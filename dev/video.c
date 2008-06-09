@@ -1,4 +1,4 @@
-/*	$OpenBSD: video.c,v 1.7 2008/06/07 22:14:57 mglocker Exp $	*/
+/*	$OpenBSD: video.c,v 1.10 2008/06/09 20:51:31 mglocker Exp $	*/
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
  *
@@ -63,13 +63,17 @@ videoattach(struct device *parent, struct device *self, void *aux)
 {
 	struct video_softc *sc = (void *) self;
 	struct video_attach_args *sa = aux;
+	int video_buf_size = 0;
 
 	printf("\n");
 	sc->hw_if = sa->hwif;
 	sc->hw_hdl = sa->hdl;
 	sc->sc_dev = parent;
 
-	sc->sc_fbuffer = malloc(VIDEO_BUF_SIZE, M_DEVBUF, M_NOWAIT);
+	if (sc->hw_if->get_bufsize)
+		video_buf_size = (sc->hw_if->get_bufsize)(sc->hw_hdl);
+
+	sc->sc_fbuffer = malloc(video_buf_size, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_fbuffer == NULL) {
 		printf("video: could not allocate frame buffer\n");
 		return;
@@ -87,6 +91,8 @@ videoopen(dev_t dev, int flags, int fmt, struct proc *p)
 	    (sc = video_cd.cd_devs[unit]) == NULL ||
 	     sc->hw_if == NULL)
 		return (ENXIO);
+
+	sc->sc_start_read = 0;
 
 	if (sc->hw_if->open != NULL)
 		return (sc->hw_if->open(sc->hw_hdl, flags, &sc->sc_fsize,
@@ -121,6 +127,12 @@ videoread(dev_t dev, struct uio *uio, int ioflag)
 
 	if (sc->sc_dying)
 		return (EIO);
+
+	/* start the stream */
+	if (sc->hw_if->start_read && !sc->sc_start_read) {
+		sc->sc_start_read = 1;
+		sc->hw_if->start_read(sc->hw_hdl);
+	}
 
 	DPRINTF(("resid=%d\n", uio->uio_resid));
 
@@ -254,7 +266,6 @@ videommap(dev_t dev, off_t off, int prot)
 		return (-1);
 	if (pmap_extract(pmap_kernel(), (vaddr_t)p, &pa) == FALSE)
 		panic("videommap: invalid page");
-	pmap_update(pmap_kernel());
 
 #if defined(__powerpc__) || defined(__sparc64__)
 	return (pa);

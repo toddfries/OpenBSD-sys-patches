@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.26 2008/06/08 00:18:33 robert Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.29 2008/06/09 20:51:31 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -101,6 +101,7 @@ void		uvideo_vs_cb(usbd_xfer_handle, usbd_private_handle,
 int		uvideo_vs_decode_stream_header(struct uvideo_softc *,
 		    uint8_t *, int); 
 int		uvideo_mmap_queue(struct uvideo_softc *, uint8_t *, int);
+int		uvideo_read(struct uvideo_softc *, uint8_t *, int);
 #ifdef UVIDEO_DEBUG
 void		uvideo_dump_desc_all(struct uvideo_softc *);
 void		uvideo_dump_desc_vc_header(struct uvideo_softc *,
@@ -147,6 +148,12 @@ int		uvideo_streamon(void *, int);
 int		uvideo_try_fmt(void *, struct v4l2_format *);
 caddr_t		uvideo_mappage(void *, off_t, int);
 
+/*
+ * Other hardware interface related functions
+ */
+int		uvideo_get_bufsize(void *);
+void		uvideo_start_read(void *);
+
 #define DEVNAME(_s) ((_s)->sc_dev.dv_xname)
 
 const struct cfattach uvideo_ca = {
@@ -182,7 +189,9 @@ struct video_hw_if uvideo_hw_if = {
 	uvideo_dqbuf,		/* VIDIOC_DQBUF */
 	uvideo_streamon,	/* VIDIOC_STREAMON */
 	uvideo_try_fmt,		/* VIDIOC_TRY_FMT */
-	uvideo_mappage		/* mmap */
+	uvideo_mappage,		/* mmap */
+	uvideo_get_bufsize,	/* read */
+	uvideo_start_read	/* start stream for read */
 };
 
 int
@@ -255,7 +264,7 @@ uvideo_open(void *addr, int flags, int *size, uint8_t *buffer,
 		return(EIO);
 	usb_init_task(&sc->sc_task_write, uvideo_debug_file_write_sample, sc);
 #endif
-	//uvideo_vs_start(sc);
+	sc->sc_mmap_flag = 0;
 
 	return (0);
 }
@@ -885,6 +894,8 @@ uvideo_vs_get_probe(struct uvideo_softc *sc, uint8_t *probe_data)
 	}
 	DPRINTF(1, "%s: GET probe request successfully\n", DEVNAME(sc));
 
+	sc->sc_video_buf_size = UGETDW(pc->dwMaxVideoFrameSize);
+
 	DPRINTF(1, "bmHint=0x%02x\n", UGETW(pc->bmHint));
 	DPRINTF(1, "bFormatIndex=0x%02x\n", pc->bFormatIndex);
 	DPRINTF(1, "bFrameIndex=0x%02x\n", pc->bFrameIndex);
@@ -895,7 +906,7 @@ uvideo_vs_get_probe(struct uvideo_softc *sc, uint8_t *probe_data)
 	DPRINTF(1, "wCompWindowSize=0x%04x\n", UGETW(pc->wCompWindowSize));
 	DPRINTF(1, "wDelay=%d (ms)\n", UGETW(pc->wDelay));
 	DPRINTF(1, "dwMaxVideoFrameSize=%d (bytes)\n",
-	    UGETDW(pc->dwMaxVideoFrameSize));
+	    sc->sc_video_buf_size);
 	DPRINTF(1, "dwMaxPayloadTransferSize=%d (bytes)\n",
 	    UGETDW(pc->dwMaxPayloadTransferSize));
 
@@ -936,7 +947,7 @@ uvideo_vs_alloc_sample(struct uvideo_softc *sc)
 	fb->buf_size = UGETDW(sc->sc_desc_probe.dwMaxVideoFrameSize);
 
 	/* don't overflow the upper layer sample buffer */
-	if (VIDEO_BUF_SIZE < fb->buf_size) {
+	if (sc->sc_video_buf_size < fb->buf_size) {
 		printf("%s: sofware video buffer is too small!\n", DEVNAME(sc));
 		return (USBD_NOMEM);
 	}
@@ -1206,16 +1217,13 @@ uvideo_vs_decode_stream_header(struct uvideo_softc *sc, uint8_t *frame,
 			usb_rem_task(sc->sc_udev, &sc->sc_task_write);
 			usb_add_task(sc->sc_udev, &sc->sc_task_write);
 #endif
-#if 0
-			/*
-			 * Copy video frame to upper layer buffer and call
-			 * upper layer interrupt.
-			 */
-			*sc->sc_uplayer_fsize = fb->offset;
-			bcopy(fb->buf, sc->sc_uplayer_fbuffer, fb->offset);
-			sc->sc_uplayer_intr(sc->sc_uplayer_arg);
-#endif
-			uvideo_mmap_queue(sc, fb->buf, fb->offset);
+			if (sc->sc_mmap_flag) {
+				/* mmap */
+				uvideo_mmap_queue(sc, fb->buf, fb->offset);
+			} else {
+				/* read */
+				uvideo_read(sc, fb->buf, fb->offset);
+			}
 		} else {
 			DPRINTF(1, "%s: %s: sample too large, skipped!\n",
 			    DEVNAME(sc), __func__);
@@ -1243,17 +1251,37 @@ uvideo_mmap_queue(struct uvideo_softc *sc, uint8_t *buf, int len)
 	if (sc->sc_mmap_cur == sc->sc_mmap_count)
 		panic("uvideo_mmap_queue: mmap queue is full!");
 
-	/* copy frame to mmap buffer */
+	/* copy frame to mmap buffer and report length */
 	bcopy(buf, sc->sc_mmap[sc->sc_mmap_cur].buf, len);
+	sc->sc_mmap[sc->sc_mmap_cur].v4l2_buf.bytesused = len;
 
 	/* queue it */
 	SIMPLEQ_INSERT_TAIL(&sc->sc_mmap_q, &sc->sc_mmap[sc->sc_mmap_cur],
 	    q_frames);
+	DPRINTF(1, "%s: %s: frame queued on index %d\n",
+	    DEVNAME(sc), __func__, sc->sc_mmap_cur);
 
 	/* point to next mmap buffer */
 	sc->sc_mmap_cur++;
+	if (sc->sc_mmap_cur == sc->sc_mmap_count)
+		/* we reached the end of the mmap buffer, start over */
+		sc->sc_mmap_cur = 0;
 
 	wakeup(sc);
+
+	return (0);
+}
+
+int
+uvideo_read(struct uvideo_softc *sc, uint8_t *buf, int len)
+{
+	/*
+	 * Copy video frame to upper layer buffer and call
+	 * upper layer interrupt.
+	 */
+	*sc->sc_uplayer_fsize = len;
+	bcopy(buf, sc->sc_uplayer_fbuffer, len);
+	sc->sc_uplayer_intr(sc->sc_uplayer_arg);
 
 	return (0);
 }
@@ -1863,6 +1891,9 @@ uvideo_qbuf(void *v, struct v4l2_buffer *qb)
 	sc->sc_mmap[qb->index].v4l2_buf.flags |= V4L2_BUF_FLAG_MAPPED;
 	sc->sc_mmap[qb->index].v4l2_buf.flags |= V4L2_BUF_FLAG_QUEUED;
 
+	DPRINTF(1, "%s: %s: buffer on index %d ready for queueing\n",
+	    DEVNAME(sc), __func__, qb->index);
+
 	return (0);
 }
 
@@ -1888,8 +1919,9 @@ uvideo_dqbuf(void *v, struct v4l2_buffer *dqb)
 
 	mmap->v4l2_buf.flags |= V4L2_BUF_FLAG_MAPPED | V4L2_BUF_FLAG_DONE;
 
+	DPRINTF(1, "%s: %s: frame dequeued from index %d\n",
+	    DEVNAME(sc), __func__, mmap->v4l2_buf.index);
 	SIMPLEQ_REMOVE_HEAD(&sc->sc_mmap_q, q_frames);
-	sc->sc_mmap_cur--;
 
 	return (0);
 }
@@ -1913,11 +1945,33 @@ uvideo_try_fmt(void *v, struct v4l2_format *fmt)
 	return (0);
 }
 
+int
+uvideo_get_bufsize(void *v)
+{
+	struct uvideo_softc *sc = v;
+
+	return (sc->sc_video_buf_size);
+}
+
+void
+uvideo_start_read(void *v)
+{
+	struct uvideo_softc *sc = v;
+
+	if (sc->sc_mmap_flag)
+		sc->sc_mmap_flag = 0;
+
+	uvideo_vs_start(sc);
+}
+
 caddr_t
 uvideo_mappage(void *v, off_t off, int prot)
 {
 	struct uvideo_softc *sc = v;
 	caddr_t p;
+
+	if (!sc->sc_mmap_flag)
+		sc->sc_mmap_flag = 1;
 
 	p = sc->sc_mmap_buffer + off;
 
