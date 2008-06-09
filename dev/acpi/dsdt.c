@@ -1,5 +1,5 @@
 
-/* $OpenBSD: dsdt.c,v 1.119 2008/06/07 17:30:50 marco Exp $ */
+/* $OpenBSD: dsdt.c,v 1.122 2008/06/08 17:20:52 art Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -18,6 +18,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
@@ -40,8 +41,6 @@
 
 #define opsize(opcode) (((opcode) & 0xFF00) ? 2 : 1)
 
-#define AML_CHECKSTACK()
-
 #define AML_FIELD_RESERVED	0x00
 #define AML_FIELD_ATTRIB	0x01
 
@@ -49,13 +48,6 @@
 #define AML_INTSTRLEN		16
 #define AML_NAMESEG_LEN		4
 
-#define aml_valid(pv)	 ((pv) != NULL)
-
-#define aml_ipaddr(n) ((n)-aml_root.start)
-
-extern int hz;
-
-struct aml_scope;
 #if 0
 int			aml_cmpvalue(struct aml_value *, struct aml_value *, int);
 #endif
@@ -114,7 +106,7 @@ struct aml_value	*aml_callmethod(struct aml_scope *, struct aml_value *);
 struct aml_value	*aml_evalmethod(struct aml_scope *, struct aml_node *,
 			    int, struct aml_value *, struct aml_value *);
 
-const char *aml_getname(const char *);
+const char		*aml_getname(const char *);
 void			aml_dump(int, u_int8_t *);
 void			_aml_die(const char *fn, int line, const char *fmt, ...);
 #define aml_die(x...)	_aml_die(__FUNCTION__, __LINE__, x)
@@ -414,7 +406,7 @@ _acpi_os_malloc(size_t size, const char *fn, int line)
 {
 	struct acpi_memblock *sptr;
 
-	sptr = malloc(size+sizeof(*sptr), M_DEVBUF, M_WAITOK | M_ZERO);
+	sptr = malloc(size+sizeof(*sptr), M_ACPI, M_WAITOK | M_ZERO);
 	dnprintf(99, "alloc: %x %s:%d\n", sptr, fn, line);
 	acpi_nalloc += size;
 	sptr->size = size;
@@ -431,7 +423,7 @@ _acpi_os_free(void *ptr, const char *fn, int line)
 		acpi_nalloc -= sptr->size;
 
 		dnprintf(99, "free: %x %s:%d\n", sptr, fn, line);
-		free(sptr, M_DEVBUF);
+		free(sptr, M_ACPI);
 	}
 }
 
@@ -854,7 +846,7 @@ aml_unlockfield(struct aml_scope *scope, struct aml_value *field)
 /*
  * @@@: Value set/compare/alloc/free routines
  */
-int64_t aml_str2int(const char *, int);
+int64_t aml_str2int(const char *);
 
 #ifndef SMALL_KERNEL
 void
@@ -944,11 +936,25 @@ aml_showvalue(struct aml_value *val, int lvl)
 #endif /* SMALL_KERNEL */
 
 int64_t
-aml_str2int(const char *str, int radix)
+aml_str2int(const char *str)
 {
-	/* XXX: fixme */
-	aml_die("aml_str2int not implemented\n");
-	return 0;
+	int64_t val = 0;
+	int n;
+
+	/* process max 64 bit [0-9a-zA-Z] */
+	for (n = 0; n < 16; n++) {
+		int ch = str[n];
+		if (ch >= '0' && ch <= '9')
+			val = (val << 4) + ch - '0';
+		else if (ch >= 'a' && ch <= 'f')
+			val = (val << 4) + ch - 'a' + 10;
+		else if (ch >= 'A' && ch <= 'F')
+			val = (val << 4) + ch - 'A' + 10;
+		else	/* first non-digit ends conversion */
+			break;
+	}
+
+	return val;
 }
 
 int64_t
@@ -970,9 +976,7 @@ aml_val2int(struct aml_value *rval)
 		    min(aml_intlen, rval->length*8));
 		break;
 	case AML_OBJTYPE_STRING:
-		ival = (strncmp(rval->v_string, "0x", 2) == 0) ?
-		    aml_str2int(rval->v_string+2, 16) :
-		    aml_str2int(rval->v_string, 10);
+		aml_str2int(rval->v_string);
 		break;
 	}
 	return (ival);

@@ -199,6 +199,8 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 #endif /* INET6 */
 		}
 
+		printf("tdb af = %d, enc packet af = %d\n", tdb->tdb_dst.sa.sa_family, af);
+
 		/* Do the appropriate encapsulation, if necessary. */
 		if ((tdb->tdb_dst.sa.sa_family != af) || /* PF mismatch */
 		    (tdb->tdb_flags & TDBF_TUNNELING) || /* Tunneling needed */
@@ -216,8 +218,10 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 #endif /* INET6 */
 		    0) {
 #ifdef INET
+			printf("tdb inside if case\n");
 			/* Fix IPv4 header checksum and length. */
 			if (af == AF_INET) {
+				printf("fixing AF_INET case\n");
 				if (m->m_len < sizeof(struct ip))
 					if ((m = m_pullup(m,
 					    sizeof(struct ip))) == NULL)
@@ -227,6 +231,7 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 				ip->ip_len = htons(m->m_pkthdr.len);
 				ip->ip_sum = 0;
 				ip->ip_sum = in_cksum(m, ip->ip_hl << 2);
+				printf("ip->ip_sum = 0x%xe\n",ip->ip_sum);
 			}
 #endif /* INET */
 
