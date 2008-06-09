@@ -114,6 +114,8 @@ sched_idle(void *v)
 			}
 		}
 
+		splassert(IPL_NONE);
+
 		cpu_idle_enter();
 		while (sched_is_idle())
 			cpu_idle_cycle();

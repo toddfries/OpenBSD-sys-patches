@@ -449,7 +449,8 @@ loop:
 		}
 
 		bremfree(bp);
-		bp->b_flags |= B_BUSY | B_SCANNED;
+		buf_acquire(bp);
+		bp->b_flags |= B_SCANNED;
 		splx(s);
 		/*
 		 * On our final pass through, do all I/O synchronously

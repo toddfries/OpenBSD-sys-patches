@@ -447,7 +447,7 @@ loop:
 		if ((bp->b_flags & B_DELWRI) == 0)
 			panic("spec_fsync: not dirty");
 		bremfree(bp);
-		bp->b_flags |= B_BUSY;
+		buf_acquire(bp);
 		splx(s);
 		bawrite(bp);
 		goto loop;

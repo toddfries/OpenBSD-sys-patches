@@ -399,7 +399,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		/* read boot record */
 		bp->b_blkno = part_blkno;
 		bp->b_bcount = lp->d_secsize;
-		bp->b_flags = B_BUSY | B_READ;
+		bp->b_flags = B_BUSY | B_READ | B_RAW;
 		(*strat)(bp);
 		if (biowait(bp)) {
 /*wrong*/		if (partoffp)
