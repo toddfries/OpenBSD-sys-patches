@@ -98,11 +98,8 @@ drm_mmap(dev_t kdev, off_t offset, int prot)
 	 */
 	DRM_LOCK();
 	TAILQ_FOREACH(map, &dev->maplist, link) {
-		if (offset >= map->mm->start &&
-		    offset < map->mm->start + map->size) {
-			offset -= map->mm->start;
+		if (offset >= map->offset && offset < map->offset + map->size)
 			break;
-		}
 	}
 
 	if (map == NULL) {
@@ -126,7 +123,7 @@ drm_mmap(dev_t kdev, off_t offset, int prot)
 	case _DRM_FRAME_BUFFER:
 	case _DRM_REGISTERS:
 	case _DRM_AGP:
-		phys = offset + map->offset;
+		phys = offset;
 		break;
 #ifdef __FreeBSD__
 	case _DRM_CONSISTENT:
@@ -140,12 +137,12 @@ drm_mmap(dev_t kdev, off_t offset, int prot)
 	/* XXX unify all the bus_dmamem_mmap bits */
 	case _DRM_SCATTER_GATHER:
 		return bus_dmamem_mmap(dev->pa.pa_dmat, dev->sg->mem->sg_segs,
-		    dev->sg->mem->sg_nsegs, map->offset - dev->sg->handle +
-		    offset, prot, BUS_DMA_NOWAIT);
+		    dev->sg->mem->sg_nsegs, offset - dev->sg->handle, prot,
+		    BUS_DMA_NOWAIT);
 	case _DRM_SHM:
 	case _DRM_CONSISTENT:
 		return bus_dmamem_mmap(dev->pa.pa_dmat, &map->dmah->seg, 1,
-		    offset, prot, BUS_DMA_NOWAIT);
+		    offset - map->offset, prot, BUS_DMA_NOWAIT);
 #endif
 	default:
 		DRM_ERROR("bad map type %d\n", type);
