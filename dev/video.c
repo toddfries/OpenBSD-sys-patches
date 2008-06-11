@@ -1,4 +1,4 @@
-/*	$OpenBSD: video.c,v 1.10 2008/06/09 20:51:31 mglocker Exp $	*/
+/*	$OpenBSD: video.c,v 1.12 2008/06/11 01:27:30 robert Exp $	*/
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
  *
@@ -228,10 +228,20 @@ videoioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 			error = (sc->hw_if->streamon)(sc->hw_hdl,
 			    (int)*data);
 		break;
+	case VIDIOC_STREAMOFF:
+		if (sc->hw_if->streamoff)
+			error = (sc->hw_if->streamoff)(sc->hw_hdl,
+			    (int)*data);
+		break;
 	case VIDIOC_TRY_FMT:
 		if (sc->hw_if->try_fmt)
 			error = (sc->hw_if->try_fmt)(sc->hw_hdl,
 			    (struct v4l2_format *)data);
+		break;
+	case VIDIOC_QUERYCTRL:
+		if (sc->hw_if->queryctrl)
+			error = (sc->hw_if->queryctrl)(sc->hw_hdl,
+			    (struct v4l2_queryctrl *)data);
 		break;
 	default:
 		error = (ENOTTY);

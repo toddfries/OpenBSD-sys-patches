@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.582 2008/06/09 07:07:16 djm Exp $ */
+/*	$OpenBSD: pf.c,v 1.589 2008/06/10 22:59:13 reyk Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -183,10 +183,13 @@ int			 pf_test_fragment(struct pf_rule **, int,
 			    struct pfi_kif *, struct mbuf *, void *,
 			    struct pf_pdesc *, struct pf_rule **,
 			    struct pf_ruleset **);
-int			 pf_tcp_seqtrack_full(struct pf_state_peer *,
+int			 pf_tcp_track_full(struct pf_state_peer *,
 			    struct pf_state_peer *, struct pf_state **,
 			    struct pfi_kif *, struct mbuf *, int,
 			    struct pf_pdesc *, u_short *, int *);
+int			pf_tcp_track_sloppy(struct pf_state_peer *,
+			    struct pf_state_peer *, struct pf_state **,
+			    struct pf_pdesc *, u_short *);
 int			 pf_test_state_tcp(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, int,
 			    void *, struct pf_pdesc *, u_short *);
@@ -524,12 +527,11 @@ pf_insert_src_node(struct pf_src_node **sn, struct pf_rule *rule,
 	if (*sn == NULL) {
 		if (!rule->max_src_nodes ||
 		    rule->src_nodes < rule->max_src_nodes)
-			(*sn) = pool_get(&pf_src_tree_pl, PR_NOWAIT);
+			(*sn) = pool_get(&pf_src_tree_pl, PR_NOWAIT | PR_ZERO);
 		else
 			pf_status.lcounters[LCNT_SRCNODES]++;
 		if ((*sn) == NULL)
 			return (-1);
-		bzero(*sn, sizeof(struct pf_src_node));
 
 		pf_init_threshold(&(*sn)->conn_rate,
 		    rule->max_src_conn_rate.limit,
@@ -710,8 +712,6 @@ pf_state_key_detach(struct pf_state_key *sk, struct pf_state *s, int flags)
 	for (si = TAILQ_FIRST(&sk->states); si->s != s;
 	    si = TAILQ_NEXT(si, entry));
 
-/* XXX DEBUG */ if (!si) { printf("pf_state_key_detach, si NULL\n"); }
-
 	TAILQ_REMOVE(&sk->states, si, entry);
 	pool_put(&pf_state_item_pl, si);
 
@@ -727,9 +727,8 @@ pf_alloc_state_key(void)
 {
 	struct pf_state_key	*sk;
 
-	if ((sk = pool_get(&pf_state_key_pl, PR_NOWAIT)) == NULL)
+	if ((sk = pool_get(&pf_state_key_pl, PR_NOWAIT | PR_ZERO)) == NULL)
 		return (NULL);
-	bzero(sk, sizeof(*sk));
 	TAILQ_INIT(&sk->states);
 
 	return (sk);
@@ -3374,7 +3373,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 			REASON_SET(&reason, PFRES_SRCLIMIT);
 			goto cleanup;
 		}
-		s = pool_get(&pf_state_pl, PR_NOWAIT);
+		s = pool_get(&pf_state_pl, PR_NOWAIT | PR_ZERO);
 		if (s == NULL) {
 			REASON_SET(&reason, PFRES_MEMORY);
 cleanup:
@@ -3397,12 +3396,14 @@ cleanup:
 				pool_put(&pf_state_key_pl, nk);
 			return (PF_DROP);
 		}
-		bzero(s, sizeof(*s));
 		s->rule.ptr = r;
 		s->nat_rule.ptr = nr;
 		s->anchor.ptr = a;
 		STATE_INC_COUNTERS(s);
-		s->allow_opts = r->allow_opts;
+		if (r->allow_opts)
+			s->state_flags |= PFSTATE_ALLOWOPTS;
+		if (r->rule_flag & PFRULE_STATESLOPPY)
+			s->state_flags |= PFSTATE_SLOPPY;
 		s->log = r->log & PF_LOG_ALL;
 		if (nr != NULL)
 			s->log |= nr->log & PF_LOG_ALL;
@@ -3648,7 +3649,7 @@ pf_test_fragment(struct pf_rule **rm, int direction, struct pfi_kif *kif,
 }
 
 int
-pf_tcp_seqtrack_full(struct pf_state_peer *src, struct pf_state_peer *dst,
+pf_tcp_track_full(struct pf_state_peer *src, struct pf_state_peer *dst,
 	struct pf_state **state, struct pfi_kif *kif, struct mbuf *m, int off,
 	struct pf_pdesc *pd, u_short *reason, int *copyback)
 {
@@ -3976,6 +3977,77 @@ pf_tcp_seqtrack_full(struct pf_state_peer *src, struct pf_state_peer *dst,
 }
 
 int
+pf_tcp_track_sloppy(struct pf_state_peer *src, struct pf_state_peer *dst,
+	struct pf_state **state, struct pf_pdesc *pd, u_short *reason)
+{
+	struct tcphdr		*th = pd->hdr.tcp;
+
+	if (th->th_flags & TH_SYN)
+		if (src->state < TCPS_SYN_SENT)
+			src->state = TCPS_SYN_SENT;
+	if (th->th_flags & TH_FIN)
+		if (src->state < TCPS_CLOSING)
+			src->state = TCPS_CLOSING;
+	if (th->th_flags & TH_ACK) {
+		if (dst->state == TCPS_SYN_SENT) {
+			dst->state = TCPS_ESTABLISHED;
+			if (src->state == TCPS_ESTABLISHED &&
+			    (*state)->src_node != NULL &&
+			    pf_src_connlimit(state)) {
+				REASON_SET(reason, PFRES_SRCLIMIT);
+				return (PF_DROP);
+			}
+		} else if (dst->state == TCPS_CLOSING) {
+			dst->state = TCPS_FIN_WAIT_2;
+		} else if (src->state == TCPS_SYN_SENT &&
+		    dst->state < TCPS_SYN_SENT) {
+			/*
+			 * Handle a special sloppy case where we only see one
+			 * half of the connection. If there is a ACK after
+			 * the initial SYN without ever seeing a packet from
+			 * the destination, set the connection to established.
+			 */
+			dst->state = src->state = TCPS_ESTABLISHED;
+			if ((*state)->src_node != NULL &&
+			    pf_src_connlimit(state)) {
+				REASON_SET(reason, PFRES_SRCLIMIT);
+				return (PF_DROP);
+			}
+		} else if (src->state == TCPS_CLOSING &&
+		    dst->state == TCPS_ESTABLISHED &&
+		    dst->seqlo == 0) {
+			/*
+			 * Handle the closing of half connections where we
+			 * don't see the full bidirectional FIN/ACK+ACK
+			 * handshake.
+			 */
+			dst->state = TCPS_CLOSING;
+		}
+	}
+	if (th->th_flags & TH_RST)
+		src->state = dst->state = TCPS_TIME_WAIT;
+
+	/* update expire time */
+	(*state)->expire = time_second;
+	if (src->state >= TCPS_FIN_WAIT_2 &&
+	    dst->state >= TCPS_FIN_WAIT_2)
+		(*state)->timeout = PFTM_TCP_CLOSED;
+	else if (src->state >= TCPS_CLOSING &&
+	    dst->state >= TCPS_CLOSING)
+		(*state)->timeout = PFTM_TCP_FIN_WAIT;
+	else if (src->state < TCPS_ESTABLISHED ||
+	    dst->state < TCPS_ESTABLISHED)
+		(*state)->timeout = PFTM_TCP_OPENING;
+	else if (src->state >= TCPS_CLOSING ||
+	    dst->state >= TCPS_CLOSING)
+		(*state)->timeout = PFTM_TCP_CLOSING;
+	else
+		(*state)->timeout = PFTM_TCP_ESTABLISHED;
+
+	return (PF_PASS);
+}
+
+int
 pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
     struct mbuf *m, int off, void *h, struct pf_pdesc *pd,
     u_short *reason)
@@ -4110,9 +4182,14 @@ pf_test_state_tcp(struct pf_state **state, int direction, struct pfi_kif *kif,
 		return (PF_DROP);
 	}
 
-	if (pf_tcp_seqtrack_full(src, dst, state, kif, m, off, pd, reason,
-	    &copyback) == PF_DROP)
-		return (PF_DROP);
+	if ((*state)->state_flags & PFSTATE_SLOPPY) {
+		if (pf_tcp_track_sloppy(src, dst, state, pd, reason) == PF_DROP)
+			return (PF_DROP);
+	} else {
+		if (pf_tcp_track_full(src, dst, state, kif, m, off, pd, reason,
+		    &copyback) == PF_DROP)
+			return (PF_DROP);
+	}
 
 	/* translate source/destination address, if necessary */
 	if ((*state)->key[PF_SK_WIRE] != (*state)->key[PF_SK_STACK]) {
@@ -4482,8 +4559,9 @@ pf_test_state_icmp(struct pf_state **state, int direction, struct pfi_kif *kif,
 				copyback = 1;
 			}
 
-			if (!SEQ_GEQ(src->seqhi, seq) ||
-			    !SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws))) {
+			if (!((*state)->state_flags & PFSTATE_SLOPPY) &&
+			    (!SEQ_GEQ(src->seqhi, seq) ||
+			    !SEQ_GEQ(seq, src->seqlo - (dst->max_win << dws)))) {
 				if (pf_status.debug >= PF_DEBUG_MISC) {
 					printf("pf: BAD ICMP %d:%d ",
 					    icmptype, pd->hdr.icmp->icmp_code);
@@ -5663,7 +5741,7 @@ pf_test(int dir, struct ifnet *ifp, struct mbuf **m0,
 
 done:
 	if (action == PF_PASS && h->ip_hl > 5 &&
-	    !((s && s->allow_opts) || r->allow_opts)) {
+	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_IPOPTIONS);
 		log = 1;
@@ -6039,7 +6117,7 @@ done:
 
 	/* handle dangerous IPv6 extension headers. */
 	if (action == PF_PASS && rh_cnt &&
-	    !((s && s->allow_opts) || r->allow_opts)) {
+	    !((s && s->state_flags & PFSTATE_ALLOWOPTS) || r->allow_opts)) {
 		action = PF_DROP;
 		REASON_SET(&reason, PFRES_IPOPTIONS);
 		log = 1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.29 2008/06/09 20:51:31 mglocker Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.33 2008/06/11 01:27:31 robert Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -145,12 +145,13 @@ int		uvideo_querybuf(void *, struct v4l2_buffer *);
 int		uvideo_qbuf(void *, struct v4l2_buffer *);
 int		uvideo_dqbuf(void *, struct v4l2_buffer *);
 int		uvideo_streamon(void *, int);
+int		uvideo_streamoff(void *, int);
 int		uvideo_try_fmt(void *, struct v4l2_format *);
-caddr_t		uvideo_mappage(void *, off_t, int);
 
 /*
  * Other hardware interface related functions
  */
+caddr_t		uvideo_mappage(void *, off_t, int);
 int		uvideo_get_bufsize(void *);
 void		uvideo_start_read(void *);
 
@@ -188,7 +189,9 @@ struct video_hw_if uvideo_hw_if = {
 	uvideo_qbuf,		/* VIDIOC_QBUF */
 	uvideo_dqbuf,		/* VIDIOC_DQBUF */
 	uvideo_streamon,	/* VIDIOC_STREAMON */
+	uvideo_streamoff,	/* VIDIOC_STREAMOFF */
 	uvideo_try_fmt,		/* VIDIOC_TRY_FMT */
+	NULL,			/* VIDIOC_QUERYCTRL */
 	uvideo_mappage,		/* mmap */
 	uvideo_get_bufsize,	/* read */
 	uvideo_start_read	/* start stream for read */
@@ -640,17 +643,24 @@ int
 uvideo_vs_parse_desc_frame_mjpeg(struct uvideo_softc *sc,
     const usb_descriptor_t *desc)
 {
-        struct usb_video_frame_mjpeg_desc *d;
+	struct usb_video_frame_mjpeg_desc *d;
 
-        d = (struct usb_video_frame_mjpeg_desc *)(uint8_t *)desc;
+	d = (struct usb_video_frame_mjpeg_desc *)(uint8_t *)desc;
 
-	/* choose default frame index */
-        if (d->bFrameIndex != sc->sc_desc_format_mjpeg->bDefaultFrameIndex)
-                return (1);
+	/*
+	 * If bDefaultFrameIndex is not set by the device
+	 * use the first bFrameIndex available, otherwise
+	 * set it to the default one.
+	 */
+	if (!sc->sc_desc_format_mjpeg->bDefaultFrameIndex)
+		goto set;
+	else if (d->bFrameIndex != sc->sc_desc_format_mjpeg->bDefaultFrameIndex)
+		return (1);
 
-        sc->sc_desc_frame_mjpeg = d;
+set:
+	sc->sc_desc_frame_mjpeg = d;
 
-        return (0);
+	return (0);
 }
 
 int
@@ -798,12 +808,10 @@ uvideo_vs_negotation(struct uvideo_softc *sc)
 	/* set probe */
 	bzero(probe_data, sizeof(probe_data));
 	pc = (struct usb_video_probe_commit *)probe_data;
-#if 0
-	pc->bFormatIndex = 1;
-	pc->bFrameIndex = 1;
-#endif
+
 	pc->bFormatIndex = sc->sc_desc_format_mjpeg->bFormatIndex;
 	pc->bFrameIndex = sc->sc_desc_format_mjpeg->bDefaultFrameIndex;
+
 	error = uvideo_vs_set_probe(sc, probe_data);
 	if (error != USBD_NORMAL_COMPLETION)
 		return (error);
@@ -1231,7 +1239,6 @@ uvideo_vs_decode_stream_header(struct uvideo_softc *sc, uint8_t *frame,
 
 		fb->fragment = 0;
 		fb->fid = 0;
-		//fb->offset = 0;
 	}
 
 	return (0);
@@ -1937,12 +1944,36 @@ uvideo_streamon(void *v, int type)
 }
 
 int
+uvideo_streamoff(void *v, int type)
+{
+	struct uvideo_softc *sc = v;
+
+	uvideo_vs_close(sc);
+
+	return (0);
+}
+
+int
 uvideo_try_fmt(void *v, struct v4l2_format *fmt)
 {
 	if (fmt->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return (EINVAL);
 
 	return (0);
+}
+
+caddr_t
+uvideo_mappage(void *v, off_t off, int prot)
+{
+	struct uvideo_softc *sc = v;
+	caddr_t p;
+
+	if (!sc->sc_mmap_flag)
+		sc->sc_mmap_flag = 1;
+
+	p = sc->sc_mmap_buffer + off;
+
+	return (p);
 }
 
 int
@@ -1962,18 +1993,4 @@ uvideo_start_read(void *v)
 		sc->sc_mmap_flag = 0;
 
 	uvideo_vs_start(sc);
-}
-
-caddr_t
-uvideo_mappage(void *v, off_t off, int prot)
-{
-	struct uvideo_softc *sc = v;
-	caddr_t p;
-
-	if (!sc->sc_mmap_flag)
-		sc->sc_mmap_flag = 1;
-
-	p = sc->sc_mmap_buffer + off;
-
-	return (p);
 }

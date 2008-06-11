@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.74 2008/04/22 18:53:34 thib Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.77 2008/06/10 22:59:09 thib Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -72,6 +72,7 @@
 #include <netinet/in.h>
 
 #include <dev/rndvar.h>
+#include <crypto/idgen.h>
 
 int	nfs_attrtimeo(struct nfsnode *np);
 
@@ -547,6 +548,22 @@ nfsm_reqh(vp, procid, hsiz, bposp)
 }
 
 /*
+ * Return an unpredictable XID.
+ */
+u_int32_t
+nfs_get_xid(void)
+{
+	static struct idgen32_ctx nfs_xid_ctx;
+	static int called = 0;
+
+	if (!called) {
+		called = 1;
+		idgen32_init(&nfs_xid_ctx);
+	}
+	return idgen32(&nfs_xid_ctx);
+}
+
+/*
  * Build the RPC header and fill in the authorization info.
  * Right now we are pretty centric around RPCAUTH_UNIX, in the
  * future, this function will need some love to be able to handle
@@ -558,7 +575,6 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 {
 	struct mbuf	*mb;
 	u_int32_t	*tl;
-	u_int32_t	xid;
 	caddr_t		bpos;
 	int		i, authsiz, auth_len, ngroups;
 
@@ -602,12 +618,7 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 	tl = nfsm_build(&mb, 6 * NFSX_UNSIGNED, &bpos);
 
 	/* Get a new (non-zero) xid */
-	do {
-		while ((xid = arc4random() & 0xff) == 0)
-			;
-		nfs_xid += xid;
-	} while (nfs_xid == 0);
-
+	nfs_xid = nfs_get_xid();
 
 	*tl++ = req->r_xid = txdr_unsigned(nfs_xid);
 	*tl++ = rpc_call;
@@ -1004,6 +1015,8 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	struct timespec mtime;
 	struct vnode *nvp;
 	int v3 = NFS_ISV3(vp);
+	uid_t uid;
+	gid_t gid;
 
 	md = *mdp;
 	t1 = (mtod(md, caddr_t) + md->m_len) - *dposp;
@@ -1080,6 +1093,15 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	vap->va_rdev = (dev_t)rdev;
 	vap->va_mtime = mtime;
 	vap->va_fsid = vp->v_mount->mnt_stat.f_fsid.val[0];
+
+	uid = fxdr_unsigned(uid_t, fp->fa_uid);
+	gid = fxdr_unsigned(gid_t, fp->fa_gid);
+	/* Invalidate access cache if uid, gid or mode changed. */
+	if (np->n_accstamp != -1 &&
+	    (gid != vap->va_gid || uid != vap->va_uid ||
+	    vmode != vap->va_mode))
+		np->n_accstamp = -1;
+
 	switch (vtyp) {
 	case VBLK:
 		vap->va_blocksize = BLKDEV_IOSIZE;
@@ -1121,6 +1143,7 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 		vap->va_gen = fxdr_unsigned(u_int32_t,fp->fa2_ctime.nfsv2_usec);
 		vap->va_filerev = 0;
 	}
+
 	if (vap->va_size != np->n_size) {
 		if (vap->va_type == VREG) {
 			if (np->n_flag & NMODIFIED) {

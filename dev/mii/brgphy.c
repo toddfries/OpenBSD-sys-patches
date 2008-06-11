@@ -1,4 +1,4 @@
-/*	$OpenBSD: brgphy.c,v 1.77 2008/04/26 21:26:42 brad Exp $	*/
+/*	$OpenBSD: brgphy.c,v 1.79 2008/06/10 21:18:41 brad Exp $	*/
 
 /*
  * Copyright (c) 2000
@@ -44,7 +44,6 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/socket.h>
-#include <sys/timeout.h>
 #include <sys/errno.h>
 
 #include <machine/bus.h>
@@ -52,10 +51,8 @@
 #include <net/if.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/pci/pcivar.h>
 
@@ -461,7 +458,7 @@ brgphy_reset(struct mii_softc *sc)
 	switch (sc->mii_model) {
 	case MII_MODEL_BROADCOM_BCM5400:
 		brgphy_bcm5401_dspcode(sc);
-			break;
+		break;
 	case MII_MODEL_BROADCOM_BCM5401:
 		if (sc->mii_rev == 1 || sc->mii_rev == 3)
 			brgphy_bcm5401_dspcode(sc);

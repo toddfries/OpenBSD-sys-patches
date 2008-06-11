@@ -1,4 +1,4 @@
-/*	$OpenBSD: krpc_subr.c,v 1.15 2008/05/23 15:51:12 thib Exp $	*/
+/*	$OpenBSD: krpc_subr.c,v 1.17 2008/06/10 23:15:32 blambert Exp $	*/
 /*	$NetBSD: krpc_subr.c,v 1.12.4.1 1996/06/07 00:52:26 cgd Exp $	*/
 
 /*
@@ -61,6 +61,7 @@
 #include <nfs/krpc.h>
 #include <nfs/xdr_subs.h>
 #include <dev/rndvar.h>
+#include <crypto/idgen.h>
 
 /*
  * Kernel support for Sun RPC
@@ -114,6 +115,24 @@ struct rpc_reply {
 #define rp_status rp_u.rpu_rok.rok_status
 
 #define MIN_REPLY_HDR 16	/* xid, dir, astat, errno */
+
+u_int32_t krpc_get_xid(void);
+
+/*
+ * Return an unpredictable XID.
+ */
+u_int32_t
+krpc_get_xid(void)
+{
+	static struct idgen32_ctx krpc_xid_ctx;
+	static int called = 0;
+
+	if (!called) {
+		called = 1;
+		idgen32_init(&krpc_xid_ctx);
+	}
+	return idgen32(&krpc_xid_ctx);
+}
 
 /*
  * What is the longest we will wait before re-sending a request?
@@ -201,7 +220,6 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	struct uio auio;
 	int error, rcvflg, timo, secs, len;
 	static u_int32_t xid = 0;
-	u_int32_t newxid;
 	int *ip;
 	struct timeval *tv;
 
@@ -248,12 +266,6 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	 * because some NFS servers refuse requests from
 	 * non-reserved (non-privileged) ports.
 	 */
-	m = m_getclr(M_WAIT, MT_SONAME);
-	sin = mtod(m, struct sockaddr_in *);
-	sin->sin_len = m->m_len = sizeof(*sin);
-	sin->sin_family = AF_INET;
-	sin->sin_addr.s_addr = INADDR_ANY;
-
 	MGET(mopt, M_WAIT, MT_SOOPTS);
 	mopt->m_len = sizeof(int);
 	ip = mtod(mopt, int *);
@@ -299,8 +311,7 @@ krpc_call(sa, prog, vers, func, data, from_p, retries)
 	mhead->m_len = sizeof(*call);
 	bzero((caddr_t)call, sizeof(*call));
 	/* rpc_call part */
-	while ((newxid = arc4random()) == xid);
-	xid = newxid;
+	xid = krpc_get_xid();
 	call->rp_xid = txdr_unsigned(xid);
 	/* call->rp_direction = 0; */
 	call->rp_rpcvers = txdr_unsigned(2);

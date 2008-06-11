@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.166 2008/05/07 14:08:37 thib Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.168 2008/06/10 20:14:36 beck Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -120,7 +120,7 @@ void
 vntblinit(void)
 {
 	/* buffer cache may need a vnode for each buffer */
-	maxvnodes = desiredvnodes;
+	maxvnodes = bufpages;
 	pool_init(&vnode_pool, sizeof(struct vnode), 0, 0, 0, "vnodes",
 	    &pool_allocator_nointr);
 	TAILQ_INIT(&vnode_hold_list);
@@ -1256,8 +1256,12 @@ vfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 
 		free(tmpvfsp, M_TEMP);
 		return (ret);
-	}
+	case VFS_BCACHESTAT:	/* buffer cache statistics */
+		ret = sysctl_rdstruct(oldp, oldlenp, newp, &bcstats,
+		    sizeof(struct bcachestats));
+		return(ret);
 
+	}
 	return (EOPNOTSUPP);
 }
 
@@ -1520,14 +1524,19 @@ vfs_export_lookup(struct mount *mp, struct netexport *nep, struct mbuf *nam)
  * while acc_mode and cred are from the VOP_ACCESS parameter list
  */
 int
-vaccess(mode_t file_mode, uid_t uid, gid_t gid, mode_t acc_mode,
-    struct ucred *cred)
+vaccess(enum vtype type, mode_t file_mode, uid_t uid, gid_t gid,
+    mode_t acc_mode, struct ucred *cred)
 {
 	mode_t mask;
 
-	/* User id 0 always gets access. */
-	if (cred->cr_uid == 0)
+	/* User id 0 always gets read/write access. */
+	if (cred->cr_uid == 0) {
+		/* For VEXEC, at least one of the execute bits must be set. */
+		if ((acc_mode & VEXEC) && type != VDIR &&
+		    (file_mode & (S_IXUSR|S_IXGRP|S_IXOTH)) == 0)
+			return EACCES;
 		return 0;
+	}
 
 	mask = 0;
 
@@ -1659,7 +1668,7 @@ vfs_syncwait(int verbose)
 			if (bp->b_flags & B_DELWRI) {
 				s = splbio();
 				bremfree(bp);
-				bp->b_flags |= B_BUSY;
+				buf_acquire(bp);
 				splx(s);
 				nbusy++;
 				bawrite(bp);
@@ -1830,7 +1839,7 @@ loop:
 				break;
 			}
 			bremfree(bp);
-			bp->b_flags |= B_BUSY;
+			buf_acquire(bp);
 			/*
 			 * XXX Since there are no node locks for NFS, I believe
 			 * there is a slight chance that a delayed write will
@@ -1868,7 +1877,7 @@ loop:
 		if ((bp->b_flags & B_DELWRI) == 0)
 			panic("vflushbuf: not dirty");
 		bremfree(bp);
-		bp->b_flags |= B_BUSY;
+		buf_acquire(bp);
 		splx(s);
 		/*
 		 * Wait for I/O associated with indirect blocks to complete,
