@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1378 2008/06/08 17:21:57 reyk Exp 
+ *	OpenBSD: pcidevs,v 1.1381 2008/06/11 20:22:00 jsg Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -1062,6 +1062,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ALTEON, PCI_PRODUCT_ALTEON_BCM5701,
 	    "BCM5701",
+	},
+	{
+	    PCI_VENDOR_ALTERA, PCI_PRODUCT_ALTERA_EBUS,
+	    "EBus",
 	},
 	{
 	    PCI_VENDOR_ALTIMA, PCI_PRODUCT_ALTIMA_AC1000,
@@ -2428,6 +2432,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon XPRESS 200M",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RX780_HB,
+	    "RX780 Host",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD780_HT_GFX,
 	    "RD780 HT-PCIE",
 	},
@@ -2457,6 +2465,10 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD790_PCIE_1,
+	    "RD790 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD790_PCIE_3,
 	    "RD790 PCIE",
 	},
 	{
@@ -2702,6 +2714,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2400_M72,
 	    "Mobility Radeon HD 2400",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3870,
+	    "Radeon HD 3870",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600,
@@ -4918,6 +4934,26 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_HP, PCI_PRODUCT_HP_HPSA_12,
 	    "Smart Array",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_HPSAP212,
+	    "Smart Array P212",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_HPSAP410,
+	    "Smart Array P410",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_HPSAP410I,
+	    "Smart Array P410i",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_HPSAP411,
+	    "Smart Array P411",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_HPSAP812,
+	    "Smart Array P812",
 	},
 	{
 	    PCI_VENDOR_HP, PCI_PRODUCT_HP_USB,
@@ -7702,6 +7738,46 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_IOAT_CNB,
 	    "I/OAT CNB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_HB,
+	    "E4500 Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_1,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_2,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_3,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_4,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_5,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_6,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_7,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_8,
+	    "E4500 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E4500_PCIE_9,
+	    "E4500 PCIE",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_IOAT_SNB,
@@ -15830,6 +15906,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_RCC,
 	    "ServerWorks",
+	},
+	{
+	    PCI_VENDOR_ALTERA,
+	    "Altera",
 	},
 	{
 	    PCI_VENDOR_TOSHIBA2,
