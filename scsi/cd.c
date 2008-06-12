@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.137 2008/06/10 20:27:31 art Exp $	*/
+/*	$OpenBSD: cd.c,v 1.136 2008/06/10 20:14:37 beck Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
