@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_bmap.c,v 1.26 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: ufs_bmap.c,v 1.27 2008/06/10 20:14:37 beck Exp $	*/
 /*	$NetBSD: ufs_bmap.c,v 1.3 1996/02/09 22:36:00 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.93 2008/05/29 01:00:53 mcbride Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.96 2008/06/10 22:39:31 mcbride Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -224,10 +224,9 @@ pfsync_alloc_scrub_memory(struct pfsync_state_peer *s,
     struct pf_state_peer *d)
 {
 	if (s->scrub.scrub_flag && d->scrub == NULL) {
-		d->scrub = pool_get(&pf_state_scrub_pl, PR_NOWAIT);
+		d->scrub = pool_get(&pf_state_scrub_pl, PR_NOWAIT | PR_ZERO);
 		if (d->scrub == NULL)
 			return (ENOMEM);
-		bzero(d->scrub, sizeof(*d->scrub));
 	}
 
 	return (0);
@@ -269,12 +268,11 @@ pfsync_insert_net_state(struct pfsync_state *sp, u_int8_t chksum_flag)
 		r = &pf_default_rule;
 
 	if (!r->max_states || r->states_cur < r->max_states)
-		st = pool_get(&pf_state_pl, PR_NOWAIT);
+		st = pool_get(&pf_state_pl, PR_NOWAIT | PR_ZERO);
 	if (st == NULL) {
 		pfi_kif_unref(kif, PFI_KIF_REF_NONE);
 		return (ENOMEM);
 	}
-	bzero(st, sizeof(*st));
 
 	if ((skw = pf_alloc_state_key()) == NULL) {
 		pool_put(&pf_state_pl, st);
@@ -343,7 +341,7 @@ pfsync_insert_net_state(struct pfsync_state *sp, u_int8_t chksum_flag)
 	st->direction = sp->direction;
 	st->log = sp->log;
 	st->timeout = sp->timeout;
-	st->allow_opts = sp->allow_opts;
+	st->state_flags = sp->state_flags;
 
 	bcopy(sp->id, &st->id, sizeof(st->id));
 	st->creatorid = sp->creatorid;
@@ -1261,7 +1259,7 @@ pfsync_pack_state(u_int8_t action, struct pf_state *st, int flags)
 		sp->proto = sk->proto;
 		sp->direction = st->direction;
 		sp->log = st->log;
-		sp->allow_opts = st->allow_opts;
+		sp->state_flags = st->state_flags;
 		sp->timeout = st->timeout;
 
 		if (flags & PFSYNC_FLAG_STALE)

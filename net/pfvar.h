@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.270 2008/05/30 14:22:48 henning Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.273 2008/06/10 20:55:02 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -626,6 +626,7 @@ struct pf_rule {
 
 /* rule flags again */
 #define PFRULE_IFBOUND		0x00010000	/* if-bound */
+#define PFRULE_STATESLOPPY	0x00020000	/* sloppy state tracking */
 
 #define PFSTATE_HIWAT		10000	/* default state table size */
 #define PFSTATE_ADAPT_START	6000	/* default adaptive timeout start */
@@ -758,7 +759,9 @@ struct pf_state {
 	u_int32_t		 pfsync_time;
 	u_int16_t		 tag;
 	u_int8_t		 log;
-	u_int8_t		 allow_opts;
+	u_int8_t		 state_flags;
+#define	PFSTATE_ALLOWOPTS	0x01
+#define	PFSTATE_SLOPPY		0x02
 	u_int8_t		 timeout;
 	u_int8_t		 sync_flags;
 #define	PFSTATE_NOSYNC	 0x01
@@ -814,7 +817,7 @@ struct pfsync_state {
 	u_int8_t	 proto;
 	u_int8_t	 direction;
 	u_int8_t	 log;
-	u_int8_t	 allow_opts;
+	u_int8_t	 state_flags;
 	u_int8_t	 timeout;
 	u_int8_t	 sync_flags;
 	u_int8_t	 updates;
@@ -915,9 +918,11 @@ RB_PROTOTYPE(pf_anchor_node, pf_anchor, entry_node, pf_anchor_compare);
 #define PFR_TFLAG_INACTIVE	0x00000008
 #define PFR_TFLAG_REFERENCED	0x00000010
 #define PFR_TFLAG_REFDANCHOR	0x00000020
-#define PFR_TFLAG_USRMASK	0x00000003
+#define PFR_TFLAG_COUNTERS	0x00000040
+/* Adjust masks below when adding flags. */
+#define PFR_TFLAG_USRMASK	0x00000043
 #define PFR_TFLAG_SETMASK	0x0000003C
-#define PFR_TFLAG_ALLMASK	0x0000003F
+#define PFR_TFLAG_ALLMASK	0x0000007F
 
 struct pfr_table {
 	char			 pfrt_anchor[MAXPATHLEN];
@@ -928,7 +933,7 @@ struct pfr_table {
 
 enum { PFR_FB_NONE, PFR_FB_MATCH, PFR_FB_ADDED, PFR_FB_DELETED,
 	PFR_FB_CHANGED, PFR_FB_CLEARED, PFR_FB_DUPLICATE,
-	PFR_FB_NOTMATCH, PFR_FB_CONFLICT, PFR_FB_MAX };
+	PFR_FB_NOTMATCH, PFR_FB_CONFLICT, PFR_FB_NOCOUNT, PFR_FB_MAX };
 
 struct pfr_addr {
 	union {
@@ -969,13 +974,23 @@ struct pfr_tstats {
 #define	pfrts_name	pfrts_t.pfrt_name
 #define pfrts_flags	pfrts_t.pfrt_flags
 
+struct pfr_kcounters {
+	u_int64_t		 pfrkc_packets[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
+	u_int64_t		 pfrkc_bytes[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
+};
+
 SLIST_HEAD(pfr_kentryworkq, pfr_kentry);
 struct pfr_kentry {
 	struct radix_node	 pfrke_node[2];
 	union sockaddr_union	 pfrke_sa;
-	u_int64_t		 pfrke_packets[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
-	u_int64_t		 pfrke_bytes[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
 	SLIST_ENTRY(pfr_kentry)	 pfrke_workq;
+	union {
+		
+		struct pfr_kcounters		*pfrke_counters;
+#if 0
+		struct pfr_kroute		*pfrke_route;
+#endif
+	} u;
 	long			 pfrke_tzero;
 	u_int8_t		 pfrke_af;
 	u_int8_t		 pfrke_net;
@@ -983,6 +998,9 @@ struct pfr_kentry {
 	u_int8_t		 pfrke_mark;
 	u_int8_t		 pfrke_intrpool;
 };
+#define pfrke_counters	u.pfrke_counters
+#define pfrke_route	u.pfrke_route
+
 
 SLIST_HEAD(pfr_ktableworkq, pfr_ktable);
 RB_HEAD(pfr_ktablehead, pfr_ktable);

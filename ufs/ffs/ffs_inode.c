@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_inode.c,v 1.52 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: ffs_inode.c,v 1.53 2008/06/10 20:14:37 beck Exp $	*/
 /*	$NetBSD: ffs_inode.c,v 1.10 1996/05/11 18:27:19 mycroft Exp $	*/
 
 /*

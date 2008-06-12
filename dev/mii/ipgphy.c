@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipgphy.c,v 1.8 2008/06/07 19:39:25 brad Exp $	*/
+/*	$OpenBSD: ipgphy.c,v 1.10 2008/06/10 21:18:41 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -44,10 +44,8 @@
 #include <net/if.h>
 #include <net/if_media.h>
 
-#ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -231,6 +229,7 @@ done:
 		 */
 		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
+
 		/*
 		 * Is the interface even up?
 		 */

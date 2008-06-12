@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.200 2008/05/30 14:22:48 henning Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.204 2008/06/10 22:39:31 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -881,7 +881,7 @@ pf_state_export(struct pfsync_state *sp, struct pf_state *s)
 	sp->creation = secs - s->creation;
 	sp->expire = pf_state_expires(s);
 	sp->log = s->log;
-	sp->allow_opts = s->allow_opts;
+	sp->state_flags = s->state_flags;
 	sp->timeout = s->timeout;
 
 	if (s->src_node)
@@ -1569,8 +1569,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		struct pfioc_state_kill *psk = (struct pfioc_state_kill *)addr;
 		u_int			 killed = 0;
 
-		for (s = RB_MIN(pf_state_tree_id, &tree_id); s; s = nexts) {
-			nexts = RB_NEXT(pf_state_tree_id, &tree_id, s);
+		for (s = TAILQ_FIRST(&state_list); s; s = nexts) {
+			nexts = TAILQ_NEXT(s, entry_list);
 
 			if (!psk->psk_ifname[0] || !strcmp(psk->psk_ifname,
 			    s->kif->pfik_name)) {
@@ -1676,12 +1676,11 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			error = EINVAL;
 			break;
 		}
-		s = pool_get(&pf_state_pl, PR_NOWAIT);
+		s = pool_get(&pf_state_pl, PR_NOWAIT | PR_ZERO);
 		if (s == NULL) {
 			error = ENOMEM;
 			break;
 		}
-		bzero(s, sizeof(struct pf_state));
 		if ((skw = pf_alloc_state_key()) == NULL) {
 			pool_put(&pf_state_pl, s);
 			error = ENOMEM;
