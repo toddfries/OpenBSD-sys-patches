@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.19 2008/06/11 00:26:18 hshoexer Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.22 2008/06/13 18:26:59 hshoexer Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -51,6 +51,8 @@
 struct cryptop	*sr_crypto_getcryptop(struct sr_workunit *, int);
 int		 sr_crypto_create_keys(struct sr_discipline *);
 void		*sr_crypto_putcryptop(struct cryptop *);
+int		 sr_crypto_get_kdf(struct bioc_createraid *,
+		     struct sr_discipline *);
 int		 sr_crypto_decrypt_key(struct sr_discipline *);
 int		 sr_crypto_alloc_resources(struct sr_discipline *);
 int		 sr_crypto_free_resources(struct sr_discipline *);
@@ -161,6 +163,53 @@ sr_crypto_putcryptop(struct cryptop *crp)
 }
 
 int
+sr_crypto_get_kdf(struct bioc_createraid *bc, struct sr_discipline *sd)
+{
+	struct sr_crypto_kdfinfo	*kdfinfo;
+	int				 rv = EINVAL;
+
+	if (!(bc->bc_opaque_flags & BIOC_SOIN))
+		return (rv);
+	if (bc->bc_opaque == NULL)
+		return (rv);
+	if (bc->bc_opaque_size < sizeof(*kdfinfo))
+		return (rv);
+
+	kdfinfo = malloc(bc->bc_opaque_size, M_DEVBUF, M_WAITOK | M_ZERO);
+	if (copyin(bc->bc_opaque, kdfinfo, bc->bc_opaque_size))
+		goto out;
+
+	if (kdfinfo->len != bc->bc_opaque_size)
+		goto out;
+
+	/* copy KDF hint to disk meta data */
+	if (kdfinfo->flags & SR_CRYPTOKDF_HINT) {
+		if (sizeof(sd->mds.mdd_crypto.scr_meta.scm_kdfhint) <
+		    kdfinfo->kdfhint.len)
+			goto out;
+		bcopy(&kdfinfo->kdfhint,
+		    sd->mds.mdd_crypto.scr_meta.scm_kdfhint,
+		    kdfinfo->kdfhint.len);
+	}
+
+	/* copy mask key to run-time meta data */
+	if ((kdfinfo->flags & SR_CRYPTOKDF_KEY)) {
+		if (sizeof(sd->mds.mdd_crypto.scr_maskkey) <
+		    sizeof(kdfinfo->maskkey))
+			goto out;
+		bcopy(&kdfinfo->maskkey, sd->mds.mdd_crypto.scr_maskkey,
+		    sizeof(kdfinfo->maskkey));
+	}
+
+	rv = 0;
+out:
+	bzero(kdfinfo, bc->bc_opaque_size);
+	free(kdfinfo, M_DEVBUF);
+
+	return (rv);
+}
+
+int
 sr_crypto_decrypt_key(struct sr_discipline *sd)
 {
 	rijndael_ctx	 ctx;
@@ -170,11 +219,13 @@ sr_crypto_decrypt_key(struct sr_discipline *sd)
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_decrypt_key\n", DEVNAME(sd->sd_sc));
 
-	if (rijndael_set_key(&ctx, sd->mds.mdd_crypto.scr_meta.scm_kdfhint,
-	    128) != 0) {
+	if (rijndael_set_key(&ctx, sd->mds.mdd_crypto.scr_maskkey, 128) != 0) {
 		bzero(&ctx, sizeof(ctx));
 		return (1);
 	}
+	/* we don't need the mask key anymore */
+	bzero(&sd->mds.mdd_crypto.scr_maskkey,
+	    sizeof(sd->mds.mdd_crypto.scr_maskkey));
 
 	c = (u_char *)sd->mds.mdd_crypto.scr_meta.scm_key;
 	p = (u_char *)sd->mds.mdd_crypto.scr_key;
@@ -187,13 +238,6 @@ sr_crypto_decrypt_key(struct sr_discipline *sd)
 #ifdef SR_DEBUG0
 	sr_crypto_dumpkeys(sd);
 #endif
-		
-	/*
-	 * XXX de-mask keys instead of bcopy
-	 */
-	bcopy(sd->mds.mdd_crypto.scr_meta.scm_key, sd->mds.mdd_crypto.scr_key,
-	    sizeof(sd->mds.mdd_crypto.scr_meta.scm_key));
-
 	return (0);
 }
 
@@ -201,7 +245,6 @@ int
 sr_crypto_create_keys(struct sr_discipline *sd)
 {
 	rijndael_ctx	 ctx;
-	u_int8_t	 kdfhint[SR_CRYPTO_KDFHINTBYTES];	/* XXX fake */
 	u_char		*p, *c;
 	size_t		 ksz;
 	int		 i;
@@ -209,11 +252,8 @@ sr_crypto_create_keys(struct sr_discipline *sd)
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_create_keys\n",
 	    DEVNAME(sd->sd_sc));
 
-	/* XXX fake for now */
-	memset(kdfhint, 0xdeadbeef, sizeof(kdfhint));
-
-	bcopy(kdfhint, sd->mds.mdd_crypto.scr_meta.scm_kdfhint,
-	    sizeof(sd->mds.mdd_crypto.scr_meta.scm_kdfhint));
+	if (AES_MAXKEYBYTES < sizeof(sd->mds.mdd_crypto.scr_maskkey))
+		return (1);
 
 	/* generate crypto keys */
 	arc4random_buf(sd->mds.mdd_crypto.scr_key,
@@ -222,7 +262,8 @@ sr_crypto_create_keys(struct sr_discipline *sd)
 	/* XXX 128 for now */
 	sd->mds.mdd_crypto.scr_meta.scm_alg = SR_CRYPTOA_AES_XTS_128;
 
-	if (rijndael_set_key_enc_only(&ctx, kdfhint, 128) != 0) {
+	if (rijndael_set_key_enc_only(&ctx, sd->mds.mdd_crypto.scr_maskkey,
+	    128) != 0) {
 		bzero(sd->mds.mdd_crypto.scr_key,
 		    sizeof(sd->mds.mdd_crypto.scr_key));
 		bzero(&ctx, sizeof(ctx));
@@ -321,6 +362,8 @@ sr_crypto_rw(struct sr_workunit *wu)
 		s = splvm();
 		if (crypto_invoke(crp))
 			rv = 1;
+		else
+			rv = crp->crp_etype;
 		splx(s);
 	} else
 		rv = sr_crypto_rw2(wu, NULL);
@@ -331,8 +374,8 @@ sr_crypto_rw(struct sr_workunit *wu)
 int
 sr_crypto_write(struct cryptop *crp)
 {
-	int		 s;
-struct sr_workunit	*wu = crp->crp_opaque;
+	int		 	 s;
+	struct sr_workunit	*wu = crp->crp_opaque;
 
 	DNPRINTF(SR_D_INTR, "%s: sr_crypto_write: wu %x xs: %x\n",
 	    DEVNAME(wu->swu_dis->sd_sc), wu, wu->swu_xs);
@@ -420,6 +463,8 @@ queued:
 	return (0);
 bad:
 	/* wu is unwound by sr_put_wu */
+	if (crp)
+		crp->crp_etype = EINVAL;
 	return (1);
 }
 

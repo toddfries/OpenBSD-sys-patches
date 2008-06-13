@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.63 2008/06/07 17:19:28 miod Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.65 2008/06/12 17:02:04 miod Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -75,11 +75,11 @@ struct ELFNAME(probe_entry) {
 #ifdef COMPAT_FREEBSD
 	{ freebsd_elf_probe },
 #endif
-#ifdef COMPAT_SVR4
-	{ svr4_elf_probe },
-#endif
 #ifdef COMPAT_LINUX
 	{ linux_elf_probe },
+#endif
+#ifdef COMPAT_SVR4
+	{ svr4_elf_probe },
 #endif
 	{ NULL }
 };
@@ -549,9 +549,7 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 		goto native;
 	}
 #endif
-	for (i = 0;
-	    i < sizeof(ELFNAME(probes)) / sizeof(ELFNAME(probes)[0]) && error;
-	    i++) {
+	for (i = 0; ELFNAME(probes)[i].func != NULL && error; i++) {
 		error = (*ELFNAME(probes)[i].func)(p, epp, interp, &pos, &os);
 	}
 	if (!error)

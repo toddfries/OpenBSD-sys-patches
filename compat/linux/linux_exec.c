@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_exec.c,v 1.27 2007/10/30 12:09:22 gilles Exp $	*/
+/*	$OpenBSD: linux_exec.c,v 1.29 2008/06/12 22:04:55 miod Exp $	*/
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
 /*-
@@ -483,9 +483,30 @@ linux_elf_probe(p, epp, itp, pos, os)
 	int error;
 	size_t len;
 
+	if (!(emul_linux_elf.e_flags & EMUL_ENABLED))
+		return (ENOEXEC);
+
+	/*
+	 * Modern Linux binaries carry an identification note.
+	 */
+	if (ELFNAME(os_pt_note)(p, epp, epp->ep_hdr, "GNU", 4, 0x10) == 0) {
+		goto recognized;
+	}
+
 	brand = elf32_check_brand(eh);
-	if (brand && strcmp(brand, "Linux"))
+	if (brand != NULL && strcmp(brand, "Linux") != 0)
 		return (EINVAL);
+
+	/*
+	 * If this is a static binary, do not allow it to run, as it
+	 * has not been identified. We'll give non-static binaries a
+	 * chance to run, as the Linux ld.so name is usually unique
+	 * enough to clear any amibiguity.
+	 */
+	if (itp == NULL)
+		return (EINVAL);
+
+recognized:
 	if (itp) {
 		if ((error = emul_find(p, NULL, linux_emul_path, itp, &bp, 0)))
 			return (error);
