@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkcsum.c,v 1.12 2008/06/10 20:50:22 beck Exp $	*/
+/*	$OpenBSD: dkcsum.c,v 1.14 2008/06/12 06:58:33 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1997 Niklas Hallqvist.  All rights reserved.

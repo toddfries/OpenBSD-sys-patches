@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.47 2008/06/11 04:52:27 blambert Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.50 2008/06/12 19:14:15 thib Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -548,8 +548,9 @@ nfs_asyncio(bp)
 	int i;
 
 	if (nfs_numasync == 0)
-		return (EIO);
-	for (i = 0; i < NFS_MAXASYNCDAEMON; i++)
+		goto out;
+
+	for (i = 0; i < NFS_MAXASYNCDAEMON; i++) {
 	    if (nfs_iodwant[i]) {
 		if ((bp->b_flags & B_READ) == 0) {
 			bp->b_flags |= B_WRITEINPROG;
@@ -560,7 +561,9 @@ nfs_asyncio(bp)
 		wakeup((caddr_t)&nfs_iodwant[i]);
 		return (0);
 	    }
+	}
 
+<<<<<<< HEAD:nfs/nfs_bio.c
 	/*
 	 * If it is a read or a write already marked B_WRITEINPROG or B_NOCACHE
 	 * return EIO so the process will call nfs_doio() and do it
@@ -569,6 +572,10 @@ nfs_asyncio(bp)
 	if (bp->b_flags & (B_READ | B_WRITEINPROG | B_NOCACHE))
 		return (EIO);
 
+=======
+out:
+	nfsstats.forcedsync++;
+>>>>>>> master:nfs/nfs_bio.c
 	return (EIO);
 }
 

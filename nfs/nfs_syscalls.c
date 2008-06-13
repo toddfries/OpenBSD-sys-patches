@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.60 2008/06/10 20:14:37 beck Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.64 2008/06/12 06:58:40 deraadt Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*

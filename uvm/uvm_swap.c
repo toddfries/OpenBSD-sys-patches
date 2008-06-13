@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.c,v 1.80 2008/06/10 20:50:23 beck Exp $	*/
+/*	$OpenBSD: uvm_swap.c,v 1.82 2008/06/12 06:58:40 deraadt Exp $	*/
 /*	$NetBSD: uvm_swap.c,v 1.40 2000/11/17 11:39:39 mrg Exp $	*/
 
 /*

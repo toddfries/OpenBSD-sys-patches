@@ -1,4 +1,4 @@
-/* $OpenBSD: ufs_dirhash.c,v 1.18 2008/06/10 20:14:37 beck Exp $	*/
+/* $OpenBSD: ufs_dirhash.c,v 1.20 2008/06/12 06:58:40 deraadt Exp $	*/
 /*
  * Copyright (c) 2001, 2002 Ian Dowse.  All rights reserved.
  *

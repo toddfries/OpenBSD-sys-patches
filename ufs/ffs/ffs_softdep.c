@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep.c,v 1.95 2008/06/10 20:14:37 beck Exp $	*/
+/*	$OpenBSD: ffs_softdep.c,v 1.97 2008/06/12 06:58:40 deraadt Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.54 2008/06/10 20:50:22 beck Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.56 2008/06/12 06:58:34 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff

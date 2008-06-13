@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_inode.c,v 1.40 2008/06/10 20:14:37 beck Exp $	*/
+/*	$OpenBSD: ext2fs_inode.c,v 1.42 2008/06/12 06:58:40 deraadt Exp $	*/
 /*	$NetBSD: ext2fs_inode.c,v 1.24 2001/06/19 12:59:18 wiz Exp $	*/
 
 /*

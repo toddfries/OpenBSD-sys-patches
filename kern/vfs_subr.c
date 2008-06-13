@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.168 2008/06/10 20:14:36 beck Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.171 2008/06/13 03:45:39 beck Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
