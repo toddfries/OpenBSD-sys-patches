@@ -287,20 +287,21 @@ rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
+zyd*	at uhub?		# Zydas ZD1211
 onewire* at uow?
 
 # Bluetooth controllers
-#ubt*	at uhub?		# USB Bluetooth
+ubt*	at uhub?		# USB Bluetooth
 
 # Bluetooth bus support
-#bthub*	at ubt?
+bthub*	at ubt?
 
 # Bluetooth HID support
-#bthidev* at bthub?
-#btkbd*	at bthidev?
-#btms*	at bthidev?
-#wskbd*	at btkbd? mux 1
-#wsmouse* at btms? mux 0
+bthidev* at bthub?
+btkbd*	at bthidev?
+btms*	at bthidev?
+wskbd*	at btkbd? mux 1
+wsmouse* at btms? mux 0
 
 # I2C bus support
 iic*		at kiic?

@@ -191,6 +191,7 @@ udav*		at uhub?		# Davicom DM9601 based Ethernet
 ural*		at uhub?		# Ralink RT2500
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
+zyd*		at uhub?		# Zydas ZD1211
 #uscanner*	at uhub?		# USB Scanner driver
 #usscanner*	at uhub?		# USB SCSI scanners
 #scsibus*	at usscanner?

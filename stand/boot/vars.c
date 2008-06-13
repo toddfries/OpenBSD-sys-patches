@@ -170,6 +170,8 @@ Xhowto(void)
 				putchar('s');
 			if (cmd.boothowto & RB_KDB)
 				putchar('d');
+			if (cmd.boothowto & RB_KBDUSBPREF)
+				putchar('u');
 		}
 		putchar('\n');
 	} else
@@ -208,6 +210,9 @@ bootparse(int i)
 					break;
 				case 'd':
 					howto |= RB_KDB;
+					break;
+				case 'u':
+					howto |= RB_KBDUSBPREF;
 					break;
 				default:
 					printf("howto: bad option: %c\n", *cp);

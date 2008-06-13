@@ -225,7 +225,7 @@ decr_intr(struct clockframe *frame)
 	 */
 	ppc_mtdec(nextevent - tb);
 
-	if (curcpu()->ci_cpl & SPL_CLOCK) {
+	if (ci->ci_cpl >= IPL_CLOCK) {
 		ci->ci_statspending += nstats;
 	} else {
 		KERNEL_LOCK();
