@@ -319,6 +319,8 @@ wsdisplay* at rfx?
 scsibus* at esp?
 scsibus* at si?
 scsibus* at sw?
+softraid0	at root		# Software RAID
+scsibus*	at softraid?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
@@ -338,6 +340,5 @@ pseudo-device	rd	2
 pseudo-device	loop	1	# network loopback
 pseudo-device	bpfilter 1	# packet filter
 #pseudo-device	pty	4	# pseudo-terminals
-softraid0	at root		# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto	1
+pseudo-device	bio		1       # ioctl multiplexing device

@@ -69,6 +69,8 @@ vs3	at vmes0 addr 0xffff5800 ipl 2
 vs4	at vmes0 addr 0xffff7000 ipl 2
 vs5	at vmes0 addr 0xffff7800 ipl 2
 
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
 scsibus* at vs?
 scsibus* at osiop?
 
@@ -79,6 +81,5 @@ cd*	at scsibus?
 pseudo-device	loop	1
 pseudo-device	bpfilter 1
 pseudo-device	rd	1
-softraid0	at root			# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto	1
+pseudo-device	bio		1       # ioctl multiplexing device

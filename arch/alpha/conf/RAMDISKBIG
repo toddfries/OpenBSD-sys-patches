@@ -307,6 +307,10 @@ wd*	at pciide? flags 0x0000
 atapiscsi* at pciide?
 scsibus* at atapiscsi?
 
+# Softraid
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
+
 # Workstation Console attachments
 #wsdisplay*	at cfb?
 #wsdisplay*	at sfb?
@@ -319,6 +323,5 @@ pseudo-device	bpfilter	1
 pseudo-device	loop
 pseudo-device	rd		1
 pseudo-device	wsmux		2
-softraid0	at root			# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto		1
+pseudo-device	bio		1       # ioctl multiplexing device

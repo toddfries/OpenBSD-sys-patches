@@ -102,6 +102,10 @@ pxammc0		at pxaip?		# MMC/SD/SDIO controller
 sdmmc*		at pxammc?		# SD/MMC bus
 scsibus*	at sdmmc?		# SCSI emulation
 
+# Softraid
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
+
 sd*		at scsibus?
 #st*		at scsibus?
 cd*		at scsibus?
@@ -175,6 +179,5 @@ options	BOOT_CONFIG	# boot-time kernel config
 # RAMDISK stuff
 options	MINIROOTSIZE=5120
 options	RAMDISK_HOOKS
-softraid0	at root			# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto		1
+pseudo-device	bio		1       # ioctl multiplexing device
