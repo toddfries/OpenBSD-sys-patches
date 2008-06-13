@@ -96,9 +96,9 @@ mbattach(struct device *parent, struct device *self, void *aux)
 	len = OF_getprop(node, "compatible", name, sizeof(name));
 	if (len > 1) {
 		name[len] = '\0';
+		hw_vendor = "Apple Computer, Inc.";
 		/* Old World Macintosh */
 		if ((strncmp(name, "AAPL", 4)) == 0) {
-			hw_vendor = "Apple Computer, Inc.";
 			slen = strlen(t) + strlen(name) - 3;
 			if ((hw_prod = malloc(slen, M_DEVBUF, M_NOWAIT)) != NULL) {
 				snprintf(hw_prod, slen, "%s %s", t, name + 5);
@@ -106,7 +106,6 @@ mbattach(struct device *parent, struct device *self, void *aux)
 			}
 		} else {
 			/* New World Macintosh or Unknown */
-			hw_vendor = "Apple Computer, Inc.";
 			hw_prod = t;
 		}
 	}

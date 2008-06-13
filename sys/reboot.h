@@ -53,6 +53,7 @@
 #define	RB_POWERDOWN	0x1000	/* attempt to power down machine */
 #define	RB_SERCONS	0x2000	/* use serial console if available */
 #define	RB_USERREQ	0x4000	/* boot() called at user request (e.g. ddb) */
+#define	RB_KBDUSBPREF	0x8000	/* prefer usb keyboard for console */
 
 /*
  * Constants for converting boot-style device number to type,

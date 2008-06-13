@@ -364,6 +364,7 @@ initppc(startkernel, endkernel, args)
 	while ( *++bootpath && *bootpath != ' ');
 	if (*bootpath) {
 		*bootpath++ = 0;
+		printf("bootpath: %s\n",bootpath);
 		while (*bootpath) {
 			switch (*bootpath++) {
 			case 'a':
@@ -378,6 +379,9 @@ initppc(startkernel, endkernel, args)
 			case 'c':
 				boothowto |= RB_CONFIG;
 				break;
+			case 'u':
+				boothowto |= RB_KBDUSBPREF;
+				break;
 			default:
 				break;
 			}
@@ -388,6 +392,7 @@ initppc(startkernel, endkernel, args)
 #ifdef DDB
 	ddb_init();
 #endif
+	printf("boothowto = 0x%x\n",boothowto);
 
 	/*
 	 * Set up extents for pci mappings
@@ -870,8 +875,6 @@ dumpsys()
 	delay(5000000);         /* 5 seconds */
 
 }
-
-int imask[IPL_NUM];
 
 /*
  * this is a hack interface to allow zs to work better until

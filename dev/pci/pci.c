@@ -253,7 +253,7 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	struct pci_dev *pd;
 	struct device *dev;
 	pcireg_t id, csr, class, intr, bhlcr;
-	int ret, pin, bus, device, function;
+	int ret = 0, pin, bus, device, function;
 
 	pci_decompose_tag(pc, tag, &bus, &device, &function);
 
