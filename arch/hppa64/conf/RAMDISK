@@ -180,6 +180,8 @@ ukphy*		at mii?		# generic unknown PHYs
 #wd*	at pciide? flags 0x0000
 #atapiscsi* at pciide?
 #scsibus* at atapiscsi?
+softraid0	at root		# Software RAID
+scsibus*	at softraid?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
@@ -196,6 +198,5 @@ pseudo-device	bpfilter 1	# packet filter
 pseudo-device	pty	16	# pseudo-terminals
 pseudo-device	ksyms	1	# kernel symbols device
 pseudo-device	ccd	4	# concatenated disk devices
-softraid0	at root		# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto	1
+pseudo-device	bio		1       # ioctl multiplexing device

@@ -96,6 +96,8 @@ vmel0	at vme0
 scsibus* at wdsc?
 scsibus* at ssh?
 scsibus* at vs?
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
 
 sd*	at scsibus?
 st*	at scsibus?
@@ -104,6 +106,5 @@ cd*	at scsibus?
 pseudo-device	loop	1		# network loopback
 pseudo-device	bpfilter 1		# packet filter
 pseudo-device	rd	1		# ramdisk
-softraid0	at root			# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto	1
+pseudo-device	bio		1       # ioctl multiplexing device

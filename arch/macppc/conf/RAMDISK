@@ -198,6 +198,8 @@ wi*		at uhub?		# WaveLAN IEEE 802.11DS
 #ugen*		at uhub?		# USB Generic driver
 umass*		at uhub?		# USB Mass Storage devices
 scsibus*	at umass?
+softraid0	at root		# Software RAID
+scsibus*	at softraid?
 
 # CardBus bus support
 cardbus*	at cardslot?
@@ -232,6 +234,5 @@ option		BOOT_CONFIG	# boot-time kernel config
 # RAMDISK stuff
 option		MINIROOTSIZE=8192
 option		RAMDISK_HOOKS
-softraid0	at root		# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto	1
+pseudo-device	bio		1       # ioctl multiplexing device

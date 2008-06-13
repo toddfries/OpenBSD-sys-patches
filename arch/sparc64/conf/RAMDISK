@@ -143,8 +143,10 @@ jmb*	at pci?
 ahci*	at jmb?
 pciide*	at jmb?
 ahci*	at pci?
+softraid0	at root		# Software RAID
 
 option ISP_COMPILE_FW=1
+scsibus*	at softraid?
 scsibus*	at siop?
 scsibus*	at isp?
 scsibus*	at mpi?
@@ -261,6 +263,5 @@ prtc0	at mainbus0
 pseudo-device	rd	2	# ramdisk
 pseudo-device	loop	1	# network loopback
 pseudo-device	bpfilter 1	# packet filter
-softraid0	at root		# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto	1
+pseudo-device	bio		1       # ioctl multiplexing device

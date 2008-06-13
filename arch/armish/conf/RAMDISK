@@ -146,6 +146,10 @@ ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
 #udcf*	at uhub?		# Gude Expert mouseCLOCK
 
+# Softraid
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
+
 amphy*		at mii?		# AMD 79C873 PHYs
 dcphy*		at mii?		# Digital Clone PHYs
 exphy*		at mii?		# 3Com internal PHYs
@@ -189,6 +193,3 @@ option		BOOT_CONFIG		# boot-time kernel config
 # RAMDISK stuff
 option		MINIROOTSIZE=5120
 option		RAMDISK_HOOKS
-softraid0	at root			# Software RAID
-scsibus*	at softraid?
-pseudo-device	crypto		1

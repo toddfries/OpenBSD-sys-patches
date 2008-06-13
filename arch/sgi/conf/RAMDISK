@@ -64,6 +64,7 @@ pci*		at macepcibr?	# PCI is on pci bridge
 #### SCSI controllers
 ahc*		at pci?
 siop*		at pci?
+softraid0	at root			# Software RAID
 
 #### NICs
 dc*		at pci?		# 21143, "tulip" clone ethernet
@@ -108,6 +109,7 @@ pckbd*		at mkbc?
 wskbd*		at pckbd? console ?
 
 #### SCSI Bus devices
+scsibus*	at softraid?
 scsibus*	at ahc?
 scsibus*	at siop?
 
@@ -123,6 +125,5 @@ pseudo-device	loop		1	# network loopback
 pseudo-device	bpfilter	1	# packet filter ports
 
 pseudo-device	rd		1	# Ram disk.
-softraid0	at root			# Software RAID
-scsibus*	at softraid?
 pseudo-device	crypto		1
+pseudo-device	bio		1       # ioctl multiplexing device
