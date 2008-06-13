@@ -273,15 +273,7 @@ ofw_recurse_keyboard(int pnode)
 		if (strcmp(name, "keyboard") == 0) {
 			/* found a keyboard node, where is it? */
 			if (ofw_devtree == DEVTREE_USB) {
-				if (OF_getprop(pnode, "vendor-id", &vendor,
-				    sizeof vendor) != sizeof vendor)
-					vendor = 0;
-				if (OF_getprop(pnode, "product-id", &product,
-				    sizeof product) != sizeof product)
-					product = 0;
-				if (vendor != USB_VENDOR_APPLE ||
-				    product != USB_PRODUCT_APPLE_ADB)
-					ofw_have_kbd |= OFW_HAVE_USBKBD;
+				ofw_have_kbd |= OFW_HAVE_USBKBD;
 			} else if (ofw_devtree == DEVTREE_ADB) {
 				ofw_have_kbd |= OFW_HAVE_ADBKBD;
 			} else {
@@ -323,13 +315,6 @@ ofw_find_keyboard()
 
 	ofw_recurse_keyboard(OF_peer(0));
 
-	if (ofw_have_kbd == 0) {
-		printf("console: no keyboard found, trying usb anyway\n");
-#if NUKBD > 0
-		ukbd_cnattach();
-#endif
-	}
-
 	/*
 	 * On some machines, such as PowerBook6,8,
 	 * the built-in USB Bluetooth device
@@ -337,7 +322,8 @@ ofw_find_keyboard()
 	 * ADB (builtin) keyboard for console
 	 * for PowerBook systems.
 	 */
-	if (strncmp(hw_prod, "PowerBook", 9)) {
+	if (strncmp(hw_prod, "PowerBook", 9) ||
+	    strncmp(hw_prod, "iBook", 5)) {
 		pref = OFW_HAVE_ADBKBD;
 	} else {
 		pref = OFW_HAVE_USBKBD;
@@ -360,7 +346,15 @@ ofw_find_keyboard()
 		printf("akbd0 at %s: attached\n", iname);
 		akbd_cnattach();
 #endif
+	} else {
+#if NUKBD > 0
+		printf("console: no keyboard found, trying usb anyway\n");
+		ukbd_cnattach();
+#else
+		printf("console: no keyboard found!\n");
+#endif
 	}
+
 }
 
 void
