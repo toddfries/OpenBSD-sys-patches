@@ -67,6 +67,8 @@ void OF_boot(char *bootspec) __attribute__((__noreturn__));
 void ofw_mem_regions(struct mem_region **memp, struct mem_region **availp);
 void ofw_vmon(void);
 
+extern char *hw_prod;
+
 struct firmware ofw_firmware = {
 	ofw_mem_regions,
 	OF_exit,
@@ -271,14 +273,6 @@ ofw_recurse_keyboard(int pnode)
 		if (strcmp(name, "keyboard") == 0) {
 			/* found a keyboard node, where is it? */
 			if (ofw_devtree == DEVTREE_USB) {
-				/*
-				 * On some machines, such as PowerBook6,8,
-				 * the built-in ADB keyboard and mouse also
-				 * appears as an USB device, which we will
-				 * ignore.
-				 * We need to tell these shadow devices apart
-				 * from regular external USB keyboards.
-				 */
 				if (OF_getprop(pnode, "vendor-id", &vendor,
 				    sizeof vendor) != sizeof vendor)
 					vendor = 0;
@@ -316,12 +310,12 @@ ofw_find_keyboard()
 {
 	int stdin_node;
 	char iname[32];
-	int len;
+	int len, pref;
 
 	stdin_node = OF_instance_to_package(OF_stdin);
 	len = OF_getprop(stdin_node, "name", iname, 20);
 	iname[len] = 0;
-	printf("console in [%s] ", iname);
+	printf("%s at console: input\n", iname);
 
 	/* GRR, apple removed the interface once used for keyboard
 	 * detection walk the OFW tree to find keyboards and what type.
@@ -330,28 +324,40 @@ ofw_find_keyboard()
 	ofw_recurse_keyboard(OF_peer(0));
 
 	if (ofw_have_kbd == 0) {
-		printf("no keyboard found, hoping USB will be present\n");
+		printf("console: no keyboard found, trying usb anyway\n");
 #if NUKBD > 0
 		ukbd_cnattach();
 #endif
 	}
 
+	/*
+	 * On some machines, such as PowerBook6,8,
+	 * the built-in USB Bluetooth device
+	 * appears as an USB device.  Prefer
+	 * ADB (builtin) keyboard for console
+	 * for PowerBook systems.
+	 */
+	if (strncmp(hw_prod, "PowerBook", 9)) {
+		pref = OFW_HAVE_ADBKBD;
+	} else {
+		pref = OFW_HAVE_USBKBD;
+	}
+
 	if (ofw_have_kbd == (OFW_HAVE_USBKBD | OFW_HAVE_ADBKBD)) {
 #if NUKBD > 0
-		printf("USB and ADB found, using USB\n");
-		ukbd_cnattach();
+		ofw_have_kbd = pref;
 #else
 		ofw_have_kbd = OFW_HAVE_ADBKBD;
 #endif
 	}
 	if (ofw_have_kbd == OFW_HAVE_USBKBD) {
 #if NUKBD > 0
-		printf("USB found\n");
+		printf("ukbd0 at %s: attached\n", iname);
 		ukbd_cnattach();
 #endif
 	} else if (ofw_have_kbd == OFW_HAVE_ADBKBD) {
 #if NAKBD >0
-		printf("ADB found\n");
+		printf("akbd0 at %s: attached\n", iname);
 		akbd_cnattach();
 #endif
 	}
@@ -378,7 +384,7 @@ of_display_console()
 	stdout_node = OF_instance_to_package(OF_stdout);
 	len = OF_getprop(stdout_node, "name", name, 20);
 	name[len] = 0;
-	printf("console out [%s]", name);
+	printf("%s at console: input\n", name);
 	cons_displaytype=1;
 	cons_display_ofh = OF_stdout;
 	err = OF_getprop(stdout_node, "width", &cons_width, 4);
