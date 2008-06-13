@@ -563,19 +563,8 @@ nfs_asyncio(bp)
 	    }
 	}
 
-<<<<<<< HEAD:nfs/nfs_bio.c
-	/*
-	 * If it is a read or a write already marked B_WRITEINPROG or B_NOCACHE
-	 * return EIO so the process will call nfs_doio() and do it
-	 * synchronously.
-	 */
-	if (bp->b_flags & (B_READ | B_WRITEINPROG | B_NOCACHE))
-		return (EIO);
-
-=======
 out:
 	nfsstats.forcedsync++;
->>>>>>> master:nfs/nfs_bio.c
 	return (EIO);
 }
 

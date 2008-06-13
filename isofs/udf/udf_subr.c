@@ -110,11 +110,7 @@ udf_disklabelspoof(dev_t dev, void (*strat)(struct buf *),
 	 */
 	bp->b_blkno = sector * btodb(bsize);
 	bp->b_bcount = bsize;
-<<<<<<< HEAD:isofs/udf/udf_subr.c
-	bp->b_flags |= (B_READ | B_RAW);
-=======
 	bp->b_flags |= B_READ;
->>>>>>> master:isofs/udf/udf_subr.c
 	bp->b_resid = bp->b_blkno / lp->d_secpercyl;
 
 	(*strat)(bp);
@@ -134,11 +130,7 @@ udf_disklabelspoof(dev_t dev, void (*strat)(struct buf *),
 	for (sector = mvds_start; sector < mvds_end; sector++) {
 		bp->b_blkno = sector * btodb(bsize);
 		bp->b_bcount = bsize;
-<<<<<<< HEAD:isofs/udf/udf_subr.c
-		bp->b_flags |= (B_READ | B_RAW);
-=======
 		bp->b_flags |= B_READ;
->>>>>>> master:isofs/udf/udf_subr.c
 		bp->b_resid = bp->b_blkno / lp->d_secpercyl;
 
 		(*strat)(bp);
