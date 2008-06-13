@@ -1,6 +1,7 @@
-/*	$OpenBSD: video.c,v 1.12 2008/06/11 01:27:30 robert Exp $	*/
+/*	$OpenBSD: video.c,v 1.15 2008/06/13 05:00:32 mglocker Exp $	*/
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
+ * Copyright (c) 2008 Marcus Glocker <mglocker@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -33,7 +34,13 @@
 #include <dev/video_if.h>
 #include <dev/videovar.h>
 
+#undef VIDEO_DEBUG	/* XXX remove from here somewhen */
+
+#ifdef VIDEO_DEBUG
 #define	DPRINTF(x)	do { printf x; } while (0)
+#else
+#define DPRINTF(x)
+#endif
 
 int	videoprobe(struct device *, void *, void *);
 void	videoattach(struct device *, struct device *, void *);

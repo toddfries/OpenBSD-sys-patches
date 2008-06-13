@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.51 2008/06/12 00:19:15 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.53 2008/06/12 18:21:04 hshoexer Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -28,6 +28,10 @@
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
+
+#ifdef CRYPTO
+#include <crypto/rijndael.h>
+#endif
 
 #define DEVNAME(_s)     ((_s)->sc_dev.dv_xname)
 
@@ -135,10 +139,28 @@ struct sr_raid1 {
 };
 
 /* CRYPTO */
+#ifdef CRYPTO
 #define SR_CRYPTO_MAXKEYS	32
 #define SR_CRYPTO_KEYBITS	512	/* AES-XTS with 2 * 256 bit keys */
 #define SR_CRYPTO_KEYBYTES	(SR_CRYPTO_KEYBITS >> 3)
-#define SR_CRYPTO_KDFHINTBYTES	64
+#define SR_CRYPTO_KDFHINTBYTES	256
+
+struct sr_crypto_genkdf {
+	u_int32_t	len;
+	u_int32_t	type;
+#define SR_CRYPTOKDFT_INVALID	(0)
+#define SR_CRYPTOKDFT_PBKDF2	(1<<0)
+};
+
+struct sr_crypto_kdfinfo {
+	u_int32_t	len;
+	u_int32_t	flags;
+#define SR_CRYPTOKDF_INVALID	(0)
+#define SR_CRYPTOKDF_KEY	(1<<0)
+#define SR_CRYPTOKDF_HINT	(1<<1)
+	u_int8_t	maskkey[AES_MAXKEYBYTES];
+	struct sr_crypto_genkdf	kdfhint;
+};
 
 struct sr_crypto_metadata {
 	u_int32_t		scm_alg;
@@ -158,8 +180,10 @@ struct sr_crypto {
 	struct sr_crypto_metadata scr_meta;
 
 	u_int8_t		scr_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
+	u_int8_t		scr_maskkey[AES_MAXKEYBYTES];
 	u_int64_t		scr_sid/*[SR_CRYPTO_MAXKEYS]*/;
 };
+#endif	/* CRYPTO */
 
 #define SR_META_SIZE		32	/* save space at chunk beginning */
 #define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
@@ -424,6 +448,8 @@ void			sr_raid1_set_vol_state(struct sr_discipline *);
 int			sr_crypto_alloc_resources(struct sr_discipline *);
 int			sr_crypto_free_resources(struct sr_discipline *);
 int			sr_crypto_rw(struct sr_workunit *);
+int			sr_crypto_get_kdf(struct bioc_createraid *,
+			    struct sr_discipline *);
 int			sr_crypto_create_keys(struct sr_discipline *);
 
 #ifdef SR_DEBUG
