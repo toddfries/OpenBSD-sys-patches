@@ -157,17 +157,6 @@ ugen_match(struct device *parent, void *match, void *aux)
 		return (uaa->matchlvl);
 #endif
 	if (uaa->usegeneric) {
-#ifdef __macppc__
-		/*
-		 * Some Apple laptops have USB phantom devices which match
-		 * the ADB devices.  We want to ignore them to avoid
-		 * confusing users, as the real hardware underneath is adb
-		 * and has already attached.
-		 */
-		if (uaa->vendor == USB_VENDOR_APPLE &&
-		    uaa->product == USB_PRODUCT_APPLE_ADB)
-			return (UMATCH_NONE);
-#endif
 		return (UMATCH_GENERIC);
 	} else
 		return (UMATCH_NONE);
