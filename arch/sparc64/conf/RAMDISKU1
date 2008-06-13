@@ -114,3 +114,6 @@ pcons0	at mainbus0			# PROM console
 
 pseudo-device	rd	2	# ramdisk
 pseudo-device	loop	1	# network loopback
+softraid0	at root		# Software RAID
+scsibus*	at softraid?
+pseudo-device	crypto	1

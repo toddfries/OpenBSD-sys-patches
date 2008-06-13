@@ -189,3 +189,6 @@ option		BOOT_CONFIG		# boot-time kernel config
 # RAMDISK stuff
 option		MINIROOTSIZE=5120
 option		RAMDISK_HOOKS
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
+pseudo-device	crypto		1

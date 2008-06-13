@@ -77,3 +77,6 @@ st*		at scsibus?		# SCSI tape drives
 cd*		at scsibus?		# SCSI CD-ROM drives
 
 pseudo-device	rd 1
+softraid0	at root			# Software RAID
+scsibus*	at softraid?
+pseudo-device	crypto 1

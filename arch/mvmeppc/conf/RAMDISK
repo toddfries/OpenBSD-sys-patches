@@ -89,4 +89,3 @@ pseudo-device	rd		1	# ram disk
 # RAMDISK stuff
 option		MINIROOTSIZE=8192
 option		RAMDISK_HOOKS
-

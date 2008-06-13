@@ -336,3 +336,6 @@ pseudo-device	bpfilter 1	# packet filter
 pseudo-device	rd	1	# ramdisk
 pseudo-device	ccd	4	# concatenated disk devices
 pseudo-device	wsmux	2
+softraid0	at root		# Software RAID
+scsibus*	at softraid?
+pseudo-device	crypto	1
