@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.81 2008/06/13 17:24:13 thib Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.83 2008/06/14 00:26:13 thib Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -525,9 +525,7 @@ struct pool nfsreqpl;
  * (just used to decide if a cluster is a good idea)
  */
 struct mbuf *
-nfsm_reqh(vp, procid, hsiz)
-	struct vnode *vp;
-	u_long procid;
+nfsm_reqhead(hsiz)
 	int hsiz;
 {
 	struct mbuf *mb;
@@ -668,7 +666,7 @@ nfsm_mbuftouio(mrep, uiop, siz, dpos)
 	mp = *mrep;
 	mbufcp = *dpos;
 	len = mtod(mp, caddr_t)+mp->m_len-mbufcp;
-	rem = nfsm_rndup(siz)-siz;
+	rem = nfsm_padlen(siz);
 	while (siz > 0) {
 		if (uiop->uio_iovcnt <= 0 || uiop->uio_iov == NULL)
 			return (EFBIG);
@@ -1282,7 +1280,7 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	*tocp = '\0';
 	*mdp = md;
 	*dposp = fromcp;
-	len = nfsm_rndup(len)-len;
+	len = nfsm_padlen(len);
 	if (len > 0) {
 		if (rem >= len)
 			*dposp += len;

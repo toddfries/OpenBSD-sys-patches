@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.31 2007/11/12 04:18:09 deraadt Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.32 2008/06/14 02:40:23 todd Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -112,7 +112,6 @@ uhidev_match(struct device *parent, void *match, void *aux)
 		return (UMATCH_NONE);
 	if (uaa->matchlvl)
 		return (uaa->matchlvl);
-
 
 	return (UMATCH_IFACECLASS_GENERIC);
 }
