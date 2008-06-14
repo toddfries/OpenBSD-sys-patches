@@ -340,12 +340,12 @@ ofw_find_keyboard()
 	}
 	if (ofw_have_kbd == OFW_HAVE_USBKBD) {
 #if NUKBD > 0
-		printf("UKBD found\n");
+		printf("USB found\n");
 		ukbd_cnattach();
 #endif
 	} else if (ofw_have_kbd == OFW_HAVE_ADBKBD) {
 #if NAKBD >0
-		printf("AKBD found\n");
+		printf("ADB found\n");
 		akbd_cnattach();
 #endif
 	} else {
@@ -380,7 +380,7 @@ of_display_console()
 	stdout_node = OF_instance_to_package(OF_stdout);
 	len = OF_getprop(stdout_node, "name", name, 20);
 	name[len] = 0;
-	printf("%s at console: input\n", name);
+	printf("console out [%s]", name);
 	cons_displaytype=1;
 	cons_display_ofh = OF_stdout;
 	err = OF_getprop(stdout_node, "width", &cons_width, 4);
