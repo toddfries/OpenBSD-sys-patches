@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_table.c,v 1.76 2008/06/10 22:39:31 mcbride Exp $	*/
+/*	$OpenBSD: pf_table.c,v 1.78 2008/06/14 03:50:14 art Exp $	*/
 
 /*
  * Copyright (c) 2002 Cedric Berger
@@ -191,9 +191,9 @@ void
 pfr_initialize(void)
 {
 	pool_init(&pfr_ktable_pl, sizeof(struct pfr_ktable), 0, 0, 0,
-	    "pfrktable", &pool_allocator_oldnointr);
+	    "pfrktable", NULL);
 	pool_init(&pfr_kentry_pl, sizeof(struct pfr_kentry), 0, 0, 0,
-	    "pfrkentry", &pool_allocator_oldnointr);
+	    "pfrkentry", NULL);
 	pool_init(&pfr_kentry_pl2, sizeof(struct pfr_kentry), 0, 0, 0,
 	    "pfrkentry2", NULL);
 	pool_init(&pfr_kcounters_pl, sizeof(struct pfr_kcounters), 0, 0, 0,
@@ -813,7 +813,7 @@ pfr_create_kentry(struct pfr_addr *ad, int intr)
 	if (intr)
 		ke = pool_get(&pfr_kentry_pl2, PR_NOWAIT | PR_ZERO);
 	else
-		ke = pool_get(&pfr_kentry_pl, PR_NOWAIT | PR_ZERO);
+		ke = pool_get(&pfr_kentry_pl, PR_WAITOK|PR_ZERO|PR_LIMITFAIL);
 	if (ke == NULL)
 		return (NULL);
 
@@ -1900,7 +1900,7 @@ pfr_create_ktable(struct pfr_table *tbl, long tzero, int attachruleset)
 	struct pfr_ktable	*kt;
 	struct pf_ruleset	*rs;
 
-	kt = pool_get(&pfr_ktable_pl, PR_NOWAIT | PR_ZERO);
+	kt = pool_get(&pfr_ktable_pl, PR_WAITOK | PR_ZERO | PR_LIMITFAIL);
 	if (kt == NULL)
 		return (NULL);
 	kt->pfrkt_t = *tbl;
