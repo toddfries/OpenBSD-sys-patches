@@ -262,7 +262,6 @@ ofw_recurse_keyboard(int pnode)
 	int old_devtree;
 	int len;
 	int node;
-	int vendor, product;
 
 	for (node = OF_child(pnode); node != 0; node = OF_peer(node)) {
 
@@ -340,7 +339,7 @@ ofw_find_keyboard()
 #endif
 	} else if (ofw_have_kbd == OFW_HAVE_ADBKBD) {
 #if NAKBD >0
-		printf(", ADB found\n");
+		printf(", using ADB\n");
 		akbd_cnattach();
 		attach=1;
 #endif
