@@ -307,7 +307,7 @@ ofw_find_keyboard()
 	stdin_node = OF_instance_to_package(OF_stdin);
 	len = OF_getprop(stdin_node, "name", iname, 20);
 	iname[len] = 0;
-	printf("%s at console: input\n", iname);
+	printf("console in [%s] ", iname);
 
 	/* GRR, apple removed the interface once used for keyboard
 	 * detection walk the OFW tree to find keyboards and what type.
@@ -331,6 +331,8 @@ ofw_find_keyboard()
 
 	if (ofw_have_kbd == (OFW_HAVE_USBKBD | OFW_HAVE_ADBKBD)) {
 #if NUKBD > 0
+		printf("USB and ADB found, using %s\n",
+			pref == OFW_HAVE_USBKBD ? "USB" : "ADB");
 		ofw_have_kbd = pref;
 #else
 		ofw_have_kbd = OFW_HAVE_ADBKBD;
@@ -338,12 +340,12 @@ ofw_find_keyboard()
 	}
 	if (ofw_have_kbd == OFW_HAVE_USBKBD) {
 #if NUKBD > 0
-		printf("ukbd0 at %s: attached\n", iname);
+		printf("UKBD found\n");
 		ukbd_cnattach();
 #endif
 	} else if (ofw_have_kbd == OFW_HAVE_ADBKBD) {
 #if NAKBD >0
-		printf("akbd0 at %s: attached\n", iname);
+		printf("AKBD found\n");
 		akbd_cnattach();
 #endif
 	} else {
