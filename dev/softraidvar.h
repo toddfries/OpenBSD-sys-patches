@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.54 2008/06/13 18:27:42 djm Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.58 2008/06/14 00:39:15 djm Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -99,12 +99,28 @@ struct sr_chunk_meta {
 #define SR_CRYPTO_KEYBITS	512	/* AES-XTS with 2 * 256 bit keys */
 #define SR_CRYPTO_KEYBYTES	(SR_CRYPTO_KEYBITS >> 3)
 #define SR_CRYPTO_KDFHINTBYTES	256
+#define SR_CRYPTO_CHECKBYTES	64
 
 struct sr_crypto_genkdf {
 	u_int32_t	len;
 	u_int32_t	type;
 #define SR_CRYPTOKDFT_INVALID	(0)
 #define SR_CRYPTOKDFT_PBKDF2	(1<<0)
+};
+
+struct sr_crypto_kdf_pbkdf2 {
+	u_int32_t	len;
+	u_int32_t	type;
+	u_int32_t	rounds;
+	u_int8_t	salt[128];
+};
+
+/*
+ * Check that HMAC-SHA1_k(decrypted scm_key) == sch_mac, where
+ * k = SHA1(masking key)
+ */
+struct sr_crypto_chk_hmac_sha1 {
+	u_int8_t	sch_mac[20];
 };
 
 struct sr_crypto_kdfinfo {
@@ -114,7 +130,12 @@ struct sr_crypto_kdfinfo {
 #define SR_CRYPTOKDF_KEY	(1<<0)
 #define SR_CRYPTOKDF_HINT	(1<<1)
 	u_int8_t	maskkey[SR_CRYPTO_MAXKEYBYTES];
-	struct sr_crypto_genkdf	kdfhint;
+	union {
+		struct sr_crypto_genkdf		generic;
+		struct sr_crypto_kdf_pbkdf2	pbkdf2;
+	}		_kdfhint;
+#define genkdf		_kdfhint.generic
+#define pbkdf2		_kdfhint.pbkdf2
 };
 
 struct sr_crypto_metadata {
@@ -125,9 +146,20 @@ struct sr_crypto_metadata {
 #define SR_CRYPTOF_INVALID	(0)
 #define SR_CRYPTOF_KEY		(1<<0)
 #define SR_CRYPTOF_KDFHINT	(1<<1)
+	u_int32_t		scm_mask_alg;
+#define SR_CRYPTOM_AES_ECB_256	1
+	u_int8_t		scm_reserved[64];
 
 	u_int8_t		scm_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
 	u_int8_t		scm_kdfhint[SR_CRYPTO_KDFHINTBYTES];
+
+	u_int32_t		scm_check_alg;
+#define SR_CRYPTOC_HMAC_SHA1		1
+	union {
+		struct sr_crypto_chk_hmac_sha1	chk_hmac_sha1;
+		u_int8_t			chk_reserved2[64];
+	}			_scm_chk;
+#define	chk_hmac_sha1	_scm_chk.chk_hmac_sha1
 };
 
 #define SR_OPT_VERSION		1	/* bump when sr_opt_meta changes */

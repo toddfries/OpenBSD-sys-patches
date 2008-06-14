@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_var.h,v 1.40 2008/06/13 03:49:26 blambert Exp $	*/
+/*	$OpenBSD: nfs_var.h,v 1.42 2008/06/14 00:23:26 thib Exp $	*/
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -31,34 +31,17 @@
  */
 
 /*
- * XXX needs <nfs/rpcv2.h> and <nfs/nfs.h> because of typedefs
+ * XXX needs <nfs/rpcv2.h> and <nfs/nfs.h> because of typedefs.
  */
+#ifndef _NFS_NFS_VAR_H_
+#define _NFS_NFS_VAR_H_
 
-struct vnode;
-struct uio;
-struct ucred;
-struct proc;
-struct buf;
-struct nfs_diskless;
-struct sockaddr_in;
-struct nfs_dlmount;
-struct vnode;
-struct nfsd;
-struct mbuf;
-struct file;
-struct nfssvc_sock;
-struct nfsmount;
-struct socket;
-struct nfsreq;
-struct vattr;
-struct nameidata;
+#ifdef _KERNEL
+
 struct nfsnode;
 struct sillyrename;
 struct componentname;
-struct nfsd_srvargs;
-struct nfsrv_descript;
-struct nfs_fattr;
-union nethostaddr;
+struct nfs_diskless;
 
 /* nfs_bio.c */
 int nfs_bioread(struct vnode *, struct uio *, int, struct ucred *);
@@ -237,7 +220,7 @@ void nfsrv_updatecache(struct nfsrv_descript *, int, struct mbuf *);
 void nfsrv_cleancache(void);
 
 /* nfs_subs.c */
-struct mbuf *nfsm_reqh(struct vnode *, u_long, int);
+struct mbuf *nfsm_reqhead(int);
 u_int32_t nfs_get_xid(void);
 void nfsm_rpchead(struct nfsreq *, struct ucred *, int, struct mbuf *, int);
 void *nfsm_build(struct mbuf **, u_int);
@@ -296,3 +279,6 @@ int  nfs_kqfilter(void *);
 /* Internal NFS utility macros */
 #define	mb_offset(m)	(mtod((m), caddr_t) + (m)->m_len)
 #define	nfsm_padlen(s)	(nfsm_rndup(s) - (s))
+
+#endif /* _KERNEL */
+#endif /* _NFS_NFS_VAR_H_ */
