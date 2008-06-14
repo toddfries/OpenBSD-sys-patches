@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.51 2008/06/12 00:19:15 marco Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.59 2008/06/14 03:01:00 djm Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -18,6 +18,163 @@
 
 #ifndef SOFTRAIDVAR_H
 #define SOFTRAIDVAR_H
+
+#define SR_UUID_MAX		4
+struct sr_uuid {
+	u_int32_t		sui_id[SR_UUID_MAX];
+} __packed;
+
+#define SR_META_SIZE		32	/* save space at chunk beginning */
+#define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
+#define SR_META_VERSION		1	/* bump when sr_metadata changes */
+struct sr_metadata {
+	/* do not change order of ssd_magic, ssd_version & ssd_checksum */
+	u_int64_t		ssd_magic;	/* magic id */
+#define	SR_MAGIC		0x4d4152436372616dLLU
+	u_int8_t		ssd_version;	/* meta data version */
+	u_int8_t		ssd_pad1[3];
+	u_int32_t		ssd_flags;	/* flags */
+
+	/* meta-data */
+	u_int32_t		ssd_checksum;	/* xor of the structure */
+	u_int32_t		ssd_size;	/* sizeof(sr_metadata) */
+	u_int32_t		ssd_ondisk;	/* on disk version counter */
+	u_int32_t		ssd_pad2;
+	struct sr_uuid		ssd_uuid;	/* unique identifier */
+
+	/* virtual disk data */
+	u_int32_t		ssd_vd_ver;	/* vd structure version */
+	u_int32_t		ssd_vd_size;	/* vd structure size */
+	u_int32_t		ssd_vd_volid;	/* volume id */
+	u_int32_t		ssd_vd_chk;	/* vd structure xor */
+
+	/* chunk data */
+	u_int32_t		ssd_chunk_ver;	/* chunk structure version */
+	u_int32_t		ssd_chunk_no;	/* number of chunks */
+	u_int32_t		ssd_chunk_size;	/* chunk structure size */
+	u_int32_t		ssd_chunk_id;	/* chunk identifier */
+	u_int32_t		ssd_chunk_chk;	/* chunk structure xor */
+	u_int32_t		ssd_pad3;
+
+	/* optional metadata */
+	u_int32_t		ssd_opt_ver;	/* optinal meta version */
+	u_int32_t		ssd_opt_no;	/* nr of optional md elements */
+	u_int32_t		ssd_opt_size;	/* sizeof optional metadata */
+	u_int32_t		ssd_opt_chk;	/* optional metadata xor */
+} __packed;
+
+#define SR_VOL_VERSION	2	/* bump when sr_vol_meta changes */
+struct sr_vol_meta {
+	u_int32_t		svm_volid;	/* volume id */
+	u_int32_t		svm_status; 	/* use bioc_vol status */
+	u_int32_t		svm_flags;	/* flags */
+#define	SR_VOL_DIRTY		0x01
+	u_int32_t		svm_level;	/* raid level */
+	int64_t			svm_size;	/* virt disk size in blocks */
+	char			svm_devname[32];/* /dev/XXXXX */
+	char			svm_vendor[8];	/* scsi vendor */
+	char			svm_product[16];/* scsi product */
+	char			svm_revision[4];/* scsi revision */
+	u_int32_t		svm_no_chunk;	/* number of chunks */
+	struct sr_uuid 		svm_uuid;	/* volume unique identifier */
+
+	/* optional members */
+	u_int32_t		svm_strip_size;	/* strip size */
+} __packed;
+
+#define SR_CHUNK_VERSION	1	/* bump when sr_chunk_meta changes */
+struct sr_chunk_meta {
+	u_int32_t		scm_volid;	/* vd we belong to */
+	u_int32_t		scm_chunk_id;	/* chunk id */
+	u_int32_t		scm_status;	/* use bio bioc_disk status */
+	u_int32_t		scm_pad1;
+	char			scm_devname[32];/* /dev/XXXXX */
+	int64_t			scm_size;	/* size of partition in blocks*/
+	int64_t			scm_coerced_size; /* coerced sz of part in blk*/
+	struct sr_uuid		scm_uuid;	/* unique identifier */
+} __packed;
+
+#define SR_CRYPTO_MAXKEYBYTES	32
+#define SR_CRYPTO_MAXKEYS	32
+#define SR_CRYPTO_KEYBITS	512	/* AES-XTS with 2 * 256 bit keys */
+#define SR_CRYPTO_KEYBYTES	(SR_CRYPTO_KEYBITS >> 3)
+#define SR_CRYPTO_KDFHINTBYTES	256
+#define SR_CRYPTO_CHECKBYTES	64
+#define SR_CRYPTO_KEY_BLKSHIFT	30	/* 0.5TB per key */
+
+struct sr_crypto_genkdf {
+	u_int32_t	len;
+	u_int32_t	type;
+#define SR_CRYPTOKDFT_INVALID	(0)
+#define SR_CRYPTOKDFT_PBKDF2	(1<<0)
+};
+
+struct sr_crypto_kdf_pbkdf2 {
+	u_int32_t	len;
+	u_int32_t	type;
+	u_int32_t	rounds;
+	u_int8_t	salt[128];
+};
+
+/*
+ * Check that HMAC-SHA1_k(decrypted scm_key) == sch_mac, where
+ * k = SHA1(masking key)
+ */
+struct sr_crypto_chk_hmac_sha1 {
+	u_int8_t	sch_mac[20];
+};
+
+struct sr_crypto_kdfinfo {
+	u_int32_t	len;
+	u_int32_t	flags;
+#define SR_CRYPTOKDF_INVALID	(0)
+#define SR_CRYPTOKDF_KEY	(1<<0)
+#define SR_CRYPTOKDF_HINT	(1<<1)
+	u_int8_t	maskkey[SR_CRYPTO_MAXKEYBYTES];
+	union {
+		struct sr_crypto_genkdf		generic;
+		struct sr_crypto_kdf_pbkdf2	pbkdf2;
+	}		_kdfhint;
+#define genkdf		_kdfhint.generic
+#define pbkdf2		_kdfhint.pbkdf2
+};
+
+struct sr_crypto_metadata {
+	u_int32_t		scm_alg;
+#define SR_CRYPTOA_AES_XTS_128	1
+#define SR_CRYPTOA_AES_XTS_256	2
+	u_int32_t		scm_flags;
+#define SR_CRYPTOF_INVALID	(0)
+#define SR_CRYPTOF_KEY		(1<<0)
+#define SR_CRYPTOF_KDFHINT	(1<<1)
+	u_int32_t		scm_mask_alg;
+#define SR_CRYPTOM_AES_ECB_256	1
+	u_int8_t		scm_reserved[64];
+
+	u_int8_t		scm_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
+	u_int8_t		scm_kdfhint[SR_CRYPTO_KDFHINTBYTES];
+
+	u_int32_t		scm_check_alg;
+#define SR_CRYPTOC_HMAC_SHA1		1
+	union {
+		struct sr_crypto_chk_hmac_sha1	chk_hmac_sha1;
+		u_int8_t			chk_reserved2[64];
+	}			_scm_chk;
+#define	chk_hmac_sha1	_scm_chk.chk_hmac_sha1
+};
+
+#define SR_OPT_VERSION		1	/* bump when sr_opt_meta changes */
+struct sr_opt_meta {
+	u_int32_t		som_type;
+#define SR_OPT_INVALID		0x00
+#define SR_OPT_CRYPTO		0x01
+	u_int32_t		som_pad;
+	union {
+		struct sr_crypto_metadata smm_crypto;
+	}			som_meta;
+};
+
+#ifdef _KERNEL
 
 #include <dev/biovar.h>
 
@@ -57,11 +214,6 @@ extern u_int32_t		sr_debug;
 
 /* forward define to prevent dependency goo */
 struct sr_softc;
-
-#define SR_UUID_MAX		4
-struct sr_uuid {
-	u_int32_t		sui_id[SR_UUID_MAX];
-} __packed;
 
 struct sr_ccb {
 	struct buf		ccb_buf;	/* MUST BE FIRST!! */
@@ -135,70 +287,14 @@ struct sr_raid1 {
 };
 
 /* CRYPTO */
-#define SR_CRYPTO_MAXKEYS	32
-#define SR_CRYPTO_KEYBITS	512	/* AES-XTS with 2 * 256 bit keys */
-#define SR_CRYPTO_KEYBYTES	(SR_CRYPTO_KEYBITS >> 3)
-#define SR_CRYPTO_KDFHINTBYTES	64
-
-struct sr_crypto_metadata {
-	u_int32_t		scm_alg;
-#define SR_CRYPTOA_AES_XTS_128	1
-#define SR_CRYPTOA_AES_XTS_256	2
-	u_int32_t		scm_flags;
-#define SR_CRYPTOF_INVALID	(0)
-#define SR_CRYPTOF_KEY		(1<<0)
-#define SR_CRYPTOF_KDFHINT	(1<<1)
-
-	u_int8_t		scm_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
-	u_int8_t		scm_kdfhint[SR_CRYPTO_KDFHINTBYTES];
-};
-
 #define SR_CRYPTO_NOWU		16
 struct sr_crypto {
 	struct sr_crypto_metadata scr_meta;
 
 	u_int8_t		scr_key[SR_CRYPTO_MAXKEYS][SR_CRYPTO_KEYBYTES];
-	u_int64_t		scr_sid/*[SR_CRYPTO_MAXKEYS]*/;
+	u_int8_t		scr_maskkey[SR_CRYPTO_MAXKEYBYTES];
+	u_int64_t		scr_sid[SR_CRYPTO_MAXKEYS];
 };
-
-#define SR_META_SIZE		32	/* save space at chunk beginning */
-#define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
-#define SR_META_VERSION		1	/* bump when sr_metadata changes */
-struct sr_metadata {
-	/* do not change order of ssd_magic, ssd_version & ssd_checksum */
-	u_int64_t		ssd_magic;	/* magic id */
-#define	SR_MAGIC		0x4d4152436372616dLLU
-	u_int8_t		ssd_version;	/* meta data version */
-	u_int8_t		ssd_pad1[3];
-	u_int32_t		ssd_flags;	/* flags */
-
-	/* meta-data */
-	u_int32_t		ssd_checksum;	/* xor of the structure */
-	u_int32_t		ssd_size;	/* sizeof(sr_metadata) */
-	u_int32_t		ssd_ondisk;	/* on disk version counter */
-	u_int32_t		ssd_pad2;
-	struct sr_uuid		ssd_uuid;	/* unique identifier */
-
-	/* virtual disk data */
-	u_int32_t		ssd_vd_ver;	/* vd structure version */
-	u_int32_t		ssd_vd_size;	/* vd structure size */
-	u_int32_t		ssd_vd_volid;	/* volume id */
-	u_int32_t		ssd_vd_chk;	/* vd structure xor */
-
-	/* chunk data */
-	u_int32_t		ssd_chunk_ver;	/* chunk structure version */
-	u_int32_t		ssd_chunk_no;	/* number of chunks */
-	u_int32_t		ssd_chunk_size;	/* chunk structure size */
-	u_int32_t		ssd_chunk_id;	/* chunk identifier */
-	u_int32_t		ssd_chunk_chk;	/* chunk structure xor */
-	u_int32_t		ssd_pad3;
-
-	/* optional metadata */
-	u_int32_t		ssd_opt_ver;	/* optinal meta version */
-	u_int32_t		ssd_opt_no;	/* nr of optional md elements */
-	u_int32_t		ssd_opt_size;	/* sizeof optional metadata */
-	u_int32_t		ssd_opt_chk;	/* optional metadata xor */
-} __packed;
 
 struct sr_metadata_list {
 	struct sr_metadata	*sml_metadata;
@@ -209,29 +305,6 @@ struct sr_metadata_list {
 };
 
 SLIST_HEAD(sr_metadata_list_head, sr_metadata_list);
-
-#define SR_OPT_VERSION		1	/* bump when sr_opt_meta changes */
-struct sr_opt_meta {
-	u_int32_t		som_type;
-#define SR_OPT_INVALID		0x00
-#define SR_OPT_CRYPTO		0x01
-	u_int32_t		som_pad;
-	union {
-		struct sr_crypto_metadata smm_crypto;
-	}			som_meta;
-};
-
-#define SR_CHUNK_VERSION	1	/* bump when sr_chunk_meta changes */
-struct sr_chunk_meta {
-	u_int32_t		scm_volid;	/* vd we belong to */
-	u_int32_t		scm_chunk_id;	/* chunk id */
-	u_int32_t		scm_status;	/* use bio bioc_disk status */
-	u_int32_t		scm_pad1;
-	char			scm_devname[32];/* /dev/XXXXX */
-	int64_t			scm_size;	/* size of partition in blocks*/
-	int64_t			scm_coerced_size; /* coerced sz of part in blk*/
-	struct sr_uuid		scm_uuid;	/* unique identifier */
-} __packed;
 
 struct sr_chunk {
 	struct sr_chunk_meta	src_meta;	/* chunk meta data */
@@ -248,25 +321,6 @@ struct sr_chunk {
 };
 
 SLIST_HEAD(sr_chunk_head, sr_chunk);
-
-#define SR_VOL_VERSION	2	/* bump when sr_vol_meta changes */
-struct sr_vol_meta {
-	u_int32_t		svm_volid;	/* volume id */
-	u_int32_t		svm_status; 	/* use bioc_vol status */
-	u_int32_t		svm_flags;	/* flags */
-#define	SR_VOL_DIRTY		0x01
-	u_int32_t		svm_level;	/* raid level */
-	int64_t			svm_size;	/* virt disk size in blocks */
-	char			svm_devname[32];/* /dev/XXXXX */
-	char			svm_vendor[8];	/* scsi vendor */
-	char			svm_product[16];/* scsi product */
-	char			svm_revision[4];/* scsi revision */
-	u_int32_t		svm_no_chunk;	/* number of chunks */
-	struct sr_uuid 		svm_uuid;	/* volume unique identifier */
-
-	/* optional members */
-	u_int32_t		svm_strip_size;	/* strip size */
-} __packed;
 
 struct sr_volume {
 	struct sr_vol_meta	sv_meta;	/* meta data */
@@ -424,10 +478,14 @@ void			sr_raid1_set_vol_state(struct sr_discipline *);
 int			sr_crypto_alloc_resources(struct sr_discipline *);
 int			sr_crypto_free_resources(struct sr_discipline *);
 int			sr_crypto_rw(struct sr_workunit *);
+int			sr_crypto_get_kdf(struct bioc_createraid *,
+			    struct sr_discipline *);
 int			sr_crypto_create_keys(struct sr_discipline *);
 
 #ifdef SR_DEBUG
 void			sr_dump_mem(u_int8_t *, int);
 #endif
+
+#endif /* _KERNEL */
 
 #endif /* SOFTRAIDVAR_H */
