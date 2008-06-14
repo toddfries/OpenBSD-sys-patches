@@ -330,27 +330,27 @@ ofw_find_keyboard()
 		} else {
 			ofw_have_kbd = OFW_HAVE_USBKBD;
 		}
-		printf("USB and ADB found ");
+		printf("USB and ADB found");
 	}
 	if (ofw_have_kbd == OFW_HAVE_USBKBD) {
 #if NUKBD > 0
-		printf("USB found\n");
+		printf(", using USB\n");
 		ukbd_cnattach();
 		attach=1;
 #endif
 	} else if (ofw_have_kbd == OFW_HAVE_ADBKBD) {
 #if NAKBD >0
-		printf("ADB found\n");
+		printf(", ADB found\n");
 		akbd_cnattach();
 		attach=1;
 #endif
 	} 
 	if (attach == 0) {
 #if NUKBD > 0
-		printf("console: no keyboard attached, trying usb anyway\n");
+		printf(", no keyboard attached, trying usb anyway\n");
 		ukbd_cnattach();
 #else
-		printf("console: no keyboard found!\n");
+		printf(", no keyboard found!\n");
 #endif
 	}
 }
