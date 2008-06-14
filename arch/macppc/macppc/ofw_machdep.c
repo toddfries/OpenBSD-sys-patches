@@ -302,7 +302,7 @@ ofw_find_keyboard()
 {
 	int stdin_node;
 	char iname[32];
-	int len, pref;
+	int len;
 
 	stdin_node = OF_instance_to_package(OF_stdin);
 	len = OF_getprop(stdin_node, "name", iname, 20);
@@ -315,25 +315,24 @@ ofw_find_keyboard()
 
 	ofw_recurse_keyboard(OF_peer(0));
 
-	/*
-	 * On some machines, such as PowerBook6,8,
-	 * the built-in USB Bluetooth device
-	 * appears as an USB device.  Prefer
-	 * ADB (builtin) keyboard for console
-	 * for PowerBook systems.
-	 */
-	if (strncmp(hw_prod, "PowerBook", 9) ||
-	    strncmp(hw_prod, "iBook", 5)) {
-		pref = OFW_HAVE_ADBKBD;
-	} else {
-		pref = OFW_HAVE_USBKBD;
-	}
 
 	if (ofw_have_kbd == (OFW_HAVE_USBKBD | OFW_HAVE_ADBKBD)) {
 #if NUKBD > 0
+		/*
+		 * On some machines, such as PowerBook6,8,
+		 * the built-in USB Bluetooth device
+		 * appears as an USB device.  Prefer
+		 * ADB (builtin) keyboard for console
+		 * for PowerBook systems.
+		 */
+		if (strncmp(hw_prod, "PowerBook", 9) ||
+		    strncmp(hw_prod, "iBook", 5)) {
+			ofw_have_kbd = OFW_HAVE_ADBKBD;
+		} else {
+			ofw_have_kbd = OFW_HAVE_USBKBD;
+		}
 		printf("USB and ADB found, using %s\n",
-			pref == OFW_HAVE_USBKBD ? "USB" : "ADB");
-		ofw_have_kbd = pref;
+			ofw_have_kbd == OFW_HAVE_USBKBD ? "USB" : "ADB");
 #else
 		ofw_have_kbd = OFW_HAVE_ADBKBD;
 #endif
@@ -356,7 +355,6 @@ ofw_find_keyboard()
 		printf("console: no keyboard found!\n");
 #endif
 	}
-
 }
 
 void
