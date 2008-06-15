@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.47 2008/06/11 04:52:27 blambert Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.51 2008/06/14 19:33:58 beck Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -60,6 +60,7 @@ extern struct proc *nfs_iodwant[NFS_MAXASYNCDAEMON];
 extern int nfs_numasync;
 extern struct nfsstats nfsstats;
 struct nfs_bufqhead nfs_bufq;
+uint32_t nfs_bufqmax, nfs_bufqlen;
 
 /*
  * Vnode op for read using bio
@@ -545,41 +546,25 @@ int
 nfs_asyncio(bp)
 	struct buf *bp;
 {
-	int i,s;
-
 	if (nfs_numasync == 0)
-		return (EIO);
-	for (i = 0; i < NFS_MAXASYNCDAEMON; i++)
-	    if (nfs_iodwant[i]) {
-		if ((bp->b_flags & B_READ) == 0) {
-			bp->b_flags |= B_WRITEINPROG;
-		}
-	
-		TAILQ_INSERT_TAIL(&nfs_bufq, bp, b_freelist);
-		nfs_iodwant[i] = (struct proc *)0;
-		wakeup((caddr_t)&nfs_iodwant[i]);
-		return (0);
-	    }
+		goto out;
 
-	/*
-	 * If it is a read or a write already marked B_WRITEINPROG or B_NOCACHE
-	 * return EIO so the process will call nfs_doio() and do it
-	 * synchronously.
-	 */
-	if (bp->b_flags & (B_READ | B_WRITEINPROG | B_NOCACHE))
-		return (EIO);
+	if (nfs_bufqlen > nfs_bufqmax)
+		goto out; /* too many bufs in use, force sync */
 
-	/*
-	 * Just turn the async write into a delayed write, instead of
-	 * doing in synchronously. Hopefully, at least one of the nfsiods
-	 * is currently doing a write for this file and will pick up the
-	 * delayed writes before going back to sleep.
-	 */
-	s = splbio();
-	buf_dirty(bp);
-	biodone(bp);
-	splx(s);
+	if ((bp->b_flags & B_READ) == 0) {
+		bp->b_flags |= B_WRITEINPROG;
+	}
+
+	TAILQ_INSERT_TAIL(&nfs_bufq, bp, b_freelist);
+	nfs_bufqlen++;
+
+	wakeup_one(&nfs_bufq);
 	return (0);
+
+out:
+	nfsstats.forcedsync++;
+	return (EIO);
 }
 
 /*

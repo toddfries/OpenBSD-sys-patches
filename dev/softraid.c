@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.109 2008/06/12 01:26:16 marco Exp $ */
+/* $OpenBSD: softraid.c,v 1.115 2008/06/14 18:40:50 hshoexer Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -818,13 +818,8 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			strlcpy(sd->sd_name, "RAID 1", sizeof(sd->sd_name));
 			vol_size = ch_entry->src_meta.scm_coerced_size;
 			break;
-#if 0
 #ifdef CRYPTO
 		case 'C':
-			/*
-                         * XXX we need the masking keys and salt here,
-                         * provided by bioctl.
-			 */
 			DNPRINTF(SR_D_IOCTL,
 			    "%s: sr_ioctl_createraid: no_chunk %d\n",
 			    DEVNAME(sc), no_chunk);
@@ -832,14 +827,26 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			if (no_chunk != 1)
 				goto unwind;
 
+			/* no hint available yet */
+			if (bc->bc_opaque_flags & BIOC_SOOUT) {
+				bc->bc_opaque_status = BIOC_SOINOUT_FAILED;
+				rv = 0;
+				goto unwind;
+			}
+
+			if (!(bc->bc_flags & BIOC_SCNOAUTOASSEMBLE))
+				goto unwind;
+
+			if (sr_crypto_get_kdf(bc, sd))
+				goto unwind;
+
 			strlcpy(sd->sd_name, "CRYPTO", sizeof(sd->sd_name));
 			vol_size = ch_entry->src_meta.scm_size;
 
-			/* create crypto keys and encrypt them */
 			sr_crypto_create_keys(sd);
+
 			break;
 #endif /* CRYPTO */
-#endif
 		default:
 			goto unwind;
 		}
@@ -876,6 +883,31 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			printf(" already assembled\n");
 			goto unwind;
 		}
+#ifdef CRYPTO
+		/* provide userland with kdf hint */
+		if (bc->bc_opaque_flags & BIOC_SOOUT) {
+			if (bc->bc_opaque == NULL)
+				goto unwind;
+
+			if (sizeof(sd->mds.mdd_crypto.scr_meta.scm_kdfhint) <
+			    bc->bc_opaque_size)
+				goto unwind;
+
+			if (copyout(sd->mds.mdd_crypto.scr_meta.scm_kdfhint,
+			    bc->bc_opaque, bc->bc_opaque_size))
+				goto unwind;
+
+			/* we're done */
+			bc->bc_opaque_status = BIOC_SOINOUT_OK;
+			rv = 0;
+			goto unwind;
+		}
+		/* get kdf with maskkey from userland */
+		if (bc->bc_opaque_flags & BIOC_SOIN) {
+			if (sr_crypto_get_kdf(bc, sd))
+				goto unwind;
+		}
+#endif	/* CRYPTO */
 		DNPRINTF(SR_D_META, "%s: disk assembled from metadata\n",
 		    DEVNAME(sc));
 		updatemeta = 0;
@@ -1009,7 +1041,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		sd->sd_vol.sv_meta.svm_volid = vol;
 		strlcpy(sd->sd_vol.sv_meta.svm_devname, dev->dv_xname,
 		    sizeof(sd->sd_vol.sv_meta.svm_devname));
-
 	}
 
 	/* save metadata to disk */
@@ -1189,7 +1220,7 @@ sr_read_meta(struct sr_discipline *sd)
 
 		/* XXX mark chunk offline and restart metadata write */
 		if (b.b_flags & B_ERROR) {
-			printf("%s: %s i/o error on block %d while reading "
+			printf("%s: %s i/o error on block %lld while reading "
 			    "metadata %d\n", DEVNAME(sc),
 			    ch_entry->src_devname, b.b_blkno, b.b_error);
 			continue;
@@ -1279,7 +1310,7 @@ sr_read_meta(struct sr_discipline *sd)
 		/* XXX fix this check, sd_type isnt filled in yet */
 		if (mv->svm_level == 'C') {
 			mo = (struct sr_opt_meta *)(mc + mv->svm_no_chunk);
-			if (m->ssd_chunk_id > 2) {
+			if (m->ssd_chunk_id > 1) {
 				no_chunk = -1;
 				goto bad;
 			}
@@ -1386,9 +1417,9 @@ sr_unwind_chunks(struct sr_softc *sc, struct sr_chunk_head *cl)
 void
 sr_free_discipline(struct sr_discipline *sd)
 {
-#ifdef SR_DEBUG
 	struct sr_softc		*sc = sd->sd_sc;
-#endif
+	int			i;
+
 	if (!sd)
 		return;
 
@@ -1400,6 +1431,12 @@ sr_free_discipline(struct sr_discipline *sd)
 	if (sd->sd_vol.sv_chunks)
 		free(sd->sd_vol.sv_chunks, M_DEVBUF);
 	free(sd, M_DEVBUF);
+
+	for (i = 0; i < SR_MAXSCSIBUS; i++)
+		if (sc->sc_dis[i] == sd) {
+			sc->sc_dis[i] = NULL;
+			break;
+		}
 }
 
 void
@@ -1700,7 +1737,7 @@ sr_clear_metadata(struct sr_discipline *sd)
 		biowait(&b);
 
 		if (b.b_flags & B_ERROR) {
-			printf("%s: %s i/o error on block %d while clearing "
+			printf("%s: %s i/o error on block %lld while clearing "
 			    "metadata %d\n", DEVNAME(sc),
 			    ch_entry->src_devname, b.b_blkno, b.b_error);
 			rv++;
@@ -1895,7 +1932,7 @@ sr_save_metadata(struct sr_discipline *sd, u_int32_t flags)
 		/* XXX do something smart here */
 		/* mark chunk offline and restart metadata write */
 		if (b.b_flags & B_ERROR) {
-			printf("%s: %s i/o error on block %d while writing "
+			printf("%s: %s i/o error on block %lld while writing "
 			    "metadata %d\n", DEVNAME(sc),
 			    src->src_meta.scm_devname, b.b_blkno, b.b_error);
 			goto bad;

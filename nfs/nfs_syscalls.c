@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.63 2008/06/11 12:35:46 deraadt Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.66 2008/06/14 19:33:58 beck Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -391,32 +391,7 @@ nfssvc_nfsd(nsd, argp, p)
 		    else
 			nd->nd_nam = slp->ns_nam;
 
-		    /*
-		     * Check to see if authorization is needed.
-		     */
-		    if (nfsd->nfsd_flag & NFSD_NEEDAUTH) {
-			nfsd->nfsd_flag &= ~NFSD_NEEDAUTH;
-			nsd->nsd_haddr = mtod(nd->nd_nam,
-			    struct sockaddr_in *)->sin_addr.s_addr;
-			nsd->nsd_authlen = nfsd->nfsd_authlen;
-			nsd->nsd_verflen = nfsd->nfsd_verflen;
-			if (!copyout(nfsd->nfsd_authstr,nsd->nsd_authstr,
-				nfsd->nfsd_authlen) &&
-			    !copyout(nfsd->nfsd_verfstr, nsd->nsd_verfstr,
-				nfsd->nfsd_verflen) &&
-			    !copyout((caddr_t)nsd, argp, sizeof (*nsd))) {
-			    return (ENEEDAUTH);
-			}
-			cacherep = RC_DROPIT;
-		    } else
-			cacherep = nfsrv_getcache(nd, slp, &mreq);
-
-		    if (nfsd->nfsd_flag & NFSD_AUTHFAIL) {
-			    nfsd->nfsd_flag &= ~NFSD_AUTHFAIL;
-			    nd->nd_procnum = NFSPROC_NOOP;
-			    nd->nd_repstat = (NFSERR_AUTHERR | AUTH_TOOWEAK);
-			    cacherep = RC_DOIT;
-		    }
+		    cacherep = nfsrv_getcache(nd, slp, &mreq);
 		}
 
 		/*
@@ -703,33 +678,42 @@ nfssvc_iod(p)
 	struct buf *bp, *nbp;
 	int i, myiod;
 	struct vnode *vp;
-	int error = 0, s;
+	int error = 0, s, bufcount;
 
-	/*
-	 * Assign my position or return error if too many already running
-	 */
+	bufcount = 256;	/* XXX: Big enough? sysctl, constant ? */
+
+	/* Assign my position or return error if too many already running. */
 	myiod = -1;
-	for (i = 0; i < NFS_MAXASYNCDAEMON; i++)
+	for (i = 0; i < NFS_MAXASYNCDAEMON; i++) {
 		if (nfs_asyncdaemon[i] == NULL) {
 			myiod = i;
 			break;
 		}
+	}
 	if (myiod == -1)
 		return (EBUSY);
+
 	nfs_asyncdaemon[myiod] = p;
 	nfs_numasync++;
-	/*
-	 * Just loop around doin our stuff until SIGKILL
-	 */
+
+	/* Upper limit on how many bufs we'll queue up for this iod. */
+	if (nfs_bufqmax > bcstats.numbufs / 4) {
+		nfs_bufqmax = bcstats.numbufs / 4; /* limit to 1/4 of bufs */
+		bufcount = 0;
+	}
+
+	nfs_bufqmax += bufcount;
+
+	/* Just loop around doin our stuff until SIGKILL. */
 	for (;;) {
 	    while (TAILQ_FIRST(&nfs_bufq) == NULL && error == 0) {
-		nfs_iodwant[myiod] = p;
-		error = tsleep((caddr_t)&nfs_iodwant[myiod],
+		    error = tsleep(&nfs_bufq,
 			PWAIT | PCATCH, "nfsidl", 0);
 	    }
 	    while ((bp = TAILQ_FIRST(&nfs_bufq)) != NULL) {
 		/* Take one off the front of the list */
 		TAILQ_REMOVE(&nfs_bufq, bp, b_freelist);
+		nfs_bufqlen--;
 		if (bp->b_flags & B_READ)
 		    (void) nfs_doio(bp, NULL);
 		else do {
@@ -746,7 +730,8 @@ nfssvc_iod(p)
 			    (B_BUSY|B_DELWRI|B_NEEDCOMMIT|B_NOCACHE))!=B_DELWRI)
 			    continue;
 			bremfree(nbp);
-			nbp->b_flags |= (B_BUSY|B_ASYNC);
+			nbp->b_flags |= B_ASYNC;
+			buf_acquire(nbp);
 			break;
 		    }
 		    /*
@@ -766,6 +751,7 @@ nfssvc_iod(p)
 	    if (error) {
 		nfs_asyncdaemon[myiod] = NULL;
 		nfs_numasync--;
+		nfs_bufqmax -= bufcount;
 		return (error);
 	    }
 	}

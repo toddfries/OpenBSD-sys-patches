@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.124 2007/11/25 22:28:53 dlg Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.127 2008/06/15 00:52:25 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -214,6 +214,11 @@ scsi_make_xs(struct scsi_link *sc_link, struct scsi_generic *scsi_cmd,
 		xs->cmd->bytes[0] |= ((sc_link->lun << SCSI_CMD_LUN_SHIFT) &
 		    SCSI_CMD_LUN_MASK);
 
+#ifdef	SCSIDEBUG
+	if ((sc_link->flags & SDEV_DB1) != 0)
+		show_scsi_xs(xs);
+#endif /* SCSIDEBUG */
+
 	return (xs);
 }
 
@@ -292,9 +297,6 @@ int
 scsi_test_unit_ready(struct scsi_link *sc_link, int retries, int flags)
 {
 	struct scsi_test_unit_ready		scsi_cmd;
-
-	if (sc_link->quirks & ADEV_NOTUR)
-		return (0);
 
 	bzero(&scsi_cmd, sizeof(scsi_cmd));
 	scsi_cmd.opcode = TEST_UNIT_READY;
@@ -687,10 +689,6 @@ scsi_done(struct scsi_xfer *xs)
 	splassert(IPL_BIO);
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_done\n"));
-#ifdef	SCSIDEBUG
-	if ((sc_link->flags & SDEV_DB1) != 0)
-		show_scsi_cmd(xs);
-#endif /* SCSIDEBUG */
 
 	/*
  	 * If it's a user level request, bypass all usual completion processing,
@@ -1064,9 +1062,10 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 			case SENSE_NOT_READY_INPROGRESS:
 			case SENSE_NOT_READY_LONGWRITE:
 			case SENSE_NOT_READY_SELFTEST:
+			case SENSE_NOT_READY_INIT_REQUIRED:
 				SC_DEBUG(sc_link, SDEV_DB1,
-		    		    ("not ready: busy (%#x)\n",
-				    sense->add_sense_code_qual));
+		    		    ("not ready (ASC_ASCQ == %#x)\n",
+				    ASC_ASCQ(sense)));
 				return (scsi_delay(xs, 1));
 			case SENSE_NOMEDIUM:
 			case SENSE_NOMEDIUM_TCLOSED:
@@ -1916,7 +1915,13 @@ scsi_decode_sense(struct scsi_sense_data *sense, int flag)
 void
 show_scsi_xs(struct scsi_xfer *xs)
 {
+	u_char *b = (u_char *) xs->cmd;
+	int i = 0;
+
+	sc_print_addr(xs->sc_link);
+
 	printf("xs(%p): ", xs);
+
 	printf("flg(0x%x)", xs->flags);
 	printf("sc_link(%p)", xs->sc_link);
 	printf("retr(0x%x)", xs->retries);
@@ -1927,17 +1932,8 @@ show_scsi_xs(struct scsi_xfer *xs)
 	printf("len(0x%x)", xs->datalen);
 	printf("res(0x%x)", xs->resid);
 	printf("err(0x%x)", xs->error);
-	printf("bp(%p)", xs->bp);
-	show_scsi_cmd(xs);
-}
+	printf("bp(%p)\n", xs->bp);
 
-void
-show_scsi_cmd(struct scsi_xfer *xs)
-{
-	u_char					*b = (u_char *) xs->cmd;
-	int					i = 0;
-
-	sc_print_addr(xs->sc_link);
 	printf("command: ");
 
 	if ((xs->flags & SCSI_RESET) == 0) {

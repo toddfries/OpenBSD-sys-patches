@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.82 2007/09/12 18:45:14 mk Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.84 2008/06/15 00:36:40 krw Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -211,8 +211,8 @@ getccdbuf(void)
 {
 	struct ccdbuf *cbp;
 
-	if ((cbp = pool_get(&ccdbufpl, PR_WAITOK)))
-		bzero(cbp, sizeof(struct ccdbuf));
+	cbp = pool_get(&ccdbufpl, PR_WAITOK | PR_ZERO);
+
 	return (cbp);
 }
 
@@ -680,8 +680,7 @@ ccdstrategy(struct buf *bp)
 	 * error, the bounds check will flag that for us.
 	 */
 	wlabel = cs->sc_flags & (CCDF_WLABEL|CCDF_LABELLING);
-	if (DISKPART(bp->b_dev) != RAW_PART &&
-	    bounds_check_with_label(bp, lp, wlabel) <= 0)
+	if (bounds_check_with_label(bp, lp, wlabel) <= 0)
 		goto done;
 
 	bp->b_resid = bp->b_bcount;

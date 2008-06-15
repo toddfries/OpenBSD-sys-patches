@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsm_subs.h,v 1.26 2008/05/27 19:06:28 blambert Exp $	*/
+/*	$OpenBSD: nfsm_subs.h,v 1.31 2008/06/15 04:03:40 thib Exp $	*/
 /*	$NetBSD: nfsm_subs.h,v 1.10 1996/03/20 21:59:56 fvdl Exp $	*/
 
 /*
@@ -51,7 +51,6 @@
  */
 
 #define	M_HASCL(m)	((m)->m_flags & M_EXT)
-#define	NFSMADV(m, s)	(m)->m_data += (s)
 #define	NFSMSIZ(m)	((M_HASCL(m)) ? (m)->m_ext.ext_size : \
 				(((m)->m_flags & M_PKTHDR) ? MHLEN : MLEN))
 
@@ -84,24 +83,20 @@
 #define nfsm_fhtom(v, v3) \
 	      { if (v3) { \
 			nfsm_strtombuf(&mb, VTONFS(v)->n_fhp, \
-			    VTONFS(v)->n_fhsize, &bpos); \
+			    VTONFS(v)->n_fhsize); \
 		} else { \
-			cp = nfsm_build(&mb, NFSX_V2FH, &bpos); \
-			bcopy((caddr_t)VTONFS(v)->n_fhp, cp, NFSX_V2FH); \
+			nfsm_buftombuf(&mb, VTONFS(v)->n_fhp, NFSX_V2FH); \
 		} }
 
 #define nfsm_srvfhtom(f, v3) \
 		{ if (v3) { \
-			tl = nfsm_build(&mb, NFSX_UNSIGNED + NFSX_V3FH,&bpos); \
-			*tl++ = txdr_unsigned(NFSX_V3FH); \
-			bcopy((caddr_t)(f), (caddr_t)tl, NFSX_V3FH); \
+			nfsm_strtombuf(&mb, (f), NFSX_V3FH); \
 		} else { \
-			cp = nfsm_build(&mb, NFSX_V2FH, &bpos); \
-			bcopy((caddr_t)(f), cp, NFSX_V2FH); \
+			nfsm_buftombuf(&mb, (f), NFSX_V2FH); \
 		} }
 
 #define nfsm_srvpostop_fh(f) \
-		{ tl = nfsm_build(&mb, 2 * NFSX_UNSIGNED + NFSX_V3FH, &bpos); \
+		{ tl = nfsm_build(&mb, 2 * NFSX_UNSIGNED + NFSX_V3FH); \
 		*tl++ = nfs_true; \
 		*tl++ = txdr_unsigned(NFSX_V3FH); \
 		bcopy((caddr_t)(f), (caddr_t)tl, NFSX_V3FH); \
@@ -224,9 +219,6 @@
 			goto nfsmout; \
 		}
 
-#define	nfsm_reqhead(v,a,s) \
-		mb = mreq = nfsm_reqh((v),(a),(s),&bpos)
-
 #define nfsm_rndup(a)	(((a)+3)&(~0x3))
 
 #define	nfsm_request(v, t, p, c)	\
@@ -244,17 +236,17 @@
 			error = ENAMETOOLONG; \
 			goto nfsmout; \
 		} \
-		nfsm_strtombuf(&mb, (a), (s), &bpos)
+		nfsm_strtombuf(&mb, (a), (s))
 
 #define	nfsm_reply(s) \
 		{ \
 		nfsd->nd_repstat = error; \
 		if (error && !(nfsd->nd_flag & ND_NFSV3)) \
 		   (void) nfs_rephead(0, nfsd, slp, error, \
-			mrq, &mb, &bpos); \
+			mrq, &mb); \
 		else \
 		   (void) nfs_rephead((s), nfsd, slp, error, \
-			mrq, &mb, &bpos); \
+			mrq, &mb); \
 		if (mrep != NULL) { \
 			m_freem(mrep); \
 			mrep = NULL; \
@@ -270,10 +262,10 @@
 		nfsd->nd_repstat = error; \
 		if (error && !(v3)) \
 		   (void) nfs_rephead(0, nfsd, slp, error, \
-			&mreq, &mb, &bpos); \
+			&mreq, &mb); \
 		else \
 		   (void) nfs_rephead((s), nfsd, slp, error, \
-			&mreq, &mb, &bpos); \
+			&mreq, &mb); \
 		}
 
 #define	nfsm_adv(s) \
@@ -299,9 +291,6 @@
 		if ((nfsd->nd_flag & ND_NFSV3) == 0) \
 			nfsm_adv(NFSX_V2FH - NFSX_V3FH); \
 		}
-
-#define nfsm_srvpostop_attr(r, a) \
-		nfsm_srvpostopattr(nfsd, (r), (a), &mb, &bpos)
 
 #define nfsm_srvsattr(a) \
 		{ nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED); \
