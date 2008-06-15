@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.73 2008/06/11 04:52:27 blambert Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.76 2008/06/14 22:44:07 blambert Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -111,10 +111,9 @@ nfs_statfs(mp, sbp, p)
 {
 	struct vnode *vp;
 	struct nfs_statfs *sfp = NULL;
-	caddr_t cp;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t bpos, dpos, cp2;
+	caddr_t dpos, cp2;
 	struct nfsmount *nmp = VFSTONFS(mp);
 	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
 	struct mbuf *mreq, *mrep = NULL, *md, *mb;
@@ -131,7 +130,7 @@ nfs_statfs(mp, sbp, p)
 	if (v3 && (nmp->nm_flag & NFSMNT_GOTFSINFO) == 0)
 		(void)nfs_fsinfo(nmp, vp, cred, p);
 	nfsstats.rpccnt[NFSPROC_FSSTAT]++;
-	nfsm_reqhead(vp, NFSPROC_FSSTAT, NFSX_FH(v3));
+	mb = mreq = nfsm_reqhead(NFSX_FH(v3));
 	nfsm_fhtom(vp, v3);
 	nfsm_request(vp, NFSPROC_FSSTAT, p, cred);
 	if (v3)
@@ -186,15 +185,14 @@ nfs_fsinfo(nmp, vp, cred, p)
 	struct proc *p;
 {
 	struct nfsv3_fsinfo *fsp;
-	caddr_t cp;
 	int32_t t1;
 	u_int32_t *tl, pref, max;
-	caddr_t bpos, dpos, cp2;
+	caddr_t dpos, cp2;
 	int error = 0, retattr;
 	struct mbuf *mreq, *mrep, *md, *mb;
 
 	nfsstats.rpccnt[NFSPROC_FSINFO]++;
-	nfsm_reqhead(vp, NFSPROC_FSINFO, NFSX_FH(1));
+	mb = mreq = nfsm_reqhead(NFSX_FH(1));
 	nfsm_fhtom(vp, 1);
 	nfsm_request(vp, NFSPROC_FSINFO, p, cred);
 	nfsm_postop_attr(vp, retattr);

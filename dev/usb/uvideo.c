@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.33 2008/06/11 01:27:31 robert Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.36 2008/06/15 03:44:31 robert Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -36,16 +36,16 @@
 #include <sys/poll.h>
 #include <uvm/uvm.h>
 
+#include <machine/bus.h>
+
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
+#include <dev/usb/usbdivar.h>
 #include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdevs.h>
 #include <dev/usb/uvideo.h>
 
 #include <dev/video_if.h>
-
-#define UVIDEO_DEBUG
-#undef UVIDEO_DUMP
 
 #ifdef UVIDEO_DEBUG
 int uvideo_debug = 1;
@@ -322,6 +322,12 @@ uvideo_attach(struct device * parent, struct device * self, void *aux)
 	usbd_status error;
 
 	sc->sc_udev = uaa->device;
+
+	if (uaa->device->bus->usbrev == USBREV_2_0) {
+		printf("%s: ehci(4) does not support isochronous transfers "
+		    "yet, disable it.\n", DEVNAME(sc));
+		return; 
+	}
 
 	/* get the config descriptor */
 	cdesc = usbd_get_config_descriptor(sc->sc_udev);

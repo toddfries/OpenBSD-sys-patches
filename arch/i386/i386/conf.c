@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.125 2008/05/21 18:49:47 kettenis Exp $	*/
+/*	$OpenBSD: conf.c,v 1.127 2008/06/14 21:31:46 mbalmer Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -146,6 +146,7 @@ cdev_decl(cy);
 cdev_decl(mcd);
 #include "tun.h"
 #include "audio.h"
+#include "video.h"
 #include "midi.h"
 #include "sequencer.h"
 cdev_decl(music);
@@ -196,6 +197,7 @@ cdev_decl(pci);
 #include "pf.h"
 #include "hotplug.h"
 #include "gpio.h"
+#include "amdmsr.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -256,7 +258,7 @@ struct cdevsw	cdevsw[] =
 #else
 	cdev_notdef(),			/* 43 */
 #endif
-	cdev_notdef(),			/* 44 */
+	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_random_init(1,random),	/* 45: random data source */
 	cdev_ocis_init(NPCTR,pctr),	/* 46: pentium performance counters */
 	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
@@ -311,7 +313,8 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 85: ACPI (deprecated) */
 	cdev_bthub_init(NBTHUB,bthub),	/* 86: bthub */
 	cdev_agp_init(NAGP,agp),	/* 87: agp */
-	cdev_drm_init(NDRMBASE,drm)	/* 88: drm */
+	cdev_drm_init(NDRMBASE,drm),	/* 88: drm */
+	cdev_amdmsr_init(NAMDMSR,amdmsr)	/* 89: amdmsr */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.121 2008/05/24 19:48:32 thib Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.123 2008/06/14 22:15:30 jsing Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -103,6 +103,8 @@
 extern int ip6_defhlim;
 #endif /* INET6 */
 
+#include "faith.h"
+
 /*
  * UDP protocol implementation.
  * Per RFC 768, August, 1980.
@@ -137,13 +139,11 @@ udp_init()
 
 #ifdef INET6
 int
-udp6_input(mp, offp, proto)
-	struct mbuf **mp;
-	int *offp, proto;
+udp6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
 
-#if defined(NFAITH) && 0 < NFAITH
+#if NFAITH > 0
 	if (m->m_pkthdr.rcvif) {
 		if (m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
 			/* XXX send icmp6 host/port unreach? */
@@ -664,9 +664,7 @@ bad:
  * just wake up so that he can collect error status.
  */
 void
-udp_notify(inp, errno)
-	struct inpcb *inp;
-	int errno;
+udp_notify(struct inpcb *inp, int errno)
 {
 	inp->inp_socket->so_error = errno;
 	sorwakeup(inp->inp_socket);
@@ -675,10 +673,7 @@ udp_notify(inp, errno)
 
 #ifdef INET6
 void
-udp6_ctlinput(cmd, sa, d)
-	int cmd;
-	struct sockaddr *sa;
-	void *d;
+udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 {
 	struct udphdr uh;
 	struct sockaddr_in6 sa6;
@@ -836,10 +831,7 @@ udp6_ctlinput(cmd, sa, d)
 #endif
 
 void *
-udp_ctlinput(cmd, sa, v)
-	int cmd;
-	struct sockaddr *sa;
-	void *v;
+udp_ctlinput(int cmd, struct sockaddr *sa, void *v)
 {
 	struct ip *ip = v;
 	struct udphdr *uhp;
@@ -1003,11 +995,8 @@ release:
 
 /*ARGSUSED*/
 int
-udp_usrreq(so, req, m, addr, control, p)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *addr, *control;
-	struct proc *p;
+udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
+    struct mbuf *control, struct proc *p)
 {
 	struct inpcb *inp = sotoinpcb(so);
 	int error = 0;
@@ -1210,8 +1199,7 @@ release:
 }
 
 void
-udp_detach(inp)
-	struct inpcb *inp;
+udp_detach(struct inpcb *inp)
 {
 	int s = splsoftnet();
 
@@ -1223,13 +1211,8 @@ udp_detach(inp)
  * Sysctl for udp variables.
  */
 int
-udp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
+udp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen)
 {
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)

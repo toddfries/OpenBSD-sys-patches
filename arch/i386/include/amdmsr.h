@@ -1,6 +1,5 @@
-/*	$OpenBSD: conf.c,v 1.3 2008/06/13 00:31:09 krw Exp $	*/
 /*
- * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
+ * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,25 +13,16 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#include <sys/param.h>
-  
-#include <dev/cons.h>   
-     
-#include <lib/libsa/stand.h>
 
+#ifndef _SYS_AMDMSR_H_
+#define _SYS_AMDMSR_H_
 
-const char version[] = "1.1";
-int     debug = 0;
-
-void ofc_probe(struct consdev *);
-void ofc_init(struct consdev *);
-int ofc_getc(dev_t);
-void ofc_putc(dev_t, int);
-
-
-struct consdev *cn_tab;
-
-struct consdev constab[] = {
-	{ ofc_probe, ofc_init, ofc_getc, ofc_putc },
-	{ NULL }
+struct amdmsr_req {
+	u_int32_t addr;	/* 32-bit MSR address */
+	u_int64_t val;	/* 64-bit MSR value */
 };
+
+#define RDMSR	_IOWR('M', 0, struct amdmsr_req)
+#define WRMSR	_IOW('M', 1, struct amdmsr_req)
+
+#endif	/* !_SYS_AMDMSR_H_ */

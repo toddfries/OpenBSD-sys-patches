@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.620 2008/06/07 23:05:37 robert Exp $
+#	$OpenBSD: GENERIC,v 1.622 2008/06/14 21:31:46 mbalmer Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -45,6 +45,7 @@ acpi0	at bios?
 pcibios0 at bios0 flags 0x0000	# use 0x30 for a total verbose
 ipmi0	at mainbus? disable	# IPMI
 esm0	at mainbus? 		# Dell Embedded Server Management
+amdmsr0	at mainbus?		# AMD MSR access
 
 acpitimer*	at acpi?
 acpihpet*	at acpi?
@@ -280,6 +281,10 @@ uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 puc*	at pci?			# PCI "universal" communication device
 #puc*	at cardbus?
+
+# USB Video
+uvideo* at uhub?
+video*  at uvideo?
 
 sdhc*	at pci?			# SD Host Controller
 sdmmc*	at sdhc?		# SD/MMC bus
