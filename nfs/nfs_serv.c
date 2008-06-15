@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.55 2008/06/14 00:26:13 thib Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.57 2008/06/15 04:03:40 thib Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -345,7 +345,6 @@ nfsrv_lookup(nfsd, slp, procp, mrq)
 	struct vnode *vp, *dirp;
 	nfsfh_t nfh;
 	fhandle_t *fhp;
-	caddr_t cp;
 	u_int32_t *tl;
 	int32_t t1;
 	int error = 0, len, dirattr_ret = 1;
@@ -726,7 +725,7 @@ nfsrv_write(nfsd, slp, procp, mrq)
 			adjust = dpos - mtod(mp, caddr_t);
 			mp->m_len -= adjust;
 			if (mp->m_len > 0 && adjust > 0)
-				NFSMADV(mp, adjust);
+				mp->m_data += adjust;
 		}
 		if (zeroing)
 			mp->m_len = 0;
@@ -921,7 +920,7 @@ nfsrv_writegather(ndp, slp, procp, mrq)
 		    adjust = dpos - mtod(mp, caddr_t);
 		    mp->m_len -= adjust;
 		    if (mp->m_len > 0 && adjust > 0)
-			NFSMADV(mp, adjust);
+		    	mp->m_data += adjust;
 		}
 		if (zeroing)
 		    mp->m_len = 0;
@@ -2108,7 +2107,6 @@ nfsrv_mkdir(nfsd, slp, procp, mrq)
 	struct vattr va, dirfor, diraft;
 	struct nfs_fattr *fp;
 	struct nameidata nd;
-	caddr_t cp;
 	u_int32_t *tl;
 	int32_t t1;
 	int error = 0, len, dirfor_ret = 1, diraft_ret = 1;
