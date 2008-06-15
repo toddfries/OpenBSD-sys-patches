@@ -316,20 +316,6 @@ ofw_find_keyboard()
 	ofw_recurse_keyboard(OF_peer(0));
 
 
-	/*
-	 * On some machines, such as PowerBook6,8,
-	 * the built-in USB Bluetooth device
-	 * appears as an USB device.  Prefer
-	 * ADB (builtin) keyboard for console
-	 * for PowerBook systems.
-	 */
-	if (strncmp(hw_prod, "PowerBook", 9) &&
-	    (boothowto & RB_KBDUSBPREF) == 0) {
-		pref = OFW_HAVE_ADBKBD;
-	} else {
-		pref = OFW_HAVE_USBKBD;
-	}
-
 	if (ofw_have_kbd == (OFW_HAVE_USBKBD | OFW_HAVE_ADBKBD)) {
 		/*
 		 * On some machines, such as PowerBook6,8,
