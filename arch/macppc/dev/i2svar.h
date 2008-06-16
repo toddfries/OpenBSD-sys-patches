@@ -61,6 +61,7 @@ struct i2s_softc {
 	void (*sc_setvolume)(struct i2s_softc *, int, int);
 	void (*sc_setbass)(struct i2s_softc *, int);
 	void (*sc_settreble)(struct i2s_softc *, int);
+	void (*sc_setinput)(struct i2s_softc *, int);
 
 	u_char *sc_reg;
 	void *sc_i2c;
