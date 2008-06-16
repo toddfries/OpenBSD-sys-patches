@@ -81,16 +81,20 @@ static int ipi_nopirq = IPI_VECTOR_NOP;
 static int ipi_ddbirq = IPI_VECTOR_DDB;
 #endif
 
-static __inline u_int openpic_read(int);
-static __inline void openpic_write(int, u_int);
-void openpic_set_enable_irq(int, int);
-void openpic_enable_irq(int);
-void openpic_disable_irq(int);
-void openpic_init(void);
-void openpic_set_priority(int, int);
-static __inline int openpic_read_irq(int);
-static __inline void openpic_eoi(int);
-void openpic_ipi_ddb(void);
+void	openpic_enable_irq(int, int);
+void	openpic_disable_irq(int);
+void	openpic_init(void);
+void	openpic_set_priority(int);
+
+typedef void  (void_f) (void);
+extern void_f *pending_int_f;
+
+vaddr_t openpic_base;
+void *	openpic_intr_establish( void * lcv, int irq, int type, int level,
+    int (*ih_fun)(void *), void *ih_arg, char *name);
+void	openpic_intr_disestablish( void *lcp, void *arg);
+void	openpic_collect_preconf_intr(void);
+int	openpic_big_endian;
 
 struct openpic_softc {
 	struct device sc_dev;
@@ -548,17 +552,9 @@ openpic_ext_intr()
 
 	while (irq != 255) {
 #ifdef MULTIPROCESSOR
-		if (realirq == IPI_VECTOR_NOP) {
-			ipi_nop[ci->ci_cpuid].ec_count++;
+		if (irq == IPI_VECTOR) {
 			openpic_eoi(ci->ci_cpuid);
-			realirq = openpic_read_irq(ci->ci_cpuid);
-			continue;
-		}
-		if (realirq == IPI_VECTOR_DDB) {
-			ipi_ddb[ci->ci_cpuid].ec_count++;
-			openpic_eoi(ci->ci_cpuid);
-			openpic_ipi_ddb();
-			realirq = openpic_read_irq(ci->ci_cpuid);
+			irq = openpic_read_irq(ci->ci_cpuid);
 			continue;
 		}
 #endif
@@ -571,15 +567,8 @@ openpic_ext_intr()
 		splraise(iq->iq_ipl);
 		openpic_eoi(ci->ci_cpuid);
 
-		if ((pcpl & r_imen) != 0) {
-			/* Masked! Mark this as pending. */
-			ci->ci_ipending |= r_imen;
-			openpic_enable_irq_mask(~imask[o_intrmaxlvl[realirq]]);
-			openpic_eoi(ci->ci_cpuid);
-		} else {
-			openpic_enable_irq_mask(~imask[o_intrmaxlvl[realirq]]);
-			ocpl = splraise(imask[o_intrmaxlvl[realirq]]);
-			openpic_eoi(ci->ci_cpuid);
+		TAILQ_FOREACH(ih, &iq->iq_list, ih_list) {
+			ppc_intr_enable(1);
 
 			KERNEL_LOCK();
 			if ((*ih->ih_fun)(ih->ih_arg))
@@ -651,21 +640,6 @@ openpic_init()
 	x &= ~(OPENPIC_IMASK | OPENPIC_PRIORITY_MASK | OPENPIC_VECTOR_MASK);
 	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR_NOP;
 	openpic_write(OPENPIC_IPI_VECTOR(0), x);
-
-	evcount_attach(&ipi_nop[0], "ipi_nop0", (void *)&ipi_nopirq,
-	    &evcount_intr); 
-	evcount_attach(&ipi_nop[1], "ipi_nop1", (void *)&ipi_nopirq,
-	    &evcount_intr);
-
-	x = openpic_read(OPENPIC_IPI_VECTOR(1));
-	x &= ~(OPENPIC_IMASK | OPENPIC_PRIORITY_MASK | OPENPIC_VECTOR_MASK);
-	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR_DDB;
-	openpic_write(OPENPIC_IPI_VECTOR(1), x);
-	evcount_attach(&ipi_ddb[0], "ipi_ddb0", (void *)&ipi_ddbirq,
-	    &evcount_intr);
-	evcount_attach(&ipi_ddb[1], "ipi_ddb1", (void *)&ipi_ddbirq,
-	    &evcount_intr);
-#endif
 
 #if 0
 	openpic_write(OPENPIC_SPURIOUS_VECTOR, 255);
