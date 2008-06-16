@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.622 2008/06/14 21:31:46 mbalmer Exp $
+#	$OpenBSD: GENERIC,v 1.624 2008/06/15 16:34:08 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -43,9 +43,9 @@ bios0	at mainbus0
 apm0	at bios0 flags 0x0000	# flags 0x0101 to force protocol version 1.1
 acpi0	at bios?
 pcibios0 at bios0 flags 0x0000	# use 0x30 for a total verbose
-ipmi0	at mainbus? disable	# IPMI
+ipmi0	at mainbus?		# IPMI
 esm0	at mainbus? 		# Dell Embedded Server Management
-amdmsr0	at mainbus?		# AMD MSR access
+amdmsr0	at mainbus? disable	# AMD MSR access
 
 acpitimer*	at acpi?
 acpihpet*	at acpi?
