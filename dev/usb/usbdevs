@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.365 2008/06/13 04:58:59 jsg Exp $
+$OpenBSD: usbdevs,v 1.372 2008/06/26 05:42:19 ray Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -17,13 +17,6 @@ $OpenBSD: usbdevs,v 1.365 2008/06/13 04:58:59 jsg Exp $
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -521,6 +514,7 @@ vendor QCOM		0x18e8	Qcom
 vendor LINKSYS3		0x1915	Linksys
 vendor MEINBERG		0x1938	Meinberg Funkuhren
 vendor QUALCOMM3		0x19d2	Qualcomm Inc.
+vendor WCH2		0x1a86	QinHeng Electronics
 vendor DLINK		0x2001	D-Link
 vendor PLANEX2		0x2019	Planex Communications
 vendor DLINK3		0x2101	D-Link
@@ -1796,12 +1790,28 @@ product LOGITECH QUICKCAMWEB	0x0801	QuickCam Web
 product LOGITECH QUICKCAMPRO	0x0810	QuickCam Pro
 product LOGITECH QUICKCAMEXP	0x0840	QuickCam Express
 product LOGITECH QUICKCAM	0x0850	QuickCam
-product LOGITECH QUICKCAMDLXNB	0x08a9	QuickCam Notebook Deluxe
-product LOGITECH QUICKCAMPRO3k	0x08b0	QuickCam Pro 3000
-product LOGITECH QUICKCAMPRONB	0x08b1	QuickCam Notebook Pro
+product LOGITECH QUICKCAMNBDLX	0x08a9	QuickCam Notebook Deluxe
+product LOGITECH QUICKCAMPRO3K	0x08b0	QuickCam Pro 3000
+product LOGITECH QUICKCAMNBPRO_1 0x08b1	QuickCam Notebook Pro
 product LOGITECH QUICKCAMPRO4K	0x08b2	QuickCam Pro 4000
-product LOGITECH QUICKCAMFUSION	0x08ca	QuickCam Fusion
-product LOGITECH QUICKCAMPRO5K	0x08ce	QuickCam Pro 5000
+product LOGITECH QUICKCAMFUSION_1 0x08c1 QuickCam Fusion
+product LOGITECH QUICKCAMORBITMP_1 0x08c2 QuickCam Orbit MP
+product LOGITECH QUICKCAMNBPRO	0x08c3	QuickCam Notebook Pro
+product LOGITECH QUICKCAMPRO5K_1 0x08c5	QuickCam Pro 5000
+product LOGITECH QUICKCAMOEM_1	0x08c6	QuickCam OEM
+product LOGITECH QUICKCAMOEM_2	0x08c7	QuickCam OEM
+product LOGITECH QUICKCAMULTVIS	0x08c9	QuickCam Ultra Vision
+product LOGITECH QUICKCAMFUSION_2 0x08ca QuickCam Fusion
+product LOGITECH QUICKCAMNBPRO_2 0x08cb	QuickCam Notebook Pro
+product LOGITECH QUICKCAMORBITMP_2 0x08cc QuickCam Orbit MP
+product LOGITECH QUICKCAMPRO5K_2 0x08ce	QuickCam Pro 5000
+product LOGITECH QUICKCAMPRO9K	0x0990	QuickCam Pro 9000
+product LOGITECH QUICKCAMPRONB	0x0991	QuickCam Pro Notebook
+product LOGITECH QUICKCAMCOMMDLX 0x0992	QuickCam Communicate Deluxe
+product LOGITECH QUICKCAMORBITAF 0x0994 QuickCam Orbit AF
+product LOGITECH QUICKCAMCOMMMP	0x09a1	QuickCam Communicate MP
+product LOGITECH QUICKCAME3500P	0x09a4	QuickCam E 3500 Plus
+product LOGITECH QUICKCAMDLXNB	0x09c1	QuickCam Deluxe Notebook
 product LOGITECH N43		0xc000	N43
 product LOGITECH N48		0xc001	N48 mouse
 product LOGITECH MBA47		0xc002	M-BA47 mouse
@@ -2815,6 +2825,7 @@ product OPTION GT3GPLUS		0x6721  GlobeTrotter 3G PLUS
 
 /* WCH/QinHeng Electronics */
 product WCH CH341		0x5523	CH341 serial/parallel
+product WCH2 CH341		0x7523	CH341 serial/parallel
 
 /* Wacom products */
 product WACOM CT0405U		0x0000	CT-0405-U Tablet
