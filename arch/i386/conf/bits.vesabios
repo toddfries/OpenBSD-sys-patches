@@ -1,0 +1,14 @@
+#	$OpenBSD: GENERIC.MP,v 1.5 2005/05/01 07:54:42 david Exp $
+#
+#	bits.vesabios - sample vesabios kernel
+#
+
+vesabios0	at mainbus? disable
+option	VESABIOSVERBOSE
+
+#vesafb*		at pci? disable
+#wsdisplay*	at vesafb? disable
+
+#option	VESAFB_WIDTH=1024
+#option	VESAFB_HEIGHT=768
+#option	VESAFB_DEPTH=16
