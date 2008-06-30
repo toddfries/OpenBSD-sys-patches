@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.39 2008/06/15 17:07:18 mglocker Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.42 2008/06/26 21:00:27 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -1078,7 +1078,14 @@ uvideo_vs_open(struct uvideo_softc *sc)
 	}
 
 	/* calculate optimal isoc xfer size */
-	sc->sc_nframes = UVIDEO_SFRAMES_MAX / sc->sc_vs_curr->max_packet_size;
+	if (strncmp(sc->sc_udev->bus->bdev.dv_xname, "ohci", 4) == 0) {
+		/* ohci workaround */
+		sc->sc_nframes = 6400 /
+		    sc->sc_vs_curr->max_packet_size;
+	} else {
+		sc->sc_nframes = UGETDW(sc->sc_desc_probe.dwMaxVideoFrameSize) /
+		    sc->sc_vs_curr->max_packet_size;
+	}
 	if (sc->sc_nframes > UVIDEO_NFRAMES_MAX)
 		sc->sc_nframes = UVIDEO_NFRAMES_MAX;
 	DPRINTF(1, "%s: nframes=%d\n", DEVNAME(sc), sc->sc_nframes);
@@ -1108,9 +1115,6 @@ uvideo_vs_start(struct uvideo_softc *sc)
 
 	for (i = 0; i < sc->sc_nframes; i++)
 		sc->sc_vs_curr->size[i] = sc->sc_vs_curr->max_packet_size;
-
-	bzero(sc->sc_vs_curr->buf,
-	    sc->sc_vs_curr->max_packet_size * sc->sc_nframes);
 
 	usbd_setup_isoc_xfer(
 	    sc->sc_vs_curr->xfer,
@@ -1919,7 +1923,7 @@ uvideo_dqbuf(void *v, struct v4l2_buffer *dqb)
 
 	if (SIMPLEQ_EMPTY(&sc->sc_mmap_q)) {
 		/* mmap queue is empty, block until first frame is queued */
-		error = tsleep(sc, 0, "vid_mmap", 0);
+		error = tsleep(sc, 0, "vid_mmap", 10 * hz);
 		if (error)
 			return (EINVAL);
 	}

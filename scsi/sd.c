@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.148 2008/06/15 00:52:25 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.150 2008/06/26 05:42:20 ray Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -742,7 +735,7 @@ sdstart(void *v)
 		 */
 		error = scsi_scsi_cmd(sc_link, cmdp, cmdlen,
 		    (u_char *)bp->b_data, bp->b_bcount,
-		    SDRETRIES, 60000, bp, SCSI_NOSLEEP |
+		    SCSI_RETRIES, 60000, bp, SCSI_NOSLEEP |
 		    ((bp->b_flags & B_READ) ? SCSI_DATA_IN : SCSI_DATA_OUT));
 		switch (error) {
 		case 0:
@@ -1108,7 +1101,7 @@ sd_reassign_blocks(struct sd_softc *sd, u_long blkno)
 	_lto4b(blkno, rbdata.defect_descriptor[0].dlbaddr);
 
 	return scsi_scsi_cmd(sd->sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)&rbdata, sizeof(rbdata), SDRETRIES,
+	    sizeof(scsi_cmd), (u_char *)&rbdata, sizeof(rbdata), SCSI_RETRIES,
 	    5000, NULL, SCSI_DATA_OUT);
 }
 
@@ -1283,7 +1276,7 @@ sddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 		bzero(xs, sizeof(sx));
 		xs->flags |= SCSI_AUTOCONF | SCSI_DATA_OUT;
 		xs->sc_link = sd->sc_link;
-		xs->retries = SDRETRIES;
+		xs->retries = SCSI_RETRIES;
 		xs->timeout = 10000;	/* 10000 millisecs for a disk ! */
 		xs->cmd = (struct scsi_generic *)&cmd;
 		xs->cmdlen = sizeof(cmd);
@@ -1500,7 +1493,7 @@ sd_flush(struct sd_softc *sd, int flags)
 	cmd.opcode = SYNCHRONIZE_CACHE;
 		
 	if (scsi_scsi_cmd(sc_link, (struct scsi_generic *)&cmd, sizeof(cmd),
-	    NULL, 0, SDRETRIES, 100000, NULL,
+	    NULL, 0, SCSI_RETRIES, 100000, NULL,
 	    flags | SCSI_IGNORE_ILLEGAL_REQUEST)) {
 		SC_DEBUG(sc_link, SDEV_DB1, ("cache sync failed\n"));
 	} else

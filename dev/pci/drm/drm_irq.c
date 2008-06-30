@@ -37,15 +37,10 @@
 
 irqreturn_t	drm_irq_handler_wrap(DRM_IRQ_ARGS);
 void		vblank_disable(void *);
-
-#ifdef __OpenBSD__
 void		drm_locked_task(void *context, void *pending);
-#else
-void		drm_locked_task(void *context, int pending __unused);
-#endif
 
 int
-drm_irq_by_busid(drm_device_t *dev, void *data, struct drm_file *file_priv)
+drm_irq_by_busid(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	drm_irq_busid_t *irq = data;
 
@@ -63,41 +58,11 @@ drm_irq_by_busid(drm_device_t *dev, void *data, struct drm_file *file_priv)
 	return 0;
 }
 
-#if defined(__FreeBSD__) && __FreeBSD_version >= 500000
-static irqreturn_t
-drm_irq_handler_wrap(DRM_IRQ_ARGS)
-{
-	drm_device_t *dev = (drm_device_t *)arg;
-
-	DRM_SPINLOCK(&dev->irq_lock);
-	dev->driver.irq_handler(arg);
-	DRM_SPINUNLOCK(&dev->irq_lock);
-}
-#endif
-
-#ifdef __NetBSD__
-static irqreturn_t
-drm_irq_handler_wrap(DRM_IRQ_ARGS)
-{
-	int s;
-	irqreturn_t ret;
-	drm_device_t *dev = (drm_device_t *)arg;
-
-	s = spldrm();
-	DRM_SPINLOCK(&dev->irq_lock);
-	ret = dev->driver.irq_handler(arg);
-	DRM_SPINUNLOCK(&dev->irq_lock);
-	splx(s);
-	return ret;
-}
-#endif
-
-#ifdef __OpenBSD__
 irqreturn_t
 drm_irq_handler_wrap(DRM_IRQ_ARGS)
 {
 	irqreturn_t ret;
-	drm_device_t *dev = (drm_device_t *)arg;
+	struct drm_device *dev = (struct drm_device *)arg;
 
 	DRM_SPINLOCK(&dev->irq_lock);
 	ret = dev->driver.irq_handler(arg);
@@ -105,16 +70,13 @@ drm_irq_handler_wrap(DRM_IRQ_ARGS)
 
 	return ret;
 }
-#endif
 
 int
-drm_irq_install(drm_device_t *dev)
+drm_irq_install(struct drm_device *dev)
 {
 	int retcode;
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 	pci_intr_handle_t ih;
 	const char *istr;
-#endif
 
 	if (dev->irq == 0 || dev->dev_private == NULL)
 		return EINVAL;
@@ -130,109 +92,56 @@ drm_irq_install(drm_device_t *dev)
 
 	dev->context_flag = 0;
 
-#ifdef __OpenBSD__
 	mtx_init(&dev->irq_lock, IPL_BIO);
-#else
-	DRM_SPININIT(&dev->irq_lock, "DRM IRQ lock");
-#endif
 
 				/* Before installing handler */
 	dev->driver.irq_preinstall(dev);
 	DRM_UNLOCK();
 
 				/* Install handler */
-#ifdef __FreeBSD__
-	dev->irqrid = 0;
-	dev->irqr = bus_alloc_resource_any(dev->device, SYS_RES_IRQ, 
-				      &dev->irqrid, RF_SHAREABLE);
-	if (!dev->irqr) {
-		retcode = ENOENT;
-		goto err;
-	}
-#if __FreeBSD_version >= 700031
-	retcode = bus_setup_intr(dev->device, dev->irqr,
-				 INTR_TYPE_TTY | INTR_MPSAFE,
-				 NULL, drm_irq_handler_wrap, dev, &dev->irqh);
-#else
-	retcode = bus_setup_intr(dev->device, dev->irqr,
-				 INTR_TYPE_TTY | INTR_MPSAFE,
-				 drm_irq_handler_wrap, dev, &dev->irqh);
-#endif
-	if (retcode != 0)
-		goto err;
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 	if (pci_intr_map(&dev->pa, &ih) != 0) {
 		retcode = ENOENT;
 		goto err;
 	}
 	istr = pci_intr_string(dev->pa.pa_pc, ih);
-#if defined(__OpenBSD__)
 	dev->irqh = pci_intr_establish(dev->pa.pa_pc, ih, IPL_BIO,
 	    drm_irq_handler_wrap, dev,
 	    dev->device.dv_xname);
-#else
-	dev->irqh = pci_intr_establish(dev->pa.pa_pc, ih, IPL_BIO,
-	    drm_irq_handler_wrap, dev);
-#endif
 	if (!dev->irqh) {
 		retcode = ENOENT;
 		goto err;
 	}
 	DRM_DEBUG("%s: interrupting at %s\n", dev->device.dv_xname, istr);
-#endif
 
 				/* After installing handler */
 	DRM_LOCK();
 	dev->driver.irq_postinstall(dev);
 	DRM_UNLOCK();
 
-#ifdef __FreeBSD__
-	TASK_INIT(&dev->locked_task, 0, drm_locked_task, dev);
-#endif
 	return 0;
 err:
 	DRM_LOCK();
 	dev->irq_enabled = 0;
-#ifdef ___FreeBSD__
-	if (dev->irqrid != 0) {
-		bus_release_resource(dev->device, SYS_RES_IRQ, dev->irqrid,
-		    dev->irqr);
-		dev->irqrid = 0;
-	}
-#endif
 	DRM_SPINUNINIT(&dev->irq_lock);
 	DRM_UNLOCK();
 	return retcode;
 }
 
 int
-drm_irq_uninstall(drm_device_t *dev)
+drm_irq_uninstall(struct drm_device *dev)
 {
-#ifdef __FreeBSD__
-	int irqrid;
-#endif
 
 	if (!dev->irq_enabled)
 		return EINVAL;
 
 	dev->irq_enabled = 0;
-#ifdef __FreeBSD__
-	irqrid = dev->irqrid;
-	dev->irqrid = 0;
-#endif
 
 	DRM_DEBUG( "%s: irq=%d\n", __FUNCTION__, dev->irq );
 
 	dev->driver.irq_uninstall(dev);
 
-#ifdef __FreeBSD__
-	DRM_UNLOCK();
-	bus_teardown_intr(dev->device, dev->irqr, dev->irqh);
-	bus_release_resource(dev->device, SYS_RES_IRQ, irqrid, dev->irqr);
-	DRM_LOCK();
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 	pci_intr_disestablish(dev->pa.pa_pc, dev->irqh);
-#endif
+
 	drm_vblank_cleanup(dev);
 	DRM_SPINUNINIT(&dev->irq_lock);
 
@@ -240,7 +149,7 @@ drm_irq_uninstall(drm_device_t *dev)
 }
 
 int
-drm_control(drm_device_t *dev, void *data, struct drm_file *file_priv)
+drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	drm_control_t *ctl = data;
 	int err;
@@ -421,10 +330,11 @@ drm_vblank_get(struct drm_device *dev, int crtc)
 	if (dev->vblank_refcount[crtc] == 1 &&
 	    dev->vblank_enabled[crtc] == 0) {
 		ret = dev->driver.enable_vblank(dev, crtc);
-		if (ret)
+		if (ret) {
 			atomic_dec(&dev->vblank_refcount[crtc]);
-		else
+		} else {
 			dev->vblank_enabled[crtc] = 1;
+		}
 	}
 	DRM_SPINUNLOCK(&dev->vbl_lock);
 
@@ -437,7 +347,7 @@ drm_vblank_put(struct drm_device *dev, int crtc)
 	DRM_SPINLOCK(&dev->vbl_lock);
 	/* Last user schedules interrupt disable */
 	atomic_dec(&dev->vblank_refcount[crtc]);
-	if (&dev->vblank_refcount[crtc] == 0)
+	if (dev->vblank_refcount[crtc] == 0) 
 		timeout_add(&dev->vblank_disable_timer, 5*DRM_HZ);
 	DRM_SPINUNLOCK(&dev->vbl_lock);
 }
@@ -481,7 +391,7 @@ out:
 }
 
 int
-drm_wait_vblank(drm_device_t *dev, void *data, struct drm_file *file_priv)
+drm_wait_vblank(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	drm_wait_vblank_t *vblwait = data;
 	int ret, flags, crtc, seq;
@@ -551,8 +461,8 @@ drm_wait_vblank(drm_device_t *dev, void *data, struct drm_file *file_priv)
 				    "drmvblq", 3 * DRM_HZ);
 				DRM_SPINUNLOCK(&dev->vbl_lock);
 			}
+			drm_vblank_put(dev, crtc);
 		}
-		drm_vblank_put(dev, crtc);
 
 		if (ret != EINTR) {
 			struct timeval now;
@@ -567,13 +477,13 @@ drm_wait_vblank(drm_device_t *dev, void *data, struct drm_file *file_priv)
 }
 
 void
-drm_vbl_send_signals(drm_device_t *dev, int crtc)
+drm_vbl_send_signals(struct drm_device *dev, int crtc)
 {
 }
 
 #if 0 /* disabled */
 void
-drm_vbl_send_signals(drm_device_t *dev, int crtc)
+drm_vbl_send_signals(struct drm_device *dev, int crtc)
 {
 	drm_vbl_sig_t *vbl_sig;
 	unsigned int vbl_seq = atomic_read( &dev->vbl_received );
@@ -605,13 +515,9 @@ drm_handle_vblank(struct drm_device *dev, int crtc)
 }
 
 void
-#ifdef __OpenBSD__
 drm_locked_task(void *context, void *pending)
-#else
-drm_locked_task(void *context, int pending __unused)
-#endif
 {
-	drm_device_t *dev = context;
+	struct drm_device *dev = context;
 
 	DRM_LOCK();
 	for (;;) {
@@ -642,13 +548,9 @@ drm_locked_task(void *context, int pending __unused)
 }
 
 void
-drm_locked_tasklet(drm_device_t *dev, void (*tasklet)(drm_device_t *dev))
+drm_locked_tasklet(struct drm_device *dev, void (*tasklet)(struct drm_device *))
 {
 	dev->locked_task_call = tasklet;
-#ifdef __FreeBSD__
-	taskqueue_enqueue(taskqueue_swi, &dev->locked_task);
-#else
 	if (workq_add_task(NULL, 0, drm_locked_task, dev, NULL) == ENOMEM)
 		DRM_ERROR("error adding task to workq\n");
-#endif
 }
