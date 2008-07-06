@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.42 2008/06/26 21:00:27 mglocker Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.46 2008/07/03 09:50:04 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -76,8 +76,12 @@ int		uvideo_vs_parse_desc_input_header(struct uvideo_softc *,
 int		uvideo_vs_parse_desc_format(struct uvideo_softc *);
 int		uvideo_vs_parse_desc_format_mjpeg(struct uvideo_softc *,
 		    const usb_descriptor_t *);
+int		uvideo_vs_parse_desc_format_uncompressed(struct uvideo_softc *,
+		    const usb_descriptor_t *);
 int		uvideo_vs_parse_desc_frame(struct uvideo_softc *);
 int		uvideo_vs_parse_desc_frame_mjpeg(struct uvideo_softc *,
+		    const usb_descriptor_t *);
+int		uvideo_vs_parse_desc_frame_uncompressed(struct uvideo_softc *,
 		    const usb_descriptor_t *);
 int		uvideo_vs_parse_desc_alt(struct uvideo_softc *,
 		    struct usb_attach_arg *uaa, int, int, int);
@@ -125,6 +129,12 @@ void		uvideo_dump_desc_colorformat(struct uvideo_softc *,
 void		uvideo_dump_desc_frame_mjpeg(struct uvideo_softc *,
 		    const usb_descriptor_t *);
 void		uvideo_dump_desc_format_mjpeg(struct uvideo_softc *,
+		    const usb_descriptor_t *);
+void		uvideo_dump_desc_format_uncompressed(struct uvideo_softc *,
+		    const usb_descriptor_t *);
+void		uvideo_dump_desc_frame_uncompressed(struct uvideo_softc *,
+		    const usb_descriptor_t *);
+void		uvideo_dump_desc_extension(struct uvideo_softc *,
 		    const usb_descriptor_t *);
 void		uvideo_hexdump(void *, int);
 int		uvideo_debug_file_open(struct uvideo_softc *);
@@ -294,7 +304,7 @@ uvideo_close(void *addr)
 }
 
 int
-uvideo_match(struct device * parent, void *match, void *aux)
+uvideo_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
 	usb_interface_descriptor_t *id;
@@ -314,7 +324,7 @@ uvideo_match(struct device * parent, void *match, void *aux)
 }
 
 void
-uvideo_attach(struct device * parent, struct device * self, void *aux)
+uvideo_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct uvideo_softc *sc = (struct uvideo_softc *) self;
 	struct usb_attach_arg *uaa = aux;
@@ -366,7 +376,7 @@ uvideo_attach(struct device * parent, struct device * self, void *aux)
 }
 
 int
-uvideo_detach(struct device * self, int flags)
+uvideo_detach(struct device *self, int flags)
 {
 	struct uvideo_softc *sc = (struct uvideo_softc *)self;
 	int rv = 0;
@@ -385,10 +395,10 @@ uvideo_detach(struct device * self, int flags)
 }
 
 int
-uvideo_activate(struct device * self, enum devact act)
+uvideo_activate(struct device *self, enum devact act)
 {
 	struct uvideo_softc *sc = (struct uvideo_softc *) self;
-	int             rv = 0;
+	int rv = 0;
 
 	DPRINTF(1, "uvideo_activate: sc=%p\n", sc);
 
@@ -587,6 +597,12 @@ uvideo_vs_parse_desc_format(struct uvideo_softc *sc)
 				uvideo_vs_parse_desc_format_mjpeg(sc, desc);
 			}
 			break;
+		case UDESCSUB_VS_FORMAT_UNCOMPRESSED:
+			if (desc->bLength == 27) {
+				uvideo_vs_parse_desc_format_uncompressed(sc,
+				    desc);
+			}
+			break;
 		}
 
 		desc = usb_desc_iter_next(&iter);
@@ -612,6 +628,25 @@ uvideo_vs_parse_desc_format_mjpeg(struct uvideo_softc *sc,
         sc->sc_desc_format_mjpeg = d;
 
         return (0);
+}
+
+int
+uvideo_vs_parse_desc_format_uncompressed(struct uvideo_softc *sc,
+    const usb_descriptor_t *desc)
+{
+	struct usb_video_format_uncompressed_desc *d;
+
+	d = (struct usb_video_format_uncompressed_desc *)(uint8_t *)desc;
+
+	if (d->bNumFrameDescriptors == 0) {
+		printf("%s: no UNCOMPRESSED frame descriptors found!\n",
+		    DEVNAME(sc));
+		return (-1);
+	}
+
+	/* TODO */
+
+	return (0);
 }
 
 int
@@ -991,6 +1026,11 @@ uvideo_vs_free_sample(struct uvideo_softc *sc)
 		free(fb->buf, M_DEVBUF);
 		fb->buf = NULL;
 	}
+
+	if (sc->sc_mmap_buffer != NULL) {
+		free(sc->sc_mmap_buffer, M_DEVBUF);
+		sc->sc_mmap_buffer = NULL;
+	}
 }
 
 usbd_status
@@ -1355,14 +1395,31 @@ uvideo_dump_desc_all(struct uvideo_softc *sc)
 			case UDESCSUB_VC_SELECTOR_UNIT:
 				printf("bDescriptorSubtype=0x%02x",
 				    desc->bDescriptorSubtype);
-				printf(" (UDESCSUB_VC_SELECTOR_UNIT)\n");
-				/* TODO */
+				if (desc->bLength == 27) {
+					printf(" (UDESCSUB_VS_FORMAT_"
+					    "UNCOMPRESSED)\n");
+					uvideo_dump_desc_format_uncompressed(
+					    sc, desc);
+				} else {
+					printf(" (UDESCSUB_VC_SELECTOR_"
+					    "UNIT)\n");
+					/* TODO */
+				}
 				break;
 			case UDESCSUB_VC_PROCESSING_UNIT:
 				printf("bDescriptorSubtype=0x%02x",
 				    desc->bDescriptorSubtype);
-				printf(" (UDESCSUB_VC_PROCESSING_UNIT)\n");
-				/* TODO */
+				/* XXX do correct length calculation */
+				if (desc->bLength > 11) {
+					printf(" (UDESCSUB_VS_FRAME_"
+					    "UNCOMPRESSED)\n");
+					uvideo_dump_desc_frame_uncompressed(
+					    sc, desc);
+				} else {
+					printf(" (UDESCSUB_VC_PROCESSING_"
+					    "UNIT)\n");
+					/* TODO */
+				}
 				break;
 			case UDESCSUB_VC_EXTENSION_UNIT:
 				printf("bDescriptorSubtype=0x%02x",
@@ -1372,8 +1429,10 @@ uvideo_dump_desc_all(struct uvideo_softc *sc)
 					printf("|\n");
 					uvideo_dump_desc_format_mjpeg(sc, desc);
 				} else {
-					printf(" (UDESCSUB_VC_EXTENSION_UNIT)\n");
-					/* TODO */
+					printf(" (UDESCSUB_VC_EXTENSION_"
+					    "UNIT)\n");
+					printf("|\n");
+					uvideo_dump_desc_extension(sc, desc);
 				}
 				break;
 			case UDESCSUB_VS_FRAME_MJPEG:
@@ -1666,6 +1725,70 @@ uvideo_dump_desc_format_mjpeg(struct uvideo_softc *sc,
 }
 
 void
+uvideo_dump_desc_frame_uncompressed(struct uvideo_softc *sc,
+    const usb_descriptor_t *desc)
+{
+	struct usb_video_frame_uncompressed_desc *d;
+
+	d = (struct usb_video_frame_uncompressed_desc *)(uint8_t *)desc;
+
+	printf("bLength=%d\n", d->bLength);
+	printf("bDescriptorType=0x%02x\n", d->bDescriptorType);
+	printf("bDescriptorSubtype=0x%02x\n", d->bDescriptorSubtype);
+	printf("bFrameIndex=0x%02x\n", d->bFrameIndex);
+	printf("bmCapabilities=0x%02x\n", d->bmCapabilities);
+	printf("wWidth=%d\n", UGETW(d->wWidth));
+	printf("wHeight=%d\n", UGETW(d->wHeight));
+	printf("dwMinBitRate=%d\n", UGETDW(d->dwMinBitRate));
+	printf("dwMaxBitRate=%d\n", UGETDW(d->dwMaxBitRate));
+	printf("dwMaxVideoFrameBufferSize=%d\n",
+	    UGETDW(d->dwMaxVideoFrameBufferSize));
+	printf("dwDefaultFrameInterval=%d\n",
+	    UGETDW(d->dwDefaultFrameInterval));
+	printf("bFrameIntervalType=0x%02x\n", d->bFrameIntervalType);
+}
+
+void
+uvideo_dump_desc_format_uncompressed(struct uvideo_softc *sc,
+    const usb_descriptor_t *desc)
+{
+	struct usb_video_format_uncompressed_desc *d;
+
+	d = (struct usb_video_format_uncompressed_desc *)(uint8_t *)desc;
+
+	printf("bLength=%d\n", d->bLength);
+	printf("bDescriptorType=0x%02x\n", d->bDescriptorType);
+	printf("bDescriptorSubtype=0x%02x\n", d->bDescriptorSubtype);
+	printf("bFormatIndex=0x%02x\n", d->bFormatIndex);
+	printf("bNumFrameDescriptors=0x%02x\n", d->bNumFrameDescriptors);
+	printf("guidFormat=%s\n", d->guidFormat);
+	printf("bBitsPerPixel=0x%02x\n", d->bBitsPerPixel);
+	printf("bDefaultFrameIndex=0x%02x\n", d->bDefaultFrameIndex);
+	printf("bAspectRatioX=0x%02x\n", d->bAspectRatioX);
+	printf("bAspectRatioY=0x%02x\n", d->bAspectRatioY);
+	printf("bmInterlaceFlags=0x%02x\n", d->bmInterlaceFlags);
+	printf("bCopyProtect=0x%02x\n", d->bCopyProtect);
+}
+
+void
+uvideo_dump_desc_extension(struct uvideo_softc *sc,
+    const usb_descriptor_t *desc)
+{
+	struct usb_video_vc_extension_desc *d;
+
+	d = (struct usb_video_vc_extension_desc *)(uint8_t *)desc;
+
+	printf("bLength=%d\n", d->bLength);
+	printf("bDescriptorType=0x%02x\n", d->bDescriptorType);
+	printf("bDescriptorSubtype=0x%02x\n", d->bDescriptorSubtype);
+	printf("bUnitID=0x%02x\n", d->bUnitID);
+	/* XXX we need a hexdump here */
+	printf("guidExtensionCode=%s\n", d->guidExtensionCode);
+	printf("bNumControls=0x%02x\n", d->bNumControls);
+	printf("bNrInPins=0x%02x\n", d->bNrInPins);
+}
+
+void
 uvideo_hexdump(void *buf, int len)
 {
 	int i;
@@ -1763,7 +1886,7 @@ uvideo_enum_fmt(void *v, struct v4l2_fmtdesc *fmtdesc)
 
 	/*
 	 * XXX We need to create a sc->sc_desc_format pointer array
-	 * which containts all available format descriptors.
+	 * which contains all available format descriptors.
 	 */
 	switch (sc->sc_desc_format_mjpeg->bDescriptorSubtype) {
 	case UDESCSUB_VS_FORMAT_MJPEG:
@@ -1832,7 +1955,7 @@ uvideo_reqbufs(void *v, struct v4l2_requestbuffers *rb)
 	struct uvideo_softc *sc = v;
 	int i, buf_size, buf_size_total;
 
-	DPRINTF(1, "%s: count=%d\n", __func__, rb->count);
+	DPRINTF(1, "%s: %s: count=%d\n", DEVNAME(sc), __func__, rb->count);
 
 	/* limit the buffers */
 	if (rb->count > UVIDEO_MAX_BUFFERS)
