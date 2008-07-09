@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.106 2008/06/10 00:02:09 kettenis Exp $
+#	$OpenBSD: files.sparc64,v 1.109 2008/07/07 14:46:18 kettenis Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -9,11 +9,15 @@ maxusers 2 8 1024
 define	mainbus {}
 device	mainbus: pcibus, mainbus
 attach	mainbus at root
-file	arch/sparc64/dev/upa.c			upa
+
+device	ssm: mainbus
+attach	ssm at mainbus
+file	arch/sparc64/dev/ssm.c			ssm
 
 define	upa {}
 device	upa
 attach	upa at mainbus
+file	arch/sparc64/dev/upa.c			upa
 
 define	central {}
 device	central
@@ -116,6 +120,10 @@ file	arch/sparc64/dev/vgafb.c		vgafb
 device	ifb: wsemuldisplaydev, rasops8
 attach	ifb at pci
 file	arch/sparc64/dev/ifb.c			ifb
+
+device	sbbc
+attach	sbbc at pci
+file	arch/sparc64/dev/sbbc.c			sbbc needs-flag
 
 # IOMMU is for both sbus and pci
 file	arch/sparc64/dev/iommu.c		sbus | psycho | schizo | pyro | vpci

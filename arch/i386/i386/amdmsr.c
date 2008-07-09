@@ -1,4 +1,4 @@
-/*      $OpenBSD: amdmsr.c,v 1.5 2008/06/19 09:58:40 mbalmer Exp $	*/
+/*      $OpenBSD: amdmsr.c,v 1.8 2008/07/01 12:03:48 mbalmer Exp $	*/
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -65,16 +65,17 @@ struct cfattach amdmsr_ca = {
 int
 amdmsr_probe(void)
 {
+#ifdef APERTURE
 	u_int64_t gld_msr_cap;
-	int family, model, step;
+	int family, model;
 
 	family = (cpu_id >> 8) & 0xf;
 	model  = (cpu_id >> 4) & 0xf;
-	step   = (cpu_id >> 0) & 0xf;
 
+	/* Check for AMD Geode LX CPU */
 	if (strcmp(cpu_vendor, "AuthenticAMD") == 0 && family == 0x5 &&
-	    (model > 0x8 || (model == 0x8 && step > 0x7))) {
-		/* Check for Geode LX CPU and graphics processor presence */
+	    model == 0x0a) {
+		/* Check for graphics processor presence */
 		gld_msr_cap = rdmsr(GLX_CPU_GLD_MSR_CAP);
 		if (((gld_msr_cap >> 8) & 0x0fff) == GLX_CPU_DID) {
 			gld_msr_cap = rdmsr(GLX_GP_GLD_MSR_CAP);
@@ -82,6 +83,7 @@ amdmsr_probe(void)
 				return 1;
 		}
 	}
+#endif
 	return 0;
 }
 
@@ -121,7 +123,9 @@ amdmsropen(dev_t dev, int flags, int devtype, struct proc *p)
 int
 amdmsrclose(dev_t dev, int flags, int devtype, struct proc *p)
 {
+#ifdef APERTURE
 	amdmsr_open_cnt--;
+#endif
 	return 0;
 }
 

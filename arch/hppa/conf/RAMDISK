@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.82 2008/06/08 20:37:39 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.84 2008/07/02 03:00:03 brad Exp $
 #
 # Diskless kernel config
 #
@@ -11,6 +11,7 @@ option		SCSITERSE
 option		DDB			# in-kernel debugger
 
 option		FFS			# UFS
+option		FFS2			# UFS2
 option		NFSCLIENT		# Network File System client
 option		CD9660			# ISO 9660 + Rock Ridge file system
 #option		UDF			# UDF (DVD) file system
@@ -341,5 +342,4 @@ pseudo-device	bpfilter 1	# packet filter
 pseudo-device	ksyms	1	# kernel symbols device
 #pseudo-device	ccd	4	# concatenated disk devices
 pseudo-device	wsmux	2
-pseudo-device	crypto	1
-pseudo-device	bio		1       # ioctl multiplexing device
+pseudo-device	bio	1	# ioctl multiplexing device
