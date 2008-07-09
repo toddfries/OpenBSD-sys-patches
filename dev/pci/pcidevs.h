@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1384 2008/07/01 22:48:15 sthen Exp 
+ *	OpenBSD: pcidevs,v 1.1385 2008/07/05 18:21:47 kettenis Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -2297,6 +2297,8 @@
 #define	PCI_PRODUCT_INTEL_82945GM_PCIE	0x27a1		/* 82945GM PCIE */
 #define	PCI_PRODUCT_INTEL_82945GM_IGD_1	0x27a2		/* 82945GM Video */
 #define	PCI_PRODUCT_INTEL_82945GM_IGD_2	0x27a6		/* 82945GM Video */
+#define	PCI_PRODUCT_INTEL_82945GME_HB	0x27ac		/* 82945GME Host */
+#define	PCI_PRODUCT_INTEL_82945GME_IGD_1	0x27ae		/* 82945GME Video */
 #define	PCI_PRODUCT_INTEL_82801GH_LPC	0x27b0		/* 82801GH LPC */
 #define	PCI_PRODUCT_INTEL_82801GB_LPC	0x27b8		/* 82801GB LPC */
 #define	PCI_PRODUCT_INTEL_82801GBM_LPC	0x27b9		/* 82801GBM LPC */
@@ -4103,6 +4105,7 @@
 #define	PCI_PRODUCT_SUN_US_IIe	0xa001		/* UltraSPARC IIe PCI */
 #define	PCI_PRODUCT_SUN_CASSINI	0xabba		/* Cassini */
 #define	PCI_PRODUCT_SUN_NEPTUNE	0xabcd		/* Neptune */
+#define	PCI_PRODUCT_SUN_SBBC	0xc416		/* SBBC */
 
 /* Sundance products */
 #define	PCI_PRODUCT_SUNDANCE_ST201_1	0x0200		/* ST201 */

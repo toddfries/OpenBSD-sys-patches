@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.67 2008/06/26 23:56:26 blambert Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.70 2008/07/06 16:54:48 thib Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -72,8 +72,6 @@
 #include <nfs/nfsnode.h>
 #include <nfs/nfsrtt.h>
 #include <nfs/nfs_var.h>
-
-void	nfsrv_zapsock(struct nfssvc_sock *);
 
 /* Global defs. */
 extern int32_t (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *,
@@ -255,7 +253,6 @@ nfssvc_addsock(fp, mynam)
 	else {
 		slp = malloc(sizeof(struct nfssvc_sock), M_NFSSVC,
 		    M_WAITOK|M_ZERO);
-		TAILQ_INIT(&slp->ns_uidlruhead);
 		TAILQ_INSERT_TAIL(&nfssvc_sockhead, slp, ns_chain);
 	}
 	slp->ns_so = so;
@@ -293,10 +290,9 @@ nfssvc_nfsd(nsd, argp, p)
 	u_quad_t cur_usec;
 	struct timeval tv;
 
-#ifndef nolint
 	cacherep = RC_DOIT;
 	writes_todo = 0;
-#endif
+
 	s = splsoftnet();
 	if (nfsd == NULL) {
 		nsd->nsd_nfsd = nfsd = malloc(sizeof(struct nfsd), M_NFSD,
@@ -531,7 +527,6 @@ void
 nfsrv_zapsock(slp)
 	struct nfssvc_sock *slp;
 {
-	struct nfsuid *nuidp, *nnuidp;
 	struct nfsrv_descript *nwp, *nnwp;
 	struct socket *so;
 	struct file *fp;
@@ -555,15 +550,6 @@ nfsrv_zapsock(slp)
 			n = m->m_nextpkt;
 			m_freem(m);
 			m = n;
-		}
-		for (nuidp = TAILQ_FIRST(&slp->ns_uidlruhead); nuidp != NULL;
-		    nuidp = nnuidp) {
-			nnuidp = TAILQ_NEXT(nuidp, nu_lru);
-			LIST_REMOVE(nuidp, nu_hash);
-			TAILQ_REMOVE(&slp->ns_uidlruhead, nuidp, nu_lru);
-			if (nuidp->nu_flag & NU_NAM)
-				m_freem(nuidp->nu_nam);
-			free((caddr_t)nuidp, M_NFSUID);
 		}
 		s = splsoftclock();
 		for (nwp = LIST_FIRST(&slp->ns_tq); nwp != NULL; nwp = nnwp) {
@@ -628,7 +614,6 @@ nfsrv_init(terminating)
 
 	nfs_udpsock =  malloc(sizeof(struct nfssvc_sock), M_NFSSVC,
 	    M_WAITOK|M_ZERO);
-	TAILQ_INIT(&nfs_udpsock->ns_uidlruhead);
 	TAILQ_INSERT_HEAD(&nfssvc_sockhead, nfs_udpsock, ns_chain);
 }
 

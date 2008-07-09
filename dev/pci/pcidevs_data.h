@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1384 2008/07/01 22:48:15 sthen Exp 
+ *	OpenBSD: pcidevs,v 1.1385 2008/07/05 18:21:47 kettenis Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -6936,6 +6936,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "82945GM Video",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GME_HB,
+	    "82945GME Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GME_IGD_1,
+	    "82945GME Video",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801GH_LPC,
 	    "82801GH LPC",
 	},
@@ -13286,6 +13294,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_SUN, PCI_PRODUCT_SUN_NEPTUNE,
 	    "Neptune",
+	},
+	{
+	    PCI_VENDOR_SUN, PCI_PRODUCT_SUN_SBBC,
+	    "SBBC",
 	},
 	{
 	    PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_1,
