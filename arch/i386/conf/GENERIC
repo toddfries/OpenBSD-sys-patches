@@ -292,7 +292,7 @@ sdmmc*	at sdhc?		# SD/MMC bus
 scsibus* at sdmmc?		# SCSI emulation
 
 # Bluetooth controllers
-#sbt*	at sdmmc?		# SDIO Bluetooth
+sbt*	at sdmmc?		# SDIO Bluetooth
 ubt*	at uhub?		# USB Bluetooth
 
 # Bluetooth bus support
