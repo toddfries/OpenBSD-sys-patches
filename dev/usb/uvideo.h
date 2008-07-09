@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.14 2008/06/09 20:51:31 mglocker Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.18 2008/07/03 09:50:04 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -208,6 +208,17 @@ struct usb_video_camera_terminal_desc {
 	uByte	*bmControls; /* XXX */	
 };
 
+/* Table 3-9: VC Extension Unit Descriptor */
+struct usb_video_vc_extension_desc {
+	uByte	bLength;
+	uByte	bDescriptorType;
+	uByte	bDescriptorSubtype;
+	uByte	bUnitID;
+	uByte	guidExtensionCode[16];
+	uByte	bNumControls;
+	uByte	bNrInPins;
+} __packed;
+
 /* Table 3-11: VC Endpoint Descriptor */
 struct usb_video_vc_endpoint_desc {
 	uByte	bLength;
@@ -325,10 +336,45 @@ struct usb_video_frame_mjpeg_desc {
 } __packed;
 
 /*
+ * USB Video Payload Uncompressed
+ */
+/* Table 3-1: Uncompressed Video Format Descriptor */
+struct usb_video_format_uncompressed_desc {
+	uByte	bLength;
+	uByte	bDescriptorType;
+	uByte	bDescriptorSubtype;
+	uByte	bFormatIndex;
+	uByte	bNumFrameDescriptors;
+	uByte	guidFormat[16];
+	uByte	bBitsPerPixel;
+	uByte	bDefaultFrameIndex;
+	uByte	bAspectRatioX;
+	uByte	bAspectRatioY;
+	uByte	bmInterlaceFlags;
+	uByte	bCopyProtect;
+} __packed;
+
+/* Table 3-2: Uncompressed Video Frame Descriptor */
+struct usb_video_frame_uncompressed_desc {
+	uByte	bLength;
+	uByte	bDescriptorType;
+	uByte	bDescriptorSubtype;
+	uByte	bFrameIndex;
+	uByte	bmCapabilities;
+	uWord	wWidth;
+	uWord	wHeight;
+	uDWord	dwMinBitRate;
+	uDWord	dwMaxBitRate;
+	uDWord	dwMaxVideoFrameBufferSize;
+	uDWord	dwDefaultFrameInterval;
+	uByte	bFrameIntervalType;
+	/* TODO add continous/discrete frame intervals (Table 3-3/3-4) */
+} __packed;
+
+/*
  * Driver specific private definitions.
  */
-#define UVIDEO_NFRAMES_MAX	34	/* XXX find optimal value */
-#define UVIDEO_SFRAMES_MAX	6400	/* XXX find optimal value */
+#define UVIDEO_NFRAMES_MAX	40
 
 struct uvideo_vs_iface {
 	struct uvideo_softc	*sc;
@@ -352,7 +398,7 @@ struct uvideo_sample_buffer {
 	uint8_t		*buf;
 };
 
-#define UVIDEO_MAX_BUFFERS	256
+#define UVIDEO_MAX_BUFFERS	32
 struct uvideo_mmap {
 	SIMPLEQ_ENTRY(uvideo_mmap)	q_frames;
 	/*
