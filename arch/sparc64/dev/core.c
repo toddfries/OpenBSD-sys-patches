@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmp.c,v 1.2 2008/07/11 13:47:20 kettenis Exp $	*/
+/*	$OpenBSD: core.c,v 1.1 2008/07/11 14:23:53 kettenis Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *
@@ -22,32 +22,32 @@
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
 
-int	cmp_match(struct device *, void *, void *);
-void	cmp_attach(struct device *, struct device *, void *);
+int	core_match(struct device *, void *, void *);
+void	core_attach(struct device *, struct device *, void *);
 
-struct cfattach cmp_ca = {
-	sizeof(struct device), cmp_match, cmp_attach
+struct cfattach core_ca = {
+	sizeof(struct device), core_match, core_attach
 };
 
-struct cfdriver cmp_cd = {
-	NULL, "cmp", DV_DULL
+struct cfdriver core_cd = {
+	NULL, "core", DV_DULL
 };
 
-int	cmp_print(void *, const char *);
+int	core_print(void *, const char *);
 
 int
-cmp_match(struct device *parent, void *match, void *aux)
+core_match(struct device *parent, void *match, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
-	if (strcmp(ma->ma_name, "cmp") == 0)
+	if (strcmp(ma->ma_name, "core") == 0)
 		return (1);
 
 	return (0);
 }
 
 void
-cmp_attach(struct device *parent, struct device *self, void *aux)
+core_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 	struct mainbus_attach_args nma;
@@ -62,17 +62,17 @@ cmp_attach(struct device *parent, struct device *self, void *aux)
 
 		OF_getprop(node, "name", buf, sizeof(buf));
 		if (strcmp(buf, "cpu") == 0)
-			OF_getprop(node, "compatible", buf, sizeof(buf));
+			OF_getprop(ma->ma_node, "compatible", buf, sizeof(buf));
 
 		bzero(&nma, sizeof(nma));
 		nma.ma_node = node;
 		nma.ma_name = buf;
-		config_found(self, &nma, cmp_print);
+		config_found(self, &nma, core_print);
 	}
 }
 
 int
-cmp_print(void *aux, const char *name)
+core_print(void *aux, const char *name)
 {
 	struct mainbus_attach_args *ma = aux;
 

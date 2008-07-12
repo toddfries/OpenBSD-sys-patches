@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.40 2008/06/08 02:21:34 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.42 2008/07/11 14:23:53 kettenis Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -226,7 +226,7 @@ cpu_attach(parent, dev, aux)
 	void *aux;
 {
 	int node;
-	long clk;
+	u_int clk;
 	int impl, vers;
 	struct mainbus_attach_args *ma = aux;
 	struct cpu_info *ci;
@@ -241,7 +241,10 @@ cpu_attach(parent, dev, aux)
 	vers = IU_VERS(ver);
 
 	/* tell them what we have */
-	node = ma->ma_node;
+	if (strncmp(parent->dv_xname, "core", 4) == 0)
+		node = OF_parent(ma->ma_node);
+	else
+		node = ma->ma_node;
 
 	/*
 	 * Allocate cpu_info structure if needed.
