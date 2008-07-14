@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.91 2008/06/10 16:49:01 kettenis Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.96 2008/07/06 08:53:38 kettenis Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -72,6 +72,7 @@
 #include <machine/sparc64.h>
 #include <machine/cpu.h>
 #include <machine/pmap.h>
+#include <machine/trap.h>
 #include <sparc64/sparc64/cache.h>
 #include <sparc64/sparc64/timerreg.h>
 
@@ -260,6 +261,7 @@ bootstrap(nctx)
 	int nctx;
 {
 	extern int end;	/* End of kernel */
+	struct trapvec *romtba;
 #if defined(SUN4US) || defined(SUN4V)
 	char buf[32];
 #endif
@@ -370,6 +372,15 @@ bootstrap(nctx)
 
 	}
 #endif
+
+	/*
+	 * Copy over the OBP breakpoint trap vector; OpenFirmware 5.x
+	 * needs it to be able to return to the ok prompt.
+	 */
+	romtba = (struct trapvec *)sparc_rdpr(tba);
+	bcopy(&romtba[T_MON_BREAKPOINT], &trapbase[T_MON_BREAKPOINT],
+	    sizeof(struct trapvec));
+	flush((void *)trapbase);
 
 	ncpus = get_ncpus();
 	pmap_bootstrap(KERNBASE, (u_long)&end, nctx, ncpus);
@@ -784,6 +795,10 @@ extern bus_space_tag_t mainbus_space_tag;
 	/* We configure the CPUs first. */
 
 	node = findroot();
+	for (node0 = OF_child(node); node0; node0 = OF_peer(node0)) {
+		if (OF_getprop(node0, "name", buf, sizeof(buf)) <= 0)
+			continue;
+	}
 
 	for (node = OF_child(node); node; node = OF_peer(node)) {
 		if (!checkstatus(node))
@@ -829,12 +844,17 @@ extern bus_space_tag_t mainbus_space_tag;
 	if (optionsnode == 0)
 		panic("no options in OPENPROM");
 
+	for (node0 = OF_child(node); node0; node0 = OF_peer(node0)) {
+		if (OF_getprop(node0, "name", buf, sizeof(buf)) <= 0)
+			continue;
+	}
+
 	/*
 	 * Configure the devices, in PROM order.  Skip
 	 * PROM entries that are not for devices, or which must be
 	 * done before we get here.
 	 */
-	for (node = node0; node; node = OF_peer(node)) {
+	for (node = OF_child(node); node; node = OF_peer(node)) {
 		int portid;
 
 		DPRINTF(ACDB_PROBE, ("Node: %x", node));
@@ -1204,7 +1224,8 @@ device_register(struct device *dev, void *aux)
 	 * types; this is only used to find the boot device.
 	 */
 	busname = busdev->dv_cfdata->cf_driver->cd_name;
-	if (strcmp(busname, "mainbus") == 0 || strcmp(busname, "upa") == 0)
+	if (strcmp(busname, "mainbus") == 0 ||
+	    strcmp(busname, "ssm") == 0 || strcmp(busname, "upa") == 0)
 		node = ma->ma_node;
 	else if (strcmp(busname, "sbus") == 0 ||
 	    strcmp(busname, "dma") == 0 || strcmp(busname, "ledma") == 0)

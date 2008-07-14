@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.154 2008/06/08 20:37:39 deraadt Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.158 2008/07/02 22:14:07 todd Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -15,6 +15,7 @@ option		DST=0		# daylight saving time used by RTC
 #makeoptions	DEBUG="-g"	# compile full symbol table
 
 option		FFS		# UFS
+option		FFS2		# UFS2
 option		EXT2FS		# Linux ext2fs
 
 option		NFSCLIENT	# Network File System client
@@ -27,6 +28,7 @@ option		INET		# IP + ICMP + TCP + UDP
 option		INET6		# IPv6 (needs INET)
 
 option		BOOT_CONFIG	# boot-time kernel config
+option		CRYPTO		# Cryptographic framework
 
 option		RAMDISK_HOOKS
 option		MINIROOTSIZE=3800
@@ -251,6 +253,8 @@ scsibus* at uha?
 wds0	at isa? disable port 0x350 irq 15 drq 6	# WD7000 and TMC-7000 controllers
 #wds1	at isa? port 0x358 irq 11 drq 5
 scsibus* at wds?
+softraid0	at root		# Software RAID
+scsibus* at softraid?
 
 # I2O
 iop*	at pci?			# I2O processor
@@ -421,3 +425,4 @@ pseudo-device	bpfilter 1		# packet filter
 pseudo-device	rd	1		# ramdisk
 pseudo-device	ccd	4		# concatenated disk devices
 pseudo-device	wsmux	2
+pseudo-device	bio	1		# ioctl multiplexing device

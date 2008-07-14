@@ -36,12 +36,10 @@
 
 #include "drmP.h"
 
-#ifdef __OpenBSD__
-
-drm_file_t *
+struct drm_file *
 drm_find_file_by_minor(struct drm_device *dev, int minor)
 {
-	drm_file_t *priv;
+	struct drm_file *priv;
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
 
@@ -51,31 +49,12 @@ drm_find_file_by_minor(struct drm_device *dev, int minor)
 	return (NULL);
 }
 
-#else
-
-drm_file_t *
-drm_find_file_by_proc(drm_device_t *dev, DRM_STRUCTPROC *p)
-{
-	uid_t uid = DRM_UID(p);
-	pid_t pid = DRM_PID(p);
-
-	drm_file_t *priv;
-
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-
-	TAILQ_FOREACH(priv, &dev->files, link)
-		if (priv->pid == pid && priv->uid == uid)
-			return priv;
-	return NULL;
-}
-#endif
-
 /* drm_open_helper is called whenever a process opens /dev/drm. */
 int
 drm_open_helper(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p,
-    drm_device_t *dev)
+    struct drm_device *dev)
 {
-	drm_file_t   *priv;
+	struct drm_file   *priv;
 	int m, retcode;
 
 	m = minor(kdev);
@@ -86,11 +65,7 @@ drm_open_helper(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p,
 	DRM_DEBUG("pid = %d, minor = %d\n", DRM_CURRENTPID, m);
 
 	DRM_LOCK();
-#ifdef __OpenBSD__
 	priv = drm_find_file_by_minor(dev, m);
-#else
-	priv = drm_find_file_by_proc(dev, p);
-#endif
 	if (priv) {
 		priv->refs++;
 	} else {
@@ -120,22 +95,17 @@ drm_open_helper(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p,
 		}
 
 		/* first opener automatically becomes master if root */
-#ifdef __OpenBSD__
 		if (TAILQ_EMPTY(&dev->files) && !DRM_SUSER(p)) {
 			free(priv, M_DRM);
 			DRM_UNLOCK();
 			return (EPERM);
 		}
-#endif
 
 		priv->master = TAILQ_EMPTY(&dev->files);
 
 		TAILQ_INSERT_TAIL(&dev->files, priv, link);
 	}
 	DRM_UNLOCK();
-#ifdef __FreeBSD__
-	kdev->si_drv1 = dev;
-#endif
 	return 0;
 }
 
@@ -144,13 +114,13 @@ drm_open_helper(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p,
  * on older X Servers (4.3.0 and earlier) */
 
 int
-drm_read(DRM_CDEV kdev, struct uio *uio, int ioflag)
+drmread(DRM_CDEV kdev, struct uio *uio, int ioflag)
 {
 	return 0;
 }
 
 int
-drm_poll(DRM_CDEV kdev, int events, DRM_STRUCTPROC *p)
+drmpoll(DRM_CDEV kdev, int events, DRM_STRUCTPROC *p)
 {
 	return 0;
 }

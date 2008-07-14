@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.234 2008/06/12 19:45:05 robert Exp $
+#	$OpenBSD: GENERIC,v 1.237 2008/06/30 00:03:15 ian Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -50,7 +50,7 @@ acpiprt*	at acpi?
 acpitz*		at acpi?
 acpithinkpad*	at acpi?
 
-ipmi0	at mainbus? disable	# IPMI
+ipmi0	at mainbus?		# IPMI
 
 option		PCIVERBOSE
 option		USBVERBOSE
@@ -397,11 +397,13 @@ mskc*	at pci?				# Marvell Yukon-2
 msk*	at mskc?			#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
+#ix*	at pci?				# Intel 82598EB 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 #nge*	at pci?				# NS DP83820/DP83821 GigE
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
 bnx*	at pci?				# Broadcom BCM5706/5708 GigE
 re*	at pci?				# Realtek 8169/8169S/8110S
+re*	at cardbus?			# Realtek 8169/8169S/8110S
 stge*	at pci?				# Sundance TC9021 GigE
 #lge*	at pci?				# Level1 LXT1001 GigE
 hme*	at pci?				# Sun Happy Meal

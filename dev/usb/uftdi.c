@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.48 2008/06/02 12:08:01 jsg Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.50 2008/07/10 13:48:54 mbalmer Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -16,13 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -405,8 +398,7 @@ static const struct usb_devno uftdi_devs[] = {
 	{ USB_VENDOR_TESTO, USB_PRODUCT_TESTO_SERIAL_1 },
 	{ USB_VENDOR_TESTO, USB_PRODUCT_TESTO_SERIAL_2 },
 	{ USB_VENDOR_TESTO, USB_PRODUCT_TESTO_SERVICE },
-	{ USB_VENDOR_THURLBY, USB_PRODUCT_THURLBY_QL355P },
-	{ 0, 0 }
+	{ USB_VENDOR_THURLBY, USB_PRODUCT_THURLBY_QL355P }
 };
 
 int

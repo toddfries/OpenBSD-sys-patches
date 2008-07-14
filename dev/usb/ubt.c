@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubt.c,v 1.11 2008/02/24 21:34:48 uwe Exp $	*/
+/*	$OpenBSD: ubt.c,v 1.13 2008/07/10 13:48:54 mbalmer Exp $	*/
 /*	$NetBSD: ubt.c,v 1.30 2007/12/16 19:01:37 christos Exp $	*/
 
 /*-
@@ -47,13 +47,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -297,8 +290,7 @@ static void ubt_abortdealloc(struct ubt_softc *);
  * to the ubt_ignore list.
  */
 static const struct usb_devno ubt_ignore[] = {
-	{ USB_VENDOR_BROADCOM, USB_PRODUCT_BROADCOM_BCM2033NF },
-	{ 0, 0 }	/* end of list */
+	{ USB_VENDOR_BROADCOM, USB_PRODUCT_BROADCOM_BCM2033NF }
 };
 
 int

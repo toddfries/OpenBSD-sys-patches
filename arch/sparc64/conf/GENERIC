@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.212 2008/06/12 22:22:36 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.216 2008/07/11 14:23:53 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -30,8 +30,13 @@ config		bsd	swap generic
 # Main bus and CPU .. all systems.
 mainbus0 at root
 cpu0	at mainbus0
+ssm*	at mainbus0
+cpu0	at ssm?
 cmp*	at mainbus0
+cmp*	at ssm?
 cpu0	at cmp?
+core*	at cmp?
+cpu0	at core?
 
 # Bus types found on SPARC systems.
 sbus*	at mainbus0
@@ -42,6 +47,7 @@ upa0	at mainbus0
 psycho*	at mainbus0
 pci*	at psycho?
 schizo*	at mainbus0
+schizo*	at ssm?
 pci*	at schizo?
 pyro*	at mainbus0
 pci*	at pyro?
@@ -52,6 +58,7 @@ ppb*	at pci?
 ebus*	at mainbus0
 ebus*	at pci?
 vbus0	at mainbus0
+sbbc*	at pci?
 
 # PCI Ethernet
 lmc*	at pci?			# Lan Media Corp SSI/T3/HSSI
@@ -223,6 +230,10 @@ udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
+
+# USB Video
+uvideo* at uhub?
+video*  at uvideo?
 
 # Bluetooth controllers
 #ubt*	at uhub?		# USB Bluetooth

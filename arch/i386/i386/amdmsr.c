@@ -1,4 +1,4 @@
-/*      $OpenBSD: amdmsr.c,v 1.2 2008/06/15 01:18:22 deraadt Exp $	*/
+/*      $OpenBSD: amdmsr.c,v 1.8 2008/07/01 12:03:48 mbalmer Exp $	*/
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -18,7 +18,7 @@
  */
 
 /*
- * Enable MSR access AMD Processors
+ * Enable MSR access for AMD Geode LX Processors with graphics processor
  */
 
 #include <sys/param.h>
@@ -42,6 +42,11 @@ static int amdmsr_open_cnt;
 extern int allowaperture;
 #endif
 
+#define GLX_CPU_GLD_MSR_CAP	0x00002000
+#define GLX_CPU_DID		0x0864		/* CPU device ID */
+#define GLX_GP_GLD_MSR_CAP	0xa0002000
+#define GLX_GP_DID		0x03d4		/* GP device ID */
+
 struct amdmsr_softc {
 	struct device		sc_dev;
 };
@@ -58,19 +63,36 @@ struct cfattach amdmsr_ca = {
 };
 
 int
-amdmsr_match(struct device *parent, void *match, void *aux)
+amdmsr_probe(void)
 {
-	int family, model, step;
+#ifdef APERTURE
+	u_int64_t gld_msr_cap;
+	int family, model;
 
 	family = (cpu_id >> 8) & 0xf;
 	model  = (cpu_id >> 4) & 0xf;
-	step   = (cpu_id >> 0) & 0xf;
 
+	/* Check for AMD Geode LX CPU */
 	if (strcmp(cpu_vendor, "AuthenticAMD") == 0 && family == 0x5 &&
-	    (model > 0x8 || (model == 0x8 && step > 0x7)))
-		return 1;
-
+	    model == 0x0a) {
+		/* Check for graphics processor presence */
+		gld_msr_cap = rdmsr(GLX_CPU_GLD_MSR_CAP);
+		if (((gld_msr_cap >> 8) & 0x0fff) == GLX_CPU_DID) {
+			gld_msr_cap = rdmsr(GLX_GP_GLD_MSR_CAP);
+			if (((gld_msr_cap >> 8) & 0x0fff) == GLX_GP_DID)
+				return 1;
+		}
+	}
+#endif
 	return 0;
+}
+
+int
+amdmsr_match(struct device *parent, void *match, void *aux)
+{
+	const char **busname = (const char **)aux;
+
+	return (strcmp(*busname, amdmsr_cd.cd_name) == 0);
 }
 
 void
@@ -82,23 +104,28 @@ amdmsr_attach(struct device *parent, struct device *self, void *aux)
 int
 amdmsropen(dev_t dev, int flags, int devtype, struct proc *p)
 {
-	if (suser(p, 0) != 0)
-		return EPERM;
 #ifdef APERTURE
-	if (!allowaperture)
+	if (amdmsr_cd.cd_ndevs == 0 || minor(dev) != 0)
+		return ENXIO;
+
+	if (suser(p, 0) != 0 || !allowaperture)
 		return EPERM;
-#endif
 	/* allow only one simultaneous open() */
 	if (amdmsr_open_cnt > 0)
 		return EPERM;
 	amdmsr_open_cnt++;
 	return 0;
+#else
+	return ENXIO;
+#endif
 }
 
 int
 amdmsrclose(dev_t dev, int flags, int devtype, struct proc *p)
 {
+#ifdef APERTURE
 	amdmsr_open_cnt--;
+#endif
 	return 0;
 }
 
