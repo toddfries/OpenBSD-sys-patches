@@ -72,14 +72,7 @@ ppc_spllower_t openpic_spllower;
 ppc_splx_t openpic_splx;
 
 /* IRQ vector used for inter-processor interrupts. */
-#define IPI_VECTOR_DDB 64
-#define IPI_VECTOR_NOP 65
-#ifdef MULTIPROCESSOR
-static struct evcount ipi_ddb[2];
-static struct evcount ipi_nop[2];
-static int ipi_nopirq = IPI_VECTOR_NOP;
-static int ipi_ddbirq = IPI_VECTOR_DDB;
-#endif
+#define IPI_VECTOR	64
 
 void	openpic_enable_irq(int, int);
 void	openpic_disable_irq(int);
@@ -534,9 +527,6 @@ openpic_send_ipi(int cpu)
 
 #endif
 
-
-/* XXX */ extern long hostid;
-
 void
 openpic_ext_intr()
 {
@@ -638,7 +628,7 @@ openpic_init()
 	/* Set up inter-processor interrupts. */
 	x = openpic_read(OPENPIC_IPI_VECTOR(0));
 	x &= ~(OPENPIC_IMASK | OPENPIC_PRIORITY_MASK | OPENPIC_VECTOR_MASK);
-	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR_NOP;
+	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR;
 	openpic_write(OPENPIC_IPI_VECTOR(0), x);
 
 #if 0
@@ -664,30 +654,4 @@ openpic_prog_button (void *arg)
 	printf("programmer button pressed, debugger not available\n");
 #endif
 	return 1;
-}
-
-void
-openpic_ipi_ddb()
-{
-	printf("ipi_ddb() called\n");
-	Debugger();
-}
-
-void
-ppc_send_ipi(struct cpu_info *ci, int id)
-{
-	printf("sending IPI %d to %d\n", id, ci->ci_cpuid);
-	switch (id) {
-	case PPC_IPI_NOP:
-		id = 0;
-		break;
-	case PPC_IPI_DDB:
-		id = 1;
-		break;
-	default:
-		printf("invalid ipi send to cpu %d %d\n", ci->ci_cpuid, id);
-		return;
-	}
-
-	openpic_write(OPENPIC_IPI(curcpu()->ci_cpuid, id), 1 << ci->ci_cpuid);
 }
