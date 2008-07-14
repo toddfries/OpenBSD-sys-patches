@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.127 2008/06/15 00:52:25 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.130 2008/07/05 16:07:01 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -250,7 +250,7 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	 * number of blocks
 	 */
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&rc, sizeof(rc),
-	    (u_char *)&rdcap, sizeof(rdcap), 2, 20000, NULL,
+	    (u_char *)&rdcap, sizeof(rdcap), SCSI_RETRIES, 20000, NULL,
 	    flags | SCSI_DATA_IN);
 	if (error) {
 		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY error (%#x)\n",
@@ -275,8 +275,8 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	 _lto4b(sizeof(rdcap16), rc16.length);
 
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&rc16,
-	    sizeof(rc16), (u_char *)&rdcap16, sizeof(rdcap16), 2, 20000, NULL,
-	    flags | SCSI_DATA_IN);
+	    sizeof(rc16), (u_char *)&rdcap16, sizeof(rdcap16), SCSI_RETRIES,
+	    20000, NULL, flags | SCSI_DATA_IN);
 	if (error) {
 		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY 16 error (%#x)\n",
 		    error));
@@ -426,7 +426,7 @@ scsi_mode_sense(struct scsi_link *sc_link, int byte2, int page,
 	scsi_cmd.length = len;
 
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)data, len, 4, timeout, NULL,
+	    sizeof(scsi_cmd), (u_char *)data, len, SCSI_RETRIES, timeout, NULL,
 	    flags | SCSI_DATA_IN);
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_mode_sense: page %#x, error = %d\n",
@@ -459,7 +459,7 @@ scsi_mode_sense_big(struct scsi_link *sc_link, int byte2, int page,
 	_lto2b(len, scsi_cmd.length);
 
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)data, len, 4, timeout, NULL,
+	    sizeof(scsi_cmd), (u_char *)data, len, SCSI_RETRIES, timeout, NULL,
 	    flags | SCSI_DATA_IN);
 
 	SC_DEBUG(sc_link, SDEV_DB2,
@@ -616,8 +616,8 @@ scsi_mode_select(struct scsi_link *sc_link, int byte2,
 	data->data_length = 0;
 
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)data, scsi_cmd.length, 4, timeout, NULL,
-	    flags | SCSI_DATA_OUT);
+	    sizeof(scsi_cmd), (u_char *)data, scsi_cmd.length, SCSI_RETRIES,
+	    timeout, NULL, flags | SCSI_DATA_OUT);
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_mode_select: error = %d\n", error));
 
@@ -643,7 +643,7 @@ scsi_mode_select_big(struct scsi_link *sc_link, int byte2,
 	_lto2b(0, data->data_length);
 
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)data, len, 4, timeout, NULL,
+	    sizeof(scsi_cmd), (u_char *)data, len, SCSI_RETRIES, timeout, NULL,
 	    flags | SCSI_DATA_OUT);
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_mode_select_big: error = %d\n",
@@ -668,8 +668,8 @@ scsi_report_luns(struct scsi_link *sc_link, int selectreport,
 	_lto4b(datalen, scsi_cmd.length);
 
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)data, datalen, 4, timeout, NULL,
-	    flags | SCSI_DATA_IN);
+	    sizeof(scsi_cmd), (u_char *)data, datalen, SCSI_RETRIES, timeout,
+	    NULL, flags | SCSI_DATA_IN);
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_report_luns: error = %d\n", error));
 
@@ -877,7 +877,21 @@ scsi_scsi_cmd(struct scsi_link *sc_link, struct scsi_generic *scsi_cmd,
 	    retries, timeout, bp, flags)) == NULL)
 		return (ENOMEM);
 
-	if ((error = scsi_execute_xs(xs)) == EJUSTRETURN)
+#ifdef	SCSIDEBUG
+	if ((sc_link->flags & SDEV_DB1) != 0)
+		if (xs->datalen && (xs->flags & SCSI_DATA_OUT))
+			show_mem(xs->data, min(64, xs->datalen));
+#endif	/* SCSIDEBUG */
+
+	error = scsi_execute_xs(xs);
+
+#ifdef	SCSIDEBUG
+	if ((sc_link->flags & SDEV_DB1) != 0)
+		if (xs->datalen && (xs->flags & SCSI_DATA_IN))
+			show_mem(xs->data, min(64, xs->datalen));
+#endif	/* SCSIDEBUG */
+
+	if (error == EJUSTRETURN)
 		return (0);
 
 	s = splbio();
@@ -1943,8 +1957,6 @@ show_scsi_xs(struct scsi_xfer *xs)
 			printf("%x", b[i++]);
 		}
 		printf("-[%d bytes]\n", xs->datalen);
-		if (xs->datalen)
-			show_mem(xs->data, min(64, xs->datalen));
 	} else
 		printf("-RESET-\n");
 }

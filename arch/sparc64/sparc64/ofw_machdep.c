@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.25 2008/03/19 20:21:01 kettenis Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.28 2008/07/10 08:57:05 kettenis Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.16 2001/07/20 00:07:14 eeh Exp $	*/
 
 /*
@@ -118,7 +118,10 @@ prom_set_trap_table(tba, mmfsa)
 	} args;
 
 	args.name = ADR2CELL("SUNW,set-trap-table");
-	args.nargs = 2;
+	if (CPU_ISSUN4V)
+		args.nargs = 2;
+	else
+		args.nargs = 1;
 	args.nreturns = 0;
 	args.tba = ADR2CELL(tba);
 	args.mmfsa = ADR2CELL(mmfsa);
@@ -735,6 +738,49 @@ prom_printf(const char *fmt, ...)
 	va_end(ap);
 
 	OF_write(OF_stdout(), buf, len);
+}
+
+const char *
+prom_serengeti_set_console_input(const char *new)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  new;
+		cell_t  old;
+	} args;
+
+	args.name = ADR2CELL("SUNW,set-console-input");
+	args.nargs = 1;
+	args.nreturns = 1;
+	args.new = ADR2CELL(new);
+
+	if (openfirmware(&args) == -1)
+		return NULL;
+
+	return (const char *)args.old;
+}
+
+time_t
+prom_opl_get_tod(void)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  stick;
+		cell_t  time;
+	} args;
+
+	args.name = ADR2CELL("FJSV,get-tod");
+	args.nargs = 0;
+	args.nreturns = 2;
+
+	if (openfirmware(&args) == -1)
+		return (time_t)-1;
+
+	return (time_t)args.time;
 }
 
 #ifdef DEBUG

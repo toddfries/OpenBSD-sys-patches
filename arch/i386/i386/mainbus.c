@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.40 2008/01/13 22:29:01 kettenis Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.42 2008/07/08 05:22:00 dlg Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.21 1997/06/06 23:14:20 thorpej Exp $	*/
 
 /*
@@ -53,7 +53,9 @@
 #include "acpi.h"
 #include "ipmi.h"
 #include "esm.h"
+#include "vmt.h"
 #include "vesabios.h"
+#include "amdmsr.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
@@ -67,6 +69,14 @@
 
 #if NIPMI > 0
 #include <dev/ipmivar.h>
+#endif
+
+#if NVMT > 0
+#include <dev/vmtvar.h>
+#endif
+
+#if NAMDMSR > 0
+#include <machine/amdmsr.h>
 #endif
 
 #if NESM > 0
@@ -155,6 +165,13 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
+#if NVMT > 0
+	if (vmt_probe()) {
+		mba.mba_busname = "vmware";
+		config_found(self, &mba.mba_busname, mainbus_print);
+	}
+#endif
+
 #if NMPBIOS > 0
 	if (mpbios_probe(self))
 		mpbios_scan(self);
@@ -173,6 +190,12 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 		config_found(self, &caa, mainbus_print);
 	}
+#if NAMDMSR > 0
+	if (amdmsr_probe()) {
+		mba.mba_busname = "amdmsr";
+		config_found(self, &mba.mba_busname, mainbus_print);
+	}
+#endif
 
 #if NACPI > 0
 	if (!acpi_hasprocfvs)
