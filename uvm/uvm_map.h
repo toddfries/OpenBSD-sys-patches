@@ -151,9 +151,8 @@ struct vm_map_entry {
 	int			advice;		/* madvise advice */
 #define uvm_map_entry_stop_copy flags
 	u_int8_t		flags;		/* flags */
-
 #define UVM_MAP_STATIC		0x01		/* static map entry */
-#define UVM_MAP_KMEM		0x02		/* from kmem entry pool */
+#define UVM_MAP_INTR		0x02		/* intr safe parent map */
 
 };
 
