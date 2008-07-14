@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.432 2008/06/26 05:42:10 ray Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.435 2008/07/11 03:03:07 dlg Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -103,6 +103,7 @@
 #include <stand/boot/bootarg.h>
 
 #include <uvm/uvm_extern.h>
+#include <uvm/uvm_swap.h>
 
 #define _I386_BUS_DMA_PRIVATE
 #include <machine/bus.h>
@@ -2020,6 +2021,19 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
+	case 0xc: /* Atom */
+		msr = rdmsr(MSR_FSB_FREQ);
+		bus = (msr >> 0) & 0x7;
+		switch (bus) {
+		case 1:
+			bus_clock = BUS133;
+			break;
+		default:
+			printf("%s: unknown Atom FSB_FREQ value %d",
+			    ci->ci_dev.dv_xname, bus);
+			goto print_msr;
+		}
+		break;
 	case 0x1: /* Pentium Pro, model 1 */
 	case 0x3: /* Pentium II, model 3 */
 	case 0x5: /* Pentium II, II Xeon, Celeron, model 5 */
@@ -2543,6 +2557,10 @@ dumpsys()
 	if (dumplo < 0)
 		return;
 	printf("\ndumping to dev %x, offset %ld\n", dumpdev, dumplo);
+
+#ifdef UVM_SWAP_ENCRYPT
+	uvm_swap_finicrypt_all();
+#endif
 
 	error = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	printf("dump ");
@@ -3713,7 +3731,7 @@ int
 _bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
     bus_size_t buflen, struct proc *p, int flags)
 {
-	bus_addr_t lastaddr;
+	bus_addr_t lastaddr = 0;
 	int seg, error;
 
 	/*
@@ -3742,7 +3760,7 @@ int
 _bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m0,
     int flags)
 {
-	paddr_t lastaddr;
+	paddr_t lastaddr = 0;
 	int seg, error, first;
 	struct mbuf *m;
 
@@ -3784,7 +3802,7 @@ int
 _bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
     int flags)
 {
-	paddr_t lastaddr;
+	paddr_t lastaddr = 0;
 	int seg, i, error, first;
 	bus_size_t minlen, resid;
 	struct proc *p = NULL;
