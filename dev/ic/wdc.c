@@ -1,7 +1,5 @@
-/*      $OpenBSD: wdc.c,v 1.97 2007/10/01 04:03:51 krw Exp $     */
-/*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $ */
-
-
+/*	$OpenBSD: wdc.c,v 1.100 2008/07/02 03:00:55 fgsch Exp $	*/
+/*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $	*/
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
  *
@@ -46,13 +44,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -146,6 +137,7 @@ struct channel_softc_vtbl wdc_default_vtbl = {
 	wdc_default_write_raw_multi_4
 };
 
+#ifdef WDCDEBUG
 static char *wdc_log_buf = NULL;
 static unsigned int wdc_tail = 0;
 static unsigned int wdc_head = 0;
@@ -293,7 +285,7 @@ wdc_get_log(unsigned int * size, unsigned int *left)
 	splx(s);
 	return (retbuf);
 }
-
+#endif /* WDCDEBUG */
 
 u_int8_t
 wdc_default_read_reg(chp, reg)
@@ -2298,6 +2290,7 @@ wdc_ioctl(drvp, xfer, addr, flag, p)
 	int error = 0;
 
 	switch (xfer) {
+#ifdef WDCDEBUG
 	case ATAIOGETTRACE: {
 		atagettrace_t *agt = (atagettrace_t *)addr;
 		unsigned int size = 0;
@@ -2318,6 +2311,7 @@ wdc_ioctl(drvp, xfer, addr, flag, p)
 		agt->bytes_copied = size;
 		break;
 	}
+#endif /* WDCDEBUG */
 
 	case ATAIOCCOMMAND:
 		/*

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.106 2008/06/10 00:02:09 kettenis Exp $
+#	$OpenBSD: files.sparc64,v 1.110 2008/07/11 14:23:53 kettenis Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -9,11 +9,15 @@ maxusers 2 8 1024
 define	mainbus {}
 device	mainbus: pcibus, mainbus
 attach	mainbus at root
-file	arch/sparc64/dev/upa.c			upa
+
+device	ssm: mainbus
+attach	ssm at mainbus
+file	arch/sparc64/dev/ssm.c			ssm
 
 define	upa {}
 device	upa
 attach	upa at mainbus
+file	arch/sparc64/dev/upa.c			upa
 
 define	central {}
 device	central
@@ -117,6 +121,10 @@ device	ifb: wsemuldisplaydev, rasops8
 attach	ifb at pci
 file	arch/sparc64/dev/ifb.c			ifb
 
+device	sbbc
+attach	sbbc at pci
+file	arch/sparc64/dev/sbbc.c			sbbc needs-flag
+
 # IOMMU is for both sbus and pci
 file	arch/sparc64/dev/iommu.c		sbus | psycho | schizo | pyro | vpci
 file	arch/sparc64/dev/viommu.c		vpci
@@ -145,13 +153,17 @@ device	eeprom
 attach	eeprom at sbus, ebus
 file	arch/sparc64/sparc64/clock.c
 
-device	cpu
-attach	cpu at mainbus
-file	arch/sparc64/sparc64/cpu.c
-
-device	cmp: mainbus
+device	cmp {}
 attach	cmp at mainbus
 file	arch/sparc64/dev/cmp.c			cmp
+
+device	core {}
+attach	core at cmp
+file	arch/sparc64/dev/core.c			core
+
+device	cpu
+attach	cpu at mainbus, cmp, core
+file	arch/sparc64/sparc64/cpu.c
 
 device	auxio
 attach	auxio at ebus with auxio_ebus
