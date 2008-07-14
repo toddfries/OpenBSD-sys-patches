@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.64 2008/06/14 03:16:06 thib Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.67 2008/07/10 18:17:56 thib Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -656,7 +656,6 @@ errout:
  * We must search through the list of received datagrams matching them
  * with outstanding requests using the xid, until ours is found.
  */
-/* ARGSUSED */
 int
 nfs_reply(myrep)
 	struct nfsreq *myrep;
@@ -696,8 +695,6 @@ nfs_reply(myrep)
 			if (NFSIGNORE_SOERROR(nmp->nm_soflags, error)) {
 				if (nmp->nm_so)
 					nmp->nm_so->so_error = 0;
-				if (myrep->r_flags & R_GETONEREP)
-					return (0);
 				continue;
 			}
 			return (error);
@@ -716,8 +713,6 @@ nfs_reply(myrep)
 			nfsstats.rpcinvalid++;
 			m_freem(mrep);
 nfsmout:
-			if (myrep->r_flags & R_GETONEREP)
-				return (0);
 			continue;
 		}
 
@@ -800,8 +795,6 @@ nfsmout:
 				panic("nfsreply nil");
 			return (0);
 		}
-		if (myrep->r_flags & R_GETONEREP)
-			return (0);
 	}
 }
 
@@ -1334,6 +1327,7 @@ nfs_rcvlock(rep)
 		slpflag = PCATCH;
 	else
 		slpflag = 0;
+
 	while (*flagp & NFSMNT_RCVLOCK) {
 		if (nfs_sigintr(rep->r_nmp, rep, rep->r_procp))
 			return (EINTR);
@@ -1927,7 +1921,7 @@ nfsrv_wakenfsd(struct nfssvc_sock *slp)
 				panic("nfsd wakeup");
 			slp->ns_sref++;
 			nfsd->nfsd_slp = slp;
-			wakeup(nfsd);
+			wakeup_one(nfsd);
 			return;
 		}
 	}
