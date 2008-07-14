@@ -630,6 +630,7 @@ openpic_init()
 	x &= ~(OPENPIC_IMASK | OPENPIC_PRIORITY_MASK | OPENPIC_VECTOR_MASK);
 	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR;
 	openpic_write(OPENPIC_IPI_VECTOR(0), x);
+#endif
 
 #if 0
 	openpic_write(OPENPIC_SPURIOUS_VECTOR, 255);
