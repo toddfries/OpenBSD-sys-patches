@@ -655,6 +655,7 @@ struct usb_event {
 #define USB_DISCOVER		_IO  ('U', 3)
 #define USB_DEVICEINFO		_IOWR('U', 4, struct usb_device_info)
 #define USB_DEVICESTATS		_IOR ('U', 5, struct usb_device_stats)
+#define USB_DEVICEREATTACH	_IOW ('U', 6, uint8_t)
 
 /* Generic HID device */
 #define USB_GET_REPORT_DESC	_IOR ('U', 21, struct usb_ctl_report_desc)
