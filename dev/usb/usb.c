@@ -569,6 +569,23 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		*(struct usb_device_stats *)data = sc->sc_bus->stats;
 		break;
 
+	case USB_DEVICEREATTACH:
+	{
+		uint8_t *addr = (void *)data;
+		usbd_device_handle dev;
+
+		if (!(flag & FWRITE))
+			return (EBADF);
+
+		if (*addr < 1 || *addr >= USB_MAX_DEVICES)
+			return (EINVAL);
+		dev = sc->sc_bus->devices[*addr];
+		if (dev == NULL)
+			return (ENXIO);
+		usb_needs_reattach(dev);
+		break;
+	}
+
 	default:
 		return (EINVAL);
 	}
