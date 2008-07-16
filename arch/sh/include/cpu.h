@@ -101,6 +101,7 @@ do {									\
 	if (curproc != NULL)						\
 		aston(curproc);					\
 } while (/*CONSTCOND*/0)
+#define clear_resched(ci) 	want_resched = 0
 
 /*
  * Give a profiling tick to the current process when the user profiling

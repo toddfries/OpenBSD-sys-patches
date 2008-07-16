@@ -415,6 +415,8 @@ mi_switch(void)
 		p->p_stat = SONPROC;
 	}
 
+	clear_resched(curcpu());
+
 	SCHED_ASSERT_LOCKED();
 
 	/*

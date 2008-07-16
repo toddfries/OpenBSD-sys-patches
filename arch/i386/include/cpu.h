@@ -230,6 +230,7 @@ extern void cpu_init_idle_pcbs(void);
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 #define	CLKF_USERMODE(frame)	USERMODE((frame)->if_cs, (frame)->if_eflags)
 #define	CLKF_PC(frame)		((frame)->if_eip)
