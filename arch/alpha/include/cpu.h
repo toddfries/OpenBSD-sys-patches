@@ -282,12 +282,14 @@ do {									\
 	ci->ci_want_resched = 1;					\
 	aston(curcpu());						\
 } while (/*CONSTCOND*/0)
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 #else
 #define	need_resched(ci)						\
 do {									\
 	curcpu()->ci_want_resched = 1;					\
 	aston(curcpu());						\
 } while (/*CONSTCOND*/0)
+#define clear_resched(ci) curcpu()->ci_want_resched = 0
 #endif
 
 /*

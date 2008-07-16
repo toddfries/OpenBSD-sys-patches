@@ -107,6 +107,7 @@ extern int bootdev;
 	want_resched++; \
 	mtpr(AST_OK,PR_ASTLVL); \
 	}
+#define clear_resched(ci) 	want_resched = 0
 
 /*
  * Notify the current process (p) that it has a signal pending,

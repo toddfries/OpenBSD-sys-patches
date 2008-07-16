@@ -131,6 +131,7 @@ extern void	raise(int, int);
  */
 extern int	want_resched;		/* resched() was called */
 #define	need_resched(ci)		(want_resched = 1, want_ast = 1)
+#define clear_resched(ci) 	want_resched = 0
 extern int	want_ast;
 
 /*

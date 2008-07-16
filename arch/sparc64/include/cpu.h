@@ -223,6 +223,7 @@ void setsoftnet(void);
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 /*
  * This is used during profiling to integrate system time.

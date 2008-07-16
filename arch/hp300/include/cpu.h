@@ -92,6 +92,7 @@ struct clockframe {
  */
 extern int want_resched;	/* resched() was called */
 #define	need_resched(ci)	{ want_resched = 1; aston(); }
+#define clear_resched(ci) 	want_resched = 0
 
 /*
  * Give a profiling tick to the current process when the user profiling

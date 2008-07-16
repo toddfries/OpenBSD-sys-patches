@@ -161,6 +161,7 @@ extern struct cpu_info *cpu_info_list;
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 #if defined(MULTIPROCESSOR)
 

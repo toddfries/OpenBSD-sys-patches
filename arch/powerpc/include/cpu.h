@@ -151,6 +151,7 @@ do {									\
 	if (ci->ci_curproc != NULL)					\
 		aston(ci->ci_curproc);					\
 } while (0)
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 #define	need_proftick(p)	aston(p)
 

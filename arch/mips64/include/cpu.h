@@ -409,6 +409,7 @@ extern int int_nest_cntr;
  * or after the current trap/syscall if in system mode.
  */
 #define	need_resched(info)	{ want_resched = 1; aston(); }
+#define clear_resched(ci) 	want_resched = 0
 
 /*
  * Give a profiling tick to the current process when the user profiling

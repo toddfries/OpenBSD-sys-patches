@@ -150,6 +150,7 @@ extern int cpu_hvers;
 
 #define	signotify(p)		(setsoftast())
 #define	need_resched(ci)	(want_resched = 1, setsoftast())
+#define clear_resched(ci) 	want_resched = 0
 #define	need_proftick(p)	setsoftast()
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq_head)
 
