@@ -189,6 +189,7 @@ vmt_attach(struct device *parent, struct device *self, void *aux)
 	u_int32_t rlen;
 	u_int16_t ack;
 
+#if 0
 	sc->sc_rpc_buf = malloc(VMT_RPC_BUFLEN, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_rpc_buf == NULL) {
 		printf(": unable to allocate buffer for RPC\n");
@@ -234,6 +235,7 @@ vmt_attach(struct device *parent, struct device *self, void *aux)
 		printf("%s: setting version failed\n", DEVNAME(sc));
 		return;
 	}
+#endif
 
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
@@ -252,8 +254,10 @@ vmt_attach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 	return;
 
+#if 0
 free:
 	free(sc->sc_rpc_buf, M_DEVBUF);
+#endif
 }
 
 void
@@ -290,6 +294,7 @@ vmt_tick(void *xarg)
 	    (u_int64_t)diff.tv_usec * 1000LL;
 	sc->sc_sensor.status = SENSOR_S_OK;
 
+#if 0
 	if (strncmp(sc->sc_hostname, hostname, sizeof(sc->sc_hostname)) != 0) {
 		strlcpy(sc->sc_hostname, hostname, sizeof(sc->sc_hostname));
 
@@ -340,6 +345,7 @@ vmt_tick(void *xarg)
 	printf("%s: \"%s\"\n", DEVNAME(sc), sc->sc_rpc_buf);
 
 out:
+#endif
 	timeout_add(&sc->sc_tick, hz * 15);
 }
 
