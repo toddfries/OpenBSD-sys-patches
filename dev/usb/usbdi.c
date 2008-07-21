@@ -1096,6 +1096,8 @@ usb_match_device(const struct usb_devno *tbl, u_int nentries, u_int sz,
 		u_int16_t tproduct = tbl->ud_product;
 		if (tbl->ud_vendor == 0 && tproduct == 0)
 			return (NULL);
+		if (tbl->ud_vendor == 0 && tproduct == 0)
+			return (NULL);
 		if (tbl->ud_vendor == vendor &&
 		    (tproduct == product || tproduct == USB_PRODUCT_ANY))
 			return (tbl);

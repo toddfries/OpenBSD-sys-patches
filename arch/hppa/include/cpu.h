@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.52 2007/10/10 15:53:51 art Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.54 2008/07/18 23:43:31 art Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -91,6 +91,7 @@ enum hppa_cpu_type {
 extern enum hppa_cpu_type cpu_type;
 extern const char *cpu_typename;
 extern int cpu_hvers;
+extern register_t kpsw;
 #endif
 #endif
 
@@ -150,6 +151,7 @@ extern int cpu_hvers;
 
 #define	signotify(p)		(setsoftast())
 #define	need_resched(ci)	(want_resched = 1, setsoftast())
+#define clear_resched(ci) 	want_resched = 0
 #define	need_proftick(p)	setsoftast()
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq_head)
 

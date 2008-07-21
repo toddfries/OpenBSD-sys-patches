@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.42 2008/07/11 14:23:53 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.44 2008/07/12 14:26:07 kettenis Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -209,6 +209,12 @@ cpu_match(parent, vcf, aux)
 
 	if (portid != cpus->ci_upaid)
 		return (0);
+#else
+	/* XXX Only attach the first thread of a core for now. */
+	if (OF_getprop(OF_parent(ma->ma_node), "device_type",
+	    buf, sizeof(buf)) >= 0 && strcmp(buf, "core") == 0 &&
+	    (getpropint(ma->ma_node, "cpuid", -1) % 2) == 1)
+		return (0);
 #endif
 
 	return (1);
@@ -366,6 +372,7 @@ int
 cpu_myid(void)
 {
 	char buf[32];
+	int impl;
 
 #ifdef SUN4V
 	if (CPU_ISSUN4V) {
@@ -379,8 +386,20 @@ cpu_myid(void)
 	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
 	    strcmp(buf, "SUNW,Ultra-Enterprise-10000") == 0)
 		return lduwa(0x1fff40000d0UL, ASI_PHYS_NON_CACHED);
-	else
+
+	impl = (getver() & VER_IMPL) >> VER_IMPL_SHIFT;
+	switch (impl) {
+	case IMPL_OLYMPUS_C:
+	case IMPL_JUPITER:
+		return CPU_JUPITERID;
+	case IMPL_CHEETAH:
+	case IMPL_CHEETAH_PLUS:
+	case IMPL_JAGUAR:
+	case IMPL_PANTHER:
+		return CPU_FIREPLANEID;
+	default:
 		return CPU_UPAID;
+	}
 }
 
 void
