@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.27 2007/05/30 17:10:44 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.28 2008/07/18 23:43:31 art Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

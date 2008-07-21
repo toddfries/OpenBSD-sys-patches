@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.78 2008/05/21 19:42:07 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.80 2008/07/16 16:40:05 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.73 1997/09/13 20:36:48 pk Exp $	*/
 
 /*
@@ -231,11 +231,6 @@ _C_LABEL(pgofset):
 	.globl	_C_LABEL(trapbase)
 _C_LABEL(trapbase):
 	.word	0
-
-#if defined(SUN4M)
-_C_LABEL(mapme):
-	.asciz "0 0 f8000000 15c6a0 map-pages"
-#endif
 
 #if !defined(SUN4M)
 sun4m_notsup:
@@ -6163,5 +6158,3 @@ _C_LABEL(proc0paddr):
 
 	.comm	_C_LABEL(nwindows), 4
 	.comm	_C_LABEL(promvec), 4
-	.comm	_C_LABEL(qs), 32 * 8
-	.comm	_C_LABEL(whichqs), 4

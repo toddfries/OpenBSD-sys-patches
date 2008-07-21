@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.28 2008/06/25 17:43:09 thib Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.29 2008/07/19 22:41:58 marco Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -100,16 +100,23 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct cryptop		*crp;
 	struct cryptodesc	*crd;
-	struct uio		*uio;
-	int			 flags, i, n;
-	daddr64_t		 blk = 0;
-	u_int			 keyndx;
+	struct uio		*uio = NULL;
+	int			flags, i, n, s;
+	daddr64_t		blk = 0;
+	u_int			keyndx;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_getcryptop wu: %p encrypt: %d\n",
 	    DEVNAME(sd->sd_sc), wu, encrypt);
 
-	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_WAITOK | PR_ZERO);
-	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, PR_WAITOK);
+	s = splbio();
+	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_ZERO);
+	if (uio == NULL)
+		goto unwind;
+	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, 0);
+	if (uio->uio_iov == NULL)
+		goto unwind;
+	splx(s);
+
 	uio->uio_iovcnt = 1;
 	uio->uio_iov->iov_len = xs->datalen;
 	if (xs->flags & SCSI_DATA_OUT) {
@@ -172,8 +179,19 @@ unwind:
 		crypto_freereq(crp);
 	if (wu->swu_xs->flags & SCSI_DATA_OUT)
 		free(uio->uio_iov->iov_base, M_DEVBUF);
+<<<<<<< HEAD:dev/softraid_crypto.c
 	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
 	pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
+=======
+
+	s = splbio();
+	if (uio && uio->uio_iov)
+		pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
+	if (uio)
+		pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
+	splx(s);
+
+>>>>>>> master:dev/softraid_crypto.c
 	return (NULL);
 }
 
@@ -183,14 +201,25 @@ sr_crypto_putcryptop(struct cryptop *crp)
 	struct uio		*uio = crp->crp_buf;
 	struct sr_workunit	*wu = crp->crp_opaque;
 	struct sr_discipline	*sd = wu->swu_dis;
+<<<<<<< HEAD:dev/softraid_crypto.c
+=======
+	int			s;
+>>>>>>> master:dev/softraid_crypto.c
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_putcryptop crp: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), crp);
 
 	if (wu->swu_xs->flags & SCSI_DATA_OUT)
 		free(uio->uio_iov->iov_base, M_DEVBUF);
+<<<<<<< HEAD:dev/softraid_crypto.c
 	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
 	pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
+=======
+	s = splbio();
+	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
+	pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
+	splx(s);
+>>>>>>> master:dev/softraid_crypto.c
 	crypto_freereq(crp);
 
 	return (wu);

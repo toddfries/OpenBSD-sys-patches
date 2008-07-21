@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.47 2008/04/20 01:18:02 brad Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.49 2008/07/15 13:21:17 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -159,13 +159,17 @@
 #define RL_HWREV_8169S		0x04000000
 #define RL_HWREV_8169_8110SB	0x10000000
 #define RL_HWREV_8169_8110SCd	0x18000000
+#define RL_HWREV_8102EL		0x24800000
 #define RL_HWREV_8168_SPIN1	0x30000000
 #define RL_HWREV_8100E_SPIN1	0x30800000
 #define RL_HWREV_8101E		0x34000000
+#define RL_HWREV_8102E		0x34800000
 #define RL_HWREV_8168_SPIN2	0x38000000
 #define RL_HWREV_8168_SPIN3	0x38400000
 #define RL_HWREV_8100E_SPIN2	0x38800000
-#define RL_HWREV_8168C		0x3C000000
+#define RL_HWREV_8168C		0x3c000000
+#define RL_HWREV_8168C_SPIN2	0x3c400000
+#define RL_HWREV_8168CP		0x3c800000
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
 #define RL_HWREV_8139AG		0x70800000
@@ -176,6 +180,7 @@
 #define RL_HWREV_8139CPLUS	0x74800000
 #define RL_HWREV_8101		0x74c00000
 #define RL_HWREV_8100		0x78800000
+#define RL_HWREV_8169_8110SBL	0x7cc00000
 #define RL_HWREV_8169_8110SCe	0x98000000
 
 #define RL_TXDMA_16BYTES	0x00000000
@@ -414,6 +419,15 @@
 #define RL_CPLUSCMD_PCI_DAC	0x0010	/* PCI dual-address cycle only */
 #define RL_CPLUSCMD_RXCSUM_ENB	0x0020	/* enable RX checksum offload */
 #define RL_CPLUSCMD_VLANSTRIP	0x0040	/* enable VLAN tag stripping */
+#define	RL_CPLUSCMD_MACSTAT_DIS	0x0080	/* 8168B/C/CP */
+#define	RL_CPLUSCMD_ASF		0x0100	/* 8168C/CP */
+#define	RL_CPLUSCMD_DBG_SEL	0x0200	/* 8168C/CP */
+#define	RL_CPLUSCMD_FORCE_TXFC	0x0400	/* 8168C/CP */
+#define	RL_CPLUSCMD_FORCE_RXFC	0x0800	/* 8168C/CP */
+#define	RL_CPLUSCMD_FORCE_HDPX	0x1000	/* 8168C/CP */
+#define	RL_CPLUSCMD_NORMAL_MODE	0x2000	/* 8168C/CP */
+#define	RL_CPLUSCMD_DBG_ENB	0x4000	/* 8168C/CP */
+#define	RL_CPLUSCMD_BIST_ENB	0x8000	/* 8168C/CP */
 
 /* C+ early transmit threshold */
 
@@ -744,6 +758,15 @@ struct rl_softc {
 	struct timeout		timer_handle;
 
 	int			rl_txstart;
+	u_int32_t		rl_flags;
+#define	RL_FLAG_MSI		0x0001
+#define	RL_FLAG_INVMAR		0x0004
+#define	RL_FLAG_PHYWAKE		0x0008
+#define	RL_FLAG_NOJUMBO		0x0010
+#define	RL_FLAG_PAR		0x0020
+#define	RL_FLAG_DESCV2		0x0040
+#define	RL_FLAG_MACSTAT		0x0080
+#define	RL_FLAG_LINK		0x8000
 	int			rl_link;
 };
 

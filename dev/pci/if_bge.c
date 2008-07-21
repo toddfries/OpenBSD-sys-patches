@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.236 2008/06/07 19:05:11 brad Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.238 2008/07/17 19:59:44 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -1669,8 +1669,8 @@ bge_blockinit(struct bge_softc *sc)
 		dma_read_modebits =
 		  BGE_RDMAMODE_ENABLE | BGE_RDMAMODE_ALL_ATTNS;
 
-		if (sc->bge_flags & BGE_PCIE && 0)
-			dma_read_modebits |= BGE_RDMA_MODE_FIFO_LONG_BURST;
+		if (sc->bge_flags & BGE_PCIE)
+			dma_read_modebits |= BGE_RDMAMODE_FIFO_LONG_BURST;
 
 		CSR_WRITE_4(sc, BGE_RDMA_MODE, dma_read_modebits);
 	}
@@ -1896,6 +1896,11 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 
 	misccfg = CSR_READ_4(sc, BGE_MISC_CFG);
 	misccfg &= BGE_MISCCFG_BOARD_ID_MASK;
+
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5705 &&
+	    (misccfg == BGE_MISCCFG_BOARD_ID_5788 ||
+	     misccfg == BGE_MISCCFG_BOARD_ID_5788M))
+		sc->bge_flags |= BGE_IS_5788;
 
 	if ((BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703 &&
 	     (misccfg == 0x4000 || misccfg == 0x8000)) ||

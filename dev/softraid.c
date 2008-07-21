@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.116 2008/06/25 17:43:09 thib Exp $ */
+/* $OpenBSD: softraid.c,v 1.118 2008/07/20 21:57:51 djm Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -135,6 +135,10 @@ void			sr_meta_init(struct sr_discipline *,
 			    struct sr_chunk_head *);
 
 /* native metadata format */
+int			sr_meta_native_bootprobe(struct sr_softc *,
+			    struct device *, struct sr_metadata_list_head *);
+#define SR_META_NOTCLAIMED	(0)
+#define SR_META_CLAIMED		(1)
 int			sr_meta_native_probe(struct sr_softc *,
 			   struct sr_chunk *);
 int			sr_meta_native_attach(struct sr_discipline *, int);
@@ -386,7 +390,11 @@ sr_meta_clear(struct sr_discipline *sd)
 		bzero(&ch_entry->src_opt, sizeof(ch_entry->src_opt));
 	}
 
+<<<<<<< HEAD:dev/softraid.c
 	bzero(&sd->sd_meta, sizeof(sd->sd_meta));
+=======
+	bzero(sd->sd_meta, SR_META_SIZE * 512);
+>>>>>>> master:dev/softraid.c
 
 	free(m, M_DEVBUF);
 	rv = 0;
@@ -552,11 +560,14 @@ restart:
 		src = sd->sd_vol.sv_chunks[i];
 		cm = (struct sr_meta_chunk *)(m + 1);
 		bcopy(&src->src_meta, cm + i, sizeof(*cm));
+<<<<<<< HEAD:dev/softraid.c
 
 		/* calculate metdata checksum and ids */
 		m->ssdi.ssd_chunk_id = i;
 		sr_checksum(sc, m, &m->ssd_checksum,
 		    sizeof(struct sr_meta_invariant));
+=======
+>>>>>>> master:dev/softraid.c
 	}
 
 	/* optional metadata */
@@ -574,6 +585,14 @@ restart:
 		if (src->src_meta.scm_status == BIOC_SDOFFLINE)
 			continue;
 
+<<<<<<< HEAD:dev/softraid.c
+=======
+		/* calculate metdata checksum for correct chunk */
+		m->ssdi.ssd_chunk_id = i;
+		sr_checksum(sc, m, &m->ssd_checksum,
+		    sizeof(struct sr_meta_invariant));
+
+>>>>>>> master:dev/softraid.c
 #ifdef SR_DEBUG
 		DNPRINTF(SR_D_META, "%s: sr_meta_save %s: volid: %d "
 		    "chunkid: %d checksum: ",
@@ -750,6 +769,7 @@ done:
 }
 
 int
+<<<<<<< HEAD:dev/softraid.c
 sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 {
 	struct disklabel	label;
@@ -815,6 +835,301 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
 
+=======
+sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
+    struct sr_metadata_list_head *mlh)
+{
+	struct bdevsw		*bdsw;
+	struct disklabel	label;
+	struct sr_metadata	*md;
+	struct sr_discipline	*fake_sd;
+	struct sr_metadata_list *mle;
+	char			devname[32];
+	dev_t			dev, devr;
+	int			error, i, majdev;
+	int			rv = SR_META_NOTCLAIMED;
+
+	DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe\n", DEVNAME(sc));
+
+	majdev = findblkmajor(dv);
+	if (majdev == -1)
+		goto done;
+	dev = MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
+	bdsw = &bdevsw[majdev];
+
+	/*
+	 * The devices are being opened with S_IFCHR instead of
+	 * S_IFBLK so that the SCSI mid-layer does not whine when
+	 * media is not inserted in certain devices like zip drives
+	 * and such.
+	 */
+
+	/* open device */
+	error = (*bdsw->d_open)(dev, FREAD, S_IFCHR, curproc);
+	if (error) {
+		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe open "
+		    "failed\n" , DEVNAME(sc));
+		goto done;
+	}
+
+	/* get disklabel */
+	error = (*bdsw->d_ioctl)(dev, DIOCGDINFO, (void *)&label,
+	    FREAD, curproc);
+	if (error) {
+		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe ioctl "
+		    "failed\n", DEVNAME(sc));
+		error = (*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
+		goto done;
+	}
+
+	/* we are done, close device */
+	error = (*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
+	if (error) {
+		DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe close "
+		    "failed\n", DEVNAME(sc));
+		goto done;
+	}
+
+	md = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
+	if (md == NULL) {
+		printf("%s: not enough memory for metadata buffer\n",
+		    DEVNAME(sc));
+		goto done;
+	}
+
+	/* create fake sd to use utility functions */
+	fake_sd = malloc(sizeof(struct sr_discipline) , M_DEVBUF, M_ZERO);
+	if (fake_sd == NULL) {
+		printf("%s: not enough memory for fake discipline\n",
+		    DEVNAME(sc));
+		goto nosd;
+	}
+	fake_sd->sd_sc = sc;
+	fake_sd->sd_meta_type = SR_META_F_NATIVE;
+
+	for (i = 0; i < MAXPARTITIONS; i++) {
+		if (label.d_partitions[i].p_fstype != FS_RAID)
+			continue;
+
+		/* open partition */
+		devr = MAKEDISKDEV(majdev, dv->dv_unit, i);
+		error = (*bdsw->d_open)(devr, FREAD, S_IFCHR, curproc);
+		if (error) {
+			DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe "
+			    "open failed, partition %d\n",
+			    DEVNAME(sc), i);
+			continue;
+		}
+
+		if (sr_meta_native_read(fake_sd, devr, md, NULL)) {
+			printf("%s: native bootprobe could not read native "
+			    "metadata\n", DEVNAME(sc));
+			continue;
+		}
+
+		/* are we a softraid partition? */
+		sr_meta_getdevname(sc, devr, devname, sizeof(devname));
+		if (sr_meta_validate(fake_sd, devr, md, NULL) == 0) {
+			if (md->ssdi.ssd_flags & BIOC_SCNOAUTOASSEMBLE) {
+				DNPRINTF(SR_D_META, "%s: don't save %s\n",
+				    DEVNAME(sc), devname);
+			} else {
+				/* XXX fix M_WAITOK, this is boot time */
+				mle = malloc(sizeof(*mle), M_DEVBUF,
+				    M_WAITOK | M_ZERO);
+				bcopy(md, &mle->sml_metadata,
+				    SR_META_SIZE * 512);
+				mle->sml_mm = devr;
+				SLIST_INSERT_HEAD(mlh, mle, sml_link);
+				rv = SR_META_CLAIMED;
+			}
+		}
+
+		/* we are done, close partition */
+		error = (*bdsw->d_close)(devr, FREAD, S_IFCHR, curproc);
+		if (error) {
+			DNPRINTF(SR_D_META, "%s: sr_meta_native_bootprobe "
+			    "close failed\n", DEVNAME(sc));
+			continue;
+		}
+	}
+
+	free(fake_sd, M_DEVBUF);
+nosd:
+	free(md, M_DEVBUF);
+done:
+	return (rv);
+}
+
+int
+sr_boot_assembly(struct sr_softc *sc)
+{
+	struct device		*dv;
+	struct sr_metadata_list_head mlh;
+	struct sr_metadata_list *mle, *mle2;
+	struct sr_metadata	*m1, *m2;
+	struct bioc_createraid	bc;
+	int			rv = 0, no_dev;
+	dev_t			*dt = NULL;
+
+	DNPRINTF(SR_D_META, "%s: sr_boot_assembly\n", DEVNAME(sc));
+
+	SLIST_INIT(&mlh);
+
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
+		if (dv->dv_class != DV_DISK)
+			continue;
+
+		/* XXX is there  a better way of excluding some devices? */
+		if (!strncmp(dv->dv_xname, "fd", 2) ||
+		    !strncmp(dv->dv_xname, "cd", 2) ||
+		    !strncmp(dv->dv_xname, "rx", 2))
+			continue;
+
+		/* native softraid uses partitions */
+		if (sr_meta_native_bootprobe(sc, dv, &mlh) == SR_META_CLAIMED)
+			continue;
+
+		/* probe non-native disks */
+	}
+
+	/*
+	 * XXX poor mans hack that doesn't keep disks in order and does not
+	 * roam disks correctly.  replace this with something smarter that
+	 * orders disks by volid, chunkid and uuid.
+	 */
+	dt = malloc(BIOC_CRMAXLEN, M_DEVBUF, M_WAITOK);
+	SLIST_FOREACH(mle, &mlh, sml_link) {
+		/* chunk used already? */
+		if (mle->sml_used)
+			continue;
+
+		no_dev = 0;
+		bzero(dt, BIOC_CRMAXLEN);
+		SLIST_FOREACH(mle2, &mlh, sml_link) {
+			/* chunk used already? */
+			if (mle2->sml_used)
+				continue;
+
+			m1 = (struct sr_metadata *)&mle->sml_metadata;
+			m2 = (struct sr_metadata *)&mle2->sml_metadata;
+
+			/* are we the same volume? */
+			if (m1->ssdi.ssd_volid != m2->ssdi.ssd_volid)
+				continue;
+
+			/* same uuid? */
+			if (bcmp(&m1->ssdi.ssd_uuid, &m2->ssdi.ssd_uuid,
+			    sizeof(m1->ssdi.ssd_uuid)))
+				continue;
+
+			/* sanity */
+			if (dt[m2->ssdi.ssd_chunk_id]) {
+				printf("%s: chunk id already in use; can not "
+				    "assemble volume\n", DEVNAME(sc));
+				goto unwind;
+			}
+			dt[m2->ssdi.ssd_chunk_id] = mle2->sml_mm;
+			no_dev++;
+			mle2->sml_used = 1;
+		}
+		if (m1->ssdi.ssd_chunk_no != no_dev) {
+			printf("%s: not assembling partial disk that used to "
+			    "be volume %d\n", DEVNAME(sc),
+			    m1->ssdi.ssd_volid);
+			continue;
+		}
+
+		bzero(&bc, sizeof(bc));
+		bc.bc_level = m1->ssdi.ssd_level;
+		bc.bc_dev_list_len = no_dev * sizeof(dev_t);
+		bc.bc_dev_list = dt;
+		bc.bc_flags = BIOC_SCDEVT;
+		sr_ioctl_createraid(sc, &bc, 0);
+		rv++;
+	}
+
+	/* done with metadata */
+unwind:
+	for (mle = SLIST_FIRST(&mlh); mle != SLIST_END(&mlh); mle = mle2) {
+		mle2 = SLIST_NEXT(mle, sml_link);
+		free(mle, M_DEVBUF);
+	}
+	SLIST_INIT(&mlh);
+
+	if (dt)
+		free(dt, M_DEVBUF);
+
+	return (rv);
+}
+
+int
+sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
+{
+	struct disklabel	label;
+	char			*devname;
+	int			error, part;
+	daddr64_t		size;
+	struct bdevsw		*bdsw;
+	dev_t			dev;
+
+	DNPRINTF(SR_D_META, "%s: sr_meta_native_probe(%s)\n",
+	   DEVNAME(sc), ch_entry->src_devname);
+
+	dev = ch_entry->src_dev_mm;
+	devname = ch_entry->src_devname;
+	bdsw = bdevsw_lookup(dev);
+	part = DISKPART(dev);
+
+	/* get disklabel */
+	error = bdsw->d_ioctl(dev, DIOCGDINFO, (void *)&label, 0, NULL);
+	if (error) {
+		DNPRINTF(SR_D_META, "%s: %s can't obtain disklabel\n",
+		    DEVNAME(sc), devname);
+		goto unwind;
+	}
+
+	/* make sure the partition is of the right type */
+	if (label.d_partitions[part].p_fstype != FS_RAID) {
+		DNPRINTF(SR_D_META,
+		    "%s: %s partition not of type RAID (%d)\n", DEVNAME(sc) ,
+		        devname,
+		    label.d_partitions[part].p_fstype);
+		goto unwind;
+	}
+
+	size = DL_GETPSIZE(&label.d_partitions[part]) -
+	    SR_META_SIZE - SR_META_OFFSET;
+	if (size <= 0) {
+		DNPRINTF(SR_D_META, "%s: %s partition too small\n", DEVNAME(sc),
+		    devname);
+		goto unwind;
+	}
+	ch_entry->src_size = size;
+
+	DNPRINTF(SR_D_META, "%s: probe found %s size %d\n", DEVNAME(sc),
+	    devname, size);
+
+	return (SR_META_F_NATIVE);
+unwind:
+	DNPRINTF(SR_D_META, "%s: invalid device: %s\n", DEVNAME(sc),
+	    devname ? devname : "nodev");
+	return (SR_META_F_INVALID);
+}
+
+int
+sr_meta_native_attach(struct sr_discipline *sd, int force)
+{
+	struct sr_softc		*sc = sd->sd_sc;
+	struct sr_chunk_head 	*cl = &sd->sd_vol.sv_chunk_list;
+	struct sr_metadata	*md = NULL;
+	struct sr_chunk		*ch_entry;
+	struct sr_uuid		uuid;
+	int			sr, not_sr, rv = 1, d, expected = -1;
+
+	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
+
+>>>>>>> master:dev/softraid.c
 	md = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
 	if (md == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
@@ -1816,10 +2131,23 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		sr_meta_init(sd, cl);
 	} else {
 		if (strncmp(sd->sd_meta->ssd_devname, dev->dv_xname,
+<<<<<<< HEAD:dev/softraid.c
 		    sizeof(dev->dv_xname)))
 			printf("%s: volume %s is roaming, it used to be %s\n",
 			    DEVNAME(sc), sd->sd_meta->ssd_devname,
 			    dev->dv_xname);
+=======
+		    sizeof(dev->dv_xname))) {
+			printf("%s: volume %s is roaming, it used to be %s, "
+			    "updating metadata\n",
+			    DEVNAME(sc), dev->dv_xname,
+			    sd->sd_meta->ssd_devname);
+
+			sd->sd_meta->ssdi.ssd_volid = vol;
+			strlcpy(sd->sd_meta->ssd_devname, dev->dv_xname,
+			    sizeof(sd->sd_meta->ssd_devname));
+		}
+>>>>>>> master:dev/softraid.c
 	}
 
 	/* save metadata to disk */
@@ -2054,6 +2382,7 @@ sr_raid_tur(struct sr_workunit *wu)
 	return (0);
 }
 
+<<<<<<< HEAD:dev/softraid.c
 int
 sr_raid_request_sense(struct sr_workunit *wu)
 {
@@ -2218,9 +2547,12 @@ sr_already_assembled(struct sr_discipline *sd)
 	return (0);
 }
 
+=======
+>>>>>>> master:dev/softraid.c
 int
-sr_boot_assembly(struct sr_softc *sc)
+sr_raid_request_sense(struct sr_workunit *wu)
 {
+<<<<<<< HEAD:dev/softraid.c
 	return 1;
 #if 0
 	struct device		*dv;
@@ -2237,60 +2569,45 @@ sr_boot_assembly(struct sr_softc *sc)
 	size_t			sz = SR_META_SIZE * 512;
 
 	DNPRINTF(SR_D_META, "%s: sr_boot_assembly\n", DEVNAME(sc));
+=======
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct scsi_xfer	*xs = wu->swu_xs;
+>>>>>>> master:dev/softraid.c
 
-	SLIST_INIT(&mlh);
-	bp = geteblk(sz);
-	if (!bp)
-		return (ENOMEM);
+	DNPRINTF(SR_D_DIS, "%s: sr_raid_request_sense\n",
+	    DEVNAME(sd->sd_sc));
 
-	TAILQ_FOREACH(dv, &alldevs, dv_list) {
-		if (dv->dv_class != DV_DISK)
-			continue;
+	/* use latest sense data */
+	bcopy(&sd->sd_scsi_sense, &xs->sense, sizeof(xs->sense));
 
-		majdev = findblkmajor(dv);
-		if (majdev == -1)
-			continue;
+	/* clear sense data */
+	bzero(&sd->sd_scsi_sense, sizeof(sd->sd_scsi_sense));
 
-		bp->b_dev = dev = MAKEDISKDEV(majdev, dv->dv_unit, RAW_PART);
-		bdsw = &bdevsw[majdev];
+	return (0);
+}
 
-		/* XXX is there  a better way of excluding some devices? */
-		if (!strncmp(dv->dv_xname, "fd", 2) ||
-		    !strncmp(dv->dv_xname, "cd", 2) ||
-		    !strncmp(dv->dv_xname, "rx", 2))
-			continue;
-		/*
-		 * The devices are being opened with S_IFCHR instead of
-		 * S_IFBLK so that the SCSI mid-layer does not whine when
-		 * media is not inserted in certain devices like zip drives
-		 * and such.
-		 */
+int
+sr_raid_start_stop(struct sr_workunit *wu)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct scsi_xfer	*xs = wu->swu_xs;
+	struct scsi_start_stop	*ss = (struct scsi_start_stop *)xs->cmd;
+	int			rv = 1;
 
-		/* open device */
-		error = (*bdsw->d_open)(dev, FREAD, S_IFCHR, curproc);
-		if (error) {
-			DNPRINTF(SR_D_META, "%s: sr_boot_assembly open failed"
-			    "\n", DEVNAME(sc));
-			continue;
+	DNPRINTF(SR_D_DIS, "%s: sr_raid_start_stop\n",
+	    DEVNAME(sd->sd_sc));
+
+	if (!ss)
+		return (rv);
+
+	if (ss->byte2 == 0x00) {
+		/* START */
+		if (sd->sd_vol_status == BIOC_SVOFFLINE) {
+			/* bring volume online */
+			/* XXX check to see if volume can be brought online */
+			sd->sd_vol_status = BIOC_SVONLINE;
 		}
-
-		/* get disklabel */
-		error = (*bdsw->d_ioctl)(dev, DIOCGDINFO, (void *)&label,
-		    FREAD, curproc);
-		if (error) {
-			DNPRINTF(SR_D_META, "%s: sr_boot_assembly ioctl "
-			    "failed\n", DEVNAME(sc));
-			error = (*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
-			continue;
-		}
-
-		/* we are done, close device */
-		error = (*bdsw->d_close)(dev, FREAD, S_IFCHR, curproc);
-		if (error) {
-			DNPRINTF(SR_D_META, "%s: sr_boot_assembly close "
-			    "failed\n", DEVNAME(sc));
-			continue;
-		}
+<<<<<<< HEAD:dev/softraid.c
 
 		/* are we a softraid partition? */
 		for (i = 0; i < MAXPARTITIONS; i++) {
@@ -2343,79 +2660,145 @@ sr_boot_assembly(struct sr_softc *sc)
 				    "close failed\n", DEVNAME(sc));
 				continue;
 			}
+=======
+		rv = 0;
+	} else /* XXX is this the check? if (byte == 0x01) */ {
+		/* STOP */
+		if (sd->sd_vol_status == BIOC_SVONLINE) {
+			/* bring volume offline */
+			sd->sd_vol_status = BIOC_SVOFFLINE;
+>>>>>>> master:dev/softraid.c
 		}
+		rv = 0;
 	}
-
-	/*
-	 * XXX poor mans hack that doesn't keep disks in order and does not
-	 * roam disks correctly.  replace this with something smarter that
-	 * orders disks by volid, chunkid and uuid.
-	 */
-	dt = malloc(BIOC_CRMAXLEN, M_DEVBUF, M_WAITOK);
-	SLIST_FOREACH(mle, &mlh, sml_link) {
-		/* chunk used already? */
-		if (mle->sml_used)
-			continue;
-
-		no_dev = 0;
-		bzero(dt, BIOC_CRMAXLEN);
-		SLIST_FOREACH(mle2, &mlh, sml_link) {
-			/* chunk used already? */
-			if (mle2->sml_used)
-				continue;
-
-			/* are we the same volume? */
-			if (mle->sml_metadata->ssd_vd_volid !=
-			    mle2->sml_metadata->ssd_vd_volid)
-				continue;
-
-			/* same uuid? */
-			if (bcmp(&mle->sml_metadata->ssd_uuid,
-			    &mle2->sml_metadata->ssd_uuid,
-			    sizeof(mle->sml_metadata->ssd_uuid)))
-				continue;
-
-			/* sanity */
-			if (dt[mle2->sml_metadata->ssd_chunk_id]) {
-				printf("%s: chunk id already in use; can not "
-				    "assemble volume\n", DEVNAME(sc));
-				goto unwind;
-			}
-			dt[mle2->sml_metadata->ssd_chunk_id] = mle2->sml_mm;
-			no_dev++;
-			mle2->sml_used = 1;
-		}
-		if (mle->sml_metadata->ssd_chunk_no != no_dev) {
-			printf("%s: not assembling partial disk that used to "
-			    "be volume %d\n", DEVNAME(sc),
-			    mle->sml_metadata->ssd_vd_volid);
-			continue;
-		}
-
-		bzero(&bc, sizeof(bc));
-		vm = (struct sr_vol_meta *)(mle->sml_metadata + 1);
-		bc.bc_level = vm->svm_level;
-		bc.bc_dev_list_len = no_dev * sizeof(dev_t);
-		bc.bc_dev_list = dt;
-		bc.bc_flags = BIOC_SCDEVT;
-		sr_ioctl_createraid(sc, &bc, 0);
-		rv++;
-	}
-
-unwind:
-	if (dt)
-		free(dt, M_DEVBUF);
-
-	for (mle = SLIST_FIRST(&mlh); mle != SLIST_END(&mlh); mle = mle2) {
-		mle2 = SLIST_NEXT(mle, sml_link);
-
-		free(mle->sml_metadata, M_DEVBUF);
-		free(mle, M_DEVBUF);
-	}
-	SLIST_INIT(&mlh);
 
 	return (rv);
+}
+
+int
+sr_raid_sync(struct sr_workunit *wu)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	int			s, rv = 0, ios;
+
+	DNPRINTF(SR_D_DIS, "%s: sr_raid_sync\n", DEVNAME(sd->sd_sc));
+
+	/* when doing a fake sync don't coun't the wu */
+	ios = wu->swu_fake ? 0 : 1;
+
+	s = splbio();
+	sd->sd_sync = 1;
+
+	while (sd->sd_wu_pending > ios)
+		if (tsleep(sd, PRIBIO, "sr_sync", 15 * hz) == EWOULDBLOCK) {
+			DNPRINTF(SR_D_DIS, "%s: sr_raid_sync timeout\n",
+			    DEVNAME(sd->sd_sc));
+			rv = 1;
+			break;
+		}
+
+	sd->sd_sync = 0;
+	splx(s);
+
+	wakeup(&sd->sd_sync);
+
+	return (rv);
+<<<<<<< HEAD:dev/softraid.c
 #endif
+=======
+}
+
+void
+sr_raid_startwu(struct sr_workunit *wu)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct sr_ccb		*ccb;
+
+	splassert(IPL_BIO);
+
+	if (wu->swu_state == SR_WU_RESTART)
+		/*
+		 * no need to put the wu on the pending queue since we
+		 * are restarting the io
+		 */
+		 ;
+	else
+		/* move wu to pending queue */
+		TAILQ_INSERT_TAIL(&sd->sd_wu_pendq, wu, swu_link);
+
+	/* start all individual ios */
+	TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
+		bdevsw_lookup(ccb->ccb_buf.b_dev)->d_strategy(&ccb->ccb_buf);
+	}
+}
+
+void
+sr_checksum_print(u_int8_t *md5)
+{
+	int			i;
+
+	for (i = 0; i < MD5_DIGEST_LENGTH; i++)
+		printf("%02x", md5[i]);
+}
+
+void
+sr_checksum(struct sr_softc *sc, void *src, void *md5, u_int32_t len)
+{
+	MD5_CTX			ctx;
+
+	DNPRINTF(SR_D_MISC, "%s: sr_checksum(%p %p %d)\n", DEVNAME(sc), src,
+	    md5, len);
+
+	MD5Init(&ctx);
+	MD5Update(&ctx, src, len);
+	MD5Final(md5, &ctx);
+}
+
+void
+sr_uuid_get(struct sr_uuid *uuid)
+{
+	arc4random_buf(uuid->sui_id, sizeof(uuid->sui_id));
+	/* UUID version 4: random */
+	uuid->sui_id[6] &= 0x0f;
+	uuid->sui_id[6] |= 0x40;
+	/* RFC4122 variant */
+	uuid->sui_id[8] &= 0x3f;
+	uuid->sui_id[8] |= 0x80;
+}
+
+void
+sr_uuid_print(struct sr_uuid *uuid, int cr)
+{
+	printf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-"
+	    "%02x%02x%02x%02x%02x%02x",
+	    uuid->sui_id[0], uuid->sui_id[1],
+	    uuid->sui_id[2], uuid->sui_id[3],
+	    uuid->sui_id[4], uuid->sui_id[5],
+	    uuid->sui_id[6], uuid->sui_id[7],
+	    uuid->sui_id[8], uuid->sui_id[9],
+	    uuid->sui_id[10], uuid->sui_id[11],
+	    uuid->sui_id[12], uuid->sui_id[13],
+	    uuid->sui_id[14], uuid->sui_id[15]);
+
+	if (cr)
+		printf("\n");
+}
+
+int
+sr_already_assembled(struct sr_discipline *sd)
+{
+	struct sr_softc		*sc = sd->sd_sc;
+	int			i;
+
+	for (i = 0; i < SR_MAXSCSIBUS; i++)
+		if (sc->sc_dis[i])
+			if (!bcmp(&sd->sd_meta->ssdi.ssd_uuid,
+			    &sc->sc_dis[i]->sd_meta->ssdi.ssd_uuid,
+			    sizeof(sd->sd_meta->ssdi.ssd_uuid)))
+				return (1);
+
+	return (0);
+>>>>>>> master:dev/softraid.c
 }
 
 int32_t

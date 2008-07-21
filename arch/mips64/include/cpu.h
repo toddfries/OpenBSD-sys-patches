@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.24 2008/04/07 22:37:16 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.25 2008/07/18 23:43:31 art Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993

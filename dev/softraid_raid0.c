@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid0.c,v 1.8 2008/02/05 16:49:25 marco Exp $ */
+/* $OpenBSD: softraid_raid0.c,v 1.9 2008/07/19 22:41:58 marco Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
  *
