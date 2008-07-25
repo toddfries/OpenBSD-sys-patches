@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1387 2008/07/18 11:44:22 reyk Exp 
+ *	OpenBSD: pcidevs,v 1.1391 2008/07/23 18:34:29 brad Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -305,6 +305,7 @@
 #define	PCI_VENDOR_AGEIA	0x1971		/* Ageia */
 #define	PCI_VENDOR_JMICRON	0x197b		/* JMicron */
 #define	PCI_VENDOR_ASPEED	0x1a03		/* ASPEED Technology */
+#define	PCI_VENDOR_AWT	0x1a3b		/* AWT */
 #define	PCI_VENDOR_SYMPHONY2	0x1c1c		/* Symphony Labs */
 #define	PCI_VENDOR_TEKRAM2	0x1de1		/* Tekram */
 #define	PCI_VENDOR_TEHUTI	0x1fc9		/* Tehuti Networks */
@@ -1079,6 +1080,7 @@
 #define	PCI_PRODUCT_ATI_RADEON_HD2400_M72	0x94c9		/* Mobility Radeon HD 2400 */
 #define	PCI_PRODUCT_ATI_RADEON_HD3870	0x9501		/* Radeon HD 3870 */
 #define	PCI_PRODUCT_ATI_RADEON_HD2600	0x9589		/* Radeon HD 2600 */
+#define	PCI_PRODUCT_ATI_RADEON_HD3450	0x95c5		/* Radeon HD 3450 */
 #define	PCI_PRODUCT_ATI_RS780_HB	0x9600		/* RS780 Host */
 #define	PCI_PRODUCT_ATI_RS780_PCIE_1	0x9602		/* RS780 PCIE */
 #define	PCI_PRODUCT_ATI_RS780_PCIE_2	0x9609		/* RS780 PCIE */
@@ -1086,6 +1088,7 @@
 #define	PCI_PRODUCT_ATI_RADEON_HD3200	0x9610		/* Radeon HD 3200 */
 #define	PCI_PRODUCT_ATI_RADEON_HD2600_HDA	0xaa08		/* Radeon HD 2600 HD Audio */
 #define	PCI_PRODUCT_ATI_RS690M_HDA	0xaa10		/* RS690M HD Audio */
+#define	PCI_PRODUCT_ATI_RADEON_HD34xx_HDA	0xaa28		/* Radeon HD 34xx HD Audio */
 #define	PCI_PRODUCT_ATI_RS100_AGP	0xcab0		/* RS100 AGP */
 #define	PCI_PRODUCT_ATI_RS200_AGP	0xcab2		/* RS200 AGP */
 #define	PCI_PRODUCT_ATI_RS250_AGP	0xcab3		/* RS250 AGP */
@@ -1127,6 +1130,7 @@
 #define	PCI_PRODUCT_ATRONICS_IDE_2015PL	0x2015		/* IDE-2015PL */
 
 /* Attansic Technology products */
+#define	PCI_PRODUCT_ATTANSIC_L1E	0x1026		/* L1E */
 #define	PCI_PRODUCT_ATTANSIC_L1	0x1048		/* L1 */
 #define	PCI_PRODUCT_ATTANSIC_L2	0x2048		/* L2 */
 
@@ -1151,6 +1155,9 @@
 #define	PCI_PRODUCT_AVM_FRITZ_CARD	0x0a00		/* Fritz ISDN */
 #define	PCI_PRODUCT_AVM_FRITZ_PCI_V2_ISDN	0x0e00		/* Fritz v2.0 ISDN */
 #define	PCI_PRODUCT_AVM_T1	0x1200		/* PRI T1 ISDN */
+
+/* AWT products */
+#define	PCI_PRODUCT_AWT_RT2890	0x1059		/* RT2890 */
 
 /* Belkin Components products */
 #define	PCI_PRODUCT_BELKIN2_F5D6001	0x6001		/* F5D6001 */
@@ -3833,10 +3840,10 @@
 #define	PCI_PRODUCT_RALINK_RT2561S	0x0301		/* RT2561S */
 #define	PCI_PRODUCT_RALINK_RT2561	0x0302		/* RT2561 */
 #define	PCI_PRODUCT_RALINK_RT2661	0x0401		/* RT2661 */
-#define	PCI_PRODUCT_RALINK_RT2860_1	0x0601		/* RT2860 */
-#define	PCI_PRODUCT_RALINK_RT2860_1E	0x0681		/* RT2860E */
-#define	PCI_PRODUCT_RALINK_RT2860_2	0x0701		/* RT2860 */
-#define	PCI_PRODUCT_RALINK_RT2860_3	0x0801		/* RT2860 */
+#define	PCI_PRODUCT_RALINK_RT2860	0x0601		/* RT2860 */
+#define	PCI_PRODUCT_RALINK_RT2890	0x0681		/* RT2890 */
+#define	PCI_PRODUCT_RALINK_RT2760	0x0701		/* RT2760 */
+#define	PCI_PRODUCT_RALINK_RT2790	0x0781		/* RT2790 */
 
 /* Realtek products */
 #define	PCI_PRODUCT_REALTEK_RT8029	0x8029		/* 8029 */

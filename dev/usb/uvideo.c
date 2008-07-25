@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.56 2008/07/19 11:30:55 mglocker Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.61 2008/07/24 13:30:10 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -91,7 +91,7 @@ int		uvideo_desc_len(const usb_descriptor_t *, int, int, int, int);
 int		uvideo_find_res(struct uvideo_softc *, int, int, int,
 		    struct uvideo_res *);
 
-usbd_status	uvideo_vs_negotation(struct uvideo_softc *, int);
+usbd_status	uvideo_vs_negotiation(struct uvideo_softc *, int);
 usbd_status	uvideo_vs_set_probe(struct uvideo_softc *, uint8_t *);
 usbd_status	uvideo_vs_get_probe(struct uvideo_softc *, uint8_t *, uint8_t);
 usbd_status	uvideo_vs_set_commit(struct uvideo_softc *, uint8_t *);
@@ -287,6 +287,19 @@ uvideo_close(void *addr)
 	return (0);
 }
 
+/*
+ * Some devices do not report themselfs as UVC compatible although
+ * they are.  They report UICLASS_VENDOR in the bInterfaceClass
+ * instead of UICLASS_VIDEO.  Give those devices a chance to attach
+ * by looking up their USB ID.
+ *
+ * If the device also doesn't set UDCLASS_VIDEO you need to add an
+ * entry in usb_quirks.c, too, so the ehci disown works.
+ */
+static const struct usb_devno uvideo_quirk_devs [] = {
+	{ USB_VENDOR_LOGITECH,	USB_PRODUCT_LOGITECH_QUICKCAMOEM_1 }
+};
+
 int
 uvideo_match(struct device *parent, void *match, void *aux)
 {
@@ -301,6 +314,11 @@ uvideo_match(struct device *parent, void *match, void *aux)
 		return (UMATCH_NONE);
 
 	if (id->bInterfaceClass == UICLASS_VIDEO &&
+	    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
+		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
+
+	if (usb_lookup(uvideo_quirk_devs, uaa->vendor, uaa->product) != NULL &&
+	    id->bInterfaceClass == UICLASS_VENDOR &&
 	    id->bInterfaceSubClass == UISUBCLASS_VIDEOCONTROL)
 		return (UMATCH_VENDOR_PRODUCT_CONF_IFACE);
 
@@ -348,8 +366,8 @@ uvideo_attach(struct device *parent, struct device *self, void *aux)
 	if (error != USBD_NORMAL_COMPLETION)
 		return;
 
-	/* do device negotation without commit */
-	error = uvideo_vs_negotation(sc, 0);
+	/* do device negotiation without commit */
+	error = uvideo_vs_negotiation(sc, 0);
 	if (error != USBD_NORMAL_COMPLETION)
 		return;
 
@@ -535,7 +553,9 @@ uvideo_vs_parse_desc(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 		DPRINTF(1, "bInterfaceNumber=0x%02x, numalts=%d\n",
 		    id->bInterfaceNumber, numalts);
 
-		uvideo_vs_parse_desc_alt(sc, uaa, i, iface, numalts);
+		error = uvideo_vs_parse_desc_alt(sc, uaa, i, iface, numalts);
+		if (error != USBD_NORMAL_COMPLETION)
+			return (error);
 	}
 
 	/* XXX for now always use the first video stream */
@@ -700,7 +720,7 @@ uvideo_vs_parse_desc_frame(struct uvideo_softc *sc)
 			break;
 		case UDESCSUB_VS_FRAME_UNCOMPRESSED:
 			/* XXX do correct length calculation */
-			if (desc->bLength == 38) {
+			if (desc->bLength > 25) {
 				if (uvideo_vs_parse_desc_frame_uncompressed(sc,
 				    desc, &fmtidx))
 					return (1);
@@ -818,12 +838,17 @@ uvideo_vs_parse_desc_alt(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 		}
 
 		/* jump to corresponding endpoint descriptor */
-		desc = usb_desc_iter_next(&iter);
-		if (desc->bDescriptorType != UDESC_ENDPOINT)
-			goto next;
+		while ((desc = usb_desc_iter_next(&iter))) {
+			if (desc->bDescriptorType == UDESC_ENDPOINT)
+				break;
+		}
 		ed = (usb_endpoint_descriptor_t *)(uint8_t *)desc;
 		DPRINTF(1, "bEndpointAddress=0x%02x, ", ed->bEndpointAddress);
 		DPRINTF(1, "wMaxPacketSize=%d\n", UGETW(ed->wMaxPacketSize));
+
+		/* we just support isoc endpoints yet */
+		if (UE_GET_XFERTYPE(ed->bmAttributes) != UE_ISOCHRONOUS)
+			goto next;
 
 		/* save endpoint with largest bandwidth */
 		if (UGETW(ed->wMaxPacketSize) > vs->max_packet_size) {
@@ -836,6 +861,13 @@ uvideo_vs_parse_desc_alt(struct uvideo_softc *sc, struct usb_attach_arg *uaa,
 		}
 next:
 		desc = usb_desc_iter_next(&iter);
+	}
+
+	/* check if we have found a valid alternate interface */
+	if (vs->ifaceh == NULL) {
+		printf("%s: no valid alternate interface found!\n",
+		    DEVNAME(sc));
+		return (USBD_INVAL);
 	}
 
 	return (USBD_NORMAL_COMPLETION);
@@ -970,7 +1002,7 @@ uvideo_find_res(struct uvideo_softc *sc, int idx, int width, int height,
 }
 
 usbd_status
-uvideo_vs_negotation(struct uvideo_softc *sc, int commit)
+uvideo_vs_negotiation(struct uvideo_softc *sc, int commit)
 {
 	struct usb_video_probe_commit *pc;
 	uint8_t probe_data[34];
@@ -1227,8 +1259,8 @@ uvideo_vs_open(struct uvideo_softc *sc)
 	DPRINTF(1, "%s: %s\n", DEVNAME(sc), __func__);
 
 	if (sc->sc_negotiated_flag == 0) {
-		/* do device negotation with commit */
-		error = uvideo_vs_negotation(sc, 1);
+		/* do device negotiation with commit */
+		error = uvideo_vs_negotiation(sc, 1);
 		if (error != USBD_NORMAL_COMPLETION)
 			return (error);
 	}
@@ -1588,7 +1620,7 @@ uvideo_dump_desc_all(struct uvideo_softc *sc)
 				printf("bDescriptorSubtype=0x%02x",
 				    desc->bDescriptorSubtype);
 				/* XXX do correct length calculation */
-				if (desc->bLength > 11) {
+				if (desc->bLength > 25) {
 					printf(" (UDESCSUB_VS_FRAME_"
 					    "UNCOMPRESSED)\n");
 					uvideo_dump_desc_frame_uncompressed(
@@ -2066,7 +2098,7 @@ uvideo_enum_fmt(void *v, struct v4l2_fmtdesc *fmtdesc)
 		return (EINVAL);
 
 	idx = fmtdesc->index + 1;
-	if (idx == UVIDEO_MAX_FORMAT || sc->sc_fmtgrp[idx].format == NULL)
+	if (idx > sc->sc_fmtgrp_num) 
 		/* no more formats left */
 		return (EINVAL);
 
@@ -2080,13 +2112,13 @@ uvideo_enum_fmt(void *v, struct v4l2_fmtdesc *fmtdesc)
 		break;
 	case UDESCSUB_VS_FORMAT_UNCOMPRESSED:
 		fmtdesc->flags = 0;
-		if (!strcmp(sc->sc_fmtgrp[idx].format->u.uc.guidFormat,
-		    "YUY2")) {
+		if (sc->sc_fmtgrp[idx].pixelformat ==
+		    V4L2_PIX_FMT_YUYV) {
 			(void)strlcpy(fmtdesc->description, "YUYV",
 			    sizeof(fmtdesc->description));
 			fmtdesc->pixelformat = V4L2_PIX_FMT_YUYV;
-		} else if (!strcmp(sc->sc_fmtgrp[idx].format->u.uc.guidFormat,
-		    "NV12")) {
+		} else if (sc->sc_fmtgrp[idx].pixelformat ==
+		    V4L2_PIX_FMT_NV12) {
 			(void)strlcpy(fmtdesc->description, "NV12",
 			    sizeof(fmtdesc->description));
 			fmtdesc->pixelformat = V4L2_PIX_FMT_NV12;
@@ -2139,17 +2171,17 @@ uvideo_s_fmt(void *v, struct v4l2_format *fmt)
 	uvideo_find_res(sc, i, fmt->fmt.pix.width, fmt->fmt.pix.height, &r);
 
 	/*
-	 * Do negotation.
+	 * Do negotiation.
 	 */
-	/* save a copy of current fromat group in case of negotation fails */
+	/* save a copy of current fromat group in case of negotiation fails */
 	fmtgrp_save = sc->sc_fmtgrp_cur;
 	frame_save = sc->sc_fmtgrp_cur->frame_cur;
 	/* set new format group */
 	sc->sc_fmtgrp_cur = &sc->sc_fmtgrp[i];
 	sc->sc_fmtgrp[i].frame_cur = sc->sc_fmtgrp[i].frame[r.fidx];
 	sc->sc_fmtgrp[i].format_dfidx = r.fidx;
-	/* do device negotation with commit */
-	error = uvideo_vs_negotation(sc, 1);
+	/* do device negotiation with commit */
+	error = uvideo_vs_negotiation(sc, 1);
 	if (error != USBD_NORMAL_COMPLETION) {
 		sc->sc_fmtgrp_cur = fmtgrp_save;
 		sc->sc_fmtgrp_cur->frame_cur = frame_save;

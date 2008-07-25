@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.88 2008/07/23 16:24:43 beck Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.87 2008/07/20 01:53:43 krw Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -652,8 +652,6 @@ vndiodone(struct buf *bp)
 		    vbp->vb_buf.b_error);
 
 		pbp->b_flags |= B_ERROR;
-		/* XXX does this matter here? */
-		(&vbp->vb_buf)->b_flags |= B_RAW;
 		pbp->b_error = biowait(&vbp->vb_buf);
 	}
 	pbp->b_resid -= vbp->vb_buf.b_bcount;
@@ -744,11 +742,13 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	DNPRINTF(VDB_FOLLOW, "vndioctl(%x, %lx, %p, %x, %p): unit %d\n",
 	    dev, cmd, addr, flag, p, unit);
 
-	error = suser(p, 0);
-	if (error)
-		return (error);
-	if (unit >= numvnd)
-		return (ENXIO);
+	if (p) {
+		error = suser(p, 0);
+		if (error)
+			return (error);
+		if (unit >= numvnd)
+			return (ENXIO);
+	}
 
 	vnd = &vnd_softc[unit];
 	vio = (struct vnd_ioctl *)addr;
