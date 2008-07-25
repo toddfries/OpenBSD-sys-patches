@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.610 2008/07/14 13:29:45 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.613 2008/07/22 12:31:35 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -207,7 +207,7 @@ int			 pf_test_state_icmp(struct pf_state **, int,
 int			 pf_test_state_other(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, struct pf_pdesc *);
 void			 pf_step_into_anchor(int *, struct pf_ruleset **, int,
-			    struct pf_rule **, struct pf_rule **,  int *);
+			    struct pf_rule **, struct pf_rule **, int *);
 int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
 			     int, struct pf_rule **, struct pf_rule **,
 			     int *);
@@ -674,7 +674,7 @@ pf_state_key_attach(struct pf_state_key *sk, struct pf_state *s, int idx)
 					    "pf: %s key attach failed on %s: ",
 					    (idx == PF_SK_WIRE) ?
 					    "wire" : "stack",
-		     			    s->kif->pfik_name);
+					    s->kif->pfik_name);
 					pf_print_state_parts(s,
 					    (idx == PF_SK_WIRE) ? sk : NULL,
 					    (idx == PF_SK_STACK) ? sk : NULL);
@@ -2010,7 +2010,7 @@ pf_tag_packet(struct mbuf *m, int tag, int rtableid)
 
 void
 pf_step_into_anchor(int *depth, struct pf_ruleset **rs, int n,
-    struct pf_rule **r, struct pf_rule **a,  int *match)
+    struct pf_rule **r, struct pf_rule **a, int *match)
 {
 	struct pf_anchor_stackframe	*f;
 
@@ -2074,7 +2074,7 @@ pf_step_out_of_anchor(int *depth, struct pf_ruleset **rs, int n,
 		if (*depth == 0 && a != NULL)
 			*a = NULL;
 		*rs = f->rs;
-		if (f->r->anchor->match || (match  != NULL && *match))
+		if (f->r->anchor->match || (match != NULL && *match))
 			quick = f->r->quick;
 		*r = TAILQ_NEXT(f->r, entries);
 	} while (*r == NULL);
@@ -3058,7 +3058,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_FILTER].active.ptr);
 
 	bport = nport = sport;
-	/* check  packet for BINAT/NAT/RDR */
+	/* check packet for BINAT/NAT/RDR */
 	if ((nr = pf_get_translation(pd, m, off, direction, kif, &nsn,
 	    &skw, &sks, &sk, &nk, saddr, daddr, sport, dport)) != NULL) {
 		if (nk == NULL || sk == NULL) {
@@ -3160,7 +3160,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 				    &nk->addr[pd->sidx], AF_INET))
 					pf_change_a(&saddr->v4.s_addr,
 					    pd->ip_sum,
-					    nk->addr[pd->didx].v4.s_addr, 0);
+					    nk->addr[pd->sidx].v4.s_addr, 0);
 
 				if (PF_ANEQ(daddr,
 				    &nk->addr[pd->didx], AF_INET))
@@ -3537,12 +3537,15 @@ pf_create_state(struct pf_rule *r, struct pf_rule *nr, struct pf_rule *a,
 		s->src.state = PF_TCPS_PROXY_SRC;
 		/* undo NAT changes, if they have taken place */
 		if (nr != NULL) {
-			PF_ACPY(pd->src, &sk->addr[pd->sidx], pd->af);
-			PF_ACPY(pd->dst, &sk->addr[pd->didx], pd->af);
+			struct pf_state_key *skt = s->key[PF_SK_WIRE];
+			if (pd->dir == PF_OUT)
+				skt = s->key[PF_SK_STACK];
+			PF_ACPY(pd->src, &skt->addr[pd->sidx], pd->af);
+			PF_ACPY(pd->dst, &skt->addr[pd->didx], pd->af);
 			if (pd->sport)
-				*pd->sport = sk->port[pd->sidx];
+				*pd->sport = skt->port[pd->sidx];
 			if (pd->dport)
-				*pd->dport = sk->port[pd->didx];
+				*pd->dport = skt->port[pd->didx];
 			if (pd->proto_sum)
 				*pd->proto_sum = bproto_sum;
 			if (pd->ip_sum)

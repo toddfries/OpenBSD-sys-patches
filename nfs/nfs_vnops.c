@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.94 2008/07/06 16:54:48 thib Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.97 2008/07/23 17:40:29 deraadt Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -1154,7 +1154,7 @@ nfs_mknodrpc(dvp, vpp, cnp, vap)
 	u_int32_t *tl;
 	int32_t t1;
 	struct vnode *newvp = (struct vnode *)0;
-	struct nfsnode *np;
+	struct nfsnode *np = NULL;
 	char *cp2;
 	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR, gotvp = 0;
@@ -2523,6 +2523,7 @@ nfs_lookitup(dvp, name, len, cred, procp, npp)
 		} else if (NFS_CMPFH(dnp, nfhp, fhlen)) {
 		    VREF(dvp);
 		    newvp = dvp;
+		    np = dnp;
 		} else {
 		    error = nfs_nget(dvp->v_mount, nfhp, fhlen, &np);
 		    if (error) {
@@ -2996,7 +2997,10 @@ nfs_writebp(bp, force)
 	}
 
 	if( (oldflags & B_ASYNC) == 0) {
-		int rtval = biowait(bp);
+		int rtval;
+
+		bp->b_flags |= B_RAW;
+		rtval = biowait(bp);
 		if (!(oldflags & B_DELWRI) && p) {
 			++p->p_stats->p_ru.ru_oublock;
 		}
