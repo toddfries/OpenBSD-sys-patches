@@ -390,11 +390,7 @@ sr_meta_clear(struct sr_discipline *sd)
 		bzero(&ch_entry->src_opt, sizeof(ch_entry->src_opt));
 	}
 
-<<<<<<< HEAD:dev/softraid.c
-	bzero(&sd->sd_meta, sizeof(sd->sd_meta));
-=======
 	bzero(sd->sd_meta, SR_META_SIZE * 512);
->>>>>>> master:dev/softraid.c
 
 	free(m, M_DEVBUF);
 	rv = 0;
@@ -560,14 +556,6 @@ restart:
 		src = sd->sd_vol.sv_chunks[i];
 		cm = (struct sr_meta_chunk *)(m + 1);
 		bcopy(&src->src_meta, cm + i, sizeof(*cm));
-<<<<<<< HEAD:dev/softraid.c
-
-		/* calculate metdata checksum and ids */
-		m->ssdi.ssd_chunk_id = i;
-		sr_checksum(sc, m, &m->ssd_checksum,
-		    sizeof(struct sr_meta_invariant));
-=======
->>>>>>> master:dev/softraid.c
 	}
 
 	/* optional metadata */
@@ -585,14 +573,11 @@ restart:
 		if (src->src_meta.scm_status == BIOC_SDOFFLINE)
 			continue;
 
-<<<<<<< HEAD:dev/softraid.c
-=======
 		/* calculate metdata checksum for correct chunk */
 		m->ssdi.ssd_chunk_id = i;
 		sr_checksum(sc, m, &m->ssd_checksum,
 		    sizeof(struct sr_meta_invariant));
 
->>>>>>> master:dev/softraid.c
 #ifdef SR_DEBUG
 		DNPRINTF(SR_D_META, "%s: sr_meta_save %s: volid: %d "
 		    "chunkid: %d checksum: ",
@@ -769,73 +754,6 @@ done:
 }
 
 int
-<<<<<<< HEAD:dev/softraid.c
-sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
-{
-	struct disklabel	label;
-	char			*devname;
-	int			error, part;
-	daddr64_t		size;
-	struct bdevsw		*bdsw;
-	dev_t			dev;
-
-	DNPRINTF(SR_D_META, "%s: sr_meta_native_probe(%s)\n",
-	   DEVNAME(sc), ch_entry->src_devname);
-
-	dev = ch_entry->src_dev_mm;
-	devname = ch_entry->src_devname;
-	bdsw = bdevsw_lookup(dev);
-	part = DISKPART(dev);
-
-	/* get disklabel */
-	error = bdsw->d_ioctl(dev, DIOCGDINFO, (void *)&label, 0, NULL);
-	if (error) {
-		DNPRINTF(SR_D_META, "%s: %s can't obtain disklabel\n",
-		    DEVNAME(sc), devname);
-		goto unwind;
-	}
-
-	/* make sure the partition is of the right type */
-	if (label.d_partitions[part].p_fstype != FS_RAID) {
-		DNPRINTF(SR_D_META,
-		    "%s: %s partition not of type RAID (%d)\n", DEVNAME(sc) ,
-		        devname,
-		    label.d_partitions[part].p_fstype);
-		goto unwind;
-	}
-
-	size = DL_GETPSIZE(&label.d_partitions[part]) -
-	    SR_META_SIZE - SR_META_OFFSET;
-	if (size <= 0) {
-		DNPRINTF(SR_D_META, "%s: %s partition too small\n", DEVNAME(sc),
-		    devname);
-		goto unwind;
-	}
-	ch_entry->src_size = size;
-
-	DNPRINTF(SR_D_META, "%s: probe found %s size %d\n", DEVNAME(sc),
-	    devname, size);
-
-	return (SR_META_F_NATIVE);
-unwind:
-	DNPRINTF(SR_D_META, "%s: invalid device: %s\n", DEVNAME(sc),
-	    devname ? devname : "nodev");
-	return (SR_META_F_INVALID);
-}
-
-int
-sr_meta_native_attach(struct sr_discipline *sd, int force)
-{
-	struct sr_softc		*sc = sd->sd_sc;
-	struct sr_chunk_head 	*cl = &sd->sd_vol.sv_chunk_list;
-	struct sr_metadata	*md = NULL;
-	struct sr_chunk		*ch_entry;
-	struct sr_uuid		uuid;
-	int			sr, not_sr, rv = 1, d, expected = -1;
-
-	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
-
-=======
 sr_meta_native_bootprobe(struct sr_softc *sc, struct device *dv,
     struct sr_metadata_list_head *mlh)
 {
@@ -1129,7 +1047,6 @@ sr_meta_native_attach(struct sr_discipline *sd, int force)
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_attach\n", DEVNAME(sc));
 
->>>>>>> master:dev/softraid.c
 	md = malloc(SR_META_SIZE * 512 , M_DEVBUF, M_ZERO);
 	if (md == NULL) {
 		printf("%s: not enough memory for metadata buffer\n",
@@ -2131,12 +2048,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		sr_meta_init(sd, cl);
 	} else {
 		if (strncmp(sd->sd_meta->ssd_devname, dev->dv_xname,
-<<<<<<< HEAD:dev/softraid.c
-		    sizeof(dev->dv_xname)))
-			printf("%s: volume %s is roaming, it used to be %s\n",
-			    DEVNAME(sc), sd->sd_meta->ssd_devname,
-			    dev->dv_xname);
-=======
 		    sizeof(dev->dv_xname))) {
 			printf("%s: volume %s is roaming, it used to be %s, "
 			    "updating metadata\n",
@@ -2147,7 +2058,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 			strlcpy(sd->sd_meta->ssd_devname, dev->dv_xname,
 			    sizeof(sd->sd_meta->ssd_devname));
 		}
->>>>>>> master:dev/softraid.c
 	}
 
 	/* save metadata to disk */
@@ -2382,7 +2292,6 @@ sr_raid_tur(struct sr_workunit *wu)
 	return (0);
 }
 
-<<<<<<< HEAD:dev/softraid.c
 int
 sr_raid_request_sense(struct sr_workunit *wu)
 {
@@ -2463,249 +2372,6 @@ sr_raid_sync(struct sr_workunit *wu)
 	wakeup(&sd->sd_sync);
 
 	return (rv);
-}
-
-void
-sr_raid_startwu(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-	struct sr_ccb		*ccb;
-
-	splassert(IPL_BIO);
-
-	if (wu->swu_state == SR_WU_RESTART)
-		/*
-		 * no need to put the wu on the pending queue since we
-		 * are restarting the io
-		 */
-		 ;
-	else
-		/* move wu to pending queue */
-		TAILQ_INSERT_TAIL(&sd->sd_wu_pendq, wu, swu_link);
-
-	/* start all individual ios */
-	TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
-		bdevsw_lookup(ccb->ccb_buf.b_dev)->d_strategy(&ccb->ccb_buf);
-	}
-}
-
-void
-sr_checksum_print(u_int8_t *md5)
-{
-	int			i;
-
-	for (i = 0; i < MD5_DIGEST_LENGTH; i++)
-		printf("%02x", md5[i]);
-}
-
-void
-sr_checksum(struct sr_softc *sc, void *src, void *md5, u_int32_t len)
-{
-	MD5_CTX			ctx;
-
-	DNPRINTF(SR_D_MISC, "%s: sr_checksum(%p %p %d)\n", DEVNAME(sc), src,
-	    md5, len);
-
-	MD5Init(&ctx);
-	MD5Update(&ctx, src, len);
-	MD5Final(md5, &ctx);
-}
-
-void
-sr_uuid_get(struct sr_uuid *uuid)
-{
-	/* XXX replace with idgen32 */
-	arc4random_buf(uuid->sui_id, sizeof(uuid->sui_id));
-}
-
-void
-sr_uuid_print(struct sr_uuid *uuid, int cr)
-{
-	int			i;
-
-	for (i = 0; i < SR_UUID_MAX; i++)
-		printf("%x%s", uuid->sui_id[i],
-		    i < SR_UUID_MAX - 1 ? ":" : "");
-
-	if (cr)
-		printf("\n");
-}
-
-int
-sr_already_assembled(struct sr_discipline *sd)
-{
-	struct sr_softc		*sc = sd->sd_sc;
-	int			i;
-
-	for (i = 0; i < SR_MAXSCSIBUS; i++)
-		if (sc->sc_dis[i])
-			if (!bcmp(&sd->sd_meta->ssdi.ssd_uuid,
-			    &sc->sc_dis[i]->sd_meta->ssdi.ssd_uuid,
-			    sizeof(sd->sd_meta->ssdi.ssd_uuid)))
-				return (1);
-
-	return (0);
-}
-
-=======
->>>>>>> master:dev/softraid.c
-int
-sr_raid_request_sense(struct sr_workunit *wu)
-{
-<<<<<<< HEAD:dev/softraid.c
-	return 1;
-#if 0
-	struct device		*dv;
-	struct buf		*bp;
-	struct bdevsw		*bdsw;
-	struct disklabel	label;
-	struct sr_metadata	*sm;
-	struct sr_metadata_list_head mlh;
-	struct sr_metadata_list *mle, *mle2;
-	struct sr_vol_meta	*vm;
-	struct bioc_createraid	bc;
-	dev_t			dev, devr, *dt = NULL;
-	int			error, majdev, i, no_dev, rv = 0;
-	size_t			sz = SR_META_SIZE * 512;
-
-	DNPRINTF(SR_D_META, "%s: sr_boot_assembly\n", DEVNAME(sc));
-=======
-	struct sr_discipline	*sd = wu->swu_dis;
-	struct scsi_xfer	*xs = wu->swu_xs;
->>>>>>> master:dev/softraid.c
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid_request_sense\n",
-	    DEVNAME(sd->sd_sc));
-
-	/* use latest sense data */
-	bcopy(&sd->sd_scsi_sense, &xs->sense, sizeof(xs->sense));
-
-	/* clear sense data */
-	bzero(&sd->sd_scsi_sense, sizeof(sd->sd_scsi_sense));
-
-	return (0);
-}
-
-int
-sr_raid_start_stop(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-	struct scsi_xfer	*xs = wu->swu_xs;
-	struct scsi_start_stop	*ss = (struct scsi_start_stop *)xs->cmd;
-	int			rv = 1;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid_start_stop\n",
-	    DEVNAME(sd->sd_sc));
-
-	if (!ss)
-		return (rv);
-
-	if (ss->byte2 == 0x00) {
-		/* START */
-		if (sd->sd_vol_status == BIOC_SVOFFLINE) {
-			/* bring volume online */
-			/* XXX check to see if volume can be brought online */
-			sd->sd_vol_status = BIOC_SVONLINE;
-		}
-<<<<<<< HEAD:dev/softraid.c
-
-		/* are we a softraid partition? */
-		for (i = 0; i < MAXPARTITIONS; i++) {
-			if (label.d_partitions[i].p_fstype != FS_RAID)
-				continue;
-
-			/* open device */
-			bp->b_dev = devr = MAKEDISKDEV(majdev, dv->dv_unit, i);
-			error = (*bdsw->d_open)(devr, FREAD, S_IFCHR, curproc);
-			if (error) {
-				DNPRINTF(SR_D_META, "%s: sr_boot_assembly "
-				    "open failed, partition %d\n",
-				    DEVNAME(sc), i);
-				continue;
-			}
-			/* read metadat */
-			bp->b_flags = B_BUSY | B_READ;
-			bp->b_blkno = SR_META_OFFSET;
-			bp->b_cylinder = 0;
-			bp->b_bcount = sz;
-			bp->b_bufsize = sz;
-			bp->b_resid = sz;
-			(*bdsw->d_strategy)(bp);
-			if ((error = biowait(bp))) {
-				DNPRINTF(SR_D_META, "%s: sr_boot_assembly "
-				    "strategy failed, partition %d\n",
-				    DEVNAME(sc));
-				error = (*bdsw->d_close)(devr, FREAD, S_IFCHR,
-				    curproc);
-				continue;
-			}
-
-			sm = (struct sr_metadata *)bp->b_data;
-			if (!sr_meta_validate(sc, devr, sm)) {
-				/* we got one; save it off */
-				mle = malloc(sizeof(*mle), M_DEVBUF,
-				    M_WAITOK | M_ZERO);
-				mle->sml_metadata = malloc(sz, M_DEVBUF,
-				    M_WAITOK | M_ZERO);
-				bcopy(sm, mle->sml_metadata, sz);
-				mle->sml_mm = devr;
-				SLIST_INSERT_HEAD(&mlh, mle, sml_link);
-			}
-
-			/* we are done, close device */
-			error = (*bdsw->d_close)(devr, FREAD, S_IFCHR,
-			    curproc);
-			if (error) {
-				DNPRINTF(SR_D_META, "%s: sr_boot_assembly "
-				    "close failed\n", DEVNAME(sc));
-				continue;
-			}
-=======
-		rv = 0;
-	} else /* XXX is this the check? if (byte == 0x01) */ {
-		/* STOP */
-		if (sd->sd_vol_status == BIOC_SVONLINE) {
-			/* bring volume offline */
-			sd->sd_vol_status = BIOC_SVOFFLINE;
->>>>>>> master:dev/softraid.c
-		}
-		rv = 0;
-	}
-
-	return (rv);
-}
-
-int
-sr_raid_sync(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-	int			s, rv = 0, ios;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid_sync\n", DEVNAME(sd->sd_sc));
-
-	/* when doing a fake sync don't coun't the wu */
-	ios = wu->swu_fake ? 0 : 1;
-
-	s = splbio();
-	sd->sd_sync = 1;
-
-	while (sd->sd_wu_pending > ios)
-		if (tsleep(sd, PRIBIO, "sr_sync", 15 * hz) == EWOULDBLOCK) {
-			DNPRINTF(SR_D_DIS, "%s: sr_raid_sync timeout\n",
-			    DEVNAME(sd->sd_sc));
-			rv = 1;
-			break;
-		}
-
-	sd->sd_sync = 0;
-	splx(s);
-
-	wakeup(&sd->sd_sync);
-
-	return (rv);
-<<<<<<< HEAD:dev/softraid.c
-#endif
-=======
 }
 
 void
@@ -2798,7 +2464,6 @@ sr_already_assembled(struct sr_discipline *sd)
 				return (1);
 
 	return (0);
->>>>>>> master:dev/softraid.c
 }
 
 int32_t

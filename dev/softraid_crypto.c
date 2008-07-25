@@ -179,10 +179,6 @@ unwind:
 		crypto_freereq(crp);
 	if (wu->swu_xs->flags & SCSI_DATA_OUT)
 		free(uio->uio_iov->iov_base, M_DEVBUF);
-<<<<<<< HEAD:dev/softraid_crypto.c
-	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
-	pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
-=======
 
 	s = splbio();
 	if (uio && uio->uio_iov)
@@ -191,7 +187,6 @@ unwind:
 		pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
 	splx(s);
 
->>>>>>> master:dev/softraid_crypto.c
 	return (NULL);
 }
 
@@ -201,25 +196,17 @@ sr_crypto_putcryptop(struct cryptop *crp)
 	struct uio		*uio = crp->crp_buf;
 	struct sr_workunit	*wu = crp->crp_opaque;
 	struct sr_discipline	*sd = wu->swu_dis;
-<<<<<<< HEAD:dev/softraid_crypto.c
-=======
 	int			s;
->>>>>>> master:dev/softraid_crypto.c
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_putcryptop crp: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), crp);
 
 	if (wu->swu_xs->flags & SCSI_DATA_OUT)
 		free(uio->uio_iov->iov_base, M_DEVBUF);
-<<<<<<< HEAD:dev/softraid_crypto.c
-	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
-	pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
-=======
 	s = splbio();
 	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
 	pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
 	splx(s);
->>>>>>> master:dev/softraid_crypto.c
 	crypto_freereq(crp);
 
 	return (wu);
