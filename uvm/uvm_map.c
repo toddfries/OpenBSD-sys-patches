@@ -94,6 +94,9 @@
 #include <uvm/uvm_ddb.h>
 #endif
 
+static struct timeval uvm_kmapent_last_warn_time;
+static struct timeval uvm_kmapent_warn_rate = { 10, 0 };
+
 struct uvm_cnt uvm_map_call, map_backmerge, map_forwmerge;
 struct uvm_cnt uvm_mlk_call, uvm_mlk_hint;
 const char vmmapbsy[] = "vmmapbsy";
@@ -115,6 +118,7 @@ struct pool uvm_vmspace_pool;
  */
 
 struct pool uvm_map_entry_pool;
+struct pool uvm_map_entry_kmem_pool;
 
 #ifdef PMAP_GROWKERNEL
 /*
@@ -196,10 +200,7 @@ int uvm_map_spacefits(struct vm_map *, vaddr_t *, vsize_t,
     struct vm_map_entry *, voff_t, vsize_t);
 
 struct vm_map_entry	*uvm_mapent_alloc(struct vm_map *);
-void			 uvm_mapent_free(struct vm_map_entry *);
-struct vm_map_entry	*uvm_smapent_alloc(void);
-void			 uvm_smapent_free(struct vm_map_entry *);
-void			 uvm_init_smapent(void);
+void			uvm_mapent_free(struct vm_map_entry *);
 
 
 /*
@@ -379,113 +380,85 @@ _uvm_tree_sanity(struct vm_map *map, const char *name)
 }
 #endif
 
-/* uvm_mapent_alloc: allocate a map entry. */
+/*
+ * uvm_mapent_alloc: allocate a map entry
+ */
+
 struct vm_map_entry *
 uvm_mapent_alloc(struct vm_map *map)
 {
-	struct vm_map_entry		*me;
-	int				 s;
+	struct vm_map_entry *me, *ne;
+	int s, i;
+	UVMHIST_FUNC("uvm_mapent_alloc"); UVMHIST_CALLED(maphist);
 
-	UVMHIST_FUNC("uvm_mapent_alloc");
-	UVMHIST_CALLED(maphist);
-
-	if (cold)
-		return (uvm_smapent_alloc());
-
-	if (map->flags & VM_MAP_INTRSAFE || map == kernel_map) {
+	if (map->flags & VM_MAP_INTRSAFE || cold) {
 		s = splvm();
-		me = pool_get(&uvm_map_entry_pool, PR_NOWAIT|PR_ZERO);
+		simple_lock(&uvm.kentry_lock);
+		me = uvm.kentry_free;
+		if (me == NULL) {
+			ne = uvm_km_getpage(0);
+			if (ne == NULL)
+				panic("uvm_mapent_alloc: cannot allocate map "
+				    "entry");
+			for (i = 0;
+			    i < PAGE_SIZE / sizeof(struct vm_map_entry) - 1;
+			    i++)
+				ne[i].next = &ne[i + 1];
+			ne[i].next = NULL;
+			me = ne;
+			if (ratecheck(&uvm_kmapent_last_warn_time,
+			    &uvm_kmapent_warn_rate))
+				printf("uvm_mapent_alloc: out of static "
+				    "map entries\n");
+		}
+		uvm.kentry_free = me->next;
+		uvmexp.kmapent++;
+		simple_unlock(&uvm.kentry_lock);
 		splx(s);
-
-		if (__predict_false(me == NULL))
-			return (uvm_smapent_alloc());
-
-		me->flags = UVM_MAP_INTR;
-		goto out;
+		me->flags = UVM_MAP_STATIC;
+	} else if (map == kernel_map) {
+		splassert(IPL_NONE);
+		me = pool_get(&uvm_map_entry_kmem_pool, PR_WAITOK);
+		me->flags = UVM_MAP_KMEM;
+	} else {
+		splassert(IPL_NONE);
+		me = pool_get(&uvm_map_entry_pool, PR_WAITOK);
+		me->flags = 0;
 	}
 
-	splassert(IPL_NONE);
-	me = pool_get(&uvm_map_entry_pool, PR_WAITOK|PR_ZERO);
-
- out:
 	UVMHIST_LOG(maphist, "<- new entry=%p [kentry=%ld]", me,
 	    ((map->flags & VM_MAP_INTRSAFE) != 0 || map == kernel_map), 0, 0);
-
-	return (me);
+	return(me);
 }
 
-/* uvm_mapent_free: free map entry */
+/*
+ * uvm_mapent_free: free map entry
+ *
+ * => XXX: static pool for kernel map?
+ */
+
 void
 uvm_mapent_free(struct vm_map_entry *me)
 {
 	int s;
-	
-	UVMHIST_FUNC("uvm_mapent_free");
-	UVMHIST_CALLED(maphist);
+	UVMHIST_FUNC("uvm_mapent_free"); UVMHIST_CALLED(maphist);
+
 	UVMHIST_LOG(maphist,"<- freeing map entry=%p [flags=%ld]",
-	    me, me->flags, 0, 0);
-
+		me, me->flags, 0, 0);
 	if (me->flags & UVM_MAP_STATIC) {
-		uvm_smapent_free(me);
-		return;
-	}
-
-	/* XXX: Will a simple pool_put() do ? */
-	if (me->flags & UVM_MAP_INTR) {
 		s = splvm();
-		pool_put(&uvm_map_entry_pool, me);
+		simple_lock(&uvm.kentry_lock);
+		me->next = uvm.kentry_free;
+		uvm.kentry_free = me;
+		uvmexp.kmapent--;
+		simple_unlock(&uvm.kentry_lock);
 		splx(s);
+	} else if (me->flags & UVM_MAP_KMEM) {
+		splassert(IPL_NONE);
+		pool_put(&uvm_map_entry_kmem_pool, me);
 	} else {
 		splassert(IPL_NONE);
 		pool_put(&uvm_map_entry_pool, me);
-	}
-}
-
-/* XXX: NEEDS MAJOR WORK :XXX */
-struct vm_map_entry	kernel_map_entry[MAX_KMAPENT];
-
-struct vm_map_entry *
-uvm_smapent_alloc(void)
-{
-	struct vm_map_entry	*me;
-	int			 s;
-
-	s = splvm();
-	me = uvm.kentry_free;
-	if (__predict_false(me == NULL))
-		panic("%s: too many static map entries.", __func__);
-
-	uvm.kentry_free = me->next;
-	uvmexp.kmapent++;
-	me->flags = UVM_MAP_STATIC;
-	splx(s);
-	return (me);
-}
-
-void
-uvm_smapent_free(struct vm_map_entry *me)
-{
-	int			 s;
-
-	KASSERT(ISSET(me->flags, UVM_MAP_STATIC));
-
-	s = splvm();
-	me->flags = 0;
-	me->next = uvm.kentry_free;
-	uvm.kentry_free = me;
-	uvmexp.kmapent--;
-	splx(s);
-}
-
-void
-uvm_init_smapent(void)
-{
-	int	 i;
-
-	uvm.kentry_free = NULL;
-	for (i = 0; i < MAX_KMAPENT; i++) {
-		kernel_map_entry[i].next = uvm.kentry_free;
-		uvm.kentry_free = &kernel_map_entry[i];
 	}
 }
 
@@ -544,12 +517,17 @@ uvm_map_unreference_amap(struct vm_map_entry *entry, int flags)
 void
 uvm_map_init(void)
 {
+	static struct vm_map_entry kernel_map_entry[MAX_KMAPENT];
 #if defined(UVMHIST)
 	static struct uvm_history_ent maphistbuf[100];
 	static struct uvm_history_ent pdhistbuf[100];
 #endif
+	int lcv;
 
-	/* first, init logging system. */
+	/*
+	 * first, init logging system.
+	 */
+
 	UVMHIST_FUNC("uvm_map_init");
 	UVMHIST_INIT_STATIC(maphist, maphistbuf);
 	UVMHIST_INIT_STATIC(pdhist, pdhistbuf);
@@ -563,13 +541,27 @@ uvm_map_init(void)
 	UVMCNT_INIT(uvm_mlk_call,  UVMCNT_CNT, 0, "# map lookup calls", 0);
 	UVMCNT_INIT(uvm_mlk_hint,  UVMCNT_CNT, 0, "# map lookup hint hits", 0);
 
-	uvm_init_smapent();
+	/*
+	 * now set up static pool of kernel map entries ...
+	 */
 
-	/* Initialize the map-related pools. */
+	simple_lock_init(&uvm.kentry_lock);
+	uvm.kentry_free = NULL;
+	for (lcv = 0 ; lcv < MAX_KMAPENT ; lcv++) {
+		kernel_map_entry[lcv].next = uvm.kentry_free;
+		uvm.kentry_free = &kernel_map_entry[lcv];
+	}
+
+	/*
+	 * initialize the map-related pools.
+	 */
 	pool_init(&uvm_vmspace_pool, sizeof(struct vmspace),
-	    0, 0, 0, "vmsppl", NULL);
+	    0, 0, 0, "vmsppl", &pool_allocator_nointr);
 	pool_init(&uvm_map_entry_pool, sizeof(struct vm_map_entry),
-	    0, 0, 0, "vmmpepl", NULL);
+	    0, 0, 0, "vmmpepl", &pool_allocator_nointr);
+	pool_init(&uvm_map_entry_kmem_pool, sizeof(struct vm_map_entry),
+	    0, 0, 0, "vmmpekpl", NULL);
+	pool_sethiwat(&uvm_map_entry_pool, 8192);
 }
 
 /*
