@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.40 2008/07/21 19:27:26 damien Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.42 2008/07/28 19:42:13 damien Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -133,7 +133,7 @@ struct ieee80211_channel {
 #define	IEEE80211_FH_CHANPAT(chan)	((chan)%IEEE80211_FH_CHANMOD)
 
 /*
- * 802.11e EDCA AC parameters.
+ * EDCA AC parameters.
  */
 struct ieee80211_edca_ac_params {
 	u_int8_t	ac_ecwmin;	/* CWmin = 2^ECWmin - 1 */
@@ -164,10 +164,6 @@ struct ieee80211_rxinfo {
 	int			rxi_rssi;
 };
 #define IEEE80211_RXI_HWDEC	0x00000001
-
-#define	IEEE80211_PS_SLEEP	0x1	/* STA is in power saving mode */
-
-#define	IEEE80211_PS_MAX_QUEUE	50	/* maximum saved packets */
 
 #define	IEEE80211_SCAN_UNLOCKED	0x0
 #define	IEEE80211_SCAN_LOCKED	0x1
@@ -247,6 +243,7 @@ struct ieee80211com {
 	u_int16_t		ic_nonerpsta;	/* # non-ERP stations */
 	u_int16_t		ic_longslotsta;	/* # long slot time stations */
 	u_int16_t		ic_rsnsta;	/* # RSN stations */
+	u_int16_t		ic_pssta;	/* # ps mode stations */
 	int			ic_mgt_timer;	/* mgmt timeout */
 	int			ic_inact_timer;	/* inactivity timer wait */
 	int			ic_des_esslen;
