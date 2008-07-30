@@ -79,28 +79,29 @@
 #define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
 #define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
 
-#define DRM_MEM_DMA	   0
-#define DRM_MEM_SAREA	   1
-#define DRM_MEM_DRIVER	   2
-#define DRM_MEM_MAGIC	   3
-#define DRM_MEM_IOCTLS	   4
-#define DRM_MEM_MAPS	   5
-#define DRM_MEM_BUFS	   6
-#define DRM_MEM_SEGS	   7
-#define DRM_MEM_PAGES	   8
-#define DRM_MEM_FILES	  9
-#define DRM_MEM_QUEUES	  10
-#define DRM_MEM_CMDS	  11
-#define DRM_MEM_MAPPINGS  12
-#define DRM_MEM_BUFLISTS  13
-#define DRM_MEM_AGPLISTS  14
-#define DRM_MEM_TOTALAGP  15
-#define DRM_MEM_BOUNDAGP  16
-#define DRM_MEM_CTXBITMAP 17
-#define DRM_MEM_STUB	  18
-#define DRM_MEM_SGLISTS	  19
-#define DRM_MEM_DRAWABLE  20
-#define DRM_MEM_MM	21
+#define DRM_MEM_DMA		0
+#define DRM_MEM_SAREA		1
+#define DRM_MEM_DRIVER		2
+#define DRM_MEM_MAGIC		3
+#define DRM_MEM_IOCTLS		4
+#define DRM_MEM_MAPS		5
+#define DRM_MEM_BUFS		6
+#define DRM_MEM_SEGS		7
+#define DRM_MEM_PAGES		8
+#define DRM_MEM_FILES		9
+#define DRM_MEM_QUEUES		10
+#define DRM_MEM_CMDS		11
+#define DRM_MEM_MAPPINGS	12
+#define DRM_MEM_BUFLISTS	13
+#define DRM_MEM_AGPLISTS	14
+#define DRM_MEM_TOTALAGP	15
+#define DRM_MEM_BOUNDAGP	16
+#define DRM_MEM_CTXBITMAP	17
+#define DRM_MEM_CTXLIST		18
+#define DRM_MEM_STUB		19
+#define DRM_MEM_SGLISTS		20
+#define DRM_MEM_DRAWABLE	21
+#define DRM_MEM_MM		22
 
 #define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
 
@@ -371,7 +372,6 @@ typedef struct drm_dma_handle {
 	bus_dmamap_t	dmamap;
 	bus_dma_segment_t seg;
 	void *addr;
-	bus_addr_t dmaaddr;
 	size_t size;
 } drm_dma_handle_t;
 
@@ -678,6 +678,7 @@ struct drm_device {
 	int		  last_context;	/* Last current context		   */
 
 	/* VBLANK support */
+	int		 vblank_disable_allowed;
 	int		*vbl_queue;	/* vbl wait channel */
 	atomic_t	*_vblank_count;	/* no vblank interrupts */
 	DRM_SPINTYPE	vbl_lock;	/* locking for vblank operations */
@@ -688,8 +689,7 @@ struct drm_device {
 	atomic_t	*vblank_refcount; /* no. users for vlank interrupts */
 	u_int32_t	*last_vblank;	/* locked, used for overflow handling*/
 	int		*vblank_enabled; /* make sure we only disable once */
-	u_int32_t	*vblank_premodeset; /* compensation for wraparounds */
-	int		*vblank_suspend; /* Don't wait while crtc is disabled */
+	int		*vblank_inmodeset; /* X DDX is currently setting mode */
 	struct timeout	vblank_disable_timer;
 	int		num_crtcs;	/* number of crtcs on device */
 
@@ -796,7 +796,6 @@ void	drm_vbl_send_signals(struct drm_device *, int);
 void	drm_vblank_cleanup(struct drm_device *);
 int	drm_vblank_init(struct drm_device *, int);
 u_int32_t drm_vblank_count(struct drm_device *, int);
-void	drm_update_vblank_count(struct drm_device *, int);
 int	drm_vblank_get(struct drm_device *, int);
 void	drm_vblank_put(struct drm_device *, int);
 int	drm_modeset_ctl(struct drm_device *, void *, struct drm_file *);
@@ -924,6 +923,7 @@ int		 drm_memrange_add_space_to_tail(struct drm_memrange *,
 		     unsigned long );
 
 /* Inline replacements for DRM_IOREMAP macros */
+#define drm_core_ioremap_wc drm_core_ioremap
 static __inline__ void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
 {
 	map->handle = drm_ioremap(dev, map);
