@@ -88,7 +88,7 @@ static struct mem_block *alloc_block(struct mem_block *heap, int size,
 
 	list_for_each(p, heap) {
 		int start = (p->start + mask) & ~mask;
-		if (p->file_priv == 0 && start + size <= p->start + p->size)
+		if (p->file_priv == NULL && start + size <= p->start + p->size)
 			return split_block(p, start, size, file_priv);
 	}
 
@@ -113,7 +113,7 @@ static void free_block(struct mem_block *p)
 	/* Assumes a single contiguous range.  Needs a special file_priv in
 	 * 'heap' to stop it being subsumed.
 	 */
-	if (p->next->file_priv == 0) {
+	if (p->next->file_priv == NULL) {
 		struct mem_block *q = p->next;
 		p->size += q->size;
 		p->next = q->next;
@@ -121,7 +121,7 @@ static void free_block(struct mem_block *p)
 		drm_free(q, sizeof(*q), DRM_MEM_BUFS);
 	}
 
-	if (p->prev->file_priv == 0) {
+	if (p->prev->file_priv == NULL) {
 		struct mem_block *q = p->prev;
 		q->size += p->size;
 		q->next = p->next;
@@ -139,7 +139,7 @@ static int init_heap(struct mem_block **heap, int start, int size)
 	if (!blocks)
 		return -ENOMEM;
 
-	*heap = drm_alloc(sizeof(**heap), DRM_MEM_BUFS);
+	*heap = drm_calloc(1, sizeof(**heap), DRM_MEM_BUFS);
 	if (!*heap) {
 		drm_free(blocks, sizeof(*blocks), DRM_MEM_BUFS);
 		return -ENOMEM;
@@ -150,7 +150,6 @@ static int init_heap(struct mem_block **heap, int start, int size)
 	blocks->file_priv = NULL;
 	blocks->next = blocks->prev = *heap;
 
-	memset(*heap, 0, sizeof(**heap));
 	(*heap)->file_priv = (struct drm_file *) - 1;
 	(*heap)->next = (*heap)->prev = blocks;
 	return 0;
@@ -174,7 +173,7 @@ void radeon_mem_release(struct drm_file *file_priv, struct mem_block *heap)
 	 * 'heap' to stop it being subsumed.
 	 */
 	list_for_each(p, heap) {
-		while (p->file_priv == 0 && p->next->file_priv == 0) {
+		while (p->file_priv == NULL && p->next->file_priv == NULL) {
 			struct mem_block *q = p->next;
 			p->size += q->size;
 			p->next = q->next;
