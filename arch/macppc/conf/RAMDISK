@@ -240,4 +240,3 @@ option		MINIROOTSIZE=8192
 option		RAMDISK_HOOKS
 pseudo-device	crypto	1
 pseudo-device	bio		1       # ioctl multiplexing device
-option		FFS2		# UFS2

@@ -480,9 +480,10 @@ in_pcbdetach(v)
 	if (inp->inp_route.ro_rt)
 		rtfree(inp->inp_route.ro_rt);
 #ifdef INET6
-	if (inp->inp_flags & INP_IPV6)
+	if (inp->inp_flags & INP_IPV6) {
+		ip6_freepcbopts(inp->inp_outputopts6);
 		ip6_freemoptions(inp->inp_moptions6);
-	else
+	} else
 #endif
 		ip_freemoptions(inp->inp_moptions);
 #ifdef IPSEC
