@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.63 2008/07/27 14:21:15 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.66 2008/08/02 08:35:48 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -98,9 +98,9 @@ int
 ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
     struct rtentry *rt)
 {
-	u_int dlt = 0;
-	int s, error = 0;
 	struct m_tag *mtag;
+	int s, len, error = 0;
+	u_short mflags;
 
 	/* Interface has to be up and running */
 	if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) !=
@@ -111,7 +111,7 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 
 	/* Try to get the DLT from a mbuf tag */
 	if ((mtag = m_tag_find(m, PACKET_TAG_DLT, NULL)) != NULL) {
-		dlt = *(u_int *)(mtag + 1);
+		u_int dlt = *(u_int *)(mtag + 1);
 
 		/* Fallback to ethernet for non-802.11 linktypes */
 		if (!(dlt == DLT_IEEE802_11 || dlt == DLT_IEEE802_11_RADIO))
@@ -122,6 +122,8 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		 * further headers, and start output if interface not
 		 * yet active.
 		 */
+		mflags = m->m_flags;
+		len = m->m_pkthdr.len;
 		s = splnet();
 		IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
 		if (error) {
@@ -131,8 +133,8 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 			    ifp->if_xname);
 			return (error);
 		}
-		ifp->if_obytes += m->m_pkthdr.len;
-		if (m->m_flags & M_MCAST)
+		ifp->if_obytes += len;
+		if (mflags & M_MCAST)
 			ifp->if_omcasts++;
 		if ((ifp->if_flags & IFF_OACTIVE) == 0)
 			(*ifp->if_start)(ifp);
@@ -501,7 +503,8 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		goto bad;
 	}
 
-	if ((ic->ic_flags & IEEE80211_F_RSNON) && !ni->ni_port_valid &&
+	if ((ic->ic_flags & IEEE80211_F_RSNON) &&
+	    !ni->ni_port_valid &&
 	    eh.ether_type != htons(ETHERTYPE_PAE)) {
 		DPRINTF(("port not valid: %s\n",
 		    ether_sprintf(eh.ether_dhost)));
@@ -546,7 +549,7 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		struct ieee80211_qosframe *qwh =
 		    (struct ieee80211_qosframe *)wh;
 		qwh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS;
-		qwh->i_qos[0] = tid & IEEE80211_QOS_TID;
+		qwh->i_qos[0] = tid & 0xf;
 		qwh->i_qos[1] = 0;	/* no TXOP requested */
 		*(u_int16_t *)&qwh->i_seq[0] =
 		    htole16(ni->ni_qos_txseqs[tid] << IEEE80211_SEQ_SEQ_SHIFT);
@@ -581,7 +584,8 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 	}
 
 	if ((ic->ic_flags & IEEE80211_F_WEPON) ||
-	    ((ic->ic_flags & IEEE80211_F_RSNON) && ni->ni_port_valid))
+	    ((ic->ic_flags & IEEE80211_F_RSNON) &&
+	     (ni->ni_flags & IEEE80211_NODE_TXPROT)))
 		wh->i_fc[1] |= IEEE80211_FC1_PROTECTED;
 
 	*pni = ni;

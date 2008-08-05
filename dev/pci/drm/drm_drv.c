@@ -177,8 +177,7 @@ drm_attach(struct device *parent, struct device *kdev,
 	dev->id_entry = id_entry;
 	dev->driver.id_entry = id_entry;
 
-	printf("\n");
-	DRM_INFO("%s (unit %d)\n", id_entry->name, dev->unit);
+	printf(": %s(%d)", id_entry->name, dev->unit);
 	drm_load(dev);
 }
 
@@ -286,7 +285,7 @@ drm_lastclose(struct drm_device *dev)
 		drm_irq_uninstall(dev);
 
 	if ( dev->unique ) {
-		free(dev->unique, M_DRM);
+		drm_free(dev->unique, dev->unique_len + 1,  DRM_MEM_DRIVER);
 		dev->unique = NULL;
 		dev->unique_len = 0;
 	}
@@ -295,7 +294,7 @@ drm_lastclose(struct drm_device *dev)
 				/* Clear pid list */
 	while ((pt = SPLAY_ROOT(&dev->magiclist)) != NULL) {
 		SPLAY_REMOVE(drm_magic_tree, &dev->magiclist, pt);
-		free(pt, M_DRM);
+		drm_free(pt, sizeof(*pt), DRM_MEM_MAGIC);
 	}
 
 				/* Clear AGP information */
@@ -310,7 +309,7 @@ drm_lastclose(struct drm_device *dev)
 				drm_agp_unbind_memory(entry->handle);
 			drm_agp_free_memory(entry->handle);
 			TAILQ_REMOVE(&dev->agp->memory, entry, link);
-			free(entry, M_DRM);
+			drm_free(entry, sizeof(*entry), DRM_MEM_AGPLISTS);
 		}
 
 		if (dev->agp->acquired)
@@ -405,8 +404,7 @@ drm_load(struct drm_device *dev)
 		DRM_ERROR("Cannot allocate memory for context bitmap.\n");
 		goto error;
 	}
-	DRM_INFO("Initialized %s %d.%d.%d %s\n",
-	    dev->driver.name,
+	printf(", %d.%d.%d %s\n",
 	    dev->driver.major,
 	    dev->driver.minor,
 	    dev->driver.patchlevel,
@@ -447,7 +445,7 @@ drm_unload(struct drm_device *dev)
 	DRM_UNLOCK();
 
 	if ( dev->agp ) {
-		free(dev->agp, M_DRM);
+		drm_free(dev->agp, sizeof(*dev->agp), DRM_MEM_AGPLISTS);
 		dev->agp = NULL;
 	}
 
@@ -596,7 +594,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 	if (dev->driver.postclose != NULL)
 		dev->driver.postclose(dev, file_priv);
 	TAILQ_REMOVE(&dev->files, file_priv, link);
-	free(file_priv, M_DRM);
+	drm_free(file_priv, sizeof(*file_priv), DRM_MEM_FILES);
 
 	/* ========================================================
 	 * End inline drm_release

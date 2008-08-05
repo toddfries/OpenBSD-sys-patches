@@ -1,4 +1,4 @@
-/*	$OpenBSD$	*/
+/*	$OpenBSD: ukbdmap.c,v 1.32 2008/07/30 15:53:37 deraadt Exp $	*/
 
 /*
  * THIS FILE IS AUTOMAGICALLY GENERATED.  DO NOT EDIT.
@@ -7,12 +7,12 @@
  *	OpenBSD: makemap.awk,v 1.8 2008/05/19 18:09:06 miod Exp 
  * generated from:
  */
-/*	OpenBSD: wskbdmap_mfii.c,v 1.37 2008/07/16 16:33:18 miod Exp  */
+/*	OpenBSD: wskbdmap_mfii.c,v 1.38 2008/07/30 15:53:31 deraadt Exp  */
 /*	$NetBSD: wskbdmap_mfii.c,v 1.15 2000/05/19 16:40:04 drochner Exp $	*/
 
 /*
  * PLEASE DO NOT FORGET TO REGEN
- 	sys/dev/usb/ukbdmap.c
+ *	sys/dev/usb/ukbdmap.c
  * AFTER ANY CHANGES TO THIS FILE!
  */
 
