@@ -149,9 +149,6 @@ const struct usbd_quirk_entry {
  { USB_VENDOR_CYPRESS, USB_PRODUCT_CYPRESS_SISPM,	    ANY,   { UQ_BAD_HID }},
  { USB_VENDOR_CYPRESS, USB_PRODUCT_CYPRESS_SISPM_FLASH,	    ANY,   { UQ_BAD_HID }},
 
-/* devices which are UVC compatible (uvideo) but don't set UDCLASS_VIDEO */
-{ USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMOEM_1,
-	ANY, { UQ_EHCI_NEEDTO_DISOWN }},
  { 0, 0, 0, { 0 } }
 };
 
@@ -162,7 +159,6 @@ const struct usbd_dev_quirk_entry {
 	u_int8_t bDeviceProtocol;
 	struct usbd_quirks quirks;
 } usb_dev_quirks[] = {
- { UDCLASS_VIDEO, bANY,	bANY,	{ UQ_EHCI_NEEDTO_DISOWN }},
  { 0, 0, 0, { 0 } }
 };
 
