@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.66 2008/08/02 08:35:48 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.71 2008/08/15 08:15:27 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -193,6 +193,24 @@ ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
 	IEEE80211_ADDR_COPY(wh->i_addr1, ni->ni_macaddr);
 	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
 	IEEE80211_ADDR_COPY(wh->i_addr3, ni->ni_bssid);
+
+	/* check if protection is required for this mgmt frame */
+	if ((ic->ic_caps & IEEE80211_C_MFP) &&
+	    (type == IEEE80211_FC0_SUBTYPE_DISASSOC ||
+	     type == IEEE80211_FC0_SUBTYPE_DEAUTH ||
+	     type == IEEE80211_FC0_SUBTYPE_ACTION)) {
+		/*
+		 * Hack: we should not set the Protected bit in outgoing
+		 * group management frames, however it is used as an
+		 * indication to the drivers that they must encrypt the
+		 * frame.  Drivers should clear this bit from group
+		 * management frames (software crypto code will do it).
+		 * XXX could use an mbuf flag..
+		 */
+		if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
+		    (ni->ni_flags & IEEE80211_NODE_TXMGMTPROT))
+			wh->i_fc[1] |= IEEE80211_FC1_PROTECTED;
+	}
 
 	if (ifp->if_flags & IFF_DEBUG) {
 		/* avoid to print too many frames */
@@ -529,7 +547,7 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		hdrlen = sizeof(struct ieee80211_frame);
 		addqos = 0;
 	}
-	m_adj(m, sizeof(struct ether_header) - sizeof(struct llc));
+	m_adj(m, sizeof(struct ether_header) - LLC_SNAPFRAMELEN);
 	llc = mtod(m, struct llc *);
 	llc->llc_dsap = llc->llc_ssap = LLC_SNAP_LSAP;
 	llc->llc_control = LLC_UI;
@@ -823,7 +841,7 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 	/* write Version field */
 	LE_WRITE_2(frm, 1); frm += 2;
 
-	/* write Group Cipher Suite field (see Table 20da) */
+	/* write Group Data Cipher Suite field (see Table 20da) */
 	memcpy(frm, oui, 3); frm += 3;
 	switch (ni->ni_rsngroupcipher) {
 	case IEEE80211_CIPHER_WEP40:
@@ -840,7 +858,7 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 		break;
 	default:
 		/* can't get there */
-		panic("invalid group cipher!");
+		panic("invalid group data cipher!");
 	}
 
 	pcount = frm; frm += 2;
@@ -867,7 +885,7 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 	pcount = frm; frm += 2;
 	count = 0;
 	/* write AKM Suite List (see Table 20dc) */
-	if (ni->ni_rsnakms & IEEE80211_AKM_IEEE8021X) {
+	if (ni->ni_rsnakms & IEEE80211_AKM_8021X) {
 		memcpy(frm, oui, 3); frm += 3;
 		*frm++ = 1;
 		count++;
@@ -877,14 +895,40 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 		*frm++ = 2;
 		count++;
 	}
+	if (ni->ni_rsnakms & IEEE80211_AKM_SHA256_8021X) {
+		memcpy(frm, oui, 3); frm += 3;
+		*frm++ = 5;
+		count++;
+	}
+	if (ni->ni_rsnakms & IEEE80211_AKM_SHA256_PSK) {
+		memcpy(frm, oui, 3); frm += 3;
+		*frm++ = 6;
+		count++;
+	}
 	/* write AKM Suite List Count field */
 	LE_WRITE_2(pcount, count);
 
-	if (!wpa) {
-		/* write RSN Capabilities field */
-		LE_WRITE_2(frm, ni->ni_rsncaps); frm += 2;
+	if (wpa)
+		return frm;
 
-		/* no PMKID List for now */
+	/* write RSN Capabilities field */
+	LE_WRITE_2(frm, ni->ni_rsncaps); frm += 2;
+
+	if (!(ic->ic_caps & IEEE80211_C_MFP))
+		return frm;
+
+	/* no PMKID List for now */
+	LE_WRITE_2(frm, 0); frm += 2;
+
+	/* write Group Integrity Cipher Suite field */
+	memcpy(frm, oui, 3); frm += 3;
+	switch (ic->ic_rsngroupmgmtcipher) {
+	case IEEE80211_CIPHER_AES128_CMAC:
+		*frm++ = 6;
+		break;
+	default:
+		/* can't get there */
+		panic("invalid integrity group cipher!");
 	}
 	return frm;
 }
@@ -1028,10 +1072,12 @@ ieee80211_get_probe_resp(struct ieee80211com *ic, struct ieee80211_node *ni)
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
 		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_RSN)) ? 2 + 44 : 0) +
+	      (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_RSN)) ?
+		2 + IEEE80211_RSNIE_MAXLEN : 0) +
 	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 18 : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_WPA)) ? 2 + 48 : 0));
+	      (ic->ic_bss->ni_rsnprotos & IEEE80211_PROTO_WPA)) ?
+		2 + IEEE80211_WPAIE_MAXLEN : 0));
 	if (m == NULL)
 		return NULL;
 
@@ -1135,7 +1181,7 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 	u_int16_t capinfo;
 
 	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
-	    2 +	2 +
+	    2 + 2 +
 	    ((reassoc == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) ?
 		IEEE80211_ADDR_LEN : 0) +
 	    2 + ni->ni_esslen +
@@ -1143,10 +1189,12 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
 		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ? 2 + 44 : 0) +
+	      (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ?
+		2 + IEEE80211_RSNIE_MAXLEN : 0) +
 	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 1 : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ni->ni_rsnprotos & IEEE80211_PROTO_WPA)) ? 2 + 48 : 0));
+	      (ni->ni_rsnprotos & IEEE80211_PROTO_WPA)) ?
+		2 + IEEE80211_WPAIE_MAXLEN : 0));
 	if (m == NULL)
 		return NULL;
 
@@ -1203,7 +1251,7 @@ ieee80211_get_assoc_resp(struct ieee80211com *ic, struct ieee80211_node *ni,
 	u_int8_t *frm;
 
 	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
-	    2 +	2 + 2 +
+	    2 + 2 + 2 +
 	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
 		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
@@ -1436,10 +1484,12 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
 		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	     (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ? 2 + 44 : 0) +
+	     (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ?
+		2 + IEEE80211_RSNIE_MAXLEN : 0) +
 	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 18 : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	      (ni->ni_rsnprotos & IEEE80211_PROTO_WPA)) ? 2 + 48 : 0));
+	      (ni->ni_rsnprotos & IEEE80211_PROTO_WPA)) ?
+		2 + IEEE80211_WPAIE_MAXLEN : 0));
 	if (m == NULL)
 		return NULL;
 
