@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.4 2008/07/26 12:36:15 damien Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.7 2008/08/12 16:45:44 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -14,6 +14,11 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/*
+ * This code implements the Temporal Key Integrity Protocol (TKIP) defined
+ * in IEEE Std 802.11-2007 section 8.3.2.
  */
 
 #include <sys/param.h>
@@ -155,7 +160,7 @@ ieee80211_tkip_mic(struct mbuf *m0, int off, const u_int8_t *key,
 			    (const struct ieee80211_qosframe *)wh;
 			wht.i_pri = qwh->i_qos[0] & 0xf;
 		}
-	}  else
+	} else
 		wht.i_pri = 0;
 	wht.i_pad[0] = wht.i_pad[1] = wht.i_pad[2] = 0;
 
@@ -254,7 +259,7 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN - IEEE80211_TKIP_TAILLEN) {
+			if (left >= MINCLSIZE - IEEE80211_TKIP_TAILLEN) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -323,7 +328,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	u_int16_t wepseed[8];	/* needs to be 16-bit aligned for Phase2 */
 	u_int8_t buf[IEEE80211_TKIP_MICLEN + IEEE80211_WEP_CRCLEN];
 	u_int8_t mic[IEEE80211_TKIP_MICLEN];
-	u_int64_t tsc;
+	u_int64_t tsc, *prsc;
 	u_int32_t crc, crc0;
 	u_int8_t *ivp, *mic0;
 	struct mbuf *n0, *m, *n;
@@ -343,6 +348,26 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 		m_freem(m0);
 		return NULL;
 	}
+
+	/* retrieve last seen packet number for this frame TID */
+	if ((wh->i_fc[0] &
+	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
+	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS)) {
+		u_int8_t tid;
+		if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) ==
+		    IEEE80211_FC1_DIR_DSTODS) {
+			struct ieee80211_qosframe_addr4 *qwh4 =
+			    (struct ieee80211_qosframe_addr4 *)wh;
+			tid = qwh4->i_qos[0] & 0x0f;
+		} else {
+			struct ieee80211_qosframe *qwh =
+			    (struct ieee80211_qosframe *)wh;
+			tid = qwh->i_qos[0] & 0x0f;
+		}
+		prsc = &k->k_rsc[tid];
+	} else
+		prsc = &k->k_rsc[0];
+
 	/* extract the 48-bit TSC from the TKIP header */
 	tsc = (u_int64_t)ivp[2]       |
 	      (u_int64_t)ivp[0] <<  8 |
@@ -350,9 +375,9 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	      (u_int64_t)ivp[5] << 24 |
 	      (u_int64_t)ivp[6] << 32 |
 	      (u_int64_t)ivp[7] << 40;
-	/* NB: the keys are refreshed, we'll never overflow the 48 bits */
-	if (tsc <= k->k_rsc[0]) {
+	if (tsc <= *prsc) {
 		/* replayed frame, discard */
+		ic->ic_stats.is_tkip_replays++;
 		m_freem(m0);
 		return NULL;
 	}
@@ -377,7 +402,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
 
 	/* compute WEP seed */
-	if (!ctx->TTAK2ok || ((tsc >> 16) != (k->k_rsc[0] >> 16))) {
+	if (!ctx->TTAK2ok || ((tsc >> 16) != (*prsc >> 16))) {
 		Phase1(ctx->TTAK2, k->k_key, wh->i_addr2, tsc >> 16);
 		ctx->TTAK2ok = 1;
 	}
@@ -404,7 +429,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN) {
+			if (left >= MINCLSIZE) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -436,7 +461,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	/* decrypt ICV and compare it with calculated ICV */
 	crc0 = *(u_int32_t *)(buf + IEEE80211_TKIP_MICLEN);
 	if (crc != letoh32(crc0)) {
-		ic->ic_stats.is_rx_decryptcrc++;
+		ic->ic_stats.is_tkip_icv_errs++;
 		m_freem(m0);
 		m_freem(n0);
 		return NULL;
@@ -453,11 +478,8 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 		return NULL;
 	}
 
-	/*
-	 * Update last seen packet number (note that it must be done
-	 * after MIC is validated.)
-	 */
-	k->k_rsc[0] = tsc;
+	/* update last seen packet number (MIC is validated) */
+	*prsc = tsc;
 
 	m_freem(m0);
 	return n0;

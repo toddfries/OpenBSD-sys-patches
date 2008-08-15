@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_node.c,v 1.40 2008/06/14 10:55:21 mk Exp $	*/
+/*	$OpenBSD: nfs_node.c,v 1.42 2008/08/09 10:14:02 thib Exp $	*/
 /*	$NetBSD: nfs_node.c,v 1.16 1996/02/18 11:53:42 fvdl Exp $	*/
 
 /*
@@ -144,10 +144,7 @@ loop:
 	}
 	
 	LIST_INSERT_HEAD(nhpp, np, n_hash);
-	if (fhsize > NFS_SMALLFH) {
-		np->n_fhp = malloc(fhsize, M_NFSBIGFH, M_WAITOK);
-	} else
-		np->n_fhp = &np->n_fh;
+	np->n_fhp = &np->n_fh;
 	bcopy((caddr_t)fhp, (caddr_t)np->n_fhp, fhsize);
 	np->n_fhsize = fhsize;
 	np->n_accstamp = -1;
@@ -181,7 +178,7 @@ nfs_inactive(v)
 		/*
 		 * Remove the silly file that was rename'd earlier
 		 */
-		(void) nfs_vinvalbuf(ap->a_vp, 0, sp->s_cred, p, 1);
+		nfs_vinvalbuf(ap->a_vp, 0, sp->s_cred, p);
 		nfs_removeit(sp);
 		crfree(sp->s_cred);
 		vrele(sp->s_dvp);
@@ -212,9 +209,6 @@ nfs_reclaim(v)
 	if (np->n_hash.le_prev != NULL)
 		LIST_REMOVE(np, n_hash);
 
-	if (np->n_fhsize > NFS_SMALLFH)
-		free(np->n_fhp, M_NFSBIGFH);
-
 	if (np->n_rcred)
 		crfree(np->n_rcred);
 	if (np->n_wcred)
@@ -224,4 +218,3 @@ nfs_reclaim(v)
 	vp->v_data = NULL;
 	return (0);
 }
-

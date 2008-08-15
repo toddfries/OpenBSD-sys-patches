@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.84 2008/06/29 10:04:15 yuo Exp $ */
+/*	$OpenBSD: ehci.c,v 1.85 2008/08/09 22:59:20 mglocker Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -1524,7 +1524,7 @@ ehci_open(usbd_pipe_handle pipe)
 		    EHCI_QH_SET_ADDR(addr) |
 		    EHCI_QH_SET_ENDPT(UE_GET_ADDR(ed->bEndpointAddress)) |
 		    EHCI_QH_SET_EPS(speed) |
-		    EHCI_QH_DTC |
+		    (xfertype == UE_CONTROL ? EHCI_QH_DTC : 0) |
 		    EHCI_QH_SET_MPL(UGETW(ed->wMaxPacketSize)) |
 		    (speed != EHCI_QH_SPEED_HIGH && xfertype == UE_CONTROL ?
 		    EHCI_QH_CTL : 0) |
@@ -1534,14 +1534,15 @@ ehci_open(usbd_pipe_handle pipe)
 		    EHCI_QH_SET_MULT(1) |
 		    EHCI_QH_SET_HUBA(hshubaddr) |
 		    EHCI_QH_SET_PORT(hshubport) |
-		    EHCI_QH_SET_CMASK(0x08) | /* XXX */
-		    EHCI_QH_SET_SMASK(xfertype == UE_INTERRUPT ? 0x02 : 0)
+		    EHCI_QH_SET_CMASK(0x1c) | /* XXX */
+		    EHCI_QH_SET_SMASK(xfertype == UE_INTERRUPT ? 0x01 : 0)
 		    );
 		sqh->qh.qh_curqtd = EHCI_NULL;
 		/* Fill the overlay qTD */
 		sqh->qh.qh_qtd.qtd_next = EHCI_NULL;
 		sqh->qh.qh_qtd.qtd_altnext = EHCI_NULL;
-		sqh->qh.qh_qtd.qtd_status = htole32(0);
+		sqh->qh.qh_qtd.qtd_status =
+		    htole32(EHCI_QTD_SET_TOGGLE(pipe->endpoint->savedtoggle));
 		epipe->sqh = sqh;
 	} else {
 		sqh = NULL;

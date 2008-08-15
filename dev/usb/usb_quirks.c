@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_quirks.c,v 1.44 2008/07/22 16:24:40 mglocker Exp $ */
+/*	$OpenBSD: usb_quirks.c,v 1.45 2008/08/11 05:37:01 mglocker Exp $ */
 /*	$NetBSD: usb_quirks.c,v 1.45 2003/05/10 17:47:14 hamajima Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.30 2003/01/02 04:15:55 imp Exp $	*/
 

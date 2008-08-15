@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.98 2008/07/25 14:56:47 beck Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.101 2008/08/09 10:14:02 thib Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -186,7 +186,6 @@ extern u_int32_t nfs_true, nfs_false;
 extern u_int32_t nfs_xdrneg1;
 extern struct nfsstats nfsstats;
 extern nfstype nfsv3_type[9];
-struct proc *nfs_iodwant[NFS_MAXASYNCDAEMON];
 int nfs_numasync = 0;
 
 
@@ -399,8 +398,8 @@ nfs_open(v)
 	}
 
 	if (np->n_flag & NMODIFIED) {
-		if ((error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred,
-			 ap->a_p, 1)) == EINTR)
+		error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p);
+		if (error == EINTR)
 			return (error);
 		uvm_vnp_uncache(vp);
 		np->n_attrstamp = 0;
@@ -417,8 +416,8 @@ nfs_open(v)
 		if (np->n_mtime != vattr.va_mtime.tv_sec) {
 			if (vp->v_type == VDIR)
 				np->n_direofoffset = 0;
-			if ((error = nfs_vinvalbuf(vp, V_SAVE,
-				 ap->a_cred, ap->a_p, 1)) == EINTR)
+			error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p);
+			if (error == EINTR);
 				return (error);
 			uvm_vnp_uncache(vp);
 			np->n_mtime = vattr.va_mtime.tv_sec;
@@ -470,7 +469,7 @@ nfs_close(v)
 		    error = nfs_flush(vp, ap->a_cred, MNT_WAIT, ap->a_p, 0);
 		    np->n_flag &= ~NMODIFIED;
 		} else
-		    error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p, 1);
+		    error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p);
 		np->n_attrstamp = 0;
 	    }
 	    if (np->n_flag & NWRITEERR) {
@@ -571,10 +570,10 @@ nfs_setattr(v)
 				return (EROFS);
  			if (vap->va_size == 0)
  				error = nfs_vinvalbuf(vp, 0,
- 				     ap->a_cred, ap->a_p, 1);
+ 				     ap->a_cred, ap->a_p);
 			else
 				error = nfs_vinvalbuf(vp, V_SAVE,
- 				     ap->a_cred, ap->a_p, 1);
+ 				     ap->a_cred, ap->a_p);
 			if (error)
 				return (error);
  			tsize = np->n_size;
@@ -585,7 +584,7 @@ nfs_setattr(v)
 		vap->va_atime.tv_sec != VNOVAL) &&
 		vp->v_type == VREG &&
   		(error = nfs_vinvalbuf(vp, V_SAVE, ap->a_cred,
-		 ap->a_p, 1)) == EINTR)
+		    ap->a_p)) == EINTR)
 		return (error);
 	error = nfs_setattrrpc(vp, vap, ap->a_cred, ap->a_p);
 	if (error && vap->va_size != VNOVAL) {
@@ -1397,7 +1396,7 @@ nfs_remove(v)
 		 * throw away biocache buffers, mainly to avoid
 		 * unnecessary delayed writes later.
 		 */
-		error = nfs_vinvalbuf(vp, 0, cnp->cn_cred, cnp->cn_proc, 1);
+		error = nfs_vinvalbuf(vp, 0, cnp->cn_cred, cnp->cn_proc);
 		/* Do the rpc */
 		if (error != EINTR)
 			error = nfs_removerpc(dvp, cnp->cn_nameptr,
@@ -2512,11 +2511,7 @@ nfs_lookitup(dvp, name, len, cred, procp, npp)
 		nfsm_getfh(nfhp, fhlen, v3);
 		if (*npp) {
 		    np = *npp;
-		    if (np->n_fhsize > NFS_SMALLFH && fhlen <= NFS_SMALLFH) {
-			free((caddr_t)np->n_fhp, M_NFSBIGFH);
-			np->n_fhp = &np->n_fh;
-		    } else if (np->n_fhsize <= NFS_SMALLFH && fhlen>NFS_SMALLFH)
-			np->n_fhp =(nfsfh_t *)malloc(fhlen,M_NFSBIGFH,M_WAITOK);
+		    np->n_fhp = &np->n_fh;
 		    bcopy((caddr_t)nfhp, (caddr_t)np->n_fhp, fhlen);
 		    np->n_fhsize = fhlen;
 		    newvp = NFSTOV(np);

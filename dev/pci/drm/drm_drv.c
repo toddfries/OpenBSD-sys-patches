@@ -70,15 +70,15 @@ static drm_ioctl_desc_t		  drm_ioctls[256] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_ADD_MAP, drm_addmap_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_RM_MAP, drm_rmmap_ioctl, DRM_AUTH),
 
-	DRM_IOCTL_DEF(DRM_IOCTL_SET_SAREA_CTX, drm_setsareactx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_IOCTL_GET_SAREA_CTX, drm_getsareactx, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_IOCTL_SET_SAREA_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_GET_SAREA_CTX, drm_noop, DRM_AUTH),
 
 	DRM_IOCTL_DEF(DRM_IOCTL_ADD_CTX, drm_addctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_RM_CTX, drm_rmctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_IOCTL_MOD_CTX, drm_modctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_MOD_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_CTX, drm_getctx, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_IOCTL_SWITCH_CTX, drm_switchctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_IOCTL_NEW_CTX, drm_newctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_SWITCH_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_NEW_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_RES_CTX, drm_resctx, DRM_AUTH),
 
 	DRM_IOCTL_DEF(DRM_IOCTL_ADD_DRAW, drm_adddraw, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
@@ -253,12 +253,11 @@ drm_firstopen(struct drm_device *dev)
 	for ( i = 0 ; i < DRM_ARRAY_SIZE(dev->counts) ; i++ )
 		atomic_set( &dev->counts[i], 0 );
 
+	dev->magicid = 1;
 	SPLAY_INIT(&dev->magiclist);
 
 	dev->lock.lock_queue = 0;
 	dev->irq_enabled = 0;
-	dev->context_flag = 0;
-	dev->last_context = 0;
 	dev->if_version = 0;
 
 	dev->buf_pgid = 0;
@@ -493,8 +492,6 @@ drmopen(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 	if (dev == NULL)
 		return (ENXIO);
 
-	dev->kdev = kdev; /* hack for now */
-
 	DRM_DEBUG( "open_count = %d\n", dev->open_count );
 
 	retcode = drm_open_helper(kdev, flags, fmt, p, dev);
@@ -529,9 +526,6 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 		goto done;
 	}
 
-	if (--file_priv->refs != 0)
-		goto done;
-
 	if (dev->driver.preclose != NULL)
 		dev->driver.preclose(dev, file_priv);
 
@@ -550,7 +544,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 		if (dev->driver.reclaim_buffers_locked != NULL)
 			dev->driver.reclaim_buffers_locked(dev, file_priv);
 
-		drm_lock_free(dev, &dev->lock.hw_lock->lock,
+		drm_lock_free(&dev->lock,
 		    _DRM_LOCKING_CONTEXT(dev->lock.hw_lock->lock));
 		
 				/* FIXME: may require heavy-handed reset of
@@ -566,8 +560,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 				retcode = EINTR;
 				break;
 			}
-			if (drm_lock_take(&dev->lock.hw_lock->lock,
-			    DRM_KERNEL_CONTEXT)) {
+			if (drm_lock_take(&dev->lock, DRM_KERNEL_CONTEXT)) {
 				dev->lock.file_priv = file_priv;
 				dev->lock.lock_time = jiffies;
                                 atomic_inc( &dev->counts[_DRM_STAT_LOCKS] );
@@ -581,8 +574,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 		}
 		if (retcode == 0) {
 			dev->driver.reclaim_buffers_locked(dev, file_priv);
-			drm_lock_free(dev, &dev->lock.hw_lock->lock,
-			    DRM_KERNEL_CONTEXT);
+			drm_lock_free(&dev->lock, DRM_KERNEL_CONTEXT);
 		}
 	}
 
