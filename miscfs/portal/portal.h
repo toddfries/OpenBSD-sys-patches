@@ -1,4 +1,4 @@
-/*	$OpenBSD: portal.h,v 1.5 2003/08/14 07:46:39 mickey Exp $	*/
+/*	$OpenBSD: portal.h,v 1.2 1996/02/27 07:59:41 niklas Exp $	*/
 /*	$NetBSD: portal.h,v 1.7 1996/02/09 22:40:40 christos Exp $	*/
 
 /*
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -66,6 +70,6 @@ struct portalnode {
 
 #define PORTAL_ROOTFILEID	2
 
-extern int (**portal_vnodeop_p)(void *);
-extern const struct vfsops portal_vfsops;
+extern int (**portal_vnodeop_p) __P((void *));
+extern struct vfsops portal_vfsops;
 #endif /* _KERNEL */

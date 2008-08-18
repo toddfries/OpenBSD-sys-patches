@@ -1,4 +1,4 @@
-/*	$OpenBSD: poll.h,v 1.11 2003/12/10 23:10:08 millert Exp $ */
+/*	$OpenBSD: poll.h,v 1.1 1996/05/18 08:53:08 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Theo de Raadt
@@ -12,6 +12,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -28,13 +30,11 @@
 #ifndef	_SYS_POLL_H_
 #define	_SYS_POLL_H_
 
-typedef struct pollfd {
+struct pollfd {
 	int 	fd;
 	short	events;
 	short	revents;
-} pollfd_t;
-
-typedef unsigned int	nfds_t;
+};
 
 #define	POLLIN		0x0001
 #define	POLLPRI		0x0002
@@ -43,19 +43,7 @@ typedef unsigned int	nfds_t;
 #define	POLLHUP		0x0010
 #define	POLLNVAL	0x0020
 #define	POLLRDNORM	0x0040
-#define POLLNORM	POLLRDNORM
-#define POLLWRNORM      POLLOUT
 #define	POLLRDBAND	0x0080
 #define	POLLWRBAND	0x0100
-
-#define INFTIM		(-1)
-
-#ifndef _KERNEL
-#include <ctype.h>
-
-__BEGIN_DECLS
-int   poll(struct pollfd[], nfds_t, int);
-__END_DECLS
-#endif /* _KERNEL */
 
 #endif /* !_SYS_POLL_H_ */

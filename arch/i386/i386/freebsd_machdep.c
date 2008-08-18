@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_machdep.c,v 1.22 2008/03/18 14:29:25 kettenis Exp $	*/
+/*	$OpenBSD: freebsd_machdep.c,v 1.7 1996/08/27 10:46:51 downsj Exp $	*/
 /*	$NetBSD: freebsd_machdep.c,v 1.10 1996/05/03 19:42:05 christos Exp $	*/
 
 /*-
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +49,7 @@
 #include <sys/exec.h>
 #include <sys/mount.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 #include <machine/cpufunc.h>
 #include <machine/npx.h>
@@ -53,7 +57,6 @@
 #include <machine/vm86.h>
 #include <machine/freebsd_machdep.h>
 
-#include <compat/freebsd/freebsd_signal.h>
 #include <compat/freebsd/freebsd_syscallargs.h>
 #include <compat/freebsd/freebsd_exec.h>
 #include <compat/freebsd/freebsd_ptrace.h>
@@ -73,16 +76,19 @@
  * specified pc, psl.
  */
 void
-freebsd_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
-    union sigval val)
+freebsd_sendsig(catcher, sig, mask, code)
+	sig_t catcher;
+	int sig, mask;
+	u_long code;
 {
-	struct proc *p = curproc;
-	struct trapframe *tf;
+	register struct proc *p = curproc;
+	register struct trapframe *tf;
 	struct freebsd_sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
 	int oonstack;
+	extern char freebsd_sigcode[], freebsd_esigcode[];
 
-	/*
+	/* 
 	 * Build the argument list for the signal handler.
 	 */
 	frame.sf_signum = sig;
@@ -95,7 +101,7 @@ freebsd_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	 */
 	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct freebsd_sigframe *)((char *)psp->ps_sigstk.ss_sp +
+		fp = (struct freebsd_sigframe *)(psp->ps_sigstk.ss_sp +
 		    psp->ps_sigstk.ss_size - sizeof(struct freebsd_sigframe));
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
 	} else {
@@ -151,9 +157,10 @@ freebsd_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	 */
 	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_eip = p->p_sigcode;
+	tf->tf_eip = (int)(((char *)PS_STRINGS) - 
+	     (freebsd_esigcode - freebsd_sigcode));
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
-	tf->tf_eflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
+	tf->tf_eflags &= ~(PSL_T|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
 }
@@ -169,13 +176,16 @@ freebsd_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
  * a machine fault.
  */
 int
-freebsd_sys_sigreturn(struct proc *p, void *v, register_t *retval)
+freebsd_sys_sigreturn(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 	struct freebsd_sys_sigreturn_args /* {
 		syscallarg(struct freebsd_sigcontext *) scp;
 	} */ *uap = v;
 	struct freebsd_sigcontext *scp, context;
-	struct trapframe *tf;
+	register struct trapframe *tf;
 
 	tf = p->p_md.md_regs;
 
@@ -241,8 +251,10 @@ freebsd_sys_sigreturn(struct proc *p, void *v, register_t *retval)
  */
 
 void
-netbsd_to_freebsd_ptrace_regs(struct reg *nregs, struct fpreg *nfpregs,
-    struct freebsd_ptrace_reg *fregs)
+netbsd_to_freebsd_ptrace_regs(nregs, nfpregs, fregs)
+	struct reg *nregs;
+	struct fpreg *nfpregs;
+	struct freebsd_ptrace_reg *fregs;
 {
 	struct save87 *nframe = (struct save87 *)nfpregs;
 
@@ -270,7 +282,7 @@ netbsd_to_freebsd_ptrace_regs(struct reg *nregs, struct fpreg *nfpregs,
 		*(struct freebsd_env87 *)&nframe->sv_env;
 	bcopy(nframe->sv_ac, fregs->freebsd_ptrace_fpregs.sv_ac,
 	      sizeof(fregs->freebsd_ptrace_fpregs.sv_ac));
-	fregs->freebsd_ptrace_fpregs.sv_ex_sw =
+	fregs->freebsd_ptrace_fpregs.sv_ex_sw = 
 		nframe->sv_ex_sw;
 #if 0
 	/*
@@ -279,7 +291,7 @@ netbsd_to_freebsd_ptrace_regs(struct reg *nregs, struct fpreg *nfpregs,
 #ifdef DIAGNOSTIC
 	if (sizeof(fregs->freebsd_ptrace_fpregs.sv_pad) <
 	    sizeof(nframe->sv_ex_tw) + sizeof(nframe->sv_pad)) {
-		panic("netbsd_to_freebsd_ptrace_regs: %s",
+		panic("netbsd_to_freebsd_ptrace_regs: %s\n",
 		      "sizeof(freebsd_save87) >= sizeof(save87)");
 	}
 #endif
@@ -299,8 +311,10 @@ netbsd_to_freebsd_ptrace_regs(struct reg *nregs, struct fpreg *nfpregs,
 }
 
 void
-freebsd_to_netbsd_ptrace_regs(struct freebsd_ptrace_reg *fregs,
-    struct reg *nregs, struct fpreg *nfpregs)
+freebsd_to_netbsd_ptrace_regs(fregs, nregs, nfpregs)
+	struct freebsd_ptrace_reg *fregs;
+	struct reg *nregs;
+	struct fpreg *nfpregs;
 {
 	struct save87 *nframe = (struct save87 *)nfpregs;
 
@@ -343,22 +357,24 @@ freebsd_to_netbsd_ptrace_regs(struct freebsd_ptrace_reg *fregs,
 #define	FREEBSD_REGS_OFFSET 0x2000
 
 int
-freebsd_ptrace_getregs(struct freebsd_ptrace_reg *fregs, caddr_t addr,
-    register_t *datap)
+freebsd_ptrace_getregs(fregs, addr, datap)
+	struct freebsd_ptrace_reg *fregs;
+	caddr_t addr;
+	register_t *datap;
 {
-	vaddr_t offset = (vaddr_t)addr;
+	vm_offset_t offset = (vm_offset_t)addr;
 
 	if (offset == FREEBSD_U_AR0_OFFSET) {
 		*datap = FREEBSD_REGS_OFFSET + FREEBSD_USRSTACK;
 		return 0;
 	} else if (offset >= FREEBSD_REGS_OFFSET &&
-		   offset <= FREEBSD_REGS_OFFSET +
+		   offset <= FREEBSD_REGS_OFFSET + 
 		      sizeof(fregs->freebsd_ptrace_regs)-sizeof(register_t)) {
 		*datap = *(register_t *)&((caddr_t)&fregs->freebsd_ptrace_regs)
-			[(vaddr_t) addr - FREEBSD_REGS_OFFSET];
+			[(vm_offset_t) addr - FREEBSD_REGS_OFFSET];
 		return 0;
 	} else if (offset >= FREEBSD_U_SAVEFP_OFFSET &&
-		   offset <= FREEBSD_U_SAVEFP_OFFSET +
+		   offset <= FREEBSD_U_SAVEFP_OFFSET + 
 		      sizeof(fregs->freebsd_ptrace_fpregs)-sizeof(register_t)){
 		*datap= *(register_t *)&((caddr_t)&fregs->freebsd_ptrace_fpregs)
 			[offset - FREEBSD_U_SAVEFP_OFFSET];
@@ -371,9 +387,12 @@ freebsd_ptrace_getregs(struct freebsd_ptrace_reg *fregs, caddr_t addr,
 }
 
 int
-freebsd_ptrace_setregs(struct freebsd_ptrace_reg *fregs, caddr_t addr, int data)
+freebsd_ptrace_setregs(fregs, addr, data)
+	struct freebsd_ptrace_reg *fregs;
+	caddr_t addr;
+	int data;
 {
-	vaddr_t offset = (vaddr_t)addr;
+	vm_offset_t offset = (vm_offset_t)addr;
 
 	if (offset >= FREEBSD_REGS_OFFSET &&
 	    offset <= FREEBSD_REGS_OFFSET +
@@ -382,7 +401,7 @@ freebsd_ptrace_setregs(struct freebsd_ptrace_reg *fregs, caddr_t addr, int data)
 			[offset - FREEBSD_REGS_OFFSET] = data;
 		return 0;
 	} else if (offset >= FREEBSD_U_SAVEFP_OFFSET &&
-		   offset <= FREEBSD_U_SAVEFP_OFFSET +
+		   offset <= FREEBSD_U_SAVEFP_OFFSET + 
 			sizeof(fregs->freebsd_ptrace_fpregs) - sizeof(int)) {
 		*(int *)&((caddr_t)&fregs->freebsd_ptrace_fpregs)
 			[offset - FREEBSD_U_SAVEFP_OFFSET] = data;

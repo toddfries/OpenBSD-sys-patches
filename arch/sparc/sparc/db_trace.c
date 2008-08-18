@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.6 2002/05/18 09:49:17 art Exp $	*/
-/*	$NetBSD: db_trace.c,v 1.9 1997/07/29 09:42:00 fair Exp $ */
+/*	$NetBSD: db_trace.c,v 1.8 1996/04/04 23:25:35 pk Exp $ */
 
 /*
  * Mach Operating System
@@ -36,21 +35,20 @@
 #include <ddb/db_interface.h>
 #include <ddb/db_output.h>
 
-#define INKERNEL(va)	(((vaddr_t)(va)) >= USRSTACK)
+#define INKERNEL(va)	(((vm_offset_t)(va)) >= USRSTACK)
 
 void
-db_stack_trace_print(addr, have_addr, count, modif, pr)
+db_stack_trace_cmd(addr, have_addr, count, modif)
 	db_expr_t       addr;
 	int             have_addr;
 	db_expr_t       count;
 	char            *modif;
-	int		(*pr)(const char *, ...);
 {
 	struct frame	*frame;
 	boolean_t	kernel_only = TRUE;
 
 	{
-		char c, *cp = modif;
+		register char c, *cp = modif;
 		while ((c = *cp++) != 0)
 			if (c == 'u')
 				kernel_only = FALSE;
@@ -85,17 +83,17 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 		if (name == NULL)
 			name = "?";
 
-		(*pr)("%s(", name);
+		db_printf("%s(", name);
 
 		/*
 		 * Print %i0..%i5, hope these still reflect the
 		 * actual arguments somewhat...
 		 */
 		for (i=0; i < 5; i++)
-			(*pr)("0x%x, ", frame->fr_arg[i]);
-		(*pr)("0x%x) at ", frame->fr_arg[i]);
-		db_printsym(pc, DB_STGY_PROC, pr);
-		(*pr)("\n");
+			db_printf("%x, ", frame->fr_arg[i]);
+		db_printf("%x) at ", frame->fr_arg[i]);
+		db_printsym(pc, DB_STGY_PROC);
+		db_printf("\n");
 
 	}
 }

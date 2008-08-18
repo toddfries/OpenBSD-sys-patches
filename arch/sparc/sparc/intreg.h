@@ -1,5 +1,4 @@
-/*	$OpenBSD: intreg.h,v 1.8 2006/05/29 20:40:01 miod Exp $	*/
-/*	$NetBSD: intreg.h,v 1.6 1997/07/22 20:19:10 pk Exp $ */
+/*	$NetBSD: intreg.h,v 1.5 1996/03/31 23:03:39 pk Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -22,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -60,14 +63,6 @@
  * be cleared in software.  This is done in locore.s.  The ALLIE bit must
  * be cleared to clear asynchronous memory error (level 15) interrupts.
  */
-#ifdef solbourne
-#define	IE_L14		14
-#define	IE_L10		10
-#define	IE_L8		8
-#define	IE_L6		6
-#define	IE_L4		4
-#define	IE_L1		1
-#else
 #define	IE_L14		0x80	/* enable level 14 (counter 1) interrupts */
 #define	IE_L10		0x20	/* enable level 10 (counter 0) interrupts */
 #define	IE_L8		0x10	/* enable level 8 interrupts */
@@ -75,11 +70,10 @@
 #define	IE_L4		0x04	/* request software level 4 interrupt */
 #define	IE_L1		0x02	/* request software level 1 interrupt */
 #define	IE_ALLIE	0x01	/* enable interrupts */
-#endif
 
 #ifndef _LOCORE
-void	ienab_bis(int bis);	/* set given bits */
-void	ienab_bic(int bic);	/* clear given bits */
+void	ienab_bis __P((int bis));	/* set given bits */
+void	ienab_bic __P((int bic));	/* clear given bits */
 #endif
 
 #if defined(SUN4M)
@@ -127,27 +121,18 @@ void	ienab_bic(int bic);	/* clear given bits */
 #define SINTR_ME		0x40000000	/* Module Error (async) */
 #define SINTR_I			0x20000000	/* MSI (MBus-SBus) */
 #define SINTR_M			0x10000000	/* ECC Memory controller */
-#define SINTR_V			0x08000000	/* VME Async error */
-#define SINTR_RSVD2		0x07800000
+#define SINTR_RSVD2		0x0f800000
 #define SINTR_F			0x00400000	/* Floppy */
-#define SINTR_MI		0x00200000	/* Module interrupt */
-#define SINTR_VI		0x00100000	/* Video (Supersparc only) */
+#define SINTR_RSVD3		0x00200000
+#define SINTR_V			0x00100000	/* Video (Supersparc only) */
 #define SINTR_T			0x00080000	/* Level 10 counter */
 #define SINTR_SC		0x00040000	/* SCSI */
-#define SINTR_A			0x00020000	/* Audio/ISDN */
+#define SINTR_RSVD4		0x00020000
 #define SINTR_E			0x00010000	/* Ethernet */
 #define SINTR_S			0x00008000	/* Serial port */
 #define SINTR_K			0x00004000	/* Keyboard/mouse */
 #define SINTR_SBUSMASK		0x00003f80	/* SBus */
-#define SINTR_SBUS(n)		(1 << (7+(n)-1))
-#define SINTR_VMEMASK		0x0000007f	/* VME */
-#define SINTR_VME(n)		(1 << ((n)-1))
-#define SINTR_BITS		"\020" \
-				"\01VME0\02VME1\03VME2\04VME3\05VME4\06VME5" \
-				"\07VME6\010SBUS0\011SBUS1\012SBUS2\013SBUS3" \
-				"\014SBUS4\015SBUS5\016SBUS6\017K\020S\021E" \
-				"\022A\023SC\024T\025VI\065MI\027F" \
-				"\034V\035M\036I\037ME\040MA"
-
+#define SINTR_SBUS(n)		(((n) << 7) & 0x00003f80)
+#define SINTR_RSVD5		0x0000007f
 
 #endif

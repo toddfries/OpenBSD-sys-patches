@@ -1,5 +1,5 @@
-/*	$OpenBSD: rtfps.c,v 1.19 2002/03/14 01:26:56 millert Exp $       */
-/*	$NetBSD: rtfps.c,v 1.27 1996/10/21 22:41:18 thorpej Exp $	*/
+/*	$OpenBSD: rtfps.c,v 1.10 1996/05/26 00:27:27 deraadt Exp $       */
+/*	$NetBSD: rtfps.c,v 1.23 1996/05/12 23:53:29 mycroft Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -43,8 +43,8 @@
 #include <machine/intr.h>
 
 #include <dev/isa/isavar.h>
-#include <dev/ic/comreg.h>
-#include <dev/ic/comvar.h>
+#include <dev/isa/comreg.h>
+#include <dev/isa/comvar.h>
 
 #define	NSLAVES	4
 
@@ -52,20 +52,20 @@ struct rtfps_softc {
 	struct device sc_dev;
 	void *sc_ih;
 
-	bus_space_tag_t sc_iot;
+	bus_chipset_tag_t sc_bc;
 	int sc_iobase;
 	int sc_irqport;
-	bus_space_handle_t sc_irqioh;
+	bus_io_handle_t sc_irqioh;
 
 	int sc_alive;			/* mask of slave units attached */
 	void *sc_slaves[NSLAVES];	/* com device unit numbers */
-	bus_space_handle_t sc_slaveioh[NSLAVES];
+	bus_io_handle_t sc_slaveioh[NSLAVES];
 };
 
-int rtfpsprobe(struct device *, void *, void *);
-void rtfpsattach(struct device *, struct device *, void *);
-int rtfpsintr(void *);
-int rtfpsprint(void *, const char *);
+int rtfpsprobe __P((struct device *, void *, void *));
+void rtfpsattach __P((struct device *, struct device *, void *));
+int rtfpsintr __P((void *));
+int rtfpsprint __P((void *, char *));
 
 struct cfattach rtfps_ca = {
 	sizeof(struct rtfps_softc), rtfpsprobe, rtfpsattach
@@ -83,8 +83,8 @@ rtfpsprobe(parent, self, aux)
 {
 	struct isa_attach_args *ia = aux;
 	int iobase = ia->ia_iobase;
-	bus_space_tag_t iot = ia->ia_iot;
-	bus_space_handle_t ioh;
+	bus_chipset_tag_t bc = ia->ia_bc;
+	bus_io_handle_t ioh;
 	int i, rv = 1;
 
 	/*
@@ -98,12 +98,12 @@ rtfpsprobe(parent, self, aux)
 	if (iobase == comconsaddr && !comconsattached)
 		goto checkmappings;
 
-	if (bus_space_map(iot, iobase, COM_NPORTS, 0, &ioh)) {
+	if (bus_io_map(bc, iobase, COM_NPORTS, &ioh)) {
 		rv = 0;
 		goto out;
 	}
-	rv = comprobe1(iot, ioh);
-	bus_space_unmap(iot, ioh, COM_NPORTS);
+	rv = comprobe1(bc, ioh, iobase);
+	bus_io_unmap(bc, ioh, COM_NPORTS);
 	if (rv == 0)
 		goto out;
 
@@ -114,11 +114,11 @@ checkmappings:
 		if (iobase == comconsaddr && !comconsattached)
 			continue;
 
-		if (bus_space_map(iot, iobase, COM_NPORTS, 0, &ioh)) {
+		if (bus_io_map(bc, iobase, COM_NPORTS, &ioh)) {
 			rv = 0;
 			goto out;
 		}
-		bus_space_unmap(iot, ioh, COM_NPORTS);
+		bus_io_unmap(bc, ioh, COM_NPORTS);
 	}
 
 out:
@@ -130,7 +130,7 @@ out:
 int
 rtfpsprint(aux, pnp)
 	void *aux;
-	const char *pnp;
+	char *pnp;
 {
 	struct commulti_attach_args *ca = aux;
 
@@ -148,16 +148,17 @@ rtfpsattach(parent, self, aux)
 	struct rtfps_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 	struct commulti_attach_args ca;
+	struct isa_attach_args isa;
 	static int irqport[] = {
 		IOBASEUNK, IOBASEUNK, IOBASEUNK, IOBASEUNK,
 		IOBASEUNK, IOBASEUNK, IOBASEUNK, IOBASEUNK,
 		IOBASEUNK,     0x2f2,     0x6f2,     0x6f3,
 		IOBASEUNK, IOBASEUNK, IOBASEUNK, IOBASEUNK
 	};
-	bus_space_tag_t iot = ia->ia_iot;
+	bus_chipset_tag_t bc = ia->ia_bc;
 	int i;
 
-	sc->sc_iot = ia->ia_iot;
+	sc->sc_bc = ia->ia_bc;
 	sc->sc_iobase = ia->ia_iobase;
 
 	if (ia->ia_irq >= 16 || irqport[ia->ia_irq] == IOBASEUNK)
@@ -165,20 +166,20 @@ rtfpsattach(parent, self, aux)
 	sc->sc_irqport = irqport[ia->ia_irq];
 
 	for (i = 0; i < NSLAVES; i++)
-		if (bus_space_map(iot, sc->sc_iobase + i * COM_NPORTS,
-		    COM_NPORTS, 0, &sc->sc_slaveioh[i]))
+		if (bus_io_map(bc, sc->sc_iobase + i * COM_NPORTS, COM_NPORTS,
+		    &sc->sc_slaveioh[i]))
 			panic("rtfpsattach: couldn't map slave %d", i);
-	if (bus_space_map(iot, sc->sc_irqport, 1, 0, &sc->sc_irqioh))
-		panic("rtfpsattach: couldn't map irq port at 0x%x",
+	if (bus_io_map(bc, sc->sc_irqport, 1, &sc->sc_irqioh))
+		panic("rtfpsattach: couldn't map irq port at 0x%x\n",
 		    sc->sc_irqport);
 
-	bus_space_write_1(iot, sc->sc_irqioh, 0, 0);
+	bus_io_write_1(bc, sc->sc_irqioh, 0, 0);
 
 	printf("\n");
 
 	for (i = 0; i < NSLAVES; i++) {
 		ca.ca_slave = i;
-		ca.ca_iot = sc->sc_iot;
+		ca.ca_bc = sc->sc_bc;
 		ca.ca_ioh = sc->sc_slaveioh[i];
 		ca.ca_iobase = sc->sc_iobase + i * COM_NPORTS;
 		ca.ca_noien = 0;
@@ -197,10 +198,10 @@ rtfpsintr(arg)
 	void *arg;
 {
 	struct rtfps_softc *sc = arg;
-	bus_space_tag_t iot = sc->sc_iot;
+	bus_chipset_tag_t bc = sc->sc_bc;
 	int alive = sc->sc_alive;
 
-	bus_space_write_1(iot, sc->sc_irqioh, 0, 0);
+	bus_io_write_1(bc, sc->sc_irqioh, 0, 0);
 
 #define	TRY(n) \
 	if (alive & (1 << (n))) \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: scc.h,v 1.5 2003/06/02 05:09:14 deraadt Exp $ */
+/*	$OpenBSD: scc.h,v 1.3 1996/04/28 11:03:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -13,6 +13,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -57,12 +63,10 @@ struct sccregs {
 	u_char s_val[16];
 };
 
-int mc_rev1_bug = 0;
-
 #define ZREAD0(scc)	((*((scc)->s_cr)))
 #define ZREAD(scc, n)	((*((scc)->s_cr)) = n, (*((scc)->s_cr)))
 #if 1
-#define ZREADD(scc)	mc_rev1_bug ? (ZWRITE0((scc), 8), ZREAD0((scc))) : ((*((scc)->s_dr)))
+#define ZREADD(scc)	(ZWRITE0((scc), 8), ZREAD0((scc)))
 #else
 #define ZREADD(scc)	((*((scc)->s_dr)))
 #endif
@@ -71,8 +75,7 @@ int mc_rev1_bug = 0;
 #define ZWRITE(scc, n, v) (ZWRITE0(scc, (u_char)n), \
 	    ZWRITE0(scc, (scc)->s_val[n] = (u_char)(v)))
 #if 1
-#define ZWRITED(scc, v)	mc_rev1_bug ? ((ZWRITE0((scc), 8), ZWRITE0((scc), (u_char)(v)))) : \
-        (((*((scc)->s_dr)) = (u_char)(v)))
+#define ZWRITED(scc, v)	(ZWRITE0((scc), 8), ZWRITE0((scc), (u_char)(v)))
 #else
 #define ZWRITED(scc, v)	((*((scc)->s_dr)) = (u_char)(v))
 #endif

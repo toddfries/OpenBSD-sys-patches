@@ -1,4 +1,4 @@
-/*	$OpenBSD: ultrix_misc.c,v 1.30 2007/06/06 17:15:13 deraadt Exp $	*/
+/*	$OpenBSD: ultrix_misc.c,v 1.10 1996/08/31 09:24:06 pefo Exp $	*/
 /*	$NetBSD: ultrix_misc.c,v 1.23 1996/04/07 17:23:04 jonathan Exp $	*/
 
 /*
@@ -50,7 +50,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -109,7 +113,6 @@
 
 #include <compat/ultrix/ultrix_syscall.h>
 #include <compat/ultrix/ultrix_syscallargs.h>
-#include <compat/ultrix/ultrix_util.h>
 
 #include <netinet/in.h>
 
@@ -119,30 +122,28 @@
 #include <nfs/nfsproto.h>
 #include <nfs/nfs.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 #include <sys/conf.h>					/* iszerodev() */
 #include <sys/socketvar.h>				/* sosetopt() */
 
 extern struct sysent ultrix_sysent[];
-#ifdef SYSCALL_DEBUG
 extern char *ultrix_syscallnames[];
-#endif
 
 /*
  * Select the appropriate setregs callback for the target architecture.
  */
-#ifdef __mips__
+#ifdef mips
 #define ULTRIX_EXEC_SETREGS cpu_exec_ecoff_setregs
-#endif /* __mips__ */
+#endif /* mips */
 
-#ifdef __vax__
+#ifdef vax
 #define ULTRIX_EXEC_SETREGS setregs
-#endif /* __vax__ */
+#endif /* mips */
 
 
-extern void ULTRIX_EXEC_SETREGS(struct proc *, struct exec_package *,
-					u_long, register_t *);
+extern void ULTRIX_EXEC_SETREGS __P((struct proc *, struct exec_package *,
+					u_long, register_t *));
 extern char sigcode[], esigcode[];
 
 struct emul emul_ultrix = {
@@ -152,11 +153,7 @@ struct emul emul_ultrix = {
 	ULTRIX_SYS_syscall,
 	ULTRIX_SYS_MAXSYSCALL,
 	ultrix_sysent,
-#ifdef SYSCALL_DEBUG
 	ultrix_syscallnames,
-#else
-	NULL,
-#endif
 	0,
 	copyargs,
 	ULTRIX_EXEC_SETREGS,
@@ -275,7 +272,7 @@ ultrix_sys_select(p, v, retval)
 #endif
 
 	}
-	error = sys_select(p, (void *) uap, retval);
+	error = sys_select(p, (void*) uap, retval);
 	if (error == EINVAL)
 		printf("ultrix select: bad args?\n");
 
@@ -304,12 +301,15 @@ async_daemon(p, v, retval)
 
 int
 ultrix_sys_mmap(p, v, retval)
-	struct proc *p;
+	register struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct ultrix_sys_mmap_args *uap = v;
+	register struct ultrix_sys_mmap_args *uap = v;
 	struct sys_mmap_args ouap;
+	register struct filedesc *fdp;
+	register struct file *fp;
+	register struct vnode *vp;
 
 	/*
 	 * Verify the arguments.
@@ -325,13 +325,26 @@ ultrix_sys_mmap(p, v, retval)
 
 	if ((SCARG(&ouap, flags) & MAP_FIXED) == 0 &&
 	    SCARG(&ouap, addr) != 0 &&
-	    SCARG(&ouap, addr) < (void *)round_page((vaddr_t)p->p_vmspace->vm_daddr+MAXDSIZ))
-		SCARG(&ouap, addr) = (void *)round_page((vaddr_t)p->p_vmspace->vm_daddr+MAXDSIZ);
+	    SCARG(&ouap, addr) < (caddr_t)round_page(p->p_vmspace->vm_daddr+MAXDSIZ))
+		SCARG(&ouap, addr) = (caddr_t)round_page(p->p_vmspace->vm_daddr+MAXDSIZ);
 
 	SCARG(&ouap, len) = SCARG(uap, len);
 	SCARG(&ouap, prot) = SCARG(uap, prot);
 	SCARG(&ouap, fd) = SCARG(uap, fd);
 	SCARG(&ouap, pos) = SCARG(uap, pos);
+
+	/*
+	 * Special case: if fd refers to /dev/zero, map as MAP_ANON.  (XXX)
+	 */
+	fdp = p->p_fd;
+	if ((unsigned)SCARG(&ouap, fd) < fdp->fd_nfiles &&		/*XXX*/
+	    (fp = fdp->fd_ofiles[SCARG(&ouap, fd)]) != NULL &&		/*XXX*/
+	    fp->f_type == DTYPE_VNODE &&				/*XXX*/
+	    (vp = (struct vnode *)fp->f_data)->v_type == VCHR &&	/*XXX*/
+	    iszerodev(vp->v_rdev)) {					/*XXX*/
+		SCARG(&ouap, flags) |= MAP_ANON;
+		SCARG(&ouap, fd) = -1;
+	}
 
 	return (sys_mmap(p, &ouap, retval));
 }
@@ -352,30 +365,28 @@ ultrix_sys_setsockopt(p, v, retval)
 #define	SO_DONTLINGER (~SO_LINGER)
 	if (SCARG(uap, name) == SO_DONTLINGER) {
 		m = m_get(M_WAIT, MT_SOOPTS);
+		if (m == NULL)
+			return (ENOBUFS);
 		mtod(m, struct linger *)->l_onoff = 0;
 		m->m_len = sizeof(struct linger);
-		error = (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
+		return (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
 		    SO_LINGER, m));
-		goto bad;
 	}
-	if (SCARG(uap, valsize) > MLEN) {
-		error = EINVAL;
-		goto bad;
-	}
+	if (SCARG(uap, valsize) > MLEN)
+		return (EINVAL);
 	if (SCARG(uap, val)) {
 		m = m_get(M_WAIT, MT_SOOPTS);
+		if (m == NULL)
+			return (ENOBUFS);
 		if ((error = copyin(SCARG(uap, val), mtod(m, caddr_t),
 				    (u_int)SCARG(uap, valsize))) != 0) {
 			(void) m_free(m);
-			goto bad;
+			return (error);
 		}
 		m->m_len = SCARG(uap, valsize);
 	}
-	error = (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
+	return (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
 	    SCARG(uap, name), m));
-bad:
-	FRELE(fp);
-	return (error);
 }
 
 struct ultrix_utsname {
@@ -395,7 +406,7 @@ ultrix_sys_uname(p, v, retval)
 {
 	struct ultrix_sys_uname_args *uap = v;
 	struct ultrix_utsname sut;
-	extern char machine[];
+	extern char ostype[], machine[], osrelease[];
 
 	bzero(&sut, sizeof(sut));
 
@@ -467,7 +478,7 @@ ultrix_sys_nfssvc(p, v, retval)
 #endif /* NFSSERVER */
 
 struct ultrix_ustat {
-	int32_t	f_tfree;	/* total free */
+	daddr_t	f_tfree;	/* total free */
 	ino_t	f_tinode;	/* total inodes free */
 	char	f_fname[6];	/* filsys name */
 	char	f_fpack[6];	/* filsys pack name */
@@ -579,20 +590,10 @@ ultrix_sys_execve(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct ultrix_sys_execve_args /* {
-		syscallarg(char *) path;
-		syscallarg(char **) argv;
-		syscallarg(char **) envp;
-        } */ *uap = v;
-	struct sys_execve_args ap;
-	caddr_t sg;
+	struct ultrix_sys_execve_args *uap = v;
 
-	sg = stackgap_init(p->p_emul);
+	caddr_t sg = stackgap_init(p->p_emul);
 	ULTRIX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = SCARG(uap, envp);
-
-	return (sys_execve(p, &ap, retval));
+	return (sys_execve(p, (struct sys_execve_args *)&uap, retval));
 }

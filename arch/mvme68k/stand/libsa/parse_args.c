@@ -1,8 +1,8 @@
-/*	$OpenBSD: parse_args.c,v 1.7 2008/03/23 17:05:41 deraadt Exp $ */
+/*	$OpenBSD: parse_args.c,v 1.2 1996/07/27 11:28:15 deraadt Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt
- *
+ * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -11,6 +11,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -46,10 +52,11 @@ struct flags {
 	{ 'y', RB_NOSYM },
 	{ 'd', RB_KDB },
 	{ 'm', RB_MINIROOT },
+	{ 'r', RB_DFLTROOT },
 	{ 's', RB_SINGLE },
 };
 
-int
+void
 parse_args(filep, flagp)
 
 char **filep;
@@ -66,7 +73,7 @@ int *flagp;
 			while (c == ' ')
 				c = *++ptr;
 			if (c == '\0')
-				return (0);
+				return;
 			if (c != '-') {
 				name = ptr;
 				while ((c = *++ptr) && c != ' ')
@@ -76,8 +83,6 @@ int *flagp;
 				continue;
 			}
 			while ((c = *++ptr) && c != ' ') {
-				if (c == 'q')
-					return (1);
 				for (i = 0; i < sizeof(bf)/sizeof(bf[0]); i++)
 					if (bf[i].c == c) {
 						howto |= bf[i].bit;
@@ -87,5 +92,4 @@ int *flagp;
 	}
 	*flagp = howto;
 	*filep = name;
-	return (0);
 }

@@ -1,3 +1,6 @@
+/*	$OpenBSD: quad.h,v 1.4 1996/05/01 15:18:48 deraadt Exp $	*/
+/*	$NetBSD: quad.h,v 1.7 1996/04/18 02:20:04 cgd Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -14,7 +17,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,7 +37,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: quad.h,v 1.10 2008/02/25 21:21:58 deraadt Exp $
+ *	@(#)quad.h	8.1 (Berkeley) 6/4/93
  */
 
 /*
@@ -40,20 +47,20 @@
  *
  *  - The type long long (aka quad_t) exists.
  *
- *  - A quad variable is exactly twice as long as `int'.
+ *  - A quad variable is exactly twice as long as `long'.
  *
  *  - The machine's arithmetic is two's complement.
  *
  * This library can provide 128-bit arithmetic on a machine with 128-bit
- * quads and 64-bit ints, for instance, or 96-bit arithmetic on machines
- * with 48-bit ints.
+ * quads and 64-bit longs, for instance, or 96-bit arithmetic on machines
+ * with 48-bit longs.
  */
 
 #include <sys/types.h>
-#if !defined(_KERNEL) && !defined(_STANDALONE)
+#ifndef _KERNEL
 #include <limits.h>
 #else
-#include <sys/limits.h>
+#include <machine/limits.h>
 #endif
 
 /*
@@ -63,12 +70,12 @@
 union uu {
 	quad_t	q;		/* as a (signed) quad */
 	u_quad_t uq;		/* as an unsigned quad */
-	int	sl[2];		/* as two signed ints */
-	u_int	ul[2];		/* as two unsigned ints */
+	long	sl[2];		/* as two signed longs */
+	u_long	ul[2];		/* as two unsigned longs */
 };
 
 /*
- * Define high and low parts of a quad_t.
+ * Define high and low longwords.
  */
 #define	H		_QUAD_HIGHWORD
 #define	L		_QUAD_LOWWORD
@@ -79,21 +86,23 @@ union uu {
  * and assembly.
  */
 #define	QUAD_BITS	(sizeof(quad_t) * CHAR_BIT)
-#define	INT_BITS	(sizeof(int) * CHAR_BIT)
-#define	HALF_BITS	(sizeof(int) * CHAR_BIT / 2)
+#define	LONG_BITS	(sizeof(long) * CHAR_BIT)
+#define	HALF_BITS	(sizeof(long) * CHAR_BIT / 2)
 
 /*
  * Extract high and low shortwords from longword, and move low shortword of
  * longword to upper half of long, i.e., produce the upper longword of
- * ((quad_t)(x) << (number_of_bits_in_int/2)).  (`x' must actually be u_int.)
+ * ((quad_t)(x) << (number_of_bits_in_long/2)).  (`x' must actually be u_long.)
  *
  * These are used in the multiply code, to split a longword into upper
  * and lower halves, and to reassemble a product as a quad_t, shifted left
- * (sizeof(int)*CHAR_BIT/2).
+ * (sizeof(long)*CHAR_BIT/2).
  */
-#define	HHALF(x)	((u_int)(x) >> HALF_BITS)
-#define	LHALF(x)	((u_int)(x) & (((int)1 << HALF_BITS) - 1))
-#define	LHUP(x)		((u_int)(x) << HALF_BITS)
+#define	HHALF(x)	((u_long)(x) >> HALF_BITS)
+#define	LHALF(x)	((u_long)(x) & (((long)1 << HALF_BITS) - 1))
+#define	LHUP(x)		((u_long)(x) << HALF_BITS)
+
+extern u_quad_t __qdivrem __P((u_quad_t u, u_quad_t v, u_quad_t *rem));
 
 /*
  * XXX
@@ -101,28 +110,29 @@ union uu {
  * as u_quad_t, while gcc 2 correctly uses int.  Unfortunately, we still use
  * both compilers.
  */
-#if __GNUC_PREREQ__(2, 0) || defined(lint)
+#if __GNUC__ >= 2
 typedef unsigned int	qshift_t;
 #else
 typedef u_quad_t	qshift_t;
 #endif
 
-quad_t __adddi3(quad_t, quad_t);
-quad_t __anddi3(quad_t, quad_t);
-quad_t __ashldi3(quad_t, qshift_t);
-quad_t __ashrdi3(quad_t, qshift_t);
-int __cmpdi2(quad_t, quad_t);
-quad_t __divdi3(quad_t, quad_t);
-quad_t __iordi3(quad_t, quad_t);
-quad_t __lshldi3(quad_t, qshift_t);
-quad_t __lshrdi3(quad_t, qshift_t);
-quad_t __moddi3(quad_t, quad_t);
-quad_t __muldi3(quad_t, quad_t);
-quad_t __negdi2(quad_t);
-quad_t __one_cmpldi2(quad_t);
-u_quad_t __qdivrem(u_quad_t, u_quad_t, u_quad_t *);
-quad_t __subdi3(quad_t, quad_t);
-int __ucmpdi2(u_quad_t, u_quad_t);
-u_quad_t __udivdi3(u_quad_t, u_quad_t );
-u_quad_t __umoddi3(u_quad_t, u_quad_t );
-quad_t __xordi3(quad_t, quad_t);
+__BEGIN_DECLS
+quad_t	__adddi3	__P((quad_t, quad_t));
+quad_t	__anddi3	__P((quad_t, quad_t));
+quad_t	__ashldi3	__P((quad_t, qshift_t));
+quad_t	__ashrdi3	__P((quad_t, qshift_t));
+int	__cmpdi2	__P((quad_t, quad_t));
+quad_t	__divdi3	__P((quad_t, quad_t));
+quad_t	__iordi3	__P((quad_t, quad_t));
+quad_t	__lshldi3	__P((quad_t, qshift_t));
+quad_t	__lshrdi3	__P((quad_t, qshift_t));
+quad_t	__moddi3	__P((quad_t, quad_t));
+quad_t	__muldi3	__P((quad_t, quad_t));
+quad_t	__negdi2	__P((quad_t));
+quad_t	__one_cmpldi2	__P((quad_t));
+quad_t	__subdi3	__P((quad_t, quad_t));
+int	__ucmpdi2	__P((u_quad_t, u_quad_t));
+u_quad_t __udivdi3	__P((u_quad_t, u_quad_t));
+u_quad_t __umoddi3	__P((u_quad_t, u_quad_t));
+quad_t	__xordi3	__P((quad_t, quad_t));
+__END_DECLS

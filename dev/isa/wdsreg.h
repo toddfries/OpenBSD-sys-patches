@@ -1,7 +1,5 @@
-/*	$OpenBSD: wdsreg.h,v 1.4 1997/11/07 08:07:11 niklas Exp $	*/
-
-typedef u_int8_t physaddr[3];
-typedef u_int8_t physlen[3];
+typedef u_char physaddr[3];
+typedef u_char physlen[3];
 #define	ltophys	_lto3b
 #define	phystol	_3btol
 
@@ -12,8 +10,6 @@ typedef u_int8_t physlen[3];
 #define WDS_CMD			0	/* write */
 #define WDS_IRQACK		1	/* write */
 #define WDS_HCR			2	/* write */
-
-#define	WDS_IO_PORTS		8	/* size in I/O-space */
 
 /* WDS_STAT (read) defs */
 #define WDSS_IRQ		0x80
@@ -52,16 +48,16 @@ struct wds_scat_gath {
 };
 
 struct wds_cmd {
-	u_int8_t opcode;
-	u_int8_t targ;
+	u_char opcode;
+	u_char targ;
 	struct scsi_generic scb;
-	u_int8_t stat;
-	u_int8_t venderr;
+	u_char stat;
+	u_char venderr;
 	physlen len;
 	physaddr data;
 	physaddr link;
-	u_int8_t write;
-	u_int8_t xx[6];
+	u_char write;
+	u_char xx[6];
 };
 
 struct wds_scb {
@@ -70,8 +66,6 @@ struct wds_scb {
 
 	struct wds_scat_gath scat_gath[WDS_NSEG];
 	struct scsi_sense_data sense_data;
-	/*----------------------------------------------------------------*/
-#define SCB_PHYS_SIZE ((int)&((struct wds_scb *)0)->chain)
 
 	TAILQ_ENTRY(wds_scb) chain;
 	struct wds_scb *nexthash;
@@ -89,11 +83,6 @@ struct wds_scb {
 #define	SCB_BUFFER	0x40
 	int timeout;
 
-#ifdef notyet
-	struct isadma_seg scb_phys[1];	/* phys segment of this scb */
-	struct isadma_seg data_phys[WDS_NSEG];	/* phys segments of data */
-	int data_nseg;			/* number of phys segments of data */
-#endif
 	struct wds_buf *buf;
 };
 
@@ -116,12 +105,12 @@ struct wds_scb {
 #define WDSX_GETEXECPARM	0x8f
 
 struct wds_mbx_out {
-	u_int8_t cmd;
+	u_char cmd;
 	physaddr scb_addr;
 };
 
 struct wds_mbx_in {
-	u_int8_t stat;
+	u_char stat;
 	physaddr scb_addr;
 };
 
@@ -147,12 +136,12 @@ struct wds_mbx_in {
 #define WDS_MBI_EHRESET		0x84
 
 struct wds_setup {
-	u_int8_t opcode;
-	u_int8_t scsi_id;
-	u_int8_t buson_t;
-	u_int8_t busoff_t;
-	u_int8_t xx;
+	u_char opcode;
+	u_char scsi_id;
+	u_char buson_t;
+	u_char busoff_t;
+	u_char xx;
 	physaddr mbaddr;
-	u_int8_t nomb;
-	u_int8_t nimb;
+	u_char nomb;
+	u_char nimb;
 };

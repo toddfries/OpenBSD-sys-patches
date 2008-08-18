@@ -1,4 +1,4 @@
-/*	$OpenBSD: etherfun.c,v 1.6 2003/08/19 10:22:30 deraadt Exp $ */
+/*	$OpenBSD: etherfun.c,v 1.2 1996/04/28 10:49:36 deraadt Exp $ */
 
 /*
  *
@@ -34,13 +34,12 @@
 /* etherfun.c */
 
 #include <sys/cdefs.h>
-#include <stand.h>
 #include "sboot.h"
 #include "etherfun.h"
 
 /* Construct and send a rev arp packet */
 void
-do_rev_arp(void)
+do_rev_arp()
 {
 	int     i;
 
@@ -65,7 +64,7 @@ do_rev_arp(void)
 
 /* Receive and disassemble the rev_arp reply */
 int
-get_rev_arp(void)
+get_rev_arp()
 {
 	le_get(buf, sizeof(buf), 6);
 	if (eh->ether_type == ETYPE_RARP && rarp->ar_op == OPCODE_REPLY) {
@@ -79,7 +78,7 @@ get_rev_arp(void)
 
 /* Try to get a reply to a rev arp request */
 int
-rev_arp(void)
+rev_arp()
 {
 	int     tries = 0;
 	while (tries < 5) {
@@ -97,14 +96,15 @@ rev_arp(void)
  * acknowledgement
  */
 void
-do_send_tftp(int mesgtype)
+do_send_tftp(mesgtype)
+	int mesgtype;
 {
 	u_long  res, iptmp, lcv;
 	char   *tot;
 
 	if (mesgtype == 0) {
 		tot = tftp_r + (sizeof(MSG) - 1);
-		myport = (u_short) ttime();
+		myport = (u_short) time();
 		if (myport < 1000)
 			myport += 1000;
 		servport = FTP_PORT;	/* to start */
@@ -153,7 +153,7 @@ do_send_tftp(int mesgtype)
 
 /* Attempt to tftp a file and read it into memory */
 int
-do_get_file(void)
+do_get_file()
 {
 	int     fail = 0, oldlen;
 	char   *loadat = (char *) LOAD_ADDR;
@@ -162,7 +162,7 @@ do_get_file(void)
 	do_send_tftp(READ);
 	while (1) {
 		if (le_get(buf, sizeof(buf), 5) == 0) {
-			/* timeout occurred */
+			/* timeout occured */
 			if (last_ack)
 				do_send_tftp(last_ack);
 			else

@@ -1,4 +1,3 @@
-/*	$OpenBSD: xyvar.h,v 1.6 2004/09/29 07:35:12 miod Exp $	*/
 /*	$NetBSD: xyvar.h,v 1.4 1996/03/31 22:39:04 pk Exp $	*/
 
 /*
@@ -141,6 +140,7 @@ struct xy_softc {
 struct xyc_softc {
   struct device sc_dev;            /* device struct, reqd by autoconf */
   struct intrhand sc_ih;           /* interrupt info */
+  struct evcnt sc_intrcnt;         /* event counter (for vmstat -i) */
 
   struct xyc *xyc;                 /* vaddr of vme registers */
 
@@ -159,7 +159,6 @@ struct xyc_softc {
   struct xy_iorq *xy_chain[XYC_MAXIOPB];
 				   /* current chain */
   int no_ols;			   /* disable overlap seek for stupid 450s */
-  struct timeout xyc_tick_tmo;	   /* for xyc_tick() */   
 };
 
 /*

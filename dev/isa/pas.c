@@ -1,5 +1,5 @@
-/*	$OpenBSD: pas.c,v 1.25 2008/04/21 00:32:42 jakemsr Exp $	*/
-/*	$NetBSD: pas.c,v 1.37 1998/01/12 09:43:43 thorpej Exp $	*/
+/*	$OpenBSD: pas.c,v 1.12 1996/08/24 05:03:18 deraadt Exp $	*/
+/*	$NetBSD: pas.c,v 1.17 1996/05/12 23:53:18 mycroft Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -35,15 +35,8 @@
  *
  */
 /*
- * jfw 7/13/97 - The soundblaster code requires the generic bus-space 
- * structures to be set up properly.  Rather than go to the effort of making
- * code for a dead line fully generic, properly set up the SB structures and
- * leave the rest x86/ISA/default-configuration specific.  If you have a
- * REAL computer, go buy a REAL sound card.
- */
-/*
  * Todo:
- * 	- look at other PAS drivers (for PAS native support)
+ * 	- look at other PAS drivers (for PAS native suport)
  * 	- use common sb.c once emulation is setup
  */
 
@@ -57,11 +50,11 @@
 
 #include <machine/cpu.h>
 #include <machine/intr.h>
-#include <machine/bus.h>
+#include <machine/pio.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
-#include <dev/midi_if.h>
+#include <dev/mulaw.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/isa/isadmavar.h>
@@ -102,8 +95,9 @@ struct pas_softc {
 
 };
 
-int	pas_getdev(void *, struct audio_device *);
-void	pasconf(int, int, int, int);
+int	pasopen __P((dev_t, int));
+int	pas_getdev __P((void *, struct audio_device *));
+void	pasconf __P((int, int, int, int));
 
 
 /*
@@ -111,33 +105,43 @@ void	pasconf(int, int, int, int);
  */
 
 struct audio_hw_if pas_hw_if = {
-	sbdsp_open,
+	pasopen,
 	sbdsp_close,
-	0,
+	NULL,
+	sbdsp_set_in_sr,
+	sbdsp_get_in_sr,
+	sbdsp_set_out_sr,
+	sbdsp_get_out_sr,
 	sbdsp_query_encoding,
-	sbdsp_set_params,
+	sbdsp_set_encoding,
+	sbdsp_get_encoding,
+	sbdsp_set_precision,
+	sbdsp_get_precision,
+	sbdsp_set_channels,
+	sbdsp_get_channels,
 	sbdsp_round_blocksize,
-	0,
-	0,
-	0,
-	0,
-	0,
+	sbdsp_set_out_port,
+	sbdsp_get_out_port,
+	sbdsp_set_in_port,
+	sbdsp_get_in_port,
+	sbdsp_commit_settings,
+	sbdsp_get_silence,
+	mulaw_expand,
+	mulaw_compress,
+	sbdsp_dma_output,
+	sbdsp_dma_input,
 	sbdsp_haltdma,
 	sbdsp_haltdma,
+	sbdsp_contdma,
+	sbdsp_contdma,
 	sbdsp_speaker_ctl,
 	pas_getdev,
-	0,
+	sbdsp_setfd,
 	sbdsp_mixer_set_port,
 	sbdsp_mixer_get_port,
 	sbdsp_mixer_query_devinfo,
-	sb_malloc,
-	sb_free,
-	sb_round,
-        sb_mappage,
-	sbdsp_get_props,
-	sbdsp_trigger_output,
-	sbdsp_trigger_input,
-	NULL
+	0,	/* not full-duplex */
+	0
 };
 
 /* The Address Translation code is used to convert I/O register addresses to
@@ -241,8 +245,8 @@ pasconf(model, sbbase, sbirq, sbdrq)
 	paswrite(P_M_MV508_INPUTMIX | 30, PARALLEL_MIXER);
 }
 
-int	pasprobe(struct device *, void *, void *);
-void	pasattach(struct device *, struct device *, void *);
+int	pasprobe __P((struct device *, void *, void *));
+void	pasattach __P((struct device *, struct device *, void *));
 
 struct cfattach pas_ca = {
 	sizeof(struct pas_softc), pasprobe, pasattach
@@ -264,16 +268,10 @@ pasprobe(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
-	struct pas_softc *sc = match;
-	struct isa_attach_args *ia = aux;
-	int iobase;
+	register struct pas_softc *sc = match;
+	register struct isa_attach_args *ia = aux;
+	register int iobase;
 	u_char id, t;
-
-        /* ensure we can set this up as a sound blaster */
-       	if (!SB_BASE_VALID(ia->ia_iobase)) {
-		DPRINTF(("pas: configured SB iobase 0x%x invalid\n", ia->ia_iobase));
-		return 0;
-	}
 
 	/*
 	 * WARNING: Setting an option like W:1 or so that disables
@@ -290,7 +288,7 @@ pasprobe(parent, match, aux)
 	/* XXX Need to setup pseudo device */
 	/* XXX What are good io addrs ? */
 	if (iobase != PAS_DEFAULT_BASE) {
-		DPRINTF(("pas: configured iobase %d invalid\n", iobase));
+		printf("pas: configured iobase %d invalid\n", iobase);
 		return 0;
 	}
 #else
@@ -321,7 +319,7 @@ pasprobe(parent, match, aux)
 
 	if (t != id) {
 		/* Not a PAS2 */
-		DPRINTF(("pas: detected card but PAS2 test failed\n"));
+		printf("pas: detected card but PAS2 test failed\n");
 		return 0;
 	}
 	/*XXX*/
@@ -337,7 +335,7 @@ pasprobe(parent, match, aux)
 
         if (sc->model >= 0) {
                 if (ia->ia_irq == IRQUNK) {
-                        DPRINTF(("pas: sb emulation requires known irq\n"));
+                        printf("pas: sb emulation requires known irq\n");
                         return (0);
                 } 
                 pasconf(sc->model, ia->ia_iobase, ia->ia_irq, 1);
@@ -346,55 +344,79 @@ pasprobe(parent, match, aux)
                 return (0);
         }
 
-	/* Now a SoundBlaster, so set up proper bus-space hooks
-         * appropriately
-         */
-
+	/* Now a SoundBlaster */
+/*	sc->sc_iobase = ia->ia_iobase;
+	/* and set the SB iobase into the DSP as well ... */
 	sc->sc_sbdsp.sc_iobase = ia->ia_iobase;
-	sc->sc_sbdsp.sc_iot = ia->ia_iot;
-
-	/* Map i/o space [we map 24 ports which is the max of the sb and pro */
-	if (bus_space_map(sc->sc_sbdsp.sc_iot, ia->ia_iobase, SBP_NPORT, 0,
-	    &sc->sc_sbdsp.sc_ioh)) {
-		DPRINTF(("pas: can't map i/o space 0x%x/%d in probe\n",
-		    ia->ia_iobase, SBP_NPORT));
-		return 0;
-	}
-
 	if (sbdsp_reset(&sc->sc_sbdsp) < 0) {
 		DPRINTF(("pas: couldn't reset card\n"));
-		goto unmap;
+		return 0;
 	}
 
 	/*
 	 * Cannot auto-discover DMA channel.
 	 */
 	if (!SB_DRQ_VALID(ia->ia_drq)) {
-		DPRINTF(("pas: configured dma chan %d invalid\n", ia->ia_drq));
-		goto unmap;
+		printf("pas: configured dma chan %d invalid\n", ia->ia_drq);
+		return 0;
 	}
+#ifdef NEWCONFIG
+	/*
+	 * If the IRQ wasn't compiled in, auto-detect it.
+	 */
+	if (ia->ia_irq == IRQUNK) {
+		ia->ia_irq = isa_discoverintr(pasforceintr, aux);
+		sbdsp_reset(&sc->sc_sbdsp);
+		if (!SB_IRQ_VALID(ia->ia_irq)) {
+			printf("pas: couldn't auto-detect interrupt");
+			return 0;
+		}
+	} else
+#endif
 	if (!SB_IRQ_VALID(ia->ia_irq)) {
-		DPRINTF(("pas: configured irq chan %d invalid\n", ia->ia_irq));
-		goto unmap;
+		printf("pas: configured irq chan %d invalid\n", ia->ia_irq);
+		return 0;
 	}
 
 	sc->sc_sbdsp.sc_irq = ia->ia_irq;
-	sc->sc_sbdsp.sc_drq8 = ia->ia_drq;
-	sc->sc_sbdsp.sc_drq16 = -1; /* XXX */
-	sc->sc_sbdsp.sc_ic = ia->ia_ic;
+	sc->sc_sbdsp.sc_drq = ia->ia_drq;
 	
 	if (sbdsp_probe(&sc->sc_sbdsp) == 0) {
 		DPRINTF(("pas: sbdsp probe failed\n"));
-		goto unmap;
+		return 0;
 	}
 
 	ia->ia_iosize = SB_NPORT;
 	return 1;
-
- unmap:
-	bus_space_unmap(sc->sc_sbdsp.sc_iot, sc->sc_sbdsp.sc_ioh, SBP_NPORT);
-	return 0;
 }
+
+#ifdef NEWCONFIG
+void
+pasforceintr(aux)
+	void *aux;
+{
+	static char dmabuf;
+	struct isa_attach_args *ia = aux;
+	int iobase = ia->ia_iobase;
+
+	/*
+	 * Set up a DMA read of one byte.
+	 * XXX Note that at this point we haven't called 
+	 * at_setup_dmachan().  This is okay because it just
+	 * allocates a buffer in case it needs to make a copy,
+	 * and it won't need to make a copy for a 1 byte buffer.
+	 * (I think that calling at_setup_dmachan() should be optional;
+	 * if you don't call it, it will be called the first time
+	 * it is needed (and you pay the latency).  Also, you might
+	 * never need the buffer anyway.)
+	 */
+	at_dma(DMAMODE_READ, &dmabuf, 1, ia->ia_drq);
+	if (pas_wdsp(iobase, SB_DSP_RDMA) == 0) {
+		(void)pas_wdsp(iobase, 0);
+		(void)pas_wdsp(iobase, 0);
+	}
+}
+#endif
 
 /*
  * Attach hardware to driver, attach hardware driver to audio
@@ -405,11 +427,11 @@ pasattach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
-	struct pas_softc *sc = (struct pas_softc *)self;
+	register struct pas_softc *sc = (struct pas_softc *)self;
 	struct isa_attach_args *ia = (struct isa_attach_args *)aux;
-	int iobase = ia->ia_iobase;
+	register int iobase = ia->ia_iobase;
+	int err;
 	
-	sc->sc_sbdsp.sc_isa = parent;
 	sc->sc_sbdsp.sc_iobase = iobase;
 	sc->sc_sbdsp.sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
 	    IPL_AUDIO, sbdsp_intr, &sc->sc_sbdsp, sc->sc_sbdsp.sc_dev.dv_xname);
@@ -418,12 +440,29 @@ pasattach(parent, self, aux)
 	
 	sbdsp_attach(&sc->sc_sbdsp);
 
-	snprintf(pas_device.name, sizeof pas_device.name, "pas,%s",
-	    pasnames[sc->model]);
-	snprintf(pas_device.version, sizeof pas_device.version, "%d",
-	    sc->rev);
+	sprintf(pas_device.name, "pas,%s", pasnames[sc->model]);
+	sprintf(pas_device.version, "%d", sc->rev);
 
-	audio_attach_mi(&pas_hw_if, &sc->sc_sbdsp, &sc->sc_sbdsp.sc_dev);
+	if ((err = audio_hardware_attach(&pas_hw_if, &sc->sc_sbdsp)) != 0)
+		printf("pas: could not attach to audio pseudo-device driver (%d)\n", err);
+}
+
+int
+pasopen(dev, flags)
+    dev_t dev;
+    int flags;
+{
+    struct pas_softc *sc;
+    int unit = AUDIOUNIT(dev);
+    
+    if (unit >= pas_cd.cd_ndevs)
+	return ENODEV;
+    
+    sc = pas_cd.cd_devs[unit];
+    if (!sc)
+	return ENXIO;
+    
+    return sbdsp_open(&sc->sc_sbdsp, dev, flags);
 }
 
 int

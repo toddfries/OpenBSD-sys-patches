@@ -1,4 +1,4 @@
-/*	$OpenBSD: scanc.c,v 1.5 2004/08/07 00:38:33 deraadt Exp $	*/
+/*	$OpenBSD: scanc.c,v 1.2 1996/04/19 16:09:33 niklas Exp $	*/
 /*	$NetBSD: scanc.c,v 1.3 1996/03/14 18:52:16 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,11 +40,14 @@
 #include <lib/libkern/libkern.h>
 
 int
-scanc(u_int size, const u_char *cp, const u_char table[], int mask)
+scanc(size, cp, table, mask)
+	u_int size;
+	register u_char *cp, table[];
+	register u_char mask;
 {
-	const u_char *end = &cp[size];
+	register u_char *end = &cp[size];
 
-	while (cp < end && (table[*cp] & (u_char)mask) == 0)
+	while (cp < end && (table[*cp] & mask) == 0)
 		cp++;
 	return (end - cp);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsproto.h,v 1.7 2007/06/06 14:13:42 thib Exp $	*/
+/*	$OpenBSD: nfsproto.h,v 1.2 1996/04/17 04:50:39 mickey Exp $	*/
 /*	$NetBSD: nfsproto.h,v 1.1 1996/02/18 11:54:06 fvdl Exp $	*/
 
 /*
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -54,10 +58,9 @@
 #define	NFS_PROG	100003
 #define NFS_VER2	2
 #define	NFS_VER3	3
-#define NFS_VER4        4
 #define NFS_V2MAXDATA	8192
-#define	NFS_MAXDGRAMDATA 32768
-#define	NFS_MAXDATA	MAXBSIZE
+#define	NFS_MAXDGRAMDATA 16384
+#define	NFS_MAXDATA	32768
 #define	NFS_MAXPATHLEN	1024
 #define	NFS_MAXNAMLEN	255
 #define	NFS_MAXPKTHDR	404
@@ -170,6 +173,11 @@
 #define	NFSPROC_PATHCONF	20
 #define	NFSPROC_COMMIT		21
 
+/* And leasing (nqnfs) procedure numbers (must be last) */
+#define	NQNFSPROC_GETLEASE	22
+#define	NQNFSPROC_VACATED	23
+#define	NQNFSPROC_EVICTED	24
+
 #define NFSPROC_NOOP		25
 #define	NFS_NPROCS		26
 
@@ -273,6 +281,15 @@ struct nfs_uquad {
 	u_int32_t nfsuquad[2];
 };
 typedef	struct nfs_uquad	nfsuint64;
+
+/*
+ * Used to convert between two u_longs and a u_quad_t.
+ */
+union nfs_quadconvert {
+	u_int32_t lval[2];
+	u_quad_t  qval;
+};
+typedef union nfs_quadconvert	nfsquad_t;
 
 /*
  * NFS Version 3 special file number.

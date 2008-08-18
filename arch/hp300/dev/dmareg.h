@@ -1,5 +1,4 @@
-/*	$OpenBSD: dmareg.h,v 1.9 2005/11/17 23:56:02 miod Exp $	*/
-/*	$NetBSD: dmareg.h,v 1.12 1997/05/05 21:02:40 thorpej Exp $	*/
+/*	$NetBSD: dmareg.h,v 1.6 1995/12/02 02:46:49 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1982, 1990, 1993
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -70,6 +73,9 @@ struct	dmareg {
 /* The hp300 has 2 DMA channels. */
 #define	NDMACHAN	2
 
+/* intr level must be >= level of any device using dma.  i.e., splbio */
+#define	DMAINTLVL	5
+
 /* addresses */
 #define	DMA_BASE	IIOV(0x500000)
 
@@ -105,31 +111,28 @@ struct	dmareg {
  *		look at the 98620C status to get the extended bits.
  * DMA_ARM:	Load address, count and kick-off DMA.
  */
-#define	DMA_CLEAR(dc) do {					\
-		v_int dmaclr;					\
-		dmaclr = (int)dc->dm_Bhwaddr->dmaB_addr;	\
-	} while (0);
+#define	DMA_CLEAR(dc)	{ v_int dmaclr = (int) dc->dm_Bhwaddr->dmaB_addr; }
 #define	DMA_STAT(dc)	dc->dm_Bhwaddr->dmaB_stat
 
 #if defined(HP320)
-#define	DMA_ARM(sc, dc)	\
-	if (sc->sc_type == DMA_B) { \
-		struct dmaBdevice *dma = dc->dm_Bhwaddr; \
-		dma->dmaB_addr = (v_char *)dc->dm_chain[dc->dm_cur].dc_addr; \
-		dma->dmaB_count = dc->dm_chain[dc->dm_cur].dc_count - 1; \
+#define	DMA_ARM(dc)	\
+	if (dc->dm_softc->sc_type == DMA_B) { \
+		register struct dmaBdevice *dma = dc->dm_Bhwaddr; \
+		dma->dmaB_addr = dc->dm_cur->dc_addr; \
+		dma->dmaB_count = dc->dm_cur->dc_count - 1; \
 		dma->dmaB_cmd = dc->dm_cmd; \
 	} else { \
-		struct dmadevice *dma = dc->dm_hwaddr; \
-		dma->dma_addr = (v_char *)dc->dm_chain[dc->dm_cur].dc_addr; \
-		dma->dma_count = dc->dm_chain[dc->dm_cur].dc_count - 1; \
+		register struct dmadevice *dma = dc->dm_hwaddr; \
+		dma->dma_addr = dc->dm_cur->dc_addr; \
+		dma->dma_count = dc->dm_cur->dc_count - 1; \
 		dma->dma_cmd = dc->dm_cmd; \
 	}
 #else
-#define	DMA_ARM(sc, dc)	\
+#define	DMA_ARM(dc)	\
 	{ \
-		struct dmadevice *dma = dc->dm_hwaddr; \
-		dma->dma_addr = (v_char *)dc->dm_chain[dc->dm_cur].dc_addr; \
-		dma->dma_count = dc->dm_chain[dc->dm_cur].dc_count - 1; \
+		register struct dmadevice *dma = dc->dm_hwaddr; \
+		dma->dma_addr = dc->dm_cur->dc_addr; \
+		dma->dma_count = dc->dm_cur->dc_count - 1; \
 		dma->dma_cmd = dc->dm_cmd; \
 	}
 #endif

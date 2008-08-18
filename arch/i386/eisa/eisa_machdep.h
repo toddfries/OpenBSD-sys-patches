@@ -1,5 +1,5 @@
-/*	$OpenBSD: eisa_machdep.h,v 1.6 2004/06/13 21:49:15 niklas Exp $	*/
-/*	$NetBSD: eisa_machdep.h,v 1.4 1997/06/06 23:12:52 thorpej Exp $	*/
+/*	$OpenBSD: eisa_machdep.h,v 1.2 1996/04/21 22:16:19 deraadt Exp $	*/
+/*	$NetBSD: eisa_machdep.h,v 1.2 1996/04/09 23:00:27 cgd Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -43,11 +43,6 @@
 #define	EISA_ID_LEN		(sizeof(EISA_ID) - 1)
 #define	EISA_ID_PADDR		0xfffd9
 
-extern struct i386_bus_dma_tag eisa_bus_dma_tag;
-
-#define ELCR0	0x4d0		/* eisa irq 0-7 */
-#define ELCR1	0x4d1		/* eisa irq 8-15 */
-
 /*
  * Types provided to machine-independent EISA code.
  */
@@ -57,12 +52,13 @@ typedef int eisa_intr_handle_t;
 /*
  * Functions provided to machine-independent EISA code.
  */
-void		eisa_attach_hook(struct device *, struct device *,
-		    struct eisabus_attach_args *);
-int		eisa_maxslots(eisa_chipset_tag_t);
-int		eisa_intr_map(eisa_chipset_tag_t, u_int,
-		    eisa_intr_handle_t *);
-const char	*eisa_intr_string(eisa_chipset_tag_t, eisa_intr_handle_t);
-void		*eisa_intr_establish(eisa_chipset_tag_t, eisa_intr_handle_t,
-		    int, int, int (*)(void *), void *, char *);
-void		eisa_intr_disestablish(eisa_chipset_tag_t, void *);
+void		eisa_attach_hook __P((struct device *, struct device *,
+		    struct eisabus_attach_args *));
+int		eisa_maxslots __P((eisa_chipset_tag_t));
+int		eisa_intr_map __P((eisa_chipset_tag_t, u_int,
+		    eisa_intr_handle_t *));
+const char	*eisa_intr_string __P((eisa_chipset_tag_t, eisa_intr_handle_t));
+void		*eisa_intr_establish __P((eisa_chipset_tag_t,
+		    eisa_intr_handle_t, int, int, int (*)(void *), void *,
+		    char *));
+void		eisa_intr_disestablish __P((eisa_chipset_tag_t, void *));

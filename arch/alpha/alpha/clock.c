@@ -1,5 +1,5 @@
-/*	$OpenBSD: clock.c,v 1.18 2007/04/30 04:35:05 miod Exp $	*/
-/*	$NetBSD: clock.c,v 1.29 2000/06/05 21:47:10 thorpej Exp $	*/
+/*	$OpenBSD: clock.c,v 1.5 1996/07/29 22:57:13 niklas Exp $	*/
+/*	$NetBSD: clock.c,v 1.10 1996/04/23 15:26:06 cgd Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,43 +47,21 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/evcount.h>
-#include <sys/timetc.h>
-
-#include <dev/clock_subr.h>
 
 #include <machine/rpb.h>
-#include <machine/autoconf.h>
-#include <machine/cpuconf.h>
 
 #include <alpha/alpha/clockvar.h>
 
-#define MINYEAR 1998 /* "today" */
-#ifdef CLOCK_COMPAT_OSF1
-/*
- * According to OSF/1's /usr/sys/include/arch/alpha/clock.h,
- * the console adjusts the RTC years 13..19 to 93..99 and
- * 20..40 to 00..20. (historical reasons?)
- * DEC Unix uses an offset to the year to stay outside
- * the dangerous area for the next couple of years.
- */
-#define UNIX_YEAR_OFFSET 52 /* 41=>1993, 12=>2064 */
-#else
-#define UNIX_YEAR_OFFSET 0
-#endif
- 
-extern int schedhz;
+#define	SECMIN	((unsigned)60)			/* seconds per minute */
+#define	SECHOUR	((unsigned)(60*SECMIN))		/* seconds per hour */
+#define	SECDAY	((unsigned)(24*SECHOUR))	/* seconds per day */
+#define	SECYR	((unsigned)(365*SECDAY))	/* seconds per common year */
+
+#define	LEAPYEAR(year)	(((year) % 4) == 0)
 
 struct device *clockdev;
 const struct clockfns *clockfns;
 int clockinitted;
-struct evcount clk_count;
-int clk_irq = 0;
-
-u_int rpcc_get_timecount(struct timecounter *);
-struct timecounter rpcc_timecounter = {
-	rpcc_get_timecount, NULL, ~0u, 0, "rpcc", 0, NULL
-};
 
 void
 clockattach(dev, fns)
@@ -88,8 +70,12 @@ clockattach(dev, fns)
 {
 
 	/*
-	 * Just bookkeeping.
+	 * establish the clock interrupt; it's a special case
 	 */
+	set_clockintr();
+#ifdef EVCNT_COUNTERS
+	evcnt_attach(self, "intr", &clock_intr_evcnt);
+#endif
 	printf("\n");
 
 	if (clockfns != NULL)
@@ -106,7 +92,7 @@ clockattach(dev, fns)
  *
  * Inittodr initializes the time of day hardware which provides
  * date functions.  Its primary function is to use some file
- * system information in case the hardware clock lost state.
+ * system information in case the hardare clock lost state.
  *
  * Resettodr restores the time of day hardware after a time change.
  */
@@ -116,63 +102,30 @@ clockattach(dev, fns)
  * are no other timers available.
  */
 void
-cpu_initclocks(void)
+cpu_initclocks()
 {
-	u_int32_t cycles_per_sec;
-	struct clocktime ct;
-	u_int32_t first_rpcc, second_rpcc; /* only lower 32 bits are valid */
-	int first_sec;
+	extern int tickadj;
+	struct clock_softc *csc;
+	int fractick;
 
 	if (clockfns == NULL)
 		panic("cpu_initclocks: no clock attached");
 
+	hz = 1024;		/* 1024 Hz clock */
 	tick = 1000000 / hz;	/* number of microseconds between interrupts */
+	tickfix = 1000000 - (hz * tick);
+	if (tickfix) {
+		int ftp;
 
-	/*
-	 * Establish the clock interrupt; it's a special case.
-	 *
-	 * We establish the clock interrupt this late because if
-	 * we do it at clock attach time, we may have never been at
-	 * spl0() since taking over the system.  Some versions of
-	 * PALcode save a clock interrupt, which would get delivered
-	 * when we spl0() in autoconf.c.  If established the clock
-	 * interrupt handler earlier, that interrupt would go to
-	 * hardclock, which would then fall over because p->p_stats
-	 * isn't set at that time.
-	 */
-	platform.clockintr = hardclock;
-	schedhz = 16;
-
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
+		ftp = min(ffs(tickfix), ffs(hz));
+		tickfix >>= (ftp - 1);
+		tickfixinterval = hz >> (ftp - 1);
+        }
 
 	/*
 	 * Get the clock started.
 	 */
 	(*clockfns->cf_init)(clockdev);
-
-	/*
-	 * Calibrate the cycle counter frequency.
-	 */
-	(*clockfns->cf_get)(clockdev, 0, &ct);
-	first_sec = ct.sec;
-
-	/* Let the clock tick one second. */
-	do {
-		first_rpcc = alpha_rpcc();
-		(*clockfns->cf_get)(clockdev, 0, &ct);
-	} while (ct.sec == first_sec);
-	first_sec = ct.sec;
-	/* Let the clock tick one more second. */
-	do {
-		second_rpcc = alpha_rpcc();
-		(*clockfns->cf_get)(clockdev, 0, &ct);
-	} while (ct.sec == first_sec);
-
-	cycles_per_sec = second_rpcc - first_rpcc;
-
-	rpcc_timecounter.tc_frequency = cycles_per_sec;
-
-	tc_init(&rpcc_timecounter);
 }
 
 /*
@@ -189,85 +142,76 @@ setstatclockrate(newhz)
 }
 
 /*
- * Initialize the time of day register, based on the time base which is, e.g.
+ * This code is defunct after 2099.
+ * Will Unix still be here then??
+ */
+static short dayyr[12] = {
+	0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
+};
+
+/*
+ * Initialze the time of day register, based on the time base which is, e.g.
  * from a filesystem.  Base provides the time to within six months,
  * and the time of year clock (if any) provides the rest.
  */
 void
-inittodr(time_t base)
+inittodr(base)
+	time_t base;
 {
+	register int days, yr;
 	struct clocktime ct;
-	int year;
-	struct clock_ymdhms dt;
-	time_t deltat;
-	int badbase;
-	struct timespec ts;
+	long deltat;
+	int badbase, s;
 
-	ts.tv_sec = ts.tv_nsec = 0;
-
-	if (base < (MINYEAR-1970)*SECYR) {
+	if (base < 5*SECYR) {
 		printf("WARNING: preposterous time in file system");
 		/* read the system clock anyway */
-		base = (MINYEAR-1970)*SECYR;
+		base = 6*SECYR + 186*SECDAY + SECDAY/2;
 		badbase = 1;
 	} else
 		badbase = 0;
 
 	(*clockfns->cf_get)(clockdev, base, &ct);
-#ifdef DEBUG
-	printf("readclock: %d/%d/%d/%d/%d/%d", ct.year, ct.mon, ct.day,
-	       ct.hour, ct.min, ct.sec);
-#endif
 	clockinitted = 1;
 
-	year = 1900 + UNIX_YEAR_OFFSET + ct.year;
-	if (year < 1970)
-		year += 100;
-	/* simple sanity checks (2037 = time_t overflow) */
-	if (year < MINYEAR || year > 2037 ||
-	    ct.mon < 1 || ct.mon > 12 || ct.day < 1 ||
+	/* simple sanity checks */
+	if (ct.year < 70 || ct.mon < 1 || ct.mon > 12 || ct.day < 1 ||
 	    ct.day > 31 || ct.hour > 23 || ct.min > 59 || ct.sec > 59) {
 		/*
 		 * Believe the time in the file system for lack of
 		 * anything better, resetting the TODR.
 		 */
-		ts.tv_sec = base;
+		time.tv_sec = base;
 		if (!badbase) {
 			printf("WARNING: preposterous clock chip time\n");
 			resettodr();
 		}
 		goto bad;
 	}
-
-	dt.dt_year = year;
-	dt.dt_mon = ct.mon;
-	dt.dt_day = ct.day;
-	dt.dt_hour = ct.hour;
-	dt.dt_min = ct.min;
-	dt.dt_sec = ct.sec;
-	ts.tv_sec = clock_ymdhms_to_secs(&dt);
-#ifdef DEBUG
-	printf("=>%ld (%d)\n", ts.tv_sec, base);
-#endif
+	days = 0;
+	for (yr = 70; yr < ct.year; yr++)
+		days += LEAPYEAR(yr) ? 366 : 365;
+	days += dayyr[ct.mon - 1] + ct.day - 1;
+	if (LEAPYEAR(yr) && ct.mon > 2)
+		days++;
+	/* now have days since Jan 1, 1970; the rest is easy... */
+	time.tv_sec =
+	    days * SECDAY + ct.hour * SECHOUR + ct.min * SECMIN + ct.sec;
 
 	if (!badbase) {
 		/*
 		 * See if we gained/lost two or more days;
 		 * if so, assume something is amiss.
 		 */
-		deltat = ts.tv_sec - base;
+		deltat = time.tv_sec - base;
 		if (deltat < 0)
 			deltat = -deltat;
-		if (deltat < 2 * SECDAY) {
-			tc_setclock(&ts);
+		if (deltat < 2 * SECDAY)
 			return;
-		}
-		printf("WARNING: clock %s %ld days",
-		    ts.tv_sec < base ? "lost" : "gained",
-		    (long)deltat / SECDAY);
+		printf("WARNING: clock %s %d days",
+		    time.tv_sec < base ? "lost" : "gained", deltat / SECDAY);
 	}
 bad:
-	tc_setclock(&ts);
 	printf(" -- CHECK AND RESET THE DATE!\n");
 }
 
@@ -281,32 +225,41 @@ bad:
 void
 resettodr()
 {
-	struct clock_ymdhms dt;
+	register int t, t2;
 	struct clocktime ct;
+	int s;
 
 	if (!clockinitted)
 		return;
 
-	clock_secs_to_ymdhms(time_second, &dt);
+	/* compute the day of week. */
+	t2 = time.tv_sec / SECDAY;
+	ct.dow = (t2 + 4) % 7;	/* 1/1/1970 was thursday */
 
-	/* rt clock wants 2 digits */
-	ct.year = (dt.dt_year - UNIX_YEAR_OFFSET) % 100;
-	ct.mon = dt.dt_mon;
-	ct.day = dt.dt_day;
-	ct.hour = dt.dt_hour;
-	ct.min = dt.dt_min;
-	ct.sec = dt.dt_sec;
-	ct.dow = dt.dt_wday;
-#ifdef DEBUG
-	printf("setclock: %d/%d/%d/%d/%d/%d\n", ct.year, ct.mon, ct.day,
-	       ct.hour, ct.min, ct.sec);
-#endif
+	/* compute the year */
+	ct.year = 69;
+	while (t2 >= 0) {	/* whittle off years */
+		t = t2;
+		ct.year++;
+		t2 -= LEAPYEAR(ct.year) ? 366 : 365;
+	}
+
+	/* t = month + day; separate */
+	t2 = LEAPYEAR(ct.year);
+	for (ct.mon = 1; ct.mon < 12; ct.mon++)
+		if (t < dayyr[ct.mon] + (t2 && ct.mon > 1))
+			break;
+
+	ct.day = t - dayyr[ct.mon - 1] + 1;
+	if (t2 && ct.mon > 2)
+		ct.day--;
+
+	/* the rest is easy */
+	t = time.tv_sec % SECDAY;
+	ct.hour = t / SECHOUR;
+	t %= 3600;
+	ct.min = t / SECMIN;
+	ct.sec = t % SECMIN;
 
 	(*clockfns->cf_set)(clockdev, &ct);
-}
-
-u_int
-rpcc_get_timecount(struct timecounter *tc)
-{
-	return alpha_rpcc();
 }

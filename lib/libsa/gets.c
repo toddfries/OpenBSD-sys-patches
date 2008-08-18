@@ -1,4 +1,4 @@
-/*	$OpenBSD: gets.c,v 1.4 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: gets.c,v 1.2 1996/09/23 14:18:54 mickey Exp $	*/
 /*	$NetBSD: gets.c,v 1.5.2.1 1995/10/13 19:54:26 pk Exp $	*/
 
 /*-
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,10 +39,11 @@
 #include "stand.h"
 
 void
-gets(char *buf)
+gets(buf)
+	char *buf;
 {
-	int c;
-	char *lp;
+	register int c;
+	register char *lp;
 
 	for (lp = buf;;)
 		switch (c = getchar() & 0177) {
@@ -63,7 +68,7 @@ gets(char *buf)
 			break;
 #endif
 		case 'r'&037: {
-		char *p;
+			register char *p;
 
 			putchar('\n');
 			for (p = buf; p < lp; ++p)

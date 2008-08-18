@@ -1,5 +1,4 @@
-/*	$OpenBSD: timerreg.h,v 1.4 2003/06/02 23:27:55 millert Exp $	*/
-/*	$NetBSD: timerreg.h,v 1.6 1996/10/28 00:20:32 abrown Exp $ */
+/*	$NetBSD: timerreg.h,v 1.5 1996/05/02 18:17:33 pk Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -22,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -71,6 +74,12 @@
  *	  they count in 500ns increments (bit 9 being the least
  *	  significant bit).
  *
+ *	  Note that we still use the `sun4c' masks and shifts to compute
+ *	  the bit pattern, given the tick period in microseconds, resulting
+ *	  in a limit value that is 1 too high. This means that (with HZ=100)
+ *	  the clock will err on the slow side by 500ns/10ms (or 0.00005 %).
+ *	  We dont bother.
+ *
  */
 #ifndef _LOCORE
 struct timer_4 {
@@ -109,18 +118,8 @@ struct counter_4m {		/* counter that interrupts at ipl 14 */
 #define	TMR_SHIFT	10		/* shift to obtain microseconds */
 #define	TMR_MASK	0x1fffff	/* 21 bits */
 
-/* 
- * Compute a limit that causes the timer to fire every n microseconds.
- * The Sun4c requires that the timer register be initialized for n+1
- * microseconds, while the Sun4m requires it be initialized for n. Thus
- * the two versions of this function.
- *
- * Note that the manual for the chipset used in the Sun4m suggests that
- * the timer be set at n+0.5 microseconds; in practice, this produces
- * a 50 ppm clock skew, which means that the 0.5 should not be there... 
- */
+/* Compute a limit that causes the timer to fire every n microseconds. */
 #define	tmr_ustolim(n)	(((n) + 1) << TMR_SHIFT)
 
 /*efine	TMR_SHIFT4M	9		-* shift to obtain microseconds */
-/*efine tmr_ustolim4m(n)	(((2*(n)) + 1) << TMR_SHIFT4M)*/
-#define tmr_ustolim4m(n)	((n) << TMR_SHIFT)
+/*efine tmr_ustolim(n)	(((2*(n)) + 1) << TMR_SHIFT4M)*/

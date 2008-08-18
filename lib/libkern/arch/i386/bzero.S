@@ -1,4 +1,4 @@
-/*	$OpenBSD: bzero.S,v 1.4 2007/11/25 18:25:35 deraadt Exp $	*/
+/*	$OpenBSD: bzero.S,v 1.2 1996/09/27 06:47:45 mickey Exp $	*/
 
 /*
  * Written by J.T. Conklin <jtc@netbsd.org>.
@@ -7,7 +7,6 @@
 
 #include <machine/asm.h>
 
-#ifndef _KERNEL
 ENTRY(bzero)
 	pushl	%edi
 	movl	8(%esp),%edi
@@ -18,7 +17,7 @@ ENTRY(bzero)
 
 	/*
 	 * if the string is too short, it's really not worth the overhead
-	 * of aligning to word boundaries, etc.  So we jump to a plain
+	 * of aligning to word boundries, etc.  So we jump to a plain
 	 * unaligned set.
 	 */
 	cmpl	$16,%edx
@@ -43,4 +42,3 @@ L1:	movl	%edx,%ecx		/* zero remainder by bytes */
 
 	popl	%edi
 	ret
-#endif

@@ -1,4 +1,3 @@
-/*	$OpenBSD: bsd_openprom.h,v 1.11 2003/11/14 19:05:36 miod Exp $	*/
 /*	$NetBSD: bsd_openprom.h,v 1.11 1996/05/18 12:27:43 mrg Exp $ */
 
 /*
@@ -16,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -71,15 +74,15 @@
  * and so forth).
  */
 struct v0devops {
-	int	(*v0_open)(char *dev);
-	int	(*v0_close)(int d);
-	int	(*v0_rbdev)(int d, int nblks, int blkno, void *addr);
-	int	(*v0_wbdev)(int d, int nblks, int blkno, void *addr);
-	int	(*v0_wnet)(int d, int nbytes, void *addr);
-	int	(*v0_rnet)(int d, int nbytes, void *addr);
-	int	(*v0_rcdev)(int d, int nbytes, int, void *addr);
-	int	(*v0_wcdev)(int d, int nbytes, int, void *addr);
-	int	(*v0_seek)(int d, long offset, int whence);
+	int	(*v0_open) __P((char *dev));
+	int	(*v0_close) __P((int d));
+	int	(*v0_rbdev) __P((int d, int nblks, int blkno, void *addr));
+	int	(*v0_wbdev) __P((int d, int nblks, int blkno, void *addr));
+	int	(*v0_wnet) __P((int d, int nbytes, void *addr));
+	int	(*v0_rnet) __P((int d, int nbytes, void *addr));
+	int	(*v0_rcdev) __P((int d, int nbytes, int, void *addr));
+	int	(*v0_wcdev) __P((int d, int nbytes, int, void *addr));
+	int	(*v0_seek) __P((int d, long offset, int whence));
 };
 
 /*
@@ -97,25 +100,25 @@ struct v2devops {
 	 * Convert an `instance handle' (acquired through v2_open()) to
 	 * a `package handle', a.k.a. a `node'.
 	 */
-	int	(*v2_fd_phandle)(int d);
+	int	(*v2_fd_phandle) __P((int d));
 
 	/* Memory allocation and release. */
-	void	*(*v2_malloc)(caddr_t va, u_int sz);
-	void	(*v2_free)(caddr_t va, u_int sz);
+	void	*(*v2_malloc) __P((caddr_t va, u_int sz));
+	void	(*v2_free) __P((caddr_t va, u_int sz));
 
 	/* Device memory mapper. */
-	caddr_t	(*v2_mmap)(caddr_t va, int asi, u_int pa, u_int sz);
-	void	(*v2_munmap)(caddr_t va, u_int sz);
+	caddr_t	(*v2_mmap) __P((caddr_t va, int asi, u_int pa, u_int sz));
+	void	(*v2_munmap) __P((caddr_t va, u_int sz));
 
 	/* Device open, close, etc. */
-	int	(*v2_open)(char *devpath);
-	void	(*v2_close)(int d);
-	int	(*v2_read)(int d, void *buf, int nbytes);
-	int	(*v2_write)(int d, void *buf, int nbytes);
-	void	(*v2_seek)(int d, int hi, int lo);
+	int	(*v2_open) __P((char *devpath));
+	void	(*v2_close) __P((int d));
+	int	(*v2_read) __P((int d, void *buf, int nbytes));
+	int	(*v2_write) __P((int d, void *buf, int nbytes));
+	void	(*v2_seek) __P((int d, int hi, int lo));
 
-	void	(*v2_chain)(void);	/* ??? */
-	void	(*v2_release)(void);	/* ??? */
+	void	(*v2_chain) __P((void));	/* ??? */
+	void	(*v2_release) __P((void));	/* ??? */
 };
 
 /*
@@ -205,37 +208,37 @@ struct promvec {
 #define	PROMDEV_TTYB	2		/* in/out to ttyb */
 
 	/* Blocking getchar/putchar.  NOT REENTRANT! (grr) */
-	int	(*pv_getchar)(void);
-	void	(*pv_putchar)(int ch);
+	int	(*pv_getchar) __P((void));
+	void	(*pv_putchar) __P((int ch));
 
 	/* Non-blocking variants that return -1 on error. */
-	int	(*pv_nbgetchar)(void);
-	int	(*pv_nbputchar)(int ch);
+	int	(*pv_nbgetchar) __P((void));
+	int	(*pv_nbputchar) __P((int ch));
 
 	/* Put counted string (can be very slow). */
-	void	(*pv_putstr)(char *str, int len);
+	void	(*pv_putstr) __P((char *str, int len));
 
 	/* Miscellany. */
-	void	(*pv_reboot)(char *bootstr);
-	void	(*pv_printf)(const char *fmt, ...);
-	void	(*pv_abort)(void);	/* L1-A abort */
+	void	(*pv_reboot) __P((char *bootstr));
+	void	(*pv_printf) __P((const char *fmt, ...));
+	void	(*pv_abort) __P((void));	/* L1-A abort */
 	int	*pv_ticks;		/* Ticks since last reset */
-	void	(*pv_halt)(void) __attribute__((__noreturn__));/* Halt! */
-	void	(**pv_synchook)(void);	/* "sync" command hook */
+	__dead void (*pv_halt) __P((void)) __attribute__((noreturn));/* Halt! */
+	void	(**pv_synchook) __P((void));	/* "sync" command hook */
 
 	/*
 	 * This eval's a FORTH string.  Unfortunately, its interface
 	 * changed between V0 and V2, which gave us much pain.
 	 */
 	union {
-		void	(*v0_eval)(int len, char *str);
-		void	(*v2_eval)(char *str);
+		void	(*v0_eval) __P((int len, char *str));
+		void	(*v2_eval) __P((char *str));
 	} pv_fortheval;
 
 	struct	v0bootargs **pv_v0bootargs;	/* V0: Boot args */
 
 	/* Extract Ethernet address from network device. */
-	u_int	(*pv_enaddr)(int d, char *enaddr);
+	u_int	(*pv_enaddr) __P((int d, char *enaddr));
 
 	struct	v2bootargs pv_v2bootargs;	/* V2: Boot args + std in/out */
 	struct	v2devops pv_v2devops;	/* V2: device operations */
@@ -253,17 +256,17 @@ struct promvec {
 	 * all memory references go to the PROM, so the PROM can do it
 	 * easily.
 	 */
-	void	(*pv_setctxt)(int ctxt, caddr_t va, int pmeg);
+	void	(*pv_setctxt) __P((int ctxt, caddr_t va, int pmeg));
 #if defined(SUN4M) && defined(notyet)
 	/*
 	 * The following are V3 ROM functions to handle MP machines in the
 	 * Sun4m series. They have undefined results when run on a uniprocessor!
 	 */
-	int	(*pv_v3cpustart)(u_int module, u_int ctxtbl,
-				      int context, caddr_t pc);
-	int 	(*pv_v3cpustop)(u_int module);
-	int	(*pv_v3cpuidle)(u_int module);
-	int 	(*pv_v3cpuresume)(u_int module);
+	int	(*pv_v3cpustart) __P((u_int module, u_int ctxtbl,
+				      int context, caddr_t pc));
+	int 	(*pv_v3cpustop) __P((u_int module));
+	int	(*pv_v3cpuidle) __P((u_int module));
+	int 	(*pv_v3cpuresume) __P((u_int module));
 #endif
 };
 
@@ -279,7 +282,7 @@ struct promvec {
  * A node property is simply a name/value pair.  The names are C strings
  * (NUL-terminated); the values are arbitrary byte strings (counted strings).
  * Many values are really just C strings.  Sometimes these are NUL-terminated,
- * sometimes not, depending on the interface version; v0 seems to
+ * sometimes not, depending on the the interface version; v0 seems to
  * terminate and v2 not.  Many others are simply integers stored as four
  * bytes in machine order: you just get them and go.  The third popular
  * format is an `address', which is made up of one or more sets of three
@@ -301,22 +304,24 @@ struct nodeops {
 	/*
 	 * Tree traversal.
 	 */
-	int	(*no_nextnode)(int node);	/* next(node) */
-	int	(*no_child)(int node);	/* first child */
+	int	(*no_nextnode) __P((int node));	/* next(node) */
+	int	(*no_child) __P((int node));	/* first child */
 
 	/*
 	 * Property functions.  Proper use of getprop requires calling
 	 * proplen first to make sure it fits.  Kind of a pain, but no
 	 * doubt more convenient for the PROM coder.
 	 */
-	int	(*no_proplen)(int node, caddr_t name);
-	int	(*no_getprop)(int node, caddr_t name, caddr_t val);
-	int	(*no_setprop)(int node, caddr_t name, caddr_t val,
-				   int len);
-	caddr_t	(*no_nextprop)(int node, caddr_t name);
+	int	(*no_proplen) __P((int node, caddr_t name));
+	int	(*no_getprop) __P((int node, caddr_t name, caddr_t val));
+	int	(*no_setprop) __P((int node, caddr_t name, caddr_t val,
+				   int len));
+	caddr_t	(*no_nextprop) __P((int node, caddr_t name));
 };
 
-__dead void	romhalt(void);
-__dead void	romboot(char *);
+void	romhalt __P((void))
+    __attribute__((__noreturn__));
+void	romboot __P((char *))
+    __attribute__((__noreturn__));
 
 extern struct promvec *promvec;

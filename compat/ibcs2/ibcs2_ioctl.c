@@ -1,5 +1,5 @@
-/*	$OpenBSD: ibcs2_ioctl.c,v 1.12 2004/09/19 21:34:42 mickey Exp $	*/
-/*	$NetBSD: ibcs2_ioctl.c,v 1.12 1996/08/10 09:08:26 mycroft Exp $	*/
+/*	$OpenBSD: ibcs2_ioctl.c,v 1.5 1996/08/10 12:09:21 deraadt Exp $	*/
+/*	$NetBSD: ibcs2_ioctl.c,v 1.11 1996/05/03 17:05:22 christos Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Scott Bartram
@@ -72,7 +72,7 @@
  * iBCS2 ioctl calls.
  */
 
-static const struct speedtab sptab[] = {
+static struct speedtab sptab[] = {
 	{ 0, 0 },
 	{ 50, 1 },
 	{ 75, 2 },
@@ -93,7 +93,7 @@ static const struct speedtab sptab[] = {
 	{ -1, -1 }
 };
 
-static const u_long s2btab[] = { 
+static u_long s2btab[] = { 
 	0,
 	50,
 	75,
@@ -112,10 +112,10 @@ static const u_long s2btab[] = {
 	38400,
 };
 
-static void stios2btios(struct ibcs2_termios *, struct termios *);
-static void btios2stios(struct termios *, struct ibcs2_termios *);
-static void stios2stio(struct ibcs2_termios *, struct ibcs2_termio *);
-static void stio2stios(struct ibcs2_termio *, struct ibcs2_termios *);
+static void stios2btios __P((struct ibcs2_termios *, struct termios *));
+static void btios2stios __P((struct termios *, struct ibcs2_termios *));
+static void stios2stio __P((struct ibcs2_termios *, struct ibcs2_termio *));
+static void stio2stios __P((struct ibcs2_termio *, struct ibcs2_termios *));
 
 static void
 stios2btios(st, bt)
@@ -342,17 +342,19 @@ ibcs2_sys_ioctl(p, v, retval)
 	} */ *uap = v;
 	struct filedesc *fdp = p->p_fd;
 	struct file *fp;
-	int (*ctl)(struct file *, u_long, caddr_t, struct proc *);
+	int (*ctl) __P((struct file *, u_long, caddr_t, struct proc *));
 	int error;
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
-		return (EBADF);
-	FREF(fp);
+	if (SCARG(uap, fd) < 0 || SCARG(uap, fd) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL) {
+		DPRINTF(("ibcs2_ioctl(%d): bad fd %d ", p->p_pid,
+			 SCARG(uap, fd)));
+		return EBADF;
+	}
 
 	if ((fp->f_flag & (FREAD|FWRITE)) == 0) {
 		DPRINTF(("ibcs2_ioctl(%d): bad fp flag ", p->p_pid));
-		error = EBADF;
-		goto out;
+		return EBADF;
 	}
 
 	ctl = fp->f_ops->fo_ioctl;
@@ -367,7 +369,7 @@ ibcs2_sys_ioctl(p, v, retval)
 		struct ibcs2_termio st;
 	
 		if ((error = (*ctl)(fp, TIOCGETA, (caddr_t)&bts, p)) != 0)
-			goto out;
+			return error;
 	
 		btios2stios (&bts, &sts);
 		if (SCARG(uap, cmd) == IBCS2_TCGETA) {
@@ -377,12 +379,10 @@ ibcs2_sys_ioctl(p, v, retval)
 			if (error)
 				DPRINTF(("ibcs2_ioctl(%d): copyout failed ",
 					 p->p_pid));
-			goto out;
-		} else {
-			error = copyout((caddr_t)&sts, SCARG(uap, data),
+			return error;
+		} else
+			return copyout((caddr_t)&sts, SCARG(uap, data),
 					sizeof (sts));
-			goto out;
-		}
 		/*NOTREACHED*/
 	    }
 
@@ -398,14 +398,14 @@ ibcs2_sys_ioctl(p, v, retval)
 				    sizeof(st))) != 0) {
 			DPRINTF(("ibcs2_ioctl(%d): TCSET copyin failed ",
 				 p->p_pid));
-			goto out;
+			return error;
 		}
 
 		/* get full BSD termios so we don't lose information */
 		if ((error = (*ctl)(fp, TIOCGETA, (caddr_t)&bts, p)) != 0) {
 			DPRINTF(("ibcs2_ioctl(%d): TCSET ctl failed fd %d ",
 				 p->p_pid, SCARG(uap, fd)));
-			goto out;
+			return error;
 		}
 
 		/*
@@ -416,9 +416,8 @@ ibcs2_sys_ioctl(p, v, retval)
 		stio2stios(&st, &sts);
 		stios2btios(&sts, &bts);
 
-		error = (*ctl)(fp, SCARG(uap, cmd) - IBCS2_TCSETA + TIOCSETA,
+		return (*ctl)(fp, SCARG(uap, cmd) - IBCS2_TCSETA + TIOCSETA,
 			      (caddr_t)&bts, p);
-		goto out;
 	    }
 
 	case IBCS2_XCSETA:
@@ -430,12 +429,11 @@ ibcs2_sys_ioctl(p, v, retval)
 
 		if ((error = copyin(SCARG(uap, data), (caddr_t)&sts,
 				    sizeof (sts))) != 0) {
-			goto out;
+			return error;
 		}
 		stios2btios (&sts, &bts);
-		error = (*ctl)(fp, SCARG(uap, cmd) - IBCS2_XCSETA + TIOCSETA,
+		return (*ctl)(fp, SCARG(uap, cmd) - IBCS2_XCSETA + TIOCSETA,
 			      (caddr_t)&bts, p);
-		goto out;
 	    }
 
 	case IBCS2_OXCSETA:
@@ -447,18 +445,16 @@ ibcs2_sys_ioctl(p, v, retval)
 
 		if ((error = copyin(SCARG(uap, data), (caddr_t)&sts,
 				    sizeof (sts))) != 0) {
-			goto out;
+			return error;
 		}
 		stios2btios (&sts, &bts);
-		error = (*ctl)(fp, SCARG(uap, cmd) - IBCS2_OXCSETA + TIOCSETA,
+		return (*ctl)(fp, SCARG(uap, cmd) - IBCS2_OXCSETA + TIOCSETA,
 			      (caddr_t)&bts, p);
-		goto out;
 	    }
 
 	case IBCS2_TCSBRK:
 		DPRINTF(("ibcs2_ioctl(%d): TCSBRK ", p->p_pid));
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 
 	case IBCS2_TCXONC:
 	    {
@@ -466,17 +462,13 @@ ibcs2_sys_ioctl(p, v, retval)
 		case 0:
 		case 1:
 			DPRINTF(("ibcs2_ioctl(%d): TCXONC ", p->p_pid));
-			error = ENOSYS;
-			goto out;
+			return ENOSYS;
 		case 2:
-			error = (*ctl)(fp, TIOCSTOP, (caddr_t)0, p);
-			goto out;
+			return (*ctl)(fp, TIOCSTOP, (caddr_t)0, p);
 		case 3:
-			error = (*ctl)(fp, TIOCSTART, (caddr_t)1, p);
-			goto out;
+			return (*ctl)(fp, TIOCSTART, (caddr_t)1, p);
 		default:
-			error = EINVAL;
-			goto out;
+			return EINVAL;
 		}
 	    }
 
@@ -495,27 +487,22 @@ ibcs2_sys_ioctl(p, v, retval)
 			arg = FREAD | FWRITE;
 			break;
 		default:
-			error = EINVAL;
-			goto out;
+			return EINVAL;
 		}
-		error = (*ctl)(fp, TIOCFLUSH, (caddr_t)&arg, p);
-		goto out;
+		return (*ctl)(fp, TIOCFLUSH, (caddr_t)&arg, p);
 	    }
 
 	case IBCS2_TIOCGWINSZ:
 		SCARG(uap, cmd) = TIOCGWINSZ;
-		error = sys_ioctl(p, uap, retval);
-		goto out;
+		return sys_ioctl(p, uap, retval);
 
 	case IBCS2_TIOCSWINSZ:
 		SCARG(uap, cmd) = TIOCSWINSZ;
-		error = sys_ioctl(p, uap, retval);
-		goto out;
+		return sys_ioctl(p, uap, retval);
 
 	case IBCS2_TIOCGPGRP:
-		error = copyout((caddr_t)&p->p_pgrp->pg_id, SCARG(uap, data),
+		return copyout((caddr_t)&p->p_pgrp->pg_id, SCARG(uap, data),
 				sizeof(p->p_pgrp->pg_id));
-		goto out;
 
 	case IBCS2_TIOCSPGRP:	/* XXX - is uap->data a pointer to pgid? */
 	    {
@@ -524,50 +511,28 @@ ibcs2_sys_ioctl(p, v, retval)
 		SCARG(&sa, pid) = 0;
 		SCARG(&sa, pgid) = (int)SCARG(uap, data);
 		if ((error = sys_setpgid(p, &sa, retval)) != 0)
-			goto out;
-		error = 0;
-		goto out;
+			return error;
+		return 0;
 	    }
 
 	case IBCS2_TCGETSC:	/* SCO console - get scancode flags */
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 
 	case IBCS2_TCSETSC:	/* SCO console - set scancode flags */
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 
 	case IBCS2_SIOCSOCKSYS:
-		error = ibcs2_socksys(p, uap, retval);
-		goto out;
+		return ibcs2_socksys(p, uap, retval);
 
-	case IBCS2_FIONBIO:
-		{
-			int arg;
-
-			if ((error = copyin(SCARG(uap, data), &arg,
-			    sizeof(arg))) != 0)
-				goto out;
-
-			error = (*ctl)(fp, FIONBIO, (caddr_t)&arg, p);
-			goto out;
-		}
-	case IBCS2_FIONREAD:
 	case IBCS2_I_NREAD:     /* STREAMS */
-		SCARG(uap, cmd) = FIONREAD;
-		error = sys_ioctl(p, uap, retval);
-		goto out;
+	        SCARG(uap, cmd) = FIONREAD;
+		return sys_ioctl(p, uap, retval);
 
 	default:
 		DPRINTF(("ibcs2_ioctl(%d): unknown cmd 0x%lx ",
 			 p->p_pid, SCARG(uap, cmd)));
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 	}
-	error = ENOSYS;
-
-out:
-	FRELE(fp);
-	return (error);
+	return ENOSYS;
 }
 

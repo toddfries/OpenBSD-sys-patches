@@ -1,5 +1,5 @@
-/* $OpenBSD: tc_3000_500.c,v 1.14 2007/11/06 18:20:05 miod Exp $ */
-/* $NetBSD: tc_3000_500.c,v 1.24 2001/07/27 00:25:21 thorpej Exp $ */
+/*	$OpenBSD: tc_3000_500.c,v 1.4 1996/07/29 23:02:23 niklas Exp $	*/
+/*	$NetBSD: tc_3000_500.c,v 1.4.4.3 1996/06/13 18:35:35 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -29,36 +29,28 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 
 #include <machine/autoconf.h>
 #include <machine/pte.h>
-#include <machine/rpb.h>
+#ifndef EVCNT_COUNTERS
+#include <machine/intrcnt.h>
+#endif
 
 #include <dev/tc/tcvar.h>
 #include <alpha/tc/tc_conf.h>
 #include <alpha/tc/tc_3000_500.h>
 
-#include "wsdisplay.h"
-#include "sfb.h"
+void	tc_3000_500_intr_setup __P((void));
+void	tc_3000_500_intr_establish __P((struct device *, void *,
+	    tc_intrlevel_t, int (*)(void *), void *));
+void	tc_3000_500_intr_disestablish __P((struct device *, void *));
+void	tc_3000_500_iointr __P((void *, int));
 
-#if NSFB > 0
-extern int	sfb_cnattach(tc_addr_t);
-#endif
-
-void	tc_3000_500_intr_setup(void);
-void	tc_3000_500_intr_establish(struct device *, void *,
-	    int, int (*)(void *), void *);
-void	tc_3000_500_intr_disestablish(struct device *, void *);
-void	tc_3000_500_iointr(void *, unsigned long);
-
-int	tc_3000_500_intrnull(void *);
-int	tc_3000_500_fb_cnattach(u_int64_t);
+int	tc_3000_500_intrnull __P((void *));
 
 #define C(x)	((void *)(u_long)x)
-#define	KV(x)	(ALPHA_PHYS_TO_K0SEG(x))
+#define	KV(x)	(phystok0seg(x))
 
 struct tc_slotdesc tc_3000_500_slots[] = {
 	{ KV(0x100000000), C(TC_3000_500_DEV_OPT0), },	/* 0 - opt slot 0 */
@@ -73,20 +65,13 @@ struct tc_slotdesc tc_3000_500_slots[] = {
 int tc_3000_500_nslots =
     sizeof(tc_3000_500_slots) / sizeof(tc_3000_500_slots[0]);
 
-struct tc_builtin tc_3000_500_graphics_builtins[] = {
+struct tc_builtin tc_3000_500_builtins[] = {
 	{ "FLAMG-IO",	7, 0x00000000, C(TC_3000_500_DEV_IOASIC),	},
 	{ "PMAGB-BA",	7, 0x02000000, C(TC_3000_500_DEV_CXTURBO),	},
 	{ "PMAZ-DS ",	6, 0x00000000, C(TC_3000_500_DEV_TCDS),		},
 };
-int tc_3000_500_graphics_nbuiltins = sizeof(tc_3000_500_graphics_builtins) /
-    sizeof(tc_3000_500_graphics_builtins[0]);
-
-struct tc_builtin tc_3000_500_nographics_builtins[] = {
-	{ "FLAMG-IO",	7, 0x00000000, C(TC_3000_500_DEV_IOASIC),	},
-	{ "PMAZ-DS ",	6, 0x00000000, C(TC_3000_500_DEV_TCDS),		},
-};
-int tc_3000_500_nographics_nbuiltins = sizeof(tc_3000_500_nographics_builtins) /
-    sizeof(tc_3000_500_nographics_builtins[0]);
+int tc_3000_500_nbuiltins =
+    sizeof(tc_3000_500_builtins) / sizeof(tc_3000_500_builtins[0]);
 
 u_int32_t tc_3000_500_intrbits[TC_3000_500_NCOOKIES] = {
 	TC_3000_500_IR_OPT0,
@@ -101,10 +86,8 @@ u_int32_t tc_3000_500_intrbits[TC_3000_500_NCOOKIES] = {
 };
 
 struct tcintr {
-	int	(*tci_func)(void *);
+	int	(*tci_func) __P((void *));
 	void	*tci_arg;
-	struct evcount tci_count;
-	char	tci_name[12];
 } tc_3000_500_intr[TC_3000_500_NCOOKIES];
 
 u_int32_t tc_3000_500_imask;	/* intrs we want to ignore; mirrors IMR. */
@@ -130,10 +113,6 @@ tc_3000_500_intr_setup()
         for (i = 0; i < TC_3000_500_NCOOKIES; i++) {
 		tc_3000_500_intr[i].tci_func = tc_3000_500_intrnull;
 		tc_3000_500_intr[i].tci_arg = (void *)i;
-		snprintf(tc_3000_500_intr[i].tci_name,
-		    sizeof tc_3000_500_intr[i].tci_name, "tc slot %u", i);
-		evcount_attach(&tc_3000_500_intr[i].tci_count,
-		    tc_3000_500_intr[i].tci_name, NULL, &evcount_intr);
         }
 }
 
@@ -141,8 +120,8 @@ void
 tc_3000_500_intr_establish(tcadev, cookie, level, func, arg)
 	struct device *tcadev;
 	void *cookie, *arg;
-	int level;
-	int (*func)(void *);
+	tc_intrlevel_t level;
+	int (*func) __P((void *));
 {
 	u_long dev = (u_long)cookie;
 
@@ -151,7 +130,7 @@ tc_3000_500_intr_establish(tcadev, cookie, level, func, arg)
 #endif
 
 	if (tc_3000_500_intr[dev].tci_func != tc_3000_500_intrnull)
-		panic("tc_3000_500_intr_establish: cookie %lu twice", dev);
+		panic("tc_3000_500_intr_establish: cookie %d twice", dev);
 
 	tc_3000_500_intr[dev].tci_func = func;
 	tc_3000_500_intr[dev].tci_arg = arg;
@@ -173,7 +152,7 @@ tc_3000_500_intr_disestablish(tcadev, cookie)
 #endif
 
 	if (tc_3000_500_intr[dev].tci_func == tc_3000_500_intrnull)
-		panic("tc_3000_500_intr_disestablish: cookie %lu bad intr",
+		panic("tc_3000_500_intr_disestablish: cookie %d bad intr",
 		    dev);
 
 	tc_3000_500_imask |= tc_3000_500_intrbits[dev];
@@ -189,14 +168,14 @@ tc_3000_500_intrnull(val)
 	void *val;
 {
 
-	panic("tc_3000_500_intrnull: uncaught TC intr for cookie %ld",
+	panic("tc_3000_500_intrnull: uncaught TC intr for cookie %ld\n",
 	    (u_long)val);
 }
 
 void
-tc_3000_500_iointr(arg, vec)
-        void *arg;
-        unsigned long vec;
+tc_3000_500_iointr(framep, vec)
+        void *framep;
+        int vec;
 {
         u_int32_t ir;
 	int ifound;
@@ -204,11 +183,10 @@ tc_3000_500_iointr(arg, vec)
 #ifdef DIAGNOSTIC
 	int s;
 	if (vec != 0x800)
-		panic("INVALID ASSUMPTION: vec 0x%lx, not 0x800", vec);
+		panic("INVALID ASSUMPTION: vec %x, not 0x800", vec);
 	s = splhigh();
-	if (s != ALPHA_PSL_IPL_IO)
-		panic("INVALID ASSUMPTION: IPL %d, not %d", s,
-		    ALPHA_PSL_IPL_IO);
+	if (s != PSL_IPL_IO)
+		panic("INVALID ASSUMPTION: IPL %d, not %d", s, PSL_IPL_IO);
 	splx(s);
 #endif
 
@@ -221,10 +199,17 @@ tc_3000_500_iointr(arg, vec)
 
 		ifound = 0;
 
+#ifdef EVCNT_COUNTERS
+	/* No interrupt counting via evcnt counters */ 
+	XXX BREAK HERE XXX
+#else /* !EVCNT_COUNTERS */
+#define	INCRINTRCNT(slot)	intrcnt[INTRCNT_KN15 + slot]++
+#endif /* EVCNT_COUNTERS */ 
+
 #define	CHECKINTR(slot)							\
 		if (ir & tc_3000_500_intrbits[slot]) {			\
 			ifound = 1;					\
-			tc_3000_500_intr[slot].tci_count.ec_count++;	\
+			INCRINTRCNT(slot);				\
 			(*tc_3000_500_intr[slot].tci_func)		\
 			    (tc_3000_500_intr[slot].tci_arg);		\
 		}
@@ -263,48 +248,6 @@ tc_3000_500_iointr(arg, vec)
 	} while (ifound);
 }
 
-#if NWSDISPLAY > 0
-/*
- * tc_3000_500_fb_cnattach --
- *	Attempt to map the CTB output device to a slot and attach the
- * framebuffer as the output side of the console.
- */
-int
-tc_3000_500_fb_cnattach(turbo_slot)
-	u_int64_t turbo_slot;
-{
-	u_int32_t output_slot;
-
-	output_slot = turbo_slot & 0xffffffff;
-
-	if (output_slot >= tc_3000_500_nslots) {
-		return EINVAL;
-	}
-
-	if (hwrpb->rpb_variation & SV_GRAPHICS) {
-		if (output_slot == 0) {
-#if NSFB > 0
-			sfb_cnattach(KV(0x1e0000000) + 0x02000000);
-			return 0;
-#else
-			return ENXIO;
-#endif
-		}
-	} else {
-		/*
-		 * Slots 0-2 in the tc_3000_500_slots array are only
-		 * on the 500 models that also have the CXTurbo
-		 * (500/800/900) and a total of 6 TC slots.  For the
-		 * 400/600/700, slots 0-2 are in table locations 3-5, so
-		 * offset the CTB slot by 3 to get the address in our table.
-		 */
-		output_slot += 3;
-	}
-	return tc_fb_cnattach(tc_3000_500_slots[output_slot-1].tcs_addr);
-}
-#endif /* NWSDISPLAY */
-
-#if 0
 /*
  * tc_3000_500_ioslot --
  *	Set the PBS bits for devices on the TC.
@@ -330,4 +273,3 @@ tc_3000_500_ioslot(slot, flags, set)
 	tc_mb();
 	splx(s);
 }
-#endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: stat.c,v 1.6 2003/08/11 06:23:09 deraadt Exp $	*/
+/*	$OpenBSD: stat.c,v 1.3 1996/09/23 14:19:05 mickey Exp $	*/
 /*	$NetBSD: stat.c,v 1.3 1994/10/26 05:45:07 cgd Exp $	*/
 
 /*-
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,21 +39,16 @@
 #include "stand.h"
 
 int
-stat(const char *str, struct stat *sb)
+stat(str, sb)
+	const char *str;
+	struct stat *sb;
 {
 	int fd, rv;
 
-#ifdef __INTERNAL_LIBSA_CREAD
-	if ((fd = oopen(str, 0)) < 0)
-#else
-	if ((fd = open(str, 0)) < 0)
-#endif
+	fd = open(str, 0);
+	if (fd < 0)
 		return (-1);
 	rv = fstat(fd, sb);
-#ifdef __INTERNAL_LIBSA_CREAD
-	(void)oclose(fd);
-#else
 	(void)close(fd);
-#endif
 	return (rv);
 }

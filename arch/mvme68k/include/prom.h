@@ -1,4 +1,4 @@
-/*	$OpenBSD: prom.h,v 1.11 2003/06/02 05:09:14 deraadt Exp $ */
+/*	$OpenBSD: prom.h,v 1.7 1996/05/19 20:05:11 chuck Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -24,8 +30,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _MACHINE_PROM_H_
-#define _MACHINE_PROM_H_
 
 #define MVMEPROM_INCHR		0x00
 #define MVMEPROM_INSTAT		0x01
@@ -152,15 +156,15 @@ struct mvmeprom_args {
 #endif
 
 #define MVMEPROM_CALL(x) \
-	__asm__ __volatile__ (__CONCAT("trap #15; .short ", __STRING(x)) )
+	asm volatile (__CONCAT("trap #15; .short ", __STRING(x)) )
 #define MVMEPROM_NOARG() \
-	__asm__ __volatile__ ("clrl sp@-")
+	asm volatile ("clrl sp@-")
 #define MVMEPROM_ARG1(arg) \
-	__asm__ __volatile__ ("movel %0, sp@-"::"d" (arg))
+	asm volatile ("movel %0, sp@-"::"d" (arg))
 #define MVMEPROM_ARG2(arg) \
-	__asm__ __volatile__ ("movel %0, sp@-"::"d" (arg))
+	asm volatile ("movel %0, sp@-"::"d" (arg))
 #define MVMEPROM_GETRES(ret) \
-	__asm__ __volatile__ ("movel sp@+,%0": "=d" (ret):)
+	asm volatile ("movel sp@+,%0": "=d" (ret):)
 #define MVMEPROM_RETURN(ret) \
 	MVMEPROM_GETRES(ret); \
 	return (ret);			/* return a value (int) */
@@ -183,7 +187,6 @@ struct mvmeprom_args {
 #define MVMEPROM_REG_ARGEND	"a6"
 
 #ifndef RB_NOSYM
-#define RB_NOSYM 0x4000
+#define RB_NOSYM 0x400
 #endif
 
-#endif /* _MACHINE_PROM_H_ */

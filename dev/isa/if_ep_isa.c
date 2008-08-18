@@ -1,4 +1,3 @@
-/*	$OpenBSD: if_ep_isa.c,v 1.25 2008/02/18 16:24:13 krw Exp $	*/
 /*	$NetBSD: if_ep_isa.c,v 1.5 1996/05/12 23:52:36 mycroft Exp $	*/
 
 /*
@@ -45,8 +44,7 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/syslog.h>
-#include <sys/selinfo.h>
-#include <sys/timeout.h>
+#include <sys/select.h>
 #include <sys/device.h>
 #include <sys/queue.h>
 
@@ -54,7 +52,6 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
-#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -66,14 +63,12 @@
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
+#include <net/bpfdesc.h>
 #endif
 
 #include <machine/cpu.h>
 #include <machine/bus.h>
 #include <machine/intr.h>
-
-#include <dev/mii/mii.h>
-#include <dev/mii/miivar.h>
 
 #include <dev/ic/elink3var.h>
 #include <dev/ic/elink3reg.h>
@@ -81,14 +76,14 @@
 #include <dev/isa/isavar.h>
 #include <dev/isa/elink.h>
 
-int ep_isa_probe(struct device *, void *, void *);
-void ep_isa_attach(struct device *, struct device *, void *);
+int ep_isa_probe __P((struct device *, void *, void *));
+void ep_isa_attach __P((struct device *, struct device *, void *));
 
 struct cfattach ep_isa_ca = {
 	sizeof(struct ep_softc), ep_isa_probe, ep_isa_attach
 };
 
-static	void epaddcard(int, int, int, u_short);
+static	void epaddcard __P((int, int, int));
 
 /*
  * This keeps track of which ISAs have been through an ep probe sequence.
@@ -112,14 +107,12 @@ static struct epcard {
 	int	iobase;
 	int	irq;
 	char	available;
-	u_short	model;
 } epcards[MAXEPCARDS];
 static int nepcards;
 
 static void
-epaddcard(bus, iobase, irq, model)
+epaddcard(bus, iobase, irq)
 	int bus, iobase, irq;
-	u_short model;
 {
 
 	if (nepcards >= MAXEPCARDS)
@@ -128,14 +121,13 @@ epaddcard(bus, iobase, irq, model)
 	epcards[nepcards].iobase = iobase;
 	epcards[nepcards].irq = (irq == 2) ? 9 : irq;
 	epcards[nepcards].available = 1;
-	epcards[nepcards].model = model;
 	nepcards++;
 }
 
 /*
  * 3c509 cards on the ISA bus are probed in ethernet address order.
  * The probe sequence requires careful orchestration, and we'd like
- * to allow the irq and base address to be wildcarded. So, we
+ * like to allow the irq and base address to be wildcarded. So, we
  * probe all the cards the first time epprobe() is called. On subsequent
  * calls we look for matching cards.
  */
@@ -145,9 +137,9 @@ ep_isa_probe(parent, match, aux)
 	void *match, *aux;
 {
 	struct isa_attach_args *ia = aux;
-	bus_space_tag_t iot = ia->ia_iot;
-	bus_space_handle_t ioh;
-	int slot, iobase, irq, i, pnp;
+	bus_chipset_tag_t bc = ia->ia_bc;
+	bus_io_handle_t ioh;
+	int slot, iobase, irq, i;
 	u_int16_t vendor, model;
 	struct ep_isa_done_probe *er;
 	int bus = parent->dv_unit;
@@ -160,7 +152,8 @@ ep_isa_probe(parent, match, aux)
 	/*
 	 * Probe this bus if we haven't done so already.
 	 */
-	LIST_FOREACH(er, &ep_isa_all_probes, er_link)
+	for (er = ep_isa_all_probes.lh_first; er != NULL;
+	    er = er->er_link.le_next)
 		if (er->er_bus == parent->dv_unit)
 			goto bus_probed;
 
@@ -178,45 +171,41 @@ ep_isa_probe(parent, match, aux)
 	/*
 	 * Map the Etherlink ID port for the probe sequence.
 	 */
-	if (bus_space_map(iot, ELINK_ID_PORT, 1, 0, &ioh)) {
+	if (bus_io_map(bc, ELINK_ID_PORT, 1, &ioh)) {
 		printf("ep_isa_probe: can't map Etherlink ID port\n");
 		return 0;
 	}
 
 	for (slot = 0; slot < MAXEPCARDS; slot++) {
-		elink_reset(iot, ioh, parent->dv_unit);
-		elink_idseq(iot, ioh, ELINK_509_POLY);
+		elink_reset(bc, ioh, parent->dv_unit);
+		elink_idseq(bc, ioh, ELINK_509_POLY);
 
 		/* Untag all the adapters so they will talk to us. */
 		if (slot == 0)
-			bus_space_write_1(iot, ioh, 0, TAG_ADAPTER + 0);
+			bus_io_write_1(bc, ioh, 0, TAG_ADAPTER + 0);
 
-		vendor = htons(epreadeeprom(iot, ioh, EEPROM_MFG_ID));
+		vendor = htons(epreadeeprom(bc, ioh, EEPROM_MFG_ID));
 		if (vendor != MFG_ID)
 			continue;
 
-		model = htons(epreadeeprom(iot, ioh, EEPROM_PROD_ID));
-		if ((model & 0xfff0) != PROD_ID_3C509) {
+		model = htons(epreadeeprom(bc, ioh, EEPROM_PROD_ID));
+		if ((model & 0xfff0) != PROD_ID) {
 #ifndef trusted
-			printf("ep_isa_probe: ignoring model %04x\n",
-			    model);
+			printf(
+			 "ep_isa_probe: ignoring model %04x\n", model);
 #endif
 			continue;
-		}
+			}
 
-		iobase = epreadeeprom(iot, ioh, EEPROM_ADDR_CFG);
+		iobase = epreadeeprom(bc, ioh, EEPROM_ADDR_CFG);
 		iobase = (iobase & 0x1f) * 0x10 + 0x200;
 
-		irq = epreadeeprom(iot, ioh, EEPROM_RESOURCE_CFG);
+		irq = epreadeeprom(bc, ioh, EEPROM_RESOURCE_CFG);
 		irq >>= 12;
-
-		pnp = epreadeeprom(iot, ioh, EEPROM_PNP) & 8;
+		epaddcard(bus, iobase, irq);
 
 		/* so card will not respond to contention again */
-		bus_space_write_1(iot, ioh, 0, TAG_ADAPTER + 1);
-
-		if ((model & 0xfff0) == PROD_ID_3C509 && pnp != 0)
-			continue;
+		bus_io_write_1(bc, ioh, 0, TAG_ADAPTER + 1);
 
 		/*
 		 * XXX: this should probably not be done here
@@ -224,12 +213,11 @@ ep_isa_probe(parent, match, aux)
 		 * the board. Perhaps it should be done after
 		 * we have checked for irq/drq collisions?
 		 */
-		bus_space_write_1(iot, ioh, 0, ACTIVATE_ADAPTER_TO_CONFIG);
-		epaddcard(bus, iobase, irq, model);
+		bus_io_write_1(bc, ioh, 0, ACTIVATE_ADAPTER_TO_CONFIG);
 	}
 	/* XXX should we sort by ethernet address? */
 
-	bus_space_unmap(iot, ioh, 1);
+	bus_io_unmap(bc, ioh, 1);
 
  bus_probed:
 
@@ -254,7 +242,6 @@ good:
 	ia->ia_irq = epcards[i].irq;
 	ia->ia_iosize = 0x10;
 	ia->ia_msize = 0;
-	ia->ia_aux = (void *)(long)(epcards[i].model);
 	return 1;
 }
 
@@ -265,30 +252,24 @@ ep_isa_attach(parent, self, aux)
 {
 	struct ep_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
-	bus_space_tag_t iot = ia->ia_iot;
-	bus_space_handle_t ioh;
-	int chipset;
+	bus_chipset_tag_t bc = ia->ia_bc;
+	bus_io_handle_t ioh;
+	u_short conn = 0;
 
 	/* Map i/o space. */
-	if (bus_space_map(iot, ia->ia_iobase, ia->ia_iosize, 0, &ioh))
+	if (bus_io_map(bc, ia->ia_iobase, ia->ia_iosize, &ioh))
 		panic("ep_isa_attach: can't map i/o space");
 
-	sc->sc_iot = iot;
+	sc->sc_bc = bc;
 	sc->sc_ioh = ioh;
 	sc->bustype = EP_BUS_ISA;
 
-	printf(":");
+	GO_WINDOW(0);
+	conn = bus_io_read_2(bc, ioh, EP_W0_CONFIG_CTRL);
 
-	chipset = (int)(long)ia->ia_aux;
-	if ((chipset & 0xfff0) == PROD_ID_3C509) {
-		epconfig(sc, EP_CHIPSET_3C509, NULL);
-	} else {
-		/*
-		 * XXX: Maybe a 3c515, but the check in ep_isa_probe looks
-		 * at the moment only for a 3c509.
-		 */
-		epconfig(sc, EP_CHIPSET_UNKNOWN, NULL);
-	}
+	printf(": <3Com 3C509 Ethernet> ");
+
+	epconfig(sc, conn);
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
 	    IPL_NET, epintr, sc, sc->sc_dev.dv_xname);

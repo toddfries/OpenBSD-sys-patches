@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioctl_compat.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
+/*	$OpenBSD: ioctl_compat.h,v 1.2 1996/03/03 12:11:51 niklas Exp $	*/
 /*	$NetBSD: ioctl_compat.h,v 1.10 1995/03/31 03:10:15 christos Exp $	*/
 
 /*
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -164,22 +168,5 @@ struct sgttyb {
 #define	NTTYDISC	2
 
 #define TIOCGSID	_IOR('t', 99, int)	/* For svr4 -- get session id */
-
-/*
- * Passthrough ioctl commands. These are passed through to devices
- * as they are, it is expected that the device (an LKM, for example),
- * will know how to deal with them. One for each emulation, so that
- * no namespace clashes will occur between them, for devices that
- * may be dealing with specific ioctls for multiple emulations.
- *
- * XXX: Currently only implemented for Linux.
- */
-
-struct ioctl_pt {
-	unsigned long com;
-	void *data;
-};
-
-#define PTIOCLINUX  _IOW('Z', 3, struct ioctl_pt)
 
 #endif /* !_SYS_IOCTL_COMPAT_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm.c,v 1.10 2008/05/27 19:57:45 thib Exp $	*/
+/*	$OpenBSD: natm.c,v 1.2 1996/07/03 17:24:29 chuck Exp $	*/
 
 /*
  *
@@ -67,8 +67,19 @@ u_long natm0_recvspace = 16*1024;
  * user requests
  */
 
-int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control, struct proc *p)
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+int natm_usrreq(so, req, m, nam, control, p)
+#elif defined(__FreeBSD__)
+int natm_usrreq(so, req, m, nam, control)
+#endif
+
+struct socket *so;
+int req;
+struct mbuf *m, *nam, *control;
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+struct proc *p;
+#endif
+
 {
   int error = 0, s, s2;
   struct natmpcb *npcb;
@@ -179,7 +190,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
       ATM_PH_VPI(&api.aph) = npcb->npcb_vpi;
       ATM_PH_SETVCI(&api.aph, npcb->npcb_vci);
       api.rxhand = npcb;
-      s2 = splnet();
+      s2 = splimp();
       if (ifp->if_ioctl == NULL || 
 	  ifp->if_ioctl(ifp, SIOCATMENA, (caddr_t) &api) != 0) {
 	splx(s2);
@@ -210,7 +221,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
       ATM_PH_VPI(&api.aph) = npcb->npcb_vpi;
       ATM_PH_SETVCI(&api.aph, npcb->npcb_vci);
       api.rxhand = npcb;
-      s2 = splnet();
+      s2 = splimp();
       if (ifp->if_ioctl != NULL)
 	  ifp->if_ioctl(ifp, SIOCATMDIS, (caddr_t) &api);
       splx(s);
@@ -237,6 +248,10 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
        */
 
       M_PREPEND(m, sizeof(*aph), M_WAITOK);
+      if (m == NULL) {
+        error = ENOBUFS;
+	break;
+      }
       aph = mtod(m, struct atm_pseudohdr *);
       ATM_PH_VPI(aph) = npcb->npcb_vpi;
       ATM_PH_SETVCI(aph, npcb->npcb_vci);
@@ -259,7 +274,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
       bcopy(npcb->npcb_ifp->if_xname, snatm->snatm_if, sizeof(snatm->snatm_if));
 #elif defined(__FreeBSD__)
       sprintf(snatm->snatm_if, "%s%d", npcb->npcb_ifp->if_name,
-	npcb->npcb_ifp->if_unit);
+			npcb->npcb_ifp->if_unit);
 #endif
       snatm->snatm_vci = npcb->npcb_vci;
       snatm->snatm_vpi = npcb->npcb_vpi;
@@ -296,7 +311,7 @@ int natm_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
     case PRU_LISTEN:			/* listen for connection */
     case PRU_ACCEPT:			/* accept connection from peer */
     case PRU_CONNECT2:			/* connect two sockets */
-    case PRU_ABORT:			/* abort (fast DISCONNECT, DETACH) */
+    case PRU_ABORT:			/* abort (fast DISCONNECT, DETATCH) */
 					/* (only happens if LISTEN socket) */
     case PRU_RCVD:			/* have taken data; more room now */
     case PRU_FASTTIMO:			/* 200ms timeout */
@@ -338,7 +353,7 @@ natmintr()
   struct natmpcb *npcb;
 
 next:
-  s = splnet();
+  s = splimp();
   IF_DEQUEUE(&natmintrq, m);
   splx(s);
   if (m == NULL)
@@ -346,20 +361,20 @@ next:
 
 #ifdef DIAGNOSTIC
   if ((m->m_flags & M_PKTHDR) == 0)
-    panic("natmintr no HDR");
+    panic("ipintr no HDR");
 #endif
 
   npcb = (struct natmpcb *) m->m_pkthdr.rcvif; /* XXX: overloaded */
   so = npcb->npcb_socket;
 
-  s = splnet();			/* could have atm devs @ different levels */
+  s = splimp();			/* could have atm devs @ different levels */
   npcb->npcb_inq--;
   splx(s);
 
   if (npcb->npcb_flags & NPCB_DRAIN) {
     m_freem(m);
     if (npcb->npcb_inq == 0)
-      free(npcb, M_PCB);			/* done! */
+      FREE(npcb, M_PCB);			/* done! */
     goto next;
   }
 
@@ -382,7 +397,7 @@ m->m_pkthdr.rcvif = NULL;	/* null it out to be safe */
     natm_sookcnt++;
     natm_sookbytes += m->m_pkthdr.len;
 #endif
-    sbappendrecord(&so->so_rcv, m);
+    sbappend(&so->so_rcv, m);
     sorwakeup(so);
   } else {
 #ifdef NATM_STAT

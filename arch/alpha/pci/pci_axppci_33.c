@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci_axppci_33.c,v 1.18 2006/06/15 20:08:29 brad Exp $	*/
-/*	$NetBSD: pci_axppci_33.c,v 1.10 1996/11/13 21:13:29 cgd Exp $	*/
+/*	$OpenBSD: pci_axppci_33.c,v 1.5 1996/07/29 23:00:37 niklas Exp $	*/
+/*	$NetBSD: pci_axppci_33.c,v 1.5 1996/04/23 14:15:28 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -34,9 +34,8 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
-#include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/intr.h>
 
@@ -52,13 +51,12 @@
 
 #include "sio.h"
 
-int     dec_axppci_33_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
-const char *dec_axppci_33_intr_string(void *, pci_intr_handle_t);
-int	dec_axppci_33_intr_line(void *, pci_intr_handle_t);
-void    *dec_axppci_33_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
-void    dec_axppci_33_intr_disestablish(void *, void *);
+int     dec_axppci_33_intr_map __P((void *, pcitag_t, int, int,
+	    pci_intr_handle_t *));
+const char *dec_axppci_33_intr_string __P((void *, pci_intr_handle_t));
+void    *dec_axppci_33_intr_establish __P((void *, pci_intr_handle_t,
+	    int, int (*func)(void *), void *, char *));
+void    dec_axppci_33_intr_disestablish __P((void *, void *));
 
 #define	LCA_SIO_DEVICE	7	/* XXX */
 
@@ -66,7 +64,7 @@ void
 pci_axppci_33_pickintr(lcp)
 	struct lca_config *lcp;
 {
-	bus_space_tag_t iot = &lcp->lc_iot;
+	bus_chipset_tag_t bc = &lcp->lc_bc;
 	pci_chipset_tag_t pc = &lcp->lc_pc;
 	pcireg_t sioclass;
 	int sioII;
@@ -82,16 +80,12 @@ pci_axppci_33_pickintr(lcp)
 	pc->pc_intr_v = lcp;
 	pc->pc_intr_map = dec_axppci_33_intr_map;
 	pc->pc_intr_string = dec_axppci_33_intr_string;
-	pc->pc_intr_line = dec_axppci_33_intr_line;
 	pc->pc_intr_establish = dec_axppci_33_intr_establish;
 	pc->pc_intr_disestablish = dec_axppci_33_intr_disestablish;
 
-        /* Not supported on AXPpci33. */
-        pc->pc_pciide_compat_intr_establish = NULL;
-        pc->pc_pciide_compat_intr_disestablish = NULL;
-
 #if NSIO
-	sio_intr_setup(pc, iot);
+	sio_intr_setup(bc);
+	set_iointr(&sio_iointr);
 #else
 	panic("pci_axppci_33_pickintr: no I/O interrupt handler (no sio)");
 #endif
@@ -138,11 +132,6 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 1;
 			break;
-#ifdef DIAGNOSTIC
-		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_axppci_33_intr_map bogus PCI pin %d",
-			    buspin);
-#endif
 		};
 		break;
 
@@ -158,11 +147,6 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 2;
 			break;
-#ifdef DIAGNOSTIC
-		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_axppci_33_intr_map bogus PCI pin %d",
-			    buspin);
-#endif
 		};
 		break;
 
@@ -178,18 +162,12 @@ dec_axppci_33_intr_map(lcv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 0;
 			break;
-#ifdef DIAGNOSTIC
-		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_axppci_33_intr_map bogus PCI pin %d",
-			    buspin);
-#endif
 		};
 		break;
-
 	default:
-                printf("dec_axppci_33_intr_map: weird device number %d\n",
-		    device);
-                return 1;
+		printf("dec_axppci_33_pci_map_int: unknown device %d\n",
+			device);
+		panic("dec_axppci_33_pci_map_int: bad device number");
 	}
 
 	pirqreg = pci_conf_read(pc, pci_make_tag(pc, 0, LCA_SIO_DEVICE, 0),
@@ -217,15 +195,9 @@ dec_axppci_33_intr_string(lcv, ih)
 	void *lcv;
 	pci_intr_handle_t ih;
 {
-	return sio_intr_string(NULL /*XXX*/, ih);
-}
+	struct lca_config *lcp = lcv;
 
-int
-dec_axppci_33_intr_line(lcv, ih)
-	void *lcv;
-	pci_intr_handle_t ih;
-{
-	return sio_intr_line(NULL /*XXX*/, ih);
+	return sio_intr_string(NULL /*XXX*/, ih);
 }
 
 void *
@@ -233,9 +205,11 @@ dec_axppci_33_intr_establish(lcv, ih, level, func, arg, name)
 	void *lcv, *arg;
 	pci_intr_handle_t ih;
 	int level;
-	int (*func)(void *);
+	int (*func) __P((void *));
 	char *name;
 {
+	struct lca_config *lcp = lcv;
+
 	return sio_intr_establish(NULL /*XXX*/, ih, IST_LEVEL, level, func,
 	    arg, name);
 }
@@ -244,5 +218,7 @@ void
 dec_axppci_33_intr_disestablish(lcv, cookie)
 	void *lcv, *cookie;
 {
+	struct lca_config *lcp = lcv;
+
 	sio_intr_disestablish(NULL /*XXX*/, cookie);
 }

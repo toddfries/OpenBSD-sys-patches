@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_el.c,v 1.20 2006/03/25 22:41:44 djm Exp $       */
+/*    $OpenBSD: if_el.c,v 1.11 1996/05/26 00:27:18 deraadt Exp $       */
 /*	$NetBSD: if_el.c,v 1.39 1996/05/12 23:52:32 mycroft Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
+#include <net/bpfdesc.h>
 #endif
 
 #include <machine/cpu.h>
@@ -52,6 +53,10 @@
 
 #include <dev/isa/isavar.h>
 #include <dev/isa/if_elreg.h>
+
+#define ETHER_MIN_LEN	64
+#define ETHER_MAX_LEN	1518
+#define	ETHER_ADDR_LEN	6
 
 /* for debugging convenience */
 #ifdef EL_DEBUG
@@ -74,20 +79,20 @@ struct el_softc {
 /*
  * prototypes
  */
-int elintr(void *);
-void elinit(struct el_softc *);
-int elioctl(struct ifnet *, u_long, caddr_t);
-void elstart(struct ifnet *);
-void elwatchdog(struct ifnet *);
-void elreset(struct el_softc *);
-void elstop(struct el_softc *);
-static int el_xmit(struct el_softc *);
-void elread(struct el_softc *, int);
-struct mbuf *elget(struct el_softc *sc, int);
-static inline void el_hardreset(struct el_softc *);
+int elintr __P((void *));
+void elinit __P((struct el_softc *));
+int elioctl __P((struct ifnet *, u_long, caddr_t));
+void elstart __P((struct ifnet *));
+void elwatchdog __P((struct ifnet *));
+void elreset __P((struct el_softc *));
+void elstop __P((struct el_softc *));
+static int el_xmit __P((struct el_softc *));
+void elread __P((struct el_softc *, int));
+struct mbuf *elget __P((struct el_softc *sc, int));
+static inline void el_hardreset __P((struct el_softc *));
 
-int elprobe(struct device *, void *, void *);
-void elattach(struct device *, struct device *, void *);
+int elprobe __P((struct device *, void *, void *));
+void elattach __P((struct device *, struct device *, void *));
 
 struct cfattach el_ca = {
 	sizeof(struct el_softc), elprobe, elattach
@@ -186,7 +191,6 @@ elattach(parent, self, aux)
 	ifp->if_ioctl = elioctl;
 	ifp->if_watchdog = elwatchdog;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS;
-	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Now we can attach the interface. */
 	dprintf(("Attaching interface...\n"));
@@ -195,6 +199,12 @@ elattach(parent, self, aux)
 
 	/* Print out some information for the user. */
 	printf(": address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
+
+	/* Finally, attach to bpf filter if it is present. */
+#if NBPFILTER > 0
+	dprintf(("Attaching to BPF...\n"));
+	bpfattach(&ifp->if_bpf, ifp, DLT_EN10MB, sizeof(struct ether_header));
+#endif
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
 	    IPL_NET, elintr, sc, sc->sc_dev.dv_xname);
@@ -316,7 +326,7 @@ elstart(ifp)
 	 */
 	for (;;) {
 		/* Dequeue the next datagram. */
-		IFQ_DEQUEUE(&ifp->if_snd, m0);
+		IF_DEQUEUE(&ifp->if_snd, m0);
 
 		/* If there's nothing to send, return. */
 		if (m0 == 0)
@@ -325,7 +335,7 @@ elstart(ifp)
 #if NBPFILTER > 0
 		/* Give the packet to the bpf, if any. */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
+			bpf_mtap(ifp->if_bpf, m0);
 #endif
 
 		/* Disable the receiver. */
@@ -341,10 +351,7 @@ elstart(ifp)
 		/* Copy the datagram to the buffer. */
 		for (m = m0; m != 0; m = m->m_next)
 			outsb(iobase+EL_BUF, mtod(m, caddr_t), m->m_len);
-		for (i = 0;
-		    i < ETHER_MIN_LEN - ETHER_CRC_LEN - m0->m_pkthdr.len; i++)
-			outb(iobase+EL_BUF, 0);
-			
+
 		m_freem(m0);
 
 		/* Now transmit the datagram. */
@@ -496,6 +503,7 @@ elread(sc, len)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
+	struct ether_header *eh;
 
 	if (len <= sizeof(struct ether_header) ||
 	    len > ETHER_MAX_LEN) {
@@ -514,16 +522,35 @@ elread(sc, len)
 
 	ifp->if_ipackets++;
 
+	/* We assume that the header fit entirely in one mbuf. */
+	eh = mtod(m, struct ether_header *);
+
 #if NBPFILTER > 0
 	/*
 	 * Check if there's a BPF listener on this interface.
 	 * If so, hand off the raw packet to BPF.
 	 */
-	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+	if (ifp->if_bpf) {
+		bpf_mtap(ifp->if_bpf, m);
+
+		/*
+		 * Note that the interface cannot be in promiscuous mode if
+		 * there are no BPF listeners.  And if we are in promiscuous
+		 * mode, we have to check if this packet is really ours.
+		 */
+		if ((ifp->if_flags & IFF_PROMISC) &&
+		    (eh->ether_dhost[0] & 1) == 0 && /* !mcast and !bcast */
+		    bcmp(eh->ether_dhost, sc->sc_arpcom.ac_enaddr,
+			    sizeof(eh->ether_dhost)) != 0) {
+			m_freem(m);
+			return;
+		}
+	}
 #endif
 
-	ether_input_mbuf(ifp, m);
+	/* We assume that the header fit entirely in one mbuf. */
+	m_adj(m, sizeof(struct ether_header));
+	ether_input(ifp, eh, m);
 }
 
 /*

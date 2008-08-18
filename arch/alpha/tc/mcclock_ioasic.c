@@ -1,5 +1,5 @@
-/* $OpenBSD: mcclock_ioasic.c,v 1.6 2002/05/02 22:56:06 miod Exp $ */
-/* $NetBSD: mcclock_ioasic.c,v 1.9 2000/07/04 02:37:51 nisimura Exp $ */
+/*	$OpenBSD: mcclock_ioasic.c,v 1.2 1996/07/29 23:02:09 niklas Exp $	*/
+/*	$NetBSD: mcclock_ioasic.c,v 1.2 1996/04/17 22:22:58 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -33,9 +33,10 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 
-#include <dev/dec/clockvar.h>
-#include <dev/dec/mcclockvar.h>
+#include <alpha/alpha/clockvar.h>
+#include <alpha/alpha/mcclockvar.h>
 #include <dev/ic/mc146818reg.h>
+#include <dev/tc/tcreg.h>
 #include <dev/tc/tcvar.h> 
 #include <dev/tc/ioasicvar.h>                   /* XXX */
 
@@ -50,16 +51,16 @@ struct mcclock_ioasic_softc {
 	struct mcclock_ioasic_clockdatum *sc_dp;
 };
 
-int	mcclock_ioasic_match(struct device *, void *, void *);
-void	mcclock_ioasic_attach(struct device *, struct device *, void *);
+int	mcclock_ioasic_match __P((struct device *, void *, void *));
+void	mcclock_ioasic_attach __P((struct device *, struct device *, void *));
 
 struct cfattach mcclock_ioasic_ca = {
 	sizeof (struct mcclock_ioasic_softc), mcclock_ioasic_match,
 	    mcclock_ioasic_attach, 
 };
 
-void	mcclock_ioasic_write(struct mcclock_softc *, u_int, u_int);
-u_int	mcclock_ioasic_read(struct mcclock_softc *, u_int);
+void	mcclock_ioasic_write __P((struct mcclock_softc *, u_int, u_int));
+u_int	mcclock_ioasic_read __P((struct mcclock_softc *, u_int));
 
 const struct mcclock_busfns mcclock_ioasic_busfns = {
 	mcclock_ioasic_write, mcclock_ioasic_read,

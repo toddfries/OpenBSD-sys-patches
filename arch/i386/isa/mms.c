@@ -1,8 +1,7 @@
-/* $OpenBSD: mms.c,v 1.19 2007/04/10 22:37:17 miod Exp $ */
-/*	$NetBSD: mms.c,v 1.35 2000/01/08 02:57:25 takemura Exp $	*/
+/*	$NetBSD: mms.c,v 1.24 1996/05/12 23:12:18 mycroft Exp $	*/
 
 /*-
- * Copyright (c) 1993, 1994 Charles M. Hannum.
+ * Copyright (c) 1993, 1994 Charles Hannum.
  * Copyright (c) 1992, 1993 Erik Forsberg.
  * All rights reserved.
  *
@@ -25,216 +24,335 @@
  */
 
 #include <sys/param.h>
+#include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/buf.h>
+#include <sys/malloc.h>
 #include <sys/ioctl.h>
+#include <sys/tty.h>
+#include <sys/file.h>
+#include <sys/select.h>
+#include <sys/proc.h>
+#include <sys/vnode.h>
 #include <sys/device.h>
 
+#include <machine/cpu.h>
 #include <machine/intr.h>
-#include <machine/bus.h>
+#include <machine/pio.h>
+#include <machine/mouse.h>
+#include <machine/conf.h>
 
 #include <dev/isa/isavar.h>
-
-#include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsmousevar.h>
 
 #define	MMS_ADDR	0	/* offset for register select */
 #define	MMS_DATA	1	/* offset for InPort data */
 #define	MMS_IDENT	2	/* offset for identification register */
 #define	MMS_NPORTS	4
 
+#define	MMS_CHUNK	128	/* chunk size for read */
+#define	MMS_BSIZE	1020	/* buffer size */
+
 struct mms_softc {		/* driver status information */
 	struct device sc_dev;
 	void *sc_ih;
 
-	bus_space_tag_t sc_iot;
-	bus_space_handle_t sc_ioh;
-
-	int sc_enabled; /* device is open */
-
-	struct device *sc_wsmousedev;
+	struct clist sc_q;
+	struct selinfo sc_rsel;
+	int sc_iobase;		/* I/O port base */
+	u_char sc_state;	/* mouse driver state */
+#define	MMS_OPEN	0x01	/* device is open */
+#define	MMS_ASLP	0x02	/* waiting for mouse data */
+	u_char sc_status;	/* mouse button status */
+	int sc_x, sc_y;		/* accumulated motion in the X,Y axis */
 };
 
-int mmsprobe(struct device *, void *, void *);
-void mmsattach(struct device *, struct device *, void *);
-int mmsintr(void *);
+int mmsprobe __P((struct device *, void *, void *));
+void mmsattach __P((struct device *, struct device *, void *));
+int mmsintr __P((void *));
 
 struct cfattach mms_ca = {
 	sizeof(struct mms_softc), mmsprobe, mmsattach
 };
 
-int	mms_enable(void *);
-int	mms_ioctl(void *, u_long, caddr_t, int, struct proc *);
-void	mms_disable(void *);
-
-const struct wsmouse_accessops mms_accessops = {
-	mms_enable,
-	mms_ioctl,
-	mms_disable,
+struct cfdriver mms_cd = {
+	NULL, "mms", DV_TTY
 };
 
+#define	MMSUNIT(dev)	(minor(dev))
+
 int
-mmsprobe(struct device *parent, void *match, void *aux)
+mmsprobe(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
 {
 	struct isa_attach_args *ia = aux;
-	bus_space_tag_t iot = ia->ia_iot;
-	bus_space_handle_t ioh;
-	int rv;
-
-	/* Disallow wildcarded i/o address. */
-	if (ia->ia_iobase == IOBASEUNK)
-		return 0;
-
-	/* Map the i/o space. */
-	if (bus_space_map(iot, ia->ia_iobase, MMS_NPORTS, 0, &ioh))
-		return 0;
-
-	rv = 0;
+	int iobase = ia->ia_iobase;
 
 	/* Read identification register to see if present */
-	if (bus_space_read_1(iot, ioh, MMS_IDENT) != 0xde)
-		goto out;
+	if (inb(iobase + MMS_IDENT) != 0xde)
+		return 0;
 
 	/* Seems it was there; reset. */
-	bus_space_write_1(iot, ioh, MMS_ADDR, 0x87);
+	outb(iobase + MMS_ADDR, 0x87);
 
-	rv = 1;
 	ia->ia_iosize = MMS_NPORTS;
 	ia->ia_msize = 0;
-
-out:
-	bus_space_unmap(iot, ioh, MMS_NPORTS);
-	return rv;
+	return 1;
 }
 
 void
-mmsattach(struct device *parent, struct device *self, void *aux)
+mmsattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct mms_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
-	bus_space_tag_t iot = ia->ia_iot;
-	bus_space_handle_t ioh;
-	struct wsmousedev_attach_args a;
+	int iobase = ia->ia_iobase;
 
 	printf("\n");
 
-	if (bus_space_map(iot, ia->ia_iobase, MMS_NPORTS, 0, &ioh)) {
-		printf("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
-		return;
-	}
-
 	/* Other initialization was done by mmsprobe. */
-	sc->sc_iot = iot;
-	sc->sc_ioh = ioh;
-	sc->sc_enabled = 0;
+	sc->sc_iobase = iobase;
+	sc->sc_state = 0;
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_PULSE,
 	    IPL_TTY, mmsintr, sc, sc->sc_dev.dv_xname);
-
-	a.accessops = &mms_accessops;
-	a.accesscookie = sc;
-
-	/*
-	 * Attach the wsmouse, saving a handle to it.
-	 * Note that we don't need to check this pointer against NULL
-	 * here or in psmintr, because if this fails lms_enable() will
-	 * never be called, so lmsintr() will never be called.
-	 */
-	sc->sc_wsmousedev = config_found(self, &a, wsmousedevprint);
 }
 
 int
-mms_enable(void *v)
+mmsopen(dev, flag, mode, p)
+	dev_t dev;
+	int flag;
+	int mode;
+	struct proc *p;
 {
-	struct mms_softc *sc = v;
+	int unit = MMSUNIT(dev);
+	struct mms_softc *sc;
 
-	if (sc->sc_enabled)
+	if (unit >= mms_cd.cd_ndevs)
+		return ENXIO;
+	sc = mms_cd.cd_devs[unit];
+	if (!sc)
+		return ENXIO;
+
+	if (sc->sc_state & MMS_OPEN)
 		return EBUSY;
 
-	sc->sc_enabled = 1;
+	if (clalloc(&sc->sc_q, MMS_BSIZE, 0) == -1)
+		return ENOMEM;
+
+	sc->sc_state |= MMS_OPEN;
+	sc->sc_status = 0;
+	sc->sc_x = sc->sc_y = 0;
 
 	/* Enable interrupts. */
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, MMS_ADDR, 0x07);
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, MMS_DATA, 0x09);
+	outb(sc->sc_iobase + MMS_ADDR, 0x07);
+	outb(sc->sc_iobase + MMS_DATA, 0x09);
 
 	return 0;
 }
 
-void
-mms_disable(void *v)
+int
+mmsclose(dev, flag, mode, p)
+	dev_t dev;
+	int flag;
+	int mode;
+	struct proc *p;
 {
-	struct mms_softc *sc = v;
+	struct mms_softc *sc = mms_cd.cd_devs[MMSUNIT(dev)];
 
 	/* Disable interrupts. */
-	bus_space_write_1(sc->sc_iot, sc->sc_ioh, MMS_ADDR, 0x87);
+	outb(sc->sc_iobase + MMS_ADDR, 0x87);
 
-	sc->sc_enabled = 0;
+	sc->sc_state &= ~MMS_OPEN;
+
+	clfree(&sc->sc_q);
+
+	return 0;
 }
 
 int
-mms_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
+mmsread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-#if 0
-	struct mms_softc *sc = v;
-#endif
+	struct mms_softc *sc = mms_cd.cd_devs[MMSUNIT(dev)];
+	int s;
+	int error = 0;
+	size_t length;
+	u_char buffer[MMS_CHUNK];
+
+	/* Block until mouse activity occured. */
+
+	s = spltty();
+	while (sc->sc_q.c_cc == 0) {
+		if (flag & IO_NDELAY) {
+			splx(s);
+			return EWOULDBLOCK;
+		}
+		sc->sc_state |= MMS_ASLP;
+		error = tsleep((caddr_t)sc, PZERO | PCATCH, "mmsrea", 0);
+		if (error) {
+			sc->sc_state &= ~MMS_ASLP;
+			splx(s);
+			return error;
+		}
+	}
+	splx(s);
+
+	/* Transfer as many chunks as possible. */
+
+	while (sc->sc_q.c_cc > 0 && uio->uio_resid > 0) {
+		length = min(sc->sc_q.c_cc, uio->uio_resid);
+		if (length > sizeof(buffer))
+			length = sizeof(buffer);
+
+		/* Remove a small chunk from the input queue. */
+		(void) q_to_b(&sc->sc_q, buffer, length);
+
+		/* Copy the data to the user process. */
+		if ((error = uiomove(buffer, length, uio)) != 0)
+			break;
+	}
+
+	return error;
+}
+
+int
+mmsioctl(dev, cmd, addr, flag, p)
+	dev_t dev;
+	u_long cmd;
+	caddr_t addr;
+	int flag;
+	struct proc *p;
+{
+	struct mms_softc *sc = mms_cd.cd_devs[MMSUNIT(dev)];
+	struct mouseinfo info;
+	int s;
+	int error;
 
 	switch (cmd) {
-	case WSMOUSEIO_GTYPE:
-		*(u_int *)data = WSMOUSE_TYPE_MMS;
-		return (0);
+	case MOUSEIOCREAD:
+		s = spltty();
+
+		info.status = sc->sc_status;
+		if (sc->sc_x || sc->sc_y)
+			info.status |= MOVEMENT;
+
+		if (sc->sc_x > 127)
+			info.xmotion = 127;
+		else if (sc->sc_x < -127)
+			/* Bounding at -127 avoids a bug in XFree86. */
+			info.xmotion = -127;
+		else
+			info.xmotion = sc->sc_x;
+
+		if (sc->sc_y > 127)
+			info.ymotion = 127;
+		else if (sc->sc_y < -127)
+			info.ymotion = -127;
+		else
+			info.ymotion = sc->sc_y;
+
+		/* Reset historical information. */
+		sc->sc_x = sc->sc_y = 0;
+		sc->sc_status &= ~BUTCHNGMASK;
+		ndflush(&sc->sc_q, sc->sc_q.c_cc);
+
+		splx(s);
+		error = copyout(&info, addr, sizeof(struct mouseinfo));
+		break;
+
+	default:
+		error = EINVAL;
+		break;
 	}
-	return (-1);
+
+	return error;
 }
 
 int
-mmsintr(void *arg)
+mmsintr(arg)
+	void *arg;
 {
 	struct mms_softc *sc = arg;
-	bus_space_tag_t iot = sc->sc_iot;
-	bus_space_handle_t ioh = sc->sc_ioh;
-	u_char status;
-	signed char dx, dy;
-	u_int buttons;
-	int changed;
+	int iobase = sc->sc_iobase;
+	u_char buttons, changed, status;
+	char dx, dy;
+	u_char buffer[5];
 
-	if (!sc->sc_enabled)
+	if ((sc->sc_state & MMS_OPEN) == 0)
 		/* Interrupts are not expected. */
 		return 0;
 
 	/* Freeze InPort registers (disabling interrupts). */
-	bus_space_write_1(iot, ioh, MMS_ADDR, 0x07);
-	bus_space_write_1(iot, ioh, MMS_DATA, 0x29);
+	outb(iobase + MMS_ADDR, 0x07);
+	outb(iobase + MMS_DATA, 0x29);
 
-	bus_space_write_1(iot, ioh, MMS_ADDR, 0x00);
-	status = bus_space_read_1(iot, ioh, MMS_DATA);
+	outb(iobase + MMS_ADDR, 0x00);
+	status = inb(iobase + MMS_DATA);
 
 	if (status & 0x40) {
-		bus_space_write_1(iot, ioh, MMS_ADDR, 1);
-		dx = bus_space_read_1(iot, ioh, MMS_DATA);
-		/* Bounding at -127 avoids a bug in XFree86. */
+		outb(iobase + MMS_ADDR, 1);
+		dx = inb(iobase + MMS_DATA);
 		dx = (dx == -128) ? -127 : dx;
-
-		bus_space_write_1(iot, ioh, MMS_ADDR, 2);
-		dy = bus_space_read_1(iot, ioh, MMS_DATA);
+		outb(iobase + MMS_ADDR, 2);
+		dy = inb(iobase + MMS_DATA);
 		dy = (dy == -128) ? 127 : -dy;
 	} else
 		dx = dy = 0;
 
 	/* Unfreeze InPort registers (reenabling interrupts). */
-	bus_space_write_1(iot, ioh, MMS_ADDR, 0x07);
-	bus_space_write_1(iot, ioh, MMS_DATA, 0x09);
+	outb(iobase + MMS_ADDR, 0x07);
+	outb(iobase + MMS_DATA, 0x09);
 
-	buttons = ((status & 0x04) ? 0x1 : 0) |
-		((status & 0x02) ? 0x2 : 0) |
-		((status & 0x01) ? 0x4 : 0);
-	changed = status & 0x38;
+	buttons = status & BUTSTATMASK;
+	changed = status & BUTCHNGMASK;
+	sc->sc_status = buttons | (sc->sc_status & ~BUTSTATMASK) | changed;
 
-	if (dx || dy || changed)
-		wsmouse_input(sc->sc_wsmousedev,
-			      buttons, dx, dy, 0, 0, WSMOUSE_INPUT_DELTA);
+	if (dx || dy || changed) {
+		/* Update accumulated movements. */
+		sc->sc_x += dx;
+		sc->sc_y += dy;
+
+		/* Add this event to the queue. */
+		buffer[0] = 0x80 | (buttons ^ BUTSTATMASK);
+		buffer[1] = dx;
+		buffer[2] = dy;
+		buffer[3] = buffer[4] = 0;
+		(void) b_to_q(buffer, sizeof buffer, &sc->sc_q);
+
+		if (sc->sc_state & MMS_ASLP) {
+			sc->sc_state &= ~MMS_ASLP;
+			wakeup((caddr_t)sc);
+		}
+		selwakeup(&sc->sc_rsel);
+	}
 
 	return -1;
 }
 
-struct cfdriver mms_cd = {
-	NULL, "mms", DV_DULL
-};
+int
+mmsselect(dev, rw, p)
+	dev_t dev;
+	int rw;
+	struct proc *p;
+{
+	struct mms_softc *sc = mms_cd.cd_devs[MMSUNIT(dev)];
+	int s;
+	int ret;
+
+	if (rw == FWRITE)
+		return 0;
+
+	s = spltty();
+	if (!sc->sc_q.c_cc) {
+		selrecord(p, &sc->sc_rsel);
+		ret = 0;
+	} else
+		ret = 1;
+	splx(s);
+
+	return ret;
+}

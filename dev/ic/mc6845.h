@@ -1,4 +1,4 @@
-/*	$OpenBSD: mc6845.h,v 1.5 2005/12/12 12:35:49 mickey Exp $	*/
+/*	$OpenBSD: mc6845.h,v 1.2 1996/09/23 15:07:50 mickey Exp $	*/
 
 /*
  * Copyright (c) 1992, 1995 Hellmuth Michaelis and Joerg Wunsch.
@@ -15,8 +15,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by
- *	Hellmuth Michaelis, Brian Dunford-Shore and Joerg Wunsch.
+ *	This product includes software developed by Michael Shalayeff.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
@@ -48,7 +47,7 @@
 #define CRTC_HSYNCE	0x05		/* horizontal sync end */
 #define CRTC_VTOTAL	0x06		/* vertical total */
 #define CRTC_OVERFLL	0x07		/* overflow low */
-#define CRTC_IROWADDR	0x08		/* initial row address */
+#define CRTC_IROWADDR	0x08		/* inital row address */
 #define CRTC_MAXROW	0x09		/* maximum row address */
 #define CRTC_CURSTART	0x0A		/* cursor start row address */
 #define CRTC_CUREND	0x0B		/* cursor end row address */
@@ -70,7 +69,7 @@
 
 #define CRTC_RASCAS	0x32		/* ras/cas configuration */
 #define CRTC_EXTSTART	0x33		/* extended start address */
-#define CRTC_COMPAT6845	0x34		/* 6845 compatibility control */
+#define CRTC_COMPAT6845	0x34		/* 6845 comatibility control */
 #define CRTC_OVFLHIGH	0x35		/* overflow high */
 #define CRTC_SYSCONF1	0x36		/* video system configuration 1 */
 #define CRTC_SYSCONF2	0x36		/* video system configuration 2 */

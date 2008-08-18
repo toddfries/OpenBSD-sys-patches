@@ -1,5 +1,5 @@
-/*	$OpenBSD: fpu_subr.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_subr.c,v 1.6 2003/08/07 16:28:12 agc Exp $ */
+/*	$OpenBSD: fpu_subr.c,v 1.2 1996/05/09 22:20:48 niklas Exp $	*/
+/*	$NetBSD: fpu_subr.c,v 1.2 1996/04/30 11:52:38 briggs Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -22,7 +22,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -50,8 +54,8 @@
 
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_emulate.h>
-#include <m68k/fpe/fpu_arith.h>
+#include "fpu_emulate.h"
+#include "fpu_arith.h"
 
 /*
  * Shift the given number right rsh bits.  Any bits that `fall off' will get
@@ -60,31 +64,33 @@
  * sticky field is ignored anyway.
  */
 int
-fpu_shr(struct fpn *fp, int rsh)
+fpu_shr(register struct fpn *fp, register int rsh)
 {
-	u_int m0, m1, m2, s;
-	int lsh;
+	register u_int m0, m1, m2, m3, s;
+	register int lsh;
 
 #ifdef DIAGNOSTIC
-	if (rsh < 0 || (fp->fp_class != FPC_NUM && !ISNAN(fp)))
+	if (rsh <= 0 || (fp->fp_class != FPC_NUM && !ISNAN(fp)))
 		panic("fpu_rightshift 1");
 #endif
 
 	m0 = fp->fp_mant[0];
 	m1 = fp->fp_mant[1];
 	m2 = fp->fp_mant[2];
+	m3 = fp->fp_mant[3];
 
 	/* If shifting all the bits out, take a shortcut. */
 	if (rsh >= FP_NMANT) {
 #ifdef DIAGNOSTIC
-		if ((m0 | m1 | m2) == 0)
+		if ((m0 | m1 | m2 | m3) == 0)
 			panic("fpu_rightshift 2");
 #endif
 		fp->fp_mant[0] = 0;
 		fp->fp_mant[1] = 0;
 		fp->fp_mant[2] = 0;
+		fp->fp_mant[3] = 0;
 #ifdef notdef
-		if ((m0 | m1 | m2) == 0)
+		if ((m0 | m1 | m2 | m3) == 0)
 			fp->fp_class = FPC_ZERO;
 		else
 #endif
@@ -94,18 +100,22 @@ fpu_shr(struct fpn *fp, int rsh)
 
 	/* Squish out full words. */
 	s = fp->fp_sticky;
-	if (rsh >= 32 * 2) {
-		s |= m2 | m1;
-		m2 = m0, m1 = 0, m0 = 0;
+	if (rsh >= 32 * 3) {
+		s |= m3 | m2 | m1;
+		m3 = m0, m2 = 0, m1 = 0, m0 = 0;
+	} else if (rsh >= 32 * 2) {
+		s |= m3 | m2;
+		m3 = m1, m2 = m0, m1 = 0, m0 = 0;
 	} else if (rsh >= 32) {
-		s |= m2;
-		m2 = m1, m1 = m0, m0 = 0;
+		s |= m3;
+		m3 = m2, m2 = m1, m1 = m0, m0 = 0;
 	}
 
 	/* Handle any remaining partial word. */
 	if ((rsh &= 31) != 0) {
 		lsh = 32 - rsh;
-		s |= m2 << lsh;
+		s |= m3 << lsh;
+		m3 = (m3 >> rsh) | (m2 << lsh);
 		m2 = (m2 >> rsh) | (m1 << lsh);
 		m1 = (m1 >> rsh) | (m0 << lsh);
 		m0 >>= rsh;
@@ -113,6 +123,7 @@ fpu_shr(struct fpn *fp, int rsh)
 	fp->fp_mant[0] = m0;
 	fp->fp_mant[1] = m1;
 	fp->fp_mant[2] = m2;
+	fp->fp_mant[3] = m3;
 	fp->fp_sticky = s;
 	return (s);
 }
@@ -124,32 +135,29 @@ fpu_shr(struct fpn *fp, int rsh)
  *
  * Internally, this may use a `supernormal' -- a number whose fp_mant
  * is greater than or equal to 2.0 -- so as a side effect you can hand it
- * a supernormal and it will fix it (provided fp->fp_mant[2] == 0).
+ * a supernormal and it will fix it (provided fp->fp_mant[3] == 0).
  */
 void
-fpu_norm(struct fpn *fp)
+fpu_norm(register struct fpn *fp)
 {
-	u_int m0, m1, m2, sup, nrm;
-	int lsh, rsh, exp;
+	register u_int m0, m1, m2, m3, top, sup, nrm;
+	register int lsh, rsh, exp;
 
 	exp = fp->fp_exp;
 	m0 = fp->fp_mant[0];
 	m1 = fp->fp_mant[1];
 	m2 = fp->fp_mant[2];
+	m3 = fp->fp_mant[3];
 
 	/* Handle severe subnormals with 32-bit moves. */
 	if (m0 == 0) {
-		if (m1) {
-			m0 = m1;
-			m1 = m2;
-			m2 = 0;
-			exp -= 32;
-		} else if (m2) {
-			m0 = m2;
-			m1 = 0;
-			m2 = 0;
-			exp -= 2 * 32;
-		} else {
+		if (m1)
+			m0 = m1, m1 = m2, m2 = m3, m3 = 0, exp -= 32;
+		else if (m2)
+			m0 = m2, m1 = m3, m2 = 0, m3 = 0, exp -= 2 * 32;
+		else if (m3)
+			m0 = m3, m1 = 0, m2 = 0, m3 = 0, exp -= 3 * 32;
+		else {
 			fp->fp_class = FPC_ZERO;
 			return;
 		}
@@ -161,33 +169,36 @@ fpu_norm(struct fpn *fp)
 	if (m0 >= sup) {
 		/*
 		 * We have a supernormal number.  We need to shift it right.
-		 * We may assume m2==0.
+		 * We may assume m3==0.
 		 */
-		__asm __volatile("bfffo %1{#0:#32},%0" : "=d"(rsh) : "g"(m0));
-		rsh = 31 - rsh - FP_LG;
+		for (rsh = 1, top = m0 >> 1; top >= sup; rsh++)	/* XXX slow */
+			top >>= 1;
 		exp += rsh;
 		lsh = 32 - rsh;
-		m2 = m1 << lsh;
+		m3 = m2 << lsh;
+		m2 = (m2 >> rsh) | (m1 << lsh);
 		m1 = (m1 >> rsh) | (m0 << lsh);
-		m0 = (m0 >> rsh);
+		m0 = top;
 	} else if (m0 < nrm) {
 		/*
 		 * We have a regular denorm (a subnormal number), and need
 		 * to shift it left.
 		 */
-		__asm __volatile("bfffo %1{#0:#32},%0" : "=d"(lsh) : "g"(m0));
-		lsh = FP_LG - 31 + lsh;
+		for (lsh = 1, top = m0 << 1; top < nrm; lsh++)	/* XXX slow */
+			top <<= 1;
 		exp -= lsh;
 		rsh = 32 - lsh;
-		m0 = (m0 << lsh) | (m1 >> rsh);
+		m0 = top | (m1 >> rsh);
 		m1 = (m1 << lsh) | (m2 >> rsh);
-		m2 <<= lsh;
+		m2 = (m2 << lsh) | (m3 >> rsh);
+		m3 <<= lsh;
 	}
 
 	fp->fp_exp = exp;
 	fp->fp_mant[0] = m0;
 	fp->fp_mant[1] = m1;
 	fp->fp_mant[2] = m2;
+	fp->fp_mant[3] = m3;
 }
 
 /*
@@ -195,15 +206,15 @@ fpu_norm(struct fpn *fp)
  * As a side effect, we set OPERR for the current exceptions.
  */
 struct fpn *
-fpu_newnan(struct fpemu *fe)
+fpu_newnan(register struct fpemu *fe)
 {
-	struct fpn *fp;
+	register struct fpn *fp;
 
 	fe->fe_fpsr |= FPSR_OPERR;
 	fp = &fe->fe_f3;
 	fp->fp_class = FPC_QNAN;
 	fp->fp_sign = 0;
 	fp->fp_mant[0] = FP_1 - 1;
-	fp->fp_mant[1] = fp->fp_mant[2] = ~0;
+	fp->fp_mant[1] = fp->fp_mant[2] = fp->fp_mant[3] = ~0;
 	return (fp);
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: frame.h,v 1.3 2001/08/25 13:33:36 hugh Exp $ */
-/*	$NetBSD: frame.h,v 1.2 2000/06/04 19:30:15 matt Exp $ */
+/*	$NetBSD: frame.h,v 1.1 1995/11/12 15:07:30 ragge Exp $ */
 /*
  * Copyright (c) 1995 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -31,9 +30,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _VAX_FRAME_H_
-#define	_VAX_FRAME_H_
-
 /*
  * Description of calls frame on stack. This is the 
  * standard way of making procedure calls on vax systems.
@@ -49,16 +45,6 @@ struct callsframe {
 	/* This can be followed by more arguments */
 };
 
-struct icallsframe {
-	struct callsframe ica_frame;	/* std call frame */
-	unsigned int	ica_r0;		/* interrupt saved r0 */
-	unsigned int	ica_r1;		/* interrupt saved r1 */
-	unsigned int	ica_r2;		/* interrupt saved r2 */
-	unsigned int	ica_r3;		/* interrupt saved r3 */
-	unsigned int	ica_r4;		/* interrupt saved r4 */
-	unsigned int	ica_r5;		/* interrupt saved r5 */
-	unsigned int	ica_pc;		/* interrupt saved pc */
-	unsigned int	ica_psl;	/* interrupt saved psl */
-};
+/* Offset to beginning of calls frame from first arg */
+#define	FRAMEOFFSET(arg1) ((struct callsframe *)((unsigned int)&(arg1) - 24))
 
-#endif /* _VAX_FRAME_H */

@@ -1,12 +1,10 @@
-/*	$OpenBSD: si.c,v 1.29 2007/12/29 03:04:19 dlg Exp $	*/
-/*	$NetBSD: si.c,v 1.38 1997/08/27 11:24:20 bouyer Exp $	*/
+/*	$NetBSD: si.c,v 1.24 1996/05/13 01:53:45 thorpej Exp $	*/
 
-/*-
- * Copyright (c) 1996 The NetBSD Foundation, Inc.
+/*
+ * Copyright (c) 1995 Jason R. Thorpe
+ * Copyright (c) 1995 David Jones, Gordon W. Ross
+ * Copyright (c) 1994 Adam Glass
  * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Adam Glass, David Jones, Gordon W. Ross, and Jason R. Thorpe.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,25 +14,23 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
+ * 3. The name of the authors may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ * 4. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
+ *      This product includes software developed by
+ *      Adam Glass, David Jones, Gordon Ross, and Jason R. Thorpe
  *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -72,7 +68,7 @@
  * and Chris Torek for bits of insight needed along the way.  Thanks to
  * David Gilbert and Andrew Gillham who risked filesystem life-and-limb
  * for the sake of testing.  Andrew Gillham helped work out the bugs
- * in the 4/100 DMA code.
+ * the the 4/100 DMA code.
  */
 
 /*
@@ -85,7 +81,7 @@
  * reselection failing on Sun Shoebox-type configurations where
  * there are multiple non-SCSI devices behind Emulex or Adaptec
  * bridges.  These devices pre-date the SCSI-I spec, and might not
- * behave the way the 5380 code expects.  For this reason, only
+ * bahve the way the 5380 code expects.  For this reason, only
  * DMA is enabled by default in this driver.
  *
  *	Jason R. Thorpe <thorpej@NetBSD.ORG>
@@ -112,7 +108,14 @@
 #include <machine/pmap.h>
 
 #include <sparc/sparc/vaddrs.h>
-#include <sparc/sparc/cpuvar.h>
+
+#ifndef DDB
+#define	Debugger()
+#endif
+
+#ifndef DEBUG
+#define DEBUG XXX
+#endif
 
 #define COUNT_SW_LEFTOVERS	XXX	/* See sw DMA completion code */
 
@@ -169,52 +172,62 @@ struct si_softc {
 };
 
 /*
- * Options.  By default, configuration files enable DMA and disable
- * DMA completion interrupts and reselect.  You may enable additional features
+ * Options.  By default, DMA is enabled and DMA completion interrupts
+ * and reselect are disabled.  You may enable additional features
  * the `flags' directive in your kernel's configuration file.
  *
+ * Alternatively, you can patch your kernel with DDB or some other
+ * mechanism.  The sc_options member of the softc is OR'd with
+ * the value in si_options.
+ *
  * On the "sw", interrupts (and thus) reselection don't work, so they're
- * disabled.  DMA is still a little dangerous, too.
+ * disabled by default.  DMA is still a little dangerous, too.
+ *
+ * Note, there's a separate sw_options to make life easier.
  */
 #define	SI_ENABLE_DMA	0x01	/* Use DMA (maybe polled) */
 #define	SI_DMA_INTR	0x02	/* DMA completion interrupts */
 #define	SI_DO_RESELECT	0x04	/* Allow disconnect/reselect */
 #define	SI_OPTIONS_MASK	(SI_ENABLE_DMA|SI_DMA_INTR|SI_DO_RESELECT)
-#define	SW_OPTIONS_MASK	(SI_ENABLE_DMA)
 #define SI_OPTIONS_BITS	"\10\3RESELECT\2DMA_INTR\1DMA"
+int si_options = SI_ENABLE_DMA;
+int sw_options = SI_ENABLE_DMA;
 
 /* How long to wait for DMA before declaring an error. */
 int si_dma_intr_timo = 500;	/* ticks (sec. X 100) */
 
-static int	si_match(struct device *, void *, void *);
-static void	si_attach(struct device *, struct device *, void *);
-static int	si_intr(void *);
-static void	si_reset_adapter(struct ncr5380_softc *);
-static void	si_minphys(struct buf *);
+static int	si_match __P((struct device *, void *, void *));
+static void	si_attach __P((struct device *, struct device *, void *));
+static int	si_intr __P((void *));
+static void	si_reset_adapter __P((struct ncr5380_softc *));
+static void	si_minphys __P((struct buf *));
+static int	si_print __P((void *, char *));
 
-void si_dma_alloc(struct ncr5380_softc *);
-void si_dma_free(struct ncr5380_softc *);
-void si_dma_poll(struct ncr5380_softc *);
+void si_dma_alloc __P((struct ncr5380_softc *));
+void si_dma_free __P((struct ncr5380_softc *));
+void si_dma_poll __P((struct ncr5380_softc *));
 
-void si_vme_dma_setup(struct ncr5380_softc *);
-void si_vme_dma_start(struct ncr5380_softc *);
-void si_vme_dma_stop(struct ncr5380_softc *);
+void si_vme_dma_setup __P((struct ncr5380_softc *));
+void si_vme_dma_start __P((struct ncr5380_softc *));
+void si_vme_dma_eop __P((struct ncr5380_softc *));
+void si_vme_dma_stop __P((struct ncr5380_softc *));
 
-void si_vme_intr_on(struct ncr5380_softc *);
-void si_vme_intr_off(struct ncr5380_softc *);
+void si_vme_intr_on  __P((struct ncr5380_softc *));
+void si_vme_intr_off __P((struct ncr5380_softc *));
 
-void si_obio_dma_setup(struct ncr5380_softc *);
-void si_obio_dma_start(struct ncr5380_softc *);
-void si_obio_dma_stop(struct ncr5380_softc *);
+void si_obio_dma_setup __P((struct ncr5380_softc *));
+void si_obio_dma_start __P((struct ncr5380_softc *));
+void si_obio_dma_eop __P((struct ncr5380_softc *));
+void si_obio_dma_stop __P((struct ncr5380_softc *));
 
-void si_obio_intr_on(struct ncr5380_softc *);
-void si_obio_intr_off(struct ncr5380_softc *);
+void si_obio_intr_on __P((struct ncr5380_softc *));
+void si_obio_intr_off __P((struct ncr5380_softc *));
 
 static struct scsi_adapter	si_ops = {
-	ncr5380_scsi_cmd,		/* scsi_cmd() */
-	si_minphys,			/* scsi_minphys() */
-	NULL,				/* probe_dev() */
-	NULL,				/* free_dev() */
+	ncr5380_scsi_cmd,		/* scsi_cmd()		*/
+	si_minphys,			/* scsi_minphys()	*/
+	NULL,				/* open_target_lu()	*/
+	NULL,				/* close_target_lu()	*/
 };
 
 /* This is copied from julian's bt driver */
@@ -246,12 +259,22 @@ struct cfdriver sw_cd = {
 };
 
 static int
-si_match(parent, vcf, aux)
-	struct device	*parent;
-	void *vcf, *aux;
+si_print(aux, name)
+	void *aux;
+	char *name;
 {
-	struct cfdata *cf = vcf;
-	struct confargs *ca = aux;
+	if (name != NULL)
+		printf("%s: scsibus ", name);
+	return UNCONF;
+}
+
+static int
+si_match(parent, vcf, args)
+	struct device	*parent;
+	void		*vcf, *args;
+{
+	struct cfdata	*cf = vcf;
+	struct confargs *ca = args;
 	struct romaux *ra = &ca->ca_ra;
 
 	/* Are we looking for the right thing? */
@@ -273,15 +296,13 @@ si_match(parent, vcf, aux)
 	switch (ca->ca_bustype) {
 	case BUS_VME16:
 		/* AFAIK, the `si' can only exist on the vmes. */
-		if (strcmp(ra->ra_name, "si") ||
-		    cpuinfo.cpu_type == CPUTYP_4_100)
+		if (strcmp(ra->ra_name, "si") || cpumod == SUN4_100)
 			return (0);
 		break;
 
 	case BUS_OBIO:
 		/* AFAIK, an `sw' can only exist on the obio. */
-		if (strcmp(ra->ra_name, "sw") ||
-		    cpuinfo.cpu_type != CPUTYP_4_100)
+		if (strcmp(ra->ra_name, "sw") || cpumod != SUN4_100)
 			return (0);
 		break;
 
@@ -314,23 +335,23 @@ si_attach(parent, self, args)
 {
 	struct si_softc *sc = (struct si_softc *) self;
 	struct ncr5380_softc *ncr_sc = (struct ncr5380_softc *)sc;
-	struct scsibus_attach_args saa;
 	volatile struct si_regs *regs;
 	struct confargs *ca = args;
 	struct romaux *ra = &ca->ca_ra;
 	struct bootpath *bp;
 	int i;
 
-	/*
-	 * Pull in the options flags.  Allow the user to completely
-	 * override the default values.
-	 */
-	sc->sc_options = ncr_sc->sc_dev.dv_cfdata->cf_flags &
-	    (ca->ca_bustype == BUS_OBIO ? SW_OPTIONS_MASK : SI_OPTIONS_MASK);
+	/* Pull in the options flags. */
+	if (ca->ca_bustype == BUS_OBIO)
+		sc->sc_options = sw_options;
+	else
+		sc->sc_options = si_options;
+	sc->sc_options |=
+	    (ncr_sc->sc_dev.dv_cfdata->cf_flags & SI_OPTIONS_MASK);
 
 	/* Map the controller registers. */
-	regs = (struct si_regs *)
-		mapiodev(ra->ra_reg, 0, sizeof(struct si_regs));
+	regs = (struct si_regs *)mapiodev(ra->ra_reg, 0,
+	    sizeof(struct si_regs), ca->ca_bustype);
 
 	/*
 	 * Fill in the prototype scsi_link.
@@ -339,7 +360,6 @@ si_attach(parent, self, args)
 	ncr_sc->sc_link.adapter_target = 7;
 	ncr_sc->sc_link.adapter = &si_ops;
 	ncr_sc->sc_link.device = &si_dev;
-	ncr_sc->sc_link.openings = 4;
 
 	/*
 	 * Initialize fields used by the MI code
@@ -358,49 +378,44 @@ si_attach(parent, self, args)
 	 */
 	ncr_sc->sc_pio_out = ncr5380_pio_out;
 	ncr_sc->sc_pio_in =  ncr5380_pio_in;
-	if (sc->sc_options & SI_ENABLE_DMA) {
-		ncr_sc->sc_dma_alloc = si_dma_alloc;
-		ncr_sc->sc_dma_free  = si_dma_free;
-		ncr_sc->sc_dma_poll  = si_dma_poll;
-	}
+	ncr_sc->sc_dma_alloc = si_dma_alloc;
+	ncr_sc->sc_dma_free  = si_dma_free;
+	ncr_sc->sc_dma_poll  = si_dma_poll;
 
 	switch (ca->ca_bustype) {
 	case BUS_VME16:
-		if (sc->sc_options & SI_ENABLE_DMA) {
-			ncr_sc->sc_dma_setup = si_vme_dma_setup;
-			ncr_sc->sc_dma_start = si_vme_dma_start;
-			ncr_sc->sc_dma_stop  = si_vme_dma_stop;
-			if (sc->sc_options & SI_DO_RESELECT) {
-				/*
-				 * Need to enable interrupts (and DMA!)
-				 * on this H/W for reselect to work.
-				 */
-				ncr_sc->sc_intr_on   = si_vme_intr_on;
-				ncr_sc->sc_intr_off  = si_vme_intr_off;
-			}
+		ncr_sc->sc_dma_setup = si_vme_dma_setup;
+		ncr_sc->sc_dma_start = si_vme_dma_start;
+		ncr_sc->sc_dma_eop   = si_vme_dma_stop;
+		ncr_sc->sc_dma_stop  = si_vme_dma_stop;
+		if (sc->sc_options & SI_DO_RESELECT) {
+			/*
+			 * Need to enable interrupts (and DMA!)
+			 * on this H/W for reselect to work.
+			 */
+			ncr_sc->sc_intr_on   = si_vme_intr_on;
+			ncr_sc->sc_intr_off  = si_vme_intr_off;
 		}
 		break;
 
 	case BUS_OBIO:
-		if (sc->sc_options & SI_ENABLE_DMA) {
-			ncr_sc->sc_dma_setup = si_obio_dma_setup;
-			ncr_sc->sc_dma_start = si_obio_dma_start;
-			ncr_sc->sc_dma_stop  = si_obio_dma_stop;
-		}
+		ncr_sc->sc_dma_setup = si_obio_dma_setup;
+		ncr_sc->sc_dma_start = si_obio_dma_start;
+		ncr_sc->sc_dma_eop   = si_obio_dma_stop;
+		ncr_sc->sc_dma_stop  = si_obio_dma_stop;
 		ncr_sc->sc_intr_on   = si_obio_intr_on;
 		ncr_sc->sc_intr_off  = si_obio_intr_off;
 		break;
 
 	default:
-		panic("si_attach: impossible bus type 0x%x", ca->ca_bustype);
+		panic("\nsi_attach: impossible bus type 0x%x", ca->ca_bustype);
 		/* NOTREACHED */
 	}
 
 	ncr_sc->sc_flags = 0;
-	if ((sc->sc_options & SI_DO_RESELECT) == 0)
+	if (sc->sc_options & SI_DO_RESELECT)
 		ncr_sc->sc_flags |= NCR5380_PERMIT_RESELECT;
-	if ((sc->sc_options & (SI_ENABLE_DMA | SI_DMA_INTR)) !=
-	    (SI_ENABLE_DMA | SI_DMA_INTR))
+	if ((sc->sc_options & SI_DMA_INTR) == 0)
 		ncr_sc->sc_flags |= NCR5380_FORCE_POLLING;
 	ncr_sc->sc_min_dma_len = MIN_DMA_LEN;
 
@@ -417,7 +432,7 @@ si_attach(parent, self, args)
 	i = SCI_OPENINGS * sizeof(struct si_dma_handle);
 	sc->sc_dma = (struct si_dma_handle *)malloc(i, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_dma == NULL)
-		panic("si: dma handle malloc failed");
+		panic("si: dma handle malloc failed\n");
 	for (i = 0; i < SCI_OPENINGS; i++)
 		sc->sc_dma[i].dh_flags = 0;
 
@@ -433,8 +448,7 @@ si_attach(parent, self, args)
 		/*
 		 * This will be an "sw" controller.
 		 */
-		intr_establish(ra->ra_intr[0].int_pri, &sc->sc_ih, IPL_BIO,
-		    self->dv_xname);
+		intr_establish(ra->ra_intr[0].int_pri, &sc->sc_ih);
 		break;
 
 	case BUS_VME16:
@@ -442,8 +456,7 @@ si_attach(parent, self, args)
 		 * This will be an "si" controller.
 		 */
 		vmeintr_establish(ra->ra_intr[0].int_vec,
-		    ra->ra_intr[0].int_pri, &sc->sc_ih, IPL_BIO,
-		    self->dv_xname);
+		    ra->ra_intr[0].int_pri, &sc->sc_ih);
 		sc->sc_adapter_iv_am =
 		    VME_SUPV_DATA_24 | (ra->ra_intr[0].int_vec & 0xFF);
 		break;
@@ -453,11 +466,11 @@ si_attach(parent, self, args)
 		break;
 	}
 	printf(" pri %d\n", ra->ra_intr[0].int_pri);
-#ifdef	DEBUG
 	if (sc->sc_options) {
 		printf("%s: options=%b\n", ncr_sc->sc_dev.dv_xname,
 			sc->sc_options, SI_OPTIONS_BITS);
 	}
+#ifdef	DEBUG
 	if (si_debug)
 		printf("si: Set TheSoftC=%p TheRegs=%p\n", sc, regs);
 	ncr_sc->sc_link.flags |= si_link_flags;
@@ -469,7 +482,6 @@ si_attach(parent, self, args)
 	si_reset_adapter(ncr_sc);
 	ncr5380_init(ncr_sc);
 	ncr5380_reset_scsibus(ncr_sc);
-	DELAY(2000000);
 
 	/*
 	 * If the boot path is "sw" or "si" at the moment and it's me, then
@@ -481,11 +493,8 @@ si_attach(parent, self, args)
 	    bp->val[0] == -1 && bp->val[1] == ncr_sc->sc_dev.dv_unit)
 		bootpath_store(1, bp + 1);
 
-	bzero(&saa, sizeof(saa));
-	saa.saa_sc_link = &(ncr_sc->sc_link);
-
 	/* Configure sub-devices */
-	config_found(self, &saa, scsiprint);
+	config_found(self, &(ncr_sc->sc_link), si_print);
 
 	bootpath_store(1, NULL);
 }
@@ -496,10 +505,8 @@ si_minphys(struct buf *bp)
 	if (bp->b_bcount > MAX_DMA_LEN) {
 #ifdef DEBUG
 		if (si_debug) {
-			printf("si_minphys len = 0x%x.\n", MAX_DMA_LEN);
-#ifdef DDB
+			printf("si_minphys len = %x.\n", MAX_DMA_LEN);
 			Debugger();
-#endif
 		}
 #endif
 		bp->b_bcount = MAX_DMA_LEN;
@@ -548,11 +555,9 @@ si_intr(void *arg)
 #ifdef DEBUG
 		if (!claimed) {
 			printf("si_intr: spurious from SBC\n");
-#ifdef DDB
 			if (si_debug & 4) {
 				Debugger();	/* XXX */
 			}
-#endif
 		}
 #endif
 	}
@@ -645,15 +650,28 @@ si_dma_alloc(ncr_sc)
 
 	/* If the DMA start addr is misaligned then do PIO */
 	if ((addr & 1) || (xlen & 1)) {
-#ifdef DEBUG
 		printf("si_dma_alloc: misaligned.\n");
-#endif
 		return;
 	}
 
 	/* Make sure our caller checked sc_min_dma_len. */
 	if (xlen < MIN_DMA_LEN)
-		panic("si_dma_alloc: xlen=0x%x", xlen);
+		panic("si_dma_alloc: xlen=0x%x\n", xlen);
+
+	/*
+	 * XXX SUN4 doesn't have this limitation?
+	 * Never attempt single transfers of more than 63k, because
+	 * our count register may be only 16 bits (an OBIO adapter).
+	 * This should never happen since already bounded by minphys().
+	 * XXX - Should just segment these...
+	 */
+	if (xlen > MAX_DMA_LEN) {
+		printf("si_dma_alloc: excessive xlen=0x%x\n", xlen);
+#ifdef DEBUG
+		Debugger();
+#endif
+		ncr_sc->sc_datalen = xlen = MAX_DMA_LEN;
+	}
 
 	/* Find free DMA handle.  Guaranteed to find one since we have
 	   as many DMA handles as the driver has processes. */
@@ -666,7 +684,7 @@ found:
 
 	dh = &sc->sc_dma[i];
 	dh->dh_flags = SIDH_BUSY;
-	dh->dh_addr = (u_char *) addr;
+	dh->dh_addr = (u_char*) addr;
 	dh->dh_maplen  = xlen;
 	dh->dh_dvma = 0;
 
@@ -683,7 +701,7 @@ found:
 	dh->dh_dvma = (long)kdvma_mapin((caddr_t)addr, xlen, 0);
 	if (dh->dh_dvma == 0) {
 		/* Can't remap segment */
-		printf("si_dma_alloc: can't remap %p/0x%x, doing PIO\n",
+		printf("si_dma_alloc: can't remap %p/%x, doing PIO\n",
 			dh->dh_addr, dh->dh_maplen);
 		dh->dh_flags = 0;
 		return;
@@ -715,8 +733,8 @@ si_dma_free(ncr_sc)
 		/* XXX - Should separate allocation and mapping. */
 
 		/* Give back the DVMA space. */
-		dvma_mapout((vaddr_t)dh->dh_dvma, (vaddr_t)dh->dh_addr,
-			    dh->dh_maplen);
+		dvma_mapout((vm_offset_t)dh->dh_dvma,
+		    (vm_offset_t)dh->dh_addr, dh->dh_maplen);
 
 		dh->dh_dvma = 0;
 		dh->dh_flags = 0;
@@ -812,7 +830,7 @@ si_vme_intr_off(ncr_sc)
 
 /*
  * This function is called during the COMMAND or MSG_IN phase
- * that precedes a DATA_IN or DATA_OUT phase, in case we need
+ * that preceeds a DATA_IN or DATA_OUT phase, in case we need
  * to setup the DMA engine before the bus enters a DATA phase.
  *
  * XXX: The VME adapter appears to suppress SBC interrupts
@@ -915,9 +933,7 @@ si_vme_dma_start(ncr_sc)
 	if (si->fifo_count != xlen) {
 		printf("si_dma_start: Fifo_count=0x%x, xlen=0x%x\n",
 		    si->fifo_count, xlen);
-#ifdef DDB
 		Debugger();
-#endif
 	}
 #endif
 
@@ -950,6 +966,15 @@ si_vme_dma_start(ncr_sc)
 			   ncr_sc->sc_state);
 	}
 #endif
+}
+
+
+void
+si_vme_dma_eop(ncr_sc)
+	struct ncr5380_softc *ncr_sc;
+{
+
+	/* Not needed - DMA was stopped prior to examining sci_csr */
 }
 
 
@@ -1120,7 +1145,7 @@ si_obio_intr_off(ncr_sc)
 
 /*
  * This function is called during the COMMAND or MSG_IN phase
- * that precedes a DATA_IN or DATA_OUT phase, in case we need
+ * that preceeds a DATA_IN or DATA_OUT phase, in case we need
  * to setup the DMA engine before the bus enters a DATA phase.
  *
  * On the OBIO version we just clear the DMA count and address
@@ -1250,6 +1275,14 @@ si_obio_dma_start(ncr_sc)
 #endif
 }
 
+
+void
+si_obio_dma_eop(ncr_sc)
+	struct ncr5380_softc *ncr_sc;
+{
+
+	/* Not needed - DMA was stopped prior to examining sci_csr */
+}
 
 #if (defined(DEBUG) || defined(DIAGNOSTIC)) && !defined(COUNT_SW_LEFTOVERS)
 #define COUNT_SW_LEFTOVERS

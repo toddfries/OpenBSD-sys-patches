@@ -1,5 +1,4 @@
-/*	$OpenBSD: mba.c,v 1.10 2006/01/20 23:27:25 miod Exp $ */
-/*	$NetBSD: mba.c,v 1.18 2000/01/24 02:40:36 matt Exp $ */
+/*	$NetBSD: mba.c,v 1.6 1996/04/08 18:38:59 ragge Exp $ */
 /*
  * Copyright (c) 1994, 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -45,7 +44,8 @@
 #include <sys/buf.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
 
 #include <machine/trap.h>
 #include <machine/scb.h>
@@ -53,7 +53,6 @@
 #include <machine/pte.h>
 #include <machine/pcb.h>
 #include <machine/sid.h>
-#include <machine/cpu.h>
 
 #include <vax/mba/mbareg.h>
 #include <vax/mba/mbavar.h>
@@ -70,34 +69,32 @@ struct	mbaunit mbaunit[] = {
 	{0,		0,	0}
 };
 
-int	mbamatch(struct device *, struct cfdata *, void *);
-void	mbaattach(struct device *, struct device *, void *);
-void	mbaintr(void *);
-int	mbaprint(void *, const char *);
-void	mbaqueue(struct mba_device *);
-void	mbastart(struct mba_softc *);
-void	mbamapregs(struct mba_softc *);
+int	mbamatch __P((struct device *, void *, void *));
+void	mbaattach __P((struct device *, struct device *, void *));
+void	mbaintr __P((int));
+int	mbaprint __P((void *, char *));
+void	mbaqueue __P((struct mba_device *));
+void	mbastart __P((struct mba_softc *));
+void	mbamapregs __P((struct mba_softc *));
 
-struct	cfattach mba_cmi_ca = {
-	sizeof(struct mba_softc), mbamatch, mbaattach
+struct	cfdriver mba_cd = {
+	NULL, "mba", DV_DULL
 };
 
-struct	cfattach mba_sbi_ca = {
+struct	cfattach mba_ca = {
 	sizeof(struct mba_softc), mbamatch, mbaattach
 };
-
-extern	struct cfdriver mba_cd;
 
 /*
  * Look if this is a massbuss adapter.
  */
 int
-mbamatch(parent, cf, aux)
+mbamatch(parent, match, aux)
 	struct	device *parent;
-	struct  cfdata *cf;
-	void	*aux;
+	void	*match, *aux;
 {
 	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
+	struct	cfdata *cf = match;
 
 	if ((cf->cf_loc[0] != sa->nexnum) && (cf->cf_loc[0] > -1 ))
 		return 0;
@@ -121,22 +118,23 @@ mbaattach(parent, self, aux)
 	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
 	volatile struct	mba_regs *mbar = (struct mba_regs *)sa->nexaddr;
 	struct	mba_attach_args ma;
+	extern  struct  ivec_dsp idsptch;
 	int	i, j;
 
 	printf("\n");
 	/*
 	 * Set up interrupt vectors for this MBA.
 	 */
-	sc->sc_dsp = idsptch;
-	sc->sc_dsp.pushlarg = sc;
-	sc->sc_dsp.hoppaddr = mbaintr;
+	bcopy(&idsptch, &sc->sc_dsp, sizeof(struct ivec_dsp));
 	scb->scb_nexvec[0][sa->nexnum] = scb->scb_nexvec[1][sa->nexnum] =
 	    scb->scb_nexvec[2][sa->nexnum] = scb->scb_nexvec[3][sa->nexnum] =
 	    &sc->sc_dsp;
+	sc->sc_dsp.pushlarg = sc->sc_dev.dv_unit;
+	sc->sc_dsp.hoppaddr = mbaintr;
 
 	sc->sc_physnr = sa->nexnum - 8; /* MBA's have TR between 8 - 11... */
-#if VAX750
-	if (vax_cputype == VAX_750)
+#ifdef VAX750
+	if (cpunumber == VAX_750)
 		sc->sc_physnr += 4;	/* ...but not on 11/750 */
 #endif
 	sc->sc_first = 0;
@@ -168,9 +166,9 @@ mbaattach(parent, self, aux)
  */
 void
 mbaintr(mba)
-	void	*mba;
+	int	mba;
 {
-	struct	mba_softc *sc = mba;
+	struct	mba_softc *sc = mba_cd.cd_devs[mba];
 	volatile struct	mba_regs *mr = sc->sc_mbareg;
 	struct	mba_device *md;
 	struct	buf *bp;
@@ -186,7 +184,7 @@ mbaintr(mba)
 		return;	/* During autoconfig */
 
 	md = sc->sc_first;
-	bp = BUFQ_FIRST(&md->md_q);
+	bp = md->md_q.b_actf;
 	/*
 	 * A data-transfer interrupt. Current operation is finished,
 	 * call that device's finish routine to see what to do next.
@@ -203,13 +201,13 @@ mbaintr(mba)
 			 * If more to transfer, start the adapter again
 			 * by calling mbastart().
 			 */
-			BUFQ_REMOVE(&md->md_q, bp);
+			md->md_q.b_actf = bp->b_actf;
 			sc->sc_first = md->md_back;
 			md->md_back = 0;
 			if (sc->sc_first == 0)
 				sc->sc_last = (void *)&sc->sc_first;
 
-			if (BUFQ_FIRST(&md->md_q) != NULL) {
+			if (md->md_q.b_actf) {
 				sc->sc_last->md_back = md;
 				sc->sc_last = md;
 			}
@@ -241,7 +239,7 @@ mbaintr(mba)
 int
 mbaprint(aux, mbaname)
 	void	*aux;
-	const char	*mbaname;
+	char	*mbaname;
 {
 	struct  mba_attach_args *ma = aux;
 
@@ -284,13 +282,73 @@ mbastart(sc)
 {
 	struct	mba_device *md = sc->sc_first;
 	volatile struct	mba_regs *mr = sc->sc_mbareg;
-	struct	buf *bp = BUFQ_FIRST(&md->md_q);
+	struct	buf *bp = md->md_q.b_actf;
 
-	disk_reallymapin(BUFQ_FIRST(&md->md_q), sc->sc_mbareg->mba_map,
-	    0, PG_V);
+	mbamapregs(sc);
 
 	sc->sc_state = SC_ACTIVE;
-	mr->mba_var = ((u_int)bp->b_data & VAX_PGOFSET);
+	mr->mba_var = ((u_int)bp->b_un.b_addr & PGOFSET);
 	mr->mba_bc = (~bp->b_bcount) + 1;
 	(*md->md_start)(md);		/* machine-dependent start */
 }
+
+/*
+ * Setup map registers for a dma transfer.
+ * This routine could be synced with the other adapter map routines!
+ */
+void
+mbamapregs(sc)
+	struct  mba_softc *sc;
+{
+	struct	mba_device *md = sc->sc_first;
+	volatile struct	mba_regs *mr = sc->sc_mbareg;
+	struct	buf *bp = md->md_q.b_actf;
+	struct	pcb *pcb;
+	pt_entry_t *pte;
+	volatile pt_entry_t *io;
+	int	pfnum, npf, o, i;
+	caddr_t	addr;
+
+	o = (int)bp->b_un.b_addr & PGOFSET;
+	npf = btoc(bp->b_bcount + o) + 1;
+	addr = bp->b_un.b_addr;
+
+	/*
+	 * Get a pointer to the pte pointing out the first virtual address.
+	 * Use different ways in kernel and user space.
+	 */
+	if ((bp->b_flags & B_PHYS) == 0) {
+		pte = kvtopte(addr);
+	} else {
+		pcb = bp->b_proc->p_vmspace->vm_pmap.pm_pcb;
+		pte = uvtopte(addr, pcb);
+	}
+
+	/*
+	 * When we are doing DMA to user space, be sure that all pages
+	 * we want to transfer to is mapped. WHY DO WE NEED THIS???
+	 * SHOULDN'T THEY ALWAYS BE MAPPED WHEN DOING THIS???
+	 */
+	for (i = 0; i < (npf - 1); i++) {
+		if ((pte + i)->pg_pfn == 0) {
+			int rv;
+			rv = vm_fault(&bp->b_proc->p_vmspace->vm_map,
+			    (unsigned)addr + i * NBPG,
+			    VM_PROT_READ|VM_PROT_WRITE, FALSE);
+			if (rv)
+				panic("MBA DMA to nonexistent page, %d", rv);
+		}
+	}
+
+	io = &mr->mba_map[0];
+	while (--npf > 0) {
+		pfnum = pte->pg_pfn;
+		if (pfnum == 0)
+			panic("mba zero entry");
+		pte++;
+		*(int *)io++ = pfnum | PG_V;
+	}
+	*(int *)io = 0;
+}
+
+

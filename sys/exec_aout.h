@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_aout.h,v 1.22 2006/10/06 20:58:17 miod Exp $	*/
+/*	$OpenBSD: exec_aout.h,v 1.5 1996/06/25 20:48:58 deraadt Exp $	*/
 /*	$NetBSD: exec_aout.h,v 1.15 1996/05/18 17:20:54 christos Exp $	*/
 
 /*
@@ -41,14 +41,14 @@
  * N_SETMAGIC/N_GET{MAGIC,MID,FLAG} macros below.
  */
 struct exec {
-	u_int32_t	a_midmag;	/* htonl(flags<<26|mid<<16|magic) */
-	u_int32_t	a_text;		/* text segment size */
-	u_int32_t	a_data;		/* initialized data size */
-	u_int32_t	a_bss;		/* uninitialized data size */
-	u_int32_t	a_syms;		/* symbol table size */
-	u_int32_t	a_entry;	/* entry point */
-	u_int32_t	a_trsize;	/* text relocation size */
-	u_int32_t	a_drsize;	/* data relocation size */
+	u_long	a_midmag;	/* htonl(flags<<26 | mid<<16 | magic) */
+	u_long	a_text;		/* text segment size */
+	u_long	a_data;		/* initialized data size */
+	u_long	a_bss;		/* uninitialized data size */
+	u_long	a_syms;		/* symbol table size */
+	u_long	a_entry;	/* entry point */
+	u_long	a_trsize;	/* text relocation size */
+	u_long	a_drsize;	/* data relocation size */
 };
 
 /* a_magic */
@@ -65,32 +65,20 @@ struct exec {
 #define	MID_SUN010	1	/* sun 68010/68020 binary */
 #define	MID_SUN020	2	/* sun 68020-only binary */
 #define	MID_PC386	100	/* 386 PC binary. (so quoth BFD) */
-#define	MID_ROMPAOS	104	/* old IBM RT */
+#define	MID_HP200	200	/* hp200 (68010) BSD binary */
 #define	MID_I386	134	/* i386 BSD binary */
 #define	MID_M68K	135	/* m68k BSD binary with 8K page sizes */
 #define	MID_M68K4K	136	/* DO NOT USE: m68k BSD binary with 4K page sizes */
 #define	MID_NS32532	137	/* ns32532 */
 #define	MID_SPARC	138	/* sparc */
 #define	MID_PMAX	139	/* pmax */
-#define	MID_VAX1K	140	/* vax 1k page size */
+#define	MID_VAX		140	/* vax */
 #define	MID_ALPHA	141	/* Alpha BSD binary */
 #define	MID_MIPS	142	/* big-endian MIPS */
 #define	MID_ARM6	143	/* ARM6 */
-#define	MID_SH3		145	/* SH3 */
-#define	MID_POWERPC	149	/* big-endian PowerPC */
-#define	MID_VAX		150	/* vax */
-#define	MID_SPARC64	151	/* LP64 sparc */
-#define MID_MIPS2	152	/* MIPS2 */
-#define	MID_M88K	153	/* m88k BSD binary */ 
-#define	MID_HPPA	154	/* hppa */
-#define	MID_AMD64	157	/* AMD64 */
-#define	MID_MIPS64	158	/* big-endian MIPS64 */
-#define	MID_HP200	200	/* hp200 (68010) BSD binary */
 #define	MID_HP300	300	/* hp300 (68020+68881) BSD binary */
 #define	MID_HPUX	0x20C	/* hp200/300 HP-UX binary */
-#define	MID_HPUX800	0x20B	/* hp800 HP-UX binary pa1.0 */
-#define	MID_HPPA11	0x210	/* hp700 HP-UX binary pa1.1 */
-#define	MID_HPPA20	0x214	/* hp700 HP-UX binary pa2.0 */
+#define	MID_HPUX800     0x20B   /* hp800 HP-UX binary */
 
 /*
  * a_flags
@@ -182,26 +170,25 @@ struct exec {
 #ifdef _KERNEL
 
 /* the "a.out" format's entry in the exec switch */
-int	exec_aout_makecmds(struct proc *, struct exec_package *);
+int	exec_aout_makecmds __P((struct proc *, struct exec_package *));
 
 /* functions which prepare various a.out executable types */
 /*
  * MI portion
  */
-int	exec_aout_prep_zmagic(struct proc *, struct exec_package *);
-int	exec_aout_prep_nmagic(struct proc *, struct exec_package *);
-int	exec_aout_prep_omagic(struct proc *, struct exec_package *);
+int	exec_aout_prep_zmagic __P((struct proc *, struct exec_package *));
+int	exec_aout_prep_nmagic __P((struct proc *, struct exec_package *));
+int	exec_aout_prep_omagic __P((struct proc *, struct exec_package *));
+int	exec_aout_setup_stack __P((struct proc *, struct exec_package *));
 
 /* For compatibility modules */
-int	exec_aout_prep_oldzmagic(struct proc *, struct exec_package *);
-int	exec_aout_prep_oldnmagic(struct proc *, struct exec_package *);
-int	exec_aout_prep_oldomagic(struct proc *, struct exec_package *);
+int	exec_aout_prep_oldzmagic __P((struct proc *, struct exec_package *));
+int	exec_aout_prep_oldnmagic __P((struct proc *, struct exec_package *));
+int	exec_aout_prep_oldomagic __P((struct proc *, struct exec_package *));
 
 /*
  * MD portion
  */
-#if !defined(cpu_exec_aout_makecmds)
-int cpu_exec_aout_makecmds(struct proc *, struct exec_package *);
-#endif
+int cpu_exec_aout_makecmds __P((struct proc *, struct exec_package *));
 
 #endif /* _KERNEL */

@@ -1,6 +1,5 @@
-/*	$OpenBSD: svr4_stream.c,v 1.19 2005/11/21 18:16:38 millert Exp $	 */
-/*	$NetBSD: svr4_stream.c,v 1.19 1996/12/22 23:00:03 fvdl Exp $	 */
-
+/*	$OpenBSD: svr4_stream.c,v 1.6 1996/08/01 00:50:54 niklas Exp $	 */
+/*	$NetBSD: svr4_stream.c,v 1.14 1996/05/13 16:57:50 christos Exp $	 */
 /*
  * Copyright (c) 1994, 1996 Christos Zoulas.  All rights reserved.
  *
@@ -29,12 +28,12 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 /*
  * Pretend that we have streams...
  * Yes, this is gross.
  *
  * ToDo: The state machine for getmsg needs re-thinking
+ *       We really need I_FDINSERT and it is going to be a pain.
  */
 
 #include <sys/param.h>
@@ -46,7 +45,7 @@
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/un.h>
@@ -71,101 +70,71 @@
 #include <compat/svr4/svr4_socket.h>
 
 /* Utils */
-static int clean_pipe(struct proc *, const char *);
-static void getparm(struct file *, struct svr4_si_sockparms *);
+static int clean_pipe __P((struct proc *, const char *));
+static void getparm __P((struct file *, struct svr4_si_sockparms *));
 
 /* Address Conversions */
-static void sockaddr_to_netaddr_in(struct svr4_strmcmd *,
-					const struct sockaddr_in *);
-static void sockaddr_to_netaddr_un(struct svr4_strmcmd *,
-					const struct sockaddr_un *);
-static void netaddr_to_sockaddr_in(struct sockaddr_in *,
-					const struct svr4_strmcmd *);
-static void netaddr_to_sockaddr_un(struct sockaddr_un *,
-					const struct svr4_strmcmd *);
+static void sockaddr_to_netaddr_in __P((struct svr4_strmcmd *,
+					const struct sockaddr_in *));
+static void sockaddr_to_netaddr_un __P((struct svr4_strmcmd *,
+					const struct sockaddr_un *));
+static void netaddr_to_sockaddr_in __P((struct sockaddr_in *,
+					const struct svr4_strmcmd *));
+static void netaddr_to_sockaddr_un __P((struct sockaddr_un *,
+					const struct svr4_strmcmd *));
 
 /* stream ioctls */
-static int i_nread(struct file *, struct proc *, register_t *, int,
-			u_long, caddr_t);
-static int i_fdinsert(struct file *, struct proc *, register_t *, int,
-			   u_long, caddr_t);
-static int i_str(struct file *, struct proc *, register_t *, int,
-			u_long, caddr_t);
-static int _i_bind_rsvd(struct file *, struct proc *, register_t *, int,
-			     u_long, caddr_t);
-static int _i_rele_rsvd(struct file *, struct proc *, register_t *, int,
-			     u_long, caddr_t);
+static int i_nread __P((struct file *, struct proc *, register_t *, int,
+			u_long, caddr_t));
+static int i_str   __P((struct file *, struct proc *, register_t *, int,
+			u_long, caddr_t));
 
 /* i_str sockmod calls */
-static int sockmod(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
-static int si_listen(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
-static int si_ogetudata(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
-static int si_sockparams(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
-static int si_shutdown(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
-static int si_getudata(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
+static int sockmod       __P((struct file *, int, struct svr4_strioctl *,
+			      struct proc *));
+static int si_listen     __P((struct file *, int, struct svr4_strioctl *,
+			      struct proc *));
+static int si_ogetudata  __P((struct file *, int, struct svr4_strioctl *,
+			      struct proc *));
+static int si_sockparams __P((struct file *, int, struct svr4_strioctl *,
+			      struct proc *));
+static int si_getudata   __P((struct file *, int, struct svr4_strioctl *,
+			      struct proc *));
 
 /* i_str timod calls */
-static int timod(struct file *, int, struct svr4_strioctl *,
-		              struct proc *);
-static int ti_getinfo(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
-static int ti_bind(struct file *, int, struct svr4_strioctl *,
-			      struct proc *);
+static int timod         __P((struct file *, int, struct svr4_strioctl *,
+		              struct proc *));
+static int ti_getinfo    __P((struct file *, int, struct svr4_strioctl *,
+			      struct proc *));
+static int ti_bind       __P((struct file *, int, struct svr4_strioctl *,
+			      struct proc *));
 
 #ifdef DEBUG_SVR4
-static void bufprint(u_char *, size_t);
-static int show_ioc(const char *, struct svr4_strioctl *);
-static int show_strbuf(struct svr4_strbuf *);
-static void show_msg(const char *, int, struct svr4_strbuf *, 
-			  struct svr4_strbuf *, int);
-
-static void
-bufprint(buf, len)
-	u_char *buf;
-	size_t len;
-{
-	size_t i;
-
-	uprintf("\n\t");
-	for (i = 0; i < len; i++) {
-		uprintf("%x ", buf[i]);
-		if (i && (i % 16) == 0) 
-			uprintf("\n\t");
-	}
-}
+static int show_ioc __P((const char *, struct svr4_strioctl *));
+static int show_strbuf __P((struct svr4_strbuf *));
+static void show_msg __P((const char *, int, struct svr4_strbuf *, 
+			  struct svr4_strbuf *, int));
+static void show_strmcmd __P((const char *, struct svr4_strmcmd *));
 
 static int
 show_ioc(str, ioc)
 	const char		*str;
 	struct svr4_strioctl	*ioc;
 {
-	u_char *ptr;
+	char *ptr = (char *) malloc(ioc->len, M_TEMP, M_WAITOK);
 	int error;
-	int len;
+	int i;
 
-	len = ioc->len;
-	if (len > 1024)
-		len = 1024;
-
-	if (len <= 0)
-		return 0;
-
-	ptr = (u_char *) malloc(len, M_TEMP, M_WAITOK);	
 	uprintf("%s cmd = %ld, timeout = %d, len = %d, buf = %p { ",
 	    str, ioc->cmd, ioc->timeout, ioc->len, ioc->buf);
 
-	if ((error = copyin(ioc->buf, ptr, len)) != 0) {
+	if ((error = copyin(ioc->buf, ptr, ioc->len)) != 0) {
 		free((char *) ptr, M_TEMP);
 		return error;
 	}
 
-	bufprint(ptr, len);
+	for (i = 0; i < ioc->len; i++)
+		uprintf("%x ", (unsigned char) ptr[i]);
 
 	uprintf("}\n");
 
@@ -179,21 +148,19 @@ show_strbuf(str)
 	struct svr4_strbuf *str;
 {
 	int error;
-	u_char *ptr = NULL;
+	int i;
+	char *ptr = NULL;
 	int maxlen = str->maxlen;
 	int len = str->len;
-
-	if (maxlen > 8192)
-		maxlen = 8192;
 
 	if (maxlen < 0)
 		maxlen = 0;
 
-	if (len >= maxlen)
+	if (len >= maxlen || len <= 0)
 		len = maxlen;
 
-	if (len > 0) {
-	    ptr = (u_char *)malloc(len, M_TEMP, M_WAITOK);
+	if (len != 0) {
+	    ptr = malloc(len, M_TEMP, M_WAITOK);
 
 	    if ((error = copyin(str->buf, ptr, len)) != 0) {
 		    free((char *) ptr, M_TEMP);
@@ -203,8 +170,8 @@ show_strbuf(str)
 
 	uprintf(", { %d, %d, %p=[ ", str->maxlen, str->len, str->buf);
 
-	if (ptr)
-		bufprint(ptr, len);
+	for (i = 0; i < len; i++)
+		uprintf("%x ", (unsigned char) ptr[i]);
 
 	uprintf("]}");
 
@@ -245,7 +212,25 @@ show_msg(str, fd, ctl, dat, flags)
 
 	uprintf(", %x);\n", flags);
 }
+
+
+static void
+show_strmcmd(str, cmd)
+	const char		*str;
+	struct svr4_strmcmd	*cmd;
+{
+	int i;
+
+	uprintf("%s cmd = %ld, len = %ld, offs = %ld { ",
+	    str, cmd->cmd, cmd->len, cmd->offs);
+
+	for (i = 0; i < sizeof(cmd->pad) / sizeof(cmd->pad[0]); i++)
+		uprintf("%lx ", cmd->pad[i]);
+
+	uprintf("}\n");
+}
 #endif /* DEBUG_SVR4 */
+
 
 /*
  * We are faced with an interesting situation. On svr4 unix sockets
@@ -274,7 +259,7 @@ clean_pipe(p, path)
 	SCARG(&la, path) = stackgap_alloc(&sg, l);
 	SCARG(&la, ub) = stackgap_alloc(&sg, sizeof(struct stat));
 
-	if ((error = copyout((char *) path, (char *) SCARG(&la, path), l)) != 0)
+	if ((error = copyout((char *) path, SCARG(&la, path), l)) != 0)
 		return error;
 
 	if ((error = sys_lstat(p, &la, &retval)) != 0)
@@ -399,7 +384,7 @@ getparm(fp, pa)
 
 	case SOCK_STREAM:
 		pa->type = SVR4_SOCK_STREAM;
-		pa->protocol = IPPROTO_IP;
+		pa->protocol = IPPROTO_TCP;
 		return;
 
 	case SOCK_RAW:
@@ -439,18 +424,11 @@ si_ogetudata(fp, fd, ioc, p)
 
 	switch (pa.family) {
 	case AF_INET:
-	    ud.tidusize = 16384;
 	    ud.addrsize = sizeof(struct sockaddr_in);
-	    if (pa.type == SVR4_SOCK_STREAM) 
-		    ud.etsdusize = 1;
-	    else
-		    ud.etsdusize = 0;
 	    break;
 
 	case AF_UNIX:
-	    ud.tidusize = 65536;
-	    ud.addrsize = 128;
-	    ud.etsdusize = 128;
+	    ud.addrsize = sizeof(struct sockaddr_un);
 	    break;
 
 	default:
@@ -460,8 +438,16 @@ si_ogetudata(fp, fd, ioc, p)
 	}
 
 	/* I have no idea what these should be! */
+	ud.tidusize = 16384;
 	ud.optsize = 128;
-	ud.tsdusize = 128;
+	if (ioc->len == sizeof(ud))
+	    ud.tsdusize = 128;
+
+	if (pa.type == SVR4_SOCK_STREAM) 
+		ud.etsdusize = 1;
+	else
+		ud.etsdusize = 0;
+
 	ud.servtype = pa.type;
 
 	/* XXX: Fixme */
@@ -495,26 +481,73 @@ si_listen(fp, fd, ioc, p)
 	int error;
 	struct svr4_strm *st = svr4_stream_get(fp);
 	register_t retval;
+#if 0
+	struct sockaddr_in sain;
+	struct sockaddr_un saun;
+	caddr_t sg;
+	void *skp, *sup;
+	int sasize;
+#endif
 	struct svr4_strmcmd lst;
 	struct sys_listen_args la;
 
 	if (st == NULL)
 		return EINVAL;
 
-	if (ioc->len > sizeof(lst))
-		return EINVAL;
-
 	if ((error = copyin(ioc->buf, &lst, ioc->len)) != 0)
 		return error;
 
-	if (lst.cmd != SVR4_TI_BIND_REQUEST) {
-		DPRINTF(("si_listen: bad request %ld\n", lst.cmd));
-		return EINVAL;
+#ifdef DEBUG_SVR4
+	show_strmcmd(">si_listen", &lst);
+#endif
+
+#if 0
+	switch (st->s_family) {
+	case AF_INET:
+		skp = &sain;
+		sasize = sizeof(sain);
+
+		if (lst.offs == 0)
+			goto reply;
+
+		netaddr_to_sockaddr_in(&sain, &lst);
+
+		DPRINTF(("SI_LISTEN: fam %d, port %d, addr %x\n",
+			 sain.sin_family, sain.sin_port,
+			 sain.sin_addr.s_addr));
+		break;
+
+	case AF_UNIX:
+		skp = &saun;
+		sasize = sizeof(saun);
+		if (lst.offs == 0)
+			goto reply;
+
+		netaddr_to_sockaddr_un(&saun, &lst);
+
+		if (saun.sun_path[0] == '\0')
+			goto reply;
+
+		DPRINTF(("SI_LISTEN: fam %d, path %s\n",
+			 saun.sun_family, saun.sun_path));
+
+		if ((error = clean_pipe(p, saun.sun_path)) != 0)
+			return error;
+		break;
+
+	default:
+		DPRINTF(("SI_LISTEN: Unsupported address family %d\n",
+			 st->s_family));
+		return ENOSYS;
 	}
 
-	/*
-	 * We are making assumptions again...
-	 */
+	sg = stackgap_init(p->p_emul);
+	sup = stackgap_alloc(&sg, sasize);
+
+	if ((error = copyout(skp, sup, sasize)) != 0)
+		return error;
+#endif
+
 	SCARG(&la, s) = fd;
 	DPRINTF(("SI_LISTEN: fileno %d backlog = %d\n", fd, 5));
 	SCARG(&la, backlog) = 5;
@@ -524,32 +557,23 @@ si_listen(fp, fd, ioc, p)
 		return error;
 	}
 
-	st->s_cmd = SVR4_TI__ACCEPT_WAIT;
+	st->s_cmd = SVR4_TI_ACCEPT_REPLY;
+
+	return 0;
+
+#if 0
+reply:
+	bzero(&lst, sizeof(lst));
 	lst.cmd = SVR4_TI_BIND_REPLY;
+	lst.len = sasize;
+	lst.offs = 0x10;	/* XXX */
 
-	switch (st->s_family) {
-	case AF_INET:
-		/* XXX: Fill the length here */
-		break;
-
-	case AF_UNIX:
-		lst.len = 140;
-		lst.pad[28] = 0x00000000;	/* magic again */
-		lst.pad[29] = 0x00000800;	/* magic again */
-		lst.pad[30] = 0x80001400;	/* magic again */
-		break;
-
-	default:
-		DPRINTF(("SI_LISTEN: Unsupported address family %d\n",
-			 st->s_family));
-		return ENOSYS;
-	}
-
-
+	ioc->len = 32;
 	if ((error = copyout(&lst, ioc->buf, ioc->len)) != 0)
 		return error;
 
 	return 0;
+#endif
 }
 
 
@@ -576,22 +600,11 @@ si_getudata(fp, fd, ioc, p)
 
 	switch (ud.sockparms.family) {
 	case AF_INET:
-	    ud.tidusize = 16384;
-	    ud.tsdusize = 16384;
 	    ud.addrsize = sizeof(struct sockaddr_in);
-	    if (ud.sockparms.type == SVR4_SOCK_STREAM) 
-		    ud.etsdusize = 1;
-	    else
-		    ud.etsdusize = 0;
-	    ud.optsize = 0;
 	    break;
 
 	case AF_UNIX:
-	    ud.tidusize = 65536;
-	    ud.tsdusize = 128;
-	    ud.addrsize = 128;
-	    ud.etsdusize = 128;
-	    ud.optsize = 128;
+	    ud.addrsize = sizeof(struct sockaddr_un);
 	    break;
 
 	default:
@@ -599,6 +612,17 @@ si_getudata(fp, fd, ioc, p)
 		     ud.sockparms.family));
 	    return ENOSYS;
 	}
+
+	/* I have no idea what these should be! */
+	ud.tidusize = 16384;
+	ud.optsize = 128;
+	ud.tsdusize = 16384;
+
+
+	if (ud.sockparms.type == SVR4_SOCK_STREAM) 
+		ud.etsdusize = 1;
+	else
+		ud.etsdusize = 0;
 
 	ud.servtype = ud.sockparms.type;
 
@@ -608,31 +632,6 @@ si_getudata(fp, fd, ioc, p)
 	return copyout(&ud, ioc->buf, sizeof(ud));
 }
 
-
-static int
-si_shutdown(fp, fd, ioc, p)
-	struct file		*fp;
-	int 			 fd;
-	struct svr4_strioctl	*ioc;
-	struct proc		*p;
-{
-	int error;
-	struct sys_shutdown_args ap;
-	register_t retval;
-
-	if (ioc->len != sizeof(SCARG(&ap, how))) {
-		DPRINTF(("SI_SHUTDOWN: Wrong size %d != %d\n",
-			 sizeof(SCARG(&ap, how)), ioc->len));
-		return EINVAL;
-	}
-
-	if ((error = copyin(ioc->buf, &SCARG(&ap, how), ioc->len)) != 0)
-		return error;
-
-	SCARG(&ap, s) = fd;
-
-	return sys_shutdown(p, &ap, &retval);
-}
 
 static int
 sockmod(fp, fd, ioc, p)
@@ -648,7 +647,7 @@ sockmod(fp, fd, ioc, p)
 
 	case SVR4_SI_SHUTDOWN:
 		DPRINTF(("SI_SHUTDOWN\n"));
-		return si_shutdown(fp, fd, ioc, p);
+		return 0;
 
 	case SVR4_SI_LISTEN:
 		DPRINTF(("SI_LISTEN\n"));
@@ -702,9 +701,6 @@ ti_getinfo(fp, fd, ioc, p)
 
 	bzero(&info, sizeof(info));
 
-	if (ioc->len > sizeof(info))
-		return EINVAL;
-
 	if ((error = copyin(ioc->buf, &info, ioc->len)) != 0)
 		return error;
 
@@ -749,21 +745,14 @@ ti_bind(fp, fd, ioc, p)
 	struct svr4_strmcmd bnd;
 	struct sys_bind_args ba;
 
-	if (st == NULL) {
-		DPRINTF(("ti_bind: bad file descriptor\n"));
-		return EINVAL;
-	}
-
-	if (ioc->len > sizeof(bnd))
+	if (st == NULL)
 		return EINVAL;
 
 	if ((error = copyin(ioc->buf, &bnd, ioc->len)) != 0)
 		return error;
 
-	if (bnd.cmd != SVR4_TI_BIND_REQUEST) {
-		DPRINTF(("ti_bind: bad request %ld\n", bnd.cmd));
+	if (bnd.cmd != SVR4_TI_BIND_REQUEST)
 		return EINVAL;
-	}
 
 	switch (st->s_family) {
 	case AF_INET:
@@ -796,8 +785,6 @@ ti_bind(fp, fd, ioc, p)
 
 		if ((error = clean_pipe(p, saun.sun_path)) != 0)
 			return error;
-
-		bnd.pad[28] = 0x00001000;	/* magic again */
 		break;
 
 	default:
@@ -814,7 +801,7 @@ ti_bind(fp, fd, ioc, p)
 
 	SCARG(&ba, s) = fd;
 	DPRINTF(("TI_BIND: fileno %d\n", fd));
-	SCARG(&ba, name) = (void *)sup;
+	SCARG(&ba, name) = (caddr_t) sup;
 	SCARG(&ba, namelen) = sasize;
 
 	if ((error = sys_bind(p, &ba, &retval)) != 0) {
@@ -825,7 +812,7 @@ ti_bind(fp, fd, ioc, p)
 reply:
 	if (sup == NULL) {
 		bzero(&bnd, sizeof(bnd));
-		bnd.len = sasize + 4;
+		bnd.len = sasize;
 		bnd.offs = 0x10;	/* XXX */
 	}
 
@@ -885,7 +872,7 @@ svr4_stream_ti_ioctl(fp, p, retval, fd, cmd, dat)
 	struct sockaddr_in sain;
 	struct sockaddr_un saun;
 	struct svr4_strmcmd sc;
-	socklen_t sasize, samax;
+	int sasize;
 	caddr_t sg;
 	int *lenp;
 
@@ -894,15 +881,20 @@ svr4_stream_ti_ioctl(fp, p, retval, fd, cmd, dat)
 
 	sc.offs = 0x10;
 	
+	if ((error = copyin(sub, &skb, sizeof(skb))) != 0) {
+		DPRINTF(("ti_ioctl: error copying in strbuf\n"));
+		return error;
+	}
+
 	switch (st->s_family) {
 	case AF_INET:
 		skp = &sain;
-		samax = sizeof(sain);
+		sasize = sizeof(sain);
 		break;
 
 	case AF_UNIX:
 		skp = &saun;
-		samax = sizeof(saun);
+		sasize = sizeof(saun);
 		break;
 
 	default:
@@ -912,10 +904,10 @@ svr4_stream_ti_ioctl(fp, p, retval, fd, cmd, dat)
 	}
 
 	sg = stackgap_init(p->p_emul);
-	sup = stackgap_alloc(&sg, samax);
+	sup = stackgap_alloc(&sg, sasize);
 	lenp = stackgap_alloc(&sg, sizeof(*lenp));
 
-	if ((error = copyout(&samax, lenp, sizeof(*lenp))) != 0) {
+	if ((error = copyout(&sasize, lenp, sizeof(*lenp))) != 0) {
 		DPRINTF(("ti_ioctl: error copying out lenp\n"));
 		return error;
 	}
@@ -961,7 +953,7 @@ svr4_stream_ti_ioctl(fp, p, retval, fd, cmd, dat)
 		return ENOSYS;
 	}
 
-	if ((error = copyin(sup, skp, samax)) != 0) {
+	if ((error = copyin(sup, skp, sasize)) != 0) {
 		DPRINTF(("ti_ioctl: error copying in socket data\n"));
 		return error;
 	}
@@ -971,31 +963,20 @@ svr4_stream_ti_ioctl(fp, p, retval, fd, cmd, dat)
 		return error;
 	}
 
-	if (sasize < 0 || sasize > samax) {
-		DPRINTF(("ti_ioctl: invalid socklen on stack\n"));
-		error = EINVAL;
-		return error;
-	}
-
-	if ((error = copyin(sub, &skb, sizeof(skb))) != 0) {
-		DPRINTF(("ti_ioctl: error copying in strbuf\n"));
-		return error;
-	}
-
 	switch (st->s_family) {
 	case AF_INET:
 		sockaddr_to_netaddr_in(&sc, &sain);
-		skb.len = sasize;
 		break;
 
 	case AF_UNIX:
 		sockaddr_to_netaddr_un(&sc, &saun);
-		skb.len = sasize + 4;
 		break;
 
 	default:
 		return ENOSYS;
 	}
+
+	skb.len = sasize;
 
 	if ((error = copyout(SVR4_ADDROF(&sc), skb.buf, sasize)) != 0) {
 		DPRINTF(("ti_ioctl: error copying out socket data\n"));
@@ -1009,6 +990,9 @@ svr4_stream_ti_ioctl(fp, p, retval, fd, cmd, dat)
 
 	return error;
 }
+
+
+
 
 static int
 i_nread(fp, p, retval, fd, cmd, dat)
@@ -1041,111 +1025,6 @@ i_nread(fp, p, retval, fd, cmd, dat)
 	return copyout(&nread, dat, sizeof(nread));
 }
 
-static int
-i_fdinsert(fp, p, retval, fd, cmd, dat)
-	struct file *fp;
-	struct proc *p;
-	register_t *retval;
-	int fd;
-	u_long cmd;
-	caddr_t dat;
-{
-	/*
-	 * Major hack again here. We assume that we are using this to
-	 * implement accept(2). If that is the case, we have already
-	 * called accept, and we have stored the file descriptor in
-	 * afd. We find the file descriptor that the code wants to use
-	 * in fd insert, and then we dup2() our accepted file descriptor
-	 * to it.
-	 */
-	int error;
-	struct svr4_strm *st = svr4_stream_get(fp);
-	struct svr4_strfdinsert fdi;
-	struct sys_dup2_args d2p;
-	struct sys_close_args clp;
-
-	if (st == NULL) {
-		DPRINTF(("fdinsert: bad file type\n"));
-		return EINVAL;
-	}
-
-	if (st->s_afd == -1) {
-		DPRINTF(("fdinsert: accept fd not found\n"));
-		return ENOENT;
-	}
-
-	if ((error = copyin(dat, &fdi, sizeof(fdi))) != 0) {
-		DPRINTF(("fdinsert: copyin failed %d\n", error));
-		return error;
-	}
-
-	SCARG(&d2p, from) = st->s_afd;
-	SCARG(&d2p, to) = fdi.fd;
-
-	if ((error = sys_dup2(p, &d2p, retval)) != 0) {
-		DPRINTF(("fdinsert: dup2(%d, %d) failed %d\n", 
-		    st->s_afd, fdi.fd, error));
-		return error;
-	}
-
-	SCARG(&clp, fd) = st->s_afd;
-
-	if ((error = sys_close(p, &clp, retval)) != 0) {
-		DPRINTF(("fdinsert: close(%d) failed %d\n", 
-		    st->s_afd, error));
-		return error;
-	}
-
-	st->s_afd = -1;
-
-	*retval = 0;
-	return 0;
-}
-
-
-static int
-_i_bind_rsvd(fp, p, retval, fd, cmd, dat)
-	struct file *fp;
-	struct proc *p;
-	register_t *retval;
-	int fd;
-	u_long cmd;
-	caddr_t dat;
-{
-	struct sys_mknod_args ap;
-
-	/*
-	 * This is a supposed to be a kernel and library only ioctl.
-	 * It gets called before ti_bind, when we have a unix 
-	 * socket, to physically create the socket transport and
-	 * ``reserve'' it. I don't know how this get reserved inside
-	 * the kernel, but we are going to create it nevertheless.
-	 */
-	SCARG(&ap, path) = dat;
-	SCARG(&ap, mode) = S_IFIFO;
-
-	return sys_mkfifo(p, &ap, retval);
-}
-
-static int
-_i_rele_rsvd(fp, p, retval, fd, cmd, dat)
-	struct file *fp;
-	struct proc *p;
-	register_t *retval;
-	int fd;
-	u_long cmd;
-	caddr_t dat;
-{
-	struct sys_unlink_args ap;
-
-	/*
-	 * This is a supposed to be a kernel and library only ioctl.
-	 * I guess it is supposed to release the socket.
-	 */
-	SCARG(&ap, path) = dat;
-
-	return sys_unlink(p, &ap, retval);
-}
 
 static int
 i_str(fp, p, retval, fd, cmd, dat)
@@ -1241,45 +1120,7 @@ svr4_stream_ioctl(fp, p, retval, fd, cmd, dat)
 
 	case SVR4_I_SETSIG:
 		DPRINTF(("I_SETSIG\n"));
-		/* 
-		 * This is the best we can do for now; we cannot generate
-		 * signals only for specific events so the signal mask gets
-		 * ignored.
-		 *
-		 * We alse have to fix the O_ASYNC fcntl bit, so the
-		 * process will get SIGPOLLs. */
-		{
-			struct sys_fcntl_args fa;
-			int error;
-			register_t oflags, flags;
-
-			/* get old status flags */
-			SCARG(&fa, fd) = fd;
-			SCARG(&fa, cmd) = F_GETFL;
-			if ((error = sys_fcntl(p, &fa, &oflags)) != 0)
-				return error;
-
-			/* update the flags */
-			if ((long) dat != 0)
-				flags = oflags | O_ASYNC;
-			else
-				flags = oflags & ~O_ASYNC;
-
-			/* set the new flags, if changed */
-			if (flags != oflags) {
-				SCARG(&fa, cmd) = F_SETFL;
-				SCARG(&fa, arg) = (void *) flags;
-				if ((error = sys_fcntl(p, &fa, &flags)) != 0)
-					return error;
-			}
-
-			/* set up SIGIO receiver if needed */
-			if ((long) dat != 0) {
-				SCARG(&fa, cmd) = F_SETOWN;
-				SCARG(&fa, arg) = (void *) p->p_pid;
-				return sys_fcntl(p, &fa, retval);
-			}
-		}
+		return 0;
 
 	case SVR4_I_GETSIG:
 		DPRINTF(("I_GETSIG\n"));
@@ -1312,7 +1153,7 @@ svr4_stream_ioctl(fp, p, retval, fd, cmd, dat)
 
 	case SVR4_I_FDINSERT:
 		DPRINTF(("I_FDINSERT\n"));
-		return i_fdinsert(fp, p, retval, fd, cmd, dat);
+		return 0;
 
 	case SVR4_I_SENDFD:
 		DPRINTF(("I_SENDFD\n"));
@@ -1386,14 +1227,6 @@ svr4_stream_ioctl(fp, p, retval, fd, cmd, dat)
 		DPRINTF(("I_CANPUT\n"));
 		return 0;
 
-	case SVR4__I_BIND_RSVD:
-		DPRINTF(("_I_BIND_RSVD\n"));
-		return _i_bind_rsvd(fp, p, retval, fd, cmd, dat);
-
-	case SVR4__I_RELE_RSVD:
-		DPRINTF(("_I_RELE_RSVD\n"));
-		return _i_rele_rsvd(fp, p, retval, fd, cmd, dat);
-
 	default:
 		DPRINTF(("unimpl cmd = %lx\n", cmd));
 		break;
@@ -1424,25 +1257,29 @@ svr4_sys_putmsg(p, v, retval)
 	int error;
 	caddr_t sg;
 
+	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
+		return EBADF;
+
 #ifdef DEBUG_SVR4
 	show_msg(">putmsg", SCARG(uap, fd), SCARG(uap, ctl),
 		 SCARG(uap, dat), SCARG(uap, flags));
 #endif /* DEBUG_SVR4 */
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
 		return EBADF;
-	FREF(fp);
 
 	if (SCARG(uap, ctl) != NULL) {
 		if ((error = copyin(SCARG(uap, ctl), &ctl, sizeof(ctl))) != 0)
-			goto out;
+			return error;
 	}
 	else
 		ctl.len = -1;
 
 	if (SCARG(uap, dat) != NULL) {
 	    	if ((error = copyin(SCARG(uap, dat), &dat, sizeof(dat))) != 0)
-			goto out;
+			return error;
 	}
 	else
 		dat.len = -1;
@@ -1452,26 +1289,23 @@ svr4_sys_putmsg(p, v, retval)
 	 */
 	if ((st = svr4_stream_get(fp)) == NULL) {
 		DPRINTF(("putmsg: bad file type\n"));
-		error = EINVAL;
-		goto out;
+		return EINVAL;
 	}
 
 	if (ctl.len > sizeof(sc)) {
 		DPRINTF(("putmsg: Bad control size %d != %d\n", ctl.len,
 			 sizeof(struct svr4_strmcmd)));
-		error = EINVAL;
-		goto out;
+		return EINVAL;
 	}
 
 	if ((error = copyin(ctl.buf, &sc, ctl.len)) != 0)
-		goto out;
+		return error;
 
 	switch (st->s_family) {
 	case AF_INET:
 		if (sc.len != sizeof(sain)) {
 			DPRINTF(("putmsg: Invalid inet length %ld\n", sc.len));
-			error = ENOSYS;
-			goto out;
+			return ENOSYS;
 		}
 		netaddr_to_sockaddr_in(&sain, &sc);
 		skp = &sain;
@@ -1480,22 +1314,12 @@ svr4_sys_putmsg(p, v, retval)
 		break;
 
 	case AF_UNIX:
-		if (ctl.len == 8) {
-			/* We are doing an accept; succeed */
-			DPRINTF(("putmsg: Do nothing\n"));
-			*retval = 0;
-			error = 0;
-			goto out;
-		} else {
-			/* Maybe we've been given a device/inode pair */
+		{
+			/* We've been given a device/inode pair */
 			dev_t *dev = SVR4_ADDROF(&sc);
 			ino_t *ino = (ino_t *) &dev[1];
-			skp = svr4_find_socket(p, fp, *dev, *ino);
-			if (skp == NULL) {
-				skp = &saun;
-				/* I guess we have it by name */
-				netaddr_to_sockaddr_un(skp, &sc);
-			}
+			if ((skp = svr4_find_socket(p, fp, *dev, *ino)) == NULL)
+				return ENOENT;
 			sasize = sizeof(saun);
 		}
 		break;
@@ -1503,33 +1327,30 @@ svr4_sys_putmsg(p, v, retval)
 	default:
 		DPRINTF(("putmsg: Unsupported address family %d\n",
 			 st->s_family));
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 	}
 
 	sg = stackgap_init(p->p_emul);
 	sup = stackgap_alloc(&sg, sasize);
 
 	if ((error = copyout(skp, sup, sasize)) != 0)
-		goto out;
+		return error;
 
 	switch (st->s_cmd = sc.cmd) {
 	case SVR4_TI_CONNECT_REQUEST:	/* connect 	*/
 		{
 			struct sys_connect_args co;
 
-			SCARG(&co, s) = SCARG(uap, fd);
-			SCARG(&co, name) = (void *)sup;
-			SCARG(&co, namelen) = (int)sasize;
-			error = sys_connect(p, &co, retval);
-			goto out;
+			co.s = SCARG(uap, fd);
+			co.name = (caddr_t) sup;
+			co.namelen = (int) sasize;
+			return sys_connect(p, &co, retval);
 		}
 
 	case SVR4_TI_SENDTO_REQUEST:	/* sendto 	*/
 		{
 			struct msghdr msg;
 			struct iovec aiov;
-
 			msg.msg_name = (caddr_t) sup;
 			msg.msg_namelen = sasize;
 			msg.msg_iov = &aiov;
@@ -1542,18 +1363,12 @@ svr4_sys_putmsg(p, v, retval)
 				       SCARG(uap, flags), retval);
 
 			*retval = 0;
-			goto out;
+			return error;
 		}
-
 	default:
 		DPRINTF(("putmsg: Unimplemented command %lx\n", sc.cmd));
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 	}
-
-out:
-	FRELE(fp);
-	return (error);
 }
 
 
@@ -1582,6 +1397,10 @@ svr4_sys_getmsg(p, v, retval)
 	int fl;
 	caddr_t sg;
 
+	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
+		return EBADF;
+
 	bzero(&sc, sizeof(sc));
 
 #ifdef DEBUG_SVR4
@@ -1589,13 +1408,13 @@ svr4_sys_getmsg(p, v, retval)
 		 SCARG(uap, dat), 0);
 #endif /* DEBUG_SVR4 */
 			
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
 		return EBADF;
-	FREF(fp);
 
 	if (SCARG(uap, ctl) != NULL) {
 		if ((error = copyin(SCARG(uap, ctl), &ctl, sizeof(ctl))) != 0)
-			goto out;
+			return error;
 	}
 	else {
 		ctl.len = -1;
@@ -1604,7 +1423,7 @@ svr4_sys_getmsg(p, v, retval)
 
 	if (SCARG(uap, dat) != NULL) {
 	    	if ((error = copyin(SCARG(uap, dat), &dat, sizeof(dat))) != 0)
-			goto out;
+			return error;
 	}
 	else {
 		dat.len = -1;
@@ -1616,14 +1435,12 @@ svr4_sys_getmsg(p, v, retval)
 	 */
 	if ((st = svr4_stream_get(fp)) == NULL) {
 		DPRINTF(("getmsg: bad file type\n"));
-		error = EINVAL;
-		goto out;
+		return EINVAL;
 	}
 
 	if (ctl.maxlen == -1 || dat.maxlen == -1) {
 		DPRINTF(("getmsg: Cannot handle -1 maxlen (yet)\n"));
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 	}
 
 	switch (st->s_family) {
@@ -1640,8 +1457,7 @@ svr4_sys_getmsg(p, v, retval)
 	default:
 		DPRINTF(("getmsg: Unsupported address family %d\n",
 			 st->s_family));
-		error = ENOSYS;
-		goto out;
+		return ENOSYS;
 	}
 
 	sg = stackgap_init(p->p_emul);
@@ -1650,11 +1466,10 @@ svr4_sys_getmsg(p, v, retval)
 
 	fl = sasize;
 	if ((error = copyout(&fl, flen, sizeof(fl))) != 0)
-		goto out;
+		return error;
 
 	switch (st->s_cmd) {
 	case SVR4_TI_CONNECT_REQUEST:
-		DPRINTF(("getmsg: TI_CONNECT_REQUEST\n"));
 		/*
 		 * We do the connect in one step, so the putmsg should
 		 * have gotten the error.
@@ -1665,91 +1480,65 @@ svr4_sys_getmsg(p, v, retval)
 		ctl.len = 8;
 		dat.len = -1;
 		fl = 1;
-		st->s_cmd = sc.cmd;
 		break;
 
 	case SVR4_TI_OK_REPLY:
-		DPRINTF(("getmsg: TI_OK_REPLY\n"));
-
 		/*
 		 * We are immediately after a connect reply, so we send
-		 * a connect verification.
+		 * an connect verification.
 		 */
 		SCARG(&ga, fdes) = SCARG(uap, fd);
-		SCARG(&ga, asa) = (void *)sup;
+		SCARG(&ga, asa) = (caddr_t) sup;
 		SCARG(&ga, alen) = flen;
 		
 		if ((error = sys_getpeername(p, &ga, retval)) != 0) {
 			DPRINTF(("getmsg: getpeername failed %d\n", error));
-			goto out;
+			return error;
 		}
 
 		if ((error = copyin(sup, skp, sasize)) != 0)
-			goto out;
+			return error;
 		
 		sc.cmd = SVR4_TI_CONNECT_REPLY;
-		sc.pad[0] = 0x4;
+		sc.len = sasize;
 		sc.offs = 0x18;
+		sc.pad[0] = 0x4;
 		sc.pad[1] = 0x14;
 		sc.pad[2] = 0x04000402;
 
 		switch (st->s_family) {
 		case AF_INET:
-			sc.len = sasize;
 			sockaddr_to_netaddr_in(&sc, &sain);
 			break;
 
 		case AF_UNIX:
-			sc.len = sasize + 4;
 			sockaddr_to_netaddr_un(&sc, &saun);
 			break;
 
 		default:
-			error = ENOSYS;
-			goto out;
+			return ENOSYS;
 		}
 
 		ctl.len = 40;
 		dat.len = -1;
 		fl = 0;
-		st->s_cmd = sc.cmd;
 		break;
 
-	case SVR4_TI__ACCEPT_OK:
-		DPRINTF(("getmsg: TI__ACCEPT_OK\n"));
-		/*
-		 * We do the connect in one step, so the putmsg should
-		 * have gotten the error.
-		 */
-		sc.cmd = SVR4_TI_OK_REPLY;
-		sc.len = 1;
-
-		ctl.len = 8;
-		dat.len = -1;
-		fl = 1;
-		st->s_cmd = SVR4_TI__ACCEPT_WAIT;
-		break;
-
-	case SVR4_TI__ACCEPT_WAIT:
-		DPRINTF(("getmsg: TI__ACCEPT_WAIT\n"));
+	case SVR4_TI_ACCEPT_REPLY:
 		/*
 		 * We are after a listen, so we try to accept...
 		 */
 		SCARG(&aa, s) = SCARG(uap, fd);
-		SCARG(&aa, name) = (void *)sup;
+		SCARG(&aa, name) = (caddr_t) sup;
 		SCARG(&aa, anamelen) = flen;
 		
 		if ((error = sys_accept(p, &aa, retval)) != 0) {
-			DPRINTF(("getmsg: accept failed %d\n", error));
-			goto out;
+			DPRINTF(("getmsg: getpeername failed %d\n", error));
+			return error;
 		}
 
-		st->s_afd = *retval;
-
-		DPRINTF(("getmsg: Accept fd = %d\n", st->s_afd));
-
 		if ((error = copyin(sup, skp, sasize)) != 0)
-			goto out;
+			return error;
 		
 		sc.cmd = SVR4_TI_ACCEPT_REPLY;
 		sc.len = sasize;
@@ -1760,41 +1549,28 @@ svr4_sys_getmsg(p, v, retval)
 
 		switch (st->s_family) {
 		case AF_INET:
-			sc.pad[1] = 0x28;
 			sockaddr_to_netaddr_in(&sc, &sain);
-			ctl.len = 40;
-			sc.len = sasize;
 			break;
 
 		case AF_UNIX:
-			sc.pad[1] = 0x00010000;
-			sc.pad[2] = 0xf6bcdaa0;	/* I don't know what that is */
-			sc.pad[3] = 0x00010000;
-			ctl.len = 134;
-			sc.len = sasize + 4;
+			sockaddr_to_netaddr_un(&sc, &saun);
 			break;
 
 		default:
-			error = ENOSYS;
-			goto out;
+			return ENOSYS;
 		}
 
 		ctl.len = 40;
 		dat.len = -1;
 		fl = 0;
-		st->s_cmd = SVR4_TI__ACCEPT_OK;
 		break;
 
 	case SVR4_TI_SENDTO_REQUEST:
-		DPRINTF(("getmsg: TI_SENDTO_REQUEST\n"));
 		if (ctl.maxlen > 36 && ctl.len < 36)
-			ctl.len = 36;
-
-		if (ctl.len > sizeof(sc))
-			ctl.len = sizeof(sc);
+		    ctl.len = 36;
 
 		if ((error = copyin(ctl.buf, &sc, ctl.len)) != 0)
-			goto out;
+			return error;
 
 		switch (st->s_family) {
 		case AF_INET:
@@ -1806,8 +1582,7 @@ svr4_sys_getmsg(p, v, retval)
 			break;
 
 		default:
-			error = ENOSYS;
-			goto out;
+			return ENOSYS;
 		}
 
 		msg.msg_name = (caddr_t) sup;
@@ -1823,59 +1598,55 @@ svr4_sys_getmsg(p, v, retval)
 
 		if (error) {
 			DPRINTF(("getmsg: recvit failed %d\n", error));
-			goto out;
+			return error;
 		}
 
 		if ((error = copyin(msg.msg_name, skp, sasize)) != 0)
-			goto out;
+			return error;
 
 		sc.cmd = SVR4_TI_RECVFROM_REPLY;
+		sc.len = sasize;
 
 		switch (st->s_family) {
 		case AF_INET:
-			sc.len = sasize;
 			sockaddr_to_netaddr_in(&sc, &sain);
 			break;
 
 		case AF_UNIX:
-			sc.len = sasize + 4;
 			sockaddr_to_netaddr_un(&sc, &saun);
 			break;
 
 		default:
-			error = ENOSYS;
-			goto out;
+			return ENOSYS;
 		}
 
 		dat.len = *retval;
 		fl = 0;
-		st->s_cmd = sc.cmd;
 		break;
 
 	default:
-		st->s_cmd = sc.cmd;
 		DPRINTF(("getmsg: Unknown state %x\n", st->s_cmd));
-		error = EINVAL;
-		goto out;
+		return EINVAL;
 	}
 
+	st->s_cmd = sc.cmd;
 	if (SCARG(uap, ctl)) {
 		if (ctl.len != -1)
 			if ((error = copyout(&sc, ctl.buf, ctl.len)) != 0)
-				goto out;
+				return error;
 
 		if ((error = copyout(&ctl, SCARG(uap, ctl), sizeof(ctl))) != 0)
-			goto out;
+			return error;
 	}
 
 	if (SCARG(uap, dat)) {
 		if ((error = copyout(&dat, SCARG(uap, dat), sizeof(dat))) != 0)
-			goto out;
+			return error;
 	}
 
 	if (SCARG(uap, flags)) { /* XXX: Need translation */
 		if ((error = copyout(&fl, SCARG(uap, flags), sizeof(fl))) != 0)
-			goto out;
+			return error;
 	}
 
 	*retval = 0;
@@ -1884,7 +1655,5 @@ svr4_sys_getmsg(p, v, retval)
 	show_msg("<getmsg", SCARG(uap, fd), SCARG(uap, ctl),
 		 SCARG(uap, dat), fl);
 #endif /* DEBUG_SVR4 */
-out:
-	FRELE(fp);
 	return error;
 }

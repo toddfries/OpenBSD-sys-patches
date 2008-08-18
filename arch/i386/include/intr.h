@@ -1,4 +1,3 @@
-/*	$OpenBSD: intr.h,v 1.35 2008/05/07 20:42:02 kettenis Exp $	*/
 /*	$NetBSD: intr.h,v 1.5 1996/05/13 06:11:28 mycroft Exp $	*/
 
 /*
@@ -33,182 +32,129 @@
 #ifndef _I386_INTR_H_
 #define _I386_INTR_H_
 
-#include <machine/intrdefs.h>
+/* Interrupt priority `levels'; not mutually exclusive. */
+#define	IPL_BIO		0	/* block I/O */
+#define	IPL_NET		1	/* network */
+#define	IPL_TTY		2	/* terminal */
+#define	IPL_CLOCK	3	/* clock */
+#define	IPL_IMP		4	/* memory allocation */
+#define	IPL_NONE	5	/* nothing */
+#define	IPL_HIGH	6	/* everything */
+
+/* Interrupt sharing types. */
+#define	IST_NONE	0	/* none */
+#define	IST_PULSE	1	/* pulsed */
+#define	IST_EDGE	2	/* edge-triggered */
+#define	IST_LEVEL	3	/* level-triggered */
+
+/* Soft interrupt masks. */
+#define	SIR_CLOCK	31
+#define	SIR_CLOCKMASK	((1 << SIR_CLOCK))
+#define	SIR_NET		30
+#define	SIR_NETMASK	((1 << SIR_NET) | SIR_CLOCKMASK)
+#define	SIR_TTY		29
+#define	SIR_TTYMASK	((1 << SIR_TTY) | SIR_CLOCKMASK)
+#define	SIR_ALLMASK	(SIR_CLOCKMASK | SIR_NETMASK | SIR_TTYMASK)
 
 #ifndef _LOCORE
 
-#ifdef MULTIPROCESSOR
-#include <machine/i82489reg.h>
-#include <machine/i82489var.h>
-#include <machine/cpu.h>
-#endif
+volatile int cpl, ipending, astpending;
+int imask[7];
 
-extern volatile u_int32_t lapic_tpr;	/* Current interrupt priority level. */
+extern void Xspllower __P((void));
 
-extern int imask[];	/* Bitmasks telling what interrupts are blocked. */
-extern int iunmask[];	/* Bitmasks telling what interrupts are accepted. */
-
-#define IMASK(level) imask[IPL(level)]
-#define IUNMASK(level) iunmask[IPL(level)]
-
-extern void Xspllower(void);
-
-extern int splraise(int);
-extern int spllower(int);
-extern void splx(int);
-extern void softintr(int);
+static __inline int splraise __P((int));
+static __inline int spllower __P((int));
+static __inline void splx __P((int));
+static __inline void softintr __P((int));
 
 /*
- * compiler barrier: prevent reordering of instructions.
- * XXX something similar will move to <sys/cdefs.h>
- * or thereabouts.
- * This prevents the compiler from reordering code around
- * this "instruction", acting as a sequence point for code generation.
+ * Add a mask to cpl, and return the old value of cpl.
  */
+static __inline int
+splraise(ncpl)
+	register int ncpl;
+{
+	register int ocpl = cpl;
 
-#define	__splbarrier() __asm __volatile("":::"memory")
-
-/* SPL asserts */
-#ifdef DIAGNOSTIC
-/*
- * Although this function is implemented in MI code, it must be in this MD
- * header because we don't want this header to include MI includes.
- */
-void splassert_fail(int, int, const char *);
-extern int splassert_ctl;
-void splassert_check(int, const char *);
-#define splassert(__wantipl) do {			\
-	if (splassert_ctl > 0) {			\
-		splassert_check(__wantipl, __func__);	\
-	}						\
-} while (0)
-#else
-#define splassert(wantipl) do { /* nada */ } while (0)
-#endif
+	cpl = ocpl | ncpl;
+	return (ocpl);
+}
 
 /*
- * Define the splraise and splx code in macros, so that the code can be
- * reused in a profiling build in a way that does not cause recursion.
+ * Restore a value to cpl (unmasking interrupts).  If any unmasked
+ * interrupts are pending, call Xspllower() to process them.
  */
-#define _SPLRAISE(ocpl, ncpl) 		\
-	ocpl = lapic_tpr;		\
-	if (ncpl > ocpl)		\
-		lapic_tpr = ncpl
+static __inline void
+splx(ncpl)
+	register int ncpl;
+{
 
+	cpl = ncpl;
+	if (ipending & ~ncpl)
+		Xspllower();
+}
 
-#define _SPLX(ncpl) 			\
-	lapic_tpr = ncpl;		\
-	if (curcpu()->ci_ipending & IUNMASK(ncpl))	\
-		Xspllower()
+/*
+ * Same as splx(), but we return the old value of spl, for the
+ * benefit of some splsoftclock() callers.
+ */
+static __inline int
+spllower(ncpl)
+	register int ncpl;
+{
+	register int ocpl = cpl;
+
+	cpl = ncpl;
+	if (ipending & ~ncpl)
+		Xspllower();
+	return (ocpl);
+}
 
 /*
  * Hardware interrupt masks
  */
-#define	splbio()	splraise(IPL_BIO)
-#define	splnet()	splraise(IPL_NET)
-#define	spltty()	splraise(IPL_TTY)
-#define	splaudio()	splraise(IPL_AUDIO)
-#define	splclock()	splraise(IPL_CLOCK)
+#define	splbio()	splraise(imask[IPL_BIO])
+#define	splnet()	splraise(imask[IPL_NET])
+#define	spltty()	splraise(imask[IPL_TTY])
+#define	splclock()	splraise(imask[IPL_CLOCK])
+#define	splimp()	splraise(imask[IPL_IMP])
 #define	splstatclock()	splhigh()
-#define splipi()	splraise(IPL_IPI)
 
 /*
  * Software interrupt masks
+ *
+ * NOTE: splsoftclock() is used by hardclock() to lower the priority from
+ * clock to softclock before it calls softclock().
  */
-#define	splsoftclock()		splraise(IPL_SOFTCLOCK)
-#define	splsoftnet()		splraise(IPL_SOFTNET)
-#define	splsofttty()		splraise(IPL_SOFTTTY)
+#define	splsoftclock()	spllower(SIR_CLOCKMASK)
+#define	splsoftnet()	splraise(SIR_NETMASK)
+#define	splsofttty()	splraise(SIR_TTYMASK)
 
 /*
  * Miscellaneous
  */
-#define	splvm()		splraise(IPL_VM)
-#define	splhigh()	splraise(IPL_HIGH)
-#define	splsched()	splraise(IPL_SCHED)
-#define spllock() 	splhigh()
-#define	spl0()		spllower(IPL_NONE)
-
-#define	setsoftnet()	softintr(SIR_NET)
-#define	setsofttty()	softintr(SIR_TTY)
-
-struct cpu_info;
-
-#ifdef MULTIPROCESSOR
-int i386_send_ipi(struct cpu_info *, int);
-int i386_fast_ipi(struct cpu_info *, int);
-void i386_broadcast_ipi(int);
-void i386_multicast_ipi(int, int);
-void i386_ipi_handler(void);
-void i386_intlock(int);
-void i386_intunlock(int);
-void i386_softintlock(void);
-void i386_softintunlock(void);
-void i386_setperf_ipi(struct cpu_info *);
-
-extern void (*ipifunc[I386_NIPI])(struct cpu_info *);
-#endif
-
-#endif /* !_LOCORE */
+#define	splhigh()	splraise(-1)
+#define	spl0()		spllower(0)
 
 /*
- * Generic software interrupt support.
+ * Software interrupt registration
+ *
+ * We hand-code this to ensure that it's atomic.
  */
+static __inline void
+softintr(mask)
+	register int mask;
+{
 
-#define	I386_SOFTINTR_SOFTCLOCK		0
-#define	I386_SOFTINTR_SOFTNET		1
-#define	I386_SOFTINTR_SOFTTTY		2
-#define	I386_NSOFTINTR			3
+	__asm __volatile("orl %0,_ipending" : : "ir" (mask));
+}
 
-#ifndef _LOCORE
-#include <sys/queue.h>
+#define	setsoftast()	(astpending = 1)
+#define	setsoftclock()	softintr(1 << SIR_CLOCK)
+#define	setsoftnet()	softintr(1 << SIR_NET)
+#define	setsofttty()	softintr(1 << SIR_TTY)
 
-struct i386_soft_intrhand {
-	TAILQ_ENTRY(i386_soft_intrhand)
-		sih_q;
-	struct i386_soft_intr *sih_intrhead;
-	void	(*sih_fn)(void *);
-	void	*sih_arg;
-	int	sih_pending;
-};
-
-struct i386_soft_intr {
-	TAILQ_HEAD(, i386_soft_intrhand)
-		softintr_q;
-	int softintr_ssir;
-	struct simplelock softintr_slock;
-};
-
-#define	i386_softintr_lock(si, s)					\
-do {									\
-	(s) = splhigh();						\
-	simple_lock(&si->softintr_slock);				\
-} while (/*CONSTCOND*/ 0)
-
-#define	i386_softintr_unlock(si, s)					\
-do {									\
-	simple_unlock(&si->softintr_slock);				\
-	splx((s));							\
-} while (/*CONSTCOND*/ 0)
-
-void	*softintr_establish(int, void (*)(void *), void *);
-void	softintr_disestablish(void *);
-void	softintr_init(void);
-void	softintr_dispatch(int);
-
-#define	softintr_schedule(arg)						\
-do {									\
-	struct i386_soft_intrhand *__sih = (arg);			\
-	struct i386_soft_intr *__si = __sih->sih_intrhead;		\
-	int __s;							\
-									\
-	i386_softintr_lock(__si, __s);					\
-	if (__sih->sih_pending == 0) {					\
-		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
-		__sih->sih_pending = 1;					\
-		softintr(__si->softintr_ssir);				\
-	}								\
-	i386_softintr_unlock(__si, __s);					\
-} while (/*CONSTCOND*/ 0)
-#endif /* _LOCORE */
+#endif /* !_LOCORE */
 
 #endif /* !_I386_INTR_H_ */

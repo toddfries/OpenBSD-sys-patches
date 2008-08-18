@@ -1,6 +1,6 @@
-/*	$OpenBSD: fdvar.h,v 1.8 2006/08/17 01:37:41 krw Exp $	*/
+/*	$OpenBSD: fdvar.h,v 1.4 1996/08/11 23:16:36 downsj Exp $	*/
 /*
- *	$NetBSD: fdvar.h,v 1.5 1996/12/08 23:40:34 pk Exp $
+ *	$NetBSD: fdvar.h,v 1.4 1996/02/01 22:32:29 mycroft Exp $
  *
  * Copyright (c) 1995 Paul Kranenburg
  * All rights reserved.
@@ -32,7 +32,7 @@
  *
  */
 
-#define	FD_BSIZE(fd)	(128 << fd->sc_type->secsize)
+#define	FDC_BSIZE	512
 #define	FDC_MAXIOSIZE	NBPG	/* XXX should be MAXBSIZE */
 
 #define FDC_NSTATUS	10
@@ -50,8 +50,7 @@ struct fdcio {
 	/*
 	 * Interrupt state.
 	 */
-	int	fdcio_itask;
-	int	fdcio_istatus;
+	int	fdcio_istate;
 
 	/*
 	 * IO state.
@@ -61,20 +60,18 @@ struct fdcio {
 	u_char	fdcio_status[FDC_NSTATUS];	/* copy of registers */
 	int	fdcio_nstat;		/* # of valid status bytes */
 
-	struct	intrhand fdcio_ih;
+	/*
+	 * Statictics.
+	 */
+	struct	evcnt fdcio_intrcnt;
 };
 #endif /* _LOCORE */
 
-/* itask values */
-#define FDC_ITASK_NONE		0	/* No HW interrupt expected */
-#define FDC_ITASK_SENSEI	1	/* Do SENSEI on next HW interrupt */
-#define FDC_ITASK_DMA		2	/* Do Pseudo-DMA */
-#define FDC_ITASK_RESULT	3	/* Pick up command results */
-
-/* istatus values */
-#define FDC_ISTATUS_NONE	0	/* No status available */
-#define FDC_ISTATUS_SPURIOUS	1	/* Spurious HW interrupt detected */
-#define FDC_ISTATUS_ERROR	2	/* Operation completed abnormally */
-#define FDC_ISTATUS_DONE	3	/* Operation completed normally */
+/* istate values */
+#define ISTATE_IDLE		0	/* No HW interrupt expected */
+#define ISTATE_SPURIOUS		1	/* Spurious HW interrupt detected */
+#define ISTATE_SENSEI		2	/* Do SENSEI on next HW interrupt */
+#define ISTATE_DMA		3	/* Pseudo-DMA in progress */
 
 #define SUNOS_FDIOCEJECT	_IO('f', 24)
+

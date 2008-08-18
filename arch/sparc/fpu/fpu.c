@@ -1,5 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.12 2006/05/14 21:58:05 kettenis Exp $	*/
-/*	$NetBSD: fpu.c,v 1.6 1997/07/29 10:09:51 fair Exp $	*/
+/*	$NetBSD: fpu.c,v 1.3 1996/03/14 19:41:49 christos Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -22,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -86,14 +89,6 @@ static u_char fpu_codes[] = {
 	X16(FPE_FLTOPERR_TRAP)
 };
 
-static int fpu_types[] = {
-	X1(FPE_FLTRES),
-	X2(FPE_FLTDIV),
-	X4(FPE_FLTUND),
-	X8(FPE_FLTOVF),
-	X16(FPE_FLTINV)
-};
-
 /*
  * The FPU gave us an exception.  Clean up the mess.  Note that the
  * fp queue can only have FPops in it, never load/store FP registers
@@ -107,28 +102,19 @@ fpu_cleanup(p, fs)
 {
 	register int i, fsr = fs->fs_fsr, error;
 	union instr instr;
-	union sigval sv;
 	struct fpemu fe;
-
-	sv.sival_int = p->p_md.md_tf->tf_pc;  /* XXX only approximate */
 
 	switch ((fsr >> FSR_FTT_SHIFT) & FSR_FTT_MASK) {
 
 	case FSR_TT_NONE:
-#if 0
-		/* XXX I'm not sure how we get here, but ignoring the trap */
-		/* XXX seems to work in my limited tests		   */
-		/* XXX More research to be done =)			   */
-		panic("fpu_cleanup 1"); /* ??? */
-#else
-		printf("fpu_cleanup 1\n");
-#endif
+		panic("fpu_cleanup 1");	/* ??? */
 		break;
 
 	case FSR_TT_IEEE:
+		/* XXX missing trap address! */
 		if ((i = fsr & FSR_CX) == 0)
 			panic("fpu ieee trap, but no exception");
-		trapsignal(p, SIGFPE, fpu_codes[i - 1], fpu_types[i - 1], sv);
+		trapsignal(p, SIGFPE, fpu_codes[i - 1]);
 		break;		/* XXX should return, but queue remains */
 
 	case FSR_TT_UNFIN:
@@ -145,11 +131,11 @@ fpu_cleanup(p, fs)
 		log(LOG_ERR, "fpu hardware error (%s[%d])\n",
 		    p->p_comm, p->p_pid);
 		uprintf("%s[%d]: fpu hardware error\n", p->p_comm, p->p_pid);
-		trapsignal(p, SIGFPE, -1, FPE_FLTINV, sv);	/* ??? */
+		trapsignal(p, SIGFPE, -1);	/* ??? */
 		goto out;
 
 	default:
-		printf("fsr=0x%x\n", fsr);
+		printf("fsr=%x\n", fsr);
 		panic("fpu error");
 	}
 
@@ -169,12 +155,11 @@ fpu_cleanup(p, fs)
 
 		case FPE:
 			trapsignal(p, SIGFPE,
-			    fpu_codes[(fs->fs_fsr & FSR_CX) - 1],
-			    fpu_types[(fs->fs_fsr & FSR_CX) - 1], sv);
+			    fpu_codes[(fs->fs_fsr & FSR_CX) - 1]);
 			break;
 
 		case NOTFPU:
-			trapsignal(p, SIGILL, 0, ILL_COPROC, sv);
+			trapsignal(p, SIGILL, 0);	/* ??? code?  */
 			break;
 
 		default:
@@ -358,17 +343,10 @@ fpu_execute(fe, instr)
 		fp = fpu_mul(fe);
 		break;
 
-	case FTOI >> 2:
 	case FTOS >> 2:
-		rd = instr.i_opf.i_rd;
-		goto fto;
 	case FTOD >> 2:
-		rd = instr.i_opf.i_rd & (~1);
-		goto fto;
 	case FTOX >> 2:
-		rd = instr.i_opf.i_rd & (~3);
-
-fto:
+	case FTOI >> 2:
 		fpu_explode(fe, fp = &fe->fe_f1, type, rs2);
 		type = opf & 3;	/* sneaky; depends on instruction encoding */
 		break;

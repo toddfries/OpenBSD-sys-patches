@@ -1,5 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.20 2007/05/29 09:53:59 sobrado Exp $	*/
-/*	$NetBSD: iommu.c,v 1.13 1997/07/29 09:42:04 fair Exp $ */
+/*	$NetBSD: iommu.c,v 1.4 1996/05/21 07:25:07 pk Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -40,16 +39,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-
-#include <uvm/uvm.h>
-
-#include <machine/pmap.h>
+#include <vm/vm.h>
 
 #include <machine/autoconf.h>
 #include <machine/ctlreg.h>
 #include <sparc/sparc/asm.h>
 #include <sparc/sparc/vaddrs.h>
-#include <sparc/sparc/cpuvar.h>
 #include <sparc/sparc/iommureg.h>
 
 struct iommu_softc {
@@ -66,9 +61,9 @@ int	has_iocache;
 
 
 /* autoconfiguration driver */
-int	iommu_print(void *, const char *);
-void	iommu_attach(struct device *, struct device *, void *);
-int	iommu_match(struct device *, void *, void *);
+int	iommu_print __P((void *, char *));
+void	iommu_attach __P((struct device *, struct device *, void *));
+int	iommu_match __P((struct device *, void *, void *));
 
 struct cfattach iommu_ca = {
 	sizeof(struct iommu_softc), iommu_match, iommu_attach
@@ -87,7 +82,7 @@ struct cfdriver iommu_cd = {
 int
 iommu_print(args, iommu)
 	void *args;
-	const char *iommu;
+	char *iommu;
 {
 	register struct confargs *ca = args;
 
@@ -101,7 +96,7 @@ iommu_match(parent, vcf, aux)
 	struct device *parent;
 	void *vcf, *aux;
 {
-	register struct cfdata *cf = vcf;
+	struct cfdata *cf = vcf;
 	register struct confargs *ca = aux;
 	register struct romaux *ra = &ca->ca_ra;
 
@@ -126,13 +121,12 @@ iommu_attach(parent, self, aux)
 	register int node;
 	register char *name;
 	register u_int pbase, pa;
-	register int i, mmupcrsave, s;
+	register int i, mmupcrsav, s, wierdviking = 0;
 	register iopte_t *tpte_p;
-	struct pglist mlist;
-	struct vm_page *m;
-	vaddr_t va;
-	paddr_t iopte_pa;
+	extern u_int *kernel_iopte_table;
+	extern u_int kernel_iopte_table_pa;
 
+/*XXX-GCC!*/mmupcrsav=0;
 	iommu_sc = sc;
 	/*
 	 * XXX there is only one iommu, for now -- do not know how to
@@ -157,12 +151,10 @@ iommu_attach(parent, self, aux)
 	 *     other fields for?
 	 */
 	sc->sc_reg = (struct iommureg *)
-		mapiodev(ra->ra_reg, 0, ra->ra_len);
+		mapdev(ra->ra_reg, 0, 0, ra->ra_len, ra->ra_iospace);
 #endif
 
 	sc->sc_hasiocache = node_has_property(node, "cache-coherence?");
-	if (CACHEINFO.c_enabled == 0) /* XXX - is this correct? */
-		sc->sc_hasiocache = 0;
 	has_iocache = sc->sc_hasiocache; /* Set global flag */
 
 	sc->sc_pagesize = getpropint(node, "page-size", NBPG),
@@ -175,32 +167,6 @@ iommu_attach(parent, self, aux)
 			(14 - IOMMU_BAR_IBASHFT);
 
 	/*
-	 * Allocate memory for I/O pagetables. This takes 64k of memory
-	 * since we want to have 64M of dvma space (this actually depends
-	 * on the definition of DVMA4M_BASE...we may drop it back to 32M).
-	 * The table must be aligned on a (-DVMA4M_BASE/NBPG) boundary
-	 * (i.e. 64K for 64M of dvma space).
-	 */
-	TAILQ_INIT(&mlist);
-#define DVMA_PTESIZE ((0 - DVMA4M_BASE) / 1024)
-	if (uvm_pglistalloc(DVMA_PTESIZE, 0, 0xffffffff, DVMA_PTESIZE,
-			    0, &mlist, 1, 0) ||
-	    (va = uvm_km_valloc(kernel_map, DVMA_PTESIZE)) == 0)
-		panic("iommu_attach: can't allocate memory for pagetables");
-#undef DVMA_PTESIZE
-	m = TAILQ_FIRST(&mlist);
-	iopte_pa = VM_PAGE_TO_PHYS(m);
-	sc->sc_ptes = (iopte_t *) va;
-
-	while (m) {
-		paddr_t pa = VM_PAGE_TO_PHYS(m);
-		pmap_kenter_pa(va, pa | PMAP_NC, VM_PROT_READ|VM_PROT_WRITE);
-		va += PAGE_SIZE;
-		m = TAILQ_NEXT(m, pageq);
-	}
-	pmap_update(pmap_kernel());
-
-	/*
 	 * Now we build our own copy of the IOMMU page tables. We need to
 	 * do this since we're going to change the range to give us 64M of
 	 * mappings, and thus we can move DVMA space down to 0xfd000000 to
@@ -208,6 +174,14 @@ iommu_attach(parent, self, aux)
 	 *
 	 * XXX Note that this is rather messy.
 	 */
+	sc->sc_ptes = (iopte_t *) kernel_iopte_table;
+
+	/*
+	 * Now discache the page tables so that the IOMMU sees our
+	 * changes.
+	 */
+	kvm_uncache((caddr_t)sc->sc_ptes,
+		(((0 - DVMA4M_BASE)/sc->sc_pagesize) * sizeof(iopte_t)) / NBPG);
 
 	/*
 	 * Ok. We've got to read in the original table using MMU bypass,
@@ -217,10 +191,10 @@ iommu_attach(parent, self, aux)
 	 *
 	 * XXX: PGOFSET, NBPG assume same page size as SRMMU
 	 */
-	if (cpuinfo.cpu_vers == 4 && cpuinfo.mxcc) {
-		/* set MMU AC bit */
-		sta(SRMMU_PCR, ASI_SRMMU,
-		    ((mmupcrsave = lda(SRMMU_PCR, ASI_SRMMU)) | VIKING_PCR_AC));
+	if ((getpsr() & 0x40000000) && (!(lda(SRMMU_PCR,ASI_SRMMU) & 0x800))) {
+		wierdviking = 1;
+		sta(SRMMU_PCR, ASI_SRMMU, 	/* set MMU AC bit */
+		    ((mmupcrsav = lda(SRMMU_PCR,ASI_SRMMU)) | SRMMU_PCR_AC));
 	}
 
 	for (tpte_p = &sc->sc_ptes[((0 - DVMA4M_BASE)/NBPG) - 1],
@@ -233,9 +207,8 @@ iommu_attach(parent, self, aux)
 			        (tpte_p - &sc->sc_ptes[0])*NBPG + DVMA4M_BASE);
 		*tpte_p = lda(pa, ASI_BYPASS);
 	}
-	if (cpuinfo.cpu_vers == 4 && cpuinfo.mxcc) {
-		/* restore mmu after bug-avoidance */
-		sta(SRMMU_PCR, ASI_SRMMU, mmupcrsave);
+	if (wierdviking) {	/* restore mmu after bug-avoidance */
+		sta(SRMMU_PCR, ASI_SRMMU, mmupcrsav);
 	}
 
 	/*
@@ -247,19 +220,19 @@ iommu_attach(parent, self, aux)
 	/* calculate log2(sc->sc_range/16MB) */
 	i = ffs(sc->sc_range/(1 << 24)) - 1;
 	if ((1 << i) != (sc->sc_range/(1 << 24)))
-		panic("bad iommu range: %d",i);
+		panic("bad iommu range: %d\n",i);
 
 	s = splhigh();
 	IOMMU_FLUSHALL(sc);
 
 	sc->sc_reg->io_cr = (sc->sc_reg->io_cr & ~IOMMU_CTL_RANGE) |
 			  (i << IOMMU_CTL_RANGESHFT) | IOMMU_CTL_ME;
-	sc->sc_reg->io_bar = (iopte_pa >> 4) & IOMMU_BAR_IBA;
+	sc->sc_reg->io_bar = (kernel_iopte_table_pa >> 4) & IOMMU_BAR_IBA;
 
 	IOMMU_FLUSHALL(sc);
 	splx(s);
 
-	printf(": version 0x%x/0x%x, page-size %d, range %dMB\n",
+	printf(": version %x/%x, page-size %d, range %dMB\n",
 		(sc->sc_reg->io_cr & IOMMU_CTL_VER) >> 24,
 		(sc->sc_reg->io_cr & IOMMU_CTL_IMPL) >> 28,
 		sc->sc_pagesize,
@@ -272,7 +245,7 @@ iommu_attach(parent, self, aux)
 		oca.ca_ra.ra_bp = NULL;
 
 	/*
-	 * Loop through ROM children (expect SBus among them).
+	 * Loop through ROM children (expect Sbus among them).
 	 */
 	for (node = firstchild(node); node; node = nextsibling(node)) {
 		name = getpropstring(node, "name");
@@ -304,7 +277,7 @@ iommu_enter(va, pa)
 }
 
 /*
- * iommu_remove: clears mappings created by iommu_enter
+ * iommu_clear: clears mappings created by iommu_enter
  */
 void
 iommu_remove(va, len)
@@ -321,13 +294,59 @@ iommu_remove(va, len)
 #ifdef notyet
 #ifdef DEBUG
 		if ((sc->sc_ptes[atop(va - sc->sc_dvmabase)] & IOPTE_V) == 0)
-			panic("iommu_remove: clearing invalid pte at va 0x%x",
+			panic("iommu_clear: clearing invalid pte at va 0x%x",
 				va);
 #endif
 #endif
 		sc->sc_ptes[atop(va - sc->sc_dvmabase)] = 0;
+		sta(sc->sc_ptes + atop(va - sc->sc_dvmabase), ASI_BYPASS, 0);
 		IOMMU_FLUSHPAGE(sc, va);
 		len -= sc->sc_pagesize;
 		va += sc->sc_pagesize;
 	}
 }
+
+#if 0	/* These registers aren't there??? */
+void
+iommu_error()
+{
+	struct iommu_softc *sc = X;
+	struct iommureg *iop = sc->sc_reg;
+
+	printf("iommu: afsr %x, afar %x\n", iop->io_afsr, iop->io_afar);
+	printf("iommu: mfsr %x, mfar %x\n", iop->io_mfsr, iop->io_mfar);
+}
+int
+iommu_alloc(va, len)
+	u_int va, len;
+{
+	struct iommu_softc *sc = X;
+	int off, tva, pa, iovaddr, pte;
+
+	off = (int)va & PGOFSET;
+	len = round_page(len + off);
+	va -= off;
+
+if ((int)sc->sc_dvmacur + len > 0)
+	sc->sc_dvmacur = sc->sc_dvmabase;
+
+	iovaddr = tva = sc->sc_dvmacur;
+	sc->sc_dvmacur += len;
+	while (len) {
+		pa = pmap_extract(pmap_kernel(), va);
+
+#define IOMMU_PPNSHIFT	8
+#define IOMMU_V		0x00000002
+#define IOMMU_W		0x00000004
+
+		pte = atop(pa) << IOMMU_PPNSHIFT;
+		pte |= IOMMU_V | IOMMU_W;
+		sta(sc->sc_ptes + atop(tva - sc->sc_dvmabase), ASI_BYPASS, pte);
+		sc->sc_reg->io_flushpage = tva;
+		len -= NBPG;
+		va += NBPG;
+		tva += NBPG;
+	}
+	return iovaddr + off;
+}
+#endif

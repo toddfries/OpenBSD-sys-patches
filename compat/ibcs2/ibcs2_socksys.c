@@ -1,5 +1,5 @@
-/*	$OpenBSD: ibcs2_socksys.c,v 1.7 2003/01/30 03:29:49 millert Exp $	*/
-/*	$NetBSD: ibcs2_socksys.c,v 1.7 1996/10/13 00:46:51 christos Exp $	*/
+/*	$OpenBSD: ibcs2_socksys.c,v 1.3 1996/08/02 20:35:10 niklas Exp $	*/
+/*	$NetBSD: ibcs2_socksys.c,v 1.4 1996/05/03 17:05:29 christos Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Scott Bartram
@@ -35,8 +35,10 @@
 #include <sys/termios.h>
 #include <sys/tty.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <net/if.h>
+
 
 #include <sys/syscallargs.h>
 
@@ -115,9 +117,9 @@ ibcs2_socksys(p, v, retval)
 	case SOCKSYS_ADJTIME:
 		return sys_adjtime(p, realargs + 1, retval);
 	case SOCKSYS_SETREUID:
-		return sys_setreuid(p, realargs + 1, retval);
+		return compat_43_sys_setreuid(p, realargs + 1, retval);
 	case SOCKSYS_SETREGID:
-		return sys_setregid(p, realargs + 1, retval);
+		return compat_43_sys_setregid(p, realargs + 1, retval);
 	case SOCKSYS_GETTIME:
 		return sys_gettimeofday(p, realargs + 1, retval);
 	case SOCKSYS_SETTIME:

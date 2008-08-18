@@ -1,5 +1,4 @@
-/*	$OpenBSD: sbusreg.h,v 1.5 2007/05/29 09:54:15 sobrado Exp $	*/
-/*	$NetBSD: sbusreg.h,v 1.3 1997/09/14 19:17:25 pk Exp $ */
+/*	$NetBSD: sbusreg.h,v 1.2 1994/11/20 20:52:26 deraadt Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -22,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,10 +47,10 @@
 /*
  * Sun-4c S-bus definitions.  (Should be made generic!)
  *
- * SBus slot 0 is not a separate slot; it talks to the onboard I/O devices.
- * It is, however, addressed just like any `real' SBus.
+ * Sbus slot 0 is not a separate slot; it talks to the onboard I/O devices.
+ * It is, however, addressed just like any `real' Sbus.
  *
- * SBus device addresses are obtained from the FORTH PROMs.  They come
+ * Sbus device addresses are obtained from the FORTH PROMs.  They come
  * in `absolute' and `relative' address flavors, so we have to handle both.
  * Relative addresses do *not* include the slot number.
  */
@@ -56,14 +59,3 @@
 #define	SBUS_ABS(a)		((unsigned)(a) >= SBUS_BASE)
 #define	SBUS_ABS_TO_SLOT(a)	(((a) - SBUS_BASE) >> 25)
 #define	SBUS_ABS_TO_OFFSET(a)	(((a) - SBUS_BASE) & 0x1ffffff)
-
-struct sbusreg {
-	u_int32_t	sbus_afsr;	/* M-to-S Asynchronous Fault Status */
-	u_int32_t	sbus_afar;	/* M-to-S Asynchronous Fault Address */
-	u_int32_t	sbus_arbiter;	/* Arbiter Enable  */
-	u_int32_t	sbus_reserved1;
-
-#define NSBUSCFG	20
-	/* Actual number dependent on machine model */
-	u_int32_t	sbus_sbuscfg[NSBUSCFG];	/* SBus configuration control */
-};

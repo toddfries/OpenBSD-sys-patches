@@ -1,7 +1,7 @@
-/*	$OpenBSD: dpme.h,v 1.7 2008/03/09 12:03:03 sobrado Exp $	*/
-/*	$NetBSD: dpme.h,v 1.8 1997/11/30 04:46:59 briggs Exp $	*/
+/*	$OpenBSD: dpme.h,v 1.3 1996/06/23 16:24:07 briggs Exp $	*/
+/*	$NetBSD: dpme.h,v 1.6 1996/06/23 15:30:51 briggs Exp $	 */
 
-/*
+/*-
  * Copyright (C) 1993	Allen K. Briggs, Chris P. Caputo,
  *			Michael L. Finch, Bradley A. Grantham, and
  *			Lawrence A. Kesteloot
@@ -71,7 +71,7 @@ struct partmapentry {
 
 /*
  * "pmBootArgs" for APPLE_UNIX_SVR2 partition.
- * OpenBSD/mac68k only uses Magic, Cluster, Type, and Flags.
+ * NetBSD/Mac68k only uses Magic, Cluster, Type, and Flags.
  */
 struct blockzeroblock {
 	u_int32_t       bzbMagic;
@@ -90,16 +90,10 @@ struct blockzeroblock {
 #define BZB_TYPESWAP	3
 #define BZB_ROOTFS	0x8000
 #define BZB_USRFS	0x4000
-#define BZB_EXFS4	0x4
-#define BZB_EXFS5	0x5
-#define BZB_EXFS6	0x6
 
 /* MF */
 #define PART_UNIX_TYPE		"APPLE_UNIX_SVR2"
 #define PART_MAC_TYPE		"APPLE_HFS"
 #define PART_SCRATCH		"APPLE_SCRATCH"
 #define PART_DRIVER_TYPE	"APPLE_DRIVER"
-#define PART_DRIVER43_TYPE	"APPLE_DRIVER43"
-#define PART_DRIVERATA_TYPE	"APPLE_DRIVER_ATA"
-#define PART_FWB_COMPONENT_TYPE	"FWB DRIVER COMPONENTS"
 #define PART_PARTMAP_TYPE	"APPLE_PARTITION_MAP"

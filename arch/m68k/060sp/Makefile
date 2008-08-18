@@ -1,11 +1,8 @@
-# $OpenBSD: Makefile,v 1.6 2007/10/18 18:08:02 deraadt Exp $
-# $NetBSD: Makefile,v 1.3 1996/12/31 22:44:13 veego Exp $
+# $OpenBSD: Makefile,v 1.3 1996/10/04 14:58:34 niklas Exp $
+# $NetBSD: Makefile,v 1.2 1996/05/20 13:31:40 is Exp $
 #
-.if ${MACHINE_ARCH} == "m68k"
-
-AS?=	as
-AS+=	-m68060
-LD=	ld
+AS		= as -m68060
+LD		= ld
 
 .SUFFIXES:	.o .S .sa .defs .h
 
@@ -19,11 +16,6 @@ clean cleandir:
 	rm -f 060sp.o isp.S fpsp.S
 
 _SUBDIRUSE:
-
-.else
-clean cleandir:
-
-.endif
 
 all:
 

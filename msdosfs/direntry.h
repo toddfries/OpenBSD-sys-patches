@@ -1,9 +1,8 @@
-/*	$OpenBSD: direntry.h,v 1.6 2002/03/14 01:27:09 millert Exp $	*/
-/*	$NetBSD: direntry.h,v 1.13 1997/10/17 11:23:45 ws Exp $	*/
+/*	$NetBSD: direntry.h,v 1.11 1995/11/29 15:08:34 ws Exp $	*/
 
 /*-
- * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
- * Copyright (C) 1994, 1995, 1997 TooLs GmbH.
+ * Copyright (C) 1994, 1995 Wolfgang Solfrank.
+ * Copyright (C) 1994, 1995 TooLs GmbH.
  * All rights reserved.
  * Original code by Paul Popelka (paulp@uts.amdahl.com) (see below).
  *
@@ -65,14 +64,11 @@ struct direntry {
 #define	ATTR_VOLUME	0x08		/* entry is a volume label */
 #define	ATTR_DIRECTORY	0x10		/* entry is a directory name */
 #define	ATTR_ARCHIVE	0x20		/* file is new or modified */
-	u_int8_t	deLowerCase;	/* case for base and extension */
-#define	CASE_LOWER_BASE	0x08		/* base is lower case */
-#define	CASE_LOWER_EXT	0x10		/* extension is lower case */
-	u_int8_t	deCTimeHundredth; /* create time, 1/100th of a sec */
+	u_int8_t	deReserved[2];	/* reserved */
 	u_int8_t	deCTime[2];	/* create time */
 	u_int8_t	deCDate[2];	/* create date */
 	u_int8_t	deADate[2];	/* access date */
-	u_int8_t	deHighClust[2];	/* high byte of cluster number */
+	u_int8_t	deATime[2];	/* access time */
 	u_int8_t	deMTime[2];	/* last update time */
 	u_int8_t	deMDate[2];	/* last update date */
 	u_int8_t	deStartCluster[2]; /* starting cluster of file */
@@ -122,13 +118,13 @@ struct winentry {
 #define DD_YEAR_SHIFT		9
 
 #ifdef _KERNEL
-void unix2dostime(struct timespec *tsp, u_int16_t *ddp, u_int16_t *dtp, u_int8_t *dhp);
-void dos2unixtime(u_int dd, u_int dt, u_int dh, struct timespec *tsp);
-int dos2unixfn(u_char dn[11], u_char *un, int lower);
-int unix2dosfn(u_char *un, u_char dn[12], int unlen, u_int gen);
-int unix2winfn(u_char *un, int unlen, struct winentry *wep, int cnt, int chksum);
-int winChkName(u_char *un, int unlen, struct winentry *wep, int chksum);
-int win2unixfn(struct winentry *wep, struct dirent *dp, int chksum);
-u_int8_t winChksum(u_int8_t *name);
-int winSlotCnt(u_char *un, int unlen);
+void unix2dostime __P((struct timespec *tsp, u_int16_t *ddp, u_int16_t *dtp));
+void dos2unixtime __P((u_int dd, u_int dt, struct timespec *tsp));
+int dos2unixfn __P((u_char dn[11], u_char *un, int lower));
+int unix2dosfn __P((u_char *un, u_char dn[12], int unlen, u_int gen));
+int unix2winfn __P((u_char *un, int unlen, struct winentry *wep, int cnt, int chksum));
+int winChkName __P((u_char *un, int unlen, struct winentry *wep, int chksum));
+int win2unixfn __P((struct winentry *wep, struct dirent *dp, int chksum));
+u_int8_t winChksum __P((u_int8_t *name));
+int winSlotCnt __P((u_char *un, int unlen));
 #endif	/* _KERNEL */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.80 2008/05/26 22:49:57 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.14 1996/09/29 08:00:41 downsj Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
 
 /*-
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,195 +42,295 @@
 /*
  * Setup the system to run on the current machine.
  *
- * cpu_configure() is called at boot time and initializes the vba
+ * Configure() is called at boot time and initializes the vba 
  * device tables and the memory controller monitoring.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
  */
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/dkstat.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
+#include <sys/dmap.h>
 #include <sys/reboot.h>
 #include <sys/device.h>
-#include <sys/socket.h>
-#include <sys/socketvar.h>
-
-#include <net/if.h>
-#include <net/if_types.h>
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/pte.h>
 #include <machine/cpu.h>
-#include <machine/gdt.h>
-#include <machine/biosvar.h>
-#include <machine/kvm86.h>
 
-#include <dev/cons.h>
-
-#include "ioapic.h"
-
-#if NIOAPIC > 0
-#include <machine/i82093var.h>
-#endif
+void swapconf __P((void));
+void setroot __P((void));
+void setconf __P((void));
 
 /*
  * The following several variables are related to
  * the configuration process, and are used in initializing
  * the machine.
  */
-extern dev_t bootdev;
-
-/* Support for VIA C3 RNG */
-extern struct timeout viac3_rnd_tmo;
-extern int	viac3_rnd_present;
-void		viac3_rnd(void *);
-
-#ifdef CRYPTO
-void		viac3_crypto_setup(void);
-extern int	i386_has_xcrypt;
-#endif
+extern int	cold;		/* cold start flag initialized in locore.s */
 
 /*
  * Determine i/o configuration for a machine.
  */
 void
-cpu_configure(void)
+configure()
 {
-	/*
-	 * Note, on i386, configure is not running under splhigh unlike other
-	 * architectures.  This fact is used by the pcmcia irq line probing.
-	 */
 
 	startrtclock();
 
-	gdt_init();		/* XXX - pcibios uses gdt stuff */
-
-	/* Set up proc0's TSS and LDT */
-	i386_proc0_tss_ldt_init();
-
-#ifdef KVM86
-	kvm86_init();
-#endif
-
 	if (config_rootfound("mainbus", NULL) == NULL)
-		panic("cpu_configure: mainbus not configured");
+		panic("configure: mainbus not configured");
 
-#if NIOAPIC > 0
-	if (nioapics > 0)
-		goto nomasks;
-#endif
-	printf("biomask %x netmask %x ttymask %x\n", (u_short)IMASK(IPL_BIO),
-	    (u_short)IMASK(IPL_NET), (u_short)IMASK(IPL_TTY));
+	printf("biomask %x netmask %x ttymask %x\n",
+	    (u_short)imask[IPL_BIO], (u_short)imask[IPL_NET],
+	    (u_short)imask[IPL_TTY]);
 
-#if NIOAPIC > 0
- nomasks:
-	ioapic_enable();
-#endif
-
-	proc0.p_addr->u_pcb.pcb_cr0 = rcr0();
-
-#ifdef MULTIPROCESSOR
-	/* propagate TSS and LDT configuration to the idle pcb's. */
-	cpu_init_idle_pcbs();
-#endif
 	spl0();
 
+	setconf();
+
 	/*
-	 * We can not know which is our root disk, defer
-	 * until we can checksum blocks to figure it out.
+	 * Configure swap area and related system
+	 * parameter based on device(s) used.
 	 */
+	swapconf();
+	dumpconf();
 	cold = 0;
-
-	/*
-	 * At this point the RNG is running, and if FSXR is set we can
-	 * use it.  Here we setup a periodic timeout to collect the data.
-	 */
-	if (viac3_rnd_present) {
-		timeout_set(&viac3_rnd_tmo, viac3_rnd, &viac3_rnd_tmo);
-		viac3_rnd(&viac3_rnd_tmo);
-	}
-#ifdef CRYPTO
-	/*
-	 * Also, if the chip has crypto available, enable it.
-	 */
-	if (i386_has_xcrypt)
-		viac3_crypto_setup();
-#endif
-}
-
-void
-device_register(struct device *dev, void *aux)
-{
 }
 
 /*
- * Now that we are fully operational, we can checksum the
- * disks, and using some heuristics, hopefully are able to
- * always determine the correct root disk.
+ * Configure swap space and related parameters.
  */
 void
-diskconf(void)
+swapconf()
 {
-	int majdev, unit, part = 0;
-	struct device *bootdv = NULL;
-	dev_t tmpdev;
-	char buf[128];
-	extern bios_bootmac_t *bios_bootmac;
+	register struct swdevt *swp;
+	register int nblks;
 
-	dkcsumattach();
+	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
+		int maj = major(swp->sw_dev);
 
-	if ((bootdev & B_MAGICMASK) == (u_int)B_DEVMAGIC) {
-		majdev = B_TYPE(bootdev);
-		unit = B_UNIT(bootdev);
-		part = B_PARTITION(bootdev);
-		snprintf(buf, sizeof buf, "%s%d%c", findblkname(majdev),
-		    unit, part + 'a');
-		bootdv = parsedisk(buf, strlen(buf), part, &tmpdev);
-	}
-
-	if (bios_bootmac) {
-		struct ifnet *ifp;
-
-		for (ifp = TAILQ_FIRST(&ifnet); ifp != NULL;
-		    ifp = TAILQ_NEXT(ifp, if_list)) {
-			if ((ifp->if_type == IFT_ETHER ||
-			    ifp->if_type == IFT_FDDI) &&
-			    bcmp(bios_bootmac->mac,
-			    ((struct arpcom *)ifp)->ac_enaddr,
-			    ETHER_ADDR_LEN) == 0)
-				break;
+		if (maj > nblkdev)
+			break;
+		if (bdevsw[maj].d_psize) {
+			nblks = (*bdevsw[maj].d_psize)(swp->sw_dev);
+			if (nblks != -1 &&
+			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
+				swp->sw_nblks = nblks;
+			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
 		}
-		if (ifp) {
-#if defined(NFSCLIENT)
-			printf("PXE boot MAC address %s, interface %s\n",
-			    ether_sprintf(bios_bootmac->mac), ifp->if_xname);
-			bootdv = parsedisk(ifp->if_xname, strlen(ifp->if_xname),
-			    0, &tmpdev);
-			part = 0;
-#endif
-		} else
-			printf("PXE boot MAC address %s, interface %s\n",
-			    ether_sprintf(bios_bootmac->mac), "unknown");
 	}
-
-	setroot(bootdv, part, RB_USERREQ);
-	dumpconf();
 }
 
-struct nam2blk nam2blk[] = {
-	{ "wd",		0 },
-	{ "fd",		2 },
-	{ "sd",		4 },
-	{ "cd",		6 },
-	{ "mcd",	7 },
-	{ "rd",		17 },
-	{ "raid",	19 },
-	{ NULL,		-1 }
+#define	DOSWAP			/* change swdevt and dumpdev */
+u_long	bootdev = 0;		/* should be dev_t, but not until 32 bits */
+
+static	char devname[][2] = {
+	{ 'w','d' },	/* 0 = wd */
+	{ 's','w' },	/* 1 = sw */
+	{ 'f','d' },	/* 2 = fd */
+	{ 'w','t' },	/* 3 = wt */
+	{ 's','d' },	/* 4 = sd -- new SCSI system */
 };
+
+dev_t	argdev = NODEV;
+int	nswap;
+long	dumplo;
+int	dmmin, dmmax, dmtext;
+
+/*
+ * Attempt to find the device from which we were booted.
+ * If we can do so, and not instructed not to do so,
+ * change rootdev to correspond to the load device.
+ */
+void
+setroot()
+{
+	int  majdev, mindev, unit, part, adaptor;
+	dev_t orootdev;
+#ifdef DOSWAP
+	dev_t temp = 0;
+#endif
+	struct swdevt *swp;
+
+	if (boothowto & RB_DFLTROOT ||
+	    (bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
+		return;
+	majdev = (bootdev >> B_TYPESHIFT) & B_TYPEMASK;
+	if (majdev > sizeof(devname) / sizeof(devname[0]))
+		return;
+	adaptor = (bootdev >> B_ADAPTORSHIFT) & B_ADAPTORMASK;
+	part = (bootdev >> B_PARTITIONSHIFT) & B_PARTITIONMASK;
+	unit = (bootdev >> B_UNITSHIFT) & B_UNITMASK;
+	mindev = (unit * MAXPARTITIONS) + part;
+	orootdev = rootdev;
+	rootdev = makedev(majdev, mindev);
+	/*
+	 * If the original rootdev is the same as the one
+	 * just calculated, don't need to adjust the swap configuration.
+	 */
+	if (rootdev == orootdev)
+		return;
+	printf("root on %c%c%d%c\n",
+	    devname[majdev][0], devname[majdev][1],
+	    unit, part + 'a');
+
+#ifdef DOSWAP
+	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
+		if (majdev == major(swp->sw_dev) &&
+		    (mindev / MAXPARTITIONS) ==
+		    (minor(swp->sw_dev) / MAXPARTITIONS)) {
+			temp = swdevt[0].sw_dev;
+			swdevt[0].sw_dev = swp->sw_dev;
+			swp->sw_dev = temp;
+			break;
+		}
+	}
+	if (swp->sw_dev == NODEV)
+		return;
+
+	/*
+	 * If dumpdev was the same as the old primary swap device, move
+	 * it to the new primary swap device.
+	 */
+	if (temp == dumpdev)
+		dumpdev = swdevt[0].sw_dev;
+#endif
+}
+
+#include "wdc.h"
+#if NWDC > 0
+extern	struct cfdriver wd_cd;
+#endif
+#include "fd.h"
+#if NFD > 0
+extern	struct cfdriver fd_cd;
+#endif
+#include "sd.h"
+#if NSD > 0
+extern	struct cfdriver sd_cd;
+#endif
+#include "cd.h"
+#if NCD > 0
+extern	struct cfdriver cd_cd;
+#endif
+#include "mcd.h"
+#if NMCD > 0
+extern	struct cfdriver mcd_cd;
+#endif
+
+struct	genericconf {
+	struct cfdriver *gc_driver;
+	char *gc_name;
+	dev_t gc_major;
+} genericconf[] = {
+#if NWDC > 0
+	{ &wd_cd,  "wd",  0 },
+#endif
+#if NSD > 0
+	{ &sd_cd,  "sd",  4 },
+#endif
+#if NCD > 0
+	{ &cd_cd,  "cd",  6 },
+#endif
+#if NMCD > 0
+	{ &mcd_cd, "mcd", 7 },
+#endif
+#if NFDC > 0
+	{ &fd_cd,  "fd",  2 },
+#endif
+	{ 0 }
+};
+
+void
+setconf()
+{
+	extern int ffs_mountroot __P((void *));
+	extern int (*mountroot) __P((void *));
+	register struct genericconf *gc;
+	int unit;
+#if 0
+	int swaponroot = 0;
+#endif
+	char *num;
+
+#ifdef INSTALL
+	if (((bootdev >> B_TYPESHIFT) & B_TYPEMASK) == 2) {
+		printf("\n\nInsert file system floppy...\n");
+		if (!(boothowto & RB_ASKNAME))
+			cngetc();
+	}
+#endif
+
+	if (boothowto & RB_ASKNAME) {
+		char name[128];
+retry:
+		printf("root device? ");
+		getsn(name, sizeof name);
+		if (*name == '\0')
+			goto noask;
+		for (gc = genericconf; gc->gc_driver; gc++)
+			if (gc->gc_driver->cd_ndevs &&
+			    strncmp(gc->gc_name, name,
+			    strlen(gc->gc_name)) == 0)
+				break;
+		if (gc->gc_driver) {
+			num = &name[strlen(gc->gc_name)];
+#if 0
+			if (num[0] == '*') {
+				strcpy(num, num+1);
+				swaponroot++;
+			}
+#endif
+
+			unit = 0;
+			do {
+				unit = (unit * 10) + *num - '0';
+				if (*num < '0' || *num > '9')
+					unit = -1;
+			} while (unit != -1 && *++num);
+
+			if (unit < 0) {
+				printf("%s: not a unit number\n",
+				    &name[strlen(gc->gc_name)]);
+			} else if (unit > gc->gc_driver->cd_ndevs ||
+			    gc->gc_driver->cd_devs[unit] == NULL) {
+				printf("%d: no such unit\n", unit);
+			} else {
+				printf("root on %s%da\n", gc->gc_name, unit);
+				rootdev = makedev(gc->gc_major,
+				    unit * MAXPARTITIONS);
+				goto doswap;
+			}
+		}
+		printf("use one of: ");
+		for (gc = genericconf; gc->gc_driver; gc++) {
+			for (unit=0; unit < gc->gc_driver->cd_ndevs; unit++) {
+				if (gc->gc_driver->cd_devs[unit])
+					printf("%s%d ", gc->gc_name, unit);
+			}
+		}
+		printf("\n");
+		goto retry;
+	}
+noask:
+	if (mountroot == NULL) {
+		/* `swap generic' */
+		setroot();
+	} else {
+		/* preconfigured */
+		return;
+	}
+
+doswap:
+	mountroot = ffs_mountroot;
+	swdevt[0].sw_dev = argdev = dumpdev =
+	    makedev(major(rootdev), minor(rootdev) + 1);
+	/* swap size and dumplo set during autoconfigure */
+#if 0
+	if (swaponroot)
+		rootdev = dumpdev;
+#endif
+}

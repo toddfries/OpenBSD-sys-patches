@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka780.c,v 1.9 2003/06/02 23:27:59 millert Exp $	*/
-/*	$NetBSD: ka780.c,v 1.14 1999/08/07 10:36:49 ragge Exp $ */
+/*	$NetBSD: ka780.c,v 1.3 1996/04/08 18:32:43 ragge Exp $	*/
 /*-
  * Copyright (c) 1982, 1986, 1988 The Regents of the University of California.
  * All rights reserved.
@@ -12,7 +11,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,79 +39,28 @@
  */
 
 #include <sys/param.h>
+#include <sys/types.h>
 #include <sys/device.h>
 #include <sys/systm.h>
 
-#include <machine/nexus.h>
-#include <machine/sid.h>
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
+
+#include <machine/pte.h>
 #include <machine/cpu.h>
-#include <machine/clock.h>
+#include <machine/mtpr.h>
+#include <machine/scb.h>
+#include <machine/nexus.h>
+#include <vax/uba/ubavar.h>
+#include <vax/uba/ubareg.h>
 
-static	void	ka780_memerr(void);
-static	int	ka780_mchk(caddr_t);
-static	void	ka780_conf(void);
-static	int mem_sbi_match(struct device *, struct cfdata *, void *);
-static	void mem_sbi_attach(struct device *, struct device *, void *);
-
-struct	cfattach mem_sbi_ca = {
-	sizeof(struct mem_softc), mem_sbi_match, mem_sbi_attach
-};
-
-int	
-mem_sbi_match(parent, cf, aux)
-	struct	device	*parent;
-	struct cfdata *cf;
-	void	*aux;
-{
-	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
-
-	if (cf->cf_loc[SBICF_TR] != sa->nexnum && cf->cf_loc[SBICF_TR] > -1)
-		return 0;
-
-	switch (sa->type) {
-	case NEX_MEM4:
-	case NEX_MEM4I:
-	case NEX_MEM16:
-	case NEX_MEM16I:
-		sa->nexinfo = M780C;
-		break;
-
-	case NEX_MEM64I:
-	case NEX_MEM64L:
-	case NEX_MEM64LI:
-	case NEX_MEM256I:
-	case NEX_MEM256L:
-	case NEX_MEM256LI:
-		sa->nexinfo = M780EL;
-		break;
-
-	case NEX_MEM64U:
-	case NEX_MEM64UI:
-	case NEX_MEM256U:
-	case NEX_MEM256UI:
-		sa->nexinfo = M780EU;
-		break;
- 
-	default:
-		return 0;
-	}
-	return 1;
-}
-
-
-/*
- * Declaration of 780-specific calls.
- */
-struct	cpu_dep ka780_calls = {
-	0,
-	ka780_mchk,
-	ka780_memerr,
-	ka780_conf,
-	generic_clkread,
-	generic_clkwrite,
-	2,	/* ~VUPS */
-	5,	/* SCB pages */
-};
+/* Prototypes. XXX These should be somewhere else */
+void	ka780_conf __P((struct device *, struct device *, void *));
+int	ka780_clock __P((void));
+void	ka780_memenable __P((struct sbi_attach_args *, void *));
+void	ka780_memerr __P((void));
+int	ka780_mchk __P((caddr_t));
+void	ka780_steal_pages __P((void));
 
 /*
  * Memory controller register usage varies per controller.
@@ -117,59 +69,54 @@ struct	mcr780 {
 	int	mc_reg[4];
 };
 
-#define M780_ICRD	0x40000000	/* inhibit crd interrupts, in [2] */
-#define M780_HIER	0x20000000	/* high error rate, in reg[2] */
-#define M780_ERLOG	0x10000000	/* error log request, in reg[2] */
+#define	M780_ICRD	0x40000000	/* inhibit crd interrupts, in [2] */
+#define	M780_HIER	0x20000000	/* high error rate, in reg[2] */
+#define	M780_ERLOG	0x10000000	/* error log request, in reg[2] */
 /* on a 780, memory crd's occur only when bit 15 is set in the SBIER */
 /* register; bit 14 there is an error bit which we also clear */
 /* these bits are in the back of the ``red book'' (or in the VMS code) */
 
-#define M780C_INH(mcr)	\
+#define	M780C_INH(mcr)	\
 	((mcr)->mc_reg[2] = (M780_ICRD|M780_HIER|M780_ERLOG)); \
 	    mtpr(0, PR_SBIER);
-#define M780C_ENA(mcr)	\
+#define	M780C_ENA(mcr)	\
 	((mcr)->mc_reg[2] = (M780_HIER|M780_ERLOG)); mtpr(3<<14, PR_SBIER);
-#define M780C_ERR(mcr)	\
+#define	M780C_ERR(mcr)	\
 	((mcr)->mc_reg[2] & (M780_ERLOG))
 
-#define M780C_SYN(mcr)	((mcr)->mc_reg[2] & 0xff)
-#define M780C_ADDR(mcr) (((mcr)->mc_reg[2] >> 8) & 0xfffff)
+#define	M780C_SYN(mcr)	((mcr)->mc_reg[2] & 0xff)
+#define	M780C_ADDR(mcr)	(((mcr)->mc_reg[2] >> 8) & 0xfffff)
 
-#define M780EL_INH(mcr) \
+#define	M780EL_INH(mcr)	\
 	((mcr)->mc_reg[2] = (M780_ICRD|M780_HIER|M780_ERLOG)); \
 	    mtpr(0, PR_SBIER);
-#define M780EL_ENA(mcr) \
+#define	M780EL_ENA(mcr)	\
 	((mcr)->mc_reg[2] = (M780_HIER|M780_ERLOG)); mtpr(3<<14, PR_SBIER);
-#define M780EL_ERR(mcr) \
+#define	M780EL_ERR(mcr)	\
 	((mcr)->mc_reg[2] & (M780_ERLOG))
 
-#define M780EL_SYN(mcr)		((mcr)->mc_reg[2] & 0x7f)
-#define M780EL_ADDR(mcr)	(((mcr)->mc_reg[2] >> 11) & 0x1ffff)
+#define	M780EL_SYN(mcr)		((mcr)->mc_reg[2] & 0x7f)
+#define	M780EL_ADDR(mcr)	(((mcr)->mc_reg[2] >> 11) & 0x1ffff)
 
-#define M780EU_INH(mcr) \
+#define	M780EU_INH(mcr)	\
 	((mcr)->mc_reg[3] = (M780_ICRD|M780_HIER|M780_ERLOG)); \
 	    mtpr(0, PR_SBIER);
-#define M780EU_ENA(mcr) \
+#define	M780EU_ENA(mcr)	\
 	((mcr)->mc_reg[3] = (M780_HIER|M780_ERLOG)); mtpr(3<<14, PR_SBIER);
-#define M780EU_ERR(mcr) \
+#define	M780EU_ERR(mcr)	\
 	((mcr)->mc_reg[3] & (M780_ERLOG))
 
-#define M780EU_SYN(mcr)		((mcr)->mc_reg[3] & 0x7f)
-#define M780EU_ADDR(mcr)	(((mcr)->mc_reg[3] >> 11) & 0x1ffff)
+#define	M780EU_SYN(mcr)		((mcr)->mc_reg[3] & 0x7f)
+#define	M780EU_ADDR(mcr)	(((mcr)->mc_reg[3] >> 11) & 0x1ffff)
 
 /* enable crd interrrupts */
 void
-mem_sbi_attach(parent, self, aux)
-	struct	device	*parent, *self;
-	void	*aux;
+ka780_memenable(sa, osc)
+	struct	sbi_attach_args *sa;
+	void *osc;
 {
-	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
-	struct	mem_softc *sc = (void *)self;
-	struct mcr780 *mcr = (void *)sa->nexaddr;
-
-	sc->sc_memaddr = sa->nexaddr;
-	sc->sc_memtype = sa->nexinfo;
-	sc->sc_memnr = sa->type;
+	struct	mem_softc *sc = osc;
+	register struct mcr780 *mcr = (void *)sc->sc_memaddr;
 
 	printf(": ");
 	switch (sc->sc_memtype) {
@@ -197,7 +144,7 @@ mem_sbi_attach(parent, self, aux)
 void
 ka780_memerr()
 {
-	extern struct cfdriver mem_cd;
+	extern	struct cfdriver mem_cd;
 	struct	mem_softc *sc;
 	register struct mcr780 *mcr;
 	register int m;
@@ -266,8 +213,8 @@ struct {
 	0x73,	"L19",	0x75,	"L21",	0x76,	"L22",	0x79,	"L25",
 	0x7A,	"L26",	0x7C,	"L28",	0x7F,	"L31",	0x80,	"C07",
 	0x89,	"U01",	0x8A,	"U02",	0x8C,	"U04",	0x8F,	"U07",
-	0x91,	"U09",	0x92,	"U10",	0x94,	"U12",	0x97,	"U15",
-	0x98,	"U16",	0x9B,	"U19",	0x9D,	"U21",	0x9E,	"U22",
+	0x91,	"U09",	0x92,	"U10",	0x94,	"U12",	0x97, 	"U15",
+	0x98,	"U16",	0x9B,	"U19",	0x9D,	"U21",	0x9E, 	"U22",
 	0xA8,	"U00",	0xAB,	"U03",	0xAD,	"U05",	0xAE,	"U06",
 	0xB0,	"U08",	0xB3,	"U11",	0xB5,	"U13",	0xB6,	"U14",
 	0xB9,	"U17",	0xBA,	"U18",	0xBC,	"U20",	0xBF,	"U23",
@@ -294,10 +241,10 @@ memlog(m, mcr)
 	printf ("mcr%d: multiple errors, not traceable\n", m);
 	break;
 }
-#endif /* TRENDATA */
+#endif TRENDATA
 
 char *mc780[]={"0","1","2","3","4","5","6","7","8","9","10","11","12","13",
-	"14","15"};
+        "14","15"};
 
 struct mc780frame {
 	int	mc8_bcnt;		/* byte count == 0x28 */
@@ -348,20 +295,47 @@ struct ka78x {
 };
 
 void
-ka780_conf()
+ka780_conf(parent, self, aux)
+	struct  device *parent, *self;
+	void    *aux;
 {
-	extern	char cpu_model[];
-	struct	ka78x *ka78 = (void *)&vax_cpudata;
+	extern  char cpu_model[];
+	struct	ka78x *ka78 = (void *)&cpu_type;
 
 	/* Enable cache */
 	mtpr(0x200000, PR_SBIMT);
 
-	printf("cpu: %s, serial number %d(%d), hardware ECO level %d(%d)\n",
+	strcpy(cpu_model,"VAX 11/780");
+	if (ka78->v785)
+		cpu_model[9] = '5';
+	printf(": %s, serial number %d(%d), hardware ECO level %d(%d)\n",
 	    &cpu_model[4], ka78->snr, ka78->plant, ka78->eco >> 4, ka78->eco);
+	printf("%s: ", self->dv_xname);
 	if (mfpr(PR_ACCS) & 255) {
-		printf("cpu: FPA present, enabling.\n");
+		printf("FPA present, enabling.\n");
 		mtpr(0x8000, PR_ACCS);
 	} else
-		printf("cpu: no FPA\n");
+		printf("no FPA\n");
 
+}
+
+int
+ka780_clock()
+{
+	mtpr(-10000, PR_NICR); /* Load in count register */
+	mtpr(0x800000d1, PR_ICCS); /* Start clock and enable interrupt */
+	return 0;
+}
+
+void
+ka780_steal_pages()
+{
+	extern	vm_offset_t avail_start, virtual_avail;
+	extern	struct nexus *nexus;
+	int	junk;
+
+	MAPPHYS(junk, 4, VM_PROT_READ|VM_PROT_WRITE);
+	MAPVIRT(nexus, btoc(8192*16));
+	pmap_map((vm_offset_t)nexus, 0x20000000, 0x20020000,
+	    VM_PROT_READ|VM_PROT_WRITE);
 }

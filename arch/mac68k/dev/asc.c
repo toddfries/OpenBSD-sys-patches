@@ -1,32 +1,6 @@
-/*	$OpenBSD: asc.c,v 1.25 2006/09/16 10:42:23 miod Exp $	*/
-/*	$NetBSD: asc.c,v 1.20 1997/02/24 05:47:33 scottr Exp $	*/
+/*	$OpenBSD: asc.c,v 1.4 1996/05/26 18:35:18 briggs Exp $	*/
+/*	$NetBSD: asc.c,v 1.11 1996/05/05 06:16:26 briggs Exp $	*/
 
-/*
- * Copyright (C) 1997 Scott Reynolds
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
 /*-
  * Copyright (C) 1993	Allen K. Briggs, Chris P. Caputo,
  *			Michael L. Finch, Bradley A. Grantham, and
@@ -61,7 +35,7 @@
  */
 
 /*
- * ASC driver code and console bell support
+ * ASC driver code and asc_ringbell() support
  */
 
 #include <sys/types.h>
@@ -71,301 +45,145 @@
 #include <sys/systm.h>
 #include <sys/param.h>
 #include <sys/device.h>
-#include <sys/fcntl.h>
-#include <sys/poll.h>
-#include <sys/timeout.h>
-
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_pmap.h>
-
-#include <machine/autoconf.h>
 #include <machine/cpu.h>
-#include <machine/bus.h>
 
-#include <mac68k/dev/ascvar.h>
-#include <mac68k/dev/obiovar.h>
+#include "ascvar.h"
 
-#define	MAC68K_ASC_BASE		0x50f14000
-#define	MAC68K_IIFX_ASC_BASE	0x50f10000
-#define	MAC68K_ASC_LEN		0x01000
+/* Global ASC location */
+volatile unsigned char *ASCBase = (unsigned char *) 0x14000;
 
-static u_int8_t		asc_wave_tab[0x800];
 
-static int	asc_ring_bell(void *, int, int, int);
-static void	asc_stop_bell(void *);
+/* bell support data */
+static int bell_freq = 1880;
+static int bell_length = 10;
+static int bell_volume = 100;
+static int bell_ringing = 0;
 
-static int	ascmatch(struct device *, void *, void *);
-static void	ascattach(struct device *, struct device *, void *);
+static int  ascmatch __P((struct device *, void *, void *));
+static void ascattach __P((struct device *, struct device *, void *));
 
 struct cfattach asc_ca = {
-	sizeof(struct asc_softc), ascmatch, ascattach
+	sizeof(struct device), ascmatch, ascattach
 };
 
 struct cfdriver asc_cd = {
-	NULL, "asc", DV_DULL
+	NULL, "asc", DV_DULL, NULL, 0
 };
 
 static int
-ascmatch(parent, vcf, aux)
-	struct device *parent;
-	void *vcf;
-	void *aux;
+ascmatch(pdp, match, auxp)
+	struct device	*pdp;
+	void	*match, *auxp;
 {
-	struct obio_attach_args *oa = (struct obio_attach_args *)aux;
-	bus_addr_t addr;
-	bus_space_handle_t bsh;
-	int rval = 0;
-
-	if (oa->oa_addr != (-1))
-		addr = (bus_addr_t)oa->oa_addr;
-	else if (current_mac_model->machineid == MACH_MACTV)
-		return 0;
-	else if (current_mac_model->machineid == MACH_MACIIFX)
-		addr = (bus_addr_t)MAC68K_IIFX_ASC_BASE;
-	else
-		addr = (bus_addr_t)MAC68K_ASC_BASE;
-
-	if (bus_space_map(oa->oa_tag, addr, MAC68K_ASC_LEN, 0, &bsh))
-		return (0);
-
-	if (mac68k_bus_space_probe(oa->oa_tag, bsh, 0, 1))
-		rval = 1;
-	else
-		rval = 0;
-
-	bus_space_unmap(oa->oa_tag, bsh, MAC68K_ASC_LEN);
-
-	return rval;
+	return 1;
 }
 
 static void
-ascattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+ascattach(parent, dev, aux)
+	struct device *parent, *dev;
+	void   *aux;
 {
-	struct asc_softc *sc = (struct asc_softc *)self;
-	struct obio_attach_args *oa = (struct obio_attach_args *)aux;
-	bus_addr_t addr;
-	int i;
-
-	sc->sc_tag = oa->oa_tag;
-	if (oa->oa_addr != (-1))
-		addr = (bus_addr_t)oa->oa_addr;
-	else if (current_mac_model->machineid == MACH_MACIIFX)
-		addr = (bus_addr_t)MAC68K_IIFX_ASC_BASE;
-	else
-		addr = (bus_addr_t)MAC68K_ASC_BASE;
-	if (bus_space_map(sc->sc_tag, addr, MAC68K_ASC_LEN, 0,
-	    &sc->sc_handle)) {
-		printf(": can't map memory space\n");
-		return;
-	}
-	sc->sc_open = 0;
-	sc->sc_ringing = 0;
-	timeout_set(&sc->sc_bell_tmo, asc_stop_bell, sc);
-
-	for (i = 0; i < 256; i++) {	/* up part of wave, four voices? */
-		asc_wave_tab[i] = i / 4;
-		asc_wave_tab[i + 512] = i / 4;
-		asc_wave_tab[i + 1024] = i / 4;
-		asc_wave_tab[i + 1536] = i / 4;
-	}
-	for (i = 0; i < 256; i++) {	/* down part of wave, four voices? */
-		asc_wave_tab[i + 256] = 0x3f - (i / 4);
-		asc_wave_tab[i + 768] = 0x3f - (i / 4);
-		asc_wave_tab[i + 1280] = 0x3f - (i / 4);
-		asc_wave_tab[i + 1792] = 0x3f - (i / 4);
-	}
-
-	printf(": Apple Sound Chip");
-	if (oa->oa_addr != (-1))
-		printf(" at %x", oa->oa_addr);
-	printf("\n");
-
-	mac68k_set_bell_callback(asc_ring_bell, sc);
+	printf(" Apple sound chip.\n");
 }
 
-int
-ascopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag;
-	int mode;
-	struct proc *p;
+int 
+asc_setbellparams(freq, length, volume)
+    int freq;
+    int length;
+    int volume;
 {
-	struct asc_softc *sc;
-	int unit;
+	/* I only perform these checks for sanity. */
+	/* I suppose someone might want a bell that rings */
+	/* all day, but then the can make kernel mods themselves. */
 
-	unit = ASCUNIT(dev);
-	if (unit >= asc_cd.cd_ndevs)
-		return (ENXIO);
-	sc = asc_cd.cd_devs[unit];
-	if (sc == NULL)
-		return (ENXIO);
-	if (sc->sc_open)
-		return (EBUSY);
-	sc->sc_open = 1;
+	if (freq < 10 || freq > 40000)
+		return (EINVAL);
+	if (length < 0 || length > 3600)
+		return (EINVAL);
+	if (volume < 0 || volume > 100)
+		return (EINVAL);
+
+	bell_freq = freq;
+	bell_length = length;
+	bell_volume = volume;
 
 	return (0);
 }
 
-int
-ascclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag;
-	int mode;
-	struct proc *p;
-{
-	struct asc_softc *sc;
 
-	sc = asc_cd.cd_devs[ASCUNIT(dev)];
-	sc->sc_open = 0;
+int 
+asc_getbellparams(freq, length, volume)
+    int *freq;
+    int *length;
+    int *volume;
+{
+	*freq = bell_freq;
+	*length = bell_length;
+	*volume = bell_volume;
 
 	return (0);
 }
 
-int
-ascread(dev, uio, ioflag)
-	dev_t dev;
-	struct uio *uio;
-	int ioflag;
+
+void 
+asc_bellstop(param)
+    int param;
 {
-	return (ENXIO);
-}
-
-int
-ascwrite(dev, uio, ioflag)
-	dev_t dev;
-	struct uio *uio;
-	int ioflag;
-{
-	return (ENXIO);
-}
-
-int
-ascioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	int cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
-{
-	struct asc_softc *sc;
-	int error;
-	int unit = ASCUNIT(dev);
-
-	sc = asc_cd.cd_devs[unit];
-	error = 0;
-
-	switch (cmd) {
-	default:
-		error = EINVAL;
-		break;
+	if (bell_ringing > 1000 || bell_ringing < 0)
+		panic("bell got out of synch?????");
+	if (--bell_ringing == 0) {
+		ASCBase[0x801] = 0;
 	}
-	return (error);
+	/* disable ASC */
 }
 
-int
-ascpoll(dev, events, p)
-	dev_t dev;
-	int events;
-	struct proc *p;
+
+int 
+asc_ringbell()
 {
-	/* always fails => never blocks */
-	return (events & (POLLOUT | POLLWRNORM));
-}
+	int     i;
+	unsigned long freq;
 
-paddr_t
-ascmmap(dev, off, prot)
-	dev_t dev;
-	off_t off;
-	int prot;
-{
-	int unit = ASCUNIT(dev);
-	struct asc_softc *sc;
-	paddr_t pa;
+	if (bell_ringing == 0) {
+		for (i = 0; i < 0x800; i++)
+			ASCBase[i] = 0;
 
-	sc = asc_cd.cd_devs[unit];
-	if (off >= 0 && off < MAC68K_ASC_LEN) {
-		(void)pmap_extract(pmap_kernel(),
-		    (vaddr_t)bus_space_vaddr(sc->sc_tag, sc->sc_handle), &pa);
-		return atop(pa + off);
-	}
-
-	return (-1);
-}
-
-static int
-asc_ring_bell(arg, freq, length, volume)
-	void *arg;
-	int freq, length, volume;
-{
-	struct asc_softc *sc = (struct asc_softc *)arg;
-	unsigned long cfreq;
-	int i;
-
-	if (!sc)
-		return (ENODEV);
-
-	if (sc->sc_ringing == 0) {
-		bus_space_set_region_1(sc->sc_tag, sc->sc_handle,
-		    0, 0, 0x800);
-		bus_space_write_region_1(sc->sc_tag, sc->sc_handle,
-		    0, asc_wave_tab, 0x800);
+		for (i = 0; i < 256; i++) {
+			ASCBase[i] = i / 4;
+			ASCBase[i + 512] = i / 4;
+			ASCBase[i + 1024] = i / 4;
+			ASCBase[i + 1536] = i / 4;
+		}		/* up part of wave, four voices ? */
+		for (i = 0; i < 256; i++) {
+			ASCBase[i + 256] = 0x3f - (i / 4);
+			ASCBase[i + 768] = 0x3f - (i / 4);
+			ASCBase[i + 1280] = 0x3f - (i / 4);
+			ASCBase[i + 1792] = 0x3f - (i / 4);
+		}		/* down part of wave, four voices ? */
 
 		/* Fix this.  Need to find exact ASC sampling freq */
-		cfreq = 65536 * freq / 466;
+		freq = 65536 * bell_freq / 466;
 
 		/* printf("beep: from %d, %02x %02x %02x %02x\n",
-		 * cur_beep.freq, (cfreq >> 24) & 0xff, (cfreq >> 16) & 0xff,
-		 * (cfreq >> 8) & 0xff, (cfreq) & 0xff); */
+		 * cur_beep.freq, (freq >> 24) & 0xff, (freq >> 16) & 0xff,
+		 * (freq >> 8) & 0xff, (freq) & 0xff); */
 		for (i = 0; i < 8; i++) {
-			bus_space_write_1(sc->sc_tag, sc->sc_handle,
-			    0x814 + 8 * i, (cfreq >> 24) & 0xff);
-			bus_space_write_1(sc->sc_tag, sc->sc_handle,
-			    0x815 + 8 * i, (cfreq >> 16) & 0xff);
-			bus_space_write_1(sc->sc_tag, sc->sc_handle,
-			    0x816 + 8 * i, (cfreq >> 8) & 0xff);
-			bus_space_write_1(sc->sc_tag, sc->sc_handle,
-			    0x817 + 8 * i, (cfreq) & 0xff);
+			ASCBase[0x814 + 8 * i] = (freq >> 24) & 0xff;
+			ASCBase[0x815 + 8 * i] = (freq >> 16) & 0xff;
+			ASCBase[0x816 + 8 * i] = (freq >> 8) & 0xff;
+			ASCBase[0x817 + 8 * i] = (freq) & 0xff;
 		}		/* frequency; should put cur_beep.freq in here
 				 * somewhere. */
 
-		bus_space_write_1(sc->sc_tag, sc->sc_handle, 0x807, 3); /* 44 ? */
-		bus_space_write_1(sc->sc_tag, sc->sc_handle, 0x806,
-		    255 * volume / 100);
-		bus_space_write_1(sc->sc_tag, sc->sc_handle, 0x805, 0);
-		bus_space_write_1(sc->sc_tag, sc->sc_handle, 0x80f, 0);
-		bus_space_write_1(sc->sc_tag, sc->sc_handle, 0x802, 2); /* sampled */
-		bus_space_write_1(sc->sc_tag, sc->sc_handle, 0x801, 2); /* enable sampled */
-		sc->sc_ringing = 1;
-		timeout_add(&sc->sc_bell_tmo, length);
+		ASCBase[0x807] = 3;	/* 44 ? */
+		ASCBase[0x806] = 255 * bell_volume / 100;
+		ASCBase[0x805] = 0;
+		ASCBase[0x80f] = 0;
+		ASCBase[0x802] = 2;	/* sampled */
+		ASCBase[0x801] = 2;	/* enable sampled */
 	}
+	bell_ringing++;
+	timeout((void *) asc_bellstop, 0, bell_length);
 
-	return (0);
-}
-
-static void
-asc_stop_bell(arg)
-	void *arg;
-{
-	struct asc_softc *sc = (struct asc_softc *)arg;
-
-	if (!sc)
-		return;
-
-	if (sc->sc_ringing > 1000 || sc->sc_ringing < 0)
-		panic("bell got out of sync?");
-
-	if (--sc->sc_ringing == 0)	/* disable ASC */
-		bus_space_write_1(sc->sc_tag, sc->sc_handle, 0x801, 0);
-}
-
-int asckqfilter(dev_t, struct knote *);
-
-int
-asckqfilter(dev, kn)
-	dev_t dev;
-	struct knote *kn;
-{
-	return (1);
+	return 0;
 }

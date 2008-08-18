@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_examine.c,v 1.16 2007/11/05 19:23:24 miod Exp $	*/
+/*	$OpenBSD: db_examine.c,v 1.5 1996/08/04 01:27:45 niklas Exp $	*/
 /*	$NetBSD: db_examine.c,v 1.11 1996/03/30 22:30:07 christos Exp $	*/
 
 /*
@@ -33,8 +33,6 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/db_machdep.h>		/* type definitions */
 
 #include <ddb/db_lex.h>
@@ -49,7 +47,7 @@ char	db_examine_format[TOK_STRING_SIZE] = "x";
 
 /*
  * Examine (print) data.  Syntax is:
- *		x/[bhlq][cdiorsuxz]*
+ *		x/[bhl][cdiorsuxz]*
  * For example, the command:
  *  	x/bxxxx
  * should print:
@@ -57,26 +55,33 @@ char	db_examine_format[TOK_STRING_SIZE] = "x";
  */
 /*ARGSUSED*/
 void
-db_examine_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_examine_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	int		have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
 	if (modif[0] != '\0')
-		db_strlcpy(db_examine_format, modif, sizeof(db_examine_format));
+		db_strcpy(db_examine_format, modif);
 
 	if (count == -1)
 		count = 1;
 
-	db_examine((db_addr_t)addr, db_examine_format, count);
+	db_examine((db_addr_t) addr, db_examine_format, count);
 }
 
 void
-db_examine(db_addr_t addr, char *fmt, int count)
+db_examine(addr, fmt, count)
+	register
+	    db_addr_t	addr;
+	char *		fmt;	/* format string */
+	int		count;	/* repeat count */
 {
 	int		c;
 	db_expr_t	value;
 	int		size;
 	int		width;
 	char *		fp;
-	char		tmpfmt[28];
 
 	while (--count >= 0) {
 		fp = fmt;
@@ -85,7 +90,7 @@ db_examine(db_addr_t addr, char *fmt, int count)
 		while ((c = *fp++) != 0) {
 			if (db_print_position() == 0) {
 				/* Always print the address. */
-				db_printsym(addr, DB_STGY_ANY, db_printf);
+				db_printsym(addr, DB_STGY_ANY);
 				db_printf(":\t");
 				db_prev = addr;
 			}
@@ -102,48 +107,38 @@ db_examine(db_addr_t addr, char *fmt, int count)
 				size = 4;
 				width = 12;
 				break;
-#ifdef __LP64__
-			case 'q':	/* quad-word */
-				size = 8;
-				width = 20;
-				break;
-#endif
 			case 'a':	/* address */
-				db_printf("= 0x%lx\n", (long)addr);
+				db_printf("= 0x%lx\n", addr);
 				break;
 			case 'r':	/* signed, current radix */
 				value = db_get_value(addr, size, TRUE);
 				addr += size;
-				db_format(tmpfmt, sizeof tmpfmt,
-				    (long)value, DB_FORMAT_R, 0, width);
-				db_printf("%-*s", width, tmpfmt);
+				db_printf("%-*r", width, value);
 				break;
 			case 'x':	/* unsigned hex */
 				value = db_get_value(addr, size, FALSE);
 				addr += size;
-				db_printf("%-*lx", width, (long)value);
+				db_printf("%-*x", width, value);
 				break;
 			case 'z':	/* signed hex */
 				value = db_get_value(addr, size, TRUE);
 				addr += size;
-				db_format(tmpfmt, sizeof tmpfmt,
-				    (long)value, DB_FORMAT_Z, 0, width);
-				db_printf("%-*s", width, tmpfmt);
+				db_printf("%-*z", width, value);
 				break;
 			case 'd':	/* signed decimal */
 				value = db_get_value(addr, size, TRUE);
 				addr += size;
-				db_printf("%-*ld", width, (long)value);
+				db_printf("%-*d", width, value);
 				break;
 			case 'u':	/* unsigned decimal */
 				value = db_get_value(addr, size, FALSE);
 				addr += size;
-				db_printf("%-*lu", width, (long)value);
+				db_printf("%-*u", width, value);
 				break;
 			case 'o':	/* unsigned octal */
 				value = db_get_value(addr, size, FALSE);
 				addr += size;
-				db_printf("%-*lo", width, value);
+				db_printf("%-*o", width, value);
 				break;
 			case 'c':	/* character */
 				value = db_get_value(addr, 1, FALSE);
@@ -175,7 +170,7 @@ db_examine(db_addr_t addr, char *fmt, int count)
 				break;
 			}
 			if (db_print_position() != 0)
-				db_end_line(width);
+				db_end_line();
 		}
 	}
 	db_next = addr;
@@ -188,37 +183,38 @@ char	db_print_format = 'x';
 
 /*ARGSUSED*/
 void
-db_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_print_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	int		have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
 	db_expr_t	value;
-	char		tmpfmt[28];
 
 	if (modif[0] != '\0')
 		db_print_format = modif[0];
 
 	switch (db_print_format) {
 	case 'a':
-		db_printsym((db_addr_t)addr, DB_STGY_ANY, db_printf);
+		db_printsym((db_addr_t)addr, DB_STGY_ANY);
 		break;
 	case 'r':
-		db_printf("%s", db_format(tmpfmt, sizeof tmpfmt, addr,
-		    DB_FORMAT_R, 0, sizeof(db_expr_t) * 2 * 6 / 5));
+		db_printf("%11r", addr);
 		break;
 	case 'x':
-		db_printf("%*x", sizeof(db_expr_t) * 2, addr);
+		db_printf("%8x", addr);
 		break;
 	case 'z':
-		db_printf("%s", db_format(tmpfmt, sizeof tmpfmt, addr,
-		    DB_FORMAT_Z, 0, sizeof(db_expr_t) * 2));
+		db_printf("%8z", addr);
 		break;
 	case 'd':
-		db_printf("%*d", sizeof(db_expr_t) * 2 * 6 / 5, addr);
+		db_printf("%11d", addr);
 		break;
 	case 'u':
-		db_printf("%*u", sizeof(db_expr_t) * 2 * 6 / 5, addr);
+		db_printf("%11u", addr);
 		break;
 	case 'o':
-		db_printf("%*o", sizeof(db_expr_t) * 2 * 4 / 3, addr);
+		db_printf("%16o", addr);
 		break;
 	case 'c':
 		value = addr & 0xFF;
@@ -232,38 +228,21 @@ db_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 }
 
 void
-db_print_loc_and_inst(db_addr_t loc)
+db_print_loc_and_inst(loc)
+	db_addr_t	loc;
 {
-	db_printsym(loc, DB_STGY_PROC, db_printf);
+	db_printsym(loc, DB_STGY_PROC);
 	db_printf(":\t");
 	(void) db_disasm(loc, FALSE);
 }
 
-/* local copy is needed here so that we can trace strlcpy() in libkern */
-size_t
-db_strlcpy(char *dst, const char *src, size_t siz)
+void
+db_strcpy(dst, src)
+	register char *dst;
+	register char *src;
 {
-	char *d = dst;
-	const char *s = src;
-	size_t n = siz;
-
-	/* Copy as many bytes as will fit */
-	if (n != 0 && --n != 0) {
-		do {
-			if ((*d++ = *s++) == 0)
-				break;
-		} while (--n != 0);
-	}
-
-	/* Not enough room in dst, add NUL and traverse rest of src */
-	if (n == 0) {
-		if (siz != 0)
-			*d = '\0';		/* NUL-terminate dst */
-		while (*s++)
-			;
-	}
-
-	return(s - src - 1);	/* count does not include NUL */
+	while ((*dst++ = *src++) != '\0')
+		;
 }
 
 /*
@@ -272,7 +251,11 @@ db_strlcpy(char *dst, const char *src, size_t siz)
  */
 /*ARGSUSED*/
 void
-db_search_cmd(db_expr_t daddr, int have_addr, db_expr_t dcount, char *modif)
+db_search_cmd(daddr, have_addr, dcount, modif)
+	db_expr_t	daddr;
+	int		have_addr;
+	db_expr_t	dcount;
+	char *		modif;
 {
 	int		t;
 	db_addr_t	addr;
@@ -337,8 +320,13 @@ db_search_cmd(db_expr_t daddr, int have_addr, db_expr_t dcount, char *modif)
 }
 
 void
-db_search(db_addr_t addr, int size, db_expr_t value, db_expr_t mask,
-    db_expr_t count)
+db_search(addr, size, value, mask, count)
+	register
+	db_addr_t	addr;
+	int		size;
+	db_expr_t	value;
+	db_expr_t	mask;
+	db_expr_t	count;
 {
 	/* Negative counts means forever.  */
 	while (count < 0 || count-- != 0) {

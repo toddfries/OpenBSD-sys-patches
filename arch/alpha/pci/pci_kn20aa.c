@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci_kn20aa.c,v 1.22 2006/06/15 20:08:29 brad Exp $	*/
-/*	$NetBSD: pci_kn20aa.c,v 1.21 1996/11/17 02:05:27 cgd Exp $	*/
+/*	$OpenBSD: pci_kn20aa.c,v 1.6 1996/10/04 03:06:04 deraadt Exp $	*/
+/*	$NetBSD: pci_kn20aa.c,v 1.3.4.2 1996/06/13 18:35:31 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -37,9 +37,7 @@
 #include <sys/device.h>
 #include <sys/syslog.h>
 
-#include <uvm/uvm_extern.h>
-
-#include <machine/autoconf.h>
+#include <vm/vm.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -49,57 +47,77 @@
 
 #include <alpha/pci/pci_kn20aa.h>
 
+#ifndef EVCNT_COUNTERS
+#include <machine/intrcnt.h>
+#endif
+
 #include "sio.h"
 #if NSIO
 #include <alpha/pci/siovar.h>
 #endif
 
-int	dec_kn20aa_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
-const char *dec_kn20aa_intr_string(void *, pci_intr_handle_t);
-int	dec_kn20aa_intr_line(void *, pci_intr_handle_t);
-void	*dec_kn20aa_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
-void	dec_kn20aa_intr_disestablish(void *, void *);
+int	dec_kn20aa_intr_map __P((void *, pcitag_t, int, int,
+	    pci_intr_handle_t *));
+const char *dec_kn20aa_intr_string __P((void *, pci_intr_handle_t));
+void	*dec_kn20aa_intr_establish __P((void *, pci_intr_handle_t,
+	    int, int (*func)(void *), void *, char *));
+void	dec_kn20aa_intr_disestablish __P((void *, void *));
 
 #define	KN20AA_PCEB_IRQ	31
 #define	KN20AA_MAX_IRQ	32
 #define	PCI_STRAY_MAX	5
 
-struct alpha_shared_intr *kn20aa_pci_intr;
-struct evcount kn20aa_intr_count;
+struct kn20aa_intrhand {
+	TAILQ_ENTRY(kn20aa_intrhand) ih_q;
+        int     (*ih_fun)();
+        void    *ih_arg;
+        u_long  ih_count;
+        int     ih_level;
+};
+TAILQ_HEAD(kn20aa_intrchain, kn20aa_intrhand);
 
-void	kn20aa_iointr(void *arg, unsigned long vec);
-void	kn20aa_enable_intr(int irq);
-void	kn20aa_disable_intr(int irq);
+struct kn20aa_intrchain kn20aa_pci_intrs[KN20AA_MAX_IRQ];
+int	kn20aa_pci_strayintrcnt[KN20AA_MAX_IRQ];
+#ifdef EVCNT_COUNTERS
+struct evcnt kn20aa_intr_evcnt;
+#endif
+
+void	kn20aa_pci_strayintr __P((int irq));
+void	kn20aa_iointr __P((void *framep, int vec));
+void	kn20aa_enable_intr __P((int irq));
+void	kn20aa_disable_intr __P((int irq));
+struct kn20aa_intrhand *kn20aa_attach_intr __P((struct kn20aa_intrchain *,
+			    int, int (*) (void *), void *));
 
 void
 pci_kn20aa_pickintr(ccp)
 	struct cia_config *ccp;
 {
 	int i;
-	bus_space_tag_t iot = &ccp->cc_iot;
+	struct kn20aa_intrhand *nintrhand;
+	bus_chipset_tag_t bc = &ccp->cc_bc;
 	pci_chipset_tag_t pc = &ccp->cc_pc;
+
+	for (i = 0; i < KN20AA_MAX_IRQ; i++)
+		TAILQ_INIT(&kn20aa_pci_intrs[i]);
 
         pc->pc_intr_v = ccp;
         pc->pc_intr_map = dec_kn20aa_intr_map;
         pc->pc_intr_string = dec_kn20aa_intr_string;
-        pc->pc_intr_line = dec_kn20aa_intr_line;
         pc->pc_intr_establish = dec_kn20aa_intr_establish;
         pc->pc_intr_disestablish = dec_kn20aa_intr_disestablish;
 
-        /* Not supported on KN20AA. */
-        pc->pc_pciide_compat_intr_establish = NULL;
-        pc->pc_pciide_compat_intr_disestablish = NULL;
+#if NSIO
+	sio_intr_setup(bc);
+#endif
 
-	kn20aa_pci_intr = alpha_shared_intr_alloc(KN20AA_MAX_IRQ);
-	for (i = 0; i < KN20AA_MAX_IRQ; i++)
-		alpha_shared_intr_set_maxstrays(kn20aa_pci_intr, i,
-		    PCI_STRAY_MAX);
+	set_iointr(kn20aa_iointr);
 
 #if NSIO
-	sio_intr_setup(pc, iot);
 	kn20aa_enable_intr(KN20AA_PCEB_IRQ);
+#if 0 /* XXX init PCEB interrupt handler? */
+	kn20aa_attach_intr(&kn20aa_pci_intrs[KN20AA_PCEB_IRQ], ???, ???, ???);
+#endif
 #endif
 }
 
@@ -114,6 +132,7 @@ dec_kn20aa_intr_map(ccv, bustag, buspin, line, ihp)
 	pci_chipset_tag_t pc = &ccp->cc_pc;
 	int device;
 	int kn20aa_irq;
+	void *ih;
 
         if (buspin == 0) {
                 /* No IRQ used. */
@@ -155,14 +174,13 @@ dec_kn20aa_intr_map(ccv, bustag, buspin, line, ihp)
 		break;
 
 	default:
-                printf("dec_kn20aa_intr_map: weird device number %d\n",
+		panic("pci_kn20aa_map_int: invalid device number %d\n",
 		    device);
-                return 1;
 	}
 
 	kn20aa_irq += buspin - 1;
 	if (kn20aa_irq > KN20AA_MAX_IRQ)
-		panic("pci_kn20aa_map_int: kn20aa_irq too large (%d)",
+		panic("pci_kn20aa_map_int: kn20aa_irq too large (%d)\n",
 		    kn20aa_irq);
 
 	*ihp = kn20aa_irq;
@@ -174,21 +192,15 @@ dec_kn20aa_intr_string(ccv, ih)
 	void *ccv;
 	pci_intr_handle_t ih;
 {
+	struct cia_config *ccp = ccv;
         static char irqstr[15];          /* 11 + 2 + NULL + sanity */
 
         if (ih > KN20AA_MAX_IRQ)
-		panic("dec_kn20aa_intr_string: bogus kn20aa IRQ 0x%x", ih);
+                panic("dec_kn20aa_a50_intr_string: bogus kn20aa IRQ 0x%x\n",
+		    ih);
 
-        snprintf(irqstr, sizeof irqstr, "kn20aa irq %ld", ih);
+        sprintf(irqstr, "kn20aa irq %d", ih);
         return (irqstr);
-}
-
-int
-dec_kn20aa_intr_line(ccv, ih)
-	void *ccv;
-	pci_intr_handle_t ih;
-{
-	return (ih);
 }
 
 void *
@@ -196,23 +208,18 @@ dec_kn20aa_intr_establish(ccv, ih, level, func, arg, name)
         void *ccv, *arg;
         pci_intr_handle_t ih;
         int level;
-        int (*func)(void *);
+        int (*func) __P((void *));
 	char *name;
 {           
+        struct cia_config *ccp = ccv;
 	void *cookie;
 
         if (ih > KN20AA_MAX_IRQ)
-                panic("dec_kn20aa_intr_establish: bogus kn20aa IRQ 0x%x",
+                panic("dec_kn20aa_intr_establish: bogus kn20aa IRQ 0x%x\n",
 		    ih);
 
-	cookie = alpha_shared_intr_establish(kn20aa_pci_intr, ih, IST_LEVEL,
-	    level, func, arg, name);
-
-	if (cookie != NULL &&
-	    alpha_shared_intr_firstactive(kn20aa_pci_intr, ih)) {
-		scb_set(0x900 + SCB_IDXTOVEC(ih), kn20aa_iointr, NULL);
-		kn20aa_enable_intr(ih);
-	}
+	cookie = kn20aa_attach_intr(&kn20aa_pci_intrs[ih], level, func, arg);
+	kn20aa_enable_intr(ih);
 	return (cookie);
 }
 
@@ -220,39 +227,69 @@ void
 dec_kn20aa_intr_disestablish(ccv, cookie)
         void *ccv, *cookie;
 {
-	struct alpha_shared_intrhand *ih = cookie;
-	unsigned int irq = ih->ih_num;
-	int s;
+	struct cia_config *ccp = ccv;
 
-	s = splhigh();
+	panic("dec_kn20aa_intr_disestablish not implemented"); /* XXX */
+}
 
-	alpha_shared_intr_disestablish(kn20aa_pci_intr, cookie,
-	    "kn20aa irq");
-	if (alpha_shared_intr_isactive(kn20aa_pci_intr, irq) == 0) {
+/*
+ * caught a stray interrupt; notify if not too many seen already.
+ */
+void
+kn20aa_pci_strayintr(irq)
+	int irq;
+{
+
+	kn20aa_pci_strayintrcnt[irq]++;
+	if (kn20aa_pci_strayintrcnt[irq] == PCI_STRAY_MAX)
 		kn20aa_disable_intr(irq);
-		alpha_shared_intr_set_dfltsharetype(kn20aa_pci_intr, irq,
-		    IST_NONE);
-		scb_free(0x900 + SCB_IDXTOVEC(irq));
-	}
-	splx(s);
+
+	log(LOG_ERR, "stray kn20aa irq %d\n", irq);
+	if (kn20aa_pci_strayintrcnt[irq] == PCI_STRAY_MAX)
+		log(LOG_ERR, "disabling interrupts on kn20aa irq %d\n", irq);
 }
 
 void
-kn20aa_iointr(arg, vec)
-	void *arg;
-	unsigned long vec;
+kn20aa_iointr(framep, vec)
+	void *framep;
+	int vec;
 {
-	int irq;
+	struct kn20aa_intrhand *ih;
+	int irq, handled;
 
-	irq = SCB_VECTOIDX(vec - 0x900);
+	if (vec >= 0x900) {
+		if (vec >= 0x900 + (KN20AA_MAX_IRQ << 4))
+			panic("kn20aa_iointr: vec 0x%x out of range\n", vec);
+		irq = (vec - 0x900) >> 4;
 
-	if (!alpha_shared_intr_dispatch(kn20aa_pci_intr, irq)) {
-		alpha_shared_intr_stray(kn20aa_pci_intr, irq,
-		    "kn20aa irq");
-		if (ALPHA_SHARED_INTR_DISABLE(kn20aa_pci_intr, irq))
-			kn20aa_disable_intr(irq);
-	} else
-		alpha_shared_intr_reset_strays(kn20aa_pci_intr, irq);
+#ifdef EVCNT_COUNTERS
+		kn20aa_intr_evcnt.ev_count++;
+#else
+		if (KN20AA_MAX_IRQ != INTRCNT_KN20AA_IRQ_LEN)
+			panic("kn20aa interrupt counter sizes inconsistent");
+		intrcnt[INTRCNT_KN20AA_IRQ + irq]++;
+#endif
+
+		for (ih = kn20aa_pci_intrs[irq].tqh_first, handled = 0;
+		    ih != NULL; ih = ih->ih_q.tqe_next) {
+			int rv;
+
+			rv = (*ih->ih_fun)(ih->ih_arg);
+
+			ih->ih_count++;
+			handled = handled || (rv != 0);
+		}
+		if (!handled)
+			kn20aa_pci_strayintr(irq);
+		return;
+	}
+	if (vec >= 0x800) {
+#if NSIO
+		sio_iointr(framep, vec);
+#endif
+		return;
+	} 
+	panic("kn20aa_iointr: weird vec 0x%x\n", vec);
 }
 
 void
@@ -266,9 +303,9 @@ kn20aa_enable_intr(irq)
 	 * "blech."  I'd give valuable body parts for better docs or
 	 * for a good decompiler.
 	 */
-	alpha_mb();
+	wbflush();
 	REGVAL(0x8780000000L + 0x40L) |= (1 << irq);	/* XXX */
-	alpha_mb();
+	wbflush();
 }
 
 void
@@ -276,7 +313,28 @@ kn20aa_disable_intr(irq)
 	int irq;
 {
 
-	alpha_mb();
+	wbflush();
 	REGVAL(0x8780000000L + 0x40L) &= ~(1 << irq);	/* XXX */
-	alpha_mb();
+	wbflush();
+}
+
+struct kn20aa_intrhand *
+kn20aa_attach_intr(chain, level, func, arg)
+	struct kn20aa_intrchain *chain;
+	int level;
+	int (*func) __P((void *));
+	void *arg;
+{
+	struct kn20aa_intrhand *nintrhand;
+
+	nintrhand = (struct kn20aa_intrhand *)
+	    malloc(sizeof *nintrhand, M_DEVBUF, M_WAITOK);
+
+        nintrhand->ih_fun = func;
+        nintrhand->ih_arg = arg;
+        nintrhand->ih_count = 0;
+        nintrhand->ih_level = level;
+	TAILQ_INSERT_TAIL(chain, nintrhand, ih_q);
+	
+	return (nintrhand);
 }

@@ -1,36 +1,44 @@
-#	$OpenBSD: Makefile,v 1.21 2008/03/11 20:07:53 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.10 1996/05/16 02:30:38 chuck Exp $
 
 LIB=sa
 
-CLEANFILES+=SRT0.o
+CLEANFILES+=SRT0.o 
 
 NOPIC=nopic
 NOPROFILE=noprofile
 
 # Logically src/sys
 S=${.CURDIR}/../../../..
+DIR_SA=$S/lib/libsa
+DIR_KERN=$S/lib/libkern
 
-SRCS+=	bugdev.c clock.c parse_args.c exec_mvme.c
+SRC_net= nfs.c rpc.c net.c ether.c arp.c in_cksum.c netif.c \
+	 bootparam.c rarp.c
 
-.PATH:  $S/lib/libsa
-SRCS+=	alloc.c memcpy.c exit.c getfile.c gets.c globals.c printf.c \
-	strerror.c memset.c memcmp.c strncpy.c strcmp.c strlen.c \
-	snprintf.c close.c closeall.c dev.c dkcksum.c lseek.c open.c \
-	nullfs.c read.c fstat.c ufs.c cread.c
-SRCS+=	arp.c ether.c in_cksum.c net.c netif.c rpc.c nfs.c rarp.c bootparam.c
 
-.PATH:	${S}/lib/libkern
-SRCS+=	ashrdi3.c muldi3.c
+SRC_sa = alloc.c bcopy.c memcpy.c close.c exit.c getfile.c gets.c open.c \
+	 printf.c read.c strerror.c ufs.c globals.c lseek.c \
+	 closeall.c dev.c dkcksum.c nullfs.c fstat.c
+
+SRC_kern= ashrdi3.c bcmp.c bzero.c strcmp.c strlen.c
+
+SRC_mvme= exec_mvme.c
+
+SRC_here= clock.c bugdev.c parse_args.c
+
+SRCS= ${SRC_net} ${SRC_sa} ${SRC_kern} ${SRC_mvme} ${SRC_here}
 
 # DBG= -DDEBUG -DNETIF_DEBUG -DNFS_DEBUG -DRPC_DEBUG \
 # 	-DNET_DEBUG -DRARP_DEBUG -DETHER_DEBUG
 
 #DEFS= -DCOMPAT_UFS
-DEFS= -D__INTERNAL_LIBSA_CREAD
-INCL= -I${.CURDIR} -I${.CURDIR}/../libbug -I${S}/lib/libsa -I${S}
-CFLAGS+= ${XCFLAGS} -O2 ${COPTS} ${DEFS} ${DBG} ${INCL}
+INCL= -I. -I${.CURDIR}/../libbug -I${S}/lib/libsa -I${S}
+COPTS= #-fno-defer-pop
+CFLAGS= -O2 ${COPTS} ${DEFS} ${DBG} ${INCL}
 
-all: libsa.a SRT0.o
+.PATH:  ${DIR_SA} ${DIR_KERN} 
+
+all: libsa.a SRT0.o 
 
 install:
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm.h,v 1.7 2008/05/27 19:57:45 thib Exp $	*/
+/*	$OpenBSD: natm.h,v 1.2 1996/07/03 17:24:30 chuck Exp $	*/
 
 /*
  *
@@ -82,7 +82,7 @@ struct natmpcb {
   u_int	npcb_inq;			/* # of our pkts in proto q */
   struct socket	*npcb_socket;		/* backpointer to socket */
   struct ifnet *npcb_ifp;		/* pointer to hardware */
-  struct in_addr ipaddr;		/* remote IP address, if NPCB_IP */
+  struct in_addr ipaddr;		/* remote IP address, if APCB_IP */
   u_int16_t npcb_vci;			/* VCI */
   u_int8_t npcb_vpi;			/* VPI */
   u_int8_t npcb_flags;			/* flags */
@@ -133,15 +133,20 @@ struct atm_rawioctl {
 /* external functions */
 
 /* natm_pcb.c */
-struct	natmpcb *npcb_alloc(int);
-void	npcb_free(struct natmpcb *, int);
-struct	natmpcb *npcb_add(struct natmpcb *, struct ifnet *, int, int);
+struct	natmpcb *npcb_alloc __P((int));
+void	npcb_free __P((struct natmpcb *, int));
+struct	natmpcb *npcb_add __P((struct natmpcb *, struct ifnet *, int, int));
 
 /* natm.c */
-int	natm_usrreq(struct socket *, int, struct mbuf *,
-	    struct mbuf *, struct mbuf *, struct proc *);
-int	natm0_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-int	natm5_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-void	natmintr(void);
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+int	natm_usrreq __P((struct socket *, int, struct mbuf *,
+                             struct mbuf *, struct mbuf *, struct proc *));
+#elif defined(__FreeBSD__)
+int	natm_usrreq __P((struct socket *, int, struct mbuf *,
+                             struct mbuf *, struct mbuf *));
+#endif
+int	natm0_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
+int	natm5_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
+void	natmintr __P((void));
 
 #endif

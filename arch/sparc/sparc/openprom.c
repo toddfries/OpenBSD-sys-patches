@@ -1,4 +1,3 @@
-/*	$OpenBSD: openprom.c,v 1.5 2003/06/02 23:27:55 millert Exp $	*/
 /*	$NetBSD: openprom.c,v 1.8 1996/03/31 23:45:34 pk Exp $ */
 
 /*
@@ -22,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -58,8 +61,8 @@ static	int lastnode;			/* speed hack */
 extern	int optionsnode;		/* node ID of ROM's options */
 extern	struct promvec *promvec;
 
-static int openpromcheckid(int, int);
-static int openpromgetstr(int, char *, char **);
+static int openpromcheckid __P((int, int));
+static int openpromgetstr __P((int, char *, char **));
 
 int
 openpromopen(dev, flags, mode, p)

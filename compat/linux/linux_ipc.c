@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_ipc.c,v 1.10 2007/05/29 10:44:29 sturm Exp $	*/
+/*	$OpenBSD: linux_ipc.c,v 1.2 1996/04/17 05:23:52 mickey Exp $	*/
 /*	$NetBSD: linux_ipc.c,v 1.10 1996/04/05 00:01:44 christos Exp $	*/
 
 /*
@@ -70,35 +70,53 @@
  */
 
 #ifdef SYSVSEM
-int linux_semop(struct proc *, void *, register_t *);
-int linux_semget(struct proc *, void *, register_t *);
-int linux_semctl(struct proc *, void *, register_t *);
-void bsd_to_linux_semid_ds(struct semid_ds *, struct linux_semid_ds *);
-void linux_to_bsd_semid_ds(struct linux_semid_ds *, struct semid_ds *);
+static int linux_semop __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_semget __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_semctl __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static void bsd_to_linux_semid_ds __P((struct semid_ds *,
+				       struct linux_semid_ds *));
+static void linux_to_bsd_semid_ds __P((struct linux_semid_ds *,
+				       struct semid_ds *));
 #endif
 
 #ifdef SYSVMSG
-int linux_msgsnd(struct proc *, void *, register_t *);
-int linux_msgrcv(struct proc *, void *, register_t *);
-int linux_msgget(struct proc *, void *, register_t *);
-int linux_msgctl(struct proc *, void *, register_t *);
-void linux_to_bsd_msqid_ds(struct linux_msqid_ds *, struct msqid_ds *);
-void bsd_to_linux_msqid_ds(struct msqid_ds *, struct linux_msqid_ds *);
+static int linux_msgsnd __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_msgrcv __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_msgget __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_msgctl __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static void linux_to_bsd_msqid_ds __P((struct linux_msqid_ds *,
+				       struct msqid_ds *));
+static void bsd_to_linux_msqid_ds __P((struct msqid_ds *,
+				       struct linux_msqid_ds *));
 #endif
 
 #ifdef SYSVSHM
-int linux_shmat(struct proc *, void *, register_t *);
-int linux_shmdt(struct proc *, void *, register_t *);
-int linux_shmget(struct proc *, void *, register_t *);
-int linux_shmctl(struct proc *, void *, register_t *);
-void linux_to_bsd_shmid_ds(struct linux_shmid_ds *, struct shmid_ds *);
-void bsd_to_linux_shmid_ds(struct shmid_ds *, struct linux_shmid_ds *);
+static int linux_shmat __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_shmdt __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_shmget __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static int linux_shmctl __P((struct proc *, struct linux_sys_ipc_args *,
+				register_t *));
+static void linux_to_bsd_shmid_ds __P((struct linux_shmid_ds *,
+				       struct shmid_ds *));
+static void bsd_to_linux_shmid_ds __P((struct shmid_ds *,
+				       struct linux_shmid_ds *));
 #endif
 
-#if defined(SYSVMSG) || defined(SYSVSEM) || defined(SYSVSHM)
-void linux_to_bsd_ipc_perm(struct linux_ipc_perm *, struct ipc_perm *);
-void bsd_to_linux_ipc_perm(struct ipc_perm *, struct linux_ipc_perm *);
-#endif
+
+static void linux_to_bsd_ipc_perm __P((struct linux_ipc_perm *,
+				       struct ipc_perm *));
+static void bsd_to_linux_ipc_perm __P((struct ipc_perm *,
+				       struct linux_ipc_perm *));
 
 int
 linux_sys_ipc(p, v, retval)
@@ -148,12 +166,11 @@ linux_sys_ipc(p, v, retval)
 	}
 }
 
-#if defined(SYSVMSG) || defined(SYSVSEM) || defined(SYSVSHM)
 /*
- * Convert between Linux and OpenBSD ipc_perm structures. Only the
+ * Convert between Linux and NetBSD ipc_perm structures. Only the
  * order of the fields is different.
  */
-void
+static void
 linux_to_bsd_ipc_perm(lpp, bpp)
 	struct linux_ipc_perm *lpp;
 	struct ipc_perm *bpp;
@@ -168,7 +185,7 @@ linux_to_bsd_ipc_perm(lpp, bpp)
 	bpp->seq = lpp->l_seq;
 }
 
-void
+static void
 bsd_to_linux_ipc_perm(bpp, lpp)
 	struct ipc_perm *bpp;
 	struct linux_ipc_perm *lpp;
@@ -182,7 +199,6 @@ bsd_to_linux_ipc_perm(bpp, lpp)
 	lpp->l_mode = bpp->mode;
 	lpp->l_seq = bpp->seq;
 }
-#endif
 
 #ifdef SYSVSEM
 /*
@@ -191,9 +207,9 @@ bsd_to_linux_ipc_perm(bpp, lpp)
  */
 
 /*
- * Convert between Linux and OpenBSD semid_ds structures.
+ * Convert between Linux and NetBSD semid_ds structures.
  */
-void
+static void
 bsd_to_linux_semid_ds(bs, ls)
 	struct semid_ds *bs;
 	struct linux_semid_ds *ls;
@@ -206,7 +222,7 @@ bsd_to_linux_semid_ds(bs, ls)
 	ls->l_sem_base = bs->sem_base;
 }
 
-void
+static void
 linux_to_bsd_semid_ds(ls, bs)
 	struct linux_semid_ds *ls;
 	struct semid_ds *bs;
@@ -220,18 +236,17 @@ linux_to_bsd_semid_ds(ls, bs)
 }
 
 int
-linux_semop(p, v, retval)
+linux_semop(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_semop_args bsa;
 
 	SCARG(&bsa, semid) = SCARG(uap, a1);
@@ -242,18 +257,17 @@ linux_semop(p, v, retval)
 }
 
 int
-linux_semget(p, v, retval)
+linux_semget(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_semget_args bsa;
 
 	SCARG(&bsa, key) = (key_t)SCARG(uap, a1);
@@ -270,18 +284,17 @@ linux_semget(p, v, retval)
  * structure.
  */
 int
-linux_semctl(p, v, retval)
+linux_semctl(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	caddr_t sg, unptr, dsp, ldsp;
 	int error, cmd;
 	struct sys___semctl_args bsa;
@@ -352,7 +365,7 @@ linux_semctl(p, v, retval)
 
 #ifdef SYSVMSG
 
-void
+static void
 linux_to_bsd_msqid_ds(lmp, bmp)
 	struct linux_msqid_ds *lmp;
 	struct msqid_ds *bmp;
@@ -371,7 +384,7 @@ linux_to_bsd_msqid_ds(lmp, bmp)
 	bmp->msg_ctime = lmp->l_msg_ctime;
 }
 
-void
+static void
 bsd_to_linux_msqid_ds(bmp, lmp)
 	struct msqid_ds *bmp;
 	struct linux_msqid_ds *lmp;
@@ -390,19 +403,18 @@ bsd_to_linux_msqid_ds(bmp, lmp)
 	lmp->l_msg_ctime = bmp->msg_ctime;
 }
 
-int
-linux_msgsnd(p, v, retval)
+static int
+linux_msgsnd(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_msgsnd_args bma;
 
 	SCARG(&bma, msqid) = SCARG(uap, a1);
@@ -413,19 +425,18 @@ linux_msgsnd(p, v, retval)
 	return sys_msgsnd(p, &bma, retval);
 }
 
-int
-linux_msgrcv(p, v, retval)
+static int
+linux_msgrcv(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_msgrcv_args bma;
 	struct linux_msgrcv_msgarg kluge;
 	int error;
@@ -442,19 +453,18 @@ linux_msgrcv(p, v, retval)
 	return sys_msgrcv(p, &bma, retval);
 }
 
-int
-linux_msgget(p, v, retval)
+static int
+linux_msgget(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_msgget_args bma;
 
 	SCARG(&bma, key) = (key_t)SCARG(uap, a1);
@@ -463,19 +473,18 @@ linux_msgget(p, v, retval)
 	return sys_msgget(p, &bma, retval);
 }
 
-int
-linux_msgctl(p, v, retval)
+static int
+linux_msgctl(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_msgctl_args bma;
 	caddr_t umsgptr, sg;
 	struct linux_msqid_ds lm;
@@ -518,19 +527,18 @@ linux_msgctl(p, v, retval)
  * in which the return value is to be passed. This is subsequently
  * handled by libc, apparently.
  */
-int
-linux_shmat(p, v, retval)
+static int
+linux_shmat(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_shmat_args bsa;
 	int error;
 
@@ -553,19 +561,18 @@ linux_shmat(p, v, retval)
  * shmdt(): this could have been mapped directly, if it wasn't for
  * the extra indirection by the linux_ipc system call.
  */
-int
-linux_shmdt(p, v, retval)
+static int
+linux_shmdt(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_shmdt_args bsa;
 
 	SCARG(&bsa, shmaddr) = SCARG(uap, ptr);
@@ -576,39 +583,36 @@ linux_shmdt(p, v, retval)
 /*
  * Same story as shmdt.
  */
-int
-linux_shmget(p, v, retval)
+static int
+linux_shmget(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	struct sys_shmget_args bsa;
 
 	SCARG(&bsa, key) = SCARG(uap, a1);
 	SCARG(&bsa, size) = SCARG(uap, a2);
 	SCARG(&bsa, shmflg) = SCARG(uap, a3);
 
-	SCARG(&bsa, shmflg) |= _SHM_RMLINGER;
-
 	return sys_shmget(p, &bsa, retval);
 }
 
 /*
- * Convert between Linux and OpenBSD shmid_ds structures.
+ * Convert between Linux and NetBSD shmid_ds structures.
  * The order of the fields is once again the difference, and
  * we also need a place to store the internal data pointer
  * in, which is unfortunately stored in this structure.
  *
  * We abuse a Linux internal field for that.
  */
-void
+static void
 linux_to_bsd_shmid_ds(lsp, bsp)
 	struct linux_shmid_ds *lsp;
 	struct shmid_ds *bsp;
@@ -625,7 +629,7 @@ linux_to_bsd_shmid_ds(lsp, bsp)
 	bsp->shm_internal = lsp->l_private2;	/* XXX Oh well. */
 }
 
-void
+static void
 bsd_to_linux_shmid_ds(bsp, lsp)
 	struct shmid_ds *bsp;
 	struct linux_shmid_ds *lsp;
@@ -645,23 +649,22 @@ bsd_to_linux_shmid_ds(bsp, lsp)
 /*
  * shmctl. Not implemented (for now): IPC_INFO, SHM_INFO, SHM_STAT
  * SHM_LOCK and SHM_UNLOCK are passed on, but currently not implemented
- * by OpenBSD itself.
+ * by NetBSD itself.
  *
  * The usual structure conversion and massaging is done.
  */
-int
-linux_shmctl(p, v, retval)
+static int
+linux_shmctl(p, uap, retval)
 	struct proc *p;
-	void *v;
-	register_t *retval;
-{
 	struct linux_sys_ipc_args /* {
 		syscallarg(int) what;
 		syscallarg(int) a1;
 		syscallarg(int) a2;
 		syscallarg(int) a3;
 		syscallarg(caddr_t) ptr;
-	} */ *uap = v;
+	} */ *uap;
+	register_t *retval;
+{
 	int error;
 	caddr_t sg;
 	struct sys_shmctl_args bsa;
@@ -677,7 +680,7 @@ linux_shmctl(p, v, retval)
 		SCARG(&bsa, buf) = bsp;
 		if ((error = sys_shmctl(p, &bsa, retval)))
 			return error;
-		if ((error = copyin((caddr_t) bsp, (caddr_t) &bs, sizeof bs)))
+		if ((error = copyin((caddr_t) &bs, (caddr_t) bsp, sizeof bs)))
 			return error;
 		bsd_to_linux_shmid_ds(&bs, &lseg);
 		return copyout((caddr_t) &lseg, SCARG(uap, ptr), sizeof lseg);

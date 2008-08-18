@@ -1,3 +1,5 @@
+/*	$NetBSD: lshrdi3.c,v 1.5 1995/10/07 09:26:30 mycroft Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -14,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,7 +38,11 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: lshrdi3.c,v 1.5 2004/11/28 07:23:41 mickey Exp $";
+#if 0
+static char sccsid[] = "@(#)lshrdi3.c	8.1 (Berkeley) 6/4/93";
+#else
+static char rcsid[] = "$NetBSD: lshrdi3.c,v 1.5 1995/10/07 09:26:30 mycroft Exp $";
+#endif
 #endif /* LIBC_SCCS and not lint */
 
 #include "quad.h"
@@ -41,19 +51,20 @@ static char rcsid[] = "$OpenBSD: lshrdi3.c,v 1.5 2004/11/28 07:23:41 mickey Exp 
  * Shift an (unsigned) quad value right (logical shift right).
  */
 quad_t
-__lshrdi3(quad_t a, qshift_t shift)
+__lshrdi3(a, shift)
+	quad_t a;
+	qshift_t shift;
 {
 	union uu aa;
 
-	if (shift == 0)
-		return(a);
 	aa.q = a;
-	if (shift >= INT_BITS) {
-		aa.ul[L] = aa.ul[H] >> (shift - INT_BITS);
+	if (shift >= LONG_BITS) {
+		aa.ul[L] = shift >= QUAD_BITS ? 0 :
+		    aa.ul[H] >> (shift - LONG_BITS);
 		aa.ul[H] = 0;
-	} else {
+	} else if (shift > 0) {
 		aa.ul[L] = (aa.ul[L] >> shift) |
-		    (aa.ul[H] << (INT_BITS - shift));
+		    (aa.ul[H] << (LONG_BITS - shift));
 		aa.ul[H] >>= shift;
 	}
 	return (aa.q);

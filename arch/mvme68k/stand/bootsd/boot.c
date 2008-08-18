@@ -1,4 +1,3 @@
-/*	$OpenBSD: boot.c,v 1.11 2003/06/02 23:27:51 millert Exp $ */
 /*	$NetBSD: boot.c,v 1.2 1995/09/23 03:42:52 gwr Exp $ */
 
 /*-
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,39 +46,19 @@
 int debug;
 int errno;
 extern char *version;
-char	line[80];
 
 int
 main()
 {
 	char *cp, *file;
-	int	io, flag, ret;
-	int	ask = 0;
+	int	io, flag;
 
 	printf(">> OpenBSD MVME%x bootsd [%s]\n", bugargs.cputyp, version);
 
-	ret = parse_args(&file, &flag);
+	parse_args(&file, &flag);
 
-	for (;;) {
-		if (ask) {
-			printf("boot: ");
-			gets(line);
-			if (line[0]) {
-				bugargs.arg_start = line;
-				cp = line;
-				while (cp < (line + sizeof(line) -1) && *cp)
-					cp++;
-				bugargs.arg_end = cp;
-				ret = parse_args(&file, &flag);
-			}
-		}
-		if (ret) {
-			printf("boot: -q returning to MVME-Bug\n");
-			break;
-		}
-		exec_mvme(file, flag);
-		printf("boot: %s: %s\n", file, strerror(errno));
-		ask = 1;
-	}
+	exec_mvme(file, flag);
+
+	printf("boot: %s: %s\n", file, strerror(errno));
 	return(0);
 }

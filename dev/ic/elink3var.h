@@ -1,5 +1,4 @@
-/*	$OpenBSD: elink3var.h,v 1.18 2002/06/09 03:14:18 todd Exp $	*/
-/*	$NetBSD: elink3var.h,v 1.12 1997/03/30 22:47:11 jonathan Exp $	*/
+/*	$NetBSD: elink3var.h,v 1.5 1996/05/14 22:22:06 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1994 Herb Peyerl <hpeyerl@beer.org>
@@ -37,13 +36,10 @@
 struct ep_softc {
 	struct device sc_dev;
 	void *sc_ih;
-	struct timeout sc_epmbuffill_tmo;
 
 	struct arpcom sc_arpcom;	/* Ethernet common part		*/
-	struct mii_data sc_mii;		/* MII/media control		*/
-	bus_space_tag_t sc_iot;		/* bus cookie			*/
-	bus_space_handle_t sc_ioh;	/* bus i/o handle		*/
-	u_int	ep_connectors;		/* Connectors on this card.	*/
+	bus_chipset_tag_t sc_bc;	/* bus cookie			*/
+	bus_io_handle_t sc_ioh;		/* bus i/o handle		*/
 #define MAX_MBS	8			/* # of mbufs we keep around	*/
 	struct mbuf *mb[MAX_MBS];	/* spare mbuf storage.		*/
 	int	next_mb;		/* Which mbuf to use next. 	*/
@@ -52,31 +48,8 @@ struct ep_softc {
 	int	tx_succ_ok;		/* # packets sent in sequence   */
 					/* w/o underrun			*/
 
-	u_int	ep_flags;		/* capabilities flag (from EEPROM) */
-#define EP_FLAGS_PNP			0x0001
-#define EP_FLAGS_FULLDUPLEX		0x0002
-#define EP_FLAGS_LARGEPKT		0x0004	/* 4k packet support */
-#define EP_FLAGS_SLAVEDMA		0x0008
-#define EP_FLAGS_SECONDDMA		0x0010
-#define EP_FLAGS_FULLDMA		0x0020
-#define EP_FLAGS_FRAGMENTDMA		0x0040
-#define EP_FLAGS_CRC_PASSTHRU		0x0080
-#define EP_FLAGS_TXDONE			0x0100
-#define EP_FLAGS_NO_TXLENGTH		0x0200
-#define EP_FLAGS_RXREPEAT		0x0400
-#define EP_FLAGS_SNOOPING		0x0800
-#define EP_FLAGS_100MBIT		0x1000
-#define EP_FLAGS_POWERMGMT		0x2000
-#define EP_FLAGS_MII			0x4000
-
-	u_short ep_chipset;		/* Chipset family on this board */
-#define EP_CHIPSET_UNKNOWN		0x00	/* unknown (assume 3c509) */
-#define EP_CHIPSET_3C509		0x01	/* PIO: 3c509, 3c589 */
-#define EP_CHIPSET_VORTEX		0x02	/* 100mbit, single-pkt dma */
-#define EP_CHIPSET_BOOMERANG		0x03	/* Saner dma plus PIO */
-#define EP_CHIPSET_BOOMERANG2		0x04	/* Saner dma, no PIO */
-#define EP_CHIPSET_ROADRUNNER		0x05	/* Like Boomerang, but PCMCIA */
-
+	char    ep_connectors;		/* Connectors on this card.	*/
+	u_char	txashift;		/* shift in SET_TX_AVAIL_THRESH */
 	u_char	bustype;
 #define EP_BUS_ISA	  	0x0
 #define	EP_BUS_PCMCIA	  	0x1
@@ -85,12 +58,12 @@ struct ep_softc {
 
 #define EP_IS_BUS_32(a)	((a) & 0x2)
 
-	u_char	txashift;		/* shift in SET_TX_AVAIL_THRESH */
+	u_char	pcmcia_flags;
+#define EP_REATTACH		0x01
+#define EP_ABSENT		0x02
 };
 
-u_int16_t epreadeeprom(bus_space_tag_t, bus_space_handle_t, int);
-void	epconfig(struct ep_softc *, u_short, u_int8_t *);
-int	epintr(void *);
-void	epstop(struct ep_softc *);
-void	epinit(struct ep_softc *);
-int	ep_detach(struct device *);
+u_int16_t epreadeeprom __P((bus_chipset_tag_t, bus_io_handle_t, int));
+void	epconfig __P((struct ep_softc *, u_int16_t));
+int	epintr __P((void *));
+void	epstop __P((struct ep_softc *));

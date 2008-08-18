@@ -1,5 +1,5 @@
-/*	$OpenBSD: svr4_ipc.c,v 1.9 2002/03/14 01:26:51 millert Exp $	*/
-/*	$NetBSD: svr4_ipc.c,v 1.3 1997/03/30 17:21:02 christos Exp $	*/
+/*	$OpenBSD: svr4_ipc.c,v 1.2 1996/08/02 20:35:39 niklas Exp $	*/
+/*	$NetBSD: svr4_ipc.c,v 1.1 1995/10/14 20:24:30 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Christos Zoulas.  All rights reserved.
@@ -55,43 +55,45 @@
 #include <compat/svr4/svr4_util.h>
 #include <compat/svr4/svr4_ipc.h>
 
+#define	syscallarg(x)	union { x datum; register_t pad; }
+
 #if defined(SYSVMSG) || defined(SYSVSHM) || defined(SYSVSEM)
-static void svr4_to_bsd_ipc_perm(const struct svr4_ipc_perm *,
-				      struct ipc_perm *);
-static void bsd_to_svr4_ipc_perm(const struct ipc_perm *,
-				      struct svr4_ipc_perm *);
+static void svr4_to_bsd_ipc_perm __P((const struct svr4_ipc_perm *,
+				      struct ipc_perm *));
+static void bsd_to_svr4_ipc_perm __P((const struct ipc_perm *,
+				      struct svr4_ipc_perm *));
 #endif
 
 #ifdef SYSVSEM
-static void bsd_to_svr4_semid_ds(const struct semid_ds *,
-				      struct svr4_semid_ds *);
-static void svr4_to_bsd_semid_ds(const struct svr4_semid_ds *,
-				      struct semid_ds *);
-static int svr4_semop(struct proc *, void *, register_t *);
-static int svr4_semget(struct proc *, void *, register_t *);
-static int svr4_semctl(struct proc *, void *, register_t *);
+static void bsd_to_svr4_semid_ds __P((const struct semid_ds *,
+				      struct svr4_semid_ds *));
+static void svr4_to_bsd_semid_ds __P((const struct svr4_semid_ds *,
+				      struct semid_ds *));
+static int svr4_semop __P((struct proc *, void *, register_t *));
+static int svr4_semget __P((struct proc *, void *, register_t *));
+static int svr4_semctl __P((struct proc *, void *, register_t *));
 #endif
 
 #ifdef SYSVMSG
-static void bsd_to_svr4_msqid_ds(const struct msqid_ds *,
-				      struct svr4_msqid_ds *);
-static void svr4_to_bsd_msqid_ds(const struct svr4_msqid_ds *,
-				      struct msqid_ds *);
-static int svr4_msgsnd(struct proc *, void *, register_t *);
-static int svr4_msgrcv(struct proc *, void *, register_t *);
-static int svr4_msgget(struct proc *, void *, register_t *);
-static int svr4_msgctl(struct proc *, void *, register_t *);
+static void bsd_to_svr4_msqid_ds __P((const struct msqid_ds *,
+				      struct svr4_msqid_ds *));
+static void svr4_to_bsd_msqid_ds __P((const struct svr4_msqid_ds *,
+				      struct msqid_ds *));
+static int svr4_msgsnd __P((struct proc *, void *, register_t *));
+static int svr4_msgrcv __P((struct proc *, void *, register_t *));
+static int svr4_msgget __P((struct proc *, void *, register_t *));
+static int svr4_msgctl __P((struct proc *, void *, register_t *));
 #endif
 
 #ifdef SYSVSHM
-static void bsd_to_svr4_shmid_ds(const struct shmid_ds *,
-				      struct svr4_shmid_ds *);
-static void svr4_to_bsd_shmid_ds(const struct svr4_shmid_ds *,
-				      struct shmid_ds *);
-static int svr4_shmat(struct proc *, void *, register_t *);
-static int svr4_shmdt(struct proc *, void *, register_t *);
-static int svr4_shmget(struct proc *, void *, register_t *);
-static int svr4_shmctl(struct proc *, void *, register_t *);
+static void bsd_to_svr4_shmid_ds __P((const struct shmid_ds *,
+				      struct svr4_shmid_ds *));
+static void svr4_to_bsd_shmid_ds __P((const struct svr4_shmid_ds *,
+				      struct shmid_ds *));
+static int svr4_shmat __P((struct proc *, void *, register_t *));
+static int svr4_shmdt __P((struct proc *, void *, register_t *));
+static int svr4_shmget __P((struct proc *, void *, register_t *));
+static int svr4_shmctl __P((struct proc *, void *, register_t *));
 #endif
 
 #if defined(SYSVMSG) || defined(SYSVSHM) || defined(SYSVSEM)
@@ -146,7 +148,7 @@ svr4_to_bsd_semid_ds(sds, bds)
 	struct semid_ds *bds;
 {
 	svr4_to_bsd_ipc_perm(&sds->sem_perm, &bds->sem_perm);
-	bds->sem_base = (struct sem *) sds->sem_base;
+	bds->sem_base = (struct sem *) bds->sem_base;
 	bds->sem_nsems = sds->sem_nsems;
 	bds->sem_otime = sds->sem_otime;
 	bds->sem_pad1 = sds->sem_pad1;
@@ -219,7 +221,7 @@ svr4_semctl(p, v, retval)
 		SCARG(&ap, arg)->buf = stackgap_alloc(&sg, sizeof(bs));
 		if ((error = sys___semctl(p, &ap, retval)) != 0)
 			return error;
-		error = copyin(SCARG(&ap, arg)->buf, &bs, sizeof bs);
+		error = copyin(&bs, SCARG(&ap, arg)->buf, sizeof bs);
 		if (error)
 			return error;
 		bsd_to_svr4_semid_ds(&bs, &ss);
@@ -347,7 +349,7 @@ bsd_to_svr4_msqid_ds(bds, sds)
 
 	/* use the padding for the rest of the fields */
 	{
-		const short *pad = (const short *) bds->msg_pad4;
+		short *pad = (short *) bds->msg_pad4;
 		sds->msg_cv = pad[0];
 		sds->msg_qnum_cv = pad[1];
 	}
@@ -483,7 +485,7 @@ svr4_msgctl(p, v, retval)
 		SCARG(&ap, cmd) = IPC_STAT;
 		if ((error = sys_msgctl(p, &ap, retval)) != 0)
 			return error;
-		error = copyin(SCARG(&ap, buf), &bs, sizeof bs);
+		error = copyin(&bs, SCARG(&ap, buf), sizeof bs);
 		if (error)
 			return error;
 		bsd_to_svr4_msqid_ds(&bs, &ss);
@@ -666,39 +668,13 @@ svr4_shmctl(p, v, retval)
 	struct svr4_shmid_ds ss;
 
 	SCARG(&ap, shmid) = SCARG(uap, shmid);
-
-	if (SCARG(uap, buf) != NULL) {
-		SCARG(&ap, buf) = stackgap_alloc(&sg, sizeof (struct shmid_ds));
-		switch (SCARG(uap, cmd)) {
-                case SVR4_IPC_SET:
-                case SVR4_IPC_RMID:
-                case SVR4_SHM_LOCK:
-                case SVR4_SHM_UNLOCK:
-			error = copyin(SCARG(uap, buf), (caddr_t) &ss,
-                            sizeof ss);
-                        if (error)
-                                return error;
-                        svr4_to_bsd_shmid_ds(&ss, &bs);
-                        error = copyout(&bs, SCARG(&ap, buf), sizeof bs);
-                        if (error)
-                                return error;
-                        break;
-                default:
-                        break;
-                }
-	}
-	else
-		SCARG(&ap, buf) = NULL;
-
-
+	SCARG(&ap, buf) = stackgap_alloc(&sg, sizeof (struct shmid_ds));
 	switch (SCARG(uap, cmd)) {
 	case SVR4_IPC_STAT:
 		SCARG(&ap, cmd) = IPC_STAT;
 		if ((error = sys_shmctl(p, &ap, retval)) != 0)
 			return error;
-		if (SCARG(uap, buf) == NULL)
-			return 0;
-		error = copyin(SCARG(&ap, buf), &bs, sizeof bs);
+		error = copyin(&bs, SCARG(&ap, buf), sizeof bs);
 		if (error)
 			return error;
 		bsd_to_svr4_shmid_ds(&bs, &ss);
@@ -706,6 +682,13 @@ svr4_shmctl(p, v, retval)
 
 	case SVR4_IPC_SET:
 		SCARG(&ap, cmd) = IPC_SET;
+		error = copyin(SCARG(uap, buf), (caddr_t) &ss, sizeof ss);
+		if (error)
+			return error;
+		svr4_to_bsd_shmid_ds(&ss, &bs);
+		error = copyout(&bs, SCARG(&ap, buf), sizeof bs);
+		if (error)
+			return error;
 		return sys_shmctl(p, &ap, retval);
 
 	case SVR4_IPC_RMID:
@@ -721,9 +704,14 @@ svr4_shmctl(p, v, retval)
 		case SVR4_SHM_UNLOCK:
 			SCARG(&ap, cmd) = SHM_UNLOCK;
 			break;
-		default:
-			return EINVAL;
 		}
+		error = copyin(SCARG(uap, buf), &ss, sizeof ss);
+		if (error)
+			return error;
+		svr4_to_bsd_shmid_ds(&ss, &bs);
+		error = copyout(&bs, SCARG(&ap, buf), sizeof bs);
+		if (error)
+			return error;
 		return sys_shmctl(p, &ap, retval);
 
 	default:

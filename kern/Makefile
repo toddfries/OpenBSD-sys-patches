@@ -1,9 +1,9 @@
-#	$OpenBSD: Makefile,v 1.18 2008/04/23 10:55:14 norby Exp $
+#	@(#)Makefile	8.2 (Berkeley) 3/21/94
 
 # Makefile for kernel tags files, init_sysent, etc.
 
-ARCH=	alpha aviion hp300 hppa i386 m68k mac68k mvme68k mvme88k \
-	mvmeppc powerpc sparc sparc64 vax
+ARCH=	alpha amiga atari hp300 i386 m68k mac68k mvme68k mvme88k pc532 \
+	pica pmax sparc sun3 vax
 
 all:	init_sysent.c vnode_if.c
 
@@ -28,20 +28,22 @@ SYSTAGS=/var/db/sys_tags
 SYSDIR=/sys
 
 # Directories in which to place tags links (other than machine-dependent)
-DGEN=	compat compat/common compat/freebsd compat/hpux compat/ibcs2 \
+DGEN=	adosfs \
+	compat compat/common compat/freebsd compat/hpux compat/ibcs2 \
 	compat/linux compat/osf1 compat/sunos compat/svr4 compat/ultrix \
 	conf \
 	ddb \
-	dev dev/eisa dev/ic dev/isa dev/pci dev/pcmcia dev/cardbus dev/rcons \
-	dev/sun dev/tc \
+	dev dev/eisa dev/ic dev/isa dev/pci dev/pcmcia dev/rcons dev/sun \
+	dev/tc \
 	gnu \
 	isofs isofs/cd9660 \
 	kern \
 	lib libkern \
-	miscfs miscfs/deadfs miscfs/fifofs \
-	miscfs/portal miscfs/procfs miscfs/specfs \
+	miscfs miscfs/deadfs miscfs/fdesc miscfs/fifofs miscfs/kernfs \
+	miscfs/nullfs miscfs/portal miscfs/procfs \
+	miscfs/specfs miscfs/umapfs miscfs/union \
 	msdosfs \
-	net netinet netmpls \
+	net netccitt netinet netiso netns \
 	nfs \
 	scsi \
 	sys \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ipc_10.c,v 1.8 2004/05/05 05:18:17 mickey Exp $	*/
+/*	$OpenBSD: kern_ipc_10.c,v 1.2 1996/08/02 20:34:42 niklas Exp $	*/
 /*	$NetBSD: kern_ipc_10.c,v 1.4 1995/10/07 06:26:25 mycroft Exp $	*/
 
 /*
@@ -41,14 +41,12 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_map.h>
+#include <vm/vm_map.h>
+#include <vm/vm_kern.h>
 
-/*
- * Note that while we no longer have a COMPAT_10 kernel option,
- * there are other COMPAT_* options that need these old functions.
- */
-
-#if defined(SYSVSEM) && !defined(__LP64__)
+#ifdef SYSVSEM
 int
 compat_10_sys_semsys(p, v, retval)
 	struct proc *p;
@@ -78,6 +76,9 @@ compat_10_sys_semsys(p, v, retval)
 		syscallarg(struct sembuf *) sops;
 		syscallarg(u_int) nsops;
 	} */ semop_args;
+	struct sys_semconfig_args /* {
+		syscallarg(int) flag;
+	} */ semconfig_args;
 
 	switch (SCARG(uap, which)) {
 	case 0:						/* __semctl() */
@@ -99,11 +100,17 @@ compat_10_sys_semsys(p, v, retval)
 		SCARG(&semop_args, nsops) = SCARG(uap, a4);
 		return (sys_semop(p, &semop_args, retval));
 
+	case 3:						/* semconfig() */
+		SCARG(&semconfig_args, flag) = SCARG(uap, a2);
+		return (sys_semconfig(p, &semconfig_args, retval));
+
 	default:
 		return (EINVAL);
 	}
 }
+#endif
 
+#ifdef SYSVSHM
 int
 compat_10_sys_shmsys(p, v, retval)
 	struct proc *p;
@@ -149,7 +156,7 @@ compat_10_sys_shmsys(p, v, retval)
 		return (sys_shmctl(p, &shmctl_args, retval));
 
 	case 2:						/* shmdt() */
-		SCARG(&shmdt_args, shmaddr) = (void *)SCARG(uap, a2);
+		SCARG(&shmat_args, shmaddr) = (void *)SCARG(uap, a2);
 		return (sys_shmdt(p, &shmdt_args, retval));
 
 	case 3:						/* shmget() */
@@ -162,7 +169,9 @@ compat_10_sys_shmsys(p, v, retval)
 		return (EINVAL);
 	}
 }
+#endif
 
+#ifdef SYSVMSG
 int
 compat_10_sys_msgsys(p, v, retval)
 	struct proc *p;

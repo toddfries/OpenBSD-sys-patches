@@ -1,5 +1,5 @@
-/*	$OpenBSD: bootparam.c,v 1.11 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: bootparam.c,v 1.10 1996/10/14 21:16:55 thorpej Exp $	*/
+/*	$OpenBSD: bootparam.c,v 1.4 1996/09/27 07:13:47 mickey Exp $	*/
+/*	$NetBSD: bootparam.c,v 1.7 1996/02/26 23:05:14 gwr Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -43,6 +43,8 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 
+#include <string.h>
+
 #include <nfs/rpcv2.h>
 
 #include "stand.h"
@@ -50,12 +52,6 @@
 #include "netif.h"
 #include "rpc.h"
 #include "bootparam.h"
-
-#ifdef DEBUG_RPC
-#define RPC_PRINTF(a)	printf a
-#else
-#define RPC_PRINTF(a)	/* printf a */
-#endif
 
 struct in_addr	bp_server_addr;	/* net order */
 n_short		bp_server_port;	/* net order */
@@ -77,11 +73,11 @@ struct xdr_inaddr {
 	int32_t	addr[4];
 };
 
-int xdr_inaddr_encode(char **p, struct in_addr ia);
-int xdr_inaddr_decode(char **p, struct in_addr *ia);
+int xdr_inaddr_encode __P((char **p, struct in_addr ia));
+int xdr_inaddr_decode __P((char **p, struct in_addr *ia));
 
-int xdr_string_encode(char **p, char *str, int len);
-int xdr_string_decode(char **p, char *str, int *len_p);
+int xdr_string_encode __P((char **p, char *str, int len));
+int xdr_string_decode __P((char **p, char *str, int *len_p));
 
 
 /*
@@ -100,7 +96,8 @@ int xdr_string_decode(char **p, char *str, int *len_p);
  * know about us (don't want to broadcast a getport call).
  */
 int
-bp_whoami(int sockfd)
+bp_whoami(sockfd)
+	int sockfd;
 {
 	/* RPC structures for PMAPPROC_CALLIT */
 	struct args {
@@ -129,10 +126,14 @@ bp_whoami(int sockfd)
 	struct iodesc *d;
 	int len, x;
 
-	RPC_PRINTF(("bp_whoami: myip=%s\n", inet_ntoa(myip)));
+#ifdef	RPC_DEBUG
+	printf("bp_whoami: myip=%s\n", inet_ntoa(myip));
+#endif
 
 	if (!(d = socktodesc(sockfd))) {
-		RPC_PRINTF(("bp_whoami: bad socket. %d\n", sockfd));
+#ifdef	RPC_DEBUG
+		printf("bp_whoami: bad socket. %d\n", sockfd);
+#endif
 		return (-1);
 	}
 	args = &sdata.d;
@@ -145,7 +146,7 @@ bp_whoami(int sockfd)
 	args->vers = htonl(BOOTPARAM_VERS);
 	args->proc = htonl(BOOTPARAM_WHOAMI);
 	args->arglen = htonl(sizeof(struct xdr_inaddr));
-	send_tail = (char *)&args->xina;
+	send_tail = (char*) &args->xina;
 
 	/*
 	 * append encapsulated data (client IP address)
@@ -159,8 +160,8 @@ bp_whoami(int sockfd)
 	/* rpc_call will set d->destport */
 
 	len = rpc_call(d, PMAPPROG, PMAPVERS, PMAPPROC_CALLIT,
-	    args, send_tail - (char *)args,
-	    repl, sizeof(*repl));
+				  args, send_tail - (char*)args,
+				  repl, sizeof(*repl));
 	if (len < 8) {
 		printf("bootparamd: 'whoami' call failed\n");
 		return (-1);
@@ -176,12 +177,16 @@ bp_whoami(int sockfd)
 	 */
 	bp_server_port = repl->port;
 
-	RPC_PRINTF(("bp_whoami: server at %s:%d\n",
-	    inet_ntoa(bp_server_addr), ntohs(bp_server_port)));
+#ifdef	RPC_DEBUG
+	printf("bp_whoami: server at %s:%d\n",
+		   inet_ntoa(bp_server_addr), ntohs(bp_server_port));
+#endif
 
 	/* We have just done a portmap call, so cache the portnum. */
-	rpc_pmap_putcache(bp_server_addr, BOOTPARAM_PROG, BOOTPARAM_VERS,
-	    (int)ntohs(bp_server_port));
+	rpc_pmap_putcache(bp_server_addr,
+			  BOOTPARAM_PROG,
+			  BOOTPARAM_VERS,
+			  (int)ntohs(bp_server_port));
 
 	/*
 	 * Parse the encapsulated results from bootparam/whoami
@@ -191,25 +196,31 @@ bp_whoami(int sockfd)
 		printf("bp_whoami: short reply, %d < %d\n", len, x);
 		return (-1);
 	}
-	recv_head = (char *)repl->capsule;
+	recv_head = (char*) repl->capsule;
 
 	/* client name */
 	hostnamelen = MAXHOSTNAMELEN-1;
 	if (xdr_string_decode(&recv_head, hostname, &hostnamelen)) {
-		RPC_PRINTF(("bp_whoami: bad hostname\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_whoami: bad hostname\n");
+#endif
 		return (-1);
 	}
 
 	/* domain name */
 	domainnamelen = MAXHOSTNAMELEN-1;
 	if (xdr_string_decode(&recv_head, domainname, &domainnamelen)) {
-		RPC_PRINTF(("bp_whoami: bad domainname\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_whoami: bad domainname\n");
+#endif
 		return (-1);
 	}
 
 	/* gateway address */
 	if (xdr_inaddr_decode(&recv_head, &gateip)) {
-		RPC_PRINTF(("bp_whoami: bad gateway\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_whoami: bad gateway\n");
+#endif
 		return (-1);
 	}
 
@@ -226,7 +237,11 @@ bp_whoami(int sockfd)
  *	server pathname
  */
 int
-bp_getfile(int sockfd, char *key, struct in_addr *serv_addr, char *pathname)
+bp_getfile(sockfd, key, serv_addr, pathname)
+	int sockfd;
+	char *key;
+	char *pathname;
+	struct in_addr *serv_addr;
 {
 	struct {
 		n_long	h[RPC_HEADER_WORDS];
@@ -243,12 +258,14 @@ bp_getfile(int sockfd, char *key, struct in_addr *serv_addr, char *pathname)
 	int sn_len, path_len, rlen;
 
 	if (!(d = socktodesc(sockfd))) {
-		RPC_PRINTF(("bp_getfile: bad socket. %d\n", sockfd));
+#ifdef	RPC_DEBUG
+		printf("bp_getfile: bad socket. %d\n", sockfd);
+#endif
 		return (-1);
 	}
 
-	send_tail = (char *)sdata.d;
-	recv_head = (char *)rdata.d;
+	send_tail = (char*) sdata.d;
+	recv_head = (char*) rdata.d;
 
 	/*
 	 * Build request message.
@@ -256,13 +273,17 @@ bp_getfile(int sockfd, char *key, struct in_addr *serv_addr, char *pathname)
 
 	/* client name (hostname) */
 	if (xdr_string_encode(&send_tail, hostname, hostnamelen)) {
-		RPC_PRINTF(("bp_getfile: bad client\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_getfile: bad client\n");
+#endif
 		return (-1);
 	}
 
 	/* key name (root or swap) */
 	if (xdr_string_encode(&send_tail, key, strlen(key))) {
-		RPC_PRINTF(("bp_getfile: bad key\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_getfile: bad key\n");
+#endif
 		return (-1);
 	}
 
@@ -273,14 +294,16 @@ bp_getfile(int sockfd, char *key, struct in_addr *serv_addr, char *pathname)
 
 	rlen = rpc_call(d,
 		BOOTPARAM_PROG, BOOTPARAM_VERS, BOOTPARAM_GETFILE,
-		sdata.d, send_tail - (char *)sdata.d,
+		sdata.d, send_tail - (char*)sdata.d,
 		rdata.d, sizeof(rdata.d));
 	if (rlen < 4) {
-		RPC_PRINTF(("bp_getfile: short reply\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_getfile: short reply\n");
+#endif
 		errno = EBADRPC;
 		return (-1);
 	}
-	recv_head = (char *)rdata.d;
+	recv_head = (char*) rdata.d;
 
 	/*
 	 * Parse result message.
@@ -289,20 +312,26 @@ bp_getfile(int sockfd, char *key, struct in_addr *serv_addr, char *pathname)
 	/* server name */
 	sn_len = FNAME_SIZE-1;
 	if (xdr_string_decode(&recv_head, serv_name, &sn_len)) {
-		RPC_PRINTF(("bp_getfile: bad server name\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_getfile: bad server name\n");
+#endif
 		return (-1);
 	}
 
 	/* server IP address (mountd/NFS) */
 	if (xdr_inaddr_decode(&recv_head, serv_addr)) {
-		RPC_PRINTF(("bp_getfile: bad server addr\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_getfile: bad server addr\n");
+#endif
 		return (-1);
 	}
 
 	/* server pathname */
 	path_len = MAXPATHLEN-1;
 	if (xdr_string_decode(&recv_head, pathname, &path_len)) {
-		RPC_PRINTF(("bp_getfile: bad server path\n"));
+#ifdef	RPC_DEBUG
+		printf("bp_getfile: bad server path\n");
+#endif
 		return (-1);
 	}
 
@@ -316,8 +345,12 @@ bp_getfile(int sockfd, char *key, struct in_addr *serv_addr, char *pathname)
  * (but with non-standard args...)
  */
 
+
 int
-xdr_string_encode(char **pkt, char *str, int len)
+xdr_string_encode(pkt, str, len)
+	char **pkt;
+	char *str;
+	int len;
 {
 	u_int32_t *lenp;
 	char *datap;
@@ -336,7 +369,10 @@ xdr_string_encode(char **pkt, char *str, int len)
 }
 
 int
-xdr_string_decode(char **pkt, char *str, int *len_p)
+xdr_string_decode(pkt, str, len_p)
+	char **pkt;
+	char *str;
+	int *len_p;		/* bufsize - 1 */
 {
 	u_int32_t *lenp;
 	char *datap;
@@ -361,8 +397,11 @@ xdr_string_decode(char **pkt, char *str, int *len_p)
 	return (0);
 }
 
+
 int
-xdr_inaddr_encode(char **pkt, struct in_addr ia)
+xdr_inaddr_encode(pkt, ia)
+	char **pkt;
+	struct in_addr ia;		/* network order */
 {
 	struct xdr_inaddr *xi;
 	u_char *cp;
@@ -393,7 +432,9 @@ xdr_inaddr_encode(char **pkt, struct in_addr ia)
 }
 
 int
-xdr_inaddr_decode(char **pkt, struct in_addr *ia)
+xdr_inaddr_decode(pkt, ia)
+	char **pkt;
+	struct in_addr *ia;		/* network order */
 {
 	struct xdr_inaddr *xi;
 	u_char *cp;
@@ -407,8 +448,10 @@ xdr_inaddr_decode(char **pkt, struct in_addr *ia)
 	xi = (struct xdr_inaddr *) *pkt;
 	*pkt += sizeof(*xi);
 	if (xi->atype != htonl(1)) {
-		RPC_PRINTF(("xdr_inaddr_decode: bad addrtype=%d\n",
-		    ntohl(xi->atype)));
+#ifdef	RPC_DEBUG
+		printf("xdr_inaddr_decode: bad addrtype=%d\n",
+			   ntohl(xi->atype));
+#endif
 		return(-1);
 	}
 

@@ -1,4 +1,3 @@
-/*	$OpenBSD: mcount.c,v 1.8 2004/08/07 00:38:32 deraadt Exp $	*/
 /*	$NetBSD: mcount.c,v 1.3.6.1 1996/06/12 04:23:01 cgd Exp $	*/
 
 /*-
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)mcount.c	8.1 (Berkeley) 6/4/93";
 #else
-static char rcsid[] = "$OpenBSD: mcount.c,v 1.8 2004/08/07 00:38:32 deraadt Exp $";
+static char rcsid[] = "$NetBSD: mcount.c,v 1.3.6.1 1996/06/12 04:23:01 cgd Exp $";
 #endif
 #endif
 
@@ -55,20 +58,16 @@ static char rcsid[] = "$OpenBSD: mcount.c,v 1.8 2004/08/07 00:38:32 deraadt Exp 
  * Note: the original BSD code used the same variable (frompcindex) for
  * both frompcindex and frompc.  Any reasonable, modern compiler will
  * perform this optimization.
- *
- * XXX - the unused attribute is there because some archs define _mcount
- *       as static and gcc doesn't check for function calls in assembler
- *       stubs.
  */
-_MCOUNT_DECL(u_long frompc, u_long selfpc) __attribute__((unused));
-_MCOUNT_DECL(u_long frompc, u_long selfpc)	/* _mcount; may be static, inline, etc */
+_MCOUNT_DECL(frompc, selfpc)	/* _mcount; may be static, inline, etc */
+	register u_long frompc, selfpc;
 {
-	u_short *frompcindex;
-	struct tostruct *top, *prevtop;
-	struct gmonparam *p;
-	long toindex;
+	register u_short *frompcindex;
+	register struct tostruct *top, *prevtop;
+	register struct gmonparam *p;
+	register long toindex;
 #ifdef _KERNEL
-	int s;
+	register int s;
 #endif
 
 	p = &_gmonparam;

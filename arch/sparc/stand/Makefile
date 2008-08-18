@@ -1,10 +1,36 @@
-#	$OpenBSD: Makefile,v 1.9 2007/11/25 18:25:33 deraadt Exp $
-#	$NetBSD: Makefile,v 1.15 1997/06/01 03:39:03 mrg Exp $
+#	$NetBSD: Makefile,v 1.10 1995/10/09 23:25:54 pk Exp $
 
-.if ${MACHINE} == "sparc"
-SUBDIR= libsa libz boot bootxx binstall
-.endif
+SUBDIR= boot bootxx installboot
 
-SUBDIR+= installboot
+### find out what to use for libkern and libsa
+SAREL=
+KERNREL=
+.include "Makefile.inc"
+.include "$S/lib/libkern/Makefile.inc"
+.include "$S/lib/libsa/Makefile.inc"
+
+all: ${KERNLIB} ${SALIB} _SUBDIRUSE
+
+libdep:
+	@echo  ${.OBJDIR}/${KERNLIB} ${.OBJDIR}/${SALIB}
+
+sadep:
+	@echo  ${.OBJDIR}/${SALIB}
+
+kernlibdir:
+	@echo  ${.OBJDIR}/${KERNDST}
+
+salibdir:
+	@echo  ${.OBJDIR}/${SADST}
+
+clean:: _SUBDIRUSE
+
+cleandir: _SUBDIRUSE
+
+BINDIR=/usr/mdec
+
+afterinstall:
+	install -c -o ${BINOWN} -g ${BINGRP} -m ${BINMODE} \
+		${.CURDIR}/binstall.sh ${DESTDIR}${BINDIR}/binstall
 
 .include <bsd.subdir.mk>

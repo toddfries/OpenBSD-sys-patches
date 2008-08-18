@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_lex.c,v 1.9 2006/03/13 06:23:20 jsg Exp $	*/
+/*	$OpenBSD: db_lex.c,v 1.4 1996/04/21 22:19:03 deraadt Exp $	*/
 /*	$NetBSD: db_lex.c,v 1.8 1996/02/05 01:57:05 christos Exp $	*/
 
 /* 
@@ -36,8 +36,6 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/db_machdep.h>
 
 #include <ddb/db_lex.h>
@@ -45,16 +43,12 @@
 #include <ddb/db_command.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
-#include <ddb/db_var.h>
 
 char	db_line[120];
 char *	db_lp, *db_endlp;
 
-db_expr_t db_tok_number;
-char	db_tok_string[TOK_STRING_SIZE];
-
 int
-db_read_line(void)
+db_read_line()
 {
 	int	i;
 
@@ -67,7 +61,7 @@ db_read_line(void)
 }
 
 void
-db_flush_line(void)
+db_flush_line()
 {
 	db_lp = db_line;
 	db_endlp = db_line;
@@ -76,7 +70,7 @@ db_flush_line(void)
 int	db_look_char = 0;
 
 int
-db_read_char(void)
+db_read_char()
 {
 	int	c;
 
@@ -92,7 +86,8 @@ db_read_char(void)
 }
 
 void
-db_unread_char(int c)
+db_unread_char(c)
+	int c;
 {
 	db_look_char = c;
 }
@@ -100,13 +95,14 @@ db_unread_char(int c)
 int	db_look_token = 0;
 
 void
-db_unread_token(int t)
+db_unread_token(t)
+	int	t;
 {
 	db_look_token = t;
 }
 
 int
-db_read_token(void)
+db_read_token()
 {
 	int	t;
 
@@ -119,8 +115,10 @@ db_read_token(void)
 	return (t);
 }
 
+int	db_radix = 16;
+
 void
-db_flush_lex(void)
+db_flush_lex()
 {
 	db_flush_line();
 	db_look_char = 0;
@@ -128,7 +126,7 @@ db_flush_lex(void)
 }
 
 int
-db_lex(void)
+db_lex()
 {
 	int	c;
 

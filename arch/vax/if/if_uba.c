@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_uba.c,v 1.11 2003/11/10 21:05:04 miod Exp $	*/
-/*	$NetBSD: if_uba.c,v 1.15 1999/01/01 21:43:18 ragge Exp $	*/
+/*	$NetBSD: if_uba.c,v 1.11 1996/03/17 22:56:36 ragge Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,6 +40,7 @@
 #include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
+#include <sys/map.h>
 #include <sys/buf.h>
 #include <sys/socket.h>
 #include <sys/syslog.h>
@@ -46,15 +50,15 @@
 #include <machine/pte.h>
 #include <machine/mtpr.h>
 #include <machine/vmparam.h>
-#include <machine/cpu.h>
+#include <machine/macros.h>
 
 #include <vax/if/if_uba.h>
 #include <vax/uba/ubareg.h>
 #include <vax/uba/ubavar.h>
 
-static	int if_ubaalloc(struct ifubinfo *, struct ifrw *, int);
-static	void rcv_xmtbuf(struct ifxmt *);
-static	void restor_xmtbuf(struct ifxmt *);
+static	int if_ubaalloc __P((struct ifubinfo *, struct ifrw *, int));
+static	void rcv_xmtbuf __P((struct ifxmt *));
+static	void restor_xmtbuf __P((struct ifxmt *));
 
 /*
  * Routines supporting UNIBUS network interfaces.
@@ -64,20 +68,20 @@ static	void restor_xmtbuf(struct ifxmt *);
  */
 
 /*
- * Init UNIBUS for interface whose headers of size hlen are to
+ * Init UNIBUS for interface on uban whose headers of size hlen are to
  * end on a page boundary.  We allocate a UNIBUS map register for the page
  * with the header, and nmr more UNIBUS map registers for i/o on the adapter,
  * doing this once for each read and once for each write buffer.  We also
  * allocate page frames in the mbuffer pool for these pages.
  */
 int
-if_ubaminit(ifu, uh, hlen, nmr, ifr, nr, ifw, nw)
+if_ubaminit(ifu, uban, hlen, nmr, ifr, nr, ifw, nw)
 	register struct ifubinfo *ifu;
-	struct uba_softc *uh;
-	int hlen, nmr, nr, nw;
+	int uban, hlen, nmr, nr, nw;
 	register struct ifrw *ifr;
 	register struct ifxmt *ifw;
 {
+	struct	uba_softc *ubasc;
 	register caddr_t p;
 	caddr_t cp;
 	int i, nclbytes, off;
@@ -86,7 +90,7 @@ if_ubaminit(ifu, uh, hlen, nmr, ifr, nr, ifw, nw)
 		off = MCLBYTES - hlen;
 	else
 		off = 0;
-	nclbytes = roundup(nmr * VAX_NBPG, MCLBYTES);
+	nclbytes = roundup(nmr * NBPG, MCLBYTES);
 	if (hlen)
 		nclbytes += MCLBYTES;
 	if (ifr[0].ifrw_addr)
@@ -107,9 +111,10 @@ if_ubaminit(ifu, uh, hlen, nmr, ifr, nr, ifw, nw)
 			p += nclbytes;
 		}
 		ifu->iff_hlen = hlen;
-		ifu->iff_softc = uh;
-		ifu->iff_uba = uh->uh_uba;
-		ifu->iff_ubamr = uh->uh_mr;
+		ifu->iff_uban = uban;
+		ubasc = uba_cd.cd_devs[uban];
+		ifu->iff_uba = ubasc->uh_uba;
+		ifu->iff_ubamr = ubasc->uh_mr;
 	}
 	for (i = 0; i < nr; i++)
 		if (if_ubaalloc(ifu, &ifr[i], nmr) == 0) {
@@ -132,9 +137,9 @@ if_ubaminit(ifu, uh, hlen, nmr, ifr, nr, ifw, nw)
 	return (1);
 bad:
 	while (--nw >= 0)
-		ubarelse(ifu->iff_softc, &ifw[nw].ifw_info);
+		ubarelse(ifu->iff_uban, &ifw[nw].ifw_info);
 	while (--nr >= 0)
-		ubarelse(ifu->iff_softc, &ifr[nr].ifrw_info);
+		ubarelse(ifu->iff_uban, &ifr[nr].ifrw_info);
 	free(cp, M_DEVBUF);
 	ifr[0].ifrw_addr = 0;
 	return (0);
@@ -154,7 +159,7 @@ if_ubaalloc(ifu, ifrw, nmr)
 	register int info;
 
 	info =
-	    uballoc(ifu->iff_softc, ifrw->ifrw_addr, nmr*VAX_NBPG + ifu->iff_hlen,
+	    uballoc(ifu->iff_uban, ifrw->ifrw_addr, nmr*NBPG + ifu->iff_hlen,
 	        ifu->iff_flags);
 	if (info == 0)
 		return (0);
@@ -214,7 +219,7 @@ if_ubaget(ifu, ifr, totlen, ifp)
 		}
 		len = totlen;
 		if (len >= MINCLSIZE) {
-			pt_entry_t *cpte, *ppte;
+			struct pte *cpte, *ppte;
 			int x, *ip, i;
 
 			MCLGET(m, M_DONTWAIT);
@@ -223,7 +228,7 @@ if_ubaget(ifu, ifr, totlen, ifp)
 			}
 			len = min(len, MCLBYTES);
 			m->m_len = len;
-			if (((vaddr_t)cp & PAGE_MASK) != 0) {
+			if (!claligned(cp)){
 				goto copy;
 			}
 			/*
@@ -231,18 +236,18 @@ if_ubaget(ifu, ifr, totlen, ifp)
 			 * as quick form of copy.  Remap UNIBUS and invalidate.
 			 */
 			pp = mtod(m, char *);
-			cpte = kvtopte(cp);
-			ppte = kvtopte(pp);
-			x = vax_btop(cp - ifr->ifrw_addr);
+			cpte = (struct pte *)kvtopte(cp);
+			ppte = (struct pte *)kvtopte(pp);
+			x = btop(cp - ifr->ifrw_addr);
 			ip = (int *)&ifr->ifrw_mr[x];
-			for (i = 0; i < MCLBYTES/VAX_NBPG; i++) {
-				pt_entry_t t;
+			for (i = 0; i < MCLBYTES/NBPG; i++) {
+				struct pte t;
 				t = *ppte; *ppte++ = *cpte; *cpte = t;
-				*ip++ = (*cpte++ & PG_FRAME) | ifr->ifrw_proto;
+				*ip++ = cpte++->pg_pfn|ifr->ifrw_proto;
 				mtpr(cp,PR_TBIS);
-				cp += VAX_NBPG;
+				cp += NBPG;
 				mtpr((caddr_t)pp,PR_TBIS);
-				pp += VAX_NBPG;
+				pp += NBPG;
 			}
 			goto nocopy;
 		}
@@ -285,7 +290,7 @@ rcv_xmtbuf(ifw)
 {
 	register struct mbuf *m;
 	struct mbuf **mprev;
-	register int i;
+	register i;
 	char *cp;
 
 	while ((i = ffs((long)ifw->ifw_xswapd)) != 0) {
@@ -314,7 +319,7 @@ static void
 restor_xmtbuf(ifw)
 	register struct ifxmt *ifw;
 {
-	register int i;
+	register i;
 
 	for (i = 0; i < ifw->ifw_nmr; i++)
 		ifw->ifw_wmap[i] = ifw->ifw_mr[i];
@@ -342,18 +347,17 @@ if_ubaput(ifu, ifw, m)
 	cp = ifw->ifw_addr;
 	while (m) {
 		dp = mtod(m, char *);
-		if (((vaddr_t)cp & PAGE_MASK) == 0 &&
-		    ((vaddr_t)dp & PAGE_MASK) == 0 &&
+		if (claligned(cp) && claligned(dp) &&
 		    (m->m_len == MCLBYTES || m->m_next == (struct mbuf *)0)) {
-			pt_entry_t *pte;
+			struct pte *pte;
 			int *ip;
 
-			pte = kvtopte(dp);
-			x = vax_btop(cp - ifw->ifw_addr);
+			pte = (struct pte *)kvtopte(dp);
+			x = btop(cp - ifw->ifw_addr);
 			ip = (int *)&ifw->ifw_mr[x];
-			for (i = 0; i < MCLBYTES/VAX_NBPG; i++)
-				*ip++ = ifw->ifw_proto | (*pte++ & PG_FRAME);
-			xswapd |= 1 << (x>>(MCLSHIFT-VAX_PGSHIFT));
+			for (i = 0; i < MCLBYTES/NBPG; i++)
+				*ip++ = ifw->ifw_proto | pte++->pg_pfn;
+			xswapd |= 1 << (x>>(MCLSHIFT-PGSHIFT));
 			mp = m->m_next;
 			m->m_next = ifw->ifw_xtofree;
 			ifw->ifw_xtofree = m;
@@ -381,8 +385,8 @@ if_ubaput(ifu, ifw, m)
 		if (i >= x)
 			break;
 		ifw->ifw_xswapd &= ~(1<<i);
-		i *= MCLBYTES/VAX_NBPG;
-		for (t = 0; t < MCLBYTES/VAX_NBPG; t++) {
+		i *= MCLBYTES/NBPG;
+		for (t = 0; t < MCLBYTES/NBPG; t++) {
 			ifw->ifw_mr[i] = ifw->ifw_wmap[i];
 			i++;
 		}

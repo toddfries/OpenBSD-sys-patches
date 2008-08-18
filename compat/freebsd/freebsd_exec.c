@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_exec.c,v 1.17 2006/01/19 17:54:50 mickey Exp $	*/
+/*	$OpenBSD: freebsd_exec.c,v 1.4 1996/08/31 09:24:00 pefo Exp $	*/
 /*	$NetBSD: freebsd_exec.c,v 1.2 1996/05/18 16:02:08 christos Exp $	*/
 
 /*
@@ -38,59 +38,28 @@
 #include <sys/vnode.h>
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
-#include <uvm/uvm_extern.h>
-#include <sys/exec_elf.h>
-#include <sys/exec_olf.h>
+#include <vm/vm.h>
 
 #include <machine/freebsd_machdep.h>
 
 #include <compat/freebsd/freebsd_syscall.h>
 #include <compat/freebsd/freebsd_exec.h>
-#include <compat/freebsd/freebsd_util.h>
 
 extern struct sysent freebsd_sysent[];
-#ifdef SYSCALL_DEBUG
 extern char *freebsd_syscallnames[];
-#endif
 
-extern const char freebsd_emul_path[];
-
-struct emul emul_freebsd_aout = {
+struct emul emul_freebsd = {
 	"freebsd",
 	NULL,
 	freebsd_sendsig,
 	FREEBSD_SYS_syscall,
 	FREEBSD_SYS_MAXSYSCALL,
 	freebsd_sysent,
-#ifdef SYSCALL_DEBUG
 	freebsd_syscallnames,
-#else
-	NULL,
-#endif
 	0,
 	copyargs,
 	setregs,
 	NULL,
-	freebsd_sigcode,
-	freebsd_esigcode,
-};
-
-struct emul emul_freebsd_elf = {
-	"freebsd",
-	NULL,
-	freebsd_sendsig,
-	FREEBSD_SYS_syscall,
-	FREEBSD_SYS_MAXSYSCALL,
-	freebsd_sysent,
-#ifdef SYSCALL_DEBUG
-	freebsd_syscallnames,
-#else
-	NULL,
-#endif
-	FREEBSD_ELF_AUX_ARGSIZ,
-	elf32_copyargs,
-	setregs,
-	exec_elf32_fixup,
 	freebsd_sigcode,
 	freebsd_esigcode,
 };
@@ -137,53 +106,9 @@ exec_freebsd_aout_makecmds(p, epp)
 		break;
 	}
 	if (error == 0)
-		epp->ep_emul = &emul_freebsd_aout;
+		epp->ep_emul = &emul_freebsd;
 	else
 		kill_vmcmds(&epp->ep_vmcmds);
 
 	return error;
-}
-
-int
-exec_freebsd_elf32_makecmds(struct proc *p, struct exec_package *epp)
-{
-	if (!(emul_freebsd_elf.e_flags & EMUL_ENABLED))
-		return (ENOEXEC);
-	return exec_elf32_makecmds(p, epp);
-
-}
-
-int
-freebsd_elf_probe(p, epp, itp, pos, os)
-	struct proc *p;
-	struct exec_package *epp;
-	char *itp;
-	u_long *pos;
-	u_int8_t *os;
-{
-	Elf32_Ehdr *eh = epp->ep_hdr;
-	char *bp, *brand;
-	int error;
-	size_t len;
-
-	/*
-	 * Older FreeBSD ELF binaries use a brand; newer ones use EI_OSABI
-	 */
-	if (eh->e_ident[EI_OSABI] != ELFOSABI_FREEBSD) {
-		brand = elf32_check_brand(eh);
-		if (brand == NULL || strcmp(brand, "FreeBSD") != 0)
-			return (EINVAL);
-	}
-	if (itp) {
-		if ((error = emul_find(p, NULL, freebsd_emul_path, itp, &bp, 0)))
-			return (error);
-		if ((error = copystr(bp, itp, MAXPATHLEN, &len)))
-			return (error);
-		free(bp, M_TEMP);
-	}
-	epp->ep_emul = &emul_freebsd_elf;
-	*pos = ELF32_NO_ADDR;
-	if (*os == OOS_NULL)
-		*os = OOS_FREEBSD;
-	return (0);
 }

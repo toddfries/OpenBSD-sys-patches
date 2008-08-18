@@ -1,48 +1,47 @@
-/*	$OpenBSD: cy_pci.c,v 1.13 2004/06/13 17:30:27 pvalchev Exp $	*/
-/*
- * Copyright (c) 1996 Timo Rossi.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the author nor the names of contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
+/*	$OpenBSD: cy_pci.c,v 1.1 1996/07/27 07:20:07 deraadt Exp $	*/
 
 /*
- * cy_pci.c
+ * cy.c
  *
  * Driver for Cyclades Cyclom-8/16/32 multiport serial cards
  * (currently not tested with Cyclom-32 cards)
  *
  * Timo Rossi, 1996
+ *
+ * Supports both ISA and PCI Cyclom cards
+ *
+ * Uses CD1400 automatic CTS flow control, and
+ * if CY_HW_RTS is defined, uses CD1400 automatic input flow control.
+ * This requires a special cable that exchanges the RTS and DTR lines.
+ *
+ * Lots of debug output can be enabled by defining CY_DEBUG
+ * Some debugging counters (number of receive/transmit interrupts etc.)
+ * can be enabled by defining CY_DEBUG1
+ *
+ * This version uses the bus_mem/io_??() stuff
+ *
+ * NOT TESTED !!!
+ *
  */
 
+#undef CY_DEBUG
+#undef CY_DEBUG1
+
+#include <sys/types.h>
 #include <sys/param.h>
-#include <sys/systm.h>
+#include <sys/ioctl.h>
+#include <sys/syslog.h>
+#include <sys/fcntl.h>
+#include <sys/tty.h>
+#include <sys/proc.h>
+#include <sys/conf.h>
+#include <sys/user.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
 #include <sys/device.h>
-
+#include <sys/malloc.h>
+#include <sys/systm.h>
 #include <machine/bus.h>
-
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
@@ -50,126 +49,92 @@
 #include <dev/ic/cd1400reg.h>
 #include <dev/ic/cyreg.h>
 
-int cy_pci_match(struct device *, void *, void *);
-void cy_pci_attach(struct device *, struct device *, void *);
+/* Macros to clear/set/test flags. */
+#define	SET(t, f)	(t) |= (f)
+#define	CLR(t, f)	(t) &= ~(f)
+#define	ISSET(t, f)	((t) & (f))
 
-struct cy_pci_softc {
-	struct cy_softc 	sc_cy;		/* real softc */
+int cy_probe_pci __P((struct device *, void *, void *));
+int cy_probe_common __P((int card, bus_chipset_tag_t,
+			 bus_mem_handle_t, int bustype));
 
-	bus_space_tag_t		sc_iot;		/* PLX i/o tag */
-	bus_space_handle_t	sc_ioh;		/* PLX i/o handle */
-};
+void cyattach __P((struct device *, struct device *, void *));
 
 struct cfattach cy_pci_ca = {
-	sizeof(struct cy_pci_softc), cy_pci_match, cy_pci_attach
+  sizeof(struct cy_softc), cy_probe_pci, cyattach
 };
 
-#define CY_PLX_9050_ICS_IENABLE		0x040
-#define CY_PLX_9050_ICS_LOCAL_IENABLE	0x001
-#define CY_PLX_9050_ICS_LOCAL_IPOLARITY	0x002
-#define CY_PLX_9060_ICS_IENABLE		0x100
-#define CY_PLX_9060_ICS_LOCAL_IENABLE	0x800
-
-const struct pci_matchid cy_pci_devices[] = {
-	{ PCI_VENDOR_CYCLADES, PCI_PRODUCT_CYCLADES_CYCLOMY_1 },
-	{ PCI_VENDOR_CYCLADES, PCI_PRODUCT_CYCLADES_CYCLOMY_2 },
-	{ PCI_VENDOR_CYCLADES, PCI_PRODUCT_CYCLADES_CYCLOM4Y_1 },
-	{ PCI_VENDOR_CYCLADES, PCI_PRODUCT_CYCLADES_CYCLOM4Y_2 },
-	{ PCI_VENDOR_CYCLADES, PCI_PRODUCT_CYCLADES_CYCLOM8Y_1 },
-	{ PCI_VENDOR_CYCLADES, PCI_PRODUCT_CYCLADES_CYCLOM8Y_2 },
-};
-
+/*
+ * PCI probe
+ */
 int
-cy_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+cy_probe_pci(parent, match, aux)
+     struct device *parent;
+     void *match, *aux;
 {
-	return (pci_matchbyid((struct pci_attach_args *)aux, cy_pci_devices,
-	    sizeof(cy_pci_devices)/sizeof(cy_pci_devices[0])));
-}
+  vm_offset_t v_addr, p_addr;
+  int card = ((struct device *)match)->dv_unit;
+  struct pci_attach_args *pa = aux;
+  bus_chipset_tag_t bc;
+  bus_mem_handle_t memh;
+  bus_mem_addr_t memaddr;
+  bus_mem_size_t memsize;
+  bus_io_handle_t ioh;
+  bus_io_addr_t iobase;
+  bus_io_size_t iosize;
+  int cacheable;
 
-void
-cy_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
-{
-	struct cy_pci_softc *psc = (struct cy_pci_softc *)self;
-	struct cy_softc *sc = (struct cy_softc *)self;
-	struct pci_attach_args *pa = aux;
-	const char *intrstr = NULL;
-	pci_intr_handle_t ih;
-	pcireg_t memtype;
-	int plx_ver;
+  if(!(PCI_VENDOR(pa->pa_id) == PCI_VENDOR_CYCLADES &&
+       (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_CYCLADES_CYCLOMY_1 ||
+	PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_CYCLADES_CYCLOMY_2)))
+    return 0;
 
-	sc->sc_bustype = CY_BUSTYPE_PCI;
+#ifdef CY_DEBUG
+  printf("cy: Found Cyclades PCI device, id = 0x%x\n", pa->pa_id);
+#endif
 
-	switch (PCI_PRODUCT(pa->pa_id)) {
-	case PCI_PRODUCT_CYCLADES_CYCLOMY_1:
-	case PCI_PRODUCT_CYCLADES_CYCLOM4Y_1:
-	case PCI_PRODUCT_CYCLADES_CYCLOM8Y_1:
-		memtype = PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT_1M;
-		break;
-	case PCI_PRODUCT_CYCLADES_CYCLOMY_2:
-	case PCI_PRODUCT_CYCLADES_CYCLOM4Y_2:
-	case PCI_PRODUCT_CYCLADES_CYCLOM8Y_2:
-		memtype = PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT;
-		break;
-	}
+  bc = pa->pa_bc;
 
-	if (pci_mapreg_map(pa, 0x14, PCI_MAPREG_TYPE_IO, 0,
-	    &psc->sc_iot, &psc->sc_ioh, NULL, NULL, 0) != 0) {
-		printf(": unable to map PLX registers\n");
-		return;
-	}
+  if(pci_mem_find(pa->pa_pc, pa->pa_tag, 0x18,
+		  &memaddr, &memsize, &cacheable) != 0) {
+    printf("cy%d: can't find PCI card memory", card);
+    return 0;
+  }
 
-	if (pci_mapreg_map(pa, 0x18, memtype, 0, &sc->sc_memt,
-	    &sc->sc_memh, NULL, NULL, 0) != 0) {
-                printf(": couldn't map device registers\n");
-                return;
-        }
+  /* map the memory (non-cacheable) */
+  if(bus_mem_map(bc, memaddr, memsize, 0, &memh) != 0) {
+    printf("cy%d: couldn't map PCI memory region\n", card);
+    return 0;
+  }
 
-	if ((sc->sc_nr_cd1400s = cy_probe_common(sc->sc_memt, sc->sc_memh,
-	    CY_BUSTYPE_PCI)) == 0) {
-		printf(": PCI Cyclom card with no CD1400s\n");
-		return;
-	}
+  /* the PCI Cyclom IO space is only used for enabling interrupts */
+  if(pci_io_find(pa->pa_pc, pa->pa_tag, 0x14, &iobase, &iosize) != 0) {
+    bus_mem_unmap(bc, memh, memsize);
+    printf("cy%d: couldn't find PCI io region\n", card);
+    return 0;
+  }
 
-	if (pci_intr_map(pa, &ih) != 0) {
-		printf(": couldn't map interrupt\n");
-		return;
-	}
+  if(bus_io_map(bc, iobase, iosize, &ioh) != 0) {
+    bus_mem_unmap(bc, memh, memsize);
+    printf("cy%d: couldn't map PCI io region\n", card);
+    return 0; 
+  }
 
-	intrstr = pci_intr_string(pa->pa_pc, ih);
-	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_TTY, cy_intr,
-	    sc, sc->sc_dev.dv_xname);
-	if (sc->sc_ih == NULL) {
-		printf(": couldn't establish interrupt");
-		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		return;
-	}
-	printf(": %s", intrstr);
+#ifdef CY_DEBUG
+  printf("cy%d: pci mapped mem 0x%lx (size %d), io 0x%x (size %d)\n",
+	 card, memaddr, memsize, iobase, iosize);
+#endif
 
-	cy_attach(parent, self);
+  if(cy_probe_common(card, bc, memh, CY_BUSTYPE_PCI) == 0) {
+    bus_mem_unmap(bc, memh, memsize);
+    bus_io_unmap(bc, ioh, iosize);
+    printf("cy%d: PCI Cyclom card with no CD1400s!?\n", card);
+    return 0;
+  }
 
-	/* Get PLX version */
-	plx_ver = bus_space_read_1(sc->sc_memt, sc->sc_memh, CY_PLX_VER) & 0x0f;
+  /* Enable PCI card interrupts */
+  bus_io_write_2(bc, ioh, CY_PCI_INTENA,
+		 bus_io_read_2(bc, ioh, CY_PCI_INTENA) | 0x900);
 
-	/* Enable PCI card interrupts */
-	switch (plx_ver) {
-	case CY_PLX_9050:
-		bus_space_write_2(psc->sc_iot, psc->sc_ioh, CY_PCI_INTENA_9050,
-		    CY_PLX_9050_ICS_IENABLE | CY_PLX_9050_ICS_LOCAL_IENABLE |
-		    CY_PLX_9050_ICS_LOCAL_IPOLARITY);
-		break;
-
-	case CY_PLX_9060:
-	case CY_PLX_9080:
-	default:
-		bus_space_write_2(psc->sc_iot, psc->sc_ioh, CY_PCI_INTENA,
-		    bus_space_read_2(psc->sc_iot, psc->sc_ioh,
-		    CY_PCI_INTENA) | CY_PLX_9060_ICS_IENABLE | 
-		    CY_PLX_9060_ICS_LOCAL_IENABLE);
-	}
+  return 1;
 }

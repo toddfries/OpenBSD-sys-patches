@@ -1,5 +1,5 @@
-/*	$OpenBSD: autoconf.h,v 1.13 2006/07/11 18:58:15 miod Exp $	*/
-/*	$NetBSD: autoconf.h,v 1.5 1996/12/17 06:47:40 scottr Exp $	*/
+/*	$OpenBSD: autoconf.h,v 1.2 1996/05/26 18:35:45 briggs Exp $	*/
+/*	$NetBSD: autoconf.h,v 1.2 1996/05/18 18:52:48 briggs Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -33,28 +33,53 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _MAC68K_AUTOCONF_H_
-#define _MAC68K_AUTOCONF_H_
+#include <sys/device.h>
 
 /*
  * Autoconfiguration information.
  * From sun3 port--adapted for mac68k platform by Allen Briggs.
  */
 
-#ifdef _KERNEL
+/* These are the "bus" types: */
+#define	BUS_OBIO	0	/* On-board I/O */
+#define	BUS_NUBUS	1	/* "nubus"  */
+
+/*
+ * This is the "args" parameter to the bus match/attach functions.
+ */
+struct confargs {
+	int	ca_bustype;		/* BUS_INTERNAL0, ... */
+	int	slot;
+};
+
 /* autoconf.c */
-void	setconf(void);
+void	setconf __P((void));
+int	bus_scan __P((struct device *, void *, void *));
+int	bus_print __P((void *, char *));
+int	bus_peek __P((int, vm_offset_t, int));
+char	*bus_mapin __P((int, int, int));
+void	configure __P((void));
 
 /* machdep.c */
-void	mac68k_set_io_offsets(vaddr_t);
-void	dumpconf(void);
+void	mac68k_set_io_offsets __P((vm_offset_t));
+void	dumpconf __P((void));
+int	badbaddr __P((register caddr_t addr));
+int	badwaddr __P((register caddr_t addr));
+int	badladdr __P((register caddr_t addr));
+
+int	mac68k_name_match __P((struct device *, void *, void *));
 
 /* clock.h */
 
-u_long	clkread(void);
-void	mac68k_calibrate_delay(void);
-void	startrtclock(void);
+void	enablertclock __P((void));
+void	cpu_initclocks __P((void));
+void	setstatclockrate __P((int));
+void	disablertclock __P((void));
+u_long	clkread __P((void));
+void	inittodr __P((time_t));
+void	resettodr __P((void));
+void	mac68k_calibrate_delay __P((void));
+void	startrtclock __P((void));
 
-#endif	/* _KERNEL */
-
-#endif	/* _MAC68K_AUTOCONF_H_ */
+/* macrom.c */
+void	mrg_init __P((void));

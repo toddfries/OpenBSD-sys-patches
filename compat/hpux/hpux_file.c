@@ -1,8 +1,8 @@
-/*	$OpenBSD: hpux_file.c,v 1.18 2007/03/15 10:22:30 art Exp $	*/
-/*	$NetBSD: hpux_file.c,v 1.5 1997/04/27 21:40:48 thorpej Exp $	*/
+/*	$OpenBSD: hpux_file.c,v 1.3 1996/08/02 20:34:55 niklas Exp $	*/
+/*	$NetBSD: hpux_file.c,v 1.3 1996/01/06 12:44:14 thorpej Exp $	*/
 
 /*
- * Copyright (c) 1995, 1997 Jason R. Thorpe.  All rights reserved.
+ * Copyright (c) 1995 Jason R. Thorpe.  All rights reserved.
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -19,7 +19,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -79,11 +83,9 @@
 #include <compat/hpux/hpux_syscall.h>
 #include <compat/hpux/hpux_syscallargs.h>
 
-#include <machine/hpux_machdep.h>
-
-int	hpux_stat1(struct proc *, void *, register_t *, int);
-void	bsd_to_hpux_stat(struct stat *, struct hpux_stat *);
-void	bsd_to_hpux_ostat(struct stat *, struct hpux_ostat *);
+static	int hpux_stat1 __P((struct proc *, void *, register_t *, int));
+static	void bsd_to_hpux_stat __P((struct stat *, struct hpux_stat *));
+static	void bsd_to_hpux_ostat __P((struct stat *, struct hpux_ostat *));
 
 /*
  * HP-UX creat(2) system call.
@@ -214,11 +216,10 @@ hpux_sys_fcntl(p, v, retval)
 	struct flock fl;
 	struct vnode *vp;
 	struct sys_fcntl_args fa;
-	struct filedesc *fdp = p->p_fd;
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if ((u_int)SCARG(uap, fd) > p->p_fd->fd_nfiles ||
+	    (fp = p->p_fd->fd_ofiles[SCARG(uap, fd)]) == NULL)
 		return (EBADF);
-	FREF(fp);
 
 	pop = &p->p_fd->fd_ofileflags[SCARG(uap, fd)];
 	arg = SCARG(uap, arg);
@@ -254,10 +255,8 @@ hpux_sys_fcntl(p, v, retval)
 		/* Fall into F_SETLK */
 
 	case HPUXF_SETLK:
-		if (fp->f_type != DTYPE_VNODE) {
-			error = EBADF;
-			goto out;
-		}
+		if (fp->f_type != DTYPE_VNODE)
+			return (EBADF);
 
 		vp = (struct vnode *)fp->f_data;
 
@@ -265,7 +264,7 @@ hpux_sys_fcntl(p, v, retval)
 		error = copyin((caddr_t)SCARG(uap, arg), (caddr_t)&hfl,
 		    sizeof (hfl));
 		if (error)
-			goto out;
+			return (error);
 
 		fl.l_start = hfl.hl_start;
 		fl.l_len = hfl.hl_len;
@@ -277,40 +276,30 @@ hpux_sys_fcntl(p, v, retval)
 
 		switch (fl.l_type) {
 		case F_RDLCK:
-			if ((fp->f_flag & FREAD) == 0) {
-				error = EBADF;
-				goto out;
-			}
+			if ((fp->f_flag & FREAD) == 0)
+				return (EBADF);
 
-			atomic_setbits_int(&p->p_flag, P_ADVLOCK);
-			error = VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg);
-			goto out;
+			p->p_flag |= P_ADVLOCK;
+			return (VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg));
 
 		case F_WRLCK:
-			if ((fp->f_flag & FWRITE) == 0) {
-				error = EBADF;
-				goto out;
-			}
-			atomic_setbits_int(&p->p_flag, P_ADVLOCK);
-			error = VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg);
-			goto out;
+			if ((fp->f_flag & FWRITE) == 0)
+				return (EBADF);
+			p->p_flag |= P_ADVLOCK;
+			return (VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg));
 
 		case F_UNLCK:
-			error = VOP_ADVLOCK(vp, (caddr_t)p, F_UNLCK, &fl,
-			    F_POSIX);
-			goto out;
+			return (VOP_ADVLOCK(vp, (caddr_t)p, F_UNLCK, &fl,
+			    F_POSIX));
 
 		default:
-			error = EINVAL;
-			goto out;
+			return (EINVAL);
 		}
 		/* NOTREACHED */
 
 	case F_GETLK:
-		if (fp->f_type != DTYPE_VNODE) {
-			error = EBADF;
-			goto out;
-		}
+		if (fp->f_type != DTYPE_VNODE)
+		return (EBADF);
 
 		vp = (struct vnode *)fp->f_data;
 
@@ -318,7 +307,7 @@ hpux_sys_fcntl(p, v, retval)
 		error = copyin((caddr_t)SCARG(uap, arg), (caddr_t)&hfl,
 		    sizeof (hfl));
 		if (error)
-			goto out;
+			return (error);
 
 		fl.l_start = hfl.hl_start;
 		fl.l_len = hfl.hl_len;
@@ -328,22 +317,19 @@ hpux_sys_fcntl(p, v, retval)
 		if (fl.l_whence == SEEK_CUR)
 			fl.l_start += fp->f_offset;
 
-		if ((error =
-		    VOP_ADVLOCK(vp, (caddr_t)p, F_GETLK, &fl, F_POSIX)))
-			goto out;
+		if (error = VOP_ADVLOCK(vp, (caddr_t)p, F_GETLK, &fl, F_POSIX))
+			return (error);
 
 		hfl.hl_start = fl.l_start;
 		hfl.hl_len = fl.l_len;
 		hfl.hl_pid = fl.l_pid;
 		hfl.hl_type = fl.l_type;
 		hfl.hl_whence = fl.l_whence;
-		error = copyout((caddr_t)&hfl, (caddr_t)SCARG(uap, arg),
-		    sizeof (hfl));
-		goto out;
+		return (copyout((caddr_t)&hfl, (caddr_t)SCARG(uap, arg),
+		    sizeof (hfl)));
 
 	default:
-		error = EINVAL;
-		goto out;
+		return (EINVAL);
 	}
 
 	/*
@@ -374,8 +360,6 @@ hpux_sys_fcntl(p, v, retval)
 		if (mode & O_EXCL)
 			*retval |= HPUXFEXCL;
 	}
-out:
-	FRELE(fp);
 	return (error);
 }
 
@@ -445,7 +429,7 @@ hpux_sys_lstat(p, v, retval)
 /*
  * Do the meat of stat(2) and lstat(2).
  */
-int
+static int
 hpux_stat1(p, v, retval, dolstat)
 	struct proc *p;
 	void *v;
@@ -464,9 +448,9 @@ hpux_stat1(p, v, retval, dolstat)
 
 	sg = stackgap_init(p->p_emul);
 
-	st = stackgap_alloc(&sg, sizeof (struct stat));
 	HPUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
+	st = stackgap_alloc(&sg, sizeof (struct stat));
 	SCARG(&sa, ub) = st;
 	SCARG(&sa, path) = SCARG(uap, path);
 
@@ -486,7 +470,6 @@ hpux_stat1(p, v, retval, dolstat)
 	return (copyout(&tmphst, SCARG(uap, sb), sizeof(struct hpux_stat)));
 }
 
-#ifndef __hppa__
 /*
  * The old HP-UX fstat(2) system call.
  */
@@ -563,9 +546,49 @@ hpux_sys_stat_6x(p, v, retval)
 }
 
 /*
+ * Convert a NetBSD stat structure to an HP-UX stat structure.
+ */
+static void
+bsd_to_hpux_stat(sb, hsb)
+	struct stat *sb;
+	struct hpux_stat *hsb;
+{
+
+	bzero((caddr_t)hsb, sizeof(struct hpux_stat));
+	hsb->hst_dev = (long)sb->st_dev;
+	hsb->hst_ino = (u_long)sb->st_ino;
+	hsb->hst_mode = (u_short)sb->st_mode;
+	hsb->hst_nlink = (u_short)sb->st_nlink;
+	hsb->hst_uid = (u_long)sb->st_uid;
+	hsb->hst_gid = (u_long)sb->st_gid;
+	hsb->hst_rdev = (long)bsdtohpuxdev(sb->st_rdev);
+	/*
+	 * XXX Let's just hope that the old binary doesn't lose.
+	 */
+	hsb->hst_old_uid = (u_short)sb->st_uid;
+	hsb->hst_old_gid = (u_short)sb->st_gid;
+
+	/*
+	 * Call machine-dependent stat conversion.  Is it just me
+	 * who thinks HP-UX device semantics are strange?!
+	 */
+	hpux_cpu_bsd_to_hpux_stat(sb, hsb);
+
+	if (sb->st_size < (off_t)(((off_t)1) << 32))
+		hsb->hst_size = (long)sb->st_size;
+	else
+		hsb->hst_size = -2;
+	hsb->hst_atime = (long)sb->st_atime;
+	hsb->hst_mtime = (long)sb->st_mtime;
+	hsb->hst_ctime = (long)sb->st_ctime;
+	hsb->hst_blksize = (long)sb->st_blksize;
+	hsb->hst_blocks = (long)sb->st_blocks;
+}
+
+/*
  * Convert a NetBSD stat structure to an old-style HP-UX stat structure.
  */
-void
+static void
 bsd_to_hpux_ostat(sb, hsb)
 	struct stat *sb;
 	struct hpux_ostat *hsb;
@@ -586,41 +609,6 @@ bsd_to_hpux_ostat(sb, hsb)
 	hsb->hst_atime = (int)sb->st_atime;
 	hsb->hst_mtime = (int)sb->st_mtime;
 	hsb->hst_ctime = (int)sb->st_ctime;
-}
-#endif
-
-/*
- * Convert a NetBSD stat structure to an HP-UX stat structure.
- */
-void
-bsd_to_hpux_stat(sb, hsb)
-	struct stat *sb;
-	struct hpux_stat *hsb;
-{
-
-	bzero((caddr_t)hsb, sizeof(struct hpux_stat));
-	hsb->hst_dev = (long)sb->st_dev;
-	hsb->hst_ino = (u_long)sb->st_ino;
-	hsb->hst_mode = (u_short)sb->st_mode;
-	hsb->hst_nlink = (u_short)sb->st_nlink;
-	hsb->hst_uid = (u_long)sb->st_uid;
-	hsb->hst_gid = (u_long)sb->st_gid;
-	hsb->hst_rdev = (long)bsdtohpuxdev(sb->st_rdev);
-	/*
-	 * XXX Let's just hope that the old binary doesn't lose.
-	 */
-	hsb->hst_old_uid = (u_short)sb->st_uid;
-	hsb->hst_old_gid = (u_short)sb->st_gid;
-
-	if (sb->st_size < (off_t)(((off_t)1) << 32))
-		hsb->hst_size = (long)sb->st_size;
-	else
-		hsb->hst_size = -2;
-	hsb->hst_atime = (long)sb->st_atime;
-	hsb->hst_mtime = (long)sb->st_mtime;
-	hsb->hst_ctime = (long)sb->st_ctime;
-	hsb->hst_blksize = (long)sb->st_blksize;
-	hsb->hst_blocks = (long)sb->st_blocks;
 }
 
 /*
@@ -703,7 +691,7 @@ hpux_sys_mknod(p, v, retval)
 	/*
 	 * BSD handles FIFOs separately.
 	 */
-	if (S_ISFIFO(SCARG(uap, mode))) {
+	if (SCARG(uap, mode) & S_IFIFO) {
 		SCARG(&bma, path) = SCARG(uap, path);
 		SCARG(&bma, mode) = SCARG(uap, mode);
 		return (sys_mkfifo(p, uap, retval));
@@ -751,7 +739,7 @@ hpux_sys_chown(p, v, retval)
 
 	/* XXX What about older HP-UX executables? */
 
-	return (sys_lchown(p, uap, retval));
+	return (sys_chown(p, uap, retval));
 }
 
 /*

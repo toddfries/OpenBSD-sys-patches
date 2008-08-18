@@ -1,5 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.14 2005/12/31 18:13:45 miod Exp $	*/
-/*	$NetBSD: autoconf.h,v 1.4 1997/04/01 03:03:56 scottr Exp $	*/
+/*	$NetBSD: autoconf.h,v 1.3 1996/03/03 16:49:17 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -39,14 +38,13 @@
 
 #ifdef _KERNEL
 extern	int conscode;			/* select code of console device */
-#define	CONSCODE_INTERNAL	(-1)
-#define	CONSCODE_INVALID	(-2)
+extern	int consinit_active;		/* hint for drivers */
 extern	caddr_t conaddr;		/* KVA of console device */
 extern	int convasize;			/* size of mapping at conaddr */
-extern	int consolepass;		/* console initialization pass */
+extern	int conforced;			/* console has been forced */
 
-void	hp300_cninit(void);
-void	console_scan(int (*)(int, caddr_t, void *), void *);
-caddr_t	iomap(caddr_t, int);
-void	iounmap(caddr_t, int);
+void	hp300_cninit __P((void));
+void	console_scan __P((int (*)(int, caddr_t, void *), void *));
+caddr_t	iomap __P((caddr_t, int));
+void	iounmap __P((caddr_t, int));
 #endif /* _KERNEL */

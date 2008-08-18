@@ -1,18 +1,28 @@
-#	$OpenBSD: Makefile,v 1.7 2004/01/26 19:48:33 miod Exp $
-
 LIB=bug
 
-NOPIC=
-NOPROFILE=
+CFLAGS+=-I${.CURDIR}/../include
+CFLAGS+=-I${.CURDIR}/../../include
+CFLAGS+=-I${.CURDIR}/../..
+CFLAGS+=-I/usr/src/sys
+CFLAGS+=-fwritable-strings
 
-S=${.CURDIR}/../../../..
-DIR_SA=$S/lib/libsa
+SRCS+=bugio.c
+#SRCS+=bugcrt.c bugio.c main.c
 
-CFLAGS+=-I${.CURDIR}/../../include -I${DIR_SA}
+.if (${MACHINE_ARCH} == "m68k")
+SRCS+=mvme147.c bcopy.c memset.c
+.endif
+.if (${MACHINE_ARCH} == "m88k")
+SRCS+=bcopy.c memset.c printf.c
+.endif
 
-SRCS=	delay.c diskrd.c diskwr.c getbrdid.c inchr.c instat.c \
-	netfopen.c netfread.c outln.c outstr.c putchar.c return.c rtc_rd.c
+.PATH:    ${.CURDIR}/../../../../lib/libc_sa ${.CURDIR}/${MACHINE_ARCH}
 
-install:
+all:	bugio.o
+
+#bugio.o: bugio.c
+#	${CC} ${CFLAGS} -c -O ${.ALLSRC}
+#	${LD} -x -r ${.TARGET}
+#	mv a.out ${.TARGET}
 
 .include <bsd.lib.mk>

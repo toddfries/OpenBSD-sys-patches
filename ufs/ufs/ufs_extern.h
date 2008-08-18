@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_extern.h,v 1.29 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: ufs_extern.h,v 1.2 1996/02/27 07:21:25 niklas Exp $	*/
 /*	$NetBSD: ufs_extern.h,v 1.5 1996/02/09 22:36:03 christos Exp $	*/
 
 /*-
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -50,106 +54,115 @@ struct ufs_args;
 struct ufsmount;
 struct uio;
 struct vattr;
-struct vfsconf;
 struct vnode;
 
 __BEGIN_DECLS
-int	 ufs_access(void *);
-int	 ufs_advlock(void *);
-int	 ufs_bmap(void *);
-int	 ufs_close(void *);
-int	 ufs_create(void *);
-int	 ufs_getattr(void *);
-int	 ufs_inactive(void *);
-int	 ufs_ioctl(void *);
-int	 ufs_islocked(void *);
-int	 ufs_link(void *);
-int	 ufs_lock(void *);
-int	 ufs_lookup(void *);
-int	 ufs_mkdir(void *);
-int	 ufs_mknod(void *);
-int	 ufs_mmap(void *);
-int	 ufs_open(void *);
-int	 ufs_pathconf(void *);
-int	 ufs_print(void *);
-int	 ufs_readdir(void *);
-int	 ufs_readlink(void *);
-int	 ufs_remove(void *);
-int	 ufs_rename(void *);
-#define  ufs_revoke  vop_generic_revoke
-int	 ufs_rmdir(void *);
-int	 ufs_poll(void *);
-int	 ufs_kqfilter(void *);
-int	 ufs_setattr(void *);
-int	 ufs_strategy(void *);
-int	 ufs_symlink(void *);
-int	 ufs_unlock(void *);
-int	 ufsspec_close(void *);
-int	 ufsspec_read(void *);
-int	 ufsspec_write(void *);
+int	 ufs_abortop	__P((void *));
+int	 ufs_access	__P((void *));
+int	 ufs_advlock	__P((void *));
+int	 ufs_bmap	__P((void *));
+int	 ufs_close	__P((void *));
+int	 ufs_create	__P((void *));
+int	 ufs_getattr	__P((void *));
+int	 ufs_inactive	__P((void *));
+int	 ufs_ioctl	__P((void *));
+int	 ufs_islocked	__P((void *));
+#ifdef NFSSERVER
+int	 lease_check	__P((void *));
+#define	 ufs_lease_check lease_check
+#else
+#define	 ufs_lease_check ((int (*) __P((void *)))nullop)
+#endif
+int	 ufs_link	__P((void *));
+int	 ufs_lock	__P((void *));
+int	 ufs_lookup	__P((void *));
+int	 ufs_mkdir	__P((void *));
+int	 ufs_mknod	__P((void *));
+int	 ufs_mmap	__P((void *));
+int	 ufs_open	__P((void *));
+int	 ufs_pathconf	__P((void *));
+int	 ufs_print	__P((void *));
+int	 ufs_readdir	__P((void *));
+int	 ufs_readlink	__P((void *));
+int	 ufs_remove	__P((void *));
+int	 ufs_rename	__P((void *));
+int	 ufs_rmdir	__P((void *));
+int	 ufs_seek	__P((void *));
+int	 ufs_select	__P((void *));
+int	 ufs_setattr	__P((void *));
+int	 ufs_strategy	__P((void *));
+int	 ufs_symlink	__P((void *));
+int	 ufs_unlock	__P((void *));
+int	 ufs_whiteout	__P((void *));
+int	 ufsspec_close	__P((void *));
+int	 ufsspec_read	__P((void *));
+int	 ufsspec_write	__P((void *));
 
 #ifdef FIFO
-int	ufsfifo_read(void *);
-int	ufsfifo_write(void *);
-int	ufsfifo_close(void *);
+int	ufsfifo_read	__P((void *));
+int	ufsfifo_write	__P((void *));
+int	ufsfifo_close	__P((void *));
 #endif
 
 /* ufs_bmap.c */
-int ufs_bmaparray(struct vnode *, daddr64_t, daddr64_t *, struct indir *,
-		       int *, int *);
-int ufs_getlbns(struct vnode *, daddr64_t, struct indir *, int *);
+int ufs_bmaparray __P((struct vnode *, daddr_t, daddr_t *, struct indir *,
+		       int *, int *));
+int ufs_getlbns __P((struct vnode *, daddr_t, struct indir *, int *));
 
 /* ufs_ihash.c */
-void ufs_ihashinit(void);
-struct vnode *ufs_ihashlookup(dev_t, ino_t);
-struct vnode *ufs_ihashget(dev_t, ino_t);
-int ufs_ihashins(struct inode *);
-void ufs_ihashrem(struct inode *);
+void ufs_ihashinit __P((void));
+struct vnode *ufs_ihashlookup __P((dev_t, ino_t));
+struct vnode *ufs_ihashget __P((dev_t, ino_t));
+void ufs_ihashins __P((struct inode *));
+void ufs_ihashrem __P((struct inode *));
 
 /* ufs_inode.c */
-int ufs_init(struct vfsconf *);
-int ufs_reclaim(struct vnode *, struct proc *);
+void ufs_init __P((void));
+int ufs_reclaim __P((struct vnode *));
 
 /* ufs_lookup.c */
-void ufs_dirbad(struct inode *, doff_t, char *);
-int ufs_dirbadentry(struct vnode *, struct direct *, int);
-void ufs_makedirentry(struct inode *, struct componentname *,
-			   struct direct *);
-int ufs_direnter(struct vnode *, struct vnode *, struct direct *,
-		      struct componentname *, struct buf *);
-int ufs_dirremove(struct vnode *, struct inode *, int, int);
-int ufs_dirrewrite(struct inode *, struct inode *,
-		        ino_t, int, int);
-int ufs_dirempty(struct inode *, ino_t, struct ucred *);
-int ufs_checkpath(struct inode *, struct inode *, struct ucred *);
+void ufs_dirbad __P((struct inode *, doff_t, char *));
+int ufs_dirbadentry __P((struct vnode *, struct direct *, int));
+int ufs_direnter __P((struct inode *, struct vnode *,
+		      struct componentname *));
+int ufs_direnter2 __P((struct vnode *, struct direct *, struct ucred *,
+		       struct proc *));
+int ufs_dirremove __P((struct vnode *, struct componentname *));
+int ufs_dirrewrite __P((struct inode *, struct inode *,
+			struct componentname *));
+int ufs_dirempty __P((struct inode *, ino_t, struct ucred *));
+int ufs_checkpath __P((struct inode *, struct inode *, struct ucred *));
+
+/* ufs_quota.c */
+int getinoquota __P((struct inode *));
+int chkdq __P((struct inode *, long, struct ucred *, int));
+int chkdqchg __P((struct inode *, long, struct ucred *, int));
+int chkiq __P((struct inode *, long, struct ucred *, int));
+int chkiqchg __P((struct inode *, long, struct ucred *, int));
+void chkdquot __P((struct inode *));
+int quotaon __P((struct proc *, struct mount *, int, caddr_t));
+int quotaoff __P((struct proc *, struct mount *, int));
+int getquota __P((struct mount *, u_long, int, caddr_t));
+int setquota __P((struct mount *, u_long, int, caddr_t));
+int setuse __P((struct mount *, u_long, int, caddr_t));
+int qsync __P((struct mount *));
+int dqget __P((struct vnode *, u_long, struct ufsmount *, int,
+	       struct dquot **));
+void dqref __P((struct dquot *));
+void dqrele __P((struct vnode *, struct dquot *));
+int dqsync __P((struct vnode *, struct dquot *));
+void dqflush __P((struct vnode *));
 
 /* ufs_vfsops.c */
-int ufs_start(struct mount *, int, struct proc *);
-int ufs_root(struct mount *, struct vnode **);
-int ufs_quotactl(struct mount *, int, uid_t, caddr_t, struct proc *);
-int ufs_fhtovp(struct mount *, struct ufid *, struct vnode **);
-int ufs_check_export(struct mount *, struct mbuf *, int *,
-		struct ucred **);
+int ufs_start __P((struct mount *, int, struct proc *));
+int ufs_root __P((struct mount *, struct vnode **));
+int ufs_quotactl __P((struct mount *, int, uid_t, caddr_t, struct proc *));
+int ufs_check_export __P((struct mount *, struct ufid *, struct mbuf *,
+			  struct vnode **, int *, struct ucred **));
 
 /* ufs_vnops.c */
-int ufs_vinit(struct mount *, int (**)(void *),
-	      int (**)(void *), struct vnode **);
-int ufs_makeinode(int, struct vnode *, struct vnode **,
-		  struct componentname *);
-
- 
-/*
- * Soft dependency function prototypes.
- */
-int  softdep_setup_directory_add(struct buf *, struct inode *, off_t,
-          long, struct buf *, int);
-void  softdep_change_directoryentry_offset(struct inode *, caddr_t,
-          caddr_t, caddr_t, int);
-void  softdep_setup_remove(struct buf *,struct inode *, struct inode *,
-          int);
-void  softdep_setup_directory_change(struct buf *, struct inode *,
-          struct inode *, long, int);
-void  softdep_change_linkcnt(struct inode *, int);
-int   softdep_slowdown(struct vnode *);
-
+int ufs_vinit __P((struct mount *, int (**) __P((void *)),
+		   int (**) __P((void *)), struct vnode **));
+int ufs_makeinode __P((int, struct vnode *, struct vnode **,
+		       struct componentname *));
 __END_DECLS

@@ -1,5 +1,4 @@
-/*	$OpenBSD: cd1400reg.h,v 1.4 1998/05/20 19:29:23 deraadt Exp $	*/
-/*	$NetBSD: cd1400reg.h,v 1.3 1996/09/24 18:02:33 christos Exp $	*/
+/*	$OpenBSD: cd1400reg.h,v 1.2 1996/06/20 11:39:12 deraadt Exp $	*/
 
 /*-
  * cyclades cyclom-y serial driver
@@ -38,7 +37,6 @@
 #define	CD1400_NO_OF_CHANNELS	4	/* 4 serial channels per chip */
 #define	CD1400_RX_FIFO_SIZE	12
 #define	CD1400_TX_FIFO_SIZE	12
-#define	CD1400_PAR_FIFO_SIZE	30
 
 /*
  * Global registers.

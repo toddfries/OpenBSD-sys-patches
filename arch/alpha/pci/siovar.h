@@ -1,5 +1,5 @@
-/*	$OpenBSD: siovar.h,v 1.12 2004/06/28 02:28:43 aaron Exp $	*/
-/*	$NetBSD: siovar.h,v 1.5 1996/10/23 04:12:34 cgd Exp $	*/
+/*	$OpenBSD: siovar.h,v 1.3 1996/07/29 23:00:58 niklas Exp $	*/
+/*	$NetBSD: siovar.h,v 1.3 1996/04/12 06:09:06 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -28,15 +28,14 @@
  * rights to redistribute these changes.
  */
 
-#include <sys/evcount.h>
+void	sio_intr_setup __P((bus_chipset_tag_t));
+void	sio_iointr __P((void *framep, int vec));
 
-void	sio_intr_setup(pci_chipset_tag_t, bus_space_tag_t);
-void	sio_iointr(void *framep, unsigned long vec);
+const char *sio_intr_string __P((void *, int));
+void	*sio_intr_establish __P((void *, int, int, int, int (*)(void *),
+	    void *, char *));
+void	sio_intr_disestablish __P((void *, void *));
 
-const char *sio_intr_string(void *, int);
-int	sio_intr_line(void *, int);
-void	*sio_intr_establish(void *, int, int, int, int (*)(void *),
-	    void *, char *);
-void	sio_intr_disestablish(void *, void *);
-
-struct evcount sio_intr_count;
+#ifdef EVCNT_COUNTERS
+extern struct evcnt sio_intr_evcnt;
+#endif

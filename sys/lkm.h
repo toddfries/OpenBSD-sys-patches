@@ -1,4 +1,4 @@
-/*	$OpenBSD: lkm.h,v 1.12 2007/11/03 22:23:35 mikeb Exp $	*/
+/*	$OpenBSD: lkm.h,v 1.5 1996/08/29 15:17:34 deraadt Exp $	*/
 /*	$NetBSD: lkm.h,v 1.12 1996/02/09 18:25:13 christos Exp $	*/
 
 /*
@@ -51,13 +51,14 @@ typedef enum loadmod {
 	LM_SYSCALL,
 	LM_VFS,
 	LM_DEV,
+	LM_STRMOD,
 	LM_EXEC,
 	LM_MISC
 } MODTYPE;
 
 
 #define	LKM_OLDVERSION	1		/* version of module loader */
-#define	LKM_VERSION	2		/* version of module loader */
+#define	LKM_VERSION	1		/* version of module loader */
 #define	MAXLKMNAME	32
 
 /****************************************************************************/
@@ -68,11 +69,11 @@ typedef enum loadmod {
  * Loadable system call
  */
 struct lkm_syscall {
-	MODTYPE		lkm_type;
-	int		lkm_ver;
-	char	       *lkm_name;
-	u_long		lkm_offset;	/* save/assign area */
-	struct sysent  *lkm_sysent;
+	MODTYPE	lkm_type;
+	int	lkm_ver;
+	char	*lkm_name;
+	u_long	lkm_offset;		/* save/assign area */
+	struct sysent	*lkm_sysent;
 	struct sysent	lkm_oldent;	/* save area for unload */
 };
 
@@ -80,11 +81,11 @@ struct lkm_syscall {
  * Loadable file system
  */
 struct lkm_vfs {
-	MODTYPE		lkm_type;
-	int		lkm_ver;
-	char	       *lkm_name;
-	u_long		lkm_offset;
-	struct vfsconf *lkm_vfsconf;
+	MODTYPE	lkm_type;
+	int	lkm_ver;
+	char	*lkm_name;
+	u_long	lkm_offset;
+	struct vfsops	*lkm_vfsops;
 };
 
 /*
@@ -99,13 +100,13 @@ typedef enum devtype {
  * Loadable device driver
  */
 struct lkm_dev {
-	MODTYPE		lkm_type;
-	int		lkm_ver;
-	char	       *lkm_name;
-	u_long		lkm_offset;
-	DEVTYPE		lkm_devtype;
+	MODTYPE	lkm_type;
+	int	lkm_ver;
+	char	*lkm_name;
+	u_long	lkm_offset;
+	DEVTYPE	lkm_devtype;
 	union {
-		void		*anon;
+		void	*anon;
 		struct bdevsw	*bdev;
 		struct cdevsw	*cdev;
 	} lkm_dev;
@@ -116,14 +117,27 @@ struct lkm_dev {
 };
 
 /*
+ * Loadable streams module
+ */
+struct lkm_strmod {
+	MODTYPE	lkm_type;
+	int	lkm_ver;
+	char	*lkm_name;
+	u_long	lkm_offset;
+	/*
+	 * Removed: future release
+	 */
+};
+
+/*
  * Exec loader
  */
 struct lkm_exec {
-	MODTYPE		lkm_type;
-	int		lkm_ver;
-	char	       *lkm_name;
-	u_long		lkm_offset;
-	struct execsw  *lkm_exec;
+	MODTYPE	lkm_type;
+	int	lkm_ver;
+	char	*lkm_name;
+	u_long	lkm_offset;
+	struct execsw	*lkm_exec;
 	struct execsw	lkm_oldexec;
 };
 
@@ -131,20 +145,20 @@ struct lkm_exec {
  * Miscellaneous module (complex load/unload, potentially complex stat
  */
 struct lkm_misc {
-	MODTYPE		lkm_type;
-	int		lkm_ver;
-	char	       *lkm_name;
-	u_long		lkm_offset;
+	MODTYPE	lkm_type;
+	int	lkm_ver;
+	char	*lkm_name;
+	u_long	lkm_offset;
 };
 
 /*
  * Any module (to get type and name info without knowing type)
  */
 struct lkm_any {
-	MODTYPE		lkm_type;
-	int		lkm_ver;
-	char	       *lkm_name;
-	u_long		lkm_offset;
+	MODTYPE	lkm_type;
+	int	lkm_ver;
+	char	*lkm_name;
+	u_long	lkm_offset;
 };
 
 
@@ -157,6 +171,7 @@ union lkm_generic {
 	struct lkm_syscall	*lkm_syscall;
 	struct lkm_vfs		*lkm_vfs;
 	struct lkm_dev		*lkm_dev;
+	struct lkm_strmod	*lkm_strmod;
 	struct lkm_exec		*lkm_exec;
 	struct lkm_misc		*lkm_misc;
 };
@@ -176,7 +191,7 @@ struct lkm_table {
 	int	depcnt;		/* dependency count (INIT) */
 	int	id;		/* identifier (INIT) */
 
-	int	(*entry)(struct lkm_table *, int, int);	/* entry function */
+	int	(*entry) __P((struct lkm_table *, int, int));/* entry function */
 	union lkm_generic	private;	/* module private data */
 
 				/* ddb support */
@@ -185,7 +200,6 @@ struct lkm_table {
 	u_long	sym_offset;	/* ? offset */
 	u_long	sym_symsize;	/* ? symsize */
 	char	*sym_addr;	/* ? addr */
-	int	sym_id;		/* ? symtab id from ddb */
 };
 
 
@@ -203,13 +217,13 @@ struct lkm_table {
 		sysentp				\
 	};
 
-#define	MOD_VFS(name,vfsslot,vfsconf)		\
+#define	MOD_VFS(name,vfsslot,vfsopsp)		\
 	static struct lkm_vfs _module = {	\
 		LM_VFS,				\
 		LKM_VERSION,			\
 		name,				\
 		vfsslot,			\
-		vfsconf				\
+		vfsopsp				\
 	};
 
 #define	MOD_DEV(name,devtype,devslot,devp)	\
@@ -219,7 +233,7 @@ struct lkm_table {
 		name,				\
 		devslot,			\
 		devtype,			\
-		{(void *)devp}			\
+		(void *)devp			\
 	};
 
 #define	MOD_EXEC(name,execslot,execsw)		\
@@ -239,9 +253,8 @@ struct lkm_table {
 	};
 
 
-extern int lkm_nofunc(struct lkm_table *lkmtp, int cmd);
-extern struct lkm_table *lkm_list(struct lkm_table *);
-extern int lkmdispatch(struct lkm_table *, int);
+extern int	lkm_nofunc __P((struct lkm_table *lkmtp, int cmd));
+extern struct lkm_table *lkm_list __P((struct lkm_table *));
 
 /*
  * DISPATCH -- body function for use in module entry point function;
@@ -260,21 +273,19 @@ extern int lkmdispatch(struct lkm_table *, int);
 	int	error;							\
 	case LKM_E_LOAD:						\
 		lkmtp->private.lkm_any = (struct lkm_any *)&_module;	\
-		if ((error = load(lkmtp, cmd)) != 0)			\
+		if (error = load(lkmtp, cmd))				\
 			return error;					\
 		break;							\
 	case LKM_E_UNLOAD:						\
-		if ((error = unload(lkmtp, cmd)) != 0)			\
+		if (error = unload(lkmtp, cmd))				\
 			return error;					\
 		break;							\
 	case LKM_E_STAT:						\
-		if ((error = stat(lkmtp, cmd)) != 0)			\
+		if (error = stat(lkmtp, cmd))				\
 			return error;					\
 		break;							\
 	}								\
 	return lkmdispatch(lkmtp, cmd);
-
-extern struct vm_map *lkm_map;
 
 #endif /* _KERNEL */
 
@@ -286,7 +297,7 @@ extern struct vm_map *lkm_map;
 #define	LMRESERV_O	_IOWR('K', 0, struct lmc_resrv)
 #define	LMLOADBUF	_IOW('K', 1, struct lmc_loadbuf)
 #define	LMUNRESRV	_IO('K', 2)
-#define	LMREADY		_IOW('K', 3, u_long)
+#define	LMREADY		_IOW('K', 3, int)
 #define	LMRESERV	_IOWR('K', 4, struct lmc_resrv)
 
 #define	LMLOAD		_IOW('K', 9, struct lmc_load)

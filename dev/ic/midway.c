@@ -1,5 +1,5 @@
-/*	$OpenBSD: midway.c,v 1.37 2006/03/25 22:41:43 djm Exp $	*/
-/*	(sync'd to midway.c 1.68)	*/
+/*	$OpenBSD: midway.c,v 1.13 1996/08/02 02:49:48 chuck Exp $	*/
+/*	(sync'd to midway.c 1.62)	*/
 
 /*
  *
@@ -61,33 +61,6 @@
 #define EN_NOWMAYBE	1	/* hook to disable word maybe DMA */
 				/* XXX: WMAYBE doesn't work, needs debugging */
 #define EN_DDBHOOK	1	/* compile in ddb functions */
-#if defined(MIDWAY_ADPONLY)
-#define EN_ENIDMAFIX	0	/* no ENI cards to worry about */
-#else
-#define EN_ENIDMAFIX	1	/* avoid byte DMA on the ENI card (see below) */
-#endif
-
-/*
- * note on EN_ENIDMAFIX: the byte aligner on the ENI version of the card
- * appears to be broken.   it works just fine if there is no load... however
- * when the card is loaded the data get corrupted.   to see this, one only
- * has to use "telnet" over ATM.   do the following command in "telnet":
- * 	cat /usr/share/misc/termcap
- * "telnet" seems to generate lots of 1023 byte mbufs (which make great
- * use of the byte aligner).   watch "netstat -s" for checksum errors.
- * 
- * I further tested this by adding a function that compared the transmit 
- * data on the card's SRAM with the data in the mbuf chain _after_ the 
- * "transmit DMA complete" interrupt.   using the "telnet" test I got data
- * mismatches where the byte-aligned data should have been.   using ddb
- * and en_dumpmem() I verified that the DTQs fed into the card were 
- * absolutely correct.   thus, we are forced to concluded that the ENI
- * hardware is buggy.   note that the Adaptec version of the card works
- * just fine with byte DMA.
- *
- * bottom line: we set EN_ENIDMAFIX to 1 to avoid byte DMAs on the ENI
- * card.
- */
 
 #if defined(DIAGNOSTIC) && !defined(EN_DIAG)
 #define EN_DIAG			/* link in with master DIAG option */
@@ -108,8 +81,6 @@
 #define INLINE inline
 #endif /* EN_DEBUG */
 
-#include "bpfilter.h"
-
 #ifdef __FreeBSD__
 #include "en.h"
 #endif
@@ -122,11 +93,7 @@
 #if defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__)
 #include <sys/device.h>
 #endif
-#if defined(__FreeBSD__)
-#include <sys/sockio.h>
-#else
 #include <sys/ioctl.h>
-#endif
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -134,7 +101,7 @@
 #include <net/if.h>
 #include <net/if_atm.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 #ifdef INET
 #include <netinet/if_atm.h>
@@ -146,7 +113,7 @@
 #endif
 
 
-#if !defined(__sparc__) && !defined(__FreeBSD__)
+#if !defined(sparc) && !defined(__FreeBSD__)
 #include <machine/bus.h>
 #endif
 
@@ -156,29 +123,15 @@
 #if defined(__alpha__)
 /* XXX XXX NEED REAL DMA MAPPING SUPPORT XXX XXX */
 #undef vtophys
-#define	vtophys(va)	alpha_XXX_dmamap((vaddr_t)(va))
+#define	vtophys(va)	__alpha_bus_XXX_dmamap(sc->en_bc, (void *)(va))
 #endif
 #elif defined(__FreeBSD__)
 #include <machine/cpufunc.h>            /* for rdtsc proto for clock.h below */
 #include <machine/clock.h>              /* for DELAY */
-#include <dev/en/midwayreg.h>
-#include <dev/en/midwayvar.h>
+#include <pci/midwayreg.h>
+#include <pci/midwayvar.h>
 #include <vm/pmap.h>			/* for vtophys proto */
-
-/* 
- * 2.1.x does not have if_softc.   detect this by seeing if IFF_NOTRAILERS
- * is defined, as per kjc.
- */
-#ifdef IFF_NOTRAILERS
-#define MISSING_IF_SOFTC
-#else
 #define IFF_NOTRAILERS 0
-#endif
-
-#endif	/* __FreeBSD__ */
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
 #endif
 
 /*
@@ -196,7 +149,7 @@
 #define RX_NONE		0xffff	/* recv VC not in use */
 
 #define EN_OBHDR	ATM_PH_DRIVER7  /* TBD in first mbuf ! */
-#define EN_OBTRL	ATM_PH_DRIVER8  /* PDU trailer in last mbuf ! */
+#define EN_OBTRL	ATM_PH_DRIVER8  /* PDU trailier in last mbuf ! */
 
 #define ENOTHER_FREE	0x01		/* free rxslot */
 #define ENOTHER_DRAIN	0x02		/* almost free (drain DRQ dma) */
@@ -274,120 +227,70 @@ static struct en_dmatab en_dma_planB[] = {
 static struct en_dmatab *en_dmaplan = en_dma_planA;
   
 /*
- * prototypes
- */
-
-STATIC INLINE	int en_b2sz(int) __attribute__ ((unused));
-#ifdef EN_DDBHOOK
-		int en_dump(int,int);
-		int en_dumpmem(int,int,int);
-#endif
-STATIC		void en_dmaprobe(struct en_softc *);
-STATIC		int en_dmaprobe_doit(struct en_softc *, u_int8_t *, 
-		    u_int8_t *, int);
-STATIC INLINE	int en_dqneed(struct en_softc *, caddr_t, u_int,
-		    u_int) __attribute__ ((unused));
-STATIC		void en_init(struct en_softc *);
-STATIC		int en_ioctl(struct ifnet *, EN_IOCTL_CMDT, caddr_t);
-STATIC INLINE	int en_k2sz(int) __attribute__ ((unused));
-STATIC		void en_loadvc(struct en_softc *, int);
-STATIC		int en_mfix(struct en_softc *, struct mbuf **,
-		    struct mbuf *);
-STATIC INLINE	struct mbuf *en_mget(struct en_softc *, u_int,
-		    u_int *) __attribute__ ((unused));
-STATIC INLINE	u_int32_t en_read(struct en_softc *,
-		    u_int32_t) __attribute__ ((unused));
-STATIC		int en_rxctl(struct en_softc *, struct atm_pseudoioctl *,
-		    int);
-STATIC		void en_txdma(struct en_softc *, int);
-STATIC		void en_txlaunch(struct en_softc *, int,
-		    struct en_launch *);
-STATIC		void en_service(struct en_softc *);
-STATIC		void en_start(struct ifnet *);
-STATIC INLINE	int en_sz2b(int) __attribute__ ((unused));
-STATIC INLINE	void en_write(struct en_softc *, u_int32_t,
-		    u_int32_t) __attribute__ ((unused));
-
-/*
  * macros/inline
  */
 
-/*
- * raw read/write macros
- */
+#ifdef EN_DEBUG_RANGE
+u_int32_t en_read(sc, r)
 
+struct en_softc *sc;
+u_int32_t r;
+
+{
+  if (r > MID_MAXOFF || (r % 4)) {
+    printf("en_read out of range, r=0x%x\n", r);
+    panic("en_read");
+  }
+  return(bus_mem_read_4(sc->en_bc, sc->en_base, r));
+}
+#define EN_READ(SC,R) ntohl(en_read(SC,R))
 #define EN_READDAT(SC,R) en_read(SC,R)
+
+void en_write(sc, r, v)
+
+struct en_softc *sc;
+u_int32_t r, v;
+
+{
+  if (r > MID_MAXOFF || (r % 4)) {
+    printf("en_write out of range, r=0x%x\n", r);
+    panic("en_write");
+  }
+  bus_mem_write_4(sc->en_bc, sc->en_base, r, v);
+}
+#define EN_WRITE(SC,R,V) en_write(SC,R, htonl(V))
 #define EN_WRITEDAT(SC,R,V) en_write(SC,R,V)
 
-/*
- * cooked read/write macros
- */
+#else /* EN_DEBUG_RANGE */
 
-#define EN_READ(SC,R) ntohl(en_read(SC,R))
-#define EN_WRITE(SC,R,V) en_write(SC,R, htonl(V))
+#define EN_READ(SC,R) ntohl(bus_mem_read_4((SC)->en_bc, (SC)->en_base, (R)))
+#define EN_WRITE(SC,R,V) \
+	bus_mem_write_4((SC)->en_bc, (SC)->en_base, (R), htonl((V)))
+
+#define EN_READDAT(SC,R) bus_mem_read_4((SC)->en_bc, (SC)->en_base, (R))
+#define EN_WRITEDAT(SC,R,V) \
+	bus_mem_write_4((SC)->en_bc, (SC)->en_base, (R), (V))
 
 #define EN_WRAPADD(START,STOP,CUR,VAL) { \
 	(CUR) = (CUR) + (VAL); \
 	if ((CUR) >= (STOP)) \
 		(CUR) = (START) + ((CUR) - (STOP)); \
 	}
+#endif /* EN_DEBUG_RANGE */
 
 #define WORD_IDX(START, X) (((X) - (START)) / sizeof(u_int32_t))
 
 /* we store sc->dtq and sc->drq data in the following format... */
-#define EN_DQ_MK(SLOT,LEN) (((SLOT) << 20)|(LEN)|(0x80000))
-					/* the 0x80000 ensures we != 0 */
+#define EN_DQ_MK(SLOT,LEN) (((SLOT) << 20)|(LEN))
 #define EN_DQ_SLOT(X) ((X) >> 20)
-#define EN_DQ_LEN(X) ((X) & 0x3ffff)
-
-/* format of DTQ/DRQ word 1 differs between ENI and ADP */
-#if defined(MIDWAY_ENIONLY)
-
-#define MID_MK_TXQ(SC,CNT,CHAN,END,BCODE) \
-	EN_WRITE((SC), (SC)->dtq_us, \
-		MID_MK_TXQ_ENI((CNT), (CHAN), (END), (BCODE))); 
-
-#define MID_MK_RXQ(SC,CNT,VCI,END,BCODE) \
-	EN_WRITE((SC), (SC)->drq_us, \
-		MID_MK_RXQ_ENI((CNT), (VCI), (END), (BCODE))); 
-
-#elif defined(MIDWAY_ADPONLY)
-
-#define MID_MK_TXQ(SC,CNT,CHAN,END,JK) \
-	EN_WRITE((SC), (SC)->dtq_us, \
-		MID_MK_TXQ_ADP((CNT), (CHAN), (END), (JK))); 
-
-#define MID_MK_RXQ(SC,CNT,VCI,END,JK) \
-	EN_WRITE((SC), (SC)->drq_us, \
-		MID_MK_RXQ_ADP((CNT), (VCI), (END), (JK))); 
-
-#else
-
-#define MID_MK_TXQ(SC,CNT,CHAN,END,JK_OR_BCODE) { \
-	if ((SC)->is_adaptec) \
-	  EN_WRITE((SC), (SC)->dtq_us, \
-		  MID_MK_TXQ_ADP((CNT), (CHAN), (END), (JK_OR_BCODE))); \
-	else \
-	  EN_WRITE((SC), (SC)->dtq_us, \
-		  MID_MK_TXQ_ENI((CNT), (CHAN), (END), (JK_OR_BCODE))); \
-	}
-
-#define MID_MK_RXQ(SC,CNT,VCI,END,JK_OR_BCODE) { \
-	if ((SC)->is_adaptec) \
-	  EN_WRITE((SC), (SC)->drq_us, \
-		  MID_MK_RXQ_ADP((CNT), (VCI), (END), (JK_OR_BCODE))); \
-	else \
-	  EN_WRITE((SC), (SC)->drq_us, \
-		   MID_MK_RXQ_ENI((CNT), (VCI), (END), (JK_OR_BCODE))); \
-	}
-
-#endif
+#define EN_DQ_LEN(X) ((X) & 0xfffff)
 
 /* add an item to the DTQ */
-#define EN_DTQADD(SC,CNT,CHAN,JK_OR_BCODE,ADDR,LEN,END) { \
+#define EN_DTQADD(SC,CNT,CHAN,BCODE,ADDR,LEN,END) { \
 	if (END) \
 	  (SC)->dtq[MID_DTQ_A2REG((SC)->dtq_us)] = EN_DQ_MK(CHAN,LEN); \
-	MID_MK_TXQ(SC,CNT,CHAN,END,JK_OR_BCODE); \
+	EN_WRITE((SC), (SC)->dtq_us, \
+		MID_MK_TXQ((CNT), (CHAN), (END), (BCODE))); \
 	(SC)->dtq_us += 4; \
 	EN_WRITE((SC), (SC)->dtq_us, (ADDR)); \
 	EN_WRAPADD(MID_DTQOFF, MID_DTQEND, (SC)->dtq_us, 4); \
@@ -397,10 +300,11 @@ STATIC INLINE	void en_write(struct en_softc *, u_int32_t,
 }
 
 /* DRQ add macro */
-#define EN_DRQADD(SC,CNT,VCI,JK_OR_BCODE,ADDR,LEN,SLOT,END) { \
+#define EN_DRQADD(SC,CNT,VCI,BCODE,ADDR,LEN,SLOT,END) { \
 	if (END) \
 	  (SC)->drq[MID_DRQ_A2REG((SC)->drq_us)] = EN_DQ_MK(SLOT,LEN); \
-	MID_MK_RXQ(SC,CNT,VCI,END,JK_OR_BCODE); \
+	EN_WRITE((SC), (SC)->drq_us, \
+		MID_MK_RXQ((CNT), (VCI), (END), (BCODE))); \
 	(SC)->drq_us += 4; \
 	EN_WRITE((SC), (SC)->drq_us, (ADDR)); \
 	EN_WRAPADD(MID_DRQOFF, MID_DRQEND, (SC)->drq_us, 4); \
@@ -410,58 +314,43 @@ STATIC INLINE	void en_write(struct en_softc *, u_int32_t,
 }
 
 /*
+ * prototypes
+ */
+
+STATIC	int en_b2sz __P((int));
+#ifdef EN_DDBHOOK
+int	en_dump __P((int,int));
+int	en_dumpmem __P((int,int,int));
+#endif
+STATIC	void en_dmaprobe __P((struct en_softc *));
+STATIC	int en_dmaprobe_doit __P((struct en_softc *, u_int8_t *, 
+							u_int8_t *, int));
+STATIC	int en_dqneed __P((struct en_softc *, caddr_t, u_int, u_int));
+STATIC	void en_init __P((struct en_softc *));
+STATIC	int en_ioctl __P((struct ifnet *, EN_IOCTL_CMDT, caddr_t));
+STATIC	int en_k2sz __P((int));
+STATIC	void en_loadvc __P((struct en_softc *, int));
+STATIC	int en_mfix __P((struct en_softc *, struct mbuf **, struct mbuf *));
+STATIC	struct mbuf *en_mget __P((struct en_softc *, u_int, u_int *));
+STATIC	int en_rxctl __P((struct en_softc *, struct atm_pseudoioctl *, int));
+STATIC	void en_txdma __P((struct en_softc *, int));
+STATIC	void en_txlaunch __P((struct en_softc *, int, struct en_launch *));
+STATIC	void en_service __P((struct en_softc *));
+STATIC	void en_start __P((struct ifnet *));
+STATIC	int en_sz2b __P((int));
+
+/*
  * the driver code
  *
  * the code is arranged in a specific way:
  * [1] short/inline functions
  * [2] autoconfig stuff
  * [3] ioctl stuff
- * [4] reset -> init -> transmit -> intr -> receive functions
+ * [4] reset -> init -> trasmit -> intr -> receive functions
  *
  */
 
 /***********************************************************************/
-
-/*
- * en_read: read a word from the card.   this is the only function
- * that reads from the card.
- */
-
-STATIC INLINE u_int32_t en_read(sc, r)
-
-struct en_softc *sc;
-u_int32_t r;
-
-{
-
-#ifdef EN_DEBUG_RANGE
-  if (r > MID_MAXOFF || (r % 4)) {
-    panic("en_read: out of range, r=0x%x", r);
-  }
-#endif
-
-  return(bus_space_read_4(sc->en_memt, sc->en_base, r));
-}
-
-/*
- * en_write: write a word to the card.   this is the only function that
- * writes to the card.
- */
-
-STATIC INLINE void en_write(sc, r, v)
-
-struct en_softc *sc;
-u_int32_t r, v;
-
-{
-#ifdef EN_DEBUG_RANGE
-  if (r > MID_MAXOFF || (r % 4)) {
-    panic("en_write: out of range, r=0x%x", r);
-  }
-#endif
-
-  bus_space_write_4(sc->en_memt, sc->en_base, r, v);
-}
 
 /*
  * en_k2sz: convert KBytes to a size parameter (a log2)
@@ -545,17 +434,8 @@ caddr_t data;
 u_int len, tx;
 
 {
-  int result, needalign, sz;
-
-#if !defined(MIDWAY_ENIONLY)
-#if !defined(MIDWAY_ADPONLY)
-    if (sc->is_adaptec)
-#endif /* !MIDWAY_ADPONLY */
-      return(1);	/* adaptec can DMA anything in one go */
-#endif
+  int result = 0, needalign, sz;
     
-#if !defined(MIDWAY_ADPONLY)
-    result = 0;
     if (len < EN_MINDMA) {
       if (!tx)			/* XXX: conservative */
         return(1);		/* will copy/DMA_JK */
@@ -594,7 +474,6 @@ u_int len, tx;
     }
 
     return(result);
-#endif	/* !MIDWAY_ADPONLY */
 }
 
 
@@ -633,14 +512,10 @@ u_int totlen, *drqneed;
       }
       m->m_len = MLEN;
     }
-    if (totlen >= MINCLSIZE) {
+    if (top && totlen >= MINCLSIZE) {
       MCLGET(m, M_DONTWAIT);
-      if ((m->m_flags & M_EXT) == 0) {
-	m_free(m);
-	m_freem(top);
-	return(NULL);	/* out of mbuf clusters */
-      }
-      m->m_len = MCLBYTES;
+      if (m->m_flags & M_EXT)
+	m->m_len = MCLBYTES;
     }
     m->m_len = min(totlen, m->m_len);
     totlen -= m->m_len;
@@ -676,8 +551,6 @@ struct en_softc *sc;
    * are aliases for 0x27fffc  [note that RAM starts at offset 0x200000]).
    */
 
-  if (sc->en_busreset)
-    sc->en_busreset(sc);
   EN_WRITE(sc, MID_RESID, 0x0);	/* reset card before touching RAM */
   for (lcv = MID_PROBEOFF; lcv <= MID_MAXOFF ; lcv += MID_PROBSIZE) {
     EN_WRITE(sc, lcv, lcv);	/* data[address] = address */
@@ -702,32 +575,20 @@ done_probe:
    * "hello world"
    */
 
-  if (sc->en_busreset)
-    sc->en_busreset(sc);
   EN_WRITE(sc, MID_RESID, 0x0);		/* reset */
   for (lcv = MID_RAMOFF ; lcv < MID_RAMOFF + sc->en_obmemsz ; lcv += 4)
     EN_WRITE(sc, lcv, 0);	/* zero memory */
 
   reg = EN_READ(sc, MID_RESID);
 
-  printf("%s: ATM midway v%d, board IDs %d.%d, %s%s%s, %ldKB on-board RAM\n",
+  printf("%s: ATM midway v%d, board IDs %d.%d, %s%s%s, %dKB on-board RAM\n",
 	sc->sc_dev.dv_xname, MID_VER(reg), MID_MID(reg), MID_DID(reg), 
 	(MID_IS_SABRE(reg)) ? "sabre controller, " : "",
 	(MID_IS_SUNI(reg)) ? "SUNI" : "Utopia",
 	(!MID_IS_SUNI(reg) && MID_IS_UPIPE(reg)) ? " (pipelined)" : "",
 	sc->en_obmemsz / 1024);
-
-  if (sc->is_adaptec) {
-    if (sc->bestburstlen == 64 && sc->alburst == 0)
-      printf("%s: passed 64 byte DMA test\n", sc->sc_dev.dv_xname);
-    else
-      printf("%s: FAILED DMA TEST: burst=%d, alburst=%d\n", 
-	    sc->sc_dev.dv_xname, sc->bestburstlen, sc->alburst);
-  } else {
-    printf("%s: maximum DMA burst length = %d bytes%s\n", sc->sc_dev.dv_xname,
-	  sc->bestburstlen, (sc->alburst) ? " (must align)" : "");
-  }
-
+  printf("%s: maximum DMA burst length = %d bytes%s\n", sc->sc_dev.dv_xname,
+	sc->bestburstlen, (sc->alburst) ? " (must align)" : "");
 #if 0		/* WMAYBE doesn't work, don't complain about it */
   /* check if en_dmaprobe disabled wmaybe */
   if (en_dmaplan == en_dma_planB)
@@ -741,13 +602,11 @@ done_probe:
 #if defined(__NetBSD__) || defined(__OpenBSD__)
   bcopy(sc->sc_dev.dv_xname, sc->enif.if_xname, IFNAMSIZ);
 #endif
-#if !defined(MISSING_IF_SOFTC)
   sc->enif.if_softc = sc;
-#endif
   ifp->if_flags = IFF_SIMPLEX|IFF_NOTRAILERS;
   ifp->if_ioctl = en_ioctl;
+  ifp->if_output = atm_output;
   ifp->if_start = en_start;
-  IFQ_SET_READY(&ifp->if_snd);
 
   /*
    * init softc
@@ -755,8 +614,7 @@ done_probe:
 
   for (lcv = 0 ; lcv < MID_N_VC ; lcv++) {
     sc->rxvc2slot[lcv] = RX_NONE;
-    sc->txspeed[lcv] = 0;	/* full */
-    sc->txvc2slot[lcv] = 0;	/* full speed == slot 0 */
+    sc->txspeed[lcv] = 0; /* full */
   }
 
   sz = sc->en_obmemsz - (MID_BUFOFF - MID_RAMOFF);
@@ -773,7 +631,6 @@ done_probe:
     ptr += (EN_TXSZ * 1024);
     sz -= (EN_TXSZ * 1024);
     sc->txslot[lcv].stop = ptr;
-    sc->txslot[lcv].nref = 0;
     bzero(&sc->txslot[lcv].indma, sizeof(sc->txslot[lcv].indma));
     bzero(&sc->txslot[lcv].q, sizeof(sc->txslot[lcv].q));
 #ifdef EN_DEBUG
@@ -790,14 +647,6 @@ done_probe:
     printf("%s: EN_NTX/EN_TXSZ/EN_RXSZ too big\n", sc->sc_dev.dv_xname);
     return;
   }
-
-  /* 
-   * ensure that there is always one VC slot on the service list free
-   * so that we can tell the difference between a full and empty list.
-   */
-  if (sc->en_nrx >= MID_N_VC)
-    sc->en_nrx = MID_N_VC - 1;
-
   for (lcv = 0 ; lcv < sc->en_nrx ; lcv++) {
     sc->rxslot[lcv].rxhand = NULL;
     sc->rxslot[lcv].oth_flags = ENOTHER_FREE;
@@ -838,11 +687,6 @@ done_probe:
 
   if_attach(ifp);
   atm_ifattach(ifp); 
-
-
-#if NBPFILTER > 0
-  bpfattach(&ifp->if_bpf, ifp, DLT_ATM_RFC1483, sizeof(struct atmllc));
-#endif
 
 }
 
@@ -899,16 +743,6 @@ struct en_softc *sc;
     return;				/* won't be using WMAYBE */
 
   /*
-   * adaptec does not have (or need) wmaybe.   do not bother testing
-   * for it.
-   */
-  if (sc->is_adaptec) {
-    /* XXX, actually don't need a DMA plan: adaptec is smarter than that */
-    en_dmaplan = en_dma_planB; 
-    return;
-  }
-
-  /*
    * test that WMAYBE dma works like we think it should 
    * (i.e. no alignment restrictions on host address other than alburst)
    */
@@ -950,9 +784,10 @@ int wmtry;
    * set up a 1k buffer at MID_BUFOFF
    */
 
-  if (sc->en_busreset)
-    sc->en_busreset(sc);
   EN_WRITE(sc, MID_RESID, 0x0);	/* reset card before touching RAM */
+
+  for (lcv = MID_BUFOFF ; lcv < 1024; lcv += 4) 
+    EN_WRITE(sc, lcv, 0);	/* zero memory */
 
   midvloc = ((MID_BUFOFF - MID_RAMOFF) / sizeof(u_int32_t)) >> MIDV_LOCTOPSHFT;
   EN_WRITE(sc, MIDX_PLACE(0), MIDX_MKPLACE(en_k2sz(1), midvloc));
@@ -982,13 +817,6 @@ int wmtry;
    */
 
   for (lcv = 8 ; lcv <= MIDDMA_MAXBURST ; lcv = lcv * 2) {
-
-    /* zero SRAM and dest buffer */
-    for (cnt = 0 ; cnt < 1024; cnt += 4) 
-      EN_WRITE(sc, MID_BUFOFF+cnt, 0);	/* zero memory */
-    for (cnt = 0 ; cnt < 68  ; cnt++) 
-      dp[cnt] = 0;
-
     if (wmtry) {
       count = (sc->bestburstlen - sizeof(u_int32_t)) / sizeof(u_int32_t);
       bcode = en_dmaplan[count].bcode;
@@ -997,10 +825,7 @@ int wmtry;
       bcode = en_sz2b(lcv);
       count = 1;
     }
-    if (sc->is_adaptec)
-      EN_WRITE(sc, sc->dtq_chip, MID_MK_TXQ_ADP(lcv, 0, MID_DMA_END, 0));
-    else
-      EN_WRITE(sc, sc->dtq_chip, MID_MK_TXQ_ENI(count, 0, MID_DMA_END, bcode));
+    EN_WRITE(sc, sc->dtq_chip, MID_MK_TXQ(count, 0, MID_DMA_END, bcode));
     EN_WRITE(sc, sc->dtq_chip+4, vtophys(sp));
     EN_WRITE(sc, MID_DMA_WRTX, MID_DTQ_A2REG(sc->dtq_chip+8));
     cnt = 1000;
@@ -1023,10 +848,7 @@ int wmtry;
 
     /* "return to sender..."  address is known ... */
 
-    if (sc->is_adaptec)
-      EN_WRITE(sc, sc->drq_chip, MID_MK_RXQ_ADP(lcv, 0, MID_DMA_END, 0));
-    else
-      EN_WRITE(sc, sc->drq_chip, MID_MK_RXQ_ENI(count, 0, MID_DMA_END, bcode));
+    EN_WRITE(sc, sc->drq_chip, MID_MK_RXQ(count, 0, MID_DMA_END, bcode));
     EN_WRITE(sc, sc->drq_chip+4, vtophys(dp));
     EN_WRITE(sc, MID_DMA_WRRX, MID_DRQ_A2REG(sc->drq_chip+8));
     cnt = 1000;
@@ -1064,12 +886,6 @@ int wmtry;
 
 /*
  * en_ioctl: handle ioctl requests
- *
- * NOTE: if you add an ioctl to set txspeed, you should choose a new
- * TX channel/slot.   Choose the one with the lowest sc->txslot[slot].nref
- * value, subtract one from sc->txslot[0].nref, add one to the
- * sc->txslot[slot].nref, set sc->txvc2slot[vci] = slot, and then set
- * txspeed[vci].
  */
 
 STATIC int en_ioctl(ifp, cmd, data)
@@ -1079,11 +895,7 @@ EN_IOCTL_CMDT cmd;
 caddr_t data;
 
 {
-#ifdef MISSING_IF_SOFTC
-    struct en_softc *sc = (struct en_softc *) en_cd.cd_devs[ifp->if_unit];
-#else
     struct en_softc *sc = (struct en_softc *) ifp->if_softc;
-#endif
     struct ifaddr *ifa = (struct ifaddr *) data;
     struct ifreq *ifr = (struct ifreq *) data;
     struct atm_pseudoioctl *api = (struct atm_pseudoioctl *)data;
@@ -1149,6 +961,10 @@ caddr_t data;
 		error = EINVAL;
 		break;
 
+#if defined(SIOCSIFMTU)		/* ??? copied from if_de */
+#if !defined(ifr_mtu)
+#define ifr_mtu ifr_metric
+#endif
 	case SIOCSIFMTU:
 	    /*
 	     * Set the interface MTU.
@@ -1164,6 +980,7 @@ caddr_t data;
 	    en_reset(sc);
 	    en_init(sc);
 	    break;
+#endif /* SIOCSIFMTU */
 
 	default: 
 	    error = EINVAL;
@@ -1222,9 +1039,6 @@ int on;
     sc->rxslot[slot].rxhand = pi->rxhand;
     if (sc->rxslot[slot].indma.ifq_head || sc->rxslot[slot].q.ifq_head)
       panic("en_rxctl: left over mbufs on enable");
-    sc->txspeed[vci] = 0;	/* full speed to start */
-    sc->txvc2slot[vci] = 0;	/* init value */
-    sc->txslot[0].nref++;	/* bump reference count */
     en_loadvc(sc, vci);		/* does debug printf for us */
     return(0);
   }
@@ -1238,22 +1052,19 @@ int on;
   slot = sc->rxvc2slot[vci];
   if ((sc->rxslot[slot].oth_flags & (ENOTHER_FREE|ENOTHER_DRAIN)) != 0)
     return(EINVAL);
-  s = splnet();		/* block out enintr() */
+  s = splimp();		/* block out enintr() */
   oldmode = EN_READ(sc, MID_VC(vci));
-  newmode = MIDV_SETMODE(oldmode, MIDV_TRASH) & ~MIDV_INSERVICE;
+  newmode = MIDV_SETMODE(oldmode, MIDV_TRASH);
   EN_WRITE(sc, MID_VC(vci), (newmode | (oldmode & MIDV_INSERVICE)));
 		/* halt in tracks, be careful to preserve inserivce bit */
   DELAY(27);
   sc->rxslot[slot].rxhand = NULL;
   sc->rxslot[slot].mode = newmode;
 
-  sc->txslot[sc->txvc2slot[vci]].nref--;
-  sc->txspeed[vci] = 0;
-  sc->txvc2slot[vci] = 0;
-
   /* if stuff is still going on we are going to have to drain it out */
   if (sc->rxslot[slot].indma.ifq_head || 
 		sc->rxslot[slot].q.ifq_head ||
+		(EN_READ(sc, MID_VC(vci)) & MIDV_INSERVICE) != 0 ||
 		(sc->rxslot[slot].oth_flags & ENOTHER_SWSL) != 0) {
     sc->rxslot[slot].oth_flags |= ENOTHER_DRAIN;
   } else {
@@ -1288,8 +1099,6 @@ struct en_softc *sc;
   printf("%s: reset\n", sc->sc_dev.dv_xname);
 #endif
 
-  if (sc->en_busreset)
-    sc->en_busreset(sc);
   EN_WRITE(sc, MID_RESID, 0x0);	/* reset hardware */
 
   /*
@@ -1373,36 +1182,24 @@ struct en_softc *sc;
 #endif
   sc->enif.if_flags |= IFF_RUNNING;	/* enable */
 
-  if (sc->en_busreset)
-    sc->en_busreset(sc);
   EN_WRITE(sc, MID_RESID, 0x0);		/* reset */
 
   /*
    * init obmem data structures: vc tab, dma q's, slist.
-   *
-   * note that we set drq_free/dtq_free to one less than the total number
-   * of DTQ/DRQs present.   we do this because the card uses the condition
-   * (drq_chip == drq_us) to mean "list is empty"... but if you allow the
-   * circular list to be completely full then (drq_chip == drq_us) [i.e.
-   * the drq_us pointer will wrap all the way around].   by restricting
-   * the number of active requests to (N - 1) we prevent the list from
-   * becoming completely full.    note that the card will sometimes give
-   * us an interrupt for a DTQ/DRQ we have already processes... this helps
-   * keep that interrupt from messing us up.
    */
 
   for (vc = 0 ; vc < MID_N_VC ; vc++) 
     en_loadvc(sc, vc);
 
   bzero(&sc->drq, sizeof(sc->drq));
-  sc->drq_free = MID_DRQ_N - 1;		/* N - 1 */
+  sc->drq_free = MID_DRQ_N;
   sc->drq_chip = MID_DRQ_REG2A(EN_READ(sc, MID_DMA_RDRX));
   EN_WRITE(sc, MID_DMA_WRRX, MID_DRQ_A2REG(sc->drq_chip)); 
 						/* ensure zero queue */
   sc->drq_us = sc->drq_chip;
 
   bzero(&sc->dtq, sizeof(sc->dtq));
-  sc->dtq_free = MID_DTQ_N - 1;		/* N - 1 */
+  sc->dtq_free = MID_DTQ_N;
   sc->dtq_chip = MID_DTQ_REG2A(EN_READ(sc, MID_DMA_RDTX));
   EN_WRITE(sc, MID_DMA_WRTX, MID_DRQ_A2REG(sc->dtq_chip)); 
 						/* ensure zero queue */
@@ -1479,7 +1276,7 @@ int vc;
 
 /*
  * en_start: start transmitting the next packet that needs to go out
- * if there is one.    note that atm_output() has already splnet()'d us.
+ * if there is one.    note that atm_output() has already splimp()'d us.
  */
 
 STATIC void en_start(ifp)
@@ -1487,14 +1284,11 @@ STATIC void en_start(ifp)
 struct ifnet *ifp;
 
 {
-#ifdef MISSING_IF_SOFTC
-    struct en_softc *sc = (struct en_softc *) en_cd.cd_devs[ifp->if_unit];
-#else
     struct en_softc *sc = (struct en_softc *) ifp->if_softc;
-#endif
+    struct ifqueue *ifq = &ifp->if_snd; /* if INPUT QUEUE */
     struct mbuf *m, *lastm, *prev;
     struct atm_pseudohdr *ap, *new_ap;
-    int txchan, mlen, got, need, toadd, cellcnt, first;
+    int txchan, c, mlen, got, need, toadd, cellcnt, first;
     u_int32_t atm_vpi, atm_vci, atm_flags, *dat, aal;
     u_int8_t *cp;
 
@@ -1508,7 +1302,7 @@ struct ifnet *ifp;
 
     while (1) {
 
-      IFQ_DEQUEUE(&ifp->if_snd, m);
+      IF_DEQUEUE(ifq, m);
       if (m == NULL)
 	return;		/* EMPTY: >>> exit here <<< */
     
@@ -1526,8 +1320,7 @@ struct ifnet *ifp;
       mlen = 0;
       prev = NULL;
       while (1) {
-	/* no DMA? */
-        if ((!sc->is_adaptec && EN_ENIDMAFIX) || EN_NOTXDMA || !en_dma) {
+        if (EN_NOTXDMA || !en_dma) {		/* no DMA? */
 	  if ( (mtod(lastm, unsigned long) % sizeof(u_int32_t)) != 0 ||
 	    ((lastm->m_len % sizeof(u_int32_t)) != 0 && lastm->m_next)) {
 	    first = (lastm == m);
@@ -1582,7 +1375,7 @@ struct ifnet *ifp;
        *	[including AAL5 PDU, if AAL5]
        */
 
-      got = mlen - sizeof(struct atm_pseudohdr);
+      got = mlen - sizeof(struct atm_pseudohdr *);
       toadd = (aal == MID_TBD_AAL5) ? MID_PDU_SIZE : 0;	/* PDU */
       cellcnt = (got + toadd + (MID_ATMDATASZ - 1)) / MID_ATMDATASZ;
       need = cellcnt * MID_ATMDATASZ;
@@ -1637,16 +1430,25 @@ struct ifnet *ifp;
 #endif	/* EN_MBUF_OPT */
 
       /*
-       * get assigned channel (will be zero unless txspeed[atm_vci] is set)
+       * choose channel with smallest # of bytes waiting for DMA
        */
 
-      txchan = sc->txvc2slot[atm_vci];
+      if (sc->txspeed[atm_vci]) {
+	txchan = 1;
+	for (c = 1 ; c < EN_NTX; c++) {
+	  if (sc->txslot[c].mbsize < sc->txslot[txchan].mbsize)
+	    txchan = c;
+	  if (sc->txslot[txchan].mbsize == 0) break; /* zero length!!! */
+	}
+      } else {
+	txchan = 0;
+      }
 
       if (sc->txslot[txchan].mbsize > EN_TXHIWAT) {
 	EN_COUNT(sc->txmbovr);
 	m_freem(m);
 #ifdef EN_DEBUG
-	printf("%s: tx%d: buffer space shortage\n", sc->sc_dev.dv_xname,
+	printf("%s: tx%d: buffer space shortage\n", ifp->if_xname,
 		txchan);
 #endif
 	continue;
@@ -1689,7 +1491,7 @@ struct mbuf **mm, *prev;
 
   EN_COUNT(sc->mfix);			/* count # of calls */
 #ifdef EN_DEBUG
-  printf("%s: mfix mbuf m_data=%p, m_len=%d\n", sc->sc_dev.dv_xname,
+  printf("%s: mfix mbuf m_data=0x%x, m_len=%d\n", sc->sc_dev.dv_xname,
 	m->m_data, m->m_len);
 #endif
 
@@ -1750,7 +1552,7 @@ struct mbuf **mm, *prev;
 
 
 /*
- * en_txdma: start transmit DMA, if possible
+ * en_txdma: start trasmit DMA, if possible
  */
 
 STATIC void en_txdma(sc, chan)
@@ -1762,7 +1564,7 @@ int chan;
   struct mbuf *tmp;
   struct atm_pseudohdr *ap;
   struct en_launch launch;
-  int datalen = 0, dtqneed, len, ncells;
+  int datalen, dtqneed, len, ncells;
   u_int8_t *cp;
 
 #ifdef EN_DEBUG
@@ -1814,7 +1616,7 @@ again:
 
   if ((launch.atm_flags & EN_OBHDR) == 0) {
     dtqneed = 1;		/* header still needs to be added */
-    launch.need = MID_TBD_SIZE;	/* not included with mbuf */
+    launch.need = MID_TBD_SIZE;	/* not includeded with mbuf */
   } else {
     dtqneed = 0;		/* header on-board, dma with mbuf */
     launch.need = 0;
@@ -1864,17 +1666,10 @@ again:
     goto dequeue_drop;
   }
 
-  /*
-   * note: note that we cannot totally fill the circular buffer (i.e.
-   * we can't use up all of the remaining sc->txslot[chan].bfree free
-   * bytes) because that would cause the circular buffer read pointer
-   * to become equal to the write pointer, thus signaling 'empty buffer'
-   * to the hardware and stopping the transmitter.
-   */
-  if (launch.need >= sc->txslot[chan].bfree) {
+  if (launch.need > sc->txslot[chan].bfree) {
     EN_COUNT(sc->txoutspace);
 #ifdef EN_DEBUG
-    printf("%s: tx%d: out of transmit space\n", sc->sc_dev.dv_xname, chan);
+    printf("%s: tx%d: out of trasmit space\n", sc->sc_dev.dv_xname, chan);
 #endif
     return;		/* >>> exit here if out of obmem buffer space <<< */
   }
@@ -1890,7 +1685,7 @@ again:
     sc->need_dtqs = 1;
     EN_COUNT(sc->txdtqout);
 #ifdef EN_DEBUG
-    printf("%s: tx%d: out of transmit DTQs\n", sc->sc_dev.dv_xname, chan);
+    printf("%s: tx%d: out of trasmit DTQs\n", sc->sc_dev.dv_xname, chan);
 #endif
     return;		/* >>> exit here if out of dtqs <<< */
   }
@@ -1910,40 +1705,18 @@ again:
    */
 
   EN_COUNT(sc->launch);
-  sc->enif.if_opackets++;
   if ((launch.atm_flags & EN_OBHDR) == 0) {
     EN_COUNT(sc->lheader);
-    /* store tbd1/tbd2 in host byte order */
-    launch.tbd1 = MID_TBD_MK1(launch.aal, sc->txspeed[launch.atm_vci], ncells);
-    launch.tbd2 = MID_TBD_MK2(launch.atm_vci, 0, 0);
+    /* store tbd1/tbd2 in network byte order */
+    launch.tbd1 = htonl(MID_TBD_MK1(launch.aal, sc->txspeed[launch.atm_vci], 
+		ncells));
+    launch.tbd2 = htonl(MID_TBD_MK2(launch.atm_vci, 0, 0));
   }
   if ((launch.atm_flags & EN_OBTRL) == 0 && launch.aal == MID_TBD_AAL5) {
     EN_COUNT(sc->ltail);
-    launch.pdu1 = MID_PDU_MK1(0, 0, datalen);  /* host byte order */
+    /* store pdu1 in network byte order */
+    launch.pdu1 = htonl(MID_PDU_MK1(0, 0, datalen));
   }
-
-#if NBPFILTER > 0
-	if (sc->enif.if_bpf != NULL) {
-		/*
-		 * adjust the top of the mbuf to skip the TBD if present
-		 * before passing the packet to bpf.
-		 * Also remove padding and the PDU trailer. Assume both of
-		 * them to be in the same mbuf. pktlen, m_len and m_data
-		 * are not needed anymore so we can change them.
-		 */
-		int size = sizeof(struct atm_pseudohdr);
-		if (launch.atm_flags & EN_OBHDR)
-			size += MID_TBD_SIZE;
-	
-		launch.t->m_data += size;
-		launch.t->m_len -= size;
-
-		bpf_mtap(sc->enif.if_bpf, launch.t, BPF_DIRECTION_OUT);
-
-		launch.t->m_data -= size;
-		launch.t->m_len += size;
-	}
-#endif
 
   en_txlaunch(sc, chan, &launch);
   
@@ -2017,11 +1790,11 @@ struct en_launch *l;
 
 #ifdef EN_DIAG
   if ((need - MID_TBD_SIZE) % MID_ATMDATASZ) 
-    printf("%s: tx%d: bogus transmit needs (%d)\n", sc->sc_dev.dv_xname, chan,
+    printf("%s: tx%d: bogus trasmit needs (%d)\n", sc->sc_dev.dv_xname, chan,
 		need);
 #endif
 #ifdef EN_DEBUG
-  printf("%s: tx%d: launch mbuf %p!   cur=0x%x[%d], need=%d, addtail=%d\n",
+  printf("%s: tx%d: launch mbuf 0x%x!   cur=0x%x[%d], need=%d, addtail=%d\n",
 	sc->sc_dev.dv_xname, chan, l->t, cur, (cur-start)/4, need, addtail);
   count = EN_READ(sc, MIDX_PLACE(chan));
   printf("     HW: base_address=0x%x, size=%d, read=%d, descstart=%d\n",
@@ -2031,17 +1804,17 @@ struct en_launch *l;
 
  /*
   * do we need to insert the TBD by hand?
-  * note that tbd1/tbd2/pdu1 are in host byte order.
   */
 
   if ((l->atm_flags & EN_OBHDR) == 0) {
+    /* note: data already in correct byte order.  use WRITEDAT to xfer */
 #ifdef EN_DEBUG
     printf("%s: tx%d: insert header 0x%x 0x%x\n", sc->sc_dev.dv_xname,
-	chan, l->tbd1, l->tbd2);
+	chan, ntohl(l->tbd1), ntohl(l->tbd2));
 #endif
-    EN_WRITE(sc, cur, l->tbd1);
+    EN_WRITEDAT(sc, cur, l->tbd1);
     EN_WRAPADD(start, stop, cur, 4);
-    EN_WRITE(sc, cur, l->tbd2);
+    EN_WRITEDAT(sc, cur, l->tbd2);
     EN_WRAPADD(start, stop, cur, 4);
     need -= 8;
   }
@@ -2063,16 +1836,6 @@ struct en_launch *l;
     /* now, determine if we should copy it */
     if (l->nodma || (len < EN_MINDMA &&
        (len % 4) == 0 && ((unsigned long) data % 4) == 0 && (cur % 4) == 0)) {
-
-      /* 
-       * roundup len: the only time this will change the value of len
-       * is when l->nodma is true, tmp is the last mbuf, and there is
-       * a non-word number of bytes to transmit.   in this case it is
-       * safe to round up because we've en_mfix'd the mbuf (so the first
-       * byte is word aligned there must be enough free bytes at the end
-       * to round off to the next word boundary)...
-       */
-      len = roundup(len, sizeof(u_int32_t));
       datastop = data + (len / sizeof(u_int32_t));
       /* copy loop: preserve byte order!!!  use WRITEDAT */
       while (data != datastop) {
@@ -2105,39 +1868,13 @@ struct en_launch *l;
 
     if (tmp->m_next == NULL) {
       cnt = (need - len) % sizeof(u_int32_t);
-      if (cnt && M_TRAILINGSPACE(tmp) >= cnt)
-        len += cnt;			/* pad for FLUSH */
+      if (cnt) {
+        cnt = sizeof(u_int32_t) - cnt;	/* # of byte we need to FLUSH */
+        if (M_TRAILINGSPACE(tmp) >= cnt)
+          len += cnt;			/* pad for FLUSH */
+      }
     }
       
-#if !defined(MIDWAY_ENIONLY)
-
-    /*
-     * the adaptec DMA engine is smart and handles everything for us.
-     */
-
-    if (sc->is_adaptec) {
-      /* need to DMA "len" bytes out to card */
-      need -= len;
-      EN_WRAPADD(start, stop, cur, len);
-#ifdef EN_DEBUG
-      printf("%s: tx%d: adp_dma %d bytes (%d left, cur now 0x%x)\n",
-              sc->sc_dev.dv_xname, chan, len, need, cur);
-#endif
-      end = (need == 0) ? MID_DMA_END : 0;
-      EN_DTQADD(sc, len, chan, 0, vtophys(data), l->mlen, end);
-      if (end)
-        goto done;
-      dma = cur;	/* update dma pointer */
-      continue;
-    }
-#endif /* !MIDWAY_ENIONLY */
-
-#if !defined(MIDWAY_ADPONLY)
-
-    /*
-     * the ENI DMA engine is not so smart and need more help from us
-     */
-
     /* do we need to do a DMA op to align to word boundary? */
     needalign = (unsigned long) data % sizeof(u_int32_t);
     if (needalign) {
@@ -2256,7 +1993,6 @@ struct en_launch *l;
     }
 
     dma = cur;		/* update dma pointer */
-#endif /* !MIDWAY_ADPONLY */
 
   } /* next mbuf, please */
 
@@ -2282,15 +2018,10 @@ struct en_launch *l;
        * FLUSH internal data buffer.  pad out with random data from the front
        * of the mbuf chain...
        */
-      bcode = (sc->is_adaptec) ? 0 : MIDDMA_BYTE;
       EN_COUNT(sc->tailflush);
       EN_WRAPADD(start, stop, cur, pad);
-      EN_DTQADD(sc, pad, chan, bcode, vtophys(l->t->m_data), 0, 0);
+      EN_DTQADD(sc, pad, chan, MIDDMA_BYTE, vtophys(l->t->m_data), 0, 0);
       need -= pad;
-#ifdef EN_DEBUG
-      printf("%s: tx%d: pad/FLUSH dma %d bytes (%d left, cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, pad, need, cur);
-#endif
     }
 
     /* copy data */
@@ -2298,21 +2029,21 @@ struct en_launch *l;
     if (l->aal == MID_TBD_AAL5)
       pad -= 2;
 #ifdef EN_DEBUG
-      printf("%s: tx%d: padding %d bytes (cur now 0x%x)\n", 
-		sc->sc_dev.dv_xname, chan, pad * sizeof(u_int32_t), cur);
+      printf("%s: tx%d: padding %d bytes\n", 
+		sc->sc_dev.dv_xname, chan, pad * sizeof(u_int32_t));
 #endif
     while (pad--) {
       EN_WRITEDAT(sc, cur, 0);	/* no byte order issues with zero */
       EN_WRAPADD(start, stop, cur, 4);
     }
     if (l->aal == MID_TBD_AAL5) {
-      EN_WRITE(sc, cur, l->pdu1); /* in host byte order */
+      EN_WRITEDAT(sc, cur, l->pdu1); /* already in network order */
       EN_WRAPADD(start, stop, cur, 8);
     }
   }
 
   if (addtail || dma != cur) {
-   /* write final descriptor  */
+   /* write final descritor  */
     EN_DTQADD(sc, WORD_IDX(start,cur), chan, MIDDMA_JK, 0, 
 				l->mlen, MID_DMA_END);
     /* dma = cur; */ 	/* not necessary since we are done */
@@ -2396,7 +2127,7 @@ void *arg;
 	else
 	  sc->txslot[lcv].bfree = (val + (EN_TXSZ*1024)) - sc->txslot[lcv].cur;
 #ifdef EN_DEBUG
-	printf("%s: tx%d: transmit done.   %d bytes now free in buffer\n",
+	printf("%s: tx%d: trasmit done.   %d bytes now free in buffer\n",
 		sc->sc_dev.dv_xname, lcv, sc->txslot[lcv].bfree);
 #endif
       }
@@ -2419,7 +2150,7 @@ void *arg;
       printf("%s: cleared need DTQ condition\n", sc->sc_dev.dv_xname);
 #endif
     }
-    while (idx != val) {
+    do {				/* while idx != val */ 
       sc->dtq_free++;
       if ((dtq = sc->dtq[idx]) != 0) {
         sc->dtq[idx] = 0;	/* don't forget to zero it out when done */
@@ -2435,7 +2166,7 @@ void *arg;
 	m_freem(m);
       }
       EN_WRAPADD(0, MID_DTQ_N, idx, 1);
-    }
+    } while (idx != val);
     sc->dtq_chip = MID_DTQ_REG2A(val);	/* sync softc */
   }
 
@@ -2467,24 +2198,20 @@ void *arg;
   if (reg & MID_INT_DMA_RX) {
     val = EN_READ(sc, MID_DMA_RDRX); /* chip's current location */
     idx = MID_DRQ_A2REG(sc->drq_chip);/* where we last saw chip */
-    while (idx != val) {
+    do {				/* while (idx != val)  */
       sc->drq_free++;
       if ((drq = sc->drq[idx]) != 0) {
         sc->drq[idx] = 0;	/* don't forget to zero it out when done */
 	slot = EN_DQ_SLOT(drq);
-        if (EN_DQ_LEN(drq) == 0) {  /* "JK" trash DMA? */
-          m = NULL;
-        } else {
-	  IF_DEQUEUE(&sc->rxslot[slot].indma, m);
-	  if (!m) {
-	    panic("enintr: drqsync: %s: lost mbuf in slot %d!",
-		sc->sc_dev.dv_xname, slot);
-	  }
-        }
+	IF_DEQUEUE(&sc->rxslot[slot].indma, m);
+	if (!m) {
+	  printf("%s: lost mbuf in slot %d!\n", sc->sc_dev.dv_xname, slot);
+	  panic("enintr: drqsync");
+	}
+
 	/* do something with this mbuf */
 	if (sc->rxslot[slot].oth_flags & ENOTHER_DRAIN) {  /* drain? */
-          if (m)
-	    m_freem(m);
+	  m_freem(m);
 	  vci = sc->rxslot[slot].atm_vci;
 	  if (sc->rxslot[slot].indma.ifq_head == NULL &&
 		sc->rxslot[slot].q.ifq_head == NULL &&
@@ -2498,28 +2225,21 @@ void *arg;
 			slot, vci);
 #endif
 	  }
-	} else if (m != NULL) {
+	} else {
 	  ATM_PH_FLAGS(&ah) = sc->rxslot[slot].atm_flags;
 	  ATM_PH_VPI(&ah) = 0;
 	  ATM_PH_SETVCI(&ah, sc->rxslot[slot].atm_vci);
 #ifdef EN_DEBUG
-	  printf("%s: rx%d: rxvci%d: atm_input, mbuf %p, len %d, hand %p\n",
+	  printf("%s: rx%d: rxvci%d: atm_input, mbuf 0x%x, len %d, hand 0x%x\n",
 		sc->sc_dev.dv_xname, slot, sc->rxslot[slot].atm_vci, m,
 		EN_DQ_LEN(drq), sc->rxslot[slot].rxhand);
 #endif
-	  sc->enif.if_ipackets++;
-
-#if NBPFILTER > 0
-	  if (sc->enif.if_bpf)
-		bpf_mtap(sc->enif.if_bpf, m, BPF_DIRECTION_IN);
-#endif
-
 	  atm_input(&sc->enif, &ah, m, sc->rxslot[slot].rxhand);
 	}
 
       }
       EN_WRAPADD(0, MID_DRQ_N, idx, 1);
-    }
+    } while (idx != val);
     sc->drq_chip = MID_DRQ_REG2A(val);	/* sync softc */
 
     if (sc->need_drqs) {	/* true if we had a DRQ shortage */
@@ -2538,17 +2258,15 @@ void *arg;
   if (reg & MID_INT_SERVICE) {
     chip = MID_SL_REG2A(EN_READ(sc, MID_SERV_WRITE));
 
-    while (sc->hwslistp != chip) {
+    do {				/* while sc->hwslistp != chip */
 
       /* fetch and remove it from hardware service list */
       vci = EN_READ(sc, sc->hwslistp);
       EN_WRAPADD(MID_SLOFF, MID_SLEND, sc->hwslistp, 4);/* advance hw ptr */
       slot = sc->rxvc2slot[vci];
       if (slot == RX_NONE) {
-#ifdef EN_DEBUG
 	printf("%s: unexpected rx interrupt on VCI %d\n", 
 		sc->sc_dev.dv_xname, vci);
-#endif
 	EN_WRITE(sc, MID_VC(vci), MIDV_TRASH);  /* rx off, damn it! */
 	continue;				/* next */
       }
@@ -2571,7 +2289,7 @@ void *arg;
       printf("%s: added VCI %d to swslist\n", sc->sc_dev.dv_xname, vci);
 #endif
       }
-    }
+    } while (sc->hwslistp != chip);   
   }
 
   /*
@@ -2629,7 +2347,6 @@ struct en_softc *sc;
   u_int32_t start, stop, cnt, needalign;
   int slot, raw, aal5, llc, vci, fill, mlen, tlen, drqneed, need, needfill, end;
 
-  aal5 = 0;		/* Silence gcc */
 next_vci:
   if (sc->swsl_size == 0) {
 #ifdef EN_DEBUG
@@ -2704,7 +2421,7 @@ defer:					/* defer processing */
     llc = (aal5 && (sc->rxslot[slot].atm_flags & ATM_PH_LLCSNAP)) ? 1 : 0;
     rbd = EN_READ(sc, cur);
     if (MID_RBD_ID(rbd) != MID_RBD_STDID) 
-      panic("en_service: id mismatch");
+      panic("en_service: id mismatch\n");
 
     if (rbd & MID_RBD_T) {
       mlen = 0;			/* we've got trash */
@@ -2718,11 +2435,11 @@ defer:					/* defer processing */
       pdu = cur + tlen - MID_PDU_SIZE;
       if (pdu >= stop)
 	pdu -= (EN_RXSZ*1024);
-      pdu = EN_READ(sc, pdu);	/* get PDU in correct byte order */
+      pdu = EN_READ(sc, pdu);		/* READ swaps to proper byte order */
       fill = tlen - MID_RBD_SIZE - MID_PDU_LEN(pdu);
-      if (fill < 0 || (rbd & MID_RBD_CRCERR) != 0) {
-        printf("%s: %s, dropping frame\n", sc->sc_dev.dv_xname,
-	    (rbd & MID_RBD_CRCERR) ? "CRC error" : "invalid AAL5 PDU length");
+      if (fill < 0) {
+        printf("%s: invalid AAL5 PDU length detected, dropping frame\n", 
+						sc->sc_dev.dv_xname);
         printf("%s: got %d cells (%d bytes), AAL5 len is %d bytes (pdu=0x%x)\n",
 	  sc->sc_dev.dv_xname, MID_RBD_CNT(rbd), tlen - MID_RBD_SIZE,
 		MID_PDU_LEN(pdu), pdu);
@@ -2752,7 +2469,7 @@ defer:					/* defer processing */
     sav = mtod(m, u_int32_t *);
     if (sav[0] != cur) {
 #ifdef EN_DEBUG
-      printf("%s: rx%d: q'ed mbuf %p not ours\n", 
+      printf("%s: rx%d: q'ed mbuf 0x%x not ours\n", 
 		sc->sc_dev.dv_xname, slot, m);
 #endif
       m = NULL;			/* wasn't ours */
@@ -2762,8 +2479,8 @@ defer:					/* defer processing */
       IF_DEQUEUE(&sc->rxslot[slot].q, m);
       drqneed = sav[1];
 #ifdef EN_DEBUG
-      printf("%s: rx%d: recovered q'ed mbuf %p (drqneed=%d)\n", 
-	sc->sc_dev.dv_xname, slot, m, drqneed);
+      printf("%s: rx%d: recovered q'ed mbuf 0x%x (drqneed=%d)\n", 
+	sc->sc_dev.dv_xname, slot, drqneed);
 #endif
     }
   }
@@ -2779,13 +2496,13 @@ defer:					/* defer processing */
 #endif
     }
 #ifdef EN_DEBUG
-    printf("%s: rx%d: allocate mbuf %p, mlen=%d, drqneed=%d\n", 
+    printf("%s: rx%d: allocate mbuf 0x%x, mlen=%d, drqneed=%d\n", 
 	sc->sc_dev.dv_xname, slot, m, mlen, drqneed);
 #endif
   }
 
 #ifdef EN_DEBUG
-  printf("%s: rx%d: VCI %d, mbuf_chain %p, mlen %d, fill %d\n",
+  printf("%s: rx%d: VCI %d, mbuf_chain 0x%x, mlen %d, fill %d\n",
 	sc->sc_dev.dv_xname, slot, vci, m, mlen, fill);
 #endif
 
@@ -2839,7 +2556,7 @@ defer:					/* defer processing */
     data = mtod(tmp, u_int32_t *);
 
 #ifdef EN_DEBUG
-    printf("%s: rx%d: load mbuf %p, m_len=%d, m_data=%p, tlen=%d\n",
+    printf("%s: rx%d: load mbuf 0x%x, m_len=%d, m_data=0x%x, tlen=%d\n",
 	sc->sc_dev.dv_xname, slot, tmp, tmp->m_len, tmp->m_data, tlen);
 #endif
     
@@ -2868,35 +2585,6 @@ defer:					/* defer processing */
 		sc->sc_dev.dv_xname, slot, vci, cur);
 #endif
     }
-
-#if !defined(MIDWAY_ENIONLY)
-     
-    /*
-     * the adaptec DMA engine is smart and handles everything for us.
-     */ 
-  
-    if (sc->is_adaptec) {
-      need -= tlen;
-      EN_WRAPADD(start, stop, cur, tlen);
-#ifdef EN_DEBUG
-      printf("%s: rx%d: vci%d: adp_dma %d bytes (%d left)\n",
-		sc->sc_dev.dv_xname, slot, vci, tlen, need);
-#endif
-      end = (need == 0 && !fill) ? MID_DMA_END : 0;
-      EN_DRQADD(sc, tlen, vci, 0, vtophys(data), mlen, slot, end);
-      if (end)
-        goto done;
-      dma = cur;	/* update dma pointer */
-      continue;
-    }
-#endif /* !MIDWAY_ENIONLY */
-
-
-#if !defined(MIDWAY_ADPONLY)
-
-    /*
-     * the ENI DMA engine is not so smart and need more help from us
-     */
 
     /* do we need to do a DMA op to align? */
     if (sc->alburst &&
@@ -2962,8 +2650,6 @@ defer:					/* defer processing */
     }
 
     dma = cur;		/* update dma pointer */
-
-#endif /* !MIDWAY_ADPONLY */
 
   }
 
@@ -3074,7 +2760,7 @@ int unit, level;
       printf("    %d times we ran out of mbufs *and* DRQs\n", sc->rxoutboth);
       printf("    %d times we ran out of DRQs\n", sc->rxdrqout);
 
-      printf("    %d transmit packets dropped due to mbsize\n", sc->txmbovr);
+      printf("    %d trasmit packets dropped due to mbsize\n", sc->txmbovr);
       printf("    %d cells trashed due to turned off rxvc\n", sc->vtrash);
       printf("    %d cells trashed due to totally full buffer\n", sc->otrash);
       printf("    %d cells trashed due almost full buffer\n", sc->ttrash);
@@ -3201,7 +2887,7 @@ int unit, addr, len;
   struct en_softc *sc;
   u_int32_t reg;
 
-  if (unit < 0 || unit >= en_cd.cd_ndevs ||
+  if (unit < 0 || unit > en_cd.cd_ndevs ||
 	(sc = (struct en_softc *) en_cd.cd_devs[unit]) == NULL) {
     printf("invalid unit number: %d\n", unit);
     return(0);

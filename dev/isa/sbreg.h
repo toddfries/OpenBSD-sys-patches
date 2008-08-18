@@ -1,5 +1,5 @@
-/*	$OpenBSD: sbreg.h,v 1.6 2002/07/02 19:38:55 nate Exp $	*/
-/*	$NetBSD: sbreg.h,v 1.24 1997/08/24 23:24:51 augustss Exp $	*/
+/*	$OpenBSD: sbreg.h,v 1.2 1996/04/18 23:47:49 niklas Exp $	*/
+/*	$NetBSD: sbreg.h,v 1.16 1996/03/16 04:00:14 jtk Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -71,19 +71,20 @@
 #define SBP_FM_DATA		9	/* RW FM data port */
 #define SBP_MIXER_ADDR		4	/* W mixer address register */
 #define SBP_MIXER_DATA		5	/* RW mixer data port */
-
-#define	SBP_MIX_RESET		0x00	/* mixer reset port, value */
-#define SBP_1335_MASTER_VOL	0x02
-#define	SBP_1335_MIDI_VOL	0x06
-#define	SBP_1335_CD_VOL		0x08
-#define	SBP_1335_VOICE_VOL	0x0A
-
-#define	SBP_VOICE_VOL		0x04
-#define	SBP_MIC_VOL		0x0A	/* warning: only one channel of volume... */
+#define	SBP_MIX_RESET		0	/* mixer reset port, value */
 #define	SBP_MASTER_VOL		0x22
-#define	SBP_MIDI_VOL		0x26
+#define	SBP_FM_VOL		0x26
 #define	SBP_CD_VOL		0x28
 #define	SBP_LINE_VOL		0x2E
+#define	SBP_DAC_VOL		0x04
+#define	SBP_MIC_VOL		0x0A	/* warning: only one channel of
+					   volume... */
+#define SBP_SPEAKER_VOL		0x42
+#define SBP_TREBLE_EQ		0x44
+#define SBP_BASS_EQ		0x46
+
+#define SBP_SET_IRQ		0x80	/* Soft-configured irq (SB16-) */
+#define SBP_SET_DRQ		0x81	/* Soft-configured drq (SB16-) */
 
 #define	SBP_RECORD_SOURCE	0x0C
 #define	SBP_STEREO		0x0E
@@ -103,60 +104,17 @@
 #define		SBP_FROM_MIC		0x00
 #define		SBP_FROM_CD		0x02
 #define		SBP_FROM_LINE		0x06
-
-#define SBP_SET_IRQ		0x80	/* Soft-configured irq (SB16-) */
-#define SBP_SET_DRQ		0x81	/* Soft-configured drq (SB16-) */
-#define	SBP_IRQ_STATUS		0x82	/* Pending IRQ status (SB16-) */
-#define		SBP_IRQ_MPU401	0x04
-#define		SBP_IRQ_DMA16	0x02
-#define		SBP_IRQ_DMA8	0x01
-
-#define SB16P_MASTER_L		0x30
-#define SB16P_VOICE_L		0x32
-#define SB16P_MIDI_L		0x34
-#define SB16P_CD_L		0x36
-#define SB16P_LINE_L		0x38
-#define SB16P_MIC_L		0x3a
-#define SB16P_PCSPEAKER		0x3b
-#define SB16P_OSWITCH		0x3c
-#define SB16P_ISWITCH_L		0x3d
-#define SB16P_ISWITCH_R		0x3e
-#define 	SB16P_SW_MIC	0x01
-#define 	SB16P_SW_CD_R	0x02
-#define 	SB16P_SW_CD_L	0x04
-#define 	SB16P_SW_CD	(SB16P_SW_CD_L|SB16P_SW_CD_R)
-#define 	SB16P_SW_LINE_R	0x08
-#define 	SB16P_SW_LINE_L	0x10
-#define 	SB16P_SW_LINE	(SB16P_SW_LINE_L|SB16P_SW_LINE_R)
-#define 	SB16P_SW_MIDI_R	0x20
-#define 	SB16P_SW_MIDI_L	0x40
-#define 	SB16P_SW_MIDI	(SB16P_SW_MIDI_L|SB16P_SW_MIDI_R)
-#define SB16P_INPUT_GAIN_L	0x3f
-#define SB16P_OUTPUT_GAIN_L	0x41
-#define SB16P_TREBLE_L		0x44
-#define SB16P_BASS_L		0x46
-#define SB16P_L_TO_R(l) ((l)+1)
-
-#define SB16P_AGC		0x43
-
-#define SBP_RECORD_SOURCE_L	0x3d
-#define SBP_RECORD_SOURCE_R	0x3e
-#define 	SBP_MIDI_SRC_R	0x20
-#define 	SBP_LINE_SRC_R	0x08
-#define 	SBP_CD_SRC_R	0x02
-#define 	SBP_MIC_SRC	0x01
-#define SB_SRC_R_TO_L(x) ((x) << 1)
-
-#define SB_STEREO_GAIN(left, right) ((left) | ((right) >> 4))
-#define SB_MIC_GAIN(v) ((v) >> 5)
-
-#define SB_ADJUST_MIC_GAIN(sc, x) sbdsp_adjust((x), ISSB16CLASS(sc) ? 0xf8 : 0xc0)
-#define SB_ADJUST_GAIN(sc, x)     sbdsp_adjust((x), ISSB16CLASS(sc) ? 0xf8 : 0xe0)
-#define SB_ADJUST_2_GAIN(sc, x)   sbdsp_adjust((x), 0xc0)
-
-#define SB_1335_GAIN(x) ((x) >> 4)
-#define SB_1335_MASTER_GAIN(x) ((x) >> 5)
-
+#define sbdsp_mono_vol(left) (((left) << 4) | (left))
+#define sbdsp_stereo_vol(left, right) (((left) << 4) | (right))
+#define SBP_MAXVOL 0xf			/* per channel */
+#define SBP_MINVOL 0x0			/* per channel */
+#define SBP_AGAIN_TO_SBGAIN(again)	((again) >> 4) /* per channel */
+#define SBP_AGAIN_TO_MICGAIN(again)	((again) >> 5) /* mic has only 3 bits,
+							  sorry! */
+#define SBP_LEFTGAIN(sbgain)		(sbgain & 0xf0)	/* left channel */
+#define SBP_RIGHTGAIN(sbgain)		((sbgain & 0xf) << 4) /* right channel */
+#define SBP_SBGAIN_TO_AGAIN(sbgain)	SBP_LEFTGAIN(sbgain)
+#define SBP_MICGAIN_TO_AGAIN(micgain)	(micgain << 5)
 #define SBP_DSP_RESET		6	/* W reset port */
 #define 	SB_MAGIC	0xaa	/* card outputs on successful reset */
 #define SBP_DSP_READ		10 	/* R read port */
@@ -165,8 +123,6 @@
 #define SBP_DSP_RSTAT		14	/* R read status */
 #define 	SB_DSP_BUSY	0x80
 #define 	SB_DSP_READY	0x80
-#define	SBP_DSP_IRQACK8		14	/* R acknowledge DSP IRQ, 8-bit */
-#define	SBP_DSP_IRQACK16	15	/* R acknowledge DSP IRQ, 16-bit */
 #define SBP_CDROM_DATA		16	/* RW send cmds/recv data */
 #define SBP_CDROM_STATUS	17	/* R status port */
 #define SBP_CDROM_RESET		18	/* W reset register */
@@ -187,10 +143,8 @@
 #define SB_DSP_DACWRITE		0x10	/* programmed I/O write to DAC */
 #define SB_DSP_WDMA		0x14	/* begin 8-bit linear DMA output */
 #define SB_DSP_WDMA_2		0x16	/* begin 2-bit ADPCM DMA output */
-#define	SB_DSP_WDMA_LOOP	0x1C	/* begin 8-bit linear DMA output loop */
 #define SB_DSP_ADCREAD		0x20	/* programmed I/O read from ADC */
 #define SB_DSP_RDMA		0x24	/* begin 8-bit linear DMA input */
-#define	SB_DSP_RDMA_LOOP	0x2C	/* begin 8-bit linear DMA input loop */
 #define SB_MIDI_POLL		0x30	/* initiate a polling read for MIDI */
 #define SB_MIDI_READ		0x31	/* read a MIDI byte on recv intr */
 #define SB_MIDI_UART_POLL	0x34	/* enter UART mode w/ read polling */
@@ -203,15 +157,15 @@
 #define SB_DSP_WDMA_4		0x74	/* begin 4-bit ADPCM DMA output */
 #define SB_DSP_WDMA_2_6		0x76	/* begin 2.6-bit ADPCM DMA output */
 #define SB_DSP_SILENCE		0x80	/* send a block of silence */
-#define SB_DSP_HS_OUTPUT	0x90	/* set high speed mode for wdma */
-#define SB_DSP_HS_INPUT		0x98	/* set high speed mode for rdma */
+#define SB_DSP_HS_OUTPUT	0x91	/* set high speed mode for wdma */
+#define SB_DSP_HS_INPUT		0x99	/* set high speed mode for rdma */
 #define SB_DSP_RECORD_MONO	0xA0	/* set mono recording */
 #define SB_DSP_RECORD_STEREO	0xA8	/* set stereo recording */
 #define	SB_DSP16_WDMA_16	0xB6	/* begin 16-bit linear output */
 #define	SB_DSP16_RDMA_16	0xBE	/* begin 16-bit linear input */
 #define	SB_DSP16_WDMA_8		0xC6	/* begin 8-bit linear output */
 #define	SB_DSP16_RDMA_8		0xCE	/* begin 8-bit linear input */
-#define SB_DSP_HALT		0xd0	/* temporarily suspend DMA */
+#define SB_DSP_HALT		0xd0	/* temporarilty suspend DMA */
 #define SB_DSP_SPKR_ON		0xd1	/* turn speaker on */
 #define SB_DSP_SPKR_OFF		0xd3	/* turn speaker off */
 #define SB_DSP_CONT		0xd4	/* continue suspended DMA */
@@ -219,10 +173,6 @@
 #define 	SB_SPKR_OFF	0x00
 #define 	SB_SPKR_ON	0xff
 #define SB_DSP_VERSION		0xe1	/* get version number */
-
-#define SB_BMODE_UNSIGNED	0x00
-#define SB_BMODE_SIGNED		0x10
-#define SB_BMODE_STEREO		0x20
 
 /* Some of these come from linux driver (It serves as convenient unencumbered
    documentation) */
@@ -267,7 +217,7 @@
 
 /*
  * The ADPCM encodings are differential, meaning each sample represents
- * a difference to add to a running sum.  The initial value is called the
+ * a difference to add to a running sum.  The inital value is called the
  * reference, or reference byte.  Any of the ADPCM DMA transfers can specify
  * that the given transfer begins with a reference byte by or'ing
  * in the bit below.
@@ -280,8 +230,6 @@
 #define SBP_IRQ_VALID(irq)  ((irq) == 5 || (irq) == 7 || (irq) == 9 || (irq) == 10)
 #define SB_IRQ_VALID(irq)   ((irq) == 3 || (irq) == 5 || (irq) == 7 || (irq) == 9)
 
-#define SB16_DRQ_VALID(chan) ((chan) == 0 || (chan) == 1 || (chan) == 3 || \
-			      (chan) == 5 || (chan) == 6 || (chan) == 7) 
 #define SBP_DRQ_VALID(chan) ((chan) == 0 || (chan) == 1 || (chan) == 3)
 #define SB_DRQ_VALID(chan)  ((chan) == 1)
 

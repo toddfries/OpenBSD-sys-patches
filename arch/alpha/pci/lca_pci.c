@@ -1,5 +1,5 @@
-/*	$OpenBSD: lca_pci.c,v 1.9 2006/03/26 20:23:08 brad Exp $	*/
-/* $NetBSD: lca_pci.c,v 1.13 1997/09/02 13:19:35 thorpej Exp $ */
+/*	$OpenBSD: lca_pci.c,v 1.3 1996/07/29 23:00:28 niklas Exp $	*/
+/*	$NetBSD: lca_pci.c,v 1.3 1996/04/23 14:01:00 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -32,24 +32,21 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-
-#include <uvm/uvm_extern.h>
-
-#include <machine/autoconf.h>	/* badaddr proto */
+#include <vm/vm.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <alpha/pci/lcareg.h>
 #include <alpha/pci/lcavar.h>
 
-void		lca_attach_hook(struct device *, struct device *,
-		    struct pcibus_attach_args *);
-int		lca_bus_maxdevs(void *, int);
-pcitag_t	lca_make_tag(void *, int, int, int);
-void		lca_decompose_tag(void *, pcitag_t, int *, int *,
-		    int *);
-pcireg_t	lca_conf_read(void *, pcitag_t, int);
-void		lca_conf_write(void *, pcitag_t, int, pcireg_t);
+void		lca_attach_hook __P((struct device *, struct device *,
+		    struct pcibus_attach_args *));
+int		lca_bus_maxdevs __P((void *, int));
+pcitag_t	lca_make_tag __P((void *, int, int, int));
+void		lca_decompose_tag __P((void *, pcitag_t, int *, int *,
+		    int *));
+pcireg_t	lca_conf_read __P((void *, pcitag_t, int));
+void		lca_conf_write __P((void *, pcitag_t, int, pcireg_t));
 
 void
 lca_pci_init(pc, v)
@@ -119,15 +116,13 @@ lca_conf_read(cpv, tag, offset)
 	pcireg_t *datap, data;
 	int s, secondary, device, ba;
 
-	s = 0;					/* XXX gcc -Wuninitialized */
-
 	/* secondary if bus # != 0 */
 	pci_decompose_tag(&lcp->lc_pc, tag, &secondary, &device, 0);
 	if (secondary) {
 		s = splhigh();
-		alpha_mb();
+		wbflush();
 		REGVAL(LCA_IOC_CONF) = 0x01;
-		alpha_mb();
+		wbflush();
 	} else {
 		/*
 		 * on the LCA, must frob the tag used for
@@ -138,7 +133,7 @@ lca_conf_read(cpv, tag, offset)
 		tag = (1 << (device + 11)) | (tag & 0x7ff);
 	}
 
-	datap = (pcireg_t *)ALPHA_PHYS_TO_K0SEG(LCA_PCI_CONF |
+	datap = (pcireg_t *)phystok0seg(LCA_PCI_CONF |
 	    tag << 5UL |					/* XXX */
 	    (offset & ~0x03) << 5 |				/* XXX */
 	    0 << 5 |						/* XXX */
@@ -148,9 +143,9 @@ lca_conf_read(cpv, tag, offset)
 		data = *datap;
 
 	if (secondary) {
-		alpha_mb();
+		wbflush();
 		REGVAL(LCA_IOC_CONF) = 0x00;
-		alpha_mb();
+		wbflush();
 		splx(s);
 	}
 
@@ -173,15 +168,13 @@ lca_conf_write(cpv, tag, offset, data)
 	pcireg_t *datap;
 	int s, secondary, device;
 
-	s = 0;					/* XXX gcc -Wuninitialized */
-
 	/* secondary if bus # != 0 */
 	pci_decompose_tag(&lcp->lc_pc, tag, &secondary, &device, 0);
 	if (secondary) {
 		s = splhigh();
-		alpha_mb();
+		wbflush();
 		REGVAL(LCA_IOC_CONF) = 0x01;
-		alpha_mb();
+		wbflush();
 	} else {
 		/*
 		 * on the LCA, must frob the tag used for
@@ -192,7 +185,7 @@ lca_conf_write(cpv, tag, offset, data)
 		tag = (1 << (device + 11)) | (tag & 0x7ff);
 	}
 
-	datap = (pcireg_t *)ALPHA_PHYS_TO_K0SEG(LCA_PCI_CONF |
+	datap = (pcireg_t *)phystok0seg(LCA_PCI_CONF |
 	    tag << 5UL |					/* XXX */
 	    (offset & ~0x03) << 5 |				/* XXX */
 	    0 << 5 |						/* XXX */
@@ -200,9 +193,9 @@ lca_conf_write(cpv, tag, offset, data)
 	*datap = data;
 
 	if (secondary) {
-		alpha_mb();
+		wbflush();
 		REGVAL(LCA_IOC_CONF) = 0x00;	
-		alpha_mb();
+		wbflush();
 		splx(s);
 	}
 

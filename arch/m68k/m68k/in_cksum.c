@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.4 2003/06/02 23:27:48 millert Exp $	*/
+/*	$OpenBSD: in_cksum.c,v 1.2 1996/05/09 22:30:11 niklas Exp $	*/
 /*	$NetBSD: in_cksum.c,v 1.6 1996/04/30 11:57:05 briggs Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +47,7 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 
-extern int oc_cksum(char *buffer, int length, int startingval);
+extern int oc_cksum __P((char *buffer, int length, int startingval));
 
 /*
  * Checksum routine for the Internet Protocol family.

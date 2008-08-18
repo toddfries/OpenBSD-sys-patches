@@ -1,5 +1,5 @@
-/* $OpenBSD: ciavar.h,v 1.13 2006/03/16 22:32:44 miod Exp $ */
-/* $NetBSD: ciavar.h,v 1.17 2000/03/19 01:43:25 thorpej Exp $ */
+/*	$OpenBSD: ciavar.h,v 1.3 1996/07/29 23:00:24 niklas Exp $	*/
+/*	$NetBSD: ciavar.h,v 1.3.4.1 1996/06/10 00:04:12 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -30,7 +30,6 @@
 
 #include <dev/isa/isavar.h>
 #include <dev/pci/pcivar.h>
-#include <alpha/pci/pci_sgmap_pte64.h>
 
 /*
  * A 21171 chipset's configuration.
@@ -39,41 +38,22 @@
  * do their dirty work (and more!).
  */
 struct cia_config {
-	int	cc_initted;
-
-	struct alpha_bus_space cc_iot, cc_memt;
+	struct alpha_bus_chipset cc_bc;
 	struct alpha_pci_chipset cc_pc;
-
-	struct alpha_bus_dma_tag cc_dmat_direct;
-	struct alpha_bus_dma_tag cc_dmat_sgmap;
-
-	struct alpha_sgmap cc_sgmap;
 
 	u_int32_t cc_hae_mem;
 	u_int32_t cc_hae_io;
-
-	u_int32_t cc_rev;
-	u_int32_t cc_cnfg;
-
-	int	cc_flags;
-
-#define	CCF_ISPYXIS	0x01		/* chip is a 21174 Pyxis */
-#define	CCF_PYXISBUG	0x02
-#define	CCF_PCI_USE_BWX	0x04		/* use BWX for PCI config space */
-#define	CCF_BUS_USE_BWX	0x08		/* use BWX for bus space */
-
-	struct extent *cc_io_ex, *cc_d_mem_ex, *cc_s_mem_ex;
-	int	cc_mallocsafe;
 };
 
-void	cia_init(struct cia_config *, int);
-void	cia_pci_init(pci_chipset_tag_t, void *);
-void	cia_dma_init(struct cia_config *);
+struct cia_softc {
+	struct	device sc_dev;
 
-void	cia_bwx_bus_io_init(bus_space_tag_t, void *);
-void	cia_bwx_bus_mem_init(bus_space_tag_t, void *);
+	struct	cia_config *sc_ccp;
+	/* XXX SGMAP info */
+};
 
-void	cia_bus_io_init(bus_space_tag_t, void *);
-void	cia_bus_mem_init(bus_space_tag_t, void *);
+void	cia_init __P((struct cia_config *));
+void	cia_pci_init __P((pci_chipset_tag_t, void *));
 
-void	cia_pyxis_intr_enable(int, int);
+void	cia_bus_mem_init __P((bus_chipset_tag_t bc, void *memv));
+void	cia_bus_io_init __P((bus_chipset_tag_t bc, void *iov));

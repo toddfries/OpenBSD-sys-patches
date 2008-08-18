@@ -1,4 +1,4 @@
-/*	$OpenBSD: tprintf.h,v 1.6 2003/08/24 01:27:07 avsm Exp $	*/
+/*	$OpenBSD: tprintf.h,v 1.3 1996/04/21 22:32:10 deraadt Exp $	*/
 /*	$NetBSD: tprintf.h,v 1.10 1996/04/09 20:55:43 cgd Exp $	*/
 
 /*-
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,8 +38,8 @@
 
 typedef struct session *tpr_t;
 
-tpr_t	tprintf_open(struct proc *);
-void	tprintf_close(tpr_t);
+tpr_t	tprintf_open __P((struct proc *));
+void	tprintf_close __P((tpr_t));
 
-void	tprintf(tpr_t, const char *fmt, ...)
-    __attribute__((__format__(__kprintf__,2,3)));
+void	tprintf __P((tpr_t, const char *fmt, ...))
+    __kprintf_attribute__((__format__(__kprintf__,2,3)));

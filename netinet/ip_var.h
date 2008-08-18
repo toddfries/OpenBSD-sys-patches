@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_var.h,v 1.38 2008/05/23 15:51:12 thib Exp $	*/
+/*	$OpenBSD: ip_var.h,v 1.3 1996/03/03 22:30:42 niklas Exp $	*/
 /*	$NetBSD: ip_var.h,v 1.16 1996/02/13 23:43:20 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,32 +36,46 @@
  *	@(#)ip_var.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef _NETINET_IP_VAR_H_
-#define _NETINET_IP_VAR_H_
-
 #include <sys/queue.h>
 
 /*
  * Overlay for ip header used by other protocols (tcp, udp).
  */
 struct ipovly {
-	u_int8_t  ih_x1[9];		/* (unused) */
-	u_int8_t  ih_pr;		/* protocol */
-	u_int16_t ih_len;		/* protocol length */
-	struct	  in_addr ih_src;	/* source internet address */
-	struct	  in_addr ih_dst;	/* destination internet address */
+	u_int8_t ih_x1[9];		/* (unused) */
+	u_int8_t ih_pr;			/* protocol */
+	int16_t	 ih_len;		/* protocol length */
+	struct	 in_addr ih_src;	/* source internet address */
+	struct	 in_addr ih_dst;	/* destination internet address */
 };
 
 /*
- * Ip reassembly queue structures.
+ * Ip (reassembly or sequence) queue structures.
+ *
+ * XXX -- The following explains why the ipqe_m field is here, for TCP's use:
+ * We want to avoid doing m_pullup on incoming packets but that
+ * means avoiding dtom on the tcp reassembly code.  That in turn means
+ * keeping an mbuf pointer in the reassembly queue (since we might
+ * have a cluster).  As a quick hack, the source & destination
+ * port numbers (which are no longer needed once we've located the
+ * tcpcb) are overlayed with an mbuf pointer.
  */
 LIST_HEAD(ipqehead, ipqent);
 struct ipqent {
 	LIST_ENTRY(ipqent) ipqe_q;
-	struct ip	*ipqe_ip;
-	struct mbuf	*ipqe_m;	/* mbuf contains packet */
-	u_int8_t	ipqe_mff;	/* for IP fragmentation */
+	union {
+		struct ip	*_ip;
+		struct tcpiphdr *_tcp;
+	} _ipqe_u1;
+	union {
+		u_int8_t	_mff;	/* for IP fragmentation */
+		struct mbuf	*_m;	/* XXX for TCP; see above */
+	} _ipqe_u2;
 };
+#define	ipqe_ip		_ipqe_u1._ip
+#define	ipqe_tcp	_ipqe_u1._tcp
+#define	ipqe_mff	_ipqe_u2._mff
+#define	ipqe_m		_ipqe_u2._m
 
 /*
  * Ip reassembly queue structure.  Each fragment
@@ -96,8 +114,7 @@ struct ip_moptions {
 	u_int8_t  imo_multicast_ttl;	/* TTL for outgoing multicasts */
 	u_int8_t  imo_multicast_loop;	/* 1 => hear sends if a member */
 	u_int16_t imo_num_memberships;	/* no. memberships this socket */
-	u_int16_t imo_max_memberships;	/* max memberships this socket */
-	struct	  in_multi **imo_membership; /* group memberships */
+	struct	  in_multi *imo_membership[IP_MAX_MEMBERSHIPS];
 };
 
 struct	ipstat {
@@ -118,7 +135,7 @@ struct	ipstat {
 	u_long	ips_localout;		/* total ip packets generated here */
 	u_long	ips_odropped;		/* lost packets due to nobufs, etc. */
 	u_long	ips_reassembled;	/* total packets reassembled ok */
-	u_long	ips_fragmented;		/* datagrams successfully fragmented */
+	u_long	ips_fragmented;		/* datagrams sucessfully fragmented */
 	u_long	ips_ofragments;		/* output fragments created */
 	u_long	ips_cantfrag;		/* don't fragment flag was set, etc. */
 	u_long	ips_badoptions;		/* error in option processing */
@@ -127,12 +144,6 @@ struct	ipstat {
 	u_long	ips_rawout;		/* total raw ip packets generated */
 	u_long	ips_badfrags;		/* malformed fragments (bad length) */
 	u_long	ips_rcvmemdrop;		/* frags dropped for lack of memory */
-	u_long	ips_toolong;		/* ip length > max ip packet size */
-	u_long	ips_nogif;		/* no match gif found */
-	u_long	ips_badaddr;		/* invalid address on header */
-	u_long	ips_inhwcsum;		/* hardware checksummed on input */
-	u_long	ips_outhwcsum;		/* hardware checksummed on output */
-	u_long	ips_notmember;		/* multicasts for unregistered groups */
 };
 
 #ifdef _KERNEL
@@ -141,57 +152,39 @@ struct	ipstat {
 #define	IP_RAWOUTPUT		0x2		/* raw ip header exists */
 #define	IP_ROUTETOIF		SO_DONTROUTE	/* bypass routing tables */
 #define	IP_ALLOWBROADCAST	SO_BROADCAST	/* can send broadcast packets */
-#define IP_JUMBO		SO_JUMBO	/* try to use the jumbo mtu */
-#define	IP_MTUDISC		0x0800		/* pmtu discovery, set DF */
-#define IP_ROUTETOETHER		0x1000		/* ether addresses given */
 
-extern struct ipstat ipstat;
-extern LIST_HEAD(ipqhead, ipq)	ipq;	/* ip reass. queue */
-extern int ip_defttl;			/* default IP ttl */
+struct	  ipstat ipstat;
+LIST_HEAD(ipqhead, ipq)	ipq;		/* ip reass. queue */
+u_int16_t ip_id;			/* ip packet ctr, for ids */
+int	  ip_defttl;			/* default IP ttl */
 
-extern int ip_mtudisc;			/* mtu discovery */
-extern u_int ip_mtudisc_timeout;	/* seconds to timeout mtu discovery */
-extern struct rttimer_queue *ip_mtudisc_timeout_q;
-extern struct pool ipqent_pool;
-struct inpcb;
-
-int	 ip_ctloutput(int, struct socket *, int, int, struct mbuf **);
-int	 ip_dooptions(struct mbuf *);
-void	 ip_drain(void);
-void	 ip_flush(void);
-void	 ip_forward(struct mbuf *, int);
-int	 ip_fragment(struct mbuf *, struct ifnet *, u_long);
-void	 ip_freef(struct ipq *);
-void	 ip_freemoptions(struct ip_moptions *);
-int	 ip_getmoptions(int, struct ip_moptions *, struct mbuf **);
-void	 ip_init(void);
-int	 ip_mforward(struct mbuf *, struct ifnet *);
-int	 ip_optcopy(struct ip *, struct ip *);
-int	 ip_output(struct mbuf *, ...);
-int	 ip_pcbopts(struct mbuf **, struct mbuf *);
-struct mbuf *
-	 ip_reass(struct ipqent *, struct ipq *);
+int	 ip_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
+int	 ip_dooptions __P((struct mbuf *));
+void	 ip_drain __P((void));
+void	 ip_forward __P((struct mbuf *, int));
+void	 ip_freef __P((struct ipq *));
+void	 ip_freemoptions __P((struct ip_moptions *));
+int	 ip_getmoptions __P((int, struct ip_moptions *, struct mbuf **));
+void	 ip_init __P((void));
+int	 ip_mforward __P((struct mbuf *, struct ifnet *));
+int	 ip_optcopy __P((struct ip *, struct ip *));
+int	 ip_output __P((struct mbuf *, ...));
+int	 ip_pcbopts __P((struct mbuf **, struct mbuf *));
+struct ip *
+	 ip_reass __P((struct ipqent *, struct ipq *));
 struct in_ifaddr *
-	 in_iawithaddr(struct in_addr, struct mbuf *);
-struct in_ifaddr *
-	 ip_rtaddr(struct in_addr);
-u_int16_t
-	 ip_randomid(void);
-int	 ip_setmoptions(int, struct ip_moptions **, struct mbuf *);
-void	 ip_slowtimo(void);
+	 ip_rtaddr __P((struct in_addr));
+int	 ip_setmoptions __P((int, struct ip_moptions **, struct mbuf *));
+void	 ip_slowtimo __P((void));
 struct mbuf *
-	 ip_srcroute(void);
-void	 ip_stripoptions(struct mbuf *, struct mbuf *);
-int	 ip_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-void	 ip_savecontrol(struct inpcb *, struct mbuf **, struct ip *,
-	    struct mbuf *);
-void	 ipintr(void);
-void	 ipv4_input(struct mbuf *);
-int	 rip_ctloutput(int, struct socket *, int, int, struct mbuf **);
-void	 rip_init(void);
-void	 rip_input(struct mbuf *, ...);
-int	 rip_output(struct mbuf *, ...);
-int	 rip_usrreq(struct socket *,
-	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);
-#endif /* _KERNEL */
-#endif /* _NETINET_IP_VAR_H_ */
+	 ip_srcroute __P((void));
+void	 ip_stripoptions __P((struct mbuf *, struct mbuf *));
+int	 ip_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
+void	 ipintr __P((void));
+int	 rip_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
+void	 rip_init __P((void));
+void	 rip_input __P((struct mbuf *, ...));
+int	 rip_output __P((struct mbuf *, ...));
+int	 rip_usrreq __P((struct socket *,
+	    int, struct mbuf *, struct mbuf *, struct mbuf *));
+#endif

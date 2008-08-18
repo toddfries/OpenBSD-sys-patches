@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_command.h,v 1.21 2008/03/23 12:31:58 miod Exp $	*/
+/*	$OpenBSD: db_command.h,v 1.5 1996/05/31 10:37:24 niklas Exp $	*/
 /*	$NetBSD: db_command.h,v 1.8 1996/02/05 01:56:55 christos Exp $	*/
 
 /* 
@@ -33,39 +33,28 @@
 /*
  * Command loop declarations.
  */
-void db_skip_to_eol(void);
+void db_skip_to_eol __P((void));
 struct db_command;
-int db_cmd_search(char *, struct db_command *, struct db_command **);
-void db_cmd_list(struct db_command *);
-void db_command(struct db_command **, struct db_command *);
-void db_buf_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_map_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_malloc_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_mount_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_show_all_mounts(db_expr_t, int, db_expr_t, char *);
-void db_object_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_page_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_extent_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_pool_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_proc_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_uvmexp_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_vnode_print_cmd(db_expr_t, int, db_expr_t, char *);
-void db_machine_commands_install(struct db_command *);
-void db_help_cmd(db_expr_t, int, db_expr_t, char *);
-void db_command_loop(void);
-void db_error(char *);
-void db_fncall(db_expr_t, int, db_expr_t, char *);
-void db_boot_sync_cmd(db_expr_t, int, db_expr_t, char *);
-void db_boot_crash_cmd(db_expr_t, int, db_expr_t, char *);
-void db_boot_dump_cmd(db_expr_t, int, db_expr_t, char *);
-void db_boot_halt_cmd(db_expr_t, int, db_expr_t, char *);
-void db_boot_reboot_cmd(db_expr_t, int, db_expr_t, char *);
-void db_boot_poweroff_cmd(db_expr_t, int, db_expr_t, char *);
-void db_stack_trace_cmd(db_expr_t, int, db_expr_t, char *);
-void db_dmesg_cmd(db_expr_t, int, db_expr_t, char *);
-void db_show_panic_cmd(db_expr_t, int, db_expr_t, char *);
+int db_cmd_search __P((char *, struct db_command *, struct db_command **));
+void db_cmd_list __P((struct db_command *));
+void db_command __P((struct db_command **, struct db_command *));
+void db_map_print_cmd __P((db_expr_t, int, db_expr_t, char *));
+void db_object_print_cmd __P((db_expr_t, int, db_expr_t, char *));
+void db_machine_commands_install __P((struct db_command *));
+void db_help_cmd __P((void));
+void db_command_loop __P((void));
+void db_error __P((char *));
+void db_fncall __P((db_expr_t, int, db_expr_t, char *));
+void db_boot_sync_cmd __P((db_expr_t, int, db_expr_t, char *));
+void db_boot_crash_cmd __P((db_expr_t, int, db_expr_t, char *));
+void db_boot_dump_cmd __P((db_expr_t, int, db_expr_t, char *));
 
-extern	db_addr_t db_dot, db_last_addr, db_prev, db_next;
+db_addr_t	db_dot;		/* current location */
+db_addr_t	db_last_addr;	/* last explicit address typed */
+db_addr_t	db_prev;	/* last address examined
+				   or written */
+db_addr_t	db_next;	/* next address to be examined
+				   or written */
 
 /*
  * Command table
@@ -73,7 +62,7 @@ extern	db_addr_t db_dot, db_last_addr, db_prev, db_next;
 struct db_command {
 	char		*name;		/* command name */
 	/* function to call */
-	void		(*fcn)(db_expr_t, int, db_expr_t, char *);
+	void		(*fcn) __P((db_expr_t, int, db_expr_t, char *));
 	int		flag;		/* extra info: */
 #define	CS_OWN		0x1		/* non-standard syntax */
 #define	CS_MORE		0x2		/* standard syntax, but may have other

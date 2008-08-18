@@ -1,4 +1,4 @@
-/*	$OpenBSD: errno.h,v 1.20 2007/09/03 14:37:52 millert Exp $	*/
+/*	$OpenBSD: errno.h,v 1.5 1996/07/26 10:34:28 deraadt Exp $	*/
 /*	$NetBSD: errno.h,v 1.10 1996/01/20 01:33:53 jtc Exp $	*/
 
 /*
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,7 +41,16 @@
  *	@(#)errno.h	8.5 (Berkeley) 1/21/94
  */
 
-#include <sys/cdefs.h>
+#ifndef _KERNEL
+extern int errno;			/* global error number */
+
+#if !defined(_ANSI_SOURCE) && !defined(_POSIX_SOURCE) && !defined(__SYS_ERRLIST)
+#define __SYS_ERRLIST
+
+extern int sys_nerr;
+extern char *sys_errlist[];
+#endif
+#endif
 
 #define	EPERM		1		/* Operation not permitted */
 #define	ENOENT		2		/* No such file or directory */
@@ -54,7 +67,7 @@
 #define	ENOMEM		12		/* Cannot allocate memory */
 #define	EACCES		13		/* Permission denied */
 #define	EFAULT		14		/* Bad address */
-#if __BSD_VISIBLE
+#ifndef _POSIX_SOURCE
 #define	ENOTBLK		15		/* Block device required */
 #endif
 #define	EBUSY		16		/* Device busy */
@@ -67,7 +80,9 @@
 #define	ENFILE		23		/* Too many open files in system */
 #define	EMFILE		24		/* Too many open files */
 #define	ENOTTY		25		/* Inappropriate ioctl for device */
+#ifndef _POSIX_SOURCE
 #define	ETXTBSY		26		/* Text file busy */
+#endif
 #define	EFBIG		27		/* File too large */
 #define	ENOSPC		28		/* No space left on device */
 #define	ESPIPE		29		/* Illegal seek */
@@ -81,6 +96,7 @@
 
 /* non-blocking and interrupt i/o */
 #define	EAGAIN		35		/* Resource temporarily unavailable */
+#ifndef _POSIX_SOURCE
 #define	EWOULDBLOCK	EAGAIN		/* Operation would block */
 #define	EINPROGRESS	36		/* Operation now in progress */
 #define	EALREADY	37		/* Operation already in progress */
@@ -92,13 +108,9 @@
 #define	EPROTOTYPE	41		/* Protocol wrong type for socket */
 #define	ENOPROTOOPT	42		/* Protocol not available */
 #define	EPROTONOSUPPORT	43		/* Protocol not supported */
-#if __BSD_VISIBLE
 #define	ESOCKTNOSUPPORT	44		/* Socket type not supported */
-#endif
 #define	EOPNOTSUPP	45		/* Operation not supported */
-#if __BSD_VISIBLE
 #define	EPFNOSUPPORT	46		/* Protocol family not supported */
-#endif
 #define	EAFNOSUPPORT	47		/* Address family not supported by protocol family */
 #define	EADDRINUSE	48		/* Address already in use */
 #define	EADDRNOTAVAIL	49		/* Can't assign requested address */
@@ -112,63 +124,47 @@
 #define	ENOBUFS		55		/* No buffer space available */
 #define	EISCONN		56		/* Socket is already connected */
 #define	ENOTCONN	57		/* Socket is not connected */
-#if __BSD_VISIBLE
 #define	ESHUTDOWN	58		/* Can't send after socket shutdown */
 #define	ETOOMANYREFS	59		/* Too many references: can't splice */
-#endif /* __BSD_VISIBLE */
 #define	ETIMEDOUT	60		/* Operation timed out */
 #define	ECONNREFUSED	61		/* Connection refused */
 
 #define	ELOOP		62		/* Too many levels of symbolic links */
+#endif /* _POSIX_SOURCE */
 #define	ENAMETOOLONG	63		/* File name too long */
 
 /* should be rearranged */
-#if __BSD_VISIBLE
+#ifndef _POSIX_SOURCE
 #define	EHOSTDOWN	64		/* Host is down */
 #define	EHOSTUNREACH	65		/* No route to host */
-#endif /* __BSD_VISIBLE */
+#endif /* _POSIX_SOURCE */
 #define	ENOTEMPTY	66		/* Directory not empty */
 
 /* quotas & mush */
-#if __BSD_VISIBLE
+#ifndef _POSIX_SOURCE
 #define	EPROCLIM	67		/* Too many processes */
 #define	EUSERS		68		/* Too many users */
-#endif /* __BSD_VISIBLE */
-#define	EDQUOT		69		/* Disk quota exceeded */
+#define	EDQUOT		69		/* Disc quota exceeded */
 
 /* Network File System */
 #define	ESTALE		70		/* Stale NFS file handle */
-#if __BSD_VISIBLE
 #define	EREMOTE		71		/* Too many levels of remote in path */
 #define	EBADRPC		72		/* RPC struct is bad */
 #define	ERPCMISMATCH	73		/* RPC version wrong */
 #define	EPROGUNAVAIL	74		/* RPC prog. not avail */
 #define	EPROGMISMATCH	75		/* Program version wrong */
 #define	EPROCUNAVAIL	76		/* Bad procedure for program */
-#endif /* __BSD_VISIBLE */
+#endif /* _POSIX_SOURCE */
 
 #define	ENOLCK		77		/* No locks available */
 #define	ENOSYS		78		/* Function not implemented */
 
-#if __BSD_VISIBLE
+#ifndef _POSIX_SOURCE
 #define	EFTYPE		79		/* Inappropriate file type or format */
 #define	EAUTH		80		/* Authentication error */
 #define	ENEEDAUTH	81		/* Need authenticator */
-#define	EIPSEC		82		/* IPsec processing failure */
-#define	ENOATTR		83		/* Attribute not found */
-#endif /* __BSD_VISIBLE */
-#define	EILSEQ		84		/* Illegal byte sequence */
-#if __BSD_VISIBLE
-#define	ENOMEDIUM	85		/* No medium found */
-#define	EMEDIUMTYPE	86		/* Wrong Medium Type */
-#define	EOVERFLOW	87		/* Conversion overflow */
-#define	ECANCELED	88		/* Operation canceled */
-#endif /* __BSD_VISIBLE */
-#define	EIDRM		89		/* Identifier removed */
-#define	ENOMSG		90		/* No message of desired type */
-#if __BSD_VISIBLE
-#define	ELAST		90		/* Must be equal largest errno */
-#endif /* __BSD_VISIBLE */
+#define	ELAST		81		/* Must be equal largest errno */
+#endif /* _POSIX_SOURCE */
 
 #ifdef _KERNEL
 /* pseudo-errors returned inside kernel to modify return to process */

@@ -1,4 +1,3 @@
-/*	$OpenBSD: asm.h,v 1.10 2007/05/27 18:34:01 art Exp $	*/
 /*	$NetBSD: asm.h,v 1.7 1994/10/27 04:15:56 cgd Exp $	*/
 
 /*-
@@ -16,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,10 +44,10 @@
 #ifdef PIC
 #define PIC_PROLOGUE	\
 	pushl	%ebx;	\
-	call	666f;	\
-666:			\
+	call	1f;	\
+1:			\
 	popl	%ebx;	\
-	addl	$_C_LABEL(_GLOBAL_OFFSET_TABLE_)+[.-666b], %ebx
+	addl	$_GLOBAL_OFFSET_TABLE_+[.-1b], %ebx
 #define PIC_EPILOGUE	\
 	popl	%ebx
 #define PIC_PLT(x)	x@PLT
@@ -58,41 +61,17 @@
 #define PIC_GOTOFF(x)	x
 #endif
 
-#define _C_LABEL(name)	name
+#ifdef __STDC__
+# define _C_LABEL(x)	_ ## x
+#else
+# define _C_LABEL(x)	_/**/x
+#endif
 #define	_ASM_LABEL(x)	x
 
-#define CVAROFF(x, y)	_C_LABEL(x) + y
-
-#ifdef __STDC__
-# define __CONCAT(x,y)	x ## y
-# define __STRING(x)	#x
-#else
-# define __CONCAT(x,y)	x/**/y
-# define __STRING(x)	"x"
-#endif
-
-/*
- * WEAK ALIAS: create a weak alias
- */
-#define WEAK_ALIAS(alias,sym) \
-	.weak alias; \
-	alias = sym
-
-/*
- * WARN_REFERENCES: create a warning if the specified symbol is referenced
- */
-#define WARN_REFERENCES(_sym,_msg)	\
-	.section .gnu.warning. ## _sym ; .ascii _msg ; .text
-
-/* let kernels and others override entrypoint alignment */
-#ifndef _ALIGN_TEXT
-# define _ALIGN_TEXT .align 2, 0x90
-#endif
-
 #define _ENTRY(x) \
-	.text; _ALIGN_TEXT; .globl x; .type x,@function; x:
+	.text; .align 2; .globl x; .type x,@function; x:
 
-#if defined(PROF) || defined(GPROF)
+#ifdef PROF
 # define _PROF_PROLOGUE	\
 	pushl %ebp; movl %esp,%ebp; call PIC_PLT(mcount); popl %ebp
 #else
@@ -100,24 +79,10 @@
 #endif
 
 #define	ENTRY(y)	_ENTRY(_C_LABEL(y)); _PROF_PROLOGUE
-#define	NENTRY(y)	_ENTRY(_C_LABEL(y))
 #define	ASENTRY(y)	_ENTRY(_ASM_LABEL(y)); _PROF_PROLOGUE
-#define	NASENTRY(y)	_ENTRY(_ASM_LABEL(y))
-
-#define	ALTENTRY(name)	.globl _C_LABEL(name); _C_LABEL(name):
 
 #define	ASMSTR		.asciz
 
 #define RCSID(x)	.text; .asciz x
-
-#ifdef _KERNEL
-
-#ifdef MULTIPROCESSOR
-#define CPUVAR(var)	%fs:__CONCAT(CPU_INFO_,var)
-#else
-#define CPUVAR(var)	_C_LABEL(cpu_info_primary)+__CONCAT(CPU_INFO_,var)
-#endif
-
-#endif /* _KERNEL */
 
 #endif /* !_I386_ASM_H_ */

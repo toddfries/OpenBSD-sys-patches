@@ -1,7 +1,7 @@
-/*	$OpenBSD: rndioctl.h,v 1.10 2003/06/02 19:24:22 mickey Exp $	*/
+/*	$OpenBSD: rndioctl.h,v 1.2 1996/08/11 07:31:32 dm Exp $	*/
 
 /*
- * Copyright (c) 1996,2000 Michael Shalayeff.
+ * Copyright (c) 1996 Michael Shalayeff.
  *
  * This software derived from one contributed by Theodore Ts'o.
  *
@@ -13,6 +13,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Theodore Ts'o.
+ * 4. Neither the name of the University nor of the Laboratory may be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -32,21 +38,20 @@
 #ifndef __RNDIOCTL_H__
 #define __RNDIOCTL_H__
 
-/* ioctl()'s for the random number generator */
-
 struct rnd_pool_info {
 	size_t	entropy_count;
 	size_t	buf_size;
 	u_int32_t *buf;
 };
 
-#define RNDGETENTCNT	_IOR('R', 0, u_int)
-#define RNDADDTOENTCNT	_IOW('R', 1, u_int)
-#define RNDGETPOOL	_IOWR('R', 2, struct rnd_pool_info)
-#define RNDADDENTROPY	_IOW('R', 3, u_int)
+/* ioctl()'s for the random number generator */
+
+#define RNDGETENTCNT	_IOR('R', 0, sizeof(u_int))
+#define RNDADDTOENTCNT	_IOW('R', 1, sizeof(u_int))
+#define RNDGETPOOL	_IOWR('R', 2, sizeof(struct rnd_pool_info))
+#define RNDADDENTROPY	_IOW('R', 3, sizeof(u_int))
 #define RNDZAPENTCNT	_IO( 'R', 4)
 #define RNDSTIRARC4	_IO( 'R', 5)
-#define RNDCLRSTATS	_IO( 'R', 6)
 
 
 #endif /* __RNDIOCTL_H__ */

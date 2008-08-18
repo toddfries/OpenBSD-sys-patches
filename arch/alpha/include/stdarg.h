@@ -1,5 +1,5 @@
-/*	$OpenBSD: stdarg.h,v 1.10 2006/04/09 03:07:52 deraadt Exp $	*/
-/*	$NetBSD: stdarg.h,v 1.4 1996/10/09 21:13:05 cgd Exp $	*/
+/*	$OpenBSD: stdarg.h,v 1.3 1996/07/29 22:59:21 niklas Exp $	*/
+/*	$NetBSD: stdarg.h,v 1.3 1995/12/26 00:15:47 mycroft Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,20 +39,15 @@
 #ifndef _ALPHA_STDARG_H_
 #define	_ALPHA_STDARG_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <machine/ansi.h>
 
-typedef __va_list	va_list;
+typedef _BSD_VA_LIST_	va_list;
 
 #define	__va_size(type) \
 	(((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
 
-#ifdef lint
-#define	va_start(ap,lastarg)	((ap) = (ap))
-#else
 #define	va_start(ap, last) \
-	(__builtin_next_arg(last), (ap) = *(va_list *)__builtin_saveregs(), (ap).pad = 0)
-#endif /* lint */
+	(__builtin_next_arg(last), (ap) = *(va_list *)__builtin_saveregs())
 
 #define	__REAL_TYPE_CLASS	8
 #define	__va_arg_offset(ap, type)					\
@@ -59,11 +58,6 @@ typedef __va_list	va_list;
 	(*(type *)((ap).offset += __va_size(type),			\
 		   (ap).base + (ap).offset + __va_arg_offset(ap, type)))
 
-#if __ISO_C_VISIBLE >= 1999
-#define va_copy(dest, src) \
-	((dest) = (src))
-#endif
-
-#define	va_end(ap)	
+#define	va_end(ap)	((void)0)
 
 #endif /* !_ALPHA_STDARG_H_ */

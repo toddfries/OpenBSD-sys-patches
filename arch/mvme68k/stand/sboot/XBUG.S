@@ -1,7 +1,7 @@
-/*	$OpenBSD: XBUG.S,v 1.7 2003/06/04 16:36:14 deraadt Exp $ */
+/*	$OpenBSD: XBUG.S,v 1.3 1996/04/28 10:49:32 deraadt Exp $ */
 
 /*
- * Copyright (c) 1989,1990,1995 Theo de Raadt
+ * Copyright (c) 1995 Theo de Raadt
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -11,6 +11,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -26,7 +32,7 @@
  */
 
 /*
- * Theo says: I wrote a bootrom for the MVME147 *years* ago. To write
+ * Theo sez: I wrote a bootrom for the MVME147 *years* ago. To write
  * this ROM I copied a few chunks from the old bootrom, like this piece:
  * 
  * "watch this, the moto bastard struck here, shouldn't have hired people
@@ -53,8 +59,7 @@ bootlabelend:
 
 		| clear bss and the kernel location
 bssclr:		movl	#_edata,a0
-		movl	#_end,d0
-		subl	#_edata,d0
+		movl	#_end - _edata,d0
 1:		clrb	a0@+
 		subql	#1,d0
 		bpl	1b
@@ -62,8 +67,7 @@ bssclr:		movl	#_edata,a0
 		| rip the data segment from ROM into ram..
 		movl	#_etext,a2		| start of data
 		movl	#0x4000,a1		| shovel address
-		movl	#_edata,d0
-		subl	#_etext,d0
+		movl	#_edata - _etext,d0
 1:		movb	a2@+,a1@+
 		subql	#1,d0
 		bpl	1b

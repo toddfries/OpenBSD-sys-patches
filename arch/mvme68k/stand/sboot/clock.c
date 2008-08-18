@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.7 2003/08/19 10:22:30 deraadt Exp $ */
+/*	$OpenBSD: clock.c,v 1.3 1996/04/28 10:49:34 deraadt Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -23,7 +23,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +51,6 @@
  */
 
 #include <sys/cdefs.h>
-#include <sys/types.h>
 #include "sboot.h"
 #include "clockreg.h"
 
@@ -70,8 +73,9 @@ static struct clockreg *clockreg = (struct clockreg *) CLOCK_ADDR;
 const short dayyr[12] =
     {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
 
-static u_long
-chiptotime(int sec, int min, int hour, int day, int mon, int year)
+static u_long 
+chiptotime(sec, min, hour, day, mon, year)
+	register int sec, min, hour, day, mon, year;
 {
 	register int days, yr;
 
@@ -100,8 +104,8 @@ chiptotime(int sec, int min, int hour, int day, int mon, int year)
 /*
  * Set up the system's time, given a `reasonable' time value.
  */
-u_long
-ttime(void)
+u_long 
+time()
 {
 	register struct clockreg *cl = clockreg;
 	int     sec, min, hour, day, mon, year;

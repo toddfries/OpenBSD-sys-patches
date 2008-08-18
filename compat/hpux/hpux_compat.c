@@ -1,5 +1,5 @@
-/*	$OpenBSD: hpux_compat.c,v 1.29 2007/09/22 09:57:40 martin Exp $	*/
-/*	$NetBSD: hpux_compat.c,v 1.35 1997/05/08 16:19:48 mycroft Exp $	*/
+/*	$OpenBSD: hpux_compat.c,v 1.5 1996/08/02 20:34:53 niklas Exp $	*/
+/*	$NetBSD: hpux_compat.c,v 1.23 1996/01/06 12:44:11 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -76,7 +80,6 @@
 #include <sys/syscallargs.h>
 
 #include <compat/hpux/hpux.h>
-#include <compat/hpux/hpux_sig.h>
 #include <compat/hpux/hpux_util.h>
 #include <compat/hpux/hpux_termio.h>
 #include <compat/hpux/hpux_syscall.h>
@@ -108,11 +111,7 @@ extern char sigcode[], esigcode[];
 extern struct sysent hpux_sysent[];
 extern char *hpux_syscallnames[];
 
-int	hpux_shmctl1(struct proc *, struct hpux_sys_shmctl_args *,
-	    register_t *, int);
-int	hpuxtobsdioctl(u_long);
-
-static int	hpux_scale(struct timeval *);
+static	int hpux_scale __P((struct timeval *));
 
 /*
  * HP-UX fork and vfork need to map the EAGAIN return value appropriately.
@@ -123,7 +122,7 @@ hpux_sys_fork(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	/* struct hpux_sys_fork_args *uap = v; */
+	struct hpux_sys_fork_args *uap = v;
 	int error;
 
 	error = sys_fork(p, v, retval);
@@ -138,7 +137,7 @@ hpux_sys_vfork(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	/* struct hpux_sys_vfork_args *uap = v; */
+	struct hpux_sys_vfork_args *uap = v;
 	int error;
 
 	error = sys_vfork(p, v, retval);
@@ -164,7 +163,7 @@ hpux_sys_wait3(p, v, retval)
 	/* rusage pointer must be zero */
 	if (SCARG(uap, rusage))
 		return (EINVAL);
-#ifdef m68k
+#if __mc68k__
 	p->p_md.md_regs[PS] = PSL_ALLCC;
 	p->p_md.md_regs[R0] = SCARG(uap, options);
 	p->p_md.md_regs[R1] = SCARG(uap, rusage);
@@ -175,11 +174,11 @@ hpux_sys_wait3(p, v, retval)
 
 int
 hpux_sys_wait(p, v, retval)
-	struct proc *p;
+	register struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct hpux_sys_wait_args *uap = v;
+	register struct hpux_sys_wait_args *uap = v;
 	struct sys_wait4_args w4;
 	int error;
 	int sig;
@@ -252,10 +251,7 @@ hpux_sys_waitpid(p, v, retval)
 		 * pull it back, change the signal portion, and write
 		 * it back out.
 		 */
-		if ((error = copyin((caddr_t)SCARG(uap, status), &rv,
-		    sizeof(int))) != 0)
-			return error;
-
+		rv = fuword((caddr_t)SCARG(uap, status));
 		if (WIFSTOPPED(rv)) {
 			sig = WSTOPSIG(rv);
 			rv = W_STOPCODE(bsdtohpuxsig(sig));
@@ -265,7 +261,7 @@ hpux_sys_waitpid(p, v, retval)
 			rv = W_EXITCODE(xstat, bsdtohpuxsig(sig)) |
 				WCOREDUMP(rv);
 		}
-		error = copyout(&rv, (caddr_t)SCARG(uap, status), sizeof(int));
+		(void)suword((caddr_t)SCARG(uap, status), rv);
 	}
 	return (error);
 }
@@ -375,33 +371,69 @@ hpux_sys_writev(p, v, retval)
 	return (error);
 }
 
+/*
+ * 4.3bsd dup allows dup2 to come in on the same syscall entry
+ * and hence allows two arguments.  HP-UX dup has only one arg.
+ */
+int
+hpux_sys_dup(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	register struct hpux_sys_dup_args *uap = v;
+	register struct filedesc *fdp = p->p_fd;
+	struct file *fp;
+	int fd, error;
+
+	if (((unsigned)SCARG(uap, fd)) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
+		return (EBADF);
+	if (error = fdalloc(p, 0, &fd))
+		return (error);
+	fdp->fd_ofiles[fd] = fp;
+	fdp->fd_ofileflags[fd] =
+	    fdp->fd_ofileflags[SCARG(uap, fd)] &~ UF_EXCLOSE;
+	fp->f_count++;
+	if (fd > fdp->fd_lastfile)
+		fdp->fd_lastfile = fd;
+	*retval = fd;
+	return (0);
+}
+
 int
 hpux_sys_utssys(p, v, retval)
 	struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct hpux_sys_utssys_args *uap = v;
-	int i;
+	register struct hpux_sys_utssys_args *uap = v;
+	register int i;
 	int error;
 	struct hpux_utsname	ut;
-	extern char hostname[], machine[];
+	extern char ostype[], hostname[], osrelease[], version[], machine[];
 
 	switch (SCARG(uap, request)) {
 	/* uname */
 	case 0:
 		bzero(&ut, sizeof(ut));
 
-		strlcpy(ut.sysname, ostype, sizeof(ut.sysname));
+		strncpy(ut.sysname, ostype, sizeof(ut.sysname));
+		ut.sysname[sizeof(ut.sysname) - 1] = '\0';
 
 		/* copy hostname (sans domain) to nodename */
 		for (i = 0; i < 8 && hostname[i] != '.'; i++)
 			ut.nodename[i] = hostname[i];
 		ut.nodename[i] = '\0';
 
-		strlcpy(ut.release, osrelease, sizeof(ut.release));
-		strlcpy(ut.version, version, sizeof(ut.version));
-		strlcpy(ut.machine, machine, sizeof(ut.machine));
+		strncpy(ut.release, osrelease, sizeof(ut.release));
+		ut.release[sizeof(ut.release) - 1] = '\0';
+
+		strncpy(ut.version, version, sizeof(ut.version));
+		ut.version[sizeof(ut.version) - 1] = '\0';
+
+		/* Fill in machine-dependent part of uname. */
+		hpux_cpu_uname(&ut);
 
 		error = copyout((caddr_t)&ut,
 		    (caddr_t)SCARG(uap, uts), sizeof(ut));
@@ -410,14 +442,10 @@ hpux_sys_utssys(p, v, retval)
 	/* gethostname */
 	case 5:
 		/* SCARG(uap, dev) is length */
-		i = SCARG(uap, dev);
-		if (i < 0) {
-			error = EINVAL;
-			break;
-		}
-		if (i > hostnamelen + 1)
-			i = hostnamelen + 1;
-		error = copyout((caddr_t)hostname, (caddr_t)SCARG(uap, uts), i);
+		if (SCARG(uap, dev) > hostnamelen + 1)
+			SCARG(uap, dev) = hostnamelen + 1;
+		error = copyout((caddr_t)hostname, (caddr_t)SCARG(uap, uts),
+				SCARG(uap, dev));
 		break;
 
 	case 1:	/* ?? */
@@ -469,7 +497,7 @@ hpux_sys_ulimit(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct hpux_sys_ulimit_args *uap = v;
+	register struct hpux_sys_ulimit_args *uap = v;
 	struct rlimit *limp;
 	int error = 0;
 
@@ -478,7 +506,7 @@ hpux_sys_ulimit(p, v, retval)
 	case 2:
 		SCARG(uap, newlimit) *= 512;
 		if (SCARG(uap, newlimit) > limp->rlim_max &&
-		    (error = suser(p, 0)))
+		    (error = suser(p->p_ucred, &p->p_acflag)))
 			break;
 		limp->rlim_cur = limp->rlim_max = SCARG(uap, newlimit);
 		/* else fall into... */
@@ -489,7 +517,7 @@ hpux_sys_ulimit(p, v, retval)
 
 	case 3:
 		limp = &p->p_rlimit[RLIMIT_DATA];
-		*retval = ptoa(p->p_vmspace->vm_tsize) + limp->rlim_max;
+		*retval = ctob(p->p_vmspace->vm_tsize) + limp->rlim_max;
 		break;
 
 	default:
@@ -509,7 +537,7 @@ hpux_sys_rtprio(cp, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct hpux_sys_rtprio_args *uap = v;
+	register struct hpux_sys_rtprio_args *uap = v;
 	struct proc *p;
 	int nice, error;
 
@@ -549,8 +577,6 @@ hpux_sys_rtprio(cp, v, retval)
 
 /* hpux_sys_advise() is found in hpux_machdep.c */
 
-#ifdef PTRACE
-
 int
 hpux_sys_ptrace(p, v, retval)
 	struct proc *p;
@@ -558,11 +584,8 @@ hpux_sys_ptrace(p, v, retval)
 	register_t *retval;
 {
 	struct hpux_sys_ptrace_args *uap = v;
-	int error;
-#if defined(PT_READ_U) || defined(PT_WRITE_U)
-	int isps = 0;
+	int error, isps = 0;
 	struct proc *cp;
-#endif
 
 	switch (SCARG(uap, req)) {
 	/* map signal */
@@ -628,8 +651,6 @@ hpux_sys_ptrace(p, v, retval)
 	return (error);
 }
 
-#endif	/* PTRACE */
-
 #ifdef SYSVSHM
 #include <sys/shm.h>
 
@@ -641,7 +662,7 @@ hpux_sys_shmctl(p, v, retval)
 {
 	struct hpux_sys_shmctl_args *uap = v;
 
-	return (hpux_shmctl1(p, (struct hpux_sys_shmctl_args *)uap, retval, 0));
+	return (hpux_shmctl1(p, (struct hpux_shmctl_args *) uap, retval, 0));
 }
 
 int
@@ -652,7 +673,7 @@ hpux_sys_nshmctl(p, v, retval)
 {
 	struct hpux_sys_nshmctl_args *uap = v;
 
-	return (hpux_shmctl1(p, (struct hpux_sys_shmctl_args *)uap, retval, 1));
+	return (hpux_shmctl1(p, (struct hpux_shmctl_args *) uap, retval, 1));
 }
 
 /*
@@ -665,11 +686,11 @@ hpux_shmctl1(p, uap, retval, isnew)
 	register_t *retval;
 	int isnew;
 {
-	struct shmid_ds *shp;
-	struct ucred *cred = p->p_ucred;
+	register struct shmid_ds *shp;
+	register struct ucred *cred = p->p_ucred;
 	struct hpux_shmid_ds sbuf;
 	int error;
-	extern struct shmid_ds *shm_find_segment_by_shmid(int);
+	extern struct shmid_ds *shm_find_segment_by_shmid __P((int));
 
 	if ((shp = shm_find_segment_by_shmid(SCARG(uap, shmid))) == NULL)
 		return EINVAL;
@@ -722,7 +743,7 @@ hpux_shmctl1(p, uap, retval, isnew)
 			shp->shm_perm.gid = sbuf.shm_perm.gid;
 			shp->shm_perm.mode = (shp->shm_perm.mode & ~0777)
 				| (sbuf.shm_perm.mode & 0777);
-			shp->shm_ctime = time_second;
+			shp->shm_ctime = time.tv_sec;
 		}
 		return (error);
 	}
@@ -806,15 +827,15 @@ hpux_sys_ioctl(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct hpux_sys_ioctl_args /* {
+	register struct hpux_sys_ioctl_args /* {
 		syscallarg(int) fd;
 		syscallarg(int) com;
 		syscallarg(caddr_t) data;
 	} */ *uap = v;
-	struct filedesc *fdp = p->p_fd;
-	struct file *fp;
-	int com, error = 0;
-	u_int size;
+	register struct filedesc *fdp = p->p_fd;
+	register struct file *fp;
+	register int com, error;
+	register u_int size;
 	caddr_t memp = 0;
 #define STK_PARAMS	128
 	char stkbuf[STK_PARAMS];
@@ -826,7 +847,8 @@ hpux_sys_ioctl(p, v, retval)
 	if (com == HPUXTIOCGETP || com == HPUXTIOCSETP)
 		return (getsettty(p, SCARG(uap, fd), com, SCARG(uap, data)));
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if (((unsigned)SCARG(uap, fd)) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
 		return (EBADF);
 	if ((fp->f_flag & (FREAD|FWRITE)) == 0)
 		return (EBADF);
@@ -839,7 +861,6 @@ hpux_sys_ioctl(p, v, retval)
 	size = IOCPARM_LEN(com);
 	if (size > IOCPARM_MAX)
 		return (ENOTTY);
-	FREF(fp);
 	if (size > sizeof (stkbuf)) {
 		memp = (caddr_t)malloc((u_long)size, M_IOCTLOPS, M_WAITOK);
 		dt = memp;
@@ -848,7 +869,9 @@ hpux_sys_ioctl(p, v, retval)
 		if (size) {
 			error = copyin(SCARG(uap, data), dt, (u_int)size);
 			if (error) {
-				goto out;
+				if (memp)
+					free(memp, M_IOCTLOPS);
+				return (error);
 			}
 		} else
 			*(caddr_t *)dt = SCARG(uap, data);
@@ -936,9 +959,6 @@ hpux_sys_ioctl(p, v, retval)
 	 */
 	if (error == 0 && (com&IOC_OUT) && size)
 		error = copyout(dt, SCARG(uap, data), (u_int)size);
-
-out:
-	FRELE(fp);
 	if (memp)
 		free(memp, M_IOCTLOPS);
 	return (error);
@@ -956,8 +976,8 @@ hpux_sys_getpgrp2(cp, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct hpux_sys_getpgrp2_args *uap = v;
-	struct proc *p;
+	register struct hpux_sys_getpgrp2_args *uap = v;
+	register struct proc *p;
 
 	if (SCARG(uap, pid) == 0)
 		SCARG(uap, pid) = cp->p_pid;
@@ -987,6 +1007,31 @@ hpux_sys_setpgrp2(p, v, retval)
 	if (SCARG(uap, pgid) < 0 || SCARG(uap, pgid) >= 30000)
 		return (EINVAL);
 	return (sys_setpgid(p, uap, retval));
+}
+
+/*
+ * XXX Same as BSD setre[ug]id right now.  Need to consider saved ids.
+ */
+int
+hpux_sys_setresuid(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct hpux_sys_setresuid_args *uap = v;
+
+	return (compat_43_sys_setreuid(p, uap, retval));
+}
+
+int
+hpux_sys_setresgid(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct hpux_sys_setresgid_args *uap = v;
+
+	return (compat_43_sys_setregid(p, uap, retval));
 }
 
 int
@@ -1038,24 +1083,22 @@ hpux_sys_lockf(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	/* struct hpux_sys_lockf_args *uap = v; */
+	struct hpux_sys_lockf_args *uap = v;
 
 	return (0);
 }
 
-
-#ifndef __hppa__
 int
 hpux_sys_getaccess(p, v, retval)
-	struct proc *p;
+	register struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct hpux_sys_getaccess_args *uap = v;
+	register struct hpux_sys_getaccess_args *uap = v;
 	int lgroups[NGROUPS];
 	int error = 0;
-	struct ucred *cred;
-	struct vnode *vp;
+	register struct ucred *cred;
+	register struct vnode *vp;
 	struct nameidata nd;
 
 	/*
@@ -1138,13 +1181,17 @@ hpux_sys_getaccess(p, v, retval)
 		*retval |= R_OK;
 	if (vn_writechk(vp) == 0 && VOP_ACCESS(vp, VWRITE, cred, p) == 0)
 		*retval |= W_OK;
+	/* XXX we return X_OK for root on VREG even if not */
 	if (VOP_ACCESS(vp, VEXEC, cred, p) == 0)
 		*retval |= X_OK;
 	vput(vp);
 	crfree(cred);
 	return (error);
 }
-#endif
+
+/* hpux_to_bsd_uoff() is found in hpux_machdep.c */
+
+/* hpux_dumpu() is found in hpux_machdep.c */
 
 /*
  * Ancient HP-UX system calls.  Some 9.x executables even use them!
@@ -1159,7 +1206,7 @@ hpux_sys_getaccess(p, v, retval)
  */
 int
 hpux_sys_setpgrp_6x(p, v, retval)
-	struct proc *p;
+	register struct proc *p;
 	void *v;
 	register_t *retval;
 {
@@ -1199,16 +1246,18 @@ hpux_sys_stime_6x(p, v, retval)
 	struct hpux_sys_stime_6x_args /* {
 		syscallarg(int) time;
 	} */ *uap = v;
-	struct timespec ts;
-	int error;
+	struct timeval tv;
+	int s, error;
 
-	ts.tv_sec = SCARG(uap, time);
-	ts.tv_nsec = 0;
-	if ((error = suser(p, 0)))
+	tv.tv_sec = SCARG(uap, time);
+	tv.tv_usec = 0;
+	if (error = suser(p->p_ucred, &p->p_acflag))
 		return (error);
 
-	settime(&ts);
-
+	/* WHAT DO WE DO ABOUT PENDING REAL-TIME TIMEOUTS??? */
+	boottime.tv_sec += tv.tv_sec - time.tv_sec;
+	s = splhigh(); time = tv; splx(s);
+	resettodr();
 	return (0);
 }
 
@@ -1222,11 +1271,12 @@ hpux_sys_ftime_6x(p, v, retval)
 		syscallarg(struct hpux_timeb *) tp;
 	} */ *uap = v;
 	struct hpux_otimeb tb;
-	struct timeval tv;
+	int s;
 
-	microtime(&tv);
-	tb.time = tv.tv_sec;
-	tb.millitm = tv.tv_usec / 1000;
+	s = splhigh();
+	tb.time = time.tv_sec;
+	tb.millitm = time.tv_usec / 1000;
+	splx(s);
 	tb.timezone = tz.tz_minuteswest;
 	tb.dstflag = tz.tz_dsttime;
 	return (copyout((caddr_t)&tb, (caddr_t)SCARG(uap, tp), sizeof (tb)));
@@ -1234,41 +1284,36 @@ hpux_sys_ftime_6x(p, v, retval)
 
 int
 hpux_sys_alarm_6x(p, v, retval)
-	struct proc *p;
+	register struct proc *p;
 	void *v;
 	register_t *retval;
 {
 	struct hpux_sys_alarm_6x_args /* {
 		syscallarg(int) deltat;
 	} */ *uap = v;
-	int timo;
-	struct timeval tv, atv;
+	int s = splhigh();
 
-	timeout_del(&p->p_realit_to);
+	untimeout(realitexpire, (caddr_t)p);
 	timerclear(&p->p_realtimer.it_interval);
 	*retval = 0;
-	getmicrouptime(&tv);
 	if (timerisset(&p->p_realtimer.it_value) &&
-	    timercmp(&p->p_realtimer.it_value, &tv, >))
-		*retval = p->p_realtimer.it_value.tv_sec - tv.tv_sec;
+	    timercmp(&p->p_realtimer.it_value, &time, >))
+		*retval = p->p_realtimer.it_value.tv_sec - time.tv_sec;
 	if (SCARG(uap, deltat) == 0) {
 		timerclear(&p->p_realtimer.it_value);
+		splx(s);
 		return (0);
 	}
-	atv.tv_sec = SCARG(uap, deltat);
-	atv.tv_usec = 0;
-	p->p_realtimer.it_value = tv;
+	p->p_realtimer.it_value = time;
 	p->p_realtimer.it_value.tv_sec += SCARG(uap, deltat);
-	timo = tvtohz(&atv);
-	if (timo <= 0)
-		timo = 1;
-	timeout_add(&p->p_realit_to, timo);
+	timeout(realitexpire, (caddr_t)p, hzto(&p->p_realtimer.it_value));
+	splx(s);
 	return (0);
 }
 
 int
 hpux_sys_nice_6x(p, v, retval)
-	struct proc *p;
+	register struct proc *p;
 	void *v;
 	register_t *retval;
 {
@@ -1303,11 +1348,9 @@ hpux_sys_times_6x(p, v, retval)
 	atms.tms_cstime = hpux_scale(&p->p_stats->p_cru.ru_stime);
 	error = copyout((caddr_t)&atms, (caddr_t)SCARG(uap, tms),
 	    sizeof (atms));
-	if (error == 0) {
-		struct timeval tv;
-		getmicrouptime(&tv);
-		*(time_t *)retval = hpux_scale(&tv);
-	}
+	if (error == 0)
+		*(time_t *)retval = hpux_scale((struct timeval *)&time) -
+		    hpux_scale(&boottime);
 	return (error);
 }
 
@@ -1318,7 +1361,7 @@ hpux_sys_times_6x(p, v, retval)
  */
 static int
 hpux_scale(tvp)
-	struct timeval *tvp;
+	register struct timeval *tvp;
 {
 	return (tvp->tv_sec * HPUX_HZ + tvp->tv_usec * HPUX_HZ / 1000000);
 }
@@ -1337,7 +1380,7 @@ hpux_sys_utime_6x(p, v, retval)
 		syscallarg(char *) fname;
 		syscallarg(time_t *) tptr;
 	} */ *uap = v;
-	struct vnode *vp;
+	register struct vnode *vp;
 	struct vattr vattr;
 	time_t tv[2];
 	int error;
@@ -1349,7 +1392,7 @@ hpux_sys_utime_6x(p, v, retval)
 		if (error)
 			return (error);
 	} else
-		tv[0] = tv[1] = time_second;
+		tv[0] = tv[1] = time.tv_sec;
 	vattr_null(&vattr);
 	vattr.va_atime.tv_sec = tv[0];
 	vattr.va_atime.tv_nsec = 0;
@@ -1357,7 +1400,7 @@ hpux_sys_utime_6x(p, v, retval)
 	vattr.va_mtime.tv_nsec = 0;
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
 	    SCARG(uap, fname), p);
-	if ((error = namei(&nd)))
+	if (error = namei(&nd))
 		return (error);
 	vp = nd.ni_vp;
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)

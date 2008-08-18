@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_le.c,v 1.17 2005/01/15 21:13:08 miod Exp $	*/
-/*	$NetBSD: if_le.c,v 1.43 1997/05/05 21:05:32 thorpej Exp $	*/
+/*	$NetBSD: if_le.c,v 1.31 1996/05/09 21:11:47 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1995 Charles M. Hannum.  All rights reserved.
@@ -17,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -52,47 +55,47 @@
 #include <netinet/if_ether.h>
 #endif
 
-#include <net/if_media.h>
-
-#include <machine/autoconf.h>
 #include <machine/cpu.h>
-#include <machine/intr.h>
+#include <machine/mtpr.h>
+
+#include <hp300/hp300/isr.h>
+
+#ifdef USELEDS
+#include <hp300/hp300/led.h>
+#endif
+
+#include <hp300/dev/device.h>
 
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
 
-#include <hp300/dev/dioreg.h>
-#include <hp300/dev/diovar.h>
-#include <hp300/dev/diodevs.h>
 #include <hp300/dev/if_lereg.h>
 #include <hp300/dev/if_levar.h>
 
-#ifdef USELEDS
-#include <hp300/hp300/leds.h>
-#endif
+#include "le.h"
+struct	le_softc le_softc[NLE];
 
-int	lematch(struct device *, void *, void *);
-void	leattach(struct device *, struct device *, void *);
+int	lematch __P((struct hp_device *));
+void	leattach __P((struct hp_device *));
+int	leintr __P((void *));
 
-struct cfattach le_ca = {
-	sizeof(struct le_softc), lematch, leattach
+struct	driver ledriver = {
+	lematch, leattach, "le",
 };
-
-int	leintr(void *);
 
 /* offsets for:	   ID,   REGS,    MEM,  NVRAM */
 int	lestd[] = { 0, 0x4000, 0x8000, 0xC008 };
 
-hide void lewrcsr(struct am7990_softc *, u_int16_t, u_int16_t);
-hide u_int16_t lerdcsr(struct am7990_softc *, u_int16_t);
+hide void lewrcsr __P((struct am7990_softc *, u_int16_t, u_int16_t));
+hide u_int16_t lerdcsr __P((struct am7990_softc *, u_int16_t));  
 
 hide void
 lewrcsr(sc, port, val)
 	struct am7990_softc *sc;
 	u_int16_t port, val;
 {
-	struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
-	struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
+	register struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
+	register struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
 
 	do {
 		ler1->ler1_rap = port;
@@ -107,8 +110,8 @@ lerdcsr(sc, port)
 	struct am7990_softc *sc;
 	u_int16_t port;
 {
-	struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
-	struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
+	register struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
+	register struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
 	u_int16_t val;
 
 	do {
@@ -121,16 +124,20 @@ lerdcsr(sc, port)
 }
 
 int
-lematch(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+lematch(hd)
+	struct hp_device *hd;
 {
-	struct dio_attach_args *da = aux;
+	register struct lereg0 *ler0;
+	struct le_softc *lesc = &le_softc[hd->hp_unit];
 
-	if ((da->da_id == DIO_DEVICE_ID_LAN) ||
-	    (da->da_id == DIO_DEVICE_ID_LANREM))
-		return (1);
-	return (0);
+	ler0 = (struct lereg0 *)(lestd[0] + (int)hd->hp_addr);
+	if (ler0->ler0_id != LEID)
+		return (0);
+
+	hd->hp_ipl = LE_IPL(ler0->ler0_status);
+	lesc->sc_hd = hd;
+
+	return (1);
 }
 
 /*
@@ -139,34 +146,25 @@ lematch(parent, match, aux)
  * to accept packets.
  */
 void
-leattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+leattach(hd)
+	struct hp_device *hd;
 {
-	struct lereg0 *ler0;
-	struct dio_attach_args *da = aux;
-	struct le_softc *lesc = (struct le_softc *)self;
-	caddr_t addr;
+	register struct lereg0 *ler0;
+	struct le_softc *lesc = &le_softc[hd->hp_unit];
 	struct am7990_softc *sc = &lesc->sc_am7990;
 	char *cp;
-	int i, ipl;
+	int i;
 
-	addr = iomap(dio_scodetopa(da->da_scode), da->da_size);
-	if (addr == 0) {
-		printf("\n%s: can't map LANCE registers\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
-
-	ler0 = lesc->sc_r0 = (struct lereg0 *)(lestd[0] + (int)addr);
+	ler0 = lesc->sc_r0 = (struct lereg0 *)(lestd[0] + (int)hd->hp_addr);
 	ler0->ler0_id = 0xFF;
 	DELAY(100);
 
-	ipl = DIO_IPL(addr);
-	printf(" ipl %d", ipl);
+	/* XXXX kluge for now */
+	sc->sc_dev.dv_unit = hd->hp_unit;
+	sprintf(sc->sc_dev.dv_xname, "%s%d", le_cd.cd_name, hd->hp_unit);
 
-	lesc->sc_r1 = (struct lereg1 *)(lestd[1] + (int)addr);
-	sc->sc_mem = (void *)(lestd[2] + (int)addr);
+	lesc->sc_r1 = (struct lereg1 *)(lestd[1] + (int)hd->hp_addr);
+	sc->sc_mem = (void *)(lestd[2] + (int)hd->hp_addr);
 	sc->sc_conf3 = LE_C3_BSWP;
 	sc->sc_addr = 0;
 	sc->sc_memsize = 16384;
@@ -174,7 +172,7 @@ leattach(parent, self, aux)
 	/*
 	 * Read the ethernet address off the board, one nibble at a time.
 	 */
-	cp = (char *)(lestd[3] + (int)addr);
+	cp = (char *)(lestd[3] + (int)hd->hp_addr);
 	for (i = 0; i < sizeof(sc->sc_arpcom.ac_enaddr); i++) {
 		sc->sc_arpcom.ac_enaddr[i] = (*++cp & 0xF) << 4;
 		cp++;
@@ -190,17 +188,12 @@ leattach(parent, self, aux)
 
 	sc->sc_rdcsr = lerdcsr;
 	sc->sc_wrcsr = lewrcsr;
-	sc->sc_hwreset = NULL;
 	sc->sc_hwinit = NULL;
 
 	am7990_config(sc);
 
 	/* Establish the interrupt handler. */
-	lesc->sc_isr.isr_func = leintr;
-	lesc->sc_isr.isr_arg = lesc;
-	lesc->sc_isr.isr_ipl = ipl;
-	lesc->sc_isr.isr_priority = IPL_NET;
-	dio_intr_establish(&lesc->sc_isr, self->dv_xname);
+	isrlink(leintr, sc, hd->hp_ipl, ISRPRI_NET);
 	ler0->ler0_status = LE_IE;
 }
 
@@ -208,22 +201,23 @@ int
 leintr(arg)
 	void *arg;
 {
-	struct le_softc *lesc = (struct le_softc *)arg;
-	struct am7990_softc *sc = &lesc->sc_am7990;
-#ifdef USELEDS
+	struct am7990_softc *sc = arg;
 	u_int16_t isr;
 
+#ifdef USELEDS
 	isr = lerdcsr(sc, LE_CSR0);
 
 	if ((isr & LE_C0_INTR) == 0)
 		return (0);
 
 	if (isr & LE_C0_RINT)
-		ledcontrol(0, 0, LED_LANRCV);
+		if (inledcontrol == 0)
+			ledcontrol(0, 0, LED_LANRCV);
 
 	if (isr & LE_C0_TINT)
-		ledcontrol(0, 0, LED_LANXMT);
+		if (inledcontrol == 0)
+			ledcontrol(0, 0, LED_LANXMT);
 #endif /* USELEDS */
 
-	return am7990_intr(sc);
+	return (am7990_intr(sc));
 }

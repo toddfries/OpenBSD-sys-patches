@@ -1,5 +1,5 @@
-/*	$OpenBSD: cd9660_bmap.c,v 1.6 2007/06/06 17:15:13 deraadt Exp $	*/
-/*	$NetBSD: cd9660_bmap.c,v 1.7 1997/01/24 00:27:29 cgd Exp $	*/
+/*	$OpenBSD: cd9660_bmap.c,v 1.2 1996/02/29 10:12:14 niklas Exp $	*/
+/*	$NetBSD: cd9660_bmap.c,v 1.6 1996/02/09 21:31:50 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +49,6 @@
 #include <sys/mount.h>
 
 #include <isofs/cd9660/iso.h>
-#include <isofs/cd9660/cd9660_extern.h>
 #include <isofs/cd9660/cd9660_node.h>
 
 /*
@@ -57,9 +60,15 @@ int
 cd9660_bmap(v)
 	void *v;
 {
-	struct vop_bmap_args *ap = v;
+	struct vop_bmap_args /* {
+		struct vnode *a_vp;
+		daddr_t  a_bn;
+		struct vnode **a_vpp;
+		daddr_t *a_bnp;
+		int *a_runp;
+	} */ *ap = v;
 	struct iso_node *ip = VTOI(ap->a_vp);
-	daddr64_t lblkno = ap->a_bn;
+	daddr_t lblkno = ap->a_bn;
 	int bshift;
 
 	/*

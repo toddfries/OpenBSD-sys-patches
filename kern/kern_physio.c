@@ -1,5 +1,5 @@
-/*	$OpenBSD: kern_physio.c,v 1.28 2007/05/26 20:26:51 pedro Exp $	*/
-/*	$NetBSD: kern_physio.c,v 1.28 1997/05/19 10:43:28 pk Exp $	*/
+/*	$OpenBSD: kern_physio.c,v 1.2 1996/03/03 17:19:50 niklas Exp $	*/
+/*	$NetBSD: kern_physio.c,v 1.26 1996/02/04 02:15:51 christos Exp $	*/
 
 /*-
  * Copyright (c) 1994 Christopher G. Demetriou
@@ -19,7 +19,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,9 +47,8 @@
 #include <sys/buf.h>
 #include <sys/conf.h>
 #include <sys/proc.h>
-#include <sys/pool.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 /*
  * The routines implemented in this file are described in:
@@ -58,8 +61,8 @@
  * I/O, so raw I/O requests don't have to be single-threaded.
  */
 
-struct buf *getphysbuf(void);
-void putphysbuf(struct buf *bp);
+struct buf *getphysbuf __P((void));
+void putphysbuf __P((struct buf *bp));
 
 /*
  * Do "physical I/O" on behalf of a user.  "Physical I/O" is I/O directly
@@ -68,8 +71,13 @@ void putphysbuf(struct buf *bp);
  * Comments in brackets are from Leffler, et al.'s pseudo-code implementation.
  */
 int
-physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
-    void (*minphys)(struct buf *), struct uio *uio)
+physio(strategy, bp, dev, flags, minphys, uio)
+	void (*strategy) __P((struct buf *));
+	struct buf *bp;
+	dev_t dev;
+	int flags;
+	void (*minphys) __P((struct buf *));
+	struct uio *uio;
 {
 	struct iovec *iovp;
 	struct proc *p = curproc;
@@ -77,6 +85,18 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 
 	error = 0;
 	flags &= B_READ | B_WRITE;
+
+	/*
+	 * [check user read/write access to the data buffer]
+	 *
+	 * Check each iov one by one.  Note that we know if we're reading or
+	 * writing, so we ignore the uio's rw parameter.  Also note that if
+	 * we're doing a read, that's a *write* to user-space.
+	 */
+	for (i = 0; i < uio->uio_iovcnt; i++)
+		if (!useracc(uio->uio_iov[i].iov_base, uio->uio_iov[i].iov_len,
+		    (flags == B_READ) ? B_WRITE : B_READ))
+			return (EFAULT);
 
 	/* Make sure we have a buffer, creating one if necessary. */
 	if ((nobuf = (bp == NULL)) != 0)
@@ -90,7 +110,7 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 		/* [mark the buffer wanted] */
 		bp->b_flags |= B_WANTED;
 		/* [wait until the buffer is available] */
-		tsleep(bp, PRIBIO+1, "physbuf", 0);
+		tsleep((caddr_t)bp, PRIBIO+1, "physbuf", 0);
 	}
 
 	/* Mark it busy, so nobody else will use it. */
@@ -103,7 +123,6 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 	bp->b_dev = dev;
 	bp->b_error = 0;
 	bp->b_proc = p;
-	LIST_INIT(&bp->b_dep);
 
 	/*
 	 * [while there are data to transfer and no I/O error]
@@ -116,7 +135,7 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 			/*
 			 * [mark the buffer busy for physical I/O]
 			 * (i.e. set B_PHYS (because it's an I/O to user
-			 * memory), and B_RAW, because B_RAW is to be
+			 * memory, and B_RAW, because B_RAW is to be
 			 * "Set by physio for raw transfers.", in addition
 			 * to the "busy" and read/write flag.)
 			 */
@@ -124,20 +143,11 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 
 			/* [set up the buffer for a maximum-sized transfer] */
 			bp->b_blkno = btodb(uio->uio_offset);
+			bp->b_bcount = iovp->iov_len;
 			bp->b_data = iovp->iov_base;
 
 			/*
-			 * Because iov_len is unsigned but b_bcount is signed,
-			 * an overflow is possible. Therefore bound to MAXPHYS
-			 * before calling minphys.
-			 */
-			if (iovp->iov_len > MAXPHYS)
-				bp->b_bcount = MAXPHYS;
-			else
-				bp->b_bcount = iovp->iov_len;
-
-			/*
-			 * [call minphys to bound the transfer size]
+			 * [call minphys to bound the tranfer size]
 			 * and remember the amount of data to transfer,
 			 * for later comparison.
 			 */
@@ -157,14 +167,8 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 			 * saves it in b_saveaddr.  However, vunmapbuf()
 			 * restores it.
 			 */
-			error = uvm_vslock(p, bp->b_data, todo,
-			    (flags & B_READ) ?
-			    VM_PROT_READ | VM_PROT_WRITE : VM_PROT_READ);
-			if (error) {
-				bp->b_flags |= B_ERROR;
-				bp->b_error = error;
-				goto after_unlock;
-			}
+			p->p_holdcnt++;
+			vslock(bp->b_data, todo);
 			vmapbuf(bp, todo);
 
 			/* [call strategy to start the transfer] */
@@ -182,7 +186,7 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 
 			/* [wait for the transfer to complete] */
 			while ((bp->b_flags & B_DONE) == 0)
-				tsleep(bp, PRIBIO + 1, "physio", 0);
+				tsleep((caddr_t) bp, PRIBIO + 1, "physio", 0);
 
 			/* Mark it busy again, so nobody else will use it. */
 			bp->b_flags |= B_BUSY;
@@ -195,8 +199,8 @@ physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev, int flags,
 			 *    locked]
 			 */
 			vunmapbuf(bp, todo);
-			uvm_vsunlock(p, bp->b_data, todo);
-after_unlock:
+			vsunlock(bp->b_data, todo);
+			p->p_holdcnt--;
 
 			/* remember error value (save a splbio/splx pair) */
 			if (bp->b_flags & B_ERROR)
@@ -214,9 +218,9 @@ after_unlock:
 				panic("done > todo; strategy broken");
 #endif
 			iovp->iov_len -= done;
-			iovp->iov_base = (caddr_t)iovp->iov_base + done;
-			uio->uio_offset += done;
-			uio->uio_resid -= done;
+                        iovp->iov_base += done;
+                        uio->uio_offset += done;
+                        uio->uio_resid -= done;
 
 			/*
 			 * Now, check for an error.
@@ -240,7 +244,7 @@ done:
 	else {
 		/*
 		 * [if another process is waiting for the raw I/O buffer,
-		 *    wake up processes waiting to do physical I/O]
+		 *    wake up processes waiting to do physical I/O;
 		 */
 		if (bp->b_flags & B_WANTED) {
 			bp->b_flags &= ~B_WANTED;
@@ -259,20 +263,19 @@ done:
  * rather than PSWP + 1 (and on a different wchan).
  */
 struct buf *
-getphysbuf(void)
+getphysbuf()
 {
 	struct buf *bp;
 	int s;
 
 	s = splbio();
-	bp = pool_get(&bufpool, PR_WAITOK);
-	splx(s);
-
-	bzero(bp, sizeof(*bp));
-
-	/* XXXCDC: are the following two lines necessary? */
-	bp->b_vnbufs.le_next = NOLIST;
-
+        while (bswlist.b_actf == NULL) {
+                bswlist.b_flags |= B_WANTED;
+                tsleep((caddr_t)&bswlist, PRIBIO + 1, "getphys", 0);
+        }
+        bp = bswlist.b_actf;
+        bswlist.b_actf = bp->b_actf;
+        splx(s);
 	return (bp);
 }
 
@@ -283,19 +286,18 @@ getphysbuf(void)
  * must mask disk interrupts, rather than putphysbuf() itself.
  */
 void
-putphysbuf(struct buf *bp)
+putphysbuf(bp)
+	struct buf *bp;
 {
-	splassert(IPL_BIO);
 
-	/* XXXCDC: is this necessary? */
-	if (bp->b_vp)
-		brelvp(bp);
-
-#ifdef DIAGNOSTIC
-	if (bp->b_flags & B_WANTED)
-		panic("putphysbuf: private buf B_WANTED");
-#endif
-	pool_put(&bufpool, bp);
+        bp->b_actf = bswlist.b_actf;
+        bswlist.b_actf = bp;
+        if (bp->b_vp)
+                brelvp(bp);
+        if (bswlist.b_flags & B_WANTED) {
+                bswlist.b_flags &= ~B_WANTED;
+                wakeup(&bswlist);
+        }
 }
 
 /*
@@ -308,7 +310,8 @@ putphysbuf(struct buf *bp)
  * and return the new count;
  */
 void
-minphys(struct buf *bp)
+minphys(bp)
+	struct buf *bp;
 {
 
 	if (bp->b_bcount > MAXPHYS)

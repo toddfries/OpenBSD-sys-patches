@@ -1,6 +1,5 @@
-/*	$OpenBSD: ibcs2_stat.c,v 1.13 2004/07/09 23:52:02 millert Exp $	*/
+/*	$OpenBSD: ibcs2_stat.c,v 1.3 1996/08/02 20:35:11 niklas Exp $	*/
 /*	$NetBSD: ibcs2_stat.c,v 1.5 1996/05/03 17:05:32 christos Exp $	*/
-
 /*
  * Copyright (c) 1995 Scott Bartram
  * All rights reserved.
@@ -42,7 +41,7 @@
 #include <sys/vnode.h>
 #include <sys/syscallargs.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 #include <compat/ibcs2/ibcs2_types.h>
 #include <compat/ibcs2/ibcs2_fcntl.h>
@@ -54,12 +53,12 @@
 #include <compat/ibcs2/ibcs2_util.h>
 #include <compat/ibcs2/ibcs2_utsname.h>
 
-static void bsd_stat2ibcs_stat(struct stat43 *, struct ibcs2_stat *);
-static int cvt_statfs(struct statfs *, caddr_t, int);
+static void bsd_stat2ibcs_stat __P((struct ostat *, struct ibcs2_stat *));
+static int cvt_statfs __P((struct statfs *, caddr_t, int));
 
 static void
 bsd_stat2ibcs_stat(st, st4)
-	struct stat43 *st;
+	struct ostat *st;
 	struct ibcs2_stat *st4;
 {
 	bzero(st4, sizeof(*st4));
@@ -83,11 +82,6 @@ cvt_statfs(sp, buf, len)
 	int len;
 {
 	struct ibcs2_statfs ssfs;
-
-	if (len < 0)
-		return (EINVAL);
-	if (len > sizeof(ssfs))
-		len = sizeof(ssfs);
 
 	bzero(&ssfs, sizeof ssfs);
 	ssfs.f_fstyp = 0;
@@ -154,9 +148,7 @@ ibcs2_sys_fstatfs(p, v, retval)
 		return (error);
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	sp = &mp->mnt_stat;
-	error = VFS_STATFS(mp, sp, p);
-	FRELE(fp);
-	if (error)
+	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
 	return cvt_statfs(sp, (caddr_t)SCARG(uap, buf), SCARG(uap, len));
@@ -172,16 +164,15 @@ ibcs2_sys_stat(p, v, retval)
 		syscallarg(char *) path;
 		syscallarg(struct ibcs2_stat *) st;
 	} */ *uap = v;
-	struct stat43 st;
+	struct ostat st;
 	struct ibcs2_stat ibcs2_st;
 	struct compat_43_sys_stat_args cup;
 	int error;
 	caddr_t sg = stackgap_init(p->p_emul);
 
-	SCARG(&cup, ub) = stackgap_alloc(&sg, sizeof(st));
 	IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 	SCARG(&cup, path) = SCARG(uap, path);
-
+	SCARG(&cup, ub) = stackgap_alloc(&sg, sizeof(st));
 	if ((error = compat_43_sys_stat(p, &cup, retval)) != 0)
 		return error;
 	if ((error = copyin(SCARG(&cup, ub), &st, sizeof(st))) != 0)
@@ -201,16 +192,15 @@ ibcs2_sys_lstat(p, v, retval)
 		syscallarg(char *) path;
 		syscallarg(struct ibcs2_stat *) st;
 	} */ *uap = v;
-	struct stat43 st;
+	struct ostat st;
 	struct ibcs2_stat ibcs2_st;
 	struct compat_43_sys_lstat_args cup;
 	int error;
 	caddr_t sg = stackgap_init(p->p_emul);
 
-	SCARG(&cup, ub) = stackgap_alloc(&sg, sizeof(st));
 	IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 	SCARG(&cup, path) = SCARG(uap, path);
-
+	SCARG(&cup, ub) = stackgap_alloc(&sg, sizeof(st));
 	if ((error = compat_43_sys_lstat(p, &cup, retval)) != 0)
 		return error;
 	if ((error = copyin(SCARG(&cup, ub), &st, sizeof(st))) != 0)
@@ -230,7 +220,7 @@ ibcs2_sys_fstat(p, v, retval)
 		syscallarg(int) fd;
 		syscallarg(struct ibcs2_stat *) st;
 	} */ *uap = v;
-	struct stat43 st;
+	struct ostat st;
 	struct ibcs2_stat ibcs2_st;
 	struct compat_43_sys_fstat_args cup;
 	int error;
@@ -263,14 +253,14 @@ ibcs2_sys_utssys(p, v, retval)
 	case 0:			/* uname(2) */
 	{
 		struct ibcs2_utsname sut;
-		extern char machine[];
+		extern char ostype[], machine[], osrelease[];
 
 		bzero(&sut, ibcs2_utsname_len);
 		bcopy(ostype, sut.sysname, sizeof(sut.sysname) - 1);
 		bcopy(hostname, sut.nodename, sizeof(sut.nodename));
 		sut.nodename[sizeof(sut.nodename)-1] = '\0';
 		bcopy(osrelease, sut.release, sizeof(sut.release) - 1);
-		strlcpy(sut.version, "1", sizeof(sut.version));
+		bcopy("1", sut.version, sizeof(sut.version) - 1);
 		bcopy(machine, sut.machine, sizeof(sut.machine) - 1);
 
 		return copyout((caddr_t)&sut, (caddr_t)SCARG(uap, a1),

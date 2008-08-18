@@ -1,5 +1,5 @@
-/*	$OpenBSD: eisavar.h,v 1.12 2003/12/12 22:56:46 hshoexer Exp $	*/
-/*	$NetBSD: eisavar.h,v 1.11 1997/06/06 23:30:07 thorpej Exp $	*/
+/*	$OpenBSD: eisavar.h,v 1.4 1996/04/21 22:20:45 deraadt Exp $	*/
+/*	$NetBSD: eisavar.h,v 1.9 1996/04/12 06:34:36 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou
@@ -54,20 +54,14 @@ struct eisabus_attach_args;
 /*
  * Machine-dependent definitions.
  */
-#if (__alpha__ + __i386__ + __arc__ + __hppa__ != 1)
-#error COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
+#if (alpha + i386 != 1)
+ERROR: COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
 #endif
-#if __alpha__
+#if alpha
 #include <alpha/eisa/eisa_machdep.h>
 #endif
-#if __i386__
+#if i386
 #include <i386/eisa/eisa_machdep.h>
-#endif
-#if __arc__
-#include <arc/eisa/eisa_machdep.h>
-#endif
-#if __hppa__
-#include <hppa/include/eisa_machdep.h>
 #endif
 
 typedef int	eisa_slot_t;		/* really only needs to be 4 bits */
@@ -76,10 +70,8 @@ typedef int	eisa_slot_t;		/* really only needs to be 4 bits */
  * EISA bus attach arguments.
  */
 struct eisabus_attach_args {
-	char	*eba_busname;		/* XXX should be common */
-	bus_space_tag_t eba_iot;	/* eisa i/o space tag */
-	bus_space_tag_t eba_memt;	/* eisa mem space tag */
-	bus_dma_tag_t eba_dmat;		/* DMA tag */
+	char		*eba_busname;		/* XXX should be common */
+	bus_chipset_tag_t eba_bc;		/* XXX should be common */
 	eisa_chipset_tag_t eba_ec;
 };
 
@@ -87,9 +79,7 @@ struct eisabus_attach_args {
  * EISA device attach arguments.
  */
 struct eisa_attach_args {
-	bus_space_tag_t ea_iot;		/* eisa i/o space tag */
-	bus_space_tag_t ea_memt;	/* eisa mem space tag */
-	bus_dma_tag_t ea_dmat;		/* DMA tag */
+	bus_chipset_tag_t ea_bc;
 	eisa_chipset_tag_t ea_ec;
 
 	eisa_slot_t	ea_slot;

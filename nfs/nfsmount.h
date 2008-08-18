@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsmount.h,v 1.14 2007/06/13 18:05:27 thib Exp $	*/
+/*	$OpenBSD: nfsmount.h,v 1.3 1996/03/31 13:16:12 mickey Exp $	*/
 /*	$NetBSD: nfsmount.h,v 1.10 1996/02/18 11:54:03 fvdl Exp $	*/
 
 /*
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -67,6 +71,9 @@ struct	nfsmount {
 	int	nm_wsize;		/* Max size of write rpc */
 	int	nm_readdirsize;		/* Size of a readdir rpc */
 	int	nm_readahead;		/* Num. of blocks to readahead */
+	int	nm_leaseterm;		/* Term (sec) for NQNFS lease */
+	CIRCLEQ_HEAD(, nfsnode) nm_timerhead; /* Head of lease timer queue */
+	struct vnode *nm_inprog;	/* Vnode in prog by nqnfs_clientd() */
 	uid_t	nm_authuid;		/* Uid for authenticator */
 	int	nm_authtype;		/* Authenticator type */
 	int	nm_authlen;		/* and length */
@@ -78,10 +85,6 @@ struct	nfsmount {
 	int	nm_numuids;		/* Number of nfsuid mappings */
 	TAILQ_HEAD(, nfsuid) nm_uidlruhead; /* Lists of nfsuid mappings */
 	LIST_HEAD(, nfsuid) nm_uidhashtbl[NFS_MUIDHASHSIZ];
-	u_short	nm_acregmin;		/* Attr cache file recently modified */
-	u_short	nm_acregmax;		/* ac file not recently modified */
-	u_short	nm_acdirmin;		/* ac for dir recently modified */
-	u_short	nm_acdirmax;		/* ac for dir not recently modified */
 };
 
 #ifdef _KERNEL
@@ -94,25 +97,26 @@ struct	nfsmount {
 /*
  * Prototypes for NFS mount operations
  */
-int	nfs_mount(struct mount *mp, const char *path, void *data,
-		struct nameidata *ndp, struct proc *p);
-int	mountnfs(struct nfs_args *argp, struct mount *mp,
-		struct mbuf *nam, char *pth, char *hst);
-int	nfs_mountroot(void);
-void	nfs_decode_args(struct nfsmount *, struct nfs_args *, struct nfs_args *);
-int	nfs_start(struct mount *mp, int flags, struct proc *p);
-int	nfs_unmount(struct mount *mp, int mntflags, struct proc *p);
-int	nfs_root(struct mount *mp, struct vnode **vpp);
-int	nfs_quotactl(struct mount *mp, int cmds, uid_t uid, caddr_t arg,
-		struct proc *p);
-int	nfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p);
-int	nfs_sync(struct mount *mp, int waitfor, struct ucred *cred,
-		struct proc *p);
-int	nfs_vget(struct mount *, ino_t, struct vnode **);
-int	nfs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp);
-int	nfs_vptofh(struct vnode *vp, struct fid *fhp);
-int	nfs_fsinfo(struct nfsmount *, struct vnode *, struct ucred *,
-			struct proc *);
-void	nfs_init(void);
+int	nfs_mount __P((struct mount *mp, char *path, caddr_t data,
+		struct nameidata *ndp, struct proc *p));
+int	mountnfs __P((struct nfs_args *argp, struct mount *mp,
+		struct mbuf *nam, char *pth, char *hst, struct vnode **vpp));
+int	nfs_mountroot __P((void));
+void	nfs_decode_args __P((struct nfsmount *, struct nfs_args *));
+int	nfs_start __P((struct mount *mp, int flags, struct proc *p));
+int	nfs_unmount __P((struct mount *mp, int mntflags, struct proc *p));
+int	nfs_root __P((struct mount *mp, struct vnode **vpp));
+int	nfs_quotactl __P((struct mount *mp, int cmds, uid_t uid, caddr_t arg,
+		struct proc *p));
+int	nfs_statfs __P((struct mount *mp, struct statfs *sbp, struct proc *p));
+int	nfs_sync __P((struct mount *mp, int waitfor, struct ucred *cred,
+		struct proc *p));
+int	nfs_vget __P((struct mount *, ino_t, struct vnode **));
+int	nfs_fhtovp __P((struct mount *mp, struct fid *fhp, struct mbuf *nam,
+		struct vnode **vpp, int *exflagsp, struct ucred **credanonp));
+int	nfs_vptofh __P((struct vnode *vp, struct fid *fhp));
+int	nfs_fsinfo __P((struct nfsmount *, struct vnode *, struct ucred *,
+			struct proc *));
+void	nfs_init __P((void));
 
 #endif

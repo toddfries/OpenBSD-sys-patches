@@ -1,5 +1,5 @@
-#	$OpenBSD: Makefile,v 1.15 2007/10/18 18:08:02 deraadt Exp $
-#	$NetBSD: Makefile,v 1.6 1997/04/25 22:17:33 veego Exp $
+#	$OpenBSD: Makefile,v 1.10 1996/08/04 18:44:58 deraadt Exp $
+#	$NetBSD: Makefile,v 1.4 1994/10/26 07:48:46 cgd Exp $
 
 #	MOTOROLA MICROPROCESSOR & MEMORY TECHNOLOGY GROUP
 #	M68000 Hi-Performance Microprocessor Division
@@ -36,17 +36,16 @@
 #
 #	Makefile for 68040 Floating Point Software Package
 #
-.if ${MACHINE_ARCH} == "m68k"
 
 TARGET = fpsp
 
-FPSPAS=${CC} -x assembler-with-cpp -traditional-cpp -c -m68040 -I${.CURDIR}
-LD		?= ld
+AS		= as -m68040
+LD		= ld
 
 #
 # For the Library Version:
 #
-AR		?= ar
+AR		= ar
 LIB_FILTER 	= sed 's/fpsp.defs/l_fpsp.defs/'
 LIB_TARGET	= lib$(TARGET).a
 #
@@ -74,7 +73,7 @@ PREFIX		= L_
 .h.defs:
 	sh ${.CURDIR}/asm2gas ${.IMPSRC} >${.TARGET}
 .s.o:
-	$(FPSPAS) -o ${.TARGET} ${.IMPSRC}
+	$(AS) -o ${.TARGET} ${.IMPSRC}
 
 H_FILES = \
 	fpsp.defs \
@@ -336,14 +335,7 @@ clean cleandir:
 	rm -f $(LIB_O_FILES)
 	rm -f $(LIB_TARGET)
 
-clobber:	clean
-
 _SUBDIRUSE:
-
-.else
-clean cleandir:
-
-.endif
 
 all:
 

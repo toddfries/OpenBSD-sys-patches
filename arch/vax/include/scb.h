@@ -1,5 +1,4 @@
-/*	$OpenBSD: scb.h,v 1.9 2007/04/10 18:31:44 miod Exp $	*/
-/*	$NetBSD: scb.h,v 1.11 2000/07/10 09:14:34 ragge Exp $	*/
+/*	$NetBSD: scb.h,v 1.4 1995/12/13 18:54:56 ragge Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -30,8 +29,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _VAX_SCB_H
-#define	_VAX_SCB_H
+
 
 /*
  * Definition of the System Control Block. More about it can be
@@ -105,36 +103,6 @@ struct scb {
 	struct	ivec_dsp *scb_nexvec[4][16];	/* Nexus interrupt vectors */
 };
 
-#define	SCB_KSTACK	0
-#define	SCB_ISTACK	1
-
-#define vecnum(bus, ipl, tr) (256+(ipl-0x14)*64+tr*4+bus*256)
-
-/*
- * This struct is used when setting up interrupt vectors dynamically.
- * It puts a opaque 32 bit quantity on the stack and also has a placeholder
- * for evcount structure.
- */
-struct ivec_dsp {
-	char	pushr;		/* pushr */
-	char	pushrarg;	/* $0x3f */
-	char	jsb;
-	char	mode;
-	long	displacement;
-	void	(*hoppaddr)(void *);
-	void	*pushlarg;
-	struct	evcount *ev;
-};
-
 #ifdef _KERNEL
-extern	const struct ivec_dsp idsptch;
 extern	struct scb *scb;
-extern	struct ivec_dsp *scb_vec;
-
-extern	paddr_t scb_init (paddr_t);
-extern	int scb_vecref (int *, int *);
-extern	void scb_fake (int, int);
-extern	void scb_vecalloc (int, void(*)(void *), void *, int, struct evcount *);
-#endif /* _KERNEL */
-
-#endif /* _VAX_SCB_H */
+#endif

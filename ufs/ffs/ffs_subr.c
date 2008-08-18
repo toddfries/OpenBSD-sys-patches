@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_subr.c,v 1.21 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: ffs_subr.c,v 1.3 1996/04/21 22:32:33 deraadt Exp $	*/
 /*	$NetBSD: ffs_subr.c,v 1.6 1996/03/17 02:16:23 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,15 +42,10 @@
 #ifdef _KERNEL
 #include <sys/systm.h>
 #include <sys/vnode.h>
-#include <sys/mount.h>
+#include <ufs/ffs/ffs_extern.h>
 #include <sys/buf.h>
-
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
-#include <ufs/ufs/ufsmount.h>
-#include <ufs/ufs/ufs_extern.h>
-
-#include <ufs/ffs/ffs_extern.h>
 
 /*
  * Return buffer with the contents of block "offset" from the beginning of
@@ -54,50 +53,52 @@
  * remaining space in the directory.
  */
 int
-ffs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
+ffs_blkatoff(v)
+	void *v;
 {
-	struct fs *fs;
-	struct vnode *vp;
+	struct vop_blkatoff_args /* {
+		struct vnode *a_vp;
+		off_t a_offset;
+		char **a_res;
+		struct buf **a_bpp;
+	} */ *ap = v;
+	struct inode *ip;
+	register struct fs *fs;
 	struct buf *bp;
-	daddr64_t lbn;
+	daddr_t lbn;
 	int bsize, error;
 
-	vp = ITOV(ip);
+	ip = VTOI(ap->a_vp);
 	fs = ip->i_fs;
-	lbn = lblkno(fs, offset);
+	lbn = lblkno(fs, ap->a_offset);
 	bsize = blksize(fs, ip, lbn);
 
-	*bpp = NULL;
-	if ((error = bread(vp, lbn, fs->fs_bsize, NOCRED, &bp)) != 0) {
+	*ap->a_bpp = NULL;
+	if ((error = bread(ap->a_vp, lbn, bsize, NOCRED, &bp)) != 0) {
 		brelse(bp);
 		return (error);
 	}
-	bp->b_bcount = bsize;
-	if (res)
-		*res = (char *)bp->b_data + blkoff(fs, offset);
-	*bpp = bp;
+	if (ap->a_res)
+		*ap->a_res = (char *)bp->b_data + blkoff(fs, ap->a_offset);
+	*ap->a_bpp = bp;
 	return (0);
 }
-#else
-/* Prototypes for userland */
-void	ffs_fragacct(struct fs *, int, int32_t[], int);
-int	ffs_isfreeblock(struct fs *, unsigned char *, daddr64_t);
-int	ffs_isblock(struct fs *, unsigned char *, daddr64_t);
-void	ffs_clrblock(struct fs *, u_char *, daddr64_t);
-void	ffs_setblock(struct fs *, unsigned char *, daddr64_t);
-__dead void panic(const char *, ...);
 #endif
 
 /*
- * Update the frsum fields to reflect addition or deletion
+ * Update the frsum fields to reflect addition or deletion 
  * of some frags.
  */
 void
-ffs_fragacct(struct fs *fs, int fragmap, int32_t fraglist[], int cnt)
+ffs_fragacct(fs, fragmap, fraglist, cnt)
+	struct fs *fs;
+	int fragmap;
+	int32_t fraglist[];
+	int cnt;
 {
 	int inblk;
-	int field, subfield;
-	int siz, pos;
+	register int field, subfield;
+	register int siz, pos;
 
 	inblk = (int)(fragtbl[fs->fs_frag][fragmap]) << 1;
 	fragmap <<= 1;
@@ -121,19 +122,22 @@ ffs_fragacct(struct fs *fs, int fragmap, int32_t fraglist[], int cnt)
 
 #if defined(_KERNEL) && defined(DIAGNOSTIC)
 void
-ffs_checkoverlap(struct buf *bp, struct inode *ip)
+ffs_checkoverlap(bp, ip)
+	struct buf *bp;
+	struct inode *ip;
 {
-	daddr64_t start, last;
+	register struct buf *ebp, *ep;
+	register daddr_t start, last;
 	struct vnode *vp;
-	struct buf *ep;
 
+	ebp = &buf[nbuf];
 	start = bp->b_blkno;
 	last = start + btodb(bp->b_bcount) - 1;
-	LIST_FOREACH(ep, &bufhead, b_list) {
+	for (ep = buf; ep < ebp; ep++) {
 		if (ep == bp || (ep->b_flags & B_INVAL) ||
 		    ep->b_vp == NULLVP)
 			continue;
-		if (VOP_BMAP(ep->b_vp, (daddr64_t)0, &vp, (daddr64_t)0, NULL))
+		if (VOP_BMAP(ep->b_vp, (daddr_t)0, &vp, (daddr_t)0, NULL))
 			continue;
 		if (vp != ip->i_devvp)
 			continue;
@@ -156,12 +160,14 @@ ffs_checkoverlap(struct buf *bp, struct inode *ip)
  * check if a block is available
  */
 int
-ffs_isblock(struct fs *fs, unsigned char *cp, daddr64_t h)
+ffs_isblock(fs, cp, h)
+	struct fs *fs;
+	unsigned char *cp;
+	daddr_t h;
 {
 	unsigned char mask;
 
-	switch (fs->fs_frag) {
-	default:
+	switch ((int)fs->fs_frag) {
 	case 8:
 		return (cp[h] == 0xff);
 	case 4:
@@ -173,6 +179,8 @@ ffs_isblock(struct fs *fs, unsigned char *cp, daddr64_t h)
 	case 1:
 		mask = 0x01 << (h & 0x7);
 		return ((cp[h >> 3] & mask) == mask);
+	default:
+		panic("ffs_isblock");
 	}
 }
 
@@ -180,11 +188,13 @@ ffs_isblock(struct fs *fs, unsigned char *cp, daddr64_t h)
  * take a block out of the map
  */
 void
-ffs_clrblock(struct fs *fs, u_char *cp, daddr64_t h)
+ffs_clrblock(fs, cp, h)
+	struct fs *fs;
+	u_char *cp;
+	daddr_t h;
 {
 
-	switch (fs->fs_frag) {
-	default:
+	switch ((int)fs->fs_frag) {
 	case 8:
 		cp[h] = 0;
 		return;
@@ -197,6 +207,8 @@ ffs_clrblock(struct fs *fs, u_char *cp, daddr64_t h)
 	case 1:
 		cp[h >> 3] &= ~(0x01 << (h & 0x7));
 		return;
+	default:
+		panic("ffs_clrblock");
 	}
 }
 
@@ -204,11 +216,14 @@ ffs_clrblock(struct fs *fs, u_char *cp, daddr64_t h)
  * put a block into the map
  */
 void
-ffs_setblock(struct fs *fs, unsigned char *cp, daddr64_t h)
+ffs_setblock(fs, cp, h)
+	struct fs *fs;
+	unsigned char *cp;
+	daddr_t h;
 {
 
-	switch (fs->fs_frag) {
-	default:
+	switch ((int)fs->fs_frag) {
+
 	case 8:
 		cp[h] = 0xff;
 		return;
@@ -221,25 +236,7 @@ ffs_setblock(struct fs *fs, unsigned char *cp, daddr64_t h)
 	case 1:
 		cp[h >> 3] |= (0x01 << (h & 0x7));
 		return;
-	}
-}
-
-/*
- * check if a block is free
- */
-int
-ffs_isfreeblock(struct fs *fs, unsigned char *cp, daddr64_t h)
-{
-
-	switch (fs->fs_frag) {
 	default:
-	case 8:
-		return (cp[h] == 0);
-	case 4:
-		return ((cp[h >> 1] & (0x0f << ((h & 0x1) << 2))) == 0);
-	case 2:
-		return ((cp[h >> 2] & (0x03 << ((h & 0x3) << 1))) == 0);
-	case 1:
-		return ((cp[h >> 3] & (0x01 << (h & 0x7))) == 0);
+		panic("ffs_setblock");
 	}
 }

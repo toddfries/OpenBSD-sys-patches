@@ -1,4 +1,4 @@
-/*	$OpenBSD: cyreg.h,v 1.8 2002/09/14 15:00:02 art Exp $	*/
+/*	$OpenBSD: cyreg.h,v 1.1 1996/07/27 07:20:03 deraadt Exp $	*/
 /*	$FreeBSD: cyreg.h,v 1.1 1995/07/05 12:15:51 bde Exp $	*/
 
 /*-
@@ -32,11 +32,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _DEV_IC_CYREG_H_
-#define _DEV_IC_CYREG_H_
-
-#include <sys/timeout.h>
-
 /*
  * Definitions for Cyclades Cyclom-Y serial boards.
  */
@@ -58,16 +53,8 @@
 
 /* I/O location for enabling interrupts on PCI Cyclom cards */
 #define CY_PCI_INTENA           0x68
-#define CY_PCI_INTENA_9050      0x4c
 
-/* Cyclom-Y Custom Register for PLX ID (PCI only) */
-#define CY_PLX_VER             0x3400          /* PLX version */
-#define CY_PLX_9050            0x0b
-#define CY_PLX_9060            0x0c
-#define CY_PLX_9080            0x0d
-
-#define CY_CLOCK		25000000	/* baud rate clock */
-#define CY_CLOCK_60		60000000	/* baud rate clock for newer cd1400s */
+#define	CY_CLOCK		25000000	/* baud rate clock */
 
 /*
  * bustype is actually the shift count for the offset
@@ -102,22 +89,22 @@
 /*
  * read/write cd1400 registers (when cy_port-structure is available)
  */
-#define cd_read_reg(cy,reg) bus_space_read_1(cy->cy_memt, cy->cy_memh, \
-			  cy->cy_chip_offs+(((reg<<1))<<cy->cy_bustype))
+#define cd_read_reg(cy,reg)  bus_mem_read_1(cy->cy_bc, cy->cy_memh, \
+			     cy->cy_chip_offs+(((reg<<1))<<cy->cy_bustype))
 
-#define cd_write_reg(cy,reg,val) bus_space_write_1(cy->cy_memt, cy->cy_memh, \
+#define cd_write_reg(cy,reg,val) bus_mem_write_1(cy->cy_bc, cy->cy_memh, \
 			  cy->cy_chip_offs+(((reg<<1))<<cy->cy_bustype), \
 			  (val))
 
 /*
  * read/write cd1400 registers (when sc_softc-structure is available)
  */
-#define cd_read_reg_sc(sc,chip,reg) bus_space_read_1(sc->sc_memt, \
+#define cd_read_reg_sc(sc,chip,reg) bus_mem_read_1(sc->sc_bc, \
 				 sc->sc_memh, \
 				 sc->sc_cd1400_offs[chip]+\
 				 (((reg<<1))<<sc->sc_bustype))
 
-#define cd_write_reg_sc(sc,chip,reg,val) bus_space_write_1(sc->sc_memt, \
+#define cd_write_reg_sc(sc,chip,reg,val) bus_mem_write_1(sc->sc_bc, \
 				 sc->sc_memh, \
 				 sc->sc_cd1400_offs[chip]+\
 				 (((reg<<1))<<sc->sc_bustype), \
@@ -131,28 +118,25 @@
 
 /* software state for one port */
 struct cy_port {
-	int			 cy_port_num;
-	bus_space_tag_t		 cy_memt;
-	bus_space_handle_t	 cy_memh;
-	int			 cy_chip_offs;
-	int			 cy_bustype;
-	int			 cy_clock;
-	struct tty		*cy_tty;
-	int			 cy_openflags;
-	int			 cy_fifo_overruns;
-	int			 cy_ibuf_overruns;
-	u_char			 cy_channel_control;	/* last CCR channel
-							 * control command
-							 * bits */
-	u_char			 cy_carrier_stat;	/* copied from MSVR2 */
-	u_char			 cy_flags;
-	u_char			*cy_ibuf, *cy_ibuf_end;
-	u_char			*cy_ibuf_rd_ptr, *cy_ibuf_wr_ptr;
+  int cy_port_num;
+  bus_chipset_tag_t cy_bc;
+  bus_mem_handle_t cy_memh;
+  int cy_chip_offs;
+  int cy_bustype;
+  struct tty *cy_tty;
+  int cy_openflags;
+  int cy_fifo_overruns;
+  int cy_ibuf_overruns;
+  u_char cy_channel_control; /* last CCR channel control command bits */
+  u_char cy_carrier_stat;      /* copied from MSVR2 */
+  u_char cy_flags;
+  u_char *cy_ibuf, *cy_ibuf_end;
+  u_char *cy_ibuf_rd_ptr, *cy_ibuf_wr_ptr;
 #ifdef CY_DEBUG1
-	int			 cy_rx_int_count;
-	int			 cy_tx_int_count;
-	int			 cy_modem_int_count;
-	int			 cy_start_count;
+  int cy_rx_int_count;
+  int cy_tx_int_count;
+  int cy_modem_int_count;
+  int cy_start_count;
 #endif /* CY_DEBUG1 */
 };
 
@@ -165,25 +149,16 @@ struct cy_port {
 
 /* software state for one card */
 struct cy_softc {
-	struct device		 sc_dev;
-	struct timeout		 sc_poll_to;
-	int			 sc_events;
-	void			*sc_ih;
-	bus_space_tag_t		 sc_memt;
-	bus_space_handle_t	 sc_memh;
-	int			 sc_bustype;
-	int			 sc_nports; /* number of ports on this card */
-	int			 sc_cd1400_offs[CY_MAX_CD1400s];
-	struct cy_port		 sc_ports[CY_MAX_PORTS];
-	int			 sc_nr_cd1400s;
+  struct device sc_dev;
+  void *sc_ih;
+  bus_chipset_tag_t sc_bc;
+  bus_mem_handle_t sc_memh;
+  int sc_bustype;
+  int sc_nports; /* number of ports on this card */
+  int sc_cd1400_offs[CY_MAX_CD1400s];
+  struct cy_port sc_ports[CY_MAX_PORTS];
 #ifdef CY_DEBUG1
-	int			 sc_poll_count1;
-	int			 sc_poll_count2;
+  int sc_poll_count1;
+  int sc_poll_count2;
 #endif
 };
-
-int	cy_probe_common(bus_space_tag_t, bus_space_handle_t, int);
-void	cy_attach(struct device *, struct device *);
-int	cy_intr(void *);
-
-#endif	/* _DEV_IC_CYREG_H_ */

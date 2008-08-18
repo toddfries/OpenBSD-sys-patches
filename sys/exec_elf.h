@@ -1,6 +1,7 @@
-/*	$OpenBSD: exec_elf.h,v 1.43 2007/05/14 05:04:58 tedu Exp $	*/
+/*	$OpenBSD: exec_elf.h,v 1.7 1996/08/31 09:19:14 pefo Exp $	*/
 /*
- * Copyright (c) 1995, 1996 Erik Theisen.  All rights reserved.
+ * Copyright (c) 1995, 1996 Erik Theisen
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,39 +34,20 @@
 #ifndef _SYS_EXEC_ELF_H_
 #define _SYS_EXEC_ELF_H_
 
-#include <machine/_types.h>
-#include <machine/exec.h>
-
-typedef __uint8_t	Elf_Byte;
-
-typedef __uint32_t	Elf32_Addr;	/* Unsigned program address */
-typedef __uint32_t	Elf32_Off;	/* Unsigned file offset */
-typedef __int32_t	Elf32_Sword;	/* Signed large integer */
-typedef __uint32_t	Elf32_Word;	/* Unsigned large integer */
-typedef __uint16_t	Elf32_Half;	/* Unsigned medium integer */
-
-typedef __uint64_t	Elf64_Addr;
-typedef __uint64_t	Elf64_Off;
-typedef __int32_t	Elf64_Shalf;
-
-#ifdef __alpha__
-typedef __int64_t	Elf64_Sword;
-typedef __uint64_t	Elf64_Word;
-#else
-typedef __int32_t	Elf64_Sword;
-typedef __uint32_t	Elf64_Word;
-#endif
-
-typedef __int64_t	Elf64_Sxword;
-typedef __uint64_t	Elf64_Xword;
-
-typedef __uint32_t	Elf64_Half;
-typedef __uint16_t	Elf64_Quarter;
+#include <machine/types.h>
 
 /*
- * e_ident[] identification indexes 
- * See http://www.caldera.com/developers/gabi/2000-07-17/ch4.eheader.html
+ * These typedefs need to be handled better -
+ *  doesn't work on 64-bit machines.  Note:
+ *  there currently isn't a 64-bit ABI.
  */
+typedef u_int32_t	Elf32_Addr;	/* Unsigned program address */
+typedef u_int32_t	Elf32_Off;	/* Unsigned file offset */
+typedef int32_t		Elf32_Sword;	/* Signed large integer */
+typedef u_int32_t	Elf32_Word;	/* Unsigned large integer */
+typedef u_int16_t	Elf32_Half;	/* Unsigned medium integer */
+
+/* e_ident[] identification indexes */
 #define EI_MAG0		0		/* file ID */
 #define EI_MAG1		1		/* file ID */
 #define EI_MAG2		2		/* file ID */
@@ -73,9 +55,7 @@ typedef __uint16_t	Elf64_Quarter;
 #define EI_CLASS	4		/* file class */
 #define EI_DATA		5		/* data encoding */
 #define EI_VERSION	6		/* ELF header version */
-#define EI_OSABI	7		/* OS/ABI ID */
-#define EI_ABIVERSION	8		/* ABI version */ 
-#define EI_PAD		9		/* start of pad bytes */
+#define EI_PAD		7		/* start of pad bytes */
 #define EI_NIDENT	16		/* Size of e_ident[] */
 
 /* e_ident[] magic number */
@@ -98,23 +78,6 @@ typedef __uint16_t	Elf64_Quarter;
 #define ELFDATA2MSB	2		/* Big-Endian */
 #define ELFDATANUM	3		/* number of data encode defines */
 
-/* e_ident[] Operating System/ABI */
-#define ELFOSABI_SYSV		0	/* UNIX System V ABI */
-#define ELFOSABI_HPUX		1	/* HP-UX operating system */
-#define ELFOSABI_NETBSD		2	/* NetBSD */
-#define ELFOSABI_LINUX		3	/* GNU/Linux */
-#define ELFOSABI_HURD		4	/* GNU/Hurd */
-#define ELFOSABI_86OPEN		5	/* 86Open common IA32 ABI */
-#define ELFOSABI_SOLARIS	6	/* Solaris */
-#define ELFOSABI_MONTEREY	7	/* Monterey */
-#define ELFOSABI_IRIX		8	/* IRIX */
-#define ELFOSABI_FREEBSD	9	/* FreeBSD */
-#define ELFOSABI_TRU64		10	/* TRU64 UNIX */
-#define ELFOSABI_MODESTO	11	/* Novell Modesto */
-#define ELFOSABI_OPENBSD	12	/* OpenBSD */
-#define ELFOSABI_ARM		97	/* ARM */
-#define ELFOSABI_STANDALONE	255	/* Standalone (embedded) application */
-
 /* e_ident */
 #define IS_ELF(ehdr) ((ehdr).e_ident[EI_MAG0] == ELFMAG0 && \
                       (ehdr).e_ident[EI_MAG1] == ELFMAG1 && \
@@ -122,7 +85,7 @@ typedef __uint16_t	Elf64_Quarter;
                       (ehdr).e_ident[EI_MAG3] == ELFMAG3)
 
 /* ELF Header */
-typedef struct elfhdr {
+typedef struct elfhdr{
 	unsigned char	e_ident[EI_NIDENT]; /* ELF Identification */
 	Elf32_Half	e_type;		/* object file type */
 	Elf32_Half	e_machine;	/* machine */
@@ -139,23 +102,6 @@ typedef struct elfhdr {
 	Elf32_Half	e_shstrndx;	/* section header table's "section 
 					   header string table" entry offset */
 } Elf32_Ehdr;
-
-typedef struct {
-	unsigned char	e_ident[EI_NIDENT];	/* Id bytes */
-	Elf64_Quarter	e_type;			/* file type */
-	Elf64_Quarter	e_machine;		/* machine type */
-	Elf64_Half	e_version;		/* version number */
-	Elf64_Addr	e_entry;		/* entry point */
-	Elf64_Off	e_phoff;		/* Program hdr offset */
-	Elf64_Off	e_shoff;		/* Section hdr offset */
-	Elf64_Half	e_flags;		/* Processor flags */
-	Elf64_Quarter	e_ehsize;		/* sizeof ehdr */
-	Elf64_Quarter	e_phentsize;		/* Program header entry size */
-	Elf64_Quarter	e_phnum;		/* Number of program headers */
-	Elf64_Quarter	e_shentsize;		/* Section header entry size */
-	Elf64_Quarter	e_shnum;		/* Number of section headers */
-	Elf64_Quarter	e_shstrndx;		/* String table index */
-} Elf64_Ehdr;
 
 /* e_type */
 #define ET_NONE		0		/* No file type */
@@ -185,16 +131,8 @@ typedef struct {
 #define EM_MIPS_RS4_BE	10		/* MIPS R4000 Big-Endian */
 #define EM_SPARC64	11		/* SPARC v9 64-bit unoffical */
 #define EM_PARISC	15		/* HPPA */
-#define EM_SPARC32PLUS	18		/* Enhanced instruction set SPARC */
 #define EM_PPC		20		/* PowerPC */
-#define EM_ARM		40		/* Advanced RISC Machines ARM */
-#define EM_ALPHA	41		/* DEC ALPHA */
-#define	EM_SH		42		/* Hitachi/Renesas Super-H */
-#define EM_SPARCV9	43		/* SPARC version 9 */
-#define EM_ALPHA_EXP	0x9026		/* DEC ALPHA */
-#define EM_AMD64	62		/* AMD64 architecture */
-#define EM_VAX		75		/* DEC VAX */
-#define EM_NUM		15		/* number of machine types */
+#define EM_NUM		13		/* number of machine types */
 
 /* Version */
 #define EV_NONE		0		/* Invalid */
@@ -215,19 +153,6 @@ typedef struct {
 	Elf32_Word	sh_addralign;	/* address alignment */
 	Elf32_Word	sh_entsize;	/* section entry size */
 } Elf32_Shdr;
-
-typedef struct {
-	Elf64_Half	sh_name;	/* section name */
-	Elf64_Half	sh_type;	/* section type */
-	Elf64_Xword	sh_flags;	/* section flags */
-	Elf64_Addr	sh_addr;	/* virtual address */
-	Elf64_Off	sh_offset;	/* file offset */
-	Elf64_Xword	sh_size;	/* section size */
-	Elf64_Half	sh_link;	/* link to another */
-	Elf64_Half	sh_info;	/* misc info */
-	Elf64_Xword	sh_addralign;	/* memory alignment */
-	Elf64_Xword	sh_entsize;	/* table entry size */
-} Elf64_Shdr;
 
 /* Special Section Indexes */
 #define SHN_UNDEF	0		/* undefined */
@@ -251,7 +176,8 @@ typedef struct {
 #define SHT_REL		9		/* relation section without addends */
 #define SHT_SHLIB	10		/* reserved - purpose unknown */
 #define SHT_DYNSYM	11		/* dynamic symbol table section */
-#define SHT_NUM		12		/* number of section types */
+
+#define SHT_NUM		13		/* number of section types */
 #define SHT_LOPROC	0x70000000	/* reserved range for processor */
 #define SHT_HIPROC	0x7fffffff	/*  specific section header types */
 #define SHT_LOUSER	0x80000000	/* reserved range for application */
@@ -298,15 +224,6 @@ typedef struct elf32_sym {
 	Elf32_Half	st_shndx;	/* section header index */
 } Elf32_Sym;
 
-typedef struct {
-	Elf64_Half	st_name;	/* Symbol name index in str table */
-	Elf_Byte	st_info;	/* type / binding attrs */
-	Elf_Byte	st_other;	/* unused */
-	Elf64_Quarter	st_shndx;	/* section index of symbol */
-	Elf64_Xword	st_value;	/* value of symbol */
-	Elf64_Xword	st_size;	/* size of symbol */
-} Elf64_Sym;
-
 /* Symbol table index */
 #define STN_UNDEF	0		/* undefined */
 
@@ -314,10 +231,6 @@ typedef struct {
 #define ELF32_ST_BIND(x)	((x) >> 4)
 #define ELF32_ST_TYPE(x)	(((unsigned int) x) & 0xf)
 #define ELF32_ST_INFO(b,t)	(((b) << 4) + ((t) & 0xf))
-
-#define ELF64_ST_BIND(x)	((x) >> 4)
-#define ELF64_ST_TYPE(x)	(((unsigned int) x) & 0xf)
-#define ELF64_ST_INFO(b,t)	(((b) << 4) + ((t) & 0xf))
 
 /* Symbol Binding - ELF32_ST_BIND - st_info */
 #define STB_LOCAL	0		/* Local symbol */
@@ -338,13 +251,15 @@ typedef struct {
 #define STT_HIPROC	15		/*  specific symbol types */
 
 /* Relocation entry with implicit addend */
-typedef struct {
+typedef struct 
+{
 	Elf32_Addr	r_offset;	/* offset of relocation */
 	Elf32_Word	r_info;		/* symbol table index and type */
 } Elf32_Rel;
 
 /* Relocation entry with explicit addend */
-typedef struct {
+typedef struct 
+{
 	Elf32_Addr	r_offset;	/* offset of relocation */
 	Elf32_Word	r_info;		/* symbol table index and type */
 	Elf32_Sword	r_addend;
@@ -354,21 +269,6 @@ typedef struct {
 #define ELF32_R_SYM(i)		((i) >> 8)
 #define ELF32_R_TYPE(i)		((unsigned char) (i))
 #define ELF32_R_INFO(s,t) 	(((s) << 8) + (unsigned char)(t))
-
-typedef struct {
-	Elf64_Xword	r_offset;	/* where to do it */
-	Elf64_Xword	r_info;		/* index & type of relocation */
-} Elf64_Rel;
-
-typedef struct {
-	Elf64_Xword	r_offset;	/* where to do it */
-	Elf64_Xword	r_info;		/* index & type of relocation */
-	Elf64_Sxword	r_addend;	/* adjustment value */
-} Elf64_Rela;
-
-#define	ELF64_R_SYM(info)	((info) >> 32)
-#define	ELF64_R_TYPE(info)	((info) & 0xFFFFFFFF)
-#define ELF64_R_INFO(s,t) 	(((s) << 32) + (__uint32_t)(t))
 
 /* Program Header */
 typedef struct {
@@ -382,17 +282,6 @@ typedef struct {
 	Elf32_Word	p_align;	/* memory alignment */
 } Elf32_Phdr;
 
-typedef struct {
-	Elf64_Half	p_type;		/* entry type */
-	Elf64_Half	p_flags;	/* flags */
-	Elf64_Off	p_offset;	/* offset */
-	Elf64_Addr	p_vaddr;	/* virtual address */
-	Elf64_Addr	p_paddr;	/* physical address */
-	Elf64_Xword	p_filesz;	/* file size */
-	Elf64_Xword	p_memsz;	/* memory size */
-	Elf64_Xword	p_align;	/* memory & file alignment */
-} Elf64_Phdr;
-
 /* Segment types - p_type */
 #define PT_NULL		0		/* unused */
 #define PT_LOAD		1		/* loadable segment */
@@ -401,9 +290,7 @@ typedef struct {
 #define PT_NOTE		4		/* auxiliary information */
 #define PT_SHLIB	5		/* reserved - purpose undefined */
 #define PT_PHDR		6		/* program header */
-#define PT_NUM		7		/* Number of segment types */
-#define PT_LOOS		0x60000000	/* reserved range for OS */
-#define PT_HIOS		0x6fffffff	/*  specific segment types */
+#define PT_NUM		8		/* Number of segment types */
 #define PT_LOPROC	0x70000000	/* reserved range for processor */
 #define PT_HIPROC	0x7fffffff	/*  specific segment types */
 
@@ -415,21 +302,17 @@ typedef struct {
 					/*  specific segment flags */
 
 /* Dynamic structure */
-typedef struct {
+typedef struct 
+{
 	Elf32_Sword	d_tag;		/* controls meaning of d_val */
-	union {
+	union 
+	{
 		Elf32_Word	d_val;	/* Multiple meanings - see d_tag */
 		Elf32_Addr	d_ptr;	/* program virtual address */
 	} d_un;
 } Elf32_Dyn;
 
-typedef struct {
-	Elf64_Xword	d_tag;		/* controls meaning of d_val */
-	union {
-		Elf64_Addr	d_ptr;
-		Elf64_Xword	d_val;
-	} d_un;
-} Elf64_Dyn;
+extern Elf32_Dyn	_DYNAMIC[];
 
 /* Dynamic Array Tags - d_tag */
 #define DT_NULL		0		/* marks end of _DYNAMIC array */
@@ -457,49 +340,24 @@ typedef struct {
 #define DT_DEBUG	21		/* bugger */
 #define DT_TEXTREL	22		/* Allow rel. mod. to unwritable seg */
 #define DT_JMPREL	23		/* add. of PLT's relocation entries */
-#define DT_BIND_NOW	24		/* Bind now regardless of env setting */
-#define DT_NUM		25		/* Number used. */
 #define DT_LOPROC	0x70000000	/* reserved range for processor */
 #define DT_HIPROC	0x7fffffff	/*  specific dynamic array tags */
 	
 /* Standard ELF hashing function */
-unsigned int elf_hash(const unsigned char *name);
-
-/*
- * Note Definitions
- */
-typedef struct {
-	Elf32_Word namesz;
-	Elf32_Word descsz;
-	Elf32_Word type;
-} Elf32_Note;
-
-typedef struct {
-	Elf64_Half namesz;
-	Elf64_Half descsz;
-	Elf64_Half type;
-} Elf64_Note;
+unsigned long elf_hash(const unsigned char *name);
 
 /*
  * XXX - these _KERNEL items aren't part of the ABI!
  */
-#if defined(_KERNEL) || defined(_DYN_LOADER)
+#ifdef _KERNEL
 
-#define ELF32_NO_ADDR	((uint32_t) ~0)	/* Indicates addr. not yet filled in */
+#define ELF32_NO_ADDR	((u_long) ~0)	/* Indicates addr. not yet filled in */
 #define ELF_AUX_ENTRIES	8		/* Size of aux array passed to loader */
 
 typedef struct {
-	Elf32_Sword	au_id;				/* 32-bit id */
-	Elf32_Word	au_v;				/* 32-bit value */
-} Aux32Info;
-
-#define ELF64_NO_ADDR	((__uint64_t) ~0)/* Indicates addr. not yet filled in */
-#define ELF64_AUX_ENTRIES	8	/* Size of aux array passed to loader */
-
-typedef struct {
-	Elf64_Shalf	au_id;				/* 32-bit id */
-	Elf64_Xword	au_v;				/* 64-bit id */
-} Aux64Info;
+	int             au_id;
+	unsigned long   au_v;
+} AuxInfo;
 
 enum AuxID {
 	AUX_null = 0,
@@ -519,105 +377,48 @@ enum AuxID {
 };
 
 struct elf_args {
-        u_long  arg_entry;		/* program entry point */
+        u_long  arg_entry;		/* progran entry point */
         u_long  arg_interp;		/* Interpreter load address */
         u_long  arg_phaddr;		/* program header address */
         u_long  arg_phentsize;		/* Size of program header */
         u_long  arg_phnum;		/* Number of program headers */
-        u_long  arg_os;			/* OS tag */
 };
 
-#endif
+int exec_elf_makecmds __P((struct proc *, struct exec_package *));
+void *elf_copyargs __P((struct exec_package *, struct ps_strings *,
+        void *, void *));
+int exec_elf_fixup __P((struct proc *, struct exec_package *));
 
-#if !defined(ELFSIZE) && defined(ARCH_ELFSIZE)
-#define ELFSIZE ARCH_ELFSIZE
-#endif
+/*
+ * XXX - OpenBSD hack to determine
+ * target OS - This is NOT ABI
+ * compliant!!!
+ */
+struct elf_oshdr {
+        Elf32_Word      os_name;        /* name string - index into strtab */
+        Elf32_Word      os_type;        /* operating system type */
+        Elf32_Half      os_major;       /* major version tag */
+        Elf32_Half      os_minor;       /* minor version tag */
+        Elf32_Half      os_subminor;    /* sub minor version tag */
+        Elf32_Half      os_nmisc;       /* number of misc strings */
+        Elf32_Word      os_misc;        /* misc string - index into strtab */
+} Elf32_Oshdr;
 
-#if defined(ELFSIZE)
-#define CONCAT(x,y)	__CONCAT(x,y)
-#define ELFNAME(x)	CONCAT(elf,CONCAT(ELFSIZE,CONCAT(_,x)))
-#define ELFNAME2(x,y)	CONCAT(x,CONCAT(_elf,CONCAT(ELFSIZE,CONCAT(_,y))))
-#define ELFNAMEEND(x)	CONCAT(x,CONCAT(_elf,ELFSIZE))
-#define ELFDEFNNAME(x)	CONCAT(ELF,CONCAT(ELFSIZE,CONCAT(_,x)))
-#endif
+/* Program header type, section header type,
+    and section header name */
+#define PT_OS		0x7fffffff	/* program header type */
+#define SHT_OS		0xffffffff	/* section header type */
+#define ELF_OS          ".os"		/* section header name string */
 
-#if defined(ELFSIZE) && (ELFSIZE == 32)
-#define Elf_Ehdr	Elf32_Ehdr
-#define Elf_Phdr	Elf32_Phdr
-#define Elf_Shdr	Elf32_Shdr
-#define Elf_Sym		Elf32_Sym
-#define Elf_Rel		Elf32_Rel
-#define Elf_RelA	Elf32_Rela
-#define Elf_Dyn		Elf32_Dyn
-#define Elf_Half	Elf32_Half
-#define Elf_Word	Elf32_Word
-#define Elf_Sword	Elf32_Sword
-#define Elf_Addr	Elf32_Addr
-#define Elf_Off		Elf32_Off
-#define Elf_Nhdr	Elf32_Nhdr
-#define Elf_Note	Elf32_Note
+/* Operating system types */
+#define OST_NULL        0               /* Invalid */
+#define OST_OPENBSD     1               /* OpenBSD */
+#define OST_LINUX       2               /* Linux */
+#define OST_NUM         3               /* Number of operating system types */
 
-#define ELF_R_SYM	ELF32_R_SYM
-#define ELF_R_TYPE	ELF32_R_TYPE
-#define ELF_R_INFO	ELF32_R_INFO
-#define ELFCLASS	ELFCLASS32
-
-#define ELF_ST_BIND	ELF32_ST_BIND
-#define ELF_ST_TYPE	ELF32_ST_TYPE
-#define ELF_ST_INFO	ELF32_ST_INFO
-
-#define AuxInfo		Aux32Info
-#elif defined(ELFSIZE) && (ELFSIZE == 64)
-#define Elf_Ehdr	Elf64_Ehdr
-#define Elf_Phdr	Elf64_Phdr
-#define Elf_Shdr	Elf64_Shdr
-#define Elf_Sym		Elf64_Sym
-#define Elf_Rel		Elf64_Rel
-#define Elf_RelA	Elf64_Rela
-#define Elf_Dyn		Elf64_Dyn
-#define Elf_Half	Elf64_Half
-#define Elf_Word	Elf64_Word
-#define Elf_Sword	Elf64_Sword
-#define Elf_Addr	Elf64_Addr
-#define Elf_Off		Elf64_Off
-#define Elf_Nhdr	Elf64_Nhdr
-#define Elf_Note	Elf64_Note
-
-#define ELF_R_SYM	ELF64_R_SYM
-#define ELF_R_TYPE	ELF64_R_TYPE
-#define ELF_R_INFO	ELF64_R_INFO
-#define ELFCLASS	ELFCLASS64
-
-#define ELF_ST_BIND	ELF64_ST_BIND
-#define ELF_ST_TYPE	ELF64_ST_TYPE
-#define ELF_ST_INFO	ELF64_ST_INFO
-
-#define AuxInfo		Aux64Info
-#endif
-
-#ifndef _KERNEL
-extern Elf_Dyn		_DYNAMIC[];
-#endif
-
-#ifdef	_KERNEL
-#ifdef _KERN_DO_ELF64
-int exec_elf64_makecmds(struct proc *, struct exec_package *);
-void *elf64_copyargs(struct exec_package *, struct ps_strings *,
-        void *, void *);
-int exec_elf64_fixup(struct proc *, struct exec_package *);
-char *elf64_check_brand(Elf64_Ehdr *);
-int elf64_os_pt_note(struct proc *, struct exec_package *, Elf64_Ehdr *,
-	char *, size_t, size_t);
-#endif
-#ifdef _KERN_DO_ELF
-int exec_elf32_makecmds(struct proc *, struct exec_package *);
-void *elf32_copyargs(struct exec_package *, struct ps_strings *,
-        void *, void *);
-int exec_elf32_fixup(struct proc *, struct exec_package *);
-char *elf32_check_brand(Elf32_Ehdr *);
-int elf32_os_pt_note(struct proc *, struct exec_package *, Elf32_Ehdr *,
-	char *, size_t, size_t);
-#endif
+/* Operating system names */
+#define ELF_OPENBSD     "openbsd"       /* OpenBSD */
+#define ELF_LINUX       "linux"         /* Linux */
 
 #endif /* _KERNEL */
 

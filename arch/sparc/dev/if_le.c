@@ -1,8 +1,6 @@
-/*	$OpenBSD: if_le.c,v 1.29 2007/05/29 09:54:09 sobrado Exp $	*/
-/*	$NetBSD: if_le.c,v 1.50 1997/09/09 20:54:48 pk Exp $	*/
+/*	$NetBSD: if_le.c,v 1.35.4.1 1996/07/17 01:46:00 jtc Exp $	*/
 
 /*-
- * Copyright (c) 1997 Jason R. Thorpe.  All rights reserved.
  * Copyright (c) 1996
  *	The President and Fellows of Harvard College. All rights reserved.
  * Copyright (c) 1995 Charles M. Hannum.  All rights reserved.
@@ -24,8 +22,8 @@
  *    must display the following acknowledgement:
  *	This product includes software developed by Aaron Brown and
  *	Harvard University.
- *	This product includes software developed for the NetBSD Project
- *	by Jason R. Thorpe.
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
  * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
@@ -56,7 +54,6 @@
 #include <sys/malloc.h>
 
 #include <net/if.h>
-#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -69,7 +66,6 @@
 #include <sparc/dev/sbusvar.h>
 #include <sparc/dev/dmareg.h>
 #include <sparc/dev/dmavar.h>
-#include <sparc/dev/lebuffervar.h>
 
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
@@ -77,52 +73,31 @@
 #include <sparc/dev/if_lereg.h>
 #include <sparc/dev/if_levar.h>
 
-#ifdef solbourne
-#include <sparc/sparc/asm.h>
-#include <machine/idt.h>
-#include <machine/kap.h>
-#endif
-
-int	lematch(struct device *, void *, void *);
-void	leattach(struct device *, struct device *, void *);
-
-/*
- * ifmedia interfaces
- */
-int	lemediachange(struct ifnet *);
-void	lemediastatus(struct ifnet *, struct ifmediareq *);
-
-#if defined(SUN4M)
-/*
- * media change methods (only for sun4m)
- */
-void	lesetutp(struct am7990_softc *);
-void	lesetaui(struct am7990_softc *);
-#endif /* SUN4M */
+int	lematch __P((struct device *, void *, void *));
+void	leattach __P((struct device *, struct device *, void *));
 
 #if defined(SUN4M)	/* XXX */
-int	myleintr(void *);
-int	ledmaintr(struct dma_softc *);
+int	myleintr __P((void *));
+int	ledmaintr __P((struct dma_softc *));
 
 int
 myleintr(arg)
 	void	*arg;
 {
 	register struct le_softc *lesc = arg;
-	static int dodrain=0;
 
-	if (lesc->sc_dma->sc_regs->csr & D_ERR_PEND) {
-		dodrain = 1;
+	if (lesc->sc_dma->sc_regs->csr & D_ERR_PEND)
 		return ledmaintr(lesc->sc_dma);
-	}
 
-	if (dodrain) {	/* XXX - is this necessary with D_DSBL_WRINVAL on? */
-		int i = 10;
-		while (i-- > 0 && (lesc->sc_dma->sc_regs->csr & D_DRAINING))
-			delay(1);
-	}
+	/*
+	 * XXX There is a bug somewhere in the interrupt code that causes stray
+	 * ethernet interrupts under high network load. This bug has been
+	 * impossible to locate, so until it is found, we just ignore stray
+	 * interrupts, as they do not in fact correspond to dropped packets.
+	 */
 
-	return (am7990_intr(arg));
+	/* return */ am7990_intr(arg);
+	return 1;
 }
 #endif
 
@@ -130,17 +105,9 @@ struct cfattach le_ca = {
 	sizeof(struct le_softc), lematch, leattach
 };
 
-hide void lewrcsr(struct am7990_softc *, u_int16_t, u_int16_t);
-hide u_int16_t lerdcsr(struct am7990_softc *, u_int16_t);
-hide void lehwreset(struct am7990_softc *);
-hide void lehwinit(struct am7990_softc *);
-#if defined(SUN4M)
-hide void lenocarrier(struct am7990_softc *);
-#endif
-#if defined(solbourne)
-hide void kap_copytobuf(struct am7990_softc *, void *, int, int);
-hide void kap_copyfrombuf(struct am7990_softc *, void *, int, int);
-#endif
+hide void lewrcsr __P((struct am7990_softc *, u_int16_t, u_int16_t));
+hide u_int16_t lerdcsr __P((struct am7990_softc *, u_int16_t));
+hide void lehwinit __P((struct am7990_softc *));
 
 hide void
 lewrcsr(sc, port, val)
@@ -148,21 +115,9 @@ lewrcsr(sc, port, val)
 	u_int16_t port, val;
 {
 	register struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
-#if defined(SUN4M)
-	volatile u_int16_t discard;
-#endif
 
 	ler1->ler1_rap = port;
 	ler1->ler1_rdp = val;
-#if defined(SUN4M)
-	/* 
-	 * We need to flush the SBus->MBus write buffers. This can most
-	 * easily be accomplished by reading back the register that we
-	 * just wrote (thanks to Chris Torek for this solution).
-	 */	   
-	if (CPU_ISSUN4M)
-		discard = ler1->ler1_rdp;
-#endif
 }
 
 hide u_int16_t
@@ -178,155 +133,6 @@ lerdcsr(sc, port)
 	return (val);
 }
 
-#if defined(SUN4M)
-void
-lesetutp(sc)
-	struct am7990_softc *sc;
-{
-	struct le_softc *lesc = (struct le_softc *)sc;
-	u_int32_t csr;
-	int tries = 5;
-
-	while (--tries) {
-		csr = lesc->sc_dma->sc_regs->csr;
-		csr |= E_TP_AUI;
-		lesc->sc_dma->sc_regs->csr = csr;
-		delay(20000);	/* must not touch le for 20ms */
-		if (lesc->sc_dma->sc_regs->csr & E_TP_AUI)
-			return;
-	}
-}
-
-void
-lesetaui(sc)
-	struct am7990_softc *sc;
-{
-	struct le_softc *lesc = (struct le_softc *)sc;
-	u_int32_t csr;
-	int tries = 5;
-
-	while (--tries) {
-		csr = lesc->sc_dma->sc_regs->csr;
-		csr &= ~E_TP_AUI;
-		lesc->sc_dma->sc_regs->csr = csr;
-		delay(20000);	/* must not touch le for 20ms */
-		if ((lesc->sc_dma->sc_regs->csr & E_TP_AUI) == 0)
-			return;
-	}
-}
-#endif
-
-int
-lemediachange(ifp)
-	struct ifnet *ifp;
-{
-	struct am7990_softc *sc = ifp->if_softc;
-	struct ifmedia *ifm = &sc->sc_ifmedia;
-#if defined(SUN4M)
-	struct le_softc *lesc = (struct le_softc *)sc;
-#endif
-
-	if (IFM_TYPE(ifm->ifm_media) != IFM_ETHER)
-		return (EINVAL);
-
-	/*
-	 * Switch to the selected media.  If autoselect is
-	 * set, we don't really have to do anything.  We'll
-	 * switch to the other media when we detect loss of
-	 * carrier.
-	 */
-	switch (IFM_SUBTYPE(ifm->ifm_media)) {
-#if defined(SUN4M)
-	case IFM_10_T:
-		if (CPU_ISSUN4M && lesc->sc_dma)
-			lesetutp(sc);
-		else
-			return (EOPNOTSUPP);
-		break;
-
-	case IFM_AUTO:
-		if (CPU_ISSUN4M && lesc->sc_dma)
-			return (0);
-		else
-			return (EOPNOTSUPP);
-		break;
-#endif
-
-	case IFM_10_5:
-#if defined(SUN4M)
-		if (CPU_ISSUN4M && lesc->sc_dma)
-			lesetaui(sc);
-#else
-		return (0);
-#endif
-		break;
-
-
-	default:
-		return (EINVAL);
-	}
-
-	return (0);
-}
-
-void
-lemediastatus(ifp, ifmr)
-	struct ifnet *ifp;
-	struct ifmediareq *ifmr;
-{
-#if defined(SUN4M)
-	struct am7990_softc *sc = ifp->if_softc;
-	struct le_softc *lesc = (struct le_softc *)sc;
-
-	if (lesc->sc_dma == NULL) {
-		if (lesc->sc_lebufchild)
-			ifmr->ifm_active = IFM_ETHER | IFM_10_T;
-		else
-			ifmr->ifm_active = IFM_ETHER | IFM_10_5;
-		return;
-	}
-
-	if (CPU_ISSUN4M) {
-		/*
-		 * Notify the world which media we're currently using.
-		 */
-		if (lesc->sc_dma->sc_regs->csr & E_TP_AUI)
-			ifmr->ifm_active = IFM_ETHER | IFM_10_T;
-		else
-			ifmr->ifm_active = IFM_ETHER | IFM_10_5;
-	}
-	else
-		ifmr->ifm_active = IFM_ETHER | IFM_10_5;
-#else
-	ifmr->ifm_active = IFM_ETHER | IFM_10_5;
-#endif
-}
-
-hide void
-lehwreset(sc)
-	struct am7990_softc *sc;
-{
-#if defined(SUN4M) 
-	struct le_softc *lesc = (struct le_softc *)sc;
-
-	/*
-	 * Reset DMA channel.
-	 */
-	if (CPU_ISSUN4M && lesc->sc_dma) {
-		u_int32_t aui;
-
-		aui = lesc->sc_dma->sc_regs->csr & E_TP_AUI;
-		DMA_RESET(lesc->sc_dma);
-		lesc->sc_dma->sc_regs->en_bar = lesc->sc_laddr & 0xff000000;
-		DMA_ENINTR(lesc->sc_dma);
-#define D_DSBL_WRINVAL D_DSBL_SCSI_DRN	/* XXX: fix dmareg.h */
-		/* Disable E-cache invalidates on chip writes */
-		lesc->sc_dma->sc_regs->csr |= D_DSBL_WRINVAL | aui;
-		delay(20000);	/* must not touch le for 20ms */
-	}
-#endif
-}
-
 hide void
 lehwinit(sc)
 	struct am7990_softc *sc;
@@ -335,85 +141,31 @@ lehwinit(sc)
 	struct le_softc *lesc = (struct le_softc *)sc;
 
 	if (CPU_ISSUN4M && lesc->sc_dma) {
-		switch (IFM_SUBTYPE(sc->sc_ifmedia.ifm_cur->ifm_media)) {
-		case IFM_10_T:
-			lesetutp(sc);
-			break;
+		struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
-		case IFM_10_5:
-			lesetaui(sc);
-			break;
+		if (ifp->if_flags & IFF_LINK0)
+			lesc->sc_dma->sc_regs->csr |= DE_AUI_TP;
+		else if (ifp->if_flags & IFF_LINK1)
+			lesc->sc_dma->sc_regs->csr &= ~DE_AUI_TP;
 
-		case IFM_AUTO:
-			lesetutp(sc);
-			break;
-
-		default:	/* XXX shouldn't happen */
-			lesetutp(sc);
-			break;
-		}
+		delay(20000);	/* must not touch le for 20ms */
 	}
 #endif
 }
-
-#if defined(SUN4M)
-hide void
-lenocarrier(sc)
-	struct am7990_softc *sc;
-{
-	struct le_softc *lesc = (struct le_softc *)sc;
-
-	if (lesc->sc_dma) {
-		/* 
-		 * Check if the user has requested a certain cable type, and
-		 * if so, honor that request.
-		 */
-		if (lesc->sc_dma->sc_regs->csr & E_TP_AUI) {
-			switch (IFM_SUBTYPE(sc->sc_ifmedia.ifm_media)) {
-			case IFM_10_5:
-			case IFM_AUTO:
-				printf("%s: lost carrier on UTP port"
-				    ", switching to AUI port\n",
-				    sc->sc_dev.dv_xname);
-				lesetaui(sc);
-			}
-		} else {
-			switch (IFM_SUBTYPE(sc->sc_ifmedia.ifm_media)) {
-			case IFM_10_T:
-			case IFM_AUTO:
-				printf("%s: lost carrier on AUI port"
-				    ", switching to UTP port\n",
-				    sc->sc_dev.dv_xname);
-				lesetutp(sc);
-			}
-		}
-	}
-}
-#endif
 
 int
-lematch(parent, vcf, aux)
+lematch(parent, match, aux)
 	struct device *parent;
-	void *vcf, *aux;
+	void *match, *aux;
 {
-	struct cfdata *cf = vcf;
+	struct cfdata *cf = match;
 	struct confargs *ca = aux;
 	register struct romaux *ra = &ca->ca_ra;
 
 	if (strcmp(cf->cf_driver->cd_name, ra->ra_name))
 		return (0);
-#if defined(solbourne)
-	if (CPU_ISKAP) {
-		return (ca->ca_bustype == BUS_OBIO);
-	}
-#endif
-#if defined(SUN4C) || defined(SUN4M)
-	if (ca->ca_bustype == BUS_SBUS) {
-		if (!sbus_testdma((struct sbus_softc *)parent, ca))
-			return (0);
+	if (ca->ca_bustype == BUS_SBUS)
 		return (1);
-	}
-#endif
 
 	return (probeget(ra->ra_vaddr, 2) != -1);
 }
@@ -428,15 +180,13 @@ leattach(parent, self, aux)
 	struct confargs *ca = aux;
 	int pri;
 	struct bootpath *bp;
+	u_long laddr;
 #if defined(SUN4C) || defined(SUN4M)
 	int sbuschild = strncmp(parent->dv_xname, "sbus", 4) == 0;
-	int lebufchild = strncmp(parent->dv_xname, "lebuffer", 8) == 0;
-	int dmachild = strncmp(parent->dv_xname, "ledma", 5) == 0;
-	struct lebuf_softc *lebuf;
 #endif
 
 	/* XXX the following declarations should be elsewhere */
-	extern void myetheraddr(u_char *);
+	extern void myetheraddr __P((u_char *));
 
 	if (ca->ca_ra.ra_nintr != 1) {
 		printf(": expected 1 interrupt, got %d\n", ca->ca_ra.ra_nintr);
@@ -445,102 +195,31 @@ leattach(parent, self, aux)
 	pri = ca->ca_ra.ra_intr[0].int_pri;
 	printf(" pri %d", pri);
 
-	sc->sc_hasifmedia = 1;
-#if defined(SUN4C) || defined(SUN4M)
-	lesc->sc_lebufchild = lebufchild;
-#endif
-
-	lesc->sc_r1 = (struct lereg1 *)
-		mapiodev(ca->ca_ra.ra_reg, 0, sizeof(struct lereg1));
-
-#if defined(SUN4C) || defined(SUN4M)
-	lebuf = NULL;
-	if (lebufchild) {
-		lebuf = (struct lebuf_softc *)parent;
-	} else if (sbuschild) {
-		extern struct cfdriver lebuffer_cd;
-		struct lebuf_softc *lebufsc;
-		int i;
-
-		for (i = 0; i < lebuffer_cd.cd_ndevs; i++) {
-			lebufsc = (struct lebuf_softc *)lebuffer_cd.cd_devs[i];
-			if (lebufsc == NULL || lebufsc->attached != 0)
-				continue;
-
-			lebuf = lebufsc;
-			break;
-		}
-	}
-	if (lebuf != NULL) {
-		sc->sc_mem = lebuf->sc_buffer;
-		sc->sc_memsize = lebuf->sc_bufsiz;
-		sc->sc_addr = 0; /* Lance view is offset by buffer location */
-		lebuf->attached = 1;
-
-		/* That old black magic... */
-		sc->sc_conf3 = getpropint(ca->ca_ra.ra_node,
-			 	"busmaster-regval",
-				LE_C3_BSWP | LE_C3_ACON | LE_C3_BCON);
-	} else
-#endif
-	{
-		u_long laddr;
-
-#if defined(solbourne)
-		if (CPU_ISKAP && ca->ca_bustype == BUS_OBIO) {
-			/*
-			 * Use the fixed buffer allocated in pmap_bootstrap().
-			 * for now, until I get the iCU translation to work...
-			 */
-			extern vaddr_t lance_va;
-
-			laddr = PTW1_TO_PHYS(lance_va);
-			sc->sc_mem = (void *)PHYS_TO_PTW2(laddr);
-
-			/* disable ICU translations for ethernet */
-			sta(ICU_TER, ASI_PHYS_IO,
-			    lda(ICU_TER, ASI_PHYS_IO) & ~TER_ETHERNET);
-
-			/* stash the high 15 bits of the physical address */
-			sta(SE_BASE + 0x18, ASI_PHYS_IO,
-			    laddr & 0xfffe0000);
-		} /* else */
-#endif	/* solbourne */
-#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
-#if defined(SUN4C) || defined(SUN4M)
-		if (sbuschild && CPU_ISSUN4M)
-			laddr = (u_long)dvma_malloc_space(MEMSIZE,
-			     &sc->sc_mem, M_NOWAIT, M_SPACE_D24);
-		else
-#endif
-			laddr = (u_long)dvma_malloc(MEMSIZE,
-			     &sc->sc_mem, M_NOWAIT);
-#endif	/* SUN4 || SUN4C || SUN4M */
+	lesc->sc_r1 = (struct lereg1 *)mapiodev(ca->ca_ra.ra_reg, 0,
+					      sizeof(struct lereg1),
+					      ca->ca_bustype);
+	sc->sc_conf3 = LE_C3_BSWP | LE_C3_ACON | LE_C3_BCON;
+	laddr = (u_long)dvma_malloc(MEMSIZE, &sc->sc_mem, M_NOWAIT);
 #if defined (SUN4M)
-		if ((laddr & 0xffffff) >= (laddr & 0xffffff) + MEMSIZE)
-			panic("if_le: Lance buffer crosses 16MB boundary");
+	if ((laddr & 0xffffff) >= (laddr & 0xffffff) + MEMSIZE)
+		panic("if_le: Lance buffer crosses 16MB boundary");
 #endif
-#if defined(solbourne)
-		if (CPU_ISKAP && ca->ca_bustype == BUS_OBIO)
-			sc->sc_addr = laddr & 0x01ffff;
-		else
-#endif
-			sc->sc_addr = laddr & 0xffffff;
-		sc->sc_memsize = MEMSIZE;
-#if defined(solbourne)
-		if (CPU_ISKAP && ca->ca_bustype == BUS_OBIO)
-			sc->sc_conf3 = LE_C3_BSWP;
-		else
-#endif
-			sc->sc_conf3 = LE_C3_BSWP | LE_C3_ACON | LE_C3_BCON;
-#if defined(SUN4C) || defined(SUN4M)
-		if (dmachild) {
-			lesc->sc_dma = (struct dma_softc *)parent;
-			lesc->sc_dma->sc_le = lesc;
-			lesc->sc_laddr = laddr;
-		}
-#endif
-	}
+	sc->sc_addr = laddr & 0xffffff;
+	sc->sc_memsize = MEMSIZE;
+
+	myetheraddr(sc->sc_arpcom.ac_enaddr);
+
+	sc->sc_copytodesc = am7990_copytobuf_contig;
+	sc->sc_copyfromdesc = am7990_copyfrombuf_contig;
+	sc->sc_copytobuf = am7990_copytobuf_contig;
+	sc->sc_copyfrombuf = am7990_copyfrombuf_contig;
+	sc->sc_zerobuf = am7990_zerobuf_contig;
+
+	sc->sc_rdcsr = lerdcsr;
+	sc->sc_wrcsr = lewrcsr;
+	sc->sc_hwinit = lehwinit;
+
+	am7990_config(sc);
 
 	bp = ca->ca_ra.ra_bp;
 	switch (ca->ca_bustype) {
@@ -550,6 +229,18 @@ leattach(parent, self, aux)
 	 (bp->val[0] == -1 && bp->val[1] == sc->sc_dev.dv_unit))
 
 	case BUS_SBUS:
+		lesc->sc_sd.sd_reset = (void *)am7990_reset;
+		if (sbuschild) {
+			lesc->sc_dma = NULL;
+			sbus_establish(&lesc->sc_sd, &sc->sc_dev);
+		} else {
+			lesc->sc_dma = (struct dma_softc *)parent;
+			lesc->sc_dma->sc_le = lesc;
+			lesc->sc_dma->sc_regs->en_bar = laddr & 0xff000000;
+			/* Assume SBus is grandparent */
+			sbus_establish(&lesc->sc_sd, parent);
+		}
+
 		if (bp != NULL && strcmp(bp->name, le_cd.cd_name) == 0 &&
 		    SAME_LANCE(bp, ca))
 			bp->dev = &sc->sc_dev;
@@ -563,77 +254,16 @@ leattach(parent, self, aux)
 		break;
 	}
 
-	myetheraddr(sc->sc_arpcom.ac_enaddr);
-
-	sc->sc_copytodesc = am7990_copytobuf_contig;
-	sc->sc_copyfromdesc = am7990_copyfrombuf_contig;
-	sc->sc_copytobuf = am7990_copytobuf_contig;
-	sc->sc_copyfrombuf = am7990_copyfrombuf_contig;
-	sc->sc_zerobuf = am7990_zerobuf_contig;
-
-	sc->sc_rdcsr = lerdcsr;
-	sc->sc_wrcsr = lewrcsr;
-	sc->sc_hwinit = lehwinit;
-#if defined(SUN4M)
-	if (CPU_ISSUN4M)
-		sc->sc_nocarrier = lenocarrier;
-#endif
-	sc->sc_hwreset = lehwreset;
-
-	ifmedia_init(&sc->sc_ifmedia, 0, lemediachange, lemediastatus);
-#if defined(SUN4C) || defined(SUN4M)
-	if (lebufchild) {
-		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_10_T, 0, NULL);
-		ifmedia_set(&sc->sc_ifmedia, IFM_ETHER | IFM_10_T);
-	} else
-#endif
-#if defined(SUN4M)
-	if (CPU_ISSUN4M && lesc->sc_dma) {
-		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_10_T, 0, NULL);
-		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_10_5, 0, NULL);
-		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_AUTO, 0, NULL);
-		ifmedia_set(&sc->sc_ifmedia, IFM_ETHER | IFM_AUTO);
-	} else
-#endif
-	{
-		ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_10_5, 0, NULL);
-		ifmedia_set(&sc->sc_ifmedia, IFM_ETHER | IFM_10_5);
-	}
-
-	am7990_config(sc);
-
-#if defined(solbourne)
-	if (CPU_ISKAP && ca->ca_bustype == BUS_OBIO) {
-		sc->sc_copytodesc = kap_copytobuf;
-		sc->sc_copyfromdesc = kap_copyfrombuf;
-
-		sc->sc_initaddr = 1 << 23 | (sc->sc_initaddr & 0x01ffff);
-		sc->sc_rmdaddr = 1 << 23 | (sc->sc_rmdaddr & 0x01ffff);
-		sc->sc_tmdaddr = 1 << 23 | (sc->sc_tmdaddr & 0x01ffff);
-	}
-#endif
-
 	lesc->sc_ih.ih_fun = am7990_intr;
 #if defined(SUN4M) /*XXX*/
-	if (CPU_ISSUN4M && lesc->sc_dma)
+	if (CPU_ISSUN4M)
 		lesc->sc_ih.ih_fun = myleintr;
 #endif
 	lesc->sc_ih.ih_arg = sc;
-	intr_establish(pri, &lesc->sc_ih, IPL_NET, self->dv_xname);
+	intr_establish(pri, &lesc->sc_ih);
 
 	/* now initialize DMA */
-	lehwreset(sc);
+	if (lesc->sc_dma) {
+		DMA_ENINTR(lesc->sc_dma);
+	}
 }
-
-#if defined(solbourne)
-hide void
-kap_copytobuf(struct am7990_softc *sc, void *to, int boff, int len)
-{
-	return (am7990_copytobuf_contig(sc, to, boff & ~(1 << 23), len));
-}
-hide void
-kap_copyfrombuf(struct am7990_softc *sc, void *from, int boff, int len)
-{
-	return (am7990_copyfrombuf_contig(sc, from, boff & ~(1 << 23), len));
-}
-#endif

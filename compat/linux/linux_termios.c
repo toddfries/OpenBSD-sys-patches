@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_termios.c,v 1.15 2003/04/05 20:30:18 millert Exp $	*/
+/*	$OpenBSD: linux_termios.c,v 1.3 1996/04/18 21:21:39 niklas Exp $	*/
 /*	$NetBSD: linux_termios.c,v 1.3 1996/04/05 00:01:54 christos Exp $	*/
 
 /*
@@ -52,24 +52,15 @@
 
 static speed_t linux_speeds[] = {
 	0, 50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800,
-	9600, 19200, 38400, 57600, 115200, 230400
+	9600, 19200, 38400, 57600, 115200
 };
 
-static const int linux_spmasks[] = {
+static int linux_spmasks[] = {
 	LINUX_B0, LINUX_B50, LINUX_B75, LINUX_B110, LINUX_B134, LINUX_B150,
 	LINUX_B200, LINUX_B300, LINUX_B600, LINUX_B1200, LINUX_B1800,
 	LINUX_B2400, LINUX_B4800, LINUX_B9600, LINUX_B19200, LINUX_B38400,
 	LINUX_B57600, LINUX_B115200, LINUX_B230400
 };
-
-static void linux_termio_to_bsd_termios(struct linux_termio *,
-    struct termios *);
-static void bsd_termios_to_linux_termio(struct termios *,
-    struct linux_termio *);
-static void linux_termios_to_bsd_termios(struct linux_termios *,
-    struct termios *);
-static void bsd_termios_to_linux_termios(struct termios *,
-    struct linux_termios *);
 
 /*
  * Deal with termio ioctl cruft. This doesn't look very good..
@@ -83,8 +74,8 @@ static void bsd_termios_to_linux_termios(struct termios *,
 
 static void
 linux_termio_to_bsd_termios(lt, bts)
-	struct linux_termio *lt;
-	struct termios *bts;
+	register struct linux_termio *lt;
+	register struct termios *bts;
 {
 	int index;
 
@@ -166,8 +157,8 @@ linux_termio_to_bsd_termios(lt, bts)
 
 static void
 bsd_termios_to_linux_termio(bts, lt)
-	struct termios *bts;
-	struct linux_termio *lt;
+	register struct termios *bts;
+	register struct linux_termio *lt;
 {
 	int i, mask;
 
@@ -252,8 +243,8 @@ bsd_termios_to_linux_termio(bts, lt)
 
 static void
 linux_termios_to_bsd_termios(lts, bts)
-	struct linux_termios *lts;
-	struct termios *bts;
+	register struct linux_termios *lts;
+	register struct termios *bts;
 {
 	int index;
 
@@ -340,8 +331,8 @@ linux_termios_to_bsd_termios(lts, bts)
 
 static void
 bsd_termios_to_linux_termios(bts, lts)
-	struct termios *bts;
-	struct linux_termios *lts;
+	register struct termios *bts;
+	register struct linux_termios *lts;
 {
 	int i, mask;
 
@@ -438,50 +429,46 @@ bsd_termios_to_linux_termios(bts, lts)
 }
 
 int
-linux_ioctl_termios(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_ioctl_args /* {
+linux_ioctl_termios(p, uap, retval)
+	register struct proc *p;
+	register struct linux_sys_ioctl_args /* {
 		syscallarg(int) fd;
 		syscallarg(u_long) com;
 		syscallarg(caddr_t) data;
-	} */ *uap = v;
-	struct file *fp;
-	struct filedesc *fdp;
+	} */ *uap;
+	register_t *retval;
+{
+	register struct file *fp;
+	register struct filedesc *fdp;
 	u_long com;
 	struct linux_termio tmplt;
 	struct linux_termios tmplts;
 	struct termios tmpbts;
-	caddr_t sg;
 	int idat;
 	struct sys_ioctl_args ia;
-	char tioclinux;
-	int error = 0;
+	int error;
 
 	fdp = p->p_fd;
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
 		return (EBADF);
-	FREF(fp);
 
-	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
-		error = EBADF;
-		goto out;
-	}
+	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
+		return (EBADF);
 
 	com = SCARG(uap, com);
 	retval[0] = 0;
                 
 	switch (com) {
 	case LINUX_TCGETS:
-		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts,
-		    p);
+		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts, p);
 		if (error)
-			goto out;
+			return error;
 		bsd_termios_to_linux_termios(&tmpbts, &tmplts);
 		error = copyout(&tmplts, SCARG(uap, data), sizeof tmplts);
-		goto out;
+		if (error)
+			return error;
+		return 0;
 	case LINUX_TCSETS:
 	case LINUX_TCSETSW:
 	case LINUX_TCSETSF:
@@ -489,13 +476,12 @@ linux_ioctl_termios(p, v, retval)
 		 * First fill in all fields, so that we keep the current
 		 * values for fields that Linux doesn't know about.
 		 */
-		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts,
-		    p);
+		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts, p);
 		if (error)
-			goto out;
+			return error;
 		error = copyin(SCARG(uap, data), &tmplts, sizeof tmplts);
 		if (error)
-			goto out;
+			return error;
 		linux_termios_to_bsd_termios(&tmplts, &tmpbts);
 		switch (com) {
 		case LINUX_TCSETS:
@@ -509,15 +495,18 @@ linux_ioctl_termios(p, v, retval)
 			break;
 		}
 		error = (*fp->f_ops->fo_ioctl)(fp, com, (caddr_t)&tmpbts, p);
-		goto out;
-	case LINUX_TCGETA:
-		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts,
-		    p);
 		if (error)
-			goto out;
+			return error;
+		return 0;
+	case LINUX_TCGETA:
+		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts, p);
+		if (error)
+			return error;
 		bsd_termios_to_linux_termio(&tmpbts, &tmplt);
 		error = copyout(&tmplt, SCARG(uap, data), sizeof tmplt);
-		goto out;
+		if (error)
+			return error;
+		return 0;
 	case LINUX_TCSETA:
 	case LINUX_TCSETAW:
 	case LINUX_TCSETAF:
@@ -525,13 +514,12 @@ linux_ioctl_termios(p, v, retval)
 		 * First fill in all fields, so that we keep the current
 		 * values for fields that Linux doesn't know about.
 		 */
-		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts,
-		    p);
+		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA, (caddr_t)&tmpbts, p);
 		if (error)
-			goto out;
+			return error;
 		error = copyin(SCARG(uap, data), &tmplt, sizeof tmplt);
 		if (error)
-			goto out;
+			return error;
 		linux_termio_to_bsd_termios(&tmplt, &tmpbts);
 		switch (com) {
 		case LINUX_TCSETA:
@@ -545,11 +533,13 @@ linux_ioctl_termios(p, v, retval)
 			break;
 		}
 		error = (*fp->f_ops->fo_ioctl)(fp, com, (caddr_t)&tmpbts, p);
-		goto out;
+		if (error)
+			return error;
+		return 0;
 	case LINUX_TIOCGETD:
 		error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETD, (caddr_t)&idat, p);
 		if (error)
-			goto out;
+			return error;
 		switch (idat) {
 		case TTYDISC:
 			idat = LINUX_N_TTY;
@@ -569,11 +559,13 @@ linux_ioctl_termios(p, v, retval)
 			break;
 		}
 		error = copyout(&idat, SCARG(uap, data), sizeof idat);
-		goto out;
+		if (error)
+			return error;
+		return 0;
 	case LINUX_TIOCSETD:
 		error = copyin(SCARG(uap, data), &idat, sizeof idat);
 		if (error)
-			goto out;
+			return error;
 		switch (idat) {
 		case LINUX_N_TTY:
 			idat = TTYDISC;
@@ -589,52 +581,17 @@ linux_ioctl_termios(p, v, retval)
 		 */
 		case LINUX_N_MOUSE:
 		default:
-			error = EINVAL;
-			goto out;
+			return EINVAL;
 		}
 		error = (*fp->f_ops->fo_ioctl)(fp, TIOCSETD, (caddr_t)&idat, p);
-		goto out;
-	case LINUX_TIOCLINUX:
-		error = copyin(SCARG(uap, data), &tioclinux, sizeof tioclinux);
-		if (error != 0)
-			goto out;
-		switch (tioclinux) {
-		case LINUX_TIOCLINUX_KERNMSG:
-			/*
-			 * XXX needed to not fail for some things. Could
-			 * try to use TIOCCONS, but the char argument
-			 * specifies the VT #, not an fd.
-			 */
-			goto out;
-		case LINUX_TIOCLINUX_COPY:
-		case LINUX_TIOCLINUX_PASTE:
-		case LINUX_TIOCLINUX_UNBLANK:
-		case LINUX_TIOCLINUX_LOADLUT:
-		case LINUX_TIOCLINUX_READSHIFT:
-		case LINUX_TIOCLINUX_READMOUSE:
-		case LINUX_TIOCLINUX_VESABLANK:
-		case LINUX_TIOCLINUX_CURCONS:	/* could use VT_GETACTIVE */
-			error = EINVAL;
-			goto out;
-		}
-		break;
+		if (error)
+			return error;
+		return 0;
 	case LINUX_TIOCGWINSZ:
 		SCARG(&ia, com) = TIOCGWINSZ;
 		break;
 	case LINUX_TIOCSWINSZ:
 		SCARG(&ia, com) = TIOCSWINSZ;
-		break;
-	case LINUX_TIOCMGET:
-		SCARG(&ia, com) = TIOCMGET;
-		break;
-	case LINUX_TIOCMBIS:
-		SCARG(&ia, com) = TIOCMBIS;
-		break;
-	case LINUX_TIOCMBIC:
-		SCARG(&ia, com) = TIOCMBIC;
-		break;
-	case LINUX_TIOCMSET:
-		SCARG(&ia, com) = TIOCMSET;
 		break;
 	case LINUX_TIOCGPGRP:
 		SCARG(&ia, com) = TIOCGPGRP;
@@ -657,69 +614,17 @@ linux_ioctl_termios(p, v, retval)
 	case LINUX_TIOCNXCL:
 		SCARG(&ia, com) = TIOCNXCL;
 		break;
-	case LINUX_TIOCSCTTY:
-		SCARG(&ia, com) = TIOCSCTTY;
-		break;
 	case LINUX_TIOCCONS:
 		SCARG(&ia, com) = TIOCCONS;
 		break;
 	case LINUX_TIOCNOTTY:
 		SCARG(&ia, com) = TIOCNOTTY;
 		break;
-	case LINUX_TCSBRK:
-		SCARG(&ia, com) = SCARG(uap, data) ? TIOCDRAIN : TIOCSBRK;
-		break;
-	case LINUX_TCXONC:
-		switch ((int)SCARG(uap, data)) {
-		case LINUX_TCOOFF:
-			SCARG(&ia, com) = TIOCSTOP;
-			break;
-		case LINUX_TCOON:
-			SCARG(&ia, com) = TIOCSTART;
-			break;
-		case LINUX_TCIOFF:
-		case LINUX_TCION: {
-			u_char c, *cp;
-			struct sys_write_args wa;
-
-			error = (*fp->f_ops->fo_ioctl)(fp, TIOCGETA,
-			    (caddr_t)&tmpbts, p);
-			if (error)
-				goto out;
-			if ((int)SCARG(uap, data) == LINUX_TCIOFF)
-				c = tmpbts.c_cc[VSTOP];
-			else
-				c = tmpbts.c_cc[VSTART];
-			if (c == _POSIX_VDISABLE)
-				goto out;
-
-			sg = stackgap_init(p->p_emul);
-			cp = (char *) stackgap_alloc(&sg, 1);
-			if ((error = copyout(&c, cp, 1)))
-				goto out;
-
-			SCARG(&wa, fd) = SCARG(uap, fd);
-			SCARG(&wa, buf) = cp;
-			SCARG(&wa, nbyte) = 1;
-			error = sys_write(p, &wa, retval);
-			goto out;
-		    }
-		default:
-			error = EINVAL;
-			goto out;
-		}
-		SCARG(uap, data) = 0;
-		break;
 	default:
-		error = EINVAL;
-		goto out;
+		return EINVAL;
 	}
 
 	SCARG(&ia, fd) = SCARG(uap, fd);
 	SCARG(&ia, data) = SCARG(uap, data);
-	error = sys_ioctl(p, &ia, retval);
-
-out:
-	FRELE(fp);
-	return (error);
+	return sys_ioctl(p, &ia, retval);
 }

@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci_2100_a50.c,v 1.20 2006/06/15 20:08:29 brad Exp $	*/
-/*	$NetBSD: pci_2100_a50.c,v 1.12 1996/11/13 21:13:29 cgd Exp $	*/
+/*	$OpenBSD: pci_2100_a50.c,v 1.6 1996/07/29 23:00:34 niklas Exp $	*/
+/*	$NetBSD: pci_2100_a50.c,v 1.7 1996/04/23 14:15:55 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -34,9 +34,8 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
-#include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/intr.h>
 
@@ -52,13 +51,12 @@
 
 #include "sio.h"
 
-int	dec_2100_a50_intr_map(void *, pcitag_t, int, int,
-	    pci_intr_handle_t *);
-const char *dec_2100_a50_intr_string(void *, pci_intr_handle_t);
-int	 dec_2100_a50_intr_line(void *, pci_intr_handle_t);
-void    *dec_2100_a50_intr_establish(void *, pci_intr_handle_t,
-	    int, int (*func)(void *), void *, char *);
-void    dec_2100_a50_intr_disestablish(void *, void *);
+int	dec_2100_a50_intr_map __P((void *, pcitag_t, int, int,
+	    pci_intr_handle_t *));
+const char *dec_2100_a50_intr_string __P((void *, pci_intr_handle_t));
+void    *dec_2100_a50_intr_establish __P((void *, pci_intr_handle_t,
+	    int, int (*func)(void *), void *, char *));
+void    dec_2100_a50_intr_disestablish __P((void *, void *));
 
 #define	APECS_SIO_DEVICE	7	/* XXX */
 
@@ -66,7 +64,7 @@ void
 pci_2100_a50_pickintr(acp)
 	struct apecs_config *acp;
 {
-	bus_space_tag_t iot = &acp->ac_iot;
+	bus_chipset_tag_t bc = &acp->ac_bc;
 	pci_chipset_tag_t pc = &acp->ac_pc;
 	pcireg_t sioclass;
 	int sioII;
@@ -81,16 +79,12 @@ pci_2100_a50_pickintr(acp)
 	pc->pc_intr_v = acp;
 	pc->pc_intr_map = dec_2100_a50_intr_map;
 	pc->pc_intr_string = dec_2100_a50_intr_string;
-	pc->pc_intr_line = dec_2100_a50_intr_line;
 	pc->pc_intr_establish = dec_2100_a50_intr_establish;
 	pc->pc_intr_disestablish = dec_2100_a50_intr_disestablish;
 
-	/* Not supported on 2100 A50. */
-	pc->pc_pciide_compat_intr_establish = NULL;
-	pc->pc_pciide_compat_intr_disestablish = NULL;
-
 #if NSIO
-        sio_intr_setup(pc, iot);
+        sio_intr_setup(bc);
+	set_iointr(&sio_iointr);
 #else
 	panic("pci_2100_a50_pickintr: no I/O interrupt handler (no sio)");
 #endif
@@ -114,8 +108,7 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
                 return 1;
         }
         if (buspin > 4) {
-                printf("dec_2100_a50_intr_map: bad interrupt pin %d\n",
-		    buspin);
+                printf("pci_map_int: bad interrupt pin %d\n", buspin);
                 return 1;
         }
 
@@ -139,11 +132,6 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 1;
 			break;
-#ifdef DIAGNOSTIC
-		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_2100_a50_intr_map bogus PCI pin %d",
-			    buspin);
-#endif
 		};
 		break;
 
@@ -159,11 +147,6 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 2;
 			break;
-#ifdef DIAGNOSTIC
-		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_2100_a50_intr_map bogus PCI pin %d",
-			    buspin);
-#endif
 		};
 		break;
 
@@ -179,18 +162,8 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 0;
 			break;
-#ifdef DIAGNOSTIC
-		default:			/* XXX gcc -Wuninitialized */
-			panic("dec_2100_a50_intr_map bogus PCI pin %d",
-			    buspin);
-#endif
 		};
 		break;
-
-	default:
-                printf("dec_2100_a50_intr_map: weird device number %d\n",
-		    device);
-                return 1;
 	}
 
 	pirqreg = pci_conf_read(pc, pci_make_tag(pc, 0, APECS_SIO_DEVICE, 0),
@@ -218,15 +191,9 @@ dec_2100_a50_intr_string(acv, ih)
 	void *acv;
 	pci_intr_handle_t ih;
 {
-	return sio_intr_string(NULL /*XXX*/, ih);
-}
+	struct apecs_config *acp = acv;
 
-int
-dec_2100_a50_intr_line(acv, ih)
-	void *acv;
-	pci_intr_handle_t ih;
-{
-	return sio_intr_line(NULL /*XXX*/, ih);
+	return sio_intr_string(NULL /*XXX*/, ih);
 }
 
 void *
@@ -234,9 +201,11 @@ dec_2100_a50_intr_establish(acv, ih, level, func, arg, name)
 	void *acv, *arg;
 	pci_intr_handle_t ih;
 	int level;
-	int (*func)(void *);
+	int (*func) __P((void *));
 	char *name;
 {
+	struct apecs_config *acp = acv;
+
 	return sio_intr_establish(NULL /*XXX*/, ih, IST_LEVEL, level, func,
 	    arg, name);
 }
@@ -245,5 +214,7 @@ void
 dec_2100_a50_intr_disestablish(acv, cookie)
 	void *acv, *cookie;
 {
+	struct apecs_config *acp = acv;
+
 	sio_intr_disestablish(NULL /*XXX*/, cookie);
 }

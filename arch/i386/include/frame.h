@@ -1,4 +1,3 @@
-/*	$OpenBSD: frame.h,v 1.9 2007/10/10 15:53:52 art Exp $	*/
 /*	$NetBSD: frame.h,v 1.12 1995/10/11 04:20:08 mycroft Exp $	*/
 
 /*-
@@ -17,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,8 +39,6 @@
  *	@(#)frame.h	5.2 (Berkeley) 1/18/91
  */
 
-#ifndef _MACHINE_FRAME_H
-#define _MACHINE_FRAME_H
 #include <sys/signal.h>
 
 /*
@@ -48,8 +49,6 @@
  * Exception/Trap Stack Frame
  */
 struct trapframe {
-	int	tf_fs;
-	int	tf_gs;
 	int	tf_es;
 	int	tf_ds;
 	int	tf_edi;
@@ -80,8 +79,6 @@ struct trapframe {
  */
 struct intrframe {
 	int	if_ppl;
-	int	if_fs;
-	int	if_gs;
 	int	if_es;
 	int	if_ds;
 	int	if_edi;
@@ -106,6 +103,7 @@ struct intrframe {
  * Stack frame inside cpu_switch()
  */
 struct switchframe {
+	int	sf_ppl;
 	int	sf_edi;
 	int	sf_esi;
 	int	sf_ebx;
@@ -117,11 +115,8 @@ struct switchframe {
  */
 struct sigframe {
 	int	sf_signum;
-	siginfo_t *sf_sip;
+	int	sf_code;
 	struct	sigcontext *sf_scp;
 	sig_t	sf_handler;
 	struct	sigcontext sf_sc;
-	siginfo_t sf_si;
-	void	*sf_fpstate;
 };
-#endif

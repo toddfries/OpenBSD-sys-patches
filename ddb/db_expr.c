@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_expr.c,v 1.8 2006/03/13 06:23:20 jsg Exp $	*/
+/*	$OpenBSD: db_expr.c,v 1.4 1996/04/21 22:19:00 deraadt Exp $	*/
 /*	$NetBSD: db_expr.c,v 1.5 1996/02/05 01:56:58 christos Exp $	*/
 
 /* 
@@ -33,8 +33,6 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/db_machdep.h>
 
 #include <ddb/db_lex.h>
@@ -45,7 +43,8 @@
 #include <ddb/db_variables.h>
 
 boolean_t
-db_term(db_expr_t *valuep)
+db_term(valuep)
+	db_expr_t *valuep;
 {
 	int	t;
 
@@ -58,7 +57,7 @@ db_term(db_expr_t *valuep)
 	    return (TRUE);
 	}
 	if (t == tNUMBER) {
-	    *valuep = db_tok_number;
+	    *valuep = (db_expr_t)db_tok_number;
 	    return (TRUE);
 	}
 	if (t == tDOT) {
@@ -99,7 +98,8 @@ db_term(db_expr_t *valuep)
 }
 
 boolean_t
-db_unary(db_expr_t *valuep)
+db_unary(valuep)
+	db_expr_t *valuep;
 {
 	int	t;
 
@@ -126,7 +126,8 @@ db_unary(db_expr_t *valuep)
 }
 
 boolean_t
-db_mult_expr(db_expr_t *valuep)
+db_mult_expr(valuep)
+	db_expr_t *valuep;
 {
 	db_expr_t	lhs, rhs;
 	int		t;
@@ -162,7 +163,8 @@ db_mult_expr(db_expr_t *valuep)
 }
 
 boolean_t
-db_add_expr(db_expr_t *valuep)
+db_add_expr(valuep)
+	db_expr_t *valuep;
 {
 	db_expr_t	lhs, rhs;
 	int		t;
@@ -188,7 +190,8 @@ db_add_expr(db_expr_t *valuep)
 }
 
 boolean_t
-db_shift_expr(db_expr_t *valuep)
+db_shift_expr(valuep)
+	db_expr_t *valuep;
 {
 	db_expr_t	lhs, rhs;
 	int		t;
@@ -220,7 +223,8 @@ db_shift_expr(db_expr_t *valuep)
 }
 
 int
-db_expression(db_expr_t *valuep)
+db_expression(valuep)
+	db_expr_t *valuep;
 {
 	return (db_shift_expr(valuep));
 }

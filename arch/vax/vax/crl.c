@@ -1,5 +1,4 @@
-/*	$OpenBSD: crl.c,v 1.8 2006/01/20 23:27:26 miod Exp $	*/
-/*	$NetBSD: crl.c,v 1.6 2000/01/24 02:40:33 matt Exp $	*/
+/*	$NetBSD: crl.c,v 1.2 1996/04/08 18:32:30 ragge Exp $	*/
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
  * All rights reserved.
@@ -12,7 +11,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -63,24 +66,26 @@ struct {
 	int	crl_ds;		/* saved drive status */
 } crlstat;
 
-void	crlintr(void *);
-void	crlattach(void);
-static	void crlstart(void);
+void	crlintr __P((int));
+void	crlattach __P((void));
+static	void crlstart __P((void));
 
-int	crlopen(dev_t, int, struct proc *);
-int	crlclose(dev_t, int, struct proc *);
-int	crlrw(dev_t, struct uio *, int);
+int	crlopen __P((dev_t, int, struct proc *));
+int	crlclose __P((dev_t, int, struct proc *));
+int	crlrw __P((dev_t, struct uio *, int));
 
 
-struct	ivec_dsp crl_intr;
+struct  ivec_dsp crl_intr;
 
 void
 crlattach()
 {
-	crl_intr = idsptch;
-	crl_intr.hoppaddr = crlintr;
+	extern  struct ivec_dsp idsptch;
+
+	bcopy(&idsptch, &crl_intr, sizeof(struct ivec_dsp));
 	scb->scb_csrint = &crl_intr;
-}	
+	crl_intr.hoppaddr = crlintr;
+}       
 
 /*ARGSUSED*/
 int
@@ -89,7 +94,7 @@ crlopen(dev, flag, p)
 	int flag;
 	struct proc *p;
 {
-	if (vax_cputype != VAX_8600)
+	if (cpunumber != VAX_8600)
 		return (ENXIO);
 	if (crltab.crl_state != CRL_IDLE)
 		return (EALREADY);
@@ -127,7 +132,7 @@ crlrw(dev, uio, flag)
 		return (0);
 	s = spl4();
 	while (crltab.crl_state & CRL_BUSY)
-		tsleep((caddr_t)&crltab, PRIBIO, "crlrw", 0);
+		sleep((caddr_t)&crltab, PRIBIO);
 	crltab.crl_state |= CRL_BUSY;
 	splx(s);
 
@@ -140,7 +145,7 @@ crlrw(dev, uio, flag)
 			break;
 		}
 		if (uio->uio_rw == UIO_WRITE) {
-			error = uiomove(bp->b_data, i, uio);
+			error = uiomove(bp->b_un.b_addr, i, uio);
 			if (error)
 				break;
 		}
@@ -148,14 +153,14 @@ crlrw(dev, uio, flag)
 		s = spl4(); 
 		crlstart();
 		while ((bp->b_flags & B_DONE) == 0)
-			tsleep((caddr_t)bp, PRIBIO, "crlrw", 0);	
+			sleep((caddr_t)bp, PRIBIO);	
 		splx(s);
 		if (bp->b_flags & B_ERROR) {
 			error = EIO;
 			break;
 		}
 		if (uio->uio_rw == UIO_READ) {
-			error = uiomove(bp->b_data, i, uio);
+			error = uiomove(bp->b_un.b_addr, i, uio);
 			if (error)
 				break;
 		}
@@ -172,7 +177,7 @@ crlstart()
 
 	bp = crltab.crl_buf;
 	crltab.crl_errcnt = 0;
-	crltab.crl_xaddr = (ushort *) bp->b_data;
+	crltab.crl_xaddr = (ushort *) bp->b_un.b_addr;
 	bp->b_resid = 0;
 
 	if ((mfpr(PR_STXCS) & STXCS_RDY) == 0)
@@ -186,13 +191,13 @@ crlstart()
 		mtpr(bp->b_blkno<<8 | STXCS_IE | CRL_F_WRITE, PR_STXCS);
 	}
 #ifdef lint
-	crlintr(NULL);
+	crlintr();
 #endif
 }
 
 void
 crlintr(arg)
-	void *arg;
+	int arg;
 {
 	register struct buf *bp;
 	int i;

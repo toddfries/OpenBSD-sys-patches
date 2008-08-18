@@ -1,4 +1,3 @@
-/*	$OpenBSD: ppp-deflate.c,v 1.8 2007/09/15 16:43:51 henning Exp $	*/
 /*	$NetBSD: ppp-deflate.c,v 1.1 1996/03/15 02:28:09 paulus Exp $	*/
 
 /*
@@ -6,36 +5,28 @@
  * and decompression (as used by gzip) to the PPP code.
  * This version is for use with mbufs on BSD-derived systems.
  *
- * Copyright (c) 1989-2002 Paul Mackerras. All rights reserved.
+ * Copyright (c) 1994 The Australian National University.
+ * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation is hereby granted, provided that the above copyright
+ * notice appears in all copies.  This software is provided without any
+ * warranty, express or implied. The Australian National University
+ * makes no representations about the suitability of this software for
+ * any purpose.
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * IN NO EVENT SHALL THE AUSTRALIAN NATIONAL UNIVERSITY BE LIABLE TO ANY
+ * PARTY FOR DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
+ * ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION, EVEN IF
+ * THE AUSTRALIAN NATIONAL UNIVERSITY HAS BEEN ADVISED OF THE POSSIBILITY
+ * OF SUCH DAMAGE.
  *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * 3. The name(s) of the authors of this software must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission.
- *
- * 4. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by Paul Mackerras
- *     <paulus@samba.org>".
- *
- * THE AUTHORS OF THIS SOFTWARE DISCLAIM ALL WARRANTIES WITH REGARD TO
- * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS, IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
- * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
- * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * THE AUSTRALIAN NATIONAL UNIVERSITY SPECIFICALLY DISCLAIMS ANY WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ * ON AN "AS IS" BASIS, AND THE AUSTRALIAN NATIONAL UNIVERSITY HAS NO
+ * OBLIGATION TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS,
+ * OR MODIFICATIONS.
  */
 
 #include <sys/param.h>
@@ -66,24 +57,24 @@ struct deflate_state {
 
 #define DEFLATE_OVHD	2		/* Deflate overhead/packet */
 
-static void	*zalloc(void *, u_int items, u_int size);
-static void	zfree(void *, void *ptr, u_int nb);
-static void	*z_comp_alloc(u_char *options, int opt_len);
-static void	*z_decomp_alloc(u_char *options, int opt_len);
-static void	z_comp_free(void *state);
-static void	z_decomp_free(void *state);
-static int	z_comp_init(void *state, u_char *options, int opt_len,
-				 int unit, int hdrlen, int debug);
-static int	z_decomp_init(void *state, u_char *options, int opt_len,
-				     int unit, int hdrlen, int mru, int debug);
-static int	z_compress(void *state, struct mbuf **mret,
-				  struct mbuf *mp, int slen, int maxolen);
-static void	z_incomp(void *state, struct mbuf *dmsg);
-static int	z_decompress(void *state, struct mbuf *cmp,
-				    struct mbuf **dmpp);
-static void	z_comp_reset(void *state);
-static void	z_decomp_reset(void *state);
-static void	z_comp_stats(void *state, struct compstat *stats);
+static void	*zalloc __P((void *, u_int items, u_int size));
+static void	zfree __P((void *, void *ptr, u_int nb));
+static void	*z_comp_alloc __P((u_char *options, int opt_len));
+static void	*z_decomp_alloc __P((u_char *options, int opt_len));
+static void	z_comp_free __P((void *state));
+static void	z_decomp_free __P((void *state));
+static int	z_comp_init __P((void *state, u_char *options, int opt_len,
+				 int unit, int hdrlen, int debug));
+static int	z_decomp_init __P((void *state, u_char *options, int opt_len,
+				     int unit, int hdrlen, int mru, int debug));
+static int	z_compress __P((void *state, struct mbuf **mret,
+				  struct mbuf *mp, int slen, int maxolen));
+static void	z_incomp __P((void *state, struct mbuf *dmsg));
+static int	z_decompress __P((void *state, struct mbuf *cmp,
+				    struct mbuf **dmpp));
+static void	z_comp_reset __P((void *state));
+static void	z_decomp_reset __P((void *state));
+static void	z_comp_stats __P((void *state, struct compstat *stats));
 
 /*
  * Procedures exported to if_ppp.c.
@@ -105,22 +96,6 @@ struct compressor ppp_deflate = {
     z_comp_stats,		/* decomp_stat */
 };
 
-struct compressor ppp_deflate_draft = {
-    CI_DEFLATE_DRAFT,		/* compress_proto */
-    z_comp_alloc,		/* comp_alloc */
-    z_comp_free,		/* comp_free */
-    z_comp_init,		/* comp_init */
-    z_comp_reset,		/* comp_reset */
-    z_compress,			/* compress */
-    z_comp_stats,		/* comp_stat */
-    z_decomp_alloc,		/* decomp_alloc */
-    z_decomp_free,		/* decomp_free */
-    z_decomp_init,		/* decomp_init */
-    z_decomp_reset,		/* decomp_reset */
-    z_decompress,		/* decompress */
-    z_incomp,			/* incomp */
-    z_comp_stats,		/* decomp_stat */
-};
 /*
  * Space allocation and freeing routines for use by zlib routines.
  */
@@ -131,7 +106,7 @@ zalloc(notused, items, size)
 {
     void *ptr;
 
-    ptr = malloc(items * size, M_DEVBUF, M_NOWAIT);
+    MALLOC(ptr, void *, items * size, M_DEVBUF, M_NOWAIT);
     return ptr;
 }
 
@@ -141,7 +116,7 @@ zfree(notused, ptr, nbytes)
     void *ptr;
     u_int nbytes;
 {
-    free(ptr, M_DEVBUF);
+    FREE(ptr, M_DEVBUF);
 }
 
 /*
@@ -155,8 +130,7 @@ z_comp_alloc(options, opt_len)
     struct deflate_state *state;
     int w_size;
 
-    if (opt_len != CILEN_DEFLATE
-	|| (options[0] != CI_DEFLATE && options[0] != CI_DEFLATE_DRAFT)
+    if (opt_len != CILEN_DEFLATE || options[0] != CI_DEFLATE
 	|| options[1] != CILEN_DEFLATE
 	|| DEFLATE_METHOD(options[2]) != DEFLATE_METHOD_VAL
 	|| options[3] != DEFLATE_CHK_SEQUENCE)
@@ -165,7 +139,8 @@ z_comp_alloc(options, opt_len)
     if (w_size < DEFLATE_MIN_SIZE || w_size > DEFLATE_MAX_SIZE)
 	return NULL;
 
-    state = malloc(sizeof(*state), M_DEVBUF, M_NOWAIT);
+    MALLOC(state, struct deflate_state *, sizeof(struct deflate_state),
+	   M_DEVBUF, M_NOWAIT);
     if (state == NULL)
 	return NULL;
 
@@ -174,7 +149,7 @@ z_comp_alloc(options, opt_len)
     state->strm.zfree = zfree;
     if (deflateInit2(&state->strm, Z_DEFAULT_COMPRESSION, DEFLATE_METHOD_VAL,
 		     -w_size, 8, Z_DEFAULT_STRATEGY, DEFLATE_OVHD+2) != Z_OK) {
-	free(state, M_DEVBUF);
+	FREE(state, M_DEVBUF);
 	return NULL;
     }
 
@@ -190,7 +165,7 @@ z_comp_free(arg)
     struct deflate_state *state = (struct deflate_state *) arg;
 
     deflateEnd(&state->strm);
-    free(state, M_DEVBUF);
+    FREE(state, M_DEVBUF);
 }
 
 static int
@@ -201,8 +176,7 @@ z_comp_init(arg, options, opt_len, unit, hdrlen, debug)
 {
     struct deflate_state *state = (struct deflate_state *) arg;
 
-    if (opt_len < CILEN_DEFLATE
-	|| (options[0] != CI_DEFLATE && options[0] != CI_DEFLATE_DRAFT)
+    if (opt_len < CILEN_DEFLATE || options[0] != CI_DEFLATE
 	|| options[1] != CILEN_DEFLATE
 	|| DEFLATE_METHOD(options[2]) != DEFLATE_METHOD_VAL
 	|| DEFLATE_SIZE(options[2]) != state->w_size
@@ -387,8 +361,7 @@ z_decomp_alloc(options, opt_len)
     struct deflate_state *state;
     int w_size;
 
-    if (opt_len != CILEN_DEFLATE
-	|| (options[0] != CI_DEFLATE && options[0] != CI_DEFLATE_DRAFT)
+    if (opt_len != CILEN_DEFLATE || options[0] != CI_DEFLATE
 	|| options[1] != CILEN_DEFLATE
 	|| DEFLATE_METHOD(options[2]) != DEFLATE_METHOD_VAL
 	|| options[3] != DEFLATE_CHK_SEQUENCE)
@@ -397,7 +370,8 @@ z_decomp_alloc(options, opt_len)
     if (w_size < DEFLATE_MIN_SIZE || w_size > DEFLATE_MAX_SIZE)
 	return NULL;
 
-    state = malloc(sizeof(*state), M_DEVBUF, M_NOWAIT);
+    MALLOC(state, struct deflate_state *, sizeof(struct deflate_state),
+	   M_DEVBUF, M_NOWAIT);
     if (state == NULL)
 	return NULL;
 
@@ -405,7 +379,7 @@ z_decomp_alloc(options, opt_len)
     state->strm.zalloc = zalloc;
     state->strm.zfree = zfree;
     if (inflateInit2(&state->strm, -w_size) != Z_OK) {
-	free(state, M_DEVBUF);
+	FREE(state, M_DEVBUF);
 	return NULL;
     }
 
@@ -421,7 +395,7 @@ z_decomp_free(arg)
     struct deflate_state *state = (struct deflate_state *) arg;
 
     inflateEnd(&state->strm);
-    free(state, M_DEVBUF);
+    FREE(state, M_DEVBUF);
 }
 
 static int
@@ -432,8 +406,7 @@ z_decomp_init(arg, options, opt_len, unit, hdrlen, mru, debug)
 {
     struct deflate_state *state = (struct deflate_state *) arg;
 
-    if (opt_len < CILEN_DEFLATE
-	|| (options[0] != CI_DEFLATE && options[0] != CI_DEFLATE_DRAFT)
+    if (opt_len < CILEN_DEFLATE || options[0] != CI_DEFLATE
 	|| options[1] != CILEN_DEFLATE
 	|| DEFLATE_METHOD(options[2]) != DEFLATE_METHOD_VAL
 	|| DEFLATE_SIZE(options[2]) != state->w_size
@@ -558,9 +531,7 @@ z_decompress(arg, mi, mop)
     for (;;) {
 	r = inflate(&state->strm, flush);
 	if (r != Z_OK) {
-#ifndef DEFLATE_DEBUG
 	    if (state->debug)
-#endif
 		printf("z_decompress%d: inflate returned %d (%s)\n",
 		       state->unit, r, (state->strm.msg? state->strm.msg: ""));
 	    m_freem(mo_head);
@@ -607,11 +578,6 @@ z_decompress(arg, mi, mop)
 	return DECOMP_ERROR;
     }
     olen += (mo->m_len = ospace - state->strm.avail_out);
-#ifdef DEFLATE_DEBUG
-    if (olen > state->mru + PPP_HDRLEN)
-	printf("ppp_deflate%d: exceeded mru (%d > %d)\n",
-	       state->unit, olen, state->mru + PPP_HDRLEN);
-#endif
 
     state->stats.unc_bytes += olen;
     state->stats.unc_packets++;
@@ -661,11 +627,10 @@ z_incomp(arg, mi)
 	r = inflateIncomp(&state->strm);
 	if (r != Z_OK) {
 	    /* gak! */
-#ifndef DEFLATE_DEBUG
-	    if (state->debug)
-#endif
+	    if (state->debug) {
 		printf("z_incomp%d: inflateIncomp returned %d (%s)\n",
 		       state->unit, r, (state->strm.msg? state->strm.msg: ""));
+	    }
 	    return;
 	}
 	mi = mi->m_next;

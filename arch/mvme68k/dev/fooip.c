@@ -1,4 +1,4 @@
-/*	$OpenBSD: fooip.c,v 1.9 2004/07/30 22:29:44 miod Exp $ */
+/*	$OpenBSD: fooip.c,v 1.3 1996/04/28 11:06:03 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -35,6 +41,7 @@
 #include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
+#include <sys/callout.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
@@ -58,18 +65,18 @@ struct fooipsoftc {
 	struct fooipregs	*sc_regs;
 };
 
-void fooipattach(struct device *, struct device *, void *);
-int  fooipmatch(struct device *, void *, void *);
+void fooipattach __P((struct device *, struct device *, void *));
+int  fooipmatch __P((struct device *, void *, void *));
 
 struct cfattach fooip_ca = {
 	sizeof(struct fooipsoftc), fooipmatch, fooipattach
 };
 
 struct cfdriver fooip_cd = {
-	NULL, "fooip", DV_DULL
+	NULL, "fooip", DV_DULL, 0
 };
 
-int  fooipintr(void *);
+int  fooipintr __P((void *));
 
 int
 fooipmatch(parent, cf, args)
@@ -88,7 +95,7 @@ fooipattach(parent, self, args)
 	struct fooipsoftc *sc = (struct fooipsoftc *)self;
 	struct confargs *ca = args;
 
-	sc->sc_ipicsc = (struct ipicsoftc *)parent;
+	sc->sc_ipicsc = (struct ipicsoftc *)ca->ca_master;
 	sc->sc_regs = (struct fooipregs *)(ca->ca_vaddr +
 	    IPIC_IP_REGOFFSET);
 	sc->sc_slot = ca->ca_offset;
@@ -97,7 +104,7 @@ fooipattach(parent, self, args)
 	sc->sc_ih.ih_fn = fooipintr;
 	sc->sc_ih.ih_arg = sc;
 	sc->sc_ih.ih_ipl = ca->ca_ipl;
-	ipicintr_establish(ca->ca_vec, &sc->sc_ih, self->dv_xname);
+	ipicintr_establish(ca->ca_vec, &sc->sc_ih);
 
 	sc->sc_regs->fooip_vec = ca->ca_vec;
 	sc->sc_ipicsc->sc_ipic->ipic_irq[sc->sc_slot][0] = ca->ca_ipl |

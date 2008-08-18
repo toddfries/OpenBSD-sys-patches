@@ -1,3 +1,5 @@
+/*	$NetBSD: divdi3.c,v 1.5 1995/10/07 09:26:24 mycroft Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -14,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,7 +38,11 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: divdi3.c,v 1.5 2004/11/28 07:23:41 mickey Exp $";
+#if 0
+static char sccsid[] = "@(#)divdi3.c	8.1 (Berkeley) 6/4/93";
+#else
+static char rcsid[] = "$NetBSD: divdi3.c,v 1.5 1995/10/07 09:26:24 mycroft Exp $";
+#endif
 #endif /* LIBC_SCCS and not lint */
 
 #include "quad.h"
@@ -42,21 +52,20 @@ static char rcsid[] = "$OpenBSD: divdi3.c,v 1.5 2004/11/28 07:23:41 mickey Exp $
  * ??? if -1/2 should produce -1 on this machine, this code is wrong
  */
 quad_t
-__divdi3(quad_t a, quad_t b)
+__divdi3(a, b)
+	quad_t a, b;
 {
 	u_quad_t ua, ub, uq;
-	int neg = 0;
-
-	ua = a;
-	ub = b;
+	int neg;
 
 	if (a < 0)
-		ua = -ua, neg ^= 1;
+		ua = -(u_quad_t)a, neg = 1;
+	else
+		ua = a, neg = 0;
 	if (b < 0)
-		ub = -ub, neg ^= 1;
-
+		ub = -(u_quad_t)b, neg ^= 1;
+	else
+		ub = b;
 	uq = __qdivrem(ua, ub, (u_quad_t *)0);
-	if (neg)
-		uq = - uq;
-	return uq;
+	return (neg ? -uq : uq);
 }

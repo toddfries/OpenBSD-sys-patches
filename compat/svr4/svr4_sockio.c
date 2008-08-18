@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_sockio.c,v 1.10 2006/03/05 21:48:56 miod Exp $	 */
+/*	$OpenBSD: svr4_sockio.c,v 1.6 1996/05/07 08:49:20 deraadt Exp $	 */
 /*	$NetBSD: svr4_sockio.c,v 1.10 1996/05/03 17:09:15 christos Exp $	 */
 
 /*
@@ -37,6 +37,7 @@
 #include <sys/termios.h>
 #include <sys/tty.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <net/if.h>
 #include <sys/malloc.h>
@@ -51,7 +52,7 @@
 #include <compat/svr4/svr4_ioctl.h>
 #include <compat/svr4/svr4_sockio.h>
 
-static int bsd_to_svr4_flags(int);
+static int bsd_to_svr4_flags __P((int));
 
 #define bsd_to_svr4_flag(a) \
 	if (bf & __CONCAT(I,a))	sf |= __CONCAT(SVR4_I,a)
@@ -85,7 +86,7 @@ svr4_sock_ioctl(fp, p, retval, fd, cmd, data)
 	caddr_t data;
 {
 	int error;
-	int (*ctl)(struct file *, u_long,  caddr_t, struct proc *) =
+	int (*ctl) __P((struct file *, u_long,  caddr_t, struct proc *)) =
 			fp->f_ops->fo_ioctl;
 
 	*retval = 0;
@@ -109,12 +110,13 @@ svr4_sock_ioctl(fp, p, retval, fd, cmd, data)
 			 * entry per physical interface?
 			 */
 
-			TAILQ_FOREACH(ifp, &ifnet, if_list)
-				if (TAILQ_EMPTY(&ifp->if_addrlist))
+			for (ifp = ifnet.tqh_first;
+			     ifp != 0; ifp = ifp->if_list.tqe_next)
+				if ((ifa = ifp->if_addrlist.tqh_first) == NULL)
 					ifnum++;
 				else
-					TAILQ_FOREACH(ifa, &ifp->if_addrlist,
-					    ifa_list)
+					for (;ifa != NULL;
+					    ifa = ifa->ifa_list.tqe_next)
 						ifnum++;
 
 
@@ -130,7 +132,7 @@ svr4_sock_ioctl(fp, p, retval, fd, cmd, data)
 			if ((error = copyin(data, &sr, sizeof(sr))) != 0)
 				return error;
 
-			(void) strlcpy(br.ifr_name, sr.svr4_ifr_name,
+			(void) strncpy(br.ifr_name, sr.svr4_ifr_name,
 			    sizeof(br.ifr_name));
 
 			if ((error = (*ctl)(fp, SIOCGIFFLAGS, 

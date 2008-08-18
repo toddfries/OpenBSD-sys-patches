@@ -1,4 +1,4 @@
-/*	$OpenBSD: vme.h,v 1.12 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: vme.h,v 1.4 1996/06/11 10:15:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -27,18 +33,8 @@
 
 struct vmesoftc {
 	struct device	sc_dev;
-	vaddr_t		sc_vaddr;
+	void *		sc_vaddr;
 	struct intrhand sc_abih;	/* `abort' switch */
-};
-
-struct vmessoftc {
-	struct device		sc_dev;
-	struct vmesoftc		*sc_vme;
-};
-
-struct vmelsoftc {
-	struct device		sc_dev;
-	struct vmesoftc		*sc_vme;
 };
 
 /*
@@ -135,7 +131,7 @@ struct vme1reg {
 #define VME1_A16BASE	0xffff0000UL
 
 /*
- * XXX: this chip has some rather insane access rules!
+ * XXX: this chip has some rather inane access rules!
  */
 struct vme2reg {
 /*00*/	volatile u_long		vme2_slaveaddr1;
@@ -220,10 +216,6 @@ struct vme2reg {
 /*58*/	volatile u_long		vme2_t2cmp;
 /*5c*/	volatile u_long		vme2_t2count;
 /*60*/	volatile u_long		vme2_tctl;
-#define VME2_TCTL_CEN		0x01
-#define VME2_TCTL_COC		0x02
-#define VME2_TCTL_COVF		0x04
-#define VME2_TCTL_OVF		0xf0
 #define VME2_TCTL_SCON		0x40000000	/* we are SCON */
 #define VME2_TCTL_SYSFAIL	0x20000000	/* light SYSFAIL led */
 #define VME2_TCTL_SRST		0x00800000	/* system reset */
@@ -327,9 +319,8 @@ struct vme2reg {
 #define VME2_A16BASE	0xffff0000UL
 #define VME2_A24BASE	0xff000000UL
 
-paddr_t	vmepmap(struct vmesoftc *sc, paddr_t vmeaddr, int len, int bustype);
-vaddr_t	vmemap(struct vmesoftc *sc, paddr_t vmeaddr, int len, int bustype);
-int	vmerw(struct vmesoftc *sc, struct uio *uio, int flags, int bus);
-
-int vmeintr_establish(int, struct intrhand *, const char *);
-int vmescan(struct device *, void *, void *, int);
+void * vmepmap __P((struct vmesoftc *sc, void * vmeaddr, int len,
+	    int bustype));
+void * vmemap __P((struct vmesoftc *sc, void * vmeaddr, int len,
+	    int bustype));
+int	vmerw __P((struct vmesoftc *sc, struct uio *uio, int flags, int bus));

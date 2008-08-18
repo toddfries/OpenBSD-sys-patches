@@ -1,5 +1,4 @@
-/*	$OpenBSD: gencons.h,v 1.5 2002/03/14 01:26:48 millert Exp $ */
-/*	$NetBSD: gencons.h,v 1.9 2000/01/20 00:07:49 matt Exp $ */
+/*	$NetBSD: gencons.h,v 1.5 1996/04/08 18:32:37 ragge Exp $ */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -33,6 +32,7 @@
  */
 
  /* All bugs are subject to removal without further notice */
+		
 
 /*
  * Some definitions for generic console interface (PR 32-35)
@@ -41,8 +41,10 @@
 /* PR_TXCS */
 #define	GC_RDY	0x80	/* Console ready to xmit chr */
 #define	GC_TIE	0x40	/* xmit interrupt enable */
-#define	GC_LT	0x80000	/* VAX8600: Enable logical terminal */
-#define	GC_WRT	0x8000	/* VAX8600: Allow mtpr's to console */
+#if VAX8600
+#define	GC_LT	0x80000	/* Enable logical terminal */
+#define	GC_WRT	0x8000	/* Allow mtpr's to console */
+#endif
 
 /* PR_RXCS */
 #define	GC_DON	0x80	/* character received */
@@ -53,20 +55,8 @@
 #define	GC_CON	0xf00	/* mfpr($PR_RXDB)&GC_CON==0 then console chr */
 
 /* PR_TXDB */
-#define	GC_CONS	0xf00	/* Console software !8600 */
-#define	GC_BTFL	0x2	/* boot machine */
-#define	GC_CWFL	0x3	/* clear warm start flag */
-#define	GC_CCFL	0x4	/* clear cold start flag */
-
-/* Interrupt vectors used */
-#define	SCB_G0R	0xf8
-#define	SCB_G0T	0xfc
-#define	SCB_G1R	0xc8
-#define	SCB_G1T	0xcc
-#define	SCB_G2R	0xd0
-#define	SCB_G2T	0xd4
-#define	SCB_G3R	0xd8
-#define	SCB_G3T	0xdc
+#define	GC_BOOT	0xf02	/* boot machine */
+#define	GC_CCF	0xf04	/* clear cold start flag */
 
 /* Prototypes */
-void	gencnputc(dev_t, int);
+void	gencnputc __P((dev_t, int));

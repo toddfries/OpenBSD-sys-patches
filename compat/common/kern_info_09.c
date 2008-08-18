@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_info_09.c,v 1.13 2007/11/28 14:04:44 deraadt Exp $	*/
+/*	$OpenBSD: kern_info_09.c,v 1.3 1996/03/03 05:26:22 mickey Exp $	*/
 /*	$NetBSD: kern_info_09.c,v 1.5 1996/02/21 00:10:59 cgd Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,16 +43,11 @@
 #include <sys/proc.h>
 #include <sys/syslog.h>
 #include <sys/unistd.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 #include <sys/sysctl.h>
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
-
-/*
- * Note that while we no longer have a COMPAT_09 kernel option,
- * there are other COMPAT_* options that need these old functions.
- */
 
 /* ARGSUSED */
 int
@@ -84,9 +83,50 @@ compat_09_sys_setdomainname(p, v, retval)
 	int name;
 	int error;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 	name = KERN_DOMAINNAME;
 	return (kern_sysctl(&name, 1, 0, 0, SCARG(uap, domainname),
 			    SCARG(uap, len), p));
+}
+
+struct outsname {
+	char	sysname[32];
+	char	nodename[32];
+	char	release[32];
+	char	version[32];
+	char	machine[32];
+};
+
+/* ARGSUSED */
+int
+compat_09_sys_uname(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct compat_09_sys_uname_args /* {
+		syscallarg(struct outsname *) name;
+	} */ *uap = v;
+	struct outsname outsname;
+	char *cp, *dp, *ep;
+	extern char ostype[], osrelease[];
+
+	strncpy(outsname.sysname, ostype, sizeof(outsname.sysname));
+	strncpy(outsname.nodename, hostname, sizeof(outsname.nodename));
+	strncpy(outsname.release, osrelease, sizeof(outsname.release));
+	dp = outsname.version;
+	ep = &outsname.version[sizeof(outsname.version) - 1];
+	for (cp = version; *cp && *cp != '('; cp++)
+		;
+	for (cp++; *cp && *cp != ')' && dp < ep; cp++)
+		*dp++ = *cp;
+	for (; *cp && *cp != '#'; cp++)
+		;
+	for (; *cp && *cp != ':' && dp < ep; cp++)
+		*dp++ = *cp;
+	*dp = '\0';
+	strncpy(outsname.machine, MACHINE, sizeof(outsname.machine));
+	return (copyout((caddr_t)&outsname, (caddr_t)SCARG(uap, name),
+			sizeof(struct outsname)));
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: hp.c,v 1.19 2007/09/01 12:45:42 miod Exp $ */
-/*	$NetBSD: hp.c,v 1.22 2000/02/12 16:09:33 ragge Exp $ */
+/*	$NetBSD: hp.c,v 1.9 1996/05/19 16:43:34 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -52,7 +51,6 @@
 #include <sys/ioccom.h>
 #include <sys/fcntl.h>
 #include <sys/syslog.h>
-#include <sys/reboot.h>
 
 #include <machine/trap.h>
 #include <machine/pte.h>
@@ -73,39 +71,40 @@ struct	hp_softc {
 	int	sc_physnr;		/* Physical disk number */
 };
 
-int     hpmatch(struct device *, struct cfdata *, void *);
-void    hpattach(struct device *, struct device *, void *);
-void	hpstrategy(struct buf *);
-void	hpstart(struct mba_device *);
-int	hpattn(struct mba_device *);
-enum	xfer_action hpfinish(struct mba_device *, int, int *);
-int	hpopen(dev_t, int, int);
-int	hpclose(dev_t, int, int);
-int	hpioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	hpdump(dev_t, daddr64_t, caddr_t, size_t);
-int	hpread(dev_t, struct uio *);
-int	hpwrite(dev_t, struct uio *);
-daddr64_t hpsize(dev_t);
+int     hpmatch __P((struct device *, void *, void *));
+void    hpattach __P((struct device *, struct device *, void *));
+void	hpstrategy __P((struct buf *));
+void	hpstart __P((struct mba_device *));
+int	hpattn __P((struct mba_device *));
+enum	xfer_action hpfinish __P((struct mba_device *, int, int *));
+int	hpopen __P((dev_t, int, int));
+int	hpclose __P((dev_t, int, int));
+int	hpioctl __P((dev_t, u_long, caddr_t, int, struct proc *));
+int	hpdump __P((dev_t, caddr_t, caddr_t, size_t));
+int	hpread __P((dev_t, struct uio *));
+int	hpwrite __P((dev_t, struct uio *));
+int	hpsize __P((dev_t));
+
+struct	cfdriver hp_cd = {
+	NULL, "hp", DV_DISK
+};
 
 struct	cfattach hp_ca = {
 	sizeof(struct hp_softc), hpmatch, hpattach
 };
 
-extern struct cfdriver hp_cd;
-
 /*
  * Check if this is a disk drive; done by checking type from mbaattach.
  */
 int
-hpmatch(parent, cf, aux)
+hpmatch(parent, match, aux)
 	struct	device *parent;
-	struct	cfdata *cf;
-	void	*aux;
+	void	*match, *aux;
 {
+	struct	cfdata *cf = match;
 	struct	mba_attach_args *ma = aux;
 
-	if (cf->cf_loc[MBACF_DRIVE] != MBACF_DRIVE_DEFAULT &&
-	    cf->cf_loc[MBACF_DRIVE] != ma->unit)
+	if (cf->cf_loc[0] != -1 && cf->cf_loc[0] != ma->unit)
 		return 0;
 
 	if (ma->devtyp != MB_RP)
@@ -132,7 +131,6 @@ hpattach(parent, self, aux)
 	/*
 	 * Init the common struct for both the adapter and its slaves.
 	 */
-	BUFQ_INIT(&sc->sc_md.md_q);
 	sc->sc_md.md_softc = (void *)sc;	/* Pointer to this softc */
 	sc->sc_md.md_mba = (void *)parent;	/* Pointer to parent softc */
 	sc->sc_md.md_start = hpstart;		/* Disk start routine */
@@ -162,17 +160,9 @@ hpattach(parent, self, aux)
 	 * Read in label.
 	 */
 	if ((msg = readdisklabel(makedev(0, self->dv_unit * 8), hpstrategy,
-	    dl, NULL)) != NULL) {
-		/*printf(": %s", msg);*/
-	}
-	printf(": %.*s, size = %d sectors\n",
-	    (int)sizeof(dl->d_typename), dl->d_typename, DL_GETDSIZE(dl));
-	/*
-	 * check if this was what we booted from.
-	 */
-	if ((B_TYPE(bootdev) == BDEV_HP) && (ma->unit == B_UNIT(bootdev)) &&
-	    (ms->sc_physnr == B_ADAPTOR(bootdev)))
-		booted_from = self;
+	    dl, NULL)) != NULL)
+		printf(": %s", msg);
+	printf(": %s, size = %d sectors\n", dl->d_typename, dl->d_secperunit);
 }
 
 
@@ -183,23 +173,17 @@ hpstrategy(bp)
 	struct	hp_softc *sc;
 	struct	buf *gp;
 	int	unit, s;
-	struct disklabel *lp;
 
 	unit = DISKUNIT(bp->b_dev);
 	sc = hp_cd.cd_devs[unit];
-	lp = sc->sc_disk.dk_label;
 
-	if (bounds_check_with_label(bp, lp, sc->sc_wlabel) <= 0)
+	if (bounds_check_with_label(bp, sc->sc_disk.dk_label, sc->sc_wlabel)
+	    <= 0)
 		goto done;
-
-	bp->b_rawblkno =
-	    bp->b_blkno + DL_GETPOFFSET(&lp->d_partitions[DISKPART(bp->b_dev)]);
-	bp->b_cylinder = bp->b_rawblkno / lp->d_secpercyl;
-
 	s = splbio();
 
-	gp = BUFQ_FIRST(&sc->sc_md.md_q);
-	disksort_cylinder(&sc->sc_md.md_q, bp);
+	gp = sc->sc_md.md_q.b_actf;
+	disksort(&sc->sc_md.md_q, bp);
 	if (gp == 0)
 		mbaqueue(&sc->sc_md);
 
@@ -208,9 +192,7 @@ hpstrategy(bp)
 
 done:
 	bp->b_resid = bp->b_bcount;
-	s = splbio();
 	biodone(bp);
-	splx(s);
 }
 
 /*
@@ -224,8 +206,9 @@ hpstart(md)
 	struct	mba_regs *mr = md->md_mba->sc_mbareg;
 	volatile struct	hp_regs *hr;
 	struct	disklabel *lp = sc->sc_disk.dk_label;
-	struct	buf *bp = BUFQ_FIRST(&md->md_q);
+	struct	buf *bp = md->md_q.b_actf;
 	unsigned bn, cn, sn, tn;
+	int	part = DISKPART(bp->b_dev);
 
 	/*
 	 * Collect statistics.
@@ -235,7 +218,7 @@ hpstart(md)
 
 	hr = (void *)&mr->mba_md[DISKUNIT(bp->b_dev)];
 
-	bn = bp->b_rawblkno;
+	bn = bp->b_blkno + lp->d_partitions[part].p_offset;
 	if (bn) {
 		cn = bn / lp->d_secpercyl;
 		sn = bn % lp->d_secpercyl;
@@ -376,7 +359,7 @@ hpfinish(md, mbasr, attn)
 	int	mbasr, *attn;
 {
 	struct	hp_softc *sc = md->md_softc;
-	struct	buf *bp = BUFQ_FIRST(&md->md_q);
+	struct	buf *bp = md->md_q.b_actf;
 	volatile struct  mba_regs *mr = md->md_mba->sc_mbareg;
 	volatile struct	hp_regs *hr = (void *)&mr->mba_md[DISKUNIT(bp->b_dev)];
 	int	er1, er2;
@@ -415,9 +398,8 @@ hper2:
 		printf("massbuss error :%s %x\n",
 		    sc->sc_dev.dv_xname, mbasr);
 
-	BUFQ_FIRST(&md->md_q)->b_resid = 0;
-	disk_unbusy(&sc->sc_disk, BUFQ_FIRST(&md->md_q)->b_bcount,
-	    (BUFQ_FIRST(&md->md_q)->b_flags & B_READ));
+	md->md_q.b_actf->b_resid = 0;
+	disk_unbusy(&sc->sc_disk, md->md_q.b_actf->b_bcount);
 	return XFER_FINISH;
 }
 
@@ -443,7 +425,7 @@ hpattn(md)
 }
 
 
-daddr64_t
+int
 hpsize(dev)
 	dev_t	dev;
 {
@@ -454,8 +436,7 @@ hpsize(dev)
 		return -1;
 
 	sc = hp_cd.cd_devs[unit];
-	size = DL_GETPSIZE(&sc->sc_disk.dk_label->d_partitions[DISKPART(dev)]) *
-	    (sc->sc_disk.dk_label->d_secsize / DEV_BSIZE);
+	size = sc->sc_disk.dk_label->d_partitions[DISKPART(dev)].p_size;
 
 	return size;
 }
@@ -463,8 +444,7 @@ hpsize(dev)
 int
 hpdump(dev, a1, a2, size)
 	dev_t	dev;
-	daddr64_t a1;
-	caddr_t a2;
+	caddr_t	a1, a2;
 	size_t	size;
 {
 	printf("hpdump: Not implemented yet.\n");
@@ -486,3 +466,27 @@ hpwrite(dev, uio)
 {
 	return (physio(hpstrategy, NULL, dev, B_WRITE, minphys, uio));
 }
+
+/*
+ * Convert physical adapternr and unit to the unit number used by kernel.
+ */
+int
+hp_getdev(mbanr, unit)
+	int	mbanr, unit;
+{
+	struct	mba_softc *ms;
+	struct	hp_softc *sc;
+	int i;
+
+	for (i = 0; i < hp_cd.cd_ndevs; i++) {
+		if (hp_cd.cd_devs[i] == 0)
+			continue;
+
+		sc = hp_cd.cd_devs[i];
+		ms = (void *)sc->sc_dev.dv_parent;
+		if (ms->sc_physnr == mbanr && sc->sc_physnr == unit)
+			return i;
+	}
+	return -1;
+}
+

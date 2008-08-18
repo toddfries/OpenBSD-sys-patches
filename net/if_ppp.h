@@ -1,50 +1,27 @@
-/*	$OpenBSD: if_ppp.h,v 1.8 2002/07/01 19:31:34 deraadt Exp $	*/
+/*	$OpenBSD: if_ppp.h,v 1.3 1996/04/21 22:28:33 deraadt Exp $	*/
 /*	$NetBSD: if_ppp.h,v 1.11 1996/03/15 02:28:05 paulus Exp $	*/
 
 /*
  * if_ppp.h - Point-to-Point Protocol definitions.
  *
- * Copyright (c) 1984-2000 Carnegie Mellon University. All rights reserved.
+ * Copyright (c) 1989 Carnegie Mellon University.
+ * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * 3. The name "Carnegie Mellon University" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any legal
- *    details, please contact
- *      Office of Technology Transfer
- *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
- *
- * 4. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by Computing Services
- *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
- *
- * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
- * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
- * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
- * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
- * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Redistribution and use in source and binary forms are permitted
+ * provided that the above copyright notice and this paragraph are
+ * duplicated in all such forms and that any documentation,
+ * advertising materials, and other materials related to such
+ * distribution and use acknowledge that the software was developed
+ * by Carnegie Mellon University.  The name of the
+ * University may not be used to endorse or promote products derived
+ * from this software without specific prior written permission.
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
+ * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#ifndef _NET_IF_PPP_H_
-#define _NET_IF_PPP_H_
+#ifndef _IF_PPP_H_
+#define _IF_PPP_H_
 
 /*
  * Packet sizes
@@ -149,10 +126,15 @@ struct ifpppcstatsreq {
 #define SIOCGPPPSTATS	_IOWR('i', 123, struct ifpppstatsreq)
 #define SIOCGPPPCSTATS	_IOWR('i', 122, struct ifpppcstatsreq)
 
-#ifdef _KERNEL
-void pppattach(void);
-int pppoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
-		   struct rtentry *);
-void pppintr(void);
+#if !defined(ifr_mtu)
+#define ifr_mtu	ifr_ifru.ifru_metric
 #endif
-#endif /* _NET_IF_PPP_H_ */
+
+#ifdef _KERNEL
+void pppattach __P((void));
+int pppsioctl __P((struct ifnet *, u_long, caddr_t));
+int pppoutput __P((struct ifnet *, struct mbuf *, struct sockaddr *,
+		   struct rtentry *));
+void pppintr __P((void));
+#endif
+#endif /* _IF_PPP_H_ */

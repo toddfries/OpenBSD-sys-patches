@@ -1,10 +1,10 @@
-/*	$OpenBSD: exit.c,v 1.9 2004/01/03 14:08:53 espie Exp $	*/
-/*	$NetBSD: exit.c,v 1.11 1996/12/01 20:22:19 pk Exp $	*/
+/*	$OpenBSD: exit.c,v 1.2 1996/02/29 13:29:22 niklas Exp $	*/
+/*	$NetBSD: exit.c,v 1.8 1996/02/09 16:10:59 gwr Exp $	*/
 
 /*-
  *  Copyright (c) 1993 John Brezak
  *  All rights reserved.
- *
+ * 
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
  *  are met:
@@ -15,7 +15,7 @@
  *     documentation and/or other materials provided with the distribution.
  *  3. The name of the author may not be used to endorse or promote products
  *     derived from this software without specific prior written permission.
- *
+ * 
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR `AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -28,34 +28,46 @@
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/stdarg.h>
+#ifdef __STDC__
+#include <stdarg.h>
+#else
+#include <varargs.h>
+#endif
 
 #include "stand.h"
 
 __dead void
+#ifdef __STDC__
 panic(const char *fmt, ...)
+#else
+panic(fmt /*, va_alist */)
+	char *fmt;
+#endif
 {
-	extern void closeall(void);
-	va_list ap;
-	static int paniced;
+    extern void closeall __P((void));
+    va_list ap;
+    static int paniced;
+    
+    if (!paniced) {
+        paniced = 1;
+        closeall();
+    }
 
-	if (!paniced) {
-		paniced = 1;
-		closeall();
-	}
-
-	va_start(ap, fmt);
-	vprintf(fmt, ap);
-	printf("\n");
-	va_end(ap);
-	_rtt();
-	/*NOTREACHED*/
+#ifdef __STDC__
+    va_start(ap, fmt);
+#else
+    va_start(ap);
+#endif
+    vprintf(fmt, ap);
+    printf("\n");
+    va_end(ap);
+    _rtt();
+    /*NOTREACHED*/
 }
 
 void
-exit(void)
+exit()
 {
-	panic("exit");
-	/*NOTREACHED*/
+    panic("exit");
+    /*NOTREACHED*/
 }

@@ -1,5 +1,5 @@
-/*	$OpenBSD: fpu_explode.c,v 1.6 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_explode.c,v 1.6 2003/10/23 15:07:30 kleink Exp $ */
+/*	$OpenBSD: fpu_explode.c,v 1.2 1996/05/09 22:20:45 niklas Exp $	*/
+/*	$NetBSD: fpu_explode.c,v 1.2 1996/04/30 11:52:18 briggs Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -22,7 +22,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -49,18 +53,18 @@
 #include <sys/types.h>
 #include <sys/systm.h>
 
-#include <machine/ieee.h>
+#include "ieee.h"
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_arith.h>
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_arith.h"
+#include "fpu_emulate.h"
 
 
 /* Conversion to internal format -- note asymmetry. */
-int	fpu_itof(struct fpn *fp, u_int i);
-int	fpu_stof(struct fpn *fp, u_int i);
-int	fpu_dtof(struct fpn *fp, u_int i, u_int j);
-int	fpu_xtof(struct fpn *fp, u_int i, u_int j, u_int k);
+static int	fpu_itof __P((struct fpn *fp, u_int i));
+static int	fpu_stof __P((struct fpn *fp, u_int i));
+static int	fpu_dtof __P((struct fpn *fp, u_int i, u_int j));
+static int	fpu_xtof __P((struct fpn *fp, u_int i, u_int j, u_int k));
 
 /*
  * N.B.: in all of the following, we assume the FP format is
@@ -84,10 +88,10 @@ int	fpu_xtof(struct fpn *fp, u_int i, u_int j, u_int k);
 /*
  * int -> fpn.
  */
-int
+static int
 fpu_itof(fp, i)
-	struct fpn *fp;
-	u_int i;
+	register struct fpn *fp;
+	register u_int i;
 {
 
 	if (i == 0)
@@ -102,6 +106,7 @@ fpu_itof(fp, i)
 	fp->fp_mant[0] = (int)i < 0 ? -i : i;
 	fp->fp_mant[1] = 0;
 	fp->fp_mant[2] = 0;
+	fp->fp_mant[3] = 0;
 	fpu_norm(fp);
 	return (FPC_NUM);
 }
@@ -120,6 +125,7 @@ fpu_itof(fp, i)
 		fp->fp_mant[0] = f0; \
 		fp->fp_mant[1] = f1; \
 		fp->fp_mant[2] = f2; \
+		fp->fp_mant[3] = f3; \
 		fpu_norm(fp); \
 		return (FPC_NUM); \
 	} \
@@ -129,12 +135,14 @@ fpu_itof(fp, i)
 		fp->fp_mant[0] = f0; \
 		fp->fp_mant[1] = f1; \
 		fp->fp_mant[2] = f2; \
+		fp->fp_mant[3] = f3; \
 		return (FPC_QNAN); \
 	} \
 	fp->fp_exp = exp - expbias; \
 	fp->fp_mant[0] = FP_1 | f0; \
 	fp->fp_mant[1] = f1; \
 	fp->fp_mant[2] = f2; \
+	fp->fp_mant[3] = f3; \
 	return (FPC_NUM)
 
 /*
@@ -142,13 +150,13 @@ fpu_itof(fp, i)
  * We assume a single occupies at most (64-FP_LG) bits in the internal
  * format: i.e., needs at most fp_mant[0] and fp_mant[1].
  */
-int
+static int
 fpu_stof(fp, i)
-	struct fpn *fp;
-	u_int i;
+	register struct fpn *fp;
+	register u_int i;
 {
-	int exp;
-	u_int frac, f0, f1;
+	register int exp;
+	register u_int frac, f0, f1;
 #define SNG_SHIFT (SNG_FRACBITS - FP_LG)
 
 	exp = (i >> (32 - 1 - SNG_EXPBITS)) & mask(SNG_EXPBITS);
@@ -162,13 +170,13 @@ fpu_stof(fp, i)
  * 64-bit double -> fpn.
  * We assume this uses at most (96-FP_LG) bits.
  */
-int
+static int
 fpu_dtof(fp, i, j)
-	struct fpn *fp;
-	u_int i, j;
+	register struct fpn *fp;
+	register u_int i, j;
 {
-	int exp;
-	u_int frac, f0, f1, f2;
+	register int exp;
+	register u_int frac, f0, f1, f2;
 #define DBL_SHIFT (DBL_FRACBITS - 32 - FP_LG)
 
 	exp = (i >> (32 - 1 - DBL_EXPBITS)) & mask(DBL_EXPBITS);
@@ -183,13 +191,13 @@ fpu_dtof(fp, i, j)
 /*
  * 96-bit extended -> fpn.
  */
-int
+static int
 fpu_xtof(fp, i, j, k)
-	struct fpn *fp;
-	u_int i, j, k;
+	register struct fpn *fp;
+	register u_int i, j, k;
 {
-	int exp;
-	u_int frac, f0, f1, f2;
+	register int exp;
+	register u_int frac, f0, f1, f2;
 #define EXT_SHIFT (EXT_FRACBITS - 1 - 32 - FP_LG)
 
 	exp = (i >> (32 - 1 - EXT_EXPBITS)) & mask(EXT_EXPBITS);
@@ -206,6 +214,7 @@ fpu_xtof(fp, i, j, k)
 		fp->fp_mant[0] = f0;
 		fp->fp_mant[1] = f1;
 		fp->fp_mant[2] = f2;
+		fp->fp_mant[3] = 0;
 		fpu_norm(fp);
 		return (FPC_NUM);
 	}
@@ -215,12 +224,14 @@ fpu_xtof(fp, i, j, k)
 		fp->fp_mant[0] = f0;
 		fp->fp_mant[1] = f1;
 		fp->fp_mant[2] = f2;
+		fp->fp_mant[3] = 0;
 		return (FPC_QNAN);
 	}
 	fp->fp_exp = exp - EXT_EXP_BIAS;
 	fp->fp_mant[0] = FP_1 | f0;
 	fp->fp_mant[1] = f1;
 	fp->fp_mant[2] = f2;
+	fp->fp_mant[3] = 0;
 	return (FPC_NUM);
 }
 
@@ -229,12 +240,12 @@ fpu_xtof(fp, i, j, k)
  */
 void
 fpu_explode(fe, fp, type, space)
-	struct fpemu *fe;
-	struct fpn *fp;
+	register struct fpemu *fe;
+	register struct fpn *fp;
 	int type;
-	u_int *space;
+	register u_int *space;
 {
-	u_int s;
+	register u_int s;
 
 	s = space[0];
 	fp->fp_sign = s >> 31;

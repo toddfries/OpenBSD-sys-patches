@@ -1,5 +1,5 @@
-/*	$OpenBSD: mem.c,v 1.21 2007/09/22 16:21:32 krw Exp $	*/
-/*	$NetBSD: mem.c,v 1.22 1999/03/27 00:30:07 mycroft Exp $	*/
+/*	$OpenBSD: mem.c,v 1.3 1996/06/08 16:21:16 briggs Exp $	*/
+/*	$NetBSD: mem.c,v 1.11 1996/05/05 06:18:41 briggs Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -51,11 +55,9 @@
 
 #include <machine/cpu.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
-extern u_long maxaddr;
-
-static caddr_t devzeropage;
+caddr_t zeropage;
 
 #define mmread	mmrw
 #define mmwrite	mmrw
@@ -69,15 +71,7 @@ mmopen(dev, flag, mode, p)
 	struct proc *p;
 {
 
-	switch (minor(dev)) {
-		case 0:
-		case 1:
-		case 2:
-		case 12:
-			return (0);
-		default:
-			return (ENXIO);
-	}
+	return (0);
 }
 
 /*ARGSUSED*/
@@ -98,12 +92,11 @@ mmrw(dev, uio, flags)
 	struct uio *uio;
 	int flags;
 {
-	vaddr_t o, v;
-	int c;
-	struct iovec *iov;
+	register vm_offset_t o, v;
+	register int c;
+	register struct iovec *iov;
 	int error = 0;
 	static int physlock;
-	vm_prot_t prot;
 
 	if (minor(dev) == 0) {
 		/* lock against other uses of shared vmmap */
@@ -130,33 +123,21 @@ mmrw(dev, uio, flags)
 /* minor device 0 is physical memory */
 		case 0:
 			v = uio->uio_offset;
-
-			/*
-			 * Only allow reads in physical RAM.
-			 */
-			if (v >= maxaddr || v < 0) {
-				error = EFAULT;
-				goto unlock;
-			}
-
-			prot = uio->uio_rw == UIO_READ ? VM_PROT_READ :
-			    VM_PROT_WRITE;
-			pmap_enter(pmap_kernel(), (vaddr_t)vmmap,
-			    trunc_page(v), prot, prot|PMAP_WIRED);
-			pmap_update(pmap_kernel());
-			o = m68k_page_offset(uio->uio_offset);
+			pmap_enter(pmap_kernel(), (vm_offset_t)vmmap,
+			    trunc_page(v), uio->uio_rw == UIO_READ ?
+			    VM_PROT_READ : VM_PROT_WRITE, TRUE);
+			o = uio->uio_offset & PGOFSET;
 			c = min(uio->uio_resid, (int)(NBPG - o));
 			error = uiomove((caddr_t)vmmap + o, c, uio);
-			pmap_remove(pmap_kernel(), (vaddr_t)vmmap,
-			    (vaddr_t)vmmap + NBPG);
-			pmap_update(pmap_kernel());
+			pmap_remove(pmap_kernel(), (vm_offset_t)vmmap,
+			    (vm_offset_t)vmmap + NBPG);
 			continue;
 
 /* minor device 1 is kernel memory */
 		case 1:
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
-			if (!uvm_kernacc((caddr_t)v, c,
+			if (!kernacc((caddr_t)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 				return (EFAULT);
 			error = uiomove((caddr_t)v, c, uio);
@@ -174,16 +155,13 @@ mmrw(dev, uio, flags)
 				c = iov->iov_len;
 				break;
 			}
-
-			/*
-			 * On the first call, allocate and zero a page
-			 * of memory for use with /dev/zero.
-			 */
-			if (devzeropage == NULL)
-				devzeropage = malloc(PAGE_SIZE, M_TEMP,
-				    M_WAITOK | M_ZERO);
-			c = min(iov->iov_len, PAGE_SIZE);
-			error = uiomove(devzeropage, c, uio);
+			if (zeropage == NULL) {
+				zeropage = (caddr_t)
+				    malloc(CLBYTES, M_TEMP, M_WAITOK);
+				bzero(zeropage, CLBYTES);
+			}
+			c = min(iov->iov_len, CLBYTES);
+			error = uiomove(zeropage, c, uio);
 			continue;
 
 		default:
@@ -191,13 +169,12 @@ mmrw(dev, uio, flags)
 		}
 		if (error)
 			break;
-		iov->iov_base = (caddr_t)iov->iov_base + c;
+		iov->iov_base += c;
 		iov->iov_len -= c;
 		uio->uio_offset += c;
 		uio->uio_resid -= c;
 	}
 	if (minor(dev) == 0) {
-unlock:
 		if (physlock > 1)
 			wakeup((caddr_t)&physlock);
 		physlock = 0;
@@ -205,11 +182,10 @@ unlock:
 	return (error);
 }
 
-paddr_t
+int
 mmmmap(dev, off, prot)
 	dev_t dev;
-	off_t off;
-	int prot;
+	int off, prot;
 {
 	/*
 	 * /dev/mem is the only one that makes sense through this
@@ -221,23 +197,13 @@ mmmmap(dev, off, prot)
 	 */
 	if (minor(dev) != 0)
 		return (-1);
-
 	/*
-	 * Only allow access to physical RAM.
-	 */
-	if ((u_int)off >= maxaddr)
+	 * Allow access only in RAM.
+	 *
+	 * XXX could be extended to allow access to IO space but must
+	 * be very careful.
+	if ((unsigned)off < lowram || (unsigned)off >= 0xFFFFFFFC)
 		return (-1);
-
-	return (atop((u_int)off));
-}
-
-int
-mmioctl(dev, cmd, data, flags, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flags;
-	struct proc *p;
-{
-	return (EOPNOTSUPP);
+	 */
+	return (mac68k_btop(off));
 }

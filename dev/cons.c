@@ -1,4 +1,4 @@
-/*	$OpenBSD: cons.c,v 1.18 2007/06/17 18:50:58 jasper Exp $	*/
+/*	$OpenBSD: cons.c,v 1.7 1996/04/21 22:19:48 deraadt Exp $	*/
 /*	$NetBSD: cons.c,v 1.30 1996/04/08 19:57:30 jonathan Exp $	*/
 
 /*
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -49,7 +53,6 @@
 #include <sys/file.h>
 #include <sys/conf.h>
 #include <sys/vnode.h>
-#include <sys/poll.h>
 
 #include <dev/cons.h>
 
@@ -58,9 +61,11 @@ struct	consdev *cn_tab;	/* physical console device info */
 struct	vnode *cn_devvp;	/* vnode for underlying device. */
 
 int
-cnopen(dev_t dev, int flag, int mode, struct proc *p)
+cnopen(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
-	dev_t cndev;
 
 	if (cn_tab == NULL)
 		return (0);
@@ -70,22 +75,19 @@ cnopen(dev_t dev, int flag, int mode, struct proc *p)
 	 * later.  This follows normal device semantics; they always get
 	 * open() calls.
 	 */
-	cndev = cn_tab->cn_dev;
-	if (cndev == NODEV)
-		return (ENXIO);
-#ifdef DIAGNOSTIC
-	if (cndev == dev)
-		panic("cnopen: recursive");
-#endif
+	dev = cn_tab->cn_dev;
 	if (cn_devvp == NULLVP) {
 		/* try to get a reference on its vnode, but fail silently */
-		cdevvp(cndev, &cn_devvp);
+		cdevvp(dev, &cn_devvp);
 	}
-	return ((*cdevsw[major(cndev)].d_open)(cndev, flag, mode, p));
+	return ((*cdevsw[major(dev)].d_open)(dev, flag, mode, p));
 }
  
 int
-cnclose(dev_t dev, int flag, int mode, struct proc *p)
+cnclose(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
 	struct vnode *vp;
 
@@ -109,7 +111,10 @@ cnclose(dev_t dev, int flag, int mode, struct proc *p)
 }
  
 int
-cnread(dev_t dev, struct uio *uio, int flag)
+cnread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 
 	/*
@@ -119,7 +124,7 @@ cnread(dev_t dev, struct uio *uio, int flag)
 	 * input (except a shell in single-user mode, but then,
 	 * one wouldn't TIOCCONS then).
 	 */
-	if (constty != NULL)
+	if (constty != NULL && (cn_tab == NULL || cn_tab->cn_pri != CN_REMOTE))
 		return 0;
 	else if (cn_tab == NULL)
 		return ENXIO;
@@ -129,14 +134,17 @@ cnread(dev_t dev, struct uio *uio, int flag)
 }
  
 int
-cnwrite(dev_t dev, struct uio *uio, int flag)
+cnwrite(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 
 	/*
 	 * Redirect output, if that's appropriate.
 	 * If there's no real console, return ENXIO.
 	 */
-	if (constty != NULL)
+	if (constty != NULL && (cn_tab == NULL || cn_tab->cn_pri != CN_REMOTE))
 		dev = constty->t_dev;
 	else if (cn_tab == NULL)
 		return ENXIO;
@@ -146,14 +154,20 @@ cnwrite(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-cnstop(struct tty *tp, int flag)
+cnstop(tp, flag)
+	struct tty *tp;
+	int flag;
 {
 	return (0);
 }
  
 int
-cnioctl(dev_t dev, u_long cmd, caddr_t data, int flag,
-    struct proc *p)
+cnioctl(dev, cmd, data, flag, p)
+	dev_t dev;
+	u_long cmd;
+	caddr_t data;
+	int flag;
+	struct proc *p;
 {
 	int error;
 
@@ -162,7 +176,7 @@ cnioctl(dev_t dev, u_long cmd, caddr_t data, int flag,
 	 * output from the "virtual" console.
 	 */
 	if (cmd == TIOCCONS && constty != NULL) {
-		error = suser(p, SUSER_NOACCT);
+		error = suser(p->p_ucred, (u_short *) NULL);
 		if (error)
 			return (error);
 		constty = NULL;
@@ -175,7 +189,7 @@ cnioctl(dev_t dev, u_long cmd, caddr_t data, int flag,
 	 * ioctls on /dev/console, then the console is redirected
 	 * out from under it.
 	 */
-	if (constty != NULL)
+	if (constty != NULL && (cn_tab == NULL || cn_tab->cn_pri != CN_REMOTE))
 		dev = constty->t_dev;
 	else if (cn_tab == NULL)
 		return ENXIO;
@@ -186,45 +200,28 @@ cnioctl(dev_t dev, u_long cmd, caddr_t data, int flag,
 
 /*ARGSUSED*/
 int
-cnpoll(dev_t dev, int rw, struct proc *p)
+cnselect(dev, rw, p)
+	dev_t dev;
+	int rw;
+	struct proc *p;
 {
 
 	/*
-	 * Redirect the poll, if that's appropriate.
+	 * Redirect the select, if that's appropriate.
 	 * I don't want to think of the possible side effects
 	 * of console redirection here.
 	 */
-	if (constty != NULL)
+	if (constty != NULL && (cn_tab == NULL || cn_tab->cn_pri != CN_REMOTE))
 		dev = constty->t_dev;
 	else if (cn_tab == NULL)
-		return POLLERR;
+		return ENXIO;
 	else
 		dev = cn_tab->cn_dev;
-	return (ttpoll(cn_tab->cn_dev, rw, p));
-}
-
-
-int
-cnkqfilter(dev_t dev, struct knote *kn)
-{
-
-	/*
-	 * Redirect output, if that's appropriate.
-	 * If there's no real console, return 1.
-	 */
-	if (constty != NULL)
-		dev = constty->t_dev;
-	else if (cn_tab == NULL)
-		return (1);
-	else
-		dev = cn_tab->cn_dev;
-	if (cdevsw[major(dev)].d_flags & D_KQFILTER)
-		return ((*cdevsw[major(dev)].d_kqfilter)(dev, kn));
-	return (1);
+	return (ttselect(cn_tab->cn_dev, rw, p));
 }
 
 int
-cngetc(void)
+cngetc()
 {
 
 	if (cn_tab == NULL)
@@ -233,7 +230,8 @@ cngetc(void)
 }
 
 void
-cnputc(int c)
+cnputc(c)
+	register int c;
 {
 
 	if (cn_tab == NULL)
@@ -247,7 +245,8 @@ cnputc(int c)
 }
 
 void
-cnpollc(int on)
+cnpollc(on)
+	int on;
 {
 	static int refcount = 0;
 
@@ -262,16 +261,9 @@ cnpollc(int on)
 }
 
 void
-nullcnpollc(dev_t dev, int on)
+nullcnpollc(dev, on)
+	dev_t dev;
+	int on;
 {
 
-}
-
-void
-cnbell(u_int pitch, u_int period, u_int volume)
-{
-	if (cn_tab == NULL || cn_tab->cn_bell == NULL)
-		return;
-
-	(*cn_tab->cn_bell)(cn_tab->cn_dev, pitch, period, volume);
 }

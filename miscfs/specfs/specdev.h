@@ -1,4 +1,4 @@
-/*	$OpenBSD: specdev.h,v 1.25 2008/05/03 14:41:29 thib Exp $	*/
+/*	$OpenBSD: specdev.h,v 1.2 1996/02/27 08:05:17 niklas Exp $	*/
 /*	$NetBSD: specdev.h,v 1.12 1996/02/13 13:13:01 mycroft Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -40,31 +44,21 @@
 struct specinfo {
 	struct	vnode **si_hashchain;
 	struct	vnode *si_specnext;
-	struct  mount *si_mountpoint;
+	long	si_flags;
 	dev_t	si_rdev;
-	struct	lockf *si_lockf;
-	daddr64_t si_lastr;
-	union {
-		struct vnode *ci_parent; /* pointer back to parent device */
-		u_int8_t ci_bitmap[8]; /* bitmap of devices cloned off us */
-	} si_ci;
 };
-
-struct cloneinfo {
-	struct vnode *ci_vp; /* cloned vnode */
-	void *ci_data; /* original vnode's v_data */
-};
-
 /*
  * Exported shorthand
  */
 #define v_rdev v_specinfo->si_rdev
 #define v_hashchain v_specinfo->si_hashchain
 #define v_specnext v_specinfo->si_specnext
-#define v_specmountpoint v_specinfo->si_mountpoint
-#define v_speclockf v_specinfo->si_lockf
-#define v_specparent v_specinfo->si_ci.ci_parent
-#define v_specbitmap v_specinfo->si_ci.ci_bitmap
+#define v_specflags v_specinfo->si_flags
+
+/*
+ * Flags for specinfo
+ */
+#define	SI_MOUNTEDON	0x0001	/* block special device is mounted on */
 
 /*
  * Special device management
@@ -76,12 +70,12 @@ struct cloneinfo {
 #define	SPECHASH(rdev)	(((unsigned)((rdev>>5)+(rdev)))%SPECHSZ)
 #endif
 
-extern struct vnode *speclisth[SPECHSZ];
+struct vnode *speclisth[SPECHSZ];
 
 /*
  * Prototypes for special file operations on vnodes.
  */
-extern	int (**spec_vnodeop_p)(void *);
+extern	int (**spec_vnodeop_p) __P((void *));
 struct	nameidata;
 struct	componentname;
 struct	ucred;
@@ -89,26 +83,48 @@ struct	flock;
 struct	buf;
 struct	uio;
 
-int	spec_badop(void *);
-int	spec_getattr(void *);
-int	spec_setattr(void *);
-int	spec_access(void *);
-int	spec_open(void *);
-int	spec_close(void *);
-int	spec_read(void *);
-int	spec_write(void *);
-int	spec_ioctl(void *);
-int	spec_poll(void *);
-int	spec_kqfilter(void *);
-int	spec_fsync(void *);
-int	spec_inactive(void *);
-int	spec_strategy(void *);
-int	spec_print(void *);
-int	spec_pathconf(void *);
-int	spec_advlock(void *);
+int	spec_badop	__P((void *));
+int	spec_ebadf	__P((void *));
 
-int	spec_vnoperate(void *);
-
-/* spec_subr.c */
-int	spec_open_clone(struct vop_open_args *);
-int	spec_close_clone(struct vop_close_args *);
+int	spec_lookup	__P((void *));
+#define	spec_create	spec_badop
+#define	spec_mknod	spec_badop
+int	spec_open	__P((void *));
+int	spec_close	__P((void *));
+#define	spec_access	spec_ebadf
+#define	spec_getattr	spec_ebadf
+#define	spec_setattr	spec_ebadf
+int	spec_read	__P((void *));
+int	spec_write	__P((void *));
+#define	spec_lease_check nullop
+int	spec_ioctl	__P((void *));
+int	spec_select	__P((void *));
+#define	spec_mmap	spec_badop
+int	spec_fsync	__P((void *));
+#define	spec_seek	spec_badop
+#define	spec_remove	spec_badop
+#define	spec_link	spec_badop
+#define	spec_rename	spec_badop
+#define	spec_mkdir	spec_badop
+#define	spec_rmdir	spec_badop
+#define	spec_symlink	spec_badop
+#define	spec_readdir	spec_badop
+#define	spec_readlink	spec_badop
+#define	spec_abortop	spec_badop
+#define	spec_inactive	nullop
+#define	spec_reclaim	nullop
+int	spec_lock	__P((void *));
+int	spec_unlock	__P((void *));
+int	spec_bmap	__P((void *));
+int	spec_strategy	__P((void *));
+int	spec_print	__P((void *));
+#define	spec_islocked	nullop
+int	spec_pathconf	__P((void *));
+int	spec_advlock	__P((void *));
+#define	spec_blkatoff	spec_badop
+#define	spec_valloc	spec_badop
+#define	spec_reallocblks spec_badop
+#define	spec_vfree	spec_badop
+#define	spec_truncate	nullop
+#define	spec_update	nullop
+#define	spec_bwrite	vn_bwrite

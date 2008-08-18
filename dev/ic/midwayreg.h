@@ -1,4 +1,4 @@
-/*	$OpenBSD: midwayreg.h,v 1.9 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: midwayreg.h,v 1.4 1996/07/16 22:08:16 chuck Exp $	*/
 
 /*
  * m i d w a y r e g . h
@@ -8,20 +8,19 @@
  *
  */
 
-#if defined(__sparc__) || defined(__FreeBSD__)
+#if defined(sparc) || defined(__FreeBSD__)
 /* XXX: gross.   netbsd/sparc doesn't have machine/bus.h yet. */
-typedef void * bus_space_tag_t;
+typedef void * bus_chipset_tag_t;
 typedef u_int32_t pci_chipset_tag_t;
-typedef caddr_t bus_space_handle_t;
-typedef u_int32_t bus_size_t;
-typedef caddr_t bus_addr_t;
+typedef caddr_t bus_mem_handle_t;
+typedef u_int32_t bus_mem_size_t;
+typedef caddr_t bus_mem_addr_t;
 
-#define bus_space_read_4(t, h, o) ((void) t,                            \
-    (*(volatile u_int32_t *)((h) + (o))))
-#define bus_space_write_4(t, h, o, v)                                   \
+#define bus_mem_read_4(t, h, o) ((void) t, (*(volatile u_int32_t *)((h) + (o))))
+#define bus_mem_write_4(t, h, o, v)                                     \
     ((void) t, ((void)(*(volatile u_int32_t *)((h) + (o)) = (v))))
 
-#if defined(__sparc__)
+#if defined(sparc)
 #define vtophys(x) ((u_int32_t)(x))	/* sun4c dvma */
 #endif
 
@@ -39,12 +38,12 @@ typedef caddr_t bus_addr_t;
  * card data structures, top down
  *
  * in order to have a portable driver, the netbsd guys will not let us
- * use structs.   we have a bus_space_handle_t which is the en_base address.
+ * use structs.   we have a bus_mem_handle_t which is the en_base address.
  * everything else is an offset from that base.   all card data must be 
- * accessed with bus_space_read_4()/bus_space_write_4():
+ * accessed with bus_mem_read_4()/bus_mem_write_4():
  *
- * rv = bus_space_read_4(sc->en_memt, sc->en_base, BYTE_OFFSET);
- * bus_space_write_4(sc->en_memt, sc->en_base, BYTE_OFFSET, VALUE);
+ * rv = bus_mem_read_4(sc->en_bc, sc->en_base, BYTE_OFFSET);
+ * bus_mem_write_4(sc->en_bc, sc->en_base, BYTE_OFFSET, VALUE);
  *
  * en_card: the whole card (prom + phy + midway + obmem)
  * 	obmem contains: vci tab + dma queues (rx & tx) + service list + bufs
@@ -208,12 +207,9 @@ typedef caddr_t bus_addr_t;
 				/* convert byte offset to reg value */
 #define MID_DRQ_REG2A(N)	(((N) << 3) + MID_DRQOFF) /* and back */
 
-/* note: format of word 1 of RXQ is different between ENI and ADP cards */
-#define MID_MK_RXQ_ENI(CNT,VC,END,TYPE) \
+#define MID_MK_RXQ(CNT,VC,END,TYPE) \
 	( ((CNT) << 16)|((VC) << 6)|(END)|(TYPE) )
 
-#define MID_MK_RXQ_ADP(CNT,VC,END,JK) \
-	( ((CNT) << 12)|((VC) << 2)|((END) >> 4)|(((JK) != 0) ? 1 : 0))
 /*
  * dma xmit q.
  */
@@ -224,12 +220,8 @@ typedef caddr_t bus_addr_t;
 #define MID_DTQ_REG2A(N)	(((N) << 3) + MID_DTQOFF) /* and back */
 
 
-/* note: format of word 1 of TXQ is different between ENI and ADP cards */
-#define MID_MK_TXQ_ENI(CNT,CHN,END,TYPE) \
+#define MID_MK_TXQ(CNT,CHN,END,TYPE) \
 	( ((CNT) << 16)|((CHN) << 6)|(END)|(TYPE) )
-
-#define MID_MK_TXQ_ADP(CNT,CHN,END,JK) \
-	( ((CNT) << 12)|((CHN) << 2)|((END) >> 4)|(((JK) != 0) ? 1 : 0) )
 
 /*
  * dma types

@@ -1,15 +1,11 @@
-#	$OpenBSD: Makefile,v 1.7 2003/07/19 00:03:52 david Exp $
+#	$NetBSD: Makefile,v 1.3 1995/09/30 21:43:41 pk Exp $
 
-
-MAN=	installboot.8
-MANSUBDIR=sparc
-LDSTATIC=-static
-
-.if ${MACHINE} == "sparc"
-BINDIR=	/usr/sbin
+.PATH:	${.CURDIR}/..
 PROG=	installboot
-.else
-NOPROG=
-.endif
+MAN=	installboot.8
+BINDIR=/usr/sbin
+
+# XXX - prevent sa clutter
+__stand_makefile_inc=1
 
 .include <bsd.prog.mk>

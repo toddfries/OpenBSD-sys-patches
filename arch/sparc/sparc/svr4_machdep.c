@@ -1,5 +1,4 @@
-/*	$OpenBSD: svr4_machdep.c,v 1.13 2005/03/21 22:34:33 miod Exp $	*/
-/*	$NetBSD: svr4_machdep.c,v 1.24 1997/07/29 10:04:45 fair Exp $	 */
+/*	$NetBSD: svr4_machdep.c,v 1.17.4.1 1996/06/11 01:46:42 jtc Exp $	 */
 
 /*
  * Copyright (c) 1994 Christos Zoulas
@@ -41,7 +40,6 @@
 #include <sys/signalvar.h>
 #include <sys/malloc.h>
 #include <sys/buf.h>
-#include <sys/exec.h>
 
 #include <sys/syscallargs.h>
 #include <compat/svr4/svr4_types.h>
@@ -55,7 +53,7 @@
 #include <machine/trap.h>
 #include <machine/svr4_machdep.h>
 
-static void svr4_getsiginfo(union svr4_siginfo *, int, u_long, int, caddr_t);
+static void svr4_getsiginfo __P((union svr4_siginfo *, int, u_long, caddr_t));
 
 #ifdef DEBUG
 extern int sigdebug;
@@ -66,7 +64,7 @@ extern int sigpid;
 #endif
 
 #ifdef DEBUG_SVR4
-static void svr4_printcontext(const char *, struct svr4_ucontext *);
+static void svr4_printcontext __P((const char *, struct svr4_ucontext *));
 
 static void
 svr4_printcontext(fun, uc)
@@ -79,31 +77,31 @@ svr4_printcontext(fun, uc)
 	printf("%s at %p\n", fun, uc);
 
 	printf("Regs: ");
-	printf("PSR = 0x%x ", r[SVR4_SPARC_PSR]);
-	printf("PC = 0x%x ",  r[SVR4_SPARC_PC]);
-	printf("nPC = 0x%x ", r[SVR4_SPARC_nPC]);
-	printf("Y = 0x%x ",   r[SVR4_SPARC_Y]);
-	printf("G1 = 0x%x ",  r[SVR4_SPARC_G1]);
-	printf("G2 = 0x%x ",  r[SVR4_SPARC_G2]);
-	printf("G3 = 0x%x ",  r[SVR4_SPARC_G3]);
-	printf("G4 = 0x%x ",  r[SVR4_SPARC_G4]);
-	printf("G5 = 0x%x ",  r[SVR4_SPARC_G5]);
-	printf("G6 = 0x%x ",  r[SVR4_SPARC_G6]);
-	printf("G7 = 0x%x ",  r[SVR4_SPARC_G7]);
-	printf("O0 = 0x%x ",  r[SVR4_SPARC_O0]);
-	printf("O1 = 0x%x ",  r[SVR4_SPARC_O1]);
-	printf("O2 = 0x%x ",  r[SVR4_SPARC_O2]);
-	printf("O3 = 0x%x ",  r[SVR4_SPARC_O3]);
-	printf("O4 = 0x%x ",  r[SVR4_SPARC_O4]);
-	printf("O5 = 0x%x ",  r[SVR4_SPARC_O5]);
-	printf("O6 = 0x%x ",  r[SVR4_SPARC_O6]);
-	printf("O7 = 0x%x ",  r[SVR4_SPARC_O7]);
+	printf("PSR = %x ", r[SVR4_SPARC_PSR]);
+	printf("PC = %x ",  r[SVR4_SPARC_PC]);
+	printf("nPC = %x ", r[SVR4_SPARC_nPC]);
+	printf("Y = %x ",   r[SVR4_SPARC_Y]);
+	printf("G1 = %x ",  r[SVR4_SPARC_G1]);
+	printf("G2 = %x ",  r[SVR4_SPARC_G2]);
+	printf("G3 = %x ",  r[SVR4_SPARC_G3]);
+	printf("G4 = %x ",  r[SVR4_SPARC_G4]);
+	printf("G5 = %x ",  r[SVR4_SPARC_G5]);
+	printf("G6 = %x ",  r[SVR4_SPARC_G6]);
+	printf("G7 = %x ",  r[SVR4_SPARC_G7]);
+	printf("O0 = %x ",  r[SVR4_SPARC_O0]);
+	printf("O1 = %x ",  r[SVR4_SPARC_O1]);
+	printf("O2 = %x ",  r[SVR4_SPARC_O2]);
+	printf("O3 = %x ",  r[SVR4_SPARC_O3]);
+	printf("O4 = %x ",  r[SVR4_SPARC_O4]);
+	printf("O5 = %x ",  r[SVR4_SPARC_O5]);
+	printf("O6 = %x ",  r[SVR4_SPARC_O6]);
+	printf("O7 = %x ",  r[SVR4_SPARC_O7]);
 	printf("\n");
 
-	printf("Signal Stack: sp %p, size %d, flags 0x%x\n",
-	    s->ss_sp, s->ss_size, s->ss_flags);
+	printf("Signal Stack: sp %p, size %d, flags %x\n",
+	       s->ss_sp, s->ss_size, s->ss_flags);
 
-	printf("Flags: 0x%lx\n", uc->uc_flags);
+	printf("Flags: %lx\n", uc->uc_flags);
 }
 #endif
 
@@ -162,14 +160,14 @@ svr4_getcontext(p, uc, mask, oonstack)
 		size_t sz = f->fp_nqel * f->fp_nqsize;
 		if (sz > sizeof(fps->fs_queue)) {
 #ifdef DIAGNOSTIC
-			printf("svr4_getcontext: fp_queue too large\n");
+			printf("getcontext: fp_queue too large\n");
 #endif
 			return;
 		}
 		if (copyout(fps->fs_queue, f->fp_q, sz) != 0) {
 #ifdef DIAGNOSTIC
-			printf("svr4_getcontext: copy of fp_queue failed %d\n",
-			    error);
+			printf("getcontext: copy of fp_queue failed %d\n",
+			       error);
 #endif
 			return;
 		}
@@ -254,9 +252,7 @@ svr4_setcontext(p, uc)
 		 * that is required; if it holds, just do it.
 		 */
 		if (((r[SVR4_SPARC_PC] | r[SVR4_SPARC_nPC]) & 3) != 0) {
-#ifdef DEBUG_SVR4
-			printf("svr4_setcontext: pc or npc are not multiples of 4!\n");
-#endif
+			printf("pc or npc are not multiples of 4!\n");
 			return EINVAL;
 		}
 
@@ -296,7 +292,7 @@ svr4_setcontext(p, uc)
 		size_t sz = f->fp_nqel * f->fp_nqsize;
 		if (sz > sizeof(fps->fs_queue)) {
 #ifdef DIAGNOSTIC
-			printf("svr4_setcontext: fp_queue too large\n");
+			printf("setcontext: fp_queue too large\n");
 #endif
 			return EINVAL;
 		}
@@ -304,16 +300,10 @@ svr4_setcontext(p, uc)
 		fps->fs_qsize = f->fp_nqel;
 		fps->fs_fsr = f->fp_fsr;
 		if (f->fp_q != NULL) {
-			size_t sz = f->fp_nqel * f->fp_nqsize;
-			if (sz > sizeof(fps->fs_queue)) {
+			if ((error = copyin(f->fp_q, fps->fs_queue,
+					    f->fp_nqel * f->fp_nqsize)) != 0) {
 #ifdef DIAGNOSTIC
-				printf("svr4_setcontext: fp_queue too large\n");
-#endif
-				return (EINVAL);
-			}
-			if ((error = copyin(f->fp_q, fps->fs_queue, sz)) != 0) {
-#ifdef DIAGNOSTIC
-				printf("svr4_setcontext: copy of fp_queue failed\n");
+				printf("setcontext: copy of fp_queue failed\n");
 #endif
 				return error;
 			}
@@ -340,100 +330,124 @@ svr4_setcontext(p, uc)
 }
 
 /*
- * map the native sig/type code into the svr4 siginfo as best we can
+ * map the trap code into the svr4 siginfo as best we can
  */
 static void
-svr4_getsiginfo(si, sig, code, type, addr)
+svr4_getsiginfo(si, sig, code, addr)
 	union svr4_siginfo	*si;
 	int			 sig;
 	u_long			 code;
-	int			 type;
 	caddr_t			 addr;
 {
-	si->svr4_si_signo = bsd_to_svr4_sig[sig];
-	si->svr4_si_errno = 0;
-	si->svr4_si_addr  = addr;
+	si->si_signo = bsd_to_svr4_sig[sig];
+	si->si_errno = 0;
+	si->si_addr  = addr;
 	/*
 	 * we can do this direct map as they are the same as all sparc
 	 * architectures.
 	 */
-	si->svr4_si_trap = code;
+	si->si_trap = code;
 
-	si->svr4_si_code = 0;
-	si->svr4_si_trap = 0;
+	switch (code) {
+	case T_RESET:
+		si->si_code = 0;
+		break;
 
-	switch (sig) {
-	case SIGSEGV:
-		switch (type) {
-		case SEGV_ACCERR:
-			si->svr4_si_code = SVR4_SEGV_ACCERR;
-			si->svr4_si_trap = SVR4_T_PROTFLT;
-			break;
-		case SEGV_MAPERR:
-			si->svr4_si_code = SVR4_SEGV_MAPERR;
-			si->svr4_si_trap = SVR4_T_SEGNPFLT;
-			break;
-		}
+	case T_TEXTFAULT:
+		si->si_code = SVR4_BUS_ADRALN;
 		break;
-	case SIGBUS:
-		switch (type) {
-		case BUS_ADRALN:
-			si->svr4_si_code = SVR4_BUS_ADRALN;
-			si->svr4_si_trap = SVR4_T_ALIGNFLT;
-			break;
-		}
+
+	case T_ILLINST:
+		si->si_code = SVR4_ILL_ILLOPC;
 		break;
-	case SIGTRAP:
-		switch (type) {
-		case TRAP_BRKPT:
-			si->svr4_si_code = SVR4_TRAP_BRKPT;
-			si->svr4_si_trap = SVR4_T_BPTFLT;
-			break;
-		case TRAP_TRACE:
-			si->svr4_si_code = SVR4_TRAP_TRACE;
-			si->svr4_si_trap = SVR4_T_TRCTRAP;
-			break;
-		}
+
+	case T_PRIVINST:
+		si->si_code = SVR4_ILL_PRVOPC;
 		break;
-	case SIGEMT:
-		switch (type) {
-		}
+
+	case T_FPDISABLED:
+		si->si_code = SVR4_FPE_FLTINV;
 		break;
-	case SIGILL:
-		switch (type) {
-		case ILL_PRVOPC:
-			si->svr4_si_code = SVR4_ILL_PRVOPC;
-			si->svr4_si_trap = SVR4_T_PRIVINFLT;
-			break;
-		case ILL_BADSTK:
-			si->svr4_si_code = SVR4_ILL_BADSTK;
-			si->svr4_si_trap = SVR4_T_STKFLT;
-			break;
-		}
+
+	case T_ALIGN:
+		si->si_code = SVR4_BUS_ADRALN;
 		break;
-	case SIGFPE:
-		switch (type) {
-		case FPE_INTOVF:
-			si->svr4_si_code = SVR4_FPE_INTOVF;
-			si->svr4_si_trap = SVR4_T_DIVIDE;
-			break;
-		case FPE_FLTDIV:
-			si->svr4_si_code = SVR4_FPE_FLTDIV;
-			si->svr4_si_trap = SVR4_T_DIVIDE;
-			break;
-		case FPE_FLTOVF:
-			si->svr4_si_code = SVR4_FPE_FLTOVF;
-			si->svr4_si_trap = SVR4_T_DIVIDE;
-			break;
-		case FPE_FLTSUB:
-			si->svr4_si_code = SVR4_FPE_FLTSUB;
-			si->svr4_si_trap = SVR4_T_BOUND;
-			break;
-		case FPE_FLTINV:
-			si->svr4_si_code = SVR4_FPE_FLTINV;
-			si->svr4_si_trap = SVR4_T_FPOPFLT;
-			break;
-		}
+
+	case T_FPE:
+		si->si_code = SVR4_FPE_FLTINV;
+		break;
+
+	case T_DATAFAULT:
+		si->si_code = SVR4_BUS_ADRALN;
+		break;
+
+	case T_TAGOF:
+		si->si_code = SVR4_EMT_TAGOVF;
+		break;
+
+	case T_CPDISABLED:
+		si->si_code = SVR4_FPE_FLTINV;
+		break;
+
+	case T_CPEXCEPTION:
+		si->si_code = SVR4_FPE_FLTINV;
+		break;
+
+	case T_DIV0:
+		si->si_code = SVR4_FPE_INTDIV;
+		break;
+
+	case T_INTOF:
+		si->si_code = SVR4_FPE_INTOVF;
+		break;
+
+	case T_BREAKPOINT:
+		si->si_code = SVR4_TRAP_BRKPT;
+		break;
+
+	/*
+	 * XXX - hardware traps with unknown code
+	 */
+	case T_WINOF:
+	case T_WINUF:
+	case T_L1INT:
+	case T_L2INT:
+	case T_L3INT:
+	case T_L4INT:
+	case T_L5INT:
+	case T_L6INT:
+	case T_L7INT:
+	case T_L8INT:
+	case T_L9INT:
+	case T_L10INT:
+	case T_L11INT:
+	case T_L12INT:
+	case T_L13INT:
+	case T_L14INT:
+	case T_L15INT:
+		si->si_code = 0;
+		break;
+
+	/*
+	 * XXX - software traps with unknown code
+	 */
+	case T_SUN_SYSCALL:
+	case T_FLUSHWIN:
+	case T_CLEANWIN:
+	case T_RANGECHECK:
+	case T_FIXALIGN:
+	case T_SVR4_SYSCALL:
+	case T_BSD_SYSCALL:
+	case T_KGDB_EXEC:
+		si->si_code = 0;
+		break;
+
+	default:
+		si->si_code = 0;
+#ifdef DIAGNOSTIC
+		printf("sig %d code %ld\n", sig, code);
+		panic("svr4_getsiginfo");
+#endif
 		break;
 	}
 }
@@ -448,18 +462,18 @@ svr4_getsiginfo(si, sig, code, type, addr)
  * will return to the user pc, psl.
  */
 void
-svr4_sendsig(catcher, sig, mask, code, type, val)
+svr4_sendsig(catcher, sig, mask, code)
 	sig_t catcher;
 	int sig, mask;
 	u_long code;
-	int type;
-	union sigval val;
 {
 	register struct proc *p = curproc;
 	register struct trapframe *tf;
 	struct svr4_sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
-	int oonstack, oldsp, newsp, caddr;
+	int oonstack, oldsp, newsp, addr;
+	extern char svr4_sigcode[], svr4_esigcode[];
+
 
 	tf = (struct trapframe *)p->p_md.md_tf;
 	oldsp = tf->tf_out[6];
@@ -485,9 +499,9 @@ svr4_sendsig(catcher, sig, mask, code, type, val)
 	/*
 	 * Build the argument list for the signal handler.
 	 */
-	svr4_getsiginfo(&frame.sf_si, sig, code, type, val.sival_ptr);
+	svr4_getsiginfo(&frame.sf_si, sig, code, (caddr_t) tf->tf_pc);
 	svr4_getcontext(p, &frame.sf_uc, mask, oonstack);
-	frame.sf_signum = frame.sf_si.svr4_si_signo;
+	frame.sf_signum = frame.sf_si.si_signo;
 	frame.sf_sip = &fp->sf_si;
 	frame.sf_ucp = &fp->sf_uc;
 	frame.sf_handler = catcher;
@@ -504,8 +518,7 @@ svr4_sendsig(catcher, sig, mask, code, type, val)
 	write_user_windows();
 
 	if (rwindow_save(p) || copyout(&frame, fp, sizeof(frame)) != 0 ||
-	    copyout(&oldsp, &((struct rwindow *)newsp)->rw_in[6],
-	      sizeof(register_t)) != 0) {
+	    suword(&((struct rwindow *)newsp)->rw_in[6], oldsp)) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -521,11 +534,11 @@ svr4_sendsig(catcher, sig, mask, code, type, val)
 	/*
 	 * Build context to run handler in.
 	 */
-	caddr = p->p_sigcode;
+	addr = (int)PS_STRINGS - (svr4_esigcode - svr4_sigcode);
 	tf->tf_global[1] = (int)catcher;
 
-	tf->tf_pc = caddr;
-	tf->tf_npc = caddr + 4;
+	tf->tf_pc = addr;
+	tf->tf_npc = addr + 4;
 	tf->tf_out[6] = newsp;
 }
 

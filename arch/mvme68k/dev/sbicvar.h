@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbicvar.h,v 1.7 2004/07/02 17:57:29 miod Exp $ */
+/*	$OpenBSD: sbicvar.h,v 1.3 1996/04/28 11:24:47 deraadt Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -15,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *  This product includes software developed by the University of
+ *  California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -99,6 +103,7 @@ struct  sbic_softc {
     u_char                  lun;
     struct  scsi_link       sc_link;    /* proto for sub devices */
     sbic_regmap_p           sc_sbicp;   /* the SBIC */
+    void                    *sc_cregs;  /* driver specific regs */
     int                     sc_ipl;
 
     /* Lists of command blocks */
@@ -115,7 +120,7 @@ struct  sbic_softc {
     u_char                  sc_stat[2];
     u_char                  sc_msg[7];
     u_long                  sc_clkfreq;
-    u_long                  sc_tcnt;    /* number of bytes transferred */
+    u_long                  sc_tcnt;    /* number of bytes transfered */
     u_short                 sc_dmacmd;  /* used by dma drivers */
     u_long                  sc_dmamask; /* dma valid mem mask */
 #ifdef DEBUG
@@ -123,10 +128,10 @@ struct  sbic_softc {
 #endif
     struct  dma_chain       *sc_cur;
     struct  dma_chain       *sc_last;
-    int  (*sc_dmago)(struct sbic_softc *, char *, int, int);
-    int  (*sc_dmanext)(struct sbic_softc *);
-    void (*sc_enintr)(struct sbic_softc *);
-    void (*sc_dmastop)(struct sbic_softc *);
+    int  (*sc_dmago)        __P((struct sbic_softc *, char *, int, int));
+    int  (*sc_dmanext)      __P((struct sbic_softc *));
+    void (*sc_enintr)       __P((struct sbic_softc *));
+    void (*sc_dmastop)      __P((struct sbic_softc *));
 };
 
 /*
@@ -196,7 +201,7 @@ struct  sbic_softc {
 struct buf;
 struct scsi_xfer;
 
-void sbic_minphys(struct buf *bp);
-int sbic_scsicmd(struct scsi_xfer *);
+void sbic_minphys __P((struct buf *bp));
+int sbic_scsicmd __P((struct scsi_xfer *));
 
 #endif /* _SBICVAR_H_ */

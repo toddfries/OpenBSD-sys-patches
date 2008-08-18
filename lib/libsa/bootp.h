@@ -1,5 +1,5 @@
-/*	$OpenBSD: bootp.h,v 1.5 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: bootp.h,v 1.3 1996/09/26 23:22:01 cgd Exp $	*/
+/*	$OpenBSD: bootp.h,v 1.3 1996/09/27 07:44:42 mickey Exp $	*/
+/*	$NetBSD: bootp.h,v 1.2 1994/10/26 05:44:39 cgd Exp $	*/
 
 /*
  * Bootstrap Protocol (BOOTP).  RFC951 and RFC1048.
@@ -33,7 +33,7 @@ struct bootp {
 	u_char		bp_htype;		/* hardware addr type */
 	u_char		bp_hlen;		/* hardware addr length */
 	u_char		bp_hops;		/* gateway hops */
-	u_int		bp_xid;			/* transaction ID */
+	u_long		bp_xid;			/* transaction ID */
 	u_short		bp_secs;		/* seconds since boot began */
 	u_short		bp_flags;		/* RFC1532 broadcast, etc. */
 	struct in_addr	bp_ciaddr;		/* client IP address */
@@ -116,7 +116,7 @@ struct bootp {
 
 struct cmu_vend {
 	unsigned char	v_magic[4];	/* magic number */
-	unsigned int	v_flags;	/* flags/opcodes, etc. */
+	unsigned long	v_flags;	/* flags/opcodes, etc. */
 	struct in_addr	v_smask;	/* Subnet mask */
 	struct in_addr	v_dgate;	/* Default gateway */
 	struct in_addr	v_dns1, v_dns2; /* Domain name servers */
@@ -125,7 +125,6 @@ struct cmu_vend {
 	unsigned char	v_unused[25];	/* currently unused */
 };
 
+
 /* v_flags values */
 #define VF_SMASK	1	/* Subnet mask field contains valid data */
-
-void	bootp(int);

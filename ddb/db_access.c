@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_access.c,v 1.10 2007/03/15 17:10:22 miod Exp $	*/
+/*	$OpenBSD: db_access.c,v 1.5 1996/04/21 22:18:53 deraadt Exp $	*/
 /*	$NetBSD: db_access.c,v 1.8 1994/10/09 08:37:35 mycroft Exp $	*/
 
 /* 
@@ -33,8 +33,6 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/db_machdep.h>		/* type definitions */
 #include <machine/endian.h>
 
@@ -44,22 +42,28 @@
  * Access unaligned data items on aligned (longword)
  * boundaries.
  */
-db_expr_t
-db_get_value(db_addr_t addr, size_t size, boolean_t is_signed)
-{
-	char data[sizeof(db_expr_t)];
-	db_expr_t value, extend;
-	int i;
 
-#ifdef DIAGNOSTIC
-	if (size > sizeof data)
-		size = sizeof data;
-#endif
+int db_extend[] = {	/* table for sign-extending */
+	0,
+	(int)0xFFFFFF80,
+	(int)0xFFFF8000,
+	(int)0xFF800000,
+	(int)0x80000000
+};
+
+db_expr_t
+db_get_value(addr, size, is_signed)
+	db_addr_t addr;
+	register size_t size;
+	boolean_t is_signed;
+{
+	char data[sizeof(int)];
+	register db_expr_t value;
+	register int i;
 
 	db_read_bytes(addr, size, data);
 
 	value = 0;
-	extend = (~(db_expr_t)0) << (size * 8 - 1);
 #if BYTE_ORDER == LITTLE_ENDIAN
 	for (i = size - 1; i >= 0; i--)
 #else /* BYTE_ORDER == BIG_ENDIAN */
@@ -67,21 +71,19 @@ db_get_value(db_addr_t addr, size_t size, boolean_t is_signed)
 #endif /* BYTE_ORDER */
 		value = (value << 8) + (data[i] & 0xFF);
 	    
-	if (size < sizeof(db_expr_t) && is_signed && (value & extend))
-		value |= extend;
+	if (size < 4 && is_signed && (value & db_extend[size]) != 0)
+		value |= db_extend[size];
 	return (value);
 }
 
 void
-db_put_value(db_addr_t addr, size_t size, db_expr_t value)
+db_put_value(addr, size, value)
+	db_addr_t addr;
+	register size_t size;
+	register db_expr_t value;
 {
-	char data[sizeof(db_expr_t)];
-	int i;
-
-#ifdef DIAGNOSTIC
-	if (size > sizeof data)
-		size = sizeof data;
-#endif
+	char data[sizeof(int)];
+	register int i;
 
 #if BYTE_ORDER == LITTLE_ENDIAN
 	for (i = 0; i < size; i++)
@@ -89,7 +91,7 @@ db_put_value(db_addr_t addr, size_t size, db_expr_t value)
 	for (i = size - 1; i >= 0; i--)
 #endif /* BYTE_ORDER */
 	{
-		data[i] = value & 0xff;
+		data[i] = value & 0xFF;
 		value >>= 8;
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_print.c,v 1.12 2007/11/05 19:23:24 miod Exp $	*/
+/*	$OpenBSD: db_print.c,v 1.4 1996/04/21 22:19:08 deraadt Exp $	*/
 /*	$NetBSD: db_print.c,v 1.5 1996/02/05 01:57:11 christos Exp $	*/
 
 /* 
@@ -36,8 +36,6 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/db_machdep.h>
 
 #include <ddb/db_lex.h>
@@ -46,27 +44,31 @@
 #include <ddb/db_output.h>
 #include <ddb/db_extern.h>
 
+extern unsigned int	db_maxoff;
+
 /*ARGSUSED*/
 void
-db_show_regs(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_show_regs(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	int		have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
-	struct db_variable *regp;
+	register struct db_variable *regp;
 	db_expr_t	value, offset;
 	char *		name;
-	char		tmpfmt[28];
 
 	for (regp = db_regs; regp < db_eregs; regp++) {
 	    db_read_variable(regp, &value);
-	    db_printf("%-12s%s", regp->name, db_format(tmpfmt, sizeof tmpfmt,
-	      (long)value, DB_FORMAT_N, 1, sizeof(long) * 3));
+	    db_printf("%-12s%#10n", regp->name, value);
 	    db_find_xtrn_sym_and_offset((db_addr_t)value, &name, &offset);
 	    if (name != 0 && offset <= db_maxoff && offset != value) {
 		db_printf("\t%s", name);
 		if (offset != 0)
-		    db_printf("+%s", db_format(tmpfmt, sizeof tmpfmt,
-		      (long)offset, DB_FORMAT_R, 1, 0));
+		    db_printf("+%#r", offset);
 	    }
 	    db_printf("\n");
 	}
 	db_print_loc_and_inst(PC_REGS(DDB_REGS));
 }
+

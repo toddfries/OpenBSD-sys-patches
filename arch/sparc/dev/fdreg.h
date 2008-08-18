@@ -1,5 +1,4 @@
-/*	$OpenBSD: fdreg.h,v 1.5 2004/09/22 22:12:58 miod Exp $	*/
-/*	$NetBSD: fdreg.h,v 1.6 1997/05/02 13:03:44 pk Exp $	*/
+/*	$NetBSD: fdreg.h,v 1.5 1996/02/01 22:32:27 mycroft Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -76,15 +79,12 @@ union fdreg {
 #define	FDC_250KBPS	0x02		/*   250KBPS MFM drive transfer rate */
 #define	FDC_125KBPS	0x03		/*   125KBPS  FM drive transfer rate */
 
-/* Digital Output Register bits (modified on suns) */
-#define	FDO_DS		0x01		/*  floppy device select (neg) */
-#define	FDO_FRST	0x04		/*  floppy controller reset (neg) */
+/* Digital Output Register bits */
+#define	FDO_FDSEL	0x03		/*  floppy device select */
+#define	FDO_FRST	0x04		/*  floppy controller reset */
 #define	FDO_FDMAEN	0x08		/*  enable floppy DMA and Interrupt */
-#define	FDO_MOEN(n)	((1 << n) << 4)	/* motor enable */
-#define FDO_DEN		0x40		/* Density select */
-#define FDO_EJ		0x80		/* Eject disk */
+#define	FDO_MOEN(n)	((1 << n) * 0x10)	/* motor enable */
 
-/* Digital Input Register bits */
 #define	FDI_DCHG	0x80		/*   diskette has been changed */
 
 /* XXX - find a place for these... */
@@ -105,4 +105,4 @@ union fdreg {
 
 #define ST1_OVERRUN		0x10
 
-#define NE7_SPECIFY_NODMA	0x01
+

@@ -1,5 +1,4 @@
-/*	$OpenBSD: pte.h,v 1.6 2007/05/29 09:54:21 sobrado Exp $	*/
-/*	$NetBSD: pte.h,v 1.19 1997/08/05 11:00:10 pk Exp $ */
+/*	$NetBSD: pte.h,v 1.17 1996/05/16 15:57:03 abrown Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -157,8 +156,8 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
  * 		if (usermode && PTE_PROT_LEVEL(pte) > 0x5) TRAP();
  *		if (writing && !PTE_PROT_LEVEL_ALLOWS_WRITING(pte)) TRAP();
  *		if (!(pte & SRMMU_PG_C)) DO_NOT_USE_CACHE_FOR_THIS_ACCESS();
- *		pte |= SRMMU_PG_R;
- * 		if (writing) pte |= SRMMU_PG_M;
+ *		pte |= SRMMU_PG_U;
+ * 		if (writing) pte |= PG_M;
  * 		physaddr = ((pte & SRMMU_PG_PFNUM) << SRMMU_PGSHIFT)|va.va_off;
  *		return;
  *	if (mmu_3l)
@@ -177,8 +176,12 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
  *	physadr = ((pte & PG_PFNUM) << PGSHIFT) | va.va_off;
  */
 
-#if defined(SUN4_MMU3L) && !defined(SUN4)
+#if defined(MMU_3L) && !defined(SUN4)
 #error "configuration error"
+#endif
+
+#if defined(MMU_3L)
+extern int mmu_3l;
 #endif
 
 #define	NBPRG	(1 << 24)	/* bytes per region */
@@ -221,12 +224,30 @@ extern int nptesg;
 #define	VA_ROUNDDOWNTOSEG(va)	((int)(va) & ~SGOFSET)
 
 /* virtual segment to virtual address (must sign extend on holy MMUs!) */
-#define	VRTOVA(vr)	((CPU_ISSUN4M || HASSUN4_MMU3L)	\
-	? ((int)(vr) << RGSHIFT)			\
+#if defined(SUN4M) && !(defined(SUN4C) || defined(SUN4))
+#define VRTOVA(vr)	((int)(vr) << RGSHIFT)
+#define VSTOVA(vr,vs)	(((int)(vr) << RGSHIFT) + ((int)(vs) << SGSHIFT))
+#else
+#if defined(MMU_3L) || defined(SUN4M)	/* hairy.. */
+#if !defined(MMU_3L)
+#define _PTE_HAIRY_3L_TEST	(cputyp==CPU_SUN4M)
+#elif !defined(SUN4M)
+#define _PTE_HAIRY_3L_TEST	(mmu_3l)
+#else
+#define _PTE_HAIRY_3L_TEST	(mmu_3l || cputyp==CPU_SUN4M)
+#endif
+#define	VRTOVA(vr)	(_PTE_HAIRY_3L_TEST	\
+	? ((int)(vr) << RGSHIFT)		\
 	: (((int)(vr) << (RGSHIFT+2)) >> 2))
-#define	VSTOVA(vr,vs)	((CPU_ISSUN4M || HASSUN4_MMU3L)	\
+#define	VSTOVA(vr,vs)	(_PTE_HAIRY_3L_TEST	\
 	? (((int)(vr) << RGSHIFT) + ((int)(vs) << SGSHIFT))	\
 	: ((((int)(vr) << (RGSHIFT+2)) >> 2) + ((int)(vs) << SGSHIFT)))
+#else
+#define	VRTOVA(vr)	(((int)(vr) << (RGSHIFT+2)) >> 2)
+#define	VSTOVA(vr,vs)	((((int)(vr) << (RGSHIFT+2)) >> 2) + \
+			 ((int)(vs) << SGSHIFT))
+#endif
+#endif
 
 extern int mmu_has_hole;
 #define VA_INHOLE(va)	(mmu_has_hole \
@@ -240,7 +261,7 @@ extern int mmu_has_hole;
 #if defined(SUN4M)		/* Optimization: sun4m, sun4c have same page */
 #if defined(SUN4)		/* size, so they're used interchangeably */
 #define VA_VPG(va)	(cputyp==CPU_SUN4 ? VA_SUN4_VPG(va) : VA_SUN4C_VPG(va))
-#define VA_OFF(va)	(cputyp==CPU_SUN4 ? VA_SUN4_OFF(va) : VA_SUN4C_OFF(va))
+#define VA_OFF(VA)	(cputyp==CPU_SUN4 ? VA_SUN4_OFF(va) : VA_SUN4C_OFF(va))
 #else
 #define VA_VPG(va)	VA_SUN4M_VPG(va)
 #define VA_OFF(va)	VA_SUN4M_OFF(va)
@@ -269,7 +290,7 @@ extern int mmu_has_hole;
 #define	PG_TYPE		0x0c000000	/* both type bits */
 
 #define	PG_OBMEM	0x00000000	/* on board memory */
-#define	PG_OBIO		0x04000000	/* on board I/O (incl. SBus on 4c) */
+#define	PG_OBIO		0x04000000	/* on board I/O (incl. Sbus on 4c) */
 #define	PG_VME16	0x08000000	/* 16-bit-data VME space */
 #define	PG_VME32	0x0c000000	/* 32-bit-data VME space */
 #if defined(SUN4M)

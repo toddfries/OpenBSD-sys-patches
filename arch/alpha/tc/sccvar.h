@@ -1,5 +1,5 @@
-/* $OpenBSD: sccvar.h,v 1.6 2003/06/02 23:27:44 millert Exp $ */
-/* $NetBSD: sccvar.h,v 1.7 2001/08/26 16:39:56 simonb Exp $ */
+/*	$OpenBSD: sccvar.h,v 1.2 1996/07/29 23:02:15 niklas Exp $	*/
+/*	$NetBSD: sccvar.h,v 1.2 1995/08/03 00:52:23 cgd Exp $	*/
 
 /* 
  * Copyright (c) 1991,1990,1989,1994,1995 Carnegie Mellon University
@@ -41,7 +41,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -92,18 +96,9 @@ typedef struct {
 } scc_regmap_t;
 
 #define	scc_get_datum(d, v) \
-	do { (v) = ((d) >> 8) & 0xff; alpha_mb(); DELAY(5); } while (0)
+	do { (v) = ((d) >> 8) & 0xff; } while (0)
 #define	scc_set_datum(d, v) \
-	do { (d) = (volatile unsigned int)(v) << 8; alpha_mb(); DELAY(5); } while (0)
-
-/* From <pmax/dev/pdma.h>. */
-struct pdma {
-	void	*p_addr;
-	char	*p_mem;
-	char	*p_end;
-	int	p_arg;
-	void	(*p_fcn)(struct tty *tp);
-};
+	do { (d) = (volatile unsigned int)(v) << 8; wbflush(); } while (0)
 
 /*
  * Minor device numbers for scc.  Weird because B channel comes first and
@@ -114,5 +109,3 @@ struct pdma {
 #define	SCCMOUSE_PORT	0x1
 #define	SCCCOMM3_PORT	0x2
 #define	SCCKBD_PORT	0x3
-
-int	alpha_donot_kludge_scc;

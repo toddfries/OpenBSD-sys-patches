@@ -1,12 +1,17 @@
-/*	$OpenBSD: in_cksum.c,v 1.12 2008/02/16 23:02:41 miod Exp $	*/
-/*	$NetBSD: in_cksum.c,v 1.7 1996/10/05 23:44:34 mrg Exp $ */
+/*	$NetBSD: in_cksum.c,v 1.3 1995/04/26 13:30:03 pk Exp $ */
 
 /*
  * Copyright (c) 1995 Zubin Dittia.
- * Copyright (c) 1995 Matthew R. Green.
+ * Copyright (c) 1995 Theo de Raadt.
+ * Copyright (c) 1995 Matthew Green.
  * Copyright (c) 1994 Charles Hannum.
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, and it's contributors.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -16,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,13 +45,7 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/socketvar.h>
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
-#include <netinet/ip_var.h>
 
 /*
  * Checksum routine for Internet Protocol family headers.
@@ -69,72 +72,75 @@
  * Another possible optimization is to replace a pair of 32-bit loads
  * with a single 64-bit load (ldd) instruction, but I found that although
  * this improves performance somewhat on Sun4c machines, it actually
- * reduces performance considerably on Sun4m machines (I don't know why).
- * So I chose to leave it out.
+ * reduces performance considerably on Sun4m machines (because of their
+ * superscaler architecture).  So I chose to leave it out.
  *
  * Zubin Dittia (zubin@dworkin.wustl.edu)
  */
 
 #define Asm	__asm __volatile
-#define ADD64		Asm("	ld [%4+ 0],%1;   ld [%4+ 4],%2;		\
-				addcc  %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+ 8],%1;   ld [%4+12],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+16],%1;   ld [%4+20],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+24],%1;   ld [%4+28],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+32],%1;   ld [%4+36],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+40],%1;   ld [%4+44],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+48],%1;   ld [%4+52],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+56],%1;   ld [%4+60],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
+#define ADD64		Asm("	ld [%2],%3; ld [%2+4],%4;		\
+				addcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+8],%3; ld [%2+12],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+16],%3; ld [%2+20],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+24],%3; ld [%2+28],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+32],%3; ld [%2+36],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+40],%3; ld [%2+44],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+48],%3; ld [%2+52],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+56],%3; ld [%2+60],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
 				addxcc %0,0,%0"				\
-				: "=r" (sum), "=&r" (tmp1), "=&r" (tmp2)\
-				: "0" (sum), "r" (w))
-#define ADD32		Asm("	ld [%4+ 0],%1;   ld [%4+ 4],%2;		\
-				addcc  %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+ 8],%1;   ld [%4+12],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+16],%1;   ld [%4+20],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+24],%1;   ld [%4+28],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
+				: "=r" (sum)				\
+				: "0" (sum), "r" (w), "r" (tmp1), "r" (tmp2))
+#define ADD32		Asm("	ld [%2],%3; ld [%2+4],%4;		\
+				addcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+8],%3; ld [%2+12],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+16],%3; ld [%2+20],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+24],%3; ld [%2+28],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
 				addxcc %0,0,%0"				\
-				: "=r" (sum), "=&r" (tmp1), "=&r" (tmp2)\
-				: "0" (sum), "r" (w))
-#define ADD16		Asm("	ld [%4+ 0],%1;   ld [%4+ 4],%2;		\
-				addcc  %0,%1,%0; addxcc %0,%2,%0;	\
-				ld [%4+ 8],%1;   ld [%4+12],%2;		\
-				addxcc %0,%1,%0; addxcc %0,%2,%0;	\
+				: "=r" (sum)				\
+				: "0" (sum), "r" (w), "r" (tmp1), "r" (tmp2))
+#define ADD16		Asm("	ld [%2],%3; ld [%2+4],%4;		\
+				addcc %0,%3,%0; addxcc %0,%4,%0;	\
+				ld [%2+8],%3; ld [%2+12],%4;		\
+				addxcc %0,%3,%0; addxcc %0,%4,%0;	\
 				addxcc %0,0,%0"				\
-				: "=r" (sum), "=&r" (tmp1), "=&r" (tmp2)\
-				: "0" (sum), "r" (w))
-#define ADD8		Asm("	ld [%4+ 0],%1;   ld [%4+ 4],%2;		\
-				addcc  %0,%1,%0; addxcc %0,%2,%0;	\
+				: "=r" (sum)				\
+				: "0" (sum), "r" (w), "r" (tmp1), "r" (tmp2))
+#define ADD8		Asm("	ld [%2],%3; ld [%2+4],%4;		\
+				addcc %0,%3,%0; addxcc %0,%4,%0;	\
 				addxcc %0,0,%0"				\
-				: "=r" (sum), "=&r" (tmp1), "=&r" (tmp2)\
-				: "0" (sum), "r" (w))
-#define ADD4		Asm("	ld [%3+ 0],%1; 				\
-				addcc  %0,%1,%0;			\
+				: "=r" (sum)				\
+				: "0" (sum), "r" (w), "r" (tmp1), "r" (tmp2))
+#define ADD4		Asm("	ld [%2],%3; addcc  %0,%3,%0;		\
 				addxcc %0,0,%0"				\
-				: "=r" (sum), "=&r" (tmp1)		\
-				: "0" (sum), "r" (w))
+				: "=r" (sum)				\
+				: "0" (sum), "r" (w), "r" (tmp1))
 
 #define REDUCE		{sum = (sum & 0xffff) + (sum >> 16);}
+#define ADDCARRY	{if (sum > 0xffff) sum -= 0xffff;}
 #define ROL		{sum = sum << 8;}	/* depends on recent REDUCE */
 #define ADDBYTE		{ROL; sum += *w; byte_swapped ^= 1;}
 #define ADDSHORT	{sum += *(u_short *)w;}
 #define ADVANCE(n)	{w += n; mlen -= n;}
 
-static __inline__ int
-in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
+int
+in_cksum(m, len)
+	register struct mbuf *m;
+	register int len;
 {
-	u_char *w;
-	int mlen = 0;
+	register u_char *w;
+	register u_int sum = 0;
+	register int mlen = 0;
 	int byte_swapped = 0;
 
 	/*
@@ -142,18 +148,17 @@ in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 	 * allow the compiler to pick which specific machine registers to
 	 * use, instead of hard-coding this in the asm code above.
 	 */
-	u_int tmp1, tmp2;
+	register u_int tmp1, tmp2;
 
 	for (; m && len; m = m->m_next) {
 		if (m->m_len == 0)
 			continue;
-		w = mtod(m, u_char *) + off;
-		mlen = m->m_len - off;
-		off = 0;
+		w = mtod(m, u_char *);
+		mlen = m->m_len;
 		if (len < mlen)
 			mlen = len;
 		len -= mlen;
-
+									 
 		/*
 		 * Ensure that we're aligned on a word boundary here so
 		 * that we can do 32 bit operations below.
@@ -171,7 +176,7 @@ in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 		}
 
 		/*
-		 * Do as many 32 bit operations as possible using the
+		 * Do as many 32 bit operattions as possible using the
 		 * 64/32/16/8/4 macro's above, using as many as possible of
 		 * these.
 		 */
@@ -211,55 +216,8 @@ in_cksum_internal(struct mbuf *m, int off, int len, u_int sum)
 		REDUCE;
 		ROL;
 	}
-	/* Two REDUCEs is faster than REDUCE1; if (sum > 65535) sum -= 65535; */
 	REDUCE;
-	REDUCE;
+	ADDCARRY;
 
 	return (0xffff ^ sum);
-}
-
-int
-in_cksum(struct mbuf *m, int len)
-{
-
-	return (in_cksum_internal(m, 0, len, 0));
-}
-
-int
-in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
-{
-	u_char *w;
-	u_int sum = 0;
-	struct ipovly ipov;
-
-	/*
-	 * Declare two temporary registers for use by the asm code.  We
-	 * allow the compiler to pick which specific machine registers to
-	 * use, instead of hard-coding this in the asm code above.
-	 */
-	u_int tmp1, tmp2;
-
-	if (nxt != 0) {
-		/* pseudo header */
-		memset(&ipov, 0, sizeof(ipov));
-		ipov.ih_len = htons(len);
-		ipov.ih_pr = nxt;
-		ipov.ih_src = mtod(m, struct ip *)->ip_src;
-		ipov.ih_dst = mtod(m, struct ip *)->ip_dst;
-		w = (u_char *)&ipov;
-		/* assumes sizeof(ipov) == 20 */
-		ADD16;
-		w += 16;
-		ADD4;
-	}
-
-	/* skip unnecessary part */
-	while (m && off > 0) {
-		if (m->m_len > off)
-			break;
-		off -= m->m_len;
-		m = m->m_next;
-	}
-
-	return (in_cksum_internal(m, off, len, sum));
 }

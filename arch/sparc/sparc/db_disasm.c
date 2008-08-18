@@ -1,4 +1,3 @@
-/*	$OpenBSD: db_disasm.c,v 1.7 2004/01/15 17:22:28 miod Exp $	*/
 /*	$NetBSD: db_disasm.c,v 1.9 1996/03/31 23:45:07 pk Exp $ */
 
 /*
@@ -48,7 +47,7 @@
  *
  * There are 5 different fields that can be used to identify which
  * operation is encoded into a particular 32-bit insn. There are 3
- * formats for instructions, which one being used is determined by
+ * formats for instuctions, which one being used is determined by
  * bits 30-31 of the insn. Here are the bit fields and their names:
  *
  * 1100 0000 0000 0000 0000 0000 0000 0000 op field, determines format
@@ -101,18 +100,18 @@
 
 struct sparc_insn {
 	  unsigned long int match;
-	  char *name;
-	  char *format;
+	  char* name;
+	  char* format;
 };
 
-char *regs[] = {
+char* regs[] = {
 	"g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7",
 	"o0", "o1", "o2", "o3", "o4", "o5", "sp", "o7",
 	"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7",
 	"i0", "i1", "i2", "i3", "i4", "i5", "fp", "i7"
 };
 
-char *priv_regs[] = {
+char* priv_regs[] = {
 	"tpc", "tnpc", "tstate", "tt", "tick", "tba", "pstate", "tl",
 	"pil", "cwp", "cansave", "canrestore", "cleanwin", "otherwin",
 	"wstate", "fq",
@@ -120,18 +119,18 @@ char *priv_regs[] = {
 	"", "", "", "", "", "", "", ""
 };
 
-char *state_regs[] = {
+char* state_regs[] = {
 	"y", "", "ccr", "asi", "tick", "pc", "fprs", "asr",
 	"", "", "", "", "", "", "", "",
 	"illegal", "", "", "", "", "", "", "", "",
 	"", "", "", "", "", "", "", ""
 };
 
-char *ccodes[] = {
+char* ccodes[] = {
 	"fcc0", "fcc1", "fcc2", "fcc3", "icc", "", "xcc", ""
 };
 
-char *prefetch[] = {
+char* prefetch[] = {
 	"n_reads", "one_read", "n_writes", "one_write", "page"
 };
 
@@ -796,14 +795,14 @@ struct sparc_insn sparc_i[] = {
 
 db_addr_t
 db_disasm(loc, altfmt)
-	vaddr_t loc;
+	vm_offset_t loc;
 	boolean_t altfmt;
 {
 	struct sparc_insn*	i_ptr = (struct sparc_insn *)&sparc_i;
 
 	unsigned long int insn, you_lose, bitmask;
 	int matchp;
-	char *f_ptr, *cp;
+	char* f_ptr, *cp;
 
 	you_lose = 0;
 	matchp = 0;
@@ -908,17 +907,17 @@ db_disasm(loc, altfmt)
 		case 'm':
 			db_printsym(
 				(db_addr_t)(loc + (4 * (insn & 0x3fffff))),
-				DB_STGY_ANY, db_printf);
+				DB_STGY_ANY);
 			break;
 		case 'u':
 			db_printsym(
 				(db_addr_t)(loc + (4 * (insn & 0x7ffff))),
-				DB_STGY_ANY, db_printf);
+				DB_STGY_ANY);
 			break;
 		case 'n':
 			db_printsym(
 				(db_addr_t)(loc + (4 * (insn & 0x3fffffff))),
-				DB_STGY_PROC, db_printf);
+				DB_STGY_PROC);
 			break;
 		case 's':
 			db_printf("%%asi");

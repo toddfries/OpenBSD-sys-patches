@@ -1,4 +1,4 @@
-/*	$OpenBSD: msgbuf.h,v 1.8 2005/04/14 21:58:50 krw Exp $	*/
+/*	$OpenBSD: msgbuf.h,v 1.2 1996/03/03 12:12:03 niklas Exp $	*/
 /*	$NetBSD: msgbuf.h,v 1.8 1995/03/26 20:24:27 jtc Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,18 +36,14 @@
  *	@(#)msgbuf.h	8.1 (Berkeley) 6/2/93
  */
 
+#define	MSG_BSIZE	(4096 - 3 * sizeof(long))
 struct	msgbuf {
 #define	MSG_MAGIC	0x063061
 	long	msg_magic;
 	long	msg_bufx;		/* write pointer */
 	long	msg_bufr;		/* read pointer */
-	long	msg_bufs;		/* real msg_bufc size (bytes) */
-	long	msg_bufl;		/* # chars, <= msg_bufs */
-	char	msg_bufc[1];		/* buffer */
+	char	msg_bufc[MSG_BSIZE];	/* buffer */
 };
 #ifdef _KERNEL
-extern struct msgbuf *msgbufp;
-
-void	initmsgbuf(caddr_t buf, size_t bufsize);
-void	msgbuf_putchar(const char c);
+struct	msgbuf *msgbufp;
 #endif

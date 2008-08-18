@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka650.c,v 1.13 2004/01/29 21:34:17 deraadt Exp $	*/
-/*	$NetBSD: ka650.c,v 1.25 2001/04/27 15:02:37 ragge Exp $	*/
+/*	$NetBSD: ka650.c,v 1.3 1996/04/08 18:32:41 ragge Exp $	*/
 /*
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.
@@ -15,7 +14,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,76 +46,96 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
 
 #include <machine/ka650.h>
-#include <machine/clock.h>
 #include <machine/cpu.h>
 #include <machine/psl.h>
 #include <machine/mtpr.h>
-#include <machine/sid.h>
+#include <machine/nexus.h>
 
 struct	ka650_merr *ka650merr_ptr;
 struct	ka650_cbd *ka650cbd_ptr;
 struct	ka650_ssc *ka650ssc_ptr;
 struct	ka650_ipcr *ka650ipcr_ptr;
 int	*KA650_CACHE_ptr;
+static	int subtyp;
 
-#define	CACHEOFF	0
-#define	CACHEON		1
-
-static	void	ka650setcache(int);
-static	void	ka650_halt(void);
-static	void	ka650_reboot(int);
-static	void    uvaxIII_conf(void);
-static	void    uvaxIII_memerr(void);
-static	int     uvaxIII_mchk(caddr_t);
-
-struct	cpu_dep	ka650_calls = {
-	0, /* No special page stealing anymore */
-	uvaxIII_mchk,
-	uvaxIII_memerr,
-	uvaxIII_conf,
-	generic_clkread,
-	generic_clkwrite,
-	4,      /* ~VUPS */
-	2,	/* SCB pages */
-	ka650_halt,
-	ka650_reboot,
-};
+void	ka650encache __P((void));
+void	ka650discache __P((void));
 
 /*
  * uvaxIII_conf() is called by cpu_attach to do the cpu_specific setup.
  */
 void
-uvaxIII_conf()
+uvaxIII_conf(parent, self, aux)
+	struct	device *parent, *self;
+	void	*aux;
 {
-	int syssub = GETSYSSUBT(vax_siedata);
+	extern	char cpu_model[];
 
 	/*
-	 * MicroVAX III: We map in memory error registers,
-	 * cache control registers, SSC registers,
-	 * interprocessor registers and cache diag space.
+	 * There are lots of different MicroVAX III models, we should
+	 * check which here. but that later...
 	 */
-	ka650merr_ptr = (void *)vax_map_physmem(KA650_MERR, 1);
-	ka650cbd_ptr = (void *)vax_map_physmem(KA650_CBD, 1);
-	ka650ssc_ptr = (void *)vax_map_physmem(KA650_SSC, 3);
-	ka650ipcr_ptr = (void *)vax_map_physmem(KA650_IPCR, 1);
-	KA650_CACHE_ptr = (void *)vax_map_physmem(KA650_CACHE,
-	    (KA650_CACHESIZE/VAX_NBPG));
-
-	printf("cpu: KA6%d%d, CVAX microcode rev %d Firmware rev %d\n",
-	    syssub == VAX_SIE_KA640 ? 4 : 5,
-	    syssub == VAX_SIE_KA655 ? 5 : 0,
-	    (vax_cpudata & 0xff), GETFRMREV(vax_siedata));
-	ka650setcache(CACHEON);
+	strcpy(cpu_model,"MicroVAX III");
+	ka650encache();
 	if (ctob(physmem) > ka650merr_ptr->merr_qbmbr) {
 		printf("physmem(0x%x) > qbmbr(0x%x)\n",
 		    ctob(physmem), (int)ka650merr_ptr->merr_qbmbr);
 		panic("qbus map unprotected");
 	}
-	if (mfpr(PR_TODR) == 0)
-		mtpr(1, PR_TODR);
+}
+
+void
+uvaxIII_steal_pages()
+{
+	extern	vm_offset_t avail_start, virtual_avail, avail_end;
+	int	junk, *jon;
+
+	/*
+	 * MicroVAX III: We steal away 64 pages from top of memory,
+	 * map in SCB, interrupt vectors, Qbus map registers, memory
+	 * error registers, cache control registers, SSC registers,
+	 * interprocessor registers and cache diag space.
+	 */
+	avail_end -= 64 * NBPG;
+
+	MAPPHYS(junk, 2, VM_PROT_READ|VM_PROT_WRITE); /* SCB & vectors */
+	MAPVIRT(nexus, btoc(0x400000)); /* Qbus map registers */
+	pmap_map((vm_offset_t)nexus, 0x20088000, 0x20090000,
+	    VM_PROT_READ|VM_PROT_WRITE);
+
+	MAPVIRT(ka650merr_ptr, 1); /* mem err & mem config regs */
+	pmap_map((vm_offset_t)ka650merr_ptr, (vm_offset_t)KA650_MERR,
+	    KA650_MERR + NBPG, VM_PROT_READ|VM_PROT_WRITE);
+
+	MAPVIRT(ka650cbd_ptr, 1); /* cache control & boot/diag regs */
+	pmap_map((vm_offset_t)ka650cbd_ptr, (vm_offset_t)KA650_CBD,
+	    KA650_CBD + NBPG, VM_PROT_READ|VM_PROT_WRITE);
+
+	MAPVIRT(ka650ssc_ptr, 1); /* SSC regs (& console prog mail box) */
+	pmap_map((vm_offset_t)ka650ssc_ptr, (vm_offset_t)KA650_SSC,
+	    KA650_SSC + NBPG, VM_PROT_READ|VM_PROT_WRITE);
+
+	MAPVIRT(ka650ipcr_ptr, 1); /* InterProcessor Com Regs */
+	pmap_map((vm_offset_t)ka650ipcr_ptr, (vm_offset_t)KA650_IPCR,
+	    KA650_IPCR + NBPG, VM_PROT_READ|VM_PROT_WRITE);
+
+	MAPVIRT(KA650_CACHE_ptr, 128); /* Cache Diagnostic space (for flush) */
+	pmap_map((vm_offset_t)KA650_CACHE_ptr, (vm_offset_t)KA650_CACHE,
+	    KA650_CACHE + KA650_CACHESIZE, VM_PROT_READ|VM_PROT_WRITE);
+
+	jon = (int *)0x20040004;
+	subtyp = *jon;
+}
+
+int
+uvaxIII_clock()
+{
+	mtpr(0x40, PR_ICCS); /* Start clock and enable interrupt */
+	return 1;
 }
 
 void
@@ -127,12 +150,12 @@ uvaxIII_memerr()
 	if (ka650cbd.cbd_cacr & CACR_CPE) {
 		printf("cache 2 tag parity error: ");
 		if (time.tv_sec - cache2tag < 7) {
-			ka650setcache(CACHEOFF);
-			printf("caching disabled\n");
+			ka650discache();
+			printf("cacheing disabled\n");
 		} else {
 			cache2tag = time.tv_sec;
 			printf("flushing cache\n");
-			ka650setcache(CACHEON);
+			ka650encache();
 		}
 	}
 	m = ka650merr.merr_errstat;
@@ -217,11 +240,11 @@ uvaxIII_mchk(cmcf)
 		cdalerr = time.tv_sec;
 	}
 	if (time.tv_sec - i < 7) {
-		ka650setcache(CACHEOFF);
-		printf(" parity error:	caching disabled\n");
+		ka650discache();
+		printf(" parity error:  cacheing disabled\n");
 	} else {
-		printf(" parity error:	flushing cache\n");
-		ka650setcache(CACHEON);
+		printf(" parity error:  flushing cache\n");
+		ka650encache();
 	}
 	/*
 	 * May be able to recover if type is 1-4, 0x80 or 0x81, but
@@ -244,43 +267,20 @@ uvaxIII_mchk(cmcf)
  * Enable 1st level cache too.
  */
 void
-ka650setcache(int state)
+ka650encache()
 {
-	int syssub = GETSYSSUBT(vax_siedata);
-	int i;
+	register int i;
 
-	/*
-	 * Before doing anything, disable the cache.
-	 */
+	ka650discache();
+	for (i = 0; i < (KA650_CACHESIZE / sizeof(KA650_CACHE_ptr[0])); i += 2)
+		KA650_CACHE_ptr[i] = 0;
+	ka650cbd_ptr->cbd_cacr = CACR_CEN;
+	mtpr(CADR_SEN2 | CADR_SEN1 | CADR_CENI | CADR_CEND, PR_CADR);
+}
+
+void
+ka650discache()
+{
 	mtpr(0, PR_CADR);
-	if (syssub != VAX_SIE_KA640)
-		ka650cbd_ptr->cbd_cacr = CACR_CPE;
-
-	/*
-	 * Check what we want to do, enable or disable.
-	 */
-	if (state == CACHEON) {
-		mtpr(CADR_SEN2 | CADR_SEN1 | CADR_CENI | CADR_CEND, PR_CADR);
-		if (syssub != VAX_SIE_KA640) {
-			for (i = 0;
-			    i < (KA650_CACHESIZE / sizeof(KA650_CACHE_ptr[0]));
-			    i += 2)
-				KA650_CACHE_ptr[i] = 0;
-			ka650cbd_ptr->cbd_cacr = CACR_CEN;
-		}
-	}
-}
-
-static void
-ka650_halt()
-{
-	ka650ssc_ptr->ssc_cpmbx = CPMB650_DOTHIS | CPMB650_HALT;
-	asm("halt");
-}
-
-static void
-ka650_reboot(arg)
-	int arg;
-{
-	ka650ssc_ptr->ssc_cpmbx = CPMB650_DOTHIS | CPMB650_REBOOT;
+	ka650cbd_ptr->cbd_cacr = CACR_CPE;
 }

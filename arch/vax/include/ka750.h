@@ -1,5 +1,4 @@
-/*	$NetBSD: ka750.h,v 1.8 1997/02/12 17:58:56 ragge Exp $	*/
-/*	$OpenBSD: ka750.h,v 1.8 2000/04/26 03:08:41 bjc Exp $	*/
+/*	$NetBSD: ka750.h,v 1.6 1996/05/19 16:43:23 ragge Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -42,3 +41,11 @@
 
 /* 11/750 specific pages needed to be stolen when bootstrapping */
 #define	V750PGS	4
+
+/* 11/750 specific prototypes */
+void	ka750_conf __P((struct device *, struct device *, void *));
+int	ka750_clock __P((void));
+void	ka750_memenable __P((struct sbi_attach_args *, struct device *));
+void	ka750_memerr __P((void));
+int	ka750_mchk __P((caddr_t));
+void	ka750_steal_pages __P((void));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_trap.c,v 1.13 2007/06/04 17:03:04 miod Exp $	*/
+/*	$OpenBSD: db_trap.c,v 1.4 1996/04/21 22:19:16 deraadt Exp $	*/
 /*	$NetBSD: db_trap.c,v 1.9 1996/02/05 01:57:18 christos Exp $	*/
 
 /* 
@@ -35,9 +35,6 @@
  */
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/systm.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/db_machdep.h>
 
@@ -47,10 +44,10 @@
 #include <ddb/db_output.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
-#include <ddb/db_interface.h>
 
 void
-db_trap(int type, int code)
+db_trap(type, code)
+	int	type, code;
 {
 	boolean_t	bkpt;
 	boolean_t	watchpt;
@@ -59,39 +56,20 @@ db_trap(int type, int code)
 	watchpt = IS_WATCHPOINT_TRAP(type, code);
 
 	if (db_stop_at_pc(DDB_REGS, &bkpt)) {
-		if (db_inst_count) {
-			db_printf("After %d instructions ", db_inst_count);
-			db_printf("(%d loads, %d stores),\n", db_load_count,
-			    db_store_count);
-		}
-		if (bkpt)
-			db_printf("Breakpoint at\t");
-		else if (watchpt)
-			db_printf("Watchpoint at\t");
-		else
-			db_printf("Stopped at\t");
-		db_dot = PC_REGS(DDB_REGS);
-		db_print_loc_and_inst(db_dot);
+	    if (db_inst_count) {
+		db_printf("After %d instructions (%d loads, %d stores),\n",
+			  db_inst_count, db_load_count, db_store_count);
+	    }
+	    if (bkpt)
+		db_printf("Breakpoint at\t");
+	    else if (watchpt)
+		db_printf("Watchpoint at\t");
+	    else
+		db_printf("Stopped at\t");
+	    db_dot = PC_REGS(DDB_REGS);
+	    db_print_loc_and_inst(db_dot);
 
-		/*
-		 * Just in case we do not have any usable console driver,
-		 * give the user a traceback.
-		 */
-		if (cold) {
-			db_stack_trace_print(db_dot, 0, 10 /* arbitrary */, "",
-			    db_printf);
-		}
-
-		if (panicstr != NULL) {
-			if (db_print_position() != 0)
-				db_printf("\n");
-			db_printf("RUN AT LEAST 'trace' AND 'ps' AND INCLUDE "
-			    "OUTPUT WHEN REPORTING THIS PANIC!\n");
-			db_printf("DO NOT EVEN BOTHER REPORTING THIS WITHOUT "
-			    "INCLUDING THAT INFORMATION!\n");
-		}
-
-		db_command_loop();
+	    db_command_loop();
 	}
 
 	db_restart_at_pc(DDB_REGS, watchpt);

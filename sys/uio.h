@@ -1,4 +1,4 @@
-/*	$OpenBSD: uio.h,v 1.13 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: uio.h,v 1.2 1996/03/03 12:12:38 niklas Exp $	*/
 /*	$NetBSD: uio.h,v 1.12 1996/02/09 18:25:45 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,8 +39,12 @@
 #ifndef _SYS_UIO_H_
 #define	_SYS_UIO_H_
 
+/*
+ * XXX
+ * iov_base should be a void *.
+ */
 struct iovec {
-	void	*iov_base;	/* Base address. */
+	char	*iov_base;	/* Base address. */
 	size_t	 iov_len;	/* Length. */
 };
 
@@ -50,42 +58,31 @@ enum uio_seg {
 
 #ifdef _KERNEL
 struct uio {
-	struct	iovec *uio_iov;	/* pointer to array of iovecs */
-	int	uio_iovcnt;	/* number of iovecs in array */
-	off_t	uio_offset;	/* offset into file this uio corresponds to */
-	size_t	uio_resid;	/* residual i/o count */
-	enum	uio_seg uio_segflg; /* see above */
-	enum	uio_rw uio_rw;	/* see above */
-	struct	proc *uio_procp;/* associated process or NULL */
+	struct	iovec *uio_iov;
+	int	uio_iovcnt;
+	off_t	uio_offset;
+	int	uio_resid;
+	enum	uio_seg uio_segflg;
+	enum	uio_rw uio_rw;
+	struct	proc *uio_procp;
 };
 
 /*
  * Limits
  */
+#define UIO_MAXIOV	1024		/* max 1K of iov's */
 #define UIO_SMALLIOV	8		/* 8 on stack, else malloc */
 #endif /* _KERNEL */
-
-#define UIO_MAXIOV	1024		/* Deprecated, use IOV_MAX instead */
 
 #ifndef	_KERNEL
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-#if __BSD_VISIBLE
-ssize_t preadv(int, const struct iovec *, int, off_t);
-ssize_t pwritev(int, const struct iovec *, int, off_t);
-#endif /* __BSD_VISIBLE */
-ssize_t	readv(int, const struct iovec *, int);
-ssize_t	writev(int, const struct iovec *, int);
+ssize_t	readv __P((int, const struct iovec *, int));
+ssize_t	writev __P((int, const struct iovec *, int));
 __END_DECLS
 #else
-int	ureadc(int c, struct uio *);
-
-int	dofilereadv(struct proc *, int, struct file *,
-	    const struct iovec *, int, off_t *, register_t *);
-int	dofilewritev(struct proc *, int, struct file *,
-	    const struct iovec *, int, off_t *, register_t *);
-
+int ureadc __P((int c, struct uio *));
 #endif /* !_KERNEL */
 
 #endif /* !_SYS_UIO_H_ */

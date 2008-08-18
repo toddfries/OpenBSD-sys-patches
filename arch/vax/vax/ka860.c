@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka860.c,v 1.9 2006/07/20 19:08:15 miod Exp $	*/
-/*	$NetBSD: ka860.c,v 1.15 1999/08/07 10:36:49 ragge Exp $	*/
+/*	$NetBSD: ka860.c,v 1.3 1996/04/08 18:32:45 ragge Exp $	*/
 /*
  * Copyright (c) 1986, 1988 Regents of the University of California.
  * All rights reserved.
@@ -12,7 +11,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,57 +36,45 @@
 
 /*
  * VAX 8600 specific routines.
- * Also contains abus spec's and memory init routines.
  */
 
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
 
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
+
 #include <machine/cpu.h>
-#include <machine/clock.h>
 #include <machine/mtpr.h>
 #include <machine/nexus.h>
 #include <machine/ioa.h>
-#include <machine/sid.h>
 
-#include <vax/vax/gencons.h>
+struct	ioa *ioa; 
 
-static	void	ka86_memerr(void);
-static	int	ka86_mchk(caddr_t);
-static	void	ka86_reboot(int);
-static	void	ka86_clrf(void);
-static	void	ka860_init(struct device *);
+/* XXX These are in autoconf.c also */
+void	ka86_conf __P((struct device *, struct device *, void *));
+int	ka86_clock __P((void));
+void	ka86_memenable __P((struct sbi_attach_args *, struct device *));
+void	ka86_memerr __P((void));
+int	ka86_mchk __P((caddr_t));
+void    ka86_steal_pages __P((void));
 
-void	crlattach(void);
-
-struct	cpu_dep	ka860_calls = {
-	0,
-	ka86_mchk,
-	ka86_memerr,
-	0,
-	generic_clkread,
-	generic_clkwrite,
-	6,      /* ~VUPS */
-	10,	/* SCB pages */
-	0,	/* Halt call, nothing special */
-	ka86_reboot,
-	ka86_clrf,
-};
+void	crlattach __P((void));
 
 /*
  * 8600 memory register (MERG) bit definitions
  */
-#define M8600_ICRD	0x400		/* inhibit crd interrupts */
+#define	M8600_ICRD	0x400		/* inhibit crd interrupts */
 #define M8600_TB_ERR	0xf00		/* translation buffer error mask */
 
 /*
  * MDECC register
  */
-#define M8600_ADDR_PE	0x080000	/* address parity error */
+#define	M8600_ADDR_PE	0x080000	/* address parity error */
 #define M8600_DBL_ERR	0x100000	/* data double bit error */
-#define M8600_SNG_ERR	0x200000	/* data single bit error */
-#define M8600_BDT_ERR	0x400000	/* bad data error */
+#define	M8600_SNG_ERR	0x200000	/* data single bit error */
+#define	M8600_BDT_ERR	0x400000	/* bad data error */
 
 /*
  * ESPA register is used to address scratch pad registers in the Ebox.
@@ -97,7 +88,7 @@ struct	cpu_dep	ka860_calls = {
  * The scratchpad registers that are supplied for a single bit ECC 
  * error are:
  */
-#define SPAD_MSTAT1	0x25		/* scratch pad mstat1 register	*/
+#define	SPAD_MSTAT1	0x25		/* scratch pad mstat1 register	*/
 #define SPAD_MSTAT2	0x26		/* scratch pad mstat2 register	*/
 #define SPAD_MDECC	0x27		/* scratch pad mdecc register	*/
 #define SPAD_MEAR	0x2a		/* scratch pad mear register	*/
@@ -120,11 +111,20 @@ struct	cpu_dep	ka860_calls = {
 #define M8600_MSTAT2_BITS "\20\20CP_BYT_WR\17ABUS_BD_DT_CODE\10MULT_ERR\
 \7CHE_TAG_PE\6CHE_TAG_W_PE\5CHE_WRTN_BIT\4NXM\3CP-IO_BUF_ERR\2MBOX_LOCK"
 
+/* enable CRD reports */
+void
+ka86_memenable(sa, dev)
+	struct sbi_attach_args *sa; /* XXX */
+	struct device *dev;
+{
+	mtpr(mfpr(PR_MERG) & ~M8600_ICRD, PR_MERG);
+}
+
 /* log CRD errors */
 void
 ka86_memerr()
 {
-	register int reg11 = 0; /* known to be r11 below */
+	register int reg11 = 0;	/* known to be r11 below */
 	int mdecc, mear, mstat1, mstat2, array;
 
 	/*
@@ -161,25 +161,25 @@ ka86_memerr()
 	}
 }
 
-#define NMC8600 7
+#define NMC8600	7
 char *mc8600[] = {
 	"unkn type",	"fbox error",	"ebox error",	"ibox error",
 	"mbox error",	"tbuf error",	"mbox 1D error"
 };
 /* codes for above */
-#define MC_FBOX		1
-#define MC_EBOX		2
-#define MC_IBOX		3
-#define MC_MBOX		4
-#define MC_TBUF		5
-#define MC_MBOX1D	6
+#define	MC_FBOX		1
+#define	MC_EBOX		2
+#define	MC_IBOX		3
+#define	MC_MBOX		4
+#define	MC_TBUF		5
+#define	MC_MBOX1D	6
 
 /* error bits */
-#define MBOX_FE		0x8000		/* Mbox fatal error */
-#define FBOX_SERV	0x10000000	/* Fbox service error */
-#define IBOX_ERR	0x2000		/* Ibox error */
-#define EBOX_ERR	0x1e00		/* Ebox error */
-#define MBOX_1D		0x81d0000	/* Mbox 1D error */
+#define	MBOX_FE		0x8000		/* Mbox fatal error */
+#define	FBOX_SERV	0x10000000	/* Fbox service error */
+#define	IBOX_ERR	0x2000		/* Ibox error */
+#define	EBOX_ERR	0x1e00		/* Ebox error */
+#define	MBOX_1D		0x81d0000	/* Mbox 1D error */
 #define EDP_PE		0x200
 
 struct mc8600frame {
@@ -254,6 +254,35 @@ ka86_mchk(cmcf)
 	return (MCHK_PANIC);
 }
 
+void
+ka86_steal_pages()
+{
+	extern  vm_offset_t avail_start, virtual_avail;
+	extern  struct nexus *nexus;
+	int     junk;
+ 
+	/* 8600 may have 2 SBI's == 4 pages */
+	MAPPHYS(junk, 4, VM_PROT_READ|VM_PROT_WRITE);
+
+	/* Map in ioa register space */
+	MAPVIRT(ioa, MAXNIOA);
+	pmap_map((vm_offset_t)ioa, (u_int)IOA8600(0),
+	    (u_int)IOA8600(0) + IOAMAPSIZ, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_map((vm_offset_t)ioa + IOAMAPSIZ, (u_int)IOA8600(1),
+	    (u_int)IOA8600(1) + IOAMAPSIZ, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_map((vm_offset_t)ioa + 2 * IOAMAPSIZ, (u_int)IOA8600(2),
+	    (u_int)IOA8600(2) + IOAMAPSIZ, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_map((vm_offset_t)ioa + 3 * IOAMAPSIZ, (u_int)IOA8600(3),
+	    (u_int)IOA8600(3) + IOAMAPSIZ, VM_PROT_READ|VM_PROT_WRITE);
+
+	/* Map in possible nexus space */
+	MAPVIRT(nexus, btoc(NEXSIZE * MAXNNEXUS));
+	pmap_map((vm_offset_t)nexus, (u_int)NEXA8600,
+	    (u_int)NEXA8600 + NNEX8600 * NEXSIZE, VM_PROT_READ|VM_PROT_WRITE);
+	pmap_map((vm_offset_t)&nexus[NNEXSBI], (u_int)NEXB8600,
+	    (u_int)NEXB8600 + NNEX8600 * NEXSIZE, VM_PROT_READ|VM_PROT_WRITE);
+}
+
 struct ka86 {
 	unsigned snr:12,
 		 plant:4,
@@ -263,153 +292,36 @@ struct ka86 {
 };
 
 void
-ka860_init(self)
-	struct device *self;
+ka86_conf(parent, self, aux)
+	struct  device *parent, *self;
+	void    *aux;
 {
-	struct	ka86 *ka86 = (void *)&vax_cpudata;
+	extern  char cpu_model[];
+	struct  ka86 *ka86 = (void *)&cpu_type;
 
 	/* Enable cache */
 	mtpr(3, PR_CSWP);
 
-	printf(": CPU serial number %d(%d), hardware ECO level %d(%d)\n%s: ",
-	    ka86->snr, ka86->plant, ka86->eco >> 4, ka86->eco, self->dv_xname);
+	strcpy(cpu_model,"VAX 8600");
+	if (ka86->v8650)
+		cpu_model[5] = '5';
+	printf(": %s, serial number %d(%d), hardware ECO level %d(%d)\n",
+	    &cpu_model[4], ka86->snr, ka86->plant, ka86->eco >> 4, ka86->eco);
+	printf("%s: ", self->dv_xname);
 	if (mfpr(PR_ACCS) & 255) {
 		printf("FPA present, type %d, serial number %d, enabling.\n", 
 		    mfpr(PR_ACCS) & 255, mfpr(PR_ACCS) >> 16);
 		mtpr(0x8000, PR_ACCS);
 	} else
 		printf("no FPA\n");
-	/* enable CRD reports */
-	mtpr(mfpr(PR_MERG) & ~M8600_ICRD, PR_MERG);
 	crlattach();
 }
 
-/*
- * Clear restart flag.
- */
-void
-ka86_clrf()
+int   
+ka86_clock()
 {
-	/*
-	 * We block all interrupts here so that there won't be any
-	 * interrupts for an ongoing printout.
-	 */
-	int s = splhigh(), old = mfpr(PR_TXCS);
-
-#define	WAIT	while ((mfpr(PR_TXCS) & GC_RDY) == 0) ;
-
-	WAIT;
-
-	/* Enable channel to console */
-	mtpr(GC_LT|GC_WRT, PR_TXCS);
-	WAIT;
-
-	/* clear warm start flag */
-	mtpr(GC_CWFL, PR_TXDB);
-	WAIT;
-
-	/* clear cold start flag */
-	mtpr(GC_CCFL, PR_TXDB);
-	WAIT;        
-
-	/* restore old state */
-	mtpr(old|GC_WRT, PR_TXCS);
-	splx(s);
+	mtpr(-10000, PR_NICR); /* Load in count register */
+	mtpr(0x800000d1, PR_ICCS); /* Start clock and enable interrupt */
+	return 0; 
 }
 
-void
-ka86_reboot(howto)
-	int howto;
-{
-	WAIT;
-
-	/* Enable channel to console */ 
-	mtpr(GC_LT|GC_WRT, PR_TXCS);
-	WAIT;   
-
-	mtpr(GC_BTFL, PR_TXDB);
-	WAIT;
-
-	asm("halt");
-}
-
-static	int abus_print(void *, const char *);
-static  int abus_match(struct device *, struct cfdata *, void *);
-static  void abus_attach(struct device *, struct device *, void *);
-
-struct  cfattach abus_ca = {
-        sizeof(struct device), abus_match, abus_attach
-};
-
-/*
- * Abus is the master bus on VAX 8600.
- */
-int
-abus_match(parent, cf, aux)
-        struct device *parent;
-        struct cfdata *cf;
-        void *aux;
-{
-	struct mainbus_attach_args *maa = aux;
-
-	if (maa->maa_bustype == VAX_ABUS)
-                return 1;
-        return 0;
-}
-
-void
-abus_attach(parent, self, aux)
-        struct device *parent, *self;
-        void *aux;
-{
-        volatile int tmp;
-        volatile struct sbia_regs *sbiar;
-        struct ioa *ioa;
-        int     type, i;
-	struct bp_conf bp;
-
-	/*
-	 * Init CPU.
-	 */
-	ka860_init(self);
-
-        for (i = 0; i < MAXNIOA; i++) {
-                ioa = (struct ioa *)vax_map_physmem((paddr_t)IOA8600(0),
-                    (IOAMAPSIZ / VAX_NBPG));
-                if (badaddr((caddr_t)ioa, 4)) {
-                        vax_unmap_physmem((vaddr_t)ioa, (IOAMAPSIZ / VAX_NBPG));
-                        continue;
-                }
-                tmp = ioa->ioacsr.ioa_csr;
-                type = tmp & IOA_TYPMSK;
-
-                switch (type) {
-        
-                case IOA_SBIA:
-                        bp.type = "sbi";
-                        bp.num = i;
-                        config_found(self, &bp, abus_print);
-                        sbiar = (void *)ioa;
-                        sbiar->sbi_errsum = -1;
-                        sbiar->sbi_error = 0x1000;
-                        sbiar->sbi_fltsts = 0xc0000;
-                        break;
-
-                default:
-                        printf("IOAdapter %x unsupported\n", type);
-                        break;
-                }
-                vax_unmap_physmem((vaddr_t)ioa, (IOAMAPSIZ / VAX_NBPG));
-        }
-}
-
-int
-abus_print(aux, hej)
-        void *aux;
-        const char *hej;
-{
-        struct bp_conf *bp = aux;
-        if (hej)
-                printf("%s at %s", bp->type, hej);
-        return (UNCONF);
-}

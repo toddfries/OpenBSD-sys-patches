@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig_43.c,v 1.7 2003/06/02 23:27:59 millert Exp $	*/
+/*	$OpenBSD: kern_sig_43.c,v 1.3 1996/04/18 21:21:34 niklas Exp $	*/
 /*	$NetBSD: kern_sig_43.c,v 1.7 1996/03/14 19:31:47 christos Exp $	*/
 
 /*
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -61,7 +65,7 @@
 
 #include <machine/cpu.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 #include <sys/user.h>		/* for coredump */
 
 int
@@ -73,12 +77,11 @@ compat_43_sys_sigblock(p, v, retval)
 	struct compat_43_sys_sigblock_args /* {
 		syscallarg(int) mask;
 	} */ *uap = v;
-	int s;
 
-	s = splhigh();
+	(void) splhigh();
 	*retval = p->p_sigmask;
 	p->p_sigmask |= SCARG(uap, mask) &~ sigcantmask;
-	splx(s);
+	(void) spl0();
 	return (0);
 }
 
@@ -92,12 +95,11 @@ compat_43_sys_sigsetmask(p, v, retval)
 	struct compat_43_sys_sigsetmask_args /* {
 		syscallarg(int) mask;
 	} */ *uap = v;
-	int s;
 
-	s = splhigh();
+	(void) splhigh();
 	*retval = p->p_sigmask;
 	p->p_sigmask = SCARG(uap, mask) &~ sigcantmask;
-	splx(s);
+	(void) spl0();
 	return (0);
 }
 
@@ -204,6 +206,10 @@ compat_43_sys_killpg(p, v, retval)
 		syscallarg(int) pgid;
 		syscallarg(int) signum;
 	} */ *uap = v;
+
+#ifdef COMPAT_09
+	SCARG(uap, pgid) = (short) SCARG(uap, pgid);
+#endif
 
 	if ((u_int)SCARG(uap, signum) >= NSIG)
 		return (EINVAL);

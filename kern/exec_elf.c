@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.63 2008/06/07 17:19:28 miod Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.17 1996/09/12 18:52:17 pefo Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -36,20 +36,27 @@
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
-#include <sys/pool.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
-#include <sys/exec_olf.h>
 #include <sys/file.h>
 #include <sys/syscall.h>
 #include <sys/signalvar.h>
 #include <sys/stat.h>
 
+#if defined(COMPAT_LINUX) || defined(COMPAT_SVR4)	/*XXX should be */
+#undef EXEC_ELF						/*XXX defined in */
+#define EXEC_ELF					/*XXX machine/exec.h */
+#endif							/*XXX instead ? */
+
+#if defined(NATIVE_EXEC_ELF) || defined(EXEC_ELF)
+
 #include <sys/mman.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/vm_map.h>
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
@@ -63,53 +70,38 @@
 #include <compat/svr4/svr4_exec.h>
 #endif
 
-#ifdef COMPAT_FREEBSD
-#include <compat/freebsd/freebsd_exec.h>
-#endif
-
-struct ELFNAME(probe_entry) {
-	int (*func)(struct proc *, struct exec_package *, char *,
-	    u_long *, u_int8_t *);
-} ELFNAME(probes)[] = {
-	/* XXX - bogus, shouldn't be size independent.. */
-#ifdef COMPAT_FREEBSD
-	{ freebsd_elf_probe },
-#endif
+int (*elf_probe_funcs[]) __P((struct proc *, struct exec_package *,
+			      char *, u_long *)) = {
 #ifdef COMPAT_SVR4
-	{ svr4_elf_probe },
+	svr4_elf_probe,
 #endif
 #ifdef COMPAT_LINUX
-	{ linux_elf_probe },
+	linux_elf_probe
 #endif
-	{ NULL }
 };
 
-int ELFNAME(load_file)(struct proc *, char *, struct exec_package *,
-	struct elf_args *, Elf_Addr *);
-int ELFNAME(check_header)(Elf_Ehdr *, int);
-int ELFNAME(read_from)(struct proc *, struct vnode *, u_long, caddr_t, int);
-void ELFNAME(load_psection)(struct exec_vmcmd_set *, struct vnode *,
-	Elf_Phdr *, Elf_Addr *, Elf_Addr *, int *, int);
+int elf_load_file __P((struct proc *, char *, struct exec_package *,
+		       struct elf_args *, u_long *));
+
+static int elf_check_header __P((Elf32_Ehdr *, int));
+static int elf_read_from __P((struct proc *, struct vnode *, u_long, caddr_t, int));
+static void elf_load_psection __P((struct exec_vmcmd_set *,
+	struct vnode *, Elf32_Phdr *, u_long *, u_long *, int *));
+
+int exec_elf_fixup __P((struct proc *, struct exec_package *));
+
+#define ELF_ALIGN(a, b) ((a) & ~((b) - 1))
+
+/*
+ * This is the basic elf emul. elf_probe_funcs may change to other emuls.
+ */
 
 extern char sigcode[], esigcode[];
 #ifdef SYSCALL_DEBUG
 extern char *syscallnames[];
 #endif
 
-/* round up and down to page boundaries. */
-#define ELF_ROUND(a, b)		(((a) + (b) - 1) & ~((b) - 1))
-#define ELF_TRUNC(a, b)		((a) & ~((b) - 1))
-
-/*
- * We limit the number of program headers to 32, this should
- * be a reasonable limit for ELF, the most we have seen so far is 12
- */
-#define ELF_MAX_VALID_PHDR 32
-
-/*
- * This is the basic elf emul. elf_probe_funcs may change to other emuls.
- */
-struct emul ELFNAMEEND(emul) = {
+struct emul emul_elf = {
 	"native",
 	NULL,
 	sendsig,
@@ -121,103 +113,105 @@ struct emul ELFNAMEEND(emul) = {
 #else
 	NULL,
 #endif
-	sizeof (AuxInfo) * ELF_AUX_ENTRIES,
-	ELFNAME(copyargs),
+	sizeof(AuxInfo) * ELF_AUX_ENTRIES,
+	elf_copyargs,
 	setregs,
-	ELFNAME2(exec,fixup),
+	exec_elf_fixup,
 	sigcode,
 	esigcode,
-	EMUL_ENABLED | EMUL_NATIVE,
 };
+
 
 /*
  * Copy arguments onto the stack in the normal way, but add some
  * space for extra information in case of dynamic binding.
  */
 void *
-ELFNAME(copyargs)(struct exec_package *pack, struct ps_strings *arginfo,
-		void *stack, void *argp)
+elf_copyargs(pack, arginfo, stack, argp)
+	struct exec_package *pack;
+	struct ps_strings *arginfo;
+	void *stack;
+	void *argp;
 {
 	stack = copyargs(pack, arginfo, stack, argp);
 	if (!stack)
-		return (NULL);
+		return NULL;
 
 	/*
 	 * Push space for extra arguments on the stack needed by
-	 * dynamically linked binaries.
+	 * dynamically linked binaries
 	 */
 	if (pack->ep_interp != NULL) {
 		pack->ep_emul_argp = stack;
-		stack = (char *)stack + ELF_AUX_ENTRIES * sizeof (AuxInfo);
+		stack += ELF_AUX_ENTRIES * sizeof (AuxInfo);
 	}
-	return (stack);
+	return stack;
 }
 
 /*
+ * elf_check_header():
+ *
  * Check header for validity; return 0 for ok, ENOEXEC if error
  */
-int
-ELFNAME(check_header)(Elf_Ehdr *ehdr, int type)
+static int
+elf_check_header(ehdr, type)
+	Elf32_Ehdr *ehdr;
+	int type;
 {
-	/*
+        /*
 	 * We need to check magic, class size, endianess, and version before
-	 * we look at the rest of the Elf_Ehdr structure. These few elements
+	 * we look at the rest of the Elf32_Ehdr structure. These few elements
 	 * are represented in a machine independant fashion.
 	 */
 	if (!IS_ELF(*ehdr) ||
 	    ehdr->e_ident[EI_CLASS] != ELF_TARG_CLASS ||
 	    ehdr->e_ident[EI_DATA] != ELF_TARG_DATA ||
 	    ehdr->e_ident[EI_VERSION] != ELF_TARG_VER)
-		return (ENOEXEC);
-
-	/* Now check the machine dependant header */
+                return ENOEXEC;
+        
+        /* Now check the machine dependant header */
 	if (ehdr->e_machine != ELF_TARG_MACH ||
 	    ehdr->e_version != ELF_TARG_VER)
-		return (ENOEXEC);
+                return ENOEXEC;
 
-	/* Check the type */
+        /* Check the type */
 	if (ehdr->e_type != type)
-		return (ENOEXEC);
+		return ENOEXEC;
 
-	/* Don't allow an insane amount of sections. */
-	if (ehdr->e_phnum > ELF_MAX_VALID_PHDR)
-		return (ENOEXEC);
-
-	return (0);
+	return 0;
 }
 
 /*
+ * elf_load_psection():
+ * 
  * Load a psection at the appropriate address
  */
-void
-ELFNAME(load_psection)(struct exec_vmcmd_set *vcset, struct vnode *vp,
-	Elf_Phdr *ph, Elf_Addr *addr, Elf_Addr *size, int *prot, int flags)
+static void
+elf_load_psection(vcset, vp, ph, addr, size, prot)
+	struct exec_vmcmd_set *vcset;
+	struct vnode *vp;
+	Elf32_Phdr *ph;
+	u_long *addr;
+	u_long *size;
+	int *prot;
 {
-	u_long uaddr, msize, lsize, psize, rm, rf;
-	long diff, offset, bdiff;
-	Elf_Addr base;
+	u_long uaddr, msize, psize, rm, rf;
+	long diff, offset;
 
 	/*
 	 * If the user specified an address, then we load there.
 	 */
-	if (*addr != ELFDEFNNAME(NO_ADDR)) {
+	if (*addr != ELF32_NO_ADDR) {
 		if (ph->p_align > 1) {
-			*addr = ELF_TRUNC(*addr, ph->p_align);
-			diff = ph->p_vaddr - ELF_TRUNC(ph->p_vaddr, ph->p_align);
-			/* page align vaddr */
-			base = *addr + trunc_page(ph->p_vaddr) 
-			    - ELF_TRUNC(ph->p_vaddr, ph->p_align);
-
-			bdiff = ph->p_vaddr - trunc_page(ph->p_vaddr);
-
+			*addr = ELF_ALIGN(*addr + ph->p_align, ph->p_align);
+			uaddr = ELF_ALIGN(ph->p_vaddr, ph->p_align);
 		} else
-			diff = 0;
+			uaddr = ph->p_vaddr;
+		diff = ph->p_vaddr - uaddr;
 	} else {
 		*addr = uaddr = ph->p_vaddr;
 		if (ph->p_align > 1)
-			*addr = ELF_TRUNC(uaddr, ph->p_align);
-		base = trunc_page(uaddr);
-		bdiff = uaddr - base;
+			*addr = ELF_ALIGN(uaddr, ph->p_align);
 		diff = uaddr - *addr;
 	}
 
@@ -225,90 +219,95 @@ ELFNAME(load_psection)(struct exec_vmcmd_set *vcset, struct vnode *vp,
 	*prot |= (ph->p_flags & PF_W) ? VM_PROT_WRITE : 0;
 	*prot |= (ph->p_flags & PF_X) ? VM_PROT_EXECUTE : 0;
 
+	offset = ph->p_offset - diff;
+	*size = ph->p_filesz + diff;
 	msize = ph->p_memsz + diff;
-	offset = ph->p_offset - bdiff;
-	lsize = ph->p_filesz + bdiff;
-	psize = round_page(lsize);
+	psize = round_page(*size);
 
 	/*
 	 * Because the pagedvn pager can't handle zero fill of the last
-	 * data page if it's not page aligned we map the last page readvn.
+	 * data page if it's not page aligned we map the las page readvn.
 	 */
-	if (ph->p_flags & PF_W) {
-		psize = trunc_page(lsize);
-		if (psize > 0)
-			NEW_VMCMD2(vcset, vmcmd_map_pagedvn, psize, base, vp,
-			    offset, *prot, flags);
-		if (psize != lsize) {
-			NEW_VMCMD2(vcset, vmcmd_map_readvn, lsize - psize,
-			    base + psize, vp, offset + psize, *prot, flags);
+	if(ph->p_flags & PF_W) {
+		psize = trunc_page(*size);
+		NEW_VMCMD(vcset, vmcmd_map_pagedvn, psize, *addr, vp, offset, *prot);
+		if(psize != *size) {
+			NEW_VMCMD(vcset, vmcmd_map_readvn, *size - psize, *addr
++ psize, vp, offset + psize, *prot);
 		}
-	} else {
-		NEW_VMCMD2(vcset, vmcmd_map_pagedvn, psize, base, vp, offset,
-		    *prot, flags);
+	}
+	else {
+		 NEW_VMCMD(vcset, vmcmd_map_pagedvn, psize, *addr, vp, offset, *prot);
 	}
 
 	/*
 	 * Check if we need to extend the size of the segment
 	 */
-	rm = round_page(*addr + ph->p_memsz + diff);
-	rf = round_page(*addr + ph->p_filesz + diff);
+	rm = round_page(*addr + msize);
+	rf = round_page(*addr + *size);
 
 	if (rm != rf) {
-		NEW_VMCMD2(vcset, vmcmd_map_zero, rm - rf, rf, NULLVP, 0,
-		    *prot, flags);
+		NEW_VMCMD(vcset, vmcmd_map_zero, rm - rf, rf, NULLVP, 0, *prot);
+		*size = msize;
 	}
-	*size = msize;
 }
 
 /*
- * Read from vnode into buffer at offset.
+ * elf_read_from():
+ *
+ *	Read from vnode into buffer at offset.
  */
-int
-ELFNAME(read_from)(struct proc *p, struct vnode *vp, u_long off, caddr_t buf,
-	int size)
+static int
+elf_read_from(p, vp, off, buf, size)
+	struct proc *p;
+	struct vnode *vp;
+	u_long off;
+	caddr_t buf;
+	int size;
 {
 	int error;
-	size_t resid;
+	int resid;
 
-	if ((error = vn_rdwr(UIO_READ, vp, buf, size, off, UIO_SYSSPACE,
-	    0, p->p_ucred, &resid, p)) != 0)
+	if ((error = vn_rdwr(UIO_READ, vp, buf, size,
+			     off, UIO_SYSSPACE, IO_NODELOCKED, p->p_ucred,
+			     &resid, p)) != 0)
 		return error;
 	/*
 	 * See if we got all of it
 	 */
 	if (resid != 0)
-		return (ENOEXEC);
-	return (0);
+		return ENOEXEC;
+	return 0;
 }
 
 /*
- * Load a file (interpreter/library) pointed to by path [stolen from
- * coff_load_shlib()]. Made slightly generic so it might be used externally.
+ * elf_load_file():
+ *
+ * Load a file (interpreter/library) pointed to by path
+ * [stolen from coff_load_shlib()]. Made slightly generic
+ * so it might be used externally.
  */
 int
-ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
-	struct elf_args *ap, Elf_Addr *last)
+elf_load_file(p, path, epp, ap, last)
+	struct proc *p;
+	char *path;
+	struct exec_package *epp;
+	struct elf_args	*ap;
+	u_long *last;
 {
 	int error, i;
 	struct nameidata nd;
-	Elf_Ehdr eh;
-	Elf_Phdr *ph = NULL;
+	Elf32_Ehdr eh;
+	Elf32_Phdr *ph = NULL;
 	u_long phsize;
-	Elf_Addr addr;
+	char *bp = NULL;
+	u_long addr = *last;
 	struct vnode *vp;
-	Elf_Phdr *base_ph = NULL;
-	struct interp_ld_sec {
-		Elf_Addr vaddr;
-		u_long memsz;
-	} loadmap[ELF_MAX_VALID_PHDR];
-	int nload, idx = 0;
-	Elf_Addr pos = *last;
-	int file_align;
 
+	bp = path;
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path, p);
 	if ((error = namei(&nd)) != 0) {
-		return (error);
+		return error;
 	}
 	vp = nd.ni_vp;
 	if (vp->v_type != VREG) {
@@ -323,116 +322,40 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	}
 	if ((error = VOP_ACCESS(vp, VREAD, p->p_ucred, p)) != 0)
 		goto bad1;
-	if ((error = ELFNAME(read_from)(p, nd.ni_vp, 0,
-				    (caddr_t)&eh, sizeof(eh))) != 0)
+	if ((error = elf_read_from(p, nd.ni_vp, 0,
+				    (caddr_t) &eh, sizeof(eh))) != 0)
 		goto bad1;
 
-	if (ELFNAME(check_header)(&eh, ET_DYN)) {
-		error = ENOEXEC;
-		goto bad1;
-	}
-
-	phsize = eh.e_phnum * sizeof(Elf_Phdr);
-	ph = malloc(phsize, M_TEMP, M_WAITOK);
-
-	if ((error = ELFNAME(read_from)(p, nd.ni_vp, eh.e_phoff, (caddr_t)ph,
-	    phsize)) != 0)
+	if ((error = elf_check_header(&eh, ET_DYN)) != 0)
 		goto bad1;
 
-	for (i = 0; i < eh.e_phnum; i++) {
-		if (ph[i].p_type == PT_LOAD) {
-			loadmap[idx].vaddr = trunc_page(ph[i].p_vaddr);
-			loadmap[idx].memsz = round_page (ph[i].p_vaddr +
-			    ph[i].p_memsz - loadmap[idx].vaddr);
-			file_align = ph[i].p_align;
-			idx++;
-		}
-	}
-	nload = idx;
+	phsize = eh.e_phnum * sizeof(Elf32_Phdr);
+	ph = (Elf32_Phdr *) malloc(phsize, M_TEMP, M_WAITOK);
 
-	/*
-	 * If no position to load the interpreter was set by a probe
-	 * function, pick the same address that a non-fixed mmap(0, ..)
-	 * would (i.e. something safely out of the way).
-	 */
-	if (pos == ELFDEFNNAME(NO_ADDR)) {
-		pos = uvm_map_hint(p, VM_PROT_EXECUTE);
-	}
-
-	pos = ELF_ROUND(pos, file_align);
-	*last = epp->ep_interp_pos = pos;
-	for (i = 0; i < nload;/**/) {
-		vaddr_t	addr;
-		struct	uvm_object *uobj;
-		off_t	uoff;
-		size_t	size;
-
-#ifdef this_needs_fixing
-		if (i == 0) {
-			uobj = &vp->v_uvm.u_obj;
-			/* need to fix uoff */
-		} else {
-#endif
-			uobj = NULL;
-			uoff = 0;
-#ifdef this_needs_fixing
-		}
-#endif
-
-		addr = trunc_page(pos + loadmap[i].vaddr);
-		size =  round_page(addr + loadmap[i].memsz) - addr;
-
-		/* CRAP - map_findspace does not avoid daddr+MAXDSIZ */
-		if ((addr + size > (vaddr_t)p->p_vmspace->vm_daddr) &&
-		    (addr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ))
-			addr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
-			    MAXDSIZ);
-
-		if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
-		    &addr, uobj, uoff, 0, UVM_FLAG_FIXED) == NULL) {
-			if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
-			    &addr, uobj, uoff, 0, 0) == NULL) {
-				error = ENOMEM; /* XXX */
-				goto bad1;
-			}
-		} 
-		if (addr != pos + loadmap[i].vaddr) {
-			/* base changed. */
-			pos = addr - trunc_page(loadmap[i].vaddr);
-			pos = ELF_ROUND(pos,file_align);
-			epp->ep_interp_pos = *last = pos;
-			i = 0;
-			continue;
-		}
-
-		i++;
-	}
+	if ((error = elf_read_from(p, nd.ni_vp, eh.e_phoff,
+				    (caddr_t) ph, phsize)) != 0)
+		goto bad1;
 
 	/*
 	 * Load all the necessary sections
 	 */
 	for (i = 0; i < eh.e_phnum; i++) {
-		Elf_Addr size = 0;
+		u_long size = 0;
 		int prot = 0;
-		int flags;
+#ifdef mips
+		if (*last == ELF32_NO_ADDR)
+			addr = ELF32_NO_ADDR;	/* GRRRRR!!!!! */
+#endif
 
 		switch (ph[i].p_type) {
 		case PT_LOAD:
-			if (base_ph == NULL) {
-				flags = VMCMD_BASE;
-				addr = *last;
-				base_ph = &ph[i];
-			} else {
-				flags = VMCMD_RELATIVE;
-				addr = ph[i].p_vaddr - base_ph->p_vaddr;
-			}
-			ELFNAME(load_psection)(&epp->ep_vmcmds, nd.ni_vp,
-			    &ph[i], &addr, &size, &prot, flags);
+			elf_load_psection(&epp->ep_vmcmds, nd.ni_vp, &ph[i],
+						&addr, &size, &prot);
 			/* If entry is within this section it must be text */
 			if (eh.e_entry >= ph[i].p_vaddr &&
 			    eh.e_entry < (ph[i].p_vaddr + size)) {
  				epp->ep_entry = addr + eh.e_entry -
-				    ELF_TRUNC(ph[i].p_vaddr,ph[i].p_align);
+                                        ELF_ALIGN(ph[i].p_vaddr,ph[i].p_align);
 				ap->arg_interp = addr;
 			}
 			addr += size;
@@ -448,80 +371,81 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 		}
 	}
 
-	vn_marktext(nd.ni_vp);
-
 bad1:
 	VOP_CLOSE(nd.ni_vp, FREAD, p->p_ucred, p);
 bad:
 	if (ph != NULL)
-		free(ph, M_TEMP);
+		free((char *) ph, M_TEMP);
 
 	*last = addr;
 	vput(nd.ni_vp);
-	return (error);
+	return error;
 }
 
 /*
- * Prepare an Elf binary's exec package
+ * exec_elf_makecmds(): Prepare an Elf binary's exec package
  *
  * First, set of the various offsets/lengths in the exec package.
  *
- * Then, mark the text image busy (so it can be demand paged) or error out if
- * this is not possible.  Finally, set up vmcmds for the text, data, bss, and
- * stack segments.
+ * Then, mark the text image busy (so it can be demand paged) or error
+ * out if this is not possible.  Finally, set up vmcmds for the
+ * text, data, bss, and stack segments.
+ *
  */
 int
-ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
+exec_elf_makecmds(p, epp)
+	struct proc *p;
+	struct exec_package *epp;
 {
-	Elf_Ehdr *eh = epp->ep_hdr;
-	Elf_Phdr *ph, *pp;
-	Elf_Addr phdr = 0;
-	int error, i;
-	char *interp = NULL;
+	Elf32_Ehdr *eh = epp->ep_hdr;
+	Elf32_Phdr *ph, *pp;
+	Elf32_Addr phdr = 0;
+	int error, i, n, nload;
+	char interp[MAXPATHLEN];
 	u_long pos = 0, phsize;
-	u_int8_t os = OOS_NULL;
 
-	if (epp->ep_hdrvalid < sizeof(Elf_Ehdr))
-		return (ENOEXEC);
+	if (epp->ep_hdrvalid < sizeof(Elf32_Ehdr))
+		return ENOEXEC;
 
-	if (ELFNAME(check_header)(eh, ET_EXEC))
-		return (ENOEXEC);
+	if (elf_check_header(eh, ET_EXEC))
+		return ENOEXEC;
 
 	/*
-	 * check if vnode is in open for writing, because we want to demand-
-	 * page out of it.  if it is, don't do it, for various reasons.
+	 * check if vnode is in open for writing, because we want to
+	 * demand-page out of it.  if it is, don't do it, for various
+	 * reasons
 	 */
 	if (epp->ep_vp->v_writecount != 0) {
 #ifdef DIAGNOSTIC
 		if (epp->ep_vp->v_flag & VTEXT)
-			panic("exec: a VTEXT vnode has writecount != 0");
+			panic("exec: a VTEXT vnode has writecount != 0\n");
 #endif
-		return (ETXTBSY);
+		return ETXTBSY;
 	}
 	/*
 	 * Allocate space to hold all the program headers, and read them
 	 * from the file
 	 */
-	phsize = eh->e_phnum * sizeof(Elf_Phdr);
-	ph = malloc(phsize, M_TEMP, M_WAITOK);
+	phsize = eh->e_phnum * sizeof(Elf32_Phdr);
+	ph = (Elf32_Phdr *) malloc(phsize, M_TEMP, M_WAITOK);
 
-	if ((error = ELFNAME(read_from)(p, epp->ep_vp, eh->e_phoff, (caddr_t)ph,
-	    phsize)) != 0)
+	if ((error = elf_read_from(p, epp->ep_vp, eh->e_phoff,
+				    (caddr_t) ph, phsize)) != 0)
 		goto bad;
 
-	epp->ep_tsize = ELFDEFNNAME(NO_ADDR);
-	epp->ep_dsize = ELFDEFNNAME(NO_ADDR);
+	epp->ep_tsize = ELF32_NO_ADDR;
+	epp->ep_dsize = ELF32_NO_ADDR;
+
+	interp[0] = '\0';
 
 	for (i = 0; i < eh->e_phnum; i++) {
 		pp = &ph[i];
 		if (pp->p_type == PT_INTERP) {
-			if (pp->p_filesz >= MAXPATHLEN)
+			if (pp->p_filesz >= sizeof(interp))
 				goto bad;
-			interp = pool_get(&namei_pool, PR_WAITOK);
-			if ((error = ELFNAME(read_from)(p, epp->ep_vp,
-			    pp->p_offset, interp, pp->p_filesz)) != 0) {
+			if ((error = elf_read_from(p, epp->ep_vp, pp->p_offset,
+			    (caddr_t) interp, pp->p_filesz)) != 0)
 				goto bad;
-			}
 			break;
 		}
 	}
@@ -530,43 +454,33 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	 * OK, we want a slightly different twist of the
 	 * standard emulation package for "real" elf.
 	 */
-	epp->ep_emul = &ELFNAMEEND(emul);
-	pos = ELFDEFNNAME(NO_ADDR);
+	epp->ep_emul = &emul_elf;
+	pos = ELF32_NO_ADDR;
 
 	/*
 	 * On the same architecture, we may be emulating different systems.
-	 * See which one will accept this executable.
+	 * See which one will accept this executable. This currently only
+	 * applies to Linux and SVR4 on the i386.
 	 *
 	 * Probe functions would normally see if the interpreter (if any)
 	 * exists. Emulation packages may possibly replace the interpreter in
-	 * *interp with a changed path (/emul/xxx/<path>), and also
+	 * interp[] with a changed path (/emul/xxx/<path>), and also
 	 * set the ep_emul field in the exec package structure.
 	 */
-	error = ENOEXEC;
-	p->p_os = OOS_OPENBSD;
-#ifdef NATIVE_EXEC_ELF
-	if (ELFNAME(os_pt_note)(p, epp, epp->ep_hdr, "OpenBSD", 8, 4) == 0) {
-		goto native;
+	if ((n = sizeof elf_probe_funcs / sizeof elf_probe_funcs[0])) {
+		error = ENOEXEC;
+		for (i = 0; i < n && error; i++)
+			error = elf_probe_funcs[i](p, epp, interp, &pos);
+
+		if (error)
+			goto bad;
 	}
-#endif
-	for (i = 0;
-	    i < sizeof(ELFNAME(probes)) / sizeof(ELFNAME(probes)[0]) && error;
-	    i++) {
-		error = (*ELFNAME(probes)[i].func)(p, epp, interp, &pos, &os);
-	}
-	if (!error)
-		p->p_os = os;
-#ifndef NATIVE_EXEC_ELF
-	else
-		goto bad;
-#else
-native:
-#endif /* NATIVE_EXEC_ELF */
+
 	/*
 	 * Load all the necessary sections
 	 */
-	for (i = 0; i < eh->e_phnum; i++) {
-		Elf_Addr addr = ELFDEFNNAME(NO_ADDR), size = 0;
+	for (i = nload = 0; i < eh->e_phnum; i++) {
+		u_long  addr = ELF32_NO_ADDR, size = 0;
 		int prot = 0;
 
 		pp = &ph[i];
@@ -574,50 +488,23 @@ native:
 		switch (ph[i].p_type) {
 		case PT_LOAD:
 			/*
-			 * Calculates size of text and data segments
-			 * by starting at first and going to end of last.
-			 * 'rwx' sections are treated as data.
-			 * this is correct for BSS_PLT, but may not be
-			 * for DATA_PLT, is fine for TEXT_PLT.
+			 * XXX
+			 * Can handle only 2 sections: text and data
 			 */
-			ELFNAME(load_psection)(&epp->ep_vmcmds, epp->ep_vp,
-			    &ph[i], &addr, &size, &prot, 0);
+			if (nload++ == 2)
+				goto bad;
+			elf_load_psection(&epp->ep_vmcmds, epp->ep_vp,
+				&ph[i], &addr, &size, &prot);
 			/*
 			 * Decide whether it's text or data by looking
-			 * at the protection of the section
+			 * at the entry point.
 			 */
-			if (prot & VM_PROT_WRITE) {
-				/* data section */
-				if (epp->ep_dsize == ELFDEFNNAME(NO_ADDR)) {
-					epp->ep_daddr = addr;
-					epp->ep_dsize = size;
-				} else {
-					if (addr < epp->ep_daddr) {
-						epp->ep_dsize =
-						    epp->ep_dsize +
-						    epp->ep_daddr -
-						    addr;
-						epp->ep_daddr = addr;
-					} else
-						epp->ep_dsize = addr+size -
-						    epp->ep_daddr;
-				}
-			} else if (prot & VM_PROT_EXECUTE) {
-				/* text section */
-				if (epp->ep_tsize == ELFDEFNNAME(NO_ADDR)) {
-					epp->ep_taddr = addr;
-					epp->ep_tsize = size;
-				} else {
-					if (addr < epp->ep_taddr) {
-						epp->ep_tsize =
-						    epp->ep_tsize +
-						    epp->ep_taddr -
-						    addr;
-						epp->ep_taddr = addr;
-					} else
-						epp->ep_tsize = addr+size -
-						    epp->ep_taddr;
-				}
+			if (eh->e_entry >= addr && eh->e_entry < (addr + size)){
+				epp->ep_taddr = addr;
+				epp->ep_tsize = size;
+			} else {
+				epp->ep_daddr = addr;
+				epp->ep_dsize = size;
 			}
 			break;
 
@@ -638,70 +525,65 @@ native:
 
 		default:
 			/*
-			 * Not fatal, we don't need to understand everything
-			 * :-)
+			 * Not fatal, we don't need to understand everything :-)
 			 */
 			break;
 		}
 	}
 
+#if !defined(mips)
 	/*
-	 * Strangely some linux programs may have all load sections marked
-	 * writeable, in this case, textsize is not -1, but rather 0;
+	 * If no position to load the interpreter was set by a probe
+	 * function, pick the same address that a non-fixed mmap(0, ..)
+	 * would (i.e. something safely out of the way).
 	 */
-	if (epp->ep_tsize == ELFDEFNNAME(NO_ADDR))
-		epp->ep_tsize = 0;
-	/*
-	 * Another possibility is that it has all load sections marked
-	 * read-only.  Fake a zero-sized data segment right after the
-	 * text segment.
-	 */
-	if (epp->ep_dsize == ELFDEFNNAME(NO_ADDR)) {
-		epp->ep_daddr = round_page(epp->ep_taddr + epp->ep_tsize);
-		epp->ep_dsize = 0;
-	}
-
-	epp->ep_interp = interp;
-	epp->ep_entry = eh->e_entry;
+	if (pos == ELF32_NO_ADDR)
+		pos = round_page(epp->ep_daddr + MAXDSIZ);
+#endif
 
 	/*
 	 * Check if we found a dynamically linked binary and arrange to load
-	 * its interpreter when the exec file is released.
+	 * it's interpreter when the exec file is released.
 	 */
-	if (interp) {
+	if (interp[0]) {
+		char *ip;
 		struct elf_args *ap;
 
-		ap = malloc(sizeof(struct elf_args), M_TEMP, M_WAITOK);
+		ip = (char *) malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
+		ap = (struct elf_args *) malloc(sizeof(struct elf_args),
+						 M_TEMP, M_WAITOK);
+
+		bcopy(interp, ip, MAXPATHLEN);
+		epp->ep_interp = ip;
+		epp->ep_interp_pos = pos;
 
 		ap->arg_phaddr = phdr;
 		ap->arg_phentsize = eh->e_phentsize;
 		ap->arg_phnum = eh->e_phnum;
 		ap->arg_entry = eh->e_entry;
-		ap->arg_os = os;
 
 		epp->ep_emul_arg = ap;
-		epp->ep_interp_pos = pos;
+		epp->ep_entry = eh->e_entry; /* keep check_exec() happy */
+	}
+	else {
+		epp->ep_interp = NULL;
+		epp->ep_entry = eh->e_entry;
 	}
 
-#if defined(COMPAT_SVR4) && defined(i386) && 0	/* nothing sets OOS_DELL... */
-#ifndef ELF_MAP_PAGE_ZERO
+#ifdef ELF_MAP_PAGE_ZERO
 	/* Dell SVR4 maps page zero, yeuch! */
-	if (p->p_os == OOS_DELL)
-#endif
-		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_readvn, PAGE_SIZE, 0,
-		    epp->ep_vp, 0, VM_PROT_READ);
+	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_readvn, NBPG, 0, epp->ep_vp, 0,
+	    VM_PROT_READ);
 #endif
 
-	free(ph, M_TEMP);
-	vn_marktext(epp->ep_vp);
-	return (exec_setup_stack(p, epp));
+	free((char *) ph, M_TEMP);
+	epp->ep_vp->v_flag |= VTEXT;
+	return exec_aout_setup_stack(p, epp);
 
 bad:
-	if (interp)
-		pool_put(&namei_pool, interp);
-	free(ph, M_TEMP);
+	free((char *) ph, M_TEMP);
 	kill_vmcmds(&epp->ep_vmcmds);
-	return (ENOEXEC);
+	return ENOEXEC;
 }
 
 /*
@@ -709,37 +591,45 @@ bad:
  * when loading the program is available for setup of the interpreter.
  */
 int
-ELFNAME2(exec,fixup)(struct proc *p, struct exec_package *epp)
+exec_elf_fixup(p, epp)
+	struct proc *p;
+	struct exec_package *epp;
 {
 	char	*interp;
-	int	error;
+	int	error, i;
 	struct	elf_args *ap;
 	AuxInfo ai[ELF_AUX_ENTRIES], *a;
-	Elf_Addr	pos = epp->ep_interp_pos;
+	u_long	pos = epp->ep_interp_pos;
 
-	if (epp->ep_interp == NULL) {
-		return (0);
+	if(epp->ep_interp == 0) {
+		return 0;
 	}
 
-	interp = epp->ep_interp;
-	ap = epp->ep_emul_arg;
+	interp = (char *)epp->ep_interp;
+	ap = (struct elf_args *) epp->ep_emul_arg;
 
-	if ((error = ELFNAME(load_file)(p, interp, epp, ap, &pos)) != 0) {
-		free(ap, M_TEMP);
-		pool_put(&namei_pool, interp);
+	if ((error = elf_load_file(p, interp, epp, ap, &pos)) != 0) {
+		free((char *) ap, M_TEMP);
+		free((char *) interp, M_TEMP);
 		kill_vmcmds(&epp->ep_vmcmds);
-		return (error);
+		return error;
 	}
 	/*
-	 * We have to do this ourselves...
+	 * We have to do this ourselfs...
 	 */
-	error = exec_process_vmcmds(p, epp);
+	for (i = 0; i < epp->ep_vmcmds.evs_used && !error; i++) {
+		struct exec_vmcmd *vcp;
+
+		vcp = &epp->ep_vmcmds.evs_cmds[i];
+		error = (*vcp->ev_proc)(p, vcp);
+	}
+	kill_vmcmds(&epp->ep_vmcmds);
 
 	/*
 	 * Push extra arguments on the stack needed by dynamically
 	 * linked binaries
 	 */
-	if (error == 0) {
+	if(error == 0) {
 		a = ai;
 
 		a->au_id = AUX_phdr;
@@ -755,7 +645,7 @@ ELFNAME2(exec,fixup)(struct proc *p, struct exec_package *epp)
 		a++;
 
 		a->au_id = AUX_pagesz;
-		a->au_v = PAGE_SIZE;
+		a->au_v = NBPG;
 		a++;
 
 		a->au_id = AUX_base;
@@ -776,77 +666,8 @@ ELFNAME2(exec,fixup)(struct proc *p, struct exec_package *epp)
 
 		error = copyout(ai, epp->ep_emul_argp, sizeof ai);
 	}
-	free(ap, M_TEMP);
-	pool_put(&namei_pool, interp);
-	return (error);
-}
-
-/*
- * Older ELF binaries use EI_ABIVERSION (formerly EI_BRAND) to brand
- * executables.  Newer ELF binaries use EI_OSABI instead.
- */
-char *
-ELFNAME(check_brand)(Elf_Ehdr *eh)
-{
-	if (eh->e_ident[EI_ABIVERSION] == '\0')
-		return (NULL);
-	return (&eh->e_ident[EI_ABIVERSION]);
-}
-
-int
-ELFNAME(os_pt_note)(struct proc *p, struct exec_package *epp, Elf_Ehdr *eh,
-	char *os_name, size_t name_size, size_t desc_size)
-{
-	Elf_Phdr *hph, *ph;
-	Elf_Note *np = NULL;
-	size_t phsize;
-	int error;
-
-	phsize = eh->e_phnum * sizeof(Elf_Phdr);
-	hph = malloc(phsize, M_TEMP, M_WAITOK);
-	if ((error = ELFNAME(read_from)(p, epp->ep_vp, eh->e_phoff,
-	    (caddr_t)hph, phsize)) != 0)
-		goto out1;
-
-	for (ph = hph;  ph < &hph[eh->e_phnum]; ph++) {
-		if (ph->p_type != PT_NOTE ||
-		    ph->p_filesz > 1024 ||
-		    ph->p_filesz < sizeof(Elf_Note) + name_size)
-			continue;
-
-		np = malloc(ph->p_filesz, M_TEMP, M_WAITOK);
-		if ((error = ELFNAME(read_from)(p, epp->ep_vp, ph->p_offset,
-		    (caddr_t)np, ph->p_filesz)) != 0)
-			goto out2;
-
-#if 0
-		if (np->type != ELF_NOTE_TYPE_OSVERSION) {
-			free(np, M_TEMP);
-			np = NULL;
-			continue;
-		}
-#endif
-
-		/* Check the name and description sizes. */
-		if (np->namesz != name_size ||
-		    np->descsz != desc_size)
-			goto out3;
-
-		if (bcmp((np + 1), os_name, name_size))
-			goto out3;
-
-		/* XXX: We could check for the specific emulation here */
-		/* All checks succeeded. */
-		error = 0;
-		goto out2;
-	}
-
-out3:
-	error = ENOEXEC;
-out2:
-	if (np)
-		free(np, M_TEMP);
-out1:
-	free(hph, M_TEMP);
+	free((char *) ap, M_TEMP);
+	free((char *) interp, M_TEMP);
 	return error;
 }
+#endif /* NATIVE_EXEC_ELF || EXEC_ELF */

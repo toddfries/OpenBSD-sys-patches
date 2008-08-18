@@ -1,4 +1,3 @@
-/*	$OpenBSD: nfsm_subs.h,v 1.26 2008/05/27 19:06:28 blambert Exp $	*/
 /*	$NetBSD: nfsm_subs.h,v 1.10 1996/03/20 21:59:56 fvdl Exp $	*/
 
 /*
@@ -16,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -51,9 +54,16 @@
  */
 
 #define	M_HASCL(m)	((m)->m_flags & M_EXT)
+#define	NFSMINOFF(m) \
+		if (M_HASCL(m)) \
+			(m)->m_data = (m)->m_ext.ext_buf; \
+		else if ((m)->m_flags & M_PKTHDR) \
+			(m)->m_data = (m)->m_pktdat; \
+		else \
+			(m)->m_data = (m)->m_dat
 #define	NFSMADV(m, s)	(m)->m_data += (s)
-#define	NFSMSIZ(m)	((M_HASCL(m)) ? (m)->m_ext.ext_size : \
-				(((m)->m_flags & M_PKTHDR) ? MHLEN : MLEN))
+#define	NFSMSIZ(m)	((M_HASCL(m))?MCLBYTES: \
+				(((m)->m_flags & M_PKTHDR)?MHLEN:MLEN))
 
 /*
  * Now for the macros that do the simple stuff and call the functions
@@ -67,6 +77,20 @@
  * fairly clean and deals with the mess caused by the xdr discriminating
  * unions.
  */
+
+#define	nfsm_build(a,c,s) \
+		{ if ((s) > M_TRAILINGSPACE(mb)) { \
+			MGET(mb2, M_WAIT, MT_DATA); \
+			if ((s) > MLEN) \
+				panic("build > MLEN"); \
+			mb->m_next = mb2; \
+			mb = mb2; \
+			mb->m_len = 0; \
+			bpos = mtod(mb, caddr_t); \
+		} \
+		(a) = (c)(bpos); \
+		mb->m_len += (s); \
+		bpos += (s); }
 
 #define	nfsm_dissect(a, c, s) \
 		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
@@ -83,25 +107,37 @@
 
 #define nfsm_fhtom(v, v3) \
 	      { if (v3) { \
-			nfsm_strtombuf(&mb, VTONFS(v)->n_fhp, \
-			    VTONFS(v)->n_fhsize, &bpos); \
+			t2 = nfsm_rndup(VTONFS(v)->n_fhsize) + NFSX_UNSIGNED; \
+			if (t2 <= M_TRAILINGSPACE(mb)) { \
+				nfsm_build(tl, u_int32_t *, t2); \
+				*tl++ = txdr_unsigned(VTONFS(v)->n_fhsize); \
+				*(tl + ((t2>>2) - 2)) = 0; \
+				bcopy((caddr_t)VTONFS(v)->n_fhp,(caddr_t)tl, \
+					VTONFS(v)->n_fhsize); \
+			} else if ((t2 = nfsm_strtmbuf(&mb, &bpos, \
+				(caddr_t)VTONFS(v)->n_fhp, \
+				  VTONFS(v)->n_fhsize)) != 0) { \
+				error = t2; \
+				m_freem(mreq); \
+				goto nfsmout; \
+			} \
 		} else { \
-			cp = nfsm_build(&mb, NFSX_V2FH, &bpos); \
+			nfsm_build(cp, caddr_t, NFSX_V2FH); \
 			bcopy((caddr_t)VTONFS(v)->n_fhp, cp, NFSX_V2FH); \
 		} }
 
 #define nfsm_srvfhtom(f, v3) \
 		{ if (v3) { \
-			tl = nfsm_build(&mb, NFSX_UNSIGNED + NFSX_V3FH,&bpos); \
+			nfsm_build(tl, u_int32_t *, NFSX_UNSIGNED + NFSX_V3FH); \
 			*tl++ = txdr_unsigned(NFSX_V3FH); \
 			bcopy((caddr_t)(f), (caddr_t)tl, NFSX_V3FH); \
 		} else { \
-			cp = nfsm_build(&mb, NFSX_V2FH, &bpos); \
+			nfsm_build(cp, caddr_t, NFSX_V2FH); \
 			bcopy((caddr_t)(f), cp, NFSX_V2FH); \
 		} }
 
 #define nfsm_srvpostop_fh(f) \
-		{ tl = nfsm_build(&mb, 2 * NFSX_UNSIGNED + NFSX_V3FH, &bpos); \
+		{ nfsm_build(tl, u_int32_t *, 2 * NFSX_UNSIGNED + NFSX_V3FH); \
 		*tl++ = nfs_true; \
 		*tl++ = txdr_unsigned(NFSX_V3FH); \
 		bcopy((caddr_t)(f), (caddr_t)tl, NFSX_V3FH); \
@@ -191,6 +227,18 @@
 			(f) = ttattrf; \
 		} }
 
+#define nfsm_v3sattr(s, a) \
+		{ (s)->sa_modetrue = nfs_true; \
+		(s)->sa_mode = vtonfsv3_mode((a)->va_mode); \
+		(s)->sa_uidfalse = nfs_false; \
+		(s)->sa_gidfalse = nfs_false; \
+		(s)->sa_sizefalse = nfs_false; \
+		(s)->sa_atimetype = txdr_unsigned(NFSV3SATTRTIME_TOCLIENT); \
+		txdr_nfsv3time(&(a)->va_atime, &(s)->sa_atime); \
+		(s)->sa_mtimetype = txdr_unsigned(NFSV3SATTRTIME_TOCLIENT); \
+		txdr_nfsv3time(&(a)->va_mtime, &(s)->sa_mtime); \
+		}
+
 #define	nfsm_strsiz(s,m) \
 		{ nfsm_dissect(tl,u_int32_t *,NFSX_UNSIGNED); \
 		if (((s) = fxdr_unsigned(int32_t,*tl)) > (m)) { \
@@ -224,8 +272,18 @@
 			goto nfsmout; \
 		}
 
+#define nfsm_uiotom(p,s) \
+		if ((t1 = nfsm_uiotombuf((p),&mb,(s),&bpos)) != 0) { \
+			error = t1; \
+			m_freem(mreq); \
+			goto nfsmout; \
+		}
+
 #define	nfsm_reqhead(v,a,s) \
 		mb = mreq = nfsm_reqh((v),(a),(s),&bpos)
+
+#define nfsm_reqdone	m_freem(mrep); \
+		nfsmout: 
 
 #define nfsm_rndup(a)	(((a)+3)&(~0x3))
 
@@ -244,16 +302,30 @@
 			error = ENAMETOOLONG; \
 			goto nfsmout; \
 		} \
-		nfsm_strtombuf(&mb, (a), (s), &bpos)
+		t2 = nfsm_rndup(s)+NFSX_UNSIGNED; \
+		if (t2 <= M_TRAILINGSPACE(mb)) { \
+			nfsm_build(tl,u_int32_t *,t2); \
+			*tl++ = txdr_unsigned(s); \
+			*(tl+((t2>>2)-2)) = 0; \
+			bcopy((caddr_t)(a), (caddr_t)tl, (s)); \
+		} else if ((t2 = nfsm_strtmbuf(&mb, &bpos, (a), (s))) != 0) { \
+			error = t2; \
+			m_freem(mreq); \
+			goto nfsmout; \
+		}
+
+#define	nfsm_srvdone \
+		nfsmout: \
+		return(error)
 
 #define	nfsm_reply(s) \
 		{ \
 		nfsd->nd_repstat = error; \
 		if (error && !(nfsd->nd_flag & ND_NFSV3)) \
-		   (void) nfs_rephead(0, nfsd, slp, error, \
+		   (void) nfs_rephead(0, nfsd, slp, error, cache, &frev, \
 			mrq, &mb, &bpos); \
 		else \
-		   (void) nfs_rephead((s), nfsd, slp, error, \
+		   (void) nfs_rephead((s), nfsd, slp, error, cache, &frev, \
 			mrq, &mb, &bpos); \
 		if (mrep != NULL) { \
 			m_freem(mrep); \
@@ -269,10 +341,10 @@
 		{ \
 		nfsd->nd_repstat = error; \
 		if (error && !(v3)) \
-		   (void) nfs_rephead(0, nfsd, slp, error, \
+		   (void) nfs_rephead(0, nfsd, slp, error, cache, &frev, \
 			&mreq, &mb, &bpos); \
 		else \
-		   (void) nfs_rephead((s), nfsd, slp, error, \
+		   (void) nfs_rephead((s), nfsd, slp, error, cache, &frev, \
 			&mreq, &mb, &bpos); \
 		}
 
@@ -300,6 +372,26 @@
 			nfsm_adv(NFSX_V2FH - NFSX_V3FH); \
 		}
 
+#define	nfsm_clget \
+		if (bp >= be) { \
+			if (mp == mb) \
+				mp->m_len += bp-bpos; \
+			MGET(mp, M_WAIT, MT_DATA); \
+			MCLGET(mp, M_WAIT); \
+			mp->m_len = NFSMSIZ(mp); \
+			mp2->m_next = mp; \
+			mp2 = mp; \
+			bp = mtod(mp, caddr_t); \
+			be = bp+mp->m_len; \
+		} \
+		tl = (u_int32_t *)bp
+
+#define	nfsm_srvfillattr(a, f) \
+		nfsm_srvfattr(nfsd, (a), (f))
+
+#define nfsm_srvwcc_data(br, b, ar, a) \
+		nfsm_srvwcc(nfsd, (br), (b), (ar), (a), &mb, &bpos)
+
 #define nfsm_srvpostop_attr(r, a) \
 		nfsm_srvpostopattr(nfsd, (r), (a), &mb, &bpos)
 
@@ -322,28 +414,28 @@
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED); \
 		if (*tl == nfs_true) { \
 			nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED); \
-			(a)->va_size = fxdr_hyper(tl); \
+			fxdr_hyper(tl, &(a)->va_size); \
 		} \
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED); \
 		switch (fxdr_unsigned(int, *tl)) { \
 		case NFSV3SATTRTIME_TOCLIENT: \
-			(a)->va_vaflags &= ~VA_UTIMES_NULL; \
 			nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED); \
 			fxdr_nfsv3time(tl, &(a)->va_atime); \
 			break; \
 		case NFSV3SATTRTIME_TOSERVER: \
-			getnanotime(&(a)->va_atime); \
+			(a)->va_atime.tv_sec = time.tv_sec; \
+			(a)->va_atime.tv_nsec = time.tv_usec * 1000; \
 			break; \
 		}; \
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED); \
 		switch (fxdr_unsigned(int, *tl)) { \
 		case NFSV3SATTRTIME_TOCLIENT: \
-			(a)->va_vaflags &= ~VA_UTIMES_NULL; \
 			nfsm_dissect(tl, u_int32_t *, 2 * NFSX_UNSIGNED); \
 			fxdr_nfsv3time(tl, &(a)->va_mtime); \
 			break; \
 		case NFSV3SATTRTIME_TOSERVER: \
-			getnanotime(&(a)->va_mtime); \
+			(a)->va_mtime.tv_sec = time.tv_sec; \
+			(a)->va_mtime.tv_nsec = time.tv_usec * 1000; \
 			break; \
 		}; }
 

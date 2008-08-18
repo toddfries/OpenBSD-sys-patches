@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugdev.c,v 1.4 2007/06/17 00:28:56 deraadt Exp $ */
+/*	$OpenBSD: bugdev.c,v 1.1 1996/05/16 02:30:36 chuck Exp $ */
 
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -37,7 +37,7 @@
 #include "stand.h"
 #include "libsa.h"
 
-void cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp);
+void cputobsdlabel __P((struct disklabel *lp, struct cpu_disklabel *clp));
 
 int errno;
 
@@ -50,7 +50,10 @@ struct bugsc_softc {
 } bugsc_softc[1];
 
 int
-devopen(struct open_file *f, const char *fname, char **file)
+devopen(f, fname, file)
+	struct open_file *f;
+	const char *fname;
+	char **file;
 {
 	register struct bugsc_softc *pp = &bugsc_softc[0];
 	int	error, i, dn = 0, pn = 0;
@@ -82,7 +85,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 	if (i != DEV_BSIZE)
 		return (EINVAL);
 
-	cputobsdlabel(&sdlabel, (struct mvmedisklabel *)iobuf);
+	cputobsdlabel(&sdlabel, (struct cpu_disklabel *)iobuf);
 	pp->poff = sdlabel.d_partitions[pn].p_offset;
 	pp->psize = sdlabel.d_partitions[pn].p_size;
 
@@ -95,10 +98,14 @@ devopen(struct open_file *f, const char *fname, char **file)
 /* silly block scale factor */
 #define BUG_BLOCK_SIZE 256
 #define BUG_SCALE (512/BUG_BLOCK_SIZE)
-
 int
-bugscstrategy(void *devdata, int func, daddr_t dblk, size_t size, void *buf,
-    size_t *rsize)
+bugscstrategy(devdata, func, dblk, size, buf, rsize)
+	void *devdata;
+	int func;
+	daddr_t dblk;
+	size_t size;
+	void *buf;
+	size_t *rsize;
 {
 	struct mvmeprom_dskio dio;
 	register struct bugsc_softc *pp = (struct bugsc_softc *)devdata;
@@ -131,7 +138,8 @@ printf("rsize %d status %x\n", *rsize, dio.status);
 }
 
 int
-bugscopen(struct open_file *f)
+bugscopen(f)
+	struct open_file *f;
 {
 #ifdef DEBUG
 	printf("bugscopen:\n");
@@ -148,19 +156,25 @@ bugscopen(struct open_file *f)
 }
 
 int
-bugscclose(struct open_file *f)
+bugscclose(f)
+	struct open_file *f;
 {
 	return (EIO);
 }
 
 int
-bugscioctl(struct open_file *f, u_long cmd, void *data)
+bugscioctl(f, cmd, data)
+	struct open_file *f;
+	u_long cmd;
+	void *data;
 {
 	return (EIO);
 }
 
 void
-cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
+cputobsdlabel(lp, clp)
+	struct disklabel *lp;
+	struct cpu_disklabel *clp;
 {
 	int i;
 
@@ -219,6 +233,6 @@ cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 	lp->d_bbsize = clp->bbsize;
 	lp->d_sbsize = clp->sbsize;
 	bcopy(clp->vid_4, &(lp->d_partitions[0]),sizeof (struct partition) * 4);
-	bcopy(clp->cfg_4, &(lp->d_partitions[4]), sizeof (struct partition) *
-	    ((MAXPARTITIONS < 16) ? (MAXPARTITIONS - 4) : 12));
+	bcopy(clp->cfg_4, &(lp->d_partitions[4]), sizeof (struct partition) 
+		* ((MAXPARTITIONS < 16) ? (MAXPARTITIONS - 4) : 12));
 }

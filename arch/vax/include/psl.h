@@ -1,5 +1,4 @@
-/*      $OpenBSD: psl.h,v 1.7 2003/06/02 23:27:57 millert Exp $      */
-/*      $NetBSD: psl.h,v 1.6 1997/06/07 12:15:28 ragge Exp $      */
+/*      $NetBSD: psl.h,v 1.5 1996/01/28 12:32:21 ragge Exp $      */
 
 /*
  * Rewritten for the VAX port. Based on Berkeley code. /IC
@@ -15,7 +14,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -80,10 +83,10 @@
 #define	PSL_PREVU	0x00c00000	/* Previous user mode */
 #define	PSL_K		0x00000000	/* kernel mode */
 #define	PSL_E		0x01000000     	/* executive mode */
-#define	PSL_S		0x02000000     	/* supervisor mode */
+#define	PSL_S		0x02000000     	/* executive mode */
 #define	PSL_U		0x03000000	/* user mode */
 #define	PSL_IS		0x04000000	/* interrupt stack select */
-#define	PSL_FPD	        0x08000000	/* first part done flag */
+#define	PSL_FPD	        0x04000000	/* first part done flag */
 #define PSL_TP          0x40000000      /* trace pending */
 #define	PSL_CM		0x80000000	/* compatibility mode */
 
@@ -101,8 +104,9 @@
  * Macros to decode processor status word.
  */
 #define	CLKF_USERMODE(framep)	((((framep)->ps) & (PSL_U)) == PSL_U)
+#define	CLKF_BASEPRI(framep)	((((framep)->ps) & (PSL_IPL1F)) == 0)
 #define	CLKF_PC(framep)		((framep)->pc)
-#define	CLKF_INTR(framep)	((((framep)->ps) & (PSL_IS)) == PSL_IS)
+#define	CLKF_INTR(framep)	0
 #define PSL2IPL(ps)             ((ps) >> 16)
 
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_ecoff.c,v 1.10 2005/11/12 04:31:24 jsg Exp $	*/
+/*	$OpenBSD: exec_ecoff.c,v 1.3 1996/05/22 12:05:19 deraadt Exp $	*/
 /*	$NetBSD: exec_ecoff.c,v 1.8 1996/05/19 20:36:06 jonathan Exp $	*/
 
 /*
@@ -39,11 +39,14 @@
 #include <sys/vnode.h>
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
-#include <uvm/uvm_extern.h>
-
-#if defined(_KERN_DO_ECOFF)
+#include <vm/vm.h>
 
 #include <sys/exec_ecoff.h>
+
+int	exec_ecoff_prep_omagic __P((struct proc *, struct exec_package *));
+int	exec_ecoff_prep_nmagic __P((struct proc *, struct exec_package *));
+int	exec_ecoff_prep_zmagic __P((struct proc *, struct exec_package *));
+int	exec_ecoff_setup_stack __P((struct proc *, struct exec_package *));
 
 /*
  * exec_ecoff_makecmds(): Check if it's an ecoff-format executable.
@@ -57,7 +60,9 @@
  * package.
  */
 int
-exec_ecoff_makecmds(struct proc *p, struct exec_package *epp)
+exec_ecoff_makecmds(p, epp)
+	struct proc *p;
+	struct exec_package *epp;
 {
 	int error;
 	struct ecoff_exechdr *execp = epp->ep_hdr;
@@ -67,7 +72,7 @@ exec_ecoff_makecmds(struct proc *p, struct exec_package *epp)
 
 	if (ECOFF_BADMAG(execp))
 		return ENOEXEC;
-
+	
 	switch (execp->a.magic) {
 	case ECOFF_OMAGIC:
 		error = exec_ecoff_prep_omagic(p, epp);
@@ -92,10 +97,55 @@ exec_ecoff_makecmds(struct proc *p, struct exec_package *epp)
 }
 
 /*
+ * exec_ecoff_setup_stack(): Set up the stack segment for an ecoff
+ * executable.
+ *
+ * Note that the ep_ssize parameter must be set to be the current stack
+ * limit; this is adjusted in the body of execve() to yield the
+ * appropriate stack segment usage once the argument length is
+ * calculated.
+ *
+ * This function returns an int for uniformity with other (future) formats'
+ * stack setup functions.  They might have errors to return.
+ */
+int
+exec_ecoff_setup_stack(p, epp)
+	struct proc *p;
+	struct exec_package *epp;
+{
+
+	epp->ep_maxsaddr = USRSTACK - MAXSSIZ;
+	epp->ep_minsaddr = USRSTACK;
+	epp->ep_ssize = p->p_rlimit[RLIMIT_STACK].rlim_cur;
+
+	/*
+	 * set up commands for stack.  note that this takes *two*, one to
+	 * map the part of the stack which we can access, and one to map
+	 * the part which we can't.
+	 *
+	 * arguably, it could be made into one, but that would require the
+	 * addition of another mapping proc, which is unnecessary
+	 *
+	 * note that in memory, things assumed to be: 0 ....... ep_maxsaddr
+	 * <stack> ep_minsaddr
+	 */
+	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero,
+	    ((epp->ep_minsaddr - epp->ep_ssize) - epp->ep_maxsaddr),
+	    epp->ep_maxsaddr, NULLVP, 0, VM_PROT_NONE);
+	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, epp->ep_ssize,
+	    (epp->ep_minsaddr - epp->ep_ssize), NULLVP, 0,
+	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
+
+	return 0;
+}
+
+/*
  * exec_ecoff_prep_omagic(): Prepare a ECOFF OMAGIC binary's exec package
  */
 int
-exec_ecoff_prep_omagic(struct proc *p, struct exec_package *epp)
+exec_ecoff_prep_omagic(p, epp)
+	struct proc *p;
+	struct exec_package *epp;
 {
 	struct ecoff_exechdr *execp = epp->ep_hdr;
 	struct ecoff_aouthdr *eap = &execp->a;
@@ -117,8 +167,8 @@ exec_ecoff_prep_omagic(struct proc *p, struct exec_package *epp)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, eap->bsize,
 		    ECOFF_SEGMENT_ALIGN(execp, eap->bss_start), NULLVP, 0,
 		    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
-
-	return exec_setup_stack(p, epp);
+	
+	return exec_ecoff_setup_stack(p, epp);
 }
 
 /*
@@ -126,7 +176,9 @@ exec_ecoff_prep_omagic(struct proc *p, struct exec_package *epp)
  *                           package.
  */
 int
-exec_ecoff_prep_nmagic(struct proc *p, struct exec_package *epp)
+exec_ecoff_prep_nmagic(p, epp)
+	struct proc *p;
+	struct exec_package *epp;
 {
 	struct ecoff_exechdr *execp = epp->ep_hdr;
 	struct ecoff_aouthdr *eap = &execp->a;
@@ -153,7 +205,7 @@ exec_ecoff_prep_nmagic(struct proc *p, struct exec_package *epp)
 		    ECOFF_SEGMENT_ALIGN(execp, eap->bss_start), NULLVP, 0,
 		    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return exec_ecoff_setup_stack(p, epp);
 }
 
 /*
@@ -166,7 +218,9 @@ exec_ecoff_prep_nmagic(struct proc *p, struct exec_package *epp)
  * text, data, bss, and stack segments.
  */
 int
-exec_ecoff_prep_zmagic(struct proc *p, struct exec_package *epp)
+exec_ecoff_prep_zmagic(p, epp)
+	struct proc *p;
+	struct exec_package *epp;
 {
 	struct ecoff_exechdr *execp = epp->ep_hdr;
 	struct ecoff_aouthdr *eap = &execp->a;
@@ -186,11 +240,11 @@ exec_ecoff_prep_zmagic(struct proc *p, struct exec_package *epp)
 	    epp->ep_vp->v_writecount != 0) {
 #ifdef DIAGNOSTIC
 		if (epp->ep_vp->v_flag & VTEXT)
-			panic("exec: a VTEXT vnode has writecount != 0");
+			panic("exec: a VTEXT vnode has writecount != 0\n");
 #endif
 		return ETXTBSY;
 	}
-	vn_marktext(epp->ep_vp);
+	epp->ep_vp->v_flag |= VTEXT;
 
 	/* set up command for text segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_pagedvn, eap->tsize,
@@ -207,7 +261,5 @@ exec_ecoff_prep_zmagic(struct proc *p, struct exec_package *epp)
 	    ECOFF_SEGMENT_ALIGN(execp, eap->bss_start), NULLVP, 0,
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return exec_ecoff_setup_stack(p, epp);
 }
-
-#endif /* _KERN_DO_ECOFF */

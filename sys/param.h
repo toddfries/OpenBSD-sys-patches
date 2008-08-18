@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.74 2008/03/10 17:15:33 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.10 1996/09/30 12:30:18 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,20 +45,15 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200805		/* OpenBSD version (year & month). */
-#define OpenBSD4_3 1		/* OpenBSD 4.3 */
+#define OpenBSD	199610		/* OpenBSD version (year & month). */
+#define OpenBSD2_0 1		/* OpenBSD 2.0 */
 
 #ifndef NULL
-#ifdef 	__GNUG__
-#define	NULL	__null
-#else
-#define	NULL	0L
-#endif
+#define	NULL	0
 #endif
 
 #ifndef _LOCORE
 #include <sys/types.h>
-#include <sys/simplelock.h>
 #endif
 
 /*
@@ -68,12 +67,11 @@
 
 #define	MAXCOMLEN	16		/* max command name remembered */
 #define	MAXINTERP	64		/* max interpreter file name length */
-#define	MAXLOGNAME	LOGIN_NAME_MAX	/* max login name length w/ NUL */
+#define	MAXLOGNAME	12		/* max login name length */
 #define	MAXUPRC		CHILD_MAX	/* max simultaneous processes */
 #define	NCARGS		ARG_MAX		/* max bytes for an exec function */
 #define	NGROUPS		NGROUPS_MAX	/* max number groups */
-#define	NOFILE		OPEN_MAX	/* max open files per process (soft) */
-#define	NOFILE_MAX	1024		/* max open files per process (hard) */
+#define	NOFILE		OPEN_MAX	/* max open files per process */
 #define	NOGROUP		65535		/* marker for empty group set member */
 #define MAXHOSTNAMELEN	256		/* max hostname size */
 
@@ -91,8 +89,8 @@
 #include <sys/signal.h>
 
 /* Machine type dependent parameters. */
-#include <sys/limits.h>
 #include <machine/param.h>
+#include <machine/limits.h>
 
 /*
  * Priorities.  Note that with 32 run queues, differences less than 4 are
@@ -111,36 +109,42 @@
 #define	PUSER	50
 #define	MAXPRI	127		/* Priorities range from 0 through MAXPRI. */
 
-#define	PRIMASK		0x0ff
-#define	PCATCH		0x100	/* OR'd with pri for tsleep to check signals */
-#define PNORELOCK	0x200	/* OR'd with pri for msleep to not reaquire
-				   the mutex */
+#define	PRIMASK	0x0ff
+#define	PCATCH	0x100		/* OR'd with pri for tsleep to check signals */
+
+#define	NZERO	0		/* default "nice" */
 
 #define	NBPW	sizeof(int)	/* number of bytes per word (integer) */
 
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
 #define	NODEV	(dev_t)(-1)	/* non-existent device */
-#define NETDEV	(dev_t)(-2)	/* network device (for nfs swap) */
-	
+
+/*
+ * Clustering of hardware pages on machines with ridiculously small
+ * page sizes is done here.  The paging subsystem deals with units of
+ * CLSIZE pte's describing NBPG (from machine/machparam.h) pages each.
+ */
+#define	CLBYTES		(CLSIZE*NBPG)
+#define	CLOFSET		(CLSIZE*NBPG-1)	/* for clusters, like PGOFSET */
+#define	claligned(x)	((((int)(x))&CLOFSET)==0)
+#define	CLOFF		CLOFSET
+#define	CLSHIFT		(PGSHIFT+CLSIZELOG2)
+
+#if CLSIZE==1
+#define	clbase(i)	(i)
+#define	clrnd(i)	(i)
+#else
+/* Give the base virtual address (first of CLSIZE). */
+#define	clbase(i)	((i) &~ (CLSIZE-1))
+/* Round a number of clicks up to a whole cluster. */
+#define	clrnd(i)	(((i) + (CLSIZE-1)) &~ (CLSIZE-1))
+#endif
+
 #define	CBLOCK	64		/* Clist block size, must be a power of 2. */
 #define CBQSIZE	(CBLOCK/NBBY)	/* Quote bytes/cblock - can do better. */
 				/* Data chars/clist. */
 #define	CBSIZE	(CBLOCK - sizeof(struct cblock *) - CBQSIZE)
 #define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
-
-/*
- * Constants related to network buffer management.
- * MCLBYTES must be no larger than NBPG (the software page size), and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
- */
-#define	MSIZE		256		/* size of an mbuf */
-#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
-					/* 2K cluster can hold Ether frame */
-#define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
-#define	MCLOFSET	(MCLBYTES - 1)
-
 
 /*
  * File system parameters and macros.
@@ -149,15 +153,17 @@
  * smaller units (fragments) only in the last direct block.  MAXBSIZE
  * primarily determines the size of buffers in the buffer pool.  It may be
  * made larger without any effect on existing file systems; however making
- * it smaller makes some file systems unmountable.
+ * it smaller make make some file systems unmountable.
  */
-#ifndef MAXBSIZE	/* XXX temp until sun3 DMA chaining */
+#if defined(__i386__)
+#define	MAXBSIZE	16384		/* XXX MAXPHYS */
+#else
 #define	MAXBSIZE	MAXPHYS
 #endif
 #define MAXFRAG 	8
 
 /*
- * MAXPATHLEN defines the longest permissible path length after expanding
+ * MAXPATHLEN defines the longest permissable path length after expanding
  * symbolic links. It is used to allocate a temporary buffer from the buffer
  * pool in which to do the name expansion, hence should be a power of two,
  * and must be less than or equal to MAXBSIZE.  MAXSYMLINKS defines the
@@ -166,20 +172,13 @@
  * infinite loops reasonably quickly.
  */
 #define	MAXPATHLEN	PATH_MAX
-#define MAXSYMLINKS	SYMLOOP_MAX
-
-/* Macros to set/clear/test flags. */
-#ifdef _KERNEL
-#define SET(t, f)	((t) |= (f))
-#define CLR(t, f)	((t) &= ~(f))
-#define ISSET(t, f)	((t) & (f))
-#endif
+#define MAXSYMLINKS	32
 
 /* Bit map related macros. */
-#define	setbit(a,i)	((a)[(i)>>3] |= 1<<((i)&(NBBY-1)))
-#define	clrbit(a,i)	((a)[(i)>>3] &= ~(1<<((i)&(NBBY-1))))
-#define	isset(a,i)	((a)[(i)>>3] & (1<<((i)&(NBBY-1))))
-#define	isclr(a,i)	(((a)[(i)>>3] & (1<<((i)&(NBBY-1)))) == 0)
+#define	setbit(a,i)	((a)[(i)/NBBY] |= 1<<((i)%NBBY))
+#define	clrbit(a,i)	((a)[(i)/NBBY] &= ~(1<<((i)%NBBY)))
+#define	isset(a,i)	((a)[(i)/NBBY] & (1<<((i)%NBBY)))
+#define	isclr(a,i)	(((a)[(i)/NBBY] & (1<<((i)%NBBY))) == 0)
 
 /* Macros for counting and rounding. */
 #ifndef howmany
@@ -189,12 +188,9 @@
 #define powerof2(x)	((((x)-1)&(x))==0)
 
 /* Macros for min/max. */
+#ifndef _KERNEL
 #define	MIN(a,b) (((a)<(b))?(a):(b))
 #define	MAX(a,b) (((a)>(b))?(a):(b))
-
-/* Macros for calculating the offset of a field */
-#if !defined(offsetof) && defined(_KERNEL)
-#define offsetof(s, e) ((size_t)&((s *)0)->e)
 #endif
 
 /*
@@ -209,11 +205,11 @@
  * always allocate and free physical memory; requests for these
  * size allocations should be done infrequently as they will be slow.
  *
- * Constraints: PAGE_SIZE <= MAXALLOCSAVE <= 2 ** (MINBUCKET + 14), and
+ * Constraints: CLBYTES <= MAXALLOCSAVE <= 2 ** (MINBUCKET + 14), and
  * MAXALLOCSIZE must be a power of two.
  */
 #define MINBUCKET	4		/* 4 => min allocation of 16 bytes */
-#define MAXALLOCSAVE	(2 * PAGE_SIZE)
+#define MAXALLOCSAVE	(2 * CLBYTES)
 
 /*
  * Scale factor for scaled integers used to count %cpu time and load avgs.
@@ -230,17 +226,6 @@
 #define FSCALE	(1<<FSHIFT)
 
 /*
- * The time for a process to be blocked before being very swappable.
- * This is a number of seconds which the system takes as being a non-trivial
- * amount of real time.  You probably shouldn't change this;
- * it is used in subtle ways (fractions and multiples of it are, that is, like
- * half of a ``long time'', almost a long time, etc.)
- * It is related to human patience and other factors which don't really
- * change over time.
- */
-#define	MAXSLP	20
-
-/*
  * rfork() options.
  *
  * XXX currently, operations without RFPROC set are not supported.
@@ -251,8 +236,7 @@
 #define RFNOTEG		(1<<3)	/* UNIMPL create new plan9 `note group' */
 #define RFPROC		(1<<4)	/* change child (else changes curproc) */
 #define RFMEM		(1<<5)	/* share `address space' */
-#define RFNOWAIT	(1<<6)	/* parent need not wait() on child */ 
+#define RFNOWAIT	(1<<6)	/* UNIMPL parent need not wait() on child */ 
 #define RFCNAMEG	(1<<10) /* UNIMPL zero plan9 `name space' */
 #define RFCENVG		(1<<11) /* UNIMPL zero plan9 `env space' */
 #define RFCFDG		(1<<12)	/* zero fd table */
-#define RFTHREAD	(1<<13)	/* create a thread, not a process */

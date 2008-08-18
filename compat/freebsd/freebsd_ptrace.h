@@ -1,4 +1,4 @@
-/* * $OpenBSD: freebsd_ptrace.h,v 1.4 2003/06/02 23:28:00 millert Exp $*/
+/* * $OpenBSD: freebsd_ptrace.h,v 1.2 1996/08/02 20:34:47 niklas Exp $*/
 /*-
  * Copyright (c) 1984, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -11,7 +11,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -51,13 +55,13 @@
 
 #define	FREEBSD_PT_FIRSTMACH	32	/* for machine-specific requests */
 
-void netbsd_to_freebsd_ptrace_regs(struct reg *, struct fpreg *,
-					struct freebsd_ptrace_reg *);
-void freebsd_to_netbsd_ptrace_regs(struct freebsd_ptrace_reg *,
-					struct reg *, struct fpreg *);
-int freebsd_ptrace_getregs(struct freebsd_ptrace_reg *, caddr_t,
-				register_t *);
-int freebsd_ptrace_setregs(struct freebsd_ptrace_reg *, caddr_t,
-				int);
+void netbsd_to_freebsd_ptrace_regs __P((struct reg *, struct fpreg *,
+					struct freebsd_ptrace_reg *));
+void freebsd_to_netbsd_ptrace_regs __P((struct freebsd_ptrace_reg *,
+					struct reg *, struct fpreg *));
+int freebsd_ptrace_getregs __P((struct freebsd_ptrace_reg *, caddr_t,
+				register_t *));
+int freebsd_ptrace_setregs __P((struct freebsd_ptrace_reg *, caddr_t,
+				int));
 
 #endif	/* !_FREEBSD_PTRACE_H_ */

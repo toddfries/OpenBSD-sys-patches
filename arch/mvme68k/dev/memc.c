@@ -1,4 +1,4 @@
-/*	$OpenBSD: memc.c,v 1.10 2004/07/30 22:29:45 miod Exp $ */
+/*	$OpenBSD: memc.c,v 1.4 1996/06/11 10:15:13 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -37,6 +43,7 @@
 #include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
+#include <sys/callout.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
@@ -55,28 +62,29 @@ struct memcsoftc {
 	struct intrhand	sc_ih;
 };
 
-void memcattach(struct device *, struct device *, void *);
-int  memcmatch(struct device *, void *, void *);
+void memcattach __P((struct device *, struct device *, void *));
+int  memcmatch __P((struct device *, void *, void *));
 
 struct cfattach memc_ca = {
 	sizeof(struct memcsoftc), memcmatch, memcattach
 };
 
 struct cfdriver memc_cd = {
-	NULL, "memc", DV_DULL
+	NULL, "memc", DV_DULL, 0
 };
 
-int memcintr(struct frame *frame);
+int memcintr __P((struct frame *frame));
 
 int
 memcmatch(parent, vcf, args)
 	struct device *parent;
 	void *vcf, *args;
 {
+	struct cfdata *cf = vcf;
 	struct confargs *ca = args;
 	struct memcreg *memc = (struct memcreg *)ca->ca_vaddr;
 
-	if (badvaddr((vaddr_t)memc, 1))
+	if (badvaddr(memc, 1))
 		return (0);
 	if (memc->memc_chipid==MEMC_CHIPID || memc->memc_chipid==MCECC_CHIPID)
 		return (1);
@@ -103,9 +111,10 @@ memcattach(parent, self, args)
 
 #if 0
 	sc->sc_ih.ih_fn = memcintr;
+	sc->sc_ih.ih_arg = 0;
 	sc->sc_ih.ih_ipl = 7;
 	sc->sc_ih.ih_wantframe = 1;
-	mcintr_establish(xxx, &sc->sc_ih, self->dv_xname);
+	mcintr_establish(xxx, &sc->sc_ih);
 #endif
 
 	switch (sc->sc_memc->memc_chipid) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_acct.c,v 1.21 2007/04/12 22:14:15 tedu Exp $	*/
+/*	$OpenBSD: kern_acct.c,v 1.2 1996/03/03 17:19:40 niklas Exp $	*/
 /*	$NetBSD: kern_acct.c,v 1.42 1996/02/04 02:15:12 christos Exp $	*/
 
 /*-
@@ -19,7 +19,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -52,7 +56,6 @@
 #include <sys/resourcevar.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
-#include <sys/kthread.h>
 
 #include <sys/syscallargs.h>
 
@@ -69,11 +72,11 @@
 
 /*
  * Internal accounting functions.
+ * The former's operation is described in Leffler, et al., and the latter
+ * was provided by UCB with the 4.4BSD-Lite release
  */
-comp_t	encode_comp_t(u_long, u_long);
-int	acct_start(void);
-void	acct_thread(void *);
-void	acct_shutdown(void);
+comp_t	encode_comp_t __P((u_long, u_long));
+void	acctwatch __P((void *));
 
 /*
  * Accounting vnode pointer, and saved vnode pointer.
@@ -88,35 +91,36 @@ int	acctsuspend = 2;	/* stop accounting when < 2% free space left */
 int	acctresume = 4;		/* resume when free space risen to > 4% */
 int	acctchkfreq = 15;	/* frequency (in seconds) to check space */
 
-struct proc *acct_proc;
-
 /*
  * Accounting system call.  Written based on the specification and
  * previous implementation done by Mark Tinguely.
  */
 int
-sys_acct(struct proc *p, void *v, register_t *retval)
+sys_acct(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 	struct sys_acct_args /* {
-		syscallarg(const char *) path;
+		syscallarg(char *) path;
 	} */ *uap = v;
 	struct nameidata nd;
 	int error;
 
 	/* Make sure that the caller is root. */
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 
 	/*
 	 * If accounting is to be started to a file, open that file for
-	 * writing and make sure it's 'normal'.
+	 * writing and make sure it's a 'normal'.
 	 */
 	if (SCARG(uap, path) != NULL) {
 		NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_USERSPACE, SCARG(uap, path),
 		    p);
-		if ((error = vn_open(&nd, FWRITE|O_APPEND, 0)) != 0)
+		if ((error = vn_open(&nd, FWRITE, 0)) != 0)
 			return (error);
-		VOP_UNLOCK(nd.ni_vp, 0, p);
+		VOP_UNLOCK(nd.ni_vp);
 		if (nd.ni_vp->v_type != VREG) {
 			vn_close(nd.ni_vp, FWRITE, p->p_ucred, p);
 			return (EACCES);
@@ -127,26 +131,22 @@ sys_acct(struct proc *p, void *v, register_t *retval)
 	 * If accounting was previously enabled, kill the old space-watcher,
 	 * close the file, and (if no new file was specified, leave).
 	 */
-	if (acctp != NULL || savacctp != NULL) {
-		wakeup(&acct_proc);
-		error = vn_close((acctp != NULL ? acctp : savacctp), FWRITE,
+	if (acctp != NULLVP || savacctp != NULLVP) {
+		untimeout(acctwatch, NULL);
+		error = vn_close((acctp != NULLVP ? acctp : savacctp), FWRITE,
 		    p->p_ucred, p);
-		acctp = savacctp = NULL;
+		acctp = savacctp = NULLVP;
 	}
 	if (SCARG(uap, path) == NULL)
-		return (0);
+		return (error);
 
 	/*
 	 * Save the new accounting file vnode, and schedule the new
 	 * free space watcher.
 	 */
 	acctp = nd.ni_vp;
-	if ((error = acct_start()) != 0) {
-		acctp = NULL;
-		(void)vn_close(nd.ni_vp, FWRITE, p->p_ucred, p);
-		return (error);
-	}
-	return (0);
+	acctwatch(NULL);
+	return (error);
 }
 
 /*
@@ -156,30 +156,19 @@ sys_acct(struct proc *p, void *v, register_t *retval)
  * "acct.h" header file.)
  */
 int
-acct_process(struct proc *p)
+acct_process(p)
+	struct proc *p;
 {
 	struct acct acct;
 	struct rusage *r;
 	struct timeval ut, st, tmp;
-	int t;
+	int s, t;
 	struct vnode *vp;
-	struct plimit *oplim = NULL;
-	int error;
 
 	/* If accounting isn't enabled, don't bother */
 	vp = acctp;
-	if (vp == NULL)
+	if (vp == NULLVP)
 		return (0);
-
-	/*
-	 * Raise the file limit so that accounting can't be stopped by the
-	 * user. (XXX - we should think about the cpu limit too).
-	 */
-	if (p->p_p->ps_limit->p_refcnt > 1) {
-		oplim = p->p_p->ps_limit;
-		p->p_p->ps_limit = limcopy(p->p_p->ps_limit);
-	}
-	p->p_rlimit[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
 
 	/*
 	 * Get process accounting information.
@@ -195,8 +184,9 @@ acct_process(struct proc *p)
 
 	/* (3) The elapsed time the commmand ran (and its starting time) */
 	acct.ac_btime = p->p_stats->p_start.tv_sec;
-	getmicrotime(&tmp);
-	timersub(&tmp, &p->p_stats->p_start, &tmp);
+	s = splclock();
+	timersub(&time, &p->p_stats->p_start, &tmp);
+	splx(s);
 	acct.ac_etime = encode_comp_t(tmp.tv_sec, tmp.tv_usec);
 
 	/* (4) The average amount of memory used */
@@ -227,15 +217,10 @@ acct_process(struct proc *p)
 	/*
 	 * Now, just write the accounting information to the file.
 	 */
-	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&acct, sizeof (acct),
-	    (off_t)0, UIO_SYSSPACE, IO_APPEND|IO_UNIT, p->p_ucred, NULL, p);
-
-	if (oplim) {
-		limfree(p->p_p->ps_limit);
-		p->p_p->ps_limit = oplim;
-	}
-
-	return error;
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	return (vn_rdwr(UIO_WRITE, vp, (caddr_t)&acct, sizeof (acct),
+	    (off_t)0, UIO_SYSSPACE, IO_APPEND|IO_UNIT, p->p_ucred,
+	    (int *)0, p));
 }
 
 /*
@@ -249,7 +234,8 @@ acct_process(struct proc *p)
 #define	MAXFRACT	((1 << MANTSIZE) - 1)	/* Maximum fractional value. */
 
 comp_t
-encode_comp_t(u_long s, u_long us)
+encode_comp_t(s, us)
+	u_long s, us;
 {
 	int exp, rnd;
 
@@ -276,16 +262,6 @@ encode_comp_t(u_long s, u_long us)
 	return (exp);
 }
 
-int
-acct_start(void)
-{
-	/* Already running. */
-	if (acct_proc != NULL)
-		return (0);
-
-	return (kthread_create(acct_thread, NULL, &acct_proc, "acct"));
-}
-
 /*
  * Periodically check the file system to see if accounting
  * should be turned on or off.  Beware the case where the vnode
@@ -294,54 +270,36 @@ acct_start(void)
  */
 /* ARGSUSED */
 void
-acct_thread(void *arg)
+acctwatch(a)
+	void *a;
 {
 	struct statfs sb;
-	struct proc *p = curproc;
 
-	for (;;) {
-		if (savacctp != NULL) {
-			if (savacctp->v_type == VBAD) {
-				(void) vn_close(savacctp, FWRITE, NOCRED, p);
-				savacctp = NULL;
-				break;
-			}
-			(void)VFS_STATFS(savacctp->v_mount, &sb, (struct proc *)0);
-			if (sb.f_bavail > acctresume * sb.f_blocks / 100) {
-				acctp = savacctp;
-				savacctp = NULL;
-				log(LOG_NOTICE, "Accounting resumed\n");
-			}
-		} else if (acctp != NULL) {
-			if (acctp->v_type == VBAD) {
-				(void) vn_close(acctp, FWRITE, NOCRED, p);
-				acctp = NULL;
-				break;
-			}
-			(void)VFS_STATFS(acctp->v_mount, &sb, (struct proc *)0);
-			if (sb.f_bavail <= acctsuspend * sb.f_blocks / 100) {
-				savacctp = acctp;
-				acctp = NULL;
-				log(LOG_NOTICE, "Accounting suspended\n");
-			}
-		} else {
-			break;
+	if (savacctp != NULLVP) {
+		if (savacctp->v_type == VBAD) {
+			(void) vn_close(savacctp, FWRITE, NOCRED, NULL);
+			savacctp = NULLVP;
+			return;
 		}
-		tsleep(&acct_proc, PPAUSE, "acct", acctchkfreq *hz);
-	}
-	acct_proc = NULL;
-	kthread_exit(0);
-}
-
-void
-acct_shutdown(void)
-{
-
-	struct proc *p = curproc;
-
-	if (acctp != NULL || savacctp != NULL) {
-		vn_close((acctp != NULL ? acctp : savacctp), FWRITE,
-		    NOCRED, p);
-		acctp = savacctp = NULL;
-	}
+		(void)VFS_STATFS(savacctp->v_mount, &sb, (struct proc *)0);
+		if (sb.f_bavail > acctresume * sb.f_blocks / 100) {
+			acctp = savacctp;
+			savacctp = NULLVP;
+			log(LOG_NOTICE, "Accounting resumed\n");
+		}
+	} else if (acctp != NULLVP) {
+		if (acctp->v_type == VBAD) {
+			(void) vn_close(acctp, FWRITE, NOCRED, NULL);
+			acctp = NULLVP;
+			return;
+		}
+		(void)VFS_STATFS(acctp->v_mount, &sb, (struct proc *)0);
+		if (sb.f_bavail <= acctsuspend * sb.f_blocks / 100) {
+			savacctp = acctp;
+			acctp = NULLVP;
+			log(LOG_NOTICE, "Accounting suspended\n");
+		}
+	} else
+		return;
+	timeout(acctwatch, NULL, acctchkfreq * hz);
 }

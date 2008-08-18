@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atmsubr.c,v 1.27 2008/05/07 13:45:35 dlg Exp $       */
+/*      $OpenBSD: if_atmsubr.c,v 1.6 1996/07/03 17:14:30 chuck Exp $       */
 
 /*
  *
@@ -33,46 +33,6 @@
  */
 
 /*
- *	@(#)COPYRIGHT	1.1 (NRL) January 1995
- * 
- * NRL grants permission for redistribution and use in source and binary
- * forms, with or without modification, of the software and documentation
- * created at NRL provided that the following conditions are met:
- * 
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgements:
- * 	This product includes software developed by the University of
- * 	California, Berkeley and its contributors.
- * 	This product includes software developed at the Information
- * 	Technology Division, US Naval Research Laboratory.
- * 4. Neither the name of the NRL nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- * 
- * THE SOFTWARE PROVIDED BY NRL IS PROVIDED BY NRL AND CONTRIBUTORS ``AS
- * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- * PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL NRL OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
- * The views and conclusions contained in the software and documentation
- * are those of the authors and should not be interpreted as representing
- * official policies, either expressed or implied, of the US Naval
- * Research Laboratory (NRL).
- */
-
-/*
  * if_atmsubr.c
  */
 
@@ -99,16 +59,12 @@
 #include <netinet/in.h>
 #include <netinet/if_atm.h>
 #include <netinet/if_ether.h> /* XXX: for ETHERTYPE_* */
-#if defined(INET) || defined(INET6)
+#ifdef INET
 #include <netinet/in_var.h>
 #endif
 #ifdef NATM
 #include <netnatm/natm.h>
 #endif
-
-#ifdef INET6
-#include <netinet6/in6_var.h>
-#endif /* INET6 */
 
 #define senderr(e) { error = (e); goto bad;}
 
@@ -129,21 +85,22 @@
 
 int
 atm_output(ifp, m0, dst, rt0)
-	struct ifnet *ifp;
+	register struct ifnet *ifp;
 	struct mbuf *m0;
 	struct sockaddr *dst;
 	struct rtentry *rt0;
 {
 	u_int16_t etype = 0;			/* if using LLC/SNAP */
-	int s, error = 0, sz, len;
+	int s, error = 0, sz;
 	struct atm_pseudohdr atmdst, *ad;
-	struct mbuf *m = m0;
-	struct rtentry *rt;
+	register struct mbuf *m = m0;
+	register struct rtentry *rt;
 	struct atmllc *atmllc;
 	u_int32_t atm_flags;
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		senderr(ENETDOWN);
+	ifp->if_lastchange = time;
 
 	/*
 	 * check route
@@ -179,15 +136,6 @@ atm_output(ifp, m0, dst, rt0)
 		switch (dst->sa_family) {
 #ifdef INET
 		case AF_INET:
-#endif
-#ifdef INET6
-		case AF_INET6:
-#endif
-#if defined(INET) || defined(INET6)
-			if (dst->sa_family == AF_INET)
-				etype = ETHERTYPE_IP;
-			else
-				etype = ETHERTYPE_IPV6;
 			if (!atmresolve(rt, m, dst, &atmdst)) {
 				m = NULL; 
 				/* XXX: atmresolve already free'd it */
@@ -195,16 +143,17 @@ atm_output(ifp, m0, dst, rt0)
 				/* XXX: put ATMARP stuff here */
 				/* XXX: watch who frees m on failure */
 			}
+			etype = htons(ETHERTYPE_IP);
 			break;
 #endif
 
 		default:
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 			printf("%s: can't handle af%d\n", ifp->if_xname, 
-			       dst->sa_family);
+				dst->sa_family);
 #elif defined(__FreeBSD__) || defined(__bsdi__)
 			printf("%s%d: can't handle af%d\n", ifp->if_name, 
-			       ifp->if_unit, dst->sa_family);
+				ifp->if_unit, dst->sa_family);
 #endif
 			senderr(EAFNOSUPPORT);
 		}
@@ -225,6 +174,7 @@ atm_output(ifp, m0, dst, rt0)
 			bcopy(ATMLLC_HDR, atmllc->llchdr, 
 						sizeof(atmllc->llchdr));
 			ATM_LLC_SETTYPE(atmllc, etype); 
+					/* note: already in network order */
 		}
 	}
 
@@ -232,15 +182,17 @@ atm_output(ifp, m0, dst, rt0)
 	 * Queue message on interface, and start output if interface
 	 * not yet active.
 	 */
-	len = m->m_pkthdr.len;
-	s = splnet();
-	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error) {
+
+	s = splimp();
+	if (IF_QFULL(&ifp->if_snd)) {
+		IF_DROP(&ifp->if_snd);
 		splx(s);
-		return (error);
+		senderr(ENOBUFS);
 	}
-	ifp->if_obytes += len;
-	if_start(ifp);
+	ifp->if_obytes += m->m_pkthdr.len;
+	IF_ENQUEUE(&ifp->if_snd, m);
+	if ((ifp->if_flags & IFF_OACTIVE) == 0)
+		(*ifp->if_start)(ifp);
 	splx(s);
 	return (error);
 
@@ -257,11 +209,11 @@ bad:
 void
 atm_input(ifp, ah, m, rxhand)
 	struct ifnet *ifp;
-	struct atm_pseudohdr *ah;
+	register struct atm_pseudohdr *ah;
 	struct mbuf *m;
 	void *rxhand;
 {
-	struct ifqueue *inq;
+	register struct ifqueue *inq;
 	u_int16_t etype = ETHERTYPE_IP; /* default */
 	int s;
 
@@ -269,12 +221,13 @@ atm_input(ifp, ah, m, rxhand)
 		m_freem(m);
 		return;
 	}
+	ifp->if_lastchange = time;
 	ifp->if_ibytes += m->m_pkthdr.len;
 
 	if (rxhand) {
 #ifdef NATM
 	  struct natmpcb *npcb = rxhand;
-	  s = splnet();			/* in case 2 atm cards @ diff lvls */
+	  s = splimp();			/* in case 2 atm cards @ diff lvls */
 	  npcb->npcb_inq++;			/* count # in queue */
 	  splx(s);
 	  schednetisr(NETISR_NATM);
@@ -291,8 +244,7 @@ atm_input(ifp, ah, m, rxhand)
 	   */
 	  if (ATM_PH_FLAGS(ah) & ATM_PH_LLCSNAP) {
 	    struct atmllc *alc;
-	    if (m->m_len < sizeof(*alc) &&
-		(m = m_pullup(m, sizeof(*alc))) == NULL)
+	    if (m->m_len < sizeof(*alc) && (m = m_pullup(m, sizeof(*alc))) == 0)
 		  return; /* failed */
 	    alc = mtod(m, struct atmllc *);
 	    if (bcmp(alc, ATMLLC_HDR, 6)) {
@@ -316,12 +268,6 @@ atm_input(ifp, ah, m, rxhand)
 		  schednetisr(NETISR_IP);
 		  inq = &ipintrq;
 		  break;
-#endif /* INET */
-#ifdef INET6
-	  case ETHERTYPE_IPV6:
-		  schednetisr(NETISR_IPV6);
-		  inq = &ip6intrq;
-		  break;
 #endif
 	  default:
 	      m_freem(m);
@@ -329,8 +275,12 @@ atm_input(ifp, ah, m, rxhand)
 	  }
 	}
 
-	s = splnet();
-	IF_INPUT_ENQUEUE(inq, m);
+	s = splimp();
+	if (IF_QFULL(inq)) {
+		IF_DROP(inq);
+		m_freem(m);
+	} else
+		IF_ENQUEUE(inq, m);
 	splx(s);
 }
 
@@ -339,8 +289,10 @@ atm_input(ifp, ah, m, rxhand)
  */
 void
 atm_ifattach(ifp)
-	struct ifnet *ifp;
+	register struct ifnet *ifp;
 {
+	register struct ifaddr *ifa;
+	register struct sockaddr_dl *sdl;
 
 	ifp->if_type = IFT_ATM;
 	ifp->if_addrlen = 0;
@@ -348,8 +300,20 @@ atm_ifattach(ifp)
 	ifp->if_mtu = ATMMTU;
 	ifp->if_output = atm_output;
 
-	if_alloc_sadl(ifp);
-#ifdef notyet /* if using ATMARP, store hardware address using the next line */
-	bcopy(ifp->hw_addr, LLADDR(ifp->if_sadl), ifp->if_addrlen);
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+	for (ifa = ifp->if_addrlist.tqh_first; ifa != 0;
+	    ifa = ifa->ifa_list.tqe_next)
+#elif defined(__FreeBSD__) || defined(__bsdi__)
+	for (ifa = ifp->if_addrlist; ifa; ifa = ifa->ifa_next) 
 #endif
+
+		if ((sdl = (struct sockaddr_dl *)ifa->ifa_addr) &&
+		    sdl->sdl_family == AF_LINK) {
+			sdl->sdl_type = IFT_ATM;
+			sdl->sdl_alen = ifp->if_addrlen;
+#ifdef notyet /* if using ATMARP, store hardware address using the next line */
+			bcopy(ifp->hw_addr, LLADDR(sdl), ifp->if_addrlen);
+#endif
+			break;
+		}
 }

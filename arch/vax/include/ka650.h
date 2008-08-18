@@ -1,5 +1,4 @@
-/*	$OpenBSD: ka650.h,v 1.10 2003/06/02 23:27:57 millert Exp $	*/
-/*	$NetBSD: ka650.h,v 1.6 1997/07/26 10:12:43 ragge Exp $	*/
+/*	$NetBSD: ka650.h,v 1.4 1996/05/19 16:43:20 ragge Exp $	*/
 /*
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.
@@ -15,7 +14,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -192,7 +195,6 @@ struct ka650_ssc {
 #define CPMB650_HALT	0x03	/* Halt */
 #define CPMB650_BIP	0x04	/* Bootstrap in progress */
 #define CPMB650_RIP	0x08	/* Restart in progress */
-#define	CPMB650_DOTHIS	0x30	/* Execute sommand */
 #define CPMB650_LANG	0xf0	/* Language field */
 
 /*
@@ -205,7 +207,7 @@ struct ka650_ipcr {
 };
 #define KA650_IPCR	0x20001e00
 
-#endif /* _LOCORE */
+#endif	_LOCORE
 
 /*
  * Physical start address of the Qbus memory.
@@ -232,10 +234,13 @@ struct ka650_ipcr {
 #define	KA650ROM_GETS	0x20060010	/* (jsb) read string with prompt */
 #define KA650_CONSTYPE	0x20140401	/* byte at which console type resides */
 
-/*
- * Some useful macros
- */
-#define	GETCPUTYPE(x)	((x >> 24) & 0xff)
-#define	GETSYSSUBT(x)	((x >> 8) & 0xff)
-#define	GETFRMREV(x)	((x >> 16) & 0xff)
-#define	GETCODREV(x)	(x & 0xff)
+/* prototypes */
+struct sbi_attach_args;
+
+void	uvaxIII_conf __P((struct device *, struct device *, void *));
+int	uvaxIII_clock __P((void));
+void	uvaxIII_memenable __P((struct sbi_attach_args *, struct device *));
+void	uvaxIII_memerr __P((void));
+int	uvaxIII_mchk __P((caddr_t));
+void	uvaxIII_steal_pages __P((void));
+

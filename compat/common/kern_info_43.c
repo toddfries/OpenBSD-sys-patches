@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_info_43.c,v 1.15 2003/08/15 20:32:15 tedu Exp $	*/
+/*	$OpenBSD: kern_info_43.c,v 1.7 1996/05/23 08:32:22 deraadt Exp $	*/
 /*	$NetBSD: kern_info_43.c,v 1.5 1996/02/04 02:02:22 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,7 +52,7 @@
 #include <sys/syslog.h>
 #include <sys/unistd.h>
 #include <sys/resourcevar.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 #include <sys/sysctl.h>
 
 #include <sys/mount.h>
@@ -201,7 +205,7 @@ compat_43_sys_getkerninfo(p, v, retval)
 	int error, name[5];
 	size_t size;
 
-	extern char machine[];
+	extern char ostype[], osrelease[], version[], machine[];
 
 	if (SCARG(uap, size) && (error = copyin((caddr_t)SCARG(uap, size),
 	    (caddr_t)&size, sizeof(size))))
@@ -242,13 +246,13 @@ compat_43_sys_getkerninfo(p, v, retval)
 	case KINFO_METER:
 		name[0] = VM_METER;
 		error =
-		    uvm_sysctl(name, 1, SCARG(uap, where), &size, NULL, 0, p);
+		    vm_sysctl(name, 1, SCARG(uap, where), &size, NULL, 0, p);
 		break;
 
 	case KINFO_LOADAVG:
 		name[0] = VM_LOADAVG;
 		error =
-		    uvm_sysctl(name, 1, SCARG(uap, where), &size, NULL, 0, p);
+		    vm_sysctl(name, 1, SCARG(uap, where), &size, NULL, 0, p);
 		break;
 
 	case KINFO_CLOCKRATE:
@@ -274,17 +278,17 @@ compat_43_sys_getkerninfo(p, v, retval)
 
 		bsdi_si.bsdi_ostype = ((char *)(s - bsdi_strings)) +
 				       sizeof(bsdi_si);
-		strlcpy(s, ostype, bsdi_strings + sizeof bsdi_strings - s);
+		strcpy(s, ostype);
 		s += strlen(s) + 1;
 
 		bsdi_si.bsdi_osrelease = ((char *)(s - bsdi_strings)) +
 					  sizeof(bsdi_si);
-		strlcpy(s, osrelease, bsdi_strings + sizeof bsdi_strings - s);
+		strcpy(s, osrelease);
 		s += strlen(s) + 1;
 
 		bsdi_si.bsdi_machine = ((char *)(s - bsdi_strings)) +
 					sizeof(bsdi_si);
-		strlcpy(s, machine, bsdi_strings + sizeof bsdi_strings - s);
+		strcpy(s, machine);
 		s += strlen(s) + 1;
 
 		needed = sizeof(bsdi_si) + (s - bsdi_strings);
@@ -344,7 +348,7 @@ compat_43_sys_sethostid(p, v, retval)
 	} */ *uap = v;
 	int error;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 	hostid = SCARG(uap, hostid);
 	return (0);
@@ -362,7 +366,7 @@ compat_43_sys_sethostname(p, v, retval)
 	int name;
 	int error;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 	name = KERN_HOSTNAME;
 	return (kern_sysctl(&name, 1, 0, 0, SCARG(uap, hostname),

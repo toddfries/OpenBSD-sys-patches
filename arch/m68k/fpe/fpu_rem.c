@@ -1,5 +1,5 @@
-/*	$OpenBSD: fpu_rem.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_rem.c,v 1.5 2003/07/15 02:43:10 lukem Exp $	*/
+/*	$OpenBSD: fpu_rem.c,v 1.2 1996/05/09 22:20:48 niklas Exp $	*/
+/*	$NetBSD: fpu_rem.c,v 1.3 1996/04/30 12:02:54 briggs Exp $	*/
 
 /*
  * Copyright (c) 1995  Ken Nakata
@@ -36,7 +36,7 @@
 #include <sys/signal.h>
 #include <machine/frame.h>
 
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_emulate.h"
 
 /*
  *       ALGORITHM
@@ -83,9 +83,9 @@
  *                R := 0. Return signQ, last 7 bits of Q, and R.
  */                
 
-struct fpn *__fpu_modrem(struct fpemu *fe, int modrem);
+static struct fpn * __fpu_modrem __P((struct fpemu *fe, int modrem));
 
-struct fpn *
+static struct fpn *
 __fpu_modrem(fe, modrem)
      struct fpemu *fe;
      int modrem;
@@ -126,12 +126,14 @@ __fpu_modrem(fe, modrem)
 	 */
 	while (y->fp_exp != r->fp_exp || y->fp_mant[0] != r->fp_mant[0] ||
 	       y->fp_mant[1] != r->fp_mant[1] ||
-	       y->fp_mant[2] != r->fp_mant[2]) {
+	       y->fp_mant[2] != r->fp_mant[2] ||
+	       y->fp_mant[3] != r->fp_mant[3]) {
 
 	    /* Step 3.2 */
 	    if (y->fp_exp < r->fp_exp || y->fp_mant[0] < r->fp_mant[0] ||
 		y->fp_mant[1] < r->fp_mant[1] ||
-		y->fp_mant[2] < r->fp_mant[2]) {
+		y->fp_mant[2] < r->fp_mant[2] ||
+		y->fp_mant[3] < r->fp_mant[3]) {
 		CPYFPN(&fe->fe_f1, r);
 		CPYFPN(&fe->fe_f2, y);
 		fe->fe_f2.fp_sign = 1;
@@ -164,13 +166,13 @@ __fpu_modrem(fe, modrem)
     if (r->fp_exp + 1 < y->fp_exp ||
 	(r->fp_exp + 1 == y->fp_exp &&
 	 (r->fp_mant[0] < y->fp_mant[0] || r->fp_mant[1] < y->fp_mant[1] ||
-	  r->fp_mant[2] < y->fp_mant[2])))
+	  r->fp_mant[2] < y->fp_mant[3] || r->fp_mant[4] < y->fp_mant[4])))
 	/* if r < y/2 */
 	goto Step6;
     /* Step 5.2 */
     if (r->fp_exp + 1 != y->fp_exp ||
 	r->fp_mant[0] != y->fp_mant[0] || r->fp_mant[1] != y->fp_mant[1] ||
-	r->fp_mant[2] != y->fp_mant[2]) {
+	r->fp_mant[2] != y->fp_mant[2] || r->fp_mant[3] != y->fp_mant[3]) {
 	/* if (!(r < y/2) && !(r == y/2)) */
 	Last_Subtract = 1;
 	q++;

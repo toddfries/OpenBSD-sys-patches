@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_usrreq.c,v 1.11 2008/05/23 15:51:12 thib Exp $	*/
+/*	$OpenBSD: raw_usrreq.c,v 1.2 1996/03/03 21:07:18 niklas Exp $	*/
 /*	$NetBSD: raw_usrreq.c,v 1.11 1996/02/13 22:00:43 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -46,7 +50,7 @@
 #include <net/netisr.h>
 #include <net/raw_cb.h>
 
-#include <sys/stdarg.h>
+#include <machine/stdarg.h>
 /*
  * Initialize raw connection block q.
  */
@@ -67,14 +71,20 @@ raw_init()
  * Raw protocol interface.
  */
 void
+#if __STDC__
 raw_input(struct mbuf *m0, ...)
+#else
+raw_input(m0, va_alist)
+	struct mbuf *m0;
+	va_dcl
+#endif
 {
-	struct rawcb *rp;
-	struct mbuf *m = m0;
-	int sockets = 0;
+	register struct rawcb *rp;
+	register struct mbuf *m = m0;
+	register int sockets = 0;
 	struct socket *last;
 	va_list ap;
-	struct sockproto *proto;
+	register struct sockproto *proto;
 	struct sockaddr *src, *dst;
 	
 	va_start(ap, m0);
@@ -84,7 +94,7 @@ raw_input(struct mbuf *m0, ...)
 	va_end(ap);
 
 	last = 0;
-	LIST_FOREACH(rp, &rawcb, rcb_list) {
+	for (rp = rawcb.lh_first; rp != 0; rp = rp->rcb_list.le_next) {
 		if (rp->rcb_proto.sp_family != proto->sp_family)
 			continue;
 		if (rp->rcb_proto.sp_protocol  &&
@@ -139,7 +149,7 @@ raw_ctlinput(cmd, arg, d)
 	void *d;
 {
 
-	if (cmd < 0 || cmd >= PRC_NCMDS)
+	if (cmd < 0 || cmd > PRC_NCMDS)
 		return NULL;
 	return NULL;
 	/* INCOMPLETE */
@@ -147,14 +157,13 @@ raw_ctlinput(cmd, arg, d)
 
 /*ARGSUSED*/
 int
-raw_usrreq(so, req, m, nam, control, p)
+raw_usrreq(so, req, m, nam, control)
 	struct socket *so;
 	int req;
 	struct mbuf *m, *nam, *control;
-	struct proc *p;
 {
-	struct rawcb *rp = sotorawcb(so);
-	int error = 0;
+	register struct rawcb *rp = sotorawcb(so);
+	register int error = 0;
 	int len;
 
 	if (req == PRU_CONTROL)
@@ -218,10 +227,8 @@ raw_usrreq(so, req, m, nam, control, p)
 		}
 		error = raw_bind(so, nam);
 		break;
-#else
-	case PRU_CONNECT:
-	case PRU_BIND:
 #endif
+
 	case PRU_CONNECT2:
 		error = EOPNOTSUPP;
 		goto release;
@@ -280,7 +287,7 @@ raw_usrreq(so, req, m, nam, control, p)
 	 */
 	case PRU_RCVOOB:
 	case PRU_RCVD:
-		return (EOPNOTSUPP);
+		return(EOPNOTSUPP);
 
 	case PRU_LISTEN:
 	case PRU_ACCEPT:

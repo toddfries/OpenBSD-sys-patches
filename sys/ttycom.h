@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttycom.h,v 1.10 2008/05/08 01:17:54 fgsch Exp $	*/
+/*	$OpenBSD: ttycom.h,v 1.4 1996/09/09 23:35:17 downsj Exp $	*/
 /*	$NetBSD: ttycom.h,v 1.4 1996/05/19 17:17:53 jonathan Exp $	*/
 
 /*-
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -56,11 +60,6 @@ struct winsize {
 	unsigned short	ws_col;		/* columns, in characters */
 	unsigned short	ws_xpixel;	/* horizontal size, pixels */
 	unsigned short	ws_ypixel;	/* vertical size, pixels */
-};
-
-struct tstamps {
-	int	ts_set;		/* TIOCM_CAR and/or TIOCM_CTS */
-	int	ts_clr;
 };
 
 #define		TIOCM_LE	0001		/* line enable */
@@ -121,7 +120,7 @@ struct tstamps {
 #define	TIOCCONS	_IOW('t', 98, int)	/* become virtual console */
 #define	TIOCSCTTY	 _IO('t', 97)		/* become controlling tty */
 #define	TIOCEXT		_IOW('t', 96, int)	/* pty: external processing */
-#define	TIOCSIG		_IOW('t', 95, int)	/* pty: generate signal */
+#define	TIOCSIG		 _IO('t', 95)		/* pty: generate signal */
 #define	TIOCDRAIN	 _IO('t', 94)		/* wait till output drained */
 #define	TIOCGFLAGS	_IOR('t', 93, int)	/* get device flags */
 #define	TIOCSFLAGS	_IOW('t', 92, int)	/* set device flags */
@@ -129,9 +128,6 @@ struct tstamps {
 #define		TIOCFLAG_CLOCAL		0x02	/* set clocal on open */
 #define		TIOCFLAG_CRTSCTS	0x04	/* set crtscts on open */
 #define		TIOCFLAG_MDMBUF		0x08	/* set mdmbuf on open */
-#define		TIOCFLAG_PPS		0x10	/* call hardpps on carrier up */
-#define	TIOCGTSTAMP	_IOR('t', 91, struct timeval)	/* get timestamp */
-#define	TIOCSTSTAMP	_IOW('t', 90, struct tstamps)	/* timestamp reasons */
 
 /* Backwards compatibility */
 #define	TIOCMODG	TIOCMGET
@@ -142,7 +138,5 @@ struct tstamps {
 #define	SLIPDISC	4		/* serial IP discipline */
 #define	PPPDISC		5		/* ppp discipline */
 #define	STRIPDISC	6		/* metricom wireless IP discipline */
-#define	NMEADISC	7		/* NMEA0183 discipline */
-#define	MSTSDISC	8		/* Meinberg time string discipline */
 
 #endif /* !_SYS_TTYCOM_H_ */

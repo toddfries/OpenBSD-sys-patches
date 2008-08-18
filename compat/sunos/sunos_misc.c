@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_misc.c,v 1.46 2004/06/24 19:35:23 tholo Exp $	*/
+/*	$OpenBSD: sunos_misc.c,v 1.8 1996/08/25 12:19:57 deraadt Exp $	*/
 /*	$NetBSD: sunos_misc.c,v 1.65 1996/04/22 01:44:31 christos Exp $	*/
 
 /*
@@ -22,7 +22,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -80,14 +84,11 @@
 #include <sys/syscallargs.h>
 #include <sys/conf.h>
 #include <sys/socketvar.h>
-#include <sys/times.h>
 
 #include <compat/sunos/sunos.h>
 #include <compat/sunos/sunos_syscallargs.h>
 #include <compat/sunos/sunos_util.h>
 #include <compat/sunos/sunos_dirent.h>
-
-#include <compat/common/compat_dir.h>
 
 #include <netinet/in.h>
 
@@ -97,13 +98,9 @@
 #include <nfs/nfsproto.h>
 #include <nfs/nfs.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
-#ifdef sun3
-# include <machine/machdep.h>	/* for prototype of reboot2() */
-#endif
-
-static int sunstatfs(struct statfs *, caddr_t);
+static int sunstatfs __P((struct statfs *, caddr_t));
 
 int
 sunos_sys_wait4(p, v, retval)
@@ -181,22 +178,12 @@ sunos_sys_execve(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct sunos_sys_execve_args /* {
-		syscallarg(char *) path;
-		syscallarg(char **) argv;
-		syscallarg(char **) envp;
-        } */ *uap = v;
-	struct sys_execve_args ap;
-	caddr_t sg;
+	struct sunos_sys_execve_args *uap = v;
 
-	sg = stackgap_init(p->p_emul);
+	caddr_t sg = stackgap_init(p->p_emul);
 	SUNOS_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = SCARG(uap, envp);
-
-	return (sys_execve(p, &ap, retval));
+	return (sys_execve(p, (struct sys_execve_args *)&uap, retval));
 }
 
 int
@@ -216,6 +203,23 @@ sunos_sys_execv(p, v, retval)
 	SCARG(&ouap, envp) = NULL;
 
 	return (sys_execve(p, &ouap, retval));
+}
+
+int
+sunos_sys_omsync(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct sunos_sys_omsync_args *uap = v;
+	struct sys_msync_args ouap;
+
+	if (SCARG(uap, flags))
+		return (EINVAL);
+	SCARG(&ouap, addr) = SCARG(uap, addr);
+	SCARG(&ouap, len) = SCARG(uap, len);
+
+	return (sys_msync(p, &ouap, retval));
 }
 
 int
@@ -264,9 +268,9 @@ sunos_sys_mount(p, v, retval)
 	register_t *retval;
 {
 	struct sunos_sys_mount_args *uap = v;
+	struct emul *e = p->p_emul;
 	int oflags = SCARG(uap, flags), nflags, error;
 	char fsname[MFSNAMELEN];
-	caddr_t sg = stackgap_init(p->p_emul);
 
 	if (oflags & (SUNM_NOSUB | SUNM_SYS5))
 		return (EINVAL);
@@ -287,7 +291,7 @@ sunos_sys_mount(p, v, retval)
 		return (error);
 
 	if (strncmp(fsname, "4.2", sizeof fsname) == 0) {
-		SCARG(uap, type) = stackgap_alloc(&sg, sizeof("ffs"));
+		SCARG(uap, type) = STACKGAPBASE;
 		error = copyout("ffs", SCARG(uap, type), sizeof("ffs"));
 		if (error)
 			return (error);
@@ -306,9 +310,10 @@ sunos_sys_mount(p, v, retval)
 			return (error);
 		bcopy(&sain, &sa, sizeof sa);
 		sa.sa_len = sizeof(sain);
-		SCARG(uap, data) = stackgap_alloc(&sg, sizeof(na));
+		SCARG(uap, data) = STACKGAPBASE;
 		na.version = NFS_ARGSVERSION;
-		na.addr = stackgap_alloc(&sg, sizeof(struct sockaddr));
+		na.addr = (struct sockaddr *)
+			  ((int)SCARG(uap, data) + sizeof na);
 		na.addrlen = sizeof(struct sockaddr);
 		na.sotype = SOCK_DGRAM;
 		na.proto = IPPROTO_UDP;
@@ -374,95 +379,132 @@ sunos_sys_sigpending(p, v, retval)
  *
  * This is quite ugly, but what do you expect from compatibility code?
  */
-int sunos_readdir_callback(void *, struct dirent *, off_t);
-
-struct sunos_readdir_callback_args {
-	caddr_t outp;
-	int     resid;
-};
-
-int
-sunos_readdir_callback(arg, bdp, cookie)
-	void *arg;
-	struct dirent *bdp;
-	off_t cookie;
-{
-	struct sunos_dirent idb;
-	struct sunos_readdir_callback_args *cb = arg; 
-	int sunos_reclen;
-	int error;
-
-	sunos_reclen = SUNOS_RECLEN(&idb, bdp->d_namlen);
-	if (cb->resid < sunos_reclen)
-		return (ENOMEM);
-	
-	idb.d_fileno = bdp->d_fileno;
-	idb.d_off = cookie;
-	idb.d_reclen = sunos_reclen;
-	idb.d_namlen = bdp->d_namlen;
-	strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-
-	if ((error = copyout((caddr_t)&idb, cb->outp, sunos_reclen)))
-		return (error);
-
-	cb->outp += sunos_reclen;
-	cb->resid -= sunos_reclen;
-
-	return (0);
-}
-
 int
 sunos_sys_getdents(p, v, retval)
 	struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct sunos_sys_getdents_args /* {
-		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(int) nbytes;
-	} */ *uap = v;
+	struct sunos_sys_getdents_args *uap = v;
+	struct dirent *bdp;
 	struct vnode *vp;
+	caddr_t inp, buf;	/* BSD-format */
+	int len, reclen;	/* BSD-format */
+	caddr_t outp;		/* Sun-format */
+	int resid, sunos_reclen;/* Sun-format */
 	struct file *fp;
-	int error;
-	struct sunos_readdir_callback_args args;
+	struct uio auio;
+	struct iovec aiov;
+	struct sunos_dirent idb;
+	off_t off;			/* true file offset */
+	int buflen, error, eofflag;
+	u_long *cookiebuf, *cookie;
+	int ncookies;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 
+	if ((fp->f_flag & FREAD) == 0)
+		return (EBADF);
+
 	vp = (struct vnode *)fp->f_data;
-	/* SunOS returns ENOTDIR here, BSD would use EINVAL */
-	if (vp->v_type != VDIR) {
-		error = ENOTDIR;
-		goto bad;
+
+	if (vp->v_type != VDIR)	/* XXX  vnode readdir op should do this */
+		return (EINVAL);
+
+	buflen = min(MAXBSIZE, SCARG(uap, nbytes));
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	ncookies = buflen / 16;
+	cookiebuf = malloc(ncookies * sizeof(*cookiebuf), M_TEMP, M_WAITOK);
+	VOP_LOCK(vp);
+	off = fp->f_offset;
+again:
+	aiov.iov_base = buf;
+	aiov.iov_len = buflen;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_segflg = UIO_SYSSPACE;
+	auio.uio_procp = p;
+	auio.uio_resid = buflen;
+	auio.uio_offset = off;
+	/*
+	 * First we read into the malloc'ed buffer, then
+	 * we massage it into user space, one record at a time.
+	 */
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, cookiebuf,
+	    ncookies);
+	if (error)
+		goto out;
+
+	inp = buf;
+	outp = SCARG(uap, buf);
+	resid = SCARG(uap, nbytes);
+	if ((len = buflen - auio.uio_resid) == 0)
+		goto eof;
+
+	for (cookie = cookiebuf; len > 0; len -= reclen) {
+		bdp = (struct dirent *)inp;
+		reclen = bdp->d_reclen;
+		if (reclen & 3)
+			panic("sunos_getdents");
+		off = *cookie++;	/* each entry points to next */
+		if (bdp->d_fileno == 0) {
+			inp += reclen;	/* it is a hole; squish it out */
+			continue;
+		}
+		sunos_reclen = SUNOS_RECLEN(&idb, bdp->d_namlen);
+		if (reclen > len || resid < sunos_reclen) {
+			/* entry too big for buffer, so just stop */
+			outp++;
+			break;
+		}
+		/*
+		 * Massage in place to make a Sun-shaped dirent (otherwise
+		 * we have to worry about touching user memory outside of
+		 * the copyout() call).
+		 */
+		idb.d_fileno = bdp->d_fileno;
+		idb.d_off = off;
+		idb.d_reclen = sunos_reclen;
+		idb.d_namlen = bdp->d_namlen;
+		strcpy(idb.d_name, bdp->d_name);
+		if ((error = copyout((caddr_t)&idb, outp, sunos_reclen)) != 0)
+			goto out;
+		/* advance past this real entry */
+		inp += reclen;
+		/* advance output past Sun-shaped entry */
+		outp += sunos_reclen;
+		resid -= sunos_reclen;
 	}
 
-	args.resid = SCARG(uap, nbytes);
-	args.outp = (caddr_t)SCARG(uap, buf);
+	/* if we squished out the whole block, try again */
+	if (outp == SCARG(uap, buf))
+		goto again;
+	fp->f_offset = off;		/* update the vnode offset */
 
-	error = readdir_with_callback(fp, &fp->f_offset, args.resid,
-	    sunos_readdir_callback, &args);
-bad:
-	FRELE(fp);
-	if (error)
-		return (error);
-
-	*retval = SCARG(uap, nbytes) - args.resid;
-
-	return (0);
+eof:
+	*retval = SCARG(uap, nbytes) - resid;
+out:
+	VOP_UNLOCK(vp);
+	free(cookiebuf, M_TEMP);
+	free(buf, M_TEMP);
+	return (error);
 }
-
 
 #define	SUNOS__MAP_NEW	0x80000000	/* if not, old mmap & cannot handle */
 
 int
 sunos_sys_mmap(p, v, retval)
-	struct proc *p;
+	register struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct sunos_sys_mmap_args *uap = v;
+	register struct sunos_sys_mmap_args *uap = v;
 	struct sys_mmap_args ouap;
+	register struct filedesc *fdp;
+	register struct file *fp;
+	register struct vnode *vp;
 
 	/*
 	 * Verify the arguments.
@@ -478,13 +520,26 @@ sunos_sys_mmap(p, v, retval)
 
 	if ((SCARG(&ouap, flags) & MAP_FIXED) == 0 &&
 	    SCARG(&ouap, addr) != 0 &&
-	    SCARG(&ouap, addr) < (void *)round_page((vaddr_t)p->p_vmspace->vm_daddr+MAXDSIZ))
-		SCARG(&ouap, addr) = (void *)round_page((vaddr_t)p->p_vmspace->vm_daddr+MAXDSIZ);
+	    SCARG(&ouap, addr) < (caddr_t)round_page(p->p_vmspace->vm_daddr+MAXDSIZ))
+		SCARG(&ouap, addr) = (caddr_t)round_page(p->p_vmspace->vm_daddr+MAXDSIZ);
 
 	SCARG(&ouap, len) = SCARG(uap, len);
 	SCARG(&ouap, prot) = SCARG(uap, prot);
 	SCARG(&ouap, fd) = SCARG(uap, fd);
 	SCARG(&ouap, pos) = SCARG(uap, pos);
+
+	/*
+	 * Special case: if fd refers to /dev/zero, map as MAP_ANON.  (XXX)
+	 */
+	fdp = p->p_fd;
+	if ((unsigned)SCARG(&ouap, fd) < fdp->fd_nfiles &&		/*XXX*/
+	    (fp = fdp->fd_ofiles[SCARG(&ouap, fd)]) != NULL &&		/*XXX*/
+	    fp->f_type == DTYPE_VNODE &&				/*XXX*/
+	    (vp = (struct vnode *)fp->f_data)->v_type == VCHR &&	/*XXX*/
+	    iszerodev(vp->v_rdev)) {					/*XXX*/
+		SCARG(&ouap, flags) |= MAP_ANON;
+		SCARG(&ouap, fd) = -1;
+	}
 
 	return (sys_mmap(p, &ouap, retval));
 }
@@ -520,7 +575,7 @@ sunos_sys_setsockopt(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct sunos_sys_setsockopt_args *uap = v;
+	register struct sunos_sys_setsockopt_args *uap = v;
 	struct file *fp;
 	struct mbuf *m = NULL;
 	int error;
@@ -530,11 +585,12 @@ sunos_sys_setsockopt(p, v, retval)
 #define	SO_DONTLINGER (~SO_LINGER)
 	if (SCARG(uap, name) == SO_DONTLINGER) {
 		m = m_get(M_WAIT, MT_SOOPTS);
+		if (m == NULL)
+			return (ENOBUFS);
 		mtod(m, struct linger *)->l_onoff = 0;
 		m->m_len = sizeof(struct linger);
-		error = (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
+		return (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
 		    SO_LINGER, m));
-		goto bad;
 	}
 	if (SCARG(uap, level) == IPPROTO_IP) {
 #define		SUNOS_IP_MULTICAST_IF		2
@@ -555,25 +611,22 @@ sunos_sys_setsockopt(p, v, retval)
 			    ipoptxlat[SCARG(uap, name) - SUNOS_IP_MULTICAST_IF];
 		}
 	}
-	if (SCARG(uap, valsize) > MLEN) {
-		error = EINVAL;
-		goto bad;
-	}
+	if (SCARG(uap, valsize) > MLEN)
+		return (EINVAL);
 	if (SCARG(uap, val)) {
 		m = m_get(M_WAIT, MT_SOOPTS);
+		if (m == NULL)
+			return (ENOBUFS);
 		error = copyin(SCARG(uap, val), mtod(m, caddr_t),
 		    (u_int)SCARG(uap, valsize));
 		if (error) {
 			(void) m_free(m);
-			goto bad;
+			return (error);
 		}
 		m->m_len = SCARG(uap, valsize);
 	}
-	error = (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
+	return (sosetopt((struct socket *)fp->f_data, SCARG(uap, level),
 	    SCARG(uap, name), m));
-bad:
-	FRELE(fp);
-	return (error);
 }
 
 int
@@ -588,26 +641,23 @@ sunos_sys_fchroot(p, v, retval)
 	struct file *fp;
 	int error;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+	VOP_LOCK(vp);
 	if (vp->v_type != VDIR)
 		error = ENOTDIR;
 	else
 		error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
-	VOP_UNLOCK(vp, 0, p);
-	if (error) {
-		FRELE(fp);
+	VOP_UNLOCK(vp);
+	if (error)
 		return (error);
-	}
 	VREF(vp);
 	if (fdp->fd_rdir != NULL)
 		vrele(fdp->fd_rdir);
 	fdp->fd_rdir = vp;
-	FRELE(fp);
 	return (0);
 }
 
@@ -631,7 +681,7 @@ sunos_sys_uname(p, v, retval)
 {
 	struct sunos_sys_uname_args *uap = v;
 	struct sunos_utsname sut;
-	extern char machine[];
+	extern char ostype[], machine[], osrelease[];
 
 	bzero(&sut, sizeof(sut));
 
@@ -639,7 +689,7 @@ sunos_sys_uname(p, v, retval)
 	bcopy(hostname, sut.nodename, sizeof(sut.nodename));
 	sut.nodename[sizeof(sut.nodename)-1] = '\0';
 	bcopy(osrelease, sut.release, sizeof(sut.release) - 1);
-	strlcpy(sut.version, "1", sizeof(sut.version));
+	bcopy("1", sut.version, sizeof(sut.version) - 1);
 	bcopy(machine, sut.machine, sizeof(sut.machine) - 1);
 
 	return copyout((caddr_t)&sut, (caddr_t)SCARG(uap, name),
@@ -688,22 +738,18 @@ sunos_sys_open(p, v, retval)
 	r |=	((l & (0x0004 | 0x1000 | 0x4000)) ? O_NONBLOCK : 0);
 	r |=	((l & 0x0080) ? O_SHLOCK : 0);
 	r |=	((l & 0x0100) ? O_EXLOCK : 0);
-	r |=	((l & 0x2000) ? O_SYNC : 0);
+	r |=	((l & 0x2000) ? O_FSYNC : 0);
 
 	SCARG(uap, flags) = r;
 	ret = sys_open(p, (struct sys_open_args *)uap, retval);
 
 	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_flag & P_CONTROLT)) {
 		struct filedesc *fdp = p->p_fd;
-		struct file *fp;
+		struct file *fp = fdp->fd_ofiles[*retval];
 
-		if ((fp = fd_getfile(fdp, *retval)) == NULL)
-			return (EBADF);
-		FREF(fp);
 		/* ignore any error, just give it a try */
 		if (fp->f_type == DTYPE_VNODE)
 			(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, (caddr_t)0, p);
-		FRELE(fp);
 	}
 	return ret;
 }
@@ -790,7 +836,7 @@ sunos_sys_vhangup(p, v, retval)
 
 	(void) ttywait(sp->s_ttyp);
 	if (sp->s_ttyvp)
-		VOP_REVOKE(sp->s_ttyvp, REVOKEALL);
+		vgoneall(sp->s_ttyvp);
 	if (sp->s_ttyvp)
 		vrele(sp->s_ttyvp);
 	sp->s_ttyvp = NULL;
@@ -853,16 +899,14 @@ sunos_sys_fstatfs(p, v, retval)
 	struct sunos_sys_fstatfs_args *uap = v;
 	struct file *fp;
 	struct mount *mp;
-	struct statfs *sp;
+	register struct statfs *sp;
 	int error;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	sp = &mp->mnt_stat;
-	error = VFS_STATFS(mp, sp, p);
-	FRELE(fp);
-	if (error)
+	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
 	return sunstatfs(sp, (caddr_t)SCARG(uap, buf));
@@ -988,7 +1032,13 @@ sunos_sys_setrlimit(p, v, retval)
 	return compat_43_sys_setrlimit(p, uap, retval);
 }
 
-#ifdef PTRACE
+/* for the m68k machines */
+#ifndef PT_GETFPREGS
+#define PT_GETFPREGS -1
+#endif
+#ifndef PT_SETFPREGS
+#define PT_SETFPREGS -1
+#endif
 
 static int sreq2breq[] = {
 	PT_TRACE_ME,    PT_READ_I,      PT_READ_D,      -1,
@@ -1025,8 +1075,6 @@ sunos_sys_ptrace(p, v, retval)
 	return sys_ptrace(p, &pa, retval);
 }
 
-#endif	/* PTRACE */
-
 /*
  * SunOS reboot system call (for compatibility).
  * Sun lets you pass in a boot string which the PROM
@@ -1055,7 +1103,7 @@ sunos_sys_reboot(p, v, retval)
 	struct sunos_howto_conv *convp;
 	int error, bsd_howto, sun_howto;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 
 	/*
@@ -1155,58 +1203,4 @@ sunos_sys_sigvec(p, v, retval)
 		setsigvec(p, signum, (struct sigaction *)sv);
 	}
 	return (0);
-}
-
-int
-sunos_sys_ostime(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_ostime_args /* {
-		syscallarg(int) time;
-	} */ *uap = v;
-	struct timespec ts;
-	int error;
-
-	if ((error = suser(p, 0)) != 0)
-		return (error);
-
-	ts.tv_sec = SCARG(uap, time);
-	ts.tv_nsec = 0;
-	error = settime(&ts);
-	return (error);
-}
-
-/*
- * This code is partly stolen from src/lib/libc/gen/times.c
- * XXX - CLK_TCK isn't declared in /sys, just in <time.h>, done here
- */
-
-#define	CLK_TCK	100
-#define	CONVTCK(r)	(r.tv_sec * CLK_TCK + r.tv_usec / (1000000 / CLK_TCK))
-
-int
-sunos_sys_otimes(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_otimes_args /* {
-		syscallarg(struct tms *) tp;
-	} */ *uap = v;
-	struct tms tms;
-	struct rusage ru, *rup;
-
-	/* RUSAGE_SELF */
-	calcru(p, &ru.ru_utime, &ru.ru_stime, NULL);
-	tms.tms_utime = CONVTCK(ru.ru_utime);
-	tms.tms_stime = CONVTCK(ru.ru_stime);
-
-	/* RUSAGE_CHILDREN */
-	rup = &p->p_stats->p_cru;
-	tms.tms_cutime = CONVTCK(rup->ru_utime);
-	tms.tms_cstime = CONVTCK(rup->ru_stime);
-
-	return copyout(&tms, SCARG(uap, tp), sizeof(*(SCARG(uap, tp))));
 }

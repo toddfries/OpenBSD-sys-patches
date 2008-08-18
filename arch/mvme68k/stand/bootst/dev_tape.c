@@ -1,4 +1,3 @@
-/*	$OpenBSD: dev_tape.c,v 1.3 2002/03/14 03:15:56 millert Exp $	*/
 /*	$NetBSD: dev_tape.c,v 1.2 1995/10/17 22:58:20 gwr Exp $	*/
 
 /*
@@ -63,7 +62,7 @@ devopen(f, fname, file)
 	struct devsw *dp;
 	int error;
 
-	*file = (char *)fname;
+	*file = (char*)fname;
 	dp = &devsw[0];
 	f->f_dev = dp;
 

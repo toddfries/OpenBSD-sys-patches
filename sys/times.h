@@ -1,4 +1,4 @@
-/*	$OpenBSD: times.h,v 1.5 2006/01/06 18:53:06 millert Exp $	*/
+/*	$OpenBSD: times.h,v 1.2 1996/03/03 12:12:28 niklas Exp $	*/
 /*	$NetBSD: times.h,v 1.8 1995/03/26 20:24:54 jtc Exp $	*/
 
 /*-
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -40,12 +44,11 @@
 #ifndef	_SYS_TIMES_H_
 #define	_SYS_TIMES_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <machine/ansi.h>
 
-#ifndef	_CLOCK_T_DEFINED_
-#define	_CLOCK_T_DEFINED_
-typedef	__clock_t	clock_t;
+#ifdef	_BSD_CLOCK_T_
+typedef	_BSD_CLOCK_T_	clock_t;
+#undef	_BSD_CLOCK_T_
 #endif
 
 struct tms {
@@ -56,8 +59,10 @@ struct tms {
 };
 
 #ifndef _KERNEL
+#include <sys/cdefs.h>
+
 __BEGIN_DECLS
-clock_t	times(struct tms *);
+clock_t	times __P((struct tms *));
 __END_DECLS
 #endif
 #endif /* !_SYS_TIMES_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xdr_subs.h,v 1.8 2003/06/02 23:28:20 millert Exp $	*/
+/*	$OpenBSD: xdr_subs.h,v 1.4 1996/03/31 13:16:27 mickey Exp $	*/
 /*	$NetBSD: xdr_subs.h,v 1.11 1996/02/18 11:54:12 fvdl Exp $	*/
 
 /*
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -77,14 +81,13 @@
 	((struct nfsv3_time *)(t))->nfsv3_nsec = htonl((f)->tv_nsec); \
 }
 
-#define	fxdr_hyper(f) 						\
-        ((((u_quad_t)ntohl(((u_int32_t *)(f))[0])) << 32) |	\
-	 (u_quad_t)(ntohl(((u_int32_t *)(f))[1])))
-
-
-#define	txdr_hyper(f, t) {						\
-	((u_int32_t *)(t))[0] = htonl((u_int32_t)((f) >> 32));		\
-	((u_int32_t *)(t))[1] = htonl((u_int32_t)((f) & 0xffffffff));	\
+#define	fxdr_hyper(f, t) { \
+	((int32_t *)(t))[_QUAD_HIGHWORD] = ntohl(((int32_t *)(f))[0]); \
+	((int32_t *)(t))[_QUAD_LOWWORD] = ntohl(((int32_t *)(f))[1]); \
+}
+#define	txdr_hyper(f, t) { \
+	((int32_t *)(t))[0] = htonl(((int32_t *)(f))[_QUAD_HIGHWORD]); \
+	((int32_t *)(t))[1] = htonl(((int32_t *)(f))[_QUAD_LOWWORD]); \
 }
 
 #endif

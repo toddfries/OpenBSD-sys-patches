@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_machdep.c,v 1.35 2008/03/18 14:29:25 kettenis Exp $	*/
+/*	$OpenBSD: linux_machdep.c,v 1.8 1996/05/07 07:21:42 deraadt Exp $	*/
 /*	$NetBSD: linux_machdep.c,v 1.29 1996/05/03 19:42:11 christos Exp $	*/
 
 /*
@@ -36,12 +36,14 @@
 #include <sys/systm.h>
 #include <sys/signalvar.h>
 #include <sys/kernel.h>
+#include <sys/map.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
 #include <sys/file.h>
+#include <sys/callout.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/msgbuf.h>
@@ -69,21 +71,19 @@
 #include <machine/linux_machdep.h>
 
 /*
- * To see whether wsdisplay is configured (for virtual console ioctl calls).
+ * To see whether pcvt is configured (for virtual console ioctl calls).
  */
-#include "wsdisplay.h"
-#include <sys/ioctl.h>
-#if NWSDISPLAY > 0 && defined(WSDISPLAY_COMPAT_USL)
-#include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsdisplay_usl_io.h>
+#include "vt.h"
+#if NVT > 0
+#include <arch/i386/isa/pcvt/pcvt_ioctl.h>
 #endif
 
 #ifdef USER_LDT
 #include <machine/cpu.h>
-int linux_read_ldt(struct proc *, struct linux_sys_modify_ldt_args *,
-    register_t *);
-int linux_write_ldt(struct proc *, struct linux_sys_modify_ldt_args *,
-    register_t *);
+int linux_read_ldt __P((struct proc *, struct linux_sys_modify_ldt_args *,
+    register_t *));
+int linux_write_ldt __P((struct proc *, struct linux_sys_modify_ldt_args *,
+    register_t *));
 #endif
 
 /*
@@ -104,14 +104,17 @@ int linux_write_ldt(struct proc *, struct linux_sys_modify_ldt_args *,
  */
 
 void
-linux_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
-    union sigval val)
+linux_sendsig(catcher, sig, mask, code)
+	sig_t catcher;
+	int sig, mask;
+	u_long code;
 {
-	struct proc *p = curproc;
-	struct trapframe *tf;
+	register struct proc *p = curproc;
+	register struct trapframe *tf;
 	struct linux_sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
 	int oonstack;
+	extern char linux_sigcode[], linux_esigcode[];
 
 	tf = p->p_md.md_regs;
 	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
@@ -121,7 +124,7 @@ linux_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	 */
 	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct linux_sigframe *)((char *)psp->ps_sigstk.ss_sp +
+		fp = (struct linux_sigframe *)(psp->ps_sigstk.ss_sp +
 		    psp->ps_sigstk.ss_size - sizeof(struct linux_sigframe));
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
 	} else {
@@ -145,8 +148,8 @@ linux_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	} else
 #endif
 	{
-		frame.sf_sc.sc_fs = tf->tf_fs;
-		frame.sf_sc.sc_gs = tf->tf_gs;
+		__asm("movl %%gs,%w0" : "=r" (frame.sf_sc.sc_gs));
+		__asm("movl %%fs,%w0" : "=r" (frame.sf_sc.sc_fs));
 		frame.sf_sc.sc_es = tf->tf_es;
 		frame.sf_sc.sc_ds = tf->tf_ds;
 		frame.sf_sc.sc_eflags = tf->tf_eflags;
@@ -179,9 +182,10 @@ linux_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	 */
 	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_eip = p->p_sigcode;
+	tf->tf_eip = (int)(((char *)PS_STRINGS) -
+	     (linux_esigcode - linux_sigcode));
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
-	tf->tf_eflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
+	tf->tf_eflags &= ~(PSL_T|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
 	tf->tf_ss = GSEL(GUDATA_SEL, SEL_UPL);
 }
@@ -197,13 +201,16 @@ linux_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
  * a machine fault.
  */
 int
-linux_sys_sigreturn(struct proc *p, void *v, register_t *retval)
+linux_sys_sigreturn(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 	struct linux_sys_sigreturn_args /* {
 		syscallarg(struct linux_sigcontext *) scp;
 	} */ *uap = v;
 	struct linux_sigcontext *scp, context;
-	struct trapframe *tf;
+	register struct trapframe *tf;
 
 	tf = p->p_md.md_regs;
 
@@ -239,8 +246,7 @@ linux_sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		    !USERMODE(context.sc_cs, context.sc_eflags))
 			return (EINVAL);
 
-		tf->tf_fs = context.sc_fs;
-		tf->tf_gs = context.sc_gs;
+		/* %fs and %gs were restored by the trampoline. */
 		tf->tf_es = context.sc_es;
 		tf->tf_ds = context.sc_ds;
 		tf->tf_eflags = context.sc_eflags;
@@ -263,25 +269,22 @@ linux_sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	return (EJUSTRETURN);
 }
 
-int
-linux_sys_rt_sigreturn(struct proc *p, void *v, register_t *retval)
-{
-	return(ENOSYS);
-}
-
 #ifdef USER_LDT
 
 int
-linux_read_ldt(struct proc *p, struct linux_sys_modify_ldt_args *uap,
-    register_t *retval)
+linux_read_ldt(p, uap, retval)
+	struct proc *p;
+	struct linux_sys_modify_ldt_args /* {
+		syscallarg(int) func;
+		syscallarg(void *) ptr;
+		syscallarg(size_t) bytecount;
+	} */ *uap;
+	register_t *retval;
 {
 	struct i386_get_ldt_args gl;
 	int error;
 	caddr_t sg;
 	char *parms;
-
-	if (user_ldt_enable == 0)
-		return (ENOSYS);
 
 	sg = stackgap_init(p->p_emul);
 
@@ -313,8 +316,14 @@ struct linux_ldt_info {
 };
 
 int
-linux_write_ldt(struct proc *p, struct linux_sys_modify_ldt_args *uap,
-    register_t *retval)
+linux_write_ldt(p, uap, retval)
+	struct proc *p;
+	struct linux_sys_modify_ldt_args /* {
+		syscallarg(int) func;
+		syscallarg(void *) ptr;
+		syscallarg(size_t) bytecount;
+	} */ *uap;
+	register_t *retval;
 {
 	struct linux_ldt_info ldt_info;
 	struct segment_descriptor sd;
@@ -322,9 +331,6 @@ linux_write_ldt(struct proc *p, struct linux_sys_modify_ldt_args *uap,
 	int error;
 	caddr_t sg;
 	char *parms;
-
-	if (user_ldt_enable == 0)
-		return (ENOSYS);
 
 	if (SCARG(uap, bytecount) != sizeof(ldt_info))
 		return (EINVAL);
@@ -372,7 +378,10 @@ linux_write_ldt(struct proc *p, struct linux_sys_modify_ldt_args *uap,
 #endif /* USER_LDT */
 
 int
-linux_sys_modify_ldt(struct proc *p, void *v, register_t *retval)
+linux_sys_modify_ldt(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 	struct linux_sys_modify_ldt_args /* {
 		syscallarg(int) func;
@@ -401,10 +410,11 @@ linux_sys_modify_ldt(struct proc *p, void *v, register_t *retval)
  * array for all major device numbers, and map linux_mknod too.
  */
 dev_t
-linux_fakedev(dev_t dev)
+linux_fakedev(dev)
+	dev_t dev;
 {
 
-	if (major(dev) == NATIVE_CONS_MAJOR)
+	if (major(dev) == NETBSD_CONS_MAJOR)
 		return makedev(LINUX_CONS_MAJOR, (minor(dev) + 1));
 	return dev;
 }
@@ -413,7 +423,10 @@ linux_fakedev(dev_t dev)
  * We come here in a last attempt to satisfy a Linux ioctl() call
  */
 int
-linux_machdepioctl(struct proc *p, void *v, register_t *retval)
+linux_machdepioctl(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 	struct linux_sys_ioctl_args /* {
 		syscallarg(int) fd;
@@ -422,28 +435,18 @@ linux_machdepioctl(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct sys_ioctl_args bia;
 	u_long com;
+#if NVT > 0
 	int error;
-#if (NWSDISPLAY > 0 && defined(WSDISPLAY_COMPAT_USL))
 	struct vt_mode lvt;
 	caddr_t bvtp, sg;
 #endif
-	struct filedesc *fdp;
-	struct file *fp;
-	int fd;
-	int (*ioctlf)(struct file *, u_long, caddr_t, struct proc *);
-	struct ioctl_pt pt;
 
-	fd = SCARG(uap, fd);
 	SCARG(&bia, fd) = SCARG(uap, fd);
 	SCARG(&bia, data) = SCARG(uap, data);
 	com = SCARG(uap, com);
 
-	fdp = p->p_fd;
-	if ((fp = fd_getfile(fdp, fd)) == NULL)
-		return (EBADF);
-
 	switch (com) {
-#if (NWSDISPLAY > 0 && defined(WSDISPLAY_COMPAT_USL))
+#if NVT > 0
 	case LINUX_KDGKBMODE:
 		com = KDGKBMODE;
 		break;
@@ -452,22 +455,11 @@ linux_machdepioctl(struct proc *p, void *v, register_t *retval)
 		if ((unsigned)SCARG(uap, data) == LINUX_K_MEDIUMRAW)
 			SCARG(&bia, data) = (caddr_t)K_RAW;
 		break;
-	case LINUX_KIOCSOUND:
-		SCARG(&bia, data) =
-			(caddr_t)(((unsigned long)SCARG(&bia, data)) & 0xffff);
-		/* FALLTHROUGH */
 	case LINUX_KDMKTONE:
 		com = KDMKTONE;
 		break;
 	case LINUX_KDSETMODE:
 		com = KDSETMODE;
-		break;
-	case LINUX_KDGETMODE:
-#if NWSDISPLAY > 0 && defined(WSDISPLAY_COMPAT_USL)
-		com = WSDISPLAYIO_GMODE;
-#else
-		com = KDGETMODE;
-#endif
 		break;
 	case LINUX_KDENABIO:
 		com = KDENABIO;
@@ -484,61 +476,32 @@ linux_machdepioctl(struct proc *p, void *v, register_t *retval)
 	case LINUX_VT_OPENQRY:
 		com = VT_OPENQRY;
 		break;
-	case LINUX_VT_GETMODE: {
-		int sig;
-
+	case LINUX_VT_GETMODE:
 		SCARG(&bia, com) = VT_GETMODE;
 		if ((error = sys_ioctl(p, &bia, retval)))
 			return error;
 		if ((error = copyin(SCARG(uap, data), (caddr_t)&lvt,
 		    sizeof (struct vt_mode))))
 			return error;
-		/* We need to bounds check here in case there
-		   is a race with another thread */
-		if ((error = bsd_to_linux_signal(lvt.relsig, &sig)))
-			return error;
-		lvt.relsig = sig;
-
-		if ((error = bsd_to_linux_signal(lvt.acqsig, &sig)))
-			return error;
-		lvt.acqsig = sig;
-		
-		if ((error = bsd_to_linux_signal(lvt.frsig, &sig)))
-			return error;
-		lvt.frsig = sig;
-
+		lvt.relsig = bsd_to_linux_sig[lvt.relsig];
+		lvt.acqsig = bsd_to_linux_sig[lvt.acqsig];
+		lvt.frsig = bsd_to_linux_sig[lvt.frsig];
 		return copyout((caddr_t)&lvt, SCARG(uap, data),
 		    sizeof (struct vt_mode));
-	}
-	case LINUX_VT_SETMODE: {
-		int sig;
-
+	case LINUX_VT_SETMODE:
 		com = VT_SETMODE;
 		if ((error = copyin(SCARG(uap, data), (caddr_t)&lvt,
 		    sizeof (struct vt_mode))))
 			return error;
-		if ((error = linux_to_bsd_signal(lvt.relsig, &sig)))
-			return error;
-		lvt.relsig = sig;
-
-		if ((error = linux_to_bsd_signal(lvt.acqsig, &sig)))
-			return error;
-		lvt.acqsig = sig;
-
-		if ((error = linux_to_bsd_signal(lvt.frsig, &sig)))
-			return error;
-		lvt.frsig = sig;
-
+		lvt.relsig = linux_to_bsd_sig[lvt.relsig];
+		lvt.acqsig = linux_to_bsd_sig[lvt.acqsig];
+		lvt.frsig = linux_to_bsd_sig[lvt.frsig];
 		sg = stackgap_init(p->p_emul);
 		bvtp = stackgap_alloc(&sg, sizeof (struct vt_mode));
 		if ((error = copyout(&lvt, bvtp, sizeof (struct vt_mode))))
 			return error;
 		SCARG(&bia, data) = bvtp;
 		break;
-	}
-	case LINUX_VT_DISALLOCATE:
-		/* XXX should use WSDISPLAYIO_DELSCREEN */
-		return 0;
 	case LINUX_VT_RELDISP:
 		com = VT_RELDISP;
 		break;
@@ -548,40 +511,10 @@ linux_machdepioctl(struct proc *p, void *v, register_t *retval)
 	case LINUX_VT_WAITACTIVE:
 		com = VT_WAITACTIVE;
 		break;
-	case LINUX_VT_GETSTATE:
-		com = VT_GETSTATE;
-		break;
-	case LINUX_KDGKBTYPE:
-	{
-		char tmp = KB_101;
-
-		/* This is what Linux does */
-		return copyout(&tmp, SCARG(uap, data), sizeof(char));
-	}
 #endif
 	default:
-		/*
-		 * Unknown to us. If it's on a device, just pass it through
-		 * using PTIOCLINUX, the device itself might be able to
-		 * make some sense of it.
-		 * XXX hack: if the function returns EJUSTRETURN,
-		 * it has stuffed a sysctl return value in pt.data.
-		 */
-		FREF(fp);
-		ioctlf = fp->f_ops->fo_ioctl;
-		pt.com = SCARG(uap, com);
-		pt.data = SCARG(uap, data);
-		error = ioctlf(fp, PTIOCLINUX, (caddr_t)&pt, p);
-		FRELE(fp);
-		if (error == EJUSTRETURN) {
-			retval[0] = (register_t)pt.data;
-			error = 0;
-		}
-
-		if (error == ENOTTY)
-			printf("linux_machdepioctl: invalid ioctl %08lx\n",
-			    com);
-		return (error);
+		printf("linux_machdepioctl: invalid ioctl %08lx\n", com);
+		return EINVAL;
 	}
 	SCARG(&bia, com) = com;
 	return sys_ioctl(p, &bia, retval);
@@ -593,7 +526,10 @@ linux_machdepioctl(struct proc *p, void *v, register_t *retval)
  * to rely on I/O permission maps, which are not implemented.
  */
 int
-linux_sys_iopl(struct proc *p, void *v, register_t *retval)
+linux_sys_iopl(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 #if 0
 	struct linux_sys_iopl_args /* {
@@ -602,9 +538,7 @@ linux_sys_iopl(struct proc *p, void *v, register_t *retval)
 #endif
 	struct trapframe *fp = p->p_md.md_regs;
 
-	if (suser(p, 0) != 0)
-		return EPERM;
-	if (securelevel > 0)
+	if (suser(p->p_ucred, &p->p_acflag) != 0)
 		return EPERM;
 	fp->tf_eflags |= PSL_IOPL;
 	*retval = 0;
@@ -616,7 +550,10 @@ linux_sys_iopl(struct proc *p, void *v, register_t *retval)
  * just let it have the whole range.
  */
 int
-linux_sys_ioperm(struct proc *p, void *v, register_t *retval)
+linux_sys_ioperm(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
 {
 	struct linux_sys_ioperm_args /* {
 		syscallarg(unsigned int) lo;
@@ -625,9 +562,7 @@ linux_sys_ioperm(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct trapframe *fp = p->p_md.md_regs;
 
-	if (suser(p, 0) != 0)
-		return EPERM;
-	if (securelevel > 0)
+	if (suser(p->p_ucred, &p->p_acflag) != 0)
 		return EPERM;
 	if (SCARG(uap, val))
 		fp->tf_eflags |= PSL_IOPL;

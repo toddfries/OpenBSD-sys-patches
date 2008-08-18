@@ -1,6 +1,5 @@
-/*	$OpenBSD: svr4_signal.c,v 1.11 2008/05/01 11:53:26 miod Exp $	 */
-/*	$NetBSD: svr4_signal.c,v 1.24 1996/12/06 03:21:53 christos Exp $	 */
-
+/*	$OpenBSD: svr4_signal.c,v 1.4 1996/04/17 05:24:20 mickey Exp $	 */
+/*	$NetBSD: svr4_signal.c,v 1.23 1996/03/30 22:38:07 christos Exp $	 */
 /*
  * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
@@ -58,11 +57,11 @@
 #define	svr4_sigismember(s, n)	((s)->bits[svr4_sigword(n)] & svr4_sigmask(n))
 #define	svr4_sigaddset(s, n)	((s)->bits[svr4_sigword(n)] |= svr4_sigmask(n))
 
-static __inline void svr4_sigfillset(svr4_sigset_t *);
-void svr4_to_bsd_sigaction(const struct svr4_sigaction *,
-				struct sigaction *);
-void bsd_to_svr4_sigaction(const struct sigaction *,
-				struct svr4_sigaction *);
+static __inline void svr4_sigfillset __P((svr4_sigset_t *));
+void svr4_to_bsd_sigaction __P((const struct svr4_sigaction *,
+				struct sigaction *));
+void bsd_to_svr4_sigaction __P((const struct sigaction *,
+				struct svr4_sigaction *));
 
 static __inline void
 svr4_sigfillset(s)
@@ -189,7 +188,7 @@ svr4_to_bsd_sigaction(ssa, bsa)
 	struct sigaction *bsa;
 {
 
-	bsa->sa_handler = (sig_t) ssa->sa__handler;
+	bsa->sa_handler = (sig_t) ssa->sa_handler;
 	svr4_to_bsd_sigset(&ssa->sa_mask, &bsa->sa_mask);
 	bsa->sa_flags = 0;
 	if ((ssa->sa_flags & SVR4_SA_ONSTACK) != 0)
@@ -200,12 +199,8 @@ svr4_to_bsd_sigaction(ssa, bsa)
 		bsa->sa_flags |= SA_RESETHAND;
 	if ((ssa->sa_flags & SVR4_SA_NOCLDSTOP) != 0)
 		bsa->sa_flags |= SA_NOCLDSTOP;
-	if ((ssa->sa_flags & SVR4_SA_NOCLDWAIT) != 0)
-		bsa->sa_flags |= SA_NOCLDWAIT;
 	if ((ssa->sa_flags & SVR4_SA_NODEFER) != 0)
 		bsa->sa_flags |= SA_NODEFER;
-	if ((ssa->sa_flags & SVR4_SA_SIGINFO) != 0)
-		bsa->sa_flags |= SA_SIGINFO;
 }
 
 void
@@ -214,23 +209,19 @@ bsd_to_svr4_sigaction(bsa, ssa)
 	struct svr4_sigaction *ssa;
 {
 
-	ssa->sa__handler = (svr4_sig_t) bsa->sa_handler;
+	ssa->sa_handler = (svr4_sig_t) bsa->sa_handler;
 	bsd_to_svr4_sigset(&bsa->sa_mask, &ssa->sa_mask);
 	ssa->sa_flags = 0;
 	if ((bsa->sa_flags & SA_ONSTACK) != 0)
-		ssa->sa_flags |= SVR4_SA_ONSTACK;
+		ssa->sa_flags |= SA_ONSTACK;
 	if ((bsa->sa_flags & SA_RESETHAND) != 0)
-		ssa->sa_flags |= SVR4_SA_RESETHAND;
+		ssa->sa_flags |= SA_RESETHAND;
 	if ((bsa->sa_flags & SA_RESTART) != 0)
-		ssa->sa_flags |= SVR4_SA_RESTART;
+		ssa->sa_flags |= SA_RESTART;
 	if ((bsa->sa_flags & SA_NODEFER) != 0)
-		ssa->sa_flags |= SVR4_SA_NODEFER;
+		ssa->sa_flags |= SA_NODEFER;
 	if ((bsa->sa_flags & SA_NOCLDSTOP) != 0)
-		ssa->sa_flags |= SVR4_SA_NOCLDSTOP;
-	if ((bsa->sa_flags & SA_NOCLDWAIT) != 0)
-		ssa->sa_flags |= SVR4_SA_NOCLDWAIT;
-	if ((bsa->sa_flags & SA_SIGINFO) != 0)
-		ssa->sa_flags |= SVR4_SA_SIGINFO;
+		ssa->sa_flags |= SA_NOCLDSTOP;
 }
 
 void
@@ -281,9 +272,6 @@ svr4_sys_sigaction(p, v, retval)
 	struct sys_sigaction_args sa;
 	caddr_t sg;
 	int error;
-
-	if (SCARG(uap, signum) < 0 || SCARG(uap, signum) >= SVR4_NSIG)
-		return (EINVAL);
 
 	sg = stackgap_init(p->p_emul);
 	nssa = SCARG(uap, nsa);
@@ -387,17 +375,16 @@ svr4_sys_signal(p, v, retval)
 		syscallarg(int) signum;
 		syscallarg(svr4_sig_t) handler;
 	} */ *uap = v;
-	int signum, error;
+	int signum = svr4_to_bsd_sig[SVR4_SIGNO(SCARG(uap, signum))];
+	int error;
 	caddr_t sg = stackgap_init(p->p_emul);
 
-	signum = SVR4_SIGNO(SCARG(uap, signum));
-	if (signum < 0 || signum >= SVR4_NSIG) {
+	if (signum <= 0 || signum >= SVR4_NSIG) {
 		if (SVR4_SIGCALL(SCARG(uap, signum)) == SVR4_SIGNAL_MASK ||
 		    SVR4_SIGCALL(SCARG(uap, signum)) == SVR4_SIGDEFER_MASK)
 			*retval = (int)SVR4_SIG_ERR;
 		return EINVAL;
 	}
-	signum = svr4_to_bsd_sig[signum];
 
 	switch (SVR4_SIGCALL(SCARG(uap, signum))) {
 	case SVR4_SIGDEFER_MASK:
@@ -514,7 +501,6 @@ svr4_sys_sigprocmask(p, v, retval)
 	svr4_sigset_t sss;
 	sigset_t bss;
 	int error = 0;
-	int s;
 
 	if (SCARG(uap, oset) != NULL) {
 		/* Fix the return value first if needed */
@@ -532,7 +518,7 @@ svr4_sys_sigprocmask(p, v, retval)
 
 	svr4_to_bsd_sigset(&sss, &bss);
 
-	s = splhigh();
+	(void) splhigh();
 
 	switch (SCARG(uap, how)) {
 	case SVR4_SIG_BLOCK:
@@ -552,7 +538,7 @@ svr4_sys_sigprocmask(p, v, retval)
 		break;
 	}
 
-	splx(s);
+	(void) spl0();
 
 	return error;
 }
@@ -624,8 +610,6 @@ svr4_sys_kill(p, v, retval)
 	} */ *uap = v;
 	struct sys_kill_args ka;
 
-	if (SCARG(uap, signum) < 0 || SCARG(uap, signum) >= SVR4_NSIG)
-		return (EINVAL);
 	SCARG(&ka, pid) = SCARG(uap, pid);
 	SCARG(&ka, signum) = svr4_to_bsd_sig[SCARG(uap, signum)];
 	return sys_kill(p, &ka, retval);
@@ -664,16 +648,4 @@ svr4_sys_context(p, v, retval)
 		return ENOSYS;
 	}
 	return 0;
-}
-
-int
-svr4_sys_pause(p, v, retval)
-	register struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sys_sigsuspend_args bsa;
-
-	SCARG(&bsa, mask) = p->p_sigmask;
-	return sys_sigsuspend(p, &bsa, retval);
 }

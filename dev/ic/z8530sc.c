@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530sc.c,v 1.6 2003/06/02 23:28:02 millert Exp $ */
+/*	$OpenBSD: z8530sc.c,v 1.3 1996/05/26 00:27:06 deraadt Exp $ */
 /*	$NetBSD: z8530sc.c,v 1.4 1996/05/17 19:30:34 gwr Exp $	*/
 
 /*
@@ -23,7 +23,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -64,10 +68,7 @@
 #include <dev/ic/z8530reg.h>
 #include <machine/z8530var.h>
 
-static void zsnull_intr(struct zs_chanstate *);
-static void zsnull_softint(struct zs_chanstate *);
-
-void
+int
 zs_break(cs, set)
 	struct zs_chanstate *cs;
 	int set;
@@ -142,6 +143,7 @@ zs_loadchannelregs(cs)
 	struct zs_chanstate *cs;
 {
 	u_char *reg;
+	int i;
 
 	/* Copy "pending" regs to "current" */
 	bcopy((caddr_t)cs->cs_preg, (caddr_t)cs->cs_creg, 16);

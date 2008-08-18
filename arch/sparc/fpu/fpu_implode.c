@@ -1,4 +1,3 @@
-/*	$OpenBSD: fpu_implode.c,v 1.5 2003/06/02 23:27:54 millert Exp $	*/
 /*	$NetBSD: fpu_implode.c,v 1.3 1996/03/14 19:41:59 christos Exp $ */
 
 /*
@@ -22,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,8 +60,8 @@
 #include <sparc/fpu/fpu_emu.h>
 #include <sparc/fpu/fpu_extern.h>
 
-static int round(register struct fpemu *, register struct fpn *);
-static int toinf(struct fpemu *, int);
+static int round __P((register struct fpemu *, register struct fpn *));
+static int toinf __P((struct fpemu *, int));
 
 /*
  * Round a number (algorithm from Motorola MC68882 manual, modified for

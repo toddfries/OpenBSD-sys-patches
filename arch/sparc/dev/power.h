@@ -1,4 +1,3 @@
-/*	$OpenBSD: power.h,v 1.5 2005/03/23 17:12:24 miod Exp $ */
 /*	$NetBSD: power.h,v 1.2 1996/05/16 15:56:57 abrown Exp $ */
 
 /*
@@ -39,6 +38,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $Id: power.h,v 1.1 1996/08/11 05:34:25 deraadt Exp $
  *
  */
 
@@ -54,7 +54,7 @@
 #define	POWER_BITS	"\20\1POWEROFF"
 
 #ifndef _LOCORE
-extern volatile u_char *power_reg;
+volatile u_char *power_reg;
 #endif
 
-void auxio_powerdown(void);		/* power off function */
+void powerdown __P((void));		/* power off function */

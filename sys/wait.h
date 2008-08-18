@@ -1,4 +1,4 @@
-/*	$OpenBSD: wait.h,v 1.14 2006/04/27 02:17:21 tedu Exp $	*/
+/*	$OpenBSD: wait.h,v 1.4 1996/04/21 22:32:21 deraadt Exp $	*/
 /*	$NetBSD: wait.h,v 1.11 1996/04/09 20:55:51 cgd Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,8 +39,6 @@
 #ifndef _SYS_WAIT_H_
 #define _SYS_WAIT_H_
 
-#include <sys/cdefs.h>
-
 /*
  * This file holds definitions relevent to the wait4 system call
  * and the alternate interfaces that use it (wait, wait3, waitpid).
@@ -46,24 +48,22 @@
  * Macros to test the exit status returned by wait
  * and extract the relevant values.
  */
-#if __BSD_VISIBLE
-#define	_W_INT(w)	(*(int *)&(w))	/* convert union wait to int */
-#else
+#ifdef _POSIX_SOURCE
 #define	_W_INT(i)	(i)
+#else
+#define	_W_INT(w)	(*(int *)&(w))	/* convert union wait to int */
+#define	WCOREFLAG	0200
 #endif
 
 #define	_WSTATUS(x)	(_W_INT(x) & 0177)
 #define	_WSTOPPED	0177		/* _WSTATUS if process is stopped */
-#define	_WCONTINUED	0177777		/* process has continued */
-#define WIFSTOPPED(x)	((_W_INT(x) & 0xff) == _WSTOPPED)
-#define WSTOPSIG(x)	(int)(((unsigned)_W_INT(x) >> 8) & 0xff)
+#define WIFSTOPPED(x)	(_WSTATUS(x) == _WSTOPPED)
+#define WSTOPSIG(x)	(_W_INT(x) >> 8)
 #define WIFSIGNALED(x)	(_WSTATUS(x) != _WSTOPPED && _WSTATUS(x) != 0)
 #define WTERMSIG(x)	(_WSTATUS(x))
 #define WIFEXITED(x)	(_WSTATUS(x) == 0)
-#define WEXITSTATUS(x)	(int)(((unsigned)_W_INT(x) >> 8) & 0xff)
-#define WIFCONTINUED(x)	((_W_INT(x) & _WCONTINUED) == _WCONTINUED)
-#if __XPG_VISIBLE
-#define	WCOREFLAG	0200
+#define WEXITSTATUS(x)	(_W_INT(x) >> 8)
+#ifndef _POSIX_SOURCE
 #define WCOREDUMP(x)	(_W_INT(x) & WCOREFLAG)
 
 #define	W_EXITCODE(ret, sig)	((ret) << 8 | (sig))
@@ -81,19 +81,17 @@
  */
 #define WNOHANG		1	/* don't hang in wait */
 #define WUNTRACED	2	/* tell about stopped, untraced children */
-#if __XPG_VISIBLE
-#define	WALTSIG		4	/* wait for child with alternate exit signal */
-#endif
-#define	WCONTINUED	8	/* report a job control continued process */
 
-#if __BSD_VISIBLE
+#ifndef _POSIX_SOURCE
+/* POSIX extensions and 4.2/4.3 compatability: */
+
 /*
  * Tokens for special values of the "pid" parameter to wait4.
  */
 #define	WAIT_ANY	(-1)	/* any process */
 #define	WAIT_MYPGRP	0	/* any process in my process group */
 
-#include <sys/types.h>
+#include <machine/endian.h>
 
 /*
  * Deprecated:
@@ -107,13 +105,13 @@ union wait {
 	 * Terminated process status.
 	 */
 	struct {
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 		unsigned int	w_Termsig:7,	/* termination signal */
 				w_Coredump:1,	/* core dump indicator */
 				w_Retcode:8,	/* exit code if w_termsig==0 */
 				w_Filler:16;	/* upper bits filler */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		unsigned int	w_Filler:16,	/* upper bits filler */
 				w_Retcode:8,	/* exit code if w_termsig==0 */
 				w_Coredump:1,	/* core dump indicator */
@@ -126,12 +124,12 @@ union wait {
 	 * with the WUNTRACED option bit.
 	 */
 	struct {
-#if _BYTE_ORDER == _LITTLE_ENDIAN
+#if BYTE_ORDER == LITTLE_ENDIAN
 		unsigned int	w_Stopval:8,	/* == W_STOPPED if stopped */
 				w_Stopsig:8,	/* signal that stopped us */
 				w_Filler:16;	/* upper bits filler */
 #endif
-#if _BYTE_ORDER == _BIG_ENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		unsigned int	w_Filler:16,	/* upper bits filler */
 				w_Stopsig:8,	/* signal that stopped us */
 				w_Stopval:8;	/* == W_STOPPED if stopped */
@@ -145,19 +143,20 @@ union wait {
 #define w_stopsig	w_S.w_Stopsig
 
 #define	WSTOPPED	_WSTOPPED
-#endif /* __BSD_VISIBLE */
+#endif /* _POSIX_SOURCE */
 
 #ifndef _KERNEL
 #include <sys/types.h>
+#include <sys/cdefs.h>
 
 __BEGIN_DECLS
 struct rusage;	/* forward declaration */
 
-pid_t	wait(int *);
-pid_t	waitpid(pid_t, int *, int);
-#if __BSD_VISIBLE
-pid_t	wait3(int *, int, struct rusage *);
-pid_t	wait4(pid_t, int *, int, struct rusage *);
+pid_t	wait __P((int *));
+pid_t	waitpid __P((pid_t, int *, int));
+#ifndef _POSIX_SOURCE
+pid_t	wait3 __P((int *, int, struct rusage *));
+pid_t	wait4 __P((pid_t, int *, int, struct rusage *));
 #endif
 __END_DECLS
 #endif

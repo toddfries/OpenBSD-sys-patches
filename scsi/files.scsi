@@ -1,15 +1,14 @@
-#	$OpenBSD: files.scsi,v 1.20 2005/08/05 00:08:58 dlg Exp $
 #	$NetBSD: files.scsi,v 1.4 1996/05/16 04:01:08 mycroft Exp $
 #
 # Config.new file and device description for machine-independent SCSI code.
-# Included by ports that need it.  Ports that use it must provide
+# Included by ports that need it.  Ports that usee it must provide
 # their own "major" declarations for the appropriate devices.
 
 file	scsi/scsi_base.c		scsi
 file	scsi/scsi_ioctl.c		scsi
 file	scsi/scsiconf.c			scsi
 
-device	scsibus {[target = -1], [lun = -1]}
+device	scsibus {target = -1, lun = -1}
 attach	scsibus at scsi
 
 device	cd: disk
@@ -34,14 +33,10 @@ file	scsi/ss.c			ss needs-flag
 file	scsi/ss_mustek.c		ss
 file	scsi/ss_scanjet.c		ss
 
+device	su: disk
+attach	su at scsibus
+file	scsi/su.c			su needs-flag
+
 device	uk: disk
 attach	uk at scsibus
 file	scsi/uk.c			uk needs-flag
-
-device	safte: disk
-attach	safte at scsibus
-file	scsi/safte.c			safte needs-flag
-
-device	ses: disk
-attach	ses at scsibus
-file	scsi/ses.c			ses needs-flag

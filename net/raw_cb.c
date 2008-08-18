@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_cb.c,v 1.5 2003/12/10 07:22:42 itojun Exp $	*/
+/*	$OpenBSD: raw_cb.c,v 1.2 1996/03/03 21:07:16 niklas Exp $	*/
 /*	$NetBSD: raw_cb.c,v 1.9 1996/02/13 22:00:39 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,7 +61,6 @@
 
 u_long	raw_sendspace = RAWSNDQ;
 u_long	raw_recvspace = RAWRCVQ;
-struct rawcbhead rawcb;
 
 /*
  * Allocate a control block and a nominal amount
@@ -65,10 +68,10 @@ struct rawcbhead rawcb;
  */
 int
 raw_attach(so, proto)
-	struct socket *so;
+	register struct socket *so;
 	int proto;
 {
-	struct rawcb *rp = sotorawcb(so);
+	register struct rawcb *rp = sotorawcb(so);
 	int error;
 
 	/*
@@ -93,7 +96,7 @@ raw_attach(so, proto)
  */
 void
 raw_detach(rp)
-	struct rawcb *rp;
+	register struct rawcb *rp;
 {
 	struct socket *so = rp->rcb_socket;
 
@@ -128,11 +131,11 @@ raw_disconnect(rp)
 #ifdef notdef
 int
 raw_bind(so, nam)
-	struct socket *so;
+	register struct socket *so;
 	struct mbuf *nam;
 {
 	struct sockaddr *addr = mtod(nam, struct sockaddr *);
-	struct rawcb *rp;
+	register struct rawcb *rp;
 
 	if (ifnet == 0)
 		return (EADDRNOTAVAIL);

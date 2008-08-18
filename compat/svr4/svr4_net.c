@@ -1,5 +1,5 @@
-/*	$OpenBSD: svr4_net.c,v 1.17 2005/11/21 18:16:38 millert Exp $	 */
-/*	$NetBSD: svr4_net.c,v 1.12 1996/09/07 12:40:51 mycroft Exp $	 */
+/*	$OpenBSD: svr4_net.c,v 1.7 1996/08/01 00:50:53 niklas Exp $	 */
+/*	$NetBSD: svr4_net.c,v 1.9 1996/04/11 12:52:41 christos Exp $	 */
 
 /*
  * Copyright (c) 1994 Christos Zoulas
@@ -41,7 +41,7 @@
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
@@ -77,13 +77,12 @@ enum {
 	dev_unix_ord_stream	= 40
 };
 
-int svr4_netattach(int);
+int svr4_netattach __P((int));
 
-static int svr4_soo_close(struct file *fp, struct proc *p);
+static int svr4_soo_close __P((struct file *fp, struct proc *p));
 
 static struct fileops svr4_netops = {
-	soo_read, soo_write, soo_ioctl, soo_poll, soo_kqfilter,
-	soo_stat, svr4_soo_close
+	soo_read, soo_write, soo_ioctl, soo_select, svr4_soo_close
 };
 
 
@@ -172,8 +171,8 @@ svr4_netopen(dev, flag, mode, p)
 
 	if ((error = socreate(family, &so, type, protocol)) != 0) {
 		DPRINTF(("socreate error %d\n", error));
-		fdremove(p->p_fd, fd);
-		closef(fp, p);
+		p->p_fd->fd_ofiles[fd] = 0;
+		ffree(fp);
 		return error;
 	}
 
@@ -187,7 +186,6 @@ svr4_netopen(dev, flag, mode, p)
 	DPRINTF(("ok);\n"));
 
 	p->p_dupfd = fd;
-	FILE_SET_MATURE(fp);
 	return ENXIO;
 }
 
@@ -222,7 +220,6 @@ svr4_stream_get(fp)
 	st = malloc(sizeof(struct svr4_strm), M_NETADDR, M_WAITOK);
 	st->s_family = so->so_proto->pr_domain->dom_family;
 	st->s_cmd = ~0;
-	st->s_afd = -1;
 	so->so_internal = st;
 
 	return st;

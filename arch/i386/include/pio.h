@@ -1,4 +1,4 @@
-/*	$OpenBSD: pio.h,v 1.9 2001/06/27 04:34:23 mickey Exp $	*/
+/*	$OpenBSD: pio.h,v 1.4 1996/04/18 19:21:40 niklas Exp $	*/
 /*	$NetBSD: pio.h,v 1.13 1996/03/08 20:15:23 cgd Exp $	*/
 
 /*
@@ -61,7 +61,7 @@ static __inline u_int8_t
 __inbc(int port)
 {
 	u_int8_t data;
-	__asm __volatile("inb %w1,%0" : "=a" (data) : "id" (port));
+	__asm __volatile("inb %1,%0" : "=a" (data) : "id" (port));
 	return data;
 }
 
@@ -76,8 +76,10 @@ __inb(int port)
 static __inline void
 insb(int port, void *addr, int cnt)
 {
-	__asm __volatile("cld\n\trepne\n\tinsb"
-	    : "+D" (addr), "+c" (cnt) : "d" (port) : "memory", "cc");
+	__asm __volatile("cld\n\trepne\n\tinsb"			:
+								:
+			 "d" (port), "D" (addr), "c" (cnt)	:
+			 "%edi", "%ecx", "memory");
 }
 
 #define	inw(port) \
@@ -87,7 +89,7 @@ static __inline u_int16_t
 __inwc(int port)
 {
 	u_int16_t data;
-	__asm __volatile("inw %w1,%0" : "=a" (data) : "id" (port));
+	__asm __volatile("inw %1,%0" : "=a" (data) : "id" (port));
 	return data;
 }
 
@@ -102,8 +104,10 @@ __inw(int port)
 static __inline void
 insw(int port, void *addr, int cnt)
 {
-	__asm __volatile("cld\n\trepne\n\tinsw"
-	    : "+D" (addr), "+c" (cnt) : "d" (port) : "memory", "cc");
+	__asm __volatile("cld\n\trepne\n\tinsw"			:
+								:
+			 "d" (port), "D" (addr), "c" (cnt)	:
+			 "%edi", "%ecx", "memory");
 }
 
 #define	inl(port) \
@@ -113,7 +117,7 @@ static __inline u_int32_t
 __inlc(int port)
 {
 	u_int32_t data;
-	__asm __volatile("inl %w1,%0" : "=a" (data) : "id" (port));
+	__asm __volatile("inl %1,%0" : "=a" (data) : "id" (port));
 	return data;
 }
 
@@ -128,8 +132,10 @@ __inl(int port)
 static __inline void
 insl(int port, void *addr, int cnt)
 {
-	__asm __volatile("cld\n\trepne\n\tinsl"
-	    : "+D" (addr), "+c" (cnt) : "d" (port) : "memory", "cc");
+	__asm __volatile("cld\n\trepne\n\tinsl"			:
+								:
+			 "d" (port), "D" (addr), "c" (cnt)	:
+			 "%edi", "%ecx", "memory");
 }
 
 #define	outb(port, data) \
@@ -138,7 +144,7 @@ insl(int port, void *addr, int cnt)
 static __inline void
 __outbc(int port, u_int8_t data)
 {
-	__asm __volatile("outb %0,%w1" : : "a" (data), "id" (port));
+	__asm __volatile("outb %0,%1" : : "a" (data), "id" (port));
 }
 
 static __inline void
@@ -148,10 +154,12 @@ __outb(int port, u_int8_t data)
 }
 
 static __inline void
-outsb(int port, const void *addr, int cnt)
+outsb(int port, void *addr, int cnt)
 {
-	__asm __volatile("cld\n\trepne\n\toutsb"
-	    : "+S" (addr), "+c" (cnt) : "d" (port) : "cc");
+	__asm __volatile("cld\n\trepne\n\toutsb"		:
+								:
+			 "d" (port), "S" (addr), "c" (cnt)	:
+			 "%esi", "%ecx");
 }
 
 #define	outw(port, data) \
@@ -160,7 +168,7 @@ outsb(int port, const void *addr, int cnt)
 static __inline void
 __outwc(int port, u_int16_t data)
 {
-	__asm __volatile("outw %0,%w1" : : "a" (data), "id" (port));
+	__asm __volatile("outw %0,%1" : : "a" (data), "id" (port));
 }
 
 static __inline void
@@ -170,10 +178,12 @@ __outw(int port, u_int16_t data)
 }
 
 static __inline void
-outsw(int port, const void *addr, int cnt)
+outsw(int port, void *addr, int cnt)
 {
-	__asm __volatile("cld\n\trepne\n\toutsw"
-	    : "+S" (addr), "+c" (cnt) : "d" (port) : "cc");
+	__asm __volatile("cld\n\trepne\n\toutsw"		:
+								:
+			 "d" (port), "S" (addr), "c" (cnt)	:
+			 "%esi", "%ecx");
 }
 
 #define	outl(port, data) \
@@ -182,7 +192,7 @@ outsw(int port, const void *addr, int cnt)
 static __inline void
 __outlc(int port, u_int32_t data)
 {
-	__asm __volatile("outl %0,%w1" : : "a" (data), "id" (port));
+	__asm __volatile("outl %0,%1" : : "a" (data), "id" (port));
 }
 
 static __inline void
@@ -192,10 +202,12 @@ __outl(int port, u_int32_t data)
 }
 
 static __inline void
-outsl(int port, const void *addr, int cnt)
+outsl(int port, void *addr, int cnt)
 {
-	__asm __volatile("cld\n\trepne\n\toutsl"
-	    : "+S" (addr), "+c" (cnt) : "d" (port) : "cc");
+	__asm __volatile("cld\n\trepne\n\toutsl"		:
+								:
+			 "d" (port), "S" (addr), "c" (cnt)	:
+			 "%esi", "%ecx");
 }
 
 #endif /* _I386_PIO_H_ */

@@ -1,5 +1,5 @@
-/*	$OpenBSD: hpux_tty.c,v 1.12 2004/09/19 21:58:41 mickey Exp $	*/
-/*	$NetBSD: hpux_tty.c,v 1.14 1997/04/01 19:59:05 scottr Exp $	*/
+/*	$OpenBSD: hpux_tty.c,v 1.3 1996/08/02 20:35:00 niklas Exp $	*/
+/*	$NetBSD: hpux_tty.c,v 1.13 1995/12/11 16:32:46 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -74,14 +78,10 @@ hpux_termio(fd, com, data, p)
 	struct file *fp;
 	struct termios tios;
 	struct hpux_termios htios;
-	int line, error;
+	int line, error, (*ioctlrout)();
 	int newi = 0;
-	int (*ioctlrout)(struct file *fp, u_long com,
-	    caddr_t data, struct proc *p);
 
-	if ((fp = fd_getfile(p->p_fd, fd)) == NULL)
-		return (EBADF);
-	FREF(fp);
+	fp = p->p_fd->fd_ofiles[fd];
 	ioctlrout = fp->f_ops->fo_ioctl;
 	switch (com) {
 	case HPUXTCGETATTR:
@@ -91,7 +91,7 @@ hpux_termio(fd, com, data, p)
 		/*
 		 * Get BSD terminal state
 		 */
-		if ((error = (*ioctlrout)(fp, TIOCGETA, (caddr_t)&tios, p)))
+		if (error = (*ioctlrout)(fp, TIOCGETA, (caddr_t)&tios, p))
 			break;
 		bzero((char *)&htios, sizeof htios);
 		/*
@@ -219,13 +219,12 @@ hpux_termio(fd, com, data, p)
 		/*
 		 * Get old characteristics and determine if we are a tty.
 		 */
-		if ((error = (*ioctlrout)(fp, TIOCGETA, (caddr_t)&tios, p)))
+		if (error = (*ioctlrout)(fp, TIOCGETA, (caddr_t)&tios, p))
 			break;
 		if (newi)
 			bcopy(data, (char *)&htios, sizeof htios);
 		else
-			termiototermios((struct hpux_termio *)data,
-			    &htios, &tios);
+			termiototermios((struct termio *)data, &htios, &tios);
 		/*
 		 * Set iflag.
 		 * Same through ICRNL, no HP-UX equiv for IMAXBEL
@@ -352,8 +351,8 @@ hpux_termio(fd, com, data, p)
 
 				nbio = (htios.c_cc[HPUXVMINS] == 0 &&
 					htios.c_cc[HPUXVTIMES] == 0);
-				if ((nbio && (fp->f_flag & FNONBLOCK) == 0) ||
-				    (!nbio && (fp->f_flag & FNONBLOCK))) {
+				if (nbio && (fp->f_flag & FNONBLOCK) == 0 ||
+				    !nbio && (fp->f_flag & FNONBLOCK)) {
 					args.fdes = fd;
 					args.cmd = F_GETFL;
 					args.arg = 0;
@@ -374,11 +373,10 @@ hpux_termio(fd, com, data, p)
 		error = EINVAL;
 		break;
 	}
-	FRELE(fp);
 	return(error);
 }
 
-void
+int
 termiototermios(tio, tios, bsdtios)
 	struct hpux_termio *tio;
 	struct hpux_termios *tios;
@@ -410,7 +408,7 @@ termiototermios(tio, tios, bsdtios)
 	tios->c_cc[HPUXVSTOP] = bsdtios->c_cc[VSTOP];
 }
 
-void
+int
 termiostotermio(tios, tio)
 	struct hpux_termios *tios;
 	struct hpux_termio *tio;
@@ -462,7 +460,7 @@ int
 hpuxtobsdbaud(hpux_speed)
 	int hpux_speed;
 {
-	static const int hpuxtobsdbaudtab[32] = {
+	static int hpuxtobsdbaudtab[32] = {
 		B0,	B50,	B75,	B110,	B134,	B150,	B200,	B300,
 		B600,	B0,	B1200,	B1800,	B2400,	B0,	B4800,	B0,
 		B9600,	B19200,	B38400,	B0,	B0,	B0,	B0,	B0,
@@ -510,20 +508,20 @@ getsettty(p, fdes, com, cmarg)
 	int fdes, com;
 	caddr_t cmarg;
 {
-	struct filedesc *fdp = p->p_fd;
-	struct file *fp;
+	register struct filedesc *fdp = p->p_fd;
+	register struct file *fp;
 	struct hpux_sgttyb hsb;
 	struct sgttyb sb;
 	int error;
 
-	if ((fp = fd_getfile(fdp, fdes)) == NULL)
+	if (((unsigned)fdes) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[fdes]) == NULL)
 		return (EBADF);
 	if ((fp->f_flag & (FREAD|FWRITE)) == 0)
 		return (EBADF);
-	FREF(fp);
 	if (com == HPUXTIOCSETP) {
-		if ((error = copyin(cmarg, (caddr_t)&hsb, sizeof hsb)))
-			goto bad;
+		if (error = copyin(cmarg, (caddr_t)&hsb, sizeof hsb))
+			return (error);
 		sb.sg_ispeed = hsb.sg_ispeed;
 		sb.sg_ospeed = hsb.sg_ospeed;
 		sb.sg_erase = hsb.sg_erase;
@@ -550,7 +548,5 @@ getsettty(p, fdes, com, cmarg)
 			hsb.sg_flags |= V7_XTABS;
 		error = copyout((caddr_t)&hsb, cmarg, sizeof hsb);
 	}
-bad:
-	FRELE(fp);
 	return (error);
 }

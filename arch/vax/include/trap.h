@@ -1,5 +1,4 @@
-/*      $OpenBSD: trap.h,v 1.12 2003/06/02 23:27:57 millert Exp $     */
-/*      $NetBSD: trap.h,v 1.18 2000/06/04 02:19:26 matt Exp $     */
+/*      $NetBSD: trap.h,v 1.13 1996/04/08 18:35:52 ragge Exp $     */
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -16,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -46,7 +49,6 @@
 #define	T_PRIVINFLT	1	/* privileged instruction */
 #define	T_RESOPFLT	2	/* reserved operand */
 #define	T_BPTFLT	3	/* breakpoint instruction */
-#define	T_XFCFLT	4	/* Customer reserved instruction */
 #define	T_SYSCALL	5	/* system call (kcall) */
 #define	T_ARITHFLT	6	/* arithmetic trap */
 #define	T_ASTFLT	7	/* system forced exception */
@@ -67,27 +69,47 @@
 
 #ifndef _LOCORE
 struct	trapframe {
-	long	fp;	/* Stack frame pointer */
-	long	ap;     /* Argument pointer on user stack */
-	long	sp;	/* Stack pointer */
-	long	r0;     /* General registers saved upon trap/syscall */
-	long	r1;
-	long	r2;
-	long	r3;
-	long	r4;
-	long	r5;
-	long	r6;
-	long	r7;
-	long	r8;
-	long	r9;
-	long	r10;
-	long	r11;
-	long	trap;	/* Type of trap */
-        long	code;   /* Trap specific code */
-        long	pc;     /* User pc */
-        long	psl;    /* User psl */
+	unsigned	fp;	/* Stack frame pointer */
+	unsigned	ap;     /* Argument pointer on user stack */
+	unsigned	sp;	/* Stack pointer */
+	unsigned	r0;     /* General registers saved upon trap/syscall */
+	unsigned	r1;
+	unsigned	r2;
+	unsigned	r3;
+	unsigned	r4;
+	unsigned	r5;
+	unsigned	r6;
+	unsigned	r7;
+	unsigned	r8;
+	unsigned	r9;
+	unsigned	r10;
+	unsigned	r11;
+	unsigned	trap;	/* Type of trap */
+        unsigned	code;   /* Trap specific code */
+        unsigned	pc;     /* User pc */
+        unsigned	psl;    /* User psl */
+};
+
+/*
+ * This struct is used when setting up interrupt vectors dynamically.
+ * It pushes a longword between 0-63 on the stack; this number is
+ * normally used as the ctlr number on devices. This use effectively
+ * limits the number of interruptable ctlrs on one unibus to 64.
+ */
+struct ivec_dsp {
+	char	pushr; 		/* pushr */
+	char	pushrarg;	/* $3f */
+	char	pushl; 		/* pushl */
+	char	pushlarg;	/* $? */
+	char	nop;      	/* nop, for foolish gcc */
+	char	calls[3]; 	/* calls $1,? */
+	void	(*hoppaddr) __P((int));	/* jump for calls */
+	char	popr;	  	/* popr $0x3f */
+	char	poprarg;
+	char	rei;      	/* rei */
+	char	pad;		/* sizeof(struct ivec_dsp) == 16 */
 };
 
 #endif /* _LOCORE */
 
-#endif /* _VAX_TRAP_H_ */
+#endif _VAX_TRAP_H_

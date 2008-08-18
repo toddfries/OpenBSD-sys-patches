@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.10 2003/08/20 00:26:00 deraadt Exp $ */
+/*	$OpenBSD: boot.c,v 1.5 1996/05/16 02:55:36 chuck Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt
@@ -12,6 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Theo de Raadt
+ * 4. The name of the Author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -36,7 +41,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -67,13 +76,13 @@
  */
 #define LOADADDR	0x10000
 
-extern   char *version;
-char  line[80];
+extern	char *version;
+char	line[80];
 
-main(int argc, char *argv[])
+main()
 {
 	char *cp, *file;
-	int ask = 0, howto, ret;
+	int ask = 0, howto;
 
 	printf(">> OpenBSD MVME%x netboot [%s]\n", bugargs.cputyp, version);
 	/* cycle in the correct args */
@@ -81,7 +90,7 @@ main(int argc, char *argv[])
 	bugargs.arg_end   = bugargs.nbarg_end;
 	*bugargs.arg_end = 0; /* ensure */
 
-	ret = parse_args(&file, &howto);
+	parse_args(&file, &howto);
 
 	for (;;) {
 		if (ask) {
@@ -90,15 +99,11 @@ main(int argc, char *argv[])
 			if (line[0]) {
 				bugargs.arg_start = line;
 				cp = line;
-				while (cp < (line + sizeof(line) - 1) && *cp)
+				while (cp < (line + sizeof(line) - 1) && *cp) 
 					cp++;
 				bugargs.arg_end = cp;
-				ret =parse_args(&file, &howto);
+				parse_args(&file, &howto);
 			}
-		}
-		if (ret) {
-			printf("boot: -q returning to MVME-Bug\n");
-			break;
 		}
 		exec_mvme(file, howto);
 		printf("boot: %s: %s\n", file, strerror(errno));

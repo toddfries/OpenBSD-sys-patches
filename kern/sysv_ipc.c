@@ -1,4 +1,3 @@
-/*	$OpenBSD: sysv_ipc.c,v 1.5 2005/12/13 10:33:14 jsg Exp $	*/
 /*	$NetBSD: sysv_ipc.c,v 1.10 1995/06/03 05:53:28 mycroft Exp $	*/
 
 /*
@@ -43,7 +42,10 @@
  */
 
 int
-ipcperm(struct ucred *cred, struct ipc_perm *perm, int mode)
+ipcperm(cred, perm, mode)
+	struct ucred *cred;
+	struct ipc_perm *perm;
+	int mode;
 {
 
 	if (mode == IPC_M) {

@@ -1,4 +1,3 @@
-/*	$OpenBSD: power.c,v 1.10 2007/07/01 19:07:45 miod Exp $	*/
 /*	$NetBSD: power.c,v 1.2 1996/05/16 15:56:56 abrown Exp $ */
 
 /*
@@ -39,6 +38,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $Id: power.c,v 1.1 1996/08/11 05:34:25 deraadt Exp $
  */
 
 #include <sys/param.h>
@@ -50,8 +50,8 @@
 
 #include <sparc/dev/power.h>
 
-void	powerattach(struct device *, struct device *, void *);
-int	powermatch(struct device *, void *, void *);
+static int powermatch __P((struct device *, void *, void *));
+static void powerattach __P((struct device *, struct device *, void *));
 
 struct cfattach power_ca = {
 	sizeof(struct device), powermatch, powerattach
@@ -61,47 +61,43 @@ struct cfdriver power_cd = {
 	NULL, "power", DV_DULL
 };
 
-static char power_attached = 0;
-volatile u_char *power_reg;
-
 /*
  * This is the driver for the "power" register available on some Sun4m
  * machines. This allows the machine to remove power automatically when
  * shutdown or halted or whatever.
+ *
+ * XXX: this capability is not utilized in the current kernel.
  */
 
-int
-powermatch(struct device *parent, void *vcf, void *aux)
+static int
+powermatch(parent, vcf, aux)
+	struct device *parent;
+	void *aux, *vcf;
 {
-	struct confargs *ca = aux;
+	register struct confargs *ca = aux;
 
-	if (CPU_ISSUN4M) {
-		if (strcmp("power", ca->ca_ra.ra_name) == 0)
-			return (1);
-	}
+	if (CPU_ISSUN4M)
+		return (strcmp("power", ca->ca_ra.ra_name) == 0);
 
 	return (0);
 }
 
 /* ARGSUSED */
-void
-powerattach(struct device *parent, struct device *self, void *aux)
+static void
+powerattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
 	struct confargs *ca = aux;
 	struct romaux *ra = &ca->ca_ra;
 
-	power_reg = mapiodev(ra->ra_reg, 0, sizeof(long));
-
-	power_attached = 1;
+	power_reg = mapdev(ra->ra_reg, 0, 0, sizeof(long), ca->ca_bustype);
 
 	printf("\n");
 }
 
 void
-auxio_powerdown()
+powerdown()
 {
-	if (power_attached) {
-		*POWER_REG |= POWER_OFF;
-		DELAY(1000000);
-	}
+	*POWER_REG |= POWER_OFF;
 }

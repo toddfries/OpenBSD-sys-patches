@@ -1,4 +1,4 @@
-/*	$OpenBSD: mem.c,v 1.24 2006/05/19 22:51:09 miod Exp $ */
+/*	$OpenBSD: mem.c,v 1.4 1996/04/28 10:59:03 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -11,6 +11,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -40,7 +46,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -64,43 +74,34 @@
  */
 
 #include <sys/param.h>
+#include <sys/conf.h>
 #include <sys/buf.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
 
 #include <machine/cpu.h>
-#include <machine/conf.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
-static caddr_t devzeropage;
+extern u_int lowram;
+caddr_t zeropage;
 
 /*ARGSUSED*/
 int
-mmopen(dev, flag, mode, p)
+mmopen(dev, flag, mode)
 	dev_t dev;
 	int flag, mode;
-	struct proc *p;
 {
 
-	switch (minor(dev)) {
-		case 0:
-		case 1:
-		case 2:
-		case 12:
-			return (0);
-		default:
-			return (ENXIO);
-	}
+	return (0);
 }
 
 /*ARGSUSED*/
 int
-mmclose(dev, flag, mode, p)
+mmclose(dev, flag, mode)
 	dev_t dev;
 	int flag, mode;
-	struct proc *p;
 {
 
 	return (0);
@@ -113,9 +114,9 @@ mmrw(dev, uio, flags)
 	struct uio *uio;
 	int flags;
 {
-	vaddr_t o, v;
-	int c;
-	struct iovec *iov;
+	register vm_offset_t o, v;
+	register int c;
+	register struct iovec *iov;
 	int error = 0;
 	static int physlock;
 
@@ -146,30 +147,26 @@ mmrw(dev, uio, flags)
 			v = uio->uio_offset;
 #ifndef DEBUG
 			/* allow reads only in RAM (except for DEBUG) */
-			if (v >= 0xFFFFFFFC || v < NBPG) {
+			if (v >= 0xFFFFFFFC || v < lowram || v < NBPG) {
 				error = EFAULT;
 				goto unlock;
 			}
 #endif
-			
-			pmap_enter(pmap_kernel(), (vaddr_t)vmmap, 
-				   trunc_page(v), 
-				   uio->uio_rw == UIO_READ ? VM_PROT_READ : VM_PROT_WRITE,
-				   (uio->uio_rw == UIO_READ ? VM_PROT_READ : VM_PROT_WRITE) | PMAP_WIRED); 
-			pmap_update(pmap_kernel());
+			pmap_enter(pmap_kernel(), (vm_offset_t)vmmap,
+			    trunc_page(v), uio->uio_rw == UIO_READ ?
+			    VM_PROT_READ : VM_PROT_WRITE, TRUE);
 			o = uio->uio_offset & PGOFSET;
 			c = min(uio->uio_resid, (int)(NBPG - o));
 			error = uiomove((caddr_t)vmmap + o, c, uio);
-			pmap_remove(pmap_kernel(), (vaddr_t)vmmap,
-			    (vaddr_t)vmmap + NBPG);
-			pmap_update(pmap_kernel());
+			pmap_remove(pmap_kernel(), (vm_offset_t)vmmap,
+			    (vm_offset_t)vmmap + NBPG);
 			continue;
 
 /* minor device 1 is kernel memory */
 		case 1:
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
-			if (!uvm_kernacc((caddr_t)v, c,
+			if (!kernacc((caddr_t)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 				return (EFAULT);
 			if (v < NBPG)
@@ -193,15 +190,21 @@ mmrw(dev, uio, flags)
 			 * On the first call, allocate and zero a page
 			 * of memory for use with /dev/zero.
 			 *
-			 * XXX on the mvme68k we already know where there
+			 * XXX on the hp300 we already know where there
 			 * is a global zeroed page, the null segment table.
 			 */
-			if (devzeropage == NULL) {
+			if (zeropage == NULL) {
+#if CLBYTES == NBPG
 				extern caddr_t Segtabzero;
-				devzeropage = Segtabzero;
+				zeropage = Segtabzero;
+#else
+				zeropage = (caddr_t)
+				    malloc(CLBYTES, M_TEMP, M_WAITOK);
+				bzero(zeropage, CLBYTES);
+#endif
 			}
-			c = min(iov->iov_len, PAGE_SIZE);
-			error = uiomove(devzeropage, c, uio);
+			c = min(iov->iov_len, CLBYTES);
+			error = uiomove(zeropage, c, uio);
 			continue;
 
 		default:
@@ -223,11 +226,10 @@ unlock:
 	return (error);
 }
 
-paddr_t
+int
 mmmmap(dev, off, prot)
 	dev_t dev;
-	off_t off;
-	int prot;
+	int off, prot;
 {
 	/*
 	 * /dev/mem is the only one that makes sense through this
@@ -245,19 +247,8 @@ mmmmap(dev, off, prot)
 	 * XXX could be extended to allow access to IO space but must
 	 * be very careful.
 	 */
-	if ((unsigned)off >= 0xFFFFFFFC || (unsigned)off < NBPG)
+	if ((unsigned)off < lowram || (unsigned)off >= 0xFFFFFFFC ||
+	    (unsigned)off < NBPG)
 		return (-1);
-	return (atop(off));
-}
-
-/*ARGSUSED*/
-int
-mmioctl(dev, cmd, data, flags, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flags;
-	struct proc *p;
-{
-	return (EOPNOTSUPP);
+	return (m68k_btop(off));
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbic.c,v 1.19 2007/05/29 13:56:14 pyr Exp $ */
+/*	$OpenBSD: sbic.c,v 1.4 1996/05/10 12:42:02 deraadt Exp $ */
 /*	$NetBSD: sbic.c,v 1.2 1996/04/23 16:32:54 chuck Exp $	*/
 
 /*
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *  This product includes software developed by the University of
+ *  California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,10 +61,13 @@
 #include <sys/disklabel.h>
 #include <sys/dkstat.h>
 #include <sys/buf.h>
-#include <sys/queue.h>
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
+#include <vm/vm_page.h>
+#include <vm/pmap.h>
+#include <machine/pmap.h>
 #include <mvme68k/dev/dmavar.h>
 #include <mvme68k/dev/sbicreg.h>
 #include <mvme68k/dev/sbicvar.h>
@@ -86,29 +93,30 @@
  */
 #define SBIC_WAIT(regs, until, timeo) sbicwait(regs, until, timeo, __LINE__)
 
-int     sbicicmd(struct sbic_softc *, void *, int, void *, int);
-int     sbicgo(struct sbic_softc *, struct scsi_xfer *);
-int     sbicdmaok(struct sbic_softc *, struct scsi_xfer *);
-int     sbicwait(sbic_regmap_p, u_char, int , int);
-int     sbiccheckdmap(void *, u_long, u_long);
-u_char  sbicselectbus(struct sbic_softc *);
-int     sbicxfout(sbic_regmap_p, int, void *);
-int     sbicxfin(sbic_regmap_p, int, void *);
-int     sbicfromscsiperiod(struct sbic_softc *, int);
-int     sbictoscsiperiod(struct sbic_softc *, int);
-int     sbicintr(struct sbic_softc *);
-int     sbicpoll(struct sbic_softc *);
-int     sbicnextstate(struct sbic_softc *, u_char, u_char);
-int     sbicmsgin(struct sbic_softc *);
-int     sbicabort(struct sbic_softc *, char *);
-void    sbicxfdone(struct sbic_softc *);
-void    sbicerror(struct sbic_softc *,u_char);
-void    sbicreset(struct sbic_softc *);
-void    sbic_scsidone(struct sbic_acb *, int);
-void    sbic_sched(struct sbic_softc *);
-void    sbic_save_ptrs(struct sbic_softc *);
-void    sbic_load_ptrs(struct sbic_softc *);
-void    sbicinit(struct sbic_softc *);
+extern u_int kvtop();
+
+int     sbicicmd            __P((struct sbic_softc *, void *, int, void *, int));
+int     sbicgo              __P((struct sbic_softc *, struct scsi_xfer *));
+int     sbicdmaok           __P((struct sbic_softc *, struct scsi_xfer *));
+int     sbicwait            __P((sbic_regmap_p, u_char, int , int));
+int     sbiccheckdmap       __P((void *, u_long, u_long));
+u_char  sbicselectbus       __P((struct sbic_softc *));
+int     sbicxfout           __P((sbic_regmap_p, int, void *));
+int     sbicxfin            __P((sbic_regmap_p, int, void *));
+int     sbicfromscsiperiod  __P((struct sbic_softc *, int));
+int     sbictoscsiperiod    __P((struct sbic_softc *, int));
+int     sbicintr            __P((struct sbic_softc *));
+int     sbicpoll            __P((struct sbic_softc *));
+int     sbicnextstate       __P((struct sbic_softc *, u_char, u_char));
+int     sbicmsgin           __P((struct sbic_softc *));
+int     sbicabort           __P((struct sbic_softc *, char *));
+void    sbicxfdone          __P((struct sbic_softc *));
+void    sbicerror           __P((struct sbic_softc *,u_char));
+void    sbicreset           __P((struct sbic_softc *));
+void    sbic_scsidone       __P((struct sbic_acb *, int));
+void    sbic_sched          __P((struct sbic_softc *));
+void    sbic_save_ptrs      __P((struct sbic_softc *));
+void    sbic_load_ptrs      __P((struct sbic_softc *));
 
 /*
  * Synch xfer parameters, and timing conversions
@@ -145,7 +153,7 @@ int     reselect_debug  = 0;    /* Debug all reselection related things */
 int     report_sense    = 0;    /* Always print Sense information */
 int     data_pointer_debug = 0; /* Debug Data Pointer related things */
 
-void    sbictimeout(struct sbic_softc *dev);
+void    sbictimeout __P((struct sbic_softc *dev));
 
 #else
 #define QPRINTF(a)  /* */
@@ -309,11 +317,11 @@ sbic_load_ptrs(dev)
          * do kvm to pa mappings
          */
         vaddr = acb->sc_kv.dc_addr;
-        paddr = acb->sc_pa.dc_addr = (char *)kvtop((vaddr_t)vaddr);
+        paddr = acb->sc_pa.dc_addr = (char *) kvtop(vaddr);
 
         for (count = (NBPG - ((int)vaddr & PGOFSET));
              count < acb->sc_kv.dc_count &&
-                (char *)kvtop((vaddr_t)vaddr + count + 4) == paddr + count + 4;
+                     (char*)kvtop(vaddr + count + 4) == paddr + count + 4;
              count += NBPG)
             ;   /* Do nothing */
 
@@ -375,7 +383,7 @@ sbic_scsicmd(xs)
 
     s = splbio();
 
-    if ( (acb = TAILQ_FIRST(&dev->free_list)) != NULL )
+    if ( (acb = dev->free_list.tqh_first) != NULL )
         TAILQ_REMOVE(&dev->free_list, acb, chain);
 
     splx(s);
@@ -388,6 +396,8 @@ sbic_scsicmd(xs)
         Debugger();
 #endif
 #endif
+        xs->error = XS_DRIVER_STUFFUP;
+
         return(TRY_AGAIN_LATER);
     }
 
@@ -400,7 +410,7 @@ sbic_scsicmd(xs)
     acb->clen           = xs->cmdlen;
     acb->sc_kv.dc_addr  = xs->data;
     acb->sc_kv.dc_count = xs->datalen;
-    acb->pa_addr        = xs->data ? (char *)kvtop((vaddr_t)xs->data) : 0;
+    acb->pa_addr        = xs->data ? (char *)kvtop(xs->data) : 0;
     bcopy(xs->cmd, &acb->cmd, xs->cmdlen);
 
     if ( flags & SCSI_POLL ) {
@@ -481,7 +491,7 @@ sbic_sched(dev)
     /*
      * Loop through the ready list looking for work to do...
      */
-    TAILQ_FOREACH(acb, &dev->ready_list, chain) {
+    for (acb = dev->ready_list.tqh_first; acb; acb = acb->chain.tqe_next) {
         int     i, j;
 
         slp = acb->xs->sc_link;
@@ -556,6 +566,10 @@ sbic_scsidone(acb, stat)
     }
 #endif
 
+    if ( slp->device_softc &&
+        ((struct device *)(slp->device_softc))->dv_unit < dk_ndrive)
+        ++dk_xfer[((struct device *)(slp->device_softc))->dv_unit];
+
     /*
      * is this right?
      */
@@ -593,7 +607,7 @@ sbic_scsidone(acb, stat)
             acb->clen           = sizeof(*ss);
             acb->sc_kv.dc_addr  = (char *)&xs->sense;
             acb->sc_kv.dc_count = sizeof(struct scsi_sense_data);
-            acb->pa_addr        = (char *)kvtop((vaddr_t)&xs->sense); /* XXX check */
+            acb->pa_addr        = (char *)kvtop(&xs->sense); /* XXX check */
             acb->flags          = ACB_ACTIVE | ACB_CHKSENSE | ACB_DATAIN;
 
             TAILQ_INSERT_HEAD(&dev->ready_list, acb, chain);
@@ -640,11 +654,11 @@ sbic_scsidone(acb, stat)
 
         dev->sc_tinfo[slp->target].lubusy &= ~(1 << slp->lun);
 
-        if ( !TAILQ_EMPTY(&dev->ready_list) )
+        if ( dev->ready_list.tqh_first )
             dosched = 1;    /* start next command */
 
     } else
-    if (TAILQ_LAST(&dev->ready_list, acb_list) == TAILQ_NEXT(acb, chain)) {
+    if ( dev->ready_list.tqh_last == &acb->chain.tqe_next ) {
 
         TAILQ_REMOVE(&dev->ready_list, acb, chain);
 
@@ -652,7 +666,7 @@ sbic_scsidone(acb, stat)
 
         register struct sbic_acb *a;
 
-	TAILQ_FOREACH(a, &dev->nexus_list, chain) {
+        for (a = dev->nexus_list.tqh_first; a; a = a->chain.tqe_next) {
             if ( a == acb ) {
                 TAILQ_REMOVE(&dev->nexus_list, acb, chain);
                 dev->sc_tinfo[slp->target].lubusy &= ~(1 << slp->lun);
@@ -662,7 +676,7 @@ sbic_scsidone(acb, stat)
 
         if ( a )
             ;
-        else if ( TAILQ_NEXT(acb, chain) != NULL) {
+        else if ( acb->chain.tqe_next ) {
             TAILQ_REMOVE(&dev->ready_list, acb, chain);
         } else {
             printf("%s: can't find matching acb\n", dev->sc_dev.dv_xname);
@@ -1004,7 +1018,7 @@ sbicselectbus(dev)
     SET_SBIC_cmd(regs, SBIC_CMD_SEL_ATN);
 
     /*
-     * wait for select (merged from separate function may need
+     * wait for select (merged from seperate function may need
      * cleanup)
      */
     WAIT_CIP(regs);
@@ -1074,7 +1088,7 @@ sbicselectbus(dev)
      * XXXSCW This is probably not necessary since we don't use use the
      * Select-and-Xfer-with-ATN command to initiate a selection...
      */
-    if ( !sbic_enable_reselect && TAILQ_EMPTY(&dev->nexus_list))
+    if ( !sbic_enable_reselect && dev->nexus_list.tqh_first == NULL)
         SET_SBIC_rselid (regs, 0);
     else
         SET_SBIC_rselid (regs, SBIC_RID_ER);
@@ -1083,7 +1097,7 @@ sbicselectbus(dev)
      * We only really need to do anything when the target goes to MSG out
      * If the device ignored ATN, it's probably old and brain-dead,
      * but we'll try to support it anyhow.
-     * If it doesn't support message out, it definitely doesn't
+     * If it doesn't support message out, it definately doesn't
      * support synchronous transfers, so no point in even asking...
      */
     if ( csr == (SBIC_CSR_MIS_2 | MESG_OUT_PHASE) ) {
@@ -1603,9 +1617,9 @@ sbicgo(dev, xs)
     addr  = acb->sc_kv.dc_addr;
     count = acb->sc_kv.dc_count;
 
-    if ( count && ((char *)kvtop((vaddr_t)addr) != acb->sc_pa.dc_addr) ) {
-        printf("sbic: DMA buffer mapping changed %p->%lx\n",
-                acb->sc_pa.dc_addr, kvtop((vaddr_t)addr));
+    if ( count && ((char *)kvtop(addr) != acb->sc_pa.dc_addr) ) {
+        printf("sbic: DMA buffer mapping changed %x->%x\n",
+                acb->sc_pa.dc_addr, kvtop(addr));
 #ifdef DDB
         Debugger();
 #endif
@@ -1747,7 +1761,7 @@ sbicpoll(dev)
 {
     sbic_regmap_p       regs = dev->sc_sbicp;
     u_char              asr,
-                        csr = 0;
+                        csr;
     int                 i;
 
     /*
@@ -2426,9 +2440,9 @@ sbicnextstate(dev, csr, asr)
                      */
                     GET_SBIC_csr(regs,csr);
 
-                    if (csr == (SBIC_CSR_MIS   | MESG_IN_PHASE) ||
-                        csr == (SBIC_CSR_MIS_1 | MESG_IN_PHASE) ||
-                        csr == (SBIC_CSR_MIS_2 | MESG_IN_PHASE)) {
+                    if ( csr == SBIC_CSR_MIS   | MESG_IN_PHASE ||
+                         csr == SBIC_CSR_MIS_1 | MESG_IN_PHASE ||
+                         csr == SBIC_CSR_MIS_2 | MESG_IN_PHASE ) {
                         /*
                          * Yup, gone to message in. Fetch the target LUN
                          */
@@ -2491,7 +2505,8 @@ sbicnextstate(dev, csr, asr)
              * Loop through the nexus list until we find the saved entry
              * for the reselecting target...
              */
-	    TAILQ_FOREACH(acb, &dev->nexus_list, chain) {
+            for (acb = dev->nexus_list.tqh_first; acb;
+                                                  acb = acb->chain.tqe_next) {
 
                 if ( acb->xs->sc_link->target == newtarget &&
                      acb->xs->sc_link->lun    == newlun) {
@@ -2511,10 +2526,10 @@ sbicnextstate(dev, csr, asr)
             }
 
             if ( acb == NULL ) {
-                printf("%s: reselect %s targ %d not in nexus_list %p\n",
+                printf("%s: reselect %s targ %d not in nexus_list %x\n",
                         dev->sc_dev.dv_xname,
                         csr == SBIC_CSR_RSLT_NI ? "NI" : "IFY", newtarget,
-                        &TAILQ_FIRST(&dev->nexus_list));
+                        &dev->nexus_list.tqh_first);
                 panic("bad reselect in sbic");
             }
 
@@ -2589,7 +2604,7 @@ sbiccheckdmap(bp, len, mask)
 
     while ( len ) {
 
-        phy_buf = kvtop((vaddr_t)buffer);
+        phy_buf = kvtop(buffer);
         phy_len = NBPG - ((int) buffer & PGOFSET);
 
         if ( len < phy_len )
@@ -2615,7 +2630,7 @@ sbictoscsiperiod(dev, a)
     /*
      * cycle = DIV / (2 * CLK)
      * DIV = FS + 2
-     * best we can do is 200ns at 20MHz, 2 cycles
+     * best we can do is 200ns at 20Mhz, 2 cycles
      */
 
     GET_SBIC_myid(dev->sc_sbicp, fs);

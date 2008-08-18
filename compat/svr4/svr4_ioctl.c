@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_ioctl.c,v 1.12 2002/11/06 09:57:18 niklas Exp $	 */
+/*	$OpenBSD: svr4_ioctl.c,v 1.6 1996/08/01 00:50:52 niklas Exp $	 */
 /*	$NetBSD: svr4_ioctl.c,v 1.16 1996/04/11 12:54:41 christos Exp $	 */
 
 /*
@@ -37,6 +37,7 @@
 #include <sys/termios.h>
 #include <sys/tty.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <net/if.h>
 #include <sys/malloc.h>
@@ -49,14 +50,13 @@
 #include <compat/svr4/svr4_syscallargs.h>
 #include <compat/svr4/svr4_stropts.h>
 #include <compat/svr4/svr4_ioctl.h>
-#include <compat/svr4/svr4_jioctl.h>
 #include <compat/svr4/svr4_termios.h>
 #include <compat/svr4/svr4_ttold.h>
 #include <compat/svr4/svr4_filio.h>
 #include <compat/svr4/svr4_sockio.h>
 
 #ifdef DEBUG_SVR4
-static void svr4_decode_cmd(u_long, char *, char *, int *, int *);
+static void svr4_decode_cmd __P((u_long, char *, char *, int *, int *));
 /*
  * Decode an ioctl command symbolically
  */
@@ -93,9 +93,8 @@ svr4_sys_ioctl(p, v, retval)
 	struct file	*fp;
 	struct filedesc	*fdp;
 	u_long		 cmd;
-	int (*fun)(struct file *, struct proc *, register_t *,
-			int, u_long, caddr_t);
-	int error = 0;
+	int (*fun) __P((struct file *, struct proc *, register_t *,
+			int, u_long, caddr_t));
 #ifdef DEBUG_SVR4
 	char		 dir[4];
 	char		 c;
@@ -110,7 +109,8 @@ svr4_sys_ioctl(p, v, retval)
 	fdp = p->p_fd;
 	cmd = SCARG(uap, com);
 
-	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
+	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
+	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
 		return EBADF;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
@@ -137,23 +137,13 @@ svr4_sys_ioctl(p, v, retval)
 		fun = svr4_sock_ioctl;
 		break;
 
-	case SVR4_jIOC:
-		fun = svr4_jerq_ioctl;
-		break;
-
 	case SVR4_XIOC:
 		/* We do not support those */
-		error = EINVAL;
-		goto out;
+		return EINVAL;
 
 	default:
 		DPRINTF(("Unimplemented ioctl %lx\n", cmd));
-		error = 0;	/* XXX: really ENOSYS */
-		goto out;
+		return 0;	/* XXX: really ENOSYS */
 	}
-	FREF(fp);
-	error = (*fun)(fp, p, retval, SCARG(uap, fd), cmd, SCARG(uap, data));
-	FRELE(fp);
-out:
-	return (error);
+	return (*fun)(fp, p, retval, SCARG(uap, fd), cmd, SCARG(uap, data));
 }

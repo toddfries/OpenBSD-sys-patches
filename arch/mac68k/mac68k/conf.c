@@ -1,5 +1,5 @@
-/*	$OpenBSD: conf.c,v 1.41 2008/05/14 20:49:48 miod Exp $	*/
-/*	$NetBSD: conf.c,v 1.41 1997/02/11 07:35:49 scottr Exp $	*/
+/*	$OpenBSD: conf.c,v 1.10 1996/08/29 09:26:14 deraadt Exp $	*/
+/*	$NetBSD: conf.c,v 1.34 1996/06/19 02:20:54 briggs Exp $	*/
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,13 +47,24 @@
 #include <sys/vnode.h>
 #include <dev/cons.h>
 
+int	ttselect	__P((dev_t, int, struct proc *));
+
+bdev_decl(sw);
 #include "st.h"
+bdev_decl(st);
 #include "sd.h"
+bdev_decl(sd);
 #include "cd.h"
+bdev_decl(cd);
 #include "ch.h"
+bdev_decl(ch);
 #include "vnd.h"
+bdev_decl(vnd);
 #include "ccd.h"
+bdev_decl(ccd);
 #include "rd.h"
+bdev_decl(rd);
+/* No cdev for rd */
 
 struct bdevsw	bdevsw[] =
 {
@@ -76,35 +91,67 @@ struct bdevsw	bdevsw[] =
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
+/* open, close, ioctl, select, mmap -- XXX should be a map device */
+#define	cdev_grf_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) nullop, \
+	(dev_type_write((*))) nullop, dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) enodev, 0, dev_init(c,n,select), \
+	dev_init(c,n,mmap) }
+
+cdev_decl(cn);
+cdev_decl(ctty);
+
+#include "ite.h"
+cdev_decl(ite);
 #define mmread	mmrw
 #define mmwrite	mmrw
 cdev_decl(mm);
-#include "bio.h"
+cdev_decl(sw);
 #include "pty.h"
-#include "ss.h"
-#include "uk.h"
+#define	ptstty		ptytty
+#define	ptsioctl	ptyioctl
+cdev_decl(pts);
+#define	ptctty		ptytty
+#define	ptcioctl	ptyioctl
+cdev_decl(ptc);
+cdev_decl(log);
+cdev_decl(st);
+cdev_decl(sd);
+cdev_decl(cd);
 cdev_decl(fd);
+#include "grf.h"
+cdev_decl(grf);
+#define NADB 1 /* #include "adb.h" */
+cdev_decl(adb);
 #include "zsc.h"
 cdev_decl(zsc);
 #include "zstty.h"
 cdev_decl(zs);
+cdev_decl(vnd);
+cdev_decl(ccd);
 #include "bpfilter.h"
+cdev_decl(bpf);
 #include "tun.h"
-#include "asc.h"
-cdev_decl(asc);
-#include "ksyms.h"
-#ifdef XFS
-#include <xfs/nxfs.h>
-cdev_decl(xfs_dev);
+cdev_decl(tun);
+dev_decl(filedesc,open);
+#include "random.h"
+cdev_decl(random);
+
+#ifdef LKM
+#define NLKM	1
+#else
+#define NLKM	0
 #endif
-#include "wsdisplay.h"
-#include "wskbd.h"
-#include "wsmouse.h"
-#include "wsmux.h"
 
-#include "pf.h"
+cdev_decl(lkm);
 
-#include "systrace.h"
+/* open, close, read, ioctl */
+cdev_decl(ipl);
+#ifdef IPFILTER
+#define NIPF 1
+#else
+#define NIPF 0
+#endif
 
 struct cdevsw	cdevsw[] =
 {
@@ -118,21 +165,22 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 7 */
 	cdev_notdef(),			/* 8 */
 	cdev_notdef(),			/* 9 */
-	cdev_notdef(),			/* 10 was GRF */
-	cdev_notdef(),			/* 11 was ITE */
+	cdev_grf_init(1,grf),		/* 10: frame buffer */
+	cdev_tty_init(NITE,ite),	/* 11: console terminal emulator */
 	cdev_tty_init(NZSTTY,zs),	/* 12: 2 mac serial ports -- BG*/
 	cdev_disk_init(NSD,sd),		/* 13: SCSI disk */
 	cdev_tape_init(NST,st),		/* 14: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 15: SCSI CD-ROM */
 	cdev_notdef(),			/* 16 */
-	cdev_ch_init(NCH,ch),		/* 17: SCSI autochanger */
-        cdev_disk_init(NRD,rd),         /* 18: ramdisk device */
+/*	cdev_disk_init(NCH,ch),		 17: SCSI autochanger */
+	cdev_notdef(),			/* 17: until we find chstrategy... */
+	cdev_notdef(),			/* 18 */
 	cdev_disk_init(NVND,vnd),	/* 19: vnode disk driver */
 	cdev_disk_init(NCCD,ccd),	/* 20: concatenated disk driver */
 	cdev_fd_init(1,filedesc),	/* 21: file descriptor pseudo-device */
-	cdev_bpf_init(NBPFILTER,bpf),	/* 22: Berkeley packet filter */
-	cdev_notdef(),			/* 23 was ADB */
-	cdev_tun_init(NTUN,tun),	/* 24: network tunnel */
+	cdev_bpftun_init(NBPFILTER,bpf),/* 22: Berkeley packet filter */
+	cdev_mouse_init(NADB,adb),	/* 23: ADB event interface */
+	cdev_bpftun_init(NTUN,tun),	/* 24: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 25: loadable module driver */
 	cdev_lkm_dummy(),		/* 26 */
 	cdev_lkm_dummy(),		/* 27 */
@@ -140,31 +188,8 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 29 */
 	cdev_lkm_dummy(),		/* 30 */
 	cdev_lkm_dummy(),		/* 31 */
-	cdev_random_init(1,random),	/* 32: random data source */
-	cdev_ss_init(NSS,ss),           /* 33: SCSI scanner */
-	cdev_uk_init(NUK,uk),		/* 34: SCSI unknown */
-	cdev_pf_init(NPF,pf),		/* 35: packet filter */
-	cdev_audio_init(NASC,asc),      /* 36: ASC audio device */
-	cdev_ksyms_init(NKSYMS,ksyms),	/* 37: Kernel symbols device */
-	cdev_wsdisplay_init(NWSDISPLAY, wsdisplay), /* 38: displays */
-	cdev_mouse_init(NWSKBD, wskbd),	/* 39: keyboards */
-	cdev_mouse_init(NWSMOUSE, wsmouse), /* 40: mice */
-	cdev_mouse_init(NWSMUX, wsmux),	/* 41: ws multiplexor */
-	cdev_notdef(),			/* 42 */
-	cdev_notdef(),			/* 43 */
-	cdev_notdef(),			/* 44 */
-	cdev_notdef(),			/* 45 */
-	cdev_notdef(),			/* 46 */
-	cdev_notdef(),			/* 47 */
-	cdev_notdef(),			/* 48 */
-	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
-	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
-#else
-	cdev_notdef(),			/* 51 */
-#endif
-	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
+	cdev_gen_ipf(NIPF,ipl),         /* 32: IP filter log */
+	cdev_random_init(NRANDOM,random), /* 33: random data source */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -203,19 +228,13 @@ iszerodev(dev)
 	return (major(dev) == mem_no && minor(dev) == 12);
 }
 
-dev_t
-getnulldev()
-{
-	return makedev(mem_no, 2);
-}
-
-int chrtoblktbl[] = {
+static int chrtoblktab[] = {
 	/* XXXX This needs to be dynamic for LKMs. */
 	/*VCHR*/	/*VBLK*/
 	/*  0 */	NODEV,
 	/*  1 */	NODEV,
 	/*  2 */	NODEV,
-	/*  3 */	NODEV,
+	/*  3 */	3,
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
@@ -225,24 +244,49 @@ int chrtoblktbl[] = {
 	/* 10 */	NODEV,
 	/* 11 */	NODEV,
 	/* 12 */	NODEV,
-	/* 13 */	4,		/* sd */
-	/* 14 */	5,		/* st */
-	/* 15 */	6,		/* cd */
+	/* 13 */	4,
+	/* 14 */	5,
+	/* 15 */	6,
 	/* 16 */	NODEV,
 	/* 17 */	NODEV,
-	/* 18 */	13,		/* rd */
-	/* 19 */	8,		/* vnd */
-	/* 20 */	9,		/* ccd */
+	/* 18 */	NODEV,
+	/* 19 */	8,
+	/* 20 */	9,
+	/* 21 */	NODEV,
+	/* 22 */	NODEV,
+	/* 23 */	NODEV,
+	/* 24 */	NODEV,
+	/* 25 */	NODEV,
+	/* 26 */	NODEV,
+	/* 27 */	NODEV,
+	/* 28 */	NODEV,
+	/* 29 */	NODEV,
+	/* 30 */	NODEV,
+	/* 31 */	NODEV,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
 
-cons_decl(ws);
+dev_t
+chrtoblk(dev)
+	dev_t	dev;
+{
+	int	blkmaj;
+
+	if (major(dev) >= nchrdev)
+		return NODEV;
+	blkmaj = chrtoblktab[major(dev)];
+	if (blkmaj == NODEV)
+		return NODEV;
+	return (makedev(blkmaj, minor(dev)));
+}
+
+#define itecnpollc	nullcnpollc
+cons_decl(ite);
 #define zscnpollc	nullcnpollc
 cons_decl(zs);
 
 struct	consdev constab[] = {
-#if NWSDISPLAY > 0
-	cons_init(ws),
+#if NITE > 0
+	cons_init(ite),
 #endif
 #if NZSTTY > 0
 	cons_init(zs),

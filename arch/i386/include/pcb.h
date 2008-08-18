@@ -1,4 +1,3 @@
-/*	$OpenBSD: pcb.h,v 1.14 2007/10/03 07:51:26 kettenis Exp $	*/
 /*	$NetBSD: pcb.h,v 1.21 1996/01/08 13:51:42 mycroft Exp $	*/
 
 /*-
@@ -17,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,28 +60,25 @@ struct pcb {
 #define	pcb_cr3	pcb_tss.tss_cr3
 #define	pcb_esp	pcb_tss.tss_esp
 #define	pcb_ebp	pcb_tss.tss_ebp
-#define	pcb_cs	pcb_tss.tss_cs
+#define	pcb_fs	pcb_tss.tss_fs
+#define	pcb_gs	pcb_tss.tss_gs
 #define	pcb_ldt_sel	pcb_tss.tss_ldt
 	int	pcb_tss_sel;
-	union	descriptor *pcb_ldt;	/* per process (user) LDT */
-	int	pcb_ldt_len;		/*      number of LDT entries */
+        union	descriptor *pcb_ldt;	/* per process (user) LDT */
+        int	pcb_ldt_len;		/*      number of LDT entries */
 	int	pcb_cr0;		/* saved image of CR0 */
-	int	pcb_pad[2];		/* savefpu on 16-byte boundary */
-	union	savefpu pcb_savefpu;	/* floating point state for FPU */
+	union	fsave87 pcb_savefpu;	/* floating point state for 287/387 */
 	struct	emcsts pcb_saveemc;	/* Cyrix EMC state */
 /*
  * Software pcb (extension)
  */
+	int	pcb_flags;
+#define	PCB_USER_LDT	0x01		/* has user-set LDT */
 	caddr_t	pcb_onfault;		/* copyin/out fault recovery */
 	int	vm86_eflags;		/* virtual eflags for vm86 mode */
 	int	vm86_flagmask;		/* flag mask for vm86 mode */
 	void	*vm86_userp;		/* XXX performance hack */
-	struct  pmap *pcb_pmap;         /* back pointer to our pmap */
-	struct	cpu_info *pcb_fpcpu;	/* cpu holding our fpu state */
 	u_long	pcb_iomap[NIOPORTS/32];	/* I/O bitmap */
-	u_char	pcb_iomap_pad;	/* required; must be 0xff, says intel */
-	int	pcb_flags;
-#define PCB_SAVECTX	0x00000001
 };
 
 /*    
@@ -88,5 +88,9 @@ struct pcb {
 struct md_coredump {
 	long	md_pad[8];
 };    
+
+#ifdef _KERNEL
+struct pcb *curpcb;		/* our current running pcb */
+#endif
 
 #endif /* _I386_PCB_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrace.h,v 1.9 2006/05/17 02:11:25 tedu Exp $	*/
+/*	$OpenBSD: ktrace.h,v 1.2 1996/03/03 12:11:54 niklas Exp $	*/
 /*	$NetBSD: ktrace.h,v 1.12 1996/02/04 02:12:29 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,10 +52,10 @@
  * ktrace record header
  */
 struct ktr_header {
-	size_t	ktr_len;		/* length of buf */
+	int	ktr_len;		/* length of buf */
+	short	ktr_type;		/* trace record type */
 	pid_t	ktr_pid;		/* process id */
 	char	ktr_comm[MAXCOMLEN+1];	/* command name */
-	short	ktr_type;		/* trace record type */
 	struct	timeval ktr_time;	/* timestamp */
 	caddr_t	ktr_buf;
 };
@@ -116,7 +120,6 @@ struct ktr_psig {
 	sig_t	action;
 	int	mask;
 	int	code;
-	siginfo_t si;
 };
 
 /*
@@ -133,7 +136,6 @@ struct ktr_csw {
  */
 #define KTR_EMUL	7
 	/* record contains emulation name */
-
 
 /*
  * kernel trace points (in p_traceflag)
@@ -158,19 +160,17 @@ struct ktr_csw {
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int	ktrace(const char *, int, int, pid_t);
+int	ktrace __P((const char *, int, int, pid_t));
 __END_DECLS
 
 #else
 
-void ktrcsw(struct proc *, int, int);
-void ktremul(struct proc *, char *);
-void ktrgenio(struct proc *, int, enum uio_rw, struct iovec *, int, int);
-void ktrnamei(struct proc *, char *);
-void ktrpsig(struct proc *, int, sig_t, int, int, siginfo_t *);
-void ktrsyscall(struct proc *, register_t, size_t, register_t []);
-void ktrsysret(struct proc *, register_t, int, register_t);
-
-void ktrsettracevnode(struct proc *, struct vnode *);
+void ktrcsw __P((struct vnode *, int, int));
+void ktremul __P((struct vnode *, char *));
+void ktrgenio __P((struct vnode *, int, enum uio_rw, struct iovec *, int, int));
+void ktrnamei __P((struct vnode *, char *));
+void ktrpsig __P((struct vnode *, int, sig_t, int, int));
+void ktrsyscall __P((struct vnode *, register_t, size_t, register_t []));
+void ktrsysret __P((struct vnode *, register_t, int, register_t));
 
 #endif	/* !_KERNEL */

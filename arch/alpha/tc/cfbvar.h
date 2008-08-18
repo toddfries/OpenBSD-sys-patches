@@ -1,4 +1,4 @@
-/*	$OpenBSD: cfbvar.h,v 1.7 2005/12/17 07:31:25 miod Exp $	*/
+/*	$OpenBSD: cfbvar.h,v 1.2 1996/07/29 23:01:58 niklas Exp $	*/
 /*	$NetBSD: cfbvar.h,v 1.1 1996/05/01 23:25:04 cgd Exp $	*/
 
 /*
@@ -30,7 +30,8 @@
 
 #include <machine/cfbreg.h>
 #include <dev/rcons/raster.h>
-#include <dev/wscons/wscons_raster.h>
+#include <alpha/wscons/wsconsvar.h>
+#include <alpha/wscons/wscons_raster.h>
 
 struct cfb_devconfig;
 struct fbcmap;
@@ -38,16 +39,16 @@ struct fbcursor;
 struct fbcurpos;
 
 struct cfb_devconfig {
-	vaddr_t dc_vaddr;		/* memory space virtual base address */
-	paddr_t dc_paddr;		/* memory space physical base address */
-	vsize_t dc_size;		/* size of slot memory */
+	vm_offset_t dc_vaddr;		/* memory space virtual base address */
+	vm_offset_t dc_paddr;		/* memory space physical base address */
+	vm_offset_t dc_size;		/* size of slot memory */
 
 	int	    dc_wid;		/* width of frame buffer */
 	int	    dc_ht;		/* height of frame buffer */
 	int	    dc_depth;		/* depth, bits per pixel */
 	int	    dc_rowbytes;	/* bytes in a FB scan line */
 
-	vaddr_t	dc_videobase;		/* base of flat frame buffer */
+	vm_offset_t dc_videobase;	/* base of flat frame buffer */
 
 	struct raster	dc_raster;	/* raster description */
 	struct rcons	dc_rcons;	/* raster blitter control info */
@@ -59,10 +60,4 @@ struct cfb_softc {
 	struct device sc_dev;
 
 	struct cfb_devconfig *sc_dc;	/* device configuration */
-	
-	int nscreens;
 };
-
-#if 0
-int cfb_cnattach(tc_addr_t);
-#endif

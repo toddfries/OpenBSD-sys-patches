@@ -1,4 +1,4 @@
-/*	$OpenBSD: htons.S,v 1.4 2007/11/25 18:25:35 deraadt Exp $	*/
+/*	$OpenBSD: htons.S,v 1.2 1996/09/27 06:47:46 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -15,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,10 +40,8 @@
 
 #include <machine/asm.h>
 
-/* netorder = htons(hostorder) AND hostorder = ntohs(netorder) */
+/* netorder = htons(hostorder) */
 ENTRY(htons)
-ENTRY(ntohs)
-ENTRY(swap16)
 	movzwl	4(%esp),%eax
 	rorw	$8,%ax
 	ret

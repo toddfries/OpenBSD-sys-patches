@@ -1,5 +1,5 @@
-/*	$OpenBSD: sunos_machdep.c,v 1.19 2007/11/02 19:18:54 martin Exp $	*/
-/*	$NetBSD: sunos_machdep.c,v 1.12 1996/10/13 03:19:22 christos Exp $	*/
+/*	$OpenBSD: sunos_machdep.c,v 1.7 1996/08/04 01:15:16 niklas Exp $	*/
+/*	$NetBSD: sunos_machdep.c,v 1.10 1996/05/05 16:11:31 veego Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -91,12 +95,10 @@ struct sunos_sigframe {
  * SIG_DFL for "dangerous" signals.
  */
 void
-sunos_sendsig(catcher, sig, mask, code, type, val)
+sunos_sendsig(catcher, sig, mask, code)
 	sig_t catcher;
 	int sig, mask;
 	u_long code;
-	int type;
-	union sigval val;
 {
 	register struct proc *p = curproc;
 	register struct sunos_sigframe *fp;
@@ -116,8 +118,12 @@ sunos_sendsig(catcher, sig, mask, code, type, val)
 	 * have the process die unconditionally. 
 	 */
 	if (ft >= FMT9) {
-		sigexit(p, sig);
-		/* NOTREACHED */
+		SIGACTION(p, sig) = SIG_DFL;
+		p->p_sigignore &= ~sig;
+		p->p_sigcatch &= ~sig;
+		p->p_sigmask &= ~sig;
+		psignal(p, sig);
+		return;
 	}
 
 	/*
@@ -135,20 +141,38 @@ sunos_sendsig(catcher, sig, mask, code, type, val)
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		fp = (struct sunos_sigframe *)frame->f_regs[SP] - 1;
-	if ((vaddr_t)fp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize)) 
-		(void)uvm_grow(p, (unsigned)fp);
+	if ((vm_offset_t)fp <= USRSTACK - ctob(p->p_vmspace->vm_ssize)) 
+		(void)grow(p, (unsigned)fp);
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
 		printf("sunos_sendsig(%d): sig %d ssp %p usp %p scp %p ft %d\n",
 		       p->p_pid, sig, &oonstack, fp, &fp->sf_sc, ft);
 #endif
+	if (useracc((caddr_t)fp, fsize, B_WRITE) == 0) {
+#ifdef DEBUG
+		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
+			printf("sunos_sendsig(%d): useracc failed on sig %d\n",
+			       p->p_pid, sig);
+#endif
+		/*
+		 * Process has trashed its stack; give it an illegal
+		 * instruction to halt it in its tracks.
+		 */
+		SIGACTION(p, SIGILL) = SIG_DFL;
+		sig = sigmask(SIGILL);
+		p->p_sigignore &= ~sig;
+		p->p_sigcatch &= ~sig;
+		p->p_sigmask &= ~sig;
+		psignal(p, SIGILL);
+		return;
+	}
 	/* 
 	 * Build the argument list for the signal handler.
 	 */
 	kfp.sf_signum = sig;
 	kfp.sf_code = code;
 	kfp.sf_scp = &fp->sf_sc;
-	kfp.sf_addr = (u_int)val.sival_ptr;
+	kfp.sf_addr = ~0;		/* means: not computable */
 
 	/*
 	 * Build the signal context to be used by sigreturn.
@@ -160,17 +184,12 @@ sunos_sendsig(catcher, sig, mask, code, type, val)
 	kfp.sf_sc.sc_ps = frame->f_sr;
 
 	if (copyout(&kfp, fp, fsize) != 0) {
-#ifdef DEBUG
-		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-			printf("sunos_sendsig(%d): copyout failed on sig %d\n",
-			       p->p_pid, sig);
-#endif
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
 		 */
 		sigexit(p, SIGILL);
-		/* NOTREACHED */
+		/* NOTREACHED */ 
 	}
 
 	frame->f_regs[SP] = (int)fp;
@@ -198,7 +217,7 @@ sunos_sendsig(catcher, sig, mask, code, type, val)
  * Return to previous pc and psl as specified by
  * context left by sendsig. Check carefully to
  * make sure that the user has not modified the
- * psl to gain improper privileges or to cause
+ * psl to gain improper priviledges or to cause
  * a machine fault.
  */
 int
@@ -223,11 +242,11 @@ sunos_sys_sigreturn(p, v, retval)
 	 * Test and fetch the context structure.
 	 * We grab it all at once for speed.
 	 */
-	if (copyin((caddr_t)scp, (caddr_t)&tsigc, sizeof(tsigc)))
+	if (useracc((caddr_t)scp, sizeof(*scp), B_WRITE) == 0 ||
+	    copyin((caddr_t)scp, (caddr_t)&tsigc, sizeof(tsigc)))
 		return (EINVAL);
 	scp = &tsigc;
-	if ((scp->sc_ps & PSL_USERCLR) != 0 ||
-	    (scp->sc_ps & PSL_USERSET) != PSL_USERSET)
+	if ((scp->sc_ps & (PSL_MBZ|PSL_IPL|PSL_S)) != 0)
 		return (EINVAL);
 	/*
 	 * Restore the user supplied information

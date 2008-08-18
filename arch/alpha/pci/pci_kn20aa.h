@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_kn20aa.h,v 1.6 2004/06/28 02:28:43 aaron Exp $	*/
+/*	$OpenBSD: pci_kn20aa.h,v 1.3 1996/07/29 23:00:42 niklas Exp $	*/
 /*	$NetBSD: pci_kn20aa.h,v 1.2 1996/04/13 00:24:35 cgd Exp $	*/
 
 /*
@@ -28,4 +28,8 @@
  * rights to redistribute these changes.
  */
 
-void	pci_kn20aa_pickintr(struct cia_config *);
+void	pci_kn20aa_pickintr __P((struct cia_config *));
+
+#ifdef EVCNT_COUNTERS
+extern struct evcnt kn20aa_intr_evcnt;
+#endif

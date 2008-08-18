@@ -1,5 +1,5 @@
-/*	$OpenBSD: nfs.h,v 1.7 2003/06/02 23:28:09 millert Exp $	*/
-/*	$NetBSD: nfs.h,v 1.5 1996/07/10 18:32:33 cgd Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.2 1996/09/23 14:19:00 mickey Exp $	*/
+/*	$NetBSD: nfs.h,v 1.4 1995/09/18 21:19:39 pk Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,13 +34,13 @@
  * SUCH DAMAGE.
  */
 
-int	nfs_open(char *path, struct open_file *f);
-int	nfs_close(struct open_file *f);
-int	nfs_read(struct open_file *f, void *buf,
-			size_t size, size_t *resid);
-int	nfs_write(struct open_file *f, void *buf,
-			size_t size, size_t *resid);
-off_t	nfs_seek(struct open_file *f, off_t offset, int where);
-int	nfs_stat(struct open_file *f, struct stat *sb);
-int	nfs_mount(int, struct in_addr, char *);
-int	nfs_readdir(struct open_file *f, char *name);
+int	nfs_open __P((char *path, struct open_file *f));
+int	nfs_close __P((struct open_file *f));
+ssize_t	nfs_read __P((struct open_file *f, void *buf,
+			size_t size, size_t *resid));
+ssize_t	nfs_write __P((struct open_file *f, void *buf,
+			size_t size, size_t *resid));
+off_t	nfs_seek __P((struct open_file *f, off_t offset, int where));
+int	nfs_stat __P((struct open_file *f, struct stat *sb));
+int	nfs_mount __P((int, struct in_addr, char *));
+

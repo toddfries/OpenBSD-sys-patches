@@ -1,5 +1,5 @@
-/*	$OpenBSD: frame.h,v 1.8 2003/11/16 20:30:06 avsm Exp $	*/
-/*	$NetBSD: frame.h,v 1.15 1997/05/03 12:49:05 mycroft Exp $	*/
+/*	$OpenBSD: frame.h,v 1.3 1996/05/29 11:31:24 niklas Exp $	*/
+/*	$NetBSD: frame.h,v 1.12 1996/05/16 16:51:30 is Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,9 +43,6 @@
  *	@(#)frame.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef	_M68K_FRAME_H_
-#define	_M68K_FRAME_H_
-
 struct frame {
 	struct trapframe {
 		int	tf_regs[16];
@@ -51,7 +52,7 @@ struct frame {
 		u_int	tf_pc;
 		u_short	tf_format:4,
 			tf_vector:12;
-	} __packed F_t;
+	} F_t;
 	union F_u {
 		struct fmt2 {
 			u_int	f_iaddr;
@@ -305,5 +306,3 @@ struct fpframe060 {
 
 	u_long	fpf6_upper, fpf6_lower;
 };
-
-#endif	/* _M68K_FRAME_H_ */

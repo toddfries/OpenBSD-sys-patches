@@ -1,8 +1,8 @@
-/*	$OpenBSD: promcons.c,v 1.9 2005/11/21 18:16:36 millert Exp $	*/
-/*	$NetBSD: promcons.c,v 1.5 1996/11/13 22:20:55 cgd Exp $	*/
+/*	$OpenBSD: promcons.c,v 1.3 1996/07/29 22:58:00 niklas Exp $	*/
+/*	$NetBSD: promcons.c,v 1.2.6.1 1996/06/03 18:54:31 cgd Exp $	*/
 
 /*
- * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
+ * Copyright (c) 1994, 1995 Carnegie-Mellon University.
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
@@ -31,7 +31,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/ioctl.h>
-#include <sys/selinfo.h>
+#include <sys/select.h>
 #include <sys/tty.h>
 #include <sys/proc.h>
 #include <sys/user.h>
@@ -42,21 +42,11 @@
 #include <sys/syslog.h>
 #include <sys/types.h>
 #include <sys/device.h>
-#include <sys/timeout.h>
-
-#include <dev/cons.h>
-
-#include <machine/rpb.h>
-#include <machine/prom.h>
 
 static struct  tty *prom_tty[1];
-static struct  timeout prom_to;
 
-void promstart(struct tty *);
-void promtimeout(void *);
-int promparam(struct tty *, struct termios *);
-cdev_decl(prom);
-cons_decl(prom);
+void promstart(), promtimeout();
+int promparam();
 
 int
 promopen(dev, flag, mode, p)
@@ -65,6 +55,7 @@ promopen(dev, flag, mode, p)
 	struct proc *p;
 {
 	int unit = minor(dev);
+	u_short iobase;
 	struct tty *tp;
 	int s;
 	int error = 0, setuptimeout = 0;
@@ -74,8 +65,9 @@ promopen(dev, flag, mode, p)
 
 	s = spltty();
 
-	if (prom_tty[unit] == NULL) {
+	if (!prom_tty[unit]) {
 		tp = prom_tty[unit] = ttymalloc();
+		tty_attach(tp);
 	} else
 		tp = prom_tty[unit];
 
@@ -101,10 +93,8 @@ promopen(dev, flag, mode, p)
 	splx(s);
 
 	error = (*linesw[tp->t_line].l_open)(dev, tp);
-	if (error == 0 && setuptimeout) {
-		timeout_set(&prom_to, promtimeout, tp);
-		timeout_add(&prom_to, 1);
-	}
+	if (error == 0 && setuptimeout)
+		timeout(promtimeout, tp, 1);
 	return error;
 }
  
@@ -117,7 +107,7 @@ promclose(dev, flag, mode, p)
 	int unit = minor(dev);
 	struct tty *tp = prom_tty[unit];
 
-	timeout_del(&prom_to);
+	untimeout(promtimeout, tp);
 	(*linesw[tp->t_line].l_close)(tp, flag);
 	ttyclose(tp);
 	return 0;
@@ -203,10 +193,9 @@ out:
 /*
  * Stop output on a line.
  */
-int
+void
 promstop(tp, flag)
 	struct tty *tp;
-	int flag;
 {
 	int s;
 
@@ -215,21 +204,19 @@ promstop(tp, flag)
 		if ((tp->t_state & TS_TTSTOP) == 0)
 			tp->t_state |= TS_FLUSH;
 	splx(s);
-	return 0;
 }
 
 void
-promtimeout(v)
-	void *v;
+promtimeout(tp)
+	struct tty *tp;
 {
-	struct tty *tp = v;
 	u_char c;
 
 	while (promcnlookc(tp->t_dev, &c)) {
 		if (tp->t_state & TS_ISOPEN)
 			(*linesw[tp->t_line].l_rint)(c, tp);
 	}
-	timeout_add(&prom_to, 1);
+	timeout(promtimeout, tp, 1);
 }
 
 struct tty *

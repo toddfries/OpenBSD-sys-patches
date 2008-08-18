@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpcv2.h,v 1.6 2003/06/02 23:28:20 millert Exp $	*/
+/*	$OpenBSD: rpcv2.h,v 1.4 1996/04/17 04:50:42 mickey Exp $	*/
 /*	$NetBSD: rpcv2.h,v 1.8 1996/02/18 11:54:11 fvdl Exp $	*/
 
 /*
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -134,8 +138,13 @@ struct nfsrpc_nickverf {
 #define RPCX_FULLBLOCK	16
 #define RPCX_NICKVERF	16
 
+#ifdef NFSKERB
+XXX
+#else
 typedef u_char			NFSKERBKEY_T[2];
 typedef u_char			NFSKERBKEYSCHED_T[2];
+#endif
+#define NFS_KERBSRV	"rcmd"		/* Kerberos Service for NFS */
 #define NFS_KERBTTL	(30 * 60)	/* Credential ttl (sec) */
 #define NFS_KERBCLOCKSKEW (5 * 60)	/* Clock skew (sec) */
 #define NFS_KERBW1(t)	(*((u_long *)(&((t).dat[((t).length + 3) & ~0x3]))))

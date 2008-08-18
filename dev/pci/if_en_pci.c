@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_en_pci.c,v 1.11 2005/09/11 18:17:08 mickey Exp $	*/
+/*	$OpenBSD: if_en_pci.c,v 1.2 1996/06/21 21:37:37 chuck Exp $	*/
 
 /*
  *
@@ -43,7 +43,7 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
+#include <sys/types.h>
 #include <sys/device.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
@@ -85,7 +85,7 @@ struct en_pci_softc {
 #define PCI_CBMA        0x10
 
 /*
- * tonga (pci bridge).   ENI cards only!
+ * tonga (pci bridge)
  */
 
 #define EN_TONGA        0x60            /* PCI config addr of tonga reg */
@@ -95,22 +95,11 @@ struct en_pci_softc {
 #define TONGA_SWAP_WORD 0x20
 
 /*
- * adaptec pci bridge.   ADP cards only!
- */
-
-#define ADP_PCIREG	0x050040	/* PCI control register */
-
-#define ADP_PCIREG_RESET	0x1	/* reset card */
-#define ADP_PCIREG_IENABLE	0x2	/* interrupt enable */
-#define ADP_PCIREG_SWAP_WORD	0x4	/* swap byte on slave access */
-#define ADP_PCIREG_SWAP_DMA	0x8	/* swap bytes on DMA */
-
-/*
  * prototypes
  */
 
-static	int en_pci_match(struct device *, void *, void *);
-static	void en_pci_attach(struct device *, struct device *, void *);
+static	int en_pci_match __P((struct device *, void *, void *));
+static	void en_pci_attach __P((struct device *, struct device *, void *));
 
 /*
  * PCI autoconfig attachments
@@ -119,35 +108,6 @@ static	void en_pci_attach(struct device *, struct device *, void *);
 struct cfattach en_pci_ca = {
     sizeof(struct en_pci_softc), en_pci_match, en_pci_attach,
 };
-
-#if !defined(MIDWAY_ENIONLY)
-
-static void adp_busreset(void *);
-
-/*
- * bus specific reset function [ADP only!]
- */
-
-static void adp_busreset(v)
-
-void *v;
-
-{
-  struct en_softc *sc = (struct en_softc *) v;
-  u_int32_t dummy;
-
-  bus_space_write_4(sc->en_memt, sc->en_base, ADP_PCIREG, ADP_PCIREG_RESET);
-  DELAY(1000);  /* let it reset */
-  dummy = bus_space_read_4(sc->en_memt, sc->en_base, ADP_PCIREG);
-  bus_space_write_4(sc->en_memt, sc->en_base, ADP_PCIREG, 
-                (ADP_PCIREG_SWAP_WORD|ADP_PCIREG_SWAP_DMA|ADP_PCIREG_IENABLE));
-  dummy = bus_space_read_4(sc->en_memt, sc->en_base, ADP_PCIREG);
-  if ((dummy & (ADP_PCIREG_SWAP_WORD|ADP_PCIREG_SWAP_DMA)) !=
-                (ADP_PCIREG_SWAP_WORD|ADP_PCIREG_SWAP_DMA))
-    printf("adp_busreset: Adaptec ATM did NOT reset!\n");
-
-}
-#endif
 
 /***********************************************************************/
 
@@ -164,19 +124,11 @@ void *aux;
 {
   struct pci_attach_args *pa = (struct pci_attach_args *) aux;
 
-#if !defined(MIDWAY_ADPONLY)
-  if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_EFFICIENTNETS && 
-      (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_EFFICIENTNETS_ENI155PF ||
-       PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_EFFICIENTNETS_ENI155PA))
-    return 1;
-#endif
+  if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_EFFICIENTNETS)
+    return 0;
 
-#if !defined(MIDWAY_ENIONLY)
-  if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ADP && 
-      (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADP_AIC5900 ||
-       PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADP_AIC5905))
+  if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_EFFICIENTNETS_ENI155P)
     return 1;
-#endif
 
   return 0;
 }
@@ -191,65 +143,57 @@ void *aux;
   struct en_softc *sc = (void *)self;
   struct en_pci_softc *scp = (void *)self;
   struct pci_attach_args *pa = aux;
+  bus_mem_addr_t membase;
   pci_intr_handle_t ih;
   const char *intrstr;
   int retval;
 
-  sc->is_adaptec = (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ADP) ? 1 : 0;
+  printf("\n");
+
+  sc->en_bc = pa->pa_bc;
   scp->en_pc = pa->pa_pc;
 
   /*
    * interrupt map
    */
 
-  if (pci_intr_map(pa, &ih)) {
-    printf(": couldn't map interrupt\n");
+  if (pci_intr_map(scp->en_pc, pa->pa_intrtag, pa->pa_intrpin, 
+					pa->pa_intrline, &ih)) {
+    printf("%s: couldn't map interrupt\n", sc->sc_dev.dv_xname);
     return;
   }
   intrstr = pci_intr_string(scp->en_pc, ih);
-  scp->sc_ih = pci_intr_establish(scp->en_pc, ih, IPL_NET, en_intr, sc,
-      sc->sc_dev.dv_xname);
+  scp->sc_ih = pci_intr_establish(scp->en_pc, ih, IPL_NET, en_intr, sc);
   if (scp->sc_ih == NULL) {
-    printf(": couldn't establish interrupt");
+    printf("%s: couldn't establish interrupt\n", sc->sc_dev.dv_xname);
     if (intrstr != NULL)
       printf(" at %s", intrstr);
     printf("\n");
     return;
   }
+  printf("%s: interrupting at %s\n", sc->sc_dev.dv_xname, intrstr);
   sc->ipl = 1; /* XXX */
 
   /*
    * memory map
    */
 
-  retval = pci_mapreg_map(pa, PCI_CBMA, PCI_MAPREG_TYPE_MEM, 0,
-    &sc->en_memt, &sc->en_base, NULL, &sc->en_obmemsz, 0);
+  retval = pci_mem_find(scp->en_pc, pa->pa_tag, PCI_CBMA,
+				&membase, &sc->en_obmemsz, NULL);
+  if (retval == 0)
+    retval = bus_mem_map(sc->en_bc, membase, sc->en_obmemsz, 0, &sc->en_base);
  
   if (retval) {
-    printf(": couldn't map memory\n");
+    printf("%s: couldn't map memory\n", sc->sc_dev.dv_xname);
     return;
   }
 
-  printf(": %s\n", intrstr);
-
   /*
-   * set up pci bridge
+   * set up swapping
    */
 
-#if !defined(MIDWAY_ENIONLY)
-  if (sc->is_adaptec) {
-    sc->en_busreset = adp_busreset;
-    adp_busreset(sc);
-  }
-#endif
-
-#if !defined(MIDWAY_ADPONLY)
-  if (!sc->is_adaptec) {
-    sc->en_busreset = NULL;
-    pci_conf_write(scp->en_pc, pa->pa_tag, EN_TONGA, 
-		  (TONGA_SWAP_DMA|TONGA_SWAP_WORD));
-  }
-#endif
+  pci_conf_write(scp->en_pc, pa->pa_tag, EN_TONGA, 
+		(TONGA_SWAP_DMA|TONGA_SWAP_WORD));
 
   /*
    * done PCI specific stuff

@@ -1,5 +1,4 @@
-/*	$OpenBSD: iommureg.h,v 1.6 1998/05/10 21:11:53 art Exp $	*/
-/*	$NetBSD: iommureg.h,v 1.5 1998/05/04 23:16:59 pk Exp $	*/
+/*	$NetBSD: iommureg.h,v 1.2 1996/05/16 15:57:18 abrown Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -43,6 +42,17 @@ struct iommureg {
 	u_int32_t	io_fill1[3];
 	u_int32_t	io_flashclear;	/* Flush all TLB entries */
 	u_int32_t	io_flushpage;	/* Flush page from TLB */
+	u_int32_t	io_fill2[0x1000-28];
+	u_int32_t	io_afsr;	/* Asynchronous Fault Status */
+	u_int32_t	io_afar;	/* Asynchronous Fault Address */
+	u_int32_t	io_sbuscfg0;	/* Sbus configuration control */
+	u_int32_t	io_sbuscfg1;
+	u_int32_t	io_sbuscfg2;
+	u_int32_t	io_sbuscfg3;
+	u_int32_t	io_mfsr;	/* Memory Fault Status */
+	u_int32_t	io_mfar;	/* Memory Fault Address */
+	u_int32_t	io_fill3[0x1000-32];
+	u_int32_t	io_mid;		/* it might be mud */
 };
 
 #define IOMMU_CTL_IMPL		0xf0000000
@@ -60,18 +70,11 @@ struct iommureg {
 #define IOMMU_FLPG_VADDR	0xfffff000
 #define IOMMU_FLUSH_MASK	0xfffff000
 
-/*
- * A few empty cycles after touching the IOMMU registers seems to
- * avoid utter lossage on some machines (SS4s & SS5s) where our caller
- * would see some of its local (`%lx') registers trashed.
- */
 #define IOMMU_FLUSHPAGE(sc, va)	do {				\
 	(sc)->sc_reg->io_flushpage = (va) & IOMMU_FLUSH_MASK;	\
-	__asm("nop;nop;nop;");					\
 } while (0);
 #define IOMMU_FLUSHALL(sc)	do {				\
 	(sc)->sc_reg->io_flashclear = 0;			\
-	__asm("nop;nop;nop;");					\
 } while (0)
 
 /* to pte.h ? */

@@ -1,5 +1,3 @@
-/*	$OpenBSD: bzero.c,v 1.7 2004/11/28 07:23:41 mickey Exp $	*/
-
 /*
  * Copyright (c) 1987 Regents of the University of California.
  * All rights reserved.
@@ -12,7 +10,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -30,10 +32,11 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: bzero.c,v 1.7 2004/11/28 07:23:41 mickey Exp $";
+/*static char *sccsid = "from: @(#)bzero.c	5.7 (Berkeley) 2/24/91";*/
+static char *rcsid = "$Id: bzero.c,v 1.2 1996/05/01 15:18:46 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
-#if !defined(_KERNEL) && !defined(_STANDALONE)
+#ifndef _KERNEL
 #include <string.h>
 #else
 #include <lib/libkern/libkern.h>
@@ -43,9 +46,11 @@ static char *rcsid = "$OpenBSD: bzero.c,v 1.7 2004/11/28 07:23:41 mickey Exp $";
  * bzero -- vax movc5 instruction
  */
 void
-bzero(void *b, size_t length)
+bzero(b, length)
+	void *b;
+	register size_t length;
 {
-	char *p;
+	register char *p;
 
 	for (p = b; length--;)
 		*p++ = '\0';

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipe.h,v 1.13 2005/11/21 18:16:46 millert Exp $	*/
+/*	$OpenBSD: pipe.h,v 1.2 1996/09/04 22:38:47 niklas Exp $	*/
 
 /*
  * Copyright (c) 1996 John S. Dyson
@@ -24,10 +24,12 @@
 #ifndef _SYS_PIPE_H_
 #define _SYS_PIPE_H_
 
+#ifndef OLD_PIPE
+
 #ifndef _KERNEL
 #include <sys/time.h>			/* for struct timeval */
-#include <sys/selinfo.h>			/* for struct selinfo */
-#include <uvm/uvm_extern.h>		/* for vm_page_t */
+#include <sys/select.h>			/* for struct selinfo */
+#include <vm/vm.h>			/* for vm_page_t */
 #include <machine/param.h>		/* for PAGE_SIZE */
 #endif /* _KERNEL */
 
@@ -43,6 +45,20 @@
 #endif
 
 /*
+ * PIPE_MINDIRECT MUST be smaller than PIPE_SIZE and MUST be bigger
+ * than PIPE_BUF.
+ */
+#ifndef PIPE_MINDIRECT
+#define PIPE_MINDIRECT	8192
+#endif
+
+#if defined(__FreeBSD__)
+#define PIPENPAGES	(BIG_PIPE_SIZE / PAGE_SIZE + 1)
+#else /* (__NetBSD__) || (__OpenBSD__) */
+#define PIPENPAGES	(BIG_PIPE_SIZE / NBPG + 1)
+#endif
+
+/*
  * Pipe buffer information.
  * Separate in, out, cnt are used to simplify calculations.
  * Buffered write is active when the buffer.cnt field is set.
@@ -53,6 +69,18 @@ struct pipebuf {
 	u_int	out;		/* out pointer */
 	u_int	size;		/* size of buffer */
 	caddr_t	buffer;		/* kva of buffer */
+	struct	vm_object *object;	/* VM object containing buffer */
+};
+
+/*
+ * Information to support direct transfers between processes for pipes.
+ */
+struct pipemapping {
+	vm_offset_t	kva;		/* kernel virtual address */
+	vm_size_t	cnt;		/* number of chars in buffer */
+	vm_size_t	pos;		/* current position of transfer */
+	int		npages;		/* number of pages */
+	vm_page_t	ms[PIPENPAGES];	/* pages in source process */
 };
 
 /*
@@ -66,6 +94,8 @@ struct pipebuf {
 #define PIPE_EOF	0x080	/* Pipe is in EOF condition. */
 #define PIPE_LOCK	0x100	/* Process has exclusive access to pointers/data. */
 #define PIPE_LWANT	0x200	/* Process wants exclusive access to pointers/data. */
+#define PIPE_DIRECTW	0x400	/* Pipe direct write active. */
+#define PIPE_DIRECTOK	0x800	/* Direct mode ok. */
 
 /*
  * Per-pipe data structure.
@@ -73,10 +103,11 @@ struct pipebuf {
  */
 struct pipe {
 	struct	pipebuf pipe_buffer;	/* data storage */
+	struct	pipemapping pipe_map;	/* pipe mapping for direct I/O */
 	struct	selinfo pipe_sel;	/* for compat with select */
-	struct	timespec pipe_atime;	/* time of last access */
-	struct	timespec pipe_mtime;	/* time of last modify */
-	struct	timespec pipe_ctime;	/* time of status change */
+	struct	timeval pipe_atime;	/* time of last access */
+	struct	timeval pipe_mtime;	/* time of last modify */
+	struct	timeval pipe_ctime;	/* time of status change */
 	int	pipe_pgid;		/* process/group for async I/O */
 	struct	pipe *pipe_peer;	/* link with other direction */
 	u_int	pipe_state;		/* pipe status info */
@@ -84,7 +115,9 @@ struct pipe {
 };
 
 #ifdef _KERNEL
-void	pipe_init(void);
+int	pipe_stat __P((struct pipe *pipe, struct stat *ub));
 #endif /* _KERNEL */
+
+#endif /* !OLD_PIPE */
 
 #endif /* !_SYS_PIPE_H_ */

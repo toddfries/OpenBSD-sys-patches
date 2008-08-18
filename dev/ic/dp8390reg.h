@@ -1,5 +1,5 @@
-/*	$OpenBSD: dp8390reg.h,v 1.9 2003/10/21 18:58:49 jmc Exp $	*/
-/*	$NetBSD: dp8390reg.h,v 1.3 1997/04/29 04:32:08 scottr Exp $	*/
+/*	$OpenBSD: dp8390reg.h,v 1.3 1996/07/31 01:51:50 niklas Exp $	*/
+/*	$NetBSD: dp8390reg.h,v 1.2 1995/04/12 16:12:42 mycroft Exp $	*/
 
 /*
  * National Semiconductor DS8390 NIC register definitions.
@@ -149,15 +149,14 @@
  *  0   0   0
  *  0   1   1
  *  1   0   2
- *  1   1   3 (only on chips which have extensions to the dp8390)
+ *  1   1   reserved
  */
 #define ED_CR_PS0	0x40
 #define ED_CR_PS1	0x80
 /* bit encoded aliases */
 #define ED_CR_PAGE_0	0x00 /* (for consistency) */
-#define ED_CR_PAGE_1	(ED_CR_PS0)
-#define ED_CR_PAGE_2	(ED_CR_PS1)
-#define	ED_CR_PAGE_3	(ED_CR_PS1|ED_CR_PS0)
+#define ED_CR_PAGE_1	0x40
+#define ED_CR_PAGE_2	0x80
 
 /*
  *		Interrupt Status Register (ISR) definitions
@@ -461,12 +460,7 @@
 #define ED_RCR_MON	0x20
 
 /*
- * INTT: Interrupt Trigger Mode.  Must be set if AX88190.
- */
-#define ED_RCR_INTT	0x40
-
-/*
- * Bit 7 is unused/reserved.
+ * Bits 6 and 7 are unused/reserved.
  */
 
 /*
@@ -512,7 +506,7 @@
 #define ED_RSR_PHY	0x20
 
 /*
- * DIS: Receiver Disabled.  Set to indicate that the receiver has entered
+ * DIS: Receiver Disabled.  Set to indicate that the receiver has enetered
  * monitor mode.  Cleared when the receiver exits monitor mode.
  */
 #define ED_RSR_DIS	0x40
@@ -525,7 +519,7 @@
 #define ED_RSR_DFR	0x80
 
 /*
- * receive ring descriptor
+ * receive ring discriptor
  *
  * The National Semiconductor DS8390 Network interface controller uses the
  * following receive ring headers.  The way this works is that the memory on
@@ -534,15 +528,8 @@
  * end block #'s in the NIC.  For each packet that is put into the receive
  * ring, one of these headers (4 bytes each) is tacked onto the front.   The
  * first byte is a copy of the receiver status register at the time the packet
- * was received.
+ * was received.  The following constants are offsets into the headers.
  */
-struct dp8390_ring	{
-	u_int8_t	rsr;		/* receiver status */
-	u_int8_t	next_packet;	/* pointer to next packet */
-	u_int16_t	count;		/* bytes in packet (length + 4) */
-};
-
-/* Some drivers prefer to use byte-constants to get at this structure.  */
 #define ED_RING_RSR		0	/* receiver status */
 #define ED_RING_NEXT_PACKET	1	/* pointer to next packet */
 #define ED_RING_COUNT		2	/* bytes in packet (length + 4) */

@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci_machdep.h,v 1.11 2002/03/14 03:15:54 millert Exp $	*/
-/*	$NetBSD: pci_machdep.h,v 1.7 1997/06/06 23:29:18 thorpej Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.3 1996/04/21 22:17:34 deraadt Exp $	*/
+/*	$NetBSD: pci_machdep.h,v 1.5 1996/03/27 04:01:16 cgd Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -55,52 +55,41 @@ union i386_pci_tag_u {
 	} mode2;
 };
 
-extern struct i386_bus_dma_tag pci_bus_dma_tag;
-
 /*
  * Types provided to machine-independent PCI code
  */
 typedef void *pci_chipset_tag_t;
 typedef union i386_pci_tag_u pcitag_t;
-
-typedef
-struct {
-	pcitag_t tag;
-	int line, pin;
-	void *link;
-} pci_intr_handle_t;
+typedef int pci_intr_handle_t;
 
 /*
  * i386-specific PCI variables and functions.
  * NOT TO BE USED DIRECTLY BY MACHINE INDEPENDENT CODE.
  */
 extern int pci_mode;
-int		pci_mode_detect(void);
+int		pci_mode_detect __P((void));
 
 /*
  * Functions provided to machine-independent PCI code.
  */
-void		pci_attach_hook(struct device *, struct device *,
-		    struct pcibus_attach_args *);
-int		pci_bus_maxdevs(pci_chipset_tag_t, int);
-pcitag_t	pci_make_tag(pci_chipset_tag_t, int, int, int);
-pcireg_t	pci_conf_read(pci_chipset_tag_t, pcitag_t, int);
-void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
-		    pcireg_t);
-struct pci_attach_args;
-int		pci_intr_map(struct pci_attach_args *,
-		    pci_intr_handle_t *);
-#define		pci_intr_line(ih)	((ih).line)
-const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
-void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
-		    int, int (*)(void *), void *, char *);
-void		pci_intr_disestablish(pci_chipset_tag_t, void *);
-void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
-		    int *, int *, int *);
+void		pci_attach_hook __P((struct device *, struct device *,
+		    struct pcibus_attach_args *));
+int		pci_bus_maxdevs __P((pci_chipset_tag_t, int));
+pcitag_t	pci_make_tag __P((pci_chipset_tag_t, int, int, int));
+pcireg_t	pci_conf_read __P((pci_chipset_tag_t, pcitag_t, int));
+void		pci_conf_write __P((pci_chipset_tag_t, pcitag_t, int,
+		    pcireg_t));
+int		pci_intr_map __P((pci_chipset_tag_t, pcitag_t, int, int,
+		    pci_intr_handle_t *));
+const char	*pci_intr_string __P((pci_chipset_tag_t, pci_intr_handle_t));
+void		*pci_intr_establish __P((pci_chipset_tag_t, pci_intr_handle_t,
+		    int, int (*)(void *), void *, char *));
+void		pci_intr_disestablish __P((pci_chipset_tag_t, void *));
 
 /*
- * Section 6.2.4, `Miscellaneous Functions' of the PIC Specification,
- * says that 255 means `unknown' or `no connection' to the interrupt
- * controller on a PC.
+ * Compatibility functions, to map the old i386 PCI functions to the new ones.
+ * NOT TO BE USED BY NEW CODE.
  */
-#define	I386_PCI_INTERRUPT_LINE_NO_CONNECTION	0xff
+void		*pci_map_int __P((pcitag_t, int, int (*)(void *), void *));
+int		pci_map_io __P((pcitag_t, int, int *));
+int		pci_map_mem __P((pcitag_t, int, vm_offset_t *, vm_offset_t *));

@@ -1,5 +1,5 @@
-/*	$OpenBSD: ibcs2_misc.c,v 1.29 2007/09/01 15:14:44 martin Exp $	*/
-/*	$NetBSD: ibcs2_misc.c,v 1.23 1997/01/15 01:37:49 perry Exp $	*/
+/*	$OpenBSD: ibcs2_misc.c,v 1.7 1996/08/10 12:09:22 deraadt Exp $	*/
+/*	$NetBSD: ibcs2_misc.c,v 1.15 1996/05/03 17:05:25 christos Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Scott Bartram
@@ -23,7 +23,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -82,7 +86,7 @@
 
 #include <miscfs/specfs/specdev.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 #include <sys/sysctl.h>		/* must be included after vm.h */
 
 #include <i386/include/reg.h>
@@ -100,7 +104,6 @@
 #include <compat/ibcs2/ibcs2_syscallargs.h>
 #include <compat/ibcs2/ibcs2_sysi86.h>
 
-#include <compat/common/compat_dir.h>
 
 int
 ibcs2_sys_ulimit(p, v, retval)
@@ -129,8 +132,8 @@ ibcs2_sys_ulimit(p, v, retval)
 	case IBCS2_SETFSIZE:	/* XXX - fix this */
 #ifdef notyet
 		rl.rlim_cur = SCARG(uap, newlimit);
-		SCARG(&sra, which) = RLIMIT_FSIZE;
-		SCARG(&sra, rlp) = &rl;
+		sra.which = RLIMIT_FSIZE;
+		sra.rlp = &rl;
 		error = setrlimit(p, &sra, retval);
 		if (!error)
 			*retval = p->p_rlimit[RLIMIT_FSIZE].rlim_cur;
@@ -145,7 +148,7 @@ ibcs2_sys_ulimit(p, v, retval)
 		*retval = p->p_rlimit[RLIMIT_RSS].rlim_cur; /* XXX */
 		return 0;
 	case IBCS2_GETDTABLESIZE:
-		SCARG(uap, cmd) = IBCS2_SC_OPEN_MAX;
+		uap->cmd = IBCS2_SC_OPEN_MAX;
 		return ibcs2_sys_sysconf(p, uap, retval);
 	default:
 		return ENOSYS;
@@ -197,17 +200,14 @@ ibcs2_sys_execv(p, v, retval)
 		syscallarg(char *) path;
 		syscallarg(char **) argp;
 	} */ *uap = v;
-	struct sys_execve_args ap;
-	caddr_t sg;
+	struct sys_execve_args ea;
+	caddr_t sg = stackgap_init(p->p_emul);
 
-	sg = stackgap_init(p->p_emul);
         IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = NULL;
-
-	return sys_execve(p, &ap, retval);
+	SCARG(&ea, path) = SCARG(uap, path);
+	SCARG(&ea, argp) = SCARG(uap, argp);
+	SCARG(&ea, envp) = NULL;
+	return sys_execve(p, &ea, retval);
 }
 
 int
@@ -216,22 +216,15 @@ ibcs2_sys_execve(p, v, retval)
 	void *v;
         register_t *retval;
 {
-	struct ibcs2_sys_execve_args /* {
+	struct sys_execve_args /* {
 		syscallarg(char *) path;
-		syscallarg(char **) argv;
+		syscallarg(char **) argp;
 		syscallarg(char **) envp;
-        } */ *uap = v;
-	struct sys_execve_args ap;
-	caddr_t sg;
+	} */ *uap = v;
+        caddr_t sg = stackgap_init(p->p_emul);
 
-	sg = stackgap_init(p->p_emul);
-	IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = SCARG(uap, envp);
-
-	return sys_execve(p, &ap, retval);
+        IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+        return sys_execve(p, uap, retval);
 }
 
 int
@@ -332,86 +325,6 @@ ibcs2_sys_mount(p, v, retval)
  * This is quite ugly, but what do you expect from compatibility code?
  */
 
-int ibcs2_readdir_callback(void *, struct dirent *, off_t);
-int ibcs2_classicread_callback(void *, struct dirent *, off_t);
-
-struct ibcs2_readdir_callback_args {
-	caddr_t outp;
-	int     resid;
-};
-
-int
-ibcs2_readdir_callback(arg, bdp, cookie)
-	void *arg;
-	struct dirent *bdp;
-	off_t cookie;
-{
-	struct ibcs2_dirent idb;
-	struct ibcs2_readdir_callback_args *cb = arg; 
-	int ibcs2_reclen;
-	int error;
-
-	ibcs2_reclen = IBCS2_RECLEN(&idb, bdp->d_namlen);
-	if (cb->resid < ibcs2_reclen)
-		return (ENOMEM);
-
-	/*
-	 * Massage in place to make a iBCS2-shaped dirent (otherwise
-	 * we have to worry about touching user memory outside of
-	 * the copyout() call).
-	 */
-	idb.d_ino = (ibcs2_ino_t)bdp->d_fileno;
-	idb.d_pad = 0;
-	idb.d_off = (ibcs2_off_t)cookie;
-	idb.d_reclen = (u_short)ibcs2_reclen;
-	strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-	error = copyout((caddr_t)&idb, cb->outp, ibcs2_reclen);
-	if (error)
-		return (error);
-
-	/* advance output past iBCS2-shaped entry */
-	cb->outp += ibcs2_reclen;
-	cb->resid -= ibcs2_reclen;
-
-	return (0);
-}
-
-int
-ibcs2_classicread_callback(arg, bdp, cookie)
-	void *arg;
-	struct dirent *bdp;
-	off_t cookie;
-{
-	struct ibcs2_direct {
-		ibcs2_ino_t ino;
-		char name[14];
-	} idb;
-	struct ibcs2_readdir_callback_args *cb = arg; 
-	int ibcs2_reclen;
-	int error;
-	
-	ibcs2_reclen = 16;
-	if (cb->resid < ibcs2_reclen)
-		return (ENOMEM);
-
-	/*
-	 * TODO: if length(filename) > 14 then break filename into
-	 * multiple entries and set inode = 0xffff except last
-	 */
-	idb.ino = (bdp->d_fileno > 0xfffe) ? 0xfffe : bdp->d_fileno;
-	bzero(&idb.name, sizeof(idb.name));
-	strncpy(idb.name, bdp->d_name, 14);
-	error = copyout(&idb, cb->outp, ibcs2_reclen);
-	if (error)
-		return (error);
-
-	/* advance output past iBCS2-shaped entry */
-	cb->outp += ibcs2_reclen;
-	cb->resid -= ibcs2_reclen;
-
-	return (0);
-}
-
 int
 ibcs2_sys_getdents(p, v, retval)
 	struct proc *p;
@@ -423,23 +336,109 @@ ibcs2_sys_getdents(p, v, retval)
 		syscallarg(char *) buf;
 		syscallarg(int) nbytes;
 	} */ *uap = v;
-	struct ibcs2_readdir_callback_args args;
+	register struct dirent *bdp;
+	struct vnode *vp;
+	caddr_t inp, buf;	/* BSD-format */
+	int len, reclen;	/* BSD-format */
+	caddr_t outp;		/* iBCS2-format */
+	int resid, ibcs2_reclen;/* iBCS2-format */
 	struct file *fp;
-	int error;
+	struct uio auio;
+	struct iovec aiov;
+	struct ibcs2_dirent idb;
+	off_t off;			/* true file offset */
+	int buflen, error, eofflag;
+	u_long *cookiebuf, *cookie;
+	int ncookies;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 
-	args.resid = SCARG(uap, nbytes);
-	args.outp = (caddr_t)SCARG(uap, buf);
-	error = readdir_with_callback(fp, &fp->f_offset, args.resid,
-	    ibcs2_readdir_callback, &args);
-	FRELE(fp);
-	if (error)
-		return (error);
+	if ((fp->f_flag & FREAD) == 0)
+		return (EBADF);
 
-	*retval = SCARG(uap, nbytes) - args.resid;
-	return (0);
+	vp = (struct vnode *)fp->f_data;
+
+	if (vp->v_type != VDIR)	/* XXX  vnode readdir op should do this */
+		return (EINVAL);
+
+	buflen = min(MAXBSIZE, SCARG(uap, nbytes));
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	ncookies = buflen / 16;
+	cookiebuf = malloc(ncookies * sizeof(*cookiebuf), M_TEMP, M_WAITOK);
+	VOP_LOCK(vp);
+	off = fp->f_offset;
+again:
+	aiov.iov_base = buf;
+	aiov.iov_len = buflen;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_segflg = UIO_SYSSPACE;
+	auio.uio_procp = p;
+	auio.uio_resid = buflen;
+	auio.uio_offset = off;
+	/*
+	 * First we read into the malloc'ed buffer, then
+	 * we massage it into user space, one record at a time.
+	 */
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, cookiebuf,
+	    ncookies);
+	if (error)
+		goto out;
+
+	inp = buf;
+	outp = SCARG(uap, buf);
+	resid = SCARG(uap, nbytes);
+	if ((len = buflen - auio.uio_resid) == 0)
+		goto eof;
+
+	for (cookie = cookiebuf; len > 0; len -= reclen) {
+		bdp = (struct dirent *)inp;
+		reclen = bdp->d_reclen;
+		if (reclen & 3)
+			panic("ibcs2_getdents");
+		off = *cookie++;	/* each entry points to the next */
+		if (bdp->d_fileno == 0) {
+			inp += reclen;	/* it is a hole; squish it out */
+			continue;
+		}
+		ibcs2_reclen = IBCS2_RECLEN(&idb, bdp->d_namlen);
+		if (reclen > len || resid < ibcs2_reclen) {
+			/* entry too big for buffer, so just stop */
+			outp++;
+			break;
+		}
+		/*
+		 * Massage in place to make a iBCS2-shaped dirent (otherwise
+		 * we have to worry about touching user memory outside of
+		 * the copyout() call).
+		 */
+		idb.d_ino = (ibcs2_ino_t)bdp->d_fileno;
+		idb.d_off = (ibcs2_off_t)off;
+		idb.d_reclen = (u_short)ibcs2_reclen;
+		strcpy(idb.d_name, bdp->d_name);
+		if ((error = copyout((caddr_t)&idb, outp, ibcs2_reclen)))
+			goto out;
+		/* advance past this real entry */
+		inp += reclen;
+		/* advance output past iBCS2-shaped entry */
+		outp += ibcs2_reclen;
+		resid -= ibcs2_reclen;
+	}
+
+	/* if we squished out the whole block, try again */
+	if (outp == SCARG(uap, buf))
+		goto again;
+	fp->f_offset = off;	/* update the vnode offset */
+
+eof:
+	*retval = SCARG(uap, nbytes) - resid;
+out:
+	VOP_UNLOCK(vp);
+	free(cookiebuf, M_TEMP);
+	free(buf, M_TEMP);
+	return (error);
 }
 
 int
@@ -453,10 +452,23 @@ ibcs2_sys_read(p, v, retval)
 		syscallarg(char *) buf;
 		syscallarg(u_int) nbytes;
 	} */ *uap = v;
-	struct vnode *vp;
-	struct ibcs2_readdir_callback_args args;
+	register struct dirent *bdp;
+	register struct vnode *vp;
+	register caddr_t inp, buf;	/* BSD-format */
+	register int len, reclen;	/* BSD-format */
+	register caddr_t outp;		/* iBCS2-format */
+	register int resid;		/* iBCS2-format */
 	struct file *fp;
-	int error;
+	struct uio auio;
+	struct iovec aiov;
+	struct ibcs2_direct {
+		ibcs2_ino_t ino;
+		char name[14];
+	} idb;
+	off_t off;			/* true file offset */
+	int buflen, error, eofflag, size;
+	u_long *cookiebuf, *cookie;
+	int ncookies;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0) {
 		if (error == EINVAL)
@@ -464,28 +476,90 @@ ibcs2_sys_read(p, v, retval)
 		else
 			return error;
 	}
-	if ((fp->f_flag & FREAD) == 0) {
-		error = EBADF;
-		goto bad;
-	}
+	if ((fp->f_flag & FREAD) == 0)
+		return (EBADF);
 	vp = (struct vnode *)fp->f_data;
-	if (vp->v_type != VDIR) {
-		FRELE(fp);
+	if (vp->v_type != VDIR)
 		return sys_read(p, uap, retval);
+	DPRINTF(("ibcs2_read: read directory\n"));
+	buflen = max(MAXBSIZE, SCARG(uap, nbytes));
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	ncookies = buflen / 16;
+	cookiebuf = malloc(ncookies * sizeof(*cookiebuf), M_TEMP, M_WAITOK);
+	VOP_LOCK(vp);
+	off = fp->f_offset;
+again:
+	aiov.iov_base = buf;
+	aiov.iov_len = buflen;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_segflg = UIO_SYSSPACE;
+	auio.uio_procp = p;
+	auio.uio_resid = buflen;
+	auio.uio_offset = off;
+	/*
+	 * First we read into the malloc'ed buffer, then
+	 * we massage it into user space, one record at a time.
+	 */
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, cookiebuf,
+	    ncookies);
+	if (error) {
+		DPRINTF(("VOP_READDIR failed: %d\n", error));
+		goto out;
 	}
-
-	args.resid = SCARG(uap, nbytes);
-	args.outp = (caddr_t)SCARG(uap, buf);
-
-	error = readdir_with_callback(fp, &fp->f_offset, args.resid,
-	    ibcs2_classicread_callback, &args);
-bad:
-	FRELE(fp);
-	if (error)
-		return (error);
-
-	*retval = SCARG(uap, nbytes) - args.resid;	
-	return (0);
+	inp = buf + off;
+	buflen -= off;
+	outp = SCARG(uap, buf);
+	resid = SCARG(uap, nbytes);
+	if ((len = buflen - auio.uio_resid) == 0)
+		goto eof;
+	for (cookie = cookiebuf; len > 0 && resid > 0; len -= reclen) {
+		bdp = (struct dirent *)inp;
+		reclen = bdp->d_reclen;
+		if (reclen & 3)
+			panic("ibcs2_read");
+		if (bdp->d_fileno == 0) {
+			inp += reclen;	/* it is a hole; squish it out */
+			off = *cookie++;
+			continue;
+		}
+		if (reclen > len || resid < sizeof(struct ibcs2_direct)) {
+			/* entry too big for buffer, so just stop */
+			outp++;
+			break;
+		}
+		/*
+		 * Massage in place to make a iBCS2-shaped dirent (otherwise
+		 * we have to worry about touching user memory outside of
+		 * the copyout() call).
+		 *
+		 * TODO: if length(filename) > 14, then break filename into
+		 * multiple entries and set inode = 0xffff except last
+		 */
+		idb.ino = (bdp->d_fileno > 0xfffe) ? 0xfffe : bdp->d_fileno;
+		(void)copystr(bdp->d_name, idb.name, 14, &size);
+		bzero(idb.name + size, 14 - size);
+		error = copyout(&idb, outp, sizeof(struct ibcs2_direct));
+		if (error)
+			goto out;
+		/* advance past this real entry */
+		off = *cookie++;	/* each entry points to the next */
+		inp += reclen;
+		/* advance output past iBCS2-shaped entry */
+		outp += sizeof(struct ibcs2_direct);
+		resid -= sizeof(struct ibcs2_direct);
+	}
+	/* if we squished out the whole block, try again */
+	if (outp == SCARG(uap, buf))
+		goto again;
+	fp->f_offset = off;		/* update the vnode offset */
+eof:
+	*retval = SCARG(uap, nbytes) - resid;
+out:
+	VOP_UNLOCK(vp);
+	free(buf, M_TEMP);
+	return (error);
 }
 
 int
@@ -541,15 +615,13 @@ ibcs2_sys_getgroups(p, v, retval)
 	}
 	if ((error = sys_getgroups(p, &sa, retval)) != 0)
 		return error;
-	if (iset) {
-		for (i = 0, gp = SCARG(&sa, gidset); i < retval[0]; i++)
-			iset[i] = (ibcs2_gid_t)*gp++;
-		if (retval[0] && (error = copyout((caddr_t)iset,
-		    (caddr_t)SCARG(uap, gidset),
-		    sizeof(ibcs2_gid_t) * retval[0])))
-			return error;
-	}
-	return 0;
+	for (i = 0, gp = SCARG(&sa, gidset); i < retval[0]; i++)
+		iset[i] = (ibcs2_gid_t)*gp++;
+	if (retval[0] && (error = copyout((caddr_t)iset,
+					  (caddr_t)SCARG(uap, gidset),
+					  sizeof(ibcs2_gid_t) * retval[0])))
+		return error;
+        return 0;
 }
 
 int
@@ -569,7 +641,8 @@ ibcs2_sys_setgroups(p, v, retval)
 	caddr_t sg = stackgap_init(p->p_emul);
 
 	SCARG(&sa, gidsetsize) = SCARG(uap, gidsetsize);
-	gp = stackgap_alloc(&sg, SCARG(&sa, gidsetsize) * sizeof(gid_t *));
+	SCARG(&sa, gidset) = stackgap_alloc(&sg, SCARG(&sa, gidsetsize) *
+					    sizeof(gid_t *));
 	iset = stackgap_alloc(&sg, SCARG(&sa, gidsetsize) *
 			      sizeof(ibcs2_gid_t *));
 	if (SCARG(&sa, gidsetsize)) {
@@ -578,9 +651,8 @@ ibcs2_sys_setgroups(p, v, retval)
 		if (error)
 			return error;
 	}
-	for (i = 0; i < SCARG(&sa, gidsetsize); i++)
-		gp[i]= (gid_t)iset[i];
-	SCARG(&sa, gidset) = gp;
+	for (i = 0, gp = SCARG(&sa, gidset); i < SCARG(&sa, gidsetsize); i++)
+		*gp++ = (gid_t)iset[i];
 	return sys_setgroups(p, &sa, retval);
 }
 
@@ -632,8 +704,7 @@ xenix_sys_ftime(p, v, retval)
 	itb.millitm = (tv.tv_usec / 1000);
 	itb.timezone = tz.tz_minuteswest;
 	itb.dstflag = tz.tz_dsttime;
-	return copyout((caddr_t)&itb, (caddr_t)SCARG(uap, tp),
-	    xenix_timeb_len);
+	return copyout((caddr_t)&itb, (caddr_t)SCARG(uap, tp), xenix_timeb_len);
 }
 
 int
@@ -693,8 +764,7 @@ ibcs2_sys_sysconf(p, v, retval)
 	struct ibcs2_sys_sysconf_args /* {
 		syscallarg(int) name;
 	} */ *uap = v;
-	int mib[2], value, error;
-	size_t len;
+	int mib[2], value, len, error;
 	struct sys___sysctl_args sa;
 	struct sys_getrlimit_args ga;
 
@@ -892,16 +962,14 @@ ibcs2_sys_stime(p, v, retval)
 	int error;
 	struct sys_settimeofday_args sa;
 	caddr_t sg = stackgap_init(p->p_emul);
-	struct timeval *tvp;
 
-	tvp = stackgap_alloc(&sg, sizeof(*SCARG(&sa, tv)));
+	SCARG(&sa, tv) = stackgap_alloc(&sg, sizeof(*SCARG(&sa, tv)));
 	SCARG(&sa, tzp) = NULL;
-	error = copyin((caddr_t)SCARG(uap, timep), (void *)&tvp->tv_sec,
-	    sizeof(long));
+	error = copyin((caddr_t)SCARG(uap, timep),
+	    &(SCARG(&sa, tv)->tv_sec), sizeof(long));
 	if (error)
 		return error;
-	tvp->tv_usec = 0;
-	SCARG(&sa, tv) = tvp;
+	SCARG(&sa, tv)->tv_usec = 0;
 	if ((error = sys_settimeofday(p, &sa, retval)) != 0)
 		return EPERM;
 	return 0;
@@ -922,7 +990,6 @@ ibcs2_sys_utime(p, v, retval)
 	struct timeval *tp;
 	caddr_t sg = stackgap_init(p->p_emul);
 
-	tp = stackgap_alloc(&sg, 2 * sizeof(struct timeval *));
         IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 	SCARG(&sa, path) = SCARG(uap, path);
 	if (SCARG(uap, buf)) {
@@ -932,11 +999,14 @@ ibcs2_sys_utime(p, v, retval)
 		    sizeof(ubuf));
 		if (error)
 			return error;
-		tp[0].tv_sec = ubuf.actime;
-		tp[0].tv_usec = 0;
-		tp[1].tv_sec = ubuf.modtime;
-		tp[1].tv_usec = 0;
-		SCARG(&sa, tptr) = tp;
+		SCARG(&sa, tptr) = stackgap_alloc(&sg,
+						  2 * sizeof(struct timeval *));
+		tp = (struct timeval *)SCARG(&sa, tptr);
+		tp->tv_sec = ubuf.actime;
+		tp->tv_usec = 0;
+		tp++;
+		tp->tv_sec = ubuf.modtime;
+		tp->tv_usec = 0;
 	} else
 		SCARG(&sa, tptr) = NULL;
 	return sys_utimes(p, &sa, retval);
@@ -956,10 +1026,10 @@ ibcs2_sys_nice(p, v, retval)
 
 	SCARG(&sa, which) = PRIO_PROCESS;
 	SCARG(&sa, who) = 0;
-	SCARG(&sa, prio) = p->p_nice - PZERO + SCARG(uap, incr);
+	SCARG(&sa, prio) = p->p_nice + SCARG(uap, incr);
 	if ((error = sys_setpriority(p, &sa, retval)) != 0)
 		return EPERM;
-	*retval = p->p_nice - PZERO;
+	*retval = p->p_nice;
 	return 0;
 }
 
@@ -1032,7 +1102,7 @@ ibcs2_sys_plock(p, v, retval)
 #define IBCS2_DATALOCK	4
 
 	
-        if ((error = suser(p, 0)) != 0)
+        if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
                 return EPERM;
 	switch(SCARG(uap, cmd)) {
 	case IBCS2_UNLOCK:
@@ -1076,7 +1146,7 @@ ibcs2_sys_uadmin(p, v, retval)
 #define SCO_AD_GETCMAJ      1
 
 	/* XXX: is this the right place for this call? */
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 
 	switch(SCARG(uap, cmd)) {
@@ -1122,7 +1192,6 @@ ibcs2_sys_sysfs(p, v, retval)
 	case IBCS2_GETFSIND:
 	case IBCS2_GETFSTYP:
 	case IBCS2_GETNFSTYP:
-		break;
 	}
 	return EINVAL;		/* XXX - TODO */
 }
@@ -1145,7 +1214,7 @@ xenix_sys_rdchk(p, v, retval)
 	SCARG(&sa, data) = stackgap_alloc(&sg, sizeof(int));
 	if ((error = sys_ioctl(p, &sa, retval)) != 0)
 		return error;
-	*retval = (*((int *)SCARG(&sa, data))) ? 1 : 0;
+	*retval = (*((int*)SCARG(&sa, data))) ? 1 : 0;
 	return 0;
 }
 
@@ -1357,7 +1426,7 @@ ibcs2_sys_sysi86(p, v, retval)
 		return EINVAL;
 
 	case IBCS2_SI86PHYSMEM:
-                *retval = ptoa(physmem);
+                *retval = ctob(physmem);
 		break;
 
 	default:

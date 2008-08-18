@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_write_cmd.c,v 1.10 2007/11/05 19:23:24 miod Exp $	*/
+/*	$OpenBSD: db_write_cmd.c,v 1.4 1996/04/21 22:19:27 deraadt Exp $	*/
 /*	$NetBSD: db_write_cmd.c,v 1.6 1996/02/05 01:57:25 christos Exp $	*/
 
 /* 
@@ -33,8 +33,6 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <machine/db_machdep.h>
 
 #include <ddb/db_lex.h>
@@ -49,15 +47,19 @@
  */
 /*ARGSUSED*/
 void
-db_write_cmd(db_expr_t	address, boolean_t have_addr, db_expr_t count,
-    char *modif)
+db_write_cmd(address, have_addr, count, modif)
+	db_expr_t	address;
+	boolean_t	have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
+	register
 	db_addr_t	addr;
+	register
 	db_expr_t	old_value;
 	db_expr_t	new_value;
-	int		size;
+	register int	size;
 	boolean_t	wrote_one = FALSE;
-	char		tmpfmt[28];
 
 	addr = (db_addr_t) address;
 
@@ -80,11 +82,8 @@ db_write_cmd(db_expr_t	address, boolean_t have_addr, db_expr_t count,
 
 	while (db_expression(&new_value)) {
 	    old_value = db_get_value(addr, size, FALSE);
-	    db_printsym(addr, DB_STGY_ANY, db_printf);
-	    db_printf("\t\t%s\t", db_format(tmpfmt, sizeof tmpfmt,
-	      old_value, DB_FORMAT_N, 0, 8));
-	    db_printf("=\t%s\n",  db_format(tmpfmt, sizeof tmpfmt,
-	      new_value, DB_FORMAT_N, 0, 8));
+	    db_printsym(addr, DB_STGY_ANY);
+	    db_printf("\t\t%#8n\t=\t%#8n\n", old_value, new_value);
 	    db_put_value(addr, size, new_value);
 	    addr += size;
 

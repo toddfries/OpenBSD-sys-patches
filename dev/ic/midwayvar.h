@@ -1,4 +1,4 @@
-/*	$OpenBSD: midwayvar.h,v 1.12 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: midwayvar.h,v 1.8 1996/07/16 22:08:16 chuck Exp $	*/
 
 /*
  *
@@ -50,7 +50,7 @@
 #define EN_NTX          8       /* number of tx bufs to use */
 #endif
 #ifndef EN_TXSZ
-#define EN_TXSZ         32      /* transmit buf size in KB */
+#define EN_TXSZ         32      /* trasmit buf size in KB */
 #endif
 #ifndef EN_RXSZ
 #define EN_RXSZ         32      /* recv buf size in KB */
@@ -101,10 +101,9 @@ struct en_softc {
   struct ifnet enif;		/* network ifnet handle */
 
   /* bus glue */
-  bus_space_tag_t en_memt;	/* for EN_READ/EN_WRITE */
-  bus_space_handle_t en_base;	/* base of en card */
-  bus_size_t en_obmemsz;	/* size of en card (bytes) */
-  void (*en_busreset)(void *);	/* bus specific reset function */
+  bus_chipset_tag_t en_bc;	/* for EN_READ/EN_WRITE */
+  bus_mem_handle_t en_base;	/* base of en card */
+  bus_mem_size_t en_obmemsz;	/* size of en card (bytes) */
 
   /* serv list */
   u_int32_t hwslistp;		/* hw pointer to service list (byte offset) */
@@ -134,14 +133,12 @@ struct en_softc {
     u_int32_t bfree;		/* # free bytes in buffer (not dma or xmit) */
     u_int32_t start, stop;	/* ends of buffer area (byte offset) */
     u_int32_t cur;		/* next free area (byte offset) */
-    u_int32_t nref;		/* # of VCs using this channel */
     struct ifqueue indma;	/* mbufs being dma'd now */
     struct ifqueue q;		/* mbufs waiting for dma now */
   } txslot[MID_NTX_CH];
 
   /* xmit vc ctrl. (per vc) */
   u_int8_t txspeed[MID_N_VC];	/* speed of tx on a VC */
-  u_int8_t txvc2slot[MID_N_VC]; /* map VC to slot */
 
   /* recv vc ctrl. (per vc).   maps VC number to recv slot */
   u_int16_t rxvc2slot[MID_N_VC];
@@ -192,13 +189,12 @@ struct en_softc {
   u_int8_t bestburstshift;	/* (x >> shift) == (x / bestburstlen) */
   u_int8_t bestburstmask;	/* bits to check if not multiple of burst */
   u_int8_t alburst;		/* align dma bursts? */
-  u_int8_t is_adaptec;		/* adaptec version of midway? */
 };
 
 /*
  * exported functions
  */
 
-void	en_attach(struct en_softc *);
-EN_INTR_TYPE	en_intr(void *);
-void	en_reset(struct en_softc *);
+void	en_attach __P((struct en_softc *));
+EN_INTR_TYPE	en_intr __P((void *));
+void	en_reset __P((struct en_softc *));

@@ -1,9 +1,6 @@
-/*	$OpenBSD: autoconf.c,v 1.29 2007/06/01 19:25:10 deraadt Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.45 1999/10/23 14:56:05 ragge Exp $	*/
+/*      $NetBSD: autoconf.c,v 1.13 1996/05/19 16:43:53 ragge Exp $      */
 
 /*
- * Copyright (c) 1988 University of Utah.
- * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
  * All rights reserved.
  *
@@ -33,15 +30,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+ /* All bugs are subject to removal without further notice */
+		
+
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/reboot.h>
-#include <sys/disklabel.h>
 #include <sys/conf.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
 #include <machine/sid.h>
@@ -49,423 +46,422 @@
 #include <machine/vmparam.h>
 #include <machine/nexus.h>
 #include <machine/ioa.h>
-#include <machine/ka820.h>
 #include <machine/ka750.h>
 #include <machine/ka650.h>
-#include <machine/clock.h>
-#include <machine/rpb.h>
-
-#include <dev/cons.h>
-
-#include "led.h"
+#include <machine/uvaxII.h>
 
 #include <vax/vax/gencons.h>
 
-#include <vax/bi/bireg.h>
+#include <vm/vm.h>
 
-void	dumpconf(void);	/* machdep.c */
-void	gencnslask(void);
+#define	BACKPLANE	0
+#define	BIBUSS		1
+#define	SBIBUSS		2
 
-struct cpu_dep *dep_call;
+struct bp_conf {
+	char *type;
+	int num;
+	int partyp;
+};
 
-int	mastercpu;	/* chief of the system */
+extern int cold;
 
-struct device *bootdv;
-int booted_partition;	/* defaults to 0 (aka 'a' partition */
+void    notsupp_steal_pages __P((void));
+
+
+#ifdef VAX8600 /* XXX These are in ka860 also */
+void    ka86_conf __P((struct device *, struct device *, void *));
+int     ka86_clock __P((void));
+void    ka86_memenable __P((struct sbi_attach_args *, struct device *));
+void    ka86_memerr __P((void));
+int     ka86_mchk __P((caddr_t));
+void    ka86_steal_pages __P((void));
+#endif
+#ifdef VAX780 /* XXX These are in ka780 also */
+void    ka780_conf __P((struct device *, struct device *, void *));
+int     ka780_clock __P((void));
+void    ka780_memenable __P((struct sbi_attach_args *, void *));
+void    ka780_memerr __P((void));
+int     ka780_mchk __P((caddr_t));
+void    ka780_steal_pages __P((void));
+#endif
+#ifdef	VAX750
+int	nexty750[]={ NEX_MEM16,	NEX_MEM16,	NEX_MEM16,	NEX_MEM16,
+		NEX_MBA,	NEX_MBA, 	NEX_MBA,	NEX_MBA,
+		NEX_UBA0,	NEX_UBA1,	NEX_ANY,	NEX_ANY,
+		NEX_ANY,	NEX_ANY,	NEX_ANY,	NEX_ANY};
+#endif
+#if VAX730
+int   nexty730[NNEX730] = {
+	NEX_MEM16,      NEX_ANY,	NEX_ANY,	NEX_ANY,
+	NEX_ANY,	NEX_ANY,	NEX_ANY,	NEX_ANY,
+};
+#endif
+
+struct	cpu_dep	cpu_calls[VAX_MAX+1]={
+		/* Type 0,noexist */
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#ifdef	VAX780	/* Type 1, 11/{780,782,785} */
+	{ka780_steal_pages, ka780_clock, ka780_mchk, ka780_memerr, ka780_conf},
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+#ifdef  VAX750	/* Type 2, 11/750 */
+	{ka750_steal_pages, ka750_clock, ka750_mchk, ka750_memerr, ka750_conf},
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+#ifdef	VAX730	/* Type 3, 11/{730,725}, ceauciesco-vax */
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+#ifdef	VAX8600	/* Type 4, 8600/8650 (11/{790,795}) */
+	{ka86_steal_pages, ka86_clock, ka86_mchk, ka86_memerr, ka86_conf},
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+#ifdef	VAX8200	/* Type 5, 8200, 8300, 8350 */
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+#ifdef	VAX8800	/* Type 6, 85X0, 8700, 88X0 */
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+#ifdef	VAX610	/* Type 7, KA610 */
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+#ifdef  VAX630  /* Type 8, KA630 or KA410 (uVAX II) */
+	{uvaxII_steal_pages, uvaxII_clock, uvaxII_mchk, uvaxII_memerr,
+	    uvaxII_conf},
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+		/* Type 9, not used */
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#ifdef	VAX650  /* Type 10, KA65X (uVAX III) */
+	{uvaxIII_steal_pages, uvaxIII_clock, uvaxIII_mchk, uvaxIII_memerr,
+	    uvaxIII_conf},
+#else
+	{notsupp_steal_pages, NULL, NULL, NULL, NULL },
+#endif
+};
 
 void
-cpu_configure()
+notsupp_steal_pages()
 {
-	if (config_rootfound("mainbus", NULL) == NULL)
-		panic("mainbus not configured");
+	printf("This cputype not supported.\n");
+	asm("halt");
+}
 
+void	gencnslask __P((void));
+
+void
+configure()
+{
+	extern int boothowto;
+
+
+	if (config_rootfound("backplane", NULL) == NULL)
+		panic("backplane not configured");
+
+#if GENERIC
+	if ((boothowto & RB_ASKNAME) == 0)
+		setroot();
+	setconf();
+#else
+	setroot();
+#endif
 	/*
-	 * We're ready to start up. Clear CPU cold start flag.
+	 * Configure swap area and related system
+	 * parameter based on device(s) used.
 	 */
+	gencnslask(); /* XXX inte g|ras h{r */
+	swapconf();
 	cold = 0;
-
-	if (dep_call->cpu_clrf) 
-		(*dep_call->cpu_clrf)();
+	mtpr(GC_CCF, PR_TXDB);	/* Clear cold start flag in cpu */
 }
 
-void
-diskconf(void)
-{
-	printf("boot device: %s\n",
-	    bootdv ? bootdv->dv_xname : "<unknown>");
-
-	setroot(bootdv, booted_partition, RB_USERREQ);
-	dumpconf();
-}
-
-int	mainbus_print(void *, const char *);
-int	mainbus_match(struct device *, struct cfdata *, void *);
-void	mainbus_attach(struct device *, struct device *, void *);
-
+int	printut __P((void *, char *));
+int	backplane_match __P((struct device *, void *, void *));
+void	backplane_attach __P((struct device *, struct device *, void *));
 int
-mainbus_print(aux, hej)
+printut(aux, hej)
 	void *aux;
-	const char *hej;
+	char *hej;
 {
-	struct mainbus_attach_args *maa = aux;
-
-	if (maa->maa_bustype == VAX_LEDS)
-		return (QUIET);
-
-	if (hej) {
-		printf("nothing at %s", hej);
-	}
-	return (UNCONF);
+	struct bp_conf *bp = aux;
+	if (hej)
+		printf("printut %s %s %d\n",hej, bp->type, bp->num);
+	return (UNSUPP);
 }
 
 int
-mainbus_match(parent, cf, aux)
+backplane_match(parent, gcf, aux)
 	struct	device	*parent;
-	struct cfdata *cf;
-	void	*aux;
+	void	*gcf, *aux;
 {
+	struct  cfdata  *cf = gcf;
+
 	if (cf->cf_unit == 0 &&
-	    strcmp(cf->cf_driver->cd_name, "mainbus") == 0)
-		return 1; /* First (and only) mainbus */
+	    strcmp(cf->cf_driver->cd_name, "backplane") == 0)
+		return 1; /* First (and only) backplane */
 
 	return (0);
 }
 
+static  void find_sbi __P((struct device *, struct bp_conf *,
+	    int (*) __P((void *, char *))));
+
+
 void
-mainbus_attach(parent, self, hej)
+backplane_attach(parent, self, hej)
 	struct	device	*parent, *self;
 	void	*hej;
 {
-	struct mainbus_attach_args maa;
+	struct bp_conf bp;
+	int i, ccpu, cmem, cbi, csbi;
 
 	printf("\n");
 
-	maa.maa_bustype = vax_bustype;
-	config_found(self, &maa, mainbus_print);
+	switch (cpunumber) {
+	case VAX_750:
+	case VAX_650:
+	case VAX_78032:
+	case VAX_780:
+		cmem = cbi = 0;
+		ccpu = csbi = 1;
+		break;
 
-#if VAX53
-	/* These models have both vsbus and ibus */
-	if (vax_boardtype == VAX_BTYP_1303) {
-		maa.maa_bustype = VAX_VSBUS;
-		config_found(self, &maa, mainbus_print);
+	case VAX_8600:
+		cmem = ccpu = 1;
+		cbi = csbi = 0;
+		break;
+	default:
+		cmem = ccpu = cbi = csbi = 0;
 	}
+
+	bp.partyp = BACKPLANE;
+	bp.type = "cpu";
+	for (i = 0; i < ccpu; i++) {
+		bp.num = i;
+		config_found(self, &bp, printut);
+	}
+	bp.type = "mem";
+	for (i = 0; i < cmem; i++) {
+		bp.num = i;
+		config_found(self, &bp, printut);
+	}
+	bp.type = "bi";
+	for (i = 0; i < cbi; i++) {
+		bp.num = i;
+		config_found(self, &bp, printut);
+	}
+	bp.type = "sbi";
+	for(i = 0; i < csbi; i++) {
+		bp.num = i;
+		config_found(self, &bp, printut);
+	}
+#if VAX8600
+	if (cpunumber == VAX_8600)
+		find_sbi(self, &bp, printut);
 #endif
-
-	if (dep_call->cpu_subconf)
-		(*dep_call->cpu_subconf)(self);
-
-#if NLED > 0
-	maa.maa_bustype = VAX_LEDS;
-	config_found(self, &maa, mainbus_print);
-#endif
-
-#if 1 /* boot blocks too old */
-        if (rpb.rpb_base == (void *)-1)
-                printf("\nWARNING: you must update your boot blocks.\n\n");
-#endif
-
 }
 
-struct	cfattach mainbus_ca = {
-	sizeof(struct device), (cfmatch_t) mainbus_match, mainbus_attach
-};
-
-struct  cfdriver mainbus_cd = {
-	NULL, "mainbus", DV_DULL
-};
-
-#include "sd.h"
-#include "cd.h"
-#if NRL > 0
-#include "rl.h"
-#endif
-#include "ra.h"
-#include "hp.h"
-#if NRY > 0
-#include "ry.h"
-#endif
-
-static int ubtest(void *);
-static int jmfr(char *, struct device *, int);
-static int booted_qe(struct device *, void *);
-static int booted_le(struct device *, void *);
-static int booted_ze(struct device *, void *);
-static int booted_de(struct device *, void *);
-static int booted_ni(struct device *, void *);
-#if NSD > 0 || NCD > 0
-static int booted_sd(struct device *, void *);
-#endif
-#if NRL > 0
-static int booted_rl(struct device *, void *);
-#endif
-#if NRA
-static int booted_ra(struct device *, void *);
-#endif
-#if NHP
-static int booted_hp(struct device *, void *);
-#endif
-#if NRD
-static int booted_rd(struct device *, void *);
-#endif
-
-int (*devreg[])(struct device *, void *) = {
-	booted_qe,
-	booted_le,
-	booted_ze,
-	booted_de,
-	booted_ni,
-#if NSD > 0 || NCD > 0
-	booted_sd,
-#endif
-#if NRL > 0
-	booted_rl,
-#endif
-#if NRA
-	booted_ra,
-#endif
-#if NHP
-	booted_hp,
-#endif
-#if NRD
-	booted_hd,
-#endif
-	0,
-};
-
-#define	ubreg(x) ((x) & 017777)
-
+#if VAX8600
 void
-device_register(struct device *dev, void *aux)
+find_sbi(self, bp, print)
+	struct	device *self;
+	struct	bp_conf *bp;
+	int	(*print) __P((void *, char *));
 {
-	int (**dp)(struct device *, void *) = devreg;
+	volatile int tmp;
+	volatile struct	sbia_regs *sbiar;
+	extern	struct ioa *ioa;
+	int	type, i;
 
-	/* If there's a synthetic RPB, we can't trust it */
-	if (rpb.rpb_base == (void *)-1)
-		return;
+	for (i = 0; i < MAXNIOA; i++) {
+		if (badaddr((caddr_t)&ioa[i], 4))
+			continue;
+		tmp = ioa[i].ioacsr.ioa_csr;
+		type = tmp & IOA_TYPMSK;
 
-	while (*dp) {
-		if ((*dp)(dev, aux)) {
-			if (bootdv == NULL)
-				bootdv = dev;
+		switch (type) {
+
+		case IOA_SBIA:
+			bp->type = "sbi";
+			bp->num = i;
+			config_found(self, bp, printut);
+			sbiar = (void *)&ioa[i];
+			sbiar->sbi_errsum = -1;
+			sbiar->sbi_error = 0x1000;
+			sbiar->sbi_fltsts = 0xc0000;
+			break;
+
+		default:
+			printf("IOAdapter %x unsupported\n", type);
 			break;
 		}
-		dp++;
 	}
 }
-
-/*
- * Simple checks. Return 1 on fail.
- */
-int
-jmfr(char *n, struct device *dev, int nr)
-{
-	if (rpb.devtyp != nr)
-		return 1;
-	return strcmp(n, dev->dv_cfdata->cf_driver->cd_name);
-}
-
-#include <arch/vax/qbus/ubavar.h>
-int
-ubtest(void *aux)
-{
-	paddr_t p;
-
-	p = kvtophys(((struct uba_attach_args *)aux)->ua_ioh);
-	if (rpb.csrphy != p)
-		return 1;
-	return 0;
-}
-
-#if 1 /* NNI */
-#include <arch/vax/bi/bivar.h>
-int
-booted_ni(struct device *dev, void *aux)
-{
-	struct bi_attach_args *ba = aux;
-
-	if (jmfr("ni", dev, BDEV_NI) || (kvtophys(ba->ba_ioh) != rpb.csrphy))
-		return 0;
-
-	return 1;
-}
-#endif /* NNI */
-
-#if 1 /* NDE */
-int
-booted_de(struct device *dev, void *aux)
-{
-
-	if (jmfr("de", dev, BDEV_DE) || ubtest(aux))
-		return 0;
-
-	return 1;
-}
-#endif /* NDE */
-
-int
-booted_le(struct device *dev, void *aux)
-{
-	if (jmfr("le", dev, BDEV_LE))
-		return 0;
-	return 1;
-}
-
-int
-booted_ze(struct device *dev, void *aux)
-{
-	if (jmfr("ze", dev, BDEV_ZE))
-		return 0;
-	return 1;
-}
-
-#if 1 /* NQE */
-int
-booted_qe(struct device *dev, void *aux)
-{
-	if (jmfr("qe", dev, BDEV_QE) || ubtest(aux))
-		return 0;
-
-	return 1;
-}
-#endif /* NQE */
-
-#if NSD > 0 || NCD > 0
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-int
-booted_sd(struct device *dev, void *aux)
-{
-	struct scsi_attach_args *sa = aux;
-	struct device *ppdev;
-
-	/* Is this a SCSI device? */
-	if (jmfr("sd", dev, BDEV_SD) && jmfr("cd", dev, BDEV_SD) &&
-	    jmfr("sd", dev, BDEV_SDN) && jmfr("cd", dev, BDEV_SDN))
-		return 0;
-
-#ifdef __NetBSD__
-	if (sa->sa_periph->periph_channel->chan_bustype->bustype_type !=
-	    SCSIPI_BUSTYPE_SCSI)
-		return 0; /* ``Cannot happen'' */
 #endif
 
-	if (sa->sa_sc_link->target != rpb.unit)
-		return 0; /* Wrong unit */
+int     cpu_match __P((struct  device  *, void *, void *));
+void	cpu_attach __P((struct  device  *, struct  device  *, void *));
 
-	ppdev = dev->dv_parent->dv_parent;
 
-	/* VS3100 NCR 53C80 (si) & VS4000 NCR 53C94 (asc) */
-	if (((jmfr("ncr",  ppdev, BDEV_SD) == 0) ||	/* old name */
-	    (jmfr("asc", ppdev, BDEV_SD) == 0) ||
-	    (jmfr("asc", ppdev, BDEV_SDN) == 0)) &&
-	    (ppdev->dv_cfdata->cf_loc[0] == rpb.csrphy))
+int
+cpu_match(parent, gcf, aux)
+	struct  device  *parent;
+	void    *gcf, *aux;
+{
+	struct  cfdata  *cf = gcf;
+	struct bp_conf *bp = aux;
+
+	if (strcmp(bp->type, "cpu"))
+		return 0;
+
+	switch (cpunumber) {
+#if VAX750 || VAX630 || VAX650 || VAX780 || VAX8600
+	case VAX_750:
+	case VAX_78032:
+	case VAX_650:
+	case VAX_780:
+	case VAX_8600:
+		if(cf->cf_unit == 0 && bp->partyp == BACKPLANE)
 			return 1;
-
-	return 0; /* Where did we come from??? */
-}
+		break;
 #endif
-#if NRL > 0
-#include <dev/qbus/rlvar.h>
-int
-booted_rl(struct device *dev, void *aux)
-{
-	struct rlc_attach_args *raa = aux;
-	static int ub;
-
-	if (jmfr("rlc", dev, BDEV_RL) == 0)
-		ub = ubtest(aux);
-	if (ub)
-		return 0;
-	if (jmfr("rl", dev, BDEV_RL))
-		return 0;
-	if (raa->hwid != rpb.unit)
-		return 0; /* Wrong unit number */
-	return 1;
-}
-#endif
-
-#if NRA
-#include <arch/vax/mscp/mscp.h>
-#include <arch/vax/mscp/mscpreg.h>
-#include <arch/vax/mscp/mscpvar.h>
-int
-booted_ra(struct device *dev, void *aux)
-{
-	struct drive_attach_args *da = aux;
-	struct mscp_softc *pdev = (void *)dev->dv_parent;
-	paddr_t ioaddr;
-
-	if (jmfr("ra", dev, BDEV_UDA))
-		return 0;
-
-	if (da->da_mp->mscp_unit != rpb.unit)
-		return 0; /* Wrong unit number */
-
-	ioaddr = kvtophys(pdev->mi_iph); /* Get phys addr of CSR */
-	if (rpb.devtyp == BDEV_UDA && rpb.csrphy == ioaddr)
-		return 1; /* Did match CSR */
+	};
 
 	return 0;
 }
-#endif
-#if NHP
-#include <vax/mba/mbavar.h>
-int
-booted_hp(struct device *dev, void *aux)
+
+void
+cpu_attach(parent, self, aux)
+	struct  device  *parent, *self;
+	void    *aux;
 {
-	static int mbaaddr;
+	(*cpu_calls[cpunumber].cpu_conf)(parent, self, aux);
+}
 
-	/* Save last adapter address */
-	if (jmfr("mba", dev, BDEV_HP) == 0) {
-		struct sbi_attach_args *sa = aux;
+int     mem_match __P((struct  device  *, void  *, void *));
+void	mem_attach __P((struct  device  *, struct  device  *, void *));
 
-		mbaaddr = kvtophys(sa->sa_ioh);
+int
+mem_match(parent, gcf, aux)
+	struct  device  *parent;
+	void    *gcf, *aux;
+{
+	struct  cfdata  *cf = gcf;
+	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
+	struct	bp_conf	*bp = aux;
+
+#if VAX8600
+	if (cpunumber == VAX_8600 && !strcmp(parent->dv_xname, "backplane0")) {
+		if (strcmp(bp->type, "mem"))
+			return 0;
+		return 1;
+	}
+#endif
+	if ((cf->cf_loc[0] != sa->nexnum) && (cf->cf_loc[0] > -1))
+		return 0;
+
+	switch (sa->type) {
+	case NEX_MEM4:
+	case NEX_MEM4I:
+	case NEX_MEM16:
+	case NEX_MEM16I:
+		sa->nexinfo = M780C;
+		break;
+
+	case NEX_MEM64I:
+	case NEX_MEM64L:
+	case NEX_MEM64LI:
+	case NEX_MEM256I:
+	case NEX_MEM256L:
+	case NEX_MEM256LI:
+		sa->nexinfo = M780EL;
+		break;
+
+	case NEX_MEM64U:
+	case NEX_MEM64UI:
+	case NEX_MEM256U:
+	case NEX_MEM256UI:
+		sa->nexinfo = M780EU;
+		break;
+
+	default:
 		return 0;
 	}
-
-	if (jmfr("hp", dev, BDEV_HP))
-		return 0;
-
-	if (((struct mba_attach_args *)aux)->ma_unit != rpb.unit)
-		return 0;
-
-	if (mbaaddr != rpb.adpphy)
-		return 0;
-
 	return 1;
 }
-#endif
-#if NHD
-int     
-booted_hd(struct device *dev, void *aux)
+
+void
+mem_attach(parent, self, aux)
+	struct  device  *parent, *self;
+	void    *aux;
 {
-	int *nr = aux; /* XXX - use the correct attach struct */
+	struct	sbi_attach_args *sa = (struct sbi_attach_args *)aux;
+	struct	mem_softc *sc = (void *)self;
 
-	if (jmfr("hd", dev, BDEV_RD))
-		return 0;
-
-	if (*nr != rpb.unit)
-		return 0;
-
-	return 1;
-}
+#if VAX8600
+	if (cpunumber == VAX_8600) {
+		ka86_memenable(0, 0);
+		printf("\n");
+		return;
+	}
 #endif
+	sc->sc_memaddr = sa->nexaddr;
+	sc->sc_memtype = sa->nexinfo;
+	sc->sc_memnr = sa->type;
 
-struct  ngcconf {
-        struct  cfdriver *ng_cf;
-        dev_t   ng_root;
+	switch (cpunumber) {
+#ifdef VAX750
+	case VAX_750:
+		ka750_memenable(sa, (void *)sc);
+		break;
+#endif
+#ifdef VAX780
+	case VAX_780:
+		ka780_memenable(sa, sc);
+		break;
+#endif
+	default:
+		break;
+	}
+
+}
+
+struct	cfdriver backplane_cd = {
+	NULL, "backplane", DV_DULL
 };
 
-struct nam2blk nam2blk[] = {
-	{ "ra",          9 },
-	{ "rx",         12 },
-#ifdef notyet
-	{ "rl",         14 },
-#endif
-	{ "hd",		19 },
-	{ "sd",         20 },
-	{ "cd",         22 },
-	{ "rd",         23 },
-	{ "raid",       25 },
-	{ NULL,		-1 }
+struct	cfattach backplane_ca = {
+	sizeof(struct device), backplane_match, backplane_attach
+};
+
+struct	cfdriver cpu_cd = {
+	NULL, "cpu", DV_CPU
+};
+
+struct	cfattach cpu_backplane_ca = {
+	sizeof(struct device), cpu_match, cpu_attach
+};
+
+struct  cfdriver mem_cd = {
+	NULL, "mem", DV_CPU
+};
+
+struct	cfattach mem_backplane_ca = {
+	sizeof(struct device), mem_match, mem_attach
+};
+
+struct	cfattach mem_sbi_ca = {
+	sizeof(struct device), mem_match, mem_attach
 };

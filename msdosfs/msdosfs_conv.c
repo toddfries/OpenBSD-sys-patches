@@ -1,9 +1,9 @@
-/*	$OpenBSD: msdosfs_conv.c,v 1.13 2004/05/14 04:05:05 tedu Exp $	*/
-/*	$NetBSD: msdosfs_conv.c,v 1.24 1997/10/17 11:23:54 ws Exp $	*/
+/*	$OpenBSD: msdosfs_conv.c,v 1.5 1996/03/02 00:54:54 niklas Exp $	*/
+/*	$NetBSD: msdosfs_conv.c,v 1.17 1996/02/09 19:13:42 christos Exp $	*/
 
 /*-
- * Copyright (C) 1995, 1997 Wolfgang Solfrank.
- * Copyright (C) 1995, 1997 TooLs GmbH.
+ * Copyright (C) 1995 Wolfgang Solfrank.
+ * Copyright (C) 1995 TooLs GmbH.
  * All rights reserved.
  * Original code by Paul Popelka (paulp@uts.amdahl.com) (see below).
  *
@@ -67,7 +67,7 @@
 /*
  * Days in each month in a regular year.
  */
-const u_short regyear[] = {
+u_short regyear[] = {
 	31, 28, 31, 30, 31, 30,
 	31, 31, 30, 31, 30, 31
 };
@@ -75,7 +75,7 @@ const u_short regyear[] = {
 /*
  * Days in each month in a leap year.
  */
-const u_short leapyear[] = {
+u_short leapyear[] = {
 	31, 29, 31, 30, 31, 30,
 	31, 31, 30, 31, 30, 31
 };
@@ -84,8 +84,8 @@ const u_short leapyear[] = {
  * Variables used to remember parts of the last time conversion.  Maybe we
  * can avoid a full conversion.
  */
-uint32_t lasttime;
-uint32_t lastday;
+u_long lasttime;
+u_long lastday;
 u_short lastddate;
 u_short lastdtime;
 
@@ -94,26 +94,33 @@ u_short lastdtime;
  * file timestamps. The passed in unix time is assumed to be in GMT.
  */
 void
-unix2dostime(tsp, ddp, dtp, dhp)
+unix2dostime(tsp, ddp, dtp)
 	struct timespec *tsp;
 	u_int16_t *ddp;
 	u_int16_t *dtp;
-	u_int8_t *dhp;
 {
-	uint32_t t;
-	uint32_t days;
-	uint32_t inc;
-	uint32_t year;
-	uint32_t month;
-	const u_short *months;
+	u_long t;
+	u_long days;
+	u_long inc;
+	u_long year;
+	u_long month;
+	u_short *months;
+	struct timespec ts;
+
+	/*
+	 * NULL means to read the current time.
+	 */
+	if (tsp == NULL) {
+		TIMEVAL_TO_TIMESPEC(&time, &ts);
+		tsp = &ts;
+	}
 
 	/*
 	 * If the time from the last conversion is the same as now, then
 	 * skip the computations and use the saved result.
 	 */
 	t = tsp->tv_sec - (tz.tz_minuteswest * 60)
-	     /* +- daylight saving time correction */ ;
-	t &= ~1;
+	     /* +- daylight savings time correction */ ;
 	if (lasttime != t) {
 		lasttime = t;
 		lastdtime = (((t / 2) % 30) << DT_2SECONDS_SHIFT)
@@ -152,12 +159,7 @@ unix2dostime(tsp, ddp, dtp, dhp)
 				lastddate += (year - 1980) << DD_YEAR_SHIFT;
 		}
 	}
-
-	if (dtp != NULL)
-		*dtp = lastdtime;
-	if (dhp != NULL)
-	        *dhp = (tsp->tv_sec & 1) * 100 + tsp->tv_nsec / 10000000;
-
+	*dtp = lastdtime;
 	*ddp = lastddate;
 }
 
@@ -168,7 +170,7 @@ unix2dostime(tsp, ddp, dtp, dhp)
 #define	SECONDSTO1980	(((8 * 365) + (2 * 366)) * (24 * 60 * 60))
 
 u_short lastdosdate;
-uint32_t lastseconds;
+u_long lastseconds;
 
 /*
  * Convert from dos' idea of time to unix'. This will probably only be
@@ -176,17 +178,16 @@ uint32_t lastseconds;
  * not be too efficient.
  */
 void
-dos2unixtime(dd, dt, dh, tsp)
+dos2unixtime(dd, dt, tsp)
 	u_int dd;
 	u_int dt;
-	u_int dh;
 	struct timespec *tsp;
 {
-	uint32_t seconds;
-	uint32_t m, month;
-	uint32_t y, year;
-	uint32_t days;
-	const u_short *months;
+	u_long seconds;
+	u_long m, month;
+	u_long y, year;
+	u_long days;
+	u_short *months;
 
 	if (dd == 0) {
 		/*
@@ -198,8 +199,7 @@ dos2unixtime(dd, dt, dh, tsp)
 	}
 	seconds = ((dt & DT_2SECONDS_MASK) >> DT_2SECONDS_SHIFT) * 2
 	    + ((dt & DT_MINUTES_MASK) >> DT_MINUTES_SHIFT) * 60
-	    + ((dt & DT_HOURS_MASK) >> DT_HOURS_SHIFT) * 3600
-	    + dh / 100;
+	    + ((dt & DT_HOURS_MASK) >> DT_HOURS_SHIFT) * 3600;
 	/*
 	 * If the year, month, and day from the last conversion are the
 	 * same then use the saved value.
@@ -217,8 +217,10 @@ dos2unixtime(dd, dt, dh, tsp)
 		 */
 		month = (dd & DD_MONTH_MASK) >> DD_MONTH_SHIFT;
 		if (month == 0) {
+#if 0
 			printf("dos2unixtime(): month value out of range (%ld)\n",
-			    month);
+			       month);
+#endif
 			month = 1;
 		}
 		for (m = 0; m < month - 1; m++)
@@ -227,24 +229,24 @@ dos2unixtime(dd, dt, dh, tsp)
 		lastseconds = (days * 24 * 60 * 60) + SECONDSTO1980;
 	}
 	tsp->tv_sec = seconds + lastseconds + (tz.tz_minuteswest * 60)
-	     /* -+ daylight saving time correction */ ;
-	tsp->tv_nsec = (dh % 100) * 10000000;
+	     /* -+ daylight savings time correction */ ;
+	tsp->tv_nsec = 0;
 }
 
-static const u_char
+static u_char
 unix2dos[256] = {
 	0,    0,    0,    0,    0,    0,    0,    0,	/* 00-07 */
 	0,    0,    0,    0,    0,    0,    0,    0,	/* 08-0f */
 	0,    0,    0,    0,    0,    0,    0,    0,	/* 10-17 */
 	0,    0,    0,    0,    0,    0,    0,    0,	/* 18-1f */
-	0,    0x21, 0,    0x23, 0x24, 0x25, 0x26, 0x27,	/* 20-27 */
-	0x28, 0x29, 0,    0,    0,    0x2d, 0,    0,	/* 28-2f */
+	0,    0x21, 0,    0x23, 0x24, 0x25, 0x26, 0,	/* 20-27 */
+	0x28, 0x29, 0,    0,    0x2c, 0x2d, 0,    0,	/* 28-2f */
 	0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,	/* 30-37 */
-	0x38, 0x39, 0,    0,    0,    0,    0,    0,	/* 38-3f */
+	0x38, 0x39, 0,    0x3b, 0,    0,    0,    0,	/* 38-3f */
 	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,	/* 40-47 */
 	0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,	/* 48-4f */
 	0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,	/* 50-57 */
-	0x58, 0x59, 0x5a, 0,    0,    0,    0x5e, 0x5f,	/* 58-5f */
+	0x58, 0x59, 0x5a, 0,    0,    0,    0,    0x5f,	/* 58-5f */
 	0x60, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,	/* 60-67 */
 	0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,	/* 68-6f */
 	0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,	/* 70-77 */
@@ -267,7 +269,7 @@ unix2dos[256] = {
 	0x9d, 0xeb, 0xe9, 0xea, 0x9a, 0xed, 0xe8, 0x98,	/* f8-ff */
 };
 
-static const u_char
+static u_char
 dos2unix[256] = {
 	0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,	/* 00-07 */
 	0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,	/* 08-0f */
@@ -303,7 +305,7 @@ dos2unix[256] = {
 	0xb0, 0xa8, 0xb7, 0xb9, 0xb3, 0xb2, 0x3f, 0x3f,	/* f8-ff */
 };
 
-static const u_char
+static u_char
 u2l[256] = {
 	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, /* 00-07 */
 	0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, /* 08-0f */
@@ -553,7 +555,7 @@ unix2dosfn(un, dn, unlen, gen)
 		i = 8 - (gentext + sizeof(gentext) - cp + 1);
 	dn[i++] = '~';
 	while (cp < gentext + sizeof(gentext))
-		dn[i++] = *cp++;
+		dn[i] = *cp++;
 	return 3;
 }
 
@@ -654,9 +656,6 @@ winChkName(un, unlen, wep, chksum)
 	if ((unlen -= i) <= 0)
 		return -1;
 	un += i;
-
-	if ((wep->weCnt&WIN_LAST) && unlen > WIN_CHARS)
-		return -1;
 	
 	/*
 	 * Compare the name parts

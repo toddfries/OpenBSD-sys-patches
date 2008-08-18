@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_exec.c,v 1.18 2005/12/30 19:46:55 miod Exp $	*/
+/*	$OpenBSD: sunos_exec.c,v 1.6 1996/08/31 09:24:04 pefo Exp $	*/
 /*	$NetBSD: sunos_exec.c,v 1.11 1996/05/05 12:01:47 briggs Exp $	*/
 
 /*
@@ -13,6 +13,8 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -42,26 +44,30 @@
 #include <sys/wait.h>
 
 #include <sys/mman.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/vm_map.h>
+#include <vm/vm_kern.h>
+#include <vm/vm_pager.h>
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
 #include <machine/exec.h>
 
+#include <compat/sunos/exec.h>
 #include <compat/sunos/sunos.h>
-#include <compat/sunos/sunos_exec.h>
 #include <compat/sunos/sunos_syscall.h>
 
-#ifdef __sparc__
+#ifdef sparc
 #define	sunos_exec_aout_prep_zmagic exec_aout_prep_zmagic
 #define	sunos_exec_aout_prep_nmagic exec_aout_prep_nmagic
 #define	sunos_exec_aout_prep_omagic exec_aout_prep_omagic
 #endif
 
-int sunos_exec_aout_makecmds(struct proc *, struct exec_package *);
-int sunos_exec_aout_prep_zmagic(struct proc *, struct exec_package *);
-int sunos_exec_aout_prep_nmagic(struct proc *, struct exec_package *);
-int sunos_exec_aout_prep_omagic(struct proc *, struct exec_package *);
+int sunos_exec_aout_makecmds __P((struct proc *, struct exec_package *));
+int sunos_exec_aout_prep_zmagic __P((struct proc *, struct exec_package *));
+int sunos_exec_aout_prep_nmagic __P((struct proc *, struct exec_package *));
+int sunos_exec_aout_prep_omagic __P((struct proc *, struct exec_package *));
 
 extern int nsunos_sysent;
 extern struct sysent sunos_sysent[];
@@ -74,7 +80,7 @@ const char sunos_emul_path[] = "/emul/sunos";
 struct emul emul_sunos = {
 	"sunos",
 	NULL,
-#ifdef __sparc__
+#ifdef sparc
 	sendsig,
 #else
 	sunos_sendsig,
@@ -103,9 +109,6 @@ sunos_exec_aout_makecmds(p, epp)
 	struct sunos_exec *sunmag = epp->ep_hdr;
 	int error = ENOEXEC;
 
-	if (epp->ep_hdrvalid < sizeof(struct sunos_exec))
-		return (ENOEXEC);
-
 	if(sunmag->a_machtype != SUNOS_M_NATIVE)
 		return (ENOEXEC);
 
@@ -128,7 +131,7 @@ sunos_exec_aout_makecmds(p, epp)
 /*
  * the code below is only needed for sun3 emulation.
  */
-#ifndef __sparc__
+#ifndef sparc
 
 /* suns keep data seg aligned to SEGSIZ because of sun custom mmu */
 #define SEGSIZ		0x20000
@@ -172,11 +175,11 @@ sunos_exec_aout_prep_zmagic(p, epp)
 	    epp->ep_vp->v_writecount != 0) {
 #ifdef DIAGNOSTIC
 		if (epp->ep_vp->v_flag & VTEXT)
-			panic("exec: a VTEXT vnode has writecount != 0");
+			panic("exec: a VTEXT vnode has writecount != 0\n");
 #endif
 		return ETXTBSY;
 	}
-	vn_marktext(epp->ep_vp);
+	epp->ep_vp->v_flag |= VTEXT;
 
 	/* set up command for text segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_pagedvn, execp->a_text,
@@ -193,7 +196,7 @@ sunos_exec_aout_prep_zmagic(p, epp)
 	    epp->ep_daddr + execp->a_data, NULLVP, 0,
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return exec_aout_setup_stack(p, epp);
 }
 
 /*
@@ -224,13 +227,13 @@ sunos_exec_aout_prep_nmagic(p, epp)
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, NBPG);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
 		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return exec_aout_setup_stack(p, epp);
 }
 
 /*
@@ -256,12 +259,12 @@ sunos_exec_aout_prep_omagic(p, epp)
 	    SUNOS_N_TXTOFF(*execp, OMAGIC), VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, NBPG);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
 		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return exec_aout_setup_stack(p, epp);
 }
-#endif /* !__sparc__ */
+#endif /* !sparc */

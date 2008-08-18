@@ -1,4 +1,4 @@
-/*	$OpenBSD: chio.h,v 1.7 2006/05/31 03:01:44 beck Exp $	*/
+/*	$OpenBSD: chio.h,v 1.4 1996/04/21 22:31:32 deraadt Exp $	*/
 /*	$NetBSD: chio.h,v 1.8 1996/04/03 00:25:21 thorpej Exp $	*/
 
 /*
@@ -48,11 +48,6 @@
 #define CHET_ST		1	/* storage transport (slot) */
 #define CHET_IE		2	/* import/export (portal) */
 #define CHET_DT		3	/* data transfer (drive) */
-
-/*
- * Maximum length of a volume identification string
- */                                               
-#define CH_VOLTAG_MAXLEN 32
 
 /*
  * Structure used to execute a MOVE MEDIUM command.
@@ -119,27 +114,12 @@ struct changer_params {
 	int	cp_ndrives;	/* number of drives */
 };
 
-struct changer_voltag {
-	u_char		cv_volid[CH_VOLTAG_MAXLEN + 1];
-	u_int16_t	cv_serial;
-};
-
-struct changer_element_status {
-	int	 		ces_type;		/* element type */
-	u_int8_t 		ces_flags;		/* flags */
-  	struct changer_voltag	ces_pvoltag;		/* primary voltag */
-	struct changer_voltag	ces_avoltag;		/* alternate voltag */
-};
-
 /*
  * Command used to get element status.
  */
-struct changer_element_status_request {
-	int				cesr_type;  /* element type */
-	int				cesr_flags;
-#define CESR_VOLTAGS 0x01	
-
-	struct changer_element_status	*cesr_data; /* pre-allocated data storage */
+struct changer_element_status {
+	int	ces_type;	/* element type */
+	u_int8_t *ces_data;	/* pre-allocated data storage */
 };
 
 /*
@@ -161,16 +141,12 @@ struct changer_element_status_request {
 #define CESTATUS_BITS	\
 	"\20\6INEAB\5EXENAB\4ACCESS\3EXCEPT\2IMPEXP\1FULL"
 
-/*
- * XXX we have to renumber this since it chashes w/ the
- * cdio ioctls, O* interface goes away right after 3.3
- */
-#define CHIOMOVE	_IOW('c', 0x41, struct changer_move)
-#define CHIOEXCHANGE	_IOW('c', 0x42, struct changer_exchange)
-#define CHIOPOSITION	_IOW('c', 0x43, struct changer_position)
-#define CHIOGPICKER	_IOR('c', 0x44, int)
-#define CHIOSPICKER	_IOW('c', 0x45, int)
-#define CHIOGPARAMS	_IOR('c', 0x46, struct changer_params)
-#define CHIOGSTATUS	_IOW('c', 0x48, struct changer_element_status_request)
+#define CHIOMOVE	_IOW('c', 0x01, struct changer_move)
+#define CHIOEXCHANGE	_IOW('c', 0x02, struct changer_exchange)
+#define CHIOPOSITION	_IOW('c', 0x03, struct changer_position)
+#define CHIOGPICKER	_IOR('c', 0x04, int)
+#define CHIOSPICKER	_IOW('c', 0x05, int)
+#define CHIOGPARAMS	_IOR('c', 0x06, struct changer_params)
+#define CHIOGSTATUS	_IOW('c', 0x08, struct changer_element_status)
 
 #endif /* _SYS_CHIO_H_ */

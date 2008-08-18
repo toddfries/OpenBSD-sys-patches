@@ -1,5 +1,4 @@
-/*	$OpenBSD: apmvar.h,v 1.15 2002/03/14 01:26:33 millert Exp $	*/
-
+/*	$NetBSD$	*/
 /*
  *  Copyright (c) 1995 John T. Kohl
  *  All rights reserved.
@@ -28,32 +27,26 @@
  * POSSIBILITY OF SUCH DAMAGE.
  * 
  */
-#ifndef _I386_APMVAR_H_
-#define _I386_APMVAR_H_
-
-#include <sys/ioccom.h>
+#ifndef __I386_APM_H__
+#define __I386_APM_H__
 
 /* Advanced Power Management (v1.0 and v1.1 specification)
  * functions/defines/etc.
  */
-
-#define	APM_VERSION	0x0102
-
+#define APM_BIOS_FNCODE	(0x53)
+#define APM_SYSTEM_BIOS	(0x15)
+#define APM_BIOS_FN(x)	((APM_BIOS_FNCODE<<8)|(x))
 /*
  * APM info word from boot loader
  */
+#define	APM_MAJOR_VERS(info) (((info)&0xff00)>>8)
+#define	APM_MINOR_VERS(info) ((info)&0xff)
 #define APM_16BIT_SUPPORTED	0x00010000
 #define APM_32BIT_SUPPORTED	0x00020000
 #define APM_IDLE_SLOWS		0x00040000
 #define APM_BIOS_PM_DISABLED	0x00080000
 #define APM_BIOS_PM_DISENGAGED	0x00100000
-#define	APM_MAJOR(f)		(((f) >> 8) & 0xff)
-#define	APM_MINOR(f)		((f) & 0xff)
-#define	APM_VERMASK		0x0000ffff
-#define	APM_NOCLI		0x00010000
-#define	APM_BEBATT		0x00020000
 
-/* APM error codes */
 #define	APM_ERR_CODE(regs)	(((regs)->ax & 0xff00) >> 8)
 #define	APM_ERR_PM_DISABLED	0x01
 #define	APM_ERR_REALALREADY	0x02
@@ -65,8 +58,6 @@
 #define	APM_ERR_UNRECOG_DEV	0x09
 #define	APM_ERR_ERANGE		0x0A
 #define	APM_ERR_NOTENGAGED	0x0B
-#define	APM_ERR_EOPNOSUPP	0x0C
-#define	APM_ERR_RTIMER_DISABLED	0x0D
 #define APM_ERR_UNABLE		0x60
 #define APM_ERR_NOEVENTS	0x80
 #define	APM_ERR_NOT_PRESENT	0x86
@@ -80,51 +71,35 @@
 #define		APM_DEV_SERIAL(x)	(0x0400|((x)&0xff))
 #define		APM_DEV_NETWORK(x)	(0x0500|((x)&0xff))
 #define		APM_DEV_PCMCIA(x)	(0x0600|((x)&0xff))
-#define		APM_DEV_BATTERIES(x)	(0x8000|((x)&0xff))
 #define		APM_DEV_ALLUNITS	0xff
-/* 0x8100-0xDFFF - reserved	*/
-/* 0xE000-0xEFFF - OEM-defined	*/
-/* 0xF000-0xFFFF - reserved	*/
 
-#define	APM_INSTCHECK		0x5300	/* int15 only */
-#define		APM_16BIT_SUPPORT	0x01
-#define		APM_32BIT_SUPPORT	0x02
-#define		APM_CPUIDLE_SLOW	0x04
-#define		APM_DISABLED		0x08
-#define		APM_DISENGAGED		0x10
-
-#define	APM_REAL_CONNECT	0x5301	/* int15 only */
-#define	APM_PROT16_CONNECT	0x5302	/* int15 only */
-#define	APM_PROT32_CONNECT	0x5303	/* int15 only */
-#define APM_DISCONNECT		0x5304	/* %bx = APM_DEV_APM_BIOS */
-
-#define APM_CPU_IDLE		0x5305
-#define APM_CPU_BUSY		0x5306
-
-#define APM_SET_PWR_STATE	0x5307
-#define		APM_SYS_READY		0x0000	/* %cx */
-#define		APM_SYS_STANDBY		0x0001
-#define		APM_SYS_SUSPEND		0x0002
-#define		APM_SYS_OFF		0x0003
+#define	APM_INSTALLATION_CHECK	0x00	/* int15 only */
+#define	APM_REALMODE_CONNECT	0x01	/* int15 only */
+#define	APM_16BIT_CONNECT	0x02	/* int15 only */
+#define	APM_32BIT_CONNECT	0x03	/* int15 only */
+#define APM_DISCONNECT		0x04	/* %bx = APM_DEV_APM_BIOS */
+#define APM_CPU_IDLE		0x05
+#define APM_CPU_BUSY		0x06
+#define APM_SET_PWR_STATE	0x07
+#define		APM_SYS_READY	0x0000	/* %cx */
+#define		APM_SYS_STANDBY	0x0001
+#define		APM_SYS_SUSPEND	0x0002
+#define		APM_SYS_OFF	0x0003
 #define		APM_LASTREQ_INPROG	0x0004
 #define		APM_LASTREQ_REJECTED	0x0005
-/* 0x0006 - 0x001f	Reserved system states    */
-/* 0x0020 - 0x003f	OEM-defined system states */
-/* 0x0040 - 0x007f	OEM-defined device states */
-/* 0x0080 - 0xffff	Reserved device states    */
 
 /* system standby is device ID (%bx) 0x0001, APM_SYS_STANDBY */
 /* system suspend is device ID (%bx) 0x0001, APM_SYS_SUSPEND */
 
-#define APM_PWR_MGT_ENABLE	0x5308
+#define APM_PWR_MGT_ENABLE	0x08
 #define		APM_MGT_ALL	0xffff	/* %bx */
 #define		APM_MGT_DISABLE	0x0	/* %cx */
 #define		APM_MGT_ENABLE	0x1
 
-#define APM_SYSTEM_DEFAULTS	0x5309
+#define APM_SYSTEM_DEFAULTS	0x09
 #define		APM_DEFAULTS_ALL	0xffff	/* %bx */
 
-#define APM_POWER_STATUS	0x530a
+#define APM_POWER_STATUS	0x0a
 #define		APM_AC_OFF		0x00
 #define		APM_AC_ON		0x01
 #define		APM_AC_BACKUP		0x02
@@ -138,26 +113,17 @@
 #define		APM_BATT_FLAG_LOW	0x02
 #define		APM_BATT_FLAG_CRITICAL	0x04
 #define		APM_BATT_FLAG_CHARGING	0x08
-#define		APM_BATT_FLAG_NOBATTERY	0x10
-#define		APM_BATT_FLAG_NOSYSBATT	0x80
+#define		APM_BATT_FLAG_NOBATTERY	0x80
 #define		APM_BATT_LIFE_UNKNOWN	0xff
 #define		BATT_STATE(regp) ((regp)->bx & 0xff)
 #define		BATT_FLAGS(regp) (((regp)->cx & 0xff00) >> 8)
 #define		AC_STATE(regp) (((regp)->bx & 0xff00) >> 8)
 #define		BATT_LIFE(regp) ((regp)->cx & 0xff) /* in % */
-/* Return time in minutes. According to the APM 1.2 spec:
-	DX = Remaining battery life -- time units
-		Bit 15 = 0	Time units are seconds
-		       = 1 	Time units are minutes
-		Bits 14-0 =	Number of seconds or minutes */
 #define		BATT_REMAINING(regp) (((regp)->dx & 0x8000) ? \
-				      ((regp)->dx & 0x7fff) : \
-				      ((regp)->dx & 0x7fff)/60)
+				      ((regp)->dx & 0x7fff)*60 : \
+				      ((regp)->dx & 0x7fff))
 #define		BATT_REM_VALID(regp) (((regp)->dx & 0xffff) != 0xffff)
-#define		BATT_COUNT(regp)	((regp)->si)
-
-#define	APM_GET_PM_EVENT	0x530b
-#define		APM_NOEVENT		0x0000
+#define	APM_GET_PM_EVENT	0x0b
 #define		APM_STANDBY_REQ		0x0001 /* %bx on return */
 #define		APM_SUSPEND_REQ		0x0002
 #define		APM_NORMAL_RESUME	0x0003
@@ -170,21 +136,11 @@
 #define		APM_USER_STANDBY_REQ	0x0009
 #define		APM_USER_SUSPEND_REQ	0x000A
 #define		APM_SYS_STANDBY_RESUME	0x000B
-#define		APM_CAPABILITY_CHANGE	0x000C	/* apm v1.2 */
-/* 0x000d - 0x00ff	Reserved system events */
-/* 0x0100 - 0x01ff	Reserved device events */
-/* 0x0200 - 0x02ff	OEM-defined APM events */
-/* 0x0300 - 0xffff	Reserved */
-#define		APM_EVENT_MASK		0xffff
 
-#define	APM_EVENT_COMPOSE(t,i)	((((i) & 0x7fff) << 16)|((t) & APM_EVENT_MASK))
-#define	APM_EVENT_TYPE(e)	((e) & APM_EVENT_MASK)
-#define	APM_EVENT_INDEX(e)	((e) >> 16)
+#define	APM_GET_POWER_STATE	0x0c
+#define	APM_DEVICE_MGMT_ENABLE	0x0d
 
-#define	APM_GET_POWER_STATE	0x530c
-#define	APM_DEVICE_MGMT_ENABLE	0x530d
-
-#define	APM_DRIVER_VERSION	0x530e
+#define	APM_DRIVER_VERSION	0x0e
 /* %bx should be DEV value (APM_DEV_APM_BIOS)
    %ch = driver major vno
    %cl = driver minor vno
@@ -193,59 +149,13 @@
 #define		APM_CONN_MINOR(regp) ((regp)->ax & 0xff)
 #define		APM_CONN_MAJOR(regp) (((regp)->ax & 0xff00) >> 8)
 
-#define APM_PWR_MGT_ENGAGE	0x530F
+#define APM_PWR_MGT_ENGAGE	0x0F
 #define		APM_MGT_DISENGAGE	0x0	/* %cx */
 #define		APM_MGT_ENGAGE		0x1
 
-/* %bx - APM_DEV_APM_BIOS
- * %bl - number of batteries
- * %cx - capabilities
- */
-#define	APM_GET_CAPABILITIES	0x5310
-#define		APM_NBATTERIES(regp)	((regp)->bx)
-#define		APM_GLOBAL_STANDBY	0x0001
-#define		APM_GLOBAL_SUSPEND	0x0002
-#define		APM_RTIMER_STANDBY	0x0004	/* resume time wakes up */
-#define		APM_RTIMER_SUSPEND	0x0008
-#define		APM_IRRING_STANDBY	0x0010	/* internal ring wakes up */
-#define		APM_IRRING_SUSPEND	0x0020
-#define		APM_PCCARD_STANDBY	0x0040	/* pccard wakes up */
-#define		APM_PCCARD_SUSPEND	0x0080
+#define APM_OEM			0x80
 
-/* %bx - APM_DEV_APM_BIOS
- * %cl - function
- *	for %cl=2 (set resume timer)
- * %ch - seconds in BCD
- * %dh - hours in BCD
- * %dl - minutes in BCD
- * %si - month in BCD (high), day in BCD (low)
- * %di - year in BCD
- */
-#define	APM_RESUME_TIMER	0x5311
-#define		APM_RT_DISABLE	0x0
-#define		APM_RT_GET	0x1
-#define		APM_RT_SET	0x2
-
-/* %bx - APM_DEV_APM_BIOS
- * %cx - function
- */
-#define	APM_RESUME_ON_RING	0x5312
-#define		APM_ROR_DISABLE	0x0
-#define		APM_ROR_ENABLE	0x1
-#define		APM_ROR_STATUS	0x2
-
-/* %bx - APM_EDV_APM_BIOS
- * %cx - function
- */
-#define	APM_INACTIVITY_TIMER	0x5313
-#define		APM_IT_DISABLE	0x0
-#define		APM_IT_ENABLE	0x1
-#define		APM_IT_STATUS	0x2
-
-/* %bh - function */
-#define APM_OEM			0x5380
-#define		APM_OEM_INSTCHECK	0x7f	/* %bx - OEM ID */
-
+#ifdef _LOCORE
 /*
  * LP (Laptop Package)
  *
@@ -260,6 +170,58 @@
  *
  * Sep., 1994	Implemented on FreeBSD 1.1.5.1R (Toshiba AVS001WD)
  */
+
+/* Error code of APM initializer */
+#define APMINI_CANTFIND		0xffffffff
+#define APMINI_NOT32BIT		0xfffffffe
+#define APMINI_CONNECTERR	0xfffffffd
+
+#define	SIZEOF_GDTE		8
+#define BOOTSTRAP_GDT_NUM	9	/* see i386/boot/table.c */
+
+#define APM_INIT_CS_INDEX	(BOOTSTRAP_GDT_NUM - 3)
+#define APM_INIT_DS_INDEX	(BOOTSTRAP_GDT_NUM - 2)
+#define APM_INIT_CS16_INDEX	(BOOTSTRAP_GDT_NUM - 1)
+#define APM_INIT_CS_SEL		(APM_INIT_CS_INDEX << 3)
+#define APM_INIT_DS_SEL		(APM_INIT_DS_INDEX << 3)
+#define APM_INIT_CS16_SEL	(APM_INIT_CS16_INDEX << 3)
+
+#define CS32_ATTRIB		0xCF9e
+#define CS16_ATTRIB		0x0F9e
+#define DS32_ATTRIB		0xCF92
+
+#define BOOTSTRAP_DS_SEL	0x10
+/* APM initializer physical address */
+#define APM_OURADDR		0x00080000
+#define APM_RELOC(x)	((x) - _apm_init_image)
+
+#else /* !_LOCORE */
+
+/* filled in by apmcall */ 
+struct apmregs {
+    u_short ax;
+    u_short bx;
+    u_short cx;
+    u_short dx;
+};
+
+struct apm_connect_info {
+	u_int apm_code32_seg_base;	/* real-mode style segment selector */
+	u_int apm_code16_seg_base;
+	u_int apm_data_seg_base;
+	u_int apm_entrypt;
+	u_short	apm_segsel;		/* segment selector for APM */
+	u_short _pad1;
+	u_int apm_code32_seg_len;
+	u_int apm_data_seg_len;
+	u_int apm_detail;
+};
+
+struct apm_event_info {
+	u_int type;
+	u_int index;
+	u_int spare[8];
+};
 
 #define APM_BATTERY_ABSENT 4
 
@@ -281,19 +243,21 @@ struct apm_ctl {
 #define	APM_IOC_STANDBY	_IO('A', 1)	/* put system into standby */
 #define	APM_IOC_SUSPEND	_IO('A', 2)	/* put system into suspend */
 #define	APM_IOC_GETPOWER _IOR('A', 3, struct apm_power_info) /* fetch battery state */
+#define	APM_IOC_NEXTEVENT _IOR('A', 4, struct apm_event_info) /* fetch event */
 #define	APM_IOC_DEV_CTL	_IOW('A', 5, struct apm_ctl) /* put device into mode */
-#define APM_IOC_PRN_CTL _IOW('A', 6, int ) /* driver power status msg */
-#define		APM_PRINT_ON	0	/* driver power status displayed */
-#define		APM_PRINT_OFF	1	/* driver power status not displayed */
-#define		APM_PRINT_PCT	2	/* driver power status only displayed
-					   if the percentage changes */
+
+struct apm_attach_args {
+	char *aaa_busname;
+};
 
 #ifdef _KERNEL
-extern void apm_cpu_busy(void);
-extern void apm_cpu_idle(void);
-extern void apminit(void);
-int apm_set_powstate(u_int devid, u_int powstate);
-int apm_kqfilter(dev_t dev, struct knote *kn);
+extern struct apm_connect_info apminfo;	/* in locore */
+extern int apmpresent;
+extern int apmcall __P((int function, struct apmregs *regs));
+extern void apm_cpu_busy __P((void));
+extern void apm_cpu_idle __P((void));
+extern void apminit __P((void));
+int apm_set_powstate __P((u_int devid, u_int powstate));
 #endif /* _KERNEL */
-
-#endif /* _I386_APMVAR_H_ */
+#endif /* _LOCORE */
+#endif /* __i386_apm_h__ */

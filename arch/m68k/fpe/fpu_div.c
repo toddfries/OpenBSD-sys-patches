@@ -1,5 +1,5 @@
-/*	$OpenBSD: fpu_div.c,v 1.5 2006/06/11 20:43:28 miod Exp $	*/
-/*	$NetBSD: fpu_div.c,v 1.4 2003/08/07 16:28:11 agc Exp $ */
+/*	$OpenBSD: fpu_div.c,v 1.2 1996/05/29 21:05:15 niklas Exp $ */
+/*	$NetBSD: fpu_div.c,v 1.1 1995/11/03 04:47:02 briggs Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -22,7 +22,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -49,8 +53,8 @@
 
 #include <machine/reg.h>
 
-#include <m68k/fpe/fpu_arith.h>
-#include <m68k/fpe/fpu_emulate.h>
+#include "fpu_arith.h"
+#include "fpu_emulate.h"
 
 /*
  * Division of normal numbers is done as follows:
@@ -149,11 +153,11 @@
 
 struct fpn *
 fpu_div(fe)
-	struct fpemu *fe;
+	register struct fpemu *fe;
 {
-	struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
-	u_int q, bit;
-	u_int r0, r1, r2, d0, d1, d2, y0, y1, y2;
+	register struct fpn *x = &fe->fe_f1, *y = &fe->fe_f2;
+	register u_int q, bit;
+	register u_int r0, r1, r2, r3, d0, d1, d2, d3, y0, y1, y2, y3;
 	FPU_DECL_CARRY
 
 	fe->fe_fpsr &= ~FPSR_EXCP; /* clear all exceptions */
@@ -202,7 +206,7 @@ fpu_div(fe)
 	 */
 
 #define	SUBTRACT		/* D = R - Y */ \
-	FPU_SUBS(d2, r2, y2); \
+	FPU_SUBS(d3, r3, y3); FPU_SUBCS(d2, r2, y2); \
 	FPU_SUBCS(d1, r1, y1); FPU_SUBC(d0, r0, y0)
 
 #define	NONNEGATIVE		/* D >= 0 */ \
@@ -210,12 +214,12 @@ fpu_div(fe)
 
 #ifdef FPU_SHL1_BY_ADD
 #define	SHL1			/* R <<= 1 */ \
-	FPU_ADDS(r2, r2, r2); \
+	FPU_ADDS(r3, r3, r3); FPU_ADDCS(r2, r2, r2); \
 	FPU_ADDCS(r1, r1, r1); FPU_ADDC(r0, r0, r0)
 #else
 #define	SHL1 \
 	r0 = (r0 << 1) | (r1 >> 31), r1 = (r1 << 1) | (r2 >> 31), \
-	r2 <<= 1
+	r2 = (r2 << 1) | (r3 >> 31), r3 <<= 1
 #endif
 
 #define	LOOP			/* do ... while (bit >>= 1) */ \
@@ -224,7 +228,7 @@ fpu_div(fe)
 		SUBTRACT; \
 		if (NONNEGATIVE) { \
 			q |= bit; \
-			r0 = d0, r1 = d1, r2 = d2; \
+			r0 = d0, r1 = d1, r2 = d2, r3 = d3; \
 		} \
 	} while ((bit >>= 1) != 0)
 
@@ -238,15 +242,17 @@ fpu_div(fe)
 	r0 = x->fp_mant[0];
 	r1 = x->fp_mant[1];
 	r2 = x->fp_mant[2];
+	r3 = x->fp_mant[3];
 	y0 = y->fp_mant[0];
 	y1 = y->fp_mant[1];
 	y2 = y->fp_mant[2];
+	y3 = y->fp_mant[3];
 
 	bit = FP_1;
 	SUBTRACT;
 	if (NONNEGATIVE) {
 		x->fp_exp -= y->fp_exp;
-		r0 = d0, r1 = d1, r2 = d2;
+		r0 = d0, r1 = d1, r2 = d2, r3 = d3;
 		q = bit;
 		bit >>= 1;
 	} else {
@@ -257,7 +263,8 @@ fpu_div(fe)
 	x->fp_mant[0] = q;
 	WORD(x, 1);
 	WORD(x, 2);
-	x->fp_sticky = r0 | r1 | r2;
+	WORD(x, 3);
+	x->fp_sticky = r0 | r1 | r2 | r3;
 
 	return (x);
 }

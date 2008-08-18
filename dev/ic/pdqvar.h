@@ -1,5 +1,5 @@
-/*	$OpenBSD: pdqvar.h,v 1.18 2006/03/25 22:41:43 djm Exp $	*/
-/*	$NetBSD: pdqvar.h,v 1.11 1996/10/25 21:33:37 cgd Exp $	*/
+/*	$OpenBSD: pdqvar.h,v 1.6 1996/08/21 22:27:42 deraadt Exp $	*/
+/*	$NetBSD: pdqvar.h,v 1.6.4.1 1996/06/08 00:17:49 cgd Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1996 Matt Thomas <matt@3am-software.com>
@@ -11,7 +11,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
+ *    derived from this software withough specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -61,8 +61,7 @@ enum _pdq_type_t {
 
 #if defined(PDQTEST)
 #include <pdq_os_test.h>
-#elif defined(__FreeBSD__) || defined(__bsdi__) || defined(__NetBSD__) \
-    || defined(__OpenBSD__)
+#elif defined(__FreeBSD__) || defined(__bsdi__) || defined(__NetBSD__) || defined(__OpenBSD__)
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -70,7 +69,8 @@ enum _pdq_type_t {
 #include <sys/mbuf.h>
 #endif /* M_CAST */
 #include <sys/malloc.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
 
 #define	PDQ_USE_MBUFS
 #if defined(__NetBSD__) || defined(__OpenBSD__)
@@ -84,9 +84,9 @@ enum _pdq_type_t {
 #define	PDQ_OS_USEC_DELAY(n)		DELAY(n)
 #define	PDQ_OS_MEMZERO(p, n)		bzero((caddr_t)(p), (n))
 #if (defined(__NetBSD__) || defined(__OpenBSD__)) && defined(__alpha__)
-#define	PDQ_OS_VA_TO_PA(pdq, p)		(alpha_XXX_dmamap((vaddr_t)p))
+#define	PDQ_OS_VA_TO_PA(pdq, p)		(vtophys(p) | (pdq->pdq_type == PDQ_DEFTA ? 0 : 0x40000000))
 #else
-#define	PDQ_OS_VA_TO_PA(pdq, p)		vtophys((vaddr_t)p)
+#define	PDQ_OS_VA_TO_PA(pdq, p)		vtophys(p)
 #endif
 #define	PDQ_OS_MEMALLOC(n)		malloc(n, M_DEVBUF, M_NOWAIT)
 #define	PDQ_OS_MEMFREE(p, n)		free((void *) p, M_DEVBUF)
@@ -94,8 +94,8 @@ enum _pdq_type_t {
 #define	PDQ_OS_MEMALLOC_CONTIG(n)	vm_page_alloc_contig(n, 0, 0xffffffff, PAGE_SIZE)
 #define	PDQ_OS_MEMFREE_CONTIG(p, n)	kmem_free(kernel_map, (vm_offset_t) p, n)
 #else
-#define	PDQ_OS_MEMALLOC_CONTIG(n)	uvm_km_alloc(kernel_map, round_page(n))
-#define	PDQ_OS_MEMFREE_CONTIG(p, n)	uvm_km_free(kernel_map, (vaddr_t) p, n)
+#define	PDQ_OS_MEMALLOC_CONTIG(n)	kmem_alloc(kernel_map, round_page(n))
+#define	PDQ_OS_MEMFREE_CONTIG(p, n)	kmem_free(kernel_map, (vm_offset_t) p, n)
 #endif /* __FreeBSD__ */
 
 #if defined(__FreeBSD__)
@@ -110,8 +110,8 @@ typedef	u_int16_t pdq_bus_ioport_t;
 typedef volatile pdq_uint32_t *pdq_bus_memaddr_t;
 typedef pdq_bus_memaddr_t pdq_bus_memoffset_t;
 #if BSD >= 199506	/* __FreeBSD__ */
-#define	PDQ_BPF_MTAP(sc, m, dir)	bpf_mtap(&(sc)->sc_if, m, dir)
-#define	PDQ_BPFATTACH(sc, t, s)		bpfattach(&(sc)->sc_if, t, s)
+#define	PDQ_BPF_MTAP(sc, m)	bpf_mtap(&(sc)->sc_if, m)
+#define	PDQ_BPFATTACH(sc, t, s)	bpfattach(&(sc)->sc_if, t, s)
 #endif
 
 
@@ -131,17 +131,21 @@ typedef pdq_bus_memaddr_t pdq_bus_memoffset_t;
 #define	PDQ_OS_PTR_FMT		"%p"
 typedef void ifnet_ret_t;
 typedef u_long ioctl_cmd_t;
-typedef	bus_space_tag_t pdq_bus_t;
-typedef	bus_space_handle_t pdq_bus_ioport_t;
-typedef	bus_space_handle_t pdq_bus_memaddr_t;
+typedef	bus_chipset_tag_t pdq_bus_t;
+typedef	bus_io_handle_t pdq_bus_ioport_t;
+#if defined(PDQ_IOMAPPED)
+typedef	bus_io_handle_t pdq_bus_memaddr_t;
+#else
+typedef bus_mem_handle_t pdq_bus_memaddr_t;
+#endif
 typedef pdq_uint32_t pdq_bus_memoffset_t;
 #define	PDQ_OS_IOMEM
-#define PDQ_OS_IORD_32(t, base, offset)		bus_space_read_4  (t, base, offset)
-#define PDQ_OS_IOWR_32(t, base, offset, data)	bus_space_write_4 (t, base, offset, data)
-#define PDQ_OS_IORD_8(t, base, offset)		bus_space_read_1  (t, base, offset)
-#define PDQ_OS_IOWR_8(t, base, offset, data)	bus_space_write_1 (t, base, offset, data)
-#define PDQ_OS_MEMRD_32(t, base, offset)	bus_space_read_4(t, base, offset)
-#define PDQ_OS_MEMWR_32(t, base, offset, data)	bus_space_write_4(t, base, offset, data)
+#define PDQ_OS_IORD_32(t, base, offset)		bus_io_read_4  (t, base, offset)
+#define PDQ_OS_IOWR_32(t, base, offset, data)	bus_io_write_4 (t, base, offset, data)
+#define PDQ_OS_IORD_8(t, base, offset)		bus_io_read_1  (t, base, offset)
+#define PDQ_OS_IOWR_8(t, base, offset, data)	bus_io_write_1 (t, base, offset, data)
+#define PDQ_OS_MEMRD_32(t, base, offset)	bus_mem_read_4(t, base, offset)
+#define PDQ_OS_MEMWR_32(t, base, offset, data)	bus_mem_write_4(t, base, offset, data)
 #define	PDQ_CSR_OFFSET(base, offset)		(0 + (offset)*sizeof(pdq_uint32_t))
 
 #if defined(PDQ_IOMAPPED)
@@ -155,11 +159,11 @@ typedef pdq_uint32_t pdq_bus_memoffset_t;
 #endif
 
 #if !defined(PDQ_BPF_MTAP)
-#define	PDQ_BPF_MTAP(sc, m, dir) bpf_mtap((sc)->sc_bpf, m, dir)
+#define	PDQ_BPF_MTAP(sc, m)	bpf_mtap((sc)->sc_bpf, m)
 #endif
 
 #if !defined(PDQ_BPFATTACH)
-#define	PDQ_BPFATTACH(sc, t, s)bpfattach(&(sc)->sc_bpf, &(sc)->sc_if, t, s)
+#define	PDQ_BPFATTACH(sc, t, s)	bpfattach(&(sc)->sc_bpf, &(sc)->sc_if, t, s)
 #endif
 
 #if !defined(PDQ_OS_PTR_FMT)
@@ -195,27 +199,21 @@ typedef struct {
     struct device sc_dev;		/* base device */
     void *sc_ih;			/* interrupt vectoring */
     void *sc_ats;			/* shutdown hook */
-    bus_space_tag_t sc_csrtag;		/* space tag for CSRs */
-    bus_space_handle_t sc_csrhandle;	/* space handle for CSRs */
-#define sc_bc		sc_csrtag
-#define sc_membase	sc_csrhandle
-    bus_space_tag_t sc_iotag;		/* i/o space tag */
-    bus_space_handle_t sc_iobase;	/* i/o space handle */
 #elif defined(__FreeBSD__)
     struct kern_devconf *sc_kdc;	/* freebsd cruft */
 #endif
-    struct arpcom sc_arpcom;
-#define	sc_if		sc_arpcom.ac_if
+    struct arpcom sc_ac;
+#define	sc_if		sc_ac.ac_if
     pdq_t *sc_pdq;
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
+#if defined(__alpha__) || defined(__i386__)
     pdq_bus_ioport_t sc_iobase;
+#endif
 #ifdef PDQ_IOMAPPED
 #define	sc_membase	sc_iobase
 #else
     pdq_bus_memaddr_t sc_membase;
 #endif
     pdq_bus_t sc_bc;
-#endif /* ! __NetBSD__ && ! __OpenBSD__ */
 #if !defined(__bsdi__) || _BSDI_VERSION >= 199401
 #define	sc_bpf		sc_if.if_bpf
 #else

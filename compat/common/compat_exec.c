@@ -1,4 +1,4 @@
-/*	$OpenBSD: compat_exec.c,v 1.7 2001/11/15 06:22:29 art Exp $	*/
+/*	$OpenBSD: compat_exec.c,v 1.2 1996/08/02 20:34:40 niklas Exp $	*/
 /*	$NetBSD: compat_exec.c,v 1.1 1996/05/18 15:52:21 christos Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #include <sys/vnode.h>
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 /*
  * exec_aout_prep_oldzmagic():
@@ -71,21 +71,21 @@ exec_aout_prep_oldzmagic(p, epp)
 	    epp->ep_vp->v_writecount != 0) {
 #ifdef DIAGNOSTIC
 		if (epp->ep_vp->v_flag & VTEXT)
-			panic("exec: a VTEXT vnode has writecount != 0");
+			panic("exec: a VTEXT vnode has writecount != 0\n");
 #endif
 		return ETXTBSY;
 	}
-	vn_marktext(epp->ep_vp);
+	epp->ep_vp->v_flag |= VTEXT;
 
 	/* set up command for text segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_pagedvn, execp->a_text,
-	    epp->ep_taddr, epp->ep_vp, PAGE_SIZE,
+	    epp->ep_taddr, epp->ep_vp, NBPG, /* XXX should NBPG be CLBYTES? */
 	    VM_PROT_READ|VM_PROT_EXECUTE);
 
 	/* set up command for data segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_pagedvn, execp->a_data,
 	    epp->ep_daddr, epp->ep_vp,
-	    execp->a_text + PAGE_SIZE,
+	    execp->a_text + NBPG, /* XXX should NBPG be CLBYTES? */
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
@@ -93,7 +93,7 @@ exec_aout_prep_oldzmagic(p, epp)
 	    epp->ep_daddr + execp->a_data, NULLVP, 0,
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return exec_aout_setup_stack(p, epp);
 }
 
 
@@ -131,13 +131,13 @@ exec_aout_prep_oldnmagic(p, epp)
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, NBPG);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
 		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_setup_stack(p, epp);
+	return exec_aout_setup_stack(p, epp);
 }
 
 
@@ -170,7 +170,7 @@ exec_aout_prep_oldomagic(p, epp)
 	    sizeof(struct exec), VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, NBPG);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
@@ -184,7 +184,7 @@ exec_aout_prep_oldomagic(p, epp)
 	 * Compensate `ep_dsize' for the amount of data covered by the last
 	 * text page. 
 	 */
-	dsize = epp->ep_dsize + execp->a_text - round_page(execp->a_text);
+	dsize = epp->ep_dsize + execp->a_text - roundup(execp->a_text, NBPG);
 	epp->ep_dsize = (dsize > 0) ? dsize : 0;
-	return exec_setup_stack(p, epp);
+	return exec_aout_setup_stack(p, epp);
 }

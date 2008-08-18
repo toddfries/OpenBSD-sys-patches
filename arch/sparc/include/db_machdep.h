@@ -1,5 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.13 2005/11/13 17:50:44 fgsch Exp $	*/
-/*	$NetBSD: db_machdep.h,v 1.10 1997/08/31 21:23:40 pk Exp $ */
+/*	$NetBSD: db_machdep.h,v 1.7 1996/03/31 22:21:28 pk Exp $ */
 
 /*
  * Mach Operating System
@@ -35,7 +34,7 @@
  */
 
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 #include <machine/frame.h>
 #include <machine/psl.h>
 #include <machine/trap.h>
@@ -43,26 +42,20 @@
 
 /* end of mangling */
 
-typedef	vaddr_t		db_addr_t;	/* address - unsigned */
-typedef	long		db_expr_t;	/* expression - signed */
+typedef	vm_offset_t	db_addr_t;	/* address - unsigned */
+typedef	int		db_expr_t;	/* expression - signed */
 
 typedef struct {
-	struct trapframe db_tf;
-	struct frame	 db_fr;
+	struct trapframe ddb_tf;
+	struct frame	 ddb_fr;
 } db_regs_t;
 
-extern db_regs_t	ddb_regs;	/* register state */
+db_regs_t		ddb_regs;	/* register state */
 #define	DDB_REGS	(&ddb_regs)
-#define	DDB_TF		(&ddb_regs.db_tf)
-#define	DDB_FR		(&ddb_regs.db_fr)
+#define	DDB_TF		(&ddb_regs.ddb_tf)
+#define	DDB_FR		(&ddb_regs.ddb_fr)
 
-#define	PC_REGS(regs)	((db_addr_t)(regs)->db_tf.tf_pc)
-#define	SET_PC_REGS(regs, value)	(regs)->db_tf.tf_pc = (int)(value)
-#define	PC_ADVANCE(regs) do {				\
-	int n = (regs)->db_tf.tf_npc;			\
-	(regs)->db_tf.tf_pc = n;			\
-	(regs)->db_tf.tf_npc = n + 4;			\
-} while(0)
+#define	PC_REGS(regs)	((db_addr_t)(regs)->ddb_tf.tf_pc)
 
 #define	BKPT_INST	0x91d02001	/* breakpoint instruction */
 #define	BKPT_SIZE	(4)		/* size of breakpoint inst */
@@ -71,8 +64,7 @@ extern db_regs_t	ddb_regs;	/* register state */
 #define	db_clear_single_step(regs)	(void) (0)
 #define	db_set_single_step(regs)	(void) (0)
 
-#define	IS_BREAKPOINT_TRAP(type, code)	\
-	((type) == T_BREAKPOINT || (type) == T_KGDB_EXEC)
+#define	IS_BREAKPOINT_TRAP(type, code)	((type) == T_BREAKPOINT)
 #define IS_WATCHPOINT_TRAP(type, code)	(0)
 
 #define	inst_trap_return(ins)	((ins)&0)
@@ -83,21 +75,8 @@ extern db_regs_t	ddb_regs;	/* register state */
 
 #define DB_MACHINE_COMMANDS
 
-void db_machine_init(void);
-int kdb_trap(int, struct trapframe *);
+void db_machine_init __P((void));
+int kdb_trap __P((int, struct trapframe *));
 
-#define DB_ELF_SYMBOLS
-#define DB_ELFSIZE	32
-
-
-/*
- * KGDB definitions
- */
-typedef u_long		kgdb_reg_t;
-#define KGDB_NUMREGS	72
-#define KGDB_BUFLEN	1024
-
-#define KGDB_PREPARE	fb_unblank()
-#define KGDB_ENTER	__asm("ta %0" :: "n" (T_KGDB_EXEC))
 
 #endif	/* _SPARC_DB_MACHDEP_H_ */

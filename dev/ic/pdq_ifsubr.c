@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdq_ifsubr.c,v 1.19 2006/05/30 21:33:59 fkr Exp $	*/
+/*	$OpenBSD: pdq_ifsubr.c,v 1.4 1996/08/21 22:27:41 deraadt Exp $	*/
 /*	$NetBSD: pdq_ifsubr.c,v 1.5 1996/05/20 00:26:21 thorpej Exp $	*/
 
 /*-
@@ -11,7 +11,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
+ *    derived from this software withough specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -46,7 +46,7 @@
 #include <sys/malloc.h>
 #if defined(__FreeBSD__)
 #include <sys/devconf.h>
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
+#elif defined(__bsdi__) || defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/device.h>
 #endif
 
@@ -58,6 +58,7 @@
 #include "bpfilter.h"
 #if NBPFILTER > 0
 #include <net/bpf.h>
+#include <net/bpfdesc.h>
 #endif
 
 #ifdef INET
@@ -73,10 +74,36 @@
 #include <net/if_fddi.h>
 #endif
 
-#include <uvm/uvm_extern.h>
+#if defined(__bsdi__) && _BSDI_VERSION < 199401
+#include <i386/isa/isavar.h>
+#endif
+
+#ifdef NS
+#include <netns/ns.h>
+#include <netns/ns_if.h>
+#endif
+
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
+#include <vm/vm_param.h>
 
 #include "pdqvar.h"
 #include "pdqreg.h"
+
+#if defined(__bsdi__) && _BSDI_VERSION < 199506 /* XXX */
+static void
+arp_ifinit(
+    struct arpcom *ac,
+    struct ifaddr *ifa)
+{
+    sc->sc_ac.ac_ipaddr = IA_SIN(ifa)->sin_addr;
+    arpwhohas(&sc->sc_ac, &IA_SIN(ifa)->sin_addr);
+#if _BSDI_VERSION >= 199401
+    ifa->ifa_rtrequest = arp_rtrequest;
+    ifa->ifa_flags |= RTF_CLONING;
+#endif
+#endif
+
 
 void
 pdq_ifinit(
@@ -119,14 +146,21 @@ pdq_ifwatchdog(
 
     ifp->if_flags &= ~IFF_OACTIVE;
     ifp->if_timer = 0;
-    IFQ_PURGE(&ifp->if_snd);
+    for (;;) {
+	struct mbuf *m;
+	IF_DEQUEUE(&ifp->if_snd, m);
+	if (m == NULL)
+	    return;
+	m_freem(m);
+    }
 }
 
 ifnet_ret_t
 pdq_ifstart(
     struct ifnet *ifp)
 {
-    pdq_softc_t *sc = (pdq_softc_t *) ((caddr_t) ifp - offsetof(pdq_softc_t, sc_arpcom.ac_if));
+    pdq_softc_t *sc = (pdq_softc_t *) ((caddr_t) ifp - offsetof(pdq_softc_t, sc_ac.ac_if));
+    struct ifqueue *ifq = &ifp->if_snd;
     struct mbuf *m;
     int tx = 0;
 
@@ -141,16 +175,15 @@ pdq_ifstart(
 	return;
     }
     for (;; tx = 1) {
-	IFQ_POLL(&ifp->if_snd, m);
+	IF_DEQUEUE(ifq, m);
 	if (m == NULL)
 	    break;
 
 	if (pdq_queue_transmit_data(sc->sc_pdq, m) == PDQ_FALSE) {
 	    ifp->if_flags |= IFF_OACTIVE;
+	    IF_PREPEND(ifq, m);
 	    break;
 	}
-
-	IFQ_DEQUEUE(&ifp->if_snd, m);
     }
     if (tx)
 	PDQ_DO_TYPE2_PRODUCER(sc->sc_pdq);
@@ -168,7 +201,7 @@ pdq_os_receive_pdu(
     sc->sc_if.if_ipackets++;
 #if NBPFILTER > 0
     if (sc->sc_bpf != NULL)
-	PDQ_BPF_MTAP(sc, m, BPF_DIRECTION_IN);
+	PDQ_BPF_MTAP(sc, m);
     if ((fh->fddi_fc & (FDDIFC_L|FDDIFC_F)) != FDDIFC_LLC_ASYNC) {
 	m_freem(m);
 	return;
@@ -188,7 +221,7 @@ pdq_os_restart_transmitter(
 {
     pdq_softc_t *sc = (pdq_softc_t *) pdq->pdq_os_ctx;
     sc->sc_if.if_flags &= ~IFF_OACTIVE;
-    if (!IFQ_IS_EMPTY(&sc->sc_if.if_snd)) {
+    if (sc->sc_if.if_snd.ifq_head != NULL) {
 	sc->sc_if.if_timer = PDQ_OS_TX_TIMEOUT;
 	pdq_ifstart(&sc->sc_if);
     } else {
@@ -204,7 +237,7 @@ pdq_os_transmit_done(
     pdq_softc_t *sc = (pdq_softc_t *) pdq->pdq_os_ctx;
 #if NBPFILTER > 0
     if (sc->sc_bpf != NULL)
-	PDQ_BPF_MTAP(sc, m, BPF_DIRECTION_OUT);
+	PDQ_BPF_MTAP(sc, m);
 #endif
     m_freem(m);
     sc->sc_if.if_opackets++;
@@ -220,7 +253,7 @@ pdq_os_addr_fill(
     struct ether_multistep step;
     struct ether_multi *enm;
 
-    ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
+    ETHER_FIRST_MULTI(step, &sc->sc_ac, enm);
     while (enm != NULL && num_addrs > 0) {
 	((u_short *) addr->lanaddr_bytes)[0] = ((u_short *) enm->enm_addrlo)[0];
 	((u_short *) addr->lanaddr_bytes)[1] = ((u_short *) enm->enm_addrlo)[1];
@@ -237,10 +270,10 @@ pdq_ifioctl(
     ioctl_cmd_t cmd,
     caddr_t data)
 {
-    pdq_softc_t *sc = (pdq_softc_t *) ((caddr_t) ifp - offsetof(pdq_softc_t, sc_arpcom.ac_if));
+    pdq_softc_t *sc = (pdq_softc_t *) ((caddr_t) ifp - offsetof(pdq_softc_t, sc_ac.ac_if));
     int s, error = 0;
 
-    s = splnet();
+    s = splimp();
 
     switch (cmd) {
 	case SIOCSIFADDR: {
@@ -251,7 +284,7 @@ pdq_ifioctl(
 #if defined(INET)
 		case AF_INET: {
 		    pdq_ifinit(sc);
-		    arp_ifinit(&sc->sc_arpcom, ifa);
+		    arp_ifinit(&sc->sc_ac, ifa);
 		    break;
 		}
 #endif /* INET */
@@ -264,12 +297,12 @@ pdq_ifioctl(
 		case AF_NS: {
 		    struct ns_addr *ina = &(IA_SNS(ifa)->sns_addr);
 		    if (ns_nullhost(*ina)) {
-			ina->x_host = *(union ns_host *)(sc->sc_arpcom.ac_enaddr);
+			ina->x_host = *(union ns_host *)(sc->sc_ac.ac_enaddr);
 		    } else {
 			ifp->if_flags &= ~IFF_RUNNING;
 			bcopy((caddr_t)ina->x_host.c_host,
-			      (caddr_t)sc->sc_arpcom.ac_enaddr,
-			      sizeof sc->sc_arpcom.ac_enaddr);
+			      (caddr_t)sc->sc_ac.ac_enaddr,
+			      sizeof sc->sc_ac.ac_enaddr);
 		    }
 
 		    pdq_ifinit(sc);
@@ -296,9 +329,9 @@ pdq_ifioctl(
 	     * Update multicast listeners
 	     */
 	    if (cmd == SIOCADDMULTI)
-		error = ether_addmulti((struct ifreq *)data, &sc->sc_arpcom);
+		error = ether_addmulti((struct ifreq *)data, &sc->sc_ac);
 	    else
-		error = ether_delmulti((struct ifreq *)data, &sc->sc_arpcom);
+		error = ether_delmulti((struct ifreq *)data, &sc->sc_ac);
 
 	    if (error == ENETRESET) {
 		if (sc->sc_if.if_flags & IFF_RUNNING)
@@ -331,16 +364,15 @@ pdq_ifattach(
 
     ifp->if_flags = IFF_BROADCAST|IFF_SIMPLEX|IFF_NOTRAILERS|IFF_MULTICAST;
 
-#if (defined(__FreeBSD__) && BSD >= 199506) || defined(__NetBSD__) || \
-	defined(__OpenBSD__)
+#if (defined(__FreeBSD__) && BSD >= 199506) || defined(__NetBSD__) || defined(__OpenBSD__)
     ifp->if_watchdog = pdq_ifwatchdog;
 #else
     ifp->if_watchdog = ifwatchdog;
 #endif
 
     ifp->if_ioctl = pdq_ifioctl;
+    ifp->if_output = fddi_output;
     ifp->if_start = pdq_ifstart;
-    IFQ_SET_READY(&ifp->if_snd);
   
     if_attach(ifp);
     fddi_ifattach(ifp);

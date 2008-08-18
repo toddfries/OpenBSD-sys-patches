@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.8 2003/06/02 23:27:44 millert Exp $	*/
+/*	$OpenBSD: devopen.c,v 1.2 1996/07/29 23:01:36 niklas Exp $	*/
 /*	$NetBSD: devopen.c,v 1.1 1995/11/23 02:39:37 cgd Exp $	*/
 
 /*-
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,8 +61,40 @@ devopen(f, fname, file)
 	cp = (char *)fname;
 	ncp = namebuf;
 
-	/* look for a string like 'disk(0,0,0)bsd' */
-	if (strchr(cp, '(')) {
+	/* look for a string like '5/rz0/vmunix' or '5/rz3f/vmunix */
+	if ((c = *cp) >= '0' && c <= '9') {
+		ctlr = c - '0';
+		/* skip the '/' */
+		if (*++cp != '/')
+			return (ENXIO);
+		cp++;
+		while ((c = *cp) != '\0') {
+			if (c == '/')
+				break;
+			if (c >= '0' && c <= '9') {
+				/* read unit number */
+				unit = c - '0';
+
+				/* look for a partition */
+				if ((c = *++cp) >= 'a' && c <= 'h') {
+					part = c - 'a';
+					c = *++cp;
+				}
+				if (c != '/')
+					return (ENXIO);
+				break;
+			}
+			if (ncp < namebuf + sizeof(namebuf) - 1)
+				*ncp++ = c;
+			cp++;
+		}
+		*ncp = '\0';
+	/*
+	 * XXX
+	 * pulling strchr from the C library, should pull from libkern.
+	 */
+	} else if (strchr(cp, '(')) {
+		/* expect a string like 'rz(0,0,0)vmunix' */
 		while ((c = *cp) != '\0') {
 			if (c == '(') {
 				cp++;
@@ -91,14 +127,10 @@ devopen(f, fname, file)
 			}
 		}
 		if (c != ')')
-			goto defdev;
+			return (ENXIO);
 		cp++;
 		*ncp = '\0';
 	} else {
-defdev:
-		/* No valid device specification */
-		cp = (char *)fname;
-		ncp = namebuf;
 		dp = devsw;
 		ctlr = unit = part = 0;
 		goto fnd;

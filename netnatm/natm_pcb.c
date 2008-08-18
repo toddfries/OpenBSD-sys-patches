@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm_pcb.c,v 1.9 2007/10/06 02:18:39 krw Exp $	*/
+/*	$OpenBSD: natm_pcb.c,v 1.2 1996/07/03 17:24:29 chuck Exp $	*/
 
 /*
  *
@@ -65,9 +65,14 @@ int wait;
 {
   struct natmpcb *npcb;
 
-  npcb = malloc(sizeof(*npcb), M_PCB, wait | M_ZERO);
+  MALLOC(npcb, struct natmpcb *, sizeof(*npcb), M_PCB, wait);
+
+#ifdef DIAGNOSTIC
+  if (wait == M_WAITOK && npcb == NULL) panic("npcb_alloc: malloc didn't wait");
+#endif
 
   if (npcb) {
+    bzero(npcb, sizeof(*npcb));
     npcb->npcb_flags = NPCB_FREE;
   }
   return(npcb);
@@ -84,7 +89,7 @@ struct natmpcb *npcb;
 int op;
 
 {
-  int s = splnet();
+  int s = splimp();
 
   if ((npcb->npcb_flags & NPCB_FREE) == 0) {
     LIST_REMOVE(npcb, pcblist);
@@ -94,7 +99,7 @@ int op;
     if (npcb->npcb_inq) {
       npcb->npcb_flags = NPCB_DRAIN;	/* flag for distruction */
     } else {
-      free(npcb, M_PCB);		/* kill it! */
+      FREE(npcb, M_PCB);		/* kill it! */
     }
   }
 
@@ -116,14 +121,15 @@ u_int8_t vpi;
 
 {
   struct natmpcb *cpcb = NULL;		/* current pcb */
-  int s = splnet();
+  int s = splimp();
 
 
   /*
    * lookup required
    */
 
-  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
+  for (cpcb = natm_pcbs.lh_first ; cpcb != NULL ; 
+					cpcb = cpcb->pcblist.le_next) {
     if (ifp == cpcb->npcb_ifp && vci == cpcb->npcb_vci && vpi == cpcb->npcb_vpi)
       break;
   }
@@ -166,16 +172,15 @@ done:
 
 #ifdef DDB
 
-int npcb_dump(void);
-
 int npcb_dump()
 
 {
   struct natmpcb *cpcb;
 
   printf("npcb dump:\n");
-  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
-    printf("if=%s, vci=%d, vpi=%d, IP=0x%x, sock=%p, flags=0x%x, inq=%d\n",
+  for (cpcb = natm_pcbs.lh_first ; cpcb != NULL ; 
+					cpcb = cpcb->pcblist.le_next) {
+    printf("if=%s, vci=%d, vpi=%d, IP=0x%x, sock=0x%x, flags=0x%x, inq=%d\n",
 	cpcb->npcb_ifp->if_xname, cpcb->npcb_vci, cpcb->npcb_vpi,
 	cpcb->ipaddr.s_addr, cpcb->npcb_socket, 
 	cpcb->npcb_flags, cpcb->npcb_inq);

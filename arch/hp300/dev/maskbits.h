@@ -1,5 +1,4 @@
-/*	$OpenBSD: maskbits.h,v 1.6 2006/08/05 09:58:56 miod Exp $	*/
-/*	$NetBSD: maskbits.h,v 1.3 1997/03/31 07:37:28 scottr Exp $	*/
+/*	$NetBSD: maskbits.h,v 1.2 1994/10/26 07:24:43 cgd Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,9 +44,9 @@ SCREEN LEFT				SCREEN RIGHT
 in this file and maskbits.c, left and right refer to screen coordinates,
 NOT bit numbering in registers.
 
-rasops_lmask[n]
+starttab[n]
 	bits[0,n-1] = 0	bits[n,31] = 1
-rasops_rmask[n] =
+endtab[n] =
 	bits[0,n-1] = 1	bits[n,31] = 0
 
 maskbits(x, w, startmask, endmask, nlw)
@@ -53,15 +56,13 @@ and the number of whole longwords between the ends.
 
 */
 
-#define maskbits(x, w, startmask, endmask, nlw)				\
-do {									\
-	startmask = rasops_lmask[(x) & 0x1f];				\
-	endmask = rasops_rmask[((x) + (w)) & 0x1f];			\
-	if (startmask)							\
-		nlw = (((w) - (32 - ((x) & 0x1f))) >> 5);		\
-	else								\
-		nlw = (w) >> 5;						\
-} while (0)
+#define maskbits(x, w, startmask, endmask, nlw) \
+    startmask = starttab[(x)&0x1f]; \
+    endmask = endtab[((x)+(w)) & 0x1f]; \
+    if (startmask) \
+	nlw = (((w) - (32 - ((x)&0x1f))) >> 5); \
+    else \
+	nlw = (w) >> 5;
 
 #define FASTGETBITS(psrc, x, w, dst) \
     asm ("bfextu %3{%1:%2},%0" \
@@ -72,19 +73,44 @@ do {									\
 	 : "=o" (*(char *)(pdst)) \
 	 : "di" (x), "di" (w), "d" (src), "0" (*(char *) (pdst)))
 
-#define getandputrop(psrc, srcbit, dstbit, width, pdst, rop)		\
-do {									\
-	unsigned int _tmpdst;						\
-	if (rop == RR_CLEAR)						\
-		_tmpdst = 0;						\
-	else								\
-		FASTGETBITS(psrc, srcbit, width, _tmpdst);		\
-	FASTPUTBITS(_tmpdst, dstbit, width, pdst);			\
-} while (0)
+#define getandputrop(psrc, srcbit, dstbit, width, pdst, rop) \
+{ \
+  register unsigned int _tmpsrc, _tmpdst; \
+  FASTGETBITS(pdst, dstbit, width, _tmpdst); \
+  FASTGETBITS(psrc, srcbit, width, _tmpsrc); \
+  DoRop(_tmpdst, rop, _tmpsrc, _tmpdst); \
+  FASTPUTBITS(_tmpdst, dstbit, width, pdst); \
+}
 
-#define getunalignedword(psrc, x, dst)					\
-do {									\
-        int _tmp;							\
-        FASTGETBITS(psrc, x, 32, _tmp);					\
-        dst = _tmp;							\
-} while (0)
+#define getandputrop0(psrc, srcbit, width, pdst, rop) \
+    	getandputrop(psrc, srcbit, 0, width, pdst, rop)
+
+#define getunalignedword(psrc, x, dst) { \
+        register int _tmp; \
+        FASTGETBITS(psrc, x, 32, _tmp); \
+        dst = _tmp; \
+}
+
+#define fnCLEAR(src, dst)       (0)
+#define fnCOPY(src, dst)        (src)
+#define fnXOR(src, dst)         (src ^ dst)
+#define fnCOPYINVERTED(src, dst)(~src)
+
+#define DoRop(result, alu, src, dst) \
+{ \
+    if (alu == RR_COPY) \
+        result = fnCOPY (src, dst); \
+    else \
+        switch (alu) \
+        { \
+          case RR_CLEAR: \
+            result = fnCLEAR (src, dst); \
+            break; \
+          case RR_XOR: \
+            result = fnXOR (src, dst); \
+            break; \
+          case RR_COPYINVERTED: \
+            result = fnCOPYINVERTED (src, dst); \
+            break; \
+        } \
+}

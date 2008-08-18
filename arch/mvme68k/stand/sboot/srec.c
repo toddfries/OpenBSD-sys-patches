@@ -1,9 +1,10 @@
-/*	$OpenBSD: srec.c,v 1.5 2003/08/19 10:22:30 deraadt Exp $ */
+/*	$OpenBSD: srec.c,v 1.3 1996/04/28 10:49:45 deraadt Exp $ */
 
 /*
  * Public domain, believed to be by Mike Price.
- *
+ * 
  * convert binary file to Srecord format
+ * XXX srec generates improper checksums for 4-byte dumps
  */
 #include <stdio.h>
 #include <ctype.h>
@@ -17,10 +18,15 @@ int checksum();
 int mask;
 int size;
 
-main(int argc, char *argv[])
+main(argc, argv)
+	int argc;
+	char *argv[];
 {
-	char buf[32], *name;
-	int cc, base, addr;
+	char buf[32];
+	int cc;
+	int base;
+	int addr;
+	char *name;
 
 	if (argc != 4) {
 		fprintf(stderr, "usage: %s {size} {hex_addr} {name}\n", argv[0]);
@@ -69,19 +75,20 @@ main(int argc, char *argv[])
 	}
 
 	/*
-	 * kludge -> some sizes need an extra count (1 if size == 3, 2 if
-	 * size == 4).  Don't ask why.
+	 * kludge -> don't know why you have to add the +1 = works
+	 * for size =3 at least
 	 */
-	printf("%02X\n", checksum(base, (char *) 0, 0, size) +
-	    (size - 2));
+	printf("%02X\n", checksum(base, (char *) 0, 0, size) + 1);
 	exit (0);
 }
 
 int
-get32(char buf[])
+get32(buf)
+	char buf[];
 {
 	char *cp = buf;
-	int i, c;
+	int i;
+	int c;
 
 	for (i = 0; i < 32; ++i) {
 		if ((c = getchar()) != EOF)
@@ -93,7 +100,11 @@ get32(char buf[])
 }
 
 void
-put32(int len, int addr, char buf[], int size, int mask)
+put32(len, addr, buf, size, mask)
+	int len;
+	int addr;
+	char buf[];
+	int size, mask;
 {
 	char *cp = buf;
 	int i;
@@ -110,20 +121,26 @@ put32(int len, int addr, char buf[], int size, int mask)
 }
 
 void
-sput(char *s)
+sput(s)
+	char *s;
 {
 	while (*s != '\0')
 		put(*s++);
 }
 
 void
-put(int c)
+put(c)
+	int c;
 {
 	printf("%02X", c & 0xff);
 }
 
 int
-checksum(int addr, char buf[], int len, int size)
+checksum(addr, buf, len, size)
+	int addr;
+	char buf[];
+	int len;
+	int size;
 {
 	char *cp = buf;
 	int sum = 0xff - 1 - size - (len & 0xff);

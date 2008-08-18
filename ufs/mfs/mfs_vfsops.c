@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vfsops.c,v 1.39 2007/12/16 21:21:25 otto Exp $	*/
+/*	$OpenBSD: mfs_vfsops.c,v 1.2 1996/02/27 07:15:47 niklas Exp $	*/
 /*	$NetBSD: mfs_vfsops.c,v 1.10 1996/02/09 22:31:28 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,7 +46,6 @@
 #include <sys/signalvar.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
-#include <sys/kthread.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -55,14 +58,18 @@
 #include <ufs/mfs/mfsnode.h>
 #include <ufs/mfs/mfs_extern.h>
 
+caddr_t	mfs_rootbase;	/* address of mini-root in kernel virtual memory */
+u_long	mfs_rootsize;	/* size of mini-root in bytes */
+
 static	int mfs_minor;	/* used for building internal dev_t */
 
-extern int (**mfs_vnodeop_p)(void *);
+extern int (**mfs_vnodeop_p) __P((void *));
 
 /*
  * mfs vfs operations.
  */
-const struct vfsops mfs_vfsops = {
+struct vfsops mfs_vfsops = {
+	MOUNT_MFS,
 	mfs_mount,
 	mfs_start,
 	ffs_unmount,
@@ -74,9 +81,94 @@ const struct vfsops mfs_vfsops = {
 	ffs_fhtovp,
 	ffs_vptofh,
 	mfs_init,
-	ffs_sysctl,
-	mfs_checkexp
 };
+
+/*
+ * Called by main() when mfs is going to be mounted as root.
+ *
+ * Name is updated by mount(8) after booting.
+ */
+#define ROOTNAME	"mfs_root"
+
+int
+mfs_mountroot()
+{
+	extern struct vnode *rootvp;
+	register struct fs *fs;
+	register struct mount *mp;
+	struct proc *p = curproc;	/* XXX */
+	struct ufsmount *ump;
+	struct mfsnode *mfsp;
+	size_t size;
+	int error;
+
+	/*
+	 * Get vnodes for swapdev and rootdev.
+	 */
+	if (bdevvp(swapdev, &swapdev_vp) || bdevvp(rootdev, &rootvp))
+		panic("mfs_mountroot: can't setup bdevvp's");
+
+	mp = malloc((u_long)sizeof(struct mount), M_MOUNT, M_WAITOK);
+	bzero((char *)mp, (u_long)sizeof(struct mount));
+	mp->mnt_op = &mfs_vfsops;
+	mp->mnt_flag = MNT_RDONLY;
+	mfsp = malloc(sizeof *mfsp, M_MFSNODE, M_WAITOK);
+	rootvp->v_data = mfsp;
+	rootvp->v_op = mfs_vnodeop_p;
+	rootvp->v_tag = VT_MFS;
+	mfsp->mfs_baseoff = mfs_rootbase;
+	mfsp->mfs_size = mfs_rootsize;
+	mfsp->mfs_vnode = rootvp;
+	mfsp->mfs_pid = p->p_pid;
+	mfsp->mfs_buflist = (struct buf *)0;
+	if ((error = ffs_mountfs(rootvp, mp, p)) != 0) {
+		free(mp, M_MOUNT);
+		free(mfsp, M_MFSNODE);
+		return (error);
+	}
+	if ((error = vfs_lock(mp)) != 0) {
+		(void)ffs_unmount(mp, 0, p);
+		free(mp, M_MOUNT);
+		free(mfsp, M_MFSNODE);
+		return (error);
+	}
+	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+	mp->mnt_vnodecovered = NULLVP;
+	ump = VFSTOUFS(mp);
+	fs = ump->um_fs;
+	bzero(fs->fs_fsmnt, sizeof(fs->fs_fsmnt));
+	fs->fs_fsmnt[0] = '/';
+	bcopy(fs->fs_fsmnt, mp->mnt_stat.f_mntonname, MNAMELEN);
+	(void) copystr(ROOTNAME, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
+	    &size);
+	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
+	(void)ffs_statfs(mp, &mp->mnt_stat, p);
+	vfs_unlock(mp);
+	inittodr((time_t)0);
+	return (0);
+}
+
+/*
+ * This is called early in boot to set the base address and size
+ * of the mini-root.
+ */
+int
+mfs_initminiroot(base)
+	caddr_t base;
+{
+	struct fs *fs = (struct fs *)(base + SBOFF);
+	extern int (*mountroot) __P((void));
+
+	/* check for valid super block */
+	if (fs->fs_magic != FS_MAGIC || fs->fs_bsize > MAXBSIZE ||
+	    fs->fs_bsize < sizeof(struct fs))
+		return (0);
+	mountroot = mfs_mountroot;
+	mfs_rootbase = base;
+	mfs_rootsize = fs->fs_fsize * fs->fs_size;
+	rootdev = makedev(255, mfs_minor++);
+	return (mfs_rootsize);
+}
 
 /*
  * VFS Operations.
@@ -85,14 +177,18 @@ const struct vfsops mfs_vfsops = {
  */
 /* ARGSUSED */
 int
-mfs_mount(struct mount *mp, const char *path, void *data,
-    struct nameidata *ndp, struct proc *p)
+mfs_mount(mp, path, data, ndp, p)
+	register struct mount *mp;
+	char *path;
+	caddr_t data;
+	struct nameidata *ndp;
+	struct proc *p;
 {
 	struct vnode *devvp;
 	struct mfs_args args;
 	struct ufsmount *ump;
-	struct fs *fs;
-	struct mfsnode *mfsp;
+	register struct fs *fs;
+	register struct mfsnode *mfsp;
 	size_t size;
 	int flags, error;
 
@@ -111,7 +207,10 @@ mfs_mount(struct mount *mp, const char *path, void *data,
 			flags = WRITECLOSE;
 			if (mp->mnt_flag & MNT_FORCE)
 				flags |= FORCECLOSE;
+			if (vfs_busy(mp))
+				return (EBUSY);
 			error = ffs_flushfiles(mp, flags, p);
+			vfs_unbusy(mp);
 			if (error)
 				return (error);
 		}
@@ -119,8 +218,7 @@ mfs_mount(struct mount *mp, const char *path, void *data,
 			fs->fs_ronly = 0;
 #ifdef EXPORTMFS
 		if (args.fspec == 0)
-			return (vfs_export(mp, &ump->um_export, 
-			    &args.export_info));
+			return (vfs_export(mp, &ump->um_export, &args.export));
 #endif
 		return (0);
 	}
@@ -128,10 +226,9 @@ mfs_mount(struct mount *mp, const char *path, void *data,
 	if (error)
 		return (error);
 	devvp->v_type = VBLK;
-	if (checkalias(devvp, makedev(255, mfs_minor), (struct mount *)0))
+	if (checkalias(devvp, makedev(255, mfs_minor++), (struct mount *)0))
 		panic("mfs_mount: dup dev");
-	mfs_minor++;
-	mfsp = malloc(sizeof *mfsp, M_MFSNODE, M_WAITOK);
+	mfsp = (struct mfsnode *)malloc(sizeof *mfsp, M_MFSNODE, M_WAITOK);
 	devvp->v_data = mfsp;
 	mfsp->mfs_baseoff = args.base;
 	mfsp->mfs_size = args.size;
@@ -151,7 +248,6 @@ mfs_mount(struct mount *mp, const char *path, void *data,
 	(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
 	    &size);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
-	bcopy(&args, &mp->mnt_stat.mount_info.mfs_args, sizeof(args));
 	return (0);
 }
 
@@ -167,79 +263,58 @@ int	mfs_pri = PWAIT | PCATCH;		/* XXX prob. temp */
  */
 /* ARGSUSED */
 int
-mfs_start(struct mount *mp, int flags, struct proc *p)
+mfs_start(mp, flags, p)
+	struct mount *mp;
+	int flags;
+	struct proc *p;
 {
-	struct vnode *vp = VFSTOUFS(mp)->um_devvp;
-	struct mfsnode *mfsp = VTOMFS(vp);
-	struct buf *bp;
-	int sleepreturn = 0, s;
+	register struct vnode *vp = VFSTOUFS(mp)->um_devvp;
+	register struct mfsnode *mfsp = VTOMFS(vp);
+	register struct buf *bp;
+	register caddr_t base;
+	int error = 0;
 
-	while (1) {
-		while (1) {
-			s = splbio();
-			bp = mfsp->mfs_buflist;
-			if (bp == NULL || bp == (struct buf *)-1) {
-				splx(s);
-				break;
-			}
-			mfsp->mfs_buflist = bp->b_actf;
-			splx(s);
-			mfs_doio(mfsp, bp);
-			wakeup((caddr_t)bp);
+	base = mfsp->mfs_baseoff;
+	while (mfsp->mfs_buflist != (struct buf *)-1) {
+#define	DOIO() \
+		while ((bp = mfsp->mfs_buflist) != NULL) {	\
+			mfsp->mfs_buflist = bp->b_actf;		\
+			mfs_doio(bp, base);			\
+			wakeup((caddr_t)bp);			\
 		}
-		if (bp == (struct buf *)-1)
-			break;
+		DOIO();
 		/*
 		 * If a non-ignored signal is received, try to unmount.
 		 * If that fails, clear the signal (it has been "processed"),
 		 * otherwise we will loop here, as tsleep will always return
 		 * EINTR/ERESTART.
 		 */
-		if (sleepreturn != 0) {
-			if (vfs_busy(mp, VB_WRITE|VB_NOWAIT) ||
-			    dounmount(mp,
-			    (CURSIG(p) == SIGKILL) ? MNT_FORCE : 0, p, NULL))
+		if ((error = tsleep((caddr_t)vp, mfs_pri, "mfsidl", 0)) != 0) {
+			DOIO();
+			if (dounmount(mp, 0, p) != 0)
 				CLRSIG(p, CURSIG(p));
-			sleepreturn = 0;
-			continue;
 		}
-		sleepreturn = tsleep((caddr_t)vp, mfs_pri, "mfsidl", 0);
 	}
-	return (0);
+	return (error);
 }
 
 /*
  * Get file system statistics.
  */
 int
-mfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
+mfs_statfs(mp, sbp, p)
+	struct mount *mp;
+	struct statfs *sbp;
+	struct proc *p;
 {
 	int error;
 
 	error = ffs_statfs(mp, sbp, p);
-	strncpy(&sbp->f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
-	if (sbp != &mp->mnt_stat)
-		bcopy(&mp->mnt_stat.mount_info.mfs_args,
-		    &sbp->mount_info.mfs_args, sizeof(struct mfs_args));
+#ifdef COMPAT_09
+	sbp->f_type = 3;
+#else
+	sbp->f_type = 0;
+#endif
+	strncpy(&sbp->f_fstypename[0], mp->mnt_op->vfs_name, MFSNAMELEN);
 	return (error);
-}
-
-/*
- * check export permission, not supported
- */
-/* ARGUSED */
-int
-mfs_checkexp(struct mount *mp, struct mbuf *nam, int *exflagsp,
-    struct ucred **credanonp)
-{
-	return (EOPNOTSUPP);
-}
-
-/*
- * Memory based filesystem initialization.
- */
-int
-mfs_init(struct vfsconf *vfsp)
-{
-	return (ffs_init(vfsp));
 }

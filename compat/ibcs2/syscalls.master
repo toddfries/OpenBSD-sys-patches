@@ -1,5 +1,5 @@
-	$OpenBSD: syscalls.master,v 1.8 2002/03/14 03:16:03 millert Exp $
-;	$NetBSD: syscalls.master,v 1.10 1996/09/07 14:21:59 mycroft Exp $
+	$OpenBSD: syscalls.master,v 1.5 1996/08/02 21:55:17 niklas Exp $
+;	$NetBSD: syscalls.master,v 1.8 1996/01/07 06:09:43 mycroft Exp $
 
 ;	@(#)syscalls.master	8.1 (Berkeley) 7/19/93
 
@@ -58,11 +58,11 @@
 11	STD		{ int ibcs2_sys_execv(char *path, char **argp); }
 12	STD		{ int ibcs2_sys_chdir(char *path); }
 13	STD		{ int ibcs2_sys_time(ibcs2_time_t *tp); }
-14	STD		{ int ibcs2_sys_mknod(char *path, int mode, int dev); }
+14	STD		{ int ibcs2_sys_mknod(char* path, int mode, int dev); }
 15	STD		{ int ibcs2_sys_chmod(char *path, int mode); }
 16	STD		{ int ibcs2_sys_chown(char *path, int uid, int gid); }
 17	NOARGS		{ int sys_obreak(caddr_t nsize); }
-18	STD		{ int ibcs2_sys_stat(char *path, \
+18	STD		{ int ibcs2_sys_stat(char* path, \
 			    struct ibcs2_stat *st); }
 19	NOARGS		{ long compat_43_sys_lseek(int fd, long offset, \
 			    int whence); }
@@ -93,7 +93,7 @@
 			    int pid, int pgid); }
 40	UNIMPL		ibcs2_xenix
 41	NOARGS		{ int sys_dup(u_int fd); }
-42	NOARGS		{ int sys_opipe(void); }
+42	NOARGS		{ int sys_pipe(void); }
 43	STD		{ int ibcs2_sys_times(struct tms *tp); }
 44	UNIMPL		profil
 45	STD		{ int ibcs2_sys_plock(int cmd); }
@@ -160,8 +160,8 @@
 86	STD		{ int ibcs2_sys_putmsg(int fd, \
 			    struct ibcs2_stropts *ctl, \
 			    struct ibcs2_stropts *dat, int flags); }
-87	NOARGS		{ int sys_poll(struct pollfd *fds, u_long nfds, \
-			    int timeout); }
+87	NOARGS		{ int sys_poll(struct pollfd *fds, \
+			    unsigned long nfds, int timeout); }
 88	UNIMPL
 89	UNIMPL
 90	STD		{ int ibcs2_sys_symlink(char *path, char *link); }

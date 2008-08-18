@@ -1,4 +1,3 @@
-/*	$OpenBSD: xdvar.h,v 1.6 2004/09/29 07:35:11 miod Exp $	*/
 /*	$NetBSD: xdvar.h,v 1.5 1996/03/31 22:38:56 pk Exp $	*/
 
 /*
@@ -138,6 +137,7 @@ struct xd_softc {
 struct xdc_softc {
   struct device sc_dev;            /* device struct, reqd by autoconf */
   struct intrhand sc_ih;           /* interrupt info */
+  struct evcnt sc_intrcnt;         /* event counter (for vmstat -i) */
 
   struct xdc *xdc;                 /* vaddr of vme registers */
 
@@ -157,7 +157,6 @@ struct xdc_softc {
   u_char ndone;                    /* number of done IORQs */
   u_char waithead;                 /* head of queue */
   u_char waitend;		   /* end of queue */
-  struct timeout xdc_tick_tmo;	   /* for xdc_tick() */
 };
 
 /*

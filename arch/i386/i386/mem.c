@@ -1,5 +1,5 @@
 /*	$NetBSD: mem.c,v 1.31 1996/05/03 19:42:19 christos Exp $	*/
-/*	$OpenBSD: mem.c,v 1.34 2007/09/07 15:00:19 art Exp $ */
+
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -17,7 +17,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,82 +48,65 @@
 #include <sys/buf.h>
 #include <sys/systm.h>
 #include <sys/uio.h>
-#include <sys/ioccom.h>
 #include <sys/malloc.h>
-#include <sys/memrange.h>
 #include <sys/proc.h>
 #include <sys/fcntl.h>
 
 #include <machine/cpu.h>
 #include <machine/conf.h>
 
-#include <uvm/uvm_extern.h>
-
-#include "mtrr.h"
+#include <vm/vm.h>
 
 extern char *vmmap;            /* poor name! */
 caddr_t zeropage;
 
-/* open counter for aperture */
-#ifdef APERTURE
-static int ap_open_count = 0;
-extern int allowaperture;
-
-#define VGA_START 0xA0000
-#define BIOS_END  0xFFFFF
-#endif
-
-#if NMTRR > 0
-struct mem_range_softc mem_range_softc;
-static int mem_ioctl(dev_t, u_long, caddr_t, int, struct proc *);
-#endif
-
 /*ARGSUSED*/
 int
-mmopen(dev_t dev, int flag, int mode, struct proc *p)
+mmopen(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
 
 	switch (minor(dev)) {
-	case 0:
-	case 1:
-	case 2:
-	case 12:
-		break;
-#ifdef APERTURE
-	case 4:
-	        if (suser(p, 0) != 0 || !allowaperture)
-			return (EPERM);
-
-		/* authorize only one simultaneous open() */
-		if (ap_open_count > 0)
-			return(EPERM);
-		ap_open_count++;
+#ifdef COMPAT_10
+	/* This is done by i386_iopl(3) now. */
+	case 14:
+		if (flag & FWRITE) {
+			struct trapframe *fp;
+			fp = curproc->p_md.md_regs;
+			fp->tf_eflags |= PSL_IOPL;
+		}
 		break;
 #endif
+
 	default:
-		return (ENXIO);
+		break;
 	}
 	return (0);
 }
 
 /*ARGSUSED*/
 int
-mmclose(dev_t dev, int flag, int mode, struct proc *p)
+mmclose(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
-#ifdef APERTURE
-	if (minor(dev) == 4)
-		ap_open_count--;
-#endif
+
 	return (0);
 }
 
 /*ARGSUSED*/
 int
-mmrw(dev_t dev, struct uio *uio, int flags)
+mmrw(dev, uio, flags)
+	dev_t dev;
+	struct uio *uio;
+	int flags;
 {
-	vaddr_t o, v;
-	int c;
-	struct iovec *iov;
+	register vm_offset_t o, v;
+	register int c;
+	register struct iovec *iov;
 	int error = 0;
 	static int physlock;
 
@@ -148,23 +135,21 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 /* minor device 0 is physical memory */
 		case 0:
 			v = uio->uio_offset;
-			pmap_enter(pmap_kernel(), (vaddr_t)vmmap,
+			pmap_enter(pmap_kernel(), (vm_offset_t)vmmap,
 			    trunc_page(v), uio->uio_rw == UIO_READ ?
-			    VM_PROT_READ : VM_PROT_WRITE, PMAP_WIRED);
-			pmap_update(pmap_kernel());
+			    VM_PROT_READ : VM_PROT_WRITE, TRUE);
 			o = uio->uio_offset & PGOFSET;
 			c = min(uio->uio_resid, (int)(NBPG - o));
 			error = uiomove((caddr_t)vmmap + o, c, uio);
-			pmap_remove(pmap_kernel(), (vaddr_t)vmmap,
-			    (vaddr_t)vmmap + NBPG);
-			pmap_update(pmap_kernel());
+			pmap_remove(pmap_kernel(), (vm_offset_t)vmmap,
+			    (vm_offset_t)vmmap + NBPG);
 			continue;
 
 /* minor device 1 is kernel memory */
 		case 1:
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
-			if (!uvm_kernacc((caddr_t)v, c,
+			if (!kernacc((caddr_t)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 				return (EFAULT);
 			error = uiomove((caddr_t)v, c, uio);
@@ -183,17 +168,20 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 				break;
 			}
 			if (zeropage == NULL) {
-				zeropage = malloc(PAGE_SIZE, M_TEMP,
-				    M_WAITOK|M_ZERO);
+				zeropage = (caddr_t)
+				    malloc(CLBYTES, M_TEMP, M_WAITOK);
+				bzero(zeropage, CLBYTES);
 			}
-			c = min(iov->iov_len, PAGE_SIZE);
+			c = min(iov->iov_len, CLBYTES);
 			error = uiomove(zeropage, c, uio);
 			continue;
 
 		default:
 			return (ENXIO);
 		}
-		(char *)iov->iov_base += c;
+		if (error)
+			break;
+		iov->iov_base += c;
 		iov->iov_len -= c;
 		uio->uio_offset += c;
 		uio->uio_resid -= c;
@@ -206,147 +194,29 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 	return (error);
 }
 
-paddr_t
-mmmmap(dev_t dev, off_t off, int prot)
+int
+mmmmap(dev, off, prot)
+	dev_t dev;
+	int off, prot;
 {
 	struct proc *p = curproc;	/* XXX */
 
 	switch (minor(dev)) {
 /* minor device 0 is physical memory */
 	case 0:
-		if ((u_int)off > ptoa(physmem) &&
-		    suser(p, 0) != 0)
+		if (off > ctob(physmem) &&
+		    suser(p->p_ucred, &p->p_acflag) != 0)
 			return -1;
-		return atop(off);
+		return i386_btop(off);
 
-#ifdef APERTURE
-/* minor device 4 is aperture driver */
-	case 4:
-		switch (allowaperture) {
-		case 1:
-			/* Allow mapping of the VGA framebuffer & BIOS only */
-			if ((off >= VGA_START && off <= BIOS_END) ||
-			    (unsigned)off > (unsigned)ptoa(physmem))
-				return atop(off);
-			else
-				return -1;
-		case 2:
-			/* Allow mapping of the whole 1st megabyte
-			   for x86emu */
-			if (off <= BIOS_END ||
-			    (unsigned)off > (unsigned)ptoa(physmem))
-				return atop(off);
-			else
-				return -1;
-		default:
+/* minor device 1 is kernel memory */
+	case 1:
+		/* XXX - writability, executability checks? */
+		if (!kernacc((caddr_t)off, NBPG, B_READ))
 			return -1;
-		}
-			
-#endif
+		return i386_btop(vtophys(off));
+
 	default:
 		return -1;
 	}
 }
-
-int
-mmioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
-{
-#if NMTRR > 0
-	switch (minor(dev)) {
-	case 0:
-	case 4:
-		return mem_ioctl(dev, cmd, data, flags, p);
-	}
-#endif
-	return (ENODEV);
-}
-
-#if NMTRR > 0
-/*
- * Operations for changing memory attributes.
- *
- * This is basically just an ioctl shim for mem_range_attr_get
- * and mem_range_attr_set.
- */
-static int
-mem_ioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
-{
-	int nd, error = 0;
-	struct mem_range_op *mo = (struct mem_range_op *)data;
-	struct mem_range_desc *md;
-	
-	/* is this for us? */
-	if ((cmd != MEMRANGE_GET) &&
-	    (cmd != MEMRANGE_SET))
-		return (ENOTTY);
-
-	/* any chance we can handle this? */
-	if (mem_range_softc.mr_op == NULL)
-		return (EOPNOTSUPP);
-
-	/* do we have any descriptors? */
-	if (mem_range_softc.mr_ndesc == 0)
-		return (ENXIO);
-
-	switch (cmd) {
-	case MEMRANGE_GET:
-		nd = imin(mo->mo_arg[0], mem_range_softc.mr_ndesc);
-		if (nd > 0) {
-			md = (struct mem_range_desc *)
-				malloc(nd * sizeof(struct mem_range_desc),
-				       M_MEMDESC, M_WAITOK);
-			error = mem_range_attr_get(md, &nd);
-			if (!error)
-				error = copyout(md, mo->mo_desc,
-					nd * sizeof(struct mem_range_desc));
-			free(md, M_MEMDESC);
-		} else {
-			nd = mem_range_softc.mr_ndesc;
-		}
-		mo->mo_arg[0] = nd;
-		break;
-		
-	case MEMRANGE_SET:
-		md = malloc(sizeof(struct mem_range_desc), M_MEMDESC, M_WAITOK);
-		error = copyin(mo->mo_desc, md, sizeof(struct mem_range_desc));
-		/* clamp description string */
-		md->mr_owner[sizeof(md->mr_owner) - 1] = 0;
-		if (error == 0)
-			error = mem_range_attr_set(md, &mo->mo_arg[0]);
-		free(md, M_MEMDESC);
-		break;
-	}
-	return (error);
-}
-
-/*
- * Implementation-neutral, kernel-callable functions for manipulating
- * memory range attributes.
- */
-int
-mem_range_attr_get(struct mem_range_desc *mrd, int *arg)
-{
-	/* can we handle this? */
-	if (mem_range_softc.mr_op == NULL)
-		return (EOPNOTSUPP);
-
-	if (*arg == 0) {
-		*arg = mem_range_softc.mr_ndesc;
-	} else {
-		bcopy(mem_range_softc.mr_desc, mrd, (*arg) * sizeof(struct mem_range_desc));
-	}
-	return (0);
-}
-
-int
-mem_range_attr_set(struct mem_range_desc *mrd, int *arg)
-{
-	/* can we handle this? */
-	if (mem_range_softc.mr_op == NULL)
-		return (EOPNOTSUPP);
-
-	return (mem_range_softc.mr_op->set(&mem_range_softc, mrd, arg));
-}
-
-#endif /* NMTRR > 0 */
-

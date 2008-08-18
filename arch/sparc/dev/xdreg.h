@@ -1,4 +1,3 @@
-/*	$OpenBSD: xdreg.h,v 1.5 2007/05/25 21:27:15 krw Exp $	*/
 /*	$NetBSD: xdreg.h,v 1.3 1996/03/31 22:38:54 pk Exp $	*/
 
 /*
@@ -169,7 +168,7 @@ struct xd_iopb {
 #define XDFUN_DM  0xa0           /* XDCMD_{XWR,XRD}: defect map */
 #define XDFUN_DMX 0xa1           /* XDCMD_{XWR,XRD}: defect map extended */
                                  /* section 4.1.6: byte 5 */
-  volatile u_char fixd:1;        /* fixed media (vs removable) */
+  volatile u_char fixd:1;        /* fixed media (vs removeable) */
   volatile u_char reserved1:4;   /* reserved */
   volatile u_char unit:3;        /* unit number */
                                  /* note: 6 to 13 are overloaded (see below) */
@@ -318,7 +317,7 @@ struct xd_iopb_drive {
 struct xd_iopb_format {
   volatile u_char same[6];       /* smae as xd_iopb */
                                  /* section 4.4.1: byte 6 */
-  volatile u_char interleave_ipl;/* (interleave << 4) | interrupt level */
+  volatile u_char interleave_ipl;/* (interleave << 4) | interupt level */
                                  /* interleave ratio 1:1 to 16:1 */
   volatile u_char same1;         /* byte 7: same */
                                  /* section 4.4.2: byte 8 */

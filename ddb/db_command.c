@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_command.c,v 1.49 2008/03/23 12:31:57 miod Exp $	*/
+/*	$OpenBSD: db_command.c,v 1.9 1996/05/31 10:37:24 niklas Exp $	*/
 /*	$NetBSD: db_command.c,v 1.20 1996/03/30 22:30:05 christos Exp $	*/
 
 /* 
@@ -34,13 +34,8 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/reboot.h>
-#include <sys/extent.h>
-#include <sys/pool.h>
-#include <sys/msgbuf.h>
-#include <sys/malloc.h>
-#include <sys/mount.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 #include <machine/db_machdep.h>		/* type definitions */
 
 #include <ddb/db_lex.h>
@@ -54,12 +49,12 @@
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 
-#include <uvm/uvm_ddb.h>
+#include <vm/vm.h>
 
 /*
  * Exported global variables
  */
-int		db_cmd_loop_done;
+boolean_t	db_cmd_loop_done;
 label_t		*db_recover;
 
 /*
@@ -69,18 +64,11 @@ label_t		*db_recover;
  */
 boolean_t	db_ed_style = TRUE;
 
-db_addr_t	db_dot;		/* current location */
-db_addr_t	db_last_addr;	/* last explicit address typed */
-db_addr_t	db_prev;	/* last address examined
-				   or written */
-db_addr_t	db_next;	/* next address to be examined
-				   or written */
-
 /*
  * Utility routine - discard tokens through end-of-line.
  */
 void
-db_skip_to_eol(void)
+db_skip_to_eol()
 {
 	int	t;
 	do {
@@ -95,20 +83,24 @@ db_skip_to_eol(void)
 #define	CMD_FOUND	1
 #define	CMD_NONE	2
 #define	CMD_AMBIGUOUS	3
+#define	CMD_HELP	4
 
 /*
  * Search for command prefix.
  */
 int
-db_cmd_search(char *name, struct db_command *table, struct db_command **cmdp)
+db_cmd_search(name, table, cmdp)
+	char			*name;
+	struct db_command	*table;
+	struct db_command	**cmdp;	/* out */
 {
 	struct db_command	*cmd;
 	int			result = CMD_NONE;
 
 	for (cmd = table; cmd->name != 0; cmd++) {
-	    char *lp;
-	    char *rp;
-	    int  c;
+	    register char *lp;
+	    register char *rp;
+	    register int  c;
 
 	    lp = name;
 	    rp = cmd->name;
@@ -135,22 +127,31 @@ db_cmd_search(char *name, struct db_command *table, struct db_command **cmdp)
 		}
 	    }
 	}
+	if (result == CMD_NONE) {
+	    /* check for 'help' */
+		if (name[0] == 'h' && name[1] == 'e'
+		    && name[2] == 'l' && name[3] == 'p')
+			result = CMD_HELP;
+	}
 	return (result);
 }
 
 void
-db_cmd_list(struct db_command *table)
+db_cmd_list(table)
+	struct db_command *table;
 {
-	struct db_command *cmd;
+	register struct db_command *cmd;
 
 	for (cmd = table; cmd->name != 0; cmd++) {
 	    db_printf("%-12s", cmd->name);
-	    db_end_line(12);
+	    db_end_line();
 	}
 }
 
 void
-db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
+db_command(last_cmdp, cmd_table)
+	struct db_command	**last_cmdp;	/* IN_OUT */
+	struct db_command	*cmd_table;
 {
 	struct db_command	*cmd;
 	int		t;
@@ -194,6 +195,10 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 			db_printf("Ambiguous\n");
 			db_flush_lex();
 			return;
+		    case CMD_HELP:
+			db_cmd_list(cmd_table);
+			db_flush_lex();
+			return;
 		    default:
 			break;
 		}
@@ -220,7 +225,7 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 			db_flush_lex();
 			return;
 		    }
-		    db_strlcpy(modif, db_tok_string, sizeof(modif));
+		    db_strcpy(modif, db_tok_string);
 		}
 		else {
 		    db_unread_token(t);
@@ -284,144 +289,34 @@ db_command(struct db_command **last_cmdp, struct db_command *cmd_table)
 
 /*ARGSUSED*/
 void
-db_buf_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-				   
-	vfs_buf_print((struct buf *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_map_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_map_print_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	int		have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
         boolean_t full = FALSE;
         
         if (modif[0] == 'f')
                 full = TRUE;
 
-        uvm_map_printit((struct vm_map *) addr, full, db_printf);
+        _vm_map_print((vm_map_t) addr, full, db_printf);
 }
 
 /*ARGSUSED*/
 void
-db_malloc_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-#if defined(MALLOC_DEBUG)
-	extern void debug_malloc_printit(int (*)(const char *, ...), vaddr_t);
-
-	if (!have_addr)
-		addr = 0;
-
-	debug_malloc_printit(db_printf, (vaddr_t)addr);
-#else
-	malloc_printit(db_printf);
-#endif
-}
-
-/*ARGSUSED*/
-void
-db_mount_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-
-	vfs_mount_print((struct mount *) addr, full, db_printf);
-}
-
-void
-db_show_all_mounts(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-	struct mount *mp;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-
-	CIRCLEQ_FOREACH(mp, &mountlist, mnt_list)
-		vfs_mount_print(mp, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_object_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_object_print_cmd(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	int		have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
         boolean_t full = FALSE;
         
         if (modif[0] == 'f')
                 full = TRUE;
 
-	uvm_object_printit((struct uvm_object *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_page_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-        boolean_t full = FALSE;
-        
-        if (modif[0] == 'f')
-                full = TRUE;
-
-	uvm_page_printit((struct vm_page *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void     
-db_vnode_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	boolean_t full = FALSE;
-
-	if (modif[0] == 'f')
-		full = TRUE;
-
-	vfs_vnode_print((struct vnode *) addr, full, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_show_panic_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	if (panicstr)
-		db_printf("%s\n", panicstr);
-	else
-		db_printf("the kernel did not panic\n");	/* yet */
-}
-
-/*ARGSUSED*/
-void
-db_extent_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	extent_print_all();
-}
-
-/*ARGSUSED*/
-void
-db_pool_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	pool_printit((struct pool *)addr, modif, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_proc_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	if (!have_addr)
-		addr = (db_expr_t)curproc;
-
-	proc_printit((struct proc *)addr, modif, db_printf);
-}
-
-/*ARGSUSED*/
-void
-db_uvmexp_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
-{
-	uvmexp_print(db_printf);
+        _vm_object_print((vm_object_t) addr, full, db_printf);
 }
 
 /*
@@ -431,39 +326,24 @@ db_uvmexp_print_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 struct db_command db_show_all_cmds[] = {
 	{ "procs",	db_show_all_procs,	0, NULL },
 	{ "callout",	db_show_callout,	0, NULL },
-	{ "pools",	db_show_all_pools,	0, NULL },
-	{ "mounts",	db_show_all_mounts,	0, NULL },
 	{ NULL, 	NULL, 			0, NULL }
 };
 
 struct db_command db_show_cmds[] = {
 	{ "all",	NULL,			0,	db_show_all_cmds },
-	{ "breaks",	db_listbreak_cmd, 	0,	NULL },
-	{ "buf",	db_buf_print_cmd,	0,	NULL },
-	{ "extents",	db_extent_print_cmd,	0,	NULL },
-	{ "malloc",	db_malloc_print_cmd,	0,	NULL },
-	{ "map",	db_map_print_cmd,	0,	NULL },
-	{ "mount",	db_mount_print_cmd,	0,	NULL },
-	{ "object",	db_object_print_cmd,	0,	NULL },
-	{ "page",	db_page_print_cmd,	0,	NULL },
-	{ "panic",	db_show_panic_cmd,	0,	NULL },
-	{ "pool",	db_pool_print_cmd,	0,	NULL },
-	{ "proc",	db_proc_print_cmd,	0,	NULL },
 	{ "registers",	db_show_regs,		0,	NULL },
-	{ "uvmexp",	db_uvmexp_print_cmd,	0,	NULL },
-	{ "vnode",	db_vnode_print_cmd,	0,	NULL },
+	{ "breaks",	db_listbreak_cmd, 	0,	NULL },
 	{ "watches",	db_listwatch_cmd, 	0,	NULL },
-	{ NULL,		NULL,			0,	NULL }
+	{ "map",	db_map_print_cmd,	0,	NULL },
+	{ "object",	db_object_print_cmd,	0,	NULL },
+	{ NULL,		NULL,			0,	NULL, }
 };
 
 struct db_command db_boot_cmds[] = {
 	{ "sync",	db_boot_sync_cmd,	0,	0 },
 	{ "crash",	db_boot_crash_cmd,	0,	0 },
 	{ "dump",	db_boot_dump_cmd,	0,	0 },
-	{ "halt",	db_boot_halt_cmd,	0,	0 },
-	{ "reboot",	db_boot_reboot_cmd,	0,	0 },
-	{ "poweroff",	db_boot_poweroff_cmd,	0,	0 },
-	{ NULL, }
+	{ (char *)0, }
 };
 
 struct db_command db_command_table[] = {
@@ -496,9 +376,7 @@ struct db_command db_command_table[] = {
 	{ "callout",	db_show_callout,	0,		NULL },
 	{ "show",	NULL,			0,		db_show_cmds },
 	{ "boot",	NULL,			0,		db_boot_cmds },
-	{ "help",	db_help_cmd,		0,		NULL },
 	{ "hangman",	db_hangman,		0,		NULL },
-	{ "dmesg",	db_dmesg_cmd,		0,		NULL },
 	{ NULL, 	NULL,			0,		NULL }
 };
 
@@ -506,7 +384,8 @@ struct db_command db_command_table[] = {
 
 /* this function should be called to install the machine dependent
    commands. It should be called before the debugger is enabled  */
-void db_machine_commands_install(struct db_command *ptr)
+void db_machine_commands_install(ptr)
+struct db_command *ptr;
 {
   db_command_table[0].more = ptr;
   return;
@@ -517,13 +396,19 @@ void db_machine_commands_install(struct db_command *ptr)
 struct db_command	*db_last_command = 0;
 
 void
-db_help_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+db_help_cmd()
 {
-	db_cmd_list(db_command_table);
+	struct db_command *cmd = db_command_table;
+
+	while (cmd->name != 0) {
+	    db_printf("%-12s", cmd->name);
+	    db_end_line();
+	    cmd++;
+	}
 }
 
 void
-db_command_loop(void)
+db_command_loop()
 {
 	label_t		db_jmpbuf;
 	label_t		*savejmp;
@@ -542,16 +427,11 @@ db_command_loop(void)
 	(void) setjmp(&db_jmpbuf);
 
 	while (!db_cmd_loop_done) {
-
 		if (db_print_position() != 0)
 			db_printf("\n");
 		db_output_line = 0;
 
-#ifdef MULTIPROCESSOR
-		db_printf("ddb{%d}> ", CPU_INFO_UNIT(curcpu()));
-#else
-		db_printf("ddb> ");
-#endif
+		db_printf("db> ");
 		(void) db_read_line();
 
 		db_command(&db_last_command, db_command_table);
@@ -561,10 +441,11 @@ db_command_loop(void)
 }
 
 void
-db_error(char *s)
+db_error(s)
+	char *s;
 {
 	if (s)
-		db_printf("%s", s);
+	    db_printf(s);
 	db_flush_lex();
 	longjmp(db_recover);
 }
@@ -576,23 +457,26 @@ db_error(char *s)
  */
 /*ARGSUSED*/
 void
-db_fncall(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
+db_fncall(addr, have_addr, count, modif)
+	db_expr_t	addr;
+	int		have_addr;
+	db_expr_t	count;
+	char *		modif;
 {
 	db_expr_t	fn_addr;
 #define	MAXARGS		11
 	db_expr_t	args[MAXARGS];
 	int		nargs = 0;
 	db_expr_t	retval;
-	db_expr_t	(*func)(db_expr_t, ...);
+	db_expr_t	(*func) __P((db_expr_t, ...));
 	int		t;
-	char		tmpfmt[28];
 
 	if (!db_expression(&fn_addr)) {
 	    db_printf("Bad function\n");
 	    db_flush_lex();
 	    return;
 	}
-	func = (db_expr_t (*)(db_expr_t, ...)) fn_addr;
+	func = (db_expr_t (*) __P((db_expr_t, ...))) fn_addr;
 
 	t = db_read_token();
 	if (t == tLPAREN) {
@@ -627,70 +511,35 @@ db_fncall(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 
 	retval = (*func)(args[0], args[1], args[2], args[3], args[4],
 			 args[5], args[6], args[7], args[8], args[9]);
-	db_printf("%s\n", db_format(tmpfmt, sizeof tmpfmt, retval,
-	    DB_FORMAT_N, 1, 0));
+	db_printf("%#n\n", retval);
 }
 
 void
-db_boot_sync_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+db_boot_sync_cmd(addr, haddr, count, modif)
+	db_expr_t addr;
+	int haddr;
+	db_expr_t count;
+	char *modif;
 {
-	boot(RB_AUTOBOOT | RB_TIMEBAD | RB_USERREQ);
+	boot(RB_AUTOBOOT);
 }
 
 void
-db_boot_crash_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+db_boot_crash_cmd(addr, haddr, count, modif)
+	db_expr_t addr;
+	int haddr;
+	db_expr_t count;
+	char *modif;
 {
-	boot(RB_NOSYNC | RB_DUMP | RB_TIMEBAD | RB_USERREQ);
+	boot(RB_NOSYNC | RB_DUMP);
 }
 
 void
-db_boot_dump_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
+db_boot_dump_cmd(addr, haddr, count, modif)
+	db_expr_t addr;
+	int haddr;
+	db_expr_t count;
+	char *modif;
 {
-	boot(RB_DUMP | RB_TIMEBAD | RB_USERREQ);
-}
-
-void
-db_boot_halt_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	boot(RB_NOSYNC | RB_HALT | RB_TIMEBAD | RB_USERREQ);
-}
-
-void
-db_boot_reboot_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	boot(RB_AUTOBOOT | RB_NOSYNC | RB_TIMEBAD | RB_USERREQ);
-}
-
-void
-db_boot_poweroff_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	boot(RB_NOSYNC | RB_HALT | RB_POWERDOWN | RB_TIMEBAD | RB_USERREQ);
-}
-
-void
-db_dmesg_cmd(db_expr_t addr, int haddr, db_expr_t count, char *modif)
-{
-	int i, off;
-	char *p;
-
-	if (!msgbufp || msgbufp->msg_magic != MSG_MAGIC)
-		return;
-	off = msgbufp->msg_bufx;
-	if (off > msgbufp->msg_bufs)
-		off = 0;
-	for (i = 0, p = msgbufp->msg_bufc + off;
-	    i < msgbufp->msg_bufs; i++, p++) {
-		if (p >= msgbufp->msg_bufc + msgbufp->msg_bufs)
-			p = msgbufp->msg_bufc;
-		if (*p != '\0')
-			db_putchar(*p);
-	}
-	db_putchar('\n');
-}
-
-void
-db_stack_trace_cmd(db_expr_t addr, boolean_t have_addr, db_expr_t count,
-    char *modif)
-{
-	db_stack_trace_print(addr, have_addr, count, modif, db_printf);
+	boot(RB_DUMP);
 }

@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_le_tc.c,v 1.9 2007/11/06 18:20:07 miod Exp $	*/
-/*	$NetBSD: if_le_tc.c,v 1.12 2001/11/13 06:26:10 lukem Exp $	*/
+/*	$NetBSD: if_le_tc.c,v 1.2 1996/05/07 02:24:57 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 Carnegie-Mellon University.
@@ -40,7 +39,6 @@
 #include <sys/device.h>
 
 #include <net/if.h>
-#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -53,8 +51,8 @@
 #include <dev/tc/if_levar.h>
 #include <dev/tc/tcvar.h>
 
-int	le_tc_match(struct device *, void *, void *);
-void	le_tc_attach(struct device *, struct device *, void *);
+int	le_tc_match __P((struct device *, void *, void *));
+void	le_tc_attach __P((struct device *, struct device *, void *));
 
 struct cfattach le_tc_ca = {
 	sizeof(struct le_softc), le_tc_match, le_tc_attach
@@ -65,29 +63,33 @@ struct cfattach le_tc_ca = {
 #define	LE_OFFSET_ROM		0x1c0000
 
 int
-le_tc_match(struct device *parent, void *match, void *aux)
+le_tc_match(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
 {
 	struct tc_attach_args *d = aux;
 
-	if (strncmp("PMAD-AA ", d->ta_modname, TC_ROM_LLEN) != 0)
+	if (strncmp("PMAD-AA ", d->ta_modname, TC_ROM_LLEN) &&
+	    strncmp("PMAD-BA ", d->ta_modname, TC_ROM_LLEN))
 		return (0);
 
 	return (1);
 }
 
 void
-le_tc_attach(struct device *parent, struct device *self, void *aux)
+le_tc_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	struct le_softc *lesc = (void *)self;
-	struct am7990_softc *sc = &lesc->sc_am7990;
+	register struct le_softc *lesc = (void *)self;
+	register struct am7990_softc *sc = &lesc->sc_am7990;
 	struct tc_attach_args *d = aux;
 
 	/*
 	 * It's on the turbochannel proper, or a kn02
 	 * baseboard implementation of a TC option card.
 	 */
-	lesc->sc_r1 = (struct lereg1 *)
-           TC_DENSE_TO_SPARSE(TC_PHYS_TO_UNCACHED(d->ta_addr + LE_OFFSET_LANCE)); 
+	lesc->sc_r1 = (struct lereg1 *)(d->ta_addr + LE_OFFSET_LANCE);
 	sc->sc_mem = (void *)(d->ta_addr + LE_OFFSET_RAM);
 
 	sc->sc_copytodesc = am7990_copytobuf_contig;
@@ -102,8 +104,7 @@ le_tc_attach(struct device *parent, struct device *self, void *aux)
 	 * so  DMA setup is not required.
 	 */
 
-	dec_le_common_attach(&lesc->sc_am7990,
-			     (u_char *)(d->ta_addr + LE_OFFSET_ROM + 2));
+	dec_le_common_attach(sc, (u_char *)(d->ta_addr + LE_OFFSET_ROM + 2));
 
-	tc_intr_establish(parent, d->ta_cookie, IPL_NET, am7990_intr, sc);
+	tc_intr_establish(parent, d->ta_cookie, TC_IPL_NET, am7990_intr, sc);
 }

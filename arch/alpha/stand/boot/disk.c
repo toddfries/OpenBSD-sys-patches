@@ -1,5 +1,5 @@
-/*	$OpenBSD: disk.c,v 1.11 2003/06/02 23:27:44 millert Exp $	*/
-/*	$NetBSD: disk.c,v 1.6 1997/04/06 08:40:33 cgd Exp $	*/
+/*	$OpenBSD: disk.c,v 1.3 1996/07/29 23:01:38 niklas Exp $	*/
+/*	$NetBSD: disk.c,v 1.3 1995/11/23 02:39:40 cgd Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -40,7 +44,6 @@
 #include <sys/param.h>
 #include <sys/disklabel.h>
 
-#include <machine/rpb.h>
 #include <machine/prom.h>
 
 #include "disk.h"
@@ -60,7 +63,7 @@ diskstrategy(devdata, rw, bn, reqcnt, addrvoid, cnt)
 	daddr_t bn;
 	size_t reqcnt;
 	void *addrvoid;
-	size_t *cnt;	/* out: number of bytes transferred */
+	size_t *cnt;	/* out: number of bytes transfered */
 {
 	char *addr = addrvoid;
 	struct disk_softc *sc;
@@ -100,9 +103,14 @@ diskopen(f, ctlr, unit, part)
 	size_t cnt;
 	int devlen, i;
 	char *msg, buf[DEV_BSIZE], devname[32];
-	struct disk_softc *sc;
+	static struct disk_softc *sc;
 
-	if (unit >= 16 || part >= MAXPARTITIONS)
+if (sc != NULL) {
+	f->f_devdata = (void *)sc;
+	return 0;
+}
+
+	if (unit >= 8 || part >= 8)
 		return (ENXIO);
 	/* 
 	 * XXX
@@ -139,15 +147,8 @@ diskopen(f, ctlr, unit, part)
 	if (i || cnt != DEV_BSIZE) {
 		printf("disk%d: error reading disk label\n", unit);
 		goto bad;
-	} else if (((struct disklabel *)(buf + LABELOFFSET))->d_magic !=
-		    DISKMAGIC) {
-		/* No label at all.  Fake all partitions as whole disk. */
-		for (i = 0; i < MAXPARTITIONS; i++) {
-			lp->d_partitions[part].p_offset = 0;
-			lp->d_partitions[part].p_size = 0x7fffffff;
-		}
 	} else {
-		msg = getdisklabel(buf + LABELOFFSET, lp);
+		msg = getdisklabel(buf, lp);
 		if (msg) {
 			printf("disk%d: %s\n", unit, msg);
 			goto bad;

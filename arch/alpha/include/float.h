@@ -1,4 +1,4 @@
-/*	$OpenBSD: float.h,v 1.6 2003/06/02 23:27:43 millert Exp $	*/
+/*	$OpenBSD: float.h,v 1.2 1996/07/29 22:58:45 niklas Exp $	*/
 /*	$NetBSD: float.h,v 1.4 1995/06/20 20:45:22 jtc Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,7 +40,7 @@
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int __flt_rounds(void);
+extern int __flt_rounds();
 __END_DECLS
 
 #define FLT_RADIX	2		/* b */

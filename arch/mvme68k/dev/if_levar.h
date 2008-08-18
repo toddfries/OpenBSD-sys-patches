@@ -1,4 +1,3 @@
-/*	$OpenBSD: if_levar.h,v 1.7 2004/07/30 22:29:45 miod Exp $	*/
 /*	$NetBSD: if_levar.h,v 1.5 1996/05/07 01:27:32 thorpej Exp $	*/
 
 /*-
@@ -16,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,10 +48,8 @@
 struct	le_softc {
 	struct	am7990_softc sc_am7990;	/* glue to MI code */
 
-	struct	intrhand sc_ih;	/* interrupt vectoring */
-	void 	*sc_r1;		/* LANCE registers */
-	u_short	csr;        		/* Control/Status reg image */
-	u_char               sc_ipl;
-	u_char               sc_vec;
+	struct	intrhand sc_ih;		/* interrupt vectoring */
+	struct	lereg1 *sc_r1;		/* LANCE registers */
+	struct	evcnt	sc_intrcnt;
+	struct	evcnt	sc_errcnt;
 };
-

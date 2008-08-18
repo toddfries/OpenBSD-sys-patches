@@ -1,13 +1,10 @@
-/*	$OpenBSD: linux_exec.c,v 1.27 2007/10/30 12:09:22 gilles Exp $	*/
+/*	$OpenBSD: linux_exec.c,v 1.3 1996/08/31 09:24:02 pefo Exp $	*/
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
-/*-
- * Copyright (c) 1994, 1995, 1998, 2000 The NetBSD Foundation, Inc.
+/*
+ * Copyright (c) 1995 Frank van der Linden
+ * Copyright (c) 1994 Christos Zoulas
  * All rights reserved.
- *
- * This code is derived from software contributed to The NetBSD Foundation
- * by Christos Zoulas, Frank van der Linden, Eric Haszlakiewicz and
- * Thor Lancelot Simon.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -17,25 +14,21 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
+ * 3. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
  *
- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * based on exec_aout.c, sunos_exec.c and svr4_exec.c
  */
 
 #include <sys/param.h>
@@ -46,17 +39,18 @@
 #include <sys/namei.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
-#include <sys/exec.h>
 #include <sys/exec_elf.h>
-#include <sys/exec_olf.h>
 
 #include <sys/mman.h>
 #include <sys/syscallargs.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/vm_map.h>
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
+#include <machine/exec.h>
 #include <machine/linux_machdep.h>
 
 #include <compat/linux/linux_types.h>
@@ -65,10 +59,9 @@
 #include <compat/linux/linux_syscallargs.h>
 #include <compat/linux/linux_util.h>
 #include <compat/linux/linux_exec.h>
-#include <compat/linux/linux_emuldata.h>
 
-static void *linux_aout_copyargs(struct exec_package *,
-	struct ps_strings *, void *, void *);
+static void *linux_aout_copyargs __P((struct exec_package *,
+	struct ps_strings *, void *, void *));
 
 #define	LINUX_AOUT_AUX_ARGSIZ	2
 #define LINUX_ELF_AUX_ARGSIZ (sizeof(AuxInfo) * 8 / sizeof(char *))
@@ -78,19 +71,12 @@ const char linux_emul_path[] = "/emul/linux";
 extern int linux_error[];
 extern char linux_sigcode[], linux_esigcode[];
 extern struct sysent linux_sysent[];
-#ifdef SYSCALL_DEBUG
 extern char *linux_syscallnames[];
-#endif
 
-int exec_linux_aout_prep_zmagic(struct proc *, struct exec_package *);
-int exec_linux_aout_prep_nmagic(struct proc *, struct exec_package *);
-int exec_linux_aout_prep_omagic(struct proc *, struct exec_package *);
-int exec_linux_aout_prep_qmagic(struct proc *, struct exec_package *);
-
-void linux_e_proc_exec(struct proc *, struct exec_package *);
-void linux_e_proc_fork(struct proc *, struct proc *);
-void linux_e_proc_exit(struct proc *);
-void linux_e_proc_init(struct proc *, struct vmspace *);
+int exec_linux_aout_prep_zmagic __P((struct proc *, struct exec_package *));
+int exec_linux_aout_prep_nmagic __P((struct proc *, struct exec_package *));
+int exec_linux_aout_prep_omagic __P((struct proc *, struct exec_package *));
+int exec_linux_aout_prep_qmagic __P((struct proc *, struct exec_package *));
 
 struct emul emul_linux_aout = {
 	"linux",
@@ -99,22 +85,13 @@ struct emul emul_linux_aout = {
 	LINUX_SYS_syscall,
 	LINUX_SYS_MAXSYSCALL,
 	linux_sysent,
-#ifdef SYSCALL_DEBUG
 	linux_syscallnames,
-#else
-	NULL,
-#endif
 	LINUX_AOUT_AUX_ARGSIZ,
 	linux_aout_copyargs,
 	setregs,
 	NULL,
 	linux_sigcode,
 	linux_esigcode,
-	0,
-	NULL,
-	linux_e_proc_exec,
-	linux_e_proc_fork,
-	linux_e_proc_exit,
 };
 
 struct emul emul_linux_elf = {
@@ -124,86 +101,15 @@ struct emul emul_linux_elf = {
 	LINUX_SYS_syscall,
 	LINUX_SYS_MAXSYSCALL,
 	linux_sysent,
-#ifdef SYSCALL_DEBUG
 	linux_syscallnames,
-#else
-	NULL,
-#endif
 	LINUX_ELF_AUX_ARGSIZ,
-	elf32_copyargs,
+	elf_copyargs,
 	setregs,
-	exec_elf32_fixup,
+	exec_elf_fixup,
 	linux_sigcode,
 	linux_esigcode,
-	0,
-	NULL,
-	linux_e_proc_exec,
-	linux_e_proc_fork,
-	linux_e_proc_exit,
 };
 
-/*
- * Allocate per-process structures. Called when executing Linux
- * process. We can reuse the old emuldata - if it's not null,
- * the executed process is of same emulation as original forked one.
- */
-void
-linux_e_proc_init(p, vmspace)
-	struct proc *p;
-	struct vmspace *vmspace;
-{
-	if (!p->p_emuldata) {
-		/* allocate new Linux emuldata */
-		p->p_emuldata = malloc(sizeof(struct linux_emuldata),
-		    M_EMULDATA, M_WAITOK|M_ZERO);
-	}
-	else {
-		memset(p->p_emuldata, '\0', sizeof(struct linux_emuldata));
-	}
-
-	/* Set the process idea of the break to the real value */
-	((struct linux_emuldata *)(p->p_emuldata))->p_break = 
-	    vmspace->vm_daddr + ptoa(vmspace->vm_dsize);
-}
-
-void
-linux_e_proc_exec(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	/* exec, use our vmspace */
-	linux_e_proc_init(p, p->p_vmspace);
-}
-
-/*
- * Emulation per-process exit hook.
- */
-void
-linux_e_proc_exit(p)
-	struct proc *p;
-{
-	/* free Linux emuldata and set the pointer to null */
-	free(p->p_emuldata, M_EMULDATA);
-	p->p_emuldata = NULL;
-}
-
-/*
- * Emulation fork hook.
- */
-void
-linux_e_proc_fork(p, parent)
-	struct proc *p, *parent;
-{
-	/*
-	 * It could be desirable to copy some stuff from parent's
-	 * emuldata. We don't need anything like that for now.
-	 * So just allocate new emuldata for the new process.
-	 */
-	p->p_emuldata = NULL;
-
-	/* fork, use parent's vmspace (our vmspace may not be setup yet) */
-	linux_e_proc_init(p, parent->p_vmspace);
-}
 
 static void *
 linux_aout_copyargs(pack, arginfo, stack, argp)
@@ -221,14 +127,14 @@ linux_aout_copyargs(pack, arginfo, stack, argp)
 	int envc = arginfo->ps_nenvstr;
 
 	if (copyout(&argc, cpp++, sizeof(argc)))
-		return (NULL);
+		return NULL;
 
 	/* leave room for envp and argv */
 	cpp += 2;
 	if (copyout(&cpp, &stk[1], sizeof (cpp)))
-		return (NULL);
+		return NULL;
 
-	dp = (char *)(cpp + argc + envc + 2);
+	dp = (char *) (cpp + argc + envc + 2);
 	sp = argp;
 
 	/* XXX don't copy them out, remap them! */
@@ -237,25 +143,25 @@ linux_aout_copyargs(pack, arginfo, stack, argp)
 	for (; --argc >= 0; sp += len, dp += len)
 		if (copyout(&dp, cpp++, sizeof(dp)) ||
 		    copyoutstr(sp, dp, ARG_MAX, &len))
-			return (NULL);
+			return NULL;
 
 	if (copyout(&nullp, cpp++, sizeof(nullp)))
-		return (NULL);
+		return NULL;
 
 	if (copyout(&cpp, &stk[2], sizeof (cpp)))
-		return (NULL);
+		return NULL;
 
 	arginfo->ps_envstr = cpp; /* remember location of envp for later */
 
 	for (; --envc >= 0; sp += len, dp += len)
 		if (copyout(&dp, cpp++, sizeof(dp)) ||
 		    copyoutstr(sp, dp, ARG_MAX, &len))
-			return (NULL);
+			return NULL;
 
 	if (copyout(&nullp, cpp++, sizeof(nullp)))
-		return (NULL);
+		return NULL;
 
-	return (cpp);
+	return cpp;
 }
 
 int
@@ -266,9 +172,6 @@ exec_linux_aout_makecmds(p, epp)
 	struct exec *linux_ep = epp->ep_hdr;
 	int machtype, magic;
 	int error = ENOEXEC;
-
-	if (epp->ep_hdrvalid < sizeof(struct exec))
-		return (ENOEXEC);
 
 	magic = LINUX_N_MAGIC(linux_ep);
 	machtype = LINUX_N_MACHTYPE(linux_ep);
@@ -293,7 +196,7 @@ exec_linux_aout_makecmds(p, epp)
 	}
 	if (error == 0)
 		epp->ep_emul = &emul_linux_aout;
-	return (error);
+	return error;
 }
 
 /*
@@ -330,7 +233,7 @@ exec_linux_aout_prep_zmagic(p, epp)
 	    epp->ep_daddr + execp->a_data, NULLVP, 0,
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return (exec_setup_stack(p, epp));
+	return exec_aout_setup_stack(p, epp);
 }
 
 /*
@@ -363,13 +266,13 @@ exec_linux_aout_prep_nmagic(p, epp)
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, NBPG);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
 		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return (exec_setup_stack(p, epp));
+	return exec_aout_setup_stack(p, epp);
 }
 
 /*
@@ -397,7 +300,7 @@ exec_linux_aout_prep_omagic(p, epp)
 	    LINUX_N_TXTOFF(*execp, OMAGIC), VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
 	/* set up command for bss segment */
-	baddr = round_page(epp->ep_daddr + execp->a_data);
+	baddr = roundup(epp->ep_daddr + execp->a_data, NBPG);
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
@@ -411,9 +314,9 @@ exec_linux_aout_prep_omagic(p, epp)
 	 * Compensate `ep_dsize' for the amount of data covered by the last
 	 * text page. 
 	 */
-	dsize = epp->ep_dsize + execp->a_text - round_page(execp->a_text);
+	dsize = epp->ep_dsize + execp->a_text - roundup(execp->a_text, NBPG);
 	epp->ep_dsize = (dsize > 0) ? dsize : 0;
-	return (exec_setup_stack(p, epp));
+	return exec_aout_setup_stack(p, epp);
 }
 
 int
@@ -438,11 +341,11 @@ exec_linux_aout_prep_qmagic(p, epp)
 	    epp->ep_vp->v_writecount != 0) {
 #ifdef DIAGNOSTIC
 		if (epp->ep_vp->v_flag & VTEXT)
-			panic("exec: a VTEXT vnode has writecount != 0");
+			panic("exec: a VTEXT vnode has writecount != 0\n");
 #endif
-		return (ETXTBSY);
+		return ETXTBSY;
 	}
-	vn_marktext(epp->ep_vp);
+	epp->ep_vp->v_flag |= VTEXT;
 
 	/* set up command for text segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_pagedvn, execp->a_text,
@@ -459,45 +362,30 @@ exec_linux_aout_prep_qmagic(p, epp)
 	    epp->ep_daddr + execp->a_data, NULLVP, 0,
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return (exec_setup_stack(p, epp));
+	return exec_aout_setup_stack(p, epp);
 }
 
 int
-exec_linux_elf32_makecmds(struct proc *p, struct exec_package *epp)
-{
-	if (!(emul_linux_elf.e_flags & EMUL_ENABLED))
-		return (ENOEXEC);
-	return exec_elf32_makecmds(p, epp);
-}
-
-int
-linux_elf_probe(p, epp, itp, pos, os)
+linux_elf_probe(p, epp, itp, pos)
 	struct proc *p;
 	struct exec_package *epp;
 	char *itp;
 	u_long *pos;
-	u_int8_t *os;
 {
-	Elf32_Ehdr *eh = epp->ep_hdr;
-	char *bp, *brand;
+	char *bp;
 	int error;
 	size_t len;
 
-	brand = elf32_check_brand(eh);
-	if (brand && strcmp(brand, "Linux"))
-		return (EINVAL);
-	if (itp) {
+	if (itp[0]) {
 		if ((error = emul_find(p, NULL, linux_emul_path, itp, &bp, 0)))
-			return (error);
+			return error;
 		if ((error = copystr(bp, itp, MAXPATHLEN, &len)))
-			return (error);
+			return error;
 		free(bp, M_TEMP);
 	}
 	epp->ep_emul = &emul_linux_elf;
 	*pos = ELF32_NO_ADDR;
-	if (*os == OOS_NULL)
-		*os = OOS_LINUX;
-	return (0);
+	return 0;
 }
 
 /*
@@ -508,7 +396,7 @@ linux_elf_probe(p, epp, itp, pos, os)
  *
  * Yes, both text and data are mapped at once, so we're left with
  * writeable text for the shared libs. The Linux crt0 seemed to break
- * sometimes when data was mapped separately. It munmapped a uselib()
+ * sometimes when data was mapped seperately. It munmapped a uselib()
  * of ld.so by hand, which failed with shared text and data for ld.so
  * Yuck.
  *
@@ -532,8 +420,7 @@ linux_sys_uselib(p, v, retval)
 	struct vnode *vp;
 	struct exec hdr;
 	struct exec_vmcmd_set vcset;
-	int i, magic, error;
-	size_t rem;
+	int rem, i, magic, error;
 
 	sg = stackgap_init(p->p_emul);
 	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
@@ -541,7 +428,7 @@ linux_sys_uselib(p, v, retval)
 	NDINIT(&ni, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 
 	if ((error = namei(&ni)))
-		return (error);
+		return error;
 
 	vp = ni.ni_vp;
 
@@ -549,37 +436,39 @@ linux_sys_uselib(p, v, retval)
 			     0, UIO_SYSSPACE, IO_NODELOCKED, p->p_ucred,
 			     &rem, p))) {
 		vrele(vp);
-		return (error);
+		return error;
 	}
 
 	if (rem != 0) {
 		vrele(vp);
-		return (ENOEXEC);
+		return ENOEXEC;
 	}
 
 	if (LINUX_N_MACHTYPE(&hdr) != LINUX_MID_MACHINE)
-		return (ENOEXEC);
+		return ENOEXEC;
 
 	magic = LINUX_N_MAGIC(&hdr);
-	taddr = trunc_page(hdr.a_entry);
+	taddr = hdr.a_entry & (~(NBPG - 1));
 	tsize = hdr.a_text;
 	daddr = taddr + tsize;
 	dsize = hdr.a_data + hdr.a_bss;
 
 	if ((hdr.a_text != 0 || hdr.a_data != 0) && vp->v_writecount != 0) {
 		vrele(vp);
-                return (ETXTBSY);
+                return ETXTBSY;
         }
-	vn_marktext(vp);
+	vp->v_flag |= VTEXT;
 
-	VMCMDSET_INIT(&vcset);
+	vcset.evs_cnt = 0;
+	vcset.evs_used = 0;
 
-	NEW_VMCMD(
-	    &vcset, magic == ZMAGIC ? vmcmd_map_readvn : vmcmd_map_pagedvn,
-	    hdr.a_text + hdr.a_data, taddr, vp, LINUX_N_TXTOFF(hdr, magic),
-	    VM_PROT_READ|VM_PROT_EXECUTE|VM_PROT_WRITE);
+	NEW_VMCMD(&vcset,
+		  magic == ZMAGIC ? vmcmd_map_readvn : vmcmd_map_pagedvn,
+		  hdr.a_text + hdr.a_data, taddr,
+		  vp, LINUX_N_TXTOFF(hdr, magic),
+		  VM_PROT_READ|VM_PROT_EXECUTE|VM_PROT_WRITE);
 
-	baddr = round_page(daddr + hdr.a_data);
+	baddr = roundup(daddr + hdr.a_data, NBPG);
 	bsize = daddr + dsize - baddr;
         if (bsize > 0) {
                 NEW_VMCMD(&vcset, vmcmd_map_zero, bsize, baddr,
@@ -597,12 +486,12 @@ linux_sys_uselib(p, v, retval)
 
 	vrele(vp);
 
-	return (error);
+	return error;
 }
 
 /*
  * Execve(2). Just check the alternate emulation path, and pass it on
- * to the regular execve().
+ * to the NetBSD execve().
  */
 int
 linux_sys_execve(p, v, retval)
@@ -614,16 +503,11 @@ linux_sys_execve(p, v, retval)
 		syscallarg(char *) path;
 		syscallarg(char **) argv;
 		syscallarg(char **) envp;
-        } */ *uap = v;
-	struct sys_execve_args ap;
+	} */ *uap = v;
 	caddr_t sg;
 
 	sg = stackgap_init(p->p_emul);
 	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
-	SCARG(&ap, path) = SCARG(uap, path);
-	SCARG(&ap, argp) = SCARG(uap, argp);
-	SCARG(&ap, envp) = SCARG(uap, envp);
-
-	return (sys_execve(p, &ap, retval));
+	return sys_execve(p, uap, retval);
 }

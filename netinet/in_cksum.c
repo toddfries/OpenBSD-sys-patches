@@ -1,4 +1,3 @@
-/*	$OpenBSD: in_cksum.c,v 1.6 2003/12/10 07:22:43 itojun Exp $	*/
 /*	$NetBSD: in_cksum.c,v 1.11 1996/04/08 19:55:37 jonathan Exp $	*/
 
 /*
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -49,12 +52,12 @@
 
 int
 in_cksum(m, len)
-	struct mbuf *m;
-	int len;
+	register struct mbuf *m;
+	register int len;
 {
-	u_int16_t *w;
-	int sum = 0;
-	int mlen = 0;
+	register u_int16_t *w;
+	register int sum = 0;
+	register int mlen = 0;
 	int byte_swapped = 0;
 
 	union {
@@ -76,7 +79,7 @@ in_cksum(m, len)
 			 * of a word spanning between this mbuf and the
 			 * last mbuf.
 			 *
-			 * s_util.c[0] is already saved when scanning previous
+			 * s_util.c[0] is already saved when scanning previous 
 			 * mbuf.
 			 */
 			s_util.c[1] = *(u_int8_t *)w;

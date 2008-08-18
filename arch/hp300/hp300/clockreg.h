@@ -1,4 +1,3 @@
-/*	$OpenBSD: clockreg.h,v 1.5 2005/01/14 22:39:27 miod Exp $	*/
 /*	$NetBSD: clockreg.h,v 1.5 1994/10/26 07:25:26 cgd Exp $	*/
 
 /*
@@ -18,7 +17,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -87,17 +90,15 @@ struct clkreg {
 #define CLK_INT3	0x04	/* interrupt flag for timer 3 (SR only) */
 #define	CLK_INTR	0x80	/* composite interrupt flag (SR only) */
 
-#define CLK_RESOLUTION	4	/* 4 usec resolution (250KHz) */
+#define CLK_RESOLUTION	4	/* 4 usec resolution (250Khz) */
 #define	CLK_INTERVAL	2500	/* 10msec interval at 250KHz */
 #ifdef NOTDEF
-#define CLK_INTERVAL	5000	/* 20msec interval at 250KHz */
+#define CLK_INTERVAL	5000	/* 20msec interval at 250Khz */
 #endif
 
 /*
  * HP300 battery-backed clock
  */
-
-#define	BBCADDR		(u_int8_t *)(IIOV(0x420000))
 
 struct bbc_tm {
 	int	tm_sec;

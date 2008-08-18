@@ -1,5 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.9 2006/04/09 03:07:53 deraadt Exp $	*/
-/*	$NetBSD: stdarg.h,v 1.11 1999/05/03 16:30:34 christos Exp $	*/
+/*	$NetBSD: stdarg.h,v 1.8 1995/12/25 23:15:37 mycroft Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the University of
+ *      California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,33 +38,19 @@
 #ifndef _VAX_STDARG_H_
 #define	_VAX_STDARG_H_
 
-#include <sys/cdefs.h>
-#include <machine/_types.h>
+#include <machine/ansi.h>
 
-typedef __va_list	va_list;
-
-#ifdef __lint__
-#define __builtin_next_arg(t)		((t) ? 0 : 0)
-#endif
+typedef _BSD_VA_LIST_	va_list;
 
 #define	__va_size(type) \
 	(((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
 
-#ifdef lint
-#define	va_start(ap,lastarg)	((ap) = (ap))
-#else
 #define va_start(ap, last) \
-	((ap) = (va_list)__builtin_next_arg(last))
-#endif /* lint */
+	((ap) = (va_list)&(last) + __va_size(last))
 
 #define	va_arg(ap, type) \
-	(*(type *)(void *)((ap) += __va_size(type), (ap) - __va_size(type)))
+	(*(type *)((ap) += __va_size(type), (ap) - __va_size(type)))
 
-#if __BSD_VISIBLE
-#define va_copy(dest, src) \
-	((dest) = (src))
-#endif
-
-#define va_end(ap)	
+#define va_end(ap)	((void)0)
 
 #endif /* !_VAX_STDARG_H_ */

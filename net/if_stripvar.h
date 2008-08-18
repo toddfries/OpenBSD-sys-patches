@@ -1,8 +1,5 @@
-/*	$OpenBSD: if_stripvar.h,v 1.9 2007/11/26 09:28:33 martynas Exp $	*/
 /*	$NetBSD: if_stripvar.h,v 1.2.4.1 1996/08/05 20:37:51 jtc Exp $	*/
 
-#ifndef _NET_IF_STRIPVAR_H_
-#define _NET_IF_STRIPVAR_H_
 /*
  * Definitions for SLIP interface data structures
  * 
@@ -38,9 +35,6 @@ struct st_softc {
 	long sc_statetimo;		/* When (secs) current state ends */
 
 	caddr_t	sc_bpf;			/* BPF data */
-	struct timeout sc_timo;
-
-	struct timeval sc_lastpacket;	/* for watchdog */
 };
 
 
@@ -51,18 +45,17 @@ struct st_softc {
 
 /* visible flags */
 #define	SC_COMPRESS	IFF_LINK0	/* compress TCP traffic */
-#define	SC_NOICMP	IFF_LINK1	/* suppress ICMP traffic */
+#define	SC_NOICMP	IFF_LINK1	/* supress ICMP traffic */
 #define	SC_AUTOCOMP	IFF_LINK2	/* auto-enable TCP compression */
 
 #ifdef _KERNEL
-void	stripattach(int n);
-void	stripclose(struct tty *);
-void	stripinput(int, struct tty *);
-int	stripioctl(struct ifnet *, u_long, caddr_t);
-int	stripopen(dev_t, struct tty *);
-int	stripoutput(struct ifnet *,
-	    struct mbuf *, struct sockaddr *, struct rtentry *);
-void	stripstart(struct tty *);
-int	striptioctl(struct tty *, u_long, caddr_t, int);
+void	stripattach __P((int n));
+void	stripclose __P((struct tty *));
+void	stripinput __P((int, struct tty *));
+int	stripioctl __P((struct ifnet *, u_long, caddr_t));
+int	stripopen __P((dev_t, struct tty *));
+int	stripoutput __P((struct ifnet *,
+	    struct mbuf *, struct sockaddr *, struct rtentry *));
+void	stripstart __P((struct tty *));
+int	striptioctl __P((struct tty *, u_long, caddr_t, int));
 #endif /* _KERNEL */
-#endif /* _NET_IF_STRIPVAR_H_ */

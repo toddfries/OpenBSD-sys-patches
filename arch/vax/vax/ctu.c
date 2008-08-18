@@ -1,5 +1,4 @@
-/*	$OpenBSD: ctu.c,v 1.10 2007/06/06 17:15:13 deraadt Exp $ */
-/*	$NetBSD: ctu.c,v 1.10 2000/03/23 06:46:44 thorpej Exp $ */
+/*	$NetBSD: ctu.c,v 1.3 1996/04/08 18:32:31 ragge Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -39,12 +38,11 @@
  * Writing of tapes does not work, by some unknown reason so far.
  * It is almost useless to try to use this driver when running
  * multiuser, because the serial device don't have any buffers 
- * so we will lose interrupts.
+ * so we will loose interrupts.
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/buf.h>
 #include <sys/fcntl.h>
@@ -70,7 +68,7 @@ enum tu_state {
 	SC_RESTART,
 };
 
-struct tu_softc {
+volatile struct tu_softc {
 	enum	tu_state sc_state;
 	int	sc_error;
 	char	sc_rsp[15];	/* Should be struct rsb; but don't work */
@@ -82,38 +80,36 @@ struct tu_softc {
 	int	sc_bbytes;	/* Number of xfer'd bytes this block */
 	int	sc_op;		/* Read/write */
 	int	sc_xmtok;	/* set if OK to xmit */
-	struct	buf_queue sc_q;	/* pending I/O requests */
+	struct	buf sc_q;	/* Current buffer */
 } tu_sc;
 
 struct	ivec_dsp tu_recv, tu_xmit;
 
-void	ctutintr(void *);
-void	cturintr(void *);
-void	ctuattach(void);
-void	ctustart(struct buf *);
-void	ctuwatch(void *);
-short	ctu_cksum(unsigned short *, int);
+void	ctutintr __P((int));
+void	cturintr __P((int));
+void	ctuattach __P((void));
+void	ctustart __P((struct buf *));
+void	ctuwatch __P((void *));
+short	ctu_cksum __P((unsigned short *, int));
 
-int	ctuopen(dev_t, int, int, struct proc *);
-int	ctuclose(dev_t, int, int, struct proc *);
-void	ctustrategy(struct buf *);
-int	ctuioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	ctudump(dev_t, daddr64_t, caddr_t, size_t);
+int	ctuopen __P((dev_t, int, int, struct proc *));
+int	ctuclose __P((dev_t, int, int, struct proc *));
+void	ctustrategy __P((struct buf *));
+int	ctuioctl __P((dev_t, u_long, caddr_t, int, struct proc *));
+int	ctudump __P((dev_t, daddr_t, caddr_t, size_t));
 
-static struct callout ctu_watch_ch = CALLOUT_INITIALIZER;
 
 void
 ctuattach()
 {
-	BUFQ_INIT(&tu_sc.sc_q);
+	extern	struct ivec_dsp idsptch;
 
-	tu_recv = idsptch;
-	tu_recv.hoppaddr = cturintr;
+	bcopy(&idsptch, &tu_recv, sizeof(struct ivec_dsp));
+	bcopy(&idsptch, &tu_xmit, sizeof(struct ivec_dsp));
 	scb->scb_csrint = (void *)&tu_recv;
-
-	tu_xmit = idsptch;
-	tu_xmit.hoppaddr = ctutintr;
 	scb->scb_cstint = (void *)&tu_xmit;
+	tu_recv.hoppaddr = cturintr;
+	tu_xmit.hoppaddr = ctutintr;
 }
 
 int
@@ -134,7 +130,7 @@ ctuopen(dev, oflags, devtype, p)
 
 	tu_sc.sc_error = 0;
 	mtpr(0100, PR_CSRS);	/* Enable receive interrupt */
-	callout_reset(&ctu_watch_ch, hz, ctuwatch, NULL);
+	timeout(ctuwatch, 0, 100); /* Check once/second */
 
 	tu_sc.sc_state = SC_INIT;
 
@@ -164,7 +160,7 @@ ctuclose(dev, oflags, devtype, p)
 	mtpr(0, PR_CSRS);
 	mtpr(0, PR_CSTS);
 	tu_sc.sc_state = SC_UNUSED;
-	callout_stop(&ctu_watch_ch);
+	untimeout(ctuwatch, 0);
 	return 0;
 }
 
@@ -176,19 +172,17 @@ ctustrategy(bp)
 
 #ifdef TUDEBUG
 	printf("addr %x, block %x, nblock %x, read %x\n",
-		bp->b_data, bp->b_blkno, bp->b_bcount,
+		bp->b_un.b_addr, bp->b_blkno, bp->b_bcount,
 		bp->b_flags & B_READ);
 #endif
 
 	if (bp->b_blkno >= 512) {
-		s = splbio();
-		biodone(bp);
-		splx(s);
+		iodone(bp);
 		return;
 	}
-	bp->b_rawblkno = bp->b_blkno;
-	s = splbio();
-	disksort_blkno(&tu_sc.sc_q, bp); /* Why not use disksort? */
+	bp->b_cylinder = bp->b_blkno;
+	s = splimp();
+	disksort((struct buf *)&tu_sc.sc_q, bp); /* Why not use disksort? */
 	if (tu_sc.sc_state == SC_READY)
 		ctustart(bp);
 	splx(s);
@@ -201,7 +195,7 @@ ctustart(bp)
 	struct rsp *rsp = (struct rsp *)tu_sc.sc_rsp;
 
 
-	tu_sc.sc_xfptr = tu_sc.sc_blk = bp->b_data;
+	tu_sc.sc_xfptr = tu_sc.sc_blk = bp->b_un.b_addr;
 	tu_sc.sc_tpblk = bp->b_blkno;
 	tu_sc.sc_nbytes = bp->b_bcount;
 	tu_sc.sc_xbytes = tu_sc.sc_bbytes = 0;
@@ -219,7 +213,7 @@ ctustart(bp)
 	tu_sc.sc_state = SC_SEND_CMD;
 	if (tu_sc.sc_xmtok) {
 		tu_sc.sc_xmtok = 0;
-		ctutintr(NULL);
+		ctutintr(0);
 	}
 }
 
@@ -240,7 +234,7 @@ ctuioctl(dev, cmd, data, fflag, p)
 int
 ctudump(dev, blkno, va, size)
 	dev_t dev;
-	daddr64_t blkno;
+	daddr_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -249,12 +243,12 @@ ctudump(dev, blkno, va, size)
 
 void
 cturintr(arg)
-	void *arg;
+	int arg;
 {
 	int	status = mfpr(PR_CSRD);
 	struct	buf *bp;
 
-	bp = BUFQ_FIRST(&tu_sc.sc_q);
+	bp = tu_sc.sc_q.b_actf;
 	switch (tu_sc.sc_state) {
 
 	case SC_UNUSED:
@@ -274,12 +268,12 @@ cturintr(arg)
 #ifdef TUDEBUG
 				printf("Xfer ok\n");
 #endif
-				BUFQ_REMOVE(&tu_sc.sc_q, bp);
-				biodone(bp);
+				tu_sc.sc_q.b_actf = bp->b_actf;
+				iodone(bp);
 				tu_sc.sc_xmtok = 1;
 				tu_sc.sc_state = SC_READY;
-				if (BUFQ_FIRST(&tu_sc.sc_q) != NULL)
-					ctustart(BUFQ_FIRST(&tu_sc.sc_q));
+				if (tu_sc.sc_q.b_actf)
+					ctustart(tu_sc.sc_q.b_actf);
 			}
 			break;
 		}
@@ -299,12 +293,12 @@ cturintr(arg)
 		if (status != 020)
 			printf("SC_GET_WCONT: status %o\n", status);
 		else
-			ctutintr(NULL);
+			ctutintr(0);
 		tu_sc.sc_xmtok = 0;
 		break;
 
 	case SC_RESTART:
-		ctustart(BUFQ_FIRST(&tu_sc.sc_q));
+		ctustart(tu_sc.sc_q.b_actf);
 		break;
 
 	default:
@@ -321,7 +315,7 @@ cturintr(arg)
 
 void
 ctutintr(arg)
-	void *arg;
+	int arg;
 {
 	int	c;
 
@@ -403,12 +397,12 @@ ctuwatch(arg)
 	void *arg;
 {
 
-	callout_reset(&ctu_watch_ch, hz, ctuwatch, NULL);
+	timeout(ctuwatch, 0, 1000);
 
 	if (tu_sc.sc_state == SC_GET_RESP && tu_sc.sc_tpblk != 0 &&
 	    tu_sc.sc_tpblk == oldtp && (tu_sc.sc_tpblk % 128 != 0)) {
 		printf("tu0: lost recv interrupt\n");
-		ctustart(BUFQ_FIRST(&tu_sc.sc_q));
+		ctustart(tu_sc.sc_q.b_actf);
 		return;
 	}
 	if (tu_sc.sc_state == SC_RESTART)

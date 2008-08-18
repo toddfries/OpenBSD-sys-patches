@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccdvar.h,v 1.11 2007/06/06 17:15:13 deraadt Exp $	*/
+/*	$OpenBSD: ccdvar.h,v 1.3 1996/03/02 00:29:23 niklas Exp $	*/
 /*	$NetBSD: ccdvar.h,v 1.11 1996/02/28 01:08:32 thorpej Exp $	*/
 
 /*-
@@ -54,7 +54,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -88,11 +92,11 @@
  * A concatenated disk is described at initialization time by this structure.
  */
 struct ccddevice {
-	struct vnode	**ccd_vpp;	/* array of component vnodes */
-	char		**ccd_cpp;	/* array of component pathnames */
 	int		ccd_unit;	/* logical unit of this ccd */
 	int		ccd_interleave;	/* interleave (DEV_BSIZE blocks) */
 	int		ccd_flags;	/* misc. information */
+	struct vnode	**ccd_vpp;	/* array of component vnodes */
+	char		**ccd_cpp;	/* array of component pathnames */
 	int		ccd_ndev;	/* number of component devices */
 };
 
@@ -101,7 +105,7 @@ struct ccddevice {
  */
 struct ccd_ioctl {
 	char	**ccio_disks;		/* pointer to component paths */
-	u_int	ccio_ndisks;		/* number of disks to concatenate */
+	int	ccio_ndisks;		/* number of disks to concatenate */
 	int	ccio_ileave;		/* interleave (DEV_BSIZE blocks) */
 	int	ccio_flags;		/* misc. information */
 	int	ccio_unit;		/* unit number: use varies */
@@ -112,13 +116,9 @@ struct ccd_ioctl {
 #define	CCDF_SWAP	0x01	/* interleave should be dmmax */
 #define CCDF_UNIFORM	0x02	/* use LCCD of sizes for uniform interleave */
 #define CCDF_MIRROR	0x04	/* enable data mirroring */
-#define CCDF_OLD	0x08	/* legacy */
-#define	CCDF_BITS \
-    "\020\01swap\02uniform\03mirror\04old"
 
 /* Mask of user-settable ccd flags. */
-#define CCDF_USERMASK \
-    (CCDF_SWAP|CCDF_UNIFORM|CCDF_MIRROR|CCDF_OLD)
+#define CCDF_USERMASK	(CCDF_SWAP|CCDF_UNIFORM|CCDF_MIRROR)
 
 /*
  * Component info table.
@@ -126,14 +126,11 @@ struct ccd_ioctl {
  */
 struct ccdcinfo {
 	struct vnode	*ci_vp;			/* device's vnode */
-	char		*ci_path;		/* path to component */
-	size_t		ci_size; 		/* size */
-	size_t		ci_pathlen;		/* length of component path */
 	dev_t		ci_dev;			/* XXX: device's dev_t */
-	int		ci_flags;		/* see below */
+	size_t		ci_size; 		/* size */
+	char		*ci_path;		/* path to component */
+	size_t		ci_pathlen;		/* length of component path */
 };
-
-#define	CCIF_FAILED	0x01	/* had a B_ERROR on this one */
 
 /*
  * Interleave description table.
@@ -162,11 +159,10 @@ struct ccdcinfo {
  * 2 starting at offset 5.
  */
 struct ccdiinfo {
-	daddr64_t	ii_startblk;	/* starting scaled block # for range */
-	daddr64_t	ii_startoff;	/* starting component offset (block #) */
-	int		*ii_index;	/* ordered list of components in range */
-	int		*ii_parity;	/* list of parity shifts */
-	int		ii_ndisk;	/* # of disks range is interleaved over */
+	int	ii_ndisk;	/* # of disks range is interleaved over */
+	daddr_t	ii_startblk;	/* starting scaled block # for range */
+	daddr_t	ii_startoff;	/* starting component offset (block #) */
+	int	*ii_index;	/* ordered list of components in range */
 };
 
 /*
@@ -177,8 +173,31 @@ struct ccdgeom {
 	u_int32_t	ccg_nsectors;	/* # data sectors per track */
 	u_int32_t	ccg_ntracks;	/* # tracks per cylinder */
 	u_int32_t	ccg_ncylinders;	/* # cylinders per unit */
-	u_int16_t	ccg_rpm;
 };
+
+/*
+ * A concatenated disk is described after initialization by this structure.
+ */
+struct ccd_softc {
+	int		 sc_unit;		/* logical unit number */
+	int		 sc_flags;		/* flags */
+	int		 sc_cflags;		/* configuration flags */
+	size_t		 sc_size;		/* size of ccd */
+	int		 sc_ileave;		/* interleave */
+	int		 sc_nccdisks;		/* number of components */
+	struct ccdcinfo	 *sc_cinfo;		/* component info */
+	struct ccdiinfo	 *sc_itable;		/* interleave table */
+	struct ccdgeom   sc_geom;		/* pseudo geometry info */
+	char		 sc_xname[8];		/* XXX external name */
+	struct disk	 sc_dkdev;		/* generic disk device info */
+};
+
+/* sc_flags */
+#define CCDF_INITED	0x01	/* unit has been initialized */
+#define CCDF_WLABEL	0x02	/* label area is writable */
+#define CCDF_LABELLING	0x04	/* unit is currently being labelled */
+#define CCDF_WANTED	0x40	/* someone is waiting to obtain a lock */
+#define CCDF_LOCKED	0x80	/* unit is locked */
 
 /*
  * Before you can use a unit, it must be configured with CCDIOCSET.

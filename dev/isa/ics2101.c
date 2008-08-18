@@ -1,5 +1,5 @@
-/* $OpenBSD: ics2101.c,v 1.6 2003/04/10 10:11:24 miod Exp $ */
-/* $NetBSD: ics2101.c,v 1.6 1997/10/09 07:57:23 jtc Exp $ */
+/* $OpenBSD: ics2101.c,v 1.3 1996/05/07 07:36:42 deraadt Exp $ */
+/* $NetBSD: ics2101.c,v 1.4 1996/04/29 20:03:10 christos Exp $ */
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -27,8 +27,8 @@
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
@@ -47,6 +47,7 @@
 #include <sys/buf.h>
 
 #include <machine/cpu.h>
+#include <machine/pio.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -67,8 +68,8 @@
 
 #define cvt_value(val) ((val) >> 1)
 
-static void ics2101_mix_doit(struct ics2101_softc *, u_int, u_int, u_int,
-    u_int);
+static void ics2101_mix_doit __P((struct ics2101_softc *, u_int, u_int, u_int,
+    u_int));
 /*
  * Program one channel of the ICS mixer
  */
@@ -79,7 +80,6 @@ ics2101_mix_doit(sc, chan, side, value, flags)
 	struct ics2101_softc *sc;
 	u_int chan, side, value, flags;
 {
-	bus_space_tag_t iot = sc->sc_iot;
 	unsigned char flip_left[6] = {0x01, 0x01, 0x01, 0x02, 0x01, 0x02};
 	unsigned char flip_right[6] = {0x02, 0x02, 0x02, 0x01, 0x02, 0x01};
 	register unsigned char ctrl_addr;
@@ -128,11 +128,11 @@ ics2101_mix_doit(sc, chan, side, value, flags)
 
 	s = splaudio();
 
-	bus_space_write_1(iot, sc->sc_selio_ioh, sc->sc_selio, ctrl_addr);
-	bus_space_write_1(iot, sc->sc_dataio_ioh, sc->sc_dataio, normal);
+	outb(sc->sc_selio, ctrl_addr);
+	outb(sc->sc_dataio, normal);
 
-	bus_space_write_1(iot, sc->sc_selio_ioh, sc->sc_selio, attn_addr);
-	bus_space_write_1(iot, sc->sc_dataio_ioh, sc->sc_dataio, (unsigned char) value);
+	outb(sc->sc_selio, attn_addr);
+	outb(sc->sc_dataio, (unsigned char) value);
 
 	splx(s);
 }

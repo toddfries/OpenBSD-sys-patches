@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_tty.c,v 1.10 2007/03/15 10:22:30 art Exp $	*/
+/*	$OpenBSD: tty_tty.c,v 1.3 1996/04/21 22:27:32 deraadt Exp $	*/
 /*	$NetBSD: tty_tty.c,v 1.13 1996/03/30 22:24:46 christos Exp $	*/
 
 /*-
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -49,14 +53,17 @@
 
 /*ARGSUSED*/
 int
-cttyopen(dev_t dev, int flag, int mode, struct proc *p)
+cttyopen(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
 	struct vnode *ttyvp = cttyvp(p);
 	int error;
 
 	if (ttyvp == NULL)
 		return (ENXIO);
-	vn_lock(ttyvp, LK_EXCLUSIVE | LK_RETRY, p);
+	VOP_LOCK(ttyvp);
 #ifdef PARANOID
 	/*
 	 * Since group is tty and mode is 620 on most terminal lines
@@ -71,45 +78,54 @@ cttyopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (!error)
 #endif /* PARANOID */
 		error = VOP_OPEN(ttyvp, flag, NOCRED, p);
-	VOP_UNLOCK(ttyvp, 0, p);
+	VOP_UNLOCK(ttyvp);
 	return (error);
 }
 
 /*ARGSUSED*/
 int
-cttyread(dev_t dev, struct uio *uio, int flag)
+cttyread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-	struct proc *p = uio->uio_procp;
-	struct vnode *ttyvp = cttyvp(uio->uio_procp);
+	register struct vnode *ttyvp = cttyvp(uio->uio_procp);
 	int error;
 
 	if (ttyvp == NULL)
 		return (EIO);
-	vn_lock(ttyvp, LK_EXCLUSIVE | LK_RETRY, p);
+	VOP_LOCK(ttyvp);
 	error = VOP_READ(ttyvp, uio, flag, NOCRED);
-	VOP_UNLOCK(ttyvp, 0, p);
+	VOP_UNLOCK(ttyvp);
 	return (error);
 }
 
 /*ARGSUSED*/
 int
-cttywrite(dev_t dev, struct uio *uio, int flag)
+cttywrite(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
-	struct proc *p = uio->uio_procp;
-	struct vnode *ttyvp = cttyvp(uio->uio_procp);
+	register struct vnode *ttyvp = cttyvp(uio->uio_procp);
 	int error;
 
 	if (ttyvp == NULL)
 		return (EIO);
-	vn_lock(ttyvp, LK_EXCLUSIVE | LK_RETRY, p);
+	VOP_LOCK(ttyvp);
 	error = VOP_WRITE(ttyvp, uio, flag, NOCRED);
-	VOP_UNLOCK(ttyvp, 0, p);
+	VOP_UNLOCK(ttyvp);
 	return (error);
 }
 
 /*ARGSUSED*/
 int
-cttyioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
+cttyioctl(dev, cmd, addr, flag, p)
+	dev_t dev;
+	u_long cmd;
+	caddr_t addr;
+	int flag;
+	struct proc *p;
 {
 	struct vnode *ttyvp = cttyvp(p);
 
@@ -119,7 +135,7 @@ cttyioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		return (EINVAL);
 	if (cmd == TIOCNOTTY) {
 		if (!SESS_LEADER(p)) {
-			atomic_clearbits_int(&p->p_flag, P_CONTROLT);
+			p->p_flag &= ~P_CONTROLT;
 			return (0);
 		} else
 			return (EINVAL);
@@ -129,11 +145,14 @@ cttyioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 
 /*ARGSUSED*/
 int
-cttypoll(dev_t dev, int events, struct proc *p)
+cttyselect(dev, flag, p)
+	dev_t dev;
+	int flag;
+	struct proc *p;
 {
 	struct vnode *ttyvp = cttyvp(p);
 
-	if (ttyvp == NULL)	/* try operation to get EOF/failure */
-		return (seltrue(dev, events, p));
-	return (VOP_POLL(ttyvp, events, p));
+	if (ttyvp == NULL)
+		return (1);	/* try operation to get EOF/failure */
+	return (VOP_SELECT(ttyvp, flag, FREAD|FWRITE, NOCRED, p));
 }

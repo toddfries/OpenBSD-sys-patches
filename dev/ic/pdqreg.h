@@ -1,5 +1,5 @@
-/*	$OpenBSD: pdqreg.h,v 1.9 2002/06/02 22:50:00 deraadt Exp $	*/
-/*	$NetBSD: pdqreg.h,v 1.6 1996/08/28 16:01:29 cgd Exp $	*/
+/*	$OpenBSD: pdqreg.h,v 1.3 1996/05/26 00:27:04 deraadt Exp $	*/
+/*	$NetBSD: pdqreg.h,v 1.4 1996/05/20 00:26:23 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1996 Matt Thomas <matt@3am-software.com>
@@ -11,7 +11,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
+ *    derived from this software withough specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -36,7 +36,6 @@
 #ifndef _PDQREG_H
 #define	_PDQREG_H
 
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
 #include <stddef.h>
 #if defined(PDQTEST) && !defined(PDQ_NDEBUG)
 #include <assert.h>
@@ -44,24 +43,6 @@
 #else
 #define	PDQ_ASSERT(x)	do { } while(0)
 #endif
-#else /* __NetBSD__ || __OpenBSD__*/
-
-/*
- * Can't directly use "assert", because apparently cpp won't expand it
- * unless it has an argument, which loses.
- */
-#ifdef PDQ_NDEBUG
-#define	PDQ_ASSERT(e)	((void)0)
-#else
-#ifdef __STDC__
-#define	PDQ_ASSERT(e)	((e) ? (void)0 :				\
-			    __assert("PDQ ", __FILE__, __LINE__, #e))
-#else
-#define	PDQ_ASSERT(e)	((e) ? (void)0 :				\
-			    __assert("PDQ ", __FILE__, __LINE__, "e"))
-#endif
-#endif
-#endif /* __NetBSD__ || __OpenBSD__ */
 
 #define	PDQ_RING_SIZE(array)	((sizeof(array) / sizeof(array[0])))
 #define	PDQ_ARRAY_SIZE(array)	((sizeof(array) / sizeof(array[0])))

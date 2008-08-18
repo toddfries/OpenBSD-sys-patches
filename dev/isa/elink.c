@@ -1,4 +1,3 @@
-/*	$OpenBSD: elink.c,v 1.7 2007/06/29 15:17:02 jasper Exp $	*/
 /*	$NetBSD: elink.c,v 1.9 1996/05/03 19:06:27 christos Exp $	*/
 
 /*
@@ -65,7 +64,10 @@ static int elink_all_resets_initialized;
  * NOTE: the caller MUST provide an i/o handle for ELINK_ID_PORT!
  */
 void
-elink_reset(bus_space_tag_t iot, bus_space_handle_t ioh, int bus)
+elink_reset(bc, ioh, bus)
+	bus_chipset_tag_t bc;
+	bus_io_handle_t ioh;
+	int bus;
 {
 	struct elink_done_reset *er;
 
@@ -77,7 +79,8 @@ elink_reset(bus_space_tag_t iot, bus_space_handle_t ioh, int bus)
 	/*
 	 * Reset these cards if we haven't done so already.
 	 */
-	LIST_FOREACH(er, &elink_all_resets, er_link)
+	for (er = elink_all_resets.lh_first; er != NULL;
+	    er = er->er_link.le_next)
 		if (er->er_bus == bus)
 			goto out;
 
@@ -91,11 +94,11 @@ elink_reset(bus_space_tag_t iot, bus_space_handle_t ioh, int bus)
 	LIST_INSERT_HEAD(&elink_all_resets, er, er_link);
 
 	/* Haven't reset the cards on this bus, yet. */
-	bus_space_write_1(iot, ioh, 0, ELINK_RESET);
+	bus_io_write_1(bc, ioh, 0, ELINK_RESET);
 
  out:
-	bus_space_write_1(iot, ioh, 0, 0x00);
-	bus_space_write_1(iot, ioh, 0, 0x00);
+	bus_io_write_1(bc, ioh, 0, 0x00);
+	bus_io_write_1(bc, ioh, 0, 0x00);
 }
 
 /*
@@ -105,14 +108,17 @@ elink_reset(bus_space_tag_t iot, bus_space_handle_t ioh, int bus)
  * NOTE: the caller MUST provide an i/o handle for ELINK_ID_PORT!
  */
 void
-elink_idseq(bus_space_tag_t iot, bus_space_handle_t ioh, u_char p)
+elink_idseq(bc, ioh, p)
+	bus_chipset_tag_t bc;
+	bus_io_handle_t ioh;
+	register u_char p;
 {
-	int i;
-	u_char c;
+	register int i;
+	register u_char c;
 
 	c = 0xff;
 	for (i = 255; i; i--) {
-		bus_space_write_1(iot, ioh, 0, c);
+		bus_io_write_1(bc, ioh, 0, c);
 		if (c & 0x80) {
 			c <<= 1;
 			c ^= p;

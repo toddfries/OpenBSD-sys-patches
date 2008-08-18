@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkio.h,v 1.6 2007/04/03 04:51:07 dlg Exp $	*/
+/*	$OpenBSD: dkio.h,v 1.2 1996/03/03 12:11:35 niklas Exp $	*/
 /*	$NetBSD: dkio.h,v 1.1 1996/01/30 18:21:48 thorpej Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -55,17 +59,5 @@
 #define DIOCSBAD	_IOW('d', 110, struct dkbad)	/* set kernel dkbad */
 #define DIOCEJECT	_IO('d', 112)		/* eject removable disk */
 #define DIOCLOCK	_IOW('d', 113, int)	/* lock/unlock pack */
-
-#define DIOCGPDINFO	_IOR('d', 114, struct disklabel)/* get physical */
-#define DIOCRLDINFO	_IO('d', 115)			/* reload disklabel */
-
-struct dk_inquiry {
-	char		vendor[64];
-	char		product[128];
-	char		revision[64];
-	char		serial[64];
-};
-
-#define DIOCINQ		_IOR('d', 116, struct dk_inquiry)
 
 #endif /* _SYS_DKIO_H_ */

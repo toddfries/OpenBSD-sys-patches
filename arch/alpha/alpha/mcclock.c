@@ -1,5 +1,5 @@
-/*	$OpenBSD: mcclock.c,v 1.5 2002/03/14 01:26:26 millert Exp $	*/
-/*	$NetBSD: mcclock.c,v 1.4 1996/10/13 02:59:41 christos Exp $	*/
+/*	$OpenBSD: mcclock.c,v 1.2 1996/07/29 22:57:47 niklas Exp $	*/
+/*	$NetBSD: mcclock.c,v 1.2 1996/04/17 22:22:32 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -41,9 +41,9 @@ struct cfdriver mcclock_cd = {
 	NULL, "mcclock", DV_DULL,
 };
 
-void	mcclock_init(struct device *);
-void	mcclock_get(struct device *, time_t, struct clocktime *);
-void	mcclock_set(struct device *, struct clocktime *);
+void	mcclock_init __P((struct device *));
+void	mcclock_get __P((struct device *, time_t, struct clocktime *));
+void	mcclock_set __P((struct device *, struct clocktime *));
 
 const struct clockfns mcclock_clockfns = {
 	mcclock_init, mcclock_get, mcclock_set,
@@ -78,7 +78,7 @@ mcclock_init(dev)
 
 	mc146818_write(sc, MC_REGA, MC_BASE_32_KHz | MC_RATE_1024_Hz);
 	mc146818_write(sc, MC_REGB,
-	    MC_REGB_PIE | MC_REGB_SQWE | MC_REGB_BINARY | MC_REGB_24HR);
+	    MC_REGB_PIE | MC_REGB_BINARY | MC_REGB_24HR);
 }
 
 /*

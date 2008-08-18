@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsrtt.h,v 1.6 2003/06/02 23:28:20 millert Exp $	*/
+/*	$OpenBSD: nfsrtt.h,v 1.4 1996/04/17 04:50:39 mickey Exp $	*/
 /*	$NetBSD: nfsrtt.h,v 1.4 1996/02/18 11:54:07 fvdl Exp $	*/
 
 /*
@@ -16,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -77,6 +81,7 @@ struct nfsrtt {
 /*
  * Bits for the flags field.
  */
+#define	DRT_NQNFS	0x01	/* Rpc used Nqnfs protocol */
 #define	DRT_TCP		0x02	/* Client used TCP transport */
 #define	DRT_CACHEREPLY	0x04	/* Reply was from recent request cache */
 #define	DRT_CACHEDROP	0x08	/* Rpc request dropped, due to recent reply */

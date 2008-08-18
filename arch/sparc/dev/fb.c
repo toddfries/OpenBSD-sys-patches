@@ -1,32 +1,7 @@
-/*	$OpenBSD: fb.c,v 1.43 2006/12/03 22:10:30 miod Exp $	*/
-/*	$NetBSD: fb.c,v 1.23 1997/07/07 23:30:22 pk Exp $ */
+/*	$OpenBSD: fb.c,v 1.9 1996/08/13 08:05:25 downsj Exp $	*/
+/*	$NetBSD: fb.c,v 1.18 1996/04/01 17:29:54 christos Exp $ */
 
 /*
- * Copyright (c) 2002, 2004  Miodrag Vallat.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- *
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -47,7 +22,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -67,7 +46,8 @@
  */
 
 /*
- * Common wsdisplay framebuffer drivers helpers.
+ * /dev/fb (indirect frame buffer driver).  This is gross; we should
+ * just build cdevsw[] dynamically.
  */
 
 #include <sys/param.h>
@@ -77,89 +57,195 @@
 #include <sys/conf.h>
 
 #include <machine/autoconf.h>
+#include <machine/fbio.h>
+#include <machine/kbd.h>
+#include <machine/fbvar.h>
 #include <machine/conf.h>
 #if defined(SUN4)
 #include <machine/eeprom.h>
 #include <sparc/dev/pfourreg.h>
 #endif
 
-#include <dev/wscons/wsdisplayvar.h>
-#include <dev/rasops/rasops.h>
-#include <machine/fbvar.h>
+static struct fbdevice *devfb;
 
-#include "wsdisplay.h"
-
-/*
- * Sun specific color indexes.
- * Black is not really 7, but rather ~0; to fit within the 8 ANSI color
- * palette we are using on console, we pick (~0) & 0x07 instead.
- * This essentially swaps WSCOL_BLACK and WSCOL_WHITE.
- */
-#define	WSCOL_SUN_WHITE		0
-#define	WSCOL_SUN_BLACK		7
-
-/*
- * emergency unblank code
- * XXX should be somewhat moved to wscons MI code
- */
-
-void (*fb_burner)(void *, u_int, u_int);
-void *fb_cookie;
 
 void
 fb_unblank()
 {
-	if (fb_burner != NULL)
-		(*fb_burner)(fb_cookie, 1, 0);
+
+	if (devfb)
+		(*devfb->fb_driver->fbd_unblank)(devfb->fb_device);
 }
 
-#if NWSDISPLAY > 0
+void
+fb_attach(fb, isconsole)
+	struct fbdevice *fb;
+	int isconsole;
+{
+	static int no_replace, seen_force;
 
-#if defined(SUN4C) || defined(SUN4M)
-static int a2int(char *, int);
-#endif
-static void fb_initwsd(struct sunfb *);
-static void fb_updatecursor(struct rasops_info *);
-int	fb_alloc_screen(void *, const struct wsscreen_descr *, void **,
-	    int *, int *, long *);
-void	fb_free_screen(void *, void *);
-int	fb_show_screen(void *, void *, int, void (*)(void *, int, int),
-	    void *);
+	/*
+	 * We've already had a framebuffer forced into /dev/fb.  Don't
+	 * allow any more, even if this is the console.
+	 */
+	if (seen_force) {
+		if (devfb) {	/* sanity */
+			printf("%s: /dev/fb already full\n",
+				fb->fb_device->dv_xname);
+			return;
+		} else
+			seen_force = 0;
+	}
+
+	/*
+	 * Check to see if we're being forced into /dev/fb.
+	 */
+	if (fb->fb_flags & FB_FORCE) {
+		if (devfb)
+			printf("%s: forcefully replacing %s\n",
+				fb->fb_device->dv_xname,
+				devfb->fb_device->dv_xname);
+		devfb = fb;
+		seen_force = no_replace = 1;
+		goto attached;
+	}
+
+	/*
+	 * Check to see if we're the console.  If we are, then replace
+	 * any currently existing framebuffer.
+	 */
+	if (isconsole) {
+		if (devfb)
+			printf("%s: replacing %s\n", fb->fb_device->dv_xname,
+				devfb->fb_device->dv_xname);
+		devfb = fb;
+		no_replace = 1;
+		goto attached;
+	}
+
+	/*
+	 * For the final case, we check to see if we can replace an
+	 * existing framebuffer, if not, say so and return.
+	 */
+	if (no_replace) {
+		if (devfb) {	/* sanity */
+			printf("%s: /dev/fb already full\n",
+				fb->fb_device->dv_xname);
+			return;
+		} else
+			no_replace = 0;
+	}
+
+	if (devfb)
+		printf("%s: replacing %s\n", fb->fb_device->dv_xname,
+			devfb->fb_device->dv_xname);
+	devfb = fb;
+
+ attached:
+	printf("%s: attached to /dev/fb\n", devfb->fb_device->dv_xname);
+}
+
+int
+fbopen(dev, flags, mode, p)
+	dev_t dev;
+	int flags, mode;
+	struct proc *p;
+{
+
+	if (devfb == NULL)
+		return (ENXIO);
+	return (devfb->fb_driver->fbd_open)(dev, flags, mode, p);
+}
+
+int
+fbclose(dev, flags, mode, p)
+	dev_t dev;
+	int flags, mode;
+	struct proc *p;
+{
+
+	return (devfb->fb_driver->fbd_close)(dev, flags, mode, p);
+}
+
+int
+fbioctl(dev, cmd, data, flags, p)
+	dev_t dev;
+	u_long cmd;
+	caddr_t data;
+	int flags;
+	struct proc *p;
+{
+
+	return (devfb->fb_driver->fbd_ioctl)(dev, cmd, data, flags, p);
+}
+
+int
+fbmmap(dev, off, prot)
+	dev_t dev;
+	int off, prot;
+{
+	int (*map)__P((dev_t, int, int)) = devfb->fb_driver->fbd_mmap;
+
+	if (map == NULL)
+		return (-1);
+	return (map(dev, off, prot));
+}
 
 void
-fb_setsize(struct sunfb *sf, int def_depth, int def_width, int def_height,
-    int node, int bustype)
+fb_setsize(fb, depth, def_width, def_height, node, bustype)
+	struct fbdevice *fb;
+	int depth, def_width, def_height, node, bustype;
 {
-	int def_linebytes;
 
+	/*
+	 * The defaults below match my screen, but are not guaranteed
+	 * to be correct as defaults go...
+	 */
 	switch (bustype) {
 	case BUS_VME16:
 	case BUS_VME32:
 	case BUS_OBIO:
-#if defined(SUN4M)
-		/* 4m may have SBus-like framebuffer on obio */
-		if (CPU_ISSUN4M) {
-			goto obpsize;
+		if (CPU_ISSUN4M) {   /* 4m has framebuffer on obio */
+			fb->fb_type.fb_width = getpropint(node, "width",
+							  def_width);
+			fb->fb_type.fb_height = getpropint(node, "height",
+							   def_height);
+			fb->fb_linebytes = getpropint(node, "linebytes",
+			    (fb->fb_type.fb_width * depth) / 8);
+			break;
 		}
-#endif
 		/* Set up some defaults. */
-		sf->sf_width = def_width;
-		sf->sf_height = def_height;
-		sf->sf_depth = def_depth;
+		fb->fb_type.fb_width = def_width;
+		fb->fb_type.fb_height = def_height;
 
-#if defined(SUN4)
 		/*
 		 * This is not particularly useful on Sun 4 VME framebuffers.
 		 * The EEPROM only contains info about the built-in.
 		 */
-		if (CPU_ISSUN4 && bustype == BUS_OBIO) {
+		if (CPU_ISSUN4 && (bustype == BUS_VME16 ||
+		    bustype == BUS_VME32))
+			goto donesize;
+
+#if defined(SUN4)
+		if (CPU_ISSUN4) {
 			struct eeprom *eep = (struct eeprom *)eeprom_va;
 
-			if (ISSET(sf->sf_flags, FB_PFOUR)) {
+			if (fb->fb_flags & FB_PFOUR) {
 				volatile u_int32_t pfour;
-				u_int size;
 
-				pfour = *sf->sf_pfour;
+				/*
+				 * Some pfour framebuffers, e.g. the
+				 * cgsix, don't encode resolution the
+				 * same, so the driver handles that.
+				 * The driver can let us know that it
+				 * needs to do this by not mapping in
+				 * the pfour register by the time this
+				 * routine is called.
+				 */
+				if (fb->fb_pfour == NULL)
+					goto donesize;
+
+				pfour = *fb->fb_pfour;
 
 				/*
 				 * Use the pfour register to determine
@@ -171,53 +257,75 @@ fb_setsize(struct sunfb *sf, int def_depth, int def_width, int def_height,
 				 */
 				if ((PFOUR_ID(pfour) == PFOUR_ID_COLOR24) ||
 				    (PFOUR_ID(pfour) == PFOUR_ID_FASTCOLOR))
-					size = 0x00; /* invalid */
-				else
-					size = PFOUR_SIZE(pfour);
+					goto donesize;
 
-				switch (size) {
+				switch (PFOUR_SIZE(pfour)) {
 				case PFOUR_SIZE_1152X900:
-					sf->sf_width = 1152;
-					sf->sf_height = 900;
+					fb->fb_type.fb_width = 1152;
+					fb->fb_type.fb_height = 900;
 					break;
+
 				case PFOUR_SIZE_1024X1024:
-					sf->sf_width = 1024;
-					sf->sf_height = 1024;
+					fb->fb_type.fb_width = 1024;
+					fb->fb_type.fb_height = 1024;
 					break;
+
 				case PFOUR_SIZE_1280X1024:
-					sf->sf_width = 1280;
-					sf->sf_height = 1024;
+					fb->fb_type.fb_width = 1280;
+					fb->fb_type.fb_height = 1024;
 					break;
+
 				case PFOUR_SIZE_1600X1280:
-					sf->sf_width = 1600;
-					sf->sf_height = 1280;
+					fb->fb_type.fb_width = 1600;
+					fb->fb_type.fb_height = 1280;
 					break;
+
 				case PFOUR_SIZE_1440X1440:
-					sf->sf_width = 1440;
-					sf->sf_height = 1440;
+					fb->fb_type.fb_width = 1440;
+					fb->fb_type.fb_height = 1440;
 					break;
+
 				case PFOUR_SIZE_640X480:
-					sf->sf_width = 640;
-					sf->sf_height = 480;
+					fb->fb_type.fb_width = 640;
+					fb->fb_type.fb_height = 480;
+					break;
+
+				default:
+					/*
+					 * XXX: Do nothing, I guess.
+					 * Should we print a warning about
+					 * an unknown value? --thorpej
+					 */
 					break;
 				}
 			} else if (eep != NULL) {
-				switch (eep->eeScreenSize) {
-				case EE_SCR_1152X900:
-					sf->sf_width = 1152;
-					sf->sf_height = 900;
+				switch (eep->ee_diag.eed_scrsize) {
+				case EED_SCR_1152X900:
+					fb->fb_type.fb_width = 1152;
+					fb->fb_type.fb_height = 900;
 					break;
-				case EE_SCR_1024X1024:
-					sf->sf_width = 1024;
-					sf->sf_height = 1024;
+
+				case EED_SCR_1024X1024:
+					fb->fb_type.fb_width = 1024;
+					fb->fb_type.fb_height = 1024;
 					break;
-				case EE_SCR_1600X1280:
-					sf->sf_width = 1600;
-					sf->sf_height = 1280;
+
+				case EED_SCR_1600X1280:
+					fb->fb_type.fb_width = 1600;
+					fb->fb_type.fb_height = 1280;
 					break;
-				case EE_SCR_1440X1440:
-					sf->sf_width = 1440;
-					sf->sf_height = 1440;
+
+				case EED_SCR_1440X1440:
+					fb->fb_type.fb_width = 1440;
+					fb->fb_type.fb_height = 1440;
+					break;
+
+				default:
+					/*
+					 * XXX: Do nothing, I guess.
+					 * Should we print a warning about
+					 * an unknown value? --thorpej
+					 */
 					break;
 				}
 			}
@@ -229,41 +337,35 @@ fb_setsize(struct sunfb *sf, int def_depth, int def_width, int def_height,
 		}
 #endif /* SUN4M */
 
-		sf->sf_linebytes = (sf->sf_width * sf->sf_depth) / 8;
+ donesize:
+		fb->fb_linebytes = (fb->fb_type.fb_width * depth) / 8;
 		break;
 
 	case BUS_SBUS:
-#if defined(SUN4M)
-obpsize:
-#endif
-		sf->sf_depth = getpropint(node, "depth", def_depth);
-		sf->sf_width = getpropint(node, "width", def_width);
-		sf->sf_height = getpropint(node, "height", def_height);
-
-		def_linebytes =
-		    roundup(sf->sf_width, sf->sf_depth) * sf->sf_depth / 8;
-		sf->sf_linebytes = getpropint(node, "linebytes", def_linebytes);
-
-		/*
-		 * XXX If we are configuring a board in a wider depth level
-		 * than the mode it is currently operating in, the PROM will
-		 * return a linebytes property tied to the current depth value,
-		 * which is NOT what we are relying upon!
-		 */
-		if (sf->sf_linebytes < (sf->sf_width * sf->sf_depth) / 8)
-			sf->sf_linebytes = def_linebytes;
-
+		fb->fb_type.fb_width = getpropint(node, "width", def_width);
+		fb->fb_type.fb_height = getpropint(node, "height", def_height);
+		fb->fb_linebytes = getpropint(node, "linebytes",
+		    (fb->fb_type.fb_width * depth) / 8);
 		break;
-	}
 
-	sf->sf_fbsize = sf->sf_height * sf->sf_linebytes;
+	default:
+		panic("fb_setsize: inappropriate bustype");
+		/* NOTREACHED */
+	}
 }
 
-#if defined(SUN4C) || defined(SUN4M)
+#ifdef RASTERCONSOLE
+#include <machine/kbd.h>
+
+static int a2int __P((char *, int));
+static void fb_bell __P((int));
+
 static int
-a2int(char *cp, int deflt)
+a2int(cp, deflt)
+	register char *cp;
+	register int deflt;
 {
-	int i = 0;
+	register int i = 0;
 
 	if (*cp == '\0')
 		return (deflt);
@@ -271,258 +373,90 @@ a2int(char *cp, int deflt)
 		i = i * 10 + *cp++ - '0';
 	return (i);
 }
-#endif
-
-/* setup the embedded wsscreen_descr structure from rasops settings */
-static void
-fb_initwsd(struct sunfb *sf)
-{
-	strlcpy(sf->sf_wsd.name, "std", sizeof(sf->sf_wsd.name));
-	sf->sf_wsd.capabilities = sf->sf_ro.ri_caps;
-	sf->sf_wsd.nrows = sf->sf_ro.ri_rows;
-	sf->sf_wsd.ncols = sf->sf_ro.ri_cols;
-	sf->sf_wsd.textops = &sf->sf_ro.ri_ops;
-}
 
 static void
-fb_updatecursor(struct rasops_info *ri)
+fb_bell(on)
+	int on;
 {
-	struct sunfb *sf = (struct sunfb *)ri->ri_hw;
-
-	if (sf->sf_crowp != NULL)
-		*sf->sf_crowp = ri->ri_crow;
-	if (sf->sf_ccolp != NULL)
-		*sf->sf_ccolp = ri->ri_ccol;
+	(void)kbd_docmd(on?KBD_CMD_BELL:KBD_CMD_NOBELL, 0);
 }
+
+#include <sparc/dev/rcons_font.h>
 
 void
-fbwscons_init(struct sunfb *sf, int flags)
+fbrcons_init(fb)
+	struct fbdevice *fb;
 {
-	struct rasops_info *ri = &sf->sf_ro;
-	int cols, rows;
+	struct rconsole	*rc = &fb->fb_rcons;
 
-	/* ri_hw and ri_bits must have already been setup by caller */
-	ri->ri_flg = RI_CENTER | RI_FULLCLEAR | flags;
-	ri->ri_depth = sf->sf_depth;
-	ri->ri_stride = sf->sf_linebytes;
-	ri->ri_width = sf->sf_width;
-	ri->ri_height = sf->sf_height;
+	/*
+	 * Common glue for rconsole initialization
+	 * XXX - mostly duplicates values with fbdevice.
+	 */
+	rc->rc_linebytes = fb->fb_linebytes;
+	rc->rc_pixels = fb->fb_pixels;
+	rc->rc_width = fb->fb_type.fb_width;
+	rc->rc_height = fb->fb_type.fb_height;
+	rc->rc_depth = fb->fb_type.fb_depth;
+	/* Setup the static font */
+	rc->rc_font = &console_font;
 
-#if defined(SUN4C) || defined(SUN4M)
-	if (CPU_ISSUN4COR4M) {
-		rows = a2int(getpropstring(optionsnode, "screen-#rows"), 34);
-		cols = a2int(getpropstring(optionsnode, "screen-#columns"), 80);
-	}
-#endif
+#if defined(RASTERCONS_FULLSCREEN) || defined(RASTERCONS_SMALLFONT)
+	rc->rc_maxcol = rc->rc_width / rc->rc_font->width;
+	rc->rc_maxrow = rc->rc_height / rc->rc_font->height;
+#else
 #if defined(SUN4)
 	if (CPU_ISSUN4) {
-		struct eeprom *ep = (struct eeprom *)eeprom_va;
+		struct eeprom *eep = (struct eeprom *)eeprom_va;
 
-		if (ep != NULL) {
-			rows = (u_short)ep->eeTtyRows;
-			cols = (u_short)ep->eeTtyCols;
-			/* deal with broken nvram contents... */
-			if (rows <= 0)
-				rows = 34;
-			if (cols <= 0)
-				cols = 80;
+		if (eep == NULL) {
+			rc->rc_maxcol = 80;
+			rc->rc_maxrow = 34;
 		} else {
-			rows = 34;
-			cols = 80;
+			rc->rc_maxcol = eep->ee_diag.eed_colsize;
+			rc->rc_maxrow = eep->ee_diag.eed_rowsize;
 		}
 	}
+#endif /* SUN4 */
+
+	if (!CPU_ISSUN4) {
+		rc->rc_maxcol =
+		    a2int(getpropstring(optionsnode, "screen-#columns"), 80);
+		rc->rc_maxrow =
+		    a2int(getpropstring(optionsnode, "screen-#rows"), 34);
+	}
+#endif /* RASTERCONS_FULLSCREEN || RASTERCONS_SMALLFONT */
+
+#if !(defined(RASTERCONS_FULLSCREEN) || defined(RASTERCONS_SMALLFONT))
+	/* Determine addresses of prom emulator row and column */
+	if (CPU_ISSUN4 ||
+	    romgetcursoraddr(&rc->rc_row, &rc->rc_col))
+#endif
+		rc->rc_row = rc->rc_col = NULL;
+
+	rc->rc_bell = fb_bell;
+	rcons_init(rc);
+	/* Hook up virtual console */
+	v_putc = rcons_cnputc;
+}
 #endif
 
-	rasops_init(ri, rows, cols);
-
-	if (sf->sf_depth == 8) {
-		/*
-		 * If we are running with an indexed palette, compensate
-		 * the swap of black and white through ri_devcmap.
-		 */
-		ri->ri_devcmap[WSCOL_SUN_BLACK] = 0;
-		ri->ri_devcmap[WSCOL_SUN_WHITE] = 0xffffffff;
-	} else if (sf->sf_depth > 8) {
-		/*
-		 * If we are running on a direct color frame buffer,
-		 * make the ``normal'' white the same as the hilighted
-		 * white.
-		 */
-		ri->ri_devcmap[WSCOL_WHITE] = ri->ri_devcmap[WSCOL_WHITE + 8];
-	}
-}
-
-void
-fbwscons_console_init(struct sunfb *sf, int row)
-{
-	struct rasops_info *ri = &sf->sf_ro;
-	long defattr;
-
-	if (CPU_ISSUN4 || romgetcursoraddr(&sf->sf_crowp, &sf->sf_ccolp))
-		sf->sf_ccolp = sf->sf_crowp = NULL;
-	if (sf->sf_ccolp != NULL)
-		ri->ri_ccol = *sf->sf_ccolp;
-
-	if (row < 0) {
-		if (sf->sf_crowp != NULL)
-			ri->ri_crow = *sf->sf_crowp;
-		else
-			/* assume last row */
-			ri->ri_crow = ri->ri_rows - 1;
-	} else {
-		/*
-		 * If we force the display row, this is because the screen
-		 * has been cleared or the font has been changed.
-		 * In this case, choose not to keep pointers to the PROM
-		 * cursor position, as the values are likely to be inaccurate
-		 * upon shutdown...
-		 */
-		sf->sf_crowp = sf->sf_ccolp = NULL;
-		ri->ri_crow = row;
-	}
-
-	/*
-	 * Scale back rows and columns if the font would not otherwise
-	 * fit on this display. Without this we would panic later.
-	 */
-	if (ri->ri_crow >= ri->ri_rows)
-		ri->ri_crow = ri->ri_rows - 1;
-	if (ri->ri_ccol >= ri->ri_cols)
-		ri->ri_ccol = ri->ri_cols - 1;
-
-	/*
-	 * Take care of updating the PROM cursor position as well if we can.
-	 */
-	if (ri->ri_updatecursor == NULL &&
-	    (sf->sf_ccolp != NULL || sf->sf_crowp != NULL))
-		ri->ri_updatecursor = fb_updatecursor;
-
-	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
-		ri->ri_ops.alloc_attr(ri,
-		    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, &defattr);
-	else
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
-
-	fb_initwsd(sf);
-	wsdisplay_cnattach(&sf->sf_wsd, ri,
-	    ri->ri_ccol, ri->ri_crow, defattr);
-}
-
-void
-fbwscons_setcolormap(struct sunfb *sf,
-    void (*setcolor)(void *, u_int, u_int8_t, u_int8_t, u_int8_t))
-{
-	int i;
-	const u_char *color;
-
-	if (sf->sf_depth <= 8 && setcolor != NULL) {
-		for (i = 0; i < 16; i++) {
-			color = &rasops_cmap[i * 3];
-			setcolor(sf, i, color[0], color[1], color[2]);
-		}
-		for (i = 240; i < 256; i++) {
-			color = &rasops_cmap[i * 3];
-			setcolor(sf, i, color[0], color[1], color[2]);
-		}
-		/*
-		 * Compensate for BoW default hardware palette: existing
-		 * output (which we do not want to affect) is black on
-		 * white with color index 0 being white and 0xff being
-		 * black.
-		 */
-		setcolor(sf, WSCOL_SUN_WHITE, 0xff, 0xff, 0xff);
-		setcolor(sf, 0xff ^ WSCOL_SUN_WHITE, 0, 0, 0);
-		setcolor(sf, WSCOL_SUN_BLACK, 0, 0, 0);
-		setcolor(sf, 0xff ^ (WSCOL_SUN_BLACK), 0xff, 0xff, 0xff);
-	}
-}
-
-void
-fbwscons_attach(struct sunfb *sf, struct wsdisplay_accessops *op, int isconsole)
-{
-	struct wsemuldisplaydev_attach_args waa;
-
-	if (isconsole == 0) {
-		/* done in wsdisplay_cnattach() earlier if console */
-		fb_initwsd(sf);
-	} else {
-		/* remember screen burner routine */
-		fb_burner = op->burn_screen;
-		fb_cookie = sf;
-	}
-
-	/* plug common wsdisplay_accessops if necessary */
-	if (op->alloc_screen == NULL) {
-		op->alloc_screen = fb_alloc_screen;
-		op->free_screen = fb_free_screen;
-		op->show_screen = fb_show_screen;
-	}
-
-	sf->sf_scrlist[0] = &sf->sf_wsd;
-	sf->sf_wsl.nscreens = 1;
-	sf->sf_wsl.screens = (const struct wsscreen_descr **)sf->sf_scrlist;
-
-	waa.console = isconsole;
-	waa.scrdata = &sf->sf_wsl;
-	waa.accessops = op;
-	waa.accesscookie = sf;
-	waa.defaultscreens = 0;
-	config_found(&sf->sf_dev, &waa, wsemuldisplaydevprint);
-}
-
-/*
- * Common wsdisplay_accessops routines.
- */
-int
-fb_alloc_screen(void *v, const struct wsscreen_descr *type,
-    void **cookiep, int *curxp, int *curyp, long *attrp)
-{
-	struct sunfb *sf = v;
-	struct rasops_info *ri = &sf->sf_ro;
-
-	if (sf->sf_nscreens > 0)
-		return (ENOMEM);
-
-	*cookiep = ri;
-	*curyp = 0;
-	*curxp = 0;
-	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
-		ri->ri_ops.alloc_attr(ri,
-		    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, attrp);
-	else
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
-	sf->sf_nscreens++;
-	return (0);
-}
-
-void
-fb_free_screen(void *v, void *cookie)
-{
-	struct sunfb *sf = v;
-
-	sf->sf_nscreens--;
-}
-
-int
-fb_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
-    void *cbarg)
-{
-	return (0);
-}
-
 #if defined(SUN4)
-
 /*
- * Support routines for P4 framebuffers.
+ * Support routines for pfour framebuffers.
  */
 
 /*
- * Probe for a P4 framebuffer.  Return values:
- *	PFOUR_NOTPFOUR		framebuffer is not a P4 framebuffer
- *	otherwise returns P4 ID
+ * Probe for a pfour framebuffer.  Return values:
+ *
+ *	PFOUR_NOTPFOUR		framebuffer is not a pfour
+ *				framebuffer
+ *
+ *	otherwise returns pfour ID
  */
 int
-fb_pfour_id(void *va)
+fb_pfour_id(va)
+	void *va;
 {
 	volatile u_int32_t val, save, *pfour = va;
 
@@ -545,18 +479,27 @@ fb_pfour_id(void *va)
 }
 
 /*
- * Screen burner routine for P4
+ * Return the status of the video enable.
  */
-void
-fb_pfour_burner(void *v, u_int enable, u_int flags)
+int
+fb_pfour_get_video(fb)
+	struct fbdevice *fb;
 {
-	struct sunfb *sf = (struct sunfb *)v;
-	volatile u_int32_t pfour;
 
-	pfour = *sf->sf_pfour & ~(PFOUR_REG_INTCLR | PFOUR_REG_VIDEO);
-	*sf->sf_pfour = pfour | (enable ? PFOUR_REG_VIDEO : 0);
+	return ((*fb->fb_pfour & PFOUR_REG_VIDEO) != 0);
 }
 
-#endif /* SUN4 */
+/*
+ * Enable or disable the framebuffer.
+ */
+void
+fb_pfour_set_video(fb, enable)
+	struct fbdevice *fb;
+	int enable;
+{
+	volatile u_int32_t pfour;
 
-#endif	/* NWSDISPLAY */
+	pfour = *fb->fb_pfour & ~(PFOUR_REG_INTCLR|PFOUR_REG_VIDEO);
+	*fb->fb_pfour = pfour | (enable ? PFOUR_REG_VIDEO : 0);
+}
+#endif /* SUN4 */

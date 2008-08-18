@@ -1,5 +1,3 @@
-/*	$OpenBSD: espreg.h,v 1.2 1996/10/31 01:01:30 niklas Exp $	*/
-
 /*-
  * Copyright (c) 1995  Sean E. Fagin, John M Vinopal.
  *

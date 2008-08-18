@@ -1,5 +1,5 @@
-/*	$OpenBSD: svr4_socket.c,v 1.5 2006/03/05 21:48:56 miod Exp $	*/
-/*	$NetBSD: svr4_socket.c,v 1.4 1997/07/21 23:02:37 christos Exp $	*/
+/*	$OpenBSD: svr4_socket.c,v 1.1 1996/04/21 22:18:24 deraadt Exp $	*/
+/*	$NetBSD: svr4_socket.c,v 1.1 1996/04/11 12:43:30 christos Exp $	*/
 
 /*
  * Copyright (c) 1996 Christos Zoulas.  All rights reserved.
@@ -47,19 +47,13 @@
 #include <sys/queue.h>
 #include <sys/mbuf.h>
 #include <sys/file.h>
-#include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/syscallargs.h>
 #include <sys/un.h>
 #include <sys/stat.h>
 
-#include <compat/svr4/svr4_types.h>
 #include <compat/svr4/svr4_util.h>
 #include <compat/svr4/svr4_socket.h>
-#include <compat/svr4/svr4_signal.h>
-#include <compat/svr4/svr4_sockmod.h>
-#include <compat/svr4/svr4_syscallargs.h>
 
 struct svr4_sockcache_entry {
 	struct proc *p;		/* Process for the socket		*/
@@ -84,8 +78,6 @@ svr4_find_socket(p, fp, dev, ino)
 	void *cookie = ((struct socket *) fp->f_data)->so_internal;
 
 	if (!initialized) {
-		DPRINTF(("svr4_find_socket: uninitialized [%p,%d,%d]\n",
-		    p, dev, ino));
 		TAILQ_INIT(&svr4_head);
 		initialized = 1;
 		return NULL;
@@ -93,7 +85,7 @@ svr4_find_socket(p, fp, dev, ino)
 
 
 	DPRINTF(("svr4_find_socket: [%p,%d,%d]: ", p, dev, ino));
-	TAILQ_FOREACH(e, &svr4_head, entries)
+	for (e = svr4_head.tqh_first; e != NULL; e = e->entries.tqe_next)
 		if (e->p == p && e->dev == dev && e->ino == ino) {
 #ifdef DIAGNOSTIC
 			if (e->cookie != NULL && e->cookie != cookie)
@@ -123,7 +115,7 @@ svr4_delete_socket(p, fp)
 		return;
 	}
 
-	TAILQ_FOREACH(e, &svr4_head, entries)
+	for (e = svr4_head.tqh_first; e != NULL; e = e->entries.tqe_next)
 		if (e->p == p && e->cookie == cookie) {
 			TAILQ_REMOVE(&svr4_head, e, entries);
 			DPRINTF(("svr4_delete_socket: %s [%p,%d,%d]\n",
@@ -141,8 +133,7 @@ svr4_add_socket(p, path, st)
 	struct stat *st;
 {
 	struct svr4_sockcache_entry *e;
-	size_t len;
-	int error;
+	int len, error;
 
 	if (!initialized) {
 		TAILQ_INIT(&svr4_head);
@@ -155,7 +146,7 @@ svr4_add_socket(p, path, st)
 	e->ino = st->st_ino;
 	e->p = p;
 
-	if ((error = copyinstr(path, e->sock.sun_path,
+	if ((error = copyinstr((char *) path, e->sock.sun_path,
 	    sizeof(e->sock.sun_path), &len)) != 0) {
 		DPRINTF(("svr4_add_socket: copyinstr failed %d\n", error));
 		free(e, M_TEMP);
@@ -169,39 +160,4 @@ svr4_add_socket(p, path, st)
 	DPRINTF(("svr4_add_socket: %s [%p,%d,%d]\n", e->sock.sun_path,
 		 p, e->dev, e->ino));
 	return 0;
-}
-
-
-int
-svr4_sys_socket(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct svr4_sys_socket_args *uap = v;
-
-	switch (SCARG(uap, type)) {
-	case SVR4_SOCK_DGRAM:
-		SCARG(uap, type) = SOCK_DGRAM;
-		break;
-
-	case SVR4_SOCK_STREAM:
-		SCARG(uap, type) = SOCK_STREAM;
-		break;
-
-	case SVR4_SOCK_RAW:
-		SCARG(uap, type) = SOCK_RAW;
-		break;
-
-	case SVR4_SOCK_RDM:
-		SCARG(uap, type) = SOCK_RDM;
-		break;
-
-	case SVR4_SOCK_SEQPACKET:
-		SCARG(uap, type) = SOCK_SEQPACKET;
-		break;
-	default:
-		return EINVAL;
-	}
-	return sys_socket(p, uap, retval);
 }

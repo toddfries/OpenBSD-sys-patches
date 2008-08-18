@@ -1,4 +1,4 @@
-/*	$OpenBSD: memdevs.c,v 1.6 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: memdevs.c,v 1.3 1996/04/28 11:03:25 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -31,24 +37,22 @@
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
+
 #include <sys/device.h>
-
-#include <machine/autoconf.h>
 #include <machine/cpu.h>
-
-#include <mvme68k/dev/memdevs.h>
+#include <machine/autoconf.h>
 
 /*ARGSUSED*/
 int
 memdevrw(base, len, uio, flags)
-	vaddr_t base;
+	caddr_t base;
 	int len;
 	struct uio *uio;
 	int flags;
 {
-	vaddr_t v;
-	int c;
-	struct iovec *iov;
+	register vm_offset_t o, v;
+	register int c;
+	register struct iovec *iov;
 	int error = 0;
 
 	while (uio->uio_resid > 0 && error == 0) {
@@ -67,7 +71,7 @@ memdevrw(base, len, uio, flags)
 			c = len - v;	/* till end of dev */
 		if (c == 0)
 			return (0);
-		error = uiomove((caddr_t)base + v, c, uio);
+		error = uiomove(base + v, c, uio);
 	}
 	return (error);
 }

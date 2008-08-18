@@ -1,4 +1,3 @@
-/*	$OpenBSD: if_fddi.h,v 1.6 2003/06/02 23:28:12 millert Exp $	*/
 /*	$NetBSD: if_fddi.h,v 1.2 1995/08/19 04:35:28 cgd Exp $	*/
 
 /*
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +48,6 @@ struct	fddi_header {
 };
 
 #define	FDDIMTU			4470
-#define	FDDIIPMTU		4352
 #define	FDDIMIN			3
 
 #define	FDDIFC_C		0x80	/* 0b10000000 */
@@ -73,9 +75,11 @@ struct	fddi_header {
 #define	fddi_delmulti		ether_delmulti
 #define	fddi_sprintf		ether_sprintf
 
-void    fddi_ifattach(struct ifnet *);
-void    fddi_input(struct ifnet *, struct fddi_header *, struct mbuf *);
-int     fddi_output(struct ifnet *,
-           struct mbuf *, struct sockaddr *, struct rtentry *); 
-#endif /* _KERNEL */
-#endif /* _NET_IF_FDDI_H_ */
+void    fddi_ifattach __P((struct ifnet *));
+void    fddi_input __P((struct ifnet *, struct fddi_header *, struct mbuf *));
+int     fddi_output __P((struct ifnet *,
+           struct mbuf *, struct sockaddr *, struct rtentry *)); 
+
+#endif
+
+#endif

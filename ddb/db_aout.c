@@ -1,5 +1,5 @@
-/*	$OpenBSD: db_aout.c,v 1.30 2006/07/06 18:12:50 miod Exp $	*/
-/*	$NetBSD: db_aout.c,v 1.29 2000/07/07 21:55:18 jhawk Exp $	*/
+/*	$OpenBSD: db_aout.c,v 1.11 1996/08/23 19:53:46 niklas Exp $	*/
+/*	$NetBSD: db_aout.c,v 1.14 1996/02/27 20:54:43 gwr Exp $	*/
 
 /* 
  * Mach Operating System
@@ -38,33 +38,9 @@
 #include <ddb/db_output.h>
 #include <ddb/db_extern.h>
 
-#ifdef	DB_AOUT_SYMBOLS
+#ifndef	DB_NO_AOUT
 
 #include <ddb/db_aout.h>
-
-boolean_t	db_aout_sym_init(int, void *, void *, const char *);
-db_sym_t	db_aout_lookup(db_symtab_t *, char *);
-db_sym_t	db_aout_search_symbol(db_symtab_t *, db_addr_t,
-		    db_strategy_t, db_expr_t *);
-void		db_aout_symbol_values(db_symtab_t *, db_sym_t,
-		    char **, db_expr_t *);
-boolean_t	db_aout_line_at_pc(db_symtab_t *, db_sym_t,
-		    char **, int *, db_expr_t);
-boolean_t	db_aout_sym_numargs(db_symtab_t *, db_sym_t, int *,
-		    char **);
-void		db_aout_forall(db_symtab_t *,
-		    db_forall_func_t db_forall_func, void *);
-
-db_symformat_t db_symformat_aout = {
-	"a.out",
-	db_aout_sym_init,
-	db_aout_lookup,
-	db_aout_search_symbol,
-	db_aout_symbol_values,
-	db_aout_line_at_pc,
-	db_aout_sym_numargs,
-	db_aout_forall
-};
 
 /*
  * An a.out symbol table as loaded into the kernel debugger:
@@ -78,152 +54,175 @@ db_symformat_t db_symformat_aout = {
  *		   including this word
  *		-> strings
  */
-static char *strtab;
-static int slen;
 
-#define X_db_getname(t, s)	(s->n_un.n_strx ? t->end + s->n_un.n_strx : NULL)
+#ifdef	SYMTAB_SPACE
+int db_symtabsize = SYMTAB_SPACE;
+int db_symtab[SYMTAB_SPACE/sizeof(int)] = { 0, 1 };
+#endif
 
 /*
  * Find the symbol table and strings; tell ddb about them.
- *
- * symsize:	size of symbol table
- * vsymtab:	pointer to end of string table
- * vesymtab:	pointer to end of string table, for checking - rounded up to
- * 		    integer boundry
  */
-boolean_t
-db_aout_sym_init(int symsize, void *vsymtab, void *vesymtab, const char *name)
+void
+X_db_sym_init(symtab, esymtab, name)
+	int *symtab;		/* pointer to start of symbol table */
+	char *esymtab;		/* pointer to end of string table,
+				   for checking - rounded up to integer
+				   boundary */
+	char *name;
 {
-	struct nlist	*sym_start, *sym_end;
-	struct nlist	*sp;
-	int bad = 0;
+	register struct nlist	*sym_start, *sym_end;
+	register struct nlist	*sp;
+	register char *strtab;
+	register int slen;
 	char *estrtab;
 
-	/*
-	 * XXX - ddb_init should take arguments.
-	 *       Fixup the arguments.
-	 */
-	symsize = *(long *)vsymtab;
-	vsymtab = (void *)((long *)vsymtab + 1);
-	
-
-	if (ALIGNED_POINTER(vsymtab, long) == 0) {
-		printf("[ %s symbol table has bad start address %p ]\n",
-		    name, vsymtab);
-		return (FALSE);
+#ifdef SYMTAB_SPACE
+	if (*symtab < sizeof(int)) {
+		printf ("DDB: no symbols\n");
+		return;
 	}
+#endif
 
 	/*
 	 * Find pointers to the start and end of the symbol entries,
 	 * given a pointer to the start of the symbol table.
 	 */
-	sym_start = (struct nlist *)vsymtab;
-	sym_end   = (struct nlist *)((char *)sym_start + symsize);
+	sym_start = (struct nlist *)(symtab + 1);
+	sym_end   = (struct nlist *)((char *)sym_start + *symtab);
 
 	strtab = (char *)sym_end;
-	if (ALIGNED_POINTER(strtab, int) == 0) {
-		printf("[ %s symbol table has bad string table address %p ]\n",
-		    name, strtab);
-		return (FALSE);
-	}
 	slen = *(int *)strtab;
 
+#ifdef	SYMTAB_SPACE
+	printf("DDB: found symbols [%d + %d bytes]\n",
+		   *symtab, slen);
+	if ((*symtab + slen) > db_symtabsize) {
+		printf("DDB: symbols larger than SYMTAB_SPACE?\n");
+		return;
+	}
+#else
 	estrtab = strtab + slen;
 
 #define	round_to_size(x) \
-    (((vaddr_t)(x) + sizeof(vsize_t) - 1) & ~(sizeof(vsize_t) - 1))
+	(((vm_offset_t)(x) + sizeof(vm_size_t) - 1) & ~(sizeof(vm_size_t) - 1))
 
-	if (round_to_size(estrtab) != round_to_size(vesymtab)) {
-		printf("[ %s a.out symbol table not valid ]\n", name);
-		return (FALSE);
+	if (round_to_size(estrtab) != round_to_size(esymtab)) {
+	    db_printf("[ %s symbol table not valid ]\n", name);
+	    return;
         }
 #undef	round_to_size
         
+#endif
+
 	for (sp = sym_start; sp < sym_end; sp++) {
-		int strx;
-		strx = sp->n_un.n_strx;
-		if (strx != 0) {
-			if (strx > slen) {
-				printf("[ %s has bad a.out string table index "
-				    "(0x%x) ]\n",
-				    name, strx);
-				bad = 1;
-				continue;
-			}
+	    register int strx;
+	    strx = sp->n_un.n_strx;
+	    if (strx != 0) {
+		if (strx > slen) {
+		    db_printf("Bad string table index (%#x)\n", strx);
+		    sp->n_un.n_name = 0;
+		    continue;
 		}
+		sp->n_un.n_name = strtab + strx;
+	    }
 	}
 
-	if (bad)
-		return (FALSE);
-
 	if (db_add_symbol_table((char *)sym_start, (char *)sym_end, name,
-	    NULL) !=  -1) {
-                printf("[ using %ld bytes of %s a.out symbol table ]\n",
-                    (long)vesymtab - (long)vsymtab, name);
-		return (TRUE);
+	    (char *)symtab, esymtab) !=  -1) {
+#ifndef	SYMTAB_SPACE
+                db_printf("[ preserving %d bytes of %s symbol table ]\n",
+                          esymtab - (char *)symtab, name);
+#endif
         }
+}
 
-	return (FALSE);
+size_t
+X_db_nsyms(stab)
+	db_symtab_t	stab;
+{
+	return (struct nlist *)stab->end - (struct nlist *)stab->start;
 }
 
 db_sym_t
-db_aout_lookup(db_symtab_t *stab, char *symstr)
+X_db_isym(stab, i)
+	db_symtab_t	stab;
+	size_t		i;
 {
-	struct nlist *sp, *ep;
-	char *n_name;
+	if (i >= X_db_nsyms(stab))
+		return NULL;
+	else
+		return (db_sym_t)((struct nlist *)stab->start + i);
+}
+
+db_sym_t
+X_db_lookup(stab, symstr)
+	db_symtab_t	stab;
+	char *		symstr;
+{
+	register struct nlist *sp, *ep;
 
 	sp = (struct nlist *)stab->start;
 	ep = (struct nlist *)stab->end;
 
 	for (; sp < ep; sp++) {
-		if ((n_name = X_db_getname(stab, sp)) == 0)
-			continue;
-		if ((sp->n_type & N_STAB) == 0 &&
-		    db_eqname(n_name, symstr, '_'))
-			return ((db_sym_t)sp);
+	    if (sp->n_un.n_name == 0)
+		continue;
+	    if ((sp->n_type & N_STAB) == 0 &&
+		sp->n_un.n_name != 0 &&
+		db_eqname(sp->n_un.n_name, symstr, '_'))
+	    {
+		return ((db_sym_t)sp);
+	    }
 	}
 	return ((db_sym_t)0);
 }
 
 db_sym_t
-db_aout_search_symbol(db_symtab_t *symtab, db_addr_t off,
-    db_strategy_t strategy, db_expr_t *diffp)
+X_db_search_symbol(symtab, off, strategy, diffp)
+	db_symtab_t	symtab;
+	register
+	db_addr_t	off;
+	db_strategy_t	strategy;
+	db_expr_t	*diffp;		/* in/out */
 {
-	unsigned int	diff = *diffp;
-	struct nlist	*symp = 0;
-	struct nlist	*sp, *ep;
+	register db_expr_t	diff = *diffp;
+	register struct nlist	*symp = 0;
+	register struct nlist	*sp, *ep;
 
 	sp = (struct nlist *)symtab->start;
 	ep = (struct nlist *)symtab->end;
 
 	for (; sp < ep; sp++) {
-		if ((sp->n_type & N_STAB) != 0 ||
-		    (sp->n_type & N_TYPE) == N_FN)
-			continue;
-		if (X_db_getname(symtab, sp) == 0)
-			continue;
-		if (off >= sp->n_value) {
-			if (off - sp->n_value < diff) {
-				diff = off - sp->n_value;
-				symp = sp;
-				if (diff == 0 && ((strategy == DB_STGY_PROC &&
-				    sp->n_type == (N_TEXT|N_EXT)) ||
-				    (strategy == DB_STGY_ANY &&
-				    (sp->n_type & N_EXT))))
-					break;
-			} else if (off - sp->n_value == diff) {
-				if (symp == 0)
-					symp = sp;
-				else if ((symp->n_type & N_EXT) == 0 &&
-				    (sp->n_type & N_EXT) != 0)
-					symp = sp;	/* pick the ext. sym */
-			}
+	    if (sp->n_un.n_name == 0)
+		continue;
+	    if ((sp->n_type & N_STAB) != 0 || (sp->n_type & N_TYPE) == N_FN)
+		continue;
+	    if (off >= sp->n_value) {
+		if ((db_expr_t)(off - sp->n_value) < diff || diff < 0) {
+		    diff = off - sp->n_value;
+		    symp = sp;
+		    if (diff == 0 &&
+				((strategy == DB_STGY_PROC &&
+					sp->n_type == (N_TEXT|N_EXT)) ||
+				 (strategy == DB_STGY_ANY &&
+					(sp->n_type & N_EXT))))
+			break;
 		}
+		else if ((db_expr_t)(off - sp->n_value) == diff) {
+		    if (symp == 0)
+			symp = sp;
+		    else if ((symp->n_type & N_EXT) == 0 &&
+				(sp->n_type & N_EXT) != 0)
+			symp = sp;	/* pick the external symbol */
+		}
+	    }
 	}
 	if (symp == 0) {
-		*diffp = off;
-	} else {
-		*diffp = diff;
+	    *diffp = off;
+	}
+	else {
+	    *diffp = diff;
 	}
 	return ((db_sym_t)symp);
 }
@@ -232,160 +231,146 @@ db_aout_search_symbol(db_symtab_t *symtab, db_addr_t off,
  * Return the name and value for a symbol.
  */
 void
-db_aout_symbol_values(db_symtab_t *symtab, db_sym_t sym, char **namep,
-    db_expr_t *valuep)
+X_db_symbol_values(sym, namep, valuep)
+	db_sym_t	sym;
+	char		**namep;
+	db_expr_t	*valuep;
 {
-	struct nlist *sp;
+	register struct nlist *sp;
 
-	sp = (struct nlist *)sym;
+	if ((sp = (struct nlist *)sym) == NULL)
+	    return;
 	if (namep)
-		*namep = X_db_getname(symtab, sp);
+	    *namep = sp->n_un.n_name;
 	if (valuep)
-		*valuep = sp->n_value;
+	    *valuep = sp->n_value;
 }
 
 
 boolean_t
-db_aout_line_at_pc(db_symtab_t *symtab, db_sym_t cursym, char **filename,
-    int *linenum, db_expr_t off)
+X_db_line_at_pc(symtab, cursym, filename, linenum, off)
+	db_symtab_t	symtab;
+	db_sym_t	cursym;
+	char 		**filename;
+	int 		*linenum;
+	db_expr_t	off;
 {
-	struct nlist	*sp, *ep;
-	unsigned long	sodiff = -1UL, lndiff = -1UL, ln = 0;
-	char		*fname = NULL;
+	register struct nlist	*sp, *ep;
+	unsigned long		sodiff = -1UL, lndiff = -1UL, ln = 0;
+	char			*fname = NULL;
 
 	sp = (struct nlist *)symtab->start;
 	ep = (struct nlist *)symtab->end;
 
 /* XXX - gcc specific */
 #define NEWSRC(str)	((str) != NULL && \
-    (str)[0] == 'g' && strcmp((str), "gcc_compiled.") == 0)
+			(str)[0] == 'g' && strcmp((str), "gcc_compiled.") == 0)
 
 	for (; sp < ep; sp++) {
 
-		/*
-		 * Prevent bogus linenumbers in case module not compiled
-		 * with debugging options
-		 */
+	    /*
+	     * Prevent bogus linenumbers in case module not compiled
+	     * with debugging options
+	     */
 #if 0
-		if (sp->n_value <= off && (off - sp->n_value) <= sodiff &&
-		    NEWSRC(X_db_getname(symtab, sp))) {
+	    if (sp->n_value <= off && (off - sp->n_value) <= sodiff &&
+		NEWSRC(sp->n_un.n_name)) {
 #endif
-		if ((sp->n_type & N_TYPE) == N_FN ||
-		    NEWSRC(X_db_getname(symtab, sp))) {
-			sodiff = lndiff = -1UL;
-			ln = 0;
-			fname = NULL;
+	    if ((sp->n_type & N_TYPE) == N_FN || NEWSRC(sp->n_un.n_name)) { 
+		sodiff = lndiff = -1UL;
+		ln = 0;
+		fname = NULL;
+	    }
+
+	    if (sp->n_type == N_SO) {
+		if ((db_expr_t)sp->n_value <= off &&
+		    (off - sp->n_value) < sodiff) {
+			sodiff = off - sp->n_value;
+			fname = sp->n_un.n_name;
 		}
+		continue;
+	    }
 
-		if (sp->n_type == N_SO) {
-			if (sp->n_value <= off &&
-			    (off - sp->n_value) < sodiff) {
-				sodiff = off - sp->n_value;
-				fname = X_db_getname(symtab, sp);
-			}
-			continue;
-		}
+	    if (sp->n_type != N_SLINE)
+		continue;
 
-		if (sp->n_type != N_SLINE)
-			continue;
+	    if ((db_expr_t)sp->n_value > off)
+		break;
 
-		if (sp->n_value > off)
-			break;
-
-		if (off - sp->n_value < lndiff) {
-			lndiff = off - sp->n_value;
-			ln = sp->n_desc;
-		}
+	    if (off - sp->n_value < lndiff) {
+		lndiff = off - sp->n_value;
+		ln = sp->n_desc;
+	    }
 	}
 
 	if (fname != NULL && ln != 0) {
 		*filename = fname;
 		*linenum = ln;
-		return (TRUE);
+		return TRUE;
 	}
 
 	return (FALSE);
 }
 
 boolean_t
-db_aout_sym_numargs(db_symtab_t *symtab, db_sym_t cursym, int *nargp,
-    char **argnamep)
+X_db_sym_numargs(symtab, cursym, nargp, argnamep)
+	db_symtab_t	symtab;
+	db_sym_t	cursym;
+	int		*nargp;
+	char		**argnamep;
 {
-	struct nlist	*sp, *ep;
-	u_long		addr;
-	int		maxnarg = *nargp, nargs = 0;
-	char		*n_name;
+	register struct nlist	*sp, *ep;
+	u_long			addr;
+	int			maxnarg = *nargp, nargs = 0;
 
 	if (cursym == NULL)
-		return (FALSE);
+		return FALSE;
 
 	addr = ((struct nlist *)cursym)->n_value;
 	sp = (struct nlist *)symtab->start;
 	ep = (struct nlist *)symtab->end;
 
 	for (; sp < ep; sp++) {
-		if (sp->n_type == N_FUN && sp->n_value == addr) {
-			while (++sp < ep && sp->n_type == N_PSYM) {
-				if (nargs >= maxnarg)
-					break;
-				nargs++;
-				n_name = X_db_getname(symtab, sp);
-				*argnamep++ = n_name ? n_name : "???";
-				{
-					/* XXX - remove trailers */
-					char *cp = *(argnamep - 1);
-
-					while (*cp != '\0' && *cp != ':')
-						cp++;
-					if (*cp == ':') *cp = '\0';
-				}
+	    if (sp->n_type == N_FUN && sp->n_value == addr) {
+		while (++sp < ep && sp->n_type == N_PSYM) {
+			if (nargs >= maxnarg)
+				break;
+			nargs++;
+			*argnamep++ = sp->n_un.n_name?sp->n_un.n_name:"???";
+			{
+			/* XXX - remove trailers */
+			char *cp = *(argnamep-1);
+			while (*cp != '\0' && *cp != ':') cp++;
+			if (*cp == ':') *cp = '\0';
 			}
-			*nargp = nargs;
-			return (TRUE);
 		}
+		*nargp = nargs;
+		return TRUE;
+	    }
 	}
-	return (FALSE);
+	return FALSE;
 }
 
+/*
+ * Initialization routine for a.out files.
+ */
 void
-db_aout_forall(db_symtab_t *stab, db_forall_func_t db_forall_func, void *arg)
+ddb_init()
 {
-	static char suffix[2];
-	struct nlist *sp, *ep;
+#ifndef SYMTAB_SPACE
+	extern char	*esym;
+	extern int	end;
 
-	sp = (struct nlist *)stab->start;
-	ep = (struct nlist *)stab->end;
+	db_sym_init();
 
-	for (; sp < ep; sp++) {
-		if (X_db_getname(stab, sp) == 0)
-			continue;
-		if ((sp->n_type & N_STAB) == 0) {
-			suffix[1] = '\0';
-			switch(sp->n_type & N_TYPE) {
-			case N_ABS:
-				suffix[0] = '@';
-				break;
-			case N_TEXT:
-				suffix[0] = '*';
-				break;
-			case N_DATA:
-				suffix[0] = '+';
-				break;
-			case N_BSS:
-				suffix[0] = '-';
-				break;
-			case N_FN:
-				suffix[0] = '/';
-				break;
-			default:
-				suffix[0] = '\0';
-			}
-			(*db_forall_func)(stab, (db_sym_t)sp,
-			    X_db_getname(stab, sp), suffix, '_', arg);
-		}
+	if (esym > (char *)&end) {
+	    X_db_sym_init((int *)&end, esym, "bsd");
 	}
-	return;
+#else
+	db_sym_init();
+
+	X_db_sym_init (db_symtab, 0, "bsd");
+#endif
 }
 
-	
-#endif	/* DB_AOUT_SYMBOLS */
+#endif	/* DB_NO_AOUT */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sl.c,v 1.35 2007/12/20 02:53:02 brad Exp $	*/
+/*	$OpenBSD: if_sl.c,v 1.7 1996/08/22 00:35:52 deraadt Exp $	*/
 /*	$NetBSD: if_sl.c,v 1.39.4.1 1996/06/02 16:26:31 thorpej Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -58,13 +62,20 @@
  * pinging you can use up all your bandwidth).  Made low clist behavior
  * more robust and slightly less likely to hang serial line.
  * Sped up a bunch of things.
+ * 
+ * Note that splimp() is used throughout to block both (tty) input
+ * interrupts and network activity; thus, splimp must be >= spltty.
  */
+
+#include "sl.h"
+#if NSL > 0
 
 #include "bpfilter.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/mbuf.h>
+#include <sys/buf.h>
 #include <sys/dkstat.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
@@ -89,7 +100,7 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #else
-#error Huh? Slip without inet?
+Huh? Slip without inet?
 #endif
 
 #include <net/slcompress.h>
@@ -152,7 +163,7 @@
 #define	SLMTU		296
 #endif
 #if (SLMTU < 3)
-#error Huh?  SLMTU way too small.
+Huh?  SLMTU way too small.
 #endif
 #define	SLIP_HIWAT	roundup(50,CBSIZE)
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))		/* XXX - cgd */
@@ -171,111 +182,63 @@
 #define	ABT_COUNT	3	/* count of escapes for abort */
 #define	ABT_WINDOW	(ABT_COUNT*2+2)	/* in seconds - time to count */
 
+struct sl_softc sl_softc[NSL];
 
 #define FRAME_END	 	0xc0		/* Frame End */
 #define FRAME_ESCAPE		0xdb		/* Frame Esc */
 #define TRANS_FRAME_END	 	0xdc		/* transposed frame end */
 #define TRANS_FRAME_ESCAPE 	0xdd		/* transposed frame esc */
 
-static int slinit(struct sl_softc *);
-static struct mbuf *sl_btom(struct sl_softc *, int);
-
-int	sl_clone_create(struct if_clone *, int);
-int	sl_clone_destroy(struct ifnet *);
-
-LIST_HEAD(, sl_softc) sl_softc_list;
-struct if_clone sl_cloner =
-    IF_CLONE_INITIALIZER("sl", sl_clone_create, sl_clone_destroy);
+static int slinit __P((struct sl_softc *));
+static struct mbuf *sl_btom __P((struct sl_softc *, int));
 
 /*
  * Called from boot code to establish sl interfaces.
  */
 void
-slattach(n)
-	int n;
+slattach()
 {
-	LIST_INIT(&sl_softc_list);
-	if_clone_attach(&sl_cloner);
-}
+	register struct sl_softc *sc;
+	register int i = 0;
 
-int
-sl_clone_create(ifc, unit)
-	struct if_clone *ifc;
-	int unit;
-{
-	struct sl_softc *sc;
-	int s;
-
-	sc = malloc(sizeof(*sc), M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!sc)
-		return (ENOMEM);
-
-	sc->sc_unit = unit;	/* XXX */
-	snprintf(sc->sc_if.if_xname, sizeof sc->sc_if.if_xname, "%s%d",
-	    ifc->ifc_name, unit);
-	sc->sc_if.if_softc = sc;
-	sc->sc_if.if_mtu = SLMTU;
-	sc->sc_if.if_flags =
-	    IFF_POINTOPOINT | SC_AUTOCOMP | IFF_MULTICAST;
-	sc->sc_if.if_type = IFT_SLIP;
-	sc->sc_if.if_ioctl = slioctl;
-	sc->sc_if.if_output = sloutput;
-	IFQ_SET_MAXLEN(&sc->sc_if.if_snd, 50);
-	sc->sc_fastq.ifq_maxlen = 32;
-	IFQ_SET_READY(&sc->sc_if.if_snd);
-	if_attach(&sc->sc_if);
-	if_alloc_sadl(&sc->sc_if);
+	for (sc = sl_softc; i < NSL; sc++) {
+		sc->sc_unit = i;		/* XXX */
+		sprintf(sc->sc_if.if_xname, "sl%d", i++);
+		sc->sc_if.if_softc = sc;
+		sc->sc_if.if_mtu = SLMTU;
+		sc->sc_if.if_flags =
+		    IFF_POINTOPOINT | SC_AUTOCOMP | IFF_MULTICAST;
+		sc->sc_if.if_type = IFT_SLIP;
+		sc->sc_if.if_ioctl = slioctl;
+		sc->sc_if.if_output = sloutput;
+		sc->sc_if.if_snd.ifq_maxlen = 50;
+		sc->sc_fastq.ifq_maxlen = 32;
+		if_attach(&sc->sc_if);
 #if NBPFILTER > 0
-	bpfattach(&sc->sc_bpf, &sc->sc_if, DLT_SLIP, SLIP_HDRLEN);
+		bpfattach(&sc->sc_bpf, &sc->sc_if, DLT_SLIP, SLIP_HDRLEN);
 #endif
-	s = splnet();
-	LIST_INSERT_HEAD(&sl_softc_list, sc, sc_list);
-	splx(s);
-
-	return (0);
-}
-
-int
-sl_clone_destroy(ifp)
-	struct ifnet *ifp;
-{
-	struct sl_softc *sc = ifp->if_softc;
-	int s;
-
-	if (sc->sc_ttyp != NULL)
-		return (EBUSY);
-
-	s = splnet();
-	LIST_REMOVE(sc, sc_list);
-	splx(s);
-
-	if_detach(ifp);
-
-	free(sc, M_DEVBUF);
-	return (0);
+	}
 }
 
 static int
 slinit(sc)
-	struct sl_softc *sc;
+	register struct sl_softc *sc;
 {
+	register caddr_t p;
+
 	if (sc->sc_ep == (u_char *) 0) {
-		MGETHDR(sc->sc_mbuf, M_WAIT, MT_DATA);
-		if (sc->sc_mbuf)
-			MCLGET(sc->sc_mbuf, M_WAIT);
-		if (sc->sc_mbuf == NULL || sc->sc_mbuf->m_ext.ext_buf == NULL) {
+		MCLALLOC(p, M_WAIT);
+		if (p)
+			sc->sc_ep = (u_char *)p + SLBUFSIZE;
+		else {
 			printf("sl%d: can't allocate buffer\n", sc->sc_unit);
 			sc->sc_if.if_flags &= ~IFF_UP;
 			return (0);
 		}
 	}
-	sc->sc_ep = (u_char *) sc->sc_mbuf->m_ext.ext_buf +
-	    sc->sc_mbuf->m_ext.ext_size;
-	sc->sc_mp = sc->sc_pktstart = (u_char *) sc->sc_mbuf->m_ext.ext_buf +
-	    BUFOFFSET;
-
-	sl_compress_init(&sc->sc_comp);
-
+	sc->sc_buf = sc->sc_ep - SLMAX;
+	sc->sc_mp = sc->sc_buf;
+	sl_compress_init(&sc->sc_comp, -1);
 	return (1);
 }
 
@@ -287,19 +250,21 @@ slinit(sc)
 int
 slopen(dev, tp)
 	dev_t dev;
-	struct tty *tp;
+	register struct tty *tp;
 {
 	struct proc *p = curproc;		/* XXX */
-	struct sl_softc *sc;
-	int error, s;
+	register struct sl_softc *sc;
+	register int nsl;
+	int error;
+	int s;
 
-	if ((error = suser(p, 0)) != 0)
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
 
 	if (tp->t_line == SLIPDISC)
 		return (0);
 
-	LIST_FOREACH(sc, &sl_softc_list, sc_list)
+	for (nsl = NSL, sc = sl_softc; --nsl >= 0; sc++)
 		if (sc->sc_ttyp == NULL) {
 			if (slinit(sc) == 0)
 				return (ENOBUFS);
@@ -328,7 +293,7 @@ slopen(dev, tp)
 				error = clalloc(&tp->t_outq, 3*SLMTU, 0);
 				if (error) {
 					splx(s);
-					return (error);
+					return(error);
 				}
 			} else
 				sc->sc_oldbufsize = sc->sc_oldbufquot = 0;
@@ -347,32 +312,30 @@ void
 slclose(tp)
 	struct tty *tp;
 {
-	struct sl_softc *sc;
+	register struct sl_softc *sc;
 	int s;
 
 	ttywflush(tp);
+	s = splimp();		/* actually, max(spltty, splsoftnet) */
 	tp->t_line = 0;
 	sc = (struct sl_softc *)tp->t_sc;
 	if (sc != NULL) {
-		s = spltty();
-
 		if_down(&sc->sc_if);
 		sc->sc_ttyp = NULL;
 		tp->t_sc = NULL;
-
-		m_freem(sc->sc_mbuf);
-		sc->sc_mbuf = NULL;
-		sc->sc_ep = sc->sc_mp = sc->sc_pktstart = NULL;
-
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-		/* if necessary, install a new outq buffer of the appropriate size */
-		if (sc->sc_oldbufsize != 0) {
-			clfree(&tp->t_outq);
-			clalloc(&tp->t_outq, sc->sc_oldbufsize, sc->sc_oldbufquot);
-		}
-#endif
-		splx(s);
+		MCLFREE((caddr_t)(sc->sc_ep - SLBUFSIZE));
+		sc->sc_ep = 0;
+		sc->sc_mp = 0;
+		sc->sc_buf = 0;
 	}
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+	/* if necessary, install a new outq buffer of the appropriate size */
+	if (sc->sc_oldbufsize != 0) {
+		clfree(&tp->t_outq);
+		clalloc(&tp->t_outq, sc->sc_oldbufsize, sc->sc_oldbufquot);
+	}
+#endif
+	splx(s);
 }
 
 /*
@@ -409,13 +372,14 @@ sltioctl(tp, cmd, data, flag)
 int
 sloutput(ifp, m, dst, rtp)
 	struct ifnet *ifp;
-	struct mbuf *m;
+	register struct mbuf *m;
 	struct sockaddr *dst;
 	struct rtentry *rtp;
 {
-	struct sl_softc *sc = ifp->if_softc;
-	struct ip *ip;
-	int s, error;
+	register struct sl_softc *sc = ifp->if_softc;
+	register struct ip *ip;
+	register struct ifqueue *ifq;
+	int s;
 
 	/*
 	 * `Cannot happen' (see slioctl).  Someday we will extend
@@ -438,34 +402,34 @@ sloutput(ifp, m, dst, rtp)
 		m_freem(m);
 		return (EHOSTUNREACH);
 	}
+	ifq = &sc->sc_if.if_snd;
 	ip = mtod(m, struct ip *);
 	if (sc->sc_if.if_flags & SC_NOICMP && ip->ip_p == IPPROTO_ICMP) {
 		m_freem(m);
 		return (ENETRESET);		/* XXX ? */
 	}
-	s = spltty();
+	if (ip->ip_tos & IPTOS_LOWDELAY)
+		ifq = &sc->sc_fastq;
+	s = splimp();
 	if (sc->sc_oqlen && sc->sc_ttyp->t_outq.c_cc == sc->sc_oqlen) {
-		struct timeval tv, tm;
+		struct timeval tv;
 
-		getmicrotime(&tm);
 		/* if output's been stalled for too long, and restart */
-		timersub(&tm, &sc->sc_lastpacket, &tv);
+		timersub(&time, &sc->sc_if.if_lastchange, &tv);
 		if (tv.tv_sec > 0) {
 			sc->sc_otimeout++;
 			slstart(sc->sc_ttyp);
 		}
 	}
-
-	(void) splnet();
-	IFQ_ENQUEUE(&sc->sc_if.if_snd, m, NULL, error);
-	if (error) {
+	if (IF_QFULL(ifq)) {
+		IF_DROP(ifq);
+		m_freem(m);
 		splx(s);
 		sc->sc_if.if_oerrors++;
-		return (error);
+		return (ENOBUFS);
 	}
-
-	(void) spltty();
-	getmicrotime(&sc->sc_lastpacket);
+	IF_ENQUEUE(ifq, m);
+	sc->sc_if.if_lastchange = time;
 	if ((sc->sc_oqlen = sc->sc_ttyp->t_outq.c_cc) == 0)
 		slstart(sc->sc_ttyp);
 	splx(s);
@@ -479,17 +443,17 @@ sloutput(ifp, m, dst, rtp)
  */
 void
 slstart(tp)
-	struct tty *tp;
+	register struct tty *tp;
 {
-	struct sl_softc *sc = (struct sl_softc *)tp->t_sc;
-	struct mbuf *m;
-	u_char *cp;
-	struct ip *ip;
+	register struct sl_softc *sc = (struct sl_softc *)tp->t_sc;
+	register struct mbuf *m;
+	register u_char *cp;
+	register struct ip *ip;
 	int s;
 	struct mbuf *m2;
 #if NBPFILTER > 0
 	u_char bpfbuf[SLMTU + SLIP_HDRLEN];
-	int len = 0;
+	register int len = 0;
 #endif
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))	/* XXX - cgd */
 	extern int cfreecount;
@@ -526,12 +490,12 @@ slstart(tp)
 		/*
 		 * Get a packet and send it to the interface.
 		 */
-		s = splnet();
+		s = splimp();
 		IF_DEQUEUE(&sc->sc_fastq, m);
 		if (m)
 			sc->sc_if.if_omcasts++;		/* XXX */
 		else
-			IFQ_DEQUEUE(&sc->sc_if.if_snd, m);
+			IF_DEQUEUE(&sc->sc_if.if_snd, m);
 		splx(s);
 		if (m == NULL)
 			return;
@@ -552,12 +516,12 @@ slstart(tp)
 			 * and/or the copy should be negligible cost compared
 			 * to the packet transmission time).
 			 */
-			struct mbuf *m1 = m;
+			register struct mbuf *m1 = m;
+			register u_char *cp = bpfbuf + SLIP_HDRLEN;
 
-			cp = bpfbuf + SLIP_HDRLEN;
 			len = 0;
 			do {
-				int mlen = m1->m_len;
+				register int mlen = m1->m_len;
 
 				bcopy(mtod(m1, caddr_t), cp, mlen);
 				cp += mlen;
@@ -579,11 +543,10 @@ slstart(tp)
 			 */
 			bpfbuf[SLX_DIR] = SLIPDIR_OUT;
 			bcopy(mtod(m, caddr_t), &bpfbuf[SLX_CHDR], CHDR_LEN);
-			bpf_tap(sc->sc_bpf, bpfbuf, len + SLIP_HDRLEN,
-			    BPF_DIRECTION_OUT);
+			bpf_tap(sc->sc_bpf, bpfbuf, len + SLIP_HDRLEN);
 		}
 #endif
-		getmicrotime(&sc->sc_lastpacket);
+		sc->sc_if.if_lastchange = time;
 
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))		/* XXX - cgd */
 		/*
@@ -608,7 +571,7 @@ slstart(tp)
 		}
 
 		while (m) {
-			u_char *ep;
+			register u_char *ep;
 
 			cp = mtod(m, u_char *); ep = cp + m->m_len;
 			while (cp < ep) {
@@ -616,7 +579,7 @@ slstart(tp)
 				 * Find out how many bytes in the string we can
 				 * handle without doing something special.
 				 */
-				u_char *bp = cp;
+				register u_char *bp = cp;
 
 				while (cp < ep) {
 					switch (*cp++) {
@@ -685,34 +648,37 @@ slstart(tp)
  */
 static struct mbuf *
 sl_btom(sc, len)
-	struct sl_softc *sc;
-	int len;
+	register struct sl_softc *sc;
+	register int len;
 {
-	struct mbuf *m;
+	register struct mbuf *m;
+
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
+	if (m == NULL)
+		return (NULL);
 
 	/*
-	 * Allocate a new input buffer and swap.
+	 * If we have more than MHLEN bytes, it's cheaper to
+	 * queue the cluster we just filled & allocate a new one
+	 * for the input buffer.  Otherwise, fill the mbuf we
+	 * allocated above.  Note that code in the input routine
+	 * guarantees that packet will fit in a cluster.
 	 */
-	m = sc->sc_mbuf;
-	MGETHDR(sc->sc_mbuf, M_DONTWAIT, MT_DATA);
-	if (sc->sc_mbuf == NULL) {
-		sc->sc_mbuf = m;
-		return (NULL);
-	}
-	MCLGET(sc->sc_mbuf, M_DONTWAIT);
-	if ((sc->sc_mbuf->m_flags & M_EXT) == 0) {
-		/*
-		 * we couldn't get a cluster - if memory's this
-		 * low, it's time to start dropping packets.
-		 */
-		m_freem(sc->sc_mbuf);
-		sc->sc_mbuf = m;
-		return (NULL);
-	}
-	sc->sc_ep = (u_char *) sc->sc_mbuf->m_ext.ext_buf +
-		sc->sc_mbuf->m_ext.ext_size;
-	
-	m->m_data = sc->sc_pktstart;
+	if (len >= MHLEN) {
+		MCLGET(m, M_DONTWAIT);
+		if ((m->m_flags & M_EXT) == 0) {
+			/*
+			 * we couldn't get a cluster - if memory's this
+			 * low, it's time to start dropping packets.
+			 */
+			(void) m_free(m);
+			return (NULL);
+		}
+		sc->sc_ep = mtod(m, u_char *) + SLBUFSIZE;
+		m->m_data = (caddr_t)sc->sc_buf;
+		m->m_ext.ext_buf = (caddr_t)((long)sc->sc_buf &~ MCLOFSET);
+	} else
+		bcopy((caddr_t)sc->sc_buf, mtod(m, caddr_t), len);
 
 	m->m_len = len;
 	m->m_pkthdr.len = len;
@@ -725,12 +691,12 @@ sl_btom(sc, len)
  */
 void
 slinput(c, tp)
-	int c;
-	struct tty *tp;
+	register int c;
+	register struct tty *tp;
 {
-	struct sl_softc *sc;
-	struct mbuf *m;
-	int len;
+	register struct sl_softc *sc;
+	register struct mbuf *m;
+	register int len;
 	int s;
 #if NBPFILTER > 0
 	u_char chdr[CHDR_LEN];
@@ -756,15 +722,15 @@ slinput(c, tp)
 			 * this one is within the time limit.
 			 */
 			if (sc->sc_abortcount &&
-			    time_second >= sc->sc_starttime + ABT_WINDOW)
+			    time.tv_sec >= sc->sc_starttime + ABT_WINDOW)
 				sc->sc_abortcount = 0;
 			/*
 			 * If we see an abort after "idle" time, count it;
 			 * record when the first abort escape arrived.
 			 */
-			if (time_second >= sc->sc_lasttime + ABT_IDLE) {
+			if (time.tv_sec >= sc->sc_lasttime + ABT_IDLE) {
 				if (++sc->sc_abortcount == 1)
-					sc->sc_starttime = time_second;
+					sc->sc_starttime = time.tv_sec;
 				if (sc->sc_abortcount >= ABT_COUNT) {
 					slclose(tp);
 					return;
@@ -772,7 +738,7 @@ slinput(c, tp)
 			}
 		} else
 			sc->sc_abortcount = 0;
-		sc->sc_lasttime = time_second;
+		sc->sc_lasttime = time.tv_sec;
 	}
 
 	switch (c) {
@@ -796,7 +762,7 @@ slinput(c, tp)
 			sc->sc_flags &= ~SC_ERROR;
 			goto newpack;
 		}
-		len = sc->sc_mp - sc->sc_pktstart;
+		len = sc->sc_mp - sc->sc_buf;
 		if (len < 3)
 			/* less than min length packet - ignore */
 			goto newpack;
@@ -811,15 +777,15 @@ slinput(c, tp)
 			 * where the buffer started so we can
 			 * compute the new header length.
 			 */
-			bcopy(sc->sc_pktstart, chdr, CHDR_LEN);
+			bcopy(sc->sc_buf, chdr, CHDR_LEN);
 		}
 #endif
 
-		if ((c = (*sc->sc_pktstart & 0xf0)) != (IPVERSION << 4)) {
+		if ((c = (*sc->sc_buf & 0xf0)) != (IPVERSION << 4)) {
 			if (c & 0x80)
 				c = TYPE_COMPRESSED_TCP;
 			else if (c == TYPE_UNCOMPRESSED_TCP)
-				*sc->sc_pktstart &= 0x4f; /* XXX */
+				*sc->sc_buf &= 0x4f; /* XXX */
 			/*
 			 * We've got something that's not an IP packet.
 			 * If compression is enabled, try to decompress it.
@@ -828,13 +794,13 @@ slinput(c, tp)
 			 * enable compression.  Otherwise, drop it.
 			 */
 			if (sc->sc_if.if_flags & SC_COMPRESS) {
-				len = sl_uncompress_tcp(&sc->sc_pktstart, len,
+				len = sl_uncompress_tcp(&sc->sc_buf, len,
 							(u_int)c, &sc->sc_comp);
 				if (len <= 0)
 					goto error;
 			} else if ((sc->sc_if.if_flags & SC_AUTOCOMP) &&
 			    c == TYPE_UNCOMPRESSED_TCP && len >= 40) {
-				len = sl_uncompress_tcp(&sc->sc_pktstart, len,
+				len = sl_uncompress_tcp(&sc->sc_buf, len,
 							(u_int)c, &sc->sc_comp);
 				if (len <= 0)
 					goto error;
@@ -842,47 +808,33 @@ slinput(c, tp)
 			} else
 				goto error;
 		}
-
-		m = sl_btom(sc, len);
-		if (m == NULL)
-			goto error;
-
 #if NBPFILTER > 0
 		if (sc->sc_bpf) {
 			/*
 			 * Put the SLIP pseudo-"link header" in place.
-			 * Note this M_PREPEND() should bever fail,
-			 * since we know we always have enough space
-			 * in the input buffer.
+			 * We couldn't do this any earlier since
+			 * decompression probably moved the buffer
+			 * pointer.  Then, invoke BPF.
 			 */
-			u_char *hp;
+			register u_char *hp = sc->sc_buf - SLIP_HDRLEN;
 
-			M_PREPEND(m, SLIP_HDRLEN, M_DONTWAIT);
-			if (m == NULL)
-				goto error;
-
-			hp = mtod(m, u_char *);
 			hp[SLX_DIR] = SLIPDIR_IN;
-			memcpy(&hp[SLX_CHDR], chdr, CHDR_LEN);
-
-			s = splnet();
-			bpf_mtap(sc->sc_bpf, m, BPF_DIRECTION_IN);
-			splx(s);
-
-			m_adj(m, SLIP_HDRLEN);
+			bcopy(chdr, &hp[SLX_CHDR], CHDR_LEN);
+			bpf_tap(sc->sc_bpf, hp, len + SLIP_HDRLEN);
 		}
 #endif
+		m = sl_btom(sc, len);
+		if (m == NULL)
+			goto error;
 
 		sc->sc_if.if_ipackets++;
-		getmicrotime(&sc->sc_lastpacket);
-		s = splnet();
+		sc->sc_if.if_lastchange = time;
+		s = splimp();
 		if (IF_QFULL(&ipintrq)) {
 			IF_DROP(&ipintrq);
 			sc->sc_if.if_ierrors++;
 			sc->sc_if.if_iqdrops++;
 			m_freem(m);
-			if (!ipintrq.ifq_congestion)
-				if_congestion(&ipintrq);
 		} else {
 			IF_ENQUEUE(&ipintrq, m);
 			schednetisr(NETISR_IP);
@@ -902,8 +854,7 @@ slinput(c, tp)
 error:
 	sc->sc_if.if_ierrors++;
 newpack:
-	sc->sc_mp = sc->sc_pktstart = (u_char *) sc->sc_mbuf->m_ext.ext_buf +
-	    BUFOFFSET;
+	sc->sc_mp = sc->sc_buf = sc->sc_ep - SLMAX;
 	sc->sc_escape = 0;
 }
 
@@ -912,15 +863,13 @@ newpack:
  */
 int
 slioctl(ifp, cmd, data)
-	struct ifnet *ifp;
+	register struct ifnet *ifp;
 	u_long cmd;
 	caddr_t data;
 {
-	struct sl_softc *sc = ifp->if_softc;
-	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct ifreq *ifr;
-	int s = splnet(), error = 0;
-	struct sl_stats *slsp;
+	register struct ifaddr *ifa = (struct ifaddr *)data;
+	register struct ifreq *ifr;
+	register int s = splimp(), error = 0;
 
 	switch (cmd) {
 
@@ -956,29 +905,10 @@ slioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCGSLSTATS:
-		slsp = &((struct ifslstatsreq *) data)->stats;
-		bzero(slsp, sizeof(*slsp));
-		/* slsp->sl = sc->sc_stats; */
-		slsp->sl.sl_ibytes = sc->sc_if.if_ibytes;
-		slsp->sl.sl_obytes = sc->sc_if.if_obytes;
-		slsp->sl.sl_ipackets = sc->sc_if.if_ipackets;
-		slsp->sl.sl_opackets = sc->sc_if.if_opackets;
-#ifdef INET
-		slsp->vj.vjs_packets = sc->sc_comp.sls_packets;
-		slsp->vj.vjs_compressed = sc->sc_comp.sls_compressed;
-		slsp->vj.vjs_searches = sc->sc_comp.sls_searches;
-		slsp->vj.vjs_misses = sc->sc_comp.sls_misses;
-		slsp->vj.vjs_uncompressedin = sc->sc_comp.sls_uncompressedin;
-		slsp->vj.vjs_compressedin = sc->sc_comp.sls_compressedin;
-		slsp->vj.vjs_errorin = sc->sc_comp.sls_errorin;
-		slsp->vj.vjs_tossed = sc->sc_comp.sls_tossed;
-#endif /* INET */
-		break;
-
 	default:
-		error = ENOTTY;
+		error = EINVAL;
 	}
 	splx(s);
 	return (error);
 }
+#endif

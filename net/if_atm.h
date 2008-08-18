@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atm.h,v 1.12 2006/06/17 10:22:06 henning Exp $       */
+/*      $OpenBSD: if_atm.h,v 1.7 1996/07/03 17:14:30 chuck Exp $       */
 
 /*
  *
@@ -35,10 +35,18 @@
 /*
  * net/if_atm.h
  */
-#ifndef _NET_IF_ATM_H_
-#define _NET_IF_ATM_H_
 
-#define RTALLOC1(A,B)		rtalloc1((A),(B), 0)
+#if (defined(__FreeBSD__) || defined(__bsdi__)) && defined(KERNEL)
+#ifndef _KERNEL
+#define _KERNEL
+#endif
+#endif /* freebsd doesn't define _KERNEL */
+
+#if defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__)
+#define RTALLOC1(A,B)		rtalloc1((A),(B))
+#elif defined(__FreeBSD__)
+#define RTALLOC1(A,B)		rtalloc1((A),(B),0UL)
+#endif
 
 /*
  * pseudo header for packet transmission
@@ -87,18 +95,16 @@ struct atmllc {
   u_int8_t type[2];	/* "ethernet" type */
 };
 
-/* ATM_LLC macros: note type code in host byte order */
-#define ATM_LLC_TYPE(X) (((X)->type[0] << 8) | ((X)->type[1]))
+#define ATM_LLC_TYPE(X) (((X)->type[1] << 8) | ((X)->type[0]))
 #define ATM_LLC_SETTYPE(X,V) { \
-	(X)->type[0] = ((V) >> 8) & 0xff; \
-	(X)->type[1] = ((V) & 0xff); \
+	(X)->type[1] = ((V) >> 8) & 0xff; \
+	(X)->type[0] = ((V) & 0xff); \
 }
 
 #ifdef _KERNEL
-void	atm_ifattach(struct ifnet *);
-void	atm_input(struct ifnet *, struct atm_pseudohdr *,
-		struct mbuf *, void *);
-int	atm_output(struct ifnet *, struct mbuf *, struct sockaddr *, 
-		struct rtentry *);
-#endif /* _KERNEL */
-#endif /* _NET_IF_ATM_H_ */
+void	atm_ifattach __P((struct ifnet *));
+void	atm_input __P((struct ifnet *, struct atm_pseudohdr *,
+		struct mbuf *, void *));
+int	atm_output __P((struct ifnet *, struct mbuf *, struct sockaddr *, 
+		struct rtentry *));
+#endif

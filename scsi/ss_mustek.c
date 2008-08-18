@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss_mustek.c,v 1.15 2007/09/16 01:30:24 krw Exp $	*/
+/*	$OpenBSD: ss_mustek.c,v 1.5 1996/05/10 12:31:40 deraadt Exp $	*/
 /*	$NetBSD: ss_mustek.c,v 1.4 1996/05/05 19:52:57 christos Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include <sys/fcntl.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
+#include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
 #include <sys/user.h>
@@ -68,15 +69,16 @@
 
 #define MUSTEK_RETRIES 4
 
-int mustek_set_params(struct ss_softc *, struct scan_io *);
-int mustek_trigger_scanner(struct ss_softc *);
-void mustek_minphys(struct ss_softc *, struct buf *);
-int mustek_read(struct ss_softc *, struct buf *);
-int mustek_rewind_scanner(struct ss_softc *);
+int mustek_get_params __P((struct ss_softc *));
+int mustek_set_params __P((struct ss_softc *, struct scan_io *));
+int mustek_trigger_scanner __P((struct ss_softc *));
+void mustek_minphys __P((struct ss_softc *, struct buf *));
+int mustek_read __P((struct ss_softc *, struct buf *));
+int mustek_rewind_scanner __P((struct ss_softc *));
 
 /* only used internally */
-int mustek_get_status(struct ss_softc *, int, int);
-void mustek_compute_sizes(struct ss_softc *);
+int mustek_get_status __P((struct ss_softc *, int, int));
+void mustek_compute_sizes __P((struct ss_softc *));
 
 /*
  * structure for the special handlers
@@ -84,7 +86,7 @@ void mustek_compute_sizes(struct ss_softc *);
 struct ss_special mustek_special = {
 	mustek_set_params,
 	mustek_trigger_scanner,
-	NULL,
+	mustek_get_params,
 	mustek_minphys,
 	mustek_read,
 	mustek_rewind_scanner,
@@ -98,7 +100,7 @@ struct ss_special mustek_special = {
 void
 mustek_attach(ss, sa)
 	struct ss_softc *ss;
-	struct scsi_attach_args *sa;
+	struct scsibus_attach_args *sa;
 {
 #ifdef SCSIDEBUG
 	struct scsi_link *sc_link = sa->sa_sc_link;
@@ -123,9 +125,32 @@ mustek_attach(ss, sa)
 	    ss->sio.scan_scanner_type));
 
 	/* install special handlers */
-	ss->special = mustek_special;
+	ss->special = &mustek_special;
+
+	/*
+	 * populate the scanio struct with legal values
+	 * the default should come from user space
+	 */
+	ss->sio.scan_width		= 1200;
+	ss->sio.scan_height		= 1200;
+	ss->sio.scan_x_resolution	= 99;
+	ss->sio.scan_y_resolution	= 99;
+	ss->sio.scan_x_origin		= 0;
+	ss->sio.scan_y_origin		= 0;
+	ss->sio.scan_brightness		= 100;
+	ss->sio.scan_contrast		= 100;
+	ss->sio.scan_quality		= 100;
+	ss->sio.scan_image_mode		= SIM_GRAYSCALE;
 
 	mustek_compute_sizes(ss);
+}
+
+int
+mustek_get_params (ss)
+	struct ss_softc *ss;
+{
+
+	return (0);
 }
 
 /*
@@ -572,6 +597,6 @@ mustek_compute_sizes(ss)
 
 	ss->sio.scan_lines =
 	    (ss->sio.scan_height * ss->sio.scan_y_resolution) / 1200;
-	ss->sio.scan_window_size = ss->sio.scan_lines *
+	ss->sio.scan_window_size = ss->sio.scan_lines * 
 	    ((ss->sio.scan_pixels_per_line * ss->sio.scan_bits_per_pixel) / 8);
 }

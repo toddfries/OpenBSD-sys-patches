@@ -1,5 +1,4 @@
-/*	$OpenBSD: in_cksum.c,v 1.5 2005/05/10 04:04:39 brad Exp $	*/
-/*	$NetBSD: in_cksum.c,v 1.7 2003/08/07 16:30:19 agc Exp $	*/
+/*	$NetBSD: in_cksum.c,v 1.2 1996/04/08 18:32:38 ragge Exp $	*/
 
 /*
  * Copyright (c) 1988, 1992, 1993
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -61,17 +64,19 @@
 #define ADDWORD	{sum += *(u_short *)w;}
 
 int
-in_cksum(struct mbuf *m, int len)
+in_cksum(m, len)
+	register struct mbuf *m;
+	register int len;
 {
-	u_int8_t *w;
-	u_int32_t sum = 0;
-	int mlen = 0;
+	register u_char *w;
+	register u_int sum = 0;
+	register int mlen = 0;
 	int byte_swapped = 0;
 
 	for (;m && len; m = m->m_next) {
 		if ((mlen = m->m_len) == 0)
 			continue;
-		w = mtod(m, u_int8_t *);
+		w = mtod(m, u_char *);
 		if (len < mlen)
 			mlen = len;
 		len -= mlen;
@@ -81,13 +86,13 @@ in_cksum(struct mbuf *m, int len)
 		 * Ensure that we're aligned on a word boundary here so
 		 * that we can do 32 bit operations below.
 		 */
-		if ((3 & (u_long) w) != 0) {
+		if ((3 & (long)w) != 0) {
 			REDUCE;
-			if ((1 & (u_long) w) != 0) {
+			if ((1 & (long)w) != 0) {
 				ADDBYTE;
 				ADVANCE(1);
 			}
-			if ((2 & (u_long) w) != 0) {
+			if ((2 & (long)w) != 0) {
 				ADDWORD;
 				ADVANCE(2);
 			}
@@ -144,3 +149,4 @@ in_cksum(struct mbuf *m, int len)
 	ADDCARRY;
 	return (sum ^ 0xffff);
 }
+

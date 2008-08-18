@@ -1,8 +1,9 @@
-/*	$OpenBSD: cl.c,v 1.44 2008/01/23 16:37:57 jsing Exp $ */
+/*	$OpenBSD: cl.c,v 1.14 1996/06/11 10:17:34 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
  *
+ *   
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -11,6 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Dale Rahn.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -27,6 +33,8 @@
 /* DMA mode still does not work!!! */
 
 #include <sys/param.h>
+#include <sys/callout.h>
+#include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
@@ -34,21 +42,13 @@
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/device.h>
-#include <sys/syslog.h>
-
-#include <machine/autoconf.h>
-#include <machine/conf.h>
+/* #include <sys/queue.h> */
 #include <machine/cpu.h>
-
+#include <machine/autoconf.h>
 #include <dev/cons.h>
-
 #include <mvme68k/dev/clreg.h>
-
+#include <sys/syslog.h>
 #include "cl.h"
-
-#ifdef DDB
-#include <ddb/db_var.h>
-#endif
 
 #include "pcctwo.h"
 
@@ -56,8 +56,7 @@
 #include <mvme68k/dev/pcctworeg.h>
 #endif
 
-#define splcl() spltty()
-#define USE_BUFFER
+#define splcl() spl3()
 
 /* min timeout 0xa, what is a good value */
 #define CL_TIMEOUT	0x10
@@ -73,7 +72,7 @@
 #define CL_RXINTR	0x02
 
 struct cl_cons {
-	paddr_t	cl_paddr;
+	void	*cl_paddr;
 	struct clreg *cl_vaddr;
 	volatile struct pcctworeg *pcctwoaddr;
 	u_char	channel;
@@ -98,11 +97,6 @@ struct cl_info {
 	void *rxp[2];
 	void *tx[2];
 	void *txp[2];
-
-	volatile u_char *pconsum;
-	volatile u_char *psupply;
-	volatile u_char *buffer; 
-	volatile int	nchar;
 };
 #define CLCD_PORTS_PER_CHIP 4
 #define CL_BUFSIZE 256
@@ -114,6 +108,9 @@ char cl_dmabuf [CLCD_PORTS_PER_CHIP * CL_BUFSIZE * 4];
 
 struct clsoftc {
 	struct device	sc_dev;
+	struct evcnt sc_txintrcnt;
+	struct evcnt sc_rxintrcnt;
+	struct evcnt sc_mxintrcnt;
 	time_t	sc_rotime;	/* time of last ring overrun */
 	time_t	sc_fotime;	/* time of last fifo overrun */
 	u_char *pbase;
@@ -123,15 +120,10 @@ struct clsoftc {
 	struct intrhand		sc_ih_m;
 	struct intrhand		sc_ih_t;
 	struct intrhand		sc_ih_r;
-	char			sc_errintrname[16 + 4];
-	char			sc_mxintrname[16 + 3];
-	char			sc_rxintrname[16 + 3];
-	char			sc_txintrname[16 + 3];
+	struct pcctworeg	*sc_pcctwo;
 	int			sc_flags;
-	u_int8_t		ssir;
 };
-
-const struct {
+struct {
 	u_int speed;
 	u_char divisor;
 	u_char clock;
@@ -156,57 +148,62 @@ const struct {
 };
 
 /* prototypes */
-cons_decl(cl);
-u_char cl_clkdiv(int speed);
-u_char cl_clknum(int speed);
-u_char cl_clkrxtimeout(int speed);
-void clstart(struct tty *tp);
-void cl_unblock(struct tty *tp);
-int clccparam(struct clsoftc *sc, struct termios *par, int channel);
+int clcnprobe __P((struct consdev *cp));
+int clcninit __P((struct consdev *cp));
+int clcngetc __P((dev_t dev));
+int clcnputc __P((dev_t dev, u_char c));
+u_char cl_clkdiv __P((int speed));
+u_char cl_clknum __P((int speed));
+u_char cl_clkrxtimeout __P((int speed));
+void clstart __P((struct tty *tp));
+void cl_unblock __P((struct tty *tp));
+int clccparam __P((struct clsoftc *sc, struct termios *par, int channel));
 
-int clparam(struct tty *tp, struct termios *t);
-int cl_mintr(void *);
-int cl_txintr(void *);
-int cl_rxintr(void *);
-void cl_overflow(struct clsoftc *sc, int channel, time_t *ptime, u_char *msg);
-void cl_parity(struct clsoftc *sc, int channel);
-void cl_frame(struct clsoftc *sc, int channel);
-void cl_break( struct clsoftc *sc, int channel);
-int clmctl(dev_t dev, int bits, int how);
-void cl_dumpport(int channel);
+int clparam __P((struct tty *tp, struct termios *t));
+int cl_mintr __P((struct clsoftc *sc));
+int cl_txintr __P((struct clsoftc *sc));
+int cl_rxintr __P((struct clsoftc *sc));
+void cl_overflow __P((struct clsoftc *sc, int channel, long *ptime, u_char *msg));
+void cl_parity __P((struct clsoftc *sc, int channel));
+void cl_frame __P((struct clsoftc *sc, int channel));
+void cl_break __P(( struct clsoftc *sc, int channel));
+int clmctl __P((dev_t dev, int bits, int how));
+void cl_dumpport __P((int channel));
 
-int	clprobe(struct device *parent, void *self, void *aux);
-void	clattach(struct device *parent, struct device *self, void *aux);
+int	clprobe __P((struct device *parent, void *self, void *aux));
+void	clattach __P((struct device *parent, struct device *self, void *aux));
 
-void cl_initchannel(struct clsoftc *sc, int channel);
-void clputc(struct clsoftc *sc, int unit, u_char c);
-u_char clgetc(struct clsoftc *sc, int *channel);
-void cloutput(struct tty *tp);
-void cl_softint(void *);
-void cl_appendbufn(struct clsoftc *sc, u_char channel, u_char *buf, u_short cnt);
+int clopen  __P((dev_t dev, int flag, int mode, struct proc *p));
+int clclose __P((dev_t dev, int flag, int mode, struct proc *p));
+int clread  __P((dev_t dev, struct uio *uio, int flag));
+int clwrite __P((dev_t dev, struct uio *uio, int flag));
+int clioctl __P((dev_t dev, int cmd, caddr_t data, int flag, struct proc *p));
+int clstop  __P((struct tty *tp, int flag));
 
-struct tty *cltty(dev_t);
-int cl_instat(struct clsoftc *);
-void clcnpollc(dev_t, int);
-void cl_break(struct clsoftc *, int);
-void cl_appendbuf(struct clsoftc *, u_char, u_char);
+static void cl_initchannel __P((struct clsoftc *sc, int channel));
+static void clputc __P((struct clsoftc *sc, int unit, u_char c));
+static u_char clgetc __P((struct clsoftc *sc, int *channel));
+static void cloutput __P( (struct tty *tp));
 
 struct cfattach cl_ca = {
 	sizeof(struct clsoftc), clprobe, clattach
 };
 
 struct cfdriver cl_cd = {
-	NULL, "cl", DV_TTY
+	NULL, "cl", DV_TTY, 0
 };
 
 #define CLCDBUF 80
+
+int dopoll = 1;
 
 #define CL_UNIT(x) (minor(x) >> 2)
 #define CL_CHANNEL(x) (minor(x) & 3)
 #define CL_TTY(x) (minor(x))
 
-struct tty *
-cltty(dev)
+extern int cputyp;
+
+struct tty * cltty(dev)
 	dev_t dev;
 {
 	int unit, channel;
@@ -220,24 +217,27 @@ cltty(dev)
 	return sc->sc_cl[channel].tty;
 }
 
-int
-clprobe(parent, self, aux)
+int	clprobe(parent, self, aux)
 	struct device *parent;
 	void *self;
 	void *aux;
 {
-	/* probing onboard 166/167/177/187 CL-cd2400
+	/* probing onboard 166/167/187 CL-cd2400
 	 * should be previously configured, 
 	 * we can check the value before resetting the chip
 	 */
 	struct clreg *cl_reg;
 	struct confargs *ca = aux;
 	int ret;
-	if (cputyp != CPU_167 && cputyp != CPU_166 && cputyp != CPU_177)
+	if (cputyp != CPU_167 && cputyp != CPU_166
+#ifdef CPU_187
+		&& cputyp != CPU_187
+#endif
+		)
 	{
 		return 0;
 	}
-   cl_reg = (struct clreg *)ca->ca_vaddr;
+	cl_reg = (struct clreg *)ca->ca_vaddr;
 
 #if 0
 	ret = !badvaddr(&cl_reg->cl_gfrcr,1);
@@ -258,19 +258,17 @@ clattach(parent, self, aux)
 	int i;
 
 	sc->cl_reg = (struct clreg *)ca->ca_vaddr;
+	sc->sc_pcctwo = ca->ca_master;
 
 	if (ca->ca_paddr == cl_cons.cl_paddr) {
 		/* if this device is configured as console,
 		 * line cl_cons.channel is the console */
-		sc->sc_cl[0].cl_consio = 1;
-		printf(": console");
+		sc->sc_cl[cl_cons.channel].cl_consio = 1;
+		printf(" console");
 	} else {
 		/* reset chip only if we are not console device */
 		/* wait for GFRCR */
 	}
-        /* allow chip to settle before continuing */
-        delay(800);
-
 	/* set up global registers */
 	sc->cl_reg->cl_tpr = CL_TIMEOUT;
 	sc->cl_reg->cl_rpilr = 0x03;
@@ -300,20 +298,9 @@ clattach(parent, self, aux)
 	sc->sc_cl[2].tx[1] = (void *)(((int)sc->sc_cl[2].tx[0]) + CL_BUFSIZE);
 	sc->sc_cl[3].tx[0] = (void *)(((int)sc->sc_cl[2].tx[1]) + CL_BUFSIZE);
 	sc->sc_cl[3].tx[1] = (void *)(((int)sc->sc_cl[3].tx[0]) + CL_BUFSIZE);
-#ifdef USE_BUFFER
-	/* receive buffer and dma buffer are "shared" */
 	for (i = 0; i < CLCD_PORTS_PER_CHIP; i++) {
-		sc->sc_cl[i].buffer = sc->sc_cl[i].rx[0];
-		sc->sc_cl[i].pconsum = sc->sc_cl[i].buffer;
-		sc->sc_cl[i].psupply = sc->sc_cl[i].buffer;
-		sc->sc_cl[i].nchar = 0;
-	}
-	sc->ssir = allocate_sir(cl_softint, (void *)sc);
-#endif
-	for (i = 0; i < CLCD_PORTS_PER_CHIP; i++) {
-#if 0
 		int j;
-
+#if 0
 		for (j = 0; j < 2 ; j++) {
 			sc->sc_cl[i].rxp[j] = (void *)kvtop(sc->sc_cl[i].rx[j]);
 			printf("cl[%d].rxbuf[%d] %x p %x\n",
@@ -323,7 +310,6 @@ clattach(parent, self, aux)
 			    i, j, sc->sc_cl[i].tx[j], sc->sc_cl[i].txp[j]);
 		}
 #endif
-		
 #if 0
 		sc->sc_cl[i].cl_rxmode =
 			!(!((flags >> (i * CL_FLAG_BIT_PCH)) & 0x01));
@@ -334,7 +320,6 @@ clattach(parent, self, aux)
 #endif
 		cl_initchannel(sc, i);
 	}
-
 	/* enable interrupts */
 	sc->sc_ih_e.ih_fn = cl_rxintr;
 	sc->sc_ih_e.ih_arg = sc;
@@ -355,47 +340,43 @@ clattach(parent, self, aux)
 	sc->sc_ih_r.ih_arg = sc;
 	sc->sc_ih_r.ih_ipl = ca->ca_ipl;
 	sc->sc_ih_r.ih_wantframe = 0;
+	switch (ca->ca_bustype) {
+	case BUS_PCCTWO:
+		dopoll = 0;
+		pcctwointr_establish(PCC2V_SCC_RXE,&sc->sc_ih_e);
+		pcctwointr_establish(PCC2V_SCC_M,&sc->sc_ih_m);
+		pcctwointr_establish(PCC2V_SCC_TX,&sc->sc_ih_t);
+		pcctwointr_establish(PCC2V_SCC_RX,&sc->sc_ih_r);
+		sc->sc_pcctwo = (void *)ca->ca_master;
+		sc->sc_pcctwo->pcc2_sccerr = 0x01; /* clear errors */
 
-	snprintf(sc->sc_errintrname, sizeof sc->sc_errintrname,
-	    "%s_err", self->dv_xname);
-	snprintf(sc->sc_mxintrname, sizeof sc->sc_mxintrname,
-	    "%s_mx", self->dv_xname);
-	snprintf(sc->sc_rxintrname, sizeof sc->sc_rxintrname,
-	    "%s_rx", self->dv_xname);
-	snprintf(sc->sc_txintrname, sizeof sc->sc_txintrname,
-	    "%s_tx", self->dv_xname);
+		/* enable all interrupts at ca_ipl */
+		sc->sc_pcctwo->pcc2_sccirq = PCC2_IRQ_IEN | (ca->ca_ipl & 0x7);
+		sc->sc_pcctwo->pcc2_scctx  = PCC2_IRQ_IEN | (ca->ca_ipl & 0x7);
+		sc->sc_pcctwo->pcc2_sccrx  = PCC2_IRQ_IEN | (ca->ca_ipl & 0x7);
+		break;
+	}
 
-	pcctwointr_establish(PCC2V_SCC_RXE,&sc->sc_ih_e, sc->sc_errintrname);
-	pcctwointr_establish(PCC2V_SCC_M,&sc->sc_ih_m, sc->sc_mxintrname);
-	pcctwointr_establish(PCC2V_SCC_TX,&sc->sc_ih_t, sc->sc_txintrname);
-	pcctwointr_establish(PCC2V_SCC_RX,&sc->sc_ih_r, sc->sc_rxintrname);
-	sys_pcc2->pcc2_sccerr = 0x01; /* clear errors */
-
-	/* enable all interrupts at ca_ipl */
-	sys_pcc2->pcc2_sccirq = PCC2_IRQ_IEN | (ca->ca_ipl & 0x7);
-	sys_pcc2->pcc2_scctx  = PCC2_IRQ_IEN | (ca->ca_ipl & 0x7);
-	sys_pcc2->pcc2_sccrx  = PCC2_IRQ_IEN | (ca->ca_ipl & 0x7);
-
+	evcnt_attach(&sc->sc_dev, "intr", &sc->sc_txintrcnt);
+	evcnt_attach(&sc->sc_dev, "intr", &sc->sc_rxintrcnt);
+	evcnt_attach(&sc->sc_dev, "intr", &sc->sc_mxintrcnt);
 	printf("\n");
 }
-
-void
+static void
 cl_initchannel(sc, channel)
 	struct clsoftc *sc;
 	int channel;
 {
 	int s;
 	struct clreg *cl_reg = sc->cl_reg;
-
 	/* set up option registers */
 	sc->sc_cl[channel].tty = NULL;
 	s = splhigh();
-
 	cl_reg->cl_car	= (u_char) channel;
 	cl_reg->cl_livr	= PCC2_VECBASE + 0xc;/* set vector base at 5C */
+	/* if the port is not the console, should be init for all ports??*/
 	cl_reg->cl_ier	= 0x00;
-
-	if (sc->sc_cl[channel].cl_consio == 0) {
+	if (sc->sc_cl[channel].cl_consio != 1) {
 		cl_reg->cl_cmr	= 0x02; 
 		cl_reg->cl_cor1	= 0x17;
 		cl_reg->cl_cor2	= 0x00;
@@ -420,10 +401,9 @@ cl_initchannel(sc, channel)
 		cl_reg->cl_msvr_dtr	= 0x00;
 		cl_reg->cl_rtprl	= CL_RX_TIMEOUT;
 		cl_reg->cl_rtprh	= 0x00;
-
-		sc->cl_reg->cl_ccr = 0x20;
-		while (sc->cl_reg->cl_ccr != 0)
-			;
+	}
+	sc->cl_reg->cl_ccr = 0x20;
+	while (sc->cl_reg->cl_ccr != 0) {
 	}
 
 	splx(s);
@@ -506,7 +486,7 @@ int clmctl (dev, bits, how)
 		}
 		break;
 	}
-	splx(s);
+	(void)splx(s);
 #if 0
 	bits = 0;
 	/* proper defaults? */
@@ -524,8 +504,7 @@ int clmctl (dev, bits, how)
 	return(bits);
 }
 
-int
-clopen(dev, flag, mode, p)
+int clopen (dev, flag, mode, p)
 	dev_t dev;
 	int flag;
 	int mode;
@@ -548,6 +527,7 @@ clopen(dev, flag, mode, p)
 		tp = cl->tty;
 	} else {
 		tp = cl->tty = ttymalloc();
+		tty_attach(tp);
 	}
 	tp->t_oproc = clstart;
 	tp->t_param = clparam;
@@ -565,7 +545,7 @@ clopen(dev, flag, mode, p)
 			tp->t_lflag = TTYDEF_LFLAG;
 			tp->t_ispeed = tp->t_ospeed = cldefaultrate;
 
-			if(sc->sc_cl[channel].cl_consio != 0) {
+			if(sc->sc_cl[channel].cl_consio == 1) {
 				/* console is 8N1 */
 				tp->t_cflag = (CREAD | CS8 | HUPCL);
 			} else {
@@ -692,7 +672,6 @@ int clparam(tp, t)
 	return 0;
 }
 
-#if 0
 void cloutput(tp)
 	struct tty *tp;
 {
@@ -730,10 +709,8 @@ void cloutput(tp)
 	}
 	splx(s);
 }
-#endif
 
-int
-clclose(dev, flag, mode, p)
+int clclose (dev, flag, mode, p)
 	dev_t dev;
 	int flag;
 	int mode;
@@ -775,12 +752,10 @@ clclose(dev, flag, mode, p)
 
 	return 0;
 }
-
-int
-clread (dev, uio, flag)
+int clread (dev, uio, flag)
 	dev_t dev;
 	struct uio *uio;
-	int flag;
+int flag;
 {
 	int unit, channel;
 	struct tty *tp;
@@ -798,9 +773,7 @@ clread (dev, uio, flag)
 		return ENXIO;
 	return((*linesw[tp->t_line].l_read)(tp, uio, flag));
 }
-
-int
-clwrite (dev, uio, flag)
+int clwrite (dev, uio, flag)
 	dev_t dev;
 	struct uio *uio;
 	int flag;
@@ -821,11 +794,9 @@ clwrite (dev, uio, flag)
 		return ENXIO;
 	return((*linesw[tp->t_line].l_write)(tp, uio, flag));
 }
-
-int
-clioctl(dev, cmd, data, flag, p)
+int clioctl (dev, cmd, data, flag, p)
 	dev_t dev;
-	u_long cmd;
+	int cmd;
 	caddr_t data;
 	int flag;
 	struct proc *p;
@@ -890,7 +861,7 @@ clioctl(dev, cmd, data, flag, p)
 		*(int *)data = cl->cl_swflags;
 		break;
 	case TIOCSFLAGS:
-		error = suser(p, 0); 
+		error = suser(p->p_ucred, &p->p_acflag); 
 		if (error != 0)
 			return(EPERM); 
 
@@ -920,45 +891,48 @@ clstop(tp, flag)
 	return 0;
 }
 
-void
+int
 clcnprobe(cp)
 	struct consdev *cp;
 {
+	/* always there ? */
+	/* serial major */
 	int maj;
-
-	switch (cputyp) {
-	case CPU_167:
-	case CPU_177:
-		break;
-	default:
-		return;
-	}
 
 	/* locate the major number */
 	for (maj = 0; maj < nchrdev; maj++)
 		if (cdevsw[maj].d_open == clopen)
 			break;
 	cp->cn_dev = makedev (maj, 0);
-	cp->cn_pri = CN_LOWPRI;
+	cp->cn_pri = CN_NORMAL;
+
+	return 1;
 }
 
-void
+int
 clcninit(cp)
-	struct consdev *cp;
+struct consdev *cp;
 {
+#ifdef MAP_DOES_WORK
+	int size = (0x1ff + PGOFSET) & ~PGOFSET;
+	int pcc2_size = (0x3C + PGOFSET) & ~PGOFSET;
+#endif
 	struct clreg *cl_reg;
 	
-	cl_cons.cl_paddr = 0xfff45000;
-	cl_cons.cl_vaddr = (struct clreg *)IIOV(cl_cons.cl_paddr);
+	cl_cons.cl_paddr = (void *)0xfff45000;
+#ifdef MAP_DOES_WORK
+	cl_cons.cl_vaddr = mapiodev(cl_cons.cl_paddr,size);
+	cd_pcc2_base = mapiodev(0xfff42000,pcc2_size);
+#else
+	cl_cons.cl_vaddr   = (struct clreg *)IIOV(cl_cons.cl_paddr);
 	cl_cons.pcctwoaddr = (void *)IIOV(0xfff42000);
+#endif
 	cl_reg = cl_cons.cl_vaddr;
-
 	/* reset the chip? */
 #ifdef CLCD_DO_RESET
 #endif
-
-#if 1
 	/* set up globals */
+#ifdef NOT_ALREADY_SETUP
 	cl_reg->cl_tftc  = 0x10;
 	cl_reg->cl_tpr   = CL_TIMEOUT; /* is this correct?? */
 	cl_reg->cl_rpilr = 0x03;
@@ -983,6 +957,7 @@ clcninit(cp)
 	cl_reg->cl_lnxt  = 0x00;
 	cl_reg->cl_cpsr  = 0x00;
 #endif
+	return 0;
 }
 
 int
@@ -1001,15 +976,11 @@ int
 clcngetc(dev)
 	dev_t dev;
 {
-	u_char val, reoir, licr, isrl, data, fifo_cnt;
-#if 0
-	u_char status;
-#endif
+	u_char val, reoir, licr, isrl, data, status, fifo_cnt;
 	int got_char = 0;
 	u_char ier_old = 0xff;
 	struct clreg *cl_reg = cl_cons.cl_vaddr;
 	volatile struct pcctworeg *pcc2_base = cl_cons.pcctwoaddr;
-
 	cl_reg->cl_car = 0;
 	if (!(cl_reg->cl_ier & 0x08)) {
 		ier_old = cl_reg->cl_ier;
@@ -1060,15 +1031,18 @@ clcngetc(dev)
 	return data;
 }
 
-void
+int
 clcnputc(dev, c)
 	dev_t dev;
 	u_char c;
 {
-	clputc(0, 0, c);
-}
+	/* is this the correct location for the cr -> cr/lf tranlation? */
+	if (c == '\n')
+		clputc(0, 0, '\r');
 
-void
+	clputc(0, 0, c);
+	return 0;
+}
 clcnpollc(dev, on)
 	dev_t dev;
 	int on;
@@ -1080,8 +1054,7 @@ clcnpollc(dev, on)
 	}
 	return;
 }
-
-void
+static void
 clputc(sc, unit, c)
 	struct clsoftc *sc;
 	int unit;
@@ -1142,7 +1115,48 @@ if (unit == 0) {
 	return;
 }
 
-u_char 
+/*
+#ifdef CLCD_DO_POLLED_INPUT
+*/
+#if 1
+void
+cl_chkinput()
+{
+	struct tty *tp;
+	int unit;
+	struct clsoftc *sc;
+	int channel;
+
+	if (dopoll == 0)
+		return;
+	for (unit = 0; unit < cl_cd.cd_ndevs; unit++) {
+		if (unit >= cl_cd.cd_ndevs || 
+			(sc = (struct clsoftc *) cl_cd.cd_devs[unit]) == NULL) {
+			continue;
+		}
+		if (cl_instat(sc)) {
+			while (cl_instat(sc)){
+				int ch;
+				u_char c;
+				/*
+				*(pinchar++) = clcngetc();
+				*/
+				ch = clgetc(sc,&channel) & 0xff;
+				c = ch;
+
+				tp = sc->sc_cl[channel].tty;
+				if (NULL != tp) {
+					(*linesw[tp->t_line].l_rint)(c,tp);
+				}
+			}
+			/*
+			wakeup(tp);
+			*/
+		}
+	}
+}
+#endif
+static u_char 
 clgetc(sc, channel)
 	struct clsoftc *sc;
 	int *channel;
@@ -1150,12 +1164,12 @@ clgetc(sc, channel)
 	struct clreg *cl_reg;
 	volatile struct pcctworeg *pcc2_base;
 	u_char val, reoir, licr, isrl, fifo_cnt, data;
-	if (sc == NULL) {
+	if (0 == sc) {
 		cl_reg = cl_cons.cl_vaddr;
 		pcc2_base = cl_cons.pcctwoaddr;
 	} else {
 		cl_reg = sc->cl_reg;
-		pcc2_base = sys_pcc2;
+		pcc2_base = sc->sc_pcctwo;
 	}
 	val = cl_reg->cl_rir;
 	/* if no receive interrupt pending wait */
@@ -1208,7 +1222,7 @@ clccparam(sc, par, channel)
 	if (par->c_ospeed == 0) { 
 		/* dont kill the console */
 		if(sc->sc_cl[channel].cl_consio == 0) {
-			/* disconnect, drop RTS DTR stop receiver */
+			/* disconnect, drop RTS DTR stop reciever */
 			sc->cl_reg->cl_msvr_rts = 0x00;
 			sc->cl_reg->cl_msvr_dtr = 0x00;
 			sc->cl_reg->cl_ccr = 0x05;
@@ -1269,10 +1283,13 @@ clccparam(sc, par, channel)
 		}
 	}
 
-	if (sc->sc_cl[channel].cl_consio == 0 && (par->c_cflag & CREAD) == 0)
+	if (sc->sc_cl[channel].cl_consio == 0
+		&& (par->c_cflag & CREAD) == 0 )
+	{
 		sc->cl_reg->cl_ccr = 0x08;
-	else
+	} else {
 		sc->cl_reg->cl_ccr = 0x0a;
+	}
 	while (sc->cl_reg->cl_ccr != 0) {
 	}
 	ints = 0;
@@ -1364,12 +1381,9 @@ clstart(tp)
 	struct tty *tp;
 {
 	dev_t dev;
-#if 0
 	u_char cbuf;
-	int cnt;
-#endif
 	struct clsoftc *sc;
-	int channel, unit, s;
+	int channel, unit, s, cnt;
 
 	dev = tp->t_dev;
 	channel = CL_CHANNEL(dev);
@@ -1416,17 +1430,18 @@ clstart(tp)
 	return;
 }
 int
-cl_mintr(arg)
-	void *arg;
+cl_mintr(sc)
+	struct clsoftc *sc;
 {
-	struct clsoftc *sc = (struct clsoftc *)arg;
 	u_char mir, misr, msvr;
 	int channel;
+	struct tty *tp;
 	if(((mir = sc->cl_reg->cl_mir) & 0x40) == 0x0) {
 		/* only if intr is not shared? */
 		log(LOG_WARNING, "cl_mintr extra intr\n");
 		return 0;
 	}
+	sc->sc_mxintrcnt.ev_count++;
 
 	channel = mir & 0x03;
 	misr = sc->cl_reg->cl_misr;
@@ -1440,42 +1455,31 @@ cl_mintr(arg)
 		log(LOG_WARNING, "cl_mintr: channel %x timer 2 unexpected\n",channel);
 	}
 	if (misr & 0x20) {
-		struct tty *tp = sc->sc_cl[channel].tty;
-#ifdef VERBOSE_LOG_MESSAGES
 		log(LOG_WARNING, "cl_mintr: channel %x cts %x\n",channel, 
 		((msvr & 0x20) != 0x0)
 		);
-#endif
-		if (msvr & 0x20) {
-			cl_unblock(tp);
-		}
 	}
 	if (misr & 0x40) {
 		struct tty *tp = sc->sc_cl[channel].tty;
-#ifdef VERBOSE_LOG_MESSAGES
 		log(LOG_WARNING, "cl_mintr: channel %x cd %x\n",channel,
 		((msvr & 0x40) != 0x0)
 		);
-#endif
 		ttymodem(tp, ((msvr & 0x40) != 0x0) );
 	}
 	if (misr & 0x80) {
-#ifdef VERBOSE_LOG_MESSAGES
 		log(LOG_WARNING, "cl_mintr: channel %x dsr %x\n",channel,
 		((msvr & 0x80) != 0x0)
 		);
-#endif
 	}
 	sc->cl_reg->cl_meoir = 0x00;
 	return 1;
 }
 
 int
-cl_txintr(arg)
-	void *arg;
+cl_txintr(sc)
+	struct clsoftc *sc;
 {
-	struct clsoftc *sc = (struct clsoftc *)arg;
-	static int empty = 0;
+	static empty = 0;
 	u_char tir, cmr, teoir;
 	u_char max;
 	int channel;
@@ -1488,6 +1492,7 @@ cl_txintr(arg)
 		log(LOG_WARNING, "cl_txintr extra intr\n");
 		return 0;
 	}
+	sc->sc_txintrcnt.ev_count++;
 
 	channel	= tir & 0x03;
 	cmr	= sc->cl_reg->cl_cmr;
@@ -1516,7 +1521,7 @@ cl_txintr(arg)
 				pbuffer = sc->sc_cl[channel].tx[nbuf];
 				resid = tp->t_outq.c_cc;
 				cnt = min (CL_BUFSIZE,resid);
-		log(LOG_WARNING, "cl_txintr: resid %x cnt %x pbuf %p\n",
+		log(LOG_WARNING, "cl_txintr: resid %x cnt %x pbuf %x\n",
 			resid, cnt, pbuffer);
 				if (cnt != 0) {
 					cnt = q_to_b(&tp->t_outq, pbuffer, cnt);
@@ -1593,17 +1598,17 @@ cl_txintr(arg)
 }
 
 int
-cl_rxintr(arg)
-	void *arg;
+cl_rxintr(sc)
+	struct clsoftc *sc;
 {
-	struct clsoftc *sc = (struct clsoftc *)arg;
 	u_char rir, channel, cmr, risrl;
+	u_char c;
 	u_char fifocnt;
 	struct tty *tp;
 	int i;
 	u_char reoir;
 	u_char buffer[CL_FIFO_MAX +1];
-#ifdef DDB
+#ifdef CONSOLEBREAKDDB
 	int wantddb = 0;
 #endif
 	
@@ -1613,7 +1618,7 @@ cl_rxintr(arg)
 		log(LOG_WARNING, "cl_rxintr extra intr\n");
 		return 0;
 	}
-
+	sc->sc_rxintrcnt.ev_count++;
 	channel = rir & 0x3;
 	cmr = sc->cl_reg->cl_cmr;
 	reoir = 0x08;
@@ -1638,9 +1643,9 @@ cl_rxintr(arg)
 		reoir = 0x08;
 	} else
 	if (risrl & 0x01) {
-#ifdef DDB
+#ifdef CONSOLEBREAKDDB
 		if (sc->sc_cl[channel].cl_consio)
-			wantddb = db_console;
+			wantddb = 1;
 #endif
 		cl_break(sc, channel);
 		reoir = 0x08;
@@ -1672,9 +1677,8 @@ log(LOG_WARNING, "cl_txintr: DMAMODE channel %x dmabsts %x risrl %x risrh %x\n",
 log(LOG_WARNING, "cl_rxintr: 1channel %x buf %x cnt %x status %x\n",
 channel, nbuf, cnt, status);
 #endif
-#ifdef USE_BUFFER
-			cl_appendbufn(sc, channel,
-				sc->sc_cl[channel].rx[nbuf], cnt);
+#if USE_BUFFER
+			cl_appendbufn(sc, channel, sc->rx[nbuf], cnt);
 #else 
 			{
 				int i;
@@ -1746,19 +1750,19 @@ channel, nbuf, cnt, status);
 		}
 
 		sc->cl_reg->cl_reoir = reoir;
-#ifdef USE_BUFFER
-		cl_appendbufn(sc, channel, buffer, fifocnt);
-#else
 		for (i = 0; i < fifocnt; i++) {
 			u_char c;
 			c = buffer[i];
+#if USE_BUFFER
+		cl_appendbuf(sc, channel, c);
+#else
 			/* does any restricitions exist on spl
 			 * for this call
 			 */
 			(*linesw[tp->t_line].l_rint)(c,tp);
 			reoir = 0x00;
-		}
 #endif
+		}
 		break;
 	default:
 		log(LOG_WARNING, "cl_rxintr unknown mode %x\n", cmr);
@@ -1766,8 +1770,8 @@ channel, nbuf, cnt, status);
 		reoir = 0x08;
 		sc->cl_reg->cl_reoir = reoir;
 	}
-#ifdef DDB
-	if (wantddb != 0)
+#ifdef CONSOLEBREAKDDB
+	if (wantddb)
 		Debugger();
 #endif
 	return 1;
@@ -1777,7 +1781,7 @@ void
 cl_overflow (sc, channel, ptime, msg)
 struct clsoftc *sc;
 int channel;
-time_t *ptime;
+long *ptime;
 u_char *msg;
 {
 /*
@@ -1797,9 +1801,7 @@ cl_parity (sc, channel)
 	struct clsoftc *sc;
 	int channel;
 {
-#ifdef VERBOSE_LOG_MESSAGES
 	log(LOG_WARNING, "%s%d[%d]: parity error\n", cl_cd.cd_name, 0, channel);
-#endif
 	return;
 }
 void
@@ -1807,9 +1809,7 @@ cl_frame (sc, channel)
 	struct clsoftc *sc;
 	int channel;
 {
-#ifdef VERBOSE_LOG_MESSAGES
 	log(LOG_WARNING, "%s%d[%d]: frame error\n", cl_cd.cd_name, 0, channel);
-#endif
 	return;
 }
 void
@@ -1817,9 +1817,32 @@ cl_break (sc, channel)
 	struct clsoftc *sc;
 	int channel;
 {
-#ifdef VERBOSE_LOG_MESSAGES
 	log(LOG_WARNING, "%s%d[%d]: break detected\n", cl_cd.cd_name, 0, channel);
-#endif
+	return;
+}
+
+void
+cl_dumpport0()
+{
+	cl_dumpport(0);
+	return;
+}
+void
+cl_dumpport1()
+{
+	cl_dumpport(1);
+	return;
+}
+void
+cl_dumpport2()
+{
+	cl_dumpport(2);
+	return;
+}
+void
+cl_dumpport3()
+{
+	cl_dumpport(3);
 	return;
 }
 
@@ -1868,7 +1891,6 @@ cl_dumpport(channel)
 	rcor = cl_reg->cl_rcor;
 	tbpr = cl_reg->cl_tbpr;
 	rpilr = cl_reg->cl_rpilr;
-	rir = cl_reg->cl_rir;
 	ier = cl_reg->cl_ier;
 	ccr = cl_reg->cl_ccr;
 	tcor = cl_reg->cl_tcor;
@@ -1927,11 +1949,11 @@ cl_dumpport(channel)
 		tpr,   csr,   rts,   dtr);
 	printf("rtprl %x rtprh %x\n",
 		rtprl,   rtprh);
-	printf("rxcnt %lx txcnt %lx\n",
+	printf("rxcnt %x txcnt %x\n",
 		sc->sc_cl[channel].rxcnt, sc->sc_cl[channel].txcnt);
 	printf("dmabsts %x, tcbadru %x, tcbadrl %x, rcbadru %x, rcbadrl %x,\n",
 		dmabsts,    tcbadru,    tcbadrl,    rcbadru,    rcbadrl );
-	printf("parbadru %p, parbadrl %p, parbcnt %p, parbsts %p\n",
+	printf("parbadru %x, parbadrl %x, parbcnt %x, parbsts %x\n",
 		parbadru,    parbadrl,    parbcnt,    parbsts);
 	printf("arbadru %x, arbadrl %x, arbcnt %x, arbsts %x\n",
 		arbadru,    arbadrl,    arbcnt,    arbsts);
@@ -1944,86 +1966,3 @@ cl_dumpport(channel)
 	printf("}\n");
 	return;
 }
-#ifdef USE_BUFFER
-void
-cl_appendbuf(sc, channel, c)
-	struct clsoftc *sc;
-	u_char channel;
-	u_char c;
-{
-	/* int s; */
-	/* s = splcl(); */
-	if (1 + sc->sc_cl[channel].nchar >= CL_BUFSIZE ) {
-		cl_overflow (sc, channel, &sc->sc_fotime, "rbuf");
-		/* just toss the character */
-		return;
-	}
-	*(sc->sc_cl[channel].psupply++) = c;
-	if (&(sc->sc_cl[channel].buffer[CL_BUFSIZE])
-	   == sc->sc_cl[channel].psupply) {
-		sc->sc_cl[channel].psupply = sc->sc_cl[channel].buffer;
-	}
-	sc->sc_cl[channel].nchar ++;
-	setsoftint(sc->ssir);
-	/* splx (s); */
-	
-}
-void
-cl_appendbufn(sc, channel, buf, cnt)
-	struct clsoftc *sc;
-	u_char channel;
-	u_char *buf;
-	u_short cnt;
-{
-	/* int s; */
-	int i;
-	/* s = splcl(); */ /* should be called at splcl(). */
-	if (cnt + sc->sc_cl[channel].nchar >= CL_BUFSIZE ) {
-		cl_overflow (sc, channel, &sc->sc_fotime, "rbuf");
-		/* just toss the character(s)
-		 *  It could be argued that not all of the charactes
-		 *  should be tossed, just the ones that actually
-		 *  overflow the buffer. eh, O well.
-		 */
-		return;
-	}
-	for (i = 0; i < cnt; i++) {
-		*(sc->sc_cl[channel].psupply++) = buf[i];
-		if (&(sc->sc_cl[channel].buffer[CL_BUFSIZE]) == sc->sc_cl[channel].psupply)
-		{
-			sc->sc_cl[channel].psupply = sc->sc_cl[channel].buffer;
-		}
-		sc->sc_cl[channel].nchar ++;
-	}
-	setsoftint(sc->ssir);
-	/* splx (s); */
-}
-
-void
-cl_softint(arg)
-	void *arg;
-{
-	struct clsoftc *sc = (struct clsoftc *)arg;
-	int i;
-	int s;
-	u_char c;
-	struct tty *tp;
-
-	for (i = 0 ; i < CLCD_PORTS_PER_CHIP; i ++) {
-/* printf("channel %x sc %x\n", i, sc); */ 
-		tp = sc->sc_cl[i].tty;
-/* printf("channel %x pconsum %x\n", i, sc->sc_cl[i].pconsum); */ 
-		while (sc->sc_cl[i].nchar > 0) {
-			s = splcl();
-			c = *(sc->sc_cl[i].pconsum++);
-			if (&(sc->sc_cl[i].buffer[CL_BUFSIZE]) == sc->sc_cl[i].pconsum)
-			{
-				sc->sc_cl[i].pconsum = sc->sc_cl[i].buffer;
-			}
-			sc->sc_cl[i].nchar--;
-			splx(s);
-			(*linesw[tp->t_line].l_rint)(c,tp);
-		}
-	}
-}
-#endif

@@ -1,5 +1,5 @@
-/*	$OpenBSD: ibcs2_ipc.c,v 1.7 2002/03/14 01:26:50 millert Exp $	*/
-/*	$NetBSD: ibcs2_ipc.c,v 1.7 1997/01/18 01:51:41 mycroft Exp $	*/
+/*	$OpenBSD: ibcs2_ipc.c,v 1.3 1996/08/02 20:35:07 niklas Exp $	*/
+/*	$NetBSD: ibcs2_ipc.c,v 1.6 1996/05/03 17:05:23 christos Exp $	*/
 
 /*
  * Copyright (c) 1995 Scott Bartram
@@ -56,7 +56,7 @@
 #include <sys/shm.h>
 #include <sys/syscallargs.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 #include <compat/ibcs2/ibcs2_types.h>
 #include <compat/ibcs2/ibcs2_signal.h>
@@ -67,7 +67,6 @@
 #define IBCS2_IPC_SET	1
 #define IBCS2_IPC_STAT	2
 
-#ifdef SYSVMSG
 /*
  * iBCS2 msgsys call
  */
@@ -86,10 +85,10 @@ struct ibcs2_msqid_ds {
 	ibcs2_time_t msg_ctime;
 };
 
-void cvt_msqid2imsqid(struct msqid_ds *, struct ibcs2_msqid_ds *);
-void cvt_imsqid2msqid(struct ibcs2_msqid_ds *, struct msqid_ds *);
+static void cvt_msqid2imsqid __P((struct msqid_ds *, struct ibcs2_msqid_ds *));
+static void cvt_imsqid2msqid __P((struct ibcs2_msqid_ds *, struct msqid_ds *));
 
-void
+static void
 cvt_msqid2imsqid(bp, ibp)
 	struct msqid_ds *bp;
 	struct ibcs2_msqid_ds *ibp;
@@ -108,7 +107,7 @@ cvt_msqid2imsqid(bp, ibp)
 	return;
 }
 
-void
+static void
 cvt_imsqid2msqid(ibp, bp)
 	struct ibcs2_msqid_ds *ibp;
 	struct msqid_ds *bp;
@@ -143,6 +142,7 @@ ibcs2_sys_msgsys(p, v, retval)
 	} */ *uap = v;
 
 	switch (SCARG(uap, which)) {
+#ifdef SYSVMSG
 	case 0:				/* msgget */
 		SCARG(uap, which) = 1;
 		return compat_10_sys_msgsys(p, uap, retval);
@@ -180,14 +180,13 @@ ibcs2_sys_msgsys(p, v, retval)
 	case 3:				/* msgsnd */
 		SCARG(uap, which) = 2;
 		return compat_10_sys_msgsys(p, uap, retval);
+#endif
 	default:
 		return EINVAL;
 	}
 }
-#endif
 
 
-#ifdef SYSVSEM
 /*
  * iBCS2 semsys call
  */
@@ -208,13 +207,13 @@ struct ibcs2_sem {
 	u_short semzcnt;
 };
 
-void cvt_semid2isemid(struct semid_ds *, struct ibcs2_semid_ds *);
-void cvt_isemid2semid(struct ibcs2_semid_ds *, struct semid_ds *);
+static void cvt_semid2isemid __P((struct semid_ds *, struct ibcs2_semid_ds *));
+static void cvt_isemid2semid __P((struct ibcs2_semid_ds *, struct semid_ds *));
 #ifdef notdef
-void cvt_sem2isem(struct sem *, struct ibcs2_sem *);
-void cvt_isem2sem(struct ibcs2_sem *, struct sem *);
+static void cvt_sem2isem __P((struct sem *, struct ibcs2_sem *));
+static void cvt_isem2sem __P((struct ibcs2_sem *, struct sem *));
 
-void
+static void
 cvt_sem2isem(bp, ibp)
 	struct sem *bp;
 	struct ibcs2_sem *ibp;
@@ -226,7 +225,7 @@ cvt_sem2isem(bp, ibp)
 	return;
 }
 
-void
+static void
 cvt_isem2sem(ibp, bp)
 	struct ibcs2_sem *ibp;
 	struct sem *bp;
@@ -239,7 +238,7 @@ cvt_isem2sem(ibp, bp)
 }
 #endif
 
-void
+static void
 cvt_semid2isemid(bp, ibp)
 	struct semid_ds *bp;
 	struct ibcs2_semid_ds *ibp;
@@ -252,7 +251,7 @@ cvt_semid2isemid(bp, ibp)
 	return;
 }
 
-void
+static void
 cvt_isemid2semid(ibp, bp)
 	struct ibcs2_semid_ds *ibp;
 	struct semid_ds *bp;
@@ -280,6 +279,7 @@ ibcs2_sys_semsys(p, v, retval)
 	} */ *uap = v;
 	int error;
 
+#ifdef SYSVSEM
 	switch (SCARG(uap, which)) {
 	case 0:					/* semctl */
 		switch(SCARG(uap, a4)) {
@@ -328,12 +328,11 @@ ibcs2_sys_semsys(p, v, retval)
 	case 2:				/* semop */
 		return compat_10_sys_semsys(p, uap, retval);
 	}
+#endif
 	return EINVAL;
 }
-#endif
 
 
-#ifdef SYSVSHM
 /*
  * iBCS2 shmsys call
  */
@@ -352,10 +351,10 @@ struct ibcs2_shmid_ds {
 	ibcs2_time_t shm_ctime;
 };
 
-void cvt_shmid2ishmid(struct shmid_ds *, struct ibcs2_shmid_ds *);
-void cvt_ishmid2shmid(struct ibcs2_shmid_ds *, struct shmid_ds *);
+static void cvt_shmid2ishmid __P((struct shmid_ds *, struct ibcs2_shmid_ds *));
+static void cvt_ishmid2shmid __P((struct ibcs2_shmid_ds *, struct shmid_ds *));
 
-void
+static void
 cvt_shmid2ishmid(bp, ibp)
 	struct shmid_ds *bp;
 	struct ibcs2_shmid_ds *ibp;
@@ -372,7 +371,7 @@ cvt_shmid2ishmid(bp, ibp)
 	return;
 }
 
-void
+static void
 cvt_ishmid2shmid(ibp, bp)
 	struct ibcs2_shmid_ds *ibp;
 	struct shmid_ds *bp;
@@ -403,6 +402,7 @@ ibcs2_sys_shmsys(p, v, retval)
 	} */ *uap = v;
 	int error;
 
+#ifdef SYSVSHM
 	switch (SCARG(uap, which)) {
 	case 0:						/* shmat */
 		return compat_10_sys_shmsys(p, uap, retval);
@@ -454,6 +454,6 @@ ibcs2_sys_shmsys(p, v, retval)
 	case 3:						/* shmget */
 		return compat_10_sys_shmsys(p, uap, retval);
 	}
+#endif
 	return EINVAL;
 }
-#endif

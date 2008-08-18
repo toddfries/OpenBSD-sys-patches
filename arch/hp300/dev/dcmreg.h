@@ -1,4 +1,3 @@
-/*	$OpenBSD: dcmreg.h,v 1.5 2007/05/25 21:27:15 krw Exp $	*/
 /*	$NetBSD: dcmreg.h,v 1.5 1996/02/24 00:55:05 thorpej Exp $	*/
 
 /*
@@ -18,7 +17,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -140,10 +143,10 @@ struct	dcmpreg {
 #define	DCMRS		0x80	/* software reset, write */
 
 /* interrupt control */
-#define	DCMIPL(x)	((((x) >> 4) & 3) + 3)	/* interrupt level, read */
-#define	IC_IR		0x40	/* interrupt request, read */
-#define	IC_IE		0x80	/* interrupt enable, write */
-#define	IC_ID		0x00	/* interrupt disable, write */
+#define	DCMIPL(x)	((((x) >> 4) & 3) + 3)	/* interupt level, read */
+#define	IC_IR		0x40	/* interupt request, read */
+#define	IC_IE		0x80	/* interupt enable, write */
+#define	IC_ID		0x00	/* interupt disable, write */
 
 
 /* Semaphore control */

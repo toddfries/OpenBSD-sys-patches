@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.h,v 1.10 2005/06/18 18:09:43 millert Exp $	*/
+/*	$OpenBSD: dir.h,v 1.5 1996/06/27 06:42:08 downsj Exp $	*/
 /*	$NetBSD: dir.h,v 1.8 1996/03/09 19:42:41 scottr Exp $	*/
 
 /*
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +48,7 @@
  * Theoretically, directories can be more than 2Gb in length, however, in
  * practice this seems unlikely. So, we define the type doff_t as a 32-bit
  * quantity to keep down the cost of doing lookup on a 32-bit machine.
- */
+*/
 #define	doff_t		int32_t
 #define	MAXDIRSIZE	(0x7fffffff)
 
@@ -95,6 +99,7 @@ struct	direct {
 #define	DT_REG		 8
 #define	DT_LNK		10
 #define	DT_SOCK		12
+#define	DT_WHT		14
 
 /*
  * Convert between stat structure types and directory types.
@@ -108,9 +113,6 @@ struct	direct {
  * without the d_name field, plus enough space for the name with a terminating
  * null byte (dp->d_namlen+1), rounded up to a 4 byte boundary.
  */
-#define DIRECTSIZ(namlen)						\
-	(((int)&((struct direct *)0)->d_name +				\
-	  ((namlen)+1)*sizeof(((struct direct *)0)->d_name[0]) + 3) & ~3)
 #if (BYTE_ORDER == LITTLE_ENDIAN)
 #define DIRSIZ(oldfmt, dp) \
     ((oldfmt) ? \
@@ -153,4 +155,44 @@ struct odirtemplate {
 	u_int16_t	dotdot_namlen;
 	char		dotdot_name[4];	/* ditto */
 };
+
+#ifdef _KERNEL
+/*
+ * For lack of a better place...
+ *
+ * This structure defines a set of function pointers, for managing rouge
+ * ufs-like filesystems in vnop code.  Most have to do with directories.
+ */
+
+struct componentname;
+struct vnode;
+struct inode;
+struct ucred;
+struct ufs_dirops {
+	int (*dirremove) __P((struct vnode *, struct componentname *));
+	int (*direnter) __P((struct inode *, struct vnode *,
+				struct componentname *));
+	int (*dirempty) __P((struct inode *, ino_t, struct ucred *));
+	int (*dirrewrite) __P((struct inode *, struct inode *,
+				struct componentname *));
+	int (*checkpath) __P((struct inode *, struct inode *,
+				struct ucred *));
+};
+
+/*
+ * Macros for accessing the above.
+ */
+#define VN_DIRREMOVE(vn, cm) \
+	VFSTOUFS(vn->v_mount)->um_dirops->dirremove(vn, cm)
+#define VN_DIRENTER(in, vn, cm) \
+	VFSTOUFS(vn->v_mount)->um_dirops->direnter(in, vn, cm)
+#define VN_DIREMPTY(vn, in, it, uc) \
+	VFSTOUFS(vn->v_mount)->um_dirops->dirempty(in, it, uc)
+#define VN_DIRREWRITE(vn, in1, in2, cm) \
+	VFSTOUFS(vn->v_mount)->um_dirops->dirrewrite(in1, in2, cm)
+#define VN_CHECKPATH(vn, in1, in2, uc) \
+	VFSTOUFS(vn->v_mount)->um_dirops->checkpath(in1, in2, uc)
+
+#endif /* _KERNEL */
+
 #endif /* !_DIR_H_ */

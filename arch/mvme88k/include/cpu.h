@@ -1,6 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.37 2007/05/14 17:00:40 miod Exp $ */
 /*
- * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -21,7 +19,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,57 +39,87 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef	_MVME88K_CPU_H_
-#define	_MVME88K_CPU_H_
 
-#include <sys/evcount.h>
-#include <m88k/cpu.h>
+#ifndef _CPU_H_
+#define _CPU_H_
 
-#ifdef _KERNEL
+/*
+ * CTL_MACHDEP definitinos.
+ */
+#define	CPU_MAXID	1	/* no valid machdep ids */
 
-/* board dependent pointers */
-extern void	(*md_interrupt_func_ptr)(u_int, struct trapframe *);
-#define	md_interrupt_func	(*md_interrupt_func_ptr)
-extern u_int	(*md_getipl)(void);
-extern u_int	(*md_setipl)(u_int);
-extern u_int	(*md_raiseipl)(u_int);
-extern void	(*md_init_clocks)(void);
-extern void	(*md_send_ipi)(int, cpuid_t);
+#define	CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+}
 
-struct intrhand {
-	SLIST_ENTRY(intrhand) ih_link;
-	int	(*ih_fn)(void *);
-	void	*ih_arg;
-	int	ih_ipl;
-	int	ih_wantframe;
-	struct evcount ih_count;
+#ifdef KERNEL
+
+#include <machine/psl.h>
+
+/*
+ * definitions of cpu-dependent requirements
+ * referenced in generic code
+ */
+#define	COPY_SIGCODE		/* copy sigcode above user stack in exec */
+
+#define	cpu_exec(p)	/* nothing */
+#define	cpu_wait(p)	/* nothing */
+#define	cpu_swapout(p)	/* nothing */
+
+/*
+ * See syscall() for an explanation of the following.  Note that the
+ * locore bootstrap code follows the syscall stack protocol.  The
+ * framep argument is unused.
+ */
+#define cpu_set_init_frame(p, fp) \
+	(p)->p_md.md_tf = (struct trapframe *) \
+	    ((caddr_t)(p)->p_addr)
+
+/*
+ * Arguments to hardclock and gatherstats encapsulate the previous
+ * machine state in an opaque clockframe.
+ */
+struct clockframe {
+	int	pc;	/* program counter at time of interrupt */
+	int	sr;	/* status register at time of interrupt */
+	int	ipl;	/* mask level at the time of interrupt  */
 };
 
-int	intr_establish(int, struct intrhand *, const char *);
-int	intr_findvec(int, int, int);
+#define	CLKF_USERMODE(framep)	(((framep)->sr & 80000000) == 0)
+#define	CLKF_BASEPRI(framep)	((framep)->ipl == 0)
+#define	CLKF_PC(framep)		((framep)->pc & ~3)
+#define	CLKF_INTR(framep)	(0)
+
+#define SIR_NET		1
+#define SIR_CLOCK	2
+
+#define setsoftnet()	(ssir |= SIR_NET, want_ast = 1)
+#define setsoftclock()	(ssir |= SIR_CLOCK, want_ast = 1)
+
+#define siroff(x)	(ssir &= ~x)
+
+int	ssir;
+int	want_ast;
 
 /*
- * There are 256 possible vectors on a mvme88k platform (including
- * onboard and VME vectors. Use intr_establish() to register a
- * handler for the given vector. vector number is used to index
- * into the intr_handlers[] table.
+ * Preempt the current process if in interrupt from user mode,
+ * or after the current trap/syscall if in system mode.
  */
-#define	NVMEINTR	256
-typedef SLIST_HEAD(, intrhand) intrhand_t;
-extern intrhand_t intr_handlers[NVMEINTR];
+int	want_resched;		/* resched() was called */
+#define	need_resched()		(want_resched = 1, want_ast = 1)
 
-#ifdef MVME188
 /*
- * Currently registered VME interrupt vectors for a given IPL, if they
- * are unique. Used to help the MVME188 interrupt handler when it's getting
- * behind.
+ * Give a profiling tick to the current process when the user profiling
+ * buffer pages are invalid.  On the sparc, request an ast to send us 
+ * through trap(), marking the proc as needing a profiling tick.
  */
-extern u_int vmevec_hints[8];
-#endif
+#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, want_ast = 1)
 
-void	doboot(void);
-void	nmihand(void *);
+/*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+#define	signotify(p)		(want_ast = 1)
 
-#endif /* _KERNEL */
-
-#endif
+#endif /* KERNEL */
+#endif /* _CPU_H_ */

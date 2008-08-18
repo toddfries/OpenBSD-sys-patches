@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_misc.c,v 1.11 2007/11/28 13:47:02 deraadt Exp $	*/
+/*	$OpenBSD: freebsd_misc.c,v 1.3 1996/08/02 20:34:46 niklas Exp $	*/
 /*	$NetBSD: freebsd_misc.c,v 1.2 1996/05/03 17:03:10 christos Exp $	*/
 
 /*
@@ -40,21 +40,36 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
-#include <sys/kernel.h>
-#include <sys/file.h>
-#include <sys/dirent.h>
-#include <sys/filedesc.h>
-#include <sys/mman.h>
-#include <sys/vnode.h>
 
 #include <sys/syscallargs.h>
 
-#include <compat/freebsd/freebsd_signal.h>
 #include <compat/freebsd/freebsd_syscallargs.h>
 #include <compat/freebsd/freebsd_util.h>
 #include <compat/freebsd/freebsd_rtprio.h>
+#include <compat/freebsd/freebsd_timex.h>
 
-#include <compat/common/compat_dir.h>
+int
+freebsd_sys_msync(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct freebsd_sys_msync_args /* {
+		syscallarg(caddr_t) addr;
+		syscallarg(size_t) len;
+		syscallarg(int) flags;
+	} */ *uap = v;
+	struct sys_msync_args bma;
+
+	/*
+	 * FreeBSD-2.0-RELEASE's msync(2) is compatible with NetBSD's.
+	 * FreeBSD-2.0.5-RELEASE's msync(2) has addtional argument `flags',
+	 * but syscall number is not changed. :-<
+	 */
+	SCARG(&bma, addr) = SCARG(uap, addr);
+	SCARG(&bma, len) = SCARG(uap, len);
+	return sys_msync(p, &bma, retval); /* XXX - simply ignores `flags' */
+}
 
 /* just a place holder */
 
@@ -75,150 +90,17 @@ freebsd_sys_rtprio(p, v, retval)
 	return ENOSYS;	/* XXX */
 }
 
-/*
- * Argh.
- * The syscalls.master mechanism cannot handle a system call that is in
- * two spots in the table.
- */
 int
-freebsd_sys_poll2(p, v, retval)
+freebsd_ntp_adjtime(p, v, retval)
 	struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	return (sys_poll(p, v, retval));
-}
-
-/*
- * Our madvise is currently dead (always returns EOPNOTSUPP).
- */
-int
-freebsd_sys_madvise(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	return (0);
-}
-
-
-int freebsd_readdir_callback(void *, struct dirent *, off_t);
-
-struct freebsd_readdir_callback_args {
-	caddr_t outp;
-	int	resid;
-};
-
-int 
-freebsd_readdir_callback(void *arg, struct dirent *bdp, off_t cookie)
-{
-	struct freebsd_readdir_callback_args *cb = arg;
-	struct dirent idb;
-	int error;
-
-	if (cb->resid < bdp->d_reclen)
-		return (ENOMEM);
-	idb.d_fileno = bdp->d_fileno;
-	idb.d_reclen = bdp->d_reclen;
-	idb.d_type = bdp->d_type;
-	idb.d_namlen = bdp->d_namlen;
-	strlcpy(idb.d_name, bdp->d_name, sizeof(idb.d_name));
-	
-	if ((error = copyout((caddr_t)&idb, cb->outp, bdp->d_reclen)))
-		return (error);
-	cb->outp += bdp->d_reclen;
-	cb->resid -= bdp->d_reclen;
-
-	return (0);
-}
-
-int
-freebsd_sys_getdents(struct proc *p, void *v, register_t *retval)
-{
-	struct freebsd_sys_getdents_args /* {
-		syscallarg(int) fd;
-		syscallarg(void *) dirent;
-		syscallarg(unsigned) count;
+#ifdef notyet
+	struct freebsd_ntp_adjtime_args /* {
+		syscallarg(struct freebsd_timex *) tp;
 	} */ *uap = v;
-	struct vnode *vp;
-	struct file *fp;
-	int error;
-	struct freebsd_readdir_callback_args args;
+#endif
 
-	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0) 
-		return (error);
-	
-	vp = (struct vnode *)fp->f_data;
-	
-	args.resid = SCARG(uap, count);
-	args.outp = (caddr_t)SCARG(uap, dirent);
-	
-	error = readdir_with_callback(fp, &fp->f_offset, args.resid,
-	    freebsd_readdir_callback, &args);
-	
-	FRELE(fp);
-	if (error) 
-		return (error);
-	
-	*retval = SCARG(uap, count) - args.resid;
-	return (0);
-}
-
-#define FBSD_MAP_NOCORE	0x20000
-int
-freebsd_sys_mmap(struct proc *p, void *v, register_t *retval)
-{
-	struct freebsd_sys_mmap_args /* {
-		syscallarg(caddr_t) addr;
-		syscallarg(size_t) len;
-		syscallarg(int) prot;
-		syscallarg(int) flags;
-		syscallarg(int) fd;
-		syscallarg(long) pad;
-		syscallarg(off_t) pos;
-	} */ *uap = v;
-	SCARG(uap, flags) &= ~FBSD_MAP_NOCORE;
-	return (sys_mmap(p, uap, retval));
-}
-
-struct outsname {
-	char	sysname[32];
-	char	nodename[32];
-	char	release[32];
-	char	version[32];
-	char	machine[32];
-};
-
-/* ARGSUSED */
-int
-compat_freebsd_sys_uname(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct compat_freebsd_sys_uname_args /* {
-		syscallarg(struct outsname *) name;
-	} */ *uap = v;
-	struct outsname outsname;
-	const char *cp;
-	char *dp, *ep;
-
-	strlcpy(outsname.sysname, ostype, sizeof(outsname.sysname));
-	strlcpy(outsname.nodename, hostname, sizeof(outsname.nodename));
-	strlcpy(outsname.release, osrelease, sizeof(outsname.release));
-	dp = outsname.version;
-	ep = &outsname.version[sizeof(outsname.version) - 1];
-	for (cp = version; *cp && *cp != '('; cp++)
-		;
-	for (cp++; *cp && *cp != ')' && dp < ep; cp++)
-		*dp++ = *cp;
-	for (; *cp && *cp != '#'; cp++)
-		;
-	for (; *cp && *cp != ':' && dp < ep; cp++)
-		*dp++ = *cp;
-	*dp = '\0';
-	strlcpy(outsname.machine, MACHINE, sizeof(outsname.machine));
-
-	return (copyout((caddr_t)&outsname, (caddr_t)SCARG(uap, name),
-			sizeof(struct outsname)));
+	return ENOSYS;	/* XXX */
 }

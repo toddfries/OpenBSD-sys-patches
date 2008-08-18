@@ -1,10 +1,7 @@
-/*	$OpenBSD: alloc.c,v 1.9 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: alloc.c,v 1.6 1997/02/04 18:36:33 thorpej Exp $	*/
+/*	$OpenBSD: alloc.c,v 1.2 1996/09/23 14:18:46 mickey Exp $	*/
+/*	$NetBSD: alloc.c,v 1.3 1994/10/26 05:44:34 cgd Exp $	*/
 
-/*
- * Copyright (c) 1997 Christopher G. Demetriou.  All rights reserved.
- * Copyright (c) 1996
- *	Matthias Drochner.  All rights reserved.
+/*-
  * Copyright (c) 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -19,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,191 +37,74 @@
  * SUCH DAMAGE.
  *
  *	@(#)alloc.c	8.1 (Berkeley) 6/11/93
- *
+ *  
  *
  * Copyright (c) 1989, 1990, 1991 Carnegie Mellon University
  * All Rights Reserved.
  *
  * Author: Alessandro Forin
- *
+ * 
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- *
+ * 
  * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- *
+ * 
  * Carnegie Mellon requests users of this software to return to
- *
+ * 
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- *
+ * 
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
- */
-
-/*
- * Dynamic memory allocator.
- *
- * Compile options:
- *
- *	ALLOC_TRACE	enable tracing of allocations/deallocations
- *
- *	ALLOC_FIRST_FIT	use a first-fit allocation algorithm, rather than
- *			the default best-fit algorithm.
- *
- *	HEAP_LIMIT	heap limit address (defaults to "no limit").
- *
- *	HEAP_START	start address of heap (defaults to '&end').
- *
- *	DEBUG		enable debugging sanity checks.
  */
 
 #include <sys/param.h>
 
 /*
- * Each block actually has ALIGN(unsigned) + ALIGN(size) bytes allocated
- * to it, as follows:
- *
- * 0 ... (sizeof(unsigned) - 1)
- *	allocated or unallocated: holds size of user-data part of block.
- *
- * sizeof(unsigned) ... (ALIGN(sizeof(unsigned)) - 1)
- *	allocated: unused
- *	unallocated: depends on packing of struct fl
- *
- * ALIGN(sizeof(unsigned)) ... (ALIGN(sizeof(unsigned)) + ALIGN(data size) - 1)
- *	allocated: user data
- *	unallocated: depends on packing of struct fl
- *
- * 'next' is only used when the block is unallocated (i.e. on the free list).
- * However, note that ALIGN(sizeof(unsigned)) + ALIGN(data size) must
- * be at least 'sizeof(struct fl)', so that blocks can be used as structures
- * when on the free list.
+ *	Dynamic memory allocator
  */
-
-#include "stand.h"
-
 struct fl {
-	unsigned	size;
 	struct fl	*next;
+	unsigned	size;
 } *freelist = (struct fl *)0;
 
-#ifdef HEAP_START
-static char *top = (char *)HEAP_START;
-#else
 extern char end[];
 static char *top = end;
-#endif
 
 void *
-alloc(unsigned int size)
+alloc(size)
+	unsigned size;
 {
-	struct fl **f = &freelist, **bestf = NULL;
-#ifndef ALLOC_FIRST_FIT
-	unsigned bestsize = 0xffffffff;	/* greater than any real size */
-#endif
-	char *help;
-	int failed;
+	register struct fl *f = freelist, **prev;
 
-#ifdef ALLOC_TRACE
-	printf("alloc(%u)", size);
-#endif
-
-#ifdef ALLOC_FIRST_FIT
-	while (*f != (struct fl *)0 && (*f)->size < size)
-		f = &((*f)->next);
-	bestf = f;
-	failed = (*bestf == (struct fl *)0);
-#else
-	/* scan freelist */
-	while (*f) {
-		if ((*f)->size >= size) {
-			if ((*f)->size == size) /* exact match */
-				goto found;
-
-			if ((*f)->size < bestsize) {
-				/* keep best fit */
-				bestf = f;
-				bestsize = (*f)->size;
-			}
-		}
-		f = &((*f)->next);
+	prev = &freelist;
+	while (f && f->size < size) {
+		prev = &f->next;
+		f = f->next;
 	}
-
-	/* no match in freelist if bestsize unchanged */
-	failed = (bestsize == 0xffffffff);
-#endif
-
-	if (failed) { /* nothing found */
-		/*
-		 * allocate from heap, keep chunk len in
-		 * first word
-		 */
-		help = top;
-
-		/* make _sure_ the region can hold a struct fl. */
-		if (size < ALIGN(sizeof (struct fl *)))
-			size = ALIGN(sizeof (struct fl *));
-		top += ALIGN(sizeof(unsigned)) + ALIGN(size);
-#ifdef HEAP_LIMIT
-		if (top > (char *)HEAP_LIMIT)
-			panic("heap full (0x%lx+%u)", help, size);
-#endif
-		*(unsigned *)help = ALIGN(size);
-#ifdef ALLOC_TRACE
-		printf("=%p\n", help + ALIGN(sizeof(unsigned)));
-#endif
-		return(help + ALIGN(sizeof(unsigned)));
-	}
-
-	/* we take the best fit */
-	f = bestf;
-
-#ifndef ALLOC_FIRST_FIT
-found:
-#endif
-	/* remove from freelist */
-	help = (char *)*f;
-	*f = (*f)->next;
-#ifdef ALLOC_TRACE
-	printf("=%p (origsize %u)\n", help + ALIGN(sizeof(unsigned)),
-	    *(unsigned *)help);
-#endif
-	return(help + ALIGN(sizeof(unsigned)));
+	if (f == (struct fl *)0) {
+		f = (struct fl *)top;
+		top += ALIGN(size);
+	} else
+		*prev = f->next;
+	return ((void *)f);
 }
 
 void
-free(void *ptr, unsigned int size)
+free(ptr, size)
+	void *ptr;
+	unsigned size;
 {
-	struct fl *f = (struct fl *)((char *)ptr -
-	    ALIGN(sizeof(unsigned)));
+	register struct fl *f = (struct fl *)ptr;
 
-#ifdef ALLOC_TRACE
-	printf("free(%p, %u) (origsize %u)\n", ptr, size, f->size);
-#endif
-#ifdef DEBUG
-	if (size > f->size)
-		printf("free %u bytes @%p, should be <=%u\n",
-		    size, ptr, f->size);
-#ifdef HEAP_START
-	if (ptr < (void *)HEAP_START)
-#else
-	if (ptr < (void *)end)
-#endif
-		printf("free: %lx before start of heap.\n", (u_long)ptr);
-
-#ifdef HEAP_LIMIT
-	if (ptr > (void *)HEAP_LIMIT)
-		printf("free: %lx beyond end of heap.\n", (u_long)ptr);
-#endif
-#endif /* DEBUG */
-	/* put into freelist */
+	f->size = ALIGN(size);
 	f->next = freelist;
 	freelist = f;
 }

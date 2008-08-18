@@ -1,5 +1,4 @@
-/*	$OpenBSD: vaddrs.h,v 1.7 2005/04/17 18:47:51 miod Exp $	*/
-/*	$NetBSD: vaddrs.h,v 1.8 1997/03/10 23:54:41 pk Exp $ */
+/*	$NetBSD: vaddrs.h,v 1.7 1996/05/16 15:57:28 abrown Exp $ */
 
 /*
  * Copyright (c) 1996
@@ -52,7 +51,7 @@
  * Special (fixed) virtual addresses on the SPARC.
  *
  * IO virtual space begins at 0xfe000000 (a segment boundary) and
- * continues up to the DVMA edge at 0xff000000.  (The upper all-1s
+ * continues up to the DMVA edge at 0xff000000.  (The upper all-1s
  * byte is special since some of the hardware supplies this to pad
  * a 24-bit address space out to 32 bits.  This is a legacy of the
  * IBM PC AT bus, actually, just so you know who to blame.)
@@ -70,7 +69,7 @@
  */
 
 #ifndef IODEV_0
-#define	IODEV_0		IOSPACE_BASE
+#define	IODEV_0	0xfe000000	/* must match VM_MAX_KERNEL_ADDRESS */
 
 #define _MAXNBPG	8192	/* fixed VAs, independent of actual NBPG */
 #define _MAXNCPU	4	/* fixed VA allocation allows 4 CPUs */
@@ -84,11 +83,10 @@
 #define	AUXREG_VA	(       ZS1_VA + _MAXNBPG)
 #define	TMPMAP_VA	(    AUXREG_VA + _MAXNBPG)
 #define	MSGBUF_VA	(    TMPMAP_VA + _MAXNBPG)
-#define INTRREG_VA	(    MSGBUF_VA + _MAXNBPG)		/* [4/4c] */
 #define PI_INTR_VA	(    MSGBUF_VA + _MAXNBPG)		/* [4m] */
 #define SI_INTR_VA	(   PI_INTR_VA + _MAXNBPG*_MAXNCPU)	/* [4m] */
 #define	IODEV_BASE	(   SI_INTR_VA + _MAXNBPG)
-#define	IODEV_END	(IOSPACE_BASE + IOSPACE_LEN)
+#define	IODEV_END	0xff000000		/* 16 MB of iospace */
 
 #define	DVMA_BASE	0xfff00000
 #define	DVMA_END	0xfffc0000
@@ -113,15 +111,8 @@
  * in both processor and IOMMU space.
  */
 #define DVMA4M_BASE	0xfc000000	/* can change subject to above rule */
-#define DVMA4M_END	0xfffff000	/* XXX is this enough? */
-#define DVMA_D24_BASE	0xff000000
-#define DVMA_D24_END	0xfffff000
-
-#define M_SPACE_D24	0x0001
-
-/*
- * Virtual address of the per cpu `cpu_softc' structure.
- */
-#define CPUINFO_VA	(KERNBASE+8192)
+#define DVMA4M_TOP	0xffffffff 	/* do not modify */
+#define DVMA4M_START	0xfd000000	/* 16M of DVMA */
+#define DVMA4M_END	0xfe000000	/* XXX is this enough? */
 
 #endif /* IODEV_0 */

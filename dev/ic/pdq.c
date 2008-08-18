@@ -1,5 +1,5 @@
-/*	$OpenBSD: pdq.c,v 1.13 2007/02/14 00:53:48 jsg Exp $	*/
-/*	$NetBSD: pdq.c,v 1.9 1996/10/13 01:37:26 christos Exp $	*/
+/*	$OpenBSD: pdq.c,v 1.5 1996/08/21 22:27:39 deraadt Exp $	*/
+/*	$NetBSD: pdq.c,v 1.5.4.1 1996/06/08 00:17:44 cgd Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996 Matt Thomas <matt@3am-software.com>
@@ -11,7 +11,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
+ *    derived from this software withough specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -169,8 +169,17 @@ pdq_print_fddi_chars(
 {
     const char hexchars[] = "0123456789abcdef";
 
-    printf(PDQ_OS_PREFIX "DEC %s FDDI %s Controller\n",
-	   PDQ_OS_PREFIX_ARGS, pdq_descriptions[pdq->pdq_type],
+    printf(
+#if !defined(__bsdi__) && !(defined(__NetBSD__) || defined(__OpenBSD__))
+	   PDQ_OS_PREFIX
+#else
+	   ": "
+#endif
+	   "DEC %s FDDI %s Controller\n",
+#if !defined(__bsdi__) && !(defined(__NetBSD__) || defined(__OpenBSD__))
+	   PDQ_OS_PREFIX_ARGS,
+#endif
+	   pdq_descriptions[pdq->pdq_type],
 	   pdq_station_types[rsp->status_chars_get.station_type]);
 
     printf(PDQ_OS_PREFIX "FDDI address %c%c:%c%c:%c%c:%c%c:%c%c:%c%c, FW=%c%c%c%c, HW=%c",
@@ -530,8 +539,6 @@ pdq_queue_commands(
 	    pdq_os_addr_fill(pdq, addr, 61);
 	    break;
 	}
-	default:
-	    break;
     }
     /*
      * At this point the command is done.  All that needs to be done is to
@@ -740,9 +747,8 @@ pdq_process_received_data(
 			status.rxs_rcc_reason, status.rxs_fsc, status.rxs_fsb_e));
 	    if (status.rxs_rcc_reason == 7)
 		goto discard_frame;
-	    if (status.rxs_rcc_reason != 0) {
+	    if (status.rxs_rcc_reason != 0)
 		/* hardware fault */
-	    }
 	    if (status.rxs_rcc_badcrc) {
 		printf(PDQ_OS_PREFIX " MAC CRC error (source=%x-%x-%x-%x-%x-%x)\n",
 		       PDQ_OS_PREFIX_ARGS,
@@ -753,7 +759,7 @@ pdq_process_received_data(
 		       dataptr[PDQ_RX_FC_OFFSET+5],
 		       dataptr[PDQ_RX_FC_OFFSET+6]);
 		/* rx->rx_badcrc++; */
-	    } else if (status.rxs_fsc == 0 || status.rxs_fsb_e == 1) {
+	    } else if (status.rxs_fsc == 0 | status.rxs_fsb_e == 1) {
 		/* rx->rx_frame_status_errors++; */
 	    } else {
 		/* hardware fault */
@@ -999,7 +1005,7 @@ pdq_stop(
 	    pdq_do_port_control(csrs, PDQ_PCTL_SUB_CMD);
 	    state = PDQ_PSTS_ADAPTER_STATE(PDQ_CSR_READ(csrs, csr_port_status));
 	    PDQ_ASSERT(state == PDQS_DMA_AVAILABLE);
-	    /* FALLTHROUGH */
+	    /* FALL THROUGH */
 	}
 	case PDQS_DMA_AVAILABLE: {
 	    PDQ_CSR_WRITE(csrs, csr_port_data_a, 0);
@@ -1007,7 +1013,7 @@ pdq_stop(
 	    pdq_do_port_control(csrs, PDQ_PCTL_DMA_UNINIT);
 	    state = PDQ_PSTS_ADAPTER_STATE(PDQ_CSR_READ(csrs, csr_port_status));
 	    PDQ_ASSERT(state == PDQS_DMA_UNAVAILABLE);
-	    /* FALLTHROUGH */
+	    /* FALL THROUGH */
 	}
 	case PDQS_DMA_UNAVAILABLE: {
 	    break;
@@ -1238,8 +1244,6 @@ pdq_run(
 	}
 	case PDQS_RING_MEMBER: {
 	}
-	default:
-	    break;
     }
 }
 
@@ -1423,7 +1427,7 @@ pdq_initialize(
     pdq->pdq_host_smt_info.rx_buffers = (void *) pdq->pdq_dbp->pdqdb_host_smt_buffers;
 
     PDQ_PRINTF(("\nPDQ Descriptor Block = " PDQ_OS_PTR_FMT "\n", pdq->pdq_dbp));
-    PDQ_PRINTF(("    Receive Queue          = " PDQ_OS_PTR_FMT "\n", pdq->pdq_dbp->pdqdb_receives));
+    PDQ_PRINTF(("    Recieve Queue          = " PDQ_OS_PTR_FMT "\n", pdq->pdq_dbp->pdqdb_receives));
     PDQ_PRINTF(("    Transmit Queue         = " PDQ_OS_PTR_FMT "\n", pdq->pdq_dbp->pdqdb_transmits));
     PDQ_PRINTF(("    Host SMT Queue         = " PDQ_OS_PTR_FMT "\n", pdq->pdq_dbp->pdqdb_host_smt));
     PDQ_PRINTF(("    Command Response Queue = " PDQ_OS_PTR_FMT "\n", pdq->pdq_dbp->pdqdb_command_responses));

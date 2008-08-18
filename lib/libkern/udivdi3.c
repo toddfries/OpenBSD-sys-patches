@@ -1,3 +1,5 @@
+/*	$NetBSD: udivdi3.c,v 1.5 1995/10/07 09:26:54 mycroft Exp $	*/
+
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -14,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,7 +38,11 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: udivdi3.c,v 1.5 2004/11/28 07:23:41 mickey Exp $";
+#if 0
+static char sccsid[] = "@(#)udivdi3.c	8.1 (Berkeley) 6/4/93";
+#else
+static char rcsid[] = "$NetBSD: udivdi3.c,v 1.5 1995/10/07 09:26:54 mycroft Exp $";
+#endif
 #endif /* LIBC_SCCS and not lint */
 
 #include "quad.h"
@@ -41,7 +51,8 @@ static char rcsid[] = "$OpenBSD: udivdi3.c,v 1.5 2004/11/28 07:23:41 mickey Exp 
  * Divide two unsigned quads.
  */
 u_quad_t
-__udivdi3(u_quad_t a, u_quad_t b)
+__udivdi3(a, b)
+	u_quad_t a, b;
 {
 
 	return (__qdivrem(a, b, (u_quad_t *)0));

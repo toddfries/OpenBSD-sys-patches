@@ -1,4 +1,4 @@
-/*	$OpenBSD: opti.c,v 1.8 2004/06/13 21:49:24 niklas Exp $	*/
+/*	$OpenBSD: opti.c,v 1.4 1996/05/27 07:57:09 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -12,6 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Michael Shalayeff.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR 
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
@@ -41,6 +46,7 @@
 
 #include <machine/pio.h>
 
+#include <i386/isa/icu.h>
 #include <dev/isa/isavar.h>
 
 #include <dev/isa/opti.h>
@@ -56,73 +62,43 @@ int	opti_type = OPTI_C929;	/* XXX only one card can be installed */
 
 #define	OPTI_cd_valid_ift(i)	((i)==OPTI_SONY||(i)==OPTI_PANASONIC||\
 					(i)==OPTI_MITSUMI||(i)==OPTI_IDE)
-
-static __inline int OPTI_cd_addr(int);
-static __inline int OPTI_cd_irq(int);
-static __inline int OPTI_cd_drq(int);
-static __inline int OPTI_snd_addr(int);
-static __inline int OPTI_snd_irq(int);
-static __inline int OPTI_snd_drq(int);
-static __inline void opti_outb(u_short, u_char);
-static __inline u_char opti_inb(u_short);
-static int opti_present(void);
-
 static __inline int
 OPTI_cd_addr(a)
 	int	a;
 {
 	switch(a) {
-	case 0x320:
-		return 0xc0;
-	case 0x330:
-		return 0x40;
-	case 0x340:
-		return 0x00;
-	case 0x360:
-		return 0x80;
-	default:
-		return -1;
+		case 0x320:	return 0xc0;
+		case 0x330:	return 0x40;
+		case 0x340:	return 0x00;
+		case 0x360:	return 0x80;
+		default:	return -1;
 	}
 }
-
 static __inline int
 OPTI_cd_irq(i)
 	int	i;
 {
 	switch(i) {
-	case 5:
-		return 0x04;
-	case 7:
-		return 0x08;
-	case 3:
-		return 0x0c;
-	case 9:
-		return 0x10;
-	case 10:
-		return 0x14;
-	case 11:
-		return 0x18;
-	case -1:
-		return 0x00;
-	default:
-		return -1;
+		case 5:	return 0x04;
+		case 7:	return 0x08;
+		case 3:	return 0x0c;
+		case 9:	return 0x10;
+		case 10:return 0x14;
+		case 11:return 0x18;
+		case -1:return 0x00;
+		default:return -1;
 	}
 }
-
 static __inline int
 OPTI_cd_drq(d)
 	int	d;
 {
 	switch(d) {
-	case 3:
-	case 5:
-		return 0;
-	case 6:
-		return 1;
-	case 7:
-		return 2;
-	default:
-		return 3;
+		case 3:
+		case 5:	return 0;
+		case 6:	return 1;
+		case 7:	return 2;
+		default:return 3;
 	}
 }
 
@@ -133,83 +109,59 @@ OPTI_snd_addr(a)
 	int	a;
 {
 	switch(a) {
-	case 0x220:
-		return 0x0;
-	case 0x240:
-		return 0x3;
-	case 0x530:
-		return 0x8;
-	case 0xE80:
-		return 0x9;
-	case 0xF40:
-		return 0xa;
-	case 0x604:
-		return 0xb;
-	default:
-		return -1;
+		case 0x220:	return 0x0;
+		case 0x240:	return 0x3;
+		case 0x530:	return 0x8;
+		case 0xE80:	return 0x9;
+		case 0xF40:	return 0xa;
+		case 0x604:	return 0xb;
+		default:	return -1;
 	}
 }
-
 static __inline int
 OPTI_snd_irq(i)
 	int	i;
 {
 	switch(i) {
-	case 5:
-		return 0x04;
-	case 7:
-		return 0x08;
-	case 3:
-		return 0x0c;
-	case 9:
-		return 0x10;
-	case 10:
-		return 0x14;
-	case 11:
-		return 0x18;
-	case -1:
-		return 0x00;
-	default:
-		return -1;
+		case 5:	return 0x04;
+		case 7:	return 0x08;
+		case 3:	return 0x0c;
+		case 9:	return 0x10;
+		case 10:return 0x14;
+		case 11:return 0x18;
+		case -1:return 0x00;
+		default:return -1;
 	}
 }
-
 static __inline int
 OPTI_snd_drq(d)
 	int	d;
 {
 	switch(d) {
-	case 3:
-	case 5:
-		return 0;
-	case 6:
-		return 1;
-	case 7:
-		return 2;
-	default:
-		return 3;
+		case 3:
+		case 5:	return 0;
+		case 6:	return 1;
+		case 7:	return 2;
+		default:return 3;
 	}
 }
 
 static __inline void
-opti_outb(port, byte)
-	u_short port;
-	u_char byte;
+opti_outb( u_short port, u_char byte )
 {
 	outb( OPTI_PASSWD, opti_type );
 	outb( port, byte );
 }
 
 static __inline u_char
-opti_inb(port)
-	u_short port;
+opti_inb( u_short port )
 {
 	outb( OPTI_PASSWD, opti_type );
 	return inb( port );
 }
 
 static int
-opti_present()
+opti_present( void )
 {
 	register u_char	a, b;
 	int s = splhigh();
@@ -234,7 +186,7 @@ opti_present()
 }
 
 int
-opti_cd_setup(ift, addr, irq, drq)
+opti_cd_setup( ift, addr, irq, drq )
 	int	ift, addr, irq, drq;
 {
 	int	ret = 0;
@@ -252,7 +204,8 @@ opti_cd_setup(ift, addr, irq, drq)
 		XDEBUG( 2, ("opti: wrong CD-ROM irq number.\n"));
 	else if( OPTI_cd_drq(drq) == -1)
 		XDEBUG( 2, ("opti: bad CD_ROM drq number.\n"));
-	else {
+	else
+	{
 			/* so the setup */
 		int s = splhigh();
 		register u_char	a, b;
@@ -299,7 +252,7 @@ opti_cd_setup(ift, addr, irq, drq)
 }
 
 int
-opti_snd_setup(ift, addr, irq, drq)
+opti_snd_setup( ift, addr, irq, drq )
 	int	ift, addr, irq, drq;
 {
 	XDEBUG( 2, ("opti: do SND setup type=%u,addr=%x,irq=%d,drq=%d\n",
@@ -315,16 +268,17 @@ opti_snd_setup(ift, addr, irq, drq)
 		XDEBUG( 2, ("opti: wrong SND irq number.\n"));
 	else if( OPTI_snd_drq(drq) == -1)
 		XDEBUG( 2, ("opti: bad SND drq number.\n"));
-	else {
+	else
+	{
 			/* so the setup */
 		int s = splhigh();
-		register u_char	a;
+		register u_char	a, b;
 
 		if (ift == OPTI_WSS) {
-			a = opti_inb(OPTI_IFTP);
-			opti_outb(OPTI_IFTP, ((a & ~OPTI_SND_MASK)
-				  | (OPTI_snd_addr(addr)*16)) + 1);
-			opti_outb(OPTI_ENBL, 0x1a);
+			a = opti_inb( OPTI_IFTP );
+			opti_outb( OPTI_IFTP, (a & ~OPTI_SND_MASK)
+				  | OPTI_snd_addr(addr)*16 + 1 );
+			opti_outb( OPTI_ENBL, 0x1a );
 		}
 
 		splx(s);

@@ -1,5 +1,5 @@
-/*	$OpenBSD: eisa.c,v 1.12 2007/06/25 14:13:40 tom Exp $	*/
-/*	$NetBSD: eisa.c,v 1.15 1996/10/21 22:31:01 thorpej Exp $	*/
+/*	$OpenBSD: eisa.c,v 1.3 1996/05/05 12:42:23 deraadt Exp $	*/
+/*	$NetBSD: eisa.c,v 1.11 1996/04/09 22:46:11 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou
@@ -49,8 +49,8 @@
 #include <dev/eisa/eisavar.h>
 #include <dev/eisa/eisadevs.h>
 
-int	eisamatch(struct device *, void *, void *);
-void	eisaattach(struct device *, struct device *, void *);
+int	eisamatch __P((struct device *, void *, void *));
+void	eisaattach __P((struct device *, struct device *, void *));
 
 struct cfattach eisa_ca = {
 	sizeof(struct device), eisamatch, eisaattach
@@ -60,9 +60,9 @@ struct cfdriver eisa_cd = {
 	NULL, "eisa", DV_DULL
 };
 
-int	eisasubmatch(struct device *, void *, void *);
-int	eisaprint(void *, const char *);
-void	eisa_devinfo(const char *, char *, size_t);
+int	eisasubmatch __P((struct device *, void *, void *));
+int	eisaprint __P((void *, char *));
+void	eisa_devinfo __P((const char *, char *));
 
 int
 eisamatch(parent, match, aux)
@@ -83,13 +83,13 @@ eisamatch(parent, match, aux)
 int
 eisaprint(aux, pnp)
 	void *aux;
-	const char *pnp;
+	char *pnp;
 {
 	register struct eisa_attach_args *ea = aux;
 	char devinfo[256]; 
 
 	if (pnp) {
-		eisa_devinfo(ea->ea_idstring, devinfo, sizeof devinfo);
+		eisa_devinfo(ea->ea_idstring, devinfo);
 		printf("%s at %s", devinfo, pnp);
 	}
 	printf(" slot %d", ea->ea_slot);
@@ -116,15 +116,14 @@ eisaattach(parent, self, aux)
 	void *aux;
 {
 	struct eisabus_attach_args *eba = aux;
-	bus_space_tag_t iot, memt;
+	bus_chipset_tag_t bc;
 	eisa_chipset_tag_t ec;
 	int slot, maxnslots;
 
 	eisa_attach_hook(parent, self, eba);
 	printf("\n");
 
-	iot = eba->eba_iot;
-	memt = eba->eba_memt;
+	bc = eba->eba_bc;
 	ec = eba->eba_ec;
 
 	/*
@@ -137,12 +136,10 @@ eisaattach(parent, self, aux)
 	for (slot = 1; slot < maxnslots; slot++) {
 		struct eisa_attach_args ea;
 		u_int slotaddr;
-		bus_space_handle_t slotioh;
+		bus_io_handle_t slotioh;
 		int i;
 
-		ea.ea_dmat = eba->eba_dmat;
-		ea.ea_iot = iot;
-		ea.ea_memt = memt;
+		ea.ea_bc = bc;
 		ea.ea_ec = ec;
 		ea.ea_slot = slot;
 		slotaddr = EISA_SLOT_ADDR(slot);
@@ -152,7 +149,7 @@ eisaattach(parent, self, aux)
 		 * space.  If we can't, assume nothing's there but warn
 		 * about it.
 		 */
-		if (bus_space_map(iot, slotaddr, EISA_SLOT_SIZE, 0, &slotioh)) {
+		if (bus_io_map(bc, slotaddr, EISA_SLOT_SIZE, &slotioh)) {
 			printf("%s: can't map I/O space for slot %d\n",
 			    self->dv_xname, slot);
 			continue;
@@ -161,10 +158,10 @@ eisaattach(parent, self, aux)
 		/* Get the vendor ID bytes */
 		for (i = 0; i < EISA_NVIDREGS; i++) {
 #ifdef EISA_SLOTOFF_PRIMING
-			bus_space_write_1(iot, slotioh,
+			bus_io_write_1(bc, slotioh,
 			    EISA_SLOTOFF_PRIMING, EISA_PRIMING_VID(i));
 #endif
-			ea.ea_vid[i] = bus_space_read_1(iot, slotioh,
+			ea.ea_vid[i] = bus_io_read_1(bc, slotioh,
 			    EISA_SLOTOFF_VID + i);
 		}
 
@@ -176,7 +173,7 @@ eisaattach(parent, self, aux)
 			printf("\t(0x%x, 0x%x)\n", ea.ea_vid[0],
 			    ea.ea_vid[1]);
 #endif
-			bus_space_unmap(iot, slotioh, EISA_SLOT_SIZE);
+			bus_io_unmap(bc, slotioh, EISA_SLOT_SIZE);
 			continue;
 		}
 
@@ -184,17 +181,17 @@ eisaattach(parent, self, aux)
 		if (EISA_VENDID_IDDELAY(ea.ea_vid)) {
 			printf("%s slot %d not configured by BIOS?\n",
 			    self->dv_xname, slot);
-			bus_space_unmap(iot, slotioh, EISA_SLOT_SIZE);
+			bus_io_unmap(bc, slotioh, EISA_SLOT_SIZE);
 			continue;
 		}
 
 		/* Get the product ID bytes */
 		for (i = 0; i < EISA_NPIDREGS; i++) {
 #ifdef EISA_SLOTOFF_PRIMING
-			bus_space_write_1(iot, slotioh,
+			bus_io_write_1(bc, slotioh,
 			    EISA_SLOTOFF_PRIMING, EISA_PRIMING_PID(i));
 #endif
-			ea.ea_pid[i] = bus_space_read_1(iot, slotioh,
+			ea.ea_pid[i] = bus_io_read_1(bc, slotioh,
 			    EISA_SLOTOFF_PID + i);
 		}
 
@@ -209,7 +206,7 @@ eisaattach(parent, self, aux)
 		ea.ea_idstring[7] = '\0';		/* sanity */
 
 		/* We no longer need the I/O handle; free it. */
-		bus_space_unmap(iot, slotioh, EISA_SLOT_SIZE);
+		bus_io_unmap(bc, slotioh, EISA_SLOT_SIZE);
 
 		/* Attach matching device. */
 		config_found_sm(self, &ea, eisaprint, eisasubmatch);
@@ -218,12 +215,11 @@ eisaattach(parent, self, aux)
 
 #ifdef EISAVERBOSE
 /*
- * Descriptions of known vendors and devices ("products").
+ * Descriptions of of known vendors and devices ("products").
  */
 struct eisa_knowndev {
 	int	flags;
-	char	id[8];
-	const char *name;
+	const char *id, *name;
 };
 #define EISA_KNOWNDEV_NOPROD	0x01		/* match on vendor only */
 
@@ -231,12 +227,14 @@ struct eisa_knowndev {
 #endif /* EISAVERBOSE */
 
 void
-eisa_devinfo(const char *id, char *cp, size_t cp_len)
+eisa_devinfo(id, cp)
+	const char *id;
+	char *cp;
 {
 	const char *name;
 	int onlyvendor;
 #ifdef EISAVERBOSE
-	const struct eisa_knowndev *edp;
+	struct eisa_knowndev *edp;
 	int match;
 	const char *unmatched = "unknown ";
 #else
@@ -249,7 +247,7 @@ eisa_devinfo(const char *id, char *cp, size_t cp_len)
 #ifdef EISAVERBOSE
 	/* find the device in the table, if possible. */
 	edp = eisa_knowndevs;
-	while (edp->name != NULL) {
+	while (edp->id != NULL) {
 		/* check this entry for a match */
 		if ((edp->flags & EISA_KNOWNDEV_NOPROD) != 0)
 			match = !strncmp(edp->id, id, 3);
@@ -265,9 +263,9 @@ eisa_devinfo(const char *id, char *cp, size_t cp_len)
 #endif
 
 	if (name == NULL)
-		snprintf(cp, cp_len, "%sdevice %s", unmatched, id);
+		cp += sprintf(cp, "%sdevice %s", unmatched, id);
 	else if (onlyvendor)			/* never if not EISAVERBOSE */
-		snprintf(cp, cp_len, "unknown %s device %s", name, id);
+		cp += sprintf(cp, "unknown %s device %s", name, id);
 	else
-		snprintf(cp, cp_len, "%s", name);
+		cp += sprintf(cp, "%s", name);
 }

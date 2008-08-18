@@ -1,4 +1,4 @@
-/*	$OpenBSD: ssvar.h,v 1.11 2006/11/28 16:56:50 dlg Exp $	*/
+/*	$OpenBSD: ssvar.h,v 1.4 1996/05/07 09:34:35 niklas Exp $	*/
 /*	$NetBSD: ssvar.h,v 1.2 1996/03/30 21:47:11 christos Exp $	*/
 
 /*
@@ -44,15 +44,15 @@ struct ss_softc;
 struct scan_io;
 
 struct ss_special {
-	int	(*set_params)(struct ss_softc *, struct scan_io *);
-	int	(*trigger_scanner)(struct ss_softc *);
-	int	(*get_params)(struct ss_softc *);
+	int	(*set_params) __P((struct ss_softc *, struct scan_io *));
+	int	(*trigger_scanner) __P((struct ss_softc *));
+	int	(*get_params) __P((struct ss_softc *));
 	/* some scanners only send line-multiples */
-	void	(*minphys)(struct ss_softc *, struct buf *);
-	int	(*read)(struct ss_softc *, struct buf *);
-	int	(*rewind_scanner)(struct ss_softc *);
-	int	(*load_adf)(struct ss_softc *);
-	int	(*unload_adf)(struct ss_softc *);
+	void	(*minphys) __P((struct ss_softc *, struct buf *));
+	int	(*read) __P((struct ss_softc *, struct buf *));
+	int	(*rewind_scanner) __P((struct ss_softc *));
+	int	(*load_adf) __P((struct ss_softc *));
+	int	(*unload_adf) __P((struct ss_softc *));
 };
 
 /*
@@ -65,15 +65,20 @@ struct ss_softc {
 	int flags;
 #define SSF_TRIGGERED	0x01	/* read operation has been primed */
 #define	SSF_LOADED	0x02	/* parameters loaded */
-	struct scsi_link *sc_link;	/* contains our targ, lun, etc.	*/
+	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
 	struct scan_io sio;
 	struct buf buf_queue;		/* the queue of pending IO operations */
-	const struct quirkdata *quirkdata; /* if we have a rogue entry */
-	struct ss_special special;	/* special handlers for spec. devices */
+	u_int quirks;			/* scanner is only mildly twisted */
+#define SS_Q_GET_BUFFER_SIZE	0x0001	/* poll for available data in ssread() */
+/* truncate to byte boundry is assumed by default unless one of these is set */
+#define SS_Q_PAD_TO_BYTE	0x0002	/* pad monochrome data to byte boundary */
+#define SS_Q_PAD_TO_WORD	0x0004	/* pad monochrome data to word boundary */
+#define SS_Q_THRESHOLD_FOLLOWS_BRIGHTNESS 0x0008
+	struct ss_special *special;	/* special handlers for spec. devices */
 };
 
 /*
  * define the special attach routines if configured
  */
-void mustek_attach(struct ss_softc *, struct scsi_attach_args *);
-void scanjet_attach(struct ss_softc *, struct scsi_attach_args *);
+void mustek_attach __P((struct ss_softc *, struct scsibus_attach_args *));
+void scanjet_attach __P((struct ss_softc *, struct scsibus_attach_args *));

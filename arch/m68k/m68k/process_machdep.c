@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.6 2004/04/12 15:28:38 kettenis Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.2 1996/05/09 22:30:12 niklas Exp $	*/
 /*	$NetBSD: process_machdep.c,v 1.17 1996/05/06 20:05:24 gwr Exp $	*/
 
 /*
@@ -63,8 +63,33 @@
 #include <machine/psl.h>
 #include <machine/reg.h>
 
-#define	process_frame(p)	(struct frame *)((p)->p_md.md_regs)
-#define	process_fpframe(p)	&((p)->p_addr->u_pcb.pcb_fpregs)
+#ifdef cpu_set_init_frame
+extern char kstack[];		/* XXX */
+#endif
+static inline struct frame   *process_frame __P((struct proc *p));
+static inline struct fpframe *process_fpframe __P((struct proc *p));
+
+static inline struct frame *
+process_frame(p)
+	struct proc *p;
+{
+	void *ptr;
+
+#ifdef cpu_set_init_frame
+	ptr = (char *)p->p_addr + ((char *)p->p_md.md_regs - (char *)kstack);
+#else
+	ptr = p->p_md.md_regs;
+#endif
+	return (ptr);
+}
+
+static inline struct fpframe *
+process_fpframe(p)
+	struct proc *p;
+{
+
+	return (&p->p_addr->u_pcb.pcb_fpregs);
+}
 
 int
 process_read_regs(p, regs)
@@ -94,8 +119,6 @@ process_read_fpregs(p, regs)
 
 	return (0);
 }
-
-#ifdef PTRACE
 
 int
 process_write_regs(p, regs)
@@ -180,5 +203,3 @@ process_set_pc(p, addr)
 
 	return (0);
 }
-
-#endif	/* PTRACE */

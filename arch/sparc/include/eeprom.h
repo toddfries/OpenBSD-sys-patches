@@ -1,9 +1,8 @@
-/*	$OpenBSD: eeprom.h,v 1.11 2007/04/10 17:47:54 miod Exp $	*/
+/*	$OpenBSD: eeprom.h,v 1.6 1996/08/16 16:28:25 ccappuc Exp $	*/
 
 /*
  * Copyright (c) 1995 Theo de Raadt
  * All rights reserved.
- * Portions Copyright (c) 1997, Jason Downs.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,6 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Theo de Raadt.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -126,8 +130,8 @@ struct eeprom {
 		char	eed_diagpath[40]; /* 0x028: boot path of diagnostic */
 #define EED_TERM_34x80	00
 #define EED_TERM_48x120	0x12		/* for large scrn size 1600x1280 */
-		u_char	eed_colsize;	/* 0x050: number of columns */
-		u_char	eed_rowsize;	/* 0x051: number of rows */
+		char	eed_colsize;	/* 0x050: number of columns */
+		char	eed_rowsize;	/* 0x051: number of rows */
 
 		char	eed_nu5[6];
 
@@ -349,38 +353,12 @@ struct eeprom {
  * The size of the eeprom on machines with the old clock is 2k.  However,
  * on machines with the new clock (and the `eeprom' in the nvram area)
  * there are only 2040 bytes available. (???).  Since we really only
- * care about the `diagnostic' area, we'll use its size when dealing
+ * care about the `diagnostic' area, we'll use it's size when dealing
  * with the eeprom in general.
  */
 #define EEPROM_SIZE             0x500
 
 #ifdef _KERNEL
 extern	char *eeprom_va;
-int	eeprom_uio(struct uio *);
-
-/*
- * Compatibility defines with NetBSD's eeprom.h.
- *
- * The goal here is to provide enough compatibility for kernel drivers to
- * compile without changes; not to make userland utilities compile.  Userland
- * should use the native interface.
- */
-#define EE_CONS_BW		EED_CONS_BW
-#define EE_CONS_TTYA		EED_CONS_TTYA
-#define EE_CONS_TTYB		EED_CONS_TTYB
-#define EE_CONS_COLOR		EED_CONS_COLOR
-#define EE_CONS_P4OPT		EED_CONS_P4
-
-#define	EE_SCR_1152X900		EED_SCR_1152X900
-#define	EE_SCR_1024X1024	EED_SCR_1024X1024
-#define EE_SCR_1600X1280	EED_SCR_1600X1280
-#define EE_SCR_1440X1440	EED_SCR_1440X1440
-#define EE_SCR_640X480		EED_SCR_640X480
-#define EE_SCR_1280X1024	EED_SCR_1280X1024
-
-#define eeConsole		ee_diag.eed_console
-#define eeTtyRows		ee_diag.eed_rowsize
-#define eeTtyCols		ee_diag.eed_colsize
-#define eeScreenSize		ee_diag.eed_scrsize
-
+int	eeprom_uio __P((struct uio *));
 #endif /* _KERNEL */

@@ -1,4 +1,5 @@
-/*	$NetBSD: db_sym.h,v 1.13 2000/05/25 19:57:36 jhawk Exp $	*/
+/*	$OpenBSD: db_sym.h,v 1.9 1996/08/16 10:12:38 mickey Exp $	*/
+/*	$NetBSD: db_sym.h,v 1.7 1996/02/05 01:57:16 christos Exp $	*/
 
 /* 
  * Mach Operating System
@@ -29,17 +30,27 @@
  *	Date:	8/90
  */
 
+#ifndef _DDB_DB_SYM_
+#define _DDB_DB_SYM_
+
 /*
  * This module can handle multiple symbol tables
  */
-typedef struct {
-	const char	*name;		/* symtab name */
-	char		*start;		/* symtab location */
-	char		*end;
-	char		*private;	/* optional machdep pointer */
-} db_symtab_t;
 
-extern db_symtab_t	*db_last_symtab; /* where last symbol was found */
+#include <sys/queue.h>
+
+typedef struct db_symtab {
+	TAILQ_ENTRY(db_symtab)	list;	/* all the tabs */
+	char		*name;		/* symtab name */
+	u_int		id;		/* id */
+	char		*start;		/* symtab location */
+	char		*end;		/* end of symtab */
+	char		*rend;		/* real end (as it passed) */
+	char		*private;	/* optional machdep pointer */
+}	*db_symtab_t;
+
+extern db_symtab_t	db_last_symtab; /* where last symbol was found */
+extern size_t		db_nsymtabs;	/* number of symbol tables */
 
 /*
  * Symbol representation is specific to the symtab style:
@@ -61,74 +72,40 @@ typedef int		db_strategy_t;	/* search strategy */
 #define DB_STGY_XTRN	1			/* only external symbols */
 #define DB_STGY_PROC	2			/* only procedures */
 
-
-/*
- * Internal db_forall function calling convention:
- *
- * (*db_forall_func)(stab, sym, name, suffix, prefix, arg);
- *
- * stab is the symbol table, symbol the (opaque) symbol pointer,
- * name the name of the symbol, suffix a string representing
- * the type, prefix an initial ignorable function prefix (e.g. "_"
- * in a.out), and arg an opaque argument to be passed in.
- */
-typedef void (db_forall_func_t)(db_symtab_t *, db_sym_t, char *, char *, int, void *);
-
-void		X_db_forall(db_symtab_t *,
-		    db_forall_func_t db_forall_func, void *);
-
-/*
- * A symbol table may be in one of many formats.  All symbol tables
- * must be of the same format as the master kernel symbol table.
- */
-typedef struct {
-	const char *sym_format;
-	boolean_t (*sym_init)(int, void *, void *, const char *);
-	db_sym_t (*sym_lookup)(db_symtab_t *, char *);
-	db_sym_t (*sym_search)(db_symtab_t *, db_addr_t, db_strategy_t,
-		db_expr_t *);
-	void	(*sym_value)(db_symtab_t *, db_sym_t, char **,
-		db_expr_t *);
-	boolean_t (*sym_line_at_pc)(db_symtab_t *, db_sym_t,
-		char **, int *, db_expr_t);
-	boolean_t (*sym_numargs)(db_symtab_t *, db_sym_t, int *,
-		char **);
-	void	(*sym_forall)(db_symtab_t *,
-		db_forall_func_t *db_forall_func, void *);
-} db_symformat_t;
-
 extern boolean_t	db_qualify_ambiguous_names;
 					/* if TRUE, check across symbol tables
 					 * for multiple occurrences of a name.
 					 * Might slow down quite a bit */
 
-extern unsigned int db_maxoff;		/* like gdb's "max-symbolic-offset" */
 /*
  * Functions exported by the symtable module
  */
-int db_add_symbol_table(char *, char *, const char *, char *);
+void db_sym_init __P((void));
+int db_add_symbol_table __P((char *, char *, char *, char *, char *));
 					/* extend the list of symbol tables */
 
-void db_del_symbol_table(char *);
+void db_del_symbol_table __P((char *));
 					/* remove a symbol table from list */
+db_symtab_t db_istab __P((size_t));
+db_symtab_t db_symiter __P((db_symtab_t));
+				/* iterate through all the symtabs, if any */
 
-boolean_t db_eqname(char *, char *, int);
+boolean_t db_eqname __P((char *, char *, int));
 					/* strcmp, modulo leading char */
 
-int db_value_of_name(char *, db_expr_t *);
+int db_value_of_name __P((char *, db_expr_t *));
 					/* find symbol value given name */
 
-db_sym_t db_lookup(char *);
+db_sym_t db_lookup __P((char *));
 
-void db_sifting(char *, int);
-				/* print partially matching symbol names */
+char *db_qualify __P((db_sym_t, char *));
 
-boolean_t db_symbol_is_ambiguous(db_sym_t);
+boolean_t db_symbol_is_ambiguous __P((db_sym_t));
 
-db_sym_t db_search_symbol(db_addr_t, db_strategy_t, db_expr_t *);
+db_sym_t db_search_symbol __P((db_addr_t, db_strategy_t, db_expr_t *));
 					/* find symbol given value */
 
-void db_symbol_values(db_sym_t, char **, db_expr_t *);
+void db_symbol_values __P((db_sym_t, char **, db_expr_t *));
 					/* return name and value of symbol */
 
 #define db_find_sym_and_offset(val,namep,offp)	\
@@ -139,17 +116,14 @@ void db_symbol_values(db_sym_t, char **, db_expr_t *);
 	db_symbol_values(db_search_symbol(val,DB_STGY_XTRN,offp),namep,0)
 					/* ditto, but no locals */
 
-void db_printsym(db_expr_t, db_strategy_t, int (*)(const char *, ...));
+void db_printsym __P((db_expr_t, db_strategy_t));
 					/* print closest symbol to a value */
 
-boolean_t db_line_at_pc(db_sym_t, char **, int *, db_expr_t);
+boolean_t db_line_at_pc __P((db_sym_t, char **, int *, db_expr_t));
 
-int db_sym_numargs(db_sym_t, int *, char **);
-char *db_qualify(db_sym_t, const char *);
+int db_sym_numargs __P((db_sym_t, int *, char **));
 
-#ifdef DB_AOUT_SYMBOLS
-extern	db_symformat_t db_symformat_aout;
-#endif
-#ifdef DB_ELF_SYMBOLS
-extern	db_symformat_t db_symformat_elf;
-#endif
+/* db_hangman.c */
+void db_hangman __P((db_expr_t, int, db_expr_t, char *));
+
+#endif /* _DDB_DB_SYM_H_ */

@@ -1,4 +1,3 @@
-/*	$OpenBSD: freebsd_machdep.h,v 1.7 2003/06/02 23:27:47 millert Exp $	*/
 /*	$NetBSD: freebsd_machdep.h,v 1.1 1995/10/10 01:22:35 mycroft Exp $	*/
 
 /*
@@ -16,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -154,8 +157,6 @@ struct freebsd_ptrace_reg {
 /* sys/i386/include/exec.h */
 #define FREEBSD___LDPGSZ	4096
 
-#ifdef _KERNEL
-void freebsd_sendsig(sig_t, int, int, u_long, int, union sigval);
-#endif
+void freebsd_sendsig __P((sig_t, int, int, u_long));
 
 #endif /* _FREEBSD_MACHDEP_H */

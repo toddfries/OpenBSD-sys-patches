@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.7 2003/10/09 21:48:48 miod Exp $	*/
+/*	$OpenBSD: proc.h,v 1.3 1996/05/26 18:35:59 briggs Exp $	*/
 /*	$NetBSD: proc.h,v 1.5 1994/10/26 08:46:40 cgd Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,4 +36,18 @@
  *	@(#)proc.h	7.1 (Berkeley) 5/15/91
  */
 
-#include <m68k/proc.h>
+/*
+ * Machine-dependent part of the proc structure for hp300.
+ */
+struct mdproc {
+	int	md_flags;		/* machine-dependent flags */
+	int	*md_regs;		/* registers on current frame */
+};
+
+/* md_flags */
+#define	MDP_AST		0x0001	/* async trap pending */
+#define	MDP_STACKADJ	0x0002	/* Frame SP adjusted, might have to
+				   undo when system call returns
+				   ERESTART. */
+#define	MDP_UNCACHE_WX	0x0004	/* The process might modify code, so
+				   don't cache writeable executable pages.  */

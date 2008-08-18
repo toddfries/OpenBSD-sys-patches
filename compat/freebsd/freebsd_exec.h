@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_exec.h,v 1.7 2004/04/15 00:22:42 tedu Exp $	*/
+/*	$OpenBSD: freebsd_exec.h,v 1.2 1996/08/02 20:34:45 niklas Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -12,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -88,14 +92,9 @@
 /* String table offset. */
 #define	FREEBSD_N_STROFF(ex) 	(FREEBSD_N_SYMOFF(ex) + (ex).a_syms)
 
-#define FREEBSD_ELF_AUX_ARGSIZ (sizeof(AuxInfo) * 15 / sizeof(char *))
-
 #define	FREEBSD_AOUT_HDR_SIZE	sizeof(struct exec)
 
-int exec_freebsd_aout_makecmds(struct proc *, struct exec_package *);
-int exec_freebsd_elf32_makecmds(struct proc *, struct exec_package *);
-int freebsd_elf_probe(struct proc *, struct exec_package *, char *,
-    u_long *, u_int8_t *);
+int exec_freebsd_aout_makecmds __P((struct proc *, struct exec_package *));
 
 extern char freebsd_sigcode[], freebsd_esigcode[];
 

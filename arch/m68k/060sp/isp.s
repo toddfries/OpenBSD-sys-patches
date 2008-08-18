@@ -1,5 +1,5 @@
 #
-# $OpenBSD: isp.s,v 1.6 2007/04/10 17:47:54 miod Exp $
+# $OpenBSD: isp.s,v 1.2 1996/05/30 22:14:48 niklas Exp $
 # $NetBSD: isp.s,v 1.2 1996/05/15 19:48:48 is Exp $
 #
 
@@ -854,7 +854,7 @@ isp_acc_exit2:
 	bra.l		_real_access		
 
 # if the addressing mode was (an)+ or -(an), the address register must
-# be restored to its pre-exception value before entering _real_access.
+# be restored to it's pre-exception value before entering _real_access.
 isp_restore:
 	cmpi.b		SPCOND_FLG(%a6),&restore_flg # do we need a restore?
 	bne.b		isp_restore_done	# no
@@ -2527,7 +2527,7 @@ _mul64:
 	cmpi.b		%d0, &0x7		# is src mode Dn or other?
 	bgt.w		mul64_memop		# src is in memory
 
-# multiplier operand in the data register file.
+# multiplier operand in the the data register file.
 # must extract the register number and fetch the operand from the stack.
 mul64_regop:
 	andi.w		&0x7, %d0		# extract Dn
@@ -2636,7 +2636,7 @@ mul64_neg:
 	addx.l		%d7, %d4		# add carry to hi(result)
 
 # the result is saved to the register file.
-# for '040 compatibility, if Dl == Dh then only the hi(result) is
+# for '040 compatability, if Dl == Dh then only the hi(result) is
 # saved. so, saving hi after lo accomplishes this without need to
 # check Dl,Dh equality.
 mul64_done:
@@ -2934,7 +2934,7 @@ cr_cas2:
 #			    (external to package)			#
 #	_isp_cas_terminate(): create access error stack frame on fault	#
 #			      (external and internal to package)	#
-#	_isp_cas_inrange(): checks whether instr addr is within range	#
+#	_isp_cas_inrange(): checks whether instr addess is within range	#
 #			    of core cas/cas2emulation code		#
 #			    (external to package)			#
 #									#
@@ -3825,7 +3825,7 @@ CAS2W2_FILLER:
 #	(3) Save current DFC/SFC (ASSUMED TO BE EQUAL!!!); Then set	#
 #	    SFC/DFC according to whether exception occurred in user or	#
 #	    supervisor mode.						#
-#	(4) Use "plpaw" instruction to pre-load ATC with effective	#
+#	(4) Use "plpaw" instruction to pre-load ATC with efective	#
 #	    address page(s). THIS SHOULD NOT FAULT!!! The relevant	#
 # 	    page(s) should have been made resident prior to entering 	#
 #	    this routine.						#
@@ -3846,7 +3846,7 @@ CAS2W2_FILLER:
 #	    assert LOCKE* for the final write operation.		#
 #	(13)Exit.							#
 # 									#
-# 	The algorithm is actually implemented slightly differently	#
+# 	The algorithm is actually implemented slightly diferently	#
 # depending on the size of the operation and the misalignment of the	#
 # operand. A misaligned operand must be written in aligned chunks or	#
 # else the BUSCR register control gets confused.			#

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.7 2003/10/09 21:48:48 miod Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.3 1996/05/26 18:35:56 briggs Exp $	*/
 /*	$NetBSD: pcb.h,v 1.7 1996/05/05 06:17:51 briggs Exp $	*/
 
 /*
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -72,5 +76,35 @@
  *
  *	@(#)pcb.h	7.4 (Berkeley) 5/4/91
  */
+#ifndef	_PCB_MACHINE_
+#define	_PCB_MACHINE_
 
-#include <m68k/pcb.h>
+#include <machine/frame.h>
+
+/*
+ * MacII process control block
+ */
+struct pcb
+{
+	short	pcb_flags;	/* misc. process flags (+0) */
+	short	pcb_ps; 	/* processor status word (+2) */
+	int	pcb_ustp;	/* user segment table pointer (+4) */
+	int	pcb_usp;	/* user stack pointer (+8) */
+	int	pcb_regs[12];	/* D2-D7, A2-A7 (+C) */
+	caddr_t	pcb_onfault;	/* for copyin/out faults */
+	struct	fpframe pcb_fpregs; /* 68881/2 context save area */
+	int	pcb_exec[16];	/* exec structure for core dumps */
+};
+
+/* flags */
+
+/*
+ * The pcb is augmented with machine-dependent additional data for
+ * core dumps.  For the m68k, this includes a header that, for the
+ * hp300, is used for HP-UX processes' exec header.
+ */
+struct md_coredump {
+	int	md_exec[16];	/* Exec structure for HP-UX (sic) core dumps */
+};
+
+#endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: signalvar.h,v 1.16 2007/02/06 18:42:37 art Exp $	*/
+/*	$OpenBSD: signalvar.h,v 1.3 1996/05/02 13:14:58 deraadt Exp $	*/
 /*	$NetBSD: signalvar.h,v 1.17 1996/04/22 01:23:31 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -50,16 +54,12 @@ struct	sigacts {
 	sigset_t ps_sigonstack;		/* signals to take on sigstack */
 	sigset_t ps_sigintr;		/* signals that interrupt syscalls */
 	sigset_t ps_sigreset;		/* signals that reset when caught */
-	sigset_t ps_siginfo;		/* signals that provide siginfo */
 	sigset_t ps_oldmask;		/* saved mask from before sigpause */
 	int	ps_flags;		/* signal flags, below */
 	struct	sigaltstack ps_sigstk;	/* sp & on stack state variable */
 	int	ps_sig;			/* for core dump/debugger XXX */
 	long	ps_code;		/* for core dump/debugger XXX */
-	int	ps_type;		/* for core dump/debugger XXX */
-	union sigval ps_sigval;		/* for core dump/debugger XXX */
 	sigset_t ps_usertramp;		/* SunOS compat; libc sigtramp XXX */
-	int	ps_refcnt;		/* reference count */
 };
 
 /* signal flags */
@@ -67,8 +67,8 @@ struct	sigacts {
 #define	SAS_ALTSTACK	0x02		/* have alternate signal stack */
 
 /* additional signal action values, used only temporarily/internally */
-#define	SIG_CATCH	(void (*)(int))2
-#define	SIG_HOLD	(void (*)(int))3
+#define	SIG_CATCH	(void (*) __P((int)))2
+#define	SIG_HOLD	(void (*) __P((int)))3
 
 /*
  * get signal action for process and signal; currently only for current process
@@ -89,7 +89,7 @@ struct	sigacts {
 /*
  * Clear a pending signal from a process.
  */
-#define	CLRSIG(p, sig)	atomic_clearbits_int(&(p)->p_siglist, sigmask(sig))
+#define	CLRSIG(p, sig)	{ (p)->p_siglist &= ~sigmask(sig); }
 
 /*
  * Signal properties and actions.
@@ -152,37 +152,27 @@ int sigprop[NSIG + 1] = {
 /*
  * Machine-independent functions:
  */
-int	coredump(struct proc *p);
-void	execsigs(struct proc *p);
-void	gsignal(int pgid, int sig);
-void	csignal(pid_t pgid, int signum, uid_t uid, uid_t euid);
-int	issignal(struct proc *p);
-void	pgsignal(struct pgrp *pgrp, int sig, int checkctty);
-void	postsig(int sig);
-void	psignal(struct proc *p, int sig);
-void	siginit(struct proc *p);
-void	trapsignal(struct proc *p, int sig, u_long code, int type,
-	    union sigval val);
-void	sigexit(struct proc *, int);
-void	setsigvec(struct proc *, int, struct sigaction *);
-int	killpg1(struct proc *, int, int, int);
-
-void	signal_init(void);
-
-struct sigacts *sigactsinit(struct proc *);
-void	sigactsshare(struct proc *, struct proc *);
-void	sigactsunshare(struct proc *);
-void	sigactsfree(struct proc *);
+int	coredump __P((struct proc *p));
+void	execsigs __P((struct proc *p));
+void	gsignal __P((int pgid, int sig));
+int	issignal __P((struct proc *p));
+void	pgsignal __P((struct pgrp *pgrp, int sig, int checkctty));
+void	postsig __P((int sig));
+void	psignal __P((struct proc *p, int sig));
+void	siginit __P((struct proc *p));
+void	trapsignal __P((struct proc *p, int sig, u_long code));
+void	sigexit __P((struct proc *, int));
+void	setsigvec __P((struct proc *, int, struct sigaction *));
+int	killpg1 __P((struct proc *, int, int, int));
 
 /*
  * Machine-dependent functions:
  */
-void	sendsig(sig_t action, int sig, int returnmask, u_long code,
-	    int type, union sigval val);
+void	sendsig __P((sig_t action, int sig, int returnmask, u_long code));
 struct core;
 struct vnode;
 struct ucred;
-int	cpu_coredump(struct proc *, struct vnode *, struct ucred *,
-			  struct core *);
+int	cpu_coredump __P((struct proc *, struct vnode *, struct ucred *,
+			  struct core *));
 #endif	/* _KERNEL */
 #endif	/* !_SYS_SIGNALVAR_H_ */

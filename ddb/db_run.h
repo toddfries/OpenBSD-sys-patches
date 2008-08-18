@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_run.h,v 1.9 2007/11/14 17:52:36 miod Exp $	*/
+/*	$OpenBSD: db_run.h,v 1.4 1996/04/21 22:19:12 deraadt Exp $	*/
 /*	$NetBSD: db_run.h,v 1.3 1996/02/05 01:57:14 christos Exp $	*/
 
 /* 
@@ -36,33 +36,22 @@
 /*
  * Commands to run process.
  */
-extern	int db_inst_count;
-extern	int db_load_count;
-extern	int db_store_count;
-extern	int db_cmd_loop_done;
+int		db_inst_count;
+int		db_load_count;
+int		db_store_count;
 
-boolean_t db_stop_at_pc(db_regs_t *, boolean_t *);
-void db_restart_at_pc(db_regs_t *, boolean_t);
-void db_single_step(db_regs_t *);
+boolean_t db_stop_at_pc __P((db_regs_t *, boolean_t *));
+void db_restart_at_pc __P((db_regs_t *, boolean_t));
+void db_single_step __P((db_regs_t *));
 #ifndef db_set_single_step
-void db_set_single_step(db_regs_t *);
+void db_set_single_step __P((db_regs_t *));
 #endif
 #ifndef db_clear_single_step
-void db_clear_single_step(db_regs_t *);
+void db_clear_single_step __P((db_regs_t *));
 #endif
-void db_single_step_cmd(db_expr_t, int, db_expr_t, char *);
-void db_trace_until_call_cmd(db_expr_t, int, db_expr_t, char *);
-void db_trace_until_matching_cmd(db_expr_t, int, db_expr_t, char *);
-void db_continue_cmd(db_expr_t, int, db_expr_t, char *);
+void db_single_step_cmd __P((db_expr_t, int, db_expr_t, char *));
+void db_trace_until_call_cmd __P((db_expr_t, int, db_expr_t, char *));
+void db_trace_until_matching_cmd __P((db_expr_t, int, db_expr_t, char *));
+void db_continue_cmd __P((db_expr_t, int, db_expr_t, char *));
 
-#ifdef SOFTWARE_SSTEP
-/*
- * I've seen this defined to (0) when it is not needed and then the proto will
- * not be correct, so skip it then.
- */
-#ifndef getreg_val
-extern register_t getreg_val(db_regs_t *, int);
-#endif
-#endif /* SOFTWARE_SSTEP */
-
-#endif	/* _DDB_DB_RUN_ */
+#endif	_DDB_DB_RUN_

@@ -1,5 +1,4 @@
-/*      $OpenBSD: cpu.h,v 1.26 2007/10/10 15:53:53 art Exp $      */
-/*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
+/*      $NetBSD: cpu.h,v 1.17 1996/05/19 16:43:16 ragge Exp $      */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden
@@ -31,79 +30,45 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _VAX_CPU_H_
-#define _VAX_CPU_H_
-#ifdef _KERNEL
+ /* All bugs are subject to removal without further notice */
 
 #include <sys/cdefs.h>
 #include <sys/device.h>
-#include <sys/evcount.h>
 
 #include <machine/mtpr.h>
-#include <machine/pte.h>
 #include <machine/pcb.h>
-#include <machine/uvax.h>
-#include <machine/psl.h>
-#include <machine/trap.h>
-#include <machine/intr.h>
 
+#define enablertclock()
 #define	cpu_wait(p)
+#define	cpu_swapout(p)
 
-#include <sys/sched.h>
-struct cpu_info {
-	struct proc *ci_curproc;
 
-	struct schedstate_percpu ci_schedstate; /* scheduler state */
-};
+extern int cpunumber, cpu_type;
+extern struct cpu_dep cpu_calls[];
 
-extern struct cpu_info cpu_info_store;
-#define	curcpu()	(&cpu_info_store)
-#define cpu_number()	0
-#define CPU_IS_PRIMARY(ci)	1
-#define CPU_INFO_ITERATOR	int
-#define CPU_INFO_FOREACH(cii, ci) \
-	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-
-/*
- * All cpu-dependent info is kept in this struct. Pointer to the
- * struct for the current cpu is set up in locore.c.
- */
 struct	cpu_dep {
-	void	(*cpu_steal_pages)(void); /* pmap init before mm is on */
-	int	(*cpu_mchk)(caddr_t);   /* Machine check handling */
-	void	(*cpu_memerr)(void); /* Memory subsystem errors */
+	void	(*cpu_steal_pages) __P((void)); /* pmap init before mm is on */
+	int	(*cpu_clock) __P((void)); /* CPU dependent clock handling */
+	int	(*cpu_mchk) __P((caddr_t));   /* Machine check handling */
+	void	(*cpu_memerr) __P((void)); /* Memory subsystem errors */
 	    /* Autoconfiguration */
-	void	(*cpu_conf)(void);
-	int	(*cpu_clkread)(time_t);	/* Read cpu clock time */
-	void	(*cpu_clkwrite)(void);	/* Write system time to cpu */
-	short	cpu_vups;	/* speed of cpu */
-	short	cpu_scbsz;	/* (estimated) size of system control block */
-	void	(*cpu_halt)(void); /* Cpu dependent halt call */
-	void	(*cpu_reboot)(int); /* Cpu dependent reboot call */
-	void	(*cpu_clrf)(void); /* Clear cold/warm start flags */
-	void	(*cpu_subconf)(struct device *);/*config cpu dep. devs */
+	void	(*cpu_conf) __P((struct device *, struct device *, void *));
 };
-
-extern struct cpu_dep *dep_call; /* Holds pointer to current CPU struct. */
 
 struct clockframe {
         int     pc;
         int     ps;
 };
 
-extern struct device *booted_from;
-extern int mastercpu;
-extern int bootdev;
+#define	setsoftnet()	mtpr(12,PR_SIRR)
+#define setsoftclock()	mtpr(8,PR_SIRR)
 
-#define	setsoftnet()	mtpr(IPL_SOFTNET,PR_SIRR)
-#define setsoftclock()	mtpr(IPL_SOFTCLOCK,PR_SIRR)
-#define	todr()		mfpr(PR_TODR)
 /*
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
 
-#define need_resched(ci){ \
+#define need_resched(){ \
 	want_resched++; \
 	mtpr(AST_OK,PR_ASTLVL); \
 	}
@@ -118,58 +83,23 @@ extern int bootdev;
 extern	int     want_resched;   /* resched() was called */
 
 /*
- * This is used during profiling to integrate system time.
- */
-#define	PROC_PC(p)	(((struct trapframe *)((p)->p_addr->u_pcb.framep))->pc)
-
-/*
  * Give a profiling tick to the current process when the user profiling
- * buffer pages are invalid.  On the vax, request an ast to send us
+ * buffer pages are invalid.  On the hp300, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define need_proftick(p) mtpr(AST_OK,PR_ASTLVL)
-
-#define	cpu_idle_enter()	do { /* nothing */ } while (0)
-#define	cpu_idle_cycle()	do { /* nothing */ } while (0)
-#define	cpu_idle_leave()	do { /* nothing */ } while (0)
-
-/*
- * This defines the I/O device register space size in pages.
- */
-#define	IOSPSZ	((64*1024) / VAX_NBPG)	/* 64k == 128 pages */
-
-struct device;
-
-extern char cpu_model[100];
+#define need_proftick(p) {(p)->p_flag |= P_OWEUPC; mtpr(AST_OK,PR_ASTLVL); }
 
 /* Some low-level prototypes */
-int	badaddr(caddr_t, int);
-void	dumpconf(void);
-void	dumpsys(void);
-void	swapconf(void);
-void	disk_printtype(int, int);
-void	disk_reallymapin(struct buf *, pt_entry_t *, int, int);
-vaddr_t	vax_map_physmem(paddr_t, int);
-void	vax_unmap_physmem(vaddr_t, int);
-void	ioaccess(vaddr_t, paddr_t, int);
-void	iounaccess(vaddr_t, int);
-void	findcpu(void);
+int	badaddr __P((caddr_t, int));
+void	cpu_set_kpc __P((struct proc *, void (*)(struct proc *)));
+void	cpu_swapin __P((struct proc *));
+int	hp_getdev __P((int, int));
+void	configure __P((void));
+void	dumpconf __P((void));
+void	dumpsys __P((void));
+void	setroot __P((void));
+void	setconf __P((void));
+void	swapconf __P((void));
 #ifdef DDB
-int	kdbrint(int);
+int	kdbrint __P((int));
 #endif
-#endif /* _KERNEL */
-
-/*
- * CTL_MACHDEP definitions.
- */
-#define CPU_CONSDEV		1	/* dev_t: console terminal device */
-#define	CPU_LED_BLINK		2	/* int: display led patterns */
-#define CPU_MAXID		3	/* number of valid machdep ids */
-
-#define CTL_MACHDEP_NAMES { \
-	{ 0, 0 }, \
-	{ "console_device", CTLTYPE_STRUCT }, \
-	{ "led_blink", CTLTYPE_INT } \
-}
-
-#endif /* _VAX_CPU_H_ */

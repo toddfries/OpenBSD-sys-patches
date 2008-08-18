@@ -1,4 +1,3 @@
-/*	$OpenBSD: igmp.h,v 1.6 2003/06/02 23:28:13 millert Exp $	*/
 /*	$NetBSD: igmp.h,v 1.6 1995/05/31 06:08:21 mycroft Exp $	*/
 
 /*
@@ -17,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,9 +38,6 @@
  *
  *	@(#)igmp.h	8.1 (Berkeley) 6/10/93
  */
-
-#ifndef _NETINET_IGMP_H_
-#define _NETINET_IGMP_H_
 
 /*
  * Internet Group Management Protocol (IGMP) definitions.
@@ -90,8 +90,3 @@ struct igmp {
  * Revert to v2 if we haven't heard from the router in this amount of time.
  */
 #define	IGMP_AGE_THRESHOLD	540
-
-#ifdef _KERNEL
-void	rti_delete(struct ifnet *);
-#endif /* _KERNEL */
-#endif /* _NETINET_IGMP_H_ */

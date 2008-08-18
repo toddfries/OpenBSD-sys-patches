@@ -1,4 +1,4 @@
-/* 	$OpenBSD: compat_util.c,v 1.10 2004/08/01 06:22:28 mickey Exp $	*/
+/* 	$OpenBSD: compat_util.c,v 1.4 1996/04/18 21:21:32 niklas Exp $	*/
 /* 	$NetBSD: compat_util.c,v 1.4 1996/03/14 19:31:45 christos Exp $	*/
 
 /*
@@ -129,7 +129,8 @@ emul_find(p, sgp, prefix, path, pbuf, cflag)
 		 * to the emulation root directory. This is expensive :-(
 		 */
 		/* XXX: prototype should have const here for NDINIT */
-		NDINIT(&ndroot, LOOKUP, FOLLOW, UIO_SYSSPACE, prefix, p);
+		NDINIT(&ndroot, LOOKUP, FOLLOW, UIO_SYSSPACE, 
+		       (char *) prefix, p);
 
 		if ((error = namei(&ndroot)) != 0)
 			goto bad2;
@@ -152,14 +153,7 @@ emul_find(p, sgp, prefix, path, pbuf, cflag)
 	else {
 		sz = &ptr[len] - buf;
 		*pbuf = stackgap_alloc(sgp, sz + 1);
-		if (*pbuf == NULL) {
-			error = ENAMETOOLONG;
-			goto bad;
-		}
-		if ((error = copyout(buf, *pbuf, sz)) != 0) {
-			*pbuf = path;
-			goto bad;
-		}
+		error = copyout(buf, *pbuf, sz);
 		free(buf, M_TEMP);
 	}
 
@@ -175,56 +169,4 @@ bad2:
 bad:
 	free(buf, M_TEMP);
 	return error;
-}
-
-/*
- * Translate one set of flags to another, based on the entries in
- * the given table.  If 'leftover' is specified, it is filled in
- * with any flags which could not be translated.
- */
-unsigned long
-emul_flags_translate(tab, in, leftover)
-	const struct emul_flags_xtab *tab;
-	unsigned long in;
-	unsigned long *leftover;
-{
-        unsigned long out;
-                 
-        for (out = 0; tab->omask != 0; tab++) {
-                if ((in & tab->omask) == tab->oval) {
-                        in &= ~tab->omask;
-                        out |= tab->nval;
-                }
-        }               
-        if (leftover != NULL)
-                *leftover = in;
-        return (out);
-}
-
-caddr_t  
-stackgap_init(e) 
-        struct emul *e;
-{
-        return STACKGAPBASE;
-}
- 
-void *          
-stackgap_alloc(sgp, sz)
-        caddr_t *sgp;
-        size_t sz;
-{
-	void *n = (void *) *sgp;
-	caddr_t nsgp;
-	
-	sz = ALIGN(sz);
-	nsgp = *sgp + sz;
-#ifdef MACHINE_STACK_GROWS_UP
-	if (nsgp > ((caddr_t)PS_STRINGS) + STACKGAPLEN)
-		return NULL;
-#else
-	if (nsgp > ((caddr_t)PS_STRINGS))
-		return NULL;
-#endif
-	*sgp = nsgp;
-	return n;
 }

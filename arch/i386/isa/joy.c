@@ -1,4 +1,3 @@
-/*	$OpenBSD: joy.c,v 1.13 2007/08/01 13:18:18 martin Exp $	*/
 /*	$NetBSD: joy.c,v 1.3 1996/05/05 19:46:15 christos Exp $	*/
 
 /*-
@@ -17,7 +16,7 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
+ *    derived from this software withough specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -46,17 +45,99 @@
 
 #include <dev/isa/isavar.h>
 #include <dev/isa/isareg.h>
-#include <dev/ic/i8253reg.h>
-#include <i386/isa/joyreg.h>
+#include <i386/isa/timerreg.h>
 
-static int	joy_get_tick(void);
+
+/*
+ * The game port can manage 4 buttons and 4 variable resistors (usually 2
+ * joysticks, each with 2 buttons and 2 pots.) via the port at address 0x201.
+ * Getting the state of the buttons is done by reading the game port;
+ * buttons 1-4 correspond to bits 4-7 and resistors 1-4 (X1, Y1, X2, Y2)
+ * to bits 0-3.  If button 1 (resp 2, 3, 4) is pressed, the bit 4 (resp 5,
+ * 6, 7) is set to 0 to get the value of a resistor, write the value 0xff
+ * at port and wait until the corresponding bit returns to 0.
+ */
+
+/*
+ * The formulae below only work if u is ``not too large''.  See also
+ * the discussion in microtime.s
+ */
+#define USEC2TICKS(u) 	(((u) * 19549) >> 14)
+#define TICKS2USEC(u) 	(((u) * 3433) >> 12)
+
+
+#define JOYPART(d) (minor(d) & 1)
+#define JOYUNIT(d) minor(d) >> 1 & 3
+
+#ifndef JOY_TIMEOUT
+#define JOY_TIMEOUT   2000	/* 2 milliseconds */
+#endif
+
+#define JOY_NPORTS    1
+
+struct joy_softc {
+	struct	device sc_dev;
+	int	port;
+	int	x_off[2], y_off[2];
+	int	timeout[2];
+};
+
+int		joyprobe __P((struct device *, void *, void *));
+void		joyattach __P((struct device *, struct device *, void *));
+int		joyopen __P((dev_t, int, int, struct proc *));
+int		joyclose __P((dev_t, int, int, struct proc *));
+static int	get_tick __P((void));
+
+struct cfattach joy_ca = {
+	sizeof(struct joy_softc), joyprobe, joyattach
+};
 
 struct cfdriver joy_cd = {
 	NULL, "joy", DV_DULL
 };
 
+
 int
-joyopen(dev_t dev, int flag, int mode, struct proc *p)
+joyprobe(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
+{
+	struct isa_attach_args *ia = aux;
+#ifdef WANT_JOYSTICK_CONNECTED
+	int iobase = ia->ia_iobase;
+
+	outb(iobase, 0xff);
+	DELAY(10000);		/* 10 ms delay */
+	return (inb(iobase) & 0x0f) != 0x0f;
+#else
+	ia->ia_iosize = JOY_NPORTS;
+	ia->ia_msize = 0;
+	return 1;
+#endif
+}
+
+void
+joyattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
+{
+	struct joy_softc *sc = (void *) self;
+	struct isa_attach_args *ia = aux;
+	int iobase = ia->ia_iobase;
+
+	sc->port = iobase;
+	sc->timeout[0] = sc->timeout[1] = 0;
+	outb(iobase, 0xff);
+	DELAY(10000);		/* 10 ms delay */
+	printf(": joystick%sconnected\n",
+	    (inb(iobase) & 0x0f) == 0x0f ? " not " : " ");
+}
+
+int
+joyopen(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
 	int unit = JOYUNIT(dev);
 	int i = JOYPART(dev);
@@ -66,8 +147,6 @@ joyopen(dev_t dev, int flag, int mode, struct proc *p)
 		return (ENXIO);
 
 	sc = joy_cd.cd_devs[unit];
-	if (sc == NULL)
-		return (ENXIO);
 
 	if (sc->timeout[i])
 		return EBUSY;
@@ -78,7 +157,10 @@ joyopen(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-joyclose(dev_t dev, int flag, int mode, struct proc *p)
+joyclose(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
 	int unit = JOYUNIT(dev);
 	int i = JOYPART(dev);
@@ -89,7 +171,10 @@ joyclose(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-joyread(dev_t dev, struct uio *uio, int flag)
+joyread(dev, uio, flag)
+	dev_t dev;
+	struct uio *uio;
+	int flag;
 {
 	int unit = JOYUNIT(dev);
 	struct joy_softc *sc = joy_cd.cd_devs[unit];
@@ -100,14 +185,14 @@ joyread(dev_t dev, struct uio *uio, int flag)
 
 	disable_intr();
 	outb(port, 0xff);
-	t0 = joy_get_tick();
+	t0 = get_tick();
 	t1 = t0;
 	i = USEC2TICKS(sc->timeout[JOYPART(dev)]);
 	while (t0 - t1 < i) {
 		state = inb(port);
 		if (JOYPART(dev) == 1)
 			state >>= 2;
-		t1 = joy_get_tick();
+		t1 = get_tick();
 		if (t1 > t0)
 			t1 -= TIMER_FREQ / hz;
 		if (!x && !(state & 0x01))
@@ -127,7 +212,12 @@ joyread(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-joyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
+joyioctl(dev, cmd, data, flag, p)
+	dev_t dev;
+	u_long cmd;
+	caddr_t data;
+	int flag;
+	struct proc *p;
 {
 	int unit = JOYUNIT(dev);
 	struct joy_softc *sc = joy_cd.cd_devs[unit];
@@ -163,13 +253,13 @@ joyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 }
 
 static int
-joy_get_tick(void)
+get_tick()
 {
 	int low, high;
 
-	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0);
-	low = inb(IO_TIMER1 + TIMER_CNTR0);
-	high = inb(IO_TIMER1 + TIMER_CNTR0);
+	outb(TIMER_MODE, TIMER_SEL0);
+	low = inb(TIMER_CNTR0);
+	high = inb(TIMER_CNTR0);
 
 	return (high << 8) | low;
 }

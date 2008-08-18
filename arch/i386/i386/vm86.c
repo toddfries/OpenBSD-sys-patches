@@ -1,4 +1,3 @@
-/*	$OpenBSD: vm86.c,v 1.17 2006/09/19 11:06:33 jsg Exp $	*/
 /*	$NetBSD: vm86.c,v 1.15 1996/05/03 19:42:33 christos Exp $	*/
 
 /*-
@@ -41,6 +40,7 @@
 #include <sys/systm.h>
 #include <sys/signalvar.h>
 #include <sys/kernel.h>
+#include <sys/map.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/exec.h>
@@ -48,6 +48,7 @@
 #include <sys/reboot.h>
 #include <sys/conf.h>
 #include <sys/file.h>
+#include <sys/callout.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/msgbuf.h>
@@ -70,8 +71,8 @@
 #include <machine/sysarch.h>
 #include <machine/vm86.h>
 
-static void fast_intxx(struct proc *, int);
-static __inline int is_bitset(int, caddr_t);
+static void fast_intxx __P((struct proc *, int));
+static __inline int is_bitset __P((int, caddr_t));
 
 #define	CS(tf)		(*(u_short *)&tf->tf_cs)
 #define	IP(tf)		(*(u_short *)&tf->tf_eip)
@@ -142,13 +143,15 @@ __res; })
 
 
 static __inline int
-is_bitset(int nr, caddr_t bitmap)
+is_bitset(nr, bitmap)
+	int nr;
+	caddr_t bitmap;
 {
 	u_int byte;		/* bt instruction doesn't do
 					   bytes--it examines ints! */
 	bitmap += nr / NBBY;
 	nr = nr % NBBY;
-	copyin(bitmap, &byte, sizeof(u_char));
+	byte = fubyte(bitmap);
 
 	__asm__ __volatile__("btl %2,%1\n\tsbbl %0,%0"
 			     :"=r" (nr)
@@ -161,7 +164,9 @@ is_bitset(int nr, caddr_t bitmap)
 #define V86_AL(regs)	(((u_char *)&((regs)->tf_eax))[0])
 
 static void
-fast_intxx(struct proc *p, int intrno)
+fast_intxx(p, intrno)
+	struct proc *p;
+	int intrno;
 {
 	struct trapframe *tf = p->p_md.md_regs;
 	/*
@@ -174,14 +179,14 @@ fast_intxx(struct proc *p, int intrno)
 
 	u_long ss, sp;
 
-	/*
+	/* 
 	 * Note: u_vm86p points to user-space, we only compute offsets
-	 * and don't deref it. is_revectored() above does copyin() to
+	 * and don't deref it. is_revectored() above does fubyte() to
 	 * get stuff from it
 	 */
 	u_vm86p = (struct vm86_struct *)p->p_addr->u_pcb.vm86_userp;
 
-	/*
+	/* 
 	 * If user requested special handling, return to user space with
 	 * indication of which INT was requested.
 	 */
@@ -230,9 +235,10 @@ bad:
 }
 
 void
-vm86_return(struct proc *p, int retval)
+vm86_return(p, retval)
+	struct proc *p;
+	int retval;
 {
-	union sigval sv;
 
 	/*
 	 * We can't set the virtual flags in our real trap frame,
@@ -247,8 +253,7 @@ vm86_return(struct proc *p, int retval)
 		sigexit(p, SIGILL);
 		/* NOTREACHED */
 	}
-	sv.sival_int = 0;
-	trapsignal(p, SIGURG, retval, 0, sv);
+	trapsignal(p, SIGURG, retval);
 }
 
 #define	CLI	0xFA
@@ -268,11 +273,11 @@ vm86_return(struct proc *p, int retval)
  * handler code and then having it restart VM86 mode).
  */
 void
-vm86_gpfault(struct proc *p, int type)
+vm86_gpfault(p, type)
+	struct proc *p;
+	int type;
 {
 	struct trapframe *tf = p->p_md.md_regs;
-	union sigval sv;
-
 	/*
 	 * we want to fetch some stuff from the current user virtual
 	 * address space for checking.  remember that the frame's
@@ -363,10 +368,8 @@ vm86_gpfault(struct proc *p, int type)
 		goto bad;
 	}
 
-	if (trace && tf->tf_eflags & PSL_VM) {
-		sv.sival_int = 0;
-		trapsignal(p, SIGTRAP, T_TRCTRAP, TRAP_TRACE, sv);
-	}
+	if (trace && tf->tf_eflags & PSL_VM)
+		trapsignal(p, SIGTRAP, T_TRCTRAP);
 	return;
 
 bad:
@@ -375,7 +378,10 @@ bad:
 }
 
 int
-i386_vm86(struct proc *p, char *args, register_t *retval)
+i386_vm86(p, args, retval)
+	struct proc *p;
+	char *args;
+	register_t *retval;
 {
 	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;

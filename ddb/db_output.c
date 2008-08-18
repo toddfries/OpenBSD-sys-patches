@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_output.c,v 1.25 2006/07/06 18:14:14 miod Exp $	*/
+/*	$OpenBSD: db_output.c,v 1.8 1996/08/04 01:27:46 niklas Exp $	*/
 /*	$NetBSD: db_output.c,v 1.13 1996/04/01 17:27:14 christos Exp $	*/
 
 /* 
@@ -32,12 +32,10 @@
  */
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/stdarg.h>
-#include <sys/systm.h>
+
+#include <machine/stdarg.h>
 
 #include <dev/cons.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/db_machdep.h>
 
@@ -45,8 +43,9 @@
 #include <ddb/db_output.h>
 #include <ddb/db_interface.h>
 #include <ddb/db_sym.h>
-#include <ddb/db_var.h>
 #include <ddb/db_extern.h>
+
+#include <lib/libkern/libkern.h>
 
 /*
  *	Character output - tracks position in line.
@@ -64,7 +63,7 @@
 #ifndef	DB_MAX_LINE
 #define	DB_MAX_LINE		24	/* maximum line */
 #define DB_MAX_WIDTH		80	/* maximum width */
-#endif	/* DB_MAX_LINE */
+#endif	DB_MAX_LINE
 
 #define DB_MIN_MAX_WIDTH	20	/* minimum max width */
 #define DB_MIN_MAX_LINE		3	/* minimum max line */
@@ -78,17 +77,18 @@ int	db_tab_stop_width = 8;		/* how wide are tab stops? */
 	((((i) + db_tab_stop_width) / db_tab_stop_width) * db_tab_stop_width)
 int	db_max_line = DB_MAX_LINE;	/* output max lines */
 int	db_max_width = DB_MAX_WIDTH;	/* output line width */
-int	db_radix = 16;			/* output numbers radix */
 
-static void db_more(void);
+static void db_more __P((void));
+static char *db_ksprintn __P((u_long, int, int *));
+static void db_printf_guts __P((const char *, va_list));
 
 /*
  * Force pending whitespace.
  */
 void
-db_force_whitespace(void)
+db_force_whitespace()
 {
-	int last_print, next_tab;
+	register int last_print, next_tab;
 
 	last_print = db_last_non_space;
 	while (last_print < db_output_position) {
@@ -108,9 +108,9 @@ db_force_whitespace(void)
 }
 
 static void
-db_more(void)
+db_more()
 {
-	char *p;
+	register  char *p;
 	int quit_output = 0;
 
 	for (p = "--db_more--"; *p; p++)
@@ -141,11 +141,11 @@ db_more(void)
  * Output character.  Buffer whitespace.
  */
 void
-db_putchar(int c)
+db_putchar(c)
+	int	c;		/* character to output */
 {
 	if (db_max_line >= DB_MIN_MAX_LINE && db_output_line >= db_max_line-1)
 	    db_more();
-
 	if (c > ' ' && c <= '~') {
 	    /*
 	     * Printing character.
@@ -171,6 +171,7 @@ db_putchar(int c)
 	    db_output_position = 0;
 	    db_last_non_space = 0;
 	    db_output_line++;
+	    db_check_interrupt();
 	}
 	else if (c == '\t') {
 	    /* assume tabs every 8 positions */
@@ -191,58 +192,266 @@ db_putchar(int c)
  * Return output position
  */
 int
-db_print_position(void)
+db_print_position()
 {
 	return (db_output_position);
+}
+
+/*
+ * Printing
+ */
+extern int	db_radix;
+
+/*VARARGS1*/
+int
+#if __STDC__
+db_printf(const char *fmt, ...)
+#else
+db_printf(fmt, va_alist)
+	const char *fmt;
+	va_dcl
+#endif
+{
+	va_list	listp;
+	va_start(listp, fmt);
+	db_printf_guts (fmt, listp);
+	va_end(listp);
+	return 0;
+}
+
+/* alternate name */
+
+/*VARARGS1*/
+int
+#if __STDC__
+kdbprintf(const char *fmt, ...)
+#else
+kdbprintf(fmt, va_alist)
+	char *fmt;
+	va_dcl
+#endif
+{
+	va_list	listp;
+	va_start(listp, fmt);
+	db_printf_guts (fmt, listp);
+	va_end(listp);
+	return 0;
 }
 
 /*
  * End line if too long.
  */
 void
-db_end_line(int space)
+db_end_line()
 {
-	if (db_output_position >= db_max_width - space)
+	if (db_output_position >= db_max_width)
 	    db_printf("\n");
 }
 
-char *
-db_format(char *buf, size_t bufsize, long val, int format, int alt, int width)
-{
-	const char *fmt;
+/*
+ * Put a number (base <= 16) in a buffer in reverse order; return an
+ * optional length and a pointer to the NULL terminated (preceded?)
+ * buffer.
+ */
+static char *
+db_ksprintn(ul, base, lenp)
+	register u_long ul;
+	register int base, *lenp;
+{					/* A long in base 8, plus NULL. */
+	static char buf[sizeof(long) * NBBY / 3 + 2];
+	register char *p;
 
-	if (format == DB_FORMAT_Z || db_radix == 16)
-		fmt = alt ? "-%#*lx" : "-%*lx";
-	else if (db_radix == 8)
-		fmt = alt ? "-%#*lo" : "-%*lo";
-	else
-		fmt = alt ? "-%#*lu" : "-%*lu";
-
-	/* The leading '-' is a nasty (and beautiful) idea from NetBSD */
-	if (val < 0 && format != DB_FORMAT_N)
-		val = -val;
-	else
-		fmt++;
-
-	snprintf(buf, bufsize, fmt, width, val);
-
-	return (buf);
+	p = buf;
+	do {
+		*++p = "0123456789abcdef"[ul % base];
+	} while (ul /= base);
+	if (lenp)
+		*lenp = p - buf;
+	return (p);
 }
 
-void
-db_stack_dump(void)
+static void
+db_printf_guts(fmt, ap)
+	register const char *fmt;
+	va_list ap;
 {
-	static int intrace;
+	register char *p;
+	register int ch, n;
+	u_long ul;
+	int base, lflag, tmp, width;
+	char padc;
+	int ladjust;
+	int sharpflag;
+	int neg;
 
-	if (intrace) {
-		printf("Faulted in traceback, aborting...\n");
-		return;
+	for (;;) {
+		padc = ' ';
+		width = 0;
+		while ((ch = *(u_char *)fmt++) != '%') {
+			if (ch == '\0')
+				return;
+			db_putchar(ch);
+		}
+		lflag = 0;
+		ladjust = 0;
+		sharpflag = 0;
+		neg = 0;
+reswitch:	switch (ch = *(u_char *)fmt++) {
+		case '0':
+			padc = '0';
+			goto reswitch;
+		case '1': case '2': case '3': case '4':
+		case '5': case '6': case '7': case '8': case '9':
+			for (width = 0;; ++fmt) {
+				width = width * 10 + ch - '0';
+				ch = *fmt;
+				if (ch < '0' || ch > '9')
+					break;
+			}
+			goto reswitch;
+		case 'l':
+			lflag = 1;
+			goto reswitch;
+		case '-':
+			ladjust = 1;
+			goto reswitch;
+		case '#':
+			sharpflag = 1;
+			goto reswitch;
+		case 'b':
+			ul = va_arg(ap, int);
+			p = va_arg(ap, char *);
+			for (p = db_ksprintn(ul, *p++, NULL);
+			     (ch = *p--) !='\0';)
+				db_putchar(ch);
+
+			if (!ul)
+				break;
+
+			for (tmp = 0; (n = *p++) != '\0';) {
+				if (ul & (1 << (n - 1))) {
+					db_putchar(tmp ? ',' : '<');
+					for (; (n = *p) > ' '; ++p)
+						db_putchar(n);
+					tmp = 1;
+				} else
+					for (; *p > ' '; ++p);
+			}
+			if (tmp)
+				db_putchar('>');
+			break;
+		case '*':
+			width = va_arg (ap, int);
+			if (width < 0) {
+				ladjust = !ladjust;
+				width = -width;
+			}
+			goto reswitch;
+		case ':':
+			p = va_arg(ap, char *);
+			db_printf_guts (p, va_arg(ap, va_list));
+			break;
+		case 'c':
+			db_putchar(va_arg(ap, int));
+			break;
+		case 's':
+			p = va_arg(ap, char *);
+			width -= strlen (p);
+			if (!ladjust && width > 0)
+				while (width--)
+					db_putchar (padc);
+			while ((ch = *p++) != '\0')
+				db_putchar(ch);
+			if (ladjust && width > 0)
+				while (width--)
+					db_putchar (padc);
+			break;
+		case 'r':
+			ul = lflag ? va_arg(ap, u_long) : va_arg(ap, u_int);
+			if ((long)ul < 0) {
+				neg = 1;
+				ul = -(long)ul;
+			}
+			base = db_radix;
+			if (base < 8 || base > 16)
+				base = 10;
+			goto number;
+		case 'n':
+			ul = lflag ? va_arg(ap, u_long) : va_arg(ap, u_int);
+			base = db_radix;
+			if (base < 8 || base > 16)
+				base = 10;
+			goto number;
+		case 'd':
+			ul = lflag ? va_arg(ap, long) : va_arg(ap, int);
+			if ((long)ul < 0) {
+				neg = 1;
+				ul = -(long)ul;
+			}
+			base = 10;
+			goto number;
+		case 'o':
+			ul = lflag ? va_arg(ap, u_long) : va_arg(ap, u_int);
+			base = 8;
+			goto number;
+		case 'p':
+			db_putchar ('0');
+			db_putchar ('x');
+			ul = (u_long) va_arg(ap, void *);
+			base = 16;
+			goto number;
+		case 'u':
+			ul = lflag ? va_arg(ap, u_long) : va_arg(ap, u_int);
+			base = 10;
+			goto number;
+		case 'z':
+			ul = lflag ? va_arg(ap, u_long) : va_arg(ap, u_int);
+			if ((long)ul < 0) {
+				neg = 1;
+				ul = -(long)ul;
+			}
+			base = 16;
+			goto number;
+		case 'x':
+			ul = lflag ? va_arg(ap, u_long) : va_arg(ap, u_int);
+			base = 16;
+number:			p = (char *)db_ksprintn(ul, base, &tmp);
+			if (sharpflag && ul != 0) {
+				if (base == 8)
+					tmp++;
+				else if (base == 16)
+					tmp += 2;
+			}
+			if (neg)
+				tmp++;
+
+			if (!ladjust && width && (width -= tmp) > 0)
+				while (width--)
+					db_putchar(padc);
+			if (neg)
+				db_putchar ('-');
+			if (sharpflag && ul != 0) {
+				if (base == 8) {
+					db_putchar ('0');
+				} else if (base == 16) {
+					db_putchar ('0');
+					db_putchar ('x');
+				}
+			}
+			if (ladjust && width && (width -= tmp) > 0)
+				while (width--)
+					db_putchar(padc);
+
+			while ((ch = *p--) != '\0')
+				db_putchar(ch);
+			break;
+		default:
+			db_putchar('%');
+			if (lflag)
+				db_putchar('l');
+			/* FALLTHROUGH */
+		case '%':
+			db_putchar(ch);
+		}
 	}
-
-	intrace = 1;
-	printf("Starting stack trace...\n");
-	db_stack_trace_print((db_expr_t)__builtin_frame_address(0), TRUE,
-	    256 /* low limit */, "", printf);
-	printf("End of stack trace.\n");
-	intrace = 0;
 }

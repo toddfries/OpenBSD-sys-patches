@@ -1,21 +1,22 @@
+/*	$NetBSD: htons.c,v 1.6.6.1 1996/05/29 23:48:02 cgd Exp $	*/
+
 /*
  * Written by J.T. Conklin <jtc@netbsd.org>.
  * Public domain.
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: htons.c,v 1.6 2007/11/24 19:25:02 deraadt Exp $";
-#endif /* LIBC_SCCS and not lint */
+static char *rcsid = "$NetBSD: htons.c,v 1.6.6.1 1996/05/29 23:48:02 cgd Exp $";
+#endif
 
 #include <sys/types.h>
 #include <machine/endian.h>
 
 #undef htons
 
-u_int16_t		htons(u_int16_t);
-
-u_int16_t
-htons(u_int16_t x)
+unsigned short
+htons(x)
+	unsigned short x;
 {
 #if BYTE_ORDER == LITTLE_ENDIAN
 	u_char *s = (u_char *) &x;

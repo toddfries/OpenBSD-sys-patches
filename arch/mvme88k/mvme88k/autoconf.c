@@ -1,7 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.41 2007/10/28 19:48:47 miod Exp $	*/
 /*
- * Copyright (c) 1998 Steve Murphree, Jr.
- * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1994 Christian E. Hopps
  * All rights reserved.
  *
@@ -30,177 +27,178 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
+ *	$Id: autoconf.c,v 1.1 1995/10/18 12:32:17 deraadt Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/buf.h>
-#include <sys/dkstat.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/disklabel.h>
-#include <sys/kernel.h>
-
-#include <machine/asm_macro.h>   /* enable/disable interrupts */
-#include <machine/autoconf.h>
 #include <machine/cpu.h>
-#include <machine/vmparam.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
+void configure __P((void));
+void setroot __P((void));
+void swapconf __P((void));
 
-#include <dev/cons.h>
-
+int realconfig=0;
+int cold;	/* 1 if still booting */
+#include <sys/kernel.h>
 /*
- * The following several variables are related to
- * the configuration process, and are used in initializing
- * the machine.
- */
-
-void	dumpconf(void);
-int	get_target(int *, int *, int *);
-
-int cold = 1;   /* 1 if still booting */
-
-paddr_t bootaddr;
-int bootpart, bootbus;
-struct device *bootdv;	/* set by device drivers (if found) */
-
-/*
- * called at boot time, configure all devices on the system.
+ * called at boot time, configure all devices on system
  */
 void
-cpu_configure()
+configure()
 {
-#ifdef MULTIPROCESSOR
 	/*
-	 * XXX This is gross. We can not invoke sched_init_cpu after
-	 * XXX init has been forked. But since we start secondary
-	 * XXX processors very late in the boot process, it is not
-	 * XXX possible to do this from the secondary processors
-	 * XXX themselves.
-	 * XXX Instead, do this now, even though this may cause
-	 * XXX idle procs to be allocated for missing or unreliable
-	 * XXX processors.
+	 * this is the real thing baby (i.e. not console init)
 	 */
-	cpuid_t cpu;
-	for (cpu = 0; cpu < max_cpus; cpu++) {
-		if (cpu == curcpu()->ci_cpuid)
-			continue;
-
-		sched_init_cpu(&m88k_cpus[cpu]);
-	}
-#endif
+	realconfig = 1;
 
 	if (config_rootfound("mainbus", "mainbus") == 0)
 		panic("no mainbus found");
-
-	/*
-	 * Turn external interrupts on.
-	 */
-	set_psr(get_psr() & ~PSR_IND);
-	spl0();
-
-	/*
-	 * Finally switch to the real console driver,
-	 * and say goodbye to the BUG!
-	 */
-	cn_tab = NULL;
-	cninit();
+	
+#ifdef GENERIC
+	if ((boothowto & RB_ASKNAME) == 0)
+		setroot();
+	setconf();
+#else
+	setroot();
+#endif
+	swapconf();
 	cold = 0;
 }
 
-void
-diskconf(void)
+/*ARGSUSED*/
+int
+simple_devprint(auxp, pnp)
+	void *auxp;
+	char *pnp;
 {
-	printf("boot device: %s\n",
-	    (bootdv) ? bootdv->dv_xname : "<unknown>");
-
-	setroot(bootdv, bootpart, RB_USERREQ);
-	dumpconf();
+	return(QUIET);
 }
 
-void
-device_register(struct device *dev, void *aux)
+int
+matchname(fp, sp)
+	char *fp, *sp;
 {
-	if (bootpart == -1) /* ignore flag from controller driver? */
-		return;
+	int len;
 
-	/*
-	 * scsi: sd,cd
-	 */
-	if (strncmp("cd", dev->dv_xname, 2) == 0 ||
-	    strncmp("sd", dev->dv_xname, 2) == 0) {
-		struct scsi_attach_args *sa = aux;
-		int target, bus, lun;
-
-		if (get_target(&target, &bus, &lun) != 0)
-			return;
-    
-		/* make sure we are on the expected scsibus */
-		if (bootbus != bus)
-			return;
-
-		if (sa->sa_sc_link->target == target &&
-		    sa->sa_sc_link->lun == lun) {
-			bootdv = dev;
-			return;
-		}
-	}
-
-	/*
-	 * ethernet: ie,le
-	 */
-	else if (strncmp("ie", dev->dv_xname, 2) == 0 ||
-	    strncmp("le", dev->dv_xname, 2) == 0) {
-		struct confargs *ca = aux;
-
-		if (ca->ca_paddr == bootaddr) {
-			bootdv = dev;
-			return;
-		}
-	}
+	len = strlen(fp);
+	if (strlen(sp) != len)
+		return(0);
+	if (bcmp(fp, sp, len) == 0)
+		return(1);
+	return(0);
 }
-
 /*
- * Returns the ID of the SCSI disk based on Motorola's CLUN/DLUN stuff
- * bootdev == CLUN << 8 | DLUN.
- * This handles SBC SCSI and MVME32[78].
+ * this function needs to get enough configured to do a console
+ * basically this means start attaching the grfxx's that support 
+ * the console. Kinda hacky but it works.
  */
 int
-get_target(int *target, int *bus, int *lun)
-{
-	extern int bootdev;
+config_console()
+{	
+	struct cfdata *cf;
 
-	switch (bootdev >> 8) {
-	/* built-in controller */
-	case 0x00:
-	/* MVME327 */
-	case 0x02:
-	case 0x03:
-		*bus = 0;
-		*target = (bootdev & 0x70) >> 4;
-		*lun = (bootdev & 0x07);
-		return (0);
-	/* MVME328 */
-	case 0x06:
-	case 0x07:
-	case 0x16:
-	case 0x17:
-	case 0x18:
-	case 0x19:
-		*bus = (bootdev & 0x40) >> 6;
-		*target = (bootdev & 0x38) >> 3;
-		*lun = (bootdev & 0x07);
-		return (0);
-	default:
-		return (ENODEV);
-	}
+	/*
+	 * we need mainbus' cfdata.
+	 */
+	cf = config_rootsearch(NULL, "mainbus", "mainbus");
+	if (cf == NULL)
+		panic("no mainbus");
 }
 
-struct nam2blk nam2blk[] = {
-	{ "sd",		4 },
-	{ "cd",		6 },
-	{ "rd",		7 },
-	{ NULL,		-1 }
+void
+swapconf()
+{
+	struct swdevt *swp;
+	u_int maj;
+	int nb;
+
+	for (swp = swdevt; swp->sw_dev > 0; swp++) {
+		maj = major(swp->sw_dev);
+
+		if (maj > nblkdev)
+			break;
+
+		if (bdevsw[maj].d_psize) {
+			nb = bdevsw[maj].d_psize(swp->sw_dev);
+			if (nb > 0 && 
+			    (swp->sw_nblks == 0 || swp->sw_nblks > nb))
+				swp->sw_nblks = nb;
+			else
+				swp->sw_nblks = 0;
+		}
+		swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
+	}
+	if (dumplo == 0 && dumpdev != NODEV && bdevsw[major(dumpdev)].d_psize)
+	/*dumplo = (*bdevsw[major(dumpdev)].d_psize)(dumpdev) - physmem;*/
+		dumplo = (*bdevsw[major(dumpdev)].d_psize)(dumpdev) -
+			ctob(physmem)/DEV_BSIZE;
+	if (dumplo < 0)
+		dumplo = 0;
+
+}
+
+#define	DOSWAP			/* change swdevt and dumpdev */
+u_long	bootdev = 0;		/* should be dev_t, but not until 32 bits */
+
+static	char devname[][2] = {
+	0,0,
+	0,0,
+	0,0,
+	0,0,
+	's','d',	/* 4 = sd -- new SCSI system */
 };
+
+void
+setroot()
+{
+	int majdev, mindev, unit, part, adaptor;
+	dev_t temp, orootdev;
+	struct swdevt *swp;
+
+	printf("setroot boothowto %x bootdev %x\n", boothowto, bootdev);
+	if (boothowto & RB_DFLTROOT ||
+	    (bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
+		return;
+	majdev = (bootdev >> B_TYPESHIFT) & B_TYPEMASK;
+	if (majdev > sizeof(devname) / sizeof(devname[0]))
+		return;
+	adaptor = (bootdev >> B_ADAPTORSHIFT) & B_ADAPTORMASK;
+	part = (bootdev >> B_PARTITIONSHIFT) & B_PARTITIONMASK;
+	unit = (bootdev >> B_UNITSHIFT) & B_UNITMASK;
+	orootdev = rootdev;
+	rootdev = MAKEDISKDEV(majdev, unit, part);
+	/*
+	 * If the original rootdev is the same as the one
+	 * just calculated, don't need to adjust the swap configuration.
+	 */
+	if (rootdev == orootdev)
+		return;
+	printf("changing root device to %c%c%d%c\n",
+		devname[majdev][0], devname[majdev][1],
+		unit, part + 'a');
+#ifdef DOSWAP
+	mindev = DISKUNIT(rootdev);
+	for (swp = swdevt; swp->sw_dev; swp++) {
+		printf("DOSWAP swap %x dev %x\n", swp, swp->sw_dev);
+		if (majdev == major(swp->sw_dev) &&
+		    mindev == DISKUNIT(swp->sw_dev)) {
+			temp = swdevt[0].sw_dev;
+			swdevt[0].sw_dev = swp->sw_dev;
+			swp->sw_dev = temp;
+			break;
+		}
+	}
+	if (swp->sw_dev == 0)
+		return;
+	/*
+	 * If dumpdev was the same as the old primary swap
+	 * device, move it to the new primary swap device.
+	 */
+	if (temp == dumpdev)
+		dumpdev = swdevt[0].sw_dev;
+#endif
+}

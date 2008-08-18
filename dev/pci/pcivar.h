@@ -1,5 +1,5 @@
-/*	$OpenBSD: pcivar.h,v 1.57 2007/12/31 19:13:36 kettenis Exp $	*/
-/*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.7 1996/04/21 22:25:51 deraadt Exp $	*/
+/*	$NetBSD: pcivar.h,v 1.15 1996/03/28 02:16:23 cgd Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -42,7 +42,6 @@
  * provided by pci_machdep.h.
  */
 
-#include <sys/device.h>
 #include <machine/bus.h>
 #include <dev/pci/pcireg.h>
 
@@ -50,54 +49,30 @@
  * Structures and definitions needed by the machine-dependent header.
  */
 typedef u_int32_t pcireg_t;		/* configuration space register XXX */
-
-/*
- * Power Management (PCI 2.2)
- */
-#define PCI_PWR_D0	0
-#define PCI_PWR_D1	1
-#define PCI_PWR_D2	2
-#define PCI_PWR_D3	3
-
-#ifdef _KERNEL
-
 struct pcibus_attach_args;
-struct pci_softc;
 
 /*
  * Machine-dependent definitions.
  */
-#if defined(__alpha__)
+#if (alpha + i386 != 1)
+ERROR: COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
+#endif
+#if alpha
 #include <alpha/pci/pci_machdep.h>
-#elif defined(__i386__)
+#endif
+#if i386
 #include <i386/pci/pci_machdep.h>
-#elif defined(__powerpc__)
-#include <powerpc/pci/pci_machdep.h>
-#elif defined(__sgi__)
-#include <sgi/pci/pci_machdep.h>
-#else
-#include <machine/pci_machdep.h>
 #endif
 
 /*
  * PCI bus attach arguments.
  */
 struct pcibus_attach_args {
-	char	*pba_busname;		/* XXX should be common */
-	bus_space_tag_t pba_iot;	/* pci i/o space tag */
-	bus_space_tag_t pba_memt;	/* pci mem space tag */
-	bus_dma_tag_t pba_dmat;		/* DMA tag */
+	char		*pba_busname;	/* XXX should be common */
+	bus_chipset_tag_t pba_bc;	/* XXX should be common */
 	pci_chipset_tag_t pba_pc;
 
-	int		pba_domain;	/* PCI domain */
 	int		pba_bus;	/* PCI bus number */
-
-	/*
-	 * Pointer to the pcitag of our parent bridge.  If there is no
-	 * parent bridge, then we assume we are a root bus.
-	 */
-	pcitag_t	*pba_bridgetag;
-	pci_intr_handle_t *pba_bridgeih;
 
 	/*
 	 * Interrupt swizzling information.  These fields
@@ -111,21 +86,13 @@ struct pcibus_attach_args {
  * PCI device attach arguments.
  */
 struct pci_attach_args {
-	bus_space_tag_t pa_iot;		/* pci i/o space tag */
-	bus_space_tag_t pa_memt;	/* pci mem space tag */
-	bus_dma_tag_t pa_dmat;		/* DMA tag */
+	bus_chipset_tag_t pa_bc;
 	pci_chipset_tag_t pa_pc;
-	int		pa_flags;	/* flags; see below */
 
-	u_int           pa_domain;
-	u_int           pa_bus;
 	u_int		pa_device;
 	u_int		pa_function;
 	pcitag_t	pa_tag;
 	pcireg_t	pa_id, pa_class;
-
-	pcitag_t	*pa_bridgetag;
-	pci_intr_handle_t *pa_bridgeih;
 
 	/*
 	 * Interrupt information.
@@ -139,47 +106,7 @@ struct pci_attach_args {
 	pcitag_t	pa_intrtag;	/* intr. appears to come from here */
 	pci_intr_pin_t	pa_intrpin;	/* intr. appears on this pin */
 	pci_intr_line_t	pa_intrline;	/* intr. routing information */
-	pci_intr_pin_t	pa_rawintrpin;	/* unswizzled pin */
 };
-
-/*
- * Flags given in the bus and device attachment args.
- *
- * OpenBSD doesn't actually use them yet -- csapuntz@cvs.openbsd.org
- */
-#define	PCI_FLAGS_IO_ENABLED	0x01		/* I/O space is enabled */
-#define	PCI_FLAGS_MEM_ENABLED	0x02		/* memory space is enabled */
-#define	PCI_FLAGS_MRL_OKAY	0x04		/* Memory Read Line okay */
-#define	PCI_FLAGS_MRM_OKAY	0x08		/* Memory Read Multiple okay */
-#define	PCI_FLAGS_MWI_OKAY	0x10		/* Memory Write and Invalidate
-						   okay */
-
-/*
- *
- */
-struct pci_quirkdata {
-	pci_vendor_id_t		vendor;		/* Vendor ID */
-	pci_product_id_t	product;	/* Product ID */
-	int			quirks;		/* quirks; see below */
-};
-#define	PCI_QUIRK_MULTIFUNCTION		1
-#define	PCI_QUIRK_MONOFUNCTION		2
-
-struct pci_softc {
-	struct device sc_dev;
-	bus_space_tag_t sc_iot, sc_memt;
-	bus_dma_tag_t sc_dmat;
-	pci_chipset_tag_t sc_pc;
-	void *sc_powerhook;
-	LIST_HEAD(, pci_dev) sc_devs;
-	int sc_domain, sc_bus, sc_maxndevs;
-	pcitag_t *sc_bridgetag;
-	pci_intr_handle_t *sc_bridgeih;
-	u_int sc_intrswiz;
-	pcitag_t sc_intrtag;
-};
-
-extern int pci_ndomains;
 
 /*
  * Locators devices that attach to 'pcibus', as specified to config.
@@ -200,51 +127,14 @@ extern int pci_ndomains;
  * Configuration space access and utility functions.  (Note that most,
  * e.g. make_tag, conf_read, conf_write are declared by pci_machdep.h.)
  */
-int	pci_mapreg_probe(pci_chipset_tag_t, pcitag_t, int, pcireg_t *);
-pcireg_t pci_mapreg_type(pci_chipset_tag_t, pcitag_t, int);
-int	pci_mapreg_info(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
-	    bus_addr_t *, bus_size_t *, int *);
-int	pci_mapreg_map(struct pci_attach_args *, int, pcireg_t, int,
-	    bus_space_tag_t *, bus_space_handle_t *, bus_addr_t *,
-	    bus_size_t *, bus_size_t);
-
-
-int	pci_io_find(pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
-	    bus_size_t *);
-int	pci_mem_find(pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
-	    bus_size_t *, int *);
-
-int pci_get_capability(pci_chipset_tag_t, pcitag_t, int,
-			    int *, pcireg_t *);
-
-struct pci_matchid {
-	pci_vendor_id_t		pm_vid;
-	pci_product_id_t	pm_pid;
-};
-
-int pci_matchbyid(struct pci_attach_args *, const struct pci_matchid *, int);
-int pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int);
-
-/*
- * Vital Product Data (PCI 2.2)
- */
-int pci_vpd_read(pci_chipset_tag_t, pcitag_t, int, int, pcireg_t *);
-int pci_vpd_write(pci_chipset_tag_t, pcitag_t, int, int, pcireg_t *);
+int	pci_io_find __P((pci_chipset_tag_t, pcitag_t, int, bus_io_addr_t *,
+	    bus_io_size_t *));
+int	pci_mem_find __P((pci_chipset_tag_t, pcitag_t, int, bus_mem_addr_t *,
+	    bus_mem_size_t *, int *));
 
 /*
  * Helper functions for autoconfiguration.
  */
-const char *pci_findvendor(pcireg_t);
-const char *pci_findproduct(pcireg_t);
-int	pci_find_device(struct pci_attach_args *pa,
-			int (*match)(struct pci_attach_args *));
-int	pci_probe_device(struct pci_softc *, pcitag_t tag,
-	    int (*)(struct pci_attach_args *), struct pci_attach_args *);
-int	pci_detach_devices(struct pci_softc *, int);
-void	pci_devinfo(pcireg_t, pcireg_t, int, char *, size_t);
-const struct pci_quirkdata *
-	pci_lookup_quirkdata(pci_vendor_id_t, pci_product_id_t);
-void	pciagp_set_pchb(struct pci_attach_args *);
+void	pci_devinfo __P((pcireg_t, pcireg_t, int, char *));
 
-#endif /* _KERNEL */
 #endif /* _DEV_PCI_PCIVAR_H_ */

@@ -1,5 +1,5 @@
-/*	$OpenBSD: ether.c,v 1.7 2003/08/11 06:23:09 deraadt Exp $	*/
-/*	$NetBSD: ether.c,v 1.8 1996/10/13 02:29:00 christos Exp $	*/
+/*	$OpenBSD: ether.c,v 1.2 1996/09/23 14:18:52 mickey Exp $	*/
+/*	$NetBSD: ether.c,v 1.6 1995/09/14 23:45:25 pk Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -42,6 +42,7 @@
 
 #include <sys/param.h>
 #include <sys/socket.h>
+#include <string.h>
 
 #include <net/if.h>
 
@@ -63,11 +64,11 @@ sendether(d, pkt, len, dea, etype)
 	u_char *dea;
 	int etype;
 {
-ssize_t n;
-struct ether_header *eh;
+	register ssize_t n;
+	register struct ether_header *eh;
 
 #ifdef ETHER_DEBUG
-	if (debug)
+ 	if (debug)
 		printf("sendether: called\n");
 #endif
 
@@ -79,7 +80,7 @@ struct ether_header *eh;
 	eh->ether_type = htons(etype);
 
 	n = netif_put(d, eh, len);
-	if (n < 0 || (size_t)n < sizeof(*eh))
+	if (n == -1 || n < sizeof(*eh))
 		return (-1);
 
 	n -= sizeof(*eh);
@@ -93,17 +94,17 @@ struct ether_header *eh;
  */
 ssize_t
 readether(d, pkt, len, tleft, etype)
-struct iodesc *d;
-void *pkt;
-size_t len;
+	register struct iodesc *d;
+	register void *pkt;
+	register size_t len;
 	time_t tleft;
-u_int16_t *etype;
+	register u_int16_t *etype;
 {
-ssize_t n;
-struct ether_header *eh;
+	register ssize_t n;
+	register struct ether_header *eh;
 
 #ifdef ETHER_DEBUG
-	if (debug)
+ 	if (debug)
 		printf("readether: called\n");
 #endif
 
@@ -111,7 +112,7 @@ struct ether_header *eh;
 	len += sizeof(*eh);
 
 	n = netif_get(d, eh, len, tleft);
-	if (n < 0 || (size_t)n < sizeof(*eh))
+	if (n == -1 || n < sizeof(*eh))
 		return (-1);
 
 	/* Validate Ethernet address. */
@@ -120,7 +121,7 @@ struct ether_header *eh;
 #ifdef ETHER_DEBUG
 		if (debug)
 			printf("readether: not ours (ea=%s)\n",
-			    ether_sprintf(eh->ether_dhost));
+				ether_sprintf(eh->ether_dhost));
 #endif
 		return (-1);
 	}
@@ -135,11 +136,12 @@ struct ether_header *eh;
  */
 static char digits[] = "0123456789abcdef";
 char *
-ether_sprintf(u_char *ap)
+ether_sprintf(ap)
+        register u_char *ap;
 {
-	int i;
+	register i;
 	static char etherbuf[18];
-	char *cp = etherbuf;
+	register char *cp = etherbuf;
 
 	for (i = 0; i < 6; i++) {
 		*cp++ = digits[*ap >> 4];

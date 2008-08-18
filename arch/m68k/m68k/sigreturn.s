@@ -1,5 +1,5 @@
-/*	$OpenBSD: sigreturn.s,v 1.3 2003/06/02 23:27:48 millert Exp $	*/
-/*	$NetBSD: sigreturn.s,v 1.2 1997/04/25 02:22:04 thorpej Exp $	*/
+/*	$OpenBSD: sigreturn.s,v 1.1 1996/05/03 08:44:33 niklas Exp $	*/
+/*	$NetBSD: sigreturn.s,v 1.1 1996/01/31 02:22:15 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -51,7 +55,7 @@
  * because we must open a hole in the stack to fill in the (possibly much
  * larger) original stack frame.
  */
-ASENTRY_NOPROFILE(sigreturn)
+sigreturn:
 	lea	sp@(-84),sp		| leave enough space for largest frame
 	movl	sp@(84),sp@		| move up current 8 byte frame
 	movl	sp@(88),sp@(4)
@@ -60,7 +64,7 @@ ASENTRY_NOPROFILE(sigreturn)
 	movl	usp,a0			| save the user SP
 	movl	a0,sp@(FR_SP)		|   in the savearea
 	movl	#SYS_sigreturn,sp@-	| push syscall number
-	jbsr	_C_LABEL(syscall)	| handle it
+	jbsr	_syscall		| handle it
 	addql	#4,sp			| pop syscall#
 	movl	sp@(FR_SP),a0		| grab and restore
 	movl	a0,usp			|   user SP
@@ -81,4 +85,4 @@ Lsigr1:
 	movl	a1,sp@(FR_SP)		| new SP value
 	moveml	sp@+,#0x7FFF		| restore user registers
 	movl	sp@,sp			| and our SP
-	jra	_ASM_LABEL(rei)		| all done
+	jra	rei			| all done

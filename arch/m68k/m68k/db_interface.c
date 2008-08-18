@@ -1,5 +1,5 @@
-/*	$OpenBSD: db_interface.c,v 1.13 2005/05/01 09:55:49 miod Exp $	*/
-/*	$NetBSD: db_interface.c,v 1.24 1997/02/18 22:27:32 gwr Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.5 1996/05/09 22:30:10 niklas Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.20 1996/04/29 20:50:28 leo Exp $	*/
 
 /* 
  * Mach Operating System
@@ -35,7 +35,7 @@
 #include <sys/reboot.h>
 #include <sys/systm.h> /* just for boothowto --eichin */
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 #include <dev/cons.h>
 
@@ -43,7 +43,6 @@
 #include <machine/db_machdep.h>
 
 #include <ddb/db_command.h>
-#include <ddb/db_var.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 
@@ -51,16 +50,15 @@
 extern label_t	*db_recover;
 
 int	db_active = 0;
-db_regs_t	ddb_regs;
 
-static void kdbprinttrap(int, int);
+static void kdbprinttrap __P((int, int));
 
 /*
  * Received keyboard interrupt sequence.
  */
 void
 kdb_kintr(regs)
-	register db_regs_t *regs;
+	register struct mc68020_saved_state *regs;
 {
 	if (db_active == 0 && (boothowto & RB_KDB)) {
 		printf("\n\nkernel: keyboard interrupt\n");
@@ -75,7 +73,7 @@ kdb_kintr(regs)
 int
 kdb_trap(type, regs)
 	int	type;
-	register db_regs_t *regs;
+	register struct mc68020_saved_state *regs;
 {
 
 	switch (type) {
@@ -86,9 +84,6 @@ kdb_trap(type, regs)
 	case -1:
 		break;
 	default:
-		if (!db_panic)
-			return (0);
-
 		kdbprinttrap(type, 0);
 		if (db_recover != 0) {
 			/* This will longjmp back to db_command_loop */
@@ -125,7 +120,7 @@ kdb_trap(type, regs)
 	 * But lock out interrupts to prevent TRACE_KDB from setting the
 	 * trace bit in the current SR (and trapping while exiting KDB).
 	 */
-	(void) splhigh();
+	(void) spl7();
 
 	/*
 	 * Tell caller "We HAVE handled the trap."
@@ -155,6 +150,6 @@ kdbprinttrap(type, code)
 void
 Debugger()
 {
-	__asm ("trap #15");
+	asm ("trap #15");
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmes.c,v 1.14 2005/11/24 22:43:16 miod Exp $ */
+/*	$OpenBSD: vmes.c,v 1.4 1996/06/11 10:15:34 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -12,6 +12,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -26,16 +32,14 @@
  */
 
 #include <sys/param.h>
+#include <sys/conf.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-
 #include <machine/autoconf.h>
-#include <machine/conf.h>
 #include <machine/cpu.h>
-
 #include <mvme68k/dev/vme.h>
 
 /*
@@ -44,17 +48,20 @@
  * functions will decide how many address bits are relevant.
  */
 
-void vmesattach(struct device *, struct device *, void *);
-int  vmesmatch(struct device *, void *, void *);
+void vmesattach __P((struct device *, struct device *, void *));
+int  vmesmatch __P((struct device *, void *, void *));
 
-int vmesscan(struct device *, void *, void *);
+struct vmessoftc {
+	struct device		sc_dev;
+	struct vmesoftc		*sc_vme;
+};
 
 struct cfattach vmes_ca = {
 	sizeof(struct vmessoftc), vmesmatch, vmesattach
 };
 
 struct cfdriver vmes_cd = {
-	NULL, "vmes", DV_DULL
+	NULL, "vmes", DV_DULL, 0
 };
 
 int
@@ -89,10 +96,9 @@ vmesattach(parent, self, args)
 
 /*ARGSUSED*/
 int
-vmesopen(dev, flag, mode, p)
+vmesopen(dev, flag, mode)
 	dev_t dev;
 	int flag, mode;
-	struct proc *p;
 {
 	if (minor(dev) >= vmes_cd.cd_ndevs ||
 	    vmes_cd.cd_devs[minor(dev)] == NULL)
@@ -102,10 +108,9 @@ vmesopen(dev, flag, mode, p)
 
 /*ARGSUSED*/
 int
-vmesclose(dev, flag, mode, p)
+vmesclose(dev, flag, mode)
 	dev_t dev;
 	int flag, mode;
-	struct proc *p;
 {
 
 	return (0);
@@ -114,12 +119,13 @@ vmesclose(dev, flag, mode, p)
 /*ARGSUSED*/
 int
 vmesioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	u_long cmd;
+	dev_t   dev;
 	caddr_t data;
-	int flag;
+	int     cmd, flag;
 	struct proc *p;
 {
+	int unit = minor(dev);
+	struct vmessoftc *sc = (struct vmessoftc *) vmes_cd.cd_devs[unit];
 	int error = 0;
 
 	switch (cmd) {
@@ -154,18 +160,19 @@ vmeswrite(dev, uio, flags)
 	return (vmerw(sc->sc_vme, uio, flags, BUS_VMES));
 }
 
-paddr_t
+int
 vmesmmap(dev, off, prot)
 	dev_t dev;
-	off_t off;
+	int off;
 	int prot;
 {
 	int unit = minor(dev);
 	struct vmessoftc *sc = (struct vmessoftc *) vmes_cd.cd_devs[unit];
-	paddr_t pa;
+	void * pa;
 
-	pa = vmepmap(sc->sc_vme, (vaddr_t)off, NBPG, BUS_VMES);
-	if (pa == 0)
+	pa = vmepmap(sc->sc_vme, (void *)off, NBPG, BUS_VMES);
+	printf("vmes %x pa %x\n", off, pa);
+	if (pa == NULL)
 		return (-1);
-	return (atop(pa));
+	return (m68k_btop(pa));
 }

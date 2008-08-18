@@ -1,4 +1,4 @@
-/*	$OpenBSD: ultrix_fs.c,v 1.15 2007/10/30 12:09:22 gilles Exp $	*/
+/*	$OpenBSD: ultrix_fs.c,v 1.3 1996/04/21 22:18:45 deraadt Exp $	*/
 /*	$NetBSD: ultrix_fs.c,v 1.4 1996/04/07 17:23:06 jonathan Exp $	*/
 
 /*
@@ -45,7 +45,7 @@
 #include <sys/syscallargs.h>
 #include <compat/ultrix/ultrix_syscallargs.h>
 
-#include <uvm/uvm_extern.h>
+#include <vm/vm.h>
 
 #define	ULTRIX_MAXPATHLEN	1024
 
@@ -59,7 +59,7 @@
 /*
  * Ultrix file system data structure, as modified by
  * Ultrix getmntent(). This  structure is padded to 2560 bytes, for
- * compatibility with the size the Ultrix kernel and user apps expect.
+ * compatiblity with the size the Ultrix kernel and user apps expect.
  */
 struct ultrix_fs_data {
 	u_int32_t	ufsd_flags;	/* how mounted */
@@ -132,7 +132,7 @@ struct ultrix_getmnt_args {
 #define ULTRIX_NM_WSIZE    0x0004  /* set write size */
 #define ULTRIX_NM_RSIZE    0x0008  /* set read size */
 #define ULTRIX_NM_TIMEO    0x0010  /* set initial timeout */
-#define ULTRIX_NM_RETRANS  0x0020  /* set number of request retries */
+#define ULTRIX_NM_RETRANS  0x0020  /* set number of request retrys */
 #define ULTRIX_NM_HOSTNAME 0x0040  /* set hostname for error printf */
 #define ULTRIX_NM_PGTHRESH 0x0080  /* set page threshold for exec */
 #define ULTRIX_NM_INT      0x0100  /* allow hard mount keyboard interrupts */
@@ -179,9 +179,8 @@ make_ultrix_mntent(sp, tem)
 	tem->ufsd_uid = 0;			/* XXX kept where ?*/
 	tem->ufsd_dev = 0;			/* ?? */
 	tem->ufsd_exroot  = 0;			/* ?? */
-	strlcpy(tem->ufsd_path, sp->f_mntonname, sizeof(tem->ufsd_path));
-	strlcpy(tem->ufsd_devname, sp->f_mntfromname,
-	    sizeof(tem->ufsd_devname));
+	strncpy(tem->ufsd_path, sp->f_mntonname, ULTRIX_MAXPATHLEN);
+	strncpy(tem->ufsd_devname, sp->f_mntfromname, ULTRIX_MAXPATHLEN);
 #if 0
 	/* In NetBSD-1.1, filesystem type is unused and always 0 */
 	printf("mntent: %s type %d\n", tem->ufsd_devname, tem->ufsd_fstype);
@@ -223,7 +222,7 @@ ultrix_sys_getmnt(p, v, retval)
 		 * Only get info on mountpoints that matches the path
 		 * provided.
 		 */
-		path = malloc(MAXPATHLEN, M_TEMP, M_WAITOK);
+		MALLOC(path, char *, MAXPATHLEN, M_TEMP, M_WAITOK);
 		if ((error = copyinstr(SCARG(uap, path), path,
 				       MAXPATHLEN, NULL)) != 0)
 			goto bad;
@@ -237,15 +236,15 @@ ultrix_sys_getmnt(p, v, retval)
 		if ((error = copyin((caddr_t)SCARG(uap, start), &start,
 				    sizeof(*SCARG(uap, start))))  != 0)
 			goto bad;
-		for (skip = start, mp = CIRCLEQ_FIRST(&mountlist);
-		    mp != CIRCLEQ_END(&mountlist) && skip-- > 0; mp = nmp)
-			nmp = CIRCLEQ_NEXT(mp, mnt_list);
+		for (skip = start, mp = mountlist.cqh_first;
+		    mp != (void*)&mountlist && skip-- > 0; mp = nmp)
+			nmp = mp->mnt_list.cqe_next;
 	}
 
-	for (count = 0, mp = CIRCLEQ_FIRST(&mountlist);
-	    mp != CIRCLEQ_END(&mountlist) && count < maxcount; mp = nmp) {
-		nmp = CIRCLEQ_NEXT(mp, mnt_list);
-		if (sfsp != NULL) {
+	for (count = 0, mp = mountlist.cqh_first;
+	    mp != (void*)&mountlist && count < maxcount; mp = nmp) {
+		nmp = mp->mnt_list.cqe_next;
+		if (sfsp != NULL && (mp->mnt_flag & MNT_MLOCK) == 0) {
 			struct ultrix_fs_data tem;
 			sp = &mp->mnt_stat;
 
@@ -279,7 +278,7 @@ ultrix_sys_getmnt(p, v, retval)
 
 bad:
 	if (path)
-		free(path, M_TEMP);
+		FREE(path, M_TEMP);
 	return (error);
 }
 
@@ -332,11 +331,13 @@ ultrix_sys_mount(p, v, retval)
 
 	int error;
 	int otype = SCARG(uap, type);
+	extern char sigcode[], esigcode[];
 	char fsname[MFSNAMELEN];
 	char * fstype;
 	struct sys_mount_args nuap;
-	caddr_t sg = stackgap_init(p->p_emul);
-	caddr_t usp = stackgap_alloc(&sg, 1024 /* XXX */);
+
+#define	szsigcode	(esigcode - sigcode)
+	caddr_t usp = (caddr_t)ALIGN(PS_STRINGS - szsigcode - STACKGAPLEN);
 
 	bzero(&nuap, sizeof(nuap));
 	SCARG(&nuap, flags) = 0;
@@ -359,7 +360,7 @@ ultrix_sys_mount(p, v, retval)
 
 	/* Copy string-ified version of mount type back out to user space */
 	SCARG(&nuap, type) = (char *)usp;
-	if ((error = copyout(fstype, (void *)SCARG(&nuap, type),
+	if ((error = copyout(fstype, SCARG(&nuap, type),
 			    strlen(fstype)+1)) != 0) {
 		return (error);
 	}
@@ -375,7 +376,7 @@ ultrix_sys_mount(p, v, retval)
 		struct ufs_args ua;
 
 		ua.fspec = SCARG(uap, special);
-		bzero(&ua.export_info, sizeof(ua.export_info));
+		bzero(&ua.export, sizeof(ua.export));
 		SCARG(&nuap, data) = usp;
 	
 		if ((error = copyout(&ua, SCARG(&nuap, data),
@@ -389,7 +390,7 @@ ultrix_sys_mount(p, v, retval)
 		 */
 		fsname[0] = 0;
 		if ((error = copyinstr((caddr_t)SCARG(&nuap, path), fsname,
-				      sizeof fsname, (u_int *)0)) != 0)
+				      sizeof fsname, (u_int*)0)) != 0)
 			return(error);
 		if (strcmp(fsname, "/") == 0) {
 			SCARG(&nuap, flags) |= MNT_UPDATE;
@@ -430,7 +431,7 @@ ultrix_sys_mount(p, v, retval)
 		na.proto = IPPROTO_UDP;
 		na.fh = una.fh;
 		na.fhsize = NFSX_V2FH;
-		na.flags = /*una.flags;*/ NFSMNT_NOCONN;
+		na.flags = /*una.flags;*/ NFSMNT_NOCONN | NFSMNT_RESVPORT;
 		na.wsize = una.wsize;
 		na.rsize = una.rsize;
 		na.timeo = una.timeo;

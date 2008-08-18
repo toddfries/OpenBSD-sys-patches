@@ -1,5 +1,5 @@
-/*	$OpenBSD: cd9660_node.c,v 1.20 2007/10/29 13:02:19 chl Exp $	*/
-/*	$NetBSD: cd9660_node.c,v 1.17 1997/05/05 07:13:57 mycroft Exp $	*/
+/*	$OpenBSD: cd9660_node.c,v 1.2 1996/02/29 10:12:19 niklas Exp $	*/
+/*	$NetBSD: cd9660_node.c,v 1.15 1996/02/09 21:31:58 christos Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1994
@@ -18,7 +18,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -50,7 +54,6 @@
 #include <sys/stat.h>
 
 #include <isofs/cd9660/iso.h>
-#include <isofs/cd9660/cd9660_extern.h>
 #include <isofs/cd9660/cd9660_node.h>
 #include <isofs/cd9660/iso_rrip.h>
 
@@ -60,7 +63,6 @@
 struct iso_node **isohashtbl;
 u_long isohash;
 #define	INOHASH(device, inum)	(((device) + ((inum)>>12)) & isohash)
-struct simplelock cd9660_ihash_slock;
 
 #ifdef ISODEVMAP
 struct iso_node **idvhashtbl;
@@ -68,24 +70,21 @@ u_long idvhash;
 #define	DNOHASH(device, inum)	(((device) + ((inum)>>12)) & idvhash)
 #endif
 
-extern int prtactive;	/* 1 => print out reclaim of active vnodes */
+int prtactive;	/* 1 => print out reclaim of active vnodes */
 
-static u_int cd9660_chars2ui(u_char *, int);
+static u_int cd9660_chars2ui __P((u_char *, int));
 
 /*
  * Initialize hash links for inodes and dnodes.
  */
-int
-cd9660_init(vfsp)
-	struct vfsconf *vfsp;
+void
+cd9660_init()
 {
 
-	isohashtbl = hashinit(desiredvnodes, M_ISOFSMNT, M_WAITOK, &isohash);
-	simple_lock_init(&cd9660_ihash_slock);
+	isohashtbl = hashinit(desiredvnodes, M_ISOFSMNT, &isohash);
 #ifdef ISODEVMAP
-	idvhashtbl = hashinit(desiredvnodes / 8, M_ISOFSMNT, M_WAITOK, &idvhash);
+	idvhashtbl = hashinit(desiredvnodes / 8, M_ISOFSMNT, &idvhash);
 #endif
-	return (0);
 }
 
 #ifdef ISODEVMAP
@@ -106,12 +105,12 @@ iso_dmap(device, inum, create)
 			return (NULL);
 		if (inum == dp->i_number && device == dp->i_dev)
 			return (dp);
-	}
 
 	if (!create)
 		return (NULL);
 
-	dp = malloc(sizeof(struct iso_dnode), M_CACHE, M_WAITOK);
+	MALLOC(dp, struct iso_dnode *, sizeof(struct iso_dnode), M_CACHE,
+	       M_WAITOK);
 	dp->i_dev = dev;
 	dp->i_number = ino;
 
@@ -131,13 +130,13 @@ iso_dunmap(device)
 	struct iso_dnode **dpp, *dp, *dq;
 	
 	for (dpp = idvhashtbl; dpp <= idvhashtbl + idvhash; dpp++) {
-		for (dp = *dpp; dp != NULL; dp = dq) {
+		for (dp = *dpp; dp != NULL; dp = dq)
 			dq = dp->d_next;
 			if (device == dp->i_dev) {
 				if (dq)
 					dq->d_prev = dp->d_prev;
 				*dp->d_prev = dq;
-				free(dp, M_CACHE);
+				FREE(dp, M_CACHE);
 			}
 		}
 	}
@@ -149,57 +148,54 @@ iso_dunmap(device)
  * to it. If it is in core, but locked, wait for it.
  */
 struct vnode *
-cd9660_ihashget(dev, inum)
-	dev_t dev;
+cd9660_ihashget(device, inum)
+	dev_t device;
 	ino_t inum;
 {
-	struct proc *p = curproc;               /* XXX */
-	struct iso_node *ip;
+	register struct iso_node *ip;
 	struct vnode *vp;
 
-loop:
-       simple_lock(&cd9660_ihash_slock);
-       for (ip = isohashtbl[INOHASH(dev, inum)]; ip; ip = ip->i_next) {
-               if (inum == ip->i_number && dev == ip->i_dev) {
-                       vp = ITOV(ip);
-                       simple_unlock(&cd9660_ihash_slock);
-                       if (vget(vp, LK_EXCLUSIVE, p))
-                               goto loop;
-                       return (vp);
-	       }
-       }
-       simple_unlock(&cd9660_ihash_slock);
-       return (NULL);
+	for (;;)
+		for (ip = isohashtbl[INOHASH(device, inum)];; ip = ip->i_next) {
+			if (ip == NULL)
+				return (NULL);
+			if (inum == ip->i_number && device == ip->i_dev) {
+				if (ip->i_flag & IN_LOCKED) {
+					ip->i_flag |= IN_WANTED;
+					sleep(ip, PINOD);
+					break;
+				}
+				vp = ITOV(ip);
+				if (!vget(vp, 1))
+					return (vp);
+				break;
+			}
+		}
+	/* NOTREACHED */
 }
 
 /*
  * Insert the inode into the hash table, and return it locked.
  */
-int
+void
 cd9660_ihashins(ip)
 	struct iso_node *ip;
 {
 	struct iso_node **ipp, *iq;
 
-	simple_lock(&cd9660_ihash_slock);
 	ipp = &isohashtbl[INOHASH(ip->i_dev, ip->i_number)];
-
-	for (iq = *ipp; iq; iq = iq->i_next) {
-		if (iq->i_dev == ip->i_dev &&
-		    iq->i_number == ip->i_number)
-			return (EEXIST);
-	}
-			      
 	if ((iq = *ipp) != NULL)
 		iq->i_prev = &ip->i_next;
 	ip->i_next = iq;
 	ip->i_prev = ipp;
 	*ipp = ip;
-	simple_unlock(&cd9660_ihash_slock);
-
-	lockmgr(&ip->i_lock, LK_EXCLUSIVE, NULL);
-
-	return (0);
+	if (ip->i_flag & IN_LOCKED)
+		panic("cd9660_ihashins: already locked");
+	if (curproc)
+		ip->i_lockholder = curproc->p_pid;
+	else
+		ip->i_lockholder = -1;
+	ip->i_flag |= IN_LOCKED;
 }
 
 /*
@@ -211,10 +207,6 @@ cd9660_ihashrem(ip)
 {
 	register struct iso_node *iq;
 
-	if (ip->i_prev == NULL)
-		return;
-	
-	simple_lock(&cd9660_ihash_slock);
 	if ((iq = ip->i_next) != NULL)
 		iq->i_prev = ip->i_prev;
 	*ip->i_prev = iq;
@@ -222,7 +214,6 @@ cd9660_ihashrem(ip)
 	ip->i_next = NULL;
 	ip->i_prev = NULL;
 #endif
-	simple_unlock(&cd9660_ihash_slock);
 }
 
 /*
@@ -233,27 +224,24 @@ int
 cd9660_inactive(v)
 	void *v;
 {
-	struct vop_inactive_args *ap = v;
+	struct vop_inactive_args /* {
+		struct vnode *a_vp;
+	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
-	struct proc *p = ap->a_p;
 	register struct iso_node *ip = VTOI(vp);
 	int error = 0;
-
-#ifdef DIAGNOSTIC
+	
 	if (prtactive && vp->v_usecount != 0)
 		vprint("cd9660_inactive: pushing active", vp);
-#endif
 	
 	ip->i_flag = 0;
-	VOP_UNLOCK(vp, 0, p);
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	if (ip->inode.iso_mode == 0)
-		vrecycle(vp, p);
-
-	return (error);
+	if (vp->v_usecount == 0 && ip->inode.iso_mode == 0)
+		vgone(vp);
+	return error;
 }
 
 /*
@@ -263,15 +251,14 @@ int
 cd9660_reclaim(v)
 	void *v;
 {
-	struct vop_reclaim_args *ap = v;
+	struct vop_reclaim_args /* {
+		struct vnode *a_vp;
+	} */ *ap = v;
 	register struct vnode *vp = ap->a_vp;
 	register struct iso_node *ip = VTOI(vp);
-
-#ifdef DIAGNOSTIC
+	
 	if (prtactive && vp->v_usecount != 0)
 		vprint("cd9660_reclaim: pushing active", vp);
-#endif
-
 	/*
 	 * Remove the inode from its hash chain.
 	 */
@@ -284,7 +271,7 @@ cd9660_reclaim(v)
 		vrele(ip->i_devvp);
 		ip->i_devvp = 0;
 	}
-	free(vp->v_data, M_ISOFSNODE);
+	FREE(vp->v_data, M_ISOFSNODE);
 	vp->v_data = NULL;
 	return (0);
 }
@@ -317,7 +304,7 @@ cd9660_defattr(isodir, inop, bp)
 	if (!bp
 	    && ((imp = inop->i_mnt)->im_flags & ISOFSMNT_EXTATT)
 	    && (off = isonum_711(isodir->ext_attr_length))) {
-		cd9660_bufatoff(inop, (off_t)-(off << imp->im_bshift), NULL,
+		VOP_BLKATOFF(ITOV(inop), (off_t)-(off << imp->im_bshift), NULL,
 			     &bp2);
 		bp = bp2;
 	}
@@ -325,26 +312,25 @@ cd9660_defattr(isodir, inop, bp)
 		ap = (struct iso_extended_attributes *)bp->b_data;
 		
 		if (isonum_711(ap->version) == 1) {
-			if (!(ap->perm[1]&0x10))
-				inop->inode.iso_mode |= S_IRUSR;
-			if (!(ap->perm[1]&0x40))
-				inop->inode.iso_mode |= S_IXUSR;
-			if (!(ap->perm[0]&0x01))
-				inop->inode.iso_mode |= S_IRGRP;
-			if (!(ap->perm[0]&0x04))
-				inop->inode.iso_mode |= S_IXGRP;
-			if (!(ap->perm[0]&0x10))
-				inop->inode.iso_mode |= S_IROTH;
 			if (!(ap->perm[0]&0x40))
-				inop->inode.iso_mode |= S_IXOTH;
+				inop->inode.iso_mode |= VEXEC >> 6;
+			if (!(ap->perm[0]&0x10))
+				inop->inode.iso_mode |= VREAD >> 6;
+			if (!(ap->perm[0]&4))
+				inop->inode.iso_mode |= VEXEC >> 3;
+			if (!(ap->perm[0]&1))
+				inop->inode.iso_mode |= VREAD >> 3;
+			if (!(ap->perm[1]&0x40))
+				inop->inode.iso_mode |= VEXEC;
+			if (!(ap->perm[1]&0x10))
+				inop->inode.iso_mode |= VREAD;
 			inop->inode.iso_uid = isonum_723(ap->owner); /* what about 0? */
 			inop->inode.iso_gid = isonum_723(ap->group); /* what about 0? */
 		} else
 			ap = NULL;
 	}
 	if (!ap) {
-		inop->inode.iso_mode |=
-		    S_IRUSR|S_IXUSR|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
+		inop->inode.iso_mode |= VREAD|VEXEC|(VREAD|VEXEC)>>3|(VREAD|VEXEC)>>6;
 		inop->inode.iso_uid = (uid_t)0;
 		inop->inode.iso_gid = (gid_t)0;
 	}
@@ -369,7 +355,7 @@ cd9660_deftstamp(isodir,inop,bp)
 	if (!bp
 	    && ((imp = inop->i_mnt)->im_flags & ISOFSMNT_EXTATT)
 	    && (off = isonum_711(isodir->ext_attr_length))) {
-		cd9660_bufatoff(inop, (off_t)-(off << imp->im_bshift), NULL,
+		VOP_BLKATOFF(ITOV(inop), (off_t)-(off << imp->im_bshift), NULL,
 			     &bp2);
 		bp = bp2;
 	}
@@ -401,8 +387,7 @@ cd9660_tstamp_conv7(pi,pu)
 	struct timespec *pu;
 {
 	int crtime, days;
-	int y, m, d, hour, minute, second;
-	signed char tz;
+	int y, m, d, hour, minute, second, tz;
 	
 	y = pi[0] + 1900;
 	m = pi[1];
@@ -410,12 +395,12 @@ cd9660_tstamp_conv7(pi,pu)
 	hour = pi[3];
 	minute = pi[4];
 	second = pi[5];
-	tz = (signed char) pi[6];
+	tz = pi[6];
 	
 	if (y < 1970) {
 		pu->tv_sec  = 0;
 		pu->tv_nsec = 0;
-		return (0);
+		return 0;
 	} else {
 #ifdef	ORIGINAL
 		/* computes day number relative to Sept. 19th,1989 */
@@ -436,7 +421,7 @@ cd9660_tstamp_conv7(pi,pu)
 	}
 	pu->tv_sec  = crtime;
 	pu->tv_nsec = 0;
-	return (1);
+	return 1;
 }
 
 static u_int
@@ -450,7 +435,7 @@ cd9660_chars2ui(begin,len)
 		rc *= 10;
 		rc += *begin++ - '0';
 	}
-	return (rc);
+	return rc;
 }
 
 int
@@ -481,7 +466,7 @@ cd9660_tstamp_conv17(pi,pu)
 	/* difference of GMT */
 	buf[6] = pi[16];
 	
-	return (cd9660_tstamp_conv7(buf,pu));
+	return cd9660_tstamp_conv7(buf,pu);
 }
 
 ino_t
@@ -491,7 +476,7 @@ isodirino(isodir, imp)
 {
 	ino_t ino;
 
-	ino = (isonum_733(isodir->extent) +
-	    isonum_711(isodir->ext_attr_length)) << imp->im_bshift;
+	ino = (isonum_733(isodir->extent) + isonum_711(isodir->ext_attr_length))
+	      << imp->im_bshift;
 	return (ino);
 }

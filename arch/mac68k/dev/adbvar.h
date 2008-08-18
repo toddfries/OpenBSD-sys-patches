@@ -1,7 +1,7 @@
-/*	$OpenBSD: adbvar.h,v 1.13 2006/01/22 15:25:30 miod Exp $	*/
-/*	$NetBSD: adbvar.h,v 1.22 2005/01/15 16:00:59 chs Exp $	*/
+/*	$OpenBSD: adbvar.h,v 1.3 1996/05/26 18:35:17 briggs Exp $	*/
+/*	$NetBSD: adbvar.h,v 1.3 1996/05/05 06:16:24 briggs Exp $	*/
 
-/*
+/*-
  * Copyright (C) 1994	Bradley A. Grantham
  * All rights reserved.
  *
@@ -31,16 +31,36 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-extern int adbHardware;
+#define ADB_MAXTRACE	(NBPG / sizeof(int) - 1)
+extern int adb_traceq[ADB_MAXTRACE];
+extern int adb_traceq_tail;
+extern int adb_traceq_len;
 
-/* types of adb hardware that we (will eventually) support */
-#define ADB_HW_UNKNOWN		0	/* don't know */
-#define ADB_HW_II		1	/* Mac II series */
-#define ADB_HW_IISI		2	/* Mac IIsi series */
-#define ADB_HW_PB		3	/* PowerBook series */
-#define ADB_HW_CUDA		4	/* Machines with a Cuda chip */
-#define	ADB_HW_IOP		5	/* Machines with an IOP */
+typedef struct adb_trace_xlate_s {
+	int     params;
+	char   *string;
+}       adb_trace_xlate_t;
 
-int	adb_poweroff(void);
-int	adb_read_date_time(unsigned long *);
-int	adb_set_date_time(unsigned long);
+extern adb_trace_xlate_t adb_trace_xlations[];
+
+/* adb.c */
+void    adb_asmcomplete __P((void));
+void	adb_enqevent __P((adb_event_t *event));
+void	adb_handoff __P((adb_event_t *event));
+void	adb_autorepeat __P((void *keyp));
+void	adb_dokeyupdown __P((adb_event_t *event));
+void	adb_keymaybemouse __P((adb_event_t *event));
+void	adb_processevent __P((adb_event_t *event));
+int	adbopen __P((dev_t dev, int flag, int mode, struct proc *p));
+int	adbclose __P((dev_t dev, int flag, int mode, struct proc *p));
+int	adbread __P((dev_t dev, struct uio *uio, int flag));
+int	adbwrite __P((dev_t dev, struct uio *uio, int flag));
+int	adbioctl __P((dev_t , int , caddr_t , int , struct proc *));
+int	adbselect __P((dev_t dev, int rw, struct proc *p));
+
+/* adbsysadm.s */
+void	extdms_complete __P((void));
+
+/* adbsys.c */
+void	adb_complete __P((caddr_t buffer, caddr_t data_area, int adb_command));
+void	extdms_init __P((void));

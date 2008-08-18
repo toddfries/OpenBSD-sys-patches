@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci_machdep.c,v 1.17 2007/11/03 10:09:03 martin Exp $	*/
-/*	$NetBSD: pci_machdep.c,v 1.7 1996/11/19 04:57:32 cgd Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.4 1996/07/29 23:00:43 niklas Exp $	*/
+/*	$NetBSD: pci_machdep.c,v 1.5 1996/04/12 06:08:49 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -38,41 +38,33 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/device.h>
-#include <uvm/uvm_extern.h>
-#include <machine/cpu.h>
-#include <sys/sysctl.h>
+#include <vm/vm.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#include "vga.h"
-#if NVGA_PCI
-#include <dev/pci/vga_pcivar.h>
+#include "pcivga.h"
+#if NPCIVGA
+#include <alpha/pci/pcivgavar.h>
 #endif
 
 #include "tga.h"
 #if NTGA
-#include <dev/pci/tgavar.h>
+#include <alpha/pci/tgavar.h>
 #endif
 
-struct alpha_pci_chipset *alpha_pci_chipset;
-
 void
-pci_display_console(iot, memt, pc, bus, device, function)
-	bus_space_tag_t iot, memt;
+pci_display_console(bc, pc, bus, device, function)
+	bus_chipset_tag_t bc;
 	pci_chipset_tag_t pc;
 	int bus, device, function;
 {
 	pcitag_t tag;
 	pcireg_t id, class;
-	int match;
-#if NVGA_PCI || NTGA
-	int nmatch;
-#endif
-	int (*fn)(bus_space_tag_t, bus_space_tag_t, pci_chipset_tag_t,
-	    int, int, int);
+	int match, nmatch;
+	void (*fn) __P((bus_chipset_tag_t, pci_chipset_tag_t, int, int, int));
 
 	tag = pci_make_tag(pc, bus, device, function);
 	id = pci_conf_read(pc, tag, PCI_ID_REG);
@@ -84,58 +76,24 @@ pci_display_console(iot, memt, pc, bus, device, function)
 	match = 0;
 	fn = NULL;
 
-#if NVGA_PCI
-	nmatch = DEVICE_IS_VGA_PCI(class);
+#if NPCIVGA
+	nmatch = DEVICE_IS_PCIVGA(class, id);
 	if (nmatch > match) {
 		match = nmatch;
-		fn = vga_pci_cnattach;
+		fn = pcivga_console;
 	}
 #endif
 #if NTGA
 	nmatch = DEVICE_IS_TGA(class, id);
 	if (nmatch > match) {
 		match = nmatch;
-		fn = tga_cnattach;
+		fn = tga_console;
 	}
 #endif
 
 	if (fn != NULL)
-		(*fn)(iot, memt, pc, bus, device, function);
+		(*fn)(bc, pc, bus, device, function);
 	else
 		panic("pci_display_console: unconfigured device at %d/%d/%d",
 		    bus, device, function);
-}
-
-int
-alpha_sysctl_chipset(int *name, u_int namelen, char *where, size_t *sizep)
-{
-	if (namelen != 1)
-		return (ENOTDIR);
-
-	if (alpha_pci_chipset == NULL)
-		return (EOPNOTSUPP);
-
-	switch (name[0]) {
-	case CPU_CHIPSET_TYPE:
-		return (sysctl_rdstring(where, sizep, NULL,
-		    alpha_pci_chipset->pc_name));
-	case CPU_CHIPSET_BWX:
-		return (sysctl_rdint(where, sizep, NULL,
-		    alpha_pci_chipset->pc_bwx));
-	case CPU_CHIPSET_MEM:
-		return (sysctl_rdquad(where, sizep, NULL,
-		    alpha_pci_chipset->pc_mem));
-	case CPU_CHIPSET_DENSE:
-		return (sysctl_rdquad(where, sizep, NULL,
-		    alpha_pci_chipset->pc_dense));
-	case CPU_CHIPSET_PORTS:
-		return (sysctl_rdquad(where, sizep, NULL,
-		    alpha_pci_chipset->pc_ports));
-	case CPU_CHIPSET_HAE_MASK:
-		return (sysctl_rdquad(where, sizep, NULL,
-		    alpha_pci_chipset->pc_hae_mask));
-	default:
-		return (EOPNOTSUPP);
-	}
-	/* NOTREACHED */
 }

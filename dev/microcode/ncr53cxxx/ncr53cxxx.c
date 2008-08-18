@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53cxxx.c,v 1.4 2003/04/06 18:54:20 ho Exp $	*/
+/*	$OpenBSD: ncr53cxxx.c,v 1.3 1996/08/31 10:49:16 pefo Exp $	*/
 
 /*
  * Copyright (c) 1995 Michael L. Hitch
@@ -393,7 +393,6 @@ void parse ()
 	char c;
 	char string[64];
 	char *s;
-	size_t len; 
 
 	ntokens = tokenix = 0;
 	while (1) {
@@ -415,9 +414,8 @@ void parse ()
 		    	    	*s++ = *p++;
 		    	}
 		    	*s = 0;
-			len = strlen (string) + 1; 
-		    	tokens[ntokens].name = malloc (len);
-		    	strlcpy (tokens[ntokens].name, string, len);
+		    	tokens[ntokens].name = malloc (strlen (string) + 1);
+		    	strcpy (tokens[ntokens].name, string);
 		    	tokens[ntokens].type = 0;
 		}
 		else {
@@ -464,7 +462,6 @@ void define_symbol (char *name, unsigned long value, short type, short flags)
 {
 	int	i;
 	struct patchlist *p;
-	size_t	len;
 
 	for (i = 0; i < nsymbols; ++i) {
 		if (symbols[i].type == type && strcmp (symbols[i].name, name) == 0) {
@@ -495,9 +492,8 @@ void define_symbol (char *name, unsigned long value, short type, short flags)
 	symbols[nsymbols].flags = flags;
 	symbols[nsymbols].value = value;
 	symbols[nsymbols].patchlist = NULL;
-	len = strlen (name) + 1; 
-	symbols[nsymbols].name = malloc (len);
-	strlcpy (symbols[nsymbols].name, name, len);
+	symbols[nsymbols].name = malloc (strlen (name) + 1);
+	strcpy (symbols[nsymbols].name, name);
 	++nsymbols;
 }
 
@@ -528,11 +524,9 @@ void close_script ()
 
 void new_script (char *name)
 {
-	size_t len = strlen (name) + 1;
-
 	close_script ();
-	script_name = malloc (len);
-	strlcpy (script_name, name, len);
+	script_name = malloc (strlen (name) + 1);
+	strcpy (script_name, name);
 }
 
 int	reserved (char *string, int t)
@@ -658,7 +652,6 @@ int	lookup (char *name)
 {
 	int	i;
 	struct patchlist *p;
-	size_t	len;
 
 	for (i = 0; i < nsymbols; ++i) {
 		if (strcmp (name, symbols[i].name) == 0) {
@@ -685,9 +678,8 @@ int	lookup (char *name)
 	symbols[nsymbols].patchlist = p;
 	p->next = NULL;
 	p->offset = dsps + 4;
-	len = strlen (name) + 1;
-	symbols[nsymbols].name = malloc (len);
-	strlcpy (symbols[nsymbols].name, name, len);
+	symbols[nsymbols].name = malloc (strlen (name) + 1);
+	strcpy (symbols[nsymbols].name, name);
 	++nsymbols;
 	return (0);
 }
@@ -1146,15 +1138,14 @@ char *	makefn (base, sub)
 	char *sub;
 {
 	char *fn;
-	size_t len = strlen (base) + strlen (sub) + 2; 
 
-	fn = malloc (len);
-	strlcpy (fn, base, len);
+	fn = malloc (strlen (base) + strlen (sub) + 2);
+	strcpy (fn, base);
 	base = strrchr(fn, '.');
 	if (base)
 		*base = 0;
-	strlcat (fn, ".", len);
-	strlcat (fn, sub, len);
+	strcat (fn, ".");
+	strcat (fn, sub);
 	return (fn);
 }
 

@@ -1,4 +1,3 @@
-/*	$OpenBSD: vfs_init.c,v 1.23 2008/05/16 17:45:37 thib Exp $	*/
 /*	$NetBSD: vfs_init.c,v 1.6 1996/02/09 19:00:58 christos Exp $	*/
 
 /*
@@ -18,7 +17,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,6 +40,7 @@
  *	@(#)vfs_init.c	8.3 (Berkeley) 1/4/94
  */
 
+
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/time.h>
@@ -47,17 +51,21 @@
 #include <sys/buf.h>
 #include <sys/errno.h>
 #include <sys/malloc.h>
-#include <sys/pool.h>
 #include <sys/systm.h>
 
-/* a list of lists of vnodeops defns */
+/*
+ * Sigh, such primitive tools are these...
+ */
+#if 0
+#define DODEBUG(A) A
+#else
+#define DODEBUG(A)
+#endif
+
 extern struct vnodeopv_desc *vfs_opv_descs[];
-
-/* and the operations they perform */
+				/* a list of lists of vnodeops defns */
 extern struct vnodeop_desc *vfs_op_descs[];
-
-struct pool namei_pool;
-
+				/* and the operations they perform */
 /*
  * This code doesn't work if the defn is **vnodop_defns with cc.
  * The problem is because of the compiler sometimes putting in an
@@ -66,7 +74,25 @@ struct pool namei_pool;
  */
 int vfs_opv_numops;
 
-typedef int (*PFI)(void *);
+typedef (*PFI) __P((void *));
+
+void vfs_opv_init __P((void));
+void vfs_opv_init_explicit __P((struct vnodeopv_desc *));
+void vfs_opv_init_default __P((struct vnodeopv_desc *));
+void vfs_op_init __P((void));
+
+/*
+ * A miscellaneous routine.
+ * A generic "default" routine that just returns an error.
+ */
+/*ARGSUSED*/
+int
+vn_default_error(v)
+	void *v;
+{
+
+	return (EOPNOTSUPP);
+}
 
 /*
  * vfs_init.c
@@ -90,26 +116,31 @@ typedef int (*PFI)(void *);
  * Also handle backwards compatibility.
  */
 void
-vfs_opv_init_explicit(struct vnodeopv_desc *vfs_opv_desc)
+vfs_opv_init_explicit(vfs_opv_desc)
+	struct vnodeopv_desc *vfs_opv_desc;
 {
-	int (**opv_desc_vector)(void *);
+	int (**opv_desc_vector) __P((void *));
 	struct vnodeopv_entry_desc *opve_descp;
 
 	opv_desc_vector = *(vfs_opv_desc->opv_desc_vector_p);
 
 	if (opv_desc_vector == NULL) {
 		/* XXX - shouldn't be M_VNODE */
-		opv_desc_vector = malloc(vfs_opv_numops * sizeof(PFI),
-		    M_VNODE, M_WAITOK|M_ZERO);
+		MALLOC(opv_desc_vector, PFI *,
+		    vfs_opv_numops * sizeof(PFI), M_VNODE, M_WAITOK);
+		bzero(opv_desc_vector, vfs_opv_numops * sizeof(PFI));
 		*(vfs_opv_desc->opv_desc_vector_p) = opv_desc_vector;
+		DODEBUG(printf("vector at %p allocated\n",
+		    opv_desc_vector_p));
 	}
 
 	for (opve_descp = vfs_opv_desc->opv_desc_ops;
-	    opve_descp->opve_op; opve_descp++) {
+	     opve_descp->opve_op;
+	     opve_descp++) {
 		/*
 		 * Sanity check:  is this operation listed
 		 * in the list of operations?  We check this
-		 * by seeing if its offset is zero.  Since
+		 * by seeing if its offest is zero.  Since
 		 * the default routine should always be listed
 		 * first, it should be the only one with a zero
 		 * offset.  Any other operation with a zero
@@ -139,10 +170,11 @@ vfs_opv_init_explicit(struct vnodeopv_desc *vfs_opv_desc)
 }
 
 void
-vfs_opv_init_default(struct vnodeopv_desc *vfs_opv_desc)
+vfs_opv_init_default(vfs_opv_desc)
+	struct vnodeopv_desc *vfs_opv_desc;
 {
 	int j;
-	int (**opv_desc_vector)(void *);
+	int (**opv_desc_vector) __P((void *));
 
 	opv_desc_vector = *(vfs_opv_desc->opv_desc_vector_p);
 
@@ -154,30 +186,18 @@ vfs_opv_init_default(struct vnodeopv_desc *vfs_opv_desc)
 
 	for (j = 0; j < vfs_opv_numops; j++)
 		if (opv_desc_vector[j] == NULL)
-			opv_desc_vector[j] =
+			opv_desc_vector[j] = 
 			    opv_desc_vector[VOFFSET(vop_default)];
 }
 
-/* Initialize known vnode operations vectors. */
 void
-vfs_op_init(void)
+vfs_opv_init()
 {
 	int i;
 
-	/* Set all vnode vectors to a well known value. */
-	for (i = 0; vfs_opv_descs[i]; i++)
-		*(vfs_opv_descs[i]->opv_desc_vector_p) = NULL;
-
 	/*
-	 * Figure out how many ops there are by counting the table,
-	 * and assign each its offset.
+	 * Allocate the dynamic vectors and fill them in.
 	 */
-	for (vfs_opv_numops = 0, i = 0; vfs_op_descs[i]; i++) {
-		vfs_op_descs[i]->vdesc_offset = vfs_opv_numops;
-		vfs_opv_numops++;
-	}
-
-	/* Allocate the dynamic vectors and fill them in. */
 	for (i = 0; vfs_opv_descs[i]; i++)
 		vfs_opv_init_explicit(vfs_opv_descs[i]);
 
@@ -187,22 +207,47 @@ vfs_op_init(void)
 	 */
 	for (i = 0; vfs_opv_descs[i]; i++)
 		vfs_opv_init_default(vfs_opv_descs[i]);
-
 }
 
+/*
+ * Initialize known vnode operations vectors.
+ */
+void
+vfs_op_init()
+{
+	int i;
+
+	DODEBUG(printf("Vnode_interface_init.\n"));
+	/*
+	 * Set all vnode vectors to a well known value.
+	 */
+	for (i = 0; vfs_opv_descs[i]; i++)
+		*(vfs_opv_descs[i]->opv_desc_vector_p) = NULL;
+	/*
+	 * Figure out how many ops there are by counting the table,
+	 * and assign each its offset.
+	 */
+	for (vfs_opv_numops = 0, i = 0; vfs_op_descs[i]; i++) {
+		vfs_op_descs[i]->vdesc_offset = vfs_opv_numops;
+		vfs_opv_numops++;
+	}
+	DODEBUG(printf ("vfs_opv_numops=%d\n", vfs_opv_numops));
+}
+
+/*
+ * Routines having to do with the management of the vnode table.
+ */
+extern struct vnodeops dead_vnodeops;
+extern struct vnodeops spec_vnodeops;
+struct vattr va_null;
 
 /*
  * Initialize the vnode structures and initialize each file system type.
  */
 void
-vfsinit(void)
+vfsinit()
 {
-	int i;
-	struct vfsconf *vfsconflist;
-	int vfsconflistlen;
-
-	pool_init(&namei_pool, MAXPATHLEN, 0, 0, 0, "namei",
-	    &pool_allocator_nointr);
+	struct vfsops **vfsp;
 
 	/*
 	 * Initialize the vnode table
@@ -216,16 +261,14 @@ vfsinit(void)
 	 * Build vnode operation vectors.
 	 */
 	vfs_op_init();
-
+	vfs_opv_init();   /* finish the job */
 	/*
-	 * Stop using vfsconf and maxvfsconf as a temporary storage,
-	 * set them to their correct values now.
+	 * Initialize each file system type.
 	 */
-	vfsconflist = vfsconf;
-	vfsconflistlen = maxvfsconf;
-	vfsconf = NULL;
-	maxvfsconf = 0;
-
-	for (i = 0; i < vfsconflistlen; i++)
-		vfs_register(&vfsconflist[i]);
+	vattr_null(&va_null);
+	for (vfsp = &vfssw[0]; vfsp < &vfssw[nvfssw]; vfsp++) {
+		if (*vfsp == NULL)
+			continue;
+		(*(*vfsp)->vfs_init)();
+	}
 }

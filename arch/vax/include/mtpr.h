@@ -1,5 +1,4 @@
-/*      $OpenBSD: mtpr.h,v 1.5 2000/04/26 03:08:42 bjc Exp $     */
-/*      $NetBSD: mtpr.h,v 1.12 1999/06/06 19:06:29 ragge Exp $     */
+/*      $NetBSD: mtpr.h,v 1.8 1996/03/07 23:23:59 ragge Exp $     */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -35,6 +34,8 @@
 
 #ifndef	_VAX_MTPR_H_
 #define	_VAX_MTPR_H_
+
+#include <machine/macros.h>
 
 /******************************************************************************
 
@@ -118,40 +119,6 @@
 #define PR_ESPA   78 /* EBOX Scratchpad Address (KA86) */
 #define PR_ESPD   79 /* EBOX Scratchpad Data (KA86) */
 
-#define	PR_RXCS1  80 /* Serial-Line Unit 1 Receive CSR (KA820) */
-#define	PR_RXDB1  81 /* Serial-Line Unit 1 Receive Data Buffer (KA820) */
-#define	PR_TXCS1  82 /* Serial-Line Unit 1 Transmit CSR (KA820) */
-#define	PR_TXDB1  83 /* Serial-Line Unit 1 Transmit Data Buffer (KA820) */
-#define	PR_RXCS2  84 /* Serial-Line Unit 2 Receive CSR (KA820) */
-#define	PR_RXDB2  85 /* Serial-Line Unit 2 Receive Data Buffer (KA820) */
-#define	PR_TXCS2  86 /* Serial-Line Unit 2 Transmit CSR (KA820) */
-#define	PR_TXDB2  87 /* Serial-Line Unit 2 Transmit Data Buffer (KA820) */
-#define	PR_RXCS3  88 /* Serial-Line Unit 3 Receive CSR (KA820) */
-#define	PR_RXDB3  89 /* Serial-Line Unit 3 Receive Data Buffer (KA820) */
-#define	PR_TXCS3  90 /* Serial-Line Unit 3 Transmit CSR (KA820) */
-#define	PR_TXDB3  91 /* Serial-Line Unit 3 Transmit Data Buffer (KA820) */
-#define	PR_RXCD	  92 /* Receive Console Data from another cpu (KA820) */
-#define	PR_CACHEX 93 /* Cache invalidate Register (KA820) */
-#define	PR_BINID  94 /* VAXBI node ID Register (KA820) */
-#define	PR_BISTOP 95 /* VAXBI Stop Register (KA820) */
-
-#define PR_BCBTS  113 /* Backup Cache Tag Store (KA670) */
-#define PR_BCP1TS 114 /* Primary Tag Store 1st half (KA670) */
-#define PR_BCP2TS 115 /* Primary Tag Store 2st half (KA670) */
-#define PR_BCRFR  116 /* Refresh Register (KA670) */
-#define PR_BCIDX  117 /* Index Register (KA670) */
-#define PR_BCSTS  118 /* Status (KA670) */
-#define PR_BCCTL  119 /* Control Register (KA670) */
-#define PR_BCERR  120 /* Error Address (KA670) */
-#define PR_BCFBTS 121 /* Flush backup tag store (KA670) */
-#define PR_BCFPTS 122 /* Flush primary tag store (KA670) */
-
-#define	PR_VINTSR 123 /* vector i/f error status (KA43/KA46) */
-#define PR_PCTAG  124 /* primary cache tag store (KA43/KA46) */
-#define PR_PCIDX  125 /* primary cache index (KA43/KA46) */
-#define PR_PCERR  126 /* primary cache error address (KA43/KA46) */
-#define PR_PCSTS  127 /* primary cache status (KA43/KA46) */
-
 /* Definitions for AST */
 #define	AST_NO	  4
 #define	AST_OK	  3
@@ -160,7 +127,7 @@
 
 #define mtpr(val,reg)                                   \
 {                                                       \
-        __asm__ __volatile ("mtpr %0,%1"                    \
+        asm __volatile ("mtpr %0,%1"                    \
                         : /* No output */               \
                         : "g" (val), "g" (reg));        \
 }
@@ -168,7 +135,7 @@
 #define mfpr(reg)                                       \
 ({                                                      \
         register int val;                               \
-        __asm__ __volatile ("mfpr %1,%0"                    \
+        asm __volatile ("mfpr %1,%0"                    \
                         : "=g" (val)                    \
                         : "g" (reg));                   \
         val;                                            \

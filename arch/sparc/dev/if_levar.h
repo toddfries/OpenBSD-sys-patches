@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_levar.h,v 1.6 2006/06/02 20:00:54 miod Exp $	*/
-/*	$NetBSD: if_levar.h,v 1.7 1997/04/04 20:29:23 pk Exp $	*/
+/*	$NetBSD: if_levar.h,v 1.5 1996/05/07 01:27:32 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1995 Charles M. Hannum.  All rights reserved.
@@ -17,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -40,15 +43,14 @@
  * Ethernet software status per interface.
  *
  * Each interface is referenced by a network interface structure,
- * ethercom.ec_if, which the routing code uses to locate the interface.
+ * arpcom.ac_if, which the routing code uses to locate the interface.
  * This structure contains the output queue for the interface, its address, ...
  */
 struct	le_softc {
 	struct	am7990_softc sc_am7990;	/* glue to MI code */
 
+	struct	sbusdev sc_sd;		/* sbus device */
 	struct	intrhand sc_ih;		/* interrupt vectoring */
 	struct	lereg1 *sc_r1;		/* LANCE registers */
 	struct	dma_softc *sc_dma;	/* pointer to my dma */
-	int	sc_lebufchild;		/* child of lebuffer */
-	u_long	sc_laddr;		/* LANCE DMA address */
 };

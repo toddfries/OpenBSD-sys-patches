@@ -1,4 +1,3 @@
-/*	$OpenBSD: pcb.h,v 1.5 2003/06/02 23:27:54 millert Exp $	*/
 /*	$NetBSD: pcb.h,v 1.4 1995/03/28 18:19:56 jtc Exp $ */
 
 /*
@@ -22,7 +21,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -40,9 +43,6 @@
  *
  *	@(#)pcb.h	8.1 (Berkeley) 6/11/93
  */
-
-#ifndef _SPARC_PCB_H_
-#define _SPARC_PCB_H_
 
 #include <machine/reg.h>
 
@@ -101,7 +101,7 @@ struct pcb {
 	int	pcb_winof;	/* number of window overflow traps */
 	int	pcb_winuf;	/* number of window underflow traps */
 #endif
-	u_int32_t pcb_wcookie;	/* StackGhost cookie (must be unsigned) */
+	int	pcb_pad;	/* pad to doubleword boundary */
 
 	/* the following MUST be aligned on a doubleword boundary */
 	struct	rwindow pcb_rw[PCB_MAXWIN];	/* saved windows */
@@ -114,13 +114,10 @@ struct pcb {
  * stack itself need not be dumped).
  */
 struct md_coredump {
-	struct trapframe	md_tf;
-	struct fpstate		md_fpstate;
-	u_int32_t		md_wcookie;
+	struct	trapframe md_tf;
+	struct	fpstate md_fpstate;
 };
 
 #ifdef _KERNEL
 extern struct pcb *cpcb;
 #endif /* _KERNEL */
-
-#endif

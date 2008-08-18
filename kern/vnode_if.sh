@@ -12,7 +12,11 @@ copyright="\
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,7 +33,7 @@ copyright="\
  * SUCH DAMAGE.
  */
 "
-SCRIPT_ID='$OpenBSD: vnode_if.sh,v 1.16 2007/12/12 16:24:49 thib Exp $'
+SCRIPT_ID='$OpenBSD: vnode_if.sh,v 1.3 1996/04/19 16:09:13 niklas Exp $'
 # SCRIPT_ID='$NetBSD: vnode_if.sh,v 1.9 1996/02/29 20:58:22 cgd Exp $'
 
 # Script to produce VFS front-end sugar.
@@ -104,27 +108,11 @@ awk_parser='
 # Middle lines of description
 {
 	argdir[argc] = $1; i=2;
-	if ($2 == "WILLRELE" ||
-	    $3 == "WILLRELE") {
+	if ($2 == "WILLRELE") {
 		willrele[argc] = 1;
-		i++;
-	} else if ($2 == "WILLUNLOCK" ||
-	    $3 == "WILLUNLOCK") {
-		willrele[argc] = 2;
-		i++;
-	} else if ($2 == "WILLPUT" ||
-	    $3 == "WILLPUT") {
-		willrele[argc] = 3;
 		i++;
 	} else
 		willrele[argc] = 0;
-
-	if ($2 == "SHOULDBELOCKED") {
-	   shouldbelocked[argc] = 1;
-	   i++;
-	} else
-	   shouldbelocked[argc] = 0;
-
 	argtype[argc] = $i; i++;
 	while (i < NF) {
 		argtype[argc] = argtype[argc]" "$i;
@@ -166,8 +154,6 @@ echo '
 extern struct vnodeop_desc vop_default_desc;
 '
 
-echo '#include "systm.h"'
-
 # Body stuff
 # This awk program needs toupper() so define it if necessary.
 sed -e "$sed_prep" $src | $awk "$toupper"'
@@ -181,7 +167,7 @@ function doit() {
 	printf("};\n");
 	printf("extern struct vnodeop_desc %s_desc;\n", name);
 	# Prototype it.
-	protoarg = sprintf("int %s(", toupper(name));
+	protoarg = sprintf("static __inline int %s __P((", toupper(name));
 	protolen = length(protoarg);
 	printf("%s", protoarg);
 	for (i=0; i<argc; i++) {
@@ -196,7 +182,24 @@ function doit() {
 		printf("%s", protoarg);
 		protolen += arglen;
 	}
-	printf(");\n");
+	printf("));\n");
+	# Define inline function.
+	printf("static __inline int %s(", toupper(name));
+	for (i=0; i<argc; i++) {
+		printf("%s", argname[i]);
+		if (i < (argc-1)) printf(", ");
+	}
+	printf(")\n");
+	for (i=0; i<argc; i++) {
+		printf("\t%s %s;\n", argtype[i], argname[i]);
+	}
+	printf("{\n\tstruct %s_args a;\n", name);
+	printf("\ta.a_desc = VDESC(%s);\n", name);
+	for (i=0; i<argc; i++) {
+		printf("\ta.a_%s = %s;\n", argname[i], argname[i]);
+	}
+	printf("\treturn (VCALL(%s%s, VOFFSET(%s), &a));\n}\n",
+		argname[0], arg0special, name);
 }
 BEGIN	{
 	arg0special="";
@@ -206,7 +209,6 @@ END	{
 	argc=1;
 	argtype[0]="struct buf *";
 	argname[0]="bp";
-	shouldbelocked[0] = 0;
 	arg0special="->b_vp";
 	name="vop_strategy";
 	doit();
@@ -239,12 +241,40 @@ struct vnodeop_desc vop_default_desc = {
 	0,
 	"default",
 	0,
+	NULL,
+	VDESC_NO_OFFSET,
+	VDESC_NO_OFFSET,
+	VDESC_NO_OFFSET,
+	VDESC_NO_OFFSET,
+	NULL,
 };
 '
 
 # Body stuff
 sed -e "$sed_prep" $src | $awk '
+function do_offset(typematch) {
+	for (i=0; i<argc; i++) {
+		if (argtype[i] == typematch) {
+			printf("\tVOPARG_OFFSETOF(struct %s_args, a_%s),\n",
+				name, argname[i]);
+			return i;
+		};
+	};
+	print "\tVDESC_NO_OFFSET,";
+	return -1;
+}
+
 function doit() {
+	# Define offsets array
+	printf("\nint %s_vp_offsets[] = {\n", name);
+	for (i=0; i<argc; i++) {
+		if (argtype[i] == "struct vnode *") {
+			printf ("\tVOPARG_OFFSETOF(struct %s_args,a_%s),\n",
+				name, argname[i]);
+		}
+	}
+	print "\tVDESC_NO_OFFSET";
+	print "};";
 	# Define F_desc
 	printf("struct vnodeop_desc %s_desc = {\n", name);
 	# offset
@@ -256,68 +286,34 @@ function doit() {
 	vpnum = 0;
 	for (i=0; i<argc; i++) {
 		if (willrele[i]) {
-			if (willrele[i] == 2) {
-				word = "UNLOCK";
-			} else if (willrele[i] == 3) {
-				word = "PUT";
-			} else {
-				word = "RELE";
-			}
 			if (argdir[i] ~ /OUT/) {
-				printf(" | VDESC_VPP_WILL%s", word);
+				printf(" | VDESC_VPP_WILLRELE");
 			} else {
-				printf(" | VDESC_VP%s_WILL%s", vpnum, word);
+				printf(" | VDESC_VP%s_WILLRELE", vpnum);
 			};
 			vpnum++;
 		}
 	}
-	printf (",\n};\n");
-
-	# Define inline function.
-	printf("\nint %s(", toupper(name));
-	desclen = 5 + length(name);
-	for (i=0; i<argc; i++) {
-		arglen = length(argtype[i]) + length(argname[i]);
-		
-		if (arglen + desclen > 77) {
-			printf("\n    ");
-			arglen += 4;
-			desclen = 0;
-		}
-		printf("%s %s", argtype[i], argname[i]);
-		if (i < (argc-1)) {
-			printf(", ");
-			desclen += 2;
-		}
-		desclen += arglen;
-	}
-	printf(")\n");
-	printf("{\n\tstruct %s_args a;\n", name);
-	printf("\ta.a_desc = VDESC(%s);\n", name);
-	for (i=0; i<argc; i++) {
-		printf("\ta.a_%s = %s;\n", argname[i], argname[i]);
-		if (shouldbelocked[i]) {
-			printf ("#ifdef VFSDEBUG\n");
-			printf ("\tif ((%s->v_flag & VLOCKSWORK) && !VOP_ISLOCKED(%s))\n", argname[i], argname[i]);
-			printf ("\t\tpanic(\"%s: %s\");\n", name, argname[i]);
-			printf ("#endif\n");
-		}
-	}
-	printf("\treturn (VCALL(%s%s, VOFFSET(%s), &a));\n}\n",
-		argname[0], arg0special, name);
-
-}
-BEGIN	{
-	arg0special="";
+	print ",";
+	# vp offsets
+	printf ("\t%s_vp_offsets,\n", name);
+	# vpp (if any)
+	do_offset("struct vnode **");
+	# cred (if any)
+	do_offset("struct ucred *");
+	# proc (if any)
+	do_offset("struct proc *");
+	# componentname
+	do_offset("struct componentname *");
+	# transport layer information
+	printf ("\tNULL,\n};\n");
 }
 END	{
 	printf("\n/* Special cases: */\n");
 	argc=1;
-	argtype[0]="struct buf *";
 	argdir[0]="IN";
+	argtype[0]="struct buf *";
 	argname[0]="bp";
-	shouldbelocked[0] = 0;
-	arg0special="->b_vp";
 	willrele[0]=0;
 	name="vop_strategy";
 	doit();

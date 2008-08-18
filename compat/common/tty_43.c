@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_43.c,v 1.9 2004/09/19 21:34:42 mickey Exp $	*/
+/*	$OpenBSD: tty_43.c,v 1.4 1996/05/23 08:32:23 deraadt Exp $	*/
 /*	$NetBSD: tty_43.c,v 1.5 1996/05/20 14:29:17 mark Exp $	*/
 
 /*-
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -54,7 +58,7 @@
 
 int ttydebug = 0;
 
-static const struct speedtab compatspeeds[] = {
+static struct speedtab compatspeeds[] = {
 #define MAX_SPEED	17
 	{ 115200, 17 },
 	{ 57600, 16 },
@@ -76,14 +80,19 @@ static const struct speedtab compatspeeds[] = {
 	{ 0,	0 },
 	{ -1,	-1 },
 };
-static const int compatspcodes[] = {
+static int compatspcodes[] = {
 	0, 50, 75, 110, 134, 150, 200, 300, 600, 1200,
 	1800, 2400, 4800, 9600, 19200, 38400, 57600, 115200
 };
 
-int ttcompatgetflags(struct tty *);
-void ttcompatsetflags(struct tty *, struct termios *);
-void ttcompatsetlflags(struct tty *, struct termios *);
+/* Macros to clear/set/test flags. */
+#define	SET(t, f)	(t) |= (f)
+#define	CLR(t, f)	(t) &= ~(f)
+#define	ISSET(t, f)	((t) & (f))
+
+int ttcompatgetflags __P((struct tty *));
+void ttcompatsetflags __P((struct tty *, struct termios *));
+void ttcompatsetlflags __P((struct tty *, struct termios *));
 
 /*ARGSUSED*/
 int
@@ -298,8 +307,6 @@ ttcompatgetflags(tp)
 		SET(flags, MDMBUF);
 	if (!ISSET(cflag, HUPCL))
 		SET(flags, NOHANG);
-	if (ISSET(cflag, XCASE) && ISSET(iflag, IUCLC) && ISSET(oflag, OLCUC))
-		SET(flags, LCASE);
 	if (ISSET(oflag, OXTABS))
 		SET(flags, XTABS);
 	if (ISSET(lflag, ECHOE))
@@ -348,20 +355,10 @@ ttcompatsetflags(tp, t)
 		SET(oflag, OXTABS);
 	else
 		CLR(oflag, OXTABS);
-	if (ISSET(flags, LCASE)) {
-		SET(iflag, IUCLC);
-		SET(oflag, OLCUC);
-		SET(cflag, XCASE);
-	}
-	else {
-		CLR(iflag, IUCLC);
-		CLR(oflag, OLCUC);
-		CLR(cflag, XCASE);
-	}
 
 
 	if (ISSET(flags, RAW)) {
-		iflag &= IXOFF|IXANY;
+		iflag &= IXOFF;
 		CLR(lflag, ISIG|ICANON|IEXTEN);
 		CLR(cflag, PARENB);
 	} else {
@@ -393,7 +390,7 @@ ttcompatsetflags(tp, t)
 	}
 
 	if (ISSET(flags, RAW|LITOUT|PASS8)) {
-		CLR(cflag, CSIZE|XCASE);
+		CLR(cflag, CSIZE);
 		SET(cflag, CS8);
 		if (!ISSET(flags, RAW|PASS8))
 			SET(iflag, ISTRIP);
@@ -406,8 +403,6 @@ ttcompatsetflags(tp, t)
 	} else {
 		CLR(cflag, CSIZE);
 		SET(cflag, CS7);
-		if (ISSET(iflag, IUCLC) && ISSET(oflag, OLCUC))
-			SET(cflag, XCASE);
 		SET(iflag, ISTRIP);
 		SET(oflag, OPOST);
 	}
@@ -459,11 +454,6 @@ ttcompatsetlflags(tp, t)
 		SET(iflag, IXANY);
 	else
 		CLR(iflag, IXANY);
-	if (ISSET(flags, LCASE)) {
-		SET(oflag, OLCUC);
-		SET(iflag, IUCLC);
-		SET(cflag, XCASE);
-	}
 	CLR(lflag, TOSTOP|FLUSHO|PENDIN|NOFLSH);
 	SET(lflag, ISSET(flags, TOSTOP|FLUSHO|PENDIN|NOFLSH));
 
@@ -476,17 +466,13 @@ ttcompatsetlflags(tp, t)
 			CLR(iflag, ISTRIP);
 		if (!ISSET(flags, RAW|LITOUT))
 			SET(oflag, OPOST);
-		else {
+		else
 			CLR(oflag, OPOST);
-			CLR(cflag, XCASE);
-		}
 	} else {
 		CLR(cflag, CSIZE);
 		SET(cflag, CS7);
 		SET(iflag, ISTRIP);
 		SET(oflag, OPOST);
-		if (ISSET(oflag, OLCUC) && ISSET(iflag, IUCLC))
-			SET(cflag, XCASE);
 	}
 
 	t->c_iflag = iflag;

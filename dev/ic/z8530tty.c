@@ -1,5 +1,5 @@
-/*	$OpenBSD: z8530tty.c,v 1.17 2008/01/18 21:36:43 kettenis Exp $ */
-/*	$NetBSD: z8530tty.c,v 1.13 1996/10/16 20:42:14 gwr Exp $	*/
+/*	$OpenBSD: z8530tty.c,v 1.6 1996/06/18 10:23:03 deraadt Exp $ */
+/*	$NetBSD: z8530tty.c,v 1.8.4.2 1996/06/13 23:11:56 gwr Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -23,7 +23,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -173,14 +177,10 @@ cdev_decl(zs);	/* open, close, read, write, ioctl, stop, ... */
 
 static void	zsstart(struct tty *);
 static int	zsparam(struct tty *, struct termios *);
-static void	zs_modem(struct zstty_softc *zst, int onoff);
+static void zs_modem(struct zstty_softc *zst, int onoff);
 static int	zshwiflow(struct tty *, int);
-static void	zs_hwiflow(struct zstty_softc *, int);
-static void	zstty_rxint(register struct zs_chanstate *);
-static void	zstty_txint(register struct zs_chanstate *);
-static void	zstty_stint(register struct zs_chanstate *);
-static void	zstty_softint(struct zs_chanstate *);
-static void	zsoverrun(struct zstty_softc *, long *, char *);
+static void zs_hwiflow(struct zstty_softc *, int);
+
 /*
  * zstty_match: how is this zs channel configured?
  */
@@ -234,7 +234,7 @@ zstty_attach(parent, self, aux)
 		printf(" flags 0x%x", zst->zst_swflags);
 
 	if (zst->zst_hwflags & ZS_HWFLAG_CONSOLE)
-		printf(": console");
+		printf(" (console)");
 	else {
 #ifdef KGDB
 		/*
@@ -259,6 +259,7 @@ zstty_attach(parent, self, aux)
 	tp->t_oproc = zsstart;
 	tp->t_param = zsparam;
 	tp->t_hwiflow = zshwiflow;
+	tty_attach(tp);
 
 	zst->zst_tty = tp;
 	zst->zst_rbhiwat =  zstty_rbuf_size;	/* impossible value */
@@ -434,7 +435,8 @@ zsclose(dev, flags, mode, p)
 	struct zstty_softc *zst;
 	register struct zs_chanstate *cs;
 	register struct tty *tp;
-	int hup;
+	struct zsinfo *zi;
+	int hup, s;
 
 	zst = zstty_cd.cd_devs[minor(dev)];
 	cs = zst->zst_cs;
@@ -535,7 +537,7 @@ zsioctl(dev, cmd, data, flag, p)
 		break;
 
 	case TIOCSFLAGS:
-		error = suser(p, 0);
+		error = suser(p->p_ucred, &p->p_acflag);
 		if (error != 0)
 			return (EPERM);
 		tmp = *(int *)data;
@@ -681,7 +683,7 @@ zsparam(tp, t)
 	register struct zstty_softc *zst;
 	register struct zs_chanstate *cs;
 	register int s, bps, cflag, tconst;
-	u_char tmp3, tmp4, tmp5;
+	u_char tmp3, tmp4, tmp5, reset;
 
 	zst = zstty_cd.cd_devs[minor(tp->t_dev)];
 	cs = zst->zst_cs;
@@ -1066,19 +1068,7 @@ zstty_stint(cs)
 		zst->zst_tx_stopped = 1;
 	}
 
-	/*
-	 * We have to accumulate status line changes here.
-	 * Otherwise, if we get multiple status interrupts
-	 * before the softint runs, we could fail to notice
-	 * some status line changes in the softint routine.
-	 * Fix from Bill Studenmund, October 1996.
-	 */
-	cs->cs_rr0_delta |= (cs->cs_rr0 ^ rr0);
-
-	ttytstamp(tp, cs->cs_rr0 & ZSRR0_CTS, rr0 & ZSRR0_CTS,
-	    cs->cs_rr0 & ZSRR0_DCD, rr0 & ZSRR0_DCD);
-
-	cs->cs_rr0 = rr0;
+	cs->cs_rr0_new = rr0;
 	zst->zst_st_check = 1;
 
 	/* Ask for softint() call. */
@@ -1095,8 +1085,8 @@ zsoverrun(zst, ptime, what)
 	char *what;
 {
 
-	if (*ptime != time_second) {
-		*ptime = time_second;
+	if (*ptime != time.tv_sec) {
+		*ptime = time.tv_sec;
 		log(LOG_WARNING, "%s: %s overrun\n",
 			zst->zst_dev.dv_xname, what);
 	}
@@ -1124,7 +1114,7 @@ zstty_softint(cs)
 	register int get, c, s;
 	int ringmask, overrun;
 	register u_short ring_data;
-	register u_char rr0, delta;
+	register u_char rr0, rr1, delta;
 
 	zst  = cs->cs_private;
 	tp   = zst->zst_tty;
@@ -1193,9 +1183,9 @@ zstty_softint(cs)
 	if (zst->zst_st_check) {
 		zst->zst_st_check = 0;
 
-		rr0 = cs->cs_rr0;
-		delta = cs->cs_rr0_delta;
-		cs->cs_rr0_delta = 0;
+		rr0 = cs->cs_rr0_new;
+		delta = rr0 ^ cs->cs_rr0;
+		cs->cs_rr0 = rr0;
 		if (delta & ZSRR0_DCD) {
 			c = ((rr0 & ZSRR0_DCD) != 0);
 			if (line->l_modem(tp, c) == 0)

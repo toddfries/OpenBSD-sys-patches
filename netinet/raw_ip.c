@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.44 2008/05/23 15:51:12 thib Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.7 1996/08/14 20:19:20 deraadt Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,64 +33,30 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
- *
- * NRL grants permission for redistribution and use in source and binary
- * forms, with or without modification, of the software and documentation
- * created at NRL provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgements:
- * 	This product includes software developed by the University of
- * 	California, Berkeley and its contributors.
- * 	This product includes software developed at the Information
- * 	Technology Division, US Naval Research Laboratory.
- * 4. Neither the name of the NRL nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THE SOFTWARE PROVIDED BY NRL IS PROVIDED BY NRL AND CONTRIBUTORS ``AS
- * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- * PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL NRL OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation
- * are those of the authors and should not be interpreted as representing
- * official policies, either expressed or implied, of the US Naval
- * Research Laboratory (NRL).
+ *	@(#)raw_ip.c	8.2 (Berkeley) 1/4/94
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
+#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/protosw.h>
 #include <sys/socketvar.h>
+#include <sys/errno.h>
+#include <sys/systm.h>
 
 #include <net/if.h>
 #include <net/route.h>
-#include <net/pfvar.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
-#include <netinet/ip_mroute.h>
 #include <netinet/ip_var.h>
+#include <netinet/ip_mroute.h>
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
-#include <netinet/ip_icmp.h>
+
+#include <machine/stdarg.h>
 
 struct inpcbtable rawcbtable;
 
@@ -110,38 +80,31 @@ rip_init()
 	in_pcbinit(&rawcbtable, 1);
 }
 
-struct sockaddr_in ripsrc = { sizeof(ripsrc), AF_INET };
-
+struct	sockaddr_in ripsrc = { sizeof(ripsrc), AF_INET };
 /*
  * Setup generic address and protocol structures
  * for raw_input routine, then pass them along with
  * mbuf chain.
  */
 void
+#if __STDC__
 rip_input(struct mbuf *m, ...)
+#else
+rip_input(m, va_alist)
+	struct mbuf *m;
+	va_dcl
+#endif
 {
-	struct ip *ip = mtod(m, struct ip *);
-	struct inpcb *inp, *last = NULL;
-	struct mbuf *opts = NULL;
+	register struct ip *ip = mtod(m, struct ip *);
+	register struct inpcb *inp;
+	struct socket *last = 0;
 
 	ripsrc.sin_addr = ip->ip_src;
-	CIRCLEQ_FOREACH(inp, &rawcbtable.inpt_queue, inp_queue) {
-#ifdef INET6
-		if (inp->inp_flags & INP_IPV6)
-			continue;
-#endif
+	for (inp = rawcbtable.inpt_queue.cqh_first;
+	    inp != (struct inpcb *)&rawcbtable.inpt_queue;
+	    inp = inp->inp_queue.cqe_next) {
 		if (inp->inp_ip.ip_p && inp->inp_ip.ip_p != ip->ip_p)
 			continue;
-#if NPF
-		if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
-			struct pf_divert *divert;
-
-			if ((divert = pf_find_divert(m)) == NULL)
-				continue;
-			if (inp->inp_laddr.s_addr != divert->addr.ipv4.s_addr)
-				continue;
-		} else
-#endif
 		if (inp->inp_laddr.s_addr &&
 		    inp->inp_laddr.s_addr != ip->ip_dst.s_addr)
 			continue;
@@ -150,40 +113,26 @@ rip_input(struct mbuf *m, ...)
 			continue;
 		if (last) {
 			struct mbuf *n;
-
 			if ((n = m_copy(m, 0, (int)M_COPYALL)) != NULL) {
-				if (last->inp_flags & INP_CONTROLOPTS ||
-				    last->inp_socket->so_options & SO_TIMESTAMP)
-					ip_savecontrol(last, &opts, ip, n);
-				if (sbappendaddr(&last->inp_socket->so_rcv,
-				    sintosa(&ripsrc), n, opts) == 0) {
+				if (sbappendaddr(&last->so_rcv,
+				    sintosa(&ripsrc), n,
+				    (struct mbuf *)0) == 0)
 					/* should notify about lost packet */
 					m_freem(n);
-					if (opts)
-						m_freem(opts);
-				} else
-					sorwakeup(last->inp_socket);
-				opts = NULL;
+				else
+					sorwakeup(last);
 			}
 		}
-		last = inp;
+		last = inp->inp_socket;
 	}
 	if (last) {
-		if (last->inp_flags & INP_CONTROLOPTS ||
-		    last->inp_socket->so_options & SO_TIMESTAMP)
-			ip_savecontrol(last, &opts, ip, m);
-		if (sbappendaddr(&last->inp_socket->so_rcv, sintosa(&ripsrc), m,
-		    opts) == 0) {
+		if (sbappendaddr(&last->so_rcv, sintosa(&ripsrc), m,
+		    (struct mbuf *)0) == 0)
 			m_freem(m);
-			if (opts)
-				m_freem(opts);
-		} else
-			sorwakeup(last->inp_socket);
-	} else {
-		if (ip->ip_p != IPPROTO_ICMP)
-			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_PROTOCOL, 0, 0);
 		else
-			m_freem(m);
+			sorwakeup(last);
+	} else {
+		m_freem(m);
 		ipstat.ips_noproto++;
 		ipstat.ips_delivered--;
 	}
@@ -194,12 +143,18 @@ rip_input(struct mbuf *m, ...)
  * Tack on options user may have setup with control call.
  */
 int
+#if __STDC__
 rip_output(struct mbuf *m, ...)
+#else
+rip_output(m, va_alist)
+	struct mbuf *m;
+	va_dcl
+#endif
 {
 	struct socket *so;
 	u_long dst;
-	struct ip *ip;
-	struct inpcb *inp;
+	register struct ip *ip;
+	register struct inpcb *inp;
 	int flags;
 	va_list ap;
 
@@ -209,75 +164,55 @@ rip_output(struct mbuf *m, ...)
 	va_end(ap);
 
 	inp = sotoinpcb(so);
-	flags = (so->so_options & (SO_DONTROUTE|SO_JUMBO)) | IP_ALLOWBROADCAST;
+	flags = (so->so_options & SO_DONTROUTE) | IP_ALLOWBROADCAST;
 
 	/*
 	 * If the user handed us a complete IP packet, use it.
 	 * Otherwise, allocate an mbuf for a header and fill it in.
 	 */
 	if ((inp->inp_flags & INP_HDRINCL) == 0) {
-		if ((m->m_pkthdr.len + sizeof(struct ip)) > IP_MAXPACKET) {
-			m_freem(m);
-			return (EMSGSIZE);
-		}
-		M_PREPEND(m, sizeof(struct ip), M_DONTWAIT);
-		if (!m)
-			return (ENOBUFS);
+		M_PREPEND(m, sizeof(struct ip), M_WAIT);
 		ip = mtod(m, struct ip *);
-		ip->ip_tos = inp->inp_ip.ip_tos;
-		ip->ip_off = htons(0);
+		ip->ip_tos = 0;
+		ip->ip_off = 0;
 		ip->ip_p = inp->inp_ip.ip_p;
-		ip->ip_len = htons(m->m_pkthdr.len);
+		ip->ip_len = m->m_pkthdr.len;
 		ip->ip_src = inp->inp_laddr;
 		ip->ip_dst.s_addr = dst;
-		ip->ip_ttl = inp->inp_ip.ip_ttl ? inp->inp_ip.ip_ttl : MAXTTL;
+		ip->ip_ttl = MAXTTL;
 	} else {
-		if (m->m_pkthdr.len > IP_MAXPACKET) {
-			m_freem(m);
-			return (EMSGSIZE);
-		}
-		if (m->m_pkthdr.len < sizeof(struct ip)) {
-			m_freem(m);
-			return (EINVAL);
-		}
 		ip = mtod(m, struct ip *);
 		/*
 		 * don't allow both user specified and setsockopt options,
 		 * and don't allow packet length sizes that will crash
 		 */
 		if ((ip->ip_hl != (sizeof (*ip) >> 2) && inp->inp_options) ||
-		    ntohs(ip->ip_len) > m->m_pkthdr.len ||
-		    ntohs(ip->ip_len) < ip->ip_hl << 2) {
+		    ip->ip_len > m->m_pkthdr.len) {
 			m_freem(m);
 			return (EINVAL);
 		}
-		if (ip->ip_id == 0) {
-			ip->ip_id = htons(ip_randomid());
-		}
+		if (ip->ip_id == 0)
+			ip->ip_id = htons(ip_id++);
 		/* XXX prevent ip_output from overwriting header fields */
 		flags |= IP_RAWOUTPUT;
 		ipstat.ips_rawout++;
 	}
-#ifdef INET6
-	/*
-	 * A thought:  Even though raw IP shouldn't be able to set IPv6
-	 *             multicast options, if it does, the last parameter to
-	 *             ip_output should be guarded against v6/v4 problems.
-	 */
-#endif
 	return (ip_output(m, inp->inp_options, &inp->inp_route, flags,
-	    inp->inp_moptions, inp));
+	    inp->inp_moptions));
 }
 
 /*
  * Raw IP socket option processing.
  */
 int
-rip_ctloutput(int op, struct socket *so, int level, int optname,
-    struct mbuf **m)
+rip_ctloutput(op, so, level, optname, m)
+	int op;
+	struct socket *so;
+	int level, optname;
+	struct mbuf **m;
 {
-	struct inpcb *inp = sotoinpcb(so);
-	int error;
+	register struct inpcb *inp = sotoinpcb(so);
+	register int error;
 
 	if (level != IPPROTO_IP) {
 		if (op == PRCO_SETOPT && *m)
@@ -313,17 +248,13 @@ rip_ctloutput(int op, struct socket *so, int level, int optname,
 	case MRT_DEL_MFC:
 	case MRT_VERSION:
 	case MRT_ASSERT:
-	case MRT_API_SUPPORT:
-	case MRT_API_CONFIG:
-	case MRT_ADD_BW_UPCALL:
-	case MRT_DEL_BW_UPCALL:
 #ifdef MROUTING
 		switch (op) {
 		case PRCO_SETOPT:
-			error = ip_mrouter_set(so, optname, m);
+			error = ip_mrouter_set(optname, so, m);
 			break;
 		case PRCO_GETOPT:
-			error = ip_mrouter_get(so, optname, m);
+			error = ip_mrouter_get(optname, so, m);
 			break;
 		default:
 			error = EINVAL;
@@ -344,17 +275,19 @@ u_long	rip_recvspace = RIPRCVQ;
 
 /*ARGSUSED*/
 int
-rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
-    struct mbuf *control, struct proc *p)
+rip_usrreq(so, req, m, nam, control)
+	register struct socket *so;
+	int req;
+	struct mbuf *m, *nam, *control;
 {
-	int error = 0;
-	struct inpcb *inp = sotoinpcb(so);
+	register int error = 0;
+	register struct inpcb *inp = sotoinpcb(so);
 #ifdef MROUTING
 	extern struct socket *ip_mrouter;
 #endif
 	if (req == PRU_CONTROL)
-		return (in_control(so, (u_long)m, (caddr_t)nam,
-		    (struct ifnet *)control));
+		return (in_control(so, (long)m, (caddr_t)nam,
+			(struct ifnet *)control));
 
 	if (inp == NULL && req != PRU_ATTACH) {
 		error = EINVAL;
@@ -404,12 +337,11 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EINVAL;
 			break;
 		}
-		if ((TAILQ_EMPTY(&ifnet)) ||
+		if ((ifnet.tqh_first == 0) ||
 		    ((addr->sin_family != AF_INET) &&
 		     (addr->sin_family != AF_IMPLINK)) ||
 		    (addr->sin_addr.s_addr &&
-		     (!(so->so_options & SO_BINDANY) &&
-		     in_iawithaddr(addr->sin_addr, NULL) == 0))) {
+		     ifa_ifwithaddr(sintosa(addr)) == 0)) {
 			error = EADDRNOTAVAIL;
 			break;
 		}
@@ -424,7 +356,7 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EINVAL;
 			break;
 		}
-		if (TAILQ_EMPTY(&ifnet)) {
+		if (ifnet.tqh_first == 0) {
 			error = EADDRNOTAVAIL;
 			break;
 		}
@@ -455,7 +387,7 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 	 */
 	case PRU_SEND:
 	    {
-		u_int32_t dst;
+		register u_int32_t dst;
 
 		if (so->so_state & SS_ISCONNECTED) {
 			if (nam) {
@@ -470,9 +402,6 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			}
 			dst = mtod(nam, struct sockaddr_in *)->sin_addr.s_addr;
 		}
-#ifdef IPSEC
-		/* XXX Find an IPsec TDB */
-#endif
 		error = rip_output(m, so, dst);
 		m = NULL;
 		break;

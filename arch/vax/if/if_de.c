@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.19 2006/04/16 00:46:32 pascoe Exp $	*/
-/*	$NetBSD: if_de.c,v 1.27 1997/04/19 15:02:29 ragge Exp $	*/
+/*	$NetBSD: if_de.c,v 1.21 1996/05/19 16:43:02 ragge Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1989 Regents of the University of California.
@@ -13,7 +12,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,7 +60,8 @@
 #include <machine/sid.h>
 
 #include <net/if.h>
-#include <net/if_dl.h>
+#include <net/netisr.h>
+#include <net/route.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -65,6 +69,17 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#endif
+
+#ifdef NS
+#include <netns/ns.h>
+#include <netns/ns_if.h>
+#endif
+
+#ifdef ISO
+#include <netiso/iso.h>
+#include <netiso/iso_var.h>
+extern char all_es_snpa[], all_is_snpa[];
 #endif
 
 #include <machine/cpu.h>
@@ -75,8 +90,8 @@
 #include <vax/uba/ubareg.h>
 #include <vax/uba/ubavar.h>
 
-#define NXMT	3	/* number of transmit buffers */
-#define NRCV	7	/* number of receive buffers (must be > 1) */
+#define	NXMT	3	/* number of transmit buffers */
+#define	NRCV	7	/* number of receive buffers (must be > 1) */
 
 int	dedebug = 0;
 
@@ -96,7 +111,8 @@ struct	de_softc {
 	struct	device ds_dev;	/* Configuration common part */
 	struct	arpcom ds_ac;		/* Ethernet common part */
 	struct	dedevice *ds_vaddr;	/* Virtual address of this interface */
-#define 	ds_if	ds_ac.ac_if	/* network-visible interface */
+#define	ds_if	ds_ac.ac_if		/* network-visible interface */
+#define	ds_addr	ds_ac.ac_enaddr		/* hardware Ethernet address */
 	int	ds_flags;
 #define	DSF_RUNNING	2		/* board is enabled */
 #define	DSF_SETADDR	4		/* physical address is changed */
@@ -106,8 +122,8 @@ struct	de_softc {
 	struct	ifxmt ds_ifw[NXMT];	/* unibus xmt maps */
 	/* the following structures are always mapped in */
 	struct	de_pcbb ds_pcbb;	/* port control block */
-	struct	de_ring ds_xrent[NXMT];	/* transmit ring entries */
-	struct	de_ring ds_rrent[NRCV];	/* receive ring entries */
+	struct	de_ring ds_xrent[NXMT];	/* transmit ring entrys */
+	struct	de_ring ds_rrent[NRCV];	/* receive ring entrys */
 	struct	de_udbbuf ds_udbbuf;	/* UNIBUS data buffer */
 	/* end mapped area */
 #define	INCORE_BASE(p)	((char *)&(p)->ds_pcbb)
@@ -124,20 +140,20 @@ struct	de_softc {
 	int	ds_nxmit;		/* # of transmits in progress */
 };
 
-int	dematch(struct device *, void *, void *);
-void	deattach(struct device *, struct device *, void *);
-int	dewait(struct de_softc *, char *);
-void	deinit(struct de_softc *);
-int	deioctl(struct ifnet *, u_long, caddr_t);
-void	dereset(int);
-void	destart(struct ifnet *);
-void	deread(struct de_softc *, struct ifrw *, int);
-void	derecv(int);
-void	de_setaddr(u_char *, struct de_softc *);
-void	deintr(int);
+int	dematch __P((struct device *, void *, void *));
+void	deattach __P((struct device *, struct device *, void *));
+int	dewait __P((struct de_softc *, char *));
+void	deinit __P((struct de_softc *));
+int     deioctl __P((struct ifnet *, u_long, caddr_t));
+void	dereset __P((int));
+void    destart __P((struct ifnet *));
+void	deread __P((struct de_softc *, struct ifrw *, int));
+void    derecv __P((int));
+void	de_setaddr __P((u_char *, struct de_softc *));
+void	deintr __P((int));
 
 
-struct	cfdriver de_cd = {
+struct  cfdriver de_cd = {
 	NULL, "de", DV_IFNET
 };
 
@@ -160,7 +176,6 @@ deattach(parent, self, aux)
 	struct dedevice *addr;
 	char *c;
 	int csr1;
-	u_int8_t myaddr[ETHER_ADDR_LEN];
 
 	addr = (struct dedevice *)ua->ua_addr;
 	ds->ds_vaddr = addr;
@@ -191,7 +206,7 @@ deattach(parent, self, aux)
 	addr->pcsr0 = PCSR0_RSET;
 	(void)dewait(ds, "reset");
 
-	ds->ds_ubaddr = uballoc((void *)ds->ds_dev.dv_parent,
+	ds->ds_ubaddr = uballoc(ds->ds_dev.dv_parent->dv_unit,
 	    (char *)&ds->ds_pcbb, sizeof (struct de_pcbb), 0);
 	addr->pcsr2 = ds->ds_ubaddr & 0xffff;
 	addr->pcsr3 = (ds->ds_ubaddr >> 16) & 0x3;
@@ -202,10 +217,11 @@ deattach(parent, self, aux)
 	addr->pclow = CMD_GETCMD;
 	(void)dewait(ds, "read addr ");
 
-	ubarelse((void *)ds->ds_dev.dv_parent, &ds->ds_ubaddr);
-	bcopy((caddr_t)&ds->ds_pcbb.pcbb2, myaddr, sizeof (myaddr));
-	printf("%s: address %s\n", ds->ds_dev.dv_xname,
-	    ether_sprintf(myaddr));
+	ubarelse(ds->ds_dev.dv_parent->dv_unit, &ds->ds_ubaddr);
+ 	bcopy((caddr_t)&ds->ds_pcbb.pcbb2, (caddr_t)ds->ds_addr,
+	    sizeof (ds->ds_addr));
+	printf("%s: hardware address %s\n", ds->ds_dev.dv_xname,
+		ether_sprintf(ds->ds_addr));
 	ifp->if_ioctl = deioctl;
 	ifp->if_start = destart;
 	ds->ds_deuba.iff_flags = UBA_CANTWAIT;
@@ -251,20 +267,20 @@ deinit(ds)
 	int s,incaddr;
 
 	/* not yet, if address still unknown */
-	if (TAILQ_EMPTY(&ifp->if_addrlist))
+	if (ifp->if_addrlist.tqh_first == (struct ifaddr *)0)
 		return;
 
 	if (ds->ds_flags & DSF_RUNNING)
 		return;
 	if ((ifp->if_flags & IFF_RUNNING) == 0) {
-		if (if_ubaminit(&ds->ds_deuba, (void *)ds->ds_dev.dv_parent,
-		    sizeof (struct ether_header), (int)vax_btoc(ETHERMTU),
+		if (if_ubaminit(&ds->ds_deuba, ds->ds_dev.dv_parent->dv_unit,
+		    sizeof (struct ether_header), (int)btoc(ETHERMTU),
 		    ds->ds_ifr, NRCV, ds->ds_ifw, NXMT) == 0) { 
 			printf("%s: can't initialize\n", ds->ds_dev.dv_xname);
 			ds->ds_if.if_flags &= ~IFF_UP;
 			return;
 		}
-		ds->ds_ubaddr = uballoc((void *)ds->ds_dev.dv_parent,
+		ds->ds_ubaddr = uballoc(ds->ds_dev.dv_parent->dv_unit,
 		    INCORE_BASE(ds), INCORE_SIZE(ds), 0);
 	}
 	addr = ds->ds_vaddr;
@@ -330,7 +346,7 @@ deinit(ds)
 	destart(&ds->ds_if);		/* queue output packets */
 	ds->ds_flags |= DSF_RUNNING;		/* need before de_setaddr */
 	if (ds->ds_flags & DSF_SETADDR)
-		de_setaddr(ds->ds_ac.ac_enaddr, ds);
+		de_setaddr(ds->ds_addr, ds);
 	addr->pclow = CMD_START | PCSR0_INTE;
 	splx(s);
 }
@@ -345,7 +361,7 @@ void
 destart(ifp)
 	struct ifnet *ifp;
 {
-	int len;
+        int len;
 	register struct de_softc *ds = ifp->if_softc;
 	volatile struct dedevice *addr = ds->ds_vaddr;
 	register struct de_ring *rp;
@@ -367,13 +383,9 @@ destart(ifp)
 		if (rp->r_flags & XFLG_OWN)
 			panic("deuna xmit in progress");
 		len = if_ubaput(&ds->ds_deuba, &ds->ds_ifw[ds->ds_xfree], m);
-		if (ds->ds_deuba.iff_flags & UBA_NEEDBDP) {
-			struct uba_softc *uh = (void *)ds->ds_dev.dv_parent;
-
-			if (uh->uh_ubapurge)
-				(*uh->uh_ubapurge)
-					(uh, ds->ds_ifw[ds->ds_xfree].ifw_bdp);
-		}
+		if (ds->ds_deuba.iff_flags & UBA_NEEDBDP)
+			UBAPURGE(ds->ds_deuba.iff_uba,
+			ds->ds_ifw[ds->ds_xfree].ifw_bdp);
 		rp->r_slen = len;
 		rp->r_tdrerr = 0;
 		rp->r_flags = XFLG_STP|XFLG_ENP|XFLG_OWN;
@@ -432,15 +444,13 @@ deintr(unit)
 		ifxp = &ds->ds_ifw[ds->ds_xindex];
 		/* check for unusual conditions */
 		if (rp->r_flags & (XFLG_ERRS|XFLG_MTCH|XFLG_ONE|XFLG_MORE)) {
-		if (rp->r_flags & XFLG_ERRS) {
+			if (rp->r_flags & XFLG_ERRS) {
 				/* output error */
 				ds->ds_if.if_oerrors++;
-				if (dedebug) {
-					printf("de%d: oerror, flags=%b ",
-					    unit, rp->r_flags, XFLG_BITS);
-					printf("tdrerr=%b\n",
-					    rp->r_tdrerr, XERR_BITS);
-				}
+				if (dedebug)
+			printf("de%d: oerror, flags=%b tdrerr=%b (len=%d)\n",
+				    unit, rp->r_flags, XFLG_BITS,
+				    rp->r_tdrerr, XERR_BITS, rp->r_slen);
 			} else if (rp->r_flags & XFLG_ONE) {
 				/* one collision */
 				ds->ds_if.if_collisions++;
@@ -478,7 +488,7 @@ deintr(unit)
  * If input error just drop packet.
  * Otherwise purge input buffered data path and examine 
  * packet to determine type.  If can't determine length
- * from type, then have to drop packet.	 Othewise decapsulate
+ * from type, then have to drop packet.  Othewise decapsulate
  * packet based on type and pass to type specific higher-level
  * input routine.
  */
@@ -493,13 +503,9 @@ derecv(unit)
 	rp = &ds->ds_rrent[ds->ds_rindex];
 	while ((rp->r_flags & RFLG_OWN) == 0) {
 		ds->ds_if.if_ipackets++;
-		if (ds->ds_deuba.iff_flags & UBA_NEEDBDP) {
-			struct uba_softc *uh = (void *)ds->ds_dev.dv_parent;
-
-			if (uh->uh_ubapurge)
-				(*uh->uh_ubapurge)
-					(uh,ds->ds_ifr[ds->ds_rindex].ifrw_bdp);
-		}
+		if (ds->ds_deuba.iff_flags & UBA_NEEDBDP)
+			UBAPURGE(ds->ds_deuba.iff_uba,
+			ds->ds_ifr[ds->ds_rindex].ifrw_bdp);
 		len = (rp->r_lenerr&RERR_MLEN) - sizeof (struct ether_header)
 			- 4;	/* don't forget checksum! */
 		/* check for errors */
@@ -508,12 +514,10 @@ derecv(unit)
 		    (rp->r_lenerr & (RERR_BUFL|RERR_UBTO|RERR_NCHN)) ||
 		    len < ETHERMIN || len > ETHERMTU) {
 			ds->ds_if.if_ierrors++;
-			if (dedebug) {
-				printf("de%d: ierror, flags=%b ",
-				    unit, rp->r_flags, RFLG_BITS);
-				printf("lenerr=%b (len=%d)\n",
-				    rp->r_lenerr, RERR_BITS, len);
-			}
+			if (dedebug)
+			printf("de%d: ierror, flags=%b lenerr=%b (len=%d)\n",
+				unit, rp->r_flags, RFLG_BITS, rp->r_lenerr,
+				RERR_BITS, len);
 		} else
 			deread(ds, &ds->ds_ifr[ds->ds_rindex], len);
 
@@ -540,8 +544,13 @@ deread(ds, ifrw, len)
 	int len;
 {
 	struct ether_header *eh;
-	struct mbuf *m;
+    	struct mbuf *m;
 
+	/*
+	 * Deal with trailer protocol: if type is trailer type
+	 * get true type from first 16-bit word past data.
+	 * Remember that type was trailer by setting off.
+	 */
 	eh = (struct ether_header *)ifrw->ifrw_addr;
 	if (len == 0)
 		return;
@@ -552,17 +561,8 @@ deread(ds, ifrw, len)
 	 * information to be at the front.
 	 */
 	m = if_ubaget(&ds->ds_deuba, ifrw, len, &ds->ds_if);
-	if (m) {
-		/*
-		 * XXX not exactly sure what if_ubaget does.  Manually 
-		 * add the ethernet header to the start of the mbuf chain.
-		 */
-		M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
-		if (m) {
-			*mtod(m, struct ether_header *) = *eh;
-			ether_input_mbuf(&ds->ds_if, m);
-		}
-	}
+	if (m)
+		ether_input(&ds->ds_if, eh, m);
 }
 /*
  * Process an ioctl request.
@@ -588,6 +588,18 @@ deioctl(ifp, cmd, data)
 		case AF_INET:
 			arp_ifinit(&ds->ds_ac, ifa);
 			break;
+#endif
+#ifdef NS
+		case AF_NS:
+		    {
+			register struct ns_addr *ina = &(IA_SNS(ifa)->sns_addr);
+			
+			if (ns_nullhost(*ina))
+				ina->x_host = *(union ns_host *)(ds->ds_addr);
+			else
+				de_setaddr(ina->x_host.c_host, ds);
+			break;
+		    }
 #endif
 		}
 		break;
@@ -630,7 +642,7 @@ de_setaddr(physaddr, ds)
 	addr->pclow = PCSR0_INTE|CMD_GETCMD;
 	if (dewait(ds, "address change") == 0) {
 		ds->ds_flags |= DSF_SETADDR;
-		bcopy((caddr_t) physaddr, ds->ds_ac.ac_enaddr, 6);
+		bcopy((caddr_t) physaddr, (caddr_t) ds->ds_addr, 6);
 	}
 }
 
@@ -644,27 +656,26 @@ dewait(ds, fn)
 	char *fn;
 {
 	volatile struct dedevice *addr = ds->ds_vaddr;
-	register int csr0;
+	register csr0;
 
 	while ((addr->pcsr0 & PCSR0_INTR) == 0)
 		;
 	csr0 = addr->pcsr0;
 	addr->pchigh = csr0 >> 8;
-	if (csr0 & PCSR0_PCEI) {
-		printf("de%d: %s failed, csr0=%b ", ds->ds_dev.dv_unit, fn,
-		    csr0, PCSR0_BITS);
-		printf("csr1=%b\n", addr->pcsr1, PCSR1_BITS);
-	}
+	if (csr0 & PCSR0_PCEI)
+		printf("de%d: %s failed, csr0=%b csr1=%b\n", 
+		    ds->ds_dev.dv_unit, fn, csr0, PCSR0_BITS, 
+		    addr->pcsr1, PCSR1_BITS);
 	return (csr0 & PCSR0_PCEI);
 }
 
 int
-dematch(parent, cf, aux)
+dematch(parent, match, aux)
 	struct	device *parent;
-	void	*cf, *aux;
+	void	*match, *aux;
 {
 	struct	uba_attach_args *ua = aux;
-	volatile struct dedevice *addr = (struct dedevice *)ua->ua_addr;
+	volatile struct	dedevice *addr = (struct dedevice *)ua->ua_addr;
 	int	i;
 
 	/*
@@ -695,7 +706,7 @@ dematch(parent, cf, aux)
 	DELAY(50000);
 
 	ua->ua_ivec = deintr;
-	ua->ua_reset = dereset; /* Wish to be called after ubareset */
+	ua->ua_reset = dereset;	/* Wish to be called after ubareset */
 
 	return 1;
 }

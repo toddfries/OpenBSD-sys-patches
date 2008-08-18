@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.13 2004/07/30 22:29:44 miod Exp $ */
+/*	$OpenBSD: clock.c,v 1.3 1996/04/28 11:06:02 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -11,6 +11,12 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed under OpenBSD by
+ *	Theo de Raadt for Willowglen Singapore.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -44,7 +50,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by the University of
+ *      California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -64,9 +74,8 @@
  */
 
 #include <sys/param.h>
-#include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/systm.h>
+#include <sys/device.h>
 
 #include <machine/psl.h>
 #include <machine/autoconf.h>
@@ -81,11 +90,13 @@
 #endif
 #if NPCCTWO > 0
 #include <mvme68k/dev/pcctworeg.h>
-#include <mvme68k/dev/vme.h>
-extern struct vme2reg *sys_vme2;
 #endif
 #if NMC > 0
 #include <mvme68k/dev/mcreg.h>
+#endif
+
+#if defined(GPROF)
+#include <sys/gmon.h>
 #endif
 
 /*
@@ -105,19 +116,19 @@ struct clocksoftc {
 	struct intrhand sc_statih;
 };
 
-void	clockattach(struct device *, struct device *, void *);
-int	clockmatch(struct device *, void *, void *);
+void	clockattach __P((struct device *, struct device *, void *));
+int	clockmatch __P((struct device *, void *, void *));
 
 struct cfattach clock_ca = {
 	sizeof(struct clocksoftc), clockmatch, clockattach
 };
 
 struct cfdriver clock_cd = {
-	NULL, "clock", DV_DULL
+	NULL, "clock", DV_DULL, 0
 };
 
-int	clockintr(void *);
-int	statintr(void *);
+int	clockintr __P((void *));
+int	statintr __P((void *));
 
 int	clockbus;
 u_char	stat_reset, prof_reset;
@@ -158,24 +169,24 @@ clockattach(parent, self, args)
 	case BUS_PCC:
 		prof_reset = ca->ca_ipl | PCC_IRQ_IEN | PCC_TIMERACK;
 		stat_reset = ca->ca_ipl | PCC_IRQ_IEN | PCC_TIMERACK;
-		pccintr_establish(PCCV_TIMER1, &sc->sc_profih, "clock");
-		pccintr_establish(PCCV_TIMER2, &sc->sc_statih, "stat");
+		pccintr_establish(PCCV_TIMER1, &sc->sc_profih);
+		pccintr_establish(PCCV_TIMER2, &sc->sc_statih);
 		break;
 #endif
 #if NMC > 0
 	case BUS_MC:
 		prof_reset = ca->ca_ipl | MC_IRQ_IEN | MC_IRQ_ICLR;
 		stat_reset = ca->ca_ipl | MC_IRQ_IEN | MC_IRQ_ICLR;
-		mcintr_establish(MCV_TIMER1, &sc->sc_profih, "clock");
-		mcintr_establish(MCV_TIMER2, &sc->sc_statih, "stat");
+		mcintr_establish(MCV_TIMER1, &sc->sc_profih);
+		mcintr_establish(MCV_TIMER2, &sc->sc_statih);
 		break;
 #endif
 #if NPCCTWO > 0
 	case BUS_PCCTWO:
 		prof_reset = ca->ca_ipl | PCC2_IRQ_IEN | PCC2_IRQ_ICLR;
 		stat_reset = ca->ca_ipl | PCC2_IRQ_IEN | PCC2_IRQ_ICLR;
-		pcctwointr_establish(PCC2V_TIMER1, &sc->sc_profih, "clock");
-		pcctwointr_establish(PCC2V_TIMER2, &sc->sc_statih, "stat");
+		pcctwointr_establish(PCC2V_TIMER1, &sc->sc_profih);
+		pcctwointr_establish(PCC2V_TIMER2, &sc->sc_statih);
 		break;
 #endif
 	}
@@ -207,7 +218,6 @@ clockintr(arg)
 		break;
 #endif
 	}
-
 	hardclock(arg);
 	return (1);
 }
@@ -216,7 +226,6 @@ clockintr(arg)
  * Set up real-time clock; we don't have a statistics clock at
  * present.
  */
-void
 cpu_initclocks()
 {
 	register int statint, minint;
@@ -366,13 +375,10 @@ statintr(cap)
 	return (1);
 }
 
-void
 delay(us)
-	int us;
+	register int us;
 {
-#if (NPCC > 0) || (NPCCTWO > 0)
 	volatile register int c;
-#endif
 
 	switch (clockbus) {
 #if NPCC > 0
@@ -385,7 +391,7 @@ delay(us)
 		c = 2 * us;
 		while (--c > 0)
 			;
-		break;
+		return (0);
 #endif
 #if NMC > 0
 	case BUS_MC:
@@ -400,33 +406,19 @@ delay(us)
 
 		while (sys_mc->mc_t3count < us)
 			;
-		break;
+		return (0);
 #endif
 #if NPCCTWO > 0
 	case BUS_PCCTWO:
 		/*
-		 * Use the first VMEChip2 timer in polling mode whenever
-		 * possible. However, since clock attaches before vme,
-		 * use a tight loop if necessary.
+		 * XXX MVME167 doesn't have a 3rd free-running timer,
+		 * so we use a stupid loop. Fix the code to watch t1:
+		 * the profiling timer.
 		 */
-	{
-		struct vme2reg *vme2;
-
-		if (sys_vme2 != NULL)
-			vme2 = sys_vme2;
-		else
-			vme2 = (struct vme2reg *)IIOV(0xfff40000);
-
-		vme2->vme2_t1cmp = 0xffffffff;
-		vme2->vme2_t1count = 0;
-		vme2->vme2_tctl |= VME2_TCTL_CEN;
-
-		while (vme2->vme2_t1count < us)
+		c = 4 * us;
+		while (--c > 0)
 			;
-
-		vme2->vme2_tctl &= ~VME2_TCTL_CEN;
-	}
-		break;
+		return (0);
 #endif
 	}
 }

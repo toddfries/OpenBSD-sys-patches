@@ -1,48 +1,45 @@
-#	$OpenBSD: Makefile,v 1.9 2007/11/25 18:25:29 deraadt Exp $
-#	$NetBSD: Makefile,v 1.12 1997/04/17 07:27:49 thorpej Exp $
+#	$OpenBSD: Makefile,v 1.3 1996/07/29 23:01:50 niklas Exp $
+#	$NetBSD: Makefile,v 1.4 1995/11/23 02:40:29 cgd Exp $
 
-S=	${.CURDIR}/../../../..
+.PATH: ${.CURDIR}/.. ${.CURDIR}/../../../../lib/libsa
 
-.PATH: ${.CURDIR}/..
-
-PROG = bootxx
-
-SRCS = start.S bootxx.c prom.c prom_disp.S puts.c
-NOMAN=
-INSTALL_STRIP=
-BINMODE= 444
-
+BOOT_PROG = bootxx
 BOOT_RELOC = ${PRIMARY_LOAD_ADDRESS}
+
+BOOT_SRCS = start.S bootxx.c prom.c prom_disp.S bzero.c puts.c
+BOOT_OBJS = ${BOOT_SRCS:N*.h:R:S/$/.o/g}
+
 HEADERSIZE_PROG = headersize
 
-CLEANFILES+= ${PROG}.sym ${PROG}.nosym ${PROG}.trunc ${HEADERSIZE_PROG}
+AFLAGS += -DASSEMBLER
+CPPFLAGS += -I${.CURDIR}/../.. -DPRIMARY_BOOTBLOCK
+CFLAGS = -Werror -mno-fp-regs -g
 
-.PATH:	${S}/lib/libkern/arch/alpha ${S}/lib/libkern
-SRCS+=	bzero.c
+.PATH: ${.CURDIR}/../../../../lib/libkern
 
-DEFNS= -DPRIMARY_BOOTBLOCK
-DEFNS+= -DALPHA_BOOT_ELF
+all: ${BOOT_PROG}
 
-AFLAGS += -DASSEMBLER ${DEFNS}
-CPPFLAGS += -I${.CURDIR}/../.. -I${S} ${DEFNS}
-CFLAGS = -Werror -mno-fp-regs
+${BOOT_PROG}: ${BOOT_OBJS} ${HEADERSIZE_PROG}
+	${LD} -Ttext ${BOOT_RELOC} -N -e start -o ${BOOT_PROG}.coff \
+	    ${BOOT_OBJS}
+	size ${BOOT_PROG}.coff
+	strip ${BOOT_PROG}.coff
+	dd if=${BOOT_PROG}.coff of=${BOOT_PROG}.nohdr \
+	    bs=`./${HEADERSIZE_PROG} < ${BOOT_PROG}.coff` skip=1
+	dd if=${BOOT_PROG}.nohdr of=${BOOT_PROG} bs=`expr 15 \* 512` conv=sync
 
-${PROG}.nosym: ${PROG}.sym
-	cp ${PROG}.sym ${PROG}.nosym
-	strip ${PROG}.nosym
+install:
+	install -c -o bin -g bin -m 444 ${BOOT_PROG} \
+	    ${DESTDIR}${BINDIR}/${BOOT_PROG}
 
-${PROG}: ${PROG}.nosym #${HEADERSIZE_PROG}
-	objcopy --output-target=binary ${PROG}.nosym ${PROG}.trunc
-	dd if=${PROG}.trunc of=${PROG} obs=`expr 15 \* 512` conv=osync
-#	dd if=${PROG}.nosym of=${PROG} \
-#	    ibs=`./${HEADERSIZE_PROG} ${BOOT_RELOC} ${PROG}.nosym` skip=1 \
-#	    obs=`expr 15 \* 512` conv=osync
+clean: _SUBDIRUSE
+	rm -f a.out [Ee]rrs mklog core *.core \
+	    ${BOOT_PROG} ${BOOT_OBJS} ${CLEANFILES} \
+	    ${BOOT_PROG}.coff ${BOOT_PROG}.nohdr ${HEADERSIZE_PROG}
 
-# no lint here (yet?)
-lint:
+cleandir: _SUBDIRUSE clean
 
-.include <bsd.prog.mk>
-
-${PROG}.sym: ${OBJS}
-	${LD} -Ttext ${BOOT_RELOC} -N -e start -o ${PROG}.sym ${OBJS}
-	size ${PROG}.sym
+.include "${.CURDIR}/../Makefile.inc"
+.include <bsd.obj.mk>
+.include <bsd.dep.mk>
+.include <bsd.subdir.mk>

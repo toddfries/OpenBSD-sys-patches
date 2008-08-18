@@ -1,5 +1,5 @@
-/*	$OpenBSD: in_cksum.c,v 1.8 2008/02/16 23:01:16 miod Exp $	*/
-/*	$NetBSD: in_cksum.c,v 1.4 1996/11/13 21:13:06 cgd Exp $	*/
+/*	$OpenBSD: in_cksum.c,v 1.2 1996/07/29 22:57:37 niklas Exp $	*/
+/*	$NetBSD: in_cksum.c,v 1.2.4.1 1996/05/30 23:12:50 cgd Exp $	*/
 
 /*
  * Copyright (c) 1988, 1992, 1993
@@ -15,7 +15,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,11 +41,7 @@
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/systm.h>
-#include <sys/socketvar.h>
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
-#include <netinet/ip_var.h>
 
 /*
  * Checksum routine for Internet Protocol family headers
@@ -83,14 +83,17 @@ union q_util {
 	u_int64_t q;
 };
 
-static u_int64_t
-in_cksumdata(caddr_t buf, int len)
+u_int64_t
+in_cksumdata(buf, len)
+	register caddr_t buf;
+	register int len;
 {
 	const u_int32_t *lw = (u_int32_t *) buf;
 	u_int64_t sum = 0;
 	u_int64_t prefilled;
 	int offset;
 	union q_util q_util;
+	union l_util l_util;
 
 	if ((3 & (long) lw) == 0 && len == 20) {
 	     sum = (u_int64_t) lw[0] + lw[1] + lw[2] + lw[3] + lw[4];
@@ -165,14 +168,16 @@ in_cksumdata(caddr_t buf, int len)
 }
 
 int
-in_cksum(struct mbuf *m, int len)
+in_cksum(m, len)
+	register struct mbuf *m;
+	register int len;
 {
-	u_int64_t sum = 0;
-	int mlen = 0;
-	int clen = 0;
-	caddr_t addr;
-	union l_util l_util;
+	register u_int64_t sum = 0;
+	register int mlen = 0;
+	register int clen = 0;
+	register caddr_t addr;
 	union q_util q_util;
+	union l_util l_util;
 
 	for (; m && len; m = m->m_next) {
 		if (m->m_len == 0)
@@ -188,63 +193,6 @@ in_cksum(struct mbuf *m, int len)
 
 		clen += mlen;
 		len -= mlen;
-	}
-	REDUCE16;
-	return (~sum & 0xffff);
-}
-
-int
-in4_cksum(struct mbuf *m, u_int8_t nxt, int off, int len)
-{
-	u_int64_t sum = 0;
-	int mlen = 0;
-	int clen = 0;
-	caddr_t addr;
-	union q_util q_util;
-	union l_util l_util; 
-	struct ipovly ipov;
-
-	if (nxt != 0) {
-#ifdef DEBUG
-		/* pseudo header */
-		if (off < sizeof(struct ipovly))
-			panic("in4_cksum: offset too short");
-		if (m->m_len < sizeof(struct ip))
-			panic("in4_cksum: bad mbuf chain");
-#endif
-
-		memset(&ipov, 0, sizeof(ipov));
-
-		ipov.ih_len = htons(len);
-		ipov.ih_pr = nxt;
-		ipov.ih_src = mtod(m, struct ip *)->ip_src;
-		ipov.ih_dst = mtod(m, struct ip *)->ip_dst;
-
-		sum += in_cksumdata((caddr_t) &ipov, sizeof(ipov));
-	}
-
-	/* skip over unnecessary part */
-	while (m != NULL && off > 0) {
-		if (m->m_len > off)
-			break;
-		off -= m->m_len;
-		m = m->m_next;
-	}
-
-	for (; m && len; m = m->m_next, off = 0) {
-		if (m->m_len == 0)
-			continue;
-		mlen = m->m_len - off;
-		if (len < mlen)
-			mlen = len;
-		addr = mtod(m, caddr_t) + off;
-		if ((clen ^ (long) addr) & 1)
-			sum += in_cksumdata(addr, mlen) << 8;
- 		else
-			sum += in_cksumdata(addr, mlen);
- 
- 		clen += mlen;
- 		len -= mlen;
 	}
 	REDUCE16;
 	return (~sum & 0xffff);

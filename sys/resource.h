@@ -1,4 +1,4 @@
-/*	$OpenBSD: resource.h,v 1.7 2003/12/11 23:02:30 millert Exp $	*/
+/*	$OpenBSD: resource.h,v 1.2 1996/03/03 12:12:12 niklas Exp $	*/
 /*	$NetBSD: resource.h,v 1.14 1996/02/09 18:25:27 christos Exp $	*/
 
 /*
@@ -13,7 +13,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,7 +61,7 @@ struct	rusage {
 	struct timeval ru_stime;	/* system time used */
 	long	ru_maxrss;		/* max resident set size */
 #define	ru_first	ru_ixrss
-	long	ru_ixrss;		/* integral shared text memory size */
+	long	ru_ixrss;		/* integral shared memory size */
 	long	ru_idrss;		/* integral unshared data " */
 	long	ru_isrss;		/* integral unshared stack " */
 	long	ru_minflt;		/* page reclaims */
@@ -88,9 +92,7 @@ struct	rusage {
 
 #define	RLIM_NLIMITS	9		/* number of resource limits */
 
-#define	RLIM_INFINITY	(((rlim_t)1 << 63) - 1)
-#define	RLIM_SAVED_MAX	RLIM_INFINITY
-#define	RLIM_SAVED_CUR	RLIM_INFINITY
+#define	RLIM_INFINITY	(((u_quad_t)1 << 63) - 1)
 
 struct orlimit {
 	int32_t	rlim_cur;		/* current (soft) limit */
@@ -110,18 +112,18 @@ struct loadavg {
 
 #ifdef _KERNEL
 extern struct loadavg averunnable;
-int	dosetrlimit(struct proc *, u_int, struct rlimit *);
-int	donice(struct proc *, struct proc *, int);
+int	dosetrlimit __P((struct proc *, u_int, struct rlimit *));
+int	donice __P((struct proc *, struct proc *, int));
 
 #else
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int	getpriority(int, id_t);
-int	getrlimit(int, struct rlimit *);
-int	getrusage(int, struct rusage *);
-int	setpriority(int, id_t, int);
-int	setrlimit(int, const struct rlimit *);
+int	getpriority __P((int, int));
+int	getrlimit __P((int, struct rlimit *));
+int	getrusage __P((int, struct rusage *));
+int	setpriority __P((int, int, int));
+int	setrlimit __P((int, const struct rlimit *));
 __END_DECLS
 
 #endif	/* _KERNEL */

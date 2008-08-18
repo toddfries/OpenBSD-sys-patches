@@ -1,5 +1,4 @@
-/*	$OpenBSD: if_en_sbus.c,v 1.7 2006/06/02 20:00:54 miod Exp $	*/
-/*	$NetBSD: if_en_sbus.c,v 1.4 1997/05/24 20:16:22 pk Exp $	*/
+/*	$OpenBSD: if_en_sbus.c,v 1.2 1996/06/21 21:37:37 chuck Exp $	*/
 
 /*
  *
@@ -70,6 +69,7 @@ struct en_sbus_softc {
   struct en_softc esc;		/* includes "device" structure */
 
   /* sbus glue */
+  struct sbusdev sc_sd;		/* sbus device */
   struct intrhand sc_ih;	/* interrupt vectoring */
 };
 
@@ -83,8 +83,8 @@ struct en_sbus_softc {
  * prototypes
  */
 
-static	int en_sbus_match(struct device *, void *, void *);
-static	void en_sbus_attach(struct device *, struct device *, void *);
+static	int en_sbus_match __P((struct device *, void *, void *));
+static	void en_sbus_attach __P((struct device *, struct device *, void *));
 
 /*
  * SBUS autoconfig attachments
@@ -138,7 +138,8 @@ void *aux;
     return;
   }
 
-  sc->en_base = (caddr_t) mapiodev(ca->ca_ra.ra_reg, 0, 4*1024*1024);
+  sc->en_base = (caddr_t) mapiodev(ca->ca_ra.ra_reg, 0, 4*1024*1024,
+        ca->ca_bustype);
 
   if (ca->ca_ra.ra_nintr == 1) {
     sc->ipl = ca->ca_ra.ra_intr[0].int_pri;
@@ -160,7 +161,7 @@ void *aux;
   }
   scs->sc_ih.ih_fun = en_intr;
   scs->sc_ih.ih_arg = sc;
-  intr_establish(EN_IPL, &scs->sc_ih, IPL_NET, self->dv_xname);
+  intr_establish(EN_IPL, &scs->sc_ih);
 
   /*
    * done SBUS specific stuff

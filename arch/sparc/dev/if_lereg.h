@@ -1,4 +1,3 @@
-/*	$OpenBSD: if_lereg.h,v 1.6 2005/04/19 21:30:19 miod Exp $	*/
 /*	$NetBSD: if_lereg.h,v 1.5 1995/12/10 10:15:07 mycroft Exp $ */
 
 /*-
@@ -17,7 +16,11 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the University nor the names of its contributors
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,15 +39,12 @@
  *	@(#)if_le.c	8.2 (Berkeley) 11/16/93
  */
 
-#define	MEMSIZE	0x8000
+#define	MEMSIZE	0x4000
 
 /*
  * LANCE registers.
  */
 struct lereg1 {
 	volatile u_int16_t	ler1_rdp;	/* data port */
-#ifdef solbourne
-	volatile u_char		ler1_pad[6];
-#endif
 	volatile u_int16_t	ler1_rap;	/* register select port */
 };
