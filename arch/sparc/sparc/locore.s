@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.19 1998/02/24 07:33:36 deraadt Exp $	*/
+/*	$OpenBSD: locore.s,v 1.21 1998/09/29 19:04:39 millert Exp $	*/
 /*	$NetBSD: locore.s,v 1.73 1997/09/13 20:36:48 pk Exp $	*/
 
 /*
@@ -52,6 +52,7 @@
  */
 
 #include "assym.h"
+#include "ksyms.h"
 #include <machine/param.h>
 #include <sparc/sparc/intreg.h>
 #include <sparc/sparc/timerreg.h>
@@ -3226,7 +3227,7 @@ dostart:
 	 * we have to be sure to use only pc-relative addressing.
 	 */
 
-#ifdef DDB
+#if defined(DDB) || NKSYMS > 0
 	/*
 	 * First, check for DDB arguments. The loader passes `_esym' in %o4.
 	 * A DDB magic number is passed in %o5 to allow for bootloaders
@@ -3395,7 +3396,7 @@ start_havetype:
 	clr	%l0			! lowva
 	set	KERNBASE, %l1		! highva
 	set	_end + (2 << 18), %l2	! last va that must be remapped
-#ifdef DDB
+#if defined(DDB) || NKSYMS > 0
 	sethi	%hi(_esym - KERNBASE), %o1
 	ld	[%o1+%lo(_esym - KERNBASE)], %o1
 	tst	%o1
@@ -5897,7 +5898,7 @@ Llongjmpbotch:
 	 mov	%g6, %o0
 
 	.data
-#ifdef DDB
+#if defined(DDB) || NKSYMS > 0
 	.globl	_esym
 _esym:
 	.word	0

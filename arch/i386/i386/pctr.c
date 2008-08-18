@@ -1,4 +1,4 @@
-/*	$OpenBSD: pctr.c,v 1.10 1997/08/16 16:31:18 mickey Exp $	*/
+/*	$OpenBSD: pctr.c,v 1.12 1998/06/04 04:56:42 downsj Exp $	*/
 
 /*
  * Pentium performance counter driver for OpenBSD.
@@ -20,34 +20,40 @@
 #include <machine/psl.h>
 #include <machine/pctr.h>
 #include <machine/cpu.h>
+#include <machine/specialreg.h>
 
 pctrval pctr_idlcnt;  /* Gets incremented in locore.s */
 
-static int usetsc;
-static int usep5ctr;
-static int usep6ctr;
+/* Pull in the cpuid values from locore.s */
+extern int cpu_id;
+extern int cpu_feature;
+extern char cpu_vendor[];
+
+int pctr_isintel;
+
+#define usetsc		(cpu_feature & CPUID_TSC)
+#define usep5ctr	(pctr_isintel && (((cpu_id >> 8) & 15) == 5) && \
+				(((cpu_id >> 4) & 15) > 0))
+#define usep6ctr	(pctr_isintel && ((cpu_id >> 8) & 15) == 6)
 
 void pctrattach __P((int));
 int pctropen __P((dev_t, int, int, struct proc *));
 int pctrclose __P((dev_t, int, int, struct proc *));
 int pctrioctl __P((dev_t, int, caddr_t, int, struct proc *));
+int p5ctrsel __P((int fflag, u_int cmd, u_int fn));
+static __inline void p5ctrrd __P((struct pctrst *st));
+int p6ctrsel __P((int fflag, u_int cmd, u_int fn));
+static __inline void p6ctrrd __P((struct pctrst *st));
 
 void
-pctrattach (int num)
+pctrattach (num)
+	int num;
 {
-	pctrval id;
-
-	if (num > 1) {
-		printf ("Ignoring pctr device #%d\n", num);
-		printf ("(config file should read `pseudo-device pctr 1')\n");
+	if (num > 1)
 		return;
-	}
 
-	id = __cpuid ();
-	usetsc = __hastsc (id);
-	usep5ctr = __hasp5ctr (id);
-	usep6ctr = __hasp6ctr (id);
-	
+	pctr_isintel = (strcmp(cpu_vendor, "GenuineIntel") == 0);
+
 	if (usep6ctr)
 		/* Enable RDTSC and RDPMC instructions from user-level. */
 		__asm __volatile (".byte 0xf,0x20,0xe0   # movl %%cr4,%%eax\n"
@@ -63,11 +69,9 @@ pctrattach (int num)
 				  :: "i" (~CR4_TSD) : "eax");
 
 	if (usep6ctr)
-		printf ("pctr: Pentium Pro user-level "
-			"performance counters enabled\n");
+		printf ("pctr: 686-class user-level performance counters enabled\n");
 	else if (usep5ctr)
-		printf ("pctr: Pentium performance counters and user-level "
-			"cycle counter enabled\n");
+		printf ("pctr: 586-class performance counters and user-level cycle counter enabled\n");
 	else if (usetsc)
 		printf ("pctr: user-level cycle counter enabled\n");
 	else
@@ -75,7 +79,11 @@ pctrattach (int num)
 }
 
 int
-pctropen (dev_t dev, int oflags, int devtype, struct proc *p)
+pctropen (dev, oflags, devtype, p)
+	dev_t dev;
+	int oflags;
+	int devtype;
+	struct proc *p;
 {
 	if (minor (dev))
 		return ENXIO;
@@ -83,13 +91,20 @@ pctropen (dev_t dev, int oflags, int devtype, struct proc *p)
 }
 
 int
-pctrclose (dev_t dev, int oflags, int devtype, struct proc *p)
+pctrclose (dev, oflags, devtype, p)
+	dev_t dev;
+	int oflags;
+	int devtype;
+	struct proc *p;
 {
 	return 0;
 }
 
-static int
-p5ctrsel (int fflag, u_int cmd, u_int fn)
+int
+p5ctrsel (fflag, cmd, fn)
+	int fflag;
+	u_int cmd;
+	u_int fn;
 {
 	pctrval msr11;
 	int msr;
@@ -116,7 +131,8 @@ p5ctrsel (int fflag, u_int cmd, u_int fn)
 }
 
 static __inline void
-p5ctrrd (struct pctrst *st)
+p5ctrrd (st)
+	struct pctrst *st;
 {
 	u_int msr11;
 
@@ -130,8 +146,11 @@ p5ctrrd (struct pctrst *st)
 	__asm __volatile ("sti");
 }
 
-static int
-p6ctrsel (int fflag, u_int cmd, u_int fn)
+int
+p6ctrsel (fflag, cmd, fn)
+	int fflag;
+	u_int cmd;
+	u_int fn;
 {
 	int msrsel, msrval;
 
@@ -150,11 +169,12 @@ p6ctrsel (int fflag, u_int cmd, u_int fn)
 	wrmsr (msrsel, fn);
 	wrmsr (msrval, 0);
 
-  return 0;
+	return 0;
 }
 
 static __inline void
-p6ctrrd (struct pctrst *st)
+p6ctrrd (st)
+	struct pctrst *st;
 {
 	st->pctr_fn[0] = rdmsr (P6MSR_CTRSEL0);
 	st->pctr_fn[1] = rdmsr (P6MSR_CTRSEL1);
@@ -167,7 +187,12 @@ p6ctrrd (struct pctrst *st)
 
 
 int
-pctrioctl (dev_t dev, int cmd, caddr_t data, int fflag, struct proc *p)
+pctrioctl (dev, cmd, data, fflag, p)
+	dev_t dev;
+	int cmd;
+	caddr_t data;
+	int fflag;
+	struct proc *p;
 {
 	switch (cmd) {
 	case PCIOCRD:

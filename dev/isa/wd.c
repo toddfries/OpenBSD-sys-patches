@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.32 1997/12/10 23:09:37 rees Exp $	*/
+/*	$OpenBSD: wd.c,v 1.38 1998/10/04 01:46:42 millert Exp $	*/
 /*	$NetBSD: wd.c,v 1.150 1996/05/12 23:54:03 mycroft Exp $ */
 
 /*
@@ -92,7 +92,8 @@ struct cfdriver wd_cd = {
 	NULL, "wd", DV_DISK
 };
 
-void	wdgetdisklabel	__P((dev_t, struct wd_softc *));
+void	wdgetdisklabel __P((dev_t, struct wd_softc *, struct disklabel *,
+			    struct cpu_disklabel *, int));
 int	wd_get_parms	__P((struct wd_softc *));
 void	wdstrategy	__P((struct buf *));
 
@@ -175,16 +176,29 @@ wdattach(parent, self, aux)
 
 	printf(": <%s>\n", buf);
 	if (d_link->sc_lp->d_type != DTYPE_ST506) {
-		printf("%s: %dMB, %d cyl, %d head, %d sec, %d bytes/sec (%dKB cache)\n",
-		    self->dv_xname,
-		    d_link->sc_params.wdp_cylinders *
-		    (d_link->sc_params.wdp_heads *
-		     d_link->sc_params.wdp_sectors) / (1048576 / DEV_BSIZE),
-		    d_link->sc_params.wdp_cylinders,
-		    d_link->sc_params.wdp_heads,
-		    d_link->sc_params.wdp_sectors,
-		    DEV_BSIZE,
-		    d_link->sc_params.wdp_bufsize / 2);
+		if ((d_link->sc_params.wdp_capabilities & WD_CAP_LBA) != 0) {
+			printf("%s: %dMB, %d cyl, %d head, %d sec, %d bytes/sec, %d sec total\n",
+				self->dv_xname,
+				d_link->sc_params.wdp_lbacapacity / 2048,
+				d_link->sc_params.wdp_cylinders,
+				d_link->sc_params.wdp_heads,
+				d_link->sc_params.wdp_sectors,
+				DEV_BSIZE, /* XXX */
+				d_link->sc_params.wdp_lbacapacity);
+		} else {
+			printf("%s: %dMB, %d cyl, %d head, %d sec, %d bytes/sec, %d sec total\n",
+				self->dv_xname,
+				d_link->sc_params.wdp_cylinders *
+					(d_link->sc_params.wdp_heads *
+					 d_link->sc_params.wdp_sectors) / (1048576 / DEV_BSIZE),
+				d_link->sc_params.wdp_cylinders,
+				d_link->sc_params.wdp_heads,
+				d_link->sc_params.wdp_sectors,
+				DEV_BSIZE, /* XXX */
+				d_link->sc_params.wdp_cylinders *
+					(d_link->sc_params.wdp_heads *
+					 d_link->sc_params.wdp_sectors));
+		}
 	}
 
 #if NISADMA > 0
@@ -193,13 +207,13 @@ wdattach(parent, self, aux)
 		d_link->sc_mode = WDM_DMA;
 	} else
 #endif
-	if (d_link->sc_params.wdp_maxmulti > 1) {
-		d_link->sc_mode = WDM_PIOMULTI;
-		d_link->sc_multiple = min(d_link->sc_params.wdp_maxmulti, 16);
-	} else {
-		d_link->sc_mode = WDM_PIOSINGLE;
-		d_link->sc_multiple = 1;
-	}
+		if (d_link->sc_params.wdp_maxmulti > 1) {
+			d_link->sc_mode = WDM_PIOMULTI;
+			d_link->sc_multiple = min(d_link->sc_params.wdp_maxmulti, 16);
+		} else {
+			d_link->sc_mode = WDM_PIOSINGLE;
+			d_link->sc_multiple = 1;
+		}
 
 	printf("%s: using", wd->sc_dev.dv_xname);
 #if NISADMA > 0
@@ -208,12 +222,15 @@ wdattach(parent, self, aux)
 	else
 #endif
 		printf(" %d-sector %d-bit pio transfers,",
-		    d_link->sc_multiple,
-		    (d_link->sc_flags & WDF_32BIT) == 0 ? 16 : 32);
+		       d_link->sc_multiple,
+		       (d_link->sc_flags & WDF_32BIT) == 0 ? 16 : 32);
 	if ((d_link->sc_params.wdp_capabilities & WD_CAP_LBA) != 0)
-		printf(" lba addressing\n");
+		printf(" lba addressing");
 	else
-		printf(" chs addressing\n");
+		printf(" chs addressing");
+	if (d_link->sc_params.wdp_bufsize > 0)
+		printf(" (%dKB cache)", d_link->sc_params.wdp_bufsize / 2);
+	printf("\n");
 }
 
 /*
@@ -435,7 +452,8 @@ wdopen(dev, flag, fmt, p)
 			}
 
 			/* Load the partition info if not already loaded. */
-			wdgetdisklabel(dev, wd);
+			wdgetdisklabel(dev, wd, wd->sc_dk.dk_label,
+			    wd->sc_dk.dk_cpulabel, 0);
 		}
 	}
 
@@ -510,18 +528,20 @@ wdclose(dev, flag, fmt, p)
  * Fabricate a default disk label, and try to read the correct one.
  */
 void
-wdgetdisklabel(dev, wd)
+wdgetdisklabel(dev, wd, lp, clp, spoofonly)
 	dev_t dev;
 	struct wd_softc *wd;
+	struct disklabel *lp;
+	struct cpu_disklabel *clp;
+	int spoofonly;
 {
-	struct disklabel *lp = wd->sc_dk.dk_label;
 	struct wd_link *d_link = wd->d_link;
 	char *errstring;
 
 	WDDEBUG_PRINT(("wdgetdisklabel\n"));
 
 	bzero(lp, sizeof(struct disklabel));
-	bzero(wd->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
+	bzero(clp, sizeof(struct cpu_disklabel));
 
 	lp->d_secsize = DEV_BSIZE;
 	lp->d_ntracks = d_link->sc_params.wdp_heads;
@@ -529,12 +549,19 @@ wdgetdisklabel(dev, wd)
 	lp->d_ncylinders = d_link->sc_params.wdp_cylinders;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
 
-#if 0
-	strncpy(lp->d_typename, "ST506 disk", 16);
-	lp->d_type = DTYPE_ST506;
-#endif
+	if (d_link->sc_params.wdp_config == WD_CFG_FIXED) {
+		strncpy(lp->d_typename, "ST506/MFM/RLL disk", 16);
+		lp->d_type = DTYPE_ST506;
+	} else {
+		strncpy(lp->d_typename, "ESDI/IDE disk", 16);
+		lp->d_type = DTYPE_ESDI;
+	}
 	strncpy(lp->d_packname, d_link->sc_params.wdp_model, 16);
-	lp->d_secperunit = lp->d_secpercyl * lp->d_ncylinders;
+	if ((d_link->sc_params.wdp_capabilities & WD_CAP_LBA))
+		lp->d_secperunit = d_link->sc_params.wdp_lbacapacity;
+	else 
+		lp->d_secperunit = lp->d_secpercyl * lp->d_ncylinders;
+
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
 	lp->d_flags = 0;
@@ -553,8 +580,12 @@ wdgetdisklabel(dev, wd)
 
 	if (d_link->sc_state > RECAL)
 		d_link->sc_state = RECAL;
-	errstring = readdisklabel(WDLABELDEV(dev), wdstrategy, lp,
-	    wd->sc_dk.dk_cpulabel);
+
+	/*
+	 * Call the generic disklabel extraction routine
+	 */
+	errstring = readdisklabel(WDLABELDEV(dev), wdstrategy, lp, clp,
+	    spoofonly);
 	if (errstring) {
 		/*
 		 * This probably happened because the drive's default
@@ -564,8 +595,8 @@ wdgetdisklabel(dev, wd)
 		 */
 		if (d_link->sc_state > GEOMETRY)
 			d_link->sc_state = GEOMETRY;
-		errstring = readdisklabel(WDLABELDEV(dev), wdstrategy, lp,
-		    wd->sc_dk.dk_cpulabel);
+		errstring = readdisklabel(WDLABELDEV(dev), wdstrategy, lp, clp,
+		    spoofonly);
 	}
 	if (errstring) {
 		/*printf("%s: %s\n", wd->sc_dev.dv_xname, errstring);*/
@@ -579,7 +610,6 @@ wdgetdisklabel(dev, wd)
 		bad144intern(wd);
 #endif
 }
-
 
 /*
  * Tell the drive what geometry to use.
@@ -633,6 +663,13 @@ wdioctl(dev, xfer, addr, flag, p)
 		return 0;
 #endif
 
+	case DIOCGPDINFO: {
+			struct cpu_disklabel osdep;
+
+			wdgetdisklabel(dev, wd, (struct disklabel *)addr,
+			    &osdep, 1);
+			return 0;
+		}
 	case DIOCGDINFO:
 		*(struct disklabel *)addr = *(wd->sc_dk.dk_label);
 		return 0;

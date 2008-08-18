@@ -1,27 +1,33 @@
-/*	$OpenBSD: ip_esp.c,v 1.13 1997/11/04 09:11:09 provos Exp $	*/
+/*	$OpenBSD: ip_esp.c,v 1.16 1998/06/10 23:57:14 provos Exp $	*/
 
 /*
- * The author of this code is John Ioannidis, ji@tla.org,
- * 	(except when noted otherwise).
+ * The authors of this code are John Ioannidis (ji@tla.org),
+ * Angelos D. Keromytis (kermit@csd.uch.gr) and 
+ * Niels Provos (provos@physnet.uni-hamburg.de).
  *
- * This code was written for BSD/OS in Athens, Greece, in November 1995.
+ * This code was written by John Ioannidis for BSD/OS in Athens, Greece, 
+ * in November 1995.
  *
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
- * by Angelos D. Keromytis, kermit@forthnet.gr.
+ * by Angelos D. Keromytis.
  *
- * Additional transforms and features in 1997 by Angelos D. Keromytis and
- * Niels Provos.
+ * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
+ * and Niels Provos.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
  * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
- * modification of this software.
+ * modification of this software. 
+ * You may use this code under the GNU public license if you so wish. Please
+ * contribute changes back to the authors under this freer than GPL license
+ * so that we may further the use of strong encryption without limitations to
+ * all.
  *
  * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTY. IN PARTICULAR, NEITHER AUTHOR MAKES ANY
+ * IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
  * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
  * MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
  * PURPOSE.
@@ -47,6 +53,8 @@
 #include <net/if.h>
 #include <net/route.h>
 #include <net/netisr.h>
+#include <net/bpf.h>
+#include <net/if_enc.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -63,6 +71,8 @@
 #include <netinet/ip_ipsp.h>
 #include <netinet/ip_esp.h>
 #include <sys/syslog.h>
+
+#include "bpfilter.h"
 
 void	esp_input __P((struct mbuf *, int));
 
@@ -204,30 +214,80 @@ esp_input(register struct mbuf *m, int iphlen)
     ipo = mtod(m, struct ip *);
     if (ipo->ip_p == IPPROTO_IPIP)	/* IP-in-IP encapsulation */
     {
+	/* ipn will now contain the inner IP header */
+	m_copydata(m, ipo->ip_hl << 2, sizeof(struct ip), (caddr_t) &ipn);
+	
 	/* Encapsulating SPI */
 	if (tdbp->tdb_osrc.s_addr && tdbp->tdb_odst.s_addr)
 	{
 	    if (tdbp->tdb_flags & TDBF_UNIQUE)
-	      if ((ipn.ip_src.s_addr != ipo->ip_src.s_addr) ||
-		  (ipn.ip_dst.s_addr != ipo->ip_dst.s_addr))
-	      {
-		  if (encdebug)
-		    log(LOG_ALERT, "esp_input(): ESP-tunnel with different internal addresses %x/%x, SA %08x/%x\n", ipo->ip_src, ipo->ip_dst, tdbp->tdb_spi, tdbp->tdb_dst);
-		  m_freem(m);
-		  espstat.esps_hdrops++;
-		  return;
-	      }
+		if ((ipn.ip_src.s_addr != ipo->ip_src.s_addr) ||
+		    (ipn.ip_dst.s_addr != ipo->ip_dst.s_addr))
+		{
+		    if (encdebug)
+			log(LOG_ALERT, "esp_input(): ESP-tunnel with different internal addresses %x/%x, SA %08x/%x\n", ipo->ip_src, ipo->ip_dst, tdbp->tdb_spi, tdbp->tdb_dst);
+		    m_freem(m);
+		    espstat.esps_hdrops++;
+		    return;
+		}
+
+	    /* 
+	     * XXX Here we should be checking that the inner IP addresses
+	     * XXX are acceptable/authorized.
+	     */
 	}
 	else				/* So we're paranoid */
 	{
 	    if (encdebug)
-	      log(LOG_ALERT, "esp_input(): ESP-tunnel used when expecting ESP-transport, SA %08x/%x\n", tdbp->tdb_spi, tdbp->tdb_dst);
+		log(LOG_ALERT, "esp_input(): ESP-tunnel used when expecting ESP-transport, SA %08x/%x\n", tdbp->tdb_spi, tdbp->tdb_dst);
 	    m_freem(m);
 	    espstat.esps_hdrops++;
 	    return;
 	}
     }
-    
+
+    /* 
+     * Check that the source address is an expected one, if we know what
+     * it's supposed to be. This avoids source address spoofing.
+     */
+    if (tdbp->tdb_src.s_addr != INADDR_ANY)
+	if (ipo->ip_src.s_addr != tdbp->tdb_src.s_addr)
+	{
+	    if (encdebug)
+		log(LOG_ALERT, "esp_input(): source address %x doesn't correspond to expected source %x, SA %08x/%x\n", ipo->ip_src, tdbp->tdb_src, tdbp->tdb_dst, tdbp->tdb_spi);
+	    m_free(m);
+	    espstat.esps_hdrops++;
+	    return;
+	}
+
+    /* Packet is confidental */
+    m->m_flags |= M_CONF;
+
+#if NBPFILTER > 0
+    if (enc_softc.if_bpf) 
+    {
+        /*
+         * We need to prepend the address family as
+         * a four byte field.  Cons up a dummy header
+         * to pacify bpf.  This is safe because bpf
+         * will only read from the mbuf (i.e., it won't
+         * try to free it or keep a pointer a to it).
+         */
+        struct mbuf m0;
+        struct enchdr hdr;
+
+	hdr.af = AF_INET;
+	hdr.spi = tdbp->tdb_spi;
+	hdr.flags = m->m_flags & (M_AUTH|M_CONF|M_TUNNEL);
+
+        m0.m_next = m;
+        m0.m_len = ENC_HDRLEN;
+        m0.m_data = (char *) &hdr;
+        
+        bpf_mtap(enc_softc.if_bpf, &m0);
+    }
+#endif
+
     /*
      * Interface pointer is already in first mbuf; chop off the 
      * `outer' header and reschedule.

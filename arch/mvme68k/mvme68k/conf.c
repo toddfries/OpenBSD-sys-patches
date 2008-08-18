@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.17 1997/11/23 05:21:56 mickey Exp $ */
+/*	$OpenBSD: conf.c,v 1.19 1998/09/25 09:20:53 todd Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt
@@ -144,6 +144,7 @@ cdev_decl(wl);
 #include "bugtty.h"
 cdev_decl(bugtty);
 
+
 /* open, close, write, ioctl */
 #define	cdev_lp_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
@@ -161,6 +162,12 @@ cdev_decl(bugtty);
 cdev_decl(lp);
 #include "lptwo.h"
 cdev_decl(lptwo);
+#ifdef XFS
+#include <xfs/nxfs.h>
+cdev_decl(xfs_dev);
+#endif
+#include "ksyms.h"
+cdev_decl(ksyms);
 
 cdev_decl(xd);
 cdev_decl(rd);
@@ -222,6 +229,19 @@ struct cdevsw	cdevsw[] =
 	cdev_random_init(1,random),	/* 40: random data source */
 	cdev_uk_init(NUK,uk),		/* 41: unknown SCSI */
 	cdev_ss_init(NSS,ss),           /* 42: SCSI scanner */
+	cdev_ksyms_init(NKSYMS,ksyms),	/* 43: Kernel symbols device */
+	cdev_lkm_dummy(),		/* 44 */
+	cdev_lkm_dummy(),		/* 45 */
+	cdev_lkm_dummy(),		/* 46 */
+	cdev_lkm_dummy(),		/* 47 */
+	cdev_lkm_dummy(),		/* 48 */
+	cdev_lkm_dummy(),		/* 49 */
+	cdev_lkm_dummy(),		/* 50 */
+#ifdef XFS
+	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#else
+	cdev_lkm_dummy(),		/* 51 */
+#endif
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

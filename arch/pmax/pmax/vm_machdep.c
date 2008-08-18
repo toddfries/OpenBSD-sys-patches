@@ -217,7 +217,7 @@ cpu_coredump(p, vp, cred, chdr)
 
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
 	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, (int *)NULL, p);
+	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
 	if (error)
 		return error;
 
@@ -225,8 +225,7 @@ cpu_coredump(p, vp, cred, chdr)
 			(caddr_t)(&(p -> p_addr -> u_pcb.pcb_regs)),
 			(off_t)chdr -> c_cpusize,
 	    		(off_t)(chdr->c_hdrsize + chdr->c_seghdrsize),
-			UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT,
-			cred, (int *)NULL, p);
+			UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, cred, NULL, p);
 
 	if (!error)
 		chdr->c_nseg++;
@@ -357,12 +356,12 @@ kvtophys(vm_offset_t kva)
 	pt_entry_t *pte;
 	vm_offset_t phys;
 
-        if (kva >= MACH_CACHED_MEMORY_ADDR && kva < MACH_UNCACHED_MEMORY_ADDR)
+        if (kva >= MIPS_KSEG0_START && kva < MIPS_KSEG1_START)
 	{
-		return (MACH_CACHED_TO_PHYS(kva));
+		return (MIPS_KSEG0_TO_PHYS(kva));
 	}
-	else if (kva >= MACH_UNCACHED_MEMORY_ADDR && kva < MACH_KSEG2_ADDR) {
-		return (MACH_UNCACHED_TO_PHYS(kva));
+	else if (kva >= MIPS_KSEG1_START && kva < MIPS_KSEG2_START) {
+		return (MIPS_KSEG1_TO_PHYS(kva));
 	}
 	else if (kva >= UADDR && kva < KERNELSTACK) {
 		int upage = (kva - UADDR) >> PGSHIFT;
@@ -371,7 +370,7 @@ kvtophys(vm_offset_t kva)
 		phys = (pte->pt_entry & PG_FRAME) |
 			(kva & PGOFSET);
 	}
-	else if (kva >= MACH_KSEG2_ADDR /*&& kva < VM_MAX_KERNEL_ADDRESS*/) {
+	else if (kva >= MIPS_KSEG2_START /*&& kva < VM_MAX_KERNEL_ADDRESS*/) {
 		pte = kvtopte(kva);
 
 		if ((pte - Sysmap) > Sysmapsize)  {

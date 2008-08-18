@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.7 1997/01/24 19:57:53 niklas Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.9 1998/07/01 02:47:37 angelos Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.6 1996/11/19 04:49:21 cgd Exp $	*/
 
 /*
@@ -40,6 +40,11 @@ typedef u_long pcitag_t;
 typedef u_long pci_intr_handle_t;
 
 /*
+ * Forward declarations.
+ */
+struct pci_attach_args;
+
+/*
  * alpha-specific PCI structure and type definitions.
  * NOT TO BE USED DIRECTLY BY MACHINE INDEPENDENT CODE.
  */
@@ -61,6 +66,11 @@ struct alpha_pci_chipset {
 	void		*(*pc_intr_establish) __P((void *, pci_intr_handle_t,
 			    int, int (*)(void *), void *, char *));
 	void		(*pc_intr_disestablish) __P((void *, void *));
+
+        /* alpha-specific */
+        void            *(*pc_pciide_compat_intr_establish) __P((void *,
+                            struct device *, struct pci_attach_args *, int,
+                            int (*)(void *), void *));
 };
 
 /*
@@ -93,6 +103,12 @@ struct alpha_pci_chipset {
  */
 void	pci_display_console __P((bus_space_tag_t, bus_space_tag_t,
 	    pci_chipset_tag_t, int, int, int));
+#define alpha_pci_decompose_tag(c, t, bp, dp, fp)                       \
+    (*(c)->pc_decompose_tag)((c)->pc_conf_v, (t), (bp), (dp), (fp))
+#define alpha_pciide_compat_intr_establish(c, d, p, ch, f, a)           \
+    ((c)->pc_pciide_compat_intr_establish == NULL ? NULL :              \
+     (*(c)->pc_pciide_compat_intr_establish)((c)->pc_conf_v, (d), (p),  \
+        (ch), (f), (a)))
 
 #ifdef _KERNEL
 void pci_display_console

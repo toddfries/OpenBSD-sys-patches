@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.24 1997/12/08 21:25:37 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.26 1998/07/07 07:12:40 deraadt Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -246,13 +246,13 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		securelevel = level;
 		return (0);
 	case KERN_HOSTNAME:
-		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		error = sysctl_tstring(oldp, oldlenp, newp, newlen,
 		    hostname, sizeof(hostname));
 		if (newp && !error)
 			hostnamelen = newlen;
 		return (error);
 	case KERN_DOMAINNAME:
-		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		error = sysctl_tstring(oldp, oldlenp, newp, newlen,
 		    domainname, sizeof(domainname));
 		if (newp && !error)
 			domainnamelen = newlen;
@@ -307,6 +307,26 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		    sizeof(rndstats)));
 	case KERN_NOSUIDCOREDUMP:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &nosuidcoredump));
+	case KERN_FSYNC:
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+	case KERN_SYSVMSG:
+#ifdef SYSVMSG
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+#else
+		return (sysctl_rdint(oldp, oldlenp, newp, 0));
+#endif
+	case KERN_SYSVSEM:
+#ifdef SYSVSEM
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+#else
+		return (sysctl_rdint(oldp, oldlenp, newp, 0));
+#endif
+	case KERN_SYSVSHM:
+#ifdef SYSVSHM
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+#else
+		return (sysctl_rdint(oldp, oldlenp, newp, 0));
+#endif
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -459,16 +479,52 @@ sysctl_string(oldp, oldlenp, newp, newlen, str, maxlen)
 	char *str;
 	int maxlen;
 {
+	return sysctl__string(oldp, oldlenp, newp, newlen, str, maxlen, 0);
+}
+
+int
+sysctl_tstring(oldp, oldlenp, newp, newlen, str, maxlen)
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	char *str;
+	int maxlen;
+{
+	return sysctl__string(oldp, oldlenp, newp, newlen, str, maxlen, 1);
+}
+
+int
+sysctl__string(oldp, oldlenp, newp, newlen, str, maxlen, trunc)
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	char *str;
+	int maxlen;
+	int trunc;
+{
 	int len, error = 0;
+	char c;
 
 	len = strlen(str) + 1;
-	if (oldp && *oldlenp < len)
-		return (ENOMEM);
+	if (oldp && *oldlenp < len) {
+		if (trunc == 0 || *oldlenp == 0)
+			return (ENOMEM);
+	}
 	if (newp && newlen >= maxlen)
 		return (EINVAL);
 	if (oldp) {
-		*oldlenp = len;
-		error = copyout(str, oldp, len);
+		if (trunc && *oldlenp < len) {
+			/* XXX save & zap NUL terminator while copying */
+			c = str[*oldlenp-1];
+			str[*oldlenp-1] = '\0';
+			error = copyout(str, oldp, *oldlenp);
+			str[*oldlenp-1] = c;
+		} else {
+			*oldlenp = len;
+			error = copyout(str, oldp, len);
+		}
 	}
 	if (error == 0 && newp) {
 		error = copyin(newp, str, newlen);

@@ -16,9 +16,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 
-#include <pmax/cpu.h>		/* declaration of of cpu_id */
-#include <pmax/locore.h>
 #include <machine/cpu.h>		/* declaration of of cpu_id */
+#include <machine/locore.h>
 
 mips_locore_jumpvec_t mips_locore_jumpvec = {
   NULL, NULL, NULL, NULL,
@@ -66,9 +65,9 @@ mips1_vector_init()
 	 */
 	if (mips1_UTLBMissEnd - mips1_UTLBMiss > 0x80)
 		panic("startup: UTLB code too large");
-	bcopy(mips1_UTLBMiss, (char *)MACH_UTLB_MISS_EXC_VEC,
+	bcopy(mips1_UTLBMiss, (char *)MIPS_UTLB_MISS_EXC_VEC,
 		mips1_UTLBMissEnd - mips1_UTLBMiss);
-	bcopy(mips1_exception, (char *)MACH_GEN_EXC_VEC,
+	bcopy(mips1_exception, (char *)MIPS1_GEN_EXC_VEC,
 	      mips1_exceptionEnd - mips1_exception);
 
 	/*
@@ -126,10 +125,10 @@ mips3_vector_init()
 	 */
 	if (mips3_TLBMissEnd - mips3_TLBMiss > 0x80)
 		panic("startup: UTLB code too large");
-	bcopy(mips3_TLBMiss, (char *)MACH_UTLB_MISS_EXC_VEC,
+	bcopy(mips3_TLBMiss, (char *)MIPS_UTLB_MISS_EXC_VEC,
 	      mips3_TLBMissEnd - mips3_TLBMiss);
 
-	bcopy(mips3_exception, (char *)MACH_GEN_EXC_VEC,
+	bcopy(mips3_exception, (char *)MIPS_GEN_EXC_VEC,
 	      mips3_exceptionEnd - mips3_exception);
 
 	/*

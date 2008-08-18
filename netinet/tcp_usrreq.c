@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.20 1998/02/28 03:39:58 angelos Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.28 1998/06/27 02:42:41 deraadt Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -69,6 +69,10 @@
 #include <netinet/tcp_debug.h>
 #include <dev/rndvar.h>
 
+#ifdef IPSEC
+extern int	check_ipsec_policy __P((struct inpcb *, u_int32_t));
+#endif
+
 /*
  * TCP protocol interface to socket abstraction.
  */
@@ -77,6 +81,8 @@ extern	int tcptv_keep_init;
 
 /* from in_pcb.c */
 extern	struct baddynamicports baddynamicports;
+
+int tcp_ident __P((void *, size_t *, void *, size_t));
 
 /*
  * Process a TCP user request for TCP tb.  If this is a send request
@@ -192,9 +198,14 @@ tcp_usrreq(so, req, m, nam, control)
 	case PRU_CONNECT:
 		sin = mtod(nam, struct sockaddr_in *);
 
+		/* Disallow connects to a multicast address */
+		if (IN_MULTICAST(sin->sin_addr.s_addr)) {
+			error = EINVAL;
+			break;
+		}
+
 		/* Trying to connect to some broadcast address */
-		if (in_broadcast(sin->sin_addr, NULL))
-		{
+		if (in_broadcast(sin->sin_addr, NULL)) {
 			error = EINVAL;
 			break;
 		}
@@ -288,6 +299,11 @@ tcp_usrreq(so, req, m, nam, control)
 	 * marker if URG set.  Possibly send more data.
 	 */
 	case PRU_SEND:
+#ifdef IPSEC
+		error = check_ipsec_policy(inp, 0);
+		if (error)
+			break;
+#endif
 		sbappend(&so->so_snd, m);
 		error = tcp_output(tp);
 		break;
@@ -569,6 +585,55 @@ tcp_usrclosed(tp)
 }
 
 /*
+ * Look up a socket for ident..
+ */
+int
+tcp_ident(oldp, oldlenp, newp, newlen)
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+{
+	int error = 0, s;
+	struct tcp_ident_mapping tir;
+	struct inpcb *inp;
+	struct sockaddr_in *fin, *lin;
+
+	if (oldp == NULL || newp != NULL || newlen != 0)
+		return (EINVAL);
+	if  (*oldlenp < sizeof(tir))
+		return (ENOMEM);
+	if ((error = copyin (oldp, &tir, sizeof (tir))) != 0 )
+		return (error);
+	if (tir.faddr.sa_len != sizeof (struct sockaddr) ||
+	    tir.faddr.sa_family != AF_INET)
+		return (EINVAL);
+	fin = (struct sockaddr_in *)&tir.faddr;
+	lin = (struct sockaddr_in *)&tir.laddr;
+
+	s = splsoftnet ();
+	inp = in_pcbhashlookup (&tcbtable,  fin->sin_addr, fin->sin_port,
+	    lin->sin_addr, lin->sin_port);
+	if (inp == NULL) {
+		++tcpstat.tcps_pcbhashmiss;
+		inp = in_pcblookup (&tcbtable, fin->sin_addr, fin->sin_port,
+		    lin->sin_addr, lin->sin_port, 0);
+	}
+	if (inp != NULL && (inp->inp_socket->so_state & SS_CONNECTOUT)) {
+		tir.ruid = inp->inp_socket->so_ruid;
+		tir.euid = inp->inp_socket->so_euid;
+	} else {
+		tir.ruid = -1;
+		tir.euid = -1;
+	}
+	splx(s);
+
+	*oldlenp = sizeof (tir);
+	error = copyout ((void *)&tir, oldp, sizeof (tir));
+	return (error);
+}
+
+/*
  * Sysctl for tcp variables.
  */
 int
@@ -614,7 +679,8 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 
 	case TCPCTL_SENDSPACE:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,&tcp_sendspace));
-
+	case TCPCTL_IDENT:
+		return (tcp_ident(oldp, oldlenp, newp, newlen));
 	default:
 		return (ENOPROTOOPT);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.7 1997/10/02 00:58:08 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.11 1998/10/04 20:35:16 millert Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.9 1997/04/01 03:12:13 scottr Exp $	*/
 
 /*
@@ -65,22 +65,32 @@ dk_establish(dk, dev)
  * string on failure.
  */
 char *
-readdisklabel(dev, strat, lp, osdep)
+readdisklabel(dev, strat, lp, osdep, spoofonly)
 	dev_t dev;
 	void (*strat) __P((struct buf *));
 	struct disklabel *lp;
 	struct cpu_disklabel *osdep;
+	int spoofonly;
 {
 	struct buf *bp;
 	struct disklabel *dlp;
 	char *msg = NULL;
 
+	/* minimal requirements for archetypal disk label */
+	if (lp->d_secsize == 0)
+		lp->d_secsize = DEV_BSIZE;
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
-	lp->d_npartitions = 1;
-	if (lp->d_partitions[0].p_size == 0)
-		lp->d_partitions[0].p_size = 0x1fffffff;
-	lp->d_partitions[0].p_offset = 0;
+	if (lp->d_secpercyl == 0)
+		lp->d_secpercyl = 1;
+	lp->d_npartitions = RAW_PART + 1;
+	if (lp->d_partitions[RAW_PART].p_size == 0)
+		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
+	lp->d_partitions[RAW_PART].p_offset = 0;
+
+	/* don't read the on-disk label if we are in spoofed-only mode */
+	if (spoofonly)
+		return (NULL);
 
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
@@ -90,7 +100,7 @@ readdisklabel(dev, strat, lp, osdep)
 	bp->b_cylinder = LABELSECTOR / lp->d_secpercyl;
 	(*strat)(bp);
 	if (biowait(bp))
-		msg = "I/O error";
+		msg = "disk label I/O error";
 	else for (dlp = (struct disklabel *)bp->b_data;
 	    dlp <= (struct disklabel *)((char *)bp->b_data +
 	    DEV_BSIZE - sizeof(*dlp));

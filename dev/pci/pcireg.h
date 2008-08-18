@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcireg.h,v 1.7 1998/02/03 19:47:13 deraadt Exp $	*/
+/*	$OpenBSD: pcireg.h,v 1.9 1998/07/12 04:22:09 deraadt Exp $	*/
 /*	$NetBSD: pcireg.h,v 1.11 1996/08/10 15:42:33 mycroft Exp $	*/
 
 /*
@@ -74,7 +74,9 @@ typedef u_int16_t pci_product_id_t;
 #define	PCI_COMMAND_SERR_ENABLE			0x00000100
 #define	PCI_COMMAND_BACKTOBACK_ENABLE		0x00000200
 
-#define	PCI_STATUS_BACKTOBACK_OKAY		0x00800000
+#define	PCI_STATUS_66MHZ_SUPPORT		0x00200000
+#define	PCI_STATUS_UDF_SUPPORT			0x00400000
+#define	PCI_STATUS_BACKTOBACK_SUPPORT		0x00800000
 #define	PCI_STATUS_PARITY_ERROR			0x01000000
 #define	PCI_STATUS_DEVSEL_FAST			0x00000000
 #define	PCI_STATUS_DEVSEL_MEDIUM		0x02000000
@@ -224,7 +226,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_BIST(bhlcr) \
 	    (((bhlcr) >> PCI_BIST_SHIFT) & PCI_BIST_MASK)
 
-#define	PCI_HDRTYPE_SHIFT			24
+#define	PCI_HDRTYPE_SHIFT			16
 #define	PCI_HDRTYPE_MASK			0xff
 #define	PCI_HDRTYPE(bhlcr) \
 	    (((bhlcr) >> PCI_HDRTYPE_SHIFT) & PCI_HDRTYPE_MASK)
@@ -232,12 +234,12 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_HDRTYPE_MULTIFN(bhlcr) \
 	    ((PCI_HDRTYPE(bhlcr) & 0x80) != 0)
 
-#define	PCI_LATTIMER_SHIFT			24
+#define	PCI_LATTIMER_SHIFT			8
 #define	PCI_LATTIMER_MASK			0xff
 #define	PCI_LATTIMER(bhlcr) \
 	    (((bhlcr) >> PCI_LATTIMER_SHIFT) & PCI_LATTIMER_MASK)
 
-#define	PCI_CACHELINE_SHIFT			24
+#define	PCI_CACHELINE_SHIFT			0
 #define	PCI_CACHELINE_MASK			0xff
 #define	PCI_CACHELINE(bhlcr) \
 	    (((bhlcr) >> PCI_CACHELINE_SHIFT) & PCI_CACHELINE_MASK)

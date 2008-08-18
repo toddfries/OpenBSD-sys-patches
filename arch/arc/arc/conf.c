@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.19 1998/01/28 13:45:49 pefo Exp $ */
+/*	$OpenBSD: conf.c,v 1.26 1998/10/14 18:28:06 imp Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)conf.c	8.2 (Berkeley) 11/14/93
- *      $Id: conf.c,v 1.19 1998/01/28 13:45:49 pefo Exp $
+ *      $Id: conf.c,v 1.26 1998/10/14 18:28:06 imp Exp $
  */
 
 #include <sys/param.h>
@@ -115,6 +115,13 @@ int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, seltrue, (dev_type_mmap((*))) enodev }
 
+/* open, close, read, ioctl */
+#define cdev_joy_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) enodev, 0, seltrue, \
+	(dev_type_mmap((*))) enodev }
+
 cdev_decl(cn);
 cdev_decl(sw);
 cdev_decl(ctty);
@@ -154,6 +161,15 @@ cdev_decl(cd);
 cdev_decl(uk);
 cdev_decl(wd);
 cdev_decl(acd);
+#include "joy.h"
+cdev_decl(joy);
+#ifdef XFS
+#include <xfs/nxfs.h>
+cdev_decl(xfs_dev);
+#endif
+#include "ksyms.h"
+cdev_decl(ksyms);
+#include "ch.h"
 
 #ifdef IPFILTER
 #define NIPF 1
@@ -189,7 +205,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NCCD,ccd),       /* 23: concatenated disk driver */
 	cdev_notdef(),			/* 24: */
 	cdev_notdef(),			/* 25: */
-	cdev_notdef(),			/* 26: */
+	cdev_joy_init(NJOY,joy),	/* 26: joystick */
 	cdev_notdef(),			/* 27: */
 	cdev_notdef(),			/* 28: */
 	cdev_notdef(),			/* 29: */
@@ -197,7 +213,28 @@ struct cdevsw	cdevsw[] =
 	cdev_gen_ipf(NIPF,ipl),         /* 31: IP filter log */
 	cdev_uk_init(NUK,uk),		/* 32: unknown SCSI */
 	cdev_random_init(1,random),	/* 33: random data source */
-	cdev_ss_init(NSS,ss),           /* 34: SCSI scanner */
+	cdev_ss_init(NSS,ss),		/* 34: SCSI scanner */
+	cdev_ksyms_init(NKSYMS,ksyms),	/* 35: Kernel symbols device */
+	cdev_ch_init(NCH,ch),		/* 36: SCSI autochanger */
+	cdev_notdef(),			/* 37: */
+	cdev_notdef(),			/* 38: */
+	cdev_notdef(),			/* 39: */
+	cdev_notdef(),			/* 40: */
+	cdev_notdef(),			/* 41: */
+	cdev_notdef(),			/* 42: */
+	cdev_notdef(),			/* 33: */
+	cdev_notdef(),			/* 44: */
+	cdev_notdef(),			/* 45: */
+	cdev_notdef(),			/* 46: */
+	cdev_notdef(),			/* 47: */
+	cdev_notdef(),			/* 48: */
+	cdev_notdef(),			/* 49: */
+	cdev_notdef(),			/* 50: */
+#ifdef XFS
+	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#else
+	cdev_notdef(),			/* 51: */
+#endif
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
@@ -247,8 +284,7 @@ iszerodev(dev)
 }
 
 
-#define MAXDEV	57
-static int chrtoblktbl[MAXDEV] =  {
+static int chrtoblktbl[] =  {
       /* VCHR */      /* VBLK */
 	/* 0 */		NODEV,
 	/* 1 */		NODEV,
@@ -273,45 +309,10 @@ static int chrtoblktbl[MAXDEV] =  {
 	/* 20 */	NODEV,
 	/* 21 */	NODEV,
 	/* 22 */	8,
-	/* 23 */	NODEV,
-	/* 24 */	NODEV,
-	/* 25 */	NODEV,
-	/* 26 */	NODEV,
-	/* 27 */	NODEV,
-	/* 28 */	NODEV,
-	/* 29 */	NODEV,
-	/* 30 */	NODEV,
-	/* 31 */	NODEV,
-	/* 32 */	NODEV,
-	/* 33 */	NODEV,
-	/* 34 */	NODEV,
-	/* 35 */	NODEV,
-	/* 36 */	NODEV,
-	/* 37 */	NODEV,
-	/* 38 */	NODEV,
-	/* 39 */	NODEV,
-	/* 40 */	NODEV,
-	/* 41 */	NODEV,
-	/* 42 */	NODEV,
-	/* 43 */	NODEV,
-	/* 44 */	NODEV,
-	/* 45 */	NODEV,
-	/* 46 */	NODEV,
-	/* 47 */	NODEV,
-	/* 48 */	NODEV,
-	/* 49 */	NODEV,
-	/* 50 */	NODEV,
-	/* 51 */	NODEV,
-	/* 52 */	NODEV,
-	/* 53 */	NODEV,
-	/* 54 */	NODEV,
-	/* 55 */	NODEV,
-	/* 56 */	NODEV,
 };
+
 /*
  * Routine to convert from character to block device number.
- *
- * A minimal stub routine can always return NODEV.
  */
 dev_t
 chrtoblk(dev)
@@ -319,7 +320,11 @@ chrtoblk(dev)
 {
 	int blkmaj;
 
-	if (major(dev) >= MAXDEV || (blkmaj = chrtoblktbl[major(dev)]) == NODEV)
+	if (major(dev) >= nchrdev ||
+	    major(dev) > sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]))
+		return (NODEV);
+	blkmaj = chrtoblktbl[major(dev)];
+	if (blkmaj == NODEV)
 		return (NODEV);
 	return (makedev(blkmaj, minor(dev)));
 }

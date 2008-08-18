@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.7 1998/03/27 08:37:06 millert Exp $	*/
+/*	$OpenBSD: hd.c,v 1.11 1998/10/04 01:02:26 millert Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -59,6 +59,8 @@
 #include <sys/ioctl.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
+
+#include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
 
 #include <hp300/dev/hpibvar.h>
 
@@ -221,7 +223,7 @@ int	hdident __P((struct device *, struct hd_softc *,
 	    struct hpibbus_attach_args *));
 void	hdreset __P((struct hd_softc *));
 void	hdustart __P((struct hd_softc *));
-int	hdgetinfo __P((dev_t));
+int	hdgetinfo __P((dev_t, struct hd_softc *, struct disklabel *, int));
 void	hdrestart __P((void *));
 struct buf *hdfinish __P((struct hd_softc *, struct buf *));
 
@@ -470,12 +472,12 @@ hdreset(rs)
  * Read or constuct a disklabel
  */
 int
-hdgetinfo(dev)
+hdgetinfo(dev, rs, lp, spoofonly)
 	dev_t dev;
+	struct hd_softc *rs;
+	struct disklabel *lp;
+	int spoofonly;
 {
-	int unit = hdunit(dev);
-	struct hd_softc *rs = hd_cd.cd_devs[unit];
-	struct disklabel *lp = rs->sc_dkdev.dk_label;
 	char *errstring;
 
 	/*
@@ -503,6 +505,10 @@ hdgetinfo(dev)
 	}
 	lp->d_secpercyl = lp->d_nsectors * lp->d_ntracks;
 
+	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
+	lp->d_bbsize = BBSIZE;
+	lp->d_sbsize = SBSIZE;
+
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size =
 	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
@@ -516,7 +522,8 @@ hdgetinfo(dev)
 	/*
 	 * Now try to read the disklabel
 	 */
-	errstring = readdisklabel(hdlabdev(dev), hdstrategy, lp, NULL);
+	errstring = readdisklabel(hdlabdev(dev), hdstrategy, lp, NULL,
+	    spoofonly);
 	if (errstring) {
 		printf("%s: WARNING: %s, defining `c' partition as entire disk\n",
 		    rs->sc_dev.dv_xname, errstring);
@@ -561,7 +568,7 @@ hdopen(dev, flags, mode, p)
 	 */
 	if (rs->sc_dkdev.dk_openmask == 0) {
 		rs->sc_flags |= HDF_OPENING;
-		error = hdgetinfo(dev);
+		error = hdgetinfo(dev, rs, rs->sc_dkdev.dk_label, 0);
 		rs->sc_flags &= ~HDF_OPENING;
 		wakeup((caddr_t)rs);
 		if (error)
@@ -624,7 +631,7 @@ hdclose(dev, flag, mode, p)
 			sleep((caddr_t)&rs->sc_tab, PRIBIO);
 		}
 		splx(s);
-		rs->sc_flags &= ~(HDF_CLOSING|HDF_WLABEL);
+		rs->sc_flags &= ~(HDF_CLOSING);
 		wakeup((caddr_t)rs);
 	}
 	return(0);
@@ -1115,6 +1122,10 @@ hdioctl(dev, cmd, data, flag, p)
 	int error, flags;
 
 	switch (cmd) {
+	case DIOCGPDINFO:
+		error = hdgetinfo(dev, sc, (struct disklabel *)data, 1);
+		return (error);
+
 	case DIOCGDINFO:
 		*(struct disklabel *)data = *lp;
 		return (0);

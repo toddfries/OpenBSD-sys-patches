@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: eisadevs,v 1.7 1997/07/25 17:40:06 deraadt Exp 
+ *	OpenBSD: eisadevs,v 1.9 1998/07/04 09:03:48 deraadt Exp 
  */
 
 /*
@@ -119,6 +119,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	},
 	{
 	    0,
+	    "DTI0000",
+	    EISA_PRODUCT_DTI0000,
+	},
+	{
+	    0,
 	    "FSI2001",
 	    EISA_PRODUCT_FSI2001,
 	},
@@ -131,6 +136,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	    0,
 	    "FSI2003",
 	    EISA_PRODUCT_FSI2003,
+	},
+	{
+	    0,
+	    "INP25D0",
+	    EISA_PRODUCT_INP25D0,
 	},
 	{
 	    0,
@@ -214,8 +224,23 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	},
 	{
 	    EISA_KNOWNDEV_NOPROD,
+	    "DTI",
+	    "DeskStation Technology, Inc.",
+	},
+	{
+	    EISA_KNOWNDEV_NOPROD,
 	    "FSI",
 	    "FORE Systems",
+	},
+	{
+	    EISA_KNOWNDEV_NOPROD,
+	    "HWP",
+	    "Hewlett-Packard",
+	},
+	{
+	    EISA_KNOWNDEV_NOPROD,
+	    "INP",
+	    "Interphase",
 	},
 	{
 	    EISA_KNOWNDEV_NOPROD,
@@ -226,6 +251,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	    EISA_KNOWNDEV_NOPROD,
 	    "ETI",
 	    "Microdyne",
+	},
+	{
+	    EISA_KNOWNDEV_NOPROD,
+	    "MLX",
+	    "Mylex",
 	},
 	{
 	    EISA_KNOWNDEV_NOPROD,

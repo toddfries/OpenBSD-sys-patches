@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.12 1997/10/21 18:01:45 pefo Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.20 1998/10/09 02:13:56 rahnds Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -85,13 +85,17 @@ struct bat battable[16];
 
 int astpending;
 
-int system_type = POWER4e;	/* XXX Hardwire it for now */
+#ifndef SYS_TYPE
+/* XXX Hardwire it for now */
+#define SYS_TYPE POWER4e
+#endif
+
+int system_type = SYS_TYPE;	/* XXX Hardwire it for now */
 
 char ofw_eth_addr[6];		/* Save address of first network ifc found */
 char *bootpath;
 char bootpathbuf[512];
 
-int cons_initted;
 
 /*
  * We use the page just above the interrupt vector as message buffer
@@ -154,13 +158,10 @@ initppc(startkernel, endkernel, args)
 	battable[0].batu = BATU(0x00000000);
 
 	if(system_type == POWER4e) {
-		/* DBAT1 maps I/O */
-		battable[1].batl = BATL(0x80000000, BAT_I);
-		battable[1].batu = BATU(0x80000000);
-
-		/* DBAT2 maps PCI mem */
-		battable[2].batl = BATL(MPC106_P_PCI_MEM_SPACE, BAT_I);
-		battable[2].batu = BATU(MPC106_V_PCI_MEM_SPACE);
+		/* Map ISA I/O */
+		addbatmap(MPC106_V_ISA_IO_SPACE, MPC106_P_ISA_IO_SPACE, BAT_I);
+		battable[1].batl = BATL(0xbfffe000, BAT_I);
+		battable[1].batu = BATU(0xbfffe000);
 	}
 
 	/*
@@ -176,10 +177,10 @@ initppc(startkernel, endkernel, args)
 	__asm__ volatile ("mtdbatl 0,%0; mtdbatu 0,%1"
 		      :: "r"(battable[0].batl), "r"(battable[0].batu));
 
+#if 1
 	__asm__ volatile ("mtdbatl 1,%0; mtdbatu 1,%1"
 		      :: "r"(battable[1].batl), "r"(battable[1].batu));
-	__asm__ volatile ("mtdbatl 2,%0; mtdbatu 2,%1"
-		      :: "r"(battable[2].batl), "r"(battable[2].batu));
+#endif
 	
 	/*
 	 * Set up trap vectors
@@ -228,6 +229,8 @@ initppc(startkernel, endkernel, args)
 	 */
 	__asm__ volatile ("mfmsr %0; ori %0,%0,%1; mtmsr %0; isync"
 		      : "=r"(scratch) : "K"(PSL_IR|PSL_DR|PSL_ME|PSL_RI));
+
+	ofwconprobe();
 
 	/*
 	 * Now we can set up the console as mapping is enabled.
@@ -278,6 +281,11 @@ initppc(startkernel, endkernel, args)
 	ipkdb_init();
 	if (boothowto & RB_KDB)
 		ipkdb_connect(0);
+#else
+#ifdef DDB
+	if (boothowto & RB_KDB)
+		Debugger();
+#endif
 #endif
 
 	/*
@@ -408,6 +416,11 @@ cpu_startup()
 	bufinit();
 
 	/*
+	 * Configure devices.
+	 */
+	configure();
+	
+	/*
 	 * Now allow hardware interrupts.
 	 */
 	{
@@ -417,13 +430,8 @@ cpu_startup()
 		__asm__ volatile ("mfmsr %0; ori %0, %0, %1; mtmsr %0"
 			      : "=r"(msr) : "K"(PSL_EE));
 	}
-	
-	/*
-	 * Configure devices.
-	 */
-	configure();
-	
 }
+	
 
 /*
  * Allocate space for system data structures.
@@ -493,7 +501,8 @@ allocsys(v)
 void
 consinit()
 {
-	
+	static int cons_initted = 0;
+
 	if (cons_initted)
 		return;
 	cninit();
@@ -804,3 +813,158 @@ power4e_get_eth_addr()
 	}
 	return(-1);
 }
+
+typedef void  (void_f) (void);
+void_f *pending_int_f = NULL;
+
+/* call the bus/interrupt controller specific pending interrupt handler
+ * would be nice if the offlevel interrupt code was handled here
+ * instead of being in each of the specific handler code
+ */
+void
+do_pending_int()
+{
+	if (pending_int_f != NULL) {
+		(*pending_int_f)();
+	}
+}
+
+/*
+ * set system type from string
+ */
+void
+systype(char *name)
+{
+	/* this table may be order specific if substrings match several
+	 * computers but a longer string matches a specific 
+	 */
+	int i;
+	struct systyp {
+		char *name;
+		char *systypename;
+		int type;
+	} systypes[] = {
+		{ "MOT,",	"(PWRSTK) MCG powerstack family", PWRSTK },
+		{ "V-I Power",	"(POWER4e) V-I ppc vme boards ",  POWER4e},
+		{ NULL,"",0}
+	};
+	for (i = 0; systypes[i].name != NULL; i++) {
+		if (strncmp( name , systypes[i].name,
+			strlen (systypes[i].name)) == 0)
+		{
+			system_type = systypes[i].type;
+			printf("recognized system type of %s as %s\n",
+				name, systypes[i].systypename);
+			break;
+		}
+	}
+	if (system_type == OFWMACH) {
+		printf("System type not recognized, good luck\n");
+	}
+}
+/* 
+ * one attempt at interrupt stuff..
+ *
+ */
+#include <dev/pci/pcivar.h>
+typedef void     *(intr_establish_t) __P((void *, pci_intr_handle_t,
+            int, int (*func)(void *), void *, char *));
+typedef void     (intr_disestablish_t) __P((void *, void *));
+
+void *
+ppc_intr_establish(lcv, ih, level, func, arg, name)
+	void *lcv;
+	pci_intr_handle_t ih;
+	int level;
+	int (*func) __P((void *));
+	void *arg;
+	char *name;
+{
+	panic("ppc_intr_establish called before interrupt controller configured: driver %s\n", name);
+}
+
+intr_establish_t *intr_establish_func = ppc_intr_establish;;
+intr_disestablish_t *intr_disestablish_func;
+
+void
+ppc_intr_setup(intr_establish_t *establish, intr_disestablish_t *disestablish)
+{
+	intr_establish_func = establish;
+	intr_disestablish_func = disestablish;
+}
+
+/*
+ * General functions to enable and disable interrupts
+ * without having inlined assembly code in many functions,
+ * should be moved into a header file for inlining the function
+ * so it is faster
+ */
+void
+ppc_intr_enable(void)
+{
+	u_int32_t emsr, dmsr;
+	__asm__ volatile("mfmsr %0" : "=r"(emsr));
+	dmsr = emsr | PSL_EE;
+	__asm__ volatile("mtmsr %0" :: "r"(dmsr));
+}
+
+void
+ppc_intr_disable(void)
+{
+	u_int32_t emsr, dmsr;
+	__asm__ volatile("mfmsr %0" : "=r"(emsr));
+	dmsr = emsr & ~PSL_EE;
+	__asm__ volatile("mtmsr %0" :: "r"(dmsr));
+}
+
+/*
+ * probably should be ppc_space_copy
+ */
+
+#define _CONCAT(A,B) A ## B
+#define __C(A,B)	_CONCAT(A,B)
+
+#define BUS_SPACE_COPY_N(BYTES,TYPE) 					\
+void 									\
+__C(bus_space_copy_,BYTES)(v, h1, o1, h2, o2, c)			\
+	void *v;							\
+	bus_space_handle_t h1, h2;					\
+	bus_size_t o1, o2, c;						\
+{									\
+	TYPE val;							\
+	TYPE *src, *dst;						\
+	int i;								\
+									\
+	src = (TYPE *) (h1+o1);						\
+	dst = (TYPE *) (h2+o2);						\
+									\
+	if (h1 == h2 && o2 > o1) {					\
+		for (i = c; i > 0; i--) {				\
+			dst[i] = src[i];				\
+		}							\
+	} else {							\
+		for (i = 0; i < c; i++) {				\
+			dst[i] = src[i];				\
+		}							\
+	}								\
+}
+BUS_SPACE_COPY_N(1,u_int8_t)
+BUS_SPACE_COPY_N(2,u_int16_t)
+BUS_SPACE_COPY_N(4,u_int32_t)
+
+#define BUS_SPACE_SET_REGION_N(BYTES,TYPE)				\
+void									\
+__C(bus_space_set_region_,BYTES)(v, h, o, val, c)					\
+{									\
+	TYPE *src, *dst;						\
+	int i;								\
+									\
+	dst = (TYPE *) (h+o);						\
+	for (i = 0; i < c; i++) {					\
+		dst[i] = val;						\
+	}								\
+}
+
+BUS_SPACE_SET_REGION_N(1,u_int8_t)
+BUS_SPACE_SET_REGION_N(2,u_int16_t)
+BUS_SPACE_SET_REGION_N(4,u_int32_t)

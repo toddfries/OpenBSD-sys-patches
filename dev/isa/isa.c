@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa.c,v 1.31 1998/01/20 21:42:25 niklas Exp $	*/
+/*	$OpenBSD: isa.c,v 1.35 1998/07/28 13:26:48 csapuntz Exp $	*/
 /*	$NetBSD: isa.c,v 1.85 1996/05/14 00:31:04 thorpej Exp $	*/
 
 /*
@@ -123,6 +123,10 @@ isaattach(parent, self, aux)
 #endif /* NISADMA > 0 */
 	sc->sc_ic = iba->iba_ic;
 
+#if NISAPNP > 0
+	isapnp_isa_attach_hook(sc);
+#endif
+
 #if NISADMA > 0
 	/*
 	 * Map the registers used by the ISA DMA controller.
@@ -173,6 +177,8 @@ isaprint(aux, isa)
 		printf(" irq %d", ia->ia_irq);
 	if (ia->ia_drq != DRQUNK)
 		printf(" drq %d", ia->ia_drq);
+	if (ia->ia_drq2 != DRQUNK)
+		printf(" drq2 %d", ia->ia_drq2);
 	return (UNCONF);
 }
 
@@ -192,12 +198,13 @@ isascan(parent, match)
 	ia.ia_dmat = sc->sc_dmat;
 #endif /* NISADMA > 0 */
 	ia.ia_ic = sc->sc_ic;
-	ia.ia_iobase = cf->cf_loc[0];
+	ia.ia_iobase = cf->cf_iobase;
 	ia.ia_iosize = 0x666;
-	ia.ia_maddr = cf->cf_loc[2];
-	ia.ia_msize = cf->cf_loc[3];
-	ia.ia_irq = cf->cf_loc[4] == 2 ? 9 : cf->cf_loc[4];
-	ia.ia_drq = cf->cf_loc[5];
+	ia.ia_maddr = cf->cf_maddr;
+	ia.ia_msize = cf->cf_msize;
+	ia.ia_irq = cf->cf_irq == 2 ? 9 : cf->cf_irq;
+	ia.ia_drq = cf->cf_drq;
+	ia.ia_drq2 = cf->cf_drq2;
 	ia.ia_delaybah = sc->sc_delaybah;
 
 	if (cf->cf_fstate == FSTATE_STAR) {
@@ -207,6 +214,17 @@ isascan(parent, match)
 			printf(">>> probing for %s*\n",
 			    cf->cf_driver->cd_name);
 		while ((*cf->cf_attach->ca_match)(parent, dev, &ia2) > 0) {
+#if !defined(__NO_ISA_INTR_CHECK)
+			if ((ia2.ia_irq != IRQUNK) &&
+			    !isa_intr_check(sc->sc_ic, ia2.ia_irq, IST_EDGE)) {
+				printf("%s%d: irq %d already in use\n",
+				    cf->cf_driver->cd_name, cf->cf_unit,
+				    ia2.ia_irq);
+				ia2 = ia;
+				continue;
+			}
+#endif
+
 			if (autoconf_verbose)
 				printf(">>> probe for %s* clone into %s%d\n",
 				    cf->cf_driver->cd_name,
@@ -218,12 +236,13 @@ isascan(parent, match)
 			}
 			config_attach(parent, dev, &ia2, isaprint);
 			dev = config_make_softc(parent, cf);
-			ia2 = ia;
-
 #if NISADMA > 0
-			if (ia.ia_drq != DRQUNK)
-				ISA_DRQ_ALLOC((struct device *)sc, ia.ia_drq);
+			if (ia2.ia_drq != DRQUNK)
+				ISA_DRQ_ALLOC((struct device *)sc, ia2.ia_drq);
+			if (ia2.ia_drq2 != DRQUNK)
+				ISA_DRQ_ALLOC((struct device *)sc, ia2.ia_drq2);
 #endif /* NISAMDA > 0 */
+			ia2 = ia;
 		}
 		if (autoconf_verbose)
 			printf(">>> probing for %s* finished\n",
@@ -236,15 +255,28 @@ isascan(parent, match)
 		printf(">>> probing for %s%d\n", cf->cf_driver->cd_name,
 		    cf->cf_unit);
 	if ((*cf->cf_attach->ca_match)(parent, dev, &ia) > 0) {
-		if (autoconf_verbose)
-			printf(">>> probing for %s%d succeeded\n",
-			    cf->cf_driver->cd_name, cf->cf_unit);
-		config_attach(parent, dev, &ia, isaprint);
+#if !defined(__NO_ISA_INTR_CHECK)
+		if ((ia.ia_irq != IRQUNK) &&
+		    !isa_intr_check(sc->sc_ic, ia.ia_irq, IST_EDGE)) {
+			printf("%s%d: irq %d already in use\n",
+			    cf->cf_driver->cd_name, cf->cf_unit, ia.ia_irq);
+			free(dev, M_DEVBUF);
+		} else {
+#endif
+			if (autoconf_verbose)
+				printf(">>> probing for %s%d succeeded\n",
+				    cf->cf_driver->cd_name, cf->cf_unit);
+			config_attach(parent, dev, &ia, isaprint);
 
 #if NISADMA > 0
-		if (ia.ia_drq != DRQUNK)
-			ISA_DRQ_ALLOC((struct device *)sc, ia.ia_drq);
+			if (ia.ia_drq != DRQUNK)
+				ISA_DRQ_ALLOC((struct device *)sc, ia.ia_drq);
+			if (ia.ia_drq2 != DRQUNK)
+				ISA_DRQ_ALLOC((struct device *)sc, ia.ia_drq2);
 #endif /* NISAMDA > 0 */
+#if !defined(__NO_ISA_INTR_CHECK)
+		}
+#endif
 	} else {
 		if (autoconf_verbose)
 			printf(">>> probing for %s%d failed\n",

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.14 1998/03/14 19:33:03 millert Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.17 1998/09/06 01:44:08 art Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -61,7 +61,7 @@ enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD };
 enum vtagtype	{
 	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS, VT_LFS, VT_LOFS, VT_FDESC,
 	VT_PORTAL, VT_NULL, VT_UMAP, VT_KERNFS, VT_PROCFS, VT_AFS, VT_ISOFS,
-	VT_UNION, VT_ADOSFS, VT_EXT2FS, VT_NCPFS, VT_VFS
+	VT_UNION, VT_ADOSFS, VT_EXT2FS, VT_NCPFS, VT_VFS, VT_XFS
 };
 
 /*
@@ -132,7 +132,7 @@ struct vnode {
 #define	VBWAIT		0x0400	/* waiting for output to complete */
 #define	VALIASED	0x0800	/* vnode has an alias */
 #define	VDIROP		0x1000	/* LFS: vnode is involved in a directory op */
-#define VGONEHACK       0x2000  /* vgone: don't put me on the head of the free list */
+#define VONFREELIST     0x2000  /* Vnode is on a free list */
 
 /*
  * Vnode attributes.  A field value of VNOVAL represents a field whose value
@@ -241,7 +241,7 @@ holdrele(vp)
 {
 	simple_lock(&vp->v_interlock);
 	vp->v_holdcnt--;
- 	if (!(vp->v_flag & VGONEHACK) &&
+ 	if ((vp->v_flag & VONFREELIST) &&
  	    vp->v_holdcnt == 0 && vp->v_usecount == 0) {
  		simple_lock(&vnode_free_list_slock);
  		TAILQ_REMOVE(&vnode_hold_list, vp, v_freelist);
@@ -257,7 +257,7 @@ vhold(vp)
 	struct vnode *vp;
 {
 	simple_lock(&vp->v_interlock);
- 	if (!(vp->v_flag & VGONEHACK) &&
+ 	if ((vp->v_flag & VONFREELIST) &&
  	    vp->v_holdcnt == 0 && vp->v_usecount == 0) {
  		simple_lock(&vnode_free_list_slock);
  		TAILQ_REMOVE(&vnode_free_list, vp, v_freelist);
@@ -457,7 +457,7 @@ void 	vgoneall __P((struct vnode *vp));
 int	vinvalbuf __P((struct vnode *vp, int save, struct ucred *cred,
 	    struct proc *p, int slpflag, int slptimeo));
 void	vprint __P((char *label, struct vnode *vp));
-int	vn_bwrite __P((void *ap));
+int	vop_generic_bwrite __P((void *ap));
 void	vn_update __P((void));
 int 	vn_close __P((struct vnode *vp,
 	    int flags, struct ucred *cred, struct proc *p));
@@ -469,12 +469,14 @@ int	vrecycle __P((struct vnode *vp, struct simplelock *inter_lkp,
 	    struct proc *p));
 int 	vn_rdwr __P((enum uio_rw rw, struct vnode *vp, caddr_t base,
 	    int len, off_t offset, enum uio_seg segflg, int ioflg,
-	    struct ucred *cred, int *aresid, struct proc *p));
+	    struct ucred *cred, size_t *aresid, struct proc *p));
 int	vn_lock __P((struct vnode *vp, int flags, struct proc *p));
-int	vop_noislocked __P((void *));
-int	vop_nolock __P((void *));
-int	vop_nounlock __P((void *));
-int	vop_revoke __P((void *));
+
+int     vop_generic_abortop __P((void *));
+int	vop_generic_islocked __P((void *));
+int	vop_generic_lock __P((void *));
+int	vop_generic_unlock __P((void *));
+int	vop_generic_revoke __P((void *));
 
 int	vn_read __P((struct file *fp, struct uio *uio, struct ucred *cred));
 int	vn_select __P((struct file *fp, int which, struct proc *p));

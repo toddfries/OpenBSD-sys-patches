@@ -1,11 +1,22 @@
-#	$OpenBSD: Makefile,v 1.17 1998/02/24 07:54:38 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.23 1998/07/11 21:13:55 angelos Exp $
+
+.include "${.CURDIR}/../Makefile.inc"
 
 PROG=	boot
-SRCS=	srt0.S boot.c cmd.c bootarg.c conf.c
-#AFLAGS+=-Wa,-R
-# AFLAGS+=-Wa,-a
-LD=ld
-LDFLAGS+=-nostdlib -Ttext $(LINKADDR) -z -x -Bstatic
+LD?=	ld
+SIZE?=	size
+LDFLAGS+=-nostdlib -Bstatic
+
+.if defined(DEBUGFLAGS) && !empty(DEBUGFLAGS:M-D_TEST)
+CLEANFILES+=	srt0.o
+SRCS=	crt0.c
+.else
+LDFLAGS+=-Ttext $(LINKADDR) -z -x
+CLEANFILES+=	crt0.o
+SRCS=	srt0.S
+.endif
+
+SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c
 MAN=	boot.8
 MLINKS=	boot.8 boot.conf.8
 S	=${.CURDIR}/../../../..
@@ -16,18 +27,13 @@ DPADD=	${LIBSA} ${LIBZ}
 
 .PATH:	${S}/stand/boot
 
-all:	machine-links
-
-machine-links:
-	@rm -f machine i386
-	@ln -fs ${.CURDIR}/../.. i386
-	@ln -fs ${.CURDIR}/../../include machine
-
 ${PROG}: $(OBJS) $(DPADD)
 	$(LD) $(LDFLAGS) -o $(PROG) $(OBJS) $(LDADD)
-	@size $(PROG)
+	@$(SIZE) $(PROG)
 
 .include <bsd.prog.mk>
 
 CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS}
 CFLAGS+=$(SACFLAGS)
+#AFLAGS+=-Wa,-R
+# AFLAGS+=-Wa,-a

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdesc_vnops.c,v 1.10 1997/11/06 05:58:33 csapuntz Exp $	*/
+/*	$OpenBSD: fdesc_vnops.c,v 1.12 1998/08/06 19:34:32 csapuntz Exp $	*/
 /*	$NetBSD: fdesc_vnops.c,v 1.32 1996/04/11 11:24:29 mrg Exp $	*/
 
 /*
@@ -108,7 +108,7 @@ int	fdesc_select	__P((void *));
 #define	fdesc_fsync	nullop
 #define	fdesc_seek	nullop
 #define	fdesc_remove	eopnotsupp
-#define fdesc_revoke    vop_revoke
+#define fdesc_revoke    vop_generic_revoke
 int	fdesc_link	__P((void *));
 #define	fdesc_rename	eopnotsupp
 #define	fdesc_mkdir	eopnotsupp
@@ -116,16 +116,15 @@ int	fdesc_link	__P((void *));
 int	fdesc_symlink	__P((void *));
 int	fdesc_readdir	__P((void *));
 int	fdesc_readlink	__P((void *));
-int	fdesc_abortop	__P((void *));
 int	fdesc_inactive	__P((void *));
 int	fdesc_reclaim	__P((void *));
-#define	fdesc_lock	vop_nolock
-#define	fdesc_unlock	vop_nounlock
+#define	fdesc_lock	vop_generic_lock
+#define	fdesc_unlock	vop_generic_unlock
 #define	fdesc_bmap	fdesc_badop
 #define	fdesc_strategy	fdesc_badop
 int	fdesc_print	__P((void *));
 int	fdesc_pathconf	__P((void *));
-#define	fdesc_islocked	vop_noislocked
+#define	fdesc_islocked	vop_generic_islocked
 #define	fdesc_advlock	eopnotsupp
 #define	fdesc_blkatoff	eopnotsupp
 #define	fdesc_valloc	eopnotsupp
@@ -163,7 +162,7 @@ struct vnodeopv_entry_desc fdesc_vnodeop_entries[] = {
 	{ &vop_symlink_desc, fdesc_symlink },	/* symlink */
 	{ &vop_readdir_desc, fdesc_readdir },	/* readdir */
 	{ &vop_readlink_desc, fdesc_readlink },	/* readlink */
-	{ &vop_abortop_desc, fdesc_abortop },	/* abortop */
+	{ &vop_abortop_desc, vop_generic_abortop },	/* abortop */
 	{ &vop_inactive_desc, fdesc_inactive },	/* inactive */
 	{ &vop_reclaim_desc, fdesc_reclaim },	/* reclaim */
 	{ &vop_lock_desc, fdesc_lock },		/* lock */
@@ -617,6 +616,7 @@ fdesc_setattr(v)
 		struct proc *a_p;
 	} */ *ap = v;
 	struct filedesc *fdp = ap->a_p->p_fd;
+	struct vattr *vap = ap->a_vap;
 	struct file *fp;
 	unsigned fd;
 	int error;
@@ -629,6 +629,8 @@ fdesc_setattr(v)
 		break;
 
 	case Fctty:
+		if (vap->va_flags != VNOVAL)
+			return (EOPNOTSUPP);
 		return (0);
 
 	default:
@@ -644,13 +646,16 @@ fdesc_setattr(v)
 	 * Can setattr the underlying vnode, but not sockets!
 	 */
 	switch (fp->f_type) {
+	case DTYPE_PIPE:
 	case DTYPE_VNODE:
 		error = VOP_SETATTR((struct vnode *) fp->f_data, ap->a_vap, ap->a_cred, ap->a_p);
 		break;
 
 	case DTYPE_SOCKET:
-	case DTYPE_PIPE:
-		error = 0;
+		if (vap->va_flags != VNOVAL)
+			error = EOPNOTSUPP;
+		else
+			error = 0;
 		break;
 
 	default:
@@ -1033,20 +1038,6 @@ fdesc_symlink(v)
 	VOP_ABORTOP(ap->a_dvp, ap->a_cnp);
 	vput(ap->a_dvp);
 	return (EROFS);
-}
-
-int
-fdesc_abortop(v)
-	void *v;
-{
-	struct vop_abortop_args /* {
-		struct vnode *a_dvp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
- 
-	if ((ap->a_cnp->cn_flags & (HASBUF | SAVESTART)) == HASBUF)
-		FREE(ap->a_cnp->cn_pnbuf, M_NAMEI);
-	return (0);
 }
 
 /*

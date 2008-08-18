@@ -1,4 +1,4 @@
-/*	$OpenBSD: pms.c,v 1.18 1998/04/01 20:21:00 matthieu Exp $	*/
+/*	$OpenBSD: pms.c,v 1.21 1998/08/07 20:34:27 deraadt Exp $	*/
 /*	$NetBSD: pms.c,v 1.29 1996/05/12 23:12:42 mycroft Exp $	*/
 
 /*-
@@ -70,7 +70,7 @@
 
 /* controller commands */
 #define	PMS_INT_ENABLE	0x47	/* enable controller interrupts */
-#define	PMS_INT_DISABLE	0x65	/* disable controller interrupts */
+#define	PMS_INT_DISABLE	0x45	/* disable controller interrupts */
 #define	PMS_AUX_ENABLE	0xa8	/* enable auxiliary port */
 #define	PMS_AUX_DISABLE	0xa7	/* disable auxiliary port */
 #define	PMS_AUX_TEST	0xa9	/* test auxiliary port */
@@ -208,9 +208,16 @@ pmsprobe(parent, match, aux)
 	x = inb(PMS_DATA);
 	pms_pit_cmd(PMS_INT_DISABLE);
 	if (x & 0x04)
-		return 0;
+		return (0);
 
-	return 1;
+	/* Make sure the IRQ is available. */
+	if (!isa_intr_check((isa_chipset_tag_t)0, cf->cf_loc[0], IST_EDGE)) {
+		printf ("%s%d: irq %d already in use\n", cf->cf_driver->cd_name,
+		    cf->cf_unit, cf->cf_loc[0]);
+		return (0);
+	}
+
+	return (1);
 }
 
 void

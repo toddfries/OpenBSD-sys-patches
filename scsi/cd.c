@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.30 1998/03/27 18:40:54 millert Exp $	*/
+/*	$OpenBSD: cd.c,v 1.35 1998/10/05 00:39:27 millert Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -71,6 +71,8 @@
 #include <scsi/scsi_disk.h>	/* rw_big and start_stop come from there */
 #include <scsi/scsiconf.h>
 
+#include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
+
 #define	CDOUTSTANDING	4
 #define	CDRETRIES	1
 
@@ -110,7 +112,8 @@ int	cdlock __P((struct cd_softc *));
 void	cdunlock __P((struct cd_softc *));
 void	cdstart __P((void *));
 void	cdminphys __P((struct buf *));
-void	cdgetdisklabel __P((dev_t, struct cd_softc *));
+void	cdgetdisklabel __P((dev_t, struct cd_softc *, struct disklabel *,
+			    struct cpu_disklabel *, int));
 void	cddone __P((struct scsi_xfer *));
 u_long	cd_size __P((struct cd_softc *, int));
 int	cd_get_mode __P((struct cd_softc *, struct cd_mode_data *, int));
@@ -341,7 +344,8 @@ cdopen(dev, flag, fmt, p)
 			SC_DEBUG(sc_link, SDEV_DB3, ("Params loaded "));
 
 			/* Fabricate a disk label. */
-			cdgetdisklabel(dev, cd);
+			cdgetdisklabel(dev, cd, cd->sc_dk.dk_label,
+			    cd->sc_dk.dk_cpulabel, 0);
 			SC_DEBUG(sc_link, SDEV_DB3, ("Disklabel fabricated "));
 		}
 	}
@@ -725,6 +729,7 @@ cdioctl(dev, cmd, addr, flag, p)
 
 	switch (cmd) {
 	case DIOCGDINFO:
+	case DIOCGPDINFO:
 		*(struct disklabel *)addr = *(cd->sc_dk.dk_label);
 		return 0;
 
@@ -823,26 +828,36 @@ cdioctl(dev, cmd, addr, flag, p)
 	case CDIOREADTOCENTRYS: {
 		struct cd_toc {
 			struct ioc_toc_header header;
-			struct cd_toc_entry entries[65];
-		} data;
+			struct cd_toc_entry entries[100];
+		} * data;
 		struct ioc_read_toc_entry *te =
 		(struct ioc_read_toc_entry *)addr;
 		struct ioc_toc_header *th;
 		int len = te->data_len;
-		th = &data.header;
+		int res;
 
-		if (len > sizeof(data.entries) ||
+		if (len > sizeof(data->entries) ||
 		    len < sizeof(struct cd_toc_entry))
 			return EINVAL;
+
+		MALLOC (data, struct cd_toc *, sizeof (struct cd_toc),
+			M_DEVBUF, M_WAITOK);
+			       
+		th = &data->header;
+
 		error = cd_read_toc(cd, te->address_format,
 				    te->starting_track,
-				    (struct cd_toc_entry *)&data,
+				    (struct cd_toc_entry *)data,
 				    len + sizeof(struct ioc_toc_header));
-		if (error)
+		if (error) {
+			FREE(data, M_DEVBUF);
 			return error;
+		}
 		len = min(len, ntohs(th->len) - (sizeof(th->starting_track) +
 			       sizeof(th->ending_track)));
-		return copyout(data.entries, te->data, len);
+		res = copyout(data->entries, te->data, len);
+		FREE(data, M_DEVBUF);
+		return (res);
 	}
 	case CDIOCSETPATCH: {
 		struct ioc_patch *arg = (struct ioc_patch *)addr;
@@ -1042,15 +1057,17 @@ cdioctl(dev, cmd, addr, flag, p)
  * data tracks from the TOC and put it in the disklabel
  */
 void
-cdgetdisklabel(dev, cd)
+cdgetdisklabel(dev, cd, lp, clp, spoofonly)
 	dev_t dev;
 	struct cd_softc *cd;
+	struct disklabel *lp;
+	struct cpu_disklabel *clp;
+	int spoofonly;
 {
-	struct disklabel *lp = cd->sc_dk.dk_label;
 	char *errstring;
 
 	bzero(lp, sizeof(struct disklabel));
-	bzero(cd->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
+	bzero(clp, sizeof(struct cpu_disklabel));
 
 	lp->d_secsize = cd->params.blksize;
 	lp->d_ntracks = 1;
@@ -1059,7 +1076,7 @@ cdgetdisklabel(dev, cd)
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
 	if (lp->d_secpercyl == 0) {
 		lp->d_secpercyl = 100;
-		/* as long as it's not 0 - readdisklabel divides by it (?) */
+		/* as long as it's not 0 - readdisklabel divides by it */
 	}
 
 	strncpy(lp->d_typename, "SCSI CD-ROM", sizeof(lp->d_typename) - 1);
@@ -1069,6 +1086,10 @@ cdgetdisklabel(dev, cd)
 	lp->d_rpm = 300;
 	lp->d_interleave = 1;
 	lp->d_flags = D_REMOVABLE;
+
+	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
+	lp->d_bbsize = BBSIZE;
+	lp->d_sbsize = SBSIZE;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size =
@@ -1083,8 +1104,8 @@ cdgetdisklabel(dev, cd)
 	/*
 	 * Call the generic disklabel extraction routine
 	 */
-	errstring = readdisklabel(CDLABELDEV(dev), cdstrategy, lp,
-	    cd->sc_dk.dk_cpulabel);
+	errstring = readdisklabel(CDLABELDEV(dev), cdstrategy, lp, clp,
+	    spoofonly);
 	if (errstring) {
 		/*printf("%s: %s\n", cd->sc_dev.dv_xname, errstring);*/
 		return;

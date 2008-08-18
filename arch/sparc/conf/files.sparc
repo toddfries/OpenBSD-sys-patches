@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.15 1998/03/25 07:54:53 jason Exp $
+#	$OpenBSD: files.sparc,v 1.24 1998/10/19 05:43:30 jason Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
@@ -76,6 +76,10 @@ device sbus { slot = -1, offset = -1 }
 attach sbus at mainbus, iommu
 file	arch/sparc/dev/sbus.c			sbus
 
+#
+# Media Indepedent Interface (mii)
+#
+include "../../../dev/mii/files.mii"
 
 #
 # Machine-independent SCSI drivers
@@ -100,6 +104,23 @@ file	arch/sparc/dev/dma.c		dma | ledma
 device lebuffer {}
 attach lebuffer at sbus
 file	arch/sparc/dev/lebuffer.c	lebuffer
+
+device	qec {}
+attach	qec at sbus
+file	arch/sparc/dev/qec.c		qec
+
+device	be: ifnet, ether, ifmedia
+attach	be at qec
+file	arch/sparc/dev/be.c		be
+
+device	qe: ifnet, ether
+attach	qe at qec
+file	arch/sparc/dev/qe.c		qe
+
+# HappyMeal (hme) ethernet
+device hme: ifnet, ether, mii, ifmedia
+attach hme at sbus
+file	arch/sparc/dev/hme.c		hme
 
 device esp: scsi, ncr53c9x
 attach esp at sbus, dma, obio
@@ -257,3 +278,12 @@ include "../../../compat/sunos/files.sunos"
 
 # Miscellaneous
 file	netns/ns_cksum.c		ns
+
+# Magma Serial/Parallel boards
+device magma {}
+attach magma at sbus                                 
+device mtty
+attach mtty at magma
+device mbpp
+attach mbpp at magma
+file    arch/sparc/dev/magma.c          magma | mtty | mbpp needs-flag

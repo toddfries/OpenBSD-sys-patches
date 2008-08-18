@@ -1,7 +1,7 @@
-#	$OpenBSD: Makefile.vax,v 1.8 1997/10/02 19:56:06 niklas Exp $
+#	$OpenBSD: Makefile.vax,v 1.12 1998/05/17 10:31:03 niklas Exp $
 #	$NetBSD: Makefile.vax,v 1.32 1997/03/14 23:27:35 mycroft Exp $
 
-# Makefile for NetBSD
+# Makefile for OpenBSD
 #
 # This makefile is constructed from a machine description:
 #	config machineid
@@ -22,10 +22,22 @@
 # DEBUG is set to -g if debugging.
 # PROF is set to -pg if profiling.
 
+.if ${MACHINE} != "vax"
+CROSSDIR?=	/usr/cross/vax
+
+.BEGIN:
+	CBIN=${CROSSDIR}/usr/bin; export CBIN; \
+	MACHINE=vax MACHINE_ARCH=vax AR=$$CBIN/ar AS=$$CBIN/as \
+	CC=$$CBIN/cc HOSTCC=cc LD=$$CBIN/ld NM=$$CBIN/nm \
+	RANLIB=$$CBIN/ranlib STRIP=$$CBIN/strip SIZE=$$CBIN/size ${MAKE} $@
+.else
+
 CC?=	cc
+HOSTCC?=${CC}
 LD?=	ld
 MKDEP?=	mkdep
 STRIP?=	strip
+SIZE?=	size
 COPTS?= 	-O2
 
 # source tree is located via $S relative to the compilation directory
@@ -43,7 +55,7 @@ AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
 LINKFLAGS=	-Z -Ttext 80000000 -e _start
 STRIPFLAGS=	-d
 
-HOSTED_CC=	${CC}
+HOSTED_CC=	${HOSTCC}
 HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
 HOSTED_CFLAGS=	${CFLAGS}
 
@@ -88,7 +100,7 @@ SYSTEM_DEP=	Makefile ${SYSTEM_OBJ}
 SYSTEM_LD_HEAD=	@rm -f $@
 SYSTEM_LD=	@echo ${LD} ${LINKFLAGS} -o $@ '$${SYSTEM_OBJ}' vers.o; \
 		${LD} ${LINKFLAGS} -o $@ ${SYSTEM_OBJ} vers.o
-SYSTEM_LD_TAIL=	@size $@; chmod 755 $@
+SYSTEM_LD_TAIL=	@${SIZE} $@; chmod 755 $@
 
 DEBUG?=
 .if ${DEBUG} == "-g"
@@ -163,3 +175,5 @@ subr.o: ${VAX}/vax/subr.s
 	${NORMAL_S}
 
 %RULES
+
+.endif

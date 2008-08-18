@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.12 1998/02/09 06:29:07 tholo Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.15 1998/07/28 22:36:42 millert Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -78,8 +78,8 @@ sys_read(p, v, retval)
 {
 	register struct sys_read_args /* {
 		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(u_int) nbyte;
+		syscallarg(void *) buf;
+		syscallarg(size_t) nbyte;
 	} */ *uap = v;
 	register struct file *fp;
 	register struct filedesc *fdp = p->p_fd;
@@ -94,6 +94,9 @@ sys_read(p, v, retval)
 	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL ||
 	    (fp->f_flag & FREAD) == 0)
 		return (EBADF);
+	/* Don't allow nbyte to be larger than max return val */
+	if (SCARG(uap, nbyte) > SSIZE_MAX)
+		return(EINVAL);
 	aiov.iov_base = (caddr_t)SCARG(uap, buf);
 	aiov.iov_len = SCARG(uap, nbyte);
 	auio.uio_iov = &aiov;
@@ -102,8 +105,6 @@ sys_read(p, v, retval)
 	auio.uio_rw = UIO_READ;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_procp = p;
-	if (auio.uio_resid < 0)
-		return EINVAL;
 #ifdef KTRACE
 	/*
 	 * if tracing, save a copy of iovec
@@ -139,7 +140,7 @@ sys_readv(p, v, retval)
 	register struct sys_readv_args /* {
 		syscallarg(int) fd;
 		syscallarg(struct iovec *) iovp;
-		syscallarg(u_int) iovcnt;
+		syscallarg(int) iovcnt;
 	} */ *uap = v;
 	register struct file *fp;
 	register struct filedesc *fdp = p->p_fd;
@@ -157,6 +158,8 @@ sys_readv(p, v, retval)
 	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL ||
 	    (fp->f_flag & FREAD) == 0)
 		return (EBADF);
+	if (SCARG(uap, iovcnt) <= 0)
+		return (EINVAL);
 	/* note: can't use iovlen until iovcnt is validated */
 	iovlen = SCARG(uap, iovcnt) * sizeof (struct iovec);
 	if (SCARG(uap, iovcnt) > UIO_SMALLIOV) {
@@ -177,14 +180,12 @@ sys_readv(p, v, retval)
 	if (error)
 		goto done;
 	auio.uio_resid = 0;
-	for (i = 0; i < SCARG(uap, iovcnt); i++) {
-		if (auio.uio_resid + iov->iov_len < auio.uio_resid) {
+	for (i = 0; i < SCARG(uap, iovcnt); i++, iov++) {
+		/* Don't allow sum > SSIZE_MAX */
+		if ((ssize_t)(auio.uio_resid += iov->iov_len) <= 0) {
 			error = EINVAL;
 			goto done;
 		}
-
-		auio.uio_resid += iov->iov_len;
-		iov++;
 	}
 #ifdef KTRACE
 	/*
@@ -228,8 +229,8 @@ sys_write(p, v, retval)
 {
 	register struct sys_write_args /* {
 		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(u_int) nbyte;
+		syscallarg(void *) buf;
+		syscallarg(size_t) nbyte;
 	} */ *uap = v;
 	register struct file *fp;
 	register struct filedesc *fdp = p->p_fd;
@@ -244,6 +245,9 @@ sys_write(p, v, retval)
 	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL ||
 	    (fp->f_flag & FWRITE) == 0)
 		return (EBADF);
+	/* Don't allow nbyte to be larger than max return val */
+	if (SCARG(uap, nbyte) > SSIZE_MAX)
+		return(EINVAL);
 	aiov.iov_base = (caddr_t)SCARG(uap, buf);
 	aiov.iov_len = SCARG(uap, nbyte);
 	auio.uio_iov = &aiov;
@@ -252,8 +256,6 @@ sys_write(p, v, retval)
 	auio.uio_rw = UIO_WRITE;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_procp = p;
-	if (auio.uio_resid < 0)
-		return EINVAL;
 #ifdef KTRACE
 	/*
 	 * if tracing, save a copy of iovec
@@ -292,7 +294,7 @@ sys_writev(p, v, retval)
 	register struct sys_writev_args /* {
 		syscallarg(int) fd;
 		syscallarg(struct iovec *) iovp;
-		syscallarg(u_int) iovcnt;
+		syscallarg(int) iovcnt;
 	} */ *uap = v;
 	register struct file *fp;
 	register struct filedesc *fdp = p->p_fd;
@@ -310,6 +312,8 @@ sys_writev(p, v, retval)
 	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL ||
 	    (fp->f_flag & FWRITE) == 0)
 		return (EBADF);
+	if (SCARG(uap, iovcnt) <= 0)
+		return (EINVAL);
 	/* note: can't use iovlen until iovcnt is validated */
 	iovlen = SCARG(uap, iovcnt) * sizeof (struct iovec);
 	if (SCARG(uap, iovcnt) > UIO_SMALLIOV) {
@@ -330,14 +334,12 @@ sys_writev(p, v, retval)
 	if (error)
 		goto done;
 	auio.uio_resid = 0;
-	for (i = 0; i < SCARG(uap, iovcnt); i++) {
-		if (auio.uio_resid + iov->iov_len < auio.uio_resid) {
+	for (i = 0; i < SCARG(uap, iovcnt); i++, iov++) {
+		/* Don't allow sum > SSIZE_MAX */
+		if ((ssize_t)(auio.uio_resid += iov->iov_len) <= 0) {
 			error = EINVAL;
 			goto done;
 		}
-
-		auio.uio_resid += iov->iov_len;
-		iov++;
 	}
 #ifdef KTRACE
 	/*

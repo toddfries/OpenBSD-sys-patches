@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vnops.c,v 1.6 1997/11/06 05:59:16 csapuntz Exp $	*/
+/*	$OpenBSD: ext2fs_vnops.c,v 1.8 1998/08/06 19:35:04 csapuntz Exp $	*/
 /*	$NetBSD: ext2fs_vnops.c,v 1.1 1997/06/11 09:34:09 bouyer Exp $	*/
 
 /*
@@ -890,7 +890,7 @@ abortit:
 			error = vn_rdwr(UIO_READ, fvp, (caddr_t)&dirbuf,
 				sizeof (struct ext2fs_dirtemplate), (off_t)0,
 				UIO_SYSSPACE, IO_NODELOCKED, 
-				tcnp->cn_cred, (int *)0, (struct proc *)0);
+				tcnp->cn_cred, NULL, (struct proc *)0);
 			if (error == 0) {
 					namlen = dirbuf.dotdot_namlen;
 				if (namlen != 2 ||
@@ -905,7 +905,7 @@ abortit:
 					    sizeof (struct dirtemplate),
 					    (off_t)0, UIO_SYSSPACE,
 					    IO_NODELOCKED|IO_SYNC,
-					    tcnp->cn_cred, (int *)0,
+					    tcnp->cn_cred, NULL,
 					    (struct proc *)0);
 					cache_purge(fdvp);
 				}
@@ -1019,7 +1019,7 @@ ext2fs_mkdir(v)
     dirtemplate.dotdot_reclen = VTOI(dvp)->i_e2fs->e2fs_bsize - 12;
 	error = vn_rdwr(UIO_WRITE, tvp, (caddr_t)&dirtemplate,
 	    sizeof (dirtemplate), (off_t)0, UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_SYNC, cnp->cn_cred, (int *)0, (struct proc *)0);
+	    IO_NODELOCKED|IO_SYNC, cnp->cn_cred, NULL, (struct proc *)0);
 	if (error) {
 		dp->i_e2fs_nlink--;
 		dp->i_flag |= IN_CHANGE;
@@ -1168,7 +1168,7 @@ ext2fs_symlink(v)
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 	} else
 		error = vn_rdwr(UIO_WRITE, vp, ap->a_target, len, (off_t)0,
-		    UIO_SYSSPACE, IO_NODELOCKED, ap->a_cnp->cn_cred, (int *)0,
+		    UIO_SYSSPACE, IO_NODELOCKED, ap->a_cnp->cn_cred, NULL,
 		    (struct proc *)0);
 	vput(vp);
 	return (error);
@@ -1440,7 +1440,7 @@ struct vnodeopv_entry_desc ext2fs_vnodeop_entries[] = {
 	{ &vop_symlink_desc, ext2fs_symlink },	/* symlink */
 	{ &vop_readdir_desc, ext2fs_readdir },	/* readdir */
 	{ &vop_readlink_desc, ext2fs_readlink },/* readlink */
-	{ &vop_abortop_desc, ufs_abortop },		/* abortop */
+	{ &vop_abortop_desc, vop_generic_abortop },		/* abortop */
 	{ &vop_inactive_desc, ext2fs_inactive },/* inactive */
 	{ &vop_reclaim_desc, ext2fs_reclaim },	/* reclaim */
 	{ &vop_lock_desc, ufs_lock },			/* lock */
@@ -1456,7 +1456,7 @@ struct vnodeopv_entry_desc ext2fs_vnodeop_entries[] = {
 	{ &vop_vfree_desc, ext2fs_vfree },		/* vfree */
 	{ &vop_truncate_desc, ext2fs_truncate },/* truncate */
 	{ &vop_update_desc, ext2fs_update },	/* update */
-	{ &vop_bwrite_desc, vn_bwrite },		/* bwrite */
+	{ &vop_bwrite_desc, vop_generic_bwrite },		/* bwrite */
 	{ (struct vnodeop_desc*)NULL, (int(*) __P((void*)))NULL }
 };
 struct vnodeopv_desc ext2fs_vnodeop_opv_desc =
@@ -1505,7 +1505,7 @@ struct vnodeopv_entry_desc ext2fs_specop_entries[] = {
 	{ &vop_vfree_desc, ext2fs_vfree },		/* vfree */
 	{ &vop_truncate_desc, spec_truncate },	/* truncate */
 	{ &vop_update_desc, ext2fs_update },	/* update */
-	{ &vop_bwrite_desc, vn_bwrite },		/* bwrite */
+	{ &vop_bwrite_desc, vop_generic_bwrite },		/* bwrite */
 	{ (struct vnodeop_desc*)NULL, (int(*) __P((void *)))NULL }
 };
 struct vnodeopv_desc ext2fs_specop_opv_desc =
@@ -1555,7 +1555,7 @@ struct vnodeopv_entry_desc ext2fs_fifoop_entries[] = {
 	{ &vop_vfree_desc, ext2fs_vfree },		/* vfree */
 	{ &vop_truncate_desc, fifo_truncate },	/* truncate */
 	{ &vop_update_desc, ext2fs_update },	/* update */
-	{ &vop_bwrite_desc, vn_bwrite },		/* bwrite */
+	{ &vop_bwrite_desc, vop_generic_bwrite },		/* bwrite */
 	{ (struct vnodeop_desc*)NULL, (int(*) __P((void *)))NULL }
 };
 struct vnodeopv_desc ext2fs_fifoop_opv_desc =

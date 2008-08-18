@@ -1,3 +1,4 @@
+# 	$OpenBSD: SUN4C,v 1.25 1998/10/19 05:43:30 jason Exp $
 # 	$NetBSD: GENERIC,v 1.19 1995/10/08 11:45:39 pk Exp $
 
 machine		sparc
@@ -63,6 +64,8 @@ sbus0	at mainbus0
 #vmel0	at mainbus0
 
 audioamd0 at mainbus0
+audio*	at audioamd?
+
 auxreg0	at mainbus0
 
 clock0	at mainbus0
@@ -103,6 +106,17 @@ esp*	at sbus0 slot ? offset ?
 le0	at sbus? slot ? offset ?
 le*	at sbus? slot ? offset ?
 #le0	at obio0 addr 0xf9000000 level 6
+
+# HappyMeal ethernet
+hme*	at sbus? slot ? offset ?
+# Media Independent Interface (mii) drivers (required by hme)
+nsphy*	at mii? phy ?				# NS and compatible PHYs
+qsphy*	at mii? phy ?				# Quality Semi QS6612 PHYs
+
+# Quad-ethernet glue device, and sub-devices
+qec*	at sbus0 slot ? offset ?
+qe*	at qec?
+be*	at qec?
 
 #ie0	at obio0 addr 0xf6000000 level 6
 #ie0	at obio0 addr 0x06000000 level 6		# 4/100

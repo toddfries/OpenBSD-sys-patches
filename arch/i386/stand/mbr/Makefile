@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 1997/08/29 19:48:25 mickey Exp $
+#	$OpenBSD: Makefile,v 1.8 1998/05/28 20:52:42 mickey Exp $
 #
 
 PROG=	mbr
@@ -9,16 +9,10 @@ LDFLAGS=-nostdlib -Ttext 0 -x -N -s -Bstatic
 MAN+=	mbr.8
 INSTALL_STRIP=
 SADIR=${.CURDIR}/..
+S=	${.CURDIR}/../../../..
 
 # Uncomment this to make mbr talk to a serial port.
 #CPPFLAGS+=-DSERIAL=0
-
-all:	machine-links
-
-machine-links:
-	@rm -f machine i386
-	@ln -fs ${.CURDIR}/../.. i386
-	@ln -fs ${.CURDIR}/../../include machine
 
 ${PROG}: $(OBJS) $(DPADD)
 	$(LD) $(LDFLAGS) -o $(PROG) $(OBJS) $(LDADD)

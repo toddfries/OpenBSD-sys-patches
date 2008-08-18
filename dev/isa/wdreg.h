@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdreg.h,v 1.6 1996/09/22 09:02:34 downsj Exp $	*/
+/*	$OpenBSD: wdreg.h,v 1.8 1998/08/08 23:01:12 downsj Exp $	*/
 /*	$NetBSD: wdreg.h,v 1.13 1995/03/29 21:56:46 briggs Exp $	*/
 
 /*-
@@ -55,12 +55,19 @@
 #define	wd_command	0x007	/* command register (W)	*/
 #define	wd_status	0x007	/* immediate status (R)	*/
 
-#define	wd_altsts	0x206	/* alternate fixed disk status (via 1015) (R) */
-#define	wd_ctlr		0x206	/* fixed disk controller control (via 1015) (W) */
+/*
+ * Control register definiations.
+ */
+#define WDCTL_OFFSET	0x206	/* offset from the first set. */
+
+#define	wd_altsts	0x000	/* alternate fixed disk status (via 1015) (R) */
+#define	wd_ctlr		0x000	/* fixed disk controller control (via 1015) (W) */
 #define  WDCTL_4BIT	 0x08	/* use four head bits (wd1003) */
 #define  WDCTL_RST	 0x04	/* reset the controller */
 #define  WDCTL_IDS	 0x02	/* disable controller interrupts */
-#define	wd_digin	0x207	/* disk controller input (via 1015) (R) */
+#if 0
+#define	wd_digin	0x001	/* disk controller input (via 1015) (R) */
+#endif
 
 /*
  * Status bits.
@@ -186,11 +193,11 @@ struct wdparams {
 	u_int16_t wdp_curcyls;		/* logical cylinders */
 	u_int16_t wdp_curheads;		/* logical heads */
 	u_int16_t wdp_cursectors;	/* logical sectors per track */
-	u_int16_t wdp_curcapacity[2];	/* logical total sectors on drive */
+	u_int32_t wdp_curcapacity;	/* logical total sectors on drive */
 	u_int8_t  wdp_curmulti;		/* current multiple sector count */
 	u_int8_t  wdp_valmulti;		/* multiple sector is valid */
 #define WD_CAP_MULTI	0x01
-	u_int16_t wdp_lbacapacity[2];	/* total number of sectors */
+	u_int32_t wdp_lbacapacity;	/* total number of sectors */
 	u_int16_t wdp_dma1word;		/* single-word dma info */
 	u_int16_t wdp_dmamword;		/* multiple-word dma info */
 	u_int16_t wdp_eidepiomode;	/* EIDE PIO mode */

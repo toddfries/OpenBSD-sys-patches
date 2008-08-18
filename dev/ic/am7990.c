@@ -1,4 +1,4 @@
-/*	$OpenBSD: am7990.c,v 1.11 1998/03/09 09:33:04 deraadt Exp $	*/
+/*	$OpenBSD: am7990.c,v 1.14 1998/09/16 22:41:20 jason Exp $	*/
 /*	$NetBSD: am7990.c,v 1.22 1996/10/13 01:37:19 christos Exp $	*/
 
 /*-
@@ -53,6 +53,7 @@
 #include <sys/errno.h>
 
 #include <net/if.h>
+#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -344,7 +345,7 @@ am7990_init(sc)
 		ifp->if_timer = 0;
 		am7990_start(ifp);
 	} else
-		printf("%s: card failed to initialize\n", sc->sc_dev.dv_xname);
+		printf("%s: controller failed to initialize\n", sc->sc_dev.dv_xname);
 	if (sc->sc_hwinit)
 		(*sc->sc_hwinit)(sc);
 }
@@ -596,6 +597,9 @@ am7990_tint(sc)
 		if (sc->sc_no_td <= 0)
 			break;
 
+		(*sc->sc_copyfromdesc)(sc, &tmd, LE_TMDADDR(sc, bix),
+		    sizeof(tmd));
+
 #ifdef LEDEBUG
 		if (sc->sc_debug)
 			printf("trans tmd: "
@@ -604,9 +608,6 @@ am7990_tint(sc)
 			    tmd.tmd0, tmd.tmd1_hadr, tmd.tmd1_bits,
 			    tmd.tmd2, tmd.tmd3);
 #endif
-
-		(*sc->sc_copyfromdesc)(sc, &tmd, LE_TMDADDR(sc, bix),
-		    sizeof(tmd));
 
 		if (tmd.tmd1_bits & LE_T1_OWN)
 			break;
@@ -916,6 +917,14 @@ am7990_ioctl(ifp, cmd, data)
 			am7990_reset(sc);
 			error = 0;
 		}
+		break;
+
+	case SIOCGIFMEDIA:
+	case SIOCSIFMEDIA:
+		if (sc->sc_hasifmedia)
+			error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, cmd);
+		else
+			error = EINVAL;
 		break;
 
 	default:

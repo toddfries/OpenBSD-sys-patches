@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.16 1998/02/23 20:10:39 niklas Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.18 1998/08/06 19:34:54 csapuntz Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -1510,7 +1510,7 @@ msdosfs_readdir(v)
 
 	/*
 	 * msdosfs_readdir() won't operate properly on regular files since
-	 * it does i/o only with the the filesystem vnode, and hence can
+	 * it does i/o only with the filesystem vnode, and hence can
 	 * retrieve the wrong block from the buffer cache for a plain file.
 	 * So, fail attempts to readdir() on a plain file.
 	 */
@@ -1753,20 +1753,6 @@ msdosfs_readlink(v)
 }
 
 int
-msdosfs_abortop(v)
-	void *v;
-{
-	struct vop_abortop_args /* {
-		struct vnode *a_dvp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
-
-	if ((ap->a_cnp->cn_flags & (HASBUF | SAVESTART)) == HASBUF)
-		FREE(ap->a_cnp->cn_pnbuf, M_NAMEI);
-	return (0);
-}
-
-int
 msdosfs_lock(v)
 	void *v;
 {
@@ -1998,7 +1984,7 @@ struct vnodeopv_entry_desc msdosfs_vnodeop_entries[] = {
 	{ &vop_symlink_desc, msdosfs_symlink },		/* symlink */
 	{ &vop_readdir_desc, msdosfs_readdir },		/* readdir */
 	{ &vop_readlink_desc, msdosfs_readlink },	/* readlink */
-	{ &vop_abortop_desc, msdosfs_abortop },		/* abortop */
+	{ &vop_abortop_desc, vop_generic_abortop },	/* abortop */
 	{ &vop_inactive_desc, msdosfs_inactive },	/* inactive */
 	{ &vop_reclaim_desc, msdosfs_reclaim },		/* reclaim */
 	{ &vop_lock_desc, msdosfs_lock },		/* lock */
@@ -2011,7 +1997,7 @@ struct vnodeopv_entry_desc msdosfs_vnodeop_entries[] = {
 	{ &vop_advlock_desc, msdosfs_advlock },		/* advlock */
 	{ &vop_reallocblks_desc, msdosfs_reallocblks },	/* reallocblks */
 	{ &vop_update_desc, msdosfs_update },		/* update */
-	{ &vop_bwrite_desc, vn_bwrite },		/* bwrite */
+	{ &vop_bwrite_desc, vop_generic_bwrite },		/* bwrite */
 	{ (struct vnodeop_desc *)NULL, (int (*) __P((void *)))NULL }
 };
 struct vnodeopv_desc msdosfs_vnodeop_opv_desc =

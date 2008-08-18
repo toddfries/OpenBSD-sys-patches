@@ -1,11 +1,10 @@
-#	$OpenBSD: Makefile.inc,v 1.20.2.1 1998/04/20 13:25:32 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.24 1998/06/11 02:32:00 mickey Exp $
 
 CFLAGS=${DEBUG} -O2 -Wall -Werror
 CPPFLAGS+=-I${S} -I${SADIR}/libsa -I. -I${.CURDIR}
-SACFLAGS=-nostdinc -fno-builtin -fpack-struct
-SACFLAGS+=-D_STANDALONE
-# CPPFLAGS+=-DSAVE_MEMORY
-# DEBUGFLAGS=-DDEBUG
+SACFLAGS=-D_STANDALONE
+DEBUGFLAGS=
+# DEBUGFLAGS+=-DDEBUG
 # DEBUGFLAGS+=-DGIDT_DEBUG
 # DEBUGFLAGS+=-DBIOS_DEBUG
 # DEBUGFLAGS+=-DEXEC_DEBUG
@@ -20,6 +19,17 @@ HEAP_LIMIT=0x60000
 BOOTREL=0x60000
 BOOTMAGIC=0xdeadbeef
 #ROM_SIZE=32768
+CLEANFILES+=	machine
+
+.if empty(DEBUGFLAGS:M-D_TEST)
+SACFLAGS+=-nostdinc -fno-builtin -fpack-struct
+.endif
+
+.if !make(libdep) && !make(sadep) && !make(salibdir) && !make(kernlibdir) && !make(obj)
+.BEGIN:
+	@([ -h machine ] || ln -s $(S)/arch/i386/include machine)
+.endif
+
 
 .if exists(${SADIR}/etc/assym.h)
 CPPFLAGS+=-I${SADIR}/etc

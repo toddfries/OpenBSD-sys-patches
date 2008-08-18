@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3var.h,v 1.9 1997/10/30 23:58:18 niklas Exp $	*/
+/*	$OpenBSD: elink3var.h,v 1.11 1998/09/19 10:08:05 maja Exp $	*/
 /*	$NetBSD: elink3var.h,v 1.12 1997/03/30 22:47:11 jonathan Exp $	*/
 
 /*
@@ -40,11 +40,10 @@ struct ep_softc {
 
 #ifdef __NetBSD__
 	struct ethercom sc_ethercom;	/* Ethernet common part		*/
-	struct ifmedia sc_media;	/* media control		*/
 #else
 	struct arpcom sc_arpcom;	/* Ethernet common part		*/
-	int sc_media;			/* default media type		*/
 #endif
+	struct ifmedia sc_media;	/* media control		*/
 	bus_space_tag_t sc_iot;		/* bus cookie			*/
 	bus_space_handle_t sc_ioh;	/* bus i/o handle		*/
 	u_int	ep_connectors;		/* Connectors on this card.	*/
@@ -71,6 +70,7 @@ struct ep_softc {
 #define EP_FLAGS_SNOOPING		0x0800
 #define EP_FLAGS_100MBIT		0x1000
 #define EP_FLAGS_POWERMGMT		0x2000
+#define EP_FLAGS_MII			0x4000
 
 	u_short ep_chipset;		/* Chipset family on this board */
 #define EP_CHIPSET_UNKNOWN		0x00	/* unknown (assume 3c509) */
@@ -94,6 +94,6 @@ struct ep_softc {
 };
 
 u_int16_t epreadeeprom __P((bus_space_tag_t, bus_space_handle_t, int));
-void	epconfig __P((struct ep_softc *, u_short));
+void	epconfig __P((struct ep_softc *, u_short, u_int8_t *));
 int	epintr __P((void *));
 void	epstop __P((struct ep_softc *));

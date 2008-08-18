@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.18 1998/02/08 22:41:34 tholo Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.20 1998/08/27 05:00:17 deraadt Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-

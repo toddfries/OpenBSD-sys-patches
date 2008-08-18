@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.15 1998/04/13 00:37:40 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.17 1998/05/28 20:52:34 mickey Exp $
 
 PROG=	biosboot
 SRCS=	biosboot.S
@@ -8,13 +8,6 @@ INSTALL_STRIP=
 MAN=	biosboot.8
 SADIR=	${.CURDIR}/..
 
-all:	machine-links
-
-machine-links:
-	@rm -f i386 machine
-	@ln -fs ${.CURDIR}/../.. i386
-	@ln -fs ${.CURDIR}/../../include machine
-
 ${PROG}: $(OBJS) $(DPADD)
 	@rm -f $(PROG)
 	$(LD) $(LDFLAGS) -o $(PROG) $(OBJS) $(LDADD)
@@ -22,6 +15,6 @@ ${PROG}: $(OBJS) $(DPADD)
 
 .include <bsd.prog.mk>
 
-CPPFLAGS+=-DLOADADDR=$(LOADADDR) -DBOOTMAGIC=$(BOOTMAGIC) -DBOOTREL=$(BOOTREL)
-CPPFLAGS+=${DEBUGFLAGS} -DBEMBR
+CPPFLAGS+=-DLOADADDR=$(LOADADDR) -DBOOTMAGIC=$(BOOTMAGIC)
+CPPFLAGS+=${DEBUGFLAGS}
 #AFLAGS+=-Wa,-a

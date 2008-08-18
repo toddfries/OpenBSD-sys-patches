@@ -1,7 +1,7 @@
-/*	$OpenBSD: boot.c,v 1.17 1998/02/24 22:16:02 weingart Exp $	*/
+/*	$OpenBSD: boot.c,v 1.22 1998/07/08 19:24:52 mickey Exp $	*/
 
 /*
- * Copyright (c) 1997 Michael Shalayeff
+ * Copyright (c) 1997,1998 Michael Shalayeff
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -38,9 +38,10 @@
 #include <libsa.h>
 #include "cmd.h"
 
-const char *const kernels[] = {
-	"/bsd",  "/bsd.gz",
-	"/obsd", "/obsd.gz",
+static const char *const kernels[] = {
+	"/bsd",
+	"/obsd",
+	"/bsd.old",
 	NULL
 };
 
@@ -56,16 +57,16 @@ boot(bootdev)
 
 	machdep();
 
+	printf(">> OpenBSD/" MACHINE_ARCH " BOOT %s\n", version);
+
 	devboot(bootdev, cmd.bootdev);
 	strncpy(cmd.image, bootfile, sizeof(cmd.image));
 	cmd.boothowto = 0;
 	cmd.conf = "/etc/boot.conf";
-	cmd.addr = (void *)0x100000;
+	cmd.addr = (void *)DEFAULT_KERNEL_ADDRESS;
 	cmd.timeout = 5;
 
 	st = read_conf();
-
-	printf(">> OpenBSD BOOT %s\n", version);
 
 	while (1) {
 		if (st <= 0) /* no boot.conf, or no boot cmd in there */

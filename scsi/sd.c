@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.27 1998/03/27 18:40:53 millert Exp $	*/
+/*	$OpenBSD: sd.c,v 1.32 1998/10/04 01:37:55 millert Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*
@@ -70,6 +70,8 @@
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
+#include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
+
 #define	SDOUTSTANDING	4
 #define	SDRETRIES	4
 
@@ -97,6 +99,11 @@ struct sd_softc {
 		int blksize;		/* number of bytes/sector */
 		u_long disksize;	/* total number sectors */
 	} params;
+	struct disk_name {
+		char vendor[9];		/* disk vendor/manufacturer */
+		char product[17];	/* disk product model */
+		char revision[5];	/* drive/firmware revision */
+	} name;
 	struct buf buf_queue;
 	u_int8_t type;
 };
@@ -112,14 +119,16 @@ void	sdattach __P((struct device *, struct device *, void *));
 int	sdlock __P((struct sd_softc *));
 void	sdunlock __P((struct sd_softc *));
 void	sdminphys __P((struct buf *));
-void	sdgetdisklabel __P((dev_t, struct sd_softc *));
+void	sdgetdisklabel __P((dev_t, struct sd_softc *, struct disklabel *,
+			    struct cpu_disklabel *, int));
 void	sdstart __P((void *));
 void	sddone __P((struct scsi_xfer *));
 int	sd_reassign_blocks __P((struct sd_softc *, u_long));
 int	sd_get_optparms __P((struct sd_softc *, int, struct disk_parms *));
 int	sd_get_parms __P((struct sd_softc *, int));
-static int sd_mode_sense __P((struct sd_softc *, struct scsi_mode_sense_data *,
+static	int sd_mode_sense __P((struct sd_softc *, struct scsi_mode_sense_data *,
 			      int, int));
+void	viscpy __P((u_char *, u_char *, int));
 
 struct cfattach sd_ca = {
 	sizeof(struct sd_softc), sdmatch, sdattach
@@ -219,6 +228,11 @@ sdattach(parent, self, aux)
 				   SCSI_IGNORE_MEDIA_CHANGE | SCSI_SILENT);
 	} else
 		error = 0;
+
+	/* Fill in name struct for spoofed label */
+	viscpy(sd->name.vendor, sa->sa_inqbuf->vendor, 8);
+	viscpy(sd->name.product, sa->sa_inqbuf->product, 16);
+	viscpy(sd->name.revision, sa->sa_inqbuf->revision, 4);
 
 	if (error || sd_get_parms(sd, SCSI_AUTOCONF) != 0)
 		printf("drive offline\n");
@@ -342,7 +356,8 @@ sdopen(dev, flag, fmt, p)
 			SC_DEBUG(sc_link, SDEV_DB3, ("Params loaded "));
 
 			/* Load the partition info if not already loaded. */
-			sdgetdisklabel(dev, sd);
+			sdgetdisklabel(dev, sd, sd->sc_dk.dk_label,
+			    sd->sc_dk.dk_cpulabel, 0);
 			SC_DEBUG(sc_link, SDEV_DB3, ("Disklabel loaded "));
 		}
 	}
@@ -415,7 +430,7 @@ sdclose(dev, flag, fmt, p)
 	sd->sc_dk.dk_openmask = sd->sc_dk.dk_copenmask | sd->sc_dk.dk_bopenmask;
 
 	if (sd->sc_dk.dk_openmask == 0) {
-		/* XXXX Must wait for I/O to complete! */
+		/* XXX Must wait for I/O to complete! */
 
 		scsi_prevent(sd->sc_link, PR_ALLOW,
 		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_NOT_READY);
@@ -714,6 +729,14 @@ sdioctl(dev, cmd, addr, flag, p)
 		return EIO;
 
 	switch (cmd) {
+	case DIOCGPDINFO: {
+			struct cpu_disklabel osdep;
+
+			sdgetdisklabel(dev, sd, (struct disklabel *)addr,
+			    &osdep, 1);
+			return 0;
+		}
+
 	case DIOCGDINFO:
 		*(struct disklabel *)addr = *(sd->sc_dk.dk_label);
 		return 0;
@@ -791,15 +814,17 @@ sdioctl(dev, cmd, addr, flag, p)
  * Load the label information on the named device
  */
 void
-sdgetdisklabel(dev, sd)
+sdgetdisklabel(dev, sd, lp, clp, spoofonly)
 	dev_t dev;
 	struct sd_softc *sd;
+	struct disklabel *lp;
+	struct cpu_disklabel *clp;
+	int spoofonly;
 {
-	struct disklabel *lp = sd->sc_dk.dk_label;
 	char *errstring;
 
 	bzero(lp, sizeof(struct disklabel));
-	bzero(sd->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
+	bzero(clp, sizeof(struct cpu_disklabel));
 
 	lp->d_secsize = sd->params.blksize;
 	lp->d_ntracks = sd->params.heads;
@@ -808,7 +833,7 @@ sdgetdisklabel(dev, sd)
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
 	if (lp->d_secpercyl == 0) {
 		lp->d_secpercyl = 100;
-		/* as long as it's not 0 - readdisklabel divides by it (?) */
+		/* as long as it's not 0 - readdisklabel divides by it */
 	}
 
 	lp->d_type = DTYPE_SCSI;
@@ -818,11 +843,23 @@ sdgetdisklabel(dev, sd)
 	else
 		strncpy(lp->d_typename, "SCSI disk",
 		    sizeof(lp->d_typename) - 1);
-	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname) - 1);
+
+	if (strlen(sd->name.vendor) + strlen(sd->name.product) + 1 <
+	    sizeof(lp->d_packname))
+		sprintf(lp->d_packname, "%s %s", sd->name.vendor,
+		    sd->name.product);
+	else
+		strncpy(lp->d_packname, sd->name.product,
+		    sizeof(lp->d_packname) - 1);
+
 	lp->d_secperunit = sd->params.disksize;
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
 	lp->d_flags = 0;
+
+	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
+	lp->d_bbsize = BBSIZE;
+	lp->d_sbsize = SBSIZE;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size =
@@ -837,8 +874,8 @@ sdgetdisklabel(dev, sd)
 	/*
 	 * Call the generic disklabel extraction routine
 	 */
-	errstring = readdisklabel(SDLABELDEV(dev), sdstrategy, lp,
-	    sd->sc_dk.dk_cpulabel);
+	errstring = readdisklabel(SDLABELDEV(dev), sdstrategy, lp, clp,
+	    spoofonly);
 	if (errstring) {
 		/*printf("%s: %s\n", sd->sc_dev.dv_xname, errstring);*/
 		return;
@@ -912,7 +949,7 @@ sd_get_optparms(sd, flags, dp)
 	u_long sectors;
 	int error;
 
-	dp->blksize = 512;
+	dp->blksize = DEV_BSIZE;
 	if ((sectors = scsi_size(sd->sc_link, flags)) == 0)
 		return 1;
 
@@ -936,7 +973,7 @@ sd_get_optparms(sd, flags, dp)
 
 	dp->blksize = _3btol(scsi_sense.blk_desc.blklen);
 	if (dp->blksize == 0) 
-		dp->blksize = 512;
+		dp->blksize = DEV_BSIZE;
 
 	/*
 	 * Create a pseudo-geometry.
@@ -993,7 +1030,7 @@ sd_get_parms(sd, flags)
 			goto fake_it;
 
 		if (dp->blksize == 0)
-			dp->blksize = 512;
+			dp->blksize = DEV_BSIZE;
 
 		sectors = scsi_size(sd->sc_link, flags);
 		dp->disksize = sectors;
@@ -1013,7 +1050,7 @@ sd_get_parms(sd, flags)
 			goto fake_it;
 
 		if (dp->blksize == 0)
-			dp->blksize = 512;
+			dp->blksize = DEV_BSIZE;
 
 		return 0;
 	}
@@ -1037,7 +1074,7 @@ fake_it:
 	dp->heads = 64;
 	dp->sectors = 32;
 	dp->cyls = sectors / (64 * 32);
-	dp->blksize = 512;
+	dp->blksize = DEV_BSIZE;
 	dp->disksize = sectors;
 	return 0;
 }
@@ -1198,3 +1235,25 @@ sddump(dev, blkno, va, size)
 	return ENXIO;
 }
 #endif	/* __BDEVSW_DUMP_OLD_TYPE */
+
+/*
+ * Copy up to len chars from src to dst, ignoring non-printables.
+ * Must be room for len+1 chars in dst so we can write the NUL.
+ * Does not assume src is NUL-terminated.
+ */
+void
+viscpy(dst, src, len)
+	u_char *dst;
+	u_char *src;
+	int len;
+{
+	while (len > 0 && *src != '\0') {
+		if (*src < 0x20 || *src >= 0x80) {
+			src++;
+			continue;
+		}
+		*dst++ = *src++;
+		len--;
+	}
+	*dst = '\0';
+}

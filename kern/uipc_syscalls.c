@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.7 1998/02/08 22:41:36 tholo Exp $	*/
+/*	$OpenBSD: uipc_syscalls.c,v 1.13 1998/09/14 23:35:01 provos Exp $	*/
 /*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
 
 /*
@@ -385,13 +385,12 @@ sys_sendmsg(p, v, retval)
 	error = copyin(SCARG(uap, msg), (caddr_t)&msg, sizeof (msg));
 	if (error)
 		return (error);
-	if ((u_int)msg.msg_iovlen >= UIO_SMALLIOV) {
-		if ((u_int)msg.msg_iovlen >= UIO_MAXIOV)
-			return (EMSGSIZE);
+	if (msg.msg_iovlen <= 0 || msg.msg_iovlen > UIO_MAXIOV)
+		return (EMSGSIZE);
+	if (msg.msg_iovlen > UIO_SMALLIOV)
 		MALLOC(iov, struct iovec *,
-		       sizeof(struct iovec) * (u_int)msg.msg_iovlen, M_IOV,
-		       M_WAITOK);
-	} else
+		       sizeof(struct iovec) * msg.msg_iovlen, M_IOV, M_WAITOK);
+	else
 		iov = aiov;
 	if (msg.msg_iovlen &&
 	    (error = copyin((caddr_t)msg.msg_iov, (caddr_t)iov,
@@ -437,7 +436,9 @@ sendit(p, s, mp, flags, retsize)
 	auio.uio_resid = 0;
 	iov = mp->msg_iov;
 	for (i = 0; i < mp->msg_iovlen; i++, iov++) {
-		if ((auio.uio_resid += iov->iov_len) < 0)
+		/* Don't allow sum > SSIZE_MAX */
+		if ((ssize_t)(auio.uio_resid += iov->iov_len) <= 0 &&
+		    (iov->iov_base != 0 || iov->iov_len != 0))
 			return (EINVAL);
 	}
 	if (mp->msg_name) {
@@ -568,13 +569,12 @@ sys_recvmsg(p, v, retval)
 		       sizeof (msg));
 	if (error)
 		return (error);
-	if ((u_int)msg.msg_iovlen >= UIO_SMALLIOV) {
-		if ((u_int)msg.msg_iovlen >= UIO_MAXIOV)
-			return (EMSGSIZE);
+	if (msg.msg_iovlen <= 0 || msg.msg_iovlen > UIO_MAXIOV)
+		return (EMSGSIZE);
+	if (msg.msg_iovlen > UIO_SMALLIOV)
 		MALLOC(iov, struct iovec *,
-		       sizeof(struct iovec) * (u_int)msg.msg_iovlen, M_IOV,
-		       M_WAITOK);
-	} else
+		       sizeof(struct iovec) * msg.msg_iovlen, M_IOV, M_WAITOK);
+	else
 		iov = aiov;
 #ifdef COMPAT_OLDSOCK
 	msg.msg_flags = SCARG(uap, flags) &~ MSG_COMPAT;
@@ -627,7 +627,9 @@ recvit(p, s, mp, namelenp, retsize)
 	auio.uio_resid = 0;
 	iov = mp->msg_iov;
 	for (i = 0; i < mp->msg_iovlen; i++, iov++) {
-		if ((auio.uio_resid += iov->iov_len) < 0)
+		/* Don't allow sum > SSIZE_MAX */
+		if ((ssize_t)(auio.uio_resid += iov->iov_len) <= 0 &&
+		    (iov->iov_base != 0 || iov->iov_len != 0))
 			return (EINVAL);
 	}
 #ifdef KTRACE

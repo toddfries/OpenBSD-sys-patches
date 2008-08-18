@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.42 1998/02/26 20:53:23 weingart Exp $	*/
+/*	$OpenBSD: locore.s,v 1.45 1998/09/06 20:09:58 millert Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -44,6 +44,7 @@
 #include "assym.h"
 #include "apm.h"
 #include "pctr.h"
+#include "ksyms.h"
 
 #include <sys/errno.h>
 #include <sys/syscall.h>
@@ -414,7 +415,7 @@ try586:	/* Use the `cpuid' instruction. */
 
 	/* Find end of kernel image. */
 	movl	$RELOC(_end),%esi
-#if defined(DDB) && !defined(SYMTAB_SPACE)
+#if (defined(DDB) || NKSYMS > 0) && !defined(SYMTAB_SPACE)
 	/* Save the symbols (if loaded). */
 	movl	RELOC(_esym),%eax
 	testl	%eax,%eax
@@ -1018,10 +1019,11 @@ ENTRY(copyoutstr)
 
 2:	/* Copy up to end of this page. */
 	subl	%ecx,%edx		# predecrement total count
-	jnc	3f
+	jnc	6f
 	addl	%edx,%ecx		# ecx += (edx - ecx) = edx
 	xorl	%edx,%edx
 
+6:	pushl	%eax			# save PT index
 3:	decl	%ecx
 	js	4f
 	lodsb
@@ -1030,11 +1032,13 @@ ENTRY(copyoutstr)
 	jnz	3b
 
 	/* Success -- 0 byte reached. */
+	addl	$4,%esp			# discard PT index
 	addl	%ecx,%edx		# add back residual for this page
 	xorl	%eax,%eax
 	jmp	copystr_return
 
 4:	/* Go to next page, if any. */
+	popl	%eax			# restore PT index
 	movl	$NBPG,%ecx
 	incl	%eax
 	testl	%edx,%edx
@@ -1574,14 +1578,13 @@ ENTRY(idle)
 	je	1f
 	call	_apm_cpu_busy
 1:
-#else /* NAPM == 0 */
-#if NPCTR > 0
+#endif
+#if NPCTR > 0 && NAPM == 0
 	addl	$1,_pctr_idlcnt
 	adcl	$0,_pctr_idlcnt+4
-#else /* NPCTR == 0 */
+#else
 	hlt
-#endif /* NPCTR == 0 */
-#endif /* NAPM == 0 */
+#endif
 	jmp	_idle
 
 #ifdef DIAGNOSTIC

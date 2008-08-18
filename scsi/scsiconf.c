@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.35 1998/03/18 21:56:46 deraadt Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.39 1998/07/19 06:08:28 downsj Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -315,6 +315,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_CDROM, T_REMOV,
 	 "CHINON  ", "CD-ROM CDS-535  ", ""},     SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
+	 "DEC     ", "RRD42   (C) DEC ", ""},     SDEV_NOLUNS},
+	{{T_CDROM, T_REMOV,
 	 "DENON   ", "DRD-25X         ", "V"},    SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
 	 "HP      ", "C4324/C4325     ", ""},     SDEV_NOLUNS},
@@ -357,7 +359,11 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_CDROM, T_REMOV,
 	 "TOSHIBA ", "XM-4101TASUNSLCD", "1755"}, SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,  
-	 "ShinaKen", "CD-ROM DM-3x1S", "1.04"}, SDEV_NOLUNS},  
+	 "ShinaKen", "CD-ROM DM-3x1S", "1.04"},   SDEV_NOLUNS},
+	{{T_CDROM, T_REMOV,
+	 "JVC     ", "R2626           ", "1.55"}, SDEV_NOLUNS},
+	{{T_CDROM, T_REMOV,
+	 "CyberDrv", "", ""}, SDEV_NOLUNS},
 
  	{{T_OPTICAL, T_REMOV,
  	 "EPSON   ", "OMD-5010        ", "3.08"}, SDEV_NOLUNS},
@@ -438,6 +444,10 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_DIRECT, T_FIXED,
 	 "SEAGATE ", "ST296N          ", ""},     SDEV_NOLUNS},
 	{{T_DIRECT, T_FIXED,
+	 "SEAGATE ", "ST19171FC", ""},            SDEV_NOMODESENSE},
+	{{T_DIRECT, T_FIXED,
+	 "SEAGATE ", "ST34501FC       ", ""},     SDEV_NOMODESENSE},
+        {{T_DIRECT, T_FIXED,
 	 "TOSHIBA ", "MK538FB         ", "6027"}, SDEV_NOLUNS},
 	{{T_DIRECT, T_REMOV,
 	 "iomega", "jaz 1GB",		 ""},	  SDEV_NOMODESENSE|SDEV_NOTAGS},
@@ -489,6 +499,10 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_SEQUENTIAL, T_REMOV,
 	 "WangDAT ", "Model 3200      ", "02.2"}, SDEV_NOSYNCWIDE},
 
+	{{T_SCANNER, T_FIXED,
+	 "RICOH   ", "IS60            ", "1R08"}, SDEV_NOLUNS},
+	{{T_SCANNER, T_FIXED,
+	 "UMAX    ", "Astra 1200S     ", "V2.9"}, SDEV_NOLUNS},
 	{{T_SCANNER, T_FIXED,
 	 "ULTIMA  ", "AT3     1.60    ", ""},     SDEV_NOLUNS},
 	{{T_SCANNER, T_FIXED,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.26 1998/03/18 10:16:31 provos Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.36 1998/08/02 22:20:30 provos Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 #include <sys/socketvar.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -68,6 +69,9 @@
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
 #include <sys/syslog.h>
+
+extern u_int8_t get_sa_require  __P((struct inpcb *));
+
 #endif
 
 static struct mbuf *ip_insertoptions __P((struct mbuf *, struct mbuf *, int *));
@@ -75,6 +79,13 @@ static void ip_mloopback
 	__P((struct ifnet *, struct mbuf *, struct sockaddr_in *));
 #if defined(IPFILTER) || defined(IPFILTER_LKM)
 int (*fr_checkp) __P((struct ip *, int, struct ifnet *, int, struct mbuf **));
+#endif
+
+#ifdef IPSEC
+extern void	encap_sendnotify __P((int, struct tdb *, void *));
+extern int ipsec_auth_default_level;
+extern int ipsec_esp_trans_default_level;
+extern int ipsec_esp_network_default_level;
 #endif
 
 /*
@@ -110,6 +121,7 @@ ip_output(m0, va_alist)
 	struct udphdr *udp;
 	struct tcphdr *tcp;
 	struct expiration *exp;
+	struct inpcb *inp;
 #endif
 
 	va_start(ap, m0);
@@ -117,6 +129,9 @@ ip_output(m0, va_alist)
 	ro = va_arg(ap, struct route *);
 	flags = va_arg(ap, int);
 	imo = va_arg(ap, struct ip_moptions *);
+#ifdef IPSEC
+	inp = va_arg(ap, struct inpcb *);
+#endif
 	va_end(ap);
 
 
@@ -147,22 +162,29 @@ ip_output(m0, va_alist)
 	/*
 	 * Check if the packet needs encapsulation
 	 */
-	if (!(flags & IP_ENCAPSULATED)) {
-		struct route_enc {
-			struct	rtentry *re_rt;
-			struct	sockaddr_encap re_dst;
-		} re0, *re = &re0;
-		struct sockaddr_encap *dst, *gw;
+	if (!(flags & IP_ENCAPSULATED) && 
+	    (inp == NULL || 
+	     (inp->inp_seclevel[SL_AUTH] != IPSEC_LEVEL_BYPASS ||
+	      inp->inp_seclevel[SL_ESP_TRANS] != IPSEC_LEVEL_BYPASS ||
+	      inp->inp_seclevel[SL_ESP_NETWORK] != IPSEC_LEVEL_BYPASS))) {
+		struct route_enc re0, *re = &re0;
+		struct sockaddr_encap *ddst, *gw;
 		struct tdb *tdb;
+		u_int8_t sa_require, sa_have = 0;
+
+		if (inp == NULL)
+			sa_require = get_sa_require(inp);
+		else
+			sa_require = inp->inp_secrequire;
 
 		bzero((caddr_t) re, sizeof(*re));
-		dst = (struct sockaddr_encap *) &re->re_dst;
-		dst->sen_family = AF_ENCAP;
-		dst->sen_len = SENT_IP4_LEN;
-		dst->sen_type = SENT_IP4;
-		dst->sen_ip_src = ip->ip_src;
-		dst->sen_ip_dst = ip->ip_dst;
-		dst->sen_proto = ip->ip_p;
+		ddst = (struct sockaddr_encap *) &re->re_dst;
+		ddst->sen_family = AF_ENCAP;
+		ddst->sen_len = SENT_IP4_LEN;
+		ddst->sen_type = SENT_IP4;
+		ddst->sen_ip_src = ip->ip_src;
+		ddst->sen_ip_dst = ip->ip_dst;
+		ddst->sen_proto = ip->ip_p;
 
 		switch (ip->ip_p) {
 		case IPPROTO_UDP:
@@ -173,8 +195,8 @@ ip_output(m0, va_alist)
 				ip = mtod(m, struct ip *);
 			}
 			udp = (struct udphdr *) (mtod(m, u_char *) + hlen);
-			dst->sen_sport = ntohs(udp->uh_sport);
-			dst->sen_dport = ntohs(udp->uh_dport);
+			ddst->sen_sport = ntohs(udp->uh_sport);
+			ddst->sen_dport = ntohs(udp->uh_dport);
 			break;
 
 		case IPPROTO_TCP:
@@ -185,13 +207,13 @@ ip_output(m0, va_alist)
 				ip = mtod(m, struct ip *);
 			}
 			tcp = (struct tcphdr *) (mtod(m, u_char *) + hlen);
-			dst->sen_sport = ntohs(tcp->th_sport);
-			dst->sen_dport = ntohs(tcp->th_dport);
+			ddst->sen_sport = ntohs(tcp->th_sport);
+			ddst->sen_dport = ntohs(tcp->th_dport);
 			break;
 
 		default:
-			dst->sen_sport = 0;
-			dst->sen_dport = 0;
+			ddst->sen_sport = 0;
+			ddst->sen_dport = 0;
 		}
 
 		rtalloc((struct route *) re);
@@ -215,9 +237,35 @@ ip_output(m0, va_alist)
 			if (encdebug)
 				printf("ip_output(): no gw or gw data not IPSP\n");
 #endif /* ENCDEBUG */
-			RTFREE(re->re_rt);
+			if (re->re_rt)
+				RTFREE(re->re_rt);
 			error = EHOSTUNREACH;
-			goto bad;
+			m_freem(m);
+			goto done;
+		}
+
+		/* 
+		 * For VPNs a route with a reserved SPI of 1 is used to
+		 * indicate the need for an SA when none is established.
+		 */
+		if (ntohl(gw->sen_ipsp_spi) == 0x1) {
+			struct tdb tmptdb;
+
+			sa_require = NOTIFY_SATYPE_AUTH | NOTIFY_SATYPE_TUNNEL;
+			if (gw->sen_ipsp_sproto == IPPROTO_ESP)
+			    sa_require |= NOTIFY_SATYPE_CONF;
+
+			tmptdb.tdb_dst.s_addr = gw->sen_ipsp_dst.s_addr;
+			tmptdb.tdb_satype = sa_require;
+			       
+			/* Request SA with key management */
+			encap_sendnotify(NOTIFY_REQUEST_SA, &tmptdb, NULL);
+			
+			/* 
+			 * When sa_require is set, the packet will be dropped
+			 * at no_encap.
+			 */
+			goto no_encap;
 		}
 
 		ip->ip_len = htons((u_short)ip->ip_len);
@@ -234,19 +282,71 @@ ip_output(m0, va_alist)
 		tdb = (struct tdb *) gettdb(gw->sen_ipsp_spi, gw->sen_ipsp_dst,
 		    gw->sen_ipsp_sproto);
 
+		/*
+		 * Now we check if this tdb has all the transforms which
+		 * are requried by the socket or our default policy.
+		 */
+		SPI_CHAIN_ATTRIB(sa_have, tdb_onext, tdb);
+
+		if (sa_require & ~sa_have)
+			goto no_encap;
+
+		if (tdb == NULL) {
 #ifdef ENCDEBUG
-		if (encdebug && (tdb == NULL))
-			printf("ip_output(): non-existant TDB for SA %08x/%x/%d\n",
-			    ntohl(gw->sen_ipsp_spi), gw->sen_ipsp_dst,
-			    gw->sen_ipsp_sproto);
-#endif ENCDEBUG
+			if (encdebug)
+				printf("ip_output(): non-existant TDB for SA %08x/%x/%d\n", ntohl(gw->sen_ipsp_spi), gw->sen_ipsp_dst, gw->sen_ipsp_sproto);
+#endif
+			if (re->re_rt)
+                        	RTFREE(re->re_rt);
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto done;
+		}
 
 		/* Fix the ip_src field if necessary */
-		if ((ip->ip_src.s_addr == INADDR_ANY) && tdb)
+		if (ip->ip_src.s_addr == INADDR_ANY) {
+		    if (tdb && tdb->tdb_src.s_addr != 0)   /* Provided */
 			ip->ip_src = tdb->tdb_src;
+		    else
+		    {
+			if (ro == 0) {
+			    ro = &iproute;
+			    bzero((caddr_t)ro, sizeof (*ro));
+			}
 
-		/* Now fix the checksum */
-		ip->ip_sum = in_cksum(m, hlen);
+			dst = satosin(&ro->ro_dst);
+
+			/*
+			 * If there is a cached route,
+			 * check that it is to the same destination
+			 * and is still up.  If not, free it and try again.
+			 */
+			if (ro->ro_rt &&
+			    ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
+			     dst->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+			    RTFREE(ro->ro_rt);
+			    ro->ro_rt = (struct rtentry *)0;
+			}
+
+			if (ro->ro_rt == 0) {
+			    dst->sin_family = AF_INET;
+			    dst->sin_len = sizeof(*dst);
+			    dst->sin_addr = ip->ip_dst;
+			    rtalloc(ro);
+			}			
+
+			if (ro->ro_rt == 0) {
+			    ipstat.ips_noroute++;
+			    error = EHOSTUNREACH;
+			    m_freem(m);
+			    goto done;
+			}
+			
+			ia = ifatoia(ro->ro_rt->rt_ifa);
+			ro->ro_rt->rt_use++;
+			ip->ip_src = ia->ia_addr.sin_addr;
+		    }
+		}
 
 #ifdef ENCDEBUG
 		if (encdebug) {
@@ -258,8 +358,6 @@ ip_output(m0, va_alist)
 #endif /* ENCDEBUG */
 
 		while (tdb && tdb->tdb_xform) {
-			m0 = NULL;
-
 			/* Check if the SPI is invalid */
 			if (tdb->tdb_flags & TDBF_INVALID) {
 			 	if (encdebug)
@@ -319,6 +417,11 @@ ip_output(m0, va_alist)
 					}
 				}
 
+				/*
+				 * Fix checksum here, AH and ESP fix the
+				 * checksum in their output routines.
+				 */
+				ip->ip_sum = in_cksum(m, hlen);
 				error = ipe4_output(m, gw, tdb, &mp);
 				if (mp == NULL)
 					error = EFAULT;
@@ -374,16 +477,35 @@ expbail:
 				}
 			}
 
+			if (tdb->tdb_xform->xf_type == XF_IP4) {
+				/*
+				 * Fix checksum if IP-IP; AH and ESP fix the
+				 * IP header checksum in their 
+				 * output routines.
+				 */
+			        ip = mtod(m, struct ip *);
+				ip->ip_sum = in_cksum(m, hlen);
+			}
+
 			error = (*(tdb->tdb_xform->xf_output))(m, gw,
 			    tdb, &mp);
-			if (mp == NULL)
+			if (!error && mp == NULL)
 				error = EFAULT;
 			if (error) {
+				if (mp != NULL)
+					m_freem(mp);
 				RTFREE(re->re_rt);
 				return error;
 			}
-			tdb = tdb->tdb_onext;
+
 			m = mp;
+			if (tdb->tdb_xform->xf_type == XF_IP4) {
+			        /* If IP-IP, calculate outter header cksum */
+			        ip = mtod(m, struct ip *);
+				ip->ip_sum = in_cksum(m, ip->ip_hl << 2);
+			}
+
+			tdb = tdb->tdb_onext;
 		}
 
 		/*
@@ -396,12 +518,18 @@ expbail:
 		NTOHS(ip->ip_len);
 		NTOHS(ip->ip_off);
 		return ip_output(m, NULL, NULL,
-		    IP_ENCAPSULATED | IP_RAWOUTPUT, NULL);
+		    IP_ENCAPSULATED | IP_RAWOUTPUT, NULL, NULL);
 
 no_encap:
 		/* This is for possible future use, don't move or delete */
 		if (re->re_rt)
 			RTFREE(re->re_rt);
+		/* No IPSec processing though it was required, drop packet */
+		if (sa_require) {
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto done;
+		}
 	}
 #endif /* IPSEC */
 
@@ -795,6 +923,9 @@ ip_ctloutput(op, so, level, optname, mp)
 	register struct inpcb *inp = sotoinpcb(so);
 	register struct mbuf *m = *mp;
 	register int optval = 0;
+#ifdef IPSEC
+	struct proc *p = curproc; /* XXX */
+#endif
 	int error = 0;
 
 	if (level != IPPROTO_IP) {
@@ -898,24 +1029,48 @@ ip_ctloutput(op, so, level, optname, mp)
 #ifndef IPSEC
 			error = EINVAL;
 #else
-			if (m == 0 || m->m_len != sizeof(u_char)) {
+			if (m == 0 || m->m_len != sizeof(int)) {
 				error = EINVAL;
 				break;
 			}
 			optval = *mtod(m, u_char *);
+
+			if (optval < IPSEC_LEVEL_BYPASS || 
+			    optval > IPSEC_LEVEL_UNIQUE) {
+				error = EINVAL;
+				break;
+			}
+				
 			switch (optname) {
 			case IP_AUTH_LEVEL:
+			        if (optval < ipsec_auth_default_level &&
+				    suser(p->p_ucred, &p->p_acflag)) {
+					error = EACCES;
+					break;
+				}
 				inp->inp_seclevel[SL_AUTH] = optval;
 				break;
 
 			case IP_ESP_TRANS_LEVEL:
+			        if (optval < ipsec_esp_trans_default_level &&
+				    suser(p->p_ucred, &p->p_acflag)) {
+					error = EACCES;
+					break;
+				}
 				inp->inp_seclevel[SL_ESP_TRANS] = optval;
 				break;
 
 			case IP_ESP_NETWORK_LEVEL:
+			        if (optval < ipsec_esp_network_default_level &&
+				    suser(p->p_ucred, &p->p_acflag)) {
+					error = EACCES;
+					break;
+				}
 				inp->inp_seclevel[SL_ESP_NETWORK] = optval;
 				break;
 			}
+			if (!error)
+				inp->inp_secrequire = get_sa_require(inp);
 #endif
 			break;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.24 1998/03/15 17:20:34 millert Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.27 1998/08/16 03:22:55 millert Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -93,7 +93,7 @@ struct ctlname {
 #define	CTL_HW		6		/* generic cpu/io */
 #define	CTL_MACHDEP	7		/* machine dependent */
 #define	CTL_USER	8		/* user-level */
-#define	CTL_DDB		9		/* DDB user interface, see ddb_var.h */
+#define	CTL_DDB		9		/* DDB user interface, see db_var.h */
 #define CTL_VFS         10              /* VFS sysctl's */
 #define	CTL_MAXID	11		/* number of valid top-level ids */
 
@@ -146,7 +146,11 @@ struct ctlname {
 #define	KERN_USERMOUNT		30	/* int: users may mount filesystems */
 #define KERN_RND		31	/* struct: rnd(4) statistics */
 #define KERN_NOSUIDCOREDUMP	32	/* int: no setuid coredumps ever */ 
-#define	KERN_MAXID		33	/* number of valid kern ids */
+#define	KERN_FSYNC		33      /* int: file synchronization support */
+#define	KERN_SYSVMSG		34      /* int: SysV message queue suppoprt */
+#define	KERN_SYSVSEM		35      /* int: SysV semaphore support */
+#define	KERN_SYSVSHM		36      /* int: SysV shared memory support */
+#define	KERN_MAXID		37	/* number of valid kern ids */
 
 #define CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -182,6 +186,10 @@ struct ctlname {
 	{ "usermount", CTLTYPE_INT }, \
 	{ "random", CTLTYPE_STRUCT }, \
 	{ "nosuidcoredump", CTLTYPE_INT }, \
+	{ "fsync", CTLTYPE_INT }, \
+	{ "sysvmsg", CTLTYPE_INT }, \
+	{ "sysvsem", CTLTYPE_INT }, \
+	{ "sysvshm", CTLTYPE_INT }, \
 }
 
 /*
@@ -375,6 +383,8 @@ typedef int (sysctlfn)
 int sysctl_int __P((void *, size_t *, void *, size_t, int *));
 int sysctl_rdint __P((void *, size_t *, void *, int));
 int sysctl_string __P((void *, size_t *, void *, size_t, char *, int));
+int sysctl_tstring __P((void *, size_t *, void *, size_t, char *, int));
+int sysctl__string __P((void *, size_t *, void *, size_t, char *, int, int));
 int sysctl_rdstring __P((void *, size_t *, void *, char *));
 int sysctl_rdstruct __P((void *, size_t *, void *, void *, int));
 int sysctl_struct __P((void *, size_t *, void *, size_t, void *, int));

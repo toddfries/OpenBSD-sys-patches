@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ep_eisa.c,v 1.9 1998/02/26 06:47:44 deraadt Exp $	*/
+/*	$OpenBSD: if_ep_eisa.c,v 1.11 1998/09/19 10:08:04 maja Exp $	*/
 /*	$NetBSD: if_ep_eisa.c,v 1.13 1997/04/18 00:50:33 cgd Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
+#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -189,5 +190,5 @@ ep_eisa_attach(parent, self, aux)
 	if (intrstr != NULL)
 		printf("%s ", intrstr);
 
-	epconfig(sc, chipset);
+	epconfig(sc, chipset, NULL);
 }

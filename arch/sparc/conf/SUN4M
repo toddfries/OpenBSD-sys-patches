@@ -1,4 +1,4 @@
-#	$OpenBSD: SUN4M,v 1.20 1998/03/04 19:49:08 johns Exp $
+#	$OpenBSD: SUN4M,v 1.25 1998/10/19 05:43:30 jason Exp $
 # 	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)
@@ -34,6 +34,7 @@ sbus0	at iommu0				# sun4m
 
 audioamd0 at obio0				# sun4m
 audioamd0 at sbus0 slot ? offset ?		# sun4m
+audio*	at audioamd?
 
 auxreg0	at obio0				# sun4m
 
@@ -85,6 +86,17 @@ lebuffer0	at sbus0 slot ? offset ?		# sun4m SBus
 lebuffer*	at sbus? slot ? offset ?		# sun4m SBus
 le0	at lebuffer0					#
 le*	at lebuffer?					#
+
+# HappyMeal ethernet
+hme*	at sbus? slot ? offset ?
+# Media Independent Interface (mii) drivers (required by hme)
+nsphy*	at mii? phy ?				# NS and compatible PHYs
+qsphy*	at mii? phy ?				# Quality Semi QS6612 PHYs
+
+# Quad-ethernet glue device, and sub-devices
+qec*	at sbus0 slot ? offset ?
+qe*	at qec?
+be*	at qec?
 
 # Sun "bwtwo" black and white framebuffer, found on sun4, sun4c, and sun4m
 # systems.  If your sun4 system has a cgfour installed in the P4 slot,

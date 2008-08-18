@@ -1,4 +1,4 @@
-/*	$OpenBSD: shm.h,v 1.4 1998/02/18 04:07:19 millert Exp $	*/
+/*	$OpenBSD: shm.h,v 1.7 1998/06/11 19:21:30 deraadt Exp $	*/
 /*	$NetBSD: shm.h,v 1.20 1996/04/09 20:55:35 cgd Exp $	*/
 
 /*
@@ -50,11 +50,6 @@
 #define SHM_R		(IPC_R)
 #define SHM_W		(IPC_W)
 
-/* Some systems (e.g. HP-UX) take these as the second (cmd) arg to shmctl(). */
-#define	SHM_LOCK	3	/* Lock segment in memory. */
-#define	SHM_UNLOCK	4	/* Unlock a segment locked by SHM_LOCK. */
-
-
 struct shmid_ds {
 	struct ipc_perm	shm_perm;	/* operation permission structure */
 	int		shm_segsz;	/* size of segment in bytes */
@@ -68,6 +63,24 @@ struct shmid_ds {
 };
 
 #ifdef _KERNEL
+struct oshmid_ds {
+	struct oipc_perm shm_perm;	/* operation permission structure */
+	int		shm_segsz;	/* size of segment in bytes */
+	pid_t		shm_lpid;	/* process ID of last shm op */
+	pid_t		shm_cpid;	/* process ID of creator */
+	short		shm_nattch;	/* number of current attaches */
+	time_t		shm_atime;	/* time of last shmat() */
+	time_t		shm_dtime;	/* time of last shmdt() */
+	time_t		shm_ctime;	/* time of last change by shmctl() */
+	void		*shm_internal;	/* sysv stupidity */
+};
+#endif
+
+#ifdef _KERNEL
+
+/* Some systems (e.g. HP-UX) take these as the second (cmd) arg to shmctl(). */
+#define	SHM_LOCK	3	/* Lock segment in memory. */
+#define	SHM_UNLOCK	4	/* Unlock a segment locked by SHM_LOCK. */
 
 /*
  * System 5 style catch-all structure for shared memory constants that
@@ -86,15 +99,16 @@ struct shmid_ds *shmsegs;
 void shminit __P((void));
 void shmfork __P((struct proc *, struct proc *));
 void shmexit __P((struct proc *));
+void shmid_n2o __P((struct shmid_ds *, struct oshmid_ds *));
 
 #else /* !_KERNEL */
 
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-void *shmat __P((int, void *, int));
+void *shmat __P((int, const void *, int));
 int shmctl __P((int, int, struct shmid_ds *));
-int shmdt __P((void *));
+int shmdt __P((const void *));
 int shmget __P((key_t, int, int));
 __END_DECLS
 

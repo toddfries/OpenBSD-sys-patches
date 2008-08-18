@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.21 1998/03/01 00:37:33 niklas Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.24 1998/08/30 07:31:32 downsj Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -134,7 +134,7 @@ struct cpu_nocpuid_nameclass {
 	const char *cpu_vendorname;
 	const char *cpu_name;
 	int cpu_class;
-	void (*cpu_setup) __P((const char *));
+	void (*cpu_setup) __P((const char *, int));
 };
 
 struct cpu_cpuid_nameclass {
@@ -144,8 +144,13 @@ struct cpu_cpuid_nameclass {
 	struct cpu_cpuid_family {
 		int cpu_class;
 		const char *cpu_models[CPU_MAXMODEL+2];
-		void (*cpu_setup) __P((const char *));
+		void (*cpu_setup) __P((const char *, int));
 	} cpu_family[CPU_MAXFAMILY - CPU_MINFAMILY + 1];
+};
+
+struct cpu_cpuid_feature {
+	int feature_bit;
+	const char *feature_name;
 };
 
 #ifdef _KERNEL
@@ -239,7 +244,10 @@ void	setconf __P((void));
 #define	CPU_BLK2CHR		3	/* convert blk maj into chr one */
 #define	CPU_CHR2BLK		4	/* convert chr maj into blk one */
 #define CPU_ALLOWAPERTURE	5	/* allow mmap of /dev/xf86 */
-#define	CPU_MAXID		6	/* number of valid machdep ids */
+#define CPU_CPUVENDOR		6	/* cpuid vendor string */
+#define CPU_CPUID		7	/* cpuid */
+#define CPU_CPUFEATURE		8	/* cpuid features */
+#define	CPU_MAXID		9	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -248,6 +256,9 @@ void	setconf __P((void));
 	{ "blk2chr", CTLTYPE_STRUCT }, \
 	{ "chr2blk", CTLTYPE_STRUCT }, \
 	{ "allowaperture", CTLTYPE_INT }, \
+	{ "cpuvendor", CTLTYPE_STRING }, \
+	{ "cpuid", CTLTYPE_INT }, \
+	{ "cpufeature", CTLTYPE_INT }, \
 }
 
 #endif /* !_I386_CPU_H_ */

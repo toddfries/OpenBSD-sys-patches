@@ -1,7 +1,5 @@
-/*	$OpenBSD: inffast.h,v 1.2 1997/11/07 15:57:49 niklas Exp $	*/
-
 /* inffast.h -- header to use inffast.c
- * Copyright (C) 1995-1996 Mark Adler
+ * Copyright (C) 1995-1998 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h 
  */
 

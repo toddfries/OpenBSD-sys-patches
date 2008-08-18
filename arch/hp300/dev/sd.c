@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.14 1998/03/27 07:47:54 millert Exp $	*/
+/*	$OpenBSD: sd.c,v 1.21 1998/10/04 01:02:25 millert Exp $	*/
 /*	$NetBSD: sd.c,v 1.34 1997/07/10 18:14:10 kleink Exp $	*/
 
 /*
@@ -55,6 +55,8 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
+
+#include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
 
 #include <hp300/dev/scsireg.h>
 #include <hp300/dev/scsivar.h>
@@ -375,6 +377,7 @@ sdgetcapacity(sc, dev)
 		    sc->sc_dev.dv_xname, sc->sc_blks, sc->sc_blksize,
 		    sc->sc_bshift);
 #endif
+	sc->sc_heads = sc->sc_cyls = 0;
 	sdgetgeom(sc);
 	return (0);
 }
@@ -383,12 +386,12 @@ sdgetcapacity(sc, dev)
  * Read or constuct a disklabel
  */
 int
-sdgetinfo(dev)
+sdgetinfo(dev, sc, lp, spoofonly)
 	dev_t dev;
+	struct sd_softc *sc;
+	struct disklabel *lp;
+	int spoofonly;
 {
-	int unit = sdunit(dev);
-	struct sd_softc *sc = sd_cd.cd_devs[unit];
-	struct disklabel *lp = sc->sc_dkdev.dk_label;
 	char *errstring;
 
 	bzero((caddr_t)lp, sizeof *lp);
@@ -433,11 +436,24 @@ sdgetinfo(dev)
 			sc->sc_blksize = DEV_BSIZE;
 
 		/* Fill in info from disk geometry if it exists. */
-		if (sc->sc_blks != 0 && sc->sc_heads != 0 && sc->sc_cyls != 0) {
-			lp->d_secperunit = sc->sc_blks >> sc->sc_bshift;
+		lp->d_secperunit = sc->sc_blks >> sc->sc_bshift;
+		if (lp->d_secperunit > 0 && sc->sc_heads > 0 && sc->sc_cyls > 0) {
 			lp->d_ntracks = sc->sc_heads;
 			lp->d_ncylinders = sc->sc_cyls;
-			lp->d_nsectors = lp->d_secperunit / (lp->d_ntracks * lp->d_ncylinders);
+			lp->d_nsectors = lp->d_secperunit /
+			    (lp->d_ntracks * lp->d_ncylinders);
+			/*
+			 * We must make sure d_nsectors is a sane value.
+			 * Adjust d_ncylinders to be reasonable if we 
+			 * monkey with d_nsectors.
+			 */
+			if (lp->d_nsectors < 1) {
+				lp->d_nsectors = 32;
+				lp->d_ncylinders = lp->d_secperunit /
+				    ( lp->d_ntracks * lp->d_nsectors);
+				if (lp->d_ncylinders == 0)
+					lp->d_ncylinders = sc->sc_cyls;
+			}
 		} else {
 			lp->d_ntracks = 20;
 			lp->d_ncylinders = 1;
@@ -465,9 +481,17 @@ sdgetinfo(dev)
 		lp->d_rpm = 3600;
 		lp->d_interleave = 1;
 
+		/* XXX - these values for BBSIZE and SBSIZE assume ffs */
+		lp->d_bbsize = BBSIZE;
+		lp->d_sbsize = SBSIZE;
+
 		lp->d_partitions[RAW_PART].p_offset = 0;
-		lp->d_partitions[RAW_PART].p_size =
-		    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
+		if (lp->d_secperunit > 0)
+			lp->d_partitions[RAW_PART].p_size =
+			    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
+		else
+			lp->d_partitions[RAW_PART].p_size =
+			    roundup(LABELSECTOR+1, btodb(sc->sc_blksize));
 		lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 		lp->d_npartitions = RAW_PART + 1;
 
@@ -475,7 +499,8 @@ sdgetinfo(dev)
 		lp->d_magic2 = DISKMAGIC;
 		lp->d_checksum = dkcksum(lp);
 
-		errstring = readdisklabel(sdlabdev(dev), sdstrategy, lp, NULL);
+		errstring = readdisklabel(sdlabdev(dev), sdstrategy, lp, NULL,
+		    spoofonly);
 	}
 
 	if (errstring) {
@@ -522,7 +547,7 @@ sdopen(dev, flags, mode, p)
 	 */
 	if (sc->sc_dkdev.dk_openmask == 0) {
 		sc->sc_flags |= SDF_OPENING;
-		error = sdgetinfo(dev);
+		error = sdgetinfo(dev, sc, sc->sc_dkdev.dk_label, 0);
 		sc->sc_flags &= ~SDF_OPENING;
 		wakeup((caddr_t)sc);
 		if (error)
@@ -585,7 +610,7 @@ sdclose(dev, flag, mode, p)
 			sleep((caddr_t)&sc->sc_tab, PRIBIO);
 		}
 		splx(s);
-		sc->sc_flags &= ~(SDF_CLOSING|SDF_WLABEL|SDF_ERROR);
+		sc->sc_flags &= ~(SDF_CLOSING|SDF_ERROR);
 		wakeup((caddr_t)sc);
 	}
 	sc->sc_format_pid = -1;
@@ -1051,6 +1076,10 @@ sdioctl(dev, cmd, data, flag, p)
 	int error, flags;
 
 	switch (cmd) {
+	case DIOCGPDINFO:
+		error = sdgetinfo(dev, sc, (struct disklabel *)data, 1);
+		return (error);
+
 	case DIOCGDINFO:
 		*(struct disklabel *)data = *lp;
 		return (0);

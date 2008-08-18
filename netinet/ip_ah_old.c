@@ -1,27 +1,33 @@
-/*	$OpenBSD: ip_ah_old.c,v 1.13 1998/03/18 10:16:27 provos Exp $	*/
+/*	$OpenBSD: ip_ah_old.c,v 1.15 1998/06/03 09:50:19 provos Exp $	*/
 
 /*
- * The author of this code is John Ioannidis, ji@tla.org,
- * 	(except when noted otherwise).
+ * The authors of this code are John Ioannidis (ji@tla.org),
+ * Angelos D. Keromytis (kermit@csd.uch.gr) and 
+ * Niels Provos (provos@physnet.uni-hamburg.de).
  *
- * This code was written for BSD/OS in Athens, Greece, in November 1995.
+ * This code was written by John Ioannidis for BSD/OS in Athens, Greece, 
+ * in November 1995.
  *
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
- * by Angelos D. Keromytis, kermit@forthnet.gr.
+ * by Angelos D. Keromytis.
  *
- * Additional transforms and features in 1997 by Angelos D. Keromytis and
- * Niels Provos.
+ * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
+ * and Niels Provos.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
  * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
- * modification of this software.
+ * modification of this software. 
+ * You may use this code under the GNU public license if you so wish. Please
+ * contribute changes back to the authors under this freer than GPL license
+ * so that we may further the use of strong encryption without limitations to
+ * all.
  *
  * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTY. IN PARTICULAR, NEITHER AUTHOR MAKES ANY
+ * IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
  * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
  * MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
  * PURPOSE.
@@ -64,7 +70,13 @@
 #include <netinet/ip_ah.h>
 #include <sys/syslog.h>
 
-extern void encap_sendnotify(int, struct tdb *);
+#ifdef ENCDEBUG
+#define DPRINTF(x)	if (encdebug) printf x
+#else
+#define DPRINTF(x)
+#endif
+
+extern void encap_sendnotify(int, struct tdb *, void *);
 
 struct ah_hash ah_old_hash[] = {
      { ALG_AUTH_MD5, "Keyed MD5", 
@@ -90,10 +102,7 @@ struct ah_hash ah_old_hash[] = {
 int
 ah_old_attach()
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ah_old_attach(): setting up\n");
-#endif /* ENCDEBUG */
+    DPRINTF(("ah_old_attach(): setting up\n"));
     return 0;
 }
 
@@ -115,10 +124,7 @@ ah_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     {
         if ((m = m_pullup(m, ENCAP_MSG_FIXED_LEN)) == NULL)
         {
-#ifdef ENCDEBUG
-            if (encdebug)
-              printf("ah_old_init(): m_pullup failed\n");
-#endif /* ENCDEBUG */
+            DPRINTF(("ah_old_init(): m_pullup failed\n"));
             return ENOBUFS;
         }
     }
@@ -146,11 +152,8 @@ ah_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	m_freem(m);
 	return EINVAL;
     }
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ah_old_init(): initalized TDB with hash algorithm %d: %s\n",
-	     xenc.amx_hash_algorithm, ah_old_hash[i].name);
-#endif /* ENCDEBUG */
+    DPRINTF(("ah_old_init(): initalized TDB with hash algorithm %d: %s\n",
+	     xenc.amx_hash_algorithm, ah_old_hash[i].name));
     thash = &ah_old_hash[i];
 
     if (xenc.amx_keylen + EMT_SETSPI_FLEN + AH_OLD_XENCAP_LEN != em->em_msglen)
@@ -165,10 +168,7 @@ ah_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	   xenc.amx_keylen, M_XDATA, M_WAITOK);
     if (tdbp->tdb_xdata == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_old_init(): MALLOC() failed\n");
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_old_init(): MALLOC() failed\n"));
       	return ENOBUFS;
     }
 
@@ -205,10 +205,7 @@ ah_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 int
 ah_old_zeroize(struct tdb *tdbp)
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ah_old_zeroize(): freeing memory\n");
-#endif /* ENCDEBUG */
+    DPRINTF(("ah_old_zeroize(): freeing memory\n"));
     if (tdbp->tdb_xdata)
     {
     	FREE(tdbp->tdb_xdata, M_XDATA);
@@ -249,10 +246,7 @@ ah_old_input(struct mbuf *m, struct tdb *tdb)
     {
 	if ((m = m_pullup(m, ohlen)) == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("ah_old_input(): m_pullup() failed\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("ah_old_input(): m_pullup() failed\n"));
 	    ahstat.ahs_hdrops++;
 	    return NULL;
 	}
@@ -265,10 +259,7 @@ ah_old_input(struct mbuf *m, struct tdb *tdb)
 	if ((m = m_pullup(m, ohlen - sizeof (struct ip) +
 			  (ip->ip_hl << 2))) == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("ah_old_input(): m_pullup() failed\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("ah_old_input(): m_pullup() failed\n"));
 	    ahstat.ahs_hdrops++;
 	    return NULL;
 	}
@@ -414,14 +405,14 @@ ah_old_input(struct mbuf *m, struct tdb *tdb)
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
-	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	  tdb->tdb_flags &= ~TDBF_SOFT_PACKETS;
       }
       else
 	if (tdb->tdb_flags & TDBF_SOFT_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_soft_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
     }
@@ -430,14 +421,14 @@ ah_old_input(struct mbuf *m, struct tdb *tdb)
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
-	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	  tdb_delete(tdb, 0);
       }
       else
 	if (tdb->tdb_flags & TDBF_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_exp_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	      tdb_delete(tdb, 0);
 	  }
     }
@@ -466,11 +457,8 @@ ah_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     m = m_pullup(m, sizeof(struct ip));
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_old_output(): m_pullup() failed, SA %x/%08x\n",
-		 tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_old_output(): m_pullup() failed, SA %x/%08x\n",
+		 tdb->tdb_dst, ntohl(tdb->tdb_spi)));
       	return ENOBUFS;
     }
 
@@ -482,11 +470,8 @@ ah_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
 	if ((m = m_pullup(m, ip->ip_hl << 2)) == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("ah_old_output(): m_pullup() failed, SA &x/%08x\n",
-		     tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	    DPRINTF(("ah_old_output(): m_pullup() failed, SA &x/%08x\n",
+		     tdb->tdb_dst, ntohl(tdb->tdb_spi)));
 	    ahstat.ahs_hdrops++;
 	    return NULL;
 	}
@@ -600,20 +585,14 @@ ah_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     M_PREPEND(m, ohlen, M_DONTWAIT);
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_old_output(): M_PREPEND() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_old_output(): M_PREPEND() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi)));
         return ENOBUFS;
     }
 
     m = m_pullup(m, ohlen + (ipo.ip_hl << 2));
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_old_output(): m_pullup() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_old_output(): m_pullup() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi)));
         return ENOBUFS;
     }
 
@@ -645,14 +624,14 @@ ah_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
-	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	  tdb->tdb_flags &= ~TDBF_SOFT_PACKETS;
       }
       else
 	if (tdb->tdb_flags & TDBF_SOFT_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_soft_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
     }
@@ -661,14 +640,14 @@ ah_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
-	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	  tdb_delete(tdb, 0);
       }
       else
 	if (tdb->tdb_flags & TDBF_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_exp_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	      tdb_delete(tdb, 0);
 	  }
     }

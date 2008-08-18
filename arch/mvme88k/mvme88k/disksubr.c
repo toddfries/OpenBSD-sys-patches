@@ -64,14 +64,29 @@ dk_establish()
  * Returns null on success and an error string on failure.
  */
 char *
-readdisklabel(dev, strat, lp, clp)
+readdisklabel(dev, strat, lp, clp, spoofonly)
 	dev_t dev;
 	void (*strat)();
 	struct disklabel *lp;
 	struct cpu_disklabel *clp;
+	int spoofonly;
 {
 	struct buf *bp;
 	char *msg = NULL;
+
+	/* minimal requirements for archetypal disk label */
+	if (lp->d_secsize == 0)
+		lp->d_secsize = DEV_BSIZE;
+	if (lp->d_secperunit == 0)
+		lp->d_secperunit = 0x1fffffff;
+	lp->d_npartitions = RAW_PART + 1;
+	if (lp->d_partitions[RAW_PART].p_size == 0)
+		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
+	lp->d_partitions[RAW_PART].p_offset = 0;
+
+	/* don't read the on-disk label if we are in spoofed-only mode */
+	if (spoofonly)
+		return (NULL);
 
 	/* obtain buffer to probe drive with */
 	bp = geteblk((int)lp->d_secsize);

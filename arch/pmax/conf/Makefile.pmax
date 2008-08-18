@@ -1,13 +1,13 @@
 #	$NetBSD: Makefile.pmax,v 1.37 1996/09/30 02:35:34 jonathan Exp $
 
-# Makefile for NetBSD
+# Makefile for OpenBSD
 #
 # This makefile is constructed from a machine description:
-#	config machineid
+#	config ``machineid''
 # Most changes should be made in the machine description
 #	/sys/arch/pmax/conf/``machineid''
 # after which you should do
-#	config machineid
+#	config ``machineid''
 # Machine generic makefile changes should be made in
 #	/sys/arch/pmax/conf/Makefile.pmax
 # after which config should be rerun for all machines of that type.
@@ -34,6 +34,7 @@ TOUCH?=	touch
 S!=	cd ../../../..; pwd
 .endif
 PMAX=	$S/arch/pmax
+MIPS=	$S/arch/mips
 
 INCLUDES=	-nostdinc -I. -I$S/arch -I$S
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -Dpmax
@@ -46,7 +47,7 @@ CDIAGFLAGS=	-Werror -Wno-main
 
 CMACHFLAGS=	-mno-abicalls -mcpu=r3000
 
-CFLAGS=		${DEBUG} -O2 ${CDIAGFLAGS} ${CMACHFLAGS} ${COPTS}
+CFLAGS=		${DEBUG} -O ${CDIAGFLAGS} ${CMACHFLAGS} ${COPTS}
 AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
 LINKFLAGS=	-N -Ttext 80030000 -e start
 STRIPFLAGS=	-d
@@ -108,8 +109,8 @@ SYSTEM_LD=	-@if [ X${DEBUG} = X-g ]; \
 		else strip=-x; \
 		fi; \
 		echo ${LD} ${LINKFLAGS} -o $@ -e start \
-			-T ../../conf/ld.script '$${SYSTEM_OBJ}' vers.o; \
-		${LD} ${LINKFLAGS} -o $@ -e start -T ../../conf/ld.script \
+			-T ${PMAX}/conf/ld.script '$${SYSTEM_OBJ}' vers.o; \
+		${LD} ${LINKFLAGS} -o $@ -e start -T ${PMAX}/conf/ld.script \
 			${SYSTEM_OBJ} vers.o
 SYSTEM_LD_TAIL=	@size $@; chmod 755 $@
 

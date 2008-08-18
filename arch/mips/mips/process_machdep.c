@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.1 1998/01/28 12:12:09 pefo Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.3 1998/10/15 21:30:15 imp Exp $	*/
 /*
  * Copyright (c) 1994 Adam Glass   
  * Copyright (c) 1993 The Regents of the University of California.
@@ -39,7 +39,7 @@
  * From:
  *	Id: procfs_i386.c,v 4.1 1993/12/17 10:47:45 jsp Rel
  *
- *	$Id: process_machdep.c,v 1.1 1998/01/28 12:12:09 pefo Exp $
+ *	$Id: process_machdep.c,v 1.3 1998/10/15 21:30:15 imp Exp $
  */
 
 /*

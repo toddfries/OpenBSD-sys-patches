@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.11 1998/01/20 18:40:34 niklas Exp $	*/
+/*	$OpenBSD: pci.c,v 1.13 1998/08/22 17:59:04 rahnds Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -41,6 +41,7 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
 
 int pcimatch __P((struct device *, void *, void *));
 void pciattach __P((struct device *, struct device *, void *));
@@ -137,7 +138,12 @@ pciattach(parent, self, aux)
 
 		tag = pci_make_tag(pc, bus, device, 0);
 		id = pci_conf_read(pc, tag, PCI_ID_REG);
-		if (id == 0 || id == 0xffffffff)
+
+		/* Invalid vendor ID value? */
+		if (PCI_VENDOR(id) == PCI_VENDOR_INVALID)
+			continue;
+		/* XXX Not invalid, but we've done this ~forever. */
+		if (PCI_VENDOR(id) == 0)
 			continue;
 
 		bhlcr = pci_conf_read(pc, tag, PCI_BHLC_REG);
@@ -146,8 +152,14 @@ pciattach(parent, self, aux)
 		for (function = 0; function < nfunctions; function++) {
 			tag = pci_make_tag(pc, bus, device, function);
 			id = pci_conf_read(pc, tag, PCI_ID_REG);
-			if (id == 0 || id == 0xffffffff)
+
+			/* Invalid vendor ID value? */
+			if (PCI_VENDOR(id) == PCI_VENDOR_INVALID)
 				continue;
+			/* XXX Not invalid, but we've done this ~forever. */
+			if (PCI_VENDOR(id) == 0)
+				continue;
+
 			class = pci_conf_read(pc, tag, PCI_CLASS_REG);
 			intr = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
 
@@ -269,7 +281,7 @@ pci_io_find(pc, pcitag, reg, iobasep, iosizep)
 	if (iosizep != NULL)
 		*iosizep = PCI_MAPREG_IO_SIZE(sizedata);
 
-#ifdef power4e
+#ifdef powerpc
 	/*
 	 * Open Firmware (yuck) shuts down devices before entering a
 	 * program so we need to bring them back 'online' to respond
@@ -341,7 +353,7 @@ pci_mem_find(pc, pcitag, reg, membasep, memsizep, cacheablep)
 	if (cacheablep != NULL)
 		*cacheablep = PCI_MAPREG_MEM_CACHEABLE(addrdata);
 
-#ifdef power4e
+#ifdef powerpc
 	/*
 	 * Open Firmware (yuck) shuts down devices before entering a
 	 * program so we need to bring them back 'online' to respond

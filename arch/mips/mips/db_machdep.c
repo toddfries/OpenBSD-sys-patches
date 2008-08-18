@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.1 1998/03/16 09:03:25 pefo Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.3 1998/10/15 21:30:15 imp Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB

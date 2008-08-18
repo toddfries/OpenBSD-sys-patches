@@ -1,4 +1,4 @@
-/*	$OpenBSD: acd.c,v 1.29 1997/10/18 10:37:06 deraadt Exp $	*/
+/*	$OpenBSD: acd.c,v 1.34 1998/10/05 17:30:58 millert Exp $	*/
 
 /*
  * Copyright (c) 1996 Manuel Bouyer.  All rights reserved.
@@ -50,6 +50,8 @@
 
 #include <dev/atapi/atapilink.h>
 #include <dev/atapi/atapi.h>
+
+#include <ufs/ffs/fs.h>			/* for BBSIZE and SBSIZE */
 
 #define	CDUNIT(z)			DISKUNIT(z)
 #define	CDPART(z)			DISKPART(z)
@@ -720,6 +722,7 @@ acdioctl(dev, cmd, addr, flag, p)
 
 	switch (cmd) {
 	case DIOCGDINFO:
+	case DIOCGPDINFO:
 		*(struct disklabel *)addr = *acd->sc_dk.dk_label;
 		return 0;
 
@@ -796,12 +799,8 @@ acdioctl(dev, cmd, addr, flag, p)
 		error = acd_read_toc(acd, 0, 0, &hdr, sizeof(hdr));
 		if (error)
 			return error;
-		if (acd->ad_link->quirks & AQUIRK_LITTLETOC) {
-#if BYTE_ORDER == BIG_ENDIAN
+		if (acd->ad_link->quirks & AQUIRK_LITTLETOC)
 			bswap((u_int8_t *)&hdr.len, sizeof(hdr.len));
-#endif
-		} else
-			hdr.len = ntohs(hdr.len);
 		bcopy(&hdr, addr, sizeof(hdr));
 		return 0;
 	}
@@ -830,26 +829,16 @@ acdioctl(dev, cmd, addr, flag, p)
 			    th->ending_track - th->starting_track + 1;
 		            ntracks >= 0; ntracks--) {
 				toc.tab[ntracks].addr_type = CD_LBA_FORMAT;
-				if (acd->ad_link->quirks & AQUIRK_LITTLETOC) {
-#if BYTE_ORDER == BIG_ENDIAN
+				if (acd->ad_link->quirks & AQUIRK_LITTLETOC)
 					bswap((u_int8_t*)
 					    &toc.tab[ntracks].addr.addr,
-					    sizeof(toc.tab[ntracks].addr.addr)
-					    );
-#endif
-				} else
-					toc.tab[ntracks].addr.lba =
-					    ntohl(toc.tab[ntracks].addr.lba);
+					    sizeof(toc.tab[ntracks].addr.addr));
 			}
 		}
-		if (acd->ad_link->quirks & AQUIRK_LITTLETOC) {
-#if BYTE_ORDER == BIG_ENDIAN
+		if (acd->ad_link->quirks & AQUIRK_LITTLETOC)
 			bswap((u_int8_t*)&th->len, sizeof(th->len));
-#endif
-		} else
-			th->len = ntohs(th->len);
 
-		len = min(len, th->len - sizeof(struct ioc_toc_header));
+		len = min(len, ntohs(th->len) - sizeof(struct ioc_toc_header));
 		return copyout(toc.tab, te->data, len);
 	}
 
@@ -1027,6 +1016,10 @@ acdgetdisklabel(acd)
 	if (acd_read_toc (acd, CD_LBA_FORMAT, 0, toc, len))
 		goto done;
 
+	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
+	lp->d_bbsize = BBSIZE;
+	lp->d_sbsize = SBSIZE;
+
 	/* The raw partition is special.  */
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size =
@@ -1078,10 +1071,10 @@ acdgetdisklabel(acd)
 		 * does not yet work, for unknown reasons.
 		 */
 		errstring = readdisklabel(MAKECDDEV(0, acd->sc_dev.dv_unit,
-		    data_track), acdstrategy, lp, acd->sc_dk.dk_cpulabel);
+		    data_track), acdstrategy, lp, acd->sc_dk.dk_cpulabel, 0);
 #else
 		errstring = readdisklabel(MAKECDDEV(0, acd->sc_dev.dv_unit,
-		    RAW_PART), acdstrategy, lp, acd->sc_dk.dk_cpulabel);
+		    RAW_PART), acdstrategy, lp, acd->sc_dk.dk_cpulabel, 0);
 #endif
 		/*if (errstring)
 			printf("%s: %s\n", acd->sc_dev.dv_xname, errstring);*/
@@ -1101,6 +1094,7 @@ acd_size(acd, flags)
 {
 	struct atapi_read_cd_capacity_data rdcap;
 	struct atapi_read_cd_capacity cmd;
+	int result;
 
 	if (acd->ad_link->quirks & AQUIRK_NOCAPACITY) {
 		/*
@@ -1125,8 +1119,15 @@ acd_size(acd, flags)
 	 * If the command works, interpret the result as a 4 byte
 	 * number of blocks and a blocksize
 	 */
-	if (atapi_exec_cmd(acd->ad_link, &cmd, sizeof(cmd),
-	    &rdcap, sizeof(rdcap), B_READ, 0) != 0) {
+	result = atapi_exec_cmd(acd->ad_link, &cmd, sizeof(cmd),
+				&rdcap, sizeof(rdcap), B_READ, 0);
+	if (result != 0) {
+		u_int8_t error = result >> 8;
+		/* Get the sense key and check for an illegal request */
+		if ((error >> 4) == ATAPI_SK_ILLEGAL_REQUEST) {
+			acd->ad_link->quirks |= AQUIRK_NOCAPACITY;
+			return acd_size(acd, flags);
+		}
 		ATAPI_DEBUG_PRINT(("ATAPI_READ_CD_CAPACITY failed\n"));
 		return 0;
 	}

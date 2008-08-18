@@ -1,3 +1,4 @@
+# 	$OpenBSD: RAMDISK,v 1.17 1998/10/19 05:43:30 jason Exp $
 # 	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)
@@ -7,8 +8,6 @@ machine		sparc
 maxusers	2
 # force default minimum number of buffers and dependents
 option		NBUF=16
-# this should only waste 64K vs. 512K, but hopefully enough for ftp et.al.
-option		NMBCLUSTERS=32
 
 # the size for MINIROOTSIZE must insure: 16384+size(bsd) < RELOC(boot,bootxx)
 option		RAMDISK_HOOKS
@@ -65,6 +64,7 @@ sbus0	at iommu0				# sun4m
 
 audioamd0 at mainbus0				# sun4c
 audioamd0 at obio0				# sun4m
+audio*	at audioamd?
 
 auxreg0	at mainbus0				# sun4c
 auxreg0	at obio0				# sun4m
@@ -157,6 +157,17 @@ le0	at obio0 addr 0xf9000000 level 6		# sun4/300
 # or on a Multibus/VME card.
 ie0	at obio0 addr 0xf6000000 level 6		# sun4/200 on-board
 ie0	at obio0 addr 0x06000000 level 6		# sun4/100 on-board
+
+# HappyMeal ethernet
+hme*	at sbus? slot ? offset ?
+# Media Independent Interface (mii) drivers (required for hme)
+nsphy*	at mii? phy ?				# NS and compatible PHYs
+qsphy*	at mii? phy ?				# Quality Semi QS6612 PHYs
+
+# Quad-ethernet glue device, and sub-devices
+qec*	at sbus0 slot ? offset ?
+qe*	at qec?
+be*	at qec?
 
 ie1	at vmes0 addr 0xffe88000 level 5 vect 0x75
 ie2	at vmes0 addr 0xff31ff02 level 5 vect 0x76
@@ -254,13 +265,9 @@ fdc0	at obio0				# sun4m controller
 fd*	at fdc0					# the drive itself
 
 pseudo-device	kbd		# Sun keyboard
-#pseudo-device	strip	1	# radio clock
 pseudo-device	rd	2
 pseudo-device	loop	1	# network loopback
-pseudo-device	sl	2	# CSLIP
-# pseudo-device	ppp	2	# PPP
-pseudo-device	pty	4	# pseudo-terminals
-#pseudo-device	ccd	4	# concatenated disk devices
-
+pseudo-device	bpfilter 1	# packet filter
+#pseudo-device	pty	4	# pseudo-terminals
 
 options		OLD_PIPE		# XXX nbpg botch

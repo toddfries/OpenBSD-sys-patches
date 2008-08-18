@@ -1,4 +1,4 @@
-/*	$OpenBSD: isavar.h,v 1.27 1998/01/20 18:40:33 niklas Exp $	*/
+/*	$OpenBSD: isavar.h,v 1.30 1998/08/22 17:58:04 rahnds Exp $	*/
 /*	$NetBSD: isavar.h,v 1.26 1997/06/06 23:43:57 thorpej Exp $	*/
 
 /*-
@@ -122,7 +122,7 @@
  */
 struct isabus_attach_args;
 
-#if (alpha + amiga + i386 + arc + wgrisc + power4e != 1)
+#if (alpha + amiga + i386 + arc + wgrisc + powerpc != 1)
 ERROR: COMPILING ISA FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
 #endif
 #if alpha
@@ -140,7 +140,7 @@ ERROR: COMPILING ISA FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
 #if wgrisc
 #include <wgrisc/isa/isa_machdep.h>
 #endif
-#if power4e
+#if powerpc
 #include <powerpc/isa/isa_machdep.h>
 #endif
 
@@ -289,6 +289,7 @@ struct isa_attach_args {
 #define ia_iosize	ipa_io[0].length
 #define ia_irq		ipa_irq[0].num
 #define	ia_drq		ipa_drq[0].num
+#define	ia_drq2		ipa_drq[1].num
 #define ia_maddr	ipa_mem[0].base
 #define ia_msize	ipa_mem[0].length
 #define ia_ioh		ipa_io[0].h
@@ -372,6 +373,7 @@ struct isa_softc {
 #define		cf_msize		cf_loc[3]
 #define		cf_irq			cf_loc[4]
 #define		cf_drq			cf_loc[5]
+#define		cf_drq2			cf_loc[6]
 
 /*
  * ISA interrupt handler manipulation.
@@ -441,6 +443,7 @@ int isapnp_config __P((bus_space_tag_t, bus_space_tag_t,
 void isapnp_unconfig __P((bus_space_tag_t, bus_space_tag_t,
     struct isa_attach_args *));
 
+void isapnp_isa_attach_hook __P((struct isa_softc *));
 #ifdef DEBUG_ISAPNP
 void isapnp_print_mem __P((const char *, const struct isapnp_region *));
 void isapnp_print_io __P((const char *, const struct isapnp_region *));

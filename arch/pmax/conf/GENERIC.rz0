@@ -3,7 +3,7 @@
 # to rz0 - required for use with zip drives for instance
 #
 
-machine		pmax			# machine type
+machine		pmax mips		# machine type and subtype
 
 # generic mips support
 option		CPU_R3000		# R2000/R3000 support
@@ -122,6 +122,8 @@ rz5		at oldscsibus? target ? drive ?
 rz6		at oldscsibus? target ? drive ?
 tz0		at oldscsibus? target ? drive ?
 tz1		at oldscsibus? target ? drive ?
+
+led0		at mainbus0		# [23]100 back panel leds
 
 pseudo-device	loop		1
 pseudo-device	sl		1	# serial-line ip ports

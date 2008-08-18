@@ -100,7 +100,7 @@
 #include <pmax/dev/lk201var.h>
 
 #ifdef pmax
-#include <pmax/cpuregs.h>	/* phys to uncached */
+#include <machine/cpuregs.h>	/* phys to uncached */
 #include <pmax/pmax/cons.h>
 #include <pmax/pmax/pmaxtype.h>
 #include <pmax/pmax/maxine.h>
@@ -496,7 +496,7 @@ sccattach(parent, self, aux)
 		printf("\nattaching scc%d, currently PROM console\n", unit);
 #endif /* defined(DEBUG) && defined(HAVE_RCONS)*/
 
-	sccaddr = (void*)MACH_PHYS_TO_UNCACHED(d->iada_addr);
+	sccaddr = (void*)MIPS_PHYS_TO_KSEG1(d->iada_addr);
 #ifdef SPARSE
 	sccaddr = (void *)TC_DENSE_TO_SPARSE((tc_addr_t)sccaddr);
 #endif

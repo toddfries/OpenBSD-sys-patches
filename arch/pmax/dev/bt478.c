@@ -62,7 +62,7 @@
 #include <sys/device.h>
 #include <sys/select.h>
 
-#include <pmax/cpuregs.h>
+#include <machine/cpuregs.h>
 #include <machine/pmioctl.h>
 
 #include <machine/fbio.h>
@@ -202,7 +202,7 @@ bt478InitColorMap (fi)
 	register VDACRegs *vdac = (VDACRegs *)(fi -> fi_vdac);
 	register int i;
 
-	*(volatile char *)MACH_PHYS_TO_UNCACHED
+	*(volatile char *)MIPS_PHYS_TO_KSEG1
 		(KN01_PHYS_COLMASK_START) = 0xff;	/* XXX */
 	wbflush();
 

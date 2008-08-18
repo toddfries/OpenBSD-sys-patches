@@ -1,27 +1,33 @@
-/*	$OpenBSD: ip_ip4.c,v 1.16 1998/03/18 10:51:36 provos Exp $	*/
+/*	$OpenBSD: ip_ip4.c,v 1.20 1998/07/29 22:18:49 angelos Exp $	*/
 
 /*
- * The author of this code is John Ioannidis, ji@tla.org,
- * 	(except when noted otherwise).
+ * The authors of this code are John Ioannidis (ji@tla.org),
+ * Angelos D. Keromytis (kermit@csd.uch.gr) and 
+ * Niels Provos (provos@physnet.uni-hamburg.de).
  *
- * This code was written for BSD/OS in Athens, Greece, in November 1995.
+ * This code was written by John Ioannidis for BSD/OS in Athens, Greece, 
+ * in November 1995.
  *
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
- * by Angelos D. Keromytis, kermit@forthnet.gr.
+ * by Angelos D. Keromytis.
  *
- * Additional transforms and features in 1997 by Angelos D. Keromytis and
- * Niels Provos.
+ * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
+ * and Niels Provos.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
  * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
- * modification of this software.
+ * modification of this software. 
+ * You may use this code under the GNU public license if you so wish. Please
+ * contribute changes back to the authors under this freer than GPL license
+ * so that we may further the use of strong encryption without limitations to
+ * all.
  *
  * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTY. IN PARTICULAR, NEITHER AUTHOR MAKES ANY
+ * IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
  * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
  * MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
  * PURPOSE.
@@ -135,7 +141,6 @@ ip4_input(m, va_alist)
     }
 
     ipi = (struct ip *) ((caddr_t) ipo + iphlen);
-
     ip4stat.ip4s_ibytes += ntohs(ipi->ip_len);
 
     /*
@@ -160,7 +165,8 @@ ip4_input(m, va_alist)
     m->m_len -= iphlen;
     m->m_pkthdr.len -= iphlen;
     m->m_data += iphlen;
-	
+    m->m_flags |= M_TUNNEL;
+
     /*
      * Interface pointer stays the same; if no IPsec processing has
      * been done (or will be done), this will point to a normal 
@@ -188,7 +194,6 @@ ip4_input(m, va_alist)
     IF_ENQUEUE(ifq, m);
     schednetisr(NETISR_IP);
     splx(s);
-	
     return;
 }
 
@@ -229,13 +234,13 @@ ipe4_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
       if (tdb->tdb_ttl == 0)
         ipo->ip_ttl = ip_defttl;
       else
-        ipi->ip_ttl = tdb->tdb_ttl;
+        ipo->ip_ttl = tdb->tdb_ttl;
 	
     ipo->ip_p = IPPROTO_IPIP;
     ipo->ip_sum = 0;
     ipo->ip_src = tdb->tdb_osrc;
     ipo->ip_dst = tdb->tdb_odst;
-	
+
 /* 
  *  printf("ip4_output: [%x->%x](l=%d, p=%d)", 
  *  	   ntohl(ipi->ip_src.s_addr), ntohl(ipi->ip_dst.s_addr),

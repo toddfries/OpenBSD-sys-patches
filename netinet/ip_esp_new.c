@@ -1,27 +1,33 @@
-/*	$OpenBSD: ip_esp_new.c,v 1.17 1998/03/07 21:30:24 provos Exp $	*/
+/*	$OpenBSD: ip_esp_new.c,v 1.24 1998/08/01 08:35:12 provos Exp $	*/
 
 /*
- * The author of this code is John Ioannidis, ji@tla.org,
- * 	(except when noted otherwise).
+ * The authors of this code are John Ioannidis (ji@tla.org),
+ * Angelos D. Keromytis (kermit@csd.uch.gr) and 
+ * Niels Provos (provos@physnet.uni-hamburg.de).
  *
- * This code was written for BSD/OS in Athens, Greece, in November 1995.
+ * This code was written by John Ioannidis for BSD/OS in Athens, Greece, 
+ * in November 1995.
  *
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
- * by Angelos D. Keromytis, kermit@forthnet.gr.
+ * by Angelos D. Keromytis.
  *
- * Additional transforms and features in 1997 by Angelos D. Keromytis and
- * Niels Provos.
+ * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
+ * and Niels Provos.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
  * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
- * modification of this software.
+ * modification of this software. 
+ * You may use this code under the GNU public license if you so wish. Please
+ * contribute changes back to the authors under this freer than GPL license
+ * so that we may further the use of strong encryption without limitations to
+ * all.
  *
  * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTY. IN PARTICULAR, NEITHER AUTHOR MAKES ANY
+ * IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
  * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
  * MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
  * PURPOSE.
@@ -65,7 +71,13 @@
 #include <netinet/ip_ah.h>
 #include <sys/syslog.h>
 
-extern void encap_sendnotify(int, struct tdb *);
+#ifdef ENCDEBUG
+#define DPRINTF(x)	if (encdebug) printf x
+#else
+#define DPRINTF(x)
+#endif
+
+extern void encap_sendnotify(int, struct tdb *, void *);
 extern void des_ecb3_encrypt(caddr_t, caddr_t, caddr_t, caddr_t, caddr_t, int);
 extern void des_ecb_encrypt(caddr_t, caddr_t, caddr_t, int);
 extern void des_set_key(caddr_t, caddr_t);
@@ -118,13 +130,13 @@ struct esp_xform esp_new_xform[] = {
      },
      { ALG_ENC_BLF, "Blowfish",
        ESP_BLF_BLKS, ESP_BLF_IVS,
-       5, BLF_MAXKEYLEN, 8,
+       5, BLF_MAXKEYLEN, 8 | 1,
        blf_encrypt,
        blf_decrypt 
      },
      { ALG_ENC_CAST, "CAST",
        ESP_CAST_BLKS, ESP_CAST_IVS,
-       5, 16, 8,
+       5, 16, 8 | 1,
        cast5_encrypt,
        cast5_decrypt 
      }
@@ -200,10 +212,7 @@ cast5_decrypt(void *pxd, u_int8_t *blk)
 int
 esp_new_attach()
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("esp_new_attach(): setting up\n");
-#endif /* ENCDEBUG */
+    DPRINTF(("esp_new_attach(): setting up\n"));
     return 0;
 }
 
@@ -229,10 +238,7 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     {
     	if ((m = m_pullup(m, ENCAP_MSG_FIXED_LEN)) == NULL)
     	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("esp_new_init(): m_pullup failed\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("esp_new_init(): m_pullup failed\n"));
 	    return ENOBUFS;
 	}
     }
@@ -260,11 +266,8 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     }
 
     txform = &esp_new_xform[i];
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("esp_new_init(): initialized TDB with enc algorithm %d: %s\n",
-	     txd.edx_enc_algorithm, esp_new_xform[i].name);
-#endif /* ENCDEBUG */
+    DPRINTF(("esp_new_init(): initialized TDB with enc algorithm %d: %s\n",
+	     txd.edx_enc_algorithm, esp_new_xform[i].name));
 
     /* Check whether the authentication algorithm is supported */
     if (txd.edx_flags & ESP_NEW_FLAG_AUTH) 
@@ -280,11 +283,8 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
             return EINVAL;
 	}
 
-#ifdef ENCDEBUG
-        if (encdebug)
-            printf("esp_new_init(): initialized TDB with hash algorithm %d: %s\n",
-		   txd.edx_hash_algorithm, esp_new_hash[i].name);
-#endif /* ENCDEBUG */
+	DPRINTF(("esp_new_init(): initialized TDB with hash algorithm %d: %s\n",
+		 txd.edx_hash_algorithm, esp_new_hash[i].name));
         blocklen = HMAC_BLOCK_LEN;
 	thash = &esp_new_hash[i];
       }
@@ -323,10 +323,7 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	   M_XDATA, M_WAITOK);
     if (tdbp->tdb_xdata == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_init(): MALLOC() failed\n");
-#endif /* ENCDEBUG */
+        DPRINTF(("esp_new_init(): MALLOC() failed\n"));
         return ENOBUFS;
     }
 
@@ -383,21 +380,15 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	/* Pass name of auth algorithm for kernfs */
 	tdbp->tdb_authname = xd->edx_hash->name;
 
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_init(): using %d bytes of authentication key\n",
-		 txd.edx_authkeylen);
-#endif
+	DPRINTF(("esp_new_init(): using %d bytes of authentication key\n",
+		 txd.edx_authkeylen));
 
 	MALLOC(buffer, caddr_t, 
 	       txd.edx_authkeylen < blocklen ? blocklen : txd.edx_authkeylen,
 	       M_TEMP, M_WAITOK);
 	if (buffer == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("esp_new_init(): MALLOC() failed\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("esp_new_init(): MALLOC() failed\n"));
 	    free(tdbp->tdb_xdata, M_XDATA);
 	    return ENOBUFS;
 	}
@@ -445,10 +436,7 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 int
 esp_new_zeroize(struct tdb *tdbp)
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("esp_new_zeroize(): freeing memory\n");
-#endif ENCDEBUG
+    DPRINTF(("esp_new_zeroize(): freeing memory\n"));
     if (tdbp->tdb_xdata)
     {
       	FREE(tdbp->tdb_xdata, M_XDATA);
@@ -491,10 +479,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     {
 	if ((m = m_pullup(m, sizeof(struct ip))) == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("esp_new_input(): (possibly too short) packet dropped\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("esp_new_input(): (possibly too short) packet dropped\n"));
 	    espstat.esps_hdrops++;
 	    return NULL;
 	}
@@ -508,10 +493,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     {
 	if ((m = m_pullup(m, ohlen + blks)) == NULL)
 	{
-#ifdef ENCDEBUG
-            if (encdebug)
-              printf("esp_new_input(): m_pullup() failed\n");
-#endif /* ENCDEBUG */
+            DPRINTF(("esp_new_input(): m_pullup() failed\n"));
             espstat.esps_hdrops++;
             return NULL;
 	}
@@ -520,7 +502,6 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     }
 
     esp = (struct esp_new *) ((u_int8_t *) ip + (ip->ip_hl << 2));
-
     ipo = *ip;
 
     /* Replay window checking */
@@ -555,12 +536,9 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     plen = m->m_pkthdr.len - (ip->ip_hl << 2) - 2 * sizeof(u_int32_t) - 
 	   xd->edx_ivlen - alen;
 
-    if (plen & (blks - 1))
+    if ((plen & (blks - 1)) || (plen <= 0))
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_input(): payload not a multiple of %d octets for packet from %x to %x, spi %08x\n", blks, ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	DPRINTF(("esp_new_input(): payload not a multiple of %d octets for packet from %x to %x, spi %08x\n", blks, ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi)));
 	espstat.esps_badilen++;
 	m_freem(m);
 	return NULL;
@@ -570,46 +548,23 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     {
 	bcopy(&(xd->edx_ictx), &ctx, xd->edx_hash->ctxsize);
 
-	/* Auth covers SPI + SN + IV*/
+	/* Auth covers SPI + SN + IV */
 	oplen = plen + 2 * sizeof(u_int32_t) + xd->edx_ivlen; 
 	off = (ip->ip_hl << 2);
 
+	/* Copy the authentication data */
+	m_copydata(m, m->m_pkthdr.len - alen, alen, buf);
+
 	mo = m;
+
 	while (oplen > 0)
 	{
 	    if (mo == 0)
 	      panic("esp_new_input(): m_copydata (copy)");
 
 	    count = min(mo->m_len - off, oplen);
-
 	    xd->edx_hash->Update(&ctx, mtod(mo, unsigned char *) + off, count);
 	    oplen -= count;
-	    if (oplen == 0) 
-	    {
-		/* Get the authentication data */
-		if (mo->m_len - off - count >= alen)
-		  bcopy(mtod(mo, unsigned char *) + off + count, buf, alen);
-		else 
-		{
-		    int olen = alen, tmp = 0;
-		      
-		    mi = mo;
-		    off += count;
-		      
-		    while (mi != NULL && olen > 0) 
-		    {
-			count = min(mi->m_len - off, olen);
-			bcopy(mtod(mi, unsigned char *) + off, buf + tmp,
-			      count);
-			  
-			off = 0;
-			tmp += count;
-			olen -= count;
-			mi = mi->m_next;
-		    }
-		}
-	    }
-		   
 	    off = 0;
 	    mo = mo->m_next;
 	}
@@ -680,7 +635,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	    }
 
 	    do {
-		mi = mi->m_next;
+		mi = (mo = mi)->m_next;
 		if (mi == NULL)
 		    panic("esp_new_input(): bad chain (i)\n");
 	    } while (mi->m_len == 0);
@@ -689,14 +644,16 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	    {
 		if ((mi = m_pullup(mi, blks - rest)) == NULL) 
 		{
-#ifdef ENCDEBUG
-		    if (encdebug)
-			printf("esp_new_input(): m_pullup() failed, SA %x/%08x\n",
-			       tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+		    DPRINTF(("esp_new_input(): m_pullup() failed, SA %x/%08x\n",
+			       tdb->tdb_dst, ntohl(tdb->tdb_spi)));
 		    espstat.esps_hdrops++;
 		    return NULL;
 		}
+		/* 
+		 * m_pullup was not called at the beginning of the chain
+		 * but might return a new mbuf, link it into the chain.
+		 */
+		mo->m_next = mi;
 	    }
 		    
 	    ilen = mi->m_len;
@@ -709,7 +666,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 		    
 		xd->edx_xform->decrypt(xd, blk);
 
-		for (i=0; i<blks; i++)
+		for (i = 0; i < blks; i++)
 		    blk[i] ^= ivp[i];
 
 		ivp = ivn;
@@ -734,7 +691,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 
 	    xd->edx_xform->decrypt(xd, idat);
 
-	    for (i=0; i<blks; i++)
+	    for (i = 0; i < blks; i++)
 		idat[i] ^= ivp[i];
 
 	    ivp = ivn;
@@ -765,6 +722,13 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 
     if ((xd->edx_flags & ESP_NEW_FLAG_NPADDING) == 0)
     {
+        if (blk[6] + 2 + alen > m->m_pkthdr.len - (ip->ip_hl << 2) - 2 * sizeof(u_int32_t) - xd->edx_ivlen)
+        {
+	    DPRINTF(("esp_new_input(): invalid padding length %d for packet from %x to %x, SA %x/%08x\n", blk[6], ipo.ip_src, ipo.ip_dst, tdb->tdb_dst, ntohl(tdb->tdb_spi)));
+	    espstat.esps_badilen++;
+	    m_freem(m);
+	    return NULL;
+	}
         if ((blk[6] != blk[5]) && (blk[6] != 0))
 	{
 	    if (encdebug)
@@ -777,6 +741,13 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     }
     else
     {
+        if (blk[6] + 1 + alen > m->m_pkthdr.len - (ip->ip_hl << 2) - 2 * sizeof(u_int32_t) - xd->edx_ivlen)
+        {
+	    DPRINTF(("esp_new_input(): invalid padding length %d for packet from %x to %x, SA %x/%08x\n", blk[6], ipo.ip_src, ipo.ip_dst, tdb->tdb_dst, ntohl(tdb->tdb_spi)));
+	    espstat.esps_badilen++;
+	    m_freem(m);
+	    return NULL;
+	}
 	if (blk[6] == 0)
 	{
 	    if (encdebug)
@@ -803,10 +774,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	m = m_pullup(m, (ipo.ip_hl << 2));
 	if (m == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("esp_new_input(): m_pullup() failed for packet from %x to %x, SA %x/%08x\n", ipo.ip_src, ipo.ip_dst, tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	    DPRINTF(("esp_new_input(): m_pullup() failed for packet from %x to %x, SA %x/%08x\n", ipo.ip_src, ipo.ip_dst, tdb->tdb_dst, ntohl(tdb->tdb_spi)));
 	    return NULL;
 	}
     }
@@ -849,14 +817,14 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
-	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	  tdb->tdb_flags &= ~TDBF_SOFT_PACKETS;
       }
       else
 	if (tdb->tdb_flags & TDBF_SOFT_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_soft_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
     }
@@ -865,14 +833,14 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
-	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	  tdb_delete(tdb, 0);
       }
       else
 	if (tdb->tdb_flags & TDBF_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_exp_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	      tdb_delete(tdb, 0);
 	  }
     }
@@ -888,7 +856,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     struct ip *ip, ipo;
     int i, ilen, ohlen, nh, rlen, plen, padding, rest;
     struct esp_new espo;
-    struct mbuf *mi;
+    struct mbuf *mi, *mo;
     u_char *pad, *idat, *odat, *ivp;
     u_char iv[ESP_MAX_IVS], blk[ESP_MAX_BLKS], auth[AH_ALEN_MAX], opts[40];
     union {
@@ -905,11 +873,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     if (xd->edx_flags & ESP_NEW_FLAG_AUTH)
     {
       alen = AH_HMAC_HASHLEN;
-#ifdef ENCDEBUG
-      if (encdebug)
-	printf("esp_new_output(): using hash algorithm: %s\n",
-	       xd->edx_hash->name);
-#endif /* ENCDEBUG */
+      DPRINTF(("esp_new_output(): using hash algorithm: %s\n", xd->edx_hash->name));
     } 
     else
       alen = 0;
@@ -919,11 +883,8 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     m = m_pullup(m, sizeof (struct ip));   /* Get IP header in one mbuf */
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
-		 tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+        DPRINTF(("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
+		 tdb->tdb_dst, ntohl(tdb->tdb_spi)));
 	return ENOBUFS;
     }
 
@@ -951,11 +912,8 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	m = m_pullup(m, iphlen + 8);
 	if (m == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("esp_new_input(): m_pullup() failed for SA %x/%08x\n",
-		     tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	    DPRINTF(("esp_new_input(): m_pullup() failed for SA %x/%08x\n",
+		     tdb->tdb_dst, ntohl(tdb->tdb_spi)));
 	    return ENOBUFS;
 	}
 
@@ -979,11 +937,8 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     pad = (u_char *) m_pad(m, padding + alen);
     if (pad == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_output(): m_pad() failed for SA %x/%08x\n",
-		 tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+        DPRINTF(("esp_new_output(): m_pad() failed for SA %x/%08x\n",
+		 tdb->tdb_dst, ntohl(tdb->tdb_spi)));
       	return ENOBUFS;
     }
 
@@ -1035,12 +990,18 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	{
 	    if (rest)
 	    {
+	        if (ivp == blk)
+		{
+			bcopy(blk, iv, blks);
+			ivp = iv;
+		}
+
 		bcopy(idat, blk, rest);
 		odat = idat;
 	    }
 
 	    do {
-		mi = mi->m_next;
+		mi = (mo = mi)->m_next;
 		if (mi == NULL)
 		    panic("esp_new_output(): bad chain (i)\n");
 	    } while (mi->m_len == 0);
@@ -1049,13 +1010,15 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	    {
 		if ((mi = m_pullup(mi, blks - rest)) == NULL)
 		{
-#ifdef ENCDEBUG
-		    if (encdebug)
-			printf("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
-			       tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+		    DPRINTF(("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
+			       tdb->tdb_dst, ntohl(tdb->tdb_spi)));
 		    return ENOBUFS;
 		}
+		/* 
+		 * m_pullup was not called at the beginning of the chain
+		 * but might return a new mbuf, link it into the chain.
+		 */
+		mo->m_next = mi;
 	    }
 		    
 	    ilen = mi->m_len;
@@ -1065,7 +1028,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	    {
 		bcopy(idat, blk + rest, blks - rest);
 		    
-		for (i=0; i<blks; i++)
+		for (i = 0; i < blks; i++)
 		    blk[i] ^= ivp[i];
 
 		xd->edx_xform->encrypt(xd, blk);
@@ -1088,7 +1051,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 
 	while (ilen >= blks && plen > 0)
 	{
-	    for (i=0; i<blks; i++)
+	    for (i = 0; i < blks; i++)
 		idat[i] ^= ivp[i];
 
 	    xd->edx_xform->encrypt(xd, idat);
@@ -1124,22 +1087,16 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     M_PREPEND(m, ohlen, M_DONTWAIT);
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_output(): M_PREPEND failed, SA %x/%08x\n",
-		 tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+        DPRINTF(("esp_new_output(): M_PREPEND failed, SA %x/%08x\n",
+		 tdb->tdb_dst, ntohl(tdb->tdb_spi)));
         return ENOBUFS;
     }
 
     m = m_pullup(m, iphlen + ohlen);
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
-		 tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+        DPRINTF(("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
+		 tdb->tdb_dst, ntohl(tdb->tdb_spi)));
         return ENOBUFS;
     }
 
@@ -1172,14 +1129,14 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
-	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	  tdb->tdb_flags &= ~TDBF_SOFT_PACKETS;
       }
       else
 	if (tdb->tdb_flags & TDBF_SOFT_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_soft_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
     }
@@ -1188,14 +1145,14 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
-	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	  tdb_delete(tdb, 0);
       }
       else
 	if (tdb->tdb_flags & TDBF_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_exp_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	      tdb_delete(tdb, 0);
 	  }
     }

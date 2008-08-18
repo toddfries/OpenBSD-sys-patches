@@ -1,4 +1,4 @@
-/*	$OpenBSD: pio.h,v 1.1 1998/01/28 11:14:50 pefo Exp $	*/
+/*	$OpenBSD: pio.h,v 1.3 1998/10/15 21:30:14 imp Exp $	*/
 
 /*
  * Copyright (c) 1995 Per Fogelstrom.  All rights reserved.

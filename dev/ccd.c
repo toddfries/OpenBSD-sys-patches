@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.35 1998/03/10 20:43:17 millert Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.37 1998/10/03 21:19:00 millert Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -1098,9 +1098,9 @@ ccdiodone(vbp)
 		 * Note that mirror component buffers aren't counted against
 		 * the original I/O buffer.
 		 */
-		bp->b_resid -= count;
-		if (bp->b_resid < 0)
+		if (count > bp->b_resid)
 			panic("ccdiodone: count");
+		bp->b_resid -= count;
 		if (bp->b_resid == 0)
 			ccdintr(&ccd_softc[unit], bp);
 	}
@@ -1591,7 +1591,7 @@ ccdgetdisklabel(dev)
 	 * Call the generic disklabel extraction routine.
 	 */
 	errstring = readdisklabel(CCDLABELDEV(dev), ccdstrategy,
-	    cs->sc_dkdev.dk_label, cs->sc_dkdev.dk_cpulabel);
+	    cs->sc_dkdev.dk_label, cs->sc_dkdev.dk_cpulabel, 0);
 	if (errstring)
 		ccdmakedisklabel(cs);
 

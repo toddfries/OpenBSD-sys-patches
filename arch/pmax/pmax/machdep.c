@@ -87,6 +87,7 @@
 #include <pmax/stand/dec_prom.h>
 
 #include <pmax/dev/ascreg.h>
+#include <pmax/dev/led.h>
 
 #include <machine/autoconf.h>
 #include <machine/locore.h>
@@ -102,7 +103,6 @@
 #include <pmax/pmax/pmaxtype.h>
 #include <pmax/pmax/cons.h>
 
-
 #include "pm.h"
 #include "cfb.h"
 #include "mfb.h"
@@ -112,6 +112,7 @@
 #include "scc.h"
 #include "le_ioasic.h"
 #include "asc.h"
+#include "led.h"
 
 extern void fbPutc();
 
@@ -347,10 +348,10 @@ mach_init(argc, argv, code, cv)
 	start = v;
 	curproc->p_addr = proc0paddr = (struct user *)v;
 	curproc->p_md.md_regs = proc0paddr->u_pcb.pcb_regs;
-	firstaddr = MACH_CACHED_TO_PHYS(v);
+	firstaddr = MIPS_KSEG0_TO_PHYS(v);
 	for (i = 0; i < UPAGES; i++) {
 		MachTLBWriteIndexed(i,
-			(UADDR + (i << PGSHIFT)) | (1 << VMMACH_TLB_PID_SHIFT),
+			(UADDR + (i << PGSHIFT)) | (1 << MIPS_TLB_PID_SHIFT),
 			curproc->p_md.md_upte[i] = firstaddr | PG_V | PG_M);
 		firstaddr += NBPG;
 	}
@@ -398,7 +399,7 @@ mach_init(argc, argv, code, cv)
 	 * Initialize physmem_boardmax; assume no SIMM-bank limits.
 	 * Adjst later in model-specific code if necessary.
 	 */
-	physmem_boardmax = MACH_MAX_MEM_ADDR;
+	physmem_boardmax = MIPS_MAX_MEM_ADDR;
 
 	/* check what model platform we are running on */
 	pmax_boardtype = ((i >> 16) & 0xff);
@@ -419,7 +420,7 @@ mach_init(argc, argv, code, cv)
 		Mach_splclock = Mach_spl3;
 		Mach_splstatclock = Mach_spl3;
 		Mach_clock_addr = (volatile struct chiptime *)
-			MACH_PHYS_TO_UNCACHED(KN01_SYS_CLOCK);
+			MIPS_PHYS_TO_KSEG1(KN01_SYS_CLOCK);
 		strcpy(cpu_model, "3100");
 		break;
 #endif /* DS3100 */
@@ -440,7 +441,7 @@ mach_init(argc, argv, code, cv)
 		Mach_splclock = Mach_spl3;
 		Mach_splstatclock = Mach_spl3;
 		Mach_clock_addr = (volatile struct chiptime *)
-			MACH_PHYS_TO_UNCACHED(KN01_SYS_CLOCK);
+			MIPS_PHYS_TO_KSEG1(KN01_SYS_CLOCK);
 		strcpy(cpu_model, "5100");
 		break;
 #endif /* DS5100 */
@@ -449,10 +450,10 @@ mach_init(argc, argv, code, cv)
 	case DS_3MAX:	/* DS5000/200 3max */
 		{
 		volatile int *csr_addr =
-			(volatile int *)MACH_PHYS_TO_UNCACHED(KN02_SYS_CSR);
+			(volatile int *)MIPS_PHYS_TO_KSEG1(KN02_SYS_CSR);
 
 		Mach_reset_addr =
-		    (unsigned *)MACH_PHYS_TO_UNCACHED(KN02_SYS_ERRADR);
+		    (unsigned *)MIPS_PHYS_TO_KSEG1(KN02_SYS_ERRADR);
 		/* clear any memory errors from new-config probes */
 		*Mach_reset_addr = 0;
 
@@ -472,7 +473,7 @@ mach_init(argc, argv, code, cv)
 		Mach_splclock = Mach_spl1;
 		Mach_splstatclock = Mach_spl1;
 		Mach_clock_addr = (volatile struct chiptime *)
-			MACH_PHYS_TO_UNCACHED(KN02_SYS_CLOCK);
+			MIPS_PHYS_TO_KSEG1(KN02_SYS_CLOCK);
 
 		}
 		strcpy(cpu_model, "5000/200");
@@ -486,7 +487,7 @@ mach_init(argc, argv, code, cv)
 		tc_slot_phys_base[0] = KMIN_PHYS_TC_0_START;
 		tc_slot_phys_base[1] = KMIN_PHYS_TC_1_START;
 		tc_slot_phys_base[2] = KMIN_PHYS_TC_2_START;
-		ioasic_base = MACH_PHYS_TO_UNCACHED(KMIN_SYS_ASIC);
+		ioasic_base = MIPS_PHYS_TO_KSEG1(KMIN_SYS_ASIC);
 		mips_hardware_intr = kmin_intr;
 		tc_enable_interrupt = kmin_enable_intr;
 		kmin_tc3_imask = (KMIN_INTR_CLOCK | KMIN_INTR_PSWARN |
@@ -505,7 +506,7 @@ mach_init(argc, argv, code, cv)
 		Mach_splclock = splhigh;
 		Mach_splstatclock = splhigh;
 		Mach_clock_addr = (volatile struct chiptime *)
-			MACH_PHYS_TO_UNCACHED(KMIN_SYS_CLOCK);
+			MIPS_PHYS_TO_KSEG1(KMIN_SYS_CLOCK);
 
 
 		/*
@@ -516,7 +517,7 @@ mach_init(argc, argv, code, cv)
 
 		/* clear any memory errors from probes */
 		Mach_reset_addr =
-		    (u_int*)MACH_PHYS_TO_UNCACHED(KMIN_REG_TIMEOUT);
+		    (u_int*)MIPS_PHYS_TO_KSEG1(KMIN_REG_TIMEOUT);
 		(*Mach_reset_addr) = 0;
 
 		strcpy(cpu_model, "5000/1xx");
@@ -529,10 +530,10 @@ mach_init(argc, argv, code, cv)
 		 * XXX Do MAXINEs lose the same way?
 		 */
 		physmem_boardmax = KMIN_PHYS_MEMORY_END + 1;
-		if ((*(int*)(MACH_PHYS_TO_UNCACHED(KMIN_REG_MSR)) &
+		if ((*(int*)(MIPS_PHYS_TO_KSEG1(KMIN_REG_MSR)) &
 		     KMIN_MSR_SIZE_16Mb) == 0)
 			physmem_boardmax = physmem_boardmax >> 2;
-		physmem_boardmax = MACH_PHYS_TO_UNCACHED(physmem_boardmax);
+		physmem_boardmax = MIPS_PHYS_TO_KSEG1(physmem_boardmax);
 
 		break;
 #endif /* ds5000_100 */
@@ -543,7 +544,7 @@ mach_init(argc, argv, code, cv)
 		tc_min_slot = XINE_TC_MIN;
 		tc_slot_phys_base[0] = XINE_PHYS_TC_0_START;
 		tc_slot_phys_base[1] = XINE_PHYS_TC_1_START;
-		ioasic_base = MACH_PHYS_TO_UNCACHED(XINE_SYS_ASIC);
+		ioasic_base = MIPS_PHYS_TO_KSEG1(XINE_SYS_ASIC);
 		mips_hardware_intr = xine_intr;
 		tc_enable_interrupt = xine_enable_intr;
 		Mach_splbio = Mach_spl3;
@@ -553,7 +554,7 @@ mach_init(argc, argv, code, cv)
 		Mach_splclock = Mach_spl1;
 		Mach_splstatclock = Mach_spl1;
 		Mach_clock_addr = (volatile struct chiptime *)
-			MACH_PHYS_TO_UNCACHED(XINE_SYS_CLOCK);
+			MIPS_PHYS_TO_KSEG1(XINE_SYS_CLOCK);
 
 		/*
 		 * Initialize interrupts.
@@ -562,7 +563,7 @@ mach_init(argc, argv, code, cv)
 		*(u_int *)IOASIC_REG_INTR(ioasic_base) = 0;
 		/* clear any memory errors from probes */
 		Mach_reset_addr =
-		    (u_int*)MACH_PHYS_TO_UNCACHED(XINE_REG_TIMEOUT);
+		    (u_int*)MIPS_PHYS_TO_KSEG1(XINE_REG_TIMEOUT);
 		(*Mach_reset_addr) = 0;
 		strcpy(cpu_model, "5000/25");
 		break;
@@ -575,11 +576,11 @@ mach_init(argc, argv, code, cv)
 		tc_slot_phys_base[0] = KN03_PHYS_TC_0_START;
 		tc_slot_phys_base[1] = KN03_PHYS_TC_1_START;
 		tc_slot_phys_base[2] = KN03_PHYS_TC_2_START;
-		ioasic_base = MACH_PHYS_TO_UNCACHED(KN03_SYS_ASIC);
+		ioasic_base = MIPS_PHYS_TO_KSEG1(KN03_SYS_ASIC);
 		mips_hardware_intr = kn03_intr;
 		tc_enable_interrupt = kn03_enable_intr;
 		Mach_reset_addr =
-		    (u_int *)MACH_PHYS_TO_UNCACHED(KN03_SYS_ERRADR);
+		    (u_int *)MIPS_PHYS_TO_KSEG1(KN03_SYS_ERRADR);
 		*Mach_reset_addr = 0;
 
 		/*
@@ -593,7 +594,7 @@ mach_init(argc, argv, code, cv)
 		Mach_splclock = Mach_spl1;
 		Mach_splstatclock = Mach_spl1;
 		Mach_clock_addr = (volatile struct chiptime *)
-			MACH_PHYS_TO_UNCACHED(KN03_SYS_CLOCK);
+			MIPS_PHYS_TO_KSEG1(KN03_SYS_CLOCK);
 
 		asic_init(0);
 		/*
@@ -623,7 +624,7 @@ mach_init(argc, argv, code, cv)
 	 * Be careful to save and restore the original contents for msgbuf.
 	 */
 	physmem = btoc((vm_offset_t)v - KERNBASE);
-	cp = (char *)MACH_PHYS_TO_UNCACHED(physmem << PGSHIFT);	
+	cp = (char *)MIPS_PHYS_TO_KSEG1(physmem << PGSHIFT);	
 	while (cp < (char *)physmem_boardmax) {
 	  	int j;
 		if (badaddr(cp, 4))
@@ -678,7 +679,7 @@ mach_init(argc, argv, code, cv)
 	 * Initialize error message buffer (at end of core).
 	 */
 	maxmem -= btoc(sizeof (struct msgbuf));
-	msgbufp = (struct msgbuf *)(MACH_PHYS_TO_CACHED(maxmem << PGSHIFT));
+	msgbufp = (struct msgbuf *)(MIPS_PHYS_TO_KSEG0(maxmem << PGSHIFT));
 	msgbufmapped = 1;
 
 	/*
@@ -898,6 +899,9 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	size_t newlen;
 	struct proc *p;
 {
+#if (NLED > 0)
+	int ret, oldval;
+#endif
 
 	/* all sysctl names at this level are terminal */
 	if (namelen != 1)
@@ -907,6 +911,18 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_CONSDEV:
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &cn_tab->cn_dev,
 		    sizeof cn_tab->cn_dev));
+	case CPU_LED_BLINK:
+#if (NLED > 0)
+		oldval = pmax_led_blink;
+		ret = sysctl_int(oldp, oldlenp, newp, newlen, &pmax_led_blink);
+
+		/*
+		 * If we were false and are now true, call led_blink().
+		 * led_blink() itself will catch the other case.
+		 */
+		led_pmax_cycle((caddr_t *)0);
+		return (ret);
+#endif
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1185,7 +1201,7 @@ dumpsys()
 	int error;
 
 	/* Save registers. */
-	savectx(&dumppcb, 0);
+	savectx((struct user *)&dumppcb, 0);
 
 	msgbufmapped = 0;
 	if (dumpdev == NODEV)
@@ -1462,7 +1478,7 @@ initcpu()
 		*(u_int *)IOASIC_REG_INTR(ioasic_base) = 0;
 		break;
 	case DS_3MAX:
-		*(u_int *)MACH_PHYS_TO_UNCACHED(KN02_SYS_CHKSYN) = 0;
+		*(u_int *)MIPS_PHYS_TO_KSEG1(KN02_SYS_CHKSYN) = 0;
 		wbflush();
 		break;
 	default:
@@ -1589,7 +1605,7 @@ kn02_enable_intr(slotno, handler, sc, on)
 	int on;
 {
 	register volatile int *p_csr =
-		(volatile int *)MACH_PHYS_TO_UNCACHED(KN02_SYS_CSR);
+		(volatile int *)MIPS_PHYS_TO_KSEG1(KN02_SYS_CSR);
 	int csr;
 	int s;
 
@@ -1650,11 +1666,11 @@ kmin_enable_intr(slotno, handler, sc, on)
 	switch (slotno) {
 		/* slots 0-2 don't interrupt through the IOASIC. */
 	case 0:
-		mask = MACH_INT_MASK_0;	break;
+		mask = MIPS_INT_MASK_0;	break;
 	case 1:
-		mask = MACH_INT_MASK_1; break;
+		mask = MIPS_INT_MASK_1; break;
 	case 2:
-		mask = MACH_INT_MASK_2; break;
+		mask = MIPS_INT_MASK_2; break;
 
 	case KMIN_SCSI_SLOT:
 		mask = (KMIN_INTR_SCSI | KMIN_INTR_SCSI_PTR_LOAD |
@@ -1804,7 +1820,7 @@ kn03_tc_reset()
 	 * Reset interrupts, clear any errors from newconf probes
 	 */
 	*(u_int *)IOASIC_REG_INTR(ioasic_base) = 0;
-	*(unsigned *)MACH_PHYS_TO_UNCACHED(KN03_SYS_ERRADR) = 0;
+	*(unsigned *)MIPS_PHYS_TO_KSEG1(KN03_SYS_ERRADR) = 0;
 }
 
 

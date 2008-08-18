@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.39 1998/01/06 02:35:19 deraadt Exp $
+#	$OpenBSD: files.i386,v 1.48 1998/10/04 23:34:37 niklas Exp $
 #	$NetBSD: files.i386,v 1.73 1996/05/07 00:58:36 thorpej Exp $
 #
 # new style config file for i386 architecture
@@ -37,6 +37,11 @@ file	lib/libz/adler32.c		!ppp_deflate
 file	dev/cons.c
 file	dev/cninit.c
 major	{vnd = 14}
+
+#
+# Media Indepedent Interface (mii)
+#
+include "../../../dev/mii/files.mii"
 
 #
 # Machine-independent SCSI drivers
@@ -86,11 +91,16 @@ device	pchb:	pcibus
 attach	pchb at pci
 file	arch/i386/pci/pchb.c		pchb
 
+# PCI-ISA bridge chipsets
+device	pcib:	pcibus
+attach	pcib at pci
+file	arch/i386/pci/pcib.c		pcib
+
 #
 # Pcmcia, before ISA (to define device stuff)
 #
 
-include "../../../dev/pcmcia/files.pcmcia"
+#include "../../../dev/pcmcia/files.pcmcia"
 
 #
 # ISA and mixed ISA+EISA or ISA+PCI or ISA+PCMCIA drivers
@@ -123,7 +133,7 @@ define pckbd { [irq = -1], [port = -1] }
 device	pccom: tty
 attach	pccom at isa with pccom_isa
 attach	pccom at commulti with pccom_commulti
-attach	pccom at pcmcia with pccom_pcmcia
+#attach	pccom at pcmcia with pccom_pcmcia
 file	arch/i386/isa/pccom.c		pccom & (pccom_isa | pccom_isapnp | pccom_commulti | pccom_pcmcia) needs-flag
 
 # PC console support a la "pccons"
@@ -156,9 +166,10 @@ file	arch/i386/isa/pms.c		pms needs-flag
 # XXX temporarily conflicts with arc, will soon move to files.isa
 device	fdc {drive = -1}
 attach	fdc at isa
+file	dev/isa/fdc.c		fdc needs-flag
+
 device	fd: disk, isa_dma
 attach	fd at fdc
-file	dev/isa/fdc.c		fdc needs-flag
 file	dev/isa/fd.c		fd needs-flag
 major	{fd = 2}
 
@@ -166,20 +177,6 @@ major	{fd = 2}
 device	spkr: tty
 attach	spkr at pckbd
 file	arch/i386/isa/spkr.c		spkr needs-flag
-
-# National Semiconductor DS8390/WD83C690-based boards
-# (WD/SMC 80x3 family, SMC Ultra [8216], 3Com 3C503, NE[12]000, and clones)
-# XXX conflicts with other ports; can't be in files.isa
-device	ed: ether, ifnet
-attach	ed at isa with ed_isa
-attach	ed at pcmcia with ed_pcmcia
-attach	ed at pci with ed_pci
-file	dev/isa/if_ed.c			ed & (ed_isa | ed_pcmcia | ed_pci) needs-flag
-
-# Game adapter (joystick)
-device	joy
-attach	joy at isa
-file	arch/i386/isa/joy.c		joy needs-flag
 
 # Adaptec AHA-284x VL SCSI controllers
 # device declaration in sys/conf/files
@@ -206,6 +203,14 @@ file	arch/i386/isa/isapnp_machdep.c	isapnp
 
 attach	pccom at isapnp with pccom_isapnp
 
+# Game adapter (joystick)
+device	joy
+file	arch/i386/isa/joy.c		joy needs-flag
+attach	joy at isa with joy_isa
+file	arch/i386/isa/joy_isa.c		joy_isa
+attach	joy at isapnp with joy_isapnp
+file	arch/i386/isa/joy_isapnp.c	joy_isapnp
+
 #
 # Compatibility modules
 #
@@ -231,6 +236,9 @@ include "../../../compat/bsdos/files.bsdos"
 include "../../../compat/freebsd/files.freebsd"
 file	arch/i386/i386/freebsd_machdep.c	compat_freebsd
 
+# OSS audio driver compatibility
+include "../../../compat/ossaudio/files.ossaudio"
+
 device bios {}
 attach bios at mainbus
 file	arch/i386/i386/bios.c		bios needs-count
@@ -238,3 +246,37 @@ file	arch/i386/i386/bios.c		bios needs-count
 device apm
 attach apm at bios
 file	arch/i386/i386/apm.c		apm needs-count
+
+# XXXX pcic here because it needs to be late.  The catch: pcic needs
+# to be late, so devices which attach to it are attached late.  But it
+# needs to be before its isa and pci attachments.  This answer is
+# non-optimal, but I don't have a better answer right now.
+
+# PCIC pcmcia contoller
+# XXX this needs to be done very late, so it's done here.  This feels
+# like a kludge, but it might be for the best.
+
+device	pcic {[controller = -1], [socket = -1]}
+file	dev/ic/i82365.c			pcic
+
+# PCIC pcmcia controller on ISA bus.
+attach	pcic at isa with pcic_isa
+file	dev/isa/i82365_isa.c		pcic_isa
+
+# PCIC pcmcia controller on PCI bus.
+#attach	pcic at pci with pcic_pci
+#file	dev/pci/i82365_pci.c		pcic_pci
+
+# PCIC pcmcia controller on PnP board
+#attach	pcic at isapnp with pcic_isapnp
+#file	dev/isa/i82365_isapnp.c	pcic_isapnp
+
+# Code common to ISA and ISAPnP attachments
+file	dev/isa/i82365_isasubr.c	pcic_isa | pcic_isapnp
+
+# this wants to be probed as late as possible.
+#
+# Machine-independent PCMCIA drivers
+#
+include "dev/pcmcia/files.pcmcia"
+

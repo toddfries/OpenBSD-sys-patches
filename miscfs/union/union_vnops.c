@@ -1,4 +1,4 @@
-/*	$OpenBSD: union_vnops.c,v 1.9 1997/11/06 05:58:54 csapuntz Exp $	*/
+/*	$OpenBSD: union_vnops.c,v 1.12 1998/08/18 07:08:29 deraadt Exp $	*/
 /*	$NetBSD: union_vnops.c,v 1.30.4.1 1996/05/25 22:10:14 jtc Exp $	*/
 
 /*
@@ -1591,8 +1591,10 @@ union_inactive(v)
 
 	union_diruncache(un);
 
+	VOP_UNLOCK(ap->a_vp, 0, ap->a_p);
+
 	if ((un->un_flags & UN_CACHED) == 0)
-		vgone(ap->a_vp);
+		vrecycle(ap->a_vp, (struct simplelock *)0, ap->a_p);
 
 	return (0);
 }
@@ -1621,7 +1623,7 @@ union_lock(v)
 	int    flags = ap->a_flags;
 	int    error = 0;
 
-	vop_nolock(ap);
+	vop_generic_lock(ap);
 	/*
 	 * Need to do real lockmgr-style locking here.
 	 * in the mean time, draining won't work quite right,
@@ -1642,14 +1644,14 @@ start:
 			error = vn_lock(un->un_uppervp, flags, p);
 			if (error)
 				return (error);
- 			un->un_flags |= UN_ULOCK;
+			un->un_flags |= UN_ULOCK;
 		}
 #ifdef DIAGNOSTIC
 		if (un->un_flags & UN_KLOCK) {
 			vprint("union: dangling klock", vp);
 			panic("union: dangling upper lock (%lx)", vp);
 		}
- #endif
+#endif
  	}
 
 	if (un->un_flags & UN_LOCKED) {
@@ -1718,7 +1720,7 @@ union_unlock(v)
 	un->un_pid = 0;
 #endif
 
-	vop_nounlock(v);
+	vop_generic_unlock(v);
 
 	return (0);
 }

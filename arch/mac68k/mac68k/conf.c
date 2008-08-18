@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.16 1997/11/23 05:21:55 mickey Exp $	*/
+/*	$OpenBSD: conf.c,v 1.20 1998/09/25 09:20:53 todd Exp $	*/
 /*	$NetBSD: conf.c,v 1.41 1997/02/11 07:35:49 scottr Exp $	*/
 
 /*
@@ -112,6 +112,10 @@ cdev_decl(ch);
 dev_decl(filedesc,open);
 #include "asc.h"
 cdev_decl(asc);
+#ifdef XFS
+#include <xfs/nxfs.h>
+cdev_decl(xfs_dev);
+#endif
 
 #ifdef IPFILTER
 #define NIPF 1
@@ -158,6 +162,25 @@ struct cdevsw	cdevsw[] =
 	cdev_uk_init(NUK,uk),		/* 34: SCSI unknown */
 	cdev_gen_ipf(NIPF,ipl),         /* 35: IP filter log */
 	cdev_audio_init(NASC,asc),      /* 36: ASC audio device */
+	cdev_notdef(),			/* 37 */
+	cdev_notdef(),			/* 38 */
+	cdev_notdef(),			/* 39 */
+	cdev_notdef(),			/* 40 */
+	cdev_notdef(),			/* 41 */
+	cdev_notdef(),			/* 42 */
+	cdev_notdef(),			/* 43 */
+	cdev_notdef(),			/* 44 */
+	cdev_notdef(),			/* 45 */
+	cdev_notdef(),			/* 46 */
+	cdev_notdef(),			/* 47 */
+	cdev_notdef(),			/* 48 */
+	cdev_notdef(),			/* 49 */
+	cdev_notdef(),			/* 50 */
+#ifdef XFS
+	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#else
+	cdev_notdef(),			/* 51 */
+#endif
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -220,17 +243,6 @@ static int chrtoblktab[] = {
 	/* 18 */	NODEV,
 	/* 19 */	8,
 	/* 20 */	9,
-	/* 21 */	NODEV,
-	/* 22 */	NODEV,
-	/* 23 */	NODEV,
-	/* 24 */	NODEV,
-	/* 25 */	NODEV,
-	/* 26 */	NODEV,
-	/* 27 */	NODEV,
-	/* 28 */	NODEV,
-	/* 29 */	NODEV,
-	/* 30 */	NODEV,
-	/* 31 */	NODEV,
 };
 
 dev_t
@@ -239,11 +251,12 @@ chrtoblk(dev)
 {
 	int	blkmaj;
 
-	if (major(dev) >= nchrdev)
-		return NODEV;
+	if (major(dev) >= nchrdev ||
+	    major(dev) > sizeof(chrtoblktab)/sizeof(chrtoblktab[0]))
+		return (NODEV);
 	blkmaj = chrtoblktab[major(dev)];
 	if (blkmaj == NODEV)
-		return NODEV;
+		return (NODEV);
 	return (makedev(blkmaj, minor(dev)));
 }
 

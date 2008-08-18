@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ep_pci.c,v 1.14 1998/04/02 20:14:03 deraadt Exp $	*/
+/*	$OpenBSD: if_ep_pci.c,v 1.18 1998/09/19 10:08:06 maja Exp $	*/
 /*	$NetBSD: if_ep_pci.c,v 1.13 1996/10/21 22:56:38 thorpej Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -100,11 +101,6 @@ ep_pci_match(parent, match, aux)
 	case PCI_PRODUCT_3COM_3C595MII:
 	case PCI_PRODUCT_3COM_3C595T4:
 	case PCI_PRODUCT_3COM_3C595TX:
-	case PCI_PRODUCT_3COM_3C900COMBO:
-	case PCI_PRODUCT_3COM_3C900TPO:
-	case PCI_PRODUCT_3COM_3C905T4:
-	case PCI_PRODUCT_3COM_3C905TX:
-	case PCI_PRODUCT_3COM_3C905B:
 		break;
 	default:
 		return 0;
@@ -145,7 +141,9 @@ ep_pci_attach(parent, self, aux)
 
 	GO_WINDOW(0);
 
-	epconfig(sc, EP_CHIPSET_VORTEX);
+	printf(":");
+
+	epconfig(sc, EP_CHIPSET_VORTEX, NULL);
 
 	/* Enable the card. */
 	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,

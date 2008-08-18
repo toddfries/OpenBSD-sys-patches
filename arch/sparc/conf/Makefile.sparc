@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.sparc,v 1.15 1998/03/03 22:35:07 niklas Exp $
+#	$OpenBSD: Makefile.sparc,v 1.17 1998/09/17 21:08:13 jason Exp $
 # 	$NetBSD: Makefile.sparc,v 1.32.4.1 1996/06/12 20:26:32 pk Exp $
 
 # Makefile for OpenBSD
@@ -43,7 +43,7 @@ CDIAGFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
 		-Wno-uninitialized -Wno-format -Wno-main
 
 .if ${IDENT:M-DSUN*} == ${IDENT:M-DSUN4M}
-CMACHFLAGS=	-mv8
+CMACHFLAGS=	-mcpu=supersparc
 .else
 CMACHFLAGS=
 .endif
@@ -169,7 +169,9 @@ depend:: .depend
 .depend: ${SRCS} assym.h param.c
 	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${SPARC}/sparc/locore.s
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
+.if !empty(SFILES)
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
+.endif
 
 
 # depend on root or device configuration

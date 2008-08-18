@@ -1,4 +1,4 @@
-/*	$OpenBSD: isapnp.c,v 1.17 1998/01/20 18:40:31 niklas Exp $	*/
+/*	$OpenBSD: isapnp.c,v 1.20 1998/07/28 15:25:40 csapuntz Exp $	*/
 /*	$NetBSD: isapnp.c,v 1.9.4.3 1997/10/29 00:40:43 thorpej Exp $	*/
 
 /*
@@ -598,7 +598,7 @@ isapnp_submatch(parent, match, aux)
 			 * ISA probe...
 			 */
 			if (isapnp_config(ipa->ia_iot, ipa->ia_memt, ipa)) {
-				printf ("%s: error in region allocation\n",
+				printf("%s: error in region allocation\n",
 				    cf->cf_driver->cd_name);
 				return (0);
 			}
@@ -791,6 +791,32 @@ isapnp_configure(sc, ipa)
 	}
 }
 
+
+/*
+ * Some BIOSes take the liberty of configuring our ISA cards for us.
+ * This code undoes the PNP card configuration.
+ */
+
+void
+isapnp_isa_attach_hook(isa_sc)
+	struct isa_softc *isa_sc;
+
+{
+	struct isapnp_softc sc;
+	
+	sc.sc_iot = isa_sc->sc_iot;
+	sc.sc_ncards = 0;
+
+	if (isapnp_map(&sc))
+		return;
+
+	isapnp_init(&sc);
+
+	isapnp_write_reg(&sc, ISAPNP_CONFIG_CONTROL, ISAPNP_CC_RESET_DRV);
+	DELAY(2000);
+
+	isapnp_unmap(&sc);
+}
 
 /* isapnp_match():
  *	Probe routine

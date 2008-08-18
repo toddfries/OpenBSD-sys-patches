@@ -1,4 +1,4 @@
-#	$OpenBSD: files.alpha,v 1.21 1998/04/07 22:07:42 deraadt Exp $
+#	$OpenBSD: files.alpha,v 1.23 1998/09/22 20:43:33 jason Exp $
 #	$NetBSD: files.alpha,v 1.32 1996/11/25 04:03:21 cgd Exp $
 #
 # alpha-specific configuration info
@@ -26,6 +26,11 @@ file	arch/alpha/alpha/cpu.c		cpu
 
 major { ccd = 7 }
 major { vnd = 9 }
+
+#
+# Media Indepedent Interface (mii)
+#
+include "../../../dev/mii/files.mii"
 
 #
 # Machine-independent SCSI drivers
@@ -136,6 +141,7 @@ major { wd = 0 }
 #device	jeisa at ibus: eisabus
 
 file	arch/alpha/isa/isa_machdep.c	isa
+file     arch/alpha/pci/pciide_machdep.c  pci
 
 device	pcppi { }
 attach	pcppi at isa

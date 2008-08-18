@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.40 1998/04/06 09:00:58 niklas Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.46 1998/09/27 03:23:47 millert Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -247,11 +247,9 @@ sys_mount(p, v, retval)
 	vfs_busy(mp, LK_NOWAIT, 0, p);
 	mp->mnt_op = vfsp->vfc_vfsops;
 	mp->mnt_vfc = vfsp;
-	vfsp->vfc_refcount++;
 	mp->mnt_stat.f_type = vfsp->vfc_typenum;
 	mp->mnt_flag |= (vfsp->vfc_flags & MNT_VISFLAGMASK);
 	strncpy(mp->mnt_stat.f_fstypename, vfsp->vfc_name, MFSNAMELEN);
-	vp->v_mountedhere = mp;
 	mp->mnt_vnodecovered = vp;
 	mp->mnt_stat.f_owner = p->p_ucred->cr_uid;
 update:
@@ -291,11 +289,15 @@ update:
 		vfs_unbusy(mp, p);
 		return (error);
 	}
+
+	vp->v_mountedhere = mp;
+
 	/*
 	 * Put the new filesystem on the mount list after root.
 	 */
 	cache_purge(vp);
 	if (!error) {
+		vfsp->vfc_refcount++;
 		simple_lock(&mountlist_slock);
 		CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 		simple_unlock(&mountlist_slock);
@@ -628,6 +630,7 @@ sys_getfsstat(p, v, retval)
 	caddr_t sfsp;
 	long count, maxcount, error;
 	struct statfs sb;
+	int  flags = SCARG(uap, flags);
 
 	maxcount = SCARG(uap, bufsize) / sizeof(struct statfs);
 	sfsp = (caddr_t)SCARG(uap, buf);
@@ -640,19 +643,16 @@ sys_getfsstat(p, v, retval)
 		}
 		if (sfsp && count < maxcount) {
 			sp = &mp->mnt_stat;
-			/*
- 			 * If MNT_NOWAIT or MNT_LAZY is specified, do not
- 			 * refresh the fsstat cache. MNT_NOWAIT or MNT_LAZY
- 			 * overrides MNT_WAIT.
-  			 */
- 			if (((SCARG(uap, flags) & (MNT_LAZY|MNT_NOWAIT)) == 0 ||
-			    (SCARG(uap, flags) & MNT_WAIT)) &&
+
+			/* Refresh stats unless MNT_NOWAIT is specified */
+			if ((flags != MNT_NOWAIT) &&
 			    (error = VFS_STATFS(mp, sp, p))) {
 				simple_lock(&mountlist_slock);
 				nmp = mp->mnt_list.cqe_next;
 				vfs_unbusy(mp, p);
  				continue;
 			}
+
 			sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
 			if (suser(p->p_ucred, &p->p_acflag)) {
 				bcopy((caddr_t)sp, (caddr_t)&sb, sizeof(sb));
@@ -660,8 +660,10 @@ sys_getfsstat(p, v, retval)
 				sp = &sb;
 			}
 			error = copyout((caddr_t)sp, sfsp, sizeof(*sp));
-			if (error)
+			if (error) {
+				vfs_unbusy(mp, p);
 				return (error);
+			}
 			sfsp += sizeof(*sp);
 		}
 		count++;
@@ -1264,12 +1266,12 @@ sys_lseek(p, v, retval)
 	else
 		special = 0;
 	switch (SCARG(uap, whence)) {
-	case L_INCR:
+	case SEEK_CUR:
 		if (!special && fp->f_offset + SCARG(uap, offset) < 0)
 			return (EINVAL);
 		fp->f_offset += SCARG(uap, offset);
 		break;
-	case L_XTND:
+	case SEEK_END:
 		error = VOP_GETATTR((struct vnode *)fp->f_data, &vattr,
 				    cred, p);
 		if (error)
@@ -1278,7 +1280,7 @@ sys_lseek(p, v, retval)
 			return (EINVAL);
 		fp->f_offset = SCARG(uap, offset) + vattr.va_size;
 		break;
-	case L_SET:
+	case SEEK_SET:
 		if (!special && SCARG(uap, offset) < 0)
 			return (EINVAL);
 		fp->f_offset = SCARG(uap, offset);
@@ -1444,7 +1446,7 @@ sys_readlink(p, v, retval)
 	register struct sys_readlink_args /* {
 		syscallarg(char *) path;
 		syscallarg(char *) buf;
-		syscallarg(int) count;
+		syscallarg(size_t) count;
 	} */ *uap = v;
 	register struct vnode *vp;
 	struct iovec aiov;

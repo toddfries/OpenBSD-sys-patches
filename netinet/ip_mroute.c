@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.c,v 1.7 1997/09/28 23:09:58 deraadt Exp $	*/
+/*	$OpenBSD: ip_mroute.c,v 1.10 1998/07/29 22:18:50 angelos Exp $	*/
 /*	$NetBSD: ip_mroute.c,v 1.27 1996/05/07 02:40:50 thorpej Exp $	*/
 
 /*
@@ -1213,7 +1213,7 @@ ip_mdq(m, ifp, rt)
     register struct ip  *ip = mtod(m, struct ip *);
     register vifi_t vifi;
     register struct vif *vifp;
-    register int plen = ntohs(ip->ip_len);
+    register int plen = ip->ip_len;
 
 /*
  * Macro to send packet on vif.  Since RSVP packets don't get counted on
@@ -1480,6 +1480,13 @@ ipip_input(m, va_alist)
 		return;
 	}
 
+#ifdef IPSEC
+	if (!have_encap_tunnel) {
+		rip_input(m);
+		return;
+	}
+#endif
+
 	if (ip->ip_src.s_addr != last_encap_src) {
 		register struct vif *vife;
 	
@@ -1510,8 +1517,17 @@ acceptedhere:
 	m->m_len -= hlen;
 	m->m_pkthdr.len -= hlen;
 #ifdef IPSEC
-	if (isencaped == 0)
-		m->m_pkthdr.rcvif = vifp->v_ifp;
+	if (isencaped == 0) {
+	        if (vifp)
+		        m->m_pkthdr.rcvif = vifp->v_ifp;
+		else {
+		        ++mrtstat.mrts_bad_tunnel;
+			m_freem(m);
+			return;		
+		}
+	}
+	else
+	        m->m_flags |= M_TUNNEL;
 #else
 	m->m_pkthdr.rcvif = vifp->v_ifp;
 #endif
@@ -1714,7 +1730,7 @@ tbf_send_packet(vifp,m)
     if (vifp->v_flags & VIFF_TUNNEL) {
 	/* If tunnel options */
 	ip_output(m, (struct mbuf *)0, &vifp->v_route,
-		  IP_FORWARDING, NULL);
+		  IP_FORWARDING, NULL, NULL);
     } else {
 	/* if physical interface option, extract the options and then send */
 	struct ip *ip = mtod(m, struct ip *);
@@ -1727,7 +1743,7 @@ tbf_send_packet(vifp,m)
 #endif
 
 	error = ip_output(m, (struct mbuf *)0, (struct route *)0,
-			  IP_FORWARDING|IP_MULTICASTOPTS, &imo);
+			  IP_FORWARDING|IP_MULTICASTOPTS, &imo, NULL);
 	if (mrtdebug & DEBUG_XMIT)
 	    log(LOG_DEBUG, "phyint_send on vif %d err %d\n", vifp-viftable, error);
     }

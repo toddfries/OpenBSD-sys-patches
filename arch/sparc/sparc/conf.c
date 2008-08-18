@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.14 1997/08/08 08:27:08 downsj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.19 1998/09/25 09:20:54 todd Exp $	*/
 /*	$NetBSD: conf.c,v 1.40 1996/04/11 19:20:03 thorpej Exp $ */
 
 /*
@@ -81,6 +81,12 @@
 #include "cgfourteen.h"
 #include "xd.h"
 #include "xy.h"
+#include "magma.h"		/* has NMTTY and NMBPP */
+#ifdef XFS
+#include <xfs/nxfs.h>
+cdev_decl(xfs_dev);
+#endif
+#include "ksyms.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -165,7 +171,11 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_notdef(),			/* 50 */
+#ifdef XFS
+	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#else
 	cdev_notdef(),			/* 51 */
+#endif
 	cdev_notdef(),			/* 52 */
 	cdev_notdef(),			/* 53 */
 	cdev_disk_init(NFD,fd),		/* 54: floppy disk */
@@ -214,8 +224,8 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 97 */
 	cdev_notdef(),			/* 98 */
 	cdev_fb_init(NCGFOURTEEN,cgfourteen), /* 99: /dev/cgfourteen */
-	cdev_notdef(),			/* 100 */
-	cdev_notdef(),			/* 101 */
+	cdev_tty_init(NMTTY,mtty),	/* 100 */
+	cdev_gen_init(NMBPP,mbpp),	/* 101 */
 	cdev_notdef(),			/* 102 */
 	cdev_notdef(),			/* 103 */
 	cdev_notdef(),			/* 104 */
@@ -236,6 +246,7 @@ struct cdevsw	cdevsw[] =
 	cdev_random_init(1,random),	/* 119: random generator */
 	cdev_uk_init(NUK,uk),		/* 120: unknown SCSI */
 	cdev_ss_init(NSS,ss),           /* 121: SCSI scanner */
+	cdev_ksyms_init(NKSYMS,ksyms),	/* 122: Kernel symbols device */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -386,14 +397,6 @@ static int chrtoblktbl[] = {
 	/*108 */	NODEV,
 	/*109 */	NODEV,
 	/*110 */	8,
-	/*111 */	NODEV,
-	/*112 */	NODEV,
-	/*113 */	NODEV,
-	/*114 */	NODEV,
-	/*115 */	NODEV,
-	/*116 */	NODEV,
-	/*117 */	NODEV,
-	/*118 */	NODEV,
 };
 
 /*
@@ -405,7 +408,8 @@ chrtoblk(dev)
 {
 	int blkmaj;
 
-	if (major(dev) >= nchrdev)
+	if (major(dev) >= nchrdev ||
+	    major(dev) > sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]))
 		return (NODEV);
 	blkmaj = chrtoblktbl[major(dev)];
 	if (blkmaj == NODEV)

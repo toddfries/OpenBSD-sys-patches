@@ -1,4 +1,4 @@
-/*	$OpenBSD: gidt.S,v 1.21 1998/04/18 07:39:51 deraadt Exp $	*/
+/*	$OpenBSD: gidt.S,v 1.23 1998/09/25 06:48:52 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -131,7 +131,7 @@
 	movl	%eax, %cr0;					\
 								\
 	data32;							\
-	ljmp	$S32TEXT, $1f;   /* reload %cs flush pipeline */\
+	ljmp	$S32TEXT, $1f;   /* reload %cs,flush pipeline */\
 1:								\
 	/* reload 32bit %ds, %ss, %es */			\
 	movl	$S32DATA, %eax;					\
@@ -371,7 +371,7 @@ EMUh:
 	movl	%ax, %ds
 
 	data32
-	# movl	Leax, %eax
+	# movl	$Leax, %eax
 	.byte	0xb8
 3:	.long	0x90909090	/* restore %eax */
 
@@ -398,7 +398,7 @@ intno	= . - 1
 
 	real2prot
 
-	# movl	Leax, %eax
+	# movl	$Leax, %eax
 	.byte	0xb8
 2:	.long	0x90909090	/* eax */
 
@@ -407,6 +407,14 @@ intno	= . - 1
 	movl	%ecx, 0xa*4(%esp)
 	movl	%edx, 0x9*4(%esp)
 	movb	%bh , 0xe*4(%esp)
+
+	/* clear NT flag in eflags */
+	/* Martin Fredriksson <martin@gbg.netman.se> */
+	pushf
+	popl	%eax
+	andl	$0xffffbfff, %eax
+	pushl	%eax
+	popf
 
 	/* save registers into save area */
 	movl	%eax, _C_LABEL(BIOS_regs)+biosr_ax

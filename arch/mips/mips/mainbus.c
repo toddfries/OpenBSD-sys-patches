@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.2 1998/03/16 09:03:34 pefo Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.4 1998/10/15 21:30:15 imp Exp $	*/
 
 /*
  * Copyright (c) 1997 Per Fogelstrom.

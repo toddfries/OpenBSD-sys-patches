@@ -1,4 +1,4 @@
-/*	$OpenBSD: stand.h,v 1.31 1998/02/24 22:14:44 weingart Exp $	*/
+/*	$OpenBSD: stand.h,v 1.35 1998/07/29 00:38:36 mickey Exp $	*/
 /*	$NetBSD: stand.h,v 1.18 1996/11/30 04:35:51 gwr Exp $	*/
 
 /*-
@@ -39,7 +39,11 @@
 #include <sys/types.h>
 #include <sys/cdefs.h>
 #include <sys/stat.h>
+#ifdef __STDC__
 #include <machine/stdarg.h>
+#else
+#include <machine/varargs.h>
+#endif
 #include "saioctl.h"
 #include "saerrno.h"
 
@@ -131,8 +135,9 @@ extern struct open_file files[];
 	h = ((b) % ((nh) * (ns))) / (ns);	\
 	s = ((b) % ((nh) * (ns))) % (ns);
 
-void	*alloc __P((unsigned int));
-void	free __P((void *, unsigned int));
+void	*alloc __P((u_int));
+void	*alloca __P((size_t));
+void	free __P((void *, u_int));
 struct	disklabel;
 char	*getdisklabel __P((const char *, struct disklabel *));
 u_int	dkcksum __P((struct disklabel *));
@@ -154,6 +159,7 @@ char	*strcpy __P((char *, const char *));
 int	strncmp __P((const char *, const char *, size_t));
 size_t	strlen __P((const char *));
 long	strtol __P((const char *, char **, int));
+char	*strchr __P((const char *, int));
 void	*memset __P((void *, int, size_t));
 void	exec __P((char *, void *, int));
 void	exit __P((void));
@@ -190,6 +196,7 @@ int	cnischar __P((void));
 int	cnspeed __P((dev_t, int));
 u_int	sleep __P((u_int));
 void	usleep __P((u_int));
+char *ctime __P((const time_t *));
 
 void	putchar __P((int));    
 int	getchar __P((void));

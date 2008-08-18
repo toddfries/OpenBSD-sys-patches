@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_devar.h,v 1.5 1997/11/16 07:41:27 millert Exp $	*/
+/*	$OpenBSD: if_devar.h,v 1.8 1998/10/08 05:51:19 jason Exp $	*/
 /*	$NetBSD: if_devar.h,v 1.13 1997/06/08 18:46:36 thorpej Exp $	*/
 
 /*-
@@ -87,19 +87,35 @@ typedef volatile u_int32_t *tulip_csrptr_t;
 /*
  *  Swap macro to access certain data types.
  */
-#if BYTE_ORDER == BIG_ENDIAN
+#if defined(BYTE_ORDER) && BYTE_ORDER == BIG_ENDIAN
+__inline__ static u_int32_t FILT_BO(u_int32_t);
+__inline__ static u_int32_t DESC_BO(u_int32_t);
+
 __inline__ static u_int32_t
-FILT_SWAP(x)
+FILT_BO(x)
+    u_int32_t x;
+{
+	u_int32_t s;
+
+	s = (x & 0xffff) << 16 | ((x & 0xff) << 8) | ((x & 0xff00) >> 8);
+	return s;
+}
+
+__inline__ static u_int32_t
+DESC_BO(x)
     u_int32_t x;
 {
 	u_int32_t s;
 
 	s = x;
-	s = s << 16;
-	return s;
+	x = (((s) >> 24) | (((s) >> 8) & 0xff00) | 
+             ((s) << 24) | (((s) & 0xff00) << 8));
+	return x;
 }
+
 #else
-#define FILT_SWAP(x)	(x)
+#define FILT_BO(x)	(x)
+#define DESC_BO(x)	(x)
 #endif
 
 /*
@@ -124,6 +140,9 @@ typedef struct {
     tulip_csrptr_t csr_13;			/* CSR13 */
     tulip_csrptr_t csr_14;			/* CSR14 */
     tulip_csrptr_t csr_15;			/* CSR15 */
+    tulip_csrptr_t csr_19;			/* CSR19 - PNIC */
+    tulip_csrptr_t csr_20;			/* CSR20 - PNIC */
+    tulip_csrptr_t csr_23;			/* CSR23 - PNIC */
 } tulip_regfile_t;
 
 #define	csr_enetrom		csr_9	/* 21040 */
@@ -178,7 +197,7 @@ typedef struct {
  * architecture which can't handle unaligned accesses) because with
  * 100Mb/s cards the copying is just too much of a hit.
  */
-#if defined(__alpha__)
+#if defined(__alpha__) || defined(__mips__)
 #define	TULIP_COPY_RXDATA	1
 #endif
 
@@ -207,6 +226,7 @@ typedef enum {
     TULIP_21041,
     TULIP_21140, TULIP_21140A, TULIP_21142,
     TULIP_21143,
+    TULIP_LC82C168,
     TULIP_CHIPID_UNKNOWN
 } tulip_chipid_t;
 
@@ -715,6 +735,7 @@ static const char * const tulip_chipdescs[] = {
     "21140A [10-100Mb/s]",
     "21142 [10-100Mb/s]",
     "21143 [10-100Mb/s]",
+    "82C168 [10-100Mb/s]",
 };
 
 static const char * const tulip_mediums[] = {

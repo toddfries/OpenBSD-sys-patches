@@ -1,4 +1,4 @@
-/*	$OpenBSD: sem.h,v 1.2 1996/03/03 12:12:17 niklas Exp $	*/
+/*	$OpenBSD: sem.h,v 1.7 1998/07/20 07:37:22 deraadt Exp $	*/
 /*	$NetBSD: sem.h,v 1.8 1996/02/09 18:25:29 christos Exp $	*/
 
 /*
@@ -13,32 +13,47 @@
 #include <sys/ipc.h>
 
 struct sem {
-	u_short	semval;		/* semaphore value */
-	pid_t	sempid;		/* pid of last operation */
-	u_short	semncnt;	/* # awaiting semval > cval */
-	u_short	semzcnt;	/* # awaiting semval = 0 */
+	unsigned short	semval;		/* semaphore value */
+	pid_t		sempid;		/* pid of last operation */
+	unsigned short	semncnt;	/* # awaiting semval > cval */
+	unsigned short	semzcnt;	/* # awaiting semval = 0 */
 };
 
 struct semid_ds {
-	struct	ipc_perm sem_perm;	/* operation permission struct */
-	struct	sem *sem_base;	/* pointer to first semaphore in set */
-	u_short	sem_nsems;	/* number of sems in set */
-	time_t	sem_otime;	/* last operation time */
-	long	sem_pad1;	/* SVABI/386 says I need this here */
-	time_t	sem_ctime;	/* last change time */
-    				/* Times measured in secs since */
-    				/* 00:00:00 GMT, Jan. 1, 1970 */
-	long	sem_pad2;	/* SVABI/386 says I need this here */
-	long	sem_pad3[4];	/* SVABI/386 says I need this here */
+	struct ipc_perm	sem_perm;	/* operation permission struct */
+	struct sem	*sem_base;	/* pointer to first semaphore in set */
+	unsigned short	sem_nsems;	/* number of sems in set */
+	time_t		sem_otime;	/* last operation time */
+	long		sem_pad1;	/* SVABI/386 says I need this here */
+	time_t		sem_ctime;	/* last change time */
+	    				/* Times measured in secs since */
+	    				/* 00:00:00 GMT, Jan. 1, 1970 */
+	long		sem_pad2;	/* SVABI/386 says I need this here */
+	long		sem_pad3[4];	/* SVABI/386 says I need this here */
 };
+
+#ifdef _KERNEL
+struct osemid_ds {
+	struct oipc_perm sem_perm;	/* operation permission struct */
+	struct sem	*sem_base;	/* pointer to first semaphore in set */
+	unsigned short	sem_nsems;	/* number of sems in set */
+	time_t		sem_otime;	/* last operation time */
+	long		sem_pad1;	/* SVABI/386 says I need this here */
+	time_t		sem_ctime;	/* last change time */
+	    				/* Times measured in secs since */
+	    				/* 00:00:00 GMT, Jan. 1, 1970 */
+	long		sem_pad2;	/* SVABI/386 says I need this here */
+	long		sem_pad3[4];	/* SVABI/386 says I need this here */
+};
+#endif
 
 /*
  * semop's sops parameter structure
  */
 struct sembuf {
-	u_short	sem_num;	/* semaphore # */
-	short	sem_op;		/* semaphore operation */
-	short	sem_flg;	/* operation flags */
+	unsigned short	sem_num;	/* semaphore # */
+	short		sem_op;		/* semaphore operation */
+	short		sem_flg;	/* operation flags */
 };
 #define SEM_UNDO	010000
 
@@ -48,9 +63,9 @@ struct sembuf {
  * semctl's arg parameter structure
  */
 union semun {
-	int	val;		/* value for SETVAL */
-	struct	semid_ds *buf;	/* buffer for IPC_STAT & IPC_SET */
-	u_short	*array;		/* array for GETALL & SETALL */
+	int		val;		/* value for SETVAL */
+	struct semid_ds	*buf;		/* buffer for IPC_STAT & IPC_SET */
+	unsigned short	*array;		/* array for GETALL & SETALL */
 };
 
 /*
@@ -64,18 +79,20 @@ union semun {
 #define SETVAL	8	/* Set the value of semval to arg.val {ALTER} */
 #define SETALL	9	/* Set semvals from arg.array {ALTER} */
 
-#ifdef _KERNEL
-/*
- * Kernel implementation stuff
- */
-#define SEMVMX	32767		/* semaphore maximum value */
-#define SEMAEM	16384		/* adjust on exit max value */
 
 /*
  * Permissions
  */
 #define SEM_A		0200	/* alter permission */
 #define SEM_R		0400	/* read permission */
+
+
+#ifdef _KERNEL
+/*
+ * Kernel implementation stuff
+ */
+#define SEMVMX	32767		/* semaphore maximum value */
+#define SEMAEM	16384		/* adjust on exit max value */
 
 /*
  * Undo structure (one per process)
@@ -167,7 +184,7 @@ int	*semu;			/* undo structure pool */
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int semctl __P((int, int, int, union semun));
+int semctl __P((int, int, int, ...));
 int __semctl __P((int, int, int, union semun *));
 int semget __P((key_t, int, int));
 int semop __P((int, struct sembuf *, u_int));
@@ -176,6 +193,7 @@ __END_DECLS
 #else
 void seminit __P((void));
 void semexit __P((struct proc *));
+void semid_n2o __P((struct semid_ds *, struct osemid_ds *));
 #endif /* !_KERNEL */
 
 #endif /* !_SEM_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ep_isapnp.c,v 1.2 1998/03/23 03:06:07 deraadt Exp $	*/
+/*	$OpenBSD: if_ep_isapnp.c,v 1.5 1998/09/19 10:08:05 maja Exp $	*/
 /*	$NetBSD: if_ep_isapnp.c,v 1.5 1996/05/12 23:52:36 mycroft Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
+#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -114,8 +115,10 @@ ep_isapnp_attach(parent, self, aux)
 	sc->sc_ioh = ioh = ia->ipa_io[0].h;
 	sc->bustype = EP_BUS_ISA;
 
+	printf(":");
+
 	/* Should look at ia->ia_devident... */
-	epconfig(sc, EP_CHIPSET_3C509);
+	epconfig(sc, EP_CHIPSET_3C509, NULL);
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
 	    IPL_NET, epintr, sc, sc->sc_dev.dv_xname);

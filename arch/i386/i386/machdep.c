@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.84 1998/03/04 07:22:02 downsj Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.94 1998/09/28 05:13:13 downsj Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -196,8 +196,10 @@ bootarg_t *bootargp;
 vm_map_t buffer_map;
 
 extern	vm_offset_t avail_start, avail_end;
-static	vm_offset_t hole_start, hole_end;
+vm_offset_t hole_start, hole_end;
+#if !defined(MACHINE_NEW_NONCONTIG)
 static	vm_offset_t avail_next;
+#endif
 
 /*
  * Extent maps to manage I/O and ISA memory hole space.  Allocate
@@ -238,8 +240,8 @@ int allowaperture = 0;
 #endif
 #endif
 
-void	cyrix6x86_cpu_setup __P((const char *));
-void	intel586_cpu_setup __P((const char *));
+void	cyrix6x86_cpu_setup __P((const char *, int));
+void	intel586_cpu_setup __P((const char *, int));
 
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 static __inline u_char
@@ -627,7 +629,7 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 			CPUCLASS_686,
 			{
 				0, "Pentium Pro", 0, "Pentium II",
-				"Pentium Pro", 0, 0,
+				"Pentium Pro", "Pentium II", "Pentium II",
 				0, 0, 0, 0, 0, 0, 0, 0, 0,
 				"Pentium Pro"	/* Default */
 			},
@@ -657,7 +659,7 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 			CPUCLASS_586,
 			{
 				"K5", "K5", "K5", "K5", 0, 0, "K6",
-				0, 0, 0, 0, 0, 0, 0, 0, 0,
+				"K6", "K6-2", "K6-2", 0, 0, 0, 0, 0, 0,
 				"K5 or K6"		/* Default */
 			},
 			NULL
@@ -668,7 +670,7 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 			{
 				0, 0, 0, 0, 0, 0, 0,
 				0, 0, 0, 0, 0, 0, 0, 0, 0,
-				"Pentium Pro compatible"	/* Default */
+				"686 class"		/* Default */
 			},
 			NULL
 		} }
@@ -681,8 +683,9 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 		{ {
 			CPUCLASS_486,
 			{
-				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				"486"		/* Default */
+				0, 0, 0, "MediaGX", 0, 0, 0, 0, "5x86", 0, 0,
+				0, 0, 0, 0,
+				"486 class"	/* Default */
 			},
 			NULL
 		},
@@ -690,9 +693,9 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 		{
 			CPUCLASS_586,
 			{
-				0, 0, "6x86", 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				0, 0, 0, 0,
-				"6x86"		/* Default */
+				0, 0, "6x86 (M1)", 0, "GXm", 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0, 0,
+				"M1 class"	/* Default */
 			},
 			cyrix6x86_cpu_setup
 		},
@@ -700,39 +703,74 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 		{
 			CPUCLASS_686,
 			{
-				"M2", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				"M2"		/* Default */
+				"6x86MX (M2)", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0,
+				"M2 class"	/* Default */
 			},
 			NULL
 		} }
 	}
 };
 
+struct cpu_cpuid_feature i386_cpuid_features[] = {
+	{ CPUID_FPU,	"FPU" },
+	{ CPUID_VME,	"V86" },
+	{ CPUID_DE,	"DE" },
+	{ CPUID_PSE,	"PSE" },
+	{ CPUID_TSC,	"TSC" },
+	{ CPUID_MSR,	"MSR" },
+	{ CPUID_PAE,	"PAE" },
+	{ CPUID_MCE,	"MCE" },
+	{ CPUID_CX8,	"CX8" },
+	{ CPUID_APIC,	"APIC" },
+	{ CPUID_SYS1,	"SYS" },
+	{ CPUID_SYS2,	"SYS" },
+	{ CPUID_MTRR,	"MTRR" },
+	{ CPUID_PGE,	"PGE" },
+	{ CPUID_MCA,	"MCA" },
+	{ CPUID_CMOV,	"CMOV" },
+	{ CPUID_MMX,	"MMX" },
+	{ CPUID_EMMX,	"EMMX" },
+	{ CPUID_3D,	"AMD3D" }
+};
+
 void
-cyrix6x86_cpu_setup(cpu_device)
+cyrix6x86_cpu_setup(cpu_device, model)
 	const char *cpu_device;
+	int model;
 {
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
-	/* set up various cyrix registers */
-	/* Enable suspend on halt */
-	cyrix_write_reg(0xc2, cyrix_read_reg(0xc2) | 0x08);
-	/* enable access to ccr4/ccr5 */
-	cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) | 0x10);
-	/* cyrix's workaround  for the "coma bug" */
-	cyrix_write_reg(0x31, cyrix_read_reg(0x31) | 0xf8);
-	cyrix_write_reg(0x32, cyrix_read_reg(0x32) | 0x7f);
-	cyrix_write_reg(0x33, cyrix_read_reg(0x33) & ~0xff);
-	cyrix_write_reg(0x3c, cyrix_read_reg(0x3c) | 0x87);
-	/* disable access to ccr4/ccr5 */
-	cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) & ~0x10);
+	extern int cpu_feature;
 
-	printf("%s: xchg bug workaround performed\n", cpu_device);
+	switch (model) {
+	case 2:	/* M1 */
+		/* set up various cyrix registers */
+		/* Enable suspend on halt */
+		cyrix_write_reg(0xc2, cyrix_read_reg(0xc2) | 0x08);
+		/* enable access to ccr4/ccr5 */
+		cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) | 0x10);
+		/* cyrix's workaround  for the "coma bug" */
+		cyrix_write_reg(0x31, cyrix_read_reg(0x31) | 0xf8);
+		cyrix_write_reg(0x32, cyrix_read_reg(0x32) | 0x7f);
+		cyrix_write_reg(0x33, cyrix_read_reg(0x33) & ~0xff);
+		cyrix_write_reg(0x3c, cyrix_read_reg(0x3c) | 0x87);
+		/* disable access to ccr4/ccr5 */
+		cyrix_write_reg(0xC3, cyrix_read_reg(0xC3) & ~0x10);
+
+		printf("%s: xchg bug workaround performed\n", cpu_device);
+		break;	/* fallthrough? */
+	case 4:	/* GXm */
+		/* Unset the TSC bit until calibrate_delay() gets fixed. */
+		cpu_feature &= ~CPUID_TSC;
+		break;
+	}
 #endif
 }
 
 void
-intel586_cpu_setup(cpu_device)
+intel586_cpu_setup(cpu_device, model)
 	const char *cpu_device;
+	int model;
 {
 #if defined(I586_CPU)
 	fix_f00f();
@@ -745,15 +783,13 @@ identifycpu()
 {
 	extern char cpu_vendor[];
 	extern int cpu_id;
-#if defined(I586_CPU) || defined(I686_CPU)
 	extern int cpu_feature;
-#endif
 	const char *name, *modifier, *vendorname, *token;
 	const char *cpu_device = "cpu0";
 	int class = CPUCLASS_386, vendor, i, max;
 	int family, model, step, modif;
 	struct cpu_cpuid_nameclass *cpup = NULL;
-	void (*cpu_setup) __P((const char *));
+	void (*cpu_setup) __P((const char *, int));
 
 	if (cpuid_level == -1) {
 #ifdef DIAGNOSTIC
@@ -827,15 +863,36 @@ identifycpu()
 	else
 		sprintf(cpu_model, "%s %s%s (%s-class)", vendorname, modifier,
 			name, classnames[class]);
+
+	/* configure the CPU if needed */
+	if (cpu_setup != NULL)
+		cpu_setup(cpu_device, model);
+
 	printf("%s: %s", cpu_device, cpu_model);
 
 #if defined(I586_CPU) || defined(I686_CPU)
-	if (cpu_feature && (cpu_feature & 0x10) >> 4) {	/* Has TSC */
+	if (cpu_feature && (cpu_feature & CPUID_TSC)) {	/* Has TSC */
 		calibrate_cyclecounter();
 		printf(" %d MHz", pentium_mhz);
 	}
 #endif
 	printf("\n");
+
+	if (cpu_feature) {
+		int numbits = 0;
+
+		printf("%s: ", cpu_device);
+		max = sizeof(i386_cpuid_features)
+			/ sizeof(i386_cpuid_features[0]);
+		for (i = 0; i < max; i++) {
+			if (cpu_feature & i386_cpuid_features[i].feature_bit) {
+				printf("%s%s", (numbits == 0 ? "" : ","),
+				       i386_cpuid_features[i].feature_name);
+				numbits++;
+			}
+		}
+		printf("\n");
+	}
 
 	cpu_class = class;
 
@@ -882,10 +939,6 @@ identifycpu()
 	default:
 		break;
 	}
-
-	/* configure the CPU if needed */
-	if (cpu_setup != NULL)
-		cpu_setup(cpu_device);
 
 	if (cpu == CPU_486DLC) {
 #ifndef CYRIX_CACHE_WORKS
@@ -1159,8 +1212,12 @@ boot(howto)
 	splhigh();
 
 	/* Do a dump if requested. */
-	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
+	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP) {
+		/* Save registers. */
+		savectx(&dumppcb);
+		
 		dumpsys();
+	}
 
 haltsys:
 	doshutdownhooks();
@@ -1173,11 +1230,17 @@ haltsys:
 			 * Turn off, if we can.  But try to turn disk off and
 		 	 * wait a bit first--some disk drives are slow to
 			 * clean up and users have reported disk corruption.
+			 *
+			 * If apm_set_powstate() fails the first time, don't
+			 * try to turn the system off.
 		 	 */
 			delay(500000);
-			apm_set_powstate(APM_DEV_DISK(0xff), APM_SYS_OFF);
-			delay(500000);
-			apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_OFF);
+			if (apm_set_powstate(APM_DEV_DISK(0xff),
+					     APM_SYS_OFF) == 0) {
+				delay(500000);
+				(void) apm_set_powstate(APM_DEV_ALLDEVS,
+							APM_SYS_OFF);
+			}
 		}
 #endif
 		printf("\n");
@@ -1261,9 +1324,6 @@ dumpsys()
 	daddr_t blkno;
 	int (*dump) __P((dev_t, daddr_t, caddr_t, size_t));
 	int error;
-
-	/* Save registers. */
-	savectx(&dumppcb);
 
 	msgbufmapped = 0;	/* don't record dump msgs in msgbuf */
 	if (dumpdev == NODEV)
@@ -1638,8 +1698,10 @@ init386(first_avail)
 	 * BIOS leaves data in low memory and VM system doesn't work with
 	 * phys 0,  /boot leaves arguments at page 1.
 	 */
-	avail_next = avail_start =
-	    bootapiver >= 2 ? NBPG + i386_round_page(bootargc) : NBPG;
+#if !defined(MACHINE_NEW_NONCONTIG)
+	avail_next =
+#endif
+	avail_start = bootapiver >= 2 ? NBPG + i386_round_page(bootargc) : NBPG;
 	avail_end = extmem ? IOM_END + extmem * 1024
 		: cnvmem * 1024;	/* just temporary use */
 
@@ -1693,6 +1755,13 @@ init386(first_avail)
 
 	/* call pmap initialization to make new kernel address space */
 	pmap_bootstrap((vm_offset_t)atdevbase + IOM_SIZE);
+
+#if !defined(MACHINE_NEW_NONCONTIG)
+	/*
+	 * Initialize for pmap_free_pages and pmap_next_page
+	 */
+	avail_next = avail_start;
+#endif
 
 #ifdef DDB
 	ddb_init();
@@ -1759,6 +1828,7 @@ cpu_exec_aout_makecmds(p, epp)
 	return ENOEXEC;
 }
 
+#if !defined(MACHINE_NEW_NONCONTIG)
 u_int
 pmap_free_pages()
 {
@@ -1797,6 +1867,7 @@ pmap_page_index(pa)
 		return i386_btop(pa - hole_end + hole_start - avail_start);
 	return -1;
 }
+#endif
 
 /*
  * consinit:
@@ -1860,6 +1931,9 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	size_t newlen;
 	struct proc *p;
 {
+	extern char cpu_vendor[];
+	extern int cpu_id;
+	extern int cpu_feature;
 	dev_t dev;
 
 	switch (name[0]) {
@@ -1887,7 +1961,7 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			return (ENOTDIR);		/* overloaded */
 		dev = chrtoblk((dev_t)name[1]);
 		return sysctl_rdstruct(oldp, oldlenp, newp, &dev, sizeof(dev));
-	case  CPU_ALLOWAPERTURE:
+	case CPU_ALLOWAPERTURE:
 #ifdef APERTURE
 		if (securelevel > 0) 
 			return (sysctl_rdint(oldp, oldlenp, newp, 
@@ -1898,6 +1972,12 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 #else
 		return (sysctl_rdint(oldp, oldlenp, newp, 0));
 #endif
+	case CPU_CPUVENDOR:
+		return (sysctl_rdstring(oldp, oldlenp, newp, cpu_vendor));
+	case CPU_CPUID:
+		return (sysctl_rdint(oldp, oldlenp, newp, cpu_id));
+	case CPU_CPUFEATURE:
+		return (sysctl_rdint(oldp, oldlenp, newp, cpu_feature));
 	default:
 		return EOPNOTSUPP;
 	}
@@ -2221,7 +2301,7 @@ _bus_dmamap_load(t, map, buf, buflen, p, flags)
 	int flags;
 {
 	bus_size_t sgsize;
-	bus_addr_t curaddr, lastaddr;
+	bus_addr_t curaddr, lastaddr, baddr, bmask;
 	caddr_t vaddr = buf;
 	int first, seg;
 	pmap_t pmap;
@@ -2234,17 +2314,15 @@ _bus_dmamap_load(t, map, buf, buflen, p, flags)
 	if (buflen > map->_dm_size)
 		return (EINVAL);
 
-	/*
-	 * XXX Need to implement "don't dma across this boundry".
-	 */
-
 	if (p != NULL)
 		pmap = p->p_vmspace->vm_map.pmap;
 	else
 		pmap = pmap_kernel();
 
 	lastaddr = ~0;		/* XXX gcc */
-	for (first = 1, seg = 0; buflen > 0 && seg < map->_dm_segcnt; ) {
+	bmask  = ~(map->_dm_boundary - 1);
+
+	for (first = 1, seg = 0; buflen > 0; ) {
 		/*
 		 * Get the physical address for this segment.
 		 */
@@ -2258,6 +2336,15 @@ _bus_dmamap_load(t, map, buf, buflen, p, flags)
 			sgsize = buflen;
 
 		/*
+		 * Make sure we don't cross any boundaries.
+		 */
+		if (map->_dm_boundary > 0) {
+			baddr = (curaddr + map->_dm_boundary) & bmask;
+			if (sgsize > (baddr - curaddr))
+				sgsize = (baddr - curaddr);
+		}
+
+		/*
 		 * Insert chunk into a segment, coalescing with
 		 * previous segment if possible.
 		 */
@@ -2268,10 +2355,14 @@ _bus_dmamap_load(t, map, buf, buflen, p, flags)
 		} else {
 			if (curaddr == lastaddr &&
 			    (map->dm_segs[seg].ds_len + sgsize) <=
-			     map->_dm_maxsegsz)
+			     map->_dm_maxsegsz &&
+			     (map->_dm_boundary == 0 ||
+			     (map->dm_segs[seg].ds_addr & bmask) ==
+			     (curaddr & bmask)))
 				map->dm_segs[seg].ds_len += sgsize;
 			else {
-				seg++;
+				if (++seg >= map->_dm_segcnt)
+					break;
 				map->dm_segs[seg].ds_addr = curaddr;
 				map->dm_segs[seg].ds_len = sgsize;
 			}
@@ -2491,8 +2582,28 @@ _bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
 	bus_dma_segment_t *segs;
 	int nsegs, off, prot, flags;
 {
+	int i;
 
-	panic("_bus_dmamem_mmap: not implemented");
+	for (i = 0; i < nsegs; i++) {
+#ifdef DIAGNOSTIC
+		if (off & PGOFSET)
+			panic("_bus_dmamem_mmap: offset unaligned");
+		if (segs[i].ds_addr & PGOFSET)
+			panic("_bus_dmamem_mmap: segment unaligned");
+		if (segs[i].ds_len & PGOFSET)
+			panic("_bus_dmamem_mmap: segment size not multiple"
+			    " of page size");
+#endif
+		if (off >= segs[i].ds_len) {
+			off -= segs[i].ds_len;
+			continue;
+		}
+
+		return (i386_btop((caddr_t)segs[i].ds_addr + off));
+	}
+
+	/* Page not found. */
+	return (-1);
 }
 
 /**********************************************************************

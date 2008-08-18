@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.19 1997/12/02 16:57:59 csapuntz Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.22 1998/08/19 22:26:57 csapuntz Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -115,7 +115,7 @@ struct vnodeopv_entry_desc nfsv2_vnodeop_entries[] = {
 	{ &vop_symlink_desc, nfs_symlink },	/* symlink */
 	{ &vop_readdir_desc, nfs_readdir },	/* readdir */
 	{ &vop_readlink_desc, nfs_readlink },	/* readlink */
-	{ &vop_abortop_desc, nfs_abortop },	/* abortop */
+	{ &vop_abortop_desc, vop_generic_abortop },	/* abortop */
 	{ &vop_inactive_desc, nfs_inactive },	/* inactive */
 	{ &vop_reclaim_desc, nfs_reclaim },	/* reclaim */
 	{ &vop_lock_desc, nfs_lock },		/* lock */
@@ -186,7 +186,7 @@ struct vnodeopv_entry_desc spec_nfsv2nodeop_entries[] = {
 	{ &vop_vfree_desc, spec_vfree },	/* vfree */
 	{ &vop_truncate_desc, spec_truncate },	/* truncate */
 	{ &vop_update_desc, nfs_update },	/* update */
-	{ &vop_bwrite_desc, vn_bwrite },
+	{ &vop_bwrite_desc, vop_generic_bwrite },
 	{ (struct vnodeop_desc*)NULL, (int(*) __P((void *)))NULL }
 };
 struct vnodeopv_desc spec_nfsv2nodeop_opv_desc =
@@ -238,7 +238,7 @@ struct vnodeopv_entry_desc fifo_nfsv2nodeop_entries[] = {
 	{ &vop_vfree_desc, fifo_vfree },	/* vfree */
 	{ &vop_truncate_desc, fifo_truncate },	/* truncate */
 	{ &vop_update_desc, nfs_update },	/* update */
-	{ &vop_bwrite_desc, vn_bwrite },
+	{ &vop_bwrite_desc, vop_generic_bwrite },
 	{ (struct vnodeop_desc*)NULL, (int(*) __P((void *)))NULL }
 };
 struct vnodeopv_desc fifo_nfsv2nodeop_opv_desc =
@@ -1959,7 +1959,7 @@ nfs_readdir(v)
 		u_long *cookies;
 		/* XXX - over-estimate - see UFS code for how to do it
 		   right */
-		int ncookies = (uio->uio_iov->iov_base - base) / 12;
+		int ncookies = ((caddr_t)uio->uio_iov->iov_base - base) / 12;
 
 		MALLOC(cookies, u_long *, sizeof(*cookies) * ncookies,
 		       M_TEMP, M_WAITOK);
@@ -1972,7 +1972,7 @@ nfs_readdir(v)
 		 */
 		if (uio->uio_segflg != UIO_SYSSPACE || uio->uio_iovcnt != 1)
 			panic("nfs_readdir: lost in space");
-		while (ncookies-- && base < uio->uio_iov->iov_base) {
+		while (ncookies-- && base < (caddr_t)uio->uio_iov->iov_base) {
 			dp = (struct dirent *) base;
 			if (dp->d_reclen == 0)
 				break;
@@ -1982,8 +1982,8 @@ nfs_readdir(v)
 		}
 
 		*ap->a_ncookies -= ncookies;
-		uio->uio_resid += (uio->uio_iov->iov_base - base);
-		uio->uio_iov->iov_len += (uio->uio_iov->iov_base - base);
+		uio->uio_resid += ((caddr_t)uio->uio_iov->iov_base - base);
+		uio->uio_iov->iov_len += ((caddr_t)uio->uio_iov->iov_base - base);
 		uio->uio_iov->iov_base = base;
 	}
 
@@ -2073,7 +2073,7 @@ nfs_readdirrpc(vp, uiop, cred)
 			if (v3) {
 				nfsm_dissect(tl, u_int32_t *,
 				    3 * NFSX_UNSIGNED);
-				fxdr_hyper(tl, &fileno);
+				fileno = fxdr_hyper(tl);
 				len = fxdr_unsigned(int, *(tl + 2));
 			} else {
 				nfsm_dissect(tl, u_int32_t *,
@@ -2092,7 +2092,7 @@ nfs_readdirrpc(vp, uiop, cred)
 			left = NFS_READDIRBLKSIZ - blksiz;
 			if ((tlen + DIRHDSIZ) > left) {
 				dp->d_reclen += left;
-				uiop->uio_iov->iov_base += left;
+				(caddr_t)uiop->uio_iov->iov_base += left;
 				uiop->uio_iov->iov_len -= left;
 				uiop->uio_offset += left;
 				uiop->uio_resid -= left;
@@ -2111,13 +2111,13 @@ nfs_readdirrpc(vp, uiop, cred)
 					blksiz = 0;
 				uiop->uio_offset += DIRHDSIZ;
 				uiop->uio_resid -= DIRHDSIZ;
-				uiop->uio_iov->iov_base += DIRHDSIZ;
+				(caddr_t)uiop->uio_iov->iov_base += DIRHDSIZ;
 				uiop->uio_iov->iov_len -= DIRHDSIZ;
 				nfsm_mtouio(uiop, len);
 				cp = uiop->uio_iov->iov_base;
 				tlen -= len;
 				*cp = '\0';	/* null terminate */
-				uiop->uio_iov->iov_base += tlen;
+				(caddr_t)uiop->uio_iov->iov_base += tlen;
 				uiop->uio_iov->iov_len -= tlen;
 				uiop->uio_offset += tlen;
 				uiop->uio_resid -= tlen;
@@ -2253,7 +2253,7 @@ nfs_readdirplusrpc(vp, uiop, cred)
 		/* loop thru the dir entries, doctoring them to 4bsd form */
 		while (more_dirs && bigenough) {
 			nfsm_dissect(tl, u_int32_t *, 3 * NFSX_UNSIGNED);
-			fxdr_hyper(tl, &fileno);
+			fileno = fxdr_hyper(tl);
 			len = fxdr_unsigned(int, *(tl + 2));
 			if (len <= 0 || len > NFS_MAXNAMLEN) {
 				error = EBADRPC;
@@ -3077,7 +3077,7 @@ nfs_bwrite(v)
 }
 
 /*
- * This is a clone of vn_bwrite(), except that B_WRITEINPROG isn't set unless
+ * This is a clone of vop_generic_bwrite(), except that B_WRITEINPROG isn't set unless
  * the force flag is one and it also handles the B_NEEDCOMMIT flag.
  */
 int

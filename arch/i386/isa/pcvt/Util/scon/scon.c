@@ -461,7 +461,7 @@ char *argv[];
 		if(vflag)
 			printf("processing option -c, setting current screen to %d\n",current);
 		
-		if(ioctl(1, VGASETSCREEN, &screeninfo) == -1)
+		if(ioctl(fd, VGASETSCREEN, &screeninfo) == -1)
 		{
 			perror("ioctl VGASETSCREEN failed");
 			exit(1);
@@ -639,6 +639,8 @@ char *vga_type(int number)
 		"TVGA 9100",
 		"TVGA 9200",
 		"TVGA 9440",
+		"TVGA 9660",
+		"TVGA 9750 (3DImage)",
 		"Unknown TRIDENT",
 		"S3 80C911",
 		"S3 80C924",

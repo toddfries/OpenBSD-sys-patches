@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ntptime.c,v 1.6 1998/02/08 22:41:35 tholo Exp $	*/
+/*	$OpenBSD: kern_ntptime.c,v 1.8 1998/08/27 05:00:22 deraadt Exp $	*/
 /*	$NetBSD: kern_ntptime.c,v 1.2 1996/03/07 14:31:20 christos Exp $	*/
 
 /******************************************************************************

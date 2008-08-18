@@ -1,4 +1,4 @@
-/*	$OpenBSD: queue.h,v 1.8 1997/11/28 22:50:15 mickey Exp $	*/
+/*	$OpenBSD: queue.h,v 1.11 1998/09/11 06:28:05 fgsch Exp $	*/
 /*	$NetBSD: queue.h,v 1.11 1996/05/16 05:17:14 mycroft Exp $	*/
 
 /*
@@ -40,8 +40,8 @@
 #define	_SYS_QUEUE_H_
 
 /*
- * This file defines three types of data structures: lists, tail queues,
- * and circular queues.
+ * This file defines four types of data structures: lists, simple queues,
+ * tail queues, and circular queues.
  *
  * A list is headed by a single forward pointer (or an array of forward
  * pointers for a hash table header). The elements are doubly linked
@@ -55,7 +55,7 @@
  * linked to save space, so only elements can only be removed from the
  * head of the list. New elements can be added to the list before or after
  * an existing element, at the head of the list, or at the end of the
- * list. A simple queue may only be traversed in the forward direection.
+ * list. A simple queue may only be traversed in the forward direction.
  *
  * A tail queue is headed by a pair of pointers, one to the head of the
  * list and the other to the tail of the list. The elements are doubly
@@ -173,6 +173,13 @@ struct {								\
 	if (((head)->sqh_first = (elm)->field.sqe_next) == NULL)	\
 		(head)->sqh_last = &(head)->sqh_first;			\
 } while (0)
+
+/*
+ * Simple queue access methods.
+ */
+#define	SIMPLEQ_FIRST(head)		((head)->sqh_first)
+
+#define	SIMPLEQ_NEXT(elm, field)	((elm)->field.sqe_next)
 
 /*
  * Tail queue definitions.

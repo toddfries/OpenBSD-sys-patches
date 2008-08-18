@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.20 1997/02/22 21:09:15 kstailey Exp $	*/
+/*	$OpenBSD: conf.c,v 1.23 1998/09/25 09:20:54 todd Exp $	*/
 /*	$NetBSD: conf.c,v 1.51 1996/11/04 16:16:09 gwr Exp $	*/
 
 /*-
@@ -65,6 +65,10 @@ int	ttselect	__P((dev_t, int, struct proc *));
 #include "xd.h"
 #include "xy.h"
 #include "zstty.h"
+#ifdef XFS
+#include <xfs/nxfs.h>
+cdev_decl(xfs_dev);
+#endif
 
 struct bdevsw	bdevsw[] =
 {
@@ -148,7 +152,11 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48: (tbi) */
 	cdev_notdef(),			/* 49: (chat) */
 	cdev_notdef(),			/* 50: (chut) */
+#ifdef XFS
+	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#else
 	cdev_notdef(),			/* 51: (chut) */
+#endif
 	cdev_disk_init(NRD,rd),		/* 52: RAM disk - for install tape */
 	cdev_notdef(),			/* 53: (hd - N/A) */
 	cdev_notdef(),			/* 54: (fd - N/A) */
@@ -273,19 +281,6 @@ static int chrtoblktbl[] = {
 	/* 56 */	NODEV,
 	/* 57 */	NODEV,
 	/* 58 */	18,
-	/* 59 */	NODEV,
-	/* 60 */	NODEV,
-	/* 61 */	NODEV,
-	/* 62 */	NODEV,
-	/* 63 */	NODEV,
-	/* 64 */	NODEV,
-	/* 65 */	NODEV,
-	/* 66 */	NODEV,
-	/* 67 */	NODEV,
-	/* 68 */	NODEV,
-	/* 69 */	NODEV,
-	/* 70 */	NODEV,
-	/* 71 */	NODEV,
 };
 
 /*
@@ -297,7 +292,8 @@ chrtoblk(dev)
 {
 	int blkmaj;
 
-	if (major(dev) >= nchrdev)
+	if (major(dev) >= nchrdev ||
+	    major(dev) > sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]))
 		return (NODEV);
 	blkmaj = chrtoblktbl[major(dev)];
 	if (blkmaj == NODEV)

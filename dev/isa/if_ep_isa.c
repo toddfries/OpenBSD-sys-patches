@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ep_isa.c,v 1.13 1998/03/23 03:06:06 deraadt Exp $	*/
+/*	$OpenBSD: if_ep_isa.c,v 1.17 1998/09/19 10:08:05 maja Exp $	*/
 /*	$NetBSD: if_ep_isa.c,v 1.5 1996/05/12 23:52:36 mycroft Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include <net/if_dl.h>
 #include <net/if_types.h>
 #include <net/netisr.h>
+#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -195,11 +196,11 @@ ep_isa_probe(parent, match, aux)
 		model = htons(epreadeeprom(iot, ioh, EEPROM_PROD_ID));
 		if ((model & 0xfff0) != PROD_ID_3C509) {
 #ifndef trusted
-			printf(
-			 "ep_isa_probe: ignoring model %04x\n", model);
+			printf("ep_isa_probe: ignoring model %04x\n",
+			    model);
 #endif
 			continue;
-			}
+		}
 
 		iobase = epreadeeprom(iot, ioh, EEPROM_ADDR_CFG);
 		iobase = (iobase & 0x1f) * 0x10 + 0x200;
@@ -222,14 +223,11 @@ ep_isa_probe(parent, match, aux)
 		 */
 		if ((model & 0xfff0) == PROD_ID_3C509) {
 			if (bus_space_map(iot, iobase, 1, 0, &ioh2)) {
-				printf(
-				"ep_isa_probe: can't map Etherlink iobase\n");
+				printf("ep_isa_probe: can't map Etherlink iobase\n");
 				return 0;
 			}
-			if (bus_space_read_2(iot, ioh2, EP_W0_EEPROM_COMMAND)
-			    & EEPROM_TST_MODE) {
-				printf(
-				 "3COM 3C509 Ethernet card in PnP mode\n");
+			if (bus_space_read_2(iot, ioh2,
+			    EP_W0_EEPROM_COMMAND) & EEPROM_TST_MODE) {
 				continue;
 			}
 			bus_space_unmap(iot, ioh2, 1);
@@ -286,15 +284,17 @@ ep_isa_attach(parent, self, aux)
 	sc->sc_ioh = ioh;
 	sc->bustype = EP_BUS_ISA;
 
+	printf(":");
+
 	chipset = (int)(long)ia->ia_aux;
 	if ((chipset & 0xfff0) == PROD_ID_3C509) {
-		epconfig(sc, EP_CHIPSET_3C509);
+		epconfig(sc, EP_CHIPSET_3C509, NULL);
 	} else {
 		/*
 		 * XXX: Maybe a 3c515, but the check in ep_isa_probe looks
 		 * at the moment only for a 3c509.
 		 */
-		epconfig(sc, EP_CHIPSET_UNKNOWN);
+		epconfig(sc, EP_CHIPSET_UNKNOWN, NULL);
 	}
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,

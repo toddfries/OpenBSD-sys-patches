@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ed.c,v 1.37 1998/03/17 10:55:24 deraadt Exp $	*/
+/*	$OpenBSD: if_ed.c,v 1.40 1998/08/11 03:28:37 millert Exp $	*/
 /*	$NetBSD: if_ed.c,v 1.105 1996/10/21 22:40:45 thorpej Exp $	*/
 
 /*
@@ -223,7 +223,7 @@ ed_pcmcia_isa_attach(parent, match, aux, pc_link)
 			    printf("Cannot read cis info %d\n", err);
 			    return 0;
 		    }
-		    if(bcmp(enaddr, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN)) {
+		    if (bcmp(enaddr, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN)) {
 			    printf("ENADDR MISMATCH %s ",
 				   ether_sprintf(sc->sc_arpcom.ac_enaddr));
 			    printf("- %s\n", ether_sprintf(enaddr));
@@ -319,6 +319,8 @@ struct pcmciadevs pcmcia_ed_devs[]={
       /* something screwed up in ports requested */
       { "ed", 0, "SVEC", "FD605 PCMCIA EtherNet Card", "V1-1", NULL,
 	(void *)-1, (void *)&pcmcia_dlink },
+      { "ed", 0, "Ethernet", "Adapter", "2.0", NULL, (void *) -1,
+	(void *)&pcmcia_dlink },
 #if 0
       /* not quite right for ethernet adress */
       { "ed", 0, "PMX   ", "PE-200", "ETHERNET", "R01", (void *)-1,
@@ -382,31 +384,32 @@ struct cfattach ed_pci_ca = {
 	sizeof(struct ed_softc), ed_pci_match, ed_pci_attach
 };
 
+static struct ed_pci_devs {
+	pci_vendor_id_t vendor;
+	pci_product_id_t product;
+} ed_pci_devs[] = {
+	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8029 },
+	{ PCI_VENDOR_WINBOND, PCI_PRODUCT_WINBOND_W89C940F },
+	{ PCI_VENDOR_WINBOND2, PCI_PRODUCT_WINBOND2_W89C940 },
+	{ PCI_VENDOR_NETVIN, PCI_PRODUCT_NETVIN_NV5000 },
+	{ PCI_VENDOR_COMPEX, PCI_PRODUCT_COMPEX_COMPEXE },
+	{ PCI_VENDOR_KTI, PCI_PRODUCT_KTI_KTIE },
+	{ PCI_VENDOR_SURECOM, PCI_PRODUCT_SURECOM_NE34 },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT86C926 },
+};
+
 int
 ed_pci_match(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
 	struct pci_attach_args *pa = aux;
-
-	/* We don't check the vendor here since many make NE2000 clones */
-	if ((PCI_VENDOR(pa->pa_id) == PCI_VENDOR_REALTEK &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RT8029) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_WINBOND &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_WINBOND_W89C940F) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_WINBOND2 &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_WINBOND2_W89C940) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_NETVIN &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_NETVIN_NV5000) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_COMPEX &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPEX_COMPEXE) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_KTI &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_KTI_KTIE) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_SURECOM &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SURECOM_NE34) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_VIATECH &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT86C926))
-		return (1);
+	int i;
+	
+	for (i = 0; i < sizeof(ed_pci_devs)/sizeof(ed_pci_devs[0]); i++)
+		if (ed_pci_devs[i].vendor == PCI_VENDOR(pa->pa_id) &&
+		    ed_pci_devs[i].product == PCI_PRODUCT(pa->pa_id))
+			return (1);
 	return (0);
 }
 
@@ -443,8 +446,6 @@ ed_pci_attach(parent, self, aux)
 		printf("%s: can't map I/O space\n", sc->sc_dev.dv_xname);
 		return;
 	}
-
-	printf(": NE2000 compatible PCI ethernet controller");
 
 	sc->asic_base = asicbase = ED_NOVELL_ASIC_OFFSET;
 	sc->nic_base = nicbase = ED_NOVELL_NIC_OFFSET;
@@ -515,7 +516,7 @@ ed_pci_attach(parent, self, aux)
 		printf("type %s ", sc->type_str);
 	else
 		printf("type unknown (0x%x) ", sc->type);
-	printf("%s\n", sc->isa16bit ? "(16-bit)" : "(8-bit)");	/* XXX */
+	printf("%s", sc->isa16bit ? "(16-bit)" : "(8-bit)");	/* XXX */
 
 #if NBPFILTER > 0
         if ((sc->spec_flags & ED_REATTACH) == 0)
@@ -526,21 +527,21 @@ ed_pci_attach(parent, self, aux)
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pc, pa->pa_intrtag, pa->pa_intrpin,
 	    pa->pa_intrline, &ih)) {
-		printf("%s: couldn't map interrupt\n", sc->sc_dev.dv_xname);
+		printf("\n%s: couldn't map interrupt\n", sc->sc_dev.dv_xname);
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, edintr,
 	    sc, sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf("%s: couldn't establish interrupt",
+		printf("\n%s: couldn't establish interrupt",
 		    sc->sc_dev.dv_xname);
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
 		return;
 	}
-	printf("%s: interrupting at %s\n", sc->sc_dev.dv_xname, intrstr);
+	printf(", %s\n", intrstr);
 }
 
 #endif

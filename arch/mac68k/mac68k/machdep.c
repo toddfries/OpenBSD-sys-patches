@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.50 1998/03/03 21:24:12 ryker Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.53 1998/05/03 07:19:54 gene Exp $	*/
 /*	$NetBSD: machdep.c,v 1.134 1997/02/14 06:15:30 scottr Exp $	*/
 
 /*
@@ -118,7 +118,6 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
-#include <machine/macinfo.h>
 #include <machine/reg.h>
 #include <machine/psl.h>
 #include <machine/pte.h>
@@ -145,7 +144,7 @@ char    machine[] = "mac68k";	/* cpu "architecture" */
 
 struct mac68k_machine_S mac68k_machine;
 
-volatile u_char *Via1Base, *Via2Base;
+volatile u_char *Via1Base, *Via2Base, *PSCBase = NULL;
 u_long  NuBusBase = NBBASE;
 u_long  IOBase;
 
@@ -207,24 +206,18 @@ int     physmem = MAXMEM;	/* max supported memory, changes to actual */
 int     safepri = PSL_LOWIPL;
 
 /*
- * Extent maps to manage all memory space, including I/O ranges.  Allocate
- * storage for 8 regions in each, initially.  Later, iomem_malloc_safe
- * will indicate that it's safe to use malloc() to dynamically allocate
- * region descriptors.
- *
- * The extent maps are not static!  Machine-dependent NuBus and on-board
- * I/O routines need access to them for bus address space allocation.
+ * Some of the below are not used yet, but might be used someday on the
+ * Q700/900/950 where the interrupt controller may be reprogrammed to
+ * interrupt on different levels as listed in locore.s
  */
-static	long iomem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
-struct	extent *iomem_ex;
-static	int iomem_malloc_safe;
+unsigned short  mac68k_ttyipl = PSL_S | PSL_IPL1;
+unsigned short  mac68k_bioipl = PSL_S | PSL_IPL2;
+unsigned short  mac68k_netipl = PSL_S | PSL_IPL2;
+unsigned short  mac68k_impipl = PSL_S | PSL_IPL2;
+unsigned short  mac68k_clockipl = PSL_S | PSL_IPL2;
+unsigned short  mac68k_statclockipl = PSL_S | PSL_IPL2;
+unsigned short  mac68k_schedipl = PSL_S | PSL_IPL3;
 
-static void	identifycpu __P((void));
-static u_long	get_physical __P((u_int, u_long *));
-void		dumpsys __P((void));
-
-int		bus_mem_add_mapping __P((bus_addr_t, bus_size_t,
-		    int, bus_space_handle_t *));
 
 /*
  * Extent maps to manage all memory space, including I/O ranges.  Allocate
@@ -237,14 +230,15 @@ int		bus_mem_add_mapping __P((bus_addr_t, bus_size_t,
  */
 static	long iomem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
 struct	extent *iomem_ex;
-static	int iomem_malloc_safe;
+int	iomem_malloc_safe;
+
+/* XXX should be in locore.s for consistency */
+int	astpending=0;
+int	want_resched=0;
 
 static void	identifycpu __P((void));
 static u_long	get_physical __P((u_int, u_long *));
 void		dumpsys __P((void));
-
-int		bus_mem_add_mapping __P((bus_addr_t, bus_size_t,
-		    int, bus_space_handle_t *));
 
 /*
  * Console initialization: called early on from main,
@@ -1958,6 +1952,35 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4081c406,	/* FixDiv */
 		(caddr_t) 0x4081c312,	/* FixMul */
 	},
+	/*
+	 * Vectors verified for the Mac IIfx
+	 */
+	{			/* 18 */
+		"Mac IIfx ROMs",
+		(caddr_t) 0x40809f4a,	/* ADB interrupt */
+		(caddr_t) 0x0,		/* PM ADB interrupt */
+		(caddr_t) 0x4080a4d8,	/* ADBBase + 130 interupt */
+		(caddr_t) 0x4080a360,	/* CountADBs */
+		(caddr_t) 0x4080a37a,	/* GetIndADB */
+		(caddr_t) 0x4080a3a6,	/* GetADBInfo */
+		(caddr_t) 0x4080a3ac,	/* SetADBInfo */
+		(caddr_t) 0x4080a752,	/* ADBReInit */
+		(caddr_t) 0x4080a3dc,	/* ADBOp */
+		(caddr_t) 0x0,		/* PMgrOp */
+		(caddr_t) 0x4080c05c,	/* WriteParam */
+		(caddr_t) 0x4080c086,	/* SetDateTime */
+		(caddr_t) 0x4080c5cc,	/* InitUtil */
+		(caddr_t) 0x4080b186,	/* ReadXPRam */
+		(caddr_t) 0x4080b190,	/* WriteXPRam */
+		(caddr_t) 0x4080b1e4,	/* jClkNoMem */
+		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
+		(caddr_t) 0x0,		/* Egret */
+		(caddr_t) 0x0,		/* InitEgret */
+		(caddr_t) 0x408037c0,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x4081c406,	/* FixDiv */
+		(caddr_t) 0x4081c312,	/* FixMul */
+	},
 	/* Please fill these in! -BG */
 };
 
@@ -1975,7 +1998,7 @@ struct cpu_model_info cpu_models[] = {
 	{MACH_MACIISI, "IIsi ", "", MACH_CLASSIIsi, &romvecs[2]},
 	{MACH_MACIIVI, "IIvi ", "", MACH_CLASSIIvx, &romvecs[2]},
 	{MACH_MACIIVX, "IIvx ", "", MACH_CLASSIIvx, &romvecs[2]},
-	{MACH_MACIIFX, "IIfx ", "", MACH_CLASSIIfx, NULL},
+	{MACH_MACIIFX, "IIfx ", "", MACH_CLASSIIfx, &romvecs[18]},
 
 /* The Centris/Quadra series. */
 	{MACH_MACQ700, "Quadra", " 700 ", MACH_CLASSQ, &romvecs[4]},
@@ -1985,9 +2008,10 @@ struct cpu_model_info cpu_models[] = {
 	{MACH_MACQ650, "Quadra", " 650 ", MACH_CLASSQ, &romvecs[6]},
 	{MACH_MACC650, "Centris", " 650 ", MACH_CLASSQ, &romvecs[6]},
 	{MACH_MACQ605, "Quadra", " 605 ", MACH_CLASSQ, &romvecs[9]},
+	{MACH_MACQ605_33, "Quadra", " 605/33 ", MACH_CLASSQ, &romvecs[9]},
 	{MACH_MACC610, "Centris", " 610 ", MACH_CLASSQ, &romvecs[6]},
 	{MACH_MACQ610, "Quadra", " 610 ", MACH_CLASSQ, &romvecs[6]},
-	{MACH_MACQ630, "Quadra", " 630 ", MACH_CLASSQ, &romvecs[13]},
+	{MACH_MACQ630, "Quadra", " 630 ", MACH_CLASSQ2, &romvecs[13]},
 	{MACH_MACC660AV, "Centris", " 660AV ", MACH_CLASSAV, &romvecs[7]},
 	{MACH_MACQ840AV, "Quadra", " 840AV ", MACH_CLASSAV, &romvecs[7]},
 
@@ -2023,6 +2047,7 @@ struct cpu_model_info cpu_models[] = {
 	{MACH_MACLCII,  "LC", " II ",  MACH_CLASSLC, &romvecs[3]},
 	{MACH_MACLCIII, "LC", " III ", MACH_CLASSLC, &romvecs[14]},
 	{MACH_MACLC475, "LC", " 475 ", MACH_CLASSQ,  &romvecs[9]},
+	{MACH_MACLC475_33, "LC", " 475/33 ", MACH_CLASSQ,  &romvecs[9]},
 	{MACH_MACLC520, "LC", " 520 ", MACH_CLASSLC, &romvecs[15]},
 	{MACH_MACLC575, "LC", " 575 ", MACH_CLASSQ2, &romvecs[16]},
 	{MACH_MACCCLASSIC, "Color Classic ", "", MACH_CLASSLC, &romvecs[3]},
@@ -2040,16 +2065,34 @@ struct {
 	caddr_t	fbbase;
 	u_long	fblen;
 } intvid_info[] =  {
-	{MACH_MACPB140,		(caddr_t) 0xfee00000,	32 * 1024},
-	{MACH_MACPB145,		(caddr_t) 0xfee00000,	32 * 1024},
-	{MACH_MACPB170,		(caddr_t) 0xfee00000,	32 * 1024},
-	{MACH_MACPB160,		(caddr_t) 0x60000000,	128 * 1024},
-	{MACH_MACPB165,		(caddr_t) 0x60000000,	128 * 1024},
-	{MACH_MACPB180,		(caddr_t) 0x60000000,	128 * 1024},
-	{MACH_MACPB165C,	(caddr_t) 0xfc040000,	512 * 1024},
-	{MACH_MACPB180C,	(caddr_t) 0xfc040000,	512 * 1024},
-	{MACH_MACPB500,		(caddr_t) 0x60000000,	512 * 1024},
-	{0,			(caddr_t) 0x0,		0},
+	{ MACH_MACCLASSICII,	(caddr_t)0xfee09a80,	21888 },
+	{ MACH_MACPB140,	(caddr_t)0xfee00000,	32 * 1024 },
+	{ MACH_MACPB145,	(caddr_t)0xfee00000,	32 * 1024 },
+	{ MACH_MACPB170,	(caddr_t)0xfee00000,	32 * 1024 },
+	{ MACH_MACPB150,	(caddr_t)0x60000000,	128 * 1024 },
+	{ MACH_MACPB160,	(caddr_t)0x60000000,	128 * 1024 },
+	{ MACH_MACPB165,	(caddr_t)0x60000000,	128 * 1024 },
+	{ MACH_MACPB180,	(caddr_t)0x60000000,	128 * 1024 },
+	{ MACH_MACCCLASSIC,	(caddr_t)0x50f40000,	512 * 1024 },
+	{ MACH_MACPB165C,	(caddr_t)0xfc040000,	512 * 1024 },
+	{ MACH_MACPB180C,	(caddr_t)0xfc040000,	512 * 1024 },
+	{ MACH_MACPB500,	(caddr_t)0x60000000,	512 * 1024 },
+	{ MACH_MACLC520,	(caddr_t)0x60000000,	1024 * 1024 },
+	{ MACH_MACLC475,	(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACLC475_33,	(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACLC575,	(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACC610,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACC650,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ605,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ605_33,	(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ610,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ630,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ650,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ700,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ800,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ900,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ MACH_MACQ950,		(caddr_t)0xf9000000,	1024 * 1024 },
+	{ 0,			(caddr_t)0x0,		0 },
 };				/* End of intvid_info[] initialization. */
 
 /*
@@ -2078,7 +2121,8 @@ mach_cputype()
 static void
 identifycpu()
 {
-	char   *mpu;
+	extern u_int delay_factor;
+	char *mpu;
 
 	switch (cputype) {
 	case CPU_68020:
@@ -2099,6 +2143,7 @@ identifycpu()
 	    cpu_models[mac68k_machine.cpu_model_index].model_minor,
 	    mpu);
 	printf("%s\n", cpu_model);
+	printf("cpu: delay factor %d\n", delay_factor);
 }
 
 static void	get_machine_info __P((void));
@@ -2160,6 +2205,7 @@ setmachdep()
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
 		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		via_reg(VIA2, vIER) = 0x7f;	/* disable VIA2 int */
@@ -2170,8 +2216,10 @@ setmachdep()
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
-		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
+		/* Disable everything but PM; we need it. */
+		via_reg(VIA1, vIER) = 0x6f;	/* disable VIA1 int */
 		/* Are we disabling something important? */
 		via_reg(VIA2, vIER) = 0x7f;	/* disable VIA2 int */
 		if (cputype == CPU_68040)
@@ -2187,22 +2235,22 @@ setmachdep()
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
-		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
+		/* Disable everything but PM; we need it. */
+		via_reg(VIA1, vIER) = 0x6f;	/* disable VIA1 int */
 		/* Are we disabling something important? */
 		via_reg(VIA2, rIER) = 0x7f;	/* disable VIA2 int */
 		break;
 	case MACH_CLASSQ:
         case MACH_CLASSQ2:
-		mac68k_vidlog = mac68k_vidphys = 0xf9000000;
-		/* Not really, but using too little memory would be wrong */
-		mac68k_vidlen = 2 * 1024 * 1024;
 		mac68k_machine.sonic = 1;
 	case MACH_CLASSAV:
 		VIA2 = 1;
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi96 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
 		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		via_reg(VIA2, vIER) = 0x7f;	/* disable VIA2 int */
@@ -2212,6 +2260,7 @@ setmachdep()
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
 		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		via_reg(VIA2, rIER) = 0x7f;	/* disable RBV int */
@@ -2221,6 +2270,7 @@ setmachdep()
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
 		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		via_reg(VIA2, rIER) = 0x7f;	/* disable RBV int */
@@ -2230,6 +2280,7 @@ setmachdep()
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
 		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		via_reg(VIA2, rIER) = 0x7f;	/* disable RBV int */
@@ -2239,13 +2290,22 @@ setmachdep()
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
 		mac68k_machine.sccClkConst = 115200;
 		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		via_reg(VIA2, rIER) = 0x7f;	/* disable RBV int */
 		break;
+	case MACH_CLASSIIfx:
+		VIA2 = 0xd;
+		IOBase = 0x50f00000;
+		Via1Base = (volatile u_char *) IOBase;
+		mac68k_machine.scsi80 = 1;
+		mac68k_machine.zs_chip = 0;
+		mac68k_machine.sccClkConst = 115200;	/* XXX unverified */
+		via_reg(VIA1, vIER) = 0x7f;  /* disable VIA1 int */
+		break;
 	default:
 	case MACH_CLASSH:
-	case MACH_CLASSIIfx:
 		break;
 	}
 
@@ -2304,6 +2364,7 @@ mac68k_set_io_offsets(base)
 		switch (current_mac_model->machineid) {
 		case MACH_MACQ900:
 		case MACH_MACQ950:
+			mac68k_machine.scsi96_2 = 1;
 		case MACH_MACQ700:
 			SCSIBase = base + 0xf000;
 			break;
@@ -2326,9 +2387,15 @@ mac68k_set_io_offsets(base)
 		Via1Base = (volatile u_char *) base;
 		sccA = (volatile u_char *) base + 0x4000;
 		SCSIBase = base + 0x18000;
+		PSCBase = (volatile u_char *) base + 0x31000;
+		mac68k_bioipl = PSL_S | PSL_IPL4;
+		mac68k_netipl = PSL_S | PSL_IPL4;
+		mac68k_impipl = PSL_S | PSL_IPL4;
+		mac68k_statclockipl = PSL_S | PSL_IPL4;
 		break;
 	case MACH_CLASSII:
 	case MACH_CLASSPB:
+	case MACH_CLASSDUO:
 	case MACH_CLASSIIci:
 	case MACH_CLASSIIsi:
 	case MACH_CLASSIIvx:
@@ -2337,10 +2404,20 @@ mac68k_set_io_offsets(base)
 		sccA = (volatile u_char *) base + 0x4000;
 		SCSIBase = base;
 		break;
+	case MACH_CLASSIIfx:
+		/*
+		 * Note that sccA base address is based on having
+		 * the serial port in `compatible' mode (set in
+		 * the Serial Switch control panel before booting).
+		 */
+		Via1Base = (volatile u_char *) base;
+		sccA = (volatile u_char *) base + 0x4020;
+		SCSIBase = base;
+		break;
 	default:
 	case MACH_CLASSH:
-	case MACH_CLASSIIfx:
-		panic("Mac IIfx machine class:unsupported machine class.");
+		panic("Unknown/unsupported machine class (%d).",
+		    current_mac_model->class);
 		break;
 	}
 	Via2Base = Via1Base + 0x2000 * VIA2;
@@ -2552,7 +2629,9 @@ get_mapping(void)
 		}
 		len = nbnumranges == 0 ? 0 : nblen[nbnumranges - 1];
 
-		/* printf ("0x%x --> 0x%x\n", addr, phys); */
+#if 0
+		printf ("0x%lx --> 0x%lx\n", addr, phys);
+#endif
 		if (nbnumranges > 0
 		    && addr == nblog[nbnumranges - 1] + len
 		    && phys == nbphys[nbnumranges - 1]) {	/* Same as last one */
@@ -2585,7 +2664,7 @@ get_mapping(void)
 		nblen[nbnumranges - 1] = -nblen[nbnumranges - 1];
 		same = 0;
 	}
-#if 1
+#if 0
 	printf("Non-system RAM (nubus, etc.):\n");
 	for (i = 0; i < nbnumranges; i++) {
 		printf("     Log = 0x%lx, Phys = 0x%lx, Len = 0x%lx (%lu)\n",
@@ -2612,6 +2691,7 @@ get_mapping(void)
 	}
 	if (i == nbnumranges) {
 		if (0x60000000 <= videoaddr && videoaddr < 0x70000000) {
+			printf("Checking for Internal Video ");
 			/*
 			 * Kludge for IIvx internal video (60b0 0000).
 			 * PB 520 (6000 0000)
@@ -2628,8 +2708,8 @@ get_mapping(void)
 			/*
 			 * Kludge for AV internal video
 			 */
-			check_video("AV video (0x50100100)", 2 * 1024 * 1024,
-						2 * 1024 * 1024);
+			check_video("AV video (0x50100100)", 1 * 1024 * 1024,
+						1 * 1024 * 1024);
 		} else {
 			printf( "  no internal video at address 0 -- "
 				"videoaddr is 0x%lx.\n", videoaddr);
@@ -2693,225 +2773,4 @@ mac68k_ring_bell(freq, length, volume)
 		    freq, length, volume));
 	else
 		return (ENXIO);
-}
-
-/*
- * bus.h implementation
- */
-
-int
-bus_space_map(t, bpa, size, cacheable, bshp)
-	bus_space_tag_t t;
-	bus_addr_t bpa;
-	bus_size_t size;
-	int cacheable;
-	bus_space_handle_t *bshp;
-{
-	u_long pa, endpa;
-	int error;
-
-	/*
-	 * Before we go any further, let's make sure that this
-	 * region is available.
-	 */
-	error = extent_alloc_region(iomem_ex, bpa, size,
-	    EX_NOWAIT | (iomem_malloc_safe ? EX_MALLOCOK : 0));
-	if (error)
-		return (error);
-
-	pa = mac68k_trunc_page(bpa + t);
-	endpa = mac68k_round_page((bpa + t + size) - 1);
-
-#ifdef DIAGNOSTIC
-	if (endpa <= pa)
-		panic("bus_space_map: overflow");
-#endif
-
-	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
-	if (error) {
-		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
-		    (iomem_malloc_safe ? EX_MALLOCOK : 0))) {
-			printf("bus_space_map: pa 0x%lx, size 0x%lx\n",
-			    bpa, size);
-			printf("bus_space_map: can't free region\n");
-		}
-	}
-
-	return (error);
-}
-
-int
-bus_space_alloc(t, rstart, rend, size, alignment, boundary, cacheable,
-    bpap, bshp)
-	bus_space_tag_t t;
-	bus_addr_t rstart, rend;
-	bus_size_t size, alignment, boundary;
-	int cacheable;
-	bus_addr_t *bpap;
-	bus_space_handle_t *bshp;
-{
-	u_long bpa;
-	int error;
-
-	/*
-	 * Sanity check the allocation against the extent's boundaries.
-	 */
-	if (rstart < iomem_ex->ex_start || rend > iomem_ex->ex_end)
-		panic("bus_space_alloc: bad region start/end");
-
-	/*
-	 * Do the requested allocation.
-	 */
-	error = extent_alloc_subregion(iomem_ex, rstart, rend, size, alignment,
-	    boundary, EX_NOWAIT | (iomem_malloc_safe ?  EX_MALLOCOK : 0),
-	    &bpa);
-
-	if (error)
-		return (error);
-
-	/*
-	 * For memory space, map the bus physical address to
-	 * a kernel virtual address.
-	 */
-	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
-	if (error) {
-		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
-		    (iomem_malloc_safe ? EX_MALLOCOK : 0))) {
-			printf("bus_space_alloc: pa 0x%lx, size 0x%lx\n",
-			    bpa, size);
-			printf("bus_space_alloc: can't free region\n");
-		}
-	}
-
-	*bpap = bpa;
-
-	return (error);
-}
-
-int
-bus_mem_add_mapping(bpa, size, cacheable, bshp)
-	bus_addr_t bpa;
-	bus_size_t size;
-	int cacheable;
-	bus_space_handle_t *bshp;
-{
-	u_long pa, endpa;
-	vm_offset_t va;
-
-	pa = mac68k_trunc_page(bpa);
-	endpa = mac68k_round_page((bpa + size) - 1);
-
-#ifdef DIAGNOSTIC
-	if (endpa <= pa)
-		panic("bus_mem_add_mapping: overflow");
-#endif
-
-	va = kmem_alloc_pageable(kernel_map, endpa - pa);
-	if (va == 0)
-		return (ENOMEM);
-
-	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
-
-	for (; pa < endpa; pa += NBPG, va += NBPG) {
-		pmap_enter(pmap_kernel(), va, pa,
-		    VM_PROT_READ | VM_PROT_WRITE, TRUE);
-		if (!cacheable)
-			pmap_changebit(pa, PG_CI, TRUE);
-	}
- 
-	return 0;
-}
-
-void
-bus_space_unmap(t, bsh, size)
-	bus_space_tag_t t;
-	bus_space_handle_t bsh;
-	bus_size_t size;
-{
-	vm_offset_t	va, endva;
-	bus_addr_t bpa;
-
-	va = mac68k_trunc_page(bsh);
-	endva = mac68k_round_page((bsh + size) - 1);
-
-#ifdef DIAGNOSTIC
-	if (endva <= va)
-		panic("bus_space_unmap: overflow");
-#endif
-
-	bpa = pmap_extract(pmap_kernel(), va) + (bsh & PGOFSET);
-
-	/*
-	 * Free the kernel virtual mapping.
-	 */
-	kmem_free(kernel_map, va, endva - va);
-
-	if (extent_free(iomem_ex, bpa, size,
-	    EX_NOWAIT | (iomem_malloc_safe ? EX_MALLOCOK : 0))) {
-		printf("bus_space_unmap: pa 0x%lx, size 0x%lx\n",
-		    bpa, size);
-		printf("bus_space_unmap: can't free region\n");
-	}
-}
-
-void    
-bus_space_free(t, bsh, size)
-	bus_space_tag_t t;
-	bus_space_handle_t bsh;
-	bus_size_t size;
-{
-	/* bus_space_unmap() does all that we need to do. */
-	bus_space_unmap(t, bsh, size);
-}
-
-int
-bus_space_subregion(t, bsh, offset, size, nbshp)
-	bus_space_tag_t t;
-	bus_space_handle_t bsh;
-	bus_size_t offset, size;
-	bus_space_handle_t *nbshp;
-{
-
-	*nbshp = bsh + offset;
-	return (0);
-}
-
-int
-bus_probe(t, bsh, offset, sz)
-	bus_space_tag_t t;
-	bus_space_handle_t bsh;
-	bus_size_t offset;
-	int sz;
-{
-	int i;
-	label_t faultbuf;
-
-	nofault = (int *)&faultbuf;
-	if (setjmp((label_t *)nofault)) {
-		nofault = (int *)0;
-		return (0);
-	}
-
-	switch (sz) {
-	case 1:
-		i = bus_space_read_1(t, bsh, offset);
-		break;
-	case 2:
-		i = bus_space_read_2(t, bsh, offset);
-		break;
-	case 4:
-		i = bus_space_read_4(t, bsh, offset);
-		break;
-	case 8:
-		/*FALLTHROUGH*/
-	default:
-#ifdef DIAGNOSTIC
-		printf("bus_probe: unsupported data size %d\n", sz);
-#endif
-		nofault = (int *)0;
-		return (0);
-	}
-
-	nofault = (int *)0;
-	return (1);
 }

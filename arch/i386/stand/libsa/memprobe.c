@@ -1,4 +1,4 @@
-/*	$OpenBSD: memprobe.c,v 1.27 1998/04/18 07:39:54 deraadt Exp $	*/
+/*	$OpenBSD: memprobe.c,v 1.30 1998/08/31 20:53:10 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner, Michael Shalayeff
@@ -34,6 +34,7 @@
 
 #include <sys/param.h>
 #include <machine/biosvar.h>
+#include <dev/isa/isareg.h>
 #include <stand/boot/bootarg.h>
 #include "libsa.h"
 
@@ -95,7 +96,7 @@ bios_E820(mp)
 	if (!gotcha)
 		return (NULL);
 #ifdef DEBUG
-	printf("0x15[E820]");
+	printf(" 0x15[E820]");
 #endif
 	return (mp);
 }
@@ -119,7 +120,7 @@ bios_E801(mp)
 	if(rc & 0xff)
 		return (NULL);
 #ifdef DEBUG
-	printf("0x15[E801]");
+	printf(" 0x15[E801]");
 #endif
 	/* Fill out BIOS map */
 	mp->addr = (1024 * 1024);	/* 1MB */
@@ -152,7 +153,7 @@ bios_8800(mp)
 	if(rc & 0xff)
 		return (NULL);
 #ifdef DEBUG
-	printf("0x15[8800]");
+	printf(" 0x15[8800]");
 #endif
 	/* Fill out a BIOS_MAP */
 	mp->addr = 1024 * 1024;		/* 1MB */
@@ -172,7 +173,7 @@ bios_int12(mp)
 {
 	int mem;
 #ifdef DEBUG
-	printf(", 0x12\n");
+	printf(" 0x12");
 #endif
 	__asm __volatile(DOINT(0x12) : "=a" (mem) :: "%ecx", "%edx", "cc");
 
@@ -247,7 +248,7 @@ addrprobe(kloc)
  * routine, we are getting pretty desparate.  Hopefully nobody
  * has to rely on this after all the work above.
  *
- * XXX - Does not detect aliases memory.
+ * XXX - Does not detect aliased memory.
  * XXX - Could be destructive, as it does write.
  */
 static __inline bios_memmap_t *
@@ -256,7 +257,7 @@ badprobe(mp)
 {
 	int ram;
 #ifdef DEBUG
-	printf("Scan");
+	printf(" Scan");
 #endif
 	/* probe extended memory
 	 *
@@ -280,7 +281,7 @@ memprobe()
 {
 	bios_memmap_t *pm = bios_memmap, *im;
 #ifdef DEBUG
-	printf("Probing memory: ");
+	printf("Probing memory:");
 #endif
 	if(!(pm = bios_E820(bios_memmap))) {
 		im = bios_int12(bios_memmap);
@@ -290,7 +291,7 @@ memprobe()
 		if (!pm)
 			pm = badprobe(im);
 		if (!pm) {
-			printf ("No Extended memory detected.");
+			printf (" No Extended memory detected.");
 			pm = im;
 		}
 	}
@@ -307,14 +308,14 @@ memprobe()
 	/* XXX - Compatibility, remove later */
 	extmem = cnvmem = 0;
 	for(im = bios_memmap; im->type != BIOS_MAP_END; im++) {
-		/* Count only "good" memory chunks 4K an up in size */
+		/* Count only "good" memory chunks 4K and up in size */
 		if ((im->type == BIOS_MAP_FREE) && (im->size >= 4)) {
 			printf(" %luK", (u_long)im->size);
 
 			/* We ignore "good" memory in the 640K-1M hole */
-			if(im->addr < 0xA0000)
+			if(im->addr < IOM_BEGIN)
 				cnvmem += im->size;
-			if(im->addr >= 0x100000)
+			if(im->addr >= IOM_END)
 				extmem += im->size;
 		}
 	}

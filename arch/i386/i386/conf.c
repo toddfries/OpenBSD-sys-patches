@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.43 1998/04/01 20:16:41 matthieu Exp $	*/
+/*	$OpenBSD: conf.c,v 1.49 1998/09/11 09:45:14 fgsch Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -122,6 +122,14 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
         (dev_type_stop((*))) enodev, 0,  dev_init(c,n,select), \
         (dev_type_mmap((*))) enodev, 0 }
 
+/* open, close, read, ioctl, mmap */
+#define	cdev_bktr_init(c, n) { \
+        dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+        (dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) enodev, 0, seltrue, \
+        dev_init(c,n,mmap) }
+
+
 #define	mmread	mmrw
 #define	mmwrite	mmrw
 cdev_decl(mm);
@@ -144,8 +152,10 @@ cdev_decl(lpt);
 #include "ch.h"
 dev_decl(filedesc,open);
 #include "bpfilter.h"
+#if 0
 #include "pcmcia.h"
 cdev_decl(pcmcia);
+#endif
 #include "spkr.h"
 cdev_decl(spkr);
 #include "mms.h"
@@ -165,6 +175,14 @@ cdev_decl(svr4_net);
 #include "apm.h"
 #include "pctr.h"
 #include "bios.h"
+#ifdef XFS
+#include <xfs/nxfs.h>
+cdev_decl(xfs_dev);
+#endif
+#include "bktr.h"
+cdev_decl(bktr);
+#include "ksyms.h"
+cdev_decl(ksyms);   
 
 #ifdef IPFILTER
 #define NIPF 1
@@ -212,7 +230,11 @@ struct cdevsw	cdevsw[] =
 	cdev_fd_init(1,filedesc),	/* 22: file descriptor pseudo-device */
 	cdev_bpftun_init(NBPFILTER,bpf),/* 23: Berkeley packet filter */
 	cdev_disk_init(NACD,acd),	/* 24: ATAPI CD-ROM */
+#if 0
 	cdev_ocis_init(NPCMCIA,pcmcia), /* 25: PCMCIA Bus */
+#else
+	cdev_notdef(),			/* 25 */
+#endif
 	cdev_joy_init(NJOY,joy),        /* 26: joystick */
 	cdev_spkr_init(NSPKR,spkr),	/* 27: PC speaker */
 	cdev_lkm_init(NLKM,lkm),	/* 28: loadable module driver */
@@ -240,6 +262,13 @@ struct cdevsw	cdevsw[] =
 	cdev_ocis_init(NPCTR,pctr),	/* 46: pentium performance counters */
 	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
 	cdev_ocis_init(NBIOS,bios),	/* 48: onboard BIOS PROM */
+	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
+	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
+#ifdef XFS
+	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
+#else
+	cdev_notdef(),			/* 51 */
+#endif
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -329,8 +358,6 @@ static int chrtoblktbl[] = {
 	/* 45 */	NODEV,
 	/* 46 */	NODEV,
 	/* 47 */	17,
-	/* 48 */	NODEV,
-	/* 49 */	NODEV,
 };
 
 /*
@@ -342,7 +369,8 @@ chrtoblk(dev)
 {
 	int blkmaj;
 
-	if (major(dev) >= nchrdev)
+	if (major(dev) >= nchrdev ||
+	    major(dev) > sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]))
 		return (NODEV);
 	blkmaj = chrtoblktbl[major(dev)];
 	if (blkmaj == NODEV)

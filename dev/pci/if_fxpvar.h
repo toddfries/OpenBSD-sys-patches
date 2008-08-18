@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxpvar.h,v 1.2 1997/07/06 16:05:03 niklas Exp $	*/
+/*	$OpenBSD: if_fxpvar.h,v 1.6 1998/09/22 18:58:03 deraadt Exp $	*/
 /*	$NetBSD: if_fxpvar.h,v 1.1 1997/06/05 02:01:58 thorpej Exp $	*/
 
 /*                  
@@ -30,14 +30,17 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *      Id: if_fxp.c,v 1.34 1997/04/23 01:44:30 davidg Exp
+ *      Id: if_fxpvar.h,v 1.6 1998/08/02 00:29:15 dg Exp
  */
 
 /*
  * Misc. defintions for the Intel EtherExpress Pro/100B PCI Fast
  * Ethernet driver
  */
-
+/*
+ * NOTE: Elements are ordered for optimal cacheline behavior, and NOT
+ *	 for functional grouping.
+ */
 struct fxp_softc {
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 	struct device sc_dev;		/* generic device structures */
@@ -53,17 +56,22 @@ struct fxp_softc {
 #if defined(__NetBSD__)
 	struct ethercom sc_ethercom;	/* ethernet common part */
 #endif
-	struct fxp_cb_tx *cbl_base;	/* base of TxCB list */
-	struct fxp_cb_tx *cbl_first;	/* first active TxCB in list */
-	struct fxp_cb_tx *cbl_last;	/* last active TxCB in list */
+	struct mii_data sc_mii;		/* MII media information */
 	struct mbuf *rfa_headm;		/* first mbuf in receive frame area */
 	struct mbuf *rfa_tailm;		/* last mbuf in receive frame area */
-	struct fxp_stats *fxp_stats;	/* Pointer to interface stats */
+	struct fxp_cb_tx *cbl_first;	/* first active TxCB in list */
 	int tx_queued;			/* # of active TxCB's */
-	int promisc_mode;		/* promiscuous mode enabled */
+	int need_mcsetup;		/* multicast filter needs programming */
+	struct fxp_cb_tx *cbl_last;	/* last active TxCB in list */
+	struct fxp_stats *fxp_stats;	/* Pointer to interface stats */
+	int rx_idle_secs;		/* # of seconds RX has been idle */
+	struct fxp_cb_tx *cbl_base;	/* base of TxCB list */
+	struct fxp_cb_mcs *mcsp;	/* Pointer to mcast setup descriptor */
+	int all_mcasts;			/* receive all multicasts */
 	int phy_primary_addr;		/* address of primary PHY */
 	int phy_primary_device;		/* device type of primary PHY */
 	int phy_10Mbps_only;		/* PHY is 10Mbps-only device */
+	int phy_settings;		/* previous PHY bits */
 };
 
 /* Macros to ease CSR access. */

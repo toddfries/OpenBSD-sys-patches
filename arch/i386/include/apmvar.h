@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmvar.h,v 1.4 1997/09/29 03:42:28 mickey Exp $	*/
+/*	$OpenBSD: apmvar.h,v 1.7 1998/07/27 23:24:10 marc Exp $	*/
 
 /*
  *  Copyright (c) 1995 John T. Kohl
@@ -131,9 +131,14 @@
 #define		BATT_FLAGS(regp) (((regp)->cx & 0xff00) >> 8)
 #define		AC_STATE(regp) (((regp)->bx & 0xff00) >> 8)
 #define		BATT_LIFE(regp) ((regp)->cx & 0xff) /* in % */
+/* Return time in minutes. According to the APM 1.2 spec:
+	DX = Remaining battery life -- time units
+		Bit 15 = 0	Time units are seconds
+		       = 1 	Time units are minutes
+		Bits 14-0 =	Number of seconds or minutes */
 #define		BATT_REMAINING(regp) (((regp)->dx & 0x8000) ? \
-				      ((regp)->dx & 0x7fff)*60 : \
-				      ((regp)->dx & 0x7fff))
+				      ((regp)->dx & 0x7fff) : \
+				      ((regp)->dx & 0x7fff)/60)
 #define		BATT_REM_VALID(regp) (((regp)->dx & 0xffff) != 0xffff)
 
 #define	APM_GET_PM_EVENT	0x530b
@@ -217,6 +222,11 @@ struct apm_ctl {
 #define	APM_IOC_GETPOWER _IOR('A', 3, struct apm_power_info) /* fetch battery state */
 #define	APM_IOC_NEXTEVENT _IOR('A', 4, struct apm_event_info) /* fetch event */
 #define	APM_IOC_DEV_CTL	_IOW('A', 5, struct apm_ctl) /* put device into mode */
+#define APM_IOC_PRN_CTL _IOW('A', 6, int ) /* driver power status msg */
+#define		APM_PRINT_ON	0	/* driver power status displayed */
+#define		APM_PRINT_OFF	1	/* driver power status not displayed */
+#define		APM_PRINT_PCT	2	/* driver power status only displayed
+					   if the percentage changes */
 
 #ifdef _KERNEL
 extern void apm_cpu_busy __P((void));

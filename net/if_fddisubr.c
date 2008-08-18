@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fddisubr.c,v 1.14 1997/09/27 02:35:58 deraadt Exp $	*/
+/*	$OpenBSD: if_fddisubr.c,v 1.17 1998/07/08 22:22:51 ryker Exp $	*/
 /*	$NetBSD: if_fddisubr.c,v 1.5 1996/05/07 23:20:21 christos Exp $	*/
 
 /*
@@ -178,7 +178,7 @@ fddi_output(ifp, m0, dst, rt0)
 #ifdef IPX
 	case AF_IPX:
 		type = htons(ETHERTYPE_IPX);
- 		bcopy((caddr_t)&(((struct sockaddr_ipx*)dst)->sipx_addr.x_host),
+ 		bcopy((caddr_t)&(((struct sockaddr_ipx*)dst)->sipx_addr.ipx_host),
 		    (caddr_t)edst, sizeof (edst));
 		if (!bcmp((caddr_t)edst, (caddr_t)&ipx_thishost, sizeof(edst)))
 			return (looutput(ifp, m, dst, rt));
@@ -463,7 +463,7 @@ fddi_input(ifp, fh, m)
 			break;
 #endif
 #ifdef DECNET
-		case ETHERTYPE_DECENT:
+		case ETHERTYPE_DECNET:
 			schednetisr(NETISR_DECNET);
 			inq = &decnetintrq;
 			break;
@@ -530,8 +530,8 @@ fddi_input(ifp, fh, m)
 			for (i = 0; i < 6; i++) {
 				eh->ether_shost[i] = c = fh->fddi_dhost[i];
 				eh->ether_dhost[i] = 
-					eh->ether_dhost[i] = fh->fddi_shost[i];
-				eh->ether_shost[i] = c;
+					fh->fddi_dhost[i] = fh->fddi_shost[i];
+				fh->fddi_shost[i] = c;
 			}
 			eh->ether_type = 0;
 			ifp->if_output(ifp, m, &sa, NULL);

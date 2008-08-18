@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	#	OpenBSD: pnpdevs,v 1.10 1998/03/16 05:21:55 dgregor Exp 
+ *	#	OpenBSD: pnpdevs,v 1.23 1998/10/21 00:56:58 deraadt Exp 
  */
 
 struct isapnp_knowndev isapnp_knowndevs[] = {
@@ -10,10 +10,11 @@ struct isapnp_knowndev isapnp_knowndevs[] = {
 	{ "PNP0500", "pccom" },
 	{ "PNP0501", "com" },
 	{ "PNP0501", "pccom" },
-	{ "PNP80D3", "ed" },
-	{ "PNP80D4", "ed" },
-	{ "PNP80D5", "ed" },
-	{ "PNP80D6", "ed" },
+	{ "PNP0600", "wdc" },
+	{ "PNP80D3", "ne" },
+	{ "PNP80D4", "ne" },
+	{ "PNP80D5", "ne" },
+	{ "PNP80D6", "ne" },
 	{ "PNP80D8", "le" },
 	{ "PNP80F1", "ep" },
 	{ "PNP80F3", "ep" },
@@ -42,6 +43,7 @@ struct isapnp_knowndev isapnp_knowndevs[] = {
 	{ "PNPB001", "sb" },
 	{ "PNPB002", "sb" },
 	{ "PNPB003", "sb" },
+	{ "PNPB02F", "joy" },
 	{ "PNPC000", "com" },
 	{ "PNPC000", "pccom" },
 	{ "PNPC001", "com" },
@@ -50,6 +52,16 @@ struct isapnp_knowndev isapnp_knowndevs[] = {
 	{ "NECE761", "pccom" },
 	{ "BDP0356", "com" },
 	{ "BDP0356", "pccom" },
+	{ "GWY6290", "com" },
+	{ "GWY6290", "pccom" },
+	{ "GVC0303", "com" },
+	{ "GVC0303", "pccom" },
+	{ "GWY0038", "com" },
+	{ "GWY0038", "pccom" },
+	{ "USR0006", "com" },
+	{ "USR0006", "pccom" },
+	{ "SUP1380", "com" },
+	{ "SUP1380", "pccom" },
 	{ "ADS7150", "sb" },
 	{ "ADS7180", "sb" },
 	{ "CTL0001", "sb" },
@@ -58,6 +70,9 @@ struct isapnp_knowndev isapnp_knowndevs[] = {
 	{ "CTL0042", "sb" },
 	{ "CTL0044", "sb" },
 	{ "CTL0045", "sb" },
+	{ "@X@0001", "sb" },
+	{ "YMH0021", "ym" },
 	{ "ESS1868", "sb" },
+	{ "SMC8416", "ed" },
 	{ NULL, NULL, }
 };

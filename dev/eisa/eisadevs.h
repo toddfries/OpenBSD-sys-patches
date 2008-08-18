@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: eisadevs,v 1.7 1997/07/25 17:40:06 deraadt Exp 
+ *	OpenBSD: eisadevs,v 1.9 1998/07/04 09:03:48 deraadt Exp 
  */
 
 /*
@@ -64,10 +64,16 @@
 #define	EISA_PRODUCT_DEC3003	"Digital Equipment DEFEA FDDI Controller"
 #define	EISA_PRODUCT_DEC3004	"Digital Equipment DEFEA FDDI Controller"
 
+/* DeskStation Technology, Inc. products */
+#define	EISA_PRODUCT_DTI0000	"DeskStation Technology, Inc. Evolution RISC PC"
+
 /* FORE Systems products */
 #define	EISA_PRODUCT_FSI2001	"FORE Systems ESA-200 ATM"
 #define	EISA_PRODUCT_FSI2002	"FORE Systems ESA-200A ATM"
 #define	EISA_PRODUCT_FSI2003	"FORE Systems ESA-200E ATM"
+
+/* Interphase products */
+#define	EISA_PRODUCT_INP25D0	"Interphase Seahawk 4811 FDDI Controller"
 
 /* Intel products */
 #define	EISA_PRODUCT_INT1010	"Intel EtherExpress 32 Flash Ethernet"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.24 1998/02/24 22:06:54 weingart Exp $	*/
+/*	$OpenBSD: libsa.h,v 1.28 1998/07/20 18:14:57 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -35,6 +35,10 @@
 #include <lib/libsa/stand.h>
 #include <machine/biosvar.h>
 
+#define	EXEC_AOUT
+
+#define	DEFAULT_KERNEL_ADDRESS	0x100000
+
 void gateA20 __P((int));
 
 void smpprobe __P((void));
@@ -44,9 +48,7 @@ void apmprobe __P((void));
 void pciprobe __P((void));
 
 void devboot __P((dev_t, char *));
-void *alloca __P((size_t));
 void machdep __P((void));
-void time_print __P((void));
 
 extern const char bdevs[][4];
 extern const int nbdevs;
@@ -59,4 +61,6 @@ extern u_int32_t bios_cksumlen;
 /* memprobe.c */
 extern bios_memmap_t *memory_map;
 
+#ifndef _TEST
 #define MACHINE_CMD	cmd_machine /* we have i386 specific sommands */
+#endif

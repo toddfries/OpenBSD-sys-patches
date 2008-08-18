@@ -1,4 +1,4 @@
-/*	$OpenBSD: uio.h,v 1.3 1996/12/13 21:26:39 michaels Exp $	*/
+/*	$OpenBSD: uio.h,v 1.6 1998/08/05 16:33:25 millert Exp $	*/
 /*	$NetBSD: uio.h,v 1.12 1996/02/09 18:25:45 christos Exp $	*/
 
 /*
@@ -39,12 +39,8 @@
 #ifndef _SYS_UIO_H_
 #define	_SYS_UIO_H_
 
-/*
- * XXX
- * iov_base should be a void *.
- */
 struct iovec {
-	char	*iov_base;	/* Base address. */
+	void	*iov_base;	/* Base address. */
 	size_t	 iov_len;	/* Length. */
 };
 
@@ -61,7 +57,7 @@ struct uio {
 	struct	iovec *uio_iov;
 	int	uio_iovcnt;
 	off_t	uio_offset;
-	int	uio_resid;
+	size_t	uio_resid;
 	enum	uio_seg uio_segflg;
 	enum	uio_rw uio_rw;
 	struct	proc *uio_procp;
@@ -73,7 +69,7 @@ struct uio {
 #define UIO_SMALLIOV	8		/* 8 on stack, else malloc */
 #endif /* _KERNEL */
 
-#define UIO_MAXIOV	1024		/* max 1K of iov's */
+#define UIO_MAXIOV	1024		/* Deprecated, use IOV_MAX instead */
 
 #ifndef	_KERNEL
 #include <sys/cdefs.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: advnops.c,v 1.11 1997/11/10 23:57:06 niklas Exp $	*/
+/*	$OpenBSD: advnops.c,v 1.15 1998/08/21 23:03:16 csapuntz Exp $	*/
 /*	$NetBSD: advnops.c,v 1.32 1996/10/13 02:52:09 christos Exp $	*/
 
 /*
@@ -63,7 +63,6 @@ int	adosfs_select	__P((void *));
 int	adosfs_strategy	__P((void *));
 int	adosfs_link	__P((void *));
 int	adosfs_symlink	__P((void *));
-int	adosfs_abortop	__P((void *));
 int	adosfs_lock	__P((void *));
 int	adosfs_unlock	__P((void *));
 int	adosfs_bmap	__P((void *));
@@ -129,7 +128,7 @@ struct vnodeopv_entry_desc adosfs_vnodeop_entries[] = {
 	{ &vop_symlink_desc, adosfs_symlink },		/* symlink */
 	{ &vop_readdir_desc, adosfs_readdir },		/* readdir */
 	{ &vop_readlink_desc, adosfs_readlink },	/* readlink */
-	{ &vop_abortop_desc, adosfs_abortop },		/* abortop */
+	{ &vop_abortop_desc, vop_generic_abortop },		/* abortop */
 	{ &vop_inactive_desc, adosfs_inactive },	/* inactive */
 	{ &vop_reclaim_desc, adosfs_reclaim },		/* reclaim */
 	{ &vop_lock_desc, adosfs_lock },		/* lock */
@@ -499,20 +498,6 @@ adosfs_symlink(v)
 	return (EROFS);
 }
 
-int
-adosfs_abortop(v)
-	void *v;
-{
-	struct vop_abortop_args /* {
-		struct vnode *a_dvp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
- 
-	if ((ap->a_cnp->cn_flags & (HASBUF | SAVESTART)) == HASBUF)
-		FREE(ap->a_cnp->cn_pnbuf, M_NAMEI);
-	return (0);
-}
-
 /*
  * lock the anode
  */
@@ -700,10 +685,12 @@ int
 adosfs_print(v)
 	void *v;
 {
+#ifdef DIAGNOSTIC
 	struct vop_print_args /* {
 		struct vnode *a_vp;
 	} */ *ap = v;
 	struct anode *anp = VTOA(ap->a_vp);
+#endif
 
 	/* XXX Fill in more info here.  */
 	printf("tag VT_ADOSFS\n");
@@ -953,19 +940,12 @@ adosfs_readlink(v)
 #ifdef ADOSFS_DIAGNOSTIC
 	advopprint(sp);
 #endif
-	error = 0;
 	ap = VTOA(sp->a_vp);
-	if (ap->type != ASLINK)
-		error = EBADF;
-	/*
-	 * XXX Should this be NULL terminated?
-	 */
-	if (error == 0)
-		error = uiomove(ap->slinkto, strlen(ap->slinkto)+1, sp->a_uio);
+	error = uiomove(ap->slinkto, strlen(ap->slinkto), sp->a_uio);
 #ifdef ADOSFS_DIAGNOSTIC
 	printf(" %d)", error);
 #endif
-	return(error);
+	return (error);
 }
 
 /*ARGSUSED*/
@@ -1031,7 +1011,9 @@ adosfs_reclaim(v)
 #endif
 	vp = sp->a_vp;
 	ap = VTOA(vp);
-	LIST_REMOVE(ap, link);
+
+	adosfs_aremhash(ap);
+
 	cache_purge(vp);
 	if (vp->v_type == VDIR && ap->tab)
 		free(ap->tab, M_ANODE);

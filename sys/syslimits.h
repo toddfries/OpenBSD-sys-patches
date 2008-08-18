@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslimits.h,v 1.3 1997/12/16 08:07:57 angelos Exp $	*/
+/*	$OpenBSD: syslimits.h,v 1.5 1998/08/05 16:33:26 millert Exp $	*/
 /*	$NetBSD: syslimits.h,v 1.12 1995/10/05 05:26:19 thorpej Exp $	*/
 
 /*
@@ -58,4 +58,11 @@
 #ifndef RE_DUP_MAX
 #define	RE_DUP_MAX		  255	/* max RE's in interval notation */
 #endif
+
+#if !defined(_POSIX_C_SOURCE) || defined(_XOPEN_SOURCE)
+#define	IOV_MAX			 1024	/* max # of iov's (readv,sendmsg,etc) */
+#define	NZERO			   20	/* default "nice" */
+#endif /* !_POSIX_C_SOURCE || _XOPEN_SOURCE */
+
 #endif
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.17 1997/07/25 20:43:27 kstailey Exp $	*/
+/*	$OpenBSD: trap.c,v 1.19 1998/08/23 16:53:00 kstailey Exp $	*/
 /*	$NetBSD: trap.c,v 1.63-1.65ish 1997/01/16 15:41:40 gwr Exp $	*/
 
 /*
@@ -592,8 +592,12 @@ finish:
 	if ((type & T_USER) == 0)
 		return;
 	/* Post a signal if necessary. */
-	if (sig != 0)
-		trapsignal(p, sig, ucode, si_type, (caddr_t)v);
+	if (sig != 0) {
+		union sigval sv;
+
+		sv.sival_int = v;
+		trapsignal(p, sig, ucode, si_type, sv);
+	}
 douret:
 	userret(p, &frame, sticks);
 }

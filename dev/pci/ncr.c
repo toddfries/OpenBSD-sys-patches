@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr.c,v 1.37 1998/03/22 17:27:44 pefo Exp $	*/
+/*	$OpenBSD: ncr.c,v 1.41 1998/08/07 16:48:19 pefo Exp $	*/
 /*	$NetBSD: ncr.c,v 1.63 1997/09/23 02:39:15 perry Exp $	*/
 
 /**************************************************************************
@@ -146,8 +146,8 @@
 /*
 **    Number of targets supported by the driver.
 **    n permits target numbers 0..n-1.
-**    Default is 7, meaning targets #0..#6.
-**    #7 .. is myself.
+**    Default is 16, meaning targets #0..#15.
+**    #7 is the host adapter.
 */
 
 #define MAX_TARGET  (16)
@@ -170,7 +170,7 @@
 **    The calculation below is actually quite silly ...
 */
 
-#define MAX_START   (MAX_TARGET + 7 * SCSI_NCR_DFLT_TAGS)
+#define MAX_START   (MAX_TARGET + (MAX_TARGET - 1) * SCSI_NCR_DFLT_TAGS)
 
 /*
 **    The maximum number of segments a transfer is split into.
@@ -183,7 +183,11 @@
 **    MUST NOT be greater than (MAX_SCATTER-1) * PAGE_SIZE.
 */
 
+#ifdef __OpenBSD__
+#define MAX_SIZE  ((MAX_SCATTER-1) * (long) NBPG)
+#else
 #define MAX_SIZE  ((MAX_SCATTER-1) * (long) PAGE_SIZE)
+#endif
 
 /*
 **	other
@@ -245,15 +249,8 @@
 
 #include <scsi/scsiconf.h>
 
-#ifdef __OpenBSD__	/* XXX */
-#define	__BROKEN_INDIRECT_CONFIG
-#undef PAGE_SIZE
-#undef PAGE_MASK
-#define	PAGE_SIZE	NBPG
-#define	PAGE_MASK	(NBPG-1)
-#endif
-
 #ifdef __OpenBSD__
+#define	__BROKEN_INDIRECT_CONFIG
 #ifdef NCR_VERBOSE
 #define bootverbose	NCR_VERBOSE
 #else
@@ -1468,7 +1465,7 @@ static	void	ncr_attach	(pcici_t tag, int unit);
 
 #if 0
 static char ident[] =
-	"\n$OpenBSD: ncr.c,v 1.37 1998/03/22 17:27:44 pefo Exp $\n";
+	"\n$OpenBSD: ncr.c,v 1.41 1998/08/07 16:48:19 pefo Exp $\n";
 #endif
 
 static const u_long	ncr_version = NCR_VERSION	* 11
@@ -3500,8 +3497,13 @@ static ncr_chip ncr_chip_table[] = {
  {NCR_875_ID, 0x02,	"ncr 53c875 fast20 wide scsi",		7, 16, 5,
  FE_WIDE|FE_ULTRA|FE_DBLR|FE_CACHE_SET|FE_DFS|FE_LDSTR|FE_PFEN|FE_RAM}
  ,
+#ifdef NCR_NARROW_875J
+ {NCR_875_ID2, 0x00,	"ncr 53c875j fast20 scsi",		4,  8, 5,
+ FE_ULTRA|FE_DBLR|FE_CACHE_SET|FE_DFS|FE_LDSTR|FE_PFEN|FE_RAM}
+#else
  {NCR_875_ID2, 0x00,	"ncr 53c875j fast20 wide scsi",		7, 16, 5,
  FE_WIDE|FE_ULTRA|FE_DBLR|FE_CACHE_SET|FE_DFS|FE_LDSTR|FE_PFEN|FE_RAM}
+#endif
  ,
  {NCR_885_ID, 0x00,	"ncr 53c885 fast20 wide scsi",		7, 16, 5,
  FE_WIDE|FE_ULTRA|FE_DBLR|FE_CACHE_SET|FE_DFS|FE_LDSTR|FE_PFEN|FE_RAM}
@@ -3836,12 +3838,16 @@ static	void ncr_attach (pcici_t config_id, int unit)
 	}
 
 	np->maxwide	= np->features & FE_WIDE ? 1 : 0;
-#if defined(__mips__) /* XXX FIXME - This is gross XXX */
-	np->clock_khz	= 66000;
-	np->clock_khz	= 48000;
+#ifdef NEED_PCI_SCSI_CLOCK_FUNC
+	{
+	int b, d, f; 
+        pci_decompose_tag(pc, pa->pa_tag, &b, &d, &f); \
+	if((np->clock_khz = pci_scsi_clock(pc, b, d)) == 0)
+		np->clock_khz	= np->features & FE_CLK80 ? 80000 : 40000;
+	}
 #else
 	np->clock_khz	= np->features & FE_CLK80 ? 80000 : 40000;
-#endif /*__mips__*/
+#endif
 	if	(np->features & FE_QUAD)	np->multiplier = 4;
 	else if	(np->features & FE_DBLR)	np->multiplier = 2;
 	else					np->multiplier = 1;
@@ -7284,7 +7290,8 @@ static	void ncr_alloc_ccb (ncb_p np, u_long target, u_long lun)
 	**	can use more than one ccb.
 	*/
 
-	if (np->actccbs >= MAX_START-2) return;
+	if (np->actccbs >= MAX_START-2)
+		return;
 	if (lp->actccbs && (lp->actccbs >= lp->reqccbs))
 		return;
 
@@ -7446,7 +7453,11 @@ static	int	ncr_scatter
 
 	free = MAX_SCATTER - 1;
 
+#ifdef __OpenBSD__
+	if (vaddr & (NBPG-1)) free -= datalen / NBPG;
+#else
 	if (vaddr & PAGE_MASK) free -= datalen / PAGE_SIZE;
+#endif
 
 	if (free>1)
 		while ((chunk * free >= 2 * datalen) && (chunk>=1024))
@@ -7475,7 +7486,11 @@ static	int	ncr_scatter
 			/*
 			**	continue this segment
 			*/
+#ifdef __OpenBSD__
+			pnext = (paddr & (~(NBPG - 1))) + NBPG;
+#else
 			pnext = (paddr & (~PAGE_MASK)) + PAGE_SIZE;
+#endif
 
 			/*
 			**	Compute max size

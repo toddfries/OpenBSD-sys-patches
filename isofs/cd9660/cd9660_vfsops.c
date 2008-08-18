@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.13 1998/02/08 22:41:32 tholo Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.15 1998/09/06 20:31:31 millert Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -174,6 +174,19 @@ cd9660_mount(mp, path, data, ndp, p)
 	if (major(devvp->v_rdev) >= nblkdev) {
 		vrele(devvp);
 		return (ENXIO);
+	}
+	/*
+	 * If mount by non-root, then verify that user has necessary
+	 * permissions on the device.
+	 */
+	if (p->p_ucred->cr_uid != 0) {
+		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
+		error = VOP_ACCESS(devvp, VREAD, p->p_ucred, p);
+		if (error) {
+			vput(devvp);
+			return (error);
+		}
+		VOP_UNLOCK(devvp, 0, p);
 	}
 	if ((mp->mnt_flag & MNT_UPDATE) == 0)
 		error = iso_mountfs(devvp, mp, p, &args);
@@ -683,6 +696,7 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 	dev_t dev;
 	int error;
 
+retry:
 	imp = VFSTOISOFS(mp);
 	dev = imp->im_dev;
 	if ((*vpp = cd9660_ihashget(dev, ino)) != NULLVP)
@@ -708,7 +722,16 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 	 * for old data structures to be purged or for the contents of the
 	 * disk portion of this inode to be read.
 	 */
-	cd9660_ihashins(ip);
+	error = cd9660_ihashins(ip);
+
+	if (error) {
+		vrele(vp);
+
+		if (error == EEXIST)
+			goto retry;
+
+		return (error);
+	}
 
 	if (isodir == 0) {
 		int lbn, off;
@@ -855,7 +878,6 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 			 */
 			vp = nvp;
 			ip->i_vnode = vp;
-			cd9660_ihashins(ip);
 		}
 		break;
 	case VLNK:

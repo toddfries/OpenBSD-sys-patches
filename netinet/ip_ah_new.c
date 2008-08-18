@@ -1,27 +1,33 @@
-/*	$OpenBSD: ip_ah_new.c,v 1.16 1998/02/22 01:23:30 niklas Exp $	*/
+/*	$OpenBSD: ip_ah_new.c,v 1.18 1998/06/03 09:50:18 provos Exp $	*/
 
 /*
- * The author of this code is John Ioannidis, ji@tla.org,
- * 	(except when noted otherwise).
+ * The authors of this code are John Ioannidis (ji@tla.org),
+ * Angelos D. Keromytis (kermit@csd.uch.gr) and 
+ * Niels Provos (provos@physnet.uni-hamburg.de).
  *
- * This code was written for BSD/OS in Athens, Greece, in November 1995.
+ * This code was written by John Ioannidis for BSD/OS in Athens, Greece, 
+ * in November 1995.
  *
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
- * by Angelos D. Keromytis, kermit@forthnet.gr.
+ * by Angelos D. Keromytis.
  *
- * Additional transforms and features in 1997 by Angelos D. Keromytis and
- * Niels Provos.
+ * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
+ * and Niels Provos.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
  * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
- * modification of this software.
+ * modification of this software. 
+ * You may use this code under the GNU public license if you so wish. Please
+ * contribute changes back to the authors under this freer than GPL license
+ * so that we may further the use of strong encryption without limitations to
+ * all.
  *
  * THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTY. IN PARTICULAR, NEITHER AUTHOR MAKES ANY
+ * IMPLIED WARRANTY. IN PARTICULAR, NONE OF THE AUTHORS MAKES ANY
  * REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE
  * MERCHANTABILITY OF THIS SOFTWARE OR ITS FITNESS FOR ANY PARTICULAR
  * PURPOSE.
@@ -65,7 +71,13 @@
 #include <netinet/ip_ah.h>
 #include <sys/syslog.h>
 
-extern void encap_sendnotify(int, struct tdb *);
+#ifdef ENCDEBUG
+#define DPRINTF(x)	if (encdebug) printf x
+#else
+#define DPRINTF(x)
+#endif
+
+extern void encap_sendnotify(int, struct tdb *, void *);
 
 struct ah_hash ah_new_hash[] = {
      { ALG_AUTH_MD5, "HMAC-MD5-96", 
@@ -99,10 +111,7 @@ struct ah_hash ah_new_hash[] = {
 int
 ah_new_attach()
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ah_new_attach(): setting up\n");
-#endif /* ENCDEBUG */
+    DPRINTF(("ah_new_attach(): setting up\n"));
     return 0;
 }
 
@@ -125,10 +134,7 @@ ah_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     {
         if ((m = m_pullup(m, ENCAP_MSG_FIXED_LEN)) == NULL)
         {
-#ifdef ENCDEBUG
-            if (encdebug)
-              printf("ah_new_init(): m_pullup failed\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("ah_new_init(): m_pullup failed\n"));
             return ENOBUFS;
         }
     }
@@ -154,11 +160,8 @@ ah_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	  log(LOG_WARNING, "ah_new_init(): unsupported authentication algorithm %d specified\n", txd.amx_hash_algorithm);
 	return EINVAL;
     }
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ah_new_init(): initalized TDB with hash algorithm %d: %s\n",
-	     txd.amx_hash_algorithm, ah_new_hash[i].name);
-#endif /* ENCDEBUG */
+    DPRINTF(("ah_new_init(): initalized TDB with hash algorithm %d: %s\n",
+	     txd.amx_hash_algorithm, ah_new_hash[i].name));
     thash = &ah_new_hash[i];
     blocklen = HMAC_BLOCK_LEN;
 
@@ -174,10 +177,7 @@ ah_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	   M_XDATA, M_WAITOK);
     if (tdbp->tdb_xdata == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_new_init(): MALLOC failed\n");
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_new_init(): MALLOC failed\n"));
       	return ENOBUFS;
     }
 
@@ -186,10 +186,7 @@ ah_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	   M_TEMP, M_WAITOK);
     if (buffer == NULL)
     {
-#ifdef ENCDEBUG
-        if (encdebug)
-          printf("ah_new_init(): MALLOC failed\n");
-#endif /* ENCDEBUG */
+        DPRINTF(("ah_new_init(): MALLOC failed\n"));
 	free(tdbp->tdb_xdata, M_XDATA);
         return ENOBUFS;
     }
@@ -248,10 +245,7 @@ ah_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 int
 ah_new_zeroize(struct tdb *tdbp)
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ah_new_zeroize(): freeing memory\n");
-#endif /* ENCDEBUG */
+    DPRINTF(("ah_new_zeroize(): freeing memory\n"));
     if (tdbp->tdb_xdata)
     {
     	FREE(tdbp->tdb_xdata, M_XDATA);
@@ -293,10 +287,7 @@ ah_new_input(struct mbuf *m, struct tdb *tdb)
 	if ((m = m_pullup(m, ohlen)) == NULL)
 	{
 	    ahstat.ahs_hdrops++;
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("ah_new_input(): (possibly too short) packet dropped\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("ah_new_input(): (possibly too short) packet dropped\n"));
 	    return NULL;
 	}
     }
@@ -309,10 +300,7 @@ ah_new_input(struct mbuf *m, struct tdb *tdb)
 	if ((m = m_pullup(m, ohlen - sizeof (struct ip) +
 			  (ip->ip_hl << 2))) == NULL)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("ah_new_input(): m_pullup() failed\n");
-#endif /* ENCDEBUG */
+	    DPRINTF(("ah_new_input(): m_pullup() failed\n"));
 	    ahstat.ahs_hdrops++;
 	    return NULL;
 	}
@@ -326,10 +314,7 @@ ah_new_input(struct mbuf *m, struct tdb *tdb)
 
     if (ah->ah_hl * sizeof(u_int32_t) != AH_HMAC_HASHLEN + AH_HMAC_RPLENGTH)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_new_input(): bad authenticator length for packet from %x to %x, spi %08x\n", ip->ip_src, ip->ip_dst, ntohl(ah->ah_spi));
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_new_input(): bad authenticator length for packet from %x to %x, spi %08x\n", ip->ip_src, ip->ip_dst, ntohl(ah->ah_spi)));
 	ahstat.ahs_badauthl++;
 	m_freem(m);
 	return NULL;
@@ -514,14 +499,14 @@ ah_new_input(struct mbuf *m, struct tdb *tdb)
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
-	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	  tdb->tdb_flags &= ~TDBF_SOFT_PACKETS;
       }
       else
 	if (tdb->tdb_flags & TDBF_SOFT_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_soft_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
     }
@@ -530,14 +515,14 @@ ah_new_input(struct mbuf *m, struct tdb *tdb)
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
-	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	  tdb_delete(tdb, 0);
       }
       else
 	if (tdb->tdb_flags & TDBF_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_exp_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	      tdb_delete(tdb, 0);
 	  }
     }
@@ -567,11 +552,8 @@ ah_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     m = m_pullup(m, sizeof(struct ip));
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_new_output(): m_pullup() failed, SA %x/%08x\n",
-		 tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_new_output(): m_pullup() failed, SA %x/%08x\n",
+		 tdb->tdb_dst, ntohl(tdb->tdb_spi)));
       	return ENOBUFS;
     }
 	
@@ -583,11 +565,8 @@ ah_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
         if ((m = m_pullup(m, ip->ip_hl << 2)) == NULL)
         {
-#ifdef ENCDEBUG
-            if (encdebug)
-              printf("ah_new_output(): m_pullup() failed, SA &x/%08x\n",
-                     tdb->tdb_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+            DPRINTF(("ah_new_output(): m_pullup() failed, SA &x/%08x\n",
+		     tdb->tdb_dst, ntohl(tdb->tdb_spi)));
             ahstat.ahs_hdrops++;
             return NULL;
         }
@@ -599,11 +578,7 @@ ah_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     m_copydata(m, sizeof(struct ip), (ip->ip_hl << 2) - sizeof(struct ip),
 	       (caddr_t) opts);
 
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ah_new_output(): using hash algorithm %s\n",
-	     xd->amx_hash->name);
-#endif /* ENCDEBUG */
+    DPRINTF(("ah_new_output(): using hash algorithm %s\n", xd->amx_hash->name));
 
     ilen = ntohs(ip->ip_len);
 
@@ -640,7 +615,7 @@ ah_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 
     aho.ah_rpl = htonl(xd->amx_rpl++);
 
-    bcopy(&(xd->amx_ictx), &ctx, xd->amx_hash->ctxsize);
+    bcopy((caddr_t)&(xd->amx_ictx), (caddr_t)&ctx, xd->amx_hash->ctxsize);
     xd->amx_hash->Update(&ctx, (unsigned char *) &ipo, sizeof(struct ip));
 
     /* Options */
@@ -715,20 +690,14 @@ ah_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     M_PREPEND(m, ohlen, M_DONTWAIT);
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_new_output(): M_PREPEND() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+        DPRINTF(("ah_new_output(): M_PREPEND() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi)));
         return ENOBUFS;
     }
 
     m = m_pullup(m, ohlen + (ipo.ip_hl << 2));
     if (m == NULL)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ah_new_output(): m_pullup() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi));
-#endif /* ENCDEBUG */
+	DPRINTF(("ah_new_output(): m_pullup() failed for packet from %x to %x, spi %08x\n", ipo.ip_src, ipo.ip_dst, ntohl(tdb->tdb_spi)));
         return ENOBUFS;
     }
 	
@@ -766,14 +735,14 @@ ah_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
-	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	  tdb->tdb_flags &= ~TDBF_SOFT_PACKETS;
       }
       else
 	if (tdb->tdb_flags & TDBF_SOFT_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_soft_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb, NULL);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
     }
@@ -782,14 +751,14 @@ ah_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
-	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	  tdb_delete(tdb, 0);
       }
       else
 	if (tdb->tdb_flags & TDBF_BYTES)
 	  if (tdb->tdb_cur_bytes >= tdb->tdb_exp_bytes)
 	  {
-	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb, NULL);
 	      tdb_delete(tdb, 0);
 	  }
     }

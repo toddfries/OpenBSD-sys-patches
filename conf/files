@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.77 1998/03/24 03:26:03 deraadt Exp $
+#	$OpenBSD: files,v 1.96 1998/09/28 02:43:22 jason Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -9,11 +9,18 @@ define	disk
 define	tape
 define	ifnet
 define	tty
-define	audio
+define	audio {}
 define	scsi {}
+define	ifmedia
+define	mii {[phy = -1]}
 
 # audio device attributes
 define	mulaw
+define	auconv
+
+# audio device, attaches to audio hardware driver
+device	audio
+attach	audio at audio
 
 # net device attributes - we have generic code for arc(net), ether(net),
 # and fddi.
@@ -27,6 +34,7 @@ define	fddi
 define	ncr5380sbc	# NCR 5380 SCSI Bus Controller
 define	ncr53c9x	# NCR 53c9x or Emulex ESP SCSI Controller
 define	pdq		# DEC FDDI chipset
+define	dp8390nic	# 8390-family Ethernet controllers
 
 # a wscons output device; used later, but needs to be near the top for
 # common file (e.g. vga) definitions.
@@ -38,6 +46,14 @@ define  wsconsdev {[console = -1]}
 # Adaptec 2[789]4X, 394X, aic7770 and aic78[5678]0 SCSI controllers
 device	ahc: scsi
 file	dev/ic/aic7xxx.c	ahc
+
+# Adaptec AIC-6[23]60 SCSI controllers
+device	aic: scsi
+file	dev/ic/aic6360.c	aic
+
+# AdvanSys 1200A, 1200B and ULTRA SCSI controllers
+device	adv: scsi
+file	dev/ic/adv.c		adv
 
 # BusLogic MultiMaster and MultiMaster Ultra SCSI controllers
 device	bha: scsi
@@ -52,15 +68,24 @@ device	uha: scsi
 file	dev/ic/uha.c		uha
 
 # 3Com Etherlink-III Ethernet controller
-device	ep: ether, ifnet
+device	ep: ether, ifnet, ifmedia
 file	dev/ic/elink3.c		ep
 
 # WaveLan
 # device wlp: ether, ifnet
 
 # LANCE and PCnet Ethernet controllers
-device	le: ether, ifnet
+device	le: ether, ifnet, ifmedia
 file	dev/ic/am7990.c		le
+
+# SMC 91Cxx Ethernet Controller
+device	sm: ether, ifnet, ifmedia
+file	dev/ic/smc91cxx.c	sm
+
+# Novell NE2000-compatible Ethernet cards, based on the
+# National Semiconductor DS8390.
+device	ne: ether, ifnet, dp8390nic, ifmedia
+file	dev/ic/ne2000.c		ne
 
 # 8250/16[45]50-based "com" ports
 device	com: tty
@@ -77,6 +102,11 @@ file	dev/ic/lpt.c		lpt & (lpt_isa | lpt_pica | lpt_algor) needs-flag
 # VGA
 device	vga: wsconsdev
 file	dev/ic/vga.c		vga & (vga_isa | vga_pci)
+
+# VGA framebuffer
+device	vgafb: wsconsdev
+file	dev/ic/vgafb.c		vgafb & (vgafb_isa | vgafb_pci)
+file	dev/ic/font_8x16.c	vgafb & (vgafb_isa | vgafb_pci)
 
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
@@ -104,6 +134,9 @@ pseudo-device strip: ifnet
 pseudo-device random
 pseudo-device enc: ifnet
 
+pseudo-device ksyms
+file	dev/ksyms.c	ksyms needs-flag
+
 # XXX machine-independent SCSI files should live somewhere here, maybe
 
 # kernel sources
@@ -129,12 +162,14 @@ file ddb/db_watch.c			ddb
 file ddb/db_write_cmd.c			ddb
 file ddb/db_usrreq.c			ddb
 file ddb/db_hangman.c			ddb
+file dev/auconv.c			auconv
 file dev/audio.c			audio			needs-flag
 file dev/ccd.c				ccd			needs-flag
 file dev/ic/ncr5380sbc.c		ncr5380sbc
 file dev/ic/ncr53c9x.c			ncr53c9x
 file dev/ic/pdq.c			pdq
 file dev/ic/pdq_ifsubr.c		pdq
+file dev/ic/dp8390.c			dp8390nic
 file dev/mulaw.c			mulaw
 file dev/vnd.c				vnd			needs-flag
 file dev/rnd.c
@@ -260,6 +295,7 @@ file net/if_atmsubr.c			atm			needs-flag
 file net/if_ethersubr.c			ether | fddi		needs-flag
 file net/if_fddisubr.c			fddi
 file net/if_loop.c			loop			needs-count
+file net/if_media.c			ifmedia
 file net/if_sl.c			sl			needs-count
 file net/if_strip.c			strip			needs-count
 file net/if_ppp.c			ppp			needs-count
@@ -401,6 +437,7 @@ file netipx/ipx_pcb.c			ipx
 file netipx/ipx_proto.c			ipx
 file netipx/ipx_tun.c			ipx
 file netipx/ipx_usrreq.c		ipx
+file netipx/ipx_cksum.c			ipx
 file netipx/spx_debug.c			ipx
 file netipx/spx_usrreq.c		ipx
 file nfs/krpc_subr.c			nfsclient
@@ -442,6 +479,14 @@ file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
 file ufs/ext2fs/ext2fs_subr.c		ext2fs
 file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
 file ufs/ext2fs/ext2fs_vnops.c		ext2fs
+file xfs/xfs_common.c			xfs
+file xfs/xfs_deb.c			xfs
+file xfs/xfs_dev.c			xfs
+file xfs/xfs_message.c			xfs
+file xfs/xfs_node.c			xfs
+file xfs/xfs_syscalls.c
+file xfs/xfs_vfsops.c			xfs
+file xfs/xfs_vnodeops.c			xfs
 file vm/device_pager.c			devpager
 file vm/swap_pager.c			swappager
 file vm/vm_fault.c

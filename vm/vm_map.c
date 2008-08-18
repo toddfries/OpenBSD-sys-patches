@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_map.c,v 1.13 1998/03/01 00:38:11 niklas Exp $	*/
+/*	$OpenBSD: vm_map.c,v 1.15 1998/04/25 20:15:13 niklas Exp $	*/
 /*	$NetBSD: vm_map.c,v 1.23 1996/02/10 00:08:08 christos Exp $	*/
 
 /* 
@@ -996,7 +996,7 @@ _vm_map_clip_end(map, entry, end)
  *	range prior to calling vm_map_submap.
  *
  *	Only a limited number of operations can be performed
- *	within this rage after calling vm_map_submap:
+ *	within this range after calling vm_map_submap:
  *		vm_fault
  *	[Don't try vm_map_copy!]
  *

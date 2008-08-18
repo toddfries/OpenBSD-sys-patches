@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibus.c,v 1.4 1998/04/06 20:23:21 pefo Exp $ */
+/*	$OpenBSD: mpcpcibus.c,v 1.8 1998/08/25 08:20:23 pefo Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -45,6 +45,7 @@
 #include <vm/vm.h>
 
 #include <machine/autoconf.h>
+#include <machine/bat.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
@@ -74,7 +75,7 @@ const char *mpc_intr_string __P((void *, pci_intr_handle_t));
 void     *mpc_intr_establish __P((void *, pci_intr_handle_t,
             int, int (*func)(void *), void *, char *));
 void     mpc_intr_disestablish __P((void *, void *));
-int      mpc_ether_hw_addr __P((u_int8_t *));
+int      mpc_ether_hw_addr __P((u_int8_t *, u_int8_t, u_int8_t));
 
 struct cfattach mpcpcibr_ca = {
         sizeof(struct pcibr_softc), mpcpcibrmatch, mpcpcibrattach,
@@ -132,8 +133,13 @@ mpcpcibrattach(parent, self, aux)
 	case POWER4e:
 		lcp = sc->sc_pcibr = &mpc_config;
 
-		sc->sc_bus_space.bus_base = MPC106_V_PCI_MEM_SPACE;
-		sc->sc_bus_space.bus_reverse = 1;
+		addbatmap(MPC106_V_PCI_MEM_SPACE,
+			  MPC106_P_PCI_MEM_SPACE, BAT_I);
+
+		sc->sc_membus_space.bus_base = MPC106_V_PCI_MEM_SPACE;
+		sc->sc_membus_space.bus_reverse = 1;
+		sc->sc_iobus_space.bus_base = MPC106_V_PCI_IO_SPACE;
+		sc->sc_iobus_space.bus_reverse = 1;
 
 		lcp->lc_pc.pc_conf_v = lcp;
 		lcp->lc_pc.pc_attach_hook = mpc_attach_hook;
@@ -154,11 +160,61 @@ mpcpcibrattach(parent, self, aux)
 				mpc_cfg_read_1(MPC106_PCI_REVID));
 		mpc_cfg_write_2(MPC106_PCI_STAT, 0xff80); /* Reset status */
 		break;
+
+	case OFWMACH:
+	case PWRSTK:
+		lcp = sc->sc_pcibr = &mpc_config;
+
+		{
+			unsigned int addr;
+			/* need to map 0xf0000000 also but cannot
+			 * because kernel uses that address space
+			 */
+			for (addr =    0xc0000000;
+			     addr >=	  0x80000000;
+			     addr -=   0x10000000)
+			{
+				/* we map it 1-1, cache inibited,
+				 * REALLY wish this could be cacheable
+				 * that is the reason to not use the bat.
+				 */
+				addbatmap(addr, addr, BAT_I);
+			}
+		}
+
+		sc->sc_membus_space.bus_base = MPC106_V_PCI_MEM_SPACE;
+		sc->sc_membus_space.bus_reverse = 1;
+		sc->sc_iobus_space.bus_base = MPC106_V_PCI_IO_SPACE;
+		sc->sc_iobus_space.bus_reverse = 1;
+
+		lcp->lc_pc.pc_conf_v = lcp;
+		lcp->lc_pc.pc_attach_hook = mpc_attach_hook;
+		lcp->lc_pc.pc_bus_maxdevs = mpc_bus_maxdevs;
+		lcp->lc_pc.pc_make_tag = mpc_make_tag;
+		lcp->lc_pc.pc_decompose_tag = mpc_decompose_tag;
+		lcp->lc_pc.pc_conf_read = mpc_conf_read;
+		lcp->lc_pc.pc_conf_write = mpc_conf_write;
+		lcp->lc_pc.pc_ether_hw_addr = mpc_ether_hw_addr;
+
+	        lcp->lc_pc.pc_intr_v = lcp;
+		lcp->lc_pc.pc_intr_map = mpc_intr_map;
+		lcp->lc_pc.pc_intr_string = mpc_intr_string;
+		lcp->lc_pc.pc_intr_establish = mpc_intr_establish;
+		lcp->lc_pc.pc_intr_disestablish = mpc_intr_disestablish;
+
+		printf(": MPC106, Revision %x.\n",
+				mpc_cfg_read_1(MPC106_PCI_REVID));
+		mpc_cfg_write_2(MPC106_PCI_STAT, 0xff80); /* Reset status */
+		break;
+
+	default:
+		printf("unknown system_type %d\n",system_type);
+		return;
 	}
 
 	pba.pba_busname = "pci";
-	pba.pba_iot = &sc->sc_bus_space;
-	pba.pba_memt = &sc->sc_bus_space;
+	pba.pba_iot = &sc->sc_iobus_space;
+	pba.pba_memt = &sc->sc_membus_space;
 	pba.pba_pc = &lcp->lc_pc;
 	pba.pba_bus = 0;
 	config_found(self, &pba, mpcpcibrprint);
@@ -208,8 +264,8 @@ mpc_attach_hook(parent, self, pba)
 }
 
 int
-mpc_ether_hw_addr(p)
-	u_int8_t *p;
+mpc_ether_hw_addr(p, b, s)
+	u_int8_t *p, b, s;
 {
 	int i;
 
@@ -343,9 +399,12 @@ mpc_intr_map(lcv, bustag, buspin, line, ihp)
 	int buspin, line;
 	pci_intr_handle_t *ihp;
 {
+	struct pcibr_config *lcp = lcv;
+	pci_chipset_tag_t pc = &lcp->lc_pc; 
 	int error = 0;
 	int route;
 	int lvl;
+	int device;
 
 	*ihp = -1;
         if (buspin == 0) {
@@ -358,31 +417,41 @@ mpc_intr_map(lcv, bustag, buspin, line, ihp)
         }
 
 	if(system_type == POWER4e) {
+		pci_decompose_tag(pc, bustag, NULL, &device, NULL);
 		route = in32rb(MPC106_PCI_CONF_SPACE + 0x860);
-		switch(line) {
-		case 14:
-			line = 9;
-			route &= ~0x000000ff;
-			route |= line;
-			break;
-		case 11:
+		switch(device) {
+		case 1:			/* SCSI */
 			line = 6;
 			route &= ~0x0000ff00;
 			route |= line << 8;
 			break;
-		case 12:
+
+		case 2:			/* Ethernet */
 			line = 14;
 			route &= ~0x00ff0000;
 			route |= line << 16;
 			break;
-		case 13:
+
+		case 3:			/* Tundra VME */
 			line = 15;
 			route &= ~0xff000000;
 			route |= line << 24;
 			break;
+
+		case 4:			/* PMC Slot */
+			line = 9;
+			route &= ~0x000000ff;
+			route |= line;
+			break;
+
+		default:
+			printf("mpc_intr_map: bad dev slot %d!\n", device);
+			error = 1;
+			break;
 		}
+
 		lvl = isa_inb(0x04d0);
-		lvl |= isa_inb(0x04d1);
+		lvl |= isa_inb(0x04d1) << 8;
 		lvl |= 1L << line;
 		isa_outb(0x04d0, lvl);
 		isa_outb(0x04d1, lvl >> 8);
@@ -436,4 +505,15 @@ mpc_print_pci_stat()
 	printf("pci: status 0x%08x.\n", stat);
 	stat = mpc_cfg_read_2(MPC106_PCI_STAT);
 	printf("pci: status 0x%04x.\n", stat);
+}
+u_int32_t
+pci_iack()
+{
+	/* do pci IACK cycle */
+	/* this should be bus allocated. */
+	volatile u_int8_t *iack = (u_int8_t *)0xbffffff0;
+	u_int8_t val;
+
+	val = *iack;
+	return val;
 }

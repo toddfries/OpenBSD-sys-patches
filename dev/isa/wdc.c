@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc.c,v 1.27 1998/02/22 00:38:40 niklas Exp $	*/
+/*	$OpenBSD: wdc.c,v 1.35 1998/09/15 01:40:08 downsj Exp $	*/
 /*	$NetBSD: wd.c,v 1.150 1996/05/12 23:54:03 mycroft Exp $ */
 
 /*
@@ -68,6 +68,8 @@
 #include <dev/isa/wdreg.h>
 #include <dev/isa/wdlink.h>
 
+#include "wdc.h"
+
 #include "atapibus.h"
 #if NATAPIBUS > 0
 #include <dev/atapi/atapilink.h>
@@ -94,9 +96,17 @@ int	wdcprint	__P((void *, const char *));
 void	wdcattach	__P((struct device *, struct device *, void *));
 int	wdcintr		__P((void *));
 
-struct cfattach wdc_ca = {
+#if NWDC_ISA
+struct cfattach wdc_isa_ca = {
 	sizeof(struct wdc_softc), wdcprobe, wdcattach
 };
+#endif
+
+#if NWDC_ISAPNP
+struct cfattach wdc_isapnp_ca = {
+	sizeof(struct wdc_softc), wdcprobe, wdcattach
+};
+#endif
 
 struct cfdriver wdc_cd = {
 	NULL, "wdc", DV_DULL
@@ -137,6 +147,14 @@ static int wdc_nxfer;
 #define WDDEBUG_PRINT(args)
 #endif
 
+/* Macro for determining bus type. */
+#if NWDC_ISAPNP
+#define IS_ISAPNP(parent) \
+	!strcmp((parent)->dv_cfdata->cf_driver->cd_name, "isapnp")
+#else
+#define IS_ISAPNP(parent) 0
+#endif
+
 int
 wdcprobe(parent, match, aux)
 	struct device *parent;
@@ -144,8 +162,12 @@ wdcprobe(parent, match, aux)
 {
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
+	bus_space_handle_t ioh_ctl;
 	struct wdc_softc *wdc = match;
 	struct isa_attach_args *ia = aux;
+#ifdef notyet
+	int err;
+#endif
 
 #if NISADMA == 0
 	if (ia->ia_drq != DRQUNK) {
@@ -155,9 +177,18 @@ wdcprobe(parent, match, aux)
 #endif
 
 	wdc->sc_iot = iot = ia->ia_iot;
-	if (bus_space_map(iot, ia->ia_iobase, 8, 0, &ioh))
-		return 0;
+	if (IS_ISAPNP(parent)) {
+		ioh = ia->ipa_io[0].h;
+		ioh_ctl = ia->ipa_io[1].h;
+	} else {
+		if (bus_space_map(iot, ia->ia_iobase, 8, 0, &ioh))
+			return 0;
+		if (bus_space_map(iot, ia->ia_iobase + WDCTL_OFFSET,
+				  1, 0, &ioh_ctl))
+			return 0;
+	}
 	wdc->sc_ioh = ioh;
+	wdc->sc_ioh_ctl = ioh_ctl;
 
 	/* Check if we have registers that work. */
 	/* Error register not writable, */
@@ -181,7 +212,7 @@ wdcprobe(parent, match, aux)
 
 	if (wdcreset(wdc, WDCRESET_SILENT) != 0) {
 		/*
-		 * if the reset failed,, there is no master. test for ATAPI
+		 * If the reset failed, there is no master. test for ATAPI
 		 * signature on the slave device. If no ATAPI slave, wait 5s
 		 * and retry a reset.
 		 */
@@ -212,16 +243,32 @@ wdcprobe(parent, match, aux)
 	if (wait_for_unbusy(wdc) < 0)
 		goto nomatch;
 
+#ifdef notyet
+	/* See if the drive(s) are alive. */
+	err = bus_space_read_1(iot, ioh, wd_error);
+	if (err && (err != 0x01)) {
+		if (err & 0x80) {
+			/* Select drive 1. */
+			bus_space_write_1(iot, ioh, wd_sdh, WDSD_IBM | 0x10);
+			(void) wait_for_unbusy(wdc);
+		
+			err = bus_space_read_1(iot, ioh, wd_error);
+			if ((err != 0x01) && (err != 0x81))
+				goto nomatch;
+		} else
+			goto nomatch;
+	}
+#endif
+
 	ia->ia_iosize = 8;
 	ia->ia_msize = 0;
-#ifdef notyet
-	/* when we are ready for it... */
-	bus_space_unmap(iot, ioh, 8);
-#endif
 	return 1;
 
 nomatch:
-	bus_space_unmap(iot, ioh, 8);
+	if (!IS_ISAPNP(parent)) {
+		bus_space_unmap(iot, ioh, 8);
+		bus_space_unmap(iot, ioh_ctl, 1);
+	}
 	return 0;
 }
 
@@ -246,9 +293,9 @@ wdcattach(parent, self, aux)
 	struct isa_attach_args *ia = aux;
 #if NWD > 0
 	int drive;
-#endif	/* NWD */
 	bus_space_tag_t iot = wdc->sc_iot;
 	bus_space_handle_t ioh = wdc->sc_ioh;
+#endif	/* NWD */
 
 	TAILQ_INIT(&wdc->sc_xfer);
 	wdc->sc_drq = ia->ia_drq;
@@ -395,6 +442,9 @@ wdc_ata_start(wdc, xfer)
 {
 	bus_space_tag_t iot = wdc->sc_iot;
 	bus_space_handle_t ioh = wdc->sc_ioh;
+#ifdef WDDEBUG
+	bus_space_handle_t ioh_ctl = wdc->sc_ioh_ctl;
+#endif
 	struct wd_link *d_link = xfer->d_link;
 	struct buf *bp = xfer->c_bp;
 	int nblks;
@@ -445,7 +495,7 @@ wdc_ata_start(wdc, xfer)
 		    xfer->c_bcount, xfer->c_blkno));
 	} else {
 		WDDEBUG_PRINT((" %d)0x%x", xfer->c_skip,
-		    bus_space_read_1(iot, ioh, wd_altsts)));
+		    bus_space_read_1(iot, ioh_ctl, wd_altsts)));
 	}
 
 	/*
@@ -575,7 +625,7 @@ wdc_ata_start(wdc, xfer)
 
 		WDDEBUG_PRINT(("sector %d cylin %d head %d addr %x sts %x\n",
 		    sector, cylin, head, xfer->databuf,
-		    bus_space_read_1(iot, ioh, wd_altsts)));
+		    bus_space_read_1(iot, ioh_ctl, wd_altsts)));
 
 	} else if (xfer->c_nblks > 1) {
 		/* The number of blocks in the last stretch may be smaller. */
@@ -865,23 +915,21 @@ wdc_get_parms(d_link)
 		d_link->sc_params.wdp_vendor5[0] = (u_int8_t)(tb[51] & 0xff);
 		d_link->sc_params.wdp_dmatiming = (u_int8_t)(tb[51] >> 8 &
 		    0xff);
-		d_link->sc_params.wdp_capvalid = (u_int16_t)tb[52];
-		d_link->sc_params.wdp_curcyls = (u_int16_t)tb[53];
-		d_link->sc_params.wdp_curheads = (u_int16_t)tb[54];
-		d_link->sc_params.wdp_cursectors = (u_int16_t)tb[55];
-		d_link->sc_params.wdp_curcapacity[0] = (u_int16_t)tb[56];
-		d_link->sc_params.wdp_curcapacity[1] = (u_int16_t)tb[57];
-		d_link->sc_params.wdp_curmulti = (u_int8_t)(tb[58] & 0xff);
-		d_link->sc_params.wdp_valmulti = (u_int8_t)(tb[58] >> 8 & 0xff);
-		d_link->sc_params.wdp_lbacapacity[0] = (u_int16_t)tb[59];
-		d_link->sc_params.wdp_lbacapacity[1] = (u_int16_t)tb[60];
-		d_link->sc_params.wdp_dma1word = (u_int16_t)tb[61];
-		d_link->sc_params.wdp_dmamword = (u_int16_t)tb[62];
-		d_link->sc_params.wdp_eidepiomode = (u_int16_t)tb[63];
-		d_link->sc_params.wdp_eidedmamin = (u_int16_t)tb[64];
-		d_link->sc_params.wdp_eidedmatime = (u_int16_t)tb[65];
-		d_link->sc_params.wdp_eidepiotime = (u_int16_t)tb[66];
-		d_link->sc_params.wdp_eidepioiordy = (u_int16_t)tb[67];
+		d_link->sc_params.wdp_capvalid = (u_int16_t)tb[53];
+		d_link->sc_params.wdp_curcyls = (u_int16_t)tb[54];
+		d_link->sc_params.wdp_curheads = (u_int16_t)tb[55];
+		d_link->sc_params.wdp_cursectors = (u_int16_t)tb[56];
+		d_link->sc_params.wdp_curcapacity = ((u_int32_t)tb[58] << 16) + tb[57];
+		d_link->sc_params.wdp_curmulti = (u_int8_t)(tb[59] & 0xff);
+		d_link->sc_params.wdp_valmulti = (u_int8_t)(tb[59] >> 8 & 0xff);
+		d_link->sc_params.wdp_lbacapacity = ((u_int32_t)tb[61] << 16) + tb[60];
+		d_link->sc_params.wdp_dma1word = (u_int16_t)tb[62];
+		d_link->sc_params.wdp_dmamword = (u_int16_t)tb[63];
+		d_link->sc_params.wdp_eidepiomode = (u_int16_t)tb[64];
+		d_link->sc_params.wdp_eidedmamin = (u_int16_t)tb[65];
+		d_link->sc_params.wdp_eidedmatime = (u_int16_t)tb[66];
+		d_link->sc_params.wdp_eidepiotime = (u_int16_t)tb[67];
+		d_link->sc_params.wdp_eidepioiordy = (u_int16_t)tb[68];
 	}
 
 	/* Clear any leftover interrupt. */
@@ -1191,7 +1239,7 @@ wdc_atapi_get_params(ab_link, drive, id)
 	wdcbit_bucket(wdc, excess);
 
  end:	/* Restart the queue. */
-	WDDEBUG_PRINT(("wdcstart from wdc_atapi_get_parms flags %d\n",
+	WDDEBUG_PRINT(("wdcstart from wdc_atapi_get_params flags %d\n",
 	    wdc->sc_flags));
 	wdc->sc_flags &= ~WDCF_ACTIVE;
 	wdcstart(wdc);
@@ -1207,6 +1255,7 @@ wdc_atapi_send_command_packet(ab_link, acp)
 	struct wdc_softc *wdc = (void*)ab_link->wdc_softc;
 	bus_space_tag_t iot = wdc->sc_iot;
 	bus_space_handle_t ioh = wdc->sc_ioh;
+	bus_space_handle_t ioh_ctl = wdc->sc_ioh_ctl;
 	struct wdc_xfer *xfer;
 	u_int8_t flags = acp->flags & 0xff;
 
@@ -1239,7 +1288,7 @@ wdc_atapi_send_command_packet(ab_link, acp)
 		}
 
 		/* Turn off interrupts.  */
-		bus_space_write_1(iot, ioh, wd_ctlr, WDCTL_4BIT | WDCTL_IDS);
+		bus_space_write_1(iot, ioh_ctl, wd_ctlr, WDCTL_4BIT|WDCTL_IDS);
 		delay(1000);
 
 		if (wdccommand((struct wd_link*)ab_link,
@@ -1280,7 +1329,7 @@ wdc_atapi_send_command_packet(ab_link, acp)
 		}
 
 		/* Turn on interrupts again. */
-		bus_space_write_1(iot, ioh, wd_ctlr, WDCTL_4BIT);
+		bus_space_write_1(iot, ioh_ctl, wd_ctlr, WDCTL_4BIT);
 		delay(1000);
 
 		wdc->sc_flags &= ~(WDCF_IRQ_WAIT | WDCF_SINGLE | WDCF_ERROR);
@@ -1501,7 +1550,15 @@ wdcintr(arg)
 	struct wdc_softc *wdc = arg;
 	struct wdc_xfer *xfer;
 
-	if ((wdc->sc_flags & WDCF_IRQ_WAIT) == 0) {
+	/*
+	 * It appears that some drives are causing the controller to
+	 * interrupt too quickly.  It also appears that such drives do not
+	 * conform to the MMC2 specifications.  This needs to be fixed
+	 * correctly and the extra check for NULL removed from the following
+	 * if().
+	 */
+	if (((wdc->sc_flags & WDCF_IRQ_WAIT) == 0)
+	    || (wdc->sc_xfer.tqh_first == NULL)) {
 		bus_space_tag_t iot = wdc->sc_iot;
 		bus_space_handle_t ioh = wdc->sc_ioh;
 		u_char s;
@@ -1541,6 +1598,12 @@ wdcintr(arg)
 
 	wdc->sc_flags &= ~WDCF_IRQ_WAIT;
 	xfer = wdc->sc_xfer.tqh_first;
+	if (xfer == NULL) {
+#ifdef ATAPI_DEBUG
+		printf("wdcintr: null xfer\n");
+#endif
+		return 0;
+	}
 #if NATAPIBUS > 0 && NWD > 0
 	if (xfer->c_flags & C_ATAPI) {
 		(void)wdc_atapi_intr(wdc, xfer);
@@ -1565,14 +1628,15 @@ wdcreset(wdc, mode)
 {
 	bus_space_tag_t iot = wdc->sc_iot;
 	bus_space_handle_t ioh = wdc->sc_ioh;
+	bus_space_handle_t ioh_ctl = wdc->sc_ioh_ctl;
 
 	/* Reset the device. */
-	bus_space_write_1(iot, ioh, wd_ctlr, WDCTL_RST|WDCTL_IDS);
+	bus_space_write_1(iot, ioh_ctl, wd_ctlr, WDCTL_RST|WDCTL_IDS);
 	delay(1000);
-	bus_space_write_1(iot, ioh, wd_ctlr, WDCTL_IDS);
+	bus_space_write_1(iot, ioh_ctl, wd_ctlr, WDCTL_IDS);
 	delay(1000);
 	(void) bus_space_read_1(iot, ioh, wd_error);
-	bus_space_write_1(iot, ioh, wd_ctlr, WDCTL_4BIT);
+	bus_space_write_1(iot, ioh_ctl, wd_ctlr, WDCTL_4BIT);
 
 	if (wait_for_unbusy(wdc) < 0) {
 		if (mode != WDCRESET_SILENT)
@@ -1650,7 +1714,6 @@ wdcwait(wdc, mask)
 		wdc->sc_status = status = bus_space_read_1(iot, ioh,
 		    wd_status);
 		/*
-		 * XXX
 		 * If a single slave ATAPI device is attached, it may
 		 * have released the bus. Select it and try again.
 		 */

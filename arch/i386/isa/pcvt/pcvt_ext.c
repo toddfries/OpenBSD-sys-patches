@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcvt_ext.c,v 1.13 1998/03/28 19:16:04 deraadt Exp $	*/
+/*	$OpenBSD: pcvt_ext.c,v 1.17 1998/09/28 03:00:27 downsj Exp $	*/
 
 /*
  * Copyright (c) 1992, 1995 Hellmuth Michaelis and Joerg Wunsch.
@@ -123,6 +123,7 @@ static int regsaved = 0;	/* registers are saved to savearea */
  *	###############################################################
  *
  *---------------------------------------------------------------------------*/
+
 u_char
 vga_chipset(void)
 {
@@ -272,6 +273,9 @@ vga_chipset(void)
 			case 0xd3:
 				can_do_132col = 1;
 				return(VGA_TR9660);
+
+			case 0xf3:
+				return(VGA_TR9750);
 
 			default:
 				return(VGA_TRUNKNOWN);
@@ -642,6 +646,7 @@ vga_string(int number)
 		"TVGA 9200",
 		"TVGA 9440",
 		"TVGA 9660",
+		"TVGA 9750 (3DImage)",
 		"unknown Trident",
 		"S3 911",
 		"S3 924",
@@ -2283,15 +2288,7 @@ switch_screen(int n, int oldgrafx, int newgrafx)
 	/* update global screen pointers/variables */
 	current_video_screen = n;	/* current screen no */
 
-#if !PCVT_NETBSD && !(PCVT_FREEBSD > 110 && PCVT_FREEBSD < 200)
-	pcconsp = &pccons[n];		/* current tty */
-#elif PCVT_FREEBSD > 110 && PCVT_FREEBSD < 200
-	pcconsp = pccons[n];		/* current tty */
-#elif PCVT_NETBSD > 100
 	pcconsp = vs[n].vs_tty;		/* current tty */
-#else
-	pcconsp = pc_tty[n];		/* current tty */
-#endif
 
 	vsp = &vs[n];			/* current video state ptr */
 
@@ -2555,16 +2552,6 @@ vgapage(int new_screen)
 		{
 			/* we are committed */
 			vt_switch_pending = 0;
-
-#if PCVT_FREEBSD > 206
-			/*
-			 * XXX: If pcvt is acting as the systems console,
-			 * avoid panics going to the debugger while we are in
-			 * process mode.
-			 */
-			if(pcvt_is_console)
-				cons_unavail = 0;
-#endif
 		}
 	}
 	return 0;
@@ -2641,16 +2628,6 @@ usl_vt_ioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 		vsp->proc = p;
 		vsp->pid = p->p_pid;
 
-#if PCVT_FREEBSD > 206
-		/*
-		 * XXX: If pcvt is acting as the systems console,
-		 * avoid panics going to the debugger while we are in
-		 * process mode.
-		 */
-		if(pcvt_is_console)
-			cons_unavail = (newmode.mode == VT_PROCESS);
-#endif
-
 		splx(opri);
 		return 0;
 
@@ -2724,12 +2701,6 @@ usl_vt_ioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 				{
 					/* we are committed */
 					vt_switch_pending = 0;
-
-#if PCVT_FREEBSD > 206
-					/* XXX */
-					if(pcvt_is_console)
-						cons_unavail = 0;
-#endif
 				}
 				return 0;
 			}
@@ -2742,11 +2713,6 @@ usl_vt_ioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 				vt_switch_pending = 0;
 				vsp->vt_status &= ~VT_WAIT_ACK;
 
-#if PCVT_FREEBSD > 206
-				/* XXX */
-				if(pcvt_is_console)
-					cons_unavail = 1;
-#endif
 				return 0;
 			}
 			break;
@@ -2812,29 +2778,24 @@ usl_vt_ioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 		return (error == ERESTART) ? PCVT_ERESTART : error;
 
 	case KDENABIO:
-		/* grant the process IO access; only allowed if euid == 0 */
+		/*
+		 * grant the process IO access; only allowed if euid == 0
+		 * and securelevel <= 1.  XXX -- this is a fairly serious
+		 * hole, but if closed at securelevel 1, would require
+		 * options INSECURE in order to use X at all.
+		 */
 	{
 
-#if (PCVT_NETBSD <= 100) || defined(COMPAT_10) || defined(COMPAT_11)
-#if PCVT_NETBSD > 9 || PCVT_FREEBSD >= 200
+#if defined(COMPAT_10) || defined(COMPAT_11) || defined(COMPAT_LINUX)
 		struct trapframe *fp = (struct trapframe *)p->p_md.md_regs;
-#elif PCVT_NETBSD || (PCVT_FREEBSD && PCVT_FREEBSD > 102)
-		struct trapframe *fp = (struct trapframe *)p->p_regs;
-#else
-		struct syscframe *fp = (struct syscframe *)p->p_regs;
-#endif
 #endif
 
-		if(suser(p->p_ucred, &p->p_acflag) != 0)
+		if (suser(p->p_ucred, &p->p_acflag) || securelevel > 1)
 			return (EPERM);
 
-#if (PCVT_NETBSD <= 100) || defined(COMPAT_10) || defined(COMPAT_11)
+#if defined(COMPAT_10) || defined(COMPAT_11) || defined(COMPAT_LINUX)
 		/* This is done by i386_iopl(3) now. */
-#if PCVT_NETBSD || (PCVT_FREEBSD && PCVT_FREEBSD > 102)
 		fp->tf_eflags |= PSL_IOPL;
-#else
-		fp->sf_eflags |= PSL_IOPL;
-#endif
 #endif
 
 		return 0;
@@ -2844,18 +2805,10 @@ usl_vt_ioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 		/* abandon IO access permission */
 	{
 
-#if (PCVT_NETBSD <= 100) || defined(COMPAT_10) || defined(COMPAT_11)
+#if defined(COMPAT_10) || defined(COMPAT_11) || defined(COMPAT_LINUX)
 		/* This is done by i386_iopl(3) now. */
-#if PCVT_NETBSD > 9 || PCVT_FREEBSD >= 200
 		struct trapframe *fp = (struct trapframe *)p->p_md.md_regs;
 		fp->tf_eflags &= ~PSL_IOPL;
-#elif PCVT_NETBSD || (PCVT_FREEBSD && PCVT_FREEBSD > 102)
-		struct trapframe *fp = (struct trapframe *)p->p_regs;
-		fp->tf_eflags &= ~PSL_IOPL;
-#else
-		struct syscframe *fp = (struct syscframe *)p->p_regs;
-		fp->sf_eflags &= ~PSL_IOPL;
-#endif
 #endif
 		return 0;
 	}
@@ -2924,16 +2877,11 @@ usl_vt_ioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 			int duration = *(int *)data >> 16;
 			int pitch = *(int *)data & 0xffff;
 
-#if PCVT_NETBSD
 			if(pitch != 0)
 			{
 			    sysbeep(PCVT_SYSBEEPF / pitch,
 				    duration * hz / 1000);
 			}
-#else /* PCVT_NETBSD */
-			sysbeep(pitch, duration * hz / 3000);
-#endif /* PCVT_NETBSD */
-
 		}
 		else
 		{

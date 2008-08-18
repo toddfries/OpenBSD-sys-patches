@@ -1,3 +1,4 @@
+/*	$OpenBSD: cpu.h,v 1.10 1998/10/15 21:30:16 imp Exp $	*/
 /*	$NetBSD: cpu.h,v 1.15 1996/03/23 20:28:19 jonathan Exp $	*/
 
 /*-
@@ -44,8 +45,27 @@
 #include <machine/machConst.h>
 
 /*
- * Exported definitions unique to NetBSD/mips cpu support.
+ * Exported definitions unique to OpenBSD/mips cpu support.
  */
+
+/*
+ * Macros to find the CPU architecture we're on at run-time,
+ * or if possible, at compile-time.
+ */
+
+#if (MIPS1 + MIPS3) == 1
+#ifdef MIPS1
+# define CPUISMIPS3	0
+#endif /* mips1 */
+
+#ifdef MIPS3
+#  define CPUISMIPS3	 1
+#endif /* mips1 */
+
+#else /* run-time test */
+extern int cpu_arch;
+#define CPUISMIPS3	(cpu_arch == 3)
+#endif /* run-time test */
 
 /*
  * definitions of cpu-dependent requirements
@@ -72,14 +92,14 @@ struct clockframe {
  */
 
 /* r3000 versions */
-#define	CLKF_USERMODE_R3K(framep)	((framep)->sr & MACH_SR_KU_PREV)
+#define	CLKF_USERMODE_R3K(framep)	((framep)->sr & MIPS_SR_KU_PREV)
 #define	CLKF_BASEPRI_R3K(framep)	\
-	((~(framep)->sr & (MACH_INT_MASK | MACH_SR_INT_ENA_PREV)) == 0)
+	((~(framep)->sr & (MIPS_INT_MASK | MIPS_SR_INT_ENA_PREV)) == 0)
 
 /* r4000 versions */
-#define	CLKF_USERMODE_R4K(framep)	((framep)->sr & MACH_SR_KSU_USER)
+#define	CLKF_USERMODE_R4K(framep)	((framep)->sr & MIPS_SR_KSU_USER)
 #define	CLKF_BASEPRI_R4K(framep)	\
-	((~(framep)->sr & (MACH_INT_MASK | MACH_SR_INT_ENAB)) == 0)
+	((~(framep)->sr & (MIPS_INT_MASK | MIPS_SR_INT_ENAB)) == 0)
 
 #define	CLKF_PC(framep)		((framep)->pc)
 #define	CLKF_INTR(framep)	(0)
@@ -132,11 +152,13 @@ union cpuprid {
  * CTL_MACHDEP definitions.
  */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
-#define	CPU_MAXID		2	/* number of valid machdep ids */
+#define CPU_LED_BLINK		2
+#define	CPU_MAXID		3	/* number of valid machdep ids */
 
 #define CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
+	{ "led_blink", CTLTYPE_INT }, \
 }
 
 
