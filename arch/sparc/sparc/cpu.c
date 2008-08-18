@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.9 1997/09/17 06:47:16 downsj Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.14 1998/04/17 18:18:04 deraadt Exp $	*/
 /*	$NetBSD: cpu.c,v 1.56 1997/09/15 20:52:36 pk Exp $ */
 
 /*
@@ -75,10 +75,12 @@
 /* The following are used externally (sysctl_hw). */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
-char	cpu_model[100];
+char	cpu_model[130];
+char	cpu_hotfix[40];
+extern char mainbus_model[];		/* from autoconf.c */
 
 /* The CPU configuration driver. */
-static void cpu_attach __P((struct device *, struct device *, void *));
+void cpu_attach __P((struct device *, struct device *, void *));
 int  cpu_match __P((struct device *, void *, void *));
 
 struct cfattach cpu_ca = {
@@ -89,7 +91,7 @@ struct cfdriver cpu_cd = {
 	NULL, "cpu", DV_CPU
 };
 
-static char *fsrtoname __P((int, int, int, char *));
+char *fsrtoname __P((int, int, int, char *));
 void cache_print __P((struct cpu_softc *));
 void cpu_spinup __P((struct cpu_softc *));
 void fpu_init __P((struct cpu_softc *));
@@ -156,7 +158,7 @@ cpu_match(parent, vcf, aux)
  * Discover interesting goop about the virtual address cache
  * (slightly funny place to do it, but this is where it is to be found).
  */
-static void
+void
 cpu_attach(parent, self, aux)
 	struct device *parent;
 	struct device *self;
@@ -167,6 +169,7 @@ cpu_attach(parent, self, aux)
 	register char *fpuname;
 	struct confargs *ca = aux;
 	char fpbuf[40];
+	char model[100];
 
 	sc->node = node = ca->ca_ra.ra_node;
 
@@ -200,14 +203,18 @@ cpu_attach(parent, self, aux)
 		fpu_init(sc);
 		if (foundfpu)
 			fpuname = fsrtoname(sc->cpu_impl, sc->cpu_vers,
-					    sc->fpuvers, fpbuf);
+			    sc->fpuvers, fpbuf);
 	}
 	/* XXX - multi-processor: take care of `cpu_model' and `foundfpu' */
 
-	sprintf(cpu_model, "%s @ %s MHz, %s FPU",
-		sc->cpu_name,
-		clockfreq(sc->hz), fpuname);
-	printf(": %s\n", cpu_model);
+	sprintf(model, "%s @ %s MHz, %s FPU", sc->cpu_name,
+	    clockfreq(sc->hz), fpuname);
+	printf(": %s", model);
+	sprintf(cpu_model, "%s, %s", mainbus_model, model);
+
+	if (cpu_hotfix[0])
+		printf("; %s", cpu_hotfix);
+	printf("\n");
 
 	if (sc->cacheinfo.c_totalsize != 0)
 		cache_print(sc);
@@ -267,7 +274,7 @@ fpu_init(sc)
 	fpstate.fs_fsr = 7 << FSR_VER_SHIFT;
 	savefpstate(&fpstate);
 	sc->fpuvers =
-		(fpstate.fs_fsr >> FSR_VER_SHIFT) & (FSR_VER >> FSR_VER_SHIFT);
+	    (fpstate.fs_fsr >> FSR_VER_SHIFT) & (FSR_VER >> FSR_VER_SHIFT);
 
 	if (sc->fpuvers != 7)
 		foundfpu = 1;
@@ -287,31 +294,30 @@ cache_print(sc)
 		printf("%s", (ci->c_physical ? " physical" : ""));
 		if (ci->ic_totalsize > 0) {
 			printf("%s%dK instruction (%d b/l)", sep,
-			       ci->ic_totalsize/1024, ci->ic_linesize);
+			    ci->ic_totalsize/1024, ci->ic_linesize);
 			sep = ", ";
 		}
 		if (ci->dc_totalsize > 0) {
 			printf("%s%dK data (%d b/l)", sep,
-			       ci->dc_totalsize/1024, ci->dc_linesize);
+			    ci->dc_totalsize/1024, ci->dc_linesize);
 			sep = ", ";
 		}
 		printf(" ");
 	} else if (ci->c_physical) {
 		/* combined, physical */
 		printf(" physical %dK combined cache (%d bytes/line) ",
-		       ci->c_totalsize/1024, ci->c_linesize);
+		    ci->c_totalsize/1024, ci->c_linesize);
 	} else {
 		/* combined, virtual */
 		printf(" %dK byte write-%s, %d bytes/line, %cw flush ",
-		       ci->c_totalsize/1024,
-		       (ci->c_vactype == VAC_WRITETHROUGH) ? "through" : "back",
-		       ci->c_linesize,
-		       ci->c_hwflush ? 'h' : 's');
+		    ci->c_totalsize/1024,
+		    (ci->c_vactype == VAC_WRITETHROUGH) ? "through" : "back",
+		    ci->c_linesize, ci->c_hwflush ? 'h' : 's');
 	}
 
 	if (ci->ec_totalsize > 0) {
 		printf(", %dK external (%d b/l)",
-		       ci->ec_totalsize/1024, ci->ec_linesize);
+		    ci->ec_totalsize/1024, ci->ec_linesize);
 	}
 }
 
@@ -575,7 +581,7 @@ sun4_hotfix(sc)
 {
 	if ((sc->flags & CPUFLG_SUN4CACHEBUG) != 0) {
 		kvm_uncache((caddr_t)trapbase, 1);
-		printf(": cache chip bug; trap page uncached");
+		sprintf(cpu_hotfix, "cache chip bug - trap page uncached");
 	}
 
 }
@@ -1198,7 +1204,7 @@ static struct info fpu_types[] = {
 	{ 0 }
 };
 
-static char *
+char *
 fsrtoname(impl, vers, fver, buf)
 	register int impl, vers, fver;
 	char *buf;

@@ -1,5 +1,5 @@
-/*	$OpenBSD: vm_fault.c,v 1.12 1997/10/06 20:21:17 deraadt Exp $	*/
-/*	$NetBSD: vm_fault.c,v 1.20 1997/02/18 13:39:33 mrg Exp $	*/
+/*	$OpenBSD: vm_fault.c,v 1.16 1998/03/30 18:50:59 niklas Exp $	*/
+/*	$NetBSD: vm_fault.c,v 1.21 1998/01/31 04:02:39 ross Exp $	*/
 
 /* 
  * Copyright (c) 1991, 1993
@@ -36,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)vm_fault.c	8.4 (Berkeley) 1/12/94
+ *	@(#)vm_fault.c	8.5 (Berkeley) 1/9/95
  *
  *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
@@ -245,7 +245,7 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 
 				PAGE_ASSERT_WAIT(m, !change_wiring);
 				UNLOCK_THINGS;
-				thread_block();
+				thread_block("mFltbsy");
 				wait_result = current_thread()->wait_result;
 				vm_object_deallocate(first_object);
 				if (wait_result != THREAD_AWAKENED)
@@ -255,7 +255,7 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 				PAGE_ASSERT_WAIT(m, !change_wiring);
 				UNLOCK_THINGS;
 				cnt.v_intrans++;
-				thread_block();
+				thread_block("mFltbsy2");
 				vm_object_deallocate(first_object);
 				goto RetryFault;
 #endif
@@ -286,6 +286,8 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 			 * Mark page busy for other threads.
 			 */
 			m->flags |= PG_BUSY;
+			if (curproc != &proc0)
+				curproc->p_addr->u_stats.p_ru.ru_minflt++;
 			break;
 		}
 
@@ -300,7 +302,7 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 
 			if (m == NULL) {
 				UNLOCK_AND_DEALLOCATE;
-				VM_WAIT;
+				vm_wait("fVfault1");
 				goto RetryFault;
 			}
 		}
@@ -320,7 +322,6 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 			 */
 			UNLOCK_MAP;
 			cnt.v_pageins++;
-			curproc->p_addr->u_stats.p_ru.ru_majflt++;
 			rv = vm_pager_get(object->pager, m, TRUE);
 
 			/*
@@ -345,6 +346,9 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 				m->flags &= ~PG_FAKE;
 				m->flags |= PG_CLEAN;
 				pmap_clear_modify(VM_PAGE_TO_PHYS(m));
+				if (curproc != &proc0)
+					curproc->p_addr->
+					    u_stats.p_ru.ru_majflt++;
 				break;
 			}
 
@@ -409,6 +413,8 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 			vm_page_zero_fill(m);
 			cnt.v_zfod++;
 			m->flags &= ~PG_FAKE;
+			if (curproc != &proc0)
+				curproc->p_addr->u_stats.p_ru.ru_minflt++;
 			break;
 		}
 		else {
@@ -574,7 +580,7 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 					copy_object->ref_count--;
 					vm_object_unlock(copy_object);
 					UNLOCK_THINGS;
-					thread_block();
+					thread_block("mCpybsy");
 					wait_result =
 					    current_thread()->wait_result;
 					vm_object_deallocate(first_object);
@@ -592,7 +598,7 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 					copy_object->ref_count--;
 					vm_object_unlock(copy_object);
 					UNLOCK_THINGS;
-					thread_block();
+					thread_block("mCpybsy2");
 					vm_object_deallocate(first_object);
 					goto RetryFault;
 #endif
@@ -627,7 +633,7 @@ vm_fault(map, vaddr, fault_type, change_wiring)
 					copy_object->ref_count--;
 					vm_object_unlock(copy_object);
 					UNLOCK_AND_DEALLOCATE;
-					VM_WAIT;
+					vm_wait("fCopy");
 					goto RetryFault;
 				}
 
@@ -986,7 +992,7 @@ vm_fault_copy_entry(dst_map, src_map, dst_entry, src_entry)
 			dst_m = vm_page_alloc(dst_object, dst_offset);
 			if (dst_m == NULL) {
 				vm_object_unlock(dst_object);
-				VM_WAIT;
+				vm_wait("fVm_copy");
 				vm_object_lock(dst_object);
 			}
 		} while (dst_m == NULL);

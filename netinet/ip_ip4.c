@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ip4.c,v 1.14 1997/10/02 02:31:05 deraadt Exp $	*/
+/*	$OpenBSD: ip_ip4.c,v 1.16 1998/03/18 10:51:36 provos Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -9,7 +9,11 @@
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
  * by Angelos D. Keromytis, kermit@forthnet.gr.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis and Angelos D. Keromytis.
+ * Additional transforms and features in 1997 by Angelos D. Keromytis and
+ * Niels Provos.
+ *
+ * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -61,7 +65,6 @@
 #include <dev/rndvar.h>
 #include <sys/syslog.h>
 
-void	ip4_input __P((struct mbuf *, int));
 
 /*
  * ip4_input gets called when we receive an encapsulated packet,
@@ -71,11 +74,23 @@ void	ip4_input __P((struct mbuf *, int));
  */
 
 void
-ip4_input(register struct mbuf *m, int iphlen)
+#if __STDC__
+ip4_input(struct mbuf *m, ...)
+#else
+ip4_input(m, va_alist)
+	struct mbuf *m;
+	va_dcl
+#endif
 {
+    int iphlen;
     struct ip *ipo, *ipi;
     struct ifqueue *ifq = NULL;
     int s;
+    va_list ap;
+
+    va_start(ap, m);
+    iphlen = va_arg(ap, int);
+    va_end(ap);
 
     ip4stat.ip4s_ipackets++;
 

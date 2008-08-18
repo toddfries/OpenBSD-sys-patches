@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_object.h,v 1.7 1997/10/06 20:21:24 deraadt Exp $	*/
+/*	$OpenBSD: vm_object.h,v 1.9 1998/03/01 00:38:17 niklas Exp $	*/
 /*	$NetBSD: vm_object.h,v 1.16 1995/03/29 22:10:28 briggs Exp $	*/
 
 /* 
@@ -36,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)vm_object.h	8.3 (Berkeley) 1/12/94
+ *	@(#)vm_object.h	8.4 (Berkeley) 1/9/95
  *
  *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
@@ -150,7 +150,7 @@ vm_object_t	kmem_object;
 	do {								\
 		(object)->flags |= OBJ_WAITING;				\
 		thread_sleep_msg((event), &(object)->Lock,		\
-		    (interruptible), (where));				\
+		    (interruptible), (where), 0);			\
 	} while (0)
 
 #define	vm_object_wakeup(object) \
@@ -184,11 +184,11 @@ vm_object_t	kmem_object;
 			vm_object_wakeup((object));			\
 	} while (0)
 
-#define	vm_object_paging_wait(object) \
+#define	vm_object_paging_wait(object,msg) \
 	do {								\
 		while (vm_object_paging((object))) {			\
 			vm_object_sleep((object), (object), FALSE,	\
-			    "vospgw");					\
+			    (msg));					\
 			vm_object_lock((object));			\
 		}							\
 	} while (0)

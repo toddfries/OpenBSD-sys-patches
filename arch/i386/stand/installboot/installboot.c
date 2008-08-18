@@ -1,4 +1,4 @@
-/*	$OpenBSD: installboot.c,v 1.26 1997/10/28 10:06:34 deraadt Exp $	*/
+/*	$OpenBSD: installboot.c,v 1.30.2.1 1998/04/20 07:26:32 deraadt Exp $	*/
 /*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
 
 /*
@@ -87,8 +87,8 @@ static int	record_block
 static void
 usage()
 {
-	fprintf(stderr, "usage: %s [-n] [-v] [-s <spt>] [-h <tpc>] "
-		"<boot> <proto> <device>\n", __progname);
+	fprintf(stderr, "usage: %s [-n] [-v] [-s sec-per-track] [-h track-per-cyl] "
+	    "boot biosboot device\n", __progname);
 	exit(1);
 }
 
@@ -343,7 +343,7 @@ devread(fd, buf, blk, size, msg)
 	size_t	size;
 	char	*msg;
 {
-	if (lseek(fd, dbtob(blk), SEEK_SET) != dbtob(blk))
+	if (lseek(fd, dbtob((off_t)blk), SEEK_SET) != dbtob((off_t)blk))
 		err(1, "%s: devread: lseek", msg);
 
 	if (read(fd, buf, size) != size)
@@ -444,8 +444,6 @@ loadblocknums(boot, devfd, dl)
 	ndb = howmany(ip->di_size, fs->fs_bsize);
 	if (ndb <= 0)
 		errx(1, "No blocks to load");
-	if (ndb > maxblocknum)
-		errx(1, "Too many blocks");
 	if (verbose)
 		fprintf(stderr, "Will load %d blocks of size %d each.\n",
 			ndb, fs->fs_bsize);
@@ -458,16 +456,20 @@ loadblocknums(boot, devfd, dl)
 	}
 
 	if (verbose)
-		fprintf(stderr, "Using disk geometry of %u spt and %u tpc.\n",
+		fprintf(stderr, "Using disk geometry of %u sectors and %u heads.\n",
 			dl->d_nsectors, dl->d_secpercyl/dl->d_nsectors);
+
 	/*
 	 * Get the block numbers; we don't handle fragments
 	 */
 	ap = ip->di_db;
 	bt = block_table_p;
-	for (i = 0; i < NDADDR && *ap && ndb; i++, ap++, ndb--)
+	for (i = 0; i < NDADDR && *ap && ndb; i++, ap++, ndb--) {
 		bt += record_block(bt, pl->p_offset + fsbtodb(fs, *ap),
 					    fs->fs_bsize / 512, dl);
+		if ((bt - block_table_p) / 4 > maxblocknum)
+			errx(1, "Too many blocks");
+	}
 	if (ndb != 0) {
 
 		/*
@@ -478,9 +480,12 @@ loadblocknums(boot, devfd, dl)
 		devread(devfd, buf, pl->p_offset + blk, fs->fs_bsize,
 			"indirect block");
 		ap = (daddr_t *)buf;
-		for (; i < NINDIR(fs) && *ap && ndb; i++, ap++, ndb--)
+		for (; i < NINDIR(fs) && *ap && ndb; i++, ap++, ndb--) {
 			bt += record_block(bt, pl->p_offset + fsbtodb(fs, *ap),
 					   fs->fs_bsize / 512, dl);
+			if ((bt - block_table_p) / 4 > maxblocknum)
+				errx(1, "Too many blocks");
+		}
 	}
 
 	/* write out remaining piece */
@@ -488,6 +493,8 @@ loadblocknums(boot, devfd, dl)
 	/* and again */
 	bt += record_block(bt, 0, 0, dl);
 	*block_count_p = (bt - block_table_p) / 4;
+	if (*block_count_p > maxblocknum)
+		errx(1, "Too many blocks");
 
 	if (verbose)
 		fprintf(stderr, "%s: %d entries total\n",
@@ -506,6 +513,7 @@ record_block(bt, blk, bs, dl)
 	static u_int ss = 0, l = 0, i = 0; /* start and len of group */
 	int ret = 0;
 
+	/* printf("%u, %u\n", blk, bs); */
 	if (ss == 0) { /* very beginning */
 		ss = blk;
 		l = bs;
@@ -532,18 +540,20 @@ record_block(bt, blk, bs, dl)
 		if (verbose)
 			fprintf(stderr, "%2d: %2d @(%d %d %d) (%d-%d)\n",
 				i, bt[3], c, bt[2], s, ss, ss + bt[3] - 1);
+		i++;
 
-		if ((ss % dl->d_nsectors + l) >= dl->d_nsectors) {
-			ss += bt[3];
-			l -= bt[3];
-			l += bs;
-		} else {
+		ss += bt[3];
+		l -= bt[3];
+		if ((ss + l) != blk) {
+			/* printf ("l=%u\n", l); */
+		 	if (l)
+				ret += record_block(bt + 4, 0, 0, dl);
 			ss = blk;
 			l = bs;
-		}
+		} else
+			l += bs;
 
-		i++;
-		ret = 4;
+		ret += 4;
 	} else {
 		l += bs;
 	}

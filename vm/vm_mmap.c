@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_mmap.c,v 1.8 1997/07/25 06:03:08 mickey Exp $	*/
+/*	$OpenBSD: vm_mmap.c,v 1.13 1998/02/25 22:13:46 deraadt Exp $	*/
 /*	$NetBSD: vm_mmap.c,v 1.47 1996/03/16 23:15:23 christos Exp $	*/
 
 /*
@@ -123,7 +123,7 @@ sys_mmap(p, v, retval)
 	register_t *retval;
 {
 	register struct sys_mmap_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
 		syscallarg(int) prot;
 		syscallarg(int) flags;
@@ -213,8 +213,7 @@ sys_mmap(p, v, retval)
 		if (fp->f_type != DTYPE_VNODE)
 			return (EINVAL);
 		vp = (struct vnode *)fp->f_data;
-		if (vp->v_type != VREG && vp->v_type != VCHR)
-			return (EINVAL);
+
 		/*
 		 * XXX hack to handle use of /dev/zero to map anon
 		 * memory (ala SunOS).
@@ -223,6 +222,14 @@ sys_mmap(p, v, retval)
 			flags |= MAP_ANON;
 			goto is_anon;
 		}
+
+		/*
+		 * Only files and cdevs are mappable, and cdevs does not
+		 * provide private mappings of any kind.
+		 */
+		if (vp->v_type != VREG &&
+		    (vp->v_type != VCHR || (flags & (MAP_PRIVATE|MAP_COPY))))
+			return (EINVAL);
 		/*
 		 * Ensure that file and memory protections are
 		 * compatible.  Note that we only worry about
@@ -237,12 +244,17 @@ sys_mmap(p, v, retval)
 			maxprot |= VM_PROT_READ;
 		else if (prot & PROT_READ)
 			return (EACCES);
-		if (flags & MAP_SHARED) {
-			if (fp->f_flag & FWRITE)
-				maxprot |= VM_PROT_WRITE;
-			else if (prot & PROT_WRITE)
-				return (EACCES);
-		} else
+
+		/*
+		 * If we are sharing potential changes (either via MAP_SHARED
+		 * or via the implicit sharing of character device mappings),
+		 * and we are trying to get write permission although we
+		 * opened it without asking for it, bail out.
+		 */
+		if (((flags & MAP_SHARED) != 0 || vp->v_type == VCHR) &&
+		    (fp->f_flag & FWRITE) == 0 && (prot & PROT_WRITE) != 0)
+			return (EACCES);
+		else
 			maxprot |= VM_PROT_WRITE;
 		handle = (caddr_t)vp;
 	} else {
@@ -271,21 +283,31 @@ sys_msync(p, v, retval)
 	register_t *retval;
 {
 	struct sys_msync_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
+		syscallarg(int) flags;
 	} */ *uap = v;
 	vm_offset_t addr;
 	vm_size_t size, pageoff;
 	vm_map_t map;
-	int rv;
+	int rv, flags;
 	boolean_t syncio, invalidate;
 
 	addr = (vm_offset_t)SCARG(uap, addr);
 	size = (vm_size_t)SCARG(uap, len);
+	flags = SCARG(uap, flags);
 #ifdef DEBUG
 	if (mmapdebug & (MDB_FOLLOW|MDB_SYNC))
 		printf("msync(%d): addr 0x%lx len %lx\n", p->p_pid, addr, size);
 #endif
+
+	/* sanity check flags */
+	if ((flags & ~(MS_ASYNC | MS_SYNC | MS_INVALIDATE)) != 0 ||
+	    (flags & (MS_ASYNC | MS_SYNC | MS_INVALIDATE)) == 0 ||
+	    (flags & (MS_ASYNC | MS_SYNC)) == (MS_ASYNC | MS_SYNC))
+		return (EINVAL);
+	if ((flags & (MS_ASYNC | MS_SYNC)) == 0)
+		flags |= MS_SYNC;
 
 	/*
 	 * Align the address to a page boundary,
@@ -297,8 +319,8 @@ sys_msync(p, v, retval)
 	size = (vm_size_t) round_page(size);
 
 	/* Disallow wrap-around. */
-	if (addr + (int)size < addr)
-		return (EINVAL);
+	if (addr + size < addr)
+		return (ENOMEM);
 
 	map = &p->p_vmspace->vm_map;
 	/*
@@ -316,7 +338,7 @@ sys_msync(p, v, retval)
 		rv = vm_map_lookup_entry(map, addr, &entry);
 		vm_map_unlock_read(map);
 		if (rv == FALSE)
-			return (EINVAL);
+			return (ENOMEM);
 		addr = entry->start;
 		size = entry->end - entry->start;
 	}
@@ -325,11 +347,20 @@ sys_msync(p, v, retval)
 		printf("msync: cleaning/flushing address range [0x%lx-0x%lx)\n",
 		       addr, addr+size);
 #endif
+
+#if 0
 	/*
-	 * Could pass this in as a third flag argument to implement
-	 * Sun's MS_ASYNC.
+	 * XXX Asynchronous msync() causes:
+	 *	. the process to hang on wchan "vospgw", and
+	 *	. a "vm_object_page_clean: pager_put error" message to
+	 *	  be printed by the kernel.
 	 */
+	syncio = (flags & MS_SYNC) ? TRUE : FALSE;
+#else
 	syncio = TRUE;
+#endif
+	invalidate = (flags & MS_INVALIDATE) ? TRUE : FALSE;
+
 	/*
 	 * XXX bummer, gotta flush all cached pages to ensure
 	 * consistency with the file system cache.  Otherwise, we could
@@ -344,9 +375,11 @@ sys_msync(p, v, retval)
 	case KERN_SUCCESS:
 		break;
 	case KERN_INVALID_ADDRESS:
-		return (EINVAL);	/* Sun returns ENOMEM? */
+		return (ENOMEM);
 	case KERN_FAILURE:
 		return (EIO);
+	case KERN_PAGES_LOCKED:
+		return (EBUSY);
 	default:
 		return (EINVAL);
 	}
@@ -360,7 +393,7 @@ sys_munmap(p, v, retval)
 	register_t *retval;
 {
 	register struct sys_munmap_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
 	} */ *uap = v;
 	vm_offset_t addr;
@@ -432,7 +465,7 @@ sys_mprotect(p, v, retval)
 	register_t *retval;
 {
 	struct sys_mprotect_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(int) len;
 		syscallarg(int) prot;
 	} */ *uap = v;
@@ -522,7 +555,7 @@ sys_madvise(p, v, retval)
 {
 #if 0
 	struct sys_madvise_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
 		syscallarg(int) behav;
 	} */ *uap = v;
@@ -541,7 +574,7 @@ sys_mincore(p, v, retval)
 {
 #if 0
 	struct sys_mincore_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
 		syscallarg(char *) vec;
 	} */ *uap = v;
@@ -558,7 +591,7 @@ sys_mlock(p, v, retval)
 	register_t *retval;
 {
 	struct sys_mlock_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
 	} */ *uap = v;
 	vm_offset_t addr;
@@ -607,7 +640,7 @@ sys_munlock(p, v, retval)
 	register_t *retval;
 {
 	struct sys_munlock_args /* {
-		syscallarg(caddr_t) addr;
+		syscallarg(void *) addr;
 		syscallarg(size_t) len;
 	} */ *uap = v;
 	vm_offset_t addr;

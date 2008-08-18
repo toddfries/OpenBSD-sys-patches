@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcvt_drv.c,v 1.16 1997/09/18 16:22:44 deraadt Exp $	*/
+/*	$OpenBSD: pcvt_drv.c,v 1.19 1998/02/22 21:35:33 niklas Exp $	*/
 
 /*
  * Copyright (c) 1992, 1995 Hellmuth Michaelis and Joerg Wunsch.
@@ -239,7 +239,7 @@ pcattach(struct isa_device *dev)
 			break;
 	}
 
-	printf("kbd, [R%s]\n", PCVT_REL);
+	printf("kbd\n");
 
 #if PCVT_NETBSD || (PCVT_FREEBSD > 110 && PCVT_FREEBSD < 200)
 
@@ -631,7 +631,7 @@ pctty(Dev_t dev)
 int
 pcioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 {
-	register error;
+	register int error;
 	register struct tty *tp;
 
 	if((tp = get_pccons(dev)) == NULL)
@@ -683,6 +683,7 @@ pcioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 
 	    i = K_RAW;
 	    error = usl_vt_ioctl(dev, KDSKBMODE, (caddr_t)&i, flag, p);
+	    ttyflush(tp, FREAD);
 	    return error;
 	  }
 
@@ -697,6 +698,7 @@ pcioctl(Dev_t dev, int cmd, caddr_t data, int flag, struct proc *p)
 
 	    i = K_XLATE;
 	    (void)usl_vt_ioctl(dev, KDSKBMODE, (caddr_t)&i, flag, p);
+	    ttyflush(tp, FREAD);
 	    return 0;
 	  }
 

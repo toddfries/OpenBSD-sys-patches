@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.6 1997/09/12 09:21:22 maja Exp $     */
+/*      $OpenBSD: pmap.h,v 1.8 1998/03/01 12:09:02 maja Exp $     */
 /*      $NetBSD: pmap.h,v 1.19 1997/07/06 22:38:29 ragge Exp $     */
 
 /* 
@@ -65,7 +65,7 @@ typedef struct pmap {
 	struct pcb		*pm_pcb; /* Pointer to PCB for this pmap */
 	int                      ref_count;   /* reference count        */
 	struct pmap_statistics   stats;       /* statistics             */
-	simple_lock_data_t       lock;        /* lock on pmap           */
+	simple_lock_data_t       pm_lock;     /* lock on pmap           */
 } *pmap_t;
 
 /*
@@ -121,6 +121,7 @@ extern	struct pmap kernel_pmap_store;
 
 /* Prototypes */
 void	pmap_bootstrap __P((void));
+vm_offset_t pmap_map __P((vm_offset_t, vm_offset_t, vm_offset_t, int));
 void	pmap_expandp0 __P((struct pmap *, int));
 void	pmap_expandp1 __P((struct pmap *));
 #endif PMAP_H

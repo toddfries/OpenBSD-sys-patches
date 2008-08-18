@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.21 1997/10/06 20:19:56 deraadt Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.26 1998/02/20 14:46:18 niklas Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -1001,6 +1001,7 @@ postsig(signum)
 	register sig_t action;
 	u_long code;
 	int mask, returnmask;
+	union sigval null_sigval;
 
 #ifdef DIAGNOSTIC
 	if (signum == 0)
@@ -1060,8 +1061,9 @@ postsig(signum)
 			code = ps->ps_code;
 			ps->ps_code = 0;
 		}
+		null_sigval.sival_ptr = 0;
 		(*p->p_emul->e_sendsig)(action, signum, returnmask, code,
-		    SI_USER, (union sigval *)0);
+		    SI_USER, null_sigval);
 	}
 }
 
@@ -1103,6 +1105,8 @@ sigexit(p, signum)
 	/* NOTREACHED */
 }
 
+int nosuidcoredump = 1;
+
 /*
  * Dump core, into a file named "progname.core", unless the process was
  * setuid/setgid.
@@ -1127,6 +1131,8 @@ coredump(p)
 	if ((p->p_flag & P_SUGID) &&
 	    (error = suser(p->p_ucred, &p->p_acflag)) != 0)
 		return (error);
+	if ((p->p_flag & P_SUGID) && nosuidcoredump)
+		return (EPERM);
 
 	/* Don't dump if will exceed file size limit. */
 	if (USPACE + ctob(vm->vm_dsize + vm->vm_ssize) >=
@@ -1142,7 +1148,10 @@ coredump(p)
 
 	sprintf(name, "%s.core", p->p_comm);
 	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_SYSSPACE, name, p);
-	if ((error = vn_open(&nd, O_CREAT | FWRITE, S_IRUSR | S_IWUSR)) != 0) {
+
+	error = vn_open(&nd, O_CREAT | FWRITE | FNOSYMLINK, S_IRUSR | S_IWUSR);
+
+	if (error) {
 		crfree(cred);
 		return (error);
 	}
@@ -1213,7 +1222,7 @@ coredump(p)
 		    UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, cred, NULL, p);
 	}
 out:
-	VOP_UNLOCK(vp);
+	VOP_UNLOCK(vp, 0, p);
 	error1 = vn_close(vp, FWRITE, cred, p);
 	crfree(cred);
 	if (error == 0)

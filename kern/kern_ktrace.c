@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.5 1997/10/06 20:19:53 deraadt Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.9 1998/02/03 19:06:23 deraadt Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -83,7 +83,7 @@ ktrsyscall(vp, code, argsize, args)
 {
 	struct	ktr_header *kth;
 	struct	ktr_syscall *ktp;
-	register len = sizeof(struct ktr_syscall) + argsize;
+	register unsigned int len = sizeof(struct ktr_syscall) + argsize;
 	struct proc *p = curproc;	/* XXX */
 	register_t *argp;
 	int i;
@@ -272,7 +272,7 @@ sys_ktrace(curp, v, retval)
 		syscallarg(int) pid;
 	} */ *uap = v;
 	register struct vnode *vp = NULL;
-	register struct proc *p;
+	struct proc *p = NULL;
 	struct pgrp *pg;
 	int facs = SCARG(uap, facs) & ~((unsigned) KTRFAC_ROOT);
 	int ops = KTROP(SCARG(uap, ops));
@@ -293,7 +293,8 @@ sys_ktrace(curp, v, retval)
 			return (error);
 		}
 		vp = nd.ni_vp;
-		VOP_UNLOCK(vp);
+
+		VOP_UNLOCK(vp, 0, curp);
 		if (vp->v_type != VREG) {
 			(void) vn_close(vp, FREAD|FWRITE, curp->p_ucred, curp);
 			curp->p_traceflag &= ~KTRFAC_ACTIVE;
@@ -468,9 +469,9 @@ ktrwrite(vp, kth)
 		aiov[1].iov_len = kth->ktr_len;
 		auio.uio_resid += kth->ktr_len;
 	}
-	VOP_LOCK(vp);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	error = VOP_WRITE(vp, &auio, IO_UNIT|IO_APPEND, p->p_ucred);
-	VOP_UNLOCK(vp);
+	VOP_UNLOCK(vp, 0, p);
 	if (!error)
 		return;
 	/*

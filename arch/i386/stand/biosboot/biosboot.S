@@ -1,7 +1,7 @@
-/*	$OpenBSD: biosboot.S,v 1.20 1997/09/05 17:58:49 mickey Exp $	*/
+/*	$OpenBSD: biosboot.S,v 1.27 1998/04/18 07:39:35 deraadt Exp $	*/
 
 /*
- * Copyright (c) 1997 Michael Shalayeff
+ * Copyright (c) 1997 Michael Shalayeff, Tobias Weingartner
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,29 +39,28 @@
 #define addr32  .byte 0x67
 #define data32  .byte 0x66
 
-#ifdef	DEBUG
 #define	BLKCNT	12	/* Max without colliding with the partition table */
-#else
-#define	BLKCNT	16
-#endif
 
 #define BOOTSEG		0x07c0	/* boot loaded here */
 #define BOOTSTACK	0xfffc	/* stack starts here */
 #define ZMAGIC		0x0b01	/* ZMAGIC */
 
-#ifdef DEBUG
-#define DBGMSG(msg)		\
-	movb    $msg, %al;	\
+
+/* Clobbers %al - maybe more */
+#define putc(c)			\
+	movb	$c, %al;	\
 	.byte	0xe8;		\
 	.word	Lchr - . - 2
-#define GO_RELOC	'R'	/* running relocated code */
-#define REAL2PROT	'P'	/* switch to protected mode */
-#else /* !DEBUG */
-#define DBGMSG(msg)	/* */
-#endif /* !DEBUG */
+
+/* Clobbers %esi - maybe more */
+#define	puts(s)			\
+	data32;			\
+	movl	$s, %esi;	\
+	.byte	0xe8;		\
+	.word	Lmessage - . - 2
+
 
 	.text
-
 	.globl	start
 start:
 	jmp	1f
@@ -88,52 +87,37 @@ ebpb:	.long	16		/* hidden sectors */
 	.word	0		/* physical disk */
 	.byte	0x29		/* signature, needed by NT */
 	.space	4, 0		/* volume serial number */
-	.asciz	"NO LABEL  "
+	.asciz	"UNIX LABEL"
 	.asciz	"UFS 4.4"
 
 	/* boot code */
 	. = start + 0x3e
 
-1:	/* set up stack (%ss:%esp) */
+1:
+	/* Fix up %cs just in case */
+	data32
+	ljmp	$BOOTSEG, $1f
+
+load_msg:
+	.asciz	"reading boot"
+
+1:
+	/* set up stack (%ss:%esp) */
 	cli			/* disable interrupts w/o stack */
-	# movw	$(BOOTREL >> 4), %ax
-	.byte	0xb8
-	.word	BOOTREL >> 4
+	xorl	%ax, %ax
 	movl	%ax, %ss
-	movl	%ax, %es	/* relocate there */
 	data32
 	movl	$BOOTSTACK, %esp
 	sti			/* we have stack, do ints */
 
-	# movw	$BOOTSEG, %ax	/* we are here */
+	/* Set up other segment regs */
+	# movw	$BOOTSEG, %ax
 	.byte	0xb8
 	.word	BOOTSEG
 	movl	%ax, %ds
-	xorl	%si, %si
-	xorl	%di, %di
-	# movw	$0x100, %cx	/* 512 bytes to move */
-	.byte	0xb9
-	.word	0x100
-	cld
-	rep;	movsl
-
-	/* jump to relocated code */
-	data32
-	ljmp $(BOOTREL >> 4), $2f
-1:	.asciz	"loading /boot"
-
-2:	DBGMSG(GO_RELOC)
-
-	nop
-	/* set up %ds */
-	pushl	%cs
-	popl	%ds
-
-	/* set up %es, (where we will load /boot to) */
-	# movw	$(LOADADDR >> 4), %ax
-	.byte	0xb8
-	.word	LOADADDR >> 4
 	movl	%ax, %es
+	movl	%ax, %fs
+	movl	%ax, %gs
 
 #ifdef SERIAL
 	# Initialize the serial port to 9600 baud, 8N1.
@@ -148,11 +132,18 @@ ebpb:	.long	16		/* hidden sectors */
 	popl	%dx
 #endif
 
-	data32
-	movl	$1b, %esi
-	# call	Lmessage
-	.byte	0xe8
-	.word	Lmessage - . - 2
+#ifdef BDEBUG
+	putc('R')
+#endif
+
+	/* Print pretty message */
+	puts(load_msg)
+
+	/* set up %es, (where we will load /boot to) */
+	# movw	$(LOADADDR >> 4), %ax
+	.byte	0xb8
+	.word	LOADADDR >> 4
+	movl	%ax, %es
 
 	data32
 	xorl	%ebx, %ebx		/* put it at %es:0 */
@@ -165,6 +156,7 @@ ebpb:	.long	16		/* hidden sectors */
 
 1:
 	pushl	%cx
+	putc('.')		/* show progress indicator */
 	cld
 	lodsl	/* word */	/* cylinder/sector */
 	movl	%ax, %cx
@@ -177,29 +169,21 @@ ebpb:	.long	16		/* hidden sectors */
 	jnc	3f
 
 	/* read error */
-       	data32
-	movl    $2f, %esi
-	jmp	5f
+	puts(2f)
+	jmp	halt
 2:	.asciz	"\r\nRead error\r\n"
 
 3:	/* read next block */
-	movb	$'.', %al
-	# call	Lchr		/* show progress indicator */
-	.byte	0xe8
-	.word	Lchr - . - 2
 
 	popl	%ax
-	movzbl	%al, %ax
+	data32
+	movzbl	%al, %eax
 	shll	$9, %ax		/* 512 bytes sectors */
 	addl	%ax, %bx
 	popl	%cx
 	loop	1b
 
-	data32
-	movl    $2f, %esi	/* new line */
-	# call	Lmessage
-	.byte	0xe8
-	.word	Lmessage - . - 2
+	puts(2f)
 
 	xorl	%si, %si
 	cld
@@ -210,27 +194,22 @@ ebpb:	.long	16		/* hidden sectors */
 	.word	ZMAGIC
 	je	3f
 
-	data32
-	movl	$1f, %esi
-5:
-	# call	Lmessage
-	.byte	0xe8
-	.word	Lmessage - . - 2
+	puts(1f)
+halt:
 	cli
 	hlt
 1:	.ascii	"Bad magic"
 2:	.asciz	"\r\n"
-3:
-#if notdef
-	data32;es;lodsl	/* text size */
-	data32;es;lodsl	/* data size */
-	data32;es;lodsl	/* bss  size */
-	data32;es;lodsl	/* syms size */
-#endif
-	data32
-	addl	16(%esi), %edi	/* entry */
 
-	DBGMSG(REAL2PROT)
+3:	/* At this point we could try to use the entry point in
+	 * the image we just loaded.  But if we do that, we also
+	 * have to potentially support loading that image where it
+	 * is supposed to go.  Screw it, just assume that the image
+	 * is sane.
+	 */
+#ifdef BDEBUG
+	putc('P')
+#endif
 
 	/* change to protected mode */
 	/* guarantee that interrupts are disabled when in prot mode */
@@ -252,18 +231,21 @@ ebpb:	.long	16		/* hidden sectors */
 	 * reload CS register
 	 */
 	data32
-	ljmp	$8, $1f+BOOTREL
+	ljmp	$8, $(BOOTSEG << 4) + 1f
 
 1:	/*
 	 * 32bit mode
-	 * set up %ds, %ss, %es
+	 * set up %ds, %ss, %es, etc
 	 */
-	movw	$0x10, %eax
+	movl	$0x10, %eax
 	movl	%ax, %ds
 	movl	%ax, %ss
+	movl	%ax, %es
+	movl	%ax, %fs
+	movl	%ax, %gs
 	movl	$BOOTSTACK, %esp
 
-#ifdef	DEBUG
+#ifdef	BDEBUG
 	movl	$0xb8004, %ebx
 	movl	$0x074f0747, (%ebx)
 #endif
@@ -341,7 +323,7 @@ Lchr:
 	.byte	0xf | 0 | 0x40 | 0x80	# hilimit, xx, 32bit, 4k granularity
 	.byte	0			# hibase
 Gdtr:	.word	. - 1b
-	.long	BOOTREL + 1b
+	.long	(BOOTSEG << 4) + 1b
 
 	.globl	_block_table, _block_count
 _block_count:
@@ -350,7 +332,7 @@ _block_table:
 	.word	0	/* cylinder/sector */
 	.byte	0	/* head */
 	.byte	0	/* nsect */
-	# . = _block_table + BLKCNT*4
+	. = _block_table + BLKCNT*4
 
 #ifdef BEMBR
 	. = 0x1b8

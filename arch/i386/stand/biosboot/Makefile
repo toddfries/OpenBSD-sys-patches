@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.11 1997/10/22 23:25:37 mickey Exp $
+#	$OpenBSD: Makefile,v 1.15 1998/04/13 00:37:40 deraadt Exp $
 
 PROG=	biosboot
 SRCS=	biosboot.S

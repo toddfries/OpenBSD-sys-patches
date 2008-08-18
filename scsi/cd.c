@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.28 1997/10/18 10:37:16 deraadt Exp $	*/
+/*	$OpenBSD: cd.c,v 1.30 1998/03/27 18:40:54 millert Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -1062,9 +1062,9 @@ cdgetdisklabel(dev, cd)
 		/* as long as it's not 0 - readdisklabel divides by it (?) */
 	}
 
-	strncpy(lp->d_typename, "SCSI disk", 16);
+	strncpy(lp->d_typename, "SCSI CD-ROM", sizeof(lp->d_typename) - 1);
 	lp->d_type = DTYPE_SCSI;
-	strncpy(lp->d_packname, "fictitious", 16);
+	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname) - 1);
 	lp->d_secperunit = cd->params.disksize;
 	lp->d_rpm = 300;
 	lp->d_interleave = 1;
@@ -1284,7 +1284,7 @@ cd_read_subchannel(cd, mode, format, track, data, len)
 	_lto2b(len, scsi_cmd.data_len);
 	return scsi_scsi_cmd(cd->sc_link, (struct scsi_generic *)&scsi_cmd,
 	    sizeof(struct scsi_read_subchannel), (u_char *)data, len,
-	    CDRETRIES, 5000, NULL, SCSI_DATA_IN||SCSI_SILENT);
+	    CDRETRIES, 5000, NULL, SCSI_DATA_IN|SCSI_SILENT);
 }
 
 /*

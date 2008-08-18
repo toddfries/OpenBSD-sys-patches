@@ -1,4 +1,4 @@
-/*	$OpenBSD: osf1_misc.c,v 1.8 1996/10/30 16:37:19 niklas Exp $	*/
+/*	$OpenBSD: osf1_misc.c,v 1.10 1998/03/01 17:00:22 niklas Exp $	*/
 /*	$NetBSD: osf1_misc.c,v 1.7 1995/10/07 06:53:04 mycroft Exp $	*/
 
 /*
@@ -609,10 +609,10 @@ osf1_sys_sendto(p, v, retval)
 {
 	register struct osf1_sys_sendto_args /* {
 		syscallarg(int) s;
-		syscallarg(caddr_t) buf;
+		syscallarg(const void *) buf;
 		syscallarg(size_t) len;
 		syscallarg(int) flags;
-		syscallarg(caddr_t) to;
+		syscallarg(const struct sockaddr *) to;
 		syscallarg(int) tolen;
 	} */ *uap = v;
 	struct sys_sendto_args a;
@@ -799,7 +799,6 @@ osf1_sys_readv(p, v, retval)
 	struct osf1_iovec *oio;
 	struct iovec *nio;
 	int error, i;
-	extern char sigcode[], esigcode[];
 
 	if (SCARG(uap, iovcnt) > (STACKGAPLEN / sizeof (struct iovec)))
 		return (EINVAL);
@@ -854,7 +853,6 @@ osf1_sys_writev(p, v, retval)
 	struct osf1_iovec *oio;
 	struct iovec *nio;
 	int error, i;
-	extern char sigcode[], esigcode[];
 
 	if (SCARG(uap, iovcnt) > (STACKGAPLEN / sizeof (struct iovec)))
 		return (EINVAL);

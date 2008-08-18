@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio.c,v 1.10 1997/07/31 11:03:03 deraadt Exp $	*/
+/*	$OpenBSD: sio.c,v 1.13 1998/02/24 02:05:20 millert Exp $	*/
 /*	$NetBSD: sio.c,v 1.15 1996/12/05 01:39:36 cgd Exp $	*/
 
 /*
@@ -110,11 +110,16 @@ siomatch(parent, match, aux)
 {
 	struct pci_attach_args *pa = aux;
 
-	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_INTEL ||
-	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_INTEL_SIO)
-		return (0);
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_CONTAQ &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_CONTAQ_SIO &&
+	    pa->pa_function == 0)
+		return (1);
 
-	return (1);
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_SIO)
+		return (1);
+
+	return (0);
 }
 
 int
@@ -143,11 +148,8 @@ sioattach(parent, self, aux)
 {
 	struct sio_softc *sc = (struct sio_softc *)self;
 	struct pci_attach_args *pa = aux;
-	char devinfo[256];
 
-	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo);
-	printf(": %s (rev. 0x%02x)\n", devinfo,
-	    PCI_REVISION(pa->pa_class));
+	printf("\n");
 
 	sc->sc_iot = pa->pa_iot;
 	sc->sc_memt = pa->pa_memt;

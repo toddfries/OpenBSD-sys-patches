@@ -1,5 +1,5 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.10 1997/10/06 20:19:45 deraadt Exp $	*/
-/*	$NetBSD: cd9660_vfsops.c,v 1.20 1996/02/09 21:32:08 christos Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.13 1998/02/08 22:41:32 tholo Exp $	*/
+/*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
  * Copyright (c) 1994
@@ -60,11 +60,11 @@
 #define	b_cylin	b_resid
 
 #include <isofs/cd9660/iso.h>
+#include <isofs/cd9660/cd9660_extern.h>
 #include <isofs/cd9660/iso_rrip.h>
 #include <isofs/cd9660/cd9660_node.h>
 
 struct vfsops cd9660_vfsops = {
-	MOUNT_CD9660,
 	cd9660_mount,
 	cd9660_start,
 	cd9660_unmount,
@@ -76,65 +76,51 @@ struct vfsops cd9660_vfsops = {
 	cd9660_fhtovp,
 	cd9660_vptofh,
 	cd9660_init,
+	cd9660_sysctl
 };
 
 /*
  * Called by vfs_mountroot when iso is going to be mounted as root.
- *
- * Name is updated by mount(8) after booting.
  */
-#define ROOTNAME	"root_device"
 
-static int iso_mountfs __P((struct vnode *devvp, struct mount *mp,
-		struct proc *p, struct iso_args *argp));
-int iso_disklabelspoof __P((dev_t dev, void (*strat) __P((struct buf *)),
-		struct disklabel *lp));
+static	int iso_mountfs __P((struct vnode *devvp, struct mount *mp,
+    struct proc *p, struct iso_args *argp));
+int	iso_disklabelspoof __P((dev_t dev, void (*strat) __P((struct buf *)),
+    struct disklabel *lp));
 
 int
 cd9660_mountroot()
 {
-	register struct mount *mp;
+	struct mount *mp;
 	extern struct vnode *rootvp;
 	struct proc *p = curproc;	/* XXX */
-	struct iso_mnt *imp;
-	size_t size;
 	int error;
 	struct iso_args args;
 	
 	/*
 	 * Get vnodes for swapdev and rootdev.
 	 */
-	if (bdevvp(swapdev, &swapdev_vp) || bdevvp(rootdev, &rootvp))
-		panic("cd9660_mountroot: can't setup bdevvp's");
+	if ((error = bdevvp(swapdev, &swapdev_vp)) ||
+	    (error = bdevvp(rootdev, &rootvp))) {
+		printf("cd9660_mountroot: can't setup bdevvp's");
+                return (error);
+        }
 
-	mp = malloc((u_long)sizeof(struct mount), M_MOUNT, M_WAITOK);
-	bzero((char *)mp, (u_long)sizeof(struct mount));
-	mp->mnt_op = &cd9660_vfsops;
-	mp->mnt_flag = MNT_RDONLY;
-	LIST_INIT(&mp->mnt_vnodelist);
+	if ((error = vfs_rootmountalloc("cd9660", "root_device", &mp)) != 0)
+		return (error);
 	args.flags = ISOFSMNT_ROOT;
 	if ((error = iso_mountfs(rootvp, mp, p, &args)) != 0) {
-		free(mp, M_MOUNT);
-		return (error);
-	}
-	if ((error = vfs_lock(mp)) != 0) {
-		(void)cd9660_unmount(mp, 0, p);
-		free(mp, M_MOUNT);
-		return (error);
-	}
-	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
-	mp->mnt_vnodecovered = NULLVP;
-	imp = VFSTOISOFS(mp);
-	(void) copystr("/", mp->mnt_stat.f_mntonname, MNAMELEN - 1,
-	    &size);
-	bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
-	(void) copystr(ROOTNAME, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
-	    &size);
-	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
-	(void)cd9660_statfs(mp, &mp->mnt_stat, p);
-	vfs_unlock(mp);
-	inittodr(0); /* XXX - can we get the cd creation time here?? */
-	return (0);
+		mp->mnt_vfc->vfc_refcount--;
+		vfs_unbusy(mp, p);
+                free(mp, M_MOUNT);
+                return (error);
+        }
+	simple_lock(&mountlist_slock);
+        CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+	simple_unlock(&mountlist_slock);
+        (void)cd9660_statfs(mp, &mp->mnt_stat, p);
+	vfs_unbusy(mp, p);
+        return (0);
 }
 
 /*
@@ -145,7 +131,7 @@ cd9660_mountroot()
 int
 cd9660_mount(mp, path, data, ndp, p)
 	register struct mount *mp;
-	char *path;
+	const char *path;
 	caddr_t data;
 	struct nameidata *ndp;
 	struct proc *p;
@@ -183,11 +169,11 @@ cd9660_mount(mp, path, data, ndp, p)
 
 	if (devvp->v_type != VBLK) {
 		vrele(devvp);
-		return ENOTBLK;
+		return (ENOTBLK);
 	}
 	if (major(devvp->v_rdev) >= nblkdev) {
 		vrele(devvp);
-		return ENXIO;
+		return (ENXIO);
 	}
 	if ((mp->mnt_flag & MNT_UPDATE) == 0)
 		error = iso_mountfs(devvp, mp, p, &args);
@@ -199,15 +185,16 @@ cd9660_mount(mp, path, data, ndp, p)
 	}
 	if (error) {
 		vrele(devvp);
-		return error;
+		return (error);
 	}
 	imp = VFSTOISOFS(mp);
-	(void) copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1, &size);
+	(void)copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1, &size);
 	bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
-	(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
+	(void)copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
 	    &size);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
-	return 0;
+	(void)cd9660_statfs(mp, &mp->mnt_stat, p);
+	return (0);
 }
 
 /*
@@ -235,7 +222,7 @@ iso_mountfs(devvp, mp, p, argp)
 	int logical_block_size;
 	
 	if (!ronly)
-		return EROFS;
+		return (EROFS);
 	
 	/*
 	 * Disallow multiple mounts of the same device.
@@ -244,15 +231,15 @@ iso_mountfs(devvp, mp, p, argp)
 	 * Flush out any old buffers remaining from a previous use.
 	 */
 	if ((error = vfs_mountedon(devvp)) != 0)
-		return error;
+		return (error);
 	if (vcount(devvp) > 1 && devvp != rootvp)
-		return EBUSY;
+		return (EBUSY);
 	if ((error = vinvalbuf(devvp, V_SAVE, p->p_ucred, p, 0, 0)) != 0)
 		return (error);
 
 	error = VOP_OPEN(devvp, ronly ? FREAD : FREAD|FWRITE, FSCRED, p);
 	if (error)
-		return error;
+		return (error);
 	needclose = 1;
 	
 	/* This is the "logical sector size".  The standard says this
@@ -318,23 +305,22 @@ iso_mountfs(devvp, mp, p, argp)
 	
 	mp->mnt_data = (qaddr_t)isomp;
 	mp->mnt_stat.f_fsid.val[0] = (long)dev;
-	mp->mnt_stat.f_fsid.val[1] = makefstype(MOUNT_CD9660);
+	mp->mnt_stat.f_fsid.val[1] = mp->mnt_vfc->vfc_typenum;
 	mp->mnt_maxsymlinklen = 0;
 	mp->mnt_flag |= MNT_LOCAL;
 	isomp->im_mountp = mp;
 	isomp->im_dev = dev;
 	isomp->im_devvp = devvp;
-	
-	devvp->v_specflags |= SI_MOUNTEDON;
-	
+
+	devvp->v_specmountpoint = mp;
+
 	/* Check the Rock Ridge Extention support */
 	if (!(argp->flags & ISOFSMNT_NORRIP)) {
-		if ((error = bread(isomp->im_devvp,
-				   (isomp->root_extent + isonum_711(rootp->ext_attr_length)) <<
-				   (isomp->im_bshift - DEV_BSHIFT),
-				   isomp->logical_block_size, NOCRED,
-				   &bp)) != 0)
-		    goto out;
+		if ((error = bread(isomp->im_devvp, (isomp->root_extent +
+		    isonum_711(rootp->ext_attr_length)) <<
+		    (isomp->im_bshift - DEV_BSHIFT),
+		    isomp->logical_block_size, NOCRED, &bp)) != 0)
+			goto out;
 		
 		rootp = (struct iso_directory_record *)bp->b_data;
 		
@@ -352,8 +338,9 @@ iso_mountfs(devvp, mp, p, argp)
 		brelse(bp);
 		bp = NULL;
 	}
-	isomp->im_flags = argp->flags&(ISOFSMNT_NORRIP|ISOFSMNT_GENS|ISOFSMNT_EXTATT);
-	switch (isomp->im_flags&(ISOFSMNT_NORRIP|ISOFSMNT_GENS)) {
+	isomp->im_flags = argp->flags & (ISOFSMNT_NORRIP | ISOFSMNT_GENS |
+	    ISOFSMNT_EXTATT);
+	switch (isomp->im_flags & (ISOFSMNT_NORRIP | ISOFSMNT_GENS)) {
 	default:
 	    isomp->iso_ftype = ISO_FTYPE_DEFAULT;
 	    break;
@@ -365,17 +352,18 @@ iso_mountfs(devvp, mp, p, argp)
 	    break;
 	}
 	
-	return 0;
+	return (0);
 out:
 	if (bp)
 		brelse(bp);
 	if (needclose)
-		(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED, p);
+		(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED,
+		    p);
 	if (isomp) {
 		free((caddr_t)isomp, M_ISOFSMNT);
 		mp->mnt_data = (qaddr_t)0;
 	}
-	return error;
+	return (error);
 }
 
 /*
@@ -472,7 +460,7 @@ cd9660_start(mp, flags, p)
 	int flags;
 	struct proc *p;
 {
-	return 0;
+	return (0);
 }
 
 /*
@@ -492,7 +480,7 @@ cd9660_unmount(mp, mntflags, p)
 #if 0
 	mntflushbuf(mp, 0);
 	if (mntinvalbuf(mp))
-		return EBUSY;
+		return (EBUSY);
 #endif
 	if ((error = vflush(mp, NULLVP, flags)) != 0)
 		return (error);
@@ -504,7 +492,7 @@ cd9660_unmount(mp, mntflags, p)
 		iso_dunmap(isomp->im_dev);
 #endif
 	
-	isomp->im_devvp->v_specflags &= ~SI_MOUNTEDON;
+	isomp->im_devvp->v_specmountpoint = NULL;
 	error = VOP_CLOSE(isomp->im_devvp, FREAD, NOCRED, p);
 	vrele(isomp->im_devvp);
 	free((caddr_t)isomp, M_ISOFSMNT);
@@ -531,7 +519,7 @@ cd9660_root(mp, vpp)
 	 * Simply tell vget, that it's a relocated directory.
 	 */
 	return (cd9660_vget_internal(mp, ino, vpp,
-				     imp->iso_ftype == ISO_FTYPE_RRIP, dp));
+	    imp->iso_ftype == ISO_FTYPE_RRIP, dp));
 }
 
 /*
@@ -577,12 +565,12 @@ cd9660_statfs(mp, sbp, p)
 	sbp->f_ffree = 0; /* free file nodes */
 	if (sbp != &mp->mnt_stat) {
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
-		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname,
+		    MNAMELEN);
 	}
-	strncpy(sbp->f_fstypename, mp->mnt_op->vfs_name, MFSNAMELEN);
 	/* Use the first spare for flags: */
 	sbp->f_spare[0] = isomp->im_flags;
-	return 0;
+	return (0);
 }
 
 /* ARGSUSED */
@@ -631,8 +619,8 @@ cd9660_fhtovp(mp, fhp, nam, vpp, exflagsp, credanonp)
 	int error;
 	
 #ifdef	ISOFS_DBG
-	printf("fhtovp: ino %d, start %ld\n",
-	       ifhp->ifid_ino, ifhp->ifid_start);
+	printf("fhtovp: ino %d, start %ld\n", ifhp->ifid_ino,
+	    ifhp->ifid_start);
 #endif
 	
 	/*
@@ -673,11 +661,11 @@ cd9660_vget(mp, ino, vpp)
 	 */
 	return (cd9660_vget_internal(mp, ino, vpp,
 #if 0
-				     VFSTOISOFS(mp)->iso_ftype == ISO_FTYPE_RRIP,
+	    VFSTOISOFS(mp)->iso_ftype == ISO_FTYPE_RRIP,
 #else
-				     0,
+	    0,
 #endif
-				     NULL));
+	    NULL));
 }
 
 int
@@ -708,6 +696,7 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 	MALLOC(ip, struct iso_node *, sizeof(struct iso_node), M_ISOFSNODE,
 	    M_WAITOK);
 	bzero((caddr_t)ip, sizeof(struct iso_node));
+	lockinit(&ip->i_lock, PINOD, "isoinode", 0, 0);
 	vp->v_data = ip;
 	ip->i_vnode = vp;
 	ip->i_dev = dev;
@@ -732,10 +721,11 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 		}
 	
 		off = blkoff(imp, ino);
-		if (off + ISO_DIRECTORY_RECORD_SIZE > imp->logical_block_size) {
+		if (off + ISO_DIRECTORY_RECORD_SIZE > imp->logical_block_size)
+		    {
 			vput(vp);
 			printf("fhtovp: crosses block boundary %d\n",
-			       off + ISO_DIRECTORY_RECORD_SIZE);
+			    off + ISO_DIRECTORY_RECORD_SIZE);
 			return (ESTALE);
 		}
 	
@@ -756,8 +746,8 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 			if (bp != 0)
 				brelse(bp);
 			printf("fhtovp: directory crosses block boundary %d[off=%d/len=%d]\n",
-			       off +isonum_711(isodir->length), off,
-			       isonum_711(isodir->length));
+			    off +isonum_711(isodir->length), off,
+			    isonum_711(isodir->length));
 			return (ESTALE);
 		}
 	
@@ -767,8 +757,9 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 			if (bp != 0)
 				brelse(bp);
 			printf("fhtovp: file start miss %d vs %d\n",
-			       isonum_733(isodir->extent) + isonum_711(isodir->ext_attr_length),
-			       ifhp->ifid_start);
+			    isonum_733(isodir->extent) +
+			    isonum_711(isodir->ext_attr_length),
+			    ifhp->ifid_start);
 			return (ESTALE);
 		}
 #endif
@@ -852,9 +843,8 @@ cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 		if ((nvp = checkalias(vp, ip->inode.iso_rdev, mp)) != NULL) {
 			/*
 			 * Discard unneeded vnode, but save its iso_node.
+			 * Note that the lock is carried over in the iso_node
 			 */
-			cd9660_ihashrem(ip);
-			VOP_UNLOCK(vp);
 			nvp->v_data = vp->v_data;
 			vp->v_data = NULL;
 			vp->v_op = spec_vnodeop_p;
@@ -899,7 +889,7 @@ cd9660_vptofh(vp, fhp)
 {
 	register struct iso_node *ip = VTOI(vp);
 	register struct ifid *ifhp;
-	
+
 	ifhp = (struct ifid *)fhp;
 	ifhp->ifid_len = sizeof(struct ifid);
 	
@@ -908,7 +898,7 @@ cd9660_vptofh(vp, fhp)
 	
 #ifdef	ISOFS_DBG
 	printf("vptofh: ino %d, start %ld\n",
-	       ifhp->ifid_ino,ifhp->ifid_start);
+	    ifhp->ifid_ino,ifhp->ifid_start);
 #endif
-	return 0;
+	return (0);
 }

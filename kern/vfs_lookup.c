@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_lookup.c,v 1.10 1997/10/06 20:20:11 deraadt Exp $	*/
+/*	$OpenBSD: vfs_lookup.c,v 1.14 1998/01/09 16:21:56 csapuntz Exp $	*/
 /*	$NetBSD: vfs_lookup.c,v 1.17 1996/02/09 19:00:59 christos Exp $	*/
 
 /*
@@ -88,6 +88,7 @@ namei(ndp)
 	struct uio auio;
 	int error, linklen;
 	struct componentname *cnp = &ndp->ni_cnd;
+	struct proc *p = cnp->cn_proc;
 
 	ndp->ni_cnd.cn_cred = ndp->ni_cnd.cn_proc->p_ucred;
 #ifdef DIAGNOSTIC
@@ -129,6 +130,24 @@ namei(ndp)
 		ndp->ni_vp = NULL;
 		return (error);
 	}
+
+	/*
+	 *  Strip trailing slashes, as requested 
+	 */
+	if (cnp->cn_flags & STRIPSLASHES) {
+		char *end = cnp->cn_pnbuf + ndp->ni_pathlen - 2;
+
+		cp = end;
+		while (cp >= cnp->cn_pnbuf &&
+		       (*cp == '/')) cp--;
+
+		/* Still some remaining characters in the buffer */
+		if (cp >= cnp->cn_pnbuf) {
+			ndp->ni_pathlen -= (end - cp);
+			*(cp + 1) = '\0';
+		}
+	}
+	
 	ndp->ni_loopcnt = 0;
 
 	/*
@@ -164,7 +183,7 @@ namei(ndp)
 			return (0);
 		}
 		if ((cnp->cn_flags & LOCKPARENT) && ndp->ni_pathlen == 1)
-			VOP_UNLOCK(ndp->ni_dvp);
+			VOP_UNLOCK(ndp->ni_dvp, 0, p);
 		if (ndp->ni_loopcnt++ >= MAXSYMLINKS) {
 			error = ELOOP;
 			break;
@@ -271,7 +290,7 @@ lookup(ndp)
 	int error = 0;
 	int slashes;
 	struct componentname *cnp = &ndp->ni_cnd;
-
+	struct proc *p = cnp->cn_proc;
 	/*
 	 * Setup: break out flag bits into variables.
 	 */
@@ -285,7 +304,7 @@ lookup(ndp)
 	cnp->cn_flags &= ~ISSYMLINK;
 	dp = ndp->ni_startdir;
 	ndp->ni_startdir = NULLVP;
-	VOP_LOCK(dp);
+	vn_lock(dp, LK_EXCLUSIVE | LK_RETRY, p);
 
 	/*
 	 * If we have a leading string of slashes, remove them, and just make
@@ -410,7 +429,7 @@ dirloop:
 			dp = dp->v_mount->mnt_vnodecovered;
 			vput(tdp);
 			VREF(dp);
-			VOP_LOCK(dp);
+			vn_lock(dp, LK_EXCLUSIVE | LK_RETRY, p);
 		}
 	}
 
@@ -419,6 +438,7 @@ dirloop:
 	 */
 unionlookup:
 	ndp->ni_dvp = dp;
+	ndp->ni_vp = NULL;
 	if ((error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp)) != 0) {
 #ifdef DIAGNOSTIC
 		if (ndp->ni_vp != NULL)
@@ -434,7 +454,7 @@ unionlookup:
 			dp = dp->v_mount->mnt_vnodecovered;
 			vput(tdp);
 			VREF(dp);
-			VOP_LOCK(dp);
+			vn_lock(dp, LK_EXCLUSIVE | LK_RETRY, p);
 			goto unionlookup;
 		}
 
@@ -491,12 +511,11 @@ unionlookup:
 	 */
 	while (dp->v_type == VDIR && (mp = dp->v_mountedhere) &&
 	       (cnp->cn_flags & NOCROSSMOUNT) == 0) {
-		if (mp->mnt_flag & MNT_MLOCK) {
-			mp->mnt_flag |= MNT_MWAIT;
-			sleep((caddr_t)mp, PVFS);
+		if (vfs_busy(mp, 0, 0, p)) 
 			continue;
-		}
-		if ((error = VFS_ROOT(dp->v_mountedhere, &tdp)) != 0)
+		error = VFS_ROOT(mp, &tdp);
+		vfs_unbusy(mp, p);
+		if (error)
 			goto bad2;
 		vput(dp);
 		ndp->ni_vp = dp = tdp;
@@ -558,12 +577,12 @@ terminal:
 			vrele(ndp->ni_dvp);
 	}
 	if ((cnp->cn_flags & LOCKLEAF) == 0)
-		VOP_UNLOCK(dp);
+		VOP_UNLOCK(dp, 0, p);
 	return (0);
 
 bad2:
 	if ((cnp->cn_flags & LOCKPARENT) && (cnp->cn_flags & ISLASTCN))
-		VOP_UNLOCK(ndp->ni_dvp);
+		VOP_UNLOCK(ndp->ni_dvp, 0, p);
 	vrele(ndp->ni_dvp);
 bad:
 	vput(dp);
@@ -579,6 +598,7 @@ relookup(dvp, vpp, cnp)
 	struct vnode *dvp, **vpp;
 	struct componentname *cnp;
 {
+	struct proc *p = cnp->cn_proc;
 	register struct vnode *dp = 0;	/* the directory we are searching */
 	int docache;			/* == 0 do not cache last component */
 	int wantparent;			/* 1 => wantparent or lockparent flag */
@@ -600,7 +620,7 @@ relookup(dvp, vpp, cnp)
 	rdonly = cnp->cn_flags & RDONLY;
 	cnp->cn_flags &= ~ISSYMLINK;
 	dp = dvp;
-	VOP_LOCK(dp);
+	vn_lock(dp, LK_EXCLUSIVE | LK_RETRY, p);
 
 /* dirloop: */
 	/*
@@ -694,15 +714,17 @@ relookup(dvp, vpp, cnp)
 	if (!wantparent)
 		vrele(dvp);
 	if ((cnp->cn_flags & LOCKLEAF) == 0)
-		VOP_UNLOCK(dp);
+		VOP_UNLOCK(dp, 0, p);
 	return (0);
 
 bad2:
 	if ((cnp->cn_flags & LOCKPARENT) && (cnp->cn_flags & ISLASTCN))
-		VOP_UNLOCK(dvp);
+		VOP_UNLOCK(dvp, 0, p);
 	vrele(dvp);
 bad:
 	vput(dp);
 	*vpp = NULL;
 	return (error);
 }
+
+

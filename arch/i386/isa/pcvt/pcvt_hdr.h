@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcvt_hdr.h,v 1.15 1997/05/29 01:47:26 mickey Exp $	*/
+/*	$OpenBSD: pcvt_hdr.h,v 1.18 1998/02/05 16:48:32 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992, 1995 Hellmuth Michaelis and Joerg Wunsch.
@@ -79,6 +79,7 @@
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
+#include <sys/fcntl.h>
 #include <sys/user.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
@@ -87,6 +88,9 @@
 #include <sys/syslog.h>
 #include <sys/malloc.h>
 #include <sys/time.h>
+#ifdef DDB
+#include <ddb/db_var.h>
+#endif
 
 #include "pcvt_conf.h"
 
@@ -257,6 +261,7 @@ in the config file"
 #define	KEYB_C_RESEND	0xfe	/* resend last byte in case of error */
 #define KEYB_C_TYPEM	0xf3	/* set keyboard typematic rate/delay */
 #define KEYB_C_ID	0xf2	/* return keyboard id */
+#define KEYB_C_SCANSET	0xf0	/* get/set keyboard scancode set */
 #define KEYB_C_ECHO	0xee	/* diagnostic, echo 0xee */
 #define KEYB_C_LEDS	0xed	/* set/reset numlock,capslock & scroll lock */
 
@@ -279,6 +284,7 @@ in the config file"
 #define KEYB_R_MF2ID2	0x41	/* MF II Keyboard id-byte #2 */
 #define KEYB_R_MF2ID2HP	0x83	/* MF II Keyboard id-byte #2 from HP keybd's */
 #define KEYB_R_MF2ID2TP 0x54	/* MF II Keyboard id-byte #2 from IBM ThinkPad */
+#define KEYB_R_MF2ID2TP2 0x84	/* MF II Keyboard id-byte #2 from IBM ThinkPad (340M) */
 
 /* internal Keyboard Type */
 

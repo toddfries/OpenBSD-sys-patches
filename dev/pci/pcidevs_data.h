@@ -2,39 +2,10 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp 
+ *	OpenBSD: pcidevs,v 1.46 1998/04/16 04:49:34 millert Exp 
  */
 
-/*
- * Copyright (c) 1995, 1996 Christopher G. Demetriou
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Christopher G. Demetriou
- *	for the NetBSD Project.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+/*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $ 	*/
 
 struct pci_knowndev pci_knowndevs[] = {
 	{
@@ -86,10 +57,34 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "3c905 100Base-T4",
 	},
 	{
+	    PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C905B,
+	    0,
+	    "3Com",
+	    "3c905B 100Base-T4",
+	},
+	{
 	    PCI_VENDOR_3DLABS, PCI_PRODUCT_3DLABS_300SX,
 	    0,
 	    "3D Labs",
-	    "300SX (\"Glint\")",
+	    "300SX (Glint)",
+	},
+	{
+	    PCI_VENDOR_3DLABS, PCI_PRODUCT_3DLABS_500TX,
+	    0,
+	    "3D Labs",
+	    "GLINT 500TX",
+	},
+	{
+	    PCI_VENDOR_3DLABS, PCI_PRODUCT_3DLABS_DELTA,
+	    0,
+	    "3D Labs",
+	    "GLINT DELTA",
+	},
+	{
+	    PCI_VENDOR_3DLABS, PCI_PRODUCT_3DLABS_500MX,
+	    0,
+	    "3D Labs",
+	    "GLINT 500MX",
 	},
 	{
 	    PCI_VENDOR_ACC, PCI_PRODUCT_ACC_2188,
@@ -132,6 +127,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    0,
 	    "Acer Labs",
 	    "M4803",
+	},
+	{
+	    PCI_VENDOR_ADP, PCI_PRODUCT_ADP_AIC7810,
+	    0,
+	    "Adaptec",
+	    "AIC-7810",
 	},
 	{
 	    PCI_VENDOR_ADP, PCI_PRODUCT_ADP_AIC7850,
@@ -218,6 +219,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "AHA-3940 Ultra",
 	},
 	{
+	    PCI_VENDOR_ADP, PCI_PRODUCT_ADP_398XU,
+	    0,
+	    "Adaptec",
+	    "AHA-398X Ultra",
+	},
+	{
 	    PCI_VENDOR_ADP, PCI_PRODUCT_ADP_2944U,
 	    0,
 	    "Adaptec",
@@ -264,6 +271,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    0,
 	    "ARC Logic",
 	    "2000MT",
+	},
+	{
+	    PCI_VENDOR_ARC, PCI_PRODUCT_ARC_2000MI,
+	    0,
+	    "ARC Logic",
+	    "2000MI",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH32,
@@ -350,6 +363,24 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "ALG2302",
 	},
 	{
+	    PCI_VENDOR_BIT3, PCI_PRODUCT_BIT3_PCIVME617,
+	    0,
+	    "Bit3 Computer Corp.",
+	    "PCI-VME Interface Mod. 617",
+	},
+	{
+	    PCI_VENDOR_BROOKTREE, PCI_PRODUCT_BROOKTREE_BT848,
+	    0,
+	    "Brooktree",
+	    "BT848",
+	},
+	{
+	    PCI_VENDOR_BROOKTREE, PCI_PRODUCT_BROOKTREE_BT849,
+	    0,
+	    "Brooktree",
+	    "BT849",
+	},
+	{
 	    PCI_VENDOR_BUSLOGIC, PCI_PRODUCT_BUSLOGIC_MULTIMASTER_NC,
 	    0,
 	    "BusLogic",
@@ -398,6 +429,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "65550",
 	},
 	{
+	    PCI_VENDOR_CHIPS, PCI_PRODUCT_CHIPS_65554,
+	    0,
+	    "Chips and Technologies",
+	    "65554",
+	},
+	{
 	    PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_GD7548,
 	    0,
 	    "Cirrus Logic",
@@ -434,10 +471,22 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "CL-GD5446",
 	},
 	{
-	    PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_GD6729,
+	    PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_GD5480,
 	    0,
 	    "Cirrus Logic",
-	    "CL-GD6729",
+	    "CL-GD5480",
+	},
+	{
+	    PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_PD6729,
+	    0,
+	    "Cirrus Logic",
+	    "CL-PD6729",
+	},
+	{
+	    PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_PD6832,
+	    0,
+	    "Cirrus Logic",
+	    "CL-PD6832",
 	},
 	{
 	    PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_GD7542,
@@ -458,28 +507,52 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "CL-GD7541",
 	},
 	{
-	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_640A,
+	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_640,
 	    0,
 	    "CMD Technology",
-	    "640A",
+	    "PCI640",
 	},
 	{
 	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_642,
 	    0,
 	    "CMD Technology",
-	    "642",
+	    "PCI0642",
+	},
+	{
+	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_643,
+	    0,
+	    "CMD Technology",
+	    "PCI0643",
 	},
 	{
 	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_646,
 	    0,
 	    "CMD Technology",
-	    "646",
+	    "PCI0646",
+	},
+	{
+	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_647,
+	    0,
+	    "CMD Technology",
+	    "PCI0647",
 	},
 	{
 	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_650A,
 	    0,
 	    "CMD Technology",
-	    "650A",
+	    "PCI0650A",
+	},
+	{
+	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_670,
+	    0,
+	    "CMD Technology",
+	    "USB0670",
+	},
+	{
+	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_673,
+	    0,
+	    "CMD Technology",
+	    "USB0673",
 	},
 	{
 	    PCI_VENDOR_COGENT, PCI_PRODUCT_COGENT_EM110TX,
@@ -584,16 +657,28 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "NetFlex 3/P",
 	},
 	{
+	    PCI_VENDOR_COMPEX, PCI_PRODUCT_COMPEX_COMPEXE,
+	    0,
+	    "Compex",
+	    "Compex Ethernet",
+	},
+	{
 	    PCI_VENDOR_CONTAQ, PCI_PRODUCT_CONTAQ_82C599,
 	    0,
 	    "Contaq Microsystems",
 	    "82C599 PCI-VLB Bridge",
 	},
 	{
+	    PCI_VENDOR_CONTAQ, PCI_PRODUCT_CONTAQ_SIO,
+	    0,
+	    "Contaq Microsystems",
+	    "CY82C693U PCI-ISA Bridge (System I/O)",
+	},
+	{
 	    PCI_VENDOR_COROLLARY, PCI_PRODUCT_COROLLARY_CBUSII_PCIB,
 	    0,
 	    "Corrollary",
-	    "\"C-Bus II\"-PCI Bridge",
+	    "C-Bus II-PCI Bridge",
 	},
 	{
 	    PCI_VENDOR_CYCLADES, PCI_PRODUCT_CYCLADES_CYCLOMY_1,
@@ -629,13 +714,13 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_21040,
 	    0,
 	    "Digital Equipment",
-	    "DECchip 21040 (\"Tulip\")",
+	    "DECchip 21040 (Tulip)",
 	},
 	{
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_21030,
 	    0,
 	    "Digital Equipment",
-	    "DECchip 21030 (\"TGA\")",
+	    "DECchip 21030 (TGA)",
 	},
 	{
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_NVRAM,
@@ -653,7 +738,7 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_21140,
 	    0,
 	    "Digital Equipment",
-	    "DECchip 21140 (\"FasterNet\")",
+	    "DECchip 21140 (FasterNet)",
 	},
 	{
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_PBXGB,
@@ -671,13 +756,13 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_21041,
 	    0,
 	    "Digital Equipment",
-	    "DECchip 21041 (\"Tulip Pass 3\")",
+	    "DECchip 21041 (Tulip Pass 3)",
 	},
 	{
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_DGLPB,
 	    0,
 	    "Digital Equipment",
-	    "DGLPB (\"OPPO\")",
+	    "DGLPB (OPPO)",
 	},
 	{
 	    PCI_VENDOR_DEC, PCI_PRODUCT_DEC_21142,
@@ -722,16 +807,34 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "Viper/PCI",
 	},
 	{
+	    PCI_VENDOR_DIAMOND, PCI_PRODUCT_DIAMOND_MONSTER,
+	    0,
+	    "Diamond Computer Systems",
+	    "Monster",
+	},
+	{
 	    PCI_VENDOR_DPT, PCI_PRODUCT_DPT_SC_RAID,
 	    0,
 	    "Distributed Processing Technology",
 	    "SmartCache/Raid",
 	},
 	{
+	    PCI_VENDOR_DOLPHIN, PCI_PRODUCT_DOLPHIN_PCISCI,
+	    0,
+	    "Dolphin Interconnect Solutions",
+	    "PCI-SCI Bridge",
+	},
+	{
 	    PCI_VENDOR_EMULEX, PCI_PRODUCT_EMULEX_LPPFC,
 	    0,
 	    "Emulex",
-	    "\"Light Pulse\" FibreChannel adapter",
+	    "Light Pulse FibreChannel adapter",
+	},
+	{
+	    PCI_VENDOR_ENSONIQ, PCI_PRODUCT_ENSONIQ_AUDIOPCI,
+	    0,
+	    "Ensoniq",
+	    "AudioPCI",
 	},
 	{
 	    PCI_VENDOR_ESSENTIAL, PCI_PRODUCT_ESSENTIAL_RR_HIPPI,
@@ -872,16 +975,16 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "82378IB PCI-ISA Bridge (System I/O)",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PCIB,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82426EX,
 	    0,
 	    "Intel",
-	    "82426EX PCI-ISA Bridge",
+	    "82426EX PCI-to-ISA Bridge (PCIB)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PCMC,
 	    0,
 	    "Intel",
-	    "82434LX/NX (Mercury/Neptune) PCI, Cache, and DRAM Controller",
+	    "82434LX/NX (Mercury/Neptune) PCI/Cache/DRAM Controller",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82092AA,
@@ -920,16 +1023,16 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "82557 Fast Ethernet LAN Controller",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82437,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82437FX,
 	    0,
 	    "Intel",
 	    "82437FX (Triton) PCI, Cache, and DRAM Controller",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82471,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371,
 	    0,
 	    "Intel",
-	    "82471FB (Triton) PCI-ISA Bridge",
+	    "82371FB (Triton) PCI-ISA Bridge",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82438,
@@ -941,25 +1044,37 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371MX,
 	    0,
 	    "Intel",
-	    "82371 (Triton MX) PCI-ISA Bridge and IDE Controller",
+	    "82371 (Triton MX) PCI-ISA and IDE",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82437MX,
 	    0,
 	    "Intel",
-	    "82437 (Triton MX) PCI, Cache, and DRAM Controller",
+	    "82437 (Triton MX) PCI/CACHECOMP/DRAM Controller",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82440FX,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82441FX,
 	    0,
 	    "Intel",
-	    "82440FX (Natoma) PCI and Memory Controller",
+	    "82441FX PCI and Memory Controller (PMC)",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82439,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82380AB,
 	    0,
 	    "Intel",
-	    "82439 (Triton II) TXC Host Bridge",
+	    "82380AB Mobile PCI-to-ISA Bridge (MISA)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82380FB,
+	    0,
+	    "Intel",
+	    "82380FB Mobile PCI-to-PCI Bridge (MPCI2)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82439HX,
+	    0,
+	    "Intel",
+	    "82439HX (Triton II) TXC Host Bridge",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371SB,
@@ -980,16 +1095,58 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "82371SB (Triton II) USB Interface",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82430VX,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82437VX,
 	    0,
 	    "Intel",
-	    "82430VX (Triton VX) Host Bridge",
+	    "82437VX System Controller (TVX)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82439TX,
+	    0,
+	    "Intel",
+	    "82439TX System Controller (MTXC)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82439TX,
+	    0,
+	    "Intel",
+	    "82439TX System Controller (MTXC)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371AB,
 	    0,
 	    "Intel",
 	    "82371AB PIIX4 ISA Bridge",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371AB_IDE,
+	    0,
+	    "Intel",
+	    "82371AB IDE controller (PIIX4)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371AB_USB,
+	    0,
+	    "Intel",
+	    "82371AB USB Host Controller (PIIX4)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371AB_PMC,
+	    0,
+	    "Intel",
+	    "82371AB Power Management Controller (PIIX4)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82443LX,
+	    0,
+	    "Intel",
+	    "82443LX PCI AGP Controller (PAC)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82443LX_AGP,
+	    0,
+	    "Intel",
+	    "82443LX AGP Device (PAC)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PCI450_PB,
@@ -1016,10 +1173,22 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "ITT3204 MPEG Decoder",
 	},
 	{
+	    PCI_VENDOR_KTI, PCI_PRODUCT_KTI_KTIE,
+	    0,
+	    "KTI",
+	    "KTI Ethernet",
+	},
+	{
 	    PCI_VENDOR_LEADTEK, PCI_PRODUCT_LEADTEK_S3_805,
 	    0,
 	    "LeadTek Research",
 	    "S3 805",
+	},
+	{
+	    PCI_VENDOR_MACRONIX, PCI_PRODUCT_MACRONIX_MX98713,
+	    0,
+	    "Macronix",
+	    "PMAC 100/10base PCI MAC controller",
 	},
 	{
 	    PCI_VENDOR_MADGE, PCI_PRODUCT_MADGE_COLLAGE25,
@@ -1043,13 +1212,31 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_ATLAS,
 	    0,
 	    "Matrox",
-	    "MGA PX2085 (\"Atlas\")",
+	    "MGA PX2085 (Atlas)",
 	},
 	{
 	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILLENIUM,
 	    0,
 	    "Matrox",
-	    "MGA Millenium 2064W (\"Storm\")",
+	    "MGA Millenium 2064W (Storm)",
+	},
+	{
+	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MYSTIQUE_220,
+	    0,
+	    "Matrox",
+	    "MGA 1064SG 220MHz",
+	},
+	{
+	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILLENNIUM_II,
+	    0,
+	    "Matrox",
+	    "MGA Millennium II 2164W",
+	},
+	{
+	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MILLENNIUM_IIAGP,
+	    0,
+	    "Matrox",
+	    "MGA Millennium II 2164WA-B AGP",
 	},
 	{
 	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_MYSTIQUE,
@@ -1080,6 +1267,18 @@ struct pci_knowndev pci_knowndevs[] = {
 	    0,
 	    "National Semiconductor",
 	    "NS87410",
+	},
+	{
+	    PCI_VENDOR_NEOMAGIC, PCI_PRODUCT_NEOMAGIC_NM3160,
+	    0,
+	    "Neomagic",
+	    "NM3160",
+	},
+	{
+	    PCI_VENDOR_NETVIN, PCI_PRODUCT_NETVIN_NV5000,
+	    0,
+	    "NetVin",
+	    "NetVin 5000",
 	},
 	{
 	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_810,
@@ -1122,6 +1321,36 @@ struct pci_knowndev pci_knowndevs[] = {
 	    0,
 	    "Symbios Logic",
 	    "53c875",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_875J,
+	    0,
+	    "Symbios Logic",
+	    "53c875J",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_885,
+	    0,
+	    "Symbios Logic",
+	    "53c885",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_895,
+	    0,
+	    "Symbios Logic",
+	    "53c895",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_896,
+	    0,
+	    "Symbios Logic",
+	    "53c896",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_PE_GNIC,
+	    0,
+	    "Symbios Logic",
+	    "Packet Engines G-NIC Ethernet",
 	},
 	{
 	    PCI_VENDOR_NEXGEN, PCI_PRODUCT_NEXGEN_NX82C501,
@@ -1192,14 +1421,20 @@ struct pci_knowndev pci_knowndevs[] = {
 	{
 	    PCI_VENDOR_QLOGIC, PCI_PRODUCT_QLOGIC_ISP1020,
 	    0,
-	    "Q Logic",
+	    "QLogic",
 	    "ISP1020",
 	},
 	{
 	    PCI_VENDOR_QLOGIC, PCI_PRODUCT_QLOGIC_ISP1022,
 	    0,
-	    "Q Logic",
+	    "QLogic",
 	    "ISP1022",
+	},
+	{
+	    PCI_VENDOR_QLOGIC, PCI_PRODUCT_QLOGIC_ISP2100,
+	    0,
+	    "QLogic",
+	    "ISP2100",
 	},
 	{
 	    PCI_VENDOR_QUANTUMDESIGNS, PCI_PRODUCT_QUANTUMDESIGNS_8500,
@@ -1259,7 +1494,7 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_VIRGE_VX,
 	    0,
 	    "S3",
-	    "ViRGE/VX",
+	    "ViRGE VX",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_928,
@@ -1271,73 +1506,91 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_864_0,
 	    0,
 	    "S3",
-	    "86C864-0 (\"Vision864\")",
+	    "86C864-0 (Vision864)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_864_1,
 	    0,
 	    "S3",
-	    "86C864-1 (\"Vision864\")",
+	    "86C864-1 (Vision864)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_864_2,
 	    0,
 	    "S3",
-	    "86C864-2 (\"Vision864\")",
+	    "86C864-2 (Vision864)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_864_3,
 	    0,
 	    "S3",
-	    "86C864-3 (\"Vision864\")",
+	    "86C864-3 (Vision864)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_964_0,
 	    0,
 	    "S3",
-	    "86C964-0 (\"Vision964\")",
+	    "86C964-0 (Vision964)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_964_1,
 	    0,
 	    "S3",
-	    "86C964-1 (\"Vision964\")",
+	    "86C964-1 (Vision964)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_964_2,
 	    0,
 	    "S3",
-	    "86C964-2 (\"Vision964\")",
+	    "86C964-2 (Vision964)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_964_3,
 	    0,
 	    "S3",
-	    "86C964-3 (\"Vision964\")",
+	    "86C964-3 (Vision964)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_968_0,
 	    0,
 	    "S3",
-	    "86C968-0 (\"Vision968\")",
+	    "86C968-0 (Vision968)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_968_1,
 	    0,
 	    "S3",
-	    "86C968-1 (\"Vision968\")",
+	    "86C968-1 (Vision968)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_968_2,
 	    0,
 	    "S3",
-	    "86C968-2 (\"Vision968\")",
+	    "86C968-2 (Vision968)",
 	},
 	{
 	    PCI_VENDOR_S3, PCI_PRODUCT_S3_968_3,
 	    0,
 	    "S3",
-	    "86C968-3 (\"Vision968\")",
+	    "86C968-3 (Vision968)",
+	},
+	{
+	    PCI_VENDOR_S3, PCI_PRODUCT_S3_TRIO64V2_DX,
+	    0,
+	    "S3",
+	    "Trio64V2/DX",
+	},
+	{
+	    PCI_VENDOR_S3, PCI_PRODUCT_S3_PLATO,
+	    0,
+	    "S3",
+	    "Plato",
+	},
+	{
+	    PCI_VENDOR_S3, PCI_PRODUCT_S3_VIRGE_DX_GX,
+	    0,
+	    "S3",
+	    "ViRGE DX/GX",
 	},
 	{
 	    PCI_VENDOR_SGSTHOMSON, PCI_PRODUCT_SGSTHOMSON_2000,
@@ -1350,6 +1603,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    0,
 	    "SGS Thomson Microelectric",
 	    "STG 1764X",
+	},
+	{
+	    PCI_VENDOR_SIGMA, PCI_PRODUCT_SIGMA_64GX,
+	    0,
+	    "Sigma Designs",
+	    "64GX",
 	},
 	{
 	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_86C201,
@@ -1388,10 +1647,70 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "85C496",
 	},
 	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_85C596,
+	    0,
+	    "Silicon Integrated System",
+	    "85C596",
+	},
+	{
 	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_85C601,
 	    0,
 	    "Silicon Integrated System",
 	    "85C601",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5511,
+	    0,
+	    "Silicon Integrated System",
+	    "5511",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5512,
+	    0,
+	    "Silicon Integrated System",
+	    "5512",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5513,
+	    0,
+	    "Silicon Integrated System",
+	    "5513",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5581,
+	    0,
+	    "Silicon Integrated System",
+	    "5581",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5582,
+	    0,
+	    "Silicon Integrated System",
+	    "5582",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5591,
+	    0,
+	    "Silicon Integrated System",
+	    "5591",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_5596,
+	    0,
+	    "Silicon Integrated System",
+	    "5596",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6204,
+	    0,
+	    "Silicon Integrated System",
+	    "6204",
+	},
+	{
+	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_6205,
+	    0,
+	    "Silicon Integrated System",
+	    "6205",
 	},
 	{
 	    PCI_VENDOR_SMC, PCI_PRODUCT_SMC_37C665,
@@ -1404,6 +1723,24 @@ struct pci_knowndev pci_knowndevs[] = {
 	    0,
 	    "Standard Microsystems",
 	    "FDC 37C922",
+	},
+	{
+	    PCI_VENDOR_SMC, PCI_PRODUCT_SMC_83C170,
+	    0,
+	    "Standard Microsystems",
+	    "83C170 (\"EPIC/100\") Fast Ethernet",
+	},
+	{
+	    PCI_VENDOR_STB2, PCI_PRODUCT_STB2_RIVA128,
+	    0,
+	    "STB (2nd PCI Vendor ID)",
+	    "Velocity128",
+	},
+	{
+	    PCI_VENDOR_SURECOM, PCI_PRODUCT_SURECOM_NE34,
+	    0,
+	    "Surecom Technology",
+	    "Surecom NE-34",
 	},
 	{
 	    PCI_VENDOR_SYMPHONY, PCI_PRODUCT_SYMPHONY_82C101,
@@ -1442,10 +1779,28 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "DC-690C",
 	},
 	{
-	    PCI_VENDOR_TI, PCI_PRODUCT_TI_CT1130,
+	    PCI_VENDOR_TI, PCI_PRODUCT_TI_TLAN,
 	    0,
 	    "Texas Instruments",
-	    "CT1130",
+	    "TLAN",
+	},
+	{
+	    PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1130,
+	    0,
+	    "Texas Instruments",
+	    "PCI1130",
+	},
+	{
+	    PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1131,
+	    0,
+	    "Texas Instruments",
+	    "PCI1131",
+	},
+	{
+	    PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI2030,
+	    0,
+	    "Texas Instruments",
+	    "PCI2030",
 	},
 	{
 	    PCI_VENDOR_TOSHIBA, PCI_PRODUCT_TOSHIBA_R4X00,
@@ -1655,7 +2010,7 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C505,
 	    0,
 	    "VIA Technologies",
-	    "VT82C505 (\"Pluto\")",
+	    "VT82C505 (Pluto)",
 	},
 	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C561,
@@ -1670,22 +2025,46 @@ struct pci_knowndev pci_knowndevs[] = {
 	    "VT82C576 3V",
 	},
 	{
+	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C586,
+	    0,
+	    "VIA Technologies",
+	    "VT82C586 (Apollo VP) PCI-ISA Bridge",
+	},
+	{
+	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT86C926,
+	    0,
+	    "VIA Technologies",
+	    "VT86C926 Amazon PCI-Ethernet Controller",
+	},
+	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C570M,
 	    0,
 	    "VIA Technologies",
-	    "VT82C570M (\"Apollo\") Host-PCI Bridge",
+	    "VT82C570M (Apollo) Host-PCI Bridge",
 	},
 	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C570MV,
 	    0,
 	    "VIA Technologies",
-	    "VT82C570M (\"Apollo\") PCI-ISA Bridge",
+	    "VT82C570M (Apollo) PCI-ISA Bridge",
 	},
 	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C416MV,
 	    0,
 	    "VIA Technologies",
 	    "VT82C416MV",
+	},
+	{
+	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C595,
+	    0,
+	    "VIA Technologies",
+	    "VT82C595 (Apollo VP2) Host-PCI Bridge",
+	},
+	{
+	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT83C572,
+	    0,
+	    "VIA Technologies",
+	    "VT83C572 USB Controller",
 	},
 	{
 	    PCI_VENDOR_VORTEX, PCI_PRODUCT_VORTEX_GDT_6000B,
@@ -1830,6 +2209,18 @@ struct pci_knowndev pci_knowndevs[] = {
 	    0,
 	    "Winbond Electronics",
 	    "W83769F",
+	},
+	{
+	    PCI_VENDOR_WINBOND, PCI_PRODUCT_WINBOND_W89C940F,
+	    0,
+	    "Winbond Electronics",
+	    "Linksys EtherPCI LAN Card II",
+	},
+	{
+	    PCI_VENDOR_WINBOND2, PCI_PRODUCT_WINBOND2_W89C940,
+	    0,
+	    "Winbond Electronics (2nd PCI Vendor ID)",
+	    "Linksys EtherPCI LAN Card",
 	},
 	{
 	    PCI_VENDOR_ZEINET, PCI_PRODUCT_ZEINET_1221,
@@ -2524,7 +2915,7 @@ struct pci_knowndev pci_knowndevs[] = {
 	{
 	    PCI_VENDOR_QLOGIC, 0,
 	    PCI_KNOWNDEV_NOPROD,
-	    "Q Logic",
+	    "QLogic",
 	    NULL,
 	},
 	{
@@ -4448,6 +4839,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    NULL,
 	},
 	{
+	    PCI_VENDOR_COMPEX, 0,
+	    PCI_KNOWNDEV_NOPROD,
+	    "Compex",
+	    NULL,
+	},
+	{
 	    PCI_VENDOR_PMCSIERRA, 0,
 	    PCI_KNOWNDEV_NOPROD,
 	    "PMC-Sierra",
@@ -4502,6 +4899,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    NULL,
 	},
 	{
+	    PCI_VENDOR_ENSONIQ, 0,
+	    PCI_KNOWNDEV_NOPROD,
+	    "Ensoniq",
+	    NULL,
+	},
+	{
 	    PCI_VENDOR_NETAPP, 0,
 	    PCI_KNOWNDEV_NOPROD,
 	    "Network Appliance",
@@ -4526,6 +4929,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    NULL,
 	},
 	{
+	    PCI_VENDOR_STB2, 0,
+	    PCI_KNOWNDEV_NOPROD,
+	    "STB (2nd PCI Vendor ID)",
+	    NULL,
+	},
+	{
 	    PCI_VENDOR_SYMPHONY2, 0,
 	    PCI_KNOWNDEV_NOPROD,
 	    "Symphony Labs (2nd PCI Vendor ID)",
@@ -4547,6 +4956,12 @@ struct pci_knowndev pci_knowndevs[] = {
 	    PCI_VENDOR_AVANCE2, 0,
 	    PCI_KNOWNDEV_NOPROD,
 	    "Avance Logic (2nd PCI Vendor ID)",
+	    NULL,
+	},
+	{
+	    PCI_VENDOR_NETVIN, 0,
+	    PCI_KNOWNDEV_NOPROD,
+	    "NetVin",
 	    NULL,
 	},
 	{
@@ -4592,9 +5007,21 @@ struct pci_knowndev pci_knowndevs[] = {
 	    NULL,
 	},
 	{
+	    PCI_VENDOR_WINBOND2, 0,
+	    PCI_KNOWNDEV_NOPROD,
+	    "Winbond Electronics (2nd PCI Vendor ID)",
+	    NULL,
+	},
+	{
 	    PCI_VENDOR_COMPUTONE, 0,
 	    PCI_KNOWNDEV_NOPROD,
 	    "Computone Corperation",
+	    NULL,
+	},
+	{
+	    PCI_VENDOR_KTI, 0,
+	    PCI_KNOWNDEV_NOPROD,
+	    "KTI",
 	    NULL,
 	},
 	{

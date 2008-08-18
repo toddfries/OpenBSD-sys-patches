@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.45 1997/08/04 21:45:47 gene Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.50 1998/03/03 21:24:12 ryker Exp $	*/
 /*	$NetBSD: machdep.c,v 1.134 1997/02/14 06:15:30 scottr Exp $	*/
 
 /*
@@ -114,6 +114,7 @@
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
+#include <ddb/db_var.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
@@ -216,7 +217,7 @@ int     safepri = PSL_LOWIPL;
  */
 static	long iomem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
 struct	extent *iomem_ex;
-static	iomem_malloc_safe;
+static	int iomem_malloc_safe;
 
 static void	identifycpu __P((void));
 static u_long	get_physical __P((u_int, u_long *));
@@ -236,7 +237,7 @@ int		bus_mem_add_mapping __P((bus_addr_t, bus_size_t,
  */
 static	long iomem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
 struct	extent *iomem_ex;
-static	iomem_malloc_safe;
+static	int iomem_malloc_safe;
 
 static void	identifycpu __P((void));
 static u_long	get_physical __P((u_int, u_long *));
@@ -370,12 +371,12 @@ again:
 	 * memory. Insure a minimum of 16 buffers.
 	 * We allocate 1/2 as many swap buffer headers as file i/o buffers.
 	 */
-	if (bufpages == 0)
+	if (bufpages == 0) {
 		if (physmem < btoc(2 * 1024 * 1024))
 			bufpages = physmem / 10 / CLSIZE;
 		else
 			bufpages = (btoc(2 * 1024 * 1024) + physmem) / 20 / CLSIZE;
-
+	}
 	bufpages = min(NKMEMCLUSTERS * 2 / 5, bufpages);
 
 	if (nbuf == 0) {
@@ -1043,9 +1044,12 @@ nmihand(frame)
 		return;
 /*	regdump(&frame, 128);
 	dumptrace(); */
-#if DDB
+#ifdef DIAGNOSTIC
 	printf("Panic switch: PC is 0x%x.\n", frame.f_pc);
-	Debugger();
+#endif
+#ifdef DDB
+	if (db_console)
+		Debugger();
 #endif
 	nmihanddeep = 0;
 }
@@ -1174,7 +1178,7 @@ cpu_exec_aout_makecmds(p, epp)
 
 #ifdef COMPAT_SUNOS
 	{
-		extern sunos_exec_aout_makecmds __P((struct proc *,
+		extern int sunos_exec_aout_makecmds __P((struct proc *,
 			        struct exec_package *));
 		if ((error = sunos_exec_aout_makecmds(p, epp)) == 0)
 			return 0;

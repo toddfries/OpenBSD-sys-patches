@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_misc.c,v 1.13 1997/10/06 20:19:35 deraadt Exp $	 */
+/*	$OpenBSD: svr4_misc.c,v 1.20 1998/03/06 21:58:09 niklas Exp $	 */
 /*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
 
 /*
@@ -37,6 +37,8 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/exec.h>
+#include <sys/exec_olf.h>
 #include <sys/namei.h>
 #include <sys/dirent.h>
 #include <sys/proc.h>
@@ -48,6 +50,7 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
+#include <sys/ktrace.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
@@ -227,8 +230,8 @@ svr4_sys_getdents(p, v, retval)
 	struct svr4_dirent idb;
 	off_t off;		/* true file offset */
 	int buflen, error, eofflag;
-	u_long *cookiebuf, *cookie;
-	int ncookies;
+	u_long *cookiebuf = NULL, *cookie;
+	int ncookies = 0;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
@@ -243,9 +246,7 @@ svr4_sys_getdents(p, v, retval)
 
 	buflen = min(MAXBSIZE, SCARG(uap, nbytes));
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	ncookies = buflen / 16;
-	cookiebuf = malloc(ncookies * sizeof(*cookiebuf), M_TEMP, M_WAITOK);
-	VOP_LOCK(vp);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	off = fp->f_offset;
 again:
 	aiov.iov_base = buf;
@@ -261,10 +262,15 @@ again:
          * First we read into the malloc'ed buffer, then
          * we massage it into user space, one record at a time.
          */
-	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, cookiebuf,
-	    ncookies);
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, &ncookies,
+	    &cookiebuf);
 	if (error)
 		goto out;
+
+	if (!error && !cookiebuf) {
+		error = EPERM;
+		goto out;
+	}
 
 	inp = buf;
 	outp = SCARG(uap, buf);
@@ -314,8 +320,9 @@ again:
 eof:
 	*retval = SCARG(uap, nbytes) - resid;
 out:
-	VOP_UNLOCK(vp);
-	free(cookiebuf, M_TEMP);
+	VOP_UNLOCK(vp, 0, p);
+	if (cookiebuf)
+		free(cookiebuf, M_TEMP);
 	free(buf, M_TEMP);
 	return error;
 }
@@ -328,7 +335,7 @@ svr4_sys_mmap(p, v, retval)
 {
 	struct svr4_sys_mmap_args	*uap = v;
 	struct sys_mmap_args	 mm;
-	caddr_t 		 rp;
+	void			*rp;
 #define _MAP_NEW	0x80000000
 	/*
          * Verify the arguments.
@@ -346,7 +353,7 @@ svr4_sys_mmap(p, v, retval)
 	SCARG(&mm, addr) = SCARG(uap, addr);
 	SCARG(&mm, pos) = SCARG(uap, pos);
 
-	rp = (caddr_t) round_page(p->p_vmspace->vm_daddr + MAXDSIZ);
+	rp = (void *) round_page(p->p_vmspace->vm_daddr + MAXDSIZ);
 	if ((SCARG(&mm, flags) & MAP_FIXED) == 0 &&
 	    SCARG(&mm, addr) != 0 && SCARG(&mm, addr) < rp)
 		SCARG(&mm, addr) = rp;
@@ -371,12 +378,12 @@ svr4_sys_fchroot(p, v, retval)
 	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
 		return error;
 	vp = (struct vnode *) fp->f_data;
-	VOP_LOCK(vp);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_type != VDIR)
 		error = ENOTDIR;
 	else
 		error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
-	VOP_UNLOCK(vp);
+	VOP_UNLOCK(vp, 0, p);
 	if (error)
 		return error;
 	VREF(vp);
@@ -742,7 +749,7 @@ svr4_sys_ulimit(p, v, retval)
 		return 0;
 
 	default:
-		return ENOSYS;
+		return EINVAL;
 	}
 }
 
@@ -1284,6 +1291,18 @@ svr4_sys_acl(p, v, retval)
 }
 
 int
+svr4_sys_auditsys(p, v, retval)
+	register struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	/*
+	 * XXX: Big brother is *not* watching.
+	 */
+	return 0;
+}
+
+int
 svr4_sys_memcntl(p, v, retval)
 	register struct proc *p;
 	void *v;
@@ -1321,4 +1340,54 @@ svr4_sys_nice(p, v, retval)
 		return error;
 
 	return 0;
+}
+
+/* ARGSUSED */
+int
+svr4_sys_setegid(p, v, retval)
+        struct proc *p;
+        void *v;
+        register_t *retval;
+{
+        struct sys_setegid_args /* {
+		syscallarg(gid_t) egid;
+        } */ *uap = v;
+
+#if defined(COMPAT_LINUX) && defined(i386)
+	if (SCARG(uap, egid) > 60000) {
+		/*
+		 * One great fuckup deserves another.  The Linux people
+		 * made this their personality system call.  But we can't
+		 * tell if a binary is SVR4 or Linux until they do that
+		 * system call, in some cases.  So when we get it, and the
+		 * value is out of some magical range, switch to Linux
+		 * emulation and pray.
+		 */
+		extern struct emul emul_linux_elf;
+
+		p->p_emul = &emul_linux_elf;
+		p->p_os = OOS_LINUX;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_EMUL))
+			ktremul(p->p_tracep, p->p_emul->e_name);
+#endif
+		return (0);
+	}
+#else
+	(void)uap;
+#endif
+        return (sys_setegid(p, v, retval));
+}
+
+int
+svr4_sys_rdebug(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+#ifdef SVR4_COMPAT_NCR
+	return (ENXIO);
+#else
+	return (p->p_os == OOS_NCR ? ENXIO : sys_nosys(p, v, retval));
+#endif
 }

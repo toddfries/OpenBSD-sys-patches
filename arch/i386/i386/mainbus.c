@@ -1,5 +1,5 @@
-/*	$OpenBSD: mainbus.c,v 1.10 1997/09/29 03:42:27 mickey Exp $	*/
-/*	$NetBSD: mainbus.c,v 1.8 1996/04/11 22:13:37 cgd Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.13 1998/01/20 18:40:15 niklas Exp $	*/
+/*	$NetBSD: mainbus.c,v 1.21 1997/06/06 23:14:20 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -45,6 +45,8 @@
 #include <i386/isa/isa_machdep.h>
 
 #include "pci.h"
+#include "eisa.h"
+#include "isa.h"
 #include "apm.h"
 #include "bios.h"
 
@@ -74,6 +76,12 @@ union mainbus_attach_args {
 	struct bios_attach_args mba_bios;
 #endif
 };
+
+/*
+ * This is set when the ISA bus is attached.  If it's not set by the
+ * time it's checked below, then mainbus attempts to attach an ISA.
+ */
+int     isa_has_been_seen;
 
 /*
  * Probe for the mainbus; always succeeds.
@@ -107,19 +115,6 @@ mainbus_attach(parent, self, aux)
 		config_found(self, &mba.mba_bios, mainbus_print);
 	}
 #endif
-	if (1 /* XXX ISA NOT YET SEEN */) {
-		mba.mba_iba.iba_busname = "isa";
-		mba.mba_iba.iba_iot = I386_BUS_SPACE_IO;
-		mba.mba_iba.iba_memt = I386_BUS_SPACE_MEM;
-		config_found(self, &mba.mba_iba, mainbus_print);
-	}
-
-	if (!bcmp(ISA_HOLE_VADDR(EISA_ID_PADDR), EISA_ID, EISA_ID_LEN)) {
-		mba.mba_eba.eba_busname = "eisa";
-		mba.mba_eba.eba_iot = I386_BUS_SPACE_IO;
-		mba.mba_eba.eba_memt = I386_BUS_SPACE_MEM;
-		config_found(self, &mba.mba_eba, mainbus_print);
-	}
 
 	/*
 	 * XXX Note also that the presence of a PCI bus should
@@ -132,10 +127,31 @@ mainbus_attach(parent, self, aux)
 		mba.mba_pba.pba_busname = "pci";
 		mba.mba_pba.pba_iot = I386_BUS_SPACE_IO;
 		mba.mba_pba.pba_memt = I386_BUS_SPACE_MEM;
+		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
 		mba.mba_pba.pba_bus = 0;
 		config_found(self, &mba.mba_pba, mainbus_print);
 	}
 #endif
+
+	if (!bcmp(ISA_HOLE_VADDR(EISA_ID_PADDR), EISA_ID, EISA_ID_LEN)) {
+		mba.mba_eba.eba_busname = "eisa";
+		mba.mba_eba.eba_iot = I386_BUS_SPACE_IO;
+		mba.mba_eba.eba_memt = I386_BUS_SPACE_MEM;
+#if NEISA > 0
+		mba.mba_eba.eba_dmat = &eisa_bus_dma_tag;
+#endif
+		config_found(self, &mba.mba_eba, mainbus_print);
+	}
+
+	if (isa_has_been_seen == 0) {
+		mba.mba_iba.iba_busname = "isa";
+		mba.mba_iba.iba_iot = I386_BUS_SPACE_IO;
+		mba.mba_iba.iba_memt = I386_BUS_SPACE_MEM;
+#if NISA > 0
+		mba.mba_iba.iba_dmat = &isa_bus_dma_tag;
+#endif
+		config_found(self, &mba.mba_iba, mainbus_print);
+	}
 }
 
 int

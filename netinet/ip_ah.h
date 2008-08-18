@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.h,v 1.9 1997/07/14 08:48:44 provos Exp $	*/
+/*	$OpenBSD: ip_ah.h,v 1.11 1997/11/24 19:14:11 provos Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -9,7 +9,11 @@
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
  * by Angelos D. Keromytis, kermit@forthnet.gr.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis and Angelos D. Keromytis.
+ * Additional transforms and features in 1997 by Angelos D. Keromytis and
+ * Niels Provos.
+ *
+ * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -30,6 +34,17 @@
 
 #include <sys/md5k.h>
 #include <netinet/ip_sha1.h>
+#include <netinet/ip_rmd160.h>
+
+struct ah_hash {
+    int type;
+    char *name;
+    u_int16_t hashsize; 
+    u_int16_t ctxsize;
+    void (*Init)(void *);
+    void (*Update)(void *, u_int8_t *, u_int16_t);
+    void (*Final)(u_int8_t *, void *);
+};
 
 struct ah_old
 {
@@ -45,6 +60,7 @@ struct ah_old
 /* Authenticator lengths */
 #define AH_MD5_ALEN		16
 #define AH_SHA1_ALEN		20
+#define AH_RMD160_ALEN		20
 
 #define AH_ALEN_MAX		AH_SHA1_ALEN 	/* Keep this updated */
 
@@ -102,44 +118,43 @@ struct ah_new_xdata
     int32_t         amx_wnd;
     u_int32_t       amx_rpl;                /* Replay counter */
     u_int32_t       amx_bitmap;
+    struct ah_hash  *amx_hash;
     union
     {
-	struct 
-	{
-            MD5_CTX         amx_ictx;       /* Internal key+padding */
-            MD5_CTX         amx_octx;       /* External key+padding */
-        } MD5stuff;
-
-	struct
-	{
-	    SHA1_CTX	    amx_ictx;
-	    SHA1_CTX	    amx_octx;
-	} SHA1stuff;
-    } Hashes;
+        MD5_CTX         amx_MD5_ictx;       /* Internal key+padding */
+        SHA1_CTX	amx_SHA1_ictx;
+	RMD160_CTX      amx_RMD160_ictx;
+    } amx_ictx;
+    union 
+    {
+        MD5_CTX         amx_MD5_octx;       /* External key+padding */
+	SHA1_CTX        amx_SHA1_octx;
+	RMD160_CTX      amx_RMD160_octx;
+    } amx_octx;
 };
 
-#define amx_md5_ictx	Hashes.MD5stuff.amx_ictx
-#define amx_md5_octx	Hashes.MD5stuff.amx_octx
-#define amx_sha1_ictx	Hashes.SHA1stuff.amx_ictx
-#define amx_sha1_octx	Hashes.SHA1stuff.amx_octx
-
-#define AHMD5_ALEN      16		/* Size of MD5 digest */
-#define AHSHA1_ALEN     20		/* Size of SHA-1 digest */
+#define amx_md5_ictx	amx_ictx.amx_MD5_ictx
+#define amx_md5_octx	amx_octx.amx_MD5_octx
+#define amx_sha1_ictx	amx_ictx.amx_SHA1_ictx
+#define amx_sha1_octx	amx_octx.amx_SHA1_octx
+#define amx_rmd160_ictx	amx_ictx.amx_RMD160_ictx
+#define amx_rmd160_octx	amx_octx.amx_RMD160_octx
 
 struct ah_old_xdata
 {
     u_int32_t       amx_hash_algorithm;
     u_int32_t       amx_keylen;             /* Key material length */
+    struct ah_hash  *amx_hash;
     union
     {
 	MD5_CTX	    amx_MD5_ctx;
 	SHA1_CTX    amx_SHA1_ctx;
-    } Hashes;
+    } amx_ctx;
     u_int8_t        amx_key[1];             /* Key material */
 };
 
-#define amx_md5_ctx	Hashes.amx_MD5_ctx
-#define amx_sha1_ctx 	Hashes.amx_SHA1_ctx
+#define amx_md5_ctx	amx_ctx.amx_MD5_ctx
+#define amx_sha1_ctx 	amx_ctx.amx_SHA1_ctx
 
 struct ah_old_xencap
 {

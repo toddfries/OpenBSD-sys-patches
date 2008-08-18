@@ -1,4 +1,4 @@
-/*	$OpenBSD: memprobe.c,v 1.24 1997/10/23 15:13:30 weingart Exp $	*/
+/*	$OpenBSD: memprobe.c,v 1.27 1998/04/18 07:39:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner, Michael Shalayeff
@@ -37,9 +37,32 @@
 #include <stand/boot/bootarg.h>
 #include "libsa.h"
 
-static int addrprobe __P((u_int));
 u_int cnvmem, extmem;		/* XXX - compatibility */
 bios_memmap_t *memory_map;
+
+
+/* Check gateA20
+ *
+ * A sanity check.
+ */
+static __inline int
+checkA20(void)
+{
+	char *p = (char *)0x100000;
+	char *q = (char *)0x000000;
+	int st;
+
+	/* Simple check */
+	if(*p != *q)
+		return(1);
+
+	/* Complex check */
+	*p = ~(*p);
+	st = (*p != *q);
+	*p = ~(*p);
+
+	return(st);
+}
 
 /* BIOS int 15, AX=E820
  *
@@ -175,41 +198,41 @@ bios_int12(mp)
  *
  * XXX - Does not detect aliased memory.
  */
+const u_int addrprobe_pat[] = {
+	0x00000000, 0xFFFFFFFF,
+	0x01010101, 0x10101010,
+	0x55555555, 0xCCCCCCCC
+};
 static int
 addrprobe(kloc)
 	u_int kloc;
 {
 	__volatile u_int *loc;
-	static const u_int pat[] = {
-		0x00000000, 0xFFFFFFFF,
-		0x01010101, 0x10101010,
-		0x55555555, 0xCCCCCCCC
-	};
 	register u_int i, ret = 0;
-	u_int save[NENTS(pat)];
+	u_int save[NENTS(addrprobe_pat)];
 
 	/* Get location */
 	loc = (int *)(kloc * 1024);
 
 	save[0] = *loc;
 	/* Probe address */
-	for(i = 0; i < NENTS(pat); i++){
-		*loc = pat[i];
-		if(*loc != pat[i])
+	for(i = 0; i < NENTS(addrprobe_pat); i++){
+		*loc = addrprobe_pat[i];
+		if(*loc != addrprobe_pat[i])
 			ret++;
 	}
 	*loc = save[0];
 
 	if (!ret) {
 		/* Write address */
-		for(i = 0; i < NENTS(pat); i++) {
+		for(i = 0; i < NENTS(addrprobe_pat); i++) {
 			save[i] = loc[i];
-			loc[i] = pat[i];
+			loc[i] = addrprobe_pat[i];
 		}
 
 		/* Read address */
-		for(i = 0; i < NENTS(pat); i++) {
-			if(loc[i] != pat[i])
+		for(i = 0; i < NENTS(addrprobe_pat); i++) {
+			if(loc[i] != addrprobe_pat[i])
 				ret++;
 			loc[i] = save[i];
 		}
@@ -251,16 +274,16 @@ badprobe(mp)
 	return ++mp;
 }
 
+bios_memmap_t bios_memmap[32];	/* This is easier */
 void
 memprobe()
 {
-	static bios_memmap_t bm[32];	/* This is easier */
-	bios_memmap_t *pm = bm, *im;
+	bios_memmap_t *pm = bios_memmap, *im;
 #ifdef DEBUG
 	printf("Probing memory: ");
 #endif
-	if(!(pm = bios_E820(bm))) {
-		im = bios_int12(bm);
+	if(!(pm = bios_E820(bios_memmap))) {
+		im = bios_int12(bios_memmap);
 		pm = bios_E801(im);
 		if (!pm)
 			pm = bios_8800(im);
@@ -276,21 +299,31 @@ memprobe()
 #endif
 	pm->type = BIOS_MAP_END;
 	/* Register in global var */
-	addbootarg(BOOTARG_MEMMAP, (pm - bm + 1) * sizeof(*bm), bm);
-	memory_map = bm; /* XXX for 'machine mem' command only */
-	printf("mem0:");
+	addbootarg(BOOTARG_MEMMAP, 
+		(pm - bios_memmap + 1) * sizeof(*bios_memmap), bios_memmap);
+	memory_map = bios_memmap; /* XXX for 'machine mem' command only */
+	printf("memory:");
 
 	/* XXX - Compatibility, remove later */
 	extmem = cnvmem = 0;
-	for(im = bm; im->type != BIOS_MAP_END; im++) {
-		if (im->type == BIOS_MAP_FREE) {
+	for(im = bios_memmap; im->type != BIOS_MAP_END; im++) {
+		/* Count only "good" memory chunks 4K an up in size */
+		if ((im->type == BIOS_MAP_FREE) && (im->size >= 4)) {
 			printf(" %luK", (u_long)im->size);
 
-			if(im->addr < 0x100000)
+			/* We ignore "good" memory in the 640K-1M hole */
+			if(im->addr < 0xA0000)
 				cnvmem += im->size;
-			else
+			if(im->addr >= 0x100000)
 				extmem += im->size;
 		}
 	}
+
+	/* Check if gate A20 is on */
+	if(checkA20())
+		printf(" [A20 on]");
+	else
+		printf(" [A20 off!]");
+
 	printf("\n");
 }

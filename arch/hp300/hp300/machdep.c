@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.27 1997/07/06 08:02:05 downsj Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.31 1998/03/06 17:33:32 millert Exp $	*/
 /*	$NetBSD: machdep.c,v 1.94 1997/06/12 15:46:29 mrg Exp $	*/
 
 /*
@@ -80,6 +80,9 @@
 #endif
 
 #include <machine/db_machdep.h>
+#ifdef DDB
+#include <ddb/db_var.h>
+#endif
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 
@@ -498,6 +501,7 @@ struct hp300_model hp300_models[] = {
 	{ HP_370,	"370",		"        ", "33.33"	},
 	{ HP_375,	"375",		"	 ", "50"	},
 	{ HP_380,	"380",		"        ", "25"	},
+	{ HP_385,	"385",		"        ", "33"	},
 	{ HP_400,	"400",		"        ", "50"	},
 	{ HP_425,	"425",		"     t s", "25"	},
 	{ HP_433,	"433",		"    t s ", "33"	},
@@ -653,6 +657,9 @@ identifycpu()
 #endif
 #if !defined(HP380)
 	case HP_380:
+#endif
+#if !defined(HP385)
+	case HP_385:
 #endif
 #if !defined(HP400)
 	case HP_400:
@@ -1020,8 +1027,11 @@ nmihand(frame)
 		 *	- Ignore it.
 		 */
 #ifdef DDB
-		printf(": entering debugger\n");
-		Debugger();
+		if (db_console) {
+			printf(": entering debugger\n");
+			Debugger();
+		} else
+			printf("\n");
 #else
 #ifdef PANICBUTTON
 		if (panicbutton) {
@@ -1293,7 +1303,7 @@ cpu_exec_aout_makecmds(p, epp)
 	int error;
 	struct exec *execp = epp->ep_hdr;
 #ifdef COMPAT_SUNOS
-	extern sunos_exec_aout_makecmds
+	extern int sunos_exec_aout_makecmds
 		__P((struct proc *, struct exec_package *));
 #endif
 

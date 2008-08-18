@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.25 1997/09/24 23:03:54 mickey Exp $
+#	$OpenBSD: GENERIC,v 1.27 1998/02/15 00:38:20 deraadt Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -65,13 +65,13 @@ option		IPFILTER_LOG	# use /dev/ipl to log IPF
 option		PPP_BSDCOMP	# PPP BSD compression
 option		PPP_DEFLATE
 
-pseudo-device	loop	1	# network loopback
+pseudo-device	loop	2	# network loopback
 pseudo-device	bpfilter 8	# packet filter
 pseudo-device	sl	2	# CSLIP
 pseudo-device	ppp	2	# PPP
 pseudo-device	tun	2	# network tunneling over tty
 pseudo-device	enc	1	# encryption device
-pseudo-device	strip	1	# Starmode Radio IP interface
+#pseudo-device	strip	1	# Starmode Radio IP interface
 
 pseudo-device	pty	64	# pseudo-terminals
 pseudo-device	tb	1	# tablet line discipline

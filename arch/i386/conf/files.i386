@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.36 1997/10/27 14:42:01 niklas Exp $
+#	$OpenBSD: files.i386,v 1.39 1998/01/06 02:35:19 deraadt Exp $
 #	$NetBSD: files.i386,v 1.73 1996/05/07 00:58:36 thorpej Exp $
 #
 # new style config file for i386 architecture
@@ -32,7 +32,7 @@ file	arch/i386/i386/random.s
 file	arch/i386/i386/sys_machdep.c
 file	arch/i386/i386/trap.c
 file	arch/i386/i386/vm_machdep.c
-file	arch/i386/i386/dkcsum.c
+file	arch/i386/i386/dkcsum.c		bios
 file	lib/libz/adler32.c		!ppp_deflate
 file	dev/cons.c
 file	dev/cninit.c
@@ -81,6 +81,11 @@ include "../../../dev/pci/files.pci"
 file	arch/i386/pci/pci_machdep.c	pci
 file	arch/i386/pci/pci_compat.c	pci	# XXX compatibility
 
+# PCI-Host bridge chipsets
+device	pchb:	pcibus
+attach	pchb at pci
+file	arch/i386/pci/pchb.c		pchb
+
 #
 # Pcmcia, before ISA (to define device stuff)
 #
@@ -119,7 +124,7 @@ device	pccom: tty
 attach	pccom at isa with pccom_isa
 attach	pccom at commulti with pccom_commulti
 attach	pccom at pcmcia with pccom_pcmcia
-file	arch/i386/isa/pccom.c		pccom & (pccom_isa | pccom_commulti | pccom_pcmcia) needs-flag
+file	arch/i386/isa/pccom.c		pccom & (pccom_isa | pccom_isapnp | pccom_commulti | pccom_pcmcia) needs-flag
 
 # PC console support a la "pccons"
 device	pc: tty, pckbd
@@ -191,6 +196,15 @@ file	arch/i386/i386/pctr.c		pctr needs-flag
 
 include "../../../dev/eisa/files.eisa"
 file	arch/i386/eisa/eisa_machdep.c	eisa
+
+#
+# ISA PnP
+#
+
+include "../../../dev/isa/files.isapnp"
+file	arch/i386/isa/isapnp_machdep.c	isapnp
+
+attach	pccom at isapnp with pccom_isapnp
 
 #
 # Compatibility modules

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkcsum.c,v 1.4.2.1 1997/10/29 22:50:41 niklas Exp $	*/
+/*	$OpenBSD: dkcsum.c,v 1.7 1998/02/22 21:35:26 niklas Exp $	*/
 
 /*-
  * Copyright (c) 1997 Niklas Hallqvist.  All rights reserved.
@@ -136,11 +136,11 @@ dkcsumattach()
 			if (!(bdi->bios_number & 0x80))
 				continue;
 #ifdef DEBUG
-		printf(
-		    "dkcsum: attempting to match with BIOS drive %x csum %x\n",
-		    bdi->bios_number, bdi->checksum);
+			printf("dkcsum: "
+			    "attempting to match with BIOS drive %x csum %x\n",
+			    bdi->bios_number, bdi->checksum);
 #endif
-			if (bdi->checksum == csum)
+			if (bdi->checksum == csum) {
 				if (!hit && !(bdi->flags & BDI_PICKED))
 					hit = bdi;
 				else {
@@ -148,6 +148,7 @@ dkcsumattach()
 					printf("dkcsum: warning: "
 					    "dup BSD->BIOS disk mapping\n");
 				}
+			}
 		}
 
 		/*

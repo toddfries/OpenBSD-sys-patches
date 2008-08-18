@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_readwrite.c,v 1.11 1997/10/06 20:21:48 deraadt Exp $	*/
+/*	$OpenBSD: ufs_readwrite.c,v 1.13 1998/03/01 08:07:13 niklas Exp $	*/
 /*	$NetBSD: ufs_readwrite.c,v 1.9 1996/05/11 18:27:57 mycroft Exp $	*/
 
 /*-
@@ -242,19 +242,13 @@ WRITE(v)
 		xfersize = fs->fs_bsize - blkoffset;
 		if (uio->uio_resid < xfersize)
 			xfersize = uio->uio_resid;
-#ifdef LFS_READWRITE
-		(void)lfs_check(vp, lbn);
-		error = lfs_balloc(vp, blkoffset, xfersize, lbn, &bp);
-#else
 		if (fs->fs_bsize > xfersize)
 			flags |= B_CLRBUF;
 		else
 			flags &= ~B_CLRBUF;
 
-		error = ffs_balloc(ip,
-		    lbn, blkoffset + xfersize, ap->a_cred, &bp, flags);
-#endif
-		if (error)
+		if ((error = VOP_BALLOC(vp, uio->uio_offset, xfersize,
+					ap->a_cred, flags, &bp)) != 0)
 			break;
 		if (uio->uio_offset + xfersize > ip->i_ffs_size) {
 			ip->i_ffs_size = uio->uio_offset + xfersize;
@@ -273,12 +267,12 @@ WRITE(v)
 #else
 		if (ioflag & IO_SYNC)
 			(void)bwrite(bp);
-		else if (xfersize + blkoffset == fs->fs_bsize)
+		else if (xfersize + blkoffset == fs->fs_bsize) {
 			if (doclusterwrite)
 				cluster_write(bp, ip->i_ffs_size);
 			else
 				bawrite(bp);
-		else
+		} else
 			bdwrite(bp);
 #endif
 		if (error || xfersize == 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.12 1997/04/23 00:29:17 gene Exp $	*/
+/*	$OpenBSD: trap.c,v 1.14 1998/03/05 05:06:09 gene Exp $	*/
 /*	$NetBSD: trap.c,v 1.46 1997/04/07 22:54:44 scottr Exp $	*/
 
 /*
@@ -130,7 +130,7 @@ int mmupid = -1;
 #endif
 
 /* trap() and syscall() only called from locore */
-void	trap __P((int, unsigned, register unsigned, struct frame));
+void	trap __P((int, unsigned, unsigned, struct frame));
 void	syscall __P((register_t, struct frame));
 
 static inline void userret __P((struct proc *p, struct frame *fp,
@@ -139,7 +139,7 @@ static inline void userret __P((struct proc *p, struct frame *fp,
 #if defined(M68040)
 static int	writeback __P((struct frame *, int));
 #if DEBUG
-static void dumpssw __P((register u_short));
+static void dumpssw __P((u_short));
 static void dumpwb __P((int, u_short, u_int, u_int));
 #endif
 #endif
@@ -150,8 +150,8 @@ static void dumpwb __P((int, u_short, u_int, u_int));
  */
 static __inline void
 userret(p, fp, oticks, faultaddr, fromtrap)
-	register struct proc *p;
-	register struct frame *fp;
+	struct proc *p;
+	struct frame *fp;
 	u_quad_t oticks;
 	u_int faultaddr;
 	int fromtrap;
@@ -159,6 +159,7 @@ userret(p, fp, oticks, faultaddr, fromtrap)
 	int sig, s;
 #if defined(M68040)
 	int beenhere = 0;
+	union sigval sv;
 
 again:
 #endif
@@ -216,8 +217,8 @@ again:
 		} else if ((sig = writeback(fp, fromtrap))) {
 			beenhere = 1;
 			oticks = p->p_sticks;
-			trapsignal(p, sig, VM_PROT_WRITE, SEGV_MAPERR,
-					(caddr_t)faultaddr);
+			sv.sival_ptr = (void *)faultaddr;
+			trapsignal(p, sig, VM_PROT_WRITE, SEGV_MAPERR, sv);
 			goto again;
 		}
 	}
@@ -235,18 +236,19 @@ void
 trap(type, code, v, frame)
 	int type;
 	unsigned code;
-	register unsigned v;
+	unsigned v;
 	struct frame frame;
 {
 	extern char fubail[], subail[];
 #ifdef DDB
 	extern char trap0[], trap1[], trap2[], trap12[], trap15[], illinst[];
 #endif
-	register struct proc *p;
-	register int i;
+	struct proc *p;
+	int i;
 	u_int ucode;
 	int typ = 0;
 	u_quad_t sticks;
+	union sigval sv;
 
 	cnt.v_trap++;
 	p = curproc;
@@ -431,11 +433,11 @@ copyfault:
 	/*
 	 * Trace traps.
 	 *
-	 * M68k OpenBSD uses trap #2,
+	 * M68k *BSD uses trap #2,
 	 * SUN 3.x uses trap #15,
 	 * KGDB uses trap #15 (for kernel breakpoints; handled elsewhere).
 	 *
-	 * M68k OpenBSD traps get mapped by locore.s into T_TRACE.
+	 * M68k *BSD traps get mapped by locore.s into T_TRACE.
 	 * SUN 3.x traps get passed through as T_TRAP15 and are not really
 	 * supported yet.
 	 */
@@ -546,9 +548,9 @@ copyfault:
 
 	case T_MMUFLT|T_USER:	/* page fault */
 	    {
-		register vm_offset_t va;
-		register struct vmspace *vm = p->p_vmspace;
-		register vm_map_t map;
+		vm_offset_t va;
+		struct vmspace *vm = p->p_vmspace;
+		vm_map_t map;
 		int rv;
 		vm_prot_t ftype, vftype;
 		extern vm_map_t kernel_map;
@@ -633,8 +635,10 @@ copyfault:
 		break;
 	    }
 	}
-	if (i)
-		trapsignal(p, i, ucode, typ, (caddr_t) v);
+	if (i) {
+		sv.sival_ptr = (void *)v;
+		trapsignal(p, i, ucode, typ, sv);
+	}
 	if ((type & T_USER) == 0)
 		return;
 out:
@@ -664,8 +668,8 @@ writeback(fp, docachepush)
 	struct frame *fp;
 	int docachepush;
 {
-	register struct fmt7 *f = &fp->f_fmt7;
-	register struct proc *p = curproc;
+	struct fmt7 *f = &fp->f_fmt7;
+	struct proc *p = curproc;
 	int err = 0;
 	u_int fa;
 	caddr_t oonfault = p->p_addr->u_pcb.pcb_onfault;
@@ -748,8 +752,8 @@ writeback(fp, docachepush)
 		 * Writeback #1.
 		 * Position the "memory-aligned" data and write it out.
 		 */
-		register u_int wb1d = f->f_wb1d;
-		register int off;
+		u_int wb1d = f->f_wb1d;
+		int off;
 
 #ifdef DEBUG
 		if ((mmudebug & MDB_WBFOLLOW) || MDB_ISPID(p->p_pid))
@@ -896,7 +900,7 @@ writeback(fp, docachepush)
 #ifdef DEBUG
 static void
 dumpssw(ssw)
-	register u_short ssw;
+	u_short ssw;
 {
 	printf(" SSW: %x: ", ssw);
 	if (ssw & SSW4_CP)
@@ -928,7 +932,7 @@ dumpwb(num, s, a, d)
 	u_short s;
 	u_int a, d;
 {
-	register struct proc *p = curproc;
+	struct proc *p = curproc;
 	vm_offset_t pa;
 
 	printf(" writeback #%d: VA %x, data %x, SZ=%s, TT=%s, TM=%s\n",
@@ -953,9 +957,9 @@ syscall(code, frame)
 	register_t code;
 	struct frame frame;
 {
-	register caddr_t params;
-	register struct sysent *callp;
-	register struct proc *p;
+	caddr_t params;
+	struct sysent *callp;
+	struct proc *p;
 	int error, opc, nsys;
 	size_t argsize;
 	register_t args[8], rval[2];

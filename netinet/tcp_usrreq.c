@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.12 1997/08/09 23:36:26 millert Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.20 1998/02/28 03:39:58 angelos Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -90,6 +90,7 @@ tcp_usrreq(so, req, m, nam, control)
 	int req;
 	struct mbuf *m, *nam, *control;
 {
+	struct sockaddr_in *sin;
 	register struct inpcb *inp;
 	register struct tcpcb *tp = NULL;
 	int s;
@@ -147,7 +148,7 @@ tcp_usrreq(so, req, m, nam, control)
 		if (error)
 			break;
 		if ((so->so_options & SO_LINGER) && so->so_linger == 0)
-			so->so_linger = TCP_LINGERTIME * hz;
+			so->so_linger = TCP_LINGERTIME;
 		tp = sototcpcb(so);
 		break;
 
@@ -176,7 +177,7 @@ tcp_usrreq(so, req, m, nam, control)
 	 */
 	case PRU_LISTEN:
 		if (inp->inp_lport == 0)
-			error = in_pcbbind(inp, (struct mbuf *)0);
+			error = in_pcbbind(inp, NULL);
 		if (error == 0)
 			tp->t_state = TCPS_LISTEN;
 		break;
@@ -189,14 +190,24 @@ tcp_usrreq(so, req, m, nam, control)
 	 * Send initial segment on connection.
 	 */
 	case PRU_CONNECT:
+		sin = mtod(nam, struct sockaddr_in *);
+
+		/* Trying to connect to some broadcast address */
+		if (in_broadcast(sin->sin_addr, NULL))
+		{
+			error = EINVAL;
+			break;
+		}
+
 		if (inp->inp_lport == 0) {
-			error = in_pcbbind(inp, (struct mbuf *)0);
+			error = in_pcbbind(inp, NULL);
 			if (error)
 				break;
 		}
 		error = in_pcbconnect(inp, nam);
 		if (error)
 			break;
+
 		tp->t_template = tcp_template(tp);
 		if (tp->t_template == 0) {
 			in_pcbdisconnect(inp);
@@ -257,6 +268,8 @@ tcp_usrreq(so, req, m, nam, control)
 	 * Mark the connection as being incapable of further output.
 	 */
 	case PRU_SHUTDOWN:
+		if (so->so_state & SS_CANTSENDMORE)
+			break;
 		socantsendmore(so);
 		tp = tcp_usrclosed(tp);
 		if (tp)
@@ -438,11 +451,11 @@ tcp_ctloutput(op, so, level, optname, mp)
 #ifndef TCP_SENDSPACE
 #define	TCP_SENDSPACE	1024*16;
 #endif
-u_long	tcp_sendspace = TCP_SENDSPACE;
+u_int	tcp_sendspace = TCP_SENDSPACE;
 #ifndef TCP_RECVSPACE
 #define	TCP_RECVSPACE	1024*16;
 #endif
-u_long	tcp_recvspace = TCP_RECVSPACE;
+u_int	tcp_recvspace = TCP_RECVSPACE;
 
 /*
  * Attach TCP protocol to socket, allocating
@@ -467,7 +480,7 @@ tcp_attach(so)
 		return (error);
 	inp = sotoinpcb(so);
 	tp = tcp_newtcpcb(inp);
-	if (tp == 0) {
+	if (tp == NULL) {
 		int nofd = so->so_state & SS_NOFDREF;	/* XXX */
 
 		so->so_state &= ~SS_NOFDREF;	/* don't free the socket yet */
@@ -576,6 +589,7 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	case TCPCTL_RFC1323:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &tcp_do_rfc1323));
+
 	case TCPCTL_KEEPINITTIME:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &tcptv_keep_init));
@@ -594,6 +608,12 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	case TCPCTL_BADDYNAMIC:
 		return (sysctl_struct(oldp, oldlenp, newp, newlen,
 		    baddynamicports.tcp, sizeof(baddynamicports.tcp)));
+
+	case TCPCTL_RECVSPACE:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,&tcp_recvspace));
+
+	case TCPCTL_SENDSPACE:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,&tcp_sendspace));
 
 	default:
 		return (ENOPROTOOPT);

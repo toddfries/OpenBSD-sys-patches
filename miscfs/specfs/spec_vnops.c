@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.11 1997/10/06 20:20:37 deraadt Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.15 1998/02/23 17:40:58 niklas Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -79,6 +79,7 @@ struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
 	{ &vop_lease_desc, spec_lease_check },		/* lease */
 	{ &vop_ioctl_desc, spec_ioctl },		/* ioctl */
 	{ &vop_select_desc, spec_select },		/* select */
+	{ &vop_revoke_desc, spec_revoke },              /* revoke */
 	{ &vop_mmap_desc, spec_mmap },			/* mmap */
 	{ &vop_fsync_desc, spec_fsync },		/* fsync */
 	{ &vop_seek_desc, spec_seek },			/* seek */
@@ -143,8 +144,11 @@ spec_open(v)
 		struct ucred *a_cred;
 		struct proc *a_p;
 	} */ *ap = v;
-	struct vnode *bvp, *vp = ap->a_vp;
-	dev_t bdev, dev = (dev_t)vp->v_rdev;
+	struct proc *p = ap->a_p;
+	struct vnode *vp = ap->a_vp;
+	struct vnode *bvp;
+	dev_t bdev;
+	dev_t dev = (dev_t)vp->v_rdev;
 	register int maj = major(dev);
 	int error;
 
@@ -184,9 +188,9 @@ spec_open(v)
 		}
 		if (cdevsw[maj].d_type == D_TTY)
 			vp->v_flag |= VISTTY;
-		VOP_UNLOCK(vp);
+		VOP_UNLOCK(vp, 0, p);
 		error = (*cdevsw[maj].d_open)(dev, ap->a_mode, S_IFCHR, ap->a_p);
-		VOP_LOCK(vp);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		return (error);
 
 	case VBLK:
@@ -255,10 +259,10 @@ spec_read(v)
 	switch (vp->v_type) {
 
 	case VCHR:
-		VOP_UNLOCK(vp);
+		VOP_UNLOCK(vp, 0, p);
 		error = (*cdevsw[major(vp->v_rdev)].d_read)
 			(vp->v_rdev, uio, ap->a_ioflag);
-		VOP_LOCK(vp);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		return (error);
 
 	case VBLK:
@@ -306,6 +310,19 @@ spec_read(v)
 	/* NOTREACHED */
 }
 
+int
+spec_inactive(v)
+	void *v;
+{
+	struct vop_inactive_args /* {
+		struct vnode *a_vp;
+		struct proc *a_p;
+	} */ *ap = v;
+
+	VOP_UNLOCK(ap->a_vp, 0, ap->a_p);
+	return (0);
+}
+
 /*
  * Vnode op for write
  */
@@ -341,10 +358,10 @@ spec_write(v)
 	switch (vp->v_type) {
 
 	case VCHR:
-		VOP_UNLOCK(vp);
+		VOP_UNLOCK(vp, 0, p);
 		error = (*cdevsw[major(vp->v_rdev)].d_write)
 			(vp->v_rdev, uio, ap->a_ioflag);
-		VOP_LOCK(vp);
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		return (error);
 
 	case VBLK:
@@ -418,13 +435,10 @@ spec_ioctl(v)
 		    ap->a_fflag, ap->a_p));
 
 	case VBLK:
-		if (ap->a_command == 0 && (long)ap->a_data == B_TAPE)
-			if (bdevsw[maj].d_type == D_TAPE)
-				return (0);
-			else
-				return (1);
+		if (ap->a_command == 0 && (long)ap->a_data == B_TAPE) 
+			return ((bdevsw[maj].d_type == D_TAPE) ? 0 : 1);
 		return ((*bdevsw[maj].d_ioctl)(dev, ap->a_command, ap->a_data,
-		   ap->a_fflag, ap->a_p));
+		    ap->a_fflag, ap->a_p));
 
 	default:
 		panic("spec_ioctl");
@@ -511,9 +525,6 @@ loop:
 	return (0);
 }
 
-/*
- * Just call the device strategy routine
- */
 int
 spec_strategy(v)
 	void *v;
@@ -521,8 +532,13 @@ spec_strategy(v)
 	struct vop_strategy_args /* {
 		struct buf *a_bp;
 	} */ *ap = v;
+	struct buf *bp = ap->a_bp;
+	int maj = major(bp->b_dev);
+	
+	if (LIST_FIRST(&bp->b_dep) != NULL && bioops.io_start)
+		(*bioops.io_start)(bp);
 
-	(*bdevsw[major(ap->a_bp->b_dev)].d_strategy)(ap->a_bp);
+	(*bdevsw[maj].d_strategy)(bp);
 	return (0);
 }
 
@@ -538,33 +554,16 @@ spec_bmap(v)
 		daddr_t  a_bn;
 		struct vnode **a_vpp;
 		daddr_t *a_bnp;
+		int *a_runp;
 	} */ *ap = v;
 
 	if (ap->a_vpp != NULL)
 		*ap->a_vpp = ap->a_vp;
 	if (ap->a_bnp != NULL)
 		*ap->a_bnp = ap->a_bn;
-	return (0);
-}
-
-/*
- * At the moment we do not do any locking.
- */
-/* ARGSUSED */
-int
-spec_lock(v)
-	void *v;
-{
-
-	return (0);
-}
-
-/* ARGSUSED */
-int
-spec_unlock(v)
-	void *v;
-{
-
+	if (ap->a_runp != NULL)
+		*ap->a_runp = 0;
+	
 	return (0);
 }
 
@@ -621,7 +620,9 @@ spec_close(v)
 		 * we must invalidate any in core blocks, so that
 		 * we can, for instance, change floppy disks.
 		 */
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, ap->a_p);
 		error = vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p, 0, 0);
+		VOP_UNLOCK(vp, 0, ap->a_p);
 		if (error)
 			return (error);
 		/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.6 1997/10/06 20:20:06 deraadt Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.9 1998/03/01 19:34:15 deraadt Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -259,6 +259,9 @@ uipc_usrreq(so, req, m, nam, control)
 		((struct stat *) m)->st_dev = NODEV;
 		if (unp->unp_ino == 0)
 			unp->unp_ino = unp_ino++;
+		((struct stat *) m)->st_atimespec =
+		    ((struct stat *) m)->st_mtimespec =
+		    ((struct stat *) m)->st_ctimespec = unp->unp_ctime;
 		((struct stat *) m)->st_ino = unp->unp_ino;
 		return (0);
 
@@ -322,6 +325,7 @@ unp_attach(so)
 	struct socket *so;
 {
 	register struct unpcb *unp;
+	struct timeval tv;
 	int error;
 	
 	if (so->so_snd.sb_hiwat == 0 || so->so_rcv.sb_hiwat == 0) {
@@ -347,6 +351,8 @@ unp_attach(so)
 	bzero((caddr_t)unp, sizeof(*unp));
 	unp->unp_socket = so;
 	so->so_pcb = unp;
+	microtime(&tv);
+	TIMEVAL_TO_TIMESPEC(&tv, &unp->unp_ctime);
 	return (0);
 }
 
@@ -427,7 +433,7 @@ unp_bind(unp, nam, p)
 	vp->v_socket = unp->unp_socket;
 	unp->unp_vnode = vp;
 	unp->unp_addr = m_copy(nam, 0, (int)M_COPYALL);
-	VOP_UNLOCK(vp);
+	VOP_UNLOCK(vp, 0, p);
 	return (0);
 }
 
@@ -655,6 +661,9 @@ unp_internalize(control, p)
 		if ((unsigned)fd >= fdp->fd_nfiles ||
 		    fdp->fd_ofiles[fd] == NULL)
 			return (EBADF);
+		if (fdp->fd_ofiles[fd]->f_count == LONG_MAX-2 ||
+		    fdp->fd_ofiles[fd]->f_msgcount == LONG_MAX-2)
+			return (EDEADLK);
 	}
 	ip = (int *)(cm + 1);
 	if (sizeof(int) != sizeof(struct file *)) {
@@ -741,7 +750,7 @@ unp_gc()
 	 * that are not otherwise accessible and then free the rights
 	 * that are stored in messages on them.
 	 *
-	 * The bug in the orginal code is a little tricky, so I'll describe
+	 * The bug in the original code is a little tricky, so I'll describe
 	 * what's wrong with it here.
 	 *
 	 * It is incorrect to simply unp_discard each entry for f_msgcount

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.17 1997/10/06 20:20:54 deraadt Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.19 1997/12/02 16:57:59 csapuntz Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -103,9 +103,7 @@ struct vnodeopv_entry_desc nfsv2_vnodeop_entries[] = {
 	{ &vop_lease_desc, nfs_lease_check },	/* lease */
 	{ &vop_ioctl_desc, nfs_ioctl },		/* ioctl */
 	{ &vop_select_desc, nfs_select },	/* select */
-#ifdef Lite2_integrated
 	{ &vop_revoke_desc, nfs_revoke },	/* revoke */
-#endif
 	{ &vop_mmap_desc, nfs_mmap },		/* mmap */
 	{ &vop_fsync_desc, nfs_fsync },		/* fsync */
 	{ &vop_seek_desc, nfs_seek },		/* seek */
@@ -159,9 +157,7 @@ struct vnodeopv_entry_desc spec_nfsv2nodeop_entries[] = {
 	{ &vop_lease_desc, spec_lease_check },	/* lease */
 	{ &vop_ioctl_desc, spec_ioctl },	/* ioctl */
 	{ &vop_select_desc, spec_select },	/* select */
-#ifdef Lite2_integrated
 	{ &vop_revoke_desc, spec_revoke },	/* revoke */
-#endif
 	{ &vop_mmap_desc, spec_mmap },		/* mmap */
 	{ &vop_fsync_desc, nfs_fsync },		/* fsync */
 	{ &vop_seek_desc, spec_seek },		/* seek */
@@ -213,9 +209,7 @@ struct vnodeopv_entry_desc fifo_nfsv2nodeop_entries[] = {
 	{ &vop_lease_desc, fifo_lease_check },	/* lease */
 	{ &vop_ioctl_desc, fifo_ioctl },	/* ioctl */
 	{ &vop_select_desc, fifo_select },	/* select */
-#ifdef Lite2_integrated
 	{ &vop_revoke_desc, fifo_revoke },	/* revoke */
-#endif
 	{ &vop_mmap_desc, fifo_mmap },		/* mmap */
 	{ &vop_fsync_desc, nfs_fsync },		/* fsync */
 	{ &vop_seek_desc, fifo_seek },		/* seek */
@@ -772,6 +766,7 @@ nfs_lookup(v)
 	register struct componentname *cnp = ap->a_cnp;
 	register struct vnode *dvp = ap->a_dvp;
 	register struct vnode **vpp = ap->a_vpp;
+	struct proc *p = cnp->cn_proc;
 	register int flags = cnp->cn_flags;
 	register struct vnode *newvp;
 	register u_int32_t *tl;
@@ -810,11 +805,8 @@ nfs_lookup(v)
 			VREF(newvp);
 			error = 0;
 		} else
-#ifdef Lite2_integrated
 			error = vget(newvp, LK_EXCLUSIVE, p);
-#else
-			error = vget(newvp, 1);
-#endif
+
 		if (!error) {
 			if (vpid == newvp->v_id) {
 			   if (!VOP_GETATTR(newvp, &vattr, cnp->cn_cred, cnp->cn_proc)
@@ -1964,11 +1956,17 @@ nfs_readdir(v)
 
 	if (!error && ap->a_cookies) {
 		struct dirent *dp;
-		u_long *cookies = ap->a_cookies;
-		int ncookies = ap->a_ncookies;
+		u_long *cookies;
+		/* XXX - over-estimate - see UFS code for how to do it
+		   right */
+		int ncookies = (uio->uio_iov->iov_base - base) / 12;
 
-		/*
-		 * Only the NFS server and emulations use cookies, and they
+		MALLOC(cookies, u_long *, sizeof(*cookies) * ncookies,
+		       M_TEMP, M_WAITOK);
+                *ap->a_ncookies = ncookies;
+                *ap->a_cookies = cookies;
+
+		/* Only the NFS server and emulations use cookies, and they
 		 * load the directory block into system space, so we can
 		 * just look at it directly.
 		 */
@@ -1982,6 +1980,8 @@ nfs_readdir(v)
 			*(cookies++) = off;
 			base += dp->d_reclen;
 		}
+
+		*ap->a_ncookies -= ncookies;
 		uio->uio_resid += (uio->uio_iov->iov_base - base);
 		uio->uio_iov->iov_len += (uio->uio_iov->iov_base - base);
 		uio->uio_iov->iov_base = base;
@@ -2810,13 +2810,13 @@ again:
 			if (retv)
 			    brelse(bp);
 			else {
+			    s = splbio();
 			    vp->v_numoutput++;
 			    bp->b_flags |= B_ASYNC;
-			    if (bp->b_flags & B_DELWRI)
-				TAILQ_REMOVE(&bdirties, bp, b_synclist);
 			    bp->b_flags &= ~(B_READ|B_DONE|B_ERROR|B_DELWRI);
 			    bp->b_dirtyoff = bp->b_dirtyend = 0;
 			    reassignbuf(bp, vp);
+			    splx(s);
 			    biodone(bp);
 			}
 		}
@@ -2865,19 +2865,24 @@ loop:
 		goto again;
 	}
 	if (waitfor == MNT_WAIT) {
+	        s = splbio();
 		while (vp->v_numoutput) {
 			vp->v_flag |= VBWAIT;
 			error = tsleep((caddr_t)&vp->v_numoutput,
 				slpflag | (PRIBIO + 1), "nfsfsync", slptimeo);
 			if (error) {
+                            splx(s);
 			    if (nfs_sigintr(nmp, (struct nfsreq *)0, p))
 				return (EINTR);
 			    if (slpflag == PCATCH) {
 				slpflag = 0;
 				slptimeo = 2 * hz;
 			    }
+			    s = splbio();
 			}
 		}
+		splx(s);
+			
 		if (vp->v_dirtyblkhd.lh_first && commit) {
 #if 0
 			vprint("nfs_fsync: dirty", vp);
@@ -3083,6 +3088,7 @@ nfs_writebp(bp, force)
 	register int oldflags = bp->b_flags, retv = 1;
 	register struct proc *p = curproc;	/* XXX */
 	off_t off;
+	int   s;
 
 	if(!(bp->b_flags & B_BUSY))
 		panic("bwrite: buffer is not busy???");
@@ -3092,10 +3098,9 @@ nfs_writebp(bp, force)
 	    bp, bp->b_vp, bp->b_validoff, bp->b_validend, bp->b_dirtyoff,
 	    bp->b_dirtyend);
 #endif
-	if (bp->b_flags & B_DELWRI)
-	    TAILQ_REMOVE(&bdirties, bp, b_synclist);
 	bp->b_flags &= ~(B_READ|B_DONE|B_ERROR|B_DELWRI);
 
+	s = splbio();
 	if (oldflags & B_ASYNC) {
 		if (oldflags & B_DELWRI) {
 			reassignbuf(bp, bp->b_vp);
@@ -3104,6 +3109,7 @@ nfs_writebp(bp, force)
 		}
 	}
 	bp->b_vp->v_numoutput++;
+	splx(s);
 
 	/*
 	 * If B_NEEDCOMMIT is set, a commit rpc may do the trick. If not
@@ -3132,7 +3138,9 @@ nfs_writebp(bp, force)
 	if( (oldflags & B_ASYNC) == 0) {
 		int rtval = biowait(bp);
 		if (oldflags & B_DELWRI) {
+		        s = splbio();
 			reassignbuf(bp, bp->b_vp);
+			splx(s);
 		} else if (p) {
 			++p->p_stats->p_ru.ru_oublock;
 		}

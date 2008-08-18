@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbr.S,v 1.11 1997/08/29 19:47:24 mickey Exp $	*/
+/*	$OpenBSD: mbr.S,v 1.13 1998/03/11 13:05:07 graichen Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff and Tobias Weingartner
@@ -66,6 +66,12 @@
 #else /* !DEBUG */
 #define DBGMSG(msg)
 #endif /* !DEBUG */
+#define	puts(s)			\
+	data32;			\
+	movl	$s, %esi;	\
+	/* call Lmessage */;	\
+	.byte	0xe8;		\
+	.word	Lmessage - . - 2
 
 	.text
 
@@ -114,7 +120,7 @@ reloc:
 	popl	%ds	/* and %ds is at the %cs */
 
 #ifdef SERIAL
-	/* Initialize the serial port to 9600 baud, 8N1. */
+	/* Initialize the serial port to 9600 baud, 8N1.
 	 * Do we need to do this?  Most things at this level
 	 * do not know or care (on a PC) where the output is
 	 * happening to go.  I think if we are headless,
@@ -161,10 +167,7 @@ reloc:
 	 * and then hardcode the boot drive to
 	 * 0x80.
 	 */
-	data32
-	movl	$fdmbr, %esi
-	data32
-	call	message
+	puts(fdmbr)
 
 	/* If we are passed bogus data, set it to HD #1.
 	 * We should load the value from a hard coded
@@ -187,10 +190,7 @@ reloc:
 	.word	signature
 	.word	DOSMBR_SIGNATURE
 	je	sigok
-	data32
-	movl	$esig, %esi
-	data32
-	call	message
+	puts(esig)
 
 	/* find the first active partition
 	 * Note: this should be the only active
@@ -216,10 +216,7 @@ sigok:
 
 	/* No bootable partition */
 no_part:
-	data32
-	movl	$noboot, %esi
-	data32
-	call	message
+	puts(noboot)
 err_stop:
 	cli
 	hlt
@@ -274,18 +271,12 @@ found:
 	xorl	%bx, %bx		/* put it at %es:0 */
 	int	$0x13
 	jnc	1f
-	data32
-	movl    $eread, %esi
-	data32
-	call	message
+	puts(eread)
 	jmp	err_stop
 
 1:
 	DBGMSG(CHAR_G)
-	data32
-	movl	$info, %esi
-	data32
-	call	message
+	puts(info)
 
 	# jump to the new code (%ds:%si is at the right point)
 	data32
@@ -295,7 +286,7 @@ found:
 /*
  * Display string
  */
-message:
+Lmessage:
 	pushl	%eax
 	cld
 1:
@@ -307,7 +298,7 @@ message:
 	jmp	1b
 
 #
-#	message: write the error message in %ds:%si to console
+#	chr: write the error message in %ds:%si to console
 #
 chr:
 	pushl	%eax

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.21 1997/10/06 20:19:58 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.24 1997/12/08 21:25:37 deraadt Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -48,6 +48,7 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
+#include <sys/resourcevar.h>
 #include <sys/file.h>
 #include <sys/vnode.h>
 #include <sys/unistd.h>
@@ -110,7 +111,7 @@ sys___sysctl(p, v, retval)
 	switch (name[0]) {
 	case CTL_KERN:
 		fn = kern_sysctl;
-		if (name[2] != KERN_VNODE)	/* XXX */
+		if (name[2] == KERN_VNODE)	/* XXX */
 			dolock = 0;
 		break;
 	case CTL_HW:
@@ -124,6 +125,9 @@ sys___sysctl(p, v, retval)
 		break;
 	case CTL_FS:
 		fn = fs_sysctl;
+		break;
+	case CTL_VFS:
+		fn = vfs_sysctl;
 		break;
 	case CTL_MACHDEP:
 		fn = cpu_sysctl;
@@ -206,7 +210,7 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	int error, level, inthostid;
 	extern char ostype[], osrelease[], osversion[], version[];
 	extern int somaxconn, sominconn;
-	extern int usermount;
+	extern int usermount, nosuidcoredump;
 
 	/* all sysctl names at this level are terminal */
 	if (namelen != 1 && !(name[0] == KERN_PROC || name[0] == KERN_PROF))
@@ -264,7 +268,7 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &boottime,
 		    sizeof(struct timeval)));
 	case KERN_VNODE:
-		return (sysctl_vnode(oldp, oldlenp));
+		return (sysctl_vnode(oldp, oldlenp, p));
 	case KERN_PROC:
 		return (sysctl_doproc(name + 1, namelen - 1, oldp, oldlenp));
 	case KERN_FILE:
@@ -301,6 +305,8 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case KERN_RND:
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &rndstats,
 		    sizeof(rndstats)));
+	case KERN_NOSUIDCOREDUMP:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &nosuidcoredump));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -751,4 +757,5 @@ fill_eproc(p, ep)
 	ep->e_login[MAXLOGNAME-1] = '\0';
 	strncpy(ep->e_emul, p->p_emul->e_name, EMULNAMELEN);
 	ep->e_emul[EMULNAMELEN] = '\0';
+	ep->e_maxrss = p->p_rlimit[RLIMIT_RSS].rlim_cur;
 }

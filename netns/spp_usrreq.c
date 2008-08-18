@@ -1,4 +1,4 @@
-/*	$OpenBSD: spp_usrreq.c,v 1.5 1997/03/29 18:21:00 deraadt Exp $	*/
+/*	$OpenBSD: spp_usrreq.c,v 1.7 1998/03/10 08:29:14 deraadt Exp $	*/
 /*	$NetBSD: spp_usrreq.c,v 1.9 1996/02/13 22:14:13 christos Exp $	*/
 
 /*
@@ -1171,7 +1171,7 @@ void
 spp_setpersist(cb)
 	register struct sppcb *cb;
 {
-	register t = ((cb->s_srtt >> 2) + cb->s_rttvar) >> 1;
+	register int t = ((cb->s_srtt >> 2) + cb->s_rttvar) >> 1;
 	extern int spp_backoff[];
 
 	if (cb->s_timer[SPPT_REXMT] && spp_do_persist_panics)
@@ -1473,6 +1473,8 @@ spp_usrreq(so, req, m, nam, controlp)
 		}
 
 	case PRU_SHUTDOWN:
+		if (so->so_state & SS_CANTSENDMORE)
+			break;
 		socantsendmore(so);
 		cb = spp_usrclosed(cb);
 		if (cb)

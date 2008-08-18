@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci.c,v 1.8 1997/10/11 09:14:53 pefo Exp $	*/
-/*	$NetBSD: pci.c,v 1.26 1996/12/05 01:25:30 cgd Exp $	*/
+/*	$OpenBSD: pci.c,v 1.11 1998/01/20 18:40:34 niklas Exp $	*/
+/*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou.  All rights reserved.
@@ -153,6 +153,7 @@ pciattach(parent, self, aux)
 
 			pa.pa_iot = iot;
 			pa.pa_memt = memt;
+			pa.pa_dmat = pba->pba_dmat;
 			pa.pa_pc = pc;
 			pa.pa_device = device;
 			pa.pa_function = function;
@@ -203,6 +204,11 @@ pciprint(aux, pnp)
 		printf("%s at %s", devinfo, pnp);
 	}
 	printf(" dev %d function %d", pa->pa_device, pa->pa_function);
+	if (!pnp) {
+		pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo);
+		printf(" %s", devinfo);
+	}
+
 	return (UNCONF);
 }
 

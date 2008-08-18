@@ -1,3 +1,4 @@
+/*	$OpenBSD: isa_machdep.c,v 1.6 1997/11/10 15:53:10 niklas Exp $	*/
 /*	$NetBSD: isa_machdep.c,v 1.5 1996/11/23 06:38:49 cgd Exp $	*/
 
 /*
@@ -43,7 +44,7 @@
 
 #include "vga_isa.h"
 #if NVGA_ISA
-#include <alpha/isa/vga_isavar.h>
+#include <dev/isa/vga_isavar.h>
 #endif
 
 struct {

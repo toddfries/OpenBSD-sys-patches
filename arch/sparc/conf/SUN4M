@@ -1,4 +1,4 @@
-#	$OpenBSD: SUN4M,v 1.15 1997/09/17 06:47:04 downsj Exp $
+#	$OpenBSD: SUN4M,v 1.20 1998/03/04 19:49:08 johns Exp $
 # 	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)

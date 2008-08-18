@@ -1,4 +1,4 @@
-/*	$OpenBSD: fb.c,v 1.10 1997/08/08 08:25:04 downsj Exp $	*/
+/*	$OpenBSD: fb.c,v 1.14 1998/03/20 05:18:27 todd Exp $	*/
 /*	$NetBSD: fb.c,v 1.23 1997/07/07 23:30:22 pk Exp $ */
 
 /*
@@ -402,34 +402,33 @@ fbrcons_init(fb)
 	rc->rc_width = fb->fb_type.fb_width;
 	rc->rc_height = fb->fb_type.fb_height;
 	rc->rc_depth = fb->fb_type.fb_depth;
-	/* Setup the static font */
-	rc->rc_font = &console_font;
+	/* Setup the static font, use a small font if display is < 800x600 */
+	if(rc->rc_height * rc->rc_width < 800*600)
+		rc->rc_font = &console_font_fixed;
+	else
+		rc->rc_font = &console_font;
 
-#if defined(RASTERCONS_FULLSCREEN) || defined(RASTERCONS_SMALLFONT)
 	rc->rc_maxcol = rc->rc_width / rc->rc_font->width;
 	rc->rc_maxrow = rc->rc_height / rc->rc_font->height;
-#else
+#if !defined(RASTERCONS_FULLSCREEN) && !defined(RASTERCONS_SMALLFONT)
 #if defined(SUN4)
 	if (CPU_ISSUN4) {
 		struct eeprom *eep = (struct eeprom *)eeprom_va;
 
-		if (eep == NULL) {
-			rc->rc_maxcol = 80;
-			rc->rc_maxrow = 34;
-		} else {
-			rc->rc_maxcol = eep->eeTtyCols;
-			rc->rc_maxrow = eep->eeTtyRows;
-		}
+		rc->rc_maxcol = min(rc->rc_maxcol,
+		    (eep && eep->eeTtyCols) ? eep->eeTtyCols : 80);
+		rc->rc_maxrow = min(rc->rc_maxrow,
+		    (eep && eep->eeTtyRows) ? eep->eeTtyRows : 34);
 	}
 #endif /* SUN4 */
 
 	if (!CPU_ISSUN4) {
-		rc->rc_maxcol =
-		    a2int(getpropstring(optionsnode, "screen-#columns"), 80);
-		rc->rc_maxrow =
-		    a2int(getpropstring(optionsnode, "screen-#rows"), 34);
+		rc->rc_maxcol = min(rc->rc_maxcol,
+		    a2int(getpropstring(optionsnode, "screen-#columns"), 80));
+		rc->rc_maxrow = min(rc->rc_maxrow,
+		    a2int(getpropstring(optionsnode, "screen-#rows"), 34));
 	}
-#endif /* RASTERCONS_FULLSCREEN || RASTERCONS_SMALLFONT */
+#endif /* !RASTERCONS_FULLSCREEN && !RASTERCONS_SMALLFONT */
 
 #if !(defined(RASTERCONS_FULLSCREEN) || defined(RASTERCONS_SMALLFONT))
 	/* Determine addresses of prom emulator row and column */

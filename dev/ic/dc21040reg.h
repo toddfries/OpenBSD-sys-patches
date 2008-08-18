@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc21040reg.h,v 1.5 1997/07/29 19:31:49 downsj Exp $	*/
+/*	$OpenBSD: dc21040reg.h,v 1.7 1998/03/25 12:18:42 pefo Exp $	*/
 /*	$NetBSD: dc21040reg.h,v 1.11 1997/06/08 18:44:02 thorpej Exp $	*/
 
 /*-
@@ -30,6 +30,10 @@
 #if !defined(_DC21040_H)
 #define _DC21040_H
 
+/* XXX The following only works with 2114x chips which have
+ * the descriptor swap bit. 21040 chips need to have the
+ * descriptor in LE order regardles.............
+ */
 #if defined(BYTE_ORDER) && BYTE_ORDER == BIG_ENDIAN
 #define	TULIP_BITFIELD2(a, b)		      b, a
 #define	TULIP_BITFIELD3(a, b, c)	   c, b, a
@@ -47,6 +51,9 @@ typedef struct {
 			      d_flag : 10);
     u_int32_t d_addr1;
     u_int32_t d_addr2;
+#ifdef PPC_MPC106_BUG
+    u_int32_t fill[4];		/* Make descr. 32 bytes avoiding MPC106 bug! */
+#endif
 } tulip_desc_t;
 
 #define	TULIP_DSTS_OWNER	0x80000000	/* Owner (1 = 21040) */
@@ -202,6 +209,7 @@ typedef struct {
 #define TULIP_SIASTS_OTHERRXACTIVITY	0x00000200L
 #define TULIP_SIASTS_RXACTIVITY		0x00000100L
 #define	TULIP_SIASTS_LINKFAIL		0x00000004L
+#define	TULIP_SIASTS_LINK100FAIL	0x00000002L
 #define	TULIP_SIACONN_RESET		0x00000000L
 
 /*
@@ -274,19 +282,19 @@ typedef struct {
 #define	TULIP_21142_PROBE_AUIBNC_TIMEOUT	300
 
 #define	TULIP_21142_SIACONN_10BASET		0x00000001L
-#define	TULIP_21142_SIATXRX_10BASET		0x0000F3FFL
-#define	TULIP_21142_SIAGEN_10BASET		0x00000000L
+#define	TULIP_21142_SIATXRX_10BASET		0x00007F3FL
+#define	TULIP_21142_SIAGEN_10BASET		0x00000008L
 
 #define	TULIP_21142_SIACONN_10BASET_FD		0x00000001L
-#define	TULIP_21142_SIATXRX_10BASET_FD		0x0000F3FDL
-#define	TULIP_21142_SIAGEN_10BASET_FD		0x00000000L
+#define	TULIP_21142_SIATXRX_10BASET_FD		0x00007F3DL
+#define	TULIP_21142_SIAGEN_10BASET_FD		0x00000008L
 
 #define	TULIP_21142_SIACONN_AUI			0x00000009L
-#define	TULIP_21142_SIATXRX_AUI			0x0000F3FDL
+#define	TULIP_21142_SIATXRX_AUI			0x00000705L
 #define	TULIP_21142_SIAGEN_AUI			0x0000000EL
 
 #define	TULIP_21142_SIACONN_BNC			0x00000009L
-#define	TULIP_21142_SIATXRX_BNC			0x0000F3FDL
+#define	TULIP_21142_SIATXRX_BNC			0x00000705L
 #define	TULIP_21142_SIAGEN_BNC			0x00000006L
 
 
@@ -434,6 +442,23 @@ typedef struct {
 #define TULIP_OUI_ASANTE_2		0x94
 #define TULIP_GP_ASANTE_PINS		0x000000bf	/* GP pin config */
 #define TULIP_GP_ASANTE_PHYRESET	0x00000008	/* Reset PHY */
+
+/*
+ * ACCTON EN1207 specialties
+ */
+
+#define TULIP_OUI_EN1207_0		0x00
+#define TULIP_OUI_EN1207_1		0x00
+#define TULIP_OUI_EN1207_2		0xE8
+
+#define TULIP_CSR8_EN1207		0x08
+#define TULIP_CSR9_EN1207		0x00
+#define TULIP_CSR10_EN1207		0x03
+#define TULIP_CSR11_EN1207		0x1F
+
+#define TULIP_GP_EN1207_BNC_INIT        0x0000011B
+#define TULIP_GP_EN1207_UTP_INIT        0x9E00000B
+#define TULIP_GP_EN1207_100_INIT        0x6D00031B
 
 /*
  * SROM definitions for the 21140 and 21041.

@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.65 1997/10/06 20:19:37 deraadt Exp $
+#	$OpenBSD: files,v 1.77 1998/03/24 03:26:03 deraadt Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -28,6 +28,10 @@ define	ncr5380sbc	# NCR 5380 SCSI Bus Controller
 define	ncr53c9x	# NCR 53c9x or Emulex ESP SCSI Controller
 define	pdq		# DEC FDDI chipset
 
+# a wscons output device; used later, but needs to be near the top for
+# common file (e.g. vga) definitions.
+define  wsconsdev {[console = -1]}
+
 # "Chipset" drivers.  These are the bus-independent routines which
 # contain the cfdrivers.  Attachments are provided by files.<bus>
 
@@ -38,6 +42,10 @@ file	dev/ic/aic7xxx.c	ahc
 # BusLogic MultiMaster and MultiMaster Ultra SCSI controllers
 device	bha: scsi
 file	dev/ic/bha.c		bha
+
+# Qlogic ISP 10x0 SCSI Controllers
+device	isp: scsi
+file	dev/ic/isp.c			isp
 
 # UltraStor SCSI controllers
 device	uha: scsi
@@ -65,6 +73,10 @@ file	dev/ic/cy.c		cy & (cy_isa | cy_pci)	needs-flag
 # PC parallel ports (XXX what chip?)
 device	lpt
 file	dev/ic/lpt.c		lpt & (lpt_isa | lpt_pica | lpt_algor) needs-flag
+
+# VGA
+device	vga: wsconsdev
+file	dev/ic/vga.c		vga & (vga_isa | vga_pci)
 
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
@@ -147,7 +159,9 @@ file kern/kern_descrip.c
 file kern/kern_exec.c
 file kern/kern_exit.c
 file kern/kern_fork.c
+file kern/kern_fthread.c
 file kern/kern_ktrace.c			ktrace
+file kern/kern_lock.c
 file kern/kern_lkm.c			lkm
 file kern/kern_ntptime.c
 file kern/kern_malloc.c
@@ -196,10 +210,12 @@ file kern/vfs_bio.c
 file kern/vfs_cache.c
 file kern/vfs_cluster.c
 file kern/vfs_conf.c
+file kern/vfs_default.c
 file kern/vfs_init.c
 file kern/vfs_lockf.c
 file kern/vfs_lookup.c
 file kern/vfs_subr.c
+file kern/vfs_sync.c
 file kern/vfs_syscalls.c
 file kern/vfs_vnops.c
 file kern/vnode_if.c
@@ -302,6 +318,9 @@ file netinet/fil.c			ipfilter
 file netinet/ip_nat.c			ipfilter
 file netinet/ip_frag.c			ipfilter
 file netinet/ip_state.c			ipfilter
+file netinet/ip_proxy.c			ipfilter
+file netinet/ip_auth.c			ipfilter
+file netinet/ip_log.c			ipfilter
 file netinet/ip_ipsp.c			inet & ipsec
 file netinet/ip_ip4.c			inet & ipsec
 file netinet/ip_ah.c			inet & ipsec
@@ -310,7 +329,10 @@ file netinet/ip_esp_old.c		inet & ipsec
 file netinet/ip_esp_new.c		inet & ipsec
 file netinet/ip_ah_old.c		inet & ipsec
 file netinet/ip_ah_new.c		inet & ipsec
+file netinet/ip_rmd160.c		inet & ipsec
 file netinet/ip_sha1.c			inet & ipsec
+file netinet/ip_blf.c			inet & ipsec
+file netinet/ip_cast.c			inet & ipsec
 file netinet/libdeslite/ecb_enc.c	inet & ipsec
 file netinet/libdeslite/set_key.c	inet & ipsec
 file netinet/libdeslite/ecb3_enc.c	inet & ipsec
@@ -397,9 +419,11 @@ file ufs/ffs/ffs_alloc.c		ffs | mfs
 file ufs/ffs/ffs_balloc.c		ffs | mfs
 file ufs/ffs/ffs_inode.c		ffs | mfs
 file ufs/ffs/ffs_subr.c			ffs | mfs
+file ufs/ffs/ffs_softdep_stub.c		ffs | mfs
 file ufs/ffs/ffs_tables.c		ffs | mfs
 file ufs/ffs/ffs_vfsops.c		ffs | mfs
 file ufs/ffs/ffs_vnops.c		ffs | mfs
+file ufs/ffs/ffs_softdep.c		ffs_softupdates
 file ufs/mfs/mfs_vfsops.c		mfs
 file ufs/mfs/mfs_vnops.c		mfs
 file ufs/ufs/ufs_bmap.c			ffs | mfs | ext2fs
@@ -419,7 +443,6 @@ file ufs/ext2fs/ext2fs_subr.c		ext2fs
 file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
 file ufs/ext2fs/ext2fs_vnops.c		ext2fs
 file vm/device_pager.c			devpager
-file vm/kern_lock.c
 file vm/swap_pager.c			swappager
 file vm/vm_fault.c
 file vm/vm_glue.c

@@ -1,9 +1,9 @@
-/*	$OpenBSD: msdosfs_lookup.c,v 1.7 1997/10/06 20:20:58 deraadt Exp $	*/
-/*	$NetBSD: msdosfs_lookup.c,v 1.30 1996/10/25 23:14:08 cgd Exp $	*/
+/*	$OpenBSD: msdosfs_lookup.c,v 1.10 1998/01/11 20:39:09 provos Exp $	*/
+/*	$NetBSD: msdosfs_lookup.c,v 1.34 1997/10/18 22:12:27 ws Exp $	*/
 
 /*-
- * Copyright (C) 1994, 1995 Wolfgang Solfrank.
- * Copyright (C) 1994, 1995 TooLs GmbH.
+ * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
+ * Copyright (C) 1994, 1995, 1997 TooLs GmbH.
  * All rights reserved.
  * Original code by Paul Popelka (paulp@uts.amdahl.com) (see below).
  *
@@ -89,6 +89,7 @@ msdosfs_lookup(v)
 	struct vnode *vdp = ap->a_dvp;
 	struct vnode **vpp = ap->a_vpp;
 	struct componentname *cnp = ap->a_cnp;
+	struct proc *p = cnp->cn_proc;
 	daddr_t bn;
 	int error;
 	int lockparent;
@@ -161,14 +162,15 @@ msdosfs_lookup(v)
 			VREF(vdp);
 			error = 0;
 		} else if (flags & ISDOTDOT) {
-			VOP_UNLOCK(pdp);
-			error = vget(vdp, 1);
+			VOP_UNLOCK(pdp, 0, p);
+			error = vget(vdp, LK_EXCLUSIVE, p);
 			if (!error && lockparent && (flags & ISLASTCN))
-				error = VOP_LOCK(pdp);
+				error =
+				    vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, p);
 		} else {
-			error = vget(vdp, 1);
+			error = vget(vdp, LK_EXCLUSIVE, p);
 			if (!lockparent || error || !(flags & ISLASTCN))
-				VOP_UNLOCK(pdp);
+				VOP_UNLOCK(pdp, 0, p);
 		}
 		/*
 		 * Check that the capability number did not change
@@ -184,9 +186,9 @@ msdosfs_lookup(v)
 			}
 			vput(vdp);
 			if (lockparent && pdp != vdp && (flags & ISLASTCN))
-				VOP_UNLOCK(pdp);
+				VOP_UNLOCK(pdp, 0, p);
 		}
-		if ((error = VOP_LOCK(pdp)) != 0)
+		if ((error = vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, p)) != 0)
 			return (error);
 		vdp = pdp;
 		dp = VTODE(vdp);
@@ -414,7 +416,7 @@ notfound:;
 		 */
 		cnp->cn_flags |= SAVENAME;
 		if (!lockparent)
-			VOP_UNLOCK(vdp);
+			VOP_UNLOCK(vdp, 0, p);
 		return (EJUSTRETURN);
 	}
 	/*
@@ -431,9 +433,17 @@ found:;
 	 */
 	isadir = dep->deAttributes & ATTR_DIRECTORY;
 	scn = getushort(dep->deStartCluster);
+	if (FAT32(pmp)) {
+		scn |= getushort(dep->deHighClust) << 16;
+		if (scn == pmp->pm_rootdirblk) {
+			/*
+			 * There should actually be 0 here.
+			 * Just ignore the error.
+			 */
+			scn = MSDOSFSROOT;
+		}
+	}
 
-	if (cluster == MSDOSFSROOT)
-		blkoff = diroff;
 	if (isadir) {
 		cluster = scn;
 		if (cluster == MSDOSFSROOT)
@@ -455,6 +465,8 @@ foundroot:;
 	 * entry of the filesystems root directory.  isadir and scn were
 	 * setup before jumping here.  And, bp is already null.
 	 */
+	if (FAT32(pmp) && scn == MSDOSFSROOT)
+		scn = pmp->pm_rootdirblk;
 
 	/*
 	 * If deleting, and at end of pathname, return
@@ -464,6 +476,12 @@ foundroot:;
 	 * on and lock the inode, being careful with ".".
 	 */
 	if (nameiop == DELETE && (flags & ISLASTCN)) {
+		/*
+		 * Don't allow deleting the root.
+		 */
+		if (blkoff == MSDOSFSROOT_OFS)
+			return EROFS;				/* really? XXX */
+
 		/*
 		 * Write access to directory required to delete files.
 		 */
@@ -484,7 +502,7 @@ foundroot:;
 			return (error);
 		*vpp = DETOV(tdp);
 		if (!lockparent)
-			VOP_UNLOCK(vdp);
+			VOP_UNLOCK(vdp, 0, p);
 		return (0);
 	}
 
@@ -496,6 +514,9 @@ foundroot:;
 	 */
 	if (nameiop == RENAME && wantparent &&
 	    (flags & ISLASTCN)) {
+		if (blkoff == MSDOSFSROOT_OFS)
+			return EROFS;				/* really? XXX */
+
 		error = VOP_ACCESS(vdp, VWRITE, cnp->cn_cred, cnp->cn_proc);
 		if (error)
 			return (error);
@@ -512,7 +533,7 @@ foundroot:;
 		*vpp = DETOV(tdp);
 		cnp->cn_flags |= SAVENAME;
 		if (!lockparent)
-			VOP_UNLOCK(vdp);
+			VOP_UNLOCK(vdp, 0, p);
 		return (0);
 	}
 
@@ -537,13 +558,13 @@ foundroot:;
 	 */
 	pdp = vdp;
 	if (flags & ISDOTDOT) {
-		VOP_UNLOCK(pdp);	/* race to get the inode */
+		VOP_UNLOCK(pdp, 0, p);	/* race to get the inode */
 		if ((error = deget(pmp, cluster, blkoff, &tdp)) != 0) {
-			VOP_LOCK(pdp);
+			vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, p);
 			return (error);
 		}
 		if (lockparent && (flags & ISLASTCN) &&
-		    (error = VOP_LOCK(pdp))) {
+		    (error = vn_lock(pdp, LK_EXCLUSIVE | LK_RETRY, p))) {
 			vput(DETOV(tdp));
 			return (error);
 		}
@@ -555,7 +576,7 @@ foundroot:;
 		if ((error = deget(pmp, cluster, blkoff, &tdp)) != 0)
 			return (error);
 		if (!lockparent || !(flags & ISLASTCN))
-			VOP_UNLOCK(pdp);
+			VOP_UNLOCK(pdp, 0, p);
 		*vpp = DETOV(tdp);
 	}
 
@@ -636,7 +657,7 @@ createde(dep, ddep, depp, cnp)
 	ndep = bptoep(pmp, bp, ddep->de_fndoffset);
 	
 	DE_EXTERNALIZE(ndep, dep);
-	
+
 	/*
 	 * Now write the Win95 long name
 	 */
@@ -684,6 +705,8 @@ createde(dep, ddep, depp, cnp)
 	if (depp) {
 		if (dep->de_Attributes & ATTR_DIRECTORY) {
 			dirclust = dep->de_StartCluster;
+			if (FAT32(pmp) && dirclust == pmp->pm_rootdirblk)
+				dirclust = MSDOSFSROOT;
 			if (dirclust == MSDOSFSROOT)
 				diroffset = MSDOSFSROOT_OFS;
 			else
@@ -800,12 +823,19 @@ doscheckpath(source, target)
 	}
 	if (dep->de_StartCluster == MSDOSFSROOT)
 		goto out;
+	pmp = dep->de_pmp;
+#ifdef	DIAGNOSTIC
+	if (pmp != source->de_pmp)
+		panic("doscheckpath: source and target on different filesystems");
+#endif
+	if (FAT32(pmp) && dep->de_StartCluster == pmp->pm_rootdirblk)
+		goto out;
+
 	for (;;) {
 		if ((dep->de_Attributes & ATTR_DIRECTORY) == 0) {
 			error = ENOTDIR;
 			break;
 		}
-		pmp = dep->de_pmp;
 		scn = dep->de_StartCluster;
 		error = bread(pmp->pm_devvp, cntobn(pmp, scn),
 			      pmp->pm_bpcluster, NOCRED, &bp);
@@ -819,12 +849,23 @@ doscheckpath(source, target)
 			break;
 		}
 		scn = getushort(ep->deStartCluster);
+		if (FAT32(pmp))
+			scn |= getushort(ep->deHighClust) << 16;
+
 		if (scn == source->de_StartCluster) {
 			error = EINVAL;
 			break;
 		}
 		if (scn == MSDOSFSROOT)
 			break;
+		if (FAT32(pmp) && scn == pmp->pm_rootdirblk) {
+			/*
+			 * scn should be 0 in this case,
+			 * but we silently ignore the error.
+			 */
+			break;
+		}
+
 		vput(DETOV(dep));
 		brelse(bp);
 		bp = NULL;
@@ -893,7 +934,7 @@ readde(dep, bpp, epp)
 
 /*
  * Remove a directory entry. At this point the file represented by the
- * directory entry to be removed is still full length until no one has it
+ * directory entry to be removed is still full length until noone has it
  * open.  When the file no longer being used msdosfs_inactive() is called
  * and will truncate the file to 0 length.  When the vnode containing the
  * denode is needed for some other purpose by VFS it will call
@@ -918,7 +959,9 @@ removede(pdep, dep)
 #endif
 
 	dep->de_refcnt--;
+	offset += sizeof(struct direntry);
 	do {
+		offset -= sizeof(struct direntry);
 		error = pcbmap(pdep, de_cluster(pmp, offset), &bn, 0, &blsize);
 		if (error)
 			return error;
@@ -928,6 +971,17 @@ removede(pdep, dep)
 			return error;
 		}
 		ep = bptoep(pmp, bp, offset);
+		/*
+		 * Check whether, if we came here the second time, i.e.
+		 * when underflowing into the previous block, the last
+		 * entry in this block is a longfilename entry, too.
+		 */
+		if (ep->deAttributes != ATTR_WIN95
+		    && offset != pdep->de_fndoffset) {
+			brelse(bp);
+			break;
+		}
+		offset += sizeof(struct direntry);
 		while (1) {
 			/*
 			 * We are a bit agressive here in that we delete any Win95
@@ -935,18 +989,18 @@ removede(pdep, dep)
 			 * Since these presumably aren't valid anyway,
 			 * there should be no harm.
 			 */
-			ep--->deName[0] = SLOT_DELETED;
 			offset -= sizeof(struct direntry);
+			ep--->deName[0] = SLOT_DELETED;
 			if ((pmp->pm_flags & MSDOSFSMNT_NOWIN95)
-			    || !((offset + sizeof(struct direntry)) & pmp->pm_crbomask)
+			    || !(offset & pmp->pm_crbomask)
 			    || ep->deAttributes != ATTR_WIN95)
 				break;
 		}
 		if ((error = bwrite(bp)) != 0)
 			return error;
 	} while (!(pmp->pm_flags & MSDOSFSMNT_NOWIN95)
-	    && offset
-	    && !(offset & pmp->pm_crbomask));
+	    && !(offset & pmp->pm_crbomask)
+	    && offset);
 	return 0;
 }
 
@@ -1012,6 +1066,8 @@ uniqdosname(dep, cnp, cp)
 			brelse(bp);
 		}
 	}
+
+	return (EEXIST);
 }
 
 /*

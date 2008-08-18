@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.22 1997/10/24 22:22:57 mickey Exp $	*/
+/*	$OpenBSD: libsa.h,v 1.24 1998/02/24 22:06:54 weingart Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -41,6 +41,7 @@ void smpprobe __P((void));
 void memprobe __P((void));
 void diskprobe __P((void));
 void apmprobe __P((void));
+void pciprobe __P((void));
 
 void devboot __P((dev_t, char *));
 void *alloca __P((size_t));
@@ -49,7 +50,6 @@ void time_print __P((void));
 
 extern const char bdevs[][4];
 extern const int nbdevs;
-extern int bootdev; /* XXX pass through the global to exec_i386 */
 extern u_int cnvmem, extmem; /* XXX global pass memprobe()->machdep_start() */
 
 /* diskprobe.c */

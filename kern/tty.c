@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.30 1997/10/21 07:22:13 niklas Exp $	*/
+/*	$OpenBSD: tty.c,v 1.36 1998/03/28 10:03:04 deraadt Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -599,12 +599,10 @@ ttyoutput(c, tp)
 
 	oflag = tp->t_oflag;
 	if (!ISSET(oflag, OPOST)) {
-		if (ISSET(tp->t_lflag, FLUSHO))
-			return (-1);
-		if (putc(c, &tp->t_outq))
-			return (c);
 		tk_nout++;
 		tp->t_outcc++;
+		if (!ISSET(tp->t_lflag, FLUSHO) && putc(c, &tp->t_outq))
+			return (c);
 		return (-1);
 	}
 	/*
@@ -641,7 +639,7 @@ ttyoutput(c, tp)
 	if (c == '\n' && ISSET(tp->t_oflag, ONLCR)) {
 		tk_nout++;
 		tp->t_outcc++;
-		if (putc('\r', &tp->t_outq))
+		if (!ISSET(tp->t_lflag, FLUSHO) && putc('\r', &tp->t_outq))
 			return (c);
 		tp->t_column = 0;
 	}
@@ -762,8 +760,8 @@ ttioctl(tp, cmd, data, flag, p)
 			if (p->p_pgrp->pg_jobc == 0)
 				return (EIO);
 			pgsignal(p->p_pgrp, SIGTTOU, 1);
-			error = ttysleep(tp,
-					 &lbolt, TTOPRI | PCATCH, ttybg, 0);
+			error = ttysleep(tp, &lbolt, TTOPRI | PCATCH,
+			    ttybg, 0);
 			if (error)
 				return (error);
 		}
@@ -813,9 +811,9 @@ ttioctl(tp, cmd, data, flag, p)
 			error = namei(&nid);
 			if (error)
 				return (error);
-			VOP_LOCK(nid.ni_vp);
+			vn_lock(nid.ni_vp, LK_EXCLUSIVE | LK_RETRY, p);
 			error = VOP_ACCESS(nid.ni_vp, VREAD, p->p_ucred, p);
-			VOP_UNLOCK(nid.ni_vp);
+			VOP_UNLOCK(nid.ni_vp, 0, p);
 			vrele(nid.ni_vp);
 			if (error)
 				return (error);
@@ -902,7 +900,7 @@ ttioctl(tp, cmd, data, flag, p)
 		}
 		if (cmd != TIOCSETAF) {
 			if (ISSET(t->c_lflag, ICANON) !=
-			    ISSET(tp->t_lflag, ICANON))
+			    ISSET(tp->t_lflag, ICANON)) {
 				if (ISSET(t->c_lflag, ICANON)) {
 					SET(tp->t_lflag, PENDIN);
 					ttwakeup(tp);
@@ -915,6 +913,7 @@ ttioctl(tp, cmd, data, flag, p)
 					tp->t_canq = tq;
 					CLR(tp->t_lflag, PENDIN);
 				}
+			}
 		}
 		tp->t_iflag = t->c_iflag;
 		tp->t_oflag = t->c_oflag;
@@ -1082,9 +1081,14 @@ ttywait(tp)
 	    (ISSET(tp->t_state, TS_CARR_ON) || ISSET(tp->t_cflag, CLOCAL))
 	    && tp->t_oproc) {
 		(*tp->t_oproc)(tp);
-		SET(tp->t_state, TS_ASLEEP);
-		error = ttysleep(tp, &tp->t_outq, TTOPRI | PCATCH, ttyout, 0);
-		if (error)
+		if ((tp->t_outq.c_cc || ISSET(tp->t_state, TS_BUSY)) &&
+		    (ISSET(tp->t_state, TS_CARR_ON) || ISSET(tp->t_cflag, CLOCAL))
+		    && tp->t_oproc) {
+			SET(tp->t_state, TS_ASLEEP);
+			error = ttysleep(tp, &tp->t_outq, TTOPRI | PCATCH, ttyout, 0);
+			if (error)
+				break;
+		} else
 			break;
 	}
 	splx(s);
@@ -1304,7 +1308,7 @@ ttypend(tp)
 	register struct tty *tp;
 {
 	struct clist tq;
-	register c;
+	register int c;
 
 	CLR(tp->t_lflag, PENDIN);
 	SET(tp->t_state, TS_TYPEN);
@@ -1466,8 +1470,8 @@ read:
 		    ISSET(lflag, IEXTEN | ISIG) == (IEXTEN | ISIG)) {
 			pgsignal(tp->t_pgrp, SIGTSTP, 1);
 			if (first) {
-				error = ttysleep(tp, &lbolt,
-						 TTIPRI | PCATCH, ttybg, 0);
+				error = ttysleep(tp, &lbolt, TTIPRI | PCATCH,
+				    ttybg, 0);
 				if (error)
 					break;
 				goto loop;

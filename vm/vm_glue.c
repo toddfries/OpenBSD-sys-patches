@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_glue.c,v 1.26 1997/10/06 20:21:18 deraadt Exp $    */
+/*	$OpenBSD: vm_glue.c,v 1.29 1998/03/01 00:38:05 niklas Exp $    */
 /*	$NetBSD: vm_glue.c,v 1.55.4.1 1996/06/13 17:25:45 cgd Exp $	*/
 
 /* 
@@ -36,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)vm_glue.c	8.6 (Berkeley) 1/5/94
+ *	@(#)vm_glue.c	8.9 (Berkeley) 3/4/95
  *
  *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
@@ -107,9 +107,9 @@ kernacc(addr, len, rw)
 	 * about the buffer cache for now.
 	 */
 	if (!readbuffers && rv && (eaddr > (vm_offset_t)buffers &&
-		   saddr < (vm_offset_t)buffers + MAXBSIZE * nbuf))
+	    saddr < (vm_offset_t)buffers + MAXBSIZE * nbuf))
 		rv = FALSE;
-	return(rv == TRUE);
+	return (rv == TRUE);
 }
 
 int
@@ -133,7 +133,7 @@ useracc(addr, len, rw)
 
 	rv = vm_map_check_protection(&curproc->p_vmspace->vm_map,
 	    trunc_page(addr), round_page(addr+len), prot);
-	return(rv == TRUE);
+	return (rv == TRUE);
 }
 
 #ifdef KGDB
@@ -182,8 +182,8 @@ vslock(addr, len)
 #ifdef __i386__
 	pmap_prefault(&curproc->p_vmspace->vm_map, (vm_offset_t)addr, len);
 #endif
-	return vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
-			       round_page(addr+len), FALSE);
+	return (vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
+	    round_page(addr+len), FALSE));
 }
 
 int
@@ -191,8 +191,8 @@ vsunlock(addr, len)
 	caddr_t	addr;
 	u_int	len;
 {
-	return vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
-			       round_page(addr+len), TRUE);
+	return (vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
+	    round_page(addr+len), TRUE));
 }
 
 /*
@@ -274,13 +274,15 @@ vm_fork(p1, p2)
 	     (caddr_t)&up->u_stats.pstat_startcopy));
 
 #if defined(i386) || defined(pc532)
-	{ vm_offset_t addr = VM_MAXUSER_ADDRESS; struct vm_map *vp;
+	{
+		 vm_offset_t addr = VM_MAXUSER_ADDRESS; struct vm_map *vp;
 
-	/* ream out old pagetables and kernel stack */
-	vp = &p2->p_vmspace->vm_map;
-	(void)vm_deallocate(vp, addr, VM_MAX_ADDRESS - addr);
-	(void)vm_allocate(vp, &addr, VM_MAX_ADDRESS - addr, FALSE);
-	(void)vm_map_inherit(vp, addr, VM_MAX_ADDRESS, VM_INHERIT_NONE);
+		 /* ream out old pagetables and kernel stack */
+		 vp = &p2->p_vmspace->vm_map;
+		 (void)vm_deallocate(vp, addr, VM_MAX_ADDRESS - addr);
+		 (void)vm_allocate(vp, &addr, VM_MAX_ADDRESS - addr, FALSE);
+		 (void)vm_map_inherit(vp, addr, VM_MAX_ADDRESS,
+		     VM_INHERIT_NONE);
 	}
 #endif
 
@@ -381,8 +383,10 @@ scheduler()
 
 loop:
 #ifdef DEBUG
-	while (!enableswap)
+	while (!enableswap) {
+		panic ("swap disabled??");
 		tsleep((caddr_t)&proc0, PVM, "noswap", 0);
+	}
 #endif
 	pp = NULL;
 	ppri = INT_MIN;
@@ -411,13 +415,14 @@ loop:
 	 * We would like to bring someone in.
 	 * This part is really bogus cuz we could deadlock on memory
 	 * despite our feeble check.
+	 * XXX should require at least vm_swrss / 2
 	 */
 	if (cnt.v_free_count > atop(USPACE)) {
 #ifdef DEBUG
 		if (swapdebug & SDB_SWAPIN)
 			printf("swapin: pid %d(%s)@%p, pri %d free %d\n",
-			       p->p_pid, p->p_comm, p->p_addr,
-			       ppri, cnt.v_free_count);
+			    p->p_pid, p->p_comm, p->p_addr, ppri,
+			    cnt.v_free_count);
 #endif
 #if defined(arc) || defined(pica)
 			vm_map_pageable(kernel_map, (vm_offset_t)p->p_addr,
@@ -433,11 +438,11 @@ loop:
 #ifdef DEBUG
 	if (swapdebug & SDB_FOLLOW)
 		printf("scheduler: no room for pid %d(%s), free %d\n",
-		       p->p_pid, p->p_comm, cnt.v_free_count);
+		    p->p_pid, p->p_comm, cnt.v_free_count);
 #endif
-	(void) splhigh();
-	VM_WAIT;
-	(void) spl0();
+	(void)splhigh();
+	vm_wait("fLowmem");
+	(void)spl0();
 #ifdef DEBUG
 	if (swapdebug & SDB_FOLLOW)
 		printf("scheduler: room again, free %d\n", cnt.v_free_count);
@@ -447,7 +452,7 @@ loop:
 
 #define	swappable(p)							\
 	(((p)->p_flag & (P_SYSTEM | P_INMEM | P_WEXIT)) == P_INMEM &&	\
-	 (p)->p_holdcnt == 0)
+	    (p)->p_holdcnt == 0)
 
 /*
  * Swapout is driven by the pageout daemon.  Very simple, we find eligible
@@ -524,8 +529,8 @@ swapout(p)
 #ifdef DEBUG
 	if (swapdebug & SDB_SWAPOUT)
 		printf("swapout: pid %d(%s)@%p, stat %x pri %d free %d\n",
-		       p->p_pid, p->p_comm, p->p_addr, p->p_stat,
-		       p->p_slptime, cnt.v_free_count);
+		    p->p_pid, p->p_comm, p->p_addr, p->p_stat, p->p_slptime,
+		    cnt.v_free_count);
 #endif
 
 	/*
@@ -551,79 +556,4 @@ swapout(p)
 	splx(s);
 	p->p_swtime = 0;
 	++cnt.v_swpout;
-}
-
-/*
- * The rest of these routines fake thread handling
- */
-
-void
-assert_wait(event, ruptible)
-	void *event;
-	boolean_t ruptible;
-{
-#ifdef lint
-	ruptible++;
-#endif
-	curproc->p_thread = event;
-}
-
-void
-thread_block()
-{
-	int s = splhigh();
-
-	if (curproc->p_thread)
-		tsleep(curproc->p_thread, PVM, "thrd_block", 0);
-	splx(s);
-}
-
-void
-thread_sleep_msg(event, lock, ruptible, msg)
-	void *event;
-	simple_lock_t lock;
-	boolean_t ruptible;
-	char *msg;
-{
-	int s = splhigh();
-
-#ifdef lint
-	ruptible++;
-#endif
-	curproc->p_thread = event;
-	simple_unlock(lock);
-	if (curproc->p_thread)
-		tsleep(event, PVM, msg, 0);
-	splx(s);
-}
-
-/*
- * DEBUG stuff
- */
-
-int indent = 0;
-
-#include <machine/stdarg.h>		/* see subr_prf.c */
-
-/*ARGSUSED2*/
-void
-#if __STDC__
-iprintf(int (*pr)(const char *, ...), const char *fmt, ...)
-#else
-iprintf(pr, fmt /* , va_alist */)
-	void (*pr)();
-	char *fmt;
-	/* va_dcl */
-#endif
-{
-	register int i;
-	va_list ap;
-
-	for (i = indent; i >= 8; i -= 8)
-		(*pr)("\t");
-	while (--i >= 0)
-		(*pr)(" ");
-	va_start(ap, fmt);
-	(*pr)("%:", fmt, ap);
-	va_end(ap);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: st.c,v 1.21 1997/09/05 05:56:51 millert Exp $	*/
+/*	$OpenBSD: st.c,v 1.24 1998/02/22 00:51:46 niklas Exp $	*/
 /*	$NetBSD: st.c,v 1.71 1997/02/21 23:03:49 thorpej Exp $	*/
 
 /*
@@ -167,6 +167,13 @@ struct st_quirk_inquiry_pattern st_quirk_patterns[] = {
 	{{T_SEQUENTIAL, T_REMOV,
 	 "ARCHIVE ", "VIPER 150  21247", ""},     {0, 12, {
 		{0, 0, 0},				/* minor 0-3 */
+		{0, 0, QIC_150},			/* minor 4-7 */
+		{0, 0, QIC_120},			/* minor 8-11 */
+		{0, 0, QIC_24}				/* minor 12-15 */
+	}}},
+	{{T_SEQUENTIAL, T_REMOV,
+	 "ARCHIVE ", "VIPER 150  21531", ""},     {0, 12, {
+		{ST_Q_SENSE_HELP, 0, 0},		/* minor 0-3 */
 		{0, 0, QIC_150},			/* minor 4-7 */
 		{0, 0, QIC_120},			/* minor 8-11 */
 		{0, 0, QIC_24}				/* minor 12-15 */
@@ -1733,8 +1740,6 @@ st_interpret_sense(xs)
 		info = xs->datalen;	/* bad choice if fixed blocks */
 	if ((sense->error_code & SSD_ERRCODE) != 0x70)
 		return -1;	/* let the generic code handle it */
-	else if ((xs->flags & SCSI_SILENT) == 0)
-		scsi_print_sense(xs, 0);	/* tell folks what happened */
 	if (st->flags & ST_FIXEDBLOCKS) {
 		xs->resid = info * st->blksize;
 		if (sense->flags & SSD_EOM) {
@@ -1797,11 +1802,23 @@ st_interpret_sense(xs)
 					printf("%s: %d-byte record too big\n",
 					    st->sc_dev.dv_xname,
 					    xs->datalen - info);
-				return EIO;
+				return (EIO);
+			} else if (info > xs->datalen) {
+				/*
+				 * huh? the residual is bigger than the request
+				 */
+				if ((xs->flags & SCSI_SILENT) == 0) {
+					printf(
+					    "%s: bad residual %d out of %d\n",
+					    st->sc_dev.dv_xname, info,
+					    xs->datalen);
+					return (EIO);
+				}
 			}
 			xs->resid = info;
 			if (bp)
 				bp->b_resid = info;
+			return 0;
 		}
 	}
 	key = sense->flags & SSD_KEY;

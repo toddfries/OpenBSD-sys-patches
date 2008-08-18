@@ -1,4 +1,4 @@
-# 	$OpenBSD: FLOPPY,v 1.16 1997/09/17 06:47:02 downsj Exp $
+# 	$OpenBSD: FLOPPY,v 1.18 1998/02/26 10:50:10 johns Exp $
 # 	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)

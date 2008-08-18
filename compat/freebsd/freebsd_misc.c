@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_misc.c,v 1.3 1996/08/02 20:34:46 niklas Exp $	*/
+/*	$OpenBSD: freebsd_misc.c,v 1.5 1997/11/13 18:35:24 deraadt Exp $	*/
 /*	$NetBSD: freebsd_misc.c,v 1.2 1996/05/03 17:03:10 christos Exp $	*/
 
 /*
@@ -48,29 +48,6 @@
 #include <compat/freebsd/freebsd_rtprio.h>
 #include <compat/freebsd/freebsd_timex.h>
 
-int
-freebsd_sys_msync(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct freebsd_sys_msync_args /* {
-		syscallarg(caddr_t) addr;
-		syscallarg(size_t) len;
-		syscallarg(int) flags;
-	} */ *uap = v;
-	struct sys_msync_args bma;
-
-	/*
-	 * FreeBSD-2.0-RELEASE's msync(2) is compatible with NetBSD's.
-	 * FreeBSD-2.0.5-RELEASE's msync(2) has addtional argument `flags',
-	 * but syscall number is not changed. :-<
-	 */
-	SCARG(&bma, addr) = SCARG(uap, addr);
-	SCARG(&bma, len) = SCARG(uap, len);
-	return sys_msync(p, &bma, retval); /* XXX - simply ignores `flags' */
-}
-
 /* just a place holder */
 
 int
@@ -103,4 +80,18 @@ freebsd_ntp_adjtime(p, v, retval)
 #endif
 
 	return ENOSYS;	/* XXX */
+}
+
+/*
+ * Argh.
+ * The syscalls.master mechanism cannot handle a system call that is in
+ * two spots in the table.
+ */
+int
+freebsd_sys_poll2(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	return (sys_poll(p, v, retval));
 }

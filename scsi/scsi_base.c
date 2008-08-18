@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.19 1997/09/11 21:05:22 niklas Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.21 1998/02/14 08:56:50 deraadt Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -412,6 +412,7 @@ scsi_execute_xs(xs)
 	xs->flags &= ~ITSDONE;
 	xs->error = XS_NOERROR;
 	xs->resid = xs->datalen;
+	xs->status = 0;
 
 retry:
 	/*
@@ -685,7 +686,7 @@ scsi_interpret_sense(xs)
 			error = EIO;
 			break;
 		case 0x7:	/* DATA PROTECT */
-			error = EACCES;
+			error = EROFS;
 			break;
 		case 0x8:	/* BLANK CHECK */
 			error = 0;

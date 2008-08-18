@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atmsubr.c,v 1.8 1996/11/09 23:02:32 chuck Exp $       */
+/*      $OpenBSD: if_atmsubr.c,v 1.10 1998/04/16 07:36:41 deraadt Exp $       */
 
 /*
  *
@@ -143,7 +143,7 @@ atm_output(ifp, m0, dst, rt0)
 				/* XXX: put ATMARP stuff here */
 				/* XXX: watch who frees m on failure */
 			}
-			etype = htons(ETHERTYPE_IP);
+			etype = ETHERTYPE_IP;
 			break;
 #endif
 

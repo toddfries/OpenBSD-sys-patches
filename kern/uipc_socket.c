@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.17 1997/08/31 20:42:24 deraadt Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.21 1998/02/14 10:55:09 deraadt Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -90,7 +90,8 @@ socreate(dom, aso, type, proto)
 	so->so_type = type;
 	if (p->p_ucred->cr_uid == 0)
 		so->so_state = SS_PRIV;
-	so->so_uid = p->p_ucred->cr_uid;
+	so->so_ruid = p->p_cred->p_ruid;
+	so->so_euid = p->p_ucred->cr_uid;
 	so->so_proto = prp;
 	error =
 	    (*prp->pr_usrreq)(so, PRU_ATTACH, NULL, (struct mbuf *)(long)proto,
@@ -196,8 +197,8 @@ soclose(so)
 				goto drop;
 			while (so->so_state & SS_ISCONNECTED) {
 				error = tsleep((caddr_t)&so->so_timeo,
-					       PSOCK | PCATCH, netcls,
-					       so->so_linger);
+				    PSOCK | PCATCH, netcls,
+				    so->so_linger * hz);
 				if (error)
 					break;
 			}
@@ -354,8 +355,10 @@ sosend(so, addr, uio, top, control, flags)
 	 * if we over-committed, and we must use a signed comparison
 	 * of space and resid.  On the other hand, a negative resid
 	 * causes us to loop sending 0-length segments to the protocol.
+	 * MSG_EOR on a SOCK_STREAM socket is also invalid.
 	 */
-	if (resid < 0) {
+	if (resid < 0 ||
+	    (so->so_type == SOCK_STREAM && (flags & MSG_EOR))) {
 		error = EINVAL;
 		goto out;
 	}
@@ -816,6 +819,8 @@ soshutdown(so, how)
 	register struct protosw *pr = so->so_proto;
 
 	how++;
+	if (how & ~(FREAD|FWRITE))
+		return (EINVAL);
 	if (how & FREAD)
 		sorflush(so);
 	if (how & FWRITE)

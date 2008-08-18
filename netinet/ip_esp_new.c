@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp_new.c,v 1.9 1997/10/02 02:31:04 deraadt Exp $	*/
+/*	$OpenBSD: ip_esp_new.c,v 1.17 1998/03/07 21:30:24 provos Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -9,7 +9,11 @@
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
  * by Angelos D. Keromytis, kermit@forthnet.gr.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis and Angelos D. Keromytis.
+ * Additional transforms and features in 1997 by Angelos D. Keromytis and
+ * Niels Provos.
+ *
+ * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -66,6 +70,128 @@ extern void des_ecb3_encrypt(caddr_t, caddr_t, caddr_t, caddr_t, caddr_t, int);
 extern void des_ecb_encrypt(caddr_t, caddr_t, caddr_t, int);
 extern void des_set_key(caddr_t, caddr_t);
 
+static void des1_encrypt(void *, u_int8_t *);
+static void des3_encrypt(void *, u_int8_t *);
+static void blf_encrypt(void *, u_int8_t *);
+static void cast5_encrypt(void *, u_int8_t *);
+static void des1_decrypt(void *, u_int8_t *);
+static void des3_decrypt(void *, u_int8_t *);
+static void blf_decrypt(void *, u_int8_t *);
+static void cast5_decrypt(void *, u_int8_t *);
+
+struct esp_hash esp_new_hash[] = {
+     { ALG_AUTH_MD5, "HMAC-MD5-96", 
+       AH_MD5_ALEN,
+       sizeof(MD5_CTX),
+       (void (*) (void *)) MD5Init, 
+       (void (*) (void *, u_int8_t *, u_int16_t)) MD5Update, 
+       (void (*) (u_int8_t *, void *)) MD5Final 
+     },
+     { ALG_AUTH_SHA1, "HMAC-SHA1-96",
+       AH_SHA1_ALEN,
+       sizeof(SHA1_CTX),
+       (void (*) (void *)) SHA1Init, 
+       (void (*) (void *, u_int8_t *, u_int16_t)) SHA1Update, 
+       (void (*) (u_int8_t *, void *)) SHA1Final 
+     },
+     { ALG_AUTH_RMD160, "HMAC-RIPEMD-160-96",
+       AH_RMD160_ALEN,
+       sizeof(RMD160_CTX),
+       (void (*)(void *)) RMD160Init, 
+       (void (*)(void *, u_int8_t *, u_int16_t)) RMD160Update, 
+       (void (*)(u_int8_t *, void *)) RMD160Final 
+     }
+};
+
+struct esp_xform esp_new_xform[] = {
+     { ALG_ENC_DES, "Data Encryption Standard (DES)",
+       ESP_DES_BLKS, ESP_DES_IVS,
+       8, 8, 8 | 1,
+       des1_encrypt,
+       des1_decrypt 
+     },
+     { ALG_ENC_3DES, "Tripple DES (3DES)",
+       ESP_3DES_BLKS, ESP_3DES_IVS,
+       24, 24, 8 | 1,
+       des3_encrypt,
+       des3_decrypt 
+     },
+     { ALG_ENC_BLF, "Blowfish",
+       ESP_BLF_BLKS, ESP_BLF_IVS,
+       5, BLF_MAXKEYLEN, 8,
+       blf_encrypt,
+       blf_decrypt 
+     },
+     { ALG_ENC_CAST, "CAST",
+       ESP_CAST_BLKS, ESP_CAST_IVS,
+       5, 16, 8,
+       cast5_encrypt,
+       cast5_decrypt 
+     }
+};
+
+static void
+des1_encrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 1);
+}
+
+static void
+des1_decrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 0);
+}
+
+static void
+des3_encrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]),
+		      (caddr_t) (xd->edx_eks[1]),
+		      (caddr_t) (xd->edx_eks[2]), 1);
+}
+
+static void
+des3_decrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[2]),
+		      (caddr_t) (xd->edx_eks[1]),
+		      (caddr_t) (xd->edx_eks[0]), 0);
+}
+
+static void
+blf_encrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     Blowfish_encipher(&xd->edx_bks, (u_int32_t *)blk,
+		       (u_int32_t *) (blk + 4));
+}
+
+static void
+blf_decrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     Blowfish_decipher(&xd->edx_bks, (u_int32_t *)blk,
+		       (u_int32_t *) (blk + 4));
+}
+
+static void
+cast5_encrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     cast_encrypt(&xd->edx_cks, blk, blk);
+}
+
+static void
+cast5_decrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_new_xdata *xd = pxd;
+     cast_decrypt(&xd->edx_cks, blk, blk);
+}
+
 /*
  * esp_new_attach() is called from the transformation initialization code.
  * It just returns.
@@ -93,9 +219,11 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     struct esp_new_xdata *xd;
     struct esp_new_xencap txd;
     struct encap_msghdr *em;
+    struct esp_xform *txform;
+    struct esp_hash *thash;
     caddr_t buffer = NULL;
-    int blocklen, i, enc_keylen, auth_keylen;
-    u_int32_t rk[6];
+    u_int32_t rk[14];
+    int blocklen, i;
 
     if (m->m_len < ENCAP_MSG_FIXED_LEN)
     {
@@ -121,91 +249,74 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     m_copydata(m, EMT_SETSPI_FLEN, ESP_NEW_XENCAP_LEN, (caddr_t) &txd);
 
     /* Check whether the encryption algorithm is supported */
-    switch (txd.edx_enc_algorithm)
+    for (i = sizeof(esp_new_xform) / sizeof(struct esp_xform) - 1; i >= 0; i--) 
+	if (txd.edx_enc_algorithm == esp_new_xform[i].type)
+	      break;
+    if (i < 0) 
     {
-        case ALG_ENC_DES:
-        case ALG_ENC_3DES:
-#ifdef ENCDEBUG
-            if (encdebug)
-              printf("esp_new_init(): initialized TDB with enc algorithm %d\n",
-                     txd.edx_enc_algorithm);
-#endif /* ENCDEBUG */
-            break;
-
-        default:
-	    if (encdebug)
-              log(LOG_WARNING, "esp_new_init(): unsupported encryption algorithm %d specified\n", txd.edx_enc_algorithm);
-            return EINVAL;
+	if (encdebug)
+	  log(LOG_WARNING, "esp_new_init(): unsupported encryption algorithm %d specified\n", txd.edx_enc_algorithm);
+        return EINVAL;
     }
 
-    /* Check whether the authentication algorithm is supported */
-    if (txd.edx_flags & ESP_NEW_FLAG_AUTH)
-      switch (txd.edx_hash_algorithm)
-      {
-          case ALG_AUTH_MD5:
-          case ALG_AUTH_SHA1:
+    txform = &esp_new_xform[i];
 #ifdef ENCDEBUG
-              if (encdebug)
-                printf("esp_new_init(): initialized TDB with hash algorithm %d\n", txd.edx_hash_algorithm);
+    if (encdebug)
+      printf("esp_new_init(): initialized TDB with enc algorithm %d: %s\n",
+	     txd.edx_enc_algorithm, esp_new_xform[i].name);
 #endif /* ENCDEBUG */
-	      blocklen = HMAC_BLOCK_LEN;
-              break;
 
-          default:
-	      if (encdebug)
-                log(LOG_WARNING, "esp_new_init(): unsupported authentication algorithm %d specified\n", txd.edx_enc_algorithm);
-              return EINVAL;
+    /* Check whether the authentication algorithm is supported */
+    if (txd.edx_flags & ESP_NEW_FLAG_AUTH) 
+    {
+        for (i = sizeof(esp_new_hash) / sizeof(struct esp_hash) - 1; i >= 0;
+	     i--) 
+	    if (txd.edx_hash_algorithm == esp_new_hash[i].type)
+	      break;
+	if (i < 0) 
+	{
+            if (encdebug)
+                log(LOG_WARNING, "esp_new_init(): unsupported authentication algorithm %d specified\n", txd.edx_hash_algorithm);
+            return EINVAL;
+	}
+
+#ifdef ENCDEBUG
+        if (encdebug)
+            printf("esp_new_init(): initialized TDB with hash algorithm %d: %s\n",
+		   txd.edx_hash_algorithm, esp_new_hash[i].name);
+#endif /* ENCDEBUG */
+        blocklen = HMAC_BLOCK_LEN;
+	thash = &esp_new_hash[i];
       }
 
-    if (txd.edx_ivlen + txd.edx_keylen + EMT_SETSPI_FLEN + ESP_NEW_XENCAP_LEN
-	!= em->em_msglen)
+    if (txd.edx_ivlen + txd.edx_confkeylen + txd.edx_authkeylen + 
+	EMT_SETSPI_FLEN + ESP_NEW_XENCAP_LEN != em->em_msglen)
     {
 	if (encdebug)
 	  log(LOG_WARNING, "esp_new_init(): message length (%d) doesn't match\n", em->em_msglen);
 	return EINVAL;
     }
 
-    switch (txd.edx_enc_algorithm)
+    /* Check the IV length */
+    if (((txd.edx_ivlen == 0) && !(txform->ivmask&1)) ||
+	((txd.edx_ivlen != 0) && (
+	     !(txd.edx_ivlen & txform->ivmask) ||
+	     (txd.edx_ivlen & (txd.edx_ivlen - 1)))))
     {
-	case ALG_ENC_DES:
-	    if ((txd.edx_ivlen != 0) && (txd.edx_ivlen != 8))
-	    {
-		if (encdebug)
-	       	  log(LOG_WARNING, "esp_new_init(): unsupported IV length %d\n",
-		      txd.edx_ivlen);
-		return EINVAL;
-	    }
+	if (encdebug)
+	  log(LOG_WARNING, "esp_new_init(): unsupported IV length %d\n",
+	      txd.edx_ivlen);
+	return EINVAL;
+    }
 
-	    if (txd.edx_keylen < 8)
-	    {
-		if (encdebug)
-		  log(LOG_WARNING, "esp_new_init(): bad key length\n",
-		      txd.edx_keylen);
-		return EINVAL;
-	    }
-
-	    enc_keylen = 8;
-	    break;
-
-	case ALG_ENC_3DES:
-            if ((txd.edx_ivlen != 0) && (txd.edx_ivlen != 8))
-            {
-		if (encdebug)
-                  log(LOG_WARNING, "esp_new_init(): unsupported IV length %d\n",
-                      txd.edx_ivlen);
-                return EINVAL;
-            }
-
-            if (txd.edx_keylen < 24)
-            {
-		if (encdebug)
-                  log(LOG_WARNING, "esp_new_init(): bad key length\n",
-                      txd.edx_keylen);
-                return EINVAL;
-            }
-
-	    enc_keylen = 24;
-            break;
+    /* Check the key length */
+    if (txd.edx_confkeylen < txform->minkey || 
+	txd.edx_confkeylen > txform->maxkey)
+    {
+	if (encdebug)
+	  log(LOG_WARNING, "esp_new_init(): bad key length %d\n",
+	      txd.edx_confkeylen);
+	return EINVAL;
     }
 
     MALLOC(tdbp->tdb_xdata, caddr_t, sizeof(struct esp_new_xdata),
@@ -231,6 +342,10 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     xd->edx_flags = txd.edx_flags;
     xd->edx_hash_algorithm = txd.edx_hash_algorithm;
     xd->edx_bitmap = 0;
+    xd->edx_xform = txform;
+
+    /* Pass name of enc algorithm for kernfs */
+    tdbp->tdb_confname = xd->edx_xform->name;
 
     /* Replay counters are mandatory, even without auth */
     xd->edx_rpl = AH_HMAC_INITIAL_RPL;
@@ -239,39 +354,43 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     m_copydata(m, EMT_SETSPI_FLEN + ESP_NEW_XENCAP_LEN, xd->edx_ivlen,
 	       (caddr_t) xd->edx_iv);
 
+    /* Copy the key material */
+    m_copydata(m, EMT_SETSPI_FLEN + ESP_NEW_XENCAP_LEN + xd->edx_ivlen,
+	       txd.edx_confkeylen, (caddr_t) rk);
     switch (xd->edx_enc_algorithm)
     {
 	case ALG_ENC_DES:
-	    /* Copy the key material */
-	    m_copydata(m, EMT_SETSPI_FLEN + ESP_NEW_XENCAP_LEN + xd->edx_ivlen,
-		       enc_keylen, (caddr_t) rk);
-
 	    des_set_key((caddr_t) rk, (caddr_t) (xd->edx_eks[0]));
 	    break;
 
 	case ALG_ENC_3DES:
-	    /* Copy the key material */
-	    m_copydata(m, EMT_SETSPI_FLEN + ESP_NEW_XENCAP_LEN + xd->edx_ivlen,
-		       enc_keylen, (caddr_t) rk);
-
 	    des_set_key((caddr_t) rk, (caddr_t) (xd->edx_eks[0]));
 	    des_set_key((caddr_t) (rk + 2), (caddr_t) (xd->edx_eks[1]));
 	    des_set_key((caddr_t) (rk + 4), (caddr_t) (xd->edx_eks[2]));
+	    break;
+        case ALG_ENC_BLF:
+	    blf_key(&xd->edx_bks, (caddr_t) rk, txd.edx_confkeylen);
+	    break;
+        case ALG_ENC_CAST:
+	    cast_setkey(&xd->edx_cks, (caddr_t) rk, txd.edx_confkeylen);
 	    break;
     }
 
     if (txd.edx_flags & ESP_NEW_FLAG_AUTH)
     {
-	auth_keylen = txd.edx_keylen - enc_keylen;
+	xd->edx_hash = thash;
+
+	/* Pass name of auth algorithm for kernfs */
+	tdbp->tdb_authname = xd->edx_hash->name;
 
 #ifdef ENCDEBUG
 	if (encdebug)
 	  printf("esp_new_init(): using %d bytes of authentication key\n",
-		 auth_keylen);
+		 txd.edx_authkeylen);
 #endif
 
 	MALLOC(buffer, caddr_t, 
-	       auth_keylen < blocklen ? blocklen : auth_keylen,
+	       txd.edx_authkeylen < blocklen ? blocklen : txd.edx_authkeylen,
 	       M_TEMP, M_WAITOK);
 	if (buffer == NULL)
 	{
@@ -283,73 +402,41 @@ esp_new_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	    return ENOBUFS;
 	}
 
-	bzero(buffer, auth_keylen < blocklen ? blocklen : auth_keylen);
+	bzero(buffer, txd.edx_authkeylen < blocklen ? 
+	      blocklen : txd.edx_authkeylen);
 
 	/* Copy the key to the buffer */
 	m_copydata(m, EMT_SETSPI_FLEN + ESP_NEW_XENCAP_LEN + xd->edx_ivlen +
-		   enc_keylen, auth_keylen, buffer);
+		   txd.edx_confkeylen, txd.edx_authkeylen, buffer);
 
 	/* Shorten the key if necessary */
-	if (auth_keylen > blocklen)
+	if (txd.edx_authkeylen > blocklen)
 	{
-	    switch (xd->edx_hash_algorithm)
-	    {
-		case ALG_AUTH_MD5:
-		    MD5Init(&(xd->edx_md5_ictx));
-		    MD5Update(&(xd->edx_md5_ictx), buffer, auth_keylen);
-		    bzero(buffer, 
-			  auth_keylen < blocklen ? blocklen : auth_keylen);
-		    MD5Final(buffer, &(xd->edx_md5_ictx));
-		    break;
-
-		case ALG_AUTH_SHA1:
-		    SHA1Init(&(xd->edx_sha1_ictx));
-		    SHA1Update(&(xd->edx_sha1_ictx), buffer, auth_keylen);
-		    bzero(buffer,
-			  auth_keylen < blocklen ? blocklen : auth_keylen);
-		    SHA1Final(buffer, &(xd->edx_sha1_ictx));
-		    break;
-	    }
+	    xd->edx_hash->Init(&(xd->edx_ictx));
+	    xd->edx_hash->Update(&(xd->edx_ictx), buffer, txd.edx_authkeylen);
+	    bzero(buffer, txd.edx_authkeylen < blocklen ? 
+		  blocklen : txd.edx_authkeylen);
+	    xd->edx_hash->Final(buffer, &(xd->edx_ictx));
 	}
 
 	/* Precompute the I and O pads of the HMAC */
 	for (i = 0; i < blocklen; i++)
 	  buffer[i] ^= HMAC_IPAD_VAL;
 
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-		MD5Init(&(xd->edx_md5_ictx));
-		MD5Update(&(xd->edx_md5_ictx), buffer, blocklen);
-		break;
-
-	    case ALG_AUTH_SHA1:
-		SHA1Init(&(xd->edx_sha1_ictx));
-		SHA1Update(&(xd->edx_sha1_ictx), buffer, blocklen);
-		break;
-	}
+	xd->edx_hash->Init(&(xd->edx_ictx));
+	xd->edx_hash->Update(&(xd->edx_ictx), buffer, blocklen);
 	 
 	for (i = 0; i < blocklen; i++)
 	  buffer[i] ^= (HMAC_IPAD_VAL ^ HMAC_OPAD_VAL);
 
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-		MD5Init(&(xd->edx_md5_octx));
-		MD5Update(&(xd->edx_md5_octx), buffer, blocklen);
-		break;
-
-	    case ALG_AUTH_SHA1:
-		SHA1Init(&(xd->edx_sha1_octx));
-		SHA1Update(&(xd->edx_sha1_octx), buffer, blocklen);
-		break;
-	}
+	xd->edx_hash->Init(&(xd->edx_octx));
+	xd->edx_hash->Update(&(xd->edx_octx), buffer, blocklen);
 
 	bzero(buffer, blocklen);
 	free(buffer, M_TEMP);
     }
 
-    bzero(rk, 6 * sizeof(u_int32_t));		/* paranoid */
+    bzero(rk, 14 * sizeof(u_int32_t));		/* paranoid */
     bzero(ipseczeroes, IPSEC_ZEROES_SIZE);	/* paranoid */
 
     return 0;
@@ -362,7 +449,11 @@ esp_new_zeroize(struct tdb *tdbp)
     if (encdebug)
       printf("esp_new_zeroize(): freeing memory\n");
 #endif ENCDEBUG
-    FREE(tdbp->tdb_xdata, M_XDATA);
+    if (tdbp->tdb_xdata)
+    {
+      	FREE(tdbp->tdb_xdata, M_XDATA);
+	tdbp->tdb_xdata = NULL;
+    }
     return 0;
 }
 
@@ -370,69 +461,31 @@ esp_new_zeroize(struct tdb *tdbp)
 struct mbuf *
 esp_new_input(struct mbuf *m, struct tdb *tdb)
 {
+    u_char iv[ESP_MAX_IVS], niv[ESP_MAX_IVS];
+    u_char blk[ESP_MAX_BLKS], *lblk, opts[40];
+    int ohlen, oplen, plen, alen, ilen, i, blks, rest;
     struct esp_new_xdata *xd;
-    struct ip *ip, ipo;
-    u_char iv[ESP_3DES_IVS], niv[ESP_3DES_IVS], blk[ESP_3DES_BLKS], opts[40];
-    u_char *idat, *odat;
-    struct esp_new *esp;
-    struct ifnet *rcvif;
-    int ohlen, oplen, plen, alen, ilen, olen, i, blks;
     int count, off, errc;
-    u_int32_t btsx;
     struct mbuf *mi, *mo;
-    MD5_CTX md5ctx;
-    SHA1_CTX sha1ctx;
+    u_char *idat, *odat, *ivp, *ivn;
+    struct esp_new *esp;
+    struct ip *ip, ipo;
+    u_int32_t btsx;
+    union {
+	 MD5_CTX md5ctx;
+	 SHA1_CTX sha1ctx;
+	 RMD160_CTX rmd160ctx;
+    } ctx;
     u_char buf[AH_ALEN_MAX], buf2[AH_ALEN_MAX];
 
-    xd = (struct esp_new_xdata *)tdb->tdb_xdata;
+    xd = (struct esp_new_xdata *) tdb->tdb_xdata;
 
-    switch (xd->edx_enc_algorithm)
-    {
-	case ALG_ENC_DES:
-	    blks = ESP_DES_BLKS;
-	    break;
-
-	case ALG_ENC_3DES:
-	    blks = ESP_3DES_BLKS;
-	    break;
-
-	default:
-	    if (encdebug)
-              log(LOG_ALERT,
-                  "esp_new_input(): unsupported algorithm %d in SA %x/%08x\n",
-                  xd->edx_enc_algorithm, tdb->tdb_dst, ntohl(tdb->tdb_spi));
-            m_freem(m);
-            return NULL;
-    }
+    blks = xd->edx_xform->blocksize;
 
     if (xd->edx_flags & ESP_NEW_FLAG_AUTH)
-    { 
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-	    case ALG_AUTH_SHA1:
-		alen = AH_HMAC_HASHLEN;
-		break;
-
-	    default:
-		if (encdebug)
-		  log(LOG_ALERT, "esp_new_input(): unsupported algorithm %d in SA %x/%08x\n", xd->edx_hash_algorithm, tdb->tdb_dst, ntohl(tdb->tdb_spi));
-		m_freem(m);
-		return NULL;
-	}
-    } 
+      alen = AH_HMAC_HASHLEN;
     else
       alen = 0;
-
-    rcvif = m->m_pkthdr.rcvif;
-    if (rcvif == NULL)
-    {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_new_input(): receive interface is NULL!!!\n");
-#endif /* ENCDEBUG */
-	rcvif = &enc_softc;
-    }
 
     if (m->m_len < sizeof(struct ip))
     {
@@ -457,7 +510,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	{
 #ifdef ENCDEBUG
             if (encdebug)
-              printf("esp_old_input(): m_pullup() failed\n");
+              printf("esp_new_input(): m_pullup() failed\n");
 #endif /* ENCDEBUG */
             espstat.esps_hdrops++;
             return NULL;
@@ -498,9 +551,10 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	}
     }
 
-    /* Skip the IP header, IP options, SPI, SN and IV and minus Auth Data*/
-    plen = m->m_pkthdr.len - (ip->ip_hl << 2) - 2 * sizeof (u_int32_t) - 
+    /* Skip the IP header, IP options, SPI, SN and IV and minus Auth Data */
+    plen = m->m_pkthdr.len - (ip->ip_hl << 2) - 2 * sizeof(u_int32_t) - 
 	   xd->edx_ivlen - alen;
+
     if (plen & (blks - 1))
     {
 #ifdef ENCDEBUG
@@ -514,16 +568,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 
     if (xd->edx_flags & ESP_NEW_FLAG_AUTH) 
     {
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-		md5ctx = xd->edx_md5_ictx;
-		break;
-	      
-	    case ALG_AUTH_SHA1:
-		sha1ctx = xd->edx_sha1_ictx;
-		break;
-	}
+	bcopy(&(xd->edx_ictx), &ctx, xd->edx_hash->ctxsize);
 
 	/* Auth covers SPI + SN + IV*/
 	oplen = plen + 2 * sizeof(u_int32_t) + xd->edx_ivlen; 
@@ -537,19 +582,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 
 	    count = min(mo->m_len - off, oplen);
 
-	    switch (xd->edx_hash_algorithm)
-	    {
-		case ALG_AUTH_MD5:
-		    MD5Update(&md5ctx, mtod(mo, unsigned char *) + off, 
-			      count);
-		    break;
-
-		case ALG_AUTH_SHA1:
-		    SHA1Update(&sha1ctx, mtod(mo, unsigned char *) + off, 
-			       count);
-		    break;
-	    }
-
+	    xd->edx_hash->Update(&ctx, mtod(mo, unsigned char *) + off, count);
 	    oplen -= count;
 	    if (oplen == 0) 
 	    {
@@ -581,22 +614,10 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	    mo = mo->m_next;
 	}
 
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-		MD5Final(buf2, &md5ctx);
-		md5ctx = xd->edx_md5_octx;
-		MD5Update(&md5ctx, buf2, AH_MD5_ALEN);
-		MD5Final(buf2, &md5ctx);
-		break;
-
-	    case ALG_AUTH_SHA1:
-		SHA1Final(buf2, &sha1ctx);
-		sha1ctx = xd->edx_sha1_octx;
-		SHA1Update(&sha1ctx, buf2, AH_SHA1_ALEN);
-		SHA1Final(buf2, &sha1ctx);
-		break;
-	}
+	xd->edx_hash->Final(buf2, &ctx);
+	bcopy(&(xd->edx_octx), &ctx, xd->edx_hash->ctxsize);
+	xd->edx_hash->Update(&ctx, buf2, xd->edx_hash->hashsize);
+	xd->edx_hash->Final(buf2, &ctx);
 
 	if (bcmp(buf2, buf, AH_HMAC_HASHLEN))
 	{
@@ -627,10 +648,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	idat += xd->edx_ivlen;
     }
     
-    olen = ilen;
-    odat = idat;
-    mi = mo = m;
-    i = 0;
+    mi = m;
 
     /*
      * At this point:
@@ -638,76 +656,104 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
      *   ilen is # of octets left in this mbuf
      *   idat is first encapsulated payload octed in this mbuf
      *   same for olen and odat
-     *   iv contains the IV.
-     *   mi and mo point to the first mbuf
+     *   ivp points to the IV, ivn buffers the next IV.
+     *   mi points to the first mbuf
      *
      * From now on until the end of the mbuf chain:
-     *   . move the next eight octets of the chain into blk[]
-     *     (ilen, idat, and mi are adjusted accordingly)
-     *     and save it back into iv[]
-     *   . decrypt blk[], xor with iv[], put back into chain
-     *     (olen, odat, amd mo are adjusted accordingly)
+     *   . move the next eight octets of the chain into ivn
+     *   . decrypt idat and xor with ivp
+     *   . swap ivp and ivn.
      *   . repeat
      */
 
+    ivp = iv;
+    ivn = niv;
+    rest = ilen % blks;
     while (plen > 0)		/* while not done */
     {
-	while (ilen == 0)	/* we exhausted previous mbuf */
+	if (ilen < blks) 
 	{
-	    mi = mi->m_next;
-	    if (mi == NULL)
-	      panic("esp_new_input(): bad chain (i)\n");
-
-	    ilen = mi->m_len;
-	    idat = (u_char *) mi->m_data;
-	}
-
-	blk[i] = niv[i] = *idat++;
-	i++;
-	ilen--;
-
-	if (i == blks)
-	{
-	    switch (xd->edx_enc_algorithm)
+	    if (rest)
 	    {
-		case ALG_ENC_DES:
-	    	    des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 0);
-		    break;
-
-		case ALG_ENC_3DES:
-		    des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[2]),
-                             	     (caddr_t) (xd->edx_eks[1]),
-                             	     (caddr_t) (xd->edx_eks[0]), 0);
-		    break;
+		bcopy(idat, blk, rest);
+		odat = idat;
 	    }
 
-	    for (i=0; i<8; i++)
+	    do {
+		mi = mi->m_next;
+		if (mi == NULL)
+		    panic("esp_new_input(): bad chain (i)\n");
+	    } while (mi->m_len == 0);
+
+	    if (mi->m_len < blks - rest)
 	    {
-		while (olen == 0)
+		if ((mi = m_pullup(mi, blks - rest)) == NULL) 
 		{
-		    mo = mo->m_next;
-		    if (mo == NULL)
-		      panic("esp_new_input(): bad chain (o)\n");
-
-		    olen = mo->m_len;
-		    odat = (u_char *)mo->m_data;
+#ifdef ENCDEBUG
+		    if (encdebug)
+			printf("esp_new_input(): m_pullup() failed, SA %x/%08x\n",
+			       tdb->tdb_dst, ntohl(tdb->tdb_spi));
+#endif /* ENCDEBUG */
+		    espstat.esps_hdrops++;
+		    return NULL;
 		}
+	    }
+		    
+	    ilen = mi->m_len;
+	    idat = mtod(mi, u_char *);
 
-		*odat = blk[i] ^ iv[i];
-		iv[i] = niv[i];
-		blk[i] = *odat++; /* needed elsewhere */
-		olen--;
+	    if (rest)
+	    {
+		bcopy(idat, blk + rest, blks - rest);
+		bcopy(blk, ivn, blks);
+		    
+		xd->edx_xform->decrypt(xd, blk);
+
+		for (i=0; i<blks; i++)
+		    blk[i] ^= ivp[i];
+
+		ivp = ivn;
+		ivn = (ivp == iv) ? niv : iv;
+
+		bcopy(blk, odat, rest);
+		bcopy(blk + rest, idat, blks - rest);
+
+		lblk = blk;   /* last block touched */
+		
+		idat += blks - rest;
+		ilen -= blks - rest;
+		plen -= blks;
 	    }
 
-	    i = 0;
+	    rest = ilen % blks;
 	}
 
-	plen--;
+	while (ilen >= blks && plen > 0)
+	{
+	    bcopy(idat, ivn, blks);
+
+	    xd->edx_xform->decrypt(xd, idat);
+
+	    for (i=0; i<blks; i++)
+		idat[i] ^= ivp[i];
+
+	    ivp = ivn;
+	    ivn = (ivp == iv) ? niv : iv;
+
+	    lblk = idat;   /* last block touched */
+	    idat += blks;
+
+	    ilen -= blks;
+	    plen -= blks;
+	}
     }
 
     /* Save the options */
     m_copydata(m, sizeof(struct ip), (ipo.ip_hl << 2) - sizeof(struct ip),
 	       (caddr_t) opts);
+
+    if (lblk != blk)
+        bcopy(lblk, blk, blks);
 
     /*
      * Now, the entire chain has been decrypted. As a side effect,
@@ -717,7 +763,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
      * Verify correct decryption by checking the last padding bytes.
      */
 
-    if (xd->edx_flags & ESP_NEW_FLAG_OPADDING)
+    if ((xd->edx_flags & ESP_NEW_FLAG_NPADDING) == 0)
     {
         if ((blk[6] != blk[5]) && (blk[6] != 0))
 	{
@@ -772,7 +818,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     ipo.ip_len += (ipo.ip_hl << 2) -  2 * sizeof(u_int32_t) - xd->edx_ivlen -
 		  blk[6] - 1 - alen;
 
-    if (xd->edx_flags & ESP_NEW_FLAG_OPADDING)
+    if ((xd->edx_flags & ESP_NEW_FLAG_NPADDING) == 0)
       ipo.ip_len -= 1;
 
     ipo.ip_len = htons(ipo.ip_len);
@@ -792,7 +838,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
     espstat.esps_ibytes += ntohs(ip->ip_len) - (ip->ip_hl << 2) + 
                            blk[6] + 1 + alen;
 
-    if (xd->edx_flags & ESP_NEW_FLAG_OPADDING)
+    if ((xd->edx_flags & ESP_NEW_FLAG_NPADDING) == 0)
     {
 	tdb->tdb_cur_bytes++;
 	espstat.esps_ibytes++;
@@ -800,6 +846,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 
     /* Notify on expiration */
     if (tdb->tdb_flags & TDBF_SOFT_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
 	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
@@ -812,8 +859,10 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
-    
+    }
+
     if (tdb->tdb_flags & TDBF_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
 	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
@@ -826,6 +875,7 @@ esp_new_input(struct mbuf *m, struct tdb *tdb)
 	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
 	      tdb_delete(tdb, 0);
 	  }
+    }
 
     return m;
 }
@@ -836,56 +886,30 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 {
     struct esp_new_xdata *xd;
     struct ip *ip, ipo;
-    int i, ilen, olen, ohlen, nh, rlen, plen, padding;
+    int i, ilen, ohlen, nh, rlen, plen, padding, rest;
     struct esp_new espo;
-    struct mbuf *mi, *mo;
-    u_char *pad, *idat, *odat;
-    u_char iv[ESP_3DES_IVS], blk[ESP_3DES_IVS], auth[AH_ALEN_MAX], opts[40];
-    MD5_CTX md5ctx;
-    SHA1_CTX sha1ctx;
+    struct mbuf *mi;
+    u_char *pad, *idat, *odat, *ivp;
+    u_char iv[ESP_MAX_IVS], blk[ESP_MAX_BLKS], auth[AH_ALEN_MAX], opts[40];
+    union {
+	 MD5_CTX md5ctx;
+	 SHA1_CTX sha1ctx;
+	 RMD160_CTX rmd160ctx;
+    } ctx;
     int iphlen, blks, alen;
     
     xd = (struct esp_new_xdata *) tdb->tdb_xdata;
 
-    switch (xd->edx_enc_algorithm)
-    {
-        case ALG_ENC_DES:
-            blks = ESP_DES_BLKS;
-            break;
-
-        case ALG_ENC_3DES:
-            blks = ESP_3DES_BLKS;
-            break;
-
-        default:
-	    if (encdebug)
-              log(LOG_ALERT,
-                  "esp_new_output(): unsupported algorithm %d in SA %x/%08x\n",
-                  xd->edx_enc_algorithm, tdb->tdb_dst, ntohl(tdb->tdb_spi));
-            m_freem(m);
-            return NULL;
-    }
+    blks = xd->edx_xform->blocksize;
 
     if (xd->edx_flags & ESP_NEW_FLAG_AUTH)
     {
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-	    case ALG_AUTH_SHA1:
-		alen = AH_HMAC_HASHLEN;
+      alen = AH_HMAC_HASHLEN;
 #ifdef ENCDEBUG
-		if (encdebug)
-		  printf("esp_new_output(): using hash algorithm %d\n",
-			 xd->edx_hash_algorithm);
+      if (encdebug)
+	printf("esp_new_output(): using hash algorithm: %s\n",
+	       xd->edx_hash->name);
 #endif /* ENCDEBUG */
-		break;
-
-	    default:
-		if (encdebug)
-		  log(LOG_ALERT, "esp_new_output(): unsupported algorithm %d in SA %x/%08x\n", xd->edx_hash_algorithm, tdb->tdb_dst, ntohl(tdb->tdb_spi));
-		m_freem(m);
-		return NULL;
-	}
     } 
     else
       alen = 0;
@@ -967,18 +991,17 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     for (i = 0; i < padding - 2; i++)
       pad[i] = i + 1;
 
-    if (xd->edx_flags & ESP_NEW_FLAG_OPADDING)
-      pad[padding - 2] = padding - 2;
-    else
+    if (xd->edx_flags & ESP_NEW_FLAG_NPADDING)
       pad[padding - 2] = padding - 1;
+    else
+      pad[padding - 2] = padding - 2;
 
     pad[padding - 1] = nh;
 
-    mi = mo = m;
+    mi = m;
     plen = rlen + padding;
-    ilen = olen = m->m_len - iphlen;
-    idat = odat = mtod(m, u_char *) + iphlen;
-    i = 0;
+    ilen = m->m_len - iphlen;
+    idat = mtod(m, u_char *) + iphlen;
 
     if (xd->edx_ivlen == 0)
     {
@@ -997,109 +1020,97 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     /* Authenticate the esp header */
     if (xd->edx_flags & ESP_NEW_FLAG_AUTH)
     {
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-		md5ctx = xd->edx_md5_ictx;
-		MD5Update(&md5ctx, (unsigned char *) &espo, 
-			  2 * sizeof(u_int32_t) + xd->edx_ivlen);
-		break;
-
-	    case ALG_AUTH_SHA1:
-		sha1ctx = xd->edx_sha1_ictx;
-		SHA1Update(&sha1ctx, (unsigned char *) &espo, 
-			   2 * sizeof(u_int32_t) + xd->edx_ivlen);
-		break;
-	}
+	bcopy(&(xd->edx_ictx), &ctx, xd->edx_hash->ctxsize);
+	xd->edx_hash->Update(&ctx, (unsigned char *) &espo, 
+		  2 * sizeof(u_int32_t) + xd->edx_ivlen);
     }
 
     /* Encrypt the payload */
 
+    ivp = iv;
+    rest = ilen % blks;
     while (plen > 0)		/* while not done */
     {
-	while (ilen == 0)	/* we exhausted previous mbuf */
+	if (ilen < blks) 
 	{
-	    mi = mi->m_next;
-	    if (mi == NULL)
-	      panic("esp_new_output(): bad chain (i)\n");
+	    if (rest)
+	    {
+		bcopy(idat, blk, rest);
+		odat = idat;
+	    }
 
+	    do {
+		mi = mi->m_next;
+		if (mi == NULL)
+		    panic("esp_new_output(): bad chain (i)\n");
+	    } while (mi->m_len == 0);
+
+	    if (mi->m_len < blks - rest)
+	    {
+		if ((mi = m_pullup(mi, blks - rest)) == NULL)
+		{
+#ifdef ENCDEBUG
+		    if (encdebug)
+			printf("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
+			       tdb->tdb_dst, ntohl(tdb->tdb_spi));
+#endif /* ENCDEBUG */
+		    return ENOBUFS;
+		}
+	    }
+		    
 	    ilen = mi->m_len;
-	    idat = (u_char *) mi->m_data;
+	    idat = mtod(mi, u_char *);
+
+	    if (rest)
+	    {
+		bcopy(idat, blk + rest, blks - rest);
+		    
+		for (i=0; i<blks; i++)
+		    blk[i] ^= ivp[i];
+
+		xd->edx_xform->encrypt(xd, blk);
+
+		if (xd->edx_flags & ESP_NEW_FLAG_AUTH)
+		    xd->edx_hash->Update(&ctx, blk, blks);
+
+		ivp = blk;
+
+		bcopy(blk, odat, rest);
+		bcopy(blk + rest, idat, blks - rest);
+		
+		idat += blks - rest;
+		ilen -= blks - rest;
+		plen -= blks;
+	    }
+
+	    rest = ilen % blks;
 	}
 
-	blk[i] = *idat++ ^ iv[i];
-		
-	i++;
-	ilen--;
-
-	if (i == blks)
+	while (ilen >= blks && plen > 0)
 	{
-	    switch (xd->edx_enc_algorithm)
-	    {
-		case ALG_ENC_DES:
-	    	    des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 1);
-		    break;
+	    for (i=0; i<blks; i++)
+		idat[i] ^= ivp[i];
 
-		case ALG_ENC_3DES:
-                    des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]),
-                            	     (caddr_t) (xd->edx_eks[1]),
-                             	     (caddr_t) (xd->edx_eks[2]), 1);
-		    break;
-	    }
+	    xd->edx_xform->encrypt(xd, idat);
 
 	    if (xd->edx_flags & ESP_NEW_FLAG_AUTH)
-	      switch (xd->edx_hash_algorithm)
-	      {
-		  case ALG_AUTH_MD5:
-		      MD5Update(&md5ctx, blk, blks);
-		      break;
+		xd->edx_hash->Update(&ctx, idat, blks);
 
-		  case ALG_AUTH_SHA1:
-		      SHA1Update(&sha1ctx, blk, blks);
-		      break;
-	      }
+	    ivp = idat;
+	    idat += blks;
 
-	    for (i = 0; i < blks; i++)
-	    {
-		while (olen == 0)
-		{
-		    mo = mo->m_next;
-		    if (mo == NULL)
-		      panic("esp_new_output(): bad chain (o)\n");
-
-		    olen = mo->m_len;
-		    odat = (u_char *)mo->m_data;
-		}
-
-		*odat++ = blk[i];
-		iv[i] = blk[i];
-		olen--;
-	    }
-	    i = 0;
+	    ilen -= blks;
+	    plen -= blks;
 	}
-
-	plen--;
     }
 
     /* Put in authentication data */
     if (xd->edx_flags & ESP_NEW_FLAG_AUTH)
     {
-	switch (xd->edx_hash_algorithm)
-	{
-	    case ALG_AUTH_MD5:
-		MD5Final(auth, &md5ctx);
-		md5ctx = xd->edx_md5_octx;
-		MD5Update(&md5ctx, auth, AH_MD5_ALEN);
-		MD5Final(auth, &md5ctx);
-		break;
-
-	    case ALG_AUTH_SHA1:
-		SHA1Final(auth, &sha1ctx);
-		sha1ctx = xd->edx_sha1_octx;
-		SHA1Update(&sha1ctx, auth, AH_SHA1_ALEN);
-		SHA1Final(auth, &sha1ctx);
-		break;
-	}
+	xd->edx_hash->Final(auth, &ctx);
+	bcopy(&(xd->edx_octx), &ctx, xd->edx_hash->ctxsize);
+	xd->edx_hash->Update(&ctx, auth, xd->edx_hash->hashsize);
+	xd->edx_hash->Final(auth, &ctx);
 
 	/* Copy the final authenticator */
 	bcopy(auth, pad + padding, alen);
@@ -1126,7 +1137,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     {
 #ifdef ENCDEBUG
 	if (encdebug)
-	  printf("esp_old_output(): m_pullup() failed, SA %x/%08x\n",
+	  printf("esp_new_output(): m_pullup() failed, SA %x/%08x\n",
 		 tdb->tdb_dst, ntohl(tdb->tdb_spi));
 #endif /* ENCDEBUG */
         return ENOBUFS;
@@ -1137,7 +1148,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     ipo.ip_p = IPPROTO_ESP;
 
     /* Save the last encrypted block, to be used as the next IV */
-    bcopy(blk, xd->edx_iv, xd->edx_ivlen);
+    bcopy(ivp, xd->edx_iv, xd->edx_ivlen);
 
     m_copyback(m, 0, sizeof(struct ip), (caddr_t) &ipo);
 
@@ -1158,6 +1169,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 
     /* Notify on expiration */
     if (tdb->tdb_flags & TDBF_SOFT_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
 	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
@@ -1170,8 +1182,10 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
-    
+    }
+
     if (tdb->tdb_flags & TDBF_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
 	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
@@ -1184,6 +1198,7 @@ esp_new_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
 	      tdb_delete(tdb, 0);
 	  }
+    }
 
     return 0;
 }	

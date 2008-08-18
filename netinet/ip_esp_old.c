@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp_old.c,v 1.9 1997/10/02 02:31:05 deraadt Exp $	*/
+/*	$OpenBSD: ip_esp_old.c,v 1.15 1998/03/07 21:30:26 provos Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -9,7 +9,11 @@
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
  * by Angelos D. Keromytis, kermit@forthnet.gr.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis and Angelos D. Keromytis.
+ * Additional transforms and features in 1997 by Angelos D. Keromytis and
+ * Niels Provos.
+ *
+ * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -65,7 +69,59 @@ extern void des_ecb3_encrypt(caddr_t, caddr_t, caddr_t, caddr_t, caddr_t, int);
 extern void des_ecb_encrypt(caddr_t, caddr_t, caddr_t, int);
 extern void des_set_key(caddr_t, caddr_t);
 
-extern encap_sendnotify(int, struct tdb *);
+extern int encap_sendnotify(int, struct tdb *);
+
+static void des1_encrypt(void *, u_int8_t *);
+static void des3_encrypt(void *, u_int8_t *);
+static void des1_decrypt(void *, u_int8_t *);
+static void des3_decrypt(void *, u_int8_t *);
+
+struct esp_xform esp_old_xform[] = {
+     { ALG_ENC_DES, "Data Encryption Standard (DES)",
+       ESP_DES_BLKS, ESP_DES_IVS,
+       8, 8, 8 | 4,
+       des1_encrypt,
+       des1_decrypt 
+     },
+     { ALG_ENC_3DES, "Tripple DES (3DES)",
+       ESP_3DES_BLKS, ESP_3DES_IVS,
+       24, 24, 8 | 4,
+       des3_encrypt,
+       des3_decrypt 
+     }
+};
+
+static void
+des1_encrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_old_xdata *xd = pxd;
+     des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 1);
+}
+
+static void
+des1_decrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_old_xdata *xd = pxd;
+     des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 0);
+}
+
+static void
+des3_encrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_old_xdata *xd = pxd;
+     des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[2]),
+		      (caddr_t) (xd->edx_eks[1]),
+		      (caddr_t) (xd->edx_eks[0]), 1);
+}
+
+static void
+des3_decrypt(void *pxd, u_int8_t *blk)
+{
+     struct esp_old_xdata *xd = pxd;
+     des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[2]),
+		      (caddr_t) (xd->edx_eks[1]),
+		      (caddr_t) (xd->edx_eks[0]), 0);
+}
 
 int
 esp_old_attach()
@@ -89,7 +145,9 @@ esp_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     struct esp_old_xdata *xd;
     struct esp_old_xencap xenc;
     struct encap_msghdr *em;
+    struct esp_xform *txform;
     u_int32_t rk[6];
+    int i;
 
     if (m->m_len < ENCAP_MSG_FIXED_LEN)
     {
@@ -115,22 +173,22 @@ esp_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     m_copydata(m, EMT_SETSPI_FLEN, ESP_OLD_XENCAP_LEN, (caddr_t) &xenc);
 
     /* Check whether the encryption algorithm is supported */
-    switch (xenc.edx_enc_algorithm)
+    for (i=sizeof(esp_old_xform)/sizeof(struct esp_xform)-1; i >= 0; i--) 
+	if (xenc.edx_enc_algorithm == esp_old_xform[i].type)
+	      break;
+    if (i < 0) 
     {
-        case ALG_ENC_DES:
-        case ALG_ENC_3DES:
-#ifdef ENCDEBUG
-            if (encdebug)
-              printf("esp_old_init(): initialized TDB with enc algorithm %d\n",
-                     xenc.edx_enc_algorithm);
-#endif /* ENCDEBUG */
-            break;
-
-        default:
-	    if (encdebug)
-              log(LOG_WARNING, "esp_old_init(): unsupported encryption algorithm %d specified\n", xenc.edx_enc_algorithm);
-            return EINVAL;
+	if (encdebug)
+	  log(LOG_WARNING, "esp_old_init(): unsupported encryption algorithm %d specified\n", xenc.edx_enc_algorithm);
+        return EINVAL;
     }
+
+    txform = &esp_old_xform[i];
+#ifdef ENCDEBUG
+    if (encdebug)
+      printf("esp_old_init(): initialized TDB with enc algorithm %d: %s\n",
+	     xenc.edx_enc_algorithm, esp_old_xform[i].name);
+#endif /* ENCDEBUG */
 
     if (xenc.edx_ivlen + xenc.edx_keylen + EMT_SETSPI_FLEN +
 	ESP_OLD_XENCAP_LEN != em->em_msglen)
@@ -140,45 +198,25 @@ esp_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 	return EINVAL;
     }
 
-    switch (xenc.edx_enc_algorithm)
+    /* Check the IV length */
+    if (((xenc.edx_ivlen == 0) && !(txform->ivmask&1)) ||
+	((xenc.edx_ivlen != 0) && (
+	     !(xenc.edx_ivlen & txform->ivmask) ||
+	     (xenc.edx_ivlen & (xenc.edx_ivlen-1)))))
     {
-	case ALG_ENC_DES:
-	    if ((xenc.edx_ivlen != 4) && (xenc.edx_ivlen != 8))
-	    {
-		if (encdebug)
-	       	  log(LOG_WARNING, "esp_old_init(): unsupported IV length %d\n",
-		      xenc.edx_ivlen);
-		return EINVAL;
-	    }
+	if (encdebug)
+	  log(LOG_WARNING, "esp_old_init(): unsupported IV length %d\n",
+	      xenc.edx_ivlen);
+	return EINVAL;
+    }
 
-	    if (xenc.edx_keylen != 8)
-	    {
-		if (encdebug)
-		  log(LOG_WARNING, "esp_old_init(): bad key length\n",
-		      xenc.edx_keylen);
-		return EINVAL;
-	    }
-
-	    break;
-
-	case ALG_ENC_3DES:
-            if ((xenc.edx_ivlen != 4) && (xenc.edx_ivlen != 8))
-            {
-		if (encdebug)
-                  log(LOG_WARNING, "esp_old_init(): unsupported IV length %d\n",
-                      xenc.edx_ivlen);
-                return EINVAL;
-            }
-
-            if (xenc.edx_keylen != 24)
-            {
-		if (encdebug)
-                  log(LOG_WARNING, "esp_old_init(): bad key length\n",
-                      xenc.edx_keylen);
-                return EINVAL;
-            }
-
-            break;
+    /* Check the key length */
+    if (xenc.edx_keylen < txform->minkey || xenc.edx_keylen > txform->maxkey)
+    {
+	if (encdebug)
+	  log(LOG_WARNING, "esp_old_init(): bad key length %d\n",
+	      xenc.edx_keylen);
+	return EINVAL;
     }
 
     MALLOC(tdbp->tdb_xdata, caddr_t, sizeof(struct esp_old_xdata),
@@ -199,7 +237,11 @@ esp_old_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
     tdbp->tdb_xform = xsp;
 
     xd->edx_ivlen = xenc.edx_ivlen;
+    xd->edx_xform = txform;
     xd->edx_enc_algorithm = xenc.edx_enc_algorithm;
+
+    /* Pass name of enc algorithm for kernfs */
+    tdbp->tdb_confname = xd->edx_xform->name;
 
     /* Copy the IV */
     m_copydata(m, EMT_SETSPI_FLEN + ESP_OLD_XENCAP_LEN, xd->edx_ivlen,
@@ -237,7 +279,11 @@ esp_old_zeroize(struct tdb *tdbp)
     if (encdebug)
       printf("esp_old_zeroize(): freeing memory\n");
 #endif /* ENCDEBUG */
-    FREE(tdbp->tdb_xdata, M_XDATA);
+    if (tdbp->tdb_xdata)
+    {
+       	FREE(tdbp->tdb_xdata, M_XDATA);
+	tdbp->tdb_xdata = NULL;
+    }
     return 0;
 }
 
@@ -250,42 +296,14 @@ esp_old_input(struct mbuf *m, struct tdb *tdb)
     struct esp_old_xdata *xd;
     struct ip *ip, ipo;
     u_char iv[ESP_3DES_IVS], niv[ESP_3DES_IVS], blk[ESP_3DES_BLKS], opts[40];
-    u_char *idat, *odat;
+    u_char *idat, *odat, *ivp, *ivn, *lblk;
     struct esp_old *esp;
-    struct ifnet *rcvif;
-    int ohlen, plen, ilen, olen, i, blks;
-    struct mbuf *mi, *mo;
+    int ohlen, plen, ilen, i, blks, rest;
+    struct mbuf *mi;
 
     xd = (struct esp_old_xdata *) tdb->tdb_xdata;
 
-    switch (xd->edx_enc_algorithm)
-    {
-	case ALG_ENC_DES:
-	    blks = ESP_DES_BLKS;
-	    break;
-
-	case ALG_ENC_3DES:
-	    blks = ESP_3DES_BLKS;
-	    break;
-
-	default:
-	    if (encdebug)
-              log(LOG_ALERT,
-                  "esp_old_input(): unsupported algorithm %d in SA %x/%08x\n",
-                  xd->edx_enc_algorithm, tdb->tdb_dst, ntohl(tdb->tdb_spi));
-            m_freem(m);
-            return NULL;
-    }
-
-    rcvif = m->m_pkthdr.rcvif;
-    if (rcvif == NULL)
-    {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("esp_old_input(): receive interface is NULL!!!\n");
-#endif /* ENCDEBUG */
-	rcvif = &enc_softc;
-    }
+    blks = xd->edx_xform->blocksize;
 
     if (m->m_len < sizeof(struct ip))
     {
@@ -364,10 +382,7 @@ esp_old_input(struct mbuf *m, struct tdb *tdb)
 	idat += 4;
     }
 
-    olen = ilen;
-    odat = idat;
-    mi = mo = m;
-    i = 0;
+    mi = m;
 
     /*
      * At this point:
@@ -375,76 +390,104 @@ esp_old_input(struct mbuf *m, struct tdb *tdb)
      *   ilen is # of octets left in this mbuf
      *   idat is first encapsulated payload octed in this mbuf
      *   same for olen and odat
-     *   iv contains the IV.
-     *   mi and mo point to the first mbuf
+     *   ivp points to the IV, ivn buffers the next IV.
+     *   mi points to the first mbuf
      *
      * From now on until the end of the mbuf chain:
-     *   . move the next eight octets of the chain into blk[]
-     *     (ilen, idat, and mi are adjusted accordingly)
-     *     and save it back into iv[]
-     *   . decrypt blk[], xor with iv[], put back into chain
-     *     (olen, odat, amd mo are adjusted accordingly)
+     *   . move the next eight octets of the chain into ivn
+     *   . decrypt idat and xor with ivp
+     *   . swap ivp and ivn.
      *   . repeat
      */
 
+    ivp = iv;
+    ivn = niv;
+    rest = ilen % blks;
     while (plen > 0)		/* while not done */
     {
-	while (ilen == 0)	/* we exhausted previous mbuf */
+	if (ilen < blks) 
 	{
-	    mi = mi->m_next;
-	    if (mi == NULL)
-	      panic("esp_old_input(): bad chain (i)\n");
-
-	    ilen = mi->m_len;
-	    idat = (u_char *) mi->m_data;
-	}
-
-	blk[i] = niv[i] = *idat++;
-	i++;
-	ilen--;
-
-	if (i == blks)
-	{
-	    switch (xd->edx_enc_algorithm)
+	    if (rest)
 	    {
-		case ALG_ENC_DES:
-	    	    des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 0);
-		    break;
-
-		case ALG_ENC_3DES:
-		    des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[2]),
-                             	     (caddr_t) (xd->edx_eks[1]),
-                             	     (caddr_t) (xd->edx_eks[0]), 0);
-		    break;
+		bcopy(idat, blk, rest);
+		odat = idat;
 	    }
 
-	    for (i = 0; i < blks; i++)
+	    do {
+		mi = mi->m_next;
+		if (mi == NULL)
+		    panic("esp_old_output(): bad chain (i)\n");
+	    } while (mi->m_len == 0);
+
+	    if (mi->m_len < blks - rest)
 	    {
-		while (olen == 0)
+		if ((mi = m_pullup(mi, blks - rest)) == NULL)
 		{
-		    mo = mo->m_next;
-		    if (mo == NULL)
-		      panic("esp_old_input(): bad chain (o)\n");
-
-		    olen = mo->m_len;
-		    odat = (u_char *) mo->m_data;
+#ifdef ENCDEBUG
+		    if (encdebug)
+			printf("esp_old_input(): m_pullup() failed, SA %x/%08x\n",
+			       tdb->tdb_dst, ntohl(tdb->tdb_spi));
+#endif /* ENCDEBUG */
+		    espstat.esps_hdrops++;
+		    return NULL;
 		}
+	    }
+		    
+	    ilen = mi->m_len;
+	    idat = mtod(mi, u_char *);
 
-		*odat = blk[i] ^ iv[i];
-		iv[i] = niv[i];
-		blk[i] = *odat++; /* needed elsewhere */
-		olen--;
+	    if (rest)
+	    {
+		bcopy(idat, blk + rest, blks - rest);
+		bcopy(blk, ivn, blks);
+		    
+		xd->edx_xform->decrypt(xd, blk);
+
+		for (i=0; i<blks; i++)
+		    blk[i] ^= ivp[i];
+
+		ivp = ivn;
+		ivn = (ivp == iv) ? niv : iv;
+
+		bcopy(blk, odat, rest);
+		bcopy(blk + rest, idat, blks - rest);
+
+		lblk = blk;   /* last block touched */
+		
+		idat += blks - rest;
+		ilen -= blks - rest;
+		plen -= blks;
 	    }
 
-	    i = 0;
+	    rest = ilen % blks;
 	}
 
-	plen--;
+	while (ilen >= blks && plen > 0)
+	{
+	    bcopy(idat, ivn, blks);
+
+	    xd->edx_xform->decrypt(xd, idat);
+
+	    for (i=0; i<blks; i++)
+		idat[i] ^= ivp[i];
+
+	    ivp = ivn;
+	    ivn = (ivp == iv) ? niv : iv;
+
+	    lblk = idat;   /* last block touched */
+	    idat += blks;
+
+	    ilen -= blks;
+	    plen -= blks;
+	}
     }
 
     /* Save the options */
     m_copydata(m, sizeof(struct ip), (ipo.ip_hl << 2) - sizeof(struct ip),
 	       (caddr_t) opts);
+
+    if (lblk != blk)
+	bcopy(lblk, blk, blks);
 
     /*
      * Now, the entire chain has been decrypted. As a side effect,
@@ -494,6 +537,7 @@ esp_old_input(struct mbuf *m, struct tdb *tdb)
 
     /* Notify on expiration */
     if (tdb->tdb_flags & TDBF_SOFT_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
 	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
@@ -506,8 +550,10 @@ esp_old_input(struct mbuf *m, struct tdb *tdb)
 	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
-    
+    }
+
     if (tdb->tdb_flags & TDBF_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
 	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
@@ -520,7 +566,8 @@ esp_old_input(struct mbuf *m, struct tdb *tdb)
 	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
 	      tdb_delete(tdb, 0);
 	  }
-	    
+    }
+    
     return m;
 }
 
@@ -530,33 +577,16 @@ esp_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 {
     struct esp_old_xdata *xd;
     struct ip *ip, ipo;
-    int i, ilen, olen, ohlen, nh, rlen, plen, padding;
+    int i, ilen, ohlen, nh, rlen, plen, padding, rest;
     u_int32_t spi;
-    struct mbuf *mi, *mo;
-    u_char *pad, *idat, *odat;
+    struct mbuf *mi;
+    u_char *pad, *idat, *odat, *ivp;
     u_char iv[ESP_3DES_IVS], blk[ESP_3DES_IVS], opts[40];
     int iphlen, blks;
 
     xd = (struct esp_old_xdata *) tdb->tdb_xdata;
 
-    switch (xd->edx_enc_algorithm)
-    {
-        case ALG_ENC_DES:
-            blks = ESP_DES_BLKS;
-            break;
-
-        case ALG_ENC_3DES:
-            blks = ESP_3DES_BLKS;
-            break;
-
-        default:
-	    if (encdebug)
-              log(LOG_ALERT,
-                  "esp_old_output(): unsupported algorithm %d in SA %x/%08x\n",
-                  xd->edx_enc_algorithm, tdb->tdb_dst, ntohl(tdb->tdb_spi));
-            m_freem(m);
-            return NULL;
-    }
+    blks = xd->edx_xform->blocksize;
 
     espstat.esps_output++;
 
@@ -622,10 +652,9 @@ esp_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     pad[padding - 1] = nh;
 
     plen = rlen + padding;
-    mi = mo = m;
-    ilen = olen = m->m_len - iphlen;
-    idat = odat = mtod(m, u_char *) + iphlen;
-    i = 0;
+    mi = m;
+    ilen = m->m_len - iphlen;
+    idat = mtod(m, u_char *) + iphlen;
 
     /*
      * We are now ready to encrypt the payload. 
@@ -651,59 +680,74 @@ esp_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	iv[7] = xd->edx_iv[7];
     }
 
+    ivp = iv;
+    rest = ilen % blks;
     while (plen > 0)		/* while not done */
     {
-	while (ilen == 0)	/* we exhausted previous mbuf */
+	if (ilen < blks)	/* we exhausted previous mbuf */
 	{
-	    mi = mi->m_next;
-	    if (mi == NULL)
-	      panic("esp_old_output(): bad chain (i)\n");
+	    if (rest)
+	    {
+		bcopy(idat, blk, rest);
+		odat = idat;
+	    }
 
+	    do {
+		mi = mi->m_next;
+		if (mi == NULL)
+		    panic("esp_old_output(): bad chain (i)\n");
+	    } while (mi->m_len == 0);
+
+	    if (mi->m_len < blks - rest)
+	    {
+		if ((mi = m_pullup(mi, blks - rest)) == NULL)
+		{
+#ifdef ENCDEBUG
+		    if (encdebug)
+			printf("esp_old_output(): m_pullup() failed, SA %x/%08x\n",
+			       tdb->tdb_dst, ntohl(tdb->tdb_spi));
+#endif /* ENCDEBUG */
+		    return ENOBUFS;
+		}
+	    }
+		    
 	    ilen = mi->m_len;
 	    idat = (u_char *) mi->m_data;
-	}
+	    if (rest)
+	    {
+		bcopy(idat, blk + rest, blks - rest);
+		    
+		for (i=0; i<blks; i++)
+		    blk[i] ^= ivp[i];
 
-	blk[i] = *idat++ ^ iv[i];
+		xd->edx_xform->encrypt(xd, blk);
+
+		ivp = blk;
+
+		bcopy(blk, odat, rest);
+		bcopy(blk + rest, idat, blks - rest);
 		
-	i++;
-	ilen--;
-
-	if (i == blks)
-	{
-	    switch (xd->edx_enc_algorithm)
-	    {
-		case ALG_ENC_DES:
-	    	    des_ecb_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]), 1);
-		    break;
-
-		case ALG_ENC_3DES:
-                    des_ecb3_encrypt(blk, blk, (caddr_t) (xd->edx_eks[0]),
-                            	     (caddr_t) (xd->edx_eks[1]),
-                             	     (caddr_t) (xd->edx_eks[2]), 1);
-		    break;
+		idat += blks - rest;
+		ilen -= blks - rest;
+		plen -= blks;
 	    }
 
-	    for (i = 0; i < blks; i++)
-	    {
-		while (olen == 0)
-		{
-		    mo = mo->m_next;
-		    if (mo == NULL)
-		      panic("esp_old_output(): bad chain (o)\n");
-
-		    olen = mo->m_len;
-		    odat = (u_char *) mo->m_data;
-		}
-
-		*odat++ = blk[i];
-		iv[i] = blk[i];
-		olen--;
-	    }
-
-	    i = 0;
+	    rest = ilen % blks;
 	}
 
-	plen--;
+	while (ilen >= blks && plen > 0)
+	{
+	    for (i=0; i<blks; i++)
+		idat[i] ^= ivp[i];
+
+	    xd->edx_xform->encrypt(xd, idat);
+
+	    ivp = idat;
+	    idat += blks;
+
+	    ilen -= blks;
+	    plen -= blks;
+	}
     }
 
     /*
@@ -750,7 +794,7 @@ esp_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     }
 
     /* Save the last encrypted block, to be used as the next IV */
-    bcopy(blk, xd->edx_iv, xd->edx_ivlen);
+    bcopy(ivp, xd->edx_iv, xd->edx_ivlen);
 
     m_copyback(m, 0, sizeof(struct ip), (caddr_t) &ipo);
 
@@ -771,6 +815,7 @@ esp_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 
     /* Notify on expiration */
     if (tdb->tdb_flags & TDBF_SOFT_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_soft_packets)
       {
 	  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
@@ -783,8 +828,10 @@ esp_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
 	      tdb->tdb_flags &= ~TDBF_SOFT_BYTES;
 	  }
-    
+    }
+
     if (tdb->tdb_flags & TDBF_PACKETS)
+    {
       if (tdb->tdb_cur_packets >= tdb->tdb_exp_packets)
       {
 	  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
@@ -797,6 +844,7 @@ esp_old_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
 	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
 	      tdb_delete(tdb, 0);
 	  }
+    }
 
     return 0;
 }	

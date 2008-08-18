@@ -1,4 +1,4 @@
-#	$OpenBSD: OPRAH,v 1.18 1997/09/26 16:43:00 kstailey Exp $
+#	$OpenBSD: OPRAH,v 1.20 1998/02/22 22:04:21 niklas Exp $
 #
 #	OPRAH -- Niklas Hallqvist's test machine
 #
@@ -21,7 +21,7 @@ option		SWAPPAGER	# paging; REQUIRED
 option		DEVPAGER	# mmap() of devices
 
 option		DDB		# in-kernel debugger
-makeoptions	DEBUG="-g"	# compile full symbol table
+#makeoptions	DEBUG="-g"	# compile full symbol table
 option		DIAGNOSTIC	# internally consistency checks
 option		KTRACE		# system call tracing, a la ktrace(1)
 option		BOOT_CONFIG	# User kernel config
@@ -69,6 +69,9 @@ option		PROCFS		# /proc
 
 #option		GATEWAY		# packet forwarding
 option		INET		# IP + ICMP + TCP + UDP
+option		IPSEC
+option		IPFILTER
+option		IPFILTER_LOG
 
 config		bsd	swap generic
 
@@ -113,16 +116,20 @@ wdc0	at isa? port 0x1f0 irq 14	# ST506, ESDI, and IDE controllers
 #wdc1	at isa? port 0x170 irq ?
 wd*	at wdc? drive ?
 
+atapibus* at wdc?
+acd*	at atapibus? drive ?
+
 ed0	at isa? port 0x320 iomem 0xd0000 irq 5
 
 #spkr0	at isa? ...
 
 pseudo-device	loop	1		# network loopback
 pseudo-device	bpfilter 8		# packet filter
-pseudo-device	sl	2		# CSLIP
+#pseudo-device	sl	2		# CSLIP
 pseudo-device	ppp	2		# PPP
 pseudo-device	tun	2		# network tunneling over tty
 
 pseudo-device	pty	64		# pseudo-terminals
 #pseudo-device	tb	1		# tablet line discipline
 pseudo-device	vnd	4		# paging to files
+pseudo-device	enc

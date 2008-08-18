@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.34 1997/10/07 07:59:57 mickey Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.37 1998/04/18 07:40:03 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -50,6 +50,7 @@ static int Xdebug __P((void));
 static int Xhelp __P((void));
 static int Ximage __P((void));
 static int Xls __P((void));
+static int Xnop __P((void));
 static int Xreboot __P((void));
 static int Xset __P((void));
 static int Xstty __P((void));
@@ -62,7 +63,7 @@ static int Xmachine __P((void));
 extern const struct cmd_table MACHINE_CMD[];
 #endif
 
-static const struct cmd_table cmd_set[] = {
+const struct cmd_table cmd_set[] = {
 	{"addr",   CMDT_VAR, Xaddr},
 	{"howto",  CMDT_VAR, Xhowto},
 #ifdef DEBUG	
@@ -74,8 +75,9 @@ static const struct cmd_table cmd_set[] = {
 	{NULL,0}
 };
 
-static const struct cmd_table cmd_table[] = {
-	{"boot",   CMDT_CMD, Xboot}, /* XXX must be first */
+const struct cmd_table cmd_table[] = {
+	{"#",      CMDT_CMD, Xnop},  /* XXX must be first */
+	{"boot",   CMDT_CMD, Xboot},
 	{"echo",   CMDT_CMD, Xecho},
 	{"help",   CMDT_CMD, Xhelp},
 	{"ls",     CMDT_CMD, Xls},
@@ -99,7 +101,7 @@ static char *whatcmd
 static int docmd __P((void));
 static char *qualify __P((char *));
 
-static char cmd_buf[133];
+char cmd_buf[133];
 
 int
 getcmd()
@@ -161,7 +163,7 @@ static int
 docmd()
 {
 	register char *p = NULL;
-	const struct cmd_table *ct, *cs;
+	const struct cmd_table *ct = cmd_table, *cs;
 
 	cmd.argc = 1;
 	if (cmd.cmd == NULL) {
@@ -241,11 +243,17 @@ readline(buf, to)
 	register char *p = buf, *pe = buf, ch;
 	time_t tt;
 
-	for (tt = getsecs() + to; getsecs() < tt && !cnischar(); )
-		;
+	/* Only do timeout if greater than 0 */
+	if (to > 0) {
+		for (tt = getsecs() + to; getsecs() < tt && !cnischar(); )
+			;
 
-	if (!cnischar())
-		return 0;
+		if (!cnischar()) {
+			strncpy(buf, "boot", 5);
+			return strlen(buf);
+		}
+	} else
+		while (!cnischar()) ;
 
 	while (1) {
 		switch ((ch = getchar())) {
@@ -420,23 +428,10 @@ Ximage()
 static int
 Xaddr()
 {
-	register char *p;
-
 	if (cmd.argc != 2)
 		printf("%p", cmd.addr);
-	else {
-		register u_long a;
-
-		p = cmd.argv[1];
-		if (p[0] == '0' && p[1] == 'x')
-			p += 2;
-		for (a = 0; *p != '\0'; p++) {
-			a <<= 4;
-			a |= (isdigit(*p)? *p - '0':
-			      10 + tolower(*p) - 'a') & 0xf;
-		}
-		cmd.addr = (void *)a;
-	}
+	else
+		cmd.addr = (void *)strtol(cmd.argv[1], NULL, 0);
 	return 0;
 }
 
@@ -522,13 +517,26 @@ ls(name, sb)
 {
 	putchar("-fc-d-b---l-s-w-"[(sb->st_mode & S_IFMT) >> 12]);
 	lsrwx(sb->st_mode >> 6, (sb->st_mode & S_ISUID? "sS" : "x-"));
-	lsrwx(sb->st_mode >> 3, (sb->st_mode & S_ISUID? "sS" : "x-"));
+	lsrwx(sb->st_mode >> 3, (sb->st_mode & S_ISGID? "sS" : "x-"));
 	lsrwx(sb->st_mode     , (sb->st_mode & S_ISTXT? "tT" : "x-"));
 
 	printf (" %u,%u\t%lu\t%s\n", sb->st_uid, sb->st_gid,
 		(u_long)sb->st_size, name);
 }
 #undef lsrwx
+
+int doboot = 1;
+
+static int
+Xnop()
+{
+	if (doboot) {
+		doboot = 0;
+		return (Xboot());
+	}
+
+	return 0;
+}
 
 static int
 Xhowto()

@@ -1,5 +1,5 @@
-/*	$OpenBSD: ppb.c,v 1.5 1996/11/28 23:28:14 niklas Exp $	*/
-/*	$NetBSD: ppb.c,v 1.12 1996/10/21 22:57:00 thorpej Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.9 1998/03/10 08:40:39 deraadt Exp $	*/
+/*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -91,10 +91,8 @@ ppbattach(parent, self, aux)
 	pci_chipset_tag_t pc = pa->pa_pc;
 	struct pcibus_attach_args pba;
 	pcireg_t busdata;
-	char devinfo[256];
 
-	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo);
-	printf(": %s (rev. 0x%02x)\n", devinfo, PCI_REVISION(pa->pa_class));
+	printf("\n");
 
 	busdata = pci_conf_read(pc, pa->pa_tag, PPB_REG_BUSINFO);
 
@@ -122,6 +120,7 @@ ppbattach(parent, self, aux)
 	pba.pba_busname = "pci";
 	pba.pba_iot = pa->pa_iot;
 	pba.pba_memt = pa->pa_memt;
+	pba.pba_dmat = pa->pa_dmat;
 	pba.pba_pc = pc;
 	pba.pba_bus = PPB_BUSINFO_SECONDARY(busdata);
 	pba.pba_intrswiz = pa->pa_intrswiz;

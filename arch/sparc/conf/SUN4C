@@ -28,6 +28,7 @@ option		QUOTA		# fast filesystem with user and group quotas
 option		MFS		# memory-based filesystem
 option		LOFS		# Loop-back filesystem
 option		FDESC		# user file descriptor filesystem
+option		NULLFS		# null fs, required by umapfs
 option		UMAPFS		# uid/gid remapping filesystem
 option		PORTAL		# portal filesystem (still experimental)
 option		PROCFS		# /proc
@@ -63,6 +64,7 @@ sbus0	at mainbus0
 
 audioamd0 at mainbus0
 auxreg0	at mainbus0
+
 clock0	at mainbus0
 #clock0	at obio0 addr 0xf2000000
 #oclock0 at obio0 addr 0xf3000000

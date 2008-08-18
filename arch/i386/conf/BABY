@@ -1,4 +1,4 @@
-#	$OpenBSD: BABY,v 1.25 1997/10/08 21:53:30 deraadt Exp $
+#	$OpenBSD: BABY,v 1.32 1998/01/22 19:05:57 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -18,7 +18,7 @@ option		BUFCACHEPERCENT=20
 #option		XSERVER
 #option		INSECURE	# insecure; allow /dev/mem writing for X
 
-maxusers	32		# estimated number of users
+maxusers	64		# estimated number of users
 option		TIMEZONE=0	# time zone to adjust RTC time by
 option		DST=0		# daylight savings time used by RTC
 
@@ -83,12 +83,21 @@ config		bsd	root on sd0 swap on sd0 and sd1 and sd2 and sd3 and sd4 dumps on sd2
 
 mainbus0 at root
 
+bios0	at mainbus0
+apm0	at bios0
+option	APM_NOIDLE
+
 isa0	at mainbus0
 eisa0	at mainbus0
-pci0	at mainbus0 bus ?
+pci*	at mainbus0 bus ?
 
+option		PCIVERBOSE
+option		EISAVERBOSE
+
+pchb*	at pci? dev ? function ?	# PCI-Host bridges
 ppb*	at pci? dev ? function ?	# PCI-PCI bridges
 pci*	at ppb? bus ?
+pci*	at pchb? bus ?
 
 pcicmaster0	at isa? port 0x3E0 size 2
 pcic0	at pcicmaster0 irq 11 iomem 0xd4000 iosiz 4096
@@ -197,8 +206,7 @@ pseudo-device	ppp	2		# PPP
 pseudo-device	tun	2		# network tunneling over tty
 
 pseudo-device	pty	64		# pseudo-terminals
-pseudo-device	tb	1		# tablet line discipline
 pseudo-device	vnd	4		# paging to files
 pseudo-device	ccd	4		# concatenated disk devices
-pseudo-device	rd	2		# ramdisk (don't remove ;)
-pseudo-device	enc		4	# encryption device
+pseudo-device	enc	4		# encryption device
+pseudo-device	pctr	1

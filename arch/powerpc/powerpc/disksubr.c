@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.7 1997/10/18 10:35:04 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.10 1998/03/31 18:21:30 mickey Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -148,7 +148,12 @@ readdisklabel(dev, strat, lp, osdep)
 				for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
 				    i++, dp2++)
 					if (get_le(&dp2->dp_size) &&
-					    dp2->dp_typ == DOSPTYP_386BSD)
+					    dp2->dp_typ == DOSPTYP_FREEBSD)
+						ourpart = i;
+				for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
+				    i++, dp2++)
+					if (get_le(&dp2->dp_size) &&
+					    dp2->dp_typ == DOSPTYP_NETBSD)
 						ourpart = i;
 				if (ourpart == -1)
 					goto donot;
@@ -216,6 +221,7 @@ donot:
 				case DOSPTYP_FAT16S:
 				case DOSPTYP_FAT16B:
 				case DOSPTYP_FAT16C:
+				case DOSPTYP_FAT32:
 					pp->p_fstype = FS_MSDOS;
 					n++;
 					break;
@@ -415,7 +421,10 @@ writedisklabel(dev, strat, lp, osdep)
 			if (get_le(&dp2->dp_size) && dp2->dp_typ == DOSPTYP_OPENBSD)
 				ourpart = i;
 		for (dp2=dp, i=0; i < NDOSPART && ourpart == -1; i++, dp2++)
-			if (get_le(&dp2->dp_size) && dp2->dp_typ == DOSPTYP_386BSD)
+			if (get_le(&dp2->dp_size) && dp2->dp_typ == DOSPTYP_FREEBSD)
+				ourpart = i;
+		for (dp2=dp, i=0; i < NDOSPART && ourpart == -1; i++, dp2++)
+			if (get_le(&dp2->dp_size) && dp2->dp_typ == DOSPTYP_NETBSD)
 				ourpart = i;
 
 		if (ourpart != -1) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.24 1997/10/02 02:31:07 deraadt Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.26 1998/03/18 10:16:31 provos Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -271,7 +271,8 @@ ip_output(m0, va_alist)
 			}
 
 			/* Check for tunneling */
-			if (tdb->tdb_flags & TDBF_TUNNELING) {
+			if ((tdb->tdb_flags & TDBF_TUNNELING) &&
+			    (tdb->tdb_xform->xf_type != XF_IP4)){
 #ifdef ENCDEBUG
 				if (encdebug)
 					printf("ip_output(): tunneling\n");
@@ -1041,7 +1042,7 @@ ip_pcbopts(pcbopt, m)
 	struct mbuf **pcbopt;
 	register struct mbuf *m;
 {
-	register cnt, optlen;
+	register int cnt, optlen;
 	register u_char *cp;
 	u_char opt;
 

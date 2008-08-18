@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.18 1997/08/09 23:36:26 millert Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.23 1998/02/14 18:50:35 mickey Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -189,7 +189,7 @@ in_pcbbind(v, nam)
 				reuseport = SO_REUSEADDR|SO_REUSEPORT;
 		} else if (sin->sin_addr.s_addr != INADDR_ANY) {
 			sin->sin_port = 0;		/* yech... */
-			if (ifa_ifwithaddr(sintosa(sin)) == 0)
+			if (in_iawithaddr(sin->sin_addr, NULL) == 0)
 				return (EADDRNOTAVAIL);
 		}
 		if (lport) {
@@ -199,10 +199,10 @@ in_pcbbind(v, nam)
 			if (ntohs(lport) < IPPORT_RESERVED &&
 			    (error = suser(p->p_ucred, &p->p_acflag)))
 				return (EACCES);
-			if (so->so_uid) {
+			if (so->so_euid) {
 				t = in_pcblookup(table, zeroin_addr, 0,
 				    sin->sin_addr, lport, INPLOOKUP_WILDCARD);
-				if (t && (so->so_uid != t->inp_socket->so_uid))
+				if (t && (so->so_euid != t->inp_socket->so_euid))
 					return (EADDRINUSE);
 			}
 			t = in_pcblookup(table, zeroin_addr, 0,
@@ -410,8 +410,9 @@ in_pcbconnect(v, nam)
 	    inp->inp_lport) != 0)
 		return (EADDRINUSE);
 	if (inp->inp_laddr.s_addr == INADDR_ANY) {
-		if (inp->inp_lport == 0)
-			(void)in_pcbbind(inp, (struct mbuf *)0);
+		if (inp->inp_lport == 0 &&
+		    in_pcbbind(inp, (struct mbuf *)0) == EADDRNOTAVAIL)
+			return (EADDRNOTAVAIL);
 		inp->inp_laddr = ifaddr->sin_addr;
 	}
 	inp->inp_faddr = sin->sin_addr;
@@ -655,12 +656,10 @@ in_pcblookup(table, faddr, fport_arg, laddr, lport_arg, flags)
 			if (laddr.s_addr != INADDR_ANY)
 				wildcard++;
 		}
-		if (wildcard && (flags & INPLOOKUP_WILDCARD) == 0)
-			continue;
-		if (wildcard < matchwild) {
+		if ((!wildcard || (flags & INPLOOKUP_WILDCARD)) &&
+		    wildcard < matchwild) {
 			match = inp;
-			matchwild = wildcard;
-			if (matchwild == 0)
+			if ((matchwild = wildcard) == 0)
 				break;
 		}
 	}

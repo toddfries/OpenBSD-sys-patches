@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.17 1997/07/14 03:07:21 angelos Exp $	*/
+/*	$OpenBSD: socket.h,v 1.19 1997/11/30 18:50:17 millert Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -135,9 +135,9 @@ struct	linger {
  * addresses.
  */
 struct sockaddr {
-	u_char	sa_len;			/* total length */
-	u_char	sa_family;		/* address family */
-	char	sa_data[14];		/* actually longer; address value */
+	u_int8_t    sa_len;		/* total length */
+	sa_family_t sa_family;		/* address family */
+	char	    sa_data[14];	/* actually longer; address value */
 };
 
 /*
@@ -186,6 +186,13 @@ struct sockproto {
 #define	PF_SIP		AF_SIP
 #define PF_KEY		AF_KEY
 #define	PF_MAX		AF_MAX
+
+/*
+ * These are the valid values for the "how" field used by shutdown(2).
+ */
+#define	SHUT_RD		0
+#define	SHUT_WR		1
+#define	SHUT_RDWR	2
 
 /*
  * Definitions for network related sysctl, CTL_NET.

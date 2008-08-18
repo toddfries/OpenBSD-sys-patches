@@ -1,4 +1,4 @@
-/*	$OpenBSD: pckbd.c,v 1.11 1997/07/08 11:19:41 niklas Exp $	*/
+/*	$OpenBSD: pckbd.c,v 1.14 1998/02/05 22:57:51 deraadt Exp $	*/
 /*	$NetBSD: pckbd.c,v 1.14 1996/12/05 01:39:30 cgd Exp $	*/
 
 /*-
@@ -52,6 +52,9 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
+#ifdef DDB
+#include <ddb/db_var.h>
+#endif
 
 #include <machine/intr.h>
 #include <machine/bus.h>
@@ -64,8 +67,8 @@
 #include <machine/wsconsio.h>
 #include <alpha/isa/pcppivar.h>
 
-#include <alpha/wscons/wsconsvar.h>
-#include <alpha/wscons/kbd.h>
+#include <dev/wscons/wsconsvar.h>
+#include <dev/wscons/kbd.h>
 #include "wscons.h"
 
 #undef KBDATAP
@@ -757,9 +760,9 @@ pckbd_translate(dev, c)
 	/*
 	 * Check for cntl-alt-esc.
 	 */
-	if ((dt == 1)
-	    && (shift_state & (CTL | ALT)) == (CTL | ALT)) {
-		Debugger();
+	if ((dt == 1) && (shift_state & (CTL | ALT)) == (CTL | ALT)) {
+		if (db_console)
+			Debugger();
 		return (NULL);
 	}
 #endif

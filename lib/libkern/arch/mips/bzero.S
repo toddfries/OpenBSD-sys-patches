@@ -1,3 +1,5 @@
+/*	$OpenBSD: bzero.S,v 1.6 1998/03/01 16:10:26 niklas Exp $	*/
+
 #include "DEFS.h"
 
 

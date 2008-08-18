@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.20 1997/10/06 20:21:11 deraadt Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.24 1998/03/15 17:20:34 millert Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -36,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)sysctl.h	8.1 (Berkeley) 6/2/93
+ *	@(#)sysctl.h	8.2 (Berkeley) 3/30/95
  */
 
 #ifndef _SYS_SYSCTL_H_
@@ -49,8 +49,9 @@
 #include <sys/time.h>
 #include <sys/ucred.h>
 #include <sys/proc.h>
-#include <vm/vm.h>
 #endif
+
+#include <vm/vm.h>
 
 /*
  * Definitions for sysctl call.  The sysctl call uses a hierarchical name
@@ -93,7 +94,8 @@ struct ctlname {
 #define	CTL_MACHDEP	7		/* machine dependent */
 #define	CTL_USER	8		/* user-level */
 #define	CTL_DDB		9		/* DDB user interface, see ddb_var.h */
-#define	CTL_MAXID	10		/* number of valid top-level ids */
+#define CTL_VFS         10              /* VFS sysctl's */
+#define	CTL_MAXID	11		/* number of valid top-level ids */
 
 #define CTL_NAMES { \
 	{ 0, 0 }, \
@@ -106,6 +108,7 @@ struct ctlname {
 	{ "machdep", CTLTYPE_NODE }, \
 	{ "user", CTLTYPE_NODE }, \
 	{ "ddb", CTLTYPE_NODE }, \
+	{ "vfs", CTLTYPE_NODE }, \
 }
 
 /*
@@ -142,7 +145,8 @@ struct ctlname {
 #define	KERN_SOMINCONN		29	/* int: half-open controllable param */
 #define	KERN_USERMOUNT		30	/* int: users may mount filesystems */
 #define KERN_RND		31	/* struct: rnd(4) statistics */
-#define	KERN_MAXID		32	/* number of valid kern ids */
+#define KERN_NOSUIDCOREDUMP	32	/* int: no setuid coredumps ever */ 
+#define	KERN_MAXID		33	/* number of valid kern ids */
 
 #define CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -177,6 +181,7 @@ struct ctlname {
 	{ "sominconn", CTLTYPE_INT }, \
 	{ "usermount", CTLTYPE_INT }, \
 	{ "random", CTLTYPE_STRUCT }, \
+	{ "nosuidcoredump", CTLTYPE_INT }, \
 }
 
 /*
@@ -219,7 +224,7 @@ struct kinfo_proc {
 		char	e_login[MAXLOGNAME];	/* setlogin() name */
 #define EMULNAMELEN	7
 		char	e_emul[EMULNAMELEN+1];	/* syscall emulation name */
-		u_int32_t e_spare[2]; /* XXX remove prior to release */
+	        rlim_t	e_maxrss;
 	} kp_eproc;
 };
 
@@ -383,7 +388,7 @@ int sysctl_rtable __P((int *, u_int, void *, size_t *, void *, size_t));
 int sysctl_clockrate __P((char *, size_t *));
 int sysctl_rdstring __P((void *, size_t *, void *, char *));
 int sysctl_rdstruct __P((void *, size_t *, void *, void *, int));
-int sysctl_vnode __P((char *, size_t *));
+int sysctl_vnode __P((char *, size_t *, struct proc *));
 int sysctl_ntptime __P((char *, size_t *));
 #ifdef GPROF
 int sysctl_doprof __P((int *, u_int, void *, size_t *, void *, size_t));
@@ -408,6 +413,8 @@ int fs_posix_sysctl __P((int *, u_int, void *, size_t *, void *, size_t,
 int net_sysctl __P((int *, u_int, void *, size_t *, void *, size_t,
 		    struct proc *));
 int cpu_sysctl __P((int *, u_int, void *, size_t *, void *, size_t,
+		    struct proc *));
+int vfs_sysctl __P((int *, u_int, void *, size_t *, void *, size_t,
 		    struct proc *));
 #else	/* !_KERNEL */
 #include <sys/cdefs.h>

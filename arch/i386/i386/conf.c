@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.41 1997/10/28 10:19:12 niklas Exp $	*/
+/*	$OpenBSD: conf.c,v 1.43 1998/04/01 20:16:41 matthieu Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -166,7 +166,6 @@ cdev_decl(svr4_net);
 #include "pctr.h"
 #include "bios.h"
 
-cdev_decl(ipl);
 #ifdef IPFILTER
 #define NIPF 1
 #else
@@ -225,7 +224,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 34 */
 	cdev_mouse_init(NMMS,mms),	/* 35: Microsoft mouse */
 	cdev_mouse_init(NLMS,lms),	/* 36: Logitech mouse */
-	cdev_mouse_init(NPMS,pms),	/* 37: PS/2 mouse */
+	cdev_mousewr_init(NPMS,pms),    /* 37: Extended PS/2 mouse */
 	cdev_tty_init(NCY,cy),		/* 38: Cyclom serial port */
 	cdev_disk_init(NMCD,mcd),	/* 39: Mitsumi CD-ROM */
 	cdev_bpftun_init(NTUN,tun),	/* 40: network tunnel */

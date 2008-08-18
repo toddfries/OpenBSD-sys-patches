@@ -1,4 +1,4 @@
-	$OpenBSD: syscalls.master,v 1.18 1997/08/29 20:44:26 kstailey Exp $
+	$OpenBSD: syscalls.master,v 1.23 1998/03/06 21:58:10 niklas Exp $
 ;	$NetBSD: syscalls.master,v 1.17 1996/02/10 17:12:51 christos Exp $
 
 ;	@(#)syscalls.master	8.1 (Berkeley) 7/19/93
@@ -142,11 +142,7 @@
 73	OBSOL		rumount
 74	OBSOL		rfstart
 75	OBSOL		sigret
-#ifdef COMPAT_SVR4_NCR
-76	STD		{ int svr4_ncr_sys_rdebug(); }
-#else
-76	OBSOL		rdebug
-#endif
+76	STD		{ int svr4_sys_rdebug(void); }
 77	OBSOL		rfstop
 78	UNIMPL		rfsys
 79	NOARGS		{ int sys_rmdir(char *path); }
@@ -234,7 +230,7 @@
 134	NOARGS		{ int sys_rename(char *from, char *to); }
 135	STD		{ int svr4_sys_uname(struct svr4_utsname* name, \
 			    int dummy); }
-136	NOARGS		{ int sys_setegid(gid_t egid); }
+136	STD		{ int svr4_sys_setegid(gid_t egid); }
 137	STD		{ int svr4_sys_sysconfig(int name); }
 138	NOARGS		{ int sys_adjtime(struct timeval *delta, \
 			    struct timeval *olddelta); }
@@ -292,7 +288,8 @@
 184	UNIMPL		tsolsys
 185	STD		{ int svr4_sys_acl(char *path, int cmd, int num, \
 			    struct svr4_aclent *buf); }
-186	UNIMPL		auditsys
+186	STD		{ int svr4_sys_auditsys(int code, int a1, int a2, \
+			    int a3, int a4, int a5); }
 187	UNIMPL		processor_bind
 188	UNIMPL		processor_info
 189	UNIMPL		p_online

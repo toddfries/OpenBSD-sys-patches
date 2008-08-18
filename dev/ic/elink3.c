@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3.c,v 1.19.2.1 1997/10/30 23:55:03 niklas Exp $	*/
+/*	$OpenBSD: elink3.c,v 1.24 1998/04/04 08:09:23 deraadt Exp $	*/
 /*	$NetBSD: elink3.c,v 1.32 1997/05/14 00:22:00 thorpej Exp $	*/
 
 /*
@@ -231,8 +231,7 @@ epconfig(sc, chipset)
 		sc->sc_arpcom.ac_enaddr[(i << 1) + 1] = x;
 	}
 
-	printf("%s: address %s, ", sc->sc_dev.dv_xname,
-		ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(": address %s, ", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
 	/*
 	 * Vortex-based (3c59x pci,eisa) and Boomerang (3c900,3c515?) cards
@@ -505,8 +504,8 @@ ep_vortex_probemedia(sc)
 	medium_name = (default_media > 8)
 		? "(unknown/impossible media)"
 		: ep_vortex_media[default_media].epm_name;
-	printf(" default %s%s\n",
-	       medium_name,  (autoselect)? ", autoselect" : "" );
+	printf(" default %s%s",
+	       medium_name,  (autoselect)? "/autoselect" : "" );
 	sc->sc_media = ep_vortex_media[default_media].epm_ifdata;
 
 #ifdef notyet	
@@ -680,11 +679,9 @@ epsetmedia(sc, medium)
 	if (!(ifp->if_flags & IFF_LINK0) && (sc->ep_connectors & EPC_BNC))
 		medium = EPMEDIA_10BASE_2;
 	else if (ifp->if_flags & IFF_LINK0)
-		if ((ifp->if_flags & IFF_LINK1) &&
-		    (sc->ep_connectors & EPC_UTP))
-			medium = EPMEDIA_10BASE_T;
-		else
-			medium = EPMEDIA_AUI;
+		medium = ((ifp->if_flags & IFF_LINK1) &&
+		    (sc->ep_connectors & EPC_UTP)) ?
+		    EPMEDIA_10BASE_T :  EPMEDIA_AUI;
 #endif
 
 	/*
@@ -719,7 +716,7 @@ epsetmedia(sc, medium)
 	case EPMEDIA_MII:
 		break;
 	default:
-#if defined(DEBUG)
+#if defined(EP_DEBUG)
 		printf("%s unknown media 0x%x\n", sc->sc_dev.dv_xname, medium);
 #endif
 		break;
@@ -738,14 +735,14 @@ epsetmedia(sc, medium)
 		config1 = (u_int)bus_space_read_2(iot, ioh,
 		    EP_W3_INTERNAL_CONFIG + 2);
 
-#if defined(DEBUG)
+#if defined(EP_DEBUG)
 		printf("%s:  read 0x%x, 0x%x from EP_W3_CONFIG register\n",
 		       sc->sc_dev.dv_xname, config0, config1);
 #endif
 		config1 = config1 & ~CONFIG_MEDIAMASK;
 		config1 |= (medium << CONFIG_MEDIAMASK_SHIFT);
 		
-#if defined(DEBUG)
+#if defined(EP_DEBUG)
 		printf("epsetmedia: %s: medium 0x%x, 0x%x to EP_W3_CONFIG\n",
 		    sc->sc_dev.dv_xname, medium, config1);
 #endif
@@ -1481,7 +1478,8 @@ epbusyeeprom(sc)
 		    sc->sc_dev.dv_xname);
 		return (1);
 	}
-	if (sc->bustype != EP_BUS_PCMCIA && (j & EEPROM_TST_MODE)) {
+	if (sc->bustype != EP_BUS_PCMCIA && sc->bustype != EP_BUS_PCI &&
+	    (j & EEPROM_TST_MODE)) {
 		printf("\n%s: erase pencil mark, or disable PnP mode!\n",
 		    sc->sc_dev.dv_xname);
 		return (1);

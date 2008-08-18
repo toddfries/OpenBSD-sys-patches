@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_cluster.c,v 1.10 1997/10/06 20:20:08 deraadt Exp $	*/
+/*	$OpenBSD: vfs_cluster.c,v 1.13 1998/02/20 14:51:58 niklas Exp $	*/
 /*	$NetBSD: vfs_cluster.c,v 1.12 1996/04/22 01:39:05 christos Exp $	*/
 
 /*-
@@ -47,15 +47,6 @@
 #include <sys/resourcevar.h>
 
 #include <vm/vm.h>
-
-#ifdef DEBUG
-#include <sys/sysctl.h>
-int doreallocblks = 0;
-struct ctldebug debug13 = { "doreallocblks", &doreallocblks };
-#else
-/* XXX for cluster_write */
-#define doreallocblks 0
-#endif
 
 /*
  * Local declarations
@@ -248,18 +239,20 @@ cluster_read(vp, filesize, lblkno, size, cred, bpp)
 
 	/* XXX Kirk, do we need to make sure the bp has creds? */
 skip_readahead:
-	if (bp)
+	if (bp) {
 		if (bp->b_flags & (B_DONE | B_DELWRI))
 			panic("cluster_read: DONE bp");
 		else 
 			error = VOP_STRATEGY(bp);
+	}
 
-	if (rbp)
+	if (rbp) {
 		if (error || rbp->b_flags & (B_DONE | B_DELWRI)) {
 			rbp->b_flags &= ~(B_ASYNC | B_READ);
 			brelse(rbp);
 		} else
 			(void) VOP_STRATEGY(rbp);
+	}
 
 	/*
 	 * Recalculate our maximum readahead
@@ -518,8 +511,7 @@ cluster_write(bp, filesize)
 			 * Otherwise try reallocating to make it sequential.
 			 */
 			cursize = vp->v_lastw - vp->v_cstart + 1;
-			if (!doreallocblks ||
-			    (lbn + 1) * bp->b_bcount != filesize ||
+			if ((lbn + 1) * bp->b_bcount != filesize ||
 			    lbn != vp->v_lastw + 1 || vp->v_clen <= cursize) {
 				cluster_wbuild(vp, NULL, bp->b_bcount,
 				    vp->v_cstart, cursize, lbn);
@@ -708,19 +700,22 @@ redo:
 			panic("Clustered write to wrong blocks");
 		}
 
+		/*
+		 * We might as well AGE the buffer here; it's either empty, or
+		 * contains data that we couldn't get rid of (but wanted to).
+		 */
+		tbp->b_flags &= ~(B_READ | B_DONE | B_ERROR | B_DELWRI);
+		tbp->b_flags |= (B_ASYNC | B_AGE);
+
+		if (LIST_FIRST(&tbp->b_dep) != NULL && bioops.io_start)
+			(*bioops.io_start)(tbp);
+
 		pagemove(tbp->b_data, cp, size);
 		bp->b_bcount += size;
 		bp->b_bufsize += size;
 
 		tbp->b_bufsize -= size;
-		if (tbp->b_flags & B_DELWRI)
-			TAILQ_REMOVE(&bdirties, tbp, b_synclist);
-		tbp->b_flags &= ~(B_READ | B_DONE | B_ERROR | B_DELWRI);
-		/*
-		 * We might as well AGE the buffer here; it's either empty, or
-		 * contains data that we couldn't get rid of (but wanted to).
-		 */
-		tbp->b_flags |= (B_ASYNC | B_AGE);
+
 		s = splbio();
 		reassignbuf(tbp, tbp->b_vp);		/* put on clean list */
 		++tbp->b_vp->v_numoutput;

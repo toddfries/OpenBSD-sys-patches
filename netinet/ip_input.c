@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.26 1997/08/09 23:36:29 millert Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.30 1998/02/14 18:50:36 mickey Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -196,7 +196,6 @@ ipintr()
 	register struct ip *ip;
 	register struct mbuf *m;
 	register struct ipq *fp;
-	register struct in_ifaddr *ia;
 	struct ipqent *ipqe;
 	int hlen, mff, s;
 
@@ -306,23 +305,9 @@ next:
 	/*
 	 * Check our list of addresses, to see if the packet is for us.
 	 */
-	for (ia = in_ifaddr.tqh_first; ia; ia = ia->ia_list.tqe_next) {
-		if (ip->ip_dst.s_addr == ia->ia_addr.sin_addr.s_addr)
-			goto ours;
-		if (((ip_directedbcast == 0) || (ip_directedbcast &&
-		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
-		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
-			if (ip->ip_dst.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
-			    ip->ip_dst.s_addr == ia->ia_netbroadcast.s_addr ||
-			    /*
-			     * Look for all-0's host part (old broadcast addr),
-			     * either for subnet or net.
-			     */
-			    ip->ip_dst.s_addr == ia->ia_subnet ||
-			    ip->ip_dst.s_addr == ia->ia_net)
-				goto ours;
-		}
-	}
+	if (in_iawithaddr(ip->ip_dst, m))
+		goto ours;
+
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
 #ifdef MROUTING
@@ -476,6 +461,37 @@ found:
 bad:
 	m_freem(m);
 	goto next;
+}
+
+struct in_ifaddr *
+in_iawithaddr(ina, m)
+	struct in_addr ina;
+	register struct mbuf *m;
+{
+	register struct in_ifaddr *ia;
+
+	for (ia = in_ifaddr.tqh_first; ia; ia = ia->ia_list.tqe_next) {
+		if ((ina.s_addr == ia->ia_addr.sin_addr.s_addr) ||
+		    ((ia->ia_ifp->if_flags & (IFF_LOOPBACK|IFF_LINK1)) ==
+			(IFF_LOOPBACK|IFF_LINK1) &&
+		     ia->ia_subnet == (ina.s_addr & ia->ia_subnetmask)))
+			return ia;
+		if (m && ((ip_directedbcast == 0) || (ip_directedbcast &&
+		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
+		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
+			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
+			    ina.s_addr == ia->ia_netbroadcast.s_addr ||
+			    /*
+			     * Look for all-0's host part (old broadcast addr),
+			     * either for subnet or net.
+			     */
+			    ina.s_addr == ia->ia_subnet ||
+			    ina.s_addr == ia->ia_net)
+				return ia;
+		}
+	}
+
+	return NULL;
 }
 
 /*
@@ -744,6 +760,17 @@ ip_dooptions(m)
 		 */
 		case IPOPT_LSRR:
 		case IPOPT_SSRR:
+			if (!ip_dosourceroute) {
+				char buf[4*sizeof "123"];
+
+				strcpy(buf, inet_ntoa(ip->ip_dst));
+				log(LOG_WARNING,
+				    "attempted source route from %s to %s\n",
+				    inet_ntoa(ip->ip_src), buf);
+				type = ICMP_UNREACH;
+				code = ICMP_UNREACH_SRCFAIL;
+				goto bad;
+			}
 			if ((off = cp[IPOPT_OFFSET]) < IPOPT_MINOFF) {
 				code = &cp[IPOPT_OFFSET] - (u_char *)ip;
 				goto bad;
@@ -769,18 +796,6 @@ ip_dooptions(m)
 				 */
 				save_rte(cp, ip->ip_src);
 				break;
-			}
-
-			if (!ip_dosourceroute) {
-				char buf[4*sizeof "123"];
-
-				strcpy(buf, inet_ntoa(ip->ip_dst));
-				log(LOG_WARNING,
-				    "attempted source route from %s to %s\n",
-				    inet_ntoa(ip->ip_src), buf);
-				type = ICMP_UNREACH;
-				code = ICMP_UNREACH_SRCFAIL;
-				goto bad;
 			}
 
 			/*
@@ -889,7 +904,7 @@ ip_dooptions(m)
 			ipt->ipt_ptr += sizeof(n_time);
 		}
 	}
-	if (forward) {
+	if (forward && ipforwarding) {
 		ip_forward(m, 1);
 		return (1);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.10 1997/09/02 08:48:32 downsj Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.12 1997/11/17 05:57:45 deraadt Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -119,6 +119,25 @@ found:
 	return 0;
 }
 
+int
+sys_getsid(p, v, retval)
+        struct proc *p;
+        void *v;
+        register_t *retval;
+{
+        register struct sys_getsid_args /* {
+                syscallarg(pid_t) pid;
+        } */ *uap = v;
+
+	if (SCARG(uap, pid) == 0)
+		goto found;
+	if ((p == pfind(SCARG(uap, pid))) == 0)
+		return (ESRCH);
+found:
+	*retval = p->p_pgrp->pg_session->s_leader->p_pid;
+	return 0;
+}
+
 /* ARGSUSED */
 int
 sys_getuid(p, v, retval)
@@ -215,7 +234,7 @@ sys_getgroups(p, v, retval)
 		return (EINVAL);
 	ngrp = pc->pc_ucred->cr_ngroups;
 	error = copyout((caddr_t)pc->pc_ucred->cr_groups,
-			(caddr_t)SCARG(uap, gidset), ngrp * sizeof(gid_t));
+	    (caddr_t)SCARG(uap, gidset), ngrp * sizeof(gid_t));
 	if (error)
 		return (error);
 	*retval = ngrp;
@@ -289,7 +308,7 @@ sys_setpgid(curp, v, retval)
 		SCARG(uap, pgid) = targp->p_pid;
 	else if (SCARG(uap, pgid) != targp->p_pid)
 		if ((pgrp = pgfind(SCARG(uap, pgid))) == 0 ||
-	            pgrp->pg_session != curp->p_session)
+		    pgrp->pg_session != curp->p_session)
 			return (EPERM);
 	return (enterpgrp(targp, SCARG(uap, pgid), 0));
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_object.c,v 1.19 1997/10/06 20:21:23 deraadt Exp $	*/
+/*	$OpenBSD: vm_object.c,v 1.21 1998/03/01 00:38:15 niklas Exp $	*/
 /*	$NetBSD: vm_object.c,v 1.46 1997/03/30 20:56:12 mycroft Exp $	*/
 
 /*-
@@ -66,7 +66,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)vm_object.c	8.5 (Berkeley) 3/22/94
+ *	@(#)vm_object.c	8.7 (Berkeley) 5/11/95
  *
  *
  * Copyright (c) 1987, 1990 Carnegie-Mellon University.
@@ -391,7 +391,7 @@ vm_object_terminate(object)
 	 * Wait until the pageout daemon is through with the object or a
 	 * potential collapse operation is finished.
 	 */
-	vm_object_paging_wait(object);
+	vm_object_paging_wait(object,"vmterm");
 
 	/*
 	 * Detach the object from its shadow if we are the shadow's
@@ -416,10 +416,8 @@ vm_object_terminate(object)
 	 *
 	 * XXX need to do something in the event of a cleaning error.
 	 */
-	if ((object->flags & OBJ_INTERNAL) == 0) {
+	if ((object->flags & OBJ_INTERNAL) == 0)
 		(void) vm_object_page_clean(object, 0, 0, TRUE, TRUE);
-		vm_object_unlock(object);
-	}
 
 	/*
 	 * Now free the pages.
@@ -509,7 +507,7 @@ again:
 	/*
 	 * Wait until the pageout daemon is through with the object.
 	 */
-	vm_object_paging_wait(object);
+	vm_object_paging_wait(object,"vclean");
 
 	/*
 	 * Loop through the object page list cleaning as necessary.
@@ -1203,7 +1201,7 @@ vm_object_overlay(object)
 
 	vm_object_unlock(object);
 retry:
-	vm_object_paging_wait(backing_object);
+	vm_object_paging_wait(backing_object,"vpagew");
 
 	/*
 	 * While we were asleep, the parent object might have been deleted.  If
@@ -1320,7 +1318,7 @@ retry:
 			    paged_offset);
 			if (backing_page == NULL) {
 				vm_object_unlock(backing_object);
-				VM_WAIT;
+				vm_wait("fVmcollapse");
 				vm_object_lock(backing_object);
 				goto retry;
 			}

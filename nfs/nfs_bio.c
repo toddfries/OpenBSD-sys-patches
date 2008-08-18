@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.12 1997/10/06 20:20:44 deraadt Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.14 1997/12/02 16:57:57 csapuntz Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -701,7 +701,7 @@ nfs_asyncio(bp, cred)
 	register struct buf *bp;
 	struct ucred *cred;
 {
-	register int i;
+	int i,s;
 
 	if (nfs_numasync == 0)
 		return (EIO);
@@ -740,18 +740,11 @@ nfs_asyncio(bp, cred)
 	 * is currently doing a write for this file and will pick up the
 	 * delayed writes before going back to sleep.
 	 */
-	if (bp->b_flags & B_DELWRI)
-	    TAILQ_REMOVE(&bdirties, bp, b_synclist);
-	TAILQ_INSERT_TAIL(&bdirties, bp, b_synclist);
-	bp->b_synctime = time.tv_sec + 30;
-	if (bdirties.tqh_first == bp) {
-		untimeout((void (*)__P((void *)))wakeup,
-			  &bdirties);
-		timeout((void (*)__P((void *)))wakeup,
-			&bdirties, 30 * hz);
-	}
 	bp->b_flags |= B_DELWRI;
+
+	s = splbio();
 	reassignbuf(bp, bp->b_vp);
+	splx(s);
 	biodone(bp);
 	return (0);
 }
@@ -770,7 +763,7 @@ nfs_doio(bp, cr, p)
 	register struct vnode *vp;
 	struct nfsnode *np;
 	struct nfsmount *nmp;
-	int error = 0, diff, len, iomode, must_commit = 0;
+	int s, error = 0, diff, len, iomode, must_commit = 0;
 	struct uio uio;
 	struct iovec io;
 
@@ -910,16 +903,6 @@ nfs_doio(bp, cr, p)
 	     * B_DELWRI and B_NEEDCOMMIT flags.
 	     */
 	    if (error == EINTR || (!error && (bp->b_flags & B_NEEDCOMMIT))) {
-		if (bp->b_flags & B_DELWRI)
-		    TAILQ_REMOVE(&bdirties, bp, b_synclist);
-		TAILQ_INSERT_TAIL(&bdirties, bp, b_synclist);
-		bp->b_synctime = time.tv_sec + 30;
-		if (bdirties.tqh_first == bp) {
-		    untimeout((void (*)__P((void *)))wakeup,
-			      &bdirties);
-		    timeout((void (*)__P((void *)))wakeup,
-			    &bdirties, 30 * hz);
-		}
 		bp->b_flags |= B_DELWRI;
 
 		/*
@@ -927,8 +910,11 @@ nfs_doio(bp, cr, p)
 		 * buffer to the clean list, we have to reassign it back to the
 		 * dirty one. Ugh.
 		 */
-		if (bp->b_flags & B_ASYNC)
+		if (bp->b_flags & B_ASYNC) {
+		    s = splbio();
 		    reassignbuf(bp, vp);
+		    splx(s);
+		}
 		else if (error)
 		    bp->b_flags |= B_EINTR;
 	    } else {

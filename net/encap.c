@@ -1,4 +1,4 @@
-/*	$OpenBSD: encap.c,v 1.17 1997/10/02 02:31:01 deraadt Exp $	*/
+/*	$OpenBSD: encap.c,v 1.21 1998/04/08 10:58:03 provos Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -9,7 +9,11 @@
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
  * by Angelos D. Keromytis, kermit@forthnet.gr.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis and Angelos D. Keromytis.
+ * Additional transforms and features in 1997 by Angelos D. Keromytis and
+ * Niels Provos.
+ *
+ * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -360,7 +364,10 @@ va_dcl
 
 	    error = tdb_init(tdbp, m);
 	    if (error)
-	      SENDERR(EINVAL);
+	    {
+		tdb_delete(tdbp, 0);
+	      	SENDERR(EINVAL);
+	    }
 	    
 	    break;
 		
@@ -474,11 +481,12 @@ va_dcl
 					 emp->em_ena_protocol,
 				    	 emp->em_ena_sport, emp->em_ena_dport);
 		if (flow4 != (struct flow *) NULL)
+		{
 		  if (!(emp->em_ena_flags & ENABLE_FLAG_REPLACE))
 		    SENDERR(EEXIST);
-		  else
-		    if (flow3 == flow4)
-		      SENDERR(EINVAL);
+		  else if (flow3 == flow4)
+		    SENDERR(EINVAL);
+		}
 	    }
 
 	    flow = get_flow();
@@ -880,7 +888,8 @@ encap_sendnotify(int subtype, struct tdb *tdbp)
 	  log(LOG_ERR, "encap_sendnotify(): m_gethdr() returned NULL\n");
 	return;
     }
-    
+   
+    m->m_len = min(MLEN, em.em_msglen); 
     m_copyback(m, 0, em.em_msglen, (caddr_t) &em);
     raw_input(m, &encap_proto, &encap_src, &encap_dst);
 

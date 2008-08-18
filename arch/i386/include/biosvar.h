@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosvar.h,v 1.25 1997/10/27 07:44:20 niklas Exp $	*/
+/*	$OpenBSD: biosvar.h,v 1.27 1998/02/24 22:02:07 weingart Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -130,7 +130,16 @@ typedef struct _bios_apminfo {
 	u_int	apm_entry;
 } bios_apminfo_t;
 
-#define BOOTARG_CKSUMLEN 3		/* u_int32_t */
+#define	BOOTARG_CKSUMLEN 3		/* u_int32_t */
+
+#define	BOOTARG_PCIINFO 4
+typedef struct _bios_pciinfo {
+	/* PCI BIOS v2.0+ - Installation check values */
+	u_int32_t	pci_chars;		/* Characteristics (%eax) */
+	u_int32_t	pci_rev;		/* BCD Revision (%ebx) */
+	u_int32_t	pci_entry32;	/* PM entry point for PCI BIOS */
+	u_int32_t	pci_lastbus;	/* Number of last PCI bus */
+} bios_pciinfo_t;
 
 #if defined(_KERNEL) || defined (_STANDALONE)
 
@@ -178,6 +187,8 @@ void bioscninit __P((struct consdev *));
 void bioscnputc __P((dev_t, int));
 int bioscngetc __P((dev_t));
 void bioscnpollc __P((dev_t, int));
+
+extern	u_int bootapiver;
 
 #endif /* _KERNEL */
 #endif /* _LOCORE */

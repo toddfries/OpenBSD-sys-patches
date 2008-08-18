@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3var.h,v 1.8.2.1 1997/10/31 00:00:00 niklas Exp $	*/
+/*	$OpenBSD: elink3var.h,v 1.9 1997/10/30 23:58:18 niklas Exp $	*/
 /*	$NetBSD: elink3var.h,v 1.12 1997/03/30 22:47:11 jonathan Exp $	*/
 
 /*

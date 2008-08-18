@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.11 1997/07/03 07:22:54 deraadt Exp $
+#	$OpenBSD: files.pci,v 1.15 1998/03/24 03:26:47 deraadt Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config.new file and device description for machine-independent PCI code.
@@ -10,6 +10,10 @@ attach	pci at pcibus
 file	dev/pci/pci.c			pci needs-flag
 file	dev/pci/pci_subr.c		pci
 
+# Generic VGA
+attach	vga at pci with vga_pci
+file	dev/pci/vga_pci.c		vga_pci	needs-flag
+
 # Adaptec 3940, 2940, and aic78[5678]0 SCSI controllers
 # device declaration in sys/conf/files
 attach	ahc at pci with ahc_pci
@@ -20,6 +24,11 @@ file	dev/ic/smc93cx6.c		ahc_pci
 # device declaration in sys/dev/isa/files.isa
 attach	bha at pci with bha_pci
 file	dev/pci/bha_pci.c		bha_pci
+
+# Qlogic ISP 10x0 (PCI) family
+# device declaration in sys/conf/files
+attach	isp at pci with isp_pci
+file	dev/pci/isp_pci.c		isp_pci
 
 # Ethernet driver for DC21040-based boards
 device	de: ether, ifnet

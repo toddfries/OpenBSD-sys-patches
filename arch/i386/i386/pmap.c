@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.22 1997/10/25 06:57:59 niklas Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.24 1998/03/20 15:40:32 niklas Exp $	*/
 /*	$NetBSD: pmap.c,v 1.36 1996/05/03 19:42:22 christos Exp $	*/
 
 /*
@@ -287,26 +287,15 @@ pmap_bootstrap(virtual_start)
 	 */
 	virtual_avail = reserve_dumppages(virtual_avail);
 
-	/*
-	 * reserve special hunk of memory for use by bus dma as a bounce
-	 * buffer (contiguous virtual *and* physical memory).  XXX
-	 */
-#if NISA > 0 && NISADMA > 0
-	if (ctob(physmem) >= 0x1000000) {
-		isaphysmem = pmap_steal_memory(DMA_BOUNCE * NBPG);
-		isaphysmempgs = DMA_BOUNCE;
-	} else {
-		isaphysmem = pmap_steal_memory(DMA_BOUNCE_LOW * NBPG);
-		isaphysmempgs = DMA_BOUNCE_LOW;
-	}
-#endif
+	/* Register the page size with the vm system */
+	vm_set_page_size();
 
 	/* flawed, no mappings?? */
 	if (ctob(physmem) > 31*1024*1024 && MAXKPDE != NKPDE) {
 		vm_offset_t p;
 		int i;
 
-		p = pmap_steal_memory((MAXKPDE-NKPDE+1) * NBPG);
+		p = vm_bootstrap_steal_memory((MAXKPDE-NKPDE+1) * NBPG);
 		bzero((void *)p, (MAXKPDE-NKPDE+1) * NBPG);
 		p = round_page(p);
 		for (i = NKPDE; i < MAXKPDE; i++, p += NBPG)
@@ -322,7 +311,6 @@ pmap_virtual_space(startp, endp)
 	vm_offset_t *startp;
 	vm_offset_t *endp;
 {
-
 	*startp = virtual_avail;
 	*endp = virtual_end;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.5 1997/02/24 14:20:00 niklas Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.7 1997/11/30 21:41:03 deraadt Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)tty_pty.c	8.2 (Berkeley) 9/23/93
+ *	@(#)tty_pty.c	8.4 (Berkeley) 2/20/95
  */
 
 /*
@@ -603,7 +603,7 @@ ptyioctl(dev, cmd, data, flag, p)
 			}
 			tp->t_lflag |= EXTPROC;
 		} else {
-			if ((tp->t_state & EXTPROC) &&
+			if ((tp->t_lflag & EXTPROC) &&
 			    (pti->pt_flags & PF_PKT)) {
 				pti->pt_send |= TIOCPKT_IOCTL;
 				ptcwakeup(tp, FREAD);
@@ -616,6 +616,19 @@ ptyioctl(dev, cmd, data, flag, p)
 		switch (cmd) {
 
 		case TIOCGPGRP:
+#ifdef COMPAT_SUNOS
+			{
+			/*
+			 * I'm not sure about SunOS TIOCGPGRP semantics
+			 * on PTYs, but it's something like this:
+			 */
+			extern struct emul emul_sunos;
+			if (p->p_emul == &emul_sunos && tp->t_pgrp == 0)
+				return (EIO);
+			*(int *)data = tp->t_pgrp->pg_id;
+			return (0);
+			}
+#endif
 			/*
 			 * We aviod calling ttioctl on the controller since,
 			 * in that case, tp must be the controlling terminal.

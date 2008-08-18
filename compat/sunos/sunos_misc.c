@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunos_misc.c,v 1.13 1997/10/06 20:19:33 deraadt Exp $	*/
+/*	$OpenBSD: sunos_misc.c,v 1.20 1998/03/23 07:12:39 millert Exp $	*/
 /*	$NetBSD: sunos_misc.c,v 1.65 1996/04/22 01:44:31 christos Exp $	*/
 
 /*
@@ -84,6 +84,7 @@
 #include <sys/syscallargs.h>
 #include <sys/conf.h>
 #include <sys/socketvar.h>
+#include <sys/times.h>
 
 #include <compat/sunos/sunos.h>
 #include <compat/sunos/sunos_syscallargs.h>
@@ -220,23 +221,6 @@ sunos_sys_execv(p, v, retval)
 }
 
 int
-sunos_sys_omsync(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sunos_sys_omsync_args *uap = v;
-	struct sys_msync_args ouap;
-
-	if (SCARG(uap, flags))
-		return (EINVAL);
-	SCARG(&ouap, addr) = SCARG(uap, addr);
-	SCARG(&ouap, len) = SCARG(uap, len);
-
-	return (sys_msync(p, &ouap, retval));
-}
-
-int
 sunos_sys_unmount(p, v, retval)
 	struct proc *p;
 	void *v;
@@ -282,9 +266,9 @@ sunos_sys_mount(p, v, retval)
 	register_t *retval;
 {
 	struct sunos_sys_mount_args *uap = v;
-	struct emul *e = p->p_emul;
 	int oflags = SCARG(uap, flags), nflags, error;
 	char fsname[MFSNAMELEN];
+	caddr_t sg = stackgap_init(p->p_emul);
 
 	if (oflags & (SUNM_NOSUB | SUNM_SYS5))
 		return (EINVAL);
@@ -305,7 +289,7 @@ sunos_sys_mount(p, v, retval)
 		return (error);
 
 	if (strncmp(fsname, "4.2", sizeof fsname) == 0) {
-		SCARG(uap, type) = STACKGAPBASE;
+		SCARG(uap, type) = stackgap_alloc(&sg, sizeof("ffs"));
 		error = copyout("ffs", SCARG(uap, type), sizeof("ffs"));
 		if (error)
 			return (error);
@@ -324,10 +308,9 @@ sunos_sys_mount(p, v, retval)
 			return (error);
 		bcopy(&sain, &sa, sizeof sa);
 		sa.sa_len = sizeof(sain);
-		SCARG(uap, data) = STACKGAPBASE;
+		SCARG(uap, data) = stackgap_alloc(&sg, sizeof(na));
 		na.version = NFS_ARGSVERSION;
-		na.addr = (struct sockaddr *)
-			  ((int)SCARG(uap, data) + sizeof na);
+		na.addr = stackgap_alloc(&sg, sizeof(struct sockaddr));
 		na.addrlen = sizeof(struct sockaddr);
 		na.sotype = SOCK_DGRAM;
 		na.proto = IPPROTO_UDP;
@@ -412,7 +395,7 @@ sunos_sys_getdents(p, v, retval)
 	struct sunos_dirent idb;
 	off_t off;			/* true file offset */
 	int buflen, error, eofflag;
-	u_long *cookiebuf, *cookie;
+	u_long *cookiebuf = NULL, *cookie;
 	int ncookies;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
@@ -428,9 +411,7 @@ sunos_sys_getdents(p, v, retval)
 
 	buflen = min(MAXBSIZE, SCARG(uap, nbytes));
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	ncookies = buflen / 16;
-	cookiebuf = malloc(ncookies * sizeof(*cookiebuf), M_TEMP, M_WAITOK);
-	VOP_LOCK(vp);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	off = fp->f_offset;
 again:
 	aiov.iov_base = buf;
@@ -446,10 +427,15 @@ again:
 	 * First we read into the malloc'ed buffer, then
 	 * we massage it into user space, one record at a time.
 	 */
-	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, cookiebuf,
-	    ncookies);
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, 
+	    &ncookies, &cookiebuf);
 	if (error)
 		goto out;
+	
+	if (!error && !cookiebuf) {
+		error = EPERM;
+		goto out;
+	}
 
 	inp = buf;
 	outp = SCARG(uap, buf);
@@ -500,8 +486,9 @@ again:
 eof:
 	*retval = SCARG(uap, nbytes) - resid;
 out:
-	VOP_UNLOCK(vp);
-	free(cookiebuf, M_TEMP);
+	VOP_UNLOCK(vp, 0, p);
+	if (cookiebuf)
+		free(cookiebuf, M_TEMP);
 	free(buf, M_TEMP);
 	return (error);
 }
@@ -534,8 +521,8 @@ sunos_sys_mmap(p, v, retval)
 
 	if ((SCARG(&ouap, flags) & MAP_FIXED) == 0 &&
 	    SCARG(&ouap, addr) != 0 &&
-	    SCARG(&ouap, addr) < (caddr_t)round_page(p->p_vmspace->vm_daddr+MAXDSIZ))
-		SCARG(&ouap, addr) = (caddr_t)round_page(p->p_vmspace->vm_daddr+MAXDSIZ);
+	    SCARG(&ouap, addr) < (void *)round_page(p->p_vmspace->vm_daddr+MAXDSIZ))
+		SCARG(&ouap, addr) = (void *)round_page(p->p_vmspace->vm_daddr+MAXDSIZ);
 
 	SCARG(&ouap, len) = SCARG(uap, len);
 	SCARG(&ouap, prot) = SCARG(uap, prot);
@@ -660,12 +647,12 @@ sunos_sys_fchroot(p, v, retval)
 	if ((error = getvnode(fdp, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
-	VOP_LOCK(vp);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_type != VDIR)
 		error = ENOTDIR;
 	else
 		error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
-	VOP_UNLOCK(vp);
+	VOP_UNLOCK(vp, 0, p);
 	if (error)
 		return (error);
 	VREF(vp);
@@ -850,7 +837,7 @@ sunos_sys_vhangup(p, v, retval)
 
 	(void) ttywait(sp->s_ttyp);
 	if (sp->s_ttyvp)
-		vgoneall(sp->s_ttyvp);
+		VOP_REVOKE(sp->s_ttyvp, REVOKEALL);
 	if (sp->s_ttyvp)
 		vrele(sp->s_ttyvp);
 	sp->s_ttyvp = NULL;
@@ -1220,17 +1207,62 @@ sunos_sys_sigvec(p, v, retval)
 }
 
 int
-sunos_sys_stime(p, v, retval)
+sunos_sys_ostime(p, v, retval)
 	struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct sunos_sys_stime_args /* {
-		time_t		*tp;
+	/*
+	 * XXX - settime() is private to kern_time.c so we just lie.
+	 */
+#if 0
+	struct sunos_sys_ostime_args /* {
+		syscallarg(int) time;
 	} */ *uap = v;
 	struct timeval tv;
+	int error;
 
-	*retval = 0;
-	microtime(&tv);
-	return copyout(&tv.tv_sec, SCARG(uap, tp), sizeof(*(SCARG(uap, tp))));
+	if ((error = suser(p->p_ucred, &p->p_acflag)) != 0)
+		return (error);
+
+	tv.tv_sec = SCARG(uap, time);
+	tv.tv_usec = 0;
+	settime(&tv);
+	return(0);
+#else
+	return(EPERM);
+#endif
+}
+
+/*
+ * This code is partly stolen from src/lib/libc/gen/times.c
+ * XXX - CLK_TCK isn't declared in /sys, just in <time.h>, done here
+ */
+
+#define	CLK_TCK	100
+#define	CONVTCK(r)	(r.tv_sec * CLK_TCK + r.tv_usec / (1000000 / CLK_TCK))
+
+int
+sunos_sys_otimes(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct sunos_sys_otimes_args /* {
+		syscallarg(struct tms *) tp;
+	} */ *uap = v;
+	struct tms tms;
+	struct rusage ru, *rup;
+
+	/* RUSAGE_SELF */
+	calcru(p, &ru.ru_utime, &ru.ru_stime, NULL);
+	tms.tms_utime = CONVTCK(ru.ru_utime);
+	tms.tms_stime = CONVTCK(ru.ru_stime);
+
+	/* RUSAGE_CHILDREN */
+	rup = &p->p_stats->p_cru;
+	tms.tms_cutime = CONVTCK(rup->ru_utime);
+	tms.tms_cstime = CONVTCK(rup->ru_stime);
+
+	return copyout(&tms, SCARG(uap, tp), sizeof(*(SCARG(uap, tp))));
 }

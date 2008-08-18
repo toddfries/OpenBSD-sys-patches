@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.9 1997/10/06 20:19:31 deraadt Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.15 1998/03/22 23:33:06 millert Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*
@@ -402,10 +402,7 @@ linux_sys_uname(p, v, retval)
 	len = sizeof(luts.l_version);
 	for (cp = luts.l_version; len--; ++cp)
 		if (*cp == '\n' || *cp == '\t')
-			if (len > 1)
-				*cp = ' ';
-			else
-				*cp = '\0';
+			*cp = (len > 1) ? ' ' : '\0';
 
 	return copyout(&luts, SCARG(uap, up), sizeof(luts));
 }
@@ -434,10 +431,7 @@ linux_sys_olduname(p, v, retval)
 	len = sizeof(luts.l_version);
 	for (cp = luts.l_version; len--; ++cp)
 		if (*cp == '\n' || *cp == '\t')
-			if (len > 1)
-				*cp = ' ';
-			else
-				*cp = '\0';
+			*cp = (len > 1) ? ' ' : '\0';
 
 	return copyout(&luts, SCARG(uap, up), sizeof(luts));
 }
@@ -466,10 +460,7 @@ linux_sys_oldolduname(p, v, retval)
 	len = sizeof(luts.l_version);
 	for (cp = luts.l_version; len--; ++cp)
 		if (*cp == '\n' || *cp == '\t')
-			if (len > 1)
-				*cp = ' ';
-			else
-				*cp = '\0';
+			*cp = (len > 1) ? ' ' : '\0';
 
 	return copyout(&luts, SCARG(uap, up), sizeof(luts));
 }
@@ -503,6 +494,8 @@ linux_sys_mmap(p, v, retval)
 
 	SCARG(&cma,addr) = lmap.lm_addr;
 	SCARG(&cma,len) = lmap.lm_len;
+	if (lmap.lm_prot & VM_PROT_WRITE)	/* XXX */
+		lmap.lm_prot |= VM_PROT_READ;
  	SCARG(&cma,prot) = lmap.lm_prot;
 	SCARG(&cma,flags) = flags;
 	SCARG(&cma,fd) = lmap.lm_fd;
@@ -513,28 +506,24 @@ linux_sys_mmap(p, v, retval)
 }
 
 int
-linux_sys_msync(p, v, retval)
+linux_sys_mremap(p, v, retval)
 	struct proc *p;
 	void *v;
 	register_t *retval;
 {
-	struct linux_sys_msync_args /* {
-		syscallarg(caddr_t) addr;
-		syscallarg(int) len;
-		syscallarg(int) fl;
+#ifdef notyet
+	struct linux_sys_mremap_args /* {
+		syscallarg(void *) old_address;
+		syscallarg(size_t) old_size;
+		syscallarg(size_t) new_size;
+		syscallarg(u_long) flags;
 	} */ *uap = v;
-
-	struct sys_msync_args bma;
-
-	/* flags are ignored */
-	SCARG(&bma, addr) = SCARG(uap, addr);
-	SCARG(&bma, len) = SCARG(uap, len);
-
-	return sys_msync(p, &bma, retval);
+#endif
+	return (ENOMEM);
 }
 
 /*
- * This code is partly stolen from src/lib/libc/compat-43/times.c
+ * This code is partly stolen from src/lib/libc/gen/times.c
  * XXX - CLK_TCK isn't declared in /sys, just in <time.h>, done here
  */
 
@@ -768,8 +757,8 @@ linux_sys_getdents(p, v, retval)
 	off_t off;		/* true file offset */
 	int buflen, error, eofflag, nbytes, oldcall;
 	struct vattr va;
-	u_long *cookiebuf, *cookie;
-	int ncookies;
+	u_long *cookiebuf = NULL, *cookie;
+	int ncookies = 0;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
@@ -795,9 +784,7 @@ linux_sys_getdents(p, v, retval)
 		oldcall = 0;
 	}
 	buf = malloc(buflen, M_TEMP, M_WAITOK);
-	ncookies = buflen / 16;
-	cookiebuf = malloc(ncookies * sizeof(*cookiebuf), M_TEMP, M_WAITOK);
-	VOP_LOCK(vp);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	off = fp->f_offset;
 again:
 	aiov.iov_base = buf;
@@ -813,9 +800,12 @@ again:
          * First we read into the malloc'ed buffer, then
          * we massage it into user space, one record at a time.
          */
-	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, cookiebuf,
-	    ncookies);
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, &ncookies,
+	    &cookiebuf);
 	if (error)
+		goto out;
+
+	if (!error && !cookiebuf)
 		goto out;
 
 	inp = buf;
@@ -881,8 +871,9 @@ again:
 eof:
 	*retval = nbytes - resid;
 out:
-	VOP_UNLOCK(vp);
-	free(cookiebuf, M_TEMP);
+	VOP_UNLOCK(vp, 0, p);
+	if (cookiebuf)
+		free(cookiebuf, M_TEMP);
 	free(buf, M_TEMP);
 	return error;
 }

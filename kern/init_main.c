@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.27 1997/10/28 10:52:17 niklas Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.31 1998/03/01 00:37:54 niklas Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -196,6 +196,9 @@ main(framep)
 
 	vm_mem_init();
 	kmeminit();
+#if defined(MACHINE_NEW_NONCONTIG)
+	vm_page_physrehash();
+#endif
 	disk_init();		/* must come before autoconfiguration */
 	tty_init();		/* initialise tty's */
 	cpu_startup();
@@ -335,25 +338,27 @@ main(framep)
 	schedcpu(NULL);
 
 #ifdef i386
+#include "bios.h"
+#if NBIOS
 	/* XXX This is only a transient solution */
 	{
-		extern dkcsumattach __P((void));
+		extern void dkcsumattach __P((void));
 		dkcsumattach();
 	}
 #endif
+#endif
 
 	/* Mount the root file system. */
-	if ((*mountroot)())
+	if (vfs_mountroot())
 		panic("cannot mount root");
 	mountlist.cqh_first->mnt_flag |= MNT_ROOTFS;
-	mountlist.cqh_first->mnt_op->vfs_refcount++;
 
 	/* Get the vnode for '/'.  Set filedesc0.fd_fd.fd_cdir to reference it. */
 	if (VFS_ROOT(mountlist.cqh_first, &rootvnode))
 		panic("cannot find root vnode");
 	filedesc0.fd_fd.fd_cdir = rootvnode;
 	VREF(filedesc0.fd_fd.fd_cdir);
-	VOP_UNLOCK(rootvnode);
+	VOP_UNLOCK(rootvnode, 0, p);
 	filedesc0.fd_fd.fd_rdir = NULL;
 	swapinit();
 
@@ -592,6 +597,6 @@ start_update(p)
 	 */
 	p->p_flag |= P_INMEM | P_SYSTEM;	/* XXX */
 	bcopy("update", curproc->p_comm, sizeof ("update"));
-	vn_update();
+	sched_sync(p);
 	/* NOTREACHED */
 }

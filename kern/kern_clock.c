@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.15 1997/01/25 23:35:58 tholo Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.18 1998/02/08 22:41:34 tholo Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -584,7 +584,8 @@ hardclock(frame)
 		 */
 #ifdef PPS_SYNC
 		pps_valid++;
-		if (pps_valid == PPS_VALID) {
+		if (pps_valid >= PPS_VALID) {
+			pps_valid = PPS_VALID;	/* Avoid possible overflow */
 			pps_jitter = MAXTIME;
 			pps_stabil = MAXFREQ;
 			time_status &= ~(STA_PPSSIGNAL | STA_PPSJITTER |
@@ -899,9 +900,9 @@ statclock(frame)
 {
 #ifdef GPROF
 	register struct gmonparam *g;
+	register int i;
 #endif
 	register struct proc *p;
-	register int i;
 
 	if (CLKF_USERMODE(frame)) {
 		p = curproc;
@@ -958,20 +959,6 @@ statclock(frame)
 			cp_time[CP_IDLE]++;
 	}
 	pscnt = psdiv;
-
-	/*
-	 * XXX Support old-style instrumentation for now.
-	 *
-	 * We maintain statistics shown by user-level statistics
-	 * programs:  the amount of time in each cpu state, and
-	 * the amount of time each of DK_NDRIVE ``drives'' is busy.
-	 *
-	 * XXX	should either run linked list of drives, or (better)
-	 *	grab timestamps in the start & done code.
-	 */
-	for (i = 0; i < DK_NDRIVE; i++)
-		if (dk_busy & (1 << i))
-			dk_time[i]++;
 
 	/*
 	 * We adjust the priority of the current process.  The priority of
@@ -1033,7 +1020,7 @@ hardupdate(offset)
 		return;
 	ltemp = offset;
 #ifdef PPS_SYNC
-	if (time_status & STA_PPSTIME && time_status & STA_PPSSIGNAL)
+	if ((time_status & STA_PPSTIME) && (time_status & STA_PPSSIGNAL))
 		ltemp = pps_offset;
 #endif /* PPS_SYNC */
 

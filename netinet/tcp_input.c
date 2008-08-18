@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.15 1997/08/26 20:02:32 deraadt Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.18 1998/03/18 02:37:47 angelos Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -157,24 +157,20 @@ tck_addfriend(struct in_addr f)
 static u_int32_t
 tck_makecookie(struct in_addr f)
 {
-        static MD5_CTX ctx;
+	static MD5_CTX ctx;
 	u_int8_t buf[16];
 	MD5_CTX ctx2;
-	
-	if (tck_initialized == 0)	/* This only happens once per reboot */
-	{
-	    tck_initialized = 1;
-	    
-	    get_random_bytes((void *) buf, 16);
-	    
-	    MD5Init(&ctx);
-	    MD5Update(&ctx, buf, 16);
-	}
 
+	if (tck_initialized == 0) {	/* This only happens once per reboot */
+		tck_initialized = 1;
+
+		get_random_bytes((void *) buf, 16);
+		MD5Init(&ctx);
+		MD5Update(&ctx, buf, 16);
+	}
 	ctx2 = ctx;
 	MD5Update(&ctx2, (void *) &f, sizeof(f));
 	MD5Final(buf, &ctx2);		/* This may not be necessary */
-	
 	return ((buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3]);
 }	
 
@@ -185,13 +181,11 @@ tck_chkcookie(struct tcpiphdr *ti)
 	printf("tck_chkcookie: src = 0x%08x, cookie = 0x%08x, seq = 0x%08x, ack = 0x%08x\n", ntohl(ti->ti_src.s_addr), tck_makecookie(ti->ti_src), ti->ti_seq, ti->ti_ack);
 #endif /* DEBUG_TCPCOOKIE */
 
-	if (tck_makecookie(ti->ti_src) == ti->ti_seq) /* seq in host order */
-	{
+	if (tck_makecookie(ti->ti_src) == ti->ti_seq) { /* seq in host order */
 		tck_addfriend(ti->ti_src);
 		return 1;
 	}
-	else
-	  return 0;
+	return 0;
 }
 
 #endif /* TCPCOOKIE */
@@ -370,7 +364,7 @@ tcpdropoldhalfopen(avoidtp, port)
 
 	s = splnet();
 	inp = tcbtable.inpt_queue.cqh_first;
-	if (inp)                                                /* XXX */
+	if (inp)						/* XXX */
 	for (; inp != (struct inpcb *)&tcbtable.inpt_queue && --ncheck;
 	    inp = inp->inp_queue.cqe_prev) {
 		if ((tp = (struct tcpcb *)inp->inp_ppcb) &&
@@ -383,7 +377,7 @@ tcpdropoldhalfopen(avoidtp, port)
 	}
 
 	inp = tcbtable.inpt_queue.cqh_first;
-	if (inp)                                                /* XXX */
+	if (inp)						/* XXX */
 	for (; inp != (struct inpcb *)&tcbtable.inpt_queue;
 	    inp = inp->inp_queue.cqe_prev) {
 		if ((tp = (struct tcpcb *)inp->inp_ppcb) &&
@@ -746,6 +740,7 @@ findpcb:
 	 * If the state is LISTEN then ignore segment if it contains an RST.
 	 * If the segment contains an ACK then it is bad and send a RST.
 	 * If it does not contain a SYN then it is not interesting; drop it.
+	 * If it is from this socket, drop it, it must be forged.
 	 * Don't bother responding if the destination was a broadcast.
 	 * Otherwise initialize tp->rcv_nxt, and tp->irs, select an initial
 	 * tp->iss, and send a segment:
@@ -765,6 +760,9 @@ findpcb:
 			goto dropwithreset;
 		if ((tiflags & TH_SYN) == 0)
 			goto drop;
+		if ((ti->ti_dport == ti->ti_sport) &&
+		    (ti->ti_dst.s_addr == ti->ti_src.s_addr))
+		 	goto drop;
 
 #ifdef TCPCOOKIE
 		/*
@@ -840,6 +838,24 @@ findpcb:
 		tcpstat.tcps_accepts++;
 		goto trimthenstep6;
 		}
+
+	/*
+	 * If the state is SYN_RECEIVED:
+	 * 	if seg contains SYN/ACK, send an RST.
+	 *	if seg contains an ACK, but not for our SYN/ACK, send an RST
+  	 */
+
+	case TCPS_SYN_RECEIVED:
+		if (tiflags & TH_ACK) {
+			if (tiflags & TH_SYN) {
+				tcpstat.tcps_badsyn++;
+				goto dropwithreset;
+			}
+			if (SEQ_LEQ(ti->ti_ack, tp->snd_una) ||
+			    SEQ_GT(ti->ti_ack, tp->snd_max))
+				goto dropwithreset;
+		}
+		break;
 
 	/*
 	 * If the state is SYN_SENT:
@@ -1063,11 +1079,11 @@ trimthenstep6:
 	 *    CLOSING, LAST_ACK, TIME_WAIT STATES
 	 *	Close the tcb.
 	 */
-	if (tiflags&TH_RST) {
+	if (tiflags & TH_RST) {
 
-		if ((ti->ti_seq != tp->rcv_nxt) ||
-		    (ti->ti_ack && ((SEQ_LEQ(ti->ti_ack, tp->iss) ||
-		      SEQ_GT(ti->ti_ack, tp->snd_max)))))
+		if ((ti->ti_seq != tp->rcv_nxt) &&
+		    (ti->ti_ack && ((SEQ_GT(ti->ti_ack, tp->snd_nxt) ||
+		      SEQ_LT(ti->ti_ack, (tp->snd_nxt - tp->snd_wnd))))))
 			goto drop;
 
 		switch (tp->t_state) {
@@ -1114,14 +1130,11 @@ trimthenstep6:
 	switch (tp->t_state) {
 
 	/*
-	 * In SYN_RECEIVED state if the ack ACKs our SYN then enter
-	 * ESTABLISHED state and continue processing, otherwise
-	 * send an RST.
+	 * In SYN_RECEIVED state, the ack ACKs our SYN, so enter
+	 * ESTABLISHED state and continue processing.
+	 * The ACK was checked above.
 	 */
 	case TCPS_SYN_RECEIVED:
-		if (SEQ_GT(tp->snd_una, ti->ti_ack) ||
-		    SEQ_GT(ti->ti_ack, tp->snd_max))
-			goto dropwithreset;
 		tcpstat.tcps_connects++;
 		soisconnected(so);
 		tp->t_state = TCPS_ESTABLISHED;
@@ -1196,7 +1209,7 @@ trimthenstep6:
 					tp->snd_cwnd = tp->t_maxseg;
 					(void) tcp_output(tp);
 					tp->snd_cwnd = tp->snd_ssthresh +
-					       tp->t_maxseg * tp->t_dupacks;
+					    tp->t_maxseg * tp->t_dupacks;
 					if (SEQ_GT(onxt, tp->snd_nxt))
 						tp->snd_nxt = onxt;
 					goto drop;

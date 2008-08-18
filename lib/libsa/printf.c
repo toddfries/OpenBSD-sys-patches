@@ -1,4 +1,4 @@
-/*	$OpenBSD: printf.c,v 1.10 1997/07/25 17:28:36 mickey Exp $	*/
+/*	$OpenBSD: printf.c,v 1.11.2.1 1998/04/18 18:01:22 deraadt Exp $	*/
 /*	$NetBSD: printf.c,v 1.10 1996/11/30 04:19:21 gwr Exp $	*/
 
 /*-

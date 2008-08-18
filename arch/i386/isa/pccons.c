@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccons.c,v 1.34 1997/03/03 12:01:15 downsj Exp $	*/
+/*	$OpenBSD: pccons.c,v 1.40 1998/03/16 09:12:39 downsj Exp $	*/
 /*	$NetBSD: pccons.c,v 1.99.4.1 1996/06/04 20:03:53 cgd Exp $	*/
 
 /*-
@@ -50,12 +50,16 @@
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/select.h>
+#include <sys/fcntl.h>
 #include <sys/tty.h>
 #include <sys/uio.h>
 #include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
 #include <sys/device.h>
+#ifdef DDB
+#include <ddb/db_var.h>
+#endif
 
 #include <dev/cons.h>
 
@@ -152,8 +156,6 @@ void pc_xmode_off __P((void));
 
 void	pcstart __P((struct tty *));
 int	pcparam __P((struct tty *, struct termios *));
-
-char	partab[];
 
 int kbd_cmd __P((u_char, u_char));
 void set_cursor_shape __P((void));
@@ -673,9 +675,11 @@ pcioctl(dev, cmd, data, flag, p)
 #ifdef XSERVER
 	case CONSOLE_X_MODE_ON:
 		pc_xmode_on();
+		ttyflush(tp, FREAD);
 		return 0;
 	case CONSOLE_X_MODE_OFF:
 		pc_xmode_off();
+		ttyflush(tp, FREAD);
 		return 0;
 	case CONSOLE_X_BELL:
 		/*
@@ -1676,7 +1680,8 @@ top:
 #if defined(DDB) && defined(XSERVER_DDB)
 		/* F12 enters the debugger while in X mode */
 		if (dt == 88)
-			Debugger();
+			if (db_console)
+				Debugger();
 #endif
 		capchar[0] = dt;
 		capchar[1] = 0;
@@ -1737,9 +1742,11 @@ top:
 	/*
 	 * Check for cntl-alt-esc.
 	 */
-	if ((dt == 1) && (shift_state & (KB_CTL | KB_ALT)) == (KB_CTL | KB_ALT)) {
+	if (dt == 1 &&
+	    (shift_state & (KB_CTL | KB_ALT)) == (KB_CTL | KB_ALT)) {
 		screen_restore(1);
-		Debugger();
+		if (db_console)
+			Debugger();
 		dt |= 0x80;	/* discard esc (ddb discarded ctl-alt) */
 	}
 #endif

@@ -1,5 +1,5 @@
-/*	$OpenBSD: cd9660_node.c,v 1.5 1997/10/06 20:19:43 deraadt Exp $	*/
-/*	$NetBSD: cd9660_node.c,v 1.15 1996/02/09 21:31:58 christos Exp $	*/
+/*	$OpenBSD: cd9660_node.c,v 1.7 1997/11/08 17:21:06 niklas Exp $	*/
+/*	$NetBSD: cd9660_node.c,v 1.17 1997/05/05 07:13:57 mycroft Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1994
@@ -54,6 +54,7 @@
 #include <sys/stat.h>
 
 #include <isofs/cd9660/iso.h>
+#include <isofs/cd9660/cd9660_extern.h>
 #include <isofs/cd9660/cd9660_node.h>
 #include <isofs/cd9660/iso_rrip.h>
 
@@ -63,6 +64,7 @@
 struct iso_node **isohashtbl;
 u_long isohash;
 #define	INOHASH(device, inum)	(((device) + ((inum)>>12)) & isohash)
+struct simplelock cd9660_ihash_slock;
 
 #ifdef ISODEVMAP
 struct iso_node **idvhashtbl;
@@ -77,14 +79,17 @@ static u_int cd9660_chars2ui __P((u_char *, int));
 /*
  * Initialize hash links for inodes and dnodes.
  */
-void
-cd9660_init()
+int
+cd9660_init(vfsp)
+	struct vfsconf *vfsp;
 {
 
 	isohashtbl = hashinit(desiredvnodes, M_ISOFSMNT, &isohash);
+	simple_lock_init(&cd9660_ihash_slock);
 #ifdef ISODEVMAP
 	idvhashtbl = hashinit(desiredvnodes / 8, M_ISOFSMNT, &idvhash);
 #endif
+	return (0);
 }
 
 #ifdef ISODEVMAP
@@ -105,6 +110,7 @@ iso_dmap(device, inum, create)
 			return (NULL);
 		if (inum == dp->i_number && device == dp->i_dev)
 			return (dp);
+	}
 
 	if (!create)
 		return (NULL);
@@ -130,7 +136,7 @@ iso_dunmap(device)
 	struct iso_dnode **dpp, *dp, *dq;
 	
 	for (dpp = idvhashtbl; dpp <= idvhashtbl + idvhash; dpp++) {
-		for (dp = *dpp; dp != NULL; dp = dq)
+		for (dp = *dpp; dp != NULL; dp = dq) {
 			dq = dp->d_next;
 			if (device == dp->i_dev) {
 				if (dq)
@@ -148,30 +154,28 @@ iso_dunmap(device)
  * to it. If it is in core, but locked, wait for it.
  */
 struct vnode *
-cd9660_ihashget(device, inum)
-	dev_t device;
+cd9660_ihashget(dev, inum)
+	dev_t dev;
 	ino_t inum;
 {
-	register struct iso_node *ip;
+	struct proc *p = curproc;               /* XXX */
+	struct iso_node *ip;
 	struct vnode *vp;
 
-	for (;;)
-		for (ip = isohashtbl[INOHASH(device, inum)];; ip = ip->i_next) {
-			if (ip == NULL)
-				return (NULL);
-			if (inum == ip->i_number && device == ip->i_dev) {
-				if (ip->i_flag & IN_LOCKED) {
-					ip->i_flag |= IN_WANTED;
-					sleep(ip, PINOD);
-					break;
-				}
-				vp = ITOV(ip);
-				if (!vget(vp, 1))
-					return (vp);
-				break;
-			}
-		}
-	/* NOTREACHED */
+loop:
+       simple_lock(&cd9660_ihash_slock);
+       for (ip = isohashtbl[INOHASH(dev, inum)]; ip; ip = ip->i_next) {
+               if (inum == ip->i_number && dev == ip->i_dev) {
+                       vp = ITOV(ip);
+                       simple_lock(&vp->v_interlock);
+                       simple_unlock(&cd9660_ihash_slock);
+                       if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK, p))
+                               goto loop;
+                       return (vp);
+	       }
+       }
+       simple_unlock(&cd9660_ihash_slock);
+       return (NULL);
 }
 
 /*
@@ -181,21 +185,19 @@ void
 cd9660_ihashins(ip)
 	struct iso_node *ip;
 {
+	struct proc *p = curproc;
 	struct iso_node **ipp, *iq;
 
+	simple_lock(&cd9660_ihash_slock);
 	ipp = &isohashtbl[INOHASH(ip->i_dev, ip->i_number)];
 	if ((iq = *ipp) != NULL)
 		iq->i_prev = &ip->i_next;
 	ip->i_next = iq;
 	ip->i_prev = ipp;
 	*ipp = ip;
-	if (ip->i_flag & IN_LOCKED)
-		panic("cd9660_ihashins: already locked");
-	if (curproc)
-		ip->i_lockholder = curproc->p_pid;
-	else
-		ip->i_lockholder = -1;
-	ip->i_flag |= IN_LOCKED;
+	simple_unlock(&cd9660_ihash_slock);
+
+	lockmgr(&ip->i_lock, LK_EXCLUSIVE, 0, p);
 }
 
 /*
@@ -207,6 +209,7 @@ cd9660_ihashrem(ip)
 {
 	register struct iso_node *iq;
 
+	simple_lock(&cd9660_ihash_slock);
 	if ((iq = ip->i_next) != NULL)
 		iq->i_prev = ip->i_prev;
 	*ip->i_prev = iq;
@@ -214,6 +217,7 @@ cd9660_ihashrem(ip)
 	ip->i_next = NULL;
 	ip->i_prev = NULL;
 #endif
+	simple_unlock(&cd9660_ihash_slock);
 }
 
 /*
@@ -226,8 +230,10 @@ cd9660_inactive(v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
+		struct proc *a_p;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
+	struct proc *p = ap->a_p;
 	register struct iso_node *ip = VTOI(vp);
 	int error = 0;
 	
@@ -235,13 +241,15 @@ cd9660_inactive(v)
 		vprint("cd9660_inactive: pushing active", vp);
 	
 	ip->i_flag = 0;
+	VOP_UNLOCK(vp, 0, p);
 	/*
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	if (vp->v_usecount == 0 && ip->inode.iso_mode == 0)
-		vgone(vp);
-	return error;
+	if (ip->inode.iso_mode == 0)
+		vrecycle(vp, (struct simplelock *)0, p);
+
+	return (error);
 }
 
 /*
@@ -401,7 +409,7 @@ cd9660_tstamp_conv7(pi,pu)
 	if (y < 1970) {
 		pu->tv_sec  = 0;
 		pu->tv_nsec = 0;
-		return 0;
+		return (0);
 	} else {
 #ifdef	ORIGINAL
 		/* computes day number relative to Sept. 19th,1989 */
@@ -422,7 +430,7 @@ cd9660_tstamp_conv7(pi,pu)
 	}
 	pu->tv_sec  = crtime;
 	pu->tv_nsec = 0;
-	return 1;
+	return (1);
 }
 
 static u_int
@@ -436,7 +444,7 @@ cd9660_chars2ui(begin,len)
 		rc *= 10;
 		rc += *begin++ - '0';
 	}
-	return rc;
+	return (rc);
 }
 
 int
@@ -467,7 +475,7 @@ cd9660_tstamp_conv17(pi,pu)
 	/* difference of GMT */
 	buf[6] = pi[16];
 	
-	return cd9660_tstamp_conv7(buf,pu);
+	return (cd9660_tstamp_conv7(buf,pu));
 }
 
 ino_t
@@ -477,7 +485,7 @@ isodirino(isodir, imp)
 {
 	ino_t ino;
 
-	ino = (isonum_733(isodir->extent) + isonum_711(isodir->ext_attr_length))
-	      << imp->im_bshift;
+	ino = (isonum_733(isodir->extent) +
+	    isonum_711(isodir->ext_attr_length)) << imp->im_bshift;
 	return (ino);
 }

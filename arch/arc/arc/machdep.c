@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.29 1997/05/19 16:21:20 pefo Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.32 1998/03/25 11:48:14 pefo Exp $	*/
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1992, 1993
@@ -38,7 +38,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)machdep.c	8.3 (Berkeley) 1/12/94
- *      $Id: machdep.c,v 1.29 1997/05/19 16:21:20 pefo Exp $
+ *      $Id: machdep.c,v 1.32 1998/03/25 11:48:14 pefo Exp $
  */
 
 /* from: Utah Hdr: machdep.c 1.63 91/04/24 */
@@ -93,14 +93,14 @@
 
 #include <dev/cons.h>
 
-#include <arc/arc/arctype.h>
-#include <arc/arc/arcbios.h>
+#include <mips/archtype.h>
+#include <mips/mips/arcbios.h>
 #include <arc/pica/pica.h>
 #include <arc/dti/desktech.h>
 #include <arc/algor/algor.h>
 
 extern struct consdev *cn_tab;
-extern char kernel_start[];
+extern char kernel_text[];
 extern void makebootdev __P((char *));
 extern void stacktrace __P((void));
 extern void configure __P((void));
@@ -131,7 +131,7 @@ int	msgbufmapped = 0;	/* set when safe to use msgbuf */
 int	physmem;		/* max supported memory, changes to actual */
 int	cpucfg;			/* Value of processor config register */
 int	l2cache_is_snooping;	/* Set if L2 cache snoops uncached writes */
-int	cputype;		/* Mother board type */
+int	system_type;		/* Mother board type */
 int	num_tlbentries = 48;	/* Size of the CPU tlb */
 int	ncpu = 1;		/* At least one cpu in the system */
 int	CONADDR;		/* Well, ain't it just plain stupid... */
@@ -142,14 +142,14 @@ char	eth_hw_addr[6];		/* HW ether addr not stored elsewhere */
 
 struct mem_descriptor mem_layout[MAXMEMSEGS];
 
-extern	int Mach_spl0 __P((void)), Mach_spl1 __P((void)), Mach_spl2 __P((void));
-extern	int Mach_spl3 __P((void)), Mach_spl4 __P((void)), Mach_spl5 __P((void));
-int	(*Mach_splnet)(void) = splhigh;
-int	(*Mach_splbio)(void) = splhigh;
-int	(*Mach_splimp)(void) = splhigh;
-int	(*Mach_spltty)(void) = splhigh;
-int	(*Mach_splclock)(void) = splhigh;
-int	(*Mach_splstatclock)(void) = splhigh;
+extern	int Mips_spl0 __P((void)), Mips_spl1 __P((void)), Mips_spl2 __P((void));
+extern	int Mips_spl3 __P((void)), Mips_spl4 __P((void)), Mips_spl5 __P((void));
+int	(*Mips_splnet)(void) = splhigh;
+int	(*Mips_splbio)(void) = splhigh;
+int	(*Mips_splimp)(void) = splhigh;
+int	(*Mips_spltty)(void) = splhigh;
+int	(*Mips_splclock)(void) = splhigh;
+int	(*Mips_splstatclock)(void) = splhigh;
 
 void mips_init __P((int, char *[], char *[]));	
 void initcpu __P((void));
@@ -192,8 +192,8 @@ mips_init(argc, argv, envv)
 	caddr_t start;
 	struct tlb tlb;
 	extern char edata[], end[];
-	extern char MachTLBMiss[], MachTLBMissEnd[];
-	extern char MachException[], MachExceptionEnd[];
+	extern char MipsTLBMiss[], MipsTLBMissEnd[];
+	extern char MipsException[], MipsExceptionEnd[];
 
 	/* clear the BSS segment in OpenBSD code */
 	sysend = (caddr_t)mips_round_page(end);
@@ -210,10 +210,10 @@ mips_init(argc, argv, envv)
 	 * entries as possible to do something useful :-).
 	 */
 
-	switch (cputype) {
+	switch (system_type) {
 	case ACER_PICA_61:	/* ALI PICA 61 and MAGNUM is almost the */
 	case MAGNUM:		/* Same kind of hardware. NEC goes here too */
-		if(cputype == MAGNUM) {
+		if(system_type == MAGNUM) {
 			strcpy(cpu_model, "MIPS Magnum");
 		}
 		else {
@@ -222,17 +222,6 @@ mips_init(argc, argv, envv)
 		arc_bus_io.bus_base = PICA_V_ISA_IO;
 		arc_bus_mem.bus_base = PICA_V_ISA_MEM;
 		CONADDR = 0;
-
-		/*
-		 * Set up interrupt handling and I/O addresses.
-		 */
-#if 0 /* XXX FIXME */
-		Mach_splnet = Mach_spl1;
-		Mach_splbio = Mach_spl0;
-		Mach_splimp = Mach_spl1;
-		Mach_spltty = Mach_spl2;
-		Mach_splstatclock = Mach_spl3;
-#endif
 		break;
 
 	case DESKSTATION_RPC44:
@@ -249,21 +238,40 @@ mips_init(argc, argv, envv)
 		CONADDR = 0; /* Don't screew the mouse... */
 		break;
 
+	case SNI_RM200:
+		strcpy(cpu_model, "Siemens Nixdorf RM200");
+#if 0
+		arc_bus_io.bus_base = RM200_V_ISA_IO;
+		arc_bus_mem.bus_base = RM200_V_ISA_MEM;
+#endif
+		CONADDR = 0; /* Don't screew the mouse... */
+		break;
+
 	case -1:	/* Not identified as an ARC system. We have a couple */
 			/* of other options. Systems not having an ARC Bios  */
 
 			/* Make this more fancy when more comes in here */
 		environment = envv;
-		cputype = ALGOR_P4032;
+#if 0
+		system_type = ALGOR_P4032;
 		strcpy(cpu_model, "Algorithmics P-4032");
 		arc_bus_io.bus_sparse1 = 2;
 		arc_bus_io.bus_sparse2 = 1;
 		arc_bus_io.bus_sparse4 = 0;
 		arc_bus_io.bus_sparse8 = 0;
 		CONADDR = P4032_COM1;
+#else
+		system_type = ALGOR_P5064;
+		strcpy(cpu_model, "Algorithmics P-5064");
+		arc_bus_io.bus_sparse1 = 0;
+		arc_bus_io.bus_sparse2 = 0;
+		arc_bus_io.bus_sparse4 = 0;
+		arc_bus_io.bus_sparse8 = 0;
+		CONADDR = P5064_COM1;
+#endif
 
 		mem_layout[0].mem_start = 0;
-		mem_layout[0].mem_size = mips_trunc_page(CACHED_TO_PHYS(kernel_start));
+		mem_layout[0].mem_size = mips_trunc_page(CACHED_TO_PHYS(kernel_text));
 		mem_layout[1].mem_start = CACHED_TO_PHYS((int)sysend);
 		if(getenv("memsize") != 0) {
 			i = atoi(getenv("memsize"), 10);
@@ -310,9 +318,11 @@ mips_init(argc, argv, envv)
 #else
 	boothowto = RB_SINGLE | RB_ASKNAME;
 #endif /* RAMDISK_HOOKS */
+
 #ifdef KADB
 	boothowto |= RB_KDB;
 #endif
+
 	get_eth_hw_addr(getenv("ethaddr"));
 	cp = getenv("osloadoptions");
 	if(cp) {
@@ -332,6 +342,10 @@ mips_init(argc, argv, envv)
 
 			case 'N': /* don't ask for names */
 				boothowto &= ~RB_ASKNAME;
+				break;
+
+			case 's': /* use serial console */
+				boothowto |= RB_SERCONS;
 				break;
 			}
 
@@ -356,7 +370,7 @@ mips_init(argc, argv, envv)
 	R4K_TLBFlush(num_tlbentries);
 	R4K_SetWIRED(VMWIRED_ENTRIES);
 	
-	switch (cputype) {
+	switch (system_type) {
 	case ACER_PICA_61:
 	case MAGNUM:
 		tlb_init_pica();
@@ -370,6 +384,11 @@ mips_init(argc, argv, envv)
 		break;
 
 	case ALGOR_P4032:
+	case ALGOR_P5064:
+		break;
+
+	case SNI_RM200:
+		/*XXX*/
 		break;
 	}
 
@@ -417,12 +436,12 @@ mips_init(argc, argv, envv)
 	/*
 	 * Copy down exception vector code.
 	 */
-	if (MachTLBMissEnd - MachTLBMiss > 0x80)
+	if (MipsTLBMissEnd - MipsTLBMiss > 0x80)
 		panic("startup: TLB code too large");
-	bcopy(MachTLBMiss, (char *)TLB_MISS_EXC_VEC,
-		MachTLBMissEnd - MachTLBMiss);
-	bcopy(MachException, (char *)GEN_EXC_VEC,
-		MachExceptionEnd - MachException);
+	bcopy(MipsTLBMiss, (char *)TLB_MISS_EXC_VEC,
+		MipsTLBMissEnd - MipsTLBMiss);
+	bcopy(MipsException, (char *)GEN_EXC_VEC,
+		MipsExceptionEnd - MipsException);
 
 	/*
 	 * Clear out the I and D caches.
@@ -531,6 +550,7 @@ mips_init(argc, argv, envv)
 	/*
 	 * Initialize the virtual memory system.
 	 */
+	vm_set_page_size();	/* XXX Works when default page size is 4k */
 	pmap_bootstrap((vm_offset_t)sysend);
 }
 
@@ -980,7 +1000,7 @@ sendsig(catcher, sig, mask, code, type, val)
 
 		/* if FPU has current state, save it first */
 		if (p == machFPCurProcPtr)
-			MachSaveCurFPState(p);
+			MipsSaveCurFPState(p);
 		bcopy((caddr_t)&p->p_md.md_regs[F0], (caddr_t)ksc.sc_fpregs,
 			sizeof(ksc.sc_fpregs));
 	}
@@ -1141,9 +1161,13 @@ boot(howto)
 		if (howto & RB_DUMP)
 			dumpsys();
 		printf("System restart.\n");
-		delay(2000000);
-		(void)kbc_8042sysreset();	/* Try this first */
-		delay(100000);			/* Give it a chance */
+#if NPC > 0
+		/* This is only done on systems with pccons driver */
+		if(system_type != ALGOR_P4032) {
+			(void)kbc_8042sysreset();       /* Try this first */
+			delay(100000);                  /* Give it a chance */
+		}
+#endif
 		__asm__(" li $2, 0xbfc00000; jr $2; nop\n");
 		while(1); /* Forever */
 	}
@@ -1261,8 +1285,9 @@ void
 initcpu()
 {
 
-	switch(cputype) {
+	switch(system_type) {
 	case ACER_PICA_61:
+	case MAGNUM:
 		/*
 		 * Disable all interrupts. New masks will be set up
 		 * during system configuration

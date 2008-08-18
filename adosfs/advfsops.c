@@ -1,4 +1,4 @@
-/*	$OpenBSD: advfsops.c,v 1.9 1997/01/20 15:49:53 niklas Exp $	*/
+/*	$OpenBSD: advfsops.c,v 1.13 1998/02/08 22:41:31 tholo Exp $	*/
 /*	$NetBSD: advfsops.c,v 1.24 1996/12/22 10:10:12 cgd Exp $	*/
 
 /*
@@ -45,11 +45,13 @@
 #include <sys/queue.h>
 #include <sys/buf.h>
 
+#include <machine/endian.h>
+
 #include <miscfs/specfs/specdev.h> /* XXX */
 #include <adosfs/adosfs.h>
 
-void	 adosfs_init __P((void));
-int	 adosfs_mount __P((struct mount *, char *, caddr_t, struct nameidata *,
+int	 adosfs_init __P((struct vfsconf *));
+int	 adosfs_mount __P((struct mount *, const char *, caddr_t, struct nameidata *,
     struct proc *));
 int	 adosfs_start __P((struct mount *, int, struct proc *));
 int	 adosfs_unmount __P((struct mount *, int, struct proc *));
@@ -69,7 +71,7 @@ int	 adosfs_loadbitmap __P((struct adosfsmount *));
 int
 adosfs_mount(mp, path, data, ndp, p)
 	struct mount *mp;
-	char *path;
+	const char *path;
 	caddr_t data;
 	struct nameidata *ndp;
 	struct proc *p;
@@ -125,13 +127,13 @@ adosfs_mount(mp, path, data, ndp, p)
 		accessmode = VREAD;
 		if ((mp->mnt_flag & MNT_RDONLY) == 0)
 			accessmode |= VWRITE;
-		VOP_LOCK(devvp);
+		vn_lock(devvp, LK_EXCLUSIVE  | LK_RETRY, p);
 		error = VOP_ACCESS(devvp, accessmode, p->p_ucred, p);
 		if (error) {
 			vput(devvp);
 			return (error);
 		}
-		VOP_UNLOCK(devvp);
+		VOP_UNLOCK(devvp, 0, p);
 	}
 /* MNT_UPDATE? */
 	if ((error = adosfs_mountfs(devvp, mp, p)) != 0) {
@@ -142,9 +144,9 @@ adosfs_mount(mp, path, data, ndp, p)
 	amp->uid = args.uid;
 	amp->gid = args.gid;
 	amp->mask = args.mask;
-	(void) copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1, &size);
+	(void)copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1, &size);
 	bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
-	(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
+	(void)copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
 	    &size);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
 	return (0);
@@ -224,7 +226,7 @@ adosfs_mountfs(devvp, mp, p)
         mp->mnt_stat.f_fsid.val[0] = (int32_t)devvp->v_rdev;
         mp->mnt_stat.f_fsid.val[1] = makefstype(MOUNT_ADOSFS);
 	mp->mnt_flag |= MNT_LOCAL;
-	devvp->v_specflags |= SI_MOUNTEDON;
+	devvp->v_specmountpoint = mp;
 
 	/*
 	 * init anode table.
@@ -287,7 +289,7 @@ adosfs_unmount(mp, mntflags, p)
 	if ((error = vflush(mp, NULLVP, flags)) != 0)
 		return (error);
 	amp = VFSTOADOSFS(mp);
-	amp->devvp->v_specflags &= ~SI_MOUNTEDON;
+	amp->devvp->v_specmountpoint = NULL;
 	error = VOP_CLOSE(amp->devvp, FREAD, NOCRED, p);
 	vrele(amp->devvp);
 	if (amp->bitmap)
@@ -332,10 +334,11 @@ adosfs_statfs(mp, sbp, p)
 	sbp->f_files = 0;		/* who knows */
 	sbp->f_ffree = 0;		/* " " */
 	if (sbp != &mp->mnt_stat) {
+		sbp->f_type = mp->mnt_vfc->vfc_typenum;
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
 	}
-	strncpy(sbp->f_fstypename, mp->mnt_op->vfs_name, MFSNAMELEN);
+	strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
 	return (0);
 }
 
@@ -375,6 +378,7 @@ adosfs_vget(mp, an, vpp)
 	 */
 	vp->v_data = ap = malloc(sizeof(struct anode), M_ANODE, M_WAITOK);
 	bzero(ap, sizeof(struct anode));
+	lockinit(&ap->a_lock, PINOD, "anode", 0, 0);
 	ap->vp = vp;
 	ap->amp = amp;
 	ap->block = AINOTOBLK(an);
@@ -734,16 +738,16 @@ adosfs_sync(mp, waitfor, uc, p)
 	return(0);
 }
 
-void
-adosfs_init()
+int
+adosfs_init(struct vfsconf *vfsp)
 {
+	return (0);
 }
 
 /*
  * vfs generic function call table
  */
 struct vfsops adosfs_vfsops = {
-	MOUNT_ADOSFS,
 	adosfs_mount,
 	adosfs_start,
 	adosfs_unmount,

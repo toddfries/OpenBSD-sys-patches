@@ -1,3 +1,4 @@
+/*	$OpenBSD: if_ep_pci.c,v 1.14 1998/04/02 20:14:03 deraadt Exp $	*/
 /*	$NetBSD: if_ep_pci.c,v 1.13 1996/10/21 22:56:38 thorpej Exp $	*/
 
 /*
@@ -103,6 +104,7 @@ ep_pci_match(parent, match, aux)
 	case PCI_PRODUCT_3COM_3C900TPO:
 	case PCI_PRODUCT_3COM_3C905T4:
 	case PCI_PRODUCT_3COM_3C905TX:
+	case PCI_PRODUCT_3COM_3C905B:
 		break;
 	default:
 		return 0;
@@ -124,7 +126,6 @@ ep_pci_attach(parent, self, aux)
 	bus_size_t iosize;
 	pci_intr_handle_t ih;
 	pcireg_t i;
-	char *model;
 	const char *intrstr = NULL;
 
 	if (pci_io_find(pc, pa->pa_tag, PCI_CBIO, &iobase, &iosize)) {
@@ -144,30 +145,6 @@ ep_pci_attach(parent, self, aux)
 
 	GO_WINDOW(0);
 
-	switch (PCI_PRODUCT(pa->pa_id)) {
-	case PCI_PRODUCT_3COM_3C590:
-		model = "3Com 3C590 Ethernet";
-		break;
-	case PCI_PRODUCT_3COM_3C595MII:
-	case PCI_PRODUCT_3COM_3C595T4:
-	case PCI_PRODUCT_3COM_3C595TX:
-		model = "3Com 3C595 Ethernet";
-		break;
-	case PCI_PRODUCT_3COM_3C900COMBO:
-	case PCI_PRODUCT_3COM_3C900TPO:
-		model = "3Com 3C900 Ethernet";
-		break;
-	case PCI_PRODUCT_3COM_3C905T4:
-	case PCI_PRODUCT_3COM_3C905TX:
-		model = "3Com 3C905 Ethernet";
-		break;
-	default:
-		model = "unknown model!";
-		break;
-	}
-
-	printf(": <%s> ", model);
-
 	epconfig(sc, EP_CHIPSET_VORTEX);
 
 	/* Enable the card. */
@@ -178,19 +155,18 @@ ep_pci_attach(parent, self, aux)
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pc, pa->pa_intrtag, pa->pa_intrpin,
 	    pa->pa_intrline, &ih)) {
-		printf("%s: couldn't map interrupt\n", sc->sc_dev.dv_xname);
+		printf(", couldn't map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, epintr,
 	    sc, sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf("%s: couldn't establish interrupt",
-		    sc->sc_dev.dv_xname);
+		printf(": couldn't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
 		return;
 	}
-	printf("%s: interrupting at %s\n", sc->sc_dev.dv_xname, intrstr);
+	printf(" %s\n", intrstr);
 }

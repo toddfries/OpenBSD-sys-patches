@@ -1,4 +1,4 @@
-/*	$OpenBSD: stat.h,v 1.4 1996/10/18 03:00:08 tholo Exp $	*/
+/*	$OpenBSD: stat.h,v 1.7 1998/02/16 21:56:25 millert Exp $	*/
 /*	$NetBSD: stat.h,v 1.20 1996/05/16 22:17:49 cgd Exp $	*/
 
 /*-
@@ -197,13 +197,14 @@ struct stat {
 __BEGIN_DECLS
 int	chmod __P((const char *, mode_t));
 int	fstat __P((int, struct stat *));
+int	mknod __P((const char *, mode_t, dev_t));
 int	mkdir __P((const char *, mode_t));
 int	mkfifo __P((const char *, mode_t));
 int	stat __P((const char *, struct stat *));
 mode_t	umask __P((mode_t));
 #ifndef _POSIX_SOURCE
-int	chflags __P((const char *, u_long));
-int	fchflags __P((int, u_long));
+int	chflags __P((const char *, unsigned int));
+int	fchflags __P((int, unsigned int));
 int	fchmod __P((int, mode_t));
 int	lstat __P((const char *, struct stat *));
 #endif

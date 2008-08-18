@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.14 1997/07/27 23:30:37 niklas Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.18 1998/03/18 10:51:38 provos Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -9,7 +9,11 @@
  * Ported to OpenBSD and NetBSD, with additional transforms, in December 1996,
  * by Angelos D. Keromytis, kermit@forthnet.gr.
  *
- * Copyright (C) 1995, 1996, 1997 by John Ioannidis and Angelos D. Keromytis.
+ * Additional transforms and features in 1997 by Angelos D. Keromytis and
+ * Niels Provos.
+ *
+ * Copyright (C) 1995, 1996, 1997 by John Ioannidis, Angelos D. Keromytis
+ * and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -99,6 +103,8 @@ struct tdb				/* tunnel descriptor block */
     u_int8_t	    tdb_sproto;		/* IPsec protocol */
     u_int16_t       tdb_satype;		/* Alignment */
     u_int32_t       tdb_epoch;		/* Used by the kernfs interface */
+    u_int8_t       *tdb_confname;       /* Used by the kernfs interface */
+    u_int8_t       *tdb_authname;       /* Used by the kernfs interface */
 };
 
 #define TDB_HASHMOD	257
@@ -124,10 +130,13 @@ struct xformsw
 /* Supported key hash algorithms */
 #define ALG_AUTH_MD5	1
 #define ALG_AUTH_SHA1	2
+#define ALG_AUTH_RMD160 3
 
 /* Supported encryption algorithms */
 #define ALG_ENC_DES	1
 #define ALG_ENC_3DES	2
+#define ALG_ENC_BLF     3
+#define ALG_ENC_CAST    4
 
 #define XFT_AUTH	0x0001
 #define XFT_CONF	0x0100
@@ -207,6 +216,7 @@ extern int ipe4_zeroize(struct tdb *);
 extern int ipe4_output(struct mbuf *, struct sockaddr_encap *, struct tdb *,
 		       struct mbuf **);
 extern void ipe4_input __P((struct mbuf *, ...));
+extern void ip4_input __P((struct mbuf *, ...));
 
 /* XF_OLD_AH */
 extern int ah_old_attach(void);

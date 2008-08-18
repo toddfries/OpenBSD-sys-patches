@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp.c,v 1.7 1997/07/31 01:14:59 downsj Exp $	*/
+/*	$OpenBSD: if_fxp.c,v 1.11 1998/03/10 21:37:44 deraadt Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -345,16 +345,16 @@ fxp_attach(parent, self, aux)
 	sc->sc_st = iot;
 #endif
 
-	printf(": Intel EtherExpress Pro 10/100B Ethernet\n");
 
 	/*
 	 * Allocate our interrupt.
 	 */
 	if (pci_intr_map(pc, pa->pa_intrtag, pa->pa_intrpin,
 	    pa->pa_intrline, &ih)) {
-		printf("%s: couldn't map interrupt\n", sc->sc_dev.dv_xname);
+		printf(": couldn't map interrupt\n");
 		return;
 	}
+
 	intrstr = pci_intr_string(pc, ih);
 #ifdef __OpenBSD__
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, fxp_intr, sc,
@@ -363,14 +363,12 @@ fxp_attach(parent, self, aux)
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, fxp_intr, sc);
 #endif
 	if (sc->sc_ih == NULL) {
-		printf("%s: couldn't establish interrupt",
-		    sc->sc_dev.dv_xname);
+		printf(": couldn't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
 		return;
 	}
-	printf("%s: interrupting at %s\n", sc->sc_dev.dv_xname, intrstr);
 
 	/* Do generic parts of attach. */
 	if (fxp_attach_common(sc, enaddr)) {
@@ -378,8 +376,8 @@ fxp_attach(parent, self, aux)
 		return;
 	}
 
-	printf("%s: Ethernet address %s%s\n", sc->sc_dev.dv_xname,
-	    ether_sprintf(enaddr), sc->phy_10Mbps_only ? ", 10Mbps" : "");
+	printf(": Ethernet address %s%s, %s\n", ether_sprintf(enaddr),
+	    sc->phy_10Mbps_only ? ", 10Mbps" : "", intrstr);
 
 #ifdef __OpenBSD__
 	ifp = &sc->arpcom.ac_if;
@@ -1323,6 +1321,9 @@ fxp_init(xsc)
 	switch (sc->phy_primary_device) {
 	case FXP_PHY_DP83840:
 	case FXP_PHY_DP83840A:
+	case FXP_PHY_82553A:
+	case FXP_PHY_82553C:
+	case FXP_PHY_82555B:
 		fxp_mdi_write(sc, sc->phy_primary_addr, FXP_DP83840_PCR,
 		    fxp_mdi_read(sc, sc->phy_primary_addr, FXP_DP83840_PCR) |
 		    FXP_DP83840_PCR_LED4_MODE |	/* LED4 always indicates duplex */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.17 1997/10/25 21:47:27 mickey Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.21 1998/03/01 00:37:33 niklas Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -96,7 +96,7 @@ int	want_resched;		/* resched() was called */
 #define	DELAY(x)		delay(x)
 void	delay __P((int));
 
-#ifdef I586_CPU
+#if defined(I586_CPU) || defined(I686_CPU)
 /*
  * High resolution clock support (Pentium only)
  */
@@ -129,17 +129,41 @@ void	delay __P((int));
  */
 #include <machine/cputypes.h>
 
-struct cpu_nameclass {
-	char *cpu_name;
-	int  cpu_class;
+struct cpu_nocpuid_nameclass {
+	int cpu_vendor;
+	const char *cpu_vendorname;
+	const char *cpu_name;
+	int cpu_class;
+	void (*cpu_setup) __P((const char *));
+};
+
+struct cpu_cpuid_nameclass {
+	const char *cpu_id;
+	int cpu_vendor;
+	const char *cpu_vendorname;
+	struct cpu_cpuid_family {
+		int cpu_class;
+		const char *cpu_models[CPU_MAXMODEL+2];
+		void (*cpu_setup) __P((const char *));
+	} cpu_family[CPU_MAXFAMILY - CPU_MINFAMILY + 1];
 };
 
 #ifdef _KERNEL
 extern int cpu;
 extern int cpu_class;
-extern struct cpu_nameclass i386_cpus[];
-#ifdef I586_CPU
+extern int cpu_feature;
+extern int cpuid_level;
+extern struct cpu_nocpuid_nameclass i386_nocpuid_cpus[];
+extern struct cpu_cpuid_nameclass i386_cpuid_cpus[];
+
+#if defined(I586_CPU) || defined(I686_CPU)
 extern int pentium_mhz;
+#endif
+
+#ifdef I586_CPU
+/* F00F bug fix stuff for pentium cpu */
+extern int cpu_f00f_bug;
+void fix_f00f __P((void));
 #endif
 
 /* autoconf.c */
@@ -185,6 +209,10 @@ int	i386_set_ldt __P((struct proc *, char *, register_t *));
 void	isa_defaultirq __P((void));
 int	isa_nmi __P((void));
 
+/* pmap.c */
+void	pmap_bootstrap __P((vm_offset_t));
+vm_offset_t pmap_map __P((vm_offset_t, vm_offset_t, vm_offset_t, int));
+
 /* vm_machdep.c */
 int	kvtop __P((caddr_t));
 
@@ -210,7 +238,8 @@ void	setconf __P((void));
 #define	CPU_BIOS		2	/* BIOS variables */
 #define	CPU_BLK2CHR		3	/* convert blk maj into chr one */
 #define	CPU_CHR2BLK		4	/* convert chr maj into blk one */
-#define	CPU_MAXID		5	/* number of valid machdep ids */
+#define CPU_ALLOWAPERTURE	5	/* allow mmap of /dev/xf86 */
+#define	CPU_MAXID		6	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -218,6 +247,7 @@ void	setconf __P((void));
 	{ "bios", CTLTYPE_INT }, \
 	{ "blk2chr", CTLTYPE_STRUCT }, \
 	{ "chr2blk", CTLTYPE_STRUCT }, \
+	{ "allowaperture", CTLTYPE_INT }, \
 }
 
 #endif /* !_I386_CPU_H_ */

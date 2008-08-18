@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.14 1997/10/24 06:49:19 mickey Exp $	*/
+/*	$OpenBSD: apm.c,v 1.19 1997/12/17 22:05:31 rees Exp $	*/
 
 /*-
  * Copyright (c) 1995 John T. Kohl.  All rights reserved.
@@ -219,22 +219,22 @@ apm_power_print (sc, regs)
 	if (apm_minver == 0)
 		switch (BATT_STATE(regs)) {
 		case APM_BATT_HIGH:
-			printf("high\n");
+			printf("high");
 			break;
 		case APM_BATT_LOW:
-			printf("low\n");
+			printf("low");
 			break;
 		case APM_BATT_CRITICAL:
-			printf("critical\n");
+			printf("critical");
 			break;
 		case APM_BATT_CHARGING:
-			printf("charging\n");
+			printf("charging");
 			break;
 		case APM_BATT_UNKNOWN:
-			printf("unknown\n");
+			printf("unknown");
 			break;
 		default:
-			printf("undecoded (%x)\n", BATT_STATE(regs));
+			printf("undecoded (%x)", BATT_STATE(regs));
 			break;
 		}
 	else if (apm_minver >= 1) {
@@ -243,16 +243,18 @@ apm_power_print (sc, regs)
 		else {
 			if (BATT_FLAGS(regs) & APM_BATT_FLAG_HIGH)
 				printf("high");
-			if (BATT_FLAGS(regs) & APM_BATT_FLAG_LOW)
+			else if (BATT_FLAGS(regs) & APM_BATT_FLAG_LOW)
 				printf("low");
-			if (BATT_FLAGS(regs) & APM_BATT_FLAG_CRITICAL)
+			else if (BATT_FLAGS(regs) & APM_BATT_FLAG_CRITICAL)
 				printf("critical");
+			else
+				printf("unknown");
 			if (BATT_FLAGS(regs) & APM_BATT_FLAG_CHARGING)
-				printf("charging");
+				printf(", charging");
 			if (BATT_REM_VALID(regs))
-				printf(", estimated %d:%02d minutes\n",
+				printf(", estimated %d:%02d minutes",
 				    BATT_REMAINING(regs) / 60,
-				    BATT_REMAINING(regs)%60);
+				    BATT_REMAINING(regs) % 60);
 		}
 	}
 
@@ -620,7 +622,6 @@ apmprobe(parent, match, aux)
 	if (apm_cd.cd_ndevs ||
 	    strcmp(ba->bios_dev, "apm") ||
 	    ba->bios_apmp->apm_detail & APM_BIOS_PM_DISABLED ||
-	    ba->bios_apmp->apm_detail & APM_BIOS_PM_DISENGAGED ||
 	    !(ba->bios_apmp->apm_detail & APM_32BIT_SUPPORTED)) {
 #ifdef DEBUG
 		printf("%s: %x\n", ba->bios_dev, ba->bios_apmp->apm_detail);
@@ -746,10 +747,10 @@ apmopen(dev, flag, mode, p)
 	int flag, mode;
 	struct proc *p;
 {
-	struct apm_softc *sc = apm_cd.cd_devs[APMUNIT(dev)];
+	struct apm_softc *sc;
 
 	/* apm0 only */
-	if (APMUNIT(dev) != 0 || sc == NULL)
+	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 || !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
 		return ENXIO;
 	
 	switch (APMDEV(dev)) {
@@ -778,10 +779,10 @@ apmclose(dev, flag, mode, p)
 	int flag, mode;
 	struct proc *p;
 {
-	struct apm_softc *sc = apm_cd.cd_devs[APMUNIT(dev)];
+	struct apm_softc *sc;
 
 	/* apm0 only */
-	if (APMUNIT(dev) != 0 || sc == NULL)
+	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 || !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
 		return ENXIO;
 	
 	DPRINTF(("apmclose: pid %d flag %x mode %x\n", p->p_pid, flag, mode));
@@ -809,7 +810,7 @@ apmioctl(dev, cmd, data, flag, p)
 	int flag;
 	struct proc *p;
 {
-	struct apm_softc *sc = apm_cd.cd_devs[APMUNIT(dev)];
+	struct apm_softc *sc;
 	struct apm_power_info *powerp;
 	struct apm_event_info *evp;
 	struct apmregs regs;
@@ -817,7 +818,7 @@ apmioctl(dev, cmd, data, flag, p)
 	struct apm_ctl *actl;
 
 	/* apm0 only */
-	if (APMUNIT(dev) != 0 || sc == NULL)
+	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 || !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
 		return ENXIO;
 	
 	switch (cmd) {
@@ -901,10 +902,10 @@ apmselect(dev, rw, p)
 	int rw;
 	struct proc *p;
 {
-	struct apm_softc *sc = apm_cd.cd_devs[APMUNIT(dev)];
+	struct apm_softc *sc;
 
 	/* apm0 only */
-	if (APMUNIT(dev) != 0 || sc == NULL)
+	if (!apm_cd.cd_ndevs || APMUNIT(dev) != 0 || !(sc = apm_cd.cd_devs[APMUNIT(dev)]))
 		return ENXIO;
 	
 	switch (rw) {

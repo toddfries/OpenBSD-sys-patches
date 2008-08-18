@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.15 1997/10/20 07:26:40 niklas Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.21 1998/03/02 20:12:02 niklas Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -92,14 +92,6 @@ dk_establish(dk, dev)
 }
 
 #if defined(DISKLABEL_I386) || defined(DISKLABEL_ALPHA) || defined(DISKLABEL_AMIGA) || defined(DISKLABEL_ALL)
-/* XXX should we not provide generic swapXX functions? */
-#if BYTE_ORDER == BIG_ENDIAN
-#define swap32(x) ((x) = htole32(x))
-#define swap16(x) ((x) = htole16(x))
-#else
-#define swap32(x) ((x) = htobe32(x))
-#define swap16(x) ((x) = htobe16(x))
-#endif
 
 /*
  * Byteswap all the fields that might be swapped.
@@ -382,7 +374,12 @@ readdoslabel(bp, strat, lp, osdep, partoffp, cylp)
 				for (dp2=dp, i=0;
 				    i < NDOSPART && ourpart == -1; i++, dp2++)
 					if (dp2->dp_size &&
-					    dp2->dp_typ == DOSPTYP_386BSD)
+					    dp2->dp_typ == DOSPTYP_FREEBSD)
+						ourpart = i;
+				for (dp2=dp, i=0;
+				    i < NDOSPART && ourpart == -1; i++, dp2++)
+					if (dp2->dp_size &&
+					    dp2->dp_typ == DOSPTYP_NETBSD)
 						ourpart = i;
 				if (ourpart == -1)
 					goto donot;
@@ -448,7 +445,9 @@ donot:
 				case DOSPTYP_FAT12:
 				case DOSPTYP_FAT16S:
 				case DOSPTYP_FAT16B:
-				case DOSPTYP_FAT16C:
+				case DOSPTYP_FAT32:
+				case DOSPTYP_FAT32L:
+				case DOSPTYP_FAT16L:
 					pp->p_fstype = FS_MSDOS;
 					n++;
 					break;
@@ -559,8 +558,8 @@ setdisklabel(olp, nlp, openmask, osdep)
 	u_long openmask;
 	struct cpu_disklabel *osdep;
 {
-	register i;
-	register struct partition *opp, *npp;
+	int i;
+	struct partition *opp, *npp;
 
 	/* sanity clause */
 	if (nlp->d_secpercyl == 0 || nlp->d_secsize == 0 ||

@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.32 1997/09/30 02:53:11 millert Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.35 1998/03/18 21:56:46 deraadt Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -391,6 +391,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_DIRECT, T_FIXED,
 	 "IBM",	  "0664",		 ""},	  SDEV_AUTOSAVE},
 	{{T_DIRECT, T_FIXED,
+	 "IBM     ", "H3171-S2",         ""},	  SDEV_NOLUNS|SDEV_AUTOSAVE},
+	{{T_DIRECT, T_FIXED,
 	 "IBM     ", "KZ-C",		 ""},	  SDEV_AUTOSAVE},
 	/* Broken IBM disk */
 	{{T_DIRECT, T_FIXED,
@@ -416,6 +418,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_DIRECT, T_FIXED,
 	 "NEC     ", "D3847           ", "0307"}, SDEV_NOLUNS},
 	{{T_DIRECT, T_FIXED,
+	 "QUANTUM ", "ELS85S          ", ""},	  SDEV_AUTOSAVE},
+	{{T_DIRECT, T_FIXED,
 	 "QUANTUM ", "LPS525S         ", ""},     SDEV_NOLUNS},
 	{{T_DIRECT, T_FIXED,
 	 "QUANTUM ", "P105S 910-10-94x", ""},     SDEV_NOLUNS},
@@ -436,7 +440,7 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_DIRECT, T_FIXED,
 	 "TOSHIBA ", "MK538FB         ", "6027"}, SDEV_NOLUNS},
 	{{T_DIRECT, T_REMOV,
-	 "iomega", "jaz 1GB",		 ""},	  SDEV_NOMODESENSE},
+	 "iomega", "jaz 1GB",		 ""},	  SDEV_NOMODESENSE|SDEV_NOTAGS},
 	{{T_DIRECT, T_REMOV,
 	 "IOMEGA", "ZIP 100",		 ""},	  SDEV_NOMODESENSE},
 	{{T_DIRECT, T_FIXED,
@@ -444,6 +448,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	/* Letting the motor run kills floppy drives and disks quit fast. */
 	{{T_DIRECT, T_REMOV,
 	 "TEAC", "FC-1",                 ""},     SDEV_NOSTARTUNIT},
+	{{T_DIRECT, T_FIXED,
+	 "NEC ", "SD120S-200      ", "0001"},     SDEV_NOLUNS},
 
 	/* XXX: QIC-36 tape behind Emulex adapter.  Very broken. */
 	{{T_SEQUENTIAL, T_REMOV,

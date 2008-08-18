@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_pager.h,v 1.4 1997/10/06 20:21:28 deraadt Exp $	*/
+/*	$OpenBSD: vm_pager.h,v 1.6 1998/03/01 00:38:24 niklas Exp $	*/
 /*	$NetBSD: vm_pager.h,v 1.10 1995/03/26 20:39:15 jtc Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)vm_pager.h	8.4 (Berkeley) 1/12/94
+ *	@(#)vm_pager.h	8.5 (Berkeley) 7/7/94
  */
 
 /*
@@ -105,19 +105,24 @@ struct	pagerops {
 
 /*
  * get/put return values
- * OK	 operation was successful
- * BAD	 specified data was out of the accepted range
- * FAIL	 specified data was in range, but doesn't exist
- * PEND	 operations was initiated but not completed
- * ERROR error while accessing data that is in range and exists
- * AGAIN temporary resource shortage prevented operation from happening
+ * OK	   operation was successful
+ * BAD	   specified data was out of the accepted range
+ * FAIL	   specified data was in range, but doesn't exist
+ * PEND	   operations was initiated but not completed
+ * ERROR   error while accessing data that is in range and exists
+ * AGAIN   temporary resource shortage prevented operation from happening
+ * UNLOCK  unlock the map and try again
+ * REFAULT [uvm_fault internal use only!] unable to relock data structures,
+ *         thus the mapping needs to be reverified before we can procede
  */
-#define	VM_PAGER_OK	0
-#define	VM_PAGER_BAD	1
-#define	VM_PAGER_FAIL	2
-#define	VM_PAGER_PEND	3
-#define	VM_PAGER_ERROR	4
-#define VM_PAGER_AGAIN	5
+#define	VM_PAGER_OK		0
+#define	VM_PAGER_BAD		1
+#define	VM_PAGER_FAIL		2
+#define	VM_PAGER_PEND		3
+#define	VM_PAGER_ERROR		4
+#define VM_PAGER_AGAIN		5
+#define VM_PAGER_UNLOCK		6
+#define VM_PAGER_REFAULT	7
 
 #ifdef _KERNEL
 extern struct pagerops *dfltpagerops;

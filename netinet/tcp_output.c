@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_output.c,v 1.7 1997/08/26 20:02:33 deraadt Exp $	*/
+/*	$OpenBSD: tcp_output.c,v 1.9 1998/02/03 19:06:30 deraadt Exp $	*/
 /*	$NetBSD: tcp_output.c,v 1.16 1997/06/03 16:17:09 kml Exp $	*/
 
 /*
@@ -86,7 +86,7 @@ tcp_output(tp)
 	register struct mbuf *m;
 	register struct tcpiphdr *ti;
 	u_char opt[MAX_TCPOPTLEN];
-	unsigned optlen, hdrlen;
+	unsigned int optlen, hdrlen;
 	int idle, sendalot;
 
 	/*
@@ -606,7 +606,7 @@ void
 tcp_setpersist(tp)
 	register struct tcpcb *tp;
 {
-	register t = ((tp->t_srtt >> 2) + tp->t_rttvar) >> 1;
+	register int t = ((tp->t_srtt >> 2) + tp->t_rttvar) >> 1;
 
 	if (tp->t_timer[TCPT_REXMT])
 		panic("tcp_output REXMT");

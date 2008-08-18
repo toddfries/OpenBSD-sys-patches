@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_proc.c,v 1.2 1996/03/03 17:19:51 niklas Exp $	*/
+/*	$OpenBSD: kern_proc.c,v 1.5 1998/03/02 07:19:11 todd Exp $	*/
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -203,10 +203,10 @@ enterpgrp(p, pgid, mksess)
 		if (p->p_pid != pgid)
 			panic("enterpgrp: new pgrp and pid != pgid");
 #endif
-		MALLOC(pgrp, struct pgrp *, sizeof(struct pgrp), M_PGRP,
-		    M_WAITOK);
 		if ((np = pfind(savepid)) == NULL || np != p)
 			return (ESRCH);
+		MALLOC(pgrp, struct pgrp *, sizeof(struct pgrp), M_PGRP,
+		    M_WAITOK);
 		if (mksess) {
 			register struct session *sess;
 
@@ -310,11 +310,12 @@ fixjobc(p, pgrp, entering)
 	 * group; if so, adjust count for p's process group.
 	 */
 	if ((hispgrp = p->p_pptr->p_pgrp) != pgrp &&
-	    hispgrp->pg_session == mysession)
+	    hispgrp->pg_session == mysession) {
 		if (entering)
 			pgrp->pg_jobc++;
 		else if (--pgrp->pg_jobc == 0)
 			orphanpg(pgrp);
+	}
 
 	/*
 	 * Check this process' children to see whether they qualify
@@ -324,11 +325,12 @@ fixjobc(p, pgrp, entering)
 	for (p = p->p_children.lh_first; p != 0; p = p->p_sibling.le_next)
 		if ((hispgrp = p->p_pgrp) != pgrp &&
 		    hispgrp->pg_session == mysession &&
-		    p->p_stat != SZOMB)
+		    p->p_stat != SZOMB) {
 			if (entering)
 				hispgrp->pg_jobc++;
 			else if (--hispgrp->pg_jobc == 0)
 				orphanpg(hispgrp);
+		}
 }
 
 /* 
@@ -360,7 +362,7 @@ pgrpdump()
 {
 	register struct pgrp *pgrp;
 	register struct proc *p;
-	register i;
+	register int i;
 
 	for (i = 0; i <= pgrphash; i++) {
 		if ((pgrp = pgrphashtbl[i].lh_first) != NULL) {
