@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.6 1997/04/10 13:06:25 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.10 1997/09/29 18:55:07 deraadt Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.3 1996/03/09 20:52:54 ghudson Exp $	*/
 
 /*
@@ -42,7 +42,9 @@
 /* DOS partition table -- located in boot block */
 #define	DOSBBSECTOR	0		/* DOS boot block relative sector # */
 #define	DOSPARTOFF	446
+#define DOSACTIVE	0x80
 #define	NDOSPART	4
+#define DOSMBR_SIGNATURE	0xAA55
 
 struct dos_partition {
 	u_int8_t	dp_flag;	/* bootstrap flags */
@@ -76,13 +78,25 @@ struct cpu_disklabel {
 	struct dkbad bad;
 };
 
+#define DKBAD(x) ((x)->bad)
+
 /* Isolate the relevant bits to get sector and cylinder. */
 #define	DPSECT(s)	((s) & 0x3f)
 #define	DPCYL(c, s)	((c) + (((s) & 0xc0) << 2))
 
-#ifdef _KERNEL
-struct disklabel;
-int	bounds_check_with_label __P((struct buf *, struct disklabel *, int));
-#endif
+static __inline u_int32_t get_le __P((void *));
+
+static __inline u_int32_t
+get_le(p)
+	void *p;
+{
+	u_int8_t *_p = (u_int8_t *)p;
+	u_int32_t x;
+	x = _p[0];
+	x |= _p[1] << 8;
+	x |= _p[2] << 16;
+	x |= _p[3] << 24;
+	return x;
+}
 
 #endif /* _MACHINE_DISKLABEL_H_ */

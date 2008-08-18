@@ -156,8 +156,7 @@ clean::
 
 lint:
 	@lint -hbxncez -Dvolatile= ${CPPFLAGS} ${PARAM} -UKGDB \
-	    ${CFILES} ${PMAX}/pmax/swapgeneric.c \
-	    ioconf.c param.c | \
+	    ${CFILES} ${PMAX}/pmax/swapgeneric.c ioconf.c param.c | \
 	    grep -v 'static function .* unused'
 
 tags:
@@ -179,7 +178,9 @@ depend:: .depend
 	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${PMAX}/pmax/locore.S ${PMAX}/pmax/fp.S
 	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${PMAX}/pmax/locore_machdep.S 
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
+.if ${SFILES} != ""
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
+.endif
 
 # depend on root or device configuration
 autoconf.o conf.o: Makefile

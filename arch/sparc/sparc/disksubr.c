@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.14 1997/05/13 08:51:19 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.18 1997/10/01 22:54:20 deraadt Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.16 1996/04/28 20:25:59 thorpej Exp $ */
 
 /*
@@ -59,6 +59,7 @@
 
 static	char *disklabel_sun_to_bsd __P((char *, struct disklabel *));
 static	int disklabel_bsd_to_sun __P((struct disklabel *, char *));
+static __inline u_long sun_extended_sum __P((struct sun_disklabel *));
 
 #define b_cylin		b_resid
 
@@ -156,10 +157,6 @@ readdisklabel(dev, strat, lp, clp)
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64*1024;		/* XXX ? */
 
-#if defined(CD9660)
-	if (iso_disklabelspoof(dev, strat, lp) == 0)
-		return (NULL);
-#endif
 	/* obtain buffer to probe drive with */
 	bp = geteblk((int)lp->d_secsize);
 
@@ -196,6 +193,10 @@ readdisklabel(dev, strat, lp, clp)
 		return (NULL);
 	}
 
+#if defined(CD9660)
+	if (iso_disklabelspoof(dev, strat, lp) == 0)
+		return (NULL);
+#endif
 	bzero(clp->cd_block, sizeof(clp->cd_block));
 	return ("no disk label");
 }
@@ -292,9 +293,10 @@ writedisklabel(dev, strat, lp, clp)
  * if needed, and signal errors or early completion.
  */
 int
-bounds_check_with_label(bp, lp, wlabel)
+bounds_check_with_label(bp, lp, osdep, wlabel)
 	struct buf *bp;
 	struct disklabel *lp;
+	struct cpu_disklabel *osdep;
 	int wlabel;
 {
 #define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))
@@ -349,7 +351,7 @@ static u_char
 sun_fstypes[16] = {
 	FS_BSDFFS,	/* a */
 	FS_SWAP,	/* b */
-	FS_OTHER,	/* c - whole disk */
+	FS_UNUSED,	/* c - whole disk */
 	FS_BSDFFS,	/* d */
 	FS_BSDFFS,	/* e */
 	FS_BSDFFS,	/* f */

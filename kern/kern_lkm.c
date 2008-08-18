@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lkm.c,v 1.14 1997/02/06 13:09:13 deraadt Exp $	*/
+/*	$OpenBSD: kern_lkm.c,v 1.20 1997/10/06 20:19:54 deraadt Exp $	*/
 /*	$NetBSD: kern_lkm.c,v 1.31 1996/03/31 21:40:27 christos Exp $	*/
 
 /*
@@ -59,14 +59,14 @@
 #include <sys/lkm.h>
 #include <sys/syscall.h>
 
+#include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/vm_kern.h>
+
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #endif
-
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-#include <vm/vm_kern.h>
 
 #define	LKM_ALLOC	0x01
 #define	LKM_WANT	0x02
@@ -266,9 +266,9 @@ lkmclose(dev, flag, mode, p)
 {
 
 	if (!(lkm_v & LKM_ALLOC)) {
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 		printf("LKM: close before open!\n");
-#endif	/* DEBUG */
+#endif	/* LKM_DEBUG */
 		return (EBADF);
 	}
 
@@ -345,12 +345,12 @@ lkmioctl(dev, cmd, data, flag, p)
 			if (cmd == LMRESERV)
 				resrvp->sym_addr = 0;
 		}
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 		printf("LKM: LMRESERV (actual   = 0x%08lx)\n", curp->area);
 		printf("LKM: LMRESERV (syms     = 0x%08x)\n", curp->syms);
 		printf("LKM: LMRESERV (adjusted = 0x%08lx)\n",
 			trunc_page(curp->area));
-#endif	/* DEBUG */
+#endif	/* LKM_DEBUG */
 		lkm_state = LKMS_RESERVED;
 		break;
 
@@ -378,15 +378,15 @@ lkmioctl(dev, cmd, data, flag, p)
 
 		if ((curp->offset + loadbufp->cnt) < curp->size) {
 			lkm_state = LKMS_LOADING;
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 			printf("LKM: LMLOADBUF (loading @ %ld of %ld, i = %d)\n",
 			curp->offset, curp->size, loadbufp->cnt);
-#endif	/* DEBUG */
+#endif	/* LKM_DEBUG */
 		} else {
 			lkm_state = LKMS_LOADING_SYMS;
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 			printf("LKM: LMLOADBUF (loaded)\n");
-#endif	/* DEBUG */
+#endif	/* LKM_DEBUG */
 		}
 		curp->offset += loadbufp->cnt;
 		break;
@@ -414,15 +414,15 @@ lkmioctl(dev, cmd, data, flag, p)
 
 		if ((curp->sym_offset + i) < curp->sym_size) {
 			lkm_state = LKMS_LOADING_SYMS;
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 			printf( "LKM: LMLOADSYMS (loading @ %d of %d, i = %d)\n",
 			curp->sym_offset, curp->sym_size, i);
-#endif	/* DEBUG*/
+#endif	/* LKM_DEBUG*/
 		} else {
 			lkm_state = LKMS_LOADED;
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 			printf( "LKM: LMLOADSYMS (loaded)\n");
-#endif	/* DEBUG*/
+#endif	/* LKM_DEBUG*/
 		}
 		curp->sym_offset += i;
 		break;
@@ -435,9 +435,9 @@ lkmioctl(dev, cmd, data, flag, p)
 			return EPERM;
 
 		lkmunreserve();	/* coerce state to LKM_IDLE */
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 		printf("LKM: LMUNRESERV\n");
-#endif	/* DEBUG */
+#endif	/* LKM_DEBUG */
 		break;
 
 	case LMREADY:		/* module loaded: call entry */
@@ -459,18 +459,18 @@ lkmioctl(dev, cmd, data, flag, p)
 			break;
 		default:
 
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 			printf("lkm_state is %02x\n", lkm_state);
-#endif	/* DEBUG */
+#endif	/* LKM_DEBUG */
 			return ENXIO;
 		}
 
 		curp->entry = (int (*) __P((struct lkm_table *, int, int)))
 				(*((long *) (data)));
 
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 		printf("LKM: call entrypoint %x\n", curp->entry);
-#endif
+#endif /* LKM_DEBUG */
 		/* call entry(load)... (assigns "private" portion) */
 		error = (*(curp->entry))(curp, LKM_E_LOAD, curp->ver);
 		if (error) {
@@ -484,19 +484,19 @@ lkmioctl(dev, cmd, data, flag, p)
 			break;
 		}
 
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 		printf("LKM: LMREADY, id=%d, dev=%d\n", curp->id, curp->private.lkm_any->lkm_offset);
-#endif	/* DEBUG */
+#endif	/* LKM_DEBUG */
 #ifdef DDB
 		if (curp->syms && curp->sym_offset >= curp->sym_size) {
-		    db_add_symbol_table(curp->syms,
+		    curp->sym_id = db_add_symbol_table(curp->syms,
 					curp->syms + curp->sym_symsize,
 					curp->private.lkm_any->lkm_name,
 					curp->syms, 
 					curp->syms + curp->sym_size );
 		    printf("DDB symbols added: %ld bytes\n", curp->sym_symsize);
 		}
-#endif
+#endif /* DDB */
 		curp->refcnt++;
 		lkm_state = LKMS_IDLE;
 		break;
@@ -983,9 +983,9 @@ lkmdispatch(lkmtp, cmd)
 {
 	int error = 0;		/* default = success */
 
-#ifdef DEBUG
+#ifdef LKM_DEBUG
 	printf("lkmdispatch: %x %d\n", lkmtp, cmd);
-#endif /* DEBUG */
+#endif /* LKM_DEBUG */
 
 	switch(lkmtp->private.lkm_any->lkm_type) {
 	case LM_SYSCALL:

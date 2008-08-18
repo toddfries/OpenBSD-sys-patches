@@ -1,18 +1,19 @@
-#	$OpenBSD: Makefile,v 1.6 1997/04/27 20:56:28 millert Exp $
+#	$OpenBSD: Makefile,v 1.16 1997/10/22 23:28:30 mickey Exp $
 
 PROG=	boot
-SRCS=	srt0.S boot.c cmd.c conf.c
-CFLAGS+=$(SACFLAGS) -I${.CURDIR}/../../../../lib/libsa -I${.CURDIR}/../libsa
-AFLAGS+=-Wa,-R
+SRCS=	srt0.S boot.c cmd.c bootarg.c conf.c
+#AFLAGS+=-Wa,-R
 # AFLAGS+=-Wa,-a
 LD=ld
-LDFLAGS+=-nostdlib -Ttext $(START) -z -x -e start_boot -Bstatic
-INSTALL_STRIP=
+LDFLAGS+=-nostdlib -Ttext $(LINKADDR) -z -x -Bstatic
 MAN=	boot.8
-SADIR=${.CURDIR}/..
+S	=${.CURDIR}/../../../..
+SADIR=	${.CURDIR}/..
 
 LDADD=	${LIBSA} ${LIBZ}
 DPADD=	${LIBSA} ${LIBZ}
+
+.PATH:	${S}/stand/boot
 
 all:	machine-links
 
@@ -27,7 +28,5 @@ ${PROG}: $(OBJS) $(DPADD)
 
 .include <bsd.prog.mk>
 
-CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC)
-.ifdef NO_NET
-CPPFLAGS+=-DNO_NET
-.endif
+CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS}
+CFLAGS+=$(SACFLAGS)

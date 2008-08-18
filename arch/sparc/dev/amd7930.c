@@ -1,5 +1,5 @@
-/*	$OpenBSD: amd7930.c,v 1.6 1996/08/12 02:10:35 downsj Exp $	*/
-/*	$NetBSD: amd7930.c,v 1.10 1996/03/31 22:38:29 pk Exp $	*/
+/*	$OpenBSD: amd7930.c,v 1.10 1997/09/17 06:47:06 downsj Exp $	*/
+/*	$NetBSD: amd7930.c,v 1.30 1997/08/27 22:42:23 augustss Exp $	*/
 
 /*
  * Copyright (c) 1995 Rolf Grossmann
@@ -50,6 +50,8 @@
 #include <dev/ic/am7930reg.h>
 #include <sparc/dev/amd7930var.h>
 
+#define AUDIO_ROM_NAME "audio"
+
 #ifdef AUDIO_DEBUG
 extern void Dprintf __P((const char *, ...));
 
@@ -84,16 +86,25 @@ struct amd7930_softc {
 
         /* sc_au is special in that the hardware interrupt handler uses it */
         struct  auio sc_au;		/* recv and xmit buffers, etc */
-#define sc_intrcnt sc_au.au_intrcnt
+#define sc_intrcnt	sc_au.au_intrcnt	/* statistics */
 };
 
 /* interrupt interfaces */
 #ifdef AUDIO_C_HANDLER
 int	amd7930hwintr __P((void *));
+#if defined(SUN4M)
+#define AUDIO_SET_SWINTR do {		\
+	if (CPU_ISSUN4M)		\
+		raise(0, 4);		\
+	else				\
+		ienab_bis(IE_L4);	\
+} while(0);
+#else
 #define AUDIO_SET_SWINTR ienab_bis(IE_L4)
+#endif /* defined(SUN4M) */
 #else
 struct auio *auiop;
-#endif
+#endif /* AUDIO_C_HANDLER */
 int	amd7930swintr __P((void *));
 
 /* forward declarations */
@@ -104,18 +115,18 @@ static void init_amd __P((volatile struct amd7930 *));
 void	amd7930attach __P((struct device *, struct device *, void *));
 int	amd7930match __P((struct device *, void *, void *));
 
-struct cfattach audio_ca = {
+struct cfattach audioamd_ca = {
 	sizeof(struct amd7930_softc), amd7930match, amd7930attach
 };
 
-struct	cfdriver audio_cd = {
-	NULL, "audio", DV_DULL
+struct	cfdriver audioamd_cd = {
+	NULL, "audioamd", DV_DULL
 };
 
 struct audio_device amd7930_device = {
 	"amd7930",
 	"x",
-	"audio"
+	"audioamd"
 };
 
 /* Write 16 bits of data from variable v to the data port of the audio chip */
@@ -130,7 +141,7 @@ struct audio_device amd7930_device = {
  * -18 to 0dB in .16dB steps then 0 to 12dB in .08dB steps.
  */
 static const u_short gx_coeff[256] = {
-	0x9008, 0x8b7c, 0x8b51, 0x8b45, 0x8b42, 0x8b3b, 0x8b36, 0x8b33,
+	0x9008, 0x8e7c, 0x8e51, 0x8e45, 0x8d42, 0x8d3b, 0x8c36, 0x8c33,
 	0x8b32, 0x8b2a, 0x8b2b, 0x8b2c, 0x8b25, 0x8b23, 0x8b22, 0x8b22,
 	0x9122, 0x8b1a, 0x8aa3, 0x8aa3, 0x8b1c, 0x8aa6, 0x912d, 0x912b,
 	0x8aab, 0x8b12, 0x8aaa, 0x8ab2, 0x9132, 0x8ab4, 0x913c, 0x8abb,
@@ -202,9 +213,8 @@ u_long	amd7930_get_in_sr __P((void *));
 int	amd7930_set_out_sr __P((void *, u_long));
 u_long	amd7930_get_out_sr __P((void *));
 int	amd7930_query_encoding __P((void *, struct audio_encoding *));
-int	amd7930_set_encoding __P((void *, u_int));
+int	amd7930_set_format __P((void *, u_int, u_int));
 int	amd7930_get_encoding __P((void *));
-int	amd7930_set_precision __P((void *, u_int));
 int	amd7930_get_precision __P((void *));
 int	amd7930_set_channels __P((void *, int));
 int	amd7930_get_channels __P((void *));
@@ -239,9 +249,8 @@ struct audio_hw_if sa_hw_if = {
 	amd7930_set_out_sr,
 	amd7930_get_out_sr,
 	amd7930_query_encoding,
-	amd7930_set_encoding,
+	amd7930_set_format,
 	amd7930_get_encoding,
-	amd7930_set_precision,
 	amd7930_get_precision,
 	amd7930_set_channels,
 	amd7930_get_channels,
@@ -251,7 +260,6 @@ struct audio_hw_if sa_hw_if = {
 	amd7930_set_in_port,
 	amd7930_get_in_port,
 	amd7930_commit_settings,
-	amd7930_get_silence,
 	NULL,
 	NULL,
 	amd7930_start_output,
@@ -277,13 +285,12 @@ amd7930match(parent, vcf, aux)
 	struct device *parent;
 	void *vcf, *aux;
 {
-	struct cfdata *cf = vcf;
 	register struct confargs *ca = aux;
 	register struct romaux *ra = &ca->ca_ra;
 
 	if (CPU_ISSUN4)
 		return (0);
-	return (strcmp(cf->cf_driver->cd_name, ra->ra_name) == 0);
+	return (strcmp(AUDIO_ROM_NAME, ra->ra_name) == 0);
 }
 
 /*
@@ -307,8 +314,7 @@ amd7930attach(parent, self, args)
 	pri = ra->ra_intr[0].int_pri;
 	printf(" pri %d, softpri %d\n", pri, PIL_AUSOFT);
 	amd = (volatile struct amd7930 *)(ra->ra_vaddr ?
-		ra->ra_vaddr : mapiodev(ra->ra_reg, 0, sizeof (*amd),
-					ca->ca_bustype));
+		ra->ra_vaddr : mapiodev(ra->ra_reg, 0, sizeof (*amd)));
 
 	sc->sc_map.mr_mmr1 = AMD_MMR1_GX | AMD_MMR1_GER |
 			     AMD_MMR1_GR | AMD_MMR1_STG;
@@ -370,9 +376,9 @@ amd7930_open(dev, flags)
 
 	DPRINTF(("sa_open: unit %d\n",unit));
 
-	if (unit >= audio_cd.cd_ndevs)
+	if (unit >= audioamd_cd.cd_ndevs)
 		return (ENODEV);
-	if ((sc = audio_cd.cd_devs[unit]) == NULL)
+	if ((sc = audioamd_cd.cd_devs[unit]) == NULL)
 		return (ENXIO);
 	if (sc->sc_open)
 		return (EBUSY);
@@ -462,11 +468,14 @@ amd7930_query_encoding(addr, fp)
 }
 
 int
-amd7930_set_encoding(addr, enc)
+amd7930_set_format(addr, enc, precision)
 	void *addr;
-	u_int enc;
+	u_int enc, precision;
 {
 	if (enc != AUDIO_ENCODING_ULAW)
+		return(EINVAL);
+
+	if (precision != 8)
 		return(EINVAL);
 
 	return(0);		/* no other encoding supported by amd chip */
@@ -477,17 +486,6 @@ amd7930_get_encoding(addr)
 	void *addr;
 {
 	return(AUDIO_ENCODING_ULAW);
-}
-
-int
-amd7930_set_precision(addr, prec)
-	void *addr;
-	u_int prec;
-{
-	if (prec != 8)
-		return(EINVAL);
-
-	return(0);		/* no other precision supported by amd chip */
 }
 
 int

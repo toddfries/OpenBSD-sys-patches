@@ -49,6 +49,8 @@ option		LKM
 option		COMPAT_SUNOS		# compatibility with SunOS binaries
 option		COMPAT_SVR4		# compatibility with SVR4 binaries
 
+maxusers	16		# estimated number of users
+
 config		bsd	swap generic
 
 mainbus0 at root
@@ -59,7 +61,7 @@ sbus0	at mainbus0
 #vmes0	at mainbus0
 #vmel0	at mainbus0
 
-audio0	at mainbus0
+audioamd0 at mainbus0
 auxreg0	at mainbus0
 clock0	at mainbus0
 #clock0	at obio0 addr 0xf2000000
@@ -146,6 +148,9 @@ scsibus* at esp?
 sd*	at scsibus? target ? lun ?
 st*	at scsibus? target ? lun ?
 cd*	at scsibus? target ? lun ?
+ch*     at scsibus? target ? lun ?              # SCSI changer devices
+ss*     at scsibus? target ? lun ?              # SCSI scanners
+uk*     at scsibus? target ? lun ?              # unknown SCSI devices
 
 fdc0	at mainbus0
 fd*	at fdc0

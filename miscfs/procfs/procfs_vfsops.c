@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vfsops.c,v 1.4 1996/06/21 12:49:56 mickey Exp $	*/
+/*	$OpenBSD: procfs_vfsops.c,v 1.6 1997/10/06 20:20:34 deraadt Exp $	*/
 /*	$NetBSD: procfs_vfsops.c,v 1.25 1996/02/09 22:40:53 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.56 1997/04/30 20:21:14 deraadt Exp $
+#	$OpenBSD: files,v 1.65 1997/10/06 20:19:37 deraadt Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -46,6 +46,9 @@ file	dev/ic/uha.c		uha
 # 3Com Etherlink-III Ethernet controller
 device	ep: ether, ifnet
 file	dev/ic/elink3.c		ep
+
+# WaveLan
+# device wlp: ether, ifnet
 
 # LANCE and PCnet Ethernet controllers
 device	le: ether, ifnet
@@ -299,19 +302,24 @@ file netinet/fil.c			ipfilter
 file netinet/ip_nat.c			ipfilter
 file netinet/ip_frag.c			ipfilter
 file netinet/ip_state.c			ipfilter
+file netinet/ip_ipsp.c			inet & ipsec
+file netinet/ip_ip4.c			inet & ipsec
 file netinet/ip_ah.c			inet & ipsec
 file netinet/ip_esp.c			inet & ipsec
-file netinet/ip_espdes.c		inet & ipsec
-file netinet/ip_espdesmd5.c		inet & ipsec
-file netinet/ip_ipsp.c			inet & ipsec
-file netinet/ip_ahmd5.c			inet & ipsec
-file netinet/ip_ip4.c			inet & ipsec
-file netinet/ip_ahhmacmd5.c		inet & ipsec
-file netinet/ip_ahhmacsha1.c		inet & ipsec
+file netinet/ip_esp_old.c		inet & ipsec
+file netinet/ip_esp_new.c		inet & ipsec
+file netinet/ip_ah_old.c		inet & ipsec
+file netinet/ip_ah_new.c		inet & ipsec
 file netinet/ip_sha1.c			inet & ipsec
 file netinet/libdeslite/ecb_enc.c	inet & ipsec
 file netinet/libdeslite/set_key.c	inet & ipsec
-file netinet/ip_esp3desmd5.c		inet & ipsec
+file netinet/libdeslite/ecb3_enc.c	inet & ipsec
+file netatalk/aarp.c			netatalk
+file netatalk/at_control.c		netatalk
+file netatalk/at_proto.c		netatalk
+file netatalk/ddp_input.c		netatalk
+file netatalk/ddp_output.c		netatalk
+file netatalk/ddp_usrreq.c		netatalk
 file netiso/clnp_debug.c		iso
 file netiso/clnp_er.c			iso
 file netiso/clnp_frag.c			iso
@@ -398,19 +406,18 @@ file ufs/ufs/ufs_bmap.c			ffs | mfs | ext2fs
 file ufs/ufs/ufs_ihash.c		ffs | mfs | ext2fs
 file ufs/ufs/ufs_inode.c		ffs | mfs | ext2fs
 file ufs/ufs/ufs_lookup.c		ffs | mfs | ext2fs
-file ufs/ufs/ufs_quota.c		quota
+file ufs/ufs/ufs_quota.c		quota & ( ffs | mfs | ext2fs )
 file ufs/ufs/ufs_vfsops.c		ffs | mfs | ext2fs
 file ufs/ufs/ufs_vnops.c		ffs | mfs | ext2fs
-file gnu/ext2fs/ext2_alloc.c		ext2fs
-file gnu/ext2fs/ext2_balloc.c		ext2fs
-file gnu/ext2fs/ext2_inode.c		ext2fs
-file gnu/ext2fs/ext2_inode_cnv.c	ext2fs
-file gnu/ext2fs/ext2_linux_balloc.c	ext2fs
-file gnu/ext2fs/ext2_linux_ialloc.c	ext2fs
-file gnu/ext2fs/ext2_lookup.c		ext2fs
-file gnu/ext2fs/ext2_subr.c		ext2fs
-file gnu/ext2fs/ext2_vfsops.c		ext2fs
-file gnu/ext2fs/ext2_vnops.c		ext2fs
+file ufs/ext2fs/ext2fs_alloc.c		ext2fs
+file ufs/ext2fs/ext2fs_balloc.c		ext2fs
+file ufs/ext2fs/ext2fs_bmap.c		ext2fs
+file ufs/ext2fs/ext2fs_inode.c		ext2fs
+file ufs/ext2fs/ext2fs_lookup.c		ext2fs
+file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
+file ufs/ext2fs/ext2fs_subr.c		ext2fs
+file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
+file ufs/ext2fs/ext2fs_vnops.c		ext2fs
 file vm/device_pager.c			devpager
 file vm/kern_lock.c
 file vm/swap_pager.c			swappager

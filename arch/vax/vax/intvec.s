@@ -1,4 +1,5 @@
-/*	$NetBSD: intvec.s,v 1.20 1996/07/20 18:20:44 ragge Exp $   */
+/*	$OpenBSD: intvec.s,v 1.8 1997/09/12 09:30:54 maja Exp $   */
+/*	$NetBSD: intvec.s,v 1.23 1997/07/28 21:48:35 ragge Exp $   */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -77,7 +78,8 @@ ENTRY(stray/**/vecnr)		; \
 	.long	label+stack;
 		.text
 
-	.globl	_kernbase, _rpb
+	.globl	_kernel_text, _kernbase, _rpb
+_kernel_text:
 _kernbase:
 _rpb:	
 /*
@@ -92,7 +94,7 @@ _rpb:
 	INTVEC(invkstk, ISTACK) # Kernel Stack Invalid., 8
 	INTVEC(stray0C, ISTACK) # Power Failed., C
 	INTVEC(privinflt, KSTACK)	# Privileged/Reserved Instruction.
-	INTVEC(stray14, ISTACK) # Customer Reserved Instruction, 14
+	INTVEC(xfcflt, KSTACK)		# Customer Reserved Instruction, 14
 	INTVEC(resopflt, KSTACK)	# Reserved Operand/Boot Vector(?), 18
 	INTVEC(resadflt, KSTACK)	# # Reserved Address Mode., 1C
 	INTVEC(access_v, KSTACK)	# Access Control Violation, 20
@@ -149,8 +151,13 @@ _rpb:
 	INTVEC(strayEC, ISTACK) # Unused, EC
 	INTVEC(strayF0, ISTACK)
 	INTVEC(strayF4, ISTACK)
+#if VAX8600 || VAX8200 || VAX750 || VAX780 || VAX630 || VAX650
 	INTVEC(consrint, ISTACK)	# Console Terminal Recieve Interrupt
 	INTVEC(constint, ISTACK)	# Console Terminal Transmit Interrupt
+#else
+	INTVEC(strayF8, ISTACK)
+	INTVEC(strayFC, ISTACK)
+#endif
 
 	/* space for adapter vectors */
 	.space 0x100
@@ -197,7 +204,7 @@ L4:	addl2	(sp)+,sp	# remove info pushed on stack
 	STRAY(0,0C)
 
 	TRAPCALL(privinflt, T_PRIVINFLT)
-	STRAY(0,14)
+	TRAPCALL(xfcflt, T_XFCFLT);
 	TRAPCALL(resopflt, T_RESOPFLT)
 	TRAPCALL(resadflt, T_RESADFLT)
 
@@ -340,9 +347,13 @@ hardclock:	mtpr	$0xc1,$PR_ICCS		# Reset interrupt flag
 	STRAY(0,EC)
 	STRAY(0,F0)
 	STRAY(0,F4)
-
+#if VAX8600 || VAX8200 || VAX750 || VAX780 || VAX630 || VAX650
 	FASTINTR(consrint,gencnrint)
 	FASTINTR(constint,gencntint)
+#else
+	STRAY(0,F8)
+	STRAY(0,FC)
+#endif
 
 /*
  * Main routine for traps; all go through this.
@@ -369,7 +380,7 @@ _sret:	movl	(sp)+, fp
 sbifltmsg:
 	.asciz	"SBI fault",0
 
-#if VAX630 || VAX650
+#if VAX630 || VAX650 || VAX410
 /*
  * Table of emulated Microvax instructions supported by emulate.s.
  * Use noemulate to convert unimplemented ones to reserved instruction faults.
@@ -434,7 +445,7 @@ _emtable:
 	.align	2
 	.globl	emulate
 emulate:
-#if VAX630 || VAX650
+#if VAX630 || VAX650 || VAX410
 	movl	r11,32(sp)		# save register r11 in unused operand
 	movl	r10,36(sp)		# save register r10 in unused operand
 	cvtbl	(sp),r10		# get opcode

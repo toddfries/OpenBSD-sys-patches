@@ -1,15 +1,16 @@
 #
 #	THREADWAY: threadway.teeny.org
 #
-#	$OpenBSD: THREADWAY,v 1.17 1997/04/27 05:01:12 downsj Exp $
+#	$OpenBSD: THREADWAY,v 1.22 1997/09/29 03:52:20 mickey Exp $
 #
 
 machine		i386
 option		I586_CPU
 
 option		XSERVER
-option		EXTMEM_SIZE=56320
-option		PCVT_USL_VT_COMPAT=1,PCVT_SCREENSAVER=1,PCVT_PRETTYSCRNS=0
+option		PCVT_SCREENSAVER=1,PCVT_PRETTYSCRNS=0
+option		NMBCLUSTERS=512
+option		APM_NOIDLE
 
 maxusers	32
 option		TIMEZONE=480
@@ -28,7 +29,6 @@ option		SYSVSEM
 option		SYSVSHM
 #option		SHMMAXPGS=1024
 
-option		COMPAT_NOMID
 option		COMPAT_09
 option		COMPAT_10
 option		COMPAT_11
@@ -39,6 +39,7 @@ option		COMPAT_SVR4
 option		COMPAT_IBCS2
 option		COMPAT_LINUX
 option		COMPAT_FREEBSD
+option		COMPAT_BSDOS
 
 option		BOOT_CONFIG
 
@@ -65,11 +66,14 @@ option		UMAPFS
 option		UNION
 
 option		INET
+option		IPSEC
 
-config		bsd root on wd0 swap on wd0 and wd1 and wd2
+config		bsd root on sd0 swap on sd0 and wd0
 
 mainbus0 at root
 
+bios0	at mainbus0
+apm0	at bios0
 isa0	at mainbus0
 eisa0	at mainbus0
 pci0	at mainbus0 bus ?
@@ -94,8 +98,8 @@ pms0	at pckbd? irq 12		# PS/2 auxiliary port mouse
 
 de0	at pci? dev ? function ?
 
-ncr0	at pci? dev ? function ?	# NCR 538XX SCSI controllers
-scsibus0 at ncr0
+ahc*	at pci? dev ? function ?
+scsibus* at ahc?
 
 sd*	at scsibus? target ? lun ?	# SCSI disk drives
 st*	at scsibus? target ? lun ?	# SCSI tape drives
@@ -116,6 +120,7 @@ acd*	at atapibus? drive?
 pseudo-device	loop	1
 pseudo-device	bpfilter 8
 pseudo-device	tun	2
+pseudo-device	enc	4
 
 pseudo-device	pty	64
 pseudo-device	vnd	8

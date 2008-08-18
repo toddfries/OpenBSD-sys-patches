@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.8 1997/02/11 22:23:14 kstailey Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.12 1997/09/28 23:09:56 deraadt Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -110,6 +110,8 @@ static void in_arpinput __P((struct mbuf *));
 static void arptfree __P((struct llinfo_arp *));
 static struct llinfo_arp *arplookup __P((u_int32_t, int, int ));
 #ifdef DDB
+#include <vm/vm.h>
+
 static void db_print_sa __P((struct sockaddr *));
 static void db_print_ifa __P((struct ifaddr *));
 static void db_print_llinfo __P((caddr_t));
@@ -203,7 +205,7 @@ arp_rtrequest(req, rt, sa)
 	case RTM_RESOLVE:
 		if (gate->sa_family != AF_LINK ||
 		    gate->sa_len < sizeof(null_sdl)) {
-			log(LOG_DEBUG, "arp_rtrequest: bad gateway value");
+			log(LOG_DEBUG, "arp_rtrequest: bad gateway value\n");
 			break;
 		}
 		SDL(gate)->sdl_type = rt->rt_ifp->if_type;
@@ -293,6 +295,8 @@ arprequest(ac, sip, tip, enaddr)
 	ea->arp_hln = sizeof(ea->arp_sha);	/* hardware address length */
 	ea->arp_pln = sizeof(ea->arp_spa);	/* protocol address length */
 	ea->arp_op = htons(ARPOP_REQUEST);
+	bcopy((caddr_t)enaddr, (caddr_t)eh->ether_shost,
+	      sizeof(eh->ether_shost));
 	bcopy((caddr_t)enaddr, (caddr_t)ea->arp_sha, sizeof(ea->arp_sha));
 	bcopy((caddr_t)sip, (caddr_t)ea->arp_spa, sizeof(ea->arp_spa));
 	bcopy((caddr_t)tip, (caddr_t)ea->arp_tpa, sizeof(ea->arp_tpa));
@@ -338,7 +342,7 @@ arpresolve(ac, rt, m, dst, desten)
 			rt = la->la_rt;
 	}
 	if (la == 0 || rt == 0) {
-		log(LOG_DEBUG, "arpresolve: can't allocate llinfo");
+		log(LOG_DEBUG, "arpresolve: can't allocate llinfo\n");
 		m_freem(m);
 		return (0);
 	}
@@ -352,6 +356,9 @@ arpresolve(ac, rt, m, dst, desten)
 		bcopy(LLADDR(sdl), desten, sdl->sdl_alen);
 		return 1;
 	}
+	if (((struct ifnet *)ac)->if_flags & IFF_NOARP)
+		return 0;
+
 	/*
 	 * There is an arptab entry, but no ethernet address
 	 * response yet.  Replace the held mbuf with this
@@ -531,6 +538,8 @@ reply:
 	eh = (struct ether_header *)sa.sa_data;
 	bcopy((caddr_t)ea->arp_tha, (caddr_t)eh->ether_dhost,
 	    sizeof(eh->ether_dhost));
+	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)eh->ether_shost,
+	    sizeof(eh->ether_shost));
 	eh->ether_type = htons(ETHERTYPE_ARP);
 	sa.sa_family = AF_UNSPEC;
 	sa.sa_len = sizeof(sa);
@@ -730,6 +739,8 @@ revarprequest(ifp)
 	ea->arp_hln = sizeof(ea->arp_sha);	/* hardware address length */
 	ea->arp_pln = sizeof(ea->arp_spa);	/* protocol address length */
 	ea->arp_op = htons(ARPOP_REVREQUEST);
+	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)eh->ether_shost,
+	   sizeof(ea->arp_tha));
 	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)ea->arp_sha,
 	   sizeof(ea->arp_sha));
 	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)ea->arp_tha,

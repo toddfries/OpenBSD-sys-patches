@@ -1,7 +1,8 @@
-/*	$OpenBSD: kern_sig.c,v 1.16 1997/02/01 21:49:41 deraadt Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.21 1997/10/06 20:19:56 deraadt Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
+ * Copyright (c) 1997 Theo de Raadt. All rights reserved. 
  * Copyright (c) 1982, 1986, 1989, 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -125,6 +126,8 @@ sys_sigaction(p, v, retval)
 		if (signum == SIGCHLD) {
 			if ((p->p_flag & P_NOCLDSTOP) != 0)
 				sa->sa_flags |= SA_NOCLDSTOP;
+			if ((p->p_flag & P_NOCLDWAIT) != 0)
+				sa->sa_flags |= SA_NOCLDWAIT;
 		}
 		if ((sa->sa_mask & bit) == 0)
 			sa->sa_flags |= SA_NODEFER;
@@ -167,6 +170,19 @@ setsigvec(p, signum, sa)
 			p->p_flag |= P_NOCLDSTOP;
 		else
 			p->p_flag &= ~P_NOCLDSTOP;
+		if (sa->sa_flags & SA_NOCLDWAIT) {
+			/*
+			 * Paranoia: since SA_NOCLDWAIT is implemented by
+			 * reparenting the dying child to PID 1 (and
+			 * trust it to reap the zombie), PID 1 itself is
+			 * forbidden to set SA_NOCLDWAIT.
+			 */
+			if (p->p_pid == 1)
+				p->p_flag &= ~P_NOCLDWAIT;
+			else
+				p->p_flag |= P_NOCLDWAIT;
+		} else
+			p->p_flag &= ~P_NOCLDWAIT;
 	}
 	if ((sa->sa_flags & SA_RESETHAND) != 0)
 		ps->ps_sigreset |= bit;
@@ -481,6 +497,46 @@ killpg1(cp, signum, pgid, all)
 		}
 	}
 	return (nfound ? 0 : ESRCH);
+}
+
+#define CANDELIVER(uid, euid, p) \
+	(euid == 0 || \
+	(uid) == (p)->p_cred->p_ruid || \
+	(uid) == (p)->p_cred->p_svuid || \
+	(uid) == (p)->p_ucred->cr_uid || \
+	(euid) == (p)->p_cred->p_ruid || \
+	(euid) == (p)->p_cred->p_svuid || \
+	(euid) == (p)->p_ucred->cr_uid)
+
+/*
+ * Deliver signum to pgid, but first check uid/euid against each
+ * process and see if it is permitted.
+ */
+void
+csignal(pgid, signum, uid, euid)
+	pid_t pgid;
+	int signum;
+	uid_t uid, euid;
+{
+	struct pgrp *pgrp;
+	struct proc *p;
+
+	if (pgid == 0)
+		return;
+	if (pgid < 0) {
+		pgid = -pgid;
+		if ((pgrp = pgfind(pgid)) == NULL)
+			return;
+		for (p = pgrp->pg_members.lh_first; p;
+		    p = p->p_pglist.le_next)
+			if (CANDELIVER(uid, euid, p))
+				psignal(p, signum);
+	} else {
+		if ((p = pfind(pgid)) == NULL)
+			return;
+		if (CANDELIVER(uid, euid, p))
+			psignal(p, signum);
+	}
 }
 
 /*

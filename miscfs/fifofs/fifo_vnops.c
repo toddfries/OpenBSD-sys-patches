@@ -1,4 +1,4 @@
-/*	$OpenBSD: fifo_vnops.c,v 1.4 1996/11/04 03:31:54 tholo Exp $	*/
+/*	$OpenBSD: fifo_vnops.c,v 1.6 1997/10/06 20:20:23 deraadt Exp $	*/
 /*	$NetBSD: fifo_vnops.c,v 1.18 1996/03/16 23:52:42 christos Exp $	*/
 
 /*

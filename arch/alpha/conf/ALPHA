@@ -1,10 +1,10 @@
-#	$OpenBSD: ALPHA,v 1.9 1997/01/24 19:56:53 niklas Exp $
+#	$OpenBSD: ALPHA,v 1.12 1997/09/26 16:49:20 kstailey Exp $
 #	$NetBSD: ALPHA,v 1.30 1996/12/03 17:25:27 cgd Exp $
 #
 # Alpha kernel with all the options you'd want, and more.
 
-include	"arch/alpha/conf/std.alpha"
-
+machine	alpha
+option		SWAPPAGER, DEVPAGER
 maxusers 8
 
 # CPU Support
@@ -38,7 +38,7 @@ options		NFSCLIENT	# Sun NFS-compatible file system client
 options		NULLFS		# Null file system layer
 options		KERNFS		# Kernel variable file system (/kern)
 options		FDESC		# File descriptor file system (/dev/fd)
-options		PORTAL		# Portal file system
+options		PORTAL		# dynamically created filesystem objects
 options		UMAPFS		# User-mapping file system layer
 options		PROCFS		# Process file system (/proc)
 options		UNION		# union file system
@@ -87,7 +87,6 @@ options		EISAVERBOSE		# recognize "unknown" EISA devices
 options		FIX_UNALIGNED_VAX_FP	# fix unaligned VAX FP loads & stores
 options		PCIVERBOSE		# recognize "unknown" PCI devices
 options		TCVERBOSE		# recognize "unknown" TC devices
-options		UCONSOLE		# users can use TIOCCONS (for xconsole)
 
 config		bsd	swap generic
 #config		bsd	root on sd0 swap on sd0

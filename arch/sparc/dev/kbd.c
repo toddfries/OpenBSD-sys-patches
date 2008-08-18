@@ -1,5 +1,5 @@
-/*	$OpenBSD: kbd.c,v 1.5 1996/08/11 23:34:01 downsj Exp $	*/
-/*	$NetBSD: kbd.c,v 1.23 1996/04/01 17:34:34 christos Exp $ */
+/*	$OpenBSD: kbd.c,v 1.7 1997/09/17 06:47:10 downsj Exp $	*/
+/*	$NetBSD: kbd.c,v 1.28 1997/09/13 19:12:18 pk Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -66,7 +66,7 @@
 #include <machine/conf.h>
 
 #include <machine/vuid_event.h>
-#include <sparc/dev/event_var.h>
+#include <dev/sun/event_var.h>
 #include <machine/kbd.h>
 #include <machine/kbio.h>
 
@@ -288,6 +288,18 @@ kbdattach(kbd)
 		if (ttyoutput(KBD_CMD_RESET, tp) >= 0)
 			panic("kbdattach");
 		(*tp->t_oproc)(tp);	/* get it going */
+
+		/*
+		 * Wait here for the keyboard initialization to complete
+		 * since subsequent kernel console access (ie. cnget())
+		 * may cause the PROM to interfere with the device.
+		 */
+		if (tsleep((caddr_t)&kbd_softc.k_state,
+			   PZERO | PCATCH, devopn, hz) != 0) {
+			/* no response */
+			printf("kbd: reset failed\n");
+			kbd_reset(&kbd_softc.k_state);
+		}
 	}
 }
 
@@ -296,11 +308,9 @@ kbd_reset(ks)
 	register struct kbd_state *ks;
 {
 	/*
-	 * On first identification, wake up anyone waiting for type
-	 * and set up the table pointers.
+	 * On first identification, set up the table pointers.
 	 */
 	if (ks->kbd_unshifted == NULL) {
-		wakeup((caddr_t)ks);
 		ks->kbd_unshifted = kbd_unshifted;
 		ks->kbd_shifted = kbd_shifted;
 		ks->kbd_cur = ks->kbd_unshifted;
@@ -326,7 +336,6 @@ kbd_reset(ks)
 		break;
 	default:
 		printf("Unknown keyboard type %d\n", ks->kbd_id);
-		break;
 	}
 
 	ks->kbd_leds = 0;
@@ -448,7 +457,8 @@ kbd_rint(c)
 			/* Arrange to get keyboard layout as well */
 			(void)ttyoutput(KBD_CMD_GLAYOUT, k->k_kbd);
 			(*k->k_kbd->t_oproc)(k->k_kbd);
-		}
+		} else
+			wakeup((caddr_t)&k->k_state);
 		return;
 	}
 
@@ -456,6 +466,10 @@ kbd_rint(c)
 	if (k->k_state.kbd_pending == KBD_LAYOUT) {
 		k->k_state.kbd_pending = 0;
 		k->k_state.kbd_layout = c;
+		/*
+		 * Wake up anyone waiting for type.
+		 */
+		wakeup((caddr_t)&k->k_state);
 		return;
 	}
 
@@ -719,6 +733,7 @@ kbdioctl(dev, cmd, data, flag, p)
 	case KIOCGLED:
 		*(char *)data = k->k_state.kbd_leds;
 		return (0);
+
 
 	case FIONBIO:		/* we will remove this someday (soon???) */
 		return (0);

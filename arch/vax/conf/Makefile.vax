@@ -1,5 +1,5 @@
-#	$OpenBSD: Makefile.vax,v 1.5 1997/01/15 23:24:30 maja Exp $
-#	$NetBSD: Makefile.vax,v 1.28 1996/12/01 06:12:39 jonathan Exp $
+#	$OpenBSD: Makefile.vax,v 1.8 1997/10/02 19:56:06 niklas Exp $
+#	$NetBSD: Makefile.vax,v 1.32 1997/03/14 23:27:35 mycroft Exp $
 
 # Makefile for NetBSD
 #
@@ -117,14 +117,14 @@ newvers: ${SYSTEM_DEP} ${SYSTEM_SWAP_DEP}
 	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c vers.c
 
 
-clean::
+clean:: cleankernel
+cleankernel:
 	rm -f eddep *bsd bsd.gdb tags *.[io] [a-z]*.s \
 	    [Ee]rrs linterrs makelinks
 
 lint:
 	@lint -hbxncez -DGENERIC -Dvolatile= ${CPPFLAGS} -UKGDB \
-	    ${VAX}/vax/Locore.c ${CFILES} ${VAX}/vax/swapgeneric.c \
-	    ioconf.c param.c | \
+	    ${CFILES} ${VAX}/vax/swapgeneric.c ioconf.c param.c | \
 	    grep -v 'static function .* unused'
 
 tags:
@@ -155,11 +155,6 @@ uipc_proto.o vfs_conf.o: Makefile
 
 # depend on maxusers
 machdep.o: Makefile
-
-# depend on CPU configuration 
-tmscp.o ts.o uba.o uda.o autoconf.o clock.o conf.o emulate.o intvec.o: Makefile
-machdep.o sbi.o subr.o uvaxII.o: Makefile
-
 
 intvec.o: ${VAX}/vax/intvec.s
 	${NORMAL_S}

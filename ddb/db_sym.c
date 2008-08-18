@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_sym.c,v 1.18 1997/02/07 07:03:40 mickey Exp $	*/
+/*	$OpenBSD: db_sym.c,v 1.21 1997/07/19 22:31:20 niklas Exp $	*/
 /*	$NetBSD: db_sym.c,v 1.12 1996/02/05 01:57:15 christos Exp $	*/
 
 /* 
@@ -31,6 +31,8 @@
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
+
+#include <vm/vm.h>
 
 #include <machine/db_machdep.h>
 
@@ -82,7 +84,7 @@ db_add_symbol_table(start, end, name, ref, rend)
 	new->id = db_nsymtabs;
 	TAILQ_INSERT_TAIL(&db_symtabs, new, list);
 
-	return ++db_nsymtabs;
+	return db_nsymtabs++;
 }
 
 /*
@@ -170,6 +172,7 @@ db_eqname(src, dst, c)
 	return (FALSE);
 }
 
+#ifdef DDB
 boolean_t
 db_value_of_name(name, valuep)
 	char		*name;
@@ -183,7 +186,6 @@ db_value_of_name(name, valuep)
 	db_symbol_values(sym, &name, valuep);
 	return (TRUE);
 }
-
 
 /*
  * Lookup a symbol.
@@ -234,6 +236,7 @@ db_lookup(symstr)
 
 	return sp;
 }
+#endif
 
 /*
  * Does this symbol name appear in more than one symbol table?
@@ -362,13 +365,15 @@ db_printsym(off, strategy)
 			if (d)
 				db_printf("+%#r", d);
 			if (strategy == DB_STGY_PROC) {
-				if (db_line_at_pc(cursym, &filename, &linenum, off))
-					db_printf(" [%s:%d]", filename, linenum);
+				if (db_line_at_pc(cursym, &filename, &linenum,
+				    off))
+					db_printf(" [%s:%d]", filename,
+				    linenum);
 			}
 			return;
 		}
 	}
-	db_printf("%#n", off);
+	db_printf("%#ln", off);
 	return;
 }
 
@@ -398,4 +403,21 @@ db_stub_xh(sym, xh)
 	struct exec	*xh;
 {
 	X_db_stub_xh(sym, xh);
+}
+
+int
+db_symtablen(sym)
+	db_symtab_t	sym;
+{
+	return X_db_symtablen(sym);
+}
+
+int
+db_symatoff(sym, off, buf, len)
+	db_symtab_t	sym;
+	int off;
+	void *buf;
+	int *len;
+{
+	return X_db_symatoff(sym, off, buf, len);
 }

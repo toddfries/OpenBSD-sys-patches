@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.6 1997/02/24 14:06:42 niklas Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.22 1997/10/02 02:31:06 deraadt Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -57,197 +57,581 @@
 #include <netinet/ip_ah.h>
 #include <netinet/ip_esp.h>
 
+#include <dev/rndvar.h>
+#include <sys/syslog.h>
+
 int	tdb_init __P((struct tdb *, struct mbuf *));
 int	ipsp_kern __P((int, char **, int));
 
-#ifdef ENCDEBUG
-int encdebug = 1;
-#endif
+int encdebug = 0;
+u_int32_t kernfs_epoch = 0;
+
+extern void encap_sendnotify(int, struct tdb *);
 
 /*
  * This is the proper place to define the various encapsulation transforms.
  */
 
 struct xformsw xformsw[] = {
-{ XF_IP4,		0,		"IPv4 Simple Encapsulation",
-  ipe4_attach,		ipe4_init,	ipe4_zeroize,
-  (struct mbuf * (*)(struct mbuf *, struct tdb *))ipe4_input,		ipe4_output, },
-{ XF_AHMD5,		XFT_AUTH,	"Keyed MD5 Authentication",
-  ahmd5_attach,		ahmd5_init,	ahmd5_zeroize,
-  ahmd5_input,		ahmd5_output, },
-{ XF_ESPDES,		XFT_CONF,	"DES-CBC Encryption",
-  espdes_attach,	espdes_init,	espdes_zeroize,
-  espdes_input,	espdes_output, },
-{ XF_AHHMACMD5,		XFT_AUTH,	"HMAC MD5 Authentication",
-  ahhmacmd5_attach,	ahhmacmd5_init,	ahhmacmd5_zeroize,
-  ahhmacmd5_input,	ahhmacmd5_output, },
-{ XF_AHHMACSHA1,	XFT_AUTH,	"HMAC SHA1 Authentication",
-  ahhmacsha1_attach,	ahhmacsha1_init, ahhmacsha1_zeroize,
-  ahhmacsha1_input,	ahhmacsha1_output, },
-{ XF_ESPDESMD5,		XFT_CONF,     "DES-CBC Encryption + MD5 Authentication",
-  espdesmd5_attach,	espdesmd5_init,	espdesmd5_zeroize,
-  espdesmd5_input,	espdesmd5_output, },
-{ XF_ESP3DESMD5,	XFT_CONF,     "3DES-CBC Encryption + MD5 Authentication",
-  esp3desmd5_attach,	esp3desmd5_init,	esp3desmd5_zeroize,
-  esp3desmd5_input,	esp3desmd5_output, },
+    { XF_IP4,	         0,               "IPv4 Simple Encapsulation",
+      ipe4_attach,       ipe4_init,       ipe4_zeroize,
+      (struct mbuf * (*)(struct mbuf *, struct tdb *))ipe4_input, 
+      ipe4_output, },
+    { XF_OLD_AH,         XFT_AUTH,	  "Keyed Authentication, RFC 1828/1852",
+      ah_old_attach,     ah_old_init,     ah_old_zeroize,
+      ah_old_input,      ah_old_output, },
+    { XF_OLD_ESP,        XFT_CONF,        "Simple Encryption, RFC 1829/1851",
+      esp_old_attach,    esp_old_init,    esp_old_zeroize,
+      esp_old_input,     esp_old_output, },
+    { XF_NEW_AH,	 XFT_AUTH,	  "HMAC Authentication",
+      ah_new_attach,	 ah_new_init,     ah_new_zeroize,
+      ah_new_input,	 ah_new_output, },
+    { XF_NEW_ESP,	 XFT_CONF|XFT_AUTH,
+      "Encryption + Authentication + Replay Protection",
+      esp_new_attach,	 esp_new_init,  esp_new_zeroize,
+      esp_new_input,	 esp_new_output, },
 };
 
 struct xformsw *xformswNXFORMSW = &xformsw[sizeof(xformsw)/sizeof(xformsw[0])];
 
 unsigned char ipseczeroes[IPSEC_ZEROES_SIZE]; /* zeroes! */ 
 
-static char *ipspkernfs = NULL;
-int ipspkernfs_dirty = 1;
+
+/*
+ * Reserve an SPI; the SA is not valid yet though. Zero is reserved as
+ * an error return value. If tspi is not zero, we try to allocate that
+ * SPI. SPIs less than 255 are reserved, so we check for those too.
+ */
+
+u_int32_t
+reserve_spi(u_int32_t tspi, struct in_addr src, u_int8_t proto, int *errval)
+{
+    struct tdb *tdbp;
+    u_int32_t spi = tspi;		/* Don't change */
+    
+    while (1)
+    {
+	while (spi <= 255)		/* Get a new SPI */
+	  get_random_bytes((void *) &spi, sizeof(spi));
+	
+	/* Check whether we're using this SPI already */
+	if (gettdb(spi, src, proto) != (struct tdb *) NULL)
+	{
+	    if (tspi != 0)		/* If one was proposed, report error */
+	    {
+		(*errval) = EEXIST;
+	      	return 0;
+	    }
+
+	    spi = 0;
+	    continue;
+	}
+	
+	MALLOC(tdbp, struct tdb *, sizeof(*tdbp), M_TDB, M_WAITOK);
+	if (tdbp == NULL)
+	{
+	    (*errval) = ENOBUFS;
+	    return 0;
+	} 
+
+	bzero((caddr_t) tdbp, sizeof(*tdbp));
+	
+	tdbp->tdb_spi = spi;
+	tdbp->tdb_dst = src;
+	tdbp->tdb_sproto = proto;
+	tdbp->tdb_flags |= TDBF_INVALID;
+	tdbp->tdb_epoch = kernfs_epoch - 1;
+	
+	puttdb(tdbp);
+	
+	return spi;
+    }
+}
 
 /*
  * An IPSP SAID is really the concatenation of the SPI found in the 
- * packet and the destination address of the packet. When we receive
- * an IPSP packet, we need to look up its tunnel descriptor block, 
- * based on the SPI in the packet and the destination address (which is
- * really one of our addresses if we received the packet!
+ * packet, the destination address of the packet and the IPsec protocol.
+ * When we receive an IPSP packet, we need to look up its tunnel descriptor
+ * block, based on the SPI in the packet and the destination address (which
+ * is really one of our addresses if we received the packet!
  */
 
 struct tdb *
-gettdb(u_long spi, struct in_addr dst)
+gettdb(u_int32_t spi, struct in_addr dst, u_int8_t proto)
 {
-	int hashval;
-	struct tdb *tdbp;
+    int hashval;
+    struct tdb *tdbp;
 	
-	hashval = (spi+dst.s_addr) % TDB_HASHMOD;
+    hashval = (spi + dst.s_addr + proto) % TDB_HASHMOD;
 	
-	for (tdbp = tdbh[hashval]; tdbp; tdbp = tdbp->tdb_hnext)
-	  if ((tdbp->tdb_spi == spi) && (tdbp->tdb_dst.s_addr == dst.s_addr))
+    for (tdbp = tdbh[hashval]; tdbp; tdbp = tdbp->tdb_hnext)
+      if ((tdbp->tdb_spi == spi) && (tdbp->tdb_dst.s_addr == dst.s_addr)
+	  && (tdbp->tdb_sproto == proto))
+	break;
+	
+    return tdbp;
+}
+
+struct flow *
+get_flow(void)
+{
+    struct flow *flow;
+
+    MALLOC(flow, struct flow *, sizeof(struct flow), M_TDB, M_WAITOK);
+    if (flow == (struct flow *) NULL)
+      return (struct flow *) NULL;
+
+    bzero(flow, sizeof(struct flow));
+
+    return flow;
+}
+
+struct expiration *
+get_expiration(void)
+{
+    struct expiration *exp;
+    
+    MALLOC(exp, struct expiration *, sizeof(struct expiration), M_TDB,
+	   M_WAITOK);
+    if (exp == (struct expiration *) NULL)
+      return (struct expiration *) NULL;
+
+    bzero(exp, sizeof(struct expiration));
+    
+    return exp;
+}
+
+void
+cleanup_expirations(struct in_addr dst, u_int32_t spi, u_int8_t sproto)
+{
+    struct expiration *exp, *nexp;
+    
+    for (exp = explist; exp; exp = exp->exp_next)
+      if ((exp->exp_dst.s_addr == dst.s_addr) &&
+	  (exp->exp_spi == spi) && (exp->exp_sproto == sproto))
+      {
+	  /* Link previous to next */
+	  if (exp->exp_prev == (struct expiration *) NULL)
+	    explist = exp->exp_next;
+	  else
+	    exp->exp_prev->exp_next = exp->exp_next;
+	  
+	  /* Link next (if it exists) to previous */
+	  if (exp->exp_next != (struct expiration *) NULL)
+	    exp->exp_next->exp_prev = exp->exp_prev;
+	 
+	  nexp = exp;
+	  exp = exp->exp_prev;
+	  free(nexp, M_TDB);
+      }
+}
+
+void 
+handle_expirations(void *arg)
+{
+    struct expiration *exp;
+    struct tdb *tdb;
+    
+    if (explist == (struct expiration *) NULL)
+      return;
+    
+    while (1)
+    {
+	exp = explist;
+
+	if (exp == (struct expiration *) NULL)
+	  return;
+	else
+	  if (exp->exp_timeout > time.tv_sec)
 	    break;
 	
-	return tdbp;
+	/* Advance pointer */
+	explist = explist->exp_next;
+	if (explist)
+	  explist->exp_prev = NULL;
+	
+	tdb = gettdb(exp->exp_spi, exp->exp_dst, exp->exp_sproto);
+	if (tdb == (struct tdb *) NULL)
+	{
+	    free(exp, M_TDB);
+	    continue;			/* TDB is gone, ignore this */
+	}
+	
+	/* Soft expirations */
+	if (tdb->tdb_flags & TDBF_SOFT_TIMER)
+	  if (tdb->tdb_soft_timeout <= time.tv_sec)
+	  {
+	      encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+	      tdb->tdb_flags &= ~TDBF_SOFT_TIMER;
+	  }
+	  else
+	    if (tdb->tdb_flags & TDBF_SOFT_FIRSTUSE)
+	      if (tdb->tdb_first_use + tdb->tdb_soft_first_use <=
+		  time.tv_sec)
+	      {
+		  encap_sendnotify(NOTIFY_SOFT_EXPIRE, tdb);
+		  tdb->tdb_flags &= ~TDBF_SOFT_FIRSTUSE;
+	      }
+	
+	/* Hard expirations */
+	if (tdb->tdb_flags & TDBF_TIMER)
+	  if (tdb->tdb_exp_timeout <= time.tv_sec)
+	  {
+	      encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+	      tdb_delete(tdb, 0);
+	  }
+	  else
+	    if (tdb->tdb_flags & TDBF_FIRSTUSE)
+	      if (tdb->tdb_first_use + tdb->tdb_exp_first_use <=
+		  time.tv_sec)
+	      {
+		  encap_sendnotify(NOTIFY_HARD_EXPIRE, tdb);
+		  tdb_delete(tdb, 0);
+	      }
+
+	free(exp, M_TDB);
+    }
+
+    if (explist)
+      timeout(handle_expirations, (void *) NULL, 
+	      hz * (explist->exp_timeout - time.tv_sec));
+}
+
+void
+put_expiration(struct expiration *exp)
+{
+    struct expiration *expt;
+    int reschedflag = 0;
+    
+    if (exp == (struct expiration *) NULL)
+    {
+#ifdef ENCDEBUG
+	if (encdebug)
+	  log(LOG_WARNING, "put_expiration(): NULL argument\n");
+#endif /* ENCDEBUG */	
+	return;
+    }
+    
+    if (explist == (struct expiration *) NULL)
+    {
+	explist = exp;
+	reschedflag = 1;
+    }
+    else
+      if (explist->exp_timeout > exp->exp_timeout)
+      {
+	  exp->exp_next = explist;
+	  explist->exp_prev = exp;
+	  explist = exp;
+	  reschedflag = 2;
+      }
+      else
+      {
+	  for (expt = explist; expt->exp_next; expt = expt->exp_next)
+	    if (expt->exp_next->exp_timeout > exp->exp_timeout)
+	    {
+		expt->exp_next->exp_prev = exp;
+		exp->exp_next = expt->exp_next;
+		expt->exp_next = exp;
+		exp->exp_prev = expt;
+		break;
+	    }
+
+	  if (expt->exp_next == (struct expiration *) NULL)
+	  {
+	      expt->exp_next = exp;
+	      exp->exp_prev = expt;
+	  }
+      }
+
+    switch (reschedflag)
+    {
+	case 1:
+	    timeout(handle_expirations, (void *) NULL, 
+		    hz * (explist->exp_timeout - time.tv_sec));
+	    break;
+	    
+	case 2:
+	    untimeout(handle_expirations, (void *) NULL);
+	    timeout(handle_expirations, (void *) NULL,
+		    hz * (explist->exp_timeout - time.tv_sec));
+	    break;
+	    
+	default:
+	    break;
+    }
+}
+
+struct flow *
+find_flow(struct in_addr src, struct in_addr srcmask, struct in_addr dst,
+	  struct in_addr dstmask, u_int8_t proto, u_int16_t sport,
+	  u_int16_t dport, struct tdb *tdb)
+{
+    struct flow *flow;
+
+    for (flow = tdb->tdb_flow; flow; flow = flow->flow_next)
+      if ((src.s_addr == flow->flow_src.s_addr) &&
+	  (dst.s_addr == flow->flow_dst.s_addr) &&
+	  (srcmask.s_addr == flow->flow_srcmask.s_addr) &&
+	  (dstmask.s_addr == flow->flow_dstmask.s_addr) &&
+	  (proto == flow->flow_proto) &&
+	  (sport == flow->flow_sport) && (dport == flow->flow_dport))
+	return flow;
+
+    return (struct flow *) NULL;
+}
+
+struct flow *
+find_global_flow(struct in_addr src, struct in_addr srcmask,
+		 struct in_addr dst, struct in_addr dstmask,
+		 u_int8_t proto, u_int16_t sport, u_int16_t dport)
+{
+    struct flow *flow;
+    struct tdb *tdb;
+    int i;
+
+    for (i = 0; i < TDB_HASHMOD; i++)
+      for (tdb = tdbh[i]; tdb; tdb = tdb->tdb_hnext)
+	if ((flow = find_flow(src, srcmask, dst, dstmask, proto, sport,
+			      dport, tdb)) != (struct flow *) NULL)
+	  return flow;
+
+    return (struct flow *) NULL;
 }
 
 void
 puttdb(struct tdb *tdbp)
 {
-	int hashval;
-	hashval = ((tdbp->tdb_spi + tdbp->tdb_dst.s_addr) % TDB_HASHMOD);
-	tdbp->tdb_hnext = tdbh[hashval];
-	tdbh[hashval] = tdbp;
-	ipspkernfs_dirty = 1;
+    int hashval;
+
+    hashval = ((tdbp->tdb_sproto + tdbp->tdb_spi + tdbp->tdb_dst.s_addr)
+	       % TDB_HASHMOD);
+    tdbp->tdb_hnext = tdbh[hashval];
+    tdbh[hashval] = tdbp;
+}
+
+void
+put_flow(struct flow *flow, struct tdb *tdb)
+{
+    flow->flow_next = tdb->tdb_flow;
+    flow->flow_prev = (struct flow *) NULL;
+
+    tdb->tdb_flow = flow;
+
+    flow->flow_sa = tdb;
+
+    if (flow->flow_next)
+      flow->flow_next->flow_prev = flow;
+}
+
+void
+delete_flow(struct flow *flow, struct tdb *tdb)
+{
+    if (tdb->tdb_flow == flow)
+    {
+	tdb->tdb_flow = flow->flow_next;
+	if (tdb->tdb_flow)
+	  tdb->tdb_flow->flow_prev = (struct flow *) NULL;
+    }
+    else
+    {
+	flow->flow_prev->flow_next = flow->flow_next;
+	if (flow->flow_next)
+	  flow->flow_next->flow_prev = flow->flow_prev;
+    }
+
+    FREE(flow, M_TDB);
 }
 
 int
 tdb_delete(struct tdb *tdbp, int delchain)
 {
-	struct tdb *tdbpp;
-	int hashval;
+    struct tdb *tdbpp;
+    struct flow *flow;
+    int hashval;
 
-	hashval = ((tdbp->tdb_spi + tdbp->tdb_dst.s_addr) % TDB_HASHMOD);
+    hashval = ((tdbp->tdb_sproto + tdbp->tdb_spi + tdbp->tdb_dst.s_addr)
+	       % TDB_HASHMOD);
 
-	if (tdbh[hashval] == tdbp)
+    if (tdbh[hashval] == tdbp)
+    {
+	tdbpp = tdbp;
+	tdbh[hashval] = tdbp->tdb_hnext;
+    }
+    else
+      for (tdbpp = tdbh[hashval]; tdbpp != NULL; tdbpp = tdbpp->tdb_hnext)
+	if (tdbpp->tdb_hnext == tdbp)
 	{
-		tdbpp = tdbp;
-		tdbh[hashval] = tdbp->tdb_hnext;
+	    tdbpp->tdb_hnext = tdbp->tdb_hnext;
+	    tdbpp = tdbp;
 	}
-	else
-	  for (tdbpp = tdbh[hashval]; tdbpp != NULL; tdbpp = tdbpp->tdb_hnext)
-	    if (tdbpp->tdb_hnext == tdbp)
-	    {
-		tdbpp->tdb_hnext = tdbp->tdb_hnext;
-		tdbpp = tdbp;
-	    }
 
-	if (tdbp != tdbpp)
-	  return EINVAL;		/* Should never happen */
-	
-	ipspkernfs_dirty = 1;
-	tdbpp = tdbp->tdb_onext;
-	(*(tdbp->tdb_xform->xf_zeroize))(tdbp);
-	FREE(tdbp, M_TDB);
-	if (delchain && tdbpp)
-	  return tdb_delete(tdbpp, delchain);
-	else
-	  return 0;
+    if (tdbp != tdbpp)
+      return EINVAL;		/* Should never happen */
+
+    /* If there was something before us in the chain, make it point nowhere */
+    if (tdbp->tdb_inext)
+      tdbp->tdb_inext->tdb_onext = NULL;
+
+    tdbpp = tdbp->tdb_onext;
+
+    if (tdbp->tdb_xform)
+      (*(tdbp->tdb_xform->xf_zeroize))(tdbp);
+
+    for (flow = tdbp->tdb_flow; flow; flow = tdbp->tdb_flow)
+      delete_flow(flow, tdbp);
+
+    cleanup_expirations(tdbp->tdb_dst, tdbp->tdb_spi, tdbp->tdb_sproto);
+    
+    FREE(tdbp, M_TDB);
+
+    if (delchain && tdbpp)
+      return tdb_delete(tdbpp, delchain);
+    else
+      return 0;
 }
 
 int
 tdb_init(struct tdb *tdbp, struct mbuf *m)
 {
-	int alg;
-	struct encap_msghdr *em;
-	struct xformsw *xsp;
+    int alg;
+    struct encap_msghdr *em;
+    struct xformsw *xsp;
 	
-	em = mtod(m, struct encap_msghdr *);
-	alg = em->em_alg;
+    em = mtod(m, struct encap_msghdr *);
+    alg = em->em_alg;
 
-	for (xsp = xformsw; xsp < xformswNXFORMSW; xsp++)
-	  if (xsp->xf_type == alg)
-	    return (*(xsp->xf_init))(tdbp, xsp, m);
+    /* Record establishment time */
+    tdbp->tdb_established = time.tv_sec;
 
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("tdbinit: no alg %d for spi %x, addr %x\n", alg, tdbp->tdb_spi, ntohl(tdbp->tdb_dst.s_addr));
-#endif
-	
-	m_freem(m);
-	return EINVAL;
+    tdbp->tdb_epoch = kernfs_epoch - 1;
+
+    for (xsp = xformsw; xsp < xformswNXFORMSW; xsp++)
+      if (xsp->xf_type == alg)
+	return (*(xsp->xf_init))(tdbp, xsp, m);
+
+    if (encdebug)
+      log(LOG_ERR, "tdb_init(): no alg %d for spi %08x, addr %x, proto %d\n", 
+	  alg, ntohl(tdbp->tdb_spi), tdbp->tdb_dst.s_addr, tdbp->tdb_sproto);
+    
+    return EINVAL;
 }
 
-
+/*
+ * Used by kernfs
+ */
 int
 ipsp_kern(int off, char **bufp, int len)
 {
-    struct tdb *tdbp;
-    int i, k;
-    char *b;
+    static char buffer[IPSEC_KERNFS_BUFSIZE];
+    struct tdb *tdb;
+    struct flow *fl;
+    int l, i;
 
-    if (off != 0)
+    if (off == 0)
+      kernfs_epoch++;
+    
+    if (bufp == NULL)
       return 0;
 
-    if ((!ipspkernfs_dirty) && (ipspkernfs))
-    {
-	*bufp = ipspkernfs;
-	return strlen(ipspkernfs);
-    }
-    else
-      ipspkernfs_dirty = 0;
+    bzero(buffer, IPSEC_KERNFS_BUFSIZE);
 
-    if (ipspkernfs)
-    {
-      	FREE(ipspkernfs, M_XDATA);
-	ipspkernfs = NULL;
-    }
+    *bufp = buffer;
+    
+    for (i = 0; i < TDB_HASHMOD; i++)
+      for (tdb = tdbh[i]; tdb; tdb = tdb->tdb_hnext)
+	if (tdb->tdb_epoch != kernfs_epoch)
+	{
+	    tdb->tdb_epoch = kernfs_epoch;
 
-    for (i = 0, k = 0; i < TDB_HASHMOD; i++)
-      for (tdbp = tdbh[i]; tdbp != (struct tdb *) NULL; tdbp = tdbp->tdb_hnext)
-      {
-	  /* Being paranoid to avoid buffer overflows */
+	    l = sprintf(buffer, "SPI = %08x, Destination = %s, Sproto = %u\n",
+			ntohl(tdb->tdb_spi), inet_ntoa(tdb->tdb_dst),
+			tdb->tdb_sproto);
+	    
+	    l += sprintf(buffer + l, "\testablished %d seconds ago\n",
+			 time.tv_sec - tdb->tdb_established);
+	   
+	    l += sprintf(buffer + l, "\tsrc = %s, flags = %08x, SAtype = %u\n",
+			 inet_ntoa(tdb->tdb_src), tdb->tdb_flags,
+			 tdb->tdb_satype);
 
-          k += 126 + strlen(tdbp->tdb_xform->xf_name);
-          if (tdbp->tdb_rcvif)
-            k += strlen(tdbp->tdb_rcvif->if_xname);
-          else
-            k += 4;
-      }
+	    if (tdb->tdb_xform)
+	      l += sprintf(buffer + l, "\txform = <%s>\n", 
+			   tdb->tdb_xform->xf_name);
+	    else
+	      l += sprintf(buffer + l, "\txform = <(null)>\n");
 
-    if (k == 0)
-      return 0;
+	    l += sprintf(buffer + l, "\tOSrc = %s", inet_ntoa(tdb->tdb_osrc));
+	    
+	    l += sprintf(buffer + l, " ODst = %s, TTL = %u\n",
+			 inet_ntoa(tdb->tdb_odst), tdb->tdb_ttl);
 
-    MALLOC(ipspkernfs, char *, k + 1, M_XDATA, M_DONTWAIT);
-    if (!ipspkernfs)
-      return 0;
+	    if (tdb->tdb_onext)
+	      l += sprintf(buffer + l, "\tNext (on output) SA: SPI = %08x, Destination = %s, Sproto = %u\n", ntohl(tdb->tdb_onext->tdb_spi), inet_ntoa(tdb->tdb_onext->tdb_dst), tdb->tdb_onext->tdb_sproto);
 
-    for (i = 0, k = 0; i < TDB_HASHMOD; i++)
-      for (tdbp = tdbh[i]; tdbp != (struct tdb *) NULL; tdbp = tdbp->tdb_hnext)
-      {
-	  b = (char *)&(tdbp->tdb_dst.s_addr);
-	  k += sprintf(ipspkernfs + k, 
-		"SPI=%x, destination=%d.%d.%d.%d, interface=%s\n algorithm=%d (%s)\n next SPI=%x, previous SPI=%x\n", 
-		ntohl(tdbp->tdb_spi), ((int)b[0] & 0xff), ((int)b[1] & 0xff), 
-		((int)b[2] & 0xff), ((int)b[3] & 0xff), 
-		(tdbp->tdb_rcvif ? tdbp->tdb_rcvif->if_xname : "none"),
-		tdbp->tdb_xform->xf_type, tdbp->tdb_xform->xf_name,
-		(tdbp->tdb_onext ? ntohl(tdbp->tdb_onext->tdb_spi) : 0),
-		(tdbp->tdb_inext ? ntohl(tdbp->tdb_inext->tdb_spi) : 0));
-      }
+	    if (tdb->tdb_inext)
+	      l += sprintf(buffer + l, "\tNext (on input) SA: SPI = %08x, Destination = %s, Sproto = %u\n", ntohl(tdb->tdb_inext->tdb_spi), inet_ntoa(tdb->tdb_inext->tdb_dst), tdb->tdb_inext->tdb_sproto);
 
-    ipspkernfs[k] = '\0';
-    *bufp = ipspkernfs;
-    return strlen(ipspkernfs);
+	    /* XXX We can reuse variable i, we're not going to loop again */
+	    for (i = 0, fl = tdb->tdb_flow; fl; fl = fl->flow_next)
+	      i++;
+
+	    l += sprintf(buffer + l, "\t%u flows counted (use netstat -r for  more information)\n", i);
+	    
+	    l += sprintf(buffer + l, "\tExpirations:\n");
+
+	    if (tdb->tdb_flags & TDBF_TIMER)
+	      l += sprintf(buffer + l, "\t\tHard expiration(1) in %u seconds\n",
+			   tdb->tdb_exp_timeout - time.tv_sec);
+	    
+	    if (tdb->tdb_flags & TDBF_SOFT_TIMER)
+	      l += sprintf(buffer + l, "\t\tSoft expiration(1) in %u seconds\n",
+			   tdb->tdb_soft_timeout - time.tv_sec);
+	    
+	    if (tdb->tdb_flags & TDBF_BYTES)
+	      l += sprintf(buffer + l, "\t\tHard expiration after %qu bytes\n",
+			   tdb->tdb_exp_bytes);
+	    
+	    if (tdb->tdb_flags & TDBF_SOFT_BYTES)
+	      l += sprintf(buffer + l, "\t\tSoft expiration after %qu bytes\n",
+			   tdb->tdb_soft_bytes);
+
+	    l += sprintf(buffer + l, "\t\tCurrently %qu bytes processed\n",
+			 tdb->tdb_cur_bytes);
+	    
+	    if (tdb->tdb_flags & TDBF_PACKETS)
+	      l += sprintf(buffer + l,
+			   "\t\tHard expiration after %qu packets\n",
+			   tdb->tdb_exp_packets);
+	    
+	    if (tdb->tdb_flags & TDBF_SOFT_PACKETS)
+	      l += sprintf(buffer + l,
+			   "\t\tSoft expiration after %qu packets\n",
+			   tdb->tdb_soft_packets);
+
+	    l += sprintf(buffer + l, "\t\tCurrently %qu packets processed\n",
+			 tdb->tdb_cur_packets);
+	    
+	    if (tdb->tdb_flags & TDBF_FIRSTUSE)
+	      l += sprintf(buffer + l, "\t\tHard expiration(2) in %u seconds\n",
+			   (tdb->tdb_established + tdb->tdb_exp_first_use) -
+			   time.tv_sec);
+	    
+	    if (tdb->tdb_flags & TDBF_SOFT_FIRSTUSE)
+	      l += sprintf(buffer + l, "\t\tSoft expiration(2) in %u seconds\n",
+			   (tdb->tdb_established + tdb->tdb_soft_first_use) -
+			   time.tv_sec);
+
+	    if (!(tdb->tdb_flags & (TDBF_TIMER | TDBF_SOFT_TIMER | TDBF_BYTES |
+				    TDBF_SOFT_PACKETS | TDBF_PACKETS |
+				    TDBF_SOFT_BYTES | TDBF_FIRSTUSE |
+				    TDBF_SOFT_FIRSTUSE)))
+	      l += sprintf(buffer + l, "\t\t(none)\n");
+
+	    l += sprintf(buffer + l, "\n");
+	    
+	    return l;
+	}
+    
+    return 0;
 }

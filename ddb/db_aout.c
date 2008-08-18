@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_aout.c,v 1.15 1997/02/07 08:32:15 mickey Exp $	*/
+/*	$OpenBSD: db_aout.c,v 1.21 1997/07/19 22:31:15 niklas Exp $	*/
 /*	$NetBSD: db_aout.c,v 1.14 1996/02/27 20:54:43 gwr Exp $	*/
 
 /* 
@@ -31,7 +31,11 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/exec_aout.h>
+#include <sys/exec.h>
+#include <sys/conf.h>
+#include <sys/lkm.h>
+
+#include <vm/vm.h>
 
 #include <machine/db_machdep.h>		/* data types */
 
@@ -66,17 +70,18 @@ int db_symtab[SYMTAB_SPACE/sizeof(int)] = { 0, 1 };
  */
 void
 X_db_sym_init(symtab, esymtab, name)
-	int *symtab;		/* pointer to start of symbol table */
+	long *symtab;		/* pointer to start of symbol table */
 	char *esymtab;		/* pointer to end of string table,
 				   for checking - rounded up to integer
 				   boundary */
 	char *name;
 {
-	register struct nlist	*sym_start, *sym_end;
-	register struct nlist	*sp;
-	register char *strtab;
-	register int slen;
-	char *estrtab;
+	struct nlist	*sym_start, *sym_end;
+	struct nlist	*sp;
+	char		*strtab;
+	int		slen;
+	char		*estrtab;
+	long		strx;
 
 #ifdef SYMTAB_SPACE
 	if (*symtab < sizeof(int)) {
@@ -117,7 +122,6 @@ X_db_sym_init(symtab, esymtab, name)
 #endif
 
 	for (sp = sym_start; sp < sym_end; sp++) {
-	    register int strx;
 	    strx = sp->n_un.n_strx;
 	    if (strx != 0) {
 		if (strx > slen) {
@@ -357,12 +361,69 @@ X_db_stub_xh(sym, xh)
 	db_symtab_t sym;
 	struct exec *xh;
 {
-	extern char kernel_text[];
+	extern char kernel_text[], etext[];
 
 	bzero(xh, sizeof(*xh));
-	xh->a_midmag = htonl((((0 << 10) | MID_ZERO) << 16) | ZMAGIC);
-	xh->a_syms   = *sym->private;
-	xh->a_entry  = (u_long)kernel_text;
+	N_SETMAGIC(*xh, ZMAGIC, MID_MACHINE, 0);
+	xh->a_entry  = (u_long)kernel_text; /* XXX not right, but who cares? */
+	xh->a_syms = *(int *)sym->private;
+	xh->a_text = etext - kernel_text;
+	xh->a_data = 0;
+	if (sym->id != 0) {	/* lkm */
+#ifdef LKM
+		struct lkm_table *p;
+		for (p = lkm_list(NULL);
+		     p != NULL && p->sym_id != sym->id; p = lkm_list(p))
+			;
+		if (p != NULL) {
+			xh->a_entry = (u_long)p->entry;
+			xh->a_syms = p->sym_symsize;
+		}
+#ifdef DIAGNOSTIC
+		else
+			printf("X_db_stub_xh: no lkm for symtab (ghost?)\n");
+#endif
+#else
+		panic("X_db_stub_xh: symtab w/o lkm itself");
+#endif
+	}
+}
+
+int
+X_db_symtablen(sym)
+	db_symtab_t sym;
+{
+	return sym->rend - sym->start;
+}
+
+int
+X_db_symatoff(sym, off, buf, len)
+	db_symtab_t sym;
+	int off;
+	void *buf;
+	int *len;
+{
+	/* symtab */
+	if (off < (sym->end - sym->start)) {
+		struct nlist n;
+
+		bcopy (&((struct nlist *)sym->start)[off / sizeof(n)],
+		       &n, sizeof(n));
+		n.n_un.n_strx = n.n_un.n_name - sym->end;
+		*len = min(*len, sizeof(n) - off % sizeof(n));
+		bcopy ((u_int8_t*)&n + off % sizeof(n), buf, *len);
+	} else {
+		/* strtab */
+		off -= sym->end - sym->start;
+		if (off < (sym->rend - sym->end)) {
+			/* no preprocessing for string table */
+			*len = min(*len, (sym->rend - sym->end - off));
+			bcopy(sym->end + off, buf, *len);
+		} else
+			return -1;
+	}
+
+	return 0;
 }
 
 /*
@@ -378,7 +439,7 @@ ddb_init()
 	db_sym_init();
 
 	if (esym > (char *)&end) {
-	    X_db_sym_init((int *)&end, esym, "bsd");
+	    X_db_sym_init((long *)&end, esym, "bsd");
 	}
 #else
 	db_sym_init();

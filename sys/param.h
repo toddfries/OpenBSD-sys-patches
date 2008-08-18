@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.13 1997/05/22 06:55:59 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.17 1997/10/06 20:21:09 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -45,8 +45,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	199706		/* OpenBSD version (year & month). */
-#define OpenBSD2_1 1		/* OpenBSD 2.1 */
+#define OpenBSD	199711		/* OpenBSD version (year & month). */
+#define OpenBSD2_2 1		/* OpenBSD 2.2 */
 
 #ifndef NULL
 #define	NULL	0
@@ -156,7 +156,9 @@
  * made larger without any effect on existing file systems; however making
  * it smaller makes some file systems unmountable.
  */
+#ifndef MAXBSIZE	/* XXX temp until sun3 DMA chaining */
 #define	MAXBSIZE	MAXPHYS
+#endif
 #define MAXFRAG 	8
 
 /*

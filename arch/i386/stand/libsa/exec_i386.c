@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_i386.c,v 1.8 1997/04/15 20:50:36 mickey Exp $	*/
+/*	$OpenBSD: exec_i386.c,v 1.19 1997/10/25 07:00:26 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -37,20 +37,29 @@
 #include <sys/param.h>
 #include <sys/exec.h>
 #include <sys/reboot.h>
-#include <libsa.h>
-
-dev_t	bootdev;
+#include <dev/cons.h>
+#include <stand/boot/bootarg.h>
+#include <machine/biosvar.h>
+#include "libsa.h"
 
 #define round_to_size(x) (((int)(x) + sizeof(int) - 1) & ~(sizeof(int) - 1))
+
+typedef void (*startfuncp)(int, int, int, int, int, int, int, int)
+    __attribute__ ((noreturn));
 
 void
 machdep_start(startaddr, howto, loadaddr, ssym, esym)
 	char *startaddr, *loadaddr, *ssym, *esym;
 	int howto;
 {
-#ifdef DEBUG
+	size_t ac = BOOTARG_LEN;
+	caddr_t av = (caddr_t)BOOTARG_OFF;
+#ifdef EXEC_DEBUG
 	struct exec *x;
+#endif
+	makebootargs(av, &ac);
 
+#ifdef EXEC_DEBUG
 	x = (void *)loadaddr;
 	printf("exec {\n\ta_midmag = %lx\n\ta_text = %lx\n\ta_data = %lx\n"
 	       "\ta_bss = %lx\n\ta_syms = %lx\n\ta_entry = %lx\n"
@@ -58,15 +67,16 @@ machdep_start(startaddr, howto, loadaddr, ssym, esym)
 	       x->a_midmag, x->a_text, x->a_data, x->a_bss, x->a_syms,
 	       x->a_entry, x->a_trsize, x->a_drsize);
 
+	printf("/bsd(%x,%x,%x,%x,%x,%x,%d,%p)\n",
+	       howto, bootdev, BOOT_APIVER, round_to_size(esym),
+	       extmem, cnvmem, ac, av);
 	getchar();
 #endif
-
 	(int)startaddr &= 0xffffff;
 
-	printf("entry point at 0x%x\n", (int)startaddr);
+	printf("entry point at %p\n", startaddr);
 	/* stack and the gung is ok at this point, so, no need for asm setup */
-	(*(int __attribute__((noreturn))(*)(int,int,int,int,int,int))startaddr)(
-		howto, bootdev, 0, round_to_size(esym), extmem, cnvmem);
+	(*(startfuncp)startaddr)(howto, bootdev, BOOT_APIVER,
+	    round_to_size(esym), extmem, cnvmem, ac, (int)av);
 	/* not reached */
 }
-

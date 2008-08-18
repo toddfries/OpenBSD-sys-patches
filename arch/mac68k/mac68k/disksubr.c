@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.4 1996/05/26 18:36:16 briggs Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.7 1997/09/08 06:14:50 deraadt Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.14 1996/05/05 06:18:22 briggs Exp $	*/
 
 /*
@@ -511,6 +511,11 @@ readdisklabel(dev, strat, lp, osdep)
 		}
 	}
 
+#if defined(CD9660)
+	if (msg && iso_disklabelspoof(dev, strat, lp) == 0)
+		msg = NULL;
+#endif
+
 	bp->b_flags = B_INVAL | B_AGE | B_READ;
 	brelse(bp);
 	return (msg);
@@ -620,9 +625,10 @@ done:
  * if needed, and signal errors or early completion.
  */
 int
-bounds_check_with_label(bp, lp, wlabel)
+bounds_check_with_label(bp, lp, osdep, wlabel)
 	struct buf *bp;
 	struct disklabel *lp;
+	struct cpu_disklabel *osdep;
 	int wlabel;
 {
 	struct partition *p = lp->d_partitions + DISKPART(bp->b_dev);

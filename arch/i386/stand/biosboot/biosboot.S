@@ -1,49 +1,104 @@
-/*	$OpenBSD: biosboot.S,v 1.8 1997/04/29 00:10:05 mickey Exp $	*/
+/*	$OpenBSD: biosboot.S,v 1.20 1997/09/05 17:58:49 mickey Exp $	*/
 
+/*
+ * Copyright (c) 1997 Michael Shalayeff
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Michael Shalayeff.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR 
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */
 	.file	"bootbios.S"
 
 #include <machine/asm.h>
-#include <machine/specialreg.h>
-#define _LOCORE
-#include <machine/segments.h>
-#undef _LOCORE
+#include <assym.h>
 
 #define addr32  .byte 0x67
 #define data32  .byte 0x66
 
-/* Better use 32, 48 does not seem to compile */
-#define	BLKCNT	20	/* Max without colliding with the partition table */
+#ifdef	DEBUG
+#define	BLKCNT	12	/* Max without colliding with the partition table */
+#else
+#define	BLKCNT	16
+#endif
 
 #define BOOTSEG		0x07c0	/* boot loaded here */
 #define BOOTSTACK	0xfffc	/* stack starts here */
 #define ZMAGIC		0x0b01	/* ZMAGIC */
 
-/*
- * Partition table values
- */
-BOOTABLE=	0x80	# value of boot_ind, means bootable partition
-OPENBSDPART=	0xA6	# OpenBSD partition type
-
 #ifdef DEBUG
 #define DBGMSG(msg)		\
 	movb    $msg, %al;	\
-	data32;			\
-	call    chr
+	.byte	0xe8;		\
+	.word	Lchr - . - 2
 #define GO_RELOC	'R'	/* running relocated code */
 #define REAL2PROT	'P'	/* switch to protected mode */
 #else /* !DEBUG */
-#define DBGMSG(msg)
+#define DBGMSG(msg)	/* */
 #endif /* !DEBUG */
 
 	.text
 
 	.globl	start
 start:
-	/* set up stack (%ss:%esp) */
+	jmp	1f
+
+	. = start + 3
+	.asciz	"OpenBSD"
+	/* BPB */
+	. = start + 0x0b
+bpb:	.word	DEV_BSIZE	/* sector size */
+	.byte	1		/* sectors/cluster */
+	.word	0		/* reserved sectors */
+	.byte	0		/* # of FAT */
+	.word	0		/* root entries */
+	.word	0		/* small sectors */
+	.byte	0xf8		/* media type (hd) */
+	.word	0		/* sectors/fat */
+	.word	0		/* sectors per track */
+	.word	0		/* # of heads */
+
+	/* EBPB */
+	. = start + 0x1c
+ebpb:	.long	16		/* hidden sectors */
+	.long	0		/* large sectors */
+	.word	0		/* physical disk */
+	.byte	0x29		/* signature, needed by NT */
+	.space	4, 0		/* volume serial number */
+	.asciz	"NO LABEL  "
+	.asciz	"UFS 4.4"
+
+	/* boot code */
+	. = start + 0x3e
+
+1:	/* set up stack (%ss:%esp) */
 	cli			/* disable interrupts w/o stack */
-	# movw	$BOOTREL, %ax
+	# movw	$(BOOTREL >> 4), %ax
 	.byte	0xb8
-	.word	BOOTREL
+	.word	BOOTREL >> 4
 	movl	%ax, %ss
 	movl	%ax, %es	/* relocate there */
 	data32
@@ -64,19 +119,20 @@ start:
 
 	/* jump to relocated code */
 	data32
-	ljmp $BOOTREL, $2f
+	ljmp $(BOOTREL >> 4), $2f
 1:	.asciz	"loading /boot"
 
 2:	DBGMSG(GO_RELOC)
 
+	nop
 	/* set up %ds */
 	pushl	%cs
 	popl	%ds
 
 	/* set up %es, (where we will load /boot to) */
-	# movw	$(START >> 4), %ax
+	# movw	$(LOADADDR >> 4), %ax
 	.byte	0xb8
-	.word	START >> 4
+	.word	LOADADDR >> 4
 	movl	%ax, %es
 
 #ifdef SERIAL
@@ -94,8 +150,9 @@ start:
 
 	data32
 	movl	$1b, %esi
-	data32
-	call	message
+	# call	Lmessage
+	.byte	0xe8
+	.word	Lmessage - . - 2
 
 	data32
 	xorl	%ebx, %ebx		/* put it at %es:0 */
@@ -122,13 +179,14 @@ start:
 	/* read error */
        	data32
 	movl    $2f, %esi
-	jmp	halt
+	jmp	5f
 2:	.asciz	"\r\nRead error\r\n"
 
 3:	/* read next block */
 	movb	$'.', %al
-	data32
-	call	chr		/* show progress indicator */
+	# call	Lchr		/* show progress indicator */
+	.byte	0xe8
+	.word	Lchr - . - 2
 
 	popl	%ax
 	movzbl	%al, %ax
@@ -139,8 +197,9 @@ start:
 
 	data32
 	movl    $2f, %esi	/* new line */
-	data32
-	call	message
+	# call	Lmessage
+	.byte	0xe8
+	.word	Lmessage - . - 2
 
 	xorl	%si, %si
 	cld
@@ -153,9 +212,10 @@ start:
 
 	data32
 	movl	$1f, %esi
-halt:
-	data32
-	call	message
+5:
+	# call	Lmessage
+	.byte	0xe8
+	.word	Lmessage - . - 2
 	cli
 	hlt
 1:	.ascii	"Bad magic"
@@ -192,7 +252,7 @@ halt:
 	 * reload CS register
 	 */
 	data32
-	ljmp	$8, $1f+(BOOTREL << 4)
+	ljmp	$8, $1f+BOOTREL
 
 1:	/*
 	 * 32bit mode
@@ -213,13 +273,29 @@ halt:
 	pushl	$BOOTMAGIC	/* use some magic */
 
 	/* jmp	/boot */
-	ljmp	$8, $(START + 0x20)
+	ljmp	$8, $(LOADADDR + 0x20)
 	/* not reached */
 
+/*
+ * Display string
+ */
+Lmessage:
+	data32
+	pushl	%eax
+	cld
+1:
+	lodsb			# load a byte into %al
+	testb	%al, %al
+	jz	1f
+	# call	Lchr
+	.byte	0xe8
+	.word	Lchr - . - 2
+	jmp	1b
+
 #
-#	chr: write the character in %al to console
+#	Lchr: write the character in %al to console
 #
-chr:
+Lchr:
 	data32
 	pushl	%eax
 
@@ -242,33 +318,13 @@ chr:
 	data32
 	popl	%edx
 #endif
-	data32
-	popl	%eax
-	data32
-	ret
-
-/*
- * Display string
- */
-message:
-	data32
-	pushl	%eax
-	cld
-1:
-	lodsb			# load a byte into %al
-	testb	%al, %al
-	jz	1f
-	data32
-	call	chr
-	jmp	1b
 1:
 	data32
 	popl	%eax
-	data32
 	ret
 
 	.align	3
-gdt:		/* 0x00 : null */
+1:		/* 0x00 : null */
 	.long	0, 0
 		/* 0x08 : flat code */
 	.word	0xFFFF			# lolimit
@@ -284,25 +340,31 @@ gdt:		/* 0x00 : null */
 	.byte	SDT_MEMRWA | 0 | 0x80	# RWA, dpl = 0, present
 	.byte	0xf | 0 | 0x40 | 0x80	# hilimit, xx, 32bit, 4k granularity
 	.byte	0			# hibase
-Gdtr:	.word	. - gdt
-	.long	(BOOTREL << 4) + gdt
+Gdtr:	.word	. - 1b
+	.long	BOOTREL + 1b
 
-	.globl	_block_table
-_block_table:
-	.word	0	/* cyllinder/sector */
-	.byte	0	/* head */
-	.byte	0	/* nsect */
-	. = _block_table + BLKCNT*4
-	.globl	_block_count
+	.globl	_block_table, _block_count
 _block_count:
 	.byte	BLKCNT	/* entries in _block_table */
+_block_table:
+	.word	0	/* cylinder/sector */
+	.byte	0	/* head */
+	.byte	0	/* nsect */
+	# . = _block_table + BLKCNT*4
 
-	. = 446
+#ifdef BEMBR
+	. = 0x1b8
+	.space	4, 0	/* NT registry offset from James C. Cortilier III */
+
+ 	. = DOSPARTOFF
+ 	.globl	_partitions
+ 	/* throw in a partition in case we are block0 as well */
+	. = DOSPARTOFF
 	.globl	_partitions
 	/* throw in a partition in case we are block0 as well */
 	/* flag, head, sec, cyl, typ, ehead, esect, ecyl, start, len */
 _partitions:
-	.byte   BOOTABLE, 0, 1, 0,OPENBSDPART, 255, 255, 255
+	.byte   DOSACTIVE, 0, 1, 0, DOSPTYP_OPENBSD, 255, 255, 255
 	.long   0,50000
 	.byte   0,0,0,0,0,0,0,0
 	.long   0,0
@@ -310,7 +372,7 @@ _partitions:
 	.long   0,0
 	.byte   0,0,0,0,0,0,0,0
 	.long   0,0
-	
+#endif
 	. = 0x200 - 2
 	/* a little signature */
-	.word	0xaa55
+	.word	DOSMBR_SIGNATURE

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_strip.c,v 1.6 1997/02/24 13:34:01 niklas Exp $	*/
+/*	$OpenBSD: if_strip.c,v 1.9 1997/09/05 04:27:02 millert Exp $	*/
 /*	$NetBSD: if_strip.c,v 1.2.4.3 1996/08/03 00:58:32 jtc Exp $	*/
 /*	from: NetBSD: if_sl.c,v 1.38 1996/02/13 22:00:23 christos Exp $	*/
 
@@ -347,7 +347,7 @@ stripattach(n)
 
 	for (sc = st_softc; i < NSTRIP; sc++) {
 		sc->sc_unit = i;		/* XXX */
-		sprintf(sc->sc_if.if_xname, "st%d", i++);
+		sprintf(sc->sc_if.if_xname, "strip%d", i++);
 		sc->sc_if.if_softc = sc;
 		sc->sc_if.if_mtu = SLMTU;
 		sc->sc_if.if_flags = 0;
@@ -417,7 +417,7 @@ stripinit(sc)
 
 	sc->sc_buf = sc->sc_ep - SLMAX;
 	sc->sc_mp = sc->sc_buf;
-	sl_compress_init(&sc->sc_comp, -1);
+	sl_compress_init(&sc->sc_comp);
 
 	/* Initialize radio probe/reset state machine */
 	sc->sc_state = ST_DEAD;		/* assumet the worst. */
@@ -708,7 +708,7 @@ stripoutput(ifp, m, dst, rt)
 	register struct ip *ip;
 	register struct ifqueue *ifq;
 	register struct st_header *shp;
-	register const u_char *dldst;		/* link-level next-hop */
+	register u_char *dldst;		/* link-level next-hop */
 	int s;
 	u_char dl_addrbuf[STARMODE_ADDR_LEN+1];
 
@@ -820,7 +820,7 @@ stripoutput(ifp, m, dst, rt)
 	dldst = dl_addrbuf;
 
 	shp = mtod(m, struct st_header *);
-	bcopy((caddr_t)"SIP0", (caddr_t)&shp->starmode_type,
+	bcopy((caddr_t)"SIP0", (caddr_t)shp->starmode_type,
 		sizeof(shp->starmode_type));
 
  	bcopy((caddr_t)dldst, (caddr_t)shp->starmode_addr,
@@ -1393,7 +1393,7 @@ strip_proberadio(sc, tp)
 {
 
 	int overflow;
-	const char *strip_probestr = "**";
+	char *strip_probestr = "**";
 
 	if (sc->sc_if.if_flags & IFF_DEBUG)
 		addlog("%s: attempting to probe radio\n", sc->sc_if.if_xname);

@@ -1,30 +1,29 @@
-#	$OpenBSD: Makefile,v 1.12 1997/04/30 18:10:08 mickey Exp $
+#	$OpenBSD: Makefile,v 1.29 1997/10/22 23:34:35 mickey Exp $
 
 
 LIB=	sa
 
 S=${.CURDIR}/../../../..
+SADIR=${.CURDIR}/..
 DIR_SA=	$S/lib/libsa
 DIR_KERN=$S/lib/libkern
 
-CFLAGS+=$(SACFLAGS) -D__INTERNAL_LIBSA_CREAD
-CFLAGS+=-DSTART=$(START) -DHEAP_LIMIT=$(HEAP_LIMIT)
-CFLAGS+=${DEBUGFLAGS} -I${.CURDIR} -I${.CURDIR}/..
-CFLAGS+=-I$(S)/lib/libsa -I$(S)
-AS+=	-R
-#AS+=	-Wa,-a
+#AS=cat ; 
+#AS+=	-R
+#AS+=	-a
 
 # i386 stuff (so, it will possibly load in the same 64k)
-SRCS=	unixsys.S bioscom.S biosdisk.S bioskbd.S biostime.S biosmem.S gidt.S \
-	debug_i386.S dev_i386.c exec_i386.c biosdev.c gateA20.c memprobe.c \
-	time.c alloca.S
+SRCS=	gidt.S debug_i386.S alloca.S \
+	machdep.c dev_i386.c exec_i386.c cmd_i386.c \
+	biosdev.c bioscons.c gateA20.c apmprobe.c \
+	memprobe.c diskprobe.c time.c
 
 # stand routines
 SRCS+=	alloc.c exit.c exec.c getfile.c gets.c globals.c strcmp.c strlen.c \
 	strncmp.c memcmp.c memcpy.c memset.c printf.c strerror.c strncpy.c
 
 # math for cd9660
-SRCS+=	divdi3.c qdivrem.c
+#SRCS+=	divdi3.c qdivrem.c
 
 # io routines
 SRCS+=	close.c closeall.c dev.c disklabel.c dkcksum.c fstat.c ioctl.c lseek.c \
@@ -40,7 +39,7 @@ SRCS+=	bootp.c bootparam.c rarp.c
 SRCS+=	ufs.c nfs.c cd9660.c
 
 # debugger
-SRCS+=	debug.c debug_aout.c
+SRCS+=	debug.c
 
 NOPROFILE=noprofile
 NOPIC=nopic
@@ -51,9 +50,13 @@ all: machine-links ${SALIB}
 
 machine-links:
 	@rm -f machine i386
-	@ln -s ${S}/arch/i386 i386
-	@ln -s ${S}/arch/i386/include machine
+	@ln -s ${.CURDIR}/../.. i386
+	@ln -s ${.CURDIR}/../../include machine
 
 install:
 
 .include <bsd.lib.mk>
+
+CPPFLAGS+=-DLINKADDR=${LINKADDR} -DHEAP_LIMIT=${HEAP_LIMIT} ${DEBUGFLAGS}
+CPPFLAGS+=-I${S}/stand/boot
+CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD

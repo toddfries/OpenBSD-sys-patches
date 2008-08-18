@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.15 1997/02/14 18:15:28 deraadt Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.20 1997/08/31 20:42:32 deraadt Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -64,6 +64,11 @@
 #include <netipx/ipx_if.h>
 #endif
 
+#ifdef NETATALK
+#include <netatalk/at.h>
+#include <netatalk/at_var.h>
+#endif
+
 #ifdef ISO
 #include <netiso/iso.h>
 #include <netiso/iso_var.h>
@@ -79,12 +84,11 @@
 struct tun_softc {
 	u_short	tun_flags;		/* misc flags */
 	struct	ifnet tun_if;		/* the interface */
-	int	tun_pgrp;		/* the process group - if any */
+	pid_t	tun_pgid;		/* the process group - if any */
+	uid_t	tun_siguid;		/* uid for process that set tun_pgid */
+	uid_t	tun_sigeuid;		/* euid for process that set tun_pgid */
 	struct	selinfo	tun_rsel;	/* read select */
 	struct	selinfo	tun_wsel;	/* write select (not used) */
-#if NBPFILTER > 0
-	caddr_t		tun_bpf;
-#endif
 };
 
 #ifdef	TUN_DEBUG
@@ -139,7 +143,8 @@ tunattach(unused)
 		ifp->if_opackets = 0;
 		if_attach(ifp);
 #if NBPFILTER > 0
-		bpfattach(&ifp->if_bpf, ifp, DLT_NULL, sizeof(u_int32_t));
+		bpfattach(&ifp->if_bpf, ifp, DLT_NULL,
+		    sizeof(struct tunnel_header));
 #endif
 	}
 }
@@ -225,7 +230,7 @@ tunclose(dev, flag, mode, p)
 		}
 		splx(s);
 	}
-	tp->tun_pgrp = 0;
+	tp->tun_pgid = 0;
 	selwakeup(&tp->tun_rsel);
 		
 	TUNDEBUG(("%s: closed\n", ifp->if_xname));
@@ -327,7 +332,7 @@ tun_output(ifp, m0, dst, rt)
 	struct rtentry *rt;
 {
 	struct tun_softc *tp = ifp->if_softc;
-	struct proc	*p;
+	struct tunnel_header *th;
 	int		s;
 
 	TUNDEBUG(("%s: tun_output\n", ifp->if_xname));
@@ -340,11 +345,9 @@ tun_output(ifp, m0, dst, rt)
 	}
 	ifp->if_lastchange = time;
 
-	M_PREPEND( m0, sizeof(struct tunnel_header), M_DONTWAIT );
-	{
-		struct tunnel_header	*th = mtod( m0, struct tunnel_header * );
-		th->tun_af = dst->sa_family;
-	}
+	M_PREPEND(m0, sizeof(struct tunnel_header), M_DONTWAIT);
+	th = mtod(m0, struct tunnel_header *);
+	th->tun_af = dst->sa_family;
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
@@ -369,12 +372,9 @@ tun_output(ifp, m0, dst, rt)
 		tp->tun_flags &= ~TUN_RWAIT;
 		wakeup((caddr_t)tp);
 	}
-	if (tp->tun_flags & TUN_ASYNC && tp->tun_pgrp) {
-		if (tp->tun_pgrp > 0)
-			gsignal(tp->tun_pgrp, SIGIO);
-		else if ((p = pfind(-tp->tun_pgrp)) != NULL)
-			psignal(p, SIGIO);
-	}
+	if (tp->tun_flags & TUN_ASYNC && tp->tun_pgid)
+		csignal(tp->tun_pgid, SIGIO,
+		    tp->tun_siguid, tp->tun_sigeuid);
 	selwakeup(&tp->tun_rsel);
 	return 0;
 }
@@ -392,7 +392,7 @@ tunioctl(dev, cmd, data, flag, p)
 {
 	int		unit, s;
 	struct tun_softc *tp;
- 	struct tuninfo *tunp;
+	struct tuninfo *tunp;
 
 	if ((unit = minor(dev)) >= NTUN)
 		return (ENXIO);
@@ -401,20 +401,20 @@ tunioctl(dev, cmd, data, flag, p)
 
 	s = splimp();
 	switch (cmd) {
- 	case TUNSIFINFO:
+	case TUNSIFINFO:
 		tunp = (struct tuninfo *)data;
- 		tp->tun_if.if_mtu = tunp->mtu;
- 		tp->tun_if.if_type = tunp->type;
- 		tp->tun_if.if_flags = tunp->flags;
- 		tp->tun_if.if_baudrate = tunp->baudrate;
- 		break;
- 	case TUNGIFINFO:
- 		tunp = (struct tuninfo *)data;
- 		tunp->mtu = tp->tun_if.if_mtu;
- 		tunp->type = tp->tun_if.if_type;
- 		tunp->flags = tp->tun_if.if_flags;
- 		tunp->baudrate = tp->tun_if.if_baudrate;
- 		break;
+		tp->tun_if.if_mtu = tunp->mtu;
+		tp->tun_if.if_type = tunp->type;
+		tp->tun_if.if_flags = tunp->flags;
+		tp->tun_if.if_baudrate = tunp->baudrate;
+		break;
+	case TUNGIFINFO:
+		tunp = (struct tuninfo *)data;
+		tunp->mtu = tp->tun_if.if_mtu;
+		tunp->type = tp->tun_if.if_type;
+		tunp->flags = tp->tun_if.if_flags;
+		tunp->baudrate = tp->tun_if.if_baudrate;
+		break;
 #ifdef TUN_DEBUG
 	case TUNSDEBUG:
 		tundebug = *(int *)data;
@@ -444,10 +444,12 @@ tunioctl(dev, cmd, data, flag, p)
 		splx(s);
 		break;
 	case TIOCSPGRP:
-		tp->tun_pgrp = *(int *)data;
+		tp->tun_pgid = *(int *)data;
+		tp->tun_siguid = p->p_cred->p_ruid;
+		tp->tun_sigeuid = p->p_ucred->cr_uid;
 		break;
 	case TIOCGPGRP:
-		*(int *)data = tp->tun_pgrp;
+		*(int *)data = tp->tun_pgid;
 		break;
 	default:
 		splx(s);
@@ -537,7 +539,7 @@ tunwrite(dev, uio, ioflag)
 	int		unit;
 	struct ifnet	*ifp;
 	struct ifqueue	*ifq;
-	struct tunnel_header	*th;
+	struct tunnel_header *th;
 	struct mbuf	*top, **mp, *m;
 	int		isr;
 	int		error=0, s, tlen, mlen;
@@ -591,14 +593,13 @@ tunwrite(dev, uio, ioflag)
 		bpf_mtap(ifp->if_bpf, top);
 #endif
 
-	th = mtod( top, struct tunnel_header * );
-		/* strip the tunnel header */
+	th = mtod(top, struct tunnel_header *);
+	/* strip the tunnel header */
 	top->m_data += sizeof(*th);
 	top->m_len  -= sizeof(*th);
 	top->m_pkthdr.len -= sizeof(*th);
 
-	switch( th->tun_af )
-	{
+	switch (th->tun_af) {
 #ifdef INET
 	case AF_INET:
 		ifq = &ipintrq;
@@ -617,6 +618,12 @@ tunwrite(dev, uio, ioflag)
 		isr = NETISR_IPX;
 		break;
 #endif
+#ifdef NETATALK
+	case AF_APPLETALK:
+		ifq = &atintrq2;
+		isr = NETISR_ATALK;
+		break;
+#endif
 #ifdef ISO
 	case AF_ISO:
 		ifq = &clnlintrq;
@@ -629,16 +636,15 @@ tunwrite(dev, uio, ioflag)
 	}
 
 	s = splimp();
-	if( IF_QFULL(ifq) )
-	{
-		IF_DROP( ifq );
+	if (IF_QFULL(ifq)) {
+		IF_DROP(ifq);
 		splx(s);
 		ifp->if_collisions++;
 		m_freem(top);
 		return ENOBUFS;
 	}
-	IF_ENQUEUE( ifq, top );
-	schednetisr( isr );
+	IF_ENQUEUE(ifq, top);
+	schednetisr(isr);
 	ifp->if_ipackets++;
 	ifp->if_ibytes += m->m_pkthdr.len;
 	splx(s);

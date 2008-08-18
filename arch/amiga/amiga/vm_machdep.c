@@ -1,5 +1,5 @@
-/*	$OpenBSD: vm_machdep.c,v 1.4 1996/05/02 06:43:25 niklas Exp $	*/
-/*	$NetBSD: vm_machdep.c,v 1.29 1996/04/25 05:57:38 veego Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.6 1997/09/09 11:27:26 niklas Exp $	*/
+/*	$NetBSD: vm_machdep.c,v 1.30 1997/05/19 10:14:50 veego Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -88,7 +88,7 @@ cpu_fork(p1, p2)
 	savectx(curpcb);
 	*pcb = p1->p_addr->u_pcb;
 
-	PMAP_ACTIVATE(&p2->p_vmspace->vm_pmap, pcb, 0);
+	PMAP_ACTIVATE(p2->p_vmspace->vm_map.pmap, pcb, 0);
 
 	/*
 	 * Copy the trap frame, and arrange for the child to return directly
@@ -172,10 +172,10 @@ pagemove(from, to, size)
 		if (pmap_extract(pmap_kernel(), (vm_offset_t)to) != 0)
 			panic("pagemove 3");
 #endif
-		pmap_remove(pmap_kernel(),
-			    (vm_offset_t)from, (vm_offset_t)from + PAGE_SIZE);
-		pmap_enter(pmap_kernel(),
-			   (vm_offset_t)to, pa, VM_PROT_READ|VM_PROT_WRITE, 1);
+		pmap_remove(pmap_kernel(), (vm_offset_t)from,
+		    (vm_offset_t)from + PAGE_SIZE);
+		pmap_enter(pmap_kernel(),  (vm_offset_t)to, pa,
+		    VM_PROT_READ|VM_PROT_WRITE, 1);
 		from += PAGE_SIZE;
 		to += PAGE_SIZE;
 		size -= PAGE_SIZE;

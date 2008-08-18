@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.10 1997/03/01 21:24:46 kstailey Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.12 1997/10/06 20:21:07 deraadt Exp $	*/
 /*	$NetBSD: malloc.h,v 1.23 1996/04/05 04:52:52 mhitch Exp $	*/
 
 /*

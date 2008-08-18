@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode_pager.c,v 1.3 1996/04/21 22:33:18 deraadt Exp $	*/
+/*	$OpenBSD: vnode_pager.c,v 1.5 1997/10/06 20:21:31 deraadt Exp $	*/
 /*	$NetBSD: vnode_pager.c,v 1.19 1996/03/16 23:15:27 christos Exp $	*/
 
 /*

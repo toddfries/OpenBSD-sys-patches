@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_lex.c,v 1.4 1996/04/21 22:19:03 deraadt Exp $	*/
+/*	$OpenBSD: db_lex.c,v 1.6 1997/07/19 22:31:18 niklas Exp $	*/
 /*	$NetBSD: db_lex.c,v 1.8 1996/02/05 01:57:05 christos Exp $	*/
 
 /* 
@@ -35,6 +35,8 @@
  */
 #include <sys/param.h>
 #include <sys/proc.h>
+
+#include <vm/vm.h>
 
 #include <machine/db_machdep.h>
 
@@ -114,8 +116,6 @@ db_read_token()
 	    t = db_lex();
 	return (t);
 }
-
-int	db_radix = 16;
 
 void
 db_flush_lex()

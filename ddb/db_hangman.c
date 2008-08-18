@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_hangman.c,v 1.10 1996/11/29 06:51:49 mickey Exp $	*/
+/*	$OpenBSD: db_hangman.c,v 1.12 1997/09/08 19:46:19 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Theo de Raadt, Michael Shalayeff
@@ -33,9 +33,14 @@
  */
 
 #include <sys/param.h>
+
+#include <vm/vm.h>
+
 #include <machine/db_machdep.h>
+
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
+
 #include <dev/cons.h>
 #include <dev/rndvar.h>
 
@@ -58,11 +63,11 @@ int	 db_hangon __P((void));
 static int	skill;
 
 static __inline size_t
-db_random( mod )
+db_random(mod)
 	register size_t	mod;
 {
 	size_t	ret;
-	get_random_bytes(&ret, sizeof(ret) );
+	get_random_bytes(&ret, sizeof(ret));
 	return ret % mod;
 }
 
@@ -109,8 +114,7 @@ db_hang(tries, word, abc)
 	register char	*p;
 
 	for(p=hangpic; *p; p++) {
-		if(*p>='0' && *p<='9')
-		{
+		if(*p>='0' && *p<='9') {
 			if(tries<=(*p)-'0')
 				cnputc(substchar[(*p)-'0']);
 			else
@@ -185,8 +189,7 @@ db_hangon(void)
 	if (tries && len)
 		return 1;
 
-	if (!tries && skill > 2)
-	{
+	if (!tries && skill > 2) {
 		register char	*p = word;
 		for (; *p; p++)
 			if (ISALPHA(*p))
@@ -200,7 +203,7 @@ db_hangon(void)
 }
 
 void
-db_hangman( addr, haddr, count, modif)
+db_hangman(addr, haddr, count, modif)
 	db_expr_t addr;
 	int	haddr;
 	db_expr_t count;

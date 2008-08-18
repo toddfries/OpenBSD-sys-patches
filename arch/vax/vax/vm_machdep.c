@@ -1,4 +1,5 @@
-/*      $NetBSD: vm_machdep.c,v 1.30 1997/01/11 11:23:09 ragge Exp $       */
+/*      $OpenBSD: vm_machdep.c,v 1.12 1997/10/08 07:15:57 niklas Exp $       */
+/*      $NetBSD: vm_machdep.c,v 1.33 1997/07/06 22:38:22 ragge Exp $       */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -247,7 +248,7 @@ cpu_switch(pp)
 again:	
 	/* First: Search for a queue. */
 	s = splhigh();
-	if ((i = ffs(whichqs) -1 ) < 0)
+	if ((i = ffs(whichqs) - 1) < 0)
 		goto idle;
 
 	/*
@@ -287,9 +288,12 @@ again:
 	return; /* New process! */
 
 idle:	
+	p = curproc;
+	curproc = NULL;		/* This is nice. /BQT */
 	spl0();
 	while (whichqs == 0)
 		;
+	curproc = p;
 	goto again;
 }
 
@@ -439,7 +443,7 @@ reno_zmagic(p, epp)
 	    epp->ep_daddr + execp->a_data, NULLVP, 0,
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 
-	return exec_aout_setup_stack(p, epp);
+	return exec_setup_stack(p, epp);
 }
 
 void
@@ -597,9 +601,12 @@ vmapbuf(bp, len)
         tmap = vm_map_pmap(phys_map);
         len = len >> PGSHIFT;
         while (len--) {
+		volatile int i = *(int *)faddr;
+
                 pa = pmap_extract(fmap, faddr);
                 if (pa == 0)
-                        panic("vmapbuf: null page frame for %x", faddr);
+                       	panic("vmapbuf: null page frame for %x", faddr);
+
                 pmap_enter(tmap, taddr, pa & ~(NBPG - 1),
                            VM_PROT_READ|VM_PROT_WRITE, TRUE);
                 faddr += NBPG;

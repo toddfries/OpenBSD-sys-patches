@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.13 1997/05/18 13:00:12 deraadt Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.19 1997/10/18 10:37:04 deraadt Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -265,7 +265,7 @@ vndgetdisklabel(dev, sc)
 	lp->d_secsize = 512;
 	lp->d_ntracks = 1;
 	lp->d_nsectors = 100;
-	lp->d_ncylinders = 100;
+	lp->d_ncylinders = sc->sc_size / 100;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
 	if (lp->d_secpercyl == 0) {
 		lp->d_secpercyl = 100;
@@ -275,7 +275,7 @@ vndgetdisklabel(dev, sc)
 	strncpy(lp->d_typename, "vnd device", 16);
 	lp->d_type = DTYPE_SCSI;
 	strncpy(lp->d_packname, "fictitious", 16);
-	lp->d_secperunit = 100 * 100;
+	lp->d_secperunit = sc->sc_size;
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
 	lp->d_flags = 0;
@@ -296,7 +296,7 @@ vndgetdisklabel(dev, sc)
 	errstring = readdisklabel(VNDLABELDEV(dev), vndstrategy, lp,
 	    sc->sc_dk.dk_cpulabel);
 	if (errstring) {
-		printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);
+		/*printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);*/
 		return;
 	}
 }
@@ -384,11 +384,15 @@ vndstrategy(bp)
 	bn = bp->b_blkno;
 	sz = howmany(bp->b_bcount, DEV_BSIZE);
 	bp->b_resid = bp->b_bcount;
-	if (bn < 0 || bn + sz > vnd->sc_size) {
-		if (bn != vnd->sc_size) {
-			bp->b_error = EINVAL;
-			bp->b_flags |= B_ERROR;
-		}
+	if (bn < 0) {
+		bp->b_error = EINVAL;
+		bp->b_flags |= B_ERROR;
+		biodone(bp);
+		return;
+	}
+	if (DISKPART(bp->b_dev) != RAW_PART &&
+	    bounds_check_with_label(bp, vnd->sc_dk.dk_label,
+	    vnd->sc_dk.dk_cpulabel, 1) == 0) {
 		biodone(bp);
 		return;
 	}
@@ -416,11 +420,14 @@ vndstrategy(bp)
 
 		/* Loop until all queued requests are handled.  */
 		for (;;) {
+			int part = DISKPART(bp->b_dev);
+			int off = vnd->sc_dk.dk_label->d_partitions[part].p_offset;
+
 			aiov.iov_base = bp->b_data;
 			auio.uio_resid = aiov.iov_len = bp->b_bcount;
 			auio.uio_iov = &aiov;
 			auio.uio_iovcnt = 1;
-			auio.uio_offset = dbtob(bp->b_blkno);
+			auio.uio_offset = dbtob(bp->b_blkno + off);
 			auio.uio_segflg = UIO_SYSSPACE;
 			auio.uio_procp = NULL;
 
@@ -459,6 +466,7 @@ vndstrategy(bp)
 	}
 
 	/* The old-style buffercache bypassing method.  */
+	bn += vnd->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)].p_offset;
 	bn = dbtob(bn);
  	bsize = vnd->sc_vp->v_mount->mnt_stat.f_iosize;
 	addr = bp->b_data;

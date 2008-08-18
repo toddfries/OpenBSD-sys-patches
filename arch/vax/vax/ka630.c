@@ -1,7 +1,8 @@
-/*	$NetBSD: ka630.c,v 1.4 1996/10/13 03:35:44 christos Exp $	*/
+/*	$OpenBSD: ka630.c,v 1.4 1997/09/12 09:30:55 maja Exp $	*/
+/*	$NetBSD: ka630.c,v 1.7 1997/07/26 10:12:46 ragge Exp $	*/
 /*-
  * Copyright (c) 1982, 1988, 1990, 1993
- * 	The Regents of the University of California.  All rights reserved.
+ *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *      @(#)ka630.c     7.8 (Berkeley) 5/9/91
+ *	@(#)ka630.c	7.8 (Berkeley) 5/9/91
  */
 
 #include <sys/param.h>
@@ -44,6 +45,7 @@
 #include <vm/vm_kern.h>
 
 #include <machine/pte.h>
+#include <machine/cpu.h>
 #include <machine/mtpr.h>
 #include <machine/sid.h>
 #include <machine/pmap.h>
@@ -51,39 +53,35 @@
 #include <machine/uvax.h>
 #include <machine/ka630.h>
 #include <machine/clock.h>
+#include <vax/vax/gencons.h>
 
-struct uvaxIIcpu *uvaxIIcpu_ptr;
-
-struct	ka630clock *ka630_clkptr = KA630CLK;
+static struct uvaxIIcpu *uvaxIIcpu_ptr;
 
 static void ka630_conf __P((struct device *, struct device *, void *));
 static void ka630_memerr __P((void));
 static int ka630_mchk __P((caddr_t));
 static void ka630_steal_pages __P((void));
+static void ka630_halt __P((void));
+static void ka630_reboot __P((int));
 
+extern	short *clk_page;
 
-int
-ka630_setup(uc,flags)
-        struct uvax_calls *uc;
-        int flags;
-{
-        uc->uc_name = "ka630";
-
-        uc->uc_phys2virt = NULL;
-        uc->uc_physmap = NULL;     /* ptv_map ? p2v_map */
-
-        uc->uc_steal_pages = ka630_steal_pages;
-        uc->uc_conf = ka630_conf;
-        uc->uc_clkread = ka630_clkread;
-        uc->uc_clkwrite = ka630_clkwrite;
-        
-#ifdef notyet
-        uc->uc_memerr = ka630_memerr;
-        uc->uc_mchk = ka630_mchk;
-#endif  
-        
-        uc->uc_busTypes = VAX_UNIBUS;
-} 
+struct	cpu_dep ka630_calls = {
+	ka630_steal_pages,
+	no_nicr_clock,
+	ka630_mchk,
+	ka630_memerr,
+	ka630_conf,
+	chip_clkread,
+	chip_clkwrite,
+	1,      /* ~VUPS */
+	0,      /* Used by vaxstation */
+	0,      /* Used by vaxstation */
+	0,      /* Used by vaxstation */
+	0,
+	ka630_halt,
+	ka630_reboot,
+};
 
 /*
  * uvaxII_conf() is called by cpu_attach to do the cpu_specific setup.
@@ -100,7 +98,8 @@ ka630_conf(parent, self, aux)
 }
 
 /* log crd errors */
-uvaxII_memerr()
+void
+ka630_memerr()
 {
 	printf("memory err!\n");
 }
@@ -121,7 +120,7 @@ struct mc78032frame {
 	int	mc63_psl;		/* trapped psl */
 };
 
-uvaxII_mchk(cmcf)
+ka630_mchk(cmcf)
 	caddr_t cmcf;
 {
 	register struct mc78032frame *mcf = (struct mc78032frame *)cmcf;
@@ -147,7 +146,8 @@ uvaxII_mchk(cmcf)
 void
 ka630_steal_pages()
 {
-	extern  vm_offset_t avail_start, virtual_avail, avail_end;
+	extern	vm_offset_t avail_start, virtual_avail, avail_end;
+	extern	int clk_adrshift, clk_tweak;
 	int	junk;
 
 	/*
@@ -165,29 +165,38 @@ ka630_steal_pages()
 	pmap_map((vm_offset_t)uvaxIIcpu_ptr, (vm_offset_t)UVAXIICPU,
 	    (vm_offset_t)UVAXIICPU + NBPG, VM_PROT_READ|VM_PROT_WRITE);
 
-	MAPVIRT(ka630_clkptr, 1);
-	pmap_map((vm_offset_t)ka630_clkptr, (vm_offset_t)KA630CLK,
+	clk_adrshift = 0;	/* Addressed at short's... */
+	clk_tweak = 0;		/* ...and no shifting */
+	MAPVIRT(clk_page, 1);
+	pmap_map((vm_offset_t)clk_page, (vm_offset_t)KA630CLK,
 	    (vm_offset_t)KA630CLK + NBPG, VM_PROT_READ|VM_PROT_WRITE);
 
 	/*
-	 * Clear restart and boot in progress flags
-	 * in the CPMBX.
-	 /
-	ka630clk_ptr->cpmbx = (ka630clk_ptr->cpmbx & KA630CLK_LANG);
+	 * Clear restart and boot in progress flags in the CPMBX.
+	 * Note: We are not running virtual yet.
+	 */
+	KA630CLK->cpmbx = (KA630CLK->cpmbx & KA630CLK_LANG);
 
 	/*
 	 * Enable memory parity error detection and clear error bits.
 	 */
-	uvaxIIcpu_ptr->uvaxII_mser = (UVAXIIMSER_PEN | UVAXIIMSER_MERR |
+	UVAXIICPU->uvaxII_mser = (UVAXIIMSER_PEN | UVAXIIMSER_MERR |
 	    UVAXIIMSER_LEB);
-
 }
-#define uVAX_gettodr    ka630_gettodr
-#define uVAX_settodr    ka630_settodr
-#define	uVAX_clkptr	ka630_clkptr
-#define	uVAX_genclock	ka630_genclock
-#define	uVAX_clock	ka630clock
-#define	uVAX_clkread	ka630_clkread
-#define	uVAX_clkwrite	ka630_clkwrite
 
-#include <arch/vax/vax/uvax_proto.c>
+static void
+ka630_halt()
+{
+	((struct ka630clock *)clk_page)->cpmbx = KA630CLK_DOTHIS|KA630CLK_HALT;
+	asm("halt");
+}
+
+static void
+ka630_reboot(arg)
+	int arg;
+{
+	((struct ka630clock *)clk_page)->cpmbx =
+	    KA630CLK_DOTHIS | KA630CLK_REBOOT;
+	mtpr(GC_BOOT, PR_TXDB);
+	asm("movl %0,r5;halt"::"g"(arg));
+}

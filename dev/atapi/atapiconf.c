@@ -1,4 +1,4 @@
-/*	$OpenBSD: atapiconf.c,v 1.12 1996/11/23 21:46:29 kstailey Exp $	*/
+/*	$OpenBSD: atapiconf.c,v 1.18 1997/08/19 19:04:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Manuel Bouyer.  All rights reserved.
@@ -93,14 +93,31 @@ struct atapi_quirk_inquiry_pattern {
 };
 
 struct atapi_quirk_inquiry_pattern atapi_quirk_inquiry_patterns[] = {
+	/* GoldStar 8X */
 	{ATAPI_DEVICE_TYPE_CD, ATAPI_REMOVABLE,
-	 "GCD-R580B", "1.00", AQUIRK_LITTLETOC},/* GoldStar 8X */
-
+	 "GCD-R580B", "1.00", AQUIRK_LITTLETOC},
+	/* MATSHITA CR-574 */
+	{ATAPI_DEVICE_TYPE_CD, ATAPI_REMOVABLE,
+	 "MATSHITA CR-574", "1.06", AQUIRK_NOCAPACITY},
+	/* NEC Multispin 2Vi */
 	{ATAPI_DEVICE_TYPE_DAD, ATAPI_REMOVABLE,
 	 "NEC                 CD-ROM DRIVE:260", "3.04", AQUIRK_CDROM},
-						/* NEC Multispin 2Vi */
-
-	{0, 0, NULL, NULL, 0}			/* The End */
+	/* NEC 273 */
+	{ATAPI_DEVICE_TYPE_CD, ATAPI_REMOVABLE,
+	 "NEC                 CD-ROM DRIVE:273", "4.21", AQUIRK_NOTUR},
+	/* Sanyo 4x */
+	{ATAPI_DEVICE_TYPE_CD, ATAPI_REMOVABLE,
+	 "SANYO CRD-254P", "1.02", AQUIRK_NOCAPACITY},
+	/* Sanyo 6x */
+	{ATAPI_DEVICE_TYPE_CD, ATAPI_REMOVABLE,
+	 "SANYO CRD-256P", "1.02", AQUIRK_NOCAPACITY},
+	/* Acer Notelight 370 */
+	{ATAPI_DEVICE_TYPE_CD, ATAPI_REMOVABLE,
+	 "UJDCD8730", "1.14", AQUIRK_NODOORLOCK},
+	/* ALPS CD changer */
+	{ATAPI_DEVICE_TYPE_CD, ATAPI_REMOVABLE,
+	 "ALPS ELECTRIC CO.,LTD. DC544C", "SW03D", AQUIRK_NOTUR},
+	{0, 0, NULL, NULL, 0}
 };
 
 int
@@ -283,7 +300,7 @@ atapi_exec_cmd(ad_link, cmd, cmd_size, databuf, datalen, rw, flags)
 	int cmd_size;
 	void *databuf;
 	int datalen;
-	long rw;
+	int rw;
 	int flags;
 {
 	struct atapi_command_packet *pkt;
@@ -526,13 +543,16 @@ atapi_test_unit_ready(ad_link, flags)
 
 	ATAPI_DEBUG_FCTN_PRINT(("atapi_test_unit_ready: "));
 
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = ATAPI_TEST_UNIT_READY;
-
-	ret = atapi_exec_cmd(ad_link, &cmd, sizeof(cmd), 0, 0, 0, flags);
-
+	/* Device doesn't support TUR! */
+	if (ad_link->quirks & AQUIRK_NOTUR)
+		ret = 0;
+	else {
+		bzero(&cmd, sizeof(cmd));
+		cmd.opcode = ATAPI_TEST_UNIT_READY;
+		ret = atapi_exec_cmd(ad_link, &cmd, sizeof(cmd), 0, 0, 0,
+		    flags);
+	}
 	ATAPI_DEBUG_FCTN_PRINT(("atapi_test_unit_ready: ret %d\n", ret));
-
 	return ret;
 }
 
@@ -568,12 +588,15 @@ atapi_prevent(ad_link, how)
 
 	ATAPI_DEBUG_FCTN_PRINT(("atapi_prevent: "));
 
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = ATAPI_PREVENT_ALLOW_MEDIUM_REMOVAL;
-	cmd.how = how & 0xff;
+	if (ad_link->quirks & AQUIRK_NODOORLOCK) 
+	        ret = 0;
+	else { 
+	        bzero(&cmd, sizeof(cmd));
+		cmd.opcode = ATAPI_PREVENT_ALLOW_MEDIUM_REMOVAL;
+		cmd.how = how & 0xff;
 
-	ret = atapi_exec_cmd(ad_link, &cmd, sizeof(cmd), 0,0,0,0);
-
+		ret = atapi_exec_cmd(ad_link, &cmd, sizeof(cmd), 0,0,0,0);
+	}
 	ATAPI_DEBUG_FCTN_PRINT(("ret %d\n", ret));
 
 	return ret;

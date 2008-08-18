@@ -108,16 +108,10 @@
 #include "mfb.h"
 #include "xcfb.h"
 #include "sfb.h"
-#include "dc.h"
 #include "dtop.h"
 #include "scc.h"
 #include "le_ioasic.h"
 #include "asc.h"
-
-#if NDTOP > 0
-#include <pmax/dev/dtopvar.h>
-#endif
-
 
 extern void fbPutc();
 

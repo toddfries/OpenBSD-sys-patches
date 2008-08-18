@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.17 1997/01/26 21:43:36 tholo Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.24 1997/09/27 02:35:57 deraadt Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -85,6 +85,18 @@
 #include <netccitt/dll.h>
 #include <netccitt/llc_var.h>
 
+#ifdef NETATALK
+#include <netatalk/at.h>
+#include <netatalk/at_var.h>
+#include <netatalk/at_extern.h>
+
+#define llc_snap_org_code llc_un.type_snap.org_code
+#define llc_snap_ether_type llc_un.type_snap.ether_type
+
+extern u_char	at_org_code[ 3 ];
+extern u_char	aarp_org_code[ 3 ];
+#endif /* NETATALK */
+
 #if defined(CCITT)
 #include <sys/socketvar.h>
 #endif
@@ -128,6 +140,11 @@ ether_ioctl(ifp, arp, cmd, data)
 			break;
 		    }
 #endif /* IPX */
+#ifdef NETATALK
+		case AF_APPLETALK:
+			/* Nothing to do. */
+			break;
+#endif /* NETATALK */
 #ifdef NS
 		/* XXX - This code is probably wrong. */
 		case AF_NS:
@@ -224,7 +241,7 @@ ether_output(ifp, m0, dst, rt0)
 #endif
 #ifdef IPX
 	case AF_IPX:
-		etype = htons(satosipx(dst)->sipx_type);
+		etype = ETHERTYPE_IPX;
  		bcopy((caddr_t)&satosipx(dst)->sipx_addr.ipx_host,
 		    (caddr_t)edst, sizeof (edst));
 		if (!bcmp((caddr_t)edst, (caddr_t)&ipx_thishost, sizeof(edst)))
@@ -234,6 +251,55 @@ ether_output(ifp, m0, dst, rt0)
 			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		break;
 #endif
+#ifdef NETATALK
+	case AF_APPLETALK: {
+		struct at_ifaddr *aa;
+
+		if (!aarpresolve(ac, m, (struct sockaddr_at *)dst, edst)) {
+#ifdef NETATALKDEBUG
+			extern char *prsockaddr(struct sockaddr *);
+			printf("aarpresolv: failed for %s\n", prsockaddr(dst));
+#endif /* NETATALKDEBUG */
+			return (0);
+		}
+
+		/*
+		 * ifaddr is the first thing in at_ifaddr
+		 */
+		aa = (struct at_ifaddr *)at_ifawithnet(
+			(struct sockaddr_at *)dst,
+			ifp->if_addrlist.tqh_first);
+		if (aa == 0)
+			goto bad;
+
+		/*
+		 * In the phase 2 case, we need to prepend an mbuf for the llc
+		 * header. Since we must preserve the value of m, which is
+		 * passed to us by value, we m_copy() the first mbuf,
+		 * and use it for our llc header.
+		 */
+		if ( aa->aa_flags & AFA_PHASE2 ) {
+			struct llc llc;
+
+			/* XXX Really this should use netisr too */
+			M_PREPEND(m, AT_LLC_SIZE, M_WAIT);
+			/*
+			 * FreeBSD doesn't count the LLC len in
+			 * ifp->obytes, so they increment a length
+			 * field here. We don't do this.
+			 */
+			llc.llc_dsap = llc.llc_ssap = LLC_SNAP_LSAP;
+			llc.llc_control = LLC_UI;
+			bcopy(at_org_code, llc.llc_snap_org_code,
+				sizeof(at_org_code));
+			llc.llc_snap_ether_type = htons( ETHERTYPE_AT );
+			bcopy(&llc, mtod(m, caddr_t), AT_LLC_SIZE);
+			etype = htons(m->m_pkthdr.len);
+		} else {
+			etype = htons(ETHERTYPE_AT);
+		}
+		} break;
+#endif /* NETATALK */
 #ifdef	ISO
 	case AF_ISO: {
 		int	snpalen;
@@ -418,17 +484,21 @@ decapsulate:
 		break;
 
 	case ETHERTYPE_ARP:
+		if (ifp->if_flags & IFF_NOARP)
+			goto dropanyway;
 		schednetisr(NETISR_ARP);
 		inq = &arpintrq;
 		break;
 
 	case ETHERTYPE_REVARP:
+		if (ifp->if_flags & IFF_NOARP)
+			goto dropanyway;
 		revarpinput(m);	/* XXX queue? */
 		return;
 
 #endif
 #ifdef IPX
-	case ETHERTYPE_II:
+	case ETHERTYPE_IPX:
 		schednetisr(NETISR_IPX);
 		inq = &ipxintrq;
 		break;
@@ -439,6 +509,17 @@ decapsulate:
 		inq = &nsintrq;
 		break;
 #endif
+#ifdef NETATALK
+	case ETHERTYPE_AT:
+		schednetisr(NETISR_ATALK);
+		inq = &atintrq1;
+		break;
+	case ETHERTYPE_AARP:
+		/* probably this should be done with a NETISR as well */
+		/* XXX queue this */
+		aarpinput((struct arpcom *)ifp, m);
+		return;
+#endif
 	default:
 		if (llcfound || etype > ETHERMTU)
 			goto dropanyway;
@@ -446,6 +527,36 @@ decapsulate:
 		l = mtod(m, struct llc *);
 		switch (l->llc_dsap) {
 		case LLC_SNAP_LSAP:
+#ifdef NETATALK
+			/*
+			 * Some protocols (like Appletalk) need special
+			 * handling depending on if they are type II
+			 * or SNAP encapsulated. Everything else
+			 * gets handled by stripping off the SNAP header
+			 * and going back up to decapsulate.
+			 */
+			if (l->llc_control == LLC_UI &&
+			    l->llc_ssap == LLC_SNAP_LSAP &&
+			    Bcmp(&(l->llc_snap_org_code)[0],
+			    at_org_code, sizeof(at_org_code)) == 0 &&
+			    ntohs(l->llc_snap_ether_type) == ETHERTYPE_AT) {
+				inq = &atintrq2;
+				m_adj(m, AT_LLC_SIZE);
+				schednetisr(NETISR_ATALK);
+				break;
+			}
+
+			if (l->llc_control == LLC_UI &&
+			    l->llc_ssap == LLC_SNAP_LSAP &&
+			    Bcmp(&(l->llc_snap_org_code)[0],
+			    aarp_org_code, sizeof(aarp_org_code)) == 0 &&
+			    ntohs(l->llc_snap_ether_type) == ETHERTYPE_AARP) {
+				m_adj(m, AT_LLC_SIZE);
+				/* XXX Really this should use netisr too */
+				aarpinput((struct arpcom *)ifp, m);
+				return;
+			}
+#endif /* NETATALK */
 			if (l->llc_control == LLC_UI &&
 			    l->llc_dsap == LLC_SNAP_LSAP &&
 			    l->llc_ssap == LLC_SNAP_LSAP) {

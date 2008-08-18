@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.13 1997/02/01 21:49:30 deraadt Exp $	*/
+/*	$OpenBSD: proc.h,v 1.16 1997/09/15 05:46:14 millert Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -235,6 +235,8 @@ struct	proc {
 #define	P_SSTEP		0x20000	/* process needs single-step fixup ??? */
 #define	P_SUGIDEXEC	0x40000	/* last execve() was a setuid/setgid execve() */
 
+#define	P_NOCLDWAIT	0x80000	/* No zombies if child dies (assign to pid 1) */
+
 /*
  * MOVE TO ucred.h?
  *
@@ -283,11 +285,12 @@ extern u_long pgrphash;
 extern struct proc *curproc;		/* Current running proc. */
 extern struct proc proc0;		/* Process slot for swapper. */
 extern int nprocs, maxproc;		/* Current and max number of procs. */
+extern int randompid;			/* fork() should create random pid's */
 
 LIST_HEAD(proclist, proc);
 extern struct proclist allproc;		/* List of all processes. */
 extern struct proclist zombproc;	/* List of zombie processes. */
-struct proc *initproc, *pageproc;	/* Process slots for init, pager. */
+struct proc *initproc;			/* Process slots for init, pager. */
 
 #define	NQS	32			/* 32 run queues. */
 int	whichqs;			/* Bit mask summary of non-empty Q's. */

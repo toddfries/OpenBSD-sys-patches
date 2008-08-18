@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.5 1996/09/20 22:53:13 deraadt Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.8 1997/08/09 23:36:27 millert Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -188,9 +188,9 @@ struct	tcpstat {
 
 	u_long	tcps_sndtotal;		/* total packets sent */
 	u_long	tcps_sndpack;		/* data packets sent */
-	u_long	tcps_sndbyte;		/* data bytes sent */
+	u_quad_t tcps_sndbyte;		/* data bytes sent */
 	u_long	tcps_sndrexmitpack;	/* data packets retransmitted */
-	u_long	tcps_sndrexmitbyte;	/* data bytes retransmitted */
+	u_quad_t tcps_sndrexmitbyte;	/* data bytes retransmitted */
 	u_long	tcps_sndacks;		/* ack-only packets sent */
 	u_long	tcps_sndprobe;		/* window probes sent */
 	u_long	tcps_sndurg;		/* packets sent with URG only */
@@ -199,25 +199,25 @@ struct	tcpstat {
 
 	u_long	tcps_rcvtotal;		/* total packets received */
 	u_long	tcps_rcvpack;		/* packets received in sequence */
-	u_long	tcps_rcvbyte;		/* bytes received in sequence */
+	u_quad_t tcps_rcvbyte;		/* bytes received in sequence */
 	u_long	tcps_rcvbadsum;		/* packets received with ccksum errs */
 	u_long	tcps_rcvbadoff;		/* packets received with bad offset */
 	u_long	tcps_rcvmemdrop;	/* packets dropped for lack of memory */
 	u_long	tcps_rcvshort;		/* packets received too short */
 	u_long	tcps_rcvduppack;	/* duplicate-only packets received */
-	u_long	tcps_rcvdupbyte;	/* duplicate-only bytes received */
+	u_quad_t tcps_rcvdupbyte;	/* duplicate-only bytes received */
 	u_long	tcps_rcvpartduppack;	/* packets with some duplicate data */
-	u_long	tcps_rcvpartdupbyte;	/* dup. bytes in part-dup. packets */
+	u_quad_t tcps_rcvpartdupbyte;	/* dup. bytes in part-dup. packets */
 	u_long	tcps_rcvoopack;		/* out-of-order packets received */
-	u_long	tcps_rcvoobyte;		/* out-of-order bytes received */
+	u_quad_t tcps_rcvoobyte;	/* out-of-order bytes received */
 	u_long	tcps_rcvpackafterwin;	/* packets with data after window */
-	u_long	tcps_rcvbyteafterwin;	/* bytes rcvd after window */
+	u_quad_t tcps_rcvbyteafterwin;	/* bytes rcvd after window */
 	u_long	tcps_rcvafterclose;	/* packets rcvd after "close" */
 	u_long	tcps_rcvwinprobe;	/* rcvd window probe packets */
 	u_long	tcps_rcvdupack;		/* rcvd duplicate acks */
 	u_long	tcps_rcvacktoomuch;	/* rcvd acks for unsent data */
 	u_long	tcps_rcvackpack;	/* rcvd ack packets */
-	u_long	tcps_rcvackbyte;	/* bytes acked by rcvd acks */
+	u_quad_t tcps_rcvackbyte;	/* bytes acked by rcvd acks */
 	u_long	tcps_rcvwinupd;		/* rcvd window update packets */
 	u_long	tcps_pawsdrop;		/* segments dropped due to PAWS */
 	u_long	tcps_predack;		/* times hdr predict ok for acks */
@@ -230,15 +230,23 @@ struct	tcpstat {
 /*
  * Names for TCP sysctl objects.
  */
-			/* enable/disable RFC1323 timestamps/scaling */
-#define	TCPCTL_RFC1323		1
-#define	TCPCTL_KEEPINITTIME	2
-#define	TCPCTL_MAXID		3
+			
+#define	TCPCTL_RFC1323		1 /* enable/disable RFC1323 timestamps/scaling */
+#define	TCPCTL_KEEPINITTIME	2 /* TCPT_KEEP value */
+#define TCPCTL_KEEPIDLE		3 /* allow tcp_keepidle to be changed */
+#define TCPCTL_KEEPINTVL	4 /* allow tcp_keepintvl to be changed */
+#define TCPCTL_SLOWHZ		5 /* return kernel idea of PR_SLOWHZ */ 
+#define TCPCTL_BADDYNAMIC	6 /* return bad dynamic port bitmap */ 
+#define	TCPCTL_MAXID		7
 
 #define	TCPCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "rfc1323",	CTLTYPE_INT }, \
 	{ "keepinittime",	CTLTYPE_INT }, \
+	{ "keepidle",	CTLTYPE_INT }, \
+	{ "keepintvl",	CTLTYPE_INT }, \
+	{ "slowhz",	CTLTYPE_INT }, \
+	{ "baddynamic", CTLTYPE_STRUCT }, \
 }
 
 #ifdef _KERNEL

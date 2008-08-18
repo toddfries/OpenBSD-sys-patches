@@ -1,5 +1,4 @@
-/*	$OpenBSD: Locore.c,v 1.3 1996/12/28 06:21:33 rahnds Exp $	*/
-/*	$NetBSD: Locore.c,v 1.2 1996/11/06 20:19:50 cgd Exp $	*/
+/*	$OpenBSD: Locore.c,v 1.5 1997/10/13 13:42:52 pefo Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996 Wolfgang Solfrank.
@@ -43,7 +42,7 @@
 int whichqs;
 
 /*
- * Put process p on the run queue indicated by its priority.
+ * Put process p on the run queue, given by its priority.
  * Calls should be made at splstatclock(), and p->p_stat should be SRUN.
  */
 void
@@ -67,8 +66,7 @@ setrunqueue(p)
 }
 
 /*
- * Remove process p from its run queue, which should be the one
- * indicated by its priority.
+ * Remove process p from its run queue, given by its priority.
  * Calls should be made at splstatclock().
  */
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.10 1996/07/27 11:10:11 deraadt Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.12 1997/10/06 20:20:44 deraadt Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*

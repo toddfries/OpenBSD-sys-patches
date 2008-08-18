@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.h,v 1.4 1996/05/16 11:52:09 mickey Exp $	*/
+/*	$OpenBSD: if_tun.h,v 1.6 1997/08/02 09:56:28 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, Julian Onions <jpo@cs.nott.ac.uk>
@@ -34,9 +34,8 @@
 
 #define	TUN_READY	(TUN_OPEN | TUN_INITED | TUN_IASET)
 
-struct tunnel_header
-{
-	u_char	tun_af;		/* adress family */
+struct tunnel_header {
+	u_int32_t	tun_af;		/* adress family */
 };
 
 /* Maximum packet size */
@@ -47,8 +46,7 @@ struct tunnel_header
 #define	TUNGDEBUG	_IOR('t', 90, int)
 
 /* iface info */
-struct tuninfo
-{
+struct tuninfo {
 	u_int	mtu;
 	u_short	type;
 	u_short	flags;

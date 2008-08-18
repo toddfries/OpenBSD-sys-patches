@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_i386.c,v 1.10 1997/04/23 06:49:07 mickey Exp $	*/
+/*	$OpenBSD: dev_i386.c,v 1.19 1997/08/22 00:38:35 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -32,16 +32,25 @@
  *
  */
 
-#include <libsa.h>
+#include "libsa.h"
 #include "biosdev.h"
+#include <sys/param.h>
+#include <dev/cons.h>
 
 extern int debug;
 
 /* XXX use slot for 'rd' for 'hd' pseudo-device */
-const char bdevs[19][4] = {
+const char bdevs[][4] = {
 	"wd", "", "fd", "wt", "sd", "st", "cd", "mcd",
 	"", "", "", "", "", "", "", "scd", "", "hd", "acd"
 };
+const int nbdevs = NENTS(bdevs);
+
+const char cdevs[][4] = {
+	"", "", "", "", "", "", "", "",
+	"com", "", "", "", "pc"
+};
+const int ncdevs = NENTS(cdevs);
 
 /* pass dev_t to the open routines */
 int
@@ -108,24 +117,31 @@ devboot(bootdev, p)
 
 void
 putchar(c)
-	int	c;
+	register int c;
 {
 	static int pos = 0;
 
 	switch(c) {
+	case '\177':	/* DEL erases */
+		cnputc('\b');
+		cnputc(' ');
+	case '\b':
+		cnputc('\b');
+		if (pos)
+			pos--;
+		break;
 	case '\t':
 		do
-			putc(' ');
+			cnputc(' ');
 		while(++pos % 8);
 		break;
 	case '\n':
-		putc('\r');
 	case '\r':
-		putc(c);
+		cnputc(c);
 		pos=0;
 		break;
 	default:
-		putc(c);
+		cnputc(c);
 		pos++;
 		break;
 	}
@@ -134,16 +150,43 @@ putchar(c)
 int
 getchar()
 {
-	int c = getc();
-
-	if (c == '\b' || c == '\177')
-		return(c);
+	register int c = cngetc();
 
 	if (c == '\r')
 		c = '\n';
+
+	if ((c < ' ' && c != '\n') || c == '\177')
+		return(c);
 
 	putchar(c);
 
 	return(c);
 }
 
+char *
+ttyname(fd)
+	int fd;
+{
+	static char buf[8];
+
+	sprintf(buf, "%s%d", cdevs[major(cn_tab->cn_dev)],
+	    minor(cn_tab->cn_dev));
+	return (buf);
+}
+
+dev_t
+ttydev(name)
+	char *name;
+{
+	int i, unit = -1;
+	char *no = name + strlen(name) - 1;
+
+	while (no >= name && *no >= '0' && *no <= '9')
+		unit = (unit < 0 ? 0 : (unit * 10)) + *no-- - '0';
+	if (no < name || unit < 0)
+		return (NODEV);
+	for (i = 0; i < ncdevs; i++)
+		if (strncmp(name, cdevs[i], no - name + 1) == 0)
+			return (makedev(i, unit));
+	return (NODEV);
+}

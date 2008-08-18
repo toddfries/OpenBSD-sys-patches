@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vnops.c,v 1.5 1996/04/21 22:26:38 deraadt Exp $	*/
+/*	$OpenBSD: cd9660_vnops.c,v 1.7 1997/10/06 20:19:46 deraadt Exp $	*/
 /*	$NetBSD: cd9660_vnops.c,v 1.32 1996/03/16 20:25:40 ws Exp $	*/
 
 /*-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_subr.c,v 1.3 1996/04/21 22:32:33 deraadt Exp $	*/
+/*	$OpenBSD: ffs_subr.c,v 1.5 1997/10/06 20:21:36 deraadt Exp $	*/
 /*	$NetBSD: ffs_subr.c,v 1.6 1996/03/17 02:16:23 christos Exp $	*/
 
 /*

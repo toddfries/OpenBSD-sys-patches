@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ed.c,v 1.29 1997/04/14 02:06:22 millert Exp $	*/
+/*	$OpenBSD: if_ed.c,v 1.33 1997/10/06 20:53:03 mickey Exp $	*/
 /*	$NetBSD: if_ed.c,v 1.105 1996/10/21 22:40:45 thorpej Exp $	*/
 
 /*
@@ -496,8 +496,7 @@ ed_pci_attach(parent, self, aux)
 	ether_ifattach(ifp);
 
 	/* Print additional info when attached. */
-	printf("\n%s: address %s, ", sc->sc_dev.dv_xname,
-	    ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(": address %s, ", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
 	if (sc->type_str)
 		printf("type %s ", sc->type_str);
@@ -878,6 +877,8 @@ ed_find_WD80x3(sc, cf, ia)
 
 	/* XXX Figure out the shared memory address. */
 
+	if (ia->ia_maddr == MADDRUNK)
+		goto out;
 	sc->isa16bit = isa16bit;
 	sc->mem_shared = 1;
 	ia->ia_msize = memsize;
@@ -1029,7 +1030,7 @@ ed_find_WD80x3(sc, cf, ia)
 
  out:
 	/*
-	 * XXX Sould always unmap, but we can't yet.
+	 * XXX Should always unmap, but we can't yet.
 	 * XXX Need to squish "indirect" first.
 	 */
 	if (rv == 0) {
@@ -1669,8 +1670,7 @@ edattach(parent, self, aux)
 	ether_ifattach(ifp);
 
 	/* Print additional info when attached. */
-	printf("\n%s: address %s, ", sc->sc_dev.dv_xname,
-	    ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(": address %s, ", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
 	if (sc->type_str)
 		printf("type %s ", sc->type_str);
@@ -2329,7 +2329,7 @@ edintr(arg)
 #ifdef ED_DEBUG
 					printf("%s: receive error %x\n",
 					    sc->sc_dev.dv_xname,
-					    NIC_GET(nicbase, ED_P0_RSR));
+					    NIC_GET(iot,ioh,nicbase,ED_P0_RSR));
 #endif
 				}
 

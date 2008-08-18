@@ -1,4 +1,4 @@
-/*	$OpenBSD: stand.h,v 1.23 1997/04/26 17:50:08 mickey Exp $	*/
+/*	$OpenBSD: stand.h,v 1.30 1997/10/07 07:59:58 mickey Exp $	*/
 /*	$NetBSD: stand.h,v 1.18 1996/11/30 04:35:51 gwr Exp $	*/
 
 /*-
@@ -97,16 +97,8 @@ struct devsw {
 extern struct devsw devsw[];	/* device array */
 extern int ndevs;		/* number of elements in devsw[] */
 
-struct consw {
-	char	*name;	/* console driver name */
-	int	(*cn_probe) __P((void));	/* probe device for presence */
-	void	(*cn_putc) __P((int c));	/* print char */
-	int	(*cn_getc) __P((void));		/* read char */
-	int	(*cn_ischar) __P((void));	/* check input */
-};
-
-extern struct consw consw[];
-extern int ncons;
+extern struct consdev constab[];
+extern struct consdev *cn_tab;
 
 struct open_file {
 	int		f_flags;	/* see F_* below */
@@ -159,6 +151,7 @@ void	*memcpy __P((void *, const void *, size_t));
 int	memcmp __P((const void *, const void*, size_t));
 char	*strncpy __P((char *, const char *, size_t));
 char	*strcpy __P((char *, const char *));
+int	strncmp __P((const char *, const char *, size_t));
 size_t	strlen __P((const char *));
 void	*memset __P((void *, int, size_t));
 void	exec __P((char *, void *, int));
@@ -186,11 +179,16 @@ ssize_t	null_write __P((struct open_file *f, void *buf,
 off_t	null_seek __P((struct open_file *f, off_t offset, int where));
 int	null_stat __P((struct open_file *f, struct stat *sb));
 int	null_readdir __P((struct open_file *f, char *name));
-int	cons_probe __P((void));
 char	*ttyname __P((int)); /* match userland decl, but ignore !0 */
-void	putc __P((int));    
-int	getc __P((void));
-int	ischar __P((void));
+dev_t	ttydev __P((char *));
+void	cninit __P((void));
+int	cnset __P((dev_t));
+void	cnputc __P((int));
+int	cngetc __P((void));
+int	cnischar __P((void));
+int	cnspeed __P((dev_t, int));
+u_int	sleep __P((u_int));
+void	usleep __P((u_int));
 
 void	putchar __P((int));    
 int	getchar __P((void));

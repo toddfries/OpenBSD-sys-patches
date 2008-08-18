@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.8 1997/02/05 15:48:27 deraadt Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.12 1997/08/09 23:36:26 millert Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -75,6 +75,9 @@
 extern	char *tcpstates[];
 extern	int tcptv_keep_init;
 
+/* from in_pcb.c */
+extern	struct baddynamicports baddynamicports;
+
 /*
  * Process a TCP user request for TCP tb.  If this is a send request
  * then m is the mbuf chain of send data.  If this is a timer expiration
@@ -94,7 +97,7 @@ tcp_usrreq(so, req, m, nam, control)
 	int ostate;
 
 	if (req == PRU_CONTROL)
-		return (in_control(so, (long)m, (caddr_t)nam,
+		return (in_control(so, (u_long)m, (caddr_t)nam,
 			(struct ifnet *)control));
 	if (control && control->m_len) {
 		m_freem(control);
@@ -156,10 +159,7 @@ tcp_usrreq(so, req, m, nam, control)
 	 * be discarded here.
 	 */
 	case PRU_DETACH:
-		if (tp->t_state > TCPS_LISTEN)
-			tp = tcp_disconnect(tp);
-		else
-			tp = tcp_close(tp);
+		tp = tcp_disconnect(tp);
 		break;
 
 	/*
@@ -579,6 +579,21 @@ tcp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	case TCPCTL_KEEPINITTIME:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &tcptv_keep_init));
+
+	case TCPCTL_KEEPIDLE:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &tcp_keepidle));
+
+	case TCPCTL_KEEPINTVL:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &tcp_keepintvl));
+
+	case TCPCTL_SLOWHZ:
+		return (sysctl_rdint(oldp, oldlenp, newp, PR_SLOWHZ));
+
+	case TCPCTL_BADDYNAMIC:
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    baddynamicports.tcp, sizeof(baddynamicports.tcp)));
 
 	default:
 		return (ENOPROTOOPT);

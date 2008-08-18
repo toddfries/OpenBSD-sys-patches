@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 1997/04/27 20:56:29 millert Exp $
+#	$OpenBSD: Makefile,v 1.6 1997/08/29 19:48:25 mickey Exp $
 #
 
 PROG=	mbr
@@ -8,6 +8,7 @@ LD=ld
 LDFLAGS=-nostdlib -Ttext 0 -x -N -s -Bstatic
 MAN+=	mbr.8
 INSTALL_STRIP=
+SADIR=${.CURDIR}/..
 
 # Uncomment this to make mbr talk to a serial port.
 #CPPFLAGS+=-DSERIAL=0
@@ -23,7 +24,7 @@ ${PROG}: $(OBJS) $(DPADD)
 	$(LD) $(LDFLAGS) -o $(PROG) $(OBJS) $(LDADD)
 	@size $(PROG)
 	@if [ -x ${.OBJDIR}/${PROG} ]; then \
-		dd if=${.OBJDIR}/${PROG} of=${.OBJDIR}/.tmp ibs=32 skip=1; \
+		dd if=${.OBJDIR}/${PROG} of=${.OBJDIR}/.tmp ibs=32 skip=1 2>/dev/null; \
 		mv -f ${.OBJDIR}/.tmp ${.OBJDIR}/${PROG}; \
 		ls -l ${.OBJDIR}/${PROG}; \
 	fi

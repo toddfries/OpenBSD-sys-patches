@@ -1,4 +1,4 @@
-/*	$OpenBSD: fifo.h,v 1.2 1996/02/27 07:53:42 niklas Exp $	*/
+/*	$OpenBSD: fifo.h,v 1.4 1997/10/06 20:20:22 deraadt Exp $	*/
 /*	$NetBSD: fifo.h,v 1.10 1996/02/09 22:40:15 christos Exp $	*/
 
 /*

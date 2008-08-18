@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_subr.c,v 1.5 1997/04/06 07:00:14 millert Exp $	*/
+/*	$OpenBSD: procfs_subr.c,v 1.10 1997/10/06 20:20:33 deraadt Exp $	*/
 /*	$NetBSD: procfs_subr.c,v 1.15 1996/02/12 15:01:42 christos Exp $	*/
 
 /*
@@ -47,6 +47,8 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
+#include <sys/stat.h>
+
 #include <miscfs/procfs/procfs.h>
 
 static TAILQ_HEAD(, pfsnode)	pfshead;
@@ -111,7 +113,7 @@ loop:
 	/*
 	 * otherwise lock the vp list while we call getnewvnode
 	 * since that can block.
-	 */ 
+	 */
 	if (pfsvplock & PROCFS_LOCKED) {
 		pfsvplock |= PROCFS_WANT;
 		sleep((caddr_t) &pfsvplock, PINOD);
@@ -134,46 +136,38 @@ loop:
 
 	switch (pfs_type) {
 	case Proot:	/* /proc = dr-xr-xr-x */
-		pfs->pfs_mode = (VREAD|VEXEC) |
-				(VREAD|VEXEC) >> 3 |
-				(VREAD|VEXEC) >> 6;
+		pfs->pfs_mode = S_IRUSR|S_IXUSR|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
 		vp->v_type = VDIR;
 		vp->v_flag = VROOT;
 		break;
 
 	case Pcurproc:	/* /proc/curproc = lr--r--r-- */
-		pfs->pfs_mode = (VREAD) |
-				(VREAD >> 3) |
-				(VREAD >> 6);
+		pfs->pfs_mode = S_IRUSR|S_IRGRP|S_IROTH;
 		vp->v_type = VLNK;
 		break;
 
-	case Pproc:
-		pfs->pfs_mode = (VREAD|VEXEC) |
-				(VREAD|VEXEC) >> 3 |
-				(VREAD|VEXEC) >> 6;
+	case Pproc:	/* /proc/N = dr-xr-xr-x */
+		pfs->pfs_mode = S_IRUSR|S_IXUSR|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
 		vp->v_type = VDIR;
 		break;
 
-	case Pfile:
-	case Pmem:
-	case Pregs:
-	case Pfpregs:
-		pfs->pfs_mode = (VREAD|VWRITE);
+	case Pfile:	/* /proc/N/file = -rw------- */
+	case Pmem:	/* /proc/N/mem = -rw------- */
+	case Pregs:	/* /proc/N/regs = -rw------- */
+	case Pfpregs:	/* /proc/N/fpregs = -rw------- */
+		pfs->pfs_mode = S_IRUSR|S_IWUSR;
 		vp->v_type = VREG;
 		break;
 
-	case Pctl:
-	case Pnote:
-	case Pnotepg:
-		pfs->pfs_mode = (VWRITE);
+	case Pctl:	/* /proc/N/ctl = --w------ */
+	case Pnote:	/* /proc/N/note = --w------ */
+	case Pnotepg:	/* /proc/N/notepg = --w------ */
+		pfs->pfs_mode = S_IWUSR;
 		vp->v_type = VREG;
 		break;
 
-	case Pstatus:
-		pfs->pfs_mode = (VREAD) |
-				(VREAD >> 3) |
-				(VREAD >> 6);
+	case Pstatus:	/* /proc/N/status = -r--r--r-- */
+		pfs->pfs_mode = S_IRUSR|S_IRGRP|S_IROTH;
 		vp->v_type = VREG;
 		break;
 
@@ -221,6 +215,9 @@ procfs_rw(v)
 	p = PFIND(pfs->pfs_pid);
 	if (p == 0)
 		return (EINVAL);
+	/* Do not permit games to be played with init(8) */
+	if (p->p_pid == 1 && securelevel > 0 && uio->uio_rw == UIO_WRITE)
+		return (EPERM);
 
 	switch (pfs->pfs_type) {
 	case Pnote:

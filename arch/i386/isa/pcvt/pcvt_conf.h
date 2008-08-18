@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcvt_conf.h,v 1.8 1997/05/22 21:18:35 millert Exp $	*/
+/*	$OpenBSD: pcvt_conf.h,v 1.10 1997/10/01 22:19:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992, 1995 Hellmuth Michaelis and Joerg Wunsch.
@@ -101,6 +101,10 @@
 #define PCVT_OPENBSD (210 + (OpenBSD2_1 - 1))
 #endif
 
+#ifdef OpenBSD2_2
+#define PCVT_OPENBSD (220 + (OpenBSD2_2 - 1))
+#endif
+
 #ifndef PCVT_NETBSD
 #define PCVT_NETBSD PCVT_OPENBSD
 #endif
@@ -197,7 +201,7 @@
 #endif
 
 #if !defined PCVT_PRETTYSCRNS	/* ---------- DEFAULT: OFF ------------ */
-# define PCVT_PRETTYSCRNS 1	/* for the cost of some microseconds of	*/
+# define PCVT_PRETTYSCRNS 0	/* for the cost of some microseconds of	*/
 #elif PCVT_PRETTYSCRNS != 0	/* cpu time this adds a more "pretty"	*/
 # undef PCVT_PRETTYSCRNS	/* version to the screensaver, an "*"	*/
 # define PCVT_PRETTYSCRNS 1	/* in random locations of the display.	*/

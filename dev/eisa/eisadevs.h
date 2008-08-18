@@ -2,9 +2,8 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: eisadevs,v 1.4 1996/05/26 00:26:53 deraadt Exp 
+ *	OpenBSD: eisadevs,v 1.7 1997/07/25 17:40:06 deraadt Exp 
  */
-/*	$NetBSD: eisadevs,v 1.10 1996/09/06 18:01:07 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou
@@ -80,6 +79,14 @@
 #define	EISA_PRODUCT_TCM5091	"3Com 3C509 Ethernet"
 #define	EISA_PRODUCT_TCM5092	"3Com 3C579-TP Ethernet"
 #define	EISA_PRODUCT_TCM5093	"3Com 3C579 Ethernet"
+#define	EISA_PRODUCT_TCM5920	"3Com 3C592 Etherlink III"
+#define	EISA_PRODUCT_TCM5970	"3Com 3C597 Fast Etherlink TX"
+#define	EISA_PRODUCT_TCM5971	"3Com 3C597 Fast Etherlink T4"
+#define	EISA_PRODUCT_TCM5972	"3Com 3C597 Fast Etherlink MII"
+
+/* Standard Microsystems (SMC) */
+#define	EISA_PRODUCT_SMC8010	"Standard Microsystems Corp. Ethercard Elite32C Ultra"
+#define	EISA_PRODUCT_SMC0110	"Standard Microsystems Corp. Elite32 Ethernet"
 
 /* UltraStor products */
 #define	EISA_PRODUCT_USC0240	"UltraStor 24f SCSI"

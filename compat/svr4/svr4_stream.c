@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_stream.c,v 1.7 1997/02/13 19:45:24 niklas Exp $	 */
+/*	$OpenBSD: svr4_stream.c,v 1.9 1997/09/11 10:48:13 deraadt Exp $	 */
 /*	$NetBSD: svr4_stream.c,v 1.19 1996/12/22 23:00:03 fvdl Exp $	 */
 
 /*
@@ -1216,15 +1216,41 @@ svr4_stream_ioctl(fp, p, retval, fd, cmd, dat)
 		/* 
 		 * This is the best we can do for now; we cannot generate
 		 * signals only for specific events so the signal mask gets
-		 * ignored
-		 */
+		 * ignored.
+		 *
+		 * We alse have to fix the O_ASYNC fcntl bit, so the
+		 * process will get SIGPOLLs. */
 		{
 			struct sys_fcntl_args fa;
+			int error;
+			register_t oflags, flags;
 
+			/* get old status flags */
 			SCARG(&fa, fd) = fd;
-			SCARG(&fa, cmd) = F_SETOWN;
-			SCARG(&fa, arg) = (void *) p->p_pid;
-			return sys_fcntl(p, &fa, retval);
+			SCARG(&fa, cmd) = F_GETFL;
+			if ((error = sys_fcntl(p, &fa, &oflags)) != 0)
+				return error;
+
+			/* update the flags */
+			if ((long) dat != 0)
+				flags = oflags | O_ASYNC;
+			else
+				flags = oflags & ~O_ASYNC;
+
+			/* set the new flags, if changed */
+			if (flags != oflags) {
+				SCARG(&fa, cmd) = F_SETFL;
+				SCARG(&fa, arg) = (void *) flags;
+				if ((error = sys_fcntl(p, &fa, &flags)) != 0)
+					return error;
+			}
+
+			/* set up SIGIO receiver if needed */
+			if ((long) dat != 0) {
+				SCARG(&fa, cmd) = F_SETOWN;
+				SCARG(&fa, arg) = (void *) p->p_pid;
+				return sys_fcntl(p, &fa, retval);
+			}
 		}
 
 	case SVR4_I_GETSIG:
@@ -1463,9 +1489,9 @@ svr4_sys_putmsg(p, v, retval)
 		{
 			struct sys_connect_args co;
 
-			co.s = SCARG(uap, fd);
-			co.name = (void *)sup;
-			co.namelen = (int)sasize;
+			SCARG(&co, s) = SCARG(uap, fd);
+			SCARG(&co, name) = (void *)sup;
+			SCARG(&co, namelen) = (int)sasize;
 			return sys_connect(p, &co, retval);
 		}
 
@@ -1473,6 +1499,7 @@ svr4_sys_putmsg(p, v, retval)
 		{
 			struct msghdr msg;
 			struct iovec aiov;
+
 			msg.msg_name = (caddr_t) sup;
 			msg.msg_namelen = sasize;
 			msg.msg_iov = &aiov;
@@ -1487,6 +1514,7 @@ svr4_sys_putmsg(p, v, retval)
 			*retval = 0;
 			return error;
 		}
+
 	default:
 		DPRINTF(("putmsg: Unimplemented command %lx\n", sc.cmd));
 		return ENOSYS;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.6 1997/01/27 01:15:30 deraadt Exp $	*/
+/*	$OpenBSD: signal.h,v 1.8 1997/09/20 01:55:58 deraadt Exp $	*/
 /*	$NetBSD: signal.h,v 1.21 1996/02/09 18:25:32 christos Exp $	*/
 
 /*
@@ -109,19 +109,30 @@
 #ifndef _ANSI_SOURCE
 typedef unsigned int sigset_t;
 
+#include <sys/siginfo.h>
+
 /*
  * Signal vector "template" used in sigaction call.
  */
 struct	sigaction {
-	void	(*sa_handler) __P((int)); /* signal handler */
+	union {		/* signal handler */
+		void	(*__sa_handler) __P((int));
+		void	(*__sa_sigaction) __P((int, siginfo_t *, void *));
+	} __sigaction_u;
 	sigset_t sa_mask;		/* signal mask to apply */
 	int	sa_flags;		/* see signal options below */
 };
+
+/* if SA_SIGINFO is set, sa_sigaction is to be used instead of sa_handler. */
+#define sa_handler      __sigaction_u.__sa_handler
+#define sa_sigaction    __sigaction_u.__sa_sigaction
+
 #ifndef _POSIX_SOURCE
 #define SA_ONSTACK	0x0001	/* take signal on signal stack */
 #define SA_RESTART	0x0002	/* restart system on signal return */
 #define SA_RESETHAND	0x0004	/* reset to SIG_DFL when taking signal */
 #define SA_NODEFER	0x0010	/* don't mask the signal we're delivering */
+#define SA_NOCLDWAIT	0x0020	/* don't create zombies (assign to pid 1) */
 #ifdef COMPAT_SUNOS
 #define	SA_USERTRAMP	0x0100	/* do not bounce off kernel's sigtramp */
 #endif
@@ -184,8 +195,6 @@ struct	sigstack {
 #define sigmask(m)	(1 << ((m)-1))
 
 #define	BADSIG		SIG_ERR
-
-#include <sys/siginfo.h>
 
 #endif	/* !_POSIX_SOURCE */
 #endif	/* !_ANSI_SOURCE */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: union_vnops.c,v 1.6 1996/12/08 17:40:29 kstailey Exp $	*/
+/*	$OpenBSD: union_vnops.c,v 1.8 1997/10/06 21:04:51 deraadt Exp $	*/
 /*	$NetBSD: union_vnops.c,v 1.30.4.1 1996/05/25 22:10:14 jtc Exp $	*/
 
 /*

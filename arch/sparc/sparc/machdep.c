@@ -1,5 +1,5 @@
-/*	$OpenBSD: machdep.c,v 1.21 1997/03/26 22:14:41 niklas Exp $ */
-/*	$NetBSD: machdep.c,v 1.64 1996/05/19 04:12:56 mrg Exp $ */
+/*	$OpenBSD: machdep.c,v 1.29 1997/09/17 06:47:20 downsj Exp $	*/
+/*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -91,6 +91,13 @@
 #include <sparc/sparc/cache.h>
 #include <sparc/sparc/vaddrs.h>
 
+#ifdef SUN4M
+#include <sparc/dev/power.h>
+#include "power.h"
+#endif
+
+#include "auxreg.h"
+
 vm_map_t buffer_map;
 extern vm_offset_t avail_end;
 
@@ -114,6 +121,9 @@ int	physmem;
 extern struct msgbuf msgbuf;
 struct	msgbuf *msgbufp = &msgbuf;
 int	msgbufmapped = 0;	/* not mapped until pmap_bootstrap */
+
+/* sysctl settable */
+int	sparc_led_blink = 0;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -275,6 +285,14 @@ cpu_startup()
 	configure();
 
 	/*
+	 * Re-zero proc0's user area, to nullify the effect of the
+	 * stack running into it during auto-configuration.
+	 * XXX - should fix stack usage.
+	 * XXX - there's a race here, as interrupts are enabled
+	 */
+	bzero(proc0paddr, sizeof(struct user));
+
+	/*
 	 * fix message buffer mapping, note phys addr of msgbuf is 0
 	 */
 
@@ -379,6 +397,9 @@ setregs(p, pack, stack, retval)
 	register struct fpstate *fs;
 	register int psr;
 
+	/* Don't allow misaligned code by default */
+	p->p_md.md_flags &= ~MDP_FIXALIGN;
+
 	/*
 	 * The syscall will ``return'' to npc or %g7 or %g2; set them all.
 	 * Set the rest of the registers to 0 except for %o6 (stack pointer,
@@ -442,12 +463,32 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	size_t newlen;
 	struct proc *p;
 {
+#if NAUXREG > 0
+	int ret, oldval;
+#endif
 
 	/* all sysctl names are this level are terminal */
 	if (namelen != 1)
 		return (ENOTDIR);	/* overloaded */
 
 	switch (name[0]) {
+	case CPU_LED_BLINK:
+#if NAUXREG > 0
+		oldval = sparc_led_blink;
+		ret = sysctl_int(oldp, oldlenp, newp, newlen,
+		    &sparc_led_blink);
+
+		/*
+		 * If we were false and are now true, call led_blink().
+		 * led_blink() itself will catch the other case.
+		 */
+		if (!oldval && sparc_led_blink > oldval)
+			led_blink((caddr_t *)0);
+
+		return (ret);
+#else
+		return (EOPNOTSUPP);
+#endif
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -657,13 +698,11 @@ boot(howto)
 	fb_unblank();
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
-#if 1
 		extern struct proc proc0;
 
-		/* protect against curproc->p_stats.foo refs in sync()   XXX */
+		/* XXX protect against curproc->p_stats.foo refs in sync() */
 		if (curproc == NULL)
 			curproc = &proc0;
-#endif
 		waittime = 0;
 		vfs_shutdown();
 
@@ -679,8 +718,18 @@ boot(howto)
 		}
 	}
 	(void) splhigh();		/* ??? */
-	if (howto & RB_HALT) {
+	if ((howto & RB_HALT) || (howto & RB_POWERDOWN)) {
 		doshutdownhooks();
+#if defined(SUN4M)
+		if (howto & RB_POWERDOWN) {
+#if NPOWER > 0
+			printf("attempting to power down...\n");
+			powerdown();
+#else
+			printf("WARNING: power not configured!\n");
+#endif
+		}
+#endif
 		printf("halted\n\n");
 		romhalt();
 	}
@@ -703,6 +752,7 @@ boot(howto)
 	/*NOTREACHED*/
 }
 
+/* XXX - dumpmag not eplicitly used, savecore may search for it to get here */
 u_long	dumpmag = 0x8fca0101;	/* magic number for savecore */
 int	dumpsize = 0;		/* also for savecore */
 long	dumplo = 0;
@@ -710,46 +760,39 @@ long	dumplo = 0;
 void
 dumpconf()
 {
-	register int nblks, nmem;
-	register struct memarr *mp;
-	extern struct memarr pmemarr[];	/* XXX */
-	extern int npmemarr;		/* XXX */
+	register int nblks, dumpblks;
 
-	dumpsize = 0;
-	for (mp = pmemarr, nmem = npmemarr; --nmem >= 0; mp++)
-		dumpsize += btoc(mp->len);
+	if (dumpdev == NODEV || bdevsw[major(dumpdev)].d_psize == 0)
+		/* No usable dump device */
+		return;
+
+	nblks = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
+
+	dumpblks = ctod(physmem) + ctod(pmap_dumpsize());
+	if (dumpblks > (nblks - ctod(1)))
+		/*
+		 * dump size is too big for the partition.
+		 * Note, we safeguard a click at the front for a
+		 * possible disk label.
+		 */
+		return;
+
+	/* Put the dump at the end of the partition */
+	dumplo = nblks - dumpblks;
 
 	/*
-	 * savecore views the image in units of pages (i.e., dumpsize is in
-	 * pages) so we round the two mmu entities into page-sized chunks.
-	 * The PMEGs (32kB) and the segment table (512 bytes plus padding)
-	 * are appending to the end of the crash dump.
+	 * savecore(8) expects dumpsize to be the number of pages
+	 * of actual core dumped (i.e. excluding the MMU stuff).
 	 */
-	dumpsize += pmap_dumpsize();
-	if (dumpdev != NODEV && bdevsw[major(dumpdev)].d_psize) {
-		nblks = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
-		/*
-		 * Don't dump on the first CLBYTES (why CLBYTES?)
-		 * in case the dump device includes a disk label.
-		 */
-		if (dumplo < btodb(CLBYTES))
-			dumplo = btodb(CLBYTES);
-
-		/*
-		 * If dumpsize is too big for the partition, truncate it.
-		 * Otherwise, put the dump at the end of the partition
-		 * by making dumplo as large as possible.
-		 */
-		if (dumpsize > btoc(dbtob(nblks - dumplo)))
-			dumpsize = btoc(dbtob(nblks - dumplo));
-		else if (dumplo + ctod(dumpsize) > nblks)
-			dumplo = nblks - ctod(dumpsize);
-	}
+	dumpsize = physmem;
 }
 
 #define	BYTES_PER_DUMP	(32 * 1024)	/* must be a multiple of pagesize */
 static vm_offset_t dumpspace;
 
+/*
+ * Allocate the dump i/o buffer area during kernel memory allocation
+ */
 caddr_t
 reserve_dumppages(p)
 	caddr_t p;
@@ -766,7 +809,7 @@ void
 dumpsys()
 {
 	register int psize;
-	register daddr_t blkno;
+	daddr_t blkno;
 	register int (*dump)	__P((dev_t, daddr_t, caddr_t, size_t));
 	int error = 0;
 	register struct memarr *mp;
@@ -787,9 +830,10 @@ dumpsys()
 	 */
 	if (dumpsize == 0)
 		dumpconf();
-	if (dumplo < 0)
+	if (dumplo <= 0)
 		return;
-	printf("\ndumping to dev %x, offset %ld\n", dumpdev, dumplo);
+	printf("\ndumping to dev(%d,%d), at offset %ld blocks\n",
+	    major(dumpdev), minor(dumpdev), dumplo);
 
 	psize = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
 	printf("dump ");
@@ -800,10 +844,16 @@ dumpsys()
 	blkno = dumplo;
 	dump = bdevsw[major(dumpdev)].d_dump;
 
-	for (mp = pmemarr, nmem = npmemarr; --nmem >= 0; mp++) {
+	printf("mmu ");
+	error = pmap_dumpmmu(dump, blkno);
+	blkno += ctod(pmap_dumpsize());
+
+	printf("memory ");
+	for (mp = pmemarr, nmem = npmemarr; --nmem >= 0 && error == 0; mp++) {
 		register unsigned i = 0, n;
 		register maddr = mp->addr;
 
+		/* XXX - what's so special about PA 0 that we can't dump it? */
 		if (maddr == 0) {
 			/* Skip first page at physical address 0 */
 			maddr += NBPG;
@@ -811,13 +861,15 @@ dumpsys()
 			blkno += btodb(NBPG);
 		}
 
+		printf("@%p:",maddr);
+
 		for (; i < mp->len; i += n) {
 			n = mp->len - i;
 			if (n > BYTES_PER_DUMP)
 				 n = BYTES_PER_DUMP;
 
-			/* print out how many MBs we have dumped */
-			if (i && (i % (1024*1024)) == 0)
+			/* print out which MBs we are dumping */
+			if (i % (1024*1024) <= NBPG)
 				printf("%d ", i / (1024*1024));
 
 			(void) pmap_map(dumpspace, maddr, maddr + n,
@@ -831,8 +883,6 @@ dumpsys()
 			blkno += btodb(n);
 		}
 	}
-	if (!error)
-		error = pmap_dumpmmu(dump, blkno);
 
 	switch (error) {
 
@@ -875,7 +925,7 @@ stackdump()
 	printf("Frame pointer is at %p\n", fp);
 	printf("Call traceback:\n");
 	while (fp && ((u_long)fp >> PGSHIFT) == ((u_long)sfp >> PGSHIFT)) {
-		printf("  pc = %x  args = (%x, %x, %x, %x, %x, %x, %x) fp = %p\n",
+		printf("  pc = 0x%x  args = (0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp = %p\n",
 		    fp->fr_pc, fp->fr_arg[0], fp->fr_arg[1], fp->fr_arg[2],
 		    fp->fr_arg[3], fp->fr_arg[4], fp->fr_arg[5], fp->fr_arg[6],
 		    fp->fr_fp);
@@ -883,27 +933,18 @@ stackdump()
 	}
 }
 
-int bt2pmt[] = {
-	PMAP_OBIO,
-	PMAP_OBIO,
-	PMAP_VME16,
-	PMAP_VME32,
-	PMAP_OBIO
-};
-
 /*
  * Map an I/O device given physical address and size in bytes, e.g.,
  *
  *	mydev = (struct mydev *)mapdev(myioaddr, 0,
- *				       0, sizeof(struct mydev), pmtype);
+ *				       0, sizeof(struct mydev));
  *
  * See also machine/autoconf.h.
  */
 void *
-mapdev(phys, virt, offset, size, bustype)
+mapdev(phys, virt, offset, size)
 	register struct rom_reg *phys;
 	register int offset, virt, size;
-	register int bustype;
 {
 	register vm_offset_t v;
 	register vm_offset_t pa;
@@ -929,9 +970,7 @@ mapdev(phys, virt, offset, size, bustype)
 			/* note: preserve page offset */
 
 	pa = trunc_page(phys->rr_paddr + offset);
-	pmtype = (CPU_ISSUN4M)
-			? (phys->rr_iospace << PMAP_SHFT4M)
-			: bt2pmt[bustype];
+	pmtype = PMAP_IOENC(phys->rr_iospace);
 
 	do {
 		pmap_enter(pmap_kernel(), v, pa | pmtype | PMAP_NC,
@@ -977,12 +1016,12 @@ oldmon_w_trace(va)
 
 #define round_up(x) (( (x) + (NBPG-1) ) & (~(NBPG-1)) )
 
-	printf("\nstack trace with sp = %lx\n", va);
+	printf("\nstack trace with sp = 0x%lx\n", va);
 	stop = round_up(va);
-	printf("stop at %lx\n", stop);
+	printf("stop at 0x%lx\n", stop);
 	fp = (struct frame *) va;
 	while (round_up((u_long) fp) == stop) {
-		printf("  %x(%x, %x, %x, %x, %x, %x, %x) fp %p\n", fp->fr_pc,
+		printf("  0x%x(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp %p\n", fp->fr_pc,
 		    fp->fr_arg[0], fp->fr_arg[1], fp->fr_arg[2], fp->fr_arg[3],
 		    fp->fr_arg[4], fp->fr_arg[5], fp->fr_arg[6], fp->fr_fp);
 		fp = fp->fr_fp;

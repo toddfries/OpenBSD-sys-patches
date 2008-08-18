@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_signal.c,v 1.5 1997/02/13 19:45:21 niklas Exp $	 */
+/*	$OpenBSD: svr4_signal.c,v 1.8 1997/09/15 06:04:58 millert Exp $	 */
 /*	$NetBSD: svr4_signal.c,v 1.24 1996/12/06 03:21:53 christos Exp $	 */
 
 /*
@@ -189,7 +189,7 @@ svr4_to_bsd_sigaction(ssa, bsa)
 	struct sigaction *bsa;
 {
 
-	bsa->sa_handler = (sig_t) ssa->sa_handler;
+	bsa->sa_handler = (sig_t) ssa->sa__handler;
 	svr4_to_bsd_sigset(&ssa->sa_mask, &bsa->sa_mask);
 	bsa->sa_flags = 0;
 	if ((ssa->sa_flags & SVR4_SA_ONSTACK) != 0)
@@ -200,8 +200,12 @@ svr4_to_bsd_sigaction(ssa, bsa)
 		bsa->sa_flags |= SA_RESETHAND;
 	if ((ssa->sa_flags & SVR4_SA_NOCLDSTOP) != 0)
 		bsa->sa_flags |= SA_NOCLDSTOP;
+	if ((ssa->sa_flags & SVR4_SA_NOCLDWAIT) != 0)
+		bsa->sa_flags |= SA_NOCLDWAIT;
 	if ((ssa->sa_flags & SVR4_SA_NODEFER) != 0)
 		bsa->sa_flags |= SA_NODEFER;
+	if ((ssa->sa_flags & SVR4_SA_SIGINFO) != 0)
+		bsa->sa_flags |= SA_SIGINFO;
 }
 
 void
@@ -210,19 +214,23 @@ bsd_to_svr4_sigaction(bsa, ssa)
 	struct svr4_sigaction *ssa;
 {
 
-	ssa->sa_handler = (svr4_sig_t) bsa->sa_handler;
+	ssa->sa__handler = (svr4_sig_t) bsa->sa_handler;
 	bsd_to_svr4_sigset(&bsa->sa_mask, &ssa->sa_mask);
 	ssa->sa_flags = 0;
 	if ((bsa->sa_flags & SA_ONSTACK) != 0)
-		ssa->sa_flags |= SA_ONSTACK;
+		ssa->sa_flags |= SVR4_SA_ONSTACK;
 	if ((bsa->sa_flags & SA_RESETHAND) != 0)
-		ssa->sa_flags |= SA_RESETHAND;
+		ssa->sa_flags |= SVR4_SA_RESETHAND;
 	if ((bsa->sa_flags & SA_RESTART) != 0)
-		ssa->sa_flags |= SA_RESTART;
+		ssa->sa_flags |= SVR4_SA_RESTART;
 	if ((bsa->sa_flags & SA_NODEFER) != 0)
-		ssa->sa_flags |= SA_NODEFER;
+		ssa->sa_flags |= SVR4_SA_NODEFER;
 	if ((bsa->sa_flags & SA_NOCLDSTOP) != 0)
-		ssa->sa_flags |= SA_NOCLDSTOP;
+		ssa->sa_flags |= SVR4_SA_NOCLDSTOP;
+	if ((bsa->sa_flags & SA_NOCLDWAIT) != 0)
+		ssa->sa_flags |= SVR4_SA_NOCLDWAIT;
+	if ((bsa->sa_flags & SA_SIGINFO) != 0)
+		ssa->sa_flags |= SVR4_SA_SIGINFO;
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_unix.c,v 1.3 1997/03/29 21:17:17 tholo Exp $	*/
+/*	$OpenBSD: vm_unix.c,v 1.7 1997/10/06 20:21:30 deraadt Exp $	*/
 /*	$NetBSD: vm_unix.c,v 1.19 1996/02/10 00:08:14 christos Exp $	*/
 
 /*
@@ -74,9 +74,18 @@ sys_obreak(p, v, retval)
 	register int diff;
 
 	old = (vm_offset_t)vm->vm_daddr;
-	new = round_page(SCARG(uap, nsize));
-	if ((int)(new - old) > p->p_rlimit[RLIMIT_DATA].rlim_cur)
+	new = (vm_offset_t)SCARG(uap, nsize);
+
+	/* Check for overflow, round to page */
+	if(round_page(new) < new)
 		return(ENOMEM);
+	new = round_page(new);
+
+	/* Check limit */
+	if ((new > old) && ((new - old) > p->p_rlimit[RLIMIT_DATA].rlim_cur))
+		return(ENOMEM);
+
+	/* Turn the trick */
 	old = round_page(old + ctob(vm->vm_dsize));
 	diff = new - old;
 	if (diff > 0) {
@@ -164,10 +173,9 @@ vm_coredump(p, vp, cred, chdr)
 	if (!map->is_main_map) {
 #ifdef DEBUG
 		uprintf(
-	"vm_coredump: %s map 0x%lx: pmap=0x%lx,ref=%d,nentries=%d,version=%d\n",
+	"vm_coredump: %s map %p: pmap=%p, ref=%d, nentries=%d, version=%d\n",
 			(map->is_main_map ? "Task" : "Share"),
-			(long)map, (long)(map->pmap),
-			map->ref_count, map->nentries,
+			map, (map->pmap), map->ref_count, map->nentries,
 			map->timestamp);
 #endif
 		return EIO;
@@ -180,10 +188,8 @@ vm_coredump(p, vp, cred, chdr)
 
 		if (entry->is_a_map || entry->is_sub_map) {
 #ifdef DEBUG
-		 	uprintf(
-			    "vm_coredump: entry: share=0x%lx, offset=0x%lx\n",
-                            (long) entry->object.share_map,
-                            (long) entry->offset);
+			uprintf("vm_coredump: entry: share=%p, offset=%p\n",
+				entry->object.share_map, entry->offset);
 #endif
 			continue;
 		}
@@ -192,7 +198,8 @@ vm_coredump(p, vp, cred, chdr)
 		    entry->object.vm_object->pager &&
 		    entry->object.vm_object->pager->pg_type == PG_DEVICE) {
 #ifdef DEBUG
-			printf("vm_coredump: skipping dev @ %lx\n", (unsigned long)entry->start);
+			printf("vm_coredump: skipping dev @ 0x%lx\n",
+			       entry->start);
 #endif
 			continue;
 		}

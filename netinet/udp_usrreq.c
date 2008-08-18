@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.9 1997/02/16 04:42:50 deraadt Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.13 1997/09/07 02:19:24 deraadt Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -81,6 +81,9 @@ static	struct mbuf *udp_saveopt __P((caddr_t, int, int));
 #define	UDBHASHSIZE	128
 #endif
 int	udbhashsize = UDBHASHSIZE;
+
+/* from in_pcb.c */
+extern	struct baddynamicports baddynamicports;
 
 void
 udp_init()
@@ -196,8 +199,10 @@ udp_input(m, va_alist)
 		 */
 		udp_in.sin_port = uh->uh_sport;
 		udp_in.sin_addr = ip->ip_src;
-		m->m_len -= sizeof (struct udpiphdr);
-		m->m_data += sizeof (struct udpiphdr);
+		iphlen += sizeof(struct udphdr);
+		m->m_len -= iphlen;
+		m->m_pkthdr.len -= iphlen;
+		m->m_data += iphlen;
 		/*
 		 * Locate pcb(s) for datagram.
 		 * (Algorithm copied from raw_intr().)
@@ -279,7 +284,6 @@ udp_input(m, va_alist)
 				goto bad;
 			}
 			*ip = save_ip;
-			ip->ip_len += iphlen;
 			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_PORT, 0, 0);
 			return;
 		}
@@ -528,7 +532,7 @@ udp_usrreq(so, req, m, addr, control)
 	int s;
 
 	if (req == PRU_CONTROL)
-		return (in_control(so, (long)m, (caddr_t)addr,
+		return (in_control(so, (u_long)m, (caddr_t)addr,
 			(struct ifnet *)control));
 	if (inp == NULL && req != PRU_ATTACH) {
 		error = EINVAL;
@@ -683,6 +687,9 @@ udp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	switch (name[0]) {
 	case UDPCTL_CHECKSUM:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &udpcksum));
+	case UDPCTL_BADDYNAMIC:
+		return (sysctl_struct(oldp, oldlenp, newp, newlen,
+		    baddynamicports.udp, sizeof(baddynamicports.udp)));
 	default:
 		return (ENOPROTOOPT);
 	}

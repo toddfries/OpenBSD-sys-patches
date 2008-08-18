@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.9 1997/03/17 16:29:37 niklas Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.12 1997/09/30 02:31:04 millert Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -439,6 +439,9 @@ bpfread(dev, uio, ioflag)
 	int error;
 	int s;
 
+	if (d->bd_bif == 0)
+		return (ENXIO);
+
 	/*
 	 * Restrict application to use a buffer the same size as
 	 * as kernel buffers.
@@ -522,14 +525,10 @@ static __inline void
 bpf_wakeup(d)
 	register struct bpf_d *d;
 {
-	struct proc *p;
-
 	wakeup((caddr_t)d);
 	if (d->bd_async && d->bd_sig)
-		if (d->bd_pgid > 0)
-			gsignal (d->bd_pgid, d->bd_sig);
-		else if ((p = pfind (-d->bd_pgid)) != NULL)
-			psignal (p, d->bd_sig);
+		csignal(d->bd_pgid, d->bd_sig,
+		    d->bd_siguid, d->bd_sigeuid);
 
 #if BSD >= 199103
 	selwakeup(&d->bd_sel);
@@ -822,6 +821,8 @@ bpfioctl(dev, cmd, addr, flag, p)
 	 */
 	case TIOCSPGRP:		/* Process or group to send signals to */
 		d->bd_pgid = *(int *)addr;
+		d->bd_siguid = p->p_cred->p_ruid;
+		d->bd_sigeuid = p->p_ucred->cr_uid;
 		break;
 
 	case TIOCGPGRP:
@@ -1116,6 +1117,9 @@ bpf_mtap(arg, m)
 	struct bpf_d *d;
 	size_t pktlen, slen;
 	struct mbuf *m0;
+
+	if (m == NULL)
+		return;
 
 	pktlen = 0;
 	for (m0 = m; m0 != 0; m0 = m0->m_next)

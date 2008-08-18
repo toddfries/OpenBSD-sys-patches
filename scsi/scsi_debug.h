@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_debug.h,v 1.5 1997/04/14 04:09:08 downsj Exp $	*/
+/*	$OpenBSD: scsi_debug.h,v 1.7 1997/09/05 05:56:49 millert Exp $	*/
 /*	$NetBSD: scsi_debug.h,v 1.7 1996/10/12 23:23:16 christos Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.3 1997/02/20 01:07:43 deraadt Exp $	*/
+/*	$OpenBSD: route.c,v 1.5 1997/09/21 03:52:42 niklas Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -113,7 +113,7 @@ rtalloc1(dst, report)
 		newrt = rt = (struct rtentry *)rn;
 		if (report && (rt->rt_flags & RTF_CLONING)) {
 			err = rtrequest(RTM_RESOLVE, dst, SA(0),
-					      SA(0), 0, &newrt);
+			    SA(0), 0, &newrt);
 			if (err) {
 				newrt = rt;
 				rt->rt_refcnt++;
@@ -127,7 +127,12 @@ rtalloc1(dst, report)
 			rt->rt_refcnt++;
 	} else {
 		rtstat.rts_unreach++;
-	miss:	if (report) {
+	/*
+	 * IP encapsulation does lots of lookups where we don't need nor want
+	 * the RTM_MISSes that would be generated.  It causes RTM_MISS storms
+	 * sent upward breaking user-level routing queries.
+	 */
+	miss:	if (report && dst->sa_family != AF_ENCAP) {
 			bzero((caddr_t)&info, sizeof(info));
 			info.rti_info[RTAX_DST] = dst;
 			rt_missmsg(msgtype, &info, 0, err);
@@ -356,7 +361,7 @@ rtrequest(req, dst, gateway, netmask, flags, ret_nrt)
 #define senderr(x) { error = x ; goto bad; }
 
 	if ((rnh = rt_tables[dst->sa_family]) == 0)
-		senderr(ESRCH);
+		senderr(EAFNOSUPPORT);
 	if (flags & RTF_HOST)
 		netmask = 0;
 	switch (req) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.22 1997/04/05 21:24:48 flipk Exp $	*/
+/*	$OpenBSD: trap.c,v 1.25 1997/09/08 22:51:36 downsj Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 #undef DEBUG
@@ -83,6 +83,9 @@ extern struct emul emul_linux_aout, emul_linux_elf;
 #endif
 #ifdef COMPAT_FREEBSD
 extern struct emul emul_freebsd;
+#endif
+#ifdef COMPAT_BSDOS
+extern struct emul emul_bsdos;
 #endif
 
 #include "npx.h"
@@ -211,7 +214,8 @@ trap(frame)
 		type |= T_USER;
 		sticks = p->p_sticks;
 		p->p_md.md_regs = &frame;
-	}
+	} else
+		sticks = 0;
 
 	switch (type) {
 
@@ -376,9 +380,8 @@ trap(frame)
 		int rv;
 		extern vm_map_t kernel_map;
 		unsigned nss, v;
-		caddr_t vv = (caddr_t)rcr2();
 
-		va = trunc_page((vm_offset_t)vv);
+		va = trunc_page((vm_offset_t)rcr2());
 		/*
 		 * It is only a kernel address space fault iff:
 		 *	1. (type & T_USER) == 0  and
@@ -438,7 +441,7 @@ trap(frame)
 			    map, va, ftype, rv);
 			goto we_re_toast;
 		}
-		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, vv);
+		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, (caddr_t)rcr2());
 		break;
 	}
 
@@ -585,12 +588,14 @@ syscall(frame)
 		 * Like syscall, but code is a quad, so as to maintain
 		 * quad alignment for the rest of the arguments.
 		 */
+		if (callp != sysent
 #ifdef COMPAT_FREEBSD
-		/* FreeBSD has a same function in SYS___syscall */
-		if (callp != sysent && p->p_emul != &emul_freebsd)
-#else
-		if (callp != sysent)
+		    && p->p_emul != &emul_freebsd
 #endif
+#ifdef COMPAT_BSDOS
+		    && p->p_emul != &emul_bsdos
+#endif
+		    )
 			break;
 		code = fuword(params + _QUAD_LOWWORD * sizeof(int));
 		params += sizeof(quad_t);

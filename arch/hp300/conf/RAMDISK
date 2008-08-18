@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.3 1997/04/17 08:21:55 downsj Exp $
+#	$OpenBSD: RAMDISK,v 1.6 1997/10/20 01:49:02 downsj Exp $
 #
 # Ram disk kernel.
 #
@@ -12,14 +12,18 @@ include "../../../conf/GENERIC"
 option	 	HP320
 option	 	HP330		# includes 318, 319
 option	 	HP340
+option		HP345
 option	 	HP350
 option	 	HP360
 option	 	HP370
-option	 	HP375		# includes 345, 400t, 400s
-option	 	HP380		# includes 425t, 425s, 433s
+option	 	HP375
+option	 	HP380
+option	 	HP400
+option	 	HP425
+option	 	HP433
 
 # Need to set locally
-maxusers	16
+maxusers	8
 
 # Options for HP hardware
 option	 	FPSP		# floating point interface for 68040
@@ -40,6 +44,7 @@ option	 	SE_KEYBOARD	# include Swedish HIL keymap
 #option	 	COMPAT_HPUX	# HP-UX binary compatibility
 
 #option	 	COMPAT_M68K4K	# compat. with NetBSD/m68k4k binaries
+#option		COMPAT_SUNOS	# SunOS/sun3 binaries
 
 # Verbose descriptions of unconfigured DIO devices
 # (Warning: this compiles in a large string table)
@@ -55,6 +60,13 @@ mainbus0	at root		# root "bus"
 
 intio0		at mainbus0	# internal i/o space
 dio0		at mainbus0	# DIO/DIO-II bus
+
+# Frodo utility chip found on 4xx's
+frodo0		at intio?
+
+# 8250-like serial ports found on Frodo ASIC
+#dnkbd0		at frodo? offset 0x0	# Domain keyboard flavor
+apci*		at frodo? offset ?	# tty flavor
 
 # Davinci framebuffer
 dvbox*		at intio?

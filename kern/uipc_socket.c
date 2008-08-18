@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.11 1997/02/28 04:03:45 angelos Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.17 1997/08/31 20:42:24 deraadt Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -355,8 +355,10 @@ sosend(so, addr, uio, top, control, flags)
 	 * of space and resid.  On the other hand, a negative resid
 	 * causes us to loop sending 0-length segments to the protocol.
 	 */
-	if (resid < 0)
-		return (EINVAL);
+	if (resid < 0) {
+		error = EINVAL;
+		goto out;
+	}
 	dontroute =
 	    (flags & MSG_DONTROUTE) && (so->so_options & SO_DONTROUTE) == 0 &&
 	    (so->so_proto->pr_flags & PR_ATOMIC);
@@ -890,30 +892,39 @@ sosetopt(so, level, optname, m0)
 		case SO_RCVBUF:
 		case SO_SNDLOWAT:
 		case SO_RCVLOWAT:
+		    {
+			u_long cnt;
+
 			if (m == NULL || m->m_len < sizeof (int)) {
 				error = EINVAL;
 				goto bad;
 			}
+			cnt = *mtod(m, int *);
+			if ((long)cnt <= 0)
+				cnt = 1;
 			switch (optname) {
 
 			case SO_SNDBUF:
 			case SO_RCVBUF:
 				if (sbreserve(optname == SO_SNDBUF ?
 				    &so->so_snd : &so->so_rcv,
-				    (u_long) *mtod(m, int *)) == 0) {
+				    cnt) == 0) {
 					error = ENOBUFS;
 					goto bad;
 				}
 				break;
 
 			case SO_SNDLOWAT:
-				so->so_snd.sb_lowat = *mtod(m, int *);
+				so->so_snd.sb_lowat = (cnt > so->so_snd.sb_hiwat) ?
+				    so->so_snd.sb_hiwat : cnt;
 				break;
 			case SO_RCVLOWAT:
-				so->so_rcv.sb_lowat = *mtod(m, int *);
+				so->so_rcv.sb_lowat = (cnt > so->so_rcv.sb_hiwat) ?
+				    so->so_rcv.sb_hiwat : cnt;
 				break;
 			}
 			break;
+		    }
 
 		case SO_SNDTIMEO:
 		case SO_RCVTIMEO:
@@ -1032,7 +1043,7 @@ sogetopt(so, level, optname, mp)
 			m->m_len = sizeof(struct timeval);
 			mtod(m, struct timeval *)->tv_sec = val / hz;
 			mtod(m, struct timeval *)->tv_usec =
-			    (val % hz) / tick;
+			    (val % hz) * tick;
 			break;
 		    }
 
@@ -1049,11 +1060,6 @@ void
 sohasoutofband(so)
 	register struct socket *so;
 {
-	struct proc *p;
-
-	if (so->so_pgid < 0)
-		gsignal(-so->so_pgid, SIGURG);
-	else if (so->so_pgid > 0 && (p = pfind(so->so_pgid)) != 0)
-		psignal(p, SIGURG);
+	csignal(so->so_pgid, SIGURG, so->so_siguid, so->so_sigeuid);
 	selwakeup(&so->so_rcv.sb_sel);
 }

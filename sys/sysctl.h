@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.11 1996/10/04 01:26:45 deraadt Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.20 1997/10/06 20:21:11 deraadt Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -141,7 +141,8 @@ struct ctlname {
 #define	KERN_SOMAXCONN		28	/* int: listen queue maximum */
 #define	KERN_SOMINCONN		29	/* int: half-open controllable param */
 #define	KERN_USERMOUNT		30	/* int: users may mount filesystems */
-#define	KERN_MAXID		31	/* number of valid kern ids */
+#define KERN_RND		31	/* struct: rnd(4) statistics */
+#define	KERN_MAXID		32	/* number of valid kern ids */
 
 #define CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -175,6 +176,7 @@ struct ctlname {
 	{ "somaxconn", CTLTYPE_INT }, \
 	{ "sominconn", CTLTYPE_INT }, \
 	{ "usermount", CTLTYPE_INT }, \
+	{ "random", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -215,7 +217,9 @@ struct kinfo_proc {
 #define	EPROC_CTTY	0x01	/* controlling tty vnode active */
 #define	EPROC_SLEADER	0x02	/* session leader */
 		char	e_login[MAXLOGNAME];	/* setlogin() name */
-		long	e_spare[4];
+#define EMULNAMELEN	7
+		char	e_emul[EMULNAMELEN+1];	/* syscall emulation name */
+		u_int32_t e_spare[2]; /* XXX remove prior to release */
 	} kp_eproc;
 };
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lfs_vfsops.c,v 1.6 1996/07/01 07:41:55 downsj Exp $	*/
+/*	$OpenBSD: lfs_vfsops.c,v 1.8 1997/06/20 14:04:33 kstailey Exp $	*/
 /*	$NetBSD: lfs_vfsops.c,v 1.11 1996/03/25 12:53:35 pk Exp $	*/
 
 /*
@@ -77,14 +77,6 @@ struct vfsops lfs_vfsops = {
 	lfs_fhtovp,
 	lfs_vptofh,
 	lfs_init,
-};
-
-static struct ufs_dirops xlfs_dirops = {
-	ufs_dirremove,
-	ufs_direnter,
-	ufs_dirempty,
-	ufs_dirrewrite,
-	ufs_checkpath,
 };
 
 int
@@ -189,7 +181,7 @@ lfs_mount(mp, path, data, ndp, p)
 		error = lfs_mountfs(devvp, mp, p);		/* LFS */
 	else {
 		if (devvp != ump->um_devvp)
-			error = EINVAL;	/* needs translation */
+			error = EINVAL;	/* XXX needs translation */
 		else
 			vrele(devvp);
 	}
@@ -278,7 +270,7 @@ lfs_mountfs(devvp, mp, p)
 	/* Check the basics. */
 	if (fs->lfs_magic != LFS_MAGIC || fs->lfs_bsize > MAXBSIZE ||
 	    fs->lfs_bsize < sizeof(struct lfs)) {
-		error = EINVAL;		/* XXX needs translation */
+		error = EFTYPE;
 		goto out;
 	}
 
@@ -318,7 +310,6 @@ lfs_mountfs(devvp, mp, p)
 	ump->um_bptrtodb = 0;
 	ump->um_seqinc = 1 << fs->lfs_fsbtodb;
 	ump->um_nindir = fs->lfs_nindir;
-	ump->um_dirops = &xlfs_dirops;
 	for (i = 0; i < MAXQUOTAS; i++)
 		ump->um_quotas[i] = NULLVP;
 	devvp->v_specflags |= SI_MOUNTEDON;
@@ -545,7 +536,7 @@ lfs_vget(mp, ino, vpp)
 		*vpp = NULL;
 		return (error);
 	}
-	ip->i_din = *lfs_ifind(fs, ino, (struct dinode *)bp->b_data);
+	ip->i_din.ffs_din = *lfs_ifind(fs, ino, (struct dinode *)bp->b_data);
 	brelse(bp);
 
 	/*
@@ -615,7 +606,7 @@ lfs_vptofh(vp, fhp)
 	ufhp = (struct ufid *)fhp;
 	ufhp->ufid_len = sizeof(struct ufid);
 	ufhp->ufid_ino = ip->i_number;
-	ufhp->ufid_gen = ip->i_gen;
+	ufhp->ufid_gen = ip->i_ffs_gen;
 	return (0);
 }
 

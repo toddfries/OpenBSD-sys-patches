@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_var.h,v 1.3 1996/03/03 22:30:52 niklas Exp $	*/
+/*	$OpenBSD: udp_var.h,v 1.5 1997/08/26 20:02:35 deraadt Exp $	*/
 /*	$NetBSD: udp_var.h,v 1.12 1996/02/13 23:44:41 christos Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
  * UDP kernel structures and variables.
  */
 struct	udpiphdr {
-	struct 	ipovly ui_i;		/* overlaid ip structure */
+	struct	ipovly ui_i;		/* overlaid ip structure */
 	struct	udphdr ui_u;		/* udp header */
 };
 #define	ui_x1		ui_i.ih_x1
@@ -71,11 +71,13 @@ struct	udpstat {
  * Names for UDP sysctl objects
  */
 #define	UDPCTL_CHECKSUM		1	/* checksum UDP packets */
-#define UDPCTL_MAXID		2
+#define	UDPCTL_BADDYNAMIC	2	/* return bad dynamic port bitmap */
+#define UDPCTL_MAXID		3
 
 #define UDPCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "checksum", CTLTYPE_INT }, \
+	{ "baddynamic", CTLTYPE_STRUCT }, \
 }
 
 #ifdef _KERNEL

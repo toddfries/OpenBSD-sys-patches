@@ -1,4 +1,4 @@
-/*	$OpenBSD: dead_vnops.c,v 1.2 1996/02/27 07:49:43 niklas Exp $	*/
+/*	$OpenBSD: dead_vnops.c,v 1.4 1997/10/06 20:20:20 deraadt Exp $	*/
 /*	$NetBSD: dead_vnops.c,v 1.16 1996/02/13 13:12:48 mycroft Exp $	*/
 
 /*

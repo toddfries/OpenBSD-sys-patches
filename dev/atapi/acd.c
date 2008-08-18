@@ -1,4 +1,4 @@
-/*	$OpenBSD: acd.c,v 1.23 1997/03/26 01:53:49 deraadt Exp $	*/
+/*	$OpenBSD: acd.c,v 1.29 1997/10/18 10:37:06 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Manuel Bouyer.  All rights reserved.
@@ -101,7 +101,7 @@ struct acd_softc {
 
 	struct	cd_parms {
 		int	blksize;
-		u_long	disksize;	/* total number sectors */
+		u_int32_t disksize;	/* total number sectors */
 	} params;
 	struct	buf buf_queue;
 };
@@ -123,9 +123,8 @@ void	acdstrategy __P((struct buf *));
 void	acdstart __P((void *));
 int	acd_pause __P((struct acd_softc *, int));
 void	acdminphys __P((struct buf*));
-u_long	acd_size __P((struct acd_softc*, int));
+u_int32_t acd_size __P((struct acd_softc*, int));
 int	acddone __P((void *));
-#ifndef XXX
 int	acdlock __P((struct acd_softc *));
 void	acdunlock __P((struct acd_softc *));
 int	acdopen __P((dev_t, int, int));
@@ -136,12 +135,10 @@ int	acdioctl __P((dev_t, u_long, caddr_t, int, struct proc *));
 int	acd_reset __P((struct acd_softc *));
 int	acdsize __P((dev_t));
 int	acddump __P((dev_t, daddr_t, caddr_t, size_t));
-#endif
 int	acd_get_mode __P((struct acd_softc *, struct atapi_mode_data *, int,
 	    int, int));
 int	acd_set_mode __P((struct acd_softc *, struct atapi_mode_data *, int));
 int	acd_setchan __P((struct acd_softc *, u_char, u_char, u_char, u_char));
-int	acd_play __P((struct acd_softc *, int, int));
 int	acd_play_big __P((struct acd_softc *, int, int));
 int	acd_load_toc __P((struct acd_softc *, struct cd_toc *));
 int	acd_play_tracks __P((struct acd_softc *, int, int, int, int));
@@ -242,6 +239,15 @@ acdattach(parent, self, aux)
 		if (cap->max_vol_levels)
 			printf (", %d volume levels", cap->max_vol_levels);
 		printf ("\n");
+	}
+
+	/* We can autoprobe AQUIRK_NODOORLOCK */
+	if (!(acd->ad_link->quirks & AQUIRK_NODOORLOCK)) {
+		if (atapi_prevent(acd->ad_link, PR_PREVENT)) {
+			acd->ad_link->quirks |= AQUIRK_NODOORLOCK;
+			printf ("%s: disabling door locks.\n", self->dv_xname);
+		} else
+			atapi_prevent(acd->ad_link, PR_ALLOW);
 	}
 }
 
@@ -483,6 +489,7 @@ acdstrategy(bp)
 	 */
 	if (CDPART(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, acd->sc_dk.dk_label,
+	    acd->sc_dk.dk_cpulabel,
 	    (acd->flags & (CDF_WLABEL|CDF_LABELLING)) != 0) <= 0)
 		goto done;
 
@@ -1076,8 +1083,8 @@ acdgetdisklabel(acd)
 		errstring = readdisklabel(MAKECDDEV(0, acd->sc_dev.dv_unit,
 		    RAW_PART), acdstrategy, lp, acd->sc_dk.dk_cpulabel);
 #endif
-		if (errstring)
-			printf("%s: %s\n", acd->sc_dev.dv_xname, errstring);
+		/*if (errstring)
+			printf("%s: %s\n", acd->sc_dev.dv_xname, errstring);*/
 	}
 
 done:
@@ -1087,7 +1094,7 @@ done:
 /*
  * Find out from the device what it's capacity is
  */
-u_long
+u_int32_t
 acd_size(acd, flags)
 	struct acd_softc *acd;
 	int flags;
@@ -1216,25 +1223,6 @@ acd_setchan(acd, c0, c1, c2, c3)
 	data.page_audio.port[3].channels = c3;
 
 	return acd_set_mode(acd, &data, AUDIOPAGESIZE);
-}
-
-/*
- * Get atapi driver to send a "start playing" command
- */
-int
-acd_play(acd, blkno, nblks)
-	struct acd_softc *acd;
-	int blkno, nblks;
-{
-	struct atapi_play atapi_cmd;
-
-	bzero(&atapi_cmd, sizeof(atapi_cmd));
-	atapi_cmd.opcode = ATAPI_PLAY_AUDIO;
-	_lto4b(blkno, atapi_cmd.lba);
-	_lto2b(nblks, atapi_cmd.length);
-
-	return atapi_exec_cmd(acd->ad_link, &atapi_cmd, sizeof(atapi_cmd),
-	    NULL, 0, 0, 0);
 }
 
 /*

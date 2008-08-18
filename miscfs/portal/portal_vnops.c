@@ -1,4 +1,4 @@
-/*	$OpenBSD: portal_vnops.c,v 1.2 1996/02/27 07:59:43 niklas Exp $	*/
+/*	$OpenBSD: portal_vnops.c,v 1.4 1997/10/06 21:04:47 deraadt Exp $	*/
 /*	$NetBSD: portal_vnops.c,v 1.17 1996/02/13 13:12:57 mycroft Exp $	*/
 
 /*

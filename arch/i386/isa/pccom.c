@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccom.c,v 1.10 1996/12/18 16:51:45 millert Exp $	*/
+/*	$OpenBSD: pccom.c,v 1.13 1997/10/07 06:49:49 mickey Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*-
@@ -163,8 +163,6 @@ com_pcmcia_mod(pc_link, self, pc_cf, cf)
     struct cfdata *cf;
 {               
     int err; 
-    struct pcmciadevs *dev = pc_link->device;
-    struct ed_softc *sc = (void *)self; 
     if (!(err = PCMCIA_BUS_CONFIG(pc_link->adapter, pc_link, self,
 				  pc_cf, cf))) {
         pc_cf->memwin = 0;
@@ -223,7 +221,7 @@ com_pcmcia_isa_attach(parent, match, aux, pc_link)
 	struct com_softc *sc = match;
 
 	int rval;
-	if (rval = comprobe(parent, sc->sc_dev.dv_cfdata, ia)) {
+	if ((rval = comprobe(parent, sc->sc_dev.dv_cfdata, ia))) {
 		if (ISSET(pc_link->flags, PCMCIA_REATTACH)) {
 #ifdef PCCOM_DEBUG
 			printf("comreattach, hwflags=%x\n", sc->sc_hwflags);
@@ -359,10 +357,9 @@ comspeed(speed)
 }
 
 int
-comprobe1(iot, ioh, iobase)
+comprobe1(iot, ioh)
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
-	int iobase;
 {
 	int i, k;
 
@@ -503,7 +500,7 @@ comprobe(parent, match, aux)
 		rv = 0;
 		goto out;
 	}
-	rv = comprobe1(iot, ioh, iobase);
+	rv = comprobe1(iot, ioh);
 	if (needioh)
 		bus_space_unmap(iot, ioh, COM_NPORTS);
 
@@ -839,12 +836,14 @@ comopen(dev, flag, mode, p)
 			return EBUSY;
 		}
 	} else {
-		while (!(DEVCUA(dev) && sc->sc_cua) &&
-		    !ISSET(tp->t_cflag, CLOCAL) &&
-		    !ISSET(tp->t_state, TS_CARR_ON)) {
+		while (sc->sc_cua ||
+		    (!ISSET(tp->t_cflag, CLOCAL) &&
+		    !ISSET(tp->t_state, TS_CARR_ON))) {
 			SET(tp->t_state, TS_WOPEN);
 			error = ttysleep(tp, &tp->t_rawq, TTIPRI | PCATCH,
 			    ttopen, 0);
+			if (!DEVCUA(dev) && sc->sc_cua && error == EINTR)
+				continue;
 			if (error) {
 				/* XXX should turn off chip if we're the
 				   only waiter */
@@ -854,6 +853,8 @@ comopen(dev, flag, mode, p)
 				splx(s);
 				return error;
 			}
+			if (!DEVCUA(dev) && sc->sc_cua)
+				continue;
 		}
 	}
 	splx(s);
@@ -1612,7 +1613,7 @@ comcnprobe(cp)
 		cp->cn_pri = CN_DEAD;
 		return;
 	}
-	found = comprobe1(iot, ioh, CONADDR);
+	found = comprobe1(iot, ioh);
 	bus_space_unmap(iot, ioh, COM_NPORTS);
 	if (!found) {
 		cp->cn_pri = CN_DEAD;

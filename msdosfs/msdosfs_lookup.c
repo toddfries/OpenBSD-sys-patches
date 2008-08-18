@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_lookup.c,v 1.5 1997/03/02 18:01:57 millert Exp $	*/
+/*	$OpenBSD: msdosfs_lookup.c,v 1.7 1997/10/06 20:20:58 deraadt Exp $	*/
 /*	$NetBSD: msdosfs_lookup.c,v 1.30 1996/10/25 23:14:08 cgd Exp $	*/
 
 /*-

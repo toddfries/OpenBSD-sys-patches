@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_param.h,v 1.8 1997/04/10 13:48:50 deraadt Exp $	*/
+/*	$OpenBSD: vm_param.h,v 1.10 1997/10/06 20:21:28 deraadt Exp $	*/
 /*	$NetBSD: vm_param.h,v 1.12 1995/03/26 20:39:16 jtc Exp $	*/
 
 /* 

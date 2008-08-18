@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_run.h,v 1.4 1996/04/21 22:19:12 deraadt Exp $	*/
+/*	$OpenBSD: db_run.h,v 1.6 1997/09/06 14:49:00 deraadt Exp $	*/
 /*	$NetBSD: db_run.h,v 1.3 1996/02/05 01:57:14 christos Exp $	*/
 
 /* 
@@ -54,4 +54,14 @@ void db_trace_until_call_cmd __P((db_expr_t, int, db_expr_t, char *));
 void db_trace_until_matching_cmd __P((db_expr_t, int, db_expr_t, char *));
 void db_continue_cmd __P((db_expr_t, int, db_expr_t, char *));
 
-#endif	_DDB_DB_RUN_
+#ifdef SOFTWARE_SSTEP
+/*
+ * I've seen this defined to (0) when it is not needed and then the proto will
+ * not be correct, so skip it then.
+ */
+#ifndef getreg_val
+extern register_t getreg_val __P((db_regs_t *, int));
+#endif
+#endif /* SOFTWARE_SSTEP */
+
+#endif	/* _DDB_DB_RUN_ */

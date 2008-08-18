@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcd.c,v 1.19 1997/01/04 08:50:25 deraadt Exp $ */
+/*	$OpenBSD: mcd.c,v 1.22 1997/10/18 10:37:12 deraadt Exp $ */
 /*	$NetBSD: mcd.c,v 1.49 1996/05/12 23:53:11 mycroft Exp $	*/
 
 /*
@@ -56,7 +56,6 @@
 
 /*static char COPYRIGHT[] = "mcd-driver (C)1993 by H.Veit & B.Moore";*/
 
-#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -466,6 +465,7 @@ mcdstrategy(bp)
 	 */
 	if (MCDPART(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, sc->sc_dk.dk_label,
+	    sc->sc_dk.dk_cpulabel,
 	    (sc->flags & (MCDF_WLABEL|MCDF_LABELLING)) != 0) <= 0)
 		goto done;
 	
@@ -722,7 +722,7 @@ mcdgetdisklabel(dev, sc)
 	errstring = readdisklabel(MCDLABELDEV(dev), mcdstrategy, lp,
 	    sc->sc_dk.dk_cpulabel);
 	if (errstring) {
-		printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);
+		/*printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);*/
 		return;
 	}
 }

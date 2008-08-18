@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.11 1997/03/02 07:59:40 tholo Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.24 1997/10/02 02:31:07 deraadt Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/systm.h>
+#include <sys/kernel.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -66,6 +67,7 @@
 #include <netinet/ip_ipsp.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
+#include <sys/syslog.h>
 #endif
 
 static struct mbuf *ip_insertoptions __P((struct mbuf *, struct mbuf *, int *));
@@ -105,8 +107,9 @@ ip_output(m0, va_alist)
 	va_list ap;
 #ifdef IPSEC
 	struct mbuf *mp;
-        struct udphdr *udp;
-        struct tcphdr *tcp;
+	struct udphdr *udp;
+	struct tcphdr *tcp;
+	struct expiration *exp;
 #endif
 
 	va_start(ap, m0);
@@ -152,8 +155,8 @@ ip_output(m0, va_alist)
 		struct sockaddr_encap *dst, *gw;
 		struct tdb *tdb;
 
-		bzero((caddr_t)re, sizeof (*re));
-		dst = (struct sockaddr_encap *)&re->re_dst;
+		bzero((caddr_t) re, sizeof(*re));
+		dst = (struct sockaddr_encap *) &re->re_dst;
 		dst->sen_family = AF_ENCAP;
 		dst->sen_len = SENT_IP4_LEN;
 		dst->sen_type = SENT_IP4;
@@ -161,100 +164,65 @@ ip_output(m0, va_alist)
 		dst->sen_ip_dst = ip->ip_dst;
 		dst->sen_proto = ip->ip_p;
 
-		if (m->m_len < hlen + 2*sizeof(u_int16_t)) {
-		    if ((m = m_pullup(m, hlen + 2*sizeof(u_int16_t))) == 0)
-			goto bad;
-		    ip = mtod(m, struct ip *);
-		}
-
 		switch (ip->ip_p) {
-		case IPPROTO_TCP:
+		case IPPROTO_UDP:
+			if (m->m_len < hlen + 2 * sizeof(u_int16_t)) {
+				if ((m = m_pullup(m, hlen + 2 *
+				    sizeof(u_int16_t))) == 0)
+					return ENOBUFS;
+				ip = mtod(m, struct ip *);
+			}
 			udp = (struct udphdr *) (mtod(m, u_char *) + hlen);
 			dst->sen_sport = ntohs(udp->uh_sport);
 			dst->sen_dport = ntohs(udp->uh_dport);
 			break;
-		case IPPROTO_UDP:
+
+		case IPPROTO_TCP:
+			if (m->m_len < hlen + 2 * sizeof(u_int16_t)) {
+				if ((m = m_pullup(m, hlen + 2 *
+				    sizeof(u_int16_t))) == 0)
+					return ENOBUFS;
+				ip = mtod(m, struct ip *);
+			}
 			tcp = (struct tcphdr *) (mtod(m, u_char *) + hlen);
 			dst->sen_sport = ntohs(tcp->th_sport);
 			dst->sen_dport = ntohs(tcp->th_dport);
 			break;
+
 		default:
 			dst->sen_sport = 0;
 			dst->sen_dport = 0;
 		}
-		rtalloc((struct route *)re);
+
+		rtalloc((struct route *) re);
 		if (re->re_rt == NULL)
 			goto no_encap;
 
-		gw = (struct sockaddr_encap *)(re->re_rt->rt_gateway);
+		gw = (struct sockaddr_encap *) (re->re_rt->rt_gateway);
+
+		/*
+		 * There might be a specific route, that tells us to avoid
+		 * doing IPsec; this is useful for specific routes that we
+		 * don't want to have IPsec applied on.
+		 */
+
+		if ((gw != NULL) && (gw->sen_ipsp_dst.s_addr == 0) &&
+		    (gw->sen_ipsp_sproto == 0) && (gw->sen_ipsp_spi == 0))
+			goto no_encap;
+
 		if (gw == NULL || gw->sen_type != SENT_IPSP) {
 #ifdef ENCDEBUG
 			if (encdebug)
-				printf("ip_output: no gw or gw data not IPSP\n");
-#endif ENCDEBUG
-			m_freem(m);
+				printf("ip_output(): no gw or gw data not IPSP\n");
+#endif /* ENCDEBUG */
 			RTFREE(re->re_rt);
-			return EHOSTUNREACH;
+			error = EHOSTUNREACH;
+			goto bad;
 		}
 
-		ifp = re->re_rt->rt_ifp;
-
-		if (ip->ip_src.s_addr == INADDR_ANY) {
-			struct sockaddr_encap *sen;
-			struct sockaddr_in *sinp;
-
-			if (ifp->if_addrlist.tqh_first)
-				sen = (struct sockaddr_encap *)
-				    ifp->if_addrlist.tqh_first->ifa_addr;
-			else {
-#ifdef ENCDEBUG
-				if (encdebug)
-					printf("ip_output: interface %s has no default address\n",
-					    ifp->if_xname);
-#endif ENCDEBUG
-				return ENXIO;
-			}
-
-			if (sen->sen_family != AF_ENCAP) {
-#ifdef ENCDEBUG
-				if (encdebug)
-					printf("ip_output: %s does not have AF_ENCAP address\n",
-					    ifp->if_xname);
-#endif ENCDEBUG
-				m_freem(m);
-				RTFREE(re->re_rt);
-				return EHOSTDOWN;
-			}
-
-			if (sen->sen_type != SENT_DEFIF) {
-#ifdef ENCDEBUG
-				if (encdebug)
-					printf("ip_output: %s does not have SENT_DEFIF address\n",
-					    ifp->if_xname);
-#endif ENCDEBUG
-				m_freem(m);
-				RTFREE(re->re_rt);
-				return EHOSTDOWN;
-			}
-			sinp = (struct sockaddr_in *)&(sen->sen_dfl);
-			ip->ip_src = sinp->sin_addr;
-		}
-
-		if (hlen > sizeof (struct ip)) {	/* XXX IPOPT */
-			ip_stripoptions(m, (struct mbuf *)0);
-			hlen = sizeof (struct ip);
-		}
-
-#ifdef ENCDEBUG
-		if (encdebug)
-			printf("ip_output: encapsulating %x->%x through %x->%x\n",
-			    ip->ip_src.s_addr, ip->ip_dst.s_addr,
-			    gw->sen_ipsp_src, gw->sen_ipsp_dst);
-#endif
 		ip->ip_len = htons((u_short)ip->ip_len);
 		ip->ip_off = htons((u_short)ip->ip_off);
 		ip->ip_sum = 0;
-		ip->ip_sum = in_cksum(m, hlen);
 
 		/*
 		 * At this point we have an IPSP "gateway" (tunnel) spec.
@@ -263,22 +231,150 @@ ip_output(m0, va_alist)
 		 * and then pass it, along with the packet and the gw,
 		 * to the appropriate transformation.
 		 */
-
-		tdb = (struct tdb *) gettdb(gw->sen_ipsp_spi, gw->sen_ipsp_dst);
+		tdb = (struct tdb *) gettdb(gw->sen_ipsp_spi, gw->sen_ipsp_dst,
+		    gw->sen_ipsp_sproto);
 
 #ifdef ENCDEBUG
-		if (encdebug)
-			printf("ip_output: tdb=0x%x, tdb->tdb_xform=0x%x, tdb->tdb_xform->xf_output=%x\n", tdb, tdb->tdb_xform, tdb->tdb_xform->xf_output);
+		if (encdebug && (tdb == NULL))
+			printf("ip_output(): non-existant TDB for SA %08x/%x/%d\n",
+			    ntohl(gw->sen_ipsp_spi), gw->sen_ipsp_dst,
+			    gw->sen_ipsp_sproto);
 #endif ENCDEBUG
+
+		/* Fix the ip_src field if necessary */
+		if ((ip->ip_src.s_addr == INADDR_ANY) && tdb)
+			ip->ip_src = tdb->tdb_src;
+
+		/* Now fix the checksum */
+		ip->ip_sum = in_cksum(m, hlen);
+
+#ifdef ENCDEBUG
+		if (encdebug) {
+			printf("ip_output(): tdb=%08x, tdb->tdb_xform=0x%x,",
+			    tdb, tdb->tdb_xform);
+			printf(" tdb->tdb_xform->xf_output=%x, sproto=%x\n",
+			    tdb->tdb_xform->xf_output, tdb->tdb_sproto);
+		}
+#endif /* ENCDEBUG */
 
 		while (tdb && tdb->tdb_xform) {
 			m0 = NULL;
+
+			/* Check if the SPI is invalid */
+			if (tdb->tdb_flags & TDBF_INVALID) {
+			 	if (encdebug)
+				  log(LOG_ALERT, "ip_output(): attempt to use invalid SA %08x/%x/%x\n", ntohl(tdb->tdb_spi), tdb->tdb_dst,
+				    tdb->tdb_sproto);
+				m_freem(m);
+				RTFREE(re->re_rt);
+				return ENXIO;
+			}
+
+			/* Check for tunneling */
+			if (tdb->tdb_flags & TDBF_TUNNELING) {
+#ifdef ENCDEBUG
+				if (encdebug)
+					printf("ip_output(): tunneling\n");
+#endif /* ENCDEBUG */
+
+				/*
+				 * Register first use,
+				 * setup expiration timer
+				 */
+				if (tdb->tdb_first_use == 0) {
+					tdb->tdb_first_use = time.tv_sec;
+
+					if (tdb->tdb_flags & TDBF_FIRSTUSE) {
+						exp = get_expiration();
+						if (exp == NULL)
+							goto expbail;
+						exp->exp_dst.s_addr =
+						    tdb->tdb_dst.s_addr;
+						exp->exp_spi = tdb->tdb_spi;
+						exp->exp_sproto =
+						    tdb->tdb_sproto;
+						exp->exp_timeout =
+						    tdb->tdb_first_use +
+						    tdb->tdb_exp_first_use;
+						put_expiration(exp);
+					}
+
+					if ((tdb->tdb_flags &
+					    TDBF_SOFT_FIRSTUSE) &&
+					    (tdb->tdb_soft_first_use <=
+						tdb->tdb_exp_first_use)) {
+						exp = get_expiration();
+						if (exp == NULL)
+							goto expbail;
+						exp->exp_dst.s_addr =
+						    tdb->tdb_dst.s_addr;
+						exp->exp_spi = tdb->tdb_spi;
+						exp->exp_sproto =
+						    tdb->tdb_sproto;
+						exp->exp_timeout =
+						    tdb->tdb_first_use +
+						    tdb->tdb_soft_first_use;
+						put_expiration(exp);
+					}
+				}
+
+				error = ipe4_output(m, gw, tdb, &mp);
+				if (mp == NULL)
+					error = EFAULT;
+				if (error) {
+					RTFREE(re->re_rt);
+					return error;
+				}
+				m = mp;
+			}
+
 #ifdef ENCDEBUG
 			if (encdebug)
-				printf("ip_output: calling %s\n",
-				    tdb->tdb_xform->xf_name);
-#endif ENCDEBUG
-			error = (*(tdb->tdb_xform->xf_output))(m, gw, tdb, &mp);
+				printf("ip_output(): calling %s\n",
+				       tdb->tdb_xform->xf_name);
+#endif /* ENCDEBUG */
+
+			/* Register first use, setup expiration timer */
+			if (tdb->tdb_first_use == 0) {
+			    tdb->tdb_first_use = time.tv_sec;
+
+				if (tdb->tdb_flags & TDBF_FIRSTUSE) {
+					exp = get_expiration();
+					if (exp == NULL)
+						goto expbail;
+					exp->exp_dst.s_addr =
+					    tdb->tdb_dst.s_addr;
+					exp->exp_spi = tdb->tdb_spi;
+					exp->exp_sproto = tdb->tdb_sproto;
+					exp->exp_timeout = tdb->tdb_first_use +
+					    tdb->tdb_exp_first_use;
+					put_expiration(exp);
+				}
+
+				if ((tdb->tdb_flags & TDBF_SOFT_FIRSTUSE) &&
+				    (tdb->tdb_soft_first_use <=
+				    tdb->tdb_exp_first_use)) {
+					exp = get_expiration();
+					if (exp == NULL) {
+expbail:
+						if (encdebug)
+						  log(LOG_WARNING, "ip_output(): no memory for exp timer\n");
+						m_freem(m);
+						RTFREE(re->re_rt);
+						return ENOBUFS;
+					}
+					exp->exp_dst.s_addr =
+					    tdb->tdb_dst.s_addr;
+					exp->exp_spi = tdb->tdb_spi;
+					exp->exp_sproto = tdb->tdb_sproto;
+					exp->exp_timeout = tdb->tdb_first_use +
+					    tdb->tdb_soft_first_use;
+					put_expiration(exp);
+				}
+			}
+
+			error = (*(tdb->tdb_xform->xf_output))(m, gw,
+			    tdb, &mp);
 			if (mp == NULL)
 				error = EFAULT;
 			if (error) {
@@ -290,18 +386,16 @@ ip_output(m0, va_alist)
 		}
 
 		/*
-		 * At this point, mp is pointing to an mbuf chain with the
+		 * At this point, m is pointing to an mbuf chain with the
 		 * processed packet. Call ourselves recursively, but
 		 * bypass the encap code.
 		 */
-
 		RTFREE(re->re_rt);
-
 		ip = mtod(m, struct ip *);
 		NTOHS(ip->ip_len);
 		NTOHS(ip->ip_off);
-
-		return ip_output(m, NULL, NULL, IP_ENCAPSULATED | IP_RAWOUTPUT, NULL);
+		return ip_output(m, NULL, NULL,
+		    IP_ENCAPSULATED | IP_RAWOUTPUT, NULL);
 
 no_encap:
 		/* This is for possible future use, don't move or delete */
@@ -324,7 +418,7 @@ no_encap:
 	 * and is still up.  If not, free it and try again.
 	 */
 	if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
-	   dst->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+	    dst->sin_addr.s_addr != ip->ip_dst.s_addr)) {
 		RTFREE(ro->ro_rt);
 		ro->ro_rt = (struct rtentry *)0;
 	}
@@ -801,31 +895,29 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_ESP_TRANS_LEVEL:
 		case IP_ESP_NETWORK_LEVEL:
 #ifndef IPSEC
-		    error = EINVAL;
+			error = EINVAL;
 #else
-		    if (m == 0 || m->m_len != sizeof(u_char))
-		      error = EINVAL;
-		    else {
+			if (m == 0 || m->m_len != sizeof(u_char)) {
+				error = EINVAL;
+				break;
+			}
 			optval = *mtod(m, u_char *);
-			
 			switch (optname) {
-			    case IP_AUTH_LEVEL:
+			case IP_AUTH_LEVEL:
 				inp->inp_seclevel[SL_AUTH] = optval;
 				break;
 
-			    case IP_ESP_TRANS_LEVEL:
+			case IP_ESP_TRANS_LEVEL:
 				inp->inp_seclevel[SL_ESP_TRANS] = optval;
 				break;
-				
-			    case IP_ESP_NETWORK_LEVEL:
+
+			case IP_ESP_NETWORK_LEVEL:
 				inp->inp_seclevel[SL_ESP_NETWORK] = optval;
 				break;
 			}
-			
-		    }
 #endif
-		    break;
-		    
+			break;
+
 		default:
 			error = ENOPROTOOPT;
 			break;
@@ -907,26 +999,24 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_ESP_TRANS_LEVEL:
 		case IP_ESP_NETWORK_LEVEL:
 #ifndef IPSEC
-		    *mtod(m, int *) = IPSEC_LEVEL_NONE;
+			*mtod(m, int *) = IPSEC_LEVEL_NONE;
 #else
-		    switch (optname) {
-			    case IP_AUTH_LEVEL:
+			switch (optname) {
+			case IP_AUTH_LEVEL:
 				    optval = inp->inp_seclevel[SL_AUTH];
 				    break;
-				
-			    case IP_ESP_TRANS_LEVEL:
+
+			case IP_ESP_TRANS_LEVEL:
 				    optval = inp->inp_seclevel[SL_ESP_TRANS];
 				    break;
-				
-			    case IP_ESP_NETWORK_LEVEL:
+
+			case IP_ESP_NETWORK_LEVEL:
 				    optval = inp->inp_seclevel[SL_ESP_NETWORK];
 				    break;
-		    }
-		    
-		    *mtod(m, int *) = optval;
+			}
+			*mtod(m, int *) = optval;
 #endif
-		    break;
-				
+			break;
 		default:
 			error = ENOPROTOOPT;
 			break;

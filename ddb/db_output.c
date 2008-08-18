@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_output.c,v 1.9 1997/03/21 00:44:18 niklas Exp $	*/
+/*	$OpenBSD: db_output.c,v 1.13 1997/07/19 22:31:19 niklas Exp $	*/
 /*	$NetBSD: db_output.c,v 1.13 1996/04/01 17:27:14 christos Exp $	*/
 
 /* 
@@ -36,6 +36,8 @@
 #include <machine/stdarg.h>
 
 #include <dev/cons.h>
+
+#include <vm/vm.h>
 
 #include <machine/db_machdep.h>
 
@@ -78,8 +80,11 @@ int	db_tab_stop_width = 8;		/* how wide are tab stops? */
 	((((i) + db_tab_stop_width) / db_tab_stop_width) * db_tab_stop_width)
 int	db_max_line = DB_MAX_LINE;	/* output max lines */
 int	db_max_width = DB_MAX_WIDTH;	/* output line width */
+int	db_radix = 16;			/* output numbers radix */
 
+#ifdef DDB
 static void db_more __P((void));
+#endif
 static char *db_ksprintn __P((u_long, int, int *));
 static void db_printf_guts __P((const char *, va_list));
 
@@ -108,6 +113,7 @@ db_force_whitespace()
 	db_last_non_space = db_output_position;
 }
 
+#ifdef DDB
 static void
 db_more()
 {
@@ -137,6 +143,7 @@ db_more()
 	    /* NOTREACHED */
 	}
 }
+#endif
 
 /*
  * Output character.  Buffer whitespace.
@@ -145,8 +152,10 @@ void
 db_putchar(c)
 	int	c;		/* character to output */
 {
+#ifdef DDB
 	if (db_max_line >= DB_MIN_MAX_LINE && db_output_line >= db_max_line-1)
 	    db_more();
+#endif
 	if (c > ' ' && c <= '~') {
 	    /*
 	     * Printing character.
@@ -172,7 +181,9 @@ db_putchar(c)
 	    db_output_position = 0;
 	    db_last_non_space = 0;
 	    db_output_line++;
+#ifdef DDB
 	    db_check_interrupt();
+#endif
 	}
 	else if (c == '\t') {
 	    /* assume tabs every 8 positions */
@@ -242,9 +253,10 @@ kdbprintf(fmt, va_alist)
  * End line if too long.
  */
 void
-db_end_line()
+db_end_line(space)
+	int space;
 {
-	if (db_output_position >= db_max_width)
+	if (db_output_position >= db_max_width - space)
 	    db_printf("\n");
 }
 
@@ -287,7 +299,7 @@ db_printf_guts(fmt, ap)
 	for (;;) {
 		padc = ' ';
 		width = 0;
-		while ((ch = *(u_char *)fmt++) != '%') {
+		while ((ch = *(const u_char *)fmt++) != '%') {
 			if (ch == '\0')
 				return;
 			db_putchar(ch);
@@ -296,7 +308,7 @@ db_printf_guts(fmt, ap)
 		ladjust = 0;
 		sharpflag = 0;
 		neg = 0;
-reswitch:	switch (ch = *(u_char *)fmt++) {
+reswitch:	switch (ch = *(const u_char *)fmt++) {
 		case '0':
 			padc = '0';
 			goto reswitch;

@@ -1,4 +1,4 @@
-#	$OpenBSD: BABY,v 1.17 1997/05/13 18:26:14 deraadt Exp $
+#	$OpenBSD: BABY,v 1.25 1997/10/08 21:53:30 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -26,7 +26,7 @@ option		SWAPPAGER	# paging; REQUIRED
 option		DEVPAGER	# mmap() of devices
 
 option		DDB		# in-kernel debugger
-#makeoptions	DEBUG="-g"	# compile full symbol table
+makeoptions	DEBUG="-g"	# compile full symbol table
 option		DIAGNOSTIC	# internal consistency checks
 option		KTRACE		# system call tracing, a la ktrace(1)
 
@@ -35,8 +35,7 @@ option		SYSVSEM		# System V-like semaphores
 option		SYSVSHM		# System V-like memory sharing
 #option		SHMMAXPGS=1024	# 1024 pages is the default
 
-option		COMPAT_NOMID	# compatibility with 386BSD, BSDI, NetBSD 0.8,
-option		COMPAT_09	# NetBSD 0.9,
+option		COMPAT_09	# Kernel compatibility with NetBSD 0.9,
 option		COMPAT_10	# NetBSD 1.0,
 option		COMPAT_11	# NetBSD 1.1,
 option		COMPAT_43	# and 4.3BSD
@@ -46,6 +45,7 @@ option		COMPAT_SVR4	# binary compatibility with SVR4
 option		COMPAT_IBCS2	# binary compatibility with SCO and ISC
 option		COMPAT_LINUX	# binary compatibility with Linux
 option		COMPAT_FREEBSD	# binary compatibility with FreeBSD
+option		COMPAT_BSDOS	# binary compatibility with BSD/OS
 
 option		USER_LDT	# user-settable LDT; used by WINE
 option		LKM		# loadable kernel modules
@@ -63,20 +63,23 @@ option		FDESC		# /dev/fd
 option		FIFO		# FIFOs; RECOMMENDED
 option		KERNFS		# /kern
 #option		NULLFS		# loopback file system
-option		PORTAL		# create sockets with open(2)
+option		PORTAL		# dynamically created filesystem objects
 option		PROCFS		# /proc
 #option		UMAPFS		# NULLFS + uid and gid remapping
 #option		UNION		# union file system
 
-#option		GATEWAY		# packet forwarding
+option		"NMBCLUSTERS=1024"
+option		GATEWAY		# packet forwarding
 option		INET		# IP + ICMP + TCP + UDP
+option		IPSEC		# IPsec
 option		NS		# XNS
 #option		ISO,TPIP	# OSI
 #option		EON		# OSI tunneling over IP
 #option		CCITT,LLC,HDLC	# X.25
 option		IPFILTER	# IP packet filter for security
+option		IPFILTER_LOG	# use /dev/ipl to log IPF
 
-config		bsd	root on sd0 swap on sd0 and sd1 and sd2 and sd3 and sd4
+config		bsd	root on sd0 swap on sd0 and sd1 and sd2 and sd3 and sd4 dumps on sd2
 
 mainbus0 at root
 
@@ -87,10 +90,10 @@ pci0	at mainbus0 bus ?
 ppb*	at pci? dev ? function ?	# PCI-PCI bridges
 pci*	at ppb? bus ?
 
-pcicmaster0     at isa? port 0x3E0 size 2
+pcicmaster0	at isa? port 0x3E0 size 2
 pcic0	at pcicmaster0 irq 11 iomem 0xd4000 iosiz 4096
 pcic1	at pcicmaster0 irq 12 iomem 0xd5000 iosiz 4096
-pcicmaster1 at isa? port 0x3E2 size 2
+pcicmaster1	at isa? port 0x3E2 size 2
 pcic2	at pcicmaster1 irq 11 iomem 0xd6000 iosiz 4096
 pcic3	at pcicmaster1 irq 12 iomem 0xd7000 iosiz 4096
 
@@ -99,20 +102,20 @@ pcmcia* at pcic?
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
 
-pc0	at isa? port 0x60 irq 1		# generic PC console device
-#vt0	at isa? port 0x60 irq 1
+#pc0	at isa? port 0x60 irq 1		# generic PC console device
+vt0	at isa? port 0x60 irq 1
 
-com0	at isa? port 0x3f8 irq 4	# standard PC serial ports
-com1	at isa? port 0x2f8 irq 3
-com2	at isa? port 0x3e8 irq 5
-#com3	at isa? port 0x2e8 irq 9
+pccom0	at isa? port 0x3f8 irq 4	# standard PC serial ports
+pccom1	at isa? port 0x2f8 irq 3
+pccom2	at isa? port 0x3e8 irq 5
+#pccom3	at isa? port 0x2e8 irq 9
 #ast0	at isa? port 0x1a0 irq 5	# AST 4-port serial cards
-#com*	at ast? slave ?
+#pccom*	at ast? slave ?
 #boca0	at isa? port 0x100 irq 5	# BOCA 8-port serial cards
-#com*	at boca? slave ?
+#pccom*	at boca? slave ?
 #rtfps0	at isa? port 0x1230 irq 10	# RT 4-port serial cards
-#com*	at rtfps? slave ?
-com3    at pcmcia? port 0x2e8 size 8 irq 3 slot ? # PCMCIA modem cards
+#pccom*	at rtfps? slave ?
+pccom3	at pcmcia? port 0x2e8 size 8 irq 3 slot ? # PCMCIA modem cards
 
 #cy0	at isa? ...
 
@@ -174,7 +177,7 @@ ep*	at pci? dev ? function ?		# 3C590 ethernet cards
 #ep*	at pcmcia? port 0x300 size 0x10 irq 10 slot ? # PCMCIA based ep cards
 #fpa*	at pci? dev ? function ?		# DEC DEFPA FDDI cards
 
-#pss0	at isa? port 0x220 irq 7 drq 6  	# Personal Sound System
+#pss0	at isa? port 0x220 irq 7 drq 6		# Personal Sound System
 #sp0	at pss0 port 0x530 irq 10 drq 0		# 	sound port driver
 
 #sb0	at isa? port 0x220 irq 7 drq 1		# SoundBlaster
@@ -198,3 +201,4 @@ pseudo-device	tb	1		# tablet line discipline
 pseudo-device	vnd	4		# paging to files
 pseudo-device	ccd	4		# concatenated disk devices
 pseudo-device	rd	2		# ramdisk (don't remove ;)
+pseudo-device	enc		4	# encryption device

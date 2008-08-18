@@ -1,4 +1,4 @@
-/*	$OpenBSD: ibcs2_misc.c,v 1.8 1997/01/23 16:12:18 niklas Exp $	*/
+/*	$OpenBSD: ibcs2_misc.c,v 1.12 1997/10/06 20:19:29 deraadt Exp $	*/
 /*	$NetBSD: ibcs2_misc.c,v 1.23 1997/01/15 01:37:49 perry Exp $	*/
 
 /*
@@ -132,8 +132,8 @@ ibcs2_sys_ulimit(p, v, retval)
 	case IBCS2_SETFSIZE:	/* XXX - fix this */
 #ifdef notyet
 		rl.rlim_cur = SCARG(uap, newlimit);
-		sra.which = RLIMIT_FSIZE;
-		sra.rlp = &rl;
+		SCARG(&sra, which) = RLIMIT_FSIZE;
+		SCARG(&sra, rlp) = &rl;
 		error = setrlimit(p, &sra, retval);
 		if (!error)
 			*retval = p->p_rlimit[RLIMIT_FSIZE].rlim_cur;
@@ -148,7 +148,7 @@ ibcs2_sys_ulimit(p, v, retval)
 		*retval = p->p_rlimit[RLIMIT_RSS].rlim_cur; /* XXX */
 		return 0;
 	case IBCS2_GETDTABLESIZE:
-		uap->cmd = IBCS2_SC_OPEN_MAX;
+		SCARG(uap, cmd) = IBCS2_SC_OPEN_MAX;
 		return ibcs2_sys_sysconf(p, uap, retval);
 	default:
 		return ENOSYS;
@@ -200,14 +200,17 @@ ibcs2_sys_execv(p, v, retval)
 		syscallarg(char *) path;
 		syscallarg(char **) argp;
 	} */ *uap = v;
-	struct sys_execve_args ea;
-	caddr_t sg = stackgap_init(p->p_emul);
+	struct sys_execve_args ap;
+	caddr_t sg;
 
+	sg = stackgap_init(p->p_emul);
         IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-	SCARG(&ea, path) = SCARG(uap, path);
-	SCARG(&ea, argp) = SCARG(uap, argp);
-	SCARG(&ea, envp) = NULL;
-	return sys_execve(p, &ea, retval);
+
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, argp) = SCARG(uap, argp);
+	SCARG(&ap, envp) = NULL;
+
+	return sys_execve(p, &ap, retval);
 }
 
 int
@@ -216,15 +219,22 @@ ibcs2_sys_execve(p, v, retval)
 	void *v;
         register_t *retval;
 {
-	struct sys_execve_args /* {
+	struct ibcs2_sys_execve_args /* {
 		syscallarg(char *) path;
-		syscallarg(char **) argp;
+		syscallarg(char **) argv;
 		syscallarg(char **) envp;
-	} */ *uap = v;
-        caddr_t sg = stackgap_init(p->p_emul);
+        } */ *uap = v;
+	struct sys_execve_args ap;
+	caddr_t sg;
 
-        IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
-        return sys_execve(p, uap, retval);
+	sg = stackgap_init(p->p_emul);
+	IBCS2_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, argp) = SCARG(uap, argp);
+	SCARG(&ap, envp) = SCARG(uap, envp);
+
+	return sys_execve(p, &ap, retval);
 }
 
 int

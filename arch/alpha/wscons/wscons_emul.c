@@ -1,4 +1,4 @@
-/*	$OpenBSD: wscons_emul.c,v 1.5 1997/04/08 23:30:26 michaels Exp $	*/
+/*	$OpenBSD: wscons_emul.c,v 1.11 1997/07/31 13:40:04 kstailey Exp $	*/
 /*	$NetBSD: wscons_emul.c,v 1.7 1996/11/19 05:23:13 cgd Exp $	*/
 
 /*
@@ -143,9 +143,7 @@ wscons_emul_input_normal(we, c)
 		break;
 
 	case ASCII_NP:
-		(*we->ac_ef->wef_eraserows)(we->ac_efa,
-		    0, we->ac_nrow - 1);
-
+		(*we->ac_ef->wef_eraserows)(we->ac_efa, 0, we->ac_nrow);
 		we->ac_ccol = 0;
 		we->ac_crow = 0;
 		break;
@@ -162,6 +160,8 @@ wscons_emul_input_normal(we, c)
 		/* else fall through; we're printing one out */
 
 	default:
+		if (c == '\0')
+			break;
 		(*we->ac_ef->wef_putstr)(we->ac_efa,
 		    we->ac_crow, we->ac_ccol, &c, 1);
 		we->ac_ccol++;
@@ -344,6 +344,38 @@ wscons_emul_docontrol(we, c)
 			(*we->ac_ef->wef_erasecols)(we->ac_efa,
 			    we->ac_crow, we->ac_ccol + copy_ncols,
 			    we->ac_ncol - (we->ac_ccol + copy_ncols));
+			break;
+		}
+		break;
+	case '@':		/* Insert Char */
+		{
+			int copy_src, copy_dst, copy_ncols;
+
+			n = we->ac_args[0] ? we->ac_args[0] : 1;
+			n = min(n, we->ac_ncol - we->ac_ccol);
+
+			copy_src = we->ac_ccol;
+			copy_dst = we->ac_ccol + n;
+			copy_ncols = we->ac_ncol - copy_dst;
+
+			if (copy_ncols > 0)
+				(*we->ac_ef->wef_copycols)(we->ac_efa,
+				    we->ac_crow, copy_src, copy_dst,
+				    copy_ncols);
+
+			(*we->ac_ef->wef_erasecols)(we->ac_efa,
+			    we->ac_crow, we->ac_ccol,
+			    copy_dst - we->ac_ccol);
+		}
+		break;
+	case 'm':		/* video attributes */
+		/* 7 for so; 0 for se */
+		switch (we->ac_args[0]) {
+		case 7:
+			(we->ac_ef->wef_set_attr)(we->ac_efa, 1);
+			break;
+		case 0:
+			(we->ac_ef->wef_set_attr)(we->ac_efa, 0);
 			break;
 		}
 		break;

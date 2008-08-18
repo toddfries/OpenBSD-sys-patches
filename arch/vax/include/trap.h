@@ -1,4 +1,5 @@
-/*      $NetBSD: trap.h,v 1.14 1997/01/11 11:46:43 ragge Exp $     */
+/*      $OpenBSD: trap.h,v 1.9 1997/09/12 09:21:25 maja Exp $     */
+/*      $NetBSD: trap.h,v 1.16 1997/07/28 21:48:36 ragge Exp $     */
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -49,6 +50,7 @@
 #define	T_PRIVINFLT	1	/* privileged instruction */
 #define	T_RESOPFLT	2	/* reserved operand */
 #define	T_BPTFLT	3	/* breakpoint instruction */
+#define	T_XFCFLT	4	/* Customer reserved instruction */
 #define	T_SYSCALL	5	/* system call (kcall) */
 #define	T_ARITHFLT	6	/* arithmetic trap */
 #define	T_ASTFLT	7	/* system forced exception */
@@ -69,25 +71,25 @@
 
 #ifndef _LOCORE
 struct	trapframe {
-	unsigned	fp;	/* Stack frame pointer */
-	unsigned	ap;     /* Argument pointer on user stack */
-	unsigned	sp;	/* Stack pointer */
-	unsigned	r0;     /* General registers saved upon trap/syscall */
-	unsigned	r1;
-	unsigned	r2;
-	unsigned	r3;
-	unsigned	r4;
-	unsigned	r5;
-	unsigned	r6;
-	unsigned	r7;
-	unsigned	r8;
-	unsigned	r9;
-	unsigned	r10;
-	unsigned	r11;
-	unsigned	trap;	/* Type of trap */
-        unsigned	code;   /* Trap specific code */
-        unsigned	pc;     /* User pc */
-        unsigned	psl;    /* User psl */
+	long	fp;	/* Stack frame pointer */
+	long	ap;     /* Argument pointer on user stack */
+	long	sp;	/* Stack pointer */
+	long	r0;     /* General registers saved upon trap/syscall */
+	long	r1;
+	long	r2;
+	long	r3;
+	long	r4;
+	long	r5;
+	long	r6;
+	long	r7;
+	long	r8;
+	long	r9;
+	long	r10;
+	long	r11;
+	long	trap;	/* Type of trap */
+        long	code;   /* Trap specific code */
+        long	pc;     /* User pc */
+        long	psl;    /* User psl */
 };
 
 /*

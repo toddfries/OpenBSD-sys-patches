@@ -1,6 +1,7 @@
-#	$NetBSD: GENERIC,v 1.23.2.1 1995/10/17 12:54:55 tls Exp $
+#	$OpenBSD: WALDORF,v 1.14 1997/10/20 01:40:13 todd Exp $
 #
-#	GENERIC -- everything that's currently supported
+#	WALDORF -- a 486 kernel config Applitron use for some gateway
+#		   machines (waldorf and neuro).
 #
 
 machine		i386		# architecture, used by config; REQUIRED
@@ -8,7 +9,7 @@ machine		i386		# architecture, used by config; REQUIRED
 #option		I386_CPU	# CPU classes; at least one is REQUIRED
 option		I486_CPU
 #option		I586_CPU
-option		GPL_MATH_EMULATE	# floating point emulation
+#option		GPL_MATH_EMULATE	# floating point emulation
 
 #option		DUMMY_NOPS	# speed hack; recommended
 #option		XSERVER
@@ -20,21 +21,21 @@ option		TIMEZONE=0	# time zone to adjust RTC time by
 option		DST=0		# daylight savings time used by RTC
 
 option		SWAPPAGER	# paging; REQUIRED
-option		DEVPAGER	# mmap() of devices
+#option		DEVPAGER	# mmap() of devices
 
 option		DDB		# in-kernel debugger
 makeoptions	DEBUG="-g"	# compile full symbol table
 option		DIAGNOSTIC	# internally consistency checks
 option		KTRACE		# system call tracing, a la ktrace(1)
 option		BOOT_CONFIG	# user kernel config
+#option		COMCONSOLE	# serial console
 
 #option		SYSVMSG		# System V-like message queues
 #option		SYSVSEM		# System V-like semaphores
 #option		SYSVSHM		# System V-like memory sharing
 #option		SHMMAXPGS=1024	# 1024 pages is the default
 
-#option		COMPAT_NOMID	# compatibility with 386BSD, BSDI, NetBSD 0.8,
-#option		COMPAT_09	# NetBSD 0.9,
+#option		COMPAT_09	# Kernel compatibility with NetBSD 0.9,
 #option		COMPAT_10	# NetBSD 1.0,
 #option		COMPAT_43	# and 4.3BSD
 #option		TCP_COMPAT_42	# TCP bug compatibility with 4.2BSD
@@ -43,11 +44,13 @@ option		BOOT_CONFIG	# user kernel config
 #option		COMPAT_IBCS2	# binary compatibility with SCO and ISC
 #option		COMPAT_LINUX	# binary compatibility with Linux
 #option		COMPAT_FREEBSD	# binary compatibility with FreeBSD
+#option		COMPAT_BSDOS	# binary compatibility with BSD/OS
 
 #option		USER_LDT	# user-settable LDT; used by WINE
 option		LKM		# loadable kernel modules
 
 option		FFS		# UFS
+option		EXT2FS		# ext2fs
 #option		QUOTA		# UFS quotas
 option		MFS		# memory file system
 
@@ -60,7 +63,7 @@ option		MSDOSFS		# MS-DOS file system
 option		FIFO		# FIFOs; RECOMMENDED
 #option		KERNFS		# /kern
 #option		NULLFS		# loopback file system
-#option		PORTAL		# ?
+#option		PORTAL		# dynamically created filesystem objects
 #option		PROCFS		# /proc
 #option		UMAPFS		# NULLFS + uid and gid remapping
 #option		UNION		# union file system
@@ -68,6 +71,7 @@ option		FIFO		# FIFOs; RECOMMENDED
 option		GATEWAY		# packet forwarding
 option		INET		# IP + ICMP + TCP + UDP
 option		IPFILTER	# IP firewall
+option		IPFILTER_LOG	# use /dev/ipl to log IPF
 #option		NS		# XNS
 #option		ISO,TPIP	# OSI
 #option		EON		# OSI tunneling over IP
@@ -78,6 +82,7 @@ options		GENERIC
 
 mainbus0 at root
 
+bios0	at mainbus?
 isa0	at mainbus?
 pci0	at mainbus?
 
@@ -127,18 +132,18 @@ scsibus* at aic?
 #scsibus* at bt?
 #ncr*	at pci? bus ? dev ?		# NCR 538XX SCSI controllers
 #scsibus* at ncr?
-#sea0	at isa? iomem 0xc8000 irq 5
+#sea0	at isa? iomem 0xc8000 irq 5	# Seagate ST0[12] SCSI controllers
 #scsibus* at sea?
 #uha0	at isa? port 0x330 irq ? drq ?	# UltraStor [13]4f SCSI controllers
 #uha1	at isa? port 0x334 irq ? drq ?	# UltraStor [13]4f SCSI controllers
 #uha*	at eisa? slot ?			# UltraStor 24f SCSI controllers
 #scsibus* at uha?
-#wds0	at isa? port 0x350 irq 15 drq 6	# WD7000 and TMC-7000 controllers
-#wds1	at isa? port 0x358 irq 11 drq 5
-#scsibus* at wds?
+wds0	at isa? port 0x350 irq 15 drq 6	# WD7000 and TMC-7000 controllers
+wds1	at isa? disable port 0x358 irq 11 drq 5
+scsibus* at wds?
 
 sd*	at scsibus? target ? lun ?	# SCSI disk drives
-#st*	at scsibus? target ? lun ?	# SCSI tape drives
+st*	at scsibus? target ? lun ?	# SCSI tape drives
 #cd*	at scsibus? target ? lun ?	# SCSI CD-ROM drives
 #ch*	at scsibus? target ? lun ?	# SCSI autochangers
 
@@ -155,7 +160,7 @@ fd*	at fdc? drive ?
 #wt0	at isa? port 0x300 irq 5 drq 1	# Archive and Wangtek QIC tape drives
 
 ed0	at isa? port 0x280 iomem 0xd0000 irq 9	# WD/SMC, 3C503, and NE[12]000
-#ed1	at isa? port 0x250 iomem 0xd8000 irq 9	#   ethernet cards
+ed1	at isa? port 0x250 iomem 0xd8000 irq 9	#   ethernet cards
 ed2	at isa? port 0x300 iomem 0xcc000 irq 10
 #eg0	at isa? ...				# 3C505 ethernet cards
 #el0	at isa? port 0x300 irq 9		# 3C501 ethernet cards

@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.11 1996/12/05 13:08:47 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.13 1997/08/08 21:47:06 niklas Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.41 1996/05/10 23:07:37 mark Exp $	*/
 
 /*
@@ -242,11 +242,11 @@ static char *dktypenames[] = {
 static char *fstypenames[] = {
 	"unused",
 	"swap",
-	"Version 6",
-	"Version 7",
-	"System V",
+	"Version6",
+	"Version7",
+	"SystemV",
 	"4.1BSD",
-	"Eighth Edition",
+	"Eighth-Edition",
 	"4.2BSD",
 	"MSDOS",
 	"4.4LFS",
@@ -349,7 +349,8 @@ char	*readdisklabel __P((dev_t, void (*)(struct buf *), struct disklabel *,
 	    struct cpu_disklabel *));
 int	 writedisklabel __P((dev_t, void (*)(struct buf *), struct disklabel *,
 	    struct cpu_disklabel *));
-int	 bounds_check_with_label __P((struct buf *, struct disklabel *, int));
+int	 bounds_check_with_label __P((struct buf *, struct disklabel *,
+	    struct cpu_disklabel *, int));
 #ifdef CD9660
 int iso_disklabelspoof __P((dev_t dev, void (*strat) __P((struct buf *)),
 	struct disklabel *lp));

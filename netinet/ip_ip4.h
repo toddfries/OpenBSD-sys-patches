@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ip4.h,v 1.4 1997/02/26 03:01:05 angelos Exp $	*/
+/*	$OpenBSD: ip_ip4.h,v 1.8 1997/07/14 08:48:47 provos Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -28,28 +28,20 @@
  * Not quite all the functionality of RFC-1853, but the main idea is there.
  */
 
-struct ip4_xdata
-{
-    int32_t ip4_ttl;
-};
-
-struct ip4_xencap
-{
-    int32_t ip4_ttl;
-};
-
 struct ip4stat
 {
-	u_long	ip4s_ipackets;		/* total input packets */
-	u_long	ip4s_opackets;		/* total output packets */
-	u_long	ip4s_hdrops;		/* packet shorter than header shows */
-	u_long	ip4s_badlen;
-	u_long	ip4s_notip4;
-	u_long	ip4s_qfull;
+    u_int32_t	ip4s_ipackets;		/* total input packets */
+    u_int32_t	ip4s_opackets;		/* total output packets */
+    u_int32_t	ip4s_hdrops;		/* packet shorter than header shows */
+    u_int32_t	ip4s_badlen;
+    u_int32_t	ip4s_notip4;
+    u_int32_t	ip4s_qfull;
+    u_int64_t   ip4s_ibytes;
+    u_int64_t   ip4s_obytes;
 };
 
-#define IP4_SAME_TTL 0
-#define IP4_DEFAULT_TTL -1
+#define IP4_DEFAULT_TTL    0
+#define IP4_SAME_TTL	  -1
 
 #ifdef _KERNEL
 struct ip4stat ip4stat;

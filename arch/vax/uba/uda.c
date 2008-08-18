@@ -1,4 +1,5 @@
-/*	$NetBSD: uda.c,v 1.23 1996/10/13 03:35:26 christos Exp $	*/
+/*	$OpenBSD: uda.c,v 1.9 1997/09/12 09:28:14 maja Exp $	*/
+/*	$NetBSD: uda.c,v 1.25 1997/07/04 13:26:02 ragge Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
  * Copyright (c) 1988 Regents of the University of California.
@@ -278,7 +279,7 @@ udaattach(parent, self, aux)
 	ma.ma_ip = &sc->sc_udadev->udaip;
 	ma.ma_sa = ma.ma_sw = &sc->sc_udadev->udasa;
 	ma.ma_ivec = ivec_no;
-	ma.ma_ctlrnr = (ua->ua_iaddr == 0772150 ? 0 : 1);	/* XXX */
+	ma.ma_ctlrnr = (ua->ua_iaddr == 0172150 ? 0 : 1);	/* XXX */
 	ma.ma_adapnr = uh->uh_nr;
 	config_found(&sc->sc_dev, &ma, udaprint);
 }
@@ -402,10 +403,12 @@ udasaerror(usc, doreset)
 	printf("%s: controller error, sa=0%o (%s%s)\n",
 		sc->sc_dev.dv_xname, code, e->desc + 1,
 		*e->desc == 'E' ? " error" : "");
+#if 0 /* XXX we just avoid panic when autoconfig non-existent KFQSA devices */
 	if (doreset) {
 		mscp_requeue(sc->sc_softc);
 /*		(void) udainit(sc);	XXX */
 	}
+#endif
 }
 
 /*

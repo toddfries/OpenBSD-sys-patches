@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vnops.c,v 1.3 1996/04/21 22:28:19 deraadt Exp $	*/
+/*	$OpenBSD: procfs_vnops.c,v 1.8 1997/10/06 20:20:35 deraadt Exp $	*/
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*
@@ -56,8 +56,12 @@
 #include <sys/dirent.h>
 #include <sys/resourcevar.h>
 #include <sys/ptrace.h>
+#include <sys/stat.h>
+
 #include <vm/vm.h>	/* for PAGE_SIZE */
+
 #include <machine/reg.h>
+
 #include <miscfs/procfs/procfs.h>
 
 /*
@@ -213,15 +217,21 @@ procfs_open(v)
 		struct proc *a_p;
 	} */ *ap = v;
 	struct pfsnode *pfs = VTOPFS(ap->a_vp);
+	struct proc *p1 = ap->a_p;	/* tracer */
+	struct proc *p2;		/* traced */
+	int error;
+
+	if ((p2 = PFIND(pfs->pfs_pid)) == 0)
+		return (ENOENT);	/* was ESRCH, jsp */
 
 	switch (pfs->pfs_type) {
 	case Pmem:
-		if (PFIND(pfs->pfs_pid) == 0)
-			return (ENOENT);	/* was ESRCH, jsp */
-
 		if (((pfs->pfs_flags & FWRITE) && (ap->a_mode & O_EXCL)) ||
 		    ((pfs->pfs_flags & O_EXCL) && (ap->a_mode & FWRITE)))
 			return (EBUSY);
+
+		if ((error = procfs_checkioperm(p1, p2)) != 0)
+			return (error);
 
 		if (ap->a_mode & FWRITE)
 			pfs->pfs_flags = ap->a_mode & (FWRITE|O_EXCL);
@@ -423,15 +433,15 @@ procfs_print(v)
 }
 
 int
-procfs_link(v) 
+procfs_link(v)
 	void *v;
 {
 	struct vop_link_args /* {
 		struct vnode *a_dvp;
-		struct vnode *a_vp;  
+		struct vnode *a_vp;
 		struct componentname *a_cnp;
 	} */ *ap = v;
- 
+
 	VOP_ABORTOP(ap->a_dvp, ap->a_cnp);
 	vput(ap->a_dvp);
 	return (EROFS);
@@ -448,7 +458,7 @@ procfs_symlink(v)
 		struct vattr *a_vap;
 		char *a_target;
 	} */ *ap = v;
-  
+
 	VOP_ABORTOP(ap->a_dvp, ap->a_cnp);
 	vput(ap->a_dvp);
 	return (EROFS);
@@ -549,19 +559,18 @@ procfs_getattr(v)
 	TIMEVAL_TO_TIMESPEC(&tv, &vap->va_ctime);
 	vap->va_atime = vap->va_mtime = vap->va_ctime;
 
-	/*
-	 * If the process has exercised some setuid or setgid
-	 * privilege, then rip away read/write permission so
-	 * that only root can gain access.
-	 */
 	switch (pfs->pfs_type) {
 	case Pmem:
 	case Pregs:
 	case Pfpregs:
+		/*
+		 * If the process has exercised some setuid or setgid
+		 * privilege, then rip away read/write permission so
+		 * that only root can gain access.
+		 */
 		if (procp->p_flag & P_SUGID)
-			vap->va_mode &= ~((VREAD|VWRITE)|
-					  ((VREAD|VWRITE)>>3)|
-					  ((VREAD|VWRITE)>>6));
+			vap->va_mode &= ~(S_IRUSR|S_IWUSR);
+		/* FALLTHROUGH */
 	case Pctl:
 	case Pstatus:
 	case Pnote:

@@ -1,3 +1,4 @@
+/*	$OpenBSD: locore.s,v 1.36 1997/10/22 23:37:12 mickey Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -63,13 +64,7 @@
 #include <machine/specialreg.h>
 #include <machine/trap.h>
 
-#include <i386/isa/debug.h>
-
-/* XXX temporary kluge; these should not be here */
-#define	IOM_BEGIN	0x0a0000	/* start of I/O memory "hole" */
-#define	IOM_END		0x100000	/* end of I/O memory "hole" */
-#define	IOM_SIZE	(IOM_END - IOM_BEGIN)
-
+#include <dev/isa/isareg.h>
 
 #define	ALIGN_DATA	.align	2
 #define	ALIGN_TEXT	.align	2,0x90	/* 4-byte boundaries, NOP-filled */
@@ -158,17 +153,9 @@
 
 	.globl	_cpu,_cpu_vendor,_cold,_cnvmem,_extmem,_esym
 	.globl	_boothowto,_bootdev,_atdevbase
-	.globl	_cyloffset,_proc0paddr,_curpcb,_PTDpaddr,_dynamic_gdt
-#if NAPM > 0
-#include <machine/apmvar.h>
-	.globl	_apminfo
-	.globl	_apm_current_gdt_pdesc	/* current GDT pseudo desc. */
-	.globl	_bootstrap_gdt
-_apm_current_gdt_pdesc:	
-	.word	0, 0, 0
-_bootstrap_gdt:	
-	.space SIZEOF_GDTE * BOOTSTRAP_GDT_NUM
-#endif
+	.globl	_proc0paddr,_curpcb,_PTDpaddr,_dynamic_gdt
+	.globl	_bootapiver, _bootargc, _bootargv
+
 _cpu:		.long	0	# are we 386, 386sx, 486, 586 or 686
 _cpu_vendor:	.space	16	# vendor string returned by `cpuid' instruction
 _cold:		.long	1	# cold till we are not
@@ -176,7 +163,9 @@ _esym:		.long	0	# ptr to end of syms
 _cnvmem:	.long	0	# conventional memory size
 _extmem:	.long	0	# extended memory size
 _atdevbase:	.long	0	# location of start of iomem in virtual
-_cyloffset:	.long	0
+_bootapiver:	.long	0	# /boot API version
+_bootargc:	.long	0	# /boot argc
+_bootargv:	.long	0	# /boot argv
 _proc0paddr:	.long	0
 _PTDpaddr:	.long	0	# paddr of PTD, for libkvm
 
@@ -193,7 +182,7 @@ tmpstk:
 start:	movw	$0x1234,0x472			# warm boot
 
 	/*
-	 * Load parameters from stack (howto, bootdev, unit, cyloffset, esym).
+	 * Load parameters from stack (howto, bootdev, unit, bootapiver, esym).
 	 * note: (%esp) is return address of boot
 	 * (If we want to hold onto /boot, it's physical %esp up to _end.)
 	 */
@@ -201,8 +190,6 @@ start:	movw	$0x1234,0x472			# warm boot
 	movl	%eax,RELOC(_boothowto)
 	movl	8(%esp),%eax
 	movl	%eax,RELOC(_bootdev)
-	movl	12(%esp),%eax
-	movl	%eax,RELOC(_cyloffset)
  	movl	16(%esp),%eax
 	testl	%eax,%eax
 	jz	1f
@@ -214,101 +201,12 @@ start:	movw	$0x1234,0x472			# warm boot
 	movl	24(%esp),%eax
 	movl	%eax,RELOC(_cnvmem)
 
-#if NAPM > 0
-
-	/*
-	 * Setup APM BIOS:
-	 *
-	 * APM BIOS initialization should be done from real mode or V86 mode.
-	 *
-	 * (by HOSOKAWA, Tatsumi <hosokawa@mt.cs.keio.ac.jp>)
-	 */
-
-	/*
-	 * Cleanup %fs and %gs:
-	 *
-	 * Some BIOS bootstrap routine store junk value into %fs
-	 * and %gs.
-	 */
-
-	xorl	%eax, %eax
-	movw	%ax, %fs
-	movw	%ax, %gs
-
-	/* get GDT base */
-	sgdt	RELOC(_apm_current_gdt_pdesc)
-
-	/* copy GDT to _bootstrap_gdt */
-	xorl	%ecx, %ecx
-	movw	RELOC(_apm_current_gdt_pdesc), %cx
-	movl	RELOC(_apm_current_gdt_pdesc)+2, %esi
-	lea	RELOC(_bootstrap_gdt), %edi
-	cld
-	rep
-	movsb
-
-	/* setup GDT pseudo descriptor */
-	movw	$(SIZEOF_GDTE*BOOTSTRAP_GDT_NUM), %ax
-	movw	%ax, RELOC(_apm_current_gdt_pdesc)
-	leal	RELOC(_bootstrap_gdt), %eax
-	movl	%eax, RELOC(_apm_current_gdt_pdesc)+2
-
-	/* load new GDTR */
-	lgdt	RELOC(_apm_current_gdt_pdesc)
-
-	/* 
-	 * Copy APM initializer under 1MB boundary:
-	 *
-	 * APM initializer program must switch the CPU to real mode.
-	 * But NetBSD kernel runs above 1MB boundary. So we must 
-	 * copy the initializer code to conventional memory.
-	 */
-	movl	RELOC(_apm_init_image_size), %ecx	/* size */
-	lea	RELOC(_apm_init_image), %esi		/* source */
-	movl	$ APM_OURADDR, %edi			/* destination */
-	cld
-	rep
-	movsb
-
-	/* setup GDT for APM initializer */
-	lea	RELOC(_bootstrap_gdt), %ecx
-	movl	$(APM_OURADDR), %eax	/* use %ax for 15..0 */
-	movl	%eax, %ebx
-	shrl	$16, %ebx		/* use %bl for 23..16 */
-					/* use %bh for 31..24 */
-#define APM_SETUP_GDT(index, attrib) \
-	movl	$(index), %si ; \
-	lea	0(%ecx,%esi,8), %edx ; \
-	movw	$0xffff, (%edx) ; \
-	movw	%ax, 2(%edx) ; \
-	movb	%bl, 4(%edx) ; \
-	movw	$(attrib), 5(%edx) ; \
-	movb	%bh, 7(%edx)
-
-	APM_SETUP_GDT(APM_INIT_CS_INDEX  , CS32_ATTRIB)
-	APM_SETUP_GDT(APM_INIT_DS_INDEX  , DS32_ATTRIB)
-	APM_SETUP_GDT(APM_INIT_CS16_INDEX, CS16_ATTRIB)
-
-	/*
-	 * Call the initializer:
-	 *
-	 * direct intersegment call to conventional memory code
-	 */
-	.byte	0x9a		/* actually, lcall $APM_INIT_CS_SEL, $0 */
-	.long	0
-	.word	APM_INIT_CS_SEL
-
-	movw	%ax,RELOC(_apminfo+APM_DETAIL)
-	movw	%di,RELOC(_apminfo+APM_DETAIL)+2
-	movl	%ebx,RELOC(_apminfo+APM_ENTRY)
-	movw	%cx,RELOC(_apminfo+APM_CODE32)
-	shrl	$16, %ecx
-	movw	%cx,RELOC(_apminfo+APM_CODE16)
-	movw	%dx,RELOC(_apminfo+APM_DATA)
-	movw	%si,RELOC(_apminfo+APM_CODE32_LEN)
-	shrl	$16, %esi
-	movw	%si,RELOC(_apminfo+APM_DATA_LEN)
-#endif /* APM */
+	movl	12(%esp),%eax
+	movl	%eax,RELOC(_bootapiver)
+	movl	28(%esp), %eax
+	movl	%eax, RELOC(_bootargc)
+	movl	32(%esp), %eax
+	movl	%eax, RELOC(_bootargv)
 
 	/* First, reset the PSL. */
 	pushl	$PSL_MBO
@@ -1660,7 +1558,6 @@ ENTRY(idle)
 	sti
 #if NAPM > 0
 	call	_apm_cpu_idle
-	hlt
 	cmpl	$0,_apm_dobusy
 	je	1f
 	call	_apm_cpu_busy
@@ -2261,78 +2158,3 @@ ENTRY(bzero)
 
 	popl	%edi
 	ret
-	
-#if NAPM > 0
-/*
- * int apmcall(int function, struct apmregs *regs):
- * 	call the APM protected mode bios function FUNCTION for BIOS selection
- * 	WHICHBIOS.
- *	Fills in *regs with registers as returned by APM.
- *	returns nonzero if error returned by APM.
- */
-apmstatus:	.long 0
-ENTRY(apmcall)
-	pushl	%ebp
-	movl	%esp,%ebp
-	pushl	%esi
-	pushl	%edi
-	pushl	%ebx
-	
-#if defined(DEBUG) || defined(DIAGNOSTIC)
-	pushl	%ds		
-	pushl	%es
-	pushl	%fs
-	pushl	%gs
-	xorl	%ax,%ax
-/*	movl	%ax,%ds		# can't toss %ds, we need it for apmstatus*/
-	movl	%ax,%es
-	movl	%ax,%fs
-	movl	%ax,%gs
-#endif
-	movb	%cs:8(%ebp),%al
-	movb	$0x53,%ah
-	movl	%cs:12(%ebp),%ebx
-	movw	%cs:APMREG_CX(%ebx),%cx
-	movw	%cs:APMREG_DX(%ebx),%dx
-	movw	%cs:APMREG_BX(%ebx),%bx
-	pushfl
-	cli
-	pushl	%ds
-	lcall	%cs:(_apminfo+APM_CALL)
-	popl	%ds
-	setc	apmstatus
-	popfl
-#if defined(DEBUG) || defined(DIAGNOSTIC)
-	popl	%gs
-	popl	%fs
-	popl	%es
-	popl	%ds		# see above
-#endif
-	movl	12(%ebp),%esi
-	movw	%ax,APMREG_AX(%esi)
-	movw	%bx,APMREG_BX(%esi)
-	movw	%cx,APMREG_CX(%esi)
-	movw	%dx,APMREG_DX(%esi)
-/* todo: do something with %edi? */
-	cmpl	$0,apmstatus
-	jne	1f
-	xorl	%eax,%eax
-1:	
-	popl	%ebx
-	popl	%edi
-	popl	%esi
-	popl	%ebp
-	ret
-		
-_apm_init_image:
-	.globl	_apm_init_image
-
-8:
-#include "lib/apm_init/apm_init.inc"
-9:
-
-_apm_init_image_size:
-	.globl	_apm_init_image_size
-	.long	9b - 8b
-
-#endif /* APM */

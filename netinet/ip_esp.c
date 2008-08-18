@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.3 1997/02/26 20:53:09 deraadt Exp $	*/
+/*	$OpenBSD: ip_esp.c,v 1.12 1997/10/02 02:31:04 deraadt Exp $	*/
 
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
@@ -58,6 +58,7 @@
 #include <netinet/ip_icmp.h>
 #include <netinet/ip_ipsp.h>
 #include <netinet/ip_esp.h>
+#include <sys/syslog.h>
 
 void	esp_input __P((struct mbuf *, int));
 
@@ -68,97 +69,184 @@ void	esp_input __P((struct mbuf *, int));
 void
 esp_input(register struct mbuf *m, int iphlen)
 {
-	struct ip *ipo;
-	struct ifqueue *ifq = NULL;
-	int s;
-	u_long spi;
-	struct tdb *tdbp;
+    struct ifqueue *ifq = NULL;
+    struct expiration *exp;
+    struct ip *ipo, ipn;
+    struct tdb *tdbp;
+    u_int32_t spi;
+    int s;
 	
-	espstat.esps_input++;
+    espstat.esps_input++;
 
-	/*
-	 * Strip IP options, if any.
-	 */
+    /*
+     * Make sure that at least the SPI is in the same mbuf
+     */
 
-	if (iphlen > sizeof (struct ip))
+    ipo = mtod(m, struct ip *);
+    if (m->m_len < iphlen + sizeof(u_int32_t))
+    {
+	if ((m = m_pullup(m, iphlen + sizeof(u_int32_t))) == 0)
 	{
-		ip_stripoptions(m, (struct mbuf *)0);
-		iphlen = sizeof (struct ip);
+#ifdef ENCDEBUG
+            if (encdebug)
+              printf("esp_input(): (possibly too short) packet from %x to %x dropped\n", ipo->ip_src, ipo->ip_dst);
+#endif /* ENCDEBUG */
+	    espstat.esps_hdrops++;
+	    return;
 	}
-	
-	/*
-	 * Make sure that at least the SPI is in the same mbuf
-	 */
 
 	ipo = mtod(m, struct ip *);
-	if (m->m_len < iphlen + ESP_FLENGTH)
-	{
-		if ((m = m_pullup(m, iphlen + ESP_FLENGTH)) == 0)
-		{
-			espstat.esps_hdrops++;
-			return;
-		}
-		ipo = mtod(m, struct ip *);
-	}
-	spi = *((u_long *)((caddr_t)ipo + iphlen));
+    }
 
-	/*
-	 * Find tunnel control block and (indirectly) call the appropriate
-	 * kernel crypto routine. The resulting mbuf chain is a valid
-	 * IP packet ready to go through input processing.
-	 */
+    spi = *((u_int32_t *) ((caddr_t) ipo + iphlen));
 
-	tdbp = gettdb(spi, ipo->ip_dst);
-	if (tdbp == NULL)
-	{
-#ifdef ENCDEBUG
-		if (encdebug)
-		  printf("esp_input: no tdb for spi=%x\n", spi);
-#endif ENCDEBUG
-		m_freem(m);
-		espstat.esps_notdb++;
-		return;
-	}
-	
-	if (tdbp->tdb_xform == NULL)
-	{
-#ifdef ENCDEBUG
-		if (encdebug)
-		  printf("esp_input: no xform for spi=%x\n", spi);
-#endif ENCDEBUG
-		m_freem(m);
-		espstat.esps_noxform++;
-		return;
-	}
+    /*
+     * Find tunnel control block and (indirectly) call the appropriate
+     * kernel crypto routine. The resulting mbuf chain is a valid
+     * IP packet ready to go through input processing.
+     */
 
-	m->m_pkthdr.rcvif = tdbp->tdb_rcvif;
-
-	m = (*(tdbp->tdb_xform->xf_input))(m, tdbp);
-
-	if (m == NULL)
-	{
-		espstat.esps_badkcr++;
-		return;
-	}
-
-	/*
-	 * Interface pointer is already in first mbuf; chop off the 
-	 * `outer' header and reschedule.
-	 */
-
-	ifq = &ipintrq;
-
-	s = splimp();			/* isn't it already? */
-	if (IF_QFULL(ifq))
-	{
-		IF_DROP(ifq);
-		m_freem(m);
-		espstat.esps_qfull++;
-		splx(s);
-		return;
-	}
-	IF_ENQUEUE(ifq, m);
-	schednetisr(NETISR_IP);
-	splx(s);
+    tdbp = gettdb(spi, ipo->ip_dst, IPPROTO_ESP);
+    if (tdbp == NULL)
+    {
+	if (encdebug)
+	  log(LOG_ERR, "esp_input(): could not find SA for ESP packet from %x to %x, spi %08x\n", ipo->ip_src, ipo->ip_dst, ntohl(spi));
+	m_freem(m);
+	espstat.esps_notdb++;
 	return;
+    }
+	
+    if (tdbp->tdb_flags & TDBF_INVALID)
+    {
+	if (encdebug)
+          log(LOG_ALERT, "esp_input(): attempted to use invalid ESP SA %08x, packet %x->%x\n", ntohl(spi), ipo->ip_src, ipo->ip_dst);
+	m_freem(m);
+	espstat.esps_invalid++;
+	return;
+    }
+
+    if (tdbp->tdb_xform == NULL)
+    {
+	if (encdebug)
+          log(LOG_ALERT, "esp_input(): attempted to use uninitialized ESP SA %08x, packet from %x to %x\n", ntohl(spi), ipo->ip_src, ipo->ip_dst);
+	m_freem(m);
+	espstat.esps_noxform++;
+	return;
+    }
+
+    m->m_pkthdr.rcvif = &enc_softc;
+
+    /* Register first use, setup expiration timer */
+    if (tdbp->tdb_first_use == 0)
+    {
+	tdbp->tdb_first_use = time.tv_sec;
+
+	if (tdbp->tdb_flags & TDBF_FIRSTUSE)
+	{
+	    exp = get_expiration();
+	    if (exp == (struct expiration *) NULL)
+	    {
+		if (encdebug)
+		  log(LOG_WARNING,
+		      "esp_input(): out of memory for expiration timer\n");
+		espstat.esps_hdrops++;
+		m_freem(m);
+		return;
+	    }
+
+	    exp->exp_dst.s_addr = tdbp->tdb_dst.s_addr;
+	    exp->exp_spi = tdbp->tdb_spi;
+	    exp->exp_sproto = tdbp->tdb_sproto;
+	    exp->exp_timeout = tdbp->tdb_first_use + tdbp->tdb_exp_first_use;
+
+	    put_expiration(exp);
+	}
+
+	if ((tdbp->tdb_flags & TDBF_SOFT_FIRSTUSE) &&
+	    (tdbp->tdb_soft_first_use <= tdbp->tdb_exp_first_use))
+	{
+	    exp = get_expiration();
+	    if (exp == (struct expiration *) NULL)
+	    {
+		if (encdebug)
+		  log(LOG_WARNING,
+		      "esp_input(): out of memory for expiration timer\n");
+		espstat.esps_hdrops++;
+		m_freem(m);
+		return;
+	    }
+
+	    exp->exp_dst.s_addr = tdbp->tdb_dst.s_addr;
+	    exp->exp_spi = tdbp->tdb_spi;
+	    exp->exp_sproto = tdbp->tdb_sproto;
+	    exp->exp_timeout = tdbp->tdb_first_use + tdbp->tdb_soft_first_use;
+
+	    put_expiration(exp);
+	}
+    }
+    
+    ipn = *ipo;
+
+    m = (*(tdbp->tdb_xform->xf_input))(m, tdbp);
+
+    if (m == NULL)
+    {
+	if (encdebug)
+	  log(LOG_ALERT, "esp_input(): processing failed for ESP packet from %x to %x, spi %08x\n", ipn.ip_src, ipn.ip_dst, ntohl(spi));
+	espstat.esps_badkcr++;
+	return;
+    }
+
+    ipo = mtod(m, struct ip *);
+    if (ipo->ip_p == IPPROTO_IPIP)	/* IP-in-IP encapsulation */
+    {
+	/* Encapsulating SPI */
+	if (tdbp->tdb_osrc.s_addr && tdbp->tdb_odst.s_addr)
+	{
+	    if (tdbp->tdb_flags & TDBF_UNIQUE)
+	      if ((ipn.ip_src.s_addr != ipo->ip_src.s_addr) ||
+		  (ipn.ip_dst.s_addr != ipo->ip_dst.s_addr))
+	      {
+		  if (encdebug)
+		    log(LOG_ALERT, "esp_input(): ESP-tunnel with different internal addresses %x/%x, SA %08x/%x\n", ipo->ip_src, ipo->ip_dst, tdbp->tdb_spi, tdbp->tdb_dst);
+		  m_freem(m);
+		  espstat.esps_hdrops++;
+		  return;
+	      }
+	}
+	else				/* So we're paranoid */
+	{
+	    if (encdebug)
+	      log(LOG_ALERT, "esp_input(): ESP-tunnel used when expecting ESP-transport, SA %08x/%x\n", tdbp->tdb_spi, tdbp->tdb_dst);
+	    m_freem(m);
+	    espstat.esps_hdrops++;
+	    return;
+	}
+    }
+    
+    /*
+     * Interface pointer is already in first mbuf; chop off the 
+     * `outer' header and reschedule.
+     */
+
+    ifq = &ipintrq;
+
+    s = splimp();			/* isn't it already? */
+    if (IF_QFULL(ifq))
+    {
+	IF_DROP(ifq);
+	m_freem(m);
+	espstat.esps_qfull++;
+	splx(s);
+#ifdef ENCDEBUG
+        if (encdebug)
+          printf("esp_input(): dropped packet because of full IP queue\n");
+#endif /* ENCDEBUG */
+	return;
+    }
+
+    IF_ENQUEUE(ifq, m);
+    schednetisr(NETISR_IP);
+    splx(s);
+    return;
 }

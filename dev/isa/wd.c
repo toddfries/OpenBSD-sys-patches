@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.25 1997/04/18 06:12:23 niklas Exp $	*/
+/*	$OpenBSD: wd.c,v 1.31 1997/10/18 21:09:57 deraadt Exp $	*/
 /*	$NetBSD: wd.c,v 1.150 1996/05/12 23:54:03 mycroft Exp $ */
 
 /*
@@ -104,7 +104,7 @@ bdev_decl(wd);
 
 void	wdfinish	__P((struct wd_softc *, struct buf *));
 int	wdsetctlr	__P((struct wd_link *));
-#if !defined(amiga) && !defined(alpha)
+#ifdef DKBAD
 static void bad144intern __P((struct wd_softc *));
 #endif
 int	wdlock		__P((struct wd_link *));
@@ -252,6 +252,7 @@ wdstrategy(bp)
 	 */
 	if (WDPART(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, wd->sc_dk.dk_label,
+	    wd->sc_dk.dk_cpulabel,
 	    (d_link->sc_flags & (WDF_WLABEL|WDF_LABELLING)) != 0) <= 0)
 		goto done;
     
@@ -282,7 +283,7 @@ wdstart(vp)
 	struct wd_link *d_link = wd->d_link;
 	struct wdc_link *ctlr_link = d_link->ctlr_link;
 	struct wdc_xfer *xfer;
-	u_long p_offset; 
+	u_int32_t p_offset; 
 
 	while (d_link->openings > 0) {
 
@@ -566,13 +567,13 @@ wdgetdisklabel(dev, wd)
 		    wd->sc_dk.dk_cpulabel);
 	}
 	if (errstring) {
-		printf("%s: %s\n", wd->sc_dev.dv_xname, errstring);
+		/*printf("%s: %s\n", wd->sc_dev.dv_xname, errstring);*/
 		return;
 	}
 
 	if (d_link->sc_state > GEOMETRY)
 		d_link->sc_state = GEOMETRY;
-#if !defined(amiga) && !defined(alpha)
+#ifdef DKBAD
 	if ((lp->d_flags & D_BADSECT) != 0)
 		bad144intern(wd);
 #endif
@@ -613,9 +614,7 @@ wdioctl(dev, xfer, addr, flag, p)
 {
 	struct wd_softc *wd = wd_cd.cd_devs[WDUNIT(dev)];
 	struct wd_link *d_link = wd->d_link;
-#ifndef amiga
 	int error;
-#endif
 
 	WDDEBUG_PRINT(("wdioctl\n"));
 
@@ -623,11 +622,11 @@ wdioctl(dev, xfer, addr, flag, p)
 		return EIO;
 
 	switch (xfer) {
-#if !defined(amiga) && !defined(alpha)
+#ifdef DKBAD
 	case DIOCSBAD:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
-		wd->sc_dk.dk_cpulabel->bad = *(struct dkbad *)addr;
+		DKBAD(wd->sc_dk.dk_cpulabel) = *(struct dkbad *)addr;
 		wd->sc_dk.dk_label->d_flags |= D_BADSECT;
 		bad144intern(wd);
 		return 0;
@@ -643,7 +642,6 @@ wdioctl(dev, xfer, addr, flag, p)
 		    &wd->sc_dk.dk_label->d_partitions[WDPART(dev)];
 		return 0;
 	
-#ifndef amiga
 	case DIOCWDINFO:
 	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0)
@@ -704,7 +702,6 @@ wdioctl(dev, xfer, addr, flag, p)
 		fop->df_reg[1] = wdc->sc_error;
 		return error;
 	}
-#endif
 #endif
 	
 	default:
@@ -823,10 +820,10 @@ wddump(dev, blkno, va, size)
    
 	while (nblks > 0) {
 		daddr_t xlt_blkno = blkno;
-		long cylin, head, sector;
+		int cylin, head, sector;
 
 		if ((lp->d_flags & D_BADSECT) != 0) {
-			long blkdiff;
+			int blkdiff;
 			int i;
 
 			for (i = 0; (blkdiff = d_link->sc_badsect[i]) != -1; i++) {
@@ -908,7 +905,7 @@ wddump(dev, blkno, va, size)
 }
 #endif /* __BDEVSW_DUMP_NEW_TYPE */
 
-#if !defined(amiga) && !defined(alpha)
+#ifdef DKBAD
 /*
  * Internalize the bad sector table.
  */
@@ -916,7 +913,7 @@ void
 bad144intern(wd)
 	struct wd_softc *wd;
 {
-	struct dkbad *bt = &wd->sc_dk.dk_cpulabel->bad;
+	struct dkbad *bt = &DKBAD(wd->sc_dk.dk_cpulabel);
 	struct disklabel *lp = wd->sc_dk.dk_label;
 	struct wd_link *d_link = wd->d_link;
 	int i = 0;

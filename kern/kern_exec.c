@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.9 1997/03/29 20:10:01 tholo Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.14 1997/10/06 20:19:51 deraadt Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -124,7 +124,8 @@ check_exec(p, epp)
 		error = EACCES;
 		goto bad1;
 	}
-	if ((vp->v_mount->mnt_flag & MNT_NOSUID) || (p->p_flag & P_TRACED))
+	if ((vp->v_mount->mnt_flag & MNT_NOSUID) ||
+	    (p->p_flag & P_TRACED) || p->p_fd->fd_refcnt > 1)
 		epp->ep_vap->va_mode &= ~(VSUID | VSGID);
 
 	/* check access.  for root we have to see if any exec bit on */
@@ -478,6 +479,20 @@ sys_execve(p, v, retval)
 		p->p_flag &= ~P_SUGID;
 	p->p_cred->p_svuid = p->p_ucred->cr_uid;
 	p->p_cred->p_svgid = p->p_ucred->cr_gid;
+
+	if (p->p_flag & P_SUGIDEXEC) {
+		int i, s = splclock();
+
+		untimeout(realitexpire, (void *)p);
+		timerclear(&p->p_realtimer.it_interval);
+		timerclear(&p->p_realtimer.it_value);
+		for (i = 0; i < sizeof(p->p_stats->p_timer) /
+		    sizeof(p->p_stats->p_timer[0]); i++) {
+			timerclear(&p->p_stats->p_timer[i].it_interval);
+			timerclear(&p->p_stats->p_timer[i].it_value);
+		}
+		splx(s);
+	}
 
 	kmem_free_wakeup(exec_map, (vm_offset_t) argp, NCARGS);
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: disksubr.c,v 1.13 1996/10/13 03:39:49 christos Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.14 1997/01/15 00:55:43 jonathan Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988 Regents of the University of California.
@@ -46,7 +46,7 @@
 #define	b_cylin	b_resid
 
 #ifdef COMPAT_ULTRIX
-#include "../../stand/dec_boot.h"
+#include <pmax/stand/dec_boot.h>
 
 extern char *
 compat_label __P((dev_t dev, void (*strat) __P((struct buf *bp)),
@@ -278,7 +278,13 @@ writedisklabel(dev, strat, lp, osdep)
 			goto done;
 		}
 	}
-	error = ESRCH;
+	/* Write it in the regular place. */
+	*(struct disklabel *)bp->b_data = *lp;
+	bp->b_flags = B_BUSY | B_WRITE;
+	(*strat)(bp);
+	error = biowait(bp);
+	goto done;
+
 done:
 	brelse(bp);
 	return (error);
@@ -306,9 +312,10 @@ dk_establish(dk, dev)
  * if needed, and signal errors or early completion.
  */
 int
-bounds_check_with_label(bp, lp, wlabel)
+bounds_check_with_label(bp, lp, osdep, wlabel)
 	struct buf *bp;
 	struct disklabel *lp;
+	struct cpu_disklabel *osdep;
 	int wlabel;
 {
 #define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.11 1997/02/12 14:57:02 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.15 1997/07/24 05:57:53 niklas Exp $	*/
 /*	$NetBSD: trap.c,v 1.19 1996/11/27 01:28:30 cgd Exp $	*/
 
 /*
@@ -40,6 +40,10 @@
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
+
+#ifdef DDB
+#include <machine/db_machdep.h>
+#endif
 
 #ifdef COMPAT_OSF1
 #include <compat/osf1/osf1_syscall.h>
@@ -118,6 +122,16 @@ userret(p, pc, oticks)
 	curpriority = p->p_priority;
 }
 
+char	*trap_type[] = {
+	"interrupt",			/*  0 ALPHA_KENTRY_INT */
+	"arithmetic trap",		/*  1 ALPHA_KENTRY_ARITH */
+	"memory management fault",	/*  2 ALPHA_KENTRY_MM */
+	"instruction fault",		/*  3 ALPHA_KENTRY_IF */
+	"unaligned access fault",	/*  4 ALPHA_KENTRY_UNA */
+	"system call",			/*  5 ALPHA_KENTRY_SYS */
+};
+int	trap_types = sizeof trap_type / sizeof trap_type[0];
+
 /*
  * Trap is called from locore to handle most types of processor traps.
  * System calls are broken out for efficiency and ASTs are broken out
@@ -143,6 +157,9 @@ trap(a0, a1, a2, entry, framep)
 	v = 0;
 	ucode = 0;
 	user = (framep->tf_regs[FRAME_PS] & ALPHA_PSL_USERMODE) != 0;
+#ifdef DDB
+	framep->tf_regs[FRAME_SP] = (long)framep + FRAME_SIZE*8;
+#endif
 	if (user)  {
 		sticks = p->p_sticks;
 		p->p_md.md_tf = framep;
@@ -183,7 +200,7 @@ trap(a0, a1, a2, entry, framep)
 		 * user are properly aligned, and so if the kernel
 		 * does cause an unaligned access it's a kernel bug.
 		 */
-		goto dopanic;
+		goto we_re_toast;
 
 	case ALPHA_KENTRY_ARITH:
 		/* 
@@ -200,15 +217,15 @@ sigfpe:			i = SIGFPE;
 		}
 
 		/* Always fatal in kernel.  Should never happen. */
-		goto dopanic;
+		goto we_re_toast;
 
 	case ALPHA_KENTRY_IF:
 		/*
 		 * These are always fatal in kernel, and should never
-		 * happen.
+		 * happen, unless they're breakpoints of course.
 		 */
 		if (!user)
-			goto dopanic;
+			goto we_re_toast;
 
 		switch (a0) {
 		case ALPHA_IF_CODE_GENTRAP:
@@ -216,16 +233,16 @@ sigfpe:			i = SIGFPE;
 				goto sigfpe;
 		case ALPHA_IF_CODE_BPT:
 		case ALPHA_IF_CODE_BUGCHK:
-			/* XXX is a0 trap type or address? */
-			v = (caddr_t)a0;
+			/* XXX what is the address?  Guess on a1 for now */
+			v = (caddr_t)a1;
 			ucode = 0;		/* XXX determine */
 			i = SIGTRAP;
 			typ = TRAP_BRKPT;
 			break;
 
 		case ALPHA_IF_CODE_OPDEC:
-			/* XXX is a0 trap type or address? */
-			v = (caddr_t)a0;
+			/* XXX what is the address?  Guess on a1 for now */
+			v = (caddr_t)a1;
 			ucode = 0;		/* XXX determine */
 #ifdef NEW_PMAP
 {
@@ -248,7 +265,7 @@ panic("foo");
 			if (fpcurproc == p) {
 				printf("trap: fp disabled for fpcurproc == %p",
 				    p);
-				goto dopanic;
+				goto we_re_toast;
 			}
 	
 			alpha_pal_wrfen(1);
@@ -263,7 +280,7 @@ panic("foo");
 
 		default:
 			printf("trap: unknown IF type 0x%lx\n", a0);
-			goto dopanic;
+			goto we_re_toast;
 		}
 		break;
 
@@ -356,7 +373,7 @@ panic("foo");
 				break;
 #ifdef DIAGNOSTIC
 			default:		/* XXX gcc -Wuninitialized */
-				goto dopanic;
+				goto we_re_toast;
 #endif
 			}
 	
@@ -406,7 +423,7 @@ panic("foo");
 					p->p_addr->u_pcb.pcb_onfault = 0;
 					goto out;
 				}
-				goto dopanic;
+				goto we_re_toast;
 			}
 			v = (caddr_t)a0;
 			ucode = ftype;
@@ -417,11 +434,16 @@ panic("foo");
 
 		default:
 			printf("trap: unknown MMCSR value 0x%lx\n", a1);
-			goto dopanic;
+			goto we_re_toast;
 		}
 		break;
 
 	default:
+	we_re_toast:
+#ifdef DDB
+		if (kdb_trap(entry, a0, framep))
+			return;
+#endif
 		goto dopanic;
 	}
 
@@ -433,31 +455,10 @@ out:
 
 dopanic:
 	{
-		const char *entryname;
+		const char *entryname = "???";
 
-		switch (entry) {
-		case ALPHA_KENTRY_INT:
-			entryname = "interrupt";
-			break;
-		case ALPHA_KENTRY_ARITH:
-			entryname = "arithmetic trap";
-			break;
-		case ALPHA_KENTRY_MM:
-			entryname = "memory management fault";
-			break;
-		case ALPHA_KENTRY_IF:
-			entryname = "instruction fault";
-			break;
-		case ALPHA_KENTRY_UNA:
-			entryname = "unaligned access fault";
-			break;
-		case ALPHA_KENTRY_SYS:
-			entryname = "system call";
-			break;
-		default:
-			entryname = "???";
-			break;
-		}
+		if (entry > 0 && entry < trap_types)
+			entryname = trap_type[entry];
 
 		printf("\n");
 		printf("fatal %s trap:\n", user ? "user" : "kernel");

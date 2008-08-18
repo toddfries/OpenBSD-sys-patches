@@ -1,4 +1,4 @@
-/*	$OpenBSD: pctr.h,v 1.5 1996/10/20 15:27:48 dm Exp $	*/
+/*	$OpenBSD: pctr.h,v 1.8 1997/09/16 07:52:35 deraadt Exp $	*/
 
 /*
  * Pentium performance counter driver for OpenBSD.
@@ -13,15 +13,17 @@
 #ifndef _I386_PCTR_H_
 #define _I386_PCTR_H_
 
+#include <sys/ioccom.h>
+
 typedef u_quad_t pctrval;
 
 #define PCTR_NUM 2
 
 struct pctrst {
-  u_int pctr_fn[PCTR_NUM];    /* Current settings of hardware counters */
-  pctrval pctr_tsc;           /* Free-running 64-bit cycle counter */
-  pctrval pctr_hwc[PCTR_NUM]; /* Values of the hardware counters */
-  pctrval pctr_idl;           /* Iterations of the idle loop */
+	u_int pctr_fn[PCTR_NUM];	/* Current settings of hardware counters */
+	pctrval pctr_tsc;		/* Free-running 64-bit cycle counter */
+	pctrval pctr_hwc[PCTR_NUM];	/* Values of the hardware counters */
+	pctrval pctr_idl;		/* Iterations of the idle loop */
 };
 
 /* Bit values in fn fields and PIOCS ioctl's */
@@ -52,7 +54,6 @@ struct pctrst {
 
 #define _PATH_PCTR "/dev/pctr"
 
-
 #define __cpuid()				\
 ({						\
   pctrval id;					\
@@ -74,7 +75,11 @@ struct pctrst {
 		    "\tje 1f\n"			\
 		    "\tmovl $1,%%eax\n"		\
 		    "\tcpuid\n"			\
+		    "\tjmp 2f\n"		\
 		    "1:\t"			\
+		    "\txorl %%eax,%%eax\n"	\
+		    "\txorl %%edx,%%edx\n"	\
+		    "2:\t"			\
 		    : "=A" (id) : "i" (PSL_ID)	\
 		    : "edx", "ecx", "ebx");	\
   id;						\
@@ -107,7 +112,7 @@ struct pctrst {
 
 #ifdef _KERNEL
 
-#define CR4_TSD 0x040         /* Time stamp disable */
+#define CR4_TSD 0x004         /* Time stamp disable */
 #define CR4_PCE 0x100         /* Performance counter enable */
 
 #define MSR_TSC 0x10          /* MSR for TSC */

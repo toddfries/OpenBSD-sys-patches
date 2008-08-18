@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.22 1997/04/19 18:40:02 pefo Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.27 1997/10/28 10:52:17 niklas Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -111,7 +111,7 @@ struct	filedesc0 filedesc0;
 struct	plimit limit0;
 struct	vmspace vmspace0;
 struct	proc *curproc = &proc0;
-struct	proc *initproc, *pageproc;
+struct	proc *initproc;
 
 int	cmask = CMASK;
 extern	struct user *proc0paddr;
@@ -334,6 +334,14 @@ main(framep)
 	roundrobin(NULL);
 	schedcpu(NULL);
 
+#ifdef i386
+	/* XXX This is only a transient solution */
+	{
+		extern dkcsumattach __P((void));
+		dkcsumattach();
+	}
+#endif
+
 	/* Mount the root file system. */
 	if ((*mountroot)())
 		panic("cannot mount root");
@@ -407,6 +415,7 @@ main(framep)
 	microtime(&rtv);
 	srandom((u_long)(rtv.tv_sec ^ rtv.tv_usec));
 
+	randompid = 1;
 	/* The scheduler is an infinite loop. */
 	scheduler();
 	/* NOTREACHED */
@@ -567,7 +576,6 @@ start_pagedaemon(p)
 	/*
 	 * Now in process 2.
 	 */
-	pageproc = p;
 	p->p_flag |= P_INMEM | P_SYSTEM;	/* XXX */
 	bcopy("pagedaemon", curproc->p_comm, sizeof ("pagedaemon"));
 	vm_pageout();
@@ -582,7 +590,6 @@ start_update(p)
 	/*
 	 * Now in process 3.
 	 */
-	pageproc = p;
 	p->p_flag |= P_INMEM | P_SYSTEM;	/* XXX */
 	bcopy("update", curproc->p_comm, sizeof ("update"));
 	vn_update();

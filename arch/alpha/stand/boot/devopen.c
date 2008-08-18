@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.4 1997/05/05 06:01:51 millert Exp $	*/
+/*	$OpenBSD: devopen.c,v 1.6 1997/10/27 16:09:53 millert Exp $	*/
 /*	$NetBSD: devopen.c,v 1.1 1995/11/23 02:39:37 cgd Exp $	*/
 
 /*-
@@ -66,7 +66,7 @@ devopen(f, fname, file)
 		ctlr = c - '0';
 		/* skip the '/' */
 		if (*++cp != '/')
-			return (ENXIO);
+			goto defdev;
 		cp++;
 		while ((c = *cp) != '\0') {
 			if (c == '/')
@@ -81,7 +81,7 @@ devopen(f, fname, file)
 					c = *++cp;
 				}
 				if (c != '/')
-					return (ENXIO);
+					goto defdev;
 				break;
 			}
 			if (ncp < namebuf + sizeof(namebuf) - 1)
@@ -123,10 +123,14 @@ devopen(f, fname, file)
 			}
 		}
 		if (c != ')')
-			return (ENXIO);
+			goto defdev;
 		cp++;
 		*ncp = '\0';
 	} else {
+defdev:
+		/* No valid device specification */
+		cp = (char *)fname;
+		ncp = namebuf;
 		dp = devsw;
 		ctlr = unit = part = 0;
 		goto fnd;

@@ -1,5 +1,5 @@
-/*	$OpenBSD: swapgeneric.c,v 1.8 1997/02/03 11:37:37 deraadt Exp $	*/
-/*	$NetBSD: swapgeneric.c,v 1.26 1996/10/13 03:06:40 christos Exp $	*/
+/*	$OpenBSD: swapgeneric.c,v 1.10 1997/09/09 11:08:08 niklas Exp $	*/
+/*	$NetBSD: swapgeneric.c,v 1.27 1997/01/26 22:58:32 rat Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986 Regents of the University of California.
@@ -160,7 +160,7 @@ setconf()
 	int unit, swaponroot;
 	char name[128];
 	char *cp;
-	
+
 	swaponroot = 0;
 
 	if (rootdev != NODEV)

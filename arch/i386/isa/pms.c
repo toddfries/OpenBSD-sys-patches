@@ -1,4 +1,4 @@
-/*	$OpenBSD: pms.c,v 1.12 1996/10/13 04:25:12 downsj Exp $	*/
+/*	$OpenBSD: pms.c,v 1.17 1997/08/29 22:49:06 kstailey Exp $	*/
 /*	$NetBSD: pms.c,v 1.29 1996/05/12 23:12:42 mycroft Exp $	*/
 
 /*-
@@ -222,7 +222,11 @@ pmsattach(parent, self, aux)
 	int irq = self->dv_cfdata->cf_loc[0];
 	isa_chipset_tag_t ic = aux;			/* XXX */
 
-	printf(" irq %d\n", irq);
+	printf(" irq %d", irq);
+#ifdef INTELLIMOUSE
+	printf(": IntelliMouse");
+#endif
+	printf("\n");
 
 	/* Other initialization was done by pmsprobe. */
 	sc->sc_state = 0;
@@ -268,6 +272,22 @@ pmsopen(dev, flag, mode, p)
 	pms_dev_cmd(PMS_SET_SAMPLE);
 	pms_dev_cmd(100);	/* 100 samples/sec */
 	pms_dev_cmd(PMS_SET_STREAM);
+#endif
+#ifdef INTELLIMOUSE
+	/* The Micro$oft IntelliMouse has a wheel that you can turn or
+	 * click stuck in between the left and right buttons.
+	 * By default this mouse acts like a two-button PS/2 mouse.
+	 * If you set the sampling rate to 200, then 100, then 80
+	 * it changes to a 4-byte-per-packet format and the wheel
+	 * acts like a middle button if you click it.  Turing the
+	 * wheel modifies the fourth byte in the packet.
+	 */
+	pms_dev_cmd(PMS_SET_SAMPLE);
+	pms_dev_cmd(200);	/* 200 samples/sec */
+	pms_dev_cmd(PMS_SET_SAMPLE);
+	pms_dev_cmd(100);	/* 100 samples/sec */
+	pms_dev_cmd(PMS_SET_SAMPLE);
+	pms_dev_cmd(80);	/* 80 samples/sec */
 #endif
 	pms_pit_cmd(PMS_INT_ENABLE);
 
@@ -446,12 +466,16 @@ pmsintr(arg)
 		case 2:
 			dy = inb(PMS_DATA);
 			dy = (dy == -128) ? -127 : dy;
+#ifdef INTELLIMOUSE
+			++state;
+#else
 			state = 0;
-
+#endif
 			buttons = ((buttons & PS2LBUTMASK) << 2) |
 			  	((buttons & (PS2RBUTMASK | PS2MBUTMASK)) >> 1);
 			changed = ((buttons ^ sc->sc_status) & BUTSTATMASK) << 3;
-			sc->sc_status = buttons | (sc->sc_status & ~BUTSTATMASK) | changed;
+			sc->sc_status = buttons |
+			    (sc->sc_status & ~BUTSTATMASK) | changed;
 
 			if (dx || dy || changed) {
 				/* Update accumulated movements. */
@@ -473,6 +497,12 @@ pmsintr(arg)
 			}
 
 			break;
+#ifdef INTELLIMOUSE		/* discard fourth "wheel" byte */
+		case 3:
+			state = 0;
+			inb(PMS_DATA);
+			break;
+#endif
 		}
 	} else {
 		/* read data port */
@@ -494,12 +524,17 @@ pmsintr(arg)
 		case 2:
 			dy = buffer[0];
 			dy = (dy == -128) ? -127 : dy;
+#ifdef INTELLIMOUSE
+			++state;
+#else
 			state = 0;
+#endif
 
 			buttons = ((buttons & PS2LBUTMASK) << 2) |
 			  	((buttons & (PS2RBUTMASK | PS2MBUTMASK)) >> 1);
 			changed = ((buttons ^ sc->sc_status) & BUTSTATMASK) << 3;
-			sc->sc_status = buttons | (sc->sc_status & ~BUTSTATMASK) | changed;
+			sc->sc_status = buttons |
+			    (sc->sc_status & ~BUTSTATMASK) | changed;
 
 			if (dx || dy || changed) {
 				/* Update accumulated movements. */
@@ -507,6 +542,11 @@ pmsintr(arg)
 				sc->sc_y += dy;
 			}
 			break;
+#ifdef INTELLIMOUSE		/* discard fourth "wheel" byte */
+		case 3:
+			state = 0;
+			return 0; /* XXX 0? -1? */
+#endif
 		}
 
 		/* add raw data to the queue. */

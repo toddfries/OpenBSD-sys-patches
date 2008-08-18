@@ -1,5 +1,5 @@
-/*	$OpenBSD: autoconf.c,v 1.9 1997/01/16 09:23:15 niklas Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.45 1996/12/23 09:15:39 veego Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.11 1997/10/07 10:58:42 niklas Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.56 1997/08/31 16:33:13 is Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -71,7 +71,6 @@ configure()
 
 	if (config_rootfound("mainbus", "mainbus") == NULL)
 		panic("no mainbus found");
-	splx(s);
 #ifdef DEBUG_KERNEL_START
 	printf("survived autoconf, going to enable interrupts\n");
 #endif
@@ -88,6 +87,7 @@ configure()
 		/* also enable hardware aided software interrupts */
 		custom.intena = INTF_SETCLR | INTF_SOFTINT;
 	}
+	splx(s);
 #ifdef DEBUG_KERNEL_START
 	printf("survived interrupt enable\n");
 #endif
@@ -115,6 +115,12 @@ configure()
 	swapconf();
 #ifdef DEBUG_KERNEL_START
 	printf("survived swap device search\n");
+#endif
+	dumpconf();
+	if (dumplo < 0)
+		dumplo = 0;
+#ifdef DEBUG_KERNEL_START
+	printf("survived dump device search\n");
 #endif
 	cold = 0;
 }
@@ -247,18 +253,22 @@ mbattach(pdp, dp, auxp)
 {
 	printf("\n");
 	config_found(dp, "clock", simple_devprint);
+	if (is_a3000() || is_a4000()) {
+		config_found(dp, "a34kbbc", simple_devprint);
+	} else if (
+#ifdef DRACO
+	    !is_draco() &&
+#endif
+	    !is_a1200()) {
+
+		config_found(dp, "a2kbbc", simple_devprint);
+	}
 #ifdef DRACO
 	if (is_draco()) {
+		config_found(dp, "drbbc", simple_devprint);
 		config_found(dp, "kbd", simple_devprint);
 		config_found(dp, "drsc", simple_devprint);
-		config_found(dp, "drcom", simple_devprint);
-		config_found(dp, "drcom", simple_devprint);
-		/*
-		 * XXX -- missing here:
-		 * SuperIO chip serial, parallel, floppy
-		 * or maybe just make that into a pseudo
-		 * ISA bus.
-		 */
+		config_found(dp, "drsupio", simple_devprint);
 	} else 
 #endif
 	{
@@ -277,6 +287,11 @@ mbattach(pdp, dp, auxp)
 	config_found(dp, "zbus", simple_devprint);
 	if (is_a3000())
 		config_found(dp, "ahsc", simple_devprint);
+#ifdef DRACO
+	if (!is_draco())
+#endif
+		config_found(dp, "aucc", simple_devprint);
+
 }
 
 int
@@ -296,7 +311,7 @@ swapconf()
 	u_int maj;
 	int nb;
 
-	for (swp = swdevt; swp->sw_dev > 0; swp++) {
+	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
 		maj = major(swp->sw_dev);
 
 		if (maj > nblkdev)
@@ -312,10 +327,6 @@ swapconf()
 		}
 		swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
 	}
-	dumpconf();
-	if (dumplo < 0)
-		dumplo = 0;
-
 }
 
 #define	DOSWAP			/* change swdevt and dumpdev */

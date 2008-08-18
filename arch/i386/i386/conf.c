@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.32 1997/04/03 21:01:07 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.41 1997/10/28 10:19:12 niklas Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -33,12 +33,16 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
+#include <sys/device.h>
+#include <sys/disklabel.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
-#include <sys/conf.h>
 #include <sys/vnode.h>
 
+#include <machine/conf.h>
+
 #include "wdc.h"
+#include "wd.h"
 bdev_decl(wd);
 bdev_decl(sw);
 #include "fdc.h"
@@ -64,7 +68,7 @@ cdev_decl(rd);
 
 struct bdevsw	bdevsw[] =
 {
-	bdev_disk_init(NWDC,wd),	/* 0: ST506/ESDI/IDE disk */
+	bdev_disk_init(NWD,wd),		/* 0: ST506/ESDI/IDE disk */
 	bdev_swap_init(1,sw),		/* 1: swap pseudo-device */
 	bdev_disk_init(NFD,fd),		/* 2: floppy diskette */
 	bdev_tape_init(NWT,wt),		/* 3: QIC-02/QIC-36 tape */
@@ -158,11 +162,9 @@ cdev_decl(mcd);
 cdev_decl(audio);
 cdev_decl(svr4_net);
 #include "joy.h"
-cdev_decl(joy);
 #include "apm.h"
-cdev_decl(apm);
 #include "pctr.h"
-cdev_decl(pctr);
+#include "bios.h"
 
 cdev_decl(ipl);
 #ifdef IPFILTER
@@ -185,7 +187,7 @@ struct cdevsw	cdevsw[] =
 	cdev_cn_init(1,cn),		/* 0: virtual console */
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
-	cdev_disk_init(NWDC,wd),	/* 3: ST506/ESDI/IDE disk */
+	cdev_disk_init(NWD,wd),		/* 3: ST506/ESDI/IDE disk */
 	cdev_swap_init(1,sw),		/* 4: /dev/drum (swap pseudo-device) */
 	cdev_tty_init(NPTY,pts),	/* 5: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 6: pseudo-tty master */
@@ -236,8 +238,9 @@ struct cdevsw	cdevsw[] =
 #endif
 	cdev_gen_ipf(NIPF,ipl),         /* 44: ip filtering */
 	cdev_random_init(1,random),	/* 45: random data source */
-	cdev_uk_init(NPCTR,pctr),	/* 46: pentium performance counters */
+	cdev_ocis_init(NPCTR,pctr),	/* 46: pentium performance counters */
 	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
+	cdev_ocis_init(NBIOS,bios),	/* 48: onboard BIOS PROM */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -349,7 +352,7 @@ chrtoblk(dev)
 }
 
 /*
- * Convert a character device number to a block device number.
+ * Convert a block device number to a character device number.
  */
 dev_t
 blktochr(dev)
@@ -363,6 +366,45 @@ blktochr(dev)
 	for (i = 0; i < sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]); i++)
 		if (blkmaj == chrtoblktbl[i])
 			return (makedev(i, minor(dev)));
+	return (NODEV);
+}
+
+/*
+ * In order to map BSD bdev numbers of disks to their BIOS equivalents
+ * we use several heuristics, one being using checksums of the first
+ * few blocks of a disk to get a signature we can match with /boot's
+ * computed signatures.  To know where from to read, we must provide a
+ * disk driver name -> bdev major number table, which follows.
+ * Note: floppies are not included as those are differentiated by the BIOS.
+ */
+static struct {
+	char *name;
+	int maj;
+} disk_maj[] = {
+	{ "wd", 0 },
+	{ "sd", 4 },
+#if 0
+	/* XXX It's not clear at all that recognizing these will help us */
+	{ "acd", 18 },
+	{ "cd", 6 },
+	{ "mcd", 7 },		/* XXX I wonder if any BIOSes support this */
+	{ "scd", 15 }		/* 	-	   "		-	   */
+#endif
+};
+
+dev_t dev_rawpart __P((struct device *));	/* XXX */
+
+dev_t
+dev_rawpart(dv)
+	struct device *dv;
+{
+	int i;
+
+	for (i = 0; i < sizeof disk_maj / sizeof disk_maj[0]; i++)
+		if (strcmp(dv->dv_cfdata->cf_driver->cd_name,
+		    disk_maj[i].name) == 0)
+			return (MAKEDISKDEV(disk_maj[i].maj, dv->dv_unit,
+			    RAW_PART));
 	return (NODEV);
 }
 

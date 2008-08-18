@@ -1,12 +1,13 @@
-/*	$OpenBSD: copypage.s,v 1.1 1997/03/26 08:23:54 downsj Exp $	*/
-/*	$NetBSD: copypage.s,v 1.1 1997/03/17 19:44:35 gwr Exp $	*/
+/*	$OpenBSD: copypage.s,v 1.2 1997/07/06 07:46:28 downsj Exp $	*/
+/*	$NetBSD: copypage.s,v 1.4 1997/05/30 01:34:49 jtc Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by J.T. Conklin
+ * by J.T. Conklin <jtc@netbsd.org> and 
+ * by Hiroshi Horitomo <horimoto@cs-aoi.cs.sist.ac.jp> 
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -57,7 +58,7 @@
 ENTRY(copypage040)
 	movl	sp@(4),a0		| source address
 	movl	sp@(8),a1		| destiniation address
-	movl	#NBPG/32-1,d0		| number of 32 byte chunks - 1
+	movw	#NBPG/32-1,d0		| number of 32 byte chunks - 1
 Lm16loop:
 	.long	0xf6209000		| move16 a0@+,a1@+
 	.long	0xf6209000		| move16 a0@+,a1@+
@@ -73,7 +74,7 @@ Lm16loop:
 ENTRY(copypage)
 	movl	sp@(4),a0		| source address
 	movl	sp@(8),a1		| destiniation address
-	movl	#NBPG/32-1,d0		| number of 32 byte chunks - 1
+	movw	#NBPG/32-1,d0		| number of 32 byte chunks - 1
 Lmlloop:
 	movl	a0@+,a1@+
 	movl	a0@+,a1@+
@@ -93,16 +94,26 @@ Lmlloop:
  */
 ENTRY(zeropage)
 	movl	sp@(4),a0		| dest address
-	movl	#NBPG/32-1,d0		| number of 32 byte chunks - 1
-	movq	#0,d1
+	movql	#NBPG/256-1,d0		| number of 256 byte chunks - 1
+	movml	d2-d7,sp@-
+	movql	#0,d1
+	movql	#0,d2
+	movql	#0,d3
+	movql	#0,d4
+	movql	#0,d5
+	movql	#0,d6
+	movql	#0,d7
+	movl	d1,a1
+	lea	a0@(NBPG),a0
 Lzloop:
-	movl	d1,a0@+
-	movl	d1,a0@+
-	movl	d1,a0@+
-	movl	d1,a0@+
-	movl	d1,a0@+
-	movl	d1,a0@+
-	movl	d1,a0@+
-	movl	d1,a0@+
+	movml	d1-d7/a1,a0@-
+	movml	d1-d7/a1,a0@-
+	movml	d1-d7/a1,a0@-
+	movml	d1-d7/a1,a0@-
+	movml	d1-d7/a1,a0@-
+	movml	d1-d7/a1,a0@-
+	movml	d1-d7/a1,a0@-
+	movml	d1-d7/a1,a0@-
 	dbf	d0,Lzloop
+	movml	sp@+,d2-d7
 	rts

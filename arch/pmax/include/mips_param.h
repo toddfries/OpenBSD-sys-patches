@@ -7,6 +7,7 @@
  */
 #define	ALIGNBYTES	7
 #define	ALIGN(p)	(((u_int)(p) + ALIGNBYTES) &~ ALIGNBYTES)
+#define ALIGNED_POINTER(p,t)	((((u_long)(p)) & (sizeof(t)-1)) == 0)
 
 #define	NBPG		4096		/* bytes/page */
 #define	PGOFSET		(NBPG-1)	/* byte offset into page */
@@ -21,7 +22,7 @@
  * Size of kernel malloc arena in CLBYTES-sized logical pages
  */ 
 #ifndef NKMEMCLUSTERS
-#define	NKMEMCLUSTERS	(512*1024/CLBYTES)
+#define	NKMEMCLUSTERS	(4*1024*1024/CLBYTES)
 #endif
 
 /* pages ("clicks") (4096 bytes) to disk blocks */

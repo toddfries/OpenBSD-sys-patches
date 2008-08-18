@@ -1,4 +1,4 @@
-/*	$OpenBSD: null.h,v 1.4 1997/04/10 17:23:14 millert Exp $	*/
+/*	$OpenBSD: null.h,v 1.6 1997/10/06 20:20:28 deraadt Exp $	*/
 /*	$NetBSD: null.h,v 1.7 1996/05/17 20:53:11 gwr Exp $	*/
 
 /*

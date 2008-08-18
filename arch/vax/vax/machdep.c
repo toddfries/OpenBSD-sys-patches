@@ -1,5 +1,5 @@
-/* $OpenBSD: machdep.c,v 1.11 1997/01/16 20:43:45 kstailey Exp $ */
-/* $NetBSD: machdep.c,v 1.35 1997/01/11 11:31:26 ragge Exp $  */
+/* $OpenBSD: machdep.c,v 1.17 1997/10/02 19:53:20 niklas Exp $ */
+/* $NetBSD: machdep.c,v 1.45 1997/07/26 10:12:49 ragge Exp $	 */
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -114,8 +114,11 @@
 void	netintr __P((void));
 void	machinecheck __P((caddr_t));
 void	cmrerr __P((void));
+int	bufcalc __P((void));
 
-extern int virtual_avail, virtual_end;
+extern vm_offset_t avail_end;
+extern vm_offset_t virtual_avail, virtual_end;
+
 /*
  * We do these external declarations here, maybe they should be done
  * somewhere else...
@@ -124,7 +127,8 @@ int		nmcr, nmba, numuba, cold = 1;
 caddr_t		mcraddr[MAXNMCR];
 int		astpending;
 int		want_resched;
-char		machine[] = "vax";
+char		machine[] = MACHINE;		/* from <machine/param.h> */
+char		machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 char		cpu_model[100];
 int		msgbufmapped = 0;
 struct msgbuf  *msgbufp;
@@ -136,7 +140,7 @@ int		dumpsize = 0;
 caddr_t allocsys __P((caddr_t));
 
 #define valloclim(name, type, num, lim) \
-		(name) = (type *)v; v = (caddr_t)((lim) = ((name)+(num)))
+    (name) = (type *)v; v = (caddr_t)((lim) = ((name) + (num)))
 
 #ifdef	BUFPAGES
 int		bufpages = BUFPAGES;
@@ -158,7 +162,6 @@ cpu_startup()
 	int		base, residual, i, sz;
 	vm_offset_t	minaddr, maxaddr;
 	vm_size_t	size;
-	extern unsigned int avail_end;
 
 	/*
 	 * Initialize error message buffer.
@@ -186,9 +189,8 @@ cpu_startup()
 	 * Find out how much space we need, allocate it, and then give
 	 * everything true virtual addresses.
 	 */
-
-	sz = (int) allocsys((caddr_t) 0);
-	if ((v = (caddr_t) kmem_alloc(kernel_map, round_page(sz))) == 0)
+	sz = (int)allocsys((caddr_t)0);
+	if ((v = (caddr_t)kmem_alloc(kernel_map, round_page(sz))) == 0)
 		panic("startup: no room for tables");
 	if (allocsys(v) - v != sz)
 		panic("startup: table size inconsistency");
@@ -198,11 +200,11 @@ cpu_startup()
 	 * that they usually occupy more virtual memory than physical.
 	 */
 	size = MAXBSIZE * nbuf;
-	buffer_map = kmem_suballoc(kernel_map, (vm_offset_t *) & buffers,
-				   &maxaddr, size, TRUE);
+	buffer_map = kmem_suballoc(kernel_map, (vm_offset_t *)&buffers,
+	    &maxaddr, size, TRUE);
 	minaddr = (vm_offset_t) buffers;
-	if (vm_map_find(buffer_map, vm_object_allocate(size), (vm_offset_t) 0,
-			&minaddr, size, FALSE) != KERN_SUCCESS)
+	if (vm_map_find(buffer_map, vm_object_allocate(size), (vm_offset_t)0,
+	    &minaddr, size, FALSE) != KERN_SUCCESS)
 		panic("startup: cannot allocate buffers");
 	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
 		/* don't want to alloc more physical mem than needed */
@@ -221,9 +223,10 @@ cpu_startup()
 		 * The rest of each buffer occupies virtual space, but has no
 		 * physical memory allocated for it.
 		 */
-		curbuf = (vm_offset_t) buffers + i * MAXBSIZE;
+		curbuf = (vm_offset_t)buffers + i * MAXBSIZE;
 		curbufsize = CLBYTES * (i < residual ? base + 1 : base);
-		vm_map_pageable(buffer_map, curbuf, curbuf + curbufsize, FALSE);
+		vm_map_pageable(buffer_map, curbuf, curbuf + curbufsize,
+		    FALSE);
 		vm_map_simplify(buffer_map, curbuf);
 	}
 
@@ -231,18 +234,18 @@ cpu_startup()
 	 * Allocate a submap for exec arguments.  This map effectively limits
 	 * the number of processes exec'ing at any time.
 	 */
-	exec_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr,
-				 16 * NCARGS, TRUE);
+	exec_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr, 16 * NCARGS,
+	    TRUE);
 
 	/*
 	 * Finally, allocate mbuf pool.	 Since mclrefcnt is an off-size we
 	 * use the more space efficient malloc in place of kmem_alloc.
 	 */
-	mclrefcnt = (char *) malloc(NMBCLUSTERS + CLBYTES / MCLBYTES,
-				    M_MBUF, M_NOWAIT);
+	mclrefcnt = (char *)malloc(NMBCLUSTERS + CLBYTES / MCLBYTES, M_MBUF,
+	    M_NOWAIT);
 	bzero(mclrefcnt, NMBCLUSTERS + CLBYTES / MCLBYTES);
-	mb_map = kmem_suballoc(kernel_map, (vm_offset_t *) & mbutl, &maxaddr,
-			       VM_MBUF_SIZE, FALSE);
+	mb_map = kmem_suballoc(kernel_map, (vm_offset_t *)&mbutl, &maxaddr,
+	    VM_MBUF_SIZE, FALSE);
 
 	/*
 	 * Allocate a submap for physio
@@ -253,20 +256,18 @@ cpu_startup()
 	/*
 	 * Initialize callouts
 	 */
-
 	callfree = callout;
 	for (i = 1; i < ncallout; i++)
 		callout[i - 1].c_next = &callout[i];
 	callout[i - 1].c_next = NULL;
 
 	printf("avail mem = %d\n", (int)ptoa(cnt.v_free_count));
-	printf("Using %d buffers containing %d bytes of memory.\n",
-	       nbuf, bufpages * CLBYTES);
+	printf("Using %d buffers containing %d bytes of memory.\n", nbuf,
+	    bufpages * CLBYTES);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
 	 */
-
 	bufinit();
 
 	/*
@@ -282,6 +283,46 @@ cpu_startup()
 	configure();
 }
 
+#ifndef BUFCACHEPERCENT
+#define BUFCACHEPERCENT 5
+#endif
+
+int
+bufcalc()
+{
+	/*
+	 * Determine how many buffers to allocate. By default we allocate
+	 * the BSD standard of use 10% of memory for the first 2 Meg,
+	 * 5% of remaining.  But this might cause systems with large
+	 * core (32MB) to fail to boot due to small KVM space.  Reduce
+	 * BUFCACHEPERCENT in this case.  Insure a minimum of 16 buffers.
+	 */
+	if (bufpages == 0) {
+		/* We always have more than 2MB of memory. */
+		bufpages = btoc(avail_end + 2 * 1024 * 1024) /
+		    ((100 / BUFCACHEPERCENT) * CLSIZE);
+	}
+	if (nbuf == 0)
+		nbuf = bufpages;
+
+	/* Restrict to at most 70% filled kvm */
+	if (nbuf * MAXBSIZE >
+	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 7 / 10)
+		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
+		    MAXBSIZE * 7 / 10;
+
+	/* We really need some buffers.  */
+	if (nbuf < 16)
+		nbuf = 16;
+
+	/* More buffer pages than fits into the buffer is senseless. */
+	if (bufpages > nbuf * MAXBSIZE / CLBYTES) {
+		bufpages = nbuf * MAXBSIZE / CLBYTES;
+		return (bufpages * CLSIZE);
+	}
+	return (nbuf * MAXBSIZE / NBPG);
+}
+
 /*
  * Allocate space for system data structures.  We are given a starting
  * virtual address and we return a final virtual address; along the way we
@@ -295,9 +336,7 @@ caddr_t
 allocsys(v)
 	register caddr_t v;
 {
-
-#define valloc(name, type, num) \
-	    v = (caddr_t)(((name) = (type *)v) + (num))
+#define valloc(name, type, num) v = (caddr_t)(((name) = (type *)v) + (num))
 
 #ifdef REAL_CLISTS
 	valloc(cfree, struct cblock, nclist);
@@ -310,6 +349,7 @@ allocsys(v)
 #ifdef SYSVSEM
 	valloc(sema, struct semid_ds, seminfo.semmni);
 	valloc(sem, struct sem, seminfo.semmns);
+
 	/* This is pretty disgusting! */
 	valloc(semu, int, (seminfo.semmnu * seminfo.semusz) / sizeof(int));
 #endif
@@ -320,29 +360,15 @@ allocsys(v)
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
 
-	/*
-	 * Determine how many buffers to allocate (enough to hold 5% of total
-	 * physical memory, but at least 16). Allocate 1/2 as many swap
-	 * buffer headers as file i/o buffers.
-	 */
-	if (bufpages == 0)
-		if (physmem < btoc(2 * 1024 * 1024))
-			bufpages = (physmem / 10) / CLSIZE;
-		else
-			bufpages = (physmem / 20) / CLSIZE;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
+	/* Allocate 1/2 as many swap buffer headers as file i/o buffers.  */
 	if (nswbuf == 0) {
 		nswbuf = (nbuf / 2) & ~1;	/* force even */
 		if (nswbuf > 256)
-			nswbuf = 256;	/* sanity */
+			nswbuf = 256;		/* sanity */
 	}
 	valloc(swbuf, struct buf, nswbuf);
 	valloc(buf, struct buf, nbuf);
-	return v;
+	return (v);
 }
 
 long	dumplo = 0;
@@ -376,7 +402,7 @@ dumpconf()
 void
 cpu_initclocks()
 {
-	(cpu_calls[vax_cputype].cpu_clock) ();
+	(*dep_call->cpu_clock)();
 }
 
 int
@@ -400,6 +426,7 @@ setstatclockrate(hzrate)
 void
 consinit()
 {
+	cninit();
 #ifdef DDB
 /*	db_machine_init(); */
 	ddb_init();
@@ -457,19 +484,24 @@ struct trampframe {
 };
 
 void
-sendsig(catcher, sig, mask, code)
+sendsig(catcher, sig, mask, code, type, val)
 	sig_t		catcher;
 	int		sig, mask;
 	u_long		code;
+	int		type;
+	union sigval	val;
 {
-	struct	proc	*p = curproc;
-	struct	sigacts *psp = p->p_sigacts;
-	struct	trapframe *syscf;
-	struct	sigcontext *sigctx;
-	struct	trampframe *trampf;
-	unsigned	cursp;
-	int	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
-	extern	char sigcode[], esigcode[];
+	struct proc *p = curproc;
+	struct sigacts *psp = p->p_sigacts;
+	struct trapframe *syscf;
+	struct sigcontext *sigctx;
+	struct trampframe *trampf;
+	unsigned cursp;
+	int oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	extern char sigcode[], esigcode[];
+	int fsize, rndfsize, kscsize;
+	siginfo_t *sip, ksi;
+
 	/*
 	 * Allocate and validate space for the signal handler context. Note
 	 * that if the stack is in P0 space, the call to grow() is a nop, and
@@ -478,27 +510,34 @@ sendsig(catcher, sig, mask, code)
 	 * stack for both struct sigcontext and struct calls...
 	 */
 	syscf = p->p_addr->u_pcb.framep;
+	fsize = sizeof *sigctx;
+	rndfsize = ((fsize + 7) / 8) * 8;		/* XXX */
+	kscsize = rndfsize;
+	if (psp->ps_siginfo & sigmask(sig)) {
+		fsize += sizeof ksi;
+		rndfsize = ((fsize + 7) / 8) * 8;	/* XXX */
+	}
 
 	/* First check what stack to work on */
 	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		cursp = (int)(psp->ps_sigstk.ss_sp + psp->ps_sigstk.ss_size);
+		cursp = (int)(psp->ps_sigstk.ss_sp + psp->ps_sigstk.ss_size - 
+		    rndfsize);
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
 	} else
-		cursp = syscf->sp;
+		cursp = syscf->sp - rndfsize;
 	if (cursp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
-		(void) grow(p, cursp);
+		(void)grow(p, cursp);
 
 	/* Set up positions for structs on stack */
-	sigctx = (struct sigcontext *) (cursp - sizeof(struct sigcontext));
-	trampf = (struct trampframe *) ((unsigned)sigctx -
+	sigctx = (struct sigcontext *)(cursp - sizeof(struct sigcontext));
+	trampf = (struct trampframe *)((unsigned)sigctx -
 	    sizeof(struct trampframe));
 
 	 /* Place for pointer to arg list in sigreturn */
 	cursp = (unsigned)sigctx - 8;
 
-	if (useracc((caddr_t) cursp, sizeof(struct sigcontext) +
-		    sizeof(struct trampframe), B_WRITE) == 0) {
+	if (useracc((caddr_t)cursp, fsize, B_WRITE) == 0) {
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -511,13 +550,13 @@ sendsig(catcher, sig, mask, code)
 		psignal(p, SIGILL);
 		return;
 	}
+
 	/* Set up pointers for sigreturn args */
 	trampf->arg = (int) sigctx;
 	trampf->pc = (unsigned) catcher;
 	trampf->scp = (int) sigctx;
 	trampf->code = code;
 	trampf->sig = sig;
-
 
 	sigctx->sc_pc = syscf->pc;
 	sigctx->sc_ps = syscf->psl;
@@ -531,15 +570,21 @@ sendsig(catcher, sig, mask, code)
 	syscf->psl = PSL_U | PSL_PREVU;
 	syscf->ap = cursp;
 	syscf->sp = cursp;
+
+	if (psp->ps_siginfo & sigmask(sig)) {
+		initsiginfo(&ksi, sig, code, type, val);
+		sip = (void *)cursp + kscsize;
+		copyout((caddr_t)&ksi, (caddr_t)sip, fsize - kscsize);
+	}
 }
 
 int	waittime = -1;
 static	volatile int showto; /* Must be volatile to survive MM on -> MM off */
 
 void
-boot(howto, bootstr)
+boot(howto /* , bootstr */)
 	register howto;
-	char *bootstr;
+/*	char *bootstr; */
 {
 	showto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
@@ -562,10 +607,26 @@ boot(howto, bootstr)
 	}
 	splhigh();		/* extreme priority */
 	if (howto & RB_HALT) {
+		if (dep_call->cpu_halt)
+			(*dep_call->cpu_halt)();
 		printf("halting (in tight loop); hit\n\t^P\n\tHALT\n\n");
-		for ( ; ; )
+		for (;;)
 			;
 	} else {
+		showto = howto;
+#ifdef notyet
+		/*
+		 * If we are provided with a bootstring, parse it and send
+		 * it to the boot program.
+		 */
+		if (b)
+			while (*b) {
+				showto |= (*b == 'a' ? RB_ASKBOOT :
+				    (*b == 'd' ? RB_DEBUG :
+				    (*b == 's' ? RB_SINGLE : 0)));
+				b++;
+			}
+#endif
 		/*
 		 * Now it's time to:
 		 *  0. Save some registers that are needed in new world.
@@ -577,26 +638,27 @@ boot(howto, bootstr)
 		 * The RPB page is _always_ first page in memory, we can
 		 * rely on that.
 		 */
-		asm("	movl	sp, (0x80000200)
-			movl	0x80000200, sp
-			mfpr	$0x10, -(sp)	# PR_PCBB
-			mfpr	$0x11, -(sp)	# PR_SCBB
-			mfpr	$0xc, -(sp)	# PR_SBR
-			mfpr	$0xd, -(sp)	# PR_SLR
-			mtpr	$0, $0x38	# PR_MAPEN
-		");
+#ifdef notyet
+		__asm volatile("movl	sp, (0x80000200);"
+		    "movl	0x80000200, sp;"
+		    "mfpr	$0x10, -(sp)	# PR_PCBB;"
+		    "mfpr	$0x11, -(sp)	# PR_SCBB;"
+		    "mfpr	$0xc, -(sp)	# PR_SBR;"
+		    "mfpr	$0xd, -(sp)	# PR_SLR;"
+		    "mtpr	$0, $0x38	# PR_MAPEN;");
+#endif
+
 		if (showto & RB_DUMP)
 			dumpsys();
-
-		asm("movl %0,r5":: "g" (showto)); /* How to boot */
+		if (dep_call->cpu_reboot)
+			(*dep_call->cpu_reboot)(showto);
 
 		switch (vax_cputype) {
 			int	state;
 
-#if VAX750 || VAX780 || VAX630
+#if VAX750 || VAX780
 		case VAX_780:
 		case VAX_750:
-		case VAX_TYP_UV2:
 			mtpr(GC_BOOT, PR_TXDB); /* boot command */
 			break;
 #endif
@@ -611,9 +673,12 @@ boot(howto, bootstr)
 		}
 
 	}
-	asm("movl %0, r11":: "r"(showto));
-	asm("halt");
-	panic("Halt sket sej");
+
+	/* How to boot */
+	__asm volatile ("movl %0, r5" : : "g" (showto));
+	__asm volatile ("movl %0, r11" : : "r" (showto));	/* ??? */
+	__asm volatile ("halt");
+	panic("Halt failed");
 }
 
 void
@@ -627,6 +692,12 @@ netintr()
 	if (netisr & (1 << NETISR_IP)) {
 		netisr &= ~(1 << NETISR_IP);
 		ipintr();
+	}
+#endif
+#ifdef NETATALK
+	if (netisr & (1 << NETISR_ATALK)) {
+		netisr &= ~(1 << NETISR_ATALK);
+		atintr();
 	}
 #endif
 #ifdef NS
@@ -658,9 +729,9 @@ void
 machinecheck(frame)
 	caddr_t frame;
 {
-	if ((*cpu_calls[vax_cputype].cpu_mchk) (frame) == 0)
+	if ((*dep_call->cpu_mchk)(frame) == 0)
 		return;
-	(*cpu_calls[vax_cputype].cpu_memerr) ();
+	(*dep_call->cpu_memerr)();
 	panic("machine check");
 }
 
@@ -682,7 +753,7 @@ dumpsys()
 		return;
 	printf("\ndumping to dev %x, offset %d\n", dumpdev, (int)dumplo);
 	printf("dump ");
-	switch ((*bdevsw[major(dumpdev)].d_dump) (dumpdev, 0, 0, 0)) {
+	switch ((*bdevsw[major(dumpdev)].d_dump)(dumpdev, 0, 0, 0)) {
 
 	case ENXIO:
 		printf("device bad\n");
@@ -708,11 +779,10 @@ dumpsys()
 
 int
 fuswintr(addr)
-	const void *addr;
+	caddr_t addr;
 {
 	panic("fuswintr: need to be implemented");
-	return 0;
-
+	return (0);
 }
 
 int
@@ -721,16 +791,16 @@ suibyte(base, byte)
 	short byte;
 {
 	panic("suibyte: need to be implemented");
-	return 0;
+	return (0);
 }
 
 int
 suswintr(addr, cnt)
-	void *addr;
-	short	cnt;
+	caddr_t	addr;
+	u_int cnt;
 {
 	panic("suswintr: need to be implemented");
-	return 0;
+	return (0);
 }
 
 int
@@ -746,7 +816,7 @@ process_read_regs(p, regs)
 	regs->sp = tf->sp;
 	regs->pc = tf->pc;
 	regs->psl = tf->psl;
-	return 0;
+	return (0);
 }
 
 int
@@ -762,7 +832,7 @@ process_write_regs(p, regs)
 	tf->sp = regs->sp;
 	tf->pc = regs->pc;
 	tf->psl = regs->psl;
-	return 0;
+	return (0);
 }
 
 int
@@ -776,10 +846,10 @@ process_set_pc(p, addr)
 	if ((p->p_flag & P_INMEM) == 0)
 		return (EIO);
 
-	ptr = (char *) p->p_addr->u_pcb.framep;
+	ptr = (char *)p->p_addr->u_pcb.framep;
 	tf = ptr;
 
-	tf->pc = (unsigned) addr;
+	tf->pc = (unsigned)addr;
 
 	return (0);
 }
@@ -808,5 +878,5 @@ process_sstep(p, sstep)
 void
 cmrerr()
 {
-	(*cpu_calls[vax_cputype].cpu_memerr) ();
+	(*dep_call->cpu_memerr)();
 }

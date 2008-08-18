@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpux.h,v 1.4 1997/04/16 09:17:59 downsj Exp $	*/
+/*	$OpenBSD: hpux.h,v 1.6 1997/09/15 06:05:51 millert Exp $	*/
 /*	$NetBSD: hpux.h,v 1.11 1997/04/01 19:58:58 scottr Exp $	*/
 
 /*
@@ -282,13 +282,16 @@ struct hpux_shmid_ds {
 /* HP-UX POSIX signal stuff implementation */
 typedef struct __hpux_sigset_t { long sigset[8]; } hpux_sigset_t;
 struct hpux_sigaction {
-	void		(*sa_handler) __P((int));
+	void		(*sa__handler) __P((int));
 	hpux_sigset_t	sa_mask;
 	int		sa_flags;
 };
 #define HPUXSA_ONSTACK		1
 #define HPUXSA_RESETHAND	4
 #define HPUXSA_NOCLDSTOP	8
+#define HPUXSA_NODEFER		32
+#define HPUXSA_RESTART		64
+#define HPUXSA_NOCLDWAIT	128
 
 #define	HPUXSIG_BLOCK	0	/* block specified signal set */
 #define	HPUXSIG_UNBLOCK	1	/* unblock specified signal set */

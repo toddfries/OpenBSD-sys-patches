@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.42 1997/05/14 04:41:49 gene Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.45 1997/08/04 21:45:47 gene Exp $	*/
 /*	$NetBSD: machdep.c,v 1.134 1997/02/14 06:15:30 scottr Exp $	*/
 
 /*
@@ -980,6 +980,7 @@ badladdr(addr)
 
 void arpintr __P((void));
 void ipintr __P((void));
+void atintr __P((void));
 void nsintr __P((void));
 void clnlintr __P((void));
 void pppintr __P((void));
@@ -998,6 +999,12 @@ netintr()
 	if (netisr & (1 << NETISR_IP)) {
 		netisr &= ~(1 << NETISR_IP);
 		ipintr();
+	}
+#endif
+#ifdef NETATALK
+	if (netisr & (1 << NETISR_ATALK)) {
+		netisr &= ~(1 << NETISR_ATALK);
+		atintr();
 	}
 #endif
 #ifdef NS
@@ -2329,7 +2336,7 @@ mac68k_set_io_offsets(base)
 	default:
 	case MACH_CLASSH:
 	case MACH_CLASSIIfx:
-		panic("Unknown/unsupported machine class.");
+		panic("Mac IIfx machine class:unsupported machine class.");
 		break;
 	}
 	Via2Base = Via1Base + 0x2000 * VIA2;
@@ -2617,8 +2624,8 @@ get_mapping(void)
 			/*
 			 * Kludge for AV internal video
 			 */
-			check_video("AV video (0x50100100)", 1 * 1024 * 1024,
-						1 * 1024 * 1024);
+			check_video("AV video (0x50100100)", 2 * 1024 * 1024,
+						2 * 1024 * 1024);
 		} else {
 			printf( "  no internal video at address 0 -- "
 				"videoaddr is 0x%lx.\n", videoaddr);

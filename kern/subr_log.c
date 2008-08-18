@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_log.c,v 1.3 1996/04/21 22:27:17 deraadt Exp $	*/
+/*	$OpenBSD: subr_log.c,v 1.5 1997/09/18 13:23:26 deraadt Exp $	*/
 /*	$NetBSD: subr_log.c,v 1.11 1996/03/30 22:24:44 christos Exp $	*/
 
 /*
@@ -60,6 +60,8 @@ struct logsoftc {
 	int	sc_state;		/* see above for possibilities */
 	struct	selinfo sc_selp;	/* process waiting on select call */
 	int	sc_pgid;		/* process/group for async I/O */
+	uid_t	sc_siguid;		/* uid for process that set sc_pgid */
+	uid_t	sc_sigeuid;		/* euid for process that set sc_pgid */
 } logsoftc;
 
 int	log_open;			/* also used in log() */
@@ -76,7 +78,6 @@ logopen(dev, flags, mode, p)
 	if (log_open)
 		return (EBUSY);
 	log_open = 1;
-	logsoftc.sc_pgid = p->p_pid;		/* signal process only */
 	/*
 	 * Potential race here with putchar() but since putchar should be
 	 * called by autoconf, msg_magic should be initialized by the time
@@ -179,17 +180,12 @@ logselect(dev, rw, p)
 void
 logwakeup()
 {
-	struct proc *p;
-
 	if (!log_open)
 		return;
 	selwakeup(&logsoftc.sc_selp);
-	if (logsoftc.sc_state & LOG_ASYNC) {
-		if (logsoftc.sc_pgid < 0)
-			gsignal(-logsoftc.sc_pgid, SIGIO); 
-		else if ((p = pfind(logsoftc.sc_pgid)) != NULL)
-			psignal(p, SIGIO);
-	}
+	if (logsoftc.sc_state & LOG_ASYNC)
+		csignal(logsoftc.sc_pgid, SIGIO,
+		    logsoftc.sc_siguid, logsoftc.sc_sigeuid);
 	if (logsoftc.sc_state & LOG_RDWAIT) {
 		wakeup((caddr_t)msgbufp);
 		logsoftc.sc_state &= ~LOG_RDWAIT;
@@ -232,6 +228,8 @@ logioctl(dev, com, data, flag, p)
 
 	case TIOCSPGRP:
 		logsoftc.sc_pgid = *(int *)data;
+		logsoftc.sc_siguid = p->p_cred->p_ruid;
+		logsoftc.sc_sigeuid = p->p_ucred->cr_uid;
 		break;
 
 	case TIOCGPGRP:

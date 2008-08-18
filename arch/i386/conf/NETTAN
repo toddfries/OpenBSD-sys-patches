@@ -1,4 +1,4 @@
-#	$OpenBSD: NETTAN,v 1.18 1997/04/29 05:15:17 deraadt Exp $
+#	$OpenBSD: NETTAN,v 1.24 1997/10/20 01:40:12 todd Exp $
 #
 #	NETTAN -- Applitron Datasystem AB
 #
@@ -10,6 +10,7 @@ machine		i386		# architecture, used by config; REQUIRED
 option		I586_CPU
 #option		GPL_MATH_EMULATE	# floating point emulation
 
+option		VM86
 #option		DUMMY_NOPS	# speed hack; recommanded
 #option		XSERVER
 
@@ -21,7 +22,7 @@ option		SWAPPAGER	# paging; REQUIRED
 option		DEVPAGER	# mmap() of devices
 
 option		DDB		# in-kernel debugger
-makeoptions	DEBUG="-g"	# compile full symbol table
+#makeoptions	DEBUG="-g"	# compile full symbol table
 option		DIAGNOSTIC	# internally consistency checks
 option		KTRACE		# system call tracing, a la ktrace(1)
 option		BOOT_CONFIG
@@ -31,8 +32,7 @@ option		SYSVSEM		# System V-like semaphores
 option		SYSVSHM		# System V-like memory sharing
 #option		SHMMAXPGS=1024	# 1024 pages is the default
 
-option		COMPAT_NOMID	# compatibility with 386BSD, BSDI, NetBSD 0.8,
-option		COMPAT_09	# NetBSD 0.9,
+option		COMPAT_09	# Kernel compatibility with NetBSD 0.9,
 option		COMPAT_10	# NetBSD 1.0,
 option		COMPAT_43	# and 4.3BSD
 #option		TCP_COMPAT_42	# TCP bug compatibility with 4.2BSD
@@ -44,6 +44,7 @@ option		ELF_MAP_PAGE_ZERO
 option		COMPAT_SVR4_NCR # 		"		 (NCR variant)
 option		COMPAT_IBCS2	# binary compatibility with SCO and ISC
 option		COMPAT_LINUX	# binary compatibility with Linux
+option		COMPAT_BSDOS	# binary compatibility with BSD/OS
 
 option		USER_LDT	# user-settable LDT; used by WINE
 option		LKM		# loadable kernel modules
@@ -61,7 +62,7 @@ option		MSDOSFS		# MS-DOS file system
 option		FIFO		# FIFOs; RECOMMENDED
 option		KERNFS		# /kern
 #option		NULLFS		# loopback file system
-#option		PORTAL		# create sockets with open(2)
+#option		PORTAL		# dynamically created filesystem objects
 option		PROCFS		# /proc
 #option		UMAPFS		# NULLFS + uid and gid remapping
 #option		UNION		# union file system
@@ -77,6 +78,7 @@ config		bsd	swap generic
 
 mainbus0	at root
 
+bios0	at mainbus0
 isa0	at mainbus0
 pci0	at mainbus0 bus ?
 
@@ -123,7 +125,7 @@ scsibus0 at ahc?
 #bt1	at isa? port 0x334 irq ? drq ?	# BusLogic [57]4X SCSI controllers
 #bt2	at isa? port ? irq ?
 #scsibus* at bt?
-#sea0	at isa? iomem 0xc8000 irq 5
+#sea0	at isa? iomem 0xc8000 irq 5	# Seagate ST0[12] SCSI controllers
 #scsibus* at sea?
 #uha0	at isa? port 0x330 irq ? drq ?	# UltraStor [13]4f SCSI controllers
 #uha1	at isa? port 0x334 irq ? drq ?	# UltraStor [13]4f SCSI controllers

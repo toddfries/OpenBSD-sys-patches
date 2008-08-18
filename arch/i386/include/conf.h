@@ -1,3 +1,4 @@
+/*	$OpenBSD: conf.h,v 1.7 1997/09/27 06:31:32 mickey Exp $	*/
 /*	$NetBSD: conf.h,v 1.2 1996/05/05 19:28:34 christos Exp $	*/
 
 /*
@@ -62,3 +63,11 @@ cdev_decl(lms);
 cdev_decl(pms);
 
 cdev_decl(joy);
+
+#define biosselect seltrue
+cdev_decl(bios);
+
+cdev_decl(apm);
+
+#define pctrselect seltrue
+cdev_decl(pctr);

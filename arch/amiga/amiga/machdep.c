@@ -1,5 +1,5 @@
-/*	$OpenBSD: machdep.c,v 1.23 1997/03/26 18:30:50 niklas Exp $	*/
-/*	$NetBSD: machdep.c,v 1.82 1996/12/17 07:32:54 is Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.27 1997/10/07 10:57:14 niklas Exp $	*/
+/*	$NetBSD: machdep.c,v 1.95 1997/08/27 18:31:17 is Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -126,6 +126,9 @@
 #include <netiso/iso.h>
 #include <netiso/clnp.h>
 #endif
+#ifdef NETATALK
+#include <netatalk/at_extern.h>
+#endif
 #if NPPP > 0
 #include <net/ppp_defs.h>
 #include <net/if_ppp.h>
@@ -142,11 +145,10 @@ vm_offset_t reserve_dumppages __P((vm_offset_t));
 void dumpsys __P((void));
 void initcpu __P((void));
 void straytrap __P((int, u_short));
-static void netintr __P((void));
-static void call_sicallbacks __P((void));
+void netintr __P((void));
+void call_sicallbacks __P((void));
+void _softintr_callit __P((void *, void *));
 void intrhand __P((int));
-static void dumpmem __P((int *, int, int));
-static char *hexstr __P((int, int));
 #if NSER > 0
 void ser_outintr __P((void));
 #endif
@@ -189,6 +191,7 @@ unsigned char ssir;
 int	safepri = PSL_LOWIPL;
 extern  int   freebufspace;
 extern	u_int lowram;
+extern	short exframesize[];
 
 #ifdef COMPAT_SUNOS
 extern struct emul emul_sunos;
@@ -197,7 +200,7 @@ extern struct emul emul_sunos;
 /* used in init_main.c */
 char *cpu_type = "m68k";
 /* the following is used externally (sysctl_hw) */
-char machine[] = "amiga";
+char machine[] = MACHINE;	/* from <machine/param.h> */
  
 struct isr *isr_ports;
 #ifdef DRACO
@@ -474,31 +477,31 @@ again:
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
-	exec_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr,
-				 16*NCARGS, TRUE);
+	exec_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr, 16 * NCARGS,
+	    TRUE);
 
 	/*
 	 * Allocate a submap for physio
 	 */
-	phys_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr,
-				 VM_PHYS_SIZE, TRUE);
+	phys_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr, VM_PHYS_SIZE,
+	    TRUE);
 
 	/*
 	 * Finally, allocate mbuf pool.  Since mclrefcnt is an off-size
 	 * we use the more space efficient malloc in place of kmem_alloc.
 	 */
-	mclrefcnt = (char *)malloc(NMBCLUSTERS+CLBYTES/MCLBYTES,
-				   M_MBUF, M_NOWAIT);
+	mclrefcnt = (char *)malloc(NMBCLUSTERS + CLBYTES / MCLBYTES, M_MBUF,
+	    M_NOWAIT);
 	bzero(mclrefcnt, NMBCLUSTERS+CLBYTES/MCLBYTES);
 	mb_map = kmem_suballoc(kernel_map, (vm_offset_t *)&mbutl, &maxaddr,
-			       VM_MBUF_SIZE, FALSE);
+	    VM_MBUF_SIZE, FALSE);
 
 	/*
 	 * Initialize callouts
 	 */
 	callfree = callout;
 	for (i = 1; i < ncallout; i++)
-		callout[i-1].c_next = &callout[i];
+		callout[i - 1].c_next = &callout[i];
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -579,11 +582,14 @@ setregs(p, pack, stack, retval)
 	frame->f_regs[SP] = stack;
 	frame->f_regs[A2] = (int)PS_STRINGS;
 
-#ifdef FPCOPROC
 	/* restore a null state frame */
 	p->p_addr->u_pcb.pcb_fpregs.fpf_null = 0;
-	m68881_restore(&p->p_addr->u_pcb.pcb_fpregs);
+#ifdef FPU_EMULATE
+	if (!fputype)
+		bzero(&p->p_addr->u_pcb.pcb_fpregs, sizeof(struct fpframe));
+	else
 #endif
+		m68881_restore(&p->p_addr->u_pcb.pcb_fpregs);
 #ifdef COMPAT_SUNOS
 	/*
 	 * SunOS' ld.so does self-modifying code without knowing
@@ -644,8 +650,16 @@ identifycpu()
 		    pcr & 0x10000 ? "LC/EC" : "", (pcr>>8)&0xff);
 		cpu_type = cpubuf;
 		mmu = "/MMU";
-		fpu = "/FPU";
-		fputype = FPU_68040; /* XXX */
+		if (pcr & 2) {
+			fpu = "/FPU disabled";
+			fputype = FPU_NONE;
+		} else if (m68060_pcr_init & 2){
+			fpu = "/FPU will be disabled";
+			fputype = FPU_NONE;
+		} else  if (machineid & AMIGA_FPU40) {
+			fpu = "/FPU";
+			fputype = FPU_68040; /* XXX */
+		}
 	} else 
 #endif
 	if (machineid & AMIGA_68040) {
@@ -709,6 +723,38 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	/* NOTREACHED */
 }
 
+#define SS_RTEFRAME	1
+#define SS_FPSTATE	2
+#define SS_USERREGS	4
+
+struct sigstate {
+	int	ss_flags;		/* which of the following are valid */
+	struct	frame ss_frame;		/* original exception frame */
+	struct	fpframe ss_fpstate;	/* 68881/68882 state info */
+};
+
+/*
+ * WARNING: code in locore.s assumes the layout shown for sf_signum
+ * thru sf_handler so... don't screw with them!
+ */
+struct sigframe {
+	int	sf_signum;		/* signo for handler */
+	siginfo_t *sf_sip;		/* additional info for handler */
+	struct	sigcontext *sf_scp;	/* context ptr for handler */
+	sig_t	sf_handler;		/* handler addr for u_sigc */
+	struct	sigstate sf_state;	/* state of the hardware */
+	struct	sigcontext sf_sc;	/* actual context */
+	siginfo_t sf_si;
+};
+
+#ifdef DEBUG
+int sigdebug = 0x0;
+int sigpid = 0;
+#define SDB_FOLLOW	0x01
+#define SDB_KSTACK	0x02
+#define SDB_FPSTATE	0x04
+#endif
+
 static int waittime = -1;
 
 void
@@ -760,7 +806,6 @@ boot(howto)
 	doboot();
 	/*NOTREACHED*/
 }
-
 
 unsigned	dumpmag = 0x8fca0101;	/* magic number for savecore */
 int	dumpsize = 0;		/* also for savecore */
@@ -967,57 +1012,106 @@ microtime(tvp)
 void
 initcpu()
 {
+	typedef void trapfun __P((void));
+
 	/* XXX should init '40 vecs here, too */
-#if defined(M68060) || defined(DRACO)
-	extern caddr_t vectab[256];
+#if defined(M68060) || defined(M68040) || defined(DRACO) || defined(FPU_EMULATE)
+	extern trapfun *vectab[256];
+#endif
+
+#if defined(M68060) || defined(M68040)
+	extern trapfun addrerr4060;
 #endif
 
 #ifdef M68060
+	extern trapfun buserr60;
 #if defined(M060SP)
 	/*extern u_int8_t I_CALL_TOP[];*/
-	extern u_int8_t intemu60, fpiemu60, fpdemu60, fpeaemu60;
+	extern trapfun intemu60, fpiemu60, fpdemu60, fpeaemu60;
 	extern u_int8_t FP_CALL_TOP[];
 #else
-	extern u_int8_t illinst;
+	extern trapfun illinst;
 #endif
-	extern u_int8_t fpfault;
+	extern trapfun fpfault;
+#endif
+
+#ifdef M68040
+	extern trapfun buserr40;
 #endif
 
 #ifdef DRACO
-	extern u_int8_t DraCoIntr, DraCoLev1intr, DraCoLev2intr;
+	extern trapfun DraCoIntr, DraCoLev1intr, DraCoLev2intr;
 	u_char dracorev;
+#endif
+
+#ifdef FPU_EMULATE
+	extern trapfun fpemuli;
 #endif
 
 #ifdef M68060
 	if (machineid & AMIGA_68060) {
+		if (machineid & AMIGA_FPU40 && m68060_pcr_init & 2) {
+			/* 
+			 * in this case, we're about to switch the FPU off;
+			 * do a FNOP to avoid stray FP traps later
+			 */
+			__asm("fnop");
+			/* ... and mark FPU as absent for identifyfpu() */
+			machineid &= ~(AMIGA_FPU40|AMIGA_68882|AMIGA_68881);
+		}
 		asm volatile ("movl %0,d0; .word 0x4e7b,0x0808" : : 
 			"d"(m68060_pcr_init):"d0" );
+
+		/* bus/addrerr vectors */
+		vectab[2] = buserr60;
+		vectab[3] = addrerr4060;
 #if defined(M060SP)
 
 		/* integer support */
-		vectab[61] = &intemu60/*&I_CALL_TOP[128 + 0x00]*/;
+		vectab[61] = intemu60/*(trapfun *)&I_CALL_TOP[128 + 0x00]*/;
 
 		/* floating point support */
 		/*
 		 * XXX maybe we really should run-time check for the
 		 * stack frame format here:
 		 */
-		vectab[11] = &fpiemu60/*&FP_CALL_TOP[128 + 0x30]*/;
+		vectab[11] = fpiemu60/*(trapfun *)&FP_CALL_TOP[128 + 0x30]*/;
 
-		vectab[55] = &fpdemu60/*&FP_CALL_TOP[128 + 0x38]*/;
-		vectab[60] = &fpeaemu60/*&FP_CALL_TOP[128 + 0x40]*/;
+		vectab[55] = fpdemu60/*(trapfun *)&FP_CALL_TOP[128 + 0x38]*/;
+		vectab[60] = fpeaemu60/*(trapfun *)&FP_CALL_TOP[128 + 0x40]*/;
 
-		vectab[54] = &FP_CALL_TOP[128 + 0x00];
-		vectab[52] = &FP_CALL_TOP[128 + 0x08];
-		vectab[53] = &FP_CALL_TOP[128 + 0x10];
-		vectab[51] = &FP_CALL_TOP[128 + 0x18];
-		vectab[50] = &FP_CALL_TOP[128 + 0x20];
-		vectab[49] = &FP_CALL_TOP[128 + 0x28];
+		vectab[54] = (trapfun *)&FP_CALL_TOP[128 + 0x00];
+		vectab[52] = (trapfun *)&FP_CALL_TOP[128 + 0x08];
+		vectab[53] = (trapfun *)&FP_CALL_TOP[128 + 0x10];
+		vectab[51] = (trapfun *)&FP_CALL_TOP[128 + 0x18];
+		vectab[50] = (trapfun *)&FP_CALL_TOP[128 + 0x20];
+		vectab[49] = (trapfun *)&FP_CALL_TOP[128 + 0x28];
 
 #else
-		vectab[61] = &illinst;
+		vectab[61] = illinst;
 #endif
-		vectab[48] = &fpfault;
+		vectab[48] = fpfault;
+	}
+#endif
+
+/*
+ * Vector initialization for special motherboards 
+ */
+#ifdef M68040
+#ifdef M68060
+	else
+#endif
+	if (machineid & AMIGA_68040) {
+		/* addrerr vector */
+		vectab[2] = buserr40;
+		vectab[3] = addrerr4060;
+	}
+#endif
+
+#ifdef FPU_EMULATE
+	if (!(machineid & (AMIGA_68881|AMIGA_68882|AMIGA_FPU40))) {
+		vectab[11] = fpemuli;
+		printf("FPU software emulation initialized.\n");
 	}
 #endif
 
@@ -1029,16 +1123,16 @@ initcpu()
 	dracorev = is_draco();
 	if (dracorev) {
 		if (dracorev >= 4) {
-			vectab[24+1] = &DraCoLev1intr;
-			vectab[24+2] = &DraCoIntr;
+			vectab[24+1] = DraCoLev1intr;
+			vectab[24+2] = DraCoIntr;
 		} else {
-			vectab[24+1] = &DraCoIntr;
-			vectab[24+2] = &DraCoLev2intr;
+			vectab[24+1] = DraCoIntr;
+			vectab[24+2] = DraCoLev2intr;
 		}
-		vectab[24+3] = &DraCoIntr;
-		vectab[24+4] = &DraCoIntr;
-		vectab[24+5] = &DraCoIntr;
-		vectab[24+6] = &DraCoIntr;
+		vectab[24+3] = DraCoIntr;
+		vectab[24+4] = DraCoIntr;
+		vectab[24+5] = DraCoIntr;
+		vectab[24+6] = DraCoIntr;
 	}
 #endif
 	DCIS();
@@ -1096,7 +1190,7 @@ badbaddr(addr)
 	return(0);
 }
 
-static void
+void
 netintr()
 {
 #ifdef INET
@@ -1109,6 +1203,12 @@ netintr()
 	if (netisr & (1 << NETISR_IP)) {
 		netisr &= ~(1 << NETISR_IP);
 		ipintr();
+	}
+#endif
+#ifdef NETATALK
+	if (netisr & (1 << NETISR_ATALK)) {
+		netisr &= ~(1 << NETISR_ATALK);
+		atintr();
 	}
 #endif
 #ifdef NS
@@ -1154,6 +1254,44 @@ static int ncb;		/* number of callback blocks allocated */
 static int ncbd;	/* number of callback blocks dynamically allocated */
 #endif
 
+/*
+ * these are __GENERIC_SOFT_INTERRUPT wrappers; will be replaced
+ * once by the real thing once all drivers are converted.
+ *
+ * to help performance for converted drivers, the YYY_sicallback() function
+ * family can be implemented in terms of softintr_XXX() as an intermediate
+ * measure.
+ */
+
+void
+_softintr_callit(rock1, rock2)
+	void *rock1, *rock2;
+{
+	(*(void (*)(void *))rock1)(rock2);
+}
+
+void *
+softintr_establish(ipl, func, arg)
+	int ipl;
+	void func __P((void *));
+	void *arg;
+{
+	struct si_callback *si;
+
+	(void)ipl;
+
+	si = (struct si_callback *)malloc(sizeof(*si), M_TEMP, M_NOWAIT);
+	if (si == NULL)
+		return (si);
+
+	si->function = (void *)0;
+	si->rock1 = (void *)func;
+	si->rock2 = arg;
+
+	alloc_sicallback();
+	return ((void *)si);
+}
+
 void
 alloc_sicallback()
 {
@@ -1170,6 +1308,16 @@ alloc_sicallback()
 #ifdef DIAGNOSTIC
 	++ncb;
 #endif
+}
+
+void
+softintr_schedule(vsi)
+	void *vsi;
+{
+	struct si_callback *si;
+	si = vsi;
+
+	add_sicallback(_softintr_callit, si->rock1, si->rock2);
 }
 
 void
@@ -1252,7 +1400,7 @@ rem_sicallback(function)
 }
 
 /* purge the list */
-static void
+void
 call_sicallbacks()
 {
 	struct si_callback *si;
@@ -1625,98 +1773,6 @@ nmihand(frame)
 	printf("unexpected level 7 interrupt ignored\n");
 }
 #endif
-
-void
-regdump(fp, sbytes)
-	struct frame *fp; /* must not be register */
-	int sbytes;
-{
-	static int doingdump = 0;
-	register int i;
-	int s;
-
-	if (doingdump)
-		return;
-	s = spl7();
-	doingdump = 1;
-	printf("pid = %d, pc = %s, ", curproc ? curproc->p_pid : 0,
-	    hexstr(fp->f_pc, 8));
-	printf("ps = %s, ", hexstr(fp->f_sr, 4));
-	printf("sfc = %s, ", hexstr(getsfc(), 4));
-	printf("dfc = %s\n", hexstr(getdfc(), 4));
-	printf("Registers:\n     ");
-	for (i = 0; i < 8; i++)
-		printf("        %d", i);
-	printf("\ndreg:");
-	for (i = 0; i < 8; i++)
-		printf(" %s", hexstr(fp->f_regs[i], 8));
-	printf("\nareg:");
-	for (i = 0; i < 8; i++)
-		printf(" %s", hexstr(fp->f_regs[i+8], 8));
-	if (sbytes > 0) {
-		if (fp->f_sr & PSL_S) {
-			printf("\n\nKernel stack (%s):",
-			       hexstr((int)(((int *)&fp)-1), 8));
-			dumpmem(((int *)&fp)-1, sbytes, 0);
-		} else {
-			printf("\n\nUser stack (%s):", hexstr(fp->f_regs[SP], 8));
-			dumpmem((int *)fp->f_regs[SP], sbytes, 1);
-		}
-	}
-	doingdump = 0;
-	splx(s);
-}
-
-extern u_int proc0paddr;
-#define KSADDR	((int *)((curproc ? (u_int)curproc->p_addr : proc0paddr) + USPACE - NBPG))
-
-static void
-dumpmem(ptr, sz, ustack)
-	register int *ptr;
-	int sz, ustack;
-{
-	register int i, val;
-
-	for (i = 0; i < sz; i++) {
-		if ((i & 7) == 0)
-			printf("\n%s: ", hexstr((int)ptr, 6));
-		else
-			printf(" ");
-		if (ustack == 1) {
-			if ((val = fuword(ptr++)) == -1)
-				break;
-		} else {
-			if (ustack == 0 &&
-			    (ptr < KSADDR || ptr > KSADDR+(NBPG/4-1)))
-				break;
-			val = *ptr++;
-		}
-		printf("%s", hexstr(val, 8));
-	}
-	printf("\n");
-}
-
-static char *
-hexstr(val, len)
-	register int val;
-	int len;
-{
-	static char nbuf[9];
-	register int x, i;
-
-	if (len > 8)
-		return("");
-	nbuf[len] = '\0';
-	for (i = len-1; i >= 0; --i) {
-		x = val & 0xF;
-		if (x > 9)
-			nbuf[i] = x - 10 + 'A';
-		else
-			nbuf[i] = x + '0';
-		val >>= 4;
-	}
-	return(nbuf);
-}
 
 /*
  * should only get here, if no standard executable. This can currently

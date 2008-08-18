@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosdev.h,v 1.8 1997/04/28 07:39:01 weingart Exp $	*/
+/*	$OpenBSD: biosdev.h,v 1.23 1997/10/22 23:34:37 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -32,14 +32,8 @@
  *
  */
 
-
-#define	BIOSNHEADS(d)	(((d)>>8)+1)
-#define	BIOSNSECTS(d)	((d)&0xff)	/* sectors are 1-based */
-
-#ifdef _LOCORE
-#define	BIOSINT(n)	int	$0x20+(n)
-#else
-#define	BIOSINT(n)	__asm ((int $0x20+(n)))
+struct consdev;
+struct open_file;
 
 /* biosdev.c */
 extern const char *biosdevs[];
@@ -47,34 +41,22 @@ int biosstrategy __P((void *, int, daddr_t, size_t, void *, size_t *));
 int biosopen __P((struct open_file *, ...));
 int biosclose __P((struct open_file *));
 int biosioctl __P((struct open_file *, u_long, void *));
+int bios_getinfo __P((int, bios_diskinfo_t *));
+int biosd_io __P((int, int, int, int, int, int, void*));
+const char * bios_getdisklabel __P((int, struct disklabel *));
 
-/* biosdisk.S */
-u_int16_t biosdinfo __P((int dev));
-int		biosdreset __P((int dev));
-int     biosread  __P((int dev, int cyl, int hd, int sect, int nsect, void *));
-int     bioswrite __P((int dev, int cyl, int hd, int sect, int nsect, void *));
+/* diskprobe.c */
+bios_diskinfo_t *bios_dklookup __P((int));
 
-/* bioskbd.S */
-int	kbd_probe __P((void));
-void	kbd_putc __P((int c));
-int	kbd_getc __P((void));
-int	kbd_ischar __P((void));
-
-/* bioscom.S */
-int	com_probe __P((void));
-void	com_putc __P((int c));
-int	com_getc __P((void));
-int	com_ischar __P((void));
-
-/* biosmem.S */
-u_int	biosmem __P((void));
-
-/* time.c */
-void time_print __P((void));
-time_t getsecs __P((void));
-
-/* biostime.S */
-int	usleep __P((u_long));
-int biostime __P((char *));
-int biosdate __P((char *));
-#endif
+/* bioscons.c */
+void pc_probe __P((struct consdev *));
+void pc_init __P((struct consdev *));
+int pc_getc __P((dev_t));
+void pc_putc __P((dev_t, int));
+void pc_pollc __P((dev_t, int));
+void com_probe __P((struct consdev *));
+void com_init __P((struct consdev *));
+int com_setsp __P((int));
+int com_getc __P((dev_t));
+void com_putc __P((dev_t, int));
+void com_pollc __P((dev_t, int));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.3 1997/03/31 23:06:22 mickey Exp $	*/
+/*	$OpenBSD: conf.c,v 1.10 1997/10/26 23:22:09 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -35,19 +35,20 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <libsa.h>
-#include <ufs.h>
-#include <nfs.h>
-#include <cd9660.h>
+#include <lib/libsa/ufs.h>
 #ifdef notdef
-#include <fat.h>
-#include <tftp.h>
+#include <lib/libsa/cd9660.h>
+#include <lib/libsa/fat.h>
+#include <lib/libsa/nfs.h>
+#include <lib/libsa/tftp.h>
+#include <lib/libsa/netif.h>
 #endif
-#include <netif.h>
-#include "biosdev.h"
-#include "unixdev.h"
+#include <lib/libsa/unixdev.h>
+#include <biosdev.h>
+#include <dev/cons.h>
 
-const char version[] = "0.99a";
-int	debug = 1;
+const char version[] = "1.06";
+int	debug;
 
 struct fs_ops file_system[] = {
 	{ ufs_open,    ufs_close,    ufs_read,    ufs_write,    ufs_seek,
@@ -57,8 +58,6 @@ struct fs_ops file_system[] = {
 	  fat_stat,    fat_readdir    },
 	{ cd9660_open, cd9660_close, cd9660_read, cd9660_write, cd9660_seek,
 	  cd9660_stat, cd9660_readdir },
-#endif
-#ifndef NO_NET
 	{ nfs_open,    nfs_close,    nfs_read,    nfs_write,    nfs_seek,
 	  nfs_stat,    nfs_readdir    },
 #endif
@@ -79,24 +78,23 @@ struct devsw	devsw[] = {
 	{ "TFTP", tftpstrategy, tftpopen, tftpclose, tftpioctl },
 #endif
 };
-int	ndevs = NENTS(devsw);
+int ndevs = NENTS(devsw);
 
-#ifndef NO_NET
+#ifdef notdef
 struct netif_driver	*netif_drivers[] = {
 	NULL
 };
 int n_netif_drivers = NENTS(netif_drivers);
 #endif
 
-struct consw	consw[] = {
+struct consdev *cn_tab = &constab[0];
+struct consdev constab[] = {
 #ifdef _TEST
-	{ "unix",unix_probe,unix_putc,unix_getc,unix_ischar},
+	{ unix_probe, unix_init, unix_getc, unix_putc },
 #else
-	{ "kbd", kbd_probe, kbd_putc, kbd_getc, kbd_ischar },
-#if 0
-	{ "com", com_probe, com_putc, com_getc, com_ischar },
+	{ pc_probe, pc_init, pc_getc, pc_putc },
+	{ com_probe, com_init, com_getc, com_putc },
 #endif
-#endif
+	{ NULL }
 };
-int	ncons = NENTS(consw);
 

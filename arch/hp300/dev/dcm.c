@@ -1,5 +1,5 @@
-/*	$OpenBSD: dcm.c,v 1.8 1997/04/16 11:55:59 downsj Exp $	*/
-/*	$NetBSD: dcm.c,v 1.39 1997/04/14 02:33:17 thorpej Exp $	*/
+/*	$OpenBSD: dcm.c,v 1.11 1997/09/14 03:43:03 downsj Exp $	*/
+/*	$NetBSD: dcm.c,v 1.41 1997/05/05 20:59:16 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996, 1997 Jason R. Thorpe.  All rights reserved.
@@ -174,7 +174,8 @@ struct	dcmstats {
 };
 #endif
 
-#define DCMUNIT(x)		minor(x)
+#define DCMUNIT(x)		(minor(x) & 0x7f)
+#define DCMCUA(x)		(minor(x) & 0x80)
 #define	DCMBOARD(x)		(((x) >> 2) & 0x3f)
 #define DCMPORT(x)		((x) & 3)
 
@@ -226,6 +227,7 @@ struct	dcm_softc {
 	char	sc_mcndlast[NDCMPORT];	/* XXX last modem status for port */
 	short	sc_softCAR;		/* mask of ports with soft-carrier */
 	struct	dcmischeme sc_scheme;	/* interrupt scheme for board */
+	u_char	sc_cua;			/* callout mode */
 
 	/*
 	 * Mask of soft-carrier bits in config flags.
@@ -354,7 +356,7 @@ dcmattach(parent, self, aux)
 	sc->sc_flags |= DCM_ACTIVE;
 
 	/* Establish the interrupt handler. */
-	(void) intr_establish(dcmintr, sc, ipl, IPL_TTY);
+	(void) dio_intr_establish(dcmintr, sc, ipl, IPL_TTY);
 
 	if (dcmistype == DIS_TIMER)
 		dcmsetischeme(brd, DIS_RESET|DIS_TIMER);
@@ -451,11 +453,13 @@ dcmopen(dev, flag, mode, p)
 	if ((sc->sc_flags & DCM_ACTIVE) == 0)
 		return (ENXIO);
 
+	s = spltty();
 	if (sc->sc_tty[port] == NULL) {
 		tp = sc->sc_tty[port] = ttymalloc();
 		tty_attach(tp);
 	} else
 		tp = sc->sc_tty[port];
+	splx(s);
 
 	tp->t_oproc = dcmstart;
 	tp->t_param = dcmparam;
@@ -494,9 +498,18 @@ dcmopen(dev, flag, mode, p)
 	(void) dcmmctl(dev, mbits, DMSET);	/* enable port */
 
 	/* Set soft-carrier if so configured. */
-	if ((sc->sc_softCAR & (1 << port)) ||
+	if ((sc->sc_softCAR & (1 << port)) || DCMCUA(dev) ||
 	    (dcmmctl(dev, MO_OFF, DMGET) & MI_CD))
 		tp->t_state |= TS_CARR_ON;
+
+	if (DCMCUA(dev)) {
+		if (tp->t_state & TS_ISOPEN) {
+			/* Ah, but someone already is dialed in... */
+			splx(s);
+			return (EBUSY);
+		}
+		sc->sc_cua = 1;		/* We go into CUA mode */
+	}
 
 #ifdef DEBUG
 	if (dcmdebug & DDB_MODEM)
@@ -506,18 +519,31 @@ dcmopen(dev, flag, mode, p)
 #endif
 
 	/* Wait for carrier if necessary. */
-	if ((flag & O_NONBLOCK) == 0)
-		while ((tp->t_cflag & CLOCAL) == 0 &&
-		    (tp->t_state & TS_CARR_ON) == 0) {
+	if (flag & O_NONBLOCK) {
+		if (!DCMCUA(dev) && sc->sc_cua) {
+			/* Opening TTY non-blocking... but the CUA is busy */
+			splx(s);
+			return (EBUSY);
+		}
+	} else {
+		while (sc->sc_cua ||
+		    ((tp->t_cflag & CLOCAL) == 0 &&
+		    (tp->t_state & TS_CARR_ON) == 0)) {
 			tp->t_state |= TS_WOPEN;
 			error = ttysleep(tp, (caddr_t)&tp->t_rawq,
 			    TTIPRI | PCATCH, ttopen, 0);
+			if (!DCMCUA(dev) && sc->sc_cua && error == EINTR)
+				continue;
 			if (error) {
+				if (DCMCUA(dev))
+					sc->sc_cua = 0;
 				splx(s);
 				return (error);
 			}
+			if (!DCMCUA(dev) && sc->sc_cua)
+				continue;
 		}
-	
+	}
 	splx(s);
 
 #ifdef DEBUG
@@ -561,6 +587,7 @@ dcmclose(dev, flag, mode, p)
 		printf("%s port %d: dcmclose: st %x fl %x\n",
 			sc->sc_dev.dv_xname, port, tp->t_state, tp->t_flags);
 #endif
+	sc->sc_cua = 0;
 	splx(s);
 	ttyclose(tp);
 #if 0
@@ -776,7 +803,7 @@ dcmreadbuf(sc, port)
 	dsp->rints++;
 #endif
 	tp = sc->sc_tty[port];
-	if (tp == NULL || (tp->t_state & TS_ISOPEN) == 0)
+	if (tp == NULL)
 		return;
 
 	if ((tp->t_state & TS_ISOPEN) == 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_fcntl.c,v 1.5 1997/01/19 00:43:43 niklas Exp $	 */
+/*	$OpenBSD: svr4_fcntl.c,v 1.10 1997/08/29 19:14:53 kstailey Exp $	 */
 /*	$NetBSD: svr4_fcntl.c,v 1.14 1995/10/14 20:24:24 christos Exp $	 */
 
 /*
@@ -95,7 +95,10 @@ svr4_to_bsd_flags(l)
 	r |= (l & SVR4_O_NDELAY) ? O_NONBLOCK : 0;
 	r |= (l & SVR4_O_APPEND) ? O_APPEND : 0;
 	r |= (l & SVR4_O_SYNC) ? O_FSYNC : 0;
+#if 0
+	/* Dellism ??? */
 	r |= (l & SVR4_O_RAIOSIG) ? O_ASYNC : 0;
+#endif
 	r |= (l & SVR4_O_NONBLOCK) ? O_NONBLOCK : 0;
 	r |= (l & SVR4_O_PRIV) ? O_EXLOCK : 0;
 	r |= (l & SVR4_O_CREAT) ? O_CREAT : 0;
@@ -117,7 +120,10 @@ bsd_to_svr4_flags(l)
 	r |= (l & O_NDELAY) ? SVR4_O_NONBLOCK : 0;
 	r |= (l & O_APPEND) ? SVR4_O_APPEND : 0;
 	r |= (l & O_FSYNC) ? SVR4_O_SYNC : 0;
+#if 0
+	/* Dellism ??? */
 	r |= (l & O_ASYNC) ? SVR4_O_RAIOSIG : 0;
+#endif
 	r |= (l & O_NONBLOCK) ? SVR4_O_NONBLOCK : 0;
 	r |= (l & O_EXLOCK) ? SVR4_O_PRIV : 0;
 	r |= (l & O_CREAT) ? SVR4_O_CREAT : 0;
@@ -255,7 +261,7 @@ svr4_sys_open(p, v, retval)
 	if (error)
 		return error;
 
-	if ((SCARG(&cup, flags) & O_NOCTTY) && SESS_LEADER(p) &&
+	if (!(SCARG(&cup, flags) & O_NOCTTY) && SESS_LEADER(p) &&
 	    !(p->p_flag & P_CONTROLT)) {
 		struct filedesc	*fdp = p->p_fd;
 		struct file	*fp = fdp->fd_ofiles[*retval];
@@ -305,6 +311,57 @@ svr4_sys_access(p, v, retval)
 }
 
 int
+svr4_sys_pread(p, v, retval)
+	register struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct svr4_sys_pread_args *uap = v;
+	struct sys_lseek_args lap;
+	struct sys_read_args rap;
+	int error;
+
+	SCARG(&lap, fd) = SCARG(uap, fd);
+	SCARG(&lap, offset) = SCARG(uap, off);
+	SCARG(&lap, whence) = SEEK_CUR;
+
+	if ((error = sys_lseek(p, &lap, retval)) != 0)
+		return error;
+
+	SCARG(&rap, fd) = SCARG(uap, fd);
+	SCARG(&rap, buf) = SCARG(uap, buf);
+	SCARG(&rap, nbyte) = SCARG(uap, nbyte);
+
+	return sys_read(p, &rap, retval);
+}
+
+int
+svr4_sys_pwrite(p, v, retval)
+	register struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct svr4_sys_pwrite_args *uap = v;
+	struct sys_lseek_args lap;
+	struct sys_write_args wap;
+	int error;
+
+	SCARG(&lap, fd) = SCARG(uap, fd);
+	SCARG(&lap, offset) = SCARG(uap, off);
+	SCARG(&lap, whence) = SEEK_CUR;
+
+	if ((error = sys_lseek(p, &lap, retval)) != 0)
+		return error;
+
+	SCARG(&wap, fd) = SCARG(uap, fd);
+	SCARG(&wap, buf) = (char *)SCARG(uap, buf); /* XXX until sys_write_args
+						       is fixed */
+	SCARG(&wap, nbyte) = SCARG(uap, nbyte);
+
+	return sys_write(p, &wap, retval);
+}
+
+int
 svr4_sys_fcntl(p, v, retval)
 	register struct proc *p;
 	void *v;
@@ -333,9 +390,24 @@ svr4_sys_fcntl(p, v, retval)
 		return error;
 
 	case F_SETFL:
-		SCARG(&fa, arg) =
-			(void *) svr4_to_bsd_flags((u_long) SCARG(uap, arg));
-		return sys_fcntl(p, &fa, retval);
+		{
+			/*
+			 * we must save the O_ASYNC flag, as that is
+			 * handled by ioctl(_, I_SETSIG, _) emulation.
+			 */
+			int cmd, flags;
+
+			cmd = SCARG(&fa, cmd); /* save it for a while */
+
+			SCARG(&fa, cmd) = F_GETFL;
+			if ((error = sys_fcntl(p, &fa, &flags)) != 0)
+				return error;
+			flags &= O_ASYNC;
+			flags |= svr4_to_bsd_flags((u_long) SCARG(uap, arg));
+			SCARG(&fa, cmd) = cmd;
+			SCARG(&fa, arg) = (void *) flags;
+			return sys_fcntl(p, &fa, retval);
+		}
 
 	case F_GETLK:
 		if (SCARG(uap, cmd) == SVR4_F_GETLK_SVR3)

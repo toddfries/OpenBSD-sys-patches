@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.9 1997/01/16 09:25:46 niklas Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.11 1997/09/19 17:16:18 niklas Exp $	*/
 /*	$NetBSD: cpu.h,v 1.36 1996/09/11 00:11:42 thorpej Exp $	*/
 
 /*
@@ -190,10 +190,8 @@ void	doboot __P((void)) __attribute__((__noreturn__));
 u_long	getdfc __P((void));
 u_long	getsfc __P((void));
 void	loadustp __P((int));
-#ifdef FPCOPROC
 void	m68881_save __P((struct fpframe *));
 void	m68881_restore __P((struct fpframe *));
-#endif
 void	physcopyseg __P((vm_offset_t, vm_offset_t));
 u_int	probeva __P((u_int, u_int));
 void	proc_trampoline __P((void));
@@ -227,8 +225,6 @@ int	badaddr __P((caddr_t));
 int	badbaddr __P((caddr_t));
 void	bootsync __P((void));
 void	dumpconf __P((void));
-struct frame;
-void	regdump __P((struct frame *, int));
 
 /*
  * Prototypes from sys_machdep.c:

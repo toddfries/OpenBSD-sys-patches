@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.9 1997/04/10 13:06:24 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.16 1997/10/14 01:02:52 weingart Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.3 1996/03/09 20:52:54 ghudson Exp $	*/
 
 /*
@@ -43,6 +43,7 @@
 #define	DOSBBSECTOR	0		/* DOS boot block relative sector # */
 #define	DOSPARTOFF	446
 #define	NDOSPART	4
+#define	DOSACTIVE	0x80		/* active partition */
 
 struct dos_partition {
 	u_int8_t	dp_flag;	/* bootstrap flags */
@@ -70,19 +71,39 @@ struct dos_partition {
 #define DOSPTYP_NETBSD	DOSPTYP_386BSD	/* NetBSD partition type (XXX) */
 #define DOSPTYP_OPENBSD	0xa6		/* OpenBSD partition type */
 
+struct dos_mbr {
+	u_int8_t		dmbr_boot[DOSPARTOFF];
+	struct dos_partition	dmbr_parts[NDOSPART];
+	u_int16_t		dmbr_sign;
+} __attribute__((packed));
+
+#define DOSMBR_SIGNATURE	(0xaa55)
+
 #include <sys/dkbad.h>
 struct cpu_disklabel {
 	struct dos_partition dosparts[NDOSPART];
 	struct dkbad bad;
 };
 
+#define DKBAD(x) ((x)->bad)
+
 /* Isolate the relevant bits to get sector and cylinder. */
 #define	DPSECT(s)	((s) & 0x3f)
 #define	DPCYL(c, s)	((c) + (((s) & 0xc0) << 2))
 
-#ifdef _KERNEL
-struct disklabel;
-int	bounds_check_with_label __P((struct buf *, struct disklabel *, int));
-#endif
+static __inline u_int32_t get_le __P((void *));
+
+static __inline u_int32_t
+get_le(p)
+	void *p;
+{
+	u_int8_t *_p = (u_int8_t *)p;
+	u_int32_t x;
+	x = _p[0];
+	x |= _p[1] << 8;
+	x |= _p[2] << 16;
+	x |= _p[3] << 24;
+	return x;
+}
 
 #endif /* _MACHINE_DISKLABEL_H_ */

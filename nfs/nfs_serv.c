@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.11 1997/04/18 09:22:45 deraadt Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.13 1997/10/06 20:20:47 deraadt Exp $	*/
 /*	$NetBSD: nfs_serv.c,v 1.25 1996/03/02 15:55:52 jtk Exp $	*/
 
 /*

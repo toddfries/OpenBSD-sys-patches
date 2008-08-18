@@ -1,4 +1,4 @@
-/*	$OpenBSD: umap.h,v 1.5 1996/03/25 18:02:55 mickey Exp $	*/
+/*	$OpenBSD: umap.h,v 1.7 1997/10/06 20:20:40 deraadt Exp $	*/
 /*	$NetBSD: umap.h,v 1.6 1996/02/09 22:41:00 christos Exp $	*/
 
 /*

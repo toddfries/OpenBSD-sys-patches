@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_pageout.c,v 1.5 1997/04/17 01:25:22 niklas Exp $	*/
+/*	$OpenBSD: vm_pageout.c,v 1.7 1997/10/06 20:21:25 deraadt Exp $	*/
 /*	$NetBSD: vm_pageout.c,v 1.23 1996/02/05 01:54:07 christos Exp $	*/
 
 /* 

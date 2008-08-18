@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.45 1997/04/17 03:44:50 tholo Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.63 1997/10/28 09:11:35 niklas Exp $	*/
 /*	$NetBSD: machdep.c,v 1.202 1996/05/18 15:54:59 christos Exp $	*/
 
 /*-
@@ -74,6 +74,7 @@
 #endif
 
 #include <dev/cons.h>
+#include <stand/boot/bootarg.h>
 
 #include <vm/vm.h>
 #include <vm/vm_kern.h>
@@ -97,8 +98,12 @@
 #include <i386/isa/isa_machdep.h>
 #include <i386/isa/nvram.h>
 
-#include "apm.h"
+#include "bios.h"
+#if NBIOS > 0
+#include <machine/biosvar.h>
+#endif
 
+#include "apm.h"
 #if NAPM > 0
 #include <machine/apmvar.h>
 #endif
@@ -147,6 +152,7 @@ int	cpu_class;
 struct	msgbuf *msgbufp;
 int	msgbufmapped;
 
+bootarg_t *bootargp;
 vm_map_t buffer_map;
 
 extern	vm_offset_t avail_start, avail_end;
@@ -176,15 +182,12 @@ void	dumpsys __P((void));
 void	identifycpu __P((void));
 void	init386 __P((vm_offset_t));
 void	consinit __P((void));
-#ifdef COMPAT_NOMID
-static int exec_nomid	__P((struct proc *, struct exec_package *));
-#endif
 
 int	bus_mem_add_mapping __P((bus_addr_t, bus_size_t,
 	    int, bus_space_handle_t *));
 
-extern long cnvmem;	/* BIOS's conventional memory size */
-extern long extmem;	/* BIOS's extended memory size */
+extern u_int cnvmem;	/* BIOS's conventional memory size */
+extern u_int extmem;	/* BIOS's extended memory size */
 
 /*
  * Machine-dependent startup code
@@ -196,7 +199,7 @@ cpu_startup()
 	caddr_t v;
 	int sz;
 	int base, residual;
-	vm_offset_t minaddr, maxaddr;
+	vm_offset_t minaddr, maxaddr, pa;
 	vm_size_t size;
 	struct pcb *pcb;
 	int x;
@@ -204,12 +207,23 @@ cpu_startup()
 	/*
 	 * Initialize error message buffer (at end of core).
 	 */
+	pa = avail_end;
 	/* avail_end was pre-decremented in pmap_bootstrap to compensate */
-	for (i = 0; i < btoc(sizeof(struct msgbuf)); i++)
+	for (i = 0; i < btoc(sizeof(struct msgbuf)); i++, pa += NBPG)
 		pmap_enter(pmap_kernel(),
 		    (vm_offset_t)((caddr_t)msgbufp + i * NBPG),
-		    avail_end + i * NBPG, VM_PROT_ALL, TRUE);
+		    pa, VM_PROT_ALL, TRUE);
 	msgbufmapped = 1;
+
+	/* Boot arguments are in page 1 */
+	if (bootargv != NULL) {
+		pa = NBPG;
+		for (i = 0; i < btoc(bootargc); i++, pa += NBPG)
+			pmap_enter(pmap_kernel(),
+			    (vm_offset_t)((caddr_t)bootargp + i * NBPG),
+			    pa, VM_PROT_READ|VM_PROT_WRITE, TRUE);
+	} else
+		bootargp = NULL;
 
 	printf(version);
 	startrtclock();
@@ -338,7 +352,6 @@ cpu_startup()
 	lldt(pcb->pcb_ldt_sel);
 
 	proc0.p_md.md_regs = (struct trapframe *)pcb->pcb_tss.tss_esp0 - 1;
-
 }
 
 /*
@@ -534,39 +547,6 @@ identifycpu()
 	if (cpu_class >= CPUCLASS_486)
 		lcr0(rcr0() | CR0_WP);
 #endif
-}
-
-/*  
- * machine dependent system variables.
- */ 
-int
-cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
-{
-	dev_t consdev;
-
-	/* all sysctl names at this level are terminal */
-	if (namelen != 1)
-		return (ENOTDIR);		/* overloaded */
-
-	switch (name[0]) {
-	case CPU_CONSDEV:
-		if (cn_tab != NULL)
-			consdev = cn_tab->cn_dev;
-		else
-			consdev = NODEV;
-		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
-		    sizeof consdev));
-	default:
-		return (EOPNOTSUPP);
-	}
-	/* NOTREACHED */
 }
 
 #ifdef COMPAT_IBCS2
@@ -827,15 +807,19 @@ haltsys:
 	doshutdownhooks();
 
 	if (howto & RB_HALT) {
-#if NAPM > 0 && !defined(APM_NO_POWEROFF)
-		/* turn off, if we can.  But try to turn disk off and
-		 * wait a bit first--some disk drives are slow to clean up
-		 * and users have reported disk corruption.
-		 */
-		delay(500000);
-		apm_set_powstate(APM_DEV_DISK(0xff), APM_SYS_OFF);
-		delay(500000);
-		apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_OFF);
+#if NAPM > 0
+		if (howto & RB_POWERDOWN) {
+			printf("\nAttempting to power down...\n");
+			/*
+			 * Turn off, if we can.  But try to turn disk off and
+		 	 * wait a bit first--some disk drives are slow to
+			 * clean up and users have reported disk corruption.
+		 	 */
+			delay(500000);
+			apm_set_powstate(APM_DEV_DISK(0xff), APM_SYS_OFF);
+			delay(500000);
+			apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_OFF);
+		}
 #endif
 		printf("\n");
 		printf("The operating system has halted.\n");
@@ -1271,6 +1255,7 @@ init386(first_avail)
 		/* XXX What should we do? */
 		printf("WARNING: CAN'T ALLOCATE BASE RAM FROM IOMEM EXTENT MAP!\n");
 	}
+
 	avail_end = biosextmem ? IOM_END + biosextmem * 1024
 	    : biosbasemem * 1024;	/* just temporary use */
 
@@ -1284,8 +1269,12 @@ init386(first_avail)
 	biosbasemem &= -(NBPG / 1024);
 	biosextmem &= -(NBPG / 1024);
 
-	avail_start = NBPG;	/* BIOS leaves data in low memory */
-				/* and VM system doesn't work with phys 0 */
+	/*
+	 * BIOS leaves data in low memory and VM system doesn't work with
+	 * phys 0,  /boot leaves arguments at page 1.
+	 */
+	avail_start = NBPG + i386_round_page(bootargc);
+
 	avail_end = biosextmem ? IOM_END + biosextmem * 1024
 	    : biosbasemem * 1024;
 
@@ -1299,6 +1288,7 @@ init386(first_avail)
 	 * These guys should be page-aligned.
 	 */
 	hole_start = biosbasemem * 1024;
+
 	/* we load right after the I/O hole; adjust hole_end to compensate */
 	hole_end = round_page(first_avail);
 	avail_next = avail_start;
@@ -1362,95 +1352,19 @@ _remque(v)
 	elem->q_prev = 0;
 }
 
-#ifdef COMPAT_NOMID
-static int
-exec_nomid(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	int error;
-	u_long midmag, magic;
-	u_short mid;
-	struct exec *execp = epp->ep_hdr;
-
-	/* check on validity of epp->ep_hdr performed by exec_out_makecmds */
-
-	midmag = ntohl(execp->a_midmag);
-	mid = (midmag >> 16) & 0xffff;
-	magic = midmag & 0xffff;
-
-	if (magic == 0) {
-		magic = (execp->a_midmag & 0xffff);
-		mid = MID_ZERO;
-	}
-
-	midmag = mid << 16 | magic;
-
-	switch (midmag) {
-	case (MID_ZERO << 16) | ZMAGIC:
-		/*
-		 * 386BSD's ZMAGIC format:
-		 */
-		error = exec_aout_prep_oldzmagic(p, epp);
-		break;
-
-	case (MID_ZERO << 16) | QMAGIC:
-		/*
-		 * BSDI's QMAGIC format:
-		 * same as new ZMAGIC format, but with different magic number
-		 */
-		error = exec_aout_prep_zmagic(p, epp);
-		break;
-
-	case (MID_ZERO << 16) | NMAGIC:
-		/*
-		 * BSDI's NMAGIC format:
-		 * same as NMAGIC format, but with different magic number
-		 * and with text starting at 0.
-		 */
-		error = exec_aout_prep_oldnmagic(p, epp);
-		break;
-
-	case (MID_ZERO << 16) | OMAGIC:
-		/*
-		 * BSDI's OMAGIC format:
-		 * same as OMAGIC format, but with different magic number
-		 * and with text starting at 0.
-		 */
-		error = exec_aout_prep_oldomagic(p, epp);
-		break;
-
-	default:
-		error = ENOEXEC;
-	}
-
-	return error;
-}
-#endif
-
 /*
  * cpu_exec_aout_makecmds():
  *	cpu-dependent a.out format hook for execve().
  *
  * Determine of the given exec package refers to something which we
  * understand and, if so, set up the vmcmds for it.
- *
- * On the i386, old (386bsd) ZMAGIC binaries and BSDI QMAGIC binaries
- * if COMPAT_NOMID is given as a kernel option.
  */
 int
 cpu_exec_aout_makecmds(p, epp)
 	struct proc *p;
 	struct exec_package *epp;
 {
-	int error = ENOEXEC;
-
-#ifdef COMPAT_NOMID
-	if ((error = exec_nomid(p, epp)) == 0)
-		return error;
-#endif /* ! COMPAT_NOMID */
-
-	return error;
+	return ENOEXEC;
 }
 
 u_int
@@ -1514,18 +1428,22 @@ cpu_reset()
 {
 	struct region_descriptor region;
 
+	disable_intr();
+
 	/* Toggle the hardware reset line on the keyboard controller. */
 	outb(KBCMDP, KBC_PULSE0);
-	delay(20000);
+	delay(100000);
 	outb(KBCMDP, KBC_PULSE0);
-	delay(20000);
+	delay(100000);
 
 	/*
 	 * Try to cause a triple fault and watchdog reset by setting the
 	 * IDT to point to nothing.
 	 */
-	setregion(&region, 0, 0);
+	bzero((caddr_t)idt, sizeof(idt));
+	setregion(&region, idt, sizeof(idt) - 1);
 	lidt(&region);
+	__asm __volatile("divl %0,%1" : : "q" (0), "a" (0));
 
 	/*
 	 * Try to cause a triple fault and watchdog reset by unmapping the
@@ -1535,6 +1453,52 @@ cpu_reset()
 	pmap_update(); 
 
 	for (;;);
+}
+
+/*  
+ * machine dependent system variables.
+ */ 
+int
+cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	struct proc *p;
+{
+	dev_t dev;
+
+	switch (name[0]) {
+	case CPU_CONSDEV:
+		if (namelen != 1)
+			return (ENOTDIR);		/* overloaded */
+
+		if (cn_tab != NULL)
+			dev = cn_tab->cn_dev;
+		else
+			dev = NODEV;
+		return sysctl_rdstruct(oldp, oldlenp, newp, &dev, sizeof(dev));
+#if NBIOS > 0
+	case CPU_BIOS:
+		return bios_sysctl(name + 1, namelen - 1, oldp, oldlenp,
+		    newp, newlen, p);
+#endif
+	case CPU_BLK2CHR:
+		if (namelen != 2)
+			return (ENOTDIR);		/* overloaded */
+		dev = blktochr((dev_t)name[1]);
+		return sysctl_rdstruct(oldp, oldlenp, newp, &dev, sizeof(dev));
+	case CPU_CHR2BLK:
+		if (namelen != 2)
+			return (ENOTDIR);		/* overloaded */
+		dev = chrtoblk((dev_t)name[1]);
+		return sysctl_rdstruct(oldp, oldlenp, newp, &dev, sizeof(dev));
+	default:
+		return EOPNOTSUPP;
+	}
+	/* NOTREACHED */
 }
 
 int

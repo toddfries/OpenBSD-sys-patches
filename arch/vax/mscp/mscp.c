@@ -1,4 +1,5 @@
-/*	$NetBSD: mscp.c,v 1.5 1997/01/11 11:20:31 ragge Exp $	*/
+/*	$OpenBSD: mscp.c,v 1.3 1997/09/12 09:25:47 maja Exp $	*/
+/*	$NetBSD: mscp.c,v 1.6 1997/07/04 11:58:20 ragge Exp $	*/
 
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -305,6 +306,7 @@ loop:
 		 * off line (the idiot controller does not tell us until
 		 * it comes back *on* line, or until we try to use it).
 		 */
+rwend:
 #ifdef DIAGNOSTIC
 		if (mp->mscp_cmdref == 0) {
 			/*
@@ -316,9 +318,12 @@ loop:
 			break;
 		}
 #endif
-rwend:
 		bp = (struct buf *) mp->mscp_cmdref;
 
+		if (mp->mscp_cmdref == -1) {
+			(*me->me_cmddone)(drive, mp);
+			break;
+		}
 		/*
 		 * Mark any error-due-to-bad-LBN (via `goto rwend').
 		 * WHAT STATUS WILL THESE HAVE?  IT SURE WOULD BE NICE

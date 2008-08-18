@@ -1,5 +1,5 @@
-/*	$OpenBSD: apcireg.h,v 1.1 1997/04/16 11:55:57 downsj Exp $	*/
-/*	$NetBSD: apcireg.h,v 1.1 1997/04/14 20:36:11 thorpej Exp $	*/
+/*	$OpenBSD: apcireg.h,v 1.2 1997/07/06 08:01:45 downsj Exp $	*/
+/*	$NetBSD: apcireg.h,v 1.2 1997/05/12 08:14:01 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Smith.  All rights reserved.
@@ -49,9 +49,6 @@ struct apciregs {
 
 /* max number of apci ports */
 #define	APCI_MAXPORT	4
-
-/* Frodo interrupt number of lowest apci port */
-#define	APCI_INTR0	12
 
 /*
  * baudrate divisor calculations.

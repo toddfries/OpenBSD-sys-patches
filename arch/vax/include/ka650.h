@@ -1,4 +1,5 @@
-/*	$NetBSD: ka650.h,v 1.4 1996/05/19 16:43:20 ragge Exp $	*/
+/*	$OpenBSD: ka650.h,v 1.7 1997/09/12 09:21:21 maja Exp $	*/
+/*	$NetBSD: ka650.h,v 1.6 1997/07/26 10:12:43 ragge Exp $	*/
 /*
  * Copyright (c) 1988 The Regents of the University of California.
  * All rights reserved.
@@ -195,6 +196,7 @@ struct ka650_ssc {
 #define CPMB650_HALT	0x03	/* Halt */
 #define CPMB650_BIP	0x04	/* Bootstrap in progress */
 #define CPMB650_RIP	0x08	/* Restart in progress */
+#define	CPMB650_DOTHIS	0x30	/* Execute sommand */
 #define CPMB650_LANG	0xf0	/* Language field */
 
 /*
@@ -233,6 +235,14 @@ struct ka650_ipcr {
 #define	KA650ROM_PUTS	0x2006000c	/* (jsb) put string to console */
 #define	KA650ROM_GETS	0x20060010	/* (jsb) read string with prompt */
 #define KA650_CONSTYPE	0x20140401	/* byte at which console type resides */
+
+/*
+ * Some useful macros
+ */
+#define	GETCPUTYPE(x)	((x >> 24) & 0xff)
+#define	GETSYSSUBT(x)	((x >> 8) & 0xff)
+#define	GETFRMREV(x)	((x >> 16) & 0xff)
+#define	GETCODREV(x)	(x & 0xff)
 
 /* prototypes */
 struct sbi_attach_args;

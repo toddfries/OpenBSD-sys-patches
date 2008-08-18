@@ -1,4 +1,4 @@
-#	$OpenBSD: DISKLESS,v 1.17 1997/04/29 05:15:15 deraadt Exp $
+#	$OpenBSD: DISKLESS,v 1.20 1997/10/20 01:40:11 todd Exp $
 #	$NetBSD: DISKLESS,v 1.26 1996/05/20 18:17:16 mrg Exp $
 #
 # DISKLESS -- Generic machine setup for diskless boot.
@@ -37,8 +37,7 @@ option		SYSVSEM		# System V-like semaphores
 option		SYSVSHM		# System V-like memory sharing
 #option		SHMMAXPGS=1024	# 1024 pages is the default
 
-option		COMPAT_NOMID	# compatibility with 386BSD, BSDI, NetBSD 0.8,
-option		COMPAT_09	# NetBSD 0.9,
+option		COMPAT_09	# Kernel compatibility with NetBSD 0.9,
 option		COMPAT_10	# NetBSD 1.0,
 option		COMPAT_11	# NetBSD 1.1,
 option		COMPAT_43	# and 4.3BSD
@@ -62,7 +61,7 @@ option		FDESC		# /dev/fd
 option		FIFO		# FIFOs; RECOMMENDED
 option		KERNFS		# /kern
 option		NULLFS		# loopback file system
-option		PORTAL		# create sockets with open(2)
+option		PORTAL		# dynamically created filesystem objects
 option		PROCFS		# /proc
 option		UMAPFS		# NULLFS + uid and gid remapping
 option		UNION		# union file system
@@ -125,7 +124,7 @@ mms1	at isa? port 0x238 irq 5
 #scsibus* at bt?
 #ncr*	at pci? dev ? function ?	# NCR 538XX SCSI controllers
 #scsibus* at ncr?
-#sea0	at isa? iomem 0xc8000 irq 5
+#sea0	at isa? iomem 0xc8000 irq 5	# Seagate ST0[12] SCSI controllers
 #scsibus* at sea?
 #uha0	at isa? port 0x330 irq ? drq ?	# UltraStor [13]4f SCSI controllers
 #uha1	at isa? port 0x334 irq ? drq ?	# UltraStor [13]4f SCSI controllers

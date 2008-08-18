@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.3 1996/09/02 18:14:21 dm Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.6 1997/07/23 02:49:35 denny Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)mbuf.h	8.3 (Berkeley) 1/21/94
+ *	@(#)mbuf.h	8.5 (Berkeley) 2/19/95
  */
 
 #ifndef M_WAITOK
@@ -41,9 +41,9 @@
 #endif
 
 /*
- * Mbufs are of a single size, MSIZE (machine/machparam.h), which
+ * Mbufs are of a single size, MSIZE (machine/param.h), which
  * includes overhead.  An mbuf may add a single "mbuf cluster" of size
- * MCLBYTES (also in machine/machparam.h), which has no additional overhead
+ * MCLBYTES (also in machine/param.h), which has no additional overhead
  * and is used instead of the internal data area; this is done when
  * at least MINCLSIZE of data must be stored.
  */
@@ -51,7 +51,7 @@
 #define	MLEN		(MSIZE - sizeof(struct m_hdr))	/* normal data len */
 #define	MHLEN		(MLEN - sizeof(struct pkthdr))	/* data len w/pkthdr */
 
-#define	MINCLSIZE	(MHLEN + MLEN)	/* smallest amount to put in cluster */
+#define	MINCLSIZE	(MHLEN+MLEN+1)	/* smallest amount to put in cluster */
 #define	M_MAXCOMPRESS	(MHLEN / 2)	/* max amount to copy for compression */
 
 /*
@@ -123,19 +123,29 @@ struct mbuf {
 /* mbuf pkthdr flags, also in m_flags */
 #define	M_BCAST		0x0100	/* send/received as link-level broadcast */
 #define	M_MCAST		0x0200	/* send/received as link-level multicast */
+#define M_CONF		0x0400  /* packet was encrypted (ESP-transport) */
+#define M_AUTH		0x0800  /* packet was authenticated (AH) */
+#define M_CTUN		0x1000  /* packet was encrypted (ESP-tunnel) */
 
 /* flags copied when copying m_pkthdr */
-#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_BCAST|M_MCAST)
+#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_BCAST|M_MCAST|M_CONF|M_AUTH|M_CTUN)
 
 /* mbuf types */
 #define	MT_FREE		0	/* should be on free list */
 #define	MT_DATA		1	/* dynamic (data) allocation */
 #define	MT_HEADER	2	/* packet header */
-#define	MT_SONAME	3	/* socket name */
-#define	MT_SOOPTS	4	/* socket options */
-#define	MT_FTABLE	5	/* fragment reassembly header */
-#define MT_CONTROL	6	/* extra-data protocol message */
-#define MT_OOBDATA	7	/* expedited data  */
+#define	MT_SOCKET	3	/* socket structure */
+#define	MT_PCB		4	/* protocol control block */
+#define	MT_RTABLE	5	/* routing tables */
+#define	MT_HTABLE	6	/* IMP host tables */
+#define	MT_ATABLE	7	/* address resolution tables */
+#define	MT_SONAME	8	/* socket name */
+#define	MT_SOOPTS	10	/* socket options */
+#define	MT_FTABLE	11	/* fragment reassembly header */
+#define	MT_RIGHTS	12	/* access rights */
+#define	MT_IFADDR	13	/* interface address */
+#define	MT_CONTROL	14	/* extra-data protocol message */
+#define	MT_OOBDATA	15	/* expedited data  */
 
 /* flags to m_get/MGET */
 #define	M_DONTWAIT	M_NOWAIT
@@ -389,11 +399,19 @@ int mbtypes[] = {				/* XXX */
 	M_FREE,		/* MT_FREE	0	   should be on free list */
 	M_MBUF,		/* MT_DATA	1	   dynamic (data) allocation */
 	M_MBUF,		/* MT_HEADER	2	   packet header */
-	M_MBUF,		/* MT_SONAME	3	   socket name */
-	M_SOOPTS,	/* MT_SOOPTS	4	   socket options */
-	M_FTABLE,	/* MT_FTABLE	5	   fragment reassembly header */
-	M_MBUF,		/* MT_CONTROL	6	   extra-data protocol message */
-	M_MBUF,		/* MT_OOBDATA	7	   expedited data  */
+	M_SOCKET,	/* MT_SOCKET	3	   socket structure */
+	M_PCB,		/* MT_PCB	4	   protocol control block */
+	M_RTABLE,	/* MT_RTABLE	5	   routing tables */
+	M_HTABLE,	/* MT_HTABLE	6	   IMP host tables */
+	0,		/* MT_ATABLE	7	   address resolution tables */
+	M_MBUF,		/* MT_SONAME	8	   socket name */
+	0,		/* 		9 */
+	M_SOOPTS,	/* MT_SOOPTS	10	   socket options */
+	M_FTABLE,	/* MT_FTABLE	11	   fragment reassembly header */
+	M_MBUF,		/* MT_RIGHTS	12	   access rights */
+	M_IFADDR,	/* MT_IFADDR	13	   interface address */
+	M_MBUF,		/* MT_CONTROL	14	   extra-data protocol message */
+	M_MBUF,		/* MT_OOBDATA	15	   expedited data  */
 #ifdef DATAKIT
 	25, 26, 27, 28, 29, 30, 31, 32		/* datakit ugliness */
 #endif

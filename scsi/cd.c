@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.23 1997/04/14 04:09:03 downsj Exp $	*/
+/*	$OpenBSD: cd.c,v 1.28 1997/10/18 10:37:16 deraadt Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -115,7 +115,6 @@ void	cddone __P((struct scsi_xfer *));
 u_long	cd_size __P((struct cd_softc *, int));
 int	cd_get_mode __P((struct cd_softc *, struct cd_mode_data *, int));
 int	cd_set_mode __P((struct cd_softc *, struct cd_mode_data *));
-int	cd_play __P((struct cd_softc *, int, int ));
 int	cd_play_big __P((struct cd_softc *, int, int ));
 int	cd_play_tracks __P((struct cd_softc *, int, int, int, int ));
 int	cd_play_msf __P((struct cd_softc *, int, int, int, int, int, int ));
@@ -486,6 +485,7 @@ cdstrategy(bp)
 	 */
 	if (CDPART(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, cd->sc_dk.dk_label,
+	    cd->sc_dk.dk_cpulabel,
 	    (cd->flags & (CDF_WLABEL|CDF_LABELLING)) != 0) <= 0)
 		goto done;
 
@@ -970,7 +970,7 @@ cdioctl(dev, cmd, addr, flag, p)
 
 		if (CDPART(dev) != RAW_PART)
 			return ENOTTY;
-		if (error = cd_get_mode(cd, &data, AUDIO_PAGE))
+		if ((error = cd_get_mode(cd, &data, AUDIO_PAGE)) != 0)
 			return error;
 		if (onoff) {
 			/* turn it on */
@@ -1026,7 +1026,7 @@ cdioctl(dev, cmd, addr, flag, p)
 	default:
 		if (CDPART(dev) != RAW_PART)
 			return ENOTTY;
-		return scsi_do_safeioctl(cd->sc_link, dev, cmd, addr, flag, p);
+		return scsi_do_ioctl(cd->sc_link, dev, cmd, addr, flag, p);
 	}
 
 #ifdef DIAGNOSTIC
@@ -1086,7 +1086,7 @@ cdgetdisklabel(dev, cd)
 	errstring = readdisklabel(CDLABELDEV(dev), cdstrategy, lp,
 	    cd->sc_dk.dk_cpulabel);
 	if (errstring) {
-		printf("%s: %s\n", cd->sc_dev.dv_xname, errstring);
+		/*printf("%s: %s\n", cd->sc_dev.dv_xname, errstring);*/
 		return;
 	}
 }
@@ -1172,24 +1172,6 @@ cd_set_mode(cd, data)
 	return scsi_scsi_cmd(cd->sc_link, (struct scsi_generic *)&scsi_cmd,
 	    sizeof(scsi_cmd), (u_char *)data, sizeof(*data), CDRETRIES, 20000,
 	    NULL, SCSI_DATA_OUT);
-}
-
-/*
- * Get scsi driver to send a "start playing" command
- */
-int
-cd_play(cd, blkno, nblks)
-	struct cd_softc *cd;
-	int blkno, nblks;
-{
-	struct scsi_play scsi_cmd;
-
-	bzero(&scsi_cmd, sizeof(scsi_cmd));
-	scsi_cmd.opcode = PLAY;
-	_lto4b(blkno, scsi_cmd.blk_addr);
-	_lto2b(nblks, scsi_cmd.xfer_len);
-	return scsi_scsi_cmd(cd->sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), 0, 0, CDRETRIES, 200000, NULL, 0);
 }
 
 /*

@@ -1,4 +1,5 @@
-#	$NetBSD: files.sparc,v 1.23 1996/05/21 19:06:26 pk Exp $
+#	$OpenBSD: files.sparc,v 1.14 1997/09/17 06:47:05 downsj Exp $
+#	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
 # sparc-specific configuration info
@@ -13,19 +14,23 @@ attach mainbus at root
 
 device obio { [addr = -1], [level = -1] }
 attach obio at mainbus
-device vmel { [addr = -1], [level = -1], [vect = -1] }
-attach vmel at mainbus
-device vmes { [addr = -1], [level = -1], [vect = -1] }
-attach vmes at mainbus
-file	arch/sparc/dev/obio.c		obio | vmel | vmes
 
-device audio
-attach audio at mainbus, obio
-file	arch/sparc/dev/amd7930.c		audio
+device iommu {}
+attach iommu at mainbus
+file	arch/sparc/sparc/iommu.c		iommu
+
+device vme {}
+attach vme at iommu
+
+device vmel { [addr = -1], [level = -1], [vect = -1] }
+attach vmel at mainbus, vme
+device vmes { [addr = -1], [level = -1], [vect = -1] }
+attach vmes at mainbus, vme
+file	arch/sparc/dev/obio.c		obio | vmel | vmes | vme
 
 device auxreg
 attach auxreg at mainbus, obio
-file	arch/sparc/sparc/auxreg.c
+file	arch/sparc/sparc/auxreg.c		auxreg needs-count
 
 device clock
 attach clock at mainbus, obio
@@ -42,7 +47,7 @@ file	arch/sparc/sparc/clock.c
 
 device power
 attach power at obio
-file	arch/sparc/dev/power.c			power
+file	arch/sparc/dev/power.c			power needs-count
 
 device cpu
 attach cpu at mainbus
@@ -62,10 +67,6 @@ device fd: disk
 attach fd at fdc
 file	arch/sparc/dev/fd.c			fdc | fd needs-flag
 file	arch/sparc/sparc/bsd_fdintr.s		fdc
-
-device iommu {}
-attach iommu at mainbus
-file	arch/sparc/sparc/iommu.c		iommu
 
 device sbus { slot = -1, offset = -1 }
 attach sbus at mainbus, iommu
@@ -92,10 +93,18 @@ attach dma at sbus, obio
 device ledma {}
 attach ledma at sbus
 file	arch/sparc/dev/dma.c		dma | ledma
+device lebuffer {}
+attach lebuffer at sbus
+file	arch/sparc/dev/lebuffer.c	lebuffer
 
-device esp: scsi
+device esp: scsi, ncr53c9x
 attach esp at sbus, dma, obio
 file	arch/sparc/dev/esp.c		esp
+
+device audioamd: audio
+attach audioamd at mainbus, obio, sbus
+file	arch/sparc/dev/amd7930.c	audio
+file	arch/sparc/sparc/amd7930intr.s	audio
 
 # Brooktree DAC attribute
 define bt_dac
@@ -124,10 +133,18 @@ device cgeight: bt_dac
 attach cgeight at obio
 file	arch/sparc/dev/cgeight.c	cgeight needs-flag
 
+device tcx: bt_dac
+attach tcx at sbus
+file	arch/sparc/dev/tcx.c		tcx needs-flag
+
+device cgfourteen
+attach cgfourteen at obio
+file	arch/sparc/dev/cgfourteen.c	cgfourteen needs-flag
+
 file	arch/sparc/dev/bt_subr.c	bt_dac
 
 # device definition in sys/conf/files
-attach le at sbus, ledma, obio
+attach le at sbus, ledma, lebuffer, obio
 file	arch/sparc/dev/if_le.c		le
 
 device ie: ifnet, ether
@@ -154,10 +171,24 @@ device sw: scsi, ncr5380sbc
 attach sw at obio
 file	arch/sparc/dev/si.c		si | sw
 
+# Efficient Networks, Inc. ATM interface
+# device declaration in sys/conf/files
+#attach	en at sbus with en_sbus
+#file	arch/sparc/dev/if_en_sbus.c	en_sbus
+
+# Qlogic ISP 10x0 (Sbus) family
+# device declaration in sys/conf/files
+#attach isp at sbus with isp_sbus
+#file	arch/sparc/dev/isp_sbus.c	isp_sbus
+
 pseudo-device	kbd
 
+#
+# Generic Sun stuff
+#
+include "../../../dev/sun/files.sun"
+
 file	arch/sparc/dev/cons.c
-file	arch/sparc/dev/event.c
 file	arch/sparc/dev/fb.c
 file	arch/sparc/dev/ms.c
 file	arch/sparc/dev/kbd.c		kbd
@@ -175,12 +206,12 @@ file	arch/sparc/fpu/fpu_subr.c
 # N.B.: optimizer breaks pmap.c and/or cache.c somehow -- have not
 # identified the exact problem yet.  NOOPT_C suffices for now.
 file	arch/sparc/sparc/autoconf.c
-file	arch/sparc/sparc/amd7930intr.s	audio
 file	arch/sparc/sparc/cache.c
 file	arch/sparc/sparc/conf.c
+file	arch/sparc/sparc/emul.c
 file	arch/sparc/sparc/in_cksum.c
 file	arch/sparc/sparc/intr.c
-file	arch/sparc/sparc/kgdb_stub.c
+file	arch/sparc/sparc/kgdb_machdep.c	kgdb
 # sparc/sparc/locore.s is handled specially in the makefile,
 # because it must come first in the "ld" command line.
 file	arch/sparc/sparc/locore2.c
@@ -199,7 +230,7 @@ file	arch/sparc/sparc/disksubr.c
 
 file	kludge_for_in_proto.c		hy needs-flag
 
-file	arch/sparc/sparc/db_interface.c	ddb
+file	arch/sparc/sparc/db_interface.c	ddb | kgdb
 file	arch/sparc/sparc/db_trace.c	ddb
 file	arch/sparc/sparc/db_disasm.c	ddb
 

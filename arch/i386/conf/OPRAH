@@ -1,4 +1,4 @@
-#	$OpenBSD: OPRAH,v 1.14 1997/04/29 05:15:18 deraadt Exp $
+#	$OpenBSD: OPRAH,v 1.18 1997/09/26 16:43:00 kstailey Exp $
 #
 #	OPRAH -- Niklas Hallqvist's test machine
 #
@@ -26,7 +26,7 @@ option		DIAGNOSTIC	# internally consistency checks
 option		KTRACE		# system call tracing, a la ktrace(1)
 option		BOOT_CONFIG	# User kernel config
 #option		SCSIDEBUG
-option		COMCONSOLE	# Serial console
+#option		COMCONSOLE	# Serial console
 option		CONADDR=0x2f8
 option		CONUNIT=1
 
@@ -35,8 +35,7 @@ option		SYSVSEM		# System V-like semaphores
 option		SYSVSHM		# System V-like memory sharing
 #option		SHMMAXPGS=1024	# 1024 pages is the default
 
-option		COMPAT_NOMID	# compatibility with 386BSD, BSDI, NetBSD 0.8,
-option		COMPAT_09	# NetBSD 0.9,
+option		COMPAT_09	# Kernel compatibility with NetBSD 0.9,
 option		COMPAT_10	# NetBSD 1.0,
 option		COMPAT_43	# and 4.3BSD
 #option		TCP_COMPAT_42	# TCP bug compatibility with 4.2BSD
@@ -45,6 +44,7 @@ option		COMPAT_SVR4	# binary compatibility with SVR4
 option		COMPAT_IBCS2	# binary compatibility with SCO and ISC
 option		COMPAT_LINUX	# binary compatibility with Linux
 option		COMPAT_FREEBSD	# binary compatibility with FreeBSD
+option		COMPAT_BSDOS	# binary compatibility with BSD/OS
 
 option		USER_LDT	# user-settable LDT; used by WINE
 option		LKM		# loadable kernel modules
@@ -62,7 +62,7 @@ option		FDESC		# /dev/fd
 option		FIFO		# FIFOs; RECOMMENDED
 option		KERNFS		# /kern
 option		NULLFS		# loopback file system
-#option		PORTAL		# create sockets with open(2)
+#option		PORTAL		# dynamically created filesystem objects
 option		PROCFS		# /proc
 #option		UMAPFS		# NULLFS + uid and gid remapping
 #option		UNION		# union file system
@@ -73,6 +73,7 @@ option		INET		# IP + ICMP + TCP + UDP
 config		bsd	swap generic
 
 mainbus0	at root
+bios0	at mainbus0
 isa0	at mainbus0
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
@@ -94,11 +95,15 @@ lpt0	at isa? port 0x378 irq 7	# standard PC parallel ports
 aha0	at isa? port 0x230 irq ? drq ?	# Adaptec 154[02] SCSI controllers
 aha1	at isa? port 0x234 irq ? drq ?	# Adaptec 154[02] SCSI controllers
 scsibus* at aha?
+aic0	at isa? port 0x340 irq 11	# Adaptec 152[02] SCSI controllers
+scsibus* at aic?
 wds0    at isa? port 0x350 irq 15 drq 6 # WD7000 and TMC-7000 controllers
 wds1    at isa? port 0x358 irq 11 drq 5
 scsibus* at wds?
 
 sd*	at scsibus? target ? lun ?
+st*	at scsibus? target ? lun ?
+cd*	at scsibus? target ? lun ?
 
 fdc0	at isa? port 0x3f0 irq 6 drq 2	# standard PC floppy controllers
 #fdc1	at isa? port 0x370 irq ? drq ?

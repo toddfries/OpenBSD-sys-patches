@@ -1,4 +1,4 @@
-/*	$OpenBSD: pckbd.c,v 1.9 1997/01/24 19:57:26 niklas Exp $	*/
+/*	$OpenBSD: pckbd.c,v 1.11 1997/07/08 11:19:41 niklas Exp $	*/
 /*	$NetBSD: pckbd.c,v 1.14 1996/12/05 01:39:30 cgd Exp $	*/
 
 /*-
@@ -167,6 +167,10 @@ void async_update __P((void));
 
 #define	KBD_DELAY \
 	do { \
+		bus_space_read_1(pckbd_iot, pckbd_delay_ioh, 0); \
+		bus_space_read_1(pckbd_iot, pckbd_delay_ioh, 0); \
+		bus_space_read_1(pckbd_iot, pckbd_delay_ioh, 0); \
+		bus_space_read_1(pckbd_iot, pckbd_delay_ioh, 0); \
 		bus_space_read_1(pckbd_iot, pckbd_delay_ioh, 0); \
 		bus_space_read_1(pckbd_iot, pckbd_delay_ioh, 0); \
 		bus_space_read_1(pckbd_iot, pckbd_delay_ioh, 0); \
@@ -746,8 +750,19 @@ pckbd_translate(dev, c)
 
 	if (dt == KBR_EXTENDED) {
 		extended = 1;
-		return NULL;
+		return (NULL);
 	}
+
+#ifdef DDB
+	/*
+	 * Check for cntl-alt-esc.
+	 */
+	if ((dt == 1)
+	    && (shift_state & (CTL | ALT)) == (CTL | ALT)) {
+		Debugger();
+		return (NULL);
+	}
+#endif
 
 	/*
 	 * Check for make/break.
@@ -877,8 +892,8 @@ pckbd_cngetc(dev)
 
         do {
 		/* wait for byte */
-                while ((bus_space_read_1(pckbd_iot, pckbd_ioh, KBSTATP) & KBS_DIB)
-		    == 0)
+                while ((bus_space_read_1(pckbd_iot, pckbd_ioh, KBSTATP)
+		    & KBS_DIB) == 0)
 			KBD_DELAY;
 		KBD_DELAY;
 

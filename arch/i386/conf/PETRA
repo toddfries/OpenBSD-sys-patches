@@ -1,4 +1,4 @@
-#	$OpenBSD: PETRA,v 1.1 1997/02/13 23:27:03 niklas Exp $
+#	$OpenBSD: PETRA,v 1.8 1997/10/20 01:40:13 todd Exp $
 #
 #	PETRA -- everything that's currently supported with certain
 #		 changes for Applitron's fileserver petra, a 128 MB
@@ -6,6 +6,8 @@
 #
 
 machine		i386		# architecture, used by config; REQUIRED
+
+makeoptions	DEBUG="-g"	# make a bsd.gdb too
 
 include "../../../conf/GENERIC"
 
@@ -35,6 +37,7 @@ option		COMPAT_SVR4_NCR # 		"		 (NCR variant)
 option		COMPAT_IBCS2	# binary compatibility with SCO and ISC
 option		COMPAT_LINUX	# binary compatibility with Linux
 option		COMPAT_FREEBSD	# binary compatibility with FreeBSD
+option		COMPAT_BSDOS	# binary compatibility with BSD/OS
 
 maxusers	32		# estimated number of users
 
@@ -42,6 +45,7 @@ config		bsd	root on sd0a swap on ccd0b dumps on ccd0b
 
 mainbus0 at root
 
+bios0	at mainbus0
 isa0	at mainbus0
 eisa0	at mainbus0
 pci0	at mainbus0 bus ?
@@ -49,10 +53,10 @@ pci0	at mainbus0 bus ?
 ppb*	at pci? dev ? function ?	# PCI-PCI bridges
 pci*	at ppb? bus ?
 
-pcicmaster0     at isa? port 0x3E0 size 2
+pcicmaster0	at isa? port 0x3E0 size 2
 pcic0	at pcicmaster0 irq 11 iomem 0xd4000 iosiz 4096
 pcic1	at pcicmaster0 irq 12 iomem 0xd5000 iosiz 4096
-pcicmaster1 at isa? port 0x3E2 size 2
+pcicmaster1	at isa? port 0x3E2 size 2
 pcic2	at pcicmaster1 irq 11 iomem 0xd6000 iosiz 4096
 pcic3	at pcicmaster1 irq 12 iomem 0xd7000 iosiz 4096
 
@@ -76,7 +80,7 @@ com*	at ast? slave ?
 #com*	at boca? slave ?
 #rtfps0	at isa? port 0x1230 irq 10	# RT 4-port serial cards
 #com*	at rtfps? slave ?
-com3    at pcmcia? port 0x2e8 size 8 irq 3 slot ? # PCMCIA modem cards
+com3	at pcmcia? port 0x2e8 size 8 irq 3 slot ? # PCMCIA modem cards
 
 # option for using CD1400 handshaking for incoming data
 # requires a special cable that exchanges the RTS and DTR lines
@@ -112,7 +116,7 @@ aic0	at isa? port 0x340 irq 11	# Adaptec 152[02] SCSI controllers
 scsibus* at aic?
 ncr*	at pci? dev ? function ?	# NCR 538XX SCSI controllers
 scsibus* at ncr?
-sea0	at isa? iomem 0xc8000 irq 5
+sea0	at isa? iomem 0xc8000 irq 5	# Seagate ST0[12] SCSI controllers
 scsibus* at sea?
 uha0	at isa? port 0x330 irq ? drq ?	# UltraStor [13]4f SCSI controllers
 uha1	at isa? port 0x334 irq ? drq ?	# UltraStor [13]4f SCSI controllers
@@ -159,19 +163,21 @@ ep*	at eisa? slot ?				# 3C579 ethernet cards
 fea*	at eisa? slot ?				# DEC DEFEA FDDI cards
 le*	at pci? dev ? function ?		# PCnet-PCI based ethernet cards
 de*	at pci? dev ? function ?		# DC21X4X-based ethernet cards
+fxp*	at pci? dev ? function ?		# EtherExpress 10/100B ethernet cards
+ed*	at pci? dev ? function ?		# NE2000-compat ethernet cards
 ep0	at pci? dev ? function ?		# 3C590 ethernet cards
 ep*	at pci? dev ? function ?		# 3C590 ethernet cards
-ed*     at pcmcia? port 0x300 size 0x20 irq 10 slot ? # PCMCIA based ed cards
-ep*     at pcmcia? port 0x300 size 0x10 irq 10 slot ? # PCMCIA based ep cards
+ed*	at pcmcia? port 0x300 size 0x20 irq 10 slot ? # PCMCIA based ed cards
+ep*	at pcmcia? port 0x300 size 0x10 irq 10 slot ? # PCMCIA based ep cards
 fpa*	at pci? dev ? function ?		# DEC DEFPA FDDI cards
 
-pss0	at isa? port 0x220 irq 7 drq 6  # Personal Sound System
-sp0	at pss0 port 0x530 irq 10 drq 0	# 	sound port driver
+pss0	at isa? port 0x220 irq 7 drq 6		# Personal Sound System
+sp0	at pss0 port 0x530 irq 10 drq 0		# 	sound port driver
 
-sb0	at isa? port 0x220 irq 7 drq 1	# SoundBlaster
-wss0	at isa? port 0x530 irq 10 drq 0	# Windows Sound System
-pas0	at isa? port 0x220 irq 7 drq 1	# ProAudio Spectrum
-gus0	at isa? port 0x220 irq 7 drq 1 flags 6 # Gravis UltraSound (flags is record drq)
+sb0	at isa? port 0x220 irq 7 drq 1		# SoundBlaster
+wss0	at isa? port 0x530 irq 10 drq 0		# Windows Sound System
+pas0	at isa? port 0x220 irq 7 drq 1		# ProAudio Spectrum
+gus0	at isa? port 0x220 irq 7 drq 1 flags 6	# Gravis UltraSound (flags is record drq)
 #spkr0	at pckbd? port 0x61
 
 # Joystick driver. Probe is a little strange; add only if you have one.

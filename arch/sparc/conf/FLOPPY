@@ -1,8 +1,11 @@
-# 	$OpenBSD: FLOPPY,v 1.13 1997/04/29 05:15:59 deraadt Exp $
+# 	$OpenBSD: FLOPPY,v 1.16 1997/09/17 06:47:02 downsj Exp $
 # 	$NetBSD: GENERIC,v 1.28.2.1 1996/07/02 23:55:22 jtc Exp $
 
 # Machine architecture; required by config(8)
 machine		sparc
+
+# maxusers means mostly "let's get small" in terms of kernel malloc's
+maxusers	2
 
 #option		INSECURE	# default to secure
 
@@ -60,6 +63,7 @@ option		INET		# IP + ICMP + TCP + UDP
 #option		EON		# OSI tunneling over IP
 #option		CCITT,LLC,HDLC	# X.25
 #option		IPFILTER	# IP packet filter for security
+#option		IPFILTER_LOG	# use /dev/ipl to log IPF
 
 pseudo-device	loop	1	# network loopback
 #pseudo-device	bpfilter 8	# packet filter
@@ -104,8 +108,8 @@ obio0	at mainbus0				# sun4 and sun4m
 iommu0	at mainbus0				# sun4m
 sbus0	at iommu0				# sun4m
 
-#audio0	at mainbus0				# sun4c
-#audio0	at obio0				# sun4m
+#audioamd0 at mainbus0				# sun4c
+#audioamd0 at obio0				# sun4m
 
 auxreg0	at mainbus0				# sun4c
 auxreg0	at obio0				# sun4m

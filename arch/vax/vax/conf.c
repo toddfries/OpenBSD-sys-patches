@@ -1,5 +1,5 @@
-/*	$OpenBSD: conf.c,v 1.11 1997/01/17 08:44:25 maja Exp $ */
-/*	$NetBSD: conf.c,v 1.27 1997/01/07 11:35:20 mrg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.13 1997/09/10 12:04:43 maja Exp $ */
+/*	$NetBSD: conf.c,v 1.28 1997/02/04 19:13:17 ragge Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986 The Regents of the University of California.
@@ -113,9 +113,6 @@ bdev_decl(st);
 #include "cd.h"
 bdev_decl(cd);
 
-#include "md.h"
-bdev_decl(md);
-
 struct bdevsw	bdevsw[] =
 {
 	bdev_disk_init(NHP,hp),		/* 0: RP0?/RM0? */
@@ -141,7 +138,7 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NSD,sd),		/* 20: SCSI disk */
 	bdev_tape_init(NST,st),		/* 21: SCSI tape */
 	bdev_disk_init(NCD,cd),		/* 22: SCSI CD-ROM */
-	bdev_disk_init(NMD,md),		/* 23: memory disk driver */
+	bdev_notdef(),			/* 23: was: memory disk driver */
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
@@ -183,17 +180,17 @@ struct	consdev constab[]={
 /* Special for console storage */
 #define dev_type_rw(n)	int n __P((dev_t, int, int, struct proc *))
 
-/* plotters - open, close, write, ioctl, poll */
+/* plotters - open, close, write, ioctl, select */
 #define cdev_plotter_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev }
+	0, dev_init(c,n,select), (dev_type_mmap((*))) enodev }
 
 /* console mass storage - open, close, read/write */
 #define cdev_cnstore_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), (dev_type_ioctl((*))) enodev, \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
+	(dev_type_stop((*))) enodev, 0, (dev_type_select((*))) enodev, \
 	(dev_type_mmap((*))) enodev }
 
 #define cdev_lp_init(c,n) { \
@@ -205,13 +202,13 @@ struct	consdev constab[]={
 #define cdev_graph_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), dev_init(c,n,ioctl), dev_init(c,n,stop), \
-	0, dev_init(c,n,poll), (dev_type_mmap((*))) enodev }
+	0, dev_init(c,n,select), (dev_type_mmap((*))) enodev }
 
 /* Ingres */
 #define cdev_ingres_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) nullop, \
 	(dev_type_write((*))) nullop, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) nullop, 0, (dev_type_poll((*))) nullop, \
+	(dev_type_stop((*))) nullop, 0, (dev_type_select((*))) nullop, \
 	(dev_type_mmap((*))) enodev }
 
 
@@ -279,6 +276,7 @@ cdev_decl(crl);
 #define crxwrite crxrw
 cdev_decl(crx);
 
+#ifdef notyet
 #if VAX780
 #define NCFL 1
 #else
@@ -287,6 +285,7 @@ cdev_decl(crx);
 #define cflread cflrw
 #define cflwrite cflrw
 cdev_decl(cfl);
+#endif
 
 #include "dz.h"
 cdev_decl(dz);
@@ -334,6 +333,9 @@ cdev_decl(ipl);
 #define NIPF 0
 #endif
 
+#include "dl.h"
+cdev_decl(dl);
+
 #if defined(INGRES)
 #define NII 1
 #else
@@ -351,7 +353,6 @@ cdev_decl(tun);
 cdev_decl(cd);
 #include "ch.h"
 cdev_decl(ch);
-cdev_decl(md);
 #include "ss.h"
 cdev_decl(ss);
 #include "uk.h"
@@ -371,7 +372,11 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 5 */
 	cdev_plotter_init(NVP,vp),	/* 6: Versatec plotter */
 	cdev_swap_init(1,sw),		/* 7 */
+#ifdef notyet
 	cdev_cnstore_init(NCFL,cfl),	/* 8: 11/780 console floppy */
+#else
+	cdev_notdef(),			/* 8 */
+#endif
 	cdev_disk_init(NRA,ra),		/* 9: MSCP disk interface */
 	cdev_plotter_init(NVA,va),	/* 10: Benson-Varian plotter */
 	cdev_disk_init(NRK,rk),		/* 11: RK06/07 */
@@ -405,7 +410,7 @@ struct cdevsw	cdevsw[] =
 	cdev_audio_init(NNP,np),	/* 39: NP Intelligent Board */
 	cdev_graph_init(NQV,qv),	/* 40: QVSS graphic display */
 	cdev_graph_init(NQD,qd),	/* 41: QDSS graphic display */
-	cdev_gen_init(NIPF,ipl),	/* 42: ip filtering */
+	cdev_gen_ipf(NIPF,ipl),		/* 42: ip filtering */
 	cdev_ingres_init(NII,ii),	/* 43: Ingres device */
 	cdev_notdef(),			/* 44  was Datakit */
 	cdev_notdef(),			/* 45  was Datakit */
@@ -425,11 +430,12 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NSD,sd),		/* 59: SCSI disk */
 	cdev_tape_init(NST,st),		/* 60: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 61: SCSI CD-ROM */
-	cdev_disk_init(NMD,md),		/* 62: memory disk driver */
+	cdev_notdef(),			/* 62: was: memory disk driver */
 	cdev_ch_init(NCH,ch),		/* 63: SCSI autochanger */
 	cdev_scanner_init(NSS,ss),	/* 64: SCSI scanner */
 	cdev_uk_init(NUK,uk),		/* 65: SCSI unknown */
 	cdev_random_init(1,random),	/* 66: random data source */
+	cdev_tty_init(NDL,dl),		/* 67; DL11 */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -545,4 +551,22 @@ iszerodev(dev)
 {
 
 	return (major(dev) == 3 && minor(dev) == 12);
+}
+
+/*
+ * Convert a character device number to a block device number.
+ */
+dev_t
+blktochr(dev)
+	dev_t dev;
+{
+	int blkmaj = major(dev);
+	int i;
+
+	if (blkmaj >= nblkdev)
+		return (NODEV);
+	for (i = 0; i < sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]); i++)
+		if (blkmaj == chrtoblktbl[i])
+			return (makedev(i, minor(dev)));
+	return (NODEV);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_node.c,v 1.7 1997/04/18 10:09:46 deraadt Exp $	*/
+/*	$OpenBSD: nfs_node.c,v 1.9 1997/10/06 20:20:45 deraadt Exp $	*/
 /*	$NetBSD: nfs_node.c,v 1.16 1996/02/18 11:53:42 fvdl Exp $	*/
 
 /*

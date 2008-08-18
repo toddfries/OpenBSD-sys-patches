@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_print.c,v 1.4 1996/04/21 22:19:08 deraadt Exp $	*/
+/*	$OpenBSD: db_print.c,v 1.6 1997/07/19 22:31:20 niklas Exp $	*/
 /*	$NetBSD: db_print.c,v 1.5 1996/02/05 01:57:11 christos Exp $	*/
 
 /* 
@@ -36,6 +36,8 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
+#include <vm/vm.h>
+
 #include <machine/db_machdep.h>
 
 #include <ddb/db_lex.h>
@@ -60,12 +62,13 @@ db_show_regs(addr, have_addr, count, modif)
 
 	for (regp = db_regs; regp < db_eregs; regp++) {
 	    db_read_variable(regp, &value);
-	    db_printf("%-12s%#10n", regp->name, value);
+	    db_printf("%-12s%#*ln", regp->name, sizeof(db_expr_t) * 2 * 6 / 5,
+		(long)value);
 	    db_find_xtrn_sym_and_offset((db_addr_t)value, &name, &offset);
 	    if (name != 0 && offset <= db_maxoff && offset != value) {
 		db_printf("\t%s", name);
 		if (offset != 0)
-		    db_printf("+%#r", offset);
+		    db_printf("+%#lr", (long)offset);
 	    }
 	    db_printf("\n");
 	}

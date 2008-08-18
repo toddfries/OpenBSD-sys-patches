@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.3 1996/03/03 17:19:46 niklas Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.5 1997/10/06 20:19:53 deraadt Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*

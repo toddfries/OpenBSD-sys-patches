@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.23 1997/04/14 04:09:16 downsj Exp $	*/
+/*	$OpenBSD: sd.c,v 1.26 1997/10/18 10:37:19 deraadt Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*
@@ -223,9 +223,9 @@ sdattach(parent, self, aux)
 	if (error || sd_get_parms(sd, SCSI_AUTOCONF) != 0)
 		printf("drive offline\n");
 	else
-	        printf("%ldMB, %d cyl, %d head, %d sec, %d bytes/sec\n",
+	        printf("%ldMB, %d cyl, %d head, %d sec, %d bytes/sec, %ld sec total\n",
 		    dp->disksize / (1048576 / dp->blksize), dp->cyls,
-		    dp->heads, dp->sectors, dp->blksize);
+		    dp->heads, dp->sectors, dp->blksize, dp->disksize);
 }
 
 /*
@@ -473,6 +473,7 @@ sdstrategy(bp)
 	 */
 	if (SDPART(bp->b_dev) != RAW_PART &&
 	    bounds_check_with_label(bp, sd->sc_dk.dk_label,
+	    sd->sc_dk.dk_cpulabel,
 	    (sd->flags & (SDF_WLABEL|SDF_LABELLING)) != 0) <= 0)
 		goto done;
 
@@ -837,7 +838,7 @@ sdgetdisklabel(dev, sd)
 	errstring = readdisklabel(SDLABELDEV(dev), sdstrategy, lp,
 	    sd->sc_dk.dk_cpulabel);
 	if (errstring) {
-		printf("%s: %s\n", sd->sc_dev.dv_xname, errstring);
+		/*printf("%s: %s\n", sd->sc_dev.dv_xname, errstring);*/
 		return;
 	}
 }

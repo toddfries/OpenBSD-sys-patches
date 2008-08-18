@@ -1,4 +1,4 @@
-/*	$OpenBSD: libsa.h,v 1.7 1997/05/01 04:10:39 mickey Exp $	*/
+/*	$OpenBSD: libsa.h,v 1.22 1997/10/24 22:22:57 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -32,16 +32,31 @@
  *
  */
 
-#include <stand.h>
+#include <lib/libsa/stand.h>
+#include <machine/biosvar.h>
 
 void gateA20 __P((int));
+
+void smpprobe __P((void));
 void memprobe __P((void));
+void diskprobe __P((void));
+void apmprobe __P((void));
+
 void devboot __P((dev_t, char *));
 void *alloca __P((size_t));
+void machdep __P((void));
+void time_print __P((void));
 
-extern u_long	codeseg;
-extern int	boothowto;
-		/* XXX filled in assumption that last file opened is kernel */
-extern int	bootdev;
-extern u_int	cnvmem, extmem;
-extern const char bdevs[19][4];
+extern const char bdevs[][4];
+extern const int nbdevs;
+extern int bootdev; /* XXX pass through the global to exec_i386 */
+extern u_int cnvmem, extmem; /* XXX global pass memprobe()->machdep_start() */
+
+/* diskprobe.c */
+extern bios_diskinfo_t bios_diskinfo[];
+extern u_int32_t bios_cksumlen;
+
+/* memprobe.c */
+extern bios_memmap_t *memory_map;
+
+#define MACHINE_CMD	cmd_machine /* we have i386 specific sommands */

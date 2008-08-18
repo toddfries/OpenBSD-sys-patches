@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_ihash.c,v 1.2 1996/02/27 07:21:26 niklas Exp $	*/
+/*	$OpenBSD: ufs_ihash.c,v 1.4 1997/10/06 20:21:45 deraadt Exp $	*/
 /*	$NetBSD: ufs_ihash.c,v 1.3 1996/02/09 22:36:04 christos Exp $	*/
 
 /*

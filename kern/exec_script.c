@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_script.c,v 1.4 1996/10/20 15:30:07 dm Exp $	*/
+/*	$OpenBSD: exec_script.c,v 1.6 1997/10/06 20:19:48 deraadt Exp $	*/
 /*	$NetBSD: exec_script.c,v 1.13 1996/02/04 02:15:06 christos Exp $	*/
 
 /*

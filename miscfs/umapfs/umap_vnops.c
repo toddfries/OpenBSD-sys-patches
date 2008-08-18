@@ -1,4 +1,4 @@
-/*	$OpenBSD: umap_vnops.c,v 1.6 1996/05/29 07:12:10 deraadt Exp $	*/
+/*	$OpenBSD: umap_vnops.c,v 1.8 1997/10/06 20:20:42 deraadt Exp $	*/
 /*	$NetBSD: umap_vnops.c,v 1.5.4.1 1996/05/25 22:13:35 jtc Exp $	*/
 
 /*

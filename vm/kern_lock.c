@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.5 1997/04/17 01:25:16 niklas Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.8 1997/10/06 20:23:14 deraadt Exp $	*/
 /*	$NetBSD: kern_lock.c,v 1.10 1994/10/30 19:11:09 cgd Exp $	*/
 
 /* 
@@ -136,7 +136,7 @@ void simple_unlock(l)
 boolean_t simple_lock_try(l)
 	simple_lock_t	l;
 {
-    	return (!test_and_set((boolean_t *)l));
+	return (!test_and_set((boolean_t *)l));
 }
 #endif /* notdef */
 #endif /* NCPUS > 1 */

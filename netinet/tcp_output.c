@@ -1,5 +1,5 @@
-/*	$OpenBSD: tcp_output.c,v 1.5 1996/09/12 06:36:57 tholo Exp $	*/
-/*	$NetBSD: tcp_output.c,v 1.14 1996/02/13 23:43:53 christos Exp $	*/
+/*	$OpenBSD: tcp_output.c,v 1.7 1997/08/26 20:02:33 deraadt Exp $	*/
+/*	$NetBSD: tcp_output.c,v 1.16 1997/06/03 16:17:09 kml Exp $	*/
 
 /*
  * Copyright (c) 1982, 1986, 1988, 1990, 1993
@@ -306,27 +306,27 @@ send:
 				optlen += 4;
 			}
 		}
- 	}
+	}
  
- 	/*
+	/*
 	 * Send a timestamp and echo-reply if this is a SYN and our side 
 	 * wants to use timestamps (TF_REQ_TSTMP is set) or both our side
 	 * and our peer have sent timestamps in our SYN's.
- 	 */
- 	if ((tp->t_flags & (TF_REQ_TSTMP|TF_NOOPT)) == TF_REQ_TSTMP &&
- 	     (flags & TH_RST) == 0 &&
- 	    ((flags & (TH_SYN|TH_ACK)) == TH_SYN ||
+	 */
+	if ((tp->t_flags & (TF_REQ_TSTMP|TF_NOOPT)) == TF_REQ_TSTMP &&
+	     (flags & TH_RST) == 0 &&
+	    ((flags & (TH_SYN|TH_ACK)) == TH_SYN ||
 	     (tp->t_flags & TF_RCVD_TSTMP))) {
 		u_int32_t *lp = (u_int32_t *)(opt + optlen);
  
- 		/* Form timestamp option as shown in appendix A of RFC 1323. */
- 		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
- 		*lp++ = htonl(tcp_now);
- 		*lp   = htonl(tp->ts_recent);
- 		optlen += TCPOLEN_TSTAMP_APPA;
- 	}
+		/* Form timestamp option as shown in appendix A of RFC 1323. */
+		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
+		*lp++ = htonl(tcp_now);
+		*lp   = htonl(tp->ts_recent);
+		optlen += TCPOLEN_TSTAMP_APPA;
+	}
 
- 	hdrlen += optlen;
+	hdrlen += optlen;
  
 	/*
 	 * Adjust data length if insertion of options will
@@ -339,7 +339,7 @@ send:
 	 }
 
 #ifdef DIAGNOSTIC
- 	if (max_linkhdr + hdrlen > MHLEN)
+	if (max_linkhdr + hdrlen > MHLEN)
 		panic("tcphdr too big");
 #endif
 
@@ -467,7 +467,10 @@ send:
 		win = 0;
 	ti->ti_win = htons((u_int16_t) (win>>tp->rcv_scale));
 	if (SEQ_GT(tp->snd_up, tp->snd_nxt)) {
-		ti->ti_urp = htons((u_int16_t)(tp->snd_up - tp->snd_nxt));
+		u_int32_t urp = tp->snd_up - tp->snd_nxt;
+		if (urp > IP_MAXPACKET)
+			urp = IP_MAXPACKET;
+		ti->ti_urp = htons((u_int16_t)urp);
 		ti->ti_flags |= TH_URG;
 	} else
 		/*

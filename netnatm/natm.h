@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm.h,v 1.2 1996/07/03 17:24:30 chuck Exp $	*/
+/*	$OpenBSD: natm.h,v 1.5 1997/10/11 01:32:08 angelos Exp $	*/
 
 /*
  *
@@ -82,7 +82,7 @@ struct natmpcb {
   u_int	npcb_inq;			/* # of our pkts in proto q */
   struct socket	*npcb_socket;		/* backpointer to socket */
   struct ifnet *npcb_ifp;		/* pointer to hardware */
-  struct in_addr ipaddr;		/* remote IP address, if APCB_IP */
+  struct in_addr ipaddr;		/* remote IP address, if NPCB_IP */
   u_int16_t npcb_vci;			/* VCI */
   u_int8_t npcb_vpi;			/* VPI */
   u_int8_t npcb_flags;			/* flags */
@@ -138,10 +138,10 @@ void	npcb_free __P((struct natmpcb *, int));
 struct	natmpcb *npcb_add __P((struct natmpcb *, struct ifnet *, int, int));
 
 /* natm.c */
-#if defined(__NetBSD__) || defined(__OpenBSD__)
+#if defined(__NetBSD__)
 int	natm_usrreq __P((struct socket *, int, struct mbuf *,
                              struct mbuf *, struct mbuf *, struct proc *));
-#elif defined(__FreeBSD__)
+#elif defined(__OpenBSD__) || defined(FreeBSD)
 int	natm_usrreq __P((struct socket *, int, struct mbuf *,
                              struct mbuf *, struct mbuf *));
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.18 1997/04/14 17:49:58 michaels Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.24 1997/07/31 03:07:55 niklas Exp $	*/
 /*	$NetBSD: machdep.c,v 1.61 1996/12/07 01:54:49 cgd Exp $	*/
 
 /*
@@ -80,6 +80,13 @@
 #include <machine/prom.h>
 #include <machine/cpuconf.h>
 
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_access.h>
+#include <ddb/db_sym.h>
+#include <ddb/db_extern.h>
+#endif
+
 #include <net/netisr.h>
 #include <net/if.h>
 
@@ -100,6 +107,9 @@
 #include <netccitt/pk.h>
 #include <netccitt/pk_extern.h>
 #endif
+#ifdef NETATALK
+#include <netatalk/at_extern.h>
+#endif
 #ifdef NATM
 #include <netnatm/natm.h>
 #endif
@@ -113,7 +123,6 @@
 
 vm_map_t buffer_map;
 
-void	alpha_init __P((u_long, u_long));
 int	cpu_dump __P((void));
 int	cpu_dumpsize __P((void));
 void	do_sir __P((void));
@@ -141,7 +150,7 @@ int	msgbufmapped = 0;	/* set when safe to use msgbuf */
 int	maxmem;			/* max memory per process */
 
 int	totalphysmem;		/* total amount of physical memory in system */
-int	physmem;		/* physical memory used by OpenBSD + some rsvd */
+int	physmem;		/* physical mem used by OpenBSD + some rsvd */
 int	firstusablepage;	/* first usable memory page */
 int	lastusablepage;		/* last usable memory page */
 int	resvmem;		/* amount of memory reserved for PROM */
@@ -182,15 +191,20 @@ int	alpha_unaligned_fix = 1;	/* fix up unaligned accesses */
 int	alpha_unaligned_sigbus = 0;	/* don't SIGBUS on fixed-up accesses */
 
 void
-alpha_init(pfn, ptb)
+alpha_init(pfn, ptb, symend)
 	u_long pfn;		/* first free PFN number */
 	u_long ptb;		/* PFN of current level 1 page table */
+	char *symend;		/* end of the symbol table */
 {
 	extern char _end[];
+	extern char *esym;
 	caddr_t start, v;
 	struct mddt *mddtp;
 	int i, mddtweird;
 	char *p;
+
+	/* Save the symbol table end */
+	esym = symend;
 
 	/*
 	 * Turn off interrupts and floating point.
@@ -202,7 +216,7 @@ alpha_init(pfn, ptb)
 	alpha_pal_imb();
 
 	/*
-	 * get address of the restart block, while we the bootstrap
+	 * get address of the restart block, while the bootstrap
 	 * mapping is still around.
 	 */
 	hwrpb = (struct rpb *)ALPHA_PHYS_TO_K0SEG(
@@ -323,7 +337,8 @@ alpha_init(pfn, ptb)
 				physmem += pgcnt(i);
 				firstusablepage =
 				    mddtp->mddt_clusters[i].mddt_pfn;
-				lastusablepage = firstusablepage + pgcnt(i) - 1;
+				lastusablepage =
+				    firstusablepage + pgcnt(i) - 1;
 			} else
 				unusedmem += pgcnt(i);
 		}
@@ -351,7 +366,7 @@ alpha_init(pfn, ptb)
 	if (PAGE_SIZE != 8192)
 		panic("page size %d != 8192?!", PAGE_SIZE);
 
-	v = (caddr_t)alpha_round_page(_end);
+	v = (caddr_t)alpha_round_page(symend ? symend : _end);
 	/*
 	 * Init mapping for u page(s) for proc 0
 	 */
@@ -385,8 +400,8 @@ unknown_cputype:
 		printf("\n");
 		printf("Support for system type %d (%s family) is\n", cputype,
 		    cpu_fn_switch->family);
-		printf("not present in this kernel.  Build a kernel with \"options %s\"\n",
-		    cpu_fn_switch->option);
+		printf("not present in this kernel.  Build a kernel with "
+		    "\"options %s\"\n", cpu_fn_switch->option);
 		printf("to include support for this system type.\n");
 		printf("\n");
 		panic("support for system not present");
@@ -396,7 +411,8 @@ unknown_cputype:
 		strncpy(cpu_model, (*cpu_fn_switch->model_name)(),
 		    sizeof cpu_model - 1);
 	else {
-		strncpy(cpu_model, cpu_fn_switch->family, sizeof cpu_model - 1);
+		strncpy(cpu_model, cpu_fn_switch->family,
+		    sizeof cpu_model - 1);
 		strcat(cpu_model, " family");		/* XXX */
 	}
 	cpu_model[sizeof cpu_model - 1] = '\0';
@@ -513,7 +529,8 @@ unknown_cputype:
 	 */
 	proc0paddr->u_pcb.pcb_hw.apcb_ksp =
 	    (u_int64_t)proc0paddr + USPACE - sizeof(struct trapframe);
-	proc0.p_md.md_tf = (struct trapframe *)proc0paddr->u_pcb.pcb_hw.apcb_ksp;
+	proc0.p_md.md_tf =
+	    (struct trapframe *)proc0paddr->u_pcb.pcb_hw.apcb_ksp;
 
 #ifdef NEW_PMAP
 	pmap_activate(kernel_pmap, &proc0paddr->u_pcb.pcb_hw, 0);
@@ -547,6 +564,11 @@ unknown_cputype:
 		case 'a': /* autoboot */
 		case 'A':
 			boothowto &= ~RB_SINGLE;
+			break;
+
+		case 'b': /* Enter DDB as soon as the console is initialised */
+		case 'B':
+			boothowto |= RB_KDB;
 			break;
 
 		case 'c': /* enter user kernel configuration */
@@ -597,9 +619,13 @@ unknown_cputype:
 void
 consinit()
 {
-
 	(*cpu_fn_switch->cons_init)();
 	pmap_unmap_prom();
+#ifdef DDB
+	ddb_init();
+	if (boothowto & RB_KDB)
+		Debugger();
+#endif
 }
 
 void
@@ -1159,6 +1185,7 @@ sendsig(catcher, sig, mask, code, type, val)
 		fsize += sizeof ksi;
 		rndfsize = ((fsize + 15) / 16) * 16;
 	}
+
 	/*
 	 * Allocate and validate space for the signal handler
 	 * context. Note that if the stack is in P0 space, the
@@ -1462,6 +1489,9 @@ netintr()
 #ifdef INET
 	DONETISR(NETISR_ARP, arpintr());
 	DONETISR(NETISR_IP, ipintr());
+#endif
+#ifdef NETATALK
+	DONETISR(NETISR_ATALK, atintr());
 #endif
 #ifdef NS
 	DONETISR(NETISR_NS, nsintr());

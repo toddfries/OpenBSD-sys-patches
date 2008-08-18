@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_nqlease.c,v 1.9 1997/04/18 10:13:23 deraadt Exp $	*/
+/*	$OpenBSD: nfs_nqlease.c,v 1.11 1997/10/06 20:20:46 deraadt Exp $	*/
 /*	$NetBSD: nfs_nqlease.c,v 1.14 1996/02/18 14:06:50 fvdl Exp $	*/
 
 /*
