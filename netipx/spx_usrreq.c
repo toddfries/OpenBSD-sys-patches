@@ -1,5 +1,4 @@
-/*	$OpenBSD: spx_usrreq.c,v 1.1 1996/08/16 09:16:04 mickey Exp $	*/
-/*	$NOWHERE: spx_usrreq.c,v 1.2 1996/05/07 09:49:55 mickey Exp $	*/
+/*	$OpenBSD: spx_usrreq.c,v 1.5 1996/12/23 08:47:05 mickey Exp $	*/
 
 /*-
  *
@@ -439,9 +438,9 @@ register struct spx *si;
 update_window:
 	if (SSEQ_LT(cb->s_snxt, cb->s_rack))
 		cb->s_snxt = cb->s_rack;
-	if (SSEQ_LT(cb->s_swl1, si->si_seq) || cb->s_swl1 == si->si_seq &&
-	    (SSEQ_LT(cb->s_swl2, si->si_ack) ||
-	     cb->s_swl2 == si->si_ack && SSEQ_LT(cb->s_ralo, si->si_alo))) {
+	if ((SSEQ_LT(cb->s_swl1, si->si_seq) || cb->s_swl1 == si->si_seq) &&
+	     (SSEQ_LT(cb->s_swl2, si->si_ack) || cb->s_swl2 == si->si_ack) &&
+	     SSEQ_LT(cb->s_ralo, si->si_alo)) {
 		/* keep track of pure window updates */
 		if ((si->si_cc & SPX_SP) && cb->s_swl2 == si->si_ack
 		    && SSEQ_LT(cb->s_ralo, si->si_alo)) {
@@ -634,7 +633,7 @@ spx_ctlinput(cmd, arg_as_sa, dummy)
 	case PRC_HOSTDEAD:
 	case PRC_HOSTUNREACH:
 		sipx = (struct sockaddr_ipx *)arg;
-		if (sipx->sipx_family != AF_IPX)
+		if (sipx == NULL || sipx->sipx_family != AF_IPX)
 			return NULL;
 		na = &sipx->sipx_addr;
 		break;
@@ -1843,4 +1842,24 @@ spx_timers(cb, timer)
 		break;
 	}
 	return (cb);
+}
+
+int
+spx_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+{
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	default:
+		return (ENOPROTOOPT);
+	}
+	/* NOT REACHED */
 }

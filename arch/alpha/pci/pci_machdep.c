@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci_machdep.c,v 1.4 1996/07/29 23:00:43 niklas Exp $	*/
-/*	$NetBSD: pci_machdep.c,v 1.5 1996/04/12 06:08:49 cgd Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.8 1997/04/19 21:51:29 tholo Exp $	*/
+/*	$NetBSD: pci_machdep.c,v 1.7 1996/11/19 04:57:32 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -45,9 +45,9 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#include "pcivga.h"
-#if NPCIVGA
-#include <alpha/pci/pcivgavar.h>
+#include "vga_pci.h"
+#if NVGA_PCI
+#include <alpha/pci/vga_pcivar.h>
 #endif
 
 #include "tga.h"
@@ -56,15 +56,19 @@
 #endif
 
 void
-pci_display_console(bc, pc, bus, device, function)
-	bus_chipset_tag_t bc;
+pci_display_console(iot, memt, pc, bus, device, function)
+	bus_space_tag_t iot, memt;
 	pci_chipset_tag_t pc;
 	int bus, device, function;
 {
 	pcitag_t tag;
 	pcireg_t id, class;
-	int match, nmatch;
-	void (*fn) __P((bus_chipset_tag_t, pci_chipset_tag_t, int, int, int));
+	int match;
+#if NVGA_PCI || NTGA
+	int nmatch;
+#endif
+	void (*fn) __P((bus_space_tag_t, bus_space_tag_t, pci_chipset_tag_t,
+	    int, int, int));
 
 	tag = pci_make_tag(pc, bus, device, function);
 	id = pci_conf_read(pc, tag, PCI_ID_REG);
@@ -76,11 +80,11 @@ pci_display_console(bc, pc, bus, device, function)
 	match = 0;
 	fn = NULL;
 
-#if NPCIVGA
-	nmatch = DEVICE_IS_PCIVGA(class, id);
+#if NVGA_PCI
+	nmatch = DEVICE_IS_VGA_PCI(class, id);
 	if (nmatch > match) {
 		match = nmatch;
-		fn = pcivga_console;
+		fn = vga_pci_console;
 	}
 #endif
 #if NTGA
@@ -92,7 +96,7 @@ pci_display_console(bc, pc, bus, device, function)
 #endif
 
 	if (fn != NULL)
-		(*fn)(bc, pc, bus, device, function);
+		(*fn)(iot, memt, pc, bus, device, function);
 	else
 		panic("pci_display_console: unconfigured device at %d/%d/%d",
 		    bus, device, function);

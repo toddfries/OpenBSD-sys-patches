@@ -1,3 +1,4 @@
+/*	$OpenBSD: subr_disk.c,v 1.14 1997/05/22 05:34:56 deraadt Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -45,12 +46,18 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/fcntl.h>
 #include <sys/buf.h>
+#include <sys/stat.h>
 #include <sys/syslog.h>
 #include <sys/time.h>
 #include <sys/disklabel.h>
+#include <sys/conf.h>
 #include <sys/disk.h>
+#include <sys/dkio.h>
 #include <sys/dkstat.h>		/* XXX */
+
+#include <dev/rndvar.h>
 
 /*
  * A global list of all disks attached to the system.  May grow or
@@ -166,11 +173,6 @@ insert:	bp->b_actf = bq->b_actf;
 	bq->b_actf = bp;
 }
 
-/* encoding of disk minor numbers, should be elsewhere... */
-#define dkunit(dev)		(minor(dev) >> 3)
-#define dkpart(dev)		(minor(dev) & 07)
-#define dkminor(unit, part)	(((unit) << 3) | (part))
-
 /*
  * Compute checksum for disk label.
  */
@@ -209,7 +211,7 @@ diskerr(bp, dname, what, pri, blkdone, lp)
 	int pri, blkdone;
 	register struct disklabel *lp;
 {
-	int unit = dkunit(bp->b_dev), part = dkpart(bp->b_dev);
+	int unit = DISKUNIT(bp->b_dev), part = DISKPART(bp->b_dev);
 	register int (*pr) __P((const char *, ...));
 	char partname = 'a' + part;
 	int sn;
@@ -386,6 +388,8 @@ disk_unbusy(diskp, bcount)
 		diskp->dk_xfer++;
 	}
 	diskp->dk_seek++;
+
+	add_disk_randomness(bcount ^ diff_time.tv_usec);
 }
 
 /*
@@ -411,4 +415,83 @@ disk_resetstat(diskp)
 	timerclear(&diskp->dk_time);
 
 	splx(s);
+}
+
+
+int
+dk_mountroot()
+{
+	dev_t rawdev, rrootdev;
+	int part = DISKPART(rootdev);
+	int (*mountrootfn) __P((void));
+	extern struct proc *curproc;
+	struct disklabel dl;
+	int error;
+
+	rrootdev = blktochr(rootdev);
+	rawdev = MAKEDISKDEV(major(rrootdev), DISKUNIT(rootdev), RAW_PART);
+	printf("rootdev=0x%x rrootdev=0x%x rawdev=0x%x\n", rootdev,
+	    rrootdev, rawdev);
+
+	/*
+	 * open device, ioctl for the disklabel, and close it.
+	 */
+	error = (cdevsw[major(rrootdev)].d_open)(rawdev, FREAD,
+	    S_IFCHR, curproc);
+	if (error)
+		panic("cannot open disk, 0x%x/0x%x, error %d",
+		    rootdev, rrootdev, error);
+	error = (cdevsw[major(rrootdev)].d_ioctl)(rawdev, DIOCGDINFO,
+	    (caddr_t)&dl, FREAD, curproc);
+	if (error)
+		panic("cannot read disk label, 0x%x/0x%x, error %d",
+		    rootdev, rrootdev, error);
+	(void) (cdevsw[major(rrootdev)].d_close)(rawdev, FREAD,
+	    S_IFCHR, curproc);
+
+	if (dl.d_partitions[part].p_size == 0)
+		panic("root filesystem has size 0");
+	switch (dl.d_partitions[part].p_fstype) {
+#ifdef EXT2FS
+	case FS_EXT2FS:
+		{
+		extern int ext2fs_mountroot __P((void));
+		mountrootfn = ext2fs_mountroot;
+		}
+		break;
+#endif
+#ifdef FFS
+	case FS_BSDFFS:
+		{
+		extern int ffs_mountroot __P((void));
+		mountrootfn = ffs_mountroot;
+		}
+		break;
+#endif
+#ifdef LFS
+	case FS_BSDLFS:
+		{
+		extern int lfs_mountroot __P((void));
+		mountrootfn = lfs_mountroot;
+		}
+		break;
+#endif
+#ifdef CD9660
+	case FS_ISO9660:
+		{
+		extern int cd9660_mountroot __P((void));
+		mountrootfn = cd9660_mountroot;
+		}
+		break;
+#endif
+	default:
+		{ 
+		extern int ffs_mountroot __P((void));
+
+		printf("filesystem type %d not known.. assuming ffs\n",
+		    dl.d_partitions[part].p_fstype);
+		mountrootfn = ffs_mountroot;
+		}
+	}
+	return (*mountrootfn)();
 }

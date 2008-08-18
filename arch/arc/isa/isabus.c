@@ -1,4 +1,4 @@
-/*	$OpenBSD: isabus.c,v 1.5 1996/09/20 17:12:08 pefo Exp $	*/
+/*	$OpenBSD: isabus.c,v 1.11 1997/04/19 17:20:01 pefo Exp $	*/
 /*	$NetBSD: isa.c,v 1.33 1995/06/28 04:30:51 cgd Exp $	*/
 
 /*-
@@ -88,12 +88,15 @@ WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
 #include <sys/param.h>
+#include <sys/proc.h>
+#include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 
+#include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/pio.h>
 #include <machine/autoconf.h>
@@ -116,14 +119,13 @@ static int beeping;
 struct isabr_softc {
 	struct	device sc_dv;
 	struct	arc_isa_bus arc_isa_cs;
-	struct	arc_isa_busmap arc_isa_map;
 	struct	abus sc_bus;
 };
 
 /* Definition of the driver for autoconfig. */
 int	isabrmatch(struct device *, void *, void *);
 void	isabrattach(struct device *, struct device *, void *);
-int	isabrprint(void *, char *);
+int	isabrprint(void *, const char *);
 
 struct cfattach isabr_ca = {
 	sizeof(struct isabr_softc), isabrmatch, isabrattach
@@ -136,7 +138,8 @@ void	*isabr_intr_establish __P((isa_chipset_tag_t, int, int, int,
 			int (*)(void *), void *, char *));
 void	isabr_intr_disestablish __P((isa_chipset_tag_t, void*));
 int	isabr_iointr __P((unsigned int, struct clockframe *));
-void	isabr_initicu();
+void	isabr_initicu __P((void));
+void	intr_calculatemasks __P((void));
 
 extern int cputype;
 
@@ -147,7 +150,6 @@ isabrmatch(parent, cfdata, aux)
 	void *cfdata;
 	void *aux;
 {
-	struct cfdata *cf = cfdata;
 	struct confargs *ca = aux;
 
         /* Make sure that we're looking for a ISABR. */
@@ -192,11 +194,10 @@ isabrattach(parent, self, aux)
 
 	sc->arc_isa_cs.ic_intr_establish = isabr_intr_establish;
 	sc->arc_isa_cs.ic_intr_disestablish = isabr_intr_disestablish;
-	sc->arc_isa_map.isa_io_base = (void *)isa_io_base;
-	sc->arc_isa_map.isa_mem_base = (void *)isa_mem_base;
 
 	iba.iba_busname = "isa";
-	iba.iba_bc = &sc->arc_isa_map;
+	iba.iba_iot = (bus_space_tag_t)&arc_bus_io;
+	iba.iba_memt = (bus_space_tag_t)&arc_bus_mem;
 	iba.iba_ic = &sc->arc_isa_cs;
 	config_found(self, &iba, isabrprint);
 }
@@ -204,13 +205,14 @@ isabrattach(parent, self, aux)
 int
 isabrprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 	struct confargs *ca = aux;
 
         if (pnp)
                 printf("%s at %s", ca->ca_name, pnp);
-        printf(" isa_io_base 0x%lx isa_mem_base 0x%lx", isa_io_base, isa_mem_base);
+        printf(" isa_io_base 0x%lx isa_mem_base 0x%lx",
+		arc_bus_io.bus_base, arc_bus_mem.bus_base);
         return (UNCONF);
 }
 
@@ -505,6 +507,10 @@ sysbeep(pitch, period)
 {
 	static int last_pitch, last_period;
 	int s;
+	extern int cold;
+
+	if (cold)
+		return;		/* Can't beep yet. */
 
 	if (beeping)
 		untimeout(sysbeepstop, 0);

@@ -1,5 +1,5 @@
-/*	$OpenBSD: grf_cc.c,v 1.3 1996/05/02 06:43:42 niklas Exp $	*/
-/*	$NetBSD: grf_cc.c,v 1.19 1996/04/21 21:11:08 veego Exp $	*/
+/*	$OpenBSD: grf_cc.c,v 1.6 1997/01/16 09:24:08 niklas Exp $	*/
+/*	$NetBSD: grf_cc.c,v 1.23 1996/12/23 09:10:02 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -62,7 +62,7 @@
 #include "view.h" 
 
 int grfccmatch __P((struct device *, void *, void *));
-int grfccprint __P((void *, char *));
+int grfccprint __P((void *, const char *));
 void grfccattach __P((struct device *, struct device *, void *));
 void grf_cc_on __P((struct grf_softc *));
 
@@ -77,7 +77,7 @@ struct cfdriver grfcc_cd = {
 /* 
  * only used in console init
  */
-static struct cfdata *cfdata;
+static struct cfdata *grfcc_cfdata;
 
 /*
  * we make sure to only init things once.  this is somewhat
@@ -110,7 +110,7 @@ grfccmatch(pdp, match, auxp)
 			return(0);
 		if (amiga_realconfig == 0) {
 			ccconunit = cfp->cf_unit;
-			cfdata = cfp;
+			grfcc_cfdata = cfp;
 		}
 	}
 	return(1);
@@ -152,13 +152,13 @@ grfccattach(pdp, dp, auxp)
 	/*
 	 * attach grf
 	 */
-	amiga_config_found(cfdata, &gp->g_device, gp, grfccprint);
+	amiga_config_found(grfcc_cfdata, &gp->g_device, gp, grfccprint);
 }
 
 int
 grfccprint(auxp, pnp)
 	void *auxp;
-	char *pnp;
+	const char *pnp;
 {
 	if (pnp)
 		printf("grf%d at %s", ((struct grf_softc *)auxp)->g_unit,

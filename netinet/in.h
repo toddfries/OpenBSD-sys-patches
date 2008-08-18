@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.6 1996/07/29 02:34:29 downsj Exp $	*/
+/*	$OpenBSD: in.h,v 1.8 1997/02/28 03:44:52 angelos Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -58,6 +58,8 @@
 #define	IPPROTO_UDP		17		/* user datagram protocol */
 #define	IPPROTO_IDP		22		/* xns idp */
 #define	IPPROTO_TP		29 		/* tp-4 w/ class negotiation */
+#define	IPPROTO_ESP		50		/* Encap. Security Payload */
+#define	IPPROTO_AH		51		/* Authentication header */
 #define	IPPROTO_EON		80		/* ISO cnlp */
 #define	IPPROTO_ENCAP		98		/* encapsulation header */
 
@@ -229,6 +231,27 @@ struct ip_opts {
 #define	IP_DROP_MEMBERSHIP	13   /* ip_mreq; drop an IP group membership */
 	/* 14-17 left empty for future compatibility with FreeBSD */
 #define IP_PORTRANGE		19   /* int; range to choose for unspec port */
+#define IP_AUTH_LEVEL		20   /* u_char; authentication used */
+#define IP_ESP_TRANS_LEVEL      21   /* u_char; transport encryption */
+#define IP_ESP_NETWORK_LEVEL    22   /* u_char; full-packet encryption */
+
+
+/*
+ * Security levels - IPsec, not IPSO
+ */
+
+#define IPSEC_LEVEL_BYPASS      0x00    /* Bypass policy altogether */
+#define IPSEC_LEVEL_NONE        0x00    /* Send clear, accept any */
+#define IPSEC_LEVEL_AVAIL       0x01    /* Send secure if SA available */
+#define IPSEC_LEVEL_USE         0x02    /* Send secure, accept any */
+#define IPSEC_LEVEL_REQUIRE     0x03    /* Require secure inbound, also use */
+#define IPSEC_LEVEL_UNIQUE      0x04    /* Use outbound SA that is unique */
+#define IPSEC_LEVEL_DEFAULT     IPSEC_LEVEL_NONE
+
+#define IPSEC_AUTH_LEVEL_DEFAULT IPSEC_LEVEL_DEFAULT
+#define IPSEC_ESP_TRANS_LEVEL_DEFAULT IPSEC_LEVEL_DEFAULT
+#define IPSEC_ESP_NETWORK_LEVEL_DEFAULT IPSEC_LEVEL_DEFAULT
+
 
 /*
  * Defaults and limits for options

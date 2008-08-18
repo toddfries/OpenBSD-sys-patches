@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1994 Christian E. Hopps
  * All rights reserved.
  *
@@ -27,7 +28,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- *	$Id: autoconf.c,v 1.1 1995/10/18 12:32:17 deraadt Exp $
+ *	$Id: autoconf.c,v 1.3 1997/03/03 20:21:28 rahnds Exp $
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,23 +42,26 @@ void configure __P((void));
 void setroot __P((void));
 void swapconf __P((void));
 
-int realconfig=0;
 int cold;	/* 1 if still booting */
 #include <sys/kernel.h>
+
 /*
- * called at boot time, configure all devices on system
+ * called at boot time, configure all devices on the system.
  */
 void
 configure()
 {
-	/*
-	 * this is the real thing baby (i.e. not console init)
-	 */
-	realconfig = 1;
-
 	if (config_rootfound("mainbus", "mainbus") == 0)
 		panic("no mainbus found");
+
+	/*
+	 * Turn external interrupts on. We have all the drivers in
+	 * place now!
+	 */
+	enable_interrupt();
+	spl0();
 	
+#if 0
 #ifdef GENERIC
 	if ((boothowto & RB_ASKNAME) == 0)
 		setroot();
@@ -65,7 +69,13 @@ configure()
 #else
 	setroot();
 #endif
+#endif /* 0 */
+	setroot();
 	swapconf();
+
+	/*
+	 * Done with autoconfig!
+  	 */
 	cold = 0;
 }
 
@@ -90,23 +100,6 @@ matchname(fp, sp)
 	if (bcmp(fp, sp, len) == 0)
 		return(1);
 	return(0);
-}
-/*
- * this function needs to get enough configured to do a console
- * basically this means start attaching the grfxx's that support 
- * the console. Kinda hacky but it works.
- */
-int
-config_console()
-{	
-	struct cfdata *cf;
-
-	/*
-	 * we need mainbus' cfdata.
-	 */
-	cf = config_rootsearch(NULL, "mainbus", "mainbus");
-	if (cf == NULL)
-		panic("no mainbus");
 }
 
 void
@@ -139,6 +132,7 @@ swapconf()
 	if (dumplo < 0)
 		dumplo = 0;
 
+	dumpconf();
 }
 
 #define	DOSWAP			/* change swdevt and dumpdev */

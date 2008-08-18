@@ -1,17 +1,12 @@
+/*	$OpenBSD: zs_kgdb.c,v 1.5 1997/01/16 04:04:01 kstailey Exp $	*/
+/*	$NetBSD: zs_kgdb.c,v 1.9 1996/11/20 18:57:04 gwr Exp $	*/
 
-/*
- * Copyright (c) 1994 Gordon W. Ross
- * Copyright (c) 1992, 1993
- *	The Regents of the University of California.  All rights reserved.
+/*-
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
+ * All rights reserved.
  *
- * This software was developed by the Computer Systems Engineering group
- * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
- * contributed to Berkeley.
- *
- * All advertising materials mentioning features or use of this software
- * must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Lawrence Berkeley Laboratory.
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Gordon W. Ross.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,25 +18,23 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- *	@(#)zs.c	8.1 (Berkeley) 7/19/93
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -71,8 +64,17 @@
 
 /* The Sun3 provides a 4.9152 MHz clock to the ZS chips. */
 #define PCLK	(9600 * 512)	/* PCLK pin input clock rate */
+#define ZSHARD_PRI	6	/* Wired on the CPU board... */
 
 #define ZS_DELAY()			delay(2)
+
+/* The layout of this is hardware-dependent (padding, order). */
+struct zschan {
+	volatile u_char	zc_csr;		/* ctrl,status, and indirect access */
+	u_char		zc_xxx0;
+	volatile u_char	zc_data;	/* data */
+	u_char		zc_xxx1;
+};
 
 extern int kgdb_dev;
 extern int kgdb_rate;
@@ -103,6 +105,9 @@ static u_char zs_kgdb_regs[16] = {
 	ZSWR15_BREAK_IE | ZSWR15_DCD_IE,
 };
 
+/*
+ * This replaces "zs_reset()" in the sparc driver.
+ */
 static void
 zs_setparam(cs, iena, rate)
 	struct zs_chanstate *cs;
@@ -118,7 +123,7 @@ zs_setparam(cs, iena, rate)
 	}
 
 	/* Initialize the speed, etc. */
-	tconst = BPS_TO_TCONST(cs->cs_pclk_div16, rate);
+	tconst = BPS_TO_TCONST(cs->cs_brg_clk, rate);
 	cs->cs_preg[5] |= ZSWR5_DTR | ZSWR5_RTS;
 	cs->cs_preg[12] = tconst;
 	cs->cs_preg[13] = tconst >> 8;
@@ -126,7 +131,7 @@ zs_setparam(cs, iena, rate)
 	s = splhigh();
 	zs_loadchannelregs(cs);
 	splx(s);
-
+}
 
 /*
  * Set up for kgdb; called at boot time before configuration.
@@ -139,11 +144,12 @@ zs_kgdb_init()
 	volatile struct zschan *zc;
 	int channel, zsc_unit;
 
-	if (major(kgdb_dev) != ZSMAJOR)
+	if (major(kgdb_dev) != ZSTTY_MAJOR)
 		return;
 
-	zsc_unit = 1;	/* XXX */
-	channel = minor(kgdb_dev) & 1;
+	/* Note: (ttya,ttyb) on zsc1, and (ttyc,ttyd) on zsc0 */
+	zsc_unit = 2 - (kgdb_dev & 2);
+	channel  =      kgdb_dev & 1;
 	printf("zs_kgdb_init: attaching zstty%d at %d baud\n",
 		   channel, kgdb_rate);
 
@@ -153,7 +159,7 @@ zs_kgdb_init()
 	cs.cs_reg_csr  = &zc->zc_csr;
 	cs.cs_reg_data = &zc->zc_data;
 	cs.cs_channel = channel;
-	cs.cs_pclk_div16 = PCLK / 16;
+	cs.cs_brg_clk = PCLK / 16;
 
 	/* Now set parameters. (interrupts disabled) */
 	zs_setparam(&cs, 0, kgdb_rate);
@@ -174,7 +180,6 @@ zs_check_kgdb(cs, dev)
 	struct zs_chanstate *cs;
 	int dev;
 {
-	int tconst;
 
 	if (dev != kgdb_dev)
 		return (0);
@@ -198,9 +203,10 @@ zs_check_kgdb(cs, dev)
  * KGDB framing character received: enter kernel debugger.  This probably
  * should time out after a few seconds to avoid hanging on spurious input.
  */
+void
 zskgdb()
 {
-	unit = minor(kgdb_dev);
+	int unit = minor(kgdb_dev);
 
 	printf("zstty%d: kgdb interrupt\n", unit);
 	/* This will trap into the debugger. */
@@ -214,7 +220,7 @@ zskgdb()
 
 int kgdb_input_lost;
 
-static int
+static void
 zs_kgdb_rxint(cs)
 	register struct zs_chanstate *cs;
 {
@@ -236,11 +242,9 @@ zs_kgdb_rxint(cs)
 	} else {
 		kgdb_input_lost++;
 	}
-
-	return(0);
 }
 
-static int
+static void
 zs_kgdb_txint(cs)
 	register struct zs_chanstate *cs;
 {
@@ -248,10 +252,9 @@ zs_kgdb_txint(cs)
 
 	rr0 = zs_read_csr(cs);
 	zs_write_csr(cs, ZSWR0_RESET_TXINT);
-	return (0);
 }
 
-static int
+static void
 zs_kgdb_stint(cs)
 	register struct zs_chanstate *cs;
 {
@@ -259,16 +262,13 @@ zs_kgdb_stint(cs)
 
 	rr0 = zs_read_csr(cs);
 	zs_write_csr(cs, ZSWR0_RESET_STATUS);
-
-	return (0);
 }
 
-static int
+static void
 zs_kgdb_softint(cs)
 	struct zs_chanstate *cs;
 {
 	printf("zs_kgdb_softint?\n");
-	return (0);
 }
 
 struct zsops zsops_kgdb = {

@@ -1,4 +1,5 @@
-/*	$NetBSD: clock.c,v 1.28 1996/03/26 15:16:42 gwr Exp $	*/
+/*	$OpenBSD: clock.c,v 1.7 1997/01/16 04:04:14 kstailey Exp $	*/
+/*	$NetBSD: clock.c,v 1.31 1996/10/30 00:24:42 gwr Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -55,17 +56,21 @@
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
-#include <machine/psl.h>
+#include <machine/control.h>
 #include <machine/cpu.h>
-
+#include <machine/machdep.h>
 #include <machine/mon.h>
 #include <machine/obio.h>
-#include <machine/control.h>
 
 #include "intersil7170.h"
 #include "interreg.h"
+#include "ledsvar.h"
 
 #define	CLOCK_PRI	5
+
+void cpu_initclocks __P((void));
+void clock_intr __P((struct clockframe *));
+
 
 extern volatile u_char *interrupt_reg;
 volatile char *clock_va;
@@ -91,27 +96,23 @@ struct cfdriver clock_cd = {
 
 static int
 clock_match(parent, vcf, args)
-    struct device *parent;
-    void *vcf, *args;
+	struct device *parent;
+	void *vcf, *args;
 {
-    struct cfdata *cf = vcf;
+	struct cfdata *cf = vcf;
 	struct confargs *ca = args;
-	int pa;
 
 	/* This driver only supports one unit. */
 	if (cf->cf_unit != 0)
 		return (0);
 
-	if ((pa = cf->cf_paddr) == -1) {
-		/* Use our default PA. */
-		pa = OBIO_CLOCK;
-	} else {
-		/* Validate the given PA. */
-		if (pa != OBIO_CLOCK)
-			panic("clock: wrong address");
-	}
-	if (pa != ca->ca_paddr)
+	/* Validate the given address. */
+	if (ca->ca_paddr != OBIO_CLOCK)
 		return (0);
+
+	/* Default interrupt priority. */
+	if (ca->ca_intpri == -1)
+		ca->ca_intpri = CLOCK_PRI;
 
 	return (1);
 }
@@ -122,18 +123,8 @@ clock_attach(parent, self, args)
 	struct device *self;
 	void *args;
 {
-	struct cfdata *cf = self->dv_cfdata;
-	struct confargs *ca = args;
-	int pri;
 
-	if ((pri = cf->cf_intpri) == -1) {
-		pri = CLOCK_PRI;
-	} else {
-		if (pri != CLOCK_PRI)
-			panic("clock: level != %d", CLOCK_PRI);
-	}
-
-	printf(" level %d\n", pri);
+	printf("\n");
 
 	/*
 	 * Can not hook up the ISR until cpu_initclock()
@@ -146,6 +137,7 @@ clock_attach(parent, self, args)
  * register.  We have to be extremely careful that we do it
  * in such a manner that we don't get ourselves lost.
  */
+void
 set_clk_mode(on, off, enable)
 	u_char on, off;
 	int enable;
@@ -161,7 +153,7 @@ set_clk_mode(on, off, enable)
 		panic("set_clk_mode: map");
 
 	/*
-	 * make sure that we are only playing w/ 
+	 * make sure that we are only playing w/
 	 * clock interrupt register bits
 	 */
 	on &= (IREG_CLOCK_ENAB_7 | IREG_CLOCK_ENAB_5);
@@ -230,7 +222,7 @@ void
 cpu_initclocks(void)
 {
 	int s;
-	extern void _isr_clock();
+	extern void _isr_clock __P((void));	/* in locore.s */
 
 	if (!intersil_clock)
 		panic("cpu_initclocks");
@@ -266,11 +258,10 @@ setstatclockrate(newhz)
  * This is is called by the "custom" interrupt handler
  * after it has reset the pending bit in the clock.
  */
-int clock_count = 0;
 void clock_intr(frame)
 	struct clockframe *frame;
 {
-	static unsigned char led_pattern = 0xFE;
+	unsigned int i;
 
 #ifdef	DIAGNOSTIC
 	if (!clk_intr_ready)
@@ -278,13 +269,16 @@ void clock_intr(frame)
 #endif
 
 	/* XXX - Move this LED frobbing to the idle loop? */
-	clock_count++;
-	if ((clock_count & 7) == 0) {
-		led_pattern = (led_pattern << 1) | 1;
-		if (led_pattern == 0xFF)
-			led_pattern = 0xFE;
-		set_control_byte((char *) DIAG_REG, led_pattern);
-	}
+	i = led_countdown;
+	if (i == 0) {
+		led_countdown = led_countmax;
+		i = led_px;
+		set_control_byte((char *) DIAG_REG, led_patterns[i]);
+		if (i == 0)
+			i = led_n_patterns;
+		led_px = i - 1;
+	} else
+		led_countdown = i - 1;
 	hardclock(frame);
 }
 
@@ -378,7 +372,7 @@ void inittodr(fs_time)
 		if (diff < 0)
 			diff = -diff;
 		if (diff >= (SECDAY*2)) {
-			printf("WARNING: clock %s %d days",
+			printf("WARNING: clock %s %ld days",
 				   (clk_time < fs_time) ? "lost" : "gained",
 				   diff / SECDAY);
 			clk_bad = 1;
@@ -389,10 +383,11 @@ void inittodr(fs_time)
 	time.tv_sec = clk_time;
 }
 
-/*   
+/*
  * Resettodr restores the time of day hardware after a time change.
  */
-void resettodr()
+void
+resettodr()
 {
 	clk_set_secs(time.tv_sec);
 }
@@ -409,7 +404,8 @@ void resettodr()
  * The clock registers have to be read or written
  * in sequential order (or so it appears). -gwr
  */
-static void clk_get_dt(struct date_time *dt)
+static void
+clk_get_dt(struct date_time *dt)
 {
 	int s;
 	register volatile char *src, *dst;
@@ -431,7 +427,8 @@ static void clk_get_dt(struct date_time *dt)
 	splx(s);
 }
 
-static void clk_set_dt(struct date_time *dt)
+static void
+clk_set_dt(struct date_time *dt)
 {
 	int s;
 	register volatile char *src, *dst;
@@ -476,7 +473,8 @@ static int month_days[12] = {
 	31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 };
 
-void gmt_to_dt(long *tp, struct date_time *dt)
+void
+gmt_to_dt(long *tp, struct date_time *dt)
 {
 	register int i;
 	register long days, secs;
@@ -511,10 +509,11 @@ void gmt_to_dt(long *tp, struct date_time *dt)
 	dt->dt_month = i;
 
 	/* Days are what is left over (+1) from all that. */
-	dt->dt_day = days + 1;  
+	dt->dt_day = days + 1;
 }
 
-void dt_to_gmt(struct date_time *dt, long *tp)
+void
+dt_to_gmt(struct date_time *dt, long *tp)
 {
 	register int i;
 	register long tmp;
@@ -563,7 +562,8 @@ void dt_to_gmt(struct date_time *dt, long *tp)
  * Now routines to get and set clock as POSIX time.
  */
 
-static long clk_get_secs()
+static long
+clk_get_secs()
 {
 	struct date_time dt;
 	long gmt;
@@ -573,7 +573,8 @@ static long clk_get_secs()
 	return (gmt);
 }
 
-static void clk_set_secs(long secs)
+static void
+clk_set_secs(long secs)
 {
 	struct date_time dt;
 	long gmt;
@@ -586,7 +587,8 @@ static void clk_set_secs(long secs)
 
 #ifdef	DEBUG
 /* Call this from DDB or whatever... */
-int clkdebug()
+int
+clkdebug()
 {
 	struct date_time dt;
 	long gmt;

@@ -1,6 +1,36 @@
 /*
+ * Copyright (c) 1996 Nivas Madhur
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Nivas Madhur.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
+/*
  * Mach Operating System
- * Copyright (c) 1993-1991 Carnegie Mellon University
+ * Copyright (c) 1991 Carnegie Mellon University
  * Copyright (c) 1991 OMRON Corporation
  * All Rights Reserved.
  *
@@ -10,19 +40,6 @@
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
  *
- * CARNEGIE MELLON AND OMRON ALLOW FREE USE OF THIS SOFTWARE IN ITS "AS IS"
- * CONDITION.  CARNEGIE MELLON AND OMRON DISCLAIM ANY LIABILITY OF ANY KIND
- * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- *
- * Carnegie Mellon requests users of this software to return to
- *
- *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
- *  School of Computer Science
- *  Carnegie Mellon University
- *  Pittsburgh PA 15213-3890
- *
- * any improvements or extensions that they make and grant Carnegie the
- * rights to redistribute these changes.
  */
 
 #include <sys/types.h>
@@ -45,8 +62,6 @@
 #include <machine/db_machdep.h>
 #endif /* DDB */
 
-int stop_on_user_memory_error = 0;
-
 #define TRAPTRACE
 #if defined(TRAPTRACE)
 unsigned traptrace = 0;
@@ -57,11 +72,6 @@ unsigned traptrace = 0;
 #else
 #define DEBUG_MSG printf
 #endif /* DDB */
-
-#ifdef JEFF_DEBUG
-# undef  DEBUG_MSG
-# define DEBUG_MSG raw_printf
-#endif
 
 #define USERMODE(PSR)   (((struct psr*)&(PSR))->psr_mode == 0)
 #define SYSTEMMODE(PSR) (((struct psr*)&(PSR))->psr_mode != 0)
@@ -82,25 +92,29 @@ char	*trap_type[] = {
 	"Error Exception",
 };
 
+char	*pbus_exception_type[] = {
+	"Success (No Fault)",
+	"",
+	"",
+	"Bus Error",
+	"Segment Fault",
+	"Page Fault",
+	"Supervisor Violation",
+	"Write Violation",
+};
+
 int	trap_types = sizeof trap_type / sizeof trap_type[0];
 
 static inline void
 userret(struct proc *p, struct m88100_saved_state *frame, u_quad_t oticks)
 {
 	int sig;
+	int s;
 
 	/* take pending signals */
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 	p->p_priority = p->p_usrpri;
-
-	if (want_ast) {
-		want_ast = 0;
-		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
-			ADDUPROF(p);
-		}
-	}
 
 	if (want_resched) {
 		/*
@@ -111,11 +125,11 @@ userret(struct proc *p, struct m88100_saved_state *frame, u_quad_t oticks)
 		 * but before we switched, we might not be on the queue
 		 * indicated by our priority.
 		 */
-		(void) splstatclock();
+		s = splstatclock();
 		setrunqueue(p);
 		p->p_stats->p_ru.ru_nivcsw++;
 		mi_switch();
-		(void) spl0();
+		(void) splx(s);
 		while ((sig = CURSIG(p)) != 0)
 			postsig(sig);
 	}
@@ -134,8 +148,18 @@ void
 panictrap(int type, struct m88100_saved_state *frame)
 {
 	static int panicing = 0;
+
 	if (panicing++ == 0) {
-		printf("trap type %d, v = %x, frame %x\n", type, frame->sxip & ~3, frame);
+		if (type == 2) {	/* instruction exception */
+			printf("Instr access fault (%s) v = %x, frame %x\n",
+				pbus_exception_type[(frame->ipfsr >> 16) & 0x7],
+				frame->sxip & ~3, frame);
+		} else if (type == 3) {	/* data access exception */
+			printf("Data access fault (%s) v = %x, frame %x\n",
+				pbus_exception_type[(frame->dpfsr >> 16) & 0x7],
+				frame->sxip & ~3, frame);
+		} else
+			printf("trap type %d, v = %x, frame %x\n", type, frame->sxip & ~3, frame);
 		regdump(frame);
 	}
 	if ((u_int)type < trap_types)
@@ -153,6 +177,8 @@ trap(unsigned type, struct m88100_saved_state *frame)
     vm_map_t map;
     vm_offset_t va;
     vm_prot_t ftype;
+    int fault_type;
+    u_long fault_code;
     unsigned nss, fault_addr;
     struct vmspace *vm;
     int result;
@@ -160,6 +186,9 @@ trap(unsigned type, struct m88100_saved_state *frame)
 
     extern vm_map_t kernel_map;
     extern int fubail(), subail();
+    extern unsigned guarded_access_start;
+    extern unsigned guarded_access_end;
+    extern unsigned guarded_access_bad;
 
     cnt.v_trap++;
     if ((p = curproc) == NULL)
@@ -169,6 +198,8 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	sticks = p->p_sticks;
 	type += T_USER;
 	p->p_md.md_tf = frame;	/* for ptrace/signals */
+	fault_type = 0;
+	fault_code = 0;
     }
 
     switch(type)
@@ -183,9 +214,9 @@ trap(unsigned type, struct m88100_saved_state *frame)
     case T_KDB_BREAK+T_USER:
     {
         int s = db_splhigh();
-        db_enable_interrupt(); /* turn interrupts on */
+	db_enable_interrupt();
         ddb_break_trap(T_KDB_BREAK,(db_regs_t*)frame);
-        db_disable_interrupt(); /* shut them back off */
+	db_disable_interrupt();
         db_splx(s);
         return;
     }
@@ -194,9 +225,9 @@ trap(unsigned type, struct m88100_saved_state *frame)
     case T_KDB_ENTRY+T_USER:
     {
         int s = db_splhigh();
-        db_enable_interrupt(); /* turn interrupts on */
+	db_enable_interrupt();
         ddb_entry_trap(T_KDB_ENTRY,(db_regs_t*)frame);
-        db_disable_interrupt(); /* shut them back off */
+	db_disable_interrupt();
         db_splx(s);
         return;
     }
@@ -205,10 +236,10 @@ trap(unsigned type, struct m88100_saved_state *frame)
     case T_ILLFLT:
     {
         int s = db_splhigh();
-        db_enable_interrupt(); /* turn interrupts on */
+	db_enable_interrupt();
         ddb_error_trap(type == T_ILLFLT ? "unimplemented opcode" :
             "error fault", (db_regs_t*)frame);
-        db_disable_interrupt(); /* shut them back off */
+	db_disable_interrupt();
         db_splx(s);
         return;
     }
@@ -222,28 +253,34 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	break;
 
     case T_INSTFLT:
-	/* kernel mode instruction access fault */
-	/* XXX I think this should be illegal, but not sure. Will leave
-	 * the way it is for now. Should never,never happen for a non-paged
-	 * kernel
+	/* kernel mode instruction access fault.
+	 * Should never, never happen for a non-paged kernel.
 	 */
-	/*FALLTHRU*/
+        DEBUG_MSG("kernel mode instruction "
+		"page fault @ 0x%08x\n", frame->sxip);
+	panictrap(frame->vector, frame);
+	break;
+
     case T_DATAFLT:
 	/* kernel mode data fault */
 	/*
-	 * if the faulting address is in user space, handle it in
+	 * If the faulting address is in user space, handle it in
 	 * the context of the user process. Else, use kernel map.
 	 */
 
 	if (type == T_DATAFLT) {
 		fault_addr = frame->dma0;
-		if (frame->dmt0 & (DMT_WRITE|DMT_LOCKBAR))
+		if (frame->dmt0 & (DMT_WRITE|DMT_LOCKBAR)) {
 		    ftype = VM_PROT_READ|VM_PROT_WRITE;
-		else
+		    fault_code = VM_PROT_WRITE;
+		} else {
 		    ftype = VM_PROT_READ;
+		    fault_code = VM_PROT_READ;
+		}
 	} else {
 		fault_addr = frame->sxip & XIP_ADDR;
 		ftype = VM_PROT_READ;
+		fault_code = VM_PROT_READ;
 	}
 
 	va = trunc_page((vm_offset_t)fault_addr);
@@ -251,42 +288,79 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	vm = p->p_vmspace;
 	map = &vm->vm_map;
 
-	/* if instruction fault or data fault on a kernel address... */
-	if ((type == T_INSTFLT) || (frame->dmt0 & DMT_DAS))
+	/* data fault on a kernel address... */
+	if (frame->dmt0 & DMT_DAS)
 		map = kernel_map;
-	
+
 	/* 
 	 * We don't want to call vm_fault() if it is fuwintr() or
 	 * suwintr(). These routines are for copying from interrupt
-	 * context and vm_fault() can potentially sleep.
+	 * context and vm_fault() can potentially sleep. You may
+	 * wonder if it isn't bad karma for an interrupt handler to	
+	 * touch the current process. Indeed it is, but clock interrupt
+	 * does it while doing profiling. It is OK in that context.
 	 */
 
 	if (p->p_addr->u_pcb.pcb_onfault == (int)fubail ||
 		p->p_addr->u_pcb.pcb_onfault == (int)subail)
 		goto outtahere;
 
-	result = vm_fault(map, va, ftype, FALSE); 
-
-        if (result == KERN_SUCCESS) {
-		/*
-		 * We could resolve the fault. Call data_access_emulation
-		 * to drain the data unit pipe line and reset dmt0 so that
-		 * trap won't get called again. For inst faults, back up
-		 * the pipe line.
-		 */
-		if (type == T_DATAFLT) {
-		    data_access_emulation(frame);
-		    frame->dmt0 = 0;
-		} else {
-		    frame->sfip = frame->snip & ~FIP_E;
-		    frame->snip = frame->sxip & ~NIP_E;
-		}	
-		return;
+	/* data fault on the user address */
+	if (type == T_DATAFLT && (frame->dmt0 & DMT_DAS) == 0)
+	{
+		type = T_DATAFLT + T_USER;
+		goto user_fault;
 	}
 
-	/* XXX Is this right? */
-	if (type == T_DATAFLT && (frame->dmt0 & DMT_DAS) == 0)
-		goto user_fault;
+	/*
+	 *	If it is a guarded access, bus error is OK.
+	 */
+
+	if ((frame->dpfsr >> 16 & 0x7) == 0x3) {
+#ifdef DIAGNOSTIC 
+		printf("sxip %x dpfsr %x\n", frame->sxip, frame->dpfsr);
+		gimmeabreak();
+#endif
+	}
+
+	if ((frame->dpfsr >> 16 & 0x7) == 0x3 && 		/* bus error */
+		(frame->sxip & ~3) >= (unsigned)&guarded_access_start &&
+		(frame->sxip & ~3) <= (unsigned)&guarded_access_end) {
+
+		frame->snip = ((unsigned)&guarded_access_bad    ) | FIP_V;
+		frame->sfip = ((unsigned)&guarded_access_bad + 4) | FIP_V;
+		frame->sxip = 0;
+		frame->dmt0 = 0;/* XXX what about other trans. in data unit */
+		frame->dpfsr = 0;
+		return;
+	}
+	/*
+	 *	On a segment or a page fault, call vm_fault() to resolve
+	 *	the fault.
+	 */
+
+	if ((frame->dpfsr >> 16 & 0x7) == 0x4 			/* seg fault */
+			|| (frame->dpfsr >> 16 & 0x7) == 0x5) { /* page fault */
+		result = vm_fault(map, va, ftype, FALSE); 
+
+		if (result == KERN_SUCCESS) {
+			/*
+			 * We could resolve the fault. Call
+			 * data_access_emulation to drain the data unit pipe
+			 * line and reset dmt0 so that trap won't get called
+			 * again. For inst faults, back up the pipe line.
+			 */
+			if (type == T_DATAFLT) {
+			    data_access_emulation(frame);
+			    frame->dmt0 = 0;
+			    frame->dpfsr = 0;
+			} else {
+			    frame->sfip = frame->snip & ~FIP_E;
+			    frame->snip = frame->sxip & ~NIP_E;
+			}	
+			return;
+		}
+	}
 
 	/*
 	 * if still the fault is not resolved ...
@@ -299,6 +373,7 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	frame->sfip = ((unsigned)p->p_addr->u_pcb.pcb_onfault + 4) | FIP_V;
 	frame->sxip = 0;
 	frame->dmt0 = 0;	/* XXX what about other trans. in data unit */
+	frame->dpfsr = 0;
 	return;
 
     case T_INSTFLT+T_USER:
@@ -306,26 +381,39 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	/*FALLTHRU*/
     case T_DATAFLT+T_USER:
     user_fault:
-	sig = SIGILL;
+
 	if (type == T_INSTFLT+T_USER)
 		fault_addr = frame->sxip & XIP_ADDR;
 	else
 		fault_addr = frame->dma0;
-	if (frame->dmt0 & (DMT_WRITE|DMT_LOCKBAR))
+
+	if (frame->dmt0 & (DMT_WRITE|DMT_LOCKBAR)) {
 	    ftype = VM_PROT_READ|VM_PROT_WRITE;
-	else
+	    fault_code = VM_PROT_WRITE;
+	} else {
 	    ftype = VM_PROT_READ;
+	    fault_code = VM_PROT_READ;
+	}
 
 	va = trunc_page((vm_offset_t)fault_addr);
 
 	vm = p->p_vmspace;
 	map = &vm->vm_map;
 
-	result = vm_fault(map, va, ftype, FALSE); 
+	/* Call vm_fault() to resolve non-bus error faults */
+
+	if ((frame->ipfsr >> 16 & 0x7) != 0x3 &&
+		(frame->dpfsr >> 16 & 0x7) != 0x3) {
+
+		result = vm_fault(map, va, ftype, FALSE); 
+		frame->ipfsr = frame->dpfsr = 0;
+
+	}
+
 
 	if ((caddr_t)va >= vm->vm_maxsaddr) {
 		if (result == KERN_SUCCESS) {
-			nss = clrnd(USRSTACK - va);/* XXX check this */
+			nss = clrnd(btoc(USRSTACK - va));/* XXX check this */
 			if (nss > vm->vm_ssize)
 				vm->vm_ssize = nss;
 		} else if (result == KERN_PROTECTION_FAILURE)
@@ -342,19 +430,23 @@ trap(unsigned type, struct m88100_saved_state *frame)
 			 */
 			data_access_emulation(frame);
 			frame->dmt0 = 0;
+			frame->dpfsr = 0;
 		} else {
 		    /* back up SXIP, SNIP clearing the the Error bit */
 		    frame->sfip = frame->snip & ~FIP_E;
 		    frame->snip = frame->sxip & ~NIP_E;
 		}
 	} else {
-		sig = result == SIGSEGV;
+		sig = result == KERN_PROTECTION_FAILURE ? SIGBUS : SIGSEGV;
+		fault_type = result == KERN_PROTECTION_FAILURE ? BUS_ADRERR
+					: SEGV_MAPERR;
 	}
 
 	break;
 
     case T_MISALGNFLT+T_USER:
 	sig = SIGBUS;
+	fault_type = BUS_ADRALN;
 	break;
 
     case T_PRIVINFLT+T_USER:
@@ -363,9 +455,15 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	break;
 
     case T_BNDFLT+T_USER:
+	sig = SIGFPE;
+	break;
     case T_ZERODIV+T_USER:
+	sig = SIGFPE;
+	fault_type = FPE_INTDIV;
+	break;
     case T_OVFFLT+T_USER:
-	sig = SIGBUS;
+	sig = SIGFPE;
+	fault_type = FPE_INTOVF;
 	break;
 
     case T_FPEPFLT+T_USER:
@@ -373,27 +471,9 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	sig = SIGFPE;
 	break;
 
-    case T_ASTFLT+T_USER:
-	want_ast = 0;
-	(void) spl0();
-	if (ssir & SIR_NET) {
-		siroff(SIR_NET);
-		cnt.v_soft++;
-		netintr();
-	}
-	if (ssir & SIR_CLOCK) {
-		siroff(SIR_CLOCK);
-		cnt.v_soft++;
-		/* XXXX softclock(&frame.f_stackadj); */
-		softclock();
-	}
-	if (p->p_flag & P_OWEUPC) {
-		p->p_flag &= ~P_OWEUPC;
-		ADDUPROF(p);
-	}
-	break;
-
     case T_SIGTRAP+T_USER:
+	sig = SIGTRAP;
+	fault_type = TRAP_TRACE;
 	break;
 
     case T_STEPBPT+T_USER:
@@ -421,8 +501,17 @@ trap(unsigned type, struct m88100_saved_state *frame)
 
 	frame->sfip = frame->snip;    /* set up the next FIP */
 	frame->snip = frame->sxip;    /* set up the next NIP */
+	sig = SIGTRAP;
+	fault_type = TRAP_BRKPT;
 	break;
 
+    case T_ASTFLT+T_USER:
+	want_ast = 0;
+	if (p->p_flag & P_OWEUPC) {
+		p->p_flag &= ~P_OWEUPC;
+		ADDUPROF(p);
+	}
+	break;
     }
 
     /*
@@ -432,18 +521,20 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	 return;
 
     if (sig) {
-	trapsignal(p, sig, frame->vector);
+	trapsignal(p, sig, fault_code, fault_type, (caddr_t)fault_addr);
 	/*
          * don't want multiple faults - we are going to
 	 * deliver signal.
 	 */
 	frame->dmt0 = 0;
+	frame->dpfsr = 0;
     }
 
     userret(p, frame, sticks);
 }
 
-void error_fault(struct m88100_saved_state *frame)
+void
+error_fault(struct m88100_saved_state *frame)
 {
     DEBUG_MSG("\n[ERROR FAULT (Bad News[tm]) frame 0x%08x]\n", frame);
 #if DDB
@@ -453,7 +544,7 @@ void error_fault(struct m88100_saved_state *frame)
 #endif /* DDB */
 }
 
-syscall(u_int code, struct m88100_saved_state *tf)
+syscall(register_t code, struct m88100_saved_state *tf)
 {
 	register int i, nsys, *ap, nap;
 	register struct sysent *callp;
@@ -468,16 +559,17 @@ syscall(u_int code, struct m88100_saved_state *tf)
 
 	cnt.v_syscall++;
 
+	p = curproc;
+
 	callp = p->p_emul->e_sysent;
 	nsys  = p->p_emul->e_nsysent;
 
-	p = curproc;
 #ifdef DIAGNOSTIC
 	if (USERMODE(tf->epsr) == 0)
 		panic("syscall");
 	if (curpcb != &p->p_addr->u_pcb)
 		panic("syscall curpcb/ppcb");
-	if (tf != (struct trapframe *)((caddr_t)curpcb))
+	if (tf != (struct trapframe *)&curpcb->user_state)
 		panic("syscall trapframe");
 #endif
 
@@ -513,21 +605,24 @@ syscall(u_int code, struct m88100_saved_state *tf)
 		callp += p->p_emul->e_nosys;
 	else {
 		callp += code;
-		i = callp->sy_narg;
+		i = callp->sy_argsize / sizeof(register_t);
 		if (i > 8)
 			panic("syscall nargs");
 		/*
 		 * just copy them; syscall stub made sure all the
 		 * args are moved from user stack to registers.
 		 */
-		bcopy((caddr_t)ap, (caddr_t)args.i, i * 4);
+		bcopy((caddr_t)ap, (caddr_t)args.i, i * sizeof(register_t));
 	}
+#ifdef SYSCALL_DEBUG
+	scdebug_call(p, code, args.i);
+#endif
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSCALL))
-		ktrsyscall(p->p_tracep, code, callp->sy_narg, args.i);
+		ktrsyscall(p->p_tracep, code, callp->sy_argsize, args.i);
 #endif
 	rval[0] = 0;
-	rval[1] = 0;	/* doesn't seem to be used any where */
+	rval[1] = 0;
 	error = (*callp->sy_call)(p, &args, rval);
 	/*
 	 * system call will look like:
@@ -553,10 +648,12 @@ syscall(u_int code, struct m88100_saved_state *tf)
 	 * 2. If the system call returned an errno > 0, plug the value
 	 *    in r2, and leave nip and fip unchanged. This will have us
 	 *    executing "br err" on return to user space.
-	 * 3. If the system call code returned ERESTART or EJUSTRETURN,
+	 * 3. If the system call code returned ERESTART,
 	 *    we need to rexecute the trap instruction. Back up the pipe
 	 *    line.
 	 *     fip = nip, nip = xip
+	 * 4. If the system call returned EJUSTRETURN, don't need to adjust
+	 *    any pointers.
 	 */
 
 	if (error == 0) {
@@ -569,22 +666,32 @@ syscall(u_int code, struct m88100_saved_state *tf)
 		 */
 		p = curproc;
 		tf = USER_REGS(p);
-		tf->r[2] = 0;
+		tf->r[2] = rval[0];
+		tf->r[3] = rval[1];
 		tf->epsr &= ~PSR_C;
-		tf->snip = tf->sfip & ~3;
+		tf->snip = tf->sfip & ~FIP_E;
 		tf->sfip = tf->snip + 4;
-	} else if (error > 0 /*error != ERESTART && error != EJUSTRETURN*/) {
-bad:
+	} else if (error > 0) {
+		/* error != ERESTART && error != EJUSTRETURN*/
 		tf->r[2] = error;
 		tf->epsr |= PSR_C;	/* fail */
-		tf->snip = tf->snip & ~3;
-		tf->sfip = tf->sfip & ~3;
+		tf->snip = tf->snip & ~NIP_E;
+		tf->sfip = tf->sfip & ~FIP_E;
+	} else if (error == ERESTART) {
+		/*
+		 * If (error == ERESTART), back up the pipe line. This
+		 * will end up reexecuting the trap.
+		 */
+		tf->epsr &= ~PSR_C;
+		tf->sfip = tf->snip & ~NIP_E;
+		tf->snip = tf->sxip & ~NIP_E;
 	} else {
-	/* if (error == ERESTART || error == EJUSTRETURN) 
-		back up the pipe line */
-		tf->sfip = tf->snip & ~3;
-		tf->snip = tf->sxip & ~3;
+		/* if (error == EJUSTRETURN), leave the ip's alone */
+		tf->epsr &= ~PSR_C;
 	}
+#ifdef SYSCALL_DEBUG
+	scdebug_ret(p, code, error, rval);
+#endif
 	userret(p, tf, sticks);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
@@ -592,17 +699,25 @@ bad:
 #endif
 }
 
-#if     MACH_PCSAMPLE > 0
-#include "mach_pcsample.h"
 /*
- * return saved state for interrupted user thread
+ * Set up return-value registers as fork() libc stub expects,
+ * and do normal return-to-user-mode stuff.
  */
-unsigned interrupted_pc(p)
-proc *p;
+void
+child_return(struct proc *p)
 {
-    struct m88100_saved_state *frame = &p->pcb->user_state;
-    unsigned sxip = frame->sxip;
-    unsigned PC = sxip & ~3; /* clear lower bits which are flags... */
-    return PC;
+	struct trapframe *tf;
+
+	tf = USER_REGS(p);
+	tf->r[2] = 0;
+	tf->r[3] = 0;
+	tf->epsr &= ~PSR_C;
+	tf->snip = tf->sfip & ~3;
+	tf->sfip = tf->snip + 4;
+
+	userret(p, tf, p->p_sticks);
+#ifdef KTRACE
+	if (KTRPOINT(p, KTR_SYSRET))
+		ktrsysret(p->p_tracep, SYS_fork, 0, 0);
+#endif
 }
-#endif  /* MACH_PCSAMPLE > 0*/

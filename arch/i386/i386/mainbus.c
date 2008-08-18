@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.5 1996/05/30 09:30:08 deraadt Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.8 1996/11/28 23:37:37 niklas Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.8 1996/04/11 22:13:37 cgd Exp $	*/
 
 /*
@@ -62,7 +62,7 @@ struct cfdriver mainbus_cd = {
 	NULL, "mainbus", DV_DULL
 };
 
-int	mainbus_print __P((void *, char *));
+int	mainbus_print __P((void *, const char *));
 
 union mainbus_attach_args {
 	const char *mba_busname;		/* first elem of all */
@@ -100,15 +100,15 @@ mainbus_attach(parent, self, aux)
 
 	if (1 /* XXX ISA NOT YET SEEN */) {
 		mba.mba_iba.iba_busname = "isa";
-		mba.mba_iba.iba_bc = NULL;
-		mba.mba_iba.iba_ic = NULL;
+		mba.mba_iba.iba_iot = I386_BUS_SPACE_IO;
+		mba.mba_iba.iba_memt = I386_BUS_SPACE_MEM;
 		config_found(self, &mba.mba_iba, mainbus_print);
 	}
 
 	if (!bcmp(ISA_HOLE_VADDR(EISA_ID_PADDR), EISA_ID, EISA_ID_LEN)) {
 		mba.mba_eba.eba_busname = "eisa";
-		mba.mba_eba.eba_bc = NULL;
-		mba.mba_eba.eba_ec = NULL;
+		mba.mba_eba.eba_iot = I386_BUS_SPACE_IO;
+		mba.mba_eba.eba_memt = I386_BUS_SPACE_MEM;
 		config_found(self, &mba.mba_eba, mainbus_print);
 	}
 
@@ -121,7 +121,8 @@ mainbus_attach(parent, self, aux)
 #if NPCI > 0
 	if (pci_mode_detect() != 0) {
 		mba.mba_pba.pba_busname = "pci";
-		mba.mba_pba.pba_bc = NULL;
+		mba.mba_pba.pba_iot = I386_BUS_SPACE_IO;
+		mba.mba_pba.pba_memt = I386_BUS_SPACE_MEM;
 		mba.mba_pba.pba_bus = 0;
 		config_found(self, &mba.mba_pba, mainbus_print);
 	}
@@ -137,7 +138,7 @@ mainbus_attach(parent, self, aux)
 int
 mainbus_print(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 	union mainbus_attach_args *mba = aux;
 

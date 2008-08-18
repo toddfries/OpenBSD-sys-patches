@@ -1,9 +1,12 @@
-/*	$NetBSD: si_obio.c,v 1.1 1996/03/26 15:01:12 gwr Exp $	*/
+/*	$OpenBSD: si_obio.c,v 1.7 1997/04/29 13:09:25 kstailey Exp $	*/
+/*	$NetBSD: si_obio.c,v 1.7 1996/11/20 18:57:00 gwr Exp $	*/
 
-/*
- * Copyright (c) 1995 David Jones, Gordon W. Ross
- * Copyright (c) 1994 Adam Glass
+/*-
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Adam Glass, David Jones, and Gordon W. Ross.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,23 +16,25 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the authors may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- * 4. All advertising materials mentioning features or use of this software
+ * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by
- *      Adam Glass, David Jones, and Gordon Ross
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -91,7 +96,6 @@
 #include <scsi/scsiconf.h>
 
 #include <machine/autoconf.h>
-#include <machine/isr.h>
 #include <machine/obio.h>
 #include <machine/dvma.h>
 
@@ -114,6 +118,10 @@ void si_obio_dma_start __P((struct ncr5380_softc *));
 void si_obio_dma_eop __P((struct ncr5380_softc *));
 void si_obio_dma_stop __P((struct ncr5380_softc *));
 
+static __inline__ int  si_obio_udc_read __P((volatile struct si_regs *, int));
+static __inline__ void si_obio_udc_write __P((volatile struct si_regs *,
+					      int, int));
+
 /*
  * New-style autoconfig attachment
  */
@@ -126,10 +134,8 @@ struct cfattach si_obio_ca = {
 };
 
 /* Options.  Interesting values are: 1,3,7 */
-int si_obio_options = 3;
-#define SI_ENABLE_DMA	1	/* Use DMA (maybe polled) */
-#define SI_DMA_INTR 	2	/* DMA completion interrupts */
-#define	SI_DO_RESELECT	4	/* Allow disconnect/reselect */
+/* XXX: Using 1 for now to mask a (pmap?) bug not yet found... */
+int si_obio_options = 0;	/* XXX */
 
 
 static int
@@ -137,40 +143,17 @@ si_obio_match(parent, vcf, args)
 	struct device	*parent;
 	void		*vcf, *args;
 {
-	struct cfdata	*cf = vcf;
 	struct confargs *ca = args;
-	int pa, x;
-
-#ifdef	DIAGNOSTIC
-	if (ca->ca_bustype != BUS_OBIO) {
-		printf("si_obio_match: bustype %d?\n", ca->ca_bustype);
-		return (0);
-	}
-#endif
-
-	/*
-	 * OBIO match functions may be called for every possible
-	 * physical address, so match only our physical address.
-	 */
-	if ((pa = cf->cf_paddr) == -1) {
-		/* Use our default PA. */
-		pa = OBIO_NCR_SCSI;
-	}
-	if (pa != ca->ca_paddr)
-		return (0);
-
-#if 0
-	if ((cpu_machine_id != SUN3_MACH_50) &&
-	    (cpu_machine_id != SUN3_MACH_60) )
-	{
-		/* Only 3/50 and 3/60 have the obio si. */
-		return (0);
-	}
-#endif
 
 	/* Make sure there is something there... */
-	x = bus_peek(ca->ca_bustype, ca->ca_paddr + 1, 1);
-	return (x != -1);
+	if (bus_peek(ca->ca_bustype, ca->ca_paddr + 1, 1) == -1)
+		return (0);
+
+	/* Default interrupt priority. */
+	if (ca->ca_intpri == -1)
+		ca->ca_intpri = 2;
+
+	return (1);
 }
 
 static void
@@ -182,21 +165,10 @@ si_obio_attach(parent, self, args)
 	struct ncr5380_softc *ncr_sc = &sc->ncr_sc;
 	struct cfdata *cf = self->dv_cfdata;
 	struct confargs *ca = args;
-	int intpri;
 
-	/* Default interrupt level. */
-	if ((intpri = cf->cf_intpri) == -1)
-		intpri = 2;
-	printf(" level %d", intpri);
-
-	/* XXX: Get options from flags... */
-	printf(" : options=%d\n", si_obio_options);
-
-	ncr_sc->sc_flags = 0;
-	if (si_obio_options & SI_DO_RESELECT)
-		ncr_sc->sc_flags |= NCR5380_PERMIT_RESELECT;
-	if ((si_obio_options & SI_DMA_INTR) == 0)
-		ncr_sc->sc_flags |= NCR5380_FORCE_POLLING;
+	/* Get options from config flags... */
+	sc->sc_options = cf->cf_flags | si_obio_options;
+	printf(": options=%d\n", sc->sc_options);
 
 	sc->sc_adapter_type = ca->ca_bustype;
 	sc->sc_regs = (struct si_regs *)
@@ -207,33 +179,21 @@ si_obio_attach(parent, self, args)
 	 */
 	ncr_sc->sc_pio_out = ncr5380_pio_out;
 	ncr_sc->sc_pio_in =  ncr5380_pio_in;
-
 	ncr_sc->sc_dma_alloc = si_dma_alloc;
 	ncr_sc->sc_dma_free  = si_dma_free;
-	ncr_sc->sc_dma_poll  = si_dma_poll;
-
 	ncr_sc->sc_dma_setup = si_obio_dma_setup;
 	ncr_sc->sc_dma_start = si_obio_dma_start;
-	ncr_sc->sc_dma_eop   = si_obio_dma_stop;
+	ncr_sc->sc_dma_poll  = si_dma_poll;
+	ncr_sc->sc_dma_eop   = si_obio_dma_eop;
 	ncr_sc->sc_dma_stop  = si_obio_dma_stop;
 	ncr_sc->sc_intr_on   = NULL;
 	ncr_sc->sc_intr_off  = NULL;
-
-	ncr_sc->sc_min_dma_len = MIN_DMA_LEN;
-
-#if 1	/* XXX - Temporary */
-	/* XXX - In case we think DMA is completely broken... */
-	if ((si_obio_options & SI_ENABLE_DMA) == 0) {
-		/* Override this function pointer. */
-		ncr_sc->sc_dma_alloc = NULL;
-	}
-#endif
 
 	/* Need DVMA-capable memory for the UDC command block. */
 	sc->sc_dmacmd = dvma_malloc(sizeof (struct udc_table));
 
 	/* Attach interrupt handler. */
-	isr_add_autovect(si_intr, (void *)sc, intpri);
+	isr_add_autovect(si_intr, (void *)sc, ca->ca_intpri);
 
 	/* Do the common attach stuff. */
 	si_attach(sc);
@@ -281,72 +241,6 @@ si_obio_dma_setup(ncr_sc)
 	struct ncr5380_softc *ncr_sc;
 {
 	struct si_softc *sc = (struct si_softc *)ncr_sc;
-	volatile struct si_regs *si = sc->sc_regs;
-	struct sci_req *sr;
-	struct si_dma_handle *dh;
-	int send = 0;
-	int xlen = 0;
-
-	/* Let this work even without a dma hand, for testing... */
-	if ((sr = ncr_sc->sc_current) != NULL) {
-		if ((dh = sr->sr_dma_hand) != NULL) {
-			send = dh->dh_flags & SIDH_OUT;
-			xlen = ncr_sc->sc_datalen;
-			xlen &= ~1;
-		}
-	}
-
-#ifdef	DEBUG
-	if (si_debug) {
-		printf("si_dma_setup: send=%d xlen=%d\n", send, xlen);
-	}
-#endif
-
-	/* Reset the UDC. (In case not already reset?) */
-	si_obio_udc_write(si, UDC_ADR_COMMAND, UDC_CMD_RESET);
-
-	/* Reset the FIFO */
-	si->si_csr &= ~SI_CSR_FIFO_RES; 	/* active low */
-	si->si_csr |= SI_CSR_FIFO_RES;
-
-	/* Set direction (send/recv) */
-	if (send) {
-		si->si_csr |= SI_CSR_SEND;
-	} else {
-		si->si_csr &= ~SI_CSR_SEND;
-	}
-
-	/* Set the FIFO counter. */
-	si->fifo_count = xlen;
-
-	/*
-	 * XXX: Reset DMA engine again!  Comment from Sprite:
-	 * Go through reset again becuase of the bug on the 3/50
-	 * where bytes occasionally linger in the DMA fifo.
-	 */
-
-	/* Reset the UDC. */
-	si_obio_udc_write(si, UDC_ADR_COMMAND, UDC_CMD_RESET);
-
-	/* Reset the FIFO */
-	si->si_csr &= ~SI_CSR_FIFO_RES; 	/* active low */
-	si->si_csr |= SI_CSR_FIFO_RES;
-
-#ifdef	DEBUG
-	if ((si->fifo_count > xlen) || (si->fifo_count < (xlen - 1))) {
-		printf("si_dma_setup: fifo_count=0x%x, xlen=0x%x\n",
-			   si->fifo_count, xlen);
-		Debugger();
-	}
-#endif
-}
-
-
-void
-si_obio_dma_start(ncr_sc)
-	struct ncr5380_softc *ncr_sc;
-{
-	struct si_softc *sc = (struct si_softc *)ncr_sc;
 	struct sci_req *sr = ncr_sc->sc_current;
 	struct si_dma_handle *dh = sr->sr_dma_hand;
 	volatile struct si_regs *si = sc->sc_regs;
@@ -363,33 +257,55 @@ si_obio_dma_start(ncr_sc)
 	if (data_pa & 1)
 		panic("si_dma_start: bad pa=0x%x", data_pa);
 	xlen = ncr_sc->sc_datalen;
-	xlen &= ~1;
-	sc->sc_reqlen = xlen; 	/* XXX: or less... */
+	sc->sc_reqlen = xlen; 	/* XXX: or less? */
 
 #ifdef	DEBUG
 	if (si_debug & 2) {
-		printf("si_dma_start: dh=0x%x, pa=0x%x, xlen=%d\n",
+		printf("si_dma_setup: dh=%p, pa=0x%lx, xlen=%d\n",
 			   dh, data_pa, xlen);
 	}
 #endif
 
+	/* Reset the UDC. (In case not already reset?) */
+	si_obio_udc_write(si, UDC_ADR_COMMAND, UDC_CMD_RESET);
+
+	/* Reset the FIFO */
+	si->si_csr &= ~SI_CSR_FIFO_RES; 	/* active low */
+	si->si_csr |= SI_CSR_FIFO_RES;
+
+	/* Set direction (send/recv) */
+	if (dh->dh_flags & SIDH_OUT) {
+		si->si_csr |= SI_CSR_SEND;
+	} else {
+		si->si_csr &= ~SI_CSR_SEND;
+	}
+
+	/* Set the FIFO counter. */
+	si->fifo_count = xlen;
+
+	/* Reset the UDC. */
+	si_obio_udc_write(si, UDC_ADR_COMMAND, UDC_CMD_RESET);
+
 	/*
-	 * Set up the DMA controller.
-	 * Already set FIFO count in dma_setup.
+	 * XXX: Reset the FIFO again!  Comment from Sprite:
+	 * Go through reset again becuase of the bug on the 3/50
+	 * where bytes occasionally linger in the DMA fifo.
 	 */
+	si->si_csr &= ~SI_CSR_FIFO_RES; 	/* active low */
+	si->si_csr |= SI_CSR_FIFO_RES;
 
 #ifdef	DEBUG
-	if ((si->fifo_count > xlen) ||
-		(si->fifo_count < (xlen - 1)))
-	{
-		printf("si_dma_start: fifo_count=0x%x, xlen=0x%x\n",
+	/* Make sure the extra FIFO reset did not hit the count. */
+	if (si->fifo_count != xlen) {
+		printf("si_dma_setup: fifo_count=0x%x, xlen=0x%x\n",
 			   si->fifo_count, xlen);
 		Debugger();
 	}
 #endif
 
 	/*
-	 * The OBIO controller needs a command block.
+	 * Set up the DMA controller.  The DMA controller on
+	 * OBIO needs a command block in DVMA space.
 	 */
 	cmd = sc->sc_dmacmd;
 	cmd->addrh = ((data_pa & 0xFF0000) >> 8) | UDC_ADDR_INFO;
@@ -397,6 +313,8 @@ si_obio_dma_start(ncr_sc)
 	cmd->count = xlen / 2;	/* bytes -> words */
 	cmd->cmrh = UDC_CMR_HIGH;
 	if (dh->dh_flags & SIDH_OUT) {
+		if (xlen & 1)
+			cmd->count++;
 		cmd->cmrl = UDC_CMR_LSEND;
 		cmd->rsel = UDC_RSEL_SEND;
 	} else {
@@ -417,7 +335,28 @@ si_obio_dma_start(ncr_sc)
 	/* Tell the chip to interrupt on error. */
 	si_obio_udc_write(si, UDC_ADR_COMMAND, UDC_CMD_CIE);
 
-	/* XXX: Move all of the above to _setup? */
+	/* Will do "start chain" command in _dma_start. */
+}
+
+
+void
+si_obio_dma_start(ncr_sc)
+	struct ncr5380_softc *ncr_sc;
+{
+	struct si_softc *sc = (struct si_softc *)ncr_sc;
+	struct sci_req *sr = ncr_sc->sc_current;
+	struct si_dma_handle *dh = sr->sr_dma_hand;
+	volatile struct si_regs *si = sc->sc_regs;
+	int s;
+
+#ifdef	DEBUG
+	if (si_debug & 2) {
+		printf("si_dma_start: sr=%p\n", sr);
+	}
+#endif
+
+	/* This MAY be time critical (not sure). */
+	s = splhigh();
 
 	/* Finally, give the UDC a "start chain" command. */
 	si_obio_udc_write(si, UDC_ADR_COMMAND, UDC_CMD_STRT_CHN);
@@ -440,6 +379,7 @@ si_obio_dma_start(ncr_sc)
 		*ncr_sc->sci_irecv = 0;	/* start it */
 	}
 
+	splx(s);
 	ncr_sc->sc_state |= NCR_DOINGDMA;
 
 #ifdef	DEBUG
@@ -478,11 +418,19 @@ si_obio_dma_stop(ncr_sc)
 	}
 	ncr_sc->sc_state &= ~NCR_DOINGDMA;
 
+	NCR_TRACE("si_dma_stop: top, csr=0x%x\n", si->si_csr);
+
+	/* OK, have either phase mis-match or end of DMA. */
+	/* Set an impossible phase to prevent data movement? */
+	*ncr_sc->sci_tcmd = PHASE_INVALID;
+
+	/* Check for DMA errors. */
 	if (si->si_csr & (SI_CSR_DMA_CONFLICT | SI_CSR_DMA_BUS_ERR)) {
 		printf("si: DMA error, csr=0x%x, reset\n", si->si_csr);
 		sr->sr_xs->error = XS_DRIVER_STUFFUP;
 		ncr_sc->sc_state |= NCR_ABORTING;
 		si_reset_adapter(ncr_sc);
+		goto out;
 	}
 
 	/* Note that timeout may have set the error flag. */
@@ -510,11 +458,9 @@ si_obio_dma_stop(ncr_sc)
 
 	/*
 	 * Now try to figure out how much actually transferred
-	 *
 	 * The fifo_count might not reflect how many bytes were
-	 * actually transferred for VME.
+	 * actually transferred.
 	 */
-
 	resid = si->fifo_count & 0xFFFF;
 	ntrans = sc->sc_reqlen - resid;
 
@@ -569,11 +515,12 @@ out:
 	si->fifo_count = 0;
 	si->si_csr &= ~SI_CSR_SEND;
 
-    /* Reset the FIFO */
-    si->si_csr &= ~SI_CSR_FIFO_RES;     /* active low */
-    si->si_csr |= SI_CSR_FIFO_RES;
+	/* Reset the FIFO */
+	si->si_csr &= ~SI_CSR_FIFO_RES;     /* active low */
+	si->si_csr |= SI_CSR_FIFO_RES;
 
 	/* Put SBIC back in PIO mode. */
+	/* XXX: set tcmd to PHASE_INVALID? */
 	*ncr_sc->sci_mode &= ~(SCI_MODE_DMA | SCI_MODE_DMA_IE);
 	*ncr_sc->sci_icmd = 0;
 }

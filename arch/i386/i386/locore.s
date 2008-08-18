@@ -156,7 +156,8 @@
  */
 	.data
 
-	.globl	_cpu,_cpu_vendor,_cold,_esym,_boothowto,_bootdev,_atdevbase
+	.globl	_cpu,_cpu_vendor,_cold,_cnvmem,_extmem,_esym
+	.globl	_boothowto,_bootdev,_atdevbase
 	.globl	_cyloffset,_proc0paddr,_curpcb,_PTDpaddr,_dynamic_gdt
 #if NAPM > 0
 #include <machine/apmvar.h>
@@ -168,10 +169,12 @@ _apm_current_gdt_pdesc:
 _bootstrap_gdt:	
 	.space SIZEOF_GDTE * BOOTSTRAP_GDT_NUM
 #endif
-_cpu:		.long	0	# are we 386, 386sx, or 486
+_cpu:		.long	0	# are we 386, 386sx, 486, 586 or 686
 _cpu_vendor:	.space	16	# vendor string returned by `cpuid' instruction
 _cold:		.long	1	# cold till we are not
 _esym:		.long	0	# ptr to end of syms
+_cnvmem:	.long	0	# conventional memory size
+_extmem:	.long	0	# extended memory size
 _atdevbase:	.long	0	# location of start of iomem in virtual
 _cyloffset:	.long	0
 _proc0paddr:	.long	0
@@ -185,6 +188,8 @@ tmpstk:
 
 	.text
 	.globl	start
+	.globl	_kernel_text
+	_kernel_text = KERNTEXTOFF
 start:	movw	$0x1234,0x472			# warm boot
 
 	/*
@@ -203,6 +208,11 @@ start:	movw	$0x1234,0x472			# warm boot
 	jz	1f
 	addl	$KERNBASE,%eax
 1: 	movl	%eax,RELOC(_esym)
+
+	movl	20(%esp),%eax
+	movl	%eax,RELOC(_extmem)
+	movl	24(%esp),%eax
+	movl	%eax,RELOC(_cnvmem)
 
 #if NAPM > 0
 
@@ -437,6 +447,9 @@ try586:	/* Use the `cpuid' instruction. */
 	cmpl	$5,%eax
 	jb	is486			# less than a Pentium
 	movl	$CPU_586,RELOC(_cpu)
+	je	3f			# Pentium
+	movl	$CPU_686,RELOC(_cpu)	# else Pentium Pro
+3:
 
 	xorl %eax,%eax
 	xorl %edx,%edx
@@ -478,27 +491,25 @@ try586:	/* Use the `cpuid' instruction. */
 	stosl
 
 	/* Find end of kernel image. */
-	movl	$RELOC(_end),%edi
+	movl	$RELOC(_end),%esi
 #if defined(DDB) && !defined(SYMTAB_SPACE)
 	/* Save the symbols (if loaded). */
 	movl	RELOC(_esym),%eax
 	testl	%eax,%eax
 	jz	1f
 	subl	$KERNBASE,%eax
-	movl	%eax,%edi
+	movl	%eax,%esi
 1:
 #endif
 
 	/* Calculate where to start the bootstrap tables. */
-	movl	%edi,%esi			# edi = esym ? esym : end
-	addl	$PGOFSET,%esi			# page align up
-	andl	$~PGOFSET,%esi
+	addl	$PGOFSET, %esi			# page align up
+	andl	$~PGOFSET, %esi
 
 	/* Clear memory for bootstrap tables. */
-	leal	(TABLESIZE)(%esi),%ecx		# end of tables
-	subl	%edi,%ecx			# size of tables
-	shrl	$2,%ecx
-	xorl	%eax,%eax
+	movl	%esi, %edi
+	movl	$((TABLESIZE + 3) >> 2), %ecx	# size of tables
+	xorl	%eax, %eax
 	cld
 	rep
 	stosl
@@ -553,18 +564,29 @@ try586:	/* Use the `cpuid' instruction. */
 
 /*
  * Construct a page table directory.
+ *
+ * Install a PDE for temporary double map of kernel text.
+ * Maps two pages, in case the kernel is larger than 4M.
+ * XXX: should the number of pages to map be decided at run-time?
  */
-	/* Install a PDE for temporary double map of kernel text. */
-	leal	(SYSMAP+PG_V|PG_KW)(%esi),%eax		# pte for KPT in proc 0,
-	movl	%eax,(PROC0PDIR+0*4)(%esi)		# which is where temp maps!
-	/* Map kernel PDEs. */
-	movl	$NKPDE,%ecx				# for this many pde s,
-	leal	(PROC0PDIR+KPTDI*4)(%esi),%ebx		# offset of pde for kernel
+	leal	(SYSMAP+PG_V|PG_KW)(%esi),%eax		# calc Sysmap physaddr
+	movl	%eax,(PROC0PDIR+0*4)(%esi)		# map it in
+	addl	$NBPG, %eax				# 2nd Sysmap page
+	movl	%eax,(PROC0PDIR+1*4)(%esi)		# map it too
+	/* code below assumes %eax == sysmap physaddr, so we adjust it back */
+	subl	$NBPG, %eax
+
+/*
+ * Map kernel PDEs: this is the real mapping used 
+ * after the temp mapping outlives its usefulness.
+ */
+	movl	$NKPDE,%ecx				# count of pde's
+	leal	(PROC0PDIR+KPTDI*4)(%esi),%ebx		# map them high
 	fillkpt
 
 	/* Install a PDE recursively mapping page directory as a page table! */
 	leal	(PROC0PDIR+PG_V|PG_KW)(%esi),%eax	# pte for ptd
-	movl	%eax,(PROC0PDIR+PTDPTDI*4)(%esi)	# which is where PTmap maps!
+	movl	%eax,(PROC0PDIR+PTDPTDI*4)(%esi)	# phys addr from above
 
 	/* Save phys. addr of PTD, for libkvm. */
 	movl	%esi,RELOC(_PTDpaddr)
@@ -583,6 +605,7 @@ try586:	/* Use the `cpuid' instruction. */
 begin:
 	/* Now running relocated at KERNBASE.  Remove double mapping. */
 	movl	$0,(PROC0PDIR+0*4)(%esi)
+	movl	$0,(PROC0PDIR+1*4)(%esi)
 
 	/* Relocate atdevbase. */
 	leal	(TABLESIZE+KERNBASE)(%esi),%edx
@@ -1269,7 +1292,7 @@ ENTRY(fuword)
 	ret
 	
 /*
- * fusword(caddr_t uaddr);
+ * fusword(u_short *uaddr);
  * Fetch a short from the user's address space.
  */
 ENTRY(fusword)
@@ -1378,7 +1401,7 @@ ENTRY(suword)
 	ret
 	
 /*
- * susword(caddr_t uaddr, short x);
+ * susword(u_short *uaddr, short x);
  * Store a short in the user's address space.
  */
 ENTRY(susword)
@@ -1592,10 +1615,10 @@ ENTRY(setrunqueue)
 #endif /* DIAGNOSTIC */
 
 /*
- * remrq(struct proc *p);
+ * remrunqueue(struct proc *p);
  * Remove a process from its queue.  Should be called at splclock().
  */
-ENTRY(remrq)
+ENTRY(remrunqueue)
 	movl	4(%esp),%ecx
 	movzbl	P_PRIORITY(%ecx),%eax
 #ifdef DIAGNOSTIC
@@ -1619,7 +1642,7 @@ ENTRY(remrq)
 1:	pushl	$3f
 	call	_panic
 	/* NOTREACHED */
-3:	.asciz	"remrq"
+3:	.asciz	"remrunqueue"
 #endif /* DIAGNOSTIC */
 
 #if NAPM > 0
@@ -2025,11 +2048,11 @@ IDTVEC(fpu)
 	pushl	$0			# dummy error code
 	pushl	$T_ASTFLT
 	INTRENTRY
-	pushl	_cpl
-	pushl	%esp
+	pushl	_cpl			# if_ppl in intrframe
+	pushl	%esp			# push address of intrframe
 	incl	_cnt+V_TRAP
 	call	_npxintr
-	addl	$4,%esp
+	addl	$8,%esp			# pop address and if_ppl
 	INTRFASTEXIT
 #else
 	ZTRAP(T_ARITHTRAP)

@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci_2100_a50.c,v 1.6 1996/07/29 23:00:34 niklas Exp $	*/
-/*	$NetBSD: pci_2100_a50.c,v 1.7 1996/04/23 14:15:55 cgd Exp $	*/
+/*	$OpenBSD: pci_2100_a50.c,v 1.10 1997/01/24 19:57:47 niklas Exp $	*/
+/*	$NetBSD: pci_2100_a50.c,v 1.12 1996/11/13 21:13:29 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -36,6 +36,7 @@
 #include <sys/device.h>
 #include <vm/vm.h>
 
+#include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/intr.h>
 
@@ -64,7 +65,7 @@ void
 pci_2100_a50_pickintr(acp)
 	struct apecs_config *acp;
 {
-	bus_chipset_tag_t bc = &acp->ac_bc;
+	bus_space_tag_t iot = acp->ac_iot;
 	pci_chipset_tag_t pc = &acp->ac_pc;
 	pcireg_t sioclass;
 	int sioII;
@@ -83,7 +84,7 @@ pci_2100_a50_pickintr(acp)
 	pc->pc_intr_disestablish = dec_2100_a50_intr_disestablish;
 
 #if NSIO
-        sio_intr_setup(bc);
+        sio_intr_setup(iot);
 	set_iointr(&sio_iointr);
 #else
 	panic("pci_2100_a50_pickintr: no I/O interrupt handler (no sio)");
@@ -108,7 +109,8 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
                 return 1;
         }
         if (buspin > 4) {
-                printf("pci_map_int: bad interrupt pin %d\n", buspin);
+                printf("dec_2100_a50_intr_map: bad interrupt pin %d\n",
+		    buspin);
                 return 1;
         }
 
@@ -132,6 +134,11 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 1;
 			break;
+#ifdef DIAGNOSTIC
+		default:			/* XXX gcc -Wuninitialized */
+			panic("dec_2100_a50_intr_map bogus PCI pin %d\n",
+			    buspin);
+#endif
 		};
 		break;
 
@@ -147,6 +154,11 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 2;
 			break;
+#ifdef DIAGNOSTIC
+		default:			/* XXX gcc -Wuninitialized */
+			panic("dec_2100_a50_intr_map bogus PCI pin %d\n",
+			    buspin);
+#endif
 		};
 		break;
 
@@ -162,8 +174,18 @@ dec_2100_a50_intr_map(acv, bustag, buspin, line, ihp)
 		case PCI_INTERRUPT_PIN_C:
 			pirq = 0;
 			break;
+#ifdef DIAGNOSTIC
+		default:			/* XXX gcc -Wuninitialized */
+			panic("dec_2100_a50_intr_map bogus PCI pin %d\n",
+			    buspin);
+#endif
 		};
 		break;
+
+	default:
+                printf("dec_2100_a50_intr_map: weird device number %d\n",
+		    device);
+                return 1;
 	}
 
 	pirqreg = pci_conf_read(pc, pci_make_tag(pc, 0, APECS_SIO_DEVICE, 0),
@@ -191,8 +213,6 @@ dec_2100_a50_intr_string(acv, ih)
 	void *acv;
 	pci_intr_handle_t ih;
 {
-	struct apecs_config *acp = acv;
-
 	return sio_intr_string(NULL /*XXX*/, ih);
 }
 
@@ -204,8 +224,6 @@ dec_2100_a50_intr_establish(acv, ih, level, func, arg, name)
 	int (*func) __P((void *));
 	char *name;
 {
-	struct apecs_config *acp = acv;
-
 	return sio_intr_establish(NULL /*XXX*/, ih, IST_LEVEL, level, func,
 	    arg, name);
 }
@@ -214,7 +232,5 @@ void
 dec_2100_a50_intr_disestablish(acv, cookie)
 	void *acv, *cookie;
 {
-	struct apecs_config *acp = acv;
-
 	sio_intr_disestablish(NULL /*XXX*/, cookie);
 }

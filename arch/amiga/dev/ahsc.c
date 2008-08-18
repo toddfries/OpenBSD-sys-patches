@@ -1,5 +1,5 @@
-/*	$OpenBSD: ahsc.c,v 1.3 1996/05/02 06:43:33 niklas Exp $	*/
-/*	$NetBSD: ahsc.c,v 1.12 1996/04/21 21:10:49 veego Exp $	*/
+/*	$OpenBSD: ahsc.c,v 1.6 1997/01/18 12:26:22 niklas Exp $	*/
+/*	$NetBSD: ahsc.c,v 1.18 1996/12/23 09:09:51 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -52,7 +52,6 @@
 #include <amiga/dev/ahscreg.h>
 #include <amiga/dev/zbusvar.h>
 
-int ahscprint __P((void *auxp, char *));
 void ahscattach __P((struct device *, struct device *, void *));
 int ahscmatch __P((struct device *, void *, void *));
 
@@ -155,22 +154,8 @@ ahscattach(pdp, dp, auxp)
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, ahscprint);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
-
-/*
- * print diag if pnp is NULL else just extra
- */
-int
-ahscprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-	return(QUIET);
-}
-
 
 void
 ahsc_enintr(dev)

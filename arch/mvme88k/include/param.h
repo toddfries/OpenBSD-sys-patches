@@ -38,14 +38,11 @@
  * from: Utah $Hdr: machparam.h 1.11 89/08/14$
  *
  *	@(#)param.h	7.8 (Berkeley) 6/28/91
- *	$Id: param.h,v 1.1.1.1 1995/10/18 10:54:21 deraadt Exp $
+ *	$Id: param.h,v 1.5 1997/03/03 20:21:06 rahnds Exp $
  */
 #ifndef _MACHINE_PARAM_H_
 #define _MACHINE_PARAM_H_
 
-/*
- * Machine dependent constants for amiga
- */
 #define	MACHINE		"m88k"
 #define MACHINE_ARCH	"m88k"
 #define MID_MACHINE	MID_M88K
@@ -53,10 +50,12 @@
 /*
  * Round p (pointer or byte index) up to a correctly-aligned value
  * for all data types (int, long, ...).   The result is u_int and
- * must be cast to any desired pointer type.
+ * must be cast to any desired pointer type. ALIGN() is used for
+ * aligning stack, which needs to be on a double word boundary for
+ * 88k.
  */
 #define ALIGNBYTES	(sizeof(int) - 1)
-#define	ALIGN(p)	(((u_int)(p) + (sizeof(int) - 1)) &~ (sizeof(int) - 1))
+#define	ALIGN(p)	(((u_int)(p) + (sizeof(double) - 1)) & ~(sizeof(double) - 1))
 
 #ifndef NBPG
 #define	NBPG		4096		/* bytes/page */
@@ -92,9 +91,15 @@
 #define USPACE		ctob(UPAGES)
 
 #define	UPAGES		3		/* pages of u-area */
-#define	UADDR		0xFFEE0000	/* address of u */
+#define	UADDR		0xEEE00000	/* address of u */
 #define	UVPN		(UADDR>>PGSHIFT)/* virtual page number of u */
 #define	KERNELSTACK	(UADDR+UPAGES*NBPG)	/* top of kernel stack */
+
+#define PHYSIO_MAP_START 	0xEEF00000
+#define PHYSIO_MAP_SIZE  	0x00100000
+#define IOMAP_MAP_START		0xEF000000 /* VME etc */
+#define IOMAP_SIZE		0x018F0000
+#define NIOPMAP			32
 
 /*
  * Constants related to network buffer management.
@@ -122,8 +127,6 @@
 #define	NKMEMCLUSTERS	(3072*1024/CLBYTES)
 #endif
 
-#define MAXPARTITIONS	16
-
 /* pages ("clicks") to disk blocks */
 #define	ctod(x)	((x)<<(PGSHIFT-DEV_BSHIFT))
 #define	dtoc(x)	((x)>>(PGSHIFT-DEV_BSHIFT))
@@ -149,75 +152,16 @@
 #define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE/DEV_BSIZE))
 #include <machine/psl.h>
 
-#ifdef JUNK
-/*
- * Mach derived conversion macros
- */
-#define m88k_round_seg(x)	((((unsigned)(x)) + NBSEG - 1) & ~(NBSEG-1))
-#define m88k_trunc_seg(x)	((unsigned)(x) & ~(NBSEG-1))
-#define m88k_round_page(x)	((((unsigned)(x)) + NBPG - 1) & ~(NBPG-1))
-#define m88k_trunc_page(x)	((unsigned)(x) & ~(NBPG-1))
-#define m88k_btos(x)		((unsigned)(x) >> SEGSHIFT)
-#define m88k_stob(x)		((unsigned)(x) << SEGSHIFT)
-#define m88k_btop(x)		((unsigned)(x) >> PGSHIFT)
-#define m88k_ptob(x)		((unsigned)(x) << PGSHIFT)
-
-/*
- * spl functions; all but spl0 are done in-line
- */
-#include <machine/psl.h>
-
-#define _debug_spl(s) \
-({ \
-        register int _spl_r; \
-\
-        asm __volatile ("clrl %0; movew sr,%0; movew %1,sr" : \
-                "&=d" (_spl_r) : "di" (s)); \
-	if ((_spl_r&PSL_IPL) > (s&PSL_IPL)) \
-		printf ("%s:%d:spl(%d) ==> spl(%d)!!\n",__FILE__,__LINE__, \
-		    ((PSL_IPL&_spl_r)>>8), ((PSL_IPL&s)>>8)); \
-        _spl_r; \
-})
-
-#define _spl_no_check(s) \
-({ \
-        register int _spl_r; \
-\
-        asm __volatile ("clrl %0; movew sr,%0; movew %1,sr" : \
-                "&=d" (_spl_r) : "di" (s)); \
-        _spl_r; \
-})
-#if defined (DEBUG)
-#define _spl _debug_spl
-#else
-#define _spl _spl_no_check
-#endif
-
-/* spl0 requires checking for software interrupts */
-#define spl1()	_spl(PSL_S|PSL_IPL1)
-#define spl2()	_spl(PSL_S|PSL_IPL2)
-#define spl3()	_spl(PSL_S|PSL_IPL3)
-#define spl4()	_spl(PSL_S|PSL_IPL4)
-#define spl5()	_spl(PSL_S|PSL_IPL5)
-#define spl6()	_spl(PSL_S|PSL_IPL6)
-#define spl7()	_spl(PSL_S|PSL_IPL7)
-
-
-#define splnone()	spl0()
-#define splsoftclock()	spl1()
-#define splnet()	spl1()
-#define splbio()	spl3()
-#define splimp()	spl3()
-#define spltty()	spl4()
-#define splclock()	spl6()
-#define splstatclock()	spl6()
-#define splvm()		spl6()
-#define splhigh()	spl7()
-#define splsched()	spl7()
-#endif /* JUNK */
-
 #ifdef _KERNEL
 #define	DELAY(x)	delay(x)
 #endif
 
+#ifdef _KERNEL
+extern int cputyp;
+extern int cpumod;
+#endif
+/*
+ * Values for the cputyp variable.
+ */
+#define CPU_187		0x187
 #endif /* !_MACHINE_PARAM_H_ */

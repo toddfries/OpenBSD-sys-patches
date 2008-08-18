@@ -1,5 +1,5 @@
-/*	$OpenBSD: autoconf.c,v 1.3 1996/07/29 22:57:12 niklas Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.3.4.3 1996/06/14 20:42:41 cgd Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.6 1997/01/24 19:56:18 niklas Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.16 1996/11/13 21:13:04 cgd Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -54,7 +54,11 @@
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
+#include <machine/rpb.h>
 #include <machine/prom.h>
+#include <machine/cpuconf.h>
+
+#include <dev/cons.h>
 
 extern char		root_device[17];		/* XXX */
 
@@ -65,8 +69,11 @@ char			boot_dev[128];
 
 void	parse_prom_bootdev __P((void));
 int	atoi __P((char *));
+void	setroot __P((void));
+void	swapconf __P((void));
 
-struct device *parsedisk __P((char *str, int len, int defpart, dev_t *devp));
+static struct device *parsedisk __P((char *str, int len, int defpart,
+				     dev_t *devp));
 static struct device *getdisk __P((char *str, int len, int defpart,
 				   dev_t *devp));
 static int findblkmajor __P((struct device *dv));
@@ -80,7 +87,6 @@ static int getstr __P((char *cp, int size));
 void
 configure()
 {
-	extern int cold;
 
 	parse_prom_bootdev();
 
@@ -100,6 +106,7 @@ configure()
 /*
  * Configure swap space and related parameters.
  */
+void
 swapconf()
 {
 	struct swdevt *swp;
@@ -126,11 +133,16 @@ struct nam2blk {
 } nam2blk[] = {
 	{ "st",		2 },
 	{ "cd",		3 },
+	{ "rd",		6 },
 	{ "sd",		8 },
 #if 0
 	{ "fd",		XXX },
 #endif
 };
+
+#ifdef RAMDISK_HOOKS
+static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
+#endif
 
 static int
 findblkmajor(dv)
@@ -168,6 +180,9 @@ getdisk(str, len, defpart, devp)
 
 	if ((dv = parsedisk(str, len, defpart, devp)) == NULL) {
 		printf("use one of:");
+#ifdef RAMDISK_HOOKS
+		printf(" %s[a-h]", fakerdrootdev.dv_xname);
+#endif
 		for (dv = alldevs.tqh_first; dv != NULL;
 		    dv = dv->dv_list.tqe_next) {
 			if (dv->dv_class == DV_DISK)
@@ -177,12 +192,12 @@ getdisk(str, len, defpart, devp)
 				printf(" %s", dv->dv_xname);
 #endif
 		}
-		printf("\n");
+		printf(" halt\n");
 	}
 	return (dv);
 }
 
-struct device *
+static struct device *
 parsedisk(str, len, defpart, devp)
 	char *str;
 	int len, defpart;
@@ -194,6 +209,10 @@ parsedisk(str, len, defpart, devp)
 
 	if (len == 0)
 		return (NULL);
+
+	if (len == 4 && !strcmp(str, "halt"))
+		boot(RB_HALT /* , NULL */);
+
 	cp = str + len - 1;
 	c = *cp;
 	if (c >= 'a' && c <= ('a' + MAXPARTITIONS - 1)) {
@@ -202,9 +221,18 @@ parsedisk(str, len, defpart, devp)
 	} else
 		part = defpart;
 
+#ifdef RAMDISK_HOOKS
+	if (strcmp(str, fakerdrootdev.dv_xname) == 0) {
+		dv = &fakerdrootdev;
+		goto gotdisk;
+	}
+#endif
 	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
 		if (dv->dv_class == DV_DISK &&
 		    strcmp(str, dv->dv_xname) == 0) {
+#ifdef RAMDISK_HOOKS
+gotdisk:
+#endif
 			majdev = findblkmajor(dv);
 			if (majdev < 0)
 				panic("parsedisk");
@@ -233,6 +261,7 @@ parsedisk(str, len, defpart, devp)
  * (ie. DV_DISK or DV_IFNET) because of how (*mountroot) is written.
  * That should be fixed.
  */
+void
 setroot()
 {
 	struct swdevt *swp;
@@ -240,20 +269,20 @@ setroot()
         register int len;
 	dev_t nrootdev, nswapdev = NODEV;
 	char buf[128], *rootdevname;
-	extern int (*mountroot) __P((void *));
 	dev_t temp;
 	struct device *bootdv, *rootdv, *swapdv;
 	int bootpartition;
 #if defined(NFSCLIENT)
 	extern char *nfsbootdevname;
-	extern int nfs_mountroot __P((void *));
-#endif
-#if defined(FFS)
-	extern int ffs_mountroot __P((void *));
 #endif
 
+#ifdef RAMDISK_HOOKS
+	bootdv = &fakerdrootdev;
+	bootpartition = 0;
+#else
 	bootdv = booted_device;
 	bootpartition = booted_partition;
+#endif
 
 	/*
 	 * If 'swap generic' and we couldn't determine root device,
@@ -265,24 +294,23 @@ setroot()
 	if (boothowto & RB_ASKNAME) {
 		for (;;) {
 			printf("root device");
-			if (bootdv != NULL)
-				printf(" (default %s%c)",
-					bootdv->dv_xname,
-					bootdv->dv_class == DV_DISK
-						? bootpartition + 'a' : ' ');
+			if (bootdv != NULL) {
+				printf(" (default %s", bootdv->dv_xname);
+				if (bootdv->dv_class == DV_DISK)
+					printf("%c", bootpartition + 'a');
+				printf(")");
+			}
 			printf(": ");
 			len = getstr(buf, sizeof(buf));
 			if (len == 0 && bootdv != NULL) {
 				strcpy(buf, bootdv->dv_xname);
 				len = strlen(buf);
 			}
-			if (len == 4 && !strcmp(buf, "halt"))
-				boot(RB_HALT);
 			if (len > 0 && buf[len - 1] == '*') {
 				buf[--len] = '\0';
 				dv = getdisk(buf, len, 1, &nrootdev);
 				if (dv != NULL) {
-					rootdv = dv;
+					rootdv = swapdv = dv;
 					nswapdev = nrootdev;
 					goto gotswap;
 				}
@@ -304,8 +332,10 @@ setroot()
 		}
 		for (;;) {
 			printf("swap device");
-			printf(" (default %s%c)", rootdv->dv_xname,
-			    rootdv->dv_class == DV_DISK?'b':' ');
+			printf(" (default %s", rootdv->dv_xname);
+			if (rootdv->dv_class == DV_DISK)
+				printf("b");
+			printf(")");
 			printf(": ");
 			len = getstr(buf, sizeof(buf));
 			if (len == 0) {
@@ -326,8 +356,6 @@ setroot()
 				swapdv = rootdv;
 				break;
 			}
-			if (len == 4 && !strcmp(buf, "halt"))
-				boot(RB_HALT);
 			dv = getdisk(buf, len, 1, &nswapdev);
 			if (dv) {
 				if (dv->dv_class == DV_IFNET)
@@ -368,7 +396,7 @@ gotswap:
 		swdevt[1].sw_dev = NODEV;
         } else {
 		/*
-		 * `root DEV swap DEV': honour rootdev/swdevt.
+		 * `root DEV swap DEV': honor rootdev/swdevt.
 		 * rootdev/swdevt/mountroot already properly set.
 		 */
 
@@ -393,9 +421,8 @@ gotswap:
 		nfsbootdevname = rootdv->dv_xname;
 		return;
 #endif
-#if defined(FFS)
 	case DV_DISK:
-		mountroot = ffs_mountroot;
+		mountroot = dk_mountroot;
 		sprintf(root_device, "%s%c", rootdv->dv_xname,
 		    DISKPART(rootdev) + 'a');
 		printf("root on %s", root_device);
@@ -404,7 +431,6 @@ gotswap:
 			    DISKPART(nswapdev) + 'a');
 		printf("\n");
 		break;
-#endif
 	default:
 		printf("can't figure root, hope your kernel is right\n");
 		return;
@@ -545,7 +571,6 @@ atoi(s)
 	char *s;
 {
 	int n, neg;
-	char c;
 
 	n = 0;
 	neg = 0;
@@ -571,7 +596,7 @@ device_register(dev, aux)
 	struct device *dev;
 	void *aux;
 {
-	extern void (*cpu_device_register) __P((struct device *dev, void *aux));
+	extern const struct cpusw *cpu_fn_switch;
 
 	if (bootdev_data == NULL) {
 		/*
@@ -581,5 +606,5 @@ device_register(dev, aux)
 		return;
 	}
 
-	(*cpu_device_register)(dev, aux);
+	(*cpu_fn_switch->device_register)(dev, aux);
 }

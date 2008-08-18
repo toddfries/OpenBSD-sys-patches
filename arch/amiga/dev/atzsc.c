@@ -1,5 +1,5 @@
-/*	$OpenBSD: atzsc.c,v 1.3 1996/05/02 06:43:34 niklas Exp $	*/
-/*	$NetBSD: atzsc.c,v 1.16 1996/04/21 21:10:51 veego Exp $	*/
+/*	$OpenBSD: atzsc.c,v 1.6 1997/01/18 12:26:23 niklas Exp $	*/
+/*	$NetBSD: atzsc.c,v 1.22 1996/12/23 09:09:52 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -52,7 +52,6 @@
 #include <amiga/dev/atzscreg.h>
 #include <amiga/dev/zbusvar.h>
 
-int atzscprint __P((void *auxp, char *));
 void atzscattach __P((struct device *, struct device *, void *));
 int atzscmatch __P((struct device *, void *, void *));
 
@@ -179,22 +178,8 @@ atzscattach(pdp, dp, auxp)
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, atzscprint);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
-
-/*
- * print diag if pnp is NULL else just extra
- */
-int
-atzscprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-	return(QUIET);
-}
-
 
 void
 atzsc_enintr(dev)

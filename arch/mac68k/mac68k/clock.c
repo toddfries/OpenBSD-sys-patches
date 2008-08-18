@@ -1,5 +1,5 @@
-/*	$OpenBSD: clock.c,v 1.7 1996/05/26 18:36:14 briggs Exp $	*/
-/*	$NetBSD: clock.c,v 1.29 1996/05/05 06:18:17 briggs Exp $	*/
+/*	$OpenBSD: clock.c,v 1.10 1997/03/08 16:17:02 briggs Exp $	*/
+/*	$NetBSD: clock.c,v 1.33 1997/02/28 07:49:19 scottr Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -95,6 +95,8 @@
 #include "pram.h"
 #include "clockreg.h"
 #include <machine/viareg.h>
+
+void	rtclock_intr __P((void));
 
 #define	DIFF19041970	2082844800
 #define	DIFF19701990	630720000
@@ -286,7 +288,7 @@ static u_long	ugmt_2_pramt __P((u_long));
 static u_long	pramt_2_ugmt __P((u_long));
 
 /*
- * Convert GMT to Mac PRAM time, using global timezone
+ * Convert GMT to Mac PRAM time, using rtc_offset
  * GMT bias adjustment is done elsewhere.
  */
 static u_long
@@ -300,7 +302,7 @@ ugmt_2_pramt(t)
 }
 
 /*
- * Convert a Mac PRAM time value to GMT, using compiled-in timezone
+ * Convert a Mac PRAM time value to GMT, using rtc_offset
  * GMT bias adjustment is done elsewhere.
  */
 static u_long
@@ -368,7 +370,7 @@ inittodr(base)
 		base = 21 * SECYR;	/* 1991 is our sane date */
 	}
 	/*
-	 * Check sanity against the year 2010.  Let's hope NetBSD/mac68k
+	 * Check sanity against the year 2010.  Let's hope OpenBSD/mac68k
 	 * doesn't run that long!
 	 */
 	if (base > 40 * SECYR) {
@@ -402,7 +404,7 @@ resettodr()
 		pram_settime(ugmt_2_pramt(time.tv_sec + macos_gmtbias * 60));
 #if DIAGNOSTIC
 	else
-		printf("NetBSD/mac68k does not trust itself to try and write "
+		printf("OpenBSD/mac68k does not trust itself to try and write "
 		    "to the pram on this system.\n");
 #endif
 }
@@ -482,7 +484,7 @@ mac68k_calibrate_delay()
 
 	/* Disable VIA1 timer 1 interrupts and set up service routine */
 	via_reg(VIA1, vIER) = V1IF_T1;
-	mac68k_register_via1_t1_irq(delay_timer1_irq);
+	via1_register_irq(VIA1_T1, delay_timer1_irq, NULL);
 
 	/* Set the timer for one-shot mode, then clear and enable interrupts */
 	via_reg(VIA1, vACR) &= ~ACR_T1LATCH;
@@ -498,7 +500,7 @@ mac68k_calibrate_delay()
 
 	/* Disable timer interrupts and reset service routine */
 	via_reg(VIA1, vIER) = V1IF_T1;
-	mac68k_register_via1_t1_irq(NULL);
+	via1_register_irq(VIA1_T1, (void (*)(void *))rtclock_intr, NULL);
 
 	/*
 	 * If this weren't integer math, the following would look

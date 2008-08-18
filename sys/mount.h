@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.10 1996/07/05 09:09:06 deraadt Exp $	*/
+/*	$OpenBSD: mount.h,v 1.18 1997/04/16 09:49:00 downsj Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -35,6 +35,9 @@
  *
  *	@(#)mount.h	8.15 (Berkeley) 7/14/94
  */
+
+#ifndef _SYS_MOUNT_H_
+#define _SYS_MOUNT_H_
 
 #ifndef _KERNEL
 #include <sys/ucred.h>
@@ -149,6 +152,11 @@ struct mount {
 #define	MNT_LOCAL	0x00001000	/* filesystem is stored locally */
 #define	MNT_QUOTA	0x00002000	/* quotas are enabled on filesystem */
 #define	MNT_ROOTFS	0x00004000	/* identifies the root filesystem */
+
+/*
+ * Extra post 4.4BSD-lite2 mount flags.
+ */
+#define MNT_NOATIME	0x00008000	/* don't update access times on fs */
 
 /*
  * Mask of flags that are visible to statfs()
@@ -306,8 +314,33 @@ struct iso_args {
 /*
  * Arguments to mount NFS
  */
-#define NFS_ARGSVERSION	3		/* change when nfs_args changes */
+#define NFS_ARGSVERSION	4		/* change when nfs_args changes */
 struct nfs_args {
+	int		version;	/* args structure version number */
+	struct sockaddr	*addr;		/* file server address */
+	int		addrlen;	/* length of address */
+	int		sotype;		/* Socket type */
+	int		proto;		/* and Protocol */
+	u_char		*fh;		/* File handle to be mounted */
+	int		fhsize;		/* Size, in bytes, of fh */
+	int		flags;		/* flags */
+	int		wsize;		/* write size in bytes */
+	int		rsize;		/* read size in bytes */
+	int		readdirsize;	/* readdir size in bytes */
+	int		timeo;		/* initial timeout in .1 secs */
+	int		retrans;	/* times to retry send */
+	int		maxgrouplist;	/* Max. size of group list */
+	int		readahead;	/* # of blocks to readahead */
+	int		leaseterm;	/* Term (sec) of lease */
+	int		deadthresh;	/* Retrans threshold */
+	char		*hostname;	/* server's name */
+	int		acregmin;	/* Attr cache file recently modified */
+	int		acregmax;	/* ac file not recently modified */
+	int		acdirmin;	/* ac for dir recently modified */
+	int		acdirmax;	/* ac for dir not recently modified */
+};
+/* NFS args version 3 (for backwards compatibility) */
+struct nfs_args3 {
 	int		version;	/* args structure version number */
 	struct sockaddr	*addr;		/* file server address */
 	int		addrlen;	/* length of address */
@@ -331,6 +364,9 @@ struct nfs_args {
 /*
  * NFS mount option flags
  */
+#ifndef _KERNEL
+#define	NFSMNT_RESVPORT		0x00000000  /* always use reserved ports */
+#endif /* ! _KERNEL */
 #define	NFSMNT_SOFT		0x00000001  /* soft mount (hard is default) */
 #define	NFSMNT_WSIZE		0x00000002  /* set write size */
 #define	NFSMNT_RSIZE		0x00000004  /* set read size */
@@ -346,9 +382,19 @@ struct nfs_args {
 #define	NFSMNT_LEASETERM	0x00001000  /* set lease term (nqnfs) */
 #define	NFSMNT_READAHEAD	0x00002000  /* set read ahead */
 #define	NFSMNT_DEADTHRESH	0x00004000  /* set dead server retry thresh */
-#define	NFSMNT_RESVPORT		0x00008000  /* Allocate a reserved port */
+#ifdef _KERNEL /* Coming soon to a system call near you! */
+#define	NFSMNT_NOAC		0x00008000  /* disable attribute cache */
+#endif /* _KERNEL */
 #define	NFSMNT_RDIRPLUS		0x00010000  /* Use Readdirplus for V3 */
 #define	NFSMNT_READDIRSIZE	0x00020000  /* Set readdir size */
+
+/* Flags valid only in mount syscall arguments */
+#define NFSMNT_ACREGMIN		0x00040000  /* acregmin field valid */
+#define NFSMNT_ACREGMAX 	0x00080000  /* acregmax field valid */
+#define NFSMNT_ACDIRMIN		0x00100000  /* acdirmin field valid */
+#define NFSMNT_ACDIRMAX		0x00200000  /* acdirmax field valid */
+
+/* Flags valid only in kernel */
 #define	NFSMNT_INTERNAL		0xfffc0000  /* Bits set internally */
 #define NFSMNT_HASWRITEVERF	0x00040000  /* Has write verifier for V3 */
 #define NFSMNT_GOTPATHCONF	0x00080000  /* Got the V3 pathconf info */
@@ -436,3 +482,4 @@ int	unmount __P((const char *, int));
 __END_DECLS
 
 #endif /* _KERNEL */
+#endif /* !_SYS_MOUNT_H_ */

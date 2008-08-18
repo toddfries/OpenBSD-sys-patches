@@ -1,4 +1,4 @@
-/*      $OpenBSD: isa_machdep.h,v 1.2 1996/09/14 15:58:26 pefo Exp $  */
+/*      $OpenBSD: isa_machdep.h,v 1.5 1997/04/19 17:20:00 pefo Exp $  */
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -40,12 +40,9 @@ typedef struct arc_isa_bus *isa_chipset_tag_t;
  *      However, the cpu executes an instruction every 7.5ns
  *      so the bus is much slower so it doesn't matter, really.
  */
-#define isa_outb(x,y)   outb(isa_io_base + (x), y)
-#define isa_inb(x)      inb(isa_io_base + (x))
+#define isa_outb(x,y)   outb(arc_bus_io.bus_base + (x), y)
+#define isa_inb(x)      inb(arc_bus_io.bus_base + (x))
  
-extern int isa_io_base;		/* Base address for ISA I/O space       */ 
-extern int isa_mem_base;	/* Base address for ISA MEM space       */
-
 struct arc_isa_bus {
         void    *ic_data;
 
@@ -66,6 +63,10 @@ struct arc_isa_bus {
     (*(c)->ic_intr_establish)((c)->ic_data, (i), (t), (l), (f), (a), (w))
 #define isa_intr_disestablish(c, h)                                     \
     (*(c)->ic_intr_disestablish)((c)->ic_data, (h))
+
+void sysbeepstop __P((void *));
+void sysbeep __P((int, int));
+
 
 /*
  *	Interrupt control struct used to control the ICU setup.

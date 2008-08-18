@@ -1,4 +1,4 @@
-/*	$OpenBSD: errno.h,v 1.5 1996/07/26 10:34:28 deraadt Exp $	*/
+/*	$OpenBSD: errno.h,v 1.7 1997/02/28 07:15:58 millert Exp $	*/
 /*	$NetBSD: errno.h,v 1.10 1996/01/20 01:33:53 jtc Exp $	*/
 
 /*

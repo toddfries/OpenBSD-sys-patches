@@ -152,7 +152,7 @@ loop:
 		}
 		dp = (struct dirent *)(iodest + off);
 		if (dp->d_reclen < 8) {
-			printf("dir corrupt (geometry mismatch?)\n");
+			printf("dir corrupt (geom. mismatch?)\n");
 			return 0;
 		}
 		loc += dp->d_reclen;
@@ -207,10 +207,11 @@ openrd()
 		* Look inside brackets for unit number, and partition	*
 		\*******************************************************/
 		if (*cp >= '0' && *cp <= '9')
-			if ((unit = *cp++ - '0') > 1) {
-				printf("Bad unit\n");
-				return 1;
-			}
+			unit = *cp++ - '0';	/* enough for both wd and sd */
+		else {
+			printf("Bad unit\n");
+			return 1;
+		}
 		if (!*cp || (*cp == ',' && !*++cp))
 			return 1;
 		if (*cp >= 'a' && *cp <= 'p')

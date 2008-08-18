@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.11 1996/08/27 10:46:52 downsj Exp $	*/
+/*	$OpenBSD: trap.c,v 1.22 1997/04/05 21:24:48 flipk Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 #undef DEBUG
@@ -153,11 +153,12 @@ char	*trap_type[] = {
 	"bounds check fault",			/* 11 T_BOUND */
 	"FPU not available fault",		/* 12 T_DNA */
 	"double fault",				/* 13 T_DOUBLEFLT */
-	"FPU operand fetch fault",		/* 14 T_FPOPFLT */
+	"FPU operand fetch fault",		/* 14 T_FPOPFLT (![P]Pro) */
 	"invalid TSS fault",			/* 15 T_TSSFLT */
 	"segment not present fault",		/* 16 T_SEGNPFLT */
 	"stack fault",				/* 17 T_STKFLT */
-	"reserved trap",			/* 18 T_RESERVED */
+	"machine check",			/* 18 T_MACHK ([P]Pro) */
+	"reserved trap",			/* 19 T_RESERVED */
 };
 int	trap_types = sizeof trap_type / sizeof trap_type[0];
 
@@ -186,8 +187,16 @@ trap(frame)
 		    resume_iret[], resume_pop_ds[], resume_pop_es[];
 	struct trapframe *vframe;
 	int resume;
+	vm_prot_t vftype, ftype;
 
 	cnt.v_trap++;
+
+	/* SIGSEGV and SIGBUS need this */
+	if (frame.tf_err & PGEX_W) {
+		vftype = VM_PROT_WRITE;
+		ftype = VM_PROT_READ | VM_PROT_WRITE;
+	} else
+		ftype = vftype = VM_PROT_READ;
 
 #ifdef DEBUG
 	if (trapdebug) {
@@ -227,11 +236,13 @@ trap(frame)
 	case T_SEGNPFLT:
 	case T_ALIGNFLT:
 		/* Check for copyin/copyout fault. */
-		pcb = &p->p_addr->u_pcb;
-		if (pcb->pcb_onfault != 0) {
-		copyfault:
-			frame.tf_eip = (int)pcb->pcb_onfault;
-			return;
+		if (p && p->p_addr) {
+			pcb = &p->p_addr->u_pcb;
+			if (pcb->pcb_onfault != 0) {
+			copyfault:
+				frame.tf_eip = (int)pcb->pcb_onfault;
+				return;
+			}
 		}
 
 		/*
@@ -278,15 +289,27 @@ trap(frame)
 			goto out;
 		}
 #endif
+		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, (caddr_t)rcr2());
+		goto out;
+
 	case T_SEGNPFLT|T_USER:
+		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, frame.tf_eip);
+		goto out;
+
 	case T_STKFLT|T_USER:
+		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, frame.tf_eip);
+		goto out;
+
 	case T_ALIGNFLT|T_USER:
-		trapsignal(p, SIGBUS, type &~ T_USER);
+		trapsignal(p, SIGBUS, vftype, BUS_ADRALN, frame.tf_eip);
 		goto out;
 
 	case T_PRIVINFLT|T_USER:	/* privileged instruction fault */
+		trapsignal(p, SIGILL, type &~ T_USER, ILL_PRVOPC, frame.tf_eip);
+		goto out;
+
 	case T_FPOPFLT|T_USER:		/* coprocessor operand fault */
-		trapsignal(p, SIGILL, type &~ T_USER);
+		trapsignal(p, SIGILL, type &~ T_USER, ILL_COPROC, frame.tf_eip);
 		goto out;
 
 	case T_ASTFLT|T_USER:		/* Allow process switch */
@@ -305,28 +328,32 @@ trap(frame)
 				goto trace;
 			return;
 		}
-		trapsignal(p, rv, type &~ T_USER);
+		trapsignal(p, rv, type &~ T_USER, FPE_FLTINV, frame.tf_eip);
 		goto out;
 #else
 		printf("pid %d killed due to lack of floating point\n",
 		    p->p_pid);
-		trapsignal(p, SIGKILL, type &~ T_USER);
+		trapsignal(p, SIGKILL, type &~ T_USER, FPE_FLTINV, frame.tf_eip);
 		goto out;
 #endif
 	}
 
 	case T_BOUND|T_USER:
+		trapsignal(p, SIGFPE, type &~ T_USER, FPE_FLTSUB, frame.tf_eip);
+		goto out;
 	case T_OFLOW|T_USER:
+		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTOVF, frame.tf_eip);
+		goto out;
 	case T_DIVIDE|T_USER:
-		trapsignal(p, SIGFPE, type &~ T_USER);
+		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTDIV, frame.tf_eip);
 		goto out;
 
 	case T_ARITHTRAP|T_USER:
-		trapsignal(p, SIGFPE, frame.tf_err);
+		trapsignal(p, SIGFPE, frame.tf_err, FPE_INTOVF, frame.tf_eip);
 		goto out;
 
 	case T_PAGEFLT:			/* allow page faults in kernel mode */
-		if (p == 0)
+		if (p == 0 || p->p_addr == 0)
 			goto we_re_toast;
 		pcb = &p->p_addr->u_pcb;
 		/*
@@ -347,11 +374,11 @@ trap(frame)
 		register struct vmspace *vm = p->p_vmspace;
 		register vm_map_t map;
 		int rv;
-		vm_prot_t ftype;
 		extern vm_map_t kernel_map;
 		unsigned nss, v;
+		caddr_t vv = (caddr_t)rcr2();
 
-		va = trunc_page((vm_offset_t)rcr2());
+		va = trunc_page((vm_offset_t)vv);
 		/*
 		 * It is only a kernel address space fault iff:
 		 *	1. (type & T_USER) == 0  and
@@ -364,10 +391,6 @@ trap(frame)
 			map = kernel_map;
 		else
 			map = &vm->vm_map;
-		if (frame.tf_err & PGEX_W)
-			ftype = VM_PROT_READ | VM_PROT_WRITE;
-		else
-			ftype = VM_PROT_READ;
 
 #ifdef DIAGNOSTIC
 		if (map == kernel_map && va == 0) {
@@ -402,12 +425,6 @@ trap(frame)
 		if (rv == KERN_SUCCESS) {
 			if (nss > vm->vm_ssize)
 				vm->vm_ssize = nss;
-			va = trunc_page(vtopte(va));
-			/* for page table, increment wiring as long as
-			   not a page table fault as well */
-			if (!v && map != kernel_map)
-				vm_map_pageable(map, va, round_page(va+1),
-				    FALSE);
 			if (type == T_PAGEFLT)
 				return;
 			goto out;
@@ -421,7 +438,7 @@ trap(frame)
 			    map, va, ftype, rv);
 			goto we_re_toast;
 		}
-		trapsignal(p, SIGSEGV, T_PAGEFLT);
+		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, vv);
 		break;
 	}
 
@@ -433,11 +450,13 @@ trap(frame)
 #endif
 
 	case T_BPTFLT|T_USER:		/* bpt instruction fault */
+		trapsignal(p, SIGTRAP, type &~ T_USER, TRAP_BRKPT, (caddr_t)rcr2());
+		break;
 	case T_TRCTRAP|T_USER:		/* trace trap */
 #if defined(MATH_EMULATE) || defined(GPL_MATH_EMULATE)
 	trace:
 #endif
-		trapsignal(p, SIGTRAP, type &~ T_USER);
+		trapsignal(p, SIGTRAP, type &~ T_USER, TRAP_TRACE, (caddr_t)rcr2());
 		break;
 
 #include "isa.h"

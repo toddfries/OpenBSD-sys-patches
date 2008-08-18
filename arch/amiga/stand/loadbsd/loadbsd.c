@@ -1,5 +1,5 @@
-/*	$OpenBSD: loadbsd.c,v 1.7.2.1 1996/10/10 07:11:17 niklas Exp $	*/
-/*	$NetBSD: loadbsd.c,v 1.19.4.2 1996/08/03 00:51:46 jtc Exp $	*/
+/*	$OpenBSD: loadbsd.c,v 1.10 1997/01/16 09:27:03 niklas Exp $	*/
+/*	$NetBSD: loadbsd.c,v 1.22 1996/10/13 13:39:52 is Exp $	*/
 
 /*
  * Copyright (c) 1994 Michael L. Hitch
@@ -208,7 +208,7 @@ main(argc, argv)
 	if ((ExpansionBase=(void *)OpenLibrary(EXPANSIONNAME, 0)) == NULL)
 		err(20, "can't open expansion library");
 
-	while ((ch = getopt(argc, argv, "aAbcC:DhI:km:n:ptsSVZ")) != EOF) {
+	while ((ch = getopt(argc, argv, "aAbcC:DhI:km:n:ptsSVZ")) != -1) {
 		switch (ch) {
 		case 'k':
 			k_flag = 1;
@@ -409,7 +409,7 @@ main(argc, argv)
 		if ((void *)kp < fmem) {
 			printf("Kernel at %08lx, Fastmem used at %08lx\n",
 			    kp, fmem);
-			errx(20, "Can't copy downwards yet.");
+			errx(20, "Can't copy upwards yet.\nDefragment your memory and try again OR try the -p OR try the -Z options.");
 		}
 		memcpy(kp + ksize + 256, (char *)startit,
 		    (char *)startit_end - (char *)startit);

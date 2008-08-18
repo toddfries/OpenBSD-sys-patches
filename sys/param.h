@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.10 1996/09/30 12:30:18 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.13 1997/05/22 06:55:59 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -45,8 +45,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	199610		/* OpenBSD version (year & month). */
-#define OpenBSD2_0 1		/* OpenBSD 2.0 */
+#define OpenBSD	199706		/* OpenBSD version (year & month). */
+#define OpenBSD2_1 1		/* OpenBSD 2.1 */
 
 #ifndef NULL
 #define	NULL	0
@@ -71,7 +71,8 @@
 #define	MAXUPRC		CHILD_MAX	/* max simultaneous processes */
 #define	NCARGS		ARG_MAX		/* max bytes for an exec function */
 #define	NGROUPS		NGROUPS_MAX	/* max number groups */
-#define	NOFILE		OPEN_MAX	/* max open files per process */
+#define	NOFILE		OPEN_MAX	/* max open files per process (soft) */
+#define	NOFILE_MAX	1024		/* max open files per process (hard) */
 #define	NOGROUP		65535		/* marker for empty group set member */
 #define MAXHOSTNAMELEN	256		/* max hostname size */
 
@@ -153,13 +154,9 @@
  * smaller units (fragments) only in the last direct block.  MAXBSIZE
  * primarily determines the size of buffers in the buffer pool.  It may be
  * made larger without any effect on existing file systems; however making
- * it smaller make make some file systems unmountable.
+ * it smaller makes some file systems unmountable.
  */
-#if defined(__i386__)
-#define	MAXBSIZE	16384		/* XXX MAXPHYS */
-#else
 #define	MAXBSIZE	MAXPHYS
-#endif
 #define MAXFRAG 	8
 
 /*

@@ -269,13 +269,13 @@ typedef struct
 	vector[_NUM].word_two = BRANCH(&vector[_NUM].word_two, _VALUE);    \
 }
 
-
 /*
  * vector_init(vector, vector_init_list)
  *
  * This routine sets up the m88k vector table for the running processor.
  * It is called with a very little stack, and interrupts disabled,
  * so don't call any other functions!
+ *	XXX clean this - nivas
  */
 void vector_init(
 	m88k_exception_vector_area *vector,
@@ -284,6 +284,7 @@ void vector_init(
     register unsigned num;
     register unsigned vec;
     extern void sigsys(), sigtrap(), stepbpt(), userbpt();
+    extern void syscall_handler();
 
     for (num = 0; (vec = vector_init_list[num]) != END_OF_VECTOR_LIST; num++)
     {
@@ -294,6 +295,8 @@ void vector_init(
     while (num < 496)
 	SET_VECTOR(num++, to, sigsys);
     num++; /* skip 496, BUG ROM vector */
+
+    SET_VECTOR(450, to, syscall_handler);
 #if 0
     while (num <= SIGSYS_MAX)
 	SET_VECTOR(num++, to, sigsys);
@@ -307,85 +310,3 @@ void vector_init(
     vector[497].word_two = 497 * 4;
 #endif
 }
-
-/* JEFF_DEBUG stuff */
-#include <machine/asm_macro.h>
-
-#ifdef JUNK
-#define MAX_XPR_COUNT	1000
-struct {
-    task_t task;
-    char *fmt;
-    unsigned arg1;
-    unsigned arg2;
-} raw_xpr_data[MAX_XPR_COUNT];
-unsigned volatile raw_xpr_lock = 0;
-unsigned raw_xpr_index = 0;
-
-void _raw_xpr(char *fmt, unsigned b, unsigned c, task_t t)
-{
-    unsigned myindex;
-    m88k_psr_type psr = disable_interrupts_return_psr();
-    simple_lock(&raw_xpr_lock);
-    if (raw_xpr_index < (MAX_XPR_COUNT - 1)) {
-        myindex = raw_xpr_index++;
-    } else {
-	myindex = 0;
-	raw_xpr_index = 1;
-    }
-    simple_unlock(&raw_xpr_lock);
-    set_psr(psr);
-
-    raw_xpr_data[myindex].task = t;
-    raw_xpr_data[myindex].fmt  = fmt;
-    raw_xpr_data[myindex].arg1 = b;
-    raw_xpr_data[myindex].arg2 = c;
-}
-
-void raw_xpr_dump(int skipcount)
-{
-    int i, index = raw_xpr_index + 1;
-
-    raw_xpr_lock = 1; /* forcefully grab the lock */
-
-    if (index >= MAX_XPR_COUNT)
-	index = 0;
-    else if (raw_xpr_data[index].task == 0)
-	index = 0; /* hasn't wrapped yet, so start at the beginning */
-
-    for (i = 1; i < MAX_XPR_COUNT; i++) {
-	if (raw_xpr_data[index].task == 0 || raw_xpr_data[index].fmt == 0)
-	    break; /* all done */
-	if (skipcount-- <= 0)
-	{
-	    db_printf("%04d: ", i);
-	    if (db_lookup_task(raw_xpr_data[index].task) < 0)
-	    {
-		/* task no longer valid */
-		db_printf("<task %x, fmt %x, arg %x, arg %x>\n",
-			raw_xpr_data[index].task,
-			raw_xpr_data[index].fmt,
-			raw_xpr_data[index].arg1,
-			raw_xpr_data[index].arg2);
-	    } else {
-		char buffer[120];
-		buffer[0] = '\0';
-		db_read_bytes(raw_xpr_data[index].fmt,
-			      sizeof(buffer),
-			      buffer,
-			      raw_xpr_data[index].task);
-		buffer[sizeof(buffer)-2] = '\n';
-		buffer[sizeof(buffer)-1] = '\0';
-		
-		db_printf(buffer,
-			raw_xpr_data[index].arg1,
-			raw_xpr_data[index].arg2);
-	   }
-	}
-	if (++index >= MAX_XPR_COUNT)
-	    index = 0;
-    }
-    
-    raw_xpr_lock = 0;
-}
-#endif /* JUNK */

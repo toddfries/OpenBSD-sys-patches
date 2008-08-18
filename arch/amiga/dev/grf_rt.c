@@ -1,5 +1,5 @@
-/*	$OpenBSD: grf_rt.c,v 1.7 1996/08/23 18:52:50 niklas Exp $	*/
-/*	$NetBSD: grf_rt.c,v 1.27.4.1 1996/05/26 17:26:43 is Exp $	*/
+/*	$OpenBSD: grf_rt.c,v 1.10 1997/01/16 09:24:20 niklas Exp $	*/
+/*	$NetBSD: grf_rt.c,v 1.34 1996/12/23 09:10:09 veego Exp $	*/
 
 /*
  * Copyright (c) 1993 Markus Wild
@@ -765,7 +765,7 @@ rt_load_mon(gp, md)
 }
 
 void grfrtattach __P((struct device *, struct device *, void *));
-int grfrtprint __P((void *, char *));
+int grfrtprint __P((void *, const char *));
 int grfrtmatch __P((struct device *, void *, void *));
  
 int rt_mode __P((struct grf_softc *, u_long, void *, u_long, int));
@@ -792,7 +792,7 @@ struct cfdriver grfrt_cd = {
 /*
  * only used in console init
  */
-static struct cfdata *cfdata;
+static struct cfdata *grfrt_cfdata;
 
 /*
  * we make sure to only init things once.  this is somewhat
@@ -838,7 +838,7 @@ grfrtmatch(pdp, match, auxp)
 #ifdef RETINACONSOLE
 		if (amiga_realconfig == 0) {
 			rtconunit = cfp->cf_unit;
-			cfdata = cfp;
+			grfrt_cfdata = cfp;
 		}
 	}
 #endif
@@ -886,13 +886,13 @@ grfrtattach(pdp, dp, auxp)
 	/*
 	 * attach grf
 	 */
-	amiga_config_found(cfdata, &gp->g_device, gp, grfrtprint);
+	amiga_config_found(grfrt_cfdata, &gp->g_device, gp, grfrtprint);
 }
 
 int
 grfrtprint(auxp, pnp)
 	void *auxp;
-	char *pnp;
+	const char *pnp;
 {
 	if (pnp)
 		printf("grf%d at %s", ((struct grf_softc *)auxp)->g_unit,
@@ -1465,7 +1465,7 @@ rt_blank(gp, on)
 
 	r = 0x01 | ((md->FLG & MDF_CLKDIV2)/ MDF_CLKDIV2 * 8);
 
-	WSeq(gp->g_regkva, SEQ_ID_CLOCKING_MODE, *on ? r : 0x21);
+	WSeq(gp->g_regkva, SEQ_ID_CLOCKING_MODE, *on > 0 ? r : 0x21);
 
 	return(0);
 }       

@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.4 1996/05/29 03:05:01 deraadt Exp $ */
+/*	$OpenBSD: exec.h,v 1.6 1997/03/31 00:24:01 downsj Exp $ */
 
 /*
  * Copyright (c) 1993 Christopher G. Demetriou
@@ -26,8 +26,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _MACHINE_EXEC_H_
-#define _MACHINE_EXEC_H_
+#ifndef _MVME68K_EXEC_H_
+#define _MVME68K_EXEC_H_
 
 #define __LDPGSZ	8192
 
@@ -49,7 +49,12 @@ struct relocation_info_m68k {
 #define ELF_TARG_DATA		ELFDATA2MSB
 #define ELF_TARG_MACH		EM_68K
 
-#define DO_AOUT			/* support a.out */
-#define DO_ELF			/* support ELF */
+#define _NLIST_DO_AOUT
+#define _NLIST_DO_ELF
 
-#endif  /* _MACHINE_EXEC_H_ */
+#define _KERN_DO_AOUT
+#if defined(COMPAT_LINUX) || defined(COMPAT_SVR4)
+#define _KERN_DO_ELF
+#endif
+
+#endif  /* _MVME68K_EXEC_H_ */

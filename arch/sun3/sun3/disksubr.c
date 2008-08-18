@@ -1,4 +1,5 @@
-/*	$NetBSD: disksubr.c,v 1.12 1996/04/26 18:37:58 gwr Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.10 1997/04/07 12:01:19 deraadt Exp $	*/
+/*	$NetBSD: disksubr.c,v 1.14 1996/09/26 18:10:21 gwr Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Gordon W. Ross
@@ -80,7 +81,7 @@ static int disklabel_bsd_to_sun(struct disklabel *, char *);
 char *
 readdisklabel(dev, strat, lp, clp)
 	dev_t dev;
-	void (*strat)();
+	void (*strat) __P((struct buf *));
 	struct disklabel *lp;
 	struct cpu_disklabel *clp;
 {
@@ -125,15 +126,19 @@ readdisklabel(dev, strat, lp, clp)
 		return(disklabel_sun_to_bsd(clp->cd_block, lp));
 	}
 
-	/* Check for a NetBSD disk label (PROM can not boot it). */
+	/* Check for a OpenBSD disk label (PROM can not boot it). */
 	dlp = (struct disklabel *) (clp->cd_block + LABELOFFSET);
 	if (dlp->d_magic == DISKMAGIC) {
 		if (dkcksum(dlp))
-			return("NetBSD disk label corrupted");
+			return("OpenBSD disk label corrupted");
 		*lp = *dlp; 	/* struct assignment */
 		return(NULL);
 	}
 
+#if defined(CD9660)
+	if (iso_disklabelspoof(dev, strat, lp) == 0)
+		return (NULL);
+#endif
 	bzero(clp->cd_block, sizeof(clp->cd_block));
 	return("no disk label");
 }
@@ -142,6 +147,7 @@ readdisklabel(dev, strat, lp, clp)
  * Check new disk label for sensibility
  * before setting it.
  */
+int
 setdisklabel(olp, nlp, openmask, clp)
 	struct disklabel *olp, *nlp;
 	u_long openmask;
@@ -188,9 +194,10 @@ setdisklabel(olp, nlp, openmask, clp)
  * Write disk label back to device after modification.
  * Current label is already in clp->cd_block[]
  */
+int
 writedisklabel(dev, strat, lp, clp)
 	dev_t dev;
-	void (*strat)();
+	void (*strat) __P((struct buf *));
 	struct disklabel *lp;
 	struct cpu_disklabel *clp;
 {
@@ -201,7 +208,7 @@ writedisklabel(dev, strat, lp, clp)
 	if (error)
 		return(error);
 
-#if 0	/* XXX - Allow writing NetBSD disk labels? */
+#if 0	/* XXX - Allow writing OpenBSD disk labels? */
 	{
 		struct disklabel *dlp;
 		dlp = (struct disklabel *)(clp->cd_block + LABELOFFSET);
@@ -234,38 +241,38 @@ writedisklabel(dev, strat, lp, clp)
 int
 bounds_check_with_label(struct buf *bp, struct disklabel *lp, int wlabel)
 {
+#define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))
 	struct partition *p = lp->d_partitions + dkpart(bp->b_dev);
-	int labelsect = lp->d_partitions[0].p_offset;
-	int maxsz = p->p_size;
-	int sz = (bp->b_bcount + DEV_BSIZE - 1) >> DEV_BSHIFT;
+	int sz = howmany(bp->b_bcount, DEV_BSIZE);
 
 	/* overwriting disk label ? */
 	/* XXX should also protect bootstrap in first 8K */
-	if (bp->b_blkno + p->p_offset <= LABELSECTOR + labelsect &&
-	    (bp->b_flags & B_READ) == 0 && wlabel == 0)
-	{
+	/* XXX PR#2598: labelsect is always sector zero. */
+	if (((bp->b_blkno + blockpersec(p->p_offset, lp)) <= LABELSECTOR) &&
+	    ((bp->b_flags & B_READ) == 0) && (wlabel == 0)) {
 		bp->b_error = EROFS;
 		goto bad;
 	}
 
 	/* beyond partition? */
-	if (bp->b_blkno < 0 || bp->b_blkno + sz > maxsz) {
-		/* if exactly at end of disk, return an EOF */
-		if (bp->b_blkno == maxsz) {
+	if (bp->b_blkno + sz > blockpersec(p->p_size, lp)) {
+		sz = blockpersec(p->p_size, lp) - bp->b_blkno;
+		if (sz == 0) {
+			/* if exactly at end of disk, return an EOF */
 			bp->b_resid = bp->b_bcount;
 			return(0);
 		}
-		/* or truncate if part of it fits */
-		sz = maxsz - bp->b_blkno;
-		if (sz <= 0) {
+		if (sz < 0) {
 			bp->b_error = EINVAL;
 			goto bad;
 		}
+		/* or truncate if part of it fits */
 		bp->b_bcount = sz << DEV_BSHIFT;
 	}
 
 	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylin = (bp->b_blkno + p->p_offset) / lp->d_secpercyl;
+	bp->b_cylin = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
+	    lp->d_secpercyl;
 	return(1);
 
 bad:
@@ -279,15 +286,12 @@ bad:
  * additional "device registration" types of work. (?)
  * For example, the sparc port uses this to record the
  * device node for the PROM-specified boot device.
- *
- * XXX: return value not documented (ignored everywhere)
  */
 void
 dk_establish(dk, dev)
 	struct disk *dk;
 	struct device *dev;
 {
-	return;
 }
 
 /************************************************************************
@@ -449,6 +453,7 @@ disklabel_bsd_to_sun(lp, cp)
 	return(0);
 }
 
+#if 0	/* XXX used by xy.c and xd.c */
 /*
  * Search the bad sector table looking for the specified sector.
  * Return index if found.
@@ -472,3 +477,4 @@ isbad(bt, cyl, trk, sec)
 	}
 	return (-1);
 }
+#endif

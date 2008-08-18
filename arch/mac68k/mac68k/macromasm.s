@@ -1,4 +1,4 @@
-/*	$OpenBSD: macromasm.s,v 1.3 1996/05/26 18:36:26 briggs Exp $	*/
+/*	$OpenBSD: macromasm.s,v 1.8 1997/04/14 18:48:04 gene Exp $	*/
 /*	$NetBSD: macromasm.s,v 1.11 1996/05/25 14:45:37 briggs Exp $	*/
 
 /*-
@@ -104,9 +104,12 @@
 	loglob(VBLQueue, 0x160)		/* Vertical blanking Queue, unused ? */
 	loglob(VBLQueue_head, 0x162)	/* Vertical blanking Queue, head */
 	loglob(VBLQueue_tail, 0x166)	/* Vertical blanking Queue, tail */
+	loglob(jDTInstall, 0xD9C)	/* short-cut to deferred task mgr */
+					/* trap handler */
 
 	loglob(InitEgretJTVec, 0x2010)	/* pointer to a jump table for */
 					/* InitEgret on AV machines */
+	loglob(jCacheFlush, 0x6f4)	/* setup_pm() needs this */
 
 #if 0
 	/* I wish I knew what these things were */
@@ -122,6 +125,9 @@
 	.global _panic
 	.global _printf
 
+#ifdef MRG_ADB		/* These functions are defined here if using the
+			 * MRG_ADB method of accessing the ADB/PRAM/RTC. 
+			 * They are in adb_direct.c. */
 /*
  * Most of the following glue just takes C function calls, converts
  * the parameters to the MacOS Trap parameters, and then tries to
@@ -216,6 +222,7 @@ _ADBOp:
 	movl	sp@(16), d0
 	.word 0xa07c
 	rts
+#endif /* ifdef MRG_ADB */
 
 
 #if 0

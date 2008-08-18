@@ -1,5 +1,5 @@
-/*	$OpenBSD: lca.c,v 1.3 1996/07/29 23:00:26 niklas Exp $	*/
-/*	$NetBSD: lca.c,v 1.5 1996/04/23 14:00:53 cgd Exp $	*/
+/*	$OpenBSD: lca.c,v 1.7 1997/01/24 19:57:41 niklas Exp $	*/
+/*	$NetBSD: lca.c,v 1.14 1996/12/05 01:39:35 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -45,8 +45,15 @@
 #include <dev/pci/pcivar.h>
 #include <alpha/pci/lcareg.h>
 #include <alpha/pci/lcavar.h>
+#if defined(DEC_AXPPCI_33)
+#include <alpha/pci/pci_axppci_33.h>
+#endif
 
+#ifdef __BROKEN_INDIRECT_CONFIG
 int	lcamatch __P((struct device *, void *, void *));
+#else
+int	lcamatch __P((struct device *, struct cfdata *, void *));
+#endif
 void	lcaattach __P((struct device *, struct device *, void *));
 
 struct cfattach lca_ca = {
@@ -57,7 +64,7 @@ struct cfdriver lca_cd = {
 	NULL, "lca", DV_DULL,
 };
 
-static int	lcaprint __P((void *, char *pnp));
+int	lcaprint __P((void *, const char *pnp));
 
 /* There can be only one. */
 int lcafound;
@@ -66,9 +73,13 @@ struct lca_config lca_configuration;
 int
 lcamatch(parent, match, aux)
 	struct device *parent;
-	void *match, *aux;
+#ifdef __BROKEN_INDIRECT_CONFIG
+	void *match;
+#else
+	struct cfdata *match;
+#endif
+	void *aux;
 {
-	struct cfdata *cf = match;
 	struct confargs *ca = aux;
 
 	/* Make sure that we're looking for a LCA. */
@@ -85,16 +96,30 @@ lcamatch(parent, match, aux)
  * Set up the chipset's function pointers.
  */
 void
-lca_init(lcp)
+lca_init(lcp, mallocsafe)
 	struct lca_config *lcp;
+	int mallocsafe;
 {
 
 	/*
 	 * Can't set up SGMAP data here; can be called before malloc().
 	 */
 
-	apecs_lca_bus_io_init(&lcp->lc_bc, lcp);
-	apecs_lca_bus_mem_init(&lcp->lc_bc, lcp);
+	/*
+	 * The LCA HAE register is WRITE-ONLY, so we can't tell where
+	 * the second sparse window is actually mapped.  Therefore,
+	 * we have to guess where it is.  This seems to be the normal
+	 * address.
+	 */
+	lcp->lc_s_mem_w2_masked_base = 0x80000000;
+
+	if (!lcp->lc_initted) {
+		/* don't do these twice since they set up extents */
+		lcp->lc_iot = lca_bus_io_init(lcp);
+		lcp->lc_memt = lca_bus_mem_init(lcp);
+	}
+	lcp->lc_mallocsafe = mallocsafe;
+
 	lca_pci_init(&lcp->lc_pc, lcp);
 
 	/*
@@ -125,7 +150,16 @@ lca_init(lcp)
 	/* Turn off DMA window enables in Window Base Registers */
 /*	REGVAL(LCA_IOC_W_BASE0) = 0;
 	REGVAL(LCA_IOC_W_BASE1) = 0; */
-	wbflush();
+	alpha_mb();
+
+	/* XXX XXX BEGIN XXX XXX */
+	{							/* XXX */
+		extern vm_offset_t alpha_XXX_dmamap_or;		/* XXX */
+		alpha_XXX_dmamap_or = 0x40000000;		/* XXX */
+	}							/* XXX */
+	/* XXX XXX END XXX XXX */
+
+	lcp->lc_initted = 1;
 }
 
 #ifdef notdef
@@ -139,18 +173,18 @@ lca_init_sgmap(lcp)
 	bzero(lcp->lc_sgmap, 1024 * 8);		/* clear all entries. */
 
 	REGVAL(LCA_IOC_W_BASE0) = 0;
-	wbflush();
+	alpha_mb();
 
 	/* Set up Translated Base Register 1; translate to sybBus addr 0. */
 	/* check size against APEC XXX JH */
-        REGVAL(LCA_IOC_T_BASE_0) = vtophys(lcp->lc_sgmap) >> 1;
+	REGVAL(LCA_IOC_T_BASE_0) = vtophys(lcp->lc_sgmap) >> 1;
 
-        /* Set up PCI mask register 1; map 8MB space. */
-        REGVAL(LCA_IOC_W_MASK0) = 0x00700000;
+	/* Set up PCI mask register 1; map 8MB space. */
+	REGVAL(LCA_IOC_W_MASK0) = 0x00700000;
 
-        /* Enable window 1; from PCI address 8MB, direct mapped. */
-        REGVAL(LCA_IOC_W_BASE0) = 0x300800000;
-        wbflush();
+	/* Enable window 1; from PCI address 8MB, direct mapped. */
+	REGVAL(LCA_IOC_W_BASE0) = 0x300800000;
+	alpha_mb();
 }
 #endif
 
@@ -172,7 +206,7 @@ lcaattach(parent, self, aux)
 	 * (maybe), but doesn't hurt to do twice.
 	 */
 	lcp = sc->sc_lcp = &lca_configuration;
-	lca_init(lcp);
+	lca_init(lcp, 1);
 #ifdef notdef
 	lca_init_sgmap(lcp);
 #endif
@@ -186,23 +220,25 @@ lcaattach(parent, self, aux)
 		pci_axppci_33_pickintr(lcp);
 		break;
 #endif
+
 	default:
 		panic("lcaattach: shouldn't be here, really...");
 	}
 
 	pba.pba_busname = "pci";
-	pba.pba_bc = &lcp->lc_bc;
+	pba.pba_iot = lcp->lc_iot;
+	pba.pba_memt = lcp->lc_memt;
 	pba.pba_pc = &lcp->lc_pc;
 	pba.pba_bus = 0;
 	config_found(self, &pba, lcaprint);
 }
 
-static int
+int
 lcaprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
-        register struct pcibus_attach_args *pba = aux;
+	register struct pcibus_attach_args *pba = aux;
 
 	/* only PCIs can attach to LCAes; easy. */
 	if (pnp)

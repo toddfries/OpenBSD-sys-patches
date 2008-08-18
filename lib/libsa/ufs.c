@@ -1,5 +1,5 @@
-/*	$OpenBSD: ufs.c,v 1.6 1996/09/23 14:19:06 mickey Exp $	*/
-/*	$NetBSD: ufs.c,v 1.14.4.1 1996/06/02 12:08:45 ragge Exp $	*/
+/*	$OpenBSD: ufs.c,v 1.11 1997/04/02 05:28:30 mickey Exp $	*/
+/*	$NetBSD: ufs.c,v 1.16 1996/09/30 16:01:22 ws Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -69,12 +69,11 @@
 
 #include <sys/param.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <ufs/ffs/fs.h>
 #include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
 #include <lib/libkern/libkern.h>
-
-#include <string.h>
 
 #include "stand.h"
 
@@ -555,8 +554,10 @@ ufs_open(path, f)
 out:
 	if (buf)
 		free(buf, fs->fs_bsize);
-	if (rc)
+	if (rc) {
+		free(fp->f_fs, SBSIZE);
 		free(fp, sizeof(struct file));
+	}
 	return (rc);
 }
 
@@ -675,6 +676,54 @@ ufs_stat(f, sb)
 	sb->st_size = fp->f_di.di_size;
 	return (0);
 }
+
+#ifndef	NO_READDIR
+int
+ufs_readdir(f, name)
+	struct open_file *f;
+	char	*name;
+{
+	register struct file *fp = (struct file *)f->f_fsdata;
+	char *buf;
+	size_t buf_size;
+	register struct direct *dp, *edp;
+	int rc, namlen;
+
+	if (name == NULL)
+		fp->f_seekp = 0;
+	else {
+			/* end of dir */
+		if (fp->f_seekp >= fp->f_di.di_size) {
+			*name = '\0';
+			return -1;
+		}
+
+		do {
+			if ((rc = buf_read_file(f, &buf, &buf_size)) != 0)
+				return rc;
+
+			dp = (struct direct *)buf;
+			edp = (struct direct *)(buf + buf_size);
+			while (dp < edp && dp->d_ino == (ino_t)0)
+				dp = (struct direct *)((char *)dp + dp->d_reclen);
+			fp->f_seekp += buf_size -
+				((u_int8_t *)edp - (u_int8_t *)dp);
+		} while (dp >= edp);
+
+#if BYTE_ORDER == LITTLE_ENDIAN
+		if (fp->f_fs->fs_maxsymlinklen <= 0)
+			namlen = dp->d_type;
+		else
+#endif
+			namlen = dp->d_namlen;
+		strncpy(name, dp->d_name, namlen + 1);
+
+		fp->f_seekp += dp->d_reclen;
+	}
+
+	return 0;
+}
+#endif
 
 #ifdef COMPAT_UFS
 /*

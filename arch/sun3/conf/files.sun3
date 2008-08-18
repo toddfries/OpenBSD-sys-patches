@@ -1,4 +1,5 @@
-#	$NetBSD: files.sun3,v 1.23 1996/03/26 15:15:59 gwr Exp $
+#	$OpenBSD: files.sun3,v 1.10 1997/04/04 14:56:57 kstailey Exp $
+#	$NetBSD: files.sun3,v 1.26 1996/10/29 19:58:14 gwr Exp $
 
 #
 # sun3-specific configuration info
@@ -22,6 +23,7 @@ file arch/sun3/sun3/disksubr.c
 file arch/sun3/sun3/fpu.c
 file arch/sun3/sun3/isr.c
 file arch/sun3/sun3/kgdb_stub.c 		kgdb
+file arch/sun3/sun3/leds.c
 file arch/sun3/sun3/machdep.c	
 file arch/sun3/sun3/mem.c		
 file arch/sun3/sun3/pmap.c		
@@ -34,9 +36,8 @@ file arch/sun3/sun3/vm_machdep.c
 
 file arch/sun3/dev/idprom.c
 
-include "../../m68k/fpe/files.fpe"
+include "arch/m68k/fpe/files.fpe"
 
-file arch/m68k/m68k/copy.s
 file dev/cons.c
 
 #
@@ -105,7 +106,7 @@ file arch/sun3/dev/if_ie_obio.c		ie_obio
 file arch/sun3/dev/if_ie_vmes.c		ie_vmes
 file arch/sun3/dev/if_ie.c		ie
 
-device le: ifnet, ether
+# device defined in sys/conf/files
 attach le at obio
 file arch/sun3/dev/if_le.c		le
 
@@ -136,8 +137,6 @@ file arch/sun3/dev/cg2.c		cgtwo needs-flag
 device cgfour: sunfb
 attach cgfour at obmem
 file arch/sun3/dev/cg4.c		cgfour needs-flag
-
-file	arch/sun3/dev/bt_subr.c 	cgfour
 
 #
 # VME

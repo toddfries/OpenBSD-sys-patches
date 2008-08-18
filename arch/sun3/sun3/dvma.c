@@ -1,8 +1,12 @@
-/*	$NetBSD: dvma.c,v 1.4 1996/02/20 22:05:32 gwr Exp $	*/
+/*	$OpenBSD: dvma.c,v 1.6 1997/01/16 04:04:19 kstailey Exp $	*/
+/*	$NetBSD: dvma.c,v 1.5 1996/11/20 18:57:29 gwr Exp $	*/
 
-/*
- * Copyright (c) 1995 Gordon W. Ross
+/*-
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Gordon W. Ross.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,22 +16,25 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- * 4. All advertising materials mentioning features or use of this software
+ * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Gordon W. Ross
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/param.h>
@@ -48,12 +55,13 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
-#include <machine/reg.h>
+#include <machine/control.h>
+#include <machine/dvma.h>
+#include <machine/machdep.h>
 #include <machine/pte.h>
 #include <machine/pmap.h>
-#include <machine/dvma.h>
+#include <machine/reg.h>
 
-#include "cache.h"
 
 /* Resource map used by dvma_mapin/dvma_mapout */
 #define	NUM_DVMA_SEGS 10
@@ -65,7 +73,8 @@ vm_size_t dvma_segmap_size = 6 * NBSG;
 /* Using phys_map to manage DVMA scratch-memory pages. */
 /* Note: Could use separate pagemap for obio if needed. */
 
-void dvma_init()
+void
+dvma_init()
 {
 	vm_offset_t segmap_addr;
 
@@ -100,7 +109,8 @@ void dvma_init()
  * Allocate actual memory pages in DVMA space.
  * (idea for implementation borrowed from Chris Torek.)
  */
-caddr_t dvma_malloc(bytes)
+caddr_t
+dvma_malloc(bytes)
 	size_t bytes;
 {
     caddr_t new_mem;
@@ -119,7 +129,8 @@ caddr_t dvma_malloc(bytes)
 /*
  * Free pages from dvma_malloc()
  */
-void dvma_free(addr, size)
+void
+dvma_free(addr, size)
 	caddr_t	addr;
 	size_t	size;
 {
@@ -133,7 +144,8 @@ void dvma_free(addr, size)
  * would be used by some OTHER bus-master besides the CPU.
  * (Examples: on-board ie/le, VME xy board).
  */
-long dvma_kvtopa(kva, bustype)
+long
+dvma_kvtopa(kva, bustype)
 	long kva;
 	int bustype;
 {
@@ -163,7 +175,10 @@ long dvma_kvtopa(kva, bustype)
  * This IS safe to call at interrupt time.
  * (Typically called at SPLBIO)
  */
-caddr_t dvma_mapin(char *kva, int len)
+caddr_t
+dvma_mapin(kva, len)
+	char *kva;
+	int len;
 {
 	vm_offset_t seg_kva, seg_dma, seg_len, seg_off;
 	register vm_offset_t v, x;
@@ -222,7 +237,10 @@ caddr_t dvma_mapin(char *kva, int len)
  * This IS safe to call at interrupt time.
  * (Typically called at SPLBIO)
  */
-void dvma_mapout(char *dma, int len)
+void
+dvma_mapout(dma, len)
+	char *dma;
+	int len;
 {
 	vm_offset_t seg_dma, seg_len, seg_off;
 	register vm_offset_t v, x;

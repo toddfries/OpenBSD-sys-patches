@@ -1,5 +1,5 @@
-/*	$OpenBSD: ibcs2_exec.c,v 1.4 1996/08/31 09:24:02 pefo Exp $	*/
-/*	$NetBSD: ibcs2_exec.c,v 1.11 1996/05/03 17:05:19 christos Exp $	*/
+/*	$OpenBSD: ibcs2_exec.c,v 1.7 1997/02/01 21:49:48 deraadt Exp $	*/
+/*	$NetBSD: ibcs2_exec.c,v 1.12 1996/10/12 02:13:52 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Scott Bartram
@@ -38,6 +38,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/exec.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
 #include <sys/resourcevar.h>
@@ -76,7 +77,7 @@ static int coff_find_section __P((struct proc *, struct vnode *,
 extern int bsd2ibcs_errno[];
 extern struct sysent ibcs2_sysent[];
 extern char *ibcs2_syscallnames[];
-extern void ibcs2_sendsig __P((sig_t, int, int, u_long));
+extern void ibcs2_sendsig __P((sig_t, int, int, u_long, int, union sigval));
 extern char sigcode[], esigcode[];
 
 const char ibcs2_emul_path[] = "/emul/ibcs2";

@@ -1,5 +1,5 @@
-/*	$OpenBSD: adbsys.c,v 1.4 1996/06/23 15:38:12 briggs Exp $	*/
-/*	$NetBSD: adbsys.c,v 1.21 1996/06/21 06:10:56 scottr Exp $	*/
+/*	$OpenBSD: adbsys.c,v 1.9 1997/04/14 18:47:55 gene Exp $	*/
+/*	$NetBSD: adbsys.c,v 1.24 1997/01/13 07:01:23 scottr Exp $	*/
 
 /*-
  * Copyright (C) 1994	Bradley A. Grantham
@@ -34,19 +34,19 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 
-#include <machine/adbsys.h>
 #include <machine/cpu.h>
+#include <machine/macinfo.h>
 #include <machine/viareg.h>
 
-#include "adbvar.h"
-#include "../mac68k/macrom.h"
+#include <arch/mac68k/mac68k/macrom.h>
+#include <arch/mac68k/dev/adbvar.h>
 
 extern	struct mac68k_machine_S mac68k_machine;
 
 /* from adb.c */
-void    adb_processevent(adb_event_t * event);
+void    adb_processevent __P((adb_event_t * event));
 
-extern void adb_jadbproc(void);
+extern void adb_jadbproc __P((void));
 
 void 
 adb_complete(buffer, data_area, adb_command)
@@ -54,27 +54,29 @@ adb_complete(buffer, data_area, adb_command)
 	caddr_t data_area;
 	int adb_command;
 {
-	register int i;
-	register char *sbuf, *dbuf;
 	adb_event_t event;
 	ADBDataBlock adbdata;
 	int adbaddr;
 	int error;
+#ifdef MRG_DEBUG
+	register int i;
 
-#if defined(MRG_DEBUG)
 	printf("adb: transaction completion\n");
 #endif
 
 	adbaddr = (adb_command & 0xf0) >> 4;
 	error = GetADBInfo(&adbdata, adbaddr);
-#if defined(MRG_DEBUG)
+#ifdef MRG_DEBUG
 	printf("adb: GetADBInfo returned %d\n", error);
 #endif
 
 	event.addr = adbaddr;
 	event.hand_id = adbdata.devType;
 	event.def_addr = adbdata.origADBAddr;
-#if defined(MRG_DEBUG)
+	event.byte_count = buffer[0];
+	memcpy(event.bytes, buffer + 1, event.byte_count);
+
+#ifdef MRG_DEBUG
 	printf("adb: from %d at %d (org %d) %d:", event.addr,
 		event.hand_id, event.def_addr, buffer[0]);
 	for (i = 1; i <= buffer[0]; i++)
@@ -82,33 +84,26 @@ adb_complete(buffer, data_area, adb_command)
 	printf("\n");
 #endif
 
-	i = event.byte_count = buffer[0];
-	sbuf = &buffer[1];
-	dbuf = &event.bytes[0];
-	while (i--)
-		*dbuf++ = *sbuf++;
-
 	microtime(&event.timestamp);
 
 	adb_processevent(&event);
 }
 
-static int extdms_done;
+static volatile int extdms_done;
 
 /*
  * initialize extended mouse - probes devices as
  * described in _Inside Macintosh, Devices_.
  */
 void
-extdms_init()
+extdms_init(totaladbs)
+	int totaladbs;
 {
 	ADBDataBlock adbdata;
-	int totaladbs;
 	int adbindex, adbaddr;
 	short cmd;
 	char buffer[9];
 
-	totaladbs = CountADBs();
 	for (adbindex = 1; adbindex <= totaladbs; adbindex++) {
 		/* Get the ADB information */
 		adbaddr = GetIndADB(&adbdata, adbindex);
@@ -181,42 +176,56 @@ adb_init()
 	int error;
 	char buffer[9];
 
+#ifdef DISABLE_ADB_WHEN_SERIAL_CONSOLE
 	if ((mac68k_machine.serial_console & 0x03)) {
 		printf("adb: using serial console\n");
 		return;
 	}
+#endif
 
+#ifdef MRG_ADB			/* We don't care about ADB ROM driver if we
+				 * aren't using the MRG_ADB method for
+				 * ADB/PRAM/RTC. */
 	if (!mrg_romready()) {
 		printf("adb: no ROM ADB driver in this kernel for this machine\n");
 		return;
 	}
+#endif
 	printf("adb: bus subsystem\n");
-#if defined(MRG_DEBUG)
+#ifdef MRG_DEBUG
 	printf("adb: call mrg_initadbintr\n");
 #endif
 
 	mrg_initadbintr();	/* Mac ROM Glue okay to do ROM intr */
-#if defined(MRG_DEBUG)
+#ifdef MRG_DEBUG
 	printf("adb: returned from mrg_initadbintr\n");
 #endif
 
 	/* ADBReInit pre/post-processing */
 	JADBProc = adb_jadbproc;
 
-	/* Initialize ADB */
-#if defined(MRG_DEBUG)
+	/*
+	 * Initialize ADB
+	 *
+	 * If not using MRG_ADB method to access ADB, then call
+	 * ADBReInit directly.  Otherwise use ADB AlternateInit()
+	 */
+#ifndef MRG_ADB
+	printf("adb: calling ADBReInit\n");
+	ADBReInit();
+#else
+#ifdef MRG_DEBUG
 	printf("adb: calling ADBAlternateInit.\n");
 #endif
-
 	ADBAlternateInit();
+#endif
 
-#if defined(MRG_DEBUG)
+#ifdef MRG_DEBUG
 	printf("adb: done with ADBReInit\n");
 #endif
 
-	extdms_init();
-
 	totaladbs = CountADBs();
+	extdms_init(totaladbs);
 
 	/* for each ADB device */
 	for (adbindex = 1; adbindex <= totaladbs; adbindex++) {
@@ -300,7 +309,7 @@ adb_init()
 		adbinfo.siServiceRtPtr = (Ptr) adb_asmcomplete;
 		adbinfo.siDataAreaAddr = NULL;
 		error = SetADBInfo(&adbinfo, adbaddr);
-#if defined(MRG_DEBUG)
+#ifdef MRG_DEBUG
 		printf("returned %d from SetADBInfo\n", error);
 #endif
 	}

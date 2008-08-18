@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.14 1996/10/04 17:58:41 niklas Exp $	*/
+/*	$OpenBSD: conf.h,v 1.21 1997/05/14 01:17:22 deraadt Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -330,6 +330,7 @@ extern struct cdevsw cdevsw[];
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, dev_init(c,n,select), (dev_type_mmap((*))) enodev }
+void	randomattach __P((void));
 
 /* symbolic sleep message strings */
 extern char devopn[], devio[], devwait[], devin[], devout[];
@@ -375,6 +376,7 @@ struct swdevt {
 extern struct swdevt swdevt[];
 
 int	chrtoblk __P((dev_t));
+int	blktochr __P((dev_t));
 int	iskmemdev __P((dev_t));
 int	iszerodev __P((dev_t));
 
@@ -412,7 +414,6 @@ cdev_decl(ccd);
 
 cdev_decl(ch);
 
-bdev_decl(ss);
 cdev_decl(ss);
 
 bdev_decl(sd);
@@ -424,12 +425,17 @@ cdev_decl(st);
 bdev_decl(cd);
 cdev_decl(cd);
 
+bdev_decl(rd);
+cdev_decl(rd);
+
 bdev_decl(uk);
 cdev_decl(uk);
 
 cdev_decl(bpf);
 
 cdev_decl(tun);
+
+cdev_decl(random);
 
 #ifdef COMPAT_SVR4
 # define NSVR4_NET	1

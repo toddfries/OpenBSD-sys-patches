@@ -1,3 +1,4 @@
+/*	$OpenBSD: npx.c,v 1.14 1997/04/17 03:44:52 tholo Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -268,8 +269,8 @@ npxprobe(parent, match, aux)
 	disable_intr();
 	save_idt_npxintr = idt[irq];
 	save_idt_npxtrap = idt[16];
-	setgate(&idt[irq], probeintr, 0, SDT_SYS386IGT, SEL_KPL);
-	setgate(&idt[16], probetrap, 0, SDT_SYS386TGT, SEL_KPL);
+	setgate(&idt[irq], probeintr, 0, SDT_SYS386IGT, SEL_KPL, GICODE_SEL);
+	setgate(&idt[16], probetrap, 0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
 	save_imen = imen;
 	imen = ~((1 << IRQ_SLAVE) | (1 << ia->ia_irq));
 	SET_ICUS();
@@ -439,16 +440,28 @@ npxintr(arg)
 		 * just before it is used).
 		 */
 		p->p_md.md_regs = (struct trapframe *)&frame->if_es;
-#ifdef notyet
+
 		/*
 		 * Encode the appropriate code for detailed information on
 		 * this exception.
 		 */
-		code = XXX_ENCODE(addr->sv_ex_sw);
-#else
-		code = 0;	/* XXX */
+		if (addr->sv_ex_sw & EN_SW_IE)
+			code = FPE_FLTINV;
+#ifdef notyet
+		else if (addr->sv_ex_sw & EN_SW_DE)
+			code = FPE_FLTDEN;
 #endif
-		trapsignal(p, SIGFPE, code);
+		else if (addr->sv_ex_sw & EN_SW_ZE)
+			code = FPE_FLTDIV;
+		else if (addr->sv_ex_sw & EN_SW_OE)
+			code = FPE_FLTOVF;
+		else if (addr->sv_ex_sw & EN_SW_UE)
+			code = FPE_FLTUND;
+		else if (addr->sv_ex_sw & EN_SW_PE)
+			code = FPE_FLTRES;
+		else
+			code = 0;		/* XXX unknown */
+		trapsignal(p, SIGFPE, T_ARITHTRAP, code, frame->if_eip);
 	} else {
 		/*
 		 * Nested interrupt.  These losers occur when:

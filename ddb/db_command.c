@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_command.c,v 1.9 1996/05/31 10:37:24 niklas Exp $	*/
+/*	$OpenBSD: db_command.c,v 1.11 1997/01/27 07:53:53 deraadt Exp $	*/
 /*	$NetBSD: db_command.c,v 1.20 1996/03/30 22:30:05 christos Exp $	*/
 
 /* 
@@ -431,7 +431,7 @@ db_command_loop()
 			db_printf("\n");
 		db_output_line = 0;
 
-		db_printf("db> ");
+		db_printf("ddb> ");
 		(void) db_read_line();
 
 		db_command(&db_last_command, db_command_table);
@@ -521,7 +521,7 @@ db_boot_sync_cmd(addr, haddr, count, modif)
 	db_expr_t count;
 	char *modif;
 {
-	boot(RB_AUTOBOOT);
+	boot(RB_AUTOBOOT | RB_TIMEBAD);
 }
 
 void
@@ -531,7 +531,7 @@ db_boot_crash_cmd(addr, haddr, count, modif)
 	db_expr_t count;
 	char *modif;
 {
-	boot(RB_NOSYNC | RB_DUMP);
+	boot(RB_NOSYNC | RB_DUMP | RB_TIMEBAD);
 }
 
 void
@@ -541,5 +541,5 @@ db_boot_dump_cmd(addr, haddr, count, modif)
 	db_expr_t count;
 	char *modif;
 {
-	boot(RB_DUMP);
+	boot(RB_DUMP | RB_TIMEBAD);
 }

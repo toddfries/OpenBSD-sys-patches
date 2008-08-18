@@ -1,3 +1,5 @@
+/*	$OpenBSD: sys_pipe.c,v 1.5 1997/02/24 14:19:58 niklas Exp $	*/
+
 /*
  * Copyright (c) 1996 John S. Dyson
  * All rights reserved.
@@ -15,8 +17,6 @@
  *    John S. Dyson.
  * 4. Modifications may be freely made to this file if the above conditions
  *    are met.
- *
- * $Id: sys_pipe.c,v 1.3 1996/09/05 12:31:14 mickey Exp $
  */
 
 #ifndef OLD_PIPE
@@ -169,7 +169,11 @@ sys_pipe(p, v, retval)
 #endif
 	struct proc *p;
 	void *v;
+#if defined(__FreeBSD__)
 	int retval[];
+#else /* (__NetBSD__) || (__OpenBSD__) */
+	register_t *retval;
+#endif
 {
 	register struct filedesc *fdp = p->p_fd;
 	struct file *rf, *wf;

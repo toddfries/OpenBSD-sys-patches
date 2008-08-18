@@ -1,5 +1,5 @@
-/*	$OpenBSD: sbdsp.c,v 1.7 1996/09/16 15:39:44 mickey Exp $	*/
-/*	$NetBSD: sbdsp.c,v 1.26 1996/05/12 23:53:38 mycroft Exp $	*/
+/*	$OpenBSD: sbdsp.c,v 1.9 1997/01/03 00:09:59 kstailey Exp $	*/
+/*	$NetBSD: sbdsp.c,v 1.30 1996/10/25 07:25:48 fvdl Exp $	*/
 
 /*
  * Copyright (c) 1991-1993 Regents of the University of California.
@@ -144,9 +144,9 @@ sb_printsc(sc)
 	printf("irate %d itc %d imode %d orate %d otc %d omode %d encoding %x\n",
 	    sc->sc_irate, sc->sc_itc, sc->sc_imode,
 	    sc->sc_orate, sc->sc_otc, sc->sc_omode, sc->encoding);
-	printf("outport %d inport %d spkron %d nintr %d\n",
+	printf("outport %d inport %d spkron %d nintr %lu\n",
 	    sc->out_port, sc->in_port, sc->spkr_state, sc->sc_interrupts);
-	printf("precision %d channels %d intr %x arg %x\n",
+	printf("precision %d channels %d intr %p arg %p\n",
 	    sc->sc_precision, sc->sc_channels, sc->sc_intr, sc->sc_arg);
 	printf("gain: ");
 	for (i = 0; i < SB_NDEVS; i++)
@@ -1342,10 +1342,7 @@ sbdsp_intr(arg)
 	if (sbdspdebug > 1)
 		Dprintf("sbdsp_intr: intr=0x%x\n", sc->sc_intr);
 #endif
-	if (!isa_dmafinished(sc->sc_drq)) {
-		printf("sbdsp_intr: not finished\n");
-		return 0;
-	}
+	/* isa_dmafinished() moved to isadma.c */
 	sc->sc_interrupts++;
 	/* clear interrupt */
 #ifdef notyet

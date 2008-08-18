@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.11 1996/07/27 11:08:48 deraadt Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.15 1997/04/18 09:57:29 deraadt Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -582,9 +582,15 @@ nfs_setattr(v)
 	u_quad_t tsize = 0;
 
 	/*
+	 * Setting of flags is not supported.
+	 */
+	if (vap->va_flags != VNOVAL)
+		return (EOPNOTSUPP);
+
+	/*
 	 * Disallow write attempts if the filesystem is mounted read-only.
 	 */
-  	if ((vap->va_flags != VNOVAL || vap->va_uid != (uid_t)VNOVAL ||
+  	if ((vap->va_uid != (uid_t)VNOVAL ||
 	    vap->va_gid != (gid_t)VNOVAL || vap->va_atime.tv_sec != VNOVAL ||
 	    vap->va_mtime.tv_sec != VNOVAL || vap->va_mode != (mode_t)VNOVAL) &&
 	    (vp->v_mount->mnt_flag & MNT_RDONLY))
@@ -1536,7 +1542,7 @@ nfs_rename(v)
 	 * rename of the new file over it.
 	 */
 	if (tvp && tvp->v_usecount > 1 && !VTONFS(tvp)->n_sillyrename &&
-		!nfs_sillyrename(tdvp, tvp, tcnp)) {
+	    tvp->v_type != VDIR && !nfs_sillyrename(tdvp, tvp, tcnp)) {
 		vrele(tvp);
 		tvp = NULL;
 	}
@@ -3059,7 +3065,7 @@ nfs_bwrite(v)
 	void *v;
 {
 	struct vop_bwrite_args /* {
-		struct vnode *a_bp;
+		struct buf *a_bp;
 	} */ *ap = v;
 
 	return (nfs_writebp(ap->a_bp, 1));

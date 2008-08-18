@@ -1,5 +1,4 @@
-/*	$OpenBSD: ipx_usrreq.c,v 1.1 1996/08/16 09:16:02 mickey Exp $	*/
-/*	$NOWHERE: ipx_usrreq.c,v 1.2 1996/05/07 09:49:50 mickey Exp $	*/
+/*	$OpenBSD: ipx_usrreq.c,v 1.5 1997/01/18 17:53:54 mickey Exp $	*/
 
 /*-
  *
@@ -44,6 +43,7 @@
 #include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/systm.h>
+#include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
@@ -51,6 +51,9 @@
 #include <sys/socketvar.h>
 #include <sys/errno.h>
 #include <sys/stat.h>
+#include <sys/proc.h>
+#include <vm/vm.h>
+#include <sys/sysctl.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -72,6 +75,9 @@
 
 int noipxRoute;
 
+int ipxsendspace = IPXSNDQ;
+int ipxrecvspace = IPXRCVQ;
+
 /*
  *  This may also be called for raw listeners.
  */
@@ -87,7 +93,7 @@ ipx_input(m, va_alist)
 	register struct ipxpcb *ipxp;
 	register struct ipx *ipx = mtod(m, struct ipx *);
 	struct ifnet *ifp = m->m_pkthdr.rcvif;
-	struct sockaddr_ipx ipx_ipx = { sizeof(ipx_ipx), AF_IPX };
+	struct sockaddr_ipx ipx_ipx;
 	va_list	ap;
 
 	va_start(ap, m);
@@ -100,6 +106,9 @@ ipx_input(m, va_alist)
 	 * Construct sockaddr format source address.
 	 * Stuff source address and datagram in user buffer.
 	 */
+	bzero(&ipx_ipx, sizeof(ipx_ipx));
+	ipx_ipx.sipx_len = sizeof(ipx_ipx);
+	ipx_ipx.sipx_family = AF_IPX;
 	ipx_ipx.sipx_addr = ipx->ipx_sna;
 	if (ipx_neteqnn(ipx->ipx_sna.ipx_net, ipx_zeronet) && ifp) {
 		register struct ifaddr *ifa;
@@ -119,8 +128,8 @@ ipx_input(m, va_alist)
 		m->m_pkthdr.len -= sizeof (struct ipx);
 		m->m_data += sizeof (struct ipx);
 	}
-	if (sbappendaddr(&ipxp->ipxp_socket->so_rcv, (struct sockaddr *)&ipx_ipx,
-	    m, (struct mbuf *)0) == 0)
+	if (sbappendaddr(&ipxp->ipxp_socket->so_rcv, sipxtosa(&ipx_ipx), m,
+	    (struct mbuf *)0) == 0)
 		goto bad;
 	sorwakeup(ipxp->ipxp_socket);
 	return;
@@ -292,7 +301,8 @@ ipx_output(m0, va_alist)
 	}
 	ipxp->ipxp_lastdst = ipx->ipx_dna;
 #endif /* ancient_history */
-	if (noipxRoute) ro = 0;
+	if (noipxRoute)
+		ro = 0;
 	return (ipx_outputfl(m, ro, so->so_options & SO_BROADCAST));
 }
 
@@ -443,7 +453,7 @@ ipx_usrreq(so, req, m, nam, control)
 		error = ipx_pcballoc(so, &ipxcbtable);
 		if (error)
 			break;
-		error = soreserve(so, (u_long) 2048, (u_long) 2048);
+		error = soreserve(so, ipxsendspace, ipxrecvspace);
 		if (error)
 			break;
 		break;
@@ -575,6 +585,7 @@ release:
 		m_freem(m);
 	return (error);
 }
+
 /*ARGSUSED*/
 int
 ipx_raw_usrreq(so, req, m, nam, control)
@@ -597,7 +608,7 @@ ipx_raw_usrreq(so, req, m, nam, control)
 		error = ipx_pcballoc(so, &ipxrawcbtable);
 		if (error)
 			break;
-		error = soreserve(so, (u_long) 2048, (u_long) 2048);
+		error = soreserve(so, ipxsendspace, ipxrecvspace);
 		if (error)
 			break;
 		ipxp = sotoipxpcb(so);
@@ -610,3 +621,28 @@ ipx_raw_usrreq(so, req, m, nam, control)
 	return (error);
 }
 
+int
+ipx_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+{
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case IPXCTL_RECVSPACE:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+			&ipxrecvspace));
+	case IPXCTL_SENDSPACE:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+			&ipxsendspace));
+	default:
+		return (ENOPROTOOPT);
+	}
+	/* NOT REACHED */
+}

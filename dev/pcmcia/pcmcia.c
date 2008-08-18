@@ -1,4 +1,5 @@
-/*	$Id: pcmcia.c,v 1.5 1996/05/07 07:34:17 deraadt Exp $	*/
+/*	$OpenBSD: pcmcia.c,v 1.9 1997/04/17 08:21:12 niklas Exp $	*/
+
 /*
  * Copyright (c) 1996 John T. Kohl.  All rights reserved.
  * Copyright (c) 1994 Stefan Grefen.  All rights reserved.
@@ -31,14 +32,18 @@
  *
  */
 
-/* XXX - these next two lines are just "glue" until the confusion over
-   pcmcia vs pcmciabus between the framework and sys/conf/files
-   gets resolved */
+/*
+ * XXX - these next two lines are just "glue" until the confusion over
+ * pcmcia vs pcmciabus between the framework and sys/conf/files
+ * gets resolved
+ */
 #define pcmciabus_cd pcmcia_cd
 #define pcmciabus_ca pcmcia_ca
 
-/* derived from scsiconf.c writte by Julian Elischer et al */
-/* TODO add modload support and loadable lists of devices */
+/*
+ * derived from scsiconf.c writte by Julian Elischer et al
+ * TODO add modload support and loadable lists of devices
+ */
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -75,15 +80,16 @@ static int      ndeldevs = 0;
 								(void *) d,e))
 #define PCMCIA_MAP_IO(a,b,c,d,e)    ((a)->chip_link->pcmcia_map_io(b,c,d,e))
 #define PCMCIA_MAP_INTR(a,b,c,d)    ((a)->chip_link->pcmcia_map_intr(b,c,d))
-/* XXX
+/*
+ * XXX
  * this is quite broken in the face of various bus mapping stuff...
  * drivers need to cooperate with the pcmcia framework to deal with
  * bus mapped memory.  Whee.
  */
 #define PCMCIA_MAP_MEM(a,b,c,d,e,f,g) ((a)->chip_link->pcmcia_map_mem(b,c,d,e,f,g))
 
-#define SCRATCH_MEM(a)	((a)->scratch_memh)
-#define SCRATCH_BC(a)	((a)->pa_bc)
+#define SCRATCH_MEM(a)	((caddr_t)(a)->scratch_memh)
+#define SCRATCH_MEMT(a)	((a)->pa_memt)
 #define SCRATCH_SIZE(a)	((a)->scratch_memsiz)
 #define SCRATCH_INUSE(a)((a)->scratch_inuse)
 
@@ -95,13 +101,17 @@ int pcmcia_probe_bus __P((int, int));
 int pcmciabusmatch __P((struct device *, void *, void *));
 void pcmciabusattach __P((struct device *, struct device *, void *));
 int  pcmcia_mapcard __P((struct pcmcia_link *, int, struct pcmcia_conf *));
+int  pcmcia_mapcard_and_configure __P((struct pcmcia_link *, int,
+	struct pcmcia_conf *));
 
 int pcmcia_unconfigure __P((struct pcmcia_link *));
 int pcmcia_unmapcard __P((struct pcmcia_link *));
 
-int pcmcia_print __P((void *, char *));
+int pcmcia_print __P((void *, const char *));
 int pcmcia_submatch __P((struct device *, void *, void *));
 void pcmcia_probe_link __P((struct pcmcia_link *));
+
+void pcmcia_detach __P((struct device *, void *));
 
 struct cfattach pcmcia_ca = {
 	sizeof(struct pcmciabus_softc), pcmciabusmatch, pcmciabusattach,
@@ -110,6 +120,14 @@ struct cfattach pcmcia_ca = {
 struct cfdriver pcmcia_cd = {
 	NULL, "pcmcia", DV_DULL, 1
 };
+
+int pcmciaopen __P((dev_t, int, int, struct proc *));
+int pcmciaclose __P((dev_t, int, int, struct proc *));
+int pcmciachip_ioctl __P((int, int, caddr_t));
+int pcmciaslot_ioctl __P((struct pcmcia_link *, int, int, caddr_t));
+int pcmciaioctl __P((dev_t, u_long, caddr_t, int, struct proc *));
+int pcmciaselect __P((dev_t, int, struct proc *));
+int pcmciammap __P((dev_t, int, int));
 
 #if 0
 int
@@ -177,7 +195,8 @@ pcmciabusattach(parent, self, aux)
 	printf("\n");
 
 	sc->sc_driver = pca;
-	sc->sc_bc = pba->pba_bc;
+	sc->sc_iot = pba->pba_iot;
+	sc->sc_memt = pba->pba_memt;
 	pcmcia_probe_bus(sc->sc_dev.dv_unit, -1);
 }
 
@@ -185,6 +204,8 @@ pcmciabusattach(parent, self, aux)
  * Probe the requested pcmcia bus. It must be already set up.
  * -1 requests all set up pcmcia busses.
  */
+int pcmcia_probe_busses __P((int, int));
+
 int
 pcmcia_probe_busses(bus, slot)
 	int             bus, slot;
@@ -308,7 +329,8 @@ pcmcia_probe_link(link)
 	CLR(link->flags, PCMCIA_ATTACH_TYPE);
 	SET(link->flags, PCMCIA_ATTACH);
 
-	/* Run the config matching routines to find us a good match.
+	/*
+	 * Run the config matching routines to find us a good match.
 	 * match routines will flag on "matchonly" and fill in stuff
 	 * into the link structure, but not return any match.
 	 */
@@ -633,8 +655,7 @@ pcmcia_mapcard(link, unit, pc_cf)
 	SCRATCH_INUSE(pca) = 1;
 	splx(s);
 	for (i = 0; i < pc_cf->memwin; i++) {
-		if ((err = PCMCIA_MAP_MEM(pca, link,
-					  pca->pa_bc,
+		if ((err = PCMCIA_MAP_MEM(pca, link, pca->pa_memt,
 					  (caddr_t) pc_cf->mem[i].start,
 					  pc_cf->mem[i].caddr,
 					  pc_cf->mem[i].len,
@@ -664,9 +685,9 @@ pcmcia_mapcard(link, unit, pc_cf)
 		}
 	}
 	/* Now we've mapped everything enable it */
-	if ((err = PCMCIA_MAP_MEM(pca, link, SCRATCH_BC(pca), SCRATCH_MEM(pca),
-	     pc_cf->cfg_off & (~(SCRATCH_SIZE(pca) - 1)), SCRATCH_SIZE(pca),
-				  PCMCIA_MAP_ATTR | PCMCIA_LAST_WIN)) != 0) {
+	if ((err = PCMCIA_MAP_MEM(pca, link, SCRATCH_MEMT(pca),
+	     SCRATCH_MEM(pca), pc_cf->cfg_off & (~(SCRATCH_SIZE(pca) - 1)),
+	     SCRATCH_SIZE(pca), PCMCIA_MAP_ATTR | PCMCIA_LAST_WIN)) != 0) {
 		PPRINTF(("pcmcia_mapcard: enable err %d\n", err));
 		goto error;
 	}
@@ -677,11 +698,12 @@ pcmcia_mapcard(link, unit, pc_cf)
 		goto error;
 	}
 
-#define GETMEM(x) bus_mem_read_1(pca->pa_bc, SCRATCH_MEM(pca), \
-				 (pc_cf->cfg_off & (SCRATCH_SIZE(pca)-1)) + x)
-#define PUTMEM(x,v) \
-	bus_mem_write_1(pca->pa_bc, SCRATCH_MEM(pca), \
-			(pc_cf->cfg_off & (SCRATCH_SIZE(pca)-1)) + x, v)
+#define GETMEM(x) bus_space_read_1(pca->pa_memt,			      \
+    (bus_space_handle_t)SCRATCH_MEM(pca),				      \
+    (pc_cf->cfg_off & (SCRATCH_SIZE(pca)-1)) + x)
+#define PUTMEM(x,v) bus_space_write_1(pca->pa_memt,			      \
+    (bus_space_handle_t)SCRATCH_MEM(pca),				      \
+    (pc_cf->cfg_off & (SCRATCH_SIZE(pca)-1)) + x, v)
 
 	if (ISSET(pc_cf->cfgtype, DOSRESET)) {
 		PUTMEM(0, PCMCIA_SRESET);
@@ -723,13 +745,13 @@ pcmcia_mapcard(link, unit, pc_cf)
 		err = 0;		/* XXX */
 	}
 error:
-	PCMCIA_MAP_MEM(pca, link, SCRATCH_BC(pca), SCRATCH_MEM(pca), 0,
+	PCMCIA_MAP_MEM(pca, link, SCRATCH_MEMT(pca), SCRATCH_MEM(pca), 0,
 		       SCRATCH_SIZE(pca), PCMCIA_LAST_WIN | PCMCIA_UNMAP);
 	if (err != 0) {
 		PPRINTF(("pcmcia_mapcard: unmaping\n"));
 		for (i = 0; i < pc_cf->memwin; i++) {
 			PCMCIA_MAP_MEM(pca, link,
-				       pca->pa_bc,
+				       pca->pa_memt,
 				       (caddr_t) pc_cf->mem[i].start,
 				       pc_cf->mem[i].caddr,
 				       pc_cf->mem[i].len,
@@ -772,7 +794,7 @@ pcmcia_unmapcard(link)
 		return ENODEV;
 
 	for (i = 0; i < link->memwin; i++)
-		PCMCIA_MAP_MEM(pca, link, pca->pa_bc, 0, 0, 0,
+		PCMCIA_MAP_MEM(pca, link, pca->pa_memt, 0, 0, 0,
 			       (i | PCMCIA_UNMAP));
 
 	for (i = 0; i < link->iowin; i++)
@@ -848,7 +870,7 @@ pcmcia_read_cis(link, scratch, offs, len)
 		int tlen = min(len + toff, size / 2) - toff;
 		int i;
 
-		if ((err = PCMCIA_MAP_MEM(pca, link, pca->pa_bc, p, pgoff,
+		if ((err = PCMCIA_MAP_MEM(pca, link, pca->pa_memt, p, pgoff,
 					  size,
 					  PCMCIA_MAP_ATTR |
 					  PCMCIA_LAST_WIN)) != 0)
@@ -859,7 +881,7 @@ pcmcia_read_cis(link, scratch, offs, len)
 		for (i = 0; i < tlen; j++, i++)
 			scratch[j] = p[toff + i * 2];
 
-		PCMCIA_MAP_MEM(pca, link, pca->pa_bc, p, 0, size,
+		PCMCIA_MAP_MEM(pca, link, pca->pa_memt, p, 0, size,
 			       PCMCIA_LAST_WIN | PCMCIA_UNMAP);
 		len -= tlen;
 	}
@@ -878,7 +900,7 @@ error:
 #define PCMCIABUS_SLOT(a)    (a&0x3)	/* per-controller */
 #define PCMCIABUS_SLOTID(a)  (a&0xf)	/* system-wide assignment */
 #define PCMCIABUS_CHIPNO(a)  ((a&0xf)>>2)
-#define PCMCIABUS_CHIPID(a) (a&0x3)
+#define PCMCIABUS_CHIPID(a)  (a&0x3)
 #define PCMCIABUS_CHIP       0x40
 #define PCMCIABUS_BUS        0x80
 #define PCMCIABUS_BUSID(a)   (a&0x3)
@@ -950,7 +972,10 @@ pcmciaopen(dev, flag, mode, p)
 
 
 int
-pcmciaclose(dev)
+pcmciaclose(dev, flag, mode, p)
+	dev_t dev;
+	int flag, mode;
+	struct proc *p;
 {
 	int unit = PCMCIABUS_UNIT(dev);
 	int chipid, slot;
@@ -1138,7 +1163,7 @@ pcmciaslot_ioctl(link, slotid, cmd, data)
 			SCRATCH_INUSE(pca) = 1;
 			splx(s);
 			if ((err = PCMCIA_MAP_MEM(pca, link,
-						  SCRATCH_BC(pca),
+						  SCRATCH_MEMT(pca),
 						  SCRATCH_MEM(pca),
 						  pc_cf.cfg_off &
 						  ~(SCRATCH_SIZE(pca)-1),
@@ -1158,7 +1183,7 @@ pcmciaslot_ioctl(link, slotid, cmd, data)
 				*d++ = 0xff;
 				*d++ = 0xff;
 				PCMCIA_MAP_MEM(pca, link,
-					       SCRATCH_BC(pca),
+					       SCRATCH_MEMT(pca),
 					       SCRATCH_MEM(pca),
 					       0,SCRATCH_SIZE(pca), 
 					       PCMCIA_LAST_WIN|PCMCIA_UNMAP);
@@ -1177,11 +1202,11 @@ pcmciaslot_ioctl(link, slotid, cmd, data)
 
 int
 pcmciaioctl(dev, cmd, data, flag, p)
-	dev_t           dev;
-	int             cmd;
-	caddr_t         data;
-	int             flag;
-	struct proc    *p;
+	dev_t		dev;
+	u_long		cmd;
+	caddr_t		data;
+	int		flag;
+	struct proc	*p;
 {
 	int unit = PCMCIABUS_UNIT(dev);
 	int chipid = PCMCIABUS_CHIPNO(unit);
@@ -1256,7 +1281,9 @@ pcmciaselect(device, rw, p)
 }
 
 int
-pcmciammap()
+pcmciammap(dev, offset, nprot)
+	dev_t dev;
+	int offset, nprot;
 {
 	return ENXIO;
 }
@@ -1298,7 +1325,7 @@ pcmciadumpcf(cf)
 int
 pcmcia_print(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 #if 0
 	struct pcmcia_attach_args *paa = aux;
@@ -1328,7 +1355,8 @@ pcmcia_submatch(parent, match, aux)
 #endif
 
 	if (cf->cf_loc[6] != -1 && link->slot != cf->cf_loc[6]) {
-		printf("slot mismatch: %d cf_loc %d\n", link->slot, cf->cf_loc[6]);
+		printf("slot mismatch: %d cf_loc %d\n", link->slot,
+		    cf->cf_loc[6]);
 		return 0;
 	}
 

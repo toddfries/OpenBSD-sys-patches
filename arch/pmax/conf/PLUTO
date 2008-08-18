@@ -4,29 +4,32 @@
 
 machine		pmax
 
-options		CPU_R3000
-options		DS3100
-options		HZ=256
-options		NKMEMCLUSTERS=1024
-options		TIMEZONE=0
-options		DST=0
+option		CPU_R3000
+option		MIPS1
+option		DS3100
+option		HZ=256
+option		NKMEMCLUSTERS=1024
+option		TIMEZONE=0
+option		DST=0
 
-maxusers	8
+maxusers	32
 
-options		SWAPPAGER
-options		VNODEPAGER
-options		DEVPAGER
+option		SWAPPAGER
+option		VNODEPAGER
+option		DEVPAGER
 
-options		COMPAT_43
-options		NATIVE_ELF
-options		FFS
-options		FIFO
-options		INET
-options		NFSCLIENT
-options		NFSSERVER
-options		KTRACE
+option		COMPAT_43
+option		NATIVE_ELF
+option		FFS
+option		FIFO
+option		CD9660
+option		MSDOSFS
+option		INET
+option		NFSCLIENT
+option		NFSSERVER
+option		KTRACE
 
-config		netbsd	root on rz0a swap on rz0b dumps on rz0b
+config		bsd	root on rz0a swap on rz0b dumps on rz0b
 
 mainbus0	at root
 
@@ -43,6 +46,7 @@ rz2		at oldscsibus? target ? drive ?
 rz3		at oldscsibus? target ? drive ?
 rz4		at oldscsibus? target ? drive ?
 rz5		at oldscsibus? target ? drive ?
+rz6		at oldscsibus? target ? drive ?
 tz0		at oldscsibus? target ? drive ?
 tz1		at oldscsibus? target ? drive ?
 

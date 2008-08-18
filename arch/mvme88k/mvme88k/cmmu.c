@@ -1,4 +1,35 @@
 /*
+ * Copyright (c) 1996 Nivas Madhur
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Nivas Madhur.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ *	$Id: cmmu.c,v 1.3 1997/03/03 20:21:30 rahnds Exp $
+ */
+/*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
  * Copyright (c) 1991 OMRON Corporation
@@ -24,17 +55,23 @@
  * any improvements or extensions that they make and grant Carnegie the
  * rights to redistribute these changes.
  */
-/*
- * HISTORY
- */
 
+#include <sys/param.h>
+#include <sys/types.h>
+#include <machine/board.h>
+#include <machine/cpus.h>
+#include <machine/m882xx.h>
 
-#define SNOOP_ENABLE
-#define SHADOW_BATC 0
+/* On some versions of 88200, page size flushes don't work. I am using
+ * sledge hammer approach till I find for sure which ones are bad XXX nivas */
+#define BROKEN_MMU_MASK	
+#if defined(MVME187)
+#undef SNOOP_ENABLE
+#else
+#define	SNOOP_ENABLE
+#endif	/* defined(MVME187)
 
-#ifndef NBPG
-#define NBPG 4096
-#endif /* NBPG */
+#undef	SHADOW_BATC		/* don't use BATCs for now XXX nivas */
 
 struct cmmu_regs
 {
@@ -66,42 +103,25 @@ struct cmmu_regs
     /* base + $8A0 */ volatile unsigned cssp2;
     /*             */ unsigned padding9[0x03];
     /* base + $8B0 */ volatile unsigned cssp3;
-
-
-
-
-
-
 };
 
-
-#include <sys/param.h>
-#include <sys/types.h>
-#include <machine/board.h>
-#include <machine/cpus.h>
-#if 0
-#include <vm/pmap.h>
-#endif
-
-
 static struct cmmu {
-    struct cmmu_regs *cmmu_regs; /* CMMU "base" area */
-    unsigned char  cmmu_cpu;	 /* cpu number it is attached to */
-    unsigned char  which;	 /* either INST_CMMU || DATA_CMMU */
-    unsigned char  cmmu_alive;
-	#define CMMU_DEAD	0	/* This cmmu not there */
-	#define CMMU_AVAILABLE	1	/* It's there, but which cpu's? */
-	#define CMMU_MARRIED	2	/* Know which cpu it belongs to. */
-    #if SHADOW_BATC
+	struct cmmu_regs *cmmu_regs; 	/* CMMU "base" area */
+	unsigned char  cmmu_cpu;	/* cpu number it is attached to */
+	unsigned char  which;	 	/* either INST_CMMU || DATA_CMMU */
+	unsigned char  cmmu_alive;
+#define CMMU_DEAD	0		/* This cmmu not there */
+#define CMMU_AVAILABLE	1		/* It's there, but which cpu's? */
+#define CMMU_MARRIED	2		/* Know which cpu it belongs to. */
+#if SHADOW_BATC
 	unsigned batc[8];
-    #endif
-    unsigned char  pad;
+#endif
+	unsigned char  pad;
 } cmmu[MAX_CMMUS] = {
     {(void *)CMMU_I, 0, 0, 0, 0},
     {(void *)CMMU_D, 0, 1, 0, 0},
 };
 
-#include <machine/m882xx.h>
 /*
  * We rely upon and use INST_CMMU == 0 and DATA_CMMU == 1
  */
@@ -119,23 +139,26 @@ struct cpu_cmmu {
 #define CMMU(cpu, data) cpu_cmmu[(cpu)].pair[(data)?DATA_CMMU:INST_CMMU]
 #define REGS(cpu, data) (*CMMU(cpu, data)->cmmu_regs)
 
-unsigned cache_policy = 0;
+unsigned cache_policy = /*CACHE_INH*/ 0;
 
 #ifdef CMMU_DEBUG
-void show_apr(unsigned value)
+void
+show_apr(unsigned value)
 {
-    union apr_template apr_template;
-    apr_template.bits = value;
-    _printf("table @ 0x%x000", apr_template.field.st_base);
-    if (apr_template.field.wt) printf(", writethrough");
-    if (apr_template.field.g)  printf(", global");
-    if (apr_template.field.ci) printf(", cache inhibit");
-    if (apr_template.field.te) printf(", valid");
-    else                       printf(", not valid");
-    printf("]\n");
+	union apr_template apr_template;
+	apr_template.bits = value;
+
+	_printf("table @ 0x%x000", apr_template.field.st_base);
+	if (apr_template.field.wt) printf(", writethrough");
+	if (apr_template.field.g)  printf(", global");
+	if (apr_template.field.ci) printf(", cache inhibit");
+	if (apr_template.field.te) printf(", valid");
+	else                       printf(", not valid");
+	printf("]\n");
 }
 
-void show_sctr(unsigned value)
+void
+show_sctr(unsigned value)
 {
     union {
 	unsigned bits;
@@ -158,258 +181,209 @@ void show_sctr(unsigned value)
 /*
  * CMMU initialization routine
  */
-void cmmu_init(void)
+void
+cmmu_init(void)
 {
-    unsigned tmp, cmmu_num;
-    union cpupid id;
-    int cpu;
+	unsigned tmp, cmmu_num;
+	union cpupid id;
+	int cpu;
 
-    cpu_cmmu[0].pair[INST_CMMU] = cpu_cmmu[0].pair[DATA_CMMU] = 0;
+	cpu_cmmu[0].pair[INST_CMMU] = cpu_cmmu[0].pair[DATA_CMMU] = 0;
 
-    for (cmmu_num = 0; cmmu_num < MAX_CMMUS; cmmu_num++) {
-	if (!wprobe((vm_offset_t)cmmu[cmmu_num].cmmu_regs, -1)) {
-	    id.cpupid = cmmu[cmmu_num].cmmu_regs->idr;
-	    if (id.m88200.type != M88200 && id.m88200.type != M88204)
-		continue;
-	    cmmu[cmmu_num].cmmu_alive = CMMU_AVAILABLE;
+	for (cmmu_num = 0; cmmu_num < MAX_CMMUS; cmmu_num++) {
+		if (!badwordaddr((vm_offset_t)cmmu[cmmu_num].cmmu_regs)) {
+			id.cpupid = cmmu[cmmu_num].cmmu_regs->idr;
+			if (id.m88200.type != M88200 && id.m88200.type !=M88204)
+				continue;
+			cmmu[cmmu_num].cmmu_alive = CMMU_AVAILABLE;
 
-	    cpu_cmmu[cmmu[cmmu_num].cmmu_cpu].pair[cmmu[cmmu_num].which] =
-		&cmmu[cmmu_num];
+			cpu_cmmu[cmmu[cmmu_num].cmmu_cpu].pair[cmmu[cmmu_num].which] =
+				&cmmu[cmmu_num];
 
-	    /*
-	     * Reset cache data....
-	     * as per M88200 Manual (2nd Ed.) section 3.11.
-	     */
-	    for (tmp = 0; tmp < 255; tmp++) {
-		cmmu[cmmu_num].cmmu_regs->sar = tmp << 4;
-		cmmu[cmmu_num].cmmu_regs->cssp = 0x3f0ff000;
-	    }
+			/*
+			 * Reset cache data....
+			 * as per M88200 Manual (2nd Ed.) section 3.11.
+			 */
+			for (tmp = 0; tmp < 255; tmp++) {
+				cmmu[cmmu_num].cmmu_regs->sar = tmp << 4;
+				cmmu[cmmu_num].cmmu_regs->cssp = 0x3f0ff000;
+			}
 
-	    /* 88204 has additional cache to clear */
-	    if(id.m88200.type == M88204)
-	    {
-		for (tmp = 0; tmp < 255; tmp++) {
-		    cmmu[cmmu_num].cmmu_regs->sar = tmp<<4;
-		    cmmu[cmmu_num].cmmu_regs->cssp1 = 0x3f0ff000;
-		}
-		for (tmp = 0; tmp < 255; tmp++) {
-		    cmmu[cmmu_num].cmmu_regs->sar = tmp<<4;
-		    cmmu[cmmu_num].cmmu_regs->cssp2 = 0x3f0ff000;
-		}
-		for (tmp = 0; tmp < 255; tmp++) {
-		    cmmu[cmmu_num].cmmu_regs->sar = tmp<<4;
-		    cmmu[cmmu_num].cmmu_regs->cssp3 = 0x3f0ff000;
-		}
-	    }
+			/* 88204 has additional cache to clear */
+			if(id.m88200.type == M88204)
+			{
+				for (tmp = 0; tmp < 255; tmp++) {
+					cmmu[cmmu_num].cmmu_regs->sar =
+								tmp<<4;
+					cmmu[cmmu_num].cmmu_regs->cssp1 =
+								0x3f0ff000;
+				}
+				for (tmp = 0; tmp < 255; tmp++) {
+					cmmu[cmmu_num].cmmu_regs->sar =
+								tmp<<4;
+					cmmu[cmmu_num].cmmu_regs->cssp2 =
+								0x3f0ff000;
+				}
+				for (tmp = 0; tmp < 255; tmp++) {
+					cmmu[cmmu_num].cmmu_regs->sar =
+								tmp<<4;
+					cmmu[cmmu_num].cmmu_regs->cssp3 =									 0x3f0ff000;
+				}
+			}
 
-	    /*
-	     * Set the SCTR, SAPR, and UAPR to some known state
-	     * (I don't trust the reset to do it).
-	     */
-	    tmp =
-		! CMMU_SCTR_PE |   /* not parity enable */
-		! CMMU_SCTR_SE |   /* not snoop enable */
-		! CMMU_SCTR_PR ;   /* not priority arbitration */
-	    cmmu[cmmu_num].cmmu_regs->sctr = tmp;
+			/*
+			 * Set the SCTR, SAPR, and UAPR to some known state
+			 * (I don't trust the reset to do it).
+			 */
+			tmp =
+				! CMMU_SCTR_PE |   /* not parity enable */
+				! CMMU_SCTR_SE |   /* not snoop enable */
+				! CMMU_SCTR_PR ;   /*not priority arbitration */
+	    		cmmu[cmmu_num].cmmu_regs->sctr = tmp;
 
-	    tmp =
-		(0x00000 << 12) |	/* segment table base address */
-		      AREA_D_WT |	/* write through */
-	              AREA_D_G  |	/* global */
-	              AREA_D_CI |	/* cache inhibit */
-	            ! AREA_D_TE ;	/* not translation enable */
-	    cmmu[cmmu_num].cmmu_regs->sapr =
-	    cmmu[cmmu_num].cmmu_regs->uapr = tmp;
+			tmp =
+				(0x00000 << 12) |/*segment table base address */
+				AREA_D_WT |	/* write through */
+				AREA_D_G  |	/* global */
+				AREA_D_CI |	/* cache inhibit */
+				! AREA_D_TE ;	/* not translation enable */
 
-	
+			cmmu[cmmu_num].cmmu_regs->sapr =
+			cmmu[cmmu_num].cmmu_regs->uapr = tmp;
+		
 #if SHADOW_BATC
-	    cmmu[cmmu_num].batc[0] =
-	    cmmu[cmmu_num].batc[1] =
-	    cmmu[cmmu_num].batc[2] =
-	    cmmu[cmmu_num].batc[3] =
-	    cmmu[cmmu_num].batc[4] =
-	    cmmu[cmmu_num].batc[5] =
-	    cmmu[cmmu_num].batc[6] =
-	    cmmu[cmmu_num].batc[7] = 0;
+			cmmu[cmmu_num].batc[0] =
+			cmmu[cmmu_num].batc[1] =
+			cmmu[cmmu_num].batc[2] =
+			cmmu[cmmu_num].batc[3] =
+			cmmu[cmmu_num].batc[4] =
+			cmmu[cmmu_num].batc[5] =
+			cmmu[cmmu_num].batc[6] =
+			cmmu[cmmu_num].batc[7] = 0;
 #endif
-	    cmmu[cmmu_num].cmmu_regs->bwp[0] = 
-	    cmmu[cmmu_num].cmmu_regs->bwp[1] = 
-	    cmmu[cmmu_num].cmmu_regs->bwp[2] = 
-	    cmmu[cmmu_num].cmmu_regs->bwp[3] = 
-	    cmmu[cmmu_num].cmmu_regs->bwp[4] = 
-	    cmmu[cmmu_num].cmmu_regs->bwp[5] = 
-	    cmmu[cmmu_num].cmmu_regs->bwp[6] = 
-	    cmmu[cmmu_num].cmmu_regs->bwp[7] = 0;
-	    cmmu[cmmu_num].cmmu_regs->scr = CMMU_FLUSH_CACHE_INV_ALL;
-	    cmmu[cmmu_num].cmmu_regs->scr = CMMU_FLUSH_SUPER_ALL;
-	    cmmu[cmmu_num].cmmu_regs->scr = CMMU_FLUSH_USER_ALL;
-	}
-    }
+			cmmu[cmmu_num].cmmu_regs->bwp[0] = 
+			cmmu[cmmu_num].cmmu_regs->bwp[1] = 
+			cmmu[cmmu_num].cmmu_regs->bwp[2] = 
+			cmmu[cmmu_num].cmmu_regs->bwp[3] = 
+			cmmu[cmmu_num].cmmu_regs->bwp[4] = 
+			cmmu[cmmu_num].cmmu_regs->bwp[5] = 
+			cmmu[cmmu_num].cmmu_regs->bwp[6] = 
+			cmmu[cmmu_num].cmmu_regs->bwp[7] = 0;
 
-    /*
-     * Now that we know which CMMUs are there, let's report on which
-     * CPU/CMMU sets seem complete (hopefully all)
-     */
-    for (cpu = 0; cpu < MAX_CPUS; cpu++)
-    {
-	if (cpu_cmmu[cpu].pair[INST_CMMU] && cpu_cmmu[cpu].pair[DATA_CMMU])
-	{
-	    if(id.m88200.type == M88204)
-		printf("CPU%d is attached with MC88204 CMMU\n", cpu);
-	    else
-		printf("CPU%d is attached with MC88200 CMMU\n", cpu);
+			cmmu[cmmu_num].cmmu_regs->scr =CMMU_FLUSH_CACHE_INV_ALL;
+			cmmu[cmmu_num].cmmu_regs->scr = CMMU_FLUSH_SUPER_ALL;
+			cmmu[cmmu_num].cmmu_regs->scr = CMMU_FLUSH_USER_ALL;
+		}
+	}
 
-	}
-	else if (cpu_cmmu[cpu].pair[INST_CMMU])
-	{
-		printf("CPU%d data CMMU is not working.\n", cpu);
-		panic("cmmu-data");
-	}
-	else if (cpu_cmmu[cpu].pair[DATA_CMMU])
-	{
-	    printf("CPU%d instruction CMMU is not working.\n", cpu);
-	    panic("cmmu");
-	}
-	else
-	{
-	}
-    }
-
-    /*
-     * Enable snooping...
-     */
-    for (cpu = 0; cpu < MAX_CPUS; cpu++)
-    {
 	/*
-	 * Enable snooping.
-	 * We enable it for instruction cmmus as well so that we can have
-	 * breakpoints, etc, and modify code.
+	 * Now that we know which CMMUs are there, let's report on which
+	 * CPU/CMMU sets seem complete (hopefully all)
 	 */
-	tmp =
-	    ! CMMU_SCTR_PE |   /* not parity enable */
-	      CMMU_SCTR_SE |   /* snoop enable */
-	    ! CMMU_SCTR_PR ;   /* not priority arbitration */
-	REGS(cpu, DATA_CMMU).sctr = tmp;
-	REGS(cpu, INST_CMMU).sctr = tmp;
-	REGS(cpu, DATA_CMMU).scr  = CMMU_FLUSH_SUPER_ALL;
-	REGS(cpu, INST_CMMU).scr  = CMMU_FLUSH_SUPER_ALL;
-    }
+	for (cpu = 0; cpu < MAX_CPUS; cpu++)
+	{
+		if (cpu_cmmu[cpu].pair[INST_CMMU] && cpu_cmmu[cpu].pair[DATA_CMMU])
+		{
+			if(id.m88200.type == M88204)
+				printf("CPU%d is attached with MC88204 CMMU\n",
+									cpu);
+			else
+				printf("CPU%d is attached with MC88200 CMMU\n",
+									cpu);
+		}
+		else if (cpu_cmmu[cpu].pair[INST_CMMU])
+		{
+			printf("CPU%d data CMMU is not working.\n", cpu);
+			panic("cmmu-data");
+		}
+		else if (cpu_cmmu[cpu].pair[DATA_CMMU])
+		{
+			printf("CPU%d instruction CMMU is not working.\n", cpu);
+			panic("cmmu");
+		}
+	}
 
-    /*
-     * Turn on some cache.
-     */
-    for (cpu = 0; cpu < MAX_CPUS; cpu++)
-    {
+#if SNOOP_ENABLE
 	/*
-	 * Enable some caching for the instruction stream.
-	 * Can't cache data yet 'cause device addresses can never
-	 * be cached, and we don't have those no-caching zones
-	 * set up yet....
+	 * Enable snooping... MVME187 doesn't support snooping. The
+	 * processor will, but the processor is not going to see the cache
+	 * accesses going on the 040 local bus. XXX nivas
 	 */
-	tmp =
-	    (0x00000 << 12) |	/* segment table base address */
-		  AREA_D_WT |	/* write through */
-		  AREA_D_G  |	/* global */
-		  AREA_D_CI |	/* cache inhibit */
-		! AREA_D_TE ;	/* not translation enable */
-	REGS(cpu, INST_CMMU).sapr = tmp;
-	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_SUPER_ALL;
-    }
+	for (cpu = 0; cpu < MAX_CPUS; cpu++)
+	{
+		/*
+		 * Enable snooping.
+		 * We enable it for instruction cmmus as well so that we can
+		 * have breakpoints, etc, and modify code.
+		 */
+		tmp =
+		    ! CMMU_SCTR_PE |   /* not parity enable */
+		      CMMU_SCTR_SE |   /* snoop enable */
+		    ! CMMU_SCTR_PR ;   /* not priority arbitration */
+
+		REGS(cpu, DATA_CMMU).sctr = tmp;
+		REGS(cpu, INST_CMMU).sctr = tmp;
+		REGS(cpu, DATA_CMMU).scr  = CMMU_FLUSH_SUPER_ALL;
+		REGS(cpu, INST_CMMU).scr  = CMMU_FLUSH_SUPER_ALL;
+	}
+
+#endif /* SNOOP_ENABLE */
+
+	/*
+	 * Turn on some cache.
+	 */
+	for (cpu = 0; cpu < MAX_CPUS; cpu++)
+	{
+		/*
+		 * Enable some caching for the instruction stream.
+		 * Can't cache data yet 'cause device addresses can never
+		 * be cached, and we don't have those no-caching zones
+		 * set up yet....
+		 */
+		tmp =
+		    (0x00000 << 12) |	/* segment table base address */
+			  AREA_D_WT |	/* write through */
+			  AREA_D_G  |	/* global */
+			  AREA_D_CI |	/* cache inhibit */
+			! AREA_D_TE ;	/* not translation enable */
+		REGS(cpu, INST_CMMU).sapr = tmp;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_SUPER_ALL;
+	}
 }
 
 /*
  * Just before poweroff or reset....
  */
-void cmmu_shutdown_now(void)
+void
+cmmu_shutdown_now(void)
 {
-#if 0 /* was trying to fix a reboot problem... doesn't seem to help */
-    unsigned tmp;
-    unsigned cmmu_num;
+	unsigned tmp;
+	unsigned cmmu_num;
 
-    /*
-     * Now set some state as we like...
-     */
-    for (cmmu_num = 0; cmmu_num < MAX_CMMUS; cmmu_num++)
-    {
-	tmp =
-	    ! CMMU_SCTR_PE |   /* parity enable */
-	    ! CMMU_SCTR_SE |   /* snoop enable */
-	    ! CMMU_SCTR_PR ;   /* priority arbitration */
-	cmmu[cmmu_num].cmmu_regs->sctr = tmp;
-
-
-	tmp = 
-	    (0x00000 << 12) |  /* segment table base address */
-	    ! AREA_D_WT |      /* write through */
-	    ! AREA_D_G  |      /* global */
-	      AREA_D_CI |      /* cache inhibit */
-	    ! AREA_D_TE ;      /* translation enable */
-	cmmu[cmmu_num].cmmu_regs->sapr = tmp;
-	cmmu[cmmu_num].cmmu_regs->uapr = tmp;
-    }
-#endif
-}
-
-
-/*
- * enable parity
- */
-void cmmu_parity_enable(void)
-{
-#ifdef	PARITY_ENABLE
-    register int cmmu_num;
-
-    for (cmmu_num = 0; cmmu_num < MAX_CMMUS; cmmu_num++) {
-	if (cmmu[cmmu_num].cmmu_alive != CMMU_DEAD) {
-	    cmmu[cmmu_num].cmmu_regs->sctr |= CMMU_SCTR_PE;
-	}
-    }
-#endif	PARITY_ENABLE
-}
-
-/*
- * Find out the CPU number from accessing CMMU
- * Better be at splhigh, or even better, with interrupts
- * disabled.
- */
-unsigned cmmu_cpu_number(void)
-{
-    register unsigned cmmu_no;
-    int i;
-
-    for (i=0; i < 10; i++)
-    {
-	/* clear CMMU p-bus status registers */
-	for (cmmu_no = 0; cmmu_no < MAX_CMMUS; cmmu_no++) 
+	/*
+	 * Now set some state as we like...
+	 */
+	for (cmmu_num = 0; cmmu_num < MAX_CMMUS; cmmu_num++)
 	{
-	    if (cmmu[cmmu_no].cmmu_alive == CMMU_AVAILABLE &&
-	        cmmu[cmmu_no].which == DATA_CMMU) 
-		    cmmu[cmmu_no].cmmu_regs->pfSTATUSr = 0;
+		tmp =
+		! CMMU_SCTR_PE |   /* parity enable */
+#if SNOOP_ENABLE
+		! CMMU_SCTR_SE |   /* snoop enable */
+#endif /* SNOOP_ENABLE */
+		! CMMU_SCTR_PR ;   /* priority arbitration */
+
+		cmmu[cmmu_num].cmmu_regs->sctr = tmp;
+
+		tmp = 
+			(0x00000 << 12) |  /* segment table base address */
+			! AREA_D_WT |      /* write through */
+			! AREA_D_G  |      /* global */
+			  AREA_D_CI |      /* cache inhibit */
+			! AREA_D_TE ;      /* translation disable */
+		
+		cmmu[cmmu_num].cmmu_regs->sapr = tmp;
+		cmmu[cmmu_num].cmmu_regs->uapr = tmp;
 	}
-
-	/* access faulting address */
-	badwordaddr((void *)ILLADDRESS);
-
-	/* check which CMMU reporting the fault  */
-	for (cmmu_no = 0; cmmu_no < MAX_CMMUS; cmmu_no++) 
-	{
-	    if (cmmu[cmmu_no].cmmu_alive == CMMU_AVAILABLE &&
-	        cmmu[cmmu_no].which == DATA_CMMU &&
-		cmmu[cmmu_no].cmmu_regs->pfSTATUSr & 0x70000)
-	    {
-		if (cmmu[cmmu_no].cmmu_regs->pfSTATUSr & 0x70000)
-		{
-		    cmmu[cmmu_no].cmmu_regs->pfSTATUSr = 0; /* to be clean */
-		    cmmu[cmmu_no].cmmu_alive = CMMU_MARRIED;
-		    return cmmu[cmmu_no].cmmu_cpu;
-		}
-	    }
-	}
-    }
-printf("at cmmu.c line %d.\n", __LINE__);
-
-    panic("could not determine my cpu number");
-    return 0; /* to make compiler happy */
 }
 
 /**
@@ -419,9 +393,10 @@ printf("at cmmu.c line %d.\n", __LINE__);
 #if !DDB
 static
 #endif
-void cmmu_remote_set(unsigned cpu, unsigned r, unsigned data, unsigned x)
+void
+cmmu_remote_set(unsigned cpu, unsigned r, unsigned data, unsigned x)
 {
-    *(volatile unsigned *)(r + (char*)&REGS(cpu,data)) = x;
+	*(volatile unsigned *)(r + (char*)&REGS(cpu,data)) = x;
 }
 
 /*
@@ -431,41 +406,49 @@ void cmmu_remote_set(unsigned cpu, unsigned r, unsigned data, unsigned x)
 #if !DDB
 static
 #endif
-unsigned cmmu_remote_get(unsigned cpu, unsigned r, unsigned data)
+unsigned
+cmmu_remote_get(unsigned cpu, unsigned r, unsigned data)
 {
-    return *(volatile unsigned *)(r + (char*)&REGS(cpu,data));
+	return (*(volatile unsigned *)(r + (char*)&REGS(cpu,data)));
 }
 
 /* Needs no locking - read only registers */
-unsigned cmmu_get_idr(unsigned data)
+unsigned
+cmmu_get_idr(unsigned data)
 {
-    return REGS(0,data).idr;
+	return REGS(0,data).idr;
 }
 
-void cmmu_set_sapr(unsigned ap)
+void
+cmmu_set_sapr(unsigned ap)
 {
-    int cpu = 0;
-    if (cache_policy & CACHE_INH)
-	ap |= AREA_D_CI;
+	int cpu = 0;
 
-    REGS(cpu, INST_CMMU).sapr = ap;
-    REGS(cpu, DATA_CMMU).sapr = ap;
+	if (cache_policy & CACHE_INH)
+		ap |= AREA_D_CI;
+
+	REGS(cpu, INST_CMMU).sapr = ap;
+	REGS(cpu, DATA_CMMU).sapr = ap;
 }
 
-void cmmu_remote_set_sapr(unsigned cpu, unsigned ap)
+void
+cmmu_remote_set_sapr(unsigned cpu, unsigned ap)
 {
-    if (cache_policy & CACHE_INH)
-	ap |= AREA_D_CI;
-    REGS(cpu, INST_CMMU).sapr = ap;
-    REGS(cpu, DATA_CMMU).sapr = ap;
+	if (cache_policy & CACHE_INH)
+		ap |= AREA_D_CI;
+
+	REGS(cpu, INST_CMMU).sapr = ap;
+	REGS(cpu, DATA_CMMU).sapr = ap;
 }
 
-void cmmu_set_uapr(unsigned ap)
+void
+cmmu_set_uapr(unsigned ap)
 {
-    int cpu = 0;
-    /* this functionality also mimiced in cmmu_pmap_activate() */
-    REGS(cpu, INST_CMMU).uapr = ap;
-    REGS(cpu, DATA_CMMU).uapr = ap;
+	int cpu = 0;
+
+	/* this functionality also mimiced in cmmu_pmap_activate() */
+	REGS(cpu, INST_CMMU).uapr = ap;
+	REGS(cpu, DATA_CMMU).uapr = ap;
 }
 
 /*
@@ -476,50 +459,50 @@ void cmmu_set_uapr(unsigned ap)
  * and cmmu_pmap_activate are the only functions which may set the
  * batc values.
  */
-void cmmu_set_batc_entry(
+void
+cmmu_set_batc_entry(
      unsigned cpu,
      unsigned entry_no,
      unsigned data,   /* 1 = data, 0 = instruction */
      unsigned value)  /* the value to stuff into the batc */
 {
 
-    REGS(cpu,data).bwp[entry_no] = value;
-    #if SHADOW_BATC
+	REGS(cpu,data).bwp[entry_no] = value;
+#if SHADOW_BATC
 	CMMU(cpu,data)->batc[entry_no] = value;
-    #endif
-#if 0 /* was for debugging piece (peace?) of mind */
-    REGS(cpu,data).scr = CMMU_FLUSH_SUPER_ALL;
-    REGS(cpu,data).scr = CMMU_FLUSH_USER_ALL;
 #endif
-
+#if 0 /* was for debugging piece (peace?) of mind */
+	REGS(cpu,data).scr = CMMU_FLUSH_SUPER_ALL;
+	REGS(cpu,data).scr = CMMU_FLUSH_USER_ALL;
+#endif
 }
 
 /*
  * Set batc entry number entry_no to value in 
  * the data and instruction cache for the named CPU.
  */
-void cmmu_set_pair_batc_entry(
+void
+cmmu_set_pair_batc_entry(
      unsigned cpu,
      unsigned entry_no,
      unsigned value)  /* the value to stuff into the batc */
 {
 
-    REGS(cpu,DATA_CMMU).bwp[entry_no] = value;
-    #if SHADOW_BATC
+	REGS(cpu,DATA_CMMU).bwp[entry_no] = value;
+#if SHADOW_BATC
 	CMMU(cpu,DATA_CMMU)->batc[entry_no] = value;
-    #endif
-    REGS(cpu,INST_CMMU).bwp[entry_no] = value;
-    #if SHADOW_BATC
+#endif
+	REGS(cpu,INST_CMMU).bwp[entry_no] = value;
+#if SHADOW_BATC
 	CMMU(cpu,INST_CMMU)->batc[entry_no] = value;
-    #endif
-
-#if 0  /* was for debugging piece (peace?) of mind */
-    REGS(cpu,INST_CMMU).scr = CMMU_FLUSH_SUPER_ALL;
-    REGS(cpu,INST_CMMU).scr = CMMU_FLUSH_USER_ALL;
-    REGS(cpu,DATA_CMMU).scr = CMMU_FLUSH_SUPER_ALL;
-    REGS(cpu,DATA_CMMU).scr = CMMU_FLUSH_USER_ALL;
 #endif
 
+#if 0  /* was for debugging piece (peace?) of mind */
+	REGS(cpu,INST_CMMU).scr = CMMU_FLUSH_SUPER_ALL;
+	REGS(cpu,INST_CMMU).scr = CMMU_FLUSH_USER_ALL;
+	REGS(cpu,DATA_CMMU).scr = CMMU_FLUSH_SUPER_ALL;
+	REGS(cpu,DATA_CMMU).scr = CMMU_FLUSH_USER_ALL;
+#endif
 }
 
 /**
@@ -530,74 +513,71 @@ void cmmu_set_pair_batc_entry(
  *	flush any tlb
  *	Some functionality mimiced in cmmu_pmap_activate.
  */
-void cmmu_flush_remote_tlb(
-    unsigned cpu,
-    unsigned kernel,
-    vm_offset_t vaddr,
-    int size)
+void
+cmmu_flush_remote_tlb(unsigned cpu, unsigned kernel, vm_offset_t vaddr, int size)
 {
-    register s = splhigh();
+	register s = splhigh();
     
-    if ((unsigned)size > M88K_PGBYTES) 
-      {
-	REGS(cpu, INST_CMMU).scr =
-	REGS(cpu, DATA_CMMU).scr =
-	    kernel ? CMMU_FLUSH_SUPER_ALL : CMMU_FLUSH_USER_ALL;
-      }
-    else /* a page or smaller */
-      {
-	REGS(cpu, INST_CMMU).sar = (unsigned)vaddr;
-	REGS(cpu, DATA_CMMU).sar = (unsigned)vaddr;
-
-	REGS(cpu, INST_CMMU).scr =
-	REGS(cpu, DATA_CMMU).scr =
-	    kernel ? CMMU_FLUSH_SUPER_PAGE : CMMU_FLUSH_USER_PAGE;
-    }
-    splx(s);
+	if ((unsigned)size > M88K_PGBYTES) 
+	{
+		REGS(cpu, INST_CMMU).scr =
+		REGS(cpu, DATA_CMMU).scr =
+			kernel ? CMMU_FLUSH_SUPER_ALL : CMMU_FLUSH_USER_ALL;
+	}
+	else /* a page or smaller */
+	{
+		REGS(cpu, INST_CMMU).sar = (unsigned)vaddr;
+		REGS(cpu, DATA_CMMU).sar = (unsigned)vaddr;
+		REGS(cpu, INST_CMMU).scr =
+		REGS(cpu, DATA_CMMU).scr =
+			kernel ? CMMU_FLUSH_SUPER_PAGE : CMMU_FLUSH_USER_PAGE;
+	}
+	splx(s);
 }
 
 /*
  *	flush my personal tlb
  */
-void cmmu_flush_tlb(unsigned kernel, vm_offset_t vaddr, int size)
+void
+cmmu_flush_tlb(unsigned kernel, vm_offset_t vaddr, int size)
 {
-    cmmu_flush_remote_tlb(0, kernel, vaddr, size);
+	cmmu_flush_remote_tlb(0, kernel, vaddr, size);
 }
-
 
 /*
  * New fast stuff for pmap_activate.
  * Does what a few calls used to do.
  * Only called from pmap.c's _pmap_activate().
  */
-void cmmu_pmap_activate(
+void
+cmmu_pmap_activate(
     unsigned cpu,
     unsigned uapr,
     batc_template_t i_batc[BATC_MAX],
     batc_template_t d_batc[BATC_MAX])
 {
-    int entry_no;
+	int entry_no;
 
-    /* the following is from cmmu_set_uapr */
-    REGS(cpu, INST_CMMU).uapr = uapr;
-    REGS(cpu, DATA_CMMU).uapr = uapr;
+	/* the following is from cmmu_set_uapr */
+	REGS(cpu, INST_CMMU).uapr = uapr;
+	REGS(cpu, DATA_CMMU).uapr = uapr;
 
-    for (entry_no = 0; entry_no < BATC_MAX; entry_no++) {
-	REGS(cpu,INST_CMMU).bwp[entry_no] = i_batc[entry_no].bits;
-	REGS(cpu,DATA_CMMU).bwp[entry_no] = d_batc[entry_no].bits;
-	#if SHADOW_BATC
-	    CMMU(cpu,INST_CMMU)->batc[entry_no] = i_batc[entry_no].bits;
-	    CMMU(cpu,DATA_CMMU)->batc[entry_no] = d_batc[entry_no].bits;
-	#endif
-    }
+	for (entry_no = 0; entry_no < BATC_MAX; entry_no++) {
+		REGS(cpu,INST_CMMU).bwp[entry_no] = i_batc[entry_no].bits;
+		REGS(cpu,DATA_CMMU).bwp[entry_no] = d_batc[entry_no].bits;
+#if SHADOW_BATC
+		CMMU(cpu,INST_CMMU)->batc[entry_no] = i_batc[entry_no].bits;
+		CMMU(cpu,DATA_CMMU)->batc[entry_no] = d_batc[entry_no].bits;
+#endif
+	}
 
-    /*
-     * Flush the user TLB.
-     * IF THE KERNEL WILL EVER CARE ABOUT THE BATC ENTRIES,
-     * THE SUPERVISOR TLBs SHOULB EE FLUSHED AS WELL.
-     */
-    REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_USER_ALL;
-    REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_USER_ALL;
+	/*
+	 * Flush the user TLB.
+	 * IF THE KERNEL WILL EVER CARE ABOUT THE BATC ENTRIES,
+	 * THE SUPERVISOR TLBs SHOULB EE FLUSHED AS WELL.
+	 */
+	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_USER_ALL;
+	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_USER_ALL;
 }
 
 /**
@@ -616,103 +596,116 @@ void cmmu_pmap_activate(
 /*
  *	flush both Instruction and Data caches
  */
-void cmmu_flush_remote_cache(int cpu, vm_offset_t physaddr, int size)
+void
+cmmu_flush_remote_cache(int cpu, vm_offset_t physaddr, int size)
 {
-    register s = splhigh();
+	register s = splhigh();
 
+#if !defined(BROKEN_MMU_MASK)
 
-    if (size < 0 || size > NBSG ) {
+	if (size < 0 || size > NBSG ) {
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+	}
+	else if (size <= 16) {
+		REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
+	}
+	else if (size <= NBPG) {
+		REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
+	}
+	else {
+		REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
+	}
+
+#else
 	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
 	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
-    }
-    else if (size <= 16) {
-	REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
-	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
-    }
-    else if (size <= NBPG) {
-	REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
-	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
-    }
-    else {
-	REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
-	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
-    }
-
-
-    splx(s);
+#endif /* !BROKEN_MMU_MASK */
+	splx(s);
 }
 
 /*
  *	flush both Instruction and Data caches
  */
-void cmmu_flush_cache(vm_offset_t physaddr, int size)
+void
+cmmu_flush_cache(vm_offset_t physaddr, int size)
 {
-    cmmu_flush_remote_cache(0, physaddr, size);
+	cmmu_flush_remote_cache(0, physaddr, size);
 }
 
 /*
  *	flush Instruction caches
  */
-void cmmu_flush_remote_inst_cache(int cpu, vm_offset_t physaddr, int size)
+void
+cmmu_flush_remote_inst_cache(int cpu, vm_offset_t physaddr, int size)
 {
-    register s = splhigh();
+	register s = splhigh();
 
-
-    if (size < 0 || size > NBSG ) {
+#if !defined(BROKEN_MMU_MASK)
+	if (size < 0 || size > NBSG ) {
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+	}
+	else if (size <= 16) {
+		REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
+	}
+	else if (size <= NBPG) {
+		REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
+	}
+	else {
+		REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
+	}
+#else
 	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
-    }
-    else if (size <= 16) {
-	REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
-    }
-    else if (size <= NBPG) {
-	REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
-    }
-    else {
-	REGS(cpu, INST_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
-    }
+#endif /* !BROKEN_MMU_MASK */
 
-
-    splx(s);
+	splx(s);
 }
 
 /*
  *	flush Instruction caches
  */
-void cmmu_flush_inst_cache(vm_offset_t physaddr, int size)
+void
+cmmu_flush_inst_cache(vm_offset_t physaddr, int size)
 {
-    cmmu_flush_remote_inst_cache(0, physaddr, size);
+	cmmu_flush_remote_inst_cache(0, physaddr, size);
 }
 
-void cmmu_flush_remote_data_cache(int cpu, vm_offset_t physaddr, int size)
+void
+cmmu_flush_remote_data_cache(int cpu, vm_offset_t physaddr, int size)
 { 
-    register s = splhigh();
+	register s = splhigh();
 
-
-    if (size < 0 || size > NBSG ) {
+#if !defined(BROKEN_MMU_MASK)
+	if (size < 0 || size > NBSG ) {
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+	}
+	else if (size <= 16) {
+		REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
+	}
+	else if (size <= NBPG) {
+		REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
+	}
+	else {
+		REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
+	}
+#else
 	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
-    }
-    else if (size <= 16) {
-	REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
-    }
-    else if (size <= NBPG) {
-	REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
-    }
-    else {
-	REGS(cpu, DATA_CMMU).sar = (unsigned)physaddr;
-	REGS(cpu, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
-    }
-
+#endif /* !BROKEN_MMU_MASK */
     
     splx(s);
 }
@@ -720,13 +713,156 @@ void cmmu_flush_remote_data_cache(int cpu, vm_offset_t physaddr, int size)
 /*
  * flush data cache
  */ 
-void cmmu_flush_data_cache(vm_offset_t physaddr, int size)
+void
+cmmu_flush_data_cache(vm_offset_t physaddr, int size)
 { 
-    cmmu_flush_remote_data_cache(0, physaddr, size);
+	cmmu_flush_remote_data_cache(0, physaddr, size);
 }
 
+/*
+ * sync dcache (and icache too)
+ */
+static void
+cmmu_sync_cache(vm_offset_t physaddr, int size)
+{
+	register s = splhigh();
 
-#if 0
+#if !defined(BROKEN_MMU_MASK)
+	if (size < 0 || size > NBSG ) {
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CB_ALL;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CB_ALL;
+	}
+	else if (size <= 16) {
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CB_LINE;
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CB_LINE;
+	}
+	else if (size <= NBPG) {
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CB_PAGE;
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CB_PAGE;
+	}
+	else {
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CB_SEGMENT;
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CB_SEGMENT;
+	}
+#else
+	REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CB_ALL;
+	REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CB_ALL;
+#endif /* !BROKEN_MMU_MASK */
+	splx(s);
+}
+
+static void
+cmmu_sync_inval_cache(vm_offset_t physaddr, int size)
+{
+	register s = splhigh();
+
+#if !defined(BROKEN_MMU_MASK)
+	if (size < 0 || size > NBSG ) {
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+	}
+	else if (size <= 16) {
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_LINE;
+	}
+	else if (size <= NBPG) {
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_PAGE;
+	}
+	else {
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_SEGMENT;
+	}
+
+#else
+	REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+	REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_CBI_ALL;
+#endif /* !BROKEN_MMU_MASK */
+	splx(s);
+}
+
+static void
+cmmu_inval_cache(vm_offset_t physaddr, int size)
+{
+	register s = splhigh();
+
+#if !defined(BROKEN_MMU_MASK)
+	if (size < 0 || size > NBSG ) {
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_INV_ALL;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_INV_ALL;
+	}
+	else if (size <= 16) {
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_INV_LINE;
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_INV_LINE;
+	}
+	else if (size <= NBPG) {
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_INV_PAGE;
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_INV_PAGE;
+	}
+	else {
+		REGS(0, DATA_CMMU).sar = (unsigned)physaddr;
+		REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_INV_SEGMENT;
+		REGS(0, INST_CMMU).sar = (unsigned)physaddr;
+		REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_INV_SEGMENT;
+	}
+#else
+	REGS(0, DATA_CMMU).scr = CMMU_FLUSH_CACHE_INV_ALL;
+	REGS(0, INST_CMMU).scr = CMMU_FLUSH_CACHE_INV_ALL;
+#endif /* !BROKEN_MMU_MASK */
+
+	splx(s);
+}
+
+void
+dma_cachectl(vm_offset_t va, int size, int op)
+{
+	int count;
+	
+#if !defined(BROKEN_MMU_MASK)
+	while (size) {
+
+		count = NBPG - ((int)va & PGOFSET);
+
+		if (size < count)
+			count = size;
+
+		if (op == DMA_CACHE_SYNC)
+			cmmu_sync_cache(kvtop(va), count);
+		else if (op == DMA_CACHE_SYNC_INVAL)
+			cmmu_sync_inval_cache(kvtop(va), count);
+		else
+			cmmu_inval_cache(kvtop(va), count);
+
+		va = (vm_offset_t)((int)va + count);
+		size -= count;
+	}
+#else
+
+	if (op == DMA_CACHE_SYNC)
+		cmmu_sync_cache(kvtop(va), size);
+	else if (op == DMA_CACHE_SYNC_INVAL)
+		cmmu_sync_inval_cache(kvtop(va), size);
+	else
+		cmmu_inval_cache(kvtop(va), size);
+#endif /* !BROKEN_MMU_MASK */
+}
+
 #if DDB
 union ssr {
     unsigned bits;
@@ -797,11 +933,15 @@ union batcu {
 	   ((LINE) == 0 ? (UNION).field.vv0 : ~0))))
 	
 
+#undef VEQR_ADDR
+#define  VEQR_ADDR 0
+
 /*
  * Show (for debugging) how the given CMMU translates the given ADDRESS.
  * If cmmu == -1, the data cmmu for the current cpu is used.
  */
-void cmmu_show_translation(
+void
+cmmu_show_translation(
     unsigned address,
     unsigned supervisor_flag,
     unsigned verbose_flag,
@@ -827,6 +967,7 @@ void cmmu_show_translation(
 
 
     /****** ACCESS PROPER CMMU or THREAD ***********/
+#if 0 /* no thread */
     if (thread != 0)
     {
 	/* the following tidbit from _pmap_activate in m88k/pmap.c */
@@ -862,7 +1003,10 @@ void cmmu_show_translation(
 		thread, thread->task, thread->task->map,
 		thread->task->map->pmap, value);
 	}
-    } else {
+    }
+    else
+#endif /* 0 */
+    {
 	if (cmmu_num == -1)
 	{
 	    if (cpu_cmmu[0].pair[DATA_CMMU] == 0)
@@ -917,7 +1061,8 @@ void cmmu_show_translation(
     }
 
     /******* LOOK AT THE BATC ** (if not a thread) **************/
-    #if SHADOW_BATC
+#if 0
+#if SHADOW_BATC
     if (thread == 0)
     {
 	int i;
@@ -938,10 +1083,13 @@ void cmmu_show_translation(
 	    }
 	}
     }
-    #endif
+#endif
+#endif /* 0 */
 
     /******* SEE WHAT A PROBE SAYS (if not a thread) ***********/ 
+#if 0
     if (thread == 0)
+#endif /* 0 */
     {
  	union ssr ssr;
 	struct cmmu_regs *cmmu_regs = cmmu[cmmu_num].cmmu_regs;
@@ -974,17 +1122,23 @@ void cmmu_show_translation(
 	union apr_template apr_template;
 	apr_template.bits = value;
         if (verbose_flag > 1) {
+		db_printf("CMMU#%d", cmmu_num);
+#if 0
 	    if (thread == 0)
 		db_printf("CMMU#%d", cmmu_num);
 	    else
 		db_printf("THREAD %x", thread);
+#endif /* 0 */
 	    db_printf(" %cAPR is 0x%08x\n",
 		supervisor_flag ? 'S' : 'U', apr_template.bits);
 	}
+	db_printf("CMMU#%d", cmmu_num);
+#if 0
 	if (thread == 0)
 	    db_printf("CMMU#%d", cmmu_num);
 	else
 	    db_printf("THREAD %x", thread);
+#endif /* 0 /
 	db_printf(" %cAPR: SegTbl: 0x%x000p",
 	    supervisor_flag ? 'S' : 'U', apr_template.field.st_base);
 	if (apr_template.field.wt) db_printf(", WTHRU");
@@ -1126,7 +1280,8 @@ void cmmu_show_translation(
 }
 
 
-void cmmu_cache_state(unsigned addr, unsigned supervisor_flag)
+void
+cmmu_cache_state(unsigned addr, unsigned supervisor_flag)
 {
     static char *vv_name[4] =
 	{"exclu-unmod", "exclu-mod", "shared-unmod", "invalid"};
@@ -1182,7 +1337,8 @@ void cmmu_cache_state(unsigned addr, unsigned supervisor_flag)
     }
 }
 
-void show_cmmu_info(unsigned addr)
+void
+show_cmmu_info(unsigned addr)
 {
     int cmmu_num;
     cmmu_cache_state(addr, 1);
@@ -1196,4 +1352,3 @@ void show_cmmu_info(unsigned addr)
 	}
 }
 #endif /* end if DDB */
-#endif /* 0 */

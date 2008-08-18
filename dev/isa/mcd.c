@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcd.c,v 1.17 1996/09/20 06:08:10 deraadt Exp $ */
+/*	$OpenBSD: mcd.c,v 1.19 1997/01/04 08:50:25 deraadt Exp $ */
 /*	$NetBSD: mcd.c,v 1.49 1996/05/12 23:53:11 mycroft Exp $	*/
 
 /*
@@ -90,6 +90,9 @@
 
 #define	MCDPART(dev)	DISKPART(dev)
 #define	MCDUNIT(dev)	DISKUNIT(dev)
+#define	MAKEMCDDEV(maj, unit, part)	MAKEDISKDEV(maj, unit, part)
+
+#define	MCDLABELDEV(dev) (MAKEMCDDEV(major(dev), MCDUNIT(dev), RAW_PART))
 
 /* toc */
 #define MCD_MAXTOCS	104	/* from the Linux driver */
@@ -190,7 +193,7 @@ struct cfdriver mcd_cd = {
 	NULL, "mcd", DV_DISK
 };
 
-void	mcdgetdisklabel __P((struct mcd_softc *));
+void	mcdgetdisklabel __P((dev_t, struct mcd_softc *));
 int	mcd_get_parms __P((struct mcd_softc *));
 void	mcdstrategy __P((struct buf *));
 void	mcdstart __P((struct mcd_softc *));
@@ -340,7 +343,7 @@ mcdopen(dev, flag, fmt, p)
 				goto bad2;
 
 			/* Fabricate a disk label. */
-			mcdgetdisklabel(sc);
+			mcdgetdisklabel(dev, sc);
 		}
 	}
 
@@ -675,10 +678,12 @@ mcdioctl(dev, cmd, addr, flag, p)
  * whether the scsi cd driver is linked in.
  */
 void
-mcdgetdisklabel(sc)
+mcdgetdisklabel(dev, sc)
+	dev_t dev;
 	struct mcd_softc *sc;
 {
 	struct disklabel *lp = sc->sc_dk.dk_label;
+	char *errstring;
 	
 	bzero(lp, sizeof(struct disklabel));
 	bzero(sc->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
@@ -688,28 +693,38 @@ mcdgetdisklabel(sc)
 	lp->d_nsectors = 100;
 	lp->d_ncylinders = (sc->disksize / 100) + 1;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
+	if (lp->d_secpercyl == 0) {
+		lp->d_secpercyl = 100;
+		/* as long as it's not 0 - readdisklabel divides by it (?) */
+	}
 
 	strncpy(lp->d_typename, "Mitsumi CD-ROM", 16);
-	lp->d_type = 0;	/* XXX */
+	lp->d_type = DTYPE_SCSI;	/* XXX */
 	strncpy(lp->d_packname, "fictitious", 16);
 	lp->d_secperunit = sc->disksize;
 	lp->d_rpm = 300;
 	lp->d_interleave = 1;
 	lp->d_flags = D_REMOVABLE;
 
-	lp->d_partitions[0].p_offset = 0;
-	lp->d_partitions[0].p_size =
-	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
-	lp->d_partitions[0].p_fstype = FS_ISO9660;
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size =
 	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
-	lp->d_partitions[RAW_PART].p_fstype = FS_ISO9660;
+	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 	
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
 	lp->d_checksum = dkcksum(lp);
+
+	/*
+	 * Call the generic disklabel extraction routine
+	 */
+	errstring = readdisklabel(MCDLABELDEV(dev), mcdstrategy, lp,
+	    sc->sc_dk.dk_cpulabel);
+	if (errstring) {
+		printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);
+		return;
+	}
 }
 
 int

@@ -1,5 +1,5 @@
-/*	$OpenBSD: tc.c,v 1.6 1996/05/26 00:27:54 deraadt Exp $	*/
-/*	$NetBSD: tc.c,v 1.16 1996/05/17 23:39:19 cgd Exp $	*/
+/*	$OpenBSD: tc.c,v 1.9 1996/12/08 01:03:05 niklas Exp $	*/
+/*	$NetBSD: tc.c,v 1.20 1996/10/22 21:37:29 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -36,6 +36,8 @@
 #include <dev/tc/tcvar.h>
 #include <dev/tc/tcdevs.h>
 
+#include <machine/autoconf.h>	/* for the proto of badaddr() */
+
 struct tc_softc {
 	struct	device sc_dv;
 
@@ -60,7 +62,7 @@ struct cfdriver tc_cd = {
 	NULL, "tc", DV_DULL
 };
 
-int	tcprint __P((void *, char *));
+int	tcprint __P((void *, const char *));
 int	tcsubmatch __P((struct device *, void *, void *));
 int	tc_checkslot __P((tc_addr_t, char *));
 void	tc_devinfo __P((const char *, char *));
@@ -130,7 +132,7 @@ tcattach(parent, self, aux)
 		 */
 		strncpy(ta.ta_modname, builtin->tcb_modname, TC_ROM_LLEN);
 #ifdef __alpha__ /* XXX */
-		ta.ta_bc = tba->tba_bc;
+		ta.ta_memt = tba->tba_memt;
 #endif
 		ta.ta_modname[TC_ROM_LLEN] = '\0';
 		ta.ta_slot = builtin->tcb_slot;
@@ -192,7 +194,7 @@ tcattach(parent, self, aux)
 int
 tcprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 	struct tc_attach_args *ta = aux;
 	char devinfo[256];

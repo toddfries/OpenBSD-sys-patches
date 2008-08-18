@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.9 1996/08/11 23:11:35 downsj Exp $	*/
+/*	$OpenBSD: fd.c,v 1.16 1997/05/11 22:37:34 grr Exp $	*/
 /*	$NetBSD: fd.c,v 1.33.4.1 1996/06/12 20:52:25 pk Exp $	*/
 
 /*-
@@ -68,8 +68,9 @@
 #include <sparc/dev/fdreg.h>
 #include <sparc/dev/fdvar.h>
 
-#define FDUNIT(dev)	(minor(dev) / 8)
-#define FDTYPE(dev)	(minor(dev) % 8)
+#define FDUNIT(dev)	((dev & 0x80) >> 7)
+#define FDTYPE(dev)	((minor(dev) & 0x70) >> 4)
+#define FDPART(dev)	(minor(dev) & 0x0f)
 
 #define b_cylin b_resid
 
@@ -219,7 +220,7 @@ void fdgetdisklabel __P((dev_t));
 int fd_get_parms __P((struct fd_softc *));
 void fdstrategy __P((struct buf *));
 void fdstart __P((struct fd_softc *));
-int fdprint __P((void *, char *));
+int fdprint __P((void *, const char *));
 
 struct dkdriver fddkdriver = { fdstrategy };
 
@@ -280,6 +281,14 @@ fdcmatch(parent, match, aux)
 	if ((CPU_ISSUN4M) && (ca->ca_bustype != BUS_OBIO))
 		return (0);
 
+#ifndef FDSUN4M
+	/*
+	 * XXX Floppy doesn't work yet sun4m, nasty things happen if you try
+	 */
+	if (CPU_ISSUN4M)
+		return (0);
+#endif
+
 	/* Sun PROMs call the controller an "fd" or "SUNW,fdtwo" */
 	if (strcmp(OBP_FDNAME, ra->ra_name))
 		return (0);
@@ -311,7 +320,7 @@ struct fdc_attach_args {
 int
 fdprint(aux, fdc)
 	void *aux;
-	char *fdc;
+	const char *fdc;
 {
 	register struct fdc_attach_args *fa = aux;
 
@@ -467,10 +476,13 @@ fdcattach(parent, self, aux)
 
 	}
 
-	/* physical limit: four drives per controller. */
-	for (fa.fa_drive = 0; fa.fa_drive < 4; fa.fa_drive++) {
+	/*
+	 * physical limit: four drives per controller, but the dev_t
+	 * only has room for 2
+	 */
+	for (fa.fa_drive = 0; fa.fa_drive < 2; fa.fa_drive++) {
 		fa.fa_deftype = NULL;		/* unknown */
-	fa.fa_deftype = &fd_types[0];		/* XXX */
+		fa.fa_deftype = &fd_types[0];	/* XXX */
 		(void)config_found(self, (void *)&fa, fdprint);
 	}
 
@@ -876,7 +888,7 @@ fdopen(dev, flags, fmt, p)
 	if (fd->sc_dk.dk_openmask == 0)
 		fdgetdisklabel(dev);
 
-	pmask = (1 << DISKPART(dev));
+	pmask = (1 << FDPART(dev));
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -900,7 +912,7 @@ fdclose(dev, flags, fmt, p)
 	struct proc *p;
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
-	int pmask = (1 << DISKPART(dev));
+	int pmask = (1 << FDPART(dev));
 
 	fd->sc_flags &= ~FD_OPEN;
 
@@ -1633,21 +1645,24 @@ fdgetdisklabel(dev)
 	struct fd_softc *fd = fd_cd.cd_devs[unit];
 	struct disklabel *lp = fd->sc_dk.dk_label;
 	struct cpu_disklabel *clp = fd->sc_dk.dk_cpulabel;
+	char *errstring;
 
 	bzero(lp, sizeof(struct disklabel));
-	bzero(lp, sizeof(struct cpu_disklabel));
+	bzero(clp, sizeof(struct cpu_disklabel));
 
-	lp->d_type = DTYPE_FLOPPY;
 	lp->d_secsize = FDC_BSIZE;
 	lp->d_secpercyl = fd->sc_type->seccyl;
+	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
 	lp->d_nsectors = fd->sc_type->sectrac;
 	lp->d_ncylinders = fd->sc_type->tracks;
-	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
-	lp->d_rpm = 3600;	/* XXX like it matters... */
 
-	strncpy(lp->d_typename, "floppy", sizeof(lp->d_typename));
+	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
+	lp->d_type = DTYPE_FLOPPY;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
+	lp->d_rpm = 300;	/* XXX like it matters... */
+	lp->d_secperunit = fd->sc_type->size;
 	lp->d_interleave = 1;
+	lp->d_flags = D_REMOVABLE;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size = lp->d_secpercyl * lp->d_ncylinders;
@@ -1659,31 +1674,12 @@ fdgetdisklabel(dev)
 	lp->d_checksum = dkcksum(lp);
 
 	/*
-	 * Call the generic disklabel extraction routine.  If there's
-	 * not a label there, fake it.
+	 * Call the generic disklabel extraction routine.
 	 */
-	if (readdisklabel(dev, fdstrategy, lp, clp) != NULL) {
-		strncpy(lp->d_packname, "default label",
-		    sizeof(lp->d_packname));
-		/*
-		 * Reset the partition info; it might have gotten
-		 * trashed in readdisklabel().
-		 *
-		 * XXX Why do we have to do this?  readdisklabel()
-		 * should be safe...
-		 */
-		for (i = 0; i < MAXPARTITIONS; ++i) {
-			lp->d_partitions[i].p_offset = 0;
-			if (i == RAW_PART) {
-				lp->d_partitions[i].p_size =
-				    lp->d_secpercyl * lp->d_ncylinders;
-				lp->d_partitions[i].p_fstype = FS_BSDFFS;
-			} else {
-				lp->d_partitions[i].p_size = 0;
-				lp->d_partitions[i].p_fstype = FS_UNUSED;
-			}
-		}
-		lp->d_npartitions = RAW_PART + 1;
+	errstring = readdisklabel(dev, fdstrategy, lp, clp);
+	if (errstring) {
+		printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);
+		return;
 	}
 }
 

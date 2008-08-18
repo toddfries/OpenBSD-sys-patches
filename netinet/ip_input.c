@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.17 1996/09/02 18:14:19 dm Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.25 1997/02/28 03:44:53 angelos Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -53,10 +53,12 @@
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_dl.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
+#include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
@@ -92,6 +94,10 @@ int	ip_directedbcast = IPDIRECTEDBCAST;
 #ifdef DIAGNOSTIC
 int	ipprintfs = 0;
 #endif
+
+u_char  ipsec_auth_default_level = IPSEC_AUTH_LEVEL_DEFAULT;
+u_char  ipsec_esp_trans_default_level = IPSEC_ESP_TRANS_LEVEL_DEFAULT;
+u_char  ipsec_esp_network_default_level = IPSEC_ESP_NETWORK_LEVEL_DEFAULT;
 
 /* from in_pcb.c */
 extern int ipport_firstauto;
@@ -139,6 +145,8 @@ static	struct ip_srcrt {
 } ip_srcrt;
 
 static void save_rte __P((u_char *, struct in_addr));
+static int ip_weadvertise(u_int32_t);
+
 /*
  * IP initialization: fill in IP protocol switch table.
  * All protocols not implemented in kernel go to raw IP protocol handler.
@@ -383,7 +391,7 @@ ours:
 	 * if the packet was previously fragmented,
 	 * but it's not worth the time; just let them time out.)
 	 */
-	if (ip->ip_off &~ IP_DF) {
+	if (ip->ip_off &~ (IP_DF | IP_RF)) {
 		if (m->m_flags & M_EXT) {		/* XXX */
 			if ((m = m_pullup(m, sizeof (struct ip))) == 0) {
 				ipstat.ips_toosmall++;
@@ -569,10 +577,16 @@ insert:
 		return (0);
 
 	/*
-	 * Reassembly is complete; concatenate fragments.
+	 * Reassembly is complete.  Check for a bogus message size and
+	 * concatenate fragments.
 	 */
 	q = fp->ipq_fragq.lh_first;
 	ip = q->ipqe_ip;
+	if ((next + (ip->ip_hl << 2)) > IP_MAXPACKET) {
+		ipstat.ips_toolong++;
+		ip_freef(fp);
+		return (0);
+	}
 	m = dtom(q->ipqe_ip);
 	t = m->m_next;
 	m->m_next = 0;
@@ -792,18 +806,6 @@ ip_dooptions(m)
 				goto bad;
 			}
 
-			if (!ip_dosourceroute) {
-				char buf[4*sizeof "123"];
-
-				strcpy(buf, inet_ntoa(ip->ip_dst));
-				log(LOG_WARNING,
-				    "attempted source route from %s to %s\n",
-				    inet_ntoa(ip->ip_src), buf);
-				type = ICMP_UNREACH;
-				code = ICMP_UNREACH_SRCFAIL;
-				goto bad;
-			}
-
 			/*
 			 * If no space remains, ignore.
 			 */
@@ -830,9 +832,9 @@ ip_dooptions(m)
 		case IPOPT_TS:
 			code = cp - (u_char *)ip;
 			ipt = (struct ip_timestamp *)cp;
-			if (ipt->ipt_len < 5)
+			if (ipt->ipt_ptr < 5 || ipt->ipt_len < 5)
 				goto bad;
-			if (ipt->ipt_ptr > ipt->ipt_len - sizeof (int32_t)) {
+			if (ipt->ipt_ptr - 1 + sizeof(n_time) > ipt->ipt_len) {
 				if (++ipt->ipt_oflw == 0)
 					goto bad;
 				break;
@@ -844,7 +846,7 @@ ip_dooptions(m)
 				break;
 
 			case IPOPT_TS_TSANDADDR:
-				if (ipt->ipt_ptr + sizeof(n_time) +
+				if (ipt->ipt_ptr - 1 + sizeof(n_time) +
 				    sizeof(struct in_addr) > ipt->ipt_len)
 					goto bad;
 				ipaddr.sin_addr = dst;
@@ -858,7 +860,7 @@ ip_dooptions(m)
 				break;
 
 			case IPOPT_TS_PRESPEC:
-				if (ipt->ipt_ptr + sizeof(n_time) +
+				if (ipt->ipt_ptr - 1 + sizeof(n_time) +
 				    sizeof(struct in_addr) > ipt->ipt_len)
 					goto bad;
 				bcopy((caddr_t)sin, (caddr_t)&ipaddr.sin_addr,
@@ -938,6 +940,48 @@ save_rte(option, dst)
 	bcopy((caddr_t)option, (caddr_t)ip_srcrt.srcopt, olen);
 	ip_nhops = (olen - IPOPT_OFFSET - 1) / sizeof(struct in_addr);
 	ip_srcrt.dst = dst;
+}
+
+/*
+ * Check whether we do proxy ARP for this address and we point to ourselves.
+ * Code shamelessly copied from arplookup().
+ */
+static int
+ip_weadvertise(addr)
+        u_int32_t addr;
+{
+        register struct rtentry *rt;
+	register struct ifnet *ifp;
+	register struct ifaddr *ifa;
+	struct sockaddr_inarp sin;
+
+	sin.sin_len = sizeof(sin);
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = addr;
+	sin.sin_other = SIN_PROXY;
+	rt = rtalloc1(sintosa(&sin), 0);
+	if (rt == 0)
+	  return 0;
+	
+	RTFREE(rt);
+	
+	if ((rt->rt_flags & RTF_GATEWAY) || (rt->rt_flags & RTF_LLINFO) == 0 
+	    || rt->rt_gateway->sa_family != AF_LINK)
+	  return 0;
+
+	for (ifp = ifnet.tqh_first; ifp != 0; ifp = ifp->if_list.tqe_next)
+          for (ifa = ifp->if_addrlist.tqh_first; ifa != 0; ifa = ifa->ifa_list.tqe_next) 
+	  {
+		if (ifa->ifa_addr->sa_family != rt->rt_gateway->sa_family)
+		  continue;
+
+		if (!bcmp(LLADDR((struct sockaddr_dl *)ifa->ifa_addr), 
+			  LLADDR((struct sockaddr_dl *)rt->rt_gateway),
+			  ETHER_ADDR_LEN))
+		  return 1;
+	  }
+
+	return 0;
 }
 
 /*
@@ -1122,11 +1166,14 @@ ip_forward(m, srcrt)
 	 * and if packet was not source routed (or has any options).
 	 * Also, don't send redirect if forwarding using a default route
 	 * or a route modified by a redirect.
+	 * Don't send redirect if we advertise destination's arp address
+	 * as ours (proxy arp).
 	 */
 	if (rt->rt_ifp == m->m_pkthdr.rcvif &&
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0 &&
 	    satosin(rt_key(rt))->sin_addr.s_addr != 0 &&
-	    ipsendredirects && !srcrt) {
+	    ipsendredirects && !srcrt &&
+	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr)) {
 		if (rt->rt_ifa &&
 		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_subnetmask) ==
 		    ifatoia(rt->rt_ifa)->ia_subnet) {

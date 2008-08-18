@@ -1,5 +1,5 @@
-/*	$OpenBSD: net.c,v 1.4 1996/09/23 14:18:57 mickey Exp $	*/
-/*	$NetBSD: net.c,v 1.12 1995/12/13 23:38:10 pk Exp $	*/
+/*	$OpenBSD: net.c,v 1.8 1997/05/05 02:49:49 millert Exp $	*/
+/*	$NetBSD: net.c,v 1.14 1996/10/13 02:29:02 christos Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -43,8 +43,6 @@
 #include <sys/param.h>
 #include <sys/socket.h>
 
-#include <string.h>
-
 #include <net/if.h>
 #include <netinet/in.h>
 
@@ -78,9 +76,9 @@ sendudp(d, pkt, len)
 		printf("sendudp: d=%x called.\n", (u_int)d);
 		if (d) {
 			printf("saddr: %s:%d",
-				inet_ntoa(d->myip), ntohs(d->myport));
+			    inet_ntoa(d->myip), ntohs(d->myport));
 			printf(" daddr: %s:%d\n",
-				inet_ntoa(d->destip), ntohs(d->destport));
+			    inet_ntoa(d->destip), ntohs(d->destport));
 		}
 	}
 #endif
@@ -232,7 +230,7 @@ readudp(d, pkt, len, tleft)
 	if (uh->uh_sum) {
 		n = ntohs(uh->uh_ulen) + sizeof(*ip);
 		if (n > RECV_SIZE - ETHER_SIZE) {
-			printf("readudp: huge packet, udp len %d\n", n);
+			printf("readudp: huge packet, udp len %ld\n", (long)n);
 			return -1;
 		}
 
@@ -427,7 +425,7 @@ intoa(addr)
 	register char *cp;
 	register u_int byte;
 	register int n;
-	static char buf[17];	/* strlen(".255.255.255.255") + 1 */
+	static char buf[sizeof(".255.255.255.255")];
 
 	NTOHL(addr);
 	cp = &buf[sizeof buf];

@@ -1,4 +1,5 @@
-/*	$NetBSD: z8530sc.h,v 1.3 1996/05/17 19:29:37 gwr Exp $	*/
+/*	$OpenBSD: z8530sc.h,v 1.7 1997/01/15 05:35:47 kstailey Exp $	*/
+/*	$NetBSD: z8530sc.h,v 1.4 1996/10/16 20:34:54 gwr Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -47,19 +48,6 @@
 
 
 /*
- * Function vector - per channel
- */
-struct zsops {
-	void	(*zsop_rxint)();	/* receive char available */
-	void	(*zsop_stint)();	/* external/status */
-	void	(*zsop_txint)();	/* xmit buffer empty */
-	void	(*zsop_softint)();	/* process software interrupt */
-};
-
-extern struct zsops zsops_null;
-
-
-/*
  * Software state, per zs channel.
  */
 struct zs_chanstate {
@@ -94,10 +82,29 @@ struct zs_chanstate {
 
 	u_char	cs_heldchange;		/* change pending (creg != preg) */
 	u_char	cs_rr0;			/* last rr0 processed */
-	u_char	cs_rr0_new;		/* rr0 saved in status interrupt. */
+	u_char	cs_rr0_delta;		/* rr0 changes at status intr. */
 
 	char	cs_softreq;		/* need soft interrupt call */
 };
+
+/*
+ * Function vector - per channel
+ */
+struct zsops {
+	/* receive char available */
+	void	(*zsop_rxint)__P((register struct zs_chanstate *));
+
+	/* external/status */
+	void	(*zsop_stint)__P((register struct zs_chanstate *));
+
+	/* xmit buffer empty */
+	void	(*zsop_txint)__P((register struct zs_chanstate *));
+
+	/* process software interrupt */
+	void	(*zsop_softint)__P((struct zs_chanstate *));
+};
+
+extern struct zsops zsops_null;
 
 struct zsc_softc {
 	struct	device zsc_dev;		/* required first: base device */
@@ -110,3 +117,9 @@ struct zsc_attach_args {
 };
 #define ZS_HWFLAG_CONSOLE 1
 
+int  zsc_intr_hard __P((void *));
+int  zsc_intr_soft __P((void *));
+void zs_break __P((struct zs_chanstate *, int));
+int  zs_getspeed __P((struct zs_chanstate *));
+void zs_iflush __P((struct zs_chanstate *));
+void zs_loadchannelregs __P((struct zs_chanstate *));

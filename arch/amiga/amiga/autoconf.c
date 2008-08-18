@@ -1,5 +1,5 @@
-/*	$OpenBSD: autoconf.c,v 1.6 1996/08/19 00:04:13 niklas Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.38.4.1 1996/05/26 16:23:26 is Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.9 1997/01/16 09:23:15 niklas Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.45 1996/12/23 09:15:39 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -44,7 +44,7 @@
 void setroot __P((void));
 void swapconf __P((void));
 void mbattach __P((struct device *, struct device *, void *));
-int mbprint __P((void *, char *));
+int mbprint __P((void *, const char *));
 int mbmatch __P((struct device *, void *, void *));
 
 int cold;	/* 1 if still booting */
@@ -55,6 +55,8 @@ int cold;	/* 1 if still booting */
 void
 configure()
 {
+	int s;
+
 	/*
 	 * this is the real thing baby (i.e. not console init)
 	 */
@@ -65,10 +67,11 @@ configure()
 	} else
 #endif
 	custom.intena = INTF_INTEN;
+	s = splhigh();
 
 	if (config_rootfound("mainbus", "mainbus") == NULL)
 		panic("no mainbus found");
-
+	splx(s);
 #ifdef DEBUG_KERNEL_START
 	printf("survived autoconf, going to enable interrupts\n");
 #endif
@@ -120,7 +123,7 @@ configure()
 int
 simple_devprint(auxp, pnp)
 	void *auxp;
-	char *pnp;
+	const char *pnp;
 {
 	return(QUIET);
 }
@@ -188,6 +191,12 @@ config_console()
 	if (cf == NULL) {
 		panic("no mainbus");
 	}
+
+	/*
+	 * delay clock calibration.
+	 */
+	amiga_config_found(cf, NULL, "clock", NULL);
+
 	/*
 	 * internal grf.
 	 */
@@ -236,12 +245,14 @@ mbattach(pdp, dp, auxp)
 	struct device *pdp, *dp;
 	void *auxp;
 {
-	printf ("\n");
+	printf("\n");
 	config_found(dp, "clock", simple_devprint);
 #ifdef DRACO
 	if (is_draco()) {
 		config_found(dp, "kbd", simple_devprint);
 		config_found(dp, "drsc", simple_devprint);
+		config_found(dp, "drcom", simple_devprint);
+		config_found(dp, "drcom", simple_devprint);
 		/*
 		 * XXX -- missing here:
 		 * SuperIO chip serial, parallel, floppy
@@ -271,7 +282,7 @@ mbattach(pdp, dp, auxp)
 int
 mbprint(auxp, pnp)
 	void *auxp;
-	char *pnp;
+	const char *pnp;
 {
 	if (pnp)
 		printf("%s at %s", (char *)auxp, pnp);
@@ -329,12 +340,12 @@ setroot()
 	if (boothowto & RB_DFLTROOT ||
 	    (bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
 		return;
-	majdev = (bootdev >> B_TYPESHIFT) & B_TYPEMASK;
+	majdev = B_TYPE(bootdev);
 	if (majdev > sizeof(devname) / sizeof(devname[0]))
 		return;
-	adaptor = (bootdev >> B_ADAPTORSHIFT) & B_ADAPTORMASK;
-	part = (bootdev >> B_PARTITIONSHIFT) & B_PARTITIONMASK;
-	unit = (bootdev >> B_UNITSHIFT) & B_UNITMASK;
+	adaptor = B_ADAPTOR(bootdev);
+	part = B_PARTITION(bootdev);
+	unit = B_UNIT(bootdev);
 	orootdev = rootdev;
 	rootdev = MAKEDISKDEV(majdev, unit, part);
 	/*
@@ -343,9 +354,8 @@ setroot()
 	 */
 	if (rootdev == orootdev)
 		return;
-	printf("changing root device to %c%c%d%c\n",
-		devname[majdev][0], devname[majdev][1],
-		unit, part + 'a');
+	printf("changing root device to %c%c%d%c\n", devname[majdev][0],
+	    devname[majdev][1], unit, part + 'a');
 #ifdef DOSWAP
 	mindev = DISKUNIT(rootdev);
 	for (swp = swdevt; swp->sw_dev; swp++) {
@@ -443,7 +453,7 @@ is_a4000()
 		return (1);
 #ifdef DEBUG
 	if (a4000_flag)
-		printf ("Denise ID = %04x\n", (unsigned short)custom.deniseid);
+		printf("Denise ID = %04x\n", (unsigned short)custom.deniseid);
 #endif
 	if (machineid >> 16)
 		return (0);		/* It's not an A4000 */

@@ -1,5 +1,5 @@
-/*	$OpenBSD: tc_conf.h,v 1.2 1996/07/29 23:02:29 niklas Exp $	*/
-/*	$NetBSD: tc_conf.h,v 1.1 1995/12/20 00:43:32 cgd Exp $	*/
+/*	$OpenBSD: tc_conf.h,v 1.4 1997/01/24 19:58:20 niklas Exp $	*/
+/*	$NetBSD: tc_conf.h,v 1.3 1996/11/15 23:59:01 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
@@ -34,7 +34,7 @@
 
 #ifdef DEC_3000_500
 extern void	tc_3000_500_intr_setup __P((void));
-extern void	tc_3000_500_iointr __P((void *, int));
+extern void	tc_3000_500_iointr __P((void *, unsigned long));
 
 extern void	tc_3000_500_intr_establish __P((struct device *, void *,
 		    tc_intrlevel_t, int (*)(void *), void *));
@@ -42,13 +42,15 @@ extern void	tc_3000_500_intr_disestablish __P((struct device *, void *));
 
 extern int	tc_3000_500_nslots;
 extern struct tc_slotdesc tc_3000_500_slots[];
-extern int	tc_3000_500_nbuiltins;
-extern struct tc_builtin tc_3000_500_builtins[];
+extern int	tc_3000_500_graphics_nbuiltins;
+extern struct tc_builtin tc_3000_500_graphics_builtins[];
+extern int	tc_3000_500_nographics_nbuiltins;
+extern struct tc_builtin tc_3000_500_nographics_builtins[];
 #endif /* DEC_3000_500 */
 
 #ifdef DEC_3000_300
 extern void	tc_3000_300_intr_setup __P((void));
-extern void	tc_3000_300_iointr __P((void *, int));
+extern void	tc_3000_300_iointr __P((void *, unsigned long));
 
 extern void	tc_3000_300_intr_establish __P((struct device *, void *,
 		    tc_intrlevel_t, int (*)(void *), void *));

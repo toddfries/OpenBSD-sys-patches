@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.13 1996/09/21 11:06:22 deraadt Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.19 1997/04/18 10:15:20 deraadt Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -418,7 +418,6 @@ nfs_mount_diskless(ndmntp, mntname, mntflag, vpp)
 	args.fh       = ndmntp->ndm_fh;
 	args.fhsize   = NFSX_V2FH;
 	args.hostname = ndmntp->ndm_host;
-	args.flags    = NFSMNT_RESVPORT;
 
 #ifdef	NFS_BOOT_OPTIONS
 	args.flags    |= NFS_BOOT_OPTIONS;
@@ -454,14 +453,19 @@ nfs_decode_args(nmp, argp)
 	struct nfs_args *argp;
 {
 	int s;
-	int adjsock;
+	int adjsock = 0;
 	int maxio;
 
 	s = splsoftnet();
 
+#if 0
 	/* Re-bind if rsrvd port requested and wasn't on one */
 	adjsock = !(nmp->nm_flag & NFSMNT_RESVPORT)
 		  && (argp->flags & NFSMNT_RESVPORT);
+#endif
+	/* Also re-bind if we're switching to/from a connected UDP socket */
+	adjsock |= ((nmp->nm_flag & NFSMNT_NOCONN) !=
+	    (argp->flags & NFSMNT_NOCONN));
 
 	/* Update flags atomically.  Don't change the lock bits. */
 	nmp->nm_flag =
@@ -543,6 +547,36 @@ nfs_decode_args(nmp, argp)
 		argp->deadthresh <= NQ_NEVERDEAD)
 		nmp->nm_deadthresh = argp->deadthresh;
 
+	if (argp->flags & NFSMNT_ACREGMIN && argp->acregmin >= 0) {
+		if (argp->acregmin > 0xffff)
+			nmp->nm_acregmin = 0xffff;
+		else
+			nmp->nm_acregmin = argp->acregmin;
+	}
+	if (argp->flags & NFSMNT_ACREGMAX && argp->acregmax >= 0) {
+		if (argp->acregmax > 0xffff)
+			nmp->nm_acregmax = 0xffff;
+		else
+			nmp->nm_acregmax = argp->acregmax;
+	}
+	if (nmp->nm_acregmin > nmp->nm_acregmax)
+	  nmp->nm_acregmin = nmp->nm_acregmax;
+
+	if (argp->flags & NFSMNT_ACDIRMIN && argp->acdirmin >= 0) {
+		if (argp->acdirmin > 0xffff)
+			nmp->nm_acdirmin = 0xffff;
+		else
+			nmp->nm_acdirmin = argp->acdirmin;
+	}
+	if (argp->flags & NFSMNT_ACDIRMAX && argp->acdirmax >= 0) {
+		if (argp->acdirmax > 0xffff)
+			nmp->nm_acdirmax = 0xffff;
+		else
+			nmp->nm_acdirmax = argp->acdirmax;
+	}
+	if (nmp->nm_acdirmin > nmp->nm_acdirmax)
+	  nmp->nm_acdirmin = nmp->nm_acdirmax;
+
 	if (nmp->nm_so && adjsock) {
 		nfs_disconnect(nmp);
 		if (nmp->nm_sotype == SOCK_DGRAM)
@@ -580,12 +614,22 @@ nfs_mount(mp, path, data, ndp, p)
 	size_t len;
 	u_char nfh[NFSX_V3FHMAX];
 
-	error = copyin(data, (caddr_t)&args, sizeof (struct nfs_args));
+	error = copyin (data, (caddr_t)&args, sizeof (args.version));
 	if (error)
 		return (error);
-	if (args.version != NFS_ARGSVERSION)
+	if (args.version == 3) {
+		error = copyin (data, (caddr_t)&args,
+				sizeof (struct nfs_args3));
+		args.flags &= ~(NFSMNT_INTERNAL|NFSMNT_NOAC);
+	}
+	else if (args.version == NFS_ARGSVERSION) {
+		error = copyin(data, (caddr_t)&args, sizeof (struct nfs_args));
+		args.flags &= ~NFSMNT_NOAC; /* XXX - compatibility */
+	}
+	else
 		return (EPROGMISMATCH);
-	args.flags |= NFSMNT_RESVPORT;		/* ALWAYS allocate one */
+	if (error)
+		return (error);
 	if (mp->mnt_flag & MNT_UPDATE) {
 		register struct nfsmount *nmp = VFSTONFS(mp);
 
@@ -674,6 +718,10 @@ mountnfs(argp, mp, nam, pth, hst, vpp)
 	CIRCLEQ_INIT(&nmp->nm_timerhead);
 	nmp->nm_inprog = NULLVP;
 	nmp->nm_fhsize = argp->fhsize;
+	nmp->nm_acregmin = NFS_MINATTRTIMO;
+	nmp->nm_acregmax = NFS_MAXATTRTIMO;
+	nmp->nm_acdirmin = NFS_MINATTRTIMO;
+	nmp->nm_acdirmax = NFS_MAXATTRTIMO;
 	bcopy((caddr_t)argp->fh, (caddr_t)nmp->nm_fh, argp->fhsize);
 #ifdef COMPAT_09
 	mp->mnt_stat.f_type = 2;

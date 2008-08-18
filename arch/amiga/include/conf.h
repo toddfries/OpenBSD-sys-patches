@@ -1,5 +1,5 @@
-/*	$OpenBSD: conf.h,v 1.5 1996/09/04 22:44:22 niklas Exp $	*/
-/*	$NetBSD: conf.h,v 1.1 1996/04/21 21:13:16 veego Exp $	*/
+/*	$OpenBSD: conf.h,v 1.8 1997/05/16 18:54:18 niklas Exp $	*/
+/*	$NetBSD: conf.h,v 1.4 1996/11/30 01:13:07 is Exp $	*/
 
 /*
  * Copyright (c) 1996 Bernd Ernesti.  All rights reserved.
@@ -35,7 +35,7 @@ cdev_decl(acd);
 
 cdev_decl(com);
 
-cdev_decl(ctty);
+cdev_decl(drcom);
 
 bdev_decl(fd);
 cdev_decl(fd);
@@ -43,6 +43,11 @@ cdev_decl(fd);
 cdev_decl(grf);
 
 cdev_decl(ipl);
+#ifdef IPFILTER
+#define NIPF 1
+#else
+#define NIPF 0
+#endif
 
 cdev_decl(ite);
 
@@ -62,17 +67,10 @@ cdev_decl(msc);
 
 cdev_decl(par);
 
-bdev_decl(rd);
-/* no cdev for rd */
-
-cdev_decl(random);
-
 cdev_decl(ser);
 
 bdev_decl(sw);
 cdev_decl(sw);
-
-cdev_decl(uk);
 
 cdev_decl(view);
 

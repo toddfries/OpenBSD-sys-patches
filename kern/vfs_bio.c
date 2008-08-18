@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.11 1996/08/29 07:46:37 deraadt Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.14 1997/04/14 04:23:23 tholo Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*-
@@ -62,11 +62,6 @@
 #include <sys/kernel.h>
 
 #include <vm/vm.h>
-
-#include "random.h"
-#if NRANDOM > 0
-#include <dev/rndvar.h>
-#endif
 
 /* Macros to clear/set/test flags. */
 #define	SET(t, f)	(t) |= (f)
@@ -607,6 +602,20 @@ brelse(bp)
 	if (ISSET(bp->b_flags, (B_NOCACHE|B_ERROR)))
 		SET(bp->b_flags, B_INVAL);
 
+	if (ISSET(bp->b_flags, B_VFLUSH)) {
+		/*
+		 * This is a delayed write buffer that was just flushed to
+		 * disk.  It is still on the LRU queue.  If it's become
+		 * invalid, then we need to move it to a different queue;
+		 * otherwise leave it in its current position.
+		 */
+		CLR(bp->b_flags, B_VFLUSH);
+		if (!ISSET(bp->b_flags, B_ERROR|B_INVAL|B_LOCKED|B_AGE))
+			goto already_queued;
+		else
+			bremfree(bp);
+	}
+
 	if ((bp->b_bufsize <= 0) || ISSET(bp->b_flags, B_INVAL)) {
 		/*
 		 * If it's invalid or empty, dissociate it from its vnode
@@ -641,6 +650,7 @@ brelse(bp)
 		binstailfree(bp, bufq);
 	}
 
+already_queued:
 	/* Unlock the buffer. */
 	CLR(bp->b_flags, (B_AGE | B_ASYNC | B_BUSY | B_NOCACHE));
 
@@ -875,13 +885,30 @@ start:
 		return (0);
 	}
 
+	if (ISSET(bp->b_flags, B_VFLUSH)) {
+		/*
+		 * This is a delayed write buffer being flushed to disk.  Make
+		 * sure it gets aged out of the queue when it's finished, and
+		 * leave it off the LRU queue.
+		 */
+		CLR(bp->b_flags, B_VFLUSH);
+		SET(bp->b_flags, B_AGE);
+		splx(s);
+		goto start;
+	}
+
 	/* Buffer is no longer on free lists. */
 	SET(bp->b_flags, B_BUSY);
 
 	/* If buffer was a delayed write, start it, and go back to the top. */
 	if (ISSET(bp->b_flags, B_DELWRI)) {
 		splx(s);
-		bawrite (bp);
+		/*
+		 * This buffer has gone through the LRU, so make sure it gets
+		 * reused ASAP.
+		 */
+		SET(bp->b_flags, B_AGE);
+		bawrite(bp);
 		goto start;
 	}
 
@@ -963,10 +990,6 @@ biodone(bp)
 	if (ISSET(bp->b_flags, B_DONE))
 		panic("biodone already");
 	SET(bp->b_flags, B_DONE);		/* note that it's done */
-
-#if NRANDOM > 0
-	add_blkdev_randomness(bp->b_dev);
-#endif
 
 	if (!ISSET(bp->b_flags, B_READ))	/* wake up reader */
 		vwakeup(bp);

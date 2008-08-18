@@ -1,4 +1,4 @@
-/*	$OpenBSD: ms.c,v 1.4 1996/05/26 00:27:50 deraadt Exp $	*/
+/*	$OpenBSD: ms.c,v 1.6 1997/01/15 07:09:33 kstailey Exp $	*/
 /*	$NetBSD: ms.c,v 1.6 1996/05/17 19:32:09 gwr Exp $	*/
 
 /*
@@ -63,6 +63,7 @@
 #include <sys/conf.h>
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
+#include <sys/signalvar.h>
 #include <sys/syslog.h>
 
 #include <dev/ic/z8530reg.h>
@@ -140,8 +141,14 @@ struct zsops zsops_ms;
  * Definition of the driver for autoconfig.
  ****************************************************************/
 
-static int	ms_match(struct device *, void *, void *);
-static void	ms_attach(struct device *, struct device *, void *);
+static int	ms_match __P((struct device *, void *, void *));
+static void	ms_attach __P((struct device *, struct device *, void *));
+
+static void	ms_input __P((register struct ms_softc *, register int));
+static void	ms_rxint __P((register struct zs_chanstate *));
+static void	ms_txint __P((register struct zs_chanstate *));
+static void	ms_stint __P((register struct zs_chanstate *));
+static void	ms_softint __P((struct zs_chanstate *));
 
 struct cfattach ms_ca = {
 	sizeof(struct ms_softc), ms_match, ms_attach
@@ -224,7 +231,7 @@ msopen(dev, flags, mode, p)
 	struct proc *p;
 {
 	struct ms_softc *ms;
-	int error, s, unit;
+	int unit;
 
 	unit = minor(dev);
 	if (unit >= ms_cd.cd_ndevs)
@@ -544,10 +551,13 @@ ms_stint(cs)
 
 	ms = cs->cs_private;
 
-	cs->cs_rr0_new = zs_read_csr(cs);
+	rr0 = zs_read_csr(cs);
 	zs_write_csr(cs, ZSWR0_RESET_STATUS);
 
+	cs->cs_rr0_delta |= (cs->cs_rr0 ^ rr0);
+	cs->cs_rr0 = rr0;
 	ms->ms_intr_flags |= INTR_ST_CHECK;
+
 	/* Ask for softint() call. */
 	cs->cs_softreq = 1;
 }
@@ -561,7 +571,6 @@ ms_softint(cs)
 	register int get, c, s;
 	int intr_flags;
 	register u_short ring_data;
-	register u_char rr0, rr1;
 
 	ms = cs->cs_private;
 
@@ -615,7 +624,7 @@ ms_softint(cs)
 		 */
 		log(LOG_ERR, "%s: status interrupt?\n",
 		    ms->ms_dev.dv_xname);
-		cs->cs_rr0 = cs->cs_rr0_new;
+		cs->cs_rr0_delta = 0;
 	}
 
 	splx(s);

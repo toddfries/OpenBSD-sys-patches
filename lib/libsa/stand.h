@@ -1,5 +1,5 @@
-/*	$OpenBSD: stand.h,v 1.6 1996/09/23 14:19:04 mickey Exp $	*/
-/*	$NetBSD: stand.h,v 1.13 1996/01/13 22:25:42 leo Exp $	*/
+/*	$OpenBSD: stand.h,v 1.23 1997/04/26 17:50:08 mickey Exp $	*/
+/*	$NetBSD: stand.h,v 1.18 1996/11/30 04:35:51 gwr Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -39,6 +39,7 @@
 #include <sys/types.h>
 #include <sys/cdefs.h>
 #include <sys/stat.h>
+#include <machine/stdarg.h>
 #include "saioctl.h"
 #include "saerrno.h"
 
@@ -47,6 +48,16 @@
 #endif
 
 struct open_file;
+
+/*
+ * Useful macros
+ */
+#define NENTS(x)	sizeof(x)/sizeof(x[0])
+/* don't define if libkern included */
+#ifndef LIBKERN_INLINE
+#define	max(a,b)	(((a)>(b))? (a) : (b))
+#define	min(a,b)	(((a)>(b))? (b) : (a))
+#endif
 
 /*
  * This structure is used to define file system operations in a file system
@@ -61,6 +72,7 @@ struct fs_ops {
 			     size_t size, size_t *resid));
 	off_t	(*seek) __P((struct open_file *f, off_t offset, int where));
 	int	(*stat) __P((struct open_file *f, struct stat *sb));
+	int	(*readdir) __P((struct open_file *f, char *));
 };
 
 extern struct fs_ops file_system[];
@@ -85,12 +97,24 @@ struct devsw {
 extern struct devsw devsw[];	/* device array */
 extern int ndevs;		/* number of elements in devsw[] */
 
+struct consw {
+	char	*name;	/* console driver name */
+	int	(*cn_probe) __P((void));	/* probe device for presence */
+	void	(*cn_putc) __P((int c));	/* print char */
+	int	(*cn_getc) __P((void));		/* read char */
+	int	(*cn_ischar) __P((void));	/* check input */
+};
+
+extern struct consw consw[];
+extern int ncons;
+
 struct open_file {
 	int		f_flags;	/* see F_* below */
 	struct devsw	*f_dev;		/* pointer to device operations */
 	void		*f_devdata;	/* device specific data */
 	struct fs_ops	*f_ops;		/* pointer to file system operations */
 	void		*f_fsdata;	/* file system specific data */
+	off_t		f_offset;	/* current file offset (F_RAW) */
 };
 
 #define	SOPEN_MAX	4
@@ -104,13 +128,17 @@ extern struct open_file files[];
 
 #define isupper(c)	((c) >= 'A' && (c) <= 'Z')
 #define islower(c)	((c) >= 'a' && (c) <= 'z')
-#define	isalpha(c)	(isupper(c)||islower(c))
-#define tolower(c)	((c) - 'A' + 'a')
-#define toupper(c)	((c) - 'a' + 'A')
+#define isalpha(c)	(isupper(c)||islower(c))
+#define tolower(c)	(isupper(c)?((c) - 'A' + 'a'):(c))
+#define toupper(c)	(islower(c)?((c) - 'a' + 'A'):(c))
 #define isspace(c)	((c) == ' ' || (c) == '\t')
 #define isdigit(c)	((c) >= '0' && (c) <= '9')
 
-int	devopen __P((struct open_file *, const char *, char **));
+#define	btochs(b,c,h,s,nh,ns)			\
+	c = (b) / ((nh) * (ns));		\
+	h = ((b) % ((nh) * (ns))) / (ns);	\
+	s = ((b) % ((nh) * (ns))) % (ns);
+
 void	*alloc __P((unsigned int));
 void	free __P((void *, unsigned int));
 struct	disklabel;
@@ -119,19 +147,32 @@ u_int	dkcksum __P((struct disklabel *));
 
 void	printf __P((const char *, ...));
 void	sprintf __P((char *, const char *, ...));
+void	vprintf __P((const char *, _BSD_VA_LIST_));
 void	twiddle __P((void));
 void	gets __P((char *));
 __dead void	panic __P((const char *, ...)) __attribute__((noreturn));
 __dead void	_rtt __P((void)) __attribute__((noreturn));
-void	bcopy __P((const void *, void *, size_t));
+#define	bzero(s,n)	((void)memset((s),0,(n)))
+#define bcmp(s1,s2,n)	(memcmp((s2),(s1),(n)))
+#define	bcopy(s1,s2,n)	((void)memcpy((s2),(s1),(n)))
 void	*memcpy __P((void *, const void *, size_t));
-void	exec __P((char *, char *, int));
+int	memcmp __P((const void *, const void*, size_t));
+char	*strncpy __P((char *, const char *, size_t));
+char	*strcpy __P((char *, const char *));
+size_t	strlen __P((const char *));
+void	*memset __P((void *, int, size_t));
+void	exec __P((char *, void *, int));
+void	exit __P((void));
 int	open __P((const char *, int));
 int	close __P((int));
 void	closeall __P((void));
 ssize_t	read __P((int, void *, size_t));
 ssize_t	write __P((int, void *, size_t));
-    
+int	stat __P((const char *path, struct stat *sb));
+int	fstat __P((int fd, struct stat *sb));
+int	opendir __P((char *));
+int	readdir __P((int, char *));
+void	closedir __P((int));
 int	nodev __P((void));
 int	noioctl __P((struct open_file *, u_long, void *));
 void	nullsys __P((void));
@@ -144,8 +185,25 @@ ssize_t	null_write __P((struct open_file *f, void *buf,
 			size_t size, size_t *resid));
 off_t	null_seek __P((struct open_file *f, off_t offset, int where));
 int	null_stat __P((struct open_file *f, struct stat *sb));
+int	null_readdir __P((struct open_file *f, char *name));
+int	cons_probe __P((void));
+char	*ttyname __P((int)); /* match userland decl, but ignore !0 */
+void	putc __P((int));    
+int	getc __P((void));
+int	ischar __P((void));
+
+void	putchar __P((int));    
+int	getchar __P((void));
+
+#ifdef __INTERNAL_LIBSA_CREAD
+int	oopen __P((const char *, int));
+int	oclose __P((int));
+ssize_t	oread __P((int, void *, size_t));
+off_t	olseek __P((int, off_t, int));
+#endif
 
 /* Machine dependent functions */
+int	devopen __P((struct open_file *, const char *, char **));
 void	machdep_start __P((char *, int, char *, char *, char *));
-int	getchar __P((void));
-void	putchar __P((int));    
+time_t	getsecs __P((void));
+

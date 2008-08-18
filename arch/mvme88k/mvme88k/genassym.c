@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)genassym.c	7.8 (Berkeley) 5/7/91
- *	$Id: genassym.c,v 1.1 1995/10/18 12:32:22 deraadt Exp $
+ *	$Id: genassym.c,v 1.3 1997/03/03 20:21:34 rahnds Exp $
  */
 
 #ifndef KERNEL
@@ -40,6 +40,7 @@
 
 #include <sys/param.h>
 #include <sys/buf.h>
+#include <sys/time.h>
 #include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/msgbuf.h>
@@ -66,14 +67,12 @@ main()
 	struct vmspace *vms = (struct vmspace *)0;
 	pmap_t pmap = (pmap_t)0;
 	struct pcb *pcb = (struct pcb *)0;
+	struct m88100_pcb *ks = (struct m88100_pcb *)0;
+
 	register unsigned i;
 
 	printf("#ifndef __GENASSYM_INCLUDED\n");
 	printf("#define __GENASSYM_INCLUDED 1\n\n");
-
-	printf("#ifdef ASSEMBLER\n"
-		"#define NEWLINE \\\\ \n"
-	"#endif\n");	
 
 	printf("#define\tP_FORW %d\n", &p->p_forw);
 	printf("#define\tP_BACK %d\n", &p->p_back);
@@ -89,11 +88,15 @@ main()
 	
 	printf("#define\tUPAGES %d\n", UPAGES);
 	printf("#define\tPGSHIFT %d\n", PGSHIFT);
+	printf("#define\tUSIZE %d\n", USPACE);
+	printf("#define\tNBPG %d\n", NBPG);
 
 	printf("#define\tU_PROF %d\n", &up->u_stats.p_prof);
 	printf("#define\tU_PROFSCALE %d\n", &up->u_stats.p_prof.pr_scale);
 	printf("#define\tPCB_ONFAULT %d\n", &pcb->pcb_onfault);
 	printf("#define\tSIZEOF_PCB %d\n", sizeof(struct pcb));
+
+	printf("#define\tPCB_USER_STATE %d\n", &pcb->user_state);
 
 	printf("#define\tSYS_exit %d\n", SYS_exit);
 	printf("#define\tSYS_execve %d\n", SYS_execve);
@@ -131,6 +134,8 @@ main()
 	pair("EF_MODE",	int_offset_of_element(ss->mode));
 
 	pair("EF_RET",	int_offset_of_element(ss->scratch1));
+	pair("EF_IPFSR",int_offset_of_element(ss->ipfsr));
+	pair("EF_DPFSR",int_offset_of_element(ss->dpfsr));
 	pair("EF_NREGS",	sizeof(*ss)/sizeof(int));
 
 	/* make a sanity check */
@@ -146,6 +151,28 @@ main()
 		exit(1);
 	}
 	pair("SIZEOF_EF", sizeof(*ss));
+
+	pair("PCB_PC", int_offset_of_element(ks->pcb_pc) * 4);
+	pair("PCB_IPL",	int_offset_of_element(ks->pcb_ipl) * 4);
+	pair("PCB_R14", int_offset_of_element(ks->pcb_r14) * 4);
+	pair("PCB_R15",	int_offset_of_element(ks->pcb_r15) * 4);
+	pair("PCB_R16",	int_offset_of_element(ks->pcb_r16) * 4);
+	pair("PCB_R17",	int_offset_of_element(ks->pcb_r17) * 4);
+	pair("PCB_R18",	int_offset_of_element(ks->pcb_r18) * 4);
+	pair("PCB_R19",	int_offset_of_element(ks->pcb_r19) * 4);
+	pair("PCB_R20",	int_offset_of_element(ks->pcb_r20) * 4);
+	pair("PCB_R21",	int_offset_of_element(ks->pcb_r21) * 4);
+	pair("PCB_R22",	int_offset_of_element(ks->pcb_r22) * 4);
+	pair("PCB_R23",	int_offset_of_element(ks->pcb_r23) * 4);
+	pair("PCB_R24",	int_offset_of_element(ks->pcb_r24) * 4);
+	pair("PCB_R25",	int_offset_of_element(ks->pcb_r25) * 4);
+	pair("PCB_R26",	int_offset_of_element(ks->pcb_r26) * 4);
+	pair("PCB_R27",	int_offset_of_element(ks->pcb_r27) * 4);
+	pair("PCB_R28",	int_offset_of_element(ks->pcb_r28) * 4);
+	pair("PCB_R29",	int_offset_of_element(ks->pcb_r29) * 4);
+	pair("PCB_R30",	int_offset_of_element(ks->pcb_r30) * 4);
+	pair("PCB_SP",	int_offset_of_element(ks->pcb_sp) * 4);
+
 	printf("\n#endif /* __GENASSYM_INCLUDED */\n");
 	exit(0);
 }

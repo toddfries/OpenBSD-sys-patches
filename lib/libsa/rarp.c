@@ -1,5 +1,5 @@
-/*	$OpenBSD: rarp.c,v 1.2 1996/09/23 14:19:01 mickey Exp $	*/
-/*	$NetBSD: rarp.c,v 1.10 1995/09/23 03:36:10 gwr Exp $	*/
+/*	$OpenBSD: rarp.c,v 1.5 1996/12/08 15:15:55 niklas Exp $	*/
+/*	$NetBSD: rarp.c,v 1.13 1996/10/13 02:29:05 christos Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -46,8 +46,6 @@
 
 #include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
-
-#include <string.h>
 
 #include "stand.h"
 #include "net.h"
@@ -194,7 +192,7 @@ rarprecv(d, pkt, len, tleft)
 	{
 #ifdef RARP_DEBUG
 		if (debug)
-			printf("bad hrd/pro/hln/pln\n")
+			printf("bad hrd/pro/hln/pln\n");
 #endif
 		return (-1);
 	}

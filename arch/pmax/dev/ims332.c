@@ -1,4 +1,4 @@
-/*	$NetBSD: ims332.c,v 1.2.4.1 1996/09/09 20:16:32 thorpej Exp $	*/
+/*	$NetBSD: ims332.c,v 1.4 1996/10/13 13:13:57 jonathan Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1995
@@ -48,7 +48,6 @@
 #include <machine/fbio.h>
 #include <machine/fbvar.h>
 
-#include <machine/machConst.h>
 #include <pmax/dev/ims332.h>
 
 static u_int ims332_read_register (struct fbinfo *, int);
@@ -299,14 +298,14 @@ ims332PosCursor(fi, x, y)
 	struct fbinfo *fi;
 	int x, y;
 {
-	if (y < 0)
-	  y = 0;
-	else if (y > fi -> fi_type.fb_width - fi -> fi_cursor.width - 1)
-	  y = fi -> fi_type.fb_width - fi -> fi_cursor.width - 1;
 	if (x < 0)
 	  x = 0;
-	else if (x > fi -> fi_type.fb_height - fi -> fi_cursor.height - 1)
-	  x = fi -> fi_type.fb_height - fi -> fi_cursor.height - 1;
+	else if (x > fi -> fi_type.fb_width - fi -> fi_cursor.width - 1)
+	  x = fi -> fi_type.fb_width - fi -> fi_cursor.width - 1;
+	if (y < 0)
+	  y = 0;
+	else if (y > fi -> fi_type.fb_height - fi -> fi_cursor.height - 1)
+	  y = fi -> fi_type.fb_height - fi -> fi_cursor.height - 1;
 
 	fi -> fi_cursor.x = x;
 	fi -> fi_cursor.y = y;

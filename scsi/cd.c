@@ -1,7 +1,8 @@
-/*	$NetBSD: cd.c,v 1.92 1996/05/05 19:52:50 christos Exp $	*/
+/*	$OpenBSD: cd.c,v 1.23 1997/04/14 04:09:03 downsj Exp $	*/
+/*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
- * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
+ * Copyright (c) 1994, 1995, 1997 Charles M. Hannum.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -77,6 +78,8 @@
 #define	CDPART(z)			DISKPART(z)
 #define	MAKECDDEV(maj, unit, part)	MAKEDISKDEV(maj, unit, part)
 
+#define	CDLABELDEV(dev)	(MAKECDDEV(major(dev), CDUNIT(dev), RAW_PART))
+
 struct cd_softc {
 	struct device sc_dev;
 	struct disk sc_dk;
@@ -107,8 +110,8 @@ int	cdlock __P((struct cd_softc *));
 void	cdunlock __P((struct cd_softc *));
 void	cdstart __P((void *));
 void	cdminphys __P((struct buf *));
-void	cdgetdisklabel __P((struct cd_softc *));
-int	cddone __P((struct scsi_xfer *, int));
+void	cdgetdisklabel __P((dev_t, struct cd_softc *));
+void	cddone __P((struct scsi_xfer *));
 u_long	cd_size __P((struct cd_softc *, int));
 int	cd_get_mode __P((struct cd_softc *, struct cd_mode_data *, int));
 int	cd_set_mode __P((struct cd_softc *, struct cd_mode_data *));
@@ -339,7 +342,7 @@ cdopen(dev, flag, fmt, p)
 			SC_DEBUG(sc_link, SDEV_DB3, ("Params loaded "));
 
 			/* Fabricate a disk label. */
-			cdgetdisklabel(cd);
+			cdgetdisklabel(dev, cd);
 			SC_DEBUG(sc_link, SDEV_DB3, ("Disklabel fabricated "));
 		}
 	}
@@ -574,6 +577,7 @@ cdstart(v)
 		if ((sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
 			bp->b_error = EIO;
 			bp->b_flags |= B_ERROR;
+			bp->b_resid = bp->b_bcount;
 			biodone(bp);
 			continue;
 		}
@@ -638,17 +642,14 @@ cdstart(v)
 	}
 }
 
-int
-cddone(xs, complete)
+void
+cddone(xs)
 	struct scsi_xfer *xs;
-	int complete;
 {
 	struct cd_softc *cd = xs->sc_link->device_softc;
 
-	if (complete && (xs->bp != NULL))
-		disk_unbusy(&cd->sc_dk, (xs->bp->b_bcount - xs->bp->b_resid));
-
-	return (0);
+	if (xs->bp != NULL)
+		disk_unbusy(&cd->sc_dk, xs->bp->b_bcount - xs->bp->b_resid);
 }
 
 void
@@ -1041,10 +1042,12 @@ cdioctl(dev, cmd, addr, flag, p)
  * data tracks from the TOC and put it in the disklabel
  */
 void
-cdgetdisklabel(cd)
+cdgetdisklabel(dev, cd)
+	dev_t dev;
 	struct cd_softc *cd;
 {
 	struct disklabel *lp = cd->sc_dk.dk_label;
+	char *errstring;
 
 	bzero(lp, sizeof(struct disklabel));
 	bzero(cd->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
@@ -1054,8 +1057,12 @@ cdgetdisklabel(cd)
 	lp->d_nsectors = 100;
 	lp->d_ncylinders = (cd->params.disksize / 100) + 1;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
+	if (lp->d_secpercyl == 0) {
+		lp->d_secpercyl = 100;
+		/* as long as it's not 0 - readdisklabel divides by it (?) */
+	}
 
-	strncpy(lp->d_typename, "SCSI CD-ROM", 16);
+	strncpy(lp->d_typename, "SCSI disk", 16);
 	lp->d_type = DTYPE_SCSI;
 	strncpy(lp->d_packname, "fictitious", 16);
 	lp->d_secperunit = cd->params.disksize;
@@ -1063,19 +1070,25 @@ cdgetdisklabel(cd)
 	lp->d_interleave = 1;
 	lp->d_flags = D_REMOVABLE;
 
-	lp->d_partitions[0].p_offset = 0;
-	lp->d_partitions[0].p_size =
-	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
-	lp->d_partitions[0].p_fstype = FS_ISO9660;
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size =
 	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
-	lp->d_partitions[RAW_PART].p_fstype = FS_ISO9660;
+	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
 	lp->d_checksum = dkcksum(lp);
+
+	/*
+	 * Call the generic disklabel extraction routine
+	 */
+	errstring = readdisklabel(CDLABELDEV(dev), cdstrategy, lp,
+	    cd->sc_dk.dk_cpulabel);
+	if (errstring) {
+		printf("%s: %s\n", cd->sc_dev.dv_xname, errstring);
+		return;
+	}
 }
 
 /*
@@ -1104,11 +1117,11 @@ cd_size(cd, flags)
 	 */
 	if (scsi_scsi_cmd(cd->sc_link, (struct scsi_generic *)&scsi_cmd,
 	    sizeof(scsi_cmd), (u_char *)&rdcap, sizeof(rdcap), CDRETRIES,
-	    2000, NULL, flags | SCSI_DATA_IN) != 0)
+	    20000, NULL, flags | SCSI_DATA_IN) != 0)
 		return 0;
 
 	blksize = _4btol(rdcap.length);
-	if (blksize < 512)
+	if (blksize < 512 || blksize > 2048)
 		blksize = 2048;	/* some drives lie ! */
 	cd->params.blksize = blksize;
 
@@ -1289,7 +1302,7 @@ cd_read_subchannel(cd, mode, format, track, data, len)
 	_lto2b(len, scsi_cmd.data_len);
 	return scsi_scsi_cmd(cd->sc_link, (struct scsi_generic *)&scsi_cmd,
 	    sizeof(struct scsi_read_subchannel), (u_char *)data, len,
-	    CDRETRIES, 5000, NULL, SCSI_DATA_IN);
+	    CDRETRIES, 5000, NULL, SCSI_DATA_IN||SCSI_SILENT);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.7 1996/08/14 20:19:20 deraadt Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.9 1997/01/30 22:41:59 deraadt Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -171,6 +171,10 @@ rip_output(m, va_alist)
 	 * Otherwise, allocate an mbuf for a header and fill it in.
 	 */
 	if ((inp->inp_flags & INP_HDRINCL) == 0) {
+		if ((m->m_pkthdr.len + sizeof(struct ip)) > IP_MAXPACKET) {
+			m_freem(m);
+			return (EMSGSIZE);
+		}
 		M_PREPEND(m, sizeof(struct ip), M_WAIT);
 		ip = mtod(m, struct ip *);
 		ip->ip_tos = 0;
@@ -181,7 +185,13 @@ rip_output(m, va_alist)
 		ip->ip_dst.s_addr = dst;
 		ip->ip_ttl = MAXTTL;
 	} else {
+		if (m->m_pkthdr.len > IP_MAXPACKET) {
+			m_freem(m);
+			return (EMSGSIZE);
+		}
 		ip = mtod(m, struct ip *);
+		NTOHS(ip->ip_len);
+		NTOHS(ip->ip_off);
 		/*
 		 * don't allow both user specified and setsockopt options,
 		 * and don't allow packet length sizes that will crash

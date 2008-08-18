@@ -1,4 +1,4 @@
-/*	$OpenBSD: libkern.h,v 1.6 1996/08/11 20:39:08 niklas Exp $	*/
+/*	$OpenBSD: libkern.h,v 1.11 1997/05/05 14:35:09 millert Exp $	*/
 /*	$NetBSD: libkern.h,v 1.7 1996/03/14 18:52:08 christos Exp $	*/
 
 /*-
@@ -35,6 +35,9 @@
  *
  *	@(#)libkern.h	8.1 (Berkeley) 6/10/93
  */
+
+#ifndef __LIBKERN_H__
+#define __LIBKERN_H__
 
 #include <sys/types.h>
 
@@ -118,8 +121,7 @@ int	 ffs __P((int));
 int	 locc __P((int, char *, u_int));
 u_long	 random __P((void));
 void	 srandom __P((u_long));
-char	*rindex __P((const char *, int));
-int	 scanc __P((u_int, u_char *, u_char *, int));
+int	 scanc __P((u_int, const u_char *, const u_char *, int));
 int	 skpc __P((int, size_t, u_char *));
 size_t	 strlen __P((const char *));
 char	*strcat __P((char *, const char *));
@@ -129,5 +131,5 @@ int	 strcmp __P((const char *, const char *));
 int	 strncmp __P((const char *, const char *, size_t));
 int	 strncasecmp __P((const char *, const char *, size_t));
 int	 getsn __P((char *, int));
-void	 MD5Init __P((u_int32_t[4]));
-void	 MD5Transform __P((u_int32_t[4], u_int32_t const [16]));
+
+#endif /* __LIBKERN_H__ */

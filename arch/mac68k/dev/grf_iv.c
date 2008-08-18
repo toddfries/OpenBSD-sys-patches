@@ -1,5 +1,5 @@
-/*	$OpenBSD: grf_iv.c,v 1.5 1996/09/21 03:47:13 briggs Exp $	*/
-/*	$NetBSD: grf_iv.c,v 1.13 1996/08/04 06:03:52 scottr Exp $	*/
+/*	$OpenBSD: grf_iv.c,v 1.15 1997/04/21 00:58:14 briggs Exp $	*/
+/*	$NetBSD: grf_iv.c,v 1.17 1997/02/20 00:23:27 scottr Exp $	*/
 
 /*
  * Copyright (c) 1995 Allen Briggs.  All rights reserved.
@@ -45,11 +45,14 @@
 #include <sys/systm.h>
 
 #include <machine/autoconf.h>
+#include <machine/bus.h>
 #include <machine/cpu.h>
+#include <machine/macinfo.h>
 #include <machine/grfioctl.h>
 #include <machine/viareg.h>
 
 #include "nubus.h"
+#include "obiovar.h"
 #include "grfvar.h"
 
 extern u_int32_t	mac68k_vidlog;
@@ -63,8 +66,6 @@ static caddr_t	grfiv_phys __P((struct grf_softc *gp, vm_offset_t addr));
 static int	grfiv_match __P((struct device *, void *, void *));
 static void	grfiv_attach __P((struct device *, struct device *, void *));
 
-static void	grfiv_q700intr __P((void *client_data, int slot));
-
 struct cfdriver intvid_cd = {
 	NULL, "intvid", DV_DULL
 };
@@ -73,46 +74,81 @@ struct cfattach intvid_ca = {
 	sizeof(struct grfbus_softc), grfiv_match, grfiv_attach
 };
 
-static void
-grfiv_q700intr(client_data, slot)
-	void *client_data;
-	int slot;
-{
-	long	*addr;
-
-	addr = (long *) ((char *) client_data + 0x10c);
-	*addr = 0;
-}
+#define QUADRA_DAFB_BASE	0xF9800000
 
 static int
-grfiv_match(pdp, match, auxp)
-	struct device	*pdp;
-	void	*match, *auxp;
+grfiv_match(parent, vcf, aux)
+	struct device *parent;
+	void *vcf;
+	void *aux;
 {
-	char		*addr = NULL;
-	static int	internal_video_found = 0;
+	struct obio_attach_args *oa = (struct obio_attach_args *) aux;
+	bus_space_handle_t	bsh;
+	int			found, sense;
 
-	if (internal_video_found || (mac68k_vidlog == 0)) {
-		return 0;
-	}
+	found = 1;
 
-	switch (mac68k_machine.machineid) {
-	case MACH_MACQ700:
-		addr = bus_mapin(BUS_NUBUS, 0xf9800000, 0x1000);
-		add_nubus_intr(15, grfiv_q700intr, addr);
+        switch (current_mac_model->class) {
+	case MACH_CLASSQ:
+	case MACH_CLASSQ2:
+
+		/*
+		 * Assume DAFB for all of these, unless we can't
+		 * access the memory.
+		 */
+
+		if (bus_space_map(oa->oa_tag, QUADRA_DAFB_BASE, 0x1000,
+					0, &bsh)) {
+			panic("failed to map space for DAFB regs.\n");
+		}
+
+		if (bus_probe(oa->oa_tag, bsh, 0x1C, 4) == 0) {
+			bus_space_unmap(oa->oa_tag, bsh, 0x1000);
+			found = 0;
+			goto nodafb;
+		}
+
+		sense = (bus_space_read_4(oa->oa_tag, bsh, 0x1C) & 7);
+
+		if (sense == 0)
+			found = 0;
+
+		/* Set "Turbo SCSI" configuration to default */
+		bus_space_write_4(oa->oa_tag, bsh, 0x24, 0x1d1); /* ch0 */
+		bus_space_write_4(oa->oa_tag, bsh, 0x28, 0x1d1); /* ch1 */
+
+		/* Disable interrupts */
+		bus_space_write_4(oa->oa_tag, bsh, 0x104, 0);
+
+		/* Clear any interrupts */
+		bus_space_write_4(oa->oa_tag, bsh, 0x10C, 0);
+		bus_space_write_4(oa->oa_tag, bsh, 0x110, 0);
+		bus_space_write_4(oa->oa_tag, bsh, 0x114, 0);
+
+		bus_space_unmap(oa->oa_tag, bsh, 0x1000);
+
 		break;
+
 	default:
+nodafb:
+		if (mac68k_vidlog == 0) {
+			found = 0;
+		}
+
 		break;
 	}
 
-	return 1;
+	return found;
 }
+
+#define R4(sc, o) (bus_space_read_4((sc)->sc_tag, (sc)->sc_regh, o) & 0xfff)
 
 static void
 grfiv_attach(parent, self, aux)
 	struct device *parent, *self;
 	void   *aux;
 {
+	struct obio_attach_args *oa = (struct obio_attach_args *) aux;
 	struct grfbus_softc	*sc;
 	struct grfmode		*gm;
 
@@ -120,7 +156,20 @@ grfiv_attach(parent, self, aux)
 
 	sc->card_id = 0;
 
-	printf(": Internal Video\n");
+        switch (current_mac_model->class) {
+        case MACH_CLASSQ:
+        case MACH_CLASSQ2:
+		sc->sc_tag = oa->oa_tag;
+		if (bus_space_map(sc->sc_tag, QUADRA_DAFB_BASE, 0x1000,
+					0, &sc->sc_regh)) {
+			panic("failed to map space for DAFB regs.\n");
+		}
+		printf(": DAFB: Monitor sense %x.\n", R4(sc,0x1C)&7);
+		break;
+	default:
+		printf(": Internal Video\n");
+		break;
+	}
 
 	gm = &(sc->curr_mode);
 	gm->mode_id = 0;
@@ -132,8 +181,8 @@ grfiv_attach(parent, self, aux)
 	gm->hres = 80;		/* XXX Hack */
 	gm->vres = 80;		/* XXX Hack */
 	gm->fbsize = gm->rowbytes * gm->height;
-	gm->fbbase = (caddr_t) mac68k_vidlog;
-	gm->fboff = 0;
+	gm->fbbase = (caddr_t) mac68k_trunc_page(mac68k_vidlog);
+	gm->fboff = mac68k_vidlog & PGOFSET;
 
 	/* Perform common video attachment. */
 	grf_establish(sc, NULL, grfiv_mode, grfiv_phys);

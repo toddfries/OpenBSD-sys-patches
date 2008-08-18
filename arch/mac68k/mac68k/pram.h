@@ -1,4 +1,4 @@
-/*	$OpenBSD: pram.h,v 1.3 1996/05/26 18:36:31 briggs Exp $	*/
+/*	$OpenBSD: pram.h,v 1.5 1997/04/14 18:48:07 gene Exp $	*/
 /*	$NetBSD: pram.h,v 1.3 1996/05/05 06:18:53 briggs Exp $	*/
 
 /*
@@ -72,4 +72,12 @@ void 		setPramTime(unsigned long time);
 
 unsigned long	pram_readtime __P((void));
 void		pram_settime __P((unsigned long));
+
+#ifndef MRG_ADB		/* These functions exist only when ADB/PRAM/RTC
+			 * access isn't done via the MRG_ADB method. */
+
+unsigned long getPramTimeII(void);
+void setPramTimeII(unsigned long);
+
+#endif
 

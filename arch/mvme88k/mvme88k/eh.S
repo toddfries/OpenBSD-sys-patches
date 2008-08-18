@@ -2,6 +2,7 @@
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
  * Copyright (c) 1991 OMRON Corporation
+ * Copyright (c) 1996 Nivas Madhur
  * All Rights Reserved.
  *
  * Permission to use, copy, modify and distribute this software and its
@@ -39,20 +40,20 @@
  **************************************************************RCS******
  *
  *  -------------------------------------------------------------------
- * |  In the following discussion, references are made to:             |
- * |          MC88100 - RISC MICROPROCESSOR USER'S MANUAL              |
- * |  (second edition). Reference in []s refer to section numbers.     |
- * |                                                                   |
- * |  This discussion assumes that you are at least vaguely familiar   |
- * |  with 88100 exception handling (chapter 6), the MACH kernel, and  |
- * |  that you have a brain (and use it while reading this).           |
- * |                                                                   |
- * |  I also assume (and hope) that you're not offended by             |
- * |  frequent misspellings.                                           |
- * |                                                                   |
- * |                       Jeffrey Friedl                              |
- * |			   jfriedl@rna.ncl.omron.co.jp		       |
- * |                       December, 1989                              |
+ * ;  In the following discussion, references are made to:             ;
+ * ;          MC88100 - RISC MICROPROCESSOR USER'S MANUAL              ;
+ * ;  (second edition). Reference in []s refer to section numbers.     ;
+ * ;                                                                   ;
+ * ;  This discussion assumes that you are at least vaguely familiar   ;
+ * ;  with 88100 exception handling (chapter 6), the MACH kernel, and  ;
+ * ;  that you have a brain (and use it while reading this).           ;
+ * ;                                                                   ;
+ * ;  I also assume (and hope) that you're not offended by             ;
+ * ;  frequent misspellings.                                           ;
+ * ;                                                                   ;
+ * ;                       Jeffrey Friedl                              ;
+ * ;			   jfriedl@rna.ncl.omron.co.jp		       ;
+ * ;                       December, 1989                              ;
  *  -------------------------------------------------------------------
  *
  * EXCEPTIONS, INTERRUPTS, and TRAPS
@@ -209,27 +210,16 @@
  *
  */
 
-#ifndef ASSEMBLER /* predefined by ascpp, at least */
-#define ASSEMBLER /* this is required for some of the include files */
+#ifndef ASSEMBLER
+#define ASSEMBLER
 #endif
 
-#include <assym.s>   	  		/* for PCB_KSP, etc */
+#include "assym.s"
 #include <machine/trap.h>        	/* for T_ defines */
-#include <machine/locore.h>		/* lots of stuff */
 #include <machine/asm.h>
 
-#ifndef PCB_USER
-#define PCB_USER 0
-#endif
-#ifndef NBPG
-#define	NBPG 4096
-#endif /* NBPG */
-#ifndef USIZE
-#define USIZE (UPAGES * NBPG) 
-#endif /* USIZE */
-
 /*
- * The exception frame as defined in "luna/m88k.h" (among other places) is
+ * The exception frame as defined in "machine/pcb.h" (among other places) is
  * a bit outdated and needs to be changed. Until then, we'll define some
  * pseudo-fields there for our needs.
  *
@@ -280,35 +270,35 @@
  ** be used freely as they've all been saved in the exception frame
  ** (which is pointed-to by r31).
  **/
-#define PREP(NAME, NUM, BIT, SSBR_STUFF, FLAG_PRECHECK)		NEWLINE \
-		xcr	FLAGS, FLAGS, SR1			NEWLINE \
-		FLAG_PRECHECK					NEWLINE \
-		 						NEWLINE \
-		/* the bsr later clobbers r1, so save now */	NEWLINE \
-		stcr	r1, SR2	/* r1 now free */		NEWLINE \
-								NEWLINE \
-		/* set or clear the FLAG_FROM_KERNEL bit */	NEWLINE \
-		ldcr	r1, EPSR				NEWLINE \
-		bb0.n	PSR_SUPERVISOR_MODE_BIT, r1, 1f		NEWLINE \
-		clr	FLAGS, FLAGS, 1<FLAG_FROM_KERNEL>	NEWLINE \
-		set	FLAGS, FLAGS, 1<FLAG_FROM_KERNEL>	NEWLINE \
-								NEWLINE \
-		/* get a stack (exception frame) */		NEWLINE \
-	1:	bsr	setup_phase_one			NEWLINE \
-								NEWLINE \
-		/* TMP2 now free -- use to set EF_VECTOR */	NEWLINE \
-		or	TMP2, r0, NUM				NEWLINE \
-		st	TMP2, r31, REG_OFF(EF_VECTOR)		NEWLINE \
-								NEWLINE \
-		/* Clear any bits in the SSBR (held in TMP) */	NEWLINE \
-		/* SSBR_STUFF may be empty, though.         */	NEWLINE \
-		SSBR_STUFF					NEWLINE \
-								NEWLINE \
-		/* call setup_phase_two to restart the FPU  */  NEWLINE \
-		/* and to save all general registers.	    */ 	NEWLINE \
-		bsr	setup_phase_two				NEWLINE \
-								NEWLINE \
-		/* All general regs free -- do any debugging */	NEWLINE \
+#define PREP(NAME, NUM, BIT, SSBR_STUFF, FLAG_PRECHECK)		; \
+		xcr	FLAGS, FLAGS, SR1			; \
+		FLAG_PRECHECK					; \
+		 						; \
+		/* the bsr later clobbers r1, so save now */	; \
+		stcr	r1, SR2	/* r1 now free */		; \
+								; \
+		/* set or clear the FLAG_FROM_KERNEL bit */	; \
+		ldcr	r1, EPSR				; \
+		bb0.n	PSR_SUPERVISOR_MODE_BIT, r1, 1f		; \
+		clr	FLAGS, FLAGS, 1<FLAG_FROM_KERNEL>	; \
+		set	FLAGS, FLAGS, 1<FLAG_FROM_KERNEL>	; \
+								; \
+		/* get a stack (exception frame) */		; \
+	1:	bsr	setup_phase_one			; \
+								; \
+		/* TMP2 now free -- use to set EF_VECTOR */	; \
+		or	TMP2, r0, NUM				; \
+		st	TMP2, r31, REG_OFF(EF_VECTOR)		; \
+								; \
+		/* Clear any bits in the SSBR (held in TMP) */	; \
+		/* SSBR_STUFF may be empty, though.         */	; \
+		SSBR_STUFF					; \
+								; \
+		/* call setup_phase_two to restart the FPU  */  ; \
+		/* and to save all general registers.	    */ 	; \
+		bsr	setup_phase_two				; \
+								; \
+		/* All general regs free -- do any debugging */	; \
 		PREP_DEBUG(BIT, NAME)
 
 #undef  EH_DEBUG
@@ -330,8 +320,7 @@
 	 *
 	 * The bits are defined in "locore.h"
 	 */
-/*	LABEL(_eh_debug) 	word 0x00000000 */
-	LABEL(_eh_debug) 	word 0xFFFFFFFF
+	LABEL(_eh_debug) 	word 0x00000000
 
 	/*
 	 * additional pre-servicing preparation to be done when
@@ -339,24 +328,24 @@
 	 * need be.
 	 */
 	#define PREP_DEBUG(DebugNumber, Name)  \
-		or.u	r2, r0, hi16(_eh_debug)		NEWLINE \
-		ld  	r3, r2, lo16(_eh_debug)		NEWLINE \
-		bb0	DebugNumber, r3, 4f		NEWLINE \
-		/* call MY_info(ef,thread,flags,kind)*/ NEWLINE \
-		or	r2, r30, r0			NEWLINE \
-		ldcr	r3, SR0				NEWLINE \
-		ldcr	r4, SR1				NEWLINE \
-		or.u	r5, r0, hi16(2f)		NEWLINE \
-		or	r5, r5, lo16(2f)		NEWLINE \
-		bsr.n	_MY_info			NEWLINE \
-		subu	r31, r31, 40			NEWLINE \
-		br.n	4f				NEWLINE \
-		addu	r31, r31, 40			NEWLINE \
-		data					NEWLINE \
-	     2: string Name				NEWLINE \
-		byte 0					NEWLINE \
-		align 4					NEWLINE \
-		text					NEWLINE \
+		or.u	r2, r0, hi16(_eh_debug)		; \
+		ld  	r3, r2, lo16(_eh_debug)		; \
+		bb0	DebugNumber, r3, 4f		; \
+		/* call MY_info(ef,thread,flags,kind)*/ ; \
+		or	r2, r30, r0			; \
+		ldcr	r3, SR0				; \
+		ldcr	r4, SR1				; \
+		or.u	r5, r0, hi16(2f)		; \
+		or	r5, r5, lo16(2f)		; \
+		bsr.n	_MY_info			; \
+		subu	r31, r31, 40			; \
+		br.n	4f				; \
+		addu	r31, r31, 40			; \
+		data					; \
+	     2: string Name				; \
+		byte 0					; \
+		align 4					; \
+		text					; \
 	     4:
 
 
@@ -368,11 +357,11 @@
 	 * Then, return from the interrupt handler.
 	 */
 	#define DONE(DebugNumber)  \
-		or.u	r2, r0, hi16(_eh_debug)		NEWLINE \
-		ld  	r3, r2, lo16(_eh_debug)		NEWLINE \
-		bb0	DebugNumber, r3, 2f		NEWLINE \
-		ldcr	r4, SR1				NEWLINE \
-		CALL(_MY_info_done, r31, r4)		NEWLINE \
+		or.u	r2, r0, hi16(_eh_debug)		; \
+		ld  	r3, r2, lo16(_eh_debug)		; \
+		bb0	DebugNumber, r3, 2f		; \
+		ldcr	r4, SR1				; \
+		CALL(_MY_info_done, r31, r4)		; \
 		2: br	return_from_exception_handler
 #else
 	/*
@@ -491,7 +480,7 @@ LABEL(fp_imprecise_handler)
 	DONE(DEBUG_FPi_BIT)
 
 /* All standard system calls.  */
-LABEL(syscall_handler)
+LABEL(_syscall_handler)
 	PREP("syscall", 128, DEBUG_SYSCALL_BIT, No_SSBR_Stuff, No_Precheck)
 	ld	r13, r30, GENREG_OFF(13)
 	CALL(_syscall, r13, r30) /* system call no. is in r13 */
@@ -579,7 +568,7 @@ LABEL(error_handler)
 	bb1      ge, r28,  2f   /* branch if at the end of the stack */
 	st	 r0,  r0, r27
 	br.n     1b
-	addu    r28, r27,   4   /* bump up */
+	addu    r27, r27,   4   /* bump up */
    2:   /* stack has been cleared */
 
 	/* ensure that stack is 8-byte aligned */
@@ -626,6 +615,7 @@ LABEL(error_handler)
 
 	ldcr	r10, DMT1
 	st	r10, r31, REG_OFF(EF_DMT1)
+	tb1	0, r0, 0
 	ldcr	r11, DMD1
 	st	r11, r31, REG_OFF(EF_DMD1)
 	ldcr	r12, DMA1
@@ -980,7 +970,7 @@ LABEL(setup_phase_one)
 	/* switch to the thread's kernel stack. */
 	or.u	r31, r0,  hi16(_curpcb)
 	ld	r31, r31, lo16(_curpcb)
-     	addu	r31, r31, PCB_USER		/* point to user save area */
+     	addu	r31, r31, PCB_USER_STATE	/* point to user save area */
 	st	FLAGS, r31, REG_OFF(EF_FLAGS)	/* save flags */
 	st	r1, r31, GENREG_OFF(1)		/* save prev. r1 (now r1 free)*/
 	ldcr	r1, SR3				/* save previous r31 */
@@ -1015,6 +1005,17 @@ LABEL(setup_phase_one)
 	st	TMP, r31, REG_OFF(EF_EPSR)
 	st	TMP2, r31, REG_OFF(EF_SFIP)
 	st	TMP3, r31, REG_OFF(EF_SNIP)
+
+	/*
+	 * Save Pbus fault status register from data and inst CMMU.
+	 */
+
+	or.u	TMP, r0, hi16(CMMU_I)
+	ld	TMP2, TMP, lo16(CMMU_I) + 0x108
+	st	TMP2, r31, REG_OFF(EF_IPFSR)
+	or.u	TMP, r0, hi16(CMMU_D)
+	ld	TMP2, TMP, lo16(CMMU_D) + 0x108
+	st	TMP2, r31, REG_OFF(EF_DPFSR)
 
 	ldcr	TMP, SSBR
 	ldcr	TMP2, SXIP
@@ -1062,6 +1063,7 @@ LABEL(setup_phase_one)
 	st	TMP2, r31, REG_OFF(EF_DMA2)
 	st	TMP3, r31, REG_OFF(EF_DMD0)
 
+	tb1	0,r0,0
 	ldcr	TMP2, DMD1
 	ldcr	TMP3, DMD2
 	st	TMP2, r31, REG_OFF(EF_DMD1)
@@ -1278,7 +1280,7 @@ LABEL(setup_phase_one)
 	 * which can be checked by matching against two templates:
 	 *			 -- 77776666555544443333222211110000 --
 	 *	if (((instruction & 11111100000000000000000000000000) ==
-	 *			    00010000000000000000000000000000) ||
+	 *			    00010000000000000000000000000000) ;;
 	 *	    ((instruction & 11111100000000001111110011100000) ==
 	 *			    11110100000000000001000000000000))
 	 *	{
@@ -1476,13 +1478,16 @@ LABEL(setup_phase_one)
 	 * If it's not the interrupt exception, enable interrupts and
 	 * take care of any data access exceptions......
 	 *
+#if notyet
 	 * If interrupt exception, switch to interrupt stack if not
 	 * already there. Else, switch to kernel stack.
+#endif
 	 */
 	or	r30, r0, r31              /* get a copy of the e.f. pointer */
         ld	r2,  r31, REG_OFF(EF_EPSR)
   	bb1	PSR_SUPERVISOR_MODE_BIT, r2, 1f  /* If in kernel mode */
 
+#if notyet
 	ld	r3,  r31, REG_OFF(EF_VECTOR)
 	cmp	r3,  r3, 1		/* is interrupt ? */
 	bb0	eq,  r3, 2f
@@ -1490,16 +1495,19 @@ LABEL(setup_phase_one)
 	or	r31, r31, lo16(_intstack_end)
 	br	3f
   2:
+#endif
 	or.u	r31, r0,  hi16(_kstack)
 	ld	r31, r31, lo16(_kstack)
 	addu	r31, r31, USIZE        /* point at proper end */
 	br	3f
   1:
+#if notyet
 	ld	r3,  r31, REG_OFF(EF_VECTOR)
 	cmp	r3,  r3, 1		/* is interrupt ? */
 	bb0	eq,  r3, 3f		/* no, we will stay on kern stack */
 	or.u	r31, r0,  hi16(_intstack_end)	/* swith to int stack */
 	or	r31, r31, lo16(_intstack_end)
+#endif /* notyet */
  /* This label is here for debugging */
  exception_handler_has_ksp:  global exception_handler_has_ksp
   3:    /*
@@ -1558,13 +1566,41 @@ LABEL(setup_phase_one)
 	jmp	r14 /* loaded above */
 
 
-
 /*
- * ##########################################################################
- * ##########################################################################
- * ##########################################################################
+ * proc_trampoline.
+ * When a process setup by cpu_set_kpc() resumes, it will find itself in
+ * proc_trampoline, with r31 pointing to a ksigframe. proc_trampoline will
+ * load func and proc values from ksigframe, call the function, and on return
+ * pop off the ksigframe. Then, it will load pc from the switchframe and
+ * jump there.
  */
 
+ENTRY(proc_trampoline)
+	ld 	r1,r31,0		/* load func */
+	ld 	r2,r31,4		/* load proc pointer */
+	jsr.n 	r1
+	subu 	r31,r31,40		/* create stack space for function */
+	addu 	r31,r31,48		/* stack space above + ksigframe */
+	ld	r1, r31,0		/* load pc */
+	ld	r2, r31,4		/* & proc pointer from switch frame */
+	jsr.n	r1
+	addu	r31,r31,8
+	bsr	_panic
+
+/*
+ * proc_do_uret 
+ * this is called as proc_do_uret(proc) from proc_trampoline(). This function
+ * loads r31 with a pointer to the trap frame for the given proc and calls
+ * return_from_exception_handler which loads all the registers and does an
+ * rte.
+ */
+
+ENTRY(proc_do_uret)
+	ld	r3,r2,P_ADDR			/* p->p_addr */
+	addu	r3,r3,PCB_USER_STATE		/* p->p_addr.u_pcb.user_state */
+	st	r3,r31,0			/* put it on the stack */
+	br      return_from_exception_handler
+	
 LABEL(return_from_exception_handler)
 LABEL(_return_from_main)
 	/*
@@ -1606,13 +1642,18 @@ LABEL(_return_from_main)
             br 1f
 		data
 		2:  string "OOPS: DMT0 not zero and not interrupt.\n\000"
-		    align 4
+		    align 8
 		text
        1:
 #endif
 	/*
 	 * If it's the interrupt exception, enable interrupt.
 	 * Take care of any data access exception...... 90/8/15 add by yama
+	 */
+
+	/*
+	 * Is it ever possible to have interrupt exception while EPSR has
+	 * it disabled? I don't think so.. XXX nivas
 	 */
 	ld	r2, FPTR, REG_OFF(EF_VECTOR)
 	cmp	r2, r2, 1   /* interrupt is exception #1 ; Is an interrupt? */
@@ -1640,59 +1681,71 @@ LABEL(_return_from_main)
 	st	r0 , FPTR, REG_OFF(EF_DMT0)
    2:
 
+/*
+ *	If the saved ipl is 0, then call dosoftint() to process soft
+ *	interrupts.
+ *	If returning to user land, look for ASTs
+ */
+
 LABEL(_check_ast)
 
-	ldcr	r1, PSR				     /* get current PSR */
-	set	r1, r1, 1<PSR_INTERRUPT_DISABLE_BIT> /* set for disable intr. */
-	stcr	r1, PSR				     /* install new PSR */
-	FLUSH_PIPELINE
-
-	/*
-	 *
-	 * This code (including a bit above) is more or less:
-	 *
-	 *    check_ast:
-	 *
-	 *	Disable interrupts
-	 *	if (exception was from user mode && want_ast)
-	 *	{
-	 *	    trap(AST, frame)
-	 *	    goto check_ast
-	 *	}
-	 *
-	 * We want to service AST's only if returning to user space.
-	 */
-
 	ld	r2, FPTR, REG_OFF(EF_EPSR)   /* get pre-exception PSR */
-	bb1	PSR_SUPERVISOR_MODE_BIT, r2, no_ast /*skip if in system mode */
+        bb1	PSR_INTERRUPT_DISABLE_BIT, r2, 1f /* skip if ints off */
+	ld	r2, FPTR, REG_OFF(EF_MASK)   /* get pre-exception ipl */
+	bcnd	ne0, r2, 1f		     /* can't do softint's */
+	bsr.n	_setipl
+	or	r2,r0,1
+	bsr	_dosoftint
+	/* is this needed? we are going to restore the ipl below XXX nivas */
+	bsr.n	_setipl
+	or	r2,r0,0		     	     /* ints are enabled */
+					     /* at ipl 0 now */
+      1:
+	ld	r2, FPTR, REG_OFF(EF_EPSR)   /* get pre-exception PSR */
+     	bb1	PSR_SUPERVISOR_MODE_BIT, r2, no_ast /*skip if in system mode */
 
+	/* should assert here - not in user mode with ints off XXX nivas */
 	/* get and check want_ast */
 	or.u	r2, r0, hi16(_want_ast)
 	ld	r3, r2, lo16(_want_ast)
 	bcnd	eq0, r3, no_ast
-					/*
-					 * trap(AST,...) will service
-					 * software interrupts and 
-					 * network interrupts
-					 */
-        CALL(_trap, T_ASTFLT, FPTR) 	/* enter with interrupts disabled */
-        subu	r31, r31, 40		/* return with interrupts enabled */
-        addu    r31, r31, 40
-	br	_check_ast		/* and check again..... */
+
+	/*
+	 * trap(AST,...) will service ast's.
+	 */
+
+        CALL(_trap, T_ASTFLT, FPTR)
+
+#if 0
+	/* assert that ipl is 0; if going back to user, it should be 0 */
+
+	bsr	_getipl
+	bcnd	eq0, r2, 2f
+	bsr	panic
+      2:
+#endif
 
 _LABEL(no_ast)
 
-  /* now ready to return....*/
+	/* disable interrupts */
+
+	ldcr	r1, PSR				     
+	set	r1, r1, 1<PSR_INTERRUPT_DISABLE_BIT>
+        FLUSH_PIPELINE
+	stcr	r1, PSR
+
+	 /* now ready to return....*/
 
     /*
      * Transfer the frame pointer to r31, since we no longer need a stack.
      * No page faults here, and interrupts are disabled.
      */
 
+	ld	r2, FPTR, REG_OFF(EF_MASK)   /* get pre-exception ipl */
+	bsr	_setipl
+
         or	r31, r0,  FPTR
-
-
-/* restore r1 later */
+	/* restore r1 later */
 	ld.d	r2 , r31, GENREG_OFF(2)
 	ld.d	r4 , r31, GENREG_OFF(4)
 	ld.d	r6 , r31, GENREG_OFF(6)
@@ -1709,14 +1762,15 @@ _LABEL(no_ast)
 	ld.d	r28, r31, GENREG_OFF(28)
 	/* restore r1, r30, r31 later */
 
-
-	/* disable shadowing (interrupts already disabled above) */
+	/* disable shadowing */
 	ldcr	r1, PSR
 	set	r1, r1, 1<PSR_SHADOW_FREEZE_BIT>
 	FLUSH_PIPELINE
 	stcr	r1, PSR
 
 	/* reload the control regs*/
+	st	r0,r31, REG_OFF(EF_IPFSR)
+	st	r0,r31, REG_OFF(EF_DPFSR)
 
 	/*
 	 * Note: no need to restore the SXIP.
@@ -1743,7 +1797,3 @@ _LABEL(no_ast)
 
     _LABEL(return_from_exception)
 	RTE
-
-/***********************************************************************/
-/***********************************************************************/
-/***********************************************************************/

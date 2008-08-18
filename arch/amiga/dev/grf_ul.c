@@ -1,5 +1,5 @@
-/*	$OpenBSD: grf_ul.c,v 1.9 1996/05/29 10:15:17 niklas Exp $	*/
-/*	$NetBSD: grf_ul.c,v 1.17 1996/05/09 20:31:25 is Exp $	*/
+/*	$OpenBSD: grf_ul.c,v 1.12 1997/01/16 09:24:21 niklas Exp $	*/
+/*	$NetBSD: grf_ul.c,v 1.23 1996/12/23 09:10:10 veego Exp $	*/
 
 #define UL_DEBUG
 
@@ -17,8 +17,9 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Lutz Vieweg.
- * 4. The name of the author may not be used to endorse or promote products
+ *      This product includes software developed by Ignatios Souvatzis for
+ *      the NetBSD project.
+ * 4. The name of the authors may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
@@ -440,7 +441,7 @@ ul_load_mon(gp, md)
 int ul_mode __P((struct grf_softc *, u_long, void *, u_long, int));
 
 void grfulattach __P((struct device *, struct device *, void *));
-int grfulprint __P((void *, char *));
+int grfulprint __P((void *, const char *));
 int grfulmatch __P((struct device *, void *, void *));
  
 struct cfattach grful_ca = {
@@ -454,7 +455,7 @@ struct cfdriver grful_cd = {
 /*
  * only used in console init
  */
-static struct cfdata *cfdata;
+static struct cfdata *grful_cfdata;
 
 /*
  * we make sure to only init things once.  this is somewhat
@@ -497,7 +498,7 @@ grfulmatch(pdp, match, auxp)
 #ifdef ULOWELLCONSOLE 
 		if (amiga_realconfig == 0) {
 			ulconunit = cfp->cf_unit;
-			cfdata = cfp;
+			grful_cfdata = cfp;
 		} 
 	}
 #endif
@@ -566,13 +567,13 @@ grfulattach(pdp, dp, auxp)
 	/*
 	 * attach grf
 	 */
-	amiga_config_found(cfdata, &gp->g_device, gp, grfulprint);
+	amiga_config_found(grful_cfdata, &gp->g_device, gp, grfulprint);
 }
 
 int
 grfulprint(auxp, pnp)
 	void *auxp;
-	char *pnp;
+	const char *pnp;
 {
 	if (pnp)
 		printf("grf%d at %s", ((struct grf_softc *)auxp)->g_unit,
@@ -912,7 +913,7 @@ ul_blank(gp, onoff, dev)
 	gsp->ctrl = (gsp->ctrl & ~(INCR | INCW)) | LBL;
 	gsp->hstadrh = 0xC000;
 	gsp->hstadrl = 0x0080;
-	if (*onoff)
+	if (*onoff > 0)
 		gsp->data |= 0x9000;
 	else
 		gsp->data &= ~0x9000;

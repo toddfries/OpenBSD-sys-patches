@@ -1,4 +1,4 @@
-/*	$OpenBSD: macrom.h,v 1.3 1996/05/26 18:36:25 briggs Exp $	*/
+/*	$OpenBSD: macrom.h,v 1.8 1997/04/14 18:48:03 gene Exp $	*/
 /*	$NetBSD: macrom.h,v 1.9 1996/05/25 14:45:35 briggs Exp $	*/
 
 /*-
@@ -78,9 +78,12 @@ extern caddr_t		ExpandMem;	/* pointer to Expanded Memory used by */
 extern u_int16_t	VBLQueue;	/* Vertical blanking Queue, unused ? */
 extern caddr_t		VBLQueue_head;	/* Vertical blanking Queue, head */
 extern caddr_t		VBLQueue_tail;	/* Vertical blanking Queue, tail */
+extern caddr_t		jDTInstall;	/* short-cut to deferred task mgr */
+					/* trap handler */
 
 extern u_int32_t	**InitEgretJTVec; /* pointer to a jump table for */
 					  /* InitEgret on AV machines */
+extern caddr_t	jCacheFlush;		/* pointer to CacheFlush */
 
 	/* Types */
 
@@ -96,7 +99,7 @@ typedef struct {
 	unsigned char	devType;
 	unsigned char	origADBAddr;
 	Ptr		dbServiceRtPtr;
-	Ptr		dbDataAreaAdd;
+	Ptr		dbDataAreaAddr;
 } ADBDataBlock;
 
 
@@ -108,6 +111,10 @@ int MyOwnTrap(
 void KnownRTS(
 	void);
 
+#ifdef MRG_ADB		/* These routines are defined here
+			 * if using the MRG_ADB method for accessing
+			 * the ADB/PRAM/RTC. They are 
+			 * defined in adb_direct.h */
 /* ADB Manager */
 int SetADBInfo(
 	ADBSetInfoBlock *info,
@@ -129,6 +136,7 @@ int ADBOp(
 	short	commandNum);
 void ADBAlternateInit(
 	void);
+#endif
 
 /* Memory Manager */
 Ptr NewPtr(
@@ -243,6 +251,7 @@ int	mrg_DisposPtr __P((void));
 int	mrg_GetPtrSize __P((void));
 int	mrg_SetPtrSize __P((void));
 int	mrg_PostEvent __P((void));
+int	mrg_GetTrapAddress __P((void));
 int	mrg_SetTrapAddress __P((void));
 void	mrg_StripAddress __P((void));
 void	mrg_aline_super __P((struct frame *));
@@ -258,6 +267,6 @@ int	mach_cputype __P((void));
 
 /* trace all instructions, not just flow changes. */
 #define tron() \
-	asm("movw sr, d0 ; orw #0x8000, d0 ; movw d0, sr" : : : "d0")
+	__asm("movw sr, d0 ; orw #0x8000, d0 ; movw d0, sr" : : : "d0")
 #define troff() \
-	asm("movw sr, d0 ; andw #0x3fff, d0 ; movw d0, sr" : : : "d0")
+	__asm("movw sr, d0 ; andw #0x3fff, d0 ; movw d0, sr" : : : "d0")

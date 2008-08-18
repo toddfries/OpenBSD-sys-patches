@@ -1,5 +1,5 @@
-/*	$OpenBSD: conf.c,v 1.6 1996/08/29 09:25:48 deraadt Exp $	*/
-/*	$NetBSD: conf.c,v 1.11 1996/04/12 02:07:23 cgd Exp $	*/
+/*	$OpenBSD: conf.c,v 1.11 1997/05/06 19:47:12 niklas Exp $	*/
+/*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -44,25 +44,16 @@
 #include <sys/conf.h>
 #include <sys/vnode.h>
 
-int	ttselect	__P((dev_t, int, struct proc *));
-
-#ifndef LKM
-#define	lkmenodev	enodev
-#else
-int	lkmenodev();
-#endif
-
 bdev_decl(sw);
 #include "st.h"
-bdev_decl(st);
 #include "cd.h"
-bdev_decl(cd);
 #include "sd.h"
-bdev_decl(sd);
+#include "ss.h"
+#include "uk.h"
 #include "vnd.h"
-bdev_decl(vnd);
 #include "ccd.h"
-bdev_decl(ccd);
+#include "rd.h"
+bdev_decl(rd);
 
 struct bdevsw	bdevsw[] =
 {
@@ -72,7 +63,7 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NCD,cd),		/* 3: SCSI CD-ROM */
 	bdev_notdef(),			/* 4 */
 	bdev_notdef(),			/* 5 */
-	bdev_notdef(),			/* 6 */
+	bdev_disk_init(NRD,rd),		/* 6: ram disk driver */
 	bdev_disk_init(NCCD,ccd),	/* 7: concatenated disk driver */
 	bdev_disk_init(NSD,sd),		/* 8: SCSI disk */
 	bdev_disk_init(NVND,vnd),	/* 9: vnode disk driver */
@@ -89,7 +80,7 @@ int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
 #define cdev_wscons_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
 	dev_init(c,n,write), dev_init(c,n,ioctl), dev_init(c,n,stop), \
-	dev_init(c,n,tty), ttselect, dev_init(c,n,mmap), D_TTY }
+	dev_init(c,n,tty), ttselect /* ttpoll */, dev_init(c,n,mmap), D_TTY }
 
 /* open, close, write, ioctl */
 #define cdev_lpt_init(c,n) { \
@@ -97,40 +88,17 @@ int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, seltrue, (dev_type_mmap((*))) enodev }
 
-cdev_decl(cn);
-cdev_decl(ctty);
 #define	mmread  mmrw
 #define	mmwrite mmrw
 cdev_decl(mm);
 cdev_decl(sw);
 #include "pty.h"
-#define	ptstty		ptytty
-#define	ptsioctl	ptyioctl
-cdev_decl(pts);
-#define	ptctty		ptytty
-#define	ptcioctl	ptyioctl
-cdev_decl(ptc);
-cdev_decl(log);
 #include "tun.h"
-cdev_decl(tun);
-cdev_decl(sd);
-cdev_decl(vnd);
-cdev_decl(ccd);
 dev_type_open(filedescopen);
 #include "bpfilter.h"
-cdev_decl(bpf);
-cdev_decl(st);
-cdev_decl(cd);
 #include "ch.h"
-cdev_decl(ch);
 #include "scc.h"
 cdev_decl(scc);
-#ifdef LKM
-#define	NLKM	1
-#else
-#define	NLKM	0
-#endif
-cdev_decl(lkm);
 #include "audio.h"
 cdev_decl(audio);
 #include "wscons.h"
@@ -141,10 +109,13 @@ cdev_decl(kbd);
 cdev_decl(ms);
 #include "lpt.h"
 cdev_decl(lpt);
-#include "random.h"
-cdev_decl(random);
-#include "uk.h"
-cdev_decl(uk);
+cdev_decl(rd);
+cdev_decl(ipl);
+#ifdef IPFILTER
+#define NIPF 1
+#else
+#define NIPF 0
+#endif
 
 cdev_decl(prom);			/* XXX XXX XXX */
 
@@ -179,12 +150,14 @@ struct cdevsw	cdevsw[] =
 	cdev_wscons_init(NWSCONS,wscons), /* 25: workstation console */
 	cdev_tty_init(NCOM,com),	/* 26: ns16550 UART */
 	cdev_disk_init(NCCD,ccd),	/* 27: concatenated disk driver */
-	cdev_notdef(),			/* 28 */
+	cdev_disk_init(NRD,rd),		/* 28: ram disk driver */
 	cdev_mouse_init(NWSCONS,kbd),	/* 29: /dev/kbd XXX */
 	cdev_mouse_init(NWSCONS,ms),	/* 30: /dev/mouse XXX */
 	cdev_lpt_init(NLPT,lpt),	/* 31: parallel printer */
-	cdev_uk_init(NUK,uk),		/* 32: unknown SCSI */
-	cdev_random_init(NRANDOM,random), /* 33: random data source */
+	cdev_scanner_init(NSS,ss),	/* 32: SCSI scanner */
+	cdev_uk_init(NUK,uk),		/* 33: SCSI unknown */
+	cdev_random_init(1,random),	/* 34: random data source */
+	cdev_gen_ipf(NIPF,ipl),		/* 35: IP filter log */
 };
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
 
@@ -204,6 +177,7 @@ dev_t	swapdev = makedev(1, 0);
 /*
  * Returns true if dev is /dev/mem or /dev/kmem.
  */
+int
 iskmemdev(dev)
 	dev_t dev;
 {
@@ -214,6 +188,7 @@ iskmemdev(dev)
 /*
  * Returns true if dev is /dev/zero.
  */
+int
 iszerodev(dev)
 	dev_t dev;
 {
@@ -232,12 +207,12 @@ static int chrtoblktbl[] = {
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
 	/*  7 */	NODEV,
-	/*  8 */	8,
-	/*  9 */	9,
+	/*  8 */	8,		/* sd */
+	/*  9 */	9,		/* vnd */
 	/* 10 */	NODEV,
 	/* 11 */	NODEV,
-	/* 12 */	NODEV,
-	/* 13 */	3,
+	/* 12 */	2,		/* st */
+	/* 13 */	3,		/* cd */
 	/* 14 */	NODEV,
 	/* 15 */	NODEV,
 	/* 16 */	NODEV,
@@ -251,16 +226,21 @@ static int chrtoblktbl[] = {
 	/* 24 */	NODEV,
 	/* 25 */	NODEV,
 	/* 26 */	NODEV,
-	/* 27 */	7,
-	/* 28 */	NODEV,
+	/* 27 */	7,		/* ccd */
+	/* 28 */	6,		/* rd */
 	/* 29 */	NODEV,
 	/* 30 */	NODEV,
 	/* 31 */	NODEV,
+	/* 32 */	NODEV,
+	/* 33 */	NODEV,
+	/* 34 */	NODEV,
+	/* 35 */	NODEV,
 };
 
 /*
  * Convert a character device number to a block device number.
  */
+dev_t
 chrtoblk(dev)
 	dev_t dev;
 {
@@ -272,4 +252,22 @@ chrtoblk(dev)
 	if (blkmaj == NODEV)
 		return (NODEV);
 	return (makedev(blkmaj, minor(dev)));
+}
+
+/*
+ * Convert a character device number to a block device number.
+ */
+dev_t
+blktochr(dev)
+	dev_t dev;
+{
+	int blkmaj = major(dev);
+	int i;
+
+	if (blkmaj >= nblkdev)
+		return (NODEV);
+	for (i = 0; i < sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]); i++)
+		if (blkmaj == chrtoblktbl[i])
+			return (makedev(i, minor(dev)));
+	return (NODEV);
 }

@@ -46,7 +46,7 @@
  * Machine-dependent constants (VM, etc) common across MIPS cpus
  */
 
-#include <pmax/mips_param.h>
+#include <machine/mips_param.h>
 
 /*
  * Machine dependent constants for DEC Station 3100.
@@ -88,8 +88,8 @@
  * of the hardware page size.
  */
 #define	MSIZE		128		/* size of an mbuf */
-#define	MCLBYTES	2048		/* enough for whole Ethernet packet */
-#define	MCLSHIFT	10
+#define	MCLSHIFT	11
+#define	MCLBYTES	(1 << MCLSHIFT)	/* enough for whole Ethernet packet */
 #define	MCLOFSET	(MCLBYTES - 1)
 #ifndef NMBCLUSTERS
 #ifdef GATEWAY

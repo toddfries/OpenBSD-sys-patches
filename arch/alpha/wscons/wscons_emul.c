@@ -1,5 +1,5 @@
-/*	$OpenBSD: wscons_emul.c,v 1.2 1996/07/29 23:02:57 niklas Exp $	*/
-/*	$NetBSD: wscons_emul.c,v 1.2 1996/04/12 06:10:29 cgd Exp $	*/
+/*	$OpenBSD: wscons_emul.c,v 1.5 1997/04/08 23:30:26 michaels Exp $	*/
+/*	$NetBSD: wscons_emul.c,v 1.7 1996/11/19 05:23:13 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -34,9 +34,25 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
 #include <alpha/wscons/wsconsvar.h>
 #include <alpha/wscons/wscons_emul.h>
+#include <alpha/wscons/kbd.h>
 #include <alpha/wscons/ascii.h>
+
+static __inline int wscons_emul_input_normal
+    __P((struct wscons_emul_data *, char));
+static __inline int wscons_emul_input_haveesc
+    __P((struct wscons_emul_data *, char));
+static __inline void wscons_emul_docontrol
+    __P((struct wscons_emul_data *, char));
+static __inline int wscons_emul_input_control
+    __P((struct wscons_emul_data *, char));
+
+static int wscons_emul_input_normal __P((struct wscons_emul_data *, char));
+static int wscons_emul_input_haveesc __P((struct wscons_emul_data *, char));
+static void wscons_emul_docontrol __P((struct wscons_emul_data *, char));
+static int wscons_emul_input_control __P((struct wscons_emul_data *, char));
 
 void
 wscons_emul_attach(we, wo)
@@ -48,19 +64,20 @@ wscons_emul_attach(we, wo)
 #ifdef DIAGNOSTIC
 	if (we == NULL || wo == NULL)
 		panic("wscons_emul_attach: bogus args");
-	if (wo->wo_ef == NULL)
+	if (wo->wo_emulfuncs == NULL)
 		panic("wscons_emul_attach: bogus emul functions");
 #endif
-	if (wo->wo_nrows < 0 || wo->wo_ncols < 0)
-		panic("wscons_emul_attach: bogus size");
+	if (wo->wo_nrows <= 0 || wo->wo_ncols <= 0)
+		panic("wscons_emul_attach: bogus size (%d/%d)",
+		    wo->wo_nrows, wo->wo_ncols);
 	if (wo->wo_crow < 0 || wo->wo_ccol < 0 ||
 	    wo->wo_crow >= wo->wo_nrows || wo->wo_ccol >= wo->wo_ncols)
 		panic("wscons_emul_attach: bogus location (n: %d/%d, c: %d/%d",
 		    wo->wo_nrows, wo->wo_ncols, wo->wo_crow, wo->wo_ccol);
 
 	we->ac_state = ANSICONS_STATE_NORMAL;
-	we->ac_ef = wo->wo_ef;
-	we->ac_efa = wo->wo_efa;
+	we->ac_ef = wo->wo_emulfuncs;
+	we->ac_efa = wo->wo_emulfuncs_cookie;
 
 	we->ac_nrow = wo->wo_nrows;
 	we->ac_ncol = wo->wo_ncols;
@@ -74,7 +91,7 @@ wscons_emul_attach(we, wo)
 	(*we->ac_ef->wef_cursor)(we->ac_efa, 1, we->ac_crow, we->ac_ccol);
 }
 
-static inline int
+static __inline int
 wscons_emul_input_normal(we, c)
 	struct wscons_emul_data *we;
 	char c;
@@ -113,19 +130,11 @@ wscons_emul_input_normal(we, c)
 		if (we->ac_crow >= we->ac_nrow)
 			panic("wscons_emul: didn't scroll (1)");
 #endif
-
-#if 0
-		(*we->ac_ef->wef_copyrows)(we->ac_efa, 1, 0,
-		    we->ac_nrow - 1);
+		(*we->ac_ef->wef_copyrows)(we->ac_efa, JUMPSCROLL, 0,
+		    we->ac_nrow - JUMPSCROLL);
 		(*we->ac_ef->wef_eraserows)(we->ac_efa,
-		    we->ac_nrow - 1, 1);
-#else
-		(*we->ac_ef->wef_copyrows)(we->ac_efa, 10, 0,
-		    we->ac_nrow - 10);
-		(*we->ac_ef->wef_eraserows)(we->ac_efa,
-		    we->ac_nrow - 10, 10);
-		we->ac_crow -= 10 - 1;
-#endif
+		    we->ac_nrow - JUMPSCROLL, JUMPSCROLL);
+		we->ac_crow -= JUMPSCROLL - 1;
 		break;
 
 	case ASCII_VT:
@@ -176,26 +185,18 @@ wscons_emul_input_normal(we, c)
 			panic("wscons_emul: didn't scroll (2)");
 #endif
 
-#if 0
-		/* scroll all of the rows up one; leave current row # alone */
-		(*we->ac_ef->wef_copyrows)(we->ac_efa, 1, 0,
-		    we->ac_nrow - 1);
+		(*we->ac_ef->wef_copyrows)(we->ac_efa, JUMPSCROLL, 0,
+		    we->ac_nrow - JUMPSCROLL);
 		(*we->ac_ef->wef_eraserows)(we->ac_efa,
-		    we->ac_nrow - 1, 1);
-#else
-		(*we->ac_ef->wef_copyrows)(we->ac_efa, 10, 0,
-		    we->ac_nrow - 10);
-		(*we->ac_ef->wef_eraserows)(we->ac_efa,
-		    we->ac_nrow - 10, 10);
-		we->ac_crow -= 10 - 1;
-#endif
+		    we->ac_nrow - JUMPSCROLL, JUMPSCROLL);
+		we->ac_crow -= JUMPSCROLL - 1;
 		break;
 	}
 
 	return newstate;
 }
 
-static inline int
+static __inline int
 wscons_emul_input_haveesc(we, c)
 	struct wscons_emul_data *we;
 	char c;
@@ -219,7 +220,7 @@ wscons_emul_input_haveesc(we, c)
 	return newstate;
 }
 
-static inline void
+static __inline void
 wscons_emul_docontrol(we, c)
 	struct wscons_emul_data *we;
 	char c;
@@ -349,7 +350,7 @@ wscons_emul_docontrol(we, c)
 	}
 }
 
-static inline int
+static __inline int
 wscons_emul_input_control(we, c)
 	struct wscons_emul_data *we;
 	char c;

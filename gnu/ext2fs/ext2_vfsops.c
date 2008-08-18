@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2_vfsops.c,v 1.11 1996/07/14 09:45:03 downsj Exp $	*/
+/*	$OpenBSD: ext2_vfsops.c,v 1.14 1996/11/09 08:38:34 downsj Exp $	*/
 
 /*
  *  modified for EXT2FS support in Lites 1.1
@@ -125,8 +125,8 @@ static int	compute_sb_data __P((struct vnode * devvp,
  */
 #define ROOTNAME	"root_device"
 
-static int
-ext2_mountroot()
+int
+ext2fs_mountroot()
 {
 	extern struct vnode *rootvp;
 	register struct ext2_sb_info *fs;
@@ -140,7 +140,7 @@ ext2_mountroot()
 	 * Get vnodes for swapdev and rootdev.
 	 */
 	if (bdevvp(swapdev, &swapdev_vp) || bdevvp(rootdev, &rootvp))
-		panic("ext2_mountroot: can't setup bdevvp's");
+		panic("ext2fs_mountroot: can't setup bdevvp's");
 
 	mp = bsd_malloc((u_long)sizeof(struct mount), M_MOUNT, M_WAITOK);
 	bzero((char *)mp, (u_long)sizeof(struct mount));
@@ -254,7 +254,7 @@ ext2_mount(mp, path, data, ndp, p)
 	 * and verify that it refers to a sensible block device.
 	 */
 	NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, p);
-	if (error = namei(ndp))
+	if ((error = namei(ndp)) != 0)
 		return (error);
 	devvp = ndp->ni_vp;
 
@@ -494,7 +494,7 @@ ext2_reload(mountp, cred, p)
 	 * Step 2: re-read superblock from disk.
 	 * constants have been adjusted for ext2
 	 */
-	if (error = bread(devvp, SBLOCK, SBSIZE, NOCRED, &bp))
+	if ((error = bread(devvp, SBLOCK, SBSIZE, NOCRED, &bp)) != 0)
 		return (error);
 	es = (struct ext2_super_block *)bp->b_data;
 	if (es->s_magic != EXT2_SUPER_MAGIC) {
@@ -511,7 +511,7 @@ ext2_reload(mountp, cred, p)
 	fs = VFSTOUFS(mountp)->um_e2fs;
 	bcopy(bp->b_data, fs->s_es, sizeof(struct ext2_super_block));
 
-	if(error = compute_sb_data(devvp, es, fs)) {
+	if ((error = compute_sb_data(devvp, es, fs)) != 0) {
 		brelse(bp);
 		return error;
 	}
@@ -542,9 +542,9 @@ loop:
 		 * Step 6: re-read inode data for all active vnodes.
 		 */
 		ip = VTOI(vp);
-		if (error =
-		    bread(devvp, fsbtodb(fs, ino_to_fsba(fs, ip->i_number)),
-		    (int)fs->s_blocksize, NOCRED, &bp)) {
+		error = bread(devvp, fsbtodb(fs, ino_to_fsba(fs, ip->i_number)),
+		    (int)fs->s_blocksize, NOCRED, &bp);
+		if (error != 0) {
 			vput(vp);
 			return (error);
 		}
@@ -882,7 +882,7 @@ loop:
 			continue;
 		if (vget(vp, 1))
 			goto loop;
-		if (error = VOP_FSYNC(vp, cred, waitfor, p))
+		if ((error = VOP_FSYNC(vp, cred, waitfor, p)) != 0)
 			allerror = error;
 		vput(vp);
 	}
@@ -915,17 +915,17 @@ ext2_vget(mp, ino, vpp)
 	struct buf *bp;
 	struct vnode *vp;
 	dev_t dev;
-	int error;
+	int i, error;
 	int used_blocks;
 
 	ump = VFSTOUFS(mp);
 	dev = ump->um_dev;
-restart:
+
 	if ((*vpp = ufs_ihashget(dev, ino)) != NULL)
 		return (0);
 
 	/* Allocate a new vnode/inode. */
-	if (error = getnewvnode(VT_EXT2FS, mp, ext2_vnodeop_p, &vp)) {
+	if ((error = getnewvnode(VT_EXT2FS, mp, ext2_vnodeop_p, &vp)) != 0) {
 		*vpp = NULL;
 		return (error);
 	}
@@ -983,8 +983,6 @@ restart:
 	   although for regular files and directories only
 	*/
 	if(S_ISDIR(ip->i_mode) || S_ISREG(ip->i_mode)) {
-		int i;
-
 		used_blocks = (ip->i_size+fs->s_blocksize-1) / fs->s_blocksize;
 		for(i = used_blocks; i < EXT2_NDIR_BLOCKS; i++)
 			ip->i_db[i] = 0;

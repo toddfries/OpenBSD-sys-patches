@@ -1,5 +1,5 @@
-/*	$OpenBSD: ppb.c,v 1.3 1996/05/07 07:38:51 deraadt Exp $	*/
-/*	$NetBSD: ppb.c,v 1.8 1996/05/03 17:33:51 christos Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.5 1996/11/28 23:28:14 niklas Exp $	*/
+/*	$NetBSD: ppb.c,v 1.12 1996/10/21 22:57:00 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -61,7 +61,7 @@ struct cfdriver ppb_cd = {
 	NULL, "ppb", DV_DULL
 };
 
-int	ppbprint __P((void *, char *pnp));
+int	ppbprint __P((void *, const char *pnp));
 
 int
 ppbmatch(parent, match, aux)
@@ -120,7 +120,8 @@ ppbattach(parent, self, aux)
 	 * Attach the PCI bus than hangs off of it.
 	 */
 	pba.pba_busname = "pci";
-	pba.pba_bc = pa->pa_bc;
+	pba.pba_iot = pa->pa_iot;
+	pba.pba_memt = pa->pa_memt;
 	pba.pba_pc = pc;
 	pba.pba_bus = PPB_BUSINFO_SECONDARY(busdata);
 	pba.pba_intrswiz = pa->pa_intrswiz;
@@ -132,7 +133,7 @@ ppbattach(parent, self, aux)
 int
 ppbprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 	struct pcibus_attach_args *pba = aux;
 

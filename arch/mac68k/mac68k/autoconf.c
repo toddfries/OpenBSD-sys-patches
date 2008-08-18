@@ -1,5 +1,5 @@
-/*	$OpenBSD: autoconf.c,v 1.8 1996/06/23 15:59:42 briggs Exp $	*/
-/*	$NetBSD: autoconf.c,v 1.31 1996/06/19 03:21:03 scottr Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.10 1997/01/24 01:35:43 briggs Exp $	*/
+/*	$NetBSD: autoconf.c,v 1.38 1996/12/18 05:46:09 scottr Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -71,6 +71,9 @@
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 
+#include <ufs/ffs/ffs_extern.h>
+
+#include "ether.h"
 
 struct device	*booted_device;
 int		booted_partition;
@@ -236,20 +239,16 @@ setroot(void)
 	register int len;
 	dev_t nrootdev, nswapdev = NODEV;
 	char buf[128];
-	extern int (*mountroot) __P((void *));
 	dev_t temp;
 	struct device *bootdv, *rootdv, *swapdv;
 	int bootpartition;
 #if defined(NFSCLIENT)
 	extern char *nfsbootdevname;
-	extern int nfs_mountroot __P((void *));
-#endif
-#if defined(FFS)
-	extern int ffs_mountroot __P((void *));
 #endif
 
 	bootdv = booted_device;
 	bootpartition = booted_partition;
+	rootdv = swapdv = NULL;		/* XXX work around gcc warning */
 
 #ifdef DEBUG
 	printf("boot device: %s\n",
@@ -380,7 +379,9 @@ gotswap:
 #if defined(NFSCLIENT)
 	case DV_IFNET:
 		mountroot = nfs_mountroot;
+#if NETHER > 0
 		nfsbootdevname = rootdv->dv_xname;
+#endif
 		return;
 #endif
 #if defined(FFS)

@@ -1,3 +1,6 @@
+/*	$OpenBSD: smc93cx6.c,v 1.6 1996/11/28 23:27:53 niklas Exp $	*/
+/*	$NetBSD: smc93cx6.c,v 1.5 1996/10/21 22:34:38 thorpej Exp $	*/
+
 /*
  * Interface for the 93C46/26/06 serial eeprom parts.
  *
@@ -17,8 +20,6 @@
  *    Daniel M. Eischen.
  * 4. Modifications may be freely made to this file if the above conditions
  *    are met.
- *
- *      $Id: smc93cx6.c,v 1.3 1996/08/21 22:27:43 deraadt Exp $
  */
 
 /*
@@ -92,8 +93,8 @@ read_seeprom(sd, buf, start_addr, count)
 	u_int start_addr;
 	int count;
 #elif defined(__NetBSD__) || defined(__OpenBSD__)
-	bus_io_size_t start_addr;
-	bus_io_size_t count;
+	bus_size_t start_addr;
+	bus_size_t count;
 #endif
 {
 	int i = 0, k = 0;

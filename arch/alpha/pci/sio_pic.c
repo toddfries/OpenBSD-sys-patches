@@ -1,5 +1,5 @@
-/*	$OpenBSD: sio_pic.c,v 1.5 1996/07/29 23:00:55 niklas Exp $	*/
-/*	$NetBSD: sio_pic.c,v 1.7.4.3 1996/06/05 22:50:23 cgd Exp $	*/
+/*	$OpenBSD: sio_pic.c,v 1.9 1997/01/24 19:57:59 niklas Exp $	*/
+/*	$NetBSD: sio_pic.c,v 1.16 1996/11/17 02:05:26 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -60,29 +60,12 @@
 /*
  * Private functions and variables.
  */
-static void	sio_strayintr __P((int));
-
-bus_chipset_tag_t sio_bc;
-bus_io_handle_t sio_ioh_icu1, sio_ioh_icu2, sio_ioh_elcr;
-
-/*
- * Interrupt handler chains.  sio_intr_establish() inserts a handler into
- * the list.  The handler is called with its (single) argument.
- */
-struct intrhand {
-	int	(*ih_fun)();
-	void	*ih_arg;
-	u_long	ih_count;
-	struct	intrhand *ih_next;
-	int	ih_level;
-	int	ih_irq;
-};
+bus_space_tag_t sio_iot;
+bus_space_handle_t sio_ioh_icu1, sio_ioh_icu2, sio_ioh_elcr;
 
 #define	ICU_LEN		16		/* number of ISA IRQs */
 
-static struct intrhand *sio_intrhand[ICU_LEN];
-static int sio_intrsharetype[ICU_LEN];
-static u_long sio_strayintrcnt[ICU_LEN];
+static struct alpha_shared_intr *sio_intr;
 #ifdef EVCNT_COUNTERS
 struct evcnt sio_intr_evcnt;
 #endif
@@ -115,6 +98,10 @@ u_int8_t initial_elcr[2];
 #define	INITIALLY_LEVEL_TRIGGERED(irq)	0
 #endif
 
+void sio_setirqstat __P((int, int, int));
+
+void	sio_setirqstat __P((int, int, int));
+
 void
 sio_setirqstat(irq, enabled, type)
 	int irq, enabled;
@@ -128,15 +115,13 @@ sio_setirqstat(irq, enabled, type)
 	    enabled ? "enabled" : "disabled", isa_intr_typename(type));
 #endif
 
-	sio_intrsharetype[irq] = type;
-
 	icu = irq / 8;
 	bit = irq % 8;
 
-	ocw1[0] = bus_io_read_1(sio_bc, sio_ioh_icu1, 1);
-	ocw1[1] = bus_io_read_1(sio_bc, sio_ioh_icu2, 1);
-	elcr[0] = bus_io_read_1(sio_bc, sio_ioh_elcr, 0);	/* XXX */
-	elcr[1] = bus_io_read_1(sio_bc, sio_ioh_elcr, 1);	/* XXX */
+	ocw1[0] = bus_space_read_1(sio_iot, sio_ioh_icu1, 1);
+	ocw1[1] = bus_space_read_1(sio_iot, sio_ioh_icu2, 1);
+	elcr[0] = bus_space_read_1(sio_iot, sio_ioh_elcr, 0);	/* XXX */
+	elcr[1] = bus_space_read_1(sio_iot, sio_ioh_elcr, 1);	/* XXX */
 
 	/*
 	 * interrupt enable: set bit to mask (disable) interrupt.
@@ -180,33 +165,33 @@ sio_setirqstat(irq, enabled, type)
 	}
 #endif
 
-	bus_io_write_1(sio_bc, sio_ioh_icu1, 1, ocw1[0]);
-	bus_io_write_1(sio_bc, sio_ioh_icu2, 1, ocw1[1]);
-	bus_io_write_1(sio_bc, sio_ioh_elcr, 0, elcr[0]);	/* XXX */
-	bus_io_write_1(sio_bc, sio_ioh_elcr, 1, elcr[1]);	/* XXX */
+	bus_space_write_1(sio_iot, sio_ioh_icu1, 1, ocw1[0]);
+	bus_space_write_1(sio_iot, sio_ioh_icu2, 1, ocw1[1]);
+	bus_space_write_1(sio_iot, sio_ioh_elcr, 0, elcr[0]);	/* XXX */
+	bus_space_write_1(sio_iot, sio_ioh_elcr, 1, elcr[1]);	/* XXX */
 }
 
 void
-sio_intr_setup(bc)
-	bus_chipset_tag_t bc;
+sio_intr_setup(iot)
+	bus_space_tag_t iot;
 {
 	int i;
 
-	sio_bc = bc;
+	sio_iot = iot;
 
-	if (bus_io_map(sio_bc, IO_ICU1, IO_ICUSIZE, &sio_ioh_icu1) ||
-	    bus_io_map(sio_bc, IO_ICU2, IO_ICUSIZE, &sio_ioh_icu2) ||
-	    bus_io_map(sio_bc, 0x4d0, 2, &sio_ioh_elcr))
+	if (bus_space_map(sio_iot, IO_ICU1, IO_ICUSIZE, 0, &sio_ioh_icu1) ||
+	    bus_space_map(sio_iot, IO_ICU2, IO_ICUSIZE, 0, &sio_ioh_icu2) ||
+	    bus_space_map(sio_iot, 0x4d0, 2, 0, &sio_ioh_elcr))
 		panic("sio_intr_setup: can't map I/O ports");
 
 #ifdef BROKEN_PROM_CONSOLE
 	/*
 	 * Remember the initial values, because the prom is stupid.
 	 */
-	initial_ocw1[0] = bus_io_read_1(sio_bc, sio_ioh_icu1, 1);
-	initial_ocw1[1] = bus_io_read_1(sio_bc, sio_ioh_icu2, 1);
-	initial_elcr[0] = bus_io_read_1(sio_bc, sio_ioh_elcr, 0); /* XXX */
-	initial_elcr[1] = bus_io_read_1(sio_bc, sio_ioh_elcr, 1); /* XXX */
+	initial_ocw1[0] = bus_space_read_1(sio_iot, sio_ioh_icu1, 1);
+	initial_ocw1[1] = bus_space_read_1(sio_iot, sio_ioh_icu2, 1);
+	initial_elcr[0] = bus_space_read_1(sio_iot, sio_ioh_elcr, 0); /* XXX */
+	initial_elcr[1] = bus_space_read_1(sio_iot, sio_ioh_elcr, 1); /* XXX */
 #if 0
 	printf("initial_ocw1[0] = 0x%x\n", initial_ocw1[0]);
 	printf("initial_ocw1[1] = 0x%x\n", initial_ocw1[1]);
@@ -215,10 +200,14 @@ sio_intr_setup(bc)
 #endif
 #endif
 
+	sio_intr = alpha_shared_intr_alloc(ICU_LEN);
+
 	/*
 	 * set up initial values for interrupt enables.
 	 */
 	for (i = 0; i < ICU_LEN; i++) {
+		alpha_shared_intr_set_maxstrays(sio_intr, i, STRAY_MAX);
+
 		switch (i) {
 		case 0:
 		case 1:
@@ -231,6 +220,8 @@ sio_intr_setup(bc)
 			if (INITIALLY_LEVEL_TRIGGERED(i))
 				printf("sio_intr_setup: %d LT!\n", i);
 			sio_setirqstat(i, INITIALLY_ENABLED(i), IST_EDGE);
+			alpha_shared_intr_set_dfltsharetype(sio_intr, i,
+			    IST_EDGE);
 			break;
 
 		case 2:
@@ -243,6 +234,8 @@ sio_intr_setup(bc)
 			if (!INITIALLY_ENABLED(i))
 				printf("sio_intr_setup: %d not enabled!\n", i);
 			sio_setirqstat(i, 1, IST_EDGE);
+			alpha_shared_intr_set_dfltsharetype(sio_intr, i,
+			    IST_UNUSABLE);
 			break;
 
 		default:
@@ -253,6 +246,9 @@ sio_intr_setup(bc)
 			sio_setirqstat(i, INITIALLY_ENABLED(i),
 			    INITIALLY_LEVEL_TRIGGERED(i) ? IST_LEVEL :
 				IST_NONE);
+			alpha_shared_intr_set_dfltsharetype(sio_intr, i,
+			    INITIALLY_LEVEL_TRIGGERED(i) ? IST_LEVEL :
+                                IST_NONE);
 			break;
 		}
 	}
@@ -266,75 +262,34 @@ sio_intr_string(v, irq)
 	static char irqstr[12];		/* 8 + 2 + NULL + sanity */
 
 	if (irq == 0 || irq >= ICU_LEN || irq == 2)
-		panic("sio_intr_string: bogus IRQ 0x%x\n", irq);
+		panic("sio_intr_string: bogus isa irq 0x%x\n", irq);
 
 	sprintf(irqstr, "isa irq %d", irq);
 	return (irqstr);
 }
 
 void *
-sio_intr_establish(v, irq, type, level, ih_fun, ih_arg, name)
-	void *v, *ih_arg;
+sio_intr_establish(v, irq, type, level, fn, arg, name)
+	void *v, *arg;
         int irq;
         int type;
         int level;
-        int (*ih_fun)(void *);
+        int (*fn)(void *);
 	char *name;
 {
-	struct intrhand **p, *c, *ih;
-	extern int cold;
-
-	/* no point in sleeping unless someone can free memory. */
-	ih = malloc(sizeof *ih, M_DEVBUF, cold ? M_NOWAIT : M_WAITOK);
-	if (ih == NULL)
-		panic("sio_intr_establish: can't malloc handler info");
+	void *cookie;
 
 	if (irq > ICU_LEN || type == IST_NONE)
 		panic("sio_intr_establish: bogus irq or type");
 
-	switch (sio_intrsharetype[irq]) {
-	case IST_EDGE:
-	case IST_LEVEL:
-		if (type == sio_intrsharetype[irq])
-			break;
-	case IST_PULSE:
-		if (type != IST_NONE) {
-			if (sio_intrhand[irq] == NULL) {
-				printf("sio_intr_establish: irq %d: warning: using %s on %s\n",
-				    irq, isa_intr_typename(type),
-				    isa_intr_typename(sio_intrsharetype[irq]));
-				type = sio_intrsharetype[irq];
-			} else {
-				panic("sio_intr_establish: irq %d: can't share %s with %s",
-				    irq, isa_intr_typename(type),
-				    isa_intr_typename(sio_intrsharetype[irq]));
-			}
-		}
-		break;
-        }
+	cookie = alpha_shared_intr_establish(sio_intr, irq, type, level, fn,
+	    arg, name);
 
-	/*
-	 * Figure out where to put the handler.
-	 * This is O(N^2), but we want to preserve the order, and N is
-	 * generally small.
-	 */
-	for (p = &sio_intrhand[irq]; (c = *p) != NULL; p = &c->ih_next)
-		;
+	if (cookie)
+		sio_setirqstat(irq, alpha_shared_intr_isactive(sio_intr, irq),
+		    alpha_shared_intr_get_sharetype(sio_intr, irq));
 
-	/*
-	 * Poke the real handler in now.
-	 */
-	ih->ih_fun = ih_fun;
-	ih->ih_arg = ih_arg;
-	ih->ih_count = 0;
-	ih->ih_next = NULL;
-	ih->ih_level = 0;			/* XXX meaningless on alpha */
-	ih->ih_irq = irq;
-	*p = ih;
-
-	sio_setirqstat(irq, 1, type);
-
-	return ih;
+	return (cookie);
 }
 
 void
@@ -343,34 +298,19 @@ sio_intr_disestablish(v, cookie)
 	void *cookie;
 {
 
-	printf("sio_intr_disestablish(%lx)\n", cookie);
+	printf("sio_intr_disestablish(%p)\n", cookie);
 	/* XXX */
 
 	/* XXX NEVER ALLOW AN INITIALLY-ENABLED INTERRUPT TO BE DISABLED */
 	/* XXX NEVER ALLOW AN INITIALLY-LT INTERRUPT TO BECOME UNTYPED */
 }
 
-/*
- * caught a stray interrupt; notify if not too many seen already.
- */
-void
-sio_strayintr(irq)
-	int irq;
-{
-
-	if (++sio_strayintrcnt[irq] <= STRAY_MAX)
-		log(LOG_ERR, "stray interrupt %d%s\n", irq,
-		    sio_strayintrcnt[irq] >= STRAY_MAX ?
-			"; stopped logging" : "");
-}
-
 void
 sio_iointr(framep, vec)
 	void *framep;
-	int vec;
+	unsigned long vec;
 {
-	int irq, handled;
-	struct intrhand *ih;
+	int irq;
 
 	irq = (vec - 0x800) >> 4;
 #ifdef DIAGNOSTIC
@@ -381,36 +321,15 @@ sio_iointr(framep, vec)
 #ifdef EVCNT_COUNTERS
 	sio_intr_evcnt.ev_count++;
 #else
+#ifdef DEBUG
 	if (ICU_LEN != INTRCNT_ISA_IRQ_LEN)
 		panic("sio interrupt counter sizes inconsistent");
+#endif
 	intrcnt[INTRCNT_ISA_IRQ + irq]++;
 #endif
 
-	/*
-	 * We cdr down the intrhand chain, calling each handler with
-	 * its appropriate argument;
-	 *
-	 * The handler returns one of three values:
-	 *   0 - This interrupt wasn't for me.
-	 *   1 - This interrupt was for me.
-	 *  -1 - This interrupt might have been for me, but I don't know.
-	 * If there are no handlers, or they all return 0, we flags it as a
-	 * `stray' interrupt.  On a system with level-triggered interrupts,
-	 * we could terminate immediately when one of them returns 1; but
-	 * this is PC-ish!
-	 */
-	for (ih = sio_intrhand[irq], handled = 0; ih != NULL;
-	    ih = ih->ih_next) {
-		int rv;
-
-		rv = (*ih->ih_fun)(ih->ih_arg);
-
-		ih->ih_count++;
-		handled = handled || (rv != 0);
-	}
-
-	if (!handled)
-		sio_strayintr(irq);
+	if (!alpha_shared_intr_dispatch(sio_intr, irq))
+		alpha_shared_intr_stray(sio_intr, irq, "isa irq");
 
 	/*
 	 * Some versions of the machines which use the SIO
@@ -419,8 +338,8 @@ sio_iointr(framep, vec)
 	 * by the interrupt handler.
 	 */
 	if (irq > 7)
-		bus_io_write_1(sio_bc,
+		bus_space_write_1(sio_iot,
 		    sio_ioh_icu2, 0, 0x20 | (irq & 0x07));	/* XXX */
-	bus_io_write_1(sio_bc,
+	bus_space_write_1(sio_iot,
 	    sio_ioh_icu1, 0, 0x20 | (irq > 7 ? 2 : irq));	/* XXX */
 }

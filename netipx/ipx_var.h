@@ -1,5 +1,4 @@
-/*	$OpenBSD: ipx_var.h,v 1.1 1996/08/16 09:16:02 mickey Exp $	*/
-/*	$NOWHERE: ipx_var.h,v 1.2 1996/05/07 09:49:51 mickey Exp $	*/
+/*	$OpenBSD: ipx_var.h,v 1.3 1996/11/25 08:20:02 mickey Exp $	*/
 
 /*-
  *
@@ -54,6 +53,20 @@ struct	ipxstat {
 	int	ipxs_badhlen;		/* ip header length < data size */
 	int	ipxs_badlen;		/* ip length < ip header length */
 };
+
+/*
+ * Names for IPX sysctl objects.
+ */
+
+#define IPXCTL_RECVSPACE	1
+#define IPXCTL_SENDSPACE	2
+#define IPXCTL_MAXID		3
+
+#define IPXCTL_NAMES { \
+	{ 0, 0}, \
+	{ "recvspace", CTLTYPE_INT }, \
+	{ "sendspace", CTLTYPE_INT }, \
+}
 
 #ifdef _KERNEL
 extern struct ipxstat ipxstat;

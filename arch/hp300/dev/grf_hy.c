@@ -1,4 +1,5 @@
-/*	$NetBSD: grf_hy.c,v 1.5 1996/03/03 16:49:00 thorpej Exp $	*/
+/*	$OpenBSD: grf_hy.c,v 1.6 1997/04/16 11:56:04 downsj Exp $	*/
+/*	$NetBSD: grf_hy.c,v 1.9 1997/03/31 07:34:16 scottr Exp $	*/
 
 /*
  * Copyright (c) 1996 Jason R. Thorpe.  All rights reserved.
@@ -44,25 +45,27 @@
  *	@(#)grf_hy.c	8.4 (Berkeley) 1/12/94
  */
 
-#include "grf.h"
-#if NGRF > 0
-
 /*
  * Graphics routines for HYPERION frame buffer
  */
 #include <sys/param.h>
-#include <sys/conf.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/ioctl.h>
-#include <sys/tty.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
+#include <sys/device.h>
+#include <sys/errno.h>
+#include <sys/ioctl.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
 #include <sys/uio.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 
 #include <dev/cons.h>
+
+#include <hp300/dev/diovar.h>
+#include <hp300/dev/diodevs.h>
+#include <hp300/dev/intiovar.h>
 
 #include <hp300/dev/grfioctl.h>
 #include <hp300/dev/grfvar.h>
@@ -79,6 +82,21 @@ caddr_t badhyaddr = (caddr_t) -1;
 int	hy_init __P((struct grf_data *gp, int, caddr_t));
 int	hy_mode __P((struct grf_data *gp, int, caddr_t));
 void	hyper_ite_fontinit __P((struct ite_data *));
+
+int	hyper_dio_match __P((struct device *, void *, void *));
+void	hyper_dio_attach __P((struct device *, struct device *, void *));
+
+int	hyper_console_scan __P((int, caddr_t, void *));
+void	hypercnprobe __P((struct consdev *cp));
+void	hypercninit __P((struct consdev *cp));
+
+struct cfattach hyper_dio_ca = {
+	sizeof(struct grfdev_softc), hyper_dio_match, hyper_dio_attach
+};
+
+struct cfdriver hyper_cd = {
+	NULL, "hyper", DV_DULL
+};
 
 /* Hyperion grf switch */
 struct grfsw hyper_grfsw = {
@@ -103,6 +121,48 @@ struct itesw hyper_itesw = {
 };
 #endif /* NITE > 0 */
 
+int
+hyper_dio_match(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
+{
+	struct dio_attach_args *da = aux;
+
+	if (da->da_id == DIO_DEVICE_ID_FRAMEBUFFER &&
+	    da->da_secid == DIO_DEVICE_SECID_HYPERION)
+		return (1);
+
+	return (0);
+}
+
+void
+hyper_dio_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
+{
+	struct grfdev_softc *sc = (struct grfdev_softc *)self;
+	struct dio_attach_args *da = aux;
+	caddr_t grf;
+
+	sc->sc_scode = da->da_scode;
+	if (sc->sc_scode == conscode)
+		grf = conaddr;
+	else {
+		grf = iomap(dio_scodetopa(sc->sc_scode), da->da_size);
+		if (grf == 0) {
+			printf("%s: can't map framebuffer\n",
+			    sc->sc_dev.dv_xname);
+			return;
+		}
+	}
+
+#if NITE > 0
+	grfdev_attach(sc, hy_init, grf, &hyper_grfsw, &hyper_itesw);
+#else
+	grfdev_attach(sc, hy_init, grf, &hyper_grfsw, NULL);
+#endif	/* NITE > 0 */
+}
+
 /*
  * Initialize hardware.
  * Must fill in the grfinfo structure in g_softc.
@@ -114,10 +174,9 @@ hy_init(gp, scode, addr)
 	int scode;
 	caddr_t addr;
 {
-	register struct hyboxfb *hy = (struct hyboxfb *) addr;
+	struct hyboxfb *hy = (struct hyboxfb *) addr;
 	struct grfinfo *gi = &gp->g_display;
 	int fboff;
-	extern caddr_t sctopa(), iomap();
 
 	/*
 	 * If the console has been initialized, and it was us, there's
@@ -127,7 +186,7 @@ hy_init(gp, scode, addr)
 		if (ISIIOVA(addr))
 			gi->gd_regaddr = (caddr_t) IIOP(addr);
 		else
-			gi->gd_regaddr = sctopa(scode);
+			gi->gd_regaddr = dio_scodetopa(scode);
 		gi->gd_regsize = 0x20000;
 		gi->gd_fbwidth = (hy->fbwmsb << 8) | hy->fbwlsb;
 		gi->gd_fbheight = (hy->fbhmsb << 8) | hy->fbhlsb;
@@ -303,7 +362,7 @@ void
 hyper_ite_fontinit(ip)
 	struct ite_data *ip;
 {
-	register u_char *fbmem, *dp;
+	u_char *fbmem, *dp;
 	int c, l, b;
 	int stride, width;
 
@@ -371,10 +430,10 @@ hyper_scroll(ip, sy, sx, count, dir)
         struct ite_data *ip;
         int sy, count, dir, sx;
 {
-	register int dy;
-	register int dx = sx;
-	register int height = 1;
-	register int width = ip->cols;
+	int dy;
+	int dx = sx;
+	int height = 1;
+	int width = ip->cols;
 
 	if (dir == SCROLL_UP) {
 		dy = sy - count;
@@ -490,16 +549,16 @@ hyper_windowmove(ip, sy, sx, dy, dx, h, w, func)
 
 	unsigned int *psrcLine, *pdstLine;
                                 /* pointers to line with current src and dst */
-	register unsigned int *psrc;  /* pointer to current src longword */
-	register unsigned int *pdst;  /* pointer to current dst longword */
+	unsigned int *psrc;  /* pointer to current src longword */
+	unsigned int *pdst;  /* pointer to current dst longword */
 
                                 /* following used for looping through a line */
 	unsigned int startmask, endmask;  /* masks for writing ends of dst */
 	int nlMiddle;		/* whole longwords in dst */
-	register int nl;	/* temp copy of nlMiddle */
-	register unsigned int tmpSrc;
+	int nl;	/* temp copy of nlMiddle */
+	unsigned int tmpSrc;
                                 /* place to store full source word */
-	register int xoffSrc;	/* offset (>= 0, < 32) from which to
+	int xoffSrc;	/* offset (>= 0, < 32) from which to
                                    fetch whole longwords fetched
                                    in src */
 	int nstart;		/* number of ragged bits at start of dst */
@@ -611,8 +670,8 @@ hyper_windowmove(ip, sy, sx, dy, dx, h, w, func)
 	    }
 	    else /* move right to left */
 	    {
-		pdstLine += (dx+w >> 5);
-		psrcLine += (sx+w >> 5);
+		pdstLine += ((dx + w) >> 5);
+		psrcLine += ((sx + w) >> 5);
 		/* if fetch of last partial bits from source crosses
 		   a longword boundary, start at the previous longword
 		   */
@@ -764,7 +823,6 @@ void
 hypercninit(cp)
 	struct consdev *cp;
 {
-	struct ite_data *ip = &ite_cn;
 	struct grf_data *gp = &grf_cn;
 
 	/*
@@ -780,16 +838,9 @@ hypercninit(cp)
 	gp->g_flags = GF_ALIVE;
 
 	/*
-	 * Set up required ite data and initialize ite.
+	 * Initialize the terminal emulator.
 	 */
-	ip->isw = &hyper_itesw;
-	ip->grf = gp;
-	ip->flags = ITE_ALIVE|ITE_CONSOLE|ITE_ACTIVE|ITE_ISCONS;
-	ip->attrbuf = console_attributes;
-	iteinit(ip);
-
-	kbd_ite = ip;		/* XXX */
+	itecninit(gp, &hyper_itesw);
 }
 
 #endif /* NITE > 0 */
-#endif /* NGRF > 0 */

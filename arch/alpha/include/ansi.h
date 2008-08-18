@@ -1,5 +1,5 @@
-/*	$OpenBSD: ansi.h,v 1.4 1996/07/29 22:58:23 niklas Exp $	*/
-/*	$NetBSD: ansi.h,v 1.4 1996/03/16 01:31:45 jtc Exp $	*/
+/*	$OpenBSD: ansi.h,v 1.6 1997/01/24 19:57:06 niklas Exp $	*/
+/*	$NetBSD: ansi.h,v 1.6 1996/11/15 22:38:45 jtc Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -55,9 +55,12 @@
 #define	_BSD_TIME_T_	int			/* time() */
 typedef struct {
 	char *base;
-	long offset;
+	int offset;
+	int pad;
 } __va_list;
 #define	_BSD_VA_LIST_	__va_list		/* va_list */
+#define _BSD_CLOCKID_T_	int
+#define _BSD_TIMER_T_	int
 
 /*
  * Runes (wchar_t) is declared to be an ``int'' instead of the more natural

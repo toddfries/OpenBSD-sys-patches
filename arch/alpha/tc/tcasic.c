@@ -1,5 +1,5 @@
-/*	$OpenBSD: tcasic.c,v 1.3 1996/07/29 23:02:32 niklas Exp $	*/
-/*	$NetBSD: tcasic.c,v 1.5 1996/05/17 23:58:43 cgd Exp $	*/
+/*	$OpenBSD: tcasic.c,v 1.7 1997/01/24 19:58:21 niklas Exp $	*/
+/*	$NetBSD: tcasic.c,v 1.14 1996/12/05 01:39:45 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -29,6 +29,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
@@ -38,7 +39,11 @@
 #include <alpha/tc/tc_conf.h>
 
 /* Definition of the driver for autoconfig. */
+#ifdef __BROKEN_INDIRECT_CONFIG
 int	tcasicmatch(struct device *, void *, void *);
+#else
+int	tcasicmatch(struct device *, struct cfdata *, void *);
+#endif
 void	tcasicattach(struct device *, struct device *, void *);
 
 struct cfattach tcasic_ca = {
@@ -49,7 +54,7 @@ struct cfdriver tcasic_cd = {
 	NULL, "tcasic", DV_DULL,
 };
 
-int	tcasicprint __P((void *, char *));
+int	tcasicprint __P((void *, const char *));
 
 extern int cputype;
 
@@ -59,7 +64,11 @@ int	tcasicfound;
 int
 tcasicmatch(parent, cfdata, aux)
 	struct device *parent;
+#ifdef __BROKEN_INDIRECT_CONFIG
 	void *cfdata;
+#else
+	struct cfdata *cfdata;
+#endif
 	void *aux;
 {
 	struct confargs *ca = aux;
@@ -86,8 +95,7 @@ tcasicattach(parent, self, aux)
 {
 	struct tcbus_attach_args tba;
 	void (*intr_setup) __P((void));
-	void (*iointr) __P((void *, int));
-	struct alpha_bus_chipset bc;
+	void (*iointr) __P((void *, unsigned long));
 
 	printf("\n");
 	tcasicfound = 1;
@@ -103,8 +111,13 @@ tcasicattach(parent, self, aux)
 		tba.tba_speed = TC_SPEED_25_MHZ;
 		tba.tba_nslots = tc_3000_500_nslots;
 		tba.tba_slots = tc_3000_500_slots;
-		tba.tba_nbuiltins = tc_3000_500_nbuiltins;
-		tba.tba_builtins = tc_3000_500_builtins;
+		if (hwrpb->rpb_variation & SV_GRAPHICS) {
+			tba.tba_nbuiltins = tc_3000_500_graphics_nbuiltins;
+			tba.tba_builtins = tc_3000_500_graphics_builtins;
+		} else {
+			tba.tba_nbuiltins = tc_3000_500_nographics_nbuiltins;
+			tba.tba_builtins = tc_3000_500_nographics_builtins;
+		}
 		tba.tba_intr_establish = tc_3000_500_intr_establish;
 		tba.tba_intr_disestablish = tc_3000_500_intr_disestablish;
 		break;
@@ -131,9 +144,14 @@ tcasicattach(parent, self, aux)
 		panic("tcasicattach: bad cputype");
 	}
 
-	tc_bus_io_init(&bc, NULL);
-	tc_bus_mem_init(&bc, NULL);
-	tba.tba_bc = &bc;
+	tba.tba_memt = tc_bus_mem_init(NULL);
+
+	/* XXX XXX BEGIN XXX XXX */
+	{							/* XXX */
+		extern vm_offset_t alpha_XXX_dmamap_or;		/* XXX */
+		alpha_XXX_dmamap_or = 0;			/* XXX */
+	}							/* XXX */
+	/* XXX XXX END XXX XXX */
 
 	(*intr_setup)();
 	set_iointr(iointr);
@@ -144,7 +162,7 @@ tcasicattach(parent, self, aux)
 int
 tcasicprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 
 	/* only TCs can attach to tcasics; easy. */

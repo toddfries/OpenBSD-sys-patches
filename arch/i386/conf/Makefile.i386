@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.i386,v 1.14 1996/06/24 17:07:34 deraadt Exp $
+#	$OpenBSD: Makefile.i386,v 1.18 1997/03/29 07:12:04 tholo Exp $
 #	$NetBSD: Makefile.i386,v 1.67 1996/05/11 16:12:11 mycroft Exp $
 
 # Makefile for OpenBSD
@@ -24,20 +24,39 @@
 
 AS?=	as
 CC?=	cc
+MKDEP?=	mkdep
 CPP?=	cpp
 LD?=	ld
-STRIP?=	strip -d
-TOUCH?=	touch -f -c
+STRIP?=	strip
+TOUCH?=	touch
 
 # source tree is located via $S relative to the compilation directory
-S=	../../../..
-I386=	../..
+.ifndef S
+S!=	cd ../../../..; pwd
+.endif
+I386=	$S/arch/i386
 
-INCLUDES=	-I. -I$S/arch -I$S
+INCLUDES=	-nostdinc -I. -I$S/arch -I$S
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -Di386
-CFLAGS=		${DEBUG} -O2 -Werror
+
+CDIAGFLAGS=	-Werror -Wall -Wstrict-prototypes -Wno-uninitialized \
+		-Wno-format
+
+.if ${IDENT:M-D*_CPU} == ${IDENT:M-DI486_CPU}
+CMACHFLAGS=	-m486
+.else
+CMACHFLAGS=
+.endif
+
+CFLAGS=		${DEBUG} -O2 ${CDIAGFLAGS} ${CMACHFLAGS} ${COPTS}
 AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
-LINKFLAGS=	-z -Ttext F8100000 -e start
+LINKFLAGS=	-z -Ttext F0100000 -e start
+STRIPFLAGS=	-d
+TOUCHFLAGS=	-f -c
+
+HOSTCC= ${CC}
+HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
+HOSTED_CFLAGS=	${CFLAGS}
 
 ### find out what to use for libkern
 .include "$S/lib/libkern/Makefile.inc"
@@ -69,6 +88,8 @@ DRIVER_C_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} ${PARAM} -c $<
 NORMAL_S=	${CC} ${AFLAGS} ${CPPFLAGS} -c $<
 NORMAL_S_C=	${CC} ${AFLAGS} ${CPPFLAGS} ${PARAM} -c $<
 
+HOSTED_C=	${HOSTCC} ${HOSTED_CFLAGS} ${HOSTED_CPPFLAGS} -c $<
+
 %OBJS
 
 %CFILES
@@ -93,21 +114,17 @@ DEBUG?=
 LINKFLAGS+=	-X
 SYSTEM_LD_TAIL+=; \
 		echo cp $@ $@.gdb; rm -f $@.gdb; cp $@ $@.gdb; \
-		echo ${STRIP} $@; ${STRIP} $@
+		echo ${STRIP} ${STRIPFLAGS} $@; ${STRIP} ${STRIPFLAGS} $@
 .else
 LINKFLAGS+=	-x
 .endif
 
 %LOAD
 
-assym.h: genassym
-	./genassym >assym.h
-
-genassym: genassym.o
-	${CC} -o $@ genassym.o
-
-genassym.o: ${I386}/i386/genassym.c
-	${NORMAL_C_C}
+assym.h: $S/kern/genassym.sh ${I386}/i386/genassym.cf
+	sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} \
+	    ${PARAM} < ${I386}/i386/genassym.cf > assym.h.tmp && \
+	    mv -f assym.h.tmp assym.h
 
 param.c: $S/conf/param.c
 	rm -f param.c
@@ -126,7 +143,7 @@ newvers: ${SYSTEM_DEP} ${SYSTEM_SWAP_DEP}
 
 clean::
 	rm -f eddep *bsd bsd.gdb tags *.[io] [a-z]*.s \
-	    [Ee]rrs linterrs makelinks genassym genassym.o assym.h
+	    [Ee]rrs linterrs makelinks assym.h
 
 lint:
 	@lint -hbxncez -Dvolatile= ${CPPFLAGS} ${PARAM} -UKGDB \
@@ -153,10 +170,9 @@ SRCS=	${I386}/i386/locore.s \
 	param.c ioconf.c ${CFILES} ${SFILES}
 depend:: .depend
 .depend: ${SRCS} assym.h param.c ${APMINC}
-	mkdep ${AFLAGS} ${CPPFLAGS} ${I386}/i386/locore.s
-	mkdep -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
-	mkdep -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
-	mkdep -a ${CFLAGS} ${CPPFLAGS} ${PARAM} ${I386}/i386/genassym.c
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${I386}/i386/locore.s
+	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
+	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
 
 
 # depend on root or device configuration
@@ -170,7 +186,7 @@ ip_input.o ip_output.o in_pcb.o in_proto.o: Makefile
 tcp_subr.o tcp_timer.o tcp_output.o: Makefile
 
 # depend on maxusers
-genassym.o machdep.o: Makefile
+machdep.o: Makefile
 
 # depend on CPU configuration 
 locore.o machdep.o: Makefile

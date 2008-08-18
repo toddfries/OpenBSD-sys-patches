@@ -1,5 +1,5 @@
-/*	$OpenBSD: db_interface.c,v 1.5 1996/05/09 22:30:10 niklas Exp $	*/
-/*	$NetBSD: db_interface.c,v 1.20 1996/04/29 20:50:28 leo Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.9 1997/03/21 00:36:39 niklas Exp $	*/
+/*	$NetBSD: db_interface.c,v 1.24 1997/02/18 22:27:32 gwr Exp $	*/
 
 /* 
  * Mach Operating System
@@ -50,6 +50,7 @@
 extern label_t	*db_recover;
 
 int	db_active = 0;
+db_regs_t	ddb_regs;
 
 static void kdbprinttrap __P((int, int));
 
@@ -58,7 +59,7 @@ static void kdbprinttrap __P((int, int));
  */
 void
 kdb_kintr(regs)
-	register struct mc68020_saved_state *regs;
+	register db_regs_t *regs;
 {
 	if (db_active == 0 && (boothowto & RB_KDB)) {
 		printf("\n\nkernel: keyboard interrupt\n");
@@ -73,7 +74,7 @@ kdb_kintr(regs)
 int
 kdb_trap(type, regs)
 	int	type;
-	register struct mc68020_saved_state *regs;
+	register db_regs_t *regs;
 {
 
 	switch (type) {
@@ -150,6 +151,6 @@ kdbprinttrap(type, code)
 void
 Debugger()
 {
-	asm ("trap #15");
+	__asm ("trap #15");
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa.c,v 1.17 1996/08/15 07:38:56 deraadt Exp $	*/
+/*	$OpenBSD: isa.c,v 1.22 1997/01/04 14:14:55 niklas Exp $	*/
 /*	$NetBSD: isa.c,v 1.85 1996/05/14 00:31:04 thorpej Exp $	*/
 
 /*-
@@ -47,7 +47,6 @@
 
 int isamatch __P((struct device *, void *, void *));
 void isaattach __P((struct device *, struct device *, void *));
-int isaprint __P((void *, char *));
 
 struct cfattach isa_ca = {
 	sizeof(struct isa_softc), isamatch, isaattach
@@ -87,14 +86,16 @@ isaattach(parent, self, aux)
 	isa_attach_hook(parent, self, iba);
 	printf("\n");
 
-	sc->sc_bc = iba->iba_bc;
+	sc->sc_iot = iba->iba_iot;
+	sc->sc_memt = iba->iba_memt;
 	sc->sc_ic = iba->iba_ic;
 
 	/*
 	 * Map port 0x84, which causes a 1.25us delay when read.
 	 * We do this now, since several drivers need it.
+	 * XXX this port doesn't exist on all ISA busses...
 	 */
-	if (bus_io_map(sc->sc_bc, 0x84, 1, &sc->sc_delayioh))
+	if (bus_space_map(sc->sc_iot, 0x84, 1, 0, &sc->sc_delaybah))
 		panic("isaattach: can't map `delay port'");	/* XXX */
 
 	TAILQ_INIT(&sc->sc_subdevs);
@@ -108,7 +109,7 @@ isaattach(parent, self, aux)
 int
 isaprint(aux, isa)
 	void *aux;
-	char *isa;
+	const char *isa;
 {
 	struct isa_attach_args *ia = aux;
 
@@ -136,17 +137,22 @@ isascan(parent, match)
 	struct device *dev = match;
 	struct cfdata *cf = dev->dv_cfdata;
 	struct isa_attach_args ia;
+#if 0
 	struct emap *io_map, *mem_map, *irq_map, *drq_map;
+#endif
 
 	if (cf->cf_loc[6] != -1)	/* pnp device, scanned later */
 		return;
 
+#if 0
 	io_map = find_emap("io");
 	mem_map = find_emap("mem");
 	irq_map = find_emap("irq");
 	drq_map = find_emap("drq");
+#endif
 
-	ia.ia_bc = sc->sc_bc;
+	ia.ia_iot = sc->sc_iot;
+	ia.ia_memt = sc->sc_memt;
 	ia.ia_ic = sc->sc_ic;
 	ia.ia_iobase = cf->cf_loc[0];
 	ia.ia_iosize = 0x666;
@@ -154,7 +160,7 @@ isascan(parent, match)
 	ia.ia_msize = cf->cf_loc[3];
 	ia.ia_irq = cf->cf_loc[4] == 2 ? 9 : cf->cf_loc[4];
 	ia.ia_drq = cf->cf_loc[5];
-	ia.ia_delayioh = sc->sc_delayioh;
+	ia.ia_delaybah = sc->sc_delaybah;
 
 	if (cf->cf_fstate == FSTATE_STAR) {
 		struct isa_attach_args ia2 = ia;
@@ -165,6 +171,7 @@ isascan(parent, match)
 				    sc->sc_dev.dv_xname);
 				ia2.ia_iosize = 0;
 			}
+#if 0
 			if (ia2.ia_iobase != -1 && ia2.ia_iosize > 0)
 				add_extent(io_map, ia2.ia_iobase, ia2.ia_iosize);
 			if (ia.ia_maddr != -1 && ia.ia_msize > 0)
@@ -173,6 +180,7 @@ isascan(parent, match)
 				add_extent(irq_map, ia2.ia_irq, 1);
 			if (ia2.ia_drq != -1)
 				add_extent(drq_map, ia2.ia_drq, 1);
+#endif
 			config_attach(parent, dev, &ia2, isaprint);
 			dev = config_make_softc(parent, cf);
 			ia2 = ia;
@@ -182,6 +190,7 @@ isascan(parent, match)
 	}
 
 	if ((*cf->cf_attach->ca_match)(parent, dev, &ia) > 0) {
+#if 0
 		if (ia.ia_iobase > 0 && ia.ia_iosize > 0)
 			add_extent(io_map, ia.ia_iobase, ia.ia_iosize);
 		if (ia.ia_maddr > 0 && ia.ia_msize > 0)
@@ -190,6 +199,7 @@ isascan(parent, match)
 			add_extent(irq_map, ia.ia_irq, 1);
 		if (ia.ia_drq > 0)
 			add_extent(drq_map, ia.ia_drq, 1);
+#endif
 		config_attach(parent, dev, &ia, isaprint);
 	}
 	else

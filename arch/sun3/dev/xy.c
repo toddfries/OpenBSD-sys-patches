@@ -1,4 +1,5 @@
-/* $NetBSD: xy.c,v 1.9 1996/03/17 02:04:10 thorpej Exp $ */
+/*	$OpenBSD: xy.c,v 1.9 1997/01/16 04:03:58 kstailey Exp $	*/
+/* $NetBSD: xy.c,v 1.11 1996/10/13 03:47:40 christos Exp $ */
 
 /*
  *
@@ -36,7 +37,7 @@
  * x y . c   x y l o g i c s   4 5 0 / 4 5 1   s m d   d r i v e r
  *
  * author: Chuck Cranor <chuck@ccrc.wustl.edu>
- * id: $NetBSD: xy.c,v 1.5 1996/03/04 20:35:29 chuck Exp $
+ * id: $NetBSD: xy.c,v 1.11 1996/10/13 03:47:40 christos Exp $
  * started: 14-Sep-95
  * references: [1] Xylogics Model 753 User's Manual
  *                 part number: 166-753-001, Revision B, May 21, 1988.
@@ -112,7 +113,7 @@
 		(SC)->ciorq->mode = XY_SUB_FREE; \
 		wakeup((SC)->ciorq); \
 	} \
-	}
+}
 
 /*
  * XYC_ADVANCE: advance iorq's pointers by a number of sectors
@@ -155,12 +156,12 @@ inline void xyc_rqinit __P((struct xy_iorq *, struct xyc_softc *,
 			    struct xy_softc *, int, u_long, int,
 			    caddr_t, struct buf *));
 void	xyc_rqtopb __P((struct xy_iorq *, struct xy_iopb *, int, int));
-int	xyc_start __P((struct xyc_softc *, struct xy_iorq *));
+void	xyc_start __P((struct xyc_softc *, struct xy_iorq *));
 int	xyc_startbuf __P((struct xyc_softc *, struct xy_softc *, struct buf *));
 int	xyc_submit_iorq __P((struct xyc_softc *, struct xy_iorq *, int));
 void	xyc_tick __P((void *));
 int	xyc_unbusy __P((struct xyc *, int));
-int	xyc_xyreset __P((struct xyc_softc *, struct xy_softc *));
+void	xyc_xyreset __P((struct xyc_softc *, struct xy_softc *));
 
 /* machine interrupt hook */
 int	xycintr __P((void *));
@@ -296,7 +297,6 @@ int xycmatch(parent, match, aux)
 	struct device *parent;
 	void   *match, *aux;
 {
-	struct cfdata *cf = match;
 	struct confargs *ca = aux;
 	int x;
 
@@ -326,7 +326,7 @@ xycattach(parent, self, aux)
 	struct xyc_softc *xyc = (void *) self;
 	struct confargs *ca = aux;
 	struct xyc_attach_args xa;
-	int     lcv, err, pri, res, pbsz;
+	int     lcv, err, res, pbsz;
 	void	*tmp, *tmp2;
 	u_long	ultmp;
 
@@ -361,8 +361,8 @@ xycattach(parent, self, aux)
 			return;
 		}
 	}
+	bzero(tmp, pbsz);
 	xyc->iopbase = tmp;
-	bzero(xyc->iopbase, pbsz);
 	xyc->dvmaiopb = (struct xy_iopb *)
 		dvma_kvtopa((long) xyc->iopbase, BUS_VME16);
 	xyc->reqs = (struct xy_iorq *)
@@ -450,7 +450,6 @@ xymatch(parent, match, aux)
 	void   *match, *aux;
 
 {
-	struct xyc_softc *xyc = (void *) parent;
 	struct cfdata *cf = match;
 	struct xyc_attach_args *xa = aux;
 
@@ -476,9 +475,8 @@ xyattach(parent, self, aux)
 	struct xy_softc *xy = (void *) self, *oxy;
 	struct xyc_softc *xyc = (void *) parent;
 	struct xyc_attach_args *xa = aux;
-	int     res, err, spt, mb, blk, lcv, fmode, s, newstate;
+	int     err, spt, mb, blk, lcv, fmode, s = -1, newstate;
 	struct dkbad *dkb;
-	struct bootpath *bp;
 
 	/*
 	 * Always re-initialize the disk structure.  We want statistics
@@ -670,6 +668,8 @@ done:
 	xy->state = newstate;
 	if (!xa->booting) {
 		wakeup(&xy->state);
+		if (s == -1)
+			panic("xy: spl/splx mismatch");
 		splx(s);
 	}
 }
@@ -926,7 +926,7 @@ xysize(dev)
 
 {
 	struct xy_softc *xysc;
-	int     unit, part, size;
+	int part, size;
 
 	/* valid unit?  try an open */
 
@@ -956,8 +956,6 @@ xystrategy(bp)
 
 {
 	struct xy_softc *xy;
-	struct xyc_softc *parent;
-	struct buf *wq;
 	int     s, unit;
 	struct xyc_attach_args xa;
 
@@ -1044,8 +1042,6 @@ xycintr(v)
 
 {
 	struct xyc_softc *xycsc = v;
-	struct xy_softc *xy;
-	struct buf *bp;
 
 	/* kick the event counter */
 
@@ -1177,8 +1173,7 @@ xyc_cmd(xycsc, cmd, subfn, unit, block, scnt, dptr, fullmode)
 	int     fullmode;
 
 {
-	int     submode = XY_STATE(fullmode), retry;
-	u_long  dp;
+	int     submode = XY_STATE(fullmode);
 	struct xy_iorq *iorq = xycsc->ciorq;
 	struct xy_iopb *iopb = xycsc->ciopb;
 
@@ -1227,10 +1222,10 @@ xyc_startbuf(xycsc, xysc, bp)
 	struct buf *bp;
 
 {
+	u_long  block;
 	int     partno;
 	struct xy_iorq *iorq;
 	struct xy_iopb *iopb;
-	u_long  block, dp;
 	caddr_t dbuf;
 
 	iorq = xysc->xyrq;
@@ -1288,9 +1283,6 @@ xyc_startbuf(xycsc, xysc, bp)
 	    bp->b_bcount / XYFM_BPS, dbuf, bp);
 
 	xyc_rqtopb(iorq, iopb, (bp->b_flags & B_READ) ? XYCMD_RD : XYCMD_WR, 0);
-
-	/* Instrumentation. */
-	disk_busy(&xysc->sc_dk);
 
 	/* Instrumentation. */
 	disk_busy(&xysc->sc_dk);
@@ -1487,7 +1479,6 @@ xyc_piodriver(xycsc, iorq)
 	int     nreset = 0;
 	int     retval = 0;
 	u_long  res;
-	struct xyc *xyc = xycsc->xyc;
 #ifdef XYC_DEBUG
 	printf("xyc_piodriver(%s, 0x%x)\n", xycsc->sc_dev.dv_xname, iorq);
 #endif
@@ -1540,7 +1531,7 @@ xyc_piodriver(xycsc, iorq)
  * xyc_xyreset: reset one drive.   NOTE: assumes xyc was just reset.
  * we steal iopb[XYC_CTLIOPB] for this, but we put it back when we are done.
  */
-int 
+void
 xyc_xyreset(xycsc, xysc)
 	struct xyc_softc *xycsc;
 	struct xy_softc *xysc;
@@ -1590,7 +1581,7 @@ xyc_reset(xycsc, quiet, blastmode, error, xysc)
 	struct xy_softc *xysc;
 
 {
-	int     del = 0, lcv, poll = -1, retval = XY_ERR_AOK;
+	int     del = 0, lcv, retval = XY_ERR_AOK;
 	struct xy_iorq *iorq;
 
 	/* soft reset hardware */
@@ -1632,7 +1623,7 @@ xyc_reset(xycsc, quiet, blastmode, error, xysc)
 				dvma_mapout(iorq->dbufbase,
 				            iorq->buf->b_bcount);
 			    iorq->xy->xyq.b_actf =
-				iorq->buf->b_actf;
+					iorq->buf->b_actf;
 			    disk_unbusy(&iorq->xy->sc_dk,
 					        (iorq->buf->b_bcount -
 					         iorq->buf->b_resid));
@@ -1666,7 +1657,7 @@ xyc_reset(xycsc, quiet, blastmode, error, xysc)
  * xyc_start: start waiting buffers
  */
 
-int 
+void
 xyc_start(xycsc, iorq)
 	struct xyc_softc *xycsc;
 	struct xy_iorq *iorq;
@@ -1983,7 +1974,7 @@ xyc_ioctlcmd(xy, dev, xio)
 	struct xd_iocmd *xio;
 
 {
-	int     s, err, rqno, dummy;
+	int     s, err, rqno, dummy = 0;
 	caddr_t dvmabuf = NULL;
 	struct xyc_softc *xycsc;
 
@@ -2018,7 +2009,7 @@ xyc_ioctlcmd(xy, dev, xio)
 	if (xio->dlen) {
 		dvmabuf = dvma_malloc(xio->dlen);
 		if (xio->cmd == XYCMD_WR) {
-			if (err = copyin(xio->dptr, dvmabuf, xio->dlen)) {
+			if ((err = copyin(xio->dptr, dvmabuf, xio->dlen))) {
 				dvma_free(dvmabuf, xio->dlen);
 				return (err);
 			}

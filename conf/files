@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.40 1996/09/20 06:44:46 deraadt Exp $
+#	$OpenBSD: files,v 1.56 1997/04/30 20:21:14 deraadt Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -25,6 +25,7 @@ define	fddi
 # "Chipset" attributes.  These are the machine-independent portions
 # of device drivers.
 define	ncr5380sbc	# NCR 5380 SCSI Bus Controller
+define	ncr53c9x	# NCR 53c9x or Emulex ESP SCSI Controller
 define	pdq		# DEC FDDI chipset
 
 # "Chipset" drivers.  These are the bus-independent routines which
@@ -34,6 +35,14 @@ define	pdq		# DEC FDDI chipset
 device	ahc: scsi
 file	dev/ic/aic7xxx.c	ahc
 
+# BusLogic MultiMaster and MultiMaster Ultra SCSI controllers
+device	bha: scsi
+file	dev/ic/bha.c		bha
+
+# UltraStor SCSI controllers
+device	uha: scsi
+file	dev/ic/uha.c		uha
+
 # 3Com Etherlink-III Ethernet controller
 device	ep: ether, ifnet
 file	dev/ic/elink3.c		ep
@@ -42,9 +51,17 @@ file	dev/ic/elink3.c		ep
 device	le: ether, ifnet
 file	dev/ic/am7990.c		le
 
-# LANCE and PCnet Ethernet controllers
+# 8250/16[45]50-based "com" ports
+device	com: tty
+file	dev/ic/com.c		com & (com_isa | com_commulti | com_pcmcia | com_pica | com_algor) needs-flag
+
+# Cyclades Cyclom multiport serial cards
 device	cy: tty
 file	dev/ic/cy.c		cy & (cy_isa | cy_pci)	needs-flag
+
+# PC parallel ports (XXX what chip?)
+device	lpt
+file	dev/ic/lpt.c		lpt & (lpt_isa | lpt_pica | lpt_algor) needs-flag
 
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
@@ -70,6 +87,7 @@ pseudo-device tun: ifnet
 pseudo-device bpfilter: ifnet
 pseudo-device strip: ifnet
 pseudo-device random
+pseudo-device enc: ifnet
 
 # XXX machine-independent SCSI files should live somewhere here, maybe
 
@@ -99,11 +117,12 @@ file ddb/db_hangman.c			ddb
 file dev/audio.c			audio			needs-flag
 file dev/ccd.c				ccd			needs-flag
 file dev/ic/ncr5380sbc.c		ncr5380sbc
+file dev/ic/ncr53c9x.c			ncr53c9x
 file dev/ic/pdq.c			pdq
 file dev/ic/pdq_ifsubr.c		pdq
 file dev/mulaw.c			mulaw
 file dev/vnd.c				vnd			needs-flag
-file dev/rnd.c				random			needs-flag
+file dev/rnd.c
 file isofs/cd9660/cd9660_bmap.c		cd9660
 file isofs/cd9660/cd9660_lookup.c	cd9660
 file isofs/cd9660/cd9660_node.c		cd9660
@@ -113,8 +132,8 @@ file isofs/cd9660/cd9660_vfsops.c	cd9660
 file isofs/cd9660/cd9660_vnops.c	cd9660
 file kern/exec_aout.c
 file kern/exec_conf.c
-file kern/exec_ecoff.c			compat_ultrix | compat_osf1 | exec_ecoff
-file kern/exec_elf.c			compat_svr4 | compat_linux | native_elf
+file kern/exec_ecoff.c
+file kern/exec_elf.c
 file kern/exec_script.c
 file kern/exec_subr.c
 file kern/init_main.c
@@ -236,6 +255,8 @@ file net/raw_usrreq.c
 file net/route.c
 file net/rtsock.c
 file net/slcompress.c			sl | ppp | strip
+file net/if_enc.c			inet & ipsec
+file net/encap.c			inet & ipsec
 file netccitt/ccitt_proto.c		ccitt
 file netccitt/hd_debug.c		hdlc
 file netccitt/hd_input.c		hdlc
@@ -278,6 +299,19 @@ file netinet/fil.c			ipfilter
 file netinet/ip_nat.c			ipfilter
 file netinet/ip_frag.c			ipfilter
 file netinet/ip_state.c			ipfilter
+file netinet/ip_ah.c			inet & ipsec
+file netinet/ip_esp.c			inet & ipsec
+file netinet/ip_espdes.c		inet & ipsec
+file netinet/ip_espdesmd5.c		inet & ipsec
+file netinet/ip_ipsp.c			inet & ipsec
+file netinet/ip_ahmd5.c			inet & ipsec
+file netinet/ip_ip4.c			inet & ipsec
+file netinet/ip_ahhmacmd5.c		inet & ipsec
+file netinet/ip_ahhmacsha1.c		inet & ipsec
+file netinet/ip_sha1.c			inet & ipsec
+file netinet/libdeslite/ecb_enc.c	inet & ipsec
+file netinet/libdeslite/set_key.c	inet & ipsec
+file netinet/ip_esp3desmd5.c		inet & ipsec
 file netiso/clnp_debug.c		iso
 file netiso/clnp_er.c			iso
 file netiso/clnp_frag.c			iso
@@ -358,26 +392,15 @@ file ufs/ffs/ffs_subr.c			ffs | mfs
 file ufs/ffs/ffs_tables.c		ffs | mfs
 file ufs/ffs/ffs_vfsops.c		ffs | mfs
 file ufs/ffs/ffs_vnops.c		ffs | mfs
-file ufs/lfs/lfs_alloc.c		lfs
-file ufs/lfs/lfs_bio.c			lfs
-file ufs/lfs/lfs_balloc.c		lfs
-file ufs/lfs/lfs_cksum.c		lfs
-file ufs/lfs/lfs_debug.c		lfs
-file ufs/lfs/lfs_inode.c		lfs
-file ufs/lfs/lfs_segment.c		lfs
-file ufs/lfs/lfs_subr.c			lfs
-file ufs/lfs/lfs_syscalls.c		lfs
-file ufs/lfs/lfs_vfsops.c		lfs
-file ufs/lfs/lfs_vnops.c		lfs
 file ufs/mfs/mfs_vfsops.c		mfs
 file ufs/mfs/mfs_vnops.c		mfs
-file ufs/ufs/ufs_bmap.c			ffs | lfs | mfs | ext2fs
-file ufs/ufs/ufs_ihash.c		ffs | lfs | mfs | ext2fs
-file ufs/ufs/ufs_inode.c		ffs | lfs | mfs | ext2fs
-file ufs/ufs/ufs_lookup.c		ffs | lfs | mfs | ext2fs
-file ufs/ufs/ufs_quota.c		ffs | lfs | mfs | ext2fs
-file ufs/ufs/ufs_vfsops.c		ffs | lfs | mfs | ext2fs
-file ufs/ufs/ufs_vnops.c		ffs | lfs | mfs | ext2fs
+file ufs/ufs/ufs_bmap.c			ffs | mfs | ext2fs
+file ufs/ufs/ufs_ihash.c		ffs | mfs | ext2fs
+file ufs/ufs/ufs_inode.c		ffs | mfs | ext2fs
+file ufs/ufs/ufs_lookup.c		ffs | mfs | ext2fs
+file ufs/ufs/ufs_quota.c		quota
+file ufs/ufs/ufs_vfsops.c		ffs | mfs | ext2fs
+file ufs/ufs/ufs_vnops.c		ffs | mfs | ext2fs
 file gnu/ext2fs/ext2_alloc.c		ext2fs
 file gnu/ext2fs/ext2_balloc.c		ext2fs
 file gnu/ext2fs/ext2_inode.c		ext2fs

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.5 1996/10/02 20:22:14 deraadt Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.8 1997/03/29 08:58:03 tholo Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -133,7 +133,9 @@ sys_issetugid(p, v, retval)
 	register_t *retval;
 {
 	if (p->p_flag & P_SUGIDEXEC)
-		return (1);
+		*retval = 1;
+	else
+		*retval = 0;
 	return (0);
 }
 
@@ -247,6 +249,9 @@ sys_setpgid(curp, v, retval)
 	SCARG(uap, pgid) = (short) SCARG(uap, pgid);		/* XXX */
 #endif
 
+	if (SCARG(uap, pgid) < 0)
+		return (EINVAL);
+
 	if (SCARG(uap, pid) != 0 && SCARG(uap, pid) != curp->p_pid) {
 		if ((targp = pfind(SCARG(uap, pid))) == 0 || !inferior(targp))
 			return (ESRCH);
@@ -287,6 +292,7 @@ sys_setuid(p, v, retval)
 	uid = SCARG(uap, uid);
 #endif
 	if (uid != pc->p_ruid &&
+	    uid != pc->p_svuid &&
 	    uid != pc->pc_ucred->cr_uid &&
 	    (error = suser(pc->pc_ucred, &p->p_acflag)))
 		return (error);
@@ -366,6 +372,7 @@ sys_setgid(p, v, retval)
 	gid = SCARG(uap, gid);
 #endif
 	if (gid != pc->p_rgid &&
+	    gid != pc->p_svgid &&
 	    gid != pc->pc_ucred->cr_gid &&
 	    (error = suser(pc->pc_ucred, &p->p_acflag)))
 		return (error);

@@ -57,15 +57,16 @@
 #include "pty.h"
 #include "bpfilter.h"
 #include "tun.h"
-#include "random.h"
 #include "audio.h"
 #include "vnd.h"
 #include "ccd.h"
 #include "ch.h"
 #include "ss.h"
+#include "uk.h"
 #include "sd.h"
 #include "st.h"
 #include "cd.h"
+#include "rd.h"
 
 #include "zs.h"
 #include "fdc.h"		/* has NFDC and NFD; see files.sparc */
@@ -96,7 +97,7 @@ struct bdevsw	bdevsw[] =
 	bdev_notdef(),			/* 14 */
 	bdev_notdef(),			/* 15 */
 	bdev_disk_init(NFD,fd),		/* 16: floppy disk */
-	bdev_notdef(),			/* 17 */
+	bdev_disk_init(NRD,rd),		/* 17: ram disk driver */
 	bdev_disk_init(NCD,cd),		/* 18: SCSI CD-ROM */
 	bdev_lkm_dummy(),		/* 19 */
 	bdev_lkm_dummy(),		/* 20 */
@@ -167,8 +168,8 @@ struct cdevsw	cdevsw[] =
 	cdev_fb_init(NCGTHREE,cgthree),	/* 55: /dev/cgthree */
 	cdev_notdef(),			/* 56 */
 	cdev_notdef(),			/* 57 */
-	cdev_disk_init(NCD,cd),		/* 58 SCSI CD-ROM */
-	cdev_notdef(),			/* 59 */
+	cdev_disk_init(NCD,cd),		/* 58: SCSI CD-ROM */
+	cdev_gen_ipf(NIPF,ipl),		/* 59: ip filtering log */
 	cdev_notdef(),			/* 60 */
 	cdev_notdef(),			/* 61 */
 	cdev_notdef(),			/* 62 */
@@ -215,7 +216,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 103 */
 	cdev_notdef(),			/* 104 */
 	cdev_bpftun_init(NBPFILTER,bpf),/* 105: packet filter */
-	cdev_notdef(),			/* 106 */
+	cdev_disk_init(NRD,rd),		/* 106: ram disk driver */
 	cdev_notdef(),			/* 107 */
 	cdev_notdef(),			/* 108 */
 	cdev_notdef(),			/* 109 */
@@ -228,7 +229,9 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 116 */
 	cdev_lkm_dummy(),		/* 117 */
 	cdev_lkm_dummy(),		/* 118 */
-	cdev_random_init(NRANDOM,random),/* 119: random generator */
+	cdev_random_init(1,random),	/* 119: random generator */
+	cdev_uk_init(NUK,uk),		/* 120: unknown SCSI */
+	cdev_ss_init(NSS,ss),           /* 121: SCSI scanner */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -374,7 +377,7 @@ static int chrtoblktbl[] = {
 	/*103 */	NODEV,
 	/*104 */	NODEV,
 	/*105 */	NODEV,
-	/*106 */	NODEV,
+	/*106 */	17,
 	/*107 */	NODEV,
 	/*108 */	NODEV,
 	/*109 */	NODEV,
@@ -404,4 +407,22 @@ chrtoblk(dev)
 	if (blkmaj == NODEV)
 		return (NODEV);
 	return (makedev(blkmaj, minor(dev)));
+}
+
+/*
+ * Convert a character device number to a block device number.
+ */
+dev_t
+blktochr(dev)
+	dev_t dev;
+{
+	int blkmaj = major(dev);
+	int i;
+
+	if (blkmaj >= nblkdev)
+		return (NODEV);
+	for (i = 0; i < sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]); i++)
+		if (blkmaj == chrtoblktbl[i])
+			return (makedev(i, minor(dev)));
+	return (NODEV);
 }

@@ -1,5 +1,5 @@
-/*	$OpenBSD: rpc.c,v 1.3 1996/09/27 07:13:49 mickey Exp $	*/
-/*	$NetBSD: rpc.c,v 1.12 1996/02/26 23:05:26 gwr Exp $	*/
+/*	$OpenBSD: rpc.c,v 1.9 1997/02/06 19:35:52 mickey Exp $	*/
+/*	$NetBSD: rpc.c,v 1.16 1996/10/13 02:29:06 christos Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -53,8 +53,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-
-#include <string.h>
 
 #include <nfs/rpcv2.h>
 
@@ -130,7 +128,7 @@ rpc_call(d, prog, vers, proc, sdata, slen, rdata, rlen)
 #ifdef RPC_DEBUG
 	if (debug)
 		printf("rpc_call: prog=0x%x vers=%d proc=%d\n",
-			prog, vers, proc);
+		    prog, vers, proc);
 #endif
 
 	port = rpc_getport(d, prog, vers);
@@ -185,8 +183,8 @@ rpc_call(d, prog, vers, proc, sdata, slen, rdata, rlen)
 	recv_head -= sizeof(*reply);
 
 	cc = sendrecv(d,
-	    sendudp, send_head, ((int)send_tail - (int)send_head),
-	    recvrpc, recv_head, ((int)recv_tail - (int)recv_head));
+	    sendudp, send_head, send_tail - send_head,
+	    recvrpc, recv_head, recv_tail - recv_head);
 
 #ifdef RPC_DEBUG
 	if (debug)
@@ -225,7 +223,7 @@ rpc_call(d, prog, vers, proc, sdata, slen, rdata, rlen)
 	}
 	recv_head += sizeof(*reply);
 
-	return (ssize_t)((int)recv_tail - (int)recv_head);
+	return (ssize_t)(recv_tail - recv_head);
 }
 
 /*
@@ -242,7 +240,7 @@ recvrpc(d, pkt, len, tleft)
 {
 	register struct rpc_reply *reply;
 	ssize_t	n;
-	long	x;
+	int	x;
 
 	errno = 0;
 #ifdef RPC_DEBUG
@@ -321,8 +319,8 @@ rpc_fromaddr(pkt, addr, port)
 int rpc_pmap_num;
 struct pmap_list {
 	struct in_addr	addr;	/* server, net order */
-	u_long	prog;		/* host order */
-	u_long	vers;		/* host order */
+	u_int	prog;		/* host order */
+	u_int	vers;		/* host order */
 	int 	port;		/* host order */
 } rpc_pmap_list[PMAP_NUM];
 
@@ -330,8 +328,8 @@ struct pmap_list {
 int
 rpc_pmap_getcache(addr, prog, vers)
 	struct in_addr	addr;	/* server, net order */
-	u_long		prog;	/* host order */
-	u_long		vers;	/* host order */
+	u_int		prog;	/* host order */
+	u_int		vers;	/* host order */
 {
 	struct pmap_list *pl;
 
@@ -348,8 +346,8 @@ rpc_pmap_getcache(addr, prog, vers)
 void
 rpc_pmap_putcache(addr, prog, vers, port)
 	struct in_addr	addr;	/* server, net order */
-	u_long		prog;	/* host order */
-	u_long		vers;	/* host order */
+	u_int		prog;	/* host order */
+	u_int		vers;	/* host order */
 	int 		port;	/* host order */
 {
 	struct pmap_list *pl;

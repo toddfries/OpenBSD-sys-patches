@@ -1,4 +1,4 @@
-/*	$OpenBSD: kernfs_vnops.c,v 1.4 1996/06/20 14:30:09 mickey Exp $	*/
+/*	$OpenBSD: kernfs_vnops.c,v 1.9 1997/04/26 12:10:00 kstailey Exp $	*/
 /*	$NetBSD: kernfs_vnops.c,v 1.43 1996/03/16 23:52:47 christos Exp $	*/
 
 /*
@@ -70,30 +70,16 @@
 
 static int	byteorder = BYTE_ORDER;
 static int	posix = _POSIX_VERSION;
-static int	osrev = BSD;
+static int	osrev = OpenBSD;
 static int	ncpu = 1;	/* XXX */
 extern char machine[], cpu_model[];
 extern char ostype[], osrelease[];
 
-struct kern_target {
-	u_char kt_type;
-	u_char kt_namlen;
-	char *kt_name;
-	void *kt_data;
-#define	KTT_NULL	 1
-#define	KTT_TIME	 5
-#define KTT_INT		17
-#define	KTT_STRING	31
-#define KTT_HOSTNAME	47
-#define KTT_AVENRUN	53
-#define KTT_DEVICE	71
-#define	KTT_MSGBUF	89
-#define KTT_USERMEM	91
-#define KTT_DOMAIN	95
-	u_char kt_tag;
-	u_char kt_vtype;
-	mode_t kt_mode;
-} kern_targets[] = {
+#ifdef IPSEC
+extern int ipsp_kern __P((int, char **, int));
+#endif
+
+struct kern_target kern_targets[] = {
 /* NOTE: The name must be less than UIO_MX-16 chars in length */
 #define N(s) sizeof(s)-1, s
      /*        name            data          tag           type  ro/rw */
@@ -124,6 +110,9 @@ struct kern_target {
      { DT_REG, N("time"),      0,            KTT_TIME,     VREG, READ_MODE  },
      { DT_REG, N("usermem"),   0,            KTT_USERMEM,  VREG, READ_MODE  },
      { DT_REG, N("version"),   version,      KTT_STRING,   VREG, READ_MODE  },
+#ifdef IPSEC
+     { DT_REG, N("ipsec"),     0,            KTT_IPSECSPI, VREG, READ_MODE  },
+#endif
 #undef N
 };
 static int nkern_targets = sizeof(kern_targets) / sizeof(kern_targets[0]);
@@ -302,9 +291,12 @@ kernfs_xread(kt, off, bufp, len)
 		break;
 
 	case KTT_USERMEM:
-		sprintf(*bufp, "%lu\n", ctob(physmem - cnt.v_wire_count));
+		sprintf(*bufp, "%u\n", physmem - cnt.v_wire_count);
 		break;
-
+#ifdef IPSEC
+        case KTT_IPSECSPI:
+                return(ipsp_kern(off, bufp, len));
+#endif
 	default:
 		return (0);
 	}

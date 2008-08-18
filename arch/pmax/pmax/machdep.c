@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.51.2.4 1996/06/25 21:52:17 jtc Exp $	*/
+/*	$NetBSD: machdep.c,v 1.67 1996/10/23 20:04:40 mhitch Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -66,6 +66,12 @@
 #include <sys/sysctl.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+#ifdef SYSVMSG
+#include <sys/msg.h>
+#endif
+#ifdef SYSVSEM
+#include <sys/sem.h>
+#endif
 #ifdef SYSVSHM
 #include <sys/shm.h>
 #endif
@@ -95,9 +101,6 @@
 #include <pmax/pmax/turbochannel.h>
 #include <pmax/pmax/pmaxtype.h>
 #include <pmax/pmax/cons.h>
-
-
-#include <pmax/pmax/mips_machdep.c>	/* XXX */
 
 
 #include "pm.h"
@@ -230,6 +233,9 @@ volatile u_int *Mach_reset_addr;
 #endif /* DS5000_200 || DS5000_25 || DS5000_100 || DS5000_240 */
 
 
+void	prom_halt __P((int, char *))   __attribute__((__noreturn__));
+
+
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -277,31 +283,16 @@ mach_init(argc, argv, code, cv)
 		argv++;
 	}
 
-#if 0
 	/*
-	 * Copy down exception vector code.
-	 */
-	if (MachUTLBMissEnd - MachUTLBMiss > 0x80)
-		panic("startup: UTLB code too large");
-	bcopy(MachUTLBMiss, (char *)MACH_UTLB_MISS_EXC_VEC,
-		MachUTLBMissEnd - MachUTLBMiss);
-	bcopy(mips_R2000_exception, (char *)MACH_GEN_EXC_VEC,
-		mips_R2000_exceptionEnd - mips_R2000_exception);
-
-	/*
-	 * Copy locore-function vector.
-	 */
-	bcopy(&R2000_locore_vec, &mips_locore_jumpvec,
-	      sizeof(mips_locore_jumpvec_t));
-
-	/*
+	 * Copy exception-dispatch code down to exception vector.
+	 * Initialize locore-function vector.
 	 * Clear out the I and D caches.
 	 */
-	mips_r2000_ConfigCache();
-	mips_r2000_FlushCache();
+#ifdef notyet
+	/* XXX locore doesn't set up cpu type early enough for this */
+	mips_vector_init();
 #else
-	/*XXX*/
-	r2000_vector_init();
+	mips1_vector_init();
 #endif
 
 	/* look at argv[0] and compute bootdev */
@@ -719,6 +710,22 @@ mach_init(argc, argv, code, cv)
 #ifdef SYSVSHM
 	valloc(shmsegs, struct shmid_ds, shminfo.shmmni);
 #endif
+#ifdef SYSVSEM
+	valloc(sema, struct semid_ds, seminfo.semmni);
+	valloc(sem, struct sem, seminfo.semmns);
+	/* This is pretty disgusting! */
+	valloc(semu, int, (seminfo.semmnu * seminfo.semusz) / sizeof(int));
+#endif
+#ifdef SYSVMSG
+	valloc(msgpool, char, msginfo.msgmax);
+	valloc(msgmaps, struct msgmap, msginfo.msgseg);
+	valloc(msghdrs, struct msg, msginfo.msgtql);
+	valloc(msqids, struct msqid_ds, msginfo.msgmni);
+#endif
+
+#ifndef BUFCACHEPERCENT
+#define BUFCACHEPERCENT 5
+#endif
 
 	/*
 	 * Determine how many buffers to allocate.
@@ -727,13 +734,29 @@ mach_init(argc, argv, code, cv)
 	 * We just allocate a flat 10%.  Ensure a minimum of 16 buffers.
 	 * We allocate 1/2 as many swap buffer headers as file i/o buffers.
 	 */
-	if (bufpages == 0)
-		bufpages = physmem / 10 / CLSIZE;
+	if (bufpages == 0) {
+		if (physmem < btoc(2 * 1024 * 1024))
+			bufpages = physmem / (10 * CLSIZE);
+		else
+			bufpages = (btoc(2 * 1024 * 1024) + physmem) /
+			    ((100/BUFCACHEPERCENT) * CLSIZE);
+	}
 	if (nbuf == 0) {
 		nbuf = bufpages;
 		if (nbuf < 16)
 			nbuf = 16;
 	}
+
+	/* Restrict to at most 70% filled kvm */
+	if (nbuf * MAXBSIZE >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) * 7 / 10)
+		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    MAXBSIZE * 7 / 10;
+
+	/* More buffer pages than fits into the buffers is senseless.  */
+	if (bufpages > nbuf * MAXBSIZE / CLBYTES)
+		bufpages = nbuf * MAXBSIZE / CLBYTES;
+
 	if (nswbuf == 0) {
 		nswbuf = (nbuf / 2) &~ 1;	/* force even */
 		if (nswbuf > 256)
@@ -795,6 +818,12 @@ cpu_startup()
 		panic("startup: cannot allocate buffers");
 	base = bufpages / nbuf;
 	residual = bufpages % nbuf;
+	if (base >= MAXBSIZE / CLBYTES) {
+		/* don't want to alloc more physical mem than needed */
+		base = MAXBSIZE / CLBYTES;
+		residual = 0;
+	}
+
 	for (i = 0; i < nbuf; i++) {
 		vm_size_t curbufsize;
 		vm_offset_t curbuf;
@@ -922,10 +951,11 @@ setregs(p, pack, stack, retval)
  */
 struct sigframe {
 	int	sf_signum;		/* signo for handler */
-	int	sf_code;		/* additional info for handler */
+	siginfo_t *sf_sip;		/* pointer to siginfo_t */
 	struct	sigcontext *sf_scp;	/* context ptr for handler */
 	sig_t	sf_handler;		/* handler addr for u_sigc */
 	struct	sigcontext sf_sc;	/* actual context */
+	siginfo_t sf_si;
 };
 
 #ifdef DEBUG
@@ -940,10 +970,12 @@ int sigpid = 0;
  * Send an interrupt to process.
  */
 void
-sendsig(catcher, sig, mask, code)
+sendsig(catcher, sig, mask, code, type, val)
 	sig_t catcher;
 	int sig, mask;
 	u_long code;
+	int type;
+	union sigval val;
 {
 	register struct proc *p = curproc;
 	register struct sigframe *fp;
@@ -963,6 +995,8 @@ sendsig(catcher, sig, mask, code)
 	 * the space with a `brk'.
 	 */
 	fsize = sizeof(struct sigframe);
+	if (!(psp->ps_siginfo & sigmask(sig)))
+		fsize -= sizeof(siginfo_t);
 	if ((psp->ps_flags & SAS_ALTSTACK) &&
 	    (psp->ps_sigstk.ss_flags & SS_ONSTACK) == 0 &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
@@ -1000,7 +1034,17 @@ sendsig(catcher, sig, mask, code)
 		bcopy((caddr_t)&p->p_md.md_regs[F0], (caddr_t)ksc.sc_fpregs,
 			sizeof(ksc.sc_fpregs));
 	}
+
+	if (psp->ps_siginfo & sigmask(sig)) {
+		siginfo_t si;
+
+		initsiginfo(&si, sig, code, type, val);
+		if (copyout((caddr_t)&si, (caddr_t)&fp->sf_si, sizeof si))
+			goto bail;
+	}
+
 	if (copyout((caddr_t)&ksc, (caddr_t)&fp->sf_sc, sizeof(ksc))) {
+bail:
 		/*
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
@@ -1017,7 +1061,7 @@ sendsig(catcher, sig, mask, code)
 	 * Build the argument list for the signal handler.
 	 */
 	regs[A0] = sig;
-	regs[A1] = code;
+	regs[A1] = (psp->ps_siginfo & sigmask(sig)) ? (int)&fp->sf_si : NULL;
 	regs[A2] = (int)&fp->sf_sc;
 	regs[A3] = (int)catcher;
 
@@ -1105,8 +1149,12 @@ sys_sigreturn(p, v, retval)
 }
 
 int	waittime = -1;
+struct pcb dumppcb;
 
 
+/*
+ * These variables are needed by /sbin/savecore
+ */
 int	dumpmag = (int)0x8fca0101;	/* magic number for savecore */
 int	dumpsize = 0;		/* also for savecore */
 long	dumplo = 0;
@@ -1141,6 +1189,9 @@ void
 dumpsys()
 {
 	int error;
+
+	/* Save registers. */
+	savectx(&dumppcb, 0);
 
 	msgbufmapped = 0;
 	if (dumpdev == NODEV)
@@ -1188,10 +1239,40 @@ dumpsys()
 	}
 }
 
+
+/*
+ * call PROM to halt or reboot.
+ */
+volatile void
+prom_halt(howto, bootstr)
+	int howto;
+	char *bootstr;
+
+{
+	if (callv != &callvec) {
+		if (howto & RB_HALT)
+			(*callv->_rex)('h');
+		else {
+			(*callv->_rex)('b');
+		}
+	} else if (howto & RB_HALT) {
+		volatile void (*f)() = (volatile void (*)())DEC_PROM_REINIT;
+
+		(*f)();	/* jump back to prom monitor */
+	} else {
+		volatile void (*f)() = (volatile void (*)())DEC_PROM_AUTOBOOT;
+		(*f)();	/* jump back to prom monitor and do 'auto' cmd */
+	}
+
+	while(1) ;	/* fool gcc */
+	/*NOTREACHED*/
+}
+
 void
 boot(howto)
 	register int howto;
 {
+	extern int cold;
 
 	/* take a snap shot before clobbering any registers */
 	if (curproc)
@@ -1202,44 +1283,57 @@ boot(howto)
 		stacktrace();
 #endif
 
+	/* If system is cold, just halt. */
+	if (cold) {
+		howto |= RB_HALT;
+		goto haltsys;
+	}
+
+	/* If "always halt" was specified as a boot flag, obey. */
+	if ((boothowto & RB_HALT) != 0)
+		howto |= RB_HALT;
+
 	boothowto = howto;
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		/*
 		 * Synchronize the disks....
 		 */
 		waittime = 0;
-		vfs_shutdown ();
+		vfs_shutdown();
 
 		/*
 		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
+		 * will be out of synch; adjust it now unless
+		 * the system was sitting in ddb.
 		 */
-		resettodr();
-	}
-	(void) splhigh();		/* extreme priority */
-	if (callv != &callvec) {
-		if (howto & RB_HALT)
-			(*callv->_rex)('h');
-		else {
-			if (howto & RB_DUMP)
-				dumpsys();
-			(*callv->_rex)('b');
+		if ((howto & RB_TIMEBAD) == 0) {
+			resettodr();
+		} else {
+			printf("WARNING: not updating battery clock\n");
 		}
-	} else if (howto & RB_HALT) {
-		volatile void (*f)() = (volatile void (*)())DEC_PROM_REINIT;
-
-		(*f)();	/* jump back to prom monitor */
-	} else {
-		volatile void (*f)() = (volatile void (*)())DEC_PROM_AUTOBOOT;
-
-		if (howto & RB_DUMP)
-			dumpsys();
-		(*f)();	/* jump back to prom monitor and do 'auto' cmd */
 	}
-	while(1) ;	/* fool gcc */
+
+	/* Disable interrupts. */
+	splhigh();
+
+	/* If rebooting and a dump is requested do it. */
+#if 0
+	if ((howto & (RB_DUMP | RB_HALT)) == RB_DUMP)
+#else
+	if (howto & RB_DUMP)
+#endif
+		dumpsys();
+
+	/* run any shutdown hooks */
+	doshutdownhooks();
+
+haltsys:
+
+	/* Finally, halt/reboot the system. */
+	printf("%s\n\n", howto & RB_HALT ? "halted." : "rebooting...");
+	prom_halt(howto & RB_HALT, NULL);
 	/*NOTREACHED*/
 }
-
 
 
 /*
@@ -1591,7 +1685,7 @@ kmin_enable_intr(slotno, handler, sc, on)
 
 #if defined(DEBUG) || defined(DIAGNOSTIC)
 	printf("3MIN: imask %x, %sabling slot %d, sc %x addr 0x%x\n",
-	       kn03_tc3_imask, (on? "en" : "dis"), slotno, sc, handler);
+	       kmin_tc3_imask, (on? "en" : "dis"), slotno, sc, handler);
 #endif
 
 	/*

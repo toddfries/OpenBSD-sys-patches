@@ -1,8 +1,12 @@
-/*	$NetBSD: zs.c,v 1.36 1996/04/04 06:26:15 cgd Exp $	*/
+/*	$OpenBSD: zs.c,v 1.7 1997/01/16 04:04:00 kstailey Exp $	*/
+/*	$NetBSD: zs.c,v 1.42 1996/11/20 18:57:03 gwr Exp $	*/
 
-/*
- * Copyright (c) 1995 Gordon W. Ross
+/*-
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Gordon W. Ross.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,22 +16,25 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- * 4. All advertising materials mentioning features or use of this software
+ * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Gordon Ross
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -56,8 +63,6 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
-#include <machine/eeprom.h>
-#include <machine/isr.h>
 #include <machine/obio.h>
 #include <machine/mon.h>
 
@@ -67,7 +72,9 @@
 #define	NZS	2		/* XXX */
 
 
-/* The Sun3 provides a 4.9152 MHz clock to the ZS chips. */
+/*
+ * The Sun3 provides a 4.9152 MHz clock to the ZS chips.
+ */
 #define PCLK	(9600 * 512)	/* PCLK pin input clock rate */
 
 /*
@@ -78,13 +85,16 @@
 
 #define ZS_DELAY()			delay(2)
 
-/* The layout of this is hardware-dependent (padding, order). */
+/*
+ * The layout of this is hardware-dependent (padding, order).
+ */
 struct zschan {
 	volatile u_char	zc_csr;		/* ctrl,status, and indirect access */
 	u_char		zc_xxx0;
 	volatile u_char	zc_data;	/* data */
 	u_char		zc_xxx1;
 };
+
 struct zsdevice {
 	/* Yes, they are backwards. */
 	struct	zschan zs_chan_b;
@@ -94,10 +104,13 @@ struct zsdevice {
 
 /* Default OBIO addresses. */
 static int zs_physaddr[NZS] = { OBIO_KEYBD_MS, OBIO_ZS };
+
 /* Saved PROM mappings */
 static struct zsdevice *zsaddr[NZS];	/* See zs_init() */
+
 /* Flags from cninit() */
 static int zs_hwflags[NZS][2];
+
 /* Default speed for each channel */
 static int zs_defspeed[NZS][2] = {
 	{ 1200, 	/* keyboard */
@@ -106,6 +119,15 @@ static int zs_defspeed[NZS][2] = {
 	  9600 },	/* ttyb */
 };
 
+
+static struct zschan *zs_get_chan_addr __P((int, int));
+int zs_getc __P((volatile void *));
+static void zs_putc __P((volatile void *, int));
+
+int  zscngetc __P((dev_t));
+void zscnputc __P((dev_t, int));
+void nullcnprobe __P((struct consdev *));
+void zscninit __P((struct consdev *));
 
 /* Find PROM mappings (for console support). */
 void zs_init()
@@ -116,10 +138,10 @@ void zs_init()
 		zsaddr[i] = (struct zsdevice *)
 			obio_find_mapping(zs_physaddr[i], OBIO_ZS_SIZE);
 	}
-}	
+}
 
 
-struct zschan *
+static struct zschan *
 zs_get_chan_addr(zsc_unit, channel)
 	int zsc_unit, channel;
 {
@@ -167,7 +189,7 @@ static u_char zs_init_reg[16] = {
 /* Definition of the driver for autoconfig. */
 static int	zsc_match __P((struct device *, void *, void *));
 static void	zsc_attach __P((struct device *, struct device *, void *));
-static int  zsc_print __P((void *, char *name));
+static int  zsc_print __P((void *, const char *name));
 
 struct cfattach zsc_ca = {
 	sizeof(struct zsc_softc), zsc_match, zsc_attach
@@ -239,7 +261,6 @@ zsc_attach(parent, self, aux)
 {
 	struct zsc_softc *zsc = (void *) self;
 	struct cfdata *cf = self->dv_cfdata;
-	struct confargs *ca = aux;
 	struct zsc_attach_args zsc_args;
 	volatile struct zschan *zc;
 	struct zs_chanstate *cs;
@@ -273,7 +294,7 @@ zsc_attach(parent, self, aux)
 		cs->cs_ops = &zsops_null;
 
 		/* Define BAUD rate clock for the MI code. */
-		cs->cs_pclk_div16 = PCLK / 16;
+		cs->cs_brg_clk = PCLK / 16;
 
 		/* XXX: get defspeed from EEPROM instead? */
 		cs->cs_defspeed = zs_defspeed[zsc_unit][channel];
@@ -329,7 +350,7 @@ zsc_attach(parent, self, aux)
 static int
 zsc_print(aux, name)
 	void *aux;
-	char *name;
+	const char *name;
 {
 	struct zsc_attach_args *args = aux;
 
@@ -348,7 +369,7 @@ zshard(arg)
 {
 	struct zsc_softc *zsc;
 	int unit, rval;
-	
+
 	/* Do ttya/ttyb first, because they go faster. */
 	rval = 0;
 	unit = zsc_cd.cd_ndevs;
@@ -366,7 +387,7 @@ int zssoftpending;
 void
 zsc_req_softint(zsc)
 	struct zsc_softc *zsc;
-{	
+{
 	if (zssoftpending == 0) {
 		/* We are at splzs here, so no need to lock. */
 		zssoftpending = ZSSOFT_PRI;
@@ -435,7 +456,8 @@ zs_write_reg(cs, reg, val)
 	ZS_DELAY();
 }
 
-u_char zs_read_csr(cs)
+u_char
+zs_read_csr(cs)
 	struct zs_chanstate *cs;
 {
 	register u_char v;
@@ -445,7 +467,8 @@ u_char zs_read_csr(cs)
 	return v;
 }
 
-u_char zs_read_data(cs)
+u_char
+zs_read_data(cs)
 	struct zs_chanstate *cs;
 {
 	register u_char v;
@@ -463,7 +486,8 @@ void  zs_write_csr(cs, val)
 	ZS_DELAY();
 }
 
-void  zs_write_data(cs, val)
+void
+zs_write_data(cs, val)
 	struct zs_chanstate *cs;
 	u_char val;
 {
@@ -480,7 +504,7 @@ void  zs_write_data(cs, val)
  */
 int
 zs_getc(arg)
-	void *arg;
+	volatile void *arg;
 {
 	register volatile struct zschan *zc = arg;
 	register int s, c, rr0;
@@ -506,9 +530,9 @@ zs_getc(arg)
 /*
  * Polled output char.
  */
-void
+static void
 zs_putc(arg, c)
-	void *arg;
+	volatile void *arg;
 	int c;
 {
 	register volatile struct zschan *zc = arg;
@@ -529,40 +553,55 @@ zs_putc(arg, c)
 extern struct consdev consdev_kd;	/* keyboard/display */
 extern struct consdev consdev_tty;
 extern struct consdev *cn_tab;	/* physical console device info */
-extern void nullcnpollc();
 
 void *zs_conschan;
 
 /*
  * This function replaces sys/dev/cninit.c
  * Determine which device is the console using
- * the "console" byte from the EEPROM.
+ * the PROM "input source" and "output sink".
  */
 void
 cninit()
 {
+	MachMonRomVector *v;
 	struct zschan *zc;
 	struct consdev *cn;
 	int zsc_unit, channel;
+	char inSource;
 
-	switch (ee_console) {
+	v = romVectorPtr;
+	inSource = *(v->inSource);
 
-	case EE_CONS_TTYA:
-	case EE_CONS_TTYB:
+	if (inSource != *(v->outSink)) {
+		mon_printf("cninit: mismatched PROM output selector\n");
+	}
+
+	switch (inSource) {
+
+	case 1:	/* ttya */
+	case 2:	/* ttyb */
 		zsc_unit = 1;
-		channel = (ee_console & 1);
+		channel = inSource - 1;
 		cn = &consdev_tty;
 		cn->cn_dev = makedev(ZSTTY_MAJOR, channel);
 		cn->cn_pri = CN_REMOTE;
 		break;
 
+	case 3:	/* ttyc (rewired keyboard connector) */
+	case 4:	/* ttyd (rewired mouse connector)   */
+		zsc_unit = 0;
+		channel = inSource - 3;
+		cn = &consdev_tty;
+		cn->cn_dev = makedev(ZSTTY_MAJOR, (channel+2));
+		cn->cn_pri = CN_REMOTE;
+		break;
+
 	default:
-		mon_printf("cninit: unknown eeprom console setting\n");
+		mon_printf("cninit: invalid PROM console selector\n");
 		/* assume keyboard/display */
 		/* fallthrough */
-	case EE_CONS_BW:
-	case EE_CONS_COLOR:
-	case EE_CONS_P4OPT:
+	case 0:	/* keyboard/display */
 		zsc_unit = 0;
 		channel = 0;
 		cn = &consdev_kd;

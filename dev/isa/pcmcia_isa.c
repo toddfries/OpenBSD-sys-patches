@@ -1,4 +1,4 @@
-/*	$Id: pcmcia_isa.c,v 1.3 1996/05/03 07:59:36 deraadt Exp $	*/
+/*	$OpenBSD: pcmcia_isa.c,v 1.10 1997/03/01 22:42:57 niklas Exp $	*/
 /*
  * Copyright (c) 1995,1996 John T. Kohl.  All rights reserved.
  * Copyright (c) 1994 Stefan Grefen.  All rights reserved.
@@ -38,6 +38,8 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <vm/vm.h>
+
+#include <machine/bus.h>
 
 #include <dev/pcmcia/pcmciavar.h>
 #include <dev/pcmcia/pcmciareg.h>
@@ -84,30 +86,29 @@ pcmcia_isa_init(parent, cf, aux, pca, flag)
 	int             flag;
 {
 	struct pcmciabus_attach_args *pa = aux;
-	bus_mem_handle_t memh;
-	vm_offset_t physaddr;
 
 #ifdef PCMCIA_ISA_DEBUG
 	if (parent != NULL)
 		printf("PARENT %s\n", parent->dv_xname);
 #endif
 	if (flag == 0) {		/* match */
-		if (bus_mem_map(pa->pba_bc, pa->pba_maddr, pa->pba_msize, 0,
-				&memh))
-			return 0;
 		pca->scratch_memsiz = pa->pba_msize;
-		pca->scratch_memh = memh;
-		pca->pa_bc = pa->pba_bc;
+		pca->scratch_memh = pa->pba_memh;
+		pca->pa_memt = pa->pba_memt;
 #ifdef PCMCIA_ISA_DEBUG
 		printf("pbaaddr %p maddr %x msize %x\n",
-		       pa, pa->pba_maddr, pa->pba_msize);
-		printf("PCA %p mem %p size %d chip %x memh %x\n",
-		       pca, pca->scratch_mem, pca->scratch_memsiz,
-		       pca->pa_bc, pca->scratch_memh);
+		    pa, pa->pba_maddr, pa->pba_msize);
+		printf("PCA %p mem %p size %d memt %x memh %x\n",
+		    pca, pca->scratch_mem, pca->scratch_memsiz,
+		    pca->pa_memt, pca->scratch_memh);
 #endif
 	}
 	return 1;
 }
+
+/* Ease some typing by providing a nice typedef. */
+typedef int (*probe_t) __P((struct device *, void *, void *,
+    struct pcmcia_link *));
 
 /* probe and attach a device, the has to be configured already */
 STATIC int
@@ -121,7 +122,7 @@ pcmcia_isa_probe(parent, match, aux, pc_link)
 	struct cfdata  *cf = aux;
 	struct isa_attach_args ia;
 	struct pcmciadevs *pcs = pc_link->device;
-	int (*probe) () = (pcs != NULL) ? pcs->dev->pcmcia_probe : NULL;
+	probe_t probe = (pcs != NULL) ? pcs->dev->pcmcia_probe : NULL;
 
 	if (cf->cf_loc[6] != -1 && cf->cf_loc[6] != pc_link->slot) {
 #ifdef PCMCIA_ISA_DEBUG
@@ -144,18 +145,20 @@ pcmcia_isa_probe(parent, match, aux, pc_link)
 	ia.ia_msize = cf->cf_loc[3];
 	ia.ia_irq = cf->cf_loc[4] == 2 ? 9 : cf->cf_loc[4] ;
 	ia.ia_drq = cf->cf_loc[5];
-	ia.ia_bc = pc_link->bus->sc_bc;
-	if (probe == NULL)
-		probe = cf->cf_attach->ca_match;
+	ia.ia_iot = pc_link->bus->sc_iot;
+	ia.ia_memt = pc_link->bus->sc_memt;
 
 #ifdef PCMCIA_ISA_DEBUG
-	printf("pcmcia probe %x %x %p\n", ia.ia_iobase, ia.ia_irq, probe);
+	printf("pcmcia probe %x %x %p\n", ia.ia_iobase, ia.ia_irq,
+	    probe == NULL ? cf->cf_attach->ca_match : probe);
 	printf("parentname = %s\n", parent->dv_xname);
 	printf("devname = %s\n", dev->dv_xname);
 	printf("driver name = %s\n", cf->cf_driver->cd_name);
 #endif
-	if ((*probe) (parent, dev, &ia, pc_link) > 0) {
-		extern isaprint();
+	if ((probe == NULL ? (*cf->cf_attach->ca_match)(parent, dev, &ia) :
+	    (*probe)(parent, dev, &ia, pc_link)) > 0) {
+		extern int isaprint __P((void *, const char *));
+
 		config_attach(parent, dev, &ia, isaprint);
 #ifdef PCMCIA_ISA_DEBUG
 		printf("biomask %x netmask %x ttymask %x\n",
@@ -305,10 +308,11 @@ pcmcia_isa_unconfig(pc_link)
 		struct softc {
 			struct device   sc_dev;
 			void *sc_ih;
-			bus_chipset_tag_t sc_bc;
+			bus_space_tag_t sc_iot;
+			bus_space_tag_t sc_memt;
 		} *sc = pc_link->devp;
 		if (sc)
-			isa_intr_disestablish(sc->sc_bc, sc->sc_ih);
+			isa_intr_disestablish(sc->sc_ic, sc->sc_ih);
 	}
 #endif
 	return 0;

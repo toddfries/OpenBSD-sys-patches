@@ -55,7 +55,7 @@ typedef struct _physadr {
 } *physadr;
 
 typedef struct label_t {
-	int val[2];
+	int val[22];
 } label_t;
 #endif
 
@@ -73,9 +73,7 @@ typedef	short			  int16_t;
 typedef	unsigned short		u_int16_t;
 typedef	int			  int32_t;
 typedef	unsigned int		u_int32_t;
-/* LONGLONG */
 typedef	long long		  int64_t;
-/* LONGLONG */
 typedef	unsigned long long	u_int64_t;
 
 typedef int32_t			register_t;

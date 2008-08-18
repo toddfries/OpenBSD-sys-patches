@@ -1,4 +1,4 @@
-/*	$OpenBSD: reboot.h,v 1.5 1996/06/16 10:27:30 deraadt Exp $	*/
+/*	$OpenBSD: reboot.h,v 1.7 1997/01/16 04:19:41 kstailey Exp $	*/
 /*	$NetBSD: reboot.h,v 1.9 1996/04/22 01:23:25 christos Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #define	RB_DUMP		0x100	/* dump kernel memory before reboot */
 #define	RB_MINIROOT	0x200	/* mini-root present in memory at boot time */
 #define	RB_CONFIG	0x400	/* change configured devices */
+#define	RB_TIMEBAD	0x800	/* don't call resettodr() in boot() */
 
 /*
  * Constants for converting boot-style device number to type,
@@ -90,7 +91,7 @@
 	((controller) << B_CONTROLLERSHIFT) | ((unit) << B_UNITSHIFT) | \
 	((partition) << B_PARTITIONSHIFT) | B_DEVMAGIC)
 
-#ifdef _KERNEL
+#if	defined(_KERNEL) && !defined(_STANDALONE)
 
 __BEGIN_DECLS
 

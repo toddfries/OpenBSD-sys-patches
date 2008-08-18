@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.c,v 1.16 1996/08/26 06:52:29 deraadt Exp $	*/
+/*	$OpenBSD: isa_machdep.c,v 1.20 1997/04/17 03:44:52 tholo Exp $	*/
 /*	$NetBSD: isa_machdep.c,v 1.14 1996/05/12 23:06:18 mycroft Exp $	*/
 
 /*-
@@ -45,6 +45,7 @@
 #include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/proc.h>
 
 #include <vm/vm.h>
 
@@ -66,6 +67,11 @@ void isa_strayintr __P((int));
 void intr_calculatemasks __P((void));
 int fakeintr __P((void *));
 
+vm_offset_t bounce_alloc __P((vm_size_t, vm_offset_t, int));
+caddr_t bounce_vaddr __P((vm_offset_t));
+void bounce_free __P((vm_offset_t, vm_size_t));
+void isadma_copyfrombuf __P((caddr_t, vm_size_t, int, struct isadma_seg *));
+
 /*
  * Fill in default interrupt table (in case of spuruious interrupt
  * during configuration of kernel, setup interrupt control unit
@@ -78,7 +84,7 @@ isa_defaultirq()
 	/* icu vectors */
 	for (i = 0; i < ICU_LEN; i++)
 		setgate(&idt[ICU_OFFSET + i], IDTVEC(intr)[i], 0, SDT_SYS386IGT,
-		    SEL_KPL);
+		    SEL_KPL, GICODE_SEL);
   
 	/* initialize 8259's */
 	outb(IO_ICU1, 0x11);		/* reset; program device, four bytes */
@@ -334,7 +340,6 @@ isa_attach_hook(parent, self, iba)
 	struct device *parent, *self;
 	struct isabus_attach_args *iba;
 {
-
 	/* Nothing to do. */
 }
 
@@ -344,7 +349,7 @@ isa_attach_hook(parent, self, iba)
 
 #define MAX_CHUNK 256		/* number of low memory segments */
 
-static unsigned long bitmap[MAX_CHUNK / 32 + 1];
+static u_int32_t bitmap[MAX_CHUNK / 32 + 1];
 
 #define set(i) (bitmap[(i) >> 5] |= (1 << (i)))
 #define clr(i) (bitmap[(i) >> 5] &= ~(1 << (i)))
@@ -366,7 +371,8 @@ int isaphysmempgs;		/* number of pages of low mem arena */
  * corresponding virtual address, 0 otherwise
  */
 
-static caddr_t
+
+caddr_t
 bounce_vaddr(addr)
 	vm_offset_t addr;
 {
@@ -388,7 +394,7 @@ bounce_vaddr(addr)
  * returns 0 on failure
  */
 
-static vm_offset_t
+vm_offset_t
 bounce_alloc(nbytes, pmask, waitok)
 	vm_size_t nbytes;
 	vm_offset_t pmask;
@@ -421,7 +427,7 @@ bounce_alloc(nbytes, pmask, waitok)
 	b = (isaphysmem + ~pmask) & pmask;
 	c = isaphysmem + chunk_num*chunk_size;
 	n = nunits*chunk_size;
-	if (a + n >= c || pmask != 0 && a + n >= b && b + n >= c) {
+	if (a + n >= c || (pmask != 0 && a + n >= b && b + n >= c)) {
 		splx(opri);
 		return(0);
 	}
@@ -467,7 +473,7 @@ bounce_alloc(nbytes, pmask, waitok)
  * return a segent of the low mem arena to the free pool
  */
 
-static void
+void
 bounce_free(addr, nbytes)
 	vm_offset_t addr;
 	vm_size_t nbytes;
@@ -618,7 +624,8 @@ isadma_copyfrombuf(addr, nbytes, nphys, phys)
 	caddr_t vaddr;
 
 	for (i = 0; i < nphys; i++) {
-		if (vaddr = bounce_vaddr(phys[i].addr))
+		vaddr = bounce_vaddr(phys[i].addr);
+		if (vaddr)
 			bcopy(vaddr, addr, phys[i].length);
 		addr += phys[i].length;
 	}
@@ -639,7 +646,8 @@ isadma_copytobuf(addr, nbytes, nphys, phys)
 	caddr_t vaddr;
 
 	for (i = 0; i < nphys; i++) {
-		if (vaddr = bounce_vaddr(phys[i].addr))
+		vaddr = bounce_vaddr(phys[i].addr);
+		if (vaddr)
 			bcopy(addr, vaddr, phys[i].length);
 		addr += phys[i].length;
 	}

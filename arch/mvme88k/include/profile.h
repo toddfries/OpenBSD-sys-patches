@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -31,24 +32,25 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)profile.h	8.1 (Berkeley) 6/11/93
- *	$Id: profile.h,v 1.2 1996/03/24 16:52:34 tholo Exp $
+ *	$Id: profile.h,v 1.6 1997/03/25 17:07:37 rahnds Exp $
  */
 
 #define	_MCOUNT_DECL static inline void _mcount
 
 #define	MCOUNT \
-extern void mcount() __asm("mcount");					\
+extern void mcount() asm("mcount");					\
 void									\
 mcount()								\
 {									\
-	register int selfret, callerret;				\
+	register int selfret;						\
+	register int callerret;						\
 	/*								\
 	 * find the return address for mcount,				\
 	 * and the return address for mcount's caller.			\
 	 *								\
 	 * selfret = ret pushed by mcount call				\
 	 */								\
-	__asm volatile("ld %0,r31,36" : "=r" (selfret));			\
+	asm volatile("or %0,r1,0" : "=r" (selfret));			\
 	/*								\
 	 * callerret = ret pushed by call into self.			\
 	 */								\
@@ -56,8 +58,8 @@ mcount()								\
 	 * This may not be right. It all depends on where the		\
 	 * caller stores the return address. XXX			\
 	 */								\
-	__asm volatile("addu	 r10,r31,48");				\
-	__asm volatile("ld %0,r10,36" : "=r" (callerret));		\
+	asm volatile("addu	 r10,r31,48");				\
+	asm volatile("ld %0,r10,36" : "=r" (callerret));		\
 	_mcount(callerret, selfret);					\
 }
 

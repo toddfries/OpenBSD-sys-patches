@@ -1,5 +1,5 @@
-/*	$OpenBSD: ivsc.c,v 1.3 1996/05/02 06:44:15 niklas Exp $	*/
-/*	$NetBSD: ivsc.c,v 1.15 1996/04/21 21:12:04 veego Exp $	*/
+/*	$OpenBSD: ivsc.c,v 1.6 1997/01/18 12:26:31 niklas Exp $	*/
+/*	$NetBSD: ivsc.c,v 1.21 1996/12/23 09:10:21 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Michael L. Hitch
@@ -49,7 +49,6 @@
 #include <amiga/dev/scivar.h>
 #include <amiga/dev/zbusvar.h>
 
-int ivscprint __P((void *auxp, char *));
 void ivscattach __P((struct device *, struct device *, void *));
 int ivscmatch __P((struct device *, void *, void *));
 
@@ -167,20 +166,7 @@ ivscattach(pdp, dp, auxp)
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, ivscprint);
-}
-
-/*
- * print diag if pnp is NULL else just extra
- */
-int
-ivscprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-	return(QUIET);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
 
 int

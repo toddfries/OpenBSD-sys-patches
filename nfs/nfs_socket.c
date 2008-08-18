@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.7 1996/07/03 07:10:33 deraadt Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.11 1997/04/25 09:22:31 deraadt Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -165,13 +165,16 @@ nfs_connect(nmp, rep)
 
 	/*
 	 * Some servers require that the client port be a reserved port number.
+	 * We always allocate a reserved port, as this prevents filehandle
+	 * disclosure through UDP port capture.
 	 */
-	if (saddr->sa_family == AF_INET && (nmp->nm_flag & NFSMNT_RESVPORT)) {
+	if (saddr->sa_family == AF_INET) {
 		MGET(m, M_WAIT, MT_SONAME);
 		sin = mtod(m, struct sockaddr_in *);
 		sin->sin_len = m->m_len = sizeof (struct sockaddr_in);
 		sin->sin_family = AF_INET;
 		sin->sin_addr.s_addr = INADDR_ANY;
+		/* XXX should do random allocation */
 		tport = IPPORT_RESERVED - 1;
 		sin->sin_port = htons(tport);
 		while ((error = sobind(so, m)) == EADDRINUSE &&
@@ -1214,7 +1217,8 @@ nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
 		}
 	}
 	*mrq = mreq;
-	*mbp = mb;
+	if (mrq != NULL)
+		*mbp = mb;
 	*bposp = bpos;
 	if (err != 0 && err != NFSERR_RETVOID)
 		nfsstats.srvrpc_errs++;

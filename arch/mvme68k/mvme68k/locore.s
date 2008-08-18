@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.9 1996/06/16 00:53:45 deraadt Exp $ */
+/*	$OpenBSD: locore.s,v 1.16 1997/03/31 00:24:13 downsj Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -107,6 +107,8 @@ tmpstk:
 	.globl	_edata
 	.globl	_etext,_end
 	.globl	start
+	.globl	_kernel_text
+_kernel_text:
 start:
 	movw	#PSL_HIGHIPL,sr		| no interrupts
 	movl	#0,a5			| RAM starts at 0
@@ -198,6 +200,9 @@ is147:
 	RELOC(_mmutype, a0)		| no, we have 68030
 	movl	#MMU_68030,a0@		| set to reflect 68030 PMMU
 
+	RELOC(_cputype, a0)		| no, we have 68030
+	movl	#CPU_68030,a0@		| set to reflect 68030 CPU
+
 	movl	#CACHE_OFF,d0
 	movc	d0,cacr			| clear and disable on-chip cache(s)
 
@@ -238,6 +243,12 @@ is162:
 	RELOC(_mmutype, a0)
 	movl	#MMU_68040,a0@		| with a 68040 MMU
 
+	RELOC(_cputype, a0)		| no, we have 68040
+	movl	#CPU_68040,a0@		| set to reflect 68040 CPU
+
+	RELOC(_fputype, a0)
+	movl	#FPU_68040,a0@		| and a 68040 FPU
+
 	bra	is16x
 #endif
 
@@ -253,6 +264,12 @@ is167:
 	RELOC(_mmutype, a0)
 	movl	#MMU_68040,a0@		| with a 68040 MMU
 
+	RELOC(_cputype, a0)		| no, we have 68040
+	movl	#CPU_68040,a0@		| set to reflect 68040 CPU
+
+	RELOC(_fputype, a0)
+	movl	#FPU_68040,a0@		| and a 68040 FPU
+
 	bra	is16x
 #endif
 
@@ -266,7 +283,10 @@ is177:
 	movl	d0, d2
 
 	RELOC(_mmutype, a0)
-	movl	#MMU_68040,a0@		| XXX TDR FIX FIX with a 68060 MMU
+	movl	#MMU_68060,a0@		| with a 68060 MMU
+
+	RELOC(_cputype, a0)		| no, we have 68060
+	movl	#CPU_68060,a0@		| set to reflect 68060 CPU
 
 	bra	is16x
 #endif
@@ -465,12 +485,14 @@ Lenab1:
 	movl	#USRSTACK-4,a2
 	movl	a2,usp			| init user SP
 	movl	a1,_curpcb		| proc0 is running
-#ifdef FPCOPROC
+
+	tstl	_fputype		| Have an FPU?
+	jeq	Lenab2			| No, skip.
 	clrl	a1@(PCB_FPCTX)		| ensure null FP context
 	movl	a1,sp@-
 	jbsr	_m68881_restore		| restore it (does not kill a1)
 	addql	#4,sp
-#endif
+Lenab2:
 /* flush TLB and turn on caches */
 	jbsr	_TBIA			| invalidate TLB
 	cmpl	#MMU_68040,_mmutype	| 68040?
@@ -527,7 +549,7 @@ _proc_trampoline:
  * Stack looks like:
  *
  *	sp+0 ->	signal number
- *	sp+4	signal specific code
+ *	sp+4	pointer to siginfo (sip)
  *	sp+8	pointer to signal context frame (scp)
  *	sp+12	address of handler
  *	sp+16	saved hardware state
@@ -718,34 +740,41 @@ Lstkadj:
  */
 _fpfline:
 #if defined(M68040)
+	cmpl	#FPU_68040,_fputype	| 68040 FPU?
+	jne	Lfp_unimp		| no, skip FPSP
 	cmpw	#0x202c,sp@(6)		| format type 2?
 	jne	_illinst		| no, not an FP emulation
+Ldofp_unimp:
 #ifdef FPSP
 	.globl	fpsp_unimp
 	jmp	fpsp_unimp		| yes, go handle it
-#else
+#endif
+Lfp_unimp:
+#endif/* M68040 */
+#ifdef FPU_EMULATE
 	clrl	sp@-			| stack adjust count
 	moveml	#0xFFFF,sp@-		| save registers
 	moveq	#T_FPEMULI,d0		| denote as FP emulation trap
 	jra	fault			| do it
-#endif
 #else
 	jra	_illinst
 #endif
 
 _fpunsupp:
 #if defined(M68040)
-	cmpl	#MMU_68040,_mmutype	| 68040?
+	cmpl	#FPU_68040,_fputype	| 68040 FPU?
 	jne	_illinst		| no, treat as illinst
 #ifdef FPSP
 	.globl	fpsp_unsupp
 	jmp	fpsp_unsupp		| yes, go handle it
-#else
+#endif
+Lfp_unsupp:
+#endif /* M68040 */
+#ifdef FPU_EMULATE
 	clrl	sp@-			| stack adjust count
 	moveml	#0xFFFF,sp@-		| save registers
 	moveq	#T_FPEMULD,d0		| denote as FP emulation trap
 	jra	fault			| do it
-#endif
 #else
 	jra	_illinst
 #endif
@@ -758,7 +787,6 @@ _fpunsupp:
  */
 	.globl	_fpfault
 _fpfault:
-#ifdef FPCOPROC
 	clrl	sp@-		| stack adjust count
 	moveml	#0xFFFF,sp@-	| save user registers
 	movl	usp,a0		| and save
@@ -767,6 +795,11 @@ _fpfault:
 	movl	_curpcb,a0	| current pcb
 	lea	a0@(PCB_FPCTX),a0 | address of FP savearea
 	fsave	a0@		| save state
+#if defined(M68040) || defined(M68060)
+	/* always null state frame on 68040, 68060 */
+	cmpl	#CPU_68040,_cputype
+	jle	Lfptnull
+#endif
 	tstb	a0@		| null state frame?
 	jeq	Lfptnull	| yes, safe
 	clrw	d0		| no, need to tweak BIU
@@ -777,9 +810,6 @@ Lfptnull:
 	frestore a0@		| restore state
 	movl	#T_FPERR,sp@-	| push type arg
 	jra	Ltrapnstkadj	| call trap and deal with stack cleanup
-#else
-	jra	_badtrap	| treat as an unexpected trap
-#endif
 
 /*
  * Coprocessor and format errors can generate mid-instruction stack
@@ -903,29 +933,16 @@ Ltrap1:
 	rte
 
 /*
- * Routines for traps 1 and 2.  The meaning of the two traps depends
- * on whether we are an HPUX compatible process or a native 4.3 process.
- * Our native 4.3 implementation uses trap 1 as sigreturn() and trap 2
- * as a breakpoint trap.  HPUX uses trap 1 for a breakpoint, so we have
- * to make adjustments so that trap 2 is used for sigreturn.
+ * Trap 1 - sigreturn
  */
 _trap1:
-#ifdef COMPAT_HPUX
-	btst	#MDP_TRCB,mdpflag	| being traced by an HPUX process?
-	jeq	sigreturn		| no, trap1 is sigreturn
-	jra	_trace			| yes, trap1 is breakpoint
-#else
-	jra	sigreturn		| no, trap1 is sigreturn
-#endif
+	jra	sigreturn
 
+/*
+ * Trap 2 - trace trap
+ */
 _trap2:
-#ifdef COMPAT_HPUX
-	btst	#MDP_TRCB,mdpflag	| being traced by an HPUX process?
-	jeq	_trace			| no, trap2 is breakpoint
-	jra	sigreturn		| yes, trap2 is sigreturn
-#else
-	jra	_trace			| no, trap2 is breakpoint
-#endif
+	jra	_trace
 
 /*
  * Trap 12 is the entry point for the cachectl "syscall" (both HPUX & BSD)
@@ -1118,54 +1135,8 @@ Ldorte:
 #define ALTENTRY(name, rname) 	ENTRY(name)
 #endif
 
-/*
- * copypage(fromaddr, toaddr)
- *
- * Optimized version of bcopy for a single page-aligned NBPG byte copy.
- */
-ENTRY(copypage)
-	movl	sp@(4),a0		| source address
-	movl	sp@(8),a1		| destination address
-	movl	#NBPG/32,d0		| number of 32 byte chunks
-#if defined(M68040)
-	cmpl	#MMU_68040,_mmutype	| 68040?
-	jne	Lmlloop			| no, use movl
-Lm16loop:
-	.long	0xf6209000		| move16 a0@+,a1@+
-	.long	0xf6209000		| move16 a0@+,a1@+
-	subql	#1,d0
-	jne	Lm16loop
-	rts
-#endif
-Lmlloop:
-	movl	a0@+,a1@+
-	movl	a0@+,a1@+
-	movl	a0@+,a1@+
-	movl	a0@+,a1@+
-	movl	a0@+,a1@+
-	movl	a0@+,a1@+
-	movl	a0@+,a1@+
-	movl	a0@+,a1@+
-	subql	#1,d0
-	jne	Lmlloop
-	rts
-
-/*
- * non-local gotos
- */
-ENTRY(setjmp)
-	movl	sp@(4),a0	| savearea pointer
-	moveml	#0xFCFC,a0@	| save d2-d7/a2-a7
-	movl	sp@,a0@(48)	| and return address
-	moveq	#0,d0		| return 0
-	rts
-
-ENTRY(longjmp)
-	movl	sp@(4),a0
-	moveml	a0@+,#0xFCFC
-	movl	a0@,sp@
-	moveq	#1,d0
-	rts
+/* Use standard m68k support. */
+#include <m68k/m68k/support.s>
 
 /*
  * The following primitives manipulate the run queues.  _whichqs tells which
@@ -1223,7 +1194,7 @@ Lset2:
  *
  * Call should be made at spl6().
  */
-ENTRY(remrq)
+ENTRY(remrunqueue)
 	movl	sp@(4),a0
 	movb	a0@(P_PRIORITY),d0
 #ifdef DIAGNOSTIC
@@ -1252,7 +1223,7 @@ Lrem2:
 	movl	#Lrem3,sp@-
 	jbsr	_panic
 Lrem3:
-	.asciz	"remrq"
+	.asciz	"remrunqueue"
 	.even
 #endif
 
@@ -1310,7 +1281,7 @@ Lbadsw:
 /*
  * cpu_switch()
  *
- * NOTE: On the mc68851 (318/319/330) we attempt to avoid flushing the
+ * NOTE: On the mc68851 we attempt to avoid flushing the
  * entire ATC.  The effort involved in selective flushing may not be
  * worth it, maybe we should just flush the whole thing?
  *
@@ -1370,7 +1341,9 @@ Lsw2:
 	moveml	#0xFCFC,a1@(PCB_REGS)	| save non-scratch registers
 	movl	usp,a2			| grab USP (a2 has been saved)
 	movl	a2,a1@(PCB_USP)		| and save it
-#ifdef FPCOPROC
+
+	tstl	_fputype		| If we don't have an FPU,
+	jeq	Lswnofpsave		|  don't try to save it.
 	lea	a1@(PCB_FPCTX),a2	| pointer to FP save area
 	fsave	a2@			| save FP state
 	tstb	a2@			| null state frame?
@@ -1378,7 +1351,6 @@ Lsw2:
 	fmovem	fp0-fp7,a2@(216)	| save FP general registers
 	fmovem	fpcr/fpsr/fpi,a2@(312)	| save FP control registers
 Lswnofpsave:
-#endif
 
 #ifdef DIAGNOSTIC
 	tstl	a0@(P_WCHAN)
@@ -1432,7 +1404,9 @@ Lcxswdone:
 	moveml	a1@(PCB_REGS),#0xFCFC	| and registers
 	movl	a1@(PCB_USP),a0
 	movl	a0,usp			| and USP
-#ifdef FPCOPROC
+
+	tstl	_fputype		| If we don't have an FPU,
+	jeq	Lnofprest		|  don't try to restore it.
 	lea	a1@(PCB_FPCTX),a0	| pointer to FP save area
 	tstb	a0@			| null state frame?
 	jeq	Lresfprest		| yes, easy
@@ -1447,7 +1421,7 @@ Lresnot040:
 	fmovem	a0@(216),fp0-fp7	| restore FP general registers
 Lresfprest:
 	frestore a0@			| restore state
-#endif
+Lnofprest:
 	movw	a1@(PCB_PS),sr		| no, restore PS
 	moveq	#1,d0			| return 1 (for alternate returns)
 	rts
@@ -1462,7 +1436,9 @@ ENTRY(savectx)
 	movl	usp,a0			| grab USP
 	movl	a0,a1@(PCB_USP)		| and save it
 	moveml	#0xFCFC,a1@(PCB_REGS)	| save non-scratch registers
-#ifdef FPCOPROC
+
+	tstl	_fputype		| If we don't have an FPU,
+	jeq	Lsvnofpsave		|  don't try to save it.
 	lea	a1@(PCB_FPCTX),a0	| pointer to FP save area
 	fsave	a0@			| save FP state
 	tstb	a0@			| null state frame?
@@ -1470,7 +1446,6 @@ ENTRY(savectx)
 	fmovem	fp0-fp7,a0@(216)	| save FP general registers
 	fmovem	fpcr/fpsr/fpi,a0@(312)	| save FP control registers
 Lsvnofpsave:
-#endif
 	moveq	#0,d0			| return 0
 	rts
 
@@ -1778,31 +1753,6 @@ ENTRY(spl0)
 Lspldone:
 	rts
 
-ENTRY(_insque)
-	movw	sr,d0
-	movw	#PSL_HIGHIPL,sr		| atomic
-	movl	sp@(8),a0		| where to insert (after)
-	movl	sp@(4),a1		| element to insert (e)
-	movl	a0@,a1@			| e->next = after->next
-	movl	a0,a1@(4)		| e->prev = after
-	movl	a1,a0@			| after->next = e
-	movl	a1@,a0
-	movl	a1,a0@(4)		| e->next->prev = e
-	movw	d0,sr
-	rts
-
-ENTRY(_remque)
-	movw	sr,d0
-	movw	#PSL_HIGHIPL,sr		| atomic
-	movl	sp@(4),a0		| element to remove (e)
-	movl	a0@,a1
-	movl	a0@(4),a0
-	movl	a0,a1@(4)		| e->next->prev = e->prev
-	movl	a1,a0@			| e->prev->next = e->next
-	movw	d0,sr
-	rts
-
-#ifdef FPCOPROC
 /*
  * Save and restore 68881 state.
  */
@@ -1825,7 +1775,6 @@ ENTRY(m68881_restore)
 Lm68881rdone:
 	frestore a0@			| restore state
 	rts
-#endif
 
 /*
  * Handle the nitty-gritty of rebooting the machine.
@@ -1899,9 +1848,13 @@ not147:
 	/*NOTREACHED*/
 
 	.data
-	.globl	_mmutype,_protorp
+	.globl	_mmutype,_protorp,_cputype,_fputype
 _mmutype:
 	.long	MMU_68030	| default to MMU_68030
+_cputype:
+	.long	CPU_68030	| default to CPU_68030
+_fputype:
+	.long	FPU_68881	| default to 68881 FPU
 _protorp:
 	.long	0,0		| prototype root pointer
 	.globl	_cold

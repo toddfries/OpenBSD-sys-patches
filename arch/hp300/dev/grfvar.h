@@ -1,4 +1,5 @@
-/*	$NetBSD: grfvar.h,v 1.7 1996/02/24 00:55:18 thorpej Exp $	*/
+/*	$OpenBSD: grfvar.h,v 1.6 1997/04/16 11:56:06 downsj Exp $	*/
+/*	$NetBSD: grfvar.h,v 1.10 1997/03/31 07:34:19 scottr Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -77,8 +78,27 @@ struct	grfsw {
 };
 
 struct	grf_softc {
+	struct	device sc_dev;		/* generic device info */
+	int	sc_scode;		/* select code; for grfdevno() */
 	struct	grf_data *sc_data;	/* display state information */
 	struct	ite_softc *sc_ite;	/* pointer to ite; may be NULL */
+};
+
+struct	grfdev_softc {
+	struct	device sc_dev;		/* generic device info */
+	struct	grf_data *sc_data;	/* generic grf data */
+	int	sc_scode;		/* select code, -1 for intio */
+};
+
+/*
+ * Set up by the hardware driver, and passed all the way down to
+ * the ITE, if appropriate.
+ */
+struct	grfdev_attach_args {
+	int	ga_scode;		/* XXX select code, -1 for intio */
+	int	ga_isconsole;		/* from hardware; is console? */
+	void	*ga_data;		/* hardware-dependent data */
+	void	*ga_ite;		/* ITE switch table */
 };
 
 /* flags */
@@ -105,7 +125,33 @@ struct	grf_softc {
 
 #ifdef _KERNEL
 extern	struct grf_data grf_cn;		/* grf_data for console device */
-extern	struct grf_softc grf_softc[];
-extern	struct grfsw *grfsw[];
-extern	int ngrfsw;
-#endif
+
+/* grf.c prototypes */
+int	grfmap __P((dev_t, caddr_t *, struct proc *));
+int	grfunmap __P((dev_t, caddr_t, struct proc *));
+int	grfon __P((dev_t));
+int	grfoff __P((dev_t));
+int	grfaddr __P((struct grf_softc *, int));
+
+#ifdef COMPAT_HPUX
+int	hpuxgrfioctl __P((dev_t, int, caddr_t, int, struct proc *));
+
+int	grflock __P((struct grf_data *, int));
+int	grfunlock __P((struct grf_data *));
+int	grfdevno __P((dev_t));
+
+int	iommap __P((dev_t, caddr_t *));
+int	iounmmap __P((dev_t, caddr_t));
+
+int	grffindpid __P((struct grf_data *));
+void	grfrmpid __P((struct grf_data *));
+int	grflckmmap __P((dev_t, caddr_t *));
+int	grflckunmmap __P((dev_t, caddr_t));
+#endif /* COMPAT_HPUX */
+
+/* grf_subr.c prototypes */
+struct itesw;
+void	grfdev_attach __P((struct grfdev_softc *,
+	    int (*init)(struct grf_data *, int, caddr_t),
+	    caddr_t, struct grfsw *, struct itesw *itesw));
+#endif /* _KERNEL */

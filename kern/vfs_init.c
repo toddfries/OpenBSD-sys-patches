@@ -1,3 +1,4 @@
+/*	$OpenBSD: vfs_init.c,v 1.4 1997/02/24 14:20:02 niklas Exp $	*/
 /*	$NetBSD: vfs_init.c,v 1.6 1996/02/09 19:00:58 christos Exp $	*/
 
 /*
@@ -75,11 +76,6 @@ extern struct vnodeop_desc *vfs_op_descs[];
 int vfs_opv_numops;
 
 typedef (*PFI) __P((void *));
-
-void vfs_opv_init __P((void));
-void vfs_opv_init_explicit __P((struct vnodeopv_desc *));
-void vfs_opv_init_default __P((struct vnodeopv_desc *));
-void vfs_op_init __P((void));
 
 /*
  * A miscellaneous routine.

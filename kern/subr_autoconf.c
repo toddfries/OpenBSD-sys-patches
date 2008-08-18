@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.12 1996/09/24 02:40:11 deraadt Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.15 1997/02/03 03:04:22 downsj Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -52,9 +52,13 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <machine/limits.h>
-/* Extra stuff from Matthias Drochner <drochner@zelux6.zel.kfa-juelich.de>
- */
+/* Extra stuff from Matthias Drochner <drochner@zelux6.zel.kfa-juelich.de> */
 #include <sys/queue.h>
+
+/* Bleh!  Need device_register proto */
+#if defined(__alpha__) || defined(hp300)
+#include <machine/autoconf.h>
+#endif /* __alpha__ || hp300 */
 
 /*
  * Autoconfiguration subroutines.
@@ -64,7 +68,6 @@
  * ioconf.c exports exactly two names: cfdata and cfroots.  All system
  * devices and drivers are found via these tables.
  */
-extern struct cfdata cfdata[];
 extern short cfroots[];
 
 #define	ROOT ((struct device *)NULL)
@@ -379,7 +382,7 @@ config_attach(parent, match, aux, print)
 				cf->cf_unit++;
 	    }
 	}
-#ifdef __alpha__
+#if defined(__alpha__) || defined(hp300)
 	device_register(dev, aux);
 #endif
 	(*ca->ca_attach)(parent, dev, aux);

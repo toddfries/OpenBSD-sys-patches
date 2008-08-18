@@ -1,4 +1,5 @@
-/*	$NetBSD: if_levar.h,v 1.4 1996/05/07 00:58:00 thorpej Exp $	*/
+/*	$OpenBSD: if_levar.h,v 1.5 1997/04/16 11:56:10 downsj Exp $	*/
+/*	 $NetBSD: if_levar.h,v 1.8 1997/04/14 02:30:45 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1995 Charles M. Hannum.  All rights reserved.
@@ -49,8 +50,6 @@
 struct	le_softc {
 	struct	am7990_softc sc_am7990;	/* glue to MI code */
 
-	struct	hp_device *sc_hd;
-	struct	isr sc_isr;
 	struct	lereg0 *sc_r0;		/* DIO registers */
 	struct	lereg1 *sc_r1;		/* LANCE registers */
 };

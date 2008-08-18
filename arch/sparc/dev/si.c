@@ -190,7 +190,7 @@ struct si_softc {
 #define	SI_DO_RESELECT	0x04	/* Allow disconnect/reselect */
 #define	SI_OPTIONS_MASK	(SI_ENABLE_DMA|SI_DMA_INTR|SI_DO_RESELECT)
 #define SI_OPTIONS_BITS	"\10\3RESELECT\2DMA_INTR\1DMA"
-int si_options = SI_ENABLE_DMA;
+int si_options = 0;		/* XXX SI_ENABLE_DMA when dma works */
 int sw_options = SI_ENABLE_DMA;
 
 /* How long to wait for DMA before declaring an error. */
@@ -201,7 +201,7 @@ static void	si_attach __P((struct device *, struct device *, void *));
 static int	si_intr __P((void *));
 static void	si_reset_adapter __P((struct ncr5380_softc *));
 static void	si_minphys __P((struct buf *));
-static int	si_print __P((void *, char *));
+static int	si_print __P((void *, const char *));
 
 void si_dma_alloc __P((struct ncr5380_softc *));
 void si_dma_free __P((struct ncr5380_softc *));
@@ -261,7 +261,7 @@ struct cfdriver sw_cd = {
 static int
 si_print(aux, name)
 	void *aux;
-	char *name;
+	const char *name;
 {
 	if (name != NULL)
 		printf("%s: scsibus ", name);

@@ -1,5 +1,5 @@
-/*	$OpenBSD: z8530tty.c,v 1.6 1996/06/18 10:23:03 deraadt Exp $ */
-/*	$NetBSD: z8530tty.c,v 1.8.4.2 1996/06/13 23:11:56 gwr Exp $	*/
+/*	$OpenBSD: z8530tty.c,v 1.10 1997/01/15 05:35:47 kstailey Exp $ */
+/*	$NetBSD: z8530tty.c,v 1.13 1996/10/16 20:42:14 gwr Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -175,12 +175,16 @@ struct zsops zsops_tty;
 /* Routines called from other code. */
 cdev_decl(zs);	/* open, close, read, write, ioctl, stop, ... */
 
-static void	zsstart(struct tty *);
-static int	zsparam(struct tty *, struct termios *);
-static void zs_modem(struct zstty_softc *zst, int onoff);
-static int	zshwiflow(struct tty *, int);
-static void zs_hwiflow(struct zstty_softc *, int);
-
+static void	zsstart __P((struct tty *));
+static int	zsparam __P((struct tty *, struct termios *));
+static void	zs_modem __P((struct zstty_softc *zst, int onoff));
+static int	zshwiflow __P((struct tty *, int));
+static void	zs_hwiflow __P((struct zstty_softc *, int));
+static void	zstty_rxint __P((register struct zs_chanstate *));
+static void	zstty_txint __P((register struct zs_chanstate *));
+static void	zstty_stint __P((register struct zs_chanstate *));
+static void	zstty_softint __P((struct zs_chanstate *));
+static void	zsoverrun __P((struct zstty_softc *, long *, char *));
 /*
  * zstty_match: how is this zs channel configured?
  */
@@ -435,8 +439,7 @@ zsclose(dev, flags, mode, p)
 	struct zstty_softc *zst;
 	register struct zs_chanstate *cs;
 	register struct tty *tp;
-	struct zsinfo *zi;
-	int hup, s;
+	int hup;
 
 	zst = zstty_cd.cd_devs[minor(dev)];
 	cs = zst->zst_cs;
@@ -683,7 +686,7 @@ zsparam(tp, t)
 	register struct zstty_softc *zst;
 	register struct zs_chanstate *cs;
 	register int s, bps, cflag, tconst;
-	u_char tmp3, tmp4, tmp5, reset;
+	u_char tmp3, tmp4, tmp5;
 
 	zst = zstty_cd.cd_devs[minor(tp->t_dev)];
 	cs = zst->zst_cs;
@@ -1068,7 +1071,15 @@ zstty_stint(cs)
 		zst->zst_tx_stopped = 1;
 	}
 
-	cs->cs_rr0_new = rr0;
+	/*
+	 * We have to accumulate status line changes here.
+	 * Otherwise, if we get multiple status interrupts
+	 * before the softint runs, we could fail to notice
+	 * some status line changes in the softint routine.
+	 * Fix from Bill Studenmund, October 1996.
+	 */
+	cs->cs_rr0_delta |= (cs->cs_rr0 ^ rr0);
+	cs->cs_rr0 = rr0;
 	zst->zst_st_check = 1;
 
 	/* Ask for softint() call. */
@@ -1114,7 +1125,7 @@ zstty_softint(cs)
 	register int get, c, s;
 	int ringmask, overrun;
 	register u_short ring_data;
-	register u_char rr0, rr1, delta;
+	register u_char rr0, delta;
 
 	zst  = cs->cs_private;
 	tp   = zst->zst_tty;
@@ -1183,9 +1194,9 @@ zstty_softint(cs)
 	if (zst->zst_st_check) {
 		zst->zst_st_check = 0;
 
-		rr0 = cs->cs_rr0_new;
-		delta = rr0 ^ cs->cs_rr0;
-		cs->cs_rr0 = rr0;
+		rr0 = cs->cs_rr0;
+		delta = cs->cs_rr0_delta;
+		cs->cs_rr0_delta = 0;
 		if (delta & ZSRR0_DCD) {
 			c = ((rr0 & ZSRR0_DCD) != 0);
 			if (line->l_modem(tp, c) == 0)

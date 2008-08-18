@@ -1,4 +1,4 @@
-#	$OpenBSD: files.arc,v 1.8 1996/09/24 21:30:00 niklas Exp $
+#	$OpenBSD: files.arc,v 1.15 1997/05/18 13:45:24 pefo Exp $
 #
 # maxpartitions must be first item in files.${ARCH}
 #
@@ -47,18 +47,31 @@ file arch/arc/arc/cpu.c			cpu
 #	PICA bus autoconfiguration devices
 #
 device	pica {}
-attach	pica at mainbus			# 
+attach	pica at mainbus			# optional
 file	arch/arc/pica/picabus.c		pica
+
+#
+#	ALGOR bus autoconfiguration devices
+#
+device	algor {}
+attach	algor at mainbus		# optional
+file	arch/arc/algor/algorbus.c	algor
 
 #
 #	ISA Bus bridge
 #
 device	isabr {} : isabus
-attach	isabr at mainbus
+attach	isabr at mainbus		# optional
 file	arch/arc/isa/isabus.c		isabr
-file    arch/arc/isa/isadma.c		isadma needs-flag
 
-#	Ethernet chip
+#
+#	PCI Bus bridge
+#
+device	pbcpcibr {} : pcibus
+attach	pbcpcibr at mainbus		# optional
+file	arch/arc/pci/pbcpcibus.c	pbcpcibr
+
+#	Ethernet chip on PICA bus
 device	sn
 attach	sn at pica: ifnet, ether
 file	arch/arc/dev/if_sn.c		sn	needs-count
@@ -68,12 +81,12 @@ include	"../../../scsi/files.scsi"
 major	{sd = 0}
 major	{cd = 3}
 
-#	Machine dependent SCSI interface driver
+#	Symbios 53C94 SCSI interface driver on PICA bus
 device	asc: scsi
 attach	asc at pica
 file	arch/arc/dev/asc.c		asc	needs-count
 
-#	Floppy disk controller
+#	Floppy disk controller on PICA bus
 device	fdc {drive = -1}
 attach	fdc at pica
 device	fd: disk
@@ -85,8 +98,8 @@ major	{fd = 7}
 #	Stock ISA bus support
 #
 define  pcmcia {}			# XXX dummy decl...
-define  pci {}				# XXX dummy decl...
 
+include	"../../../dev/pci/files.pci"
 include	"../../../dev/isa/files.isa"
 major	{ wd = 4 }
 
@@ -94,8 +107,9 @@ major	{ wd = 4 }
 device	clock
 attach	clock at pica with clock_pica
 attach	clock at isa with clock_isa
-file	arch/arc/arc/clock.c	clock & (clock_isa | clock_pica) needs-flag
-file	arch/arc/arc/clock_mc.c	clock & (clock_isa | clock_pica) needs-flag
+attach	clock at algor with clock_algor
+file	arch/arc/arc/clock.c	clock & (clock_isa | clock_pica | clock_algor) needs-flag
+file	arch/arc/arc/clock_mc.c	clock & (clock_isa | clock_pica | clock_algor) needs-flag
 
 #	Console driver on PC-style graphics
 device	pc: tty
@@ -105,23 +119,16 @@ device	pms: tty
 attach	pms at pica
 file	arch/arc/dev/pccons.c		pc & (pc_pica | pc_isa)	needs-flag
 
-#	Serial driver for both ISA and LOCAL bus.
-device  ace: tty
-attach  ace at isa with ace_isa
-attach  ace at commulti with ace_commulti
-attach  ace at pica with ace_pica
-file    arch/arc/dev/ace.c		ace & (ace_isa | ace_commulti | ace_pica) needs-flag 
-
-# 	Parallel ports (XXX what chip?)
-device  lpr
-attach  lpr at isa with lpr_isa
-attach	lpr at pica with lpr_pica
-file	arch/arc/dev/lpr.c		lpr & (lpr_isa | lpr_pica) needs-flag
-
 # BusLogic BT-445C VLB SCSI Controller. Special on TYNE local bus.
 device  btl: scsi
 attach  btl at isa
-file    arch/arc/dti/btl.c                    btl needs-count
+file    arch/arc/dti/btl.c              btl needs-count
+
+# 8250/16[45]50-based "com" ports
+attach	com at pica with com_pica
+attach	com at algor with com_algor
+file	arch/arc/dev/com_lbus.c		com & (com_pica | com_algor)
+
 
 # National Semiconductor DS8390/WD83C690-based boards
 # (WD/SMC 80x3 family, SMC Ultra [8216], 3Com 3C503, NE[12]000, and clones)
@@ -131,6 +138,32 @@ attach  ed at isa with ed_isa
 attach  ed at pcmcia with ed_pcmcia
 file    dev/isa/if_ed.c                 ed & (ed_isa | ed_pcmcia) needs-flag
 
+# PC parallel ports (XXX what chip?)
+attach	lpt at pica with lpt_pica
+attach	lpt at algor with lpt_algor
+file	arch/arc/dev/lpt_lbus.c		lpt & (lpt_pica | lpt_algor)
+
+
+#
+#	PCI Bus support
+#
+
+# PCI VGA display driver
+device	pcivga: tty
+attach	pcivga at pci
+file	arch/arc/pci/pci_vga.c		pcivga
+
+#
+# Specials.
+#
+# RAM disk for boot tape
+pseudo-device rd
+file dev/ramdisk.c			rd needs-flag
+file arch/arc/dev/rd_root.c		ramdisk_hooks
+major {rd = 8}
+
+#
+#	Common files
 #
 
 file	dev/cons.c

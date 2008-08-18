@@ -1,4 +1,5 @@
-/*	$NetBSD: if_le.c,v 1.31 1996/05/09 21:11:47 thorpej Exp $	*/
+/*	$OpenBSD: if_le.c,v 1.9 1997/04/16 11:56:10 downsj Exp $	*/
+/*	$NetBSD: if_le.c,v 1.41 1997/04/14 02:33:20 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1995 Charles M. Hannum.  All rights reserved.
@@ -55,33 +56,31 @@
 #include <netinet/if_ether.h>
 #endif
 
+#include <machine/autoconf.h>
 #include <machine/cpu.h>
-#include <machine/mtpr.h>
-
-#include <hp300/hp300/isr.h>
+#include <machine/intr.h>
 
 #ifdef USELEDS
 #include <hp300/hp300/led.h>
 #endif
 
-#include <hp300/dev/device.h>
-
 #include <dev/ic/am7990reg.h>
 #include <dev/ic/am7990var.h>
 
+#include <hp300/dev/dioreg.h>
+#include <hp300/dev/diovar.h>
+#include <hp300/dev/diodevs.h>
 #include <hp300/dev/if_lereg.h>
 #include <hp300/dev/if_levar.h>
 
-#include "le.h"
-struct	le_softc le_softc[NLE];
+int	lematch __P((struct device *, void *, void *));
+void	leattach __P((struct device *, struct device *, void *));
 
-int	lematch __P((struct hp_device *));
-void	leattach __P((struct hp_device *));
-int	leintr __P((void *));
-
-struct	driver ledriver = {
-	lematch, leattach, "le",
+struct cfattach le_ca = {
+	sizeof(struct le_softc), lematch, leattach
 };
+
+int	leintr __P((void *));
 
 /* offsets for:	   ID,   REGS,    MEM,  NVRAM */
 int	lestd[] = { 0, 0x4000, 0x8000, 0xC008 };
@@ -94,8 +93,8 @@ lewrcsr(sc, port, val)
 	struct am7990_softc *sc;
 	u_int16_t port, val;
 {
-	register struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
-	register struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
+	struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
+	struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
 
 	do {
 		ler1->ler1_rap = port;
@@ -110,8 +109,8 @@ lerdcsr(sc, port)
 	struct am7990_softc *sc;
 	u_int16_t port;
 {
-	register struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
-	register struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
+	struct lereg0 *ler0 = ((struct le_softc *)sc)->sc_r0;
+	struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
 	u_int16_t val;
 
 	do {
@@ -124,20 +123,16 @@ lerdcsr(sc, port)
 }
 
 int
-lematch(hd)
-	struct hp_device *hd;
+lematch(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
 {
-	register struct lereg0 *ler0;
-	struct le_softc *lesc = &le_softc[hd->hp_unit];
+	struct dio_attach_args *da = aux;
 
-	ler0 = (struct lereg0 *)(lestd[0] + (int)hd->hp_addr);
-	if (ler0->ler0_id != LEID)
-		return (0);
-
-	hd->hp_ipl = LE_IPL(ler0->ler0_status);
-	lesc->sc_hd = hd;
-
-	return (1);
+	if ((da->da_id == DIO_DEVICE_ID_LAN) ||
+	    (da->da_id == DIO_DEVICE_ID_LANREM))
+		return (1);
+	return (0);
 }
 
 /*
@@ -146,25 +141,34 @@ lematch(hd)
  * to accept packets.
  */
 void
-leattach(hd)
-	struct hp_device *hd;
+leattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	register struct lereg0 *ler0;
-	struct le_softc *lesc = &le_softc[hd->hp_unit];
+	struct lereg0 *ler0;
+	struct dio_attach_args *da = aux;
+	struct le_softc *lesc = (struct le_softc *)self;
+	caddr_t addr;
 	struct am7990_softc *sc = &lesc->sc_am7990;
 	char *cp;
-	int i;
+	int i, ipl;
 
-	ler0 = lesc->sc_r0 = (struct lereg0 *)(lestd[0] + (int)hd->hp_addr);
+	addr = iomap(dio_scodetopa(da->da_scode), da->da_size);
+	if (addr == 0) {
+		printf("\n%s: can't map LANCE registers\n",
+		    sc->sc_dev.dv_xname);
+		return;
+	}
+
+	ler0 = lesc->sc_r0 = (struct lereg0 *)(lestd[0] + (int)addr);
 	ler0->ler0_id = 0xFF;
 	DELAY(100);
 
-	/* XXXX kluge for now */
-	sc->sc_dev.dv_unit = hd->hp_unit;
-	sprintf(sc->sc_dev.dv_xname, "%s%d", le_cd.cd_name, hd->hp_unit);
+	ipl = DIO_IPL(addr);
+	printf(" ipl %d", ipl);
 
-	lesc->sc_r1 = (struct lereg1 *)(lestd[1] + (int)hd->hp_addr);
-	sc->sc_mem = (void *)(lestd[2] + (int)hd->hp_addr);
+	lesc->sc_r1 = (struct lereg1 *)(lestd[1] + (int)addr);
+	sc->sc_mem = (void *)(lestd[2] + (int)addr);
 	sc->sc_conf3 = LE_C3_BSWP;
 	sc->sc_addr = 0;
 	sc->sc_memsize = 16384;
@@ -172,7 +176,7 @@ leattach(hd)
 	/*
 	 * Read the ethernet address off the board, one nibble at a time.
 	 */
-	cp = (char *)(lestd[3] + (int)hd->hp_addr);
+	cp = (char *)(lestd[3] + (int)addr);
 	for (i = 0; i < sizeof(sc->sc_arpcom.ac_enaddr); i++) {
 		sc->sc_arpcom.ac_enaddr[i] = (*++cp & 0xF) << 4;
 		cp++;
@@ -193,7 +197,7 @@ leattach(hd)
 	am7990_config(sc);
 
 	/* Establish the interrupt handler. */
-	isrlink(leintr, sc, hd->hp_ipl, ISRPRI_NET);
+	(void) intr_establish(leintr, sc, ipl, IPL_NET);
 	ler0->ler0_status = LE_IE;
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.23 1996/09/01 20:55:20 downsj Exp $	*/
+/*	$OpenBSD: conf.c,v 1.32 1997/04/03 21:01:07 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -47,26 +47,20 @@ bdev_decl(fd);
 #include "wt.h"
 bdev_decl(wt);
 #include "sd.h"
-bdev_decl(sd);
 #include "st.h"
-bdev_decl(st);
 #include "cd.h"
-bdev_decl(cd);
 #include "uk.h"
-cdev_decl(uk);
 #include "acd.h"
 bdev_decl(acd);
 #include "mcd.h"
 bdev_decl(mcd);
 #include "vnd.h"
-bdev_decl(vnd);
 #include "scd.h"
 bdev_decl(scd);
 #include "ccd.h"
-bdev_decl(ccd);
 #include "rd.h"
 bdev_decl(rd);
-/* no cdev for rd */
+cdev_decl(rd);
 
 struct bdevsw	bdevsw[] =
 {
@@ -124,21 +118,12 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
         (dev_type_stop((*))) enodev, 0,  dev_init(c,n,select), \
         (dev_type_mmap((*))) enodev, 0 }
 
-cdev_decl(cn);
-cdev_decl(ctty);
 #define	mmread	mmrw
 #define	mmwrite	mmrw
 cdev_decl(mm);
 cdev_decl(wd);
 cdev_decl(sw);
 #include "pty.h"
-#define	ptstty		ptytty
-#define	ptsioctl	ptyioctl
-cdev_decl(pts);
-#define	ptctty		ptytty
-#define	ptcioctl	ptyioctl
-cdev_decl(ptc);
-cdev_decl(log);
 #include "com.h"
 #include "pccom.h"
 cdev_decl(com);
@@ -148,24 +133,17 @@ cdev_decl(scd);
 #include "pc.h"
 #include "vt.h"
 cdev_decl(pc);
-cdev_decl(sd);
-cdev_decl(st);
 #include "ss.h"
-cdev_decl(ss);
-cdev_decl(cd);
 cdev_decl(acd);
 #include "lpt.h"
 cdev_decl(lpt);
 #include "ch.h"
-cdev_decl(ch);
 dev_decl(filedesc,open);
 #include "bpfilter.h"
-cdev_decl(bpf);
 #include "pcmcia.h"
 cdev_decl(pcmcia);
 #include "spkr.h"
 cdev_decl(spkr);
-cdev_decl(lkm);
 #include "mms.h"
 cdev_decl(mms);
 #include "lms.h"
@@ -176,18 +154,13 @@ cdev_decl(pms);
 cdev_decl(cy);
 cdev_decl(mcd);
 #include "tun.h"
-cdev_decl(tun);
-cdev_decl(vnd);
 #include "audio.h"
 cdev_decl(audio);
 cdev_decl(svr4_net);
-cdev_decl(ccd);
 #include "joy.h"
 cdev_decl(joy);
 #include "apm.h"
 cdev_decl(apm);
-#include "random.h"
-cdev_decl(random);
 #include "pctr.h"
 cdev_decl(pctr);
 
@@ -202,6 +175,10 @@ cdev_decl(ipl);
 #if (NCOM > 0) && (NPCCOM > 0)
 #error com and pccom are mutually exclusive.  Sorry.
 #endif
+#if (NVT > 0) && (NPC > 0)
+#error vt and pc are mutually exclusive.  Sorry.
+#endif
+
 
 struct cdevsw	cdevsw[] =
 {
@@ -257,9 +234,10 @@ struct cdevsw	cdevsw[] =
 #else
 	cdev_notdef(),			/* 43 */
 #endif
-	cdev_gen_ipf(NIPF,ipl),         /* 44 ip filtering */
-	cdev_random_init(NRANDOM,random), /* 45 random data source */
+	cdev_gen_ipf(NIPF,ipl),         /* 44: ip filtering */
+	cdev_random_init(1,random),	/* 45: random data source */
 	cdev_uk_init(NPCTR,pctr),	/* 46: pentium performance counters */
+	cdev_disk_init(NRD,rd),		/* 47: ram disk driver */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -325,7 +303,7 @@ static int chrtoblktbl[] = {
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
-	/* 24 */	NODEV,
+	/* 24 */	18,
 	/* 25 */	NODEV,
 	/* 26 */	NODEV,
 	/* 27 */	NODEV,
@@ -348,7 +326,7 @@ static int chrtoblktbl[] = {
 	/* 44 */	NODEV,
 	/* 45 */	NODEV,
 	/* 46 */	NODEV,
-	/* 47 */	NODEV,
+	/* 47 */	17,
 	/* 48 */	NODEV,
 	/* 49 */	NODEV,
 };
@@ -368,6 +346,24 @@ chrtoblk(dev)
 	if (blkmaj == NODEV)
 		return (NODEV);
 	return (makedev(blkmaj, minor(dev)));
+}
+
+/*
+ * Convert a character device number to a block device number.
+ */
+dev_t
+blktochr(dev)
+	dev_t dev;
+{
+	int blkmaj = major(dev);
+	int i;
+
+	if (blkmaj >= nblkdev)
+		return (NODEV);
+	for (i = 0; i < sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]); i++)
+		if (blkmaj == chrtoblktbl[i])
+			return (makedev(i, minor(dev)));
+	return (NODEV);
 }
 
 /*

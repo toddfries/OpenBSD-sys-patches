@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_readwrite.c,v 1.6 1996/07/13 21:49:19 downsj Exp $	*/
+/*	$OpenBSD: ufs_readwrite.c,v 1.8 1996/11/04 01:55:18 tholo Exp $	*/
 /*	$NetBSD: ufs_readwrite.c,v 1.9 1996/05/11 18:27:57 mycroft Exp $	*/
 
 /*-
@@ -119,6 +119,9 @@ READ(v)
 	fs = ip->I_FS;
 	if ((u_int64_t)uio->uio_offset > MAXFILESIZE)
 		return (EFBIG);
+
+	if (uio->uio_resid == 0)
+		return (0);
 
 	for (error = 0, bp = NULL; uio->uio_resid > 0; bp = NULL) {
 		if ((bytesinfile = ip->i_size - uio->uio_offset) <= 0)

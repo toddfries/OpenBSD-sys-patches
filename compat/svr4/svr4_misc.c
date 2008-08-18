@@ -1,5 +1,5 @@
-/*	$OpenBSD: svr4_misc.c,v 1.6 1996/08/03 15:29:32 deraadt Exp $	 */
-/*	$NetBSD: svr4_misc.c,v 1.36 1996/03/30 22:38:02 christos Exp $	 */
+/*	$OpenBSD: svr4_misc.c,v 1.9 1997/03/28 22:03:46 kstailey Exp $	 */
+/*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
 
 /*
  * Copyright (c) 1994 Christos Zoulas
@@ -80,6 +80,7 @@
 #include <compat/svr4/svr4_wait.h>
 #include <compat/svr4/svr4_statvfs.h>
 #include <compat/svr4/svr4_sysconfig.h>
+#include <compat/svr4/svr4_acl.h>
 
 #include <vm/vm.h>
 
@@ -137,17 +138,20 @@ svr4_sys_execv(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct svr4_sys_execv_args *uap = v;
-	struct sys_execve_args ex;
-
+	struct svr4_sys_execv_args /* {
+		syscallarg(char *) path;
+		syscallarg(char **) argv;
+	} */ *uap = v;
+	struct sys_execve_args ap;
 	caddr_t sg = stackgap_init(p->p_emul);
+
 	SVR4_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
-	SCARG(&ex, path) = SCARG(uap, path);
-	SCARG(&ex, argp) = SCARG(uap, argp);
-	SCARG(&ex, envp) = NULL;
+	SCARG(&ap, path) = SCARG(uap, path);
+	SCARG(&ap, argp) = SCARG(uap, argp);
+	SCARG(&ap, envp) = NULL;
 
-	return sys_execve(p, &ex, retval);
+	return sys_execve(p, &ap, retval);
 }
 
 
@@ -157,8 +161,13 @@ svr4_sys_execve(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	struct sys_execve_args *uap = v;
+	struct sys_execve_args /* {
+		syscallarg(char *) path;
+		syscallarg(char **) argv;
+		syscallarg(char **) envp;
+	} */ *uap = v;
 	caddr_t sg = stackgap_init(p->p_emul);
+
 	SVR4_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
 
 	return sys_execve(p, uap, retval);
@@ -319,6 +328,9 @@ svr4_sys_mmap(p, v, retval)
          */
 	if (SCARG(uap, prot) & ~(PROT_READ | PROT_WRITE | PROT_EXEC))
 		return EINVAL;	/* XXX still needed? */
+
+	if (SCARG(uap, len) == 0)
+		return EINVAL;
 
 	SCARG(&mm, prot) = SCARG(uap, prot);
 	SCARG(&mm, len) = SCARG(uap, len);
@@ -906,42 +918,43 @@ svr4_setinfo(p, st, s)
 
 	bzero(&i, sizeof(i));
 
-	i.si_signo = SVR4_SIGCHLD;
-	i.si_errno = 0;	/* XXX? */
+	i.svr4_si_signo = SVR4_SIGCHLD;
+	i.svr4_si_errno = 0;	/* XXX? */
 
 	if (p) {
-		i.si_pid = p->p_pid;
+		i.svr4_si_pid = p->p_pid;
 		if (p->p_stat == SZOMB) {
-			i.si_stime = p->p_ru->ru_stime.tv_sec;
-			i.si_utime = p->p_ru->ru_utime.tv_sec;
+			i.svr4_si_stime = p->p_ru->ru_stime.tv_sec;
+			i.svr4_si_utime = p->p_ru->ru_utime.tv_sec;
 		} else {
-			i.si_stime = p->p_stats->p_ru.ru_stime.tv_sec;
-			i.si_utime = p->p_stats->p_ru.ru_utime.tv_sec;
+			i.svr4_si_stime = p->p_stats->p_ru.ru_stime.tv_sec;
+			i.svr4_si_utime = p->p_stats->p_ru.ru_utime.tv_sec;
 		}
 	}
 
 	if (WIFEXITED(st)) {
-		i.si_status = WEXITSTATUS(st);
-		i.si_code = SVR4_CLD_EXITED;
+		i.svr4_si_status = WEXITSTATUS(st);
+		i.svr4_si_code = SVR4_CLD_EXITED;
 	}
 	else if (WIFSTOPPED(st)) {
-		i.si_status = bsd_to_svr4_sig[WSTOPSIG(st)];
+		i.svr4_si_status = bsd_to_svr4_sig[WSTOPSIG(st)];
 
-		if (i.si_status == SVR4_SIGCONT)
-			i.si_code = SVR4_CLD_CONTINUED;
+		if (i.svr4_si_status == SVR4_SIGCONT)
+			i.svr4_si_code = SVR4_CLD_CONTINUED;
 		else
-			i.si_code = SVR4_CLD_STOPPED;
+			i.svr4_si_code = SVR4_CLD_STOPPED;
 	} else {
-		i.si_status = bsd_to_svr4_sig[WTERMSIG(st)];
+		i.svr4_si_status = bsd_to_svr4_sig[WTERMSIG(st)];
 
 		if (WCOREDUMP(st))
-			i.si_code = SVR4_CLD_DUMPED;
+			i.svr4_si_code = SVR4_CLD_DUMPED;
 		else
-			i.si_code = SVR4_CLD_KILLED;
+			i.svr4_si_code = SVR4_CLD_KILLED;
 	}
 
 	DPRINTF(("siginfo [pid %ld signo %d code %d errno %d status %d]\n",
-		 i.si_pid, i.si_signo, i.si_code, i.si_errno, i.si_status));
+		 i.svr4_si_pid, i.svr4_si_signo, i.svr4_si_code,
+		 i.svr4_si_errno, i.svr4_si_status));
 
 	return copyout(&i, s, sizeof(i));
 }
@@ -1089,8 +1102,8 @@ bsd_statfs_to_svr4_statvfs(bfs, sfs)
 	const struct statfs *bfs;
 	struct svr4_statvfs *sfs;
 {
-	sfs->f_bsize = bfs->f_bsize;
-	sfs->f_frsize = bfs->f_bsize / 8; /* XXX */
+	sfs->f_bsize = bfs->f_iosize; /* XXX */
+	sfs->f_frsize = bfs->f_bsize;
 	sfs->f_blocks = bfs->f_blocks;
 	sfs->f_bfree = bfs->f_bfree;
 	sfs->f_bavail = bfs->f_bavail;
@@ -1223,6 +1236,82 @@ svr4_sys_gettimeofday(p, v, retval)
 		microtime(&atv);
 		return copyout(&atv, SCARG(uap, tp), sizeof (atv));
 	}
+
+	return 0;
+}
+
+int
+svr4_sys_facl(p, v, retval)
+	register struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct svr4_sys_facl_args *uap = v;
+
+	*retval = 0;
+
+	switch (SCARG(uap, cmd)) {
+	case SVR4_SYS_SETACL:
+		/* We don't support acls on any filesystem */
+		return ENOSYS;
+
+	case SVR4_SYS_GETACL:
+		return copyout(retval, &SCARG(uap, num),
+		    sizeof(SCARG(uap, num)));
+
+	case SVR4_SYS_GETACLCNT:
+		return 0;
+
+	default:
+		return EINVAL;
+	}
+}
+
+int
+svr4_sys_acl(p, v, retval)
+	register struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	return svr4_sys_facl(p, v, retval);	/* XXX: for now the same */
+}
+
+int
+svr4_sys_memcntl(p, v, retval)
+	register struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct svr4_sys_memcntl_args *uap = v;
+	struct sys_mprotect_args ap;
+
+	SCARG(&ap, addr) = SCARG(uap, addr);
+	SCARG(&ap, len) = SCARG(uap, len);
+	SCARG(&ap, prot) = SCARG(uap, attr);
+
+	/* XXX: no locking, invalidating, or syncing supported */
+	return sys_mprotect(p, &ap, retval);
+}
+
+int
+svr4_sys_nice(p, v, retval)
+	register struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct svr4_sys_nice_args *uap = v;
+	struct sys_setpriority_args ap;
+	int error;
+
+	SCARG(&ap, which) = PRIO_PROCESS;
+	SCARG(&ap, who) = 0;
+	SCARG(&ap, prio) = SCARG(uap, prio);
+
+	if ((error = sys_setpriority(p, &ap, retval)) != 0)
+		return error;
+
+	if ((error = sys_getpriority(p, &ap, retval)) != 0)
+		return error;
 
 	return 0;
 }

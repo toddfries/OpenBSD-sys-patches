@@ -1,4 +1,5 @@
 #! /bin/sh -
+#	$OpenBSD: makesyscalls.sh,v 1.4 1997/02/24 14:19:57 niklas Exp $
 #	$NetBSD: makesyscalls.sh,v 1.18 1996/03/15 01:25:12 cgd Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
@@ -42,7 +43,12 @@ case $# in
 esac
 
 # source the config file.
-. $1
+case $1 in
+    /*)	. $1
+	;;
+    *)	. ./$1
+	;;
+esac
 
 # the config file sets the following variables:
 #	sysnames	the syscall names file

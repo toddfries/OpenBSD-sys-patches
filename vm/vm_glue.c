@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_glue.c,v 1.20 1996/08/02 00:05:59 niklas Exp $    */
+/*	$OpenBSD: vm_glue.c,v 1.23 1997/04/17 01:25:18 niklas Exp $    */
 /*	$NetBSD: vm_glue.c,v 1.55.4.1 1996/06/13 17:25:45 cgd Exp $	*/
 
 /* 
@@ -74,6 +74,7 @@
 #endif
 
 #include <vm/vm.h>
+#include <vm/vm_extern.h>
 #include <vm/vm_page.h>
 #include <vm/vm_kern.h>
 
@@ -173,22 +174,25 @@ chgkprot(addr, len, rw)
 }
 #endif
 
-void
+int
 vslock(addr, len)
 	caddr_t	addr;
 	u_int	len;
 {
-	vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
-			round_page(addr+len), FALSE);
+#ifdef __i386__
+	pmap_prefault(&curproc->p_vmspace->vm_map, (vm_offset_t)addr, len);
+#endif
+	return vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
+			       round_page(addr+len), FALSE);
 }
 
-void
+int
 vsunlock(addr, len)
 	caddr_t	addr;
 	u_int	len;
 {
-	vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
-			round_page(addr+len), TRUE);
+	return vm_map_pageable(&curproc->p_vmspace->vm_map, trunc_page(addr),
+			       round_page(addr+len), TRUE);
 }
 
 /*
@@ -228,7 +232,7 @@ vm_fork(p1, p2)
 		shmfork(p1, p2);
 #endif
 
-#if !defined(pc532) && !defined(vax)
+#if !defined(vax)
 	/*
 	 * Allocate a wired-down (for now) pcb and kernel stack for the process
 	 */
@@ -543,7 +547,7 @@ swapout(p)
 	s = splstatclock();
 	p->p_flag &= ~P_INMEM;
 	if (p->p_stat == SRUN)
-		remrq(p);
+		remrunqueue(p);
 	splx(s);
 	p->p_swtime = 0;
 	++cnt.v_swpout;
@@ -575,10 +579,11 @@ thread_block()
 }
 
 void
-thread_sleep(event, lock, ruptible)
+thread_sleep_msg(event, lock, ruptible, msg)
 	void *event;
 	simple_lock_t lock;
 	boolean_t ruptible;
+	char *msg;
 {
 	int s = splhigh();
 
@@ -588,7 +593,7 @@ thread_sleep(event, lock, ruptible)
 	curproc->p_thread = event;
 	simple_unlock(lock);
 	if (curproc->p_thread)
-		tsleep(event, PVM, "thrd_sleep", 0);
+		tsleep(event, PVM, msg, 0);
 	splx(s);
 }
 

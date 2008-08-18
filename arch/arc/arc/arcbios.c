@@ -1,6 +1,7 @@
-/*	$OpenBSD: arcbios.c,v 1.4 1996/09/24 19:37:23 pefo Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.8 1997/05/01 15:13:28 pefo Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
+ * Copyright (c) 1996 Per Fogelstrom.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,8 +28,11 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/types.h>
 #include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
+#include <sys/user.h>
+#include <lib/libkern/libkern.h>
 #include <machine/pte.h>
 #include <machine/cpu.h>
 #include <machine/memconf.h>
@@ -40,6 +44,18 @@ arc_param_blk_t *bios_base = (arc_param_blk_t *) 0x80001000;
 
 extern int	cputype;		/* Mother board type */
 extern int	physmem;		/* Total physical memory size */
+
+int Bios_Read __P((int, char *, int, int *));
+int Bios_Write __P((int, char *, int, int *));
+int Bios_Open __P((char *, int, u_int *));
+int Bios_Close __P((u_int));
+arc_mem_t *Bios_GetMemoryDescriptor __P((arc_mem_t *));
+arc_sid_t *Bios_GetSystemId __P((void));
+arc_config_t *Bios_GetChild __P((arc_config_t *));
+arc_dsp_stat_t *Bios_GetDisplayStatus __P((int));
+
+static void bios_configure_memory __P((void));
+static int get_cpu_type __P((void));
 
 char buf[100];	/*XXX*/
 arc_dsp_stat_t	displayinfo;		/* Save area for display status info. */
@@ -116,16 +132,18 @@ ARC_Call(Bios_GetDisplayStatus,		0x90);
  *	Simple getchar/putchar interface.
  */
 
+int
 bios_getchar()
 {
 	char buf[4];
 	int  cnt;
 
-	if(Bios_Read(0, &buf, 1, &cnt) != 0)
+	if(Bios_Read(0, &buf[0], 1, &cnt) != 0)
 		return(-1);
 	return(buf[0] & 255);
 }
 
+void
 bios_putchar(c)
 char c;
 {
@@ -143,11 +161,10 @@ char c;
 		buf[0] = c;
 		cnt = 1;
 	}
-	if(Bios_Write(1, &buf, cnt, &cnt) != 0)
-		return(-1);
-	return(0);
+	Bios_Write(1, &buf[0], cnt, &cnt);
 }
 
+void
 bios_putstring(s)
 char *s;
 {
@@ -164,6 +181,7 @@ char *s;
  *
  * Concatenate obvious adjecent segments.
  */
+static void
 bios_configure_memory()
 {
 	arc_mem_t *descr = 0;
@@ -236,12 +254,17 @@ bios_configure_memory()
 /*
  * Find out system type.
  */
-int
+static int
 get_cpu_type()
 {
 	arc_config_t	*cf;
 	arc_sid_t	*sid;
 	int		i;
+
+	if((bios_base->magic != ARC_PARAM_BLK_MAGIC) &&
+	   (bios_base->magic != ARC_PARAM_BLK_MAGIC_BUG)) {
+		return(-1);	/* This is not an ARC system */
+	}
 
 	sid = (arc_sid_t *)Bios_GetSystemId();
 	cf = (arc_config_t *)Bios_GetChild(NULL);
@@ -275,6 +298,9 @@ void
 bios_ident()
 {
 	cputype = get_cpu_type();
+	if(cputype < 0) {
+		return;
+	}
 	bios_configure_memory();
 	displayinfo = *(arc_dsp_stat_t *)Bios_GetDisplayStatus(1);
 }
@@ -294,5 +320,45 @@ bios_display_info(xpos, ypos, xsize, ysize)
 	*ypos = displayinfo.CursorYPosition;
 	*xsize = displayinfo.CursorMaxXPosition;
 	*ysize = displayinfo.CursorMaxYPosition;
+}
+
+/*
+ * Load the incore miniroot into memory. This is used for
+ * Initial booting before we have any file system. CD-rom booting.
+ */
+int
+bios_load_miniroot(path, where)
+	char *path;
+	caddr_t where;
+{
+	u_int file;
+	u_int count;
+	int i;
+	char s[32];
+
+static char mrdefault[] = {"scsi(0)disk(0)rdisk(0)partition(1)\\miniroot" };
+
+	bios_putstring("Loading miniroot:");
+
+	if(path == 0)
+		path = mrdefault;
+	bios_putstring(path);
+	bios_putstring("\n");
+
+	if((i = Bios_Open(path,0,&file)) != arc_ESUCCESS) {
+		sprintf(s, "Error %d. Load failed!\n", i);
+		bios_putstring(s);
+		return(-1);
+	}
+	do {
+
+		i = Bios_Read(file, where, 4096, &count);
+		bios_putstring(".");
+		where += count;
+	} while((i == 0) && (count != 0));
+
+	Bios_Close(file);
+	bios_putstring("\nLoaded.\n");
+	return(0);
 }
 

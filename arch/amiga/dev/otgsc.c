@@ -1,5 +1,5 @@
-/*	$OpenBSD: otgsc.c,v 1.3 1996/05/02 06:44:23 niklas Exp $	*/
-/*	$NetBSD: otgsc.c,v 1.11 1996/04/21 21:12:16 veego Exp $	*/
+/*	$OpenBSD: otgsc.c,v 1.6 1997/01/18 12:26:35 niklas Exp $	*/
+/*	$NetBSD: otgsc.c,v 1.17 1996/12/23 09:10:27 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Michael L. Hitch
@@ -48,7 +48,6 @@
 #include <amiga/dev/scivar.h>
 #include <amiga/dev/zbusvar.h>
 
-int otgscprint __P((void *auxp, char *));
 void otgscattach __P((struct device *, struct device *, void *));
 int otgscmatch __P((struct device *, void *, void *));
 
@@ -160,22 +159,8 @@ otgscattach(pdp, dp, auxp)
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, otgscprint);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
-
-/*
- * print diag if pnp is NULL else just extra
- */
-int
-otgscprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-	return(QUIET);
-}
-
 
 int
 otgsc_dma_xfer_in (dev, len, buf, phase)

@@ -1,3 +1,4 @@
+/*	$OpenBSD: zlib.c,v 1.7 1997/02/24 13:34:06 niklas Exp $	*/
 /*	$NetBSD: zlib.c,v 1.2 1996/03/16 23:55:40 christos Exp $	*/
 
 /*
@@ -33,7 +34,11 @@
 #include "zlib.h"
 
 #include <sys/types.h>
+#ifdef _STANDALONE
+#include <stand.h>
+#else
 #include <sys/systm.h>
+#endif
 
 #ifndef local
 #  define local static
@@ -132,6 +137,8 @@ typedef uLong (*check_func) OF((uLong check, Bytef *buf, uInt len));
 #define ZFREE(strm, addr, size)	\
 	   (*((strm)->zfree))((strm)->opaque, (voidpf)(addr), (size))
 #define TRY_FREE(s, p, n) {if (p) ZFREE(s, p, n);}
+
+#ifndef NO_DEFLATE
 
 /* deflate.h -- internal compression state
  * Copyright (C) 1995 Jean-loup Gailly
@@ -417,7 +424,6 @@ local void ct_align      OF((deflate_state *s));
 local void ct_stored_block OF((deflate_state *s, charf *buf, ulg stored_len,
                           int eof));
 local void ct_stored_type_only OF((deflate_state *s));
-
 
 /*+++++*/
 /* deflate.c -- compress data using the deflation algorithm
@@ -2598,7 +2604,7 @@ local void copy_block(s, buf, len, header)
         put_byte(s, *buf++);
     }
 }
-
+#endif /* NO_DEFLATE */
 
 /*+++++*/
 /* infblock.h -- header to use infblock.c
@@ -4562,6 +4568,7 @@ z_stream *z;
 
 char *zlib_version = ZLIB_VERSION;
 
+#ifndef NO_DEFLATE
 char *z_errmsg[] = {
 "stream end",          /* Z_STREAM_END    1 */
 "",                    /* Z_OK            0 */
@@ -4571,7 +4578,7 @@ char *z_errmsg[] = {
 "insufficient memory", /* Z_MEM_ERROR    (-4) */
 "buffer error",        /* Z_BUF_ERROR    (-5) */
 ""};
-
+#endif /* NO_DEFLATE */
 
 /*+++++*/
 /* adler32.c -- compute the Adler-32 checksum of a data stream

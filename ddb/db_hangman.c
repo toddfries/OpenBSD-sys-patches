@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_hangman.c,v 1.7 1996/08/29 09:26:34 deraadt Exp $	*/
+/*	$OpenBSD: db_hangman.c,v 1.10 1996/11/29 06:51:49 mickey Exp $	*/
 
 /*
  * Copyright (c) 1996 Theo de Raadt, Michael Shalayeff
@@ -18,8 +18,8 @@
  * 4. The name of the authors may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR 
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED 
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
@@ -37,34 +37,34 @@
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
 #include <dev/cons.h>
-#include "random.h"
-#if NRANDOM > 0
 #include <dev/rndvar.h>
-#endif
 
-#define	TOLOWER(c)	(('A'<=(c)&&(c)<='Z')?(c)-'a'+'A':(c))
+#define	TOLOWER(c)	(('A'<=(c)&&(c)<='Z')?(c)-'A'+'a':(c))
 #define	ISALPHA(c)	(('a'<=(c)&&(c)<='z')||('A'<=(c)&&(c)<='Z'))
 
-static	__inline size_t db_random __P((size_t));
-static	__inline char *db_randomsym __P((size_t *));
-static	void db_hang __P((int, char *, char *));
-static	int db_hangon __P((void));
+/*
+ * if [ `size db_hangman.o | awk 'BEGIN {getline} {print $$1+$$2}'` -gt 1024 ];
+ * then
+ *	echo 'hangman is too big!!!'
+ * fi
+ *
+ */
+
+static __inline size_t db_random __P((size_t));
+static __inline char *db_randomsym __P((size_t *));
+void	 db_hang __P((int, char *, char *));
+int	 db_hangon __P((void));
+
+static int	skill;
 
 static __inline size_t
 db_random( mod )
 	register size_t	mod;
 {
-#if NRANDOM > 0
 	size_t	ret;
 	get_random_bytes(&ret, sizeof(ret) );
 	return ret % mod;
-#else
-	u_int random __P((void));
-	return (size_t)(random() % mod);
-#endif
 }
-
-static int	skill;
 
 static __inline char *
 db_randomsym(lenp)
@@ -89,8 +89,18 @@ db_randomsym(lenp)
 	return q;
 }
 
+static char hangpic[]=
+	"\n88888 \r\n"
+	  "9 7 6 \r\n"
+	  "97  5 \r\n"
+	  "9  423\r\n"
+	  "9   2 \r\n"
+	  "9  1 0\r\n"
+	  "9\r\n"
+	  "9  ";
+static char substchar[]="\\/|\\/O|/-|";
 
-static void
+void
 db_hang(tries, word, abc)
 	int	tries;
 	register char	*word;
@@ -98,7 +108,17 @@ db_hang(tries, word, abc)
 {
 	register char	*p;
 
-	cnputc(' ');
+	for(p=hangpic; *p; p++) {
+		if(*p>='0' && *p<='9')
+		{
+			if(tries<=(*p)-'0')
+				cnputc(substchar[(*p)-'0']);
+			else
+				cnputc(' ');
+		} else
+			cnputc(*p);
+	}
+
 	for (p = word; *p; p++)
 		if (ISALPHA(*p))
 			cnputc(abc[TOLOWER(*p) - 'a']);
@@ -107,8 +127,6 @@ db_hang(tries, word, abc)
 
 	cnputc(' ');
 	cnputc('(');
-	cnputc('0' + tries);
-	cnputc(' ');
 
 	for (p = abc; *p; p++)
 		if (*p == '_')
@@ -119,7 +137,7 @@ db_hang(tries, word, abc)
 }
 
 
-static int
+int
 db_hangon(void)
 {
 	static size_t	len;
@@ -165,7 +183,7 @@ db_hangon(void)
 	}
 
 	if (tries && len)
-		return db_hangon();
+		return 1;
 
 	if (!tries && skill > 2)
 	{

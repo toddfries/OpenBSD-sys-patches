@@ -1,5 +1,5 @@
-/*	$OpenBSD: zs.c,v 1.4 1996/06/09 03:17:48 briggs Exp $	*/
-/*	$NetBSD: zs.c,v 1.5 1996/06/09 04:27:59 briggs Exp $	*/
+/*	$OpenBSD: zs.c,v 1.9 1997/03/12 13:36:59 briggs Exp $	*/
+/*	$NetBSD: zs.c,v 1.12 1996/12/18 05:04:22 scottr Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -57,6 +57,7 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <machine/macinfo.h>
 #include <machine/viareg.h>
 
 /*
@@ -185,7 +186,7 @@ static u_char zs_init_reg[16] = {
 /* Definition of the driver for autoconfig. */
 static int	zsc_match __P((struct device *, void *, void *));
 static void	zsc_attach __P((struct device *, struct device *, void *));
-static int	zsc_print __P((void *aux, char *name));
+static int	zsc_print __P((void *aux, const char *name));
 
 struct cfattach zsc_ca = {
 	sizeof(struct zsc_softc), zsc_match, zsc_attach
@@ -214,7 +215,7 @@ zsc_match(parent, vcf, aux)
 static int
 zsc_print(aux, name)
 	void *aux;
-	char *name;
+	const char *name;
 {
 	struct zsc_attach_args *args = aux;
 
@@ -244,7 +245,8 @@ zsc_attach(parent, self, aux)
 	volatile struct zschan *zc;
 	struct zs_chanstate *cs;
 	int zsc_unit, channel;
-	int reset, s, chip;
+	int reset, s;
+	int chip = 0;	/* XXX quiet bogus gcc warning */
 
 	if (!zsinited) zs_init();
 	zsinited = 2;
@@ -355,7 +357,8 @@ zstty_mdattach(zsc, zst, cs, tp)
 		 */
 		cs->cs_clocks[1].clk = mac68k_machine.print_dcd_clk;
 		cs->cs_clocks[2].clk = mac68k_machine.print_cts_clk;
-	}
+	} else
+		theflags = 0;
 
 	if (cs->cs_clocks[1].clk)
 		zst->zst_hwflags |= ZS_HWFLAG_IGDCD;
@@ -678,7 +681,10 @@ zscninit(struct consdev * cp)
         mac68k_set_io_offsets(IOBase);
 	zs_conschan = (struct zschan *) -1;
 	zs_consunit = chan;
-	zs_hwflags[0][zs_consunit] = ZS_HWFLAG_CONSOLE | ZS_HWFLAG_CONABRT;
+	zs_hwflags[0][zs_consunit] = ZS_HWFLAG_CONSOLE;
+#ifdef ZS_CONSOLE_ABORT
+	zs_hwflags[0][zs_consunit] |= ZS_HWFLAG_CONABRT;
+#endif
 	zs_init();
         /*
 	 * zsinit will set up the addresses of the scc. It will also, if
@@ -783,6 +789,9 @@ zs_abort(zst)
 	register volatile struct zschan *zc = zs_conschan;
 	int rr0;
 	register long wait = 0;
+
+	if ((zst->zst_hwflags & ZS_HWFLAG_CONABRT) == 0)
+		return;
 
 	/* Wait for end of break to avoid PROM abort. */
 	/* XXX - Limit the wait? */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: grfvar.h,v 1.4 1996/08/10 21:37:44 briggs Exp $	*/
+/*	$OpenBSD: grfvar.h,v 1.8 1997/05/01 03:36:51 briggs Exp $	*/
 /*	$NetBSD: grfvar.h,v 1.11 1996/08/04 06:03:58 scottr Exp $	*/
 
 /*
@@ -52,8 +52,15 @@ struct grfbus_softc {
 	struct	device	sc_dev;
 	nubus_slot	sc_slot;
 
+	bus_space_tag_t		sc_tag;
+	bus_space_handle_t	sc_regh;
+	bus_space_handle_t	sc_fbh;
+
 	struct	grfmode curr_mode;	/* hardware desc(for ioctl)	*/
-	u_int16_t	card_id;	/* DrHW value for nubus cards	*/
+	u_int32_t	card_id;	/* DrHW value for nubus cards	*/
+	u_int32_t	cli_offset;	/* Offset of byte to clear intr */
+					/* for cards where that's suff.  */
+	unsigned char	cli_value;	/* Value to write at cli_offset */
 	nubus_dir	board_dir;	/* Nubus dir for curr board	*/
 };
 
@@ -147,4 +154,4 @@ int	grfunmap __P((dev_t dev, caddr_t addr, struct proc *p));
 void	grf_establish __P((struct grfbus_softc *, nubus_slot *,
 	    int (*)(struct grf_softc *, int, void *),
 	    caddr_t (*)(struct grf_softc *, vm_offset_t)));
-int	grfbusprint __P((void *, char *));
+int	grfbusprint __P((void *, const char *));

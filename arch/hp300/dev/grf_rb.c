@@ -1,4 +1,5 @@
-/*	$NetBSD: grf_rb.c,v 1.7 1996/03/03 16:49:02 thorpej Exp $	*/
+/*	$OpenBSD: grf_rb.c,v 1.6 1997/04/16 11:56:04 downsj Exp $	*/
+/*	$NetBSD: grf_rb.c,v 1.11 1997/03/31 07:34:17 scottr Exp $	*/
 
 /*
  * Copyright (c) 1996 Jason R. Thorpe.  All rights reserved.
@@ -43,24 +44,26 @@
  *	@(#)grf_rb.c	8.4 (Berkeley) 1/12/94
  */
 
-#include "grf.h"
-#if NGRF > 0
-
 /*
  * Graphics routines for the Renaissance, HP98720 Graphics system.
  */
 #include <sys/param.h>
-#include <sys/conf.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/ioctl.h>
-#include <sys/tty.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
+#include <sys/device.h>
+#include <sys/errno.h>
+#include <sys/ioctl.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
  
 #include <dev/cons.h>
+
+#include <hp300/dev/diovar.h>
+#include <hp300/dev/diodevs.h>
+#include <hp300/dev/intiovar.h>
 
 #include <hp300/dev/grfioctl.h>
 #include <hp300/dev/grfvar.h>
@@ -74,6 +77,28 @@
 
 int	rb_init __P((struct grf_data *gp, int, caddr_t));
 int	rb_mode __P((struct grf_data *gp, int, caddr_t));
+
+int	rbox_intio_match __P((struct device *, void *, void *));
+void	rbox_intio_attach __P((struct device *, struct device *, void *));
+
+int	rbox_dio_match __P((struct device *, void *, void *));
+void	rbox_dio_attach __P((struct device *, struct device *, void *));
+
+int	rbox_console_scan __P((int, caddr_t, void *));
+void	rboxcnprobe __P((struct consdev *cp));
+void	rboxcninit __P((struct consdev *cp));
+
+struct cfattach rbox_intio_ca = {
+	sizeof(struct grfdev_softc), rbox_intio_match, rbox_intio_attach
+};
+
+struct cfattach rbox_dio_ca = {
+	sizeof(struct grfdev_softc), rbox_dio_match, rbox_dio_attach
+};
+
+struct cfdriver rbox_cd = {
+	NULL, "rbox", DV_DULL
+};
 
 /* Renaissance grf switch */
 struct grfsw rbox_grfsw = {
@@ -97,6 +122,87 @@ struct itesw rbox_itesw = {
 };
 #endif /* NITE > 0 */
 
+int
+rbox_intio_match(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
+{
+	struct intio_attach_args *ia = aux;
+	struct grfreg *grf;
+
+	grf = (struct grfreg *)IIOV(GRFIADDR);
+	if (badaddr((caddr_t)grf))
+		return (0);
+
+	if (grf->gr_id == DIO_DEVICE_ID_FRAMEBUFFER &&
+	    grf->gr_id2 == DIO_DEVICE_SECID_RENASSIANCE) {
+		ia->ia_addr = (caddr_t)GRFIADDR;
+		return (1);
+	}
+
+	return (0);
+}
+
+void
+rbox_intio_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
+{
+	struct grfdev_softc *sc = (struct grfdev_softc *)self;
+	caddr_t grf;
+
+	grf = (caddr_t)IIOV(GRFIADDR);
+	sc->sc_scode = -1;	/* XXX internal i/o */
+
+#if NITE > 0
+	grfdev_attach(sc, rb_init, grf, &rbox_grfsw, &rbox_itesw);
+#else
+	grfdev_attach(sc, rb_init, grf, &rbox_grfsw, NULL);
+#endif	/* NITE > 0 */
+}
+
+int
+rbox_dio_match(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
+{
+	struct dio_attach_args *da = aux;
+
+	if (da->da_id == DIO_DEVICE_ID_FRAMEBUFFER &&
+	    da->da_secid == DIO_DEVICE_SECID_RENASSIANCE)
+		return (1);
+
+	return (0);
+}
+
+void
+rbox_dio_attach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
+{
+	struct grfdev_softc *sc = (struct grfdev_softc *)self;
+	struct dio_attach_args *da = aux;
+	caddr_t grf;
+
+	sc->sc_scode = da->da_scode;
+	if (sc->sc_scode == conscode)
+		grf = conaddr;
+	else {
+		grf = iomap(dio_scodetopa(sc->sc_scode), da->da_size);
+		if (grf == 0) {
+			printf("%s: can't map framebuffer\n",
+			    sc->sc_dev.dv_xname);
+			return;
+		}
+	}
+
+#if NITE > 0
+	grfdev_attach(sc, rb_init, grf, &rbox_grfsw, &rbox_itesw);
+#else
+	grfdev_attach(sc, rb_init, grf, &rbox_grfsw, NULL);
+#endif	/* NITE > 0 */
+}
+
 /*
  * Initialize hardware.
  * Must point g_display at a grfinfo structure describing the hardware.
@@ -108,10 +214,9 @@ rb_init(gp, scode, addr)
 	int scode;
 	caddr_t addr;
 {
-	register struct rboxfb *rbp;
+	struct rboxfb *rbp;
 	struct grfinfo *gi = &gp->g_display;
 	int fboff;
-	extern caddr_t sctopa(), iomap();
 
 	/*
 	 * If the console has been initialized, and it was us, there's
@@ -122,7 +227,7 @@ rb_init(gp, scode, addr)
 		if (ISIIOVA(addr))
 			gi->gd_regaddr = (caddr_t) IIOP(addr);
 		else
-			gi->gd_regaddr = sctopa(scode);
+			gi->gd_regaddr = dio_scodetopa(scode);
 		gi->gd_regsize = 0x20000;
 		gi->gd_fbwidth = (rbp->fbwmsb << 8) | rbp->fbwlsb;
 		gi->gd_fbheight = (rbp->fbhmsb << 8) | rbp->fbhlsb;
@@ -134,7 +239,7 @@ rb_init(gp, scode, addr)
 			 * For DIO II space the fbaddr just computed is
 			 * the offset from the select code base (regaddr)
 			 * of the framebuffer.  Hence it is also implicitly
-			 * the size of the register set.
+			 * the size of the set.
 			 */
 			gi->gd_regsize = (int) gi->gd_fbaddr;
 			gi->gd_fbaddr += (int) gi->gd_regaddr;
@@ -163,17 +268,17 @@ rb_init(gp, scode, addr)
  */
 int
 rb_mode(gp, cmd, data)
-	register struct grf_data *gp;
+	struct grf_data *gp;
 	int cmd;
 	caddr_t data;
 {
-	register struct rboxfb *rbp;
+	struct rboxfb *rbp;
 	int error = 0;
 
 	rbp = (struct rboxfb *) gp->g_regkva;
 	switch (cmd) {
 	/*
-	 * The minimal register info here is from the Renaissance X driver.
+	 * The minimal info here is from the Renaissance X driver.
 	 */
 	case GM_GRFON:
 	case GM_GRFOFF:
@@ -260,7 +365,7 @@ void
 rbox_init(ip)
 	struct ite_data *ip;
 {
-	register int i;
+	int i;
 
 	/* XXX */
 	if (ip->regbase == 0) {
@@ -367,7 +472,7 @@ rbox_putc(ip, c, dy, dx, mode)
 	struct ite_data *ip;
         int dy, dx, c, mode;
 {
-        register int wrr = ((mode == ATTR_INV) ? RR_COPYINVERTED : RR_COPY);
+        int wrr = ((mode == ATTR_INV) ? RR_COPYINVERTED : RR_COPY);
 	
 	rbox_windowmove(ip, charY(ip, c), charX(ip, c),
 			dy * ip->ftheight, dx * ip->ftwidth,
@@ -405,10 +510,10 @@ rbox_scroll(ip, sy, sx, count, dir)
         struct ite_data *ip;
         int sy, count, dir, sx;
 {
-	register int dy;
-	register int dx = sx;
-	register int height = 1;
-	register int width = ip->cols;
+	int dy;
+	int dx = sx;
+	int height = 1;
+	int width = ip->cols;
 
 	if (dir == SCROLL_UP) {
 		dy = sy - count;
@@ -440,7 +545,7 @@ rbox_windowmove(ip, sy, sx, dy, dx, h, w, func)
 	struct ite_data *ip;
 	int sy, sx, dy, dx, h, w, func;
 {
-	register struct rboxfb *rp = REGBASE;
+	struct rboxfb *rp = REGBASE;
 	if (h == 0 || w == 0)
 		return;
 	
@@ -565,7 +670,6 @@ void
 rboxcninit(cp)
 	struct consdev *cp;
 {
-	struct ite_data *ip = &ite_cn;
 	struct grf_data *gp = &grf_cn;
 
 	/*
@@ -581,16 +685,9 @@ rboxcninit(cp)
 	gp->g_flags = GF_ALIVE;
 
 	/*
-	 * Set up required ite data and initialize ite.
+	 * Initialize the terminal emulator.
 	 */
-	ip->isw = &rbox_itesw;
-	ip->grf = gp;
-	ip->flags = ITE_ALIVE|ITE_CONSOLE|ITE_ACTIVE|ITE_ISCONS;
-	ip->attrbuf = console_attributes;
-	iteinit(ip);
-
-	kbd_ite = ip;		/* XXX */
+	itecninit(gp, &rbox_itesw);
 }
 
 #endif /* NITE > 0 */
-#endif /* NGRF > 0 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_boot.c,v 1.5 1996/05/10 12:31:01 deraadt Exp $ */
+/*	$OpenBSD: nfs_boot.c,v 1.10 1997/01/22 18:20:49 deraadt Exp $ */
 /*	$NetBSD: nfs_boot.c,v 1.26 1996/05/07 02:51:25 thorpej Exp $	*/
 
 /*
@@ -55,13 +55,15 @@
 #include <nfs/nfs_var.h>
 
 #include "ether.h"
-#if NETHER == 0
 
-int nfs_boot_init(nd, procp)
+#if !defined(NFSCLIENT) || (NETHER == 0 && NFDDI == 0)
+
+int
+nfs_boot_init(nd, procp)
 	struct nfs_diskless *nd;
 	struct proc *procp;
 {
-	panic("nfs_boot_init: no ether");
+	panic("nfs_boot_init: NFSCLIENT not enabled in kernel");
 }
 
 void
@@ -73,7 +75,7 @@ nfs_boot_getfh(bpsin, key, ndmntp)
 	/* can not get here */
 }
 
-#else /* NETHER */
+#else
 
 /*
  * Support for NFS diskless booting, specifically getting information
@@ -556,4 +558,4 @@ out:
 	return error;
 }
 
-#endif /* NETHER */
+#endif /* ifdef NFSCLIENT */

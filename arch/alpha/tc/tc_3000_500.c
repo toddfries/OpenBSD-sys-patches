@@ -1,5 +1,5 @@
-/*	$OpenBSD: tc_3000_500.c,v 1.4 1996/07/29 23:02:23 niklas Exp $	*/
-/*	$NetBSD: tc_3000_500.c,v 1.4.4.3 1996/06/13 18:35:35 cgd Exp $	*/
+/*	$OpenBSD: tc_3000_500.c,v 1.6 1997/01/24 19:58:18 niklas Exp $	*/
+/*	$NetBSD: tc_3000_500.c,v 1.12 1996/11/15 23:59:00 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -29,6 +29,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
@@ -45,12 +46,12 @@ void	tc_3000_500_intr_setup __P((void));
 void	tc_3000_500_intr_establish __P((struct device *, void *,
 	    tc_intrlevel_t, int (*)(void *), void *));
 void	tc_3000_500_intr_disestablish __P((struct device *, void *));
-void	tc_3000_500_iointr __P((void *, int));
+void	tc_3000_500_iointr __P((void *, unsigned long));
 
 int	tc_3000_500_intrnull __P((void *));
 
 #define C(x)	((void *)(u_long)x)
-#define	KV(x)	(phystok0seg(x))
+#define	KV(x)	(ALPHA_PHYS_TO_K0SEG(x))
 
 struct tc_slotdesc tc_3000_500_slots[] = {
 	{ KV(0x100000000), C(TC_3000_500_DEV_OPT0), },	/* 0 - opt slot 0 */
@@ -65,13 +66,20 @@ struct tc_slotdesc tc_3000_500_slots[] = {
 int tc_3000_500_nslots =
     sizeof(tc_3000_500_slots) / sizeof(tc_3000_500_slots[0]);
 
-struct tc_builtin tc_3000_500_builtins[] = {
+struct tc_builtin tc_3000_500_graphics_builtins[] = {
 	{ "FLAMG-IO",	7, 0x00000000, C(TC_3000_500_DEV_IOASIC),	},
 	{ "PMAGB-BA",	7, 0x02000000, C(TC_3000_500_DEV_CXTURBO),	},
 	{ "PMAZ-DS ",	6, 0x00000000, C(TC_3000_500_DEV_TCDS),		},
 };
-int tc_3000_500_nbuiltins =
-    sizeof(tc_3000_500_builtins) / sizeof(tc_3000_500_builtins[0]);
+int tc_3000_500_graphics_nbuiltins = sizeof(tc_3000_500_graphics_builtins) /
+    sizeof(tc_3000_500_graphics_builtins[0]);
+
+struct tc_builtin tc_3000_500_nographics_builtins[] = {
+	{ "FLAMG-IO",	7, 0x00000000, C(TC_3000_500_DEV_IOASIC),	},
+	{ "PMAZ-DS ",	6, 0x00000000, C(TC_3000_500_DEV_TCDS),		},
+};
+int tc_3000_500_nographics_nbuiltins = sizeof(tc_3000_500_nographics_builtins) /
+    sizeof(tc_3000_500_nographics_builtins[0]);
 
 u_int32_t tc_3000_500_intrbits[TC_3000_500_NCOOKIES] = {
 	TC_3000_500_IR_OPT0,
@@ -175,7 +183,7 @@ tc_3000_500_intrnull(val)
 void
 tc_3000_500_iointr(framep, vec)
         void *framep;
-        int vec;
+        unsigned long vec;
 {
         u_int32_t ir;
 	int ifound;
@@ -183,10 +191,11 @@ tc_3000_500_iointr(framep, vec)
 #ifdef DIAGNOSTIC
 	int s;
 	if (vec != 0x800)
-		panic("INVALID ASSUMPTION: vec %x, not 0x800", vec);
+		panic("INVALID ASSUMPTION: vec 0x%lx, not 0x800", vec);
 	s = splhigh();
-	if (s != PSL_IPL_IO)
-		panic("INVALID ASSUMPTION: IPL %d, not %d", s, PSL_IPL_IO);
+	if (s != ALPHA_PSL_IPL_IO)
+		panic("INVALID ASSUMPTION: IPL %d, not %d", s,
+		    ALPHA_PSL_IPL_IO);
 	splx(s);
 #endif
 
@@ -248,6 +257,7 @@ tc_3000_500_iointr(framep, vec)
 	} while (ifound);
 }
 
+#if 0
 /*
  * tc_3000_500_ioslot --
  *	Set the PBS bits for devices on the TC.
@@ -273,3 +283,4 @@ tc_3000_500_ioslot(slot, flags, set)
 	tc_mb();
 	splx(s);
 }
+#endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.4 1996/09/14 15:58:25 pefo Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.8 1997/04/19 17:19:56 pefo Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -61,10 +61,6 @@
 #define	UNCACHED_TO_PHYS(x) 	((unsigned)(x) & 0x1fffffff)
 #define	PHYS_TO_UNCACHED(x) 	((unsigned)(x) | UNCACHED_MEMORY_ADDR)
 #define VA_TO_CINDEX(x) 	((unsigned)(x) & 0xffffff | CACHED_MEMORY_ADDR)
-
-#if 0
-#define CODE_START		0x80080000
-#endif
 
 #ifdef _KERNEL
 /*
@@ -251,7 +247,7 @@
 /*
  * The number of TLB entries and the first one that write random hits.
  */
-#define VMNUM_TLB_ENTRIES	48
+/*#define VMNUM_TLB_ENTRIES	48	XXX We never use this... */
 #define VMWIRED_ENTRIES	 	8
 
 /*
@@ -374,13 +370,14 @@ union cpuprid {
 #define	MIPS_R3IDT	0x07	/* IDT R3000 derivate		ISA I	*/
 #define	MIPS_R10000	0x09	/* MIPS R10000/T5 CPU		ISA IV  */
 #define	MIPS_R4200	0x0a	/* MIPS R4200 CPU (ICE)		ISA III */
-#define MIPS_UNKC1	0x0b	/* unnanounced product cpu	ISA III */
+#define MIPS_R4300	0x0b	/* NEC VR4300 CPU		ISA III */
 #define MIPS_UNKC2	0x0c	/* unnanounced product cpu	ISA III */
 #define	MIPS_R8000	0x10	/* MIPS R8000 Blackbird/TFP	ISA IV  */
 #define	MIPS_R4600	0x20	/* QED R4600 Orion		ISA III */
-#define	MIPS_R3SONY	0x21	/* Sony R3000 based CPU		ISA I   */
+#define	MIPS_R4700	0x21	/* QED R4700 Orion		ISA III */
 #define	MIPS_R3TOSH	0x22	/* Toshiba R3000 based CPU	ISA I	*/
-#define	MIPS_R3NKK	0x23	/* NKK R3000 based CPU		ISA I   */
+#define	MIPS_R5000	0x23	/* MIPS R5000 based CPU		ISA IV  */
+#define	MIPS_RM5230	0x28	/* QED RM5230 based CPU		ISA IV  */
 
 /*
  * MIPS FPU types
@@ -399,7 +396,8 @@ union cpuprid {
 #define	MIPS_R4600	0x20	/* QED R4600 Orion		ISA III */
 #define	MIPS_R3SONY	0x21	/* Sony R3000 based FPU		ISA I   */
 #define	MIPS_R3TOSH	0x22	/* Toshiba R3000 based FPU	ISA I	*/
-#define	MIPS_R3NKK	0x23	/* NKK R3000 based FPU		ISA I   */
+#define	MIPS_R5010	0x23	/* MIPS R5000 based FPU		ISA IV  */
+#define	MIPS_RM5230	0x28	/* QED RM5230 based FPU		ISA IV  */
 
 #if defined(_KERNEL) && !defined(_LOCORE)
 union	cpuprid cpu_id;
@@ -410,7 +408,33 @@ u_int	CpuPrimaryDataCacheLSize;
 u_int	CpuPrimaryInstCacheLSize;
 u_int	CpuCacheAliasMask;
 u_int	CpuTwoWayCache;
+int	l2cache_is_snooping;
 extern	struct intr_tab intr_tab[];
+
+struct tlb;
+struct user;
+
+int	R4K_ConfigCache __P((void));
+void	R4K_SetWIRED __P((int));
+void	R4K_SetPID __P((int));
+void	R4K_FlushCache __P((void));
+void	R4K_FlushDCache __P((vm_offset_t, int));
+void	R4K_HitFlushDCache __P((vm_offset_t, int));
+void	R4K_FlushICache __P((vm_offset_t, int));
+void	R4K_TLBFlush __P((int));
+void	R4K_TLBFlushAddr __P((vm_offset_t));
+void	R4K_TLBWriteIndexed __P((int, struct tlb *));
+void	R4K_TLBUpdate __P((vm_offset_t, unsigned));
+void	R4K_TLBRead __P((int, struct tlb *));
+void	wbflush __P((void));
+void	savectx __P((struct user *, int));
+int	copykstack __P((struct user *));
+void	switch_exit __P((void));
+void	MachSaveCurFPState __P((struct proc *));
+#ifdef DEBUG
+void	mdbpanic __P((void));
+#endif
+
 #endif
 
 /*

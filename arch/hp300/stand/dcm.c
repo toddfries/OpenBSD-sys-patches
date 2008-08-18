@@ -1,4 +1,5 @@
-/*	$NetBSD: dcm.c,v 1.9 1996/02/27 22:11:44 scottr Exp $	*/
+/*	$OpenBSD: dcm.c,v 1.5 1997/04/16 11:56:37 downsj Exp $	*/
+/*	$NetBSD: dcm.c,v 1.2 1997/04/14 05:58:32 scottr Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -44,14 +45,15 @@
 #include <sys/param.h>
 #include <dev/cons.h>
 
-#include <hp300/dev/device.h>
 #include <hp300/dev/dcmreg.h>
+
 #include <hp300/stand/consdefs.h>
 #include <hp300/stand/samachdep.h>
+#include <hp300/stand/device.h>
 
 struct dcmdevice *dcmcnaddr = NULL;
 
-#define	DCMCONUNIT	0	/* XXX */
+#define	DCMCONUNIT	1	/* XXX */
 
 void
 dcmprobe(cp)
@@ -70,6 +72,9 @@ dcmprobe(cp)
 	}
 	dcmcnaddr = (struct dcmdevice *) hw->hw_kva;
 
+#ifdef FORCEDCMCONSOLE
+	cp->cn_pri = CN_REMOTE;
+#else
 	dcm = dcmcnaddr;
 	switch (dcm->dcm_rsid) {
 	case DCMID:
@@ -84,6 +89,7 @@ dcmprobe(cp)
 	}
 
 	curcons_scode = hw->hw_sc;
+#endif
 }
 
 void

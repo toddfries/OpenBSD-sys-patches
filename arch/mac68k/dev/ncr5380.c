@@ -1,5 +1,5 @@
-/*	$OpenBSD: ncr5380.c,v 1.9 1996/06/23 16:08:23 briggs Exp $	*/
-/*	$NetBSD: ncr5380.c,v 1.31 1996/06/23 15:02:58 briggs Exp $	*/
+/*	$OpenBSD: ncr5380.c,v 1.14 1997/03/08 16:16:55 briggs Exp $	*/
+/*	$NetBSD: ncr5380.c,v 1.38 1996/12/19 21:48:18 scottr Exp $	*/
 
 /*
  * Copyright (c) 1995 Leo Weppelman.
@@ -197,7 +197,6 @@ extern __inline__ void finish_req(SC_REQ *reqp)
 /*
  * Auto config stuff....
  */
-int	ncr_cprint __P((void *auxp, char *));
 void	ncr_attach __P((struct device *, struct device *, void *));
 int	ncr_match __P((struct device *, void *, void *));
 
@@ -217,11 +216,13 @@ struct cfdriver CFNAME(DRNAME) = {
 };
 
 int
-ncr_match(pdp, match, auxp)
-struct device	*pdp;
-void		*match, *auxp;
+ncr_match(parent, cf, aux)
+	struct device *parent;
+	void *cf;
+	void *aux;
 {
-	return (machine_match(pdp, match, auxp, &CFNAME(DRNAME)));
+	return (machine_match(parent,
+				(struct cfdata *) cf, aux, &CFNAME(DRNAME)));
 }
 
 void
@@ -274,21 +275,9 @@ void		*auxp;
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, ncr_cprint);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
 
-/*
- * print diag if name is NULL else just extra
- */
-int
-ncr_cprint(auxp, name)
-void	*auxp;
-char	*name;
-{
-	if (name == NULL)
-		return (UNCONF);
-	return (QUIET);
-}
 /*
  * End of auto config stuff....
  */

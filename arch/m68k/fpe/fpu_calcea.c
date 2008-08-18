@@ -1,5 +1,5 @@
-/*	$OpenBSD: fpu_calcea.c,v 1.3 1996/05/09 22:20:43 niklas Exp $	*/
-/*	$NetBSD: fpu_calcea.c,v 1.4 1996/04/30 11:52:11 briggs Exp $	*/
+/*	$OpenBSD: fpu_calcea.c,v 1.5 1997/02/13 21:49:15 kstailey Exp $	*/
+/*	$NetBSD: fpu_calcea.c,v 1.7 1996/10/16 06:27:05 scottr Exp $	*/
 
 /*
  * Copyright (c) 1995 Gordon W. Ross
@@ -35,6 +35,7 @@
 #include <sys/param.h>
 #include <sys/signal.h>
 #include <sys/systm.h>
+#include <machine/cpu.h>
 #include <machine/frame.h>
 
 #include "fpu_emulate.h"
@@ -49,8 +50,6 @@ static int fetch_immed __P((struct frame *frame, struct instruction *insn,
 static int fetch_disp __P((struct frame *frame, struct instruction *insn,
 			   int size, int *res));
 static int calc_ea __P((struct insn_ea *ea, char *ptr, char **eaddr));
-
-int fusword __P((void *));
 
 /*
  * Helper routines for dealing with "effective address" values.

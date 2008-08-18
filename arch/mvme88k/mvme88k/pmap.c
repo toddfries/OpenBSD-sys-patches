@@ -1,5 +1,45 @@
 /*
- * HISTORY
+ * Copyright (c) 1996 Nivas Madhur
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Nivas Madhur.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
+/*
+ * Mach Operating System
+ * Copyright (c) 1991 Carnegie Mellon University
+ * Copyright (c) 1991 OMRON Corporation
+ * All Rights Reserved.
+ *
+ * Permission to use, copy, modify and distribute this software and its
+ * documentation is hereby granted, provided that both the copyright
+ * notice and this permission notice appear in all copies of the
+ * software, derivative works or modified versions, and any portions
+ * thereof, and that both notices appear in supporting documentation.
+ *
  */
 
 /* don't want to make them general yet. */
@@ -11,21 +51,17 @@
 #include <sys/types.h>
 #include <machine/board.h>
 #include <vm/pmap.h>
-#include <machine/m882xx.h>/* CMMU stuff */
+#include <machine/m882xx.h>		/* CMMU stuff */
 #include <vm/vm_kern.h>			/* vm/vm_kern.h */
-#include <assym.s>
-
-/*#ifdef luna88k*/
-# define splblock splhigh
-/*#endif */
 
 #include <sys/param.h>
-#include <sys/time.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/msgbuf.h>
 #include <machine/assert.h>
 
+#include <mvme88k/dev/pcctworeg.h>
+#include <mvme88k/dev/clreg.h>
 
  /*
   *  VM externals
@@ -33,22 +69,14 @@
 extern vm_offset_t      avail_start, avail_next, avail_end;
 extern vm_offset_t      virtual_avail, virtual_end;
 
-#if 0
-/*
- * Machine configuration stuff 
- */
-pmap_table_t pmap_table_build();
-#endif /* 0 */
+extern vm_offset_t	pcc2consvaddr;
+extern vm_offset_t	clconsvaddr;
 
 /*
  * Static variables, functions and variables for debugging
  */
 #ifdef	DEBUG
-#define	static
-
-boolean_t code_cache_enable = TRUE;
-boolean_t data_cache_enable = TRUE;
-boolean_t kernel_text_ro = FALSE;	/* If TRUE kernel text set READ ONLY */
+#define	STATIC
 
 /*
  * conditional debugging
@@ -85,61 +113,45 @@ boolean_t kernel_text_ro = FALSE;	/* If TRUE kernel text set READ ONLY */
 #define CD_ALL		0x0FFFFFC
 
 int pmap_con_dbg = CD_FULL|CD_NORM;
+#else
 
-#endif /* DBG */
+#define	STATIC		static
 
-int cmmumap = 0;
-int mapallio = 1;
-int mapextra = 1;
-int mydebug = 0;
-extern proc0paddr;
+#endif /* DEBUG */
 
-/*
- * All those kernel PT submaps that BSD is so fond of
- */
-caddr_t	CADDR1, CADDR2, vmmap;
-u_int	*CMAP1, *CMAP2, *vmpte, *msgbufmap;
+caddr_t	vmmap;
+pt_entry_t	*vmpte, *msgbufmap;
 
-/*
- * PHYS_TO_VM_PAGE and vm_page_set_modified, called by pmap_remove_range
- * and pmap_remove_all, are still stubbed out.
- *
- * VM-routines would keep truck of the page status through calling
- * pmap_is_modified.
- */
-
-#ifndef PHYS_TO_VM_PAGE
-#define	PHYS_TO_VM_PAGE(pa)
-#endif
-
-#ifndef vm_page_set_modified
-#define	vm_page_set_modified(m)
-#endif
-
-static struct pmap 	kernel_pmap_store;
+STATIC struct pmap 	kernel_pmap_store;
 pmap_t kernel_pmap = &kernel_pmap_store;
 
 typedef struct kpdt_entry *kpdt_entry_t;
 struct kpdt_entry {
 		kpdt_entry_t	next;
-		vm_offset_t		phys;
+		vm_offset_t	phys;
 };
 #define	KPDT_ENTRY_NULL		((kpdt_entry_t)0)
 
-static kpdt_entry_t		kpdt_free;
+STATIC kpdt_entry_t		kpdt_free;
 
 /*
- * MAX_KERNEL_VA_SIZE must be fit into the virtual address space between
+ * MAX_KERNEL_VA_SIZE must fit into the virtual address space between
  * VM_MIN_KERNEL_ADDRESS and VM_MAX_KERNEL_ADDRESS.
  */
-#define	MAX_KERNEL_VA_SIZE	(256*1024*1024)
 
+#define	MAX_KERNEL_VA_SIZE	(256*1024*1024)	/* 256 Mb */
 
 /*
  * Size of kernel page tables, which is enough to map MAX_KERNEL_VA_SIZE
  */
-#define	MAX_KERNEL_PDT_SIZE	(M88K_BTOP(MAX_KERNEL_VA_SIZE) * sizeof(pt_entry_t))
+#define	KERNEL_PDT_SIZE	(M88K_BTOP(MAX_KERNEL_VA_SIZE) * sizeof(pt_entry_t))
 
+/*
+ * Size of kernel page tables for mapping onboard IO space.
+ */
+#define	OBIO_PDT_SIZE	(M88K_BTOP(OBIO_SIZE) * sizeof(pt_entry_t))
+
+#define MAX_KERNEL_PDT_SIZE	(KERNEL_PDT_SIZE + OBIO_PDT_SIZE)
 
 /*
  * Two pages of scratch space.
@@ -147,8 +159,7 @@ static kpdt_entry_t		kpdt_free;
  */
 vm_offset_t	phys_map_vaddr1, phys_map_vaddr2;
 
-int		ptes_per_vm_page; /* number of M88K ptes required to map one VM page */
-
+int		ptes_per_vm_page; /* no. of ptes required to map one VM page */
 
 #define PMAP_MAX	512
 
@@ -165,9 +176,9 @@ char	*pmap_modify_list;
 /* 	The PV (Physical to virtual) List.
  *
  * For each vm_page_t, pmap keeps a list of all currently valid virtual
- * mappings of that page. An entry is a pv_entry_t; the list is the pv_table.
- * This is used by things like pmap_remove, when we must find and remove all
- * mappings for a particular physical page.
+ * mappings of that page. An entry is a pv_entry_t; the list is the
+ * pv_head_table. This is used by things like pmap_remove, when we must
+ * find and remove all mappings for a particular physical page.
  */
 typedef	struct pv_entry {
 	struct pv_entry	*next;		/* next pv_entry */
@@ -240,6 +251,10 @@ static pv_entry_t	pv_head_table;	/* array of entries, one per page */
 #define LOCK_PVH(index)
 #define UNLOCK_PVH(index)
 
+#define ETHERPAGES 16
+void	*etherbuf;
+int	etherlen;
+
 /*
  * First and last physical address that we maintain any information
  * for. Initalized to zero so that pmap operations done before
@@ -249,7 +264,7 @@ static pv_entry_t	pv_head_table;	/* array of entries, one per page */
 static vm_offset_t	pmap_phys_start	= (vm_offset_t) 0;
 static vm_offset_t	pmap_phys_end	= (vm_offset_t) 0;
 
-#define PMAP_MANAGED(pa) ((pa) >= pmap_phys_start && (pa) < pmap_phys_end)
+#define PMAP_MANAGED(pa) (pmap_initialized && ((pa) >= pmap_phys_start && (pa) < pmap_phys_end))
 
 /*
  *	This variable extract vax's pmap.c.
@@ -265,6 +280,10 @@ boolean_t	pmap_initialized = FALSE;/* Has pmap_init completed? */
  * in pmap_con_dbg.
  */
 #ifdef	DEBUG
+
+static void check_pv_list __P((vm_offset_t, pv_entry_t, char *));
+static void check_pmap_consistency __P((char *));
+
 #define CHECK_PV_LIST(phys,pv_h,who) \
 	if (pmap_con_dbg & CD_CHKPV) check_pv_list(phys,pv_h,who)
 #define CHECK_PMAP_CONSISTENCY(who) \
@@ -290,12 +309,13 @@ int 	n_cmmus_pb = 1;	/* number of CMMUs per processors pbus		*/
 #define cpu_number()	0	/* just being lazy, should be taken out -nivas*/
 
 vm_offset_t kmapva = 0;
+extern vm_offset_t bugromva;
+extern vm_offset_t sramva;
+extern vm_offset_t obiova;
 
-static void flush_atc_entry(unsigned users, vm_offset_t va, int kernel)
+STATIC void
+flush_atc_entry(unsigned users, vm_offset_t va, int kernel)
 {
-		/* always flush cpu 0 TLB till we understand if this
-		   is required XXX -nivas */
-/*    if (users) */
 	cmmu_flush_remote_tlb(cpu_number(), kernel, va, M88K_PGBYTES);
 }
 
@@ -326,13 +346,10 @@ static void flush_atc_entry(unsigned users, vm_offset_t va, int kernel)
  *
  */
 void
-_pmap_activate(
-    register pmap_t pmap,
-    register pcb_t pcb,
-    register int my_cpu)
+_pmap_activate(pmap_t pmap, pcb_t pcb, int my_cpu)
 {
-    register apr_template_t	apr_data;
-    register int n;
+    apr_template_t	apr_data;
+    int 		n;
 
 #ifdef DEBUG
     if ((pmap_con_dbg & (CD_ACTIVATE | CD_FULL)) == (CD_ACTIVATE | CD_NORM))
@@ -351,6 +368,7 @@ _pmap_activate(
 	apr_data.field.g  = 1;
 	apr_data.field.ci = 0;
 	apr_data.field.te = 1;
+#ifdef notyet
 #ifdef OMRON_PMAP
 	/*
 	 * cmmu_pmap_activate will set the uapr and the batc entries, then
@@ -364,6 +382,13 @@ _pmap_activate(
 	cmmu_set_uapr(apr_data.bits);
 	cmmu_flush_tlb(0, 0, -1);
 #endif
+#endif /* notyet */
+	/*
+	 * I am forcing it to not program the BATC at all. pmap.c module
+	 * needs major, major cleanup. XXX nivas
+	 */
+	cmmu_set_uapr(apr_data.bits);
+	cmmu_flush_tlb(0, 0, -1);
 
 	/*
 	 *	Mark that this cpu is using the pmap.
@@ -406,10 +431,7 @@ _pmap_activate(
  *
  */
 void
-_pmap_deactivate(
-    register pmap_t	pmap,
-    register pcb_t	pcb,
-    register int	my_cpu)
+_pmap_deactivate(pmap_t pmap, pcb_t pcb, int my_cpu)
 {
     if (pmap != kernel_pmap) {
 	/* Nothing to do */
@@ -428,24 +450,21 @@ _pmap_deactivate(
  *
  */
 
-static int unsigned m88k_protection(
-    pmap_t	map,
-    vm_prot_t	prot)
+STATIC unsigned int
+m88k_protection(pmap_t map, vm_prot_t prot)
 {
-    register pte_template_t p;
+	pte_template_t p;
 
-    p.bits = 0;
-    p.pte.prot = (prot & VM_PROT_WRITE) ? 0 : 1;
+	p.bits = 0;
+	p.pte.prot = (prot & VM_PROT_WRITE) ? 0 : 1;
 
-    return(p.bits);
+	return(p.bits);
 
 } /* m88k_protection */
 
 
 /*
  * Routine:	PMAP_PTE
- *
- * Author: Joe Uemura
  *
  * Function:
  *	Given a map and a virtual address, compute a (virtual) pointer
@@ -464,50 +483,34 @@ static int unsigned m88k_protection(
  *	SDTENT
  *	SDT_VALID
  *	PDT_IDX
- *
- * History:
- *		90/9/12	Fuzzy	if pmap == PMAP_NULL, panic
  */
-pt_entry_t * pmap_pte(
-     pmap_t	map,
-     vm_offset_t virt)
+
+pt_entry_t *
+pmap_pte(pmap_t map, vm_offset_t virt)
 {
-    sdt_entry_t	*sdt;
+	sdt_entry_t	*sdt;
 
-    if (map == PMAP_NULL)
-      panic("pmap_pte: pmap is NULL");
+	/*XXX will this change if physical memory is not contiguous? */
+	/* take a look at PDTIDX XXXnivas */
+	if (map == PMAP_NULL)
+		panic("pmap_pte: pmap is NULL");
 
-    sdt = SDTENT(map,virt);
+	sdt = SDTENT(map,virt);
 
-    /*
-     * Check whether page table is exist or not.
-     */
-    if (!SDT_VALID(sdt))
-      return(PT_ENTRY_NULL);
-    else
-      return((pt_entry_t *)(((sdt + SDT_ENTRIES)->table_addr)<<PDT_SHIFT) + PDTIDX(virt));
+	/*
+	 * Check whether page table is exist or not.
+	 */
+	if (!SDT_VALID(sdt))
+		return(PT_ENTRY_NULL);
+	else
+		return((pt_entry_t *)(((sdt + SDT_ENTRIES)->table_addr)<<PDT_SHIFT) +
+				PDTIDX(virt));
 
 } /* pmap_pte */
 
 
 /*
  * Routine:	PMAP_EXPAND_KMAP (internal)
- *
- *	History:
- *	'90.8.3		Fuzzy
- *		if defined TEST, 'static' undeclared.
- *	'90.8.27	Fuzzy
- *		allocated pte entry clear
- *	'90.8.28	Fuzzy
- *		Bug: No free kernel page table process
- *		panic("pmap_expand_kmap:...");
- *		--> #ifdef DBG
- *		      printf("Warnning: Ran out of page table entry VALID\n");
- *		    #endif
- *	'90.8.30		Fuzzy
- *		delete "if defined TEST, 'static' undeclared."
- *
- * Author: Fuzzy
  *
  * Function:
  *    Allocate a page descriptor table (pte_table) and validate associated
@@ -542,9 +545,8 @@ pt_entry_t * pmap_pte(
  *
  */
 
-static pt_entry_t * pmap_expand_kmap(
-    vm_offset_t		virt,
-    vm_prot_t		prot)
+STATIC pt_entry_t *
+pmap_expand_kmap(vm_offset_t virt, vm_prot_t prot)
 {
     int			aprot;
     sdt_entry_t		*sdt;
@@ -615,32 +617,29 @@ static pt_entry_t * pmap_expand_kmap(
  *		increment template paddr one page
  *	}
  *
- *
- *	History:
- *	90/09/12 Fuzzy	calculation of allocating page table entry number
- *	90/09/12 Fuzzy	When mapped VA map again, output warinning message.
- *
  */
-vm_offset_t pmap_map(
-    register vm_offset_t	virt,
-    register vm_offset_t	start,
-    register vm_offset_t	end,
-    register vm_prot_t		prot
-#ifdef OMRON_PMAP
-    , register unsigned           cmode
-#endif /* OMRON */
-    )
+vm_offset_t
+pmap_map(vm_offset_t virt, vm_offset_t start, vm_offset_t end, vm_prot_t prot)
 {
     int			aprot;
     unsigned		npages;
     unsigned		num_phys_pages;
+    unsigned		cmode;
     pt_entry_t		*pte;
     pte_template_t	 template;
 
+    /*
+     * cache mode is passed in the top 16 bits.
+     * extract it from there. And clear the top
+     * 16 bits from prot.
+     */
+    cmode = (prot & 0xffff0000) >> 16;
+    prot &= 0x0000ffff;
+
 #if	DEBUG
     if ((pmap_con_dbg & (CD_MAP | CD_FULL)) == (CD_MAP | CD_FULL))
-	printf ("(pmap_map :%x) phys address from %x to %x mapped at virtual %x, prot %x\n",
-		 curproc, start, end, virt, prot);
+	printf ("(pmap_map :%x) phys address from %x to %x mapped at virtual %x, prot %x cmode %x\n",
+		 curproc, start, end, virt, prot, cmode);
 #endif
 
     if (start > end)
@@ -648,11 +647,7 @@ vm_offset_t pmap_map(
 
     aprot = m88k_protection (kernel_pmap, prot);
 
-#ifdef OMRON_PMAP
     template.bits = M88K_TRUNC_PAGE(start) | aprot | DT_VALID | cmode;
-#else /* OMRON */
-    template.bits = M88K_TRUNC_PAGE(start) | aprot | DT_VALID;
-#endif /* OMRON */
 
     npages = M88K_BTOP(M88K_ROUND_PAGE(end) - M88K_TRUNC_PAGE(start));
 
@@ -721,17 +716,10 @@ vm_offset_t pmap_map(
  *		increment template paddr one page
  *	}
  *
- * Author: Sugai
- *	Oct 25 '90	Initial virsion
- *
  */
 vm_offset_t
-pmap_map_batc (
-    register vm_offset_t	virt,
-    register vm_offset_t	start,
-    register vm_offset_t	end,
-    register vm_prot_t		prot,
-    register unsigned		cmode)
+pmap_map_batc(vm_offset_t virt, vm_offset_t start, vm_offset_t end,
+					vm_prot_t prot, unsigned cmode)
 {
     int			aprot;
     unsigned		num_phys_pages;
@@ -829,8 +817,6 @@ pmap_map_batc (
 /*
  * Routine:	PMAP_CACHE_CONTROL
  *
- * Author:	Sugai		90/09/07
- *
  * Function:
  *	Set the cache-control bits in the page table entries(PTE) which maps
  *	the specifid virutal address range.
@@ -860,11 +846,8 @@ pmap_map_batc (
  * Otherwise, the cache-control bits in the PTE's are adjusted as specified.
  *
  */
-void pmap_cache_ctrl(
-    pmap_t	pmap,
-    vm_offset_t	s,
-    vm_offset_t	e,
-    unsigned	mode)
+void
+pmap_cache_ctrl(pmap_t pmap, vm_offset_t s, vm_offset_t e, unsigned mode)
 {
     int		spl, spl_sav;
     pt_entry_t	*pte;
@@ -899,7 +882,9 @@ void pmap_cache_ctrl(
 	if ((pte = pmap_pte(pmap, va)) == PT_ENTRY_NULL)
 	    continue;
 #ifdef DEBUG
+    if ((pmap_con_dbg & (CD_CACHE | CD_NORM)) == (CD_CACHE | CD_NORM)) {
 	printf("(cache_ctrl) pte@0x%08x\n",(unsigned)pte);
+    }
 #endif /* DEBUG */
 
 	/*
@@ -907,7 +892,7 @@ void pmap_cache_ctrl(
 	 * the modified bit and/or the reference bit by other cpu.
 	 *  XXX
 	 */
-	spl_sav = splblock();
+	spl_sav = splimp();
 	opte.bits = invalidate_pte(pte);
 	((pte_template_t *)pte)->bits = (opte.bits & CACHE_MASK) | mode;
 	flush_atc_entry(0, va, kflush);
@@ -926,11 +911,6 @@ void pmap_cache_ctrl(
 
 /*
  * Routine:	PMAP_BOOTSTRAP
- *
- * Author: Fuzzy	'90.7.12
- *
- * 	90.7.23. JU - changed blkclr to bzero
- *
  *
  * Function:
  *	Bootstarp the system enough to run with virtual memory.
@@ -978,12 +958,11 @@ void pmap_cache_ctrl(
  */
 
 void
-pmap_bootstrap(
-    vm_offset_t	load_start,	/* IN */
-    vm_offset_t	*phys_start,	/* IN/OUT */
-    vm_offset_t	*phys_end,	/* IN */
-    vm_offset_t	*virt_start,	/* OUT */
-    vm_offset_t	*virt_end)	/* OUT */
+pmap_bootstrap(vm_offset_t	load_start,	/* IN */
+	       vm_offset_t	*phys_start,	/* IN/OUT */
+	       vm_offset_t	*phys_end,	/* IN */
+	       vm_offset_t	*virt_start,	/* OUT */
+	       vm_offset_t	*virt_end)	/* OUT */
 {
     kpdt_entry_t	kpdt_virt;
     sdt_entry_t		*kmap;
@@ -992,22 +971,26 @@ pmap_bootstrap(
     			kpdt_phys,
     			s_text,
     			e_text,
-    			kernel_pmap_size;
+    			kernel_pmap_size,
+    			etherpa;
     apr_template_t	apr_data;
     pt_entry_t		*pte;
     int			i;
+    u_long		foo;
     extern char	*kernelstart, *etext;
-#if 0
-    pmap_table_t ptable;
-#endif /* 0 */
+    extern void cmmu_go_virt(void);
 
-    printf("pmap_bootstrap : \"load_start\" 0x%x\n", load_start);
+#ifdef DEBUG 
+    if ((pmap_con_dbg & (CD_BOOT | CD_NORM)) == (CD_BOOT | CD_NORM)) {
+	printf("pmap_bootstrap : \"load_start\" 0x%x\n", load_start);
+    }
+#endif
     ptes_per_vm_page = PAGE_SIZE >> M88K_PGSHIFT;
     if (ptes_per_vm_page == 0)
 		panic("pmap_bootstrap: VM page size < MACHINE page size");
 
-    if ( ! PAGE_ALIGNED(load_start)) {
-	printf("pmap_bootstrap : \"load_start\" not on the m88k page boundary : 0x%x\n", load_start);
+    if (!PAGE_ALIGNED(load_start)) {
+	panic("pmap_bootstrap : \"load_start\" not on the m88k page boundary : 0x%x\n", load_start);
     }
 
     /*
@@ -1027,7 +1010,8 @@ pmap_bootstrap(
      */
 
     *phys_start = M88K_ROUND_PAGE(*phys_start);
-    *virt_start = *phys_start + ((unsigned)&kernelstart - GOOFYLDOFFSET - load_start);
+    *virt_start = *phys_start +
+   		 (M88K_TRUNC_PAGE((unsigned)&kernelstart) - load_start);
 
     /*
      * Initialilze kernel_pmap structure
@@ -1097,44 +1081,50 @@ pmap_bootstrap(
      */
 
     s_text = load_start;			/* paddr of text */
-    e_text = load_start + ((unsigned)&etext - (unsigned)&kernelstart - GOOFYLDOFFSET);	/* paddr of end of text section*/
+    e_text = load_start + ((unsigned)&etext -
+		M88K_TRUNC_PAGE((unsigned)&kernelstart));
+					/* paddr of end of text section*/
     e_text = M88K_ROUND_PAGE(e_text);
 
-    #ifdef OMRON_PMAP
-     #define PMAPER	pmap_map
-    #else
-     #define PMAPER	pmap_map_batc
-    #endif
+#ifdef OMRON_PMAP
+#define PMAPER	pmap_map
+#else
+#define PMAPER	pmap_map_batc
+#endif
 
-    /*  map the first 64k (BUG ROM) read only, cache inhibited */
+    /*  map the first 64k (BUG ROM) read only, cache inhibited (? XXX) */
     vaddr = PMAPER(
 		0,
 		0,
 		0x10000,
-		VM_PROT_READ|VM_PROT_WRITE,
-		CACHE_INH);
+		(VM_PROT_READ|VM_PROT_WRITE)|(CACHE_INH <<16));
 
-    assert(vaddr == (unsigned)&kernelstart - GOOFYLDOFFSET);
+    assert(vaddr == M88K_TRUNC_PAGE((unsigned)&kernelstart));
 
     vaddr = PMAPER(
-		(vm_offset_t)((unsigned)&kernelstart - GOOFYLDOFFSET),
+		(vm_offset_t)M88K_TRUNC_PAGE(((unsigned)&kernelstart)),
 		s_text,
 		e_text,
-		VM_PROT_WRITE | VM_PROT_READ,	/* shouldn't it be RO? XXX*/
-		CACHE_INH);
+		VM_PROT_WRITE | VM_PROT_READ|(CACHE_GLOBAL<<16));	/* shouldn't it be RO? XXX*/
 
     vaddr = PMAPER(
 		vaddr,
 		e_text,
 		(vm_offset_t)kmap,
-		VM_PROT_WRITE|VM_PROT_READ,
-		CACHE_GLOBAL);
+		(VM_PROT_WRITE|VM_PROT_READ)|(CACHE_GLOBAL << 16));
 
     /*
-     * Map system segment & page tables - should be cache inhibited.
+     * Map system segment & page tables - should be cache inhibited?
+     * 88200 manual says that CI bit is driven on the Mbus while accessing
+     * the translation tree. I don't think we need to map it CACHE_INH
+     * here...
      */
     if (kmapva != vaddr) {
-	printf("(pmap_bootstrap) correcting vaddr\n");
+#ifdef DEBUG
+    	if ((pmap_con_dbg & (CD_BOOT | CD_FULL)) == (CD_BOOT | CD_FULL)) {
+	    printf("(pmap_bootstrap) correcting vaddr\n");
+	}
+#endif
 	while (vaddr < (*virt_start - kernel_pmap_size))
 	  vaddr = M88K_ROUND_PAGE(vaddr + 1);
     }
@@ -1143,14 +1133,51 @@ pmap_bootstrap(
 		vaddr,
 		(vm_offset_t)kmap,
 		*phys_start,
-		VM_PROT_WRITE|VM_PROT_READ,
-		CACHE_INH);
+		(VM_PROT_WRITE|VM_PROT_READ)|(CACHE_GLOBAL << 16));
+	
+    etherlen = ETHERPAGES * NBPG;
+
+    /*
+     *	Get ethernet buffer - need etherlen bytes physically contiguous.
+     *  1 to 1 mapped as well???. There is actually a bug in the macros
+     *  used by the 1x7 ethernet driver. Remove this when that is fixed.
+     *  XXX -nivas
+     */
 
     if (vaddr != *virt_start) {
+#ifdef DEBUG
+        if ((pmap_con_dbg & (CD_BOOT | CD_FULL)) == (CD_BOOT | CD_FULL)) {
+ 	    printf("1:vaddr %x *virt_start %x *phys_start %x\n", vaddr,
+		*virt_start, *phys_start);
+	}
+#endif
 	*virt_start = vaddr;
 	*phys_start = round_page(*phys_start);
     }
 
+    *phys_start = vaddr;
+
+    etherbuf = (void *)vaddr;
+
+    vaddr = PMAPER(
+		vaddr,
+		*phys_start,
+		*phys_start + etherlen,
+		(VM_PROT_WRITE|VM_PROT_READ)|(CACHE_INH << 16));
+
+    *virt_start += etherlen;
+    *phys_start += etherlen;
+
+    if (vaddr != *virt_start) {
+#ifdef DEBUG
+        if ((pmap_con_dbg & (CD_BOOT | CD_FULL)) == (CD_BOOT | CD_FULL)) {
+	     printf("2:vaddr %x *virt_start %x *phys_start %x\n", vaddr,
+		*virt_start, *phys_start);
+	}
+#endif
+	*virt_start = vaddr;
+	*phys_start = round_page(*phys_start);
+    }
 
     *virt_start = round_page(*virt_start);
     *virt_end = VM_MAX_KERNEL_ADDRESS;
@@ -1163,82 +1190,68 @@ pmap_bootstrap(
     phys_map_vaddr2 = phys_map_vaddr1 + PAGE_SIZE;
 
     /*
-     * To make 1:1 mapping of virt:phys, throw away a few phys pages
+     * To make 1:1 mapping of virt:phys, throw away a few phys pages.
+     * XXX what is this? nivas
      */
 
+   
     *phys_start += 2 * PAGE_SIZE;
     *virt_start += 2 * PAGE_SIZE;
 
     /*
-     * establish mapping for code and data cmmu
+     * Map all IO space 1-to-1. Ideally, I would like to not do this
+     * but have va for the given IO address dynamically allocated. But
+     * on the 88200, 2 of the BATCs are hardwired to do map the IO space
+     * 1-to-1; I decided to map the rest of the IO space 1-to-1.
+     * And bug ROM & the SRAM need to be mapped 1-to-1 if we ever want to
+     * execute bug system calls after the MMU has been turned on.
+     * OBIO should be mapped cache inhibited.
      */
 
-    if (cmmumap) {
     PMAPER(
-	CMMU_I,
-	CMMU_I,
-	CMMU_I + 0x1000,
-	VM_PROT_WRITE|VM_PROT_READ,
-	CACHE_INH);
+            BUGROM_START,
+            BUGROM_START,
+            BUGROM_START + BUGROM_SIZE,
+            VM_PROT_WRITE|VM_PROT_READ|(CACHE_INH << 16));
 
     PMAPER(
-	CMMU_D,
-	CMMU_D,
-	CMMU_D + 0x1000,
-	VM_PROT_WRITE|VM_PROT_READ,
-	CACHE_INH);
-    }
-#if 0
-    if (mapextra) {
-	PMAPER(
-            0x01000000,
-            0x01000000,
-            0x02000000,
-            VM_PROT_WRITE|VM_PROT_READ,
-            CACHE_INH);
-    }
-#endif /* 0 */
-    if (mapallio) {
-	PMAPER(
-            0xFF800000,
-            0xFF800000,
-            0xFFFF0000,
-            VM_PROT_WRITE|VM_PROT_READ,
-            CACHE_INH);
-    }
+            SRAM_START,
+            SRAM_START,
+            SRAM_START + SRAM_SIZE,
+            VM_PROT_WRITE|VM_PROT_READ|(CACHE_GLOBAL << 16));
 
-#if 0
-    ptable = pmap_table_build(avail_end);
-
-    for (  ; ptable->size != 0xffffffffU; ptable++)
-      if (ptable->size)
-        PMAPER(ptable->virt_start,
-                 ptable->phys_start,
-                 ptable->phys_start + ptable->size,
-                 ptable->prot,
-                 ptable->cacheability);
-
-#endif /* 0 */
+    PMAPER(
+            OBIO_START,
+            OBIO_START,
+            OBIO_START + OBIO_SIZE,
+            VM_PROT_WRITE|VM_PROT_READ|(CACHE_INH << 16));
 
 	/*
-	 * Allocate all the submaps we need
+	 * Allocate all the submaps we need. Note that SYSMAP just allocates
+	 * kernel virtual address with no physical backing memory. The idea
+	 * is physical memory will be mapped at this va before using that va.
+	 * This means that if different physcal pages are going to be mapped
+	 * at different times, we better do a tlb flush before using it -	         * else we will be referencing the wrong page.
 	 */
+
 #define	SYSMAP(c, p, v, n)	\
 ({ \
 	v = (c)virt; \
     	if ((p = pmap_pte(kernel_pmap, virt)) == PT_ENTRY_NULL) \
-    		pmap_expand_kmap(virt, VM_PROT_READ|VM_PROT_WRITE); \
+    		pmap_expand_kmap(virt, VM_PROT_READ|VM_PROT_WRITE|(CACHE_GLOBAL << 16)); \
 	virt += ((n)*NBPG); \
 })
 
 	virt = *virt_start;
 
-	SYSMAP(caddr_t		,CMAP1		,CADDR1	   ,1		);
-	SYSMAP(caddr_t		,CMAP2		,CADDR2	   ,1		);
-	SYSMAP(caddr_t		,vmpte		,vmmap	   ,1		);
-	SYSMAP(struct msgbuf *	,msgbufmap	,msgbufp   ,1		);
+	SYSMAP(caddr_t, vmpte , vmmap, 1);
+	SYSMAP(struct msgbuf *,	msgbufmap ,msgbufp, 1);
+
+	vmpte->pfn = -1;
+	vmpte->dtype = DT_INVALID;
 	
 	*virt_start = virt;
+
     /*
      * Set translation for UPAGES at UADDR. The idea is we want to
      * have translations set up for UADDR. Later on, the ptes for
@@ -1254,16 +1267,18 @@ pmap_bootstrap(
     	}
 #endif
     	if ((pte = pmap_pte(kernel_pmap, virt)) == PT_ENTRY_NULL)
-    		pmap_expand_kmap(virt, VM_PROT_READ|VM_PROT_WRITE);
+    		pmap_expand_kmap(virt, VM_PROT_READ|VM_PROT_WRITE|(CACHE_GLOBAL << 16));
     }
+
     /*
      * Switch to using new page tables
      */
+
     apr_data.bits = 0;
     apr_data.field.st_base = M88K_BTOP(kernel_pmap->sdt_paddr);
     apr_data.field.wt = 1;
     apr_data.field.g  = 1;
-    apr_data.field.ci = 1;
+    apr_data.field.ci = 0;
     apr_data.field.te = 1;	/* Translation enable */
 
     /* Invalidate entire kernel TLB. */
@@ -1279,22 +1294,30 @@ pmap_bootstrap(
     }
 #endif
 
-    if (mydebug) {
-    	pmap_print(kernel_pmap);
-    	pmap_print_trace(kernel_pmap, (vm_offset_t)0xFFF00000, 1);
-    }
+    /*
+     * Set valid bit to DT_INVALID so that the very first pmap_enter()
+     * on these won't barf in pmap_remove_range().
+     */
+    pte = pmap_pte(kernel_pmap, phys_map_vaddr1);
+    pte->pfn = -1;
+    pte->dtype = DT_INVALID;
+    pte = pmap_pte(kernel_pmap, phys_map_vaddr2);
+    pte->dtype = DT_INVALID;
+    pte->pfn = -1;
+
     /* still physical */ 
     /* Load supervisor pointer to segment table. */
     cmmu_remote_set_sapr(0, apr_data.bits);
     /* virtual now on */
 #ifdef DEBUG
-    printf("running virtual - avail_next 0x%x\n", *phys_start);
+    if ((pmap_con_dbg & (CD_BOOT | CD_FULL)) == (CD_BOOT | CD_FULL)) {
+        printf("running virtual - avail_next 0x%x\n", *phys_start);
+    }
 #endif
     avail_next = *phys_start;
-    if (mydebug) {
-         pmap_print_trace(kernel_pmap, proc0paddr, 1);
-    }
 
+    return;
+    
 } /* pmap_bootstrap() */
 
 /*
@@ -1317,7 +1340,8 @@ pmap_bootstrap_alloc(int size)
 	size = round_page(size);
 	mem = (void *)virtual_avail;
 	virtual_avail = pmap_map(virtual_avail, avail_start,
-	    avail_start + size, VM_PROT_READ|VM_PROT_WRITE, CACHE_INH);
+				avail_start + size,
+				VM_PROT_READ|VM_PROT_WRITE|(CACHE_GLOBAL << 16));
 	avail_start += size;
 #ifdef DEBUG
     	if ((pmap_con_dbg & (CD_BOOT | CD_FULL)) == (CD_BOOT | CD_FULL)) {
@@ -1331,12 +1355,6 @@ pmap_bootstrap_alloc(int size)
 
 /*
  * Routine:	PMAP_INIT
- *
- * History
- * June 13 90	Fri.		Fuzzy
- *				Rewrite		lvl1 --> segment
- *						lvl3 --> page
- *	'90.7.19	Fuzzy		sdt_zone unused
  *
  * Function:
  *	Initialize the pmap module. It is called by vm_init, to initialize
@@ -1377,7 +1395,8 @@ pmap_bootstrap_alloc(int size)
  *	zinit(segment zone)
  *
  */
-void pmap_init(vm_offset_t phys_start, vm_offset_t phys_end)
+void
+pmap_init(vm_offset_t phys_start, vm_offset_t phys_end)
 {
     register long		npages;
     register vm_offset_t    	addr;
@@ -1397,9 +1416,6 @@ void pmap_init(vm_offset_t phys_start, vm_offset_t phys_end)
     npages = atop(phys_end - phys_start);
     pvl_table_size = PV_LOCK_TABLE_SIZE(npages);
     s = (vm_size_t)(npages * sizeof(struct pv_entry)	/* pv_list */
-	#if 0
-	+ pvl_table_size				/* pv_lock_table */
-	#endif /* 0 */
 	+ npages);					/* pmap_modify_list */
 
 #ifdef	DEBUG
@@ -1469,7 +1485,8 @@ void pmap_init(vm_offset_t phys_start, vm_offset_t phys_end)
  * address set up in pmap_bootstrap. It flushes the TLB to make the new
  * mappings effective, and zeros all the bits.
  */
-void pmap_zero_page(vm_offset_t phys)
+void
+pmap_zero_page(vm_offset_t phys)
 {
 	vm_offset_t	srcva;
 	pte_template_t	template;
@@ -1489,7 +1506,7 @@ void pmap_zero_page(vm_offset_t phys)
 		| DT_VALID | CACHE_GLOBAL;
 
 
-	    spl_sav = splblock();
+	    spl_sav = splimp();
 	    cmmu_flush_tlb(1, srcva, M88K_PGBYTES);
 	    *srcpte = template.pte;
 	    splx(spl_sav);
@@ -1526,20 +1543,12 @@ void pmap_zero_page(vm_offset_t phys)
  * Paramerters:
  *	size		size of the map
  *
- * Calls:
- *	zalloc
- *	simple_lock_init
- *
- *  This routines allocates a pmap structure and segment translation
- * table from the zones set up by pmap_init. The segment table entries
- * for user space addresses are initalized to zero (invalid).
- * The pmap structure is initalized with the virtual and physical
- * addresses of the segment table. The address (virtual) of the
- * pmap structure is returned.
+ *  This routines allocates a pmap structure.
  */
-pmap_t pmap_create(vm_size_t size)
+pmap_t
+pmap_create(vm_size_t size)
 {
-    register pmap_t		p;
+    	pmap_t		p;
 
     /*
      * A software use-only map doesn't even need a map.
@@ -1563,19 +1572,19 @@ pmap_t pmap_create(vm_size_t size)
 void
 pmap_pinit(pmap_t p)
 {
-    register pmap_statistics_t	stats;
-    sdt_entry_t			*segdt;
-    int                         i;
+    pmap_statistics_t	stats;
+    sdt_entry_t		*segdt;
+    int                	i;
 
     /*
      * Allocate memory for *actual* segment table and *shadow* table.
      */
-    segdt = kmem_alloc(kernel_map, 2 * SDT_SIZE);
+    segdt = (sdt_entry_t *)kmem_alloc(kernel_map, 2 * SDT_SIZE);
     if (segdt == NULL)
 	      panic("pmap_create: kmem_alloc failure");
 
 #if 0
-    /* maybe, we can use bzero to zero out the segdt. */
+    /* maybe, we can use bzero to zero out the segdt. XXX nivas */
     bzero(segdt, 2 * SDT_SIZE); */
 #endif /* 0 */
     /* use pmap zero page to zero it out */
@@ -1603,13 +1612,15 @@ pmap_pinit(pmap_t p)
     }
 #endif
 
+#if notneeded
     /*
-     * memory for page tables should be CACHE DISABLED
+     * memory for page tables should be CACHE DISABLED?
      */
     pmap_cache_ctrl(kernel_pmap,
 		   (vm_offset_t)segdt,
 		   (vm_offset_t)segdt+SDT_SIZE,
 		   CACHE_INH);
+#endif
     /*
      * Initalize SDT_ENTRIES.
      */
@@ -1651,20 +1662,6 @@ pmap_pinit(pmap_t p)
 /*
  * Routine:	PMAP_FREE_TABLES (internal)
  *
- *	History:
- *	'90. 7.16	Fuzzy		level 3 --> page discriptor table
- *					level 1 --> segment discriptor table
- *	90/07/20	N.Sugai		sdt_zone no longer exist. We must
- *					use kmem_free instead of zfree.
- *	'90. 7.26	Fuzzy	VM_MIN_ADDRESS -> VM_MIN_USER_ADDRESS
- *				VM_MIN_KERNEL_ADDRESS -> VM_MAX_USER_ADDRESS
- *	'90.8.3		Fuzzy
- *			if defined TEST, 'static' undeclared.
- *	'90.8.22	Fuzzy	Debugging message add
- *	'90.8.30		Fuzzy
- *			delete "if defined TEST, 'static' undeclared."
- *	'90. 9.11	Fuzzy	sdt_va: vm_offset_t --> unsigned long
- *
  *	Internal procedure used by pmap_destroy() to actualy deallocate
  *	the tables.
  *
@@ -1687,7 +1684,8 @@ pmap_pinit(pmap_t p)
  *
  */
 
-static void pmap_free_tables(pmap_t pmap)
+STATIC void
+pmap_free_tables(pmap_t pmap)
 {
     unsigned long	sdt_va;	/*  outer loop index */
     sdt_entry_t	*sdttbl; /*  ptr to first entry in the segment table */
@@ -1753,9 +1751,6 @@ pmap_release(register pmap_t p)
 /*
  * Routine:	PMAP_DESTROY
  *
- *	History:
- * 		'90. 7.16	Fuzzy
- *
  * Function:
  *	Retire the given physical map from service. Should only be called
  *	if the map contains no valid mappings.
@@ -1777,7 +1772,8 @@ pmap_release(register pmap_t p)
  * the memory space to the system. Then, call kmem_free to free the
  * pmap structure.
  */
-void pmap_destroy(register pmap_t p)
+void
+pmap_destroy(pmap_t p)
 {
     register int	c, s;
 
@@ -1810,8 +1806,6 @@ void pmap_destroy(register pmap_t p)
 /*
  * Routine:	PMAP_REFERENCE
  *
- * Author:	Fuzzy
- *
  * Function:
  *	Add a reference to the specified  pmap.
  *
@@ -1824,7 +1818,8 @@ void pmap_destroy(register pmap_t p)
  *   Under a pmap read lock, the ref_count field of the pmap structure
  * is incremented. The function then returns.
  */
-void pmap_reference(register pmap_t p)
+void
+pmap_reference(pmap_t p)
 {
     int		s;
 
@@ -1839,15 +1834,6 @@ void pmap_reference(register pmap_t p)
 
 /*
  * Routine:	PMAP_REMOVE_RANGE (internal)
- *
- * Update:
- *
- *	July 16, 90 - JUemura	initial porting
- *	'90.7.27	Fuzzy	Calls: add Macros
- *	'90.8.3		Fuzzy	if defined TEST, 'static' undeclared.
- *	'90.8.29	Fuzzy	line 112 (if (pte == PT_ENTRY_NULL) { ...)
- *						delete (check sdt invalid).
- *	'90.8.30	Fuzzy	delete  "if defined TEST, 'static' undeclared."
  *
  * Function:
  *	Invalidate page table entries associated with the
@@ -1901,7 +1887,8 @@ void pmap_reference(register pmap_t p)
  * its zone.
  */
 
-static void pmap_remove_range(pmap_t pmap, vm_offset_t s, vm_offset_t e)
+STATIC void
+pmap_remove_range(pmap_t pmap, vm_offset_t s, vm_offset_t e)
 {
     int			pfi;
     int			pfn;
@@ -1916,7 +1903,7 @@ static void pmap_remove_range(pmap_t pmap, vm_offset_t s, vm_offset_t e)
     register pte_template_t	opte;
     int				kflush;
 
-    if (e <= s)
+    if (e < s)
       panic("pmap_remove_range: end < start");
 
     /*
@@ -2001,7 +1988,7 @@ static void pmap_remove_range(pmap_t pmap, vm_offset_t s, vm_offset_t e)
 		}
 		if (cur == PV_ENTRY_NULL) {
 		    printf("pmap_remove_range: looking for VA "
-			   "0x%x PV list at 0x%x\n", va, (unsigned)pvl);
+			   "0x%x (pa 0x%x) PV list at 0x%x\n", va, pa, (unsigned)pvl);
 		    panic("pmap_remove_range: mapping not in pv_list");
 		}
 
@@ -2030,7 +2017,9 @@ static void pmap_remove_range(pmap_t pmap, vm_offset_t s, vm_offset_t e)
 	    flush_atc_entry(0, tva, kflush);
 
 	    if (opte.pte.modified) {
-		vm_page_set_modified(PHYS_TO_VM_PAGE(opte.bits & M88K_PGMASK));
+		if (IS_VM_PHYSADDR(pa)) {
+			vm_page_set_modified(PHYS_TO_VM_PAGE(opte.bits & M88K_PGMASK));
+		}
 		/* keep track ourselves too */
 		if (PMAP_MANAGED(pa))
 		  pmap_modify_list[pfi] = 1;
@@ -2051,11 +2040,6 @@ static void pmap_remove_range(pmap_t pmap, vm_offset_t s, vm_offset_t e)
 
 /*
  * Routine:	PMAP_REMOVE
- *
- * History:
- *	'90.7.16	Fuzzy	Unchanged
- *	'90.7.26	Fuzzy	VM_MIN_KERNEL_ADDRESS -> VM_MAX_USER_ADDRESS
- *	'90.8.23	Fuzzy	add Debugging message
  *
  * Function:
  *	Remove the given range of addresses from the specified map.
@@ -2101,10 +2085,6 @@ pmap_remove(pmap_t map, vm_offset_t s, vm_offset_t e)
 
 /*
  * Routine:	PMAP_REMOVE_ALL
- *
- *	History:
- *		'90.7.27	Fuzzy	'Calls:' modify
- *		'90.8.28	Fuzzy	add Debugging message
  *
  * Function:
  *	Removes this physical page from all physical maps in which it
@@ -2255,21 +2235,8 @@ remove_all_Retry:
 
 } /* pmap_remove_all() */
 
-
-
-
 /*
  * Routine:	PMAP_COPY_ON_WRITE
- *
- * History:
- *	'90. 7.16	Fuzzy	level 3 --> page table changed
- *	'90. 7.19	Fuzzy	Comment 'Calls' add
- *	'90. 7.26	Fuzzy	VM_MIN_KERNEL_ADDRESS -> VM_MAX_USER_ADDRESS
- *	'90. 8.18	Fuzzy	Add Debugging Message (PA no mappings)
- *	'90. 8.18	Fuzzy	Bug Fixs
- *		for (i=ptes_per_vm_page; i>0; i++) {
- *					       ^^
- *		for (i=ptes_per_vm_page; i>0; i--) {
  *
  * Function:
  *	Remove write privileges from all physical maps for this physical page.
@@ -2294,7 +2261,8 @@ remove_all_Retry:
  * the page table entry (the PTE), and sets the hardware enforced
  * read-only bit. The TLB is appropriately flushed.
  */
-static void pmap_copy_on_write(vm_offset_t phys)
+STATIC void
+pmap_copy_on_write(vm_offset_t phys)
 {
     register pv_entry_t		pv_e;
     register pt_entry_t 	*pte;
@@ -2368,7 +2336,7 @@ static void pmap_copy_on_write(vm_offset_t phys)
 	     * Invalidate pte temporarily to avoid being written back
 	     * the modified bit and/or the reference bit by other cpu.
 	     */
-	    spl_sav = splblock();
+	    spl_sav = splimp();
 	    opte.bits = invalidate_pte(pte);
 	    opte.pte.prot = M88K_RO;
 	    ((pte_template_t *)pte)->bits = opte.bits;
@@ -2386,15 +2354,8 @@ static void pmap_copy_on_write(vm_offset_t phys)
 
 } /* pmap_copy_on_write */
 
-
-
 /*
  * Routine:	PMAP_PROTECT
- *
- * History:
- *	'90.7.16	Fuzzy
- *	'90.7.26	Fuzzy	VM_MIN_KERNEL_ADDRESS -> VM_MAX_USER_ADDRESS
- *	'90.8.21	Fuzzy	Debugging message add
  *
  * Function:
  *	Sets the physical protection on the specified range of this map
@@ -2420,11 +2381,8 @@ static void pmap_copy_on_write(vm_offset_t phys)
  * entry (PTE). If the PTE is invalid, or non-existant, nothing is done.
  * Otherwise, the PTE's protection attributes are adjusted as specified.
  */
-void pmap_protect(
-    pmap_t	pmap,
-    vm_offset_t	s,
-    vm_offset_t e,
-    vm_prot_t	prot)
+void
+pmap_protect(pmap_t pmap, vm_offset_t s, vm_offset_t e, vm_prot_t prot)
 {
     pte_template_t		maprot;
     unsigned			ap;
@@ -2497,7 +2455,7 @@ void pmap_protect(
 	     * Invalidate pte temporarily to avoid being written back
 	     * the modified bit and/or the reference bit by other cpu.
 	     */
-	    spl_sav = splblock();
+	    spl_sav = splimp();
 	    opte.bits = invalidate_pte(pte);
 	    opte.pte.prot = ap;
 	    ((pte_template_t *)pte)->bits = opte.bits;
@@ -2516,15 +2474,6 @@ void pmap_protect(
 
 /*
  * Routine:	PMAP_EXPAND
- *
- *	History:
- *	'90.8.3	Fuzzy
- *			if defined TEST, 'static' undeclared.
- *	'90.8.16	Fuzzy
- *			Extern/Global	no --> user_pt_map, kernel_pmap
- *			added Debug message
- *	'90.8.30	Fuzzy
- *			delete "if defined TEST, 'static' undeclared."
  *
  * Function:
  *	Expands a pmap to be able to map the specified virtual address.
@@ -2567,7 +2516,8 @@ void pmap_protect(
  *	ptva = kmem_alloc(user_pt_map)
  *
  */
-static void pmap_expand(pmap_t map, vm_offset_t v)
+STATIC void
+pmap_expand(pmap_t map, vm_offset_t v)
 {
 	int		i,
 			spl;
@@ -2615,10 +2565,12 @@ static void pmap_expand(pmap_t map, vm_offset_t v)
 
 	pdt_paddr = pmap_extract(kernel_pmap, pdt_vaddr);
 
+#if notneeded
 	/*
 	 * the page for page tables should be CACHE DISABLED
 	 */
 	pmap_cache_ctrl(kernel_pmap, pdt_vaddr, pdt_vaddr+PAGE_SIZE, CACHE_INH);
+#endif
 
 	PMAP_LOCK(map, spl);
 
@@ -2746,12 +2698,9 @@ static void pmap_expand(pmap_t map, vm_offset_t v)
  *	}
  *
  */
-void pmap_enter(
-    register pmap_t	pmap,
-    vm_offset_t		va,
-    vm_offset_t		pa,
-    vm_prot_t		prot,
-    boolean_t		wired)
+void
+pmap_enter(pmap_t pmap, vm_offset_t va, vm_offset_t pa,
+					vm_prot_t prot, boolean_t wired)
 {
     int				ap;
     int				spl, spl_sav;
@@ -2837,12 +2786,10 @@ void pmap_enter(
 	else if (!wired && pte->wired)
 	  pmap->stats.wired_count--;
 
-/*#ifdef luna88k*/ /* KLUDGE (or is it?) */ /* is it for dealing with IO mem? */
-	if (pa >= MAXPHYSMEM)
+	if ((unsigned long)pa >= MAXPHYSMEM)
 	    template.bits = DT_VALID | ap | M88K_TRUNC_PAGE(pa) | CACHE_INH;
 	else
-/*#endif*/
-	template.bits = DT_VALID | ap | M88K_TRUNC_PAGE(pa) | CACHE_GLOBAL /*XXX*/;
+	    template.bits = DT_VALID | ap | M88K_TRUNC_PAGE(pa) | CACHE_GLOBAL;
 	if (wired)
 	  template.pte.wired = 1;
 
@@ -2858,7 +2805,7 @@ void pmap_enter(
 		 * Invalidate pte temporarily to avoid being written back
 		 * the modified bit and/or the reference bit by other cpu.
 		 */
-		spl_sav = splblock();
+		spl_sav = splimp();
 		opte.bits = invalidate_pte(pte);
 		template.pte.modified = opte.pte.modified;
 		*pte++ = template.pte;
@@ -2874,16 +2821,37 @@ void pmap_enter(
 	/*
 	 * Remove old mapping from the PV list if necessary.
 	 */
-	if (old_pa != (vm_offset_t) 0) {
+	if (old_pa != (vm_offset_t)-1) {
 	    /*
 	     *	Invalidate the translation buffer,
 	     *	then remove the mapping.
 	     */
-	    pmap_remove_range(pmap, va, va + PAGE_SIZE);
+#ifdef	DEBUG
+		if ((pmap_con_dbg & (CD_ENT | CD_NORM)) == (CD_ENT | CD_NORM)) {
+			if (va == phys_map_vaddr1 || va == phys_map_vaddr2) {
+				printf("vaddr1 0x%x vaddr2 0x%x va 0x%x pa 0x%x managed %x\n", 
+				phys_map_vaddr1, phys_map_vaddr2, va, old_pa,
+					PMAP_MANAGED(pa) ? 1 : 0);
+				printf("pte %x pfn %x valid %x\n",
+					pte, pte->pfn, pte->dtype);
+	    		}
+		}
+#endif
+		if (va == phys_map_vaddr1 || va == phys_map_vaddr2) {
+			flush_atc_entry(0, va, 1);
+		} else {
+			pmap_remove_range(pmap, va, va + PAGE_SIZE);
+		}
 	}
 
 	if (PMAP_MANAGED(pa)) {
-
+#ifdef	DEBUG
+		if ((pmap_con_dbg & (CD_ENT | CD_NORM)) == (CD_ENT | CD_NORM)) {
+	    		if (va == phys_map_vaddr1 || va == phys_map_vaddr2) {
+				printf("va 0x%x and managed pa 0x%x\n", va, pa);
+	    		}
+    		}
+#endif
 	    /*
 	     *	Enter the mappimg in the PV list for this
 	     *	physical page.
@@ -2942,13 +2910,10 @@ void pmap_enter(
 	if (wired)
 	  pmap->stats.wired_count++;
 
-/*#ifdef luna88k */ /* KLUDGE (or is it?) */
-	if (pa >= MAXPHYSMEM)
+	if ((unsigned long)pa >= MAXPHYSMEM)
 	    template.bits = DT_VALID | ap | M88K_TRUNC_PAGE(pa) | CACHE_INH;
 	else
-		/* SHOULDN't THE NEXT THING HAVE CACHE_GLOBAL? */
-/*#endif */
-	template.bits = DT_VALID | ap | M88K_TRUNC_PAGE(pa);
+	    template.bits = DT_VALID | ap | M88K_TRUNC_PAGE(pa) | CACHE_GLOBAL;
 
 	if (wired)
 	  template.pte.wired = 1;
@@ -2989,14 +2954,12 @@ void pmap_enter(
  *	Special Assumptions:
  *		The mapping must already exist in the pmap.
  */
-void pmap_change_wiring(
-    pmap_t map,
-    vm_offset_t	v,
-    boolean_t	wired)
+void
+pmap_change_wiring(pmap_t map, vm_offset_t v, boolean_t wired)
 {
-	register pt_entry_t	*pte;
-	register int		i;
-	int			spl;
+	pt_entry_t	*pte;
+	int		i;
+	int		spl;
 
 	PMAP_LOCK(map, spl);
 
@@ -3051,7 +3014,8 @@ void pmap_change_wiring(
  * then 0 address is returned. Otherwise, the physical page address from
  * the PTE is returned.
  */
-vm_offset_t pmap_extract(pmap_t pmap, vm_offset_t va)
+vm_offset_t
+pmap_extract(pmap_t pmap, vm_offset_t va)
 {
     register pt_entry_t	 *pte;
     register vm_offset_t pa;
@@ -3098,11 +3062,12 @@ vm_offset_t pmap_extract(pmap_t pmap, vm_offset_t va)
   a version for the kernel debugger 
 */
 
-vm_offset_t pmap_extract_unlocked(pmap_t pmap, vm_offset_t va)
+vm_offset_t
+pmap_extract_unlocked(pmap_t pmap, vm_offset_t va)
 {
-    register pt_entry_t	 *pte;
-    register vm_offset_t pa;
-    register int	 i;
+    pt_entry_t	*pte;
+    vm_offset_t	pa;
+    int		i;
     
     if (pmap == PMAP_NULL)
 	panic("pmap_extract: pmap is NULL");
@@ -3137,9 +3102,6 @@ vm_offset_t pmap_extract_unlocked(pmap_t pmap, vm_offset_t va)
 /*
  *	Routine:	PMAP_COPY
  *
- *	History:
- *		'90.7.16	Fuzzy
- *
  *	Function:
  *		Copy the range specigfied by src_adr/len from the source map
  *		to the range dst_addr/len in the destination map. This routine
@@ -3156,12 +3118,9 @@ vm_offset_t pmap_extract_unlocked(pmap_t pmap, vm_offset_t va)
  * function. Translation tables in the destination map will be allocated
  * at VM fault time.
  */
-void pmap_copy(
-    pmap_t	dst_pmap,
-    pmap_t	src_pmap,
-    vm_offset_t	dst_addr,
-    vm_size_t	len,
-    vm_offset_t	src_addr)
+void
+pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, vm_offset_t dst_addr,
+				vm_size_t len, vm_offset_t src_addr)
 {
 #ifdef        lint
       dst_pmap++; src_pmap++; dst_addr++; len++; src_addr++;
@@ -3173,10 +3132,6 @@ void pmap_copy(
 
 /*
  * Routine:	PMAP_UPDATE
- *
- * History:
- *	'90.7.16		Fuzzy
- *	'90.8.27		Fuzzy	Debugging message add
  *
  * Function:
  *	Require that all active physical maps contain no incorrect entries
@@ -3196,7 +3151,8 @@ void pmap_copy(
  * pmap lock is not held. Therefore, there is really no work to do in
  * this function other than to flush the TLB.
  */
-void pmap_update(void)
+void
+pmap_update(void)
 {
 #ifdef	DBG
     if ((pmap_con_dbg & (CD_UPD | CD_FULL)) == (CD_UPD | CD_FULL))
@@ -3209,14 +3165,6 @@ void pmap_update(void)
 
 /*
  * Routine:	PMAP_COLLECT
- *
- * History:
- *	'90. 7.16	Fuzzy
- *	'90. 7.26	Fuzzy	VM_MIN_ADDRESS	-->	VM_MIN_USER_ADDRESS
- *				VM_MIN_KERNEL_ADDRESS --> VM_MAX_USER_ADDRESS
- *	'90. 7.27	Fuzzy	Calls: add Macro
- *	'90. 8.22	Fuzzy	add Debugging message
- *	'90. 9.11	Fuzzy	sdt_va: vm_offset_t --> unsigned long
  *
  * Runction:
  *	Garbage collects the physical map system for pages which are
@@ -3254,7 +3202,8 @@ void pmap_update(void)
  * or allocated through kmem_alloc. In the former case, the
  * module deals with a single table at a time.]
  */
-void pmap_collect(pmap_t pmap)
+void
+pmap_collect(pmap_t pmap)
 {
 
     vm_offset_t		sdt_va;	/* outer loop index */
@@ -3370,8 +3319,6 @@ void pmap_collect(pmap_t pmap)
 /*
  *	Routine:	PMAP_ACTIVATE
  *
- *	Author:		Fuzzy
- *
  *	Function:
  *		Binds the given physical map to the given
  *		processor, and returns a hardware map description.
@@ -3385,7 +3332,8 @@ void pmap_collect(pmap_t pmap)
  *		pcbp		pointer to current pcb
  *		cpu		CPU number
  */
-void pmap_activate(pmap_t pmap, pcb_t pcb)
+void
+pmap_activate(pmap_t pmap, pcb_t pcb)
 {
 #ifdef	lint
 	my_cpu++;
@@ -3398,8 +3346,6 @@ void pmap_activate(pmap_t pmap, pcb_t pcb)
 /*
  *	Routine:	PMAP_DEACTIVATE
  *
- *	Author:		Fuzzy
- *
  *	Function:
  *		Unbinds the given physical map from the given processor,
  *		i.e. the pmap i no longer is use on the processor.
@@ -3409,7 +3355,8 @@ void pmap_activate(pmap_t pmap, pcb_t pcb)
  *		pmap		pointer to pmap structure
  *		pcb		pointer to pcb
  */
-void pmap_deactivate(pmap_t pmap, pcb_t pcb)
+void
+pmap_deactivate(pmap_t pmap, pcb_t pcb)
 {
 #ifdef	lint
 	pmap++; th++; which_cpu++;
@@ -3422,13 +3369,11 @@ void pmap_deactivate(pmap_t pmap, pcb_t pcb)
 /*
  *	Routine:	PMAP_KERNEL
  *
- *	History:
- *		'90. 7.16	Fuzzy	unchanged
- *
  *	Function:
  *		Retruns a pointer to the kernel pmap.
  */
-pmap_t pmap_kernel(void)
+pmap_t
+pmap_kernel(void)
 {
 	return (kernel_pmap);
 }/* pmap_kernel() */
@@ -3436,10 +3381,6 @@ pmap_t pmap_kernel(void)
 
 /*
  *	Routine:	PMAP_COPY_PAGE
- *
- *	History:
- *		'90.7.16	Fuzzy	M68K --> M88K
- *					DT_PAGE --> DT_VALID
  *
  *	Function:
  *		Copies the specified (machine independent) pages.
@@ -3466,7 +3407,8 @@ pmap_t pmap_kernel(void)
  * addresses set up in pmap_bootstrap. It flushes the TLB to make the
  * new mappings effective, and performs the copy.
  */
-void pmap_copy_page(vm_offset_t src, vm_offset_t dst)
+void
+pmap_copy_page(vm_offset_t src, vm_offset_t dst)
 {
 	vm_offset_t	dstva, srcva;
   	unsigned int spl_sav;
@@ -3492,7 +3434,7 @@ void pmap_copy_page(vm_offset_t src, vm_offset_t dst)
 	    template.bits = M88K_TRUNC_PAGE(src) | aprot | DT_VALID | CACHE_GLOBAL;
 
 	    /* do we need to write back dirty bits */
-	    spl_sav = splblock();
+	    spl_sav = splimp();
 	    cmmu_flush_tlb(1, srcva, M88K_PGBYTES);
 	    *srcpte = template.pte;
 
@@ -3516,10 +3458,6 @@ void pmap_copy_page(vm_offset_t src, vm_offset_t dst)
 /*
  *	copy_to_phys
  *
- *	Author:	Fuzzy
- *	History:
- *		10/17/90	take out of pmap.c of SUN3, and modify for m88k
- *
  *	Copy virtual memory to physical memory by mapping the physical
  *	memory into virtual memory and then doing a virtual to virtual
  *	copy with bcopy.
@@ -3540,15 +3478,14 @@ void pmap_copy_page(vm_offset_t src, vm_offset_t dst)
  *		bcopy
  *
  */
-void copy_to_phys(
-    register vm_offset_t	srcva,
-    register vm_offset_t	dstpa,
-    register int		bytecount)
+void
+copy_to_phys(vm_offset_t srcva, vm_offset_t dstpa, int bytecount)
 {
-    register vm_offset_t	dstva;
-    register pt_entry_t	*dstpte;
-    register int		copy_size, offset;
-    int             aprot;
+    vm_offset_t	dstva;
+    pt_entry_t	*dstpte;
+    int		copy_size,
+   		offset,
+    		aprot;
     unsigned int i;
     pte_template_t  template;
 
@@ -3588,9 +3525,6 @@ void copy_to_phys(
 /*
  *	copy_from_phys
  *
- *	Author:	David Rudolph
- *	History:
- *
  *	Copy physical memory to virtual memory by mapping the physical
  *	memory into virtual memory and then doing a virtual to virtual
  *	copy with bcopy.
@@ -3611,10 +3545,8 @@ void copy_to_phys(
  *		bcopy
  *
  */
-void copy_from_phys(
-    register vm_offset_t	srcpa,
-    register vm_offset_t	dstva,
-    register int		bytecount)
+void
+copy_from_phys(vm_offset_t srcpa, vm_offset_t dstva, int bytecount)
 {
     register vm_offset_t	srcva;
     register pt_entry_t	*srcpte;
@@ -3678,11 +3610,9 @@ void copy_from_phys(
  *
  *	This routine currently does nothing in the 88100 implemetation.
  */
-void pmap_pageable(
-    pmap_t	pmap,
-    vm_offset_t	start,
-    vm_offset_t	end,
-    boolean_t	pageable)
+void
+pmap_pageable(pmap_t pmap, vm_offset_t start, vm_offset_t end,
+							boolean_t pageable)
 {
 #ifdef	lint
 	pmap++; start++; end++; pageable++;
@@ -3693,10 +3623,6 @@ void pmap_pageable(
 
 /*
  * Routine:	PMAP_REDZONE
- *
- * History:
- *	'90.7.16	Fuzzy	m68k --> m88K
- *				pte protection & supervisor bit
  *
  * Function:
  *	Give the kernel read-only access to the specified address. This
@@ -3719,14 +3645,15 @@ void pmap_pageable(
  * table entry associated with the given virtual address. If there is a
  * page entry, and it is valid, its write protect bit will be set.
  */
-void pmap_redzone(pmap_t pmap, vm_offset_t va)
+void
+pmap_redzone(pmap_t pmap, vm_offset_t va)
 {
-    pt_entry_t			*pte;
-    int				spl, spl_sav;
-    register int		i;
-    register unsigned		users;
-    register pte_template_t	opte;
-    int				kflush;
+    pt_entry_t		*pte;
+    int			spl, spl_sav;
+    int			i;
+    unsigned		users;
+    pte_template_t	opte;
+    int			kflush;
 
     va = M88K_ROUND_PAGE(va);
     PMAP_LOCK(pmap, spl);
@@ -3745,7 +3672,7 @@ void pmap_redzone(pmap_t pmap, vm_offset_t va)
 	   * Invalidate pte temporarily to avoid being written back
 	   * the modified bit and/or the reference bit by other cpu.
 	   */
-	  spl_sav = splblock();
+	  spl_sav = splimp();
 	  opte.bits = invalidate_pte(pte);
 	  opte.pte.prot = M88K_RO;
 	  ((pte_template_t *)pte)->bits = opte.bits;
@@ -3763,12 +3690,6 @@ void pmap_redzone(pmap_t pmap, vm_offset_t va)
 
 /*
  *	Routine:	PMAP_CLEAR_MODIFY
- *
- *	Author:		Fuzzy
- *
- *	History:
- *		'90.7.24	Fuzzy
- *		'90.8.21	Fuzzy	Debugging message	add
  *
  *	Function:
  *		Clear the modify bits on the specified physical page.
@@ -3796,19 +3717,20 @@ void pmap_redzone(pmap_t pmap, vm_offset_t va)
  * entry inspected - and turned off if  necessary. If any of the
  * inspected bits were found on, an TLB flush will be performed.
  */
-void pmap_clear_modify(vm_offset_t phys)
+void
+pmap_clear_modify(vm_offset_t phys)
 {
-    pv_entry_t			pvl;
-    int				pfi;
-    pv_entry_t			pvep;
-    pt_entry_t			*pte;
-    pmap_t			pmap;
-    int				spl, spl_sav;
-    register vm_offset_t	va;
-    register int		i;
-    register unsigned		users;
-    register pte_template_t	opte;
-    int				kflush;
+    pv_entry_t		pvl;
+    int			pfi;
+    pv_entry_t		pvep;
+    pt_entry_t		*pte;
+    pmap_t		pmap;
+    int			spl, spl_sav;
+    vm_offset_t		va;
+    int			i;
+    unsigned		users;
+    pte_template_t	opte;
+    int			kflush;
 
     if (!PMAP_MANAGED(phys)) {
 #ifdef	DBG
@@ -3864,7 +3786,7 @@ clear_modify_Retry:
 	     * Invalidate pte temporarily to avoid being written back
 	     * the modified bit and/or the reference bit by other cpu.
 	     */
-	    spl_sav = splblock();
+	    spl_sav = splimp();
 	    opte.bits = invalidate_pte(pte);
 	    /* clear modified bit */
 	    opte.pte.modified = 0;
@@ -3888,12 +3810,6 @@ clear_modify_Retry:
 
 /*
  *	Routine:	PMAP_IS_MODIFIED
- *
- *	History:
- *		'90. 7.16	Fuzzy
- *		'90. 7.19	Fuzzy	comments 'Calls'
- *		'90. 8.20	Fuzzy	Added debugging message
- *		'90. 8.20	Fuzzy	when panic, print virt_address
  *
  *	Function:
  *		Return whether or not the specified physical page is modified
@@ -3928,7 +3844,8 @@ clear_modify_Retry:
  * examined. If a modified bit is found on, the function returns TRUE
  * immediately (doesn't need to walk remainder of list).
  */
-boolean_t pmap_is_modified(vm_offset_t phys)
+boolean_t
+pmap_is_modified(vm_offset_t phys)
 {
 	pv_entry_t	pvl;
 	int		pfi;
@@ -4046,19 +3963,20 @@ is_mod_Retry:
  * inspected - and turned off if necessary. If any of the inspected bits
  * werw found on, an TLB flush will be performed.
  */
-void pmap_clear_reference(vm_offset_t phys)
+void
+pmap_clear_reference(vm_offset_t phys)
 {
-    pv_entry_t			pvl;
-    int				pfi;
-    pv_entry_t			pvep;
-    pt_entry_t			*pte;
-    pmap_t			pmap;
-    int				spl, spl_sav;
-    register vm_offset_t	va;
-    register int		i;
-    register unsigned		users;
-    register pte_template_t	opte;
-    int				kflush;
+    pv_entry_t		pvl;
+    int			pfi;
+    pv_entry_t		pvep;
+    pt_entry_t		*pte;
+    pmap_t		pmap;
+    int			spl, spl_sav;
+    vm_offset_t		va;
+    int			i;
+    unsigned		users;
+    pte_template_t	opte;
+    int			kflush;
 
     if (!PMAP_MANAGED(phys)) {
 #ifdef	DBG
@@ -4112,7 +4030,7 @@ clear_reference_Retry:
 	     * Invalidate pte temporarily to avoid being written back
 	     * the modified bit and/or the reference bit by other cpu.
 	     */
-	    spl_sav = splblock();
+	    spl_sav = splimp();
 	    opte.bits = invalidate_pte(pte);
 	    /* clear reference bit */
 	    opte.pte.pg_used = 0;
@@ -4168,7 +4086,8 @@ clear_reference_Retry:
  * examined. If a used bit is found on, the function returns TRUE
  * immediately (doesn't need to walk remainder of list).
  */
-boolean_t pmap_is_referenced(vm_offset_t phys)
+boolean_t
+pmap_is_referenced(vm_offset_t phys)
 {
     pv_entry_t	pvl;
     int		pfi;
@@ -4251,7 +4170,8 @@ is_ref_Retry:
  *	It returns TRUE/FALSE.
  */
 
-boolean_t pmap_verify_free(vm_offset_t phys)
+boolean_t
+pmap_verify_free(vm_offset_t phys)
 {
 	pv_entry_t	pv_h;
 	int		spl;
@@ -4278,14 +4198,11 @@ boolean_t pmap_verify_free(vm_offset_t phys)
 /*
  *	Routine:	PMAP_VALID_PAGE
  *
- *	History:
- *	'90.7.18	Fuzzy	This function do not exist in m68K pmap list.
- *				vm_page_startup() routine calls this.
- *
  *	The physical address space is dense... there are no holes.
  *	All addresses provided to vm_page_startup() are valid.
  */
-boolean_t pmap_valid_page(vm_offset_t p)
+boolean_t
+pmap_valid_page(vm_offset_t p)
 {
 #ifdef	lint
 	p++;
@@ -4296,37 +4213,31 @@ boolean_t pmap_valid_page(vm_offset_t p)
 /*
  * Routine:	PMAP_PAGE_PROTECT
  *
- * History:
- *	'90.8.4	Fuzzy	extract vax pmap.c
- *
  * Calls:
  *	pmap_copy_on_write
  *	pmap_remove_all
  *
  *	Lower the permission for all mappings to a given page.
  */
-void pmap_page_protect(vm_offset_t phys, vm_prot_t prot)
+void
+pmap_page_protect(vm_offset_t phys, vm_prot_t prot)
 {
-    switch (prot) {
-      case VM_PROT_READ:
-      case VM_PROT_READ|VM_PROT_EXECUTE:
-	pmap_copy_on_write(phys);
-	break;
-      case VM_PROT_ALL:
-	break;
-      default:
-	pmap_remove_all(phys);
-	break;
-    }
+	switch (prot) {
+		case VM_PROT_READ:
+		case VM_PROT_READ|VM_PROT_EXECUTE:
+			pmap_copy_on_write(phys);
+			break;
+		case VM_PROT_ALL:
+			break;
+		default:
+			pmap_remove_all(phys);
+			break;
+	}
 }
 
-#if 0
+#if FUTURE_MAYBE
 /*
  * Routine:	PAGEMOVE
- *
- * History:
- *
- *	11/08/09	N.Sugai		Initial version
  *
  * Function:
  *	Move pages from one kernel virtual address to another.
@@ -4349,16 +4260,17 @@ void pmap_page_protect(vm_offset_t phys, vm_prot_t prot)
  * Special Assumptions:
  *	size must be a multiple of CLBYTES (?)
  */
-void pagemove(vm_offset_t from, vm_offset_t to, int size)
+void
+pagemove(vm_offset_t from, vm_offset_t to, int size)
 {
-    vm_offset_t			pa;
-    pt_entry_t			*srcpte, *dstpte;
-    int				pfi;
-    pv_entry_t			pvl;
-    int				spl;
-    register int		i;
-    register unsigned		users;
-    register pte_template_t	opte;
+    vm_offset_t		pa;
+    pt_entry_t		*srcpte, *dstpte;
+    int			pfi;
+    pv_entry_t		pvl;
+    int			spl;
+    int			i;
+    unsigned		users;
+    pte_template_t	opte;
 
     PMAP_LOCK(kernel_pmap, spl);
 
@@ -4389,13 +4301,13 @@ void pagemove(vm_offset_t from, vm_offset_t to, int size)
 	    panic("pagemove: Distination pte already valid");
 	}
 
-#ifdef DBG
+#ifdef DEBUG
 	if ((pmap_con_dbg & (CD_PGMV | CD_NORM)) == (CD_PGMV | CD_NORM))
 	  printf("(pagemove :%x) from 0x%x to 0x%x\n", curproc, from, to);
 	if ((pmap_con_dbg & (CD_PGMV | CD_FULL)) == (CD_PGMV | CD_FULL))
 	  printf("(pagemove :%x) srcpte @ 0x%x = %x dstpte @ 0x%x = %x\n", curproc, (unsigned)srcpte, *(unsigned *)srcpte, (unsigned)dstpte, *(unsigned *)dstpte);
 
-#endif /* DBG */
+#endif /* DEBUG */
 
 	/*
 	 * Update pv_list
@@ -4430,7 +4342,7 @@ void pagemove(vm_offset_t from, vm_offset_t to, int size)
 
 } /* pagemove */
 
-#endif /* 0 */
+#endif /* FUTURE_MAYBE */
 /*
  *	Routine:	icache_flush
  *
@@ -4454,10 +4366,11 @@ void pagemove(vm_offset_t from, vm_offset_t to, int size)
  *		vm_remove_page
  *
  */
-void icache_flush(vm_offset_t pa)
+void
+icache_flush(vm_offset_t pa)
 {
-    register int i;
-    register int cpu = 0;
+    int 	i;
+    int 	cpu = 0;
 
     for (i = ptes_per_vm_page; i > 0; i--, pa += M88K_PGBYTES) {
 	 cmmu_flush_remote_inst_cache(cpu, pa, M88K_PGBYTES);
@@ -4483,10 +4396,11 @@ void icache_flush(vm_offset_t pa)
  *		dcacheflush
  *
  */
-void pmap_dcache_flush(pmap_t pmap, vm_offset_t va)
+void
+pmap_dcache_flush(pmap_t pmap, vm_offset_t va)
 {
-    register vm_offset_t pa;
-    register int i;
+    vm_offset_t pa;
+    int 	i;
     int		spl;
 
     if (pmap == PMAP_NULL)
@@ -4504,11 +4418,12 @@ void pmap_dcache_flush(pmap_t pmap, vm_offset_t va)
 
 } /* pmap_dcache_flush */
 
-static void cache_flush_loop(int mode, vm_offset_t pa, int size)
+STATIC void
+cache_flush_loop(int mode, vm_offset_t pa, int size)
 {
-    register int	i;
-    register int	ncpus;
-    void (*cfunc)(int cpu, vm_offset_t physaddr, int size);
+    int		i;
+    int		ncpus;
+    void 	(*cfunc)(int cpu, vm_offset_t physaddr, int size);
 
     switch (mode) {
     default:
@@ -4560,15 +4475,12 @@ static void cache_flush_loop(int mode, vm_offset_t pa, int size)
  * pmap_cache_flush
  *	Internal function.
  */
-void pmap_cache_flush(
-    pmap_t pmap,
-    vm_offset_t virt,
-    int bytes,
-    int mode)
+void
+pmap_cache_flush(pmap_t pmap, vm_offset_t virt, int bytes, int mode)
 {
-    register vm_offset_t pa;
-    register vm_offset_t va;
-    register int i;
+    vm_offset_t pa;
+    vm_offset_t va;
+    int 	i;
     int		spl;
 
     if (pmap == PMAP_NULL)
@@ -4591,92 +4503,8 @@ void pmap_cache_flush(
         }
     }
     PMAP_UNLOCK(pmap, spl);
-} /* pmap_ccacheflush */
+} /* pmap_cache_flush */
 
-
-#ifdef JUNK
-/*
- *	Machine-level page attributes
- *
- *	This implementation was lifted from the MIPS pmap module.
- *	We currently only use it to invalidate the I-Cache for
- *	debugger use.
- *
- *	These are infrequently used features of the M88K CMMU,
- *	basically cache control functions.  The cachability
- *	property of mappings must be remembered across paging
- *	operations, so that they can be restored on need.
- *
- *	Obviously these attributes will be used in a sparse
- *	fashion, so we use a simple list of attribute-value
- *	pairs.
- *
- *	Some notes on the cache management based upon my quick
- *	calculation and previous experience.
- *	We must carefully weigh the cost of cache invalidate time to
- *	cache refill time.  If "cachefall()" is called for more than
- *	two pages, it is usually faster to simply invalidate the entire
- *	cache and let it refill, since the number of cycles required to
- *	perform the invalidate becomes greater than the number to refill.
- *	If we are only performing an invalidate for something like a
- *	debugger breakpoint, it becomes worthwhile to only perform a
- *	line invalidate.  Remember, we must account for the amount of
- *	time required to perform the pmap lookups.
- */
-/*
- *	pmap_attributes:
- *
- *	Set/Get special memory attributes
- *
- *	This is currently only used to invalidate the I-cache when a
- *	breakpoint is set by the debugger.
- *
- */
-int pmap_attribute(
-    pmap_t			pmap,
-    vm_offset_t			address,
-    vm_size_t			size,
-    vm_machine_attribute_t	attribute,
-    vm_machine_attribute_val_t* value)		/* IN/OUT */
-{
-	register vm_offset_t 	start, end;
-	int		ret;
-#ifdef notyet
-	pmap_attribute_t	a;
-#endif
-
-	if (attribute != MATTR_CACHE)
-		return KERN_INVALID_ARGUMENT;
-
-	if (pmap == PMAP_NULL)
-		return KERN_SUCCESS;
-
-	start = trunc_page(address);
-	end = round_page(address + size);
-	ret = KERN_SUCCESS;
-
-
-	/* All we are looking for right now is an instruction cache flush.
-	*/
-	switch(*value) {
-	case MATTR_VAL_CACHE_FLUSH:
-		pmap_cache_flush(pmap, start, size, FLUSH_CACHE);
-		break;
-	case MATTR_VAL_DCACHE_FLUSH:
-		pmap_cache_flush(pmap, start, size, FLUSH_DATA_CACHE);
-		break;
-	case MATTR_VAL_ICACHE_FLUSH:
-		pmap_cache_flush(pmap, start, size, FLUSH_CODE_CACHE);
-		/* ptrace_user_iflush(pmap, start, size); */
-		break;
-
-	default:
-		ret = KERN_INVALID_ARGUMENT;
-	}
-
-	return ret;
-}
-#endif /* JUNK */
 #ifdef	DEBUG
 /*
  *  DEBUGGING ROUTINES - check_pv_list and check_pmp_consistency are used
@@ -4687,13 +4515,6 @@ int pmap_attribute(
 
 /*
  *	Routine:	CHECK_PV_LIST (internal)
- *
- *	History:
- *		'90.7.13	Fuzzy
- *	'90.8.3	Fuzzy
- *			if defined TEST, 'static' undeclared.
- *	'90.8.30	Fuzzy
- *			delete "if defined TEST, 'static' undeclared."
  *
  *	Function:
  *		Debug-mode routine to check consistency of a PV list. First, it
@@ -4722,7 +4543,8 @@ int pmap_attribute(
  * that for the PV list being perused, the function panics.
  */
 
-static void check_pv_list(vm_offset_t phys, pv_entry_t pv_h, char *who)
+STATIC void
+check_pv_list(vm_offset_t phys, pv_entry_t pv_h, char *who)
 {
 	pv_entry_t	pv_e;
 	pt_entry_t 	*pte;
@@ -4773,16 +4595,6 @@ static void check_pv_list(vm_offset_t phys, pv_entry_t pv_h, char *who)
 /*
  *	Routine:	CHECK_MAP (itnernal)
  *
- *	History:
- *	June 13 '90		Fuzzy
- *				Rewrite		level 1 --> segment
- *						level 3 --> page
- *	'90.8.3	Fuzzy
- *			if defined TEST, 'static' undeclared.
- *	'90.8.30	Fuzzy
- *			delete "if defined TEST, 'static' undeclared."
- *
- *
  *	Function:
  *		Debug mode routine to check consistency of map.
  *		Called by check_pmap_consistency only.
@@ -4811,11 +4623,8 @@ static void check_pv_list(vm_offset_t phys, pv_entry_t pv_h, char *who)
  * panics.
  */
 
-static void check_map(
-    pmap_t	map,
-    vm_offset_t	s,
-    vm_offset_t	e,
-    char	*who)
+STATIC void
+check_map(pmap_t map, vm_offset_t s, vm_offset_t e, char *who)
 {
 	vm_offset_t	va,
 			old_va,
@@ -4919,13 +4728,6 @@ static void check_map(
 /*
  *	Routine:	CHECK_PMAP_CONSISTENCY (internal)
  *
- *	History:
- *		'90. 7.16	Fuzzy
- *	'90.8.3	Fuzzy
- *			if defined TEST, 'static' undeclared.
- *	'90.8.30	Fuzzy
- *			delete "if defined TEST, 'static' undeclared."
- *
  *	Function:
  *		Debug mode routine which walks all pmap, checking for internal
  *		consistency. We are called UNLOCKED, so we'll take the write
@@ -4957,7 +4759,8 @@ static void check_map(
  *
  */
 
-static void check_pmap_consistency(char *who)
+STATIC void
+check_pmap_consistency(char *who)
 {
 	pmap_t		p;
 	int		i;
@@ -5001,13 +4804,11 @@ static void check_pmap_consistency(char *who)
 		printf("check_pmap consistency (%s :%x): done.\n",who, curproc);
 
 } /* check_pmap_consistency() */
-#endif /* DBG */
+#endif /* DEBUG */
 
 /*
  * PMAP PRINT MACROS AND ROUTINES FOR DEBUGGING
  * These routines are called only from the debugger.
- * (No locking required.)
- *	usually found in pmap.c			Fuzzy '90.7.12
  */
 
 #define	PRINT_SDT(p)							\
@@ -5032,10 +4833,7 @@ static void check_pmap_consistency(char *who)
 /*
  *	Routine:	PMAP_PRINT
  *
- *	Author:		Fuzzy			'90.7.12
- *
- *  History:
- *		'90.7.25	Fuzzy	Null sdt entry skip, and skip count print.
+ *  	History:
  *
  *	Function:
  *		Print pmap stucture, including segment table.
@@ -5049,7 +4847,8 @@ static void check_pmap_consistency(char *who)
  *	This function prints the fields of the pmap structure, then
  * iterates through the segment translation table, printing each entry.
  */
-void pmap_print (pmap_t pmap)
+void
+pmap_print(pmap_t pmap)
 {
     sdt_entry_t	*sdtp;
     sdt_entry_t	*sdtv;
@@ -5132,10 +4931,8 @@ void pmap_print (pmap_t pmap)
  * each table are printed, with special indication of the entries used in
  * the translation.
  */
-void pmap_print_trace (
-    pmap_t	pmap,
-    vm_offset_t	va,
-    boolean_t	long_format)
+void
+pmap_print_trace (pmap_t pmap, vm_offset_t va, boolean_t long_format)
 {
     sdt_entry_t	*sdtp;	/* ptr to sdt table of physical addresses */
     sdt_entry_t	*sdtv;	/* ptr to sdt shadow table of virtual addresses */
@@ -5253,10 +5050,8 @@ void pmap_print_trace (
  *  address is valid, and, for write transactions, whether it has write
  *  permission.
  */
-boolean_t pmap_check_transaction(
-    pmap_t pmap,
-    vm_offset_t va,
-    vm_prot_t type)
+boolean_t
+pmap_check_transaction(pmap_t pmap, vm_offset_t va, vm_prot_t type)
 {
     pt_entry_t	*pte;
     sdt_entry_t	*sdt;
@@ -5299,20 +5094,21 @@ boolean_t pmap_check_transaction(
 
 /* New functions to satisfy rpd - contributed by danner */
 
-void pmap_virtual_space(
-    vm_offset_t *startp,
-    vm_offset_t *endp)
+void
+pmap_virtual_space(vm_offset_t *startp, vm_offset_t *endp)
 {
     *startp = virtual_avail;
     *endp = virtual_end;
 }
 
-unsigned int pmap_free_pages(void)
+unsigned int
+pmap_free_pages(void)
 {
         return atop(avail_end - avail_next);
 }
 
-boolean_t pmap_next_page(vm_offset_t *addrp)
+boolean_t
+pmap_next_page(vm_offset_t *addrp)
 {
         if (avail_next == avail_end)
                 return FALSE;
@@ -5322,12 +5118,13 @@ boolean_t pmap_next_page(vm_offset_t *addrp)
         return TRUE;
 }
 
-#if 0
+#if USING_BATC
 #ifdef OMRON_PMAP
 /*
  *      Set BATC
  */
-void pmap_set_batc(
+void
+pmap_set_batc(
     pmap_t pmap,
     boolean_t data,
     int i,
@@ -5383,8 +5180,8 @@ void use_batc(
 }
 
 #endif
-#endif /* 0 */
-#ifdef notyet
+#endif /* USING_BATC */
+#if FUTURE_MAYBE
 /*
  *	Machine-level page attributes
  *
@@ -5398,9 +5195,10 @@ void use_batc(
 /*
  *	Destroy an attribute list.
  */
-void pmap_destroy_ranges(pmap_range_t *ranges)
+void
+pmap_destroy_ranges(pmap_range_t *ranges)
 {
-	register pmap_range_t this, next;
+	pmap_range_t this, next;
 
 	this = *ranges;
 	while (this != 0) {
@@ -5414,11 +5212,10 @@ void pmap_destroy_ranges(pmap_range_t *ranges)
 /*
  *	Lookup an address in a sorted range list.
  */
-boolean_t pmap_range_lookup(
-	pmap_range_t *ranges,
-	vm_offset_t address)
+boolean_t
+pmap_range_lookup(pmap_range_t *ranges, vm_offset_t address)
 {
-	register pmap_range_t range;
+	pmap_range_t range;
 
 	for (range = *ranges; range != 0; range = range->next) {
 		if (address < range->start)
@@ -5433,12 +5230,10 @@ boolean_t pmap_range_lookup(
  *	Add a range to a list.
  *	The pmap must be locked.
  */
-void pmap_range_add(
-	pmap_range_t *ranges,
-	vm_offset_t start,
-	vm_offset_t end)
+void
+pmap_range_add(pmap_range_t *ranges, vm_offset_t start, vm_offset_t end)
 {
-	register pmap_range_t range, *prev;
+	pmap_range_t range, *prev;
 
 	/* look for the start address */
 
@@ -5490,12 +5285,10 @@ void pmap_range_add(
  *	Remove a range from a list.
  *	The pmap must be locked.
  */
-void pmap_range_remove(
-	pmap_range_t *ranges,
-	vm_offset_t start,
-	vm_offset_t end)
+void
+pmap_range_remove(pmap_range_t *ranges, vm_offset_t start, vm_offset_t end)
 {
-	register pmap_range_t range, *prev;
+	pmap_range_t range, *prev;
 
 	/* look for start address */
 
@@ -5535,4 +5328,4 @@ void pmap_range_remove(
 	if ((range != 0) && (range->start < end))
 		range->start = end;
 }
-#endif /* notyet */
+#endif /* FUTURE_MAYBE */

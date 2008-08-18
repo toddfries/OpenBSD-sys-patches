@@ -2,6 +2,7 @@
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University
  * Copyright (c) 1991 OMRON Corporation
+ * Copyright (c) 1996 Nivas Madhur
  * All Rights Reserved.
  *
  * Permission to use, copy, modify and distribute this software and its
@@ -37,19 +38,11 @@
 # define ASSEMBLER
 #endif
 
-#include <machine/asm.h>
-#include <machine/locore.h>
+#include "assym.s"
 #include <machine/trap.h>
 #include <machine/board.h>
+#include <machine/asm.h>
 #include <sys/errno.h>
-
-
-#undef ENTRY 	/* don't want anything to do with a G?PROF ENTRY() */
-#ifdef __STDC__
-#  define ENTRY(name)	align 4 NEWLINE _ ## name: global _ ## name
-#else
-#  define ENTRY(name)	align 4 NEWLINE _/**/name: global _/**/name
-#endif
 
 
 /*****************************************************************************
@@ -258,7 +251,7 @@ LABEL(_FAULT_ERROR)
 	or	r2,r0,1		/* bad copy */
 	jmp	r1
 
-;LABEL(_ALLOW_FAULT_START)
+/* LABEL(_ALLOW_FAULT_START) */
 
 /*
  * Fetch from user space
@@ -271,7 +264,7 @@ ENTRY(fuiword)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(fusu_fault)
 	or		r5,   r5,   lo16(fusu_fault)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = fusu_fault
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = fusu_fault */
 #if  ERRATA__XXX_USR
 	NOP
 	ld.usr   	r5,   r0,  r2
@@ -288,7 +281,7 @@ fusu_fault:
 fusu_ret:
 	or.u		r5,   r0,   hi16(_curpcb)	
 	ld		r6,   r5,   lo16(_curpcb)
-	st		r0,   r6,   PCB_ONFAULT	; pcb_onfault = 0
+	st		r0,   r6,   PCB_ONFAULT	/* pcb_onfault = 0 */
 
 	jmp		r1
 		
@@ -297,7 +290,7 @@ ENTRY(fusword)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(fusu_fault)
 	or		r5,   r5,   lo16(fusu_fault)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = fusu_fault
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = fusu_fault */
 #if  ERRATA__XXX_USR
 	NOP
 	ld.h.usr   	r5,   r0,  r2
@@ -316,7 +309,7 @@ ENTRY(fuibyte)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(fusu_fault)
 	or		r5,   r5,   lo16(fusu_fault)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = fusu_fault
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = fusu_fault */
 #if  ERRATA__XXX_USR
 	NOP
 	ld.b.usr   	r5,   r0,  r2
@@ -334,7 +327,7 @@ ENTRY(fuswintr)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(_fubail)
 	or		r5,   r5,   lo16(_fubail)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = fubail
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = fubail */
 #if  ERRATA__XXX_USR
 	NOP
 	ld.h.usr	r5,   r2, r0
@@ -363,7 +356,7 @@ ENTRY(suiword)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(fusu_fault)
 	or		r5,   r5,   lo16(fusu_fault)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = fusu_fault
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = fusu_fault */
 #if  ERRATA__XXX_USR
 	NOP
 	st.usr		r3,   r2, r0
@@ -381,7 +374,7 @@ ENTRY(susword)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(fusu_fault)
 	or		r5,   r5,   lo16(fusu_fault)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = fusu_fault
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = fusu_fault */
 #if  ERRATA__XXX_USR
 	NOP
 	st.h.usr	r3,   r2, r0
@@ -400,7 +393,7 @@ ENTRY(suibyte)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(fusu_fault)
 	or		r5,   r5,   lo16(fusu_fault)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = fusu_fault
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = fusu_fault */
 #if  ERRATA__XXX_USR
 	NOP
 	st.b.usr	r3,   r2, r0
@@ -418,7 +411,7 @@ ENTRY(suswintr)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(_subail)
 	or		r5,   r5,   lo16(_subail)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = subail
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = subail */
 #if  ERRATA__XXX_USR
 	NOP
 	st.h.usr	r3,   r2, r0
@@ -441,38 +434,34 @@ ENTRY(subail)
  *
  * Copy a null terminated string from one point to another in
  * the kernel address space.
- * NOTE: maxlength must be < 64K
  */
 ENTRY(copystr)
-	movl	sp@(4),a0		| a0 = fromaddr
-	movl	sp@(8),a1		| a1 = toaddr
-	moveq	#0,d0
-	movw	sp@(14),d0		| d0 = maxlength
-	jlt	Lcsflt1			| negative count, error
-	jeq	Lcsdone			| zero count, all done
-	subql	#1,d0			| set up for dbeq
+	or	r6,r0,0
+	bcnd	lt0,r4,Lcsflt1		/* negative count, error */
+	bcnd	eq0,r4,Lcsdone		/* zero count, all done */
 Lcsloop:
-	movb	a0@+,a1@+		| copy a byte
-	dbeq	d0,Lcsloop		| if !null and more, continue
-	jne	Lcsflt2			| ran out of room, error
-	moveq	#0,d0			| got a null, all done
+	ld	r8,r2,r6		/* copy a byte */
+	st	r8,r3,r6		
+	addu	r6,r6,1			/* bump the index */
+	bcnd	eq0,r8,Lcsdone 		/* if null, done */
+	subu	r4,r4,1			/* decrement count to copy */
+	bcnd	ne0,r4,Lcsloop		/* if more to copy, loop */
+	br	Lcsflt2 		/* ran out of room, error */
 Lcsdone:
-	tstl	sp@(16)			| return length desired?
-	jeq	Lcsret			| no, just return
-	subl	sp@(4),a0		| determine how much was copied
-	movl	sp@(16),a1		| return location
-	movl	a0,a1@			| stash it
+	bcnd	eq0, r5, Lcsret		/* if return len not desired, return */
+	st	r6,r5,0			/* stash it */
 Lcsret:
-	rts
-Lcsflt1:
-	moveq	#EFAULT,d0		| copy fault
-	jra	Lcsdone
-Lcsflt2:
-	moveq	#ENAMETOOLONG,d0	| ran out of space
-	jra	Lcsdone	
-
-#endif /* 0 */
+	or	r2,r0,0			/* good status */
 	jmp	r1
+Lcsflt1:
+	or	r2,r0,EFAULT		/* return fault */
+	br	Lcsdone
+Lcsflt2:
+	or	r2,r0,ENAMETOOLONG	/* ran out of space */
+	br	Lcsdone	
+Lcsdone:
+	jmp	r1
+#endif /* 0 */
 /*
  * Copy specified amount of data from user space into the kernel
  * copyin(from, to, len)
@@ -492,12 +481,12 @@ ENTRY(copyin)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(.Lciflt)
 	or		r5,   r5,   lo16(.Lciflt)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = .Lciflt
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = .Lciflt */
 	
-	;bcnd		ne0,  LEN,  1f ; XXX optimize len = 0 case
-	;or		r2,   r0,   0
-	;br		.Lcidone
-    ;1: ;bcnd		lt0,  LEN,  .Lciflt ; EFAULT if len < 0 
+	/*bcnd		ne0,  LEN,  1f ; XXX optimize len = 0 case */
+	/*;or		r2,   r0,   0 */
+	/*;br		.Lcidone */
+    /*;1: ;bcnd		lt0,  LEN,  .Lciflt ; EFAULT if len < 0  */
         
 	/* If it's a small length (less than 8), then do byte-by-byte */
 	cmp		r9,   LEN,  8
@@ -669,7 +658,7 @@ copyin_byte_only:
  * r2 == from
  * r3 == to
  * r4 == maxlen
- * r5 == len actually transferred
+ * r5 == len actually transferred (includes the terminating NULL!!!)
  * r6 & r7 - used as temporaries
  */
 #define SRC	r2
@@ -698,13 +687,13 @@ ENTRY(copyinstr)
 	ld.bu.usr	r7,   SRC,  r6
 #endif
 	st.b		r7,   DEST, r6
-	bcnd		eq0,  r7, 2f		; all done
+	bcnd.n		eq0,  r7, 2f		/* all done */
 	addu		r6,   r6, 1
 	cmp		r7,   r6, CNT
 	bb1		lt,   r7, 1b
-	or		r2,   r0, ENAMETOOLONG	; over flow
+	or		r2,   r0, ENAMETOOLONG	/* over flow */
 	br		.Lcisdone
-   2:   					; all done
+   2:   					/* all done */
 	or		r2,   r0, 0
 	br		.Lcisdone
 
@@ -742,11 +731,11 @@ ENTRY(copyout)
 	ld		r6,   r5,   lo16(_curpcb)
 	or.u		r5,   r0,   hi16(.Lcoflt)
 	or		r5,   r5,   lo16(.Lcoflt)
-	st		r5,   r6,   PCB_ONFAULT	; pcb_onfault = .Lcoflt
-	;bcnd		ne0,  LEN,  1f ; XXX optimize len = 0 case
-	;or		r2,   r0,   0
-	;br		.Lcodone
-    ;1: ;bcnd		lt0,  LEN,  .Lcoflt ; EFAULT if len < 0 
+	st		r5,   r6,   PCB_ONFAULT	/* pcb_onfault = .Lcoflt */
+/*	;bcnd		ne0,  LEN,  1f ; XXX optimize len = 0 case */
+/*	;or		r2,   r0,   0 */
+/*	;br		.Lcodone */
+    /*;1: ;bcnd		lt0,  LEN,  .Lcoflt ; EFAULT if len < 0  */
 	/* If it's a small length (less than 8), then do byte-by-byte */
 	cmp		r9,   LEN,  8
 	bb1		lt,   r9,   copyout_byte_only
@@ -926,7 +915,7 @@ _LABEL(copyout_byte_only)
  * r2 == from
  * r3 == to
  * r4 == maxlen that can be copied
- * r5 == len actually copied
+ * r5 == len actually copied (including the terminating NULL!!!)
  */
 
 #define SRC	r2
@@ -955,13 +944,13 @@ ENTRY(copyoutstr)
 #else
 	st.b.usr	r7,   DEST,  r6
 #endif
-	bcnd		eq0,  r7, 2f		; all done
+	bcnd.n		eq0,  r7, 2f		/* all done */
 	addu		r6,   r6, 1
 	cmp		r7,   r6, CNT
 	bb1		lt,   r7, 1b
-	or		r2,   r0, ENAMETOOLONG	; over flow
+	or		r2,   r0, ENAMETOOLONG	/* over flow */
 	br		.Lcosdone
-   2:   					; all done
+   2:   					/* all done */
 	or		r2,   r0, 0
 	br		.Lcosdone
 
@@ -983,8 +972,8 @@ ENTRY(copyoutstr)
 #undef LEN
 
 /*######################################################################*/
-;LABEL(_ALLOW_FAULT_END)
-;word 0	/* to separate from routine below */
+/*LABEL(_ALLOW_FAULT_END)*/
+/*word 0	*/ /* to separate from routine below */
 /*######################################################################*/
 
 /*
@@ -1477,6 +1466,8 @@ do_max: subu	R_len, R_len, R_bytes	/* NOTE: this is in the delay slot! */
 
 /*
  * non-local goto
+ *	int setjmp(label_t *);
+ *	void longjmp(label_t*);
  */
 	global _setjmp
 _setjmp:
@@ -1524,7 +1515,7 @@ _longjmp:
 	ld	r30,r2,17*4
 	ld	r31,r2,18*4
 	jmp.n	r1
-	or	r2,r3,r0
+	or	r2,r0,1
 
 ENTRY(longjmp_int_enable)
 	ld	r1,r2,0
@@ -1556,28 +1547,76 @@ ENTRY(getsp)
 	or	r2, r0, r31
 	jmp	r1
 
+/*
+ * This has to be cleaned - we should not use INT_MASK_LEVEL. Should
+ * use pcc2_int_lvl instead. XXX nivas
+ */
+/*
+ * I don't think we need to explictly enable interrupts. We can always enable
+ * interrupts and depend on the int level and mask in PCC2 to block the
+ * appropriate interrupts for us. If we don't depend on the PCC2 to block ints
+ * for us, we need to explicitly set the IND bit in the PSR for every spln(x)
+ * when x > 0. But for now... Rewrite the whole mess. XXX nivas
+ * This is bogus - it is blocking interrupts for all but 0 XXX nivas
+ */
+
 ENTRY(spln)
 	ldcr	r10,PSR
 	or	r11,r0,r10
+	or	r5,r2,r0
+	bb1	PSR_INTERRUPT_DISABLE_BIT,r10,1f
 	set	r10,r10,1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r10,PSR
+        FLUSH_PIPELINE
+    1:
 	or.u	r3,r0,hi16(INT_MASK_LEVEL)
-	or	r4,r3,lo16(INT_MASK_LEVEL)
-	xmem.bu	r2,r4,r0
+	or	r3,r3,lo16(INT_MASK_LEVEL)
+	xmem.bu	r2,r3,r0
+	bcnd	ne0, r5, 2f
+	clr	r11, r11, 1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r11,PSR
         FLUSH_PIPELINE
+    2:
 	jmp	r1
 
+ENTRY(getipl)
 ENTRY(spl)
 	ldcr	r10,PSR
 	or	r11,r0,r10
+	bb1	PSR_INTERRUPT_DISABLE_BIT, r10, 1f
 	set	r10,r10,1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r10,PSR
+        FLUSH_PIPELINE
+      1:
 	or.u	r3,r0,hi16(INT_MASK_LEVEL)
 	ld.b	r2,r3,lo16(INT_MASK_LEVEL)
 	stcr	r11,PSR
         FLUSH_PIPELINE
 	jmp	r1
+
+/*
+ *	Set the interrupt mask to the value passed in, returning the
+ *	the current mask level. This routine does not enable/disable
+ *	interrupts explicitly. It is assumed that the callers know what
+ *	to do with interrupts.
+ */
+ 
+ENTRY(setipl)
+	ldcr	r10,PSR
+	or	r11,r0,r10
+	bb1	PSR_INTERRUPT_DISABLE_BIT, r10, 1f
+	set	r10,r10,1<PSR_INTERRUPT_DISABLE_BIT>
+	stcr	r10,PSR 			/* disable ints, if needed */
+        FLUSH_PIPELINE
+     1:
+	/* get the current mask value */
+	or.u	r3,r0,hi16(INT_MASK_LEVEL)
+	or	r3,r3,lo16(INT_MASK_LEVEL)
+	xmem.bu	r2,r3,r0			/* xchng the new mask value */
+        FLUSH_PIPELINE
+	stcr	r11,PSR				/* restore psr */
+        FLUSH_PIPELINE
+	jmp	r1				/* and return the old value */
 
 /*
  *       invalidate_pte(pte)
@@ -1598,20 +1637,47 @@ ENTRY(invalidate_pte)
 ENTRY(db_spln)
 	ldcr	r10,PSR
 	or	r11,r0,r10
+	or	r5,r2,r0
+	bb1	PSR_INTERRUPT_DISABLE_BIT,r10,1f
 	set	r10,r10,1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r10,PSR
+        FLUSH_PIPELINE
+    1:
 	or.u	r3,r0,hi16(INT_MASK_LEVEL)
-	or	r4,r3,lo16(INT_MASK_LEVEL)
-	xmem.bu	r2,r4,r0
+	or	r3,r3,lo16(INT_MASK_LEVEL)
+	xmem.bu	r2,r3,r0
+	bcnd	ne0, r5, 2f
+	clr	r11, r11, 1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r11,PSR
         FLUSH_PIPELINE
+    2:
 	jmp	r1
 
+ENTRY(db_setipl)
+	ldcr	r10,PSR
+	or	r11,r0,r10
+	bb1	PSR_INTERRUPT_DISABLE_BIT, r10, 1f
+	set	r10,r10,1<PSR_INTERRUPT_DISABLE_BIT>
+	stcr	r10,PSR 			/* disable ints, if needed */
+        FLUSH_PIPELINE
+     1:
+	/* get the current mask value */
+	or.u	r3,r0,hi16(INT_MASK_LEVEL)
+	or	r3,r3,lo16(INT_MASK_LEVEL)
+	xmem.bu	r2,r3,r0			/* xchng the new mask value */
+        FLUSH_PIPELINE
+	stcr	r11,PSR				/* restore psr */
+        FLUSH_PIPELINE
+	jmp	r1				/* and return the old value */
+
+ENTRY(db_getipl)
 ENTRY(db_spl)
 	ldcr	r10,PSR
 	or	r11,r0,r10
+	bb1	PSR_INTERRUPT_DISABLE_BIT, r10, 1f
 	set	r10,r10,1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r10,PSR
+      1:
 	or.u	r3,r0,hi16(INT_MASK_LEVEL)
 	ld.b	r2,r3,lo16(INT_MASK_LEVEL)
 	stcr	r11,PSR
@@ -1626,43 +1692,46 @@ ENTRY(db_flush_pipeline)
 ENTRY(read_processor_identification_register)
      	jmp.n	r1
 	ldcr	r2, PID
-	
-#if 0
-/*
- *	call rom abort (called when non-maskable interrupt detected)
- */
-ENTRY(call_rom_abort)
-	tcnd	eq0, r0, EVN_ROM_ABORT	/* trap to ROM */
-	jmp	r1			/* and return */
 
-#endif /* 0 */
-;------------------------------------------------------------------------
+ENTRY(safe_byte_access)
+	ld.b	 r9,r0,r2
+	tb1	 0,r0,0
+	br	 @L1
+	or	r0,r0,r0
+@L1:
+	st.b	 r9,r0,r3
+	jmp	r1
 
-#ifdef JUNK
-/* JEFF_DEBUG stuff */
-	align 8
-raw_xpr_stack_top:
-	zero 0x40
-raw_xpr_inital_stack_frame:
-	zero 0x60
-raw_xpr_stack_bottom:
+ENTRY(guarded_access)
+ENTRY(guarded_access_start)
+	cmp	 r9,r3,4
+	bb1	 eq,r9,@L145
+	cmp	 r9,r3,2
+	bb1	 eq,r9,@L144
+	cmp	 r9,r3,1
+	bb1	 eq,r9,@L143
+	br	 _guarded_access_bad
+@L143:
+	ld.b	 r9,r0,r2
+	tb1	0, r0, 0
+	st.b	 r9,r0,r4
+	br	 @L142
+@L144:
+	ld.h	 r9,r0,r2
+	tb1	0, r0, 0
+	st.h	 r9,r0,r4
+	br	 @L142
+@L145:
+	ld	 r9,r0,r2
+	tb1	0, r0, 0
+	st	 r9,r0,r4
+	br	 @L142
 
-user_raw_xpr: global user_raw_xpr
-	ldcr	r5, cr17
-	ld	r5, r5, THREAD_TASK
-	/* get a stack ... can use r9 no problem */
-	or.u	r9, r0, hi16(raw_xpr_inital_stack_frame)
-	or	r9, r9, lo16(raw_xpr_inital_stack_frame)
-	st	r31, r9, 0x38
-	st	r1, r9, 0x3c
-	or	r31, r9, r0
-	bsr	__raw_xpr
-	ld	r1, r31, 0x3c
-	ld	r31, r31, 0x38
-	rte
-;--------------------------------------------------------------
-_raw_xpr: global _raw_xpr
-	or.u	r5, r0, hi16(_kernel_task)
-	ld	r5, r5, lo16(_kernel_task)
-	br	__raw_xpr
-#endif /* JUNK */
+ENTRY(guarded_access_bad)
+	jmp.n	 r1
+	or	 r2,r0,14
+@L142:
+
+ENTRY(guarded_access_end)
+	jmp.n	 r1
+	or	 r2,r0,0

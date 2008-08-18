@@ -1,5 +1,5 @@
-/*	$OpenBSD: if_ed.c,v 1.8 1996/10/04 15:11:40 niklas Exp $	*/
-/*	$NetBSD: if_ed.c,v 1.21 1996/05/07 00:46:41 thorpej Exp $	*/
+/*	$OpenBSD: if_ed.c,v 1.10 1997/02/21 11:08:48 niklas Exp $	*/
+/*	$NetBSD: if_ed.c,v 1.24 1996/12/23 09:10:16 veego Exp $	*/
 
 /*
  * Device driver for National Semiconductor DS8390/WD83C690 based ethernet
@@ -13,7 +13,7 @@
  * the author responsible for the proper functioning of this software, nor does
  * the author assume any responsibility for damages incurred with its use.
  *
- * Currently supports the Hydra Systems ethernet card.
+ * Currently supports the Hydra Systems and ASDG ethernet cards.
  */
 
 #include "bpfilter.h"
@@ -38,6 +38,11 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#endif
+
+#ifdef NS
+#include <netns/ns.h>
+#include <netns/ns_if.h>
 #endif
 
 #if NBPFILTER > 0
@@ -103,7 +108,7 @@ void ed_stop __P((struct ed_softc *));
 void ed_getmcaf __P((struct arpcom *, u_long *));
 u_short ed_put __P((struct ed_softc *, struct mbuf *, caddr_t));
 
-#define inline	/* XXX for debugging porpoises */
+#define inline	/* XXX for debugging purposes */
 
 void ed_get_packet __P((struct ed_softc *, caddr_t, u_short));
 static inline void ed_rint __P((struct ed_softc *));
@@ -573,8 +578,9 @@ ed_rint(sc)
 {
 	u_int8_t boundary, current;
 	u_int16_t len;
-	u_int16_t count;
 	u_int8_t nlen;
+	u_int8_t next_packet;		/* pointer to next packet */
+	u_int16_t count;		/* bytes in packet (length + 4) */
 	u_int8_t packet_hdr[ED_RING_HDRSZ];
 	caddr_t packet_ptr;
 
@@ -607,6 +613,7 @@ loop:
 		 * the NIC.
 		 */
 		bcopy(packet_ptr, packet_hdr, ED_RING_HDRSZ);
+		next_packet = packet_hdr[ED_RING_NEXT_PACKET];
 		len = count =  packet_hdr[ED_RING_COUNT] +
 		    256 * packet_hdr[ED_RING_COUNT + 1];
 		/*
@@ -617,13 +624,11 @@ loop:
 		 *
 		 * NOTE: sc->next_packet is pointing at the current packet.
 		 */
-		if (packet_hdr[ED_RING_NEXT_PACKET] >= sc->next_packet)
-			nlen = (packet_hdr[ED_RING_NEXT_PACKET] -
-			    sc->next_packet);
+		if (next_packet >= sc->next_packet)
+			nlen = next_packet - sc->next_packet;
 		else
-			nlen = ((packet_hdr[ED_RING_NEXT_PACKET] -
-			    sc->rec_page_start) + (sc->rec_page_stop -
-			    sc->next_packet));
+			nlen = next_packet - sc->rec_page_start +
+			    sc->rec_page_stop - sc->next_packet;
 		--nlen;
 		if ((len & ED_PAGE_MASK) + ED_RING_HDRSZ > ED_PAGE_SIZE)
 			--nlen;
@@ -648,13 +653,9 @@ loop:
 		 * important is that we have a length that will fit into one
 		 * mbuf cluster or less; the upper layer protocols can then
 		 * figure out the length from their own length field(s).
-		 *
-		 * MCLBYTES may be less than a valid packet len.  Thus
-		 * we use a constant that is large enough.
 		 */
-		if (len <= 2048 &&
-		    packet_hdr[ED_RING_NEXT_PACKET] >= sc->rec_page_start &&
-		    packet_hdr[ED_RING_NEXT_PACKET] < sc->rec_page_stop) {
+		if (len <= MCLBYTES && next_packet >= sc->rec_page_start &&
+		    next_packet < sc->rec_page_stop) {
 			/* Go get packet. */
 			ed_get_packet(sc, packet_ptr + ED_RING_HDRSZ,
 			    len - ED_RING_HDRSZ);
@@ -670,7 +671,7 @@ loop:
 		}
 
 		/* Update next packet pointer. */
-		sc->next_packet = packet_hdr[ED_RING_NEXT_PACKET];
+		sc->next_packet = next_packet;
 
 		/*
 		 * Update NIC boundary pointer - being careful to keep it one
@@ -885,6 +886,24 @@ ed_ioctl(ifp, command, data)
 			ed_init(sc);
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
+#endif
+#ifdef NS
+		/* XXX - This code is probably wrong. */
+		case AF_NS:
+		    {
+			register struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
+
+			if (ns_nullhost(*ina))
+				ina->x_host =
+				    *(union ns_host *)(sc->sc_arpcom.ac_enaddr);
+			else
+				bcopy(ina->x_host.c_host,
+				    sc->sc_arpcom.ac_enaddr,
+				    sizeof(sc->sc_arpcom.ac_enaddr));
+			/* Set new address. */
+			ed_init(sc);
+			break;
+		    }
 #endif
 		default:
 			ed_init(sc);

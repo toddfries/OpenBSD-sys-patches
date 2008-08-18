@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.3 1996/05/02 13:20:19 deraadt Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.9 1997/01/04 17:10:04 kstailey Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -50,6 +50,7 @@
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/disklabel.h>
+#include <sys/lockf.h>
 
 #include <miscfs/specfs/specdev.h>
 
@@ -707,8 +708,18 @@ int
 spec_advlock(v)
 	void *v;
 {
+	struct vop_advlock_args /* {
+		struct vnodeop_desc *a_desc;
+		struct vnode *a_vp;
+		caddr_t  a_id;
+		int  a_op;
+		struct flock *a_fl;
+		int  a_flags;
+	} */ *ap = v;
+	register struct vnode *vp = ap->a_vp;
 
-	return (EOPNOTSUPP);
+	return (lf_advlock(&vp->v_speclockf, (off_t)0, ap->a_id,
+		ap->a_op, ap->a_fl, ap->a_flags));
 }
 
 /*

@@ -31,7 +31,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)ansi.h	8.2 (Berkeley) 1/4/94
- *      $Id: ansi.h,v 1.1.1.1 1995/10/18 10:54:21 deraadt Exp $
+ *      $Id: ansi.h,v 1.4 1997/04/20 20:46:43 tholo Exp $
  */
 
 #ifndef	_ANSI_H_
@@ -51,7 +51,12 @@
 #define	_BSD_SIZE_T_	unsigned int		/* sizeof() */
 #define	_BSD_SSIZE_T_	int			/* byte count or error */
 #define	_BSD_TIME_T_	long			/* time() */
-#define	_BSD_VA_LIST_	char *			/* va_list */
+#define	_BSD_CLOCKID_T_	int
+#define	_BSD_TIMER_T_	int
+
+#include "va-m88k.h"
+
+#define _BSD_VA_LIST_	__gnuc_va_list
 
 /*
  * Runes (wchar_t) is declared to be an ``int'' instead of the more natural

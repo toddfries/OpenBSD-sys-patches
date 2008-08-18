@@ -63,6 +63,12 @@ bdev_decl(xd);
 #include "vnd.h"
 bdev_decl(vnd);
 
+#ifdef LKM
+int	lkmenodev();
+#else
+#define	lkmenodev	enodev
+#endif
+
 struct bdevsw	bdevsw[] =
 {
 	bdev_notdef(),			/* 0 */
@@ -93,9 +99,7 @@ cdev_decl(cn);
 cdev_decl(ctty);
 #define mmread  mmrw
 #define mmwrite mmrw
-#if notyet
 cdev_decl(mm);
-#endif /* notyet */
 cdev_decl(sw);
 
 #if notyet
@@ -128,9 +132,9 @@ cdev_decl(fd);
 #if notyet
 #include "zs.h"
 cdev_decl(zs);
+#endif /* notyet */
 #include "cl.h"
 cdev_decl(cl);
-#endif /* notyet */
 
 #include "bugtty.h"
 cdev_decl(bugtty);
@@ -161,14 +165,13 @@ cdev_decl(cd);
 cdev_decl(xd);
 cdev_decl(vnd);
 
+dev_decl(filedesc,open);
+
 #include "bpfilter.h"
 cdev_decl(bpf);
 
 #include "tun.h"
 cdev_decl(tun);
-
-#include "random.h"
-cdev_decl(random);
 
 #ifdef LKM
 #define NLKM 1
@@ -182,15 +185,15 @@ struct cdevsw	cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
 	cdev_ctty_init(1,ctty),		/* 1: controlling terminal */
-#if notyet
 	cdev_mm_init(1,mm),		/* 2: /dev/{null,mem,kmem,...} */
-#endif /* notyet */
 	cdev_swap_init(1,sw),		/* 3: /dev/drum (swap pseudo-device) */
 	cdev_tty_init(NPTY,pts),	/* 4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/* 5: pseudo-tty master */
 	cdev_log_init(1,log),		/* 6: /dev/klog */
 #if notyet
 	cdev_mdev_init(NSRAM,sram),	/* 7: /dev/sramX */
+#else /* notyet */
+	cdev_notdef(),			/* 7: /dev/sramX */
 #endif /* notyet */
 	cdev_disk_init(NSD,sd),		/* 8: SCSI disk */
 	cdev_disk_init(NCD,cd),		/* 9: SCSI CD-ROM */
@@ -198,8 +201,12 @@ struct cdevsw	cdevsw[] =
 	cdev_mdev_init(NNVRAM,nvram),	/* 10: /dev/nvramX */
 	cdev_mdev_init(NFLASH,flash),	/* 11: /dev/flashX */
 	cdev_tty_init(NZS,zs),		/* 12: SCC serial (tty[a-d]) */
-	cdev_tty_init(NCL,cl),		/* 13: CL-CD1400 serial (tty0[0-3]) */
+#else
+	cdev_notdef(),			/* 10 */
+	cdev_notdef(),			/* 11 */
+	cdev_notdef(),			/* 12: SCC serial (tty[a-d]) */
 #endif /* notyet */
+	cdev_tty_init(NCL,cl),		/* 13: CL-CD1400 serial (tty0[0-3]) */
 	cdev_tty_init(NBUGTTY,bugtty),	/* 14: BUGtty (ttyB) */
 	cdev_notdef(),			/* 15 */
 	cdev_notdef(),			/* 16 */
@@ -207,23 +214,31 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 18 */
 	cdev_disk_init(NVND,vnd),	/* 19: vnode disk */
 	cdev_tape_init(NST,st),		/* 20: SCSI tape */
-	cdev_fd_init(1,fd),		/* 21: file descriptor pseudo-dev */
+	cdev_fd_init(1,filedesc),	/* 21: file descriptor pseudo-dev */
 	cdev_bpftun_init(NBPFILTER,bpf),/* 22: berkeley packet filter */
 	cdev_bpftun_init(NTUN,tun),	/* 23: network tunnel */
 	cdev_lkm_init(NLKM,lkm),	/* 24: loadable module driver */
 	cdev_notdef(),			/* 25 */
 #if notyet
 	cdev_disk_init(NXD,xd),		/* 26: XD disk */
+#else
+	cdev_notdef(),			/* 26: XD disk */
 #endif /* notyet */
 	cdev_notdef(),			/* 27 */
 #if notyet
 	cdev_lp_init(NLP,lp),		/* 28: lp */
 	cdev_lp_init(NLPTWO,lptwo),	/* 29: lptwo */
+#else
+	cdev_notdef(),			/* 28: lp */
+	cdev_notdef(),			/* 29: lptwo */
 #endif /* notyet */
 	cdev_notdef(),			/* 30 */
 #if notyet
 	cdev_mdev_init(NVMEL,vmel),	/* 31: /dev/vmelX */
 	cdev_mdev_init(NVMES,vmes),	/* 32: /dev/vmesX */
+#else /* notyet */
+	cdev_notdef(),			/* 31: /dev/vmelX */
+	cdev_notdef(),			/* 32: /dev/vmesX */
 #endif /* notyet */
 	cdev_lkm_dummy(),		/* 33 */
 	cdev_lkm_dummy(),		/* 34 */
@@ -231,7 +246,6 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 36 */
 	cdev_lkm_dummy(),		/* 37 */
 	cdev_lkm_dummy(),		/* 38 */
-	cdev_random_init(NRANDOM,random), /* 39: random data source */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -315,6 +329,24 @@ chrtoblk(dev)
 	if (blkmaj == NODEV)
 		return (NODEV);
 	return (makedev(blkmaj, minor(dev)));
+}
+
+/*
+ * Convert a character device number to a block device number.
+ */
+dev_t
+blktochr(dev)
+	dev_t dev;
+{
+	int blkmaj = major(dev);
+	int i;
+
+	if (blkmaj >= nblkdev)
+		return (NODEV);
+	for (i = 0; i < sizeof(chrtoblktbl)/sizeof(chrtoblktbl[0]); i++)
+		if (blkmaj == chrtoblktbl[i])
+			return (makedev(i, minor(dev)));
+	return (NODEV);
 }
 
 /*

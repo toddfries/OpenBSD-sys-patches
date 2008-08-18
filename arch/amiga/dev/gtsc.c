@@ -1,5 +1,5 @@
-/*	$OpenBSD: gtsc.c,v 1.3 1996/05/02 06:44:00 niklas Exp $	*/
-/*	$NetBSD: gtsc.c,v 1.15 1996/04/21 21:11:34 veego Exp $	*/
+/*	$OpenBSD: gtsc.c,v 1.6 1997/01/18 12:26:29 niklas Exp $	*/
+/*	$NetBSD: gtsc.c,v 1.20 1996/12/23 09:10:11 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Christian E. Hopps
@@ -55,7 +55,6 @@
 
 void gtscattach __P((struct device *, struct device *, void *));
 int gtscmatch __P((struct device *, void *, void *));
-int gtscprint __P((void *auxp, char *));
 
 void gtsc_enintr __P((struct sbic_softc *));
 void gtsc_dmastop __P((struct sbic_softc *));
@@ -204,20 +203,7 @@ gtscattach(pdp, dp, auxp)
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, gtscprint);
-}
-
-/*
- * print diag if pnp is NULL else just extra
- */
-int
-gtscprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-	return(QUIET);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
 
 void

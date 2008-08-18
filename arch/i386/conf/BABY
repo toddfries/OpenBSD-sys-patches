@@ -1,22 +1,22 @@
-#	$OpenBSD: BABY,v 1.11 1996/10/04 02:51:10 deraadt Exp $
+#	$OpenBSD: BABY,v 1.17 1997/05/13 18:26:14 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
 option		I386_CPU	# CPU classes; at least one is REQUIRED
 option		I486_CPU
 option		I586_CPU
-option		MATH_EMULATE	# floating point emulation
+option		GPL_MATH_EMULATE	# floating point emulation
 #option		VM86		# Virtual 8086 emulation
 
 # Some BIOSes don't get the size of extended memory right.  If you
 # have a broken BIOS, uncomment the following and set the value
 # properly for your system.
 #option		EXTMEM_SIZE=... # size of extended memory
-#option		BUFCACHEPERCENT=20
+option		BUFCACHEPERCENT=20
 
 #option		DUMMY_NOPS	# speed hack; recommended
-option		XSERVER
-option		INSECURE	# insecure; allow /dev/mem writing for X
+#option		XSERVER
+#option		INSECURE	# insecure; allow /dev/mem writing for X
 
 maxusers	32		# estimated number of users
 option		TIMEZONE=0	# time zone to adjust RTC time by
@@ -52,7 +52,6 @@ option		LKM		# loadable kernel modules
 
 option		FFS		# UFS
 option		QUOTA		# UFS quotas
-option		LFS		# log-structured file system
 option		MFS		# memory file system
 
 option		NFSCLIENT	# Network File System client
@@ -63,21 +62,21 @@ option		MSDOSFS		# MS-DOS file system
 option		FDESC		# /dev/fd
 option		FIFO		# FIFOs; RECOMMENDED
 option		KERNFS		# /kern
-option		NULLFS		# loopback file system
+#option		NULLFS		# loopback file system
 option		PORTAL		# create sockets with open(2)
 option		PROCFS		# /proc
-option		UMAPFS		# NULLFS + uid and gid remapping
-option		UNION		# union file system
+#option		UMAPFS		# NULLFS + uid and gid remapping
+#option		UNION		# union file system
 
 #option		GATEWAY		# packet forwarding
 option		INET		# IP + ICMP + TCP + UDP
 option		NS		# XNS
-option		ISO,TPIP	# OSI
-option		EON		# OSI tunneling over IP
-option		CCITT,LLC,HDLC	# X.25
+#option		ISO,TPIP	# OSI
+#option		EON		# OSI tunneling over IP
+#option		CCITT,LLC,HDLC	# X.25
 option		IPFILTER	# IP packet filter for security
 
-config		bsd	root on sd0 swap on sd0 and sd1 and sd2
+config		bsd	root on sd0 swap on sd0 and sd1 and sd2 and sd3 and sd4
 
 mainbus0 at root
 
@@ -198,3 +197,4 @@ pseudo-device	pty	64		# pseudo-terminals
 pseudo-device	tb	1		# tablet line discipline
 pseudo-device	vnd	4		# paging to files
 pseudo-device	ccd	4		# concatenated disk devices
+pseudo-device	rd	2		# ramdisk (don't remove ;)

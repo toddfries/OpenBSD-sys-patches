@@ -1,5 +1,5 @@
-/*	$OpenBSD: z8530tty.c,v 1.3 1996/09/02 15:50:35 briggs Exp $	*/
-/*	$NetBSD: z8530tty.c,v 1.3 1996/06/01 00:13:41 scottr Exp $	*/
+/*	$OpenBSD: z8530tty.c,v 1.9 1997/03/12 22:51:42 briggs Exp $	*/
+/*	$NetBSD: z8530tty.c,v 1.10 1996/12/18 05:17:44 scottr Exp $	*/
 
 /*
  * Copyright (c) 1994 Gordon W. Ross
@@ -117,11 +117,12 @@ static int	zsgetbaud __P((register struct zs_chanstate *,
  * zstty_match: how is this zs channel configured?
  */
 int 
-zstty_match(parent, match, aux)
+zstty_match(parent, vcf, aux)
 	struct device *parent;
-	void   *match, *aux;
+	void *vcf;
+	void *aux;
 {
-	struct cfdata *cf = match;
+	struct cfdata *cf = (struct cfdata *) vcf;
 	struct zsc_attach_args *args = aux;
 
 	/* Exact match is better than wildcard. */
@@ -615,13 +616,14 @@ zsstart(tp)
 		selwakeup(&tp->t_wsel);
 	}
 
+	(void) splzs();
+
 	nch = ndqb(&tp->t_outq, 0);	/* XXX */
 	if (nch) {
 		register char *p = tp->t_outq.c_cf;
 
 		/* mark busy, enable tx done interrupts, & send first byte */
 		tp->t_state |= TS_BUSY;
-		(void) splzs();
 
 		cs->cs_preg[1] |= ZSWR1_TIE;
 		cs->cs_creg[1] = cs->cs_preg[1];
@@ -634,7 +636,6 @@ zsstart(tp)
 		 * Nothing to send, turn off transmit done interrupts.
 		 * This is useful if something is doing polled output.
 		 */
-		(void) splzs();
 		cs->cs_preg[1] &= ~ZSWR1_TIE;
 		cs->cs_creg[1] = cs->cs_preg[1];
 		zs_write_reg(cs, 1, cs->cs_creg[1]);
@@ -669,7 +670,7 @@ zsstop(tp, flag)
 			tp->t_state |= TS_FLUSH;
 	}
 	splx(s);
-	return (0);
+	return(0);
 }
 
 #ifndef ZS_TOLERANCE
@@ -699,6 +700,8 @@ zsgetbaud(cs, rate, tc, rr4, rr11, rr14, source, sourceflag)
 
 	s = -1;		/* no valid source yet */
 	tol = ZS_TOLERANCE;
+
+	sf = 0; tc0 = 0; rate0 = 0;	/* XXX Kill gcc warning */
 
 	/*
 	 * Step through all the sources and see which one matches
@@ -1238,8 +1241,7 @@ zstty_stint(cs)
 	 * Check here for console break, so that we can abort
 	 * even when interrupts are locking up the machine.
 	 */
-	if ((rr0 & ZSRR0_BREAK) &&
-		(zst->zst_hwflags & ZS_HWFLAG_CONABRT))
+	if ((rr0 & ZSRR0_BREAK))
 	{
 		zs_abort(zst);
 		return;
@@ -1258,7 +1260,8 @@ zstty_stint(cs)
 		zst->zst_tx_stopped = 1;
 	}
 
-	cs->cs_rr0_new = rr0;
+	cs->cs_rr0_changes |= cs->cs_rr0 ^ rr0;
+	cs->cs_rr0 = rr0;
 	zst->zst_st_check = 1;
 
 	/* Ask for softint() call. */
@@ -1380,9 +1383,9 @@ zstty_softint(cs)
 	if (zst->zst_st_check) {
 		zst->zst_st_check = 0;
 
-		rr0 = cs->cs_rr0_new;
-		delta = rr0 ^ cs->cs_rr0;
-		cs->cs_rr0 = rr0;
+		rr0 = cs->cs_rr0;
+		delta = cs->cs_rr0_changes;
+		cs->cs_rr0_changes = 0;
 		if ((delta & ZSRR0_DCD) &&
 		    ~(zst->zst_hwflags & ZS_HWFLAG_IGDCD)) {
 			c = ((rr0 & ZSRR0_DCD) != 0);

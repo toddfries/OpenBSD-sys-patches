@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.14 1996/08/30 00:11:26 downsj Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.28 1997/04/14 04:09:14 downsj Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -96,7 +96,32 @@ struct cfdriver scsibus_cd = {
 	NULL, "scsibus", DV_DULL
 };
 
-int scsibusprint __P((void *, char *));
+int scsidebug_targets = SCSIDEBUG_TARGETS;
+int scsidebug_luns = SCSIDEBUG_LUNS;
+int scsidebug_level = SCSIDEBUG_LEVEL;
+
+int scsibusprint __P((void *, const char *));
+
+int
+scsiprint(aux, pnp)
+	void *aux;
+	const char *pnp;
+{
+#ifndef __OpenBSD__
+	struct scsi_link *l = aux;
+#endif
+
+	/* only "scsibus"es can attach to "scsi"s; easy. */
+	if (pnp)
+		printf("scsibus at %s", pnp);
+
+#ifndef __OpenBSD__
+	/* don't print channel if the controller says there can be only one. */
+	if (l->channel != SCSI_CHANNEL_ONLY_ONE)
+		printf(" channel %d", l->channel);
+#endif
+	return (UNCONF);
+}
 
 int
 scsibusmatch(parent, match, aux)
@@ -118,10 +143,28 @@ scsibusattach(parent, self, aux)
 {
 	struct scsibus_softc *sb = (struct scsibus_softc *)self;
 	struct scsi_link *sc_link_proto = aux;
+	int nbytes, i;
 
 	sc_link_proto->scsibus = sb->sc_dev.dv_unit;
 	sb->adapter_link = sc_link_proto;
-	printf("\n");
+	if (sb->adapter_link->adapter_buswidth == 0)
+		sb->adapter_link->adapter_buswidth = 8;
+	sb->sc_buswidth = sb->adapter_link->adapter_buswidth;
+
+	printf(": %d targets\n", sb->sc_buswidth);
+
+	nbytes = sb->sc_buswidth * sizeof(struct scsi_link **);
+	sb->sc_link = (struct scsi_link ***)malloc(nbytes, M_DEVBUF, M_NOWAIT);
+	if (sb->sc_link == NULL)
+		panic("scsibusattach: can't allocate target links");
+	nbytes = 8 * sizeof(struct scsi_link *);
+	for (i = 0; i < sb->sc_buswidth; i++) {
+		sb->sc_link[i] = (struct scsi_link **)malloc(nbytes,
+		    M_DEVBUF, M_NOWAIT);
+		if (sb->sc_link[i] == NULL)
+			panic("scsibusattach: can't allocate lun links");
+		bzero(sb->sc_link[i], nbytes);
+	}
 
 #if defined(SCSI_DELAY) && SCSI_DELAY > 2
 	printf("%s: waiting for scsi devices to settle\n",
@@ -192,10 +235,11 @@ scsi_probe_bus(bus, target, lun)
 	scsi_addr = scsi->adapter_link->adapter_target;
 
 	if (target == -1) {
-		maxtarget = 7;
+		maxtarget = scsi->adapter_link->adapter_buswidth - 1;
 		mintarget = 0;
 	} else {
-		if (target < 0 || target > 7)
+		if (target < 0 ||
+		    target >= scsi->adapter_link->adapter_buswidth)
 			return EINVAL;
 		maxtarget = mintarget = target;
 	}
@@ -275,7 +319,9 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_CDROM, T_REMOV,
 	 "IMS     ", "CDD521/10       ", "2.06"}, SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
-	 "MEDIAVIS", "CDR-H93MV       ", "1.31"}, SDEV_NOLUNS},
+	 "MATSHITA", "CD-ROM CR-5XX   ", "1.0b"}, SDEV_NOLUNS},
+	{{T_CDROM, T_REMOV,
+	 "MEDIAVIS", "CDR-H93MV       ", "1.3"}, SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
 	 "NEC     ", "CD-ROM DRIVE:55 ", ""},     SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
@@ -287,6 +333,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_CDROM, T_REMOV,
 	 "NEC     ", "CD-ROM DRIVE:841", ""},     SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
+	 "PIONEER ", "CD-ROM DR-124X  ", "1.01"}, SDEV_NOLUNS},
+	{{T_CDROM, T_REMOV,
 	 "SONY    ", "CD-ROM CDU-541  ", ""},     SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
 	 "SONY    ", "CD-ROM CDU-55S  ", ""},     SDEV_NOLUNS},
@@ -297,20 +345,29 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_CDROM, T_REMOV,
 	 "TEAC    ", "CD-ROM          ", "1.06"}, SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
+	 "TEAC    ", "CD-ROM CD-56S   ", "1.0B"}, SDEV_NOLUNS},
+	{{T_CDROM, T_REMOV,
 	 "TEXEL   ", "CD-ROM          ", "1.06"}, SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
 	 "TEXEL   ", "CD-ROM DM-XX24 K", "1.10"}, SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,  
 	 "ShinaKen", "CD-ROM DM-3x1S", "1.04"}, SDEV_NOLUNS},  
 
-
 	{{T_OPTICAL, T_REMOV,
 	 "EPSON   ", "OMD-5010        ", "3.08"}, SDEV_NOLUNS},
+	{{T_OPTICAL, T_REMOV,
+	 "FUJITSU", "M2513A",            "0800"}, SDEV_NOMODESENSE},
+	{{T_OPTICAL, T_REMOV,
+	 "DELTIS  ", "MOS321          ", "3.30"}, SDEV_NOMODESENSE},
 
 	{{T_DIRECT, T_FIXED,
 	 "DEC     ", "RZ55     (C) DEC", ""},     SDEV_AUTOSAVE},
 	{{T_DIRECT, T_FIXED,
-	 "EMULEX  ", "MD21/S2     ESDI", "A00"},  SDEV_FORCELUNS},
+	 "EMULEX  ", "MD21/S2     ESDI", "A00"},  SDEV_FORCELUNS|SDEV_AUTOSAVE},
+	{{T_DIRECT, T_FIXED,
+	 "IBMRAID ", "0662S",            ""},     SDEV_AUTOSAVE},
+	{{T_DIRECT, T_FIXED,
+	 "IBM     ", "0663H",            ""},     SDEV_AUTOSAVE},
 	{{T_DIRECT, T_FIXED,
 	 "MAXTOR  ", "XT-3280         ", ""},     SDEV_NOLUNS},
 	{{T_DIRECT, T_FIXED,
@@ -342,6 +399,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_DIRECT, T_FIXED,
 	 "RODIME  ", "RO3000S         ", ""},     SDEV_NOLUNS},
 	{{T_DIRECT, T_FIXED,
+	 "SEAGATE ", "ST125N          ", ""},     SDEV_NOLUNS},
+	{{T_DIRECT, T_FIXED,
 	 "SEAGATE ", "ST157N          ", ""},     SDEV_NOLUNS},
 	{{T_DIRECT, T_FIXED,
 	 "SEAGATE ", "ST296           ", ""},     SDEV_NOLUNS},
@@ -355,13 +414,19 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	 "IOMEGA", "ZIP 100",		 ""},	  SDEV_NOMODESENSE},
 	{{T_DIRECT, T_FIXED,
 	 "IBM", "0661467",               "G"},    SDEV_NOMODESENSE},
-
+	/* Letting the motor run kills floppy drives and disks quit fast. */
+	{{T_DIRECT, T_REMOV,
+	 "TEAC", "FC-1",                 ""},     SDEV_NOSTARTUNIT},
 
 	/* XXX: QIC-36 tape behind Emulex adapter.  Very broken. */
 	{{T_SEQUENTIAL, T_REMOV,
 	 "        ", "                ", "    "}, SDEV_NOLUNS},
 	{{T_SEQUENTIAL, T_REMOV,
 	 "CALIPER ", "CP150           ", ""},     SDEV_NOLUNS},
+	{{T_SEQUENTIAL, T_REMOV,
+	 "DEC     ", "TZ30            ", ""},     SDEV_NOLUNS},
+	{{T_SEQUENTIAL, T_REMOV,
+	 "DEC     ", "TK50            ", ""},     SDEV_NOLUNS},
 	{{T_SEQUENTIAL, T_REMOV,
 	 "EXABYTE ", "EXB-8200        ", ""},     SDEV_NOLUNS},
 	{{T_SEQUENTIAL, T_REMOV,
@@ -385,6 +450,11 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	 "WangDAT ", "Model 2600      ", "01.7"}, SDEV_NOSYNCWIDE},
 	{{T_SEQUENTIAL, T_REMOV,
 	 "WangDAT ", "Model 3200      ", "02.2"}, SDEV_NOSYNCWIDE},
+
+	{{T_SCANNER, T_FIXED,
+	 "ULTIMA  ", "AT3     1.60    ", ""},     SDEV_NOLUNS},
+	{{T_SCANNER, T_FIXED,
+	 "UMAX    ", "SuperVista S-12 ", "V1.9"}, SDEV_NOLUNS},
 };
 
 /*
@@ -399,8 +469,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
  */
 int
 scsibusprint(aux, pnp)
-	void *aux;
-	char *pnp;
+	void       *aux;
+	const char *pnp;
 {
 	struct scsibus_attach_args *sa = aux;
 	struct scsi_inquiry_data *inqbuf;
@@ -527,8 +597,9 @@ scsi_probedev(scsi, target, lun)
 	 * Ask the device what it is
 	 */
 #ifdef SCSIDEBUG
-	if (target == DEBUGTARGET && lun == DEBUGLUN)
-		sc_link->flags |= DEBUGLEVEL;
+	if (((1 << target) & scsidebug_targets) &&
+	    ((1 << lun) & scsidebug_luns))
+		sc_link->flags |= scsidebug_level;
 #endif /* SCSIDEBUG */
 
 	(void) scsi_test_unit_ready(sc_link,
@@ -551,6 +622,15 @@ scsi_probedev(scsi, target, lun)
 			inqbuf.unused[len++] = '\0';
 		while (len < 3 + 28)
 			inqbuf.unused[len++] = ' ';
+		if (inqbuf.additional_length == 0) {
+			if (inqbuf.dev_qual2 == 0xb0) {
+				strncpy(inqbuf.unused+3, "DEC", 3);
+				strncpy(inqbuf.unused+11, "TZ30", 4);
+			} else if (inqbuf.dev_qual2 == 0xd0) {
+				strncpy(inqbuf.unused+3, "DEC", 3);
+				strncpy(inqbuf.unused+11, "TK50", 4);
+			}
+		}
 	}
 
 	finger = (struct scsi_quirk_inquiry_pattern *)scsi_inqmatch(&inqbuf,
@@ -562,6 +642,7 @@ scsi_probedev(scsi, target, lun)
 	if ((inqbuf.version & SID_ANSII) == 0 &&
 	    (sc_link->quirks & SDEV_FORCELUNS) == 0)
 		sc_link->quirks |= SDEV_NOLUNS;
+	sc_link->scsi_version = inqbuf.version;
 
 	if ((sc_link->quirks & SDEV_NOLUNS) == 0)
 		scsi->moreluns |= (1 << target);

@@ -1,5 +1,5 @@
-/*	$OpenBSD: bootp.c,v 1.3 1996/09/27 07:44:41 mickey Exp $	*/
-/*	$NetBSD: bootp.c,v 1.7 1995/09/18 21:19:20 pk Exp $	*/
+/*	$OpenBSD: bootp.c,v 1.6 1996/12/08 15:15:46 niklas Exp $	*/
+/*	$NetBSD: bootp.c,v 1.10 1996/10/13 02:28:59 christos Exp $	*/
 
 /*
  * Copyright (c) 1992 Regents of the University of California.
@@ -43,8 +43,6 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-
-#include <string.h>
 
 #include "stand.h"
 #include "net.h"
@@ -175,7 +173,7 @@ bootprecv(d, pkt, len, tleft)
 	if (bp->bp_xid != htonl(d->xid)) {
 #ifdef BOOTP_DEBUG
 		if (debug) {
-			printf("bootprecv: expected xid 0x%x, got 0x%x\n",
+			printf("bootprecv: expected xid 0x%lx, got 0x%lx\n",
 			    d->xid, ntohl(bp->bp_xid));
 		}
 #endif
@@ -305,7 +303,7 @@ vend_rfc1048(cp, len)
 	ep = cp + len;
 
 	/* Step over magic cookie */
-	cp += sizeof(long);
+	cp += sizeof(int);
 
 	while (cp < ep) {
 		tag = *cp++;

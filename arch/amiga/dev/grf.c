@@ -1,5 +1,5 @@
-/*	$OpenBSD: grf.c,v 1.5 1996/05/29 10:14:54 niklas Exp $	*/
-/*	$NetBSD: grf.c,v 1.27 1996/05/19 20:06:20 is Exp $	*/
+/*	$OpenBSD: grf.c,v 1.8 1997/01/16 09:24:07 niklas Exp $	*/
+/*	$NetBSD: grf.c,v 1.32 1996/12/23 09:10:01 veego Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -96,7 +96,7 @@ int grfbanked_set __P((dev_t, int));
 
 void grfattach __P((struct device *, struct device *, void *));
 int grfmatch __P((struct device *, void *, void *));
-int grfprint __P((void *, char *));
+int grfprint __P((void *, const char *));
 /*
  * pointers to grf drivers device structs 
  */
@@ -113,7 +113,7 @@ struct cfdriver grf_cd = {
 /*
  * only used in console init.
  */
-static struct cfdata *cfdata;
+static struct cfdata *grf_cfdata;
 
 /*
  * match if the unit of grf matches its perspective 
@@ -128,7 +128,7 @@ grfmatch(pdp, match, auxp)
 
 	if (cfp->cf_unit != ((struct grf_softc *)pdp)->g_unit)
 		return(0);
-	cfdata = cfp;
+	grf_cfdata = cfp;
 	return(1);
 }
 
@@ -168,13 +168,13 @@ grfattach(pdp, dp, auxp)
 	/*
 	 * try and attach an ite
 	 */
-	amiga_config_found(cfdata, dp, gp, grfprint);
+	amiga_config_found(grf_cfdata, dp, gp, grfprint);
 }
 
 int
 grfprint(auxp, pnp)
 	void *auxp;
-	char *pnp;
+	const char *pnp;
 {
 	if (pnp)
 		printf("ite at %s", pnp);

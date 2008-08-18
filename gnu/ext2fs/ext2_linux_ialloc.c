@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2_linux_ialloc.c,v 1.2 1996/07/13 21:21:16 downsj Exp $	*/
+/*	$OpenBSD: ext2_linux_ialloc.c,v 1.4 1996/11/11 08:36:34 downsj Exp $	*/
 
 /*
  *  modified for Lites 1.1
@@ -32,6 +32,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
+#include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
@@ -57,6 +58,16 @@ void mark_buffer_dirty(struct buf *bh)
 {
 	bh->b_flags |= B_DELWRI;
 	bh->b_flags &= ~(B_READ | B_ERROR);
+
+	/*
+	 * Add the block the dirty list.
+	 */
+	TAILQ_INSERT_TAIL(&bdirties, bh, b_synclist);
+	bh->b_synctime = time.tv_sec + 30;
+	if (bdirties.tqh_first == bh) {
+		untimeout((void (*)__P((void *)))wakeup, &bdirties);
+		timeout((void (*)__P((void *)))wakeup, &bdirties, 30 * hz);
+	}
 } 
 
 /* 
@@ -64,6 +75,12 @@ void mark_buffer_dirty(struct buf *bh)
  */
 int ll_w_block(struct buf * bp, int waitfor)
 {
+	/*
+	 * Remove the block from the dirty list.
+	 */
+	if (bp->b_flags & B_DELWRI)
+		TAILQ_REMOVE(&bdirties, bp, b_synclist);
+
 	bp->b_flags &= ~(B_READ|B_DONE|B_ERROR|B_DELWRI);
 	bp->b_flags |= B_WRITEINPROG;
 	bp->b_vp->v_numoutput++;
@@ -110,10 +127,11 @@ static void read_inode_bitmap (struct mount * mp,
 	int	error;
 
 	gdp = get_group_desc (mp, block_group, NULL);
-	if (error = bread (VFSTOUFS(mp)->um_devvp, 
+	error = bread (VFSTOUFS(mp)->um_devvp, 
 			    fsbtodb(sb, gdp->bg_inode_bitmap), 
 			    sb->s_blocksize,
-			    NOCRED, &bh))
+			    NOCRED, &bh);
+	if (error != 0)
 		panic ( "read_inode_bitmap:"
 			    "Cannot read inode bitmap - "
 			    "block_group = %lu, inode_bitmap = %lu",
@@ -448,6 +466,7 @@ repeat:
 	return j;
 }
 
+#if 0
 static unsigned long ext2_count_free_inodes (struct mount * mp)
 {
 #ifdef EXT2FS_DEBUG
@@ -481,6 +500,7 @@ static unsigned long ext2_count_free_inodes (struct mount * mp)
 	return VFSTOUFS(mp)->um_e2fsb->s_free_inodes_count;
 #endif
 }
+#endif
 
 #ifdef LATER
 void ext2_check_inodes_bitmap (struct mount * mp)

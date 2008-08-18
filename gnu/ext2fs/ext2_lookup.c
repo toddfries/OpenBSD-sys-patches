@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2_lookup.c,v 1.2 1996/07/15 03:39:29 downsj Exp $	*/
+/*	$OpenBSD: ext2_lookup.c,v 1.5 1996/11/06 17:05:54 downsj Exp $	*/
 
 /*
  *  modified for Lites 1.1
@@ -106,6 +106,9 @@ ext2_dirconv2ffs( e2dir, ffsdir)
 		de.d_reclen += 4;
 
 	de.d_type = DT_UNKNOWN;		/* don't know more here */
+	if (de.d_name == NULL) panic("ext2: de.d_name\n");
+	if (e2dir->name == NULL) panic("ext2: e2dir->name\n");
+	if (e2dir->name_len > 500) panic("ext2: e2dir->name_len\n");
 	strncpy(de.d_name, e2dir->name, e2dir->name_len);
 	de.d_name[de.d_namlen] = '\0';
 	/* Godmar thinks: since e2dir->rec_len can be big and means 
@@ -282,7 +285,7 @@ ext2_lookup(v)
 	 */
 	if ((dp->i_mode & IFMT) != IFDIR)
 		return (ENOTDIR);
-	if (error = VOP_ACCESS(vdp, VEXEC, cred, cnp->cn_proc))
+	if ((error = VOP_ACCESS(vdp, VEXEC, cred, cnp->cn_proc)) != 0)
 		return (error);
 
 	/*
@@ -292,7 +295,7 @@ ext2_lookup(v)
 	 * check the name cache to see if the directory/name pair
 	 * we are looking for is known already.
 	 */
-	if (error = cache_lookup(vdp, vpp, cnp)) {
+	if ((error = cache_lookup(vdp, vpp, cnp)) != 0) {
 		int vpid;	/* capability number of vnode */
 
 		if (error == ENOENT)
@@ -330,7 +333,7 @@ ext2_lookup(v)
 			if (lockparent && pdp != vdp && (flags & ISLASTCN))
 				VOP_UNLOCK(pdp);
 		}
-		if (error = VOP_LOCK(pdp))
+		if ((error = VOP_LOCK(pdp)) != 0)
 			return (error);
 		vdp = pdp;
 		dp = VTOI(pdp);
@@ -393,8 +396,8 @@ searchloop:
 		if ((dp->i_offset & bmask) == 0) {
 			if (bp != NULL)
 				brelse(bp);
-			if (error =
-			    VOP_BLKATOFF(vdp, (off_t)dp->i_offset, NULL, &bp))
+			error = VOP_BLKATOFF(vdp, (off_t)dp->i_offset, NULL, &bp);
+			if (error != 0)
 				return (error);
 			entryoffsetinblock = 0;
 		}
@@ -504,7 +507,7 @@ searchloop:
 		 * Access for write is interpreted as allowing
 		 * creation of files in the directory.
 		 */
-		if (error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc))
+		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0)
 			return (error);
 		/*
 		 * Return an indication of where the new directory
@@ -587,7 +590,7 @@ found:
 		/*
 		 * Write access to directory required to delete files.
 		 */
-		if (error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc))
+		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0)
 			return (error);
 		/*
 		 * Return pointer to current entry in dp->i_offset,
@@ -604,7 +607,7 @@ found:
 			*vpp = vdp;
 			return (0);
 		}
-		if (error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp))
+		if ((error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp)) != 0)
 			return (error);
 		/*
 		 * If directory is "sticky", then user must own
@@ -633,7 +636,7 @@ found:
 	 */
 	if (nameiop == RENAME && wantparent &&
 	    (flags & ISLASTCN)) {
-		if (error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc))
+		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0)
 			return (error);
 		/*
 		 * Careful about locking second inode.
@@ -641,7 +644,7 @@ found:
 		 */
 		if (dp->i_number == dp->i_ino)
 			return (EISDIR);
-		if (error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp))
+		if ((error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp)) != 0)
 			return (error);
 		*vpp = tdp;
 		cnp->cn_flags |= SAVENAME;
@@ -672,12 +675,12 @@ found:
 	pdp = vdp;
 	if (flags & ISDOTDOT) {
 		VOP_UNLOCK(pdp);	/* race to get the inode */
-		if (error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp)) {
+		if ((error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp)) != 0) {
 			VOP_LOCK(pdp);
 			return (error);
 		}
 		if (lockparent && (flags & ISLASTCN) &&
-		    (error = VOP_LOCK(pdp))) {
+		    (error = VOP_LOCK(pdp)) != 0) {
 			vput(tdp);
 			return (error);
 		}
@@ -686,7 +689,7 @@ found:
 		VREF(vdp);	/* we want ourself, ie "." */
 		*vpp = vdp;
 	} else {
-		if (error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp))
+		if ((error = VFS_VGET(vdp->v_mount, dp->i_ino, &tdp)) != 0)
 			return (error);
 		if (!lockparent || !(flags & ISLASTCN))
 			VOP_UNLOCK(pdp);
@@ -830,7 +833,7 @@ ext2_direnter(ip, dvp, cnp)
 	/*
 	 * Get the block containing the space for the new directory entry.
 	 */
-	if (error = VOP_BLKATOFF(dvp, (off_t)dp->i_offset, &dirbuf, &bp))
+	if ((error = VOP_BLKATOFF(dvp, (off_t)dp->i_offset, &dirbuf, &bp)) != 0)
 		return (error);
 	/*
 	 * Find space for the new entry. In the simple case, the entry at
@@ -852,7 +855,7 @@ ext2_direnter(ip, dvp, cnp)
 			/* overwrite; nothing there; header is ours */
 			spacefree += dsize;
 		}
-		dsize = EXT2_DIR_REC_LEN(ep->name_len);
+		dsize = EXT2_DIR_REC_LEN(nep->name_len);
 		spacefree += nep->rec_len - dsize;
 		loc += nep->rec_len;
 		bcopy((caddr_t)nep, (caddr_t)ep, dsize);
@@ -908,8 +911,8 @@ ext2_dirremove(dvp, cnp)
 		/*
 		 * First entry in block: set d_ino to zero.
 		 */
-		if (error =
-		    VOP_BLKATOFF(dvp, (off_t)dp->i_offset, (char **)&ep, &bp))
+		error = VOP_BLKATOFF(dvp, (off_t)dp->i_offset, (char **)&ep, &bp);
+		if (error != 0)
 			return (error);
 		ep->inode = 0;
 		error = VOP_BWRITE(bp);
@@ -919,8 +922,9 @@ ext2_dirremove(dvp, cnp)
 	/*
 	 * Collapse new free space into previous entry.
 	 */
-	if (error = VOP_BLKATOFF(dvp, (off_t)(dp->i_offset - dp->i_count),
-	    (char **)&ep, &bp))
+	error = VOP_BLKATOFF(dvp, (off_t)(dp->i_offset - dp->i_count),
+			(char **)&ep, &bp);
+	if (error != 0)
 		return (error);
 	ep->rec_len += dp->i_reclen;
 	error = VOP_BWRITE(bp);
@@ -943,7 +947,8 @@ ext2_dirrewrite(dp, ip, cnp)
 	struct vnode *vdp = ITOV(dp);
 	int error;
 
-	if (error = VOP_BLKATOFF(vdp, (off_t)dp->i_offset, (char **)&ep, &bp))
+	error = VOP_BLKATOFF(vdp, (off_t)dp->i_offset, (char **)&ep, &bp);
+	if (error != 0)
 		return (error);
 	ep->inode = ip->i_number;
 	error = VOP_BWRITE(bp);
@@ -1056,7 +1061,8 @@ ext2_checkpath(source, target, cred)
 		if (dirbuf.dotdot_ino == rootino)
 			break;
 		vput(vp);
-		if (error = VFS_VGET(vp->v_mount, dirbuf.dotdot_ino, &vp)) {
+		error = VFS_VGET(vp->v_mount, dirbuf.dotdot_ino, &vp);
+		if (error != 0) {
 			vp = NULL;
 			break;
 		}

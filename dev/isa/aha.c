@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha.c,v 1.25 1996/06/19 14:40:33 deraadt Exp $	*/
+/*	$OpenBSD: aha.c,v 1.28 1997/01/16 19:47:47 kstailey Exp $	*/
 /*	$NetBSD: aha.c,v 1.11 1996/05/12 23:51:23 mycroft Exp $	*/
 
 #undef AHADIAG
@@ -172,7 +172,6 @@ struct scsi_device aha_dev = {
 
 int	ahaprobe __P((struct device *, void *, void *));
 void	ahaattach __P((struct device *, struct device *, void *));
-int	ahaprint __P((void *, char *));
 
 struct cfattach aha_ca = {
 	sizeof(struct aha_softc), ahaprobe, ahaattach
@@ -354,17 +353,6 @@ ahaprobe(parent, match, aux)
 	return 1;
 }
 
-int
-ahaprint(aux, name)
-	void *aux;
-	char *name;
-{
-
-	if (name != NULL)
-		printf("%s: scsibus ", name);
-	return UNCONF;
-}
-
 /*
  * Attach all the sub-devices we can find
  */
@@ -406,7 +394,7 @@ ahaattach(parent, self, aux)
 	/*
 	 * ask the adapter what subunits are present
 	 */
-	config_found(self, &sc->sc_link, ahaprint);
+	config_found(self, &sc->sc_link, scsiprint);
 }
 
 integrate void
@@ -711,7 +699,9 @@ aha_collect_mbo(sc)
 	struct aha_softc *sc;
 {
 	struct aha_mbx_out *wmbo;	/* Mail Box Out pointer */
+#ifdef AHADIAG
 	struct aha_ccb *ccb;
+#endif
 
 	wmbo = wmbx->cmbo;
 
@@ -1182,8 +1172,11 @@ aha_scsi_cmd(xs)
 	struct aha_softc *sc = sc_link->adapter_softc;
 	struct aha_ccb *ccb;
 	struct aha_scat_gath *sg;
-	int seg, datalen, flags, mflags;
+	int seg, flags, mflags;
+#ifdef	TFS
 	struct iovec *iovp;
+	int datalen;
+#endif
 	int s;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("aha_scsi_cmd\n"));

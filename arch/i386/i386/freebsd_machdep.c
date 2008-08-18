@@ -1,4 +1,4 @@
-/*	$OpenBSD: freebsd_machdep.c,v 1.7 1996/08/27 10:46:51 downsj Exp $	*/
+/*	$OpenBSD: freebsd_machdep.c,v 1.9 1997/02/01 21:53:18 deraadt Exp $	*/
 /*	$NetBSD: freebsd_machdep.c,v 1.10 1996/05/03 19:42:05 christos Exp $	*/
 
 /*-
@@ -76,10 +76,12 @@
  * specified pc, psl.
  */
 void
-freebsd_sendsig(catcher, sig, mask, code)
+freebsd_sendsig(catcher, sig, mask, code, type, val)
 	sig_t catcher;
 	int sig, mask;
 	u_long code;
+	int type;
+	union sigval val;
 {
 	register struct proc *p = curproc;
 	register struct trapframe *tf;

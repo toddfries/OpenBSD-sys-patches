@@ -117,7 +117,7 @@ void	rtcput __P((mc_todregs *));
 static int yeartoday __P((int));
 int 	hexdectodec __P((int));
 int	dectohexdec __P((int));
-
+int	rtcintr __P((void *));
 
 __inline u_int mc146818_read __P((void *, u_int));
 __inline void mc146818_write __P((void *, u_int, u_int));
@@ -299,6 +299,10 @@ sysbeep(pitch, period)
 	int pitch, period;
 {
 	static int last_pitch;
+	extern int cold;
+
+	if (cold)
+		return;		/* Can't beep yet. */
 
 	if (beeping)
 		untimeout(sysbeepstop, 0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ss_scanjet.c,v 1.7 1996/07/30 11:04:10 deraadt Exp $	*/
+/*	$OpenBSD: ss_scanjet.c,v 1.19 1997/05/05 13:14:18 niklas Exp $	*/
 /*	$NetBSD: ss_scanjet.c,v 1.6 1996/05/18 22:58:01 christos Exp $	*/
 
 /*
@@ -55,7 +55,6 @@
 
 #define SCANJET_RETRIES 4
 
-int scanjet_get_params __P((struct ss_softc *));
 int scanjet_set_params __P((struct ss_softc *, struct scan_io *));
 int scanjet_trigger_scanner __P((struct ss_softc *));
 int scanjet_read __P((struct ss_softc *, struct buf *));
@@ -63,11 +62,13 @@ int scanjet_read __P((struct ss_softc *, struct buf *));
 /* only used internally */
 int scanjet_ctl_write __P((struct ss_softc *, char *, u_int, int));
 int scanjet_ctl_read __P((struct ss_softc *, char *, u_int, int));
-int scanjet_set_window __P((struct ss_softc *));
-int scanjet_compute_sizes __P((struct ss_softc *));
+int scanjet_set_window __P((struct ss_softc *, int));
+int scanjet_compute_sizes __P((struct ss_softc *, int));
 /* Maybe move to libkern? */
+#define atoi local_atoi
+#define strchr local_strchr
 __inline static int atoi __P((const char *));
-__inline static char *strchr __P((const char *, char));
+__inline static char *strchr __P((/* const */ char *, char));
 
 
 /*
@@ -76,7 +77,7 @@ __inline static char *strchr __P((const char *, char));
 struct ss_special scanjet_special = {
 	scanjet_set_params,
 	scanjet_trigger_scanner,
-	scanjet_get_params,
+	NULL,
 	NULL,			/* no special minphys */
 	scanjet_read,		/* scsi 6-byte read */
 	NULL,			/* no "rewind" code (yet?) */
@@ -121,42 +122,25 @@ scanjet_attach(ss, sa)
 	    ss->sio.scan_scanner_type));
 
 	/* now install special handlers */
-	ss->special = &scanjet_special;
+	ss->special = scanjet_special;
 
-	/*
-	 * populate the scanio struct with legal values
+	/* 
+	 * fill in the rest of the scan_io struct by calling
+	 * set_window and compute_sizes routines
 	 */
-	ss->sio.scan_width		= 1200;
-	ss->sio.scan_height		= 1200;
-	ss->sio.scan_x_resolution	= 100;
-	ss->sio.scan_y_resolution	= 100;
-	ss->sio.scan_x_origin		= 0;
-	ss->sio.scan_y_origin		= 0;
-	ss->sio.scan_brightness		= 128;
-	ss->sio.scan_contrast		= 128;
-	ss->sio.scan_quality		= 100;
-	ss->sio.scan_image_mode		= SIM_GRAYSCALE;
-
-	error = scanjet_set_window(ss);
+	error = scanjet_set_window(ss, SCSI_POLL);
 	if (error) {
 		printf(" set_window failed\n");
 		return;
 	}
-	error = scanjet_compute_sizes(ss);
+
+	error = scanjet_compute_sizes(ss, SCSI_POLL);
 	if (error) {
 		printf(" compute_sizes failed\n");
 		return;
 	}
 
 	printf("\n");
-}
-
-int
-scanjet_get_params(ss)
-	struct ss_softc *ss;
-{
-
-	return (0);
 }
 
 /*
@@ -210,12 +194,12 @@ scanjet_set_params(ss, sio)
 	sio->scan_scanner_type = ss->sio.scan_scanner_type;
 	bcopy(sio, &ss->sio, sizeof(struct scan_io));
 
-	error = scanjet_set_window(ss);
+	error = scanjet_set_window(ss, 0);
 	if (error) {
 		uprintf("%s: set_window failed\n", ss->sc_dev.dv_xname);
 		return (error);
 	}
-	error = scanjet_compute_sizes(ss);
+	error = scanjet_compute_sizes(ss, 0);
 	if (error) {
 		uprintf("%s: compute_sizes failed\n", ss->sc_dev.dv_xname);
 		return (error);
@@ -236,12 +220,12 @@ scanjet_trigger_scanner(ss)
 	char escape_codes[20];
 	int error;
 
-	error = scanjet_set_window(ss);
+	error = scanjet_set_window(ss, 0);
 	if (error) {
 		uprintf("%s: set_window failed\n", ss->sc_dev.dv_xname);
 		return (error);
 	}
-	error = scanjet_compute_sizes(ss);
+	error = scanjet_compute_sizes(ss, 0);
 	if (error) {
 		uprintf("%s: compute_sizes failed\n", ss->sc_dev.dv_xname);
 		return (error);
@@ -356,25 +340,20 @@ static void show_es(char *es)
  * simulate SCSI_SET_WINDOW for ScanJets
  */
 int
-scanjet_set_window(ss)
+scanjet_set_window(ss, flags)
 	struct ss_softc *ss;
+	int flags;
 {
 	char escape_codes[128], *p;
 
 	p = escape_codes;
 
-	sprintf(p, "\033*f%ldP", ss->sio.scan_width / 4);
-	p += strlen(p);
-	sprintf(p, "\033*f%ldQ", ss->sio.scan_height / 4);
-	p += strlen(p);
-	sprintf(p, "\033*f%ldX", ss->sio.scan_x_origin / 4);
-	p += strlen(p);
-	sprintf(p, "\033*f%ldY", ss->sio.scan_y_origin / 4);
-	p += strlen(p);
-	sprintf(p, "\033*a%dR", ss->sio.scan_x_resolution);
-	p += strlen(p);
-	sprintf(p, "\033*a%dS", ss->sio.scan_y_resolution);
-	p += strlen(p);
+	p += sprintf(p, "\033*f%ldP", ss->sio.scan_width / 4);
+	p += sprintf(p, "\033*f%ldQ", ss->sio.scan_height / 4);
+	p += sprintf(p, "\033*f%ldX", ss->sio.scan_x_origin / 4);
+	p += sprintf(p, "\033*f%ldY", ss->sio.scan_y_origin / 4);
+	p += sprintf(p, "\033*a%dR", ss->sio.scan_x_resolution);
+	p += sprintf(p, "\033*a%dS", ss->sio.scan_y_resolution);
      
 	switch (ss->sio.scan_image_mode) {
 	case SIM_BINARY_MONOCHROME:
@@ -418,14 +397,11 @@ scanjet_set_window(ss)
 		break;
 	}
 
-	sprintf(p, "\033*a%dG", ss->sio.scan_bits_per_pixel);
-	p += strlen(p);
-	sprintf(p, "\033*a%dL", (int)(ss->sio.scan_brightness) - 128);
-	p += strlen(p);
-	sprintf(p, "\033*a%dK", (int)(ss->sio.scan_contrast) - 128);
-	p += strlen(p);
+	p += sprintf(p, "\033*a%dG", ss->sio.scan_bits_per_pixel);
+	p += sprintf(p, "\033*a%dL", (int)(ss->sio.scan_brightness) - 128);
+	p += sprintf(p, "\033*a%dK", (int)(ss->sio.scan_contrast) - 128);
 
-	return (scanjet_ctl_write(ss, escape_codes, p - escape_codes, 0));
+	return (scanjet_ctl_write(ss, escape_codes, p - escape_codes, flags));
 }
 
 /* atoi() and strchr() are from /sys/arch/amiga/dev/ite.c
@@ -445,7 +421,11 @@ atoi(cp)
 
 __inline static char *
 strchr(cp, ch)
-	const char *cp;
+	/*
+	 * The const was removed to make -Wcast-qual happy.  I
+	 * don't particularily like this solution but what to do?
+	 */
+	/* const */ char *cp;
 	char ch;
 {
 	while (*cp && *cp != ch) cp++;
@@ -453,8 +433,9 @@ strchr(cp, ch)
 }
 
 int
-scanjet_compute_sizes(ss)
+scanjet_compute_sizes(ss, flags)
 	struct ss_softc *ss;
+	int flags;
 {
 	int error;
 	static char *wfail = "%s: interrogate write failed\n";
@@ -482,12 +463,13 @@ scanjet_compute_sizes(ss)
 		strcpy(escape_codes, "\033*s1024E"); /* pixels wide */
 		break;
 	}
-	error = scanjet_ctl_write(ss, escape_codes, strlen(escape_codes), 0);
+	error = scanjet_ctl_write(ss, escape_codes, strlen(escape_codes),
+		flags);
 	if (error) {
 		uprintf(wfail, ss->sc_dev.dv_xname);
 		return (error);
 	}
-	error = scanjet_ctl_read(ss, response, 20, 0);
+	error = scanjet_ctl_read(ss, response, 20, flags);
 	if (error) {
 		uprintf(rfail, ss->sc_dev.dv_xname);
 		return (error);
@@ -502,12 +484,13 @@ scanjet_compute_sizes(ss)
 		ss->sio.scan_pixels_per_line *= 8;
 
 	strcpy(escape_codes, "\033*s1026E"); /* pixels high */
-	error = scanjet_ctl_write(ss, escape_codes, strlen(escape_codes), 0);
+	error = scanjet_ctl_write(ss, escape_codes, strlen(escape_codes),
+		flags);
 	if (error) {
 		uprintf(wfail, ss->sc_dev.dv_xname);
 		return (error);
 	}
-	error = scanjet_ctl_read(ss, response, 20, 0);
+	error = scanjet_ctl_read(ss, response, 20, flags);
 	if (error) {
 		uprintf(rfail, ss->sc_dev.dv_xname);
 		return (error);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.19 1996/09/22 09:02:32 downsj Exp $	*/
+/*	$OpenBSD: wd.c,v 1.25 1997/04/18 06:12:23 niklas Exp $	*/
 /*	$NetBSD: wd.c,v 1.150 1996/05/12 23:54:03 mycroft Exp $ */
 
 /*
@@ -82,7 +82,7 @@ struct wd_softc {
 
 int	wdprobe		__P((struct device *, void *, void *));
 void	wdattach	__P((struct device *, struct device *, void *));
-int	wdprint		__P((void *, char *));
+int	wdprint		__P((void *, const char *));
 
 struct cfattach wd_ca = {
 	sizeof(struct wd_softc), wdprobe, wdattach
@@ -92,7 +92,7 @@ struct cfdriver wd_cd = {
 	NULL, "wd", DV_DISK
 };
 
-void	wdgetdisklabel	__P((struct wd_softc *));
+void	wdgetdisklabel	__P((dev_t, struct wd_softc *));
 int	wd_get_parms	__P((struct wd_softc *));
 void	wdstrategy	__P((struct buf *));
 
@@ -104,7 +104,7 @@ bdev_decl(wd);
 
 void	wdfinish	__P((struct wd_softc *, struct buf *));
 int	wdsetctlr	__P((struct wd_link *));
-#ifndef amiga
+#if !defined(amiga) && !defined(alpha)
 static void bad144intern __P((struct wd_softc *));
 #endif
 int	wdlock		__P((struct wd_link *));
@@ -433,7 +433,7 @@ wdopen(dev, flag, fmt, p)
 			}
 
 			/* Load the partition info if not already loaded. */
-			wdgetdisklabel(wd);
+			wdgetdisklabel(dev, wd);
 		}
 	}
 
@@ -508,7 +508,8 @@ wdclose(dev, flag, fmt, p)
  * Fabricate a default disk label, and try to read the correct one.
  */
 void
-wdgetdisklabel(wd)
+wdgetdisklabel(dev, wd)
+	dev_t dev;
 	struct wd_softc *wd;
 {
 	struct disklabel *lp = wd->sc_dk.dk_label;
@@ -550,8 +551,8 @@ wdgetdisklabel(wd)
 
 	if (d_link->sc_state > RECAL)
 		d_link->sc_state = RECAL;
-	errstring = readdisklabel(MAKEWDDEV(0, wd->sc_dev.dv_unit, RAW_PART),
-	    wdstrategy, lp, wd->sc_dk.dk_cpulabel);
+	errstring = readdisklabel(WDLABELDEV(dev), wdstrategy, lp,
+	    wd->sc_dk.dk_cpulabel);
 	if (errstring) {
 		/*
 		 * This probably happened because the drive's default
@@ -561,8 +562,8 @@ wdgetdisklabel(wd)
 		 */
 		if (d_link->sc_state > GEOMETRY)
 			d_link->sc_state = GEOMETRY;
-		errstring = readdisklabel(MAKEWDDEV(0, wd->sc_dev.dv_unit, RAW_PART),
-		    wdstrategy, lp, wd->sc_dk.dk_cpulabel);
+		errstring = readdisklabel(WDLABELDEV(dev), wdstrategy, lp,
+		    wd->sc_dk.dk_cpulabel);
 	}
 	if (errstring) {
 		printf("%s: %s\n", wd->sc_dev.dv_xname, errstring);
@@ -571,7 +572,7 @@ wdgetdisklabel(wd)
 
 	if (d_link->sc_state > GEOMETRY)
 		d_link->sc_state = GEOMETRY;
-#ifndef amiga
+#if !defined(amiga) && !defined(alpha)
 	if ((lp->d_flags & D_BADSECT) != 0)
 		bad144intern(wd);
 #endif
@@ -622,7 +623,7 @@ wdioctl(dev, xfer, addr, flag, p)
 		return EIO;
 
 	switch (xfer) {
-#ifndef amiga
+#if !defined(amiga) && !defined(alpha)
 	case DIOCSBAD:
 		if ((flag & FWRITE) == 0)
 			return EBADF;
@@ -790,7 +791,7 @@ wddump(dev, blkno, va, size)
 	part = WDPART(dev);
 
 	/* Make sure it was initialized. */
-	if (d_link->sc_state < OPEN)
+	if (d_link->sc_state < READY)
 		return ENXIO;
 
 	wdc = (void *)wd->sc_dev.dv_parent;
@@ -858,14 +859,15 @@ wddump(dev, blkno, va, size)
 		}
 
 #ifndef WD_DUMP_NOT_TRUSTED
-		if (wdccommand(d_link, WDCC_WRITE, d_link->sc_drive, cylin, head, sector, 1) != 0 ||
+		if (wdccommand(d_link, WDCC_WRITE, d_link->sc_drive, cylin,
+		    head, sector, 1) != 0 ||
 		    wait_for_drq(wdc) != 0) {
 			wderror(d_link, NULL, "wddump: write failed");
 			return EIO;
 		}
 	
 		/* XXX XXX XXX */
-		bus_io_write_multi_2(wdc->sc_bc, wdc->sc_ioh, wd_data,
+		bus_space_write_multi_2(wdc->sc_iot, wdc->sc_ioh, wd_data,
 		    (u_int16_t *)va, lp->d_secsize >> 1);
 	
 		/* Check data request (should be done). */
@@ -906,7 +908,7 @@ wddump(dev, blkno, va, size)
 }
 #endif /* __BDEVSW_DUMP_NEW_TYPE */
 
-#ifndef amiga
+#if !defined(amiga) && !defined(alpha)
 /*
  * Internalize the bad sector table.
  */

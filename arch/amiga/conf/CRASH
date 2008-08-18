@@ -1,10 +1,10 @@
-#	$OpenBSD: CRASH,v 1.5 1996/10/04 15:01:29 niklas Exp $
+#	$OpenBSD: CRASH,v 1.8 1997/03/25 16:53:57 niklas Exp $
 
 #
 # The first OpenBSD/Amiga "user" Neil Brewitt's GG2 + NE2000 equipped A3000
 #
 
-include "std.amiga"
+include "arch/amiga/conf/std.amiga"
 
 makeoptions	DEBUG="-g"
 
@@ -21,7 +21,6 @@ option		"M68030"	# support for 030
 option		FPCOPROC	# Support for MC6888[12] (Required)
 
 option		SWAPPAGER	# Pager for processes (Required)
-option		VNODEPAGER	# Pager for vnodes (Required)
 option		DEVPAGER	# Pager for devices (Required)
 
 #
@@ -134,7 +133,7 @@ option		IPL_REMAP_1	# Remap level 6 ints version 1
 #option	"ULOWELL_OSC2=66667000"
 
 # This is how you specify the blitting speed, higher values may speed up blits
-# a littel bit.  If you raise this value too much some trash may appear.
+# a little bit.  If you raise this value too much some trash may appear.
 # the commented version is the default.
 #option		RH_MEMCLK 61000000
 # this option enables the 64 bit sprite which doesn't seems to be work

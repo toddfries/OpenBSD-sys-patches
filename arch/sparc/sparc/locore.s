@@ -237,17 +237,17 @@ _mapme:
 
 #if !defined(SUN4M)
 sun4m_notsup:
-	.asciz	"cr .( NetBSD/sparc: this kernel does not support the sun4m) cr"
+	.asciz	"cr .( OpenBSD/sparc: this kernel does not support the sun4m) cr"
 #endif
 #if !defined(SUN4C)
 sun4c_notsup:
-	.asciz	"cr .( NetBSD/sparc: this kernel does not support the sun4c) cr"
+	.asciz	"cr .( OpenBSD/sparc: this kernel does not support the sun4c) cr"
 #endif
 #if !defined(SUN4)
 sun4_notsup:
 	! the extra characters at the end are to ensure the zs fifo drains
 	! before we halt. Sick, eh?
-	.asciz	"NetBSD/sparc: this kernel does not support the sun4\n\r \b"
+	.asciz	"OpenBSD/sparc: this kernel does not support the sun4\n\r \b"
 #endif
 	_ALIGN
 
@@ -3711,7 +3711,7 @@ noplab:	 nop
  * When this code is run, the stack looks like:
  *	[%sp]		64 bytes to which registers can be dumped
  *	[%sp + 64]	signal number (goes in %o0)
- *	[%sp + 64 + 4]	signal code (goes in %o1)
+ *	[%sp + 64 + 4]	siginfo_t pointer (goes in %o1)
  *	[%sp + 64 + 8]	placeholder
  *	[%sp + 64 + 12]	argument for %o3, currently unsupported (always 0)
  *	[%sp + 64 + 16]	first word of saved state (sigcontext)

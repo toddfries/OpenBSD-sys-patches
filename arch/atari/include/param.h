@@ -1,3 +1,4 @@
+/*	$OpenBSD: param.h,v 1.4 1997/02/28 22:57:36 niklas Exp $	*/
 /*	$NetBSD: param.h,v 1.10 1996/01/07 22:30:41 leo Exp $	*/
 
 /*
@@ -49,7 +50,9 @@
  * Machine dependent constants for atari
  */
 #define	MACHINE		"atari"
+#define	_MACHINE	atari
 #define MACHINE_ARCH	"m68k"
+#define _MACHINE_ARCH	m68k
 #define MID_MACHINE	MID_M68K
 
 /*
@@ -95,8 +98,8 @@
  * of the hardware page size.
  */
 #define	MSIZE		128		/* size of an mbuf */
-#define	MCLBYTES	1024
-#define	MCLSHIFT	10
+#define	MCLSHIFT	11
+#define	MCLBYTES	(1 << MCLSHIFT)
 #define	MCLOFSET	(MCLBYTES - 1)
 #ifndef NMBCLUSTERS
 #ifdef GATEWAY

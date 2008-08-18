@@ -1,7 +1,8 @@
-/*	$NetBSD: dca.c,v 1.23.4.1 1996/06/06 15:39:09 thorpej Exp $	*/
+/*	$OpenBSD: dca.c,v 1.8 1997/04/16 11:55:58 downsj Exp $	*/
+/*	$NetBSD: dca.c,v 1.34 1997/04/14 02:33:16 thorpej Exp $	*/
 
 /*
- * Copyright (c) 1995, 1996 Jason R. Thorpe.  All rights reserved.
+ * Copyright (c) 1995, 1996, 1997 Jason R. Thorpe.  All rights reserved.
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -36,9 +37,6 @@
  *	@(#)dca.c	8.2 (Berkeley) 1/12/94
  */
 
-#include "dca.h"
-#if NDCA > 0
-
 /*
  *  Driver for the 98626/98644/internal serial interface on hp300/hp400,
  *  based on the National Semiconductor INS8250/NS16550AF/WD16C552 UARTs.
@@ -61,24 +59,21 @@
 #include <sys/uio.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
+#include <sys/device.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <machine/intr.h>
 
 #include <dev/cons.h>
 
-#include <hp300/dev/device.h>
+#include <hp300/dev/dioreg.h>
+#include <hp300/dev/diovar.h>
+#include <hp300/dev/diodevs.h>
 #include <hp300/dev/dcareg.h>
-#include <hp300/hp300/isr.h>
-
-int	dcamatch();
-void	dcaattach();
-struct	driver dcadriver = {
-	dcamatch, dcaattach, "dca",
-};
 
 struct	dca_softc {
-	struct hp_device	*sc_hd;		/* device info */
+	struct device		sc_dev;		/* generic device glue */
 	struct dcadevice	*sc_dca;	/* pointer to hardware */
 	struct tty		*sc_tty;	/* our tty instance */
 	int			sc_oflows;	/* overflow counter */
@@ -92,14 +87,39 @@ struct	dca_softc {
 #define	DCA_HASFIFO	0x0004	/* indicates unit has FIFO */
 #define DCA_ISCONSOLE	0x0008	/* indicates unit is console */
 
-} dca_softc[NDCA];
+};
 
-void	dcastart();
-int	dcaparam();
-int	dcaintr __P((void *));
-int	ndca = NDCA;
+int	dcamatch __P((struct device *, void *, void *));
+void	dcaattach __P((struct device *, struct device *, void *));
+
+struct cfattach dca_ca = {
+	sizeof(struct dca_softc), dcamatch, dcaattach
+};
+
+struct cfdriver dca_cd = {
+	NULL, "dca", DV_TTY
+};
+
 int	dcadefaultrate = TTYDEF_SPEED;
 int	dcamajor;
+
+cdev_decl(dca);
+
+int	dcaintr __P((void *));
+void	dcaeint __P((struct dca_softc *, int));
+void	dcamint __P((struct dca_softc *));
+
+int	dcaparam __P((struct tty *, struct termios *));
+void	dcastart __P((struct tty *));
+int	dcastop __P((struct tty *, int));
+int	dcamctl __P((struct dca_softc *, int, int));
+void	dcainit __P((struct dcadevice *, int));
+
+int	dca_console_scan __P((int, caddr_t, void *));
+void	dcacnprobe __P((struct consdev *));
+void	dcacninit __P((struct consdev *));
+int	dcacngetc __P((dev_t));
+void	dcacnputc __P((dev_t, int));
 
 /*
  * Stuff for DCA console support.
@@ -108,23 +128,23 @@ static	struct dcadevice *dca_cn = NULL;	/* pointer to hardware */
 static	int dcaconsinit;			/* has been initialized */
 
 struct speedtab dcaspeedtab[] = {
-	0,	0,
-	50,	DCABRD(50),
-	75,	DCABRD(75),
-	110,	DCABRD(110),
-	134,	DCABRD(134),
-	150,	DCABRD(150),
-	200,	DCABRD(200),
-	300,	DCABRD(300),
-	600,	DCABRD(600),
-	1200,	DCABRD(1200),
-	1800,	DCABRD(1800),
-	2400,	DCABRD(2400),
-	4800,	DCABRD(4800),
-	9600,	DCABRD(9600),
-	19200,	DCABRD(19200),
-	38400,	DCABRD(38400),
-	-1,	-1
+	{	0,	0		},
+	{	50,	DCABRD(50)	},
+	{	75,	DCABRD(75)	},
+	{	110,	DCABRD(110)	},
+	{	134,	DCABRD(134)	},
+	{	150,	DCABRD(150)	},
+	{	200,	DCABRD(200)	},
+	{	300,	DCABRD(300)	},
+	{	600,	DCABRD(600)	},
+	{	1200,	DCABRD(1200)	},
+	{	1800,	DCABRD(1800)	},
+	{	2400,	DCABRD(2400)	},
+	{	4800,	DCABRD(4800)	},
+	{	9600,	DCABRD(9600)	},
+	{	19200,	DCABRD(19200)	},
+	{	38400,	DCABRD(38400)	},
+	{	-1,	-1		},
 };
 
 #ifdef KGDB
@@ -147,33 +167,37 @@ long	dcamintcount[16];
 void	dcainit __P((struct dcadevice *, int));
 
 int
-dcamatch(hd)
-	register struct hp_device *hd;
+dcamatch(parent, match, aux)
+	struct device *parent;
+	void *match, *aux;
 {
-	struct dcadevice *dca = (struct dcadevice *)hd->hp_addr;
-	struct dca_softc *sc = &dca_softc[hd->hp_unit];
+	struct dio_attach_args *da = aux;
 
-	if (dca->dca_id != DCAID0 &&
-	    dca->dca_id != DCAREMID0 &&
-	    dca->dca_id != DCAID1 &&
-	    dca->dca_id != DCAREMID1)
-		return (0);
+	switch (da->da_id) {
+	case DIO_DEVICE_ID_DCA0:
+	case DIO_DEVICE_ID_DCA0REM:
+	case DIO_DEVICE_ID_DCA1:
+	case DIO_DEVICE_ID_DCA1REM:
+		return (1);
+	}
 
-	hd->hp_ipl = DCAIPL(dca->dca_ic);
-	sc->sc_hd = hd;
-
-	return (1);
+	return (0);
 }
 
 void
-dcaattach(hd)
-	register struct hp_device *hd;
+dcaattach(parent, self, aux)
+	struct device *parent, *self;
+	void *aux;
 {
-	int unit = hd->hp_unit;
-	struct dcadevice *dca = (struct dcadevice *)hd->hp_addr;
-	struct dca_softc *sc = &dca_softc[unit];
+	struct dca_softc *sc = (struct dca_softc *)self;
+	struct dio_attach_args *da = aux;
+	struct dcadevice *dca;
+	int unit = self->dv_unit;
+	int scode = da->da_scode;
+	int ipl;
 
-	if (hd->hp_args->hw_sc == conscode) {
+	if (scode == conscode) {
+		dca = (struct dcadevice *)conaddr;
 		sc->sc_flags |= DCA_ISCONSOLE;
 		DELAY(100000);
 
@@ -182,7 +206,20 @@ dcaattach(hd)
 		 * the console probe, so we have to fixup cn_dev here.
 		 */
 		cn_tab->cn_dev = makedev(dcamajor, unit);
+	} else {
+		dca = (struct dcadevice *)iomap(dio_scodetopa(da->da_scode),
+		    da->da_size);
+		if (dca == NULL) {
+			printf("\n%s: can't map registers\n",
+			    sc->sc_dev.dv_xname);
+			return;
+		}
 	}
+
+	sc->sc_dca = dca;
+
+	ipl = DIO_IPL(dca);
+	printf(" ipl %d", ipl);
 
 	dca->dca_reset = 0xFF;
 	DELAY(100);
@@ -193,14 +230,12 @@ dcaattach(hd)
 	if ((dca->dca_iir & IIR_FIFO_MASK) == IIR_FIFO_MASK)
 		sc->sc_flags |= DCA_HASFIFO;
 
-	sc->sc_dca = dca;
-
 	/* Establish interrupt handler. */
-	isrlink(dcaintr, sc, hd->hp_ipl,
-	    (sc->sc_flags & DCA_HASFIFO) ? ISRPRI_TTY : ISRPRI_TTYNOBUF);
+	(void) intr_establish(dcaintr, sc, ipl,
+	    (sc->sc_flags & DCA_HASFIFO) ? IPL_TTY : IPL_TTYNOBUF);
 
 	sc->sc_flags |= DCA_ACTIVE;
-	if (hd->hp_flags)
+	if (self->dv_cfdata->cf_flags)
 		sc->sc_flags |= DCA_SOFTCAR;
 
 	/* Enable interrupts. */
@@ -234,11 +269,11 @@ dcaattach(hd)
 				 * Print prefix of device name,
 				 * let kgdb_connect print the rest.
 				 */
-				printf("%s: ", sc->sc_hd->hp_xname);
+				printf("%s: ", sc->sc_dev.dv_xname);
 				kgdb_connect(1);
 			} else
 				printf("%s: kgdb enabled\n",
-				    sc->sc_hd->hp_xname);
+				    sc->sc_dev.dv_xname);
 		}
 	}
 #endif
@@ -258,10 +293,10 @@ dcaopen(dev, flag, mode, p)
 	u_char code;
 	int s, error = 0;
  
-	if (unit >= NDCA)
+	if (unit >= dca_cd.cd_ndevs ||
+	    (sc = dca_cd.cd_devs[unit]) == NULL)
 		return (ENXIO);
 
-	sc = &dca_softc[unit];
 	if ((sc->sc_flags & DCA_ACTIVE) == 0)
 		return (ENXIO);
 
@@ -348,14 +383,15 @@ dcaclose(dev, flag, mode, p)
 	struct proc *p;
 {
 	struct dca_softc *sc;
-	register struct tty *tp;
-	register struct dcadevice *dca;
-	register int unit;
+	struct tty *tp;
+	struct dcadevice *dca;
+	int unit;
 	int s;
  
 	unit = DCAUNIT(dev);
 
-	sc = &dca_softc[unit];
+	sc = dca_cd.cd_devs[unit];
+
 	dca = sc->sc_dca;
 	tp = sc->sc_tty;
 	(*linesw[tp->t_line].l_close)(tp, flag);
@@ -390,10 +426,13 @@ dcaread(dev, uio, flag)
 	int flag;
 {
 	int unit = DCAUNIT(dev);
-	struct dca_softc *sc = &dca_softc[unit];
-	struct tty *tp = sc->sc_tty;
+	struct dca_softc *sc;
+	struct tty *tp;
 	int error, of;
+
+	sc = dca_cd.cd_devs[unit];
  
+	tp = sc->sc_tty;
 	of = sc->sc_oflows;
 	error = (*linesw[tp->t_line].l_read)(tp, uio, flag);
 	/*
@@ -401,7 +440,7 @@ dcaread(dev, uio, flag)
 	 * at interrupt time just exacerbates the problem.
 	 */
 	if (sc->sc_oflows != of)
-		log(LOG_WARNING, "%s: silo overflow\n", sc->sc_hd->hp_xname);
+		log(LOG_WARNING, "%s: silo overflow\n", sc->sc_dev.dv_xname);
 	return (error);
 }
  
@@ -411,7 +450,8 @@ dcawrite(dev, uio, flag)
 	struct uio *uio;
 	int flag;
 {
-	struct tty *tp = dca_softc[DCAUNIT(dev)].sc_tty;
+	struct dca_softc *sc = dca_cd.cd_devs[DCAUNIT(dev)];
+	struct tty *tp = sc->sc_tty;
  
 	return ((*linesw[tp->t_line].l_write)(tp, uio, flag));
 }
@@ -420,8 +460,9 @@ struct tty *
 dcatty(dev)
 	dev_t dev;
 {
+	struct dca_softc *sc = dca_cd.cd_devs[DCAUNIT(dev)];
 
-	return (dca_softc[DCAUNIT(dev)].sc_tty);
+	return (sc->sc_tty);
 }
  
 int
@@ -429,10 +470,12 @@ dcaintr(arg)
 	void *arg;
 {
 	struct dca_softc *sc = arg;
-	int unit = sc->sc_hd->hp_unit;
-	register struct dcadevice *dca = sc->sc_dca;
-	register struct tty *tp = sc->sc_tty;
-	register u_char code;
+#ifdef KGDB
+	int unit = sc->sc_dev.dv_unit;
+#endif
+	struct dcadevice *dca = sc->sc_dca;
+	struct tty *tp = sc->sc_tty;
+	u_char code;
 	int iflowdone = 0;
 
 	/*
@@ -474,7 +517,7 @@ dcaintr(arg)
 			RCVBYTE();
 			if (sc->sc_flags & DCA_HASFIFO) {
 #ifdef DEBUG
-				register int fifocnt = 1;
+				int fifocnt = 1;
 #endif
 				while ((code = dca->dca_lsr) & LSR_RCV_MASK) {
 					if (code == LSR_RXRDY) {
@@ -512,7 +555,7 @@ dcaintr(arg)
 			if (code & IIR_NOPEND)
 				return (1);
 			log(LOG_WARNING, "%s: weird interrupt: 0x%x\n",
-			    sc->sc_hd->hp_xname, code);
+			    sc->sc_dev.dv_xname, code);
 			/* fall through */
 		case IIR_MLSC:
 			dcamint(sc);
@@ -521,6 +564,7 @@ dcaintr(arg)
 	}
 }
 
+void
 dcaeint(sc, stat)
 	struct dca_softc *sc;
 	int stat;
@@ -549,6 +593,7 @@ dcaeint(sc, stat)
 	(*linesw[tp->t_line].l_rint)(c, tp);
 }
 
+void
 dcamint(sc)
 	struct dca_softc *sc;
 {
@@ -585,13 +630,13 @@ dcamint(sc)
 int
 dcaioctl(dev, cmd, data, flag, p)
 	dev_t dev;
-	int cmd;
+	u_long cmd;
 	caddr_t data;
 	int flag;
 	struct proc *p;
 {
 	int unit = DCAUNIT(dev);
-	struct dca_softc *sc = &dca_softc[unit];
+	struct dca_softc *sc = dca_cd.cd_devs[unit];
 	struct tty *tp = sc->sc_tty;
 	struct dcadevice *dca = sc->sc_dca;
 	int error;
@@ -676,11 +721,11 @@ dcaioctl(dev, cmd, data, flag, p)
 
 int
 dcaparam(tp, t)
-	register struct tty *tp;
-	register struct termios *t;
+	struct tty *tp;
+	struct termios *t;
 {
 	int unit = DCAUNIT(tp->t_dev);
-	struct dca_softc *sc = &dca_softc[unit];
+	struct dca_softc *sc = dca_cd.cd_devs[unit];
 	struct dcadevice *dca = sc->sc_dca;
 	int cfcr, cflag = t->c_cflag;
 	int ospeed = ttspeedtab(t->c_ospeed, dcaspeedtab);
@@ -704,6 +749,7 @@ dcaparam(tp, t)
 		break;
 
 	case CS8:
+	default:	/* XXX gcc whines about cfcr being unitialized... */
 		cfcr = CFCR_8BITS;
 		break;
 	}
@@ -753,10 +799,10 @@ dcaparam(tp, t)
  
 void
 dcastart(tp)
-	register struct tty *tp;
+	struct tty *tp;
 {
 	int s, c, unit = DCAUNIT(tp->t_dev);
-	struct dca_softc *sc = &dca_softc[unit];
+	struct dca_softc *sc = dca_cd.cd_devs[unit];
 	struct dcadevice *dca = sc->sc_dca;
  
 	s = spltty();
@@ -797,18 +843,20 @@ out:
 /*ARGSUSED*/
 int
 dcastop(tp, flag)
-	register struct tty *tp;
+	struct tty *tp;
 	int flag;
 {
-	register int s;
+	int s;
 
 	s = spltty();
 	if (tp->t_state & TS_BUSY)
 		if ((tp->t_state & TS_TTSTOP) == 0)
 			tp->t_state |= TS_FLUSH;
 	splx(s);
+	return (0);
 }
  
+int
 dcamctl(sc, bits, how)
 	struct dca_softc *sc;
 	int bits, how;
@@ -871,8 +919,9 @@ dcainit(dca, rate)
 	dca->dca_ier = rate >> 8;
 	dca->dca_cfcr = CFCR_8BITS;
 	dca->dca_ier = IER_ERXRDY | IER_ETXRDY;
-	dca->dca_fifo = FIFO_ENABLE|FIFO_RCV_RST|FIFO_XMT_RST|FIFO_TRIGGER_14;
-	dca->dca_mcr |= MCR_IEN;
+	dca->dca_fifo =
+	    FIFO_ENABLE | FIFO_RCV_RST | FIFO_XMT_RST | FIFO_TRIGGER_1;
+	dca->dca_mcr = MCR_DTR | MCR_RTS;
 	DELAY(100);
 	stat = dca->dca_iir;
 	splx(s);
@@ -1003,7 +1052,7 @@ dcacngetc(dev)
 void
 dcacnputc(dev, c)
 	dev_t dev;
-	register int c;
+	int c;
 {
 	int timo;
 	u_char stat;
@@ -1030,4 +1079,3 @@ dcacnputc(dev, c)
 	stat = dca_cn->dca_iir;
 	splx(s);
 }
-#endif /* NDCA > 0 */

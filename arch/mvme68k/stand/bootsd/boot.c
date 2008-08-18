@@ -1,3 +1,4 @@
+/*	$OpenBSD: boot.c,v 1.10 1997/04/22 16:01:19 gvf Exp $ */
 /*	$NetBSD: boot.c,v 1.2 1995/09/23 03:42:52 gwr Exp $ */
 
 /*-
@@ -46,19 +47,39 @@
 int debug;
 int errno;
 extern char *version;
+char	line[80];
 
 int
 main()
 {
 	char *cp, *file;
-	int	io, flag;
+	int	io, flag, ret;
+	int	ask = 0;
 
 	printf(">> OpenBSD MVME%x bootsd [%s]\n", bugargs.cputyp, version);
 
-	parse_args(&file, &flag);
+	ret = parse_args(&file, &flag);
 
-	exec_mvme(file, flag);
-
-	printf("boot: %s: %s\n", file, strerror(errno));
+	for (;;) {
+		if (ask) {
+			printf("boot: ");
+			gets(line);
+			if (line[0]) {
+				bugargs.arg_start = line;
+				cp = line;
+				while (cp < (line + sizeof(line) -1) && *cp)
+					cp++;
+				bugargs.arg_end = cp;
+				ret = parse_args(&file, &flag);
+			}
+		}
+		if (ret) {
+			printf("boot: -q returning to MVME-Bug\n");
+			break;
+		}
+		exec_mvme(file, flag);
+		printf("boot: %s: %s\n", file, strerror(errno));
+		ask = 1;
+	}
 	return(0);
 }

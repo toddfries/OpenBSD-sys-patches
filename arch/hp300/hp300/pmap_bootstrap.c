@@ -1,4 +1,5 @@
-/*	$NetBSD: pmap_bootstrap.c,v 1.9 1995/12/11 17:09:16 thorpej Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.4 1997/04/16 11:56:31 downsj Exp $	*/
+/*	$NetBSD: pmap_bootstrap.c,v 1.11 1997/04/01 03:12:29 scottr Exp $	*/
 
 /* 
  * Copyright (c) 1991, 1993
@@ -41,12 +42,17 @@
 
 #include <sys/param.h>
 #include <sys/msgbuf.h>
-#include <machine/pte.h>
-#include <hp300/hp300/clockreg.h>
-#include <machine/vmparam.h>
+#include <sys/proc.h>
+
+#include <machine/frame.h>
 #include <machine/cpu.h>
+#include <machine/vmparam.h>
+#include <machine/pte.h>
+
+#include <hp300/hp300/clockreg.h>
 
 #include <vm/vm.h>
+#include <vm/pmap.h>
 
 #define RELOC(v, t)	*((t*)((u_int)&(v) + firstpa))
 
@@ -56,6 +62,7 @@ extern char *extiobase, *proc0paddr;
 extern st_entry_t *Sysseg;
 extern pt_entry_t *Sysptmap, *Sysmap;
 extern vm_offset_t CLKbase, MMUbase;
+extern vm_offset_t pagezero;
 
 extern int maxmem, physmem;
 extern vm_offset_t avail_start, avail_end, virtual_avail, virtual_end;
@@ -64,6 +71,8 @@ extern int protection_codes[];
 #ifdef M68K_MMU_HP
 extern int pmap_aliasmask;
 #endif
+
+void	pmap_bootstrap __P((vm_offset_t, vm_offset_t));
 
 /*
  * Special purpose kernel virtual addresses, used for mapping
@@ -91,12 +100,12 @@ struct msgbuf	*msgbufp;
 void
 pmap_bootstrap(nextpa, firstpa)
 	vm_offset_t nextpa;
-	register vm_offset_t firstpa;
+	vm_offset_t firstpa;
 {
 	vm_offset_t kstpa, kptpa, iiopa, eiopa, kptmpa, lkptpa, p0upa;
 	u_int nptpages, kstsize;
-	register st_entry_t protoste, *ste;
-	register pt_entry_t protopte, *pte, *epte;
+	st_entry_t protoste, *ste;
+	pt_entry_t protopte, *pte, *epte;
 
 	/*
 	 * Calculate important physical addresses:
@@ -174,7 +183,7 @@ pmap_bootstrap(nextpa, firstpa)
 	 * likely be insufficient in the future (at least for the kernel).
 	 */
 	if (RELOC(mmutype, int) == MMU_68040) {
-		register int num;
+		int num;
 
 		/*
 		 * First invalidate the entire "segment table" pages
@@ -247,8 +256,8 @@ pmap_bootstrap(nextpa, firstpa)
 		while (pte < epte) {
 			*pte++ = PG_NV;
 		}
-                /*
-		 * Initialize the last to point to point to the page
+		/*
+		 * Initialize the last to point to the page
 		 * table page allocated earlier.
 		 */
 		*pte = lkptpa | PG_RW | PG_CI | PG_V;
@@ -302,16 +311,22 @@ pmap_bootstrap(nextpa, firstpa)
 	epte = &pte[nptpages * NPTEPG];
 	while (pte < epte)
 		*pte++ = PG_NV;
+
 	/*
-	 * Validate PTEs for kernel text (RO)
+	 * Save the physical address of `page zero'.  This is
+	 * a page of memory at the beginning of kernel text
+	 * not mapped at VA 0.  But, we might want to use it
+	 * for something later.
 	 */
-	pte = &((u_int *)kptpa)[hp300_btop(KERNBASE)];
+	RELOC(pagezero, vm_offset_t) = firstpa;
+
+	/*
+	 * Validate PTEs for kernel text (RO).  The first page
+	 * of kernel text remains invalid; see locore.s
+	 */
+	pte = &((u_int *)kptpa)[hp300_btop(KERNBASE + NBPG)];
 	epte = &pte[hp300_btop(hp300_trunc_page(&etext))];
-#if defined(KGDB) || defined(DDB)
-	protopte = firstpa | PG_RW | PG_V;	/* XXX RW for now */
-#else
-	protopte = firstpa | PG_RO | PG_V;
-#endif
+	protopte = (firstpa + NBPG) | PG_RO | PG_V;
 	while (pte < epte) {
 		*pte++ = protopte;
 		protopte += NBPG;
@@ -445,7 +460,7 @@ pmap_bootstrap(nextpa, firstpa)
 	 * absolute "jmp" table.
 	 */
 	{
-		register int *kp;
+		int *kp;
 
 		kp = &RELOC(protection_codes, int);
 		kp[VM_PROT_NONE|VM_PROT_NONE|VM_PROT_NONE] = 0;
@@ -478,7 +493,7 @@ pmap_bootstrap(nextpa, firstpa)
 		 *	MAXKL2SIZE-1:	maps last-page page table
 		 */
 		if (RELOC(mmutype, int) == MMU_68040) {
-			register int num;
+			int num;
 			
 			kpm->pm_stfree = ~l2tobm(0);
 			num = roundup((nptpages + 1) * (NPTEPG / SG4_LEV3SIZE),

@@ -1,4 +1,4 @@
-/*	$OpenBSD: signalvar.h,v 1.3 1996/05/02 13:14:58 deraadt Exp $	*/
+/*	$OpenBSD: signalvar.h,v 1.6 1997/02/01 21:49:36 deraadt Exp $	*/
 /*	$NetBSD: signalvar.h,v 1.17 1996/04/22 01:23:31 christos Exp $	*/
 
 /*
@@ -54,6 +54,7 @@ struct	sigacts {
 	sigset_t ps_sigonstack;		/* signals to take on sigstack */
 	sigset_t ps_sigintr;		/* signals that interrupt syscalls */
 	sigset_t ps_sigreset;		/* signals that reset when caught */
+	sigset_t ps_siginfo;		/* signals that provide siginfo */
 	sigset_t ps_oldmask;		/* saved mask from before sigpause */
 	int	ps_flags;		/* signal flags, below */
 	struct	sigaltstack ps_sigstk;	/* sp & on stack state variable */
@@ -160,7 +161,8 @@ void	pgsignal __P((struct pgrp *pgrp, int sig, int checkctty));
 void	postsig __P((int sig));
 void	psignal __P((struct proc *p, int sig));
 void	siginit __P((struct proc *p));
-void	trapsignal __P((struct proc *p, int sig, u_long code));
+void	trapsignal __P((struct proc *p, int sig, u_long code, int type,
+	    union sigval val));
 void	sigexit __P((struct proc *, int));
 void	setsigvec __P((struct proc *, int, struct sigaction *));
 int	killpg1 __P((struct proc *, int, int, int));
@@ -168,7 +170,8 @@ int	killpg1 __P((struct proc *, int, int, int));
 /*
  * Machine-dependent functions:
  */
-void	sendsig __P((sig_t action, int sig, int returnmask, u_long code));
+void	sendsig __P((sig_t action, int sig, int returnmask, u_long code,
+	    int type, union sigval val));
 struct core;
 struct vnode;
 struct ucred;

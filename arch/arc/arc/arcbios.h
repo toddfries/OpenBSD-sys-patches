@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.h,v 1.2 1996/09/14 15:58:12 pefo Exp $	*/
+/*	$OpenBSD: arcbios.h,v 1.4 1997/05/01 15:13:30 pefo Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  *
@@ -289,9 +289,9 @@ typedef struct arc_calls
 		char *,			/* Variable */
 		char *);		/* Value */
 
-	arc_status_t (*get_file_info)();	/* GetFileInformation 33 */
+	arc_status_t (*get_file_info)(void);	/* GetFileInformation 33 */
 
-	arc_status_t (*set_file_info)();	/* SetFileInformation 34 */
+	arc_status_t (*set_file_info)(void);	/* SetFileInformation 34 */
 
 	void (*flush_all_caches)(void);	/* FlushAllCaches 35 */
 
@@ -303,7 +303,8 @@ typedef struct arc_calls
 		u_int32_t);		/* FileId */
 } arc_calls_t;
 
-#define ARC_PARAM_BLK_MAGIC	0x41524353
+#define ARC_PARAM_BLK_MAGIC	0x53435241
+#define ARC_PARAM_BLK_MAGIC_BUG	0x41524353	/* This is wrong... but req */
 
 typedef struct arc_param_blk 
 {
@@ -328,4 +329,11 @@ typedef struct arc_param_blk
 #define ArcBiosBase ((arc_param_blk_t *) 0x80001000)
 #define ArcBios (ArcBiosBase->firmware_vect)
 
-extern void arcbios_ident(void);
+
+int  bios_getchar __P((void));
+void bios_putchar __P((char));
+void bios_putstring __P((char *));
+void bios_ident __P((void));
+void bios_display_info __P((int *, int *, int *, int *));
+int  bios_load_miniroot __P((char *, caddr_t));
+

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.27 1996/10/04 02:51:16 deraadt Exp $
+#	$OpenBSD: files.i386,v 1.31 1997/04/13 04:52:33 millert Exp $
 #	$NetBSD: files.i386,v 1.73 1996/05/07 00:58:36 thorpej Exp $
 #
 # new style config file for i386 architecture
@@ -8,6 +8,8 @@
 maxpartitions 16
 
 maxusers 2 16 64
+
+major	{ccd = 16}
 
 file	arch/i386/i386/autoconf.c
 file	arch/i386/i386/conf.c
@@ -94,7 +96,6 @@ major	{wt = 3}
 
 include "../../../dev/isa/files.isa"
 file	arch/i386/isa/isa_machdep.c	isabus
-file	dev/isa/isadma.c		isadma needs-flag
 
 # PC clock
 file	arch/i386/isa/clock.c		isabus
@@ -145,12 +146,13 @@ attach	pms at pckbd
 file	arch/i386/isa/pms.c		pms needs-flag
 
 # Floppy disk controller
+# XXX temporarily conflicts with arc, will soon move to files.isa
 device	fdc {drive = -1}
 attach	fdc at isa
 device	fd: disk, isa_dma
 attach	fd at fdc
-file	arch/i386/isa/fdc.c		fdc needs-flag
-file	arch/i386/isa/fd.c		fd needs-flag
+file	dev/isa/fdc.c		fdc needs-flag
+file	dev/isa/fd.c		fd needs-flag
 major	{fd = 2}
 
 # PC speaker
@@ -164,7 +166,8 @@ file	arch/i386/isa/spkr.c		spkr needs-flag
 device	ed: ether, ifnet
 attach	ed at isa with ed_isa
 attach	ed at pcmcia with ed_pcmcia
-file	dev/isa/if_ed.c			ed & (ed_isa | ed_pcmcia) needs-flag
+attach	ed at pci with ed_pci
+file	dev/isa/if_ed.c			ed & (ed_isa | ed_pcmcia | ed_pci) needs-flag
 
 # Game adapter (joystick)
 device	joy

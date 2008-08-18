@@ -1,12 +1,12 @@
-/*	$NetBSD: if_le.c,v 1.28 1996/04/22 02:25:54 christos Exp $	*/
+/*	$OpenBSD: if_le.c,v 1.9 1997/01/16 04:03:49 kstailey Exp $	*/
+/*	$NetBSD: if_le.c,v 1.33 1996/11/20 18:56:52 gwr Exp $	*/
 
 /*-
- * Copyright (c) 1995 Charles M. Hannum.  All rights reserved.
- * Copyright (c) 1992, 1993
- *	The Regents of the University of California.  All rights reserved.
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
+ * All rights reserved.
  *
- * This code is derived from software contributed to Berkeley by
- * Ralph Campbell and Rick Macklem.
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Adam Glass and Gordon W. Ross.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -18,25 +18,23 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- *	@(#)if_le.c	8.2 (Berkeley) 11/16/93
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "bpfilter.h"
@@ -58,84 +56,81 @@
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 #include <machine/dvma.h>
-#include <machine/isr.h>
 #include <machine/obio.h>
 #include <machine/idprom.h>
 
-#include <sun3/dev/if_lereg.h>
-#include <sun3/dev/if_levar.h>
 #include <dev/ic/am7990reg.h>
-#define	LE_NEED_BUF_CONTIG
 #include <dev/ic/am7990var.h>
 
-#define	LE_SOFTC(unit)	le_cd.cd_devs[unit]
-#define	LE_DELAY(x)	DELAY(x)
+/*
+ * LANCE registers.
+ * The real stuff is in dev/ic/am7990reg.h
+ */
+struct lereg1 {
+	volatile u_int16_t	ler1_rdp;	/* data port */
+	volatile u_int16_t	ler1_rap;	/* register select port */
+};
+
+/*
+ * Ethernet software status per interface.
+ * The real stuff is in dev/ic/am7990var.h
+ */
+struct	le_softc {
+	struct	am7990_softc sc_am7990;	/* glue to MI code */
+
+	struct	lereg1 *sc_r1;		/* LANCE registers */
+};
 
 static int	le_match __P((struct device *, void *, void *));
 static void	le_attach __P((struct device *, struct device *, void *));
-int	leintr __P((void *));
 
 struct cfattach le_ca = {
 	sizeof(struct le_softc), le_match, le_attach
 };
 
-struct	cfdriver le_cd = {
-	NULL, "le", DV_IFNET
-};
+hide void lewrcsr __P((struct am7990_softc *, u_int16_t, u_int16_t));
+hide u_int16_t lerdcsr __P((struct am7990_softc *, u_int16_t));
 
-integrate void
-lehwinit(sc)
-	struct le_softc *sc;
-{
-}
-
-integrate void
+hide void
 lewrcsr(sc, port, val)
-	struct le_softc *sc;
+	struct am7990_softc *sc;
 	u_int16_t port, val;
 {
-	register struct lereg1 *ler1 = sc->sc_r1;
+	register struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
 
 	ler1->ler1_rap = port;
 	ler1->ler1_rdp = val;
 }
 
-integrate u_int16_t
+hide u_int16_t
 lerdcsr(sc, port)
-	struct le_softc *sc;
+	struct am7990_softc *sc;
 	u_int16_t port;
 {
-	register struct lereg1 *ler1 = sc->sc_r1;
+	register struct lereg1 *ler1 = ((struct le_softc *)sc)->sc_r1;
 	u_int16_t val;
 
 	ler1->ler1_rap = port;
 	val = ler1->ler1_rdp;
 	return (val);
-} 
+}
 
 int
 le_match(parent, vcf, aux)
 	struct device *parent;
 	void *vcf, *aux;
 {
-	struct cfdata *cf = vcf;
 	struct confargs *ca = aux;
-	int pa, x;
 
-	/*
-	 * OBIO match functions may be called for every possible
-	 * physical address, so match only our physical address.
-	 */
-	if ((pa = cf->cf_paddr) == -1) {
-		/* Use our default PA. */
-		pa = OBIO_AMD_ETHER;
-	}
-	if (pa != ca->ca_paddr)
+	/* Make sure there is something there... */
+	if (bus_peek(ca->ca_bustype, ca->ca_paddr, 1) == -1)
 		return (0);
 
-	/* The peek returns -1 on bus error. */
-	x = bus_peek(ca->ca_bustype, ca->ca_paddr, 1);
-	return (x != -1);
+	/* Default interrupt priority. */
+	if (ca->ca_intpri == -1)
+		ca->ca_intpri = 3;
+
+	return (1);
 }
 
 void
@@ -143,17 +138,11 @@ le_attach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
-	struct le_softc *sc = (void *)self;
-	struct cfdata *cf = self->dv_cfdata;
+	struct le_softc *lesc = (struct le_softc *)self;
+	struct am7990_softc *sc = &lesc->sc_am7990;
 	struct confargs *ca = aux;
-	int intpri;
 
-	/* Default interrupt level. */
-	if ((intpri = cf->cf_intpri) == -1)
-		intpri = 3;
-	printf(" level %d", intpri);
-
-	sc->sc_r1 = (struct lereg1 *)
+	lesc->sc_r1 = (struct lereg1 *)
 	    obio_alloc(ca->ca_paddr, OBIO_AMD_ETHER_SIZE);
 
 	sc->sc_memsize = 0x4000;	/* 16K */
@@ -169,36 +158,12 @@ le_attach(parent, self, aux)
 	sc->sc_copyfrombuf = am7990_copyfrombuf_contig;
 	sc->sc_zerobuf = am7990_zerobuf_contig;
 
-	sc->sc_arpcom.ac_if.if_name = le_cd.cd_name;
-	leconfig(sc);
+	sc->sc_rdcsr = lerdcsr;
+	sc->sc_wrcsr = lewrcsr;
+	sc->sc_hwinit = NULL;
+
+	am7990_config(sc);
 
 	/* Install interrupt handler. */
-	isr_add_autovect(leintr, (void *)sc, intpri);
+	isr_add_autovect(am7990_intr, (void *)sc, ca->ca_intpri);
 }
-
-/*
- * Compare two Ether/802 addresses for equality, inlined and
- * unrolled for speed.  I'd love to have an inline assembler
- * version of this...   XXX: Who wanted that? mycroft?
- * I wrote one, but the following is just as efficient.
- * This expands to 10 short m68k instructions! -gwr
- * Note: use this like bcmp()
- */
-static inline u_short
-ether_cmp(one, two)
-	u_char *one, *two;
-{
-	register u_short *a = (u_short *) one;
-	register u_short *b = (u_short *) two;
-	register u_short diff;
-
-	diff  = *a++ - *b++;
-	diff |= *a++ - *b++;
-	diff |= *a++ - *b++;
-
-	return (diff);
-}
-
-#define	ETHER_CMP ether_cmp
-
-#include <dev/ic/am7990.c>

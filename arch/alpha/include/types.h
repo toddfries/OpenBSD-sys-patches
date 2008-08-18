@@ -1,5 +1,5 @@
-/*	$OpenBSD: types.h,v 1.2 1996/07/29 22:59:27 niklas Exp $	*/
-/*	$NetBSD: types.h,v 1.4 1995/07/06 03:39:32 cgd Exp $	*/
+/*	$OpenBSD: types.h,v 1.4 1997/01/24 19:57:21 niklas Exp $	*/
+/*	$NetBSD: types.h,v 1.6 1996/12/05 00:13:47 cgd Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -70,6 +70,6 @@ typedef	unsigned long		u_int64_t;
 
 typedef int64_t			register_t;
 
-#define	__BDEVSW_DUMP_OLD_TYPE
+#define	__BROKEN_INDIRECT_CONFIG
 
 #endif	/* _MACHTYPES_H_ */

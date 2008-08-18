@@ -1,5 +1,5 @@
-/*	$OpenBSD: bootxx.c,v 1.4 1996/07/31 10:38:46 niklas Exp $	*/
-/*	$NetBSD: bootxx.c,v 1.2 1996/04/12 06:09:36 cgd Exp $	*/
+/*	$OpenBSD: bootxx.c,v 1.7 1997/05/05 06:01:46 millert Exp $	*/
+/*	$NetBSD: bootxx.c,v 1.4 1997/01/18 00:28:59 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
@@ -29,6 +29,7 @@
  */
 
 #include <sys/param.h>
+#include <machine/rpb.h>
 #include <machine/prom.h>
 
 #include "bbinfo.h"
@@ -39,6 +40,7 @@ struct bbinfoloc desc = {
 	0xbabefacedeadbeef,
 	(u_int64_t)&start,
 	(u_int64_t)&_end,
+	{ 0, },
 	0xdeadbeeffacebabe
 };
 
@@ -81,7 +83,7 @@ load_file(bbinfop, loadaddr)
 		puts("invalid number of blocks in boot program description\n");
 		return 0;
 	}
-	if (bbinfop->bsize < 4096 || bbinfop->bsize > MAXBSIZE) {
+	if (bbinfop->bsize < DEV_BSIZE || bbinfop->bsize > MAXBSIZE) {
 		puts("invalid block size in boot program description\n");
 		return 0;
 	}
@@ -136,7 +138,7 @@ main()
 	/* Init prom callback vector. */
 	init_prom_calls();
 
-	puts("\nOpenBSD/Alpha primary boot...\n");
+	puts("\nOpenBSD/Alpha Primary Boot\n");
 
 	bbinfop = (struct bbinfo *)&_end;
 	loadaddr = (char *)SECONDARY_LOAD_ADDRESS;

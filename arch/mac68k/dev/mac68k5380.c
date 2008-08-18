@@ -1,5 +1,5 @@
-/*	$OpenBSD: mac68k5380.c,v 1.6 1996/06/08 16:21:11 briggs Exp $	*/
-/*	$NetBSD: mac68k5380.c,v 1.25 1996/06/07 01:45:43 briggs Exp $	*/
+/*	$OpenBSD: mac68k5380.c,v 1.11 1997/04/27 19:28:39 briggs Exp $	*/
+/*	$NetBSD: mac68k5380.c,v 1.29 1997/02/28 15:50:50 scottr Exp $	*/
 
 /*
  * Copyright (c) 1995 Allen Briggs
@@ -51,6 +51,7 @@
 #include "ncr5380reg.h"
 
 #include <machine/stdarg.h>
+#include <machine/macinfo.h>
 #include <machine/viareg.h>
 
 #include "ncr5380var.h"
@@ -134,8 +135,9 @@ static void	do_ncr5380_drq_intr __P((void *));
 
 static __inline__ void	scsi_clr_ipend __P((void));
 static		  void	scsi_mach_init __P((struct ncr_softc *sc));
-static		  int	machine_match __P((struct device *pdp, void *match,
-					   void *auxp, struct cfdriver *cd));
+static		  int	machine_match __P((struct device *parent,
+			    struct cfdata *cf, void *aux,
+			    struct cfdriver *cd));
 static __inline__ int	pdma_ready __P((void));
 static		  int	transfer_pdma __P((u_char *phasep, u_char *data,
 					u_long *count));
@@ -173,15 +175,16 @@ scsi_mach_init(sc)
 		scsi_flag   = Via1Base + VIA2 * 0x2000 + rIFR;
 	}
 
-	mac68k_register_scsi_irq(ncr5380_irq_intr, sc);
-	mac68k_register_scsi_drq(ncr5380_drq_intr, sc);
+	via2_register_irq(VIA2_SCSIIRQ, ncr5380_irq_intr, sc);
+	via2_register_irq(VIA2_SCSIDRQ, ncr5380_drq_intr, sc);
 }
 
 static int
-machine_match(pdp, match, auxp, cd)
-	struct device	*pdp;
-	void		*match, *auxp;
-	struct cfdriver	*cd;
+machine_match(parent, cf, aux, cd)
+	struct device *parent;
+	struct cfdata *cf;
+	void *aux;
+	struct cfdriver *cd;
 {
 	if (!mac68k_machine.scsi80)
 		return 0;
@@ -429,13 +432,13 @@ extern	int			*nofault, mac68k_buserr_addr;
 		long_data = (u_int32_t *) pending_5380_data;
 
 #define R4	*long_data++ = *long_drq++
-		while ( count >= 64 ) {
+		while ( count > 64 ) {
 			R4; R4; R4; R4; R4; R4; R4; R4;
 			R4; R4; R4; R4; R4; R4; R4; R4;	/* 64 */
 			count -= 64;
 		}
-		while (count >= 4) {
-			R4; count -= 4;
+		while (count > 8) {
+			R4; R4; count -= 8;
 		}
 #undef R4
 		data = (u_int8_t *) long_data;
@@ -479,13 +482,14 @@ extern	int			*nofault, mac68k_buserr_addr;
 		long_data = (u_int32_t *) pending_5380_data;
 
 #define W4	*long_drq++ = *long_data++
-		while ( count >= 64 ) {
+		while ( count > 64 ) {
 			W4; W4; W4; W4; W4; W4; W4; W4;
 			W4; W4; W4; W4; W4; W4; W4; W4; /*  64 */
 			count -= 64;
 		}
-		while (count >= 4) {
-			W4; count -= 4;
+		while ( count > 8 ) {
+			W4; W4;
+			count -= 8;
 		}
 #undef W4
 		data = (u_int8_t *) long_data;
@@ -498,14 +502,13 @@ extern	int			*nofault, mac68k_buserr_addr;
 		pending_5380_count -= dcount;
 		pending_5380_data += dcount;
 		}
+
 		PID("write complete");
 
 		drq = (volatile u_int8_t *) ncr_5380_with_drq;
 		tmp_data = *drq;
 
-		PID("read a byte?");
-
-		nofault = (int *) 0;
+		PID("read a byte to force a phase change");
 	}
 
 	/*

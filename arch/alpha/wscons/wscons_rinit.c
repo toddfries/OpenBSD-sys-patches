@@ -1,5 +1,5 @@
-/*	$OpenBSD: wscons_rinit.c,v 1.2 1996/07/29 23:03:04 niklas Exp $ */
-/*	$NetBSD: wscons_rinit.c,v 1.1 1996/04/12 02:00:54 cgd Exp $ */
+/*	$OpenBSD: wscons_rinit.c,v 1.5 1997/04/08 00:47:21 michaels Exp $ */
+/*	$NetBSD: wscons_rinit.c,v 1.3 1996/11/13 21:13:42 cgd Exp $ */
 
 /*
  * Copyright (c) 1991, 1993
@@ -46,13 +46,17 @@
  */
 
 #include <sys/param.h>
-#include <sys/kernel.h>
+#include <sys/systm.h>
 #include <sys/device.h>
 
 #include <dev/rcons/raster.h>
 #include <alpha/wscons/wscons_raster.h>
 
 #include <alpha/wscons/wscons_rfont.h>
+
+void	rcons_initfont __P((struct rcons *, struct raster_font *));
+
+void	rcons_initfont __P((struct rcons *, struct raster_font *));
 
 void
 rcons_initfont(rc, fp)
@@ -102,7 +106,7 @@ rcons_init(rc, mrow, mcol)
 	struct raster *rp = rc->rc_sp;
 	int i;
 
-	rcons_initfont(rc, &gallant19);
+	rcons_initfont(rc, &CONSOLE_FONT);
 
 	i = rp->height / rc->rc_font->height;
 	rc->rc_maxrow = min(i, mrow);

@@ -1,5 +1,5 @@
-/*	$OpenBSD: dec_axppci_33.c,v 1.3 1996/07/29 22:57:29 niklas Exp $	*/
-/*	$NetBSD: dec_axppci_33.c,v 1.4.4.2 1996/06/14 20:42:24 cgd Exp $	*/
+/*	$OpenBSD: dec_axppci_33.c,v 1.6 1997/01/24 19:56:27 niklas Exp $	*/
+/*	$NetBSD: dec_axppci_33.c,v 1.16 1996/11/25 03:59:20 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -29,29 +29,31 @@
  */
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/termios.h>
 #include <dev/cons.h>
 
 #include <machine/rpb.h>
 #include <machine/autoconf.h>
+#include <machine/cpuconf.h>
 
 #include <dev/isa/isavar.h>
-#include <dev/isa/comreg.h>
-#include <dev/isa/comvar.h>
+#include <dev/ic/comreg.h>
+#include <dev/ic/comvar.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
 #include <alpha/pci/lcareg.h>
 #include <alpha/pci/lcavar.h>
 
-#include <alpha/alpha/dec_axppci_33.h>
-
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 
-char *
-dec_axppci_33_modelname()
+cpu_decl(dec_axppci_33);
+
+const char *
+dec_axppci_33_model_name()
 {
 
 	switch (hwrpb->rpb_variation & SV_ST_MASK) {
@@ -66,14 +68,14 @@ dec_axppci_33_modelname()
 }
 
 void
-dec_axppci_33_consinit()
+dec_axppci_33_cons_init()
 {
 	struct ctb *ctb;
 	struct lca_config *lcp;
 	extern struct lca_config lca_configuration;
 
 	lcp = &lca_configuration;
-	lca_init(lcp);
+	lca_init(lcp, 0);
 
 	ctb = (struct ctb *)(((caddr_t)hwrpb) + hwrpb->rpb_ctb_off);
 
@@ -82,13 +84,6 @@ dec_axppci_33_consinit()
 		/* serial console ... */
 		/* XXX */
 		{
-			extern bus_chipset_tag_t comconsbc;	/* set */
-			extern bus_io_handle_t comcomsioh;	/* set */
-			extern int comconsaddr, comconsinit;	/* set */
-			extern int comdefaultrate;
-			extern int comcngetc __P((dev_t));
-			extern void comcnputc __P((dev_t, int));
-			extern void comcnpollc __P((dev_t, int));
 			static struct consdev comcons = { NULL, NULL,
 			    comcngetc, comcnputc, comcnpollc, NODEV, 1 };
 
@@ -97,12 +92,12 @@ dec_axppci_33_consinit()
 
 			comconsaddr = 0x3f8;
 			comconsinit = 0;
-			comconsbc = &lcp->lc_bc;
-			if (bus_io_map(comconsbc, comconsaddr, COM_NPORTS,
-			    &comconsioh))
+			comconsiot = lcp->lc_iot;
+			if (bus_space_map(comconsiot, comconsaddr, COM_NPORTS,
+			    0, &comconsioh))
 				panic("can't map serial console I/O ports");
 			comconscflag = (TTYDEF_CFLAG & ~(CSIZE | PARENB)) | CS8;
-			cominit(comconsbc, comconsioh, comdefaultrate);
+			cominit(comconsiot, comconsioh, comdefaultrate);
 
 			cn_tab = &comcons;
 			comcons.cn_dev = makedev(26, 0);	/* XXX */
@@ -112,9 +107,12 @@ dec_axppci_33_consinit()
 	case 3:
 		/* display console ... */
 		/* XXX */
-		pci_display_console(&lcp->lc_bc, &lcp->lc_pc,
-		    (ctb->ctb_turboslot >> 8) & 0xff,
-		    ctb->ctb_turboslot & 0xff, 0);
+		if (ctb->ctb_turboslot == 0)
+			isa_display_console(lcp->lc_iot, lcp->lc_memt);
+		else
+			pci_display_console(lcp->lc_iot, lcp->lc_memt,
+			    &lcp->lc_pc, (ctb->ctb_turboslot >> 8) & 0xff,
+			    ctb->ctb_turboslot & 0xff, 0);
 		break;
 
 	default:
@@ -126,12 +124,19 @@ dec_axppci_33_consinit()
 	}
 }
 
+const char *
+dec_axppci_33_iobus_name()
+{
+
+	return ("lca");
+}
+
 void
 dec_axppci_33_device_register(dev, aux)
 	struct device *dev;
 	void *aux;
 {
-	static int found;
+	static int found, initted, scsiboot, netboot;
 	static struct device *pcidev, *scsidev;
 	struct bootdev_data *b = bootdev_data;
 	struct device *parent = dev->dv_parent;
@@ -140,6 +145,15 @@ dec_axppci_33_device_register(dev, aux)
 
 	if (found)
 		return;
+
+	if (!initted) {
+		scsiboot = (strcmp(b->protocol, "SCSI") == 0);
+		netboot = (strcmp(b->protocol, "BOOTP") == 0);
+#if 0
+		printf("scsiboot = %d, netboot = %d\n", scsiboot, netboot);
+#endif
+		initted =1;
+	}
 
 	if (pcidev == NULL) {
 		if (strcmp(cd->cd_name, "pci"))
@@ -158,7 +172,7 @@ dec_axppci_33_device_register(dev, aux)
 		}
 	}
 
-	if (scsidev == NULL) {
+	if (scsiboot && (scsidev == NULL)) {
 		if (parent != pcidev)
 			return;
 		else {
@@ -177,9 +191,10 @@ dec_axppci_33_device_register(dev, aux)
 		}
 	}
 
-	if (!strcmp(cd->cd_name, "sd") ||
-	    !strcmp(cd->cd_name, "st") ||
-	    !strcmp(cd->cd_name, "cd")) {
+	if (scsiboot &&
+	    (!strcmp(cd->cd_name, "sd") ||
+	     !strcmp(cd->cd_name, "st") ||
+	     !strcmp(cd->cd_name, "cd"))) {
 		struct scsibus_attach_args *sa = aux;
 
 		if (parent->dv_parent != scsidev)
@@ -210,5 +225,25 @@ dec_axppci_33_device_register(dev, aux)
 		printf("\nbooted_device = %s\n", booted_device->dv_xname);
 #endif
 		found = 1;
+	}
+
+	if (netboot) {
+		if (parent != pcidev)
+			return;
+		else {
+			struct pci_attach_args *pa = aux;
+
+			if (b->slot != pa->pa_device)
+				return;
+
+			/* XXX function? */
+	
+			booted_device = dev;
+#if 0
+			printf("\nbooted_device = %s\n", booted_device->dv_xname);
+#endif
+			found = 1;
+			return;
+		}
 	}
 }

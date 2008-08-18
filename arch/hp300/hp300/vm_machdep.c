@@ -1,4 +1,5 @@
-/*	$NetBSD: vm_machdep.c,v 1.30 1996/05/09 21:26:08 scottr Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.9 1997/04/16 11:56:32 downsj Exp $	*/
+/*	$NetBSD: vm_machdep.c,v 1.35 1997/04/01 03:12:33 scottr Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -52,12 +53,15 @@
 #include <sys/core.h>
 #include <sys/exec.h>
 
-#include <vm/vm.h>
-#include <vm/vm_kern.h>
-
+#include <machine/frame.h>
 #include <machine/cpu.h>
 #include <machine/pte.h>
 #include <machine/reg.h>
+
+#include <vm/vm.h>
+#include <vm/vm_kern.h>
+
+void	setredzone __P((pt_entry_t *, caddr_t));
 
 /*
  * Finish a fork operation, with process p2 nearly set up.
@@ -70,15 +74,15 @@
  */
 void
 cpu_fork(p1, p2)
-	register struct proc *p1, *p2;
+	struct proc *p1, *p2;
 {
-	register struct pcb *pcb = &p2->p_addr->u_pcb;
-	register struct trapframe *tf;
-	register struct switchframe *sf;
+	void child_return __P((struct proc *, struct frame));
+	struct pcb *pcb = &p2->p_addr->u_pcb;
+	struct trapframe *tf;
+	struct switchframe *sf;
 	extern struct pcb *curpcb;
-	extern void proc_trampoline(), child_return();
 
-	p2->p_md.md_flags = p1->p_md.md_flags & ~MDP_HPUXTRACE;
+	p2->p_md.md_flags = p1->p_md.md_flags;
 
 	/* Sync curpcb (which is presumably p1's PCB) and copy it to p2. */
 	savectx(curpcb);
@@ -148,18 +152,6 @@ cpu_coredump(p, vp, cred, chdr)
 	struct coreseg cseg;
 	int error;
 
-#ifdef COMPAT_HPUX
-	extern struct emul emul_hpux;
-
-	/*
-	 * If we loaded from an HP-UX format binary file we dump enough
-	 * of an HP-UX style user struct so that the HP-UX debuggers can
-	 * grok it.
-	 */
-	if (p->p_emul == &emul_hpux)
-		return (hpux_dumpu(vp, cred));
-#endif
-
 	CORE_SETMAGIC(*chdr, COREMAGIC, MID_M68K, 0);
 	chdr->c_hdrsize = ALIGN(sizeof(*chdr));
 	chdr->c_seghdrsize = ALIGN(sizeof(cseg));
@@ -170,10 +162,15 @@ cpu_coredump(p, vp, cred, chdr)
 	if (error)
 		return error;
 
-	/* Save floating point registers. */
-	error = process_read_fpregs(p, &md_core.freg);
-	if (error)
-		return error;
+	if (fputype) {
+		/* Save floating point registers. */
+		error = process_read_fpregs(p, &md_core.freg);
+		if (error)
+			return error;
+	} else {
+		/* Make sure these are clear. */
+		bzero((caddr_t)&md_core.freg, sizeof(md_core.freg));
+	}
 
 	CORE_SETMAGIC(cseg, CORESEGMAGIC, MID_M68K, CORE_CPU);
 	cseg.c_addr = 0;
@@ -202,10 +199,10 @@ cpu_coredump(p, vp, cred, chdr)
  */
 void
 pagemove(from, to, size)
-	register caddr_t from, to;
+	caddr_t from, to;
 	size_t size;
 {
-	register vm_offset_t pa;
+	vm_offset_t pa;
 
 #ifdef DEBUG
 	if (size & CLOFSET)
@@ -234,12 +231,13 @@ pagemove(from, to, size)
  * kernel VA space at `vaddr'.  Read/write and cache-inhibit status
  * are specified by `prot'.
  */ 
+void
 physaccess(vaddr, paddr, size, prot)
 	caddr_t vaddr, paddr;
-	register int size, prot;
+	int size, prot;
 {
-	register pt_entry_t *pte;
-	register u_int page;
+	pt_entry_t *pte;
+	u_int page;
 
 	pte = kvtopte(vaddr);
 	page = (u_int)paddr & PG_FRAME;
@@ -250,11 +248,12 @@ physaccess(vaddr, paddr, size, prot)
 	TBIAS();
 }
 
+void
 physunaccess(vaddr, size)
 	caddr_t vaddr;
-	register int size;
+	int size;
 {
-	register pt_entry_t *pte;
+	pt_entry_t *pte;
 
 	pte = kvtopte(vaddr);
 	for (size = btoc(size); size; size--)
@@ -274,6 +273,7 @@ physunaccess(vaddr, size)
  * Look at _lev6intr in locore.s for more details.
  */
 /*ARGSUSED*/
+void
 setredzone(pte, vaddr)
 	pt_entry_t *pte;
 	caddr_t vaddr;
@@ -283,8 +283,9 @@ setredzone(pte, vaddr)
 /*
  * Convert kernel VA to physical address
  */
+int
 kvtop(addr)
-	register caddr_t addr;
+	caddr_t addr;
 {
 	vm_offset_t va;
 
@@ -307,16 +308,16 @@ extern vm_map_t phys_map;
 /*ARGSUSED*/
 void
 vmapbuf(bp, sz)
-	register struct buf *bp;
+	struct buf *bp;
 	vm_size_t sz;
 {
-	register int npf;
-	register caddr_t addr;
-	register long flags = bp->b_flags;
+	int npf;
+	caddr_t addr;
+	long flags = bp->b_flags;
 	struct proc *p;
 	int off;
 	vm_offset_t kva;
-	register vm_offset_t pa;
+	vm_offset_t pa;
 
 	if ((flags & B_PHYS) == 0)
 		panic("vmapbuf");
@@ -344,11 +345,11 @@ vmapbuf(bp, sz)
 /*ARGSUSED*/
 void
 vunmapbuf(bp, sz)
-	register struct buf *bp;
+	struct buf *bp;
 	vm_size_t sz;
 {
-	register caddr_t addr;
-	register int npf;
+	caddr_t addr;
+	int npf;
 	vm_offset_t kva;
 
 	if ((bp->b_flags & B_PHYS) == 0)
@@ -360,92 +361,3 @@ vunmapbuf(bp, sz)
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;
 }
-
-#ifdef MAPPEDCOPY
-u_int mappedcopysize = 4096;
-
-mappedcopyin(fromp, top, count)
-	register char *fromp, *top;
-	register int count;
-{
-	register vm_offset_t kva, upa;
-	register int off, len;
-	int alignable;
-	pmap_t upmap;
-	extern caddr_t CADDR1;
-
-	kva = (vm_offset_t) CADDR1;
-	off = (vm_offset_t)fromp & PAGE_MASK;
-	alignable = (off == ((vm_offset_t)top & PAGE_MASK));
-	upmap = vm_map_pmap(&curproc->p_vmspace->vm_map);
-	while (count > 0) {
-		/*
-		 * First access of a page, use fubyte to make sure
-		 * page is faulted in and read access allowed.
-		 */
-		if (fubyte(fromp) == -1)
-			return (EFAULT);
-		/*
-		 * Map in the page and bcopy data in from it
-		 */
-		upa = pmap_extract(upmap, trunc_page(fromp));
-		if (upa == 0)
-			panic("mappedcopyin");
-		len = min(count, PAGE_SIZE-off);
-		pmap_enter(pmap_kernel(), kva, upa, VM_PROT_READ, TRUE);
-		if (len == PAGE_SIZE && alignable && off == 0)
-			copypage(kva, top);
-		else
-			bcopy((caddr_t)(kva+off), top, len);
-		fromp += len;
-		top += len;
-		count -= len;
-		off = 0;
-	}
-	pmap_remove(pmap_kernel(), kva, kva+PAGE_SIZE);
-	return (0);
-}
-
-mappedcopyout(fromp, top, count)
-	register char *fromp, *top;
-	register int count;
-{
-	register vm_offset_t kva, upa;
-	register int off, len;
-	int alignable;
-	pmap_t upmap;
-	extern caddr_t CADDR2;
-
-	kva = (vm_offset_t) CADDR2;
-	off = (vm_offset_t)top & PAGE_MASK;
-	alignable = (off == ((vm_offset_t)fromp & PAGE_MASK));
-	upmap = vm_map_pmap(&curproc->p_vmspace->vm_map);
-	while (count > 0) {
-		/*
-		 * First access of a page, use subyte to make sure
-		 * page is faulted in and write access allowed.
-		 */
-		if (subyte(top, *fromp) == -1)
-			return (EFAULT);
-		/*
-		 * Map in the page and bcopy data out to it
-		 */
-		upa = pmap_extract(upmap, trunc_page(top));
-		if (upa == 0)
-			panic("mappedcopyout");
-		len = min(count, PAGE_SIZE-off);
-		pmap_enter(pmap_kernel(), kva, upa,
-			   VM_PROT_READ|VM_PROT_WRITE, TRUE);
-		if (len == PAGE_SIZE && alignable && off == 0)
-			copypage(fromp, kva);
-		else
-			bcopy(fromp, (caddr_t)(kva+off), len);
-		fromp += len;
-		top += len;
-		count -= len;
-		off = 0;
-	}
-	pmap_remove(pmap_kernel(), kva, kva+PAGE_SIZE);
-	return (0);
-}
-#endif

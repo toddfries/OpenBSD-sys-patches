@@ -1,5 +1,5 @@
-/*	$OpenBSD: pcivar.h,v 1.7 1996/04/21 22:25:51 deraadt Exp $	*/
-/*	$NetBSD: pcivar.h,v 1.15 1996/03/28 02:16:23 cgd Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.11 1997/03/12 19:52:56 pefo Exp $	*/
+/*	$NetBSD: pcivar.h,v 1.18 1996/12/01 21:02:18 leo Exp $	*/
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All rights reserved.
@@ -54,22 +54,29 @@ struct pcibus_attach_args;
 /*
  * Machine-dependent definitions.
  */
-#if (alpha + i386 != 1)
+#if (alpha + atari + i386 + arc != 1)
 ERROR: COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
 #endif
 #if alpha
 #include <alpha/pci/pci_machdep.h>
 #endif
+#if atari
+#include <atari/pci/pci_machdep.h>
+#endif
 #if i386
 #include <i386/pci/pci_machdep.h>
+#endif
+#if arc
+#include <arc/pci/pci_machdep.h>
 #endif
 
 /*
  * PCI bus attach arguments.
  */
 struct pcibus_attach_args {
-	char		*pba_busname;	/* XXX should be common */
-	bus_chipset_tag_t pba_bc;	/* XXX should be common */
+	char	*pba_busname;		/* XXX should be common */
+	bus_space_tag_t pba_iot;	/* pci i/o space tag */
+	bus_space_tag_t pba_memt;	/* pci mem space tag */
 	pci_chipset_tag_t pba_pc;
 
 	int		pba_bus;	/* PCI bus number */
@@ -86,7 +93,8 @@ struct pcibus_attach_args {
  * PCI device attach arguments.
  */
 struct pci_attach_args {
-	bus_chipset_tag_t pa_bc;
+	bus_space_tag_t pa_iot;		/* pci i/o space tag */
+	bus_space_tag_t pa_memt;	/* pci mem space tag */
 	pci_chipset_tag_t pa_pc;
 
 	u_int		pa_device;
@@ -127,14 +135,15 @@ struct pci_attach_args {
  * Configuration space access and utility functions.  (Note that most,
  * e.g. make_tag, conf_read, conf_write are declared by pci_machdep.h.)
  */
-int	pci_io_find __P((pci_chipset_tag_t, pcitag_t, int, bus_io_addr_t *,
-	    bus_io_size_t *));
-int	pci_mem_find __P((pci_chipset_tag_t, pcitag_t, int, bus_mem_addr_t *,
-	    bus_mem_size_t *, int *));
+int	pci_io_find __P((pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
+	    bus_size_t *));
+int	pci_mem_find __P((pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
+	    bus_size_t *, int *));
 
 /*
  * Helper functions for autoconfiguration.
  */
 void	pci_devinfo __P((pcireg_t, pcireg_t, int, char *));
+void	set_pci_isa_bridge_callback __P((void (*)(void *), void *));
 
 #endif /* _DEV_PCI_PCIVAR_H_ */

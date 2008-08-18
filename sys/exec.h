@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.4 1996/08/31 09:17:16 pefo Exp $	*/
+/*	$OpenBSD: exec.h,v 1.6 1997/01/12 13:02:07 downsj Exp $	*/
 /*	$NetBSD: exec.h,v 1.59 1996/02/09 18:25:09 christos Exp $	*/
 
 /*-
@@ -42,6 +42,9 @@
  *
  *	@(#)exec.h	8.3 (Berkeley) 1/21/94
  */
+
+#ifndef _SYS_EXEC_H_
+#define _SYS_EXEC_H_
 
 /*
  * The following structure is found at the top of the user stack of each
@@ -172,6 +175,7 @@ void	*copyargs		__P((struct exec_package *, struct ps_strings *,
 void	setregs			__P((struct proc *, struct exec_package *,
 				     u_long, register_t *));
 int	check_exec		__P((struct proc *, struct exec_package *));
+int	exec_setup_stack	__P((struct proc *, struct exec_package *));
 
 #ifdef DEBUG
 void	new_vmcmd __P((struct exec_vmcmd_set *evsp,
@@ -214,3 +218,5 @@ extern int	exec_maxhdrsz;
 
 #include <sys/exec_aout.h>
 #include <machine/exec.h>
+
+#endif /* !_SYS_EXEC_H_ */

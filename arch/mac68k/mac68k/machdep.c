@@ -1,7 +1,8 @@
-/*	$OpenBSD: machdep.c,v 1.19 1996/09/21 04:03:58 briggs Exp $	*/
-/*	$NetBSD: machdep.c,v 1.114 1996/08/06 04:03:33 scottr Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.42 1997/05/14 04:41:49 gene Exp $	*/
+/*	$NetBSD: machdep.c,v 1.134 1997/02/14 06:15:30 scottr Exp $	*/
 
 /*
+ * Copyright (c) 1996 Jason R. Thorpe.  All rights reserved.
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1990 The Regents of the University of California.
  * All rights reserved.
@@ -95,9 +96,11 @@
 #include <sys/mbuf.h>
 #include <sys/msgbuf.h>
 #include <sys/user.h>
-#include <sys/sysctl.h>
 #include <sys/mount.h>
+#include <sys/extent.h>
+#include <sys/sysctl.h>
 #include <sys/syscallargs.h>
+#include <sys/extent.h>
 #ifdef SYSVMSG
 #include <sys/msg.h>
 #endif
@@ -114,9 +117,11 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <machine/macinfo.h>
 #include <machine/reg.h>
 #include <machine/psl.h>
 #include <machine/pte.h>
+#include <machine/bus.h>
 #include <net/netisr.h>
 
 #define	MAXMEM	64*1024*CLSIZE	/* XXX - from cmap.h */
@@ -128,9 +133,10 @@
 #include <vm/vm_page.h>
 
 #include <dev/cons.h>
+#include <arch/mac68k/mac68k/macrom.h>
+#include <arch/mac68k/dev/adbvar.h>
 
 #include <machine/viareg.h>
-#include "macrom.h"
 #include "ether.h"
 
 /* The following is used externally (sysctl_hw) */
@@ -141,7 +147,6 @@ struct mac68k_machine_S mac68k_machine;
 volatile u_char *Via1Base, *Via2Base;
 u_long  NuBusBase = NBBASE;
 u_long  IOBase;
-u_long	conspa;
 
 vm_offset_t SCSIBase;
 
@@ -168,6 +173,10 @@ extern u_long videorowbytes;	/* Used in kernel for video. */
 u_int32_t mac68k_vidlog;	/* logical addr */
 u_int32_t mac68k_vidphys;	/* physical addr */
 u_int32_t mac68k_vidlen;	/* mem length */
+
+/* Callback and cookie to run bell */
+int	(*mac68k_bell_callback) __P((void *, int, int, int));
+caddr_t	mac68k_bell_cookie;
 
 vm_map_t buffer_map;
 
@@ -197,13 +206,44 @@ int     physmem = MAXMEM;	/* max supported memory, changes to actual */
 int     safepri = PSL_LOWIPL;
 
 /*
- * For the fpu emulation and fpu driver.
+ * Extent maps to manage all memory space, including I/O ranges.  Allocate
+ * storage for 8 regions in each, initially.  Later, iomem_malloc_safe
+ * will indicate that it's safe to use malloc() to dynamically allocate
+ * region descriptors.
+ *
+ * The extent maps are not static!  Machine-dependent NuBus and on-board
+ * I/O routines need access to them for bus address space allocation.
  */
-int     fpu_type;
+static	long iomem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
+struct	extent *iomem_ex;
+static	iomem_malloc_safe;
 
 static void	identifycpu __P((void));
 static u_long	get_physical __P((u_int, u_long *));
 void		dumpsys __P((void));
+
+int		bus_mem_add_mapping __P((bus_addr_t, bus_size_t,
+		    int, bus_space_handle_t *));
+
+/*
+ * Extent maps to manage all memory space, including I/O ranges.  Allocate
+ * storage for 8 regions in each, initially.  Later, iomem_malloc_safe
+ * will indicate that it's safe to use malloc() to dynamically allocate
+ * region descriptors.
+ *
+ * The extent maps are not static!  Machine-dependent NuBus and on-board
+ * I/O routines need access to them for bus address space allocation.
+ */
+static	long iomem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof(long)];
+struct	extent *iomem_ex;
+static	iomem_malloc_safe;
+
+static void	identifycpu __P((void));
+static u_long	get_physical __P((u_int, u_long *));
+void		dumpsys __P((void));
+
+int		bus_mem_add_mapping __P((bus_addr_t, bus_size_t,
+		    int, bus_space_handle_t *));
 
 /*
  * Console initialization: called early on from main,
@@ -449,10 +489,12 @@ again:
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
+	iomem_malloc_safe = 1;
 	configure();
 }
 
-void doboot __P((void));
+void doboot __P((void))
+	__attribute__((__noreturn__));
 void via_shutdown __P((void));
 
 /*
@@ -480,7 +522,7 @@ setregs(p, pack, sp, retval)
 	/* restore a null state frame */
 	p->p_addr->u_pcb.pcb_fpregs.fpf_null = 0;
 
-	if (fpu_type) {
+	if (fputype) {
 		m68881_restore(&p->p_addr->u_pcb.pcb_fpregs);
 	}
 
@@ -495,312 +537,6 @@ setregs(p, pack, sp, retval)
 	else
 		p->p_md.md_flags &= ~MDP_UNCACHE_WX;
 #endif
-}
-
-#define SS_RTEFRAME	1
-#define SS_FPSTATE	2
-#define SS_USERREGS	4
-
-struct sigstate {
-	int     ss_flags;	/* which of the following are valid */
-	struct frame ss_frame;	/* original exception frame */
-	struct fpframe ss_fpstate;	/* 68881/68882 state info */
-};
-/*
- * WARNING: code in locore.s assumes the layout shown for sf_signum
- * thru sf_handler so... don't screw with them!
- */
-struct sigframe {
-	int     sf_signum;	/* signo for handler */
-	int     sf_code;	/* additional info for handler */
-	struct sigcontext *sf_scp;	/* context ptr for handler */
-	sig_t   sf_handler;	/* handler addr for u_sigc */
-	struct sigstate sf_state;	/* state of the hardware */
-	struct sigcontext sf_sc;/* actual context */
-};
-#ifdef DEBUG
-int     sigdebug = 0x0;
-int     sigpid = 0;
-#define SDB_FOLLOW	0x01
-#define SDB_KSTACK	0x02
-#define SDB_FPSTATE	0x04
-#endif
-
-/*
- * Send an interrupt to process.
- */
-void
-sendsig(catcher, sig, mask, code)
-	sig_t   catcher;
-	int     sig, mask;
-	u_long  code;
-{
-	extern short	exframesize[];
-	extern char	sigcode[], esigcode[];
-	register struct proc *p = curproc;
-	register struct sigframe *fp, *kfp;
-	register struct frame *frame;
-	register struct sigacts *psp = p->p_sigacts;
-	register short	ft;
-	int     oonstack;
-
-	frame = (struct frame *) p->p_md.md_regs;
-	ft = frame->f_format;
-	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
-
-	/*
-	 * Allocate and validate space for the signal handler
-	 * context. Note that if the stack is in P0 space, the
-	 * call to grow() is a nop, and the useracc() check
-	 * will fail if the process has not already allocated
-	 * the space with a `brk'.
-	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && oonstack == 0 &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *) (psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size - sizeof(struct sigframe));
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
-	} else
-		fp = (struct sigframe *) frame->f_regs[SP] - 1;
-	if ((unsigned) fp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
-		(void) grow(p, (unsigned) fp);
-#ifdef DEBUG
-	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-		printf("sendsig(%d): sig %d ssp %x usp %x scp %x ft %d\n",
-		    p->p_pid, sig, &oonstack, fp, &fp->sf_sc, ft);
-#endif
-	if (useracc((caddr_t) fp, sizeof(struct sigframe), B_WRITE) == 0) {
-#ifdef DEBUG
-		if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-			printf("sendsig(%d): useracc failed on sig %d\n",
-			    p->p_pid, sig);
-#endif
-		/*
-		 * Process has trashed its stack; give it an illegal
-		 * instruction to halt it in its tracks.
-		 */
-		SIGACTION(p, SIGILL) = SIG_DFL;
-		sig = sigmask(SIGILL);
-		p->p_sigignore &= ~sig;
-		p->p_sigcatch &= ~sig;
-		p->p_sigmask &= ~sig;
-		psignal(p, SIGILL);
-		return;
-	}
-	kfp = malloc(sizeof(struct sigframe), M_TEMP, M_WAITOK);
-	/* Build the argument list for the signal handler. */
-	kfp->sf_signum = sig;
-	kfp->sf_code = code;
-	kfp->sf_scp = &fp->sf_sc;
-	kfp->sf_handler = catcher;
-	/*
-	 * Save necessary hardware state.  Currently this includes:
-	 *	- general registers
-	 *	- original exception frame (if not a "normal" frame)
-	 *	- FP coprocessor state
-	 */
-	kfp->sf_state.ss_flags = SS_USERREGS;
-	bcopy((caddr_t) frame->f_regs,
-	    (caddr_t) kfp->sf_state.ss_frame.f_regs, sizeof frame->f_regs);
-	if (ft >= FMT9) {
-#ifdef DEBUG
-		if (ft != FMT9 && ft != FMTA && ft != FMTB)
-			panic("sendsig: bogus frame type");
-#endif
-		kfp->sf_state.ss_flags |= SS_RTEFRAME;
-		kfp->sf_state.ss_frame.f_format = frame->f_format;
-		kfp->sf_state.ss_frame.f_vector = frame->f_vector;
-		bcopy((caddr_t) & frame->F_u,
-		    (caddr_t) & kfp->sf_state.ss_frame.F_u, exframesize[ft]);
-		/*
-		 * Leave an indicator that we need to clean up the kernel
-		 * stack.  We do this by setting the "pad word" above the
-		 * hardware stack frame to the amount the stack must be
-		 * adjusted by.
-		 *
-		 * N.B. we increment rather than just set f_stackadj in
-		 * case we are called from syscall when processing a
-		 * sigreturn.  In that case, f_stackadj may be non-zero.
-		 */
-		frame->f_stackadj += exframesize[ft];
-		frame->f_format = frame->f_vector = 0;
-#ifdef DEBUG
-		if (sigdebug & SDB_FOLLOW)
-			printf("sendsig(%d): copy out %d of frame %d\n",
-			    p->p_pid, exframesize[ft], ft);
-#endif
-	}
-	if (fpu_type) {
-		kfp->sf_state.ss_flags |= SS_FPSTATE;
-		m68881_save(&kfp->sf_state.ss_fpstate);
-	}
-#ifdef DEBUG
-	if ((sigdebug & SDB_FPSTATE) && *(char *) &kfp->sf_state.ss_fpstate)
-		printf("sendsig(%d): copy out FP state (%x) to %x\n",
-		    p->p_pid, *(u_int *) & kfp->sf_state.ss_fpstate,
-		    &kfp->sf_state.ss_fpstate);
-#endif
-
-	/*
-	 * Build the signal context to be used by sigreturn.
-	 */
-	kfp->sf_sc.sc_onstack = oonstack;
-	kfp->sf_sc.sc_mask = mask;
-	kfp->sf_sc.sc_sp = frame->f_regs[SP];
-	kfp->sf_sc.sc_fp = frame->f_regs[A6];
-	kfp->sf_sc.sc_ap = (int) &fp->sf_state;
-	kfp->sf_sc.sc_pc = frame->f_pc;
-	kfp->sf_sc.sc_ps = frame->f_sr;
-	(void) copyout((caddr_t) kfp, (caddr_t) fp, sizeof(struct sigframe));
-	frame->f_regs[SP] = (int) fp;
-#ifdef DEBUG
-	if (sigdebug & SDB_FOLLOW)
-		printf("sendsig(%d): sig %d scp %x fp %x sc_sp %x sc_ap %x\n",
-		    p->p_pid, sig, kfp->sf_scp, fp,
-		    kfp->sf_sc.sc_sp, kfp->sf_sc.sc_ap);
-#endif
-	/*
-	 * Signal trampoline code is at base of user stack.
-	 */
-	frame->f_pc = (int) (((char *) PS_STRINGS) - (esigcode - sigcode));
-#ifdef DEBUG
-	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-		printf("sendsig(%d): sig %d returns\n",
-		    p->p_pid, sig);
-#endif
-	free((caddr_t) kfp, M_TEMP);
-}
-
-/*
- * System call to cleanup state after a signal
- * has been taken.  Reset signal mask and
- * stack state from context left by sendsig (above).
- * Return to previous pc and psl as specified by
- * context left by sendsig. Check carefully to
- * make sure that the user has not modified the
- * psl to gain improper priviledges or to cause
- * a machine fault.
- */
-/* ARGSUSED */
-int
-sys_sigreturn(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct sys_sigreturn_args /* {
-		syscallarg(struct sigcontext *) sigcntxp;
-	} */ *uap = v;
-	extern short	exframesize[];
-	struct sigcontext *scp, context;
-	struct frame	*frame;
-	struct sigstate	tstate;
-	int     rf, flags;
-
-	scp = SCARG(uap, sigcntxp);
-#ifdef DEBUG
-	if (sigdebug & SDB_FOLLOW)
-		printf("sigreturn: pid %d, scp %x\n", p->p_pid, scp);
-#endif
-	if ((int) scp & 1)
-		return (EINVAL);
-	/*
-	 * Test and fetch the context structure.
-	 * We grab it all at once for speed.
-	 */
-	if (useracc((caddr_t) scp, sizeof(*scp), B_WRITE) == 0 ||
-	    copyin(scp, &context, sizeof(context)))
-		return (EINVAL);
-	scp = &context;
-	if ((scp->sc_ps & (PSL_MBZ | PSL_IPL | PSL_S)) != 0)
-		return (EINVAL);
-	/*
-	 * Restore the user supplied information
-	 */
-	if (scp->sc_onstack & 1)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
-	p->p_sigmask = scp->sc_mask & ~sigcantmask;
-	frame = (struct frame *) p->p_md.md_regs;
-	frame->f_regs[SP] = scp->sc_sp;
-	frame->f_regs[A6] = scp->sc_fp;
-	frame->f_pc = scp->sc_pc;
-	frame->f_sr = scp->sc_ps;
-
-	/*
-	 * Grab pointer to hardware state information.
-	 * If zero, the user is probably doing a longjmp.
-	 */
-	if ((rf = scp->sc_ap) == 0)
-		return (EJUSTRETURN);
-	/*
-	 * See if there is anything to do before we go to the
-	 * expense of copying in close to 1/2K of data
-	 */
-	flags = fuword((caddr_t) rf);
-#ifdef DEBUG
-	if (sigdebug & SDB_FOLLOW)
-		printf("sigreturn(%d): sc_ap %x flags %x\n",
-		    p->p_pid, rf, flags);
-#endif
-	/*
-	 * fuword failed (bogus sc_ap value).
-	 */
-	if (flags == -1)
-		return (EINVAL);
-	if (flags == 0 || copyin((caddr_t) rf, (caddr_t) & tstate, sizeof tstate))
-		return (EJUSTRETURN);
-#ifdef DEBUG
-	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
-		printf("sigreturn(%d): ssp %x usp %x scp %x ft %d\n",
-		    p->p_pid, &flags, scp->sc_sp, SCARG(uap, sigcntxp),
-		    (flags & SS_RTEFRAME) ? tstate.ss_frame.f_format : -1);
-#endif
-	/*
-	 * Restore most of the users registers except for A6 and SP
-	 * which were handled above.
-	 */
-	if (flags & SS_USERREGS)
-		bcopy((caddr_t) tstate.ss_frame.f_regs,
-		    (caddr_t) frame->f_regs, sizeof(frame->f_regs) - 2 * NBPW);
-	/*
-	 * Restore long stack frames.  Note that we do not copy
-	 * back the saved SR or PC, they were picked up above from
-	 * the sigcontext structure.
-	 */
-	if (flags & SS_RTEFRAME) {
-		register int sz;
-
-		/* grab frame type and validate */
-		sz = tstate.ss_frame.f_format;
-		if (sz > 15 || (sz = exframesize[sz]) < 0)
-			return (EINVAL);
-		frame->f_stackadj -= sz;
-		frame->f_format = tstate.ss_frame.f_format;
-		frame->f_vector = tstate.ss_frame.f_vector;
-		bcopy((caddr_t) & tstate.ss_frame.F_u, (caddr_t) & frame->F_u, sz);
-#ifdef DEBUG
-		if (sigdebug & SDB_FOLLOW)
-			printf("sigreturn(%d): copy in %d of frame type %d\n",
-			    p->p_pid, sz, tstate.ss_frame.f_format);
-#endif
-	}
-	/*
-	 * Finally we restore the original FP context
-	 */
-	if (flags & SS_FPSTATE)
-		m68881_restore(&tstate.ss_fpstate);
-#ifdef DEBUG
-	if ((sigdebug & SDB_FPSTATE) && *(char *) &tstate.ss_fpstate)
-		printf("sigreturn(%d): copied in FP state (%x) at %x\n",
-		    p->p_pid, *(u_int *) & tstate.ss_fpstate,
-		    &tstate.ss_fpstate);
-	if ((sigdebug & SDB_FOLLOW) ||
-	    ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid))
-		printf("sigreturn(%d): returns\n", p->p_pid);
-#endif
-	return (EJUSTRETURN);
 }
 
 int     waittime = -1;
@@ -833,42 +569,58 @@ boot(howto)
 #ifdef notyet
 		/*
 		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
+		 * will be out of synch; adjust it now unless
+		 * the system was sitting in ddb.
 		 */
-		resettodr();
+		if ((howto & RB_TIMEBAD) == 0) {
+			resettodr();
+		} else {
+			printf("WARNING: not updating battery clock\n");
+		}
 #else
 # ifdef DIAGNOSTIC
-		printf("NetBSD/mac68k does not trust itself to update the "
-		    "RTC on shutdown.\n");
+		printf("OpenBSD/mac68k does not trust itself to update the clock on shutdown.\n");
 # endif
 #endif
 	}
-	splhigh();		/* extreme priority */
-	if (howto & RB_HALT) {
-		printf("halted\n\n");
-		via_shutdown();
-	} else {
-		if (howto & RB_DUMP) {
-			savectx(&dumppcb);
-			dumpsys();
-		}
 
-		/* run any shutdown hooks */
-		doshutdownhooks();
+	/* Disable interrupts. */
+	splhigh();
 
-		/*
-		 * Map ROM where the MacOS likes it, so we can reboot,
-		 * hopefully.
-		 */
-		pmap_map(MacOSROMBase, MacOSROMBase,
-			 MacOSROMBase + 4 * 1024 * 1024,
-			 VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
-		doboot();
-		/* NOTREACHED */
+	/* If rebooting and a dump is requested, do it. */
+	if (howto & RB_DUMP) {
+		savectx(&dumppcb);	/* XXX this goes away soon */
+		dumpsys();
 	}
-	printf("            The system is down.\n");
-	printf("You may reboot or turn the machine off, now.\n");
-	for (;;);		/* Foil the compiler... */
+
+	/* Run any shutdown hooks. */
+	doshutdownhooks();
+
+	if (howto & RB_HALT) {
+		printf("System halted.\n\n");
+		via_shutdown();
+#ifndef MRG_ADB                 /* adb_poweroff is available only when
+                                 * the MRG_ADB method isn't used.       */
+                adb_poweroff(); /* Shut down machines whose power functions
+                                 * are accessed via modified ADB calls. */
+#endif
+		printf("You may turn the machine off,");
+		printf(" or hit any key to reboot.\n");
+		(void)cngetc();
+	}
+
+	/*
+	 * Map ROM where the MacOS likes it, so we can reboot,
+	 * hopefully.
+	 */
+	pmap_map(MacOSROMBase, MacOSROMBase,
+		 MacOSROMBase + 4 * 1024 * 1024,
+		 VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE);
+
+	
+	printf("rebooting...\n");
+	DELAY(1000000);
+	doboot();
 	/* NOTREACHED */
 }
 
@@ -894,7 +646,7 @@ get_max_page()
 }
 
 /*
- * This is called by configure to set dumplo and dumpsize.
+ * This is called by main to set dumplo and dumpsize.
  * Dumps always skip the first CLBYTES of disk space in
  * case there might be a disk label stored there.  If there
  * is extra space, put dump at the end to reduce the chance
@@ -1129,6 +881,9 @@ straytrap(pc, evec)
 {
 	printf("unexpected trap; vector offset 0x%x from 0x%x.\n",
 	    (int) (evec & 0xfff), pc);
+#ifdef DDB
+	Debugger();
+#endif
 }
 
 int    *nofault;
@@ -1403,10 +1158,10 @@ cpu_exec_aout_makecmds(p, epp)
 	struct exec_package *epp;
 {
 	int     error = ENOEXEC;
-	struct exec *execp = epp->ep_hdr;
 
 #ifdef COMPAT_NOMID
-	if (execp->a_midmag == ZMAGIC)	/* i.e., MID == 0. */
+	/* Check to see if MID == 0. */
+	if (((struct exec *) epp->ep_hdr)->a_midmag == ZMAGIC)
 		return exec_aout_prep_oldzmagic(p, epp);
 #endif
 
@@ -1423,23 +1178,107 @@ cpu_exec_aout_makecmds(p, epp)
 
 static char *envbuf = NULL;
 
-void	initenv __P((u_long, char *));
+/*
+ * getenvvars: Grab a few useful variables
+ */
+void		getenvvars __P((u_long, char *));
+static long	getenv __P((char *));
 
 void
-initenv(flag, buf)
+getenvvars(flag, buf)
 	u_long  flag;
 	char   *buf;
 {
+	extern u_long bootdev, videobitdepth, videosize;
+	extern u_long end, esym;
+	extern u_long macos_boottime, MacOSROMBase;
+	extern long macos_gmtbias;
+	int     root_scsi_id;
+
 	/*
          * If flag & 0x80000000 == 0, then we're booting with the old booter
          * and we should freak out.
          */
-
 	if ((flag & 0x80000000) == 0) {
 		/* Freak out; print something if that becomes available */
-	} else {
+	} else
 		envbuf = buf;
+
+	root_scsi_id = getenv("ROOT_SCSI_ID");
+	/*
+         * For now, we assume that the boot device is off the first controller.
+         */
+	if (bootdev == 0)
+		bootdev = MAKEBOOTDEV(4, 0, 0, root_scsi_id, 0);
+
+	if (boothowto == 0)
+		boothowto = getenv("SINGLE_USER");
+
+	/* These next two should give us mapped video & serial */
+	/* We need these for pre-mapping graybars & echo, but probably */
+	/* only on MacII or LC.  --  XXX */
+	/* videoaddr = getenv("MACOS_VIDEO"); */
+	/* sccaddr = getenv("MACOS_SCC"); */
+
+	/*
+         * The following are not in a structure so that they can be
+         * accessed more quickly.
+         */
+	videoaddr = getenv("VIDEO_ADDR");
+	videorowbytes = getenv("ROW_BYTES");
+	videobitdepth = getenv("SCREEN_DEPTH");
+	videosize = getenv("DIMENSIONS");
+
+	/*
+         * More misc stuff from booter.
+         */
+	mac68k_machine.machineid = getenv("MACHINEID");
+	mac68k_machine.mach_processor = getenv("PROCESSOR");
+	mac68k_machine.mach_memsize = getenv("MEMSIZE");
+	mac68k_machine.do_graybars = getenv("GRAYBARS");
+	mac68k_machine.serial_boot_echo = getenv("SERIALECHO");
+	mac68k_machine.serial_console = getenv("SERIALCONSOLE");
+
+	mac68k_machine.modem_flags = getenv("SERIAL_MODEM_FLAGS");
+	mac68k_machine.modem_cts_clk = getenv("SERIAL_MODEM_HSKICLK");
+	mac68k_machine.modem_dcd_clk = getenv("SERIAL_MODEM_GPICLK");
+	mac68k_machine.print_flags = getenv("SERIAL_PRINT_FLAGS");
+	mac68k_machine.print_cts_clk = getenv("SERIAL_PRINT_HSKICLK");
+	mac68k_machine.print_dcd_clk = getenv("SERIAL_PRINT_GPICLK");
+	/* Should probably check this and fail if old */
+	mac68k_machine.booter_version = getenv("BOOTERVER");
+
+	/*
+         * Get end of symbols for kernel debugging
+         */
+	esym = getenv("END_SYM");
+#ifndef SYMTAB_SPACE
+	if (esym == 0)
+#endif
+		esym = (long) &end;
+
+	/* Get MacOS time */
+	macos_boottime = getenv("BOOTTIME");
+
+	/* Save GMT BIAS saved in Booter parameters dialog box */
+	macos_gmtbias = getenv("GMTBIAS");
+
+	/*
+         * Save globals stolen from MacOS
+         */
+
+	ROMBase = (caddr_t) getenv("ROMBASE");
+	if (ROMBase == (caddr_t) 0) {
+		ROMBase = (caddr_t) ROMBASE;
 	}
+	MacOSROMBase = (unsigned long) ROMBase;
+	TimeDBRA = getenv("TIMEDBRA");
+	ADBDelay = (u_short) getenv("ADBDELAY");
+	HwCfgFlags  = getenv("HWCFGFLAGS");
+	HwCfgFlags2 = getenv("HWCFGFLAG2");
+	HwCfgFlags3 = getenv("HWCFGFLAG3");
+ 	ADBReInit_JTBL = getenv("ADBREINIT_JTBL");
+ 	mrg_ADBIntrPtr = (caddr_t) getenv("ADBINTERRUPT");
 }
 
 static char	toupper __P((char));
@@ -1454,8 +1293,6 @@ toupper(c)
 		return c;
 	}
 }
-
-static long	getenv __P((char *));
 
 static long
 getenv(str)
@@ -1520,21 +1357,66 @@ getenv(str)
 /*
  * ROM Vector information for calling drivers in ROMs
  *
- * Egret, ADBReInit_JTBL and ROMResourceMap were added to these
- *  tables.  Egret probably isn't used anyplace anymore, but I was
- *  inspired by the default value that was used in "macrom.c".  That
- *  value was most likely non-functional for all but a few systems,
- *  so putting it here will hopefully localize system-specific ROM
- *  addresses.  Likewise ADBReInit_JTBL and ROMResourceMap are
- *  currently used on only a few systems, but changes in the Booter
- *  and changes in ROM Mapping were causing problems.  Hopefully
- *  those problems will be eliminated by having the proper addresses
- *  for those machines in this table.
+ * According to information published on the Web by Apple, there have
+ * been 9 different ROM families used in the Mac since the introduction
+ * of the Lisa/XL through the latest PowerMacs (May 96).  Each family
+ * has zero or more version variants and in some cases a version variant
+ * may exist in one than one length format.  Generally any one specific
+ * Mac will use a common set of routines within the ROM and a model-specific
+ * set also in the ROM.  Luckily most of the routines used by BSD fall
+ * into the common set and can therefore be defined in the ROM Family.
+ * The offset addresses (address minus the ROM Base) of these common routines
+ * is the same for all machines which use that ROM.  The offset addresses of
+ * the machine-specific routines is generally different for each machine.
+ * The machine-specific routines currently used by BSD/mac68k include:
+ *       ADB_interrupt, PM_interrpt, ADBBase+130_interrupt,
+ *       PMgrOp, jClkNoMem, Egret, InitEgret, and ADBReInit_JTBL
  *
- * What we probably need is a little MacOS Utility that can suck all
- *  these addresses from the System, tell the user if his/er system
- *  is currently supported via the romvec tables, and provide a
- *  formatted output file for inclusion here if it isn't.
+ * It is possible that the routine at "jClkNoMem" is a common routine, but
+ * some variation in addresses has been seen.  Also, execept for the very
+ * earliest machines which used Egret, the machine-specific value of the
+ * Egret routine may be unimportant as the machine-specific InitEgret code
+ * seems to always set the OS Trap vector for Egret.
+ *
+ * Only three of the nine different ROMs are important to BSD/mac68k.
+ * All other ROMs are used in early model Macs which are unable to run
+ * BSD due to other hardware limitations such as 68000 CPU, no MMU
+ * capability, or used only in PowerMacs.  The three that we are interested
+ * in are:
+ *
+ * ROM Family $0178 - used in the II, IIx, IIcx, and SE/30
+ *            All machines which use this ROM are now supported by BSD.
+ *            There are no machine-dependent routines in these ROMs used by
+ *            BSD/mac68k.  This ROM is always 256K in length.
+ *
+ * ROM Family $067c - used in Classic, Color Classic, Color Classic II,
+ *                      IIci, IIsi, IIvi, IIvx, IIfx, LC, LC II, LC III,
+ *                      LC III+, LC475, LC520, LC550, LC575, LC580, LC630,
+ *                      MacTV, P200, P250, P275, P400/405/410/430, P450,
+ *                      P460/466/467, P475/476, P520, P550/560, P575/577/578,
+ *                      P580/588, P600, P630/631/635/636/637/638/640, Q605,
+ *                      Q610, C610, Q630, C650, Q650, Q700, Q800, Q900, Q950,
+ *                      PB140, PB145/145B, PB150, PB160, PB165, PB165c, PB170,
+ *                      PB180, PB180c, Duo 210, Duo 230, Duo 250, Duo 270c,
+ *                      Duo280, Duo 280c, PB 520/520c/540/540c/550
+ *             This is the so-called "Universal" ROM used in almost all 68K
+ *             machines. There are machine-dependent and machine-independent
+ *             routines used by BSD/mac68k in this ROM, and except for the
+ *             PowerBooks and the Duos, this ROM seems to be fairly well
+ *             known by BSD/mac68k.  Desktop machines listed here that are
+ *             not yet running BSD probably only lack the necessary
+ *             addresses for the machine-dependent routines, or are waiting
+ *             for IDE disk support.  This ROM is generally 1Meg in length,
+ *             however when used in the IIci, IIfx, IIsi, LC, Classic II, and
+ *             P400/405/410/430 it is 512K in length, and when used in the
+ *             PB 520/520c/540/540c/550 it is 2Meg in length.
+ *
+ * ROM Family - $077d - used in C660AV/Q660AV, Q840AV
+ *             The "Universal" ROM used on the PowerMacs and used in the
+ *             68K line for the AV Macs only.  When used in the 68K AV
+ *             machines the ROM is 2Meg in length; all uses in the PowerMac
+ *             use a length of 4Meg.
+ *
  *		Bob Nestor - <rnestor@metronet.com>
  */
 static romvec_t romvecs[] =
@@ -1592,7 +1474,7 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x40814800,	/* Egret */
 		(caddr_t) 0x408147c4,	/* InitEgret */
 		(caddr_t) 0x0,		/* ADBReInit_JTBL */
-		(caddr_t) 0x0,		/* ROMResourceMap List Head */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
 		(caddr_t) 0x4081c406,	/* FixDiv */
 		(caddr_t) 0x4081c312,	/* FixMul */
 	},
@@ -1611,23 +1493,23 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4080a752,	/* ADBReInit */
 		(caddr_t) 0x4080a3dc,	/* ADBOp */
 		(caddr_t) 0x0,		/* PMgrOp */
-		(caddr_t) 0x40a0c05c,	/* WriteParam */
-		(caddr_t) 0x40a0c086,	/* SetDateTime */
-		(caddr_t) 0x40a0c5cc,	/* InitUtil */
-		(caddr_t) 0x40a0b186,	/* ReadXPRam */
-		(caddr_t) 0x40a0b190,	/* WriteXPRam */
-		(caddr_t) 0x40ab39b6,	/* jClkNoMem */
-		(caddr_t) 0x40a0a818,	/* ADBAlternateInit */
-		(caddr_t) 0x40a14800,	/* Egret */
-		(caddr_t) 0x40a147c4,	/* InitEgret */
+		(caddr_t) 0x4080c05c,	/* WriteParam */
+		(caddr_t) 0x4080c086,	/* SetDateTime */
+		(caddr_t) 0x4080c5cc,	/* InitUtil */
+		(caddr_t) 0x4080b186,	/* ReadXPRam */
+		(caddr_t) 0x4080b190,	/* WriteXPRam */
+		(caddr_t) 0x4080b1e4,	/* jClkNoMem */
+		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
+		(caddr_t) 0x40814800,	/* Egret */
+		(caddr_t) 0x408147c4,	/* InitEgret */
 		(caddr_t) 0x0,		/* ADBReInit_JTBL */
-		(caddr_t) 0x0,		/* ROMResourceMap List Head */
-		(caddr_t) 0x40a1c406,	/* FixDiv */
-		(caddr_t) 0x40a1c312,	/* FixMul */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x4081c406,	/* FixDiv */
+		(caddr_t) 0x4081c312,	/* FixMul */
 	},
 	/*
 	 * Vectors verified for Mac Classic II and LC II
-	 * (LC III?  Other LC's?  680x0 Performas?)
+	 * (Other LC's?  680x0 Performas?)
 	 */
 	{			/* 3 */
 		"Mac Classic II ROMs",
@@ -1640,15 +1522,20 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x40a0a3ac,	/* SetADBInfo */
 		(caddr_t) 0x40a0a752,	/* ADBReInit */
 		(caddr_t) 0x40a0a3dc,	/* ADBOp */
-		(caddr_t) 0,	/* PMgrOp */
-		(caddr_t) 0x4080c05c,	/* WriteParam */
-		(caddr_t) 0x4080c086,	/* SetDateTime */
-		(caddr_t) 0x4080c5cc,	/* InitUtil */
-		(caddr_t) 0x4080b186,	/* ReadXPRam */
-		(caddr_t) 0x4080b190,	/* WriteXPRam */
-		(caddr_t) 0x408b39b6,	/* jClkNoMem */
-		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
-		(caddr_t) 0x408147c4,	/* InitEgret */
+		(caddr_t) 0x0,		/* PMgrOp */
+		(caddr_t) 0x40a0c05c,	/* WriteParam */
+		(caddr_t) 0x40a0c086,	/* SetDateTime */
+		(caddr_t) 0x40a0c5cc,	/* InitUtil */
+		(caddr_t) 0x40a0b186,	/* ReadXPRam */
+		(caddr_t) 0x40a0b190,	/* WriteXPRam */
+		(caddr_t) 0x40a0b1e4,	/* jClkNoMem */
+		(caddr_t) 0x40a0a818,	/* ADBAlternateInit */
+		(caddr_t) 0x40a14800,	/* Egret */
+		(caddr_t) 0x40a147c4,	/* InitEgret */
+		(caddr_t) 0x40a03ba6,	/* ADBReInit_JTBL */
+		(caddr_t) 0x40a7eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x40a1c406,	/* FixDiv, wild guess */
+		(caddr_t) 0x40a1c312,	/* FixMul, wild guess */
 	},
 	/*
 	 * Vectors verified for IIci, Q700
@@ -1675,13 +1562,13 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x0,		/* Egret */
 		(caddr_t) 0x408147c4,	/* InitEgret */
 		(caddr_t) 0x0,		/* ADBReInit_JTBL */
-		(caddr_t) 0x0,		/* ROMResourceMap List Head */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
 		(caddr_t) 0x4081c406,	/* FixDiv */
 		(caddr_t) 0x4081c312,	/* FixMul */
 	},
 	/*
-	 * Vectors verified for Duo 230, PB 180, PB 165
-	 * (Duo 210?  PB 165?  PB 160?  Duo 250?  Duo 270?)
+	 * Vectors verified for Duo 230, PB 180, PB 160, PB 165/165C
+	 * (Duo 210?  Duo 250?  Duo 270?)
 	 */
 	{			/* 5 */
 		"2nd Powerbook class ROMs",
@@ -1710,7 +1597,8 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4081c312,	/* FixMul, wild guess */
 	},
 	/*
-	 * Quadra, Centris merged table (C650, 610, Q800?)
+	 * Vectors verified for the Quadra, Centris 650
+	 *  (610, Q800?)
 	 */
 	{			/* 6 */
 		"Quadra/Centris ROMs",
@@ -1733,14 +1621,14 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
 		(caddr_t) 0x40814800,	/* Egret */
 		(caddr_t) 0x408147c4,	/* InitEgret */
-		(caddr_t) 0x0,		/* ADBReInit_JTBL */
-		(caddr_t) 0x0,		/* ROMResourceMap List Head */
+		(caddr_t) 0x408d2b64,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
 		(caddr_t) 0x4081c406,	/* FixDiv, wild guess */
 		(caddr_t) 0x4081c312,	/* FixMul, wild guess */
 	},
 	/*
-	 * Quadra 840AV (but ADBBase + 130 intr is unknown)
-	 * (PM intr is known to be 0, PMgrOp is guessed to be 0)
+	 * Vectors verified for the Quadra 660AV
+	 *  (Quadra 840AV?)
 	 */
 	{			/* 7 */
 		"Quadra AV ROMs",
@@ -1789,23 +1677,23 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4000c5cc,	/* InitUtil */
 		(caddr_t) 0x4000b186,	/* ReadXPRam */
 		(caddr_t) 0x4000b190,	/* WriteXPRam */
-		(caddr_t) 0x0,		/* jClkNoMem */
+		(caddr_t) 0x400b3c08,	/* jClkNoMem */
 		(caddr_t) 0x4000a818,	/* ADBAlternateInit */
-		(caddr_t) 0x40814800,	/* Egret */
+		(caddr_t) 0x40009ae6,	/* Egret */ /* From PB520 */
 		(caddr_t) 0x400147c4,	/* InitEgret */
-		(caddr_t) 0x0,		/* ADBReInit_JTBL */
-		(caddr_t) 0x0,		/* ROMResourceMap List Head */
+		(caddr_t) 0x400a7a5c,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4007eb90,	/* ROMResourceMap List Head */
 		(caddr_t) 0x4001c406,	/* FixDiv, wild guess */
 		(caddr_t) 0x4001c312,	/* FixMul, wild guess */
 	},
 	/*
-	 * Q 605 (but guessing at ADBBase + 130, based on Q 650)
+	 * Verified for the Q605
 	 */
 	{			/* 9 */
 		"Quadra/Centris 605 ROMs",
 		(caddr_t) 0x408a9b56,	/* ADB int */
 		(caddr_t) 0x0,		/* PM int */
-		(caddr_t) 0x408a99de,	/* ADBBase + 130 */
+		(caddr_t) 0x408b2f94,	/* ADBBase + 130 */
 		(caddr_t) 0x4080a360,	/* CountADBs */
 		(caddr_t) 0x4080a37a,	/* GetIndADB */
 		(caddr_t) 0x4080a3a6,	/* GetADBInfo */
@@ -1818,14 +1706,14 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4080c5cc,	/* InitUtil */
 		(caddr_t) 0x4080b186,	/* ReadXPRam */
 		(caddr_t) 0x4080b190,	/* WriteXPRam */
-		(caddr_t) 0x0,		/* jClkNoMem */
+		(caddr_t) 0x408b3bf8,	/* jClkNoMem */
 		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
-		(caddr_t) 0x40814800,	/* Egret */
+		(caddr_t) 0x408a99c0,	/* Egret */
 		(caddr_t) 0x408147c4,	/* InitEgret */
-		(caddr_t) 0x0,		/* ADBReInit_JTBL */
-		(caddr_t) 0x0,		/* ROMResourceMap List Head */
-		(caddr_t) 0x4081c406,	/* FixDiv, wild guess */
-		(caddr_t) 0x4081c312,	/* FixMul, wild guess */
+		(caddr_t) 0x408a82c0,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x4081c406,	/* FixDiv */
+		(caddr_t) 0x4081c312,	/* FixMul */
 	},
 	/*
 	 * Vectors verified for Duo 270c, PB150
@@ -1852,7 +1740,7 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x40814800,	/* Egret */
 		(caddr_t) 0x408147c4,	/* InitEgret */
 		(caddr_t) 0x0,		/* ADBReInit_JTBL */
-		(caddr_t) 0x0,		/* ROMResourceMap List Head */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
 		(caddr_t) 0x4081c406,	/* FixDiv, wild guess */
 		(caddr_t) 0x4081c312,	/* FixMul, wild guess */
 	},
@@ -1886,7 +1774,7 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4081c312,	/* FixMul for P550 */
 	},
 	/*
-	 * Vectors for the MacTV
+	 * Vectors verified for the MacTV
 	 */
 	{			/* 12 */
 		"MacTV ROMs",
@@ -1914,9 +1802,8 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x40a1c406,	/* FixDiv */
 		(caddr_t) 0x40a1c312,	/* FixMul */
 	},
-
 	/*
-	 * Vectors verified for Quadra 630
+	 * Vectors verified for the Quadra630
 	 */
 	{			/* 13 */
 		"Quadra630 ROMs",
@@ -1933,12 +1820,129 @@ static romvec_t romvecs[] =
 		(caddr_t) 0x4080c05c,	/* WriteParam */
 		(caddr_t) 0x4080c086,	/* SetDateTime */
 		(caddr_t) 0x4080c5cc,	/* InitUtil */
+		(caddr_t) 0x4080b186,	/* Wild guess at ReadXPRam */
 		(caddr_t) 0x4080b190,	/* Wild guess at WriteXPRam */
 		(caddr_t) 0x408b39f4,	/* jClkNoMem */
 		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
 		(caddr_t) 0x408a99c0,	/* Egret */
 		(caddr_t) 0x408147c8,	/* InitEgret */
 		(caddr_t) 0x408a7ef8,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x4081c406,	/* FixDiv */
+		(caddr_t) 0x4081c312,	/* FixMul */
+	},
+	/*
+	 * Vectors verified for LC III
+	 */
+	{			/* 14 */
+		"LC III ROMs",
+		(caddr_t) 0x40814912,	/* ADB interrupt */
+		(caddr_t) 0x0,		/* PM ADB interrupt */
+		(caddr_t) 0x408b2f94,	/* ADBBase + 130 interupt */
+		(caddr_t) 0x4080a360,	/* CountADBs */
+		(caddr_t) 0x4080a37a,	/* GetIndADB */
+		(caddr_t) 0x4080a3a6,	/* GetADBInfo */
+		(caddr_t) 0x4080a3ac,	/* SetADBInfo */
+		(caddr_t) 0x4080a752,	/* ADBReInit */
+		(caddr_t) 0x4080a3dc,	/* ADBOp */
+		(caddr_t) 0x0,		/* PMgrOp */
+		(caddr_t) 0x4080c05c,	/* WriteParam */
+		(caddr_t) 0x4080c086,	/* SetDateTime */
+		(caddr_t) 0x4080c5cc,	/* InitUtil */
+		(caddr_t) 0x4080b186,	/* ReadXPRam */
+		(caddr_t) 0x4080b190,	/* WriteXPRam */
+		(caddr_t) 0x408b39b6,	/* jClkNoMem */
+		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
+		(caddr_t) 0x40814800,	/* Egret */
+		(caddr_t) 0x408147c4,	/* InitEgret */
+		(caddr_t) 0x408d2918,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x4081c406,	/* FixDiv */
+		(caddr_t) 0x4081c312,	/* FixMul */
+	},
+	/*
+	 * Vectors verified for the LC520
+	 */
+	{			/* 15 */
+		"MacLC520 ROMs",
+		(caddr_t) 0x408d16d6,	/* ADB interrupt */
+		(caddr_t) 0x0,		/* PB ADB interrupt */
+		(caddr_t) 0x408b2f84,	/* ADBBase + 130 interrupt; whatzit? */
+		(caddr_t) 0x4080a360,	/* CountADBs */
+		(caddr_t) 0x4080a37a,	/* GetIndADB */
+		(caddr_t) 0x4080a3a6,	/* GetADBInfo */
+		(caddr_t) 0x4080a3ac,	/* SetADBInfo */
+		(caddr_t) 0x4080a752,	/* ADBReInit */
+		(caddr_t) 0x4080a3dc,	/* ADBOp */
+		(caddr_t) 0x0,		/* PMgrOp */
+		(caddr_t) 0x4080c05c,	/* WriteParam */
+		(caddr_t) 0x4080c086,	/* SetDateTime */
+		(caddr_t) 0x4080c5cc,	/* InitUtil */
+		(caddr_t) 0x4080b186,	/* ReadXPRam */
+		(caddr_t) 0x4080b190,	/* WriteXPRam */
+		(caddr_t) 0x408b3c04,	/* jClkNoMem */
+		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
+		(caddr_t) 0x408d1450,	/* Egret */
+		(caddr_t) 0x408147c4,	/* InitEgret */
+		(caddr_t) 0x408d2460,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x4081c406,	/* FixDiv for P520 */
+		(caddr_t) 0x4081c312,	/* FixMul for P520 */
+	},
+	/*
+	 * Vectors verified for the LC 575/577/578
+	 */
+	{			/* 16 */
+		"MacLC575 ROMs",
+		(caddr_t) 0x408a9b56,	/* ADB interrupt */
+		(caddr_t) 0x0,		/* PB ADB interrupt */
+		(caddr_t) 0x408b2f94,	/* ADBBase + 130 interrupt; whatzit? */
+		(caddr_t) 0x4080a360,	/* CountADBs */
+		(caddr_t) 0x4080a37a,	/* GetIndADB */
+		(caddr_t) 0x4080a3a6,	/* GetADBInfo */
+		(caddr_t) 0x4080a3ac,	/* SetADBInfo */
+		(caddr_t) 0x4080a752,	/* ADBReInit */
+		(caddr_t) 0x4080a3dc,	/* ADBOp */
+		(caddr_t) 0x0,		/* PMgrOp */
+		(caddr_t) 0x4080c05c,	/* WriteParam */
+		(caddr_t) 0x4080c086,	/* SetDateTime */
+		(caddr_t) 0x4080c5cc,	/* InitUtil */
+		(caddr_t) 0x4080b186,	/* ReadXPRam */
+		(caddr_t) 0x4080b190,	/* WriteXPRam */
+		(caddr_t) 0x408b3bf8,	/* jClkNoMem */
+		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
+		(caddr_t) 0x408a99c0,	/* Egret */
+		(caddr_t) 0x408147c4,	/* InitEgret */
+		(caddr_t) 0x408a81a0,	/* ADBReInit_JTBL */
+		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
+		(caddr_t) 0x4081c406,	/* FixDiv for P520 */
+		(caddr_t) 0x4081c312,	/* FixMul for P520 */
+	},
+	/*
+	 * Vectors verified for the Quadra 950
+	 */
+	{			/* 17 */
+		"Quadra950 class ROMs",
+		(caddr_t) 0x40814912,	/* ADB interrupt */
+		(caddr_t) 0x0,		/* PM ADB interrupt */
+		(caddr_t) 0x4080a4d8,	/* ADBBase + 130 interrupt; whatzit? */
+		(caddr_t) 0x4080a360,	/* CountADBs */
+		(caddr_t) 0x4080a37a,	/* GetIndADB */
+		(caddr_t) 0x4080a3a6,	/* GetADBInfo */
+		(caddr_t) 0x4080a3ac,	/* SetADBInfo */
+		(caddr_t) 0x4080a752,	/* ADBReInit */
+		(caddr_t) 0x4080a3dc,	/* ADBOp */
+		(caddr_t) 0x0,		/* PMgrOp */
+		(caddr_t) 0x4080c05c,	/* WriteParam */
+		(caddr_t) 0x4080c086,	/* SetDateTime */
+		(caddr_t) 0x4080c5cc,	/* InitUtil */
+		(caddr_t) 0x4080b186,	/* ReadXPRam */
+		(caddr_t) 0x4080b190,	/* WriteXPRam */
+		(caddr_t) 0x4080b1e4,	/* jClkNoMem */
+		(caddr_t) 0x4080a818,	/* ADBAlternateInit */
+		(caddr_t) 0x40814800,	/* Egret */
+		(caddr_t) 0x408147c4,	/* InitEgret */
+		(caddr_t) 0x408038bc,	/* ADBReInit_JTBL */
 		(caddr_t) 0x4087eb90,	/* ROMResourceMap List Head */
 		(caddr_t) 0x4081c406,	/* FixDiv */
 		(caddr_t) 0x4081c312,	/* FixMul */
@@ -1965,11 +1969,11 @@ struct cpu_model_info cpu_models[] = {
 /* The Centris/Quadra series. */
 	{MACH_MACQ700, "Quadra", " 700 ", MACH_CLASSQ, &romvecs[4]},
 	{MACH_MACQ900, "Quadra", " 900 ", MACH_CLASSQ, &romvecs[6]},
-	{MACH_MACQ950, "Quadra", " 950 ", MACH_CLASSQ, &romvecs[2]},
+	{MACH_MACQ950, "Quadra", " 950 ", MACH_CLASSQ, &romvecs[17]},
 	{MACH_MACQ800, "Quadra", " 800 ", MACH_CLASSQ, &romvecs[6]},
 	{MACH_MACQ650, "Quadra", " 650 ", MACH_CLASSQ, &romvecs[6]},
 	{MACH_MACC650, "Centris", " 650 ", MACH_CLASSQ, &romvecs[6]},
-	{MACH_MACQ605, "Quadra", " 605", MACH_CLASSQ, &romvecs[9]},
+	{MACH_MACQ605, "Quadra", " 605 ", MACH_CLASSQ, &romvecs[9]},
 	{MACH_MACC610, "Centris", " 610 ", MACH_CLASSQ, &romvecs[6]},
 	{MACH_MACQ610, "Quadra", " 610 ", MACH_CLASSQ, &romvecs[6]},
 	{MACH_MACQ630, "Quadra", " 630 ", MACH_CLASSQ, &romvecs[13]},
@@ -1981,7 +1985,7 @@ struct cpu_model_info cpu_models[] = {
 	/* PB 100 has no MMU! */
 	{MACH_MACPB140, "PowerBook", " 140 ", MACH_CLASSPB, &romvecs[1]},
 	{MACH_MACPB145, "PowerBook", " 145 ", MACH_CLASSPB, &romvecs[1]},
-	{MACH_MACPB150, "PowerBook", " 150 ", MACH_CLASSPB, &romvecs[10]},
+	{MACH_MACPB150, "PowerBook", " 150 ", MACH_CLASSDUO, &romvecs[10]},
 	{MACH_MACPB160, "PowerBook", " 160 ", MACH_CLASSPB, &romvecs[5]},
 	{MACH_MACPB165, "PowerBook", " 165 ", MACH_CLASSPB, &romvecs[5]},
 	{MACH_MACPB165C, "PowerBook", " 165c ", MACH_CLASSPB, &romvecs[5]},
@@ -1994,23 +1998,24 @@ struct cpu_model_info cpu_models[] = {
 	{MACH_MACPB210, "PowerBook Duo", " 210 ", MACH_CLASSDUO, &romvecs[5]},
 	{MACH_MACPB230, "PowerBook Duo", " 230 ", MACH_CLASSDUO, &romvecs[5]},
 	{MACH_MACPB250, "PowerBook Duo", " 250 ", MACH_CLASSDUO, &romvecs[5]},
-	{MACH_MACPB270, "PowerBook Duo", " 270 ", MACH_CLASSDUO, &romvecs[5]},
+	{MACH_MACPB270, "PowerBook Duo", " 270C ", MACH_CLASSDUO, &romvecs[5]},
 	{MACH_MACPB280, "PowerBook Duo", " 280 ", MACH_CLASSDUO, &romvecs[5]},
 	{MACH_MACPB280C, "PowerBook Duo", " 280C ", MACH_CLASSDUO, &romvecs[5]},
 
 /* The Performas... */
 	{MACH_MACP600, "Performa", " 600 ", MACH_CLASSIIvx, &romvecs[2]},
-	{MACH_MACP460, "Performa", " 460 ", MACH_CLASSLC, &romvecs[3]},
+	{MACH_MACP460, "Performa", " 460 ", MACH_CLASSLC, &romvecs[14]},
 	{MACH_MACP550, "Performa", " 550 ", MACH_CLASSLC, &romvecs[11]},
 	{MACH_MACTV,   "TV ",      "",      MACH_CLASSLC, &romvecs[12]},
 
 /* The LCs... */
 	{MACH_MACLCII,  "LC", " II ",  MACH_CLASSLC, &romvecs[3]},
-	{MACH_MACLCIII, "LC", " III ", MACH_CLASSLC, &romvecs[3]},
+	{MACH_MACLCIII, "LC", " III ", MACH_CLASSLC, &romvecs[14]},
 	{MACH_MACLC475, "LC", " 475 ", MACH_CLASSQ,  &romvecs[9]},
-	{MACH_MACLC520, "LC", " 520 ", MACH_CLASSLC, &romvecs[3]},
-	{MACH_MACLC575, "LC", " 575 ", MACH_CLASSLC, &romvecs[3]},
+	{MACH_MACLC520, "LC", " 520 ", MACH_CLASSLC, &romvecs[15]},
+	{MACH_MACLC575, "LC", " 575 ", MACH_CLASSQ2, &romvecs[16]},
 	{MACH_MACCCLASSIC, "Color Classic ", "", MACH_CLASSLC, &romvecs[3]},
+	{MACH_MACCCLASSICII, "Color Classic"," II ", MACH_CLASSLC, &romvecs[3]},
 /* Does this belong here? */
 	{MACH_MACCLASSICII, "Classic", " II ", MACH_CLASSLC, &romvecs[3]},
 
@@ -2018,6 +2023,23 @@ struct cpu_model_info cpu_models[] = {
 	{0, "Unknown", "", MACH_CLASSII, NULL},
 	{0, NULL, NULL, 0, NULL},
 };				/* End of cpu_models[] initialization. */
+
+struct {
+	int	machineid;
+	caddr_t	fbbase;
+	u_long	fblen;
+} intvid_info[] =  {
+	{MACH_MACPB140,		(caddr_t) 0xfee00000,	32 * 1024},
+	{MACH_MACPB145,		(caddr_t) 0xfee00000,	32 * 1024},
+	{MACH_MACPB170,		(caddr_t) 0xfee00000,	32 * 1024},
+	{MACH_MACPB160,		(caddr_t) 0x60000000,	128 * 1024},
+	{MACH_MACPB165,		(caddr_t) 0x60000000,	128 * 1024},
+	{MACH_MACPB180,		(caddr_t) 0x60000000,	128 * 1024},
+	{MACH_MACPB165C,	(caddr_t) 0xfc040000,	512 * 1024},
+	{MACH_MACPB180C,	(caddr_t) 0xfc040000,	512 * 1024},
+	{MACH_MACPB500,		(caddr_t) 0x60000000,	512 * 1024},
+	{0,			(caddr_t) 0x0,		0},
+};				/* End of intvid_info[] initialization. */
 
 /*
  * Missing Mac Models:
@@ -2045,27 +2067,26 @@ mach_cputype()
 static void
 identifycpu()
 {
-	char   *proc;
+	char   *mpu;
 
-	switch (mac68k_machine.mach_processor) {
-	case MACH_68020:
-		proc = ("(68020)");
+	switch (cputype) {
+	case CPU_68020:
+		mpu = ("(68020)");
 		break;
-	case MACH_68030:
-		proc = ("(68030)");
+	case CPU_68030:
+		mpu = ("(68030)");
 		break;
-	case MACH_68040:
-		proc = ("(68040)");
+	case CPU_68040:
+		mpu = ("(68040)");
 		break;
-	case MACH_PENTIUM:
 	default:
-		proc = ("(unknown processor)");
+		mpu = ("(unknown processor)");
 		break;
 	}
 	sprintf(cpu_model, "Apple Macintosh %s%s %s",
 	    cpu_models[mac68k_machine.cpu_model_index].model_major,
 	    cpu_models[mac68k_machine.cpu_model_index].model_minor,
-	    proc);
+	    mpu);
 	printf("%s\n", cpu_model);
 }
 
@@ -2076,113 +2097,14 @@ get_machine_info()
 {
 	int     i;
 
-	for (i = 0; cpu_models[i].model_major; i++) {
+	for (i = 0; cpu_models[i].model_major; i++)
 		if (mac68k_machine.machineid == cpu_models[i].machineid)
 			break;
-	}
 
 	if (cpu_models[i].model_major == NULL)
 		i--;
 
 	mac68k_machine.cpu_model_index = i;
-}
-
-/*
- * getenvvars: Grab a few useful variables
- */
-void	getenvvars __P((void));
-
-void
-getenvvars()
-{
-	extern u_long bootdev, videobitdepth, videosize;
-	extern u_long end, esym;
-	extern u_long macos_boottime, MacOSROMBase;
-	extern long macos_gmtbias;
-	int     root_scsi_id;
-
-	root_scsi_id = getenv("ROOT_SCSI_ID");
-	/*
-         * For now, we assume that the boot device is off the first controller.
-         */
-	if (bootdev == 0) {
-		bootdev = (root_scsi_id << 16) | 4;
-	}
-
-	if (boothowto == 0) {
-		boothowto = getenv("SINGLE_USER");
-	}
-
-	/* These next two should give us mapped video & serial */
-	/* We need these for pre-mapping graybars & echo, but probably */
-	/* only on MacII or LC.  --  XXX */
-	/* videoaddr = getenv("MACOS_VIDEO"); */
-	/* sccaddr = getenv("MACOS_SCC"); */
-
-	/*
-         * The following are not in a structure so that they can be
-         * accessed more quickly.
-         */
-	videoaddr = getenv("VIDEO_ADDR");
-	videorowbytes = getenv("ROW_BYTES");
-	videobitdepth = getenv("SCREEN_DEPTH");
-	videosize = getenv("DIMENSIONS");
-
-	/*
-         * More misc stuff from booter.
-         */
-	mac68k_machine.machineid = getenv("MACHINEID");
-	switch (mac68k_machine.mach_processor = getenv("PROCESSOR")) {
-	case MACH_68040:
-		mmutype = MMU_68040;
-		break;
-	default:;
-	}
-	mac68k_machine.mach_memsize = getenv("MEMSIZE");
-	mac68k_machine.do_graybars = getenv("GRAYBARS");
-	mac68k_machine.serial_boot_echo = getenv("SERIALECHO");
-	mac68k_machine.serial_console = getenv("SERIALCONSOLE");
-
-	mac68k_machine.modem_flags = getenv("SERIAL_MODEM_FLAGS");
-	mac68k_machine.modem_cts_clk = getenv("SERIAL_MODEM_HSKICLK");
-	mac68k_machine.modem_dcd_clk = getenv("SERIAL_MODEM_GPICLK");
-	mac68k_machine.print_flags = getenv("SERIAL_PRINT_FLAGS");
-	mac68k_machine.print_cts_clk = getenv("SERIAL_PRINT_HSKICLK");
-	mac68k_machine.print_dcd_clk = getenv("SERIAL_PRINT_GPICLK");
-	/* Should probably check this and fail if old */
-	mac68k_machine.booter_version = getenv("BOOTERVER");
-
-	/*
-         * Get end of symbols for kernel debugging
-         */
-	esym = getenv("END_SYM");
-#ifndef SYMTAB_SPACE
-	if (esym == 0)
-#endif
-		esym = (long) &end;
-
-	/* Get MacOS time */
-	macos_boottime = getenv("BOOTTIME");
-
-	/* Save GMT BIAS saved in Booter parameters dialog box */
-	macos_gmtbias = getenv("GMTBIAS");
-
-	/*
-         * Save globals stolen from MacOS
-         */
-
-	ROMBase = (caddr_t) getenv("ROMBASE");
-	if (ROMBase == (caddr_t) 0) {
-		ROMBase = (caddr_t) ROMBASE;
-	}
-	MacOSROMBase = (unsigned long) ROMBase;
-	TimeDBRA = getenv("TIMEDBRA");
-	ADBDelay = (u_short) getenv("ADBDELAY");
-	HwCfgFlags  = getenv("HWCFGFLAGS");
-	HwCfgFlags2 = getenv("HWCFGFLAG2");
-	HwCfgFlags3 = getenv("HWCFGFLAG3");
- 	ADBReInit_JTBL = getenv("ADBREINIT_JTBL");
- 	mrg_ADBIntrPtr = (caddr_t) getenv("ADBINTERRUPT");
 }
 
 struct cpu_model_info *current_mac_model;
@@ -2199,6 +2121,7 @@ setmachdep()
 	static int firstpass = 1;
 	int setup_mrg_vectors = 0;
 	struct cpu_model_info *cpui;
+	int i;
 
 	/*
 	 * First, set things that need to be set on the first pass only
@@ -2215,14 +2138,6 @@ setmachdep()
 
 	if (!firstpass)
 		return;
-
-	/*
-	 * Get the console buffer physical address.  If we can't, we
-	 * punt and set it to 0.  Note that get_physical doesn't yet
-	 * work on the '040.
-	 */
-	if ((mmutype == MMU_68040) || !get_physical(videoaddr, &conspa))
-		conspa = 0;
 
 	/*
 	 * Set up any machine specific stuff that we have to before
@@ -2245,10 +2160,11 @@ setmachdep()
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
 		mac68k_machine.sccClkConst = 115200;
-		/* Disable everything but PM; we need it. */
-		via_reg(VIA1, vIER) = 0x6f;	/* disable VIA1 int */
+		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		/* Are we disabling something important? */
 		via_reg(VIA2, vIER) = 0x7f;	/* disable VIA2 int */
+		if (cputype == CPU_68040)
+			mac68k_machine.sonic = 1;
 		break;
 	case MACH_CLASSDUO:
 		/*
@@ -2261,25 +2177,24 @@ setmachdep()
 		Via1Base = (volatile u_char *) IOBase;
 		mac68k_machine.scsi80 = 1;
 		mac68k_machine.sccClkConst = 115200;
-		/* Disable everything but PM; we need it. */
-		via_reg(VIA1, vIER) = 0x6f;	/* disable VIA1 int */
+		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		/* Are we disabling something important? */
 		via_reg(VIA2, rIER) = 0x7f;	/* disable VIA2 int */
 		break;
 	case MACH_CLASSQ:
+        case MACH_CLASSQ2:
+		mac68k_vidlog = mac68k_vidphys = 0xf9000000;
+		/* Not really, but using too little memory would be wrong */
+		mac68k_vidlen = 2 * 1024 * 1024;
+		mac68k_machine.sonic = 1;
 	case MACH_CLASSAV:
 		VIA2 = 1;
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *) IOBase;
-		mac68k_machine.sonic = 1;
 		mac68k_machine.scsi96 = 1;
 		mac68k_machine.sccClkConst = 115200;
 		via_reg(VIA1, vIER) = 0x7f;	/* disable VIA1 int */
 		via_reg(VIA2, vIER) = 0x7f;	/* disable VIA2 int */
-		if (cpui->machineid == MACH_MACQ700) {
-			mac68k_vidlog = mac68k_vidphys = 0xf9000000;
-			mac68k_vidlen = 2 * 1024 * 1024;
-		}
 		break;
 	case MACH_CLASSIIci:
 		VIA2 = 0x13;
@@ -2324,10 +2239,23 @@ setmachdep()
 	}
 
 	/*
+	 * Set `internal' framebuffer location and length, if we know 
+	 * what they are.
+	 */
+	for (i = 0; intvid_info[i].machineid; i++) {
+		if (mac68k_machine.machineid == intvid_info[i].machineid) {
+			mac68k_vidlog = mac68k_vidphys =
+			    (u_int32_t) intvid_info[i].fbbase;
+			mac68k_vidlen = (u_int32_t) intvid_info[i].fblen;
+			break;
+		}
+	}
+
+	/*
 	 * Set up current ROM Glue vectors.  Actually now all we do
 	 * is save the address of the ROM Glue Vector table. This gets
 	 * used later when we re-map the vectors from MacOS Address
-	 * Space to NetBSD Address Space.
+	 * Space to BSD Address Space.
 	 */
 	if ((mac68k_machine.serial_console & 0x03) == 0 || setup_mrg_vectors)
 		mrg_MacOSROMVectors = cpui->rom_vectors;
@@ -2343,25 +2271,59 @@ mac68k_set_io_offsets(base)
 	vm_offset_t base;
 {
 	extern volatile u_char *sccA;
-	extern volatile u_char *ASCBase;
+
+	/*
+	 * Initialize the I/O mem extent map.
+	 * Note: we don't have to check the return value since
+	 * creation of a fixed extent map will never fail (since
+	 * descriptor storage has already been allocated).
+	 *
+	 * N.B. The iomem extent manages _all_ physical addresses
+	 * on the machine.  When the amount of RAM is found, all
+	 * extents of RAM are allocated from the map.
+	 */
+	iomem_ex = extent_create("iomem", 0x0, 0xffffffff, M_DEVBUF,
+	    (caddr_t)iomem_ex_storage, sizeof(iomem_ex_storage),
+	    EX_NOCOALESCE|EX_NOWAIT);
 
 	switch (current_mac_model->class) {
 	case MACH_CLASSQ:
 		Via1Base = (volatile u_char *) base;
 		sccA = (volatile u_char *) base + 0xc000;
-		ASCBase = (volatile u_char *) base + 0x14000;
-		SCSIBase = base;
+		switch (current_mac_model->machineid) {
+		case MACH_MACQ900:
+		case MACH_MACQ950:
+		case MACH_MACQ700:
+			SCSIBase = base + 0xf000;
+			break;
+		default:
+			SCSIBase = base + 0x10000;
+			break;
+		}
+		break;
+	case MACH_CLASSQ2:
+		/*
+		 * Note the different offset for sccA for this class of
+		 * machines.  This seems to be common on many of the
+		 * Quadra-type machines.
+		 */
+		Via1Base = (volatile u_char *) base;
+		sccA = (volatile u_char *) base + 0xc020;
+		SCSIBase = base + 0x10000;
+		break;
+	case MACH_CLASSAV:
+		Via1Base = (volatile u_char *) base;
+		sccA = (volatile u_char *) base + 0x4000;
+		SCSIBase = base + 0x18000;
 		break;
 	case MACH_CLASSII:
 	case MACH_CLASSPB:
-	case MACH_CLASSAV:
 	case MACH_CLASSIIci:
 	case MACH_CLASSIIsi:
 	case MACH_CLASSIIvx:
 	case MACH_CLASSLC:
 		Via1Base = (volatile u_char *) base;
 		sccA = (volatile u_char *) base + 0x4000;
-		ASCBase = (volatile u_char *) base + 0x14000;
 		SCSIBase = base;
 		break;
 	default:
@@ -2391,10 +2353,10 @@ gray_bar()
    	3) restore regs
 */
 
-	asm("movl a0, sp@-");
-	asm("movl a1, sp@-");
-	asm("movl d0, sp@-");
-	asm("movl d1, sp@-");
+	__asm __volatile ("	movl a0,sp@-;
+				movl a1,sp@-;
+				movl d0,sp@-;
+				movl d1,sp@-");
 
 /* check to see if gray bars are turned off */
 	if (mac68k_machine.do_graybars) {
@@ -2405,14 +2367,16 @@ gray_bar()
 		for (i = 0; i < 2 * videorowbytes / 4; i++)
 			((u_long *) videoaddr)[gray_nextaddr++] = 0x00000000;
 	}
-	asm("movl sp@+, d1");
-	asm("movl sp@+, d0");
-	asm("movl sp@+, a1");
-	asm("movl sp@+, a0");
+
+	__asm __volatile ("	movl sp@+,d1;
+				movl sp@+,d0;
+				movl sp@+,a1;
+				movl sp@+,a0");
 }
 #endif
 
 /* in locore */
+extern u_long ptest040 __P((caddr_t addr, u_int fc));
 extern int get_pte __P((u_int addr, u_long pte[2], u_short * psr));
 
 /*
@@ -2429,45 +2393,50 @@ get_physical(u_int addr, u_long * phys)
 	int     i, numbits;
 	extern u_int macos_tc;
 
-	/* This can not work for the 040, yet */
-	if (mmutype == MMU_68040)
-		return 0;
+	if (mmutype == MMU_68040) {
+		ph = ptest040((caddr_t) addr, FC_SUPERD);
+		if ((ph & MMU40_RES) == 0) {
+			ph = ptest040((caddr_t) addr, FC_USERD);
+			if ((ph & MMU40_RES) == 0)
+				return 0;
+		}
 
-	i = get_pte(addr, pte, &psr);
+		mask = (macos_tc & 0x4000) ? 0x00001fff : 0x00000fff;
+		ph &= (~mask);
+	} else {
+		i = get_pte(addr, pte, &psr);
 
-	switch (i) {
-	case -1:
-		return 0;
-	case 0:
-		ph = pte[0] & 0xFFFFFF00;
-		break;
-	case 1:
-		ph = pte[1] & 0xFFFFFF00;
-		break;
-	default:
-		panic("get_physical(): bad get_pte()");
+		switch (i) {
+		case -1:
+			return 0;
+		case 0:
+			ph = pte[0] & 0xFFFFFF00;
+			break;
+		case 1:
+			ph = pte[1] & 0xFFFFFF00;
+			break;
+		default:
+			panic("get_physical(): bad get_pte()");
+		}
+
+		/*
+		 * We must now figure out how many levels down we went and
+		 * mask the bits appropriately -- the returned value may only
+		 * be the upper n bits, and we have to take the rest from addr.
+		 */
+		numbits = 0;
+		psr &= 0x0007;		/* Number of levels we went */
+		for (i = 0; i < psr; i++)
+			numbits += (macos_tc >> (12 - i * 4)) & 0x0f;
+
+		/*
+		 * We have to take the most significant "numbits" from
+		 * the returned value "ph", and the rest from our addr.
+		 * Assume that numbits != 0.
+		 */
+		mask = (1 << (32 - numbits)) - 1;
 	}
-
-	/*
-	 * We must now figure out how many levels down we went and
-	 * mask the bits appropriately -- the returned value may only
-	 * be the upper n bits, and we've got to take the rest from addr.
-	 */
-
-	numbits = 0;
-	psr &= 0x0007;		/* Number of levels we went */
-	for (i = 0; i < psr; i++) {
-		numbits += (macos_tc >> (12 - i * 4)) & 0x0f;
-	}
-
-	/*
-	 * We have to take the most significant "numbits" from
-	 * the returned value "ph", and the rest from our addr.
-	 * Assume that numbits != 0.
-	 */
-
-	mask = (1 << (32 - numbits)) - 1;
-	*phys = (ph & ~mask) | (addr & mask);
+	*phys = ph + (addr & mask);
 
 	return 1;
 }
@@ -2605,7 +2574,7 @@ get_mapping(void)
 		nblen[nbnumranges - 1] = -nblen[nbnumranges - 1];
 		same = 0;
 	}
-#if 0
+#if 1
 	printf("Non-system RAM (nubus, etc.):\n");
 	for (i = 0; i < nbnumranges; i++) {
 		printf("     Log = 0x%lx, Phys = 0x%lx, Len = 0x%lx (%lu)\n",
@@ -2632,7 +2601,6 @@ get_mapping(void)
 	}
 	if (i == nbnumranges) {
 		if (0x60000000 <= videoaddr && videoaddr < 0x70000000) {
-			printf("Checking for Internal Video ");
 			/*
 			 * Kludge for IIvx internal video (60b0 0000).
 			 * PB 520 (6000 0000)
@@ -2645,6 +2613,12 @@ get_mapping(void)
 			 */
 			check_video("LC video (0x50f40000)",
 					512 * 1024, 512 * 1024);
+		} else if (0x50100100 <= videoaddr && videoaddr < 0x50400000) {
+			/*
+			 * Kludge for AV internal video
+			 */
+			check_video("AV video (0x50100100)", 1 * 1024 * 1024,
+						1 * 1024 * 1024);
 		} else {
 			printf( "  no internal video at address 0 -- "
 				"videoaddr is 0x%lx.\n", videoaddr);
@@ -2671,15 +2645,262 @@ printstar(void)
 	 * Be careful as we assume that no registers are clobbered
 	 * when we call this from assembly.
 	 */
-	asm("movl a0, sp@-");
-	asm("movl a1, sp@-");
-	asm("movl d0, sp@-");
-	asm("movl d1, sp@-");
+	__asm __volatile ("	movl a0,sp@-;
+				movl a1,sp@-;
+				movl d0,sp@-;
+				movl d1,sp@-");
 
 	/* printf("*"); */
 
-	asm("movl sp@+, d1");
-	asm("movl sp@+, d0");
-	asm("movl sp@+, a1");
-	asm("movl sp@+, a0");
+	__asm __volatile ("	movl sp@+,d1;
+				movl sp@+,d0;
+				movl sp@+,a1;
+				movl sp@+,a0");
+}
+
+/*
+ * Console bell callback; modularizes the console terminal emulator
+ * and the audio system, so neither requires direct knowledge of the
+ * other.
+ */
+
+void
+mac68k_set_bell_callback(callback, cookie)
+	int (*callback) __P((void *, int, int, int));
+	void *cookie;
+{
+	mac68k_bell_callback = callback;
+	mac68k_bell_cookie = (caddr_t) cookie;
+}
+
+int
+mac68k_ring_bell(freq, length, volume)
+	int freq, length, volume;
+{
+	if (mac68k_bell_callback)
+		return ((*mac68k_bell_callback)(mac68k_bell_cookie,
+		    freq, length, volume));
+	else
+		return (ENXIO);
+}
+
+/*
+ * bus.h implementation
+ */
+
+int
+bus_space_map(t, bpa, size, cacheable, bshp)
+	bus_space_tag_t t;
+	bus_addr_t bpa;
+	bus_size_t size;
+	int cacheable;
+	bus_space_handle_t *bshp;
+{
+	u_long pa, endpa;
+	int error;
+
+	/*
+	 * Before we go any further, let's make sure that this
+	 * region is available.
+	 */
+	error = extent_alloc_region(iomem_ex, bpa, size,
+	    EX_NOWAIT | (iomem_malloc_safe ? EX_MALLOCOK : 0));
+	if (error)
+		return (error);
+
+	pa = mac68k_trunc_page(bpa + t);
+	endpa = mac68k_round_page((bpa + t + size) - 1);
+
+#ifdef DIAGNOSTIC
+	if (endpa <= pa)
+		panic("bus_space_map: overflow");
+#endif
+
+	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
+	if (error) {
+		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
+		    (iomem_malloc_safe ? EX_MALLOCOK : 0))) {
+			printf("bus_space_map: pa 0x%lx, size 0x%lx\n",
+			    bpa, size);
+			printf("bus_space_map: can't free region\n");
+		}
+	}
+
+	return (error);
+}
+
+int
+bus_space_alloc(t, rstart, rend, size, alignment, boundary, cacheable,
+    bpap, bshp)
+	bus_space_tag_t t;
+	bus_addr_t rstart, rend;
+	bus_size_t size, alignment, boundary;
+	int cacheable;
+	bus_addr_t *bpap;
+	bus_space_handle_t *bshp;
+{
+	u_long bpa;
+	int error;
+
+	/*
+	 * Sanity check the allocation against the extent's boundaries.
+	 */
+	if (rstart < iomem_ex->ex_start || rend > iomem_ex->ex_end)
+		panic("bus_space_alloc: bad region start/end");
+
+	/*
+	 * Do the requested allocation.
+	 */
+	error = extent_alloc_subregion(iomem_ex, rstart, rend, size, alignment,
+	    boundary, EX_NOWAIT | (iomem_malloc_safe ?  EX_MALLOCOK : 0),
+	    &bpa);
+
+	if (error)
+		return (error);
+
+	/*
+	 * For memory space, map the bus physical address to
+	 * a kernel virtual address.
+	 */
+	error = bus_mem_add_mapping(bpa, size, cacheable, bshp);
+	if (error) {
+		if (extent_free(iomem_ex, bpa, size, EX_NOWAIT |
+		    (iomem_malloc_safe ? EX_MALLOCOK : 0))) {
+			printf("bus_space_alloc: pa 0x%lx, size 0x%lx\n",
+			    bpa, size);
+			printf("bus_space_alloc: can't free region\n");
+		}
+	}
+
+	*bpap = bpa;
+
+	return (error);
+}
+
+int
+bus_mem_add_mapping(bpa, size, cacheable, bshp)
+	bus_addr_t bpa;
+	bus_size_t size;
+	int cacheable;
+	bus_space_handle_t *bshp;
+{
+	u_long pa, endpa;
+	vm_offset_t va;
+
+	pa = mac68k_trunc_page(bpa);
+	endpa = mac68k_round_page((bpa + size) - 1);
+
+#ifdef DIAGNOSTIC
+	if (endpa <= pa)
+		panic("bus_mem_add_mapping: overflow");
+#endif
+
+	va = kmem_alloc_pageable(kernel_map, endpa - pa);
+	if (va == 0)
+		return (ENOMEM);
+
+	*bshp = (bus_space_handle_t)(va + (bpa & PGOFSET));
+
+	for (; pa < endpa; pa += NBPG, va += NBPG) {
+		pmap_enter(pmap_kernel(), va, pa,
+		    VM_PROT_READ | VM_PROT_WRITE, TRUE);
+		if (!cacheable)
+			pmap_changebit(pa, PG_CI, TRUE);
+	}
+ 
+	return 0;
+}
+
+void
+bus_space_unmap(t, bsh, size)
+	bus_space_tag_t t;
+	bus_space_handle_t bsh;
+	bus_size_t size;
+{
+	vm_offset_t	va, endva;
+	bus_addr_t bpa;
+
+	va = mac68k_trunc_page(bsh);
+	endva = mac68k_round_page((bsh + size) - 1);
+
+#ifdef DIAGNOSTIC
+	if (endva <= va)
+		panic("bus_space_unmap: overflow");
+#endif
+
+	bpa = pmap_extract(pmap_kernel(), va) + (bsh & PGOFSET);
+
+	/*
+	 * Free the kernel virtual mapping.
+	 */
+	kmem_free(kernel_map, va, endva - va);
+
+	if (extent_free(iomem_ex, bpa, size,
+	    EX_NOWAIT | (iomem_malloc_safe ? EX_MALLOCOK : 0))) {
+		printf("bus_space_unmap: pa 0x%lx, size 0x%lx\n",
+		    bpa, size);
+		printf("bus_space_unmap: can't free region\n");
+	}
+}
+
+void    
+bus_space_free(t, bsh, size)
+	bus_space_tag_t t;
+	bus_space_handle_t bsh;
+	bus_size_t size;
+{
+	/* bus_space_unmap() does all that we need to do. */
+	bus_space_unmap(t, bsh, size);
+}
+
+int
+bus_space_subregion(t, bsh, offset, size, nbshp)
+	bus_space_tag_t t;
+	bus_space_handle_t bsh;
+	bus_size_t offset, size;
+	bus_space_handle_t *nbshp;
+{
+
+	*nbshp = bsh + offset;
+	return (0);
+}
+
+int
+bus_probe(t, bsh, offset, sz)
+	bus_space_tag_t t;
+	bus_space_handle_t bsh;
+	bus_size_t offset;
+	int sz;
+{
+	int i;
+	label_t faultbuf;
+
+	nofault = (int *)&faultbuf;
+	if (setjmp((label_t *)nofault)) {
+		nofault = (int *)0;
+		return (0);
+	}
+
+	switch (sz) {
+	case 1:
+		i = bus_space_read_1(t, bsh, offset);
+		break;
+	case 2:
+		i = bus_space_read_2(t, bsh, offset);
+		break;
+	case 4:
+		i = bus_space_read_4(t, bsh, offset);
+		break;
+	case 8:
+		/*FALLTHROUGH*/
+	default:
+#ifdef DIAGNOSTIC
+		printf("bus_probe: unsupported data size %d\n", sz);
+#endif
+		nofault = (int *)0;
+		return (0);
+	}
+
+	nofault = (int *)0;
+	return (1);
 }

@@ -31,14 +31,11 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)limits.h	8.3 (Berkeley) 1/4/94
- *      $Id: limits.h,v 1.1.1.1 1995/10/18 10:54:21 deraadt Exp $
+ *      $Id: limits.h,v 1.3 1997/03/03 20:21:01 rahnds Exp $
  */
 
 #define	CHAR_BIT	8		/* number of bits in a char */
 #define	MB_LEN_MAX	6		/* Allow 31 bit UTF2 */
-
-
-#define	CLK_TCK		60		/* ticks per second */
 
 /*
  * According to ANSI (section 2.2.4.2), the values below must be usable by

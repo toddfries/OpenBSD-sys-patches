@@ -1,5 +1,5 @@
-/*	$OpenBSD: mfc.c,v 1.8 1996/10/04 15:10:39 niklas Exp $ */
-/*	$NetBSD: mfc.c,v 1.12.4.1 1996/06/06 04:53:16 mhitch Exp $ */
+/*	$OpenBSD: mfc.c,v 1.10 1997/01/16 09:25:01 niklas Exp $ */
+/*	$NetBSD: mfc.c,v 1.18 1996/12/23 09:10:23 veego Exp $ */
 
 /*
  * Copyright (c) 1994 Michael L. Hitch
@@ -182,7 +182,7 @@ struct mfc_args {
 	char	unit;
 };
 
-int	mfcprint __P((void *auxp, char *));
+int	mfcprint __P((void *auxp, const char *));
 void	mfcattach __P((struct device *, struct device *, void *));
 int	mfcmatch __P((struct device *, void *, void *));
 
@@ -461,7 +461,7 @@ mfcsattach(pdp, dp, auxp)
 int
 mfcprint(auxp, pnp)
 	void *auxp;
-	char *pnp;
+	const char *pnp;
 {
 	if (pnp == NULL)
 		return(UNCONF);

@@ -1,11 +1,11 @@
-/*	$OpenBSD: ncr.c,v 1.13 1996/09/05 23:14:00 dm Exp $	*/
-/*	$NetBSD: ncr.c,v 1.35.4.1 1996/06/03 20:32:17 cgd Exp $	*/
+/*	$OpenBSD: ncr.c,v 1.29 1997/04/30 16:26:34 millert Exp $	*/
+/*	$NetBSD: ncr.c,v 1.56 1997/03/04 21:42:34 mycroft Exp $	*/
 
 /**************************************************************************
 **
 **  Device driver for the   NCR 53C810   PCI-SCSI-Controller.
 **
-**  FreeBSD / NetBSD
+**  FreeBSD / NetBSD / OpenBSD
 **
 **-------------------------------------------------------------------------
 **
@@ -45,12 +45,27 @@
 ***************************************************************************
 */
 
-#define NCR_DATE "pl23 95/09/07"
+#define NCR_DATE "pl24 96/12/14"
 
 #define NCR_VERSION	(2)
 #define	MAX_UNITS	(16)
 
 #define NCR_GETCC_WITHMSG
+
+#ifdef __OpenBSD__
+#define __BROKEN_INDIRECT_CONFIG
+#endif
+
+#if defined (__FreeBSD__) && defined(KERNEL)
+#include "opt_ncr.h"
+#endif /* defined (__FreeBSD__) && defined(KERNEL) */
+
+#ifdef FAILSAFE
+#ifndef SCSI_NCR_DFLT_TAGS
+#define	SCSI_NCR_DFLT_TAGS (0)
+#endif /* SCSI_NCR_DFLT_TAGS */
+#define	NCR_CDROM_ASYNC
+#endif /* FAILSAFE */
 
 /*==========================================================
 **
@@ -94,9 +109,9 @@
 **    Used only for disk devices that support tags.
 */
 
-#ifndef SCSI_NCR_MAX_TAGS
-#define SCSI_NCR_MAX_TAGS    (4)
-#endif /* SCSI_NCR_MAX_TAGS */
+#ifndef SCSI_NCR_DFLT_TAGS
+#define SCSI_NCR_DFLT_TAGS    (4)
+#endif /* SCSI_NCR_DFLT_TAGS */
 
 /*==========================================================
 **
@@ -121,7 +136,9 @@
 **    one lun, so take 1 as the default.
 */
 
-#define MAX_LUN     (1)
+#ifndef	MAX_LUN
+#define MAX_LUN     (8)
+#endif	/* MAX_LUN */
 
 /*
 **    The maximum number of jobs scheduled for starting.
@@ -130,7 +147,7 @@
 **    The calculation below is actually quite silly ...
 */
 
-#define MAX_START   (MAX_TARGET + 7 * SCSI_NCR_MAX_TAGS)
+#define MAX_START   (MAX_TARGET + 7 * SCSI_NCR_DFLT_TAGS)
 
 /*
 **    The maximum number of segments a transfer is split into.
@@ -163,7 +180,8 @@
 #define KERNEL
 #endif
 #endif
-#include <stddef.h>
+
+#define	offsetof(type, member)	((size_t)(&((type *)0)->member))
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -175,23 +193,24 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/kernel.h>
-#if !(defined(__NetBSD__) || defined(__OpenBSD__))
-#include <machine/clock.h>
-#include <machine/cpu.h> /* bootverbose */
-#else
+#if defined(__NetBSD__) || defined(__OpenBSD__)
 #define bootverbose	1
 #endif
+#if !(defined(__NetBSD__) || defined(__OpenBSD__))
+#include <sys/sysctl.h>
+#include <machine/clock.h>
+#endif
 #include <vm/vm.h>
+#include <vm/vm_param.h>
+#include <vm/pmap.h>
 #include <vm/vm_extern.h>
 #endif /* KERNEL */
 
 
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))
-#include <sys/devconf.h>
 #include <pci/pcivar.h>
 #include <pci/pcireg.h>
 #include <pci/ncrreg.h>
-extern PRINT_ADDR();
 #else
 #include <sys/device.h>
 #include <machine/bus.h>
@@ -202,17 +221,15 @@ extern PRINT_ADDR();
 #ifndef __alpha__
 #define DELAY(x)	delay(x)
 #endif
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
-#if !(defined(__NetBSD__) || defined(__OpenBSD__))
-#include <machine/clock.h>
-#endif /* __NetBSD__ */
 
 #if (defined(__NetBSD__) || defined(__OpenBSD__)) && defined(__alpha__)
 /* XXX XXX NEED REAL DMA MAPPING SUPPORT XXX XXX */
-#define	vtophys(va)	__alpha_bus_XXX_dmamap(np->sc_bc, (void *)(va))
+#undef vtophys
+#define	vtophys(va)	alpha_XXX_dmamap((vm_offset_t)(va))
 #endif
 
 /*==========================================================
@@ -241,12 +258,12 @@ extern PRINT_ADDR();
 **    Can be changed at runtime too.
 */
 
-#ifdef SCSI_DEBUG_FLAGS
+#ifdef SCSI_NCR_DEBUG
 	#define DEBUG_FLAGS ncr_debug
-#else /* SCSI_DEBUG_FLAGS */
-	#define SCSI_DEBUG_FLAGS	0
+#else /* SCSI_NCR_DEBUG */
+	#define SCSI_NCR_DEBUG	0
 	#define DEBUG_FLAGS	0
-#endif /* SCSI_DEBUG_FLAGS */
+#endif /* SCSI_NCR_DEBUG */
 
 
 
@@ -261,6 +278,7 @@ extern PRINT_ADDR();
 **----------------------------------------------------------
 */
 
+#undef assert
 #define	assert(expression) { \
 	if (!(expression)) { \
 		(void)printf(\
@@ -284,48 +302,48 @@ extern PRINT_ADDR();
 #define	INB(r) \
     INB_OFF(offsetof(struct ncr_reg, r))
 #define	INB_OFF(o) \
-    bus_io_read_1 (np->sc_bc, np->sc_ioh, (o))
+    bus_space_read_1 (np->sc_memt, np->sc_bah, (o))
 #define	INW(r) \
-    bus_io_read_2 (np->sc_bc, np->sc_ioh, offsetof(struct ncr_reg, r))
+    bus_space_read_2 (np->sc_memt, np->sc_bah, offsetof(struct ncr_reg, r))
 #define	INL(r) \
     INL_OFF(offsetof(struct ncr_reg, r))
 #define	INL_OFF(o) \
-    bus_io_read_4 (np->sc_bc, np->sc_ioh, (o))
+    bus_space_read_4 (np->sc_memt, np->sc_bah, (o))
 
 #define	OUTB(r, val) \
-    bus_io_write_1 (np->sc_bc, np->sc_ioh, offsetof(struct ncr_reg, r), (val))
+    bus_space_write_1 (np->sc_memt, np->sc_bah, offsetof(struct ncr_reg, r), (val))
 #define	OUTW(r, val) \
-    bus_io_write_2 (np->sc_bc, np->sc_ioh, offsetof(struct ncr_reg, r), (val))
+    bus_space_write_2 (np->sc_memt, np->sc_bah, offsetof(struct ncr_reg, r), (val))
 #define	OUTL(r, val) \
     OUTL_OFF(offsetof(struct ncr_reg, r), (val))
 #define	OUTL_OFF(o, val) \
-    bus_io_write_4 (np->sc_bc, np->sc_ioh, (o), (val))
+    bus_space_write_4 (np->sc_memt, np->sc_bah, (o), (val))
 
 #else
 
 #define	INB(r) \
     INB_OFF(offsetof(struct ncr_reg, r))
 #define	INB_OFF(o) \
-    bus_mem_read_1 (np->sc_bc, np->sc_memh, (o))
+    bus_space_read_1 (np->sc_memt, np->sc_bah, (o))
 #define	INW(r) \
-    bus_mem_read_2 (np->sc_bc, np->sc_memh, offsetof(struct ncr_reg, r))
+    bus_space_read_2 (np->sc_memt, np->sc_bah, offsetof(struct ncr_reg, r))
 #define	INL(r) \
     INL_OFF(offsetof(struct ncr_reg, r))
 #define	INL_OFF(o) \
-    bus_mem_read_4 (np->sc_bc, np->sc_memh, (o))
+    bus_space_read_4 (np->sc_memt, np->sc_bah, (o))
 
 #define	OUTB(r, val) \
-    bus_mem_write_1 (np->sc_bc, np->sc_memh, offsetof(struct ncr_reg, r), (val))
+    bus_space_write_1 (np->sc_memt, np->sc_bah, offsetof(struct ncr_reg, r), (val))
 #define	OUTW(r, val) \
-    bus_mem_write_2 (np->sc_bc, np->sc_memh, offsetof(struct ncr_reg, r), (val))
+    bus_space_write_2 (np->sc_memt, np->sc_bah, offsetof(struct ncr_reg, r), (val))
 #define	OUTL(r, val) \
     OUTL_OFF(offsetof(struct ncr_reg, r), (val))
 #define	OUTL_OFF(o, val) \
-    bus_mem_write_4 (np->sc_bc, np->sc_memh, (o), (val))
+    bus_space_write_4 (np->sc_memt, np->sc_bah, (o), (val))
 
 #endif
 
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 
 #ifdef NCR_IOMAPPED
  
@@ -348,14 +366,14 @@ extern PRINT_ADDR();
 #define	INL(r) (np->reg->r)
 #define	INL_OFF(o) (*((volatile INT32 *)((char *)np->reg + (o))))
 
-#define	OUTB(r, val) np->reg->r = val
-#define	OUTW(r, val) np->reg->r = val
-#define	OUTL(r, val) np->reg->r = val
+#define	OUTB(r, val) np->reg->r = (val)
+#define	OUTW(r, val) np->reg->r = (val)
+#define	OUTL(r, val) np->reg->r = (val)
 #define	OUTL_OFF(o, val) *((volatile INT32 *)((char *)np->reg + (o))) = val
 
 #endif
 
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 
 /*==========================================================
 **
@@ -997,16 +1015,12 @@ struct ncb {
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 	struct device sc_dev;
 	void *sc_ih;
-	bus_chipset_tag_t sc_bc;
+	bus_space_tag_t sc_memt;
 	pci_chipset_tag_t sc_pc;
-#ifdef NCR_IOMAPPED
-	bus_io_handle_t sc_ioh;
-#else /* !NCR_IOMAPPED */
-	bus_mem_handle_t sc_memh;
-#endif /* NCR_IOMAPPED */
-#else /* !__NetBSD__ */
+	bus_space_handle_t sc_bah;
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 	int	unit;
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 
 	/*-----------------------------------------------
 	**	Scripts ..
@@ -1033,7 +1047,7 @@ struct ncb {
 	vm_offset_t     vaddr;
 	vm_offset_t     paddr;
 #else
-	bus_mem_addr_t	paddr;
+	bus_addr_t	paddr;
 #endif
 
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))
@@ -1062,9 +1076,17 @@ struct ncb {
 	/*
 	**	timing parameters
 	*/
-	u_char		ns_async;
 	u_char		ns_sync;
+	u_char		maxoffs;
+
+	/*
+	**	BIOS supplied PCI bus options
+	*/
 	u_char		rv_scntl3;
+	u_char		rv_dcntl;
+	u_char		rv_dmode;
+	u_char		rv_ctest3;
+	u_char		rv_ctest5;
 
 	/*-----------------------------------------------
 	**	Link to the generic SCSI driver
@@ -1199,7 +1221,7 @@ struct script {
 	ncrcmd	skip		[  8];
 	ncrcmd	skip2		[  3];
 	ncrcmd  idle		[  2];
-	ncrcmd	select		[ 24];
+	ncrcmd	select		[ 22];
 	ncrcmd	prepare		[  4];
 	ncrcmd	loadpos		[ 14];
 	ncrcmd	prepare2	[ 24];
@@ -1264,20 +1286,20 @@ struct script {
 */
 
 #ifdef KERNEL
-static	void	ncr_alloc_ccb	(ncb_p np, struct scsi_xfer * xp);
+static	void	ncr_alloc_ccb	(ncb_p np, u_long target, u_long lun);
 static	void	ncr_complete	(ncb_p np, ccb_p cp);
 static	int	ncr_delta	(struct timeval * from, struct timeval * to);
 static	void	ncr_exception	(ncb_p np);
 static	void	ncr_free_ccb	(ncb_p np, ccb_p cp, int flags);
-static	void	ncr_getclock	(ncb_p np, u_char scntl3);
+static	void	ncr_getclock	(ncb_p np);
 static	ccb_p	ncr_get_ccb	(ncb_p np, u_long flags, u_long t,u_long l);
 static	void	ncr_init	(ncb_p np, char * msg, u_long code);
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-static	int     ncr_intr        (void *);
-#else	/* !__NetBSD__ */
-static	int	ncr_intr	(ncb_p np);
+static	int	ncr_intr	(void *vnp);
+#else
+static	void	ncr_intr	(void *vnp);
 static  U_INT32 ncr_info	(int unit);
-#endif	/* __NetBSD__ */	
+#endif	/* !(__NetBSD__ || __OpenBSD__) */ 	
 static	void	ncr_int_ma	(ncb_p np);
 static	void	ncr_int_sir	(ncb_p np);
 static  void    ncr_int_sto     (ncb_p np);
@@ -1295,8 +1317,8 @@ static	void	ncb_profile	(ncb_p np, ccb_p cp);
 static	void	ncr_script_copy_and_bind
 				(struct script * script, ncb_p np);
 static  void    ncr_script_fill (struct script * scr);
-static	int	ncr_scatter	(ncb_p np, struct dsb* phys,u_long vaddr,
-				    u_long datalen);
+static	int	ncr_scatter	(struct dsb* phys, vm_offset_t vaddr,
+				 vm_size_t datalen);
 static	void	ncr_setmaxtags	(tcb_p tp, u_long usrtags);
 static	void	ncr_setsync	(ncb_p np, ccb_p cp, u_char sxfer);
 static	void	ncr_settags     (tcb_p tp, lcb_p lp);
@@ -1309,12 +1331,16 @@ static	void	ncr_usercmd	(ncb_p np);
 static  void    ncr_wakeup      (ncb_p np, u_long code);
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
+#ifdef __BROKEN_INDIRECT_CONFIG
 static	int	ncr_probe	(struct device *, void *, void *);
+#else
+static	int	ncr_probe	(struct device *, struct cfdata *, void *);
+#endif
 static	void	ncr_attach	(struct device *, struct device *, void *);
-#else /* !__NetBSD */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 static  char*	ncr_probe       (pcici_t tag, pcidi_t type);
 static	void	ncr_attach	(pcici_t tag, int unit);
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 
 #endif /* KERNEL */
 
@@ -1330,10 +1356,10 @@ static	void	ncr_attach	(pcici_t tag, int unit);
 
 #if 0
 static char ident[] =
-	"\n$NetBSD: ncr.c,v 1.35.4.1 1996/06/03 20:32:17 cgd Exp $\n";
+	"\n$OpenBSD: ncr.c,v 1.29 1997/04/30 16:26:34 millert Exp $\n";
 #endif
 
-u_long	ncr_version = NCR_VERSION	* 11
+static const u_long	ncr_version = NCR_VERSION	* 11
 	+ (u_long) sizeof (struct ncb)	*  7
 	+ (u_long) sizeof (struct ccb)	*  5
 	+ (u_long) sizeof (struct lcb)	*  3
@@ -1342,13 +1368,16 @@ u_long	ncr_version = NCR_VERSION	* 11
 #ifdef KERNEL
 
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))
-u_long		nncr=MAX_UNITS;
-ncb_p		ncrp [MAX_UNITS];
-#endif /* !__NetBSD__ */
+static const int nncr=MAX_UNITS;	/* XXX to be replaced by SYSCTL */
+ncb_p         ncrp [MAX_UNITS];		/* XXX to be replaced by SYSCTL */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 
-static int ncr_debug = SCSI_DEBUG_FLAGS;
+static int ncr_debug = SCSI_NCR_DEBUG;
+#if !(defined(__NetBSD__) || defined(__OpenBSD__))
+SYSCTL_INT(_debug, OID_AUTO, ncr_debug, CTLFLAG_RW, &ncr_debug, 0, "");
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 
-int ncr_cache; /* to be aligned _NOT_ static */
+static int ncr_cache; /* to be aligned _NOT_ static */
 
 /*==========================================================
 **
@@ -1360,7 +1389,6 @@ int ncr_cache; /* to be aligned _NOT_ static */
 */
 
 #define	NCR_810_ID	(0x00011000ul)
-#define	NCR_810AP_ID	(0x00051000ul)
 #define	NCR_815_ID	(0x00041000ul)
 #define	NCR_825_ID	(0x00031000ul)
 #define	NCR_860_ID	(0x00061000ul)
@@ -1376,11 +1404,11 @@ struct	cfdriver ncr_cd = {
 	NULL, "ncr", DV_DULL
 };
 
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 
 static u_long ncr_count;
 
-struct	pci_device ncr_device = {
+static struct	pci_device ncr_device = {
 	"ncr",
 	ncr_probe,
 	ncr_attach,
@@ -1390,9 +1418,9 @@ struct	pci_device ncr_device = {
 
 DATA_SET (pcidevice_set, ncr_device);
 
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 
-struct scsi_adapter ncr_switch =
+static struct scsi_adapter ncr_switch =
 {
 	ncr_start,
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))
@@ -1405,10 +1433,10 @@ struct scsi_adapter ncr_switch =
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))
 	ncr_info,
 	"ncr",
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 };
 
-struct scsi_device ncr_dev =
+static struct scsi_device ncr_dev =
 {
 	NULL,			/* Use default error handler */
 	NULL,			/* have a queue, served by this */
@@ -1416,14 +1444,14 @@ struct scsi_device ncr_dev =
 	NULL,			/* Use default 'done' routine */
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))
 	"ncr",
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 };
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 
 #define	ncr_name(np)	(np->sc_dev.dv_xname)
 
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 
 static char *ncr_name (ncb_p np)
 {
@@ -1475,8 +1503,11 @@ static char *ncr_name (ncb_p np)
  * Kernel variables referenced in the scripts.
  * THESE MUST ALL BE ALIGNED TO A 4-BYTE BOUNDARY.
  */
-static void *script_kvars[] =
-	{ (void *)&mono_time.tv_sec, (void *)&mono_time, (void *)&ncr_cache };
+static unsigned long script_kvars[] = {
+	(unsigned long)&mono_time.tv_sec,
+	(unsigned long)&mono_time,
+	(unsigned long)&ncr_cache,
+};
 
 static	struct script script0 = {
 /*--------------------------< START >-----------------------*/ {
@@ -1678,8 +1709,10 @@ static	struct script script0 = {
 	*/
 	SCR_MOVE_TBL ^ SCR_MSG_OUT,
 		offsetof (struct dsb, smsg),
+#ifdef undef /* XXX better fail than try to deal with this ... */
 	SCR_JUMPR ^ IFTRUE (WHEN (SCR_MSG_OUT)),
 		-16,
+#endif
 	SCR_CLR (SCR_ATN),
 		0,
 	SCR_COPY (1),
@@ -2748,7 +2781,7 @@ static	struct script script0 = {
 	**	- struct ccb
 	**	to understand what's going on.
 	*/
-	SCR_REG_SFBR (ssid, SCR_AND, 0x87),
+	SCR_REG_SFBR (ssid, SCR_AND, 0x8F),
 		0,
 	SCR_TO_REG (ctest0),
 		0,
@@ -3082,12 +3115,12 @@ static void ncr_script_copy_and_bind (struct script *script, ncb_p np)
 	int relocs;
 
 #if !(defined(__NetBSD__) || defined(__OpenBSD__))
-	np->script = (struct script*) vm_page_alloc_contig
+	np->script = (struct script*) vm_page_alloc_contig 
 	(round_page(sizeof (struct script)), 0x100000, 0xffffffff, PAGE_SIZE);
-#else  /* !__NetBSD___ */
+#else  /* !(__NetBSD__ || __OpenBSD__) */
 	np->script = (struct script *)
 		malloc (sizeof (struct script), M_DEVBUF, M_WAITOK);
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 
 	np->p_script = vtophys(np->script);
 
@@ -3109,8 +3142,8 @@ static void ncr_script_copy_and_bind (struct script *script, ncb_p np)
 		*/
 
 		if (opcode == 0) {
-			printf ("%s: ERROR0 IN SCRIPT at %d.\n",
-				ncr_name(np), src-start-1);
+			printf ("%s: ERROR0 IN SCRIPT at %ld.\n",
+				ncr_name(np), (long)(src-start-1));
 			DELAY (1000000);
 		};
 
@@ -3134,8 +3167,8 @@ static void ncr_script_copy_and_bind (struct script *script, ncb_p np)
 			if ((tmp2 & RELOC_MASK) == RELOC_KVAR)
 				tmp2 = 0;
 			if ((tmp1 ^ tmp2) & 3) {
-				printf ("%s: ERROR1 IN SCRIPT at %d.\n",
-					ncr_name(np), src-start-1);
+				printf ("%s: ERROR1 IN SCRIPT at %ld.\n",
+					ncr_name(np), (long)(src-start-1));
 				DELAY (1000000);
 			};
 			break;
@@ -3190,7 +3223,7 @@ static void ncr_script_copy_and_bind (struct script *script, ncb_p np)
 					    ((old & ~RELOC_MASK) >
 					     SCRIPT_KVAR_LAST))
 						panic("ncr KVAR out of range");
-					new = vtophys(script_kvars[old &
+					new = vtophys((void *)script_kvars[old &
 					    ~RELOC_MASK]);
 					break;
 				case 0:
@@ -3277,7 +3310,12 @@ U_INT32 ncr_info (int unit)
 int
 ncr_probe(parent, match, aux)
 	struct device *parent;
-	void *match, *aux;
+#ifdef __BROKEN_INDIRECT_CONFIG
+	void *match;
+#else
+	struct cfdata *match;
+#endif
+	void *aux;
 {
 	struct pci_attach_args *pa = aux;
 #if 0
@@ -3287,7 +3325,6 @@ ncr_probe(parent, match, aux)
 		return 0;
 #endif
 	if (pa->pa_id != NCR_810_ID &&
-	    pa->pa_id != NCR_810AP_ID &&
 	    pa->pa_id != NCR_815_ID &&
 	    pa->pa_id != NCR_825_ID &&
 	    pa->pa_id != NCR_860_ID &&
@@ -3297,24 +3334,26 @@ ncr_probe(parent, match, aux)
 	return 1;
 }
 
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 
 
 static	char* ncr_probe (pcici_t tag, pcidi_t type)
 {
+	u_char rev = pci_conf_read (tag, PCI_CLASS_REG) & 0xff;
 	switch (type) {
 
 	case NCR_810_ID:
-		return ("ncr 53c810 scsi");
-
-	case NCR_810AP_ID:
-		return ("ncr 53c810ap scsi");
+		return (rev & 0xf0) == 0x00
+			? ("ncr 53c810 scsi") 
+			: ("ncr 53c810a scsi");
 
 	case NCR_815_ID:
 		return ("ncr 53c815 scsi");
 
 	case NCR_825_ID:
-		return ("ncr 53c825 wide scsi");
+		return (rev & 0xf0) == 0x00
+			? ("ncr 53c825 wide scsi")
+			: ("ncr 53c825a wide scsi");
 
 	case NCR_860_ID:
 		return ("ncr 53c860 scsi");
@@ -3325,7 +3364,7 @@ static	char* ncr_probe (pcici_t tag, pcidi_t type)
 	return (NULL);
 }
 
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 
 
 /*==========================================================
@@ -3341,58 +3380,45 @@ static	char* ncr_probe (pcici_t tag, pcidi_t type)
 #define	MIN_SYNC_PD	20
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-
-int ncr_print __P((void *, char *));
-
-int
-ncr_print(aux, name)
-	void *aux;
-	char *name;
-{
-
-	if (name != NULL)
-		printf("%s: scsibus ", name);
-	return UNCONF;
-}
-
 void
 ncr_attach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
 	struct pci_attach_args *pa = aux;
-	bus_chipset_tag_t bc = pa->pa_bc;
+	bus_space_tag_t memt = pa->pa_memt;
 	pci_chipset_tag_t pc = pa->pa_pc;
-	bus_mem_size_t memsize;
+	bus_size_t memsize;
 	int retval, cacheable;
 	pci_intr_handle_t intrhandle;
 	const char *intrstr;
 	ncb_p np = (void *)self;
+	int wide = 0;
+	u_char rev = pci_conf_read(pc, pa->pa_tag, PCI_CLASS_REG) & 0xff;
 
 	printf(": NCR ");
 	switch (pa->pa_id) {
 	case NCR_810_ID:
-		printf("53c810");
-		break;
-	case NCR_810AP_ID:
-		printf("53c810ap");
+		printf((rev & 0xf0) == 0x00 ? "53c810" : "53c810a");
 		break;
 	case NCR_815_ID:
 		printf("53c815");
 		break;
 	case NCR_825_ID:
-		printf("53c825 Wide");
+		printf((rev & 0xf0) == 0x00 ? "53c825 Wide" : "53c825a Wide");
+		wide = 1;
 		break;
 	case NCR_860_ID:
 		printf("53c860");
 		break;
 	case NCR_875_ID:
 		printf("53c875 Wide");
+		wide = 1;
 		break;
 	}
 	printf(" SCSI\n");
 
-	np->sc_bc = bc;
+	np->sc_memt = memt;
 	np->sc_pc = pc;
 
 	/*
@@ -3408,7 +3434,8 @@ ncr_attach(parent, self, aux)
 	}
 
 	/* Map the memory.  Note that we never want it to be cacheable. */
-	retval = bus_mem_map(pa->pa_bc, np->paddr, memsize, 0, &np->sc_memh);
+	retval = bus_space_map(pa->pa_memt, np->paddr, memsize, 0,
+	    &np->sc_bah);
 	if (retval) {
 		printf("%s: couldn't map memory region\n", self->dv_xname);
 		return;
@@ -3424,8 +3451,13 @@ ncr_attach(parent, self, aux)
 		return;
 	}
 	intrstr = pci_intr_string(pc, intrhandle);
+#ifndef __OpenBSD__
+	np->sc_ih = pci_intr_establish(pc, intrhandle, IPL_BIO,
+	    ncr_intr, np);
+#else /* !__OpenBSD__ */
 	np->sc_ih = pci_intr_establish(pc, intrhandle, IPL_BIO,
 	    ncr_intr, np, self->dv_xname);
+#endif /* __OpenBSD__ */
 	if (np->sc_ih == NULL) {
 		printf("%s: couldn't establish interrupt", self->dv_xname);
 		if (intrstr != NULL)
@@ -3436,7 +3468,7 @@ ncr_attach(parent, self, aux)
 	if (intrstr != NULL)
 		printf("%s: interrupting at %s\n", self->dv_xname, intrstr);
 
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 
 static	void ncr_attach (pcici_t config_id, int unit)
 {
@@ -3474,6 +3506,14 @@ static	void ncr_attach (pcici_t config_id, int unit)
 	if (!pci_map_mem (config_id, 0x14, &np->vaddr, &np->paddr))
 		return;
 
+	/*
+	**	Make the controller's registers available.
+	**	Now the INB INW INL OUTB OUTW OUTL macros
+	**	can be used safely.
+	*/
+
+	np->reg = (struct ncr_reg*) np->vaddr;
+
 #ifdef NCR_IOMAPPED
 	/*
 	**	Try to map the controller chip into iospace.
@@ -3483,23 +3523,64 @@ static	void ncr_attach (pcici_t config_id, int unit)
 		return;
 #endif
 
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
+
+	/*
+	**	Save some controller register default values
+	*/
+
+	np->rv_dmode  = INB (nc_dmode);
+	np->rv_dcntl  = INB (nc_dcntl) | CLSE | PFEN | NOCOM;
+	np->rv_ctest3 = INB (nc_ctest3);
+	np->rv_ctest5 = 0;
+	np->rv_scntl3 = 0x13;	/* default: 40MHz clock */
 
 	/*
 	**	Do chip dependent initialization.
 	*/
 
+	np->maxwide   = 0;
+	np->ns_sync   = 25;	/* in units of 4ns */
+	np->maxoffs   = 8;
+
+	/*
+	**	Get the frequency of the chip's clock.
+	**	Find the right value for scntl3.
+	*/
+
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 	switch (pa->pa_id) {
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 	switch (pci_conf_read (config_id, PCI_ID_REG)) {
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 	case NCR_825_ID:
-	case NCR_875_ID:
+	    {
+#if !(defined(__NetBSD__) || defined(__OpenBSD__))
+		u_char rev = pci_conf_read (config_id, PCI_CLASS_REG) & 0xff;
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
+		if ((rev & 0xf0) == 0x10)
+			np->maxoffs = 16;
 		np->maxwide = 1;
 		break;
-	default:
-		np->maxwide = 0;
+	    }
+	case NCR_860_ID:
+		np->rv_scntl3 = 0x35;	/* always assume 80MHz clock for 860 */
+		/*np->ns_sync   = 12;*/	/* in units of 4ns */
+		break;
+	case NCR_875_ID:
+		np->maxwide = 1;
+		/*np->ns_sync   = 12;*/	/* in units of 4ns */
+		np->maxoffs = 16;
+#ifdef NCR_TEKRAM_EEPROM
+		if (bootverbose) 
+		{
+			printf ("%s: Tekram EEPROM read %s\n",
+				ncr_name(np),
+				read_tekram_eeprom (np, NULL) ?
+				"succeeded" : "failed");
+		}
+#endif /* NCR_TEKRAM_EEPROM */
+		ncr_getclock(np);
 		break;
 	}
 
@@ -3518,37 +3599,12 @@ static	void ncr_attach (pcici_t config_id, int unit)
 	np->jump_tcb.l_cmd	= SCR_JUMP;
 	np->jump_tcb.l_paddr	= NCB_SCRIPT_PHYS (np, abort);
 
-#if !(defined(__NetBSD__)  || defined(__OpenBSD__))
-	/*
-	**	Make the controller's registers available.
-	**	Now the INB INW INL OUTB OUTW OUTL macros
-	**	can be used safely.
-	*/
-
-	np->reg = (struct ncr_reg*) np->vaddr;
-#endif
-
 	/*
 	**  Get SCSI addr of host adapter (set by bios?).
 	*/
 
 	np->myaddr = INB(nc_scid) & 0x07;
 	if (!np->myaddr) np->myaddr = SCSI_NCR_MYADDR;
-
-	/*
-	**	Get the value of the chip's clock.
-	**	Find the right value for scntl3.
-	*/
-
-	ncr_getclock (np, INB(nc_scntl3));
-
-	/*
-	**	Reset chip.
-	*/
-
-	OUTB (nc_istat,  SRST);
-	DELAY (1000);
-	OUTB (nc_istat,  0   );
 
 #ifdef NCR_DUMP_REG
 	/*
@@ -3558,23 +3614,23 @@ static	void ncr_attach (pcici_t config_id, int unit)
 		int reg;
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 		u_long config_id = pa->pa_tag;
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 		for (reg=0; reg<256; reg+=4) {
 			if (reg%16==0) printf ("reg[%2x]", reg);
 			printf (" %08x", (int)pci_conf_read (config_id, reg));
 			if (reg%16==12) printf ("\n");
 		}
 	}
+#endif /* NCR_DUMP_REG */
 
 	/*
-	**	Reset chip, once again.
+	**	Reset chip.
 	*/
 
 	OUTB (nc_istat,  SRST);
 	DELAY (1000);
 	OUTB (nc_istat,  0   );
 
-#endif /* NCR_DUMP_REG */
 
 	/*
 	**	Now check the cache handling of the pci chipset.
@@ -3592,7 +3648,7 @@ static	void ncr_attach (pcici_t config_id, int unit)
 
 	if (!pci_map_int (config_id, ncr_intr, np, &bio_imask))
 		printf ("\tinterruptless mode: reduced performance.\n");
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 
 	/*
 	**	After SCSI devices have been opened, we cannot
@@ -3620,18 +3676,26 @@ static	void ncr_attach (pcici_t config_id, int unit)
 	np->sc_link.adapter_softc = np;
 	np->sc_link.adapter_target = np->myaddr;
 	np->sc_link.openings = 1;
-#else /* !__NetBSD__ */
+#ifndef __OpenBSD__
+	np->sc_link.channel      = SCSI_CHANNEL_ONLY_ONE;
+	np->sc_link.max_target   = wide ? 15 : 7;
+#else
+	if (np->maxwide)
+		np->sc_link.adapter_buswidth = MAX_TARGET;
+#endif /* __OpenBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 	np->sc_link.adapter_unit = unit;
+	np->sc_link.adapter_softc = np;
 	np->sc_link.adapter_targ = np->myaddr;
 	np->sc_link.fordriver	 = 0;
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 	np->sc_link.adapter      = &ncr_switch;
 	np->sc_link.device       = &ncr_dev;
 	np->sc_link.flags	 = 0;
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-	config_found(self, &np->sc_link, ncr_print);
-#else /* !__NetBSD__ */
+	config_found(self, &np->sc_link, scsiprint);
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 #if (__FreeBSD__ >= 2)
 	scbus = scsi_alloc_bus();
 	if(!scbus)
@@ -3662,7 +3726,7 @@ static	void ncr_attach (pcici_t config_id, int unit)
 #else
 	scsi_attachdevs (&np->sc_link);
 #endif /* !__FreeBSD__ >= 2 */
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 
 	/*
 	**	start the timeout daemon
@@ -3670,6 +3734,11 @@ static	void ncr_attach (pcici_t config_id, int unit)
 	ncr_timeout (np);
 	np->lasttime=0;
 
+	/*
+	**  use SIMPLE TAG messages by default
+	*/
+
+	np->order = M_SIMPLE_TAG;
 	/*
 	**  Done.
 	*/
@@ -3687,18 +3756,17 @@ static	void ncr_attach (pcici_t config_id, int unit)
 */
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-int
-ncr_intr(arg)
-        void *arg;
-{               
-        ncb_p np = arg;
-#else /* !__NetBSD__ */
-int
-ncr_intr(np)
-	ncb_p np;
+static int
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
+static void
+#endif /* __NetBSD__ || __OpenBSD__ */      
+ncr_intr(vnp)
+	void *vnp;
 {
-#endif /* __NetBSD__ */
+#if defined(__NetBSD__) || defined(__OpenBSD__)
 	int n = 0;
+#endif
+	ncb_p np = vnp;
 	int oldspl = splbio();
 
 	if (DEBUG_FLAGS & DEBUG_TINY) printf ("[");
@@ -3711,14 +3779,18 @@ ncr_intr(np)
 			ncr_exception (np);
 		} while (INB(nc_istat) & (INTF|SIP|DIP));
 
-		n=1;
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+		n = 1;
+#endif
 		np->ticks = 100;
 	};
 
 	if (DEBUG_FLAGS & DEBUG_TINY) printf ("]\n");
 
 	splx (oldspl);
+#if defined(__NetBSD__) || defined(__OpenBSD__)
 	return (n);
+#endif
 }
 
 /*==========================================================
@@ -3733,11 +3805,7 @@ ncr_intr(np)
 
 static INT32 ncr_start (struct scsi_xfer * xp)
 {
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-	ncb_p np  = xp->sc_link->adapter_softc;
-#else /*__NetBSD__*/
-	ncb_p np  = ncrp[xp->sc_link->adapter_unit];
-#endif/*__NetBSD__*/
+	ncb_p np = (ncb_p) xp->sc_link->adapter_softc;
 
 	struct scsi_generic * cmd = xp->cmd;
 	ccb_p cp;
@@ -3745,10 +3813,8 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 	tcb_p tp = &np->target[xp->sc_link->target];
 
 	int	i, oldspl, segments, flags = xp->flags;
-	u_char	ptr, nego, idmsg;
+	u_char	qidx, nego, idmsg, *msgptr;
 	u_long  msglen, msglen2;
-
-
 
 	/*---------------------------------------------
 	**
@@ -3800,10 +3866,25 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 		};
 	};
 
+	if ((unsigned)xp->datalen > 128*1024*1024) {
+		PRINT_ADDR(xp);
+		printf ("trying to transfer %8x bytes, mem addr = %p\n", 
+			xp->datalen, xp->data);
+		{
+			int i;
+			PRINT_ADDR(xp);
+			printf ("command: %2x (", cmd->opcode);
+			for (i = 0; i<11; i++)
+				printf (" %2x", cmd->bytes[i]);
+			printf (")\n");
+		}
+	}
+
 	if (DEBUG_FLAGS & DEBUG_TINY) {
 		PRINT_ADDR(xp);
-		printf ("CMD=%x F=%x L=%x ", cmd->opcode,
-			(unsigned)xp->flags, (unsigned) xp->datalen);
+		printf ("CMD=%x F=%x A=%p L=%x ", 
+			cmd->opcode, (unsigned)xp->flags, xp->data,
+			(unsigned)xp->datalen);
 	}
 
 	/*--------------------------------------------
@@ -3891,14 +3972,25 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 
 	if (tp->inqdata[7]) {
 		/*
+		**	negotiate wide transfers ?
+		*/
+
+		if (!tp->widedone) {
+			if (tp->inqdata[7] & INQ7_WIDE16) {
+				nego = NS_WIDE;
+			} else
+				tp->widedone=1;
+		};
+
+		/*
 		**	negotiate synchronous transfers?
 		*/
 
-		if (!tp->period) {
+		if (!nego && !tp->period) {
 			if (SCSI_NCR_MAX_SYNC 
-#if defined (CDROM_ASYNC) || defined (GENERIC)
+#ifdef NCR_CDROM_ASYNC
 			    && ((tp->inqdata[0] & 0x1f) != 5)
-#endif
+#endif /* NCR_CDROM_ASYNC */
 			    && (tp->inqdata[7] & INQ7_SYNC)) {
 				nego = NS_SYNC;
 			} else {
@@ -3907,17 +3999,6 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 				PRINT_ADDR(xp);
 				printf ("asynchronous.\n");
 			};
-		};
-
-		/*
-		**	negotiate wide transfers ?
-		*/
-
-		if (!tp->widedone) {
-			if (tp->inqdata[7] & INQ7_WIDE16) {
-				if (!nego) nego = NS_WIDE;
-			} else
-				tp->widedone=1;
 		};
 	};
 
@@ -3956,25 +4037,18 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 	*/
 
 	idmsg = M_IDENTIFY | xp->sc_link->lun;
-#ifndef NCR_NO_DISCONNECT
-	/*---------------------------------------------------------------------
-	** Some users have problems with this driver.
-	** I assume that the current problems relate to a conflict between
-	** a disconnect and an immediately following reconnect operation.
-	** With this option one can prevent the driver from using disconnects.
-	** Without disconnects the performance will be severely degraded.
-	** But it may help to trace down the core problem.
-	**---------------------------------------------------------------------
-	*/
 	if ((cp!=&np->ccb) && (np->disc))
 		idmsg |= 0x40;
-#endif
 
-	cp -> scsi_smsg [0] = idmsg;
-	msglen=1;
+	msgptr = cp->scsi_smsg;
+	msglen = 0;
+	msgptr[msglen++] = idmsg;
 
 	if (cp->tag) {
+	    char tag;
 
+	    tag = np->order;
+	    if (tag == 0) {
 		/*
 		**	Ordered write ops, unordered read ops.
 		*/
@@ -3982,31 +4056,23 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 		case 0x08:  /* READ_SMALL (6) */
 		case 0x28:  /* READ_BIG  (10) */
 		case 0xa8:  /* READ_HUGE (12) */
-			cp -> scsi_smsg [msglen] = M_SIMPLE_TAG;
-			break;
+		    tag = M_SIMPLE_TAG;
+		    break;
 		default:
-			cp -> scsi_smsg [msglen] = M_ORDERED_TAG;
+		    tag = M_ORDERED_TAG;
 		}
-
-		/*
-		**	can be overwritten by ncrcontrol
-		*/
-		switch (np->order) {
-		case M_SIMPLE_TAG:
-		case M_ORDERED_TAG:
-			cp -> scsi_smsg [msglen] = np->order;
-		};
-		msglen++;
-		cp -> scsi_smsg [msglen++] = cp -> tag;
+	    }
+	    msgptr[msglen++] = tag;
+	    msgptr[msglen++] = cp -> tag;
 	}
 
 	switch (nego) {
 	case NS_SYNC:
-		cp -> scsi_smsg [msglen++] = M_EXTENDED;
-		cp -> scsi_smsg [msglen++] = 3;
-		cp -> scsi_smsg [msglen++] = M_X_SYNC_REQ;
-		cp -> scsi_smsg [msglen++] = tp->minsync;
-		cp -> scsi_smsg [msglen++] = tp->maxoffs;
+		msgptr[msglen++] = M_EXTENDED;
+		msgptr[msglen++] = 3;
+		msgptr[msglen++] = M_X_SYNC_REQ;
+		msgptr[msglen++] = tp->minsync;
+		msgptr[msglen++] = tp->maxoffs;
 		if (DEBUG_FLAGS & DEBUG_NEGO) {
 			PRINT_ADDR(cp->xfer);
 			printf ("sync msgout: ");
@@ -4015,10 +4081,10 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 		};
 		break;
 	case NS_WIDE:
-		cp -> scsi_smsg [msglen++] = M_EXTENDED;
-		cp -> scsi_smsg [msglen++] = 2;
-		cp -> scsi_smsg [msglen++] = M_X_WIDE_REQ;
-		cp -> scsi_smsg [msglen++] = tp->usrwide;
+		msgptr[msglen++] = M_EXTENDED;
+		msgptr[msglen++] = 2;
+		msgptr[msglen++] = M_X_WIDE_REQ;
+		msgptr[msglen++] = tp->usrwide;
 		if (DEBUG_FLAGS & DEBUG_NEGO) {
 			PRINT_ADDR(cp->xfer);
 			printf ("wide msgout: ");
@@ -4045,7 +4111,7 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 	**----------------------------------------------------
 	*/
 
-	segments = ncr_scatter (np, &cp->phys, (vm_offset_t) xp->data,
+	segments = ncr_scatter (&cp->phys, (vm_offset_t) xp->data,
 					(vm_size_t) xp->datalen);
 
 	if (segments < 0) {
@@ -4100,11 +4166,9 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 	/*
 	**	message
 	*/
-/*	cp->phys.smsg.addr		= cp->p_scsi_smsg;*/
 	cp->phys.smsg.addr		= CCB_PHYS (cp, scsi_smsg);
 	cp->phys.smsg.size		= msglen;
 
-/*	cp->phys.smsg2.addr		= cp->p_scsi_smsg2;*/
 	cp->phys.smsg2.addr		= CCB_PHYS (cp, scsi_smsg2);
 	cp->phys.smsg2.size		= msglen2;
 	/*
@@ -4115,7 +4179,6 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 	/*
 	**	sense command
 	*/
-/*	cp->phys.scmd.addr		= cp->p_sensecmd;*/
 	cp->phys.scmd.addr		= CCB_PHYS (cp, sensecmd);
 	cp->phys.scmd.size		= 6;
 	/*
@@ -4163,11 +4226,11 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 	**	insert into start queue.
 	*/
 
-	ptr = np->squeueput + 1;
-	if (ptr >= MAX_START) ptr=0;
-	np->squeue [ptr	  ] = NCB_SCRIPT_PHYS (np, idle);
+	qidx = np->squeueput + 1;
+	if (qidx >= MAX_START) qidx=0;
+	np->squeue [qidx	 ] = NCB_SCRIPT_PHYS (np, idle);
 	np->squeue [np->squeueput] = CCB_PHYS (cp, phys);
-	np->squeueput = ptr;
+	np->squeueput = qidx;
 
 	if(DEBUG_FLAGS & DEBUG_QUEUE)
 		printf ("%s: queuepos=%d tryoffset=%d.\n", ncr_name (np),
@@ -4193,9 +4256,9 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
         if (!(flags & SCSI_POLL)) {
-#else /* !__NetBSD__ */ 
+#else /* !(__NetBSD__ || __OpenBSD__) */  
 	if (!(flags & SCSI_NOMASK)) {
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 		if (np->lasttime) {
 			if(DEBUG_FLAGS & DEBUG_TINY) printf ("Q");
 			return(SUCCESSFULLY_QUEUED);
@@ -4246,9 +4309,9 @@ static INT32 ncr_start (struct scsi_xfer * xp)
 	};
 #if defined(__NetBSD__) || defined(__OpenBSD__)
         if (!(flags & SCSI_POLL)) 
-#else /* !__NetBSD__ */ 
+#else /* !(__NetBSD__ || __OpenBSD__) */  
 	if (!(flags & SCSI_NOMASK))
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 		return (SUCCESSFULLY_QUEUED);
 	switch (xp->error) {
 	case  0     : return (COMPLETE);
@@ -4315,7 +4378,7 @@ void ncr_complete (ncb_p np, ccb_p cp)
 		/*
 		**	fallback to asynch transfer.
 		*/
-		tp->usrsync=255;
+		tp->usrsync = 255;
 		tp->period =  0;
 	};
 
@@ -4336,7 +4399,7 @@ void ncr_complete (ncb_p np, ccb_p cp)
 			printf ("extended error %d.\n", cp->xerr_status);
 			break;
 		};
-		if (cp->host_status==HS_COMPLETE)
+		if (cp->host_status == HS_COMPLETE)
 			cp->host_status = HS_FAIL;
 	};
 
@@ -4350,7 +4413,7 @@ void ncr_complete (ncb_p np, ccb_p cp)
                 **      Don't override the error value.
                 */
 	} else                        
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 	if (   (cp->host_status == HS_COMPLETE)
 		&& (cp->scsi_status == S_GOOD)) {
 
@@ -4373,12 +4436,12 @@ void ncr_complete (ncb_p np, ccb_p cp)
 		/*
 		**	Try to assign a ccb to this nexus
 		*/
-		ncr_alloc_ccb (np, xp);
+		ncr_alloc_ccb (np, xp->sc_link->target, xp->sc_link->lun);
 
 		/*
 		**	On inquire cmd (0x12) save some data.
 		*/
-		if (xp->cmd->opcode == 0x12) {
+		if (xp->cmd->opcode == 0x12 && xp->sc_link->lun == 0) {
 			bcopy (	xp->data,
 				&tp->inqdata,
 				sizeof (tp->inqdata));
@@ -4417,7 +4480,7 @@ void ncr_complete (ncb_p np, ccb_p cp)
 		**   Not correct, but errors expected.
 		*/
 		xp->resid = 0;
-#endif /* !__NetBSD__ */
+#endif /* !(__NetBSD__ || __OpenBSD__) */ 
 	} else if ((cp->host_status == HS_COMPLETE)
 		&& (cp->scsi_status == (S_SENSE|S_GOOD))) {
 
@@ -4442,8 +4505,13 @@ void ncr_complete (ncb_p np, ccb_p cp)
 		*/
 		xp->error = XS_BUSY;
 
-	} else if ((cp->host_status == HS_SEL_TIMEOUT)
-		|| (cp->host_status == HS_TIMEOUT)) {
+	} else if (cp->host_status == HS_SEL_TIMEOUT) {
+
+		/*
+		**   Device failed selection
+		*/
+		xp->error = XS_SELTIMEOUT;
+	} else if(cp->host_status == HS_TIMEOUT) {
 
 		/*
 		**   No response
@@ -4606,28 +4674,35 @@ void ncr_init (ncb_p np, char * msg, u_long code)
 	**	Init chip.
 	*/
 
-#if !(defined(__NetBSD__) || defined(__OpenBSD__))
-	if (pci_max_burst_len < 4) {
-		static u_char tbl[4]={0,0,0x40,0x80};
-		burstlen = tbl[pci_max_burst_len];
-	} else burstlen = 0xc0;
-#else /* !__NetBSD__ */
-	burstlen = 0xc0;
-#endif /* __NetBSD__ */
+	burstlen = 0xc0;		/* XXX 53c875 needs code change to   */
+					/*     be able to use larger bursts  */
 
-	OUTB (nc_istat,  0      );      /*  Remove Reset, abort ...	     */
+	OUTB (nc_istat,  0x00   );      /*  Remove Reset, abort ...	     */
 	OUTB (nc_scntl0, 0xca   );      /*  full arb., ena parity, par->ATN  */
 	OUTB (nc_scntl1, 0x00	);	/*  odd parity, and remove CRST!!    */
 	OUTB (nc_scntl3, np->rv_scntl3);/*  timing prescaler		     */
 	OUTB (nc_scid  , RRE|np->myaddr);/*  host adapter SCSI address       */
 	OUTW (nc_respid, 1ul<<np->myaddr);/*  id to respond to		     */
 	OUTB (nc_istat , SIGP	);	/*  Signal Process		     */
-	OUTB (nc_dmode , burstlen);	/*  Burst length = 2 .. 16 transfers */
-	OUTB (nc_dcntl , NOCOM  );      /*  no single step mode, protect SFBR*/
-	OUTB (nc_ctest4, 0x08	);	/*  enable master parity checking    */
+	OUTB (nc_dmode , np->rv_dmode);	/* XXX modify burstlen ??? */
+	OUTB (nc_dcntl , np->rv_dcntl);
+	OUTB (nc_ctest3, np->rv_ctest3);
+	OUTB (nc_ctest5, np->rv_ctest5);
+	OUTB (nc_ctest4, MPEE	);	/*  enable master parity checking    */
 	OUTB (nc_stest2, EXT    );	/*  Extended Sreq/Sack filtering     */
 	OUTB (nc_stest3, TE     );	/*  TolerANT enable		     */
-	OUTB (nc_stime0, 0xfb	);	/*  HTH = 1.6sec  STO = 0.1 sec.     */
+	OUTB (nc_stime0, 0x0b	);	/*  HTH = disabled, STO = 0.1 sec.   */
+
+#ifdef __FreeBSD__
+	if (bootverbose) {
+	  printf ("\tBIOS values: dmode: %02x, dcntl: %02x, ctest3: %02x\n",
+		np->rv_dmode, np->rv_dcntl, np->rv_ctest3);
+	  printf ("\tdmode: %02x/%02x, dcntl: %02x/%02x, ctest3: %02x/%02x\n",
+		burstlen | ERL | ERMP | BOF, INB (nc_dmode),
+		CLSE | PFEN | NOCOM, INB (nc_dcntl),
+		WRIE, INB (nc_ctest3));
+	}
+#endif /* __FreeBSD__ */
 
 	/*
 	**	Reinitialize usrsync.
@@ -4706,8 +4781,6 @@ static void ncr_negotiate (struct ncb* np, struct tcb* tp)
 
 	u_long minsync = tp->usrsync;
 
-	if (minsync < 25) minsync=25;
-
 	/*
 	**	if not scsi 2
 	**	don't believe FAST!
@@ -4731,7 +4804,7 @@ static void ncr_negotiate (struct ncb* np, struct tcb* tp)
 		minsync = 255;
 
 	tp->minsync = minsync;
-	tp->maxoffs = (minsync<255 ? 8 : 0);
+	tp->maxoffs = (minsync<255 ? np->maxoffs : 0);
 
 	/*
 	**	period=0: has to negotiate sync transfer
@@ -4756,7 +4829,7 @@ static void ncr_setsync (ncb_p np, ccb_p cp, u_char sxfer)
 {
 	struct scsi_xfer *xp;
 	tcb_p tp;
-	u_char target = INB (nc_ctest0)&7;
+	u_char target = INB (nc_ctest0) & 0x0f;
 
 	assert (cp);
 	if (!cp) return;
@@ -4764,10 +4837,10 @@ static void ncr_setsync (ncb_p np, ccb_p cp, u_char sxfer)
 	xp = cp->xfer;
 	assert (xp);
 	if (!xp) return;
-	assert (target == (xp->sc_link->target & 7));
+	assert (target == (xp->sc_link->target & 0x0f));
 
 	tp = &np->target[target];
-	tp->period= sxfer&0xf ? ((sxfer>>5)+4) * np->ns_sync : 0xffff;
+	tp->period= sxfer&0x1f ? ((sxfer>>5)+4) * np->ns_sync : 0xffff;
 
 	if (tp->sval == sxfer) return;
 	tp->sval = sxfer;
@@ -4776,15 +4849,15 @@ static void ncr_setsync (ncb_p np, ccb_p cp, u_char sxfer)
 	**	Bells and whistles   ;-)
 	*/
 	PRINT_ADDR(xp);
-	if (sxfer & 0x0f) {
+	if (sxfer & 0x1f) {
+		unsigned f10 = 10000 << (tp->widedone ? tp->widedone -1 : 0);
+		unsigned mb10 = (f10 + tp->period/2) / tp->period;
 		/*
 		**  Disable extended Sreq/Sack filtering
 		*/
 		if (tp->period <= 200) OUTB (nc_stest2, 0);
-		printf ("%s%dns (%d Mb/sec) offset %d.\n",
-			tp->period<200 ? "FAST SCSI-2 ":"",
-			tp->period, (1000+tp->period/2)/tp->period,
-			sxfer & 0x0f);
+		printf ("%d.%d MB/s (%d ns, offset %d)\n",
+			mb10 / 10, mb10 % 10, tp->period, sxfer & 0x1f);
 	} else  printf ("asynchronous.\n");
 
 	/*
@@ -4813,7 +4886,7 @@ static void ncr_setsync (ncb_p np, ccb_p cp, u_char sxfer)
 static void ncr_setwide (ncb_p np, ccb_p cp, u_char wide)
 {
 	struct scsi_xfer *xp;
-	u_short target = INB (nc_ctest0)&7;
+	u_short target = INB (nc_ctest0) & 0x0f;
 	tcb_p tp;
 	u_char	scntl3 = np->rv_scntl3 | (wide ? EWS : 0);
 
@@ -4823,7 +4896,7 @@ static void ncr_setwide (ncb_p np, ccb_p cp, u_char wide)
 	xp = cp->xfer;
 	assert (xp);
 	if (!xp) return;
-	assert (target == (xp->sc_link->target & 7));
+	assert (target == (xp->sc_link->target & 0x0f));
 
 	tp = &np->target[target];
 	tp->widedone  =  wide+1;
@@ -4886,8 +4959,10 @@ static void ncr_settags (tcb_p tp, lcb_p lp)
 	**	only disk devices
 	**	only if enabled by user ..
 	*/
-	if ((  tp->inqdata[7] & INQ7_QUEUE) && ((tp->inqdata[0] & 0x1f)==0x00)
-		&& tp->usrtags) {
+	if ((tp->inqdata[7] & INQ7_QUEUE) == 0) {
+	    tp->usrtags=0;
+	}
+	if (tp->usrtags && ((tp->inqdata[0] & 0x1f) == 0x00)) {
 		reqtags = tp->usrtags;
 		if (lp->actlink <= 1)
 			lp->usetags=reqtags;
@@ -5031,27 +5106,9 @@ static void ncr_timeout (ncb_p np)
 			**      If there are no requests, the script
 			**      processor will sleep on SEL_WAIT_RESEL.
 			**      But we have to check whether it died.
-			**      Let's wake it up.
+			**      Let's try to wake it up.
 			*/
 			OUTB (nc_istat, SIGP);
-		};
-
-		if (np->latetime>4) {
-			/*
-			**	Although we tried to wake it up,
-			**	the script processor didn't respond.
-			**
-			**	May be a target is hanging,
-			**	or another initator lets a tape device
-			**	rewind with disconnect disabled :-(
-			**
-			**	We won't accept that.
-			*/
-			if (INB (nc_sbcl) & CBSY)
-				OUTB (nc_scntl1, CRST);
-			DELAY (1000);
-			ncr_init (np, "ncr dead ?", HS_TIMEOUT);
-			np->heartbeat = thistime;
 		};
 
 		/*----------------------------------------------------
@@ -5143,21 +5200,22 @@ void ncr_exception (ncb_p np)
 	**	interrupt on the fly ?
 	*/
 	while ((istat = INB (nc_istat)) & INTF) {
-		if (DEBUG_FLAGS & DEBUG_TINY) printf ("F");
+		if (DEBUG_FLAGS & DEBUG_TINY) printf ("F ");
 		OUTB (nc_istat, INTF);
 		np->profile.num_fly++;
 		ncr_wakeup (np, 0);
 	};
-
-	if (!(istat & (SIP|DIP))) return;
+	if (!(istat & (SIP|DIP))) {
+		return;
+	}
 
 	/*
 	**	Steinbach's Guideline for Systems Programming:
 	**	Never test for an error condition you don't know how to handle.
 	*/
 
-	dstat = INB (nc_dstat);
-	sist  = INW (nc_sist) ;
+ 	sist  = (istat & SIP) ? INW (nc_sist)  : 0;
+	dstat = (istat & DIP) ? INB (nc_dstat) : 0;
 	np->profile.num_int++;
 
 	if (DEBUG_FLAGS & DEBUG_TINY)
@@ -5318,7 +5376,8 @@ void ncr_exception (ncb_p np)
 	     !(dstat & DFE)) {
 		printf ("%s: have to clear fifos.\n", ncr_name (np));
 		OUTB (nc_stest3, TE|CSF);	/* clear scsi fifo */
-		OUTB (nc_ctest3, CLF);		/* clear dma fifo  */
+		OUTB (nc_ctest3, np->rv_ctest3 | CLF);
+						/* clear dma fifo  */
 	}
 
 	/*----------------------------------------
@@ -5366,7 +5425,7 @@ void ncr_exception (ncb_p np)
 			**	It's an early reconnect.
 			**	Let's continue ...
 			*/
-			OUTB (nc_dcntl, (STD|NOCOM));
+			OUTB (nc_dcntl, np->rv_dcntl | STD);
 			/*
 			**	info message
 			*/
@@ -5391,7 +5450,7 @@ void ncr_exception (ncb_p np)
 	if ((dstat & SSI) &&
 		!(sist  & (STO|GEN|HTH|MA|SGE|UDC|RST|PAR)) &&
 		!(dstat & (MDPE|BF|ABRT|SIR|IID))) {
-		OUTB (nc_dcntl, (STD|NOCOM));
+		OUTB (nc_dcntl, np->rv_dcntl | STD);
 		return;
 	};
 
@@ -5404,7 +5463,8 @@ void ncr_exception (ncb_p np)
 */
 
 	if (sist & SGE) {
-		OUTB (nc_ctest3, CLF);		/* clear scsi offsets */
+		/* clear scsi offsets */
+		OUTB (nc_ctest3, np->rv_ctest3 | CLF);
 	}
 
 	/*
@@ -5564,8 +5624,8 @@ static void ncr_int_ma (ncb_p np)
 		if (ss2 & OLF1) rest++;
 		if (ss2 & ORF1) rest++;
 	};
-	OUTB (nc_ctest3, CLF   );	/* clear dma fifo  */
-	OUTB (nc_stest3, TE|CSF);	/* clear scsi fifo */
+	OUTB (nc_ctest3, np->rv_ctest3 | CLF);	/* clear dma fifo  */
+	OUTB (nc_stest3, TE|CSF);		/* clear scsi fifo */
 
 	/*
 	**	locate matching cp
@@ -5581,9 +5641,9 @@ static void ncr_int_ma (ncb_p np)
 	    return;
 	}
 	if (cp != np->header.cp) {
-	    printf ("%s: SCSI phase error fixup: CCB address mismatch (0x%08lx != 0x%08lx)\n", 
-		    ncr_name (np), (u_long) cp, (u_long) np->header.cp);
-	    return;
+	    printf ("%s: SCSI phase error fixup: CCB address mismatch (0x%08lx != 0x%08lx) np.ccb = %p\n", 
+		    ncr_name (np), (u_long) cp, (u_long) np->header.cp, &np->ccb);
+/*	    return;*/
 	}
 
 	/*
@@ -5656,7 +5716,7 @@ static void ncr_int_ma (ncb_p np)
 			cmd&7, sbcl&7, (unsigned)olen,
 			(unsigned)oadr, (unsigned)rest);
 
-		OUTB (nc_dcntl, (STD|NOCOM));
+		OUTB (nc_dcntl, np->rv_dcntl | STD);
 		return;
 	};
 
@@ -5679,8 +5739,8 @@ static void ncr_int_ma (ncb_p np)
 
 	if (DEBUG_FLAGS & DEBUG_PHASE) {
 		PRINT_ADDR(cp->xfer);
-		printf ("newcmd[%d] %x %x %x %x.\n",
-			newcmd - cp->patch,
+		printf ("newcmd[%ld] %x %x %x %x.\n",
+			(long)(newcmd - cp->patch),
 			(unsigned)newcmd[0],
 			(unsigned)newcmd[1],
 			(unsigned)newcmd[2],
@@ -5727,7 +5787,7 @@ void ncr_int_sir (ncb_p np)
 	u_char num = INB (nc_dsps);
 	ccb_p	cp=0;
 	u_long	dsa;
-	u_char	target = INB (nc_ctest0) & 7;
+	u_char	target = INB (nc_ctest0) & 0x0f;
 	tcb_p	tp     = &np->target[target];
 	int     i;
 	if (DEBUG_FLAGS & DEBUG_TINY) printf ("I#%d", num);
@@ -6045,7 +6105,7 @@ void ncr_int_sir (ncb_p np)
 		if (DEBUG_FLAGS & DEBUG_NEGO) {
 			PRINT_ADDR(cp->xfer);
 			printf ("sync msgout: ");
-			(void) ncr_show_msg (np->msgin);
+			(void) ncr_show_msg (np->msgout);
 			printf (".\n");
 		}
 
@@ -6143,7 +6203,7 @@ void ncr_int_sir (ncb_p np)
 		if (DEBUG_FLAGS & DEBUG_NEGO) {
 			PRINT_ADDR(cp->xfer);
 			printf ("wide msgout: ");
-			(void) ncr_show_msg (np->msgin);
+			(void) ncr_show_msg (np->msgout);
 			printf (".\n");
 		}
 		break;
@@ -6299,7 +6359,7 @@ void ncr_int_sir (ncb_p np)
 	};
 
 out:
-	OUTB (nc_dcntl, (STD|NOCOM));
+	OUTB (nc_dcntl, np->rv_dcntl | STD);
 }
 
 /*==========================================================
@@ -6316,7 +6376,9 @@ static	ccb_p ncr_get_ccb
 {
 	lcb_p lp;
 	ccb_p cp = (ccb_p) 0;
+	int oldspl;
 
+	oldspl = splbio();
 	/*
 	**	Lun structure available ?
 	*/
@@ -6329,7 +6391,9 @@ static	ccb_p ncr_get_ccb
 		**	Look for free CCB
 		*/
 
-		while (cp && cp->magic) cp = cp->next_ccb;
+		while (cp && cp->magic) {
+			cp = cp->next_ccb;
+		}
 	}
 
 	/*
@@ -6348,10 +6412,13 @@ static	ccb_p ncr_get_ccb
 			break;
 	};
 
-	if (cp->magic)
+	if (cp->magic) {
+		splx(oldspl);
 		return ((ccb_p) 0);
+	}
 
 	cp->magic = 1;
+	splx(oldspl);
 	return (cp);
 }
 
@@ -6387,20 +6454,13 @@ void ncr_free_ccb (ncb_p np, ccb_p cp, int flags)
 **==========================================================
 */
 
-static	void ncr_alloc_ccb (ncb_p np, struct scsi_xfer * xp)
+static	void ncr_alloc_ccb (ncb_p np, u_long target, u_long lun)
 {
 	tcb_p tp;
 	lcb_p lp;
 	ccb_p cp;
 
-	u_long	target;
-	u_long	lun;
-
 	assert (np != NULL);
-	assert (xp != NULL);
-
-	target = xp->sc_link->target;
-	lun    = xp->sc_link->lun;
 
 	if (target>=MAX_TARGET) return;
 	if (lun   >=MAX_LUN   ) return;
@@ -6434,7 +6494,7 @@ static	void ncr_alloc_ccb (ncb_p np, struct scsi_xfer * xp)
 		tp->jump_lcb.l_paddr = NCB_SCRIPT_PHYS (np, abort);
 		np->jump_tcb.l_paddr = vtophys (&tp->jump_tcb);
 
-		ncr_setmaxtags (tp, SCSI_NCR_MAX_TAGS);
+		ncr_setmaxtags (tp, SCSI_NCR_DFLT_TAGS);
 	}
 
 	/*
@@ -6491,7 +6551,6 @@ static	void ncr_alloc_ccb (ncb_p np, struct scsi_xfer * xp)
 		return;
 
 	if (DEBUG_FLAGS & DEBUG_ALLOC) {
-		PRINT_ADDR(xp);
 		printf ("new ccb @%p.\n", cp);
 	}
 
@@ -6563,12 +6622,12 @@ static void ncr_opennings (ncb_p np, lcb_p lp, struct scsi_xfer * xp)
 			diff = xp->sc_link->openings;
 
 		xp->sc_link->openings	-= diff;
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 		if (diff > xp->sc_link->opennings)
 			diff = xp->sc_link->opennings;
 
 		xp->sc_link->opennings	-= diff;
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 		lp->actlink		-= diff;
 		if (DEBUG_FLAGS & DEBUG_TAGS)
 			printf ("%s: actlink: diff=%d, new=%d, req=%d\n",
@@ -6584,9 +6643,9 @@ static void ncr_opennings (ncb_p np, lcb_p lp, struct scsi_xfer * xp)
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 		xp->sc_link->openings	+= diff;
-#else /* !__NetBSD__ */
+#else /* !(__NetBSD__ || __OpenBSD__) */ 
 		xp->sc_link->opennings	+= diff;
-#endif /* __NetBSD__ */
+#endif /* __NetBSD__ || __OpenBSD__ */      
 		lp->actlink		+= diff;
 		wakeup ((caddr_t) xp->sc_link);
 		if (DEBUG_FLAGS & DEBUG_TAGS)
@@ -6612,7 +6671,7 @@ static void ncr_opennings (ncb_p np, lcb_p lp, struct scsi_xfer * xp)
 */
 
 static	int	ncr_scatter
-	(ncb_p np, struct dsb* phys, vm_offset_t vaddr, vm_size_t datalen)
+	(struct dsb* phys, vm_offset_t vaddr, vm_size_t datalen)
 {
 	u_long	paddr, pnext;
 
@@ -6800,6 +6859,9 @@ static int ncr_snooptest (struct ncb* np)
 	*/
 	if (pc != NCB_SCRIPT_PHYS (np, snoopend)+8) {
 		printf ("CACHE TEST FAILED: script execution failed.\n");
+		printf ("\tstart=%08lx, pc=%08lx, end=%08lx\n", 
+			NCB_SCRIPT_PHYS (np, snooptest), pc,
+			NCB_SCRIPT_PHYS (np, snoopend) +8);
 		return (0x40);
 	};
 	/*
@@ -6971,43 +7033,85 @@ static u_long ncr_lookup(char * id)
 #	define NCR_CLOCK 40
 #endif /* NCR_CLOCK */
 
-
-static void ncr_getclock (ncb_p np, u_char scntl3)
-{
-	u_char	tbl[6] = {6,2,3,4,6,8};
-	u_char	f;
-	u_char	ns_clock = (1000/NCR_CLOCK);
-
-	/*
-	**	Compute the best value for scntl3.
-	*/
 /*
-	f = (2 * MIN_SYNC_PD - 1) / ns_clock;
-	if (!f ) f=1;
-	if (f>4) f=4;
-	np -> ns_sync = (ns_clock * tbl[f]) / 2;
-	np -> rv_scntl3 = f<<4;
-
-	f = (2 * MIN_ASYNC_PD - 1) / ns_clock;
-	if (!f ) f=1;
-	if (f>4) f=4;
-	np -> ns_async = (ns_clock * tbl[f]) / 2;
-	np -> rv_scntl3 |= f;
-	if (DEBUG_FLAGS & DEBUG_TIMING)
-		printf ("%s: sclk=%d async=%d sync=%d (ns) scntl3=0x%x\n",
-		ncr_name (np), ns_clock, np->ns_async, np->ns_sync, np->rv_scntl3);
-*/
-
+ *	calculate NCR SCSI clock frequency (in KHz)
+ */
+static unsigned
+ncrgetfreq (ncb_p np, int gen)
+{
+	int ms = 0;
 	/*
-	 *	For now just preserve the BIOS setting ...
+	 * Measure GEN timer delay in order 
+	 * to calculate SCSI clock frequency
+	 *
+	 * This code will never execute too
+	 * many loop iterations (if DELAY is 
+	 * reasonably correct). It could get
+	 * too low a delay (too high a freq.)
+	 * if the CPU is slow executing the 
+	 * loop for some reason (an NMI, for
+	 * example). For this reason we will
+	 * if multiple measurements are to be 
+	 * performed trust the higher delay 
+	 * (lower frequency returned).
 	 */
+	OUTB (nc_stest1, 0);	/* make sure clock doubler is OFF	    */
+	OUTW (nc_sien , 0);	/* mask all scsi interrupts		    */
+	(void) INW (nc_sist);	/* clear pending scsi interrupt		    */
+	OUTB (nc_dien , 0);	/* mask all dma interrupts		    */
+	(void) INW (nc_sist);	/* another one, just to be sure :)	    */
+	OUTB (nc_scntl3, 4);	/* set pre-scaler to divide by 3	    */
+	OUTB (nc_stime1, 0);	/* disable general purpose timer	    */
+	OUTB (nc_stime1, gen);	/* set to nominal delay of (1<<gen) * 125us */
+	while (!(INW(nc_sist) & GEN) && ms++ < 1000)
+		DELAY(1000);	/* count ms				    */
+	OUTB (nc_stime1, 0);	/* disable general purpose timer	    */
+	OUTB (nc_scntl3, 0);
+	/*
+	 * Set prescaler to divide by whatever "0" means.
+	 * "0" ought to choose divide by 2, but appears
+	 * to set divide by 3.5 mode in my 53c810 ...
+	 */
+	OUTB (nc_scntl3, 0);
 
-	if ((scntl3 & 7) == 0) {
-		scntl3 = 3; /* assume 40MHz if no value supplied by BIOS */
+	if (bootverbose)
+	  	printf ("\tDelay (GEN=%d): %u msec\n", gen, ms);
+	/*
+	 * adjust for prescaler, and convert into KHz 
+	 */
+	return ms ? ((1 << gen) * 4440) / ms : 0;
+}
+
+static void ncr_getclock (ncb_p np)
+{
+	unsigned char scntl3;
+	unsigned char stest1;
+	scntl3 = INB(nc_scntl3);
+	stest1 = INB(nc_stest1);
+	  
+	/* always false, except for 875 with clock doubler selected */
+	if ((stest1 & (DBLEN+DBLSEL)) == DBLEN+DBLSEL) {
+		OUTB(nc_stest1, 0);
+		scntl3 = 3;
+	} else {
+		if ((scntl3 & 7) == 0) {
+			unsigned f1, f2;
+			/* throw away first result */
+			(void) ncrgetfreq (np, 11);
+			f1 = ncrgetfreq (np, 11);
+			f2 = ncrgetfreq (np, 11);
+
+			if (bootverbose)
+			  printf ("\tNCR clock is %uKHz, %uKHz\n", f1, f2);
+			if (f1 > f2) f1 = f2;	/* trust lower result	*/
+			if (f1 > 45000) {
+				scntl3 = 5;	/* >45Mhz: assume 80MHz	*/
+			} else {
+				scntl3 = 3;	/* <45Mhz: assume 40MHz	*/
+			}
+		}
 	}
 
-	np->ns_sync   = 25;
-	np->ns_async  = 50;
 	np->rv_scntl3 = ((scntl3 & 0x7) << 4) -0x20 + (scntl3 & 0x7);
 
 	if (bootverbose) {
@@ -7015,6 +7119,117 @@ static void ncr_getclock (ncb_p np, u_char scntl3)
 			scntl3, np->rv_scntl3);
 	}
 }
+
+/*=========================================================================*/
+
+#ifdef NCR_TEKRAM_EEPROM
+
+struct tekram_eeprom_dev {
+  u_char	devmode;
+#define	TKR_PARCHK	0x01
+#define	TKR_TRYSYNC	0x02
+#define	TKR_ENDISC	0x04
+#define	TKR_STARTUNIT	0x08
+#define	TKR_USETAGS	0x10
+#define	TKR_TRYWIDE	0x20
+  u_char	syncparam;	/* max. sync transfer rate (table ?) */
+  u_char	filler1;
+  u_char	filler2;
+};
+
+
+struct tekram_eeprom {
+  struct tekram_eeprom_dev 
+		dev[16];
+  u_char	adaptid;
+  u_char	adaptmode;
+#define	TKR_ADPT_GT2DRV	0x01
+#define	TKR_ADPT_GT1GB	0x02
+#define	TKR_ADPT_RSTBUS	0x04
+#define	TKR_ADPT_ACTNEG	0x08
+#define	TKR_ADPT_NOSEEK	0x10
+#define	TKR_ADPT_MORLUN	0x20
+  u_char	delay;		/* unit ? (table ???) */
+  u_char	tags;		/* use 4 times as many ... */
+  u_char	filler[60];
+};
+
+static void
+tekram_write_bit (ncb_p np, int bit)
+{
+	u_char val = 0x10 + ((bit & 1) << 1);
+
+	DELAY(10);
+	OUTB (nc_gpreg, val);
+	DELAY(10);
+	OUTB (nc_gpreg, val | 0x04);
+	DELAY(10);
+	OUTB (nc_gpreg, val);
+	DELAY(10);
+}
+
+static int
+tekram_read_bit (ncb_p np)
+{
+	OUTB (nc_gpreg, 0x10);
+	DELAY(10);
+	OUTB (nc_gpreg, 0x14);
+	DELAY(10);
+	return INB (nc_gpreg) & 1;
+}
+
+static u_short
+read_tekram_eeprom_reg (ncb_p np, int reg)
+{
+	int bit;
+	u_short result = 0;
+	int cmd = 0x80 | reg;
+
+	OUTB (nc_gpreg, 0x10);
+
+	tekram_write_bit (np, 1);
+	for (bit = 7; bit >= 0; bit--)
+	{
+		tekram_write_bit (np, cmd >> bit);
+	}
+
+	for (bit = 0; bit < 16; bit++)
+	{
+		result <<= 1;
+		result |= tekram_read_bit (np);
+	}
+
+	OUTB (nc_gpreg, 0x00);
+	return result;
+}
+
+static int 
+read_tekram_eeprom(ncb_p np, struct tekram_eeprom *buffer)
+{
+	u_short *p = (u_short *) buffer;
+	u_short sum = 0;
+	int i;
+
+	if (INB (nc_gpcntl) != 0x09)
+	{
+		return 0;
+        }
+	for (i = 0; i < 64; i++)
+	{
+		u_short val;
+if((i&0x0f) == 0) printf ("%02x:", i*2);
+		val = read_tekram_eeprom_reg (np, i);
+		if (p)
+			*p++ = val;
+		sum += val;
+if((i&0x01) == 0x00) printf (" ");
+		printf ("%02x%02x", val & 0xff, (val >> 8) & 0xff);
+if((i&0x0f) == 0x0f) printf ("\n");
+	}
+printf ("Sum = %04x\n", sum);
+	return sum == 0x1234;
+}
+#endif /* NCR_TEKRAM_EEPROM */
 
 /*=========================================================================*/
 #endif /* KERNEL */

@@ -1,5 +1,5 @@
-/*	$OpenBSD: wesc.c,v 1.4 1996/05/02 06:44:38 niklas Exp $	*/
-/*	$NetBSD: wesc.c,v 1.13 1996/04/21 21:12:42 veego Exp $	*/
+/*	$OpenBSD: wesc.c,v 1.7 1997/01/18 12:26:35 niklas Exp $	*/
+/*	$NetBSD: wesc.c,v 1.19 1996/12/23 09:10:30 veego Exp $	*/
 
 /*
  * Copyright (c) 1994 Michael L. Hitch
@@ -51,7 +51,6 @@
 #include <amiga/dev/siopvar.h>
 #include <amiga/dev/zbusvar.h>
 
-int wescprint __P((void *auxp, char *));
 void wescattach __P((struct device *, struct device *, void *));
 int wescmatch __P((struct device *, void *, void *));
 int wesc_dmaintr __P((void *));
@@ -140,22 +139,8 @@ wescattach(pdp, dp, auxp)
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, wescprint);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
-
-/*
- * print diag if pnp is NULL else just extra
- */
-int
-wescprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-	return(QUIET);
-}
-
 
 int
 wesc_dmaintr(arg)

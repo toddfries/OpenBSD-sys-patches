@@ -1,8 +1,12 @@
-/*	$NetBSD: kd.c,v 1.16 1996/04/26 18:36:54 gwr Exp $	*/
+/*	$OpenBSD: kd.c,v 1.7 1997/01/16 04:03:49 kstailey Exp $	*/
+/*	$NetBSD: kd.c,v 1.21 1996/11/20 18:56:55 gwr Exp $	*/
 
-/*
- * Copyright (c) 1994, 1995 Gordon W. Ross
+/*-
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Gordon W. Ross.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,22 +16,25 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- * 4. All advertising materials mentioning features or use of this software
+ * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Gordon Ross
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -49,16 +56,18 @@
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
+#include <machine/conf.h>
+#include <machine/machdep.h>
 #include <machine/mon.h>
 #include <machine/psl.h>
 
 #include <dev/cons.h>
 #include <dev/sun/kbd_xlate.h>
 
+#include "zs_cons.h"
+
 #define	KDMAJOR 1
 #define PUT_WSIZE	64
-
-cdev_decl(kd);	/* open, close, read, write, ioctl, stop, ... */
 
 struct kd_softc {
 	struct	device kd_dev;		/* required first: base device */
@@ -77,7 +86,7 @@ static void kdstart(struct tty *);
 int kd_is_console;
 
 /*
- * This is called by kbd_attach() 
+ * This is called by kbd_attach()
  * XXX - Make this a proper child of kbd?
  */
 void
@@ -90,12 +99,14 @@ kd_init(unit)
 	if (unit != 0)
 		return;
 	kd = &kd_softc; 	/* XXX */
-	tp = ttymalloc();
 
-	kd->kd_tty = tp;
+	tp = ttymalloc();
 	tp->t_oproc = kdstart;
 	tp->t_param = kdparam;
 	tp->t_dev = makedev(KDMAJOR, unit);
+	tty_attach(tp);
+
+	kd->kd_tty = tp;
 
 	return;
 }
@@ -119,7 +130,7 @@ kdopen(dev, flag, mode, p)
 	struct kd_softc *kd;
 	int error, s, unit;
 	struct tty *tp;
-	
+
 	unit = minor(dev);
 	if (unit != 0)
 		return ENXIO;
@@ -253,7 +264,7 @@ kdparam(tp, t)
 	tp->t_ispeed = t->c_ispeed;
 	tp->t_ospeed = t->c_ospeed;
 	tp->t_cflag = t->c_cflag;
-	return 0;
+	return (0);
 }
 
 
@@ -262,7 +273,7 @@ kdstop(tp, flag)
 	struct tty *tp;
 	int flag;
 {
-
+	return (0);
 }
 
 static void kd_later(void*);
@@ -329,7 +340,7 @@ kd_later(tpaddr)
 
 	s = spltty();
 	tp->t_state &= ~TS_BUSY;
-		(*linesw[tp->t_line].l_start)(tp);
+	(*linesw[tp->t_line].l_start)(tp);
 	splx(s);
 }
 
@@ -383,12 +394,11 @@ kd_input(c)
  ****************************************************************/
 
 extern void *zs_conschan;
-extern int zs_getc();
-extern void nullcnprobe();
-cons_decl(kd);
 
 /* The debugger gets its own key translation state. */
 static struct kbd_state kdcn_state;
+
+cons_decl(kd);
 
 void
 kdcninit(cn)
@@ -456,7 +466,6 @@ kdcnputc(dev, c)
 	(romVectorPtr->fbWriteChar)(c & 0x7f);
 }
 
-extern void fb_unblank();
 void kdcnpollc(dev, on)
 	dev_t dev;
 	int on;

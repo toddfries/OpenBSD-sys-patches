@@ -1,5 +1,5 @@
-/*	$OpenBSD: conf.c,v 1.10 1996/08/29 09:26:14 deraadt Exp $	*/
-/*	$NetBSD: conf.c,v 1.34 1996/06/19 02:20:54 briggs Exp $	*/
+/*	$OpenBSD: conf.c,v 1.15 1997/03/08 16:17:02 briggs Exp $	*/
+/*	$NetBSD: conf.c,v 1.41 1997/02/11 07:35:49 scottr Exp $	*/
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -51,17 +51,11 @@ int	ttselect	__P((dev_t, int, struct proc *));
 
 bdev_decl(sw);
 #include "st.h"
-bdev_decl(st);
 #include "sd.h"
-bdev_decl(sd);
 #include "cd.h"
-bdev_decl(cd);
 #include "ch.h"
-bdev_decl(ch);
 #include "vnd.h"
-bdev_decl(vnd);
 #include "ccd.h"
-bdev_decl(ccd);
 #include "rd.h"
 bdev_decl(rd);
 /* No cdev for rd */
@@ -91,16 +85,6 @@ struct bdevsw	bdevsw[] =
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
-/* open, close, ioctl, select, mmap -- XXX should be a map device */
-#define	cdev_grf_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) nullop, \
-	(dev_type_write((*))) nullop, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,select), \
-	dev_init(c,n,mmap) }
-
-cdev_decl(cn);
-cdev_decl(ctty);
-
 #include "ite.h"
 cdev_decl(ite);
 #define mmread	mmrw
@@ -108,16 +92,10 @@ cdev_decl(ite);
 cdev_decl(mm);
 cdev_decl(sw);
 #include "pty.h"
-#define	ptstty		ptytty
-#define	ptsioctl	ptyioctl
-cdev_decl(pts);
-#define	ptctty		ptytty
-#define	ptcioctl	ptyioctl
-cdev_decl(ptc);
-cdev_decl(log);
-cdev_decl(st);
-cdev_decl(sd);
-cdev_decl(cd);
+#include "ss.h"
+cdev_decl(ss);
+#include "uk.h"
+cdev_decl(uk);
 cdev_decl(fd);
 #include "grf.h"
 cdev_decl(grf);
@@ -127,23 +105,13 @@ cdev_decl(adb);
 cdev_decl(zsc);
 #include "zstty.h"
 cdev_decl(zs);
-cdev_decl(vnd);
-cdev_decl(ccd);
+#include "ch.h"
+cdev_decl(ch);
 #include "bpfilter.h"
-cdev_decl(bpf);
 #include "tun.h"
-cdev_decl(tun);
 dev_decl(filedesc,open);
-#include "random.h"
-cdev_decl(random);
-
-#ifdef LKM
-#define NLKM	1
-#else
-#define NLKM	0
-#endif
-
-cdev_decl(lkm);
+#include "asc.h"
+cdev_decl(asc);
 
 /* open, close, read, ioctl */
 cdev_decl(ipl);
@@ -165,15 +133,14 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 7 */
 	cdev_notdef(),			/* 8 */
 	cdev_notdef(),			/* 9 */
-	cdev_grf_init(1,grf),		/* 10: frame buffer */
+	cdev_fb_init(NGRF,grf),		/* 10: frame buffer */
 	cdev_tty_init(NITE,ite),	/* 11: console terminal emulator */
 	cdev_tty_init(NZSTTY,zs),	/* 12: 2 mac serial ports -- BG*/
 	cdev_disk_init(NSD,sd),		/* 13: SCSI disk */
 	cdev_tape_init(NST,st),		/* 14: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 15: SCSI CD-ROM */
 	cdev_notdef(),			/* 16 */
-/*	cdev_disk_init(NCH,ch),		 17: SCSI autochanger */
-	cdev_notdef(),			/* 17: until we find chstrategy... */
+	cdev_ch_init(NCH,ch),		/* 17: SCSI autochanger */
 	cdev_notdef(),			/* 18 */
 	cdev_disk_init(NVND,vnd),	/* 19: vnode disk driver */
 	cdev_disk_init(NCCD,ccd),	/* 20: concatenated disk driver */
@@ -188,8 +155,11 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 29 */
 	cdev_lkm_dummy(),		/* 30 */
 	cdev_lkm_dummy(),		/* 31 */
-	cdev_gen_ipf(NIPF,ipl),         /* 32: IP filter log */
-	cdev_random_init(NRANDOM,random), /* 33: random data source */
+	cdev_random_init(1,random),	/* 32: random data source */
+	cdev_ss_init(NSS,ss),           /* 33: SCSI scanner */
+	cdev_uk_init(NUK,uk),		/* 34: SCSI unknown */
+	cdev_gen_ipf(NIPF,ipl),         /* 35: IP filter log */
+	cdev_audio_init(NASC,asc),      /* 36: ASC audio device */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -277,6 +247,24 @@ chrtoblk(dev)
 	if (blkmaj == NODEV)
 		return NODEV;
 	return (makedev(blkmaj, minor(dev)));
+}
+
+/*
+ * Convert a character device number to a block device number.
+ */
+dev_t
+blktochr(dev)
+	dev_t dev;
+{
+	int blkmaj = major(dev);
+	int i;
+
+	if (blkmaj >= nblkdev)
+		return (NODEV);
+	for (i = 0; i < sizeof(chrtoblktab)/sizeof(chrtoblktab[0]); i++)
+		if (blkmaj == chrtoblktab[i])
+			return (makedev(i, minor(dev)));
+	return (NODEV);
 }
 
 #define itecnpollc	nullcnpollc

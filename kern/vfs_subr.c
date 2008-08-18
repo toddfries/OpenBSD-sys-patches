@@ -1,3 +1,4 @@
+/*	$OpenBSD: vfs_subr.c,v 1.10 1997/04/25 09:33:24 deraadt Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -263,6 +264,8 @@ getnewfsid(mp, mtype)
 
 /*
  * Make a 'unique' number from a mount type name.
+ * Note that this is no longer used for ffs which
+ * now has an on-disk filesystem id.
  */
 long
 makefstype(type)
@@ -464,8 +467,7 @@ vinvalbuf(vp, flags, cred, p, slpflag, slptimeo)
 					return (error);
 				break;
 			}
-			bremfree(bp);
-			bp->b_flags |= B_BUSY;
+			bp->b_flags |= B_BUSY | B_VFLUSH;
 			splx(s);
 			/*
 			 * XXX Since there are no node locks for NFS, I believe
@@ -502,8 +504,7 @@ loop:
 			continue;
 		if ((bp->b_flags & B_DELWRI) == 0)
 			panic("vflushbuf: not dirty");
-		bremfree(bp);
-		bp->b_flags |= B_BUSY;
+		bp->b_flags |= B_BUSY | B_VFLUSH;
 		splx(s);
 		/*
 		 * Wait for I/O associated with indirect blocks to complete,
@@ -708,6 +709,7 @@ loop:
 		nvp->v_hashchain = vpp;
 		nvp->v_specnext = *vpp;
 		nvp->v_specflags = 0;
+		nvp->v_speclockf = NULL;
 		*vpp = nvp;
 		if (vp != NULL) {
 			nvp->v_flag |= VALIASED;
@@ -1363,7 +1365,7 @@ vfs_hang_addrlist(mp, nep, argp)
 		saddr->sa_len = argp->ex_addrlen;
 	if (argp->ex_masklen) {
 		smask = (struct sockaddr *)((caddr_t)saddr + argp->ex_addrlen);
-		error = copyin(argp->ex_addr, (caddr_t)smask, argp->ex_masklen);
+		error = copyin(argp->ex_mask, (caddr_t)smask, argp->ex_masklen);
 		if (error)
 			goto out;
 		if (smask->sa_len > argp->ex_masklen)

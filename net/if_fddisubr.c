@@ -1,3 +1,4 @@
+/*	$OpenBSD: if_fddisubr.c,v 1.11 1997/02/24 13:33:59 niklas Exp $	*/
 /*	$NetBSD: if_fddisubr.c,v 1.5 1996/05/07 23:20:21 christos Exp $	*/
 
 /*
@@ -91,12 +92,10 @@
 
 #include "bpfilter.h"
 
-#ifdef LLC
 #include <netccitt/dll.h>
 #include <netccitt/llc_var.h>
-#endif
 
-#if defined(LLC) && defined(CCITT)
+#if defined(CCITT)
 extern struct ifqueue pkintrq;
 #endif
 
@@ -245,7 +244,7 @@ fddi_output(ifp, m0, dst, rt0)
 #endif
 		} break;
 #endif /* ISO */
-#ifdef	LLC
+#ifdef	CCITT
 /*	case AF_NSAP: */
 	case AF_CCITT: {
 		register struct sockaddr_dl *sdl = 
@@ -284,7 +283,7 @@ fddi_output(ifp, m0, dst, rt0)
 		}
 #endif /* LLC_DEBUG */
 		} break;
-#endif /* LLC */	
+#endif /* CCITT */	
 
 	case AF_UNSPEC:
 	{
@@ -363,7 +362,9 @@ fddi_output(ifp, m0, dst, rt0)
 	fh = mtod(m, struct fddi_header *);
 	fh->fddi_fc = FDDIFC_LLC_ASYNC|FDDIFC_LLC_PRIO4;
  	bcopy((caddr_t)edst, (caddr_t)fh->fddi_dhost, sizeof (edst));
+#if NBPFILTER > 0
   queue_it:
+#endif
  	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)fh->fddi_shost,
 	    sizeof(fh->fddi_shost));
 	s = splimp();
@@ -404,7 +405,9 @@ fddi_input(ifp, fh, m)
 {
 	register struct ifqueue *inq;
 	register struct llc *l;
+#ifdef	ISO
 	struct arpcom *ac = (struct arpcom *)ifp;
+#endif
 	int s;
 
 	if ((ifp->if_flags & IFF_UP) == 0) {
@@ -538,7 +541,7 @@ fddi_input(ifp, fh, m)
 		}
 		break;
 #endif /* ISO */
-#ifdef LLC
+#ifdef CCITT
 	case LLC_X25_LSAP:
 	{
 		M_PREPEND(m, sizeof(struct sdl_hdr) , M_DONTWAIT);
@@ -556,7 +559,7 @@ fddi_input(ifp, fh, m)
 		inq = &llcintrq;
 		break;
 	}
-#endif /* LLC */
+#endif /* CCITT */
 		
 	default:
 		/* printf("fddi_input: unknown dsap 0x%x\n", l->llc_dsap); */

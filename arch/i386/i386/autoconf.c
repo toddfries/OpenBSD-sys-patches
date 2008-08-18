@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.14 1996/09/29 08:00:41 downsj Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.25 1997/05/22 05:28:58 deraadt Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
 
 /*-
@@ -59,6 +59,8 @@
 
 #include <machine/pte.h>
 #include <machine/cpu.h>
+
+#include <dev/cons.h>
 
 void swapconf __P((void));
 void setroot __P((void));
@@ -127,12 +129,28 @@ swapconf()
 #define	DOSWAP			/* change swdevt and dumpdev */
 u_long	bootdev = 0;		/* should be dev_t, but not until 32 bits */
 
-static	char devname[][2] = {
-	{ 'w','d' },	/* 0 = wd */
-	{ 's','w' },	/* 1 = sw */
-	{ 'f','d' },	/* 2 = fd */
-	{ 'w','t' },	/* 3 = wt */
-	{ 's','d' },	/* 4 = sd -- new SCSI system */
+static const char *devname[] = {
+	"wd",		/* 0 = wd */
+	"sw",		/* 1 = sw */
+	"fd",		/* 2 = fd */
+	"wt",		/* 3 = wt */
+	"sd",		/* 4 = sd */
+	"",		/* 5 */
+	"",		/* 6 */
+	"mcd",		/* 7 = mcd */
+	"",		/* 8 */
+	"",		/* 9 */
+	"",		/* 10 */
+	"",		/* 11 */
+	"",		/* 12 */
+	"",		/* 13 */
+	"",		/* 14 */
+	"",		/* 15 */
+	"",		/* 16 */
+	"rd",		/* 17 = rd */
+	"acd",		/* 18 = acd */
+	"",		/* 19 */
+	""		/* 20 */
 };
 
 dev_t	argdev = NODEV;
@@ -159,7 +177,8 @@ setroot()
 	    (bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
 		return;
 	majdev = (bootdev >> B_TYPESHIFT) & B_TYPEMASK;
-	if (majdev > sizeof(devname) / sizeof(devname[0]))
+	if (majdev > sizeof(devname)/sizeof(devname[0]) ||
+	    *devname[majdev] == '\0')
 		return;
 	adaptor = (bootdev >> B_ADAPTORSHIFT) & B_ADAPTORMASK;
 	part = (bootdev >> B_PARTITIONSHIFT) & B_PARTITIONMASK;
@@ -173,15 +192,12 @@ setroot()
 	 */
 	if (rootdev == orootdev)
 		return;
-	printf("root on %c%c%d%c\n",
-	    devname[majdev][0], devname[majdev][1],
-	    unit, part + 'a');
+	printf("root on %s%d%c\n", devname[majdev], unit, part + 'a');
 
 #ifdef DOSWAP
 	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
 		if (majdev == major(swp->sw_dev) &&
-		    (mindev / MAXPARTITIONS) ==
-		    (minor(swp->sw_dev) / MAXPARTITIONS)) {
+		    mindev/MAXPARTITIONS == minor(swp->sw_dev)/MAXPARTITIONS) {
 			temp = swdevt[0].sw_dev;
 			swdevt[0].sw_dev = swp->sw_dev;
 			swp->sw_dev = temp;
@@ -200,13 +216,9 @@ setroot()
 #endif
 }
 
-#include "wdc.h"
-#if NWDC > 0
+#include "wd.h"
+#if NWD > 0
 extern	struct cfdriver wd_cd;
-#endif
-#include "fd.h"
-#if NFD > 0
-extern	struct cfdriver fd_cd;
 #endif
 #include "sd.h"
 #if NSD > 0
@@ -220,14 +232,29 @@ extern	struct cfdriver cd_cd;
 #if NMCD > 0
 extern	struct cfdriver mcd_cd;
 #endif
+#include "acd.h"
+#if NACD > 0
+extern	struct cfdriver acd_cd;
+#endif
+#include "fd.h"
+#if NFD > 0
+extern	struct cfdriver fd_cd;
+#endif
+#include "rd.h"
+#if NRD > 0
+extern	struct cfdriver rd_cd;
+#endif
 
 struct	genericconf {
 	struct cfdriver *gc_driver;
 	char *gc_name;
 	dev_t gc_major;
 } genericconf[] = {
-#if NWDC > 0
+#if NWD > 0
 	{ &wd_cd,  "wd",  0 },
+#endif
+#if NFD > 0
+	{ &fd_cd,  "fd",  2 },
 #endif
 #if NSD > 0
 	{ &sd_cd,  "sd",  4 },
@@ -238,8 +265,11 @@ struct	genericconf {
 #if NMCD > 0
 	{ &mcd_cd, "mcd", 7 },
 #endif
-#if NFDC > 0
-	{ &fd_cd,  "fd",  2 },
+#if NRD > 0
+	{ &rd_cd,  "rd",  17 },
+#endif
+#if NACD > 0
+	{ &acd_cd,  "acd",  18 },
 #endif
 	{ 0 }
 };
@@ -247,10 +277,8 @@ struct	genericconf {
 void
 setconf()
 {
-	extern int ffs_mountroot __P((void *));
-	extern int (*mountroot) __P((void *));
 	register struct genericconf *gc;
-	int unit;
+	int unit, part = 0;
 #if 0
 	int swaponroot = 0;
 #endif
@@ -285,8 +313,16 @@ retry:
 			}
 #endif
 
-			unit = 0;
+			unit = -2;
 			do {
+				if (unit != -2 && *num >= 'a' &&
+				    *num <= 'a'+MAXPARTITIONS-1 &&
+				    num[1] == '\0') {
+					part = *num++ - 'a';
+					break;
+				}
+				if (unit == -2)
+					unit = 0;
 				unit = (unit * 10) + *num - '0';
 				if (*num < '0' || *num > '9')
 					unit = -1;
@@ -299,9 +335,10 @@ retry:
 			    gc->gc_driver->cd_devs[unit] == NULL) {
 				printf("%d: no such unit\n", unit);
 			} else {
-				printf("root on %s%da\n", gc->gc_name, unit);
+				printf("root on %s%d%c\n", gc->gc_name, unit,
+				    'a' + part);
 				rootdev = makedev(gc->gc_major,
-				    unit * MAXPARTITIONS);
+				    unit * MAXPARTITIONS + part);
 				goto doswap;
 			}
 		}
@@ -309,7 +346,8 @@ retry:
 		for (gc = genericconf; gc->gc_driver; gc++) {
 			for (unit=0; unit < gc->gc_driver->cd_ndevs; unit++) {
 				if (gc->gc_driver->cd_devs[unit])
-					printf("%s%d ", gc->gc_name, unit);
+					printf("%s%d[a-%c] ", gc->gc_name,
+					    unit, 'a'+MAXPARTITIONS-1);
 			}
 		}
 		printf("\n");
@@ -325,7 +363,7 @@ noask:
 	}
 
 doswap:
-	mountroot = ffs_mountroot;
+	mountroot = dk_mountroot;
 	swdevt[0].sw_dev = argdev = dumpdev =
 	    makedev(major(rootdev), minor(rootdev) + 1);
 	/* swap size and dumplo set during autoconfigure */

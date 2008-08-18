@@ -1,4 +1,5 @@
-/*	$OpenBSD: memcpy.c,v 1.2 1996/09/23 14:18:57 mickey Exp $	*/
+/*	$OpenBSD: memcpy.c,v 1.3 1996/10/16 11:32:07 mickey Exp $	*/
+/*	$NetBSD: bcopy.c,v 1.5 1995/04/22 13:46:50 cgd Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -32,18 +33,31 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	from: @(#)bcopy.c	8.1 (Berkeley) 6/11/93
+ *	@(#)bcopy.c	8.1 (Berkeley) 6/11/93
  */
 
 #include <sys/types.h>
 #include "stand.h"
 
+/*
+ * This is designed to be small, not fast.
+ */
 void *
 memcpy(s1, s2, n)
 	void *s1;
 	const void *s2;
 	size_t n;
 {
-	bcopy(s2, s1, n);
+	register const char *f = s2;
+	register char *t = s1;
+
+	if (f < t) {
+		f += n;
+		t += n;
+		while (n-- > 0)
+			*--t = *--f;
+	} else
+		while (n-- > 0)
+			*t++ = *f++;
 	return s1;
 }

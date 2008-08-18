@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.9 1996/08/15 13:49:48 niklas Exp $	*/
+/*	$OpenBSD: systm.h,v 1.20 1997/03/06 07:05:54 tholo Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -40,6 +40,9 @@
  *
  *	@(#)systm.h	8.4 (Berkeley) 2/23/94
  */
+
+#ifndef __SYSTM_H__
+#define __SYSTM_H__
 
 #include <machine/stdarg.h>
 
@@ -96,6 +99,7 @@ extern struct vnode *rootvp;	/* vnode equivalent to above */
 extern dev_t swapdev;		/* swapping device */
 extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 
+struct proc;
 extern struct sysent {		/* system call table */
 	short	sy_narg;	/* number of args */
 	short	sy_argsize;	/* total size of arguments */
@@ -128,8 +132,14 @@ int	eopnotsupp __P((void));
 
 int	lkmenodev __P((void));
 
-int	seltrue __P((dev_t dev, int which, struct proc *p));
-void	*hashinit __P((int count, int type, u_long *hashmask));
+struct vnodeopv_desc;
+void vfs_opv_init __P((void));
+void vfs_opv_init_explicit __P((struct vnodeopv_desc *));
+void vfs_opv_init_default __P((struct vnodeopv_desc *));
+void vfs_op_init __P((void));
+
+int	seltrue __P((dev_t dev, int which, struct proc *));
+void	*hashinit __P((int, int, u_long *));
 int	sys_nosys __P((struct proc *, void *, register_t *));
 
 void	panic __P((const char *, ...))
@@ -138,6 +148,8 @@ void	panic __P((const char *, ...))
 #else
     __attribute__((__noreturn__));
 #endif
+void	__assert __P((const char *, const char *, int, const char *))
+    __attribute__((__noreturn__));
 int	printf __P((const char *, ...))
     __kprintf_attribute__((__format__(__kprintf__,1,2)));
 void	uprintf __P((const char *, ...))
@@ -146,47 +158,51 @@ int	vsprintf __P((char *, const char *, va_list))
     __kprintf_attribute__((__format__(__kprintf__,2,3)));
 int	sprintf __P((char *buf, const char *, ...))
     __kprintf_attribute__((__format__(__kprintf__,2,3)));
+struct tty;
 void	ttyprintf __P((struct tty *, const char *, ...))
     __kprintf_attribute__((__format__(__kprintf__,2,3)));
 
 void	tablefull __P((const char *));
 
-void	bcopy __P((const void *from, void *to, size_t len));
-void	ovbcopy __P((const void *from, void *to, size_t len));
-void	bzero __P((void *buf, size_t len));
-int	bcmp __P((const void *b1, const void *b2, size_t len));
+void	bcopy __P((const void *, void *, size_t));
+void	ovbcopy __P((const void *, void *, size_t));
+void	bzero __P((void *, size_t));
+int	bcmp __P((const void *, const void *, size_t));
 
-int	copystr __P((void *kfaddr, void *kdaddr, size_t len, size_t *done));
-int	copyinstr __P((void *udaddr, void *kaddr, size_t len, size_t *done));
-int	copyoutstr __P((void *kaddr, void *udaddr, size_t len, size_t *done));
-int	copyin __P((void *udaddr, void *kaddr, size_t len));
-int	copyout __P((void *kaddr, void *udaddr, size_t len));
+int	copystr __P((const void *, void *, size_t, size_t *));
+int	copyinstr __P((const void *, void *, size_t, size_t *));
+int	copyoutstr __P((const void *, void *, size_t, size_t *));
+int	copyin __P((const void *, void *, size_t));
+int	copyout __P((const void *, void *, size_t));
 
-int	fubyte __P((void *base));
+int	fubyte __P((void *));
 #ifdef notdef
-int	fuibyte __P((void *base));
+int	fuibyte __P((void *));
 #endif
-int	subyte __P((void *base, int byte));
-int	suibyte __P((void *base, int byte));
-long	fuword __P((void *base));
-long	fuiword __P((void *base));
-int	suword __P((void *base, long word));
-int	suiword __P((void *base, long word));
+int	subyte __P((void *, int));
+int	suibyte __P((void *, int));
+long	fuword __P((void *));
+long	fuiword __P((void *));
+int	suword __P((void *, long));
+int	suiword __P((void *, long));
 int	fuswintr __P((caddr_t));
 int	suswintr __P((caddr_t, u_int));
 
 struct timeval;
-int	hzto __P((struct timeval *tv));
-void	timeout __P((void (*func)(void *), void *arg, int ticks));
-void	untimeout __P((void (*func)(void *), void *arg));
+int	hzto __P((struct timeval *));
+void	timeout __P((void (*)(void *), void *, int));
+void	untimeout __P((void (*)(void *), void *));
 void	realitexpire __P((void *));
 
 struct clockframe;
-void	hardclock __P((struct clockframe *frame));
+void	hardclock __P((struct clockframe *));
 void	softclock __P((void));
-void	statclock __P((struct clockframe *frame));
+void	statclock __P((struct clockframe *));
 #ifdef NTP
 void	hardupdate __P((long offset));
+#ifdef PPS_SYNC
+void	hardpps __P((struct timeval *, long));
+#endif
 #endif
 
 void	initclocks __P((void));
@@ -196,7 +212,7 @@ void	cpu_initclocks __P((void));
 
 void	startprofclock __P((struct proc *));
 void	stopprofclock __P((struct proc *));
-void	setstatclockrate __P((int hzrate));
+void	setstatclockrate __P((int));
 
 /*
  * Shutdown hooks.  Functions to be run with all interrupts disabled
@@ -206,6 +222,7 @@ void	*shutdownhook_establish __P((void (*)(void *), void *));
 void	shutdownhook_disestablish __P((void *));
 void	doshutdownhooks __P((void));
 
+struct uio;
 int	uiomove __P((caddr_t, int, struct uio *));
 
 int	setjmp	__P((label_t *));
@@ -221,9 +238,13 @@ void	cpu_set_kpc __P((struct proc *, void (*)(struct proc *)));
 void	kmstartup __P((void));
 #endif
 
+int nfs_mountroot __P((void));
+int dk_mountroot __P((void));
+int (*mountroot) __P((void));
+
 #include <lib/libkern/libkern.h>
 
-#ifdef DDB
+#if defined(DDB) || defined(KGDB)
 /* debugger entry points */
 void	Debugger __P((void));	/* in DDB only */
 int	read_symtab_from_file __P((struct proc *,struct vnode *,const char *));
@@ -233,3 +254,4 @@ int	read_symtab_from_file __P((struct proc *,struct vnode *,const char *));
 void	user_config __P((void));
 #endif
 
+#endif /* __SYSTM_H__ */

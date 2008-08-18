@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.7 1996/09/04 22:33:48 niklas Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.11 1997/01/25 17:37:34 dm Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -314,6 +314,17 @@ sys_fcntl(p, v, retval)
 			return (error);
 		if (fl.l_whence == SEEK_CUR)
 			fl.l_start += fp->f_offset;
+		else if (fl.l_whence != SEEK_END &&
+			 fl.l_whence != SEEK_SET &&
+			 fl.l_whence != 0)
+			return (EINVAL);
+		if (fl.l_start < 0)
+			return (EINVAL);
+		if (fl.l_type != F_RDLCK &&
+		    fl.l_type != F_WRLCK &&
+		    fl.l_type != F_UNLCK &&
+		    fl.l_type != 0)
+			return (EINVAL);
 		error = VOP_ADVLOCK(vp, (caddr_t)p, F_GETLK, &fl, F_POSIX);
 		if (error)
 			return (error);
@@ -432,9 +443,14 @@ sys_fstat(p, v, retval)
 		panic("fstat");
 		/*NOTREACHED*/
 	}
-	if (error == 0)
+	if (error == 0) {
+		/* Don't let non-root see generation numbers
+		   (for NFS security) */
+		if (suser(p->p_ucred, &p->p_acflag))
+			ub.st_gen = 0;
 		error = copyout((caddr_t)&ub, (caddr_t)SCARG(uap, sb),
 		    sizeof (ub));
+	}
 	return (error);
 }
 

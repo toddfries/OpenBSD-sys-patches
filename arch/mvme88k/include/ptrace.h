@@ -42,7 +42,7 @@
  *	@(#)ptrace.h	8.1 (Berkeley) 6/11/93
  *
  * from: Header: ptrace.h,v 1.6 92/11/26 02:04:43 torek Exp  (LBL)
- * $Id: ptrace.h,v 1.1.1.1 1995/10/18 10:54:23 deraadt Exp $
+ * $Id: ptrace.h,v 1.3 1997/03/03 20:21:13 rahnds Exp $
  */
 
 /*

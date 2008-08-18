@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdlink.h,v 1.4 1996/09/11 07:27:04 downsj Exp $	*/
+/*	$OpenBSD: wdlink.h,v 1.6 1996/11/29 22:55:10 niklas Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -48,8 +48,8 @@ struct wdc_softc {
 	struct wd_link *d_link[2];
 	struct bus_link *ab_link;
 	struct wdc_link ctlr_link;
-	bus_chipset_tag_t sc_bc;
-	bus_io_handle_t sc_ioh;
+	bus_space_tag_t sc_iot;
+	bus_space_handle_t sc_ioh;
 	int sc_drq;			/* DMA channel */
 
 	TAILQ_HEAD(xferhead, wdc_xfer) sc_xfer;
@@ -85,7 +85,7 @@ struct wd_link {
 #define GEOMETRY_WAIT	3		/* done uploading geometry */
 #define MULTIMODE	4		/* set multiple mode */
 #define MULTIMODE_WAIT	5		/* done setting multiple mode */
-#define OPEN		6		/* done with open */
+#define READY		6		/* done with open */
 	int sc_mode;			/* transfer mode */
 #define WDM_PIOSINGLE	0		/* single-sector PIO */
 #define WDM_PIOMULTI	1		/* multi-sector PIO */

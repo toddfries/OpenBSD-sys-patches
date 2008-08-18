@@ -1,5 +1,5 @@
-/*	$OpenBSD: cfb.c,v 1.2 1996/07/29 23:01:56 niklas Exp $	*/
-/*	$NetBSD: cfb.c,v 1.1 1996/05/01 23:25:03 cgd Exp $	*/
+/*	$OpenBSD: cfb.c,v 1.7 1997/01/24 19:58:08 niklas Exp $	*/
+/*	$NetBSD: cfb.c,v 1.7 1996/12/05 01:39:39 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -55,9 +55,13 @@
 #include <machine/autoconf.h>
 #include <machine/pte.h>
 
+#ifdef __BROKEN_INDIRECT_CONFIG
 int	cfbmatch __P((struct device *, void *, void *));
+#else
+int	cfbmatch __P((struct device *, struct cfdata *, void *));
+#endif
 void	cfbattach __P((struct device *, struct device *, void *));
-int	cfbprint __P((void *, char *));
+int	cfbprint __P((void *, const char *));
 
 struct cfattach cfb_ca = {
 	sizeof(struct cfb_softc), cfbmatch, cfbattach,
@@ -79,17 +83,21 @@ struct wscons_emulfuncs cfb_emulfuncs = {
 	rcons_eraserows,
 };
 
-int	cfbioctl __P((struct device *, u_long, caddr_t, int, struct proc *));
-int	cfbmmap __P((struct device *, off_t, int));
+int	cfbioctl __P((void *, u_long, caddr_t, int, struct proc *));
+int	cfbmmap __P((void *, off_t, int));
 
 int	cfbintr __P((void *));
 
 int
 cfbmatch(parent, match, aux)
 	struct device *parent;
-	void *match, *aux;
+#ifdef __BROKEN_INDIRECT_CONFIG
+	void *match;
+#else
+	struct cfdata *match;
+#endif
+	void *aux;
 {
-	struct cfdata *cf = match;
 	struct tc_attach_args *ta = aux;
 
 	if (strncmp("PMAG-BA ", ta->ta_modname, TC_ROM_LLEN) != 0)
@@ -109,7 +117,7 @@ cfb_getdevconfig(dense_addr, dc)
 	int i;
 
 	dc->dc_vaddr = dense_addr;
-	dc->dc_paddr = k0segtophys(dc->dc_vaddr);		/* XXX */
+	dc->dc_paddr = ALPHA_K0SEG_TO_PHYS(dc->dc_vaddr);	/* XXX */
 	dc->dc_size = CFB_SIZE;
 
 	ramdacregp = (char *)dc->dc_vaddr + CFB_RAMDAC_OFFSET;
@@ -169,7 +177,6 @@ cfbattach(parent, self, aux)
 	struct wscons_attach_args waa;
 	struct wscons_odev_spec *wo;
 	int console;
-	char *x;
 
 	console = 0;					/* XXX */
 	if (console)
@@ -193,14 +200,18 @@ cfbattach(parent, self, aux)
 	/* initialize the raster */
 	waa.waa_isconsole = console;
 	wo = &waa.waa_odev_spec;
-	wo->wo_ef = &cfb_emulfuncs;
-	wo->wo_efa = &sc->sc_dc->dc_rcons;
+
+	wo->wo_emulfuncs = &cfb_emulfuncs;
+	wo->wo_emulfuncs_cookie = &sc->sc_dc->dc_rcons;
+
+	wo->wo_ioctl = cfbioctl;
+	wo->wo_mmap = cfbmmap;
+	wo->wo_miscfuncs_cookie = sc;
+
 	wo->wo_nrows = sc->sc_dc->dc_rcons.rc_maxrow;
 	wo->wo_ncols = sc->sc_dc->dc_rcons.rc_maxcol;
 	wo->wo_crow = 0;
 	wo->wo_ccol = 0;
-	wo->wo_ioctl = cfbioctl;
-	wo->wo_mmap = cfbmmap;
 
 	config_found(self, &waa, cfbprint);
 }
@@ -208,7 +219,7 @@ cfbattach(parent, self, aux)
 int
 cfbprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 
 	if (pnp)
@@ -217,14 +228,14 @@ cfbprint(aux, pnp)
 }
 
 int
-cfbioctl(dev, cmd, data, flag, p)
-	struct device *dev;
+cfbioctl(v, cmd, data, flag, p)
+	void *v;
 	u_long cmd;
 	caddr_t data;
 	int flag;
 	struct proc *p;
 {
-	struct cfb_softc *sc = (struct cfb_softc *)dev;
+	struct cfb_softc *sc = v;
 	struct cfb_devconfig *dc = sc->sc_dc;
 
 	switch (cmd) {
@@ -284,12 +295,12 @@ cfbioctl(dev, cmd, data, flag, p)
 }
 
 int
-cfbmmap(dev, offset, prot)
-	struct device *dev;
+cfbmmap(v, offset, prot)
+	void *v;
 	off_t offset;
 	int prot;
 {
-	struct cfb_softc *sc = (struct cfb_softc *)dev;
+	struct cfb_softc *sc = v;
 
 	if (offset > CFB_SIZE)
 		return -1;

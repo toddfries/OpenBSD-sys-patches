@@ -1,5 +1,5 @@
-/*	$OpenBSD: apecs_pci.c,v 1.4 1996/07/29 23:00:07 niklas Exp $	*/
-/*	$NetBSD: apecs_pci.c,v 1.6 1996/04/12 06:08:09 cgd Exp $	*/
+/*	$OpenBSD: apecs_pci.c,v 1.6 1997/01/24 19:57:34 niklas Exp $	*/
+/*	$NetBSD: apecs_pci.c,v 1.10 1996/11/13 21:13:25 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -33,6 +33,8 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <vm/vm.h>
+
+#include <machine/autoconf.h>	/* badaddr() proto */
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -114,17 +116,22 @@ apecs_conf_read(cpv, tag, offset)
 	int s, secondary, ba;
 	int32_t old_haxr2;					/* XXX */
 
+#ifdef DIAGNOSTIC
+	s = 0;					/* XXX gcc -Wuninitialized */
+	old_haxr2 = 0;				/* XXX gcc -Wuninitialized */
+#endif
+
 	/* secondary if bus # != 0 */
 	pci_decompose_tag(&acp->ac_pc, tag, &secondary, 0, 0);
 	if (secondary) {
 		s = splhigh();
 		old_haxr2 = REGVAL(EPIC_HAXR2);
-		wbflush();
+		alpha_mb();
 		REGVAL(EPIC_HAXR2) = old_haxr2 | 0x1;
-		wbflush();
+		alpha_mb();
 	}
 
-	datap = (pcireg_t *)phystok0seg(APECS_PCI_CONF |
+	datap = (pcireg_t *)ALPHA_PHYS_TO_K0SEG(APECS_PCI_CONF |
 	    tag << 5UL |					/* XXX */
 	    (offset & ~0x03) << 5 |				/* XXX */
 	    0 << 5 |						/* XXX */
@@ -134,9 +141,9 @@ apecs_conf_read(cpv, tag, offset)
 		data = *datap;
 
 	if (secondary) {
-		wbflush();
+		alpha_mb();
 		REGVAL(EPIC_HAXR2) = old_haxr2;
-		wbflush();
+		alpha_mb();
 		splx(s);
 	}
 
@@ -160,17 +167,22 @@ apecs_conf_write(cpv, tag, offset, data)
 	int s, secondary;
 	int32_t old_haxr2;					/* XXX */
 
+#ifdef DIAGNOSTIC
+	s = 0;					/* XXX gcc -Wuninitialized */
+	old_haxr2 = 0;				/* XXX gcc -Wuninitialized */
+#endif
+
 	/* secondary if bus # != 0 */
 	pci_decompose_tag(&acp->ac_pc, tag, &secondary, 0, 0);
 	if (secondary) {
 		s = splhigh();
 		old_haxr2 = REGVAL(EPIC_HAXR2);
-		wbflush();
+		alpha_mb();
 		REGVAL(EPIC_HAXR2) = old_haxr2 | 0x1;
-		wbflush();
+		alpha_mb();
 	}
 
-	datap = (pcireg_t *)phystok0seg(APECS_PCI_CONF |
+	datap = (pcireg_t *)ALPHA_PHYS_TO_K0SEG(APECS_PCI_CONF |
 	    tag << 5UL |					/* XXX */
 	    (offset & ~0x03) << 5 |				/* XXX */
 	    0 << 5 |						/* XXX */
@@ -178,9 +190,9 @@ apecs_conf_write(cpv, tag, offset, data)
 	*datap = data;
 
 	if (secondary) {
-		wbflush();
+		alpha_mb();
 		REGVAL(EPIC_HAXR2) = old_haxr2;	
-		wbflush();
+		alpha_mb();
 		splx(s);
 	}
 

@@ -1,3 +1,4 @@
+/*	$OpenBSD: ppp_defs.h,v 1.4 1997/02/24 13:34:04 niklas Exp $	*/
 /*	$NetBSD: ppp_defs.h,v 1.1 1995/07/04 06:28:26 paulus Exp $	*/
 
 /*
@@ -65,6 +66,7 @@
 #define PPP_PAP		0xc023	/* Password Authentication Protocol */
 #define PPP_LQR		0xc025	/* Link Quality Report protocol */
 #define PPP_CHAP	0xc223	/* Cryptographic Handshake Auth. Protocol */
+#define PPP_CBCP	0xc029	/* Callback Control Protocol */
 
 /*
  * Values for FCS calculations.

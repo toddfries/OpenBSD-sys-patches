@@ -1,5 +1,5 @@
-/*	$OpenBSD: tga.c,v 1.4 1996/07/29 23:01:00 niklas Exp $	*/
-/*	$NetBSD: tga.c,v 1.6 1996/04/12 06:09:08 cgd Exp $	*/
+/*	$OpenBSD: tga.c,v 1.9 1997/01/24 19:58:00 niklas Exp $	*/
+/*	$NetBSD: tga.c,v 1.13 1996/12/05 01:39:37 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Carnegie-Mellon University.
@@ -55,9 +55,13 @@
 #include <machine/autoconf.h>
 #include <machine/pte.h>
 
+#ifdef __BROKEN_INDIRECT_CONFIG
 int	tgamatch __P((struct device *, void *, void *));
+#else
+int	tgamatch __P((struct device *, struct cfdata *, void *));
+#endif
 void	tgaattach __P((struct device *, struct device *, void *));
-int	tgaprint __P((void *, char *));
+int	tgaprint __P((void *, const char *));
 
 struct cfattach tga_ca = {
 	sizeof(struct tga_softc), tgamatch, tgaattach,
@@ -69,7 +73,7 @@ struct cfdriver tga_cd = {
 
 int	tga_identify __P((tga_reg_t *));
 const struct tga_conf *tga_getconf __P((int));
-void	tga_getdevconfig __P((bus_chipset_tag_t bc, pci_chipset_tag_t pc,
+void	tga_getdevconfig __P((bus_space_tag_t memt, pci_chipset_tag_t pc,
 	    pcitag_t tag, struct tga_devconfig *dc));
 
 struct tga_devconfig tga_console_dc;
@@ -83,8 +87,8 @@ struct wscons_emulfuncs tga_emulfuncs = {
 	rcons_eraserows,
 };
 
-int	tgaioctl __P((struct device *, u_long, caddr_t, int, struct proc *));
-int	tgammap __P((struct device *, off_t, int));
+int	tgaioctl __P((void *, u_long, caddr_t, int, struct proc *));
+int	tgammap __P((void *, off_t, int));
 
 void	tga_blank __P((struct tga_devconfig *));
 void	tga_unblank __P((struct tga_devconfig *));
@@ -92,9 +96,13 @@ void	tga_unblank __P((struct tga_devconfig *));
 int
 tgamatch(parent, match, aux)
 	struct device *parent;
-	void *match, *aux;
+#ifdef __BROKEN_INDIRECT_CONFIG
+	void *match;
+#else
+	struct cfdata *match;
+#endif
+	void *aux;
 {
-	struct cfdata *cf = match;
 	struct pci_attach_args *pa = aux;
 
 	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_DEC ||
@@ -105,8 +113,8 @@ tgamatch(parent, match, aux)
 }
 
 void
-tga_getdevconfig(bc, pc, tag, dc)
-	bus_chipset_tag_t bc;
+tga_getdevconfig(memt, pc, tag, dc)
+	bus_space_tag_t memt;
 	pci_chipset_tag_t pc;
 	pcitag_t tag;
 	struct tga_devconfig *dc;
@@ -115,10 +123,10 @@ tga_getdevconfig(bc, pc, tag, dc)
 	const struct tga_ramdac_conf *tgar;
 	struct raster *rap;
 	struct rcons *rcp;
-	bus_mem_size_t pcisize;
+	bus_size_t pcisize;
 	int i, cacheable;
 
-	dc->dc_bc = bc;
+	dc->dc_memt = memt;
 	dc->dc_pc = pc;
 
 	dc->dc_pcitag = tag;
@@ -130,9 +138,9 @@ tga_getdevconfig(bc, pc, tag, dc)
 		panic("tga_getdevconfig: memory not cacheable?");
 
 	/* XXX XXX XXX */
-	if (bus_mem_map(bc, dc->dc_pcipaddr, pcisize, 1, &dc->dc_vaddr))
+	if (bus_space_map(memt, dc->dc_pcipaddr, pcisize, 1, &dc->dc_vaddr))
 		return;
-	dc->dc_paddr = k0segtophys(dc->dc_vaddr);		/* XXX */
+	dc->dc_paddr = ALPHA_K0SEG_TO_PHYS(dc->dc_vaddr);	/* XXX */
 
 	dc->dc_regs = (tga_reg_t *)(dc->dc_vaddr + TGA_MEM_CREGS);
 	dc->dc_tga_type = tga_identify(dc->dc_regs);
@@ -234,7 +242,7 @@ tgaattach(parent, self, aux)
 	else {
 		sc->sc_dc = (struct tga_devconfig *)
 		    malloc(sizeof(struct tga_devconfig), M_DEVBUF, M_WAITOK);
-		tga_getdevconfig(pa->pa_bc, pa->pa_pc, pa->pa_tag, sc->sc_dc);
+		tga_getdevconfig(pa->pa_memt, pa->pa_pc, pa->pa_tag, sc->sc_dc);
 	}
 	if (sc->sc_dc->dc_vaddr == NULL) {
 		printf(": couldn't map memory space; punt!\n");
@@ -242,6 +250,7 @@ tgaattach(parent, self, aux)
 	}
 
 	/* XXX say what's going on. */
+	intrstr = NULL;
 	if (sc->sc_dc->dc_tgaconf->tgac_ramdac->tgar_intr != NULL) {
 		if (pci_intr_map(pa->pa_pc, pa->pa_intrtag, pa->pa_intrpin,
 		    pa->pa_intrline, &intrh)) {
@@ -296,15 +305,20 @@ tgaattach(parent, self, aux)
 		    intrstr);
 
 	waa.waa_isconsole = console;
+
 	wo = &waa.waa_odev_spec;
-	wo->wo_ef = &tga_emulfuncs;
-	wo->wo_efa = &sc->sc_dc->dc_rcons;
+
+	wo->wo_emulfuncs = &tga_emulfuncs;
+	wo->wo_emulfuncs_cookie = &sc->sc_dc->dc_rcons;
+
+	wo->wo_ioctl = tgaioctl;
+	wo->wo_mmap = tgammap;
+	wo->wo_miscfuncs_cookie = sc;
+
 	wo->wo_nrows = sc->sc_dc->dc_rcons.rc_maxrow;
 	wo->wo_ncols = sc->sc_dc->dc_rcons.rc_maxcol;
 	wo->wo_crow = 0;
 	wo->wo_ccol = 0;
-	wo->wo_ioctl = tgaioctl;
-	wo->wo_mmap = tgammap;
 
 	config_found(self, &waa, tgaprint);
 }
@@ -312,7 +326,7 @@ tgaattach(parent, self, aux)
 int
 tgaprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 
 	if (pnp)
@@ -321,14 +335,14 @@ tgaprint(aux, pnp)
 }
 
 int
-tgaioctl(dev, cmd, data, flag, p)
-	struct device *dev;
+tgaioctl(v, cmd, data, flag, p)
+	void *v;
 	u_long cmd;
 	caddr_t data;
 	int flag;
 	struct proc *p;
 {
-	struct tga_softc *sc = (struct tga_softc *)dev;
+	struct tga_softc *sc = v;
 	struct tga_devconfig *dc = sc->sc_dc;
 	const struct tga_ramdac_conf *tgar = dc->dc_tgaconf->tgac_ramdac;
 
@@ -383,12 +397,12 @@ tgaioctl(dev, cmd, data, flag, p)
 }
 
 int
-tgammap(dev, offset, prot)
-	struct device *dev;
+tgammap(v, offset, prot)
+	void *v;
 	off_t offset;
 	int prot;
 {
-	struct tga_softc *sc = (struct tga_softc *)dev;
+	struct tga_softc *sc = v;
 
 	if (offset > sc->sc_dc->dc_tgaconf->tgac_cspace_size)
 		return -1;
@@ -396,15 +410,15 @@ tgammap(dev, offset, prot)
 }
 
 void
-tga_console(bc, pc, bus, device, function)
-	bus_chipset_tag_t bc;
+tga_console(iot, memt, pc, bus, device, function)
+	bus_space_tag_t iot, memt;
 	pci_chipset_tag_t pc;
 	int bus, device, function;
 {
 	struct tga_devconfig *dcp = &tga_console_dc;
 	struct wscons_odev_spec wo;
 
-	tga_getdevconfig(bc, pc, pci_make_tag(pc, bus, device, function), dcp);
+	tga_getdevconfig(memt, pc, pci_make_tag(pc, bus, device, function), dcp);
 
 	/* sanity checks */
 	if (dcp->dc_vaddr == NULL)
@@ -421,13 +435,15 @@ tga_console(bc, pc, bus, device, function)
 	 */
 	(*dcp->dc_tgaconf->tgac_ramdac->tgar_init)(dcp, 0);
 
-	wo.wo_ef = &tga_emulfuncs;
-	wo.wo_efa = &dcp->dc_rcons;
+	wo.wo_emulfuncs = &tga_emulfuncs;
+	wo.wo_emulfuncs_cookie = &dcp->dc_rcons;
+
+	/* ioctl and mmap are unused until real attachment. */
+
 	wo.wo_nrows = dcp->dc_rcons.rc_maxrow;
 	wo.wo_ncols = dcp->dc_rcons.rc_maxcol;
 	wo.wo_crow = 0;
 	wo.wo_ccol = 0;
-	/* ioctl and mmap are unused until real attachment. */
 
 	wscons_attach_console(&wo);
 }
@@ -465,7 +481,10 @@ tga_builtin_set_cursor(dc, fbc)
 	struct tga_devconfig *dc;
 	struct fbcursor *fbc;
 {
-	int v, count;
+	int v;
+#if 0
+	int count;
+#endif
 
 	v = fbc->set;
 #if 0
@@ -544,6 +563,7 @@ tga_builtin_set_curpos(dc, fbp)
 
 	dc->dc_regs[TGA_REG_CXYR] =
 	    ((fbp->y & 0xfff) << 12) | (fbp->x & 0xfff);
+	return (0);
 }
 
 int
@@ -554,6 +574,7 @@ tga_builtin_get_curpos(dc, fbp)
 
 	fbp->x = dc->dc_regs[TGA_REG_CXYR] & 0xfff;
 	fbp->y = (dc->dc_regs[TGA_REG_CXYR] >> 12) & 0xfff;
+	return (0);
 }
 
 int
@@ -563,4 +584,5 @@ tga_builtin_get_curmax(dc, fbp)
 {
 
 	fbp->x = fbp->y = 64;
+	return (0);
 }

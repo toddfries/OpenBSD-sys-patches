@@ -1,4 +1,4 @@
-/*	$OpenBSD: device.h,v 1.8 1996/07/02 07:58:39 deraadt Exp $	*/
+/*	$OpenBSD: device.h,v 1.10 1996/11/23 21:47:13 kstailey Exp $	*/
 /*	$NetBSD: device.h,v 1.15 1996/04/09 20:55:24 cgd Exp $	*/
 
 /*
@@ -97,6 +97,7 @@ struct cfdata {
 	void	(**cf_ivstubs)		/* config-generated vectors, if any */
 			__P((void));
 };
+extern struct cfdata cfdata[];
 #define FSTATE_NOTFOUND	0	/* has not been found */
 #define	FSTATE_FOUND	1	/* has been found */
 #define	FSTATE_STAR	2	/* duplicable */
@@ -143,7 +144,7 @@ struct cfdriver {
  * of the parent device.  The return value is ignored if the device was
  * configured, so most functions can return UNCONF unconditionally.
  */
-typedef int (*cfprint_t) __P((void *, char *));
+typedef int (*cfprint_t) __P((void *, const char *));
 #define	QUIET	0		/* print nothing */
 #define	UNCONF	1		/* print " not configured\n" */
 #define	UNSUPP	2		/* print " not supported\n" */

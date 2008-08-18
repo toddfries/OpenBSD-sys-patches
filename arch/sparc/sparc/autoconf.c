@@ -108,7 +108,7 @@ static	char *str2hex __P((char *, int *));
 static	int getstr __P((char *, int));
 static	int findblkmajor __P((struct device *));
 static	struct device *getdisk __P((char *, int, int, dev_t *));
-static	int mbprint __P((void *, char *));
+static	int mbprint __P((void *, const char *));
 static	void crazymap __P((char *, int *));
 int	st_crazymap __P((int));
 void	swapconf __P((void));
@@ -956,7 +956,7 @@ clockfreq(freq)
 static int
 mbprint(aux, name)
 	void *aux;
-	char *name;
+	const char *name;
 {
 	register struct confargs *ca = aux;
 
@@ -1698,7 +1698,7 @@ romgetcursoraddr(rowp, colp)
 	 * and in some newer proms.  They are local in version 2.9.  The
 	 * correct cutoff point is unknown, as yet; we use 2.9 here.
 	 */
-	if (promvec->pv_romvec_vers < 2 || promvec->pv_printrev < 0x00020009)
+	if (promvec->pv_romvec_vers < 2 || promvec->pv_printrev < 0x00020007)
 		sprintf(buf,
 		    "' line# >body >user %lx ! ' column# >body >user %lx !",
 		    (u_long)rowp, (u_long)colp);
@@ -1708,6 +1708,8 @@ romgetcursoraddr(rowp, colp)
 		    (u_long)rowp, (u_long)colp);
 	*rowp = *colp = NULL;
 	rominterpret(buf);
+	if (*rowp == *colp && *rowp != NULL)
+		panic("romgetcursor prom version");
 	return (*rowp == NULL || *colp == NULL);
 }
 #endif
@@ -1769,9 +1771,6 @@ swapconf()
 dev_t	bootdev;
 #endif
 
-#define	PARTITIONMASK	0x7
-#define	PARTITIONSHIFT	3
-
 struct nam2blk {
 	char *name;
 	int maj;
@@ -1781,6 +1780,7 @@ struct nam2blk {
 	{ "xd",		10 },
 	{ "st",		11 },
 	{ "fd",		16 },
+	{ "rd",		17 },
 	{ "cd",		18 },
 };
 
@@ -1829,13 +1829,13 @@ parsedisk(str, len, defpart, devp)
 {
 	register struct device *dv;
 	register char *cp, c;
-	int majdev, mindev, part;
+	int majdev, unit, part;
 
 	if (len == 0)
 		return (NULL);
 	cp = str + len - 1;
 	c = *cp;
-	if (c >= 'a' && c <= 'h') {
+	if (c >= 'a' && (c - 'a') < MAXPARTITIONS) {
 		part = c - 'a';
 		*cp = '\0';
 	} else
@@ -1845,10 +1845,10 @@ parsedisk(str, len, defpart, devp)
 		if (dv->dv_class == DV_DISK &&
 		    strcmp(str, dv->dv_xname) == 0) {
 			majdev = findblkmajor(dv);
+			unit = dv->dv_unit;
 			if (majdev < 0)
 				panic("parsedisk");
-			mindev = (dv->dv_unit << PARTITIONSHIFT) + part;
-			*devp = makedev(majdev, mindev);
+			*devp = MAKEDISKDEV(majdev, unit, part);
 			break;
 		}
 #ifdef NFSCLIENT
@@ -1896,20 +1896,15 @@ setroot()
 {
 	register struct swdevt *swp;
 	register struct device *dv;
-	register int len, majdev, mindev;
+	register int len, majdev, unit, part;
 	dev_t nrootdev, nswapdev = NODEV;
 	char buf[128];
-	extern int (*mountroot) __P((void *));
 	dev_t temp;
 	struct mountroot_hook *mrhp;
 	struct device *bootdv;
 	struct bootpath *bp;
 #if defined(NFSCLIENT)
 	extern char *nfsbootdevname;
-	extern int nfs_mountroot __P((void *));
-#endif
-#if defined(FFS)
-	extern int ffs_mountroot __P((void *));
 #endif
 
 	bp = nbootpath == 0 ? NULL : &bootpath[nbootpath-1];
@@ -1973,8 +1968,8 @@ setroot()
 					nswapdev = NODEV;
 					break;
 				case DV_DISK:
-					nswapdev = makedev(major(nrootdev),
-					    (minor(nrootdev) & ~ PARTITIONMASK) | 1);
+					nswapdev = MAKEDISKDEV(major(nrootdev),
+					    DISKUNIT(nrootdev), 1);
 					break;
 				case DV_TAPE:
 				case DV_TTY:
@@ -2009,11 +2004,11 @@ gotswap:
 			 * val[2] of the boot device is the partition number.
 			 * Assume swap is on partition b.
 			 */
-			int part = bp->val[2];
-			mindev = (bootdv->dv_unit << PARTITIONSHIFT) + part;
-			rootdev = makedev(majdev, mindev);
-			nswapdev = dumpdev = makedev(major(rootdev),
-			    (minor(rootdev) & ~ PARTITIONMASK) | 1);
+			part = bp->val[2];
+			unit = bootdv->dv_unit;
+			rootdev = MAKEDISKDEV(majdev, unit, part);
+			nswapdev = dumpdev = MAKEDISKDEV(major(rootdev),
+			    DISKUNIT(rootdev), 1);
 		} else {
 			/*
 			 * Root and swap are on a net.
@@ -2030,7 +2025,8 @@ gotswap:
 		 * rootdev/swdevt/mountroot already properly set.
 		 */
 		majdev = major(rootdev);
-		mindev = minor(rootdev);
+		unit = DISKUNIT(rootdev);
+		part = DISKPART(rootdev);
 		goto gotroot;
 	}
 
@@ -2041,15 +2037,14 @@ gotswap:
 		nfsbootdevname = bootdv->dv_xname;
 		return;
 #endif
-#if defined(FFS)
 	case DV_DISK:
-		mountroot = ffs_mountroot;
+		mountroot = dk_mountroot;
 		majdev = major(rootdev);
-		mindev = minor(rootdev);
+		unit = DISKUNIT(rootdev);
+		part = DISKPART(rootdev);
 		printf("root on %s%c\n", bootdv->dv_xname,
-		    (mindev & PARTITIONMASK) + 'a');
+		    part + 'a');
 		break;
-#endif
 	default:
 		printf("can't figure root, hope your kernel is right\n");
 		return;
@@ -2058,11 +2053,10 @@ gotswap:
 	/*
 	 * Make the swap partition on the root drive the primary swap.
 	 */
-	mindev &= ~PARTITIONMASK;
 	temp = NODEV;
 	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
 		if (majdev == major(swp->sw_dev) &&
-		    mindev == (minor(swp->sw_dev) & ~PARTITIONMASK)) {
+		    unit == DISKUNIT(swp->sw_dev)) {
 			temp = swdevt[0].sw_dev;
 			swdevt[0].sw_dev = swp->sw_dev;
 			swp->sw_dev = temp;

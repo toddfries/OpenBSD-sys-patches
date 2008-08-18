@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.12 1996/09/25 11:57:25 niklas Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.19 1997/04/28 00:40:14 deraadt Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -54,6 +54,7 @@
 #include <sys/namei.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/socketvar.h>
 #include <sys/stat.h>
 #include <sys/malloc.h>
 #include <sys/time.h>
@@ -80,6 +81,16 @@
 #include <netiso/iso.h>
 #endif
 
+#include <dev/rndvar.h>
+
+#ifdef __GNUC__
+#define INLINE __inline
+#else
+#define INLINE
+#endif
+
+int	nfs_attrtimeo __P((struct nfsnode *np));
+
 /*
  * Data items converted to xdr at startup, since they are constant
  * This is kinda hokey, but may save a little time doing byte swaps
@@ -92,6 +103,7 @@ u_int32_t nfs_prog, nqnfs_prog, nfs_true, nfs_false;
 
 /* And other global data */
 static u_int32_t nfs_xid = 0;
+static u_int32_t nfs_xid_touched = 0;
 nfstype nfsv2_type[9] = { NFNON, NFREG, NFDIR, NFBLK, NFCHR, NFLNK, NFNON,
 		      NFCHR, NFNON };
 nfstype nfsv3_type[9] = { NFNON, NFREG, NFDIR, NFBLK, NFCHR, NFLNK, NFSOCK,
@@ -611,8 +623,6 @@ nfsm_rpchead(cr, nmflag, procid, auth_type, auth_len, auth_str, verf_len,
 	register int i;
 	struct mbuf *mreq, *mb2;
 	int siz, grpsiz, authsiz;
-	struct timeval tv;
-	static u_int32_t base;
 
 	authsiz = nfsm_rndup(auth_len);
 	MGETHDR(mb, M_WAIT, MT_DATA);
@@ -632,21 +642,17 @@ nfsm_rpchead(cr, nmflag, procid, auth_type, auth_len, auth_str, verf_len,
 	 */
 	nfsm_build(tl, u_int32_t *, 8 * NFSX_UNSIGNED);
 
-	/*
-	 * derive initial xid from system time
-	 * XXX time is invalid if root not yet mounted
-	 */
-	if (!base && (rootvp)) {
-		microtime(&tv);
-		base = tv.tv_sec << 12;
-		nfs_xid = base;
-	}
-	/*
-	 * Skip zero xid if it should ever happen.
-	 */
-	if (++nfs_xid == 0)
-		nfs_xid++;
+	/* Get a new (non-zero) xid */
 
+	if ((nfs_xid == 0) && (nfs_xid_touched == 0)) {
+		nfs_xid = arc4random();
+		nfs_xid_touched = 1;
+	} else {
+		while ((*xidp = arc4random() % 256) == 0)
+			;
+		nfs_xid += *xidp;
+	}
+	    
 	*tl++ = *xidp = txdr_unsigned(nfs_xid);
 	*tl++ = rpc_call;
 	*tl++ = rpc_vers;
@@ -1117,9 +1123,10 @@ nfs_init()
 #ifdef NFSSERVER
 	nfsrv_init(0);			/* Init server data structures */
 	nfsrv_initcache();		/* Init the server request cache */
+#endif /* NFSSERVER */
 
 	/*
-	 * Initialize the nqnfs server stuff.
+	 * Initialize the nqnfs client/server stuff.
 	 */
 	if (nqnfsstarttime == 0) {
 		nqnfsstarttime = boottime.tv_sec + nqsrv_maxlease
@@ -1128,7 +1135,6 @@ nfs_init()
 		CIRCLEQ_INIT(&nqtimerhead);
 		nqfhhashtbl = hashinit(NQLCHSZ, M_NQLEASE, &nqfhhash);
 	}
-#endif /* NFSSERVER */
 
 	/*
 	 * Initialize reply list and start timer
@@ -1321,6 +1327,32 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	return (0);
 }
 
+INLINE int
+nfs_attrtimeo (np)
+	struct nfsnode *np;
+{
+	struct vnode *vp = np->n_vnode;
+	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
+	int tenthage = (time.tv_sec - np->n_mtime) / 10;
+	int minto, maxto;
+
+	if (vp->v_type == VDIR) {
+		maxto = nmp->nm_acdirmax;
+		minto = nmp->nm_acdirmin;
+	}
+	else {
+		maxto = nmp->nm_acregmax;
+		minto = nmp->nm_acregmin;
+	}
+
+	if (np->n_flag & NMODIFIED || tenthage < minto)
+		return minto;
+	else if (tenthage < maxto)
+		return tenthage;
+	else
+		return maxto;
+}
+
 /*
  * Check the time stamp
  * If the cache is valid, copy contents to *vap and return 0
@@ -1334,7 +1366,7 @@ nfs_getattrcache(vp, vaper)
 	register struct nfsnode *np = VTONFS(vp);
 	register struct vattr *vap;
 
-	if ((time.tv_sec - np->n_attrstamp) >= NFS_ATTRTIMEO(np)) {
+	if ((time.tv_sec - np->n_attrstamp) >= nfs_attrtimeo(np)) {
 		nfsstats.attrcache_misses++;
 		return (ENOENT);
 	}
@@ -1669,6 +1701,7 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp, kerbflag)
 	register int i;
 	struct ucred *credanon;
 	int error, exflags;
+	struct sockaddr_in *saddr;
 
 	*vpp = (struct vnode *)0;
 #ifdef Lite2_integrated
@@ -1681,6 +1714,15 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp, kerbflag)
 	error = VFS_FHTOVP(mp, &fhp->fh_fid, nam, vpp, &exflags, &credanon);
 	if (error)
 		return (error);
+
+	saddr = mtod(nam, struct sockaddr_in *);
+	if (saddr->sin_family == AF_INET &&
+	    (ntohs(saddr->sin_port) >= IPPORT_RESERVED ||
+	    (slp->ns_so->so_type == SOCK_STREAM && ntohs(saddr->sin_port) == 20))) {
+		vput(*vpp);
+		return (NFSERR_AUTHERR | AUTH_TOOWEAK);
+	}
+
 	/*
 	 * Check/setup credentials.
 	 */

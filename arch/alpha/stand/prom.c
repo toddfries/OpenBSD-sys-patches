@@ -1,5 +1,5 @@
-/*	$OpenBSD: prom.c,v 1.2 1996/07/29 23:01:24 niklas Exp $	*/
-/*	$NetBSD: prom.c,v 1.1 1995/11/23 02:39:07 cgd Exp $	*/
+/*	$OpenBSD: prom.c,v 1.5 1997/01/24 19:58:07 niklas Exp $	*/
+/*	$NetBSD: prom.c,v 1.2 1996/11/25 16:18:16 cgd Exp $	*/
 
 /*  
  * Mach Operating System
@@ -29,8 +29,8 @@
 
 #include <sys/types.h>
 
-#include <machine/prom.h>
 #include <machine/rpb.h>
+#include <machine/prom.h>
 
 int console;
 
@@ -46,7 +46,7 @@ init_prom_calls()
 	c = (struct crb *)((u_int8_t *)r + r->rpb_crb_off);
 
 	prom_dispatch_v.routine_arg = c->crb_v_dispatch;
-	prom_dispatch_v.routine = c->crb_v_dispatch->code;
+	prom_dispatch_v.routine = c->crb_v_dispatch->entry_va;
 
 	/* Look for console tty. */
 	prom_getenv(PROM_E_TTY_DEV, buf, 4);

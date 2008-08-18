@@ -1,4 +1,4 @@
-/*	$OpenBSD: isadma.c,v 1.7 1996/06/16 10:31:27 deraadt Exp $	*/
+/*	$OpenBSD: isadma.c,v 1.13 1996/12/12 00:21:59 niklas Exp $	*/
 /*	$NetBSD: isadma.c,v 1.19 1996/04/29 20:03:26 christos Exp $	*/
 
 #include <sys/param.h>
@@ -45,7 +45,7 @@ static u_int8_t dmamode[4] = {
 
 int isadmamatch __P((struct device *, void *, void *));
 void isadmaattach __P((struct device *, struct device *, void *));
-int isadmaprint __P((void *, char *));
+int isadmaprint __P((void *, const char *));
 
 struct cfattach isadma_ca = {
 	sizeof(struct device), isadmamatch, isadmaattach
@@ -55,6 +55,7 @@ struct cfdriver isadma_cd = {
 	NULL, "isadma", DV_DULL, 1
 };
 
+int
 isadmamatch(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
@@ -114,7 +115,6 @@ isadma_start(addr, nbytes, chan, flags)
 	struct dma_info *di;
 	int waport;
 	int mflags;
-	vm_size_t size;
 
 #ifdef ISADMA_DEBUG
 	if (chan < 0 || chan > 7 ||

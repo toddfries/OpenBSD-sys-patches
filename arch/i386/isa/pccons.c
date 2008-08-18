@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccons.c,v 1.29 1996/09/23 15:12:40 mickey Exp $	*/
+/*	$OpenBSD: pccons.c,v 1.34 1997/03/03 12:01:15 downsj Exp $	*/
 /*	$NetBSD: pccons.c,v 1.99.4.1 1996/06/04 20:03:53 cgd Exp $	*/
 
 /*-
@@ -94,6 +94,7 @@ static u_char lock_state = 0x00,	/* all off */
 static u_short cursor_shape = 0xffff,	/* don't update until set by user */
 	       old_cursor_shape = 0xffff;
 static pccons_keymap_t	scan_codes[KB_NUM_KEYS];/* keyboard translation table */
+static int pc_blank = 300;
 #ifdef XSERVER
 int pc_xmode = 0;
 #endif
@@ -108,11 +109,12 @@ static struct video_state {
 	u_char	state;		/* parser state */
 #define	VSS_ESCAPE	1
 #define	VSS_EBRACE	2
-#define	VSS_EPARAM	3
+#define VSS_EBRACEQ	3
+#define	VSS_EPARAM	4
 	char	so;		/* in standout mode? */
 	char	color;		/* color or mono display */
-	char	at;		/* normal attributes */
-	char	so_at;		/* standout attributes */
+	char	at, save_at;	/* normal attributes */
+	char	so_at, save_so;	/* standout attributes */
 } vs;
 
 struct pc_softc {
@@ -425,6 +427,10 @@ pcprobe(parent, match, aux)
 	if (!kbd_cmd(KBC_RESET, 1)) {
 #ifdef DIAGNOSTIC
 		printf("pcprobe: reset error %d\n", 1);
+		/* XXX - this would make some - maybe very
+		   broken - but usable keyboards unusable 
+		goto lose; 
+		*/
 #endif
 	}
 	for (i = 600000; i; i--)
@@ -435,6 +441,10 @@ pcprobe(parent, match, aux)
 	if (i == 0 || inb(KBDATAP) != KBR_RSTDONE) {
 #ifdef DIAGNOSTIC
 		printf("pcprobe: reset error %d\n", 2);
+		/* XXX - this would make some - maybe very
+		   broken - but usable keyboards unusable 
+		goto lose; 
+		*/
 #endif
 	}
 	/*
@@ -718,6 +728,10 @@ pcioctl(dev, cmd, data, flag, p)
 			return EINVAL;
 		bcopy(scan_codes, data, sizeof(pccons_keymap_t[KB_NUM_KEYS]));
 		return 0;
+	case CONSOLE_SET_BLANK:
+		pc_blank = *((int *)data);
+		screen_restore(0);
+		return 0;
 	default:
 		return ENOTTY;
 	}
@@ -971,6 +985,7 @@ static u_char iso2ibm437[] = {
 static u_short screen_backup[ROW*COL];
 static int screen_saved = 0;
 static u_short *saved_Crtat;
+static void screen_blank __P((void *));
 
 static void
 screen_blank(arg)
@@ -1003,8 +1018,8 @@ screen_restore(perm)
 		bcopy(screen_backup, Crtat, ROW*COL*CHR);
 		screen_saved = 0;
 	}
-	if (! perm)
-		timeout(screen_blank, NULL, 300*hz);
+	if (!perm && (pc_blank > 0))
+		timeout(screen_blank, NULL, pc_blank * hz);
 }
 
 /*
@@ -1136,6 +1151,59 @@ sput(cp, n)
 						goto maybe_scroll;
 				}
 				break;
+			case VSS_EBRACEQ: {
+				char *col;
+
+				switch (c) {
+				case 'D':
+					break;
+				case 'E':
+					break;
+				case 'F':
+					col = &vs.at;
+do_fg:
+					*col = (*col & 0xf0) | (vs.cx & 0x0f);
+					break;
+				case 'G':
+					col = &vs.at;
+do_bg:
+					*col = (*col & 0x0f) | ((vs.cx & 0x0f) << 4);
+					break;
+				case 'H':
+					col = &vs.so_at;
+					goto do_fg;
+				case 'I':
+					col = &vs.so_at;
+					goto do_bg;
+				case 'J':
+					break;
+				case 'K':
+					break;
+				case 'k':
+					break;
+				case 'l':
+					break;
+				case 'M':
+					break;
+				case 'R':
+					vs.at = vs.save_at;
+					vs.so_at = vs.save_so;
+					break;
+				case 'S':
+					vs.save_at = vs.at;
+					vs.save_so = vs.so_at;
+					break;
+				default:
+					if ((c >= '0') && (c <= '9')) {
+						vs.cx *= 10;
+						vs.cx += c - '0';
+					} else
+						vs.state = 0;
+					break;
+				}
+				vs.state = 0;
+				break;
+			}
 			default: /* VSS_EBRACE or VSS_EPARAM */
 				switch (c) {
 					int pos;
@@ -1393,6 +1461,19 @@ sput(cp, n)
 					}
 					vs.state = 0;
 					break;
+				case '_': /* set cursor type */
+					if (vs.cx == 2)
+						vs.cx = 14;
+					else if (vs.cx)
+						vs.cx = 1;
+					else
+						vs.cx = 12;
+					cursor_shape = (vs.cx << 8) | 13;
+					set_cursor_shape();
+					break;
+				case '=':
+					vs.state = VSS_EBRACEQ;
+					break;
 					
 				default: /* Only numbers valid here */
 					if ((c >= '0') && (c <= '9')) {
@@ -1437,134 +1518,134 @@ sput(cp, n)
    left and right shift when reading the keyboard map */
 static pccons_keymap_t	scan_codes[KB_NUM_KEYS] = {
 /*  type       unshift   shift     control   altgr     shift_altgr scancode */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 0 unused */
-    KB_ASCII,  "\033",   "\033",   "\033",   "",       "",  /* 1 ESCape */
-    KB_ASCII,  "1",      "!",      "!",      "",       "",  /* 2 1 */
-    KB_ASCII,  "2",      "@",      "\000",   "",       "",  /* 3 2 */
-    KB_ASCII,  "3",      "#",      "#",      "",       "",  /* 4 3 */
-    KB_ASCII,  "4",      "$",      "$",      "",       "",  /* 5 4 */
-    KB_ASCII,  "5",      "%",      "%",      "",       "",  /* 6 5 */
-    KB_ASCII,  "6",      "^",      "\036",   "",       "",  /* 7 6 */
-    KB_ASCII,  "7",      "&",      "&",      "",       "",  /* 8 7 */
-    KB_ASCII,  "8",      "*",      "\010",   "",       "",  /* 9 8 */
-    KB_ASCII,  "9",      "(",      "(",      "",       "",  /* 10 9 */
-    KB_ASCII,  "0",      ")",      ")",      "",       "",  /* 11 0 */
-    KB_ASCII,  "-",      "_",      "\037",   "",       "",  /* 12 - */
-    KB_ASCII,  "=",      "+",      "+",      "",       "",  /* 13 = */
-    KB_ASCII,  "\177",   "\177",   "\010",   "",       "",  /* 14 backspace */
-    KB_ASCII,  "\t",     "\t",     "\t",     "",       "",  /* 15 tab */
-    KB_ASCII,  "q",      "Q",      "\021",   "",       "",  /* 16 q */
-    KB_ASCII,  "w",      "W",      "\027",   "",       "",  /* 17 w */
-    KB_ASCII,  "e",      "E",      "\005",   "",       "",  /* 18 e */
-    KB_ASCII,  "r",      "R",      "\022",   "",       "",  /* 19 r */
-    KB_ASCII,  "t",      "T",      "\024",   "",       "",  /* 20 t */
-    KB_ASCII,  "y",      "Y",      "\031",   "",       "",  /* 21 y */
-    KB_ASCII,  "u",      "U",      "\025",   "",       "",  /* 22 u */
-    KB_ASCII,  "i",      "I",      "\011",   "",       "",  /* 23 i */
-    KB_ASCII,  "o",      "O",      "\017",   "",       "",  /* 24 o */
-    KB_ASCII,  "p",      "P",      "\020",   "",       "",  /* 25 p */
-    KB_ASCII,  "[",      "{",      "\033",   "",       "",  /* 26 [ */
-    KB_ASCII,  "]",      "}",      "\035",   "",       "",  /* 27 ] */
-    KB_ASCII,  "\r",     "\r",     "\n",     "",       "",  /* 28 return */
-    KB_CTL,    "",       "",       "",       "",       "",  /* 29 control */
-    KB_ASCII,  "a",      "A",      "\001",   "",       "",  /* 30 a */
-    KB_ASCII,  "s",      "S",      "\023",   "",       "",  /* 31 s */
-    KB_ASCII,  "d",      "D",      "\004",   "",       "",  /* 32 d */
-    KB_ASCII,  "f",      "F",      "\006",   "",       "",  /* 33 f */
-    KB_ASCII,  "g",      "G",      "\007",   "",       "",  /* 34 g */
-    KB_ASCII,  "h",      "H",      "\010",   "",       "",  /* 35 h */
-    KB_ASCII,  "j",      "J",      "\n",     "",       "",  /* 36 j */
-    KB_ASCII,  "k",      "K",      "\013",   "",       "",  /* 37 k */
-    KB_ASCII,  "l",      "L",      "\014",   "",       "",  /* 38 l */
-    KB_ASCII,  ";",      ":",      ";",      "",       "",  /* 39 ; */
-    KB_ASCII,  "'",      "\"",     "'",      "",       "",  /* 40 ' */
-    KB_ASCII,  "`",      "~",      "`",      "",       "",  /* 41 ` */
-    KB_SHIFT,  "\001",   "",       "",       "",       "",  /* 42 shift */
-    KB_ASCII,  "\\",     "|",      "\034",   "",       "",  /* 43 \ */
-    KB_ASCII,  "z",      "Z",      "\032",   "",       "",  /* 44 z */
-    KB_ASCII,  "x",      "X",      "\030",   "",       "",  /* 45 x */
-    KB_ASCII,  "c",      "C",      "\003",   "",       "",  /* 46 c */
-    KB_ASCII,  "v",      "V",      "\026",   "",       "",  /* 47 v */
-    KB_ASCII,  "b",      "B",      "\002",   "",       "",  /* 48 b */
-    KB_ASCII,  "n",      "N",      "\016",   "",       "",  /* 49 n */
-    KB_ASCII,  "m",      "M",      "\r",     "",       "",  /* 50 m */
-    KB_ASCII,  ",",      "<",      "<",      "",       "",  /* 51 , */
-    KB_ASCII,  ".",      ">",      ">",      "",       "",  /* 52 . */
-    KB_ASCII,  "/",      "?",      "\037",   "",       "",  /* 53 / */
-    KB_SHIFT,  "\002",   "",       "",       "",       "",  /* 54 shift */
-    KB_KP,     "*",      "*",      "*",      "",       "",  /* 55 kp * */
-    KB_ALT,    "",       "",       "",       "",       "",  /* 56 alt */
-    KB_ASCII,  " ",      " ",      "\000",   "",       "",  /* 57 space */
-    KB_CAPS,   "",       "",       "",       "",       "",  /* 58 caps */
-    KB_FUNC,   "\033[M", "\033[Y", "\033[k", "",       "",  /* 59 f1 */
-    KB_FUNC,   "\033[N", "\033[Z", "\033[l", "",       "",  /* 60 f2 */
-    KB_FUNC,   "\033[O", "\033[a", "\033[m", "",       "",  /* 61 f3 */
-    KB_FUNC,   "\033[P", "\033[b", "\033[n", "",       "",  /* 62 f4 */
-    KB_FUNC,   "\033[Q", "\033[c", "\033[o", "",       "",  /* 63 f5 */
-    KB_FUNC,   "\033[R", "\033[d", "\033[p", "",       "",  /* 64 f6 */
-    KB_FUNC,   "\033[S", "\033[e", "\033[q", "",       "",  /* 65 f7 */
-    KB_FUNC,   "\033[T", "\033[f", "\033[r", "",       "",  /* 66 f8 */
-    KB_FUNC,   "\033[U", "\033[g", "\033[s", "",       "",  /* 67 f9 */
-    KB_FUNC,   "\033[V", "\033[h", "\033[t", "",       "",  /* 68 f10 */
-    KB_NUM,    "",       "",       "",       "",       "",  /* 69 num lock */
-    KB_SCROLL, "",       "",       "",       "",       "",  /* 70 scroll lock */
-    KB_KP,     "7",      "\033[H", "7",      "",       "",  /* 71 kp 7 */
-    KB_KP,     "8",      "\033[A", "8",      "",       "",  /* 72 kp 8 */
-    KB_KP,     "9",      "\033[I", "9",      "",       "",  /* 73 kp 9 */
-    KB_KP,     "-",      "-",      "-",      "",       "",  /* 74 kp - */
-    KB_KP,     "4",      "\033[D", "4",      "",       "",  /* 75 kp 4 */
-    KB_KP,     "5",      "\033[E", "5",      "",       "",  /* 76 kp 5 */
-    KB_KP,     "6",      "\033[C", "6",      "",       "",  /* 77 kp 6 */
-    KB_KP,     "+",      "+",      "+",      "",       "",  /* 78 kp + */
-    KB_KP,     "1",      "\033[F", "1",      "",       "",  /* 79 kp 1 */
-    KB_KP,     "2",      "\033[B", "2",      "",       "",  /* 80 kp 2 */
-    KB_KP,     "3",      "\033[G", "3",      "",       "",  /* 81 kp 3 */
-    KB_KP,     "0",      "\033[L", "0",      "",       "",  /* 82 kp 0 */
-    KB_KP,     ",",      "\177",   ",",      "",       "",  /* 83 kp , */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 84 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 85 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 86 0 */
-    KB_FUNC,   "\033[W", "\033[i", "\033[u", "",       "",  /* 87 f11 */
-    KB_FUNC,   "\033[X", "\033[j", "\033[v", "",       "",  /* 88 f12 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 89 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 90 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 91 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 92 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 93 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 94 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 95 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 96 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 97 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 98 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 99 0 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 100 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 101 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 102 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 103 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 104 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 105 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 106 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 107 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 108 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 109 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 110 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 111 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 112 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 113 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 114 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 115 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 116 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 117 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 118 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 119 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 120 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 121 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 122 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 123 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 124 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 125 */
-    KB_NONE,   "",       "",       "",       "",       "",  /* 126 */
-    KB_NONE,   "",       "",       "",       "",       ""   /* 127 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 0 unused */
+  { KB_ASCII,  "\033",   "\033",   "\033",   "",       "", }, /* 1 ESCape */
+  { KB_ASCII,  "1",      "!",      "!",      "",       "", }, /* 2 1 */
+  { KB_ASCII,  "2",      "@",      "\000",   "",       "", }, /* 3 2 */
+  { KB_ASCII,  "3",      "#",      "#",      "",       "", }, /* 4 3 */
+  { KB_ASCII,  "4",      "$",      "$",      "",       "", }, /* 5 4 */
+  { KB_ASCII,  "5",      "%",      "%",      "",       "", }, /* 6 5 */
+  { KB_ASCII,  "6",      "^",      "\036",   "",       "", }, /* 7 6 */
+  { KB_ASCII,  "7",      "&",      "&",      "",       "", }, /* 8 7 */
+  { KB_ASCII,  "8",      "*",      "\010",   "",       "", }, /* 9 8 */
+  { KB_ASCII,  "9",      "(",      "(",      "",       "", }, /* 10 9 */
+  { KB_ASCII,  "0",      ")",      ")",      "",       "", }, /* 11 0 */
+  { KB_ASCII,  "-",      "_",      "\037",   "",       "", }, /* 12 - */
+  { KB_ASCII,  "=",      "+",      "+",      "",       "", }, /* 13 = */
+  { KB_ASCII,  "\177",   "\177",   "\010",   "",       "", }, /* 14 backspace */
+  { KB_ASCII,  "\t",     "\t",     "\t",     "",       "", }, /* 15 tab */
+  { KB_ASCII,  "q",      "Q",      "\021",   "",       "", }, /* 16 q */
+  { KB_ASCII,  "w",      "W",      "\027",   "",       "", }, /* 17 w */
+  { KB_ASCII,  "e",      "E",      "\005",   "",       "", }, /* 18 e */
+  { KB_ASCII,  "r",      "R",      "\022",   "",       "", }, /* 19 r */
+  { KB_ASCII,  "t",      "T",      "\024",   "",       "", }, /* 20 t */
+  { KB_ASCII,  "y",      "Y",      "\031",   "",       "", }, /* 21 y */
+  { KB_ASCII,  "u",      "U",      "\025",   "",       "", }, /* 22 u */
+  { KB_ASCII,  "i",      "I",      "\011",   "",       "", }, /* 23 i */
+  { KB_ASCII,  "o",      "O",      "\017",   "",       "", }, /* 24 o */
+  { KB_ASCII,  "p",      "P",      "\020",   "",       "", }, /* 25 p */
+  { KB_ASCII,  "[",      "{",      "\033",   "",       "", }, /* 26 [ */
+  { KB_ASCII,  "]",      "}",      "\035",   "",       "", }, /* 27 ] */
+  { KB_ASCII,  "\r",     "\r",     "\n",     "",       "", }, /* 28 return */
+  { KB_CTL,    "",       "",       "",       "",       "", }, /* 29 control */
+  { KB_ASCII,  "a",      "A",      "\001",   "",       "", }, /* 30 a */
+  { KB_ASCII,  "s",      "S",      "\023",   "",       "", }, /* 31 s */
+  { KB_ASCII,  "d",      "D",      "\004",   "",       "", }, /* 32 d */
+  { KB_ASCII,  "f",      "F",      "\006",   "",       "", }, /* 33 f */
+  { KB_ASCII,  "g",      "G",      "\007",   "",       "", }, /* 34 g */
+  { KB_ASCII,  "h",      "H",      "\010",   "",       "", }, /* 35 h */
+  { KB_ASCII,  "j",      "J",      "\n",     "",       "", }, /* 36 j */
+  { KB_ASCII,  "k",      "K",      "\013",   "",       "", }, /* 37 k */
+  { KB_ASCII,  "l",      "L",      "\014",   "",       "", }, /* 38 l */
+  { KB_ASCII,  ";",      ":",      ";",      "",       "", }, /* 39 ; */
+  { KB_ASCII,  "'",      "\"",     "'",      "",       "", }, /* 40 ' */
+  { KB_ASCII,  "`",      "~",      "`",      "",       "", }, /* 41 ` */
+  { KB_SHIFT,  "\001",   "",       "",       "",       "", }, /* 42 shift */
+  { KB_ASCII,  "\\",     "|",      "\034",   "",       "", }, /* 43 \ */
+  { KB_ASCII,  "z",      "Z",      "\032",   "",       "", }, /* 44 z */
+  { KB_ASCII,  "x",      "X",      "\030",   "",       "", }, /* 45 x */
+  { KB_ASCII,  "c",      "C",      "\003",   "",       "", }, /* 46 c */
+  { KB_ASCII,  "v",      "V",      "\026",   "",       "", }, /* 47 v */
+  { KB_ASCII,  "b",      "B",      "\002",   "",       "", }, /* 48 b */
+  { KB_ASCII,  "n",      "N",      "\016",   "",       "", }, /* 49 n */
+  { KB_ASCII,  "m",      "M",      "\r",     "",       "", }, /* 50 m */
+  { KB_ASCII,  ",",      "<",      "<",      "",       "", }, /* 51 , */
+  { KB_ASCII,  ".",      ">",      ">",      "",       "", }, /* 52 . */
+  { KB_ASCII,  "/",      "?",      "\037",   "",       "", }, /* 53 / */
+  { KB_SHIFT,  "\002",   "",       "",       "",       "", }, /* 54 shift */
+  { KB_KP,     "*",      "*",      "*",      "",       "", }, /* 55 kp * */
+  { KB_ALT,    "",       "",       "",       "",       "", }, /* 56 alt */
+  { KB_ASCII,  " ",      " ",      "\000",   "",       "", }, /* 57 space */
+  { KB_CAPS,   "",       "",       "",       "",       "", }, /* 58 caps */
+  { KB_FUNC,   "\033[M", "\033[Y", "\033[k", "",       "", }, /* 59 f1 */
+  { KB_FUNC,   "\033[N", "\033[Z", "\033[l", "",       "", }, /* 60 f2 */
+  { KB_FUNC,   "\033[O", "\033[a", "\033[m", "",       "", }, /* 61 f3 */
+  { KB_FUNC,   "\033[P", "\033[b", "\033[n", "",       "", }, /* 62 f4 */
+  { KB_FUNC,   "\033[Q", "\033[c", "\033[o", "",       "", }, /* 63 f5 */
+  { KB_FUNC,   "\033[R", "\033[d", "\033[p", "",       "", }, /* 64 f6 */
+  { KB_FUNC,   "\033[S", "\033[e", "\033[q", "",       "", }, /* 65 f7 */
+  { KB_FUNC,   "\033[T", "\033[f", "\033[r", "",       "", }, /* 66 f8 */
+  { KB_FUNC,   "\033[U", "\033[g", "\033[s", "",       "", }, /* 67 f9 */
+  { KB_FUNC,   "\033[V", "\033[h", "\033[t", "",       "", }, /* 68 f10 */
+  { KB_NUM,    "",       "",       "",       "",       "", }, /* 69 num lock */
+  { KB_SCROLL, "",       "",       "",       "",       "", }, /* 70 scroll lock */
+  { KB_KP,     "7",      "\033[H", "7",      "",       "", }, /* 71 kp 7 */
+  { KB_KP,     "8",      "\033[A", "8",      "",       "", }, /* 72 kp 8 */
+  { KB_KP,     "9",      "\033[I", "9",      "",       "", }, /* 73 kp 9 */
+  { KB_KP,     "-",      "-",      "-",      "",       "", }, /* 74 kp - */
+  { KB_KP,     "4",      "\033[D", "4",      "",       "", }, /* 75 kp 4 */
+  { KB_KP,     "5",      "\033[E", "5",      "",       "", }, /* 76 kp 5 */
+  { KB_KP,     "6",      "\033[C", "6",      "",       "", }, /* 77 kp 6 */
+  { KB_KP,     "+",      "+",      "+",      "",       "", }, /* 78 kp + */
+  { KB_KP,     "1",      "\033[F", "1",      "",       "", }, /* 79 kp 1 */
+  { KB_KP,     "2",      "\033[B", "2",      "",       "", }, /* 80 kp 2 */
+  { KB_KP,     "3",      "\033[G", "3",      "",       "", }, /* 81 kp 3 */
+  { KB_KP,     "0",      "\033[L", "0",      "",       "", }, /* 82 kp 0 */
+  { KB_KP,     ",",      "\177",   ",",      "",       "", }, /* 83 kp , */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 84 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 85 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 86 0 */
+  { KB_FUNC,   "\033[W", "\033[i", "\033[u", "",       "", }, /* 87 f11 */
+  { KB_FUNC,   "\033[X", "\033[j", "\033[v", "",       "", }, /* 88 f12 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 89 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 90 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 91 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 92 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 93 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 94 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 95 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 96 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 97 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 98 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 99 0 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 100 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 101 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 102 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 103 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 104 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 105 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 106 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 107 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 108 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 109 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 110 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 111 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 112 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 113 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 114 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 115 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 116 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 117 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 118 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 119 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 120 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 121 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 122 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 123 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 124 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 125 */
+  { KB_NONE,   "",       "",       "",       "",       "", }, /* 126 */
+  { KB_NONE,   "",       "",       "",       "",       ""  }, /* 127 */
 };
 
 /*
@@ -1813,7 +1894,9 @@ pcmmap(dev, offset, nprot)
 void
 pc_xmode_on()
 {
+#ifdef COMPAT_10
 	struct trapframe *fp;
+#endif
 
 	if (pc_xmode)
 		return;

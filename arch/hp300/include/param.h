@@ -1,4 +1,5 @@
-/*	$NetBSD: param.h,v 1.26 1996/05/17 15:38:08 thorpej Exp $	*/
+/*	$OpenBSD: param.h,v 1.7 1997/04/16 11:56:35 downsj Exp $	*/
+/*	$NetBSD: param.h,v 1.32 1997/04/14 02:28:51 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -50,6 +51,11 @@
 #define	_MACHINE_ARCH	m68k
 #define	MACHINE_ARCH	"m68k"
 #define	MID_MACHINE	MID_M68K
+
+/*
+ * Interrupt glue.
+ */
+#include <machine/intr.h>
 
 /*
  * Round p (pointer or byte index) up to a correctly-aligned value for all
@@ -140,48 +146,11 @@
 #define hp300_btop(x)		((unsigned)(x) >> PGSHIFT)
 #define hp300_ptob(x)		((unsigned)(x) << PGSHIFT)
 
-/*
- * spl functions; all but spl0 are done in-line
- */
-#include <machine/psl.h>
-
-#define _spl(s) \
-({ \
-        register int _spl_r; \
-\
-        __asm __volatile ("clrl %0; movew sr,%0; movew %1,sr" : \
-                "&=d" (_spl_r) : "di" (s)); \
-        _spl_r; \
-})
-
-/* spl0 requires checking for software interrupts */
-#define spl1()  _spl(PSL_S|PSL_IPL1)
-#define spl2()  _spl(PSL_S|PSL_IPL2)
-#define spl3()  _spl(PSL_S|PSL_IPL3)
-#define spl4()  _spl(PSL_S|PSL_IPL4)
-#define spl5()  _spl(PSL_S|PSL_IPL5)
-#define spl6()  _spl(PSL_S|PSL_IPL6)
-#define spl7()  _spl(PSL_S|PSL_IPL7)
-
-#define splsoftclock()	spl1()
-#define splsoftnet()	spl1()
-#define splbio()	spl5()
-#define splnet()	spl5()
-#define spltty()	spl5()
-#define splimp()	spl5()
-#define splclock()	spl6()
-#define splstatclock()	spl6()
-#define splvm()		spl6()
-#define splhigh()	spl7()
-#define splsched()	spl7()
-
-/* watch out for side effects */
-#define splx(s)         (s & PSL_IPL ? _spl(s) : spl0())
-
 #if defined(_KERNEL) && !defined(_LOCORE)
-extern void _delay __P((u_int));
 #define	delay(us)	_delay((us) << 8)
 #define DELAY(us)	delay(us)
+
+void	_delay __P((u_int));
 #endif /* _KERNEL && !_LOCORE */
 
 #ifdef COMPAT_HPUX

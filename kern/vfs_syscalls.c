@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.15 1996/10/04 01:26:48 deraadt Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.25 1997/03/02 09:38:35 millert Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -67,6 +67,17 @@ static int change_dir __P((struct nameidata *, struct proc *));
 
 void checkdirs __P((struct vnode *));
 int dounmount __P((struct mount *, int, struct proc *));
+
+/*
+ * Redirection info so we don't have to include the union fs routines in 
+ * the kernel directly.  This way, we can build unionfs as an LKM.  The
+ * pointer gets filled in later, when we modload the LKM, or when the
+ * compiled-in unionfs code gets initialized.  For now, we just set
+ * it to a stub routine.
+ */
+
+int (*union_check_p) __P((struct proc *, struct vnode **, 
+			   struct file *, struct uio, int *)) = NULL;
 
 /*
  * Virtual File System System Calls
@@ -240,9 +251,9 @@ update:
 	else if (mp->mnt_flag & MNT_RDONLY)
 		mp->mnt_flag |= MNT_WANTRDWR;
 	mp->mnt_flag &=~ (MNT_NOSUID | MNT_NOEXEC | MNT_NODEV |
-	    MNT_SYNCHRONOUS | MNT_UNION | MNT_ASYNC);
+	    MNT_SYNCHRONOUS | MNT_UNION | MNT_ASYNC | MNT_NOATIME);
 	mp->mnt_flag |= SCARG(uap, flags) & (MNT_NOSUID | MNT_NOEXEC |
-	    MNT_NODEV | MNT_SYNCHRONOUS | MNT_UNION | MNT_ASYNC);
+	    MNT_NODEV | MNT_SYNCHRONOUS | MNT_UNION | MNT_ASYNC | MNT_NOATIME);
 	/*
 	 * Mount the filesystem.
 	 */
@@ -515,6 +526,7 @@ sys_statfs(p, v, retval)
 	register struct statfs *sp;
 	int error;
 	struct nameidata nd;
+	struct statfs sb;
 
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
@@ -525,6 +537,12 @@ sys_statfs(p, v, retval)
 	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+	/* Don't let non-root see filesystem id (for NFS security) */
+	if (suser(p->p_ucred, &p->p_acflag)) {
+		bcopy((caddr_t)sp, (caddr_t)&sb, sizeof(sb));
+		sb.f_fsid.val[0] = sb.f_fsid.val[1] = 0;
+		sp = &sb;
+	}
 	return (copyout((caddr_t)sp, (caddr_t)SCARG(uap, buf), sizeof(*sp)));
 }
 
@@ -546,6 +564,7 @@ sys_fstatfs(p, v, retval)
 	struct mount *mp;
 	register struct statfs *sp;
 	int error;
+	struct statfs sb;
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
@@ -554,6 +573,12 @@ sys_fstatfs(p, v, retval)
 	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+	/* Don't let non-root see filesystem id (for NFS security) */
+	if (suser(p->p_ucred, &p->p_acflag)) {
+		bcopy((caddr_t)sp, (caddr_t)&sb, sizeof(sb));
+		sb.f_fsid.val[0] = sb.f_fsid.val[1] = 0;
+		sp = &sb;
+	}
 	return (copyout((caddr_t)sp, (caddr_t)SCARG(uap, buf), sizeof(*sp)));
 }
 
@@ -575,6 +600,7 @@ sys_getfsstat(p, v, retval)
 	register struct statfs *sp;
 	caddr_t sfsp;
 	long count, maxcount, error;
+	struct statfs sb;
 
 	maxcount = SCARG(uap, bufsize) / sizeof(struct statfs);
 	sfsp = (caddr_t)SCARG(uap, buf);
@@ -593,6 +619,11 @@ sys_getfsstat(p, v, retval)
 			    (error = VFS_STATFS(mp, sp, p)))
 				continue;
 			sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+			if (suser(p->p_ucred, &p->p_acflag)) {
+				bcopy((caddr_t)sp, (caddr_t)&sb, sizeof(sb));
+				sb.f_fsid.val[0] = sb.f_fsid.val[1] = 0;
+				sp = &sb;
+			}
 			error = copyout((caddr_t)sp, sfsp, sizeof(*sp));
 			if (error)
 				return (error);
@@ -1134,15 +1165,25 @@ sys_lseek(p, v, retval)
 	register struct filedesc *fdp = p->p_fd;
 	register struct file *fp;
 	struct vattr vattr;
-	int error;
+	struct vnode *vp;
+	int error, special;
 
 	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
 	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
 		return (EBADF);
 	if (fp->f_type != DTYPE_VNODE)
 		return (ESPIPE);
+	vp = (struct vnode *)fp->f_data;
+	if (vp->v_type == VFIFO)
+		return (ESPIPE);
+	if (vp->v_type == VCHR)
+		special = 1;
+	else
+		special = 0;
 	switch (SCARG(uap, whence)) {
 	case L_INCR:
+		if (!special && fp->f_offset + SCARG(uap, offset) < 0)
+			return (EINVAL);
 		fp->f_offset += SCARG(uap, offset);
 		break;
 	case L_XTND:
@@ -1150,9 +1191,13 @@ sys_lseek(p, v, retval)
 				    cred, p);
 		if (error)
 			return (error);
+		if (!special && (off_t)vattr.va_size + SCARG(uap, offset) < 0)
+			return (EINVAL);
 		fp->f_offset = SCARG(uap, offset) + vattr.va_size;
 		break;
 	case L_SET:
+		if (!special && SCARG(uap, offset) < 0)
+			return (EINVAL);
 		fp->f_offset = SCARG(uap, offset);
 		break;
 	default:
@@ -1237,6 +1282,9 @@ sys_stat(p, v, retval)
 	vput(nd.ni_vp);
 	if (error)
 		return (error);
+	/* Don't let non-root see generation numbers (for NFS security) */
+	if (suser(p->p_ucred, &p->p_acflag))
+		sb.st_gen = 0;
 	error = copyout((caddr_t)&sb, (caddr_t)SCARG(uap, ub), sizeof (sb));
 	return (error);
 }
@@ -1267,6 +1315,9 @@ sys_lstat(p, v, retval)
 	vput(nd.ni_vp);
 	if (error)
 		return (error);
+	/* Don't let non-root see generation numbers (for NFS security) */
+	if (suser(p->p_ucred, &p->p_acflag))
+		sb.st_gen = 0;
 	error = copyout((caddr_t)&sb, (caddr_t)SCARG(uap, ub), sizeof (sb));
 	return (error);
 }
@@ -1506,6 +1557,58 @@ sys_chown(p, v, retval)
 	u_short mode;
 
 	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	if ((error = namei(&nd)) != 0)
+		return (error);
+	vp = nd.ni_vp;
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	VOP_LOCK(vp);
+	if (vp->v_mount->mnt_flag & MNT_RDONLY)
+		error = EROFS;
+	else {
+		if (suser(p->p_ucred, &p->p_acflag) ||
+		    suid_clear) {
+			error = VOP_GETATTR(vp, &vattr, p->p_ucred, p);
+			if (error)
+				goto out;
+			mode = vattr.va_mode & ~(VSUID | VSGID);
+			if (mode == vattr.va_mode)
+				mode = VNOVAL;
+		}
+		else
+			mode = VNOVAL;
+		VATTR_NULL(&vattr);
+		vattr.va_uid = SCARG(uap, uid);
+		vattr.va_gid = SCARG(uap, gid);
+		vattr.va_mode = mode;
+		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
+	}
+out:
+	vput(vp);
+	return (error);
+}
+
+/*
+ * Set ownership given a path name, without following links.
+ */
+/* ARGSUSED */
+int
+sys_lchown(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	register struct sys_lchown_args /* {
+		syscallarg(char *) path;
+		syscallarg(int) uid;
+		syscallarg(int) gid;
+	} */ *uap = v;
+	register struct vnode *vp;
+	struct vattr vattr;
+	int error;
+	struct nameidata nd;
+	u_short mode;
+
+	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
 	if ((error = namei(&nd)) != 0)
 		return (error);
 	vp = nd.ni_vp;
@@ -1835,13 +1938,9 @@ sys_rename(p, v, retval)
 		error = EINVAL;
 	/*
 	 * If source is the same as the destination (that is the
-	 * same inode number with the same name in the same directory),
-	 * then there is nothing to do.
+	 * same inode number)
 	 */
-	if (fvp == tvp && fromnd.ni_dvp == tdvp &&
-	    fromnd.ni_cnd.cn_namelen == tond.ni_cnd.cn_namelen &&
-	    !bcmp(fromnd.ni_cnd.cn_nameptr, tond.ni_cnd.cn_nameptr,
-	      fromnd.ni_cnd.cn_namelen))
+	if (fvp == tvp)
 		error = -1;
 out:
 	if (!error) {
@@ -1986,7 +2085,7 @@ sys_getdirentries(p, v, retval)
 		syscallarg(u_int) count;
 		syscallarg(long *) basep;
 	} */ *uap = v;
-	register struct vnode *vp;
+	struct vnode *vp;
 	struct file *fp;
 	struct uio auio;
 	struct iovec aiov;
@@ -2016,50 +2115,12 @@ unionread:
 	VOP_UNLOCK(vp);
 	if (error)
 		return (error);
-
-#ifdef UNION
-{
-	extern int (**union_vnodeop_p) __P((void *));
-	extern struct vnode *union_dircache __P((struct vnode *));
-
 	if ((SCARG(uap, count) == auio.uio_resid) &&
-	    (vp->v_op == union_vnodeop_p)) {
-		struct vnode *lvp;
-
-		lvp = union_dircache(vp);
-		if (lvp != NULLVP) {
-			struct vattr va;
-
-			/*
-			 * If the directory is opaque,
-			 * then don't show lower entries
-			 */
-			error = VOP_GETATTR(vp, &va, fp->f_cred, p);
-			if (va.va_flags & OPAQUE) {
-				vput(lvp);
-				lvp = NULL;
-			}
-		}
-		
-		if (lvp != NULLVP) {
-			error = VOP_OPEN(lvp, FREAD, fp->f_cred, p);
-			VOP_UNLOCK(lvp);
-
-			if (error) {
-				vrele(lvp);
-				return (error);
-			}
-			fp->f_data = (caddr_t) lvp;
-			fp->f_offset = 0;
-			error = vn_close(vp, FREAD, fp->f_cred, p);
-			if (error)
-				return (error);
-			vp = lvp;
-			goto unionread;
-		}
-	}
-}
-#endif /* UNION */
+	    union_check_p &&
+	    (union_check_p(p, &vp, fp, auio, &error) != 0))
+		goto unionread;
+	if (error)
+		return (error);
 
 	if ((SCARG(uap, count) == auio.uio_resid) &&
 	    (vp->v_flag & VROOT) &&

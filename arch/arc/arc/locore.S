@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.6 1996/09/22 11:29:52 pefo Exp $	*/
+/*	$OpenBSD: locore.S,v 1.12 1997/04/19 17:19:43 pefo Exp $	*/
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -50,7 +50,7 @@
  *	v 1.1 89/07/10 14:27:41 nelson Exp  SPRITE (DECWRL)
  *
  *	from: @(#)locore.s	8.5 (Berkeley) 1/4/94
- *	$Id: locore.S,v 1.6 1996/09/22 11:29:52 pefo Exp $
+ *	$Id: locore.S,v 1.12 1997/04/19 17:19:43 pefo Exp $
  */
 
 /*
@@ -78,6 +78,8 @@
 #define START_FRAME	((4 * 4) + 4 + 4)
 
 	.globl	start
+	.globl	kernel_start
+kernel_start = start
 start:
 	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
 	mtc0	zero, COP_0_CAUSE_REG	# Clear soft interrupts
@@ -92,15 +94,14 @@ start:
 	sw	zero, START_FRAME - 8(sp)	# Zero out old fp for debugger
 
 	li	t0, SR_COP_1_BIT		# Disable interrupts and
-	mtc0	t0, COP_0_STATUS_REG	#   enable the fp coprocessor
+	mtc0	t0, COP_0_STATUS_REG		#   enable the fp coprocessor
 	li	sp, KERNELSTACK - START_FRAME	# switch to standard stack
-	mfc0	t0, COP_0_PRID		# read processor ID register
 	nop
+	nop					# wait for new status to
 	nop					# wait for new status to
 	nop					# to be effective
 	nop
 	cfc1	t1, FPC_ID			# read FPU ID register
-	sw	t0, cpu_id			# save PRID register
 	sw	t1, fpu_id			# save FPU ID register
 	jal	main				# main(regs)
 	move	a0, zero
@@ -265,6 +266,21 @@ LEAF(fillw)
 	jr	ra
 	nop
 END(fillw)
+
+/*
+ * Optimized memory zero code.
+ * mem_zero_page(addr);
+ */
+LEAF(mem_zero_page)
+	li	v0, NBPG
+1:
+	subu	v0, 8
+	sd	zero, 0(a0)
+	bne	zero, v0, 1b
+	addu	a0, 8
+	jr	ra
+	nop
+END(mem_zero_page)
 
 /*
  *	Block I/O routines mainly used by I/O drivers.
@@ -573,7 +589,7 @@ END(setrunqueue)
  *
  * Call should be made at splclock().
  */
-NON_LEAF(remrq, STAND_FRAME_SIZE, ra)
+NON_LEAF(remrunqueue, STAND_FRAME_SIZE, ra)
 	subu	sp, sp, STAND_FRAME_SIZE
 	.mask	0x80000000, (STAND_RA_OFFSET - STAND_FRAME_SIZE)
 	lbu	t0, P_PRIORITY(a0)	# get from p->p_priority / 4 queue
@@ -585,7 +601,7 @@ NON_LEAF(remrq, STAND_FRAME_SIZE, ra)
 	sw	ra, STAND_RA_OFFSET(sp)	##
 	bne	v0, zero, 1f		##
 	lw	v0, P_BACK(a0)		# v0 = p->p_back
-	PANIC("remrq")			## it wasnt recorded to be on its q
+	PANIC("remrunqueue")		## it wasnt recorded to be on its q
 1:
 	lw	v1, P_FORW(a0)		# v1 = p->p_forw
 	nop
@@ -604,7 +620,7 @@ NON_LEAF(remrq, STAND_FRAME_SIZE, ra)
 	sw	zero, P_BACK(a0)	## for firewall checking
 	j	ra
 	addu	sp, sp, STAND_FRAME_SIZE
-END(remrq)
+END(remrunqueue)
 
 /*
  * switch_exit()
@@ -1370,8 +1386,7 @@ NNON_LEAF(MachUserIntr, STAND_FRAME_SIZE, ra)
 	.mask	0x80000000, (STAND_RA_OFFSET - STAND_FRAME_SIZE)
 /*
  * Save the relevant user registers into the u.u_pcb struct.
- * We don't need to save s0 - s8 because
- * the compiler does it for us.
+ * We don't need to save s0 - s8 because the compiler does it for us.
  */
 	sw	AT, UADDR+U_PCB_REGS+(AST * 4)
 	sw	v0, UADDR+U_PCB_REGS+(V0 * 4)
@@ -1545,7 +1560,7 @@ END(MachUserIntr)
 NLEAF(MachTLBInvalidException)
 	.set	noat
 	dmfc0	k0, COP_0_BAD_VADDR	# get the fault address
-	li	k1, VM_MIN_KERNEL_ADDRESS	# compute index
+	li	k1, (VM_MIN_KERNEL_ADDRESS)	# compute index
 	subu	k0, k0, k1
 	lw	k1, Sysmapsize			# index within range?
 	srl	k0, k0, PGSHIFT
@@ -1633,7 +1648,7 @@ END(MachTLBInvalidException)
 NLEAF(MachTLBMissException)
 	.set	noat
 	dmfc0	k0, COP_0_BAD_VADDR	# get the fault address
-	li	k1, VM_MIN_KERNEL_ADDRESS	# compute index
+	li	k1, (VM_MIN_KERNEL_ADDRESS)	# compute index
 	subu	k0, k0, k1
 	lw	k1, Sysmapsize			# index within range?
 	srl	k0, k0, PGSHIFT
@@ -2003,8 +2018,9 @@ END(R4K_GetWIRED)
  *
  *	Flush the "random" entries from the TLB.
  *	Uses "wired" register to determine what register to start with.
+ *	Arg "tlbsize" is the number of entries to flush.
  *
- *	R4K_TLBFlush()
+ *	R4K_TLBFlush(tlbsize)
  *
  * Results:
  *	None.
@@ -2018,7 +2034,6 @@ LEAF(R4K_TLBFlush)
 	mfc0	v1, COP_0_STATUS_REG	# Save the status register.
 	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
 	mfc0	t1, COP_0_TLB_WIRED
-	li	t2, VMNUM_TLB_ENTRIES
 	li	v0, CACHED_MEMORY_ADDR	# invalid address
 	dmfc0	t0, COP_0_TLB_HI	# Save the PID
 
@@ -2027,7 +2042,7 @@ LEAF(R4K_TLBFlush)
 	dmtc0	zero, COP_0_TLB_LO1	# Zero out low entry1.
 	mtc0	zero, COP_0_TLB_PG_MASK	# Zero out mask entry.
 /*
- * Align the starting value (t1) and the upper bound (t2).
+ * Align the starting value (t1) and the upper bound (a0).
  */
 1:
 	mtc0	t1, COP_0_TLB_INDEX	# Set the index register.
@@ -2035,7 +2050,7 @@ LEAF(R4K_TLBFlush)
 	tlbwi				# Write the TLB entry.
 	nop
 	nop
-	bne	t1, t2, 1b
+	bne	t1, a0, 1b
 	nop
 
 	dmtc0	t0, COP_0_TLB_HI	# Restore the PID
@@ -2570,18 +2585,25 @@ END(MachFPTrap)
  *	The size of the data cache is stored into CpuPrimaryDataCacheSize.
  *	The size of instruction cache is stored into CpuPrimaryInstCacheSize.
  *	Alignment mask for cache aliasing test is stored in CpuCacheAliasMask.
+ *	cpu_id is set for later decision testing.
+
+XXX Needs support for Cpu controlled L2 caches (SC cpus). XXX
+
  *
  *----------------------------------------------------------------------------
  */
 LEAF(R4K_ConfigCache)
 	.set	noreorder
+	mfc0	t0, COP_0_PRID			# read processor ID register
+	nop
+	sw	t0, cpu_id			# save PRID register
 	mfc0	v0, COP_0_CONFIG		# Get configuration register
 	mfc0	v1, COP_0_PRID
 	srl	t1, v0, 9			# Get I cache size.
 	and	t1, 3
 	li	t2, 4096
 	sllv	t2, t2, t1
-	sw	t2, CpuPrimaryDataCacheSize
+	sw	t2, CpuPrimaryInstCacheSize
 	addiu	t2, -1
 	and	t2, ~(NBPG - 1)
 	sw	t2, CpuCacheAliasMask
@@ -2589,21 +2611,29 @@ LEAF(R4K_ConfigCache)
 	and	t2, v0, 0x20
 	srl	t2, t2, 1
 	addu	t2, t2, 16
-	sw	t2, CpuPrimaryDataCacheLSize
+	sw	t2, CpuPrimaryInstCacheLSize
 
-	srl	t1, v0, 6			# Get I cache size.
+	srl	t1, v0, 6			# Get D cache size.
 	and	t1, 3
 	li	t2, 4096
 	sllv	t2, t2, t1
-	sw	t2, CpuPrimaryInstCacheSize
+	sw	t2, CpuPrimaryDataCacheSize
 
 	and	t2, v0, 0x10
 	addu	t2, t2, 16
-	sw	t2, CpuPrimaryInstCacheLSize
+	sw	t2, CpuPrimaryDataCacheLSize
 	and	v1, 0xff00
-	li	t1, (MIPS_R4600 << 8)
+	li	t2, 1				# Recognize CPU's with
+	li	t1, (MIPS_R4600 << 8)		# two way associative caches.
+	beq	v1, t1, 1f
+	li	t1, (MIPS_R4700 << 8)
+	beq	v1, t1, 1f
+	li	t1, (MIPS_R5000 << 8)
+	beq	v1, t1, 1f
+	li	t1, (MIPS_RM5230 << 8)
+	beq	v1, t1, 1f
 	li	t2, 1
-	bnel	v1, t1, 1f
+
 	li	t2, 0
 1:
 	sw	t2, CpuTwoWayCache

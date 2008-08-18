@@ -1,7 +1,8 @@
-/*	$OpenBSD: sys_generic.c,v 1.5 1996/05/18 08:53:09 deraadt Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.7 1997/01/27 23:21:13 deraadt Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
+ * Copyright (c) 1996 Theo de Raadt
  * Copyright (c) 1982, 1986, 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -719,13 +720,13 @@ selrecord(selector, sip)
 	pid_t mypid;
 
 	mypid = selector->p_pid;
-	if (sip->si_pid == mypid)
+	if (sip->si_selpid == mypid)
 		return;
-	if (sip->si_pid && (p = pfind(sip->si_pid)) &&
+	if (sip->si_selpid && (p = pfind(sip->si_selpid)) &&
 	    p->p_wchan == (caddr_t)&selwait)
 		sip->si_flags |= SI_COLL;
 	else
-		sip->si_pid = mypid;
+		sip->si_selpid = mypid;
 }
 
 /*
@@ -738,15 +739,15 @@ selwakeup(sip)
 	register struct proc *p;
 	int s;
 
-	if (sip->si_pid == 0)
+	if (sip->si_selpid == 0)
 		return;
 	if (sip->si_flags & SI_COLL) {
 		nselcoll++;
 		sip->si_flags &= ~SI_COLL;
 		wakeup((caddr_t)&selwait);
 	}
-	p = pfind(sip->si_pid);
-	sip->si_pid = 0;
+	p = pfind(sip->si_selpid);
+	sip->si_selpid = 0;
 	if (p != NULL) {
 		s = splhigh();
 		if (p->p_wchan == (caddr_t)&selwait) {

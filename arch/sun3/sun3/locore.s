@@ -1,4 +1,5 @@
-/*	$NetBSD: locore.s,v 1.38 1996/04/07 05:42:17 gwr Exp $	*/
+/*	$OpenBSD: locore.s,v 1.18 1997/04/05 20:22:01 kstailey Exp $	*/
+/*	$NetBSD: locore.s,v 1.40 1996/11/06 20:19:54 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Gordon W. Ross
@@ -91,7 +92,6 @@ L_per_pmeg:
 
 | Kernel is now double mapped at zero and KERNBASE.
 | Force a long jump to the relocated code (high VA).
-
 	movl	#IC_CLEAR, d0		| Flush the I-cache
 	movc	d0, cacr
 	jmp L_high_code:l		| long jump
@@ -246,12 +246,12 @@ Lbe10:
 
 /*
  * the sun3 specific code
- *	
+ *
  * our mission: figure out whether what we are looking at is
  *              bus error in the UNIX sense, or
  *	        a memory error i.e a page fault
  *
- * [this code replaces similarly mmu specific code in the hp300 code]	
+ * [this code replaces similarly mmu specific code in the hp300 code]
  */
 sun3_mmu_specific:
 	clrl d0				| make sure top bits are cleard too
@@ -441,7 +441,7 @@ _trap0:
 
 /*
  * Trap 1 is either:
- * sigreturn (native NetBSD executable)
+ * sigreturn (native OpenBSD executable)
  * breakpoint (HPUX executable)
  */
 _trap1:
@@ -490,7 +490,7 @@ Lsigr1:
 
 /*
  * Trap 2 is one of:
- * NetBSD: not used (ignore)
+ * OpenBSD: not used (ignore)
  * SunOS:  Some obscure FPU operation
  * HPUX:   sigreturn
  */
@@ -499,7 +499,7 @@ _trap2:
 	/* XXX:	If HPUX, this is a user breakpoint. */
 	jne	sigreturn
 #endif
-	/* fall into trace (NetBSD or SunOS) */
+	/* fall into trace (OpenBSD or SunOS) */
 
 /*
  * Trace (single-step) trap.  Kernel-mode is special.
@@ -530,13 +530,14 @@ _trap15:
 	jne	kbrkpt			| yes, kernel breakpoint
 	jra	fault			| no, user-mode fault
 
-kbrkpt:	| Kernel-mode breakpoint or trace trap.
-	| Save system sp rather than user sp.
+kbrkpt:	| Kernel-mode breakpoint or trace trap. (d0=trap_type)
+	| Save the system sp rather than the user sp.
+	movw	#PSL_HIGHIPL,sr		| lock out interrupts
 	lea	sp@(FR_SIZE),a6		| Save stack pointer
 	movl	a6,sp@(FR_SP)		|  from before trap
 
 	| If we are not on tmpstk switch to it.
-	| (allows debugger to frob the stack)
+	| (so debugger can change the stack pointer)
 	movl	a6,d1
 	cmpl	#tmpstk,d1
 	jls	Lbrkpt2 		| already on tmpstk
@@ -551,13 +552,39 @@ Lbrkpt1:
 	bgt	Lbrkpt1
 
 Lbrkpt2:
-	| Now call the trap handler as usual.
-	clrl	sp@-			| no VA arg
-	clrl	sp@-			| or code arg
-	movl	d0,sp@-			| push trap type
-	jbsr	_trap			| handle trap
-	lea	sp@(12),sp		| pop value args
-
+	| Call the trap handler for the kernel debugger.
+	| Do not call trap() to do it, so that we can
+	| set breakpoints in trap() if we want.  We know
+	| the trap type is either T_TRACE or T_BREAKPOINT.
+	| If we have both DDB and KGDB, let KGDB see it first,
+	| because KGDB will just return 0 if not connected.
+	| Save args in d2, a2
+	movl	d0,d2			| trap type
+	movl	sp,a2			| frame ptr
+#ifdef	KGDB
+	| Let KGDB handle it (if connected)
+	movl	a2,sp@-			| push frame ptr
+	movl	d2,sp@-			| push trap type
+	jbsr	_kgdb_trap		| handle the trap
+	addql	#8,sp			| pop args
+	cmpl	#0,d0			| did kgdb handle it
+	jne	Lbrkpt3			| yes, done
+#endif
+#ifdef	DDB
+	| Let DDB handle it.
+	movl	a2,sp@-			| push frame ptr
+	movl	d2,sp@-			| push trap type
+	jbsr	_kdb_trap		| handle the trap
+	addql	#8,sp			| pop args
+	cmpl	#0,d0			| did ddb handle it
+	jne	Lbrkpt3			| yes, done
+#endif
+	| Drop into the PROM temporarily...
+	movl	a2,sp@-			| push frame ptr
+	movl	d2,sp@-			| push trap type
+	jbsr	_nodb_trap		| handle the trap
+	addql	#8,sp			| pop args
+Lbrkpt3:
 	| The stack pointer may have been modified, or
 	| data below it modified (by kgdb push call),
 	| so push the hardware frame at the current sp
@@ -589,6 +616,8 @@ _trap12:
 /*
  * Interrupt handlers.  Most are auto-vectored,
  * and hard-wired the same way on all sun3 models.
+ * Format in the stack is:
+ *   d0,d1,a0,a1, sr, pc, vo
  */
 
 #define INTERRUPT_SAVEREG \
@@ -633,8 +662,8 @@ __isr_clock:
 	jra	rei
 
 | Handler for all vectored interrupts (i.e. VME interrupts)
-	.globl	_isr_vectored
-	.globl	__isr_vectored
+	.align	2
+	.globl	__isr_vectored, _isr_vectored
 __isr_vectored:
 	INTERRUPT_SAVEREG
 	movw	sp@(22),sp@-		| push exception vector info
@@ -742,7 +771,7 @@ Ldorte:
  * Stack looks like:
  *
  *	sp+0 ->	signal number
- *	sp+4	signal specific code
+ *	sp+4	pointer to siginfo (sip)
  *	sp+8	pointer to signal context frame (scp)
  *	sp+12	address of handler
  *	sp+16	saved hardware state
@@ -771,8 +800,6 @@ _esigcode:
  * Primitives
  */
 #include <machine/asm.h>
-
-/* XXX copypage(fromaddr, toaddr) */
 
 /*
  * non-local gotos
@@ -844,11 +871,11 @@ Lset2:
 #endif
 
 /*
- * remrq(p)
+ * remrunqueue(p)
  *
  * Call should be made at splclock().
  */
-ENTRY(remrq)
+ENTRY(remrunqueue)
 	movl	sp@(4),a0		| proc *p
 	clrl	d0
 	movb	a0@(P_PRIORITY),d0
@@ -877,8 +904,8 @@ Lrem2:
 	movl	#Lrem3,sp@-
 	jbsr	_panic
 Lrem3:
-	.asciz	"remrq"
-
+	.asciz	"remrunqueue"
+	.even
 
 | Message for Lbadsw panic
 Lsw0:
@@ -945,7 +972,7 @@ Lbadsw:
 
 /*
  * cpu_switch()
- * Hacked for sun3	
+ * Hacked for sun3
  * XXX - Arg 1 is a proc pointer (curproc) but this doesn't use it.
  * XXX - Sould we use p->p_addr instead of curpcb? -gwr
  */
@@ -1007,7 +1034,7 @@ Lsw2:
 	movl	a0,_curproc
 	clrl	_want_resched
 #ifdef notyet
-	movl	sp@+,a1
+	movl	sp@+,a1			| XXX - Make this work!
 	cmpl	a0,a1			| switching to same proc?
 	jeq	Lswdone			| yes, skip save and restore
 #endif
@@ -1019,7 +1046,7 @@ Lsw2:
 	movl	usp,a2			| grab USP (a2 has been saved)
 	movl	a2,a1@(PCB_USP)		| and save it
 
-	tstl	_fpu_type		| Do we have an fpu?
+	tstl	_fputype		| Do we have an fpu?
 	jeq	Lswnofpsave		| No?  Then don't try save.
 	lea	a1@(PCB_FPCTX),a2	| pointer to FP save area
 	fsave	a2@			| save FP state
@@ -1028,6 +1055,13 @@ Lsw2:
 	fmovem	fp0-fp7,a2@(FPF_REGS)		| save FP general regs
 	fmovem	fpcr/fpsr/fpi,a2@(FPF_FPCR)	| save FP control regs
 Lswnofpsave:
+
+	/*
+	 * Now that we have saved all the registers that must be
+	 * preserved, we are free to use those registers until
+	 * we load the registers for the switched-to process.
+	 * In this section, keep:  a0=curproc, a1=curpcb
+	 */
 
 #ifdef DIAGNOSTIC
 	tstl	a0@(P_WCHAN)
@@ -1038,34 +1072,33 @@ Lswnofpsave:
 	clrl	a0@(P_BACK)		| clear back link
 	movl	a0@(P_ADDR),a1		| get p_addr
 	movl	a1,_curpcb
-	movb	a0@(P_MDFLAG+3),mdpflag	| low byte of p_md.md_flags
 
 	/* see if pmap_activate needs to be called; should remove this */
-	movl	a0@(P_VMSPACE),a0	| vmspace = p->p_vmspace
+	movl	a0@(P_VMSPACE),a2	| a2 = p->p_vmspace
 #ifdef DIAGNOSTIC
-	tstl	a0			| map == VM_MAP_NULL?
+	tstl	a2			| map == VM_MAP_NULL?
 	jeq	Lbadsw			| panic
 #endif
 
 | Important note:  We MUST call pmap_activate to set the
 | MMU context register (like setting a root table pointer).
-	lea	a0@(VM_PMAP),a0		| pmap = &vmspace.vm_pmap
-	pea	a1@			| push pcb (at p_addr)
-	pea	a0@			| push pmap
-	jbsr	_pmap_activate		| pmap_activate(pmap, pcb)
-	addql	#8,sp
+| XXX - Eventually, want to do that here, inline.
+	lea	a2@(VM_PMAP),a2		| pmap = &vmspace.vm_pmap
+	pea	a2@			| push pmap
+	jbsr	_pmap_activate		| pmap_activate(pmap)
+	addql	#4,sp
 	movl	_curpcb,a1		| restore p_addr
+| Note: pmap_activate will clear the cache if needed.
 
-| XXX - Should do this in pmap_activeate only if context reg changed.
-	movl	#IC_CLEAR,d0
-	movc	d0,cacr
-
-Lcxswdone:
+	/*
+	 * Reload the registers for the new process.
+	 * After this point we can only use d0,d1,a0,a1
+	 */
 	moveml	a1@(PCB_REGS),#0xFCFC	| reload registers
 	movl	a1@(PCB_USP),a0
 	movl	a0,usp			| and USP
 
-	tstl	_fpu_type		| If we don't have an fpu,
+	tstl	_fputype		| If we don't have an fpu,
 	jeq	Lres_skip		|  don't try to restore it.
 	lea	a1@(PCB_FPCTX),a0	| pointer to FP save area
 	tstb	a0@			| null state frame?
@@ -1095,7 +1128,7 @@ ENTRY(savectx)
 	movl	a0,a1@(PCB_USP)		| and save it
 	moveml	#0xFCFC,a1@(PCB_REGS)	| save non-scratch registers
 
-	tstl	_fpu_type		| Do we have FPU?
+	tstl	_fputype		| Do we have FPU?
 	jeq	Lsavedone		| No?  Then don't save state.
 	lea	a1@(PCB_FPCTX),a0	| pointer to FP save area
 	fsave	a0@			| save FP state
@@ -1126,8 +1159,8 @@ ENTRY(ICIA)
 ENTRY(DCIU)
 	rts
 
-/* ICPL, ICPP, DCPL, DCPP, DCPA, DCFL, DCFP, PCIA */
-/* ecacheon, ecacheoff */
+/* ICPL, ICPP, DCPL, DCPP, DCPA, DCFL, DCFP */
+/* PCIA, ecacheon, ecacheoff */
 
 /*
  * Get callers current SP value.
@@ -1207,8 +1240,6 @@ ENTRY(_remque)
 
 /*
  * Save and restore 68881 state.
- * Pretty awful looking since our assembler does not
- * recognize FP mnemonics.
  */
 ENTRY(m68881_save)
 	movl	sp@(4),a0		| save area pointer

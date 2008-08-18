@@ -1,5 +1,5 @@
-/*	$OpenBSD: flsc.c,v 1.5 1996/10/04 23:34:50 niklas Exp $	*/
-/*	$NetBSD: flsc.c,v 1.5.4.3 1996/08/05 20:40:35 jtc Exp $	*/
+/*	$OpenBSD: flsc.c,v 1.8 1997/01/18 12:26:28 niklas Exp $	*/
+/*	$NetBSD: flsc.c,v 1.14 1996/12/23 09:10:00 veego Exp $	*/
 
 /*
  * Copyright (c) 1995 Daniel Widenfalk
@@ -58,7 +58,6 @@
 #include <amiga/dev/flscreg.h>
 #include <amiga/dev/flscvar.h>
 
-int  flscprint  __P((void *auxp, char *));
 void flscattach __P((struct device *, struct device *, void *));
 int  flscmatch  __P((struct device *, void *, void *));
 
@@ -191,19 +190,7 @@ flscattach(pdp, dp, auxp)
 	printf("\n");
 
 /* attach all scsi units on us */
-	config_found(dp, &sc->sc_softc.sc_link, flscprint);
-}
-
-/* print diag if pnp is NULL else just extra */
-int
-flscprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-
-	return(QUIET);
+	config_found(dp, &sc->sc_softc.sc_link, scsiprint);
 }
 
 int

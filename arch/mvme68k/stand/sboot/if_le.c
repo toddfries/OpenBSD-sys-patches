@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le.c,v 1.3 1996/04/28 10:49:38 deraadt Exp $ */
+/*	$OpenBSD: if_le.c,v 1.5 1997/01/29 07:58:38 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -61,6 +61,7 @@
  */
 
 #include <sys/cdefs.h>
+#include <stand.h>
 #include "sboot.h"
 #include "if_lereg.h"
 
@@ -291,11 +292,11 @@ le_get(pkt, len, timeout)
 {
 	int     cc;
 	int     now, then;
-	int     stopat = time() + timeout;
+	int     stopat = ttime() + timeout;
 	then = 0;
 
 	cc = 0;
-	while ((now = time()) < stopat && !cc) {
+	while ((now = ttime()) < stopat && !cc) {
 		cc = le_poll(pkt, len);
 		if (then != now) {
 #ifdef LE_DEBUG

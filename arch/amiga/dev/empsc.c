@@ -1,5 +1,5 @@
-/*	$OpenBSD: empsc.c,v 1.3 1996/05/29 10:14:51 niklas Exp $ */
-/*	$NetBSD: empsc.c,v 1.7 1996/05/10 13:02:33 is Exp $	*/
+/*	$OpenBSD: empsc.c,v 1.6 1997/01/18 12:26:28 niklas Exp $ */
+/*	$NetBSD: empsc.c,v 1.13 1996/12/23 09:09:58 veego Exp $	*/
 
 /*
 
@@ -50,7 +50,6 @@
 #include <amiga/dev/scivar.h>
 #include <amiga/dev/zbusvar.h>
 
-int empscprint __P((void *auxp, char *));
 void empscattach __P((struct device *, struct device *, void *));
 int empscmatch __P((struct device *, void *, void *));
 int empsc_intr __P((void *));
@@ -150,20 +149,7 @@ empscattach(pdp, dp, auxp)
 	/*
 	 * attach all scsi units on us
 	 */
-	config_found(dp, &sc->sc_link, empscprint);
-}
-
-/*
- * print diag if pnp is NULL else just extra
- */
-int
-empscprint(auxp, pnp)
-	void *auxp;
-	char *pnp;
-{
-	if (pnp == NULL)
-		return(UNCONF);
-	return(QUIET);
+	config_found(dp, &sc->sc_link, scsiprint);
 }
 
 int

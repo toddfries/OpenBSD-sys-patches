@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdq_ifsubr.c,v 1.4 1996/08/21 22:27:41 deraadt Exp $	*/
+/*	$OpenBSD: pdq_ifsubr.c,v 1.6 1996/10/31 01:01:37 niklas Exp $	*/
 /*	$NetBSD: pdq_ifsubr.c,v 1.5 1996/05/20 00:26:21 thorpej Exp $	*/
 
 /*-
@@ -364,7 +364,8 @@ pdq_ifattach(
 
     ifp->if_flags = IFF_BROADCAST|IFF_SIMPLEX|IFF_NOTRAILERS|IFF_MULTICAST;
 
-#if (defined(__FreeBSD__) && BSD >= 199506) || defined(__NetBSD__) || defined(__OpenBSD__)
+#if (defined(__FreeBSD__) && BSD >= 199506) || defined(__NetBSD__) || \
+	defined(__OpenBSD__)
     ifp->if_watchdog = pdq_ifwatchdog;
 #else
     ifp->if_watchdog = ifwatchdog;

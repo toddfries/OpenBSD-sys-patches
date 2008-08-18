@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.12 1996/08/24 04:56:39 deraadt Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.16 1997/04/17 02:02:26 deraadt Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -57,8 +57,13 @@
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+#include <dev/rndvar.h>
 
 struct	in_addr zeroin_addr;
+
+extern u_char ipsec_auth_default_level;
+extern u_char ipsec_esp_trans_default_level;
+extern u_char ipsec_esp_network_default_level;
 
 /*
  * These configure the range of local port addresses assigned to
@@ -98,6 +103,9 @@ in_pcballoc(so, v)
 	bzero((caddr_t)inp, sizeof(*inp));
 	inp->inp_table = table;
 	inp->inp_socket = so;
+	inp->inp_seclevel[SL_AUTH] = ipsec_auth_default_level;
+	inp->inp_seclevel[SL_ESP_TRANS] = ipsec_esp_trans_default_level;
+	inp->inp_seclevel[SL_ESP_NETWORK] = ipsec_esp_network_default_level;
 	s = splnet();
 	CIRCLEQ_INSERT_HEAD(&table->inpt_queue, inp, inp_queue);
 	LIST_INSERT_HEAD(INPCBHASH(table, &inp->inp_faddr, inp->inp_fport,
@@ -179,7 +187,7 @@ in_pcbbind(v, nam)
 		inp->inp_laddr = sin->sin_addr;
 	}
 	if (lport == 0) {
-		u_int16_t first, last, old;
+		u_int16_t first, last, old = 0;
 		int count;
 		int loopcount = 0;
 
@@ -189,19 +197,13 @@ in_pcbbind(v, nam)
 		} else if (inp->inp_flags & INP_LOWPORT) {
 			if ((error = suser(p->p_ucred, &p->p_acflag)))
 				return (EACCES);
-			first = IPPORT_RESERVED - 1;	/* 1023 */
-#if 0
-			/* traditional way */
-			last = IPPORT_RESERVED / 2;	/* traditional - 512 */
-#else
-			/* our way */
-			last = 600;
-#endif
-			*lastport = first;		/* restart each time */
+			first = IPPORT_RESERVED-1; /* 1023 */
+			last = 600;		   /* not IPPORT_RESERVED/2 */
 		} else {
 			first = ipport_firstauto;	/* sysctl */
 			last  = ipport_lastauto;
 		}
+
 		/*
 		 * Simple check to ensure all ports are not used up causing
 		 * a deadlock here.
@@ -217,16 +219,16 @@ portloop:
 			 */
 			if (loopcount == 0) {	/* only do this once. */
 				old = first;
-				first -= (random() % (first - last));
+				first -= (arc4random() % (first - last));
 			}
 			count = first - last;
+			*lastport = first;		/* restart each time */
 
 			do {
 				if (count-- <= 0) {	/* completely used? */
 					if (loopcount == 0) {
 						last = old;
 						loopcount++;
-
 						goto portloop;
 					}
 					return (EADDRNOTAVAIL);
@@ -235,24 +237,24 @@ portloop:
 				if (*lastport > first || *lastport < last)
 					*lastport = first;
 				lport = htons(*lastport);
-			} while (in_pcblookup(table,
-				 zeroin_addr, 0, inp->inp_laddr, lport, wild));
+			} while (in_pcblookup(table, zeroin_addr, 0,
+			    inp->inp_laddr, lport, wild));
 		} else {
 			/*
 			 * counting up
 			 */
 			if (loopcount == 0) {	/* only do this once. */
 				old = first;
-				first += (random() % (last - first));
+				first += (arc4random() % (last - first));
 			}
 			count = last - first;
+			*lastport = first;		/* restart each time */
 
 			do {
 				if (count-- <= 0) {	/* completely used? */
 					if (loopcount == 0) {
 						first = old;
 						loopcount++;
-
 						goto portloop;
 					}
 					return (EADDRNOTAVAIL);
@@ -261,8 +263,8 @@ portloop:
 				if (*lastport < first || *lastport > last)
 					*lastport = first;
 				lport = htons(*lastport);
-			} while (in_pcblookup(table,
-				 zeroin_addr, 0, inp->inp_laddr, lport, wild));
+			} while (in_pcblookup(table, zeroin_addr, 0,
+			    inp->inp_laddr, lport, wild));
 		}
 	}
 	inp->inp_lport = lport;
@@ -418,6 +420,9 @@ in_pcbdetach(v)
 	if (inp->inp_route.ro_rt)
 		rtfree(inp->inp_route.ro_rt);
 	ip_freemoptions(inp->inp_moptions);
+#ifdef IPSEC
+	/* XXX IPsec cleanup here */
+#endif
 	s = splnet();
 	LIST_REMOVE(inp, inp_hash);
 	CIRCLEQ_REMOVE(&inp->inp_table->inpt_queue, inp, inp_queue);

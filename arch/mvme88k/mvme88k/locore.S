@@ -1,4 +1,34 @@
 /*
+ * Copyright (c) 1996 Nivas Madhur
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *      This product includes software developed by Nivas Madhur.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
+/*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
  * Copyright (c) 1991 OMRON Corporation
@@ -25,41 +55,23 @@
  * rights to redistribute these changes.
  */
 
-/* $RCSfile: locore.S,v $ --  asm boot routines
- *
- **********************************************************************
- *****************************************************************RCS**/
-
-#ifndef ASSEMBLER /* predefined by ascpp, at least */
+#ifndef ASSEMBLER
 #define ASSEMBLER
 #endif
 
-#include "machine/locore.h"
-#include "machine/m88100.h"
-#include "machine/trap.h"
-#include "machine/asm.h"
-#include "machine/board.h"	/* lots of stuff (OBIO_PIO*, SYSV_BASE, etc)*/
-#include "machine/vmparam.h"      /* INTSTACK_SIZE */
 #include "assym.s"
+#include "machine/asm.h"
+#include "machine/trap.h"
+#include "machine/m88100.h"
+#include "machine/psl.h"
+#include "machine/vmparam.h"      /* INTSTACK_SIZE */
 
 /***********************************************************************/
 
-/*
- *  Arrange for the include file version number to appear directly in
- *  the namelist.
- */
-global	_INCLUDE_VERSION
-def	_INCLUDE_VERSION, INCLUDE_VERSION
-#ifndef NBPG
-#define	NBPG 4096
-#endif /* NBPG */
-
 #ifndef UADDR
-#define	UADDR		0xFFEE0000	/* address of u */
+#define	UADDR		0xEEE00000	/* address of u */
 #endif /* UADDR */
-#ifndef USIZE
-#define USIZE (UPAGES * NBPG) 
-#endif /* USIZE */
+
 /*
  * The memory looks like:
  *   0x00000 - 0x01000   : trap vectors
@@ -71,11 +83,12 @@ def	_INCLUDE_VERSION, INCLUDE_VERSION
 	text
 
 LABEL(_kernelstart)
+LABEL(_kernel_text)
 LABEL(_start)
 LABEL(start)
 	br	_start_text
 #if 0
-	.align 4096		  ; VBR points to page aligned list
+	.align 4096		  /* VBR points to page aligned list */
     _LABEL(vector_list)	  /* references memory BELOW this line */
 	#include "machine/exception_vectors.h"
 	word	END_OF_VECTOR_LIST
@@ -83,23 +96,42 @@ LABEL(start)
     _LABEL(_msgsw)
 	word 0 /* Bits here turn on/off debugging somewhere. */
 #endif
-/*
- * Do a dump. Called by auto-restart.
- */
 
-	global	_dumpsys
-LABEL(_doadump)
-	bsr	_dumpsys
-	bsr	_doboot	
+ENTRY(doboot)
+	/*
+	 *	Try hitting the SRST bit in VMEchip2 to reset the system.
+	 */
+	or.u	r3,r0, 0xfff4
+	ld	r4,r3, 0x0060		/* read offset (LCSR +0x60) */
+	set	r4,r4,1<23>		/* set SYSRST bit - bit 23 */	
+	st	r4,r3, 0x0060		/* and store it back  */
+
+	/*
+	 *	We will be here if the reset above failed. In this case,
+	 *	we will try to return to bug.
+	 *
+	 *	Switch to interrupt stack and call __doboot to take care
+	 *	going to BUG. Need to do this since __doboot turns off the
+	 *	the MMU and we need to be on a 1-to-1 mapped stack so that
+	 *	further calls don't get data access exceptions.
+	 */
+
+	/* Should we use idle_u instead? XXX nivas */
+	or.u	r31, r0,  hi16(_intstack_end)
+	or	r31, r31, lo16(_intstack_end)
+	clr	r31, r31, 3<0>	/* round down to 8-byte boundary */
+
+	bsr	__doboot
 	/*NOTREACHED*/
 
 /**************************************************************************/
 LABEL(_start_text)	/* This is the *real* start upon poweron or reset */
+#ifdef OLD_BOOT_LOADER
 	/*
 	 * Args passed by boot loader
 	 * 	r2 howto
 	 *	r3 first_addr (first available address)
-	 *	r4 ((Clun << 8) | Dlun & FF) -> bootdev
+	 *	r4 ((Clun << 8) ; Dlun & FF) -> bootdev
 	 *	r5 esym
 	 *	r6 miniroot
 	 */
@@ -115,7 +147,28 @@ LABEL(_start_text)	/* This is the *real* start upon poweron or reset */
 	st	r5,  r13, lo16(_esym)
 	or.u	r13, r0,  hi16(_miniroot)
 	st	r6,  r13, lo16(_miniroot)
-
+#else /* OLD_BOOT_LOADER */
+	/*
+	 * Args passed by boot loader
+	 * 	r2 howto
+	 *	r3 not used
+	 *	r4 esym
+	 *	r5 start of mini
+	 *	r6 end miniroot
+	 */
+	or.u	r13, r0,  hi16(_boothowto)
+	st	r2,  r13, lo16(_boothowto)
+#if 0
+	or.u	r13, r0,  hi16(_bootdev)
+	st	r3,  r13, lo16(_bootdev)
+#endif
+	or.u	r13, r0,  hi16(_first_addr)
+	st	r4,  r13, lo16(_first_addr)
+	or.u	r13, r0,  hi16(_esym)
+	st	r4,  r13, lo16(_esym)
+	or.u	r13, r0,  hi16(_miniroot)
+	st	r5,  r13, lo16(_miniroot)
+#endif /* OLD_BOOT_LOADER */
 	/*
 	 * CPU Initialization
 	 *
@@ -152,10 +205,10 @@ LABEL(_start_text)	/* This is the *real* start upon poweron or reset */
 	 */
 	stcr	r0, SSBR	/* clear this for later */
 
-	/* XXX We can use SR0-SR3 for any purpose */
 	set	r11, r0,  1<PSR_SUPERVISOR_MODE_BIT>
 	set	r11, r11, 1<PSR_INTERRUPT_DISABLE_BIT>
 	stcr	r11, PSR
+        FLUSH_PIPELINE
 	/* shadowing, FPU, misalgined access exception: all enabled now.*/
 #if 0
 	or.u	r11, r0,  hi16(_vector_list)
@@ -164,14 +217,9 @@ LABEL(_start_text)	/* This is the *real* start upon poweron or reset */
 #endif /* 0 */
 	stcr	r0, VBR
 
-/************************************************************************/
-
-#if defined(RAW_PRINTF) && RAW_PRINTF
-	bsr  replace_mayput_with_rawputchar
-#endif
-
 	/*
-	 * switch to interrupt stack
+	 * Switch to interrupt stack
+	 * Use idle_u's stack instead?
 	 */
 	or.u	r31, r0,  hi16(_intstack_end)
 	or	r31, r31, lo16(_intstack_end)
@@ -181,7 +229,7 @@ LABEL(_start_text)	/* This is the *real* start upon poweron or reset */
 	 * Want to make the call:
 	 * 	vector_init(VBR, vector_list)
 	 */
-	or.u	r3, r0,  hi16(_vector_list)
+	or.u	r3, r0, hi16(_vector_list)
 	or	r3, r3, lo16(_vector_list)
 	bsr.n	_vector_init
 	ldcr	r2, VBR		
@@ -205,31 +253,50 @@ LABEL(_start_text)	/* This is the *real* start upon poweron or reset */
 	
 	or.u	r10, r0, hi16(UADDR)
 	or	r31, r10,lo16(UADDR)
-	addu	r31, r31, USIZE
+	addu	r31, r31, USIZE - 8
 
+	/*
+	 * Block clock interrupts for now. There is a problem with
+	 * clock interrupts when the first clock interrupt is received.
+	 * Hardclock() sees the base priority to be 0 and drops IPL to
+	 * splsofclock() before calling softclock(). This opens up other
+	 * clock interrupts to be received before the first one is ever
+	 * finished. Also, the first entry on calltodo list is stuck for
+	 * ever. As a work around, I will set the IPL to softclock so
+	 * that the CLKF_BASEPRI() check in hardclock() will return false.
+	 * XXX nivas
+	 */
+	 
+#if XXXX
+	bsr.n	_setipl
+	or	r2, r0, IPL_SOFTCLOCK
+	bsr	_enable_interrupt
+	bsr.n	_setipl
+	or	r2, r0, IPL_HIGH
+#endif
 	/* make the call: main() */
 	bsr.n	_main
 	subu	r31, r31, 40
 	addu	r31, r31, 40
-	br	_return_from_main
+	bsr	_panic
 
 /*****************************************************************************/
 
 	data
-	.align 4096		  ; VBR points to page aligned list
+	.align 4096		  /* VBR points to page aligned list */
 	global _vector_list
-_vector_list:			  ; references memory BELOW this line
-	#include "machine/exception_vectors.h"
+_vector_list:			  /* references memory BELOW this line */
+#include "machine/exception_vectors.h"
 	word	END_OF_VECTOR_LIST
 
 	global _msgsw
 _msgsw:
-	word 0 			 ;Bits here turn on/off debugging somewhere.
+	word 0 			 /* Bits here turn on/off debugging somewhere */
 	.align 4096
 	global	_intstack
 	global	_intstack_end
 _intstack:
-	space	4 * NBPG	/* 16K */
+	space	(4 * NBPG)	/* 16K */
 _intstack_end:
 
 /*
@@ -280,7 +347,7 @@ _proc0paddr:
 /*
  * pcb is composed of kernel state + user state
  * I may have to change curpcb to u0 + PCB_USER based on what
- * other parts expect XXX
+ * other parts expect XXX nivas
  */
 	global	_curpcb	/* move to C code */
 _curpcb:	word	_u0	/* curpcb = &u0 */
@@ -293,204 +360,21 @@ _curpcb:	word	_u0	/* curpcb = &u0 */
 _sigcode:
 				/* r31 points to sigframe */
 	ld	r2, r31, 0	/* signo */
-	ld	r3, r31, 4	/* code */
+	ld	r3, r31, 4	/* siginfo_t* */
 	ld	r4, r31, 8	/* sigcontext* */
-	or	r5, r0, 0	/* addr = 0 for now */
-	ld	r6, r31, 12	/* handler */
-	jsr.n	r6
-	addu	r31, r31, 40
-	subu	r31, r31, 40
+	ld	r5, r31, 12	/* handler */
+	jsr.n	r5
+	subu	r31, r31, 40	/* give some stack space */
+	addu	r31, r31, 40	/* restore old sp value  */
 	ld	r2,  r31, 8	/* sigcontext* */
-	or	r9,  r0, SYS_sigreturn
+	or	r13,  r0, SYS_sigreturn
 	tb0	0, r0, 128	/* syscall trap, calling sigreturn */
 	or	r0, r0, 0
 	or	r0, r0, 0
 	/* sigreturn will not return unless it fails */
-	or	r9, r0, SYS_exit
+	or	r13, r0, SYS_exit
 	tb0	0, r0, 128	/* syscall trap, exit */
 	or	r0, r0, 0
 	or	r0, r0, 0
 	global	_esigcode
 _esigcode:
-
-#if 0
-/*
- *	thread_bootstrap:
- *
- *	Bootstrap a new thread using the thread state that has been
- *	placed on the stack.  Our fp has been set up for us, we only need
- *	to fix up a few things in the saved frame, then get into
- *	usermode.
- */
-ENTRY(thread_bootstrap)
-        /* 
-	 * Here r31 should point to the place on our stack which
-	 * contains a pointer to our exception frame.
-	 */	
-#if DDB
-        ENTRY_ASM
-#endif
-	br      return_from_exception_handler
-
-/*
- *	save_context
- */
-ENTRY(save_context)
-	subu	r31,r31,40		/* allocate stack for r1 and args */
-	st	r1,r31,36		/* save return address */
-	bsr	_spl			/* get the current interrupt mask */
-	ld	r1,r31,36		/* recover return address */
-	addu	r31,r31,40		/* put stack pointer back */
-	ldcr	r10,SR0			/* r10 <- current_thread() */
-	ld	r10,r10,THREAD_PCB	/* r10 <- pcb */
-#if (PCB_KERNEL!=0)
-     	addu	r10, r10, PCB_KERNEL    /* point to kernel save region */
-#endif
-	st	r1,r10,0	/* do setjmp */ /* save return address */
-	st	r14,r10,4
-	st	r15,r10,2*4
-	st	r16,r10,3*4
-	st	r17,r10,4*4
-	st	r18,r10,5*4
-	st	r19,r10,6*4
-	st	r20,r10,7*4
-	st	r21,r10,8*4
-	st	r22,r10,9*4
-	st	r23,r10,10*4
-	st	r24,r10,11*4
-	st	r25,r10,12*4
-        /* In principle, registers 26-29 are never manipulated in the
-           kernel. Maybe we can skip saving them? */
-	st	r26,r10,13*4
-	st	r27,r10,14*4
-	st	r28,r10,15*4
-	st	r29,r10,16*4
-	st	r30,r10,17*4		/* save frame pointer */
-	st	r31,r10,18*4		/* save stack pointer */
-	st	r2,r10,19*4		/* save interrupt mask */
-       /* we need to switch to the interrupt stack here */
-	or.u	r31, r0, hi16(_intstack)
-	or	r31, r31, lo16(_intstack)
-        addu    r31, r31, INTSTACK_SIZE             /* end of stack */
-	clr	r31, r31, 3<0>	/* round down to 8-byte boundary */
-	jmp.n	r1
-	or	r2,r0,r0
-#endif /* 0 */
-
-/* ------------------------------------------------------------------------ */
-/*
- * unsigned measure_pause(volatile int *flag)
- *
- * Count cycles executed until *flag becomes nonzero.
- * Return the number of cycles counted.
- */
-ENTRY(measure_pause)
-	/* R2 is pointer to flag */
-	def GRANULAIRTY, 10000
-
-	or	r3, r0, 1	/* r3 is my counter, this is the first */
-
-    measure_pause_outer_loop:
-	or	r4, r0, GRANULAIRTY
-
-    measure_pause_inner_loop:
-	/*
-	 * Execute a tight loop of a known number of cycles.
-	 * This assumes, of course, that the instruction cache is on.
-	 * This loop takes two cycles per iteration.
-	 */
-	bcnd.n	ne0, r4, measure_pause_inner_loop
-	subu	r4, r4, 1
-
-
-	/*
-	 * Now add the number of cycles done above (plus the overhead
-	 * of the outer loop) to the total count.
-	 * Also, check the *flag and exit the outer loop if it's non-zero.
-	 *
-	 * The overhead is really unknown because it's not known how
-	 * the memory system will tread the access to *flag, so we just
-	 * take a guess.
-	 */
-	ld	r4, r2, r0			/* get the flag */
-	addu	r3, r3, (GRANULAIRTY * 2 + 10)	/* account for the cost */
-	bcnd	eq0, r4, measure_pause_outer_loop /* continue or exit the loop*/
-
-	jmp.n	r1
-	or	r2, r3, r0	/* pass count back */
-
-/*
- * void delay_in_microseconds(int count)
- *
- * The processor loops (busy waits) for the given number of microseconds:
- * Thus, delay_in_microseconds(1000000) will delay for one second.
- *
- * REGISTER USAGE:
- *  IN  r1   - return address
- *  IN  r2   - (signed int) number of microseconds
- *      r3   - (float) number of microseconds
- *      r4/5 - (double) number of cycles per microsecond
- *      r6   - (float) number of cycles to delay
- *	r7   - (signed) number of cycles to delay
- */
-ENTRY(delay_in_microseconds)
-ENTRY(delay)
-	flt.ss	 r3, r2	    /* convert microseconds from signed int to float */
-	or.u	 r4, r0, hi16(_cycles_per_microsecond)
-	ld.d	 r4, r4, lo16(_cycles_per_microsecond)
-	fmul.ssd r6, r3, r4 /* convert microseconds to cycles */
-	int.ss   r7, r6	    /* convert cycles from float to signed int */
-	subu	 r7, r7, 25 /* subtract for overhead of above instruction */
-
-	/* now loop for the given number of cycles */
-    pause_loop:
-	bcnd.n	gt0, r7, pause_loop
-	subu	r7, r7, 2	/* two cycles per iteration */
-
-	jmp	r1 /* return */
-
-#if 0
-/*
- * void switch_to_shutdown_context(thread_t thread,
- *				   void (*routine)(processor_t),
- *				   processor_t processor)
- *
- * saves the kernel context of the thread,
- * switches to the interrupt stack,
- * continues the thread (with thread_dispatch),
- * then runs routine on the interrupt stack.
- *
- */
-  
-ENTRY(switch_to_shutdown_context)
-/* call save_context to save the thread state */
-     	subu 	r31, r31, 40
-	or      r25, r3, r0    /* save arguments */
-	or	r24, r4, r0     
-     	bsr.n 	_save_context
-	st	r1, r31, 36
-     	addu 	r31, r31, 40
-	ldcr	r10, SR0			/* r10 <- current_thread() */
-	st      r31, r10, THREAD_KERNEL_STACK   /* save stack pointer */      
-	st	r0,  r10, THREAD_SWAP_FUNC      /* null continuation */
-        ldcr	r11, SR1
-	mak	r11, r11, FLAG_CPU_FIELD_WIDTH<0> /* r1 = cpu # */
-	or	r12, r12, lo16(_interrupt_stack)
-	ld	r31, r12 [r11]
-        addu    r31, r31, INTSTACK_SIZE             /* end of stack */
-	clr	r31, r31, 3<0>	/* round down to 8-byte boundary */
-        /* save the thread; switched to the interrupt stack; now call thread
-	   dispatch to get rid of this thread */
-	or	r2, r10, r0      
-	bsr.n	_thread_dispatch
-     	subu 	r31, r31, 40
-  	/* call the continuation routine */
-  	jsr.n	r25
-	or	r2, r24, r0
-        /* panic if here */
-        or.u	r2, r0, hi16(1f)
-	bsr.n	_panic
-	or	r2, r2, lo16(1f)
-1:
-  	string "switch_to_shutdown_context"
-#endif /* 0 */

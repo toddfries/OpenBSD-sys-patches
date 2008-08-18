@@ -102,8 +102,10 @@ struct bt_mbx {
 
 extern int cputype;  /* XXX */
 
-#define KVTOPHYS(x)	(((int)(x) & 0x7fffff) | 0x800000)
-#define PHYSTOKV(x)	(((int)(x) & 0x7fffff) | (cputype == DESKSTATION_TYNE ? TYNE_V_BOUNCE : 0))
+#define KVTOPHYS(x)	((cputype == DESKSTATION_TYNE) ? \
+	(((int)(x) & 0x7fffff) | 0x800000) : ((int)(x)))
+#define PHYSTOKV(x)	((cputype == DESKSTATION_TYNE) ? \
+	(((int)(x) & 0x7fffff) | TYNE_V_BOUNCE) : ((int)(x)))
 
 #include "aha.h"
 #include "btl.h"
@@ -157,6 +159,8 @@ void btminphys __P((struct buf *));
 int bt_scsi_cmd __P((struct scsi_xfer *));
 int bt_poll __P((struct bt_softc *, struct scsi_xfer *, int));
 void bt_timeout __P((void *arg));
+void bt_free_buf __P((struct bt_softc *, struct bt_buf *));
+struct bt_buf * bt_get_buf __P((struct bt_softc *, int));
 
 struct scsi_adapter bt_switch = {
 	bt_scsi_cmd,
@@ -164,6 +168,10 @@ struct scsi_adapter bt_switch = {
 	0,
 	0,
 };
+
+/* XXX static buffer as a kludge.  DMA isn't cache coherent on the rpc44, so 
+ * we always use uncached buffers for DMA. */
+static char rpc44_buffer[ TYNE_S_BOUNCE ];
 
 /* the below structure is so we have a default dev struct for out link struct */
 struct scsi_device bt_dev = {
@@ -175,7 +183,7 @@ struct scsi_device bt_dev = {
 
 int	btprobe __P((struct device *, void *, void *));
 void	btattach __P((struct device *, struct device *, void *));
-int	btprint __P((void *, char *));
+int	btprint __P((void *, const char *));
 
 struct cfattach btl_ca = {
 	sizeof(struct bt_softc), btprobe, btattach
@@ -352,7 +360,7 @@ btprobe(parent, match, aux)
 int
 btprint(aux, name)
 	void *aux;
-	char *name;
+	const char *name;
 {
 
 	if (name != NULL)
@@ -388,8 +396,9 @@ btattach(parent, self, aux)
 		bouncesize = TYNE_S_BOUNCE;
 	} else {
 		bouncesize = TYNE_S_BOUNCE; /* Good enough? XXX */
-		bouncebase = (u_int) malloc( bouncesize, M_DEVBUF, M_NOWAIT);
-    }
+/*		bouncebase = (u_int) malloc( bouncesize, M_DEVBUF, M_NOWAIT);*/
+		bouncebase = (u_int) rpc44_buffer | 0xa0000000;
+	}
 	bouncearea = bouncebase + sizeof(struct bt_mbx);
 	sc->sc_mbx = (struct bt_mbx *)bouncebase;
 
@@ -476,7 +485,7 @@ AGAIN:
 
 #ifdef BTDEBUG
 		if (bt_debug) {
-			u_char *cp = &ccb->scsi_cmd;
+			u_char *cp = (u_char *) &ccb->scsi_cmd;
 			printf("op=%x %x %x %x %x %x\n",
 			    cp[0], cp[1], cp[2], cp[3], cp[4], cp[5]);
 			printf("stat %x for mbi addr = 0x%08x, ",
@@ -709,7 +718,7 @@ bt_get_buf(sc, flags)
 		buf = sc->sc_free_buf.tqh_first;
 		if (buf) {
 			TAILQ_REMOVE(&sc->sc_free_buf, buf, chain);
-			sc->sc_numbufs;
+			sc->sc_numbufs--;
 			break;
 		}
 		if ((flags & SCSI_NOSLEEP) != 0)
@@ -762,7 +771,6 @@ bt_collect_mbo(sc)
 	struct bt_softc *sc;
 {
 	struct bt_mbx_out *wmbo;	/* Mail Box Out pointer */
-	struct bt_ccb *ccb;
 
 	wmbo = wmbx->cmbo;
 
@@ -902,7 +910,7 @@ bt_done(sc, ccb)
 			xs->resid = 0;
 	}
 
-	if(datalen = xs->datalen) {
+	if((datalen = xs->datalen) != 0) {
 		thiskv = (int)xs->data;
 		sg = ccb->scat_gath;       
 		seg = phystol(ccb->data_length) / sizeof(struct bt_scat_gath);
@@ -940,8 +948,6 @@ bt_find(ia, sc)
 	u_char sts;
 	struct bt_extended_inquire inquire;
 	struct bt_config config;
-	struct bt_revision revision;
-	struct bt_digit digit;
 	int irq, drq;
 
 	/*
@@ -1355,11 +1361,6 @@ badbuf:
 	xs->error = XS_DRIVER_STUFFUP;
 	bt_free_ccb(sc, ccb);
 	return TRY_AGAIN_LATER;
-
-bad:
-	xs->error = XS_DRIVER_STUFFUP;
-	bt_free_ccb(sc, ccb);
-	return COMPLETE;
 }
 
 /*

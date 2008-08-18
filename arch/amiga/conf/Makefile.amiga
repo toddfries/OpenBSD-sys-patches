@@ -1,5 +1,5 @@
-#	$OpenBSD: Makefile.amiga,v 1.16 1996/08/19 00:15:51 niklas Exp $
-#	$NetBSD: Makefile.amiga,v 1.45 1996/05/16 17:07:08 is Exp $
+#	$OpenBSD: Makefile.amiga,v 1.20 1997/03/27 15:50:12 niklas Exp $
+#	$NetBSD: Makefile.amiga,v 1.52 1996/12/01 12:10:07 veego Exp $
 
 # Makefile for OpenBSD
 #
@@ -22,32 +22,40 @@
 # DEBUG is set to -g if debugging.
 # PROF is set to -pg if profiling.
 
-AS?=	as
 CC?=	cc
-CPP?=	cpp
 LD?=	ld
-STRIP?=	strip -d
+MKDEP?=	mkdep
+STRIP?=	strip
 TOUCH?=	touch -f -c
+COPTS?=	-O2
 
 # source tree is located via $S relative to the compilation directory
-S=	../../../..
-AMIGA=	../..
+.ifndef S
+S!=	cd ../../../..; pwd
+.endif
+AMIGA=	$S/arch/amiga
 
-INCLUDES=	-I. -I$S/arch -I$S
+INCLUDES=	-nostdinc -I. -I$S/arch -I$S
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -Dmc68020 -Damiga
 
-CDIAGFLAGS=	-Werror -Wall -Wstrict-prototypes -Wno-uninitialized \
-		-Wno-format
+CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
+		-Wno-uninitialized -Wno-format
 
 .if empty(IDENT:M-DM68060)
-CMACHFLAGS=	-m68020 -msoft-float
+CMACHFLAGS=	-m68020
 .else
-CMACHFLAGS=	-m68060 -Wa,-m68030 -msoft-float
+CMACHFLAGS=	-m68060 -Wa,-m68030
 .endif
+CMACHFLAGS+=	-msoft-float
 
-CFLAGS=		${DEBUG} -O2 ${CDIAGFLAGS} ${CMACHFLAGS} ${COPTS}
+CFLAGS=		${DEBUG} ${CWARNFLAGS} ${COPTS} ${CMACHFLAGS}
 AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
 LINKFLAGS=	-n -Ttext 0 -e start
+STRIPFLAGS=	-d
+
+HOSTCC?=	${CC}
+HOSTED_CPPFLAGS=${CPPFLAGS:S/^-nostdinc$//}
+HOSTED_CFLAGS=	${CFLAGS}
 
 ### find out what to use for libkern
 .include "$S/lib/libkern/Makefile.inc"
@@ -71,10 +79,8 @@ LIBCOMPAT=	${COMPATLIB_PROF}
 ### for the Motorola 68060 Software Support Package
 .include "$S/arch/m68k/060sp/Makefile.inc"
 
-# compile rules: rules are named ${TYPE}_${SUFFIX}${CONFIG_DEP}
-# where TYPE is NORMAL, DRIVER, or PROFILE}; SUFFIX is the file suffix,
-# capitalized (e.g. C for a .c file), and CONFIG_DEP is _C if the file
-# is marked as config-dependent.
+# compile rules: rules are named ${TYPE}_${SUFFIX} where TYPE is NORMAL or
+# HOSTED}, and SUFFIX is the file suffix, capitalized (e.g. C for a .c file).
 
 NORMAL_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c $<
 NORMAL_C_C=	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} ${PARAM} -c $<
@@ -115,21 +121,17 @@ DEBUG?=
 LINKFLAGS+=	-X
 SYSTEM_LD_TAIL+=; \
 		echo cp $@ $@.gdb; rm -f $@.gdb; cp $@ $@.gdb; \
-		echo ${STRIP} $@; ${STRIP} $@
+		echo ${STRIP} ${STRIPFLAGS} $@; ${STRIP} ${STRIPFLAGS} $@
 .else
-LINKFLAGS+=	-x
+LINKFLAGS+=	-S
 .endif
 
 %LOAD
 
-assym.h: genassym
-	./genassym >assym.h
-
-genassym: genassym.o
-	${CC} -o $@ genassym.o
-
-genassym.o: ${AMIGA}/amiga/genassym.c
-	${NORMAL_C_C}
+assym.h: $S/kern/genassym.sh ${AMIGA}/amiga/genassym.cf
+	sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} \
+	    ${PARAM} < ${AMIGA}/amiga/genassym.cf > assym.h.tmp && \
+	    mv -f assym.h.tmp assym.h
 
 param.c: $S/conf/param.c
 	rm -f param.c
@@ -151,7 +153,7 @@ clean::
 	    [Ee]rrs linterrs makelinks genassym genassym.o assym.h
 
 lint:
-	@lint -hbxncez -DGENERIC -Dvolatile= ${CPPFLAGS} ${PARAM} -UKGDB \
+	@lint -hbxncez -DGENERIC -Dvolatile= ${CPPFLAGS} -UKGDB \
 	    ${AMIGA}/amiga/Locore.c ${CFILES} ${AMIGA}/amiga/swapgeneric.c \
 	    ioconf.c param.c | \
 	    grep -v 'static function .* unused'
@@ -161,21 +163,21 @@ tags:
 
 links:
 	egrep '#if' ${CFILES} | sed -f $S/conf/defines | \
-	  sed -e 's/:.*//' -e 's/\.c/.o/' | sort -u > dontlink
+	    sed -e 's/:.*//' -e 's/\.c/.o/' | sort -u > dontlink
 	echo ${CFILES} | tr -s ' ' '\12' | sed 's/\.c/.o/' | \
-	  sort -u | comm -23 - dontlink | \
-	  sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' > makelinks
+	    sort -u | comm -23 - dontlink | \
+	    sed 's,../.*/\(.*.o\),rm -f \1; ln -s ../GENERIC/\1 \1,' \
+	    > makelinks
 	sh makelinks && rm -f dontlink
 
 SRCS=	${AMIGA}/amiga/locore.s \
 	param.c ioconf.c ${CFILES} ${SFILES}
+
 depend:: .depend
 .depend: ${SRCS} assym.h param.c
-	mkdep ${AFLAGS} ${CPPFLAGS} ${AMIGA}/amiga/locore.s
-	mkdep -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
-	mkdep -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
-	mkdep -a ${CFLAGS} ${CPPFLAGS} ${PARAM} ${AMIGA}/amiga/genassym.c
-
+	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${AMIGA}/amiga/locore.s
+	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
+	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
 
 # depend on root or device configuration
 autoconf.o conf.o: Makefile
@@ -184,7 +186,7 @@ autoconf.o conf.o: Makefile
 uipc_proto.o vfs_conf.o: Makefile 
 
 # depend on maxusers
-genassym.o machdep.o: Makefile
+assym.h machdep.o: Makefile
 
 # depend on CPU configuration 
 amiga_init.o locore.o pmap.o sys_machdep.o bzsc.o flsc.o sbic.o sfas.o: Makefile

@@ -1,7 +1,12 @@
-/*	$NetBSD: wds.c,v 1.7 1996/05/12 23:54:09 mycroft Exp $	*/
+/*	$OpenBSD: wds.c,v 1.11 1996/11/29 22:55:10 niklas Exp $	*/
+/*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG
+#ifdef DDB
 #define	integrate
+#else
+#define	integrate	static inline
+#endif
 
 /*
  * XXX
@@ -64,6 +69,7 @@
 #include <sys/proc.h>
 #include <sys/user.h>
 
+#include <machine/bus.h>
 #include <machine/intr.h>
 #include <machine/pio.h>
 
@@ -106,7 +112,8 @@ struct wds_softc {
 	struct isadev sc_id;
 	void *sc_ih;
 
-	int sc_iobase;
+	bus_space_tag_t sc_iot;		/* bus identifier */
+	bus_space_handle_t sc_ioh;	/* io handle */
 	int sc_irq, sc_drq;
 
 	int sc_revision;
@@ -135,8 +142,13 @@ struct wds_buf {
 
 TAILQ_HEAD(, wds_buf) wds_free_buffer;
 
-integrate void    wds_wait __P((int, int, int));
-int     wds_cmd __P((int, u_char *, int));
+#ifdef WDSDEBUG
+int wds_debug = WDSDEBUG;
+#endif
+
+integrate void    wds_wait
+    __P((bus_space_tag_t, bus_space_handle_t, int, int, int));
+int     wds_cmd __P((struct wds_softc *, u_char *, int));
 integrate void wds_finish_scbs __P((struct wds_softc *));
 int     wdsintr __P((void *));
 integrate void wds_reset_scb __P((struct wds_softc *, struct wds_scb *));
@@ -159,6 +171,7 @@ void	wds_sense  __P((struct wds_softc *, struct wds_scb *));
 int	wds_poll __P((struct wds_softc *, struct scsi_xfer *, int));
 int	wds_ipoll __P((struct wds_softc *, struct wds_scb *, int));
 void	wds_timeout __P((void *));
+int	wdsprint __P((void *, const char *));
 
 struct scsi_adapter wds_switch = {
 	wds_scsi_cmd,
@@ -177,7 +190,6 @@ struct scsi_device wds_dev = {
 
 int	wdsprobe __P((struct device *, void *, void *));
 void	wdsattach __P((struct device *, struct device *, void *));
-int	wdsprint __P((void *, char *));
 
 struct cfattach wds_ca = {
 	sizeof(struct wds_softc), wdsprobe, wdsattach
@@ -190,13 +202,14 @@ struct cfdriver wds_cd = {
 #define	WDS_ABORT_TIMEOUT	2000	/* time to wait for abort (mSec) */
 
 integrate void
-wds_wait(port, mask, val)
+wds_wait(iot, ioh, port, mask, val)
+	bus_space_tag_t iot;
+	bus_space_handle_t ioh;
 	int port;
 	int mask;
 	int val;
 {
-
-	while ((inb(port) & mask) != val)
+	while ((bus_space_read_1(iot, ioh, port) & mask) != val)
 		;
 }
 
@@ -204,19 +217,21 @@ wds_wait(port, mask, val)
  * Write a command to the board's I/O ports.
  */
 int
-wds_cmd(iobase, ibuf, icnt)
-	int iobase;
-	u_char *ibuf;
+wds_cmd(sc, ibuf, icnt)
+	struct wds_softc *sc;
+	u_int8_t *ibuf;
 	int icnt;
 {
-	u_char c;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
+	u_int8_t c;
 
-	wds_wait(iobase + WDS_STAT, WDSS_RDY, WDSS_RDY);
+	wds_wait(iot, ioh, WDS_STAT, WDSS_RDY, WDSS_RDY);
 
 	while (icnt--) {
-		outb(iobase + WDS_CMD, *ibuf++);
-		wds_wait(iobase + WDS_STAT, WDSS_RDY, WDSS_RDY);
-		c = inb(iobase + WDS_STAT);
+		bus_space_write_1(iot, ioh, WDS_CMD, *ibuf++);
+		wds_wait(iot, ioh, WDS_STAT, WDSS_RDY, WDSS_RDY);
+		c = bus_space_read_1(iot, ioh, WDS_STAT);
 		if (c & WDSS_REJ)
 			return 1;
 	}
@@ -244,14 +259,14 @@ wdsprobe(parent, match, aux)
 		return 0;
 
 	ia->ia_msize = 0;
-	ia->ia_iosize = 8;
+	ia->ia_iosize = WDS_IO_PORTS;
 	return 1;
 }
 
 int
 wdsprint(aux, name)
 	void *aux;
-	char *name;
+	const char *name;
 {
 
 	if (name != NULL)
@@ -272,12 +287,11 @@ wdsattach(parent, self, aux)
 
 	if (wds_find(ia, sc) != 0)
 		panic("wdsattach: wds_find of %s failed", self->dv_xname);
-	sc->sc_iobase = ia->ia_iobase;
+	wds_init(sc);
 
 	if (sc->sc_drq != DRQUNK)
 		isa_dmacascade(sc->sc_drq);
 
-	wds_init(sc);
 	TAILQ_INIT(&sc->sc_free_scb);
 	TAILQ_INIT(&sc->sc_waiting_scb);
 	wds_inquire_setup_information(sc);
@@ -285,6 +299,9 @@ wdsattach(parent, self, aux)
 	/*
 	 * fill in the prototype scsi_link.
 	 */
+#ifdef notyet
+	sc->sc_link.channel = SCSI_CHANNEL_ONLY_ONE;
+#endif
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_scsi_dev;
 	sc->sc_link.adapter = &wds_switch;
@@ -343,7 +360,7 @@ AGAIN:
 
 #ifdef WDSDEBUG
 		if (wds_debug) {
-			u_char *cp = &scb->scsi_cmd;
+			u_int8_t *cp = (u_int8_t *)&scb->cmd.scb;
 			printf("op=%x %x %x %x %x %x\n",
 			    cp[0], cp[1], cp[2], cp[3], cp[4], cp[5]);
 			printf("stat %x for mbi addr = 0x%08x, ",
@@ -353,6 +370,10 @@ AGAIN:
 #endif /* WDSDEBUG */
 
 		untimeout(wds_timeout, scb);
+#ifdef notyet
+		isadma_copyfrombuf((caddr_t)scb, SCB_PHYS_SIZE,
+		    1, scb->scb_phys);
+#endif
 		wds_done(sc, scb, wmbi->stat);
 
 	next:
@@ -371,18 +392,19 @@ wdsintr(arg)
 	void *arg;
 {
 	struct wds_softc *sc = arg;
-	int iobase = sc->sc_iobase;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 	u_char c;
 
 	/* Was it really an interrupt from the board? */
-	if ((inb(iobase + WDS_STAT) & WDSS_IRQ) == 0)
+	if ((bus_space_read_1(iot, ioh, WDS_STAT) & WDSS_IRQ) == 0)
 		return 0;
 
 	/* Get the interrupt status byte. */
-	c = inb(iobase + WDS_IRQSTAT) & WDSI_MASK;
+	c = bus_space_read_1(iot, ioh, WDS_IRQSTAT) & WDSI_MASK;
 
 	/* Acknowledge (which resets) the interrupt. */
-	outb(iobase + WDS_IRQACK, 0x00);
+	bus_space_write_1(iot, ioh, WDS_IRQACK, 0x00);
 
 	switch (c) {
 	case WDSI_MSVC:
@@ -427,6 +449,11 @@ wds_free_scb(sc, scb)
 	}
 
 	s = splbio();
+
+#ifdef notyet
+	if (scb->scb_phys[0].addr)
+	        isadma_unmap((caddr_t)scb, SCB_PHYS_SIZE, 1, scb->scb_phys);
+#endif
 
 	wds_reset_scb(sc, scb);
 	TAILQ_INSERT_HEAD(&sc->sc_free_scb, scb, chain);
@@ -496,8 +523,18 @@ wds_get_scb(sc, flags, needbuffer)
 {
 	struct wds_scb *scb;
 	int s;
+#ifdef notyet
+	int mflags, hashnum;
+#endif
 
 	s = splbio();
+
+#ifdef notyet
+	if (flags & SCSI_NOSLEEP)
+		mflags = ISADMA_MAP_BOUNCE;
+	else
+		mflags = ISADMA_MAP_BOUNCE | ISADMA_MAP_WAITOK;
+#endif
 
 	/*
 	 * If we can and have to, sleep waiting for one to come free
@@ -528,12 +565,27 @@ wds_get_scb(sc, flags, needbuffer)
 
 	scb->flags |= SCB_ALLOC;
 
-	if (needbuffer) {
-		scb->buf = wds_get_buf(sc, flags);
-		if (scb->buf == 0)
-			wds_free_scb(sc, scb);
+#ifdef notyet
+	if (isadma_map((caddr_t)scb, SCB_PHYS_SIZE, scb->scb_phys,
+	    mflags | ISADMA_MAP_CONTIG) == 1) {
+		hashnum = SCB_HASH(scb->scb_phys[0].addr);
+		scb->nexthash = sc->sc_scbhash[hashnum];
+		sc->sc_scbhash[hashnum] = ccb;
+	} else {
+		scb->scb_phys[0].addr = 0;
+		wds_free_scb(sc, scb);
 		scb = 0;
 	}
+#else
+	if (needbuffer) {
+		scb->buf = wds_get_buf(sc, flags);
+		if (scb->buf == 0) {
+			wds_free_scb(sc, scb);
+			scb = 0;
+		}
+	}
+#endif
+
 
 out:
 	splx(s);
@@ -608,7 +660,9 @@ wds_collect_mbo(sc)
 	struct wds_softc *sc;
 {
 	struct wds_mbx_out *wmbo;	/* Mail Box Out pointer */
+#ifdef WDSDIAG
 	struct wds_scb *scb;
+#endif
 
 	wmbo = wmbx->cmbo;
 
@@ -635,7 +689,6 @@ void
 wds_start_scbs(sc)
 	struct wds_softc *sc;
 {
-	int iobase = sc->sc_iobase;
 	struct wds_mbx_out *wmbo;	/* Mail Box Out pointer */
 	struct wds_scb *scb;
 	u_char c;
@@ -647,7 +700,7 @@ wds_start_scbs(sc)
 			wds_collect_mbo(sc);
 			if (sc->sc_mbofull >= WDS_MBX_SIZE) {
 				c = WDSC_IRQMFREE;
-				wds_cmd(iobase, &c, sizeof c);
+				wds_cmd(sc, &c, sizeof c);
 				break;
 			}
 		}
@@ -658,16 +711,22 @@ wds_start_scbs(sc)
 #endif
 
 		/* Link scb to mbo. */
+#ifdef notyet
+		isadma_copytobuf((caddr_t)scb, SCB_PHYS_SIZE,
+		    1, scb->scb_phys);
+		ltophys(scb->scb_phys[0].addr, wmbo->scb_addr);
+#else
 		if (scb->flags & SCB_SENSE)
 			ltophys(KVTOPHYS(&scb->sense), wmbo->scb_addr);
 		else
 			ltophys(KVTOPHYS(&scb->cmd), wmbo->scb_addr);
+#endif
 		/* XXX What about aborts? */
 		wmbo->cmd = WDS_MBO_START;
 
 		/* Tell the card to poll immediately. */
 		c = WDSC_MSTART(wmbo - wmbx->mbo);
-		wds_cmd(sc->sc_iobase, &c, sizeof c);
+		wds_cmd(sc, &c, sizeof c);
 
 		if ((scb->flags & SCB_POLLED) == 0)
 			timeout(wds_timeout, scb, (scb->timeout * hz) / 1000);
@@ -686,7 +745,7 @@ void
 wds_done(sc, scb, stat)
 	struct wds_softc *sc;
 	struct wds_scb *scb;
-	u_char stat;
+	u_int8_t stat;
 {
 	struct scsi_xfer *xs = scb->xs;
 
@@ -767,6 +826,15 @@ wds_done(sc, scb, stat)
 		}
 	} /* XS_NOERROR */
 
+#ifdef notyet
+	if (scb->data_nseg) {
+		if (xs->flags & SCSI_DATA_IN)
+			isadma_copyfrombuf(xs->data, xs->datalen,
+			    scb->data_nseg, scb->data_phys);
+		isadma_unmap(xs->data, xs->datalen,
+		    scb->data_nseg, scb->data_phys);
+	}
+#endif
 	wds_free_scb(sc, scb);
 	xs->flags |= ITSDONE;
 	scsi_done(xs);
@@ -777,46 +845,55 @@ wds_find(ia, sc)
 	struct isa_attach_args *ia;
 	struct wds_softc *sc;
 {
-	int iobase = ia->ia_iobase;
+	bus_space_tag_t iot = ia->ia_iot;
+	bus_space_handle_t ioh;
 	u_char c;
 	int i;
 
 	/* XXXXX */
 
+	if (bus_space_map(iot, ia->ia_iobase, WDS_IO_PORTS, 0, &ioh))
+		return (0);
+
 	/*
 	 * Sending a command causes the CMDRDY bit to clear.
  	 */
-	c = inb(iobase + WDS_STAT);
+	c = bus_space_read_1(iot, ioh, WDS_STAT);
 	for (i = 0; i < 4; i++)
-		if ((inb(iobase+WDS_STAT) & WDSS_RDY) != 0) {
+		if ((bus_space_read_1(iot, ioh, WDS_STAT) & WDSS_RDY) != 0) {
 			goto ready;
 		delay(10);
 	}
 	return 1;
 
 ready:
-	outb(iobase + WDS_CMD, WDSC_NOOP);
-	if (inb(iobase + WDS_STAT) & WDSS_RDY)
+	bus_space_write_1(iot, ioh, WDS_CMD, WDSC_NOOP);
+	if (bus_space_read_1(iot, ioh, WDS_STAT) & WDSS_RDY)
 		return 1;
 
-	outb(iobase + WDS_HCR, WDSH_SCSIRESET|WDSH_ASCRESET);
+	bus_space_write_1(iot, ioh, WDS_HCR, WDSH_SCSIRESET|WDSH_ASCRESET);
 	delay(10000);
-	outb(iobase + WDS_HCR, 0x00);
+	bus_space_write_1(iot, ioh, WDS_HCR, 0x00);
 	delay(500000);
-	wds_wait(iobase + WDS_STAT, WDSS_RDY, WDSS_RDY);
-	if (inb(iobase + WDS_IRQSTAT) != 1)
-		if (inb(iobase + WDS_IRQSTAT) != 7)
-			printf("%s: failed reset!!! %2x\n", sc->sc_dev.dv_xname, inb(iobase + WDS_IRQSTAT));
+	wds_wait(iot, ioh, WDS_STAT, WDSS_RDY, WDSS_RDY);
+	if (bus_space_read_1(iot, ioh, WDS_IRQSTAT) != 1)
+		if (bus_space_read_1(iot, ioh, WDS_IRQSTAT) != 7)
+			printf("%s: failed reset!!! %2x\n",
+			    sc ? sc->sc_dev.dv_xname : "wds?",
+			    bus_space_read_1(iot, ioh, WDS_IRQSTAT));
 
-	if ((inb(iobase + WDS_STAT) & (WDSS_RDY)) != WDSS_RDY) {
-		printf("%s: waiting for controller to become ready.", sc->sc_dev.dv_xname);
+	if ((bus_space_read_1(iot, ioh, WDS_STAT) & (WDSS_RDY)) != WDSS_RDY) {
+		printf("%s: waiting for controller to become ready.",
+		    sc ? sc->sc_dev.dv_xname : "wds?");
 		for (i = 0; i < 20; i++) {
-			if ((inb(iobase + WDS_STAT) & (WDSS_RDY)) == WDSS_RDY)
+			if ((bus_space_read_1(iot, ioh, WDS_STAT) &
+			    (WDSS_RDY)) == WDSS_RDY)
 				break;
 			printf(".");
 			delay(10000);
 		}
-		if ((inb(iobase + WDS_STAT) & (WDSS_RDY)) != WDSS_RDY) {
+		if ((bus_space_read_1(iot, ioh, WDS_STAT) & (WDSS_RDY)) !=
+		    WDSS_RDY) {
 			printf(" failed\n");
 			return 1;
 		}
@@ -828,10 +905,12 @@ ready:
 		/* who are we on the scsi bus? */
 		sc->sc_scsi_dev = 7;
 
-		sc->sc_iobase = iobase;
+		sc->sc_iot = iot;
+		sc->sc_ioh = ioh;
 		sc->sc_irq = ia->ia_irq;
 		sc->sc_drq = ia->ia_drq;
-	}
+	} else
+		bus_space_unmap(iot, ioh, WDS_IO_PORTS);
 
 	return 0;
 }
@@ -843,10 +922,14 @@ void
 wds_init(sc)
 	struct wds_softc *sc;
 {
-	int iobase = sc->sc_iobase;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 	struct wds_setup init;
 	u_char c;
 	int i;
+#ifdef notyet
+	struct isadma_seg mbx_phys[1];
+#endif
 
 	/*
 	 * Set up initial mail box for round-robin operation.
@@ -873,16 +956,23 @@ wds_init(sc)
 	init.buson_t = 48;
 	init.busoff_t = 24;
 	init.xx = 0;
+#ifdef notyet
+	if (isadma_map((caddr_t)(wmbx), sizeof(struct wds_mbx),
+	    mbx_phys, ISADMA_MAP_CONTIG) != 1)
+		panic("wds_init: cannot map mail box");
+	ltophys(mbx_phys[0].addr, init.mbaddr);
+#else
 	ltophys(KVTOPHYS(wmbx), init.mbaddr);
+#endif
 	init.nomb = init.nimb = WDS_MBX_SIZE;
-	wds_cmd(iobase, (u_char *)&init, sizeof init);
+	wds_cmd(sc, (u_char *)&init, sizeof init);
 
-	wds_wait(iobase + WDS_STAT, WDSS_INIT, WDSS_INIT);
+	wds_wait(iot, ioh, WDS_STAT, WDSS_INIT, WDSS_INIT);
 
 	c = WDSC_DISUNSOL;
-	wds_cmd(iobase, &c, sizeof c);
+	wds_cmd(sc, &c, sizeof c);
 
-	outb(iobase + WDS_HCR, WDSH_DRQEN);
+	bus_space_write_1(iot, ioh, WDS_HCR, WDSH_DRQEN);
 }
 
 /*
@@ -893,14 +983,12 @@ wds_inquire_setup_information(sc)
 	struct wds_softc *sc;
 {
 	struct wds_scb *scb;
-	int iobase;
 	u_char *j;
 	int s;
 
-	iobase = sc->sc_iobase;
-
 	if ((scb = wds_get_scb(sc, SCSI_NOSLEEP, 0)) == NULL) {
-		printf("%s: no request slot available in getvers()!\n", sc->sc_dev.dv_xname);
+		printf("%s: no request slot available in getvers()!\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 	scb->xs = NULL;
@@ -911,7 +999,7 @@ wds_inquire_setup_information(sc)
 	scb->cmd.opcode = WDSX_GETFIRMREV;
 
 	/* Will poll card, await result. */
-	outb(iobase + WDS_HCR, WDSH_DRQEN);
+	bus_space_write_1(sc->sc_iot, sc->sc_ioh, WDS_HCR, WDSH_DRQEN);
 	scb->flags |= SCB_POLLED;
 
 	s = splbio();
@@ -940,7 +1028,6 @@ void
 wdsminphys(bp)
 	struct buf *bp;
 {
-
 	if (bp->b_bcount > ((WDS_NSEG - 1) << PGSHIFT))
 		bp->b_bcount = ((WDS_NSEG - 1) << PGSHIFT);
 	minphys(bp);
@@ -955,6 +1042,8 @@ wds_scsi_cmd(xs)
 {
 	struct scsi_link *sc_link = xs->sc_link;
 	struct wds_softc *sc = sc_link->adapter_softc;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 	struct wds_scb *scb;
 	struct wds_scat_gath *sg;
 	int seg;
@@ -964,10 +1053,9 @@ wds_scsi_cmd(xs)
 	struct iovec *iovp;
 #endif
 	int s;
-
-	int iobase;
-
-	iobase = sc->sc_iobase;
+#ifdef notyet
+	int mflags;
+#endif
 
 	if (xs->flags & SCSI_RESET) {
 		/* XXX Fix me! */
@@ -977,6 +1065,12 @@ wds_scsi_cmd(xs)
 	}
 
 	flags = xs->flags;
+#ifdef notyet
+	if (flags & SCSI_NOSLEEP)
+		mflags = ISADMA_MAP_BOUNCE;
+	else
+		mflags = ISADMA_MAP_BOUNCE | ISADMA_MAP_WAITOK;
+#endif
 	if ((scb = wds_get_scb(sc, flags, NEEDBUFFER(sc))) == NULL) {
 		xs->error = XS_DRIVER_STUFFUP;
 		return TRY_AGAIN_LATER;
@@ -1032,6 +1126,16 @@ wds_scsi_cmd(xs)
 			SC_DEBUG(sc_link, SDEV_DB4,
 			    ("%d @0x%x:- ", xs->datalen, xs->data));
 
+#ifdef notyet
+			scb->data_nseg = isadma_map(xs->data, xs->datalen,
+						    scb->data_phys, mflags);
+			for (seg = 0; seg < scb->data_nseg; seg++) {
+				ltophys(scb->data_phys[seg].addr,
+				       sg[seg].seg_addr);
+				ltophys(scb->data_phys[seg].length,
+				       sg[seg].seg_len);
+			}
+#else
 			datalen = xs->datalen;
 			thiskv = (int)xs->data;
 			thisphys = KVTOPHYS(xs->data);
@@ -1081,6 +1185,7 @@ wds_scsi_cmd(xs)
 				ltophys(bytes_this_seg, sg->seg_len);
 				sg++;
 				seg++;
+#endif
 			}
 		}
 		/* end of iov/kv decision */
@@ -1093,9 +1198,23 @@ wds_scsi_cmd(xs)
 			    sc->sc_dev.dv_xname, WDS_NSEG);
 			goto bad;
 		}
+#ifdef notyet
+		if (scb->data_nseg == 0) {
+			printf("%s: wds_scsi_cmd, cannot map\n",
+			       sc->sc_dev.dv_xname);
+			goto bad;
+		} else if (flags & SCSI_DATA_OUT)
+			isadma_copytobuf(xs->data, xs->datalen,
+					 scb->data_nseg, scb->data_phys);
+		ltophys((unsigned)((struct wds_scb *)(scb->scb_phys[0].addr))->scat_gath,
+			scb->data_addr);
+		ltophys(scb->data_nseg * sizeof(struct wds_scat_gath),
+			scb->data_length);
+#else
 		scb->cmd.opcode = WDSX_SCSISG;
 		ltophys(KVTOPHYS(scb->scat_gath), scb->cmd.data);
 		ltophys(seg * sizeof(struct wds_scat_gath), scb->cmd.len);
+#endif
 	} else if (xs->datalen > 0) {
 		/* The board is an ASC or ASE. Do not use scatter/gather. */
 		if (xs->datalen > BUFLEN) {
@@ -1123,15 +1242,34 @@ wds_scsi_cmd(xs)
 	/* XXX Do we really want to do this? */
 	if (flags & SCSI_POLL) {
 		/* Will poll card, await result. */
-		outb(iobase + WDS_HCR, WDSH_DRQEN);
+		bus_space_write_1(iot, ioh, WDS_HCR, WDSH_DRQEN);
 		scb->flags |= SCB_POLLED;
 	} else {
 		/* Will send command, let interrupt routine handle result. */
-		outb(iobase + WDS_HCR, WDSH_IRQEN | WDSH_DRQEN);
+		bus_space_write_1(iot, ioh, WDS_HCR, WDSH_IRQEN | WDSH_DRQEN);
 	}
 
 	s = splbio();
 	wds_queue_scb(sc, scb);
+
+#ifdef notyet
+	if (VOLATILE_XS(xs)) {
+		while ((scb->xs->flags & ITSDONE) == 0) {
+			tsleep(scb, PRIBIO, "wdswait", 0);
+		}
+		if (scb->data_nseg) {
+			if (flags & SCSI_DATA_IN)
+				isadma_copyfrombuf(xs->data, xs->datalen,
+				    scb->data_nseg, scb->data_phys);
+			isadma_unmap(xs->data, xs->datalen,
+			    scb->data_nseg, scb->data_phys);
+		}
+		wds_free_scb(sc, scb);
+		scsi_done(xs);
+		splx(s);
+		return COMPLETE;
+	}
+#endif
 	splx(s);
 
 	if ((flags & SCSI_POLL) == 0)
@@ -1209,7 +1347,8 @@ wds_poll(sc, xs, count)
 	struct scsi_xfer *xs;
 	int count;
 {
-	int iobase = sc->sc_iobase;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 
 	/* timeouts are in msec, so we loop in 1000 usec cycles */
 	while (count) {
@@ -1217,7 +1356,7 @@ wds_poll(sc, xs, count)
 		 * If we had interrupts enabled, would we
 		 * have got an interrupt?
 		 */
-		if (inb(iobase + WDS_STAT) & WDSS_IRQ)
+		if (bus_space_read_1(iot, ioh, WDS_STAT) & WDSS_IRQ)
 			wdsintr(sc);
 		if (xs->flags & ITSDONE)
 			return 0;
@@ -1236,7 +1375,8 @@ wds_ipoll(sc, scb, count)
 	struct wds_scb *scb;
 	int count;
 {
-	int iobase = sc->sc_iobase;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
 
 	/* timeouts are in msec, so we loop in 1000 usec cycles */
 	while (count) {
@@ -1244,7 +1384,7 @@ wds_ipoll(sc, scb, count)
 		 * If we had interrupts enabled, would we
 		 * have got an interrupt?
 		 */
-		if (inb(iobase + WDS_STAT) & WDSS_IRQ)
+		if (bus_space_read_1(iot, ioh, WDS_STAT) & WDSS_IRQ)
 			wdsintr(sc);
 		if (scb->flags & SCB_DONE)
 			return 0;
@@ -1259,15 +1399,21 @@ wds_timeout(arg)
 	void *arg;
 {
 	struct wds_scb *scb = arg;
-	struct scsi_xfer *xs = scb->xs;
-	struct scsi_link *sc_link = xs->sc_link;
-	struct wds_softc *sc = sc_link->adapter_softc;
+	struct scsi_xfer *xs;
+	struct scsi_link *sc_link;
+	struct wds_softc *sc;
 	int s;
+
+	s = splbio();
+#ifdef notyet
+	isadma_copyfrombuf((caddr_t)scb, SCB_PHYS_SIZE, 1, scb->scb_phys);
+#endif
+	xs = scb->xs;
+	sc_link = xs->sc_link;
+	sc = sc_link->adapter_softc;
 
 	sc_print_addr(sc_link);
 	printf("timed out");
-
-	s = splbio();
 
 #ifdef WDSDIAG
 	/*

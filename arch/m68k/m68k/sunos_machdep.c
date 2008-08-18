@@ -1,5 +1,5 @@
-/*	$OpenBSD: sunos_machdep.c,v 1.7 1996/08/04 01:15:16 niklas Exp $	*/
-/*	$NetBSD: sunos_machdep.c,v 1.10 1996/05/05 16:11:31 veego Exp $	*/
+/*	$OpenBSD: sunos_machdep.c,v 1.10 1997/02/02 01:38:11 deraadt Exp $	*/
+/*	$NetBSD: sunos_machdep.c,v 1.12 1996/10/13 03:19:22 christos Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -95,10 +95,12 @@ struct sunos_sigframe {
  * SIG_DFL for "dangerous" signals.
  */
 void
-sunos_sendsig(catcher, sig, mask, code)
+sunos_sendsig(catcher, sig, mask, code, type, val)
 	sig_t catcher;
 	int sig, mask;
 	u_long code;
+	int type;
+	union sigval val;
 {
 	register struct proc *p = curproc;
 	register struct sunos_sigframe *fp;
@@ -172,7 +174,7 @@ sunos_sendsig(catcher, sig, mask, code)
 	kfp.sf_signum = sig;
 	kfp.sf_code = code;
 	kfp.sf_scp = &fp->sf_sc;
-	kfp.sf_addr = ~0;		/* means: not computable */
+	kfp.sf_addr = (u_int)val.sival_ptr;
 
 	/*
 	 * Build the signal context to be used by sigreturn.

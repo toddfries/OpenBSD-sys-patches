@@ -1,3 +1,4 @@
+/*	$OpenBSD: vfs_conf.c,v 1.5 1997/02/24 14:20:01 niklas Exp $	*/
 /*	$NetBSD: vfs_conf.c,v 1.21.4.1 1995/11/01 00:06:26 jtc Exp $	*/
 
 /*
@@ -240,6 +241,9 @@ extern struct vnodeopv_desc cd9660_fifoop_opv_desc;
 extern struct vnodeopv_desc union_vnodeop_opv_desc;
 extern struct vnodeopv_desc msdosfs_vnodeop_opv_desc;
 extern struct vnodeopv_desc adosfs_vnodeop_opv_desc;
+extern struct vnodeopv_desc ext2fs_vnodeop_opv_desc;
+extern struct vnodeopv_desc ext2fs_specop_opv_desc;
+extern struct vnodeopv_desc ext2fs_fifoop_opv_desc;
 
 struct vnodeopv_desc *vfs_opv_descs[] = {
 #ifdef FFS
@@ -304,6 +308,13 @@ struct vnodeopv_desc *vfs_opv_descs[] = {
 #endif
 #ifdef ADOSFS
 	&adosfs_vnodeop_opv_desc,
+#endif
+#ifdef EXT2FS
+	&ext2fs_vnodeop_opv_desc,
+	&ext2fs_specop_opv_desc,
+#ifdef FIFO
+	&ext2fs_fifoop_opv_desc,
+#endif
 #endif
 	NULL
 };

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_prf.c,v 1.10 1996/07/28 01:05:48 deraadt Exp $	*/
+/*	$OpenBSD: subr_prf.c,v 1.15 1996/12/06 08:08:17 niklas Exp $	*/
 /*	$NetBSD: subr_prf.c,v 1.25 1996/04/22 01:38:46 christos Exp $	*/
 
 /*-
@@ -132,6 +132,20 @@ panic(fmt, va_alist)
 	Debugger();
 #endif
 	boot(bootopt);
+}
+
+/*
+ *	Partial support (the failure case) of the assertion facility
+ *	commonly found in userland.
+ */
+void
+__assert(t, f, l, e)
+	const char *t, *f, *e;
+	int l;
+{
+
+	panic("kernel %sassertion \"%s\" failed: file \"%s\", line %d\n",
+	    t, e, f, l);
 }
 
 /*
@@ -390,13 +404,13 @@ kprintf(fmt, flags, tp, ap)
 	for (;;) {
 		padc = ' ';
 		width = 0;
-		while ((ch = *(u_char *)fmt++) != '%') {
+		while ((ch = *(const u_char *)fmt++) != '%') {
 			if (ch == '\0')
 				return;
 			putchar(ch, flags, tp);
 		}
 		lflag = 0;
-reswitch:	switch (ch = *(u_char *)fmt++) {
+reswitch:	switch (ch = *(const u_char *)fmt++) {
 		case '\0':
 			while(*--fmt != '%')
 				;
@@ -556,12 +570,12 @@ vsprintf(buf, cfmt, ap)
 	for (bp = buf; ; ) {
 		padc = ' ';
 		width = 0;
-		while ((ch = *(u_char *)fmt++) != '%')
+		while ((ch = *(const u_char *)fmt++) != '%')
 			if ((*bp++ = ch) == '\0')
 				return ((bp - buf) - 1);
 
 		lflag = 0;
-reswitch:	switch (ch = *(u_char *)fmt++) {
+reswitch:	switch (ch = *(const u_char *)fmt++) {
 		case '\0':
 			while(*--fmt != '%')
 				;

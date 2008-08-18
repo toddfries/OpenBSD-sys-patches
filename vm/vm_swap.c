@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_swap.c,v 1.2 1996/03/03 17:45:38 niklas Exp $	*/
+/*	$OpenBSD: vm_swap.c,v 1.5 1997/05/22 07:26:53 deraadt Exp $	*/
 /*	$NetBSD: vm_swap.c,v 1.32 1996/02/05 01:54:09 christos Exp $	*/
 
 /*
@@ -439,15 +439,15 @@ swfree(p, index)
 			 * Don't use the first cluster of the device
 			 * in case it starts with a label or boot block.
 			 */
-			rminit(swapmap, blk - ctod(CLSIZE),
-			    vsbase + ctod(CLSIZE), "swap", nswapmap);
+			rminit(swapmap, blk - ctod(btoc(SWAPSKIPBYTES)),
+			    vsbase + ctod(btoc(SWAPSKIPBYTES)), "swap", nswapmap);
 		} else if (dvbase == 0) {
 			/*
 			 * Don't use the first cluster of the device
 			 * in case it starts with a label or boot block.
 			 */
-			rmfree(swapmap, blk - ctod(CLSIZE),
-			    vsbase + ctod(CLSIZE));
+			rmfree(swapmap, blk - ctod(btoc(SWAPSKIPBYTES)),
+			    vsbase + ctod(btoc(SWAPSKIPBYTES)));
 		} else
 			rmfree(swapmap, blk, vsbase);
 	}
@@ -462,8 +462,10 @@ swfree(p, index)
 	 * root (sure beats rewriting standalone restor).
 	 */
 	if (vp == rootvp) {
+#ifndef MINIROOTSIZE
 		struct mount *mp;
 		struct statfs *sp;
+#endif
 		long firstblk;
 		int rootblks;
 
@@ -477,9 +479,9 @@ swfree(p, index)
 #endif
 		if (rootblks > nblks)
 			panic("swfree miniroot size");
-		/* First ctod(CLSIZE) blocks are not in the map. */
-		firstblk = rmalloc(swapmap, rootblks - ctod(CLSIZE));
-		if (firstblk != ctod(CLSIZE))
+		/* First ctod(btoc(SWAPSKIPBYTES)) blocks are not in the map. */
+		firstblk = rmalloc(swapmap, rootblks - ctod(btoc(SWAPSKIPBYTES)));
+		if (firstblk != ctod(btoc(SWAPSKIPBYTES)))
 			panic("swfree miniroot save");
 		printf("Preserved %d blocks of miniroot leaving %d pages of swap\n",
 		       rootblks, dtoc(nblks - rootblks));

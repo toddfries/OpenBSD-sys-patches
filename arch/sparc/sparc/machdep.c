@@ -1,3 +1,4 @@
+/*	$OpenBSD: machdep.c,v 1.21 1997/03/26 22:14:41 niklas Exp $ */
 /*	$NetBSD: machdep.c,v 1.64 1996/05/19 04:12:56 mrg Exp $ */
 
 /*
@@ -194,11 +195,6 @@ cpu_startup()
 
 	base = bufpages / nbuf;
 	residual = bufpages % nbuf;
-	if (base >= MAXBSIZE) {
-		/* don't want to alloc more physical mem than needed */
-		base = MAXBSIZE;
-		residual = 0;
-	}
 
 	for (i = 0; i < nbuf; i++) {
 		vm_size_t curbufsize;
@@ -324,18 +320,33 @@ allocsys(v)
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
 
+#ifndef BUFCACHEPERCENT
+#define BUFCACHEPERCENT 5
+#endif
 	/*
 	 * Determine how many buffers to allocate (enough to
 	 * hold 5% of total physical memory, but at least 16).
 	 * Allocate 1/2 as many swap buffer headers as file i/o buffers.
 	 */
 	if (bufpages == 0)
-		bufpages = (physmem / 20) / CLSIZE;
+		bufpages = (physmem / ((100/BUFCACHEPERCENT) / CLSIZE));
 	if (nbuf == 0) {
 		nbuf = bufpages;
 		if (nbuf < 16)
 			nbuf = 16;
 	}
+	if (nbuf > 200)
+		nbuf = 200;	/* or we run out of PMEGS */
+	/* Restrict to at most 70% filled kvm */
+	if (nbuf * MAXBSIZE >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) * 7 / 10)
+		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    MAXBSIZE * 7 / 10;
+
+	/* More buffer pages than fits into the buffers is senseless.  */
+	if (bufpages > nbuf * MAXBSIZE / CLBYTES)
+		bufpages = nbuf * MAXBSIZE / CLBYTES;
+
 	if (nswbuf == 0) {
 		nswbuf = (nbuf / 2) &~ 1;	/* force even */
 		if (nswbuf > 256)
@@ -407,14 +418,15 @@ int sigpid = 0;
 
 struct sigframe {
 	int	sf_signo;		/* signal number */
-	int	sf_code;		/* code */
+	siginfo_t *sf_sip;		/* points to siginfo_t */
 #ifdef COMPAT_SUNOS
 	struct	sigcontext *sf_scp;	/* points to user addr of sigcontext */
 #else
 	int	sf_xxx;			/* placeholder */
 #endif
-	int	sf_addr;		/* SunOS compat, always 0 for now */
+	caddr_t	sf_addr;		/* SunOS compat */
 	struct	sigcontext sf_sc;	/* actual sigcontext */
+	siginfo_t sf_si;
 };
 
 /*
@@ -446,19 +458,24 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
  * Send an interrupt to process.
  */
 void
-sendsig(catcher, sig, mask, code)
+sendsig(catcher, sig, mask, code, type, val)
 	sig_t catcher;
 	int sig, mask;
 	u_long code;
+	int type;
+	union sigval val;
 {
 	register struct proc *p = curproc;
 	register struct sigacts *psp = p->p_sigacts;
 	register struct sigframe *fp;
 	register struct trapframe *tf;
-	register int addr, oonstack, oldsp, newsp;
+	register int caddr, oonstack, oldsp, newsp;
 	struct sigframe sf;
 	extern char sigcode[], esigcode[];
 #define	szsigcode	(esigcode - sigcode)
+#ifdef COMPAT_SUNOS
+	extern struct emul emul_sunos;
+#endif
 
 	tf = p->p_md.md_tf;
 	oldsp = tf->tf_out[6];
@@ -487,11 +504,14 @@ sendsig(catcher, sig, mask, code)
 	 * directly in user space....
 	 */
 	sf.sf_signo = sig;
-	sf.sf_code = code;
+	sf.sf_sip = NULL;
 #ifdef COMPAT_SUNOS
-	sf.sf_scp = &fp->sf_sc;
+	if (p->p_emul == &emul_sunos) {
+		sf.sf_sip = (void *)code;	/* SunOS has "int code" */
+		sf.sf_scp = &fp->sf_sc;
+		sf.sf_addr = val.sival_ptr;
+	}
 #endif
-	sf.sf_addr = 0;			/* XXX */
 
 	/*
 	 * Build the signal context to be used by sigreturn.
@@ -505,6 +525,11 @@ sendsig(catcher, sig, mask, code)
 	sf.sf_sc.sc_g1 = tf->tf_global[1];
 	sf.sf_sc.sc_o0 = tf->tf_out[0];
 
+	if (psp->ps_siginfo & sigmask(sig)) {
+		sf.sf_sip = &fp->sf_si;
+		initsiginfo(&sf.sf_si, sig, code, type, val);
+	}
+
 	/*
 	 * Put the stack in a consistent state before we whack away
 	 * at it.  Note that write_user_windows may just dump the
@@ -516,6 +541,7 @@ sendsig(catcher, sig, mask, code)
 	 */
 	newsp = (int)fp - sizeof(struct rwindow);
 	write_user_windows();
+	/* XXX do not copyout siginfo if not needed */
 	if (rwindow_save(p) || copyout((caddr_t)&sf, (caddr_t)fp, sizeof sf) ||
 	    suword(&((struct rwindow *)newsp)->rw_in[6], oldsp)) {
 		/*
@@ -540,15 +566,15 @@ sendsig(catcher, sig, mask, code)
 	 */
 #ifdef COMPAT_SUNOS
 	if (psp->ps_usertramp & sigmask(sig)) {
-		addr = (int)catcher;	/* user does his own trampolining */
+		caddr = (int)catcher;	/* user does his own trampolining */
 	} else
 #endif
 	{
-		addr = (int)PS_STRINGS - szsigcode;
+		caddr = (int)PS_STRINGS - szsigcode;
 		tf->tf_global[1] = (int)catcher;
 	}
-	tf->tf_pc = addr;
-	tf->tf_npc = addr + 4;
+	tf->tf_pc = caddr;
+	tf->tf_npc = caddr + 4;
 	tf->tf_out[6] = newsp;
 #ifdef DEBUG
 	if ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid)
@@ -643,9 +669,14 @@ boot(howto)
 
 		/*
 		 * If we've been adjusting the clock, the todr
-		 * will be out of synch; adjust it now.
+		 * will be out of synch; adjust it now unless
+		 * the system was sitting in ddb.
 		 */
-		resettodr();
+		if ((howto & RB_TIMEBAD) == 0) {
+			resettodr();
+		} else {
+			printf("WARNING: not updating battery clock\n");
+		}
 	}
 	(void) splhigh();		/* ??? */
 	if (howto & RB_HALT) {

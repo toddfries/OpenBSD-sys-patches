@@ -1,4 +1,4 @@
-/*	$NetBSD: endian.h,v 1.5.4.1 1996/06/05 23:53:20 jonathan Exp $	*/
+/*	$NetBSD: endian.h,v 1.8 1996/10/13 20:59:02 mhitch Exp $	*/
 
 /*
  * Copyright (c) 1987, 1991, 1993
@@ -56,17 +56,18 @@
  */
 #define	LITTLE_ENDIAN	1234	/* LSB first: i386, vax */
 #define	BIG_ENDIAN	4321	/* MSB first: 68000, ibm, net */
-#define	PDP_ENDIAN	3412	/* LSB first in word, MSW first in long */
+#define	PDP_ENDIAN	3412	/* LSB first in word, MSW first in int32_t */
 
 #define	BYTE_ORDER	LITTLE_ENDIAN
 
 #include <sys/cdefs.h>
-#include <pmax/types.h>
+#include <machine/types.h>
+
+typedef u_int32_t	in_addr_t;
+typedef u_int16_t	in_port_t;
 
 __BEGIN_DECLS
 u_int32_t	htonl __P((u_int32_t));
-
-
 u_int16_t	htons __P((u_int16_t));
 u_int32_t	ntohl __P((u_int32_t));
 u_int16_t	ntohs __P((u_int16_t));

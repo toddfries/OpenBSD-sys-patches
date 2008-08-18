@@ -1,5 +1,5 @@
-/*	$OpenBSD: pci.c,v 1.3 1996/05/07 07:38:49 deraadt Exp $	*/
-/*	$NetBSD: pci.c,v 1.19 1996/05/03 17:33:49 christos Exp $	*/
+/*	$OpenBSD: pci.c,v 1.6 1997/01/24 19:34:15 niklas Exp $	*/
+/*	$NetBSD: pci.c,v 1.26 1996/12/05 01:25:30 cgd Exp $	*/
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou.  All rights reserved.
@@ -53,8 +53,32 @@ struct cfdriver pci_cd = {
 	NULL, "pci", DV_DULL
 };
 
-int	pciprint __P((void *, char *));
+int	pciprint __P((void *, const char *));
 int	pcisubmatch __P((struct device *, void *, void *));
+
+/*
+ * Callback so that ISA/EISA bridges can attach their child busses
+ * after PCI configuration is done.
+ *
+ * This works because:
+ *	(1) there can be at most one ISA/EISA bridge per PCI bus, and
+ *	(2) any ISA/EISA bridges must be attached to primary PCI
+ *	    busses (i.e. bus zero).
+ *
+ * That boils down to: there can only be one of these outstanding
+ * at a time, it is cleared when configuring PCI bus 0 before any
+ * subdevices have been found, and it is run after all subdevices
+ * of PCI bus 0 have been found.
+ *
+ * This is needed because there are some (legacy) PCI devices which
+ * can show up as ISA/EISA devices as well (the prime example of which
+ * are VGA controllers).  If you attach ISA from a PCI-ISA/EISA bridge,
+ * and the bridge is seen before the video board is, the board can show
+ * up as an ISA device, and that can (bogusly) complicate the PCI device's
+ * attach code, or make the PCI device not be properly attached at all.
+ */
+static void	(*pci_isa_bridge_callback) __P((void *));
+static void	*pci_isa_bridge_callback_arg;
 
 int
 pcimatch(parent, match, aux)
@@ -89,17 +113,21 @@ pciattach(parent, self, aux)
 	void *aux;
 {
 	struct pcibus_attach_args *pba = aux;
-	bus_chipset_tag_t bc;
+	bus_space_tag_t iot, memt;
 	pci_chipset_tag_t pc;
 	int bus, device, maxndevs, function, nfunctions;
 
 	pci_attach_hook(parent, self, pba);
 	printf("\n");
 
-	bc = pba->pba_bc;
+	iot = pba->pba_iot;
+	memt = pba->pba_memt;
 	pc = pba->pba_pc;
 	bus = pba->pba_bus;
 	maxndevs = pci_bus_maxdevs(pc, bus);
+
+	if (bus == 0)
+		pci_isa_bridge_callback = NULL;
 
 	for (device = 0; device < maxndevs; device++) {
 		pcitag_t tag;
@@ -123,7 +151,8 @@ pciattach(parent, self, aux)
 			class = pci_conf_read(pc, tag, PCI_CLASS_REG);
 			intr = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
 
-			pa.pa_bc = bc;
+			pa.pa_iot = iot;
+			pa.pa_memt = memt;
 			pa.pa_pc = pc;
 			pa.pa_device = device;
 			pa.pa_function = function;
@@ -156,12 +185,15 @@ pciattach(parent, self, aux)
 			config_found_sm(self, &pa, pciprint, pcisubmatch);
 		}
 	}
+
+	if (bus == 0 && pci_isa_bridge_callback != NULL)
+		(*pci_isa_bridge_callback)(pci_isa_bridge_callback_arg);
 }
 
 int
 pciprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 	register struct pci_attach_args *pa = aux;
 	char devinfo[256];
@@ -196,8 +228,8 @@ pci_io_find(pc, pcitag, reg, iobasep, iosizep)
 	pci_chipset_tag_t pc;
 	pcitag_t pcitag;
 	int reg;
-	bus_io_addr_t *iobasep;
-	bus_io_size_t *iosizep;
+	bus_addr_t *iobasep;
+	bus_size_t *iosizep;
 {
 	pcireg_t addrdata, sizedata;
 	int s;
@@ -229,7 +261,7 @@ pci_io_find(pc, pcitag, reg, iobasep, iosizep)
 	if (iobasep != NULL)
 		*iobasep = PCI_MAPREG_IO_ADDR(addrdata);
 	if (iosizep != NULL)
-		*iosizep = ~PCI_MAPREG_IO_ADDR(sizedata) + 1;
+		*iosizep = PCI_MAPREG_IO_SIZE(sizedata);
 
 	return (0);
 }
@@ -239,8 +271,8 @@ pci_mem_find(pc, pcitag, reg, membasep, memsizep, cacheablep)
 	pci_chipset_tag_t pc;
 	pcitag_t pcitag;
 	int reg;
-	bus_mem_addr_t *membasep;
-	bus_mem_size_t *memsizep;
+	bus_addr_t *membasep;
+	bus_size_t *memsizep;
 	int *cacheablep;
 {
 	pcireg_t addrdata, sizedata;
@@ -285,9 +317,21 @@ pci_mem_find(pc, pcitag, reg, membasep, memsizep, cacheablep)
 	if (membasep != NULL)
 		*membasep = PCI_MAPREG_MEM_ADDR(addrdata);	/* PCI addr */
 	if (memsizep != NULL)
-		*memsizep = ~PCI_MAPREG_MEM_ADDR(sizedata) + 1;
+		*memsizep = PCI_MAPREG_MEM_SIZE(sizedata);
 	if (cacheablep != NULL)
 		*cacheablep = PCI_MAPREG_MEM_CACHEABLE(addrdata);
 
 	return 0;
+}
+
+void
+set_pci_isa_bridge_callback(fn, arg)
+	void (*fn) __P((void *));
+	void *arg;
+{
+
+	if (pci_isa_bridge_callback != NULL)
+		panic("set_pci_isa_bridge_callback");
+	pci_isa_bridge_callback = fn;
+	pci_isa_bridge_callback_arg = arg;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.6 1996/05/26 00:06:07 deraadt Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.8 1997/01/07 05:37:34 tholo Exp $	*/
 /*	$NetBSD: pmap.h,v 1.23 1996/05/03 19:26:30 christos Exp $	*/
 
 /* 
@@ -66,9 +66,10 @@
  * One page directory, shared between
  * kernel and user modes.
  */
-#define	PTDPTDI		0x3df		/* ptd entry that points to ptd! */
-#define	KPTDI		0x3e0		/* start of kernel virtual pde's */
-#define	NKPDE		31
+#define	PTDPTDI		0x3bf		/* ptd entry that points to ptd! */
+#define	KPTDI		0x3c0		/* start of kernel virtual pde's */
+#define	NKPDE		63		/* # to static alloc */
+#define	MAXKPDE		(APTDPTDI-KPTDI)
 #define	APTDPTDI	0x3ff		/* start of alternate page directory */
 
 /*
@@ -85,6 +86,7 @@ extern int	PTDpaddr;	/* physical address of kernel PTD */
 void pmap_bootstrap __P((vm_offset_t start));
 boolean_t pmap_testbit __P((vm_offset_t, int));
 void pmap_changebit __P((vm_offset_t, int, int));
+void pmap_prefault __P((vm_map_t, vm_offset_t, vm_size_t));
 #endif
 
 /*

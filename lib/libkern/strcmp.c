@@ -36,9 +36,10 @@
 
 #if defined(LIBC_SCCS) && !defined(lint)
 /*static char *sccsid = "from: @(#)strcmp.c	5.5 (Berkeley) 1/26/91";*/
-static char *rcsid = "$Id: strcmp.c,v 1.2 1996/05/01 15:18:49 deraadt Exp $";
+static char *rcsid = "$Id: strcmp.c,v 1.4 1996/12/12 08:18:31 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
+#include <sys/types.h>
 #ifndef _KERNEL
 #include <string.h>
 #else
@@ -55,5 +56,5 @@ strcmp(s1, s2)
 	while (*s1 == *s2++)
 		if (*s1++ == 0)
 			return (0);
-	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
+	return (*(const u_char *)s1 - *(const u_char *)--s2);
 }

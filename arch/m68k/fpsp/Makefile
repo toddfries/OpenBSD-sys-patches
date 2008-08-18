@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1996/08/04 18:44:58 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.12 1997/03/25 14:31:07 niklas Exp $
 #	$NetBSD: Makefile,v 1.4 1994/10/26 07:48:46 cgd Exp $
 
 #	MOTOROLA MICROPROCESSOR & MEMORY TECHNOLOGY GROUP
@@ -39,13 +39,13 @@
 
 TARGET = fpsp
 
-AS		= as -m68040
-LD		= ld
+AS		?= as -m68040
+LD		?= ld
 
 #
 # For the Library Version:
 #
-AR		= ar
+AR		?= ar
 LIB_FILTER 	= sed 's/fpsp.defs/l_fpsp.defs/'
 LIB_TARGET	= lib$(TARGET).a
 #
@@ -334,6 +334,8 @@ clean cleandir:
 	rm -f $(LIB_S_FILES)
 	rm -f $(LIB_O_FILES)
 	rm -f $(LIB_TARGET)
+
+clobber:	clean
 
 _SUBDIRUSE:
 

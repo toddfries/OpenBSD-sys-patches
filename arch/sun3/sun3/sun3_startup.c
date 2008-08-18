@@ -1,9 +1,12 @@
-/*	$NetBSD: sun3_startup.c,v 1.51 1996/03/26 15:16:59 gwr Exp $	*/
+/*	$OpenBSD: sun3_startup.c,v 1.9 1997/01/16 08:08:41 kstailey Exp $	*/
+/*	$NetBSD: sun3_startup.c,v 1.55 1996/11/20 18:57:38 gwr Exp $	*/
 
-/*
- * Copyright (c) 1994 Gordon W. Ross
- * Copyright (c) 1993 Adam Glass
+/*-
+ * Copyright (c) 1996 The NetBSD Foundation, Inc.
  * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Adam Glass and Gordon W. Ross.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,20 +18,23 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed by Adam Glass and Gordon Ross
- * 4. The name of the authors may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <sys/param.h>
@@ -41,15 +47,15 @@
 #include <vm/vm.h>
 
 #include <machine/control.h>
-#include <machine/cpufunc.h>
 #include <machine/cpu.h>
 #include <machine/dvma.h>
-#include <machine/mon.h>
-#include <machine/pte.h>
-#include <machine/pmap.h>
 #include <machine/idprom.h>
+#include <machine/machdep.h>
+#include <machine/mon.h>
 #include <machine/obio.h>
 #include <machine/obmem.h>
+#include <machine/pmap.h>
+#include <machine/pte.h>
 
 #include "vector.h"
 #include "interreg.h"
@@ -64,7 +70,7 @@ char *esym;	/* DDB */
 /*
  * Globals shared with the pmap code.
  * XXX - should reexamine this...
- */ 
+ */
 vm_offset_t virtual_avail, virtual_end;
 vm_offset_t avail_start, avail_end;
 /* used to skip the Sun3/50 video RAM */
@@ -74,7 +80,7 @@ int cache_size;
 /*
  * Now our own stuff.
  */
-unsigned int *old_vector_table;
+void **old_vector_table;
 
 unsigned char cpu_machine_id = 0;
 char *cpu_string = NULL;
@@ -93,25 +99,34 @@ vm_offset_t proc0_user_pa;
 struct user *proc0paddr;	/* proc[0] pcb address (u-area VA) */
 extern struct pcb *curpcb;
 
-/*
- * Switch to our own interrupt vector table.
- */
-static void initialize_vector_table()
-{
-	old_vector_table = getvbr();
-	setvbr((unsigned int *) vector_table);
-}
+extern vm_offset_t dumppage_pa;
+extern vm_offset_t dumppage_va;
 
-vm_offset_t high_segment_alloc(npages)
+void sun3_bootstrap __P((struct exec));
+
+static void sun3_mode_monitor __P((void));
+static void sun3_mode_normal __P((void));
+static void sun3_mon_init __P((vm_offset_t sva, vm_offset_t eva, int keep));
+static void sun3_monitor_hooks __P((void));
+static void sun3_context_equiv __P((void));
+static void sun3_save_symtab __P((struct exec *kehp));
+static void sun3_verify_hardware __P((void));
+static void sun3_vm_init __P((struct exec *kehp));
+static void tracedump __P((int));
+static void v_handler __P((int addr, char *str));
+
+static void internal_configure __P((void));
+
+vm_offset_t
+high_segment_alloc(npages)
 	int npages;
 {
-	int i;
 	vm_offset_t va, tmp;
-	
+
 	if (npages == 0)
 		mon_panic("panic: request for high segment allocation of 0 pages");
 	if (high_segment_free_start == high_segment_free_end) return NULL;
-	
+
 	va = high_segment_free_start + (npages*NBPG);
 	if (va > high_segment_free_end) return NULL;
 	tmp = high_segment_free_start;
@@ -134,11 +149,12 @@ static void sun3_mode_monitor()
 /*
  * Prepare for running the kernel
  */
-static void sun3_mode_normal()
+static void
+sun3_mode_normal()
 {
 	/* Install our vector table and disable the NMI clock. */
 	set_clk_mode(0, IREG_CLOCK_ENAB_7, 0);
-	setvbr((unsigned int *) vector_table);
+	setvbr((void **) vector_table);
 	set_clk_mode(IREG_CLOCK_ENAB_5, 0, 1);
 }
 
@@ -150,7 +166,8 @@ static void sun3_mode_normal()
  * also put our hardware state back into place after
  * the PROM "c" (continue) command is given.
  */
-void sun3_mon_abort()
+void
+sun3_mon_abort()
 {
 	int s = splhigh();
 
@@ -165,7 +182,7 @@ void sun3_mon_abort()
 	 * stuff it into the PROM interrupt vector for trap zero
 	 * and then do a trap.  Needs PROM vector table in RAM.
 	 */
-	old_vector_table[32] = (int)romp->abortEntry;
+	old_vector_table[32] = (void *)romp->abortEntry;
 	asm(" trap #0 ; _sun3_mon_continued: nop");
 
 	/* We have continued from a PROM abort! */
@@ -174,7 +191,8 @@ void sun3_mon_abort()
 	splx(s);
 }
 
-void sun3_mon_halt()
+void
+sun3_mon_halt()
 {
 	(void) splhigh();
 	sun3_mode_monitor();
@@ -182,7 +200,8 @@ void sun3_mon_halt()
 	/*NOTREACHED*/
 }
 
-void sun3_mon_reboot(bootstring)
+void
+sun3_mon_reboot(bootstring)
 	char *bootstring;
 {
 	(void) splhigh();
@@ -200,9 +219,10 @@ void sun3_mon_reboot(bootstring)
  * is identically mapped in all contexts.  The PROM can
  * do the job using hardware-dependent tricks...
  */
-void sun3_context_equiv()
+static void
+sun3_context_equiv()
 {
-	unsigned int i, sme;
+	unsigned int sme;
 	int x;
 	vm_offset_t va;
 
@@ -233,9 +253,9 @@ int keep;	/* true: steal, false: clear */
 	vm_offset_t pgva, endseg;
 	int pte, valid;
 	unsigned char sme;
-	
+
 	sva &= ~(NBSG-1);
-	
+
 	while (sva < eva) {
 		sme = get_segmap(sva);
 		if (sme != SEGINV) {
@@ -265,6 +285,7 @@ int keep;	/* true: steal, false: clear */
 /*
  * Preserve DDB symbols and strings by setting esym.
  */
+void
 sun3_save_symtab(kehp)
 	struct exec *kehp;	/* kernel exec header */
 {
@@ -339,10 +360,11 @@ sun3_save_symtab(kehp)
  * between [ KERNBASE .. virtual_avail ] and this is
  * checked in trap.c for kernel-mode MMU faults.
  */
-void sun3_vm_init(kehp)
+void
+sun3_vm_init(kehp)
 	struct exec *kehp;	/* kernel exec header */
 {
-	vm_offset_t va, eva, sva, pte, temp_seg;
+	vm_offset_t va, eva, pte;
 	unsigned int sme;
 
 	/*
@@ -364,7 +386,7 @@ void sun3_vm_init(kehp)
 	 */
 	avail_start = virtual_avail - KERNBASE;
 	if (romp->romvecVersion < 1) {
-		mon_printf("Warning: ancient PROM version=%d\n",
+		mon_printf("WARNING: ancient PROM version=%d\n",
 				   romp->romvecVersion);
 		/* Guess that PROM version 0.X used two pages. */
 		avail_end = *romp->memorySize - (2*NBPG);
@@ -396,14 +418,16 @@ void sun3_vm_init(kehp)
 
 	/*
 	 * Virtual and physical pages for proc[0] u-area (already mapped)
-	 * XXX - Make these non-cached at their full-time mapping address.
-	 * XXX - Still need to do that? -gwr
 	 */
 	proc0paddr = (struct user *) virtual_avail;
 	proc0_user_pa = avail_start;
 	virtual_avail += UPAGES*NBPG;
-	avail_start += UPAGES*NBPG;
-	/* Make them non-cached. */
+	avail_start   += UPAGES*NBPG;
+#if 0
+	/* Make them non-cached.
+	 * XXX - Make these non-cached at their full-time mapping address.
+	 * XXX - Still need to do that? -gwr
+	 */
 	va = (vm_offset_t) proc0paddr;
 	while (va < virtual_avail) {
 		pte = get_pte(va);
@@ -411,6 +435,15 @@ void sun3_vm_init(kehp)
 		set_pte(va, pte);
 		va += NBPG;
 	}
+#endif
+
+	/*
+	 * Virtual and physical page used by dumpsys()
+	 */
+	dumppage_va = virtual_avail;
+	dumppage_pa = avail_start;
+	virtual_avail += NBPG;
+	avail_start   += NBPG;
 
 	/*
 	 * XXX - Make sure avail_start is within the low 1M range
@@ -470,7 +503,7 @@ void sun3_vm_init(kehp)
 	 * segmap entries in the MMU unless pmeg_array records them.
 	 */
 	va = virtual_avail;
-	while (va < virtual_end) {	
+	while (va < virtual_end) {
 		set_segmap(va, SEGINV);
 		va += NBSG;
 	}
@@ -588,7 +621,8 @@ void sun3_vm_init(kehp)
  */
 int delay_divisor = 82;		/* assume the fastest (3/260) */
 
-void sun3_verify_hardware()
+void
+sun3_verify_hardware()
 {
 	unsigned char machtype;
 	int cpu_match = 0;
@@ -667,8 +701,9 @@ struct funcall_frame {
 	int fr_arg[1];
 };
 /*VARARGS0*/
+void
 tracedump(x1)
-	caddr_t x1;
+	int x1;
 {
 	struct funcall_frame *fp = (struct funcall_frame *)(&x1 - 2);
 	u_int stackpage = ((u_int)fp) & ~PGOFSET;
@@ -697,7 +732,7 @@ v_handler(addr, str)
 int addr;
 char *str;
 {
-	
+
 	switch (*str) {
 	case '\0':
 		/*
@@ -710,36 +745,37 @@ char *str;
 			sun3_mode_normal();
 			panic("zero");
 			/*NOTREACHED*/
-			
+
 		case 4:			/* old g4 */
-			tracedump();
+			goto do_trace;
 			break;
-			
+
 		default:
 			goto err;
 		}
 		break;
-		
+
 	case 'p':			/* 'p'rint string command */
 	case 'P':
 		mon_printf("%s\n", (char *)addr);
 		break;
-		
+
 	case '%':			/* p'%'int anything a la printf */
 		mon_printf(str, addr);
 		mon_printf("\n");
 		break;
-		
+
+	do_trace:
 	case 't':			/* 't'race kernel stack */
 	case 'T':
-		tracedump();
+		tracedump(addr);
 		break;
-		
+
 	case 'u':			/* d'u'mp hack ('d' look like hex) */
 	case 'U':
 		goto err;
 		break;
-		
+
 	default:
 	err:
 		mon_printf("Don't understand 0x%x '%s'\n", addr, str);
@@ -749,34 +785,40 @@ char *str;
 /*
  * Set the PROM vector handler (for g0, g4, etc.)
  * and set boothowto from the PROM arg strings.
+ *
+ * Note, args are always:
+ * argv[0] = boot_device	(i.e. "sd(0,0,0)")
+ * argv[1] = options	(i.e. "-ds" or NULL)
+ * argv[2] = NULL
  */
-void sun3_monitor_hooks()
+void
+sun3_monitor_hooks()
 {
 	MachMonBootParam *bpp;
+	char **argp;
 	char *p;
-	int i;
 
 	if (romp->romvecVersion >= 2)
 		*romp->vector_cmd = v_handler;
 
 	/* Set boothowto flags from PROM args. */
 	bpp = *romp->bootParam;
-	for (i = 0; i < 8; i++) {
-		p = bpp->argPtr[i];
+	argp = bpp->argPtr;
 
-		/* Null arg?  We're done. */
-		if (p == NULL || *p == '\0')
-			break;
+	/* Skip argp[0] (the device string) */
+	argp++;
+
+	/* Have options? */
+	if (*argp == NULL)
+		return;
+	p = *argp;
+	if (*p == '-') {
+		/* yes, parse options */
 #ifdef	DEBUG
-		mon_printf("arg[%d]=\"%s\"\n", i, p);
+		mon_printf("boot option: %s\n", p);
 #endif
-
-		/* Not switches?  Skip it. */
-		if (*p++ != '-')
-			continue;
-
-		while (*p) {
-			switch (*p++) {
+		for (++p; *p; p++) {
+			switch (*p) {
 			case 'a':
 				boothowto |= RB_ASKNAME;
 				break;
@@ -788,22 +830,16 @@ void sun3_monitor_hooks()
 				break;
 			}
 		}
+		argp++;
 	}
+
 #ifdef	DEBUG
-	mon_printf("boothowto=0x%x\n", boothowto);
+	/* Have init name? */
+	if (*argp == NULL)
+		return;
+	p = *argp;
+	mon_printf("boot initpath: %s\n", p);
 #endif
-}
-
-void set_interrupt_reg(value)
-	unsigned int value;
-{
-	*interrupt_reg = (unsigned char) value;
-}
-
-unsigned int get_interrupt_reg()
-{
-	vm_offset_t pte;
-	return (unsigned int) *interrupt_reg;
 }
 
 /*
@@ -811,9 +847,10 @@ unsigned int get_interrupt_reg()
  * First the obio module finds and records useful PROM mappings, then
  * the necessary drivers are given a chance to use those recorded.
  */
-void internal_configure()
+static void
+internal_configure()
 {
-    obio_init();	/* find and record PROM mappings in OBIO space */
+	obio_init();	/* find and record PROM mappings in OBIO space */
 	/* Drivers that use those OBIO mappings from the PROM */
 	zs_init();
 	eeprom_init();
@@ -829,7 +866,6 @@ void
 sun3_bootstrap(keh)
 	struct exec keh;	/* kernel exec header */
 {
-	int i;
 	extern int cold;
 
 	/* First, Clear BSS. */
@@ -853,7 +889,8 @@ sun3_bootstrap(keh)
 	 * the interrupt register and disables the NMI clock so
 	 * it will not cause "spurrious level 7" complaints.
 	 */
-	initialize_vector_table();
+	old_vector_table = getvbr();
+	setvbr((void **) vector_table);
 
 	/* Interrupts are enabled in locore.s just after this return. */
 }

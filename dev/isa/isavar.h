@@ -1,5 +1,5 @@
-/*	$OpenBSD: isavar.h,v 1.16 1996/08/15 17:31:42 shawn Exp $	*/
-/*	$NetBSD: isavar.h,v 1.23 1996/05/08 23:32:31 thorpej Exp $	*/
+/*	$OpenBSD: isavar.h,v 1.21 1997/02/13 16:50:15 pefo Exp $	*/
+/*	$NetBSD: isavar.h,v 1.24 1996/10/21 22:41:11 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1995 Chris G. Demetriou
@@ -52,7 +52,7 @@
  */
 struct isabus_attach_args;
 
-#if (alpha + amiga + i386 + arc + riscpc != 1)
+#if (alpha + amiga + i386 + arc + wgrisc != 1)
 ERROR: COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
 #endif
 #if alpha
@@ -67,16 +67,17 @@ ERROR: COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
 #if arc
 #include <arc/isa/isa_machdep.h>
 #endif
-#if riscpc
-#include <riscpc/isa/isa_machdep.h>
+#if wgrisc
+#include <wgrisc/isa/isa_machdep.h>
 #endif
 
 /*
  * ISA bus attach arguments
  */
 struct isabus_attach_args {
-	char	*iba_busname;			/* XXX should be common */
-	bus_chipset_tag_t iba_bc;		/* XXX should be common */
+	char	*iba_busname;		/* XXX should be common */
+	bus_space_tag_t iba_iot;	/* isa i/o space tag */
+	bus_space_tag_t iba_memt;	/* isa mem space tag */
 	isa_chipset_tag_t iba_ic;
 };
 
@@ -84,7 +85,9 @@ struct isabus_attach_args {
  * ISA driver attach arguments
  */
 struct isa_attach_args {
-	bus_chipset_tag_t ia_bc;
+	bus_space_tag_t ia_iot;		/* isa i/o space tag */
+	bus_space_tag_t ia_memt;	/* isa mem space tag */
+
 	isa_chipset_tag_t ia_ic;
 
 	int	ia_iobase;		/* base i/o address */
@@ -95,7 +98,7 @@ struct isa_attach_args {
 	u_int	ia_msize;		/* size of i/o memory */
 	void	*ia_aux;		/* driver specific */
 
-	bus_io_handle_t ia_delayioh;	/* i/o handle for `delay port' */
+	bus_space_handle_t ia_delaybah;	/* i/o handle for `delay port' */
 
 	/* XXX need fixes, some are duplicated */
 	/* begin isapnp section */
@@ -139,16 +142,18 @@ struct isa_softc {
 	TAILQ_HEAD(, isadev)
 		sc_subdevs;		/* list of all children */
 
-	bus_chipset_tag_t sc_bc;
+	bus_space_tag_t sc_iot;		/* isa io space tag */
+	bus_space_tag_t sc_memt;	/* isa mem space tag */
+
 	isa_chipset_tag_t sc_ic;
 
 	/*
 	 * This i/o handle is used to map port 0x84, which is
-	 * read to provide a 1.25us delay.  This i/o handle
+	 * read to provide a 1.25us delay.  This access handle
 	 * is mapped in isaattach(), and exported to drivers
 	 * via isa_attach_args.
 	 */
-	bus_io_handle_t   sc_delayioh;
+	bus_space_handle_t   sc_delaybah;
 
 	/*
 	 * This points to the isapnp_softc structure that holds
@@ -182,8 +187,10 @@ struct isa_softc {
  */
 
 /* ISA interrupt sharing types */
-void	isascan __P((struct device *parent, void *match));
 char	*isa_intr_typename __P((int type));
+
+void	isascan __P((struct device *parent, void *match));
+int	isaprint __P((void *, const char *));
 
 #ifdef NEWCONFIG
 /*

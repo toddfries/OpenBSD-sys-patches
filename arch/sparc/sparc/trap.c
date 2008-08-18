@@ -337,7 +337,7 @@ badtrap:
 		/* ... but leave it in until we find anything */
 		printf("%s[%d]: unimplemented software trap 0x%x\n",
 		    p->p_comm, p->p_pid, type);
-		trapsignal(p, SIGILL, type);
+		trapsignal(p, SIGILL, type, ILL_ILLOPC, (caddr_t)pc);
 		break;
 
 #ifdef COMPAT_SVR4
@@ -357,11 +357,11 @@ badtrap:
 		break;	/* the work is all in userret() */
 
 	case T_ILLINST:
-		trapsignal(p, SIGILL, 0);	/* XXX code?? */
+		trapsignal(p, SIGILL, 0, ILL_ILLOPC, (caddr_t)pc);
 		break;
 
 	case T_PRIVINST:
-		trapsignal(p, SIGILL, 0);	/* XXX code?? */
+		trapsignal(p, SIGILL, 0, ILL_PRVOPC, (caddr_t)pc);
 		break;
 
 	case T_FPDISABLED: {
@@ -380,7 +380,7 @@ badtrap:
 			fpu_emulate(p, tf, fs);
 			break;
 #else
-			trapsignal(p, SIGFPE, 0);	/* XXX code?? */
+			trapsignal(p, SIGFPE, 0, FPE_FLTINV, (caddr_t)pc);
 			break;
 #endif
 		}
@@ -465,7 +465,7 @@ badtrap:
 		break;
 
 	case T_ALIGN:
-		trapsignal(p, SIGBUS, 0);	/* XXX code?? */
+		trapsignal(p, SIGBUS, 0, BUS_ADRALN, (caddr_t)pc);
 		break;
 
 	case T_FPE:
@@ -490,21 +490,21 @@ badtrap:
 		break;
 
 	case T_TAGOF:
-		trapsignal(p, SIGEMT, 0);	/* XXX code?? */
+		trapsignal(p, SIGEMT, 0, EMT_TAGOVF, (caddr_t)pc);
 		break;
 
 	case T_CPDISABLED:
 		uprintf("coprocessor instruction\n");	/* XXX */
-		trapsignal(p, SIGILL, 0);	/* XXX code?? */
+		trapsignal(p, SIGILL, 0, FPE_FLTINV, (caddr_t)pc);
 		break;
 
 	case T_BREAKPOINT:
-		trapsignal(p, SIGTRAP, 0);
+		trapsignal(p, SIGTRAP, 0, TRAP_BRKPT, (caddr_t)pc);
 		break;
 
 	case T_DIV0:
 		ADVANCE;
-		trapsignal(p, SIGFPE, FPE_INTDIV_TRAP);
+		trapsignal(p, SIGFPE, 0, FPE_INTDIV, (caddr_t)pc);
 		break;
 
 	case T_FLUSHWIN:
@@ -524,7 +524,7 @@ badtrap:
 	case T_RANGECHECK:
 		uprintf("T_RANGECHECK\n");	/* XXX */
 		ADVANCE;
-		trapsignal(p, SIGILL, 0);	/* XXX code?? */
+		trapsignal(p, SIGILL, 0, ILL_ILLOPN, (caddr_t)pc);
 		break;
 
 	case T_FIXALIGN:
@@ -535,7 +535,7 @@ badtrap:
 	case T_INTOF:
 		uprintf("T_INTOF\n");		/* XXX */
 		ADVANCE;
-		trapsignal(p, SIGFPE, FPE_INTOVF_TRAP);
+		trapsignal(p, SIGFPE, FPE_INTOVF_TRAP, FPE_INTOVF, (caddr_t)pc);
 		break;
 	}
 	userret(p, pc, sticks);
@@ -743,7 +743,8 @@ kfault:
 			tf->tf_npc = onfault + 4;
 			return;
 		}
-		trapsignal(p, SIGSEGV, (u_int)v);
+		trapsignal(p, SIGSEGV, (ser & SER_WRITE) ? VM_PROT_WRITE :
+		    VM_PROT_READ, SEGV_MAPERR, (caddr_t)v);
 	}
 out:
 	if ((psr & PSR_PS) == 0) {
@@ -775,7 +776,7 @@ mem_access_fault4m(type, sfsr, sfva, afsr, afva, tf)
 	register struct vmspace *vm;
 	register vm_offset_t va;
 	register int rv;
-	vm_prot_t ftype;
+	vm_prot_t ftype, vftype;
 	int onfault;
 	u_quad_t sticks;
 #if DEBUG
@@ -927,6 +928,7 @@ static int lastdouble;
 	/* Now munch on protections... */
 
 	ftype = sfsr & SFSR_AT_STORE ? VM_PROT_READ|VM_PROT_WRITE:VM_PROT_READ;
+	vftype = sfsr & SFSR_AT_STORE ? VM_PROT_WRITE:VM_PROT_READ;
 	if (psr & PSR_PS) {
 		extern char Lfsbail[];
 		if (sfsr & SFSR_AT_TEXT || type == T_TEXTFAULT) {
@@ -1015,7 +1017,7 @@ kfault:
 			tf->tf_npc = onfault + 4;
 			return;
 		}
-		trapsignal(p, SIGSEGV, (u_int)sfva);
+		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, (caddr_t)sfva);
 	}
 out:
 	if ((psr & PSR_PS) == 0) {

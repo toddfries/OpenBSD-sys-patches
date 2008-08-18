@@ -1,5 +1,4 @@
-/*	$OpenBSD: ipx.h,v 1.1 1996/08/16 09:15:58 mickey Exp $	*/
-/*	$NOWHERE: ipx.h,v 1.3 1996/05/07 12:32:01 mickey Exp $	*/
+/*	$OpenBSD: ipx.h,v 1.5 1996/12/23 08:47:03 mickey Exp $	*/
 
 /*-
  *
@@ -80,29 +79,29 @@
 
 /* flags passed to ipx_outputfl as last parameter */
 
-#define	IPX_FORWARDING		0x1	/* most of ipx header exists */
-#define	IPX_ROUTETOIF		0x10	/* same as SO_DONTROUTE */
-#define	IPX_ALLOWBROADCAST	SO_BROADCAST	/* can send broadcast packets */
+#define IPX_FORWARDING		0x1	/* most of ipx header exists */
+#define IPX_ROUTETOIF		0x10	/* same as SO_DONTROUTE */
+#define IPX_ALLOWBROADCAST		SO_BROADCAST   /* can send broadcast packets */
 
 #define IPX_MAXHOPS		15
 
 /* flags passed to get/set socket option */
-#define	SO_HEADERS_ON_INPUT	1
-#define	SO_HEADERS_ON_OUTPUT	2
-#define	SO_DEFAULT_HEADERS	3
-#define	SO_LAST_HEADER		4
-#define	SO_IPXIP_ROUTE		5
-#define SO_SEQNO		6
-#define	SO_ALL_PACKETS		7
+#define SO_HEADERS_ON_INPUT	1
+#define SO_HEADERS_ON_OUTPUT	2
+#define SO_DEFAULT_HEADERS		3
+#define SO_LAST_HEADER		4
+#define SO_IPXIP_ROUTE		5
+#define SO_SEQNO			6
+#define SO_ALL_PACKETS		7
 #define SO_MTU			8
 #define SO_IPXTUN_ROUTE		9
 
 /*
  * IPX addressing
  */
-#define	IPX_HOSTADDRLEN	6
-#define	IPX_NETADDRLEN	4
-#define	XXX	__attribute__((packed))
+#define IPX_HOSTADDRLEN	6
+#define IPX_NETADDRLEN	4
+#define XXX	__attribute__((packed))
 
 typedef
 union ipx_host {
@@ -132,8 +131,8 @@ struct ipx_addr {
 struct sockaddr_ipx {
 	u_int8_t	sipx_len;
 	u_int8_t	sipx_family;
-	struct ipx_addr	sipx_addr;
 	u_int16_t	sipx_type;
+	struct ipx_addr	sipx_addr;
 };
 #define sipx_net  sipx_addr.ipx_net
 #define sipx_network  sipx_addr.ipx_net.l_net
@@ -168,6 +167,23 @@ struct ipx {
 	((x).ipx_net.s_net[1]==0xffff))
 #define ipx_wildhost(x) (((x).ipx_host.s_host[0]==0xffff) && \
 	((x).ipx_host.s_host[1]==0xffff) && ((x).ipx_host.s_host[2]==0xffff))
+
+/*
+ * Definitions for inet sysctl operations.
+ *
+ * Third level is protocol number.
+ * Fourth level is desired variable within that protocol.
+ */
+#define IPXPROTO_MAXID	(IPXPROTO_SPX + 1)	/* don't list to IPPROTO_MAX */
+
+#define CTL_IPXPROTO_NAMES { \
+	{ "ipx", CTLTYPE_NODE }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
+	{ "spx", CTLTYPE_NODE }, \
+};
 
 #ifdef _KERNEL
 
@@ -213,6 +229,7 @@ void	ipx_undo_route __P((struct route *ro));
 int	ipx_usrreq __P((struct socket *so, int req, struct mbuf *m,
 			struct mbuf *nam, struct mbuf *control));
 void	ipx_watch_output __P((struct mbuf *m, struct ifnet *ifp));
+int	ipx_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
 
 #ifdef	IPXDEBUG
 struct ipx_addr	ipx_addr __P((const char *));

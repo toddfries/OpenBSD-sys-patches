@@ -1,5 +1,5 @@
-/*	$OpenBSD: tcds.c,v 1.4 1996/07/29 23:02:34 niklas Exp $	*/
-/*	$NetBSD: tcds.c,v 1.9.4.2 1996/06/05 01:32:26 cgd Exp $	*/
+/*	$OpenBSD: tcds.c,v 1.7 1997/01/24 19:58:22 niklas Exp $	*/
+/*	$NetBSD: tcds.c,v 1.16 1996/12/05 01:39:45 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -56,9 +56,13 @@ struct tcds_softc {
 };
 
 /* Definition of the driver for autoconfig. */
+#ifdef __BROKEN_INDIRECT_CONFIG
 int	tcdsmatch __P((struct device *, void *, void *));
+#else
+int	tcdsmatch __P((struct device *, struct cfdata *, void *));
+#endif
 void	tcdsattach __P((struct device *, struct device *, void *));
-int     tcdsprint(void *, char *);
+int     tcdsprint __P((void *, const char *));
 
 struct cfattach tcds_ca = {
 	sizeof(struct tcds_softc), tcdsmatch, tcdsattach,
@@ -74,7 +78,11 @@ struct cfdriver tcds_cd = {
 int
 tcdsmatch(parent, cfdata, aux)
 	struct device *parent;
+#ifdef __BROKEN_INDIRECT_CONFIG
 	void *cfdata;
+#else
+	struct cfdata *cfdata;
+#endif
 	void *aux;
 {
 	struct tc_attach_args *ta = aux;
@@ -120,7 +128,7 @@ tcdsattach(parent, self, aux)
 	 * not useful) bits set in it when the system boots.  Clear it.
 	 */
 	*sc->sc_imer = 0;
-	wbflush();
+	alpha_mb();
 
 	/* XXX Initial contents of CIR? */
 
@@ -204,7 +212,7 @@ tcdsattach(parent, self, aux)
 int
 tcdsprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 	struct tc_attach_args *ta = aux;
 
@@ -279,10 +287,10 @@ tcds_scsi_reset(sc)
 	tcds_scsi_enable(sc, 0);
 
 	TCDS_CIR_CLR(*sc->sc_tcds->sc_cir, sc->sc_resetbits);
-	wbflush();
+	alpha_mb();
 	DELAY(1);
 	TCDS_CIR_SET(*sc->sc_tcds->sc_cir, sc->sc_resetbits);
-	wbflush();
+	alpha_mb();
 
 	tcds_scsi_enable(sc, 1);
 	tcds_dma_enable(sc, 1);
@@ -298,7 +306,7 @@ tcds_scsi_enable(sc, on)
 		*sc->sc_tcds->sc_imer |= sc->sc_intrmaskbits;
 	else
 		*sc->sc_tcds->sc_imer &= ~sc->sc_intrmaskbits;
-	wbflush();
+	alpha_mb();
 }
 
 void
@@ -312,7 +320,7 @@ tcds_dma_enable(sc, on)
 		TCDS_CIR_SET(*sc->sc_tcds->sc_cir, sc->sc_dmabits);
 	else
 		TCDS_CIR_CLR(*sc->sc_tcds->sc_cir, sc->sc_dmabits);
-	wbflush();
+	alpha_mb();
 }
 
 int
@@ -324,7 +332,7 @@ tcds_scsi_isintr(sc, clear)
 	if ((*sc->sc_tcds->sc_cir & sc->sc_intrbits) != 0) {
 		if (clear) {
 			TCDS_CIR_CLR(*sc->sc_tcds->sc_cir, sc->sc_intrbits);
-			wbflush();
+			alpha_mb();
 		}
 		return (1);
 	} else
@@ -353,11 +361,11 @@ tcds_intr(val)
 	 * Copy and clear (gag!) the interrupts.
 	 */
 	ir = *sc->sc_cir;
-	wbflush();
+	alpha_mb();
 	TCDS_CIR_CLR(*sc->sc_cir, TCDS_CIR_ALLINTR);
-	wbflush();
+	alpha_mb();
 	tc_syncbus();
-	wbflush();
+	alpha_mb();
 
 #ifdef EVCNT_COUNTERS
 	/* No interrupt counting via evcnt counters */ 
@@ -411,4 +419,6 @@ tcds_intr(val)
 	 *	This is wrong, but machine keeps dying.
 	 */
 	DELAY(1);
+
+	return (1);
 }

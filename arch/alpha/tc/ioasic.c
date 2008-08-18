@@ -1,5 +1,5 @@
-/*	$OpenBSD: ioasic.c,v 1.3 1996/07/29 23:02:06 niklas Exp $	*/
-/*	$NetBSD: ioasic.c,v 1.4.4.1 1996/06/05 00:39:05 cgd Exp $	*/
+/*	$OpenBSD: ioasic.c,v 1.6 1997/01/24 19:58:13 niklas Exp $	*/
+/*	$NetBSD: ioasic.c,v 1.10 1996/12/05 01:39:41 cgd Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996 Carnegie-Mellon University.
@@ -52,9 +52,13 @@ struct ioasic_softc {
 };
 
 /* Definition of the driver for autoconfig. */
+#ifdef __BROKEN_INDIRECT_CONFIG
 int	ioasicmatch __P((struct device *, void *, void *));
+#else
+int	ioasicmatch __P((struct device *, struct cfdata *, void *));
+#endif
 void	ioasicattach __P((struct device *, struct device *, void *));
-int     ioasicprint(void *, char *);
+int     ioasicprint(void *, const char *);
 
 struct cfattach ioasic_ca = {
 	sizeof(struct ioasic_softc), ioasicmatch, ioasicattach,
@@ -108,7 +112,11 @@ extern int cputype;
 int
 ioasicmatch(parent, cfdata, aux)
 	struct device *parent;
+#ifdef __BROKEN_INDIRECT_CONFIG
 	void *cfdata;
+#else
+	struct cfdata *cfdata;
+#endif
 	void *aux;
 {
 	struct tc_attach_args *ta = aux;
@@ -190,7 +198,7 @@ ioasicattach(parent, self, aux)
 int
 ioasicprint(aux, pnp)
 	void *aux;
-	char *pnp;
+	const char *pnp;
 {
 	struct ioasicdev_attach_args *d = aux;
 
@@ -288,10 +296,10 @@ ioasic_intr(val)
 	void *val;
 {
 	register struct ioasic_softc *sc = val;
-	register int i, ifound;
+	register int ifound;
 	int gifound;
-	u_int32_t sir, junk;
-	volatile u_int32_t *sirp, *junkp;
+	u_int32_t sir;
+	volatile u_int32_t *sirp;
 
 	sirp = (volatile u_int32_t *)IOASIC_REG_INTR(sc->sc_base);
 

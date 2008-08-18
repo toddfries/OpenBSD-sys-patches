@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.10 1996/08/31 09:15:12 pefo Exp $	*/
+/*	$OpenBSD: proc.h,v 1.13 1997/02/01 21:49:30 deraadt Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -75,12 +75,13 @@ struct	pgrp {
  */
 struct exec_package;
 struct ps_strings;
+union sigval;
 
 struct	emul {
 	char	e_name[8];		/* Symbolic name */
 	int	*e_errno;		/* Errno array */
 					/* Signal sending function */
-	void	(*e_sendsig) __P((sig_t, int, int, u_long));
+	void	(*e_sendsig) __P((sig_t, int, int, u_long, int, union sigval));
 	int	e_nosys;		/* Offset of the nosys() syscall */
 	int	e_nsysent;		/* Number of system call entries */
 	struct sysent *e_sysent;	/* System call array */
@@ -306,6 +307,7 @@ int	leavepgrp __P((struct proc *p));
 void	mi_switch __P((void));
 void	pgdelete __P((struct pgrp *pgrp));
 void	procinit __P((void));
+void	remrunqueue __P((struct proc *));
 void	resetpriority __P((struct proc *));
 void	setrunnable __P((struct proc *));
 void	setrunqueue __P((struct proc *));

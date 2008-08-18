@@ -1,7 +1,7 @@
-#	$OpenBSD: Makefile.mac68k,v 1.11 1996/08/30 22:41:40 briggs Exp $
-#	$NetBSD: Makefile.mac68k,v 1.40 1996/08/10 06:09:07 mycroft Exp $
+#	$OpenBSD: Makefile.mac68k,v 1.14 1997/04/23 00:57:15 gene Exp $
+#	$NetBSD: Makefile.mac68k,v 1.53 1997/04/15 06:11:38 scottr Exp $
 
-# Makefile for NetBSD
+# Makefile for OpenBSD
 #
 # This makefile is constructed from a machine description:
 #	config machineid
@@ -26,6 +26,7 @@ CC?=	cc
 LD?=	ld
 MKDEP?=	mkdep
 STRIP?=	strip -d
+COPTS?= -O2
 TOUCH?=	touch -f -c
 
 # source tree is located via $S relative to the compilation directory
@@ -35,7 +36,7 @@ MAC68K=	$S/arch/mac68k
 INCLUDES=	-I. -I$S/arch -I$S -nostdinc
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -Dmc68020 -Dmac68k
 CWARNFLAGS=	-Wall -Wstrict-prototypes -Wmissing-prototypes -Wno-uninitialized
-CFLAGS=		${DEBUG} ${CWARNFLAGS} -O -msoft-float
+CFLAGS=		${DEBUG} ${COPTS} ${CWARNFLAGS} -msoft-float
 AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
 LINKFLAGS=	-n -Ttext 0 -e start
 
@@ -105,14 +106,10 @@ LINKFLAGS+=	-S
 
 %LOAD
 
-assym.h: genassym
-	./genassym >assym.h
-
-genassym: genassym.o
-	${CC} -o $@ genassym.o
-
-genassym.o: ${MAC68K}/mac68k/genassym.c
-	${HOSTED_C_C}
+assym.h: $S/kern/genassym.sh ${MAC68K}/mac68k/genassym.cf
+	sh $S/kern/genassym.sh ${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} \
+	    < ${MAC68K}/mac68k/genassym.cf > assym.h.tmp && \
+	mv -f assym.h.tmp assym.h
 
 param.c: $S/conf/param.c
 	rm -f param.c
@@ -131,7 +128,8 @@ newvers: ${SYSTEM_DEP} ${SYSTEM_SWAP_DEP}
 
 clean::
 	rm -f eddep *bsd bsd.gdb tags *.[io] [a-z]*.s \
-	    [Ee]rrs linterrs makelinks genassym genassym.o assym.h
+	    [Ee]rrs linterrs makelinks assym.h.tmp assym.h genassym.o \
+	    genassym
 
 lint:
 	@lint -hbxncez -DGENERIC -Dvolatile= ${CPPFLAGS} ${PARAM} -UKGDB \
@@ -157,7 +155,10 @@ depend:: .depend
 	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${MAC68K}/mac68k/locore.s
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
-	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} ${PARAM} ${MAC68K}/mac68k/genassym.c
+	-if test -n "${SFILES}"; then \
+		${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}; \
+	fi
+
 
 
 # depend on root or device configuration
@@ -167,7 +168,7 @@ autoconf.o conf.o: Makefile
 uipc_proto.o vfs_conf.o: Makefile 
 
 # depend on maxusers
-genassym.o machdep.o: Makefile
+assym.h machdep.o: Makefile
 
 # depend on CPU configuration 
 locore.o pmap.o trap.o: Makefile

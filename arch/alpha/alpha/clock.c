@@ -1,5 +1,5 @@
-/*	$OpenBSD: clock.c,v 1.5 1996/07/29 22:57:13 niklas Exp $	*/
-/*	$NetBSD: clock.c,v 1.10 1996/04/23 15:26:06 cgd Exp $	*/
+/*	$OpenBSD: clock.c,v 1.7 1997/01/24 19:56:19 niklas Exp $	*/
+/*	$NetBSD: clock.c,v 1.14 1996/11/23 06:31:57 cgd Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -49,6 +49,7 @@
 #include <sys/device.h>
 
 #include <machine/rpb.h>
+#include <machine/autoconf.h>
 
 #include <alpha/alpha/clockvar.h>
 
@@ -70,18 +71,17 @@ clockattach(dev, fns)
 {
 
 	/*
-	 * establish the clock interrupt; it's a special case
+	 * Just bookkeeping.
 	 */
-	set_clockintr();
-#ifdef EVCNT_COUNTERS
-	evcnt_attach(self, "intr", &clock_intr_evcnt);
-#endif
 	printf("\n");
 
 	if (clockfns != NULL)
 		panic("clockattach: multiple clocks");
 	clockdev = dev;
 	clockfns = fns;
+#ifdef EVCNT_COUNTERS
+	evcnt_attach(dev, "intr", &clock_intr_evcnt);
+#endif
 }
 
 /*
@@ -105,8 +105,6 @@ void
 cpu_initclocks()
 {
 	extern int tickadj;
-	struct clock_softc *csc;
-	int fractick;
 
 	if (clockfns == NULL)
 		panic("cpu_initclocks: no clock attached");
@@ -121,6 +119,20 @@ cpu_initclocks()
 		tickfix >>= (ftp - 1);
 		tickfixinterval = hz >> (ftp - 1);
         }
+
+	/*
+	 * Establish the clock interrupt; it's a special case.
+	 *
+	 * We establish the clock interrupt this late because if
+	 * we do it at clock attach time, we may have never been at
+	 * spl0() since taking over the system.  Some versions of
+	 * PALcode save a clock interrupt, which would get delivered
+	 * when we spl0() in autoconf.c.  If established the clock
+	 * interrupt handler earlier, that interrupt would go to
+	 * hardclock, which would then fall over because p->p_stats
+	 * isn't set at that time.
+	 */
+	set_clockintr();
 
 	/*
 	 * Get the clock started.
@@ -160,8 +172,8 @@ inittodr(base)
 {
 	register int days, yr;
 	struct clocktime ct;
-	long deltat;
-	int badbase, s;
+	time_t deltat;
+	int badbase;
 
 	if (base < 5*SECYR) {
 		printf("WARNING: preposterous time in file system");
@@ -227,7 +239,6 @@ resettodr()
 {
 	register int t, t2;
 	struct clocktime ct;
-	int s;
 
 	if (!clockinitted)
 		return;
@@ -238,6 +249,7 @@ resettodr()
 
 	/* compute the year */
 	ct.year = 69;
+	t = t2;			/* XXX ? */
 	while (t2 >= 0) {	/* whittle off years */
 		t = t2;
 		ct.year++;

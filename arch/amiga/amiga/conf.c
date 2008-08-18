@@ -1,5 +1,5 @@
-/*	$OpenBSD: conf.c,v 1.13 1996/10/05 15:47:50 niklas Exp $	*/
-/*	$NetBSD: conf.c,v 1.36 1996/05/19 21:04:18 veego Exp $	*/
+/*	$OpenBSD: conf.c,v 1.17 1997/05/13 13:24:46 niklas Exp $	*/
+/*	$NetBSD: conf.c,v 1.42 1997/01/07 11:35:03 mrg Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -51,8 +51,6 @@
 #include <sys/bankeddev.h>
 #endif
 
-int	ttselect	__P((dev_t, int, struct proc *));
-
 #include "vnd.h"
 #include "sd.h"
 #include "cd.h"
@@ -62,9 +60,8 @@ int	ttselect	__P((dev_t, int, struct proc *));
 #include "ss.h"
 #include "wd.h"
 #include "acd.h"
-#if 0
 #include "rd.h"
-#endif
+#include "ch.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -84,9 +81,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 13 */
 	bdev_lkm_dummy(),		/* 14 */
 	bdev_disk_init(NACD,acd),	/* 15: ATAPI CD-ROM */
-#if 0
 	bdev_disk_init(NRD,rd),		/* 16: ram disk driver */
-#endif
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
@@ -100,17 +95,12 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 #include "ms.h"
 #include "view.h"
 #include "mfcs.h"
+#include "drcom.h"
 dev_decl(filedesc,open);
 #include "bpfilter.h"
 #include "tun.h"
-#ifdef IPFILTER
-#define NIPF 1
-#else
-#define NIPF 0
-#endif
 #include "com.h"
 #include "lpt.h"
-#include "random.h"
 #include "uk.h"
 
 struct cdevsw	cdevsw[] =
@@ -150,10 +140,13 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NCOM,com),	/* 32: ISA serial port */
 	cdev_lpt_init(NLPT,lpt),	/* 33: ISA parallel printer */
 	cdev_gen_ipf(NIPF,ipl),		/* 34: IP filter log */
-	cdev_random_init(NRANDOM,random), /* 35: random data source */
+	cdev_random_init(1,random),	/* 35: random data source */
 	cdev_uk_init(NUK,uk),		/* 36: unknown SCSI */
 	cdev_disk_init(NWD,wd),		/* 37: ST506/ESDI/IDE disk */
 	cdev_disk_init(NACD,acd),	/* 38: ATAPI CD-ROM */
+	cdev_tty_init(NDRCOM,drcom),	/* 39: DraCo com ports */
+	cdev_ch_init(NCH,ch),		/* 40: SCSI autochanger */
+	cdev_disk_init(NRD,rd),		/* 41: RAM disk */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 
@@ -223,9 +216,9 @@ static int chrtoblktab[] = {
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
-	/*  7 */	8,
-	/*  8 */	4,
-	/*  9 */	7,
+	/*  7 */	8,		/* ccd */
+	/*  8 */	4,		/* sd */
+	/*  9 */	7,		/* cd */
 	/* 10 */	NODEV,
 	/* 11 */	NODEV,
 	/* 12 */	NODEV,
@@ -234,9 +227,9 @@ static int chrtoblktab[] = {
 	/* 15 */	NODEV,
 	/* 16 */	NODEV,
 	/* 17 */	NODEV,
-	/* 18 */	2,
-	/* 19 */	6,
-	/* 20 */	5,
+	/* 18 */	2,		/* fd */
+	/* 19 */	6,		/* vnd */
+	/* 20 */	5,		/* st */
 	/* 21 */	NODEV,
 	/* 22 */	NODEV,
 	/* 23 */	NODEV,
@@ -253,8 +246,11 @@ static int chrtoblktab[] = {
 	/* 34 */	NODEV,
 	/* 35 */	NODEV,
 	/* 36 */	NODEV,
-	/* 37 */	0,
-	/* 38 */	15,
+	/* 37 */	0,		/* wd */
+	/* 38 */	15,		/* acd */
+	/* 39 */	NODEV,
+	/* 40 */	NODEV,
+	/* 41 */	16,		/* rd */
 };
 
 /*
@@ -272,6 +268,24 @@ chrtoblk(dev)
 	if (blkmaj == NODEV)
 		return(NODEV);
 	return (makedev(blkmaj, minor(dev)));
+}
+
+/*
+ * Convert a character device number to a block device number.
+ */
+dev_t
+blktochr(dev)
+	dev_t dev;
+{
+	int blkmaj = major(dev);
+	int i;
+
+	if (blkmaj >= nblkdev)
+		return (NODEV);
+	for (i = 0; i < sizeof(chrtoblktab)/sizeof(chrtoblktab[0]); i++)
+		if (blkmaj == chrtoblktab[i])
+			return (makedev(i, minor(dev)));
+	return (NODEV);
 }
 
 /*

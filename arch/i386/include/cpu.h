@@ -67,7 +67,7 @@
 #define	CLKF_USERMODE(frame)	USERMODE((frame)->if_cs, (frame)->if_eflags)
 #define	CLKF_BASEPRI(frame)	((frame)->if_ppl == 0)
 #define	CLKF_PC(frame)		((frame)->if_eip)
-#define	CLKF_INTR(frame)	(0)	/* XXX should have an interrupt stack */
+#define	CLKF_INTR(frame)	(IDXSEL((frame)->if_cs) == GICODE_SEL)
 
 /*
  * Preempt the current process if in interrupt from user mode,
@@ -99,6 +99,7 @@ void	delay __P((int));
 /*
  * High resolution clock support (Pentium only)
  */
+void	calibrate_cyclecounter __P((void));
 extern u_quad_t pentium_base_tsc;
 #define CPU_CLOCKUPDATE(otime, ntime)					\
 	do {								\
@@ -152,6 +153,8 @@ void	cpu_reset __P((void));
 struct region_descriptor;
 void	lgdt __P((struct region_descriptor *));
 void	fillw __P((short, void *, size_t));
+short	fusword __P((u_short *));
+int	susword __P((u_short *t, u_short));
 
 struct pcb;
 void	savectx __P((struct pcb *));
@@ -180,6 +183,9 @@ int	i386_set_ldt __P((struct proc *, char *, register_t *));
 /* isa_machdep.c */
 void	isa_defaultirq __P((void));
 int	isa_nmi __P((void));
+
+/* vm_machdep.c */
+int	kvtop __P((caddr_t));
 
 #ifdef VM86
 /* vm86.c */
