@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.26.4.1 2007/03/30 22:34:43 ckuethe Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.28.2.1 2007/04/28 01:53:46 ckuethe Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -133,7 +133,7 @@ void
 kqueue_init(void)
 {
 
-	pool_init(&kqueue_pool, sizeof(struct kqueue), 0, 0, 0, "kqeuepl",
+	pool_init(&kqueue_pool, sizeof(struct kqueue), 0, 0, 0, "kqueuepl",
 	    &pool_allocator_nointr);
 	pool_init(&knote_pool, sizeof(struct knote), 0, 0, 0, "knotepl",
 	    &pool_allocator_nointr);
@@ -423,7 +423,7 @@ kqueue_register(struct kqueue *kq, struct kevent *kev, struct proc *p)
 	if (fops == NULL) {
 		/*
 		 * XXX
-		 * filter attach routine is responsible for insuring that
+		 * filter attach routine is responsible for ensuring that
 		 * the identifier can be attached to it.
 		 */
 		return (EINVAL);
@@ -499,7 +499,7 @@ kqueue_register(struct kqueue *kq, struct kevent *kev, struct proc *p)
 			/*
 			 * The user may change some filter values after the
 			 * initial EV_ADD, but doing so will not reset any
-			 * filter which have already been triggered.
+			 * filters which have already been triggered.
 			 */
 			kn->kn_sfflags = kev->fflags;
 			kn->kn_sdata = kev->data;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.103 2006/05/11 13:21:11 mickey Exp $	*/
+/*	$OpenBSD: locore.s,v 1.106 2007/02/20 21:15:01 tom Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -195,12 +195,12 @@
 	.globl	_C_LABEL(cpu), _C_LABEL(cpu_id), _C_LABEL(cpu_vendor)
 	.globl	_C_LABEL(cpu_brandstr)
 	.globl	_C_LABEL(cpuid_level)
+	.globl	_C_LABEL(cpu_miscinfo)
 	.globl	_C_LABEL(cpu_feature), _C_LABEL(cpu_ecxfeature)
 	.globl	_C_LABEL(cpu_cache_eax), _C_LABEL(cpu_cache_ebx)
 	.globl	_C_LABEL(cpu_cache_ecx), _C_LABEL(cpu_cache_edx)
 	.globl	_C_LABEL(cold), _C_LABEL(cnvmem), _C_LABEL(extmem)
 	.globl	_C_LABEL(esym)
-	.globl	_C_LABEL(nkptp_max)
 	.globl	_C_LABEL(boothowto), _C_LABEL(bootdev), _C_LABEL(atdevbase)
 	.globl	_C_LABEL(proc0paddr), _C_LABEL(PTDpaddr), _C_LABEL(PTDsize)
 	.globl	_C_LABEL(gdt)
@@ -232,6 +232,7 @@ _C_LABEL(lapic_tpr):
 
 _C_LABEL(cpu):		.long	0	# are we 386, 386sx, 486, 586 or 686
 _C_LABEL(cpu_id):	.long	0	# saved from 'cpuid' instruction
+_C_LABEL(cpu_miscinfo):	.long	0	# misc info (apic/brand id) from 'cpuid'
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid' instruction
 _C_LABEL(cpu_ecxfeature):.long	0	# extended feature flags from 'cpuid'
 _C_LABEL(cpuid_level):	.long	-1	# max. lvl accepted by 'cpuid' insn
@@ -245,7 +246,6 @@ _C_LABEL(cold):		.long	1	# cold till we are not
 _C_LABEL(esym):		.long	0	# ptr to end of syms
 _C_LABEL(cnvmem):	.long	0	# conventional memory size
 _C_LABEL(extmem):	.long	0	# extended memory size
-_C_LABEL(boothowto):	.long	0	# boot flags
 _C_LABEL(atdevbase):	.long	0	# location of start of iomem in virtual
 _C_LABEL(bootapiver):	.long	0	# /boot API version
 _C_LABEL(bootargc):	.long	0	# /boot argc
@@ -466,6 +466,7 @@ try586:	/* Use the `cpuid' instruction. */
 	movl	$1,%eax
 	cpuid
 	movl	%eax,RELOC(_C_LABEL(cpu_id))	# store cpu_id and features
+	movl	%ebx,RELOC(_C_LABEL(cpu_miscinfo))
 	movl	%edx,RELOC(_C_LABEL(cpu_feature))
 	movl	%ecx,RELOC(_C_LABEL(cpu_ecxfeature))
 
@@ -533,20 +534,9 @@ try586:	/* Use the `cpuid' instruction. */
  *			      0          1       2      3
  */
 #define	PROC0PDIR	((0)		* NBPG)
-#define	PROC0STACK	((4)		* NBPG)
-#define	SYSMAP		((4+UPAGES)	* NBPG)
-#define	TABLESIZE	((4+UPAGES) * NBPG) /* + _C_LABEL(nkpde) * NBPG */
-
-	/* Clear the BSS. */
-	movl	$RELOC(_C_LABEL(edata)),%edi
-	movl	$_C_LABEL(end),%ecx
-	subl	$_C_LABEL(edata),%ecx
-	addl	$3,%ecx
-	shrl	$2,%ecx
-	xorl	%eax,%eax
-	cld
-	rep
-	stosl
+#define	PROC0STACK	((1)		* NBPG)
+#define	SYSMAP		((1+UPAGES)	* NBPG)
+#define	TABLESIZE	((1+UPAGES) * NBPG) /* + _C_LABEL(nkpde) * NBPG */
 
 	/* Find end of kernel image. */
 	movl	$RELOC(_C_LABEL(end)),%edi
@@ -574,9 +564,9 @@ try586:	/* Use the `cpuid' instruction. */
 	jge	1f
 	movl	$NKPTP_MIN,%ecx			# set at min
 	jmp	2f
-1:	cmpl	RELOC(_C_LABEL(nkptp_max)),%ecx	# larger than max?
+1:	cmpl	$NKPTP_MAX,%ecx			# larger than max?
 	jle	2f
-	movl	RELOC(_C_LABEL(nkptp_max)),%ecx
+	movl	$NKPTP_MAX,%ecx
 2:	movl	%ecx,RELOC(_C_LABEL(nkpde))	# and store it back
 
 	/* Clear memory for bootstrap tables. */
@@ -661,8 +651,6 @@ try586:	/* Use the `cpuid' instruction. */
 	/* Install a PDE recursively mapping page directory as a page table! */
 	leal	(PROC0PDIR+PG_V|PG_KW)(%esi),%eax	# pte for ptd
 	movl	%eax,(PROC0PDIR+PDSLOT_PTE*4)(%esi)	# recursive PD slot
-	addl	$NBPG, %eax				# pte for ptd[1]
-	movl	%eax,(PROC0PDIR+(PDSLOT_PTE+1)*4)(%esi)	# recursive PD slot
 
 	/* Save phys. addr of PTD, for libkvm. */
 	movl	%esi,RELOC(_C_LABEL(PTDpaddr))
@@ -2313,42 +2301,6 @@ ENTRY(i686_pagezero)
 	popl	%edi
 	ret
 #endif
-
-#ifndef SMALL_KERNEL
-/*
- * int cpu_paenable(void *);
- */
-ENTRY(cpu_paenable)
-	movl	$-1, %eax
-	testl	$CPUID_PAE, _C_LABEL(cpu_feature)
-	jz	1f
-
-	pushl	%esi
-	pushl	%edi
-	movl	12(%esp), %esi
-	movl	%cr3, %edi
-	orl	$0xfe0, %edi	/* PDPT will be in the last four slots! */
-	movl	%edi, %cr3
-	addl	$KERNBASE, %edi	/* and make it back virtual again */
-	movl	$8, %ecx
-	cld
-	rep
-	movsl
-	movl	%cr4, %eax
-	orl	$CR4_PAE, %eax
-	movl	%eax, %cr4	/* BANG!!! */
-	movl	12(%esp), %eax
-	subl	$KERNBASE, %eax
-	movl	%eax, %cr3	/* reload real PDPT */
-	movl	$4*NBPG, %eax
-	movl	%eax, _C_LABEL(PTDsize)
-
-	xorl	%eax, %eax
-	popl	%edi
-	popl	%esi
-1:
-	ret
-#endif /* !SMALL_KERNEL */
 
 #if NLAPIC > 0
 #include <i386/i386/apicvec.s>

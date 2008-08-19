@@ -1,4 +1,4 @@
-/*	$OpenBSD: m68k_machdep.c,v 1.8 2006/04/16 22:36:44 miod Exp $	*/
+/*	$OpenBSD: m68k_machdep.c,v 1.10 2007/02/26 21:30:17 miod Exp $	*/
 /*	$NetBSD: m68k_machdep.c,v 1.3 1997/06/12 09:57:04 veego Exp $	*/
 
 /*-
@@ -87,6 +87,8 @@ setregs(p, pack, stack, retval)
 	else
 		p->p_md.md_flags &= ~MDP_UNCACHE_WX;
 #endif
+
+	retval[1] = 0;
 }
 
 /*
@@ -103,7 +105,7 @@ child_return(arg)
 	f->f_sr &= ~PSL_C;	/* carry bit */
 	f->f_format = FMT0;
 
-	userret(p, f, p->p_sticks, 0, 0);
+	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,

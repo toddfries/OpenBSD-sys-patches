@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukbd.c,v 1.25 2006/06/26 22:14:12 miod Exp $	*/
+/*	$OpenBSD: ukbd.c,v 1.27 2007/02/11 20:29:22 miod Exp $	*/
 /*      $NetBSD: ukbd.c,v 1.85 2003/03/11 16:44:00 augustss Exp $        */
 
 /*
@@ -74,11 +74,6 @@
 #include <dev/wscons/wskbdvar.h>
 #include <dev/wscons/wsksymdef.h>
 #include <dev/wscons/wsksymvar.h>
-
-#if defined(__NetBSD__)
-#include "opt_wsdisplay_compat.h"
-#include "opt_ddb.h"
-#endif
 
 #ifdef UKBD_DEBUG
 #define DPRINTF(x)	do { if (ukbddebug) logprintf x; } while (0)
@@ -408,12 +403,17 @@ USB_ATTACH(ukbd)
 			printf(", layout %d", hid->bCountryCode);
 #endif
 	} else {
-		if (hid->bCountryCode <= HCC_MAX)
-			layout = ukbd_countrylayout[hid->bCountryCode];
+		if (uha->uaa->vendor == USB_VENDOR_TOPRE &&
+		    uha->uaa->product == USB_PRODUCT_TOPRE_HHKB) {
+			/* ignore country code on purpose */
+		} else {
+			if (hid->bCountryCode <= HCC_MAX)
+				layout = ukbd_countrylayout[hid->bCountryCode];
 #ifdef DIAGNOSTIC
-		if (hid->bCountryCode != 0)
-			printf(", country code %d", hid->bCountryCode);
+			if (hid->bCountryCode != 0)
+				printf(", country code %d", hid->bCountryCode);
 #endif
+		}
 	}
 	if (layout == (kbd_t)-1) {
 #ifdef UKBD_LAYOUT

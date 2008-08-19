@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.133 2006/07/11 21:17:58 mickey Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.139 2007/02/20 17:42:47 deraadt Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -1267,7 +1267,7 @@ loop:
 	return (count);
 }
 
-#ifdef DIAGNOSTIC
+#if defined(DEBUG) || defined(DIAGNOSTIC)
 /*
  * Print out a description of a vnode.
  */
@@ -1312,7 +1312,7 @@ vprint(char *label, struct vnode *vp)
 		VOP_PRINT(vp);
 	}
 }
-#endif /* DIAGNOSTIC */
+#endif /* DEBUG || DIAGNOSTIC */
 
 #ifdef DEBUG
 /*
@@ -1351,7 +1351,8 @@ int
 vfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen, struct proc *p)
 {
-	struct vfsconf *vfsp;
+	struct vfsconf *vfsp, *tmpvfsp;
+	int ret;
 
 	/* all sysctl names at this level are at least name and field */
 	if (namelen < 2)
@@ -1384,8 +1385,18 @@ vfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		if (vfsp == NULL)
 			return (EOPNOTSUPP);
 
-		return (sysctl_rdstruct(oldp, oldlenp, newp, vfsp,
-		    sizeof(struct vfsconf)));
+		/* Make a copy, clear out kernel pointers */
+		tmpvfsp = malloc(sizeof(*tmpvfsp), M_TEMP, M_WAITOK);
+		bcopy(vfsp, tmpvfsp, sizeof(*tmpvfsp));
+		tmpvfsp->vfc_vfsops = NULL;
+		tmpvfsp->vfc_mountroot = NULL;
+		tmpvfsp->vfc_next = NULL;
+
+		ret = sysctl_rdstruct(oldp, oldlenp, newp, tmpvfsp,
+		    sizeof(struct vfsconf));
+
+		free(tmpvfsp, M_TEMP);
+		return (ret);
 	}
 
 	return (EOPNOTSUPP);
@@ -2178,7 +2189,7 @@ reassignbuf(struct buf *bp)
 					delay = syncdelay / 3;
 					break;
 				}
-				/* fall through */
+				/* FALLTHROUGH */
 			default:
 				delay = syncdelay;
 			}
@@ -2275,14 +2286,14 @@ void
 vfs_buf_print(struct buf *bp, int full, int (*pr)(const char *, ...))
 {
 
-	(*pr)("  vp %p lblkno 0x%x blkno 0x%x dev 0x%x\n"
+	(*pr)("  vp %p lblkno 0x%llx blkno 0x%llx dev 0x%x\n"
 	      "  proc %p error %d flags %b\n",
-	    bp->b_vp, bp->b_lblkno, bp->b_blkno, bp->b_dev,
+	    bp->b_vp, (int64_t)bp->b_lblkno, (int64_t)bp->b_blkno, bp->b_dev,
 	    bp->b_proc, bp->b_error, bp->b_flags, B_BITS);
 
-	(*pr)("  bufsize 0x%lx bcount 0x%lx resid 0x%zx sync 0x%x\n"
+	(*pr)("  bufsize 0x%lx bcount 0x%lx resid 0x%lx sync 0x%x\n"
 	      "  data %p saveaddr %p dep %p iodone %p\n",
-	    bp->b_bufsize, bp->b_bcount, bp->b_resid, bp->b_synctime,
+	    bp->b_bufsize, bp->b_bcount, (long)bp->b_resid, bp->b_synctime,
 	    bp->b_data, bp->b_saveaddr, LIST_FIRST(&bp->b_dep), bp->b_iodone);
 
 	(*pr)("  dirty {off 0x%x end 0x%x} valid {off 0x%x end 0x%x}\n",
@@ -2304,8 +2315,8 @@ vfs_vnode_print(struct vnode *vp, int full, int (*pr)(const char *, ...))
 #define	NENTS(n)	(sizeof n / sizeof(n[0]))
 	(*pr)("tag %s(%d) type %s(%d) mount %p typedata %p\n",
 	      vp->v_tag > NENTS(vtags)? "<unk>":vtags[vp->v_tag], vp->v_tag,
-	      vp->v_type > NENTS(vtypes)? "<unk>":vtypes[vp->v_tag],vp->v_type,
-	      vp->v_mount, vp->v_mountedhere);
+	      vp->v_type > NENTS(vtypes)? "<unk>":vtypes[vp->v_type],
+	      vp->v_type, vp->v_mount, vp->v_mountedhere);
 
 	(*pr)("data %p usecount %d writecount %ld holdcnt %ld numoutput %d\n",
 	      vp->v_data, vp->v_usecount, vp->v_writecount,

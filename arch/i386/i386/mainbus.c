@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.26 2006/04/14 21:26:18 marco Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.33 2007/02/13 12:52:07 dim Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.21 1997/06/06 23:14:20 thorpej Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include "acpi.h"
 #include "ipmi.h"
 #include "esm.h"
+#include "vesabios.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
@@ -73,6 +74,10 @@
 
 #if NESM > 0
 #include <arch/i386/i386/esmvar.h>
+#endif
+
+#if NVESABIOS > 0
+#include <dev/vesa/vesabiosvar.h>
 #endif
 
 #if 0
@@ -137,7 +142,7 @@ void
 mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
 	union mainbus_attach_args	mba;
-	extern int			cpu_id, cpu_feature;
+	extern void			(*setperf_setup)(struct cpu_info *);
 
 	printf("\n");
 
@@ -163,6 +168,7 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 			config_found(self, &mba.mba_aaa, mainbus_print);
 	}
 #endif
+
 #if NIPMI > 0
 	{
 		memset(&mba.mba_iaa, 0, sizeof(mba.mba_iaa));
@@ -177,11 +183,11 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 #if NMPBIOS > 0
 	if (mpbios_probe(self))
 		mpbios_scan(self);
-	else
 #endif
-	{
+
+	if ((cpu_info_primary.ci_flags & CPUF_PRESENT) == 0) {
 		struct cpu_attach_args caa;
-		
+
 		memset(&caa, 0, sizeof(caa));
 		caa.caa_name = "cpu";
 		caa.cpu_number = 0;
@@ -192,6 +198,21 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 
 		config_found(self, &caa, mainbus_print);
 	}
+
+#if NACPI > 0
+	if (!acpi_hasprocfvs)
+#endif
+	{
+		if (setperf_setup != NULL)
+			setperf_setup(&cpu_info_primary);
+	}
+
+#if NVESABIOS > 0
+	if (vbeprobe())	{
+		mba.mba_busname = "vesabios";
+		config_found(self, &mba.mba_busname, NULL);
+	}
+#endif
 
 #if 0
 #ifdef SMP
@@ -231,6 +252,7 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 		mba.mba_pba.pba_iot = I386_BUS_SPACE_IO;
 		mba.mba_pba.pba_memt = I386_BUS_SPACE_MEM;
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
+		mba.mba_pba.pba_domain = pci_ndomains++;
 		mba.mba_pba.pba_bus = 0;
 		mba.mba_pba.pba_bridgetag = NULL;
 		config_found(self, &mba.mba_pba, mainbus_print);

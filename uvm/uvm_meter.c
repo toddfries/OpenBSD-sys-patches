@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_meter.c,v 1.20 2004/06/21 23:50:38 tholo Exp $	*/
+/*	$OpenBSD: uvm_meter.c,v 1.22 2007/02/14 00:53:48 jsg Exp $	*/
 /*	$NetBSD: uvm_meter.c,v 1.21 2001/07/14 06:36:03 matt Exp $	*/
 
 /*
@@ -107,7 +107,7 @@ uvm_loadav(avg)
 		case SSLEEP:
 			if (p->p_priority > PZERO || p->p_slptime > 1)
 				continue;
-		/* fall through */
+		/* FALLTHROUGH */
 		case SRUN:
 		case SIDL:
 		case SONPROC:
@@ -251,13 +251,10 @@ uvm_total(totalp)
 
 		case SSLEEP:
 		case SSTOP:
-			if (p->p_flag & P_INMEM) {
-				if (p->p_priority <= PZERO)
-					totalp->t_dw++;
-				else if (p->p_slptime < maxslp)
-					totalp->t_sl++;
-			} else if (p->p_slptime < maxslp)
-				totalp->t_sw++;
+			if (p->p_priority <= PZERO)
+				totalp->t_dw++;
+			else if (p->p_slptime < maxslp)
+				totalp->t_sl++;
 			if (p->p_slptime >= maxslp)
 				continue;
 			break;
@@ -265,10 +262,7 @@ uvm_total(totalp)
 		case SRUN:
 		case SIDL:
 		case SONPROC:
-			if (p->p_flag & P_INMEM)
-				totalp->t_rq++;
-			else
-				totalp->t_sw++;
+			totalp->t_rq++;
 			if (p->p_stat == SIDL)
 				continue;
 			break;

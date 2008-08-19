@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.128 2006/08/28 11:38:17 dlg Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.136 2007/02/20 20:43:40 tom Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -41,6 +41,17 @@ config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
 
+acpi0		at mainbus?	disable
+#acpitimer*	at acpi?
+#acpihpet*	at acpi?
+#acpiac*	at acpi?
+#acpibat*	at acpi?
+#acpibtn*	at acpi?
+#acpicpu*	at acpi?
+#acpiec*	at acpi?
+acpiprt*	at acpi?
+#acpitz*	at acpi?
+
 cpu0	at mainbus?
 bios0	at mainbus0
 apm0	at bios0 flags 0x0000	# flags 0x0101 to force protocol version 1.1
@@ -64,6 +75,7 @@ pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
 ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
 gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
+geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 
 # CardBus bus support
 cardbus*	at cardslot?
@@ -121,7 +133,6 @@ kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 urio*	at uhub?		# Diamond Multimedia Rio 500
 cdce*	at uhub?		# CDC Ethernet
-upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
@@ -131,6 +142,8 @@ wi*	at uhub?		# WaveLAN IEEE 802.11DS
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
+rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+zyd*	at uhub?		# Zydas ZD1211/ZD1211B
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
@@ -190,9 +203,6 @@ arc*	at pci?			# Areca RAID Controllers
 scsibus* at arc?
 mpi*	at pci?			# LSI Logic Fusion-MPT Message Passing Interface
 scsibus* at mpi?
-dpt*	at pci?			# DPT SmartCache/SmartRAID PCI
-dpt*	at eisa?		# DPT SmartCache/SmartRAID EISA
-scsibus* at dpt?
 gdt*	at pci?			# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
 #aac*	at pci?			# Adaptec FSA RAID controllers
@@ -343,6 +353,7 @@ bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
+vic*	at pci?				# VMware VMXnet virtual interface
 
 # Wireless network cards
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)

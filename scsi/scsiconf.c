@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.111 2006/07/29 02:40:45 krw Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.124 2006/12/29 13:04:37 pedro Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -47,6 +47,8 @@
  * Ported to run under 386BSD by Julian Elischer (julian@tfs.com) Sept 1992
  */
 
+#include "bio.h"
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,11 +58,16 @@
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 
+#if NBIO > 0
+#include <sys/ioctl.h>
+#include <sys/scsiio.h>
+#include <dev/biovar.h>
+#endif
+
 /*
  * Declarations
  */
 int	scsi_probedev(struct scsibus_softc *, int, int);
-int	scsi_probe_bus(int, int, int);
 
 struct scsi_device probe_switch = {
 	NULL,
@@ -75,6 +82,10 @@ int	scsibusactivate(struct device *, enum devact);
 int	scsibusdetach(struct device *, int);
 
 int	scsibussubmatch(struct device *, void *, void *);
+
+#if NBIO > 0
+int	scsibus_bioctl(struct device *, u_long, caddr_t);
+#endif
 
 struct cfattach scsibus_ca = {
 	sizeof(struct scsibus_softc), scsibusmatch, scsibusattach,
@@ -129,7 +140,8 @@ void
 scsibusattach(struct device *parent, struct device *self, void *aux)
 {
 	struct scsibus_softc		*sb = (struct scsibus_softc *)self;
-	struct scsi_link		*sc_link_proto = aux;
+	struct scsibus_attach_args	*saa = aux;
+	struct scsi_link		*sc_link_proto = saa->saa_sc_link;
 	int				nbytes, i;
 
 	if (!cold)
@@ -160,7 +172,12 @@ scsibusattach(struct device *parent, struct device *self, void *aux)
 		bzero(sb->sc_link[i], nbytes);
 	}
 
-	scsi_probe_bus(sb->sc_dev.dv_unit, -1, -1);
+#if NBIO > 0
+	if (bio_register(&sb->sc_dev, scsibus_bioctl) != 0)
+		printf("%s: unable to register bio\n", sb->sc_dev.dv_xname);
+#endif
+
+	scsi_probe_bus(sb);
 }
 
 int
@@ -173,17 +190,29 @@ int
 scsibusdetach(struct device *dev, int type)
 {
 	struct scsibus_softc		*sb = (struct scsibus_softc *)dev;
-	int				i, error;
+	int				i, j, error;
+
+#if NBIO > 0
+	bio_unregister(&sb->sc_dev);
+#endif
 
 	if ((error = config_detach_children(dev, type)) != 0)
 		return (error);
 
 	for (i = 0; i < sb->sc_buswidth; i++) {
-		if (sb->sc_link[i] != NULL)
+		if (sb->sc_link[i] != NULL) {
+			for (j = 0; j < sb->adapter_link->luns; j++) {
+				if (sb->sc_link[i][j] != NULL)
+					free(sb->sc_link[i][j], M_DEVBUF);
+			}
 			free(sb->sc_link[i], M_DEVBUF);
+		}
 	}
 
 	free(sb->sc_link, M_DEVBUF);
+
+	/* Free shared data. */
+	scsi_deinit();
 
 	return (0);
 }
@@ -192,7 +221,7 @@ int
 scsibussubmatch(struct device *parent, void *match, void *aux)
 {
 	struct cfdata			*cf = match;
-	struct scsibus_attach_args	*sa = aux;
+	struct scsi_attach_args		*sa = aux;
 	struct scsi_link		*sc_link = sa->sa_sc_link;
 
 	if (cf->cf_loc[0] != -1 && cf->cf_loc[0] != sc_link->target)
@@ -203,116 +232,203 @@ scsibussubmatch(struct device *parent, void *match, void *aux)
 	return ((*cf->cf_attach->ca_match)(parent, match, aux));
 }
 
-/*
- * Probe the requested scsi bus. It must be already set up.
- * -1 requests all set up scsi busses.
- * target and lun optionally narrow the search if not -1
- */
+#if NBIO > 0
 int
-scsi_probe_busses(int bus, int target, int lun)
+scsibus_bioctl(struct device *dev, u_long cmd, caddr_t addr)
 {
-	if (bus == -1) {
-		for (bus = 0; bus < scsibus_cd.cd_ndevs; bus++)
-			if (scsibus_cd.cd_devs[bus])
-				scsi_probe_bus(bus, target, lun);
+	struct scsibus_softc		*sc = (struct scsibus_softc *)dev;
+	struct sbioc_device		*sdev;
+
+	switch (cmd) {
+	case SBIOCPROBE:
+		sdev = (struct sbioc_device *)addr;
+
+		if (sdev->sd_target == -1 && sdev->sd_lun == -1)
+			return (scsi_probe_bus(sc));
+
+		/* specific lun and wildcard target is bad */
+		if (sdev->sd_target == -1)
+			return (EINVAL);
+
+		if (sdev->sd_lun == -1)
+			return (scsi_probe_target(sc, sdev->sd_target));
+
+		return (scsi_probe_lun(sc, sdev->sd_target, sdev->sd_lun));
+
+	case SBIOCDETACH:
+		sdev = (struct sbioc_device *)addr;
+
+		if (sdev->sd_target == -1)
+			return (EINVAL);
+
+		if (sdev->sd_lun == -1)
+			return (scsi_detach_target(sc, sdev->sd_target, 0));
+
+		return (scsi_detach_lun(sc, sdev->sd_target, sdev->sd_lun, 0));
+
+	default:
+		return (ENOTTY);
+	}
+}
+#endif
+
+int
+scsi_probe_bus(struct scsibus_softc *sc)
+{
+	struct scsi_link *alink = sc->adapter_link;
+	int i;
+
+	for (i = 0; i < alink->adapter_buswidth; i++)
+		scsi_probe_target(sc, i);
+
+	return (0);
+}
+
+int
+scsi_probe_target(struct scsibus_softc *sc, int target)
+{
+	struct scsi_link *alink = sc->adapter_link;
+	struct scsi_link *link;
+	struct scsi_report_luns_data *report;
+	int i, nluns, lun;
+
+	if (scsi_probe_lun(sc, target, 0) == EINVAL)
+		return (EINVAL);
+
+	link = sc->sc_link[target][0];
+	if (link == NULL)
+		return (ENXIO);
+
+	if ((link->flags & (SDEV_UMASS | SDEV_ATAPI)) == 0 &&
+	    SCSISPC(link->inqdata.version) > 2) {
+		report = malloc(sizeof(*report), M_TEMP, M_WAITOK);
+		if (report == NULL)
+			goto dumbscan;
+
+		if (scsi_report_luns(link, REPORT_NORMAL, report,
+		    sizeof(*report), scsi_autoconf | SCSI_SILENT |
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_NOT_READY |
+		    SCSI_IGNORE_MEDIA_CHANGE, 10000) != 0) {
+			free(report, M_TEMP);
+			goto dumbscan;
+		}
+
+		/*
+		 * XXX In theory we should check if data is full, which
+		 * would indicate it needs to be enlarged and REPORT
+		 * LUNS tried again. Solaris tries up to 3 times with
+		 * larger sizes for data.
+		 */
+		nluns = _4btol(report->length) / RPL_LUNDATA_SIZE;
+		for (i = 0; i < nluns; i++) {
+			if (report->luns[i].lundata[0] != 0)
+				continue;
+			lun = report->luns[i].lundata[RPL_LUNDATA_T0LUN];
+			if (lun == 0)
+				continue;
+
+			/* Probe the provided LUN. Don't check LUN 0. */
+			sc->sc_link[target][0] = NULL;
+			scsi_probe_lun(sc, target, lun);
+			sc->sc_link[target][0] = link;
+		}
+
+		free(report, M_TEMP);
 		return (0);
 	}
 
-	return (scsi_probe_bus(bus, target, lun));
+dumbscan:
+	for (i = 1; i < alink->luns; i++) {
+		if (scsi_probe_lun(sc, target, i) == EINVAL)
+			break;
+	}
+
+	return (0);
 }
 
-/*
- * Probe the requested scsi bus. It must be already set up.
- * target and lun optionally narrow the search if not -1
- */
 int
-scsi_probe_bus(int bus, int target, int lun)
+scsi_probe_lun(struct scsibus_softc *sc, int target, int lun)
 {
-	struct scsi_report_luns_data *data = NULL;
-	struct scsibus_softc *scsi;
-	struct scsi_link *sc_link;
-	u_int16_t scsi_addr;
-	int i, luncount, maxtarget, mintarget, maxlun, minlun;
+	struct scsi_link *alink = sc->adapter_link;
 
-	if (bus < 0 || bus >= scsibus_cd.cd_ndevs)
+	if (target < 0 || target >= alink->adapter_buswidth ||
+	    target == alink->adapter_target ||
+	    lun < 0 || lun >= alink->luns)
 		return (ENXIO);
 
-	scsi = scsibus_cd.cd_devs[bus];
-	if (scsi == NULL)
-		return ENXIO;
+	return (scsi_probedev(sc, target, lun));
+}
 
-	scsi_addr = scsi->adapter_link->adapter_target;
+int
+scsi_detach_bus(struct scsibus_softc *sc, int flags)
+{
+	struct scsi_link *alink = sc->adapter_link;
+	int i;
 
-	if (target == -1) {
-		maxtarget = scsi->adapter_link->adapter_buswidth - 1;
-		mintarget = 0;
-	} else {
-		if (target < 0 ||
-		    target >= scsi->adapter_link->adapter_buswidth)
-			return (EINVAL);
-		maxtarget = mintarget = target;
-	}
+	for (i = 0; i < alink->adapter_buswidth; i++)
+		scsi_detach_target(sc, i, flags);
 
-	if (lun == -1) {
-		maxlun = scsi->adapter_link->luns - 1;
-		minlun = 0;
-	} else {
-		if (lun < 0 || lun >= scsi->adapter_link->luns)
-			return (EINVAL);
-		maxlun = lun;
-		if (target == -1 || scsi->sc_link[target][0] == NULL)
-			minlun = 0;
-		else
-			minlun = lun;
-	}
-	
-	data = malloc(sizeof *data, M_TEMP, M_NOWAIT);
-	
-	for (target = mintarget; target <= maxtarget; target++) {
-		if (target == scsi_addr)
-			continue;
-		if (scsi_probedev(scsi, target, 0) == EINVAL)
+	return (0);
+}
+
+int
+scsi_detach_target(struct scsibus_softc *sc, int target, int flags)
+{
+	struct scsi_link *alink = sc->adapter_link;
+	int i, err, rv = 0, detached = 0;
+
+	if (target < 0 || target >= alink->adapter_buswidth ||
+	    target == alink->adapter_target)
+		return (ENXIO);
+
+	if (sc->sc_link[target] == NULL)
+		return (ENXIO);
+
+	for (i = 0; i < alink->luns; i++) { /* nicer backwards? */
+		if (sc->sc_link[target][i] == NULL)
 			continue;
 
-		sc_link = scsi->sc_link[target][0];
-		if (sc_link != NULL && data != NULL &&
-		    (sc_link->flags & (SDEV_UMASS | SDEV_ATAPI)) == 0 &&
-		    SCSISPC(sc_link->inqdata.version) > 2) {
-			scsi_report_luns(sc_link, REPORT_NORMAL, data,
-			    sizeof *data, scsi_autoconf | SCSI_SILENT |
-		    	    SCSI_IGNORE_ILLEGAL_REQUEST |
-		            SCSI_IGNORE_NOT_READY | SCSI_IGNORE_MEDIA_CHANGE,
-			    10000);
-			/*
-			 * XXX In theory we should check if data is full, which
-			 * would indicate it needs to be enlarged and REPORT
-			 * LUNS tried again. Solaris tries up to 3 times with
-			 * larger sizes for data.
-			 */
-			luncount = _4btol(data->length) / RPL_LUNDATA_SIZE;
-			for (i = 0; i < luncount; i++) {
-				if (data->luns[i].lundata[0] != 0)
-					continue;
-				lun = data->luns[i].lundata[RPL_LUNDATA_T0LUN];
-				if (lun == 0 || lun < minlun || lun > maxlun)
-					continue;
-				/* Probe the provided LUN. Don't check LUN 0. */
-				scsi->sc_link[target][0] = NULL;
-				scsi_probedev(scsi, target, lun);
-				scsi->sc_link[target][0] = sc_link;
-			}
-			if (luncount > 0)
-				continue; /* Next target. */
-		}
-
-		/* No LUN list available. Scan entire range. */
-		for (lun = max(minlun, 1); lun <= maxlun; lun++)
-			if (scsi_probedev(scsi, target, lun) == EINVAL)
-				break;
+		err = scsi_detach_lun(sc, target, i, flags);
+		if (err != 0)
+			rv = err;
+		detached = 1;
 	}
 
-	if (data != NULL)
-		free(data, M_TEMP);
+	return (detached ? rv : ENXIO);
+}
+
+int
+scsi_detach_lun(struct scsibus_softc *sc, int target, int lun, int flags)
+{
+	struct scsi_link *alink = sc->adapter_link;
+	struct scsi_link *link;
+	int rv;
+
+	if (target < 0 || target >= alink->adapter_buswidth ||
+	    target == alink->adapter_target ||
+	    lun < 0 || lun >= alink->luns)
+		return (ENXIO);
+
+	if (sc->sc_link[target] == NULL)
+		return (ENXIO);
+
+	link = sc->sc_link[target][lun];
+	if (link == NULL)
+		return (ENXIO);
+
+	if (((flags & DETACH_FORCE) == 0) && (link->flags & SDEV_OPEN))
+		return (EBUSY);
+
+	/* detaching a device from scsibus is a two step process... */
+
+	/* 1. detach the device */
+	rv = config_detach(link->device_softc, flags);
+	if (rv != 0)
+		return (rv);
+
+	/* 2. free up its state in the midlayer */
+	free(link, M_DEVBUF);
+	sc->sc_link[target][lun] = NULL;
 
 	return (0);
 }
@@ -376,7 +492,7 @@ struct scsi_quirk_inquiry_pattern {
 
 const struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_CDROM, T_REMOV,
-	 "PLEXTOR", "CD-ROM PX-40TS", "1.01"}, SDEV_NOSYNC},
+	 "PLEXTOR", "CD-ROM PX-40TS", "1.01"},    SDEV_NOSYNC},
 
 	{{T_DIRECT, T_FIXED,
 	 "MICROP  ", "1588-15MBSUN0669", ""},     SDEV_AUTOSAVE},
@@ -466,10 +582,10 @@ const struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 int
 scsibusprint(void *aux, const char *pnp)
 {
-	struct scsibus_attach_args	*sa = aux;
+	struct scsi_attach_args		*sa = aux;
 	struct scsi_inquiry_data	*inqbuf;
 	u_int8_t			type;
-	boolean				removable;
+	int				removable;
 	char				*dtype, *qtype;
 	char				vendor[33], product[65], revision[17];
 	int				target, lun;
@@ -570,7 +686,7 @@ scsibusprint(void *aux, const char *pnp)
 /*
  * Given a target and lun, ask the device what it is, and find the correct
  * driver table entry.
- * 
+ *
  * Return 0 if further LUNs are possible, EINVAL if not.
  */
 int
@@ -578,7 +694,7 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 {
 	const struct scsi_quirk_inquiry_pattern *finger;
 	static struct scsi_inquiry_data	inqbuf;
-	struct scsibus_attach_args sa;
+	struct scsi_attach_args sa;
 	struct scsi_link *sc_link;
 	struct cfdata *cf;
 	int priority, rslt = 0;
@@ -619,7 +735,7 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 #if defined(mvme68k)
 	if (lun == 0) {
 		/* XXX some drivers depend on this */
-		scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_DEFAULT,
+		scsi_test_unit_ready(sc_link, TEST_READY_RETRIES,
 		    scsi_autoconf | SCSI_IGNORE_ILLEGAL_REQUEST |
 		    SCSI_IGNORE_NOT_READY | SCSI_IGNORE_MEDIA_CHANGE);
 	}
@@ -735,7 +851,7 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	 * Do this now so that any messages generated by config_attach() do not
 	 * have negotiation messages inserted into their midst.
 	 */
-	scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_DEFAULT,
+	scsi_test_unit_ready(sc_link, TEST_READY_RETRIES,
 	    scsi_autoconf | SCSI_IGNORE_ILLEGAL_REQUEST |
 	    SCSI_IGNORE_NOT_READY | SCSI_IGNORE_MEDIA_CHANGE);
 
@@ -753,12 +869,13 @@ bad:
  * the patterns for the particular driver.
  */
 const void *
-scsi_inqmatch(struct scsi_inquiry_data *inqbuf, const void *base, int nmatches,
-    int matchsize, int *bestpriority)
+scsi_inqmatch(struct scsi_inquiry_data *inqbuf, const void *_base,
+    int nmatches, int matchsize, int *bestpriority)
 {
 	u_int8_t			type;
-	boolean				removable;
+	int				removable;
 	const void			*bestmatch;
+	const unsigned char		*base = (const unsigned char *)_base;
 
 	/* Include the qualifier to catch vendor-unique types. */
 	type = inqbuf->device;

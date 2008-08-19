@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.24 2006/06/19 15:13:34 deraadt Exp $
+#	$OpenBSD: files.amd64,v 1.26 2007/02/17 17:35:43 tom Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -9,6 +9,7 @@ file	arch/amd64/amd64/disksubr.c		disk
 file	arch/amd64/amd64/gdt.c
 file	arch/amd64/amd64/machdep.c
 file	arch/amd64/amd64/identcpu.c
+file	arch/amd64/amd64/amd64errata.c
 file	arch/amd64/amd64/mem.c
 file	arch/amd64/amd64/pmap.c
 file	arch/amd64/amd64/process_machdep.c
@@ -181,6 +182,11 @@ file	arch/amd64/amd64/acpi_machdep.c		acpi
 # Machine-independent SD/MMC drivers
 #
 include "dev/sdmmc/files.sdmmc"
+
+#
+# Machine-independent 1-Wire drivers
+#
+include "dev/onewire/files.onewire"
 
 #
 # IPMI

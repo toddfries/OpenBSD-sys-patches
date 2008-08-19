@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnxreg.h,v 1.11 2006/08/21 03:22:09 brad Exp $	*/
+/*	$OpenBSD: if_bnxreg.h,v 1.20 2007/03/05 11:13:10 reyk Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -34,6 +34,7 @@
 #ifndef	_BNX_H_DEFINED
 #define _BNX_H_DEFINED
 
+#ifdef _KERNEL
 #include "bpfilter.h"
 #include "vlan.h"
 
@@ -691,7 +692,8 @@ struct tx_bd {
 	u_int32_t tx_bd_haddr_hi;
 	u_int32_t tx_bd_haddr_lo;
 	u_int32_t tx_bd_mss_nbytes;
-	u_int32_t tx_bd_vlan_tag_flags;
+	u_int16_t tx_bd_flags;
+	u_int16_t tx_bd_vlan_tag;
 		#define TX_BD_FLAGS_CONN_FAULT		(1<<0)
 		#define TX_BD_FLAGS_TCP_UDP_CKSUM	(1<<1)
 		#define TX_BD_FLAGS_IP_CKSUM		(1<<2)
@@ -4570,7 +4572,8 @@ struct fw_info {
 #define BNX_MAX_JUMBO_ETHER_MTU			9018
 #define BNX_MAX_JUMBO_ETHER_MTU_VLAN 	9022
 
-#define BNX_MAX_MRU				9216
+#define BNX_MAX_MRU				MCLBYTES
+#define BNX_MAX_JUMBO_MRU			9216
 
 /****************************************************************************/
 /* BNX Device State Data Structure                                          */
@@ -4580,29 +4583,14 @@ struct fw_info {
 #define BNX_STATS_BLK_SZ		sizeof(struct statistics_block)
 #define BNX_TX_CHAIN_PAGE_SZ	BCM_PAGE_SIZE
 #define BNX_RX_CHAIN_PAGE_SZ	BCM_PAGE_SIZE
-/*
- * Mbuf pointers. We need these to keep track of the virtual addresses
- * of our mbuf chains since we can only convert from physical to virtual,
- * not the other way around.
- */
-
-struct bnx_dmamap_arg {
-	struct bnx_softc	*sc;				/* Pointer back to device context */
-	bus_addr_t			busaddr;		/* Physical address of mapped memory */
-	u_int32_t					tx_flags;		/* Flags for frame transmit */
-	u_int16_t					prod;
-	u_int16_t					chain_prod;
-	int					maxsegs;		/* Max segments supported for this mapped memory */
-	u_int32_t					prod_bseq;
-	struct tx_bd		*tx_chain[TX_PAGES];
-};
-
 
 struct bnx_softc
 {
 	struct device			bnx_dev;			/* Parent device handle */
 	struct arpcom			arpcom;
+
 	struct pci_attach_args		bnx_pa;
+	pci_intr_handle_t		bnx_ih;
 
 	struct ifmedia		bnx_ifmedia;		/* TBI media info */
 
@@ -4626,6 +4614,7 @@ struct bnx_softc
 #define BNX_USING_DAC_FLAG		0x10
 #define BNX_USING_MSI_FLAG 		0x20
 #define BNX_MFW_ENABLE_FLAG		0x40
+#define BNX_ACTIVE_FLAG			0x80
 
 	/* PHY specific flags. */
 	u_int32_t					bnx_phy_flags;
@@ -4836,6 +4825,91 @@ struct bnx_softc
 	u_int32_t unexpected_attentions;
 	u_int32_t	lost_status_block_updates;
 #endif
+};
+
+#endif /* _KERNEL */
+
+struct bnx_firmware_header {
+	int		bnx_COM_b06FwReleaseMajor;
+	int		bnx_COM_b06FwReleaseMinor;
+	int		bnx_COM_b06FwReleaseFix;
+	u_int32_t	bnx_COM_b06FwStartAddr;
+	u_int32_t	bnx_COM_b06FwTextAddr;
+	int		bnx_COM_b06FwTextLen;
+	u_int32_t	bnx_COM_b06FwDataAddr;
+	int		bnx_COM_b06FwDataLen;
+	u_int32_t	bnx_COM_b06FwRodataAddr;
+	int		bnx_COM_b06FwRodataLen;
+	u_int32_t	bnx_COM_b06FwBssAddr;
+	int		bnx_COM_b06FwBssLen;
+	u_int32_t	bnx_COM_b06FwSbssAddr;
+	int		bnx_COM_b06FwSbssLen;
+
+	int		bnx_RXP_b06FwReleaseMajor;
+	int		bnx_RXP_b06FwReleaseMinor;
+	int		bnx_RXP_b06FwReleaseFix;
+	u_int32_t	bnx_RXP_b06FwStartAddr;
+	u_int32_t	bnx_RXP_b06FwTextAddr;
+	int		bnx_RXP_b06FwTextLen;
+	u_int32_t	bnx_RXP_b06FwDataAddr;
+	int		bnx_RXP_b06FwDataLen;
+	u_int32_t	bnx_RXP_b06FwRodataAddr;
+	int		bnx_RXP_b06FwRodataLen;
+	u_int32_t	bnx_RXP_b06FwBssAddr;
+	int		bnx_RXP_b06FwBssLen;
+	u_int32_t	bnx_RXP_b06FwSbssAddr;
+	int		bnx_RXP_b06FwSbssLen;
+	
+	int		bnx_TPAT_b06FwReleaseMajor;
+	int		bnx_TPAT_b06FwReleaseMinor;
+	int		bnx_TPAT_b06FwReleaseFix;
+	u_int32_t	bnx_TPAT_b06FwStartAddr;
+	u_int32_t	bnx_TPAT_b06FwTextAddr;
+	int		bnx_TPAT_b06FwTextLen;
+	u_int32_t	bnx_TPAT_b06FwDataAddr;
+	int		bnx_TPAT_b06FwDataLen;
+	u_int32_t	bnx_TPAT_b06FwRodataAddr;
+	int		bnx_TPAT_b06FwRodataLen;
+	u_int32_t	bnx_TPAT_b06FwBssAddr;
+	int		bnx_TPAT_b06FwBssLen;
+	u_int32_t	bnx_TPAT_b06FwSbssAddr;
+	int		bnx_TPAT_b06FwSbssLen;
+
+	int		bnx_TXP_b06FwReleaseMajor;
+	int		bnx_TXP_b06FwReleaseMinor;
+	int		bnx_TXP_b06FwReleaseFix;
+	u_int32_t	bnx_TXP_b06FwStartAddr;
+	u_int32_t	bnx_TXP_b06FwTextAddr;
+	int		bnx_TXP_b06FwTextLen;
+	u_int32_t	bnx_TXP_b06FwDataAddr;
+	int		bnx_TXP_b06FwDataLen;
+	u_int32_t	bnx_TXP_b06FwRodataAddr;
+	int		bnx_TXP_b06FwRodataLen;
+	u_int32_t	bnx_TXP_b06FwBssAddr;
+	int		bnx_TXP_b06FwBssLen;
+	u_int32_t	bnx_TXP_b06FwSbssAddr;
+	int		bnx_TXP_b06FwSbssLen;
+
+	int		bnx_rv2p_proc1len;
+	int		bnx_rv2p_proc2len;
+
+	/* Followed by blocks of data, each sized according to
+	 * the (rather obvious) block length stated above.
+	 *
+	 * bnx_COM_b06FwText, bnx_COM_b06FwData, bnx_COM_b06FwRodata,
+	 * bnx_COM_b06FwBss, bnx_COM_b06FwSbss,
+	 * 
+	 * bnx_RXP_b06FwText, bnx_RXP_b06FwData, bnx_RXP_b06FwRodata,
+	 * bnx_RXP_b06FwBss, bnx_RXP_b06FwSbss,
+	 * 
+	 * bnx_TPAT_b06FwText, bnx_TPAT_b06FwData, bnx_TPAT_b06FwRodata,
+	 * bnx_TPAT_b06FwBss, bnx_TPAT_b06FwSbss,
+	 * 
+	 * bnx_TXP_b06FwText, bnx_TXP_b06FwData, bnx_TXP_b06FwRodata,
+	 * bnx_TXP_b06FwBss, bnx_TXP_b06FwSbss,
+	 * 
+	 * bnx_rv2p_proc1, bnx_rv2p_proc2
+	 */
 };
 
 #endif /* #ifndef _BNX_H_DEFINED */

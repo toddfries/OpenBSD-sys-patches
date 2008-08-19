@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.21.2.1 2007/03/14 03:50:27 ckuethe Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.24 2007/01/18 14:46:24 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -139,6 +139,7 @@ ciss_put_ccb(struct ciss_ccb *ccb)
 int
 ciss_attach(struct ciss_softc *sc)
 {
+	struct scsibus_attach_args saa;
 	struct scsibus_softc *scsibus;
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
@@ -383,8 +384,10 @@ ciss_attach(struct ciss_softc *sc)
 	sc->sc_link.adapter = &ciss_switch;
 	sc->sc_link.adapter_target = sc->maxunits;
 	sc->sc_link.adapter_buswidth = sc->maxunits;
+	bzero(&saa, sizeof(saa));
+	saa.saa_sc_link = &sc->sc_link;
 	scsibus = (struct scsibus_softc *)config_found_sm(&sc->sc_dev,
-	    &sc->sc_link, scsiprint, NULL);
+	    &saa, scsiprint, NULL);
 
 #if 0
 	sc->sc_link_raw.device = &ciss_raw_dev;
@@ -393,8 +396,10 @@ ciss_attach(struct ciss_softc *sc)
 	sc->sc_link_raw.adapter = &ciss_raw_switch;
 	sc->sc_link_raw.adapter_target = sc->ndrives;
 	sc->sc_link_raw.adapter_buswidth = sc->ndrives;
+	bzero(&saa, sizeof(saa));
+	saa.saa_sc_link = &sc->sc_link_raw;
 	rawbus = (struct scsibus_softc *)config_found_sm(&sc->sc_dev,
-	    &sc->sc_link_raw, scsiprint, NULL);
+	    &saa, scsiprint, NULL);
 #endif
 
 #if NBIO > 0
@@ -417,11 +422,12 @@ ciss_attach(struct ciss_softc *sc)
 	    M_DEVBUF, M_NOWAIT);
 	if (sc->sensors) {
 		bzero(sc->sensors, sizeof(struct sensor) * sc->maxunits);
-		for (i = 0; i < sc->maxunits; sensor_add(&sc->sensors[i++])) {
+		strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
+		    sizeof(sc->sensordev.xname));
+		for (i = 0; i < sc->maxunits;
+		    sensor_attach(&sc->sensordev, &sc->sensors[i++])) {
 			sc->sensors[i].type = SENSOR_DRIVE;
 			sc->sensors[i].status = SENSOR_S_UNKNOWN;
-			strlcpy(sc->sensors[i].device, sc->sc_dev.dv_xname,
-			    sizeof(sc->sensors[i].device));
 			strlcpy(sc->sensors[i].desc, ((struct device *)
 			    scsibus->sc_link[i][0]->device_softc)->dv_xname,
 			    sizeof(sc->sensors[i].desc));
@@ -429,11 +435,10 @@ ciss_attach(struct ciss_softc *sc)
 			    scsibus->sc_link[i][0]->device_softc)->dv_xname,
 			    sizeof(sc->sc_lds[i]->xname));
 		}
-		if (sensor_task_register(sc, ciss_sensors, 10)) {
-			for (i = sc->maxunits; i--; )
-				sensor_del(&sc->sensors[i]);
+		if (sensor_task_register(sc, ciss_sensors, 10))
 			free(sc->sensors, M_DEVBUF);
-		}
+		else
+			sensordev_install(&sc->sensordev);
 	}
 #endif
 

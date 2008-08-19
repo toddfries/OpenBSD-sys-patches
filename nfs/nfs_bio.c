@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.42 2006/04/20 14:43:32 pedro Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.44 2006/11/29 12:24:18 miod Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -57,7 +57,7 @@
 
 extern struct proc *nfs_iodwant[NFS_MAXASYNCDAEMON];
 extern int nfs_numasync;
-struct nfsstats nfsstats;
+extern struct nfsstats nfsstats;
 struct nfs_bufqhead nfs_bufq;
 
 /*
@@ -671,7 +671,6 @@ nfs_doio(bp, p)
 		    (np->n_mtime != np->n_vattr.va_mtime.tv_sec)) {
 			uprintf("Process killed due to text file modification\n");
 			psignal(p, SIGKILL);
-			p->p_holdcnt++;
 		}
 		break;
 	    case VLNK:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbc_obio.c,v 1.13 2006/04/14 09:36:49 martin Exp $	*/
+/*	$OpenBSD: sbc_obio.c,v 1.15 2006/12/13 21:12:56 miod Exp $	*/
 /*	$NetBSD: sbc_obio.c,v 1.1 1997/03/01 20:18:59 scottr Exp $	*/
 
 /*
@@ -117,6 +117,7 @@ sbc_obio_attach(parent, self, args)
 {
 	struct sbc_softc *sc = (struct sbc_softc *) self;
 	struct ncr5380_softc *ncr_sc = (struct ncr5380_softc *) sc;
+	struct scsibus_attach_args saa;
 	extern vaddr_t SCSIBase;
 
 	/* Pull in the options flags. */
@@ -198,7 +199,6 @@ sbc_obio_attach(parent, self, args)
 	ncr_sc->sc_intr_off  = NULL;
 	ncr_sc->sc_dma_setup = NULL;
 	ncr_sc->sc_dma_start = NULL;
-	ncr_sc->sc_dma_eop   = NULL;
 	ncr_sc->sc_dma_stop  = NULL;
 	ncr_sc->sc_flags = 0;
 	ncr_sc->sc_min_dma_len = MIN_DMA_LEN;
@@ -209,7 +209,6 @@ sbc_obio_attach(parent, self, args)
 		ncr_sc->sc_dma_poll  = sbc_dma_poll;
 		ncr_sc->sc_dma_setup = sbc_dma_setup;
 		ncr_sc->sc_dma_start = sbc_dma_start;
-		ncr_sc->sc_dma_eop   = sbc_dma_eop;
 		ncr_sc->sc_dma_stop  = sbc_dma_stop;
 
 		sc->sc_ih_drq.vh_fn = sbc_drq_intr;
@@ -238,12 +237,15 @@ sbc_obio_attach(parent, self, args)
 	ncr_sc->sc_link.flags |= sbc_link_flags;
 #endif
 
+	bzero(&saa, sizeof(saa));
+	saa.saa_sc_link = &(ncr_sc->sc_link);
+
 	/*
 	 *  Initialize the SCSI controller itself.
 	 */
 	ncr5380_init(ncr_sc);
 	ncr5380_reset_scsibus(ncr_sc);
-	config_found(self, &(ncr_sc->sc_link), scsiprint);
+	config_found(self, &saa, scsiprint);
 }
 
 /*

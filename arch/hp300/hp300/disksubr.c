@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.20 2006/08/17 10:34:14 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.23 2006/10/29 14:12:21 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.9 1997/04/01 03:12:13 scottr Exp $	*/
 
 /*
@@ -61,6 +61,7 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 {
 	struct buf *bp;
 	struct disklabel *dlp;
+	int i;
 	char *msg = NULL;
 
 	/* minimal requirements for archetypal disk label */
@@ -71,9 +72,13 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	if (lp->d_secpercyl == 0)
 		return ("invalid geometry");
 	lp->d_npartitions = RAW_PART + 1;
-	if (lp->d_partitions[RAW_PART].p_size == 0)
-		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_offset = 0;
+	for (i = 0; i < RAW_PART; i++) {
+		lp->d_partitions[i].p_size = 0;
+		lp->d_partitions[i].p_offset = 0;
+	}
+	if (lp->d_partitions[i].p_size == 0)
+		lp->d_partitions[i].p_size = lp->d_secperunit;
+	lp->d_partitions[i].p_offset = 0;
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
@@ -205,7 +210,6 @@ writedisklabel(dev, strat, lp, osdep)
 	bp->b_flags = B_BUSY | B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
-	goto done;
 
 done:
 	brelse(bp);

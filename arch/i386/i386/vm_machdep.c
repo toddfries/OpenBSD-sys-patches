@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.45 2006/06/23 13:46:05 mickey Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.49 2007/02/24 11:59:45 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.61 1996/05/03 19:42:35 christos Exp $	*/
 
 /*-
@@ -73,12 +73,8 @@
  * the frame pointers on the stack after copying.
  */
 void
-cpu_fork(p1, p2, stack, stacksize, func, arg)
-	struct proc *p1, *p2;
-	void *stack;
-	size_t stacksize;
-	void (*func)(void *);
-	void *arg;
+cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
+    void (*func)(void *), void *arg)
 {
 	struct pcb *pcb = &p2->p_addr->u_pcb;
 	struct trapframe *tf;
@@ -137,19 +133,6 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	pcb->pcb_esp = (int)sf;
 }
 
-void
-cpu_swapout(p)
-	struct proc *p;
-{
-
-#if NNPX > 0
-	/*
-	 * Make sure we save the FP state before the user area vanishes.
-	 */
-	npxsave_proc(p, 1);
-#endif
-}
-
 /*
  * cpu_exit is called as the last action during exit.
  *
@@ -159,8 +142,7 @@ cpu_swapout(p)
  * into switch() to wait for another process to wake up.
  */
 void
-cpu_exit(p)
-	register struct proc *p;
+cpu_exit(struct proc *p)
 {
 #if NNPX > 0
 	/* If we were using the FPU, forget about it. */
@@ -172,8 +154,7 @@ cpu_exit(p)
 }
 
 void
-cpu_wait(p)
-	struct proc *p;
+cpu_wait(struct proc *p)
 {
 	tss_free(p->p_md.md_tss_sel);
 }
@@ -187,11 +168,8 @@ struct md_core {
 };
 
 int
-cpu_coredump(p, vp, cred, chdr)
-	struct proc *p;
-	struct vnode *vp;
-	struct ucred *cred;
-	struct core *chdr;
+cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
+    struct core *chdr)
 {
 	struct md_core md_core;
 	struct coreseg cseg;
@@ -237,11 +215,10 @@ cpu_coredump(p, vp, cred, chdr)
  * Both addresses are assumed to reside in the Sysmap.
  */
 void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
+pagemove(caddr_t from, caddr_t to, size_t size)
 {
-	u_int32_t ofpte, otpte;
+	pt_entry_t *fpte, *tpte;
+	pt_entry_t ofpte, otpte;
 #ifdef MULTIPROCESSOR
 	u_int32_t cpumask = 0;
 #endif
@@ -250,12 +227,13 @@ pagemove(from, to, size)
 	if ((size & PAGE_MASK) != 0)
 		panic("pagemove");
 #endif
+	fpte = kvtopte((vaddr_t)from);
+	tpte = kvtopte((vaddr_t)to);
 	while (size > 0) {
-		ofpte = pmap_pte_bits((vaddr_t)from);
-		otpte = pmap_pte_bits((vaddr_t)to);
-		pmap_pte_set((vaddr_t)to,
-		    pmap_pte_paddr((vaddr_t)from), ofpte);
-		pmap_pte_set((vaddr_t)from, 0, 0);
+		ofpte = *fpte;
+		otpte = *tpte;
+		*tpte++ = *fpte;
+		*fpte++ = 0;
 #if defined(I386_CPU) && !defined(MULTIPROCESSOR)
 		if (cpu_class != CPUCLASS_386)
 #endif
@@ -304,22 +282,7 @@ kvtop(caddr_t addr)
 }
 
 /*
- * Map an IO request into kernel virtual address space.  Requests fall into
- * one of five catagories:
- *
- *	B_PHYS|B_UAREA:	User u-area swap.
- *			Address is relative to start of u-area (p_addr).
- *	B_PHYS|B_PAGET:	User page table swap.
- *			Address is a kernel VA in usrpt (Usrptmap).
- *	B_PHYS|B_DIRTY:	Dirty page push.
- *			Address is a VA in proc2's address space.
- *	B_PHYS|B_PGIN:	Kernel pagein of user pages.
- *			Address is VA in user's address space.
- *	B_PHYS:		User "raw" IO request.
- *			Address is VA in user's address space.
- *
- * All requests are (re)mapped into kernel VA space via the useriomap
- * (a name with only slightly more meaning than "kernelmap")
+ * Map an user IO request into kernel virtual address space.
  */
 void
 vmapbuf(struct buf *bp, vsize_t len)

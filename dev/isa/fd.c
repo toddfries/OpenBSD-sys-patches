@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.55 2006/08/13 16:24:12 krw Exp $	*/
+/*	$OpenBSD: fd.c,v 1.60 2007/02/15 00:53:26 krw Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -106,8 +106,8 @@ struct fd_softc {
 	int sc_bcount;		/* byte count left */
  	int sc_opts;			/* user-set options */
 	int sc_skip;		/* bytes already transferred */
-	int sc_nblks;		/* number of blocks currently tranferring */
-	int sc_nbytes;		/* number of bytes currently tranferring */
+	int sc_nblks;		/* number of blocks currently transferring */
+	int sc_nbytes;		/* number of bytes currently transferring */
 
 	int sc_drive;		/* physical unit number */
 	int sc_flags;
@@ -669,7 +669,7 @@ loop:
 		/* Make sure the right drive is selected. */
 		fd_set_motor(fdc, 0);
 
-		/* fall through */
+		/* FALLTHROUGH */
 	case DOSEEK:
 	doseek:
 		if (fd->sc_cylin == bp->b_cylinder)
@@ -842,7 +842,7 @@ loop:
 			(void) fdcresult(fdc);
 		}
 
-		/* fall through */
+		/* FALLTHROUGH */
 	case DORECAL:
 		out_fdc(iot, ioh, NE7CMD_RECAL);	/* recal function */
 		out_fdc(iot, ioh, fd->sc_drive);
@@ -985,7 +985,6 @@ fdioctl(dev, cmd, addr, flag, p)
 		lp->d_secperunit = fd->sc_type->size;
 		lp->d_rpm = 300;
 		lp->d_interleave = 1;
-		lp->d_flags = D_REMOVABLE;
 
 		lp->d_partitions[RAW_PART].p_offset = 0;
 		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
@@ -998,7 +997,7 @@ fdioctl(dev, cmd, addr, flag, p)
 
 		errstring = readdisklabel(dev, fdstrategy, lp, &cdl, 0);
 		if (errstring) {
-			/*printf("%s: %s\n", fd->sc_dev.dv_xname, errstring); */
+			/*printf("%s: %s\n", fd->sc_dev.dv_xname, errstring);*/
 		}
 
 		*(struct disklabel *)addr = *lp;
@@ -1069,7 +1068,6 @@ fdformat(dev, finfo, p)
         if (bp == NULL)
                 return ENOBUFS;
 
-	PHOLD(p);
         bzero((void *)bp, sizeof(struct buf));
         bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
         bp->b_proc = p;
@@ -1094,7 +1092,6 @@ fdformat(dev, finfo, p)
 
         /* ...and wait for it to complete */
 	rv = biowait(bp);
-	PRELE(p);
         free(bp, M_TEMP);
         return (rv);
 }

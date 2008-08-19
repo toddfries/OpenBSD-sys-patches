@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.48 2006/08/30 11:20:20 jsg Exp $	*/
+/*	$OpenBSD: atw.c,v 1.52 2007/02/14 04:49:43 jsg Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -141,10 +141,6 @@ __KERNEL_RCSID(0, "$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $");
  */
 
 #define ATW_REFSLAVE	/* slavishly do what the reference driver does */
-
-#define	VOODOO_DUR_11_ROUNDING		0x01 /* necessary */
-#define	VOODOO_DUR_2_4_SPECIALCASE	0x02 /* NOT necessary */
-int atw_voodoo = VOODOO_DUR_11_ROUNDING;
 
 int atw_bbp_io_enable_delay = 20 * 1000;
 int atw_bbp_io_disable_delay = 2 * 1000;
@@ -292,6 +288,9 @@ static const u_int atw_rfmd2958_rf1r[] = {
 	0x345d1, 0x28ba2, 0x1d174, 0x11745, 0x05d17, 0x3a2e8, 0x11745
 };
 
+
+#ifdef ATW_DEBUG
+
 const char *atw_tx_state[] = {
 	"STOPPED",
 	"RUNNING - read descriptor",
@@ -313,6 +312,8 @@ const char *atw_rx_state[] = {
 	"RUNNING - flush fifo",
 	"RUNNING - fifo drain"
 };
+
+#endif
 
 #ifndef __OpenBSD__
 int
@@ -568,7 +569,7 @@ atw_attach(struct atw_softc *sc)
 	};
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
-	int country_code, error, i, nrate, srom_major;
+	int country_code, error, i, srom_major;
 	u_int32_t reg;
 	static const char *type_strings[] = {"Intersil (not supported)",
 	    "RFMD", "Marvel (not supported)"};
@@ -823,12 +824,7 @@ atw_attach(struct atw_softc *sc)
 	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_IBSS |
 	    IEEE80211_C_HOSTAP | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
 
-	nrate = 0;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 2;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 4;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 11;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 22;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_nrates = nrate;
+	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;	
 
 	/*
 	 * Call MI attach routines.
@@ -3215,11 +3211,12 @@ atw_rxintr(struct atw_softc *sc)
 			tap->ar_antsignal = (int)rssi;
 			/* TBD tap->ar_flags */
 
-			M_DUP_PKTHDR(&mb, m);
 			mb.m_data = (caddr_t)tap;
 			mb.m_len = tap->ar_ihdr.it_len;
 			mb.m_next = m;
-			mb.m_pkthdr.len += mb.m_len;
+			mb.m_nextpkt = NULL;
+			mb.m_type = 0;
+			mb.m_flags = 0;
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
  		}
 #endif /* NPBFILTER > 0 */
@@ -3556,11 +3553,12 @@ atw_start(struct ifnet *ifp)
 
 			/* TBD tap->at_flags */
 
-			M_DUP_PKTHDR(&mb, m0);
 			mb.m_data = (caddr_t)tap;
 			mb.m_len = tap->at_ihdr.it_len;
 			mb.m_next = m0;
-			mb.m_pkthdr.len += mb.m_len;
+			mb.m_nextpkt = NULL;
+			mb.m_type = 0;
+			mb.m_flags = 0;
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_OUT);
 		}
 #endif /* NBPFILTER > 0 */

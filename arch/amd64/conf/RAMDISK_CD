@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.62 2006/08/29 20:04:54 jolan Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.70 2007/02/20 11:42:41 tom Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -33,6 +33,17 @@ option		MINIROOTSIZE=3584
 config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
+
+acpi0		at mainbus?	disable
+#acpitimer*	at acpi?
+#acpihpet*	at acpi?
+#acpiac*	at acpi?
+#acpibat*	at acpi?
+#acpibtn*	at acpi?
+#acpicpu*	at acpi?
+#acpiec*	at acpi?
+acpiprt*	at acpi?
+#acpitz*	at acpi?
 
 cpu*	at mainbus0
 isa0	at mainbus0
@@ -106,6 +117,8 @@ upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
+rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+zyd*	at uhub?		# Zydas ZD1211/ZD1211B
 
 pckbc0	at isa?			# PC keyboard controller
 pckbd*	at pckbc?		# PC keyboard
@@ -145,8 +158,6 @@ arc*	at pci?			# Areca RAID Controller
 scsibus* at arc?
 mpi*	at pci?			# LSI Logic Message Passing Interface
 scsibus* at mpi?
-#dpt*	at pci?			# DPT SmartCache/SmartRAID PCI
-#scsibus* at dpt?
 gdt*	at pci?			# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
 #aac*	at pci?			# Adaptec FSA RAID controllers
@@ -240,7 +251,7 @@ em*	at pci?			# Intel Pro/1000 ethernet
 ixgb*	at pci?			# Intel Pro/10Gb ethernet
 #txp*	at pci?			# 3com 3CR990
 #nge*	at pci?			# NS DP83820/DP83821 GigE
-#sf*	at pci?			# Adaptec AIC-6915 ethernet
+sf*	at pci?			# Adaptec AIC-6915 ethernet
 bge*	at pci?			# Broadcom BCM57xx (aka Tigon3)
 bnx*	at pci?			# Broadcom BCM5706/5708 GigE
 re*	at pci?			# Realtek 8169/8169S/8110S
@@ -252,6 +263,7 @@ hme*	at pci?			# Sun Happy Meal
 vge*	at pci?			# VIA VT612x
 nfe*	at pci?			# NVIDIA nForce Ethernet
 xge*	at pci?			# Neterion Xframe-I/II 10Gb ethernet
+bce*	at pci?			# Broadcom BCM4401
 
 # Wireless network cards
 ath*	at pci?			# Atheros AR5k (802.11a/b/g)
@@ -264,6 +276,7 @@ wi*	at pcmcia?		# WaveLAN IEEE 802.11DS
 an*	at pcmcia?		# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?		# Xircom Netwave
 #ray*	at pcmcia?		# Raylink Aviator2.4/Pro 802.11FH
+ral*	at pci?			# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?		# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?			# Realtek 8180
 rtw*	at cardbus?		# Realtek 8180

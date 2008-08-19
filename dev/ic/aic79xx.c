@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx.c,v 1.34 2006/07/30 14:21:14 krw Exp $	*/
+/*	$OpenBSD: aic79xx.c,v 1.37 2006/10/19 10:55:56 tom Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -1912,7 +1912,7 @@ ahd_handle_transmission_error(struct ahd_softc *ahd)
 		 * through any phases that occur after we release
 		 * this last ack until the LQI manager sees a
 		 * packet phase.  This implies we may have to
-		 * ignore a perfectly valid "unexected busfree"
+		 * ignore a perfectly valid "unexpected busfree"
 		 * after our "initiator detected error" message is
 		 * sent.  A busfree is the expected response after
 		 * we tell the target that it's L_Q was corrupted.
@@ -3324,7 +3324,7 @@ ahd_update_neg_table(struct ahd_softc *ahd, struct ahd_devinfo *devinfo,
 
 			/*
 			 * Harpoon2A assumed that there would be a
-			 * fallback rate between 160MHz and 80Mhz,
+			 * fallback rate between 160MHz and 80MHz,
 			 * so 7 is used as the period factor rather
 			 * than 8 for 160MHz.
 			 */
@@ -10261,7 +10261,7 @@ void
 ahd_setup_data_scb(struct ahd_softc *ahd, struct scb *scb)
 {
 	/*
-	 * Copy the first SG into the "current" data ponter area.
+	 * Copy the first SG into the "current" data pointer area.
 	 */
 	if ((ahd->flags & AHD_64BIT_ADDRESSING) != 0) {
 		struct ahd_dma64_seg *sg;

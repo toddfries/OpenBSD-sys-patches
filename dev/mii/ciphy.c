@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciphy.c,v 1.13 2006/03/10 09:53:16 jsg Exp $	*/
+/*	$OpenBSD: ciphy.c,v 1.18 2006/12/31 15:04:33 krw Exp $	*/
 /*	$FreeBSD: ciphy.c,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -177,13 +177,6 @@ ciphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
-#ifdef foo
-			/*
-			 * If we're already in auto mode, just return.
-			 */
-			if (PHY_READ(sc, CIPHY_MII_BMCR) & CIPHY_BMCR_AUTOEN)
-				return (0);
-#endif
 			if (mii_phy_auto(sc, 0) == EJUSTRETURN)
 				return (0);
 			break;
@@ -214,21 +207,9 @@ setit:
 			PHY_WRITE(sc, CIPHY_MII_BMCR,
 			    speed|CIPHY_BMCR_AUTOEN|CIPHY_BMCR_STARTNEG);
 
-			/*
-			 * When setting the link manually, one side must
-			 * be the master and the other the slave. However
-			 * ifmedia doesn't give us a good way to specify
-			 * this, so we fake it by using one of the LINK
-			 * flags. If LINK0 is set, we program the PHY to
-			 * be a master, otherwise it's a slave.
-			 */
-			if ((mii->mii_ifp->if_flags & IFF_LINK0)) {
-				PHY_WRITE(sc, CIPHY_MII_1000CTL,
-				    gig|CIPHY_1000CTL_MSE|CIPHY_1000CTL_MSC);
-			} else {
-				PHY_WRITE(sc, CIPHY_MII_1000CTL,
-				    gig|CIPHY_1000CTL_MSE);
-			}
+			if (mii->mii_media.ifm_media & IFM_ETH_MASTER)
+				gig |= CIPHY_1000CTL_MSE|CIPHY_1000CTL_MSC;
+			PHY_WRITE(sc, CIPHY_MII_1000CTL, gig);
 			break;
 		case IFM_NONE:
 			PHY_WRITE(sc, MII_BMCR, BMCR_ISO|BMCR_PDOWN);
@@ -252,7 +233,7 @@ setit:
 	}
 
 	/* Update the media status. */
-	ciphy_status(sc);
+	mii_phy_status(sc);
 
 	/*
 	 * Callback if something changed. Note that we need to poke
@@ -271,7 +252,7 @@ void
 ciphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
-	int bmsr, bmcr;
+	int bmsr, bmcr, gsr;
 
 	mii->mii_media_status = IFM_AVALID;
 	mii->mii_media_active = IFM_ETHER;
@@ -313,6 +294,13 @@ ciphy_status(struct mii_softc *sc)
 
 	if (bmsr & CIPHY_AUXCSR_FDX)
 		mii->mii_media_active |= IFM_FDX;
+	else
+		mii->mii_media_active |= IFM_HDX;
+
+	gsr = PHY_READ(sc, CIPHY_MII_1000STS);
+	if ((IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T) &&
+	    gsr & CIPHY_1000STS_MSR)
+		mii->mii_media_active |= IFM_ETH_MASTER;
 }
 
 void

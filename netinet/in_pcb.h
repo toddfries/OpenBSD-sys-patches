@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.54 2006/05/30 19:26:57 deraadt Exp $	*/
+/*	$OpenBSD: in_pcb.h,v 1.59 2007/02/22 20:23:07 millert Exp $	*/
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -132,6 +132,7 @@ struct inpcb {
 #define SR_FAILED         1             /* Negotiation failed permanently */
 #define SR_SUCCESS        2             /* SA successfully established */
 #define SR_WAIT           3             /* Waiting for SA */
+	u_char	inp_ip_minttl;		/* minimum TTL or drop */
 	TAILQ_ENTRY(inpcb) inp_tdb_in_next, inp_tdb_out_next;
 	struct tdb     *inp_tdb_in, *inp_tdb_out;
 	struct ipsec_policy *inp_ipo;
@@ -168,9 +169,10 @@ struct inpcbtable {
 #define	INP_HIGHPORT	0x010	/* user wants "high" port binding */
 #define	INP_LOWPORT	0x020	/* user wants "low" port binding */
 #define	INP_RECVIF	0x080	/* receive incoming interface */
+#define	INP_RECVTTL	0x040	/* receive incoming IP TTL */
 
 #define	INP_CONTROLOPTS	(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR| \
-	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF)
+	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF|INP_RECVTTL)
 
 /*
  * These flags' values should be determined by either the transport
@@ -185,9 +187,6 @@ struct inpcbtable {
  * for compatibility with *bsd*s.
  * XXX: Should IN6P_HIGHPORT and IN6P_LOWPORT be moved as well?
  */
-#define IN6P_RECVOPTS		INP_RECVOPTS	/* recv incoming IP6 options */
-#define IN6P_RECVRETOPTS	INP_RECVRETOPTS /* recv IP6 options for reply */
-#define IN6P_RECVDSTADDR	INP_RECVDSTADDR /* recv IP6 dst address */
 #define IN6P_HIGHPORT		INP_HIGHPORT	/* user wants "high" port */
 #define IN6P_LOWPORT		INP_LOWPORT	/* user wants "low" port */
 #define IN6P_PKTINFO		0x010000 /* receive IP6 dst and I/F */
@@ -196,15 +195,20 @@ struct inpcbtable {
 #define IN6P_DSTOPTS		0x080000 /* receive dst options after rthdr */
 #define IN6P_RTHDR		0x100000 /* receive routing header */
 #define IN6P_RTHDRDSTOPTS	0x200000 /* receive dstoptions before rthdr */
+#define IN6P_TCLASS		0x400000 /* receive traffic class value */
+#define IN6P_AUTOFLOWLABEL	0x800000 /* attach flowlabel automatically */
 
 #define IN6P_ANONPORT		0x4000000 /* port chosen for user */
 #define IN6P_FAITH		0x8000000 /* accept FAITH'ed connections */
+#define IN6P_RFC2292		0x40000000 /* used RFC2292 API on the socket */
+#define IN6P_MTU		0x80000000 /* receive path MTU */
 
 #define IN6P_MINMTU		0x20000000 /* use minimum MTU */
 
 #define IN6P_CONTROLOPTS	(IN6P_PKTINFO|IN6P_HOPLIMIT|IN6P_HOPOPTS|\
 				 IN6P_DSTOPTS|IN6P_RTHDR|IN6P_RTHDRDSTOPTS|\
-				 IN6P_MINMTU)
+				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL|IN6P_RFC2292|\
+				 IN6P_MTU)
 #endif
 
 #define	INPLOOKUP_WILDCARD	1
@@ -221,8 +225,8 @@ struct inpcbtable {
 #define	DP_ISSET(m, p)	((m)[((p) - IPPORT_RESERVED/2) / DP_MAPBITS] & (1 << ((p) % DP_MAPBITS)))
 
 /* default values for baddynamicports [see ip_init()] */
-#define	DEFBADDYNAMICPORTS_TCP	{ 587, 749, 750, 751, 760, 761, 871, 0 }
-#define	DEFBADDYNAMICPORTS_UDP	{ 623, 750, 751, 0 }
+#define	DEFBADDYNAMICPORTS_TCP	{ 587, 749, 750, 751, 871, 0 }
+#define	DEFBADDYNAMICPORTS_UDP	{ 623, 664, 749, 750, 751, 0 }
 
 struct baddynamicports {
 	u_int32_t tcp[DP_MAPSIZE];

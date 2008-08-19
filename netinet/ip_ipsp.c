@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.165 2006/01/13 10:11:23 mpf Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.168 2007/02/14 00:53:48 jsg Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -37,6 +37,8 @@
  * PURPOSE.
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
@@ -45,6 +47,10 @@
 
 #include <net/if.h>
 #include <net/route.h>
+
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
 
 #ifdef INET
 #include <netinet/in.h>
@@ -103,6 +109,7 @@ struct ipsec_acquire_head ipsec_acquire_head =
  */
 
 struct xformsw xformsw[] = {
+#ifdef IPSEC
 	{ XF_IP4,	     0,               "IPv4 Simple Encapsulation",
 	  ipe4_attach,       ipe4_init,       ipe4_zeroize,
 	  (int (*)(struct mbuf *, struct tdb *, int, int))ipe4_input,
@@ -116,6 +123,7 @@ struct xformsw xformsw[] = {
 	{ XF_IPCOMP,	XFT_COMP, "IPcomp",
 	  ipcomp_attach,    ipcomp_init, ipcomp_zeroize,
 	  ipcomp_input,     ipcomp_output, },
+#endif /* IPSEC */
 #ifdef TCP_SIGNATURE
 	{ XF_TCPSIGNATURE,	 XFT_AUTH, "TCP MD5 Signature Option, RFC 2385",
 	  tcp_signature_tdb_attach, 	tcp_signature_tdb_init,
@@ -858,6 +866,13 @@ tdb_free(struct tdb *tdbp)
 		tdbp->tdb_remote_cred = NULL;
 	}
 
+#if NPF > 0
+	if (tdbp->tdb_tag) {
+		pf_tag_unref(tdbp->tdb_tag);
+		tdbp->tdb_tag = 0;
+	}
+#endif
+
 	if ((tdbp->tdb_onext) && (tdbp->tdb_onext->tdb_inext == tdbp))
 		tdbp->tdb_onext->tdb_inext = NULL;
 
@@ -1241,7 +1256,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 						return SLIST_FIRST(&tags);
 			}
 		}
-		/* Fall through. */
+		/* FALLTHROUGH */
 		case IPPROTO_AH:
 			mtag = m_tag_get(PACKET_TAG_IPSEC_IN_CRYPTO_DONE,
 			    sizeof(struct tdb_ident), M_NOWAIT);

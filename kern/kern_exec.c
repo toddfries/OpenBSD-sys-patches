@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.99 2006/01/19 17:54:47 mickey Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.101 2007/03/01 11:18:40 art Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -517,7 +517,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 
 			/*
 			 * NOTE - This will never return NULL because of
-			 * unmature fds. The file descriptor table is not
+			 * immature fds. The file descriptor table is not
 			 * shared because we're suid.
 			 */
 			fp = fd_getfile(p->p_fd, i);
@@ -794,7 +794,6 @@ exec_sigcode_map(struct proc *p, struct emul *e)
 		if ((r = uvm_map(kernel_map, &va, round_page(sz), e->e_sigobject,
 		    0, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
 		    UVM_INH_SHARE, UVM_ADV_RANDOM, 0)))) {
-			printf("kernel mapping failed %d\n", r);
 			uao_detach(e->e_sigobject);
 			return (ENOMEM);
 		}
@@ -808,7 +807,6 @@ exec_sigcode_map(struct proc *p, struct emul *e)
 	if (uvm_map(&p->p_vmspace->vm_map, &p->p_sigcode, round_page(sz),
 	    e->e_sigobject, 0, 0, UVM_MAPFLAG(UVM_PROT_RX, UVM_PROT_RX,
 	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0))) {
-		printf("user mapping failed\n");
 		uao_detach(e->e_sigobject);
 		return (ENOMEM);
 	}

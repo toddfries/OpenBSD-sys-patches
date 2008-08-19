@@ -1,4 +1,4 @@
-/*      $OpenBSD: criov.c,v 1.14 2003/08/14 15:18:05 jason Exp $	*/
+/*      $OpenBSD: criov.c,v 1.16 2006/12/29 13:04:37 pedro Exp $	*/
 
 /*
  * Copyright (c) 1999 Theo de Raadt
@@ -71,11 +71,12 @@ cuio_copydata(struct uio *uio, int off, int len, caddr_t cp)
 }
 
 void
-cuio_copyback(struct uio *uio, int off, int len, const void *cp)
+cuio_copyback(struct uio *uio, int off, int len, const void *_cp)
 {
 	struct iovec *iov = uio->uio_iov;
 	int iol = uio->uio_iovcnt;
 	unsigned count;
+	caddr_t cp = (caddr_t)_cp;
 
 	if (off < 0)
 		panic("cuio_copyback: off %d < 0", off);
@@ -143,7 +144,7 @@ cuio_apply(struct uio *uio, int off, int len,
 	ind = 0;
 	while (off > 0) {
 		if (ind >= uio->uio_iovcnt)
-			panic("cui_apply: ind %d >= uio_iovcnt %d for off",
+			panic("cuio_apply: ind %d >= uio_iovcnt %d for off",
 			    ind, uio->uio_iovcnt);
 		uiolen = uio->uio_iov[ind].iov_len;
 		if (off < uiolen)
@@ -153,11 +154,12 @@ cuio_apply(struct uio *uio, int off, int len,
 	}
 	while (len > 0) {
 		if (ind >= uio->uio_iovcnt)
-			panic("cui_apply: ind %d >= uio_iovcnt %d for len",
+			panic("cuio_apply: ind %d >= uio_iovcnt %d for len",
 			    ind, uio->uio_iovcnt);
 		count = min(uio->uio_iov[ind].iov_len - off, len);
 
-		rval = f(fstate, uio->uio_iov[ind].iov_base + off, count);
+		rval = f(fstate, (char *)uio->uio_iov[ind].iov_base + off,
+		    count);
 		if (rval)
 			return (rval);
 

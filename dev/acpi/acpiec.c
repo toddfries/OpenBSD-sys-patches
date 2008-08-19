@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiec.c,v 1.3 2006/06/30 04:16:15 jordan Exp $ */
+/* $OpenBSD: acpiec.c,v 1.18 2007/02/21 20:46:57 marco Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -21,7 +21,6 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/rwlock.h>
 
 #include <machine/bus.h>
 
@@ -33,40 +32,39 @@
 
 #include <sys/sensors.h>
 
-int	acpiec_match(struct device *, void *, void *);
-void	acpiec_attach(struct device *, struct device *, void *);
-int	acpiec_notify(struct aml_node *, int, void *);
+int		acpiec_match(struct device *, void *, void *);
+void		acpiec_attach(struct device *, struct device *, void *);
 
-u_int8_t acpiec_status(struct acpiec_softc *);
-u_int8_t acpiec_read_data(struct acpiec_softc *);
-void	acpiec_write_cmd(struct acpiec_softc *, u_int8_t);
-void	acpiec_write_data(struct acpiec_softc *, u_int8_t);
-void	acpiec_burst_enable(struct acpiec_softc *sc);
+u_int8_t	acpiec_status(struct acpiec_softc *);
+u_int8_t	acpiec_read_data(struct acpiec_softc *);
+void		acpiec_write_cmd(struct acpiec_softc *, u_int8_t);
+void		acpiec_write_data(struct acpiec_softc *, u_int8_t);
+void		acpiec_burst_enable(struct acpiec_softc *sc);
 
-u_int8_t acpiec_read_1(struct acpiec_softc *, u_int8_t);
-void	acpiec_write_1(struct acpiec_softc *, u_int8_t, u_int8_t);
+u_int8_t	acpiec_read_1(struct acpiec_softc *, u_int8_t);
+void		acpiec_write_1(struct acpiec_softc *, u_int8_t, u_int8_t);
 
-void	acpiec_read(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
-void	acpiec_write(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
+void		acpiec_read(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
+void		acpiec_write(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
 
-int	acpiec_getcrs(struct acpiec_softc *, struct acpi_attach_args *);
-int	acpiec_getregister(const u_int8_t *, int, int *, bus_size_t *);
+int		acpiec_getcrs(struct acpiec_softc *,
+		    struct acpi_attach_args *);
+int		acpiec_getregister(const u_int8_t *, int, int *, bus_size_t *);
 
-void	acpiec_wait(struct acpiec_softc *, u_int8_t, u_int8_t);
-void	acpiec_wait_nosleep(struct acpiec_softc *, u_int8_t, u_int8_t);
-void	acpiec_sci_event(struct acpiec_softc *);
+void		acpiec_wait(struct acpiec_softc *, u_int8_t, u_int8_t);
+void		acpiec_sci_event(struct acpiec_softc *);
 
-void	acpiec_get_events(struct acpiec_softc *);
+void		acpiec_get_events(struct acpiec_softc *);
 
-int     acpiec_gpehandler(struct acpi_softc *, int, void *);
+int		acpiec_gpehandler(struct acpi_softc *, int, void *);
 
 struct aml_node	*aml_find_name(struct acpi_softc *, struct aml_node *,
 		    const char *);
 
-/* EC Staus bits */
+/* EC Status bits */
 #define		EC_STAT_SMI_EVT	0x40	/* SMI event pending */
 #define		EC_STAT_SCI_EVT	0x20	/* SCI event pending */
-#define 	EC_STAT_BURST	0x10	/* Controller in burst mode */
+#define		EC_STAT_BURST	0x10	/* Controller in burst mode */
 #define		EC_STAT_CMD	0x08	/* data is command */
 #define		EC_STAT_IBF	0x02	/* input buffer full */
 #define		EC_STAT_OBF	0x01	/* output buffer full */
@@ -78,10 +76,12 @@ struct aml_node	*aml_find_name(struct acpi_softc *, struct aml_node *,
 #define		EC_CMD_BD	0x83	/* Burst Disable */
 #define		EC_CMD_QR	0x84	/* Query */
 
+#define		REG_TYPE_EC	3
+
 #define ACPIEC_MAX_EVENTS	256
+
 struct acpiec_event {
 	struct aml_node *event;
-	int active;
 };
 
 struct acpiec_softc {
@@ -99,9 +99,7 @@ struct acpiec_softc {
 	struct aml_node		*sc_devnode;
 	u_int32_t		sc_gpe;
 	struct acpiec_event	sc_events[ACPIEC_MAX_EVENTS];
-	struct rwlock		sc_lock;
-	int			sc_locked;
-	int			sc_pending;
+	int			sc_gotsci;
 };
 
 
@@ -115,66 +113,40 @@ struct cfdriver acpiec_cd = {
 	NULL, "acpiec", DV_DULL
 };
 
-int
-acpiec_intr(struct acpiec_softc *sc)
-{
-	u_int8_t stat;
-
-	stat = acpiec_status(sc);
-	dnprintf(40, "%s: EC interrupt, stat: %b\n", DEVNAME(sc), (int)stat,
-		 "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF");
-
-	if (stat & (EC_STAT_IBF | EC_STAT_OBF | EC_STAT_BURST ))
-		wakeup(sc);
-	if ((stat & EC_STAT_SCI_EVT) != 0 && sc->sc_locked == 0)
-		acpiec_sci_event(sc);
-
-	return (sc->sc_pending);
-}
 
 void
 acpiec_wait(struct acpiec_softc *sc, u_int8_t mask, u_int8_t val)
 {
-	u_int8_t stat;
-	dnprintf(40, "%s: EC wait for: %b == %02x\n", DEVNAME(sc), (int)mask,
-		 "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF", (int)val);
+	u_int8_t		stat;
 
-	for (;;) {
-		if (((stat = acpiec_status(sc)) & mask) == val)
-			break;
-		tsleep(sc, PWAIT, "acpiec", 10);
+	dnprintf(40, "%s: EC wait_ns for: %b == %02x\n",
+	    DEVNAME(sc), (int)mask,
+	    "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF", (int)val);
+
+	while (((stat = acpiec_status(sc)) & mask) != val) {
+		if (stat & EC_STAT_SCI_EVT)
+			sc->sc_gotsci = 1;
+		if (cold)
+			delay(1);
+		else
+			tsleep(sc, PWAIT, "ecwait", 1);
 	}
-	dnprintf(40, "%s: EC wait, stat: %b\n", DEVNAME(sc), (int) stat,
-		 "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF");
-}
 
-void
-acpiec_wait_nosleep(struct acpiec_softc *sc, u_int8_t mask, u_int8_t val)
-{
-	u_int8_t stat;
-	dnprintf(40, "%s: EC wait_ns for: %b == %02x\n", DEVNAME(sc), (int)mask,
-		 "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF", (int)val);
-
-	for (;;) {
-		if (((stat = acpiec_status(sc)) & mask) == val)
-			break;
-		delay(1);
-	}
 	dnprintf(40, "%s: EC wait_ns, stat: %b\n", DEVNAME(sc), (int)stat,
-		 "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF");
+	    "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF");
 }
 
 u_int8_t
 acpiec_status(struct acpiec_softc *sc)
 {
-	return bus_space_read_1(sc->sc_cmd_bt, sc->sc_cmd_bh, 0);
+	return (bus_space_read_1(sc->sc_cmd_bt, sc->sc_cmd_bh, 0));
 }
 
 void
 acpiec_write_data(struct acpiec_softc *sc, u_int8_t val)
 {
 	acpiec_wait(sc, EC_STAT_IBF, 0);
-	dnprintf(40, "acpiec: write_data -- %d\n", (int) val);
+	dnprintf(40, "acpiec: write_data -- %d\n", (int)val);
 	bus_space_write_1(sc->sc_data_bt, sc->sc_data_bh, 0, val);
 }
 
@@ -182,62 +154,63 @@ void
 acpiec_write_cmd(struct acpiec_softc *sc, u_int8_t val)
 {
 	acpiec_wait(sc, EC_STAT_IBF, 0);
-	dnprintf(40, "acpiec: write_cmd -- %d\n", (int) val);
+	dnprintf(40, "acpiec: write_cmd -- %d\n", (int)val);
 	bus_space_write_1(sc->sc_cmd_bt, sc->sc_cmd_bh, 0, val);
 }
 
 u_int8_t
 acpiec_read_data(struct acpiec_softc *sc)
 {
-	u_int8_t val;
+	u_int8_t		val;
+
 	acpiec_wait(sc, EC_STAT_OBF, EC_STAT_OBF);
-	dnprintf(40, "acpiec: read_data\n", (int) val);
+	dnprintf(40, "acpiec: read_data\n", (int)val);
 	val = bus_space_read_1(sc->sc_data_bt, sc->sc_data_bh, 0);
 
-	return val;
+	return (val);
 }
 
 void
 acpiec_sci_event(struct acpiec_softc *sc)
 {
-	u_int8_t evt;
+	u_int8_t		evt;
 
-	acpiec_wait_nosleep(sc, EC_STAT_IBF, 0);
+	sc->sc_gotsci = 0;
+
+	acpiec_wait(sc, EC_STAT_IBF, 0);
 	bus_space_write_1(sc->sc_cmd_bt, sc->sc_cmd_bh, 0, EC_CMD_QR);
 
-	acpiec_wait_nosleep(sc, EC_STAT_OBF, EC_STAT_OBF);
+	acpiec_wait(sc, EC_STAT_OBF, EC_STAT_OBF);
 	evt = bus_space_read_1(sc->sc_data_bt, sc->sc_data_bh, 0);
 
-	dnprintf(10, "%s: sci_event: 0x%02x\n", DEVNAME(sc), (int) evt);
-
-	sc->sc_events[evt].active = 1;
-	sc->sc_pending = 1;
-
-	sc->sc_acpi->sc_wakeup = 0;
-	wakeup(sc->sc_acpi);
+	if (evt) {
+		dnprintf(10, "%s: sci_event: 0x%02x\n", DEVNAME(sc), (int)evt);
+		aml_evalnode(sc->sc_acpi, sc->sc_events[evt].event, 0, NULL,
+		    NULL);
+	}
 }
 
 u_int8_t
 acpiec_read_1(struct acpiec_softc *sc, u_int8_t addr)
 {
-	u_int8_t val;
+	u_int8_t		val;
 
 	if ((acpiec_status(sc) & EC_STAT_SCI_EVT) == EC_STAT_SCI_EVT)
-		acpiec_sci_event(sc);
+		sc->sc_gotsci = 1;
 
 	acpiec_write_cmd(sc, EC_CMD_RD);
 	acpiec_write_data(sc, addr);
 
 	val = acpiec_read_data(sc);
 
-	return val;
+	return (val);
 }
 
 void
 acpiec_write_1(struct acpiec_softc *sc, u_int8_t addr, u_int8_t data)
 {
 	if ((acpiec_status(sc) & EC_STAT_SCI_EVT)  == EC_STAT_SCI_EVT)
-		acpiec_sci_event(sc);
+		sc->sc_gotsci = 1;
 
 	acpiec_write_cmd(sc, EC_CMD_WR);
 	acpiec_write_data(sc, addr);
@@ -254,34 +227,34 @@ acpiec_burst_enable(struct acpiec_softc *sc)
 void
 acpiec_read(struct acpiec_softc *sc, u_int8_t addr, int len, u_int8_t *buffer)
 {
-	int reg;
-	rw_enter_write(&sc->sc_lock);
-	sc->sc_locked = 1;
+	int			reg;
 
+	/*
+	 * this works because everything runs in the acpi thread context.
+	 * at some point add a lock to deal with concurrency so that a
+	 * transaction does not get interrupted.
+	 */
 	acpiec_burst_enable(sc);
-	dnprintf(20, "%s: read %d, %d\n", DEVNAME(sc), (int) addr, len);
+	dnprintf(20, "%s: read %d, %d\n", DEVNAME(sc), (int)addr, len);
 
 	for (reg = 0; reg < len; reg++)
 		buffer[reg] = acpiec_read_1(sc, addr + reg);
-
-	sc->sc_locked = 0;
-	rw_exit_write(&sc->sc_lock);
 }
 
 void
 acpiec_write(struct acpiec_softc *sc, u_int8_t addr, int len, u_int8_t *buffer)
 {
-	int reg;
-	rw_enter_write(&sc->sc_lock);
-	sc->sc_locked = 1;
+	int			reg;
 
+	/*
+	 * this works because everything runs in the acpi thread context.
+	 * at some point add a lock to deal with concurrency so that a
+	 * transaction does not get interrupted.
+	 */
 	acpiec_burst_enable(sc);
-	dnprintf(20, "%s: write %d, %d\n", DEVNAME(sc), (int) addr, len);
+	dnprintf(20, "%s: write %d, %d\n", DEVNAME(sc), (int)addr, len);
 	for (reg = 0; reg < len; reg++)
 		acpiec_write_1(sc, addr + reg, buffer[reg]);
-
-	sc->sc_locked = 0;
-	rw_exit_write(&sc->sc_lock);
 }
 
 int
@@ -308,9 +281,6 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node->child;
 
-	rw_init(&sc->sc_lock, "acpi_ec");
-	sc->sc_locked = 0;
-
 	if (sc->sc_acpi->sc_ec != NULL) {
 		printf(": Only single EC is supported!\n");
 		return;
@@ -329,16 +299,12 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 	acpiec_get_events(sc);
 
 	sc->sc_acpi->sc_ec = sc;
-	sc->sc_acpi->sc_ec_gpemask = (1L << sc->sc_gpe);
 
-	dnprintf(10, "%s: GPE: %d (%x)\n", DEVNAME(sc),
-	    sc->sc_gpe, sc->sc_acpi->sc_ec_gpemask);
+	dnprintf(10, "%s: GPE: %d\n", DEVNAME(sc), sc->sc_gpe);
 
-	acpi_set_gpehandler(sc->sc_acpi, sc->sc_gpe, acpiec_gpehandler, sc, "acpiec");
-
-#if 0
-	/* Enable EC interrupt */
-	acpi_enable_gpe(sc->sc_acpi, sc->sc_acpi->sc_ec_gpemask);
+#ifndef SMALL_KERNEL
+	acpi_set_gpehandler(sc->sc_acpi, sc->sc_gpe, acpiec_gpehandler,
+	    sc, "acpiec");
 #endif
 
 	printf(": %s\n", sc->sc_devnode->parent->name);
@@ -347,8 +313,8 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 void
 acpiec_get_events(struct acpiec_softc *sc)
 {
-	int idx;
-	char name[16];
+	int			idx;
+	char			name[16];
 
 	memset(sc->sc_events, 0, sizeof(sc->sc_events));
 	for (idx = 0; idx < ACPIEC_MAX_EVENTS; idx++) {
@@ -362,48 +328,37 @@ acpiec_get_events(struct acpiec_softc *sc)
 int
 acpiec_gpehandler(struct acpi_softc *acpi_sc, int gpe, void *arg)
 {
-	struct acpiec_softc *sc = arg;
-	uint8_t mask;
+	struct acpiec_softc	*sc = arg;
+	u_int8_t		mask, stat;
 
 	dnprintf(10, "ACPIEC: got gpe\n");
-	printf("ACPIEC: got gpe: %x\n", gpe);
-	acpiec_intr(sc);
 
 	/* Reset GPE event */
 	mask = (1L << (gpe & 7));
 	acpi_write_pmreg(acpi_sc, ACPIREG_GPE_STS, gpe>>3, mask);
 	acpi_write_pmreg(acpi_sc, ACPIREG_GPE_EN,  gpe>>3, mask);
+
+	do {
+		if (sc->sc_gotsci)
+			acpiec_sci_event(sc);
+
+		stat = acpiec_status(sc);
+		dnprintf(40, "%s: EC interrupt, stat: %b\n",
+		    DEVNAME(sc), (int)stat,
+		    "\20\x8IGN\x7SMI\x6SCI\05BURST\04CMD\03IGN\02IBF\01OBF");
+
+		if (stat & EC_STAT_SCI_EVT)
+			sc->sc_gotsci = 1;
+	} while (sc->sc_gotsci);
+
 	return (0);
 }
-
-void
-acpiec_handle_events(struct acpiec_softc *sc)
-{
-	struct aml_value res;
-	int idx;
-
-	if (sc->sc_pending == 0)
-		return;
-
-	sc->sc_pending = 0;
-
-	for (idx = 0; idx < ACPIEC_MAX_EVENTS; idx++) {
-		if (sc->sc_events[idx].active == 0 ||
-		    sc->sc_events[idx].event == NULL)
-			continue;
-		dnprintf(10, "%s: handling event 0x%02x\n", DEVNAME(sc), idx);
-		aml_eval_object(sc->sc_acpi, sc->sc_events[idx].event,
-		    &res, 0, NULL);
-		sc->sc_events[idx].active = 0;
-	}
-}
-
 
 /* parse the resource buffer to get a 'register' value */
 int
 acpiec_getregister(const u_int8_t *buf, int size, int *type, bus_size_t *addr)
 {
-	int len, hlen;
+	int			len, hlen;
 
 #define RES_TYPE_MASK 0x80
 #define RES_LENGTH_MASK 0x07
@@ -417,7 +372,7 @@ acpiec_getregister(const u_int8_t *buf, int size, int *type, bus_size_t *addr)
 		/* large resource */
 		if (size < 3)
 			return (1);
-		len = (int) buf[1] + 256 * (int) buf[2];
+		len = (int)buf[1] + 256 * (int)buf[2];
 		hlen = 3;
 	} else {
 		/* small resource */
@@ -434,7 +389,7 @@ acpiec_getregister(const u_int8_t *buf, int size, int *type, bus_size_t *addr)
 
 	/* XXX validate? */
 	*type = GAS_SYSTEM_IOSPACE;
-	*addr = (int) buf[2] + 256 * (int) buf[3];
+	*addr = (int)buf[2] + 256 * (int)buf[3];
 
 	return (hlen + len);
 }
@@ -442,23 +397,21 @@ acpiec_getregister(const u_int8_t *buf, int size, int *type, bus_size_t *addr)
 int
 acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 {
-	struct aml_value res, env;
-	bus_size_t ec_sc, ec_data;
-	int type1, type2;
-	char *buf;
-	int size, ret;
+	struct aml_value	res;
+	bus_size_t		ec_sc, ec_data;
+	int			type1, type2;
+	char			*buf;
+	int			size, ret;
 
-	memset(&res, 0, sizeof(res));
-	memset(&env, 0, sizeof(env));
-
-	if (aml_eval_name(sc->sc_acpi, sc->sc_devnode, "_GPE", &res, &env)) {
+	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_GPE", 0, NULL, &res)) {
 		dnprintf(10, "%s: no _GPE\n", DEVNAME(sc));
 		return (1);
 	}
 
-	sc->sc_gpe = aml_val2int(NULL, &res);
+	sc->sc_gpe = aml_val2int(&res);
+	aml_freevalue(&res);
 
-	if (aml_eval_name(sc->sc_acpi, sc->sc_devnode, "_CRS", &res, &env)) {
+	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_CRS", 0, NULL, &res)) {
 		dnprintf(10, "%s: no _CRS\n", DEVNAME(sc));
 		return (1);
 	}
@@ -468,6 +421,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	if (res.type != AML_OBJTYPE_BUFFER) {
 		dnprintf(10, "%s: unknown _CRS type %d\n",
 		    DEVNAME(sc), res.type);
+		aml_freevalue(&res);
 		return (1);
 	}
 
@@ -478,6 +432,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	if (ret <= 0) {
 		dnprintf(10, "%s: failed to read DATA from _CRS\n",
 		    DEVNAME(sc));
+		aml_freevalue(&res);
 		return (1);
 	}
 
@@ -488,6 +443,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	if (ret <= 0) {
 		dnprintf(10, "%s: failed to read S/C from _CRS\n",
 		    DEVNAME(sc));
+		aml_freevalue(&res);
 		return (1);
 	}
 
@@ -496,8 +452,10 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 
 	if (size != 2 || *buf != RES_TYPE_ENDTAG) {
 		dnprintf(10, "%s: no _CRS end tag\n", DEVNAME(sc));
+		aml_freevalue(&res);
 		return (1);
 	}
+	aml_freevalue(&res);
 
 	/* XXX: todo - validate _CRS checksum? */
 
@@ -525,34 +483,30 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 		return (1);
 	}
 
-       	return (0);
+	return (0);
 }
 
 int
 acpiec_reg(struct acpiec_softc *sc)
 {
-	struct aml_value	res, arg[2];
-	struct aml_node *root;
+	struct aml_value	arg[2];
+	struct aml_node		*root;
 
-	memset(&res, 0, sizeof(res));
 	memset(&arg, 0, sizeof(arg));
-
-#define	REG_TYPE_EC	3
 
 	arg[0].type = AML_OBJTYPE_INTEGER;
 	arg[0].v_integer = REG_TYPE_EC;
 	arg[1].type = AML_OBJTYPE_INTEGER;
 	arg[1].v_integer = 1;
 
-	root = aml_find_name(sc->sc_acpi, sc->sc_devnode, "_REG");
-
+	root = aml_searchname(sc->sc_devnode, "_REG");
 	if (root == NULL) {
 		dnprintf(10, "%s: no _REG method\n", DEVNAME(sc));
 		return (1);
 	}
 
-	if (aml_eval_object(sc->sc_acpi, root, &res, 2, arg)) {
-		dnprintf(10, "%s: evaluating method _REG failed.\n", DEVNAME(sc));
+	if (aml_evalnode(sc->sc_acpi, root, 2, arg, NULL) != 0) {
+		dnprintf(10, "%s: eval method _REG failed\n", DEVNAME(sc));
 		return (1);
 	}
 

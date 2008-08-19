@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.180 2006/06/18 11:47:45 pascoe Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.184 2006/12/05 09:17:12 markus Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -602,20 +602,29 @@ sendit:
 		    tdb->tdb_mtutimeout > time_second) {
 			struct rtentry *rt = NULL;
 			int rt_mtucloned = 0;
+			int transportmode = 0;
 
+			transportmode = (tdb->tdb_dst.sa.sa_family == AF_INET) &&
+			    (tdb->tdb_dst.sin.sin_addr.s_addr ==
+			    ip->ip_dst.s_addr);
 			icmp_mtu = tdb->tdb_mtu;
 			splx(s);
 
 			/* Find a host route to store the mtu in */
 			if (ro != NULL)
 				rt = ro->ro_rt;
-			if (rt == NULL || (rt->rt_flags & RTF_HOST) == 0) {
+			/* but don't add a PMTU route for transport mode SAs */
+			if (transportmode)
+				rt = NULL;
+			else if (rt == NULL || (rt->rt_flags & RTF_HOST) == 0) {
 				struct sockaddr_in dst = {
 					sizeof(struct sockaddr_in), AF_INET};
 				dst.sin_addr = ip->ip_dst;
 				rt = icmp_mtudisc_clone((struct sockaddr *)&dst);
 				rt_mtucloned = 1;
 			}
+			DPRINTF(("ip_output: spi %08x mtu %d rt %p cloned %d\n",
+			    ntohl(tdb->tdb_spi), icmp_mtu, rt, rt_mtucloned));
 			if (rt != NULL) {
 				rt->rt_rmx.rmx_mtu = icmp_mtu;
 				if (ro && ro->ro_rt != NULL) {
@@ -1044,10 +1053,12 @@ ip_ctloutput(op, so, level, optname, mp)
 
 		case IP_TOS:
 		case IP_TTL:
+		case IP_MINTTL:
 		case IP_RECVOPTS:
 		case IP_RECVRETOPTS:
 		case IP_RECVDSTADDR:
 		case IP_RECVIF:
+		case IP_RECVTTL:
 			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
@@ -1059,7 +1070,17 @@ ip_ctloutput(op, so, level, optname, mp)
 					break;
 
 				case IP_TTL:
-					inp->inp_ip.ip_ttl = optval;
+					if (optval > 0 && optval <= MAXTTL)
+						inp->inp_ip.ip_ttl = optval;
+					else
+						error = EINVAL;
+					break;
+
+				case IP_MINTTL:
+					if (optval > 0 && optval <= MAXTTL)
+						inp->inp_ip_minttl = optval;
+					else
+						error = EINVAL;
 					break;
 #define	OPTSET(bit) \
 	if (optval) \
@@ -1080,6 +1101,9 @@ ip_ctloutput(op, so, level, optname, mp)
 					break;
 				case IP_RECVIF:
 					OPTSET(INP_RECVIF);
+					break;
+				case IP_RECVTTL:
+					OPTSET(INP_RECVTTL);
 					break;
 				}
 			}
@@ -1379,10 +1403,12 @@ ip_ctloutput(op, so, level, optname, mp)
 
 		case IP_TOS:
 		case IP_TTL:
+		case IP_MINTTL:
 		case IP_RECVOPTS:
 		case IP_RECVRETOPTS:
 		case IP_RECVDSTADDR:
 		case IP_RECVIF:
+		case IP_RECVTTL:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
 			switch (optname) {
@@ -1393,6 +1419,10 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			case IP_TTL:
 				optval = inp->inp_ip.ip_ttl;
+				break;
+
+			case IP_MINTTL:
+				optval = inp->inp_ip_minttl;
 				break;
 
 #define	OPTBIT(bit)	(inp->inp_flags & bit ? 1 : 0)
@@ -1410,6 +1440,9 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			case IP_RECVIF:
 				optval = OPTBIT(INP_RECVIF);
+				break;
+			case IP_RECVTTL:
+				optval = OPTBIT(INP_RECVTTL);
 				break;
 			}
 			*mtod(m, int *) = optval;

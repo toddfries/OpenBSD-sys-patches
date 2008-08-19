@@ -1,4 +1,4 @@
-/*	$OpenBSD: kgdb_machdep.c,v 1.6 2006/05/11 13:21:11 mickey Exp $	*/
+/*	$OpenBSD: kgdb_machdep.c,v 1.8 2007/02/20 21:15:01 tom Exp $	*/
 /*	$NetBSD: kgdb_machdep.c,v 1.6 1998/08/13 21:36:03 thorpej Exp $	*/
 
 /*-
@@ -92,18 +92,18 @@
  * Determine if the memory at va..(va+len) is valid.
  */
 int
-kgdb_acc(va, len)
-	vaddr_t va;
-	size_t len;
+kgdb_acc(vaddr_t va, size_t len)
 {
 	vaddr_t last_va;
+	pt_entry_t *pte;
 
 	last_va = va + len;
 	va  &= ~PGOFSET;
 	last_va &= ~PGOFSET;
 
 	do {
-		if ((pmap_pte_bits(va) & PG_V) == 0)
+		pte = kvtopte(va);
+		if ((*pte & PG_V) == 0)
 			return (0);
 		va  += NBPG;
 	} while (va < last_va);
@@ -116,8 +116,7 @@ kgdb_acc(va, len)
  * (gdb only understands unix signal numbers).
  */
 int
-kgdb_signal(type)
-	int type;
+kgdb_signal(int type)
 {
 	switch (type) {
 	case T_NMI:
@@ -162,9 +161,7 @@ kgdb_signal(type)
  * understood by gdb.
  */
 void
-kgdb_getregs(regs, gdb_regs)
-	db_regs_t *regs;
-	kgdb_reg_t *gdb_regs;
+kgdb_getregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
 {
 
 	gdb_regs[ 0] = regs->tf_eax;
@@ -196,9 +193,7 @@ kgdb_getregs(regs, gdb_regs)
  * Reverse the above.
  */
 void
-kgdb_setregs(regs, gdb_regs)
-	db_regs_t *regs;
-	kgdb_reg_t *gdb_regs;
+kgdb_setregs(db_regs_t *regs, kgdb_reg_t *gdb_regs)
 {
 
 	regs->tf_eax    = gdb_regs[ 0];

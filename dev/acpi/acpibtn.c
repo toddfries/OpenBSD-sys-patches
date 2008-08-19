@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.10 2006/05/31 10:01:56 canacar Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.15 2006/12/26 23:58:08 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -46,6 +46,7 @@ struct acpibtn_softc {
 	struct aml_node		*sc_devnode;
 
 	int			sc_btn_type;
+#define	ACPIBTN_UNKNOWN	-1
 #define ACPIBTN_LID	0
 #define ACPIBTN_POWER	1
 #define ACPIBTN_SLEEP	2
@@ -87,29 +88,25 @@ acpibtn_attach(struct device *parent, struct device *self, void *aux)
 
 	if (!strcmp(aa->aaa_dev, ACPI_DEV_LD))
 		sc->sc_btn_type = ACPIBTN_LID;
-	if (!strcmp(aa->aaa_dev, ACPI_DEV_PBD))
+	else if (!strcmp(aa->aaa_dev, ACPI_DEV_PBD))
 		sc->sc_btn_type = ACPIBTN_POWER;
-	if (!strcmp(aa->aaa_dev, ACPI_DEV_SBD))
+	else if (!strcmp(aa->aaa_dev, ACPI_DEV_SBD))
 		sc->sc_btn_type = ACPIBTN_SLEEP;
+	else
+		sc->sc_btn_type = ACPIBTN_UNKNOWN;
 
-	acpibtn_getsta(sc); 
+	acpibtn_getsta(sc);
 
 	printf(": %s\n", sc->sc_devnode->parent->name);
 
-	aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev, acpibtn_notify, sc);
+	aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev, acpibtn_notify,
+	    sc, ACPIDEV_NOPOLL);
 }
 
 int
 acpibtn_getsta(struct acpibtn_softc *sc)
 {
-	struct aml_value	res, env;
-	struct acpi_context	*ctx;
-
-	memset(&res, 0, sizeof(res));
-	memset(&env, 0, sizeof(env));
-
-	ctx = NULL;
-	if (aml_eval_name(sc->sc_acpi, sc->sc_devnode, "_STA", &res, &env)) {
+	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_STA", 0, NULL, NULL) != 0) {
 		dnprintf(20, "%s: no _STA\n", DEVNAME(sc));
 		/* XXX not all buttons have _STA so FALLTROUGH */
 	}
@@ -134,7 +131,6 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 		if (notify_type == 0x80) {
 			acpi_s5 = 1;
 			psignal(initproc, SIGUSR1);
-			/* NOTREACHED */
 		}
 		break;
 	default:

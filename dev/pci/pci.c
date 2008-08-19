@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.46 2006/07/04 18:07:29 kettenis Exp $	*/
+/*	$OpenBSD: pci.c,v 1.49 2006/12/14 17:36:12 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -71,6 +71,8 @@ struct cfattach pci_ca = {
 struct cfdriver pci_cd = {
 	NULL, "pci", DV_DULL
 };
+
+int	pci_ndomains;
 
 int	pciprint(void *, const char *);
 int	pcisubmatch(struct device *, void *, void *);
@@ -150,6 +152,7 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_memt = pba->pba_memt;
 	sc->sc_dmat = pba->pba_dmat;
 	sc->sc_pc = pba->pba_pc;
+	sc->sc_domain = pba->pba_domain;
 	sc->sc_bus = pba->pba_bus;
 	sc->sc_bridgetag = pba->pba_bridgetag;
 	sc->sc_maxndevs = pci_bus_maxdevs(pba->pba_pc, pba->pba_bus);
@@ -265,12 +268,14 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pa.pa_memt = sc->sc_memt;
 	pa.pa_dmat = sc->sc_dmat;
 	pa.pa_pc = pc;
+	pa.pa_domain = sc->sc_domain;
 	pa.pa_bus = bus;
 	pa.pa_device = device;
 	pa.pa_function = function;
 	pa.pa_tag = tag;
 	pa.pa_id = id;
 	pa.pa_class = class;
+	pa.pa_bridgetag = sc->sc_bridgetag;
 
 	/* This is a simplification of the NetBSD code.
 	   We don't support turning off I/O or memory
@@ -495,6 +500,10 @@ pciopen(dev_t dev, int oflags, int devtype, struct proc *p)
 {
 	PCIDEBUG(("pciopen ndevs: %d\n" , pci_cd.cd_ndevs));
 
+	if (minor(dev) >= pci_ndomains) {
+		return ENXIO;
+	}
+
 #ifndef APERTURE
 	if ((oflags & FWRITE) && securelevel > 0) {
 		return EPERM;
@@ -518,9 +527,9 @@ int
 pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct pci_io *io;
-	int error;
+	int i, error;
 	pcitag_t tag;
-	struct pci_softc *pci;
+	struct pci_softc *pci = NULL;
 	pci_chipset_tag_t pc;
 
 	io = (struct pci_io *)data;
@@ -530,12 +539,13 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	PCIDEBUG(("  bus %d dev %d func %d reg %x\n", io->pi_sel.pc_bus,
 		  io->pi_sel.pc_dev, io->pi_sel.pc_func, io->pi_reg));
 
-	if (io->pi_sel.pc_bus >= pci_cd.cd_ndevs) {
-		error = ENXIO;
-		goto done;
+	for (i = 0; i < pci_cd.cd_ndevs; i++) {
+		pci = pci_cd.cd_devs[i];
+		if (pci != NULL && pci->sc_domain == minor(dev) &&
+		    pci->sc_bus == io->pi_sel.pc_bus)
+			break;
 	}
-	pci = pci_cd.cd_devs[io->pi_sel.pc_bus];
-	if (pci != NULL) {
+	if (pci != NULL && pci->sc_bus == io->pi_sel.pc_bus) {
 		pc = pci->sc_pc;
 	} else {
 		error = ENXIO;
@@ -549,7 +559,7 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		goto done;
 	}
 
-	tag = pci_make_tag(pc, pci->sc_bus, io->pi_sel.pc_dev,
+	tag = pci_make_tag(pc, io->pi_sel.pc_bus, io->pi_sel.pc_dev,
 			   io->pi_sel.pc_func);
 
 	switch(cmd) {

@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_nfe.c,v 1.64.2.1 2006/11/13 23:41:38 brad Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.69 2007/03/02 00:16:59 jsg Exp $	*/
 
 /*-
- * Copyright (c) 2006 Damien Bergamini <damien.bergamini@free.fr>
+ * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>
  * Copyright (c) 2005, 2006 Jonathan Gray <jsg@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -146,7 +146,11 @@ const struct pci_matchid nfe_devices[] = {
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN1 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN2 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN3 },
-	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN4 }
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN4 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN1 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN2 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN3 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_LAN4 }
 };
 
 int
@@ -218,17 +222,23 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_NVIDIA_MCP61_LAN2:
 	case PCI_PRODUCT_NVIDIA_MCP61_LAN3:
 	case PCI_PRODUCT_NVIDIA_MCP61_LAN4:
+	case PCI_PRODUCT_NVIDIA_MCP67_LAN1:
+	case PCI_PRODUCT_NVIDIA_MCP67_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP67_LAN3:
+	case PCI_PRODUCT_NVIDIA_MCP67_LAN4:
 		sc->sc_flags |= NFE_40BIT_ADDR;
 		break;
 	case PCI_PRODUCT_NVIDIA_CK804_LAN1:
 	case PCI_PRODUCT_NVIDIA_CK804_LAN2:
 	case PCI_PRODUCT_NVIDIA_MCP04_LAN1:
 	case PCI_PRODUCT_NVIDIA_MCP04_LAN2:
+		sc->sc_flags |= NFE_JUMBO_SUP | NFE_40BIT_ADDR | NFE_HW_CSUM;
+		break;
 	case PCI_PRODUCT_NVIDIA_MCP65_LAN1:
 	case PCI_PRODUCT_NVIDIA_MCP65_LAN2:
 	case PCI_PRODUCT_NVIDIA_MCP65_LAN3:
 	case PCI_PRODUCT_NVIDIA_MCP65_LAN4:
-		sc->sc_flags |= NFE_JUMBO_SUP | NFE_40BIT_ADDR | NFE_HW_CSUM;
+		sc->sc_flags |= NFE_JUMBO_SUP | NFE_40BIT_ADDR;
 		break;
 	case PCI_PRODUCT_NVIDIA_MCP55_LAN1:
 	case PCI_PRODUCT_NVIDIA_MCP55_LAN2:
@@ -278,12 +288,10 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_flags & NFE_HW_VLAN)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
-#ifdef NFE_CSUM
 	if (sc->sc_flags & NFE_HW_CSUM) {
 		ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
 		    IFCAP_CSUM_UDPv4;
 	}
-#endif
 
 	sc->sc_mii.mii_ifp = ifp;
 	sc->sc_mii.mii_readreg = nfe_miibus_readreg;
@@ -747,19 +755,14 @@ nfe_rxeof(struct nfe_softc *sc)
 		m->m_pkthdr.len = m->m_len = len;
 		m->m_pkthdr.rcvif = ifp;
 
-#ifdef notyet
-		if (sc->sc_flags & NFE_HW_CSUM) {
-			if (flags & NFE_RX_IP_CSUMOK)
-				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+		if ((sc->sc_flags & NFE_HW_CSUM) &&
+		    (flags & NFE_RX_IP_CSUMOK)) {
+			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 			if (flags & NFE_RX_UDP_CSUMOK)
 				m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
 			if (flags & NFE_RX_TCP_CSUMOK)
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
 		}
-#elif defined(NFE_CSUM)
-		if ((sc->sc_flags & NFE_HW_CSUM) && (flags & NFE_RX_CSUMOK))
-			m->m_pkthdr.csum_flags = M_IPV4_CSUM_IN_OK;
-#endif
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -903,12 +906,10 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 		vtag = NFE_TX_VTAG | htons(ifv->ifv_tag);
 	}
 #endif
-#ifdef NFE_CSUM
 	if (m0->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 		flags |= NFE_TX_IP_CSUM;
 	if (m0->m_pkthdr.csum_flags & (M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT))
-		flags |= NFE_TX_TCP_CSUM;
-#endif
+		flags |= NFE_TX_TCP_UDP_CSUM;
 
 	for (i = 0; i < map->dm_nsegs; i++) {
 		data = &sc->txq.data[sc->txq.cur];
@@ -939,7 +940,7 @@ nfe_encap(struct nfe_softc *sc, struct mbuf *m0)
 			 * Checksum flags and vtag belong to the first fragment
 			 * only.
 			 */
-			flags &= ~(NFE_TX_IP_CSUM | NFE_TX_TCP_CSUM);
+			flags &= ~(NFE_TX_IP_CSUM | NFE_TX_TCP_UDP_CSUM);
 #if NVLAN > 0
 			vtag = 0;
 #endif
@@ -1053,10 +1054,8 @@ nfe_init(struct ifnet *ifp)
 		sc->rxtxctl |= NFE_RXTX_V3MAGIC;
 	else if (sc->sc_flags & NFE_JUMBO_SUP)
 		sc->rxtxctl |= NFE_RXTX_V2MAGIC;
-#ifdef NFE_CSUM
 	if (sc->sc_flags & NFE_HW_CSUM)
 		sc->rxtxctl |= NFE_RXTX_RXCSUM;
-#endif
 #if NVLAN > 0
 	/*
 	 * Although the adapter is capable of stripping VLAN tags from received
@@ -1119,7 +1118,7 @@ nfe_init(struct ifnet *ifp)
 	NFE_WRITE(sc, NFE_STATUS, sc->mii_phyaddr << 24 | NFE_STATUS_MAGIC);
 
 	NFE_WRITE(sc, NFE_SETUP_R4, NFE_R4_MAGIC);
-	NFE_WRITE(sc, NFE_WOL_CTL, NFE_WOL_MAGIC);
+	NFE_WRITE(sc, NFE_WOL_CTL, NFE_WOL_ENABLE);
 
 	sc->rxtxctl &= ~NFE_RXTX_BIT2;
 	NFE_WRITE(sc, NFE_RXTX_CTL, sc->rxtxctl);

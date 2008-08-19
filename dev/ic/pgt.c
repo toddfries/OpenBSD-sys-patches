@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.11 2006/09/16 12:20:10 mglocker Exp $  */
+/*	$OpenBSD: pgt.c,v 1.41 2007/02/14 20:09:20 claudio Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -59,6 +59,7 @@
 #include <sys/kthread.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
+#include <sys/device.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -110,22 +111,13 @@
  * http://www.prism54.org/.
  */
 
-/*
- * hack to get it compiled (from FreeBSD)
- */
-#define IEEE80211_IOC_MLME		21
-#define IEEE80211_IOC_AUTHMODE		7
-#define IEEE80211_POWERSAVE_ON		1
-#define IEEE80211_POWERSAVE_OFF		0
-#define IEEE80211_MLME_UNAUTHORIZE	5
-#define IEEE80211_MLME_AUTHORIZE	4
-
 #define SCAN_TIMEOUT			5	/* 5 seconds */
 
 struct cfdriver pgt_cd = {
         NULL, "pgt", DV_IFNET
 };
 
+void	 pgt_media_status(struct ifnet *ifp, struct ifmediareq *imr);
 int	 pgt_media_change(struct ifnet *ifp);
 void	 pgt_write_memory_barrier(struct pgt_softc *);
 uint32_t pgt_read_4(struct pgt_softc *, uint16_t);
@@ -141,7 +133,8 @@ int	 pgt_load_firmware(struct pgt_softc *);
 void	 pgt_cleanup_queue(struct pgt_softc *, enum pgt_queue,
 	     struct pgt_frag []);
 int	 pgt_reset(struct pgt_softc *);
-void	 pgt_disable(struct pgt_softc *, unsigned int);
+void	 pgt_stop(struct pgt_softc *, unsigned int);
+void	 pgt_reboot(struct pgt_softc *);
 void	 pgt_init_intr(struct pgt_softc *);
 void	 pgt_update_intr(struct pgt_softc *, int);
 struct mbuf
@@ -181,26 +174,14 @@ int	 pgt_ieee80211_send_mgmt(struct ieee80211com *,
 	     struct ieee80211_node *, int, int);
 int	 pgt_net_attach(struct pgt_softc *);
 void	 pgt_start(struct ifnet *);
-void	 pgt_start_body(struct pgt_softc *, struct ieee80211com *,
-	     struct ifnet *);
 int	 pgt_ioctl(struct ifnet *, u_long, caddr_t);
 void	 pgt_obj_bss2scanres(struct pgt_softc *,
 	     struct pgt_obj_bss *, struct wi_scan_res *, uint32_t);
-#if 0
-int	 pgt_node_set_authorization(struct pgt_softc *,
-	     struct pgt_ieee80211_node *,
-	     enum pin_dot1x_authorization);
-int	 pgt_do_mlme_sta(struct pgt_softc *, struct ieee80211req_mlme *);
-int	 pgt_do_mlme_hostap(struct pgt_softc *, struct ieee80211req_mlme *);
-int	 pgt_do_mlme_adhoc(struct pgt_softc *, struct ieee80211req_mlme *);
-int	 pgt_80211_set(struct pgt_softc *, struct ieee80211req *);
-#endif
 void	 node_mark_active_ap(void *, struct ieee80211_node *);
 void	 node_mark_active_adhoc(void *, struct ieee80211_node *);
 void	 pgt_watchdog(struct ifnet *);
 int	 pgt_init(struct ifnet *);
 void	 pgt_update_hw_from_sw(struct pgt_softc *, int, int);
-void	 pgt_update_hw_from_nodes(struct pgt_softc *);
 void	 pgt_hostap_handle_mlme(struct pgt_softc *, uint32_t,
 	     struct pgt_obj_mlme *);
 void	 pgt_update_sw_from_hw(struct pgt_softc *,
@@ -211,19 +192,8 @@ int	 pgt_dma_alloc(struct pgt_softc *);
 int	 pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq);
 void	 pgt_dma_free(struct pgt_softc *);
 void	 pgt_dma_free_queue(struct pgt_softc *sc, enum pgt_queue pq);
-
-void
-pgt_attachhook(void *xsc)
-{
-	struct pgt_softc *sc = xsc;
-	int error;
-
-	error = pgt_attach(sc);
-	if (error) {
-		printf("%s: attach error\n", sc->sc_dev.dv_xname);
-		return;
-	}
-}
+void	 pgt_shutdown(void *);
+void	 pgt_power(int, void *);
 
 void
 pgt_write_memory_barrier(struct pgt_softc *sc)
@@ -503,7 +473,7 @@ pgt_reset(struct pgt_softc *sc)
  * we'll spend a minute seeing if we can't do the reset.
  */
 void
-pgt_disable(struct pgt_softc *sc, unsigned int flag)
+pgt_stop(struct pgt_softc *sc, unsigned int flag)
 {
 	struct ieee80211com *ic;
 	unsigned int wokeup;
@@ -563,7 +533,7 @@ trying_again:
 		sc->sc_flags |= SC_NEEDS_FIRMWARE;
 		error = pgt_reset(sc);
 		if (error == 0) {
-			tsleep(&sc->sc_flags, 0, "pftres", hz);
+			tsleep(&sc->sc_flags, 0, "pgtres", hz);
 			if (sc->sc_flags & SC_UNINITIALIZED) {
 				printf("%s: not responding\n",
 				    sc->sc_dev.dv_xname);
@@ -594,13 +564,13 @@ trying_again:
 	ieee80211_new_state(&sc->sc_ic, IEEE80211_S_INIT, -1);
 }
 
-int
-pgt_attach(struct pgt_softc *sc)
+void
+pgt_attach(void *xsc)
 {
+	struct pgt_softc *sc = xsc;
 	int error;
 
 	/* debug flags */
-	//ieee80211_debug = 1;
 	//sc->sc_debug |= SC_DEBUG_QUEUES;	/* super verbose */
 	//sc->sc_debug |= SC_DEBUG_MGMT;
 	sc->sc_debug |= SC_DEBUG_UNEXPECTED;
@@ -613,61 +583,71 @@ pgt_attach(struct pgt_softc *sc)
 	//sc->sc_debug |= SC_DEBUG_RXFRAG;
 	//sc->sc_debug |= SC_DEBUG_RXETHER;
 
+	/* enable card if possible */
+	if (sc->sc_enable != NULL)
+		(*sc->sc_enable)(sc);
+
 	error = pgt_dma_alloc(sc);
 	if (error)
-		return (error);
+		return;
 
 	sc->sc_ic.ic_if.if_softc = sc;
 	TAILQ_INIT(&sc->sc_mgmtinprog);
 	TAILQ_INIT(&sc->sc_kthread.sck_traps);
 	sc->sc_flags |= SC_NEEDS_FIRMWARE | SC_UNINITIALIZED;
-
 	sc->sc_80211_ioc_auth = IEEE80211_AUTH_OPEN;
 
 	error = pgt_reset(sc);
 	if (error)
-		return (error);
+		return;
 
-	tsleep(&sc->sc_flags, 0, "pftres", hz);
+	tsleep(&sc->sc_flags, 0, "pgtres", hz);
 	if (sc->sc_flags & SC_UNINITIALIZED) {
 		printf("%s: not responding\n", sc->sc_dev.dv_xname);
-		error = ETIMEDOUT;
+		return;
 	} else {
 		/* await all interrupts */
 		pgt_write_4_flush(sc, PGT_REG_INT_EN, PGT_INT_STAT_SOURCES);
 		DELAY(PGT_WRITEIO_DELAY);
 	}
-	if (error)
-		goto failed;
 
 	error = pgt_net_attach(sc);
 	if (error)
-		goto failed;
+		return;
 
 	if (kthread_create(pgt_per_device_kthread, sc, NULL,
 	    sc->sc_dev.dv_xname) != 0)
-		goto failed;
+		return;
 
 	ieee80211_new_state(&sc->sc_ic, IEEE80211_S_INIT, -1);
-
-failed:
-	if (error) {
-		pgt_disable(sc, SC_DYING);
-		pgt_reboot(sc);
-	}
-
-	return (error);
 }
 
 int
 pgt_detach(struct pgt_softc *sc)
 {
+	if (sc->sc_flags & SC_NEEDS_FIRMWARE || sc->sc_flags & SC_UNINITIALIZED)
+		/* device was not initialized correctly, so leave early */
+		goto out;
+
 	/* stop card */
-	pgt_disable(sc, SC_DYING);
+	pgt_stop(sc, SC_DYING);
 	pgt_reboot(sc);
+
+	/*
+	 * Disable shutdown and power hooks
+	 */
+        if (sc->sc_shutdown_hook != NULL)
+                shutdownhook_disestablish(sc->sc_shutdown_hook);
+        if (sc->sc_power_hook != NULL)
+                powerhook_disestablish(sc->sc_power_hook);
 
 	ieee80211_ifdetach(&sc->sc_ic.ic_if);
 	if_detach(&sc->sc_ic.ic_if);
+
+out:
+	/* disable card if possible */
+	if (sc->sc_disable != NULL)
+		(*sc->sc_disable)(sc);
 
 	pgt_dma_free(sc);
 
@@ -766,9 +746,8 @@ pgt_update_intr(struct pgt_softc *sc, int hack)
 				sc->sc_flags |= SC_INTR_RESET;
 				break;
 			}
-			while (qfree-- > npend) {
+			while (qfree-- > npend)
 				pgt_rxdone(sc, pqs[i]);
-			}
 		} else {
 			npend = pgt_queue_frags_pending(sc, pqs[i]);
 			if (npend > qdirty) {
@@ -851,6 +830,12 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 	struct llc *snap;
 
 	ic = &sc->sc_ic;
+	if (ni != NULL && ic->ic_opmode == IEEE80211_M_MONITOR) {
+		*ni = ieee80211_ref_node(ic->ic_bss);
+		(*ni)->ni_inact = 0;
+		return (m);
+	}
+
 	M_PREPEND(m, sizeof(*frame) + sizeof(*snap), M_DONTWAIT);
 	if (m != NULL)
 		m = m_pullup(m, sizeof(*frame) + sizeof(*snap));
@@ -859,8 +844,7 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 	frame = mtod(m, struct ieee80211_frame *);
 	snap = (struct llc *)&frame[1];
 	if (ni != NULL) {
-		if (ic->ic_opmode == IEEE80211_M_STA ||
-		    ic->ic_opmode == IEEE80211_M_MONITOR) {
+		if (ic->ic_opmode == IEEE80211_M_STA) {
 			*ni = ieee80211_ref_node(ic->ic_bss);
 		} else {
 			*ni = ieee80211_find_node(ic, eh->ether_shost);
@@ -918,9 +902,6 @@ pgt_ieee80211_encap(struct pgt_softc *sc, struct ether_header *eh,
 		IEEE80211_ADDR_COPY(frame->i_addr3, eh->ether_dhost);
 		break;
 	default:
-		/*
-		 * What format do monitor-mode's frames take?
-		 */
 		break;
 	}
 	return (m);
@@ -934,13 +915,11 @@ pgt_input_frames(struct pgt_softc *sc, struct mbuf *m)
 	struct ieee80211_channel *chan;
 	struct ieee80211_node *ni;
 	struct ieee80211com *ic;
-	struct pgt_data_frame pdf;
 	struct pgt_rx_annex *pra;
+	struct pgt_rx_header *pha;
 	struct mbuf *next;
 	unsigned int n;
 	uint32_t rstamp;
-	uint16_t dataoff;
-	int encrypted;
 	uint8_t rate, rssi;
 
 	ic = &sc->sc_ic;
@@ -949,120 +928,91 @@ pgt_input_frames(struct pgt_softc *sc, struct mbuf *m)
 		next = m->m_nextpkt;
 		m->m_nextpkt = NULL;
 
-		dataoff = *mtod(m, uint16_t *);
-		m_adj(m, 2);
-		if (dataoff < sizeof(pdf)) {
-			if (sc->sc_debug & SC_DEBUG_UNEXPECTED)
-				printf("%s: missing pgt_data_frame header\n",
-				    sc->sc_dev.dv_xname);
-			ifp->if_ierrors++;
-			m_freem(m);
-			continue;
+		if (ic->ic_opmode == IEEE80211_M_MONITOR) {
+			if (m->m_len < sizeof(*pha)) {
+				m = m_pullup(m, sizeof(*pha));
+				if (m == NULL) {
+					if (sc->sc_debug & SC_DEBUG_UNEXPECTED)
+						DPRINTF(("%s: m_pullup "
+						    "failure\n",
+						    sc->sc_dev.dv_xname));
+					ifp->if_ierrors++;
+					continue;
+				}
+			}
+			pha = mtod(m, struct pgt_rx_header *);
+			pra = NULL;
+			goto input;
 		}
-		bcopy(mtod(m, struct pgt_data_frame *), &pdf, sizeof(pdf));
-		m_adj(m, dataoff);
+
 		if (m->m_len < sizeof(*pra)) {
 			m = m_pullup(m, sizeof(*pra));
 			if (m == NULL) {
 				if (sc->sc_debug & SC_DEBUG_UNEXPECTED)
-					printf("%s: m_pullup failure\n",
-					    sc->sc_dev.dv_xname);
+					DPRINTF(("%s: m_pullup failure\n",
+					    sc->sc_dev.dv_xname));
 				ifp->if_ierrors++;
 				continue;
 			}
 		}
 		pra = mtod(m, struct pgt_rx_annex *);
+		pha = &pra->pra_header;
 		if (sc->sc_debug & SC_DEBUG_RXANNEX)
-			DPRINTF(("%s: rx annex: ? %04x ? %04x "
+			DPRINTF(("%s: rx annex: ? %04x "
 			    "len %u clock %u flags %02x ? %02x rate %u ? %02x "
 			    "freq %u ? %04x rssi %u pad %02x%02x%02x\n",
 			    sc->sc_dev.dv_xname,
-			    letoh16(pdf.pdf_unknown),
-			    letoh16(pra->pra_unknown0),
-			    letoh16(pra->pra_length),
-			    letoh32(pra->pra_clock), pra->pra_flags,
-			    pra->pra_unknown1, pra->pra_rate,
-			    pra->pra_unknown2, letoh32(pra->pra_frequency),
-			    pra->pra_unknown3, pra->pra_rssi,
-			    pra->pra_pad[0], pra->pra_pad[1], pra->pra_pad[2]));
+			    letoh16(pha->pra_unknown0),
+			    letoh16(pha->pra_length),
+			    letoh32(pha->pra_clock), pha->pra_flags,
+			    pha->pra_unknown1, pha->pra_rate,
+			    pha->pra_unknown2, letoh32(pha->pra_frequency),
+			    pha->pra_unknown3, pha->pra_rssi,
+			    pha->pra_pad[0], pha->pra_pad[1], pha->pra_pad[2]));
 		if (sc->sc_debug & SC_DEBUG_RXETHER)
-			DPRINTF(("%s: rx ether: "
-			    "%02x:%02x:%02x:%02x:%02x:%02x < "
-			    "%02x:%02x:%02x:%02x:%02x:%02x 0x%04x\n",
+			DPRINTF(("%s: rx ether: %s < %s 0x%04x\n",
 			    sc->sc_dev.dv_xname,
-			    pra->pra_ether_dhost[0], pra->pra_ether_dhost[1],
-			    pra->pra_ether_dhost[2], pra->pra_ether_dhost[3],
-			    pra->pra_ether_dhost[4], pra->pra_ether_dhost[5],
-			    pra->pra_ether_shost[0], pra->pra_ether_shost[1],
-			    pra->pra_ether_shost[2], pra->pra_ether_shost[3],
-			    pra->pra_ether_shost[4], pra->pra_ether_shost[5],
+			    ether_sprintf(pra->pra_ether_dhost),
+			    ether_sprintf(pra->pra_ether_shost),
 			    ntohs(pra->pra_ether_type)));
+
+		memcpy(eh.ether_dhost, pra->pra_ether_dhost, ETHER_ADDR_LEN);
+		memcpy(eh.ether_shost, pra->pra_ether_shost, ETHER_ADDR_LEN);
+		eh.ether_type = pra->pra_ether_type;
+
+input:
 		/*
 		 * This flag is set if e.g. packet could not be decrypted.
 		 */
-		if (pra->pra_flags & PRA_FLAG_BAD) {
+		if (pha->pra_flags & PRA_FLAG_BAD) {
 			ifp->if_ierrors++;
 			m_freem(m);
 			continue;
 		}
-		/*
-		 * The 16-bit word preceding the received frame contains
-		 * values that seem to have a very non-random distribution
-		 * and possibly follow a periodic distribution.  The only
-		 * two values for it that seem to occur for WEP-decrypted
-		 * packets (assuming it is indeed a 16-bit word and not
-		 * something else) are 0x4008 and 0x4808.
-		 *
-		 * Those two values can be found in large runs in the
-		 * histogram that get zero hits over the course of
-		 * hundreds of thousands of samples from an 802.11b
-		 * sender source (ping -f).  Further analysis shows
-		 * that the 0x000c bits are always 0x0008 when WEP
-		 * has been used, and never otherwise.  The bottom
-		 * two bits seem to not be set in any known
-		 * circumstances.
-		 */
-		encrypted = sc->sc_ic.ic_flags == IEEE80211_F_WEPON &&
-		    (letoh16(pdf.pdf_unknown) & 0xc) == 0x8;
-		memcpy(eh.ether_dhost, pra->pra_ether_dhost, ETHER_ADDR_LEN);
-		memcpy(eh.ether_shost, pra->pra_ether_shost, ETHER_ADDR_LEN);
-		eh.ether_type = pra->pra_ether_type;
+
 		/*
 		 * After getting what we want, chop off the annex, then
 		 * turn into something that looks like it really was
 		 * 802.11.
 		 */
-		rssi = pra->pra_rssi;
-		rstamp = letoh32(pra->pra_clock);
-		rate = pra->pra_rate;
-		n = ieee80211_mhz2ieee(letoh32(pra->pra_frequency), 0);
+		rssi = pha->pra_rssi;
+		rstamp = letoh32(pha->pra_clock);
+		rate = pha->pra_rate;
+		n = ieee80211_mhz2ieee(letoh32(pha->pra_frequency), 0);
 		if (n <= IEEE80211_CHAN_MAX)
 			chan = &ic->ic_channels[n];
 		else
 			chan = ic->ic_bss->ni_chan;
 		/* Send to 802.3 listeners. */
-		m_adj(m, sizeof(*pra));
+		if (pra) {
+			m_adj(m, sizeof(*pra));
+		} else
+			m_adj(m, sizeof(*pha));
+
 		m = pgt_ieee80211_encap(sc, &eh, m, &ni);
 		if (m != NULL) {
 #if NBPFILTER > 0
 			if (sc->sc_drvbpf != NULL) {
-#if 0
-				struct pgt_ieee80211_radiotap pir;
-
-				bzero(&pir, sizeof(pir));
-				pir.pir_header.it_len = htole16(sizeof(pir));
-				pir.pir_header.it_present =
-				    htole32(PGT_IEEE80211_RADIOTAP_PRESENT);
-				if (encrypted)
-					pir.pir_flags |=
-					    IEEE80211_RADIOTAP_F_WEP;
-				pir.pir_rate = rate;
-				pir.pir_channel = htole16(chan->ic_freq);
-				pir.pir_channel_flags = htole16(chan->ic_flags);
-				pir.pir_db_antsignal = rssi;
-				pir.pir_db_antnoise = sc->sc_noise;
-				bpf_mtap2(sc->sc_drvbpf, &pir, sizeof(pir), m);
-#endif
 				struct mbuf mb;
 				struct pgt_rx_radiotap_hdr *tap = &sc->sc_rxtap;
 
@@ -1070,14 +1020,14 @@ pgt_input_frames(struct pgt_softc *sc, struct mbuf *m)
 				tap->wr_chan_freq = htole16(chan->ic_freq);
 				tap->wr_chan_flags = htole16(chan->ic_flags);
 				tap->wr_rssi = rssi;
-				//tap->wr_max_rssi = ic->ic_max_rssi;
+				tap->wr_max_rssi = ic->ic_max_rssi;
 
-				M_DUP_PKTHDR(&mb, m);
 				mb.m_data = (caddr_t)tap;
 				mb.m_len = sc->sc_rxtap_len;
 				mb.m_next = m;
-				mb.m_pkthdr.len += mb.m_len;
-
+				mb.m_nextpkt = NULL;
+				mb.m_type = 0;
+				mb.m_flags = 0;
 				bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 			}
 #endif
@@ -1120,8 +1070,8 @@ pgt_wakeup_intr(struct pgt_softc *sc)
 	if (!TAILQ_EMPTY(&sc->sc_mgmtinprog))
 		shouldupdate = 1;
 	if (sc->sc_debug & SC_DEBUG_POWER)
-		printf("%s: wakeup interrupt (update = %d)\n",
-		    sc->sc_dev.dv_xname, shouldupdate);
+		DPRINTF(("%s: wakeup interrupt (update = %d)\n",
+		    sc->sc_dev.dv_xname, shouldupdate));
 	sc->sc_flags &= ~SC_POWERSAVE;
 	if (shouldupdate) {
 		pgt_write_4_flush(sc, PGT_REG_DEV_INT, PGT_DEV_INT_UPDATE);
@@ -1150,8 +1100,8 @@ pgt_sleep_intr(struct pgt_softc *sc)
 	if (!TAILQ_EMPTY(&sc->sc_mgmtinprog))
 		allowed = 0;
 	if (sc->sc_debug & SC_DEBUG_POWER)
-		printf("%s: sleep interrupt (allowed = %d)\n",
-		    sc->sc_dev.dv_xname, allowed);
+		DPRINTF(("%s: sleep interrupt (allowed = %d)\n",
+		    sc->sc_dev.dv_xname, allowed));
 	if (allowed && sc->sc_ic.ic_flags & IEEE80211_F_PMGTON) {
 		sc->sc_flags |= SC_POWERSAVE;
 		pgt_write_4_flush(sc, PGT_REG_DEV_INT, PGT_DEV_INT_SLEEP);
@@ -1195,7 +1145,7 @@ pgt_per_device_kthread(void *argp)
 			sck->sck_update = 0;
 			pgt_empty_traps(sck);
 			s = splnet();
-			pgt_disable(sc, SC_NEEDS_RESET);
+			pgt_stop(sc, SC_NEEDS_RESET);
 			splx(s);
 		} else if (!TAILQ_EMPTY(&sck->sck_traps)) {
 			DPRINTF(("%s: [thread] got a trap\n",
@@ -1207,8 +1157,6 @@ pgt_per_device_kthread(void *argp)
 			pgt_update_sw_from_hw(sc, pa, m);
 			m_freem(m);
 		} else if (sck->sck_update) {
-			//DPRINTF(("%s: [thread] update_sw_from_hw\n",
-			//    sc->sc_dev.dv_xname));
 			sck->sck_update = 0;
 			pgt_update_sw_from_hw(sc, NULL, NULL);
 		}
@@ -1280,8 +1228,7 @@ pgt_intr(void *arg)
 		 * "update" after acknowledging the interrupt
 		 * bits and writing out the new control block.
 		 */
-		pgt_write_4_flush(sc, PGT_REG_DEV_INT,
-		    PGT_DEV_INT_UPDATE);
+		pgt_write_4_flush(sc, PGT_REG_DEV_INT, PGT_DEV_INT_UPDATE);
 		DELAY(PGT_WRITEIO_DELAY);
 	}
 	if (reg & PGT_INT_STAT_SLEEP && !(reg & PGT_INT_STAT_WAKEUP))
@@ -1295,10 +1242,10 @@ pgt_intr(void *arg)
 	}
 
 	if (reg & ~PGT_INT_STAT_SOURCES && sc->sc_debug & SC_DEBUG_UNEXPECTED) {
-		printf("%s: unknown interrupt bits %#x (stat %#x)\n",
+		DPRINTF(("%s: unknown interrupt bits %#x (stat %#x)\n",
 		    sc->sc_dev.dv_xname,
 		    reg & ~PGT_INT_STAT_SOURCES,
-		    pgt_read_4(sc, PGT_REG_CTRL_STAT));
+		    pgt_read_4(sc, PGT_REG_CTRL_STAT)));
 	}
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1460,8 +1407,8 @@ pgt_mgmtrx_completion(struct pgt_softc *sc, struct pgt_mgmt_desc *pmd)
 	}
 	if (pmf->pmf_operation == PMF_OP_TRAP) {
 		pmd = NULL; /* ignored */
-		DPRINTF(("%s: mgmt trap received "
-		    "(op %u, oid %#x, len %u)\n", sc->sc_dev.dv_xname,
+		DPRINTF(("%s: mgmt trap received (op %u, oid %#x, len %u)\n",
+		    sc->sc_dev.dv_xname,
 		    pmf->pmf_operation, oid, size));
 		pgt_trap_received(sc, oid, (char *)pmf + sizeof(*pmf),
 		    min(size, PGT_FRAG_SIZE - sizeof(*pmf)));
@@ -1561,43 +1508,23 @@ pgt_datarx_completion(struct pgt_softc *sc, enum pgt_queue pq)
 			goto fail;
 		}
 
-		if (m == NULL) {
-			datalen += dataoff;
+		if (m == NULL)
 			MGETHDR(m, M_DONTWAIT, MT_DATA);
-			if (m == NULL)
-				goto fail;
-			if (datalen + 2 >= MINCLSIZE) {
-				MCLGET(m, M_DONTWAIT);
-				if (!(m->m_flags & M_EXT)) {
-					m_free(m);
-					goto fail;
-				}
-			}
-		
-			/*
-			 * Add a uint16_t at the beginning containing the
-			 * actual data offset.
-			 */
-			*mtod(m, uint16_t *) = dataoff;
-			bcopy(pd->pd_mem, mtod(m, char *) + 2, datalen);
-			m->m_len = datalen + 2;
-			tlen += datalen + 2;
-		} else {
+		else
 			m = m_get(M_DONTWAIT, MT_DATA);
-			if (m == NULL)
-				goto fail;
-			if (datalen >= MINCLSIZE) {
-				MCLGET(m, M_DONTWAIT);
-				if (!(m->m_flags & M_EXT)) {
-					m_free(m);
-					goto fail;
-				}
-			}
-			bcopy(pd->pd_mem + dataoff, mtod(m, char *), datalen);
-			m->m_len = datalen;
-			tlen += datalen;
-		}
 
+		if (m == NULL)
+			goto fail;
+		if (datalen >= MINCLSIZE) {
+			MCLGET(m, M_DONTWAIT);
+			if (!(m->m_flags & M_EXT)) {
+				m_free(m);
+				goto fail;
+			}
+		}
+		bcopy(pd->pd_mem + dataoff, mtod(m, char *), datalen);
+		m->m_len = datalen;
+		tlen += datalen;
 
 		*mp = m;
 		mp = &m->m_next;
@@ -1765,8 +1692,8 @@ pgt_mgmt_request(struct pgt_softc *sc, struct pgt_mgmt_desc *pmd)
 	pmd->pmd_error = EINPROGRESS;
 	TAILQ_INSERT_TAIL(&sc->sc_mgmtinprog, pmd, pmd_link);
 	if (sc->sc_debug & SC_DEBUG_MGMT)
-		DPRINTF(("%s: queue: mgmt %p -> (op %u, "
-		    "oid %#x, len %u)\n", sc->sc_dev.dv_xname,
+		DPRINTF(("%s: queue: mgmt %p -> (op %u, oid %#x, len %u)\n",
+		    sc->sc_dev.dv_xname,
 		    pmd, pmf->pmf_operation,
 		    pmd->pmd_oid, pmd->pmd_len));
 	pgt_desc_transmit(sc, PGT_QUEUE_MGMT_TX, pd,
@@ -1886,10 +1813,10 @@ pgt_ieee80211_node_alloc(struct ieee80211com *ic)
 	struct pgt_ieee80211_node *pin;
 
 	pin = malloc(sizeof(*pin), M_DEVBUF, M_NOWAIT);
-	bzero(pin, sizeof *pin);
-	if (pin != NULL)
+	if (pin != NULL) {
+		bzero(pin, sizeof *pin);
 		pin->pin_dot1x_auth = PIN_DOT1X_UNAUTHORIZED;
-
+	}
 	return (struct ieee80211_node *)pin;
 }
 
@@ -1928,7 +1855,6 @@ pgt_ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
 	return (EOPNOTSUPP);
 }
 
-
 int
 pgt_net_attach(struct pgt_softc *sc)
 {
@@ -1966,9 +1892,15 @@ pgt_net_attach(struct pgt_softc *sc)
 	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST;
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
-	IFQ_SET_MAXLEN(&ifp->if_snd, PGT_QUEUE_FULL_THRESHOLD);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
+	/*
+	 * Set channels
+	 *
+	 * Prism hardware likes to report supported frequencies that are
+	 * not actually available for the country of origin.
+	 */
 	j = sizeof(*freqs) + (IEEE80211_CHAN_MAX + 1) * sizeof(uint16_t);
 	freqs = malloc(j, M_DEVBUF, M_WAITOK);
 	error = pgt_oid_get(sc, PGT_OID_SUPPORTED_FREQUENCIES, freqs, j);
@@ -1976,20 +1908,18 @@ pgt_net_attach(struct pgt_softc *sc)
 		free(freqs, M_DEVBUF);
 		return (error);
 	}
-	/*
-	 * Prism hardware likes to report supported frequencies that are
-	 * not actually available for the country of origin.
-	 */
-	j = letoh16(freqs->pof_count);
-	for (i = 0; i < j; i++) {
+
+	for (i = 0, j = letoh16(freqs->pof_count); i < j; i++) {
 		chan = ieee80211_mhz2ieee(letoh16(freqs->pof_freqlist_mhz[i]),
 		    0);
+
 		if (chan > IEEE80211_CHAN_MAX) {
 			printf("%s: reported bogus channel (%uMHz)\n",
 			    sc->sc_dev.dv_xname, chan);
 			free(freqs, M_DEVBUF);
 			return (EIO);
 		}
+
 		if (letoh16(freqs->pof_freqlist_mhz[i]) < 5000) {
 			if (!(phymode & htole32(PGT_OID_PHY_2400MHZ)))
 				continue;
@@ -2006,16 +1936,26 @@ pgt_net_attach(struct pgt_softc *sc)
 				continue;
 			ic->ic_channels[chan].ic_flags |= IEEE80211_CHAN_A;
 		}
+
 		ic->ic_channels[chan].ic_freq =
 		    letoh16(freqs->pof_freqlist_mhz[i]);
+
 		if (firstchan == -1)
 			firstchan = chan;
+
+		DPRINTF(("%s: set channel %d to freq %uMHz\n",
+		    sc->sc_dev.dv_xname, chan,
+		    letoh16(freqs->pof_freqlist_mhz[i])));
 	}
 	free(freqs, M_DEVBUF);
 	if (firstchan == -1) {
 		printf("%s: no channels found\n", sc->sc_dev.dv_xname);
 		return (EIO);
 	}
+
+	/*
+	 * Set rates
+	 */
 	bzero(rates, sizeof(rates));
 	error = pgt_oid_get(sc, PGT_OID_SUPPORTED_RATES, rates, sizeof(rates));
 	if (error)
@@ -2055,7 +1995,7 @@ pgt_net_attach(struct pgt_softc *sc)
 	if_attach(ifp);
 	ieee80211_ifattach(ifp);
 
-	/* Set up post-attach/pre-lateattach vector functions */
+	/* setup post-attach/pre-lateattach vector functions */
 	sc->sc_newstate = ic->ic_newstate;
 	ic->ic_newstate = pgt_newstate;
 	ic->ic_node_alloc = pgt_ieee80211_node_alloc;
@@ -2063,9 +2003,10 @@ pgt_net_attach(struct pgt_softc *sc)
 	ic->ic_node_free = pgt_ieee80211_node_free;
 	ic->ic_node_copy = pgt_ieee80211_node_copy;
 	ic->ic_send_mgmt = pgt_ieee80211_send_mgmt;
+	ic->ic_max_rssi = 255;	/* rssi is a u_int8_t */
 
 	/* let net80211 handle switching around the media + resetting */
-	ieee80211_media_init(ifp, pgt_media_change, ieee80211_media_status);
+	ieee80211_media_init(ifp, pgt_media_change, pgt_media_status);
 
 #if NBPFILTER > 0
 	bpfattach(&sc->sc_drvbpf, ifp, DLT_IEEE802_11_RADIO,
@@ -2079,6 +2020,18 @@ pgt_net_attach(struct pgt_softc *sc)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(PGT_TX_RADIOTAP_PRESENT);
 #endif
+
+	/*
+         * Enable shutdown and power hooks
+         */
+        sc->sc_shutdown_hook = shutdownhook_establish(pgt_shutdown, sc);
+        if (sc->sc_shutdown_hook == NULL)
+                printf("%s: WARNING: unable to establish shutdown hook\n",
+                    sc->sc_dev.dv_xname);
+        sc->sc_power_hook = powerhook_establish(pgt_power, sc);
+        if (sc->sc_power_hook == NULL)
+                printf("%s: WARNING: unable to establish power hook\n",
+                    sc->sc_dev.dv_xname);
 
 	return (0);
 }
@@ -2099,10 +2052,78 @@ pgt_media_change(struct ifnet *ifp)
 }
 
 void
+pgt_media_status(struct ifnet *ifp, struct ifmediareq *imr)
+{
+	struct pgt_softc *sc = ifp->if_softc;
+	struct ieee80211com *ic = &sc->sc_ic;
+	uint32_t rate;
+	int s;
+
+	imr->ifm_status = 0;
+	imr->ifm_active = IFM_IEEE80211 | IFM_NONE;
+
+	if (!(ifp->if_flags & IFF_UP))
+		return;
+
+	s = splnet();
+
+	if (ic->ic_fixed_rate != -1) {
+		rate = ic->ic_sup_rates[ic->ic_curmode].
+		    rs_rates[ic->ic_fixed_rate] & IEEE80211_RATE_VAL;
+	} else {
+		if (pgt_oid_get(sc, PGT_OID_LINK_STATE, &rate, sizeof(rate)))
+			return;
+		rate = letoh32(rate);
+		if (sc->sc_debug & SC_DEBUG_LINK) {
+			DPRINTF(("%s: %s: link rate %u\n",
+			    sc->sc_dev.dv_xname, __func__, rate));
+		}
+		if (rate == 0)
+			return;
+	}
+
+	imr->ifm_status = IFM_AVALID;
+	imr->ifm_active = IFM_IEEE80211;
+	if (ic->ic_state == IEEE80211_S_RUN)
+		imr->ifm_status |= IFM_ACTIVE;
+
+	imr->ifm_active |= ieee80211_rate2media(ic, rate, ic->ic_curmode);
+
+	switch (ic->ic_opmode) {
+	case IEEE80211_M_STA:
+		break;
+	case IEEE80211_M_IBSS:
+		imr->ifm_active |= IFM_IEEE80211_ADHOC;
+		break;
+	case IEEE80211_M_AHDEMO:
+		imr->ifm_active |= IFM_IEEE80211_ADHOC | IFM_FLAG0;
+		break;
+	case IEEE80211_M_HOSTAP:
+		imr->ifm_active |= IFM_IEEE80211_HOSTAP;
+		break;
+	case IEEE80211_M_MONITOR:
+		imr->ifm_active |= IFM_IEEE80211_MONITOR;
+		break;
+	default:
+		break;
+	}
+
+	splx(s);
+}
+
+/*
+ * Start data frames.  Critical sections surround the boundary of
+ * management frame transmission / transmission acknowledgement / response
+ * and data frame transmission / transmission acknowledgement.
+ */
+void
 pgt_start(struct ifnet *ifp)
 {
 	struct pgt_softc *sc;
 	struct ieee80211com *ic;
+	struct pgt_desc *pd;
+	struct mbuf *m;
+	int error;
 
 	sc = ifp->if_softc;
 	ic = &sc->sc_ic;
@@ -2113,21 +2134,6 @@ pgt_start(struct ifnet *ifp)
 		return;
 	}
 
-	pgt_start_body(sc, ic, ifp);
-}
-
-/*
- * Start data frames.  Critical sections surround the boundary of
- * management frame transmission / transmission acknowledgement / response
- * and data frame transmission / transmission acknowledgement.
- */
-void
-pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
-{
-	struct pgt_desc *pd;
-	struct mbuf *m;
-	int error;
-
 	/*
 	 * Management packets should probably be MLME frames
 	 * (i.e. hostap "managed" mode); we don't touch the
@@ -2136,16 +2142,15 @@ pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
 	for (; sc->sc_dirtyq_count[PGT_QUEUE_DATA_LOW_TX] <
 	    PGT_QUEUE_FULL_THRESHOLD && !IFQ_IS_EMPTY(&ifp->if_snd);) {
 		pd = TAILQ_FIRST(&sc->sc_freeq[PGT_QUEUE_DATA_LOW_TX]);
-		IFQ_DEQUEUE(&ifp->if_snd, m);
+		IFQ_POLL(&ifp->if_snd, m);
 		if (m == NULL)
 			break;
 		if (m->m_pkthdr.len <= PGT_FRAG_SIZE) {
 			error = pgt_load_tx_desc_frag(sc,
 			    PGT_QUEUE_DATA_LOW_TX, pd);
-			if (error) {
-				IF_PREPEND(&ifp->if_snd, m);
+			if (error)
 				break;
-			}
+			IFQ_DEQUEUE(&ifp->if_snd, m);
 			m_copydata(m, 0, m->m_pkthdr.len, pd->pd_mem);
 			pgt_desc_transmit(sc, PGT_QUEUE_DATA_LOW_TX,
 			    pd, m->m_pkthdr.len, 0);
@@ -2159,10 +2164,8 @@ pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
 			 * even support a full two.)
 			 */
 			if (sc->sc_dirtyq_count[PGT_QUEUE_DATA_LOW_TX] + 2 >
-			    PGT_QUEUE_FULL_THRESHOLD) {
-				IF_PREPEND(&ifp->if_snd, m);
+			    PGT_QUEUE_FULL_THRESHOLD)
 				break;
-			}
 			pd2 = TAILQ_NEXT(pd, pd_link);
 			error = pgt_load_tx_desc_frag(sc,
 			    PGT_QUEUE_DATA_LOW_TX, pd);
@@ -2176,10 +2179,9 @@ pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
 					    pd_link);
 				}
 			}
-			if (error) {
-				IF_PREPEND(&ifp->if_snd, m);
+			if (error)
 				break;
-			}
+			IFQ_DEQUEUE(&ifp->if_snd, m);
 			m_copydata(m, 0, PGT_FRAG_SIZE, pd->pd_mem);
 			pgt_desc_transmit(sc, PGT_QUEUE_DATA_LOW_TX,
 			    pd, PGT_FRAG_SIZE, 1);
@@ -2188,6 +2190,7 @@ pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
 			pgt_desc_transmit(sc, PGT_QUEUE_DATA_LOW_TX,
 			    pd2, m->m_pkthdr.len - PGT_FRAG_SIZE, 0);
 		} else {
+			IFQ_DEQUEUE(&ifp->if_snd, m);
 			ifp->if_oerrors++;
 			m_freem(m);
 			m = NULL;
@@ -2210,36 +2213,6 @@ pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
 			}
 #if NBPFILTER > 0
 			if (sc->sc_drvbpf != NULL) {
-#if 0
-				struct pgt_ieee80211_radiotap pir;
-				struct ether_header eh;
-
-				/*
-				 * Fill out what we can when faking
-				 * up a radiotapified outgoing frame.
-				 */
-				bzero(&pir, sizeof(pir));
-				pir.pir_header.it_len = htole16(sizeof(pir));
-				pir.pir_header.it_present =
-				    htole32(PGT_IEEE80211_RADIOTAP_PRESENT);
-				if (sc->sc_80211_ioc_wep != IEEE80211_WEP_OFF)
-					pir.pir_flags |=
-					    IEEE80211_RADIOTAP_F_WEP;
-				pir.pir_channel =
-				    htole16(ic->ic_bss->ni_chan->ic_freq);
-				pir.pir_channel_flags =
-				    htole16(ic->ic_bss->ni_chan->ic_flags);
-				pir.pir_db_antnoise = sc->sc_noise;
-				memcpy(mtod(m, struct ether_header *), &eh,
-				    sizeof(eh));
-				m_adj(m, sizeof(eh));
-				m = pgt_ieee80211_encap(sc, &eh, m, NULL);
-				if (m != NULL) {
-					bpf_mtap2(sc->sc_drvbpf, &pir,
-					    sizeof(pir), m);
-					m_freem(m);
-				}
-#endif
 				struct mbuf mb;
 				struct ether_header eh;
 				struct pgt_tx_radiotap_hdr *tap = &sc->sc_txtap;
@@ -2258,11 +2231,12 @@ pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
 				    htole16(ic->ic_bss->ni_chan->ic_flags);
 
 				if (m != NULL) {
-					M_DUP_PKTHDR(&mb, m);
 					mb.m_data = (caddr_t)tap;
 					mb.m_len = sc->sc_txtap_len;
 					mb.m_next = m;
-					mb.m_pkthdr.len += mb.m_len;
+					mb.m_nextpkt = NULL;
+					mb.m_type = 0;
+					mb.m_flags = 0;
 
 					bpf_mtap(sc->sc_drvbpf, &mb,
 					    BPF_DIRECTION_OUT);
@@ -2278,10 +2252,6 @@ pgt_start_body(struct pgt_softc *sc, struct ieee80211com *ic, struct ifnet *ifp)
 int
 pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 {
-#if 0
-	struct ifprismoidreq *preq;
-	struct ieee80211req *ireq;
-#endif
 	struct pgt_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
@@ -2299,25 +2269,6 @@ pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 
 	s = splnet();
 	switch (cmd) {
-#if 0
-	case SIOCGPRISMOID:
-	case SIOCSPRISMOID:
-		error = suser(curthread);
-		if (error)
-			return (error);
-		preq = (struct ifprismoidreq *)req;
-		if (preq->ifr_oidlen > sizeof(preq->ifr_oiddata))
-			return (ENOMEM);
-		pgt_enter_critical(sc);
-		if (cmd == SIOCGPRISMOID)
-			error = pgt_oid_retrieve(sc, preq->ifr_oid,
-			    preq->ifr_oiddata, preq->ifr_oidlen);
-		else
-			error = pgt_oid_set(sc, preq->ifr_oid,
-			    preq->ifr_oiddata, preq->ifr_oidlen);
-		pgt_exit_critical(sc);
-		break;
-#endif
 	case SIOCS80211SCAN:
 		/*
 		 * This chip scans always as soon as it gets initialized.
@@ -2418,7 +2369,8 @@ pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 		free(pob, M_DEVBUF);
 		break;
 	}
-	case SIOCSIFADDR: ifa = (struct ifaddr *)req;
+	case SIOCSIFADDR:
+		ifa = (struct ifaddr *)req;
 		ifp->if_flags |= IFF_UP;
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
@@ -2433,10 +2385,19 @@ pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING) {
-				pgt_disable(sc, SC_NEEDS_RESET);
+				pgt_stop(sc, SC_NEEDS_RESET);
 				error = ENETRESET;
 			}
 		}
+		break;
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+		error = (cmd == SIOCADDMULTI) ?
+		    ether_addmulti(ifr, &ic->ic_ac) :
+		    ether_delmulti(ifr, &ic->ic_ac);
+
+		if (error == ENETRESET)
+			error = 0;
 		break;
 	case SIOCSIFMTU:
 		if (ifr->ifr_mtu > PGT_FRAG_SIZE) {
@@ -2445,10 +2406,6 @@ pgt_ioctl(struct ifnet *ifp, u_long cmd, caddr_t req)
 		}
 		/* FALLTHROUGH */
 	default:
-		/*
-		 * XXX net80211 does not prevent modification of the
-		 * ieee80211com while it fondles it.
-		 */
 		error = ieee80211_ioctl(ifp, cmd, req);
 		break;
 	}
@@ -2493,257 +2450,6 @@ pgt_obj_bss2scanres(struct pgt_softc *sc, struct pgt_obj_bss *pob,
 	memcpy(scanres, &ap, WI_PRISM2_RES_SIZE);
 }
 
-#if 0
-int
-pgt_node_set_authorization(struct pgt_softc *sc,
-    struct pgt_ieee80211_node *pin, enum pin_dot1x_authorization newstate)
-{
-	int error;
-
-	if (pin->pin_dot1x_auth == newstate)
-		return (0);
-
-	DPRINTF(("%s: %02x:%02x:%02x:%02x:%02x:%02x "
-	    "changing authorization to %d\n", __func__,
-	    pin->pin_node.ni_macaddr[0], pin->pin_node.ni_macaddr[1],
-	    pin->pin_node.ni_macaddr[2], pin->pin_node.ni_macaddr[3],
-	    pin->pin_node.ni_macaddr[4], pin->pin_node.ni_macaddr[5],
-	    newstate));
-
-	error = pgt_oid_set(sc,
-	    newstate == PIN_DOT1X_AUTHORIZED ?
-	    PGT_OID_EAPAUTHSTA : PGT_OID_EAPUNAUTHSTA,
-	    pin->pin_node.ni_macaddr, sizeof(pin->pin_node.ni_macaddr));
-	if (error == 0)
-		pin->pin_dot1x_auth = pin->pin_dot1x_auth_desired = newstate;
-
-	return (error);
-}
-#endif
-
-#if 0
-int
-pgt_do_mlme_sta(struct pgt_softc *sc, struct ieee80211req_mlme *imlme)
-{
-	struct pgt_obj_mlme pffmlme;
-	struct ieee80211com *ic;
-	int error = 0;
-
-	ic = &sc->sc_ic;
-	switch (imlme->im_op) {
-	case IEEE80211_MLME_ASSOC:
-		IEEE80211_ADDR_COPY(pffmlme.pom_address, imlme->im_macaddr);
-		pffmlme.pom_id = htole16(0);
-		pffmlme.pom_state = htole16(PGT_MLME_STATE_ASSOC);
-		pffmlme.pom_code = htole16(imlme->im_reason);
-		error = pgt_oid_set(sc, PGT_OID_ASSOCIATE,
-		    &pffmlme, sizeof(pffmlme));
-		break;
-	default:
-		error = EINVAL;
-		break;
-	}
-	return (error);
-}
-#endif
-
-#if 0
-int
-pgt_do_mlme_hostap(struct pgt_softc *sc, struct ieee80211req_mlme *imlme)
-{
-	struct pgt_ieee80211_node *pin;
-	struct ieee80211com *ic;
-	int error = 0;
-
-	ic = &sc->sc_ic;
-	switch (imlme->im_op) {
-	/* Would IEEE80211_MLME_ASSOC/PGT_MLME_STATE_ASSOC be used for WDS? */
-	case IEEE80211_MLME_AUTHORIZE:
-		pin = (struct pgt_ieee80211_node *)ieee80211_find_node(ic,
-		    imlme->im_macaddr);
-		if (pin == NULL) {
-			error = ENOENT;
-			break;
-		}
-		error = pgt_node_set_authorization(sc, pin,
-		    PIN_DOT1X_AUTHORIZED);
-		ieee80211_release_node(ic, (struct ieee80211_node *)pin);
-		break;
-	case IEEE80211_MLME_UNAUTHORIZE:
-		pin = (struct pgt_ieee80211_node *)ieee80211_find_node(ic,
-		    imlme->im_macaddr);
-		if (pin == NULL) {
-			error = ENOENT;
-			break;
-		}
-		error = pgt_node_set_authorization(sc, pin,
-		    PIN_DOT1X_UNAUTHORIZED);
-		ieee80211_release_node(ic, (struct ieee80211_node *)pin);
-		break;
-	default:
-		error = EINVAL;
-		break;
-	}
-	return (error);
-}
-#endif
-
-#if 0
-int
-pgt_do_mlme_adhoc(struct pgt_softc *sc, struct ieee80211req_mlme *imlme)
-{
-	struct pgt_ieee80211_node *pin;
-	struct ieee80211com *ic;
-	int error = 0;
-
-	ic = &sc->sc_ic;
-	switch (imlme->im_op) {
-	case IEEE80211_MLME_AUTHORIZE:
-		pin = (struct pgt_ieee80211_node *)ieee80211_find_txnode(ic,
-		    imlme->im_macaddr);
-		if (pin == NULL) {
-			error = ENOMEM;
-			break;
-		} else if ((struct ieee80211_node *)pin == ic->ic_bss) {
-			error = EINVAL;
-			break;
-		}
-		error = pgt_node_set_authorization(sc, pin,
-		    PIN_DOT1X_AUTHORIZED);
-		ieee80211_release_node(ic, (struct ieee80211_node *)pin);
-		break;
-	case IEEE80211_MLME_UNAUTHORIZE:
-		pin = (struct pgt_ieee80211_node *)ieee80211_find_txnode(ic,
-		    imlme->im_macaddr);
-		if (pin == NULL) {
-			error = ENOMEM;
-			break;
-		} else if ((struct ieee80211_node *)pin == ic->ic_bss) {
-			error = EINVAL;
-			break;
-		}
-		error = pgt_node_set_authorization(sc, pin,
-		    PIN_DOT1X_UNAUTHORIZED);
-		ieee80211_release_node(ic, (struct ieee80211_node *)pin);
-		break;
-	default:
-		error = EINVAL;
-		break;
-	}
-	return (error);
-}
-#endif
-
-#if 0
-int
-pgt_80211_set(struct pgt_softc *sc, struct ieee80211req *ireq)
-{
-	struct ieee80211req_mlme mlme;
-	struct ieee80211com *ic;
-	int error;
-
-	ic = &sc->sc_ic;
-	switch (ireq->i_type) {
-	/*
-	 * These are 802.11 requests we want to let fall through to
-	 * net80211 but do not need a reset afterward.
-	 */
-	case IEEE80211_POWERSAVE_OFF:
-	case IEEE80211_POWERSAVE_ON:
-		error = ieee80211_ioctl(&ic->ic_if, SIOCS80211,
-		    (caddr_t)ireq);
-		if (error == ENETRESET)
-			error = 0;
-		break;
-	/*
-	 * These are 802.11 requests we want to let fall through to
-	 * net80211 but then use their results without doing a full
-	 * reset afterward.
-	 */
-	case IEEE80211_IOC_WEPKEY:
-	case IEEE80211_IOC_WEPTXKEY:
-		error = ieee80211_ioctl(&ic->ic_if, SIOCS80211, (caddr_t)ireq);
-		if (error == ENETRESET) {
-			pgt_update_hw_from_sw(sc,
-			    ic->ic_state != IEEE80211_S_INIT,
-			    ic->ic_opmode != IEEE80211_M_MONITOR);
-			error = 0;
-		}
-		break;
-	case IEEE80211_IOC_WEP:
-		switch (ireq->i_val) {
-		case IEEE80211_WEP_OFF:
-		case IEEE80211_WEP_ON:
-		case IEEE80211_WEP_MIXED:
-			error = 0;
-			break;
-		default:
-			error = EINVAL;
-		}
-		if (error)
-			break;
-		if (sc->sc_80211_ioc_wep != ireq->i_val) {
-			sc->sc_80211_ioc_wep = ireq->i_val;
-			pgt_update_hw_from_sw(sc, 0,
-			    ic->ic_opmode != IEEE80211_M_MONITOR);
-			error = 0;
-		} else
-			error = 0;
-		break;
-	case IEEE80211_IOC_AUTHMODE:
-		switch (ireq->i_val) {
-		case IEEE80211_AUTH_NONE:
-		case IEEE80211_AUTH_OPEN:
-		case IEEE80211_AUTH_SHARED:
-			error = 0;
-			break;
-		default:
-			error = EINVAL;
-		}
-		if (error)
-			break;
-		if (sc->sc_80211_ioc_auth != ireq->i_val) {
-			sc->sc_80211_ioc_auth = ireq->i_val;
-			pgt_update_hw_from_sw(sc, 0, 0);
-			error = 0;
-		} else
-			error = 0;
-		break;
-	case IEEE80211_IOC_MLME:
-		if (ireq->i_len != sizeof(mlme)) {
-			error = EINVAL;
-			break;
-		}
-		error = copyin(ireq->i_data, &mlme, sizeof(mlme));
-		if (error)
-			break;
-		pgt_enter_critical(sc);
-		switch (ic->ic_opmode) {
-		case IEEE80211_M_STA:
-			error = pgt_do_mlme_sta(sc, &mlme);
-			break;
-		case IEEE80211_M_HOSTAP:
-			error = pgt_do_mlme_hostap(sc, &mlme);
-			break;
-		case IEEE80211_M_IBSS:
-			error = pgt_do_mlme_adhoc(sc, &mlme);
-			break;
-		default:
-			error = EINVAL;
-			break;
-		}
-		pgt_exit_critical(sc);
-		if (error == 0)
-			error = copyout(&mlme, ireq->i_data, sizeof(mlme));
-		break;
-	default:
-		error = EOPNOTSUPP;
-		break;
-	}
-	return (error);
-}
-#endif
-
 void
 node_mark_active_ap(void *arg, struct ieee80211_node *ni)
 {
@@ -2787,8 +2493,7 @@ pgt_watchdog(struct ifnet *ifp)
 		if (sc->sc_txtimer && --sc->sc_txtimer == 0) {
 			count = pgt_drain_tx_queue(sc, PGT_QUEUE_DATA_LOW_TX);
 			if (sc->sc_debug & SC_DEBUG_UNEXPECTED)
-				DPRINTF(("%s: timed out %d data "
-				    "transmissions\n",
+				DPRINTF(("%s: timeout %d data transmissions\n",
 				    sc->sc_dev.dv_xname, count));
 		}
 	}
@@ -2831,9 +2536,10 @@ int
 pgt_init(struct ifnet *ifp)
 {
 	struct pgt_softc *sc = ifp->if_softc;
-	struct ieee80211com *ic;
+	struct ieee80211com *ic = &sc->sc_ic;
 
-	ic = &sc->sc_ic;
+	/* set default channel */
+	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 
 	if (!(sc->sc_flags & (SC_DYING | SC_UNINITIALIZED)))
 		pgt_update_hw_from_sw(sc,
@@ -2932,18 +2638,22 @@ badopmode:
 		bsstype = PGT_BSS_TYPE_NONE;
 	}
 
+	DPRINTF(("%s: current mode is ", sc->sc_dev.dv_xname));
 	switch (ic->ic_curmode) {
 	case IEEE80211_MODE_11A:
 		profile = PGT_PROFILE_A_ONLY;
 		preamble = PGT_OID_PREAMBLE_MODE_DYNAMIC;
+		DPRINTF(("IEEE80211_MODE_11A\n"));
 		break;
 	case IEEE80211_MODE_11B:
 		profile = PGT_PROFILE_B_ONLY;
 		preamble = PGT_OID_PREAMBLE_MODE_LONG;
+		DPRINTF(("IEEE80211_MODE_11B\n"));
 		break;
 	case IEEE80211_MODE_11G:
 		profile = PGT_PROFILE_G_ONLY;
 		preamble = PGT_OID_PREAMBLE_MODE_SHORT;
+		DPRINTF(("IEEE80211_MODE_11G\n"));
 		break;
 	case IEEE80211_MODE_FH:
 		/* FALLTHROUGH */
@@ -2952,6 +2662,7 @@ badopmode:
 	case IEEE80211_MODE_AUTO:
 		profile = PGT_PROFILE_MIXED_G_WIFI;
 		preamble = PGT_OID_PREAMBLE_MODE_DYNAMIC;
+		DPRINTF(("IEEE80211_MODE_AUTO\n"));
 		break;
 	default:
 		panic("unknown mode %d\n", ic->ic_curmode);
@@ -2998,16 +2709,20 @@ badopmode:
 
 	if (ic->ic_des_chan == IEEE80211_CHAN_ANYC) {
 		if (keepassoc)
-			channel = htole32(ieee80211_chan2ieee(ic,
-			    ic->ic_bss->ni_chan));
-		else
 			channel = 0;
+		else
+			channel = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
 	} else
-		channel = htole32(ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan));
+		channel = ieee80211_chan2ieee(ic, ic->ic_des_chan);
 
-	for (i = 0; i < ic->ic_sup_rates[ic->ic_curmode].rs_nrates; i++)
+	DPRINTF(("%s: set rates", sc->sc_dev.dv_xname));
+	for (i = 0; i < ic->ic_sup_rates[ic->ic_curmode].rs_nrates; i++) {
 		availrates[i] = ic->ic_sup_rates[ic->ic_curmode].rs_rates[i];
+		DPRINTF((" %d", availrates[i]));
+	}
+	DPRINTF(("\n"));
 	availrates[i++] = 0;
+
 	essid.pos_length = min(ic->ic_des_esslen, sizeof(essid.pos_ssid));
 	memcpy(&essid.pos_ssid, ic->ic_des_essid, essid.pos_length);
 
@@ -3026,7 +2741,7 @@ badopmode:
 		SETOID(PGT_OID_MODE, &mode, sizeof(mode));
 		SETOID(PGT_OID_BSS_TYPE, &bsstype, sizeof(bsstype));
 
-		if (channel != 0 && channel != htole32(IEEE80211_CHAN_ANY))
+		if (channel != 0 && channel != IEEE80211_CHAN_ANY)
 			SETOID(PGT_OID_CHANNEL, &channel, sizeof(channel));
 
 		if (ic->ic_flags & IEEE80211_F_DESBSSID) {
@@ -3110,71 +2825,6 @@ badopmode:
 	}
 }
 
-/*
- * After doing a soft-reinitialization, we will restore settings from
- * our pgt_ieee80211_nodes.  As we also lock the node list with our
- * softc mutex, unless we were to drop that the node list will remain
- * valid (see pgt_watchdog()).
- */
-void
-pgt_update_hw_from_nodes(struct pgt_softc *sc)
-{
-	struct pgt_ieee80211_node *pin;
-#if 0
-	struct ieee80211_node *ni;
-#endif
-	struct pgt_ieee80211_node **addresses;
-	size_t i, n;
-	int s;
-
-	n = 0;
-#if 0
-	TAILQ_FOREACH(ni, &sc->sc_ic.ic_node, ni_list) {
-		pin = (struct pgt_ieee80211_node *)ni;
-		if (pin->pin_dot1x_auth != pin->pin_dot1x_auth_desired)
-			n++;
-	}
-#endif
-	if (n == 0)
-		return;
-	addresses = malloc(sizeof(*addresses) * n, M_DEVBUF, M_NOWAIT);
-	if (addresses == NULL)
-		return;
-	n = 0;
-#if 0
-	TAILQ_FOREACH(ni, &sc->sc_ic.ic_node, ni_list) {
-		pin = (struct pgt_ieee80211_node *)ni;
-		if (pin->pin_dot1x_auth != pin->pin_dot1x_auth_desired) {
-			addresses[n++] = pin;
-			ieee80211_ref_node(&pin->pin_node);
-		}
-	}
-#endif
-	s = splnet();
-	for (i = 0; i < n; i++) {
-		pin = addresses[i];
-		if (pgt_oid_set(sc,
-		    pin->pin_dot1x_auth_desired == PIN_DOT1X_AUTHORIZED ?
-		    PGT_OID_EAPAUTHSTA : PGT_OID_EAPUNAUTHSTA,
-		    pin->pin_node.ni_macaddr, sizeof(pin->pin_node.ni_macaddr))
-		    == 0) {
-			pin->pin_dot1x_auth = pin->pin_dot1x_auth_desired;
-			DPRINTF(("%s: %02x:%02x:%02x:%02x:%02x:%02x "
-			    "reauthorized to %d\n", __func__,
-			    pin->pin_node.ni_macaddr[0],
-			    pin->pin_node.ni_macaddr[1],
-			    pin->pin_node.ni_macaddr[2],
-			    pin->pin_node.ni_macaddr[3],
-			    pin->pin_node.ni_macaddr[4],
-			    pin->pin_node.ni_macaddr[5],
-			    pin->pin_dot1x_auth));
-		}
-		ieee80211_release_node(&sc->sc_ic, &pin->pin_node);
-	}
-	splx(s);
-	free(addresses, M_DEVBUF);
-}
-
 void
 pgt_hostap_handle_mlme(struct pgt_softc *sc, uint32_t oid,
     struct pgt_obj_mlme *mlme)
@@ -3223,9 +2873,6 @@ pgt_update_sw_from_hw(struct pgt_softc *sc, struct pgt_async_trap *pa,
 	int error, s;
 
 	if (pa != NULL) {
-#if 0
-		struct pgt_obj_mlmeex *mlmeex;
-#endif
 		struct pgt_obj_mlme *mlme;
 		uint32_t oid;
 
@@ -3240,8 +2887,8 @@ pgt_update_sw_from_hw(struct pgt_softc *sc, struct pgt_async_trap *pa,
 				break;
 			ls = letoh32(*mtod(args, uint32_t *));
 			if (sc->sc_debug & (SC_DEBUG_TRAP | SC_DEBUG_LINK))
-				DPRINTF(("%s: link: %u\n",
-				    sc->sc_dev.dv_xname, ls));
+				DPRINTF(("%s: %s: link rate %u\n",
+				    sc->sc_dev.dv_xname, __func__, ls));
 			if (ls)
 				ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 			else
@@ -3256,12 +2903,9 @@ pgt_update_sw_from_hw(struct pgt_softc *sc, struct pgt_async_trap *pa,
 			mlme = mtod(args, struct pgt_obj_mlme *);
 			if (sc->sc_debug & SC_DEBUG_TRAP)
 				DPRINTF(("%s: mlme: address "
-				    "%02x:%02x:%02x:%02x:%02x:%02x "
-				    "id 0x%02x state 0x%02x code 0x%02x\n",
+				    "%s id 0x%02x state 0x%02x code 0x%02x\n",
 				    sc->sc_dev.dv_xname,
-				    mlme->pom_address[0], mlme->pom_address[1],
-				    mlme->pom_address[2], mlme->pom_address[3],
-				    mlme->pom_address[4], mlme->pom_address[5],
+				    ether_sprintf(mlme->pom_address),
 				    letoh16(mlme->pom_id),
 				    letoh16(mlme->pom_state),
 				    letoh16(mlme->pom_code)));
@@ -3317,9 +2961,6 @@ out:
 	splx(s);
 }
 
-/*
- * Synchronization here is due to the softc lock being held when called.
- */
 int
 pgt_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
@@ -3337,42 +2978,26 @@ pgt_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			ic->ic_if.if_timer = 0;
 		ic->ic_mgt_timer = 0;
 		ic->ic_flags &= ~IEEE80211_F_SIBSS;
-#if 0
-		IF_DRAIN(&ic->ic_mgtq);
-#endif
 		if (ic->ic_wep_ctx != NULL) {
 			free(ic->ic_wep_ctx, M_DEVBUF);  
 			ic->ic_wep_ctx = NULL;
 		}
 		ieee80211_free_allnodes(ic);
-		ic->ic_state = nstate;
 		break;
 	case IEEE80211_S_SCAN:
-#if 0
 		ic->ic_if.if_timer = 1;
 		ic->ic_mgt_timer = 0;
-		if (sc->sc_flags & SC_NOFREE_ALLNODES) {
-			struct ieee80211_node *ni;
-			struct pgt_ieee80211_node *pin;
-
-			/* Locked already by pff mutex. */
-			TAILQ_FOREACH(ni, &ic->ic_node, ni_list) {
-				pin = (struct pgt_ieee80211_node *)ni;
-				pin->pin_dot1x_auth = PIN_DOT1X_UNAUTHORIZED;
-			}
+		if (sc->sc_flags & SC_NOFREE_ALLNODES)
 			sc->sc_flags &= ~SC_NOFREE_ALLNODES;
-		} else {
+		else
 			ieee80211_free_allnodes(ic);
-		}
-		ic->ic_state = nstate;
+
 		/* Just use any old channel; we override it anyway. */
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 			ieee80211_create_ibss(ic, ic->ic_ibss_chan);
-#endif
 		break;
 	case IEEE80211_S_RUN:
 		ic->ic_if.if_timer = 1;
-		pgt_update_hw_from_nodes(sc);
 		break;
 	default:
 		break;
@@ -3579,7 +3204,8 @@ pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 		    PGT_FRAG_SIZE, 0, BUS_DMA_ALLOCNOW, &pd->pd_dmam);
 		if (error != 0) {
 			printf("%s: can not create DMA tag for fragment\n",
-			    sc->sc_dev);
+			    sc->sc_dev.dv_xname);
+			free(pd, M_DEVBUF);
 			break;
 		}
 
@@ -3587,7 +3213,7 @@ pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 		    0, &pd->pd_dmas, 1, &nsegs, BUS_DMA_WAITOK);
 		if (error != 0) {
 			printf("%s: error alloc frag %u on queue %u\n",
-			    sc->sc_dev, i, pq, error);
+			    sc->sc_dev.dv_xname, i, pq);
 			free(pd, M_DEVBUF);
 			break;
 		}
@@ -3596,7 +3222,7 @@ pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 		    PGT_FRAG_SIZE, (caddr_t *)&pd->pd_mem, BUS_DMA_WAITOK);
 		if (error != 0) {
 			printf("%s: error map frag %u on queue %u\n",
-			    sc->sc_dev, i, pq);
+			    sc->sc_dev.dv_xname, i, pq);
 			free(pd, M_DEVBUF);
 			break;
 		}
@@ -3606,7 +3232,7 @@ pgt_dma_alloc_queue(struct pgt_softc *sc, enum pgt_queue pq)
 			    pd->pd_mem, PGT_FRAG_SIZE, NULL, BUS_DMA_NOWAIT);
 			if (error != 0) {
 				printf("%s: error load frag %u on queue %u\n",
-				    sc->sc_dev, i, pq);
+				    sc->sc_dev.dv_xname, i, pq);
 				bus_dmamem_free(sc->sc_dmat, &pd->pd_dmas,
 				    nsegs);
 				free(pd, M_DEVBUF);
@@ -3671,4 +3297,52 @@ pgt_dma_free_queue(struct pgt_softc *sc, enum pgt_queue pq)
 		bus_dmamem_free(sc->sc_dmat, &pd->pd_dmas, 1);
 		free(pd, M_DEVBUF);
 	}
+}
+
+void
+pgt_shutdown(void *arg)
+{
+	struct pgt_softc *sc = arg;
+
+	DPRINTF(("%s: %s\n", sc->sc_dev.dv_xname, __func__));
+
+	pgt_stop(sc, SC_DYING);
+}
+
+void
+pgt_power(int why, void *arg)
+{
+	struct pgt_softc *sc = arg;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+	int s;
+
+	DPRINTF(("%s: %s(%d)\n", sc->sc_dev.dv_xname, __func__, why));
+
+	s = splnet();
+
+	switch (why) {
+	case PWR_STANDBY:
+	case PWR_SUSPEND:
+		pgt_stop(sc, SC_NEEDS_RESET);
+		pgt_update_hw_from_sw(sc, 0, 0);
+
+		if (sc->sc_power != NULL)
+			(*sc->sc_power)(sc, why);
+		break;
+	case PWR_RESUME:
+		if (sc->sc_power != NULL)
+			(*sc->sc_power)(sc, why);
+
+		pgt_stop(sc, SC_NEEDS_RESET);
+		pgt_update_hw_from_sw(sc, 0, 0);
+
+		if ((ifp->if_flags & IFF_UP) &&
+		    !(ifp->if_flags & IFF_RUNNING)) {
+			pgt_init(ifp);
+			pgt_update_hw_from_sw(sc, 0, 0);
+		}
+		break;
+	}
+
+	splx(s);
 }

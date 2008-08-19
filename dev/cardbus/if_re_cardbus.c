@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_cardbus.c,v 1.7 2006/07/01 21:48:08 brad Exp $	*/
+/*	$OpenBSD: if_re_cardbus.c,v 1.11 2006/11/28 20:04:02 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -120,8 +120,8 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	cardbus_function_tag_t cf = psc->sc_cf;
 	cardbus_devfunc_t ct = ca->ca_ct;
 	bus_addr_t adr;
+	char intrstr[16];
 
-	
 	sc->sc_dmat = ca->ca_dmat;
 	csc->ct = ct;
 	csc->sc_tag = ca->ca_tag;
@@ -150,14 +150,14 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Allocate interrupt */
 	csc->sc_ih = cardbus_intr_establish(cc, cf, csc->sc_intrline,
-	    IPL_NET, re_intr, sc);
+	    IPL_NET, re_intr, sc, sc->sc_dev.dv_xname);
 	if (csc->sc_ih == NULL) {
 		printf(": couldn't establish interrupt at %s",
 		    ca->ca_intrline);
 		Cardbus_function_disable(csc->ct);
 		return;
 	}
-	printf(": irq %d", ca->ca_intrline);
+	snprintf(intrstr, sizeof(intrstr), "irq %d", ca->ca_intrline);
 
 	sc->sc_flags |= RL_ENABLED;
 	sc->rl_type = RL_8169;
@@ -166,7 +166,7 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pwrhook = powerhook_establish(re_cardbus_powerhook, sc);
 
 	/* Call bus-independent (common) attach routine */
-	re_attach(sc);
+	re_attach(sc, intrstr);
 }
 
 /*
@@ -276,15 +276,16 @@ re_cardbus_detach(struct device *self, int flags)
 void
 re_cardbus_shutdown(void *arg)
 {
-	struct rl_softc *sc = (struct rl_softc *)arg;
+	struct rl_softc *sc = arg;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
-	re_stop(sc);
+	re_stop(ifp, 1);
 }
 
 void
 re_cardbus_powerhook(int why, void *arg)
 {
-	struct rl_softc *sc = (struct rl_softc *)arg;
+	struct rl_softc *sc = arg;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
 	if (why == PWR_RESUME)

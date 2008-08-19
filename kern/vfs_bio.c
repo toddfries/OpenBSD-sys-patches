@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.84 2006/08/28 16:15:29 tom Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.87 2006/10/21 18:09:52 thib Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*-
@@ -78,12 +78,11 @@ u_long	bufhash;
 /*
  * Definitions for the buffer free lists.
  */
-#define	BQUEUES		4		/* number of free buffer queues */
+#define	BQUEUES		3		/* number of free buffer queues */
 
-#define	BQ_LOCKED	0		/* super-blocks &c */
-#define	BQ_CLEAN	1		/* LRU queue with clean buffers */
-#define	BQ_DIRTY	2		/* LRU queue with dirty buffers */
-#define	BQ_EMPTY	3		/* buffer headers with no memory */
+#define	BQ_CLEAN	0		/* LRU queue with clean buffers */
+#define	BQ_DIRTY	1		/* LRU queue with dirty buffers */
+#define	BQ_EMPTY	2		/* buffer headers with no memory */
 
 TAILQ_HEAD(bqueues, buf) bufqueues[BQUEUES];
 int needbuffer;
@@ -101,7 +100,7 @@ struct pool bufpool;
 #define	binsheadfree(bp, dp)	TAILQ_INSERT_HEAD(dp, bp, b_freelist)
 #define	binstailfree(bp, dp)	TAILQ_INSERT_TAIL(dp, bp, b_freelist)
 
-static __inline struct buf *bio_doread(struct vnode *, daddr_t, int, int);
+static __inline struct buf *bio_doread(struct vnode *, daddr64_t, int, int);
 struct buf *getnewbuf(int, int, int *);
 
 /*
@@ -152,7 +151,7 @@ bremfree(struct buf *bp)
 	}
 	if (bp->b_bufsize <= 0) {
 		numemptybufs--;
-	} else if (!ISSET(bp->b_flags, B_LOCKED)) {
+	} else {
 		numfreepages -= btoc(bp->b_bufsize);
 		if (!ISSET(bp->b_flags, B_DELWRI)) {
 			numcleanpages -= btoc(bp->b_bufsize);
@@ -232,7 +231,7 @@ bufinit(void)
 }
 
 static __inline struct buf *
-bio_doread(struct vnode *vp, daddr_t blkno, int size, int async)
+bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
 {
 	struct buf *bp;
 
@@ -261,7 +260,7 @@ bio_doread(struct vnode *vp, daddr_t blkno, int size, int async)
  * This algorithm described in Bach (p.54).
  */
 int
-bread(struct vnode *vp, daddr_t blkno, int size, struct ucred *cred,
+bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
     struct buf **bpp)
 {
 	struct buf *bp;
@@ -278,7 +277,7 @@ bread(struct vnode *vp, daddr_t blkno, int size, struct ucred *cred,
  * Trivial modification to the breada algorithm presented in Bach (p.55).
  */
 int
-breadn(struct vnode *vp, daddr_t blkno, int size, daddr_t rablks[],
+breadn(struct vnode *vp, daddr64_t blkno, int size, daddr64_t rablks[],
     int rasizes[], int nrablks, struct ucred *cred, struct buf **bpp)
 {
 	struct buf *bp;
@@ -408,10 +407,20 @@ bdwrite(struct buf *bp)
 	 */
 	if (!ISSET(bp->b_flags, B_DELWRI)) {
 		SET(bp->b_flags, B_DELWRI);
+		bp->b_synctime = time_second + 35;
 		s = splbio();
 		reassignbuf(bp);
 		splx(s);
 		curproc->p_stats->p_ru.ru_oublock++;	/* XXX */
+	} else {
+		/*
+		 * see if this buffer has slacked through the syncer
+		 * and enforce an async write upon it.
+		 */
+		if (bp->b_synctime < time_second) {
+			bawrite(bp);
+			return;
+		}
 	}
 
 	/* If this is a tape block, write the block now. */
@@ -448,6 +457,7 @@ buf_dirty(struct buf *bp)
 
 	if (ISSET(bp->b_flags, B_DELWRI) == 0) {
 		SET(bp->b_flags, B_DELWRI);
+		bp->b_synctime = time_second + 35;
 		reassignbuf(bp);
 	}
 }
@@ -482,10 +492,6 @@ brelse(struct buf *bp)
 	/*
 	 * Determine which queue the buffer should be on, then put it there.
 	 */
-
-	/* If it's locked, don't report an error; try again later. */
-	if (ISSET(bp->b_flags, (B_LOCKED|B_ERROR)) == (B_LOCKED|B_ERROR))
-		CLR(bp->b_flags, B_ERROR);
 
 	/* If it's not cacheable, or an error, mark it invalid. */
 	if (ISSET(bp->b_flags, (B_NOCACHE|B_ERROR)))
@@ -522,18 +528,14 @@ brelse(struct buf *bp)
 		 * It has valid data.  Put it on the end of the appropriate
 		 * queue, so that it'll stick around for as long as possible.
 		 */
-		if (ISSET(bp->b_flags, B_LOCKED))
-			/* locked in core */
-			bufq = &bufqueues[BQ_LOCKED];
-		else {
-			numfreepages += btoc(bp->b_bufsize);
-			if (!ISSET(bp->b_flags, B_DELWRI)) {
-				numcleanpages += btoc(bp->b_bufsize);
-				bufq = &bufqueues[BQ_CLEAN];
-			} else {
-				numdirtypages += btoc(bp->b_bufsize);
-				bufq = &bufqueues[BQ_DIRTY];
-			}
+		numfreepages += btoc(bp->b_bufsize);
+
+		if (!ISSET(bp->b_flags, B_DELWRI)) {
+			numcleanpages += btoc(bp->b_bufsize);
+			bufq = &bufqueues[BQ_CLEAN];
+		} else {
+			numdirtypages += btoc(bp->b_bufsize);
+			bufq = &bufqueues[BQ_DIRTY];
 		}
 		if (ISSET(bp->b_flags, B_AGE))
 			binsheadfree(bp, bufq);
@@ -571,7 +573,7 @@ brelse(struct buf *bp)
  * chain. If it's there, return a pointer to it, unless it's marked invalid.
  */
 struct buf *
-incore(struct vnode *vp, daddr_t blkno)
+incore(struct vnode *vp, daddr64_t blkno)
 {
 	struct buf *bp;
 
@@ -594,7 +596,7 @@ incore(struct vnode *vp, daddr_t blkno)
  * cached blocks be of the correct size.
  */
 struct buf *
-getblk(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo)
+getblk(struct vnode *vp, daddr64_t blkno, int size, int slpflag, int slptimeo)
 {
 	struct bufhashhdr *bh;
 	struct buf *bp;
@@ -988,7 +990,7 @@ vfs_bufstats(void)
 	int totals[BQUEUES];
 	long ptotals[BQUEUES];
 	long pages;
-	static char *bname[BQUEUES] = { "LOCKED", "CLEAN", "DIRTY", "EMPTY" };
+	static char *bname[BQUEUES] = { "CLEAN", "DIRTY", "EMPTY" };
 
 	s = splbio();
 	for (dp = bufqueues, i = 0; dp < &bufqueues[BQUEUES]; dp++, i++) {

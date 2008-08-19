@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.30 2006/06/23 06:27:11 miod Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.33 2006/11/26 19:46:28 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -61,9 +61,8 @@
 
 #define ROUNDUP64(x) (((x)+63) & ~63)
 
-#include <net80211/ieee80211.h>
-#include <net80211/ieee80211_ioctl.h>
 #include <net80211/ieee80211_var.h>
+#include <net80211/ieee80211_ioctl.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -313,7 +312,7 @@ USB_ATTACH(wi_usb)
 	if (err) {
 		printf("%s: getting interface handle failed\n",
 		    USBDEVNAME(sc->wi_usb_dev));
-		    USB_ATTACH_ERROR_RETURN;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	/* XXX - flags? */
@@ -359,18 +358,18 @@ USB_ATTACH(wi_usb)
 	if (wi_usb_rx_list_init(sc)) {
 		printf("%s: rx list init failed\n",
 		    USBDEVNAME(sc->wi_usb_dev));
-		    USB_ATTACH_ERROR_RETURN;
+		USB_ATTACH_ERROR_RETURN;
 	}
 	if (wi_usb_tx_list_init(sc)) {
 		printf("%s: tx list init failed\n",
 		    USBDEVNAME(sc->wi_usb_dev));
-		    USB_ATTACH_ERROR_RETURN;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	if (wi_usb_open_pipes(sc)){
 		printf("%s: open pipes failed\n",
 		    USBDEVNAME(sc->wi_usb_dev));
-		    USB_ATTACH_ERROR_RETURN;
+		USB_ATTACH_ERROR_RETURN;
 	}
 
 	sc->wi_usb_attached = 1;
@@ -1785,7 +1784,7 @@ wi_watchdog_usb(struct ifnet *ifp)
 
 /*
  * ioctl will always be called from a user context, 
- * therefore is is possible to sleep in the calling context
+ * therefore it is possible to sleep in the calling context
  * acquire the lock and call the real ioctl fucntion directly 
  */
 int
@@ -1852,7 +1851,7 @@ wi_usb_thread(void *arg)
 			wi_func_io.f_start(&sc->sc_wi.sc_ic.ic_if);
 			/*
 			 * tx_unlock is explicitly missing here
-			 * is is done in txeof_frm
+			 * it is done in txeof_frm
 			 */
 		} else if (wi_thread_info->status & WI_INQUIRE) {
 			wi_thread_info->status &= ~WI_INQUIRE;

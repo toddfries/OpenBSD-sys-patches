@@ -1,4 +1,4 @@
-/*	$OpenBSD: rgephy.c,v 1.15 2006/08/28 01:54:24 brad Exp $	*/
+/*	$OpenBSD: rgephy.c,v 1.24 2007/01/21 22:37:56 kettenis Exp $	*/
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
@@ -128,7 +128,7 @@ rgephyattach(struct device *parent, struct device *self, void *aux)
 	sc->mii_funcs = &rgephy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = MII_ANEGTICKS;
+	sc->mii_anegticks = MII_ANEGTICKS_GIGE;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
@@ -183,19 +183,10 @@ rgephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
-#ifdef foo
-			/*
-			 * If we're already in auto mode, just return.
-			 */
-			if (PHY_READ(sc, RGEPHY_MII_BMCR) & RGEPHY_BMCR_AUTOEN)
-				return (0);
-#endif
 			(void) rgephy_mii_phy_auto(sc);
 			break;
 		case IFM_1000_T:
 			speed = RGEPHY_S1000;
-			anar |= RGEPHY_ANAR_TX_FD | RGEPHY_ANAR_TX |
-				RGEPHY_ANAR_10_FD | RGEPHY_ANAR_10;
 			goto setit;
 		case IFM_100_TX:
 			speed = RGEPHY_S100;
@@ -218,26 +209,16 @@ setit:
 				    ~(RGEPHY_ANAR_TX_FD | RGEPHY_ANAR_10_FD);
 			}
 
-			/*
-			 * When setting the link manually, one side must
-			 * be the master and the other the slave. However
-			 * ifmedia doesn't give us a good way to specify
-			 * this, so we fake it by using one of the LINK
-			 * flags. If LINK0 is set, we program the PHY to
-			 * be a master, otherwise it's a slave.
-			 */
-			if (IFM_SUBTYPE(ife->ifm_media) == IFM_1000_T) {
-				gig |= RGEPHY_1000CTL_MSE;
-				if (mii->mii_ifp->if_flags & IFF_LINK0)
-					gig |= RGEPHY_1000CTL_MSC;
-			}
+			if (IFM_SUBTYPE(ife->ifm_media) == IFM_1000_T &&
+			    mii->mii_media.ifm_media & IFM_ETH_MASTER)
+				gig |= RGEPHY_1000CTL_MSE|RGEPHY_1000CTL_MSC;
 
 			PHY_WRITE(sc, RGEPHY_MII_1000CTL, gig);
 			PHY_WRITE(sc, RGEPHY_MII_BMCR, speed |
 			    RGEPHY_BMCR_AUTOEN | RGEPHY_BMCR_STARTNEG);
 			PHY_WRITE(sc, RGEPHY_MII_ANAR, anar);
 			break;
-#ifdef foo
+#if 0
 		case IFM_NONE:
 			PHY_WRITE(sc, MII_BMCR, BMCR_ISO|BMCR_PDOWN);
 			break;
@@ -288,7 +269,7 @@ setit:
 	}
 
 	/* Update the media status. */
-	rgephy_status(sc);
+	mii_phy_status(sc);
 
 	/*
 	 * Callback if something changed. Note that we need to poke
@@ -310,7 +291,7 @@ void
 rgephy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
-	int bmsr, bmcr;
+	int bmsr, bmcr, gtsr;
 
 	mii->mii_media_status = IFM_AVALID;
 	mii->mii_media_active = IFM_ETHER;
@@ -341,19 +322,32 @@ rgephy_status(struct mii_softc *sc)
 		mii->mii_media_active |= IFM_100_TX;
 	else if (bmsr & RL_GMEDIASTAT_10MBPS)
 		mii->mii_media_active |= IFM_10_T;
+
 	if (bmsr & RL_GMEDIASTAT_FDX)
-		mii->mii_media_active |= IFM_FDX;
+		mii->mii_media_active |= mii_phy_flowstatus(sc) | IFM_FDX;
+	else
+		mii->mii_media_active |= IFM_HDX;
+
+	gtsr = PHY_READ(sc, RGEPHY_MII_1000STS);
+	if ((IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T) &&
+	    gtsr & RGEPHY_1000STS_MSR)
+		mii->mii_media_active |= IFM_ETH_MASTER;
 }
 
 
 int
 rgephy_mii_phy_auto(struct mii_softc *sc)
 {
+	int anar;
+
 	rgephy_loop(sc);
 	PHY_RESET(sc);
 
-	PHY_WRITE(sc, RGEPHY_MII_ANAR,
-	    BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) | ANAR_CSMA);
+	anar = BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) | ANAR_CSMA;
+	if (sc->mii_flags & MIIF_DOPAUSE)
+		anar |= RGEPHY_ANAR_PC | RGEPHY_ANAR_ASP;
+
+	PHY_WRITE(sc, RGEPHY_MII_ANAR, anar);
 	DELAY(1000);
 	PHY_WRITE(sc, RGEPHY_MII_1000CTL,
 	    RGEPHY_1000CTL_AHD | RGEPHY_1000CTL_AFD);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dp8390.c,v 1.31 2006/03/25 22:41:42 djm Exp $	*/
+/*	$OpenBSD: dp8390.c,v 1.38 2006/10/20 17:28:10 brad Exp $	*/
 /*	$NetBSD: dp8390.c,v 1.13 1998/07/05 06:49:11 jonathan Exp $	*/
 
 /*
@@ -82,8 +82,7 @@ dp8390_media_init(struct dp8390_softc *sc)
  * Do bus-independent setup.
  */
 int
-dp8390_config(sc)
-	struct dp8390_softc *sc;
+dp8390_config(struct dp8390_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int rv;
@@ -126,6 +125,8 @@ dp8390_config(sc)
 	    IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
 	IFQ_SET_READY(&ifp->if_snd);
 
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	/* Print additional info when attached. */
 	printf(", address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
@@ -145,24 +146,21 @@ out:
  * Media change callback.
  */
 int
-dp8390_mediachange(ifp)
-	struct ifnet *ifp;
+dp8390_mediachange(struct ifnet *ifp)
 {
 	struct dp8390_softc *sc = ifp->if_softc;
 
 	if (sc->sc_mediachange)
 		return ((*sc->sc_mediachange)(sc));
 
-	return (EINVAL);
+	return (0);
 }
 
 /*
  * Media status callback.
  */
 void
-dp8390_mediastatus(ifp, ifmr)
-	struct ifnet *ifp;
-	struct ifmediareq *ifmr;
+dp8390_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
 	struct dp8390_softc *sc = ifp->if_softc;
 
@@ -180,8 +178,7 @@ dp8390_mediastatus(ifp, ifmr)
  * Reset interface.
  */
 void
-dp8390_reset(sc)
-	struct dp8390_softc *sc;
+dp8390_reset(struct dp8390_softc *sc)
 {
 	int     s;
 
@@ -195,16 +192,17 @@ dp8390_reset(sc)
  * Take interface offline.
  */
 void
-dp8390_stop(sc)
-	struct dp8390_softc *sc;
+dp8390_stop(struct dp8390_softc *sc)
 {
 	bus_space_tag_t regt = sc->sc_regt;
 	bus_space_handle_t regh = sc->sc_regh;
 	int n = 5000;
 
 	/* Stop everything on the interface, and select page 0 registers. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
+	NIC_BARRIER(regt, regh);
 
 	/*
 	 * Wait for interface to enter stopped state, but limit # of checks to
@@ -213,7 +211,7 @@ dp8390_stop(sc)
 	 */
 	while (((NIC_GET(regt, regh,
 	    ED_P0_ISR) & ED_ISR_RST) == 0) && --n)
-		;
+		DELAY(1);
 
 	if (sc->stop_card != NULL)
 		(*sc->stop_card)(sc);
@@ -225,8 +223,7 @@ dp8390_stop(sc)
  */
 
 void
-dp8390_watchdog(ifp)
-	struct ifnet *ifp;
+dp8390_watchdog(struct ifnet *ifp)
 {
 	struct dp8390_softc *sc = ifp->if_softc;
 
@@ -240,8 +237,7 @@ dp8390_watchdog(ifp)
  * Initialize device.
  */
 void
-dp8390_init(sc)
-	struct dp8390_softc *sc;
+dp8390_init(struct dp8390_softc *sc)
 {
 	bus_space_tag_t regt = sc->sc_regt;
 	bus_space_handle_t regh = sc->sc_regh;
@@ -263,8 +259,10 @@ dp8390_init(sc)
 	sc->txb_next_tx = 0;
 
 	/* Set interface for page 0, remote DMA complete, stopped. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
+	NIC_BARRIER(regt, regh);
 
 	if (sc->dcr_reg & ED_DCR_LS) {
 		NIC_PUT(regt, regh, ED_P0_DCR, sc->dcr_reg);
@@ -281,7 +279,7 @@ dp8390_init(sc)
 	NIC_PUT(regt, regh, ED_P0_RBCR1, 0);
 
 	/* Tell RCR to do nothing for now. */
-	NIC_PUT(regt, regh, ED_P0_RCR, ED_RCR_MON);
+	NIC_PUT(regt, regh, ED_P0_RCR, ED_RCR_MON | sc->rcr_proto);
 
 	/* Place NIC in internal loopback mode. */
 	NIC_PUT(regt, regh, ED_P0_TCR, ED_TCR_LB0);
@@ -312,8 +310,10 @@ dp8390_init(sc)
 	NIC_PUT(regt, regh, ED_P0_ISR, 0xff);
 
 	/* Program command register for page 1. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_1 | ED_CR_STP);
+	NIC_BARRIER(regt, regh);
 
 	/* Copy out our station address. */
 	for (i = 0; i < ETHER_ADDR_LEN; ++i)
@@ -333,8 +333,10 @@ dp8390_init(sc)
 	NIC_PUT(regt, regh, ED_P1_CURR, sc->next_packet);
 
 	/* Program command register for page 0. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P1_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STP);
+	NIC_BARRIER(regt, regh);
 
 	/* Accept broadcast and multicast packets by default. */
 	i = ED_RCR_AB | ED_RCR_AM | sc->rcr_proto;
@@ -355,6 +357,7 @@ dp8390_init(sc)
 		(*sc->init_card)(sc);
 
 	/* Fire up the interface. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
 
@@ -370,8 +373,7 @@ dp8390_init(sc)
  * This routine actually starts the transmission on the interface.
  */
 static __inline__ void
-dp8390_xmit(sc)
-	struct dp8390_softc *sc;
+dp8390_xmit(struct dp8390_softc *sc)
 {
 	bus_space_tag_t regt = sc->sc_regt;
 	bus_space_handle_t regh = sc->sc_regh;
@@ -390,8 +392,10 @@ dp8390_xmit(sc)
 	len = sc->txb_len[sc->txb_next_tx];
 
 	/* Set NIC for page 0 register access. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
+	NIC_BARRIER(regt, regh);
 
 	/* Set TX buffer start page. */
 	NIC_PUT(regt, regh, ED_P0_TPSR, sc->tx_page_start +
@@ -402,6 +406,7 @@ dp8390_xmit(sc)
 	NIC_PUT(regt, regh, ED_P0_TBCR1, len >> 8);
 
 	/* Set page 0, remote DMA complete, transmit packet, and *start*. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_TXP | ED_CR_STA);
 
@@ -423,8 +428,7 @@ dp8390_xmit(sc)
  *     (i.e. that the output part of the interface is idle)
  */
 void
-dp8390_start(ifp)
-	struct ifnet *ifp;
+dp8390_start(struct ifnet *ifp)
 {
 	struct dp8390_softc *sc = ifp->if_softc;
 	struct mbuf *m0;
@@ -483,8 +487,7 @@ outloop:
  * Ethernet interface receiver interrupt.
  */
 void
-dp8390_rint(sc)
-	struct dp8390_softc *sc;
+dp8390_rint(struct dp8390_softc *sc)
 {
 	bus_space_tag_t regt = sc->sc_regt;
 	bus_space_handle_t regh = sc->sc_regh;
@@ -496,8 +499,10 @@ dp8390_rint(sc)
 
 loop:
 	/* Set NIC to page 1 registers to get 'current' pointer. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_1 | ED_CR_STA);
+	NIC_BARRIER(regt, regh);
 
 	/*
 	 * 'sc->next_packet' is the logical beginning of the ring-buffer - i.e.
@@ -512,8 +517,10 @@ loop:
 		return;
 
 	/* Set NIC to page 0 registers to update boundary register. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P1_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
+	NIC_BARRIER(regt, regh);
 
 	do {
 		/* Get pointer to this buffer's header structure. */
@@ -598,8 +605,7 @@ loop:
 
 /* Ethernet interface interrupt processor. */
 int
-dp8390_intr(arg)
-	void *arg;
+dp8390_intr(void *arg)
 {
 	struct dp8390_softc *sc = (struct dp8390_softc *)arg;
 	bus_space_tag_t regt = sc->sc_regt;
@@ -611,8 +617,10 @@ dp8390_intr(arg)
 		return (0);
 
 	/* Set NIC to page 0 registers. */
+	NIC_BARRIER(regt, regh);
 	NIC_PUT(regt, regh, ED_P0_CR,
 	    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
+	NIC_BARRIER(regt, regh);
 
 	isr = NIC_GET(regt, regh, ED_P0_ISR);
 	if (!isr)
@@ -673,7 +681,13 @@ dp8390_intr(arg)
 				/* Update output errors counter. */
 				++ifp->if_oerrors;
 			} else {
-				/* Throw away the non-error status bits. */
+				/*
+				 * Throw away the non-error status bits.
+				 *
+				 * XXX
+				 * It may be useful to detect loss of carrier
+				 * and late collisions here.
+				 */
 				(void)NIC_GET(regt, regh, ED_P0_TSR);
 
 				/*
@@ -769,8 +783,10 @@ dp8390_intr(arg)
 		 * set in the transmit routine, is *okay* - it is 'edge'
 		 * triggered from low to high).
 		 */
+		NIC_BARRIER(regt, regh);
 		NIC_PUT(regt, regh, ED_P0_CR,
 		    sc->cr_proto | ED_CR_PAGE_0 | ED_CR_STA);
+		NIC_BARRIER(regt, regh);
 
 		/*
 		 * If the Network Talley Counters overflow, read them to reset
@@ -793,10 +809,7 @@ dp8390_intr(arg)
  * Process an ioctl request.  This code needs some work - it looks pretty ugly.
  */
 int
-dp8390_ioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+dp8390_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct dp8390_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *) data;
@@ -906,10 +919,7 @@ dp8390_ioctl(ifp, cmd, data)
  * ether_input().  If there is a BPF listener, give a copy to BPF, too.
  */
 void
-dp8390_read(sc, buf, len)
-	struct dp8390_softc *sc;
-	int buf;
-	u_short len;
+dp8390_read(struct dp8390_softc *sc, int buf, u_short len)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
@@ -945,11 +955,9 @@ dp8390_read(sc, buf, len)
  * need to listen to.
  */
 void
-dp8390_getmcaf(ec, af)
-	struct arpcom *ec;
-	u_int8_t *af;
+dp8390_getmcaf(struct arpcom *ac, u_int8_t *af)
 {
-	struct ifnet *ifp = &ec->ac_if;
+	struct ifnet *ifp = &ac->ac_if;
 	struct ether_multi *enm;
 	u_int32_t crc;
 	int i;
@@ -971,7 +979,7 @@ dp8390_getmcaf(ec, af)
 	}
 	for (i = 0; i < 8; i++)
 		af[i] = 0;
-	ETHER_FIRST_MULTI(step, ec, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
 		if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
 		    sizeof(enm->enm_addrlo)) != 0) {
@@ -988,6 +996,7 @@ dp8390_getmcaf(ec, af)
 				af[i] = 0xff;
 			return;
 		}
+
 		/* Just want the 6 most significant bits. */
 		crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
 
@@ -1000,55 +1009,39 @@ dp8390_getmcaf(ec, af)
 }
 
 /*
- * Copy data from receive buffer to end of mbuf chain allocate additional mbufs
- * as needed.  Return pointer to last mbuf in chain.
+ * Copy data from receive buffer to a new mbuf chain allocating mbufs
+ * as needed.  Return pointer to first mbuf in chain.
  * sc = dp8390 info (softc)
  * src = pointer in dp8390 ring buffer
- * dst = pointer to last mbuf in mbuf chain to copy to
- * amount = amount of data to copy
+ * total_len = amount of data to copy
  */
 struct mbuf *
-dp8390_get(sc, src, total_len)
-	struct dp8390_softc *sc;
-	int src;
-	u_short total_len;
+dp8390_get(struct dp8390_softc *sc, int src, u_short total_len)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	struct mbuf *top, **mp, *m;
+	struct mbuf *m, *m0, *newm;
 	u_short len;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == 0)
-		return 0;
-	m->m_pkthdr.rcvif = ifp;
-	m->m_pkthdr.len = total_len;
+	MGETHDR(m0, M_DONTWAIT, MT_DATA);
+	if (m0 == NULL)
+		return (0);
+	m0->m_pkthdr.rcvif = ifp;
+	m0->m_pkthdr.len = total_len;
 	len = MHLEN;
-	top = 0;
-	mp = &top;
+	m = m0;
 
 	while (total_len > 0) {
-		if (top) {
-			MGET(m, M_DONTWAIT, MT_DATA);
-			if (m == 0) {
-				m_freem(top);
-				return 0;
-			}
-			len = MLEN;
-		}
 		if (total_len >= MINCLSIZE) {
 			MCLGET(m, M_DONTWAIT);
-			if ((m->m_flags & M_EXT) == 0) {
-				m_freem(m);
-				m_freem(top);
-				return 0;
-			}
+			if (!(m->m_flags & M_EXT))
+				goto bad;
 			len = MCLBYTES;
 		}
 
 		/*
 		 * Make sure the data after the Ethernet header is aligned.
 		 */
-		if (top == NULL) {
+		if (m == m0) {
 			caddr_t newdata = (caddr_t)
 			    ALIGN(m->m_data + sizeof(struct ether_header)) -
 			    sizeof(struct ether_header);
@@ -1061,12 +1054,22 @@ dp8390_get(sc, src, total_len)
 			src = (*sc->ring_copy)(sc, src, mtod(m, caddr_t), len);
 		else
 			src = dp8390_ring_copy(sc, src, mtod(m, caddr_t), len);
+
 		total_len -= len;
-		*mp = m;
-		mp = &m->m_next;
+		if (total_len > 0) {
+			MGET(newm, M_DONTWAIT, MT_DATA);
+			if (newm == NULL)
+				goto bad;
+			len = MLEN;
+			m = m->m_next = newm;
+		}
 	}
 
-	return top;
+	return (m0);
+
+bad:
+	m_freem(m0);
+	return (0);
 }
 
 
@@ -1079,8 +1082,7 @@ dp8390_get(sc, src, total_len)
  * Zero NIC buffer memory and verify that it is clear.
  */
 static int
-dp8390_test_mem(sc)
-	struct dp8390_softc *sc;
+dp8390_test_mem(struct dp8390_softc *sc)
 {
 	bus_space_tag_t buft = sc->sc_buft;
 	bus_space_handle_t bufh = sc->sc_bufh;
@@ -1103,10 +1105,7 @@ dp8390_test_mem(sc)
  * Read a packet header from the ring, given the source offset.
  */
 static __inline__ void
-dp8390_read_hdr(sc, src, hdrp)
-	struct dp8390_softc *sc;
-	int src;
-	struct dp8390_ring *hdrp;
+dp8390_read_hdr(struct dp8390_softc *sc, int src, struct dp8390_ring *hdrp)
 {
 	bus_space_tag_t buft = sc->sc_buft;
 	bus_space_handle_t bufh = sc->sc_bufh;
@@ -1127,11 +1126,7 @@ dp8390_read_hdr(sc, src, hdrp)
  * Takes into account ring-wrap.
  */
 static __inline__ int
-dp8390_ring_copy(sc, src, dst, amount)
-	struct dp8390_softc *sc;
-	int src;
-	caddr_t dst;
-	u_short amount;
+dp8390_ring_copy(struct dp8390_softc *sc, int src, caddr_t dst, u_short amount)
 {
 	bus_space_tag_t buft = sc->sc_buft;
 	bus_space_handle_t bufh = sc->sc_bufh;
@@ -1160,10 +1155,7 @@ dp8390_ring_copy(sc, src, dst, amount)
  * packet fits in one mbuf.
  */
 static __inline__ int
-dp8390_write_mbuf(sc, m, buf)
-	struct dp8390_softc *sc;
-	struct mbuf *m;
-	int buf;
+dp8390_write_mbuf(struct dp8390_softc *sc, struct mbuf *m, int buf)
 {
 	bus_space_tag_t buft = sc->sc_buft;
 	bus_space_handle_t bufh = sc->sc_bufh;
@@ -1187,8 +1179,7 @@ dp8390_write_mbuf(sc, m, buf)
  * Enable power on the interface.
  */
 int
-dp8390_enable(sc)
-	struct dp8390_softc *sc;
+dp8390_enable(struct dp8390_softc *sc)
 {
 
 	if (sc->sc_enabled == 0 && sc->sc_enable != NULL) {
@@ -1207,10 +1198,8 @@ dp8390_enable(sc)
  * Disable power on the interface.
  */
 void
-dp8390_disable(sc)
-	struct dp8390_softc *sc;
+dp8390_disable(struct dp8390_softc *sc)
 {
-
 	if (sc->sc_enabled != 0 && sc->sc_disable != NULL) {
 		(*sc->sc_disable)(sc);
 		sc->sc_enabled = 0;
@@ -1218,9 +1207,7 @@ dp8390_disable(sc)
 }
 
 int
-dp8390_detach(sc, flags)
-	struct dp8390_softc *sc;
-	int flags;
+dp8390_detach(struct dp8390_softc *sc, int flags)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 

@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.h,v 1.8 2006/08/04 14:25:24 brad Exp $ */
+/* $OpenBSD: if_ixgb.h,v 1.10 2006/11/28 04:45:08 brad Exp $ */
 
 #ifndef _IXGB_H_DEFINED_
 #define _IXGB_H_DEFINED_
@@ -207,10 +207,6 @@ struct ixgb_buffer {
 	bus_dmamap_t    map;	/* bus_dma map for packet */
 };
 
-struct ixgb_q {
-	bus_dmamap_t    map;	/* bus_dma map for packet */
-};
-
 /*
  * Bus dma allocation structure used by
  * ixgb_dma_malloc and ixgb_dma_free.
@@ -298,7 +294,10 @@ struct ixgb_softc {
 	bus_dma_tag_t		rxtag;		/* dma tag for Rx */
 	u_int32_t		next_rx_desc_to_use;
 
-	/* Jumbo frame */
+	/*
+	 * First/last mbuf pointers, for
+	 * collecting multisegment RX packets.
+	 */
 	struct mbuf		*fmp;
 	struct mbuf		*lmp;
 

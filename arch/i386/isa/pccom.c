@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccom.c,v 1.54 2006/07/31 11:06:20 mickey Exp $	*/
+/*	$OpenBSD: pccom.c,v 1.57 2007/02/15 18:39:26 mickey Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -189,9 +189,7 @@ void	com_kgdb_putc(void *, int);
 #endif
 
 int
-comspeed(freq, speed)
-	long freq;
-	long speed;
+comspeed(long freq, long speed)
 {
 #define	divrnd(n, q)	(((n)*2/(q)+1)/2)	/* divide and round off */
 
@@ -215,9 +213,7 @@ comspeed(freq, speed)
 }
 
 int
-comprobe1(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+comprobe1(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	int i, k;
 
@@ -238,9 +234,7 @@ comprobe1(iot, ioh)
 }
 
 int
-comprobe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+comprobe(struct device *parent, void *match, void *aux)
 {
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -313,9 +307,7 @@ out:
 }
 
 void
-comattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+comattach(struct device *parent, struct device *self, void *aux)
 {
 	struct com_softc *sc = (void *)self;
 	bus_addr_t iobase;
@@ -423,9 +415,7 @@ comattach(parent, self, aux)
 }
 
 int
-com_detach(self, flags)
-	struct device *self;
-	int flags;
+com_detach(struct device *self, int flags)
 {
 	struct com_softc *sc = (struct com_softc *)self;
 	int maj, mn;
@@ -455,9 +445,7 @@ com_detach(self, flags)
 }
 
 int
-com_activate(self, act)
-	struct device *self;
-	enum devact act;
+com_activate(struct device *self, enum devact act)
 {
 	struct com_softc *sc = (struct com_softc *)self;
 	int s, rv = 0;
@@ -489,10 +477,7 @@ com_activate(self, act)
 }
 
 int
-comopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+comopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	int unit = DEVUNIT(dev);
 	struct com_softc *sc;
@@ -556,6 +541,7 @@ comopen(dev, flag, mode, p)
 		switch (sc->sc_uarttype) {
 		case COM_UART_ST16650:
 		case COM_UART_ST16650V2:
+		case COM_UART_ST16C654:
 		case COM_UART_XR16850:
 		case COM_UART_OX16C950:
 			bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
@@ -585,6 +571,12 @@ comopen(dev, flag, mode, p)
 					fifo |= FIFO_RCV_TRIGGER_8|FIFO_XMT_TRIGGER_8; /* XXX */
 				else
 					fifo |= FIFO_RCV_TRIGGER_28|FIFO_XMT_TRIGGER_30;
+				break;
+			case COM_UART_ST16C654:
+				if (tp->t_ispeed <= 1200)
+					fifo |= FIFO_RCV3_TRIGGER_8|FIFO_XMT3_TRIGGER_8; /* XXX */
+				else
+					fifo |= FIFO_RCV3_TRIGGER_60|FIFO_XMT3_TRIGGER_56;
 				break;
 			case COM_UART_XR16850:
 			case COM_UART_OX16C950:
@@ -695,10 +687,7 @@ comopen(dev, flag, mode, p)
 }
  
 int
-comclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+comclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 	int unit = DEVUNIT(dev);
 	struct com_softc *sc = pccom_cd.cd_devs[unit];
@@ -737,8 +726,7 @@ comclose(dev, flag, mode, p)
 }
 
 void
-compwroff(sc)
-	struct com_softc *sc;
+compwroff(struct com_softc *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -767,6 +755,7 @@ compwroff(sc)
 	switch (sc->sc_uarttype) {
 	case COM_UART_ST16650:
 	case COM_UART_ST16650V2:
+	case COM_UART_ST16C654:
 	case COM_UART_XR16850:
 	case COM_UART_OX16C950:
 		bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
@@ -781,8 +770,7 @@ compwroff(sc)
 }
 
 void
-com_raisedtr(arg)
-	void *arg;
+com_raisedtr(void *arg)
 {
 	struct com_softc *sc = arg;
 
@@ -791,10 +779,7 @@ com_raisedtr(arg)
 }
 
 int
-comread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+comread(dev_t dev, struct uio *uio, int flag)
 {
 	struct com_softc *sc = pccom_cd.cd_devs[DEVUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
@@ -803,10 +788,7 @@ comread(dev, uio, flag)
 }
  
 int
-comwrite(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+comwrite(dev_t dev, struct uio *uio, int flag)
 {
 	struct com_softc *sc = pccom_cd.cd_devs[DEVUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
@@ -815,8 +797,7 @@ comwrite(dev, uio, flag)
 }
 
 struct tty *
-comtty(dev)
-	dev_t dev;
+comtty(dev_t dev)
 {
 	struct com_softc *sc = pccom_cd.cd_devs[DEVUNIT(dev)];
 	struct tty *tp = sc->sc_tty;
@@ -825,8 +806,7 @@ comtty(dev)
 }
  
 static u_char
-tiocm_xxx2mcr(data)
-	int data;
+tiocm_xxx2mcr(int data)
 {
 	u_char m = 0;
 
@@ -838,12 +818,7 @@ tiocm_xxx2mcr(data)
 }
 
 int
-comioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+comioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	int unit = DEVUNIT(dev);
 	struct com_softc *sc = pccom_cd.cd_devs[unit];
@@ -954,9 +929,7 @@ comioctl(dev, cmd, data, flag, p)
 }
 
 int
-comparam(tp, t)
-	struct tty *tp;
-	struct termios *t;
+comparam(struct tty *tp, struct termios *t)
 {
 	struct com_softc *sc = pccom_cd.cd_devs[DEVUNIT(tp->t_dev)];
 	bus_space_tag_t iot = sc->sc_iot;
@@ -1053,6 +1026,7 @@ comparam(tp, t)
 				else
 					fifo |= FIFO_RCV_TRIGGER_28|FIFO_XMT_TRIGGER_30;
 				break;
+			case COM_UART_ST16C654:
 			case COM_UART_XR16850:
 			case COM_UART_OX16C950:
 				if (t->c_ispeed <= 1200)
@@ -1124,9 +1098,7 @@ comparam(tp, t)
  * (un)block input via hw flowcontrol
  */
 int
-comhwiflow(tp, block)
-	struct tty *tp;
-	int block;
+comhwiflow(struct tty *tp, int block)
 {
 	struct com_softc *sc = pccom_cd.cd_devs[DEVUNIT(tp->t_dev)];
 	bus_space_tag_t iot = sc->sc_iot;
@@ -1165,8 +1137,7 @@ comhwiflow(tp, block)
 }
 
 void
-comstart(tp)
-	struct tty *tp;
+comstart(struct tty *tp)
 {
 	struct com_softc *sc = pccom_cd.cd_devs[DEVUNIT(tp->t_dev)];
 	bus_space_tag_t iot = sc->sc_iot;
@@ -1222,9 +1193,7 @@ out:
  * Stop output on a line.
  */
 int
-comstop(tp, flag)
-	struct tty *tp;
-	int flag;
+comstop(struct tty *tp, int flag)
 {
 	int s;
 	struct com_softc *sc = pccom_cd.cd_devs[DEVUNIT(tp->t_dev)];
@@ -1240,8 +1209,7 @@ comstop(tp, flag)
 }
 
 void
-comdiag(arg)
-	void *arg;
+comdiag(void *arg)
 {
 	struct com_softc *sc = arg;
 	int overflows;
@@ -1262,7 +1230,7 @@ int	maxcc = 0;
 #endif
 
 void
-comsoft()
+comsoft(void)
 {
 	struct com_softc	*sc;
 	struct tty *tp;
@@ -1298,19 +1266,7 @@ comsoft()
 			lsr = sc->sc_rxbuf[rxget];
 			rxget = (rxget + 1) & RBUFMASK;
 			if (ISSET(lsr, LSR_RCV_MASK)) {
-				if (ISSET(lsr, LSR_BI)) {
-#ifdef DDB
-					if (ISSET(sc->sc_hwflags, COM_HW_CONSOLE)) {
-						if (db_console)
-					 		Debugger();
-						rxget = (rxget + 1) & RBUFMASK;
-						continue;
- 					}
-#endif
-					c = 0;
-				}
-				else
-					c = sc->sc_rxbuf[rxget];
+				c = sc->sc_rxbuf[rxget];
 				if (ISSET(lsr, LSR_OE)) {
 					sc->sc_overflows++;
 					if (sc->sc_errors++ == 0)
@@ -1372,8 +1328,7 @@ comsoft()
  */
 
 int
-kgdbintr(arg)
-	void *arg;
+kgdbintr(void *arg)
 {
 	struct com_softc *sc = arg;
 	bus_space_tag_t iot = sc->sc_iot;
@@ -1419,14 +1374,13 @@ kgdbintr(arg)
 #endif /* KGDB */
 
 int
-comintr(arg)
-	void	*arg;
+comintr(void *arg)
 {
 	struct com_softc *sc = arg;
 	struct tty *tp = sc->sc_tty;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
-	u_int8_t lsr;
+	u_int8_t lsr, c;
 	u_int	rxput;
 
 	if (!sc->sc_tty)
@@ -1443,9 +1397,21 @@ comintr(arg)
 			lsr = bus_space_read_1(iot, ioh, com_lsr);
 			if (!ISSET(lsr, LSR_RCV_MASK))
 				break;
+			c = bus_space_read_1(iot, ioh, com_data);
+			if (ISSET(lsr, LSR_BI)) {
+#ifdef DDB
+				if (ISSET(sc->sc_hwflags, COM_HW_CONSOLE)) {
+					if (db_console)
+			 			Debugger();
+					continue;
+				}
+#endif
+				c = 0;
+ 			}
+
 			sc->sc_rxbuf[rxput] = lsr;
 			rxput = (rxput + 1) & RBUFMASK;
-			sc->sc_rxbuf[rxput] = bus_space_read_1(iot, ioh, com_data);
+			sc->sc_rxbuf[rxput] = c;
 			rxput = (rxput + 1) & RBUFMASK;
 		}
 		msr = bus_space_read_1(iot, ioh, com_msr);
@@ -1511,9 +1477,7 @@ comintr(arg)
 }
 
 void
-pccom_xr16850_fifo_init(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+pccom_xr16850_fifo_init(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	u_int8_t lcr, efr, fctl;
 
@@ -1531,8 +1495,7 @@ pccom_xr16850_fifo_init(iot, ioh)
  */
 
 void
-comcnprobe(cp)
-	struct consdev *cp;
+comcnprobe(struct consdev *cp)
 {
 	/* XXX NEEDS TO BE FIXED XXX */
 	bus_space_tag_t iot = 0;
@@ -1566,9 +1529,7 @@ comcnprobe(cp)
  */
 
 int
-com_common_getc(iot, ioh)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
+com_common_getc(bus_space_tag_t iot, bus_space_handle_t ioh)
 {
 	int s = splhigh();
 	u_char stat, c;
@@ -1585,10 +1546,7 @@ com_common_getc(iot, ioh)
 }
 
 void
-com_common_putc(iot, ioh, c)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	int c;
+com_common_putc(bus_space_tag_t iot, bus_space_handle_t ioh, int c)
 {
 	int s = splhigh();
 	int timo;
@@ -1613,8 +1571,7 @@ com_common_putc(iot, ioh, c)
  */
 
 void
-comcninit(cp)
-	struct consdev *cp;
+comcninit(struct consdev *cp)
 {
 
 #if 0
@@ -1642,10 +1599,7 @@ comcninit(cp)
 }
 
 void
-cominit(iot, ioh, rate)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	int rate;
+cominit(bus_space_tag_t iot, bus_space_handle_t ioh, int rate)
 {
 	int s = splhigh();
 	u_int8_t stat;
@@ -1664,8 +1618,7 @@ cominit(iot, ioh, rate)
 }
 
 int
-comcngetc(dev)
-	dev_t dev;
+comcngetc(dev_t dev)
 {
 	return (com_common_getc(comconsiot, comconsioh));
 }
@@ -1674,9 +1627,7 @@ comcngetc(dev)
  * Console kernel output character routine.
  */
 void
-comcnputc(dev, c)
-	dev_t dev;
-	int c;
+comcnputc(dev_t dev, int c)
 {
 #if 0
 	/* XXX not needed? */
@@ -1692,20 +1643,15 @@ comcnputc(dev, c)
 }
 
 void
-comcnpollc(dev, on)
-	dev_t dev;
-	int on;
+comcnpollc(dev_t dev, int on)
 {
 
 }
 
 #ifdef KGDB
 int
-com_kgdb_attach(iot, iobase, rate, frequency, cflag)
-	bus_space_tag_t iot;
-	bus_addr_t iobase;
-	int rate, frequency;
-	tcflag_t cflag;
+com_kgdb_attach(bus_space_tag_t iot, bus_addr_t iobase, int rate, int frequency,
+    tcflag_t cflag)
 {
 	if (iot == comconsiot && iobase == comconsaddr) {
 		return (EBUSY); /* cannot share with console */
@@ -1729,8 +1675,7 @@ com_kgdb_attach(iot, iobase, rate, frequency, cflag)
 
 /* ARGSUSED */
 int
-com_kgdb_getc(arg)
-	void *arg;
+com_kgdb_getc(void *arg)
 {
 
 	return (com_common_getc(com_kgdb_iot, com_kgdb_ioh));
@@ -1738,9 +1683,7 @@ com_kgdb_getc(arg)
 
 /* ARGSUSED */
 void
-com_kgdb_putc(arg, c)
-	void *arg;
-	int c;
+com_kgdb_putc(void *arg, int c)
 {
 
 	return (com_common_putc(com_kgdb_iot, com_kgdb_ioh, c));

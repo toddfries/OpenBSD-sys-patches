@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.36 2006/03/25 22:41:47 djm Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.41 2007/02/22 15:31:44 claudio Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -45,14 +45,17 @@
 
 #ifdef	INET
 #include <netinet/in.h>
+#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/in_gif.h>
+#include <netinet/ip.h>
 #endif	/* INET */
 
 #ifdef INET6
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet/ip6.h>
 #include <netinet6/in6_gif.h>
 #endif /* INET6 */
 
@@ -104,7 +107,8 @@ gif_clone_create(ifc, unit)
 	sc->gif_if.if_start  = gif_start;
 	sc->gif_if.if_output = gif_output;
 	sc->gif_if.if_type   = IFT_GIF;
-	sc->gif_if.if_snd.ifq_maxlen = ifqmaxlen;
+	IFQ_SET_MAXLEN(&sc->gif_if.if_snd, ifqmaxlen);
+	IFQ_SET_READY(&sc->gif_if.if_snd);
 	sc->gif_if.if_softc = sc;
 	if_attach(&sc->gif_if);
 	if_alloc_sadl(&sc->gif_if);
@@ -147,39 +151,123 @@ void
 gif_start(ifp)
         struct ifnet *ifp;
 {
-#if NBRIDGE > 0
-        struct sockaddr dst;
-#endif /* NBRIDGE */
-
+	struct gif_softc *sc = (struct gif_softc*)ifp;
         struct mbuf *m;
+	struct m_tag *mtag;
+	int family;
 	int s;
+	u_int8_t tp;
 
-#if NBRIDGE > 0
-	bzero(&dst, sizeof(dst));
+	/* is interface up and running? */
+	if ((ifp->if_flags & (IFF_OACTIVE | IFF_UP)) != IFF_UP ||
+	    sc->gif_psrc == NULL || sc->gif_pdst == NULL)
+		return;
 
-	/*
-	 * XXX The assumption here is that only the ethernet bridge
-	 * uses the start routine of this interface, and it's thus
-	 * safe to do this.
-	 */
-	dst.sa_family = AF_LINK;
-#endif /* NBRIDGE */
+	/* are the tunnel endpoints valid? */
+#ifdef INET
+	if (sc->gif_psrc->sa_family != AF_INET)
+#endif
+#ifdef INET6
+		if (sc->gif_psrc->sa_family != AF_INET6)
+#endif
+			return;
 
-	for (;;) {
+	s = splnet();
+	ifp->if_flags |= IFF_OACTIVE;
+	splx(s);
+
+	while (1) {
 	        s = splnet();
-		IF_DEQUEUE(&ifp->if_snd, m);
+		IFQ_DEQUEUE(&ifp->if_snd, m);
 		splx(s);
 
-		if (m == NULL) return;
+		if (m == NULL)
+			break;
+
+		/*
+		 * gif may cause infinite recursion calls when misconfigured.
+		 * We'll prevent this by detecting loops.
+		 */
+		for (mtag = m_tag_find(m, PACKET_TAG_GIF, NULL); mtag;
+		    mtag = m_tag_find(m, PACKET_TAG_GIF, mtag)) {
+			if (!bcmp((caddr_t)(mtag + 1), &ifp,
+			    sizeof(struct ifnet *))) {
+				IF_DROP(&ifp->if_snd);
+				log(LOG_NOTICE, "gif_output: "
+				    "recursively called too many times\n");
+				m_freem(m);
+				continue;
+			}
+		}
+
+		mtag = m_tag_get(PACKET_TAG_GIF, sizeof(caddr_t), M_NOWAIT);
+		if (mtag == NULL) {
+			m_freem(m);
+			break;
+		}
+		bcopy(&ifp, mtag + 1, sizeof(caddr_t));
+		m_tag_prepend(m, mtag);
+
+		/*
+		 * remove multicast and broadcast flags or encapsulated paket
+		 * ends up as multicast or broadcast packet.
+		 */
+		m->m_flags &= ~(M_BCAST|M_MCAST);
+
+		/* extract address family */
+		tp = *mtod(m, u_int8_t *);
+		tp = (tp >> 4) & 0xff;  /* Get the IP version number. */
+#ifdef INET
+		if (tp == IPVERSION)
+			family = AF_INET;
+#endif
+#ifdef INET6
+		if (tp == (IPV6_VERSION >> 4))
+			family = AF_INET6;
+#endif
 
 #if NBRIDGE > 0
-		/* Sanity check -- interface should be member of a bridge */
-		if (ifp->if_bridge == NULL) m_freem(m);
-		else gif_output(ifp, m, &dst, NULL);
-#else
-		m_freem(m);
-#endif /* NBRIDGE */
+		/*
+		 * Check if the packet is comming via bridge and needs
+		 * etherip encapsulation or not.
+		 */
+		if (ifp->if_bridge)
+			for (mtag = m_tag_find(m, PACKET_TAG_BRIDGE, NULL);
+			    mtag;
+			    mtag = m_tag_find(m, PACKET_TAG_BRIDGE, mtag)) {
+				if (!bcmp(&ifp->if_bridge, mtag + 1,
+				    sizeof(caddr_t))) {
+					family = AF_LINK;
+					break;
+				}
+			}
+#endif
+
+#if NBPFILTER > 0
+		if (ifp->if_bpf)
+			bpf_mtap_af(ifp->if_bpf, family, m, BPF_DIRECTION_OUT);
+#endif
+		ifp->if_opackets++;
+		ifp->if_obytes += m->m_pkthdr.len;
+
+		switch (sc->gif_psrc->sa_family) {
+#ifdef INET
+		case AF_INET:
+			in_gif_output(ifp, family, m);
+			break;
+#endif
+#ifdef INET6
+		case AF_INET6:
+			in6_gif_output(ifp, family, m);
+			break;
+#endif
+		default:
+			m_freem(m);
+			break;
+		}
 	}
+
+	ifp->if_flags &= ~IFF_OACTIVE;
 }
 
 int
@@ -191,7 +279,7 @@ gif_output(ifp, m, dst, rt)
 {
 	struct gif_softc *sc = (struct gif_softc*)ifp;
 	int error = 0;
-	struct m_tag *mtag;
+	int s;
 
 	if (!(ifp->if_flags & IFF_UP) ||
 	    sc->gif_psrc == NULL || sc->gif_pdst == NULL) {
@@ -200,62 +288,41 @@ gif_output(ifp, m, dst, rt)
 		goto end;
 	}
 
-	/*
-	 * gif may cause infinite recursion calls when misconfigured.
-	 * We'll prevent this by detecting loops.
-	 */
-	for (mtag = m_tag_find(m, PACKET_TAG_GIF, NULL); mtag;
-	     mtag = m_tag_find(m, PACKET_TAG_GIF, mtag)) {
-		if (!bcmp((caddr_t)(mtag + 1), &ifp, sizeof(struct ifnet *))) {
-			IF_DROP(&ifp->if_snd);
-			log(LOG_NOTICE,
-			    "gif_output: recursively called too many times\n");
-			m_freem(m);
-			error = EIO;	/* is there better errno? */
-			goto end;
-		}
-	}
-
-	mtag = m_tag_get(PACKET_TAG_GIF, sizeof(struct ifnet *), M_NOWAIT);
-	if (mtag == NULL) {
-		IF_DROP(&ifp->if_snd);
-		m_freem(m);
-		error = ENOMEM;
-		goto end;
-	}
-	bcopy(&ifp, (caddr_t)(mtag + 1), sizeof(struct ifnet *));
-	m_tag_prepend(m, mtag);
-
-	m->m_flags &= ~(M_BCAST|M_MCAST);
-
-#if NBPFILTER > 0
-	if (ifp->if_bpf)
-		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m, BPF_DIRECTION_OUT);
-#endif
-	ifp->if_opackets++;	
-	ifp->if_obytes += m->m_pkthdr.len;
-
 	switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 	case AF_INET:
-		error = in_gif_output(ifp, dst->sa_family, m, rt);
 		break;
 #endif
 #ifdef INET6
 	case AF_INET6:
-		error = in6_gif_output(ifp, dst->sa_family, m, rt);
 		break;
 #endif
 	default:
 		m_freem(m);		
 		error = ENETDOWN;
-		break;
+		goto end;
 	}
+
+	s = splnet();
+	/*
+	 * Queue message on interface, and start output if interface
+	 * not yet active.
+	 */
+	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
+	if (error) {
+		/* mbuf is already freed */
+		splx(s);
+		return (error);
+	}
+	if ((ifp->if_flags & IFF_OACTIVE) == 0)
+		(*ifp->if_start)(ifp);
+	splx(s);
+	return (error);
 
   end:
 	if (error)
 		ifp->if_oerrors++;
-	return error;
+	return (error);
 }
 
 int
@@ -325,45 +392,45 @@ gif_ioctl(ifp, cmd, data)
 				&(((struct if_laddrreq *)data)->dstaddr);
 			break;
 		default:
-			return EINVAL;
+			return (EINVAL);
 		}
 
 		/* sa_family must be equal */
 		if (src->sa_family != dst->sa_family)
-			return EINVAL;
+			return (EINVAL);
 
 		/* validate sa_len */
 		switch (src->sa_family) {
 #ifdef INET
 		case AF_INET:
 			if (src->sa_len != sizeof(struct sockaddr_in))
-				return EINVAL;
+				return (EINVAL);
 			break;
 #endif
 #ifdef INET6
 		case AF_INET6:
 			if (src->sa_len != sizeof(struct sockaddr_in6))
-				return EINVAL;
+				return (EINVAL);
 			break;
 #endif
 		default:
-			return EAFNOSUPPORT;
+			return (EAFNOSUPPORT);
 		}
 		switch (dst->sa_family) {
 #ifdef INET
 		case AF_INET:
 			if (dst->sa_len != sizeof(struct sockaddr_in))
-				return EINVAL;
+				return (EINVAL);
 			break;
 #endif
 #ifdef INET6
 		case AF_INET6:
 			if (dst->sa_len != sizeof(struct sockaddr_in6))
-				return EINVAL;
+				return (EINVAL);
 			break;
 #endif
 		default:
-			return EAFNOSUPPORT;
+			return (EAFNOSUPPORT);
 		}
 
 		/* check sa_family looks sane for the cmd */
@@ -371,12 +438,12 @@ gif_ioctl(ifp, cmd, data)
 		case SIOCSIFPHYADDR:
 			if (src->sa_family == AF_INET)
 				break;
-			return EAFNOSUPPORT;
+			return (EAFNOSUPPORT);
 #ifdef INET6
 		case SIOCSIFPHYADDR_IN6:
 			if (src->sa_family == AF_INET6)
 				break;
-			return EAFNOSUPPORT;
+			return (EAFNOSUPPORT);
 #endif /* INET6 */
 		case SIOCSLIFPHYADDR:
 			/* checks done in the above */
@@ -483,7 +550,7 @@ gif_ioctl(ifp, cmd, data)
 			goto bad;
 		}
 		if (src->sa_len > size)
-			return EINVAL;
+			return (EINVAL);
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 		break;
 			
@@ -515,7 +582,7 @@ gif_ioctl(ifp, cmd, data)
 			goto bad;
 		}
 		if (src->sa_len > size)
-			return EINVAL;
+			return (EINVAL);
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 		break;
 
@@ -531,7 +598,7 @@ gif_ioctl(ifp, cmd, data)
 			&(((struct if_laddrreq *)data)->addr);
 		size = sizeof(((struct if_laddrreq *)data)->addr);
 		if (src->sa_len > size)
-			return EINVAL;
+			return (EINVAL);
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 
 		/* copy dst */
@@ -540,7 +607,7 @@ gif_ioctl(ifp, cmd, data)
 			&(((struct if_laddrreq *)data)->dstaddr);
 		size = sizeof(((struct if_laddrreq *)data)->dstaddr);
 		if (src->sa_len > size)
-			return EINVAL;
+			return (EINVAL);
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 		break;
 
@@ -560,5 +627,5 @@ gif_ioctl(ifp, cmd, data)
 		break;
 	}
  bad:
-	return error;
+	return (error);
 }

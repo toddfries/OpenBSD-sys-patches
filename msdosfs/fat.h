@@ -1,4 +1,4 @@
-/*	$OpenBSD: fat.h,v 1.7 2004/05/14 04:05:05 tedu Exp $	*/
+/*	$OpenBSD: fat.h,v 1.9 2006/12/15 03:04:24 krw Exp $	*/
 /*	$NetBSD: fat.h,v 1.11 1997/10/17 11:23:49 ws Exp $	*/
 
 /*-
@@ -71,11 +71,6 @@
  * than 4078 ((CLUST_RSRVS - CLUST_FIRST) & FAT12_MASK) then we've got a
  * 16 bit fat filesystem. While mounting, the result of this test is stored
  * in pm_fatentrysize.
- * GEMDOS-flavour (atari):
- * If the filesystem is on floppy we've got a 12 bit fat filesystem, otherwise
- * 16 bit. We check the d_type field in the disklabel struct while mounting
- * and store the result in the pm_fatentrysize. Note that this kind of
- * detection gets flakey when mounting a vnd-device.
  */
 #define	FAT12(pmp)	(pmp->pm_fatmask == FAT12_MASK)
 #define	FAT16(pmp)	(pmp->pm_fatmask == FAT16_MASK)
@@ -97,7 +92,7 @@
  */
 #define	DE_CLEAR	1	/* Zero out the blocks allocated */
 
-int pcbmap(struct denode *, uint32_t, daddr_t *, uint32_t *, int *);
+int pcbmap(struct denode *, uint32_t, daddr64_t *, uint32_t *, int *);
 int clusterfree(struct msdosfsmount *, uint32_t, uint32_t *);
 int clusteralloc(struct msdosfsmount *, uint32_t, uint32_t, uint32_t, uint32_t *, uint32_t *);
 int extendfile(struct denode *, uint32_t, struct buf **, uint32_t *, int);

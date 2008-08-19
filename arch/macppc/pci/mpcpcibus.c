@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibus.c,v 1.32 2006/05/10 00:07:40 brad Exp $ */
+/*	$OpenBSD: mpcpcibus.c,v 1.36 2006/12/14 17:36:12 kettenis Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -107,7 +107,7 @@ struct config_type{
 };
 struct config_type config_offsets[] = {
 	{"grackle",		0x00c00cf8, 0x00e00cfc, 0 },
-	{"bandit",		0x00800000, 0x00c00000, 0 },
+	{"bandit",		0x00800000, 0x00c00000, 1 },
 	{"uni-north",		0x00800000, 0x00c00000, 3 },
 	{"u3-agp",		0x00800000, 0x00c00000, 3 },
 	{"u3-ht",		0x00000cf8, 0x00000cfc, 3 },
@@ -216,12 +216,12 @@ mpcpcibus_find_ranges_32 (struct pcibr_softc *sc, u_int32_t *range_store,
 				prange[i].size);
 #endif
 			if (base != 0) {
-				if ((base + size) == prange[i].base) {
+				if ((base + size) == prange[i].base)   
 					size += prange[i].size;
-				} else {
-					base = prange[i].base;
+				else {
 					size = prange[i].size;
-				}
+					base = prange[i].base;
+				} 
 			} else {
 				base = prange[i].base;
 				size = prange[i].size;
@@ -435,14 +435,16 @@ mpcpcibrattach(struct device *parent, struct device *self, void *aux)
 	printf(": %s, Revision 0x%x\n", compat, 
 	    mpc_cfg_read_1(lcp, MPC106_PCI_REVID));
 
-	pci_addr_fixup(sc, &lcp->lc_pc, 32);
+	if ((strcmp(compat, "bandit")) != 0)
+		pci_addr_fixup(sc, &lcp->lc_pc, 32);
 
 	pba.pba_dmat = &pci_bus_dma_tag;
-		
+
 	pba.pba_busname = "pci";
 	pba.pba_iot = &sc->sc_iobus_space;
 	pba.pba_memt = &sc->sc_membus_space;
 	pba.pba_pc = &lcp->lc_pc;
+	pba.pba_domain = pci_ndomains++;
 	pba.pba_bus = 0;
 	pba.pba_bridgetag = NULL;
 
@@ -605,7 +607,8 @@ fix_node_irq(int node, struct pcibus_attach_args *pba)
 			} else 
 				return;
 		}
-	}
+	} else
+		irq = intr;
 	/* program the interrupt line register with the value
 	 * found in openfirmware
 	 */
@@ -737,15 +740,14 @@ mpc_gen_config_reg(void *cpv, pcitag_t tag, int offset)
 			 * config type 1 
 			 */
 			reg =  tag | offset | 1;
-
 		}
 	} else {
 		/* config mechanism #2, type 0
 		 * standard cf8/cfc config
 		 */
 		reg =  0x80000000 | tag  | offset;
-
 	}
+
 	return reg;
 }
 

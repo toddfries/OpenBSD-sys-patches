@@ -1,4 +1,4 @@
-/*	$OpenBSD: npx.c,v 1.40.2.1 2006/11/15 03:06:15 brad Exp $	*/
+/*	$OpenBSD: npx.c,v 1.42 2006/10/18 19:48:32 tom Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -194,8 +194,7 @@ asm (".text\n\t"
 	"iret\n\t");
 
 static inline int
-npxprobe1(ia)
-	struct isa_attach_args *ia;
+npxprobe1(struct isa_attach_args *ia)
 {
 	int control;
 	int status;
@@ -270,9 +269,7 @@ npxprobe1(ia)
  * need to use interrupts.  Return 1 if device exists.
  */
 int
-npxprobe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+npxprobe(struct device *parent, void *match, void *aux)
 {
 	struct	isa_attach_args *ia = aux;
 	int	irq;
@@ -366,9 +363,7 @@ npxinit(struct cpu_info *ci)
  * Attach routine - announce which it is, and wire into system
  */
 void
-npxattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+npxattach(struct device *parent, struct device *self, void *aux)
 {
 	struct npx_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
@@ -422,8 +417,7 @@ npxattach(parent, self, aux)
  * IRQ13 exception handling makes exceptions even less precise than usual.
  */
 int
-npxintr(arg)
-	void *arg;
+npxintr(void *arg)
 {
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_fpcurproc;

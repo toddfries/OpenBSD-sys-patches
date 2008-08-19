@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.52 2006/06/23 21:53:01 reyk Exp $  */
+/*      $OpenBSD: ath.c,v 1.61 2007/01/03 18:16:43 claudio Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -235,28 +235,39 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 		goto bad;
 	}
 
-	printf("%s: AR%s %u.%u phy %u.%u", ifp->if_xname,
-	    ar5k_printver(AR5K_VERSION_VER, ah->ah_mac_srev),
-	    ah->ah_mac_version, ah->ah_mac_revision,
-	    ah->ah_phy_revision >> 4, ah->ah_phy_revision & 0xf);
-	printf(" rf%s %u.%u",
-	    ar5k_printver(AR5K_VERSION_RAD, ah->ah_radio_5ghz_revision),
-	    ah->ah_radio_5ghz_revision >> 4,
-	    ah->ah_radio_5ghz_revision & 0xf);
-	if (ah->ah_radio_2ghz_revision != 0) {
+	if (ah->ah_single_chip == AH_TRUE) {
+		printf("%s: AR%s %u.%u phy %u.%u rf %u.%u", ifp->if_xname,
+		    ar5k_printver(AR5K_VERSION_DEV, devid),
+		    ah->ah_mac_version, ah->ah_mac_revision,
+		    ah->ah_phy_revision >> 4, ah->ah_phy_revision & 0xf,
+		    ah->ah_radio_5ghz_revision >> 4,
+		    ah->ah_radio_5ghz_revision & 0xf);
+	} else {
+		printf("%s: AR%s %u.%u phy %u.%u", ifp->if_xname,
+		    ar5k_printver(AR5K_VERSION_VER, ah->ah_mac_srev),
+		    ah->ah_mac_version, ah->ah_mac_revision,
+		    ah->ah_phy_revision >> 4, ah->ah_phy_revision & 0xf);
 		printf(" rf%s %u.%u",
-		    ar5k_printver(AR5K_VERSION_RAD,
-		    ah->ah_radio_2ghz_revision),
-		    ah->ah_radio_2ghz_revision >> 4,
-		    ah->ah_radio_2ghz_revision & 0xf);
+		    ar5k_printver(AR5K_VERSION_RAD, ah->ah_radio_5ghz_revision),
+		    ah->ah_radio_5ghz_revision >> 4,
+		    ah->ah_radio_5ghz_revision & 0xf);
+		if (ah->ah_radio_2ghz_revision != 0) {
+			printf(" rf%s %u.%u",
+			    ar5k_printver(AR5K_VERSION_RAD,
+			    ah->ah_radio_2ghz_revision),
+			    ah->ah_radio_2ghz_revision >> 4,
+			    ah->ah_radio_2ghz_revision & 0xf);
+		}
 	}
 
+#if 0
 	if (ah->ah_radio_5ghz_revision >= AR5K_SREV_RAD_UNSUPP ||
 	    ah->ah_radio_2ghz_revision >= AR5K_SREV_RAD_UNSUPP) {
 		printf(": RF radio not supported\n");
 		error = EOPNOTSUPP;
 		goto bad;
 	}
+#endif
 
 	sc->sc_ah = ah;
 	sc->sc_invalid = 0;	/* ready to go, enable interrupt handling */
@@ -311,7 +322,7 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	 * allocate more tx queues for splitting management
 	 * frames and for QOS support.
 	 */
-	sc->sc_bhalq = ath_hal_setup_tx_queue(ah,HAL_TX_QUEUE_BEACON,NULL);
+	sc->sc_bhalq = ath_hal_setup_tx_queue(ah, HAL_TX_QUEUE_BEACON, NULL);
 	if (sc->sc_bhalq == (u_int) -1) {
 		printf(": unable to setup a beacon xmit queue!\n");
 		goto bad2;
@@ -319,6 +330,7 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 
 	for (i = 0; i <= HAL_TX_QUEUE_ID_DATA_MAX; i++) {
 		bzero(&qinfo, sizeof(qinfo));
+		qinfo.tqi_type = HAL_TX_QUEUE_DATA;
 		qinfo.tqi_subtype = i; /* should be mapped to WME types */
 		sc->sc_txhalq[i] = ath_hal_setup_tx_queue(ah,
 		    HAL_TX_QUEUE_DATA, &qinfo);
@@ -670,7 +682,7 @@ ath_chan2flags(struct ieee80211com *ic, struct ieee80211_channel *chan)
 	case IEEE80211_MODE_11B:
 		return CHANNEL_B;
 	case IEEE80211_MODE_11G:
-		return CHANNEL_PUREG;
+		return CHANNEL_G;
 	case IEEE80211_MODE_TURBO:
 		return CHANNEL_T;
 	default:
@@ -725,7 +737,7 @@ ath_init1(struct ath_softc *sc)
 	 */
 	hchan.channel = ic->ic_ibss_chan->ic_freq;
 	hchan.channelFlags = ath_chan2flags(ic, ic->ic_ibss_chan);
-	if (!ath_hal_reset(ah, ic->ic_opmode, &hchan, AH_FALSE, &status)) {
+	if (!ath_hal_reset(ah, ic->ic_opmode, &hchan, AH_TRUE, &status)) {
 		printf("%s: unable to reset hardware; hal status %u\n",
 			ifp->if_xname, status);
 		error = EIO;
@@ -2006,12 +2018,12 @@ ath_rx_proc(void *arg, int npending)
 			sc->sc_rxtap.wr_rssi = ds->ds_rxstat.rs_rssi;
 			sc->sc_rxtap.wr_max_rssi = ic->ic_max_rssi;
 
-			M_DUP_PKTHDR(&mb, m);
 			mb.m_data = (caddr_t)&sc->sc_rxtap;
 			mb.m_len = sc->sc_rxtap_len;
 			mb.m_next = m;
-			mb.m_pkthdr.len += mb.m_len;
-
+			mb.m_nextpkt = NULL;
+			mb.m_type = 0;
+			mb.m_flags = 0;
 			bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 		}
 #endif
@@ -2398,11 +2410,12 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 		sc->sc_txtap.wt_antenna = antenna;
 		sc->sc_txtap.wt_hwqueue = hwqueue;
 
-		M_DUP_PKTHDR(&mb, m0);
 		mb.m_data = (caddr_t)&sc->sc_txtap;
 		mb.m_len = sc->sc_txtap_len;
 		mb.m_next = m0;
-		mb.m_pkthdr.len += mb.m_len;
+		mb.m_nextpkt = NULL;
+		mb.m_type = 0;
+		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_OUT);
 	}
 #endif
@@ -2725,7 +2738,7 @@ ath_chan_set(struct ath_softc *sc, struct ieee80211_channel *chan)
 		if (!ath_hal_reset(ah, ic->ic_opmode, &hchan, AH_TRUE,
 		    &status)) {
 			printf("%s: ath_chan_set: unable to reset "
-				"channel %u (%u Mhz)\n", ifp->if_xname,
+				"channel %u (%u MHz)\n", ifp->if_xname,
 				ieee80211_chan2ieee(ic, chan), chan->ic_freq);
 			return EIO;
 		}

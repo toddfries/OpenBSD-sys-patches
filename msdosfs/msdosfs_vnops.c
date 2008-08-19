@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.56 2005/12/01 22:13:33 pedro Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.59 2007/01/16 17:52:18 thib Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -469,9 +469,7 @@ msdosfs_read(v)
 	int isadir;
 	uint32_t n;
 	long on;
-	daddr_t lbn;
-	daddr_t rablock;
-	daddr_t rablkno;
+	daddr64_t lbn, rablock, rablkno;
 	struct buf *bp;
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(vp);
@@ -1472,7 +1470,8 @@ msdosfs_readdir(v)
 	uint32_t cn;
 	uint32_t fileno;
 	long bias = 0;
-	daddr_t bn, lbn;
+	daddr_t lbn;
+	daddr64_t bn;
 	struct buf *bp;
 	struct denode *dep = VTODE(ap->a_vp);
 	struct msdosfsmount *pmp = dep->de_pmp;
@@ -1978,7 +1977,6 @@ struct vnodeopv_entry_desc msdosfs_vnodeop_entries[] = {
 	{ &vop_setattr_desc, msdosfs_setattr },		/* setattr */
 	{ &vop_read_desc, msdosfs_read },		/* read */
 	{ &vop_write_desc, msdosfs_write },		/* write */
-	{ &vop_lease_desc, msdosfs_lease_check },	/* lease */
 	{ &vop_ioctl_desc, msdosfs_ioctl },		/* ioctl */
 	{ &vop_poll_desc, msdosfs_poll },		/* poll */
 	{ &vop_fsync_desc, msdosfs_fsync },		/* fsync */

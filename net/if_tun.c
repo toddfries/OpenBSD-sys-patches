@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.79 2006/03/25 22:41:48 djm Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.85 2007/02/21 13:24:55 claudio Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -111,6 +111,9 @@ int	tundebug = TUN_DEBUG;
 #define TUNDEBUG(a)	/* (tundebug? printf a : 0) */
 #endif
 
+/* Only these IFF flags are changeable by TUNSIFINFO */
+#define TUN_IFF_FLAGS (IFF_UP|IFF_POINTOPOINT|IFF_MULTICAST|IFF_BROADCAST)
+
 extern int ifqmaxlen;
 
 void	tunattach(int);
@@ -176,7 +179,7 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	bzero(tp, sizeof(*tp));
 
 	tp->tun_unit = unit;
-	tp->tun_flags = TUN_INITED;
+	tp->tun_flags = TUN_INITED|TUN_STAYUP;
 
 	/* generate fake MAC address: 00 bd xx xx xx unit_no */
 	tp->arpcom.ac_enaddr[0] = 0x00;
@@ -274,25 +277,21 @@ tun_switch(struct tun_softc *tp, int flags)
 
 	/* tp will be removed so store unit number */
 	unit = tp->tun_unit;
-	open = tp->tun_flags & TUN_OPEN;
+	open = tp->tun_flags & (TUN_OPEN|TUN_NBIO|TUN_ASYNC);
 	TUNDEBUG(("%s: switching to layer %d\n", ifp->if_xname,
 		    flags & TUN_LAYER2 ? 2 : 3));
 
-	/*
-	 * remove old device
-	 */
+	/* remove old device and ... */
 	tun_clone_destroy(ifp);
-
-	/*
-	 * attach new interface
-	 */
+	/* attach new interface */
 	r = tun_create(&tun_cloner, unit, flags);
+
 	if (open && r == 0) {
 		/* already opened before ifconfig tunX link0 */
 		if ((tp = tun_lookup(unit)) == NULL)
 			/* this should never fail */
 			return (ENXIO);
-		tp->tun_flags |= TUN_OPEN;
+		tp->tun_flags |= open;
 		TUNDEBUG(("%s: already open\n", tp->tun_if.if_xname));
 	}
 	return (r);
@@ -321,6 +320,7 @@ tunopen(dev_t dev, int flag, int mode, struct proc *p)
 
 		if ((tp = tun_lookup(minor(dev))) == NULL)
 			return (ENXIO);
+		tp->tun_flags &= ~TUN_STAYUP;
 	}
 
 	if (tp->tun_flags & TUN_OPEN)
@@ -341,7 +341,7 @@ tunopen(dev_t dev, int flag, int mode, struct proc *p)
 
 /*
  * tunclose - close the device; if closing the real device, flush pending
- *  output and (unless set STAYUP) bring down the interface.
+ *  output and unless STAYUP bring down and destroy the interface.
  */
 int
 tunclose(dev_t dev, int flag, int mode, struct proc *p)
@@ -354,7 +354,8 @@ tunclose(dev_t dev, int flag, int mode, struct proc *p)
 		return (ENXIO);
 
 	ifp = &tp->tun_if;
-	tp->tun_flags &= ~TUN_OPEN;
+	tp->tun_flags &= ~(TUN_OPEN|TUN_NBIO|TUN_ASYNC);
+	ifp->if_flags &= ~IFF_RUNNING;
 
 	/*
 	 * junk all pending output
@@ -363,34 +364,16 @@ tunclose(dev_t dev, int flag, int mode, struct proc *p)
 	IFQ_PURGE(&ifp->if_snd);
 	splx(s);
 
-	if ((ifp->if_flags & IFF_UP) && !(tp->tun_flags & TUN_STAYUP)) {
-		s = splnet();
-		if_down(ifp);
-		if (ifp->if_flags & IFF_RUNNING) {
-			/* find internet addresses and delete routes */
-			struct ifaddr	*ifa = NULL;
-
-			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-#ifdef INET
-				if (ifa->ifa_addr->sa_family == AF_INET) {
-					rtinit(ifa, (int)RTM_DELETE,
-					    (tp->tun_flags & TUN_DSTADDR)?
-					    RTF_HOST : 0);
-				}
-				/* XXX INET6 */
-#endif
-			}
-
-			rt_if_remove(ifp);
-			ifp->if_flags &= ~IFF_RUNNING;
-		}
-		splx(s);
-	}
-	tp->tun_pgid = 0;
-	selwakeup(&tp->tun_rsel);
-	KNOTE(&tp->tun_rsel.si_note, 0);
-
 	TUNDEBUG(("%s: closed\n", ifp->if_xname));
+
+	if (!(tp->tun_flags & TUN_STAYUP))
+		return (if_clone_destroy(ifp->if_xname));
+	else {
+		tp->tun_pgid = 0;
+		selwakeup(&tp->tun_rsel);
+		KNOTE(&tp->tun_rsel.si_note, 0);
+	}
+
 	return (0);
 }
 
@@ -557,7 +540,7 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	int			 s, len, error;
 	u_int32_t		*af;
 
-	if (!(ifp->if_flags & IFF_UP)) {
+	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) {
 		m_freem(m0);
 		return (EHOSTDOWN);
 	}
@@ -632,9 +615,15 @@ tunioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	switch (cmd) {
 	case TUNSIFINFO:
 		tunp = (struct tuninfo *)data;
+		if (tunp->mtu < ETHERMIN || tunp->mtu > TUNMRU) {
+			splx(s);
+			return (EINVAL);
+		}
 		tp->tun_if.if_mtu = tunp->mtu;
 		tp->tun_if.if_type = tunp->type;
-		tp->tun_if.if_flags = tunp->flags;
+		tp->tun_if.if_flags = 
+		    (tunp->flags & TUN_IFF_FLAGS) |
+		    (tp->tun_if.if_flags & ~TUN_IFF_FLAGS);
 		tp->tun_if.if_baudrate = tunp->baudrate;
 		break;
 	case TUNGIFINFO:
@@ -656,9 +645,8 @@ tunioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		switch (*(int *)data & (IFF_POINTOPOINT|IFF_BROADCAST)) {
 		case IFF_POINTOPOINT:
 		case IFF_BROADCAST:
-		tp->tun_if.if_flags &=
-		    ~(IFF_BROADCAST|IFF_POINTOPOINT|IFF_MULTICAST);
-			tp->tun_if.if_flags |= *(int *)data;
+			tp->tun_if.if_flags &= ~TUN_IFF_FLAGS;
+			tp->tun_if.if_flags |= *(int *)data & TUN_IFF_FLAGS;
 			break;
 		default:
 			splx(s);
@@ -820,7 +808,7 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	if (uio->uio_resid >= MINCLSIZE) {
 		MCLGET(m, M_DONTWAIT);
 		if (!(m->m_flags & M_EXT)) {
-			m_freem(m);
+			m_free(m);
 			return (ENOBUFS);
 		}
 		mlen = MCLBYTES;
@@ -852,6 +840,7 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 				MCLGET(m, M_DONTWAIT);
 				if (!(m->m_flags & M_EXT)) {
 					error = ENOBUFS;
+					m_free(m);
 					break;
 				}
 				mlen = MCLBYTES;
@@ -947,7 +936,7 @@ tunpoll(dev_t dev, int events, struct proc *p)
 	struct mbuf		*m;
 
 	if ((tp = tun_lookup(minor(dev))) == NULL)
-		return (ENXIO);
+		return (POLLERR);
 
 	ifp = &tp->tun_if;
 	revents = 0;

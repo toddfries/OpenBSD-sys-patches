@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral_cardbus.c,v 1.7 2006/06/21 11:27:03 fkr Exp $  */
+/*	$OpenBSD: if_ral_cardbus.c,v 1.9 2006/10/22 12:14:44 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -44,7 +44,7 @@
 #include <netinet/if_ether.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_rssadapt.h>
+#include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/ic/rt2560var.h>
@@ -206,7 +206,7 @@ ral_cardbus_enable(struct rt2560_softc *sc)
 
 	/* map and establish the interrupt handler */
 	csc->sc_ih = cardbus_intr_establish(cc, cf, csc->sc_intrline, IPL_NET,
-	    csc->sc_opns->intr, sc);
+	    csc->sc_opns->intr, sc, sc->sc_dev.dv_xname);
 	if (csc->sc_ih == NULL) {
 		printf("%s: could not establish interrupt at %d\n",
 		    sc->sc_dev.dv_xname, csc->sc_intrline);

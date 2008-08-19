@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.133 2006/06/11 20:49:27 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.135 2007/03/03 21:21:25 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -775,7 +775,7 @@ dumpconf()
 		dumplo = ctod(1);
 
 	/* Put dump at end of partition, and make it fit. */
-	if (dumpsize < dtoc(nblks - dumplo))
+	if (dumpsize > dtoc(nblks - dumplo))
 		dumpsize = dtoc(nblks - dumplo);
 	if (dumplo < nblks - ctod(dumpsize))
 		dumplo = nblks - ctod(dumpsize);
@@ -1596,7 +1596,6 @@ setmachdep()
 
 		break;
 	case MACH_CLASSAV:
-	case MACH_CLASSP580:
 		VIA2 = VIA2OFF;
 		IOBase = 0x50f00000;
 		Via1Base = (volatile u_char *)IOBase;
@@ -1689,15 +1688,6 @@ mac68k_set_io_offsets(base)
 		Via1Base = (volatile u_char *)base;
 		sccA = (volatile u_char *)base + 0xc020;
 		SCSIBase = base + 0x10000;
-		break;
-	case MACH_CLASSP580:
-		/*
-		 * Here's a queer bird... it seems to be a cross between
-		 * the two different Quadra classes.
-		 */
-		Via1Base = (volatile u_char *)base;
-		sccA = (volatile u_char *)base + 0xc020;
-		SCSIBase = base;
 		break;
 	case MACH_CLASSAV:
 		Via1Base = (volatile u_char *)base;

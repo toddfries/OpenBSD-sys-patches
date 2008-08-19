@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.55 2006/08/30 11:20:20 jsg Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.58 2007/02/14 04:59:55 jsg Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -78,8 +78,6 @@
 #include <dev/ic/smc93cx6var.h>
 
 int rtw_rfprog_fallback = 0;
-int rtw_host_rfio = 0;
-int rtw_xmtr_restart = 0;
 int rtw_do_chip_reset = 0;
 int rtw_dwelltime = 200;	/* milliseconds per channel */
 int rtw_macbangbits_timeout = 100;
@@ -142,9 +140,7 @@ void	 rtw_txsofts_release(bus_dma_tag_t, struct ieee80211com *,
 	    struct rtw_txsoft_blk *);
 void	 rtw_hwring_setup(struct rtw_softc *);
 int	 rtw_swring_setup(struct rtw_softc *);
-void	 rtw_txdesc_blk_reset(struct rtw_txdesc_blk *);
 void	 rtw_txdescs_reset(struct rtw_softc *);
-void	 rtw_rxdescs_reset(struct rtw_softc *);
 void	 rtw_rfmd_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
 int	 rtw_pwrstate(struct rtw_softc *, enum rtw_pwrstate);
 int	 rtw_tune(struct rtw_softc *);
@@ -243,7 +239,6 @@ int	 rtw_grf5101_txpower(struct rtw_softc *, u_int8_t);
 int	 rtw_grf5101_tune(struct rtw_softc *, u_int);
 int	 rtw_rf_hostwrite(struct rtw_softc *, u_int, u_int32_t);
 int	 rtw_rf_macwrite(struct rtw_softc *, u_int, u_int32_t);
-u_int8_t rtw_bbp_read(struct rtw_regs *, u_int);
 int	 rtw_bbp_write(struct rtw_regs *, u_int, u_int);
 u_int32_t rtw_grf5101_host_crypt(u_int, u_int32_t);
 u_int32_t rtw_maxim_swizzle(u_int, uint32_t);
@@ -1329,11 +1324,12 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 			rr->rr_antsignal = rssi;
 			rr->rr_barker_lock = htole16(sq);
 
-			M_DUP_PKTHDR(&mb, m);
 			mb.m_data = (caddr_t)rr;
 			mb.m_len = sizeof(sc->sc_rxtapu);
 			mb.m_next = m;
-			mb.m_pkthdr.len += mb.m_len;
+			mb.m_nextpkt = NULL;
+			mb.m_type = 0;
+			mb.m_flags = 0;
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
 		}
 #endif /* NPBFILTER > 0 */
@@ -1953,6 +1949,7 @@ rtw_stop(struct ifnet *ifp, int disable)
 	return;
 }
 
+#ifdef RTW_DEBUG
 const char *
 rtw_pwrstate_string(enum rtw_pwrstate power)
 {
@@ -1967,6 +1964,7 @@ rtw_pwrstate_string(enum rtw_pwrstate power)
 		return "unknown";
 	}
 }
+#endif
 
 /* XXX For Maxim, I am using the RFMD settings gleaned from the
  * reference driver, plus a magic Maxim "ON" value that comes from
@@ -3079,11 +3077,12 @@ rtw_start(struct ifnet *ifp)
 			rt->rt_chan_flags =
 			    htole16(ic->ic_bss->ni_chan->ic_flags);
 
-			M_DUP_PKTHDR(&mb, m0);
 			mb.m_data = (caddr_t)rt;
 			mb.m_len = sizeof(sc->sc_txtapu);
 			mb.m_next = m0;
-			mb.m_pkthdr.len += mb.m_len;
+			mb.m_nextpkt = NULL;
+			mb.m_type = 0;
+			mb.m_flags = 0;
 			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_OUT);
 
 		}
@@ -3760,7 +3759,7 @@ rtw_attach(struct rtw_softc *sc)
 	const char *vername;
 	struct ifnet *ifp;
 	char scratch[sizeof("unknown 0xXXXXXXXX")];
-	int pri, rc, nrate;
+	int pri, rc;
 
 
 	/* Use default DMA memory access */
@@ -3929,14 +3928,7 @@ rtw_attach(struct rtw_softc *sc)
 	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_IBSS |
 	    IEEE80211_C_HOSTAP | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
 
-	nrate = 0;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] =
-	    IEEE80211_RATE_BASIC | 2;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] =
-	    IEEE80211_RATE_BASIC | 4;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 11;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 22;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_nrates = nrate;
+	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
 
 	rtw_led_attach(&sc->sc_led_state, (void *)sc);
 
@@ -4613,18 +4605,6 @@ rtw_phy_init(struct rtw_softc *sc)
 /*
  * Generic PHY I/O functions
  */
-
-
-u_int8_t
-rtw_bbp_read(struct rtw_regs *regs, u_int addr)
-{
-	KASSERT((addr & ~PRESHIFT(RTW_BB_ADDR_MASK)) == 0);
-	RTW_WRITE(regs, RTW_BB,
-	    LSHIFT(addr, RTW_BB_ADDR_MASK) | RTW_BB_RD_MASK | RTW_BB_WR_MASK);
-	delay(10);	/* XXX */
-	RTW_WBR(regs, RTW_BB, RTW_BB);
-	return MASK_AND_RSHIFT(RTW_READ(regs, RTW_BB), RTW_BB_RD_MASK);
-}
 
 int
 rtw_bbp_write(struct rtw_regs *regs, u_int addr, u_int val)

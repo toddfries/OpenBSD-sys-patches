@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_output.c,v 1.33 2005/04/12 09:39:54 markus Exp $ */
+/*	$OpenBSD: ipsec_output.c,v 1.37 2007/02/08 15:25:30 itojun Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -20,6 +20,8 @@
  * PURPOSE.
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -28,6 +30,10 @@
 
 #include <net/if.h>
 #include <net/route.h>
+
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
 
 #ifdef INET
 #include <netinet/in.h>
@@ -71,6 +77,11 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 	struct timeval tv;
 	int i, off, error;
 	struct mbuf *mp;
+#ifdef INET6
+	struct ip6_ext ip6e;
+	int nxt;
+	int dstopt = 0;
+#endif
 
 #ifdef INET
 	int setdf = 0;
@@ -264,10 +275,10 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 				ip = mtod(m, struct ip *);
 				ip->ip_off |= htons(IP_DF);
 			}
+#endif
 
 			/* Remember that we appended a tunnel header. */
 			tdb->tdb_flags |= TDBF_USEDTUNNEL;
-#endif
 		}
 
 		/* We may be done with this TDB */
@@ -297,6 +308,62 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 		ip6 = mtod(m, struct ip6_hdr *);
 		i = sizeof(struct ip6_hdr);
 		off = offsetof(struct ip6_hdr, ip6_nxt);
+		nxt = ip6->ip6_nxt;
+		/*
+		 * chase mbuf chain to find the appropriate place to
+		 * put AH/ESP/IPcomp header.
+		 *	IPv6 hbh dest1 rthdr ah* [esp* dest2 payload]
+		 */
+		do {
+			switch (nxt) {
+			case IPPROTO_AH:
+			case IPPROTO_ESP:
+			case IPPROTO_IPCOMP:
+				/*
+				 * we should not skip security header added
+				 * beforehand.
+				 */
+				goto exitip6loop;
+
+			case IPPROTO_HOPOPTS:
+			case IPPROTO_DSTOPTS:
+			case IPPROTO_ROUTING:
+				/*
+				 * if we see 2nd destination option header,
+				 * we should stop there.
+				 */
+				if (nxt == IPPROTO_DSTOPTS && dstopt)
+					goto exitip6loop;
+
+				if (nxt == IPPROTO_DSTOPTS) {
+					/*
+					 * seen 1st or 2nd destination option.
+					 * next time we see one, it must be 2nd.
+					 */
+					dstopt = 1;
+				} else if (nxt == IPPROTO_ROUTING) {
+					/*
+					 * if we see destionation option next
+					 * time, it must be dest2.
+					 */
+					dstopt = 2;
+				}
+
+				/* skip this header */
+				m_copydata(m, i, sizeof(ip6e), (caddr_t)&ip6e);
+				nxt = ip6e.ip6e_nxt;
+				off = i + offsetof(struct ip6_ext, ip6e_nxt);
+				/*
+				 * we will never see nxt == IPPROTO_AH
+				 * so it is safe to omit AH case.
+				 */
+				i += (ip6e.ip6e_len + 1) << 3;
+				break;
+			default:
+				goto exitip6loop;
+			}
+		} while (i < m->m_pkthdr.len);
+	exitip6loop:;
 		break;
 #endif /* INET6 */
 	}
@@ -428,6 +495,12 @@ ipsp_process_done(struct mbuf *m, struct tdb *tdb)
 		return ipsp_process_packet(m, tdb->tdb_onext,
 		    tdb->tdb_dst.sa.sa_family, 0);
 
+#if NPF > 0
+	/* Add pf tag if requested. */
+	if (pf_tag_packet(m, NULL, tdb->tdb_tag, -1))
+		DPRINTF(("failed to tag ipsec packet\n"));
+#endif
+
 	/*
 	 * We're done with IPsec processing, transmit the packet using the
 	 * appropriate network protocol (IP or IPv6). SPD lookup will be
@@ -538,6 +611,10 @@ ipsec_adjust_mtu(struct mbuf *m, u_int32_t mtu)
 		mtu -= adjust;
 		tdbp->tdb_mtu = mtu;
 		tdbp->tdb_mtutimeout = time_second + ip_mtudisc_timeout;
+		DPRINTF(("ipsec_adjust_mtu: "
+		    "spi %08x mtu %d adjust %d mbuf %p\n",
+		    ntohl(tdbp->tdb_spi), tdbp->tdb_mtu,
+		    adjust, m));
 	}
 
 	splx(s);

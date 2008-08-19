@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_we.c,v 1.14 2006/07/29 11:31:21 miod Exp $	*/
+/*	$OpenBSD: if_we.c,v 1.17 2006/10/20 17:02:24 brad Exp $	*/
 /*	$NetBSD: if_we.c,v 1.11 1998/07/05 06:49:14 jonathan Exp $	*/
 
 /*-
@@ -71,20 +71,12 @@
 #include <net/if_types.h>
 #include <net/if_media.h>
 
-#ifdef __NetBSD__
-#include <net/if_ether.h>
-#endif
-
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h> 
 #include <netinet/ip.h>
-#ifdef __NetBSD__
-#include <netinet/if_inarp.h> 
-#else
 #include <netinet/if_ether.h>
-#endif
 #endif 
 
 #if NBPFILTER > 0
@@ -137,13 +129,9 @@ struct cfattach we_isapnp_ca = {
 };
 #endif /* NWE_ISAPNP */
 
-#ifdef __NetBSD__
-extern struct cfdriver we_cd;
-#else
 struct cfdriver we_cd = {
 	NULL, "we", DV_IFNET
 };
-#endif
 
 const char *we_params(bus_space_tag_t, bus_space_handle_t, u_int8_t *,
 	    bus_size_t *, int *, int *);
@@ -205,9 +193,7 @@ do { \
 } while (0)
 
 int
-we_probe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+we_probe(struct device *parent, void *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	struct cfdata *cf = match;
@@ -350,9 +336,7 @@ we_probe(parent, match, aux)
 }
 
 void
-we_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+we_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct we_softc *wsc = (struct we_softc *)self;
 	struct dp8390_softc *sc = &wsc->sc_dp8390;
@@ -363,6 +347,8 @@ we_attach(parent, self, aux)
 	u_int8_t x;
 	int i;
 
+	printf("\n");
+
 	nict = asict = ia->ia_iot;
 	memt = ia->ia_memt;
 
@@ -370,20 +356,23 @@ we_attach(parent, self, aux)
 	if (!strcmp(parent->dv_cfdata->cf_driver->cd_name, "isapnp") && ia->ia_ioh)
 		asich = ia->ia_ioh;
 	else if (bus_space_map(asict, ia->ia_iobase, WE_NPORTS, 0, &asich)) {
-		printf(": can't map nic i/o space\n");
+		printf("%s: can't map nic i/o space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	if (bus_space_subregion(asict, asich, WE_NIC_OFFSET, WE_NIC_NPORTS,
 	    &nich)) {
-		printf(": can't subregion i/o space\n");
+		printf("%s: can't subregion i/o space\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
 	typestr = we_params(asict, asich, &wsc->sc_type, NULL,
 	    &wsc->sc_16bitp, &sc->is790);
 	if (typestr == NULL) {
-		printf(": where did the card go?\n");
+		printf("%s: where did the card go?\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -394,7 +383,8 @@ we_attach(parent, self, aux)
 	if (!strcmp(parent->dv_cfdata->cf_driver->cd_name, "isapnp") && ia->ia_memh)
 		memh = ia->ia_memh;
 	else if (bus_space_map(memt, ia->ia_maddr, ia->ia_msize, 0, &memh)) {
-		printf(": can't map shared memory\n");
+		printf("%s: can't map shared memory\n",
+		    sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -424,16 +414,13 @@ we_attach(parent, self, aux)
 
 	/* Now we can use the NIC_{GET,PUT}() macros. */
 
-	printf(": %s (%s-bit)\n", typestr, wsc->sc_16bitp ? "16" : "8");
+	printf("%s: %s (%s-bit)", sc->sc_dev.dv_xname, typestr,
+	    wsc->sc_16bitp ? "16" : "8");
 
 	/* Get station address from EEPROM. */
 	for (i = 0; i < ETHER_ADDR_LEN; i++)
-#ifdef __NetBSD__
-		sc->sc_enaddr[i] = bus_space_read_1(asict, asich, WE_PROM + i);
-#else
 		sc->sc_arpcom.ac_enaddr[i] =
 		    bus_space_read_1(asict, asich, WE_PROM + i);
-#endif
 
 	/*
 	 * Set upper address bits and 8/16 bit access to shared memory.
@@ -523,7 +510,7 @@ we_attach(parent, self, aux)
 	else
 		sc->sc_media_init = dp8390_media_init;
 	if (dp8390_config(sc)) {
-		printf("%s: configuration failed\n", sc->sc_dev.dv_xname);
+		printf(": configuration failed\n");
 		return;
 	}
 
@@ -565,8 +552,7 @@ we_attach(parent, self, aux)
 }
 
 int
-we_test_mem(sc)
-	struct dp8390_softc *sc;
+we_test_mem(struct dp8390_softc *sc)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 	bus_space_tag_t memt = sc->sc_buft;
@@ -606,11 +592,7 @@ we_test_mem(sc)
  * up to a word - ok as long as mbufs are word-sized.
  */
 __inline void
-we_readmem(wsc, from, to, len)
-	struct we_softc *wsc;
-	int from;
-	u_int8_t *to;
-	int len;
+we_readmem(struct we_softc *wsc, int from, u_int8_t *to, int len)
 {
 	bus_space_tag_t memt = wsc->sc_dp8390.sc_buft;
 	bus_space_handle_t memh = wsc->sc_dp8390.sc_bufh;
@@ -627,10 +609,7 @@ we_readmem(wsc, from, to, len)
 }
 
 int
-we_write_mbuf(sc, m, buf)
-	struct dp8390_softc *sc;
-	struct mbuf *m;
-	int buf;
+we_write_mbuf(struct dp8390_softc *sc, struct mbuf *m, int buf)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 	bus_space_tag_t memt = wsc->sc_dp8390.sc_buft;
@@ -724,11 +703,7 @@ we_write_mbuf(sc, m, buf)
 }
 
 int
-we_ring_copy(sc, src, dst, amount)
-	struct dp8390_softc *sc;
-	int src;
-	caddr_t dst;
-	u_short amount;
+we_ring_copy(struct dp8390_softc *sc, int src, caddr_t dst, u_short amount)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 	u_short tmp_amount;
@@ -751,10 +726,8 @@ we_ring_copy(sc, src, dst, amount)
 }
 
 void
-we_read_hdr(sc, packet_ptr, packet_hdrp)
-	struct dp8390_softc *sc;
-	int packet_ptr;
-	struct dp8390_ring *packet_hdrp;
+we_read_hdr(struct dp8390_softc *sc, int packet_ptr,
+    struct dp8390_ring *packet_hdrp)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 
@@ -766,8 +739,7 @@ we_read_hdr(sc, packet_ptr, packet_hdrp)
 }
 
 void
-we_recv_int(sc)
-	struct dp8390_softc *sc;
+we_recv_int(struct dp8390_softc *sc)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 
@@ -809,8 +781,7 @@ we_media_init(struct dp8390_softc *sc)
 }
 
 int
-we_mediachange(sc)
-	struct dp8390_softc *sc;
+we_mediachange(struct dp8390_softc *sc)
 {
 
 	/*
@@ -823,9 +794,7 @@ we_mediachange(sc)
 }
 
 void
-we_mediastatus(sc, ifmr)
-	struct dp8390_softc *sc;
-	struct ifmediareq *ifmr;
+we_mediastatus(struct dp8390_softc *sc, struct ifmediareq *ifmr)
 {
 	struct ifmedia *ifm = &sc->sc_media;
 
@@ -836,8 +805,7 @@ we_mediastatus(sc, ifmr)
 }
 
 void
-we_init_card(sc)
-	struct dp8390_softc *sc;
+we_init_card(struct dp8390_softc *sc)
 {
 	struct we_softc *wsc = (struct we_softc *)sc;
 	struct ifmedia *ifm = &sc->sc_media;
@@ -846,9 +814,7 @@ we_init_card(sc)
 }
 
 void
-we_set_media(wsc, media)
-	struct we_softc *wsc;
-	int media;
+we_set_media(struct we_softc *wsc, int media)
 {
 	struct dp8390_softc *sc = &wsc->sc_dp8390;
 	bus_space_tag_t asict = wsc->sc_asict;
@@ -880,12 +846,9 @@ we_set_media(wsc, media)
 }
 
 const char *
-we_params(asict, asich, typep, memsizep, is16bitp, is790p)
-	bus_space_tag_t asict;
-	bus_space_handle_t asich;
-	u_int8_t *typep;
-	bus_size_t *memsizep;
-	int *is16bitp, *is790p;
+we_params(bus_space_tag_t asict, bus_space_handle_t asich,
+    u_int8_t *typep, bus_size_t *memsizep, int *is16bitp,
+    int *is790p)
 {
 	const char *typestr;
 	bus_size_t memsize;

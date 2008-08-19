@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm78.c,v 1.10 2006/06/19 14:40:23 kettenis Exp $	*/
+/*	$OpenBSD: lm78.c,v 1.13 2007/02/22 20:44:51 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Mark Kettenis
@@ -60,7 +60,9 @@ void lm_refresh_temp(struct lm_softc *, int);
 void lm_refresh_fanrpm(struct lm_softc *, int);
 
 void wb_refresh_sensor_data(struct lm_softc *);
+void wb_w83637hf_refresh_vcore(struct lm_softc *, int);
 void wb_refresh_nvolt(struct lm_softc *, int);
+void wb_w83627ehf_refresh_nvolt(struct lm_softc *, int);
 void wb_refresh_temp(struct lm_softc *, int);
 void wb_refresh_fanrpm(struct lm_softc *, int);
 void wb_w83792d_refresh_fanrpm(struct lm_softc *, int);
@@ -88,12 +90,12 @@ struct lm_sensor lm78_sensors[] = {
 	{ "-5V", SENSOR_VOLTS_DC, 0, 0x26, lm_refresh_volt, NRFACT(100, 60) },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, lm_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, lm_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, lm_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -111,21 +113,54 @@ struct lm_sensor w83627hf_sensors[] = {
 	{ "VBAT", SENSOR_VOLTS_DC, 5, 0x51, lm_refresh_volt, RFACT_NONE },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
-	{ "Temp3", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
+
+	{ NULL }
+};
+
+/*
+ * The W83627EHF can measure voltages up to 2.048 V instead of the
+ * traditional 4.096 V.  For measuring positive voltages, this can be
+ * accounted for by halving the resistor factor.  Negative voltages
+ * need special treatment, also because the reference voltage is 2.048 V
+ * instead of the traditional 3.6 V.
+ */
+struct lm_sensor w83627ehf_sensors[] = {
+	/* Voltage */
+	{ "VCore", SENSOR_VOLTS_DC, 0, 0x20, lm_refresh_volt, RFACT_NONE / 2},
+	{ "+12V", SENSOR_VOLTS_DC, 0, 0x21, lm_refresh_volt, RFACT(56, 10) / 2 },
+	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x22, lm_refresh_volt, RFACT(34, 34) / 2 },
+	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x23, lm_refresh_volt, RFACT(34, 24) / 2 },
+	{ "-12V", SENSOR_VOLTS_DC, 0, 0x24, wb_w83627ehf_refresh_nvolt },
+	{ "", SENSOR_VOLTS_DC, 0, 0x25, lm_refresh_volt, RFACT_NONE / 2 },
+	{ "", SENSOR_VOLTS_DC, 0, 0x26, lm_refresh_volt, RFACT_NONE / 2 },
+	{ "3.3VSB", SENSOR_VOLTS_DC, 5, 0x50, lm_refresh_volt, RFACT(34, 34) / 2 },
+	{ "VBAT", SENSOR_VOLTS_DC, 5, 0x51, lm_refresh_volt, RFACT_NONE / 2 },
+	{ "", SENSOR_VOLTS_DC, 5, 0x52, lm_refresh_volt, RFACT_NONE / 2 },
+
+	/* Temperature */
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
+
+	/* Fans */
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
 
 	{ NULL }
 };
 
 struct lm_sensor w83637hf_sensors[] = {
 	/* Voltage */
-	{ "VCore", SENSOR_VOLTS_DC, 0, 0x20, lm_refresh_volt, RFACT_NONE },
+	{ "VCore", SENSOR_VOLTS_DC, 0, 0x20, wb_w83637hf_refresh_vcore },
 	{ "+12V", SENSOR_VOLTS_DC, 0, 0x21, lm_refresh_volt, RFACT(28, 10) },
 	{ "+3.3V", SENSOR_VOLTS_DC, 0, 0x22, lm_refresh_volt, RFACT_NONE },
 	{ "+5V", SENSOR_VOLTS_DC, 0, 0x23, lm_refresh_volt, RFACT(34, 51) },
@@ -134,14 +169,14 @@ struct lm_sensor w83637hf_sensors[] = {
 	{ "VBAT", SENSOR_VOLTS_DC, 5, 0x51, lm_refresh_volt, RFACT_NONE },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
-	{ "Temp3", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -158,12 +193,12 @@ struct lm_sensor w83697hf_sensors[] = {
 	{ "VBAT", SENSOR_VOLTS_DC, 5, 0x51, lm_refresh_volt, RFACT_NONE },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -184,14 +219,14 @@ struct lm_sensor w83781d_sensors[] = {
 	{ "-5V", SENSOR_VOLTS_DC, 0, 0x26, lm_refresh_volt, NRFACT(909, 604) },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
-	{ "Temp3", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, lm_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, lm_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, lm_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -209,14 +244,14 @@ struct lm_sensor w83782d_sensors[] = {
 	{ "VBAT", SENSOR_VOLTS_DC, 5, 0x51, lm_refresh_volt, RFACT_NONE },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
-	{ "Temp3", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 2, 0x50, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -231,13 +266,13 @@ struct lm_sensor w83783s_sensors[] = {
 	{ "-5V", SENSOR_VOLTS_DC, 0, 0x26, wb_refresh_nvolt, RFACT(120, 56) },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -256,16 +291,16 @@ struct lm_sensor w83791d_sensors[] = {
 	{ "VINR1", SENSOR_VOLTS_DC, 0, 0xb2, lm_refresh_volt, RFACT_NONE },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 0, 0xc0, wb_refresh_temp },
-	{ "Temp3", SENSOR_TEMP, 0, 0xc8, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0xc0, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0xc8, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
-	{ "Fan4", SENSOR_FANRPM, 0, 0xba, wb_refresh_fanrpm },
-	{ "Fan5", SENSOR_FANRPM, 0, 0xbb, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0xba, wb_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0xbb, wb_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -283,18 +318,18 @@ struct lm_sensor w83792d_sensors[] = {
 	{ "VBAT", SENSOR_VOLTS_DC, 0, 0xb1, lm_refresh_volt, RFACT_NONE },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 0, 0xc0, wb_refresh_temp },
-	{ "Temp3", SENSOR_TEMP, 0, 0xc8, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0xc0, wb_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0xc8, wb_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, wb_w83792d_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, wb_w83792d_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, wb_w83792d_refresh_fanrpm },
-	{ "Fan4", SENSOR_FANRPM, 0, 0xb8, wb_w83792d_refresh_fanrpm },
-	{ "Fan5", SENSOR_FANRPM, 0, 0xb9, wb_w83792d_refresh_fanrpm },
-	{ "Fan6", SENSOR_FANRPM, 0, 0xba, wb_w83792d_refresh_fanrpm },
-	{ "Fan7", SENSOR_FANRPM, 0, 0xbe, wb_w83792d_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, wb_w83792d_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, wb_w83792d_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, wb_w83792d_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0xb8, wb_w83792d_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0xb9, wb_w83792d_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0xba, wb_w83792d_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0xbe, wb_w83792d_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -310,14 +345,14 @@ struct lm_sensor as99127f_sensors[] = {
 	{ "-5V", SENSOR_VOLTS_DC, 0, 0x26, wb_refresh_nvolt, RFACT(120, 56) },
 
 	/* Temperature */
-	{ "Temp1", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
-	{ "Temp2", SENSOR_TEMP, 1, 0x50, as_refresh_temp },
-	{ "Temp3", SENSOR_TEMP, 2, 0x50, as_refresh_temp },
+	{ "", SENSOR_TEMP, 0, 0x27, lm_refresh_temp },
+	{ "", SENSOR_TEMP, 1, 0x50, as_refresh_temp },
+	{ "", SENSOR_TEMP, 2, 0x50, as_refresh_temp },
 
 	/* Fans */
-	{ "Fan1", SENSOR_FANRPM, 0, 0x28, lm_refresh_fanrpm },
-	{ "Fan2", SENSOR_FANRPM, 0, 0x29, lm_refresh_fanrpm },
-	{ "Fan3", SENSOR_FANRPM, 0, 0x2a, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x28, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x29, lm_refresh_fanrpm },
+	{ "", SENSOR_FANRPM, 0, 0x2a, lm_refresh_fanrpm },
 
 	{ NULL }
 };
@@ -347,7 +382,8 @@ lm_attach(struct lm_softc *sc)
 
 	/* Add sensors */
 	for (i = 0; i < sc->numsensors; ++i)
-		sensor_add(&sc->sensors[i]);
+		sensor_attach(&sc->sensordev, &sc->sensors[i]);
+	sensordev_install(&sc->sensordev);
 }
 
 int
@@ -356,8 +392,9 @@ lm_detach(struct lm_softc *sc)
 	int i;
 
 	/* Remove sensors */
+	sensordev_deinstall(&sc->sensordev);
 	for (i = 0; i < sc->numsensors; i++)
-		sensor_del(&sc->sensors[i]);
+		sensor_detach(&sc->sensordev, &sc->sensors[i]);
 
 	sensor_task_unregister(sc);
 
@@ -437,8 +474,16 @@ wb_match(struct lm_softc *sc)
 		printf(": W83627THF\n");
 		lm_setup_sensors(sc, w83637hf_sensors);
 		break;
+	case WB_CHIPID_W83627EHF:
+		printf(": W83627EHF\n");
+		lm_setup_sensors(sc, w83627ehf_sensors);
+		break;
 	case WB_CHIPID_W83637HF:
 		printf(": W83637HF\n");
+		sc->lm_writereg(sc, WB_BANKSEL, WB_BANKSEL_B0);
+		if (sc->lm_readreg(sc, WB_BANK0_CONFIG) & WB_CONFIG_VMR9)
+			sc->vrm9 = 1;
+		sc->lm_writereg(sc, WB_BANKSEL, banksel);
 		lm_setup_sensors(sc, w83637hf_sensors);
 		break;
 	case WB_CHIPID_W83697HF:
@@ -498,9 +543,10 @@ lm_setup_sensors(struct lm_softc *sc, struct lm_sensor *sensors)
 {
 	int i;
 
+	strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
+	    sizeof(sc->sensordev.xname));
+
 	for (i = 0; sensors[i].desc; i++) {
-		strlcpy(sc->sensors[i].device, sc->sc_dev.dv_xname,
-		    sizeof(sc->sensors[i].device));
 		sc->sensors[i].type = sensors[i].type;
 		strlcpy(sc->sensors[i].desc, sensors[i].desc,
 		    sizeof(sc->sensors[i].desc));
@@ -613,6 +659,26 @@ wb_refresh_sensor_data(struct lm_softc *sc)
 }
 
 void
+wb_w83637hf_refresh_vcore(struct lm_softc *sc, int n)
+{
+	struct sensor *sensor = &sc->sensors[n];
+	int data;
+
+	data = sc->lm_readreg(sc, sc->lm_sensors[n].reg);
+
+	/*
+	 * Depending on the voltage detection method,
+	 * one of the following formulas is used:
+	 *	VRM8 method: value = raw * 0.016V
+	 *	VRM9 method: value = raw * 0.00488V + 0.70V
+	 */
+	if (sc->vrm9)
+		sensor->value = (data * 4880) + 700000;
+	else
+		sensor->value = (data * 16000);
+}
+
+void
 wb_refresh_nvolt(struct lm_softc *sc, int n)
 {
 	struct sensor *sensor = &sc->sensors[n];
@@ -623,6 +689,19 @@ wb_refresh_nvolt(struct lm_softc *sc, int n)
 	sensor->value *= sc->lm_sensors[n].rfact;
 	sensor->value /= 10;
 	sensor->value += WB_VREF * 1000;
+}
+
+void
+wb_w83627ehf_refresh_nvolt(struct lm_softc *sc, int n)
+{
+	struct sensor *sensor = &sc->sensors[n];
+	int data;
+
+	data = sc->lm_readreg(sc, sc->lm_sensors[n].reg);
+	sensor->value = ((data << 3) - WB_W83627EHF_VREF);
+	sensor->value *= RFACT(232, 10);
+	sensor->value /= 10;
+	sensor->value += WB_W83627EHF_VREF * 1000;
 }
 
 void

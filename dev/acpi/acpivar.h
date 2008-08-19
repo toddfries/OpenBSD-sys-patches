@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.26 2006/06/30 04:16:15 jordan Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.35 2007/02/19 23:42:39 jordan Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -19,16 +19,19 @@
 #define _DEV_ACPI_ACPIVAR_H_
 
 #include <sys/timeout.h>
+#include <sys/rwlock.h>
 
 /* #define ACPI_DEBUG */
 #ifdef ACPI_DEBUG
 extern int acpi_debug;
-#define dprintf(x...)	  do { if (acpi_debug) printf(x); } while(0)
-#define dnprintf(n,x...)  do { if (acpi_debug > (n)) printf(x); } while(0)
+#define dprintf(x...)	  do { if (acpi_debug) printf(x); } while (0)
+#define dnprintf(n,x...)  do { if (acpi_debug > (n)) printf(x); } while (0)
 #else
 #define dprintf(x...)
 #define dnprintf(n,x...)
 #endif
+
+extern int acpi_hasprocfvs;
 
 struct klist;
 struct acpiec_softc;
@@ -99,11 +102,34 @@ struct acpi_thread {
 	volatile int	    running;
 };
 
+struct acpi_mutex {
+	struct rwlock		amt_lock;
+#define ACPI_MTX_MAXNAME	5
+	char			amt_name[ACPI_MTX_MAXNAME + 3]; /* only 4 used */
+	int			amt_ref_count;
+	int			amt_timeout;
+	int			amt_synclevel;
+};
+
 struct gpe_block {
 	int  (*handler)(struct acpi_softc *, int, void *);
 	void *arg;
 	int   active;
 };
+
+struct acpi_ac {
+	struct acpiac_softc	*aac_softc;
+	SLIST_ENTRY(acpi_ac)	aac_link;
+};
+
+SLIST_HEAD(acpi_ac_head, acpi_ac);
+
+struct acpi_bat {
+	struct acpibat_softc	*aba_softc;
+	SLIST_ENTRY(acpi_bat)	aba_link;
+};
+
+SLIST_HEAD(acpi_bat_head, acpi_bat);
 
 struct acpi_softc {
 	struct device		sc_dev;
@@ -129,7 +155,7 @@ struct acpi_softc {
 	struct klist		*sc_note;
 	struct acpi_reg_map	sc_pmregs[ACPIREG_MAXREG];
 	bus_space_handle_t	sc_ioh_pm1a_evt;
-  
+
 	void			*sc_interrupt;
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	void			*sc_softih;
@@ -139,18 +165,11 @@ struct acpi_softc {
 
 	int			sc_powerbtn;
 	int			sc_sleepbtn;
-  	u_int32_t		sc_gpemask;
 
 	struct {
 		int slp_typa;
 		int slp_typb;
 	}			sc_sleeptype[6];
-
-  	struct {
-		int             gpe_type;
-	  	int		gpe_number;
-		struct aml_node *gpe_handler;
-	}			sc_gpes[256];
 	int			sc_maxgpe;
         int                     sc_lastgpe;
 
@@ -160,15 +179,20 @@ struct acpi_softc {
 	u_int32_t		sc_gpe_sts;
 	u_int32_t		sc_gpe_en;
 	struct acpi_thread	*sc_thread;
-	
+
 	struct aml_node		*sc_tts;
 	struct aml_node		*sc_pts;
 	struct aml_node		*sc_bfs;
 	struct aml_node		*sc_gts;
 	struct aml_node		*sc_wak;
-	int 			sc_state;
+	int			sc_state;
 	struct acpiec_softc	*sc_ec;		/* XXX assume single EC */
-	u_int32_t		sc_ec_gpemask;
+
+	struct acpi_ac_head	sc_ac;
+	struct acpi_bat_head	sc_bat;
+
+	struct timeout		sc_dev_timeout;
+	int			sc_poll;
 };
 
 #define GPE_NONE  0x00
@@ -195,6 +219,10 @@ struct acpi_table {
 #define	ACPI_EVENT_INDEX(e)	((e) >> 16)
 
 #if defined(_KERNEL)
+struct   acpi_gas;
+int	 acpi_map_address(struct acpi_softc *, struct acpi_gas *, bus_addr_t, bus_size_t,
+			  bus_space_handle_t *, bus_space_tag_t *);
+
 int	 acpi_map(paddr_t, size_t, struct acpi_mem_map *);
 void	 acpi_unmap(struct acpi_mem_map *);
 int	 acpi_probe(struct device *, struct cfdata *, struct acpi_attach_args *);
@@ -221,6 +249,8 @@ void	acpiec_handle_events(struct acpiec_softc *);
 
 int	acpi_read_pmreg(struct acpi_softc *, int, int);
 void	acpi_write_pmreg(struct acpi_softc *, int, int, int);
+
+void	acpi_poll(void *);
 #endif
 
 #endif	/* !_DEV_ACPI_ACPIVAR_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_trace.c,v 1.11 2006/05/11 13:21:11 mickey Exp $	*/
+/*	$OpenBSD: db_trace.c,v 1.13 2006/11/28 18:56:17 uwe Exp $	*/
 /*	$NetBSD: db_trace.c,v 1.18 1996/05/03 19:42:01 christos Exp $	*/
 
 /*
@@ -30,6 +30,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/user.h>
 
 #include <machine/db_machdep.h>
 
@@ -89,7 +90,7 @@ void db_nextframe(struct i386_frame **, db_addr_t *, int *, int,
     int (*pr)(const char *, ...));
 
 void
-db_find_trace_symbols()
+db_find_trace_symbols(void)
 {
 	db_expr_t	value;
 
@@ -106,8 +107,7 @@ db_find_trace_symbols()
  * Figure out how many arguments were passed into the frame at "fp".
  */
 int
-db_numargs(fp)
-	struct i386_frame *fp;
+db_numargs(struct i386_frame *fp)
 {
 	int	*argp;
 	int	inst;
@@ -140,12 +140,8 @@ db_numargs(fp)
  *   of the function that faulted, but that could get hairy.
  */
 void
-db_nextframe(fp, ip, argp, is_trap, pr)
-	struct i386_frame **fp;		/* in/out */
-	db_addr_t	*ip;		/* out */
-	int *argp;			/* in */
-	int is_trap;			/* in */
-	int (*pr)(const char *, ...);
+db_nextframe(struct i386_frame **fp, db_addr_t	*ip, int *argp, int is_trap,
+    int (*pr)(const char *, ...))
 {
 
 	switch (is_trap) {
@@ -180,12 +176,8 @@ db_nextframe(fp, ip, argp, is_trap, pr)
 }
 
 void
-db_stack_trace_print(addr, have_addr, count, modif, pr)
-	db_expr_t	addr;
-	boolean_t	have_addr;
-	db_expr_t	count;
-	char		*modif;
-	int		(*pr)(const char *, ...);
+db_stack_trace_print(db_expr_t addr, boolean_t have_addr, db_expr_t count,
+    char *modif, int (*pr)(const char *, ...))
 {
 	struct i386_frame *frame, *lastframe;
 	int		*argp;
@@ -193,6 +185,7 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 	int		is_trap = 0;
 	boolean_t	kernel_only = TRUE;
 	boolean_t	trace_thread = FALSE;
+	boolean_t	trace_proc = FALSE;
 
 #if 0
 	if (!db_trace_symbols_found)
@@ -200,12 +193,14 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 #endif
 
 	{
-		register char *cp = modif;
-		register char c;
+		char *cp = modif;
+		char c;
 
 		while ((c = *cp++) != 0) {
 			if (c == 't')
 				trace_thread = TRUE;
+			if (c == 'p')
+				trace_proc = TRUE;
 			if (c == 'u')
 				kernel_only = FALSE;
 		}
@@ -219,6 +214,15 @@ db_stack_trace_print(addr, have_addr, count, modif, pr)
 		callpc = (db_addr_t)ddb_regs.tf_eip;
 	} else if (trace_thread) {
 		(*pr) ("db_trace.c: can't trace thread\n");
+	} else if (trace_proc) {
+		struct proc *p = pfind((pid_t)addr);
+		if (p == NULL) {
+			(*pr) ("db_trace.c: process not found\n");
+			return;
+		}
+		frame = (struct i386_frame *)p->p_addr->u_pcb.pcb_ebp;
+		callpc = (db_addr_t)
+		    db_get_value((int)&frame->f_retaddr, 4, FALSE);
 	} else {
 		frame = (struct i386_frame *)addr;
 		callpc = (db_addr_t)

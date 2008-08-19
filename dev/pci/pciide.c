@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.254 2006/09/16 00:46:56 jsg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.262 2006/11/21 21:48:54 brad Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -170,6 +170,7 @@ void piix_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void piixsata_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void piix_setup_channel(struct channel_softc *);
 void piix3_4_setup_channel(struct channel_softc *);
+void piix_timing_debug(struct pciide_softc *);
 
 static u_int32_t piix_setup_idetim_timings(u_int8_t, u_int8_t, u_int8_t);
 static u_int32_t piix_setup_idetim_drvs(struct ata_drive_datas *);
@@ -315,6 +316,10 @@ const struct pciide_product_desc default_product_desc = {
 };
 
 const struct pciide_product_desc pciide_intel_products[] =  {
+	{ PCI_PRODUCT_INTEL_31244,	/* Intel 31244 SATA */
+	  0,
+	  artisea_chip_map
+	},
 	{ PCI_PRODUCT_INTEL_82092AA,	/* Intel 82092AA IDE */
 	  0,
 	  default_chip_map
@@ -399,12 +404,6 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piixsata_chip_map
 	},
-#ifdef notyet
-	{ PCI_PRODUCT_INTEL_31244,	 /* Intel 31244 SATA */
-	  0,
-	  artisea_chip_map
-	},
-#endif
 	{ PCI_PRODUCT_INTEL_6300ESB_IDE, /* Intel 6300ESB IDE */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piix_chip_map
@@ -513,6 +512,10 @@ const struct pciide_product_desc pciide_amd_products[] =  {
 	  amd756_chip_map
 	},
 	{ PCI_PRODUCT_AMD_8111_IDE,
+	  0,
+	  amd756_chip_map
+	},
+	{ PCI_PRODUCT_AMD_CS5536_IDE,
 	  0,
 	  amd756_chip_map
 	}
@@ -852,11 +855,11 @@ const struct pciide_product_desc pciide_serverworks_products[] =  {
 	  0,
 	  svwsata_chip_map,
 	},
-	{ PCI_PRODUCT_RCC_HT_1000_SATA,
+	{ PCI_PRODUCT_RCC_HT_1000_SATA_1,
 	  0,
 	  svwsata_chip_map,
 	},
-	{ PCI_PRODUCT_RCC_SATA,
+	{ PCI_PRODUCT_RCC_HT_1000_SATA_2,
 	  0,
 	  svwsata_chip_map,
 	}
@@ -904,6 +907,10 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	  nforce_chip_map
 	},
 	{ PCI_PRODUCT_NVIDIA_MCP65_IDE,
+	  0,
+	  nforce_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP67_IDE,
 	  0,
 	  nforce_chip_map
 	},
@@ -976,6 +983,22 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_NVIDIA_MCP65_SATA4,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA2,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA3,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA4,
 	  0,
 	  sata_chip_map
 	}
@@ -1623,7 +1646,7 @@ pciide_dma_init(void *v, int channel, int drive, void *databuf,
 	    dma_maps->dmamap_xfer,
 	    databuf, datalen, NULL, BUS_DMA_NOWAIT|BUS_DMA_RAW);
 	if (error) {
-		printf("%s:%d: unable to load xfer DMA map for"
+		printf("%s:%d: unable to load xfer DMA map for "
 		    "drive %d, error=%d\n", sc->sc_wdcdev.sc_dev.dv_xname,
 		    channel, drive, error);
 		return (error);
@@ -2114,6 +2137,45 @@ sata_setup_channel(struct channel_softc *chp)
 }
 
 void
+piix_timing_debug(struct pciide_softc *sc)
+{
+	WDCDEBUG_PRINT(("piix_setup_chip: idetim=0x%x",
+	    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_IDETIM)),
+	    DEBUG_PROBE);
+	if (sc->sc_pp->ide_product != PCI_PRODUCT_INTEL_82371FB_IDE &&
+	    sc->sc_pp->ide_product != PCI_PRODUCT_INTEL_82371FB_ISA) {
+		WDCDEBUG_PRINT((", sidetim=0x%x",
+		    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_SIDETIM)),
+		    DEBUG_PROBE);
+		if (sc->sc_wdcdev.cap & WDC_CAPABILITY_UDMA) {
+			WDCDEBUG_PRINT((", udamreg 0x%x",
+			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_UDMAREG)),
+			    DEBUG_PROBE);
+		}
+		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6321ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BA_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CAM_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CA_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBL_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBM_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82372FB_IDE) {
+			WDCDEBUG_PRINT((", IDE_CONTROL 0x%x",
+			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_CONFIG)),
+			    DEBUG_PROBE);
+		}
+	}
+	WDCDEBUG_PRINT(("\n"), DEBUG_PROBE);
+}
+
+void
 piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 {
 	struct pciide_channel *cp;
@@ -2190,41 +2252,7 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 
 	pciide_print_channels(sc->sc_wdcdev.nchannels, interface);
 
-	WDCDEBUG_PRINT(("piix_setup_chip: old idetim=0x%x",
-	    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_IDETIM)),
-	    DEBUG_PROBE);
-	if (sc->sc_pp->ide_product != PCI_PRODUCT_INTEL_82371FB_IDE &&
-	    sc->sc_pp->ide_product != PCI_PRODUCT_INTEL_82371FB_ISA) {
-		WDCDEBUG_PRINT((", sidetim=0x%x",
-		    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_SIDETIM)),
-		    DEBUG_PROBE);
-		if (sc->sc_wdcdev.cap & WDC_CAPABILITY_UDMA) {
-			WDCDEBUG_PRINT((", udamreg 0x%x",
-			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_UDMAREG)),
-			    DEBUG_PROBE);
-		}
-		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6321ESB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BA_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CAM_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CA_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBL_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBM_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82372FB_IDE) {
-			WDCDEBUG_PRINT((", IDE_CONTROL 0x%x",
-			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_CONFIG)),
-			    DEBUG_PROBE);
-		}
-
-	}
-	WDCDEBUG_PRINT(("\n"), DEBUG_PROBE);
+	piix_timing_debug(sc);
 
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
@@ -2260,40 +2288,7 @@ next:
 			pciide_unmap_compat_intr(pa, cp, channel, 0);
 	}
 
-	WDCDEBUG_PRINT(("piix_setup_chip: idetim=0x%x",
-	    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_IDETIM)),
-	    DEBUG_PROBE);
-	if (sc->sc_pp->ide_product != PCI_PRODUCT_INTEL_82371FB_IDE &&
-	    sc->sc_pp->ide_product != PCI_PRODUCT_INTEL_82371FB_ISA) {
-		WDCDEBUG_PRINT((", sidetim=0x%x",
-		    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_SIDETIM)),
-		    DEBUG_PROBE);
-		if (sc->sc_wdcdev.cap & WDC_CAPABILITY_UDMA) {
-			WDCDEBUG_PRINT((", udamreg 0x%x",
-			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_UDMAREG)),
-			    DEBUG_PROBE);
-		}
-		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6321ESB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BA_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CAM_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CA_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBL_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBM_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82372FB_IDE) {
-			WDCDEBUG_PRINT((", IDE_CONTROL 0x%x",
-			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_CONFIG)),
-			    DEBUG_PROBE);
-		}
-	}
-	WDCDEBUG_PRINT(("\n"), DEBUG_PROBE);
+	piix_timing_debug(sc);
 }
 
 void
@@ -2335,24 +2330,8 @@ piixsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	case PCI_PRODUCT_INTEL_82801FBM_SATA:
 		ich = 6;
 		break;
-	case PCI_PRODUCT_INTEL_82801GB_SATA:
-	case PCI_PRODUCT_INTEL_82801GR_SATA:
-	case PCI_PRODUCT_INTEL_82801GR_AHCI:
-	case PCI_PRODUCT_INTEL_82801GBM_SATA:
-	case PCI_PRODUCT_INTEL_82801GBM_AHCI:
-	case PCI_PRODUCT_INTEL_82801GHM_RAID:
-		ich = 7;
-		break;
-	case PCI_PRODUCT_INTEL_82801H_SATA_1_6P:
-	case PCI_PRODUCT_INTEL_82801H_AHCI:
-	case PCI_PRODUCT_INTEL_82801H_RAID:
-	case PCI_PRODUCT_INTEL_82801H_SATA_1_4P:
-	case PCI_PRODUCT_INTEL_82801H_SATA_2:
-	case PCI_PRODUCT_INTEL_82801HBM_SATA_1:
-	case PCI_PRODUCT_INTEL_82801HBM_SATA_2:
-	case PCI_PRODUCT_INTEL_6321ESB_SATA:
 	default:
-		ich = 8;
+		ich = 7;
 		break;
 	}
 
@@ -7808,18 +7787,8 @@ nforce_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	case PCI_PRODUCT_NVIDIA_NFORCE_IDE:
 		sc->sc_wdcdev.UDMA_cap = 5;
 		break;
-	case PCI_PRODUCT_NVIDIA_NFORCE2_IDE:
-	case PCI_PRODUCT_NVIDIA_NFORCE2_400_IDE:
-	case PCI_PRODUCT_NVIDIA_NFORCE3_IDE:
-	case PCI_PRODUCT_NVIDIA_NFORCE3_250_IDE:
-	case PCI_PRODUCT_NVIDIA_NFORCE4_ATA133:
-	case PCI_PRODUCT_NVIDIA_MCP04_IDE:
-	case PCI_PRODUCT_NVIDIA_MCP51_IDE:
-	case PCI_PRODUCT_NVIDIA_MCP55_IDE:
-		sc->sc_wdcdev.UDMA_cap = 6;
-		break;
 	default:
-		sc->sc_wdcdev.UDMA_cap = 0;
+		sc->sc_wdcdev.UDMA_cap = 6;
 	}
 	sc->sc_wdcdev.set_modes = nforce_setup_channel;
 	sc->sc_wdcdev.channels = sc->wdc_chanarray;
@@ -7986,7 +7955,6 @@ nforce_pci_intr(void *arg)
 	return (rv);
 }
 
-#ifdef notyet
 void
 artisea_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 {
@@ -7995,9 +7963,8 @@ artisea_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface;
 	int channel;
 
-	printf("%s: DMA",
-	    sc->sc_wdcdev.sc_dev.dv_xname);
-#ifndef PCIIDE_I31244_ENABLEDMA
+	printf(": DMA");
+#ifdef PCIIDE_I31244_DISABLEDMA
 	if (sc->sc_rev == 0) {
 		printf(" disabled due to rev. 0");
 		sc->sc_dma_ok = 0;
@@ -8039,7 +8006,6 @@ artisea_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		sata_setup_channel(&cp->wdc_channel);
 	}
 }
-#endif
 
 void
 ite_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)

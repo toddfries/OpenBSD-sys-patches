@@ -1,4 +1,4 @@
-/*	$OpenBSD: mii_physubr.c,v 1.27 2005/11/06 21:46:18 brad Exp $	*/
+/*	$OpenBSD: mii_physubr.c,v 1.32 2007/02/10 22:36:18 kettenis Exp $	*/
 /*	$NetBSD: mii_physubr.c,v 1.20 2001/04/13 23:30:09 thorpej Exp $	*/
 
 /*-
@@ -147,12 +147,27 @@ mii_phy_auto(struct mii_softc *sc, int waitfor)
 			if (sc->mii_extcapabilities & EXTSR_1000XHDX)
 				anar |= ANAR_X_HD;
 
+			if (sc->mii_flags & MIIF_DOPAUSE &&
+			    sc->mii_extcapabilities & EXTSR_1000XFDX)
+				anar |= ANAR_X_PAUSE_TOWARDS;
+
 			PHY_WRITE(sc, MII_ANAR, anar);
 		} else {
 			uint16_t anar;
 
 			anar = BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) |
 			    ANAR_CSMA;
+			/* 
+			 * Most 100baseTX PHY's only support symmetric
+			 * PAUSE, so we don't advertise asymmetric
+			 * PAUSE unless we also have 1000baseT capability.
+			 */
+			if (sc->mii_flags & MIIF_DOPAUSE) {
+				if (sc->mii_capabilities & BMSR_100TXFDX)
+					anar |= ANAR_FC;
+				if (sc->mii_extcapabilities & EXTSR_1000TFDX)
+					anar |= ANAR_PAUSE_TOWARDS;
+			}
 			PHY_WRITE(sc, MII_ANAR, anar);
 			if (sc->mii_flags & MIIF_HAVE_GTCR) {
 				uint16_t gtcr = 0;
@@ -350,9 +365,14 @@ mii_phy_statusmsg(struct mii_softc *sc)
 	int baudrate, link_state, announce = 0;
 
 	if (mii->mii_media_status & IFM_AVALID) {
-		if (mii->mii_media_status & IFM_ACTIVE)
-			link_state = LINK_STATE_UP;
-		else
+		if (mii->mii_media_status & IFM_ACTIVE) {
+			if (mii->mii_media_active & IFM_FDX)
+				link_state = LINK_STATE_FULL_DUPLEX;
+			else if (mii->mii_media_active & IFM_HDX)
+				link_state = LINK_STATE_HALF_DUPLEX;
+			else
+				link_state = LINK_STATE_UP;
+		} else
 			link_state = LINK_STATE_DOWN;
 	} else
 		link_state = LINK_STATE_UNKNOWN;
@@ -511,6 +531,57 @@ mii_phy_match(const struct mii_attach_args *ma, const struct mii_phydesc *mpd)
 			return (mpd);
 	}
 	return (NULL);
+}
+
+/*
+ * Return the flow control status flag from MII_ANAR & MII_ANLPAR.
+ */
+int
+mii_phy_flowstatus(struct mii_softc *sc)
+{
+	int anar, anlpar;
+
+	if ((sc->mii_flags & MIIF_DOPAUSE) == 0)
+		return (0);
+
+	anar = PHY_READ(sc, MII_ANAR);
+	anlpar = PHY_READ(sc, MII_ANLPAR);
+
+	/* For 1000baseX, the bits are in a different location. */
+	if (sc->mii_flags & MIIF_IS_1000X) {
+		anar <<= 3;
+		anlpar <<= 3;
+	}
+
+	if ((anar & ANAR_PAUSE_SYM) & (anlpar & ANLPAR_PAUSE_SYM))
+		return (IFM_FLOW|IFM_ETH_TXPAUSE|IFM_ETH_RXPAUSE);
+
+	if ((anar & ANAR_PAUSE_SYM) == 0) {
+		if ((anar & ANAR_PAUSE_ASYM) &&
+		    ((anlpar & ANLPAR_PAUSE_TOWARDS) == ANLPAR_PAUSE_TOWARDS))
+			return (IFM_FLOW|IFM_ETH_TXPAUSE);
+		else
+			return (0);
+	}
+
+	if ((anar & ANAR_PAUSE_ASYM) == 0) {
+		if (anlpar & ANLPAR_PAUSE_SYM)
+			return (IFM_FLOW|IFM_ETH_TXPAUSE|IFM_ETH_RXPAUSE);
+		else
+			return (0);
+	}
+
+	switch ((anlpar & ANLPAR_PAUSE_TOWARDS)) {
+	case ANLPAR_PAUSE_NONE:
+		return (0);
+
+	case ANLPAR_PAUSE_ASYM:
+		return (IFM_FLOW|IFM_ETH_RXPAUSE);
+
+	default:
+		return (IFM_FLOW|IFM_ETH_RXPAUSE|IFM_ETH_TXPAUSE);
+	}
+	/* NOTREACHED */
 }
 
 /*

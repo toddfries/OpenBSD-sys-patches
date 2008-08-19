@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xge.c,v 1.31 2006/08/25 00:55:37 brad Exp $	*/
+/*	$OpenBSD: if_xge.c,v 1.37 2007/02/27 22:39:39 kettenis Exp $	*/
 /*	$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $	*/
 
 /*
@@ -36,11 +36,7 @@
  */
 
 /*
- * Device driver for the Neterion Xframe Ten Gigabit Ethernet controller.
- *
- * TODO (in no specific order):
- *	HW VLAN support.
- *	IPv6 HW cksum.
+ * Driver for the Neterion Xframe Ten Gigabit Ethernet controller.
  */
 
 #include <sys/cdefs.h>
@@ -49,6 +45,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $");
 #endif
 
 #include "bpfilter.h"
+#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -71,6 +68,11 @@ __KERNEL_RCSID(0, "$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $");
 #include <netinet/if_ether.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
+#endif
+
+#if NVLAN > 0
+#include <net/if_types.h>
+#include <net/if_vlan_var.h>
 #endif
 
 #if NBPFILTER > 0
@@ -155,6 +157,26 @@ static uint64_t fix_mac[] = {
 	0x0040600000000000ULL, 0x0060600000000000ULL,
 };
 
+/*
+ * Constants to be programmed into Hercules's registers, to configure
+ * the XGXS transciever.
+ */
+#define END_SIGN 0x0
+static uint64_t herc_dtx_cfg[] = {
+	0x8000051536750000ULL, 0x80000515367500E0ULL,
+	0x8000051536750004ULL, 0x80000515367500E4ULL,
+
+	0x80010515003F0000ULL, 0x80010515003F00E0ULL,
+	0x80010515003F0004ULL, 0x80010515003F00E4ULL,
+
+	0x801205150D440000ULL, 0x801205150D4400E0ULL,
+	0x801205150D440004ULL, 0x801205150D4400E4ULL,
+
+	0x80020515F2100000ULL, 0x80020515F21000E0ULL,
+	0x80020515F2100004ULL, 0x80020515F21000E4ULL,
+
+	END_SIGN
+};
 
 struct xge_softc {
 	struct device sc_dev;
@@ -189,8 +211,6 @@ struct xge_softc {
 	int sc_nextrx;			/* next descriptor to check */
 };
 
-#define XGE_DEBUG
-
 #ifdef XGE_DEBUG
 #define DPRINTF(x)	if (xgedebug) printf x
 #define DPRINTFN(n,x)	if (xgedebug >= (n)) printf x
@@ -210,7 +230,8 @@ void xge_shutdown(void *);
 int xge_add_rxbuf(struct xge_softc *, int);
 void xge_setmulti(struct xge_softc *);
 void xge_setpromisc(struct xge_softc *);
-int xge_setup_xgxs(struct xge_softc *);
+int xge_setup_xgxs_xena(struct xge_softc *);
+int xge_setup_xgxs_herc(struct xge_softc *);
 int xge_ioctl(struct ifnet *, u_long, caddr_t);
 int xge_init(struct ifnet *);
 void xge_ifmedia_status(struct ifnet *, struct ifmediareq *);
@@ -329,19 +350,16 @@ xge_attach(struct device *parent, struct device *self, void *aux)
 	pci_chipset_tag_t pc = pa->pa_pc;
 	uint8_t enaddr[ETHER_ADDR_LEN];
 	uint64_t val;
-	int i, pcisize;
+	int i;
 
 	sc = (struct xge_softc *)self;
 
 	sc->sc_dmat = pa->pa_dmat;
 
-	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_NETERION_XFRAME) {
+	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_NETERION_XFRAME)
 		sc->xge_type = XGE_TYPE_XENA;
-		pcisize = XGE_PCISIZE_XENA;
-	} else {
+	else
 		sc->xge_type = XGE_TYPE_HERC;
-		pcisize = XGE_PCISIZE_HERC;
-	}
 
 	/* Get BAR0 address */
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, XGE_PIF_BAR);
@@ -358,19 +376,17 @@ xge_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	/* Save PCI config space */
-	for (i = 0; i < pcisize; i += 4)
-		sc->sc_pciregs[i/4] = pci_conf_read(pa->pa_pc, pa->pa_tag, i);
+	if (sc->xge_type == XGE_TYPE_XENA) {
+		/* Save PCI config space */
+		for (i = 0; i < XGE_PCISIZE_XENA; i += 4)
+			sc->sc_pciregs[i/4] = pci_conf_read(pa->pa_pc, pa->pa_tag, i);
+	}
 
 #if BYTE_ORDER == LITTLE_ENDIAN
 	val = (uint64_t)0xFFFFFFFFFFFFFFFFULL;
 	val &= ~(TxF_R_SE|RxF_W_SE);
 	PIF_WCSR(SWAPPER_CTRL, val);
 	PIF_WCSR(SWAPPER_CTRL, val);
-#elif BYTE_ORDER == BIG_ENDIAN
-	/* do nothing */
-#else
-#error bad endianness!
 #endif
 
 	if ((val = PIF_RCSR(PIF_RD_SWAPPER_Fb)) != SWAPPER_MAGIC) {
@@ -380,52 +396,87 @@ xge_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/*
-	 * The MAC addr may be all FF's, which is not good.
-	 * Resolve it by writing some magics to GPIO_CONTROL and 
-	 * force a chip reset to read in the serial eeprom again.
-	 */
-	for (i = 0; i < sizeof(fix_mac)/sizeof(fix_mac[0]); i++) {
-		PIF_WCSR(GPIO_CONTROL, fix_mac[i]);
-		PIF_RCSR(GPIO_CONTROL);
-	}
+	 * Fix for all "FFs" MAC address problems observed on
+	 * Alpha platforms. Not needed for Herc.
+	 */ 
+	if (sc->xge_type == XGE_TYPE_XENA) {
+		/*
+		 * The MAC addr may be all FF's, which is not good.
+		 * Resolve it by writing some magics to GPIO_CONTROL and 
+		 * force a chip reset to read in the serial eeprom again.
+		 */
+		for (i = 0; i < sizeof(fix_mac)/sizeof(fix_mac[0]); i++) {
+			PIF_WCSR(GPIO_CONTROL, fix_mac[i]);
+			PIF_RCSR(GPIO_CONTROL);
+		}
 
-	/*
-	 * Reset the chip and restore the PCI registers.
-	 */
-	PIF_WCSR(SW_RESET, XGXS_RESET(0xA5));
-	DELAY(500000);
-	for (i = 0; i < pcisize; i += 4)
-		pci_conf_write(pa->pa_pc, pa->pa_tag, i, sc->sc_pciregs[i/4]);
+		/*
+		 * Reset the chip and restore the PCI registers.
+		 */
+		PIF_WCSR(SW_RESET, 0xa5a5a50000000000ULL);
+		DELAY(500000);
+		for (i = 0; i < XGE_PCISIZE_XENA; i += 4)
+			pci_conf_write(pa->pa_pc, pa->pa_tag, i, sc->sc_pciregs[i/4]);
 
-	/*
-	 * Restore the byte order registers.
-	 */
+		/*
+		 * Restore the byte order registers.
+		 */
 #if BYTE_ORDER == LITTLE_ENDIAN
-	val = (uint64_t)0xFFFFFFFFFFFFFFFFULL;
-	val &= ~(TxF_R_SE|RxF_W_SE);
-	PIF_WCSR(SWAPPER_CTRL, val);
-	PIF_WCSR(SWAPPER_CTRL, val);
-#elif BYTE_ORDER == BIG_ENDIAN
-	/* do nothing */
-#else
-#error bad endianness!
+		val = (uint64_t)0xFFFFFFFFFFFFFFFFULL;
+		val &= ~(TxF_R_SE|RxF_W_SE);
+		PIF_WCSR(SWAPPER_CTRL, val);
+		PIF_WCSR(SWAPPER_CTRL, val);
 #endif
 
-	if ((val = PIF_RCSR(PIF_RD_SWAPPER_Fb)) != SWAPPER_MAGIC) {
-		printf(": failed configuring endian2, %llx != %llx!\n",
-		    (unsigned long long)val, SWAPPER_MAGIC);
-		return;
+		if ((val = PIF_RCSR(PIF_RD_SWAPPER_Fb)) != SWAPPER_MAGIC) {
+			printf(": failed configuring endian2, %llx != %llx!\n",
+			    (unsigned long long)val, SWAPPER_MAGIC);
+			return;
+		}
 	}
 
 	/*
 	 * XGXS initialization.
 	 */
-	/* 29, reset */
-	PIF_WCSR(SW_RESET, 0);
+
+	/*
+	 * For Herc, bring EOI out of reset before XGXS.
+	 */
+	if (sc->xge_type == XGE_TYPE_HERC) {
+		val = PIF_RCSR(SW_RESET);
+		val &= 0xffff00ffffffffffULL;
+		PIF_WCSR(SW_RESET,val);
+		delay(1000*1000);	//wait for 1 sec
+	}
+
+	/* 29, Bring adapter out of reset */
+	val = PIF_RCSR(SW_RESET);
+	val &= 0xffffff00ffffffffULL;
+	PIF_WCSR(SW_RESET, val);
 	DELAY(500000);
 
+	/* Ensure that it's safe to access registers by checking
+	 * RIC_RUNNING bit is reset. Check is valid only for XframeII.
+	 */
+	if (sc->xge_type == XGE_TYPE_HERC){
+		for (i = 0; i < 50; i++) {
+			val = PIF_RCSR(ADAPTER_STATUS);
+			if (!(val & RIC_RUNNING))
+				break;
+			delay(20*1000);
+		}
+
+		if (i == 50) {
+			printf(": not safe to access registers\n");
+			return;
+		}
+	}
+
 	/* 30, configure XGXS transceiver */
-	xge_setup_xgxs(sc);
+	if (sc->xge_type == XGE_TYPE_XENA)
+		xge_setup_xgxs_xena(sc);
+	else if(sc->xge_type == XGE_TYPE_HERC)
+		xge_setup_xgxs_herc(sc);
 
 	/* 33, program MAC address (not needed here) */
 	/* Get ethernet address */
@@ -594,7 +645,12 @@ xge_attach(struct device *parent, struct device *self, void *aux)
 	IFQ_SET_MAXLEN(&ifp->if_snd, NTXDESCS - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
+	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
+			       IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 	/*
 	 * Attach the interface.
@@ -658,7 +714,6 @@ xge_enable(struct xge_softc *sc)
 #ifdef XGE_DEBUG
 	printf("%s: link up\n", XNAME);
 #endif
-
 }
 
 int 
@@ -666,6 +721,14 @@ xge_init(struct ifnet *ifp)
 {
 	struct xge_softc *sc = ifp->if_softc;
 	uint64_t val;
+	int s;
+
+	s = splnet();
+
+	/*
+	 * Cancel any pending I/O
+	 */
+	xge_stop(ifp, 0);
 
 	/* 31+32, setup MAC config */
 	PIF_WKEY(MAC_CFG, TMAC_EN|RMAC_EN|TMAC_APPEND_PAD|RMAC_STRIP_FCS|
@@ -685,8 +748,14 @@ xge_init(struct ifnet *ifp)
 		bitmask_snprintf(val, QUIESCENT_BMSK, buf, sizeof buf);
 		printf("%s: ADAPTER_STATUS missing bits %s\n", XNAME, buf);
 #endif
+		splx(s);
 		return (1);
 	}
+
+	/* disable VLAN tag stripping */
+	val = PIF_RCSR(RX_PA_CFG);
+	val &= ~STRIP_VLAN_TAG;
+	PIF_WCSR(RX_PA_CFG, val);
 
 	/* set MRU */
 #ifdef XGE_JUMBO
@@ -701,6 +770,7 @@ xge_init(struct ifnet *ifp)
 	PIF_WCSR(ADAPTER_CONTROL, val);
 
 	xge_enable(sc);
+
 	/*
 	 * Enable all interrupts
 	 */
@@ -709,6 +779,7 @@ xge_init(struct ifnet *ifp)
 	PIF_WCSR(GENERAL_INT_MASK, 0);
 	PIF_WCSR(TXPIC_INT_MASK, 0);
 	PIF_WCSR(RXPIC_INT_MASK, 0);
+
 	PIF_WCSR(MAC_INT_MASK, MAC_TMAC_INT); /* only from RMAC */
 	PIF_WCSR(MAC_RMAC_ERR_MASK, ~RMAC_LINK_STATE_CHANGE_INT);
 
@@ -720,6 +791,8 @@ xge_init(struct ifnet *ifp)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
+	splx(s);
+
 	return (0);
 }
 
@@ -728,6 +801,8 @@ xge_stop(struct ifnet *ifp, int disable)
 {
 	struct xge_softc *sc = ifp->if_softc;
 	uint64_t val;
+
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	val = PIF_RCSR(ADAPTER_CONTROL);
 	val &= ~ADAPTER_EN;
@@ -925,7 +1000,7 @@ xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			}
                 } else {
 			if (ifp->if_flags & IFF_RUNNING)
-				xge_stop(ifp, 0);
+				xge_stop(ifp, 1);
 		}
 		sc->xge_if_flags = ifp->if_flags;
 		break;
@@ -1033,6 +1108,9 @@ xge_start(struct ifnet *ifp)
 	struct	mbuf *m;
 	uint64_t par, lcr;
 	int nexttx = 0, ntxd, error, i;
+#if NVLAN > 0
+	struct ifvlan *ifv = NULL;
+#endif
 
 	if ((ifp->if_flags & (IFF_RUNNING|IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -1075,14 +1153,23 @@ xge_start(struct ifnet *ifp)
 		txd->txd_control1 |= TXD_CTL1_OWN|TXD_CTL1_GCF;
 		txd->txd_control2 = TXD_CTL2_UTIL;
 
-#ifdef XGE_CKSUM
-		if (m->m_pkthdr.csum_flags & M_CSUM_IPv4)
-			txd->txd_control2 |= TXD_CTL2_CIPv4;
-		if (m->m_pkthdr.csum_flags & M_CSUM_TCPv4)
-			txd->txd_control2 |= TXD_CTL2_CTCP;
-		if (m->m_pkthdr.csum_flags & M_CSUM_UDPv4)
-			txd->txd_control2 |= TXD_CTL2_CUDP;
+#if NVLAN > 0
+		if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
+		    m->m_pkthdr.rcvif != NULL) {
+			ifv = m->m_pkthdr.rcvif->if_softc;
+
+			txd->txd_control2 |= TXD_CTL2_VLANE;
+			txd->txd_control2 |= TXD_CTL2_VLANT(ifv->ifv_tag);
+		}
 #endif
+
+		if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+			txd->txd_control2 |= TXD_CTL2_CIPv4;
+		if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			txd->txd_control2 |= TXD_CTL2_CTCP;
+		if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			txd->txd_control2 |= TXD_CTL2_CUDP;
+
 		txd[ntxd].txd_control1 |= TXD_CTL1_GCL;
 
 		bus_dmamap_sync(sc->sc_dmat, dmp, 0, dmp->dm_mapsize,
@@ -1313,7 +1400,7 @@ xge_add_rxbuf(struct xge_softc *sc, int id)
  * This magic comes from the FreeBSD driver.
  */
 int
-xge_setup_xgxs(struct xge_softc *sc)
+xge_setup_xgxs_xena(struct xge_softc *sc)
 {
 	/* The magic numbers are described in the users guide */
 
@@ -1397,5 +1484,19 @@ xge_setup_xgxs(struct xge_softc *sc)
 		return (1);
 	}
 #endif
+	return (0);
+}
+
+int
+xge_setup_xgxs_herc(struct xge_softc *sc)
+{
+	int dtx_cnt = 0;
+
+	while (herc_dtx_cfg[dtx_cnt] != END_SIGN) {
+		PIF_WCSR(DTX_CONTROL, herc_dtx_cfg[dtx_cnt]);
+		DELAY(100);
+		dtx_cnt++;
+	}
+
 	return (0);
 }

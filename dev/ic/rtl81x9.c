@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.50 2006/05/22 20:35:12 krw Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.55 2007/02/02 04:21:40 jason Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -633,7 +633,9 @@ rl_rxeof(sc)
 			break;
 		}
 
-		if (!(rxstat & RL_RXSTAT_RXOK)) {
+		if (!(rxstat & RL_RXSTAT_RXOK) ||
+		    total_len < ETHER_MIN_LEN ||
+		    total_len > ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN) {
 			ifp->if_ierrors++;
 			rl_init(sc);
 			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
@@ -854,15 +856,16 @@ int rl_encap(sc, m_head)
 	 * TX buffers, plus we can only have one fragment buffer
 	 * per packet. We have to copy pretty much all the time.
 	 */
-
 	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL)
+	if (m_new == NULL) {
+		m_freem(m_head);
 		return(1);
+	}
 	if (m_head->m_pkthdr.len > MHLEN) {
 		MCLGET(m_new, M_DONTWAIT);
-
 		if (!(m_new->m_flags & M_EXT)) {
 			m_freem(m_new);
+			m_freem(m_head);
 			return(1);
 		}
 	}
@@ -887,6 +890,7 @@ int rl_encap(sc, m_head)
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, RL_CUR_TXMAP(sc),
 	    m_new, BUS_DMA_NOWAIT) != 0) {
 		m_freem(m_new);
+		m_freem(m_head);
 		return (1);
 	}
 	m_freem(m_head);

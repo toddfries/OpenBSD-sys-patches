@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.3 2006/07/01 16:50:33 krw Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.7 2006/10/20 23:47:42 krw Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.2 2001/11/25 19:02:03 thorpej Exp $	*/
 
 /*
@@ -52,8 +52,6 @@
 #define MAXPARTITIONS	16		/* number of partitions */
 #define RAW_PART	2		/* raw partition: XX?c */
 
-#include <sys/dkbad.h>
-
 /* MBR partition table */
 #define	DOSBBSECTOR	0		/* MBR sector number */
 #define	DOSPARTOFF	446		/* Offset of MBR partition table */
@@ -98,8 +96,6 @@ struct dos_partition {
 #define	DPCYL(c, s)	((c) + (((s) & 0xc0) << 2))
 
 struct cpu_disklabel {
-	struct dos_partition dosparts[NDOSPART];
-	struct dkbad bad;
 };
 
 #endif /* _AVIION_DISKLABEL_H_ */

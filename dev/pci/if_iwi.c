@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.73 2006/08/19 14:57:37 damien Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.79 2007/01/03 18:19:06 claudio Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -83,18 +83,8 @@ const struct pci_matchid iwi_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_2915ABG_2 }
 };
 
-static const struct ieee80211_rateset iwi_rateset_11a =
-	{ 8, { 12, 18, 24, 36, 48, 72, 96, 108 } };
-
-static const struct ieee80211_rateset iwi_rateset_11b =
-	{ 4, { 2, 4, 11, 22 } };
-
-static const struct ieee80211_rateset iwi_rateset_11g =
-	{ 12, { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 } };
-
 int		iwi_match(struct device *, void *, void *);
 void		iwi_attach(struct device *, struct device *, void *);
-int		iwi_detach(struct device *, int);
 void		iwi_power(int, void *);
 int		iwi_alloc_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_reset_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
@@ -160,7 +150,7 @@ int iwi_debug = 0;
 #endif
 
 struct cfattach iwi_ca = {
-	sizeof (struct iwi_softc), iwi_match, iwi_attach, iwi_detach
+	sizeof (struct iwi_softc), iwi_match, iwi_attach
 };
 
 int
@@ -302,7 +292,7 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 
 	if (PCI_PRODUCT(pa->pa_id) >= PCI_PRODUCT_INTEL_PRO_WL_2915ABG_1) {
 		/* set supported .11a rates */
-		ic->ic_sup_rates[IEEE80211_MODE_11A] = iwi_rateset_11a;
+		ic->ic_sup_rates[IEEE80211_MODE_11A] = ieee80211_std_rateset_11a;
 
 		/* set supported .11a channels */
 		for (i = 36; i <= 64; i += 4) {
@@ -318,8 +308,8 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* set supported .11b and .11g rates */
-	ic->ic_sup_rates[IEEE80211_MODE_11B] = iwi_rateset_11b;
-	ic->ic_sup_rates[IEEE80211_MODE_11G] = iwi_rateset_11g;
+	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
+	ic->ic_sup_rates[IEEE80211_MODE_11G] = ieee80211_std_rateset_11g;
 
 	/* set supported .11b and .11g channels (1 through 14) */
 	for (i = 1; i <= 14; i++) {
@@ -371,33 +361,6 @@ fail4:	iwi_free_tx_ring(sc, &sc->txq[2]);
 fail3:	iwi_free_tx_ring(sc, &sc->txq[1]);
 fail2:	iwi_free_tx_ring(sc, &sc->txq[0]);
 fail1:	iwi_free_cmd_ring(sc, &sc->cmdq);
-}
-
-int
-iwi_detach(struct device *self, int flags)
-{
-	struct iwi_softc *sc = (struct iwi_softc *)self;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int i;
-
-	iwi_stop(ifp, 1);
-
-	ieee80211_ifdetach(ifp);
-	if_detach(ifp);
-
-	iwi_free_cmd_ring(sc, &sc->cmdq);
-	for (i = 0; i < 4; i++)
-		iwi_free_tx_ring(sc, &sc->txq[i]);
-	iwi_free_rx_ring(sc, &sc->rxq);
-
-	if (sc->sc_ih != NULL) {
-		pci_intr_disestablish(sc->sc_pct, sc->sc_ih);
-		sc->sc_ih = NULL;
-	}
-
-	bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_sz);
-
-	return 0;
 }
 
 void
@@ -973,7 +936,7 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_data *data,
 	    ic->ic_opmode != IEEE80211_M_MONITOR) {
 		/*
 		 * Hardware decrypts the frame itself but leaves the WEP bit
-		 * set in the 802.11 header and don't remove the IV and CRC
+		 * set in the 802.11 header and doesn't remove the IV and CRC
 		 * fields.
 		 */
 		wh->i_fc[1] &= ~IEEE80211_FC1_WEP;
@@ -1000,11 +963,12 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_data *data,
 		if (frame->antenna & 0x40)
 			tap->wr_flags |= IEEE80211_RADIOTAP_F_SHORTPRE;
 
-		M_DUP_PKTHDR(&mb, m);
 		mb.m_data = (caddr_t)tap;
 		mb.m_len = sc->sc_rxtap_len;
 		mb.m_next = m;
-		mb.m_pkthdr.len += mb.m_len;
+		mb.m_nextpkt = NULL;
+		mb.m_type = 0;
+		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif
@@ -1106,7 +1070,7 @@ iwi_notification_intr(struct iwi_softc *sc, struct iwi_rx_data *data,
 
 		if (letoh32(beacon->status) == IWI_BEACON_MISSED) {
 			/* XXX should roam when too many beacons missed */
-			DPRINTFN(2, ("%u beacon(s) missed\n",
+			DPRINTFN(2, ("%s: %u beacon(s) missed\n",
 			    sc->sc_dev.dv_xname, letoh32(beacon->count)));
 		}
 		break;
@@ -1309,11 +1273,12 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 		tap->wt_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
 		tap->wt_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
 
-		M_DUP_PKTHDR(&mb, m0);
 		mb.m_data = (caddr_t)tap;
 		mb.m_len = sc->sc_txtap_len;
 		mb.m_next = m0;
-		mb.m_pkthdr.len += mb.m_len;
+		mb.m_nextpkt = NULL;
+		mb.m_type = 0;
+		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_OUT);
 	}
 #endif
@@ -1439,16 +1404,15 @@ iwi_start(struct ifnet *ifp)
 		return;
 
 	for (;;) {
-		IF_DEQUEUE(&ifp->if_snd, m0);
+		IFQ_POLL(&ifp->if_snd, m0);
 		if (m0 == NULL)
 			break;
 
 		if (sc->txq[0].queued >= IWI_TX_RING_COUNT - 8) {
-			IF_PREPEND(&ifp->if_snd, m0);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
-
+		IFQ_DEQUEUE(&ifp->if_snd, m0);
 #if NBPFILTER > 0
 		if (ifp->if_bpf != NULL)
 			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
@@ -1707,7 +1671,7 @@ iwi_load_firmware(struct iwi_softc *sc, const char *data, int size)
 	uint32_t sentinel, ctl, src, dst, sum, len, mlen;
 	int ntries, nsegs, error;
 
-	/* allocate DMA memory for storing firmware image */
+	/* allocate DMA memory to store firmware image */
 	error = bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
 	    BUS_DMA_NOWAIT, &map);
 	if (error != 0) {
@@ -2087,6 +2051,16 @@ iwi_auth_and_assoc(struct iwi_softc *sc)
 	    IWI_MODE_11G;
 	rs.type = IWI_RATESET_TYPE_NEGOTIATED;
 	rs.nrates = ni->ni_rates.rs_nrates;
+	if (rs.nrates > sizeof rs.rates) {
+#ifdef DIAGNOSTIC
+		/* should not happen since the rates are negotiated */
+		printf("%s: XXX too many rates (count=%d, last=%d)\n",
+		    sc->sc_dev.dv_xname, ni->ni_rates.rs_nrates,
+		    ni->ni_rates.rs_rates[ni->ni_rates.rs_nrates - 1] &
+		    IEEE80211_RATE_VAL);
+#endif
+		rs.nrates = sizeof rs.rates;
+	}
 	bcopy(ni->ni_rates.rs_rates, rs.rates, rs.nrates);
 	DPRINTF(("Setting negotiated rates (%u)\n", rs.nrates));
 	error = iwi_cmd(sc, IWI_CMD_SET_RATES, &rs, sizeof rs, 1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.82 2006/06/02 19:53:12 mpf Exp $	*/
+/*	$OpenBSD: if.h,v 1.86 2007/02/09 09:16:59 jmc Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -60,7 +60,7 @@
  * and then transmits it on its medium.
  *
  * On input, each interface unwraps the data received by it, and either
- * places it on the input queue of a internetwork datagram routine
+ * places it on the input queue of an internetwork datagram routine
  * and posts the associated software interrupt, or passes the datagram to a raw
  * packet input routine.
  *
@@ -150,6 +150,9 @@ struct	ifqueue {
 #define	LINK_STATE_UNKNOWN	0	/* link invalid/unknown */
 #define	LINK_STATE_DOWN		1	/* link is down */
 #define	LINK_STATE_UP		2	/* link is up */
+#define LINK_STATE_HALF_DUPLEX	3	/* link is up and half duplex */
+#define LINK_STATE_FULL_DUPLEX	4	/* link is up and full duplex */
+#define LINK_STATE_IS_UP(_s)	((_s) >= LINK_STATE_UP)
 
 /*
  * Structure defining a queue for a network interface.
@@ -676,10 +679,11 @@ extern struct ifnet **ifindex2ifnet;
 extern struct ifnet *lo0ifp;
 extern int if_indexlim;
 
+#define	ether_input_mbuf(ifp, m)        ether_input((ifp), NULL, (m))
+
 void	ether_ifattach(struct ifnet *);
 void	ether_ifdetach(struct ifnet *);
 int	ether_ioctl(struct ifnet *, struct arpcom *, u_long, caddr_t);
-void	ether_input_mbuf(struct ifnet *, struct mbuf *);
 void	ether_input(struct ifnet *, struct ether_header *, struct mbuf *);
 int	ether_output(struct ifnet *,
 	    struct mbuf *, struct sockaddr *, struct rtentry *);
@@ -701,6 +705,7 @@ int	ifconf(u_long, caddr_t);
 void	ifinit(void);
 int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
 int	ifpromisc(struct ifnet *, int);
+struct	ifg_group *if_creategroup(const char *);
 int	if_addgroup(struct ifnet *, const char *);
 int	if_delgroup(struct ifnet *, const char *);
 void	if_group_routechange(struct sockaddr *, struct sockaddr *);

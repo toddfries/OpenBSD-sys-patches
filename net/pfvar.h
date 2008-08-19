@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.236 2006/07/06 13:25:40 henning Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.244 2007/02/23 21:31:51 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -45,6 +45,7 @@
 #include <netinet/tcp_fsm.h>
 
 struct ip;
+struct ip6_hdr;
 
 #define	PF_TCPS_PROXY_SRC	((TCP_NSTATES)+0)
 #define	PF_TCPS_PROXY_DST	((TCP_NSTATES)+1)
@@ -68,6 +69,7 @@ enum	{ PF_DEBUG_NONE, PF_DEBUG_URGENT, PF_DEBUG_MISC, PF_DEBUG_NOISY };
 enum	{ PF_CHANGE_NONE, PF_CHANGE_ADD_HEAD, PF_CHANGE_ADD_TAIL,
 	  PF_CHANGE_ADD_BEFORE, PF_CHANGE_ADD_AFTER,
 	  PF_CHANGE_REMOVE, PF_CHANGE_GET_TICKET };
+enum	{ PF_GET_NONE, PF_GET_CLR_CNTR };
 
 /*
  * Note about PFTM_*: real indices into pf_rule.timeout[] come before
@@ -452,6 +454,7 @@ struct pf_os_fingerprint {
 #define PF_OSFP_MSS_DC		0x0800		/* TCP MSS dont-care */
 #define PF_OSFP_DF		0x1000		/* IPv4 don't fragment bit */
 #define PF_OSFP_TS0		0x2000		/* Zero timestamp */
+#define PF_OSFP_INET6		0x4000		/* IPv6 */
 	u_int8_t		fp_optcnt;	/* TCP option count */
 	u_int8_t		fp_wscale;	/* TCP window scaling */
 	u_int8_t		fp_ttl;		/* IPv4 TTL */
@@ -507,11 +510,11 @@ struct pf_rule {
 	union pf_rule_ptr	 skip[PF_SKIP_COUNT];
 #define PF_RULE_LABEL_SIZE	 64
 	char			 label[PF_RULE_LABEL_SIZE];
-#define PF_QNAME_SIZE		 16
+#define PF_QNAME_SIZE		 64
 	char			 ifname[IFNAMSIZ];
 	char			 qname[PF_QNAME_SIZE];
 	char			 pqname[PF_QNAME_SIZE];
-#define	PF_TAG_NAME_SIZE	 16
+#define	PF_TAG_NAME_SIZE	 64
 	char			 tagname[PF_TAG_NAME_SIZE];
 	char			 match_tagname[PF_TAG_NAME_SIZE];
 
@@ -563,6 +566,7 @@ struct pf_rule {
 	u_int8_t		 action;
 	u_int8_t		 direction;
 	u_int8_t		 log;
+	u_int8_t		 logif;
 	u_int8_t		 quick;
 	u_int8_t		 ifnot;
 	u_int8_t		 match_tag_not;
@@ -770,6 +774,7 @@ struct pf_anchor {
 	char			 path[MAXPATHLEN];
 	struct pf_ruleset	 ruleset;
 	int			 refcnt;	/* anchor rules */
+	int			 match;
 };
 RB_PROTOTYPE(pf_anchor_global, pf_anchor, entry_global, pf_anchor_compare);
 RB_PROTOTYPE(pf_anchor_node, pf_anchor, entry_node, pf_anchor_compare);
@@ -1179,7 +1184,8 @@ struct pf_tagname {
 #define PFFRAG_FRCACHE_HIWAT	10000	/* Number of fragment descriptors */
 
 #define PFR_KTABLE_HIWAT	1000	/* Number of tables */
-#define PFR_KENTRY_HIWAT	100000	/* Number of table entries */
+#define PFR_KENTRY_HIWAT	200000	/* Number of table entries */
+#define PFR_KENTRY_HIWAT_SMALL	100000	/* Number of table entries (tiny hosts) */
 
 /*
  * ioctl parameter structures
@@ -1224,6 +1230,13 @@ struct pfioc_natlook {
 struct pfioc_state {
 	u_int32_t	 nr;
 	struct pf_state	 state;
+};
+
+struct pfioc_src_node_kill {
+	/* XXX returns the number of src nodes killed in psnk_af */
+	sa_family_t psnk_af;
+	struct pf_rule_addr psnk_src;
+	struct pf_rule_addr psnk_dst;
 };
 
 struct pfioc_state_kill {
@@ -1413,6 +1426,7 @@ struct pfioc_iface {
 #define DIOCIGETIFACES	_IOWR('D', 87, struct pfioc_iface)
 #define DIOCSETIFFLAG	_IOWR('D', 89, struct pfioc_iface)
 #define DIOCCLRIFFLAG	_IOWR('D', 90, struct pfioc_iface)
+#define DIOCKILLSRCNODES	_IOWR('D', 91, struct pfioc_src_node_kill)
 
 #ifdef _KERNEL
 RB_HEAD(pf_src_tree, pf_src_node);
@@ -1425,8 +1439,6 @@ RB_PROTOTYPE(pf_state_tree_id, pf_state,
 extern struct pf_state_tree_id tree_id;
 extern struct pf_state_queue state_list;
 
-extern struct pf_anchor_global		  pf_anchors;
-extern struct pf_ruleset		  pf_main_ruleset;
 TAILQ_HEAD(pf_poolqueue, pf_pool);
 extern struct pf_poolqueue		  pf_pools[2];
 TAILQ_HEAD(pf_altqqueue, pf_altq);
@@ -1465,11 +1477,6 @@ extern struct pf_state		*pf_find_state_all(struct pf_state_cmp *key,
 				    u_int8_t tree, int *more);
 extern void			 pf_print_state(struct pf_state *);
 extern void			 pf_print_flags(u_int8_t);
-extern struct pf_anchor		*pf_find_anchor(const char *);
-extern struct pf_ruleset	*pf_find_ruleset(const char *);
-extern struct pf_ruleset	*pf_find_or_create_ruleset(const char *);
-extern void			 pf_remove_if_empty_ruleset(
-				    struct pf_ruleset *);
 extern u_int16_t		 pf_cksum_fixup(u_int16_t, u_int16_t, u_int16_t,
 				    u_int8_t);
 
@@ -1607,6 +1614,31 @@ extern struct pf_pool_limit	pf_pool_limits[PF_LIMIT_MAX];
 
 #endif /* _KERNEL */
 
+extern struct pf_anchor_global  pf_anchors;
+extern struct pf_anchor        pf_main_anchor;
+#define pf_main_ruleset	pf_main_anchor.ruleset
+
+/* these ruleset functions can be linked into userland programs (pfctl) */
+int			 pf_get_ruleset_number(u_int8_t);
+void			 pf_init_ruleset(struct pf_ruleset *);
+int			 pf_anchor_setup(struct pf_rule *,
+			    const struct pf_ruleset *, const char *);
+int			 pf_anchor_copyout(const struct pf_ruleset *,
+			    const struct pf_rule *, struct pfioc_rule *);
+void			 pf_anchor_remove(struct pf_rule *);
+void			 pf_remove_if_empty_ruleset(struct pf_ruleset *);
+struct pf_anchor	*pf_find_anchor(const char *);
+struct pf_ruleset	*pf_find_ruleset(const char *);
+struct pf_ruleset	*pf_find_or_create_ruleset(const char *);
+void			 pf_rs_initialize(void);
+
+#ifdef _KERNEL
+int			 pf_anchor_copyout(const struct pf_ruleset *,
+			    const struct pf_rule *, struct pfioc_rule *);
+void			 pf_anchor_remove(struct pf_rule *);
+
+#endif /* _KERNEL */
+
 /* The fingerprint functions can be linked into userland programs (tcpdump) */
 int	pf_osfp_add(struct pf_osfp_ioctl *);
 #ifdef _KERNEL
@@ -1615,7 +1647,8 @@ struct pf_osfp_enlist *
 	    const struct tcphdr *);
 #endif /* _KERNEL */
 struct pf_osfp_enlist *
-	pf_osfp_fingerprint_hdr(const struct ip *, const struct tcphdr *);
+	pf_osfp_fingerprint_hdr(const struct ip *, const struct ip6_hdr *,
+	    const struct tcphdr *);
 void	pf_osfp_flush(void);
 int	pf_osfp_get(struct pf_osfp_ioctl *);
 void	pf_osfp_initialize(void);

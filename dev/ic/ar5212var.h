@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5212var.h,v 1.11 2006/06/05 15:21:43 reyk Exp $	*/
+/*	$OpenBSD: ar5212var.h,v 1.13 2007/03/05 16:54:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>

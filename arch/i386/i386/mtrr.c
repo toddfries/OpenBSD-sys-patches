@@ -1,4 +1,4 @@
-/* $OpenBSD: mtrr.c,v 1.7 2006/05/11 13:21:11 mickey Exp $ */
+/* $OpenBSD: mtrr.c,v 1.9 2006/11/29 20:03:20 dim Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * Copyright (c) 1999 Brian Fundakowski Feldman
@@ -33,19 +33,13 @@
 
 #include <machine/specialreg.h>
 
-/* Pull in the cpuid values from locore.s */
-extern int cpu_id;
-extern int cpu_feature;
-extern char cpu_vendor[];
-
 extern struct mem_range_ops i686_mrops;
 extern struct mem_range_ops k6_mrops;
 
 void mtrrattach(int);
 
 void
-mtrrattach (num)
-	int num;
+mtrrattach(int num)
 {
 	if (num > 1)
 		return;
@@ -69,5 +63,4 @@ mtrrattach (num)
 	if (mem_range_softc.mr_op != NULL)
 		mem_range_softc.mr_op->init(&mem_range_softc);
 }
-
 

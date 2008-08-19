@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.49 2006/06/30 16:14:31 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.51 2007/02/27 01:04:01 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*

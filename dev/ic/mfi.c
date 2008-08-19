@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.65 2006/08/31 18:13:17 marco Exp $ */
+/* $OpenBSD: mfi.c,v 1.70 2007/02/14 00:53:16 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -576,6 +576,7 @@ mfiminphys(struct buf *bp)
 int
 mfi_attach(struct mfi_softc *sc)
 {
+	struct scsibus_attach_args saa;
 	uint32_t		status, frames;
 	int			i;
 
@@ -667,7 +668,10 @@ mfi_attach(struct mfi_softc *sc)
 	sc->sc_link.adapter_target = MFI_MAX_LD;
 	sc->sc_link.adapter_buswidth = sc->sc_max_ld;
 
-	config_found(&sc->sc_dev, &sc->sc_link, scsiprint);
+	bzero(&saa, sizeof(saa));
+	saa.saa_sc_link = &sc->sc_link;
+
+	config_found(&sc->sc_dev, &saa, scsiprint);
 
 	/* enable interrupts */
 	mfi_write(sc, MFI_OMSK, MFI_ENABLE_INTR);
@@ -699,8 +703,8 @@ mfi_despatch_cmd(struct mfi_ccb *ccb)
 	DNPRINTF(MFI_D_CMD, "%s: mfi_despatch_cmd\n",
 	    DEVNAME(ccb->ccb_sc));
 
-	mfi_write(ccb->ccb_sc, MFI_IQP, htole32((ccb->ccb_pframe >> 3) |
-	    ccb->ccb_extra_frames));
+	mfi_write(ccb->ccb_sc, MFI_IQP, (ccb->ccb_pframe >> 3) |
+	    ccb->ccb_extra_frames);
 
 	return(0);
 }
@@ -821,8 +825,8 @@ mfi_scsi_io(struct mfi_ccb *ccb, struct scsi_xfer *xs, uint32_t blockno,
 	ccb->ccb_data = xs->data;
 	ccb->ccb_len = xs->datalen;
 
-	if (mfi_create_sgl(ccb, xs->flags & SCSI_NOSLEEP) ?
-	    BUS_DMA_NOWAIT : BUS_DMA_WAITOK)
+	if (mfi_create_sgl(ccb, (xs->flags & SCSI_NOSLEEP) ?
+	    BUS_DMA_NOWAIT : BUS_DMA_WAITOK))
 		return (1);
 
 	return (0);
@@ -912,8 +916,8 @@ mfi_scsi_ld(struct mfi_ccb *ccb, struct scsi_xfer *xs)
 		ccb->ccb_data = xs->data;
 		ccb->ccb_len = xs->datalen;
 
-		if (mfi_create_sgl(ccb, xs->flags & SCSI_NOSLEEP) ?
-		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK)
+		if (mfi_create_sgl(ccb, (xs->flags & SCSI_NOSLEEP) ?
+		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK))
 			return (1);
 	}
 
@@ -1571,7 +1575,7 @@ mfi_ioctl_blink(struct mfi_softc *sc, struct bioc_blink *bb)
 
 	memset(mbox, 0, sizeof mbox);
 
-	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;;
+	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;
 
 	switch (bb->bb_status) {
 	case BIOC_SBUNBLINK:
@@ -1628,7 +1632,7 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 
 	memset(mbox, 0, sizeof mbox);
 
-	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;;
+	*((uint16_t *)&mbox) = pd->mpl_address[i].mpa_pd_id;
 
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:
@@ -1790,6 +1794,9 @@ mfi_create_sensors(struct mfi_softc *sc)
 		return (1);
 	bzero(sc->sc_sensors, sizeof(struct sensor) * sc->sc_ld_cnt);	
 
+	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
+	    sizeof(sc->sc_sensordev.xname));
+
 	for (i = 0; i < sc->sc_ld_cnt; i++) {
 		if (ssc->sc_link[i][0] == NULL)
 			goto bad;
@@ -1799,22 +1806,20 @@ mfi_create_sensors(struct mfi_softc *sc)
 		sc->sc_sensors[i].type = SENSOR_DRIVE;
 		sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
 
-		strlcpy(sc->sc_sensors[i].device, DEVNAME(sc),
-		    sizeof(sc->sc_sensors[i].device));
 		strlcpy(sc->sc_sensors[i].desc, dev->dv_xname,
 		    sizeof(sc->sc_sensors[i].desc));
 
-		sensor_add(&sc->sc_sensors[i]);
+		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
 	}
 
 	if (sensor_task_register(sc, mfi_refresh_sensors, 10) != 0)
 		goto bad;
 
+	sensordev_install(&sc->sc_sensordev);
+
 	return (0);
 
 bad:
-	while (--i >= 0)
-		sensor_del(&sc->sc_sensors[i]);
 	free(sc->sc_sensors, M_DEVBUF);
 
 	return (1);

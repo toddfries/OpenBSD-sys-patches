@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral_pci.c,v 1.6 2006/01/09 20:03:43 damien Exp $  */
+/*	$OpenBSD: if_ral_pci.c,v 1.8 2006/11/18 20:44:40 grange Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -44,7 +44,7 @@
 #include <netinet/if_ether.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_rssadapt.h>
+#include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/ic/rt2560var.h>
@@ -117,7 +117,6 @@ ral_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct rt2560_softc *sc = &psc->sc_sc;
 	struct pci_attach_args *pa = aux;
 	const char *intrstr;
-	bus_addr_t base;
 	pci_intr_handle_t ih;
 	int error;
 
@@ -129,7 +128,7 @@ ral_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	/* map control/status registers */
 	error = pci_mapreg_map(pa, RAL_PCI_BAR0, PCI_MAPREG_TYPE_MEM |
-	    PCI_MAPREG_MEM_TYPE_32BIT, 0, &sc->sc_st, &sc->sc_sh, &base,
+	    PCI_MAPREG_MEM_TYPE_32BIT, 0, &sc->sc_st, &sc->sc_sh, NULL,
 	    &psc->sc_mapsize, 0);
 	if (error != 0) {
 		printf(": could not map memory space\n");

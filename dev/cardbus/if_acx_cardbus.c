@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_acx_cardbus.c,v 1.9 2006/08/19 23:17:12 mglocker Exp $  */
+/*	$OpenBSD: if_acx_cardbus.c,v 1.11 2006/11/10 20:20:04 damien Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -48,7 +48,6 @@
 
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_amrr.h>
-#include <net80211/ieee80211_rssadapt.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/ic/acxvar.h>
@@ -229,7 +228,7 @@ acx_cardbus_enable(struct acx_softc *sc)
 
 	/* map and establish the interrupt handler */
 	csc->sc_ih = cardbus_intr_establish(cc, cf, csc->sc_intrline, IPL_NET,
-	    acx_intr, sc);
+	    acx_intr, sc, sc->sc_dev.dv_xname);
 	if (csc->sc_ih == NULL) {
 		printf("%s: could not establish interrupt at %d\n",
 		    sc->sc_dev.dv_xname, csc->sc_intrline);

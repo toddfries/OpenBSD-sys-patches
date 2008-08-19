@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf2.c,v 1.24.2.2 2007/03/17 20:50:50 henning Exp $	*/
+/*	$OpenBSD: uipc_mbuf2.c,v 1.27.2.1 2007/04/28 01:50:26 ckuethe Exp $	*/
 /*	$KAME: uipc_mbuf2.c,v 1.29 2001/02/14 13:42:10 itojun Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.40 1999/04/01 00:23:25 thorpej Exp $	*/
 
@@ -72,7 +72,7 @@
 static struct mbuf *m_dup1(struct mbuf *, int, int, int);
 
 /*
- * ensure that [off, off + len) is contiguous on the mbuf chain "m".
+ * ensure that [off, off + len] is contiguous on the mbuf chain "m".
  * packet chain before "off" is kept untouched.
  * if offp == NULL, the target will start at <retval, 0> on resulting chain.
  * if offp != NULL, the target will start at <retval, *offp> on resulting chain.
@@ -188,7 +188,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 
 	/*
 	 * now, we need to do the hard way.  don't m_copy as there's no room
-	 * on both end.
+	 * on both ends.
 	 */
 	MGET(o, M_DONTWAIT, m->m_type);
 	if (o && len > MLEN) {
@@ -271,13 +271,6 @@ m_tag_get(int type, int len, int wait)
 	return (t);
 }
 
-/* Free a packet tag. */
-void
-m_tag_free(struct m_tag *t)
-{
-	free(t, M_PACKET_TAGS);
-}
-
 /* Prepend a packet tag. */
 void
 m_tag_prepend(struct mbuf *m, struct m_tag *t)
@@ -285,36 +278,24 @@ m_tag_prepend(struct mbuf *m, struct m_tag *t)
 	SLIST_INSERT_HEAD(&m->m_pkthdr.tags, t, m_tag_link);
 }
 
-/* Unlink a packet tag. */
-void
-m_tag_unlink(struct mbuf *m, struct m_tag *t)
-{
-	SLIST_REMOVE(&m->m_pkthdr.tags, t, m_tag, m_tag_link);
-}
-
 /* Unlink and free a packet tag. */
 void
 m_tag_delete(struct mbuf *m, struct m_tag *t)
 {
-	m_tag_unlink(m, t);
-	m_tag_free(t);
+	SLIST_REMOVE(&m->m_pkthdr.tags, t, m_tag, m_tag_link);
+	free(t, M_PACKET_TAGS);
 }
 
-/* Unlink and free a packet tag chain, starting from given tag. */
+/* Unlink and free a packet tag chain. */
 void
-m_tag_delete_chain(struct mbuf *m, struct m_tag *t)
+m_tag_delete_chain(struct mbuf *m)
 {
-	struct m_tag *p, *q;
+	struct m_tag *p;
 
-	if (t != NULL)
-		p = t;
-	else
-		p = SLIST_FIRST(&m->m_pkthdr.tags);
-	if (p == NULL)
-		return;
-	while ((q = SLIST_NEXT(p, m_tag_link)) != NULL)
-		m_tag_delete(m, q);
-	m_tag_delete(m, p);
+	while ((p = SLIST_FIRST(&m->m_pkthdr.tags)) != NULL) {
+		SLIST_REMOVE_HEAD(&m->m_pkthdr.tags, m_tag_link);
+		free(p, M_PACKET_TAGS);
+	}
 }
 
 /* Find a tag, starting from a given position. */
@@ -359,11 +340,11 @@ m_tag_copy_chain(struct mbuf *to, struct mbuf *from)
 {
 	struct m_tag *p, *t, *tprev = NULL;
 
-	m_tag_delete_chain(to, NULL);
+	m_tag_delete_chain(to);
 	SLIST_FOREACH(p, &from->m_pkthdr.tags, m_tag_link) {
 		t = m_tag_copy(p);
 		if (t == NULL) {
-			m_tag_delete_chain(to, NULL);
+			m_tag_delete_chain(to);
 			return (0);
 		}
 		if (tprev == NULL)

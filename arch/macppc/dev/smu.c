@@ -1,4 +1,4 @@
-/*	$OpenBSD: smu.c,v 1.12 2006/03/20 22:40:18 kettenis Exp $	*/
+/*	$OpenBSD: smu.c,v 1.15 2007/03/01 21:39:27 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -74,6 +74,8 @@ struct smu_softc {
 
 	struct smu_sensor sc_sensors[SMU_MAXSENSORS];
 	int		sc_num_sensors;
+
+	struct sensordev sc_sensordev;
 
 	u_int16_t	sc_cpu_diode_scale;
 	int16_t		sc_cpu_diode_offset;
@@ -252,6 +254,8 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Fans */
 	node = OF_getnodebyname(ca->ca_node, "fans");
+	if (node == 0)
+		node = OF_getnodebyname(ca->ca_node, "rpm-fans");
 	for (node = OF_child(node); node; node = OF_peer(node)) {
 		if (OF_getprop(node, "reg", &reg, sizeof reg) <= 0 ||
 		    OF_getprop(node, "device_type", type, sizeof type) <= 0)
@@ -268,8 +272,6 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 		}
 
 		fan = &sc->sc_fans[sc->sc_num_fans++];
-		strlcpy(fan->sensor.device, sc->sc_dev.dv_xname,
-		    sizeof(fan->sensor.device));
 		fan->sensor.type = SENSOR_FANRPM;
 		fan->sensor.flags = SENSOR_FINVALID;
 		fan->reg = reg;
@@ -291,7 +293,18 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 		/* Start running fans at their "unmanaged" speed. */
 		smu_fan_set_rpm(sc, fan, fan->unmanaged_rpm);
 
-		sensor_add(&fan->sensor);
+		sensor_attach(&sc->sc_sensordev, &fan->sensor);
+	}
+
+	/*
+	 * Bail out if we didn't find any fans.  If we don't set the
+	 * fans to a safe speed, but tickle the SMU periodically by
+	 * reading sensors, the fans will never spin up and the
+	 * machine might overheat.
+	 */
+	if (sc->sc_num_fans == 0) {
+		printf(": no fans\n");
+		return;
 	}
 
 	/* Sensors */
@@ -302,8 +315,6 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 			continue;
 
 		sensor = &sc->sc_sensors[sc->sc_num_sensors++];
-		strlcpy(sensor->sensor.device, sc->sc_dev.dv_xname,
-		    sizeof(sensor->sensor.device));
 		sensor->sensor.flags = SENSOR_FINVALID;
 		sensor->reg = val;
 
@@ -321,8 +332,13 @@ smu_attach(struct device *parent, struct device *self, void *aux)
 			strlcpy(loc, "Unknown", sizeof loc);
 		strlcpy(sensor->sensor.desc, loc, sizeof sensor->sensor.desc);
 
-		sensor_add(&sensor->sensor);
+		sensor_attach(&sc->sc_sensordev, &sensor->sensor);
 	}
+
+	/* Register sensor device with sysctl */
+	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
+	    sizeof(sc->sc_sensordev.xname));
+	sensordev_install(&sc->sc_sensordev);
 
 	/* CPU temperature diode calibration */
 	smu_get_datablock(sc, 0x18, data, sizeof data);

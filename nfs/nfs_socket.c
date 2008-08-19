@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.44 2006/08/04 12:35:57 pedro Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.46 2006/10/28 20:56:46 thib Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -283,10 +283,10 @@ nfs_connect(nmp, rep)
 	so->so_snd.sb_flags |= SB_NOINTR;
 
 	/* Initialize other non-zero congestion variables */
-	nmp->nm_srtt[0] = nmp->nm_srtt[1] = nmp->nm_srtt[2] = nmp->nm_srtt[3] =
-		nmp->nm_srtt[4] = (NFS_TIMEO << 3);
+	nmp->nm_srtt[0] = nmp->nm_srtt[1] = nmp->nm_srtt[2] =
+	    nmp->nm_srtt[3] = (NFS_TIMEO << 3);
 	nmp->nm_sdrtt[0] = nmp->nm_sdrtt[1] = nmp->nm_sdrtt[2] =
-		nmp->nm_sdrtt[3] = nmp->nm_sdrtt[4] = 0;
+	    nmp->nm_sdrtt[3] = 0;
 	nmp->nm_cwnd = NFS_MAXCWND / 2;	    /* Initial send window */
 	nmp->nm_sent = 0;
 	nmp->nm_timeouts = 0;
@@ -843,11 +843,13 @@ nfs_request(vp, mrest, procnum, procp, cred, mrp, mdp, dposp)
 	time_t reqtime, waituntil;
 	caddr_t dpos, cp2;
 	int t1, s, error = 0, mrest_len, auth_len, auth_type;
-	int trylater_delay = 15, trylater_cnt = 0, failed_auth = 0;
+	int trylater_delay, failed_auth = 0;
 	int verf_len, verf_type;
 	u_int32_t xid;
 	char *auth_str, *verf_str;
 	NFSKERBKEY_T key;		/* save session key */
+
+	trylater_delay = NFS_MINTIMEO;
 
 	nmp = VFSTONFS(vp->v_mount);
 	rep = pool_get(&nfsreqpl, PR_WAITOK);
@@ -1043,9 +1045,10 @@ tryagain:
 				while (time_second < waituntil)
 					(void) tsleep((caddr_t)&lbolt,
 						PSOCK, "nqnfstry", 0);
-				trylater_delay *= nfs_backoff[trylater_cnt];
-				if (trylater_cnt < 7)
-					trylater_cnt++;
+				trylater_delay *= NFS_TIMEOUTMUL;
+				if (trylater_delay > NFS_MAXTIMEO)
+					trylater_delay = NFS_MAXTIMEO;
+
 				goto tryagain;
 			}
 

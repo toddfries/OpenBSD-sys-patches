@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.103 2006/06/16 16:49:39 henning Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.105 2006/12/07 18:15:29 reyk Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -235,7 +235,7 @@ ether_output(ifp0, m0, dst, rt0)
 		struct ifaddr *ifa;
 
 		/* loop back if this is going to the carp interface */
-		if (dst != NULL && ifp0->if_link_state == LINK_STATE_UP &&
+		if (dst != NULL && LINK_STATE_IS_UP(ifp0->if_link_state) &&
 		    (ifa = ifa_ifwithaddr(dst)) != NULL &&
 		    ifa->ifa_ifp == ifp0)
 			return (looutput(ifp0, m, dst, rt0));
@@ -480,22 +480,6 @@ bad:
 }
 
 /*
- * Temporary function to migrate while
- * removing ether_header * from ether_input().
- */
-void
-ether_input_mbuf(ifp, m)
-	struct ifnet *ifp;
-	struct mbuf *m;
-{
-	struct ether_header *eh;
-
-	eh = mtod(m, struct ether_header *);
-	m_adj(m, ETHER_HDR_LEN);
-	ether_input(ifp, eh, m);
-}
-
-/*
  * Process a received Ethernet packet;
  * the packet is in the mbuf chain m without
  * the ether header, which is provided separately.
@@ -517,6 +501,11 @@ ether_input(ifp, eh, m)
 #if NPPPOE > 0
 	struct ether_header *eh_tmp;
 #endif
+
+	if (eh == NULL) {
+		eh = mtod(m, struct ether_header *);
+		m_adj(m, ETHER_HDR_LEN);
+	}
 
 #if NTRUNK > 0
 	/* Handle input from a trunk port */

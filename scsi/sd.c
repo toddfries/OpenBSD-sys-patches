@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.110 2006/07/29 02:40:46 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.119 2007/02/21 01:32:21 krw Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -57,7 +57,7 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
+#include <sys/timeout.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -98,6 +98,7 @@ void	sdminphys(struct buf *);
 void	sdgetdisklabel(dev_t, struct sd_softc *, struct disklabel *,
 			    struct cpu_disklabel *, int);
 void	sdstart(void *);
+void	sdrestart(void *);
 void	sddone(struct scsi_xfer *);
 void	sd_shutdown(void *);
 int	sd_reassign_blocks(struct sd_softc *, u_long);
@@ -149,7 +150,7 @@ sdmatch(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
-	struct scsibus_attach_args *sa = aux;
+	struct scsi_attach_args *sa = aux;
 	int priority;
 
 	(void)scsi_inqmatch(sa->sa_inqbuf,
@@ -170,7 +171,7 @@ sdattach(parent, self, aux)
 	int error, result;
 	struct sd_softc *sd = (void *)self;
 	struct disk_parms *dp = &sd->params;
-	struct scsibus_attach_args *sa = aux;
+	struct scsi_attach_args *sa = aux;
 	struct scsi_link *sc_link = sa->sa_sc_link;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("sdattach:\n"));
@@ -209,12 +210,15 @@ sdattach(parent, self, aux)
 	 */
 	printf("\n");
 
-	/* Spin up the unit ready or not. */
-	scsi_start(sc_link, SSS_START, scsi_autoconf | SCSI_SILENT |
-	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
+	timeout_set(&sd->sc_timeout, sdrestart, sd);
+
+	/* Spin up non-UMASS devices ready or not. */
+	if ((sd->sc_link->flags & SDEV_UMASS) == 0)
+		scsi_start(sc_link, SSS_START, scsi_autoconf | SCSI_SILENT |
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
 
 	/* Check that it is still responding and ok. */
-	error = scsi_test_unit_ready(sd->sc_link, TEST_READY_RETRIES_DEFAULT,
+	error = scsi_test_unit_ready(sd->sc_link, TEST_READY_RETRIES,
 	    scsi_autoconf | SCSI_IGNORE_ILLEGAL_REQUEST |
 	    SCSI_IGNORE_MEDIA_CHANGE | SCSI_SILENT);
 
@@ -299,7 +303,7 @@ sddetach(self, flags)
 	}
 	splx(s);
 
-	/* locate the major number */
+	/* locate the minor number */
 	mn = SDMINOR(self->dv_unit, 0);
 
 	for (bmaj = 0; bmaj < nblkdev; bmaj++)
@@ -363,9 +367,11 @@ sdopen(dev, flag, fmt, p)
 			goto bad;
 		}
 	} else {
-		/* Spin up the unit, ready or not. */
-		scsi_start(sc_link, SSS_START, (rawopen ? SCSI_SILENT : 0) |
-		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
+		/* Spin up non-UMASS devices ready or not. */
+		if ((sd->sc_link->flags & SDEV_UMASS) == 0)
+			scsi_start(sc_link, SSS_START, (rawopen ? SCSI_SILENT :
+			    0) | SCSI_IGNORE_ILLEGAL_REQUEST |
+			    SCSI_IGNORE_MEDIA_CHANGE);
 
 		/* Use sd_interpret_sense() for sense errors.
 		 *
@@ -377,7 +383,7 @@ sdopen(dev, flag, fmt, p)
 
 		/* Check that it is still responding and ok. */
 		error = scsi_test_unit_ready(sc_link,
-		    TEST_READY_RETRIES_DEFAULT, (rawopen ? SCSI_SILENT : 0) |
+		    TEST_READY_RETRIES, (rawopen ? SCSI_SILENT : 0) |
 		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
 
 		if (error) {
@@ -492,9 +498,10 @@ sdclose(dev, flag, fmt, p)
 
 		if (sd->sc_link->flags & SDEV_EJECTING) {
 			scsi_start(sd->sc_link, SSS_STOP|SSS_LOEJ, 0);
-
 			sd->sc_link->flags &= ~SDEV_EJECTING;
 		}
+
+		timeout_del(&sd->sc_timeout);
 	}
 
 	sdunlock(sd);
@@ -533,7 +540,7 @@ sdstrategy(bp)
 		goto bad;
 	}
 	/*
-	 * If it's a null transfer, return immediatly
+	 * If it's a null transfer, return immediately
 	 */
 	if (bp->b_bcount == 0)
 		goto done;
@@ -601,7 +608,7 @@ done:
  * continues to be drained.
  *
  * must be called at the correct (highish) spl level
- * sdstart() is called at splbio from sdstrategy and scsi_done
+ * sdstart() is called at splbio from sdstrategy, sdrestart and scsi_done
  */
 void
 sdstart(v)
@@ -706,14 +713,6 @@ sdstart(v)
 		disk_busy(&sd->sc_dk);
 
 		/*
-		 * Mark the disk dirty so that the cache will be
-		 * flushed on close.
-		 */
-		if ((bp->b_flags & B_READ) == 0)
-			sd->flags |= SDF_DIRTY;
-
-
-		/*
 		 * Call the routine that chats with the adapter.
 		 * Note: we cannot sleep as we may be an interrupt
 		 */
@@ -721,12 +720,42 @@ sdstart(v)
 		    (u_char *)bp->b_data, bp->b_bcount,
 		    SDRETRIES, 60000, bp, SCSI_NOSLEEP |
 		    ((bp->b_flags & B_READ) ? SCSI_DATA_IN : SCSI_DATA_OUT));
-		if (error) {
+		switch (error) {
+		case 0:
+			/*
+			 * Mark the disk dirty so that the cache will be
+			 * flushed on close.
+			 */
+			if ((bp->b_flags & B_READ) == 0)
+				sd->flags |= SDF_DIRTY;
+			timeout_del(&sd->sc_timeout);
+			break;
+		case EAGAIN:
+			/*
+			 * The device can't start another i/o. Try again later.
+			 */
+			dp->b_actf = bp;
+			disk_unbusy(&sd->sc_dk, 0, 0);
+			timeout_add(&sd->sc_timeout, 1);
+			return;
+		default:
 			disk_unbusy(&sd->sc_dk, 0, 0);
 			printf("%s: not queued, error %d\n",
 			    sd->sc_dev.dv_xname, error);
+			break;
 		}
 	}
+}
+
+void
+sdrestart(v)
+	void *v;
+{
+	int s;
+
+	s = splbio();
+	sdstart(v);
+	splx(s);
 }
 
 void
@@ -1018,7 +1047,6 @@ sdgetdisklabel(dev, sd, lp, clp, spoofonly)
 	    spoofonly);
 	if (errstring) {
 		/*printf("%s: %s\n", sd->sc_dev.dv_xname, errstring);*/
-		return;
 	}
 }
 
@@ -1036,6 +1064,8 @@ sd_shutdown(arg)
 	 */
 	if ((sd->flags & SDF_DIRTY) != 0)
 		sd_flush(sd, SCSI_AUTOCONF);
+
+	timeout_del(&sd->sc_timeout);
 }
 
 /*
@@ -1079,19 +1109,18 @@ sd_interpret_sense(xs)
 	 * LUN not ready errors on open devices.
 	 */
 	if (((sc_link->flags & SDEV_OPEN) == 0) ||
-	    (serr != 0x70 && serr != 0x71) ||
+	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED) ||
 	    ((sense->flags & SSD_KEY) != SKEY_NOT_READY) ||
-	    (sense->extra_len < 6) ||
-	    (sense->add_sense_code != 0x04))
+	    (sense->extra_len < 6))
 		return (EJUSTRETURN);
 
-	switch (sense->add_sense_code_qual) {
-	case 0x01: /* In process of becoming ready. */
+	switch (ASC_ASCQ(sense)) {
+	case SENSE_NOT_READY_BECOMING_READY:
 		SC_DEBUG(sc_link, SDEV_DB1, ("becoming ready.\n"));
 		retval = scsi_delay(xs, 5);
 		break;
 
-	case 0x02: /* Initialization command required. */
+	case SENSE_NOT_READY_INIT_REQUIRED:
 		SC_DEBUG(sc_link, SDEV_DB1, ("spinning up\n"));
 		retval = scsi_start(sd->sc_link, SSS_START,
 		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_URGENT | SCSI_NOSLEEP);

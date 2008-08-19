@@ -1,4 +1,4 @@
-/*	$OpenBSD: fs.h,v 1.24 2006/04/12 03:46:52 tedu Exp $	*/
+/*	$OpenBSD: fs.h,v 1.26 2007/02/17 14:32:38 mickey Exp $	*/
 /*	$NetBSD: fs.h,v 1.6 1995/04/12 21:21:02 mycroft Exp $	*/
 
 /*
@@ -62,13 +62,12 @@
 #define	SBOFF		((off_t)(BBOFF + BBSIZE))
 #define	BBLOCK		((daddr_t)(0))
 #define	SBLOCK		((daddr_t)(BBLOCK + BBSIZE / DEV_BSIZE))
-#define	SBLOCK_FLOPPY	0
 #define	SBLOCK_UFS1	8192
 #define	SBLOCK_UFS2	65536
 #define	SBLOCK_PIGGY	262144
 #define	SBLOCKSIZE	8192
 #define	SBLOCKSEARCH \
-	{ SBLOCK_UFS2, SBLOCK_UFS1, SBLOCK_FLOPPY, SBLOCK_PIGGY, -1 }
+	{ SBLOCK_UFS2, SBLOCK_UFS1, SBLOCK_PIGGY, -1 }
 
 /*
  * Addresses stored in inodes are capable of addressing fragments
@@ -173,31 +172,31 @@ struct csum {
 struct fs {
 	int32_t	 fs_firstfield;		/* historic file system linked list, */
 	int32_t	 fs_unused_1;		/*     used for incore super blocks */
-	int32_t	 fs_sblkno;		/* addr of super-block in filesys */
-	int32_t	 fs_cblkno;		/* offset of cyl-block in filesys */
-	int32_t	 fs_iblkno;		/* offset of inode-blocks in filesys */
-	int32_t	 fs_dblkno;		/* offset of first data after cg */
+	int32_t	 fs_sblkno;		/* addr of super-block / frags */
+	int32_t	 fs_cblkno;		/* offset of cyl-block / frags */
+	int32_t	 fs_iblkno;		/* offset of inode-blocks / frags */
+	int32_t	 fs_dblkno;		/* offset of first data / frags */
 	int32_t	 fs_cgoffset;		/* cylinder group offset in cylinder */
 	int32_t	 fs_cgmask;		/* used to calc mod fs_ntrak */
 	time_t 	 fs_time;		/* last time written */
-	int32_t	 fs_size;		/* number of blocks in fs */
-	int32_t	 fs_dsize;		/* number of data blocks in fs */
-	int32_t	 fs_ncg;		/* number of cylinder groups */
-	int32_t	 fs_bsize;		/* size of basic blocks in fs */
-	int32_t	 fs_fsize;		/* size of frag blocks in fs */
-	int32_t	 fs_frag;		/* number of frags in a block in fs */
+	int32_t	 fs_size;		/* # of blocks in fs / frags */
+	int32_t	 fs_dsize;		/* # of data blocks in fs */
+	int32_t	 fs_ncg;		/* # of cylinder groups */
+	int32_t	 fs_bsize;		/* size of basic blocks / bytes */
+	int32_t	 fs_fsize;		/* size of frag blocks / bytes */
+	int32_t	 fs_frag;		/* # of frags in a block in fs */
 /* these are configuration parameters */
 	int32_t	 fs_minfree;		/* minimum percentage of free blocks */
-	int32_t	 fs_rotdelay;		/* num of ms for optimal next block */
+	int32_t	 fs_rotdelay;		/* # of ms for optimal next block */
 	int32_t	 fs_rps;		/* disk revolutions per second */
 /* these fields can be computed from the others */
 	int32_t	 fs_bmask;		/* ``blkoff'' calc of blk offsets */
 	int32_t	 fs_fmask;		/* ``fragoff'' calc of frag offsets */
 	int32_t	 fs_bshift;		/* ``lblkno'' calc of logical blkno */
-	int32_t	 fs_fshift;		/* ``numfrags'' calc number of frags */
+	int32_t	 fs_fshift;		/* ``numfrags'' calc # of frags */
 /* these are configuration parameters */
-	int32_t	 fs_maxcontig;		/* max number of contiguous blks */
-	int32_t	 fs_maxbpg;		/* max number of blks per cyl group */
+	int32_t	 fs_maxcontig;		/* max # of contiguous blks */
+	int32_t	 fs_maxbpg;		/* max # of blks per cyl group */
 /* these fields can be computed from the others */
 	int32_t	 fs_fragshift;		/* block to frag shift */
 	int32_t	 fs_fsbtodb;		/* fsbtodb and dbtofsb shift constant */
@@ -217,8 +216,8 @@ struct fs {
 	int32_t  fs_id[2];		/* unique filesystem id */
 /* sizes determined by number of cylinder groups and their sizes */
 	int32_t  fs_csaddr;		/* blk addr of cyl grp summary area */
-	int32_t	 fs_cssize;		/* size of cyl grp summary area */
-	int32_t	 fs_cgsize;		/* cylinder group size */
+	int32_t	 fs_cssize;		/* cyl grp summary area size / bytes */
+	int32_t	 fs_cgsize;		/* cyl grp block size / bytes */
 /* these fields are derived from the hardware */
 	int32_t	 fs_ntrak;		/* tracks per cylinder */
 	int32_t	 fs_nsect;		/* sectors per track */
@@ -450,7 +449,7 @@ struct ocg {
 
 /*
  * Give cylinder group number for a file system block.
- * Give cylinder group block number for a file system block.
+ * Give frag block number in cylinder group for a file system block.
  */
 #define	dtog(fs, d)	((d) / (fs)->fs_fpg)
 #define	dtogd(fs, d)	((d) % (fs)->fs_fpg)

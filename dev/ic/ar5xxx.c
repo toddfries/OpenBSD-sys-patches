@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5xxx.c,v 1.33 2006/06/05 15:21:43 reyk Exp $	*/
+/*	$OpenBSD: ar5xxx.c,v 1.38 2007/03/05 16:54:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
@@ -60,6 +60,12 @@ static const struct {
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5212_FPGA,
 	    ar5k_ar5212_attach },
 	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5212_IBM,
+	    ar5k_ar5212_attach },
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR2413,
+	    ar5k_ar5212_attach },
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5413,
+	    ar5k_ar5212_attach },
+	{ PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5424,
 	    ar5k_ar5212_attach },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CRDAG675,
 	    ar5k_ar5212_attach },
@@ -197,6 +203,23 @@ ath_hal_attach(u_int16_t device, void *sc, bus_space_tag_t st,
 	hal->ah_limit_tx_retries = AR5K_INIT_TX_RETRY;
 	hal->ah_software_retry = AH_FALSE;
 	hal->ah_ant_diversity = AR5K_TUNE_ANT_DIVERSITY;
+
+	switch (device) {
+	case PCI_PRODUCT_ATHEROS_AR2413:
+	case PCI_PRODUCT_ATHEROS_AR5413:
+	case PCI_PRODUCT_ATHEROS_AR5424:
+		/*
+		 * Known single chip solutions
+		 */
+		hal->ah_single_chip = AH_TRUE;
+		break;
+	default:
+		/*
+		 * Multi chip solutions
+		 */
+		hal->ah_single_chip = AH_FALSE;
+		break;
+	}
 
 	if ((attach)(device, hal, st, sh, status) == NULL)
 		goto failed;
@@ -466,10 +489,12 @@ ath_hal_init_channels(struct ath_hal *hal, HAL_CHANNEL *channels,
 			continue;
 
 		/* Match modes */
-		if (ar5k_2ghz_channels[i].rc_mode & IEEE80211_CHAN_CCK)
+		if ((hal->ah_capabilities.cap_mode & HAL_MODE_11B) &&
+		    (ar5k_2ghz_channels[i].rc_mode & IEEE80211_CHAN_CCK))
 			all_channels[c].c_channel_flags = CHANNEL_B;
 
-		if (ar5k_2ghz_channels[i].rc_mode & IEEE80211_CHAN_OFDM) {
+		if ((hal->ah_capabilities.cap_mode & HAL_MODE_11G) &&
+		    (ar5k_2ghz_channels[i].rc_mode & IEEE80211_CHAN_OFDM)) {
 			all_channels[c].c_channel_flags |=
 			    hal->ah_version == AR5K_AR5211 ?
 			    CHANNEL_PUREG : CHANNEL_G;
@@ -501,6 +526,14 @@ ar5k_printver(enum ar5k_srev_type type, u_int32_t val)
 	int i;
 
 	for (i = 0; i < AR5K_ELEMENTS(names); i++) {
+		if (type == AR5K_VERSION_DEV) {
+			if (names[i].sr_type == type &&
+			    names[i].sr_val == val) {
+				name = names[i].sr_name;
+				break;
+			}
+			continue;
+		}
 		if (names[i].sr_type != type ||
 		    names[i].sr_val == AR5K_SREV_UNKNOWN)
 			continue;

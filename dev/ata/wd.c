@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.49 2006/08/21 12:09:01 krw Exp $ */
+/*	$OpenBSD: wd.c,v 1.53 2007/02/15 00:53:26 krw Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -166,7 +166,6 @@ struct wd_softc {
 #define sc_drive sc_wdc_bio.drive
 #define sc_mode sc_wdc_bio.mode
 #define sc_multi sc_wdc_bio.multi
-#define sc_badsect sc_wdc_bio.badsect
 
 int	wdprobe(struct device *, void *, void *);
 void	wdattach(struct device *, struct device *, void *);
@@ -200,10 +199,6 @@ struct dkdriver wddkdriver = { wdstrategy };
 /* XXX: these should go elsewhere */
 cdev_decl(wd);
 bdev_decl(wd);
-
-#ifdef DKBAD
-void	bad144intern(struct wd_softc *);
-#endif
 
 #define wdlock(wd)  disk_lock(&(wd)->sc_dk)
 #define wdunlock(wd)  disk_unlock(&(wd)->sc_dk)
@@ -788,10 +783,21 @@ wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp)
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_secsize = DEV_BSIZE;
+	lp->d_secperunit = wd->sc_capacity;
 	lp->d_ntracks = wd->sc_params.atap_heads;
 	lp->d_nsectors = wd->sc_params.atap_sectors;
-	lp->d_ncylinders = wd->sc_params.atap_cylinders;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
+#ifdef CPU_BIOS
+	/*
+	 * Stick to what the controller says for BIOS compatibility. Let the
+	 * CPU_BIOS logic on i386 and friends deal with any mismatch to actual
+	 * size.
+	 */
+	lp->d_ncylinders = wd->sc_params.atap_cylinders;
+#else
+	/* We are not constrained by BIOS concerns. Calculate cylinder count. */
+	lp->d_ncylinders = lp->d_secperunit / lp->d_secpercyl;
+#endif
 	if (wd->drvp->ata_vers == -1) {
 		lp->d_type = DTYPE_ST506;
 		strncpy(lp->d_typename, "ST506/MFM/RLL", sizeof lp->d_typename);
@@ -801,7 +807,6 @@ wdgetdefaultlabel(struct wd_softc *wd, struct disklabel *lp)
 	}
 	/* XXX - user viscopy() like sd.c */
 	strncpy(lp->d_packname, wd->sc_params.atap_model, sizeof lp->d_packname);
-	lp->d_secperunit = wd->sc_capacity;
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
 	lp->d_flags = 0;
@@ -831,8 +836,6 @@ wdgetdisklabel(dev_t dev, struct wd_softc *wd, struct disklabel *lp,
 
 	wdgetdefaultlabel(wd, lp);
 
-	wd->sc_badsect[0] = -1;
-
 	if (wd->drvp->state > RECAL)
 		wd->drvp->drive_flags |= DRIVE_RESET;
 	errstring = readdisklabel(WDLABELDEV(dev),
@@ -850,16 +853,12 @@ wdgetdisklabel(dev_t dev, struct wd_softc *wd, struct disklabel *lp,
 		    wdstrategy, lp, clp, spoofonly);
 	}
 	if (errstring) {
-		printf("%s: %s\n", wd->sc_dev.dv_xname, errstring);
+		/*printf("%s: %s\n", wd->sc_dev.dv_xname, errstring);*/
 		return;
 	}
 
 	if (wd->drvp->state > RECAL)
 		wd->drvp->drive_flags |= DRIVE_RESET;
-#ifdef DKBAD
-	if ((lp->d_flags & D_BADSECT) != 0)
-		bad144intern(wd);
-#endif
 }
 
 int
@@ -880,16 +879,6 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 	}
 
 	switch (xfer) {
-#ifdef DKBAD
-	case DIOCSBAD:
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		DKBAD(wd->sc_dk.dk_cpulabel) = *(struct dkbad *)addr;
-		wd->sc_dk.dk_label->d_flags |= D_BADSECT;
-		bad144intern(wd);
-		goto exit;
-#endif
-
 	case DIOCRLDINFO:
 		wdgetdisklabel(dev, wd, wd->sc_dk.dk_label,
 		    wd->sc_dk.dk_cpulabel, 0);
@@ -956,7 +945,7 @@ wdioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 		{
-		register struct format_op *fop;
+		struct format_op *fop;
 		struct iovec aiov;
 		struct uio auio;
 
@@ -1165,32 +1154,6 @@ again:
 	wddoingadump = 0;
 	return 0;
 }
-
-#ifdef DKBAD
-/*
- * Internalize the bad sector table.
- */
-void
-bad144intern(struct wd_softc *wd)
-{
-	struct dkbad *bt = &DKBAD(wd->sc_dk.dk_cpulabel);
-	struct disklabel *lp = wd->sc_dk.dk_label;
-	int i = 0;
-
-	WDCDEBUG_PRINT(("bad144intern\n"), DEBUG_XFERS);
-
-	for (; i < NBT_BAD; i++) {
-		if (bt->bt_bad[i].bt_cyl == 0xffff)
-			break;
-		wd->sc_badsect[i] =
-		    bt->bt_bad[i].bt_cyl * lp->d_secpercyl +
-		    (bt->bt_bad[i].bt_trksec >> 8) * lp->d_nsectors +
-		    (bt->bt_bad[i].bt_trksec & 0xff);
-	}
-	for (; i < NBT_BAD+1; i++)
-		wd->sc_badsect[i] = -1;
-}
-#endif
 
 int
 wd_get_params(struct wd_softc *wd, u_int8_t flags, struct ataparams *params)

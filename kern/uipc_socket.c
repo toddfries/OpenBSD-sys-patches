@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.64 2006/06/10 17:05:17 beck Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.66 2007/02/26 23:53:33 kurt Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -838,6 +838,7 @@ dontblock:
 				m->m_data += len;
 				m->m_len -= len;
 				so->so_rcv.sb_cc -= len;
+				so->so_rcv.sb_datacc -= len;
 			}
 		}
 		if (so->so_oobmark) {
@@ -989,7 +990,7 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 				goto bad;
 			}
 			so->so_linger = mtod(m, struct linger *)->l_linger;
-			/* fall thru... */
+			/* FALLTHROUGH */
 
 		case SO_DEBUG:
 		case SO_KEEPALIVE:

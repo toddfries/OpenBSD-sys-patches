@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.57 2006/08/29 17:44:16 kettenis Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.72 2007/02/10 01:23:19 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -276,6 +276,14 @@
 #define BGE_CHIPID_BCM5714_B3		0x80030000
 #define BGE_CHIPID_BCM5715_A0		0x90000000
 #define BGE_CHIPID_BCM5715_A1		0x90010000
+#define BGE_CHIPID_BCM5715_A3		0x90030000
+#define BGE_CHIPID_BCM5755_A0		0xa0000000
+#define BGE_CHIPID_BCM5755_A1		0xa0010000
+#define BGE_CHIPID_BCM5755_A2		0xa0020000
+#define BGE_CHIPID_BCM5787_A0		0xb0000000
+#define BGE_CHIPID_BCM5787_A1		0xb0010000
+#define BGE_CHIPID_BCM5787_A2		0xb0020000
+#define BGE_CHIPID_BCM5906_A1		0xc0010000
 
 /* shorthand one */
 #define BGE_ASICREV(x)			((x) >> 28)
@@ -291,6 +299,7 @@
 #define BGE_ASICREV_BCM5714		0x09	/* 5714, 5715 */
 #define BGE_ASICREV_BCM5755		0x0a
 #define BGE_ASICREV_BCM5787		0x0b
+#define BGE_ASICREV_BCM5906		0x0c
 
 /* chip revisions */
 #define BGE_CHIPREV(x)			((x) >> 24)
@@ -737,7 +746,7 @@
 #define BGE_SERDESCFG_CDET		0x00010000 /* comma detect enable */
 #define BGE_SERDESCFG_TBILOOP		0x00020000 /* local loopback */
 #define BGE_SERDESCFG_REMLOOP		0x00040000 /* remote loopback */
-#define BGE_SERDESCFG_INVPHASE		0x00080000 /* Reverse 125Mhz clock */
+#define BGE_SERDESCFG_INVPHASE		0x00080000 /* Reverse 125MHz clock */
 #define BGE_SERDESCFG_12REGCTL		0x00300000 /* 1.2v regulator ctl */
 #define BGE_SERDESCFG_REGCTL		0x00C00000 /* regulator ctl (2.5v) */
 
@@ -1685,6 +1694,8 @@
 #define BGE_MDI_CTL			0x6844
 #define BGE_EE_DELAY			0x6848
 
+#define BGE_FASTBOOT_PC			0x6894
+
 /*
  * TLP Control Register
  * Applicable to BCM5721 and BCM5751 only
@@ -1727,7 +1738,8 @@
 /* Misc. config register */
 #define BGE_MISCCFG_RESET_CORE_CLOCKS	0x00000001
 #define BGE_MISCCFG_TIMER_PRESCALER	0x000000FE
-#define BGE_MISCCFG_GPHY_POWER_RESET	0x04000000
+#define BGE_MISCCFG_KEEP_GPHY_POWER	0x04000000
+#define BGE_MISCCFG_BOARD_ID_MASK	0x0001e000
 
 #define BGE_32BITTIME_66MHZ		(0x41 << 1)
 
@@ -1812,10 +1824,11 @@
 	} while(0)
 
 /*
- * This magic number is used to prevent PXE restart when we
- * issue a software reset. We write this magic number to the
- * firmware mailbox at 0xB50 in order to prevent the PXE boot
- * code from running.
+ * This magic number is written to the firmware mailbox at 0xb50
+ * before a software reset is issued.  After the internal firmware
+ * has completed its initialization it will write the opposite of 
+ * this value, ~BGE_MAGIC_NUMBER, to the same location, allowing the
+ * driver to synchronize with the firmware.
  */
 #define BGE_MAGIC_NUMBER                0x4B657654
 
@@ -1964,8 +1977,12 @@ struct bge_status_block {
 /*
  * SysKonnect Subsystem IDs
  */
-#define SK_SUBSYSID_9D21		0x4421
 #define SK_SUBSYSID_9D41		0x4441
+
+/*
+ * Dell PCI vendor ID
+ */
+#define DELL_VENDORID			0x1028
 
 /*
  * Offset of MAC address inside EEPROM.
@@ -2327,13 +2344,6 @@ struct txdmamap_pool_entry {
 	SLIST_ENTRY(txdmamap_pool_entry) link;
 };
 
-/*
- * Flags for bge_flags.
- */
-#define BGE_TXRING_VALID	0x0001
-#define BGE_RXRING_VALID	0x0002
-#define BGE_JUMBO_RXRING_VALID	0x0004
-
 #define ASF_ENABLE		1
 #define ASF_NEW_HANDSHAKE	2
 #define ASF_STACKUP		4
@@ -2347,16 +2357,28 @@ struct bge_softc {
 	struct pci_attach_args	bge_pa;
 	struct mii_data		bge_mii;
 	struct ifmedia		bge_ifmedia;	/* media info */
-	u_int8_t		bge_extram;	/* has external SSRAM */
-	u_int8_t		bge_eeprom;
-	u_int8_t		bge_tbi;
-	u_int8_t		bge_rx_alignment_bug;
+	u_int32_t		bge_flags;
+#define BGE_TXRING_VALID	0x00000001
+#define BGE_RXRING_VALID	0x00000002
+#define BGE_JUMBO_RXRING_VALID	0x00000004
+#define BGE_TBI			0x00000008
+#define BGE_RX_ALIGNBUG		0x00000010
+#define BGE_NO_3LED		0x00000020
+#define BGE_PCIX		0x00000040
+#define BGE_PCIE		0x00000080
+#define BGE_ASF_MODE		0x00000100
+#define BGE_NO_EEPROM		0x00000200
+#define BGE_JUMBO_CAP		0x00000400
+#define BGE_10_100_ONLY		0x00000800
+#define BGE_PHY_ADC_BUG		0x00001000
+#define BGE_PHY_5704_A0_BUG	0x00002000
+#define BGE_PHY_JITTER_BUG	0x00004000
+#define BGE_PHY_BER_BUG		0x00008000
+#define BGE_PHY_ADJUST_TRIM	0x00010000
+#define BGE_NO_ETH_WIRE_SPEED	0x00020000
+
 	bus_dma_tag_t		bge_dmatag;
 	u_int32_t		bge_chipid;
-	u_int8_t		bge_no_3_led;
-	u_int8_t		bge_asf_mode;
-	u_int8_t		bge_pcie;
-	u_int8_t		bge_pcix;
 	struct bge_ring_data	*bge_rdata;	/* rings */
 	struct bge_chain_data	bge_cdata;	/* mbufs */
 	bus_dmamap_t		bge_ring_map;
@@ -2375,8 +2397,8 @@ struct bge_softc {
 	u_int32_t		bge_rx_max_coal_bds;
 	u_int32_t		bge_tx_max_coal_bds;
 	u_int32_t		bge_tx_buf_ratio;
+	int			bge_flowflags;
 	int			bge_if_flags;
-	int			bge_flags;
 	int			bge_txcnt;
 	int			bge_link;	/* link state */
 	int			bge_link_evt;	/* pending link event */

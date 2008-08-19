@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.29 2006/07/29 02:40:45 krw Exp $ */
+/*	$OpenBSD: safte.c,v 1.33 2007/02/21 22:37:38 deanna Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -71,6 +71,7 @@ struct safte_softc {
 
 	int			sc_nsensors;
 	struct safte_sensor	*sc_sensors;
+	struct sensordev	sc_sensordev;
 
 	int			sc_celsius;
 	int			sc_ntemps;
@@ -106,7 +107,7 @@ int64_t	safte_temp2uK(u_int8_t, int);
 int
 safte_match(struct device *parent, void *match, void *aux)
 {
-	struct scsibus_attach_args	*sa = aux;
+	struct scsi_attach_args		*sa = aux;
 	struct scsi_inquiry_data	*inq = sa->sa_inqbuf;
 	struct scsi_inquiry_data	inqbuf;
 	struct scsi_inquiry		cmd;
@@ -157,7 +158,7 @@ void
 safte_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct safte_softc		*sc = (struct safte_softc *)self;
-	struct scsibus_attach_args	*sa = aux;
+	struct scsi_attach_args		*sa = aux;
 	int				i = 0;
 
 	sc->sc_link = sa->sa_sc_link;
@@ -185,7 +186,9 @@ safte_attach(struct device *parent, struct device *self, void *aux)
 		free(sc->sc_sensors, M_DEVBUF);
 	} else {
 		for (i = 0; i < sc->sc_nsensors; i++)
-			sensor_add(&sc->sc_sensors[i].se_sensor);
+			sensor_attach(&sc->sc_sensordev, 
+			    &sc->sc_sensors[i].se_sensor);
+		sensordev_install(&sc->sc_sensordev);
 	}
 
 #if NBIO > 0
@@ -219,14 +222,13 @@ safte_detach(struct device *self, int flags)
 #endif
 
 	if (sc->sc_nsensors > 0) {
+		sensordev_deinstall(&sc->sc_sensordev);
 		sensor_task_unregister(sc);
 
-		/*
-		 * we can't free the sensors since there is no mechanism to
-		 * take them out of the sensor list. mark them invalid instead.
-		 */
 		for (i = 0; i < sc->sc_nsensors; i++)
-			sc->sc_sensors[i].se_sensor.flags |= SENSOR_FINVALID;
+			sensor_detach(&sc->sc_sensordev, 
+			    &sc->sc_sensors[i].se_sensor);
+		free(sc->sc_sensors, M_DEVBUF);
 	}
 
 	if (sc->sc_encbuf != NULL)
@@ -292,6 +294,9 @@ safte_read_config(struct safte_softc *sc)
 		sc->sc_nsensors = 0;
 		return (1);
 	}
+
+	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
+	    sizeof(sc->sc_sensordev.xname));
 
 	memset(sc->sc_sensors, 0,
 	    sc->sc_nsensors * sizeof(struct safte_sensor));
@@ -365,10 +370,6 @@ safte_read_config(struct safte_softc *sc)
 	j += config.ntemps;
 
 	sc->sc_temperrs = (u_int16_t *)(sc->sc_encbuf + j);
-
-	for (i = 0; i < sc->sc_nsensors; i++)
-		strlcpy(sc->sc_sensors[i].se_sensor.device, DEVNAME(sc),
-		    sizeof(sc->sc_sensors[i].se_sensor.device));
 
 	return (0);
 }

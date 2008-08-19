@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.57 2006/05/29 16:49:42 avsm Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.59 2006/12/29 13:04:37 pedro Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -102,6 +102,7 @@ nfstype nfsv3_type[9] = { NFNON, NFREG, NFDIR, NFBLK, NFCHR, NFLNK, NFSOCK,
 enum vtype nv2tov_type[8] = { VNON, VREG, VDIR, VBLK, VCHR, VLNK, VNON, VNON };
 enum vtype nv3tov_type[8]={ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO };
 int nfs_ticks;
+struct nfsstats nfsstats;
 
 /*
  * Mapping of old NFS Version 2 RPC numbers to generic numbers.
@@ -777,7 +778,7 @@ nfsm_mbuftouio(mrep, uiop, siz, dpos)
 			uiop->uio_iovcnt--;
 			uiop->uio_iov++;
 		} else {
-			uiop->uio_iov->iov_base += uiosiz;
+			(char *)uiop->uio_iov->iov_base += uiosiz;
 			uiop->uio_iov->iov_len -= uiosiz;
 		}
 		siz -= uiosiz;
@@ -856,7 +857,7 @@ nfsm_uiotombuf(uiop, mq, siz, bpos)
 			uiop->uio_offset += xfer;
 			uiop->uio_resid -= xfer;
 		}
-		uiop->uio_iov->iov_base += uiosiz;
+		(char *)uiop->uio_iov->iov_base += uiosiz;
 		uiop->uio_iov->iov_len -= uiosiz;
 		siz -= uiosiz;
 	}

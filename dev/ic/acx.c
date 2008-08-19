@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.50 2006/08/29 17:26:38 mglocker Exp $ */
+/*	$OpenBSD: acx.c,v 1.66 2007/03/01 10:55:14 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -139,7 +139,6 @@ int acxdebug = 0;
 
 int	 acx_attach(struct acx_softc *);
 int	 acx_detach(void *);
-void	 acx_shutdown(void *);
 
 int	 acx_init(struct ifnet *);
 int	 acx_stop(struct acx_softc *);
@@ -174,9 +173,8 @@ int	 acx_reset(struct acx_softc *);
 
 int	 acx_set_null_tmplt(struct acx_softc *);
 int	 acx_set_probe_req_tmplt(struct acx_softc *, const char *, int);
-int	 acx_set_probe_resp_tmplt(struct acx_softc *, const char *, int,
-	    int);
-int	 acx_set_beacon_tmplt(struct acx_softc *, const char *, int, int);
+int	 acx_set_probe_resp_tmplt(struct acx_softc *, struct ieee80211_node *);
+int	 acx_set_beacon_tmplt(struct acx_softc *, struct ieee80211_node *);
 
 int	 acx_read_eeprom(struct acx_softc *, uint32_t, uint8_t *);
 int	 acx_read_phyreg(struct acx_softc *, uint32_t, uint8_t *);
@@ -201,11 +199,6 @@ int	 acx_init_radio(struct acx_softc *, uint32_t, uint32_t);
 void	 acx_iter_func(void *, struct ieee80211_node *);
 void	 acx_amrr_timeout(void *);
 void	 acx_newassoc(struct ieee80211com *, struct ieee80211_node *, int);
-
-const struct ieee80211_rateset	acx_rates_11b =
-	{ 4, { 2, 4, 11, 22 } };
-const struct ieee80211_rateset	acx_rates_11g =
-	{ 12, { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 } };
 
 static int	acx_chanscan_rate = 5;	/* 5 channels per second */
 int		acx_beacon_intvl = 100;	/* 100 TU */
@@ -294,10 +287,8 @@ acx_attach(struct acx_softc *sc)
 	ifp->if_watchdog = acx_watchdog;
 	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST;
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
-
-	/* set supported .11b and .11g rates */
-	ic->ic_sup_rates[IEEE80211_MODE_11B] = acx_rates_11b;
-	ic->ic_sup_rates[IEEE80211_MODE_11G] = acx_rates_11g;
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Set channels */
 	for (i = 1; i <= 14; ++i) {
@@ -381,14 +372,6 @@ acx_detach(void *xsc)
 	acx_dma_free(sc);
 
 	return (0);
-}
-
-void
-acx_shutdown(void *arg)
-{
-	struct acx_softc *sc = arg;
-
-	acx_stop(sc);
 }
 
 int
@@ -524,7 +507,8 @@ acx_set_crypt_keys(struct acx_softc *sc)
 
 	/* Set current WEP key index */
 	wep_txkey.wep_txkey = ic->ic_wep_txkey;
-	if (acx_set_wep_txkey_conf(sc, &wep_txkey) != 0) {
+	if (acx_set_conf(sc, ACX_CONF_WEP_TXKEY, &wep_txkey,
+	    sizeof(wep_txkey)) != 0) {
 		printf("%s: set WEP txkey failed\n", sc->sc_dev.dv_xname);
 		return (ENXIO);
 	}
@@ -658,7 +642,7 @@ acx_read_config(struct acx_softc *sc, struct acx_config *conf)
 	int error;
 
 	/* Get region domain */
-	if (acx_get_regdom_conf(sc, &reg_dom) != 0) {
+	if (acx_get_conf(sc, ACX_CONF_REGDOM, &reg_dom, sizeof(reg_dom)) != 0) {
 		printf("%s: can't get region domain\n", sc->sc_dev.dv_xname);
 		return (ENXIO);
 	}
@@ -666,7 +650,7 @@ acx_read_config(struct acx_softc *sc, struct acx_config *conf)
 	DPRINTF(("%s: regdom %02x\n", sc->sc_dev.dv_xname, reg_dom.regdom));
 
 	/* Get antenna */
-	if (acx_get_antenna_conf(sc, &ant) != 0) {
+	if (acx_get_conf(sc, ACX_CONF_ANTENNA, &ant, sizeof(ant)) != 0) {
 		printf("%s: can't get antenna\n", sc->sc_dev.dv_xname);
 		return (ENXIO);
 	}
@@ -688,7 +672,7 @@ acx_read_config(struct acx_softc *sc, struct acx_config *conf)
 	DPRINTF(("%s: sensitivity %02x\n", sc->sc_dev.dv_xname, sen));
 
 	/* Get firmware revision */
-	if (acx_get_fwrev_conf(sc, &fw_rev) != 0) {
+	if (acx_get_conf(sc, ACX_CONF_FWREV, &fw_rev, sizeof(fw_rev)) != 0) {
 		printf("%s: can't get firmware revision\n",
 		    sc->sc_dev.dv_xname);
 		return (ENXIO);
@@ -738,41 +722,45 @@ acx_write_config(struct acx_softc *sc, struct acx_config *conf)
 
 	/* Set number of long/short retry */
 	sretry.nretry = sc->sc_short_retry_limit;
-	if (acx_set_nretry_short_conf(sc, &sretry) != 0) {
+	if (acx_set_conf(sc, ACX_CONF_NRETRY_SHORT, &sretry,
+	    sizeof(sretry)) != 0) {
 		printf("%s: can't set short retry limit\n", ifp->if_xname);
 		return (ENXIO);
 	}
 
 	lretry.nretry = sc->sc_long_retry_limit;
-	if (acx_set_nretry_long_conf(sc, &lretry) != 0) {
+	if (acx_set_conf(sc, ACX_CONF_NRETRY_LONG, &lretry,
+	    sizeof(lretry)) != 0) {
 		printf("%s: can't set long retry limit\n", ifp->if_xname);
 		return (ENXIO);
 	}
 
 	/* Set MSDU lifetime */
 	msdu_lifetime.lifetime = htole32(sc->sc_msdu_lifetime);
-	if (acx_set_msdu_lifetime_conf(sc, &msdu_lifetime) != 0) {
+	if (acx_set_conf(sc, ACX_CONF_MSDU_LIFETIME, &msdu_lifetime,
+	    sizeof(msdu_lifetime)) != 0) {
 		printf("%s: can't set MSDU lifetime\n", ifp->if_xname);
 		return (ENXIO);
 	}
 
 	/* Enable rate fallback */
 	rate_fb.ratefb_enable = 1;
-	if (acx_set_rate_fallback_conf(sc, &rate_fb) != 0) {
+	if (acx_set_conf(sc, ACX_CONF_RATE_FALLBACK, &rate_fb,
+	    sizeof(rate_fb)) != 0) {
 		printf("%s: can't enable rate fallback\n", ifp->if_xname);
 		return (ENXIO);
 	}
 
 	/* Set antenna */
 	ant.antenna = conf->antenna;
-	if (acx_set_antenna_conf(sc, &ant) != 0) {
+	if (acx_set_conf(sc, ACX_CONF_ANTENNA, &ant, sizeof(ant)) != 0) {
 		printf("%s: can't set antenna\n", ifp->if_xname);
 		return (ENXIO);
 	}
 
 	/* Set region domain */
 	reg_dom.regdom = conf->regdom;
-	if (acx_set_regdom_conf(sc, &reg_dom) != 0) {
+	if (acx_set_conf(sc, ACX_CONF_REGDOM, &reg_dom, sizeof(reg_dom)) != 0) {
 		printf("%s: can't set region domain\n", ifp->if_xname);
 		return (ENXIO);
 	}
@@ -785,18 +773,12 @@ acx_write_config(struct acx_softc *sc, struct acx_config *conf)
 
 	/* What we want to receive and how to receive */
 	/* XXX may not belong here, acx_init() */
-	rx_opt.opt1 = RXOPT1_FILT_FDEST | RXOPT1_INCL_RXBUF_HDR;
-	rx_opt.opt2 = RXOPT2_RECV_ASSOC_REQ |
-	    RXOPT2_RECV_AUTH |
-	    RXOPT2_RECV_BEACON |
-	    RXOPT2_RECV_CF |
-	    RXOPT2_RECV_CTRL |
-	    RXOPT2_RECV_DATA |
-	    RXOPT2_RECV_MGMT |
-	    RXOPT2_RECV_PROBE_REQ |
-	    RXOPT2_RECV_PROBE_RESP |
-	    RXOPT2_RECV_OTHER;
-	if (acx_set_rxopt_conf(sc, &rx_opt) != 0) {
+	rx_opt.opt1 = htole16(RXOPT1_FILT_FDEST | RXOPT1_INCL_RXBUF_HDR);
+	rx_opt.opt2 = htole16(RXOPT2_RECV_ASSOC_REQ | RXOPT2_RECV_AUTH |
+	    RXOPT2_RECV_BEACON | RXOPT2_RECV_CF | RXOPT2_RECV_CTRL |
+	    RXOPT2_RECV_DATA | RXOPT2_RECV_MGMT | RXOPT2_RECV_PROBE_REQ |
+	    RXOPT2_RECV_PROBE_RESP | RXOPT2_RECV_OTHER);
+	if (acx_set_conf(sc, ACX_CONF_RXOPT, &rx_opt, sizeof(rx_opt)) != 0) {
 		printf("%s: can't set RX option\n", ifp->if_xname);
 		return (ENXIO);
 	}
@@ -923,13 +905,6 @@ acx_start(struct ifnet *ifp)
 			}
 			eh = mtod(m, struct ether_header *);
 
-			ni = ieee80211_find_txnode(ic, eh->ether_dhost);
-			if (ni == NULL) {
-				m_freem(m);
-				ifp->if_oerrors++;
-				continue;
-			}
-
 			/* TODO power save */
 
 #if NBPFILTER > 0
@@ -979,11 +954,12 @@ acx_start(struct ifnet *ifp)
 			tap->wt_chan_flags =
 			    htole16(ic->ic_bss->ni_chan->ic_flags);
 
-			M_DUP_PKTHDR(&mb, m);
 			mb.m_data = (caddr_t)tap;
 			mb.m_len = sc->sc_txtap_len;
 			mb.m_next = m;
-			mb.m_pkthdr.len = mb.m_len;
+			mb.m_nextpkt = NULL;
+			mb.m_type = 0;
+			mb.m_flags = 0;
 			bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_OUT);
 		}
 #endif
@@ -1336,11 +1312,12 @@ acx_rxeof(struct acx_softc *sc)
 				tap->wr_rssi = head->rbh_level;
 				tap->wr_max_rssi = ic->ic_max_rssi;
 
-				M_DUP_PKTHDR(&mb, m);
 				mb.m_data = (caddr_t)tap;
 				mb.m_len = sc->sc_rxtap_len;
 				mb.m_next = m;
-				mb.m_pkthdr.len += mb.m_len;
+				mb.m_nextpkt = NULL;
+				mb.m_type = 0;
+				mb.m_flags = 0;
 				bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 			}
 #endif
@@ -1533,16 +1510,23 @@ acx_load_radio_firmware(struct acx_softc *sc, const char *name)
 	 * Get the position, where base firmware is loaded, so that
 	 * radio firmware can be loaded after it.
 	 */
-	if (acx_get_mmap_conf(sc, &mem_map) != 0)
+	if (acx_get_conf(sc, ACX_CONF_MMAP, &mem_map, sizeof(mem_map)) != 0) {
+		free(ucode, M_DEVBUF);
 		return (ENXIO);
+	}
 	radio_fw_ofs = letoh32(mem_map.code_end);
 
 	/* Put ECPU into sleeping state, before loading radio firmware */
-	if (acx_sleep(sc) != 0)
+	if (acx_exec_command(sc, ACXCMD_SLEEP, NULL, 0, NULL, 0) != 0) {
+		free(ucode, M_DEVBUF);
 		return (ENXIO);
+	}
 
 	/* Load radio firmware */
 	error = acx_load_firmware(sc, radio_fw_ofs, ucode, size);
+
+	free(ucode, M_DEVBUF);
+
 	if (error) {
 		printf("%s: can't load radio firmware\n", ifp->if_xname);
 		return (ENXIO);
@@ -1550,7 +1534,7 @@ acx_load_radio_firmware(struct acx_softc *sc, const char *name)
 	DPRINTF(("%s: radio firmware loaded\n", sc->sc_dev.dv_xname));
 
 	/* Wake up sleeping ECPU, after radio firmware is loaded */
-	if (acx_wakeup(sc) != 0)
+	if (acx_exec_command(sc, ACXCMD_WAKEUP, NULL, 0, NULL, 0) != 0)
 		return (ENXIO);
 
 	/* Initialize radio */
@@ -1558,7 +1542,7 @@ acx_load_radio_firmware(struct acx_softc *sc, const char *name)
 		return (ENXIO);
 
 	/* Verify radio firmware's loading position */
-	if (acx_get_mmap_conf(sc, &mem_map) != 0)
+	if (acx_get_conf(sc, ACX_CONF_MMAP, &mem_map, sizeof(mem_map)) != 0)
 		return (ENXIO);
 
 	if (letoh32(mem_map.code_end) != radio_fw_ofs + size) {
@@ -1586,9 +1570,9 @@ acx_load_firmware(struct acx_softc *sc, uint32_t offset, const uint8_t *data,
 
 	fw = (const uint32_t *)data;
 
-	if (*fw != csum) {
+	if (*fw != htole32(csum)) {
 		printf("%s: firmware checksum 0x%x does not match 0x%x!\n",
-		    ifp->if_xname, fw, csum);
+		    ifp->if_xname, *fw, htole32(csum));
 		return (ENXIO);
 	}
 
@@ -1745,15 +1729,13 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 				goto back;
 			}
 
-			if (acx_set_beacon_tmplt(sc, ni->ni_essid,
-			    ni->ni_esslen, chan) != 0) {
-				printf("%s: set bescon template failed\n",
+			if (acx_set_beacon_tmplt(sc, ni) != 0) {
+				printf("%s: set beacon template failed\n",
 				    ifp->if_xname);
 				goto back;
 			}
 
-			if (acx_set_probe_resp_tmplt(sc, ni->ni_essid,
-			    ni->ni_esslen, chan) != 0) {
+			if (acx_set_probe_resp_tmplt(sc, ni) != 0) {
 				printf("%s: set probe response template "
 				    "failed\n", ifp->if_xname);
 				goto back;
@@ -1802,6 +1784,15 @@ back:
 int
 acx_init_tmplt_ordered(struct acx_softc *sc)
 {
+	union {
+		struct acx_tmplt_beacon		beacon;
+		struct acx_tmplt_null_data	null;
+		struct acx_tmplt_probe_req	preq;
+		struct acx_tmplt_probe_resp	presp;
+		struct acx_tmplt_tim		tim;
+	} data;
+
+	bzero(&data, sizeof(data));
 	/*
 	 * NOTE:
 	 * Order of templates initialization:
@@ -1812,22 +1803,35 @@ acx_init_tmplt_ordered(struct acx_softc *sc)
 	 * 5) Probe response
 	 * Above order is critical to get a correct memory map.
 	 */
-	if (acx_init_probe_req_tmplt(sc) != 0)
+	if (acx_set_tmplt(sc, ACXCMD_TMPLT_PROBE_REQ, &data.preq,
+	    sizeof(data.preq)) != 0)
 		return (1);
 
-	if (acx_init_null_data_tmplt(sc) != 0)
+	if (acx_set_tmplt(sc, ACXCMD_TMPLT_NULL_DATA, &data.null,
+	    sizeof(data.null)) != 0)
 		return (1);
 
-	if (acx_init_beacon_tmplt(sc) != 0)
+	if (acx_set_tmplt(sc, ACXCMD_TMPLT_BEACON, &data.beacon,
+	    sizeof(data.beacon)) != 0)
 		return (1);
 
-	if (acx_init_tim_tmplt(sc) != 0)
+	if (acx_set_tmplt(sc, ACXCMD_TMPLT_TIM, &data.tim,
+	    sizeof(data.tim)) != 0)
 		return (1);
 
-	if (acx_init_probe_resp_tmplt(sc) != 0)
+	if (acx_set_tmplt(sc, ACXCMD_TMPLT_PROBE_RESP, &data.presp,
+	    sizeof(data.presp)) != 0)
 		return (1);
 
-#undef CALL_SET_TMPLT
+	/* Setup TIM template */
+	data.tim.tim_eid = IEEE80211_ELEMID_TIM;
+	data.tim.tim_len = ACX_TIM_LEN(ACX_TIM_BITMAP_LEN);
+	if (acx_set_tmplt(sc, ACXCMD_TMPLT_TIM, &data.tim,
+	    ACX_TMPLT_TIM_SIZ(ACX_TIM_BITMAP_LEN)) != 0) {
+		printf("%s: can't set tim tmplt\n", sc->sc_dev.dv_xname);
+		return (1);
+	}
+
 	return (0);
 }
 
@@ -2272,9 +2276,9 @@ back:
 int
 acx_set_null_tmplt(struct acx_softc *sc)
 {
+	struct ieee80211com *ic = &sc->sc_ic;
 	struct acx_tmplt_null_data n;
 	struct ieee80211_frame *wh;
-	struct ieee80211com *ic = &sc->sc_ic;
 
 	bzero(&n, sizeof(n));
 
@@ -2286,15 +2290,15 @@ acx_set_null_tmplt(struct acx_softc *sc)
 	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
 	IEEE80211_ADDR_COPY(wh->i_addr3, etherbroadcastaddr);
 
-	return (_acx_set_null_data_tmplt(sc, &n, sizeof(n)));
+	return (acx_set_tmplt(sc, ACXCMD_TMPLT_NULL_DATA, &n, sizeof(n)));
 }
 
 int
 acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 {
+	struct ieee80211com *ic = &sc->sc_ic;
 	struct acx_tmplt_probe_req req;
 	struct ieee80211_frame *wh;
-	struct ieee80211com *ic = &sc->sc_ic;
 	uint8_t *frm;
 	int len;
 
@@ -2312,100 +2316,49 @@ acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 	frm = ieee80211_add_ssid(frm, ssid, ssid_len);
 	frm = ieee80211_add_rates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
 	frm = ieee80211_add_xrates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
-
 	len = frm - req.data.u_data.var;
 
-	return (_acx_set_probe_req_tmplt(sc, &req,
+	return (acx_set_tmplt(sc, ACXCMD_TMPLT_PROBE_REQ, &req,
 	    ACX_TMPLT_PROBE_REQ_SIZ(len)));
 }
 
 int
-acx_set_probe_resp_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len,
-    int chan)
+acx_set_probe_resp_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 {
-	struct acx_tmplt_probe_resp resp;
-	struct ieee80211_frame *wh;
 	struct ieee80211com *ic = &sc->sc_ic;
-	uint8_t *frm;
+	struct acx_tmplt_probe_resp resp;
+	struct mbuf *m;
 	int len;
 
 	bzero(&resp, sizeof(resp));
 
-	wh = &resp.data.u_data.f;
-	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
-	    IEEE80211_FC0_SUBTYPE_PROBE_RESP;
-	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
-	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_myaddr);
+	m = ieee80211_beacon_alloc(ic, ni);
+	if (m == NULL)
+		return (1);
+	m_copydata(m, 0, m->m_pkthdr.len, (caddr_t)&resp.data);
+	len = m->m_pkthdr.len + sizeof(resp.size);
+	m_freem(m); 
 
-	resp.data.u_data.beacon_intvl = htole16(acx_beacon_intvl);
-	resp.data.u_data.cap = htole16(IEEE80211_CAPINFO_IBSS);
-
-	frm = resp.data.u_data.var;
-	frm = ieee80211_add_ssid(frm, ssid, ssid_len);
-	frm = ieee80211_add_rates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
-
-	*frm++ = IEEE80211_ELEMID_DSPARMS;
-	*frm++ = 1;
-	*frm++ = chan;
-
-	/* This should after IBSS or TIM, but acx always keeps them last */
-	frm = ieee80211_add_xrates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
-
-	if (ic->ic_opmode == IEEE80211_M_IBSS) {
-		*frm++ = IEEE80211_ELEMID_IBSSPARMS;
-		*frm++ = 2;
-	}
-
-	len = frm - resp.data.u_data.var;
-
-	return (_acx_set_probe_resp_tmplt(sc, &resp,
-	    ACX_TMPLT_PROBE_RESP_SIZ(len)));
+	return (acx_set_tmplt(sc, ACXCMD_TMPLT_PROBE_RESP, &resp, len));
 }
 
 int
-acx_set_beacon_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len,
-    int chan)
+acx_set_beacon_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 {
-	struct acx_tmplt_beacon beacon;
-	struct ieee80211_frame *wh;
 	struct ieee80211com *ic = &sc->sc_ic;
-	uint8_t *frm;
+	struct acx_tmplt_beacon beacon;
+	struct mbuf *m;
 	int len;
 
+	m = ieee80211_beacon_alloc(ic, ni);
+	if (m == NULL)
+		return (1);
 	bzero(&beacon, sizeof(beacon));
+	m_copydata(m, 0, m->m_pkthdr.len, (caddr_t)&beacon.data);
+	len = m->m_pkthdr.len + sizeof(beacon.size);
+	m_freem(m);
 
-	wh = &beacon.data.u_data.f;
-	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
-	    IEEE80211_FC0_SUBTYPE_BEACON;
-	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
-	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
-	IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_myaddr);
-
-	beacon.data.u_data.beacon_intvl = htole16(acx_beacon_intvl);
-	beacon.data.u_data.cap = htole16(IEEE80211_CAPINFO_IBSS);
-
-	frm = beacon.data.u_data.var;
-	frm = ieee80211_add_ssid(frm, ssid, ssid_len);
-	frm = ieee80211_add_rates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
-
-	*frm++ = IEEE80211_ELEMID_DSPARMS;
-	*frm++ = 1;
-	*frm++ = chan;
-
-	/* This should after IBSS or TIM, but acx always keeps them last */
-	frm = ieee80211_add_xrates(frm, &ic->ic_sup_rates[sc->chip_phymode]);
-
-	if (ic->ic_opmode == IEEE80211_M_IBSS) {
-		*frm++ = IEEE80211_ELEMID_IBSSPARMS;
-		*frm++ = 2;
-	}
-
-	len = frm - beacon.data.u_data.var;
-
-	return (_acx_set_beacon_tmplt(sc, &beacon, ACX_TMPLT_BEACON_SIZ(len)));
+	return (acx_set_tmplt(sc, ACXCMD_TMPLT_BEACON, &beacon, len));
 }
 
 void

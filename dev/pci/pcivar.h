@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.48 2006/04/07 01:04:49 brad Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.52 2007/02/23 21:34:32 deraadt Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -50,6 +50,17 @@
  * Structures and definitions needed by the machine-dependent header.
  */
 typedef u_int32_t pcireg_t;		/* configuration space register XXX */
+
+/*
+ * Power Management (PCI 2.2)
+ */
+#define PCI_PWR_D0	0
+#define PCI_PWR_D1	1
+#define PCI_PWR_D2	2
+#define PCI_PWR_D3	3
+
+#ifdef _KERNEL
+
 struct pcibus_attach_args;
 struct pci_softc;
 
@@ -80,6 +91,7 @@ struct pcibus_attach_args {
 	bus_dma_tag_t pba_dmat;		/* DMA tag */
 	pci_chipset_tag_t pba_pc;
 
+	int		pba_domain;	/* PCI domain */
 	int		pba_bus;	/* PCI bus number */
 
 	/*
@@ -106,11 +118,14 @@ struct pci_attach_args {
 	pci_chipset_tag_t pa_pc;
 	int		pa_flags;	/* flags; see below */
 
-	u_int		pa_device;
+	u_int           pa_domain;
 	u_int           pa_bus;
+	u_int		pa_device;
 	u_int		pa_function;
 	pcitag_t	pa_tag;
 	pcireg_t	pa_id, pa_class;
+
+	pcitag_t	*pa_bridgetag;
 
 	/*
 	 * Interrupt information.
@@ -157,11 +172,13 @@ struct pci_softc {
 	pci_chipset_tag_t sc_pc;
 	void *sc_powerhook;
 	LIST_HEAD(, pci_dev) sc_devs;
-	int sc_bus, sc_maxndevs;
+	int sc_domain, sc_bus, sc_maxndevs;
 	pcitag_t *sc_bridgetag;
 	u_int sc_intrswiz;
 	pcitag_t sc_intrtag;
 };
+
+extern int pci_ndomains;
 
 /*
  * Locators devices that attach to 'pcibus', as specified to config.
@@ -210,6 +227,7 @@ int pci_matchbyid(struct pci_attach_args *, const struct pci_matchid *, int);
  * Helper functions for autoconfiguration.
  */
 const char *pci_findvendor(pcireg_t);
+const char *pci_findproduct(pcireg_t);
 int	pci_find_device(struct pci_attach_args *pa,
 			int (*match)(struct pci_attach_args *));
 int	pci_probe_device(struct pci_softc *, pcitag_t tag,
@@ -219,12 +237,5 @@ const struct pci_quirkdata *
 	pci_lookup_quirkdata(pci_vendor_id_t, pci_product_id_t);
 void	pciagp_set_pchb(struct pci_attach_args *);
 
-/*
- * Power Management (PCI 2.2)
- */
-#define PCI_PWR_D0	0
-#define PCI_PWR_D1	1
-#define PCI_PWR_D2	2
-#define PCI_PWR_D3	3
-
+#endif /* _KERNEL */
 #endif /* _DEV_PCI_PCIVAR_H_ */

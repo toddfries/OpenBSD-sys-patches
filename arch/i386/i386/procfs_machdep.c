@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_machdep.c,v 1.4 2005/04/27 13:18:21 fgsch Exp $	*/
+/*	$OpenBSD: procfs_machdep.c,v 1.6 2006/12/20 17:50:40 gwk Exp $	*/
 /*	$NetBSD: procfs_machdep.c,v 1.6 2001/02/21 21:39:59 jdolecek Exp $	*/
 
 /*
@@ -47,10 +47,6 @@
 #include <machine/specialreg.h>
 
 extern int i386_fpu_present, i386_fpu_exception, i386_fpu_fdivbug;
-extern int cpu_feature;
-extern char cpu_model[];
-extern char cpu_vendor[];
-extern int cpu_id, cpu_class;
 
 static const char * const i386_features[] = {
 	"fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
@@ -128,9 +124,9 @@ procfs_getcpuinfstr(char *buf, int *len)
 		return 0;
 
 #if defined(I586_CPU) || defined(I686_CPU)
-	if (pentium_mhz != 0)
+	if (cpuspeed != 0)
 		l = snprintf(p, left, "cpu MHz\t\t: %d\n",
-		    pentium_mhz);
+		    cpuspeed);
 	else
 #endif
 		l = snprintf(p, left, "cpu MHz\t\t: unknown\n");

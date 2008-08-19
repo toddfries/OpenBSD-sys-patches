@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.72 2006/07/29 02:40:45 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.82 2006/12/12 02:44:36 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -49,8 +49,6 @@
 
 #ifndef	SCSI_SCSICONF_H
 #define SCSI_SCSICONF_H 1
-
-typedef	int			boolean;
 
 #include <sys/queue.h>
 #include <sys/timeout.h>
@@ -105,8 +103,8 @@ struct scsi_adapter {
 	void		(*scsi_minphys)(struct buf *);
 	int		(*open_target_lu)(void);
 	int		(*close_target_lu)(void);
-	int		(*ioctl)(struct scsi_link *, u_long cmd,
-			    caddr_t addrp, int flag, struct proc *p);
+	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int,
+			    struct proc *);
 };
 
 /*
@@ -116,6 +114,7 @@ struct scsi_adapter {
 #define TRY_AGAIN_LATER		1
 #define	COMPLETE		2
 #define	ESCAPE_NOT_SUPPORTED	3
+#define NO_CCB			4
 
 /*
  * These entry points are called by the low-end drivers to get services from
@@ -128,12 +127,6 @@ struct scsi_device {
 	void	(*start)(void *);
 
 	int	(*async)(void);
-	/*
-	 * When called with `0' as the second argument, we expect status
-	 * back from the upper-level driver.  When called with a `1',
-	 * we're simply notifying the upper-level driver that the command
-	 * is complete and expect no status back.
-	 */
 	void	(*done)(struct scsi_xfer *);
 };
 
@@ -192,10 +185,14 @@ int	scsiprint(void *, const char *);
  */
 struct scsi_inquiry_pattern {
 	u_int8_t type;
-	boolean removable;
+	int removable;
 	char *vendor;
 	char *product;
 	char *revision;
+};
+
+struct scsibus_attach_args {
+	struct scsi_link *saa_sc_link;
 };
 
 /*
@@ -217,7 +214,7 @@ struct scsibus_softc {
  * This is used to pass information from the high-level configuration code
  * to the device-specific drivers.
  */
-struct scsibus_attach_args {
+struct scsi_attach_args {
 	struct scsi_link *sa_sc_link;
 	struct scsi_inquiry_data *sa_inqbuf;
 };
@@ -300,17 +297,17 @@ struct scsi_xfer {
 /*
  * Possible retries numbers for scsi_test_unit_ready()
  */
-#define TEST_READY_RETRIES_DEFAULT	5
-#define TEST_READY_RETRIES_CD		10
-#define TEST_READY_RETRIES_TAPE		60
+#define TEST_READY_RETRIES	5
 
 const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
 	    int, int *);
 
 void	scsi_init(void);
+void	scsi_deinit(void);
+int	scsi_task(void (*func)(void *, void *), void *, void *, int);
 struct scsi_xfer *
 	scsi_get_xs(struct scsi_link *, int);
-void	scsi_free_xs(struct scsi_xfer *);
+void	scsi_free_xs(struct scsi_xfer *, int);
 int	scsi_execute_xs(struct scsi_xfer *);
 u_long	scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
@@ -345,9 +342,16 @@ void	show_scsi_xs(struct scsi_xfer *);
 void	scsi_print_sense(struct scsi_xfer *);
 void	show_scsi_cmd(struct scsi_xfer *);
 void	show_mem(u_char *, int);
-int	scsi_probe_busses(int, int, int);
 void	scsi_strvis(u_char *, u_char *, int);
 int	scsi_delay(struct scsi_xfer *, int);
+
+int	scsi_probe_bus(struct scsibus_softc *);
+int	scsi_probe_target(struct scsibus_softc *, int);
+int	scsi_probe_lun(struct scsibus_softc *, int, int);
+
+int	scsi_detach_bus(struct scsibus_softc *, int);
+int	scsi_detach_target(struct scsibus_softc *, int, int);
+int	scsi_detach_lun(struct scsibus_softc *, int, int, int);
 
 static __inline void _lto2b(u_int32_t val, u_int8_t *bytes);
 static __inline void _lto3b(u_int32_t val, u_int8_t *bytes);

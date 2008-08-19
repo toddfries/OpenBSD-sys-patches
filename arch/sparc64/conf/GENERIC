@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.157 2006/08/18 23:14:43 jason Exp $
+#	$OpenBSD: GENERIC,v 1.170 2007/03/07 06:23:02 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -17,6 +17,10 @@ option		PCIVERBOSE
 option		USER_PCICONF		# user-space PCI configuration
 option		APERTURE
 option		USBVERBOSE
+
+option		WSEMUL_SUN	# provide sun terminal emulation; required
+option		WSEMUL_NO_VT100	# do not provide vt100 terminal emulation
+option		WSEMUL_DUMB
 
 config		bsd	swap generic
 
@@ -44,8 +48,9 @@ ebus*	at pci?
 
 # PCI Ethernet
 lmc*	at pci?			# Lan Media Corp SSI/T3/HSSI
-hme*	at pci?
-gem*	at pci?
+hme*	at pci?			# Sun Happy Meal 10/100
+gem*	at pci?			# Sun GEM 10/100/Gigabit
+cas*	at pci?			# Sun Cassini 100/Gigabit
 ti*	at pci?			# Alteon Tigon 1Gb ethernet
 skc*	at pci?			# SysKonnect GEnesis 984x
 sk*	at skc?			#  each port of above
@@ -64,8 +69,11 @@ stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
 vr*	at pci?			# VIA Rhine ethernet
 re*	at pci?			# RealTek 8169/8169S/8110S
-musycc*	at pci?			# Conexant HDLC controller
-art*	at musycc?		# Accoom Artery E1/T1 cards
+#musycc* at pci?			# Conexant HDLC controller
+#art*	at musycc?		# Accoom Artery E1/T1 cards
+
+pgt*	at pci?			# Prism54 (only full-mac varients)
+acx*	at pci?			# TI ACX100/ACX111 (802.11b/g)
 
 # PCI SCSI
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
@@ -169,6 +177,7 @@ cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 ural*	at uhub?		# Ralink RT2500USB
+uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
@@ -182,6 +191,8 @@ radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
 udcf*	at uhub?		# Gude Expert mouseCLOCK
+uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
+onewire* at uow?
 
 #### Standard system devices -- all required for a given architecture
 
@@ -218,6 +229,7 @@ wsmouse* at pmsi?			#   generic mouse
 audioce*	at ebus?		# ebus cs4231
 
 # parallel ports
+bpp*	at sbus?
 lpt*	at ebus?
 
 ppm*	at ebus?
@@ -228,6 +240,7 @@ uperf*	at sbus?
 
 ## PROM console driver -- if all else fails
 pcons0	at mainbus0			# PROM console
+wsdisplay* at pcons?
 
 ## Mostek/DS1287 clocks
 clock*	at sbus?
@@ -252,6 +265,7 @@ qe*		at qec?
 be*		at qec?
 
 hme*		at sbus?
+#gem*		at sbus?
 
 # Magma serial/parallel port devices
 magma*		at sbus?
@@ -327,8 +341,9 @@ ukphy*	at mii?				# Unknown PHYs
 # sensors
 pcfiic*	at ebus?
 iic*	at pcfiic?
-#alipm*	at pci?
-#iic*	at alipm?
+alipm*	at pci? disable
+iic*	at alipm?
+mbg*	at pci?				# Meinberg Funkuhren radio clocks
 
 adc*	at iic?				# Analog Devices AD7416/AD7417/7418
 admtemp* at iic?			# Analog Devices ADM1021
@@ -392,6 +407,12 @@ sbus*		at xbox?
 fdc*	at sbus?
 #fdc*	at ebus?
 fd*	at fdc?
+
+# 1-Wire devices
+option ONEWIREVERBOSE
+owid*	at onewire?			# ID
+owsbm*	at onewire?			# Smart Battery Monitor
+owtemp* at onewire?			# Temperature
 
 pseudo-device	hotplug	1		# devices hot plugging
 

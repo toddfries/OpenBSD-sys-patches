@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.33 2006/06/25 07:44:54 brad Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.38 2007/02/20 21:15:01 tom Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -113,7 +113,9 @@ extern bios_pciinfo_t *bios_pciinfo;
 #endif
 
 #include "pcibios.h"
+#if NPCIBIOS > 0
 #include <i386/pci/pcibiosvar.h>
+#endif
 
 int pci_mode = -1;
 
@@ -167,9 +169,8 @@ struct i386_bus_dma_tag pci_bus_dma_tag = {
 };
 
 void
-pci_attach_hook(parent, self, pba)
-	struct device *parent, *self;
-	struct pcibus_attach_args *pba;
+pci_attach_hook(struct device *parent, struct device *self,
+    struct pcibus_attach_args *pba)
 {
 
 #if NBIOS > 0
@@ -183,9 +184,7 @@ pci_attach_hook(parent, self, pba)
 }
 
 int
-pci_bus_maxdevs(pc, busno)
-	pci_chipset_tag_t pc;
-	int busno;
+pci_bus_maxdevs(pci_chipset_tag_t pc, int busno)
 {
 
 	/*
@@ -201,9 +200,7 @@ pci_bus_maxdevs(pc, busno)
 }
 
 pcitag_t
-pci_make_tag(pc, bus, device, function)
-	pci_chipset_tag_t pc;
-	int bus, device, function;
+pci_make_tag(pci_chipset_tag_t pc, int bus, int device, int function)
 {
 	pcitag_t tag;
 
@@ -231,10 +228,7 @@ pci_make_tag(pc, bus, device, function)
 }
 
 void
-pci_decompose_tag(pc, tag, bp, dp, fp)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int *bp, *dp, *fp;
+pci_decompose_tag(pci_chipset_tag_t pc, pcitag_t tag, int *bp, int *dp, int *fp)
 {
 
 	switch (pci_mode) {
@@ -260,10 +254,7 @@ pci_decompose_tag(pc, tag, bp, dp, fp)
 }
 
 pcireg_t
-pci_conf_read(pc, tag, reg)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int reg;
+pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
 
@@ -287,11 +278,7 @@ pci_conf_read(pc, tag, reg)
 }
 
 void
-pci_conf_write(pc, tag, reg, data)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int reg;
-	pcireg_t data;
+pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
 
 	switch (pci_mode) {
@@ -312,7 +299,7 @@ pci_conf_write(pc, tag, reg, data)
 }
 
 int
-pci_mode_detect()
+pci_mode_detect(void)
 {
 
 #ifdef PCI_CONF_MODE
@@ -420,9 +407,7 @@ not2:
 }
 
 int
-pci_intr_map(pa, ihp)
-	struct pci_attach_args *pa;
-	pci_intr_handle_t *ihp;
+pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
 #if NIOAPIC > 0
 	struct mp_intr_map *mip;
@@ -448,6 +433,45 @@ pci_intr_map(pa, ihp)
 
 	ihp->line = line;
 	ihp->pin = pin;
+
+#if NIOAPIC > 0
+	pci_decompose_tag (pc, intrtag, &bus, &dev, &func);
+
+	if (!(ihp->line & PCI_INT_VIA_ISA) && mp_busses != NULL) {
+		/*
+		 * Assumes 1:1 mapping between PCI bus numbers and
+		 * the numbers given by the MP bios.
+		 * XXX Is this a valid assumption?
+		 */
+		int mpspec_pin = (dev<<2)|(pin-1);
+
+		for (mip = mp_busses[bus].mb_intrs; mip != NULL; mip=mip->next) {
+			if (mip->bus_pin == mpspec_pin) {
+				ihp->line = mip->ioapic_ih | line;
+				return 0;
+			}
+		}
+		if (mip == NULL && pa->pa_bridgetag) {
+			int bridgebus, bridgedev;
+
+			pci_decompose_tag(pc, *pa->pa_bridgetag,
+			    &bridgebus, &bridgedev, NULL);
+			mpspec_pin = (bridgedev << 2)|((pin + dev - 1) & 0x3);
+			for (mip = mp_busses[bridgebus].mb_intrs; mip != NULL;
+			    mip = mip->next) {
+				if (mip->bus_pin == mpspec_pin) {
+					ihp->line = mip->ioapic_ih | line;
+					return 0;
+				}
+			}
+		}
+		/*
+		 * No explicit PCI mapping found. This is not fatal,
+		 * we'll try the ISA (or possibly EISA) mappings next.
+		 */
+	}
+#endif
+
 #if NPCIBIOS > 0
 	pci_intr_header_fixup(pc, intrtag, ihp);
 	line = ihp->line & APIC_INT_LINE_MASK;
@@ -481,34 +505,19 @@ pci_intr_map(pa, ihp)
 		}
 	}
 #if NIOAPIC > 0
-	pci_decompose_tag (pc, intrtag, &bus, &dev, &func);
-
 	if (!(ihp->line & PCI_INT_VIA_ISA) && mp_busses != NULL) {
-		/*
-		 * Assumes 1:1 mapping between PCI bus numbers and
-		 * the numbers given by the MP bios.
-		 * XXX Is this a valid assumption?
-		 */
-		int mpspec_pin = (dev<<2)|(pin-1);
-
-		for (mip = mp_busses[bus].mb_intrs; mip != NULL; mip=mip->next) {
-			if (mip->bus_pin == mpspec_pin) {
-				ihp->line = mip->ioapic_ih | line;
-				return 0;
-			}
-		}
-		if (mip == NULL && mp_isa_bus != -1) {
-			for (mip = mp_busses[mp_isa_bus].mb_intrs; mip != NULL;
-			    mip=mip->next) {
+		if (mip == NULL && mp_isa_bus) {
+			for (mip = mp_isa_bus->mb_intrs; mip != NULL;
+			    mip = mip->next) {
 				if (mip->bus_pin == line) {
 					ihp->line = mip->ioapic_ih | line;
 					return 0;
 				}
 			}
 		}
-		if (mip == NULL && mp_eisa_bus != -1) {
-			for (mip = mp_busses[mp_eisa_bus].mb_intrs;
-			    mip != NULL; mip=mip->next) {
+		if (mip == NULL && mp_eisa_bus) {
+			for (mip = mp_eisa_bus->mb_intrs;  mip != NULL;
+			    mip = mip->next) {
 				if (mip->bus_pin == line) {
 					ihp->line = mip->ioapic_ih | line;
 					return 0;
@@ -532,15 +541,10 @@ bad:
 }
 
 const char *
-pci_intr_string(pc, ih)
-	pci_chipset_tag_t pc;
-	pci_intr_handle_t ih;
+pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 {
 	static char irqstr[64];
 	int line = ih.line & APIC_INT_LINE_MASK;
-
-	if (line == 0 || line >= ICU_LEN || line == 2)
-		panic("pci_intr_string: bogus handle 0x%x", line);
 
 #if NIOAPIC > 0
 	if (ih.line & APIC_INT_VIA_APIC) {
@@ -550,17 +554,16 @@ pci_intr_string(pc, ih)
 	}
 #endif
 
+	if (line == 0 || line >= ICU_LEN || line == 2)
+		panic("pci_intr_string: bogus handle 0x%x", line);
+
 	snprintf(irqstr, sizeof irqstr, "irq %d", line);
 	return (irqstr);
 }
 
 void *
-pci_intr_establish(pc, ih, level, func, arg, what)
-	pci_chipset_tag_t pc;
-	pci_intr_handle_t ih;
-	int level, (*func)(void *);
-	void *arg;
-	char *what;
+pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
+    int (*func)(void *), void *arg, char *what)
 {
 	void *ret;
 	int l = ih.line & APIC_INT_LINE_MASK;
@@ -582,9 +585,7 @@ pci_intr_establish(pc, ih, level, func, arg, what)
 }
 
 void
-pci_intr_disestablish(pc, cookie)
-	pci_chipset_tag_t pc;
-	void *cookie;
+pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 {
 	/* XXX oh, unroute the pci int link? */
 	isa_intr_disestablish(NULL, cookie);

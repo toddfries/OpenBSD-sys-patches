@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.15 2006/07/09 21:00:17 krw Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.19 2006/10/20 23:47:42 krw Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.1 1995/02/13 23:07:34 cgd Exp $	*/
 
 /*
@@ -86,19 +86,8 @@ struct dos_partition {
 #define	DPSECT(s)	((s) & 0x3f)
 #define	DPCYL(c, s)	((c) + (((s) & 0xc0) << 2))
 
-#include <sys/dkbad.h>
 struct cpu_disklabel {
 	int labelsector;
-	union {
-		struct {
-		} _alpha;
-		struct {
-			struct dos_partition dosparts[NDOSPART];
-			struct dkbad bad;
-		} _i386;
-	} u;
 };
-
-#define DKBAD(x) ((x)->u._i386.bad)
 
 #endif /* _MACHINE_DISKLABEL_H_ */

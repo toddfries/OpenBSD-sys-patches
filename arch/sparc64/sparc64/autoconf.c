@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.57 2006/08/10 01:11:13 gwk Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.59 2007/02/12 19:53:36 gwk Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -1024,14 +1024,19 @@ extern bus_space_tag_t mainbus_space_tag;
 		OF_getprop(findroot(), "name", platform_type,
 		    sizeof(platform_type));
 	printf(": %s\n", platform_type);
-	if (len > 0) {
-		hw_vendor = platform_type;
-		if ((p = memchr(hw_vendor, ' ', len)) != NULL) {
+
+	hw_vendor = malloc(sizeof(platform_type), M_DEVBUF, M_NOWAIT);
+	if (len > 0 && hw_vendor != NULL) {
+		strlcpy(hw_vendor, platform_type, sizeof(platform_type));
+		if ((strncmp(hw_vendor, "SUNW,", 5)) == 0) {
+			p = hw_prod = hw_vendor + 5;
+			hw_vendor = "Sun";
+		} else if ((p = memchr(hw_vendor, ' ', len)) != NULL) {
 			*p = '\0';
 			hw_prod = ++p;
-			if ((p = memchr(p, '(', len - (p - hw_vendor))) != NULL)
-				*p = '\0'; 
 		}
+		if ((p = memchr(hw_prod, '(', len - (p - hw_prod))) != NULL)
+			*p = '\0';
 	}
 
 	/*
@@ -1053,7 +1058,7 @@ extern bus_space_tag_t mainbus_space_tag;
 	/* the first early device to be configured is the cpu */
 	{
 		/* XXX - what to do on multiprocessor machines? */
-		
+
 		for (node = OF_child(node); node; node = OF_peer(node)) {
 			if (OF_getprop(node, "device_type", 
 				buf, sizeof(buf)) <= 0)
@@ -1685,7 +1690,7 @@ device_register(dev, aux)
 		 * device to determine whether this target is on the
 		 * correct controller in our boot path.
 		 */
-		struct scsibus_attach_args *sa = aux;
+		struct scsi_attach_args *sa = aux;
 		struct scsi_link *sl = sa->sa_sc_link;
 		struct scsibus_softc *sbsc =
 		    (struct scsibus_softc *)dev->dv_parent;

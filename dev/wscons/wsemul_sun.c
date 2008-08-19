@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemul_sun.c,v 1.17 2006/08/17 06:27:04 miod Exp $ */
+/* $OpenBSD: wsemul_sun.c,v 1.20 2007/02/14 01:12:16 jsg Exp $ */
 /* $NetBSD: wsemul_sun.c,v 1.11 2000/01/05 11:19:36 drochner Exp $ */
 
 /*
@@ -216,7 +216,9 @@ wsemul_sun_attach(console, type, cookie, ccol, crow, cbcookie, defattr)
 		KASSERT(edp->console == 1);
 #endif
 	} else {
-		edp = malloc(sizeof *edp, M_DEVBUF, M_WAITOK);
+		edp = malloc(sizeof *edp, M_DEVBUF, M_NOWAIT);
+		if (edp == NULL)
+			return (NULL);
 		wsemul_sun_init(edp, type, cookie, ccol, crow, defattr);
 
 #ifdef DIAGNOSTIC
@@ -371,7 +373,7 @@ wsemul_sun_control(edp, c)
 
 	case 'E':		/* "Cursor Next Line (CNL)" */
 		edp->ccol = 0;
-		/* FALLTHRU */
+		/* FALLTHROUGH */
 	case 'B':		/* "Cursor Down (CUD)" */
 		edp->crow += min(NORMALIZE(ARG(0,1)), ROWS_LEFT);
 		break;
@@ -395,7 +397,7 @@ wsemul_sun_control(edp, c)
 			(*edp->emulops->eraserows)(edp->emulcookie,
 			     edp->crow + 1, ROWS_LEFT, edp->bkgdattr);
 		}
-		/* FALLTHRU */
+		/* FALLTHROUGH */
 	case 'K':		/* "Erase in Line (EL)" */
 		(*edp->emulops->erasecols)(edp->emulcookie, edp->crow,
 		    edp->ccol, COLS_LEFT + 1, edp->bkgdattr);
@@ -471,26 +473,14 @@ wsemul_sun_control(edp, c)
 				flags |= WSATTR_REVERSE;
 				break;
 			/* ANSI foreground color */
-			case 30:
-				fgcol = WSCOL_BLACK;
-				break;
-			case 31: case 32: case 33:
-			case 34: case 35: case 36:
+			case 30: case 31: case 32: case 33:
+			case 34: case 35: case 36: case 37:
 				fgcol = ARG(n,edp->nargs) - 30;
 				break;
-			case 37:
-				fgcol = WSCOL_WHITE;
-				break;
 			/* ANSI background color */
-			case 40:
-				bgcol = WSCOL_BLACK;
-				break;
-			case 41: case 42: case 43:
-			case 44: case 45: case 46:
+			case 40: case 41: case 42: case 43:
+			case 44: case 45: case 46: case 47:
 				bgcol = ARG(n,edp->nargs) - 40;
-				break;
-			case 47:
-				bgcol = WSCOL_WHITE;
 				break;
 			}
 		}

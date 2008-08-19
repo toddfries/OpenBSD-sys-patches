@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.110 2006/07/29 02:40:45 krw Exp $	*/
+/*	$OpenBSD: cd.c,v 1.119 2007/02/03 23:47:18 bluhm Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -50,7 +50,7 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
+#include <sys/timeout.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -102,6 +102,7 @@ int	cdactivate(struct device *, enum devact);
 int	cddetach(struct device *, int);
 
 void	cdstart(void *);
+void	cdrestart(void *);
 void	cdminphys(struct buf *);
 void	cdgetdisklabel(dev_t, struct cd_softc *, struct disklabel *,
 			    struct cpu_disklabel *, int);
@@ -124,6 +125,7 @@ int	cd_read_subchannel(struct cd_softc *, int, int, int,
 int	cd_read_toc(struct cd_softc *, int, int, void *, int, int);
 int	cd_get_parms(struct cd_softc *, int);
 int	cd_load_toc(struct cd_softc *, struct cd_toc *, int);
+int	cd_interpret_sense(struct scsi_xfer *);
 
 int    dvd_auth(struct cd_softc *, union dvd_authinfo *);
 int    dvd_read_physical(struct cd_softc *, union dvd_struct *);
@@ -147,7 +149,7 @@ struct cfdriver cd_cd = {
 struct dkdriver cddkdriver = { cdstrategy };
 
 struct scsi_device cd_switch = {
-	NULL,			/* use default error handler */
+	cd_interpret_sense,
 	cdstart,		/* we have a queue, which is started by this */
 	NULL,			/* we do not have an async handler */
 	cddone,			/* deal with stats at interrupt time */
@@ -175,7 +177,7 @@ cdmatch(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
-	struct scsibus_attach_args *sa = aux;
+	struct scsi_attach_args *sa = aux;
 	int priority;
 
 	(void)scsi_inqmatch(sa->sa_inqbuf,
@@ -194,7 +196,7 @@ cdattach(parent, self, aux)
 	void *aux;
 {
 	struct cd_softc *cd = (void *)self;
-	struct scsibus_attach_args *sa = aux;
+	struct scsi_attach_args *sa = aux;
 	struct scsi_link *sc_link = sa->sa_sc_link;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("cdattach:\n"));
@@ -223,6 +225,8 @@ cdattach(parent, self, aux)
 		cd->flags |= CDF_ANCIENT;
 
 	printf("\n");
+
+	timeout_set(&cd->sc_timeout, cdrestart, cd);
 
 	if ((cd->sc_cdpwrhook = powerhook_establish(cd_powerhook, cd)) == NULL)
 		printf("%s: WARNING: unable to establish power hook\n",
@@ -271,7 +275,7 @@ cddetach(self, flags)
 	}
 	splx(s);
 
-	/* locate the major number */
+	/* locate the minor number */
 	mn = CDMINOR(self->dv_unit, 0);
 
 	for (bmaj = 0; bmaj < nblkdev; bmaj++)
@@ -340,7 +344,11 @@ cdopen(dev, flag, fmt, p)
 		 * progress of loading media so use increased retries number
 		 * and don't ignore NOT_READY.
 		 */
-		error = scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_CD,
+
+		/* Use cd_interpret_sense() now. */
+		sc_link->flags |= SDEV_OPEN;
+
+		error = scsi_test_unit_ready(sc_link, TEST_READY_RETRIES,
 		    (rawopen ? SCSI_SILENT : 0) | SCSI_IGNORE_ILLEGAL_REQUEST |
 		    SCSI_IGNORE_MEDIA_CHANGE);
 
@@ -457,6 +465,8 @@ cdclose(dev, flag, fmt, p)
 
 			cd->sc_link->flags &= ~SDEV_EJECTING;
 		}
+
+		timeout_del(&cd->sc_timeout);
 	}
 
 	cdunlock(cd);
@@ -560,7 +570,7 @@ done:
  * continues to be drained.
  *
  * must be called at the correct (highish) spl level
- * cdstart() is called at splbio from cdstrategy and scsi_done
+ * cdstart() is called at splbio from cdstrategy, cdrestart and scsi_done
  */
 void
 cdstart(v)
@@ -573,7 +583,7 @@ cdstart(v)
 	struct scsi_rw_big cmd_big;
 	struct scsi_rw cmd_small;
 	struct scsi_generic *cmdp;
-	int blkno, nblks, cmdlen;
+	int blkno, nblks, cmdlen, error;
 	struct partition *p;
 
 	splassert(IPL_BIO);
@@ -667,14 +677,40 @@ cdstart(v)
 		 * Call the routine that chats with the adapter.
 		 * Note: we cannot sleep as we may be an interrupt
 		 */
-		if (scsi_scsi_cmd(sc_link, cmdp, cmdlen,
-		    (u_char *) bp->b_data, bp->b_bcount,
-		    CDRETRIES, 30000, bp, SCSI_NOSLEEP |
-		    ((bp->b_flags & B_READ) ? SCSI_DATA_IN : SCSI_DATA_OUT))) {
+		error = scsi_scsi_cmd(sc_link, cmdp, cmdlen,
+		    (u_char *) bp->b_data, bp->b_bcount, CDRETRIES, 30000, bp,
+		    SCSI_NOSLEEP | ((bp->b_flags & B_READ) ? SCSI_DATA_IN :
+		    SCSI_DATA_OUT));
+		switch (error) {
+		case 0:
+			timeout_del(&cd->sc_timeout);
+			break;
+		case EAGAIN:
+			/*
+			 * The device can't start another i/o. Try again later.
+			 */
+			dp->b_actf = bp;
 			disk_unbusy(&cd->sc_dk, 0, 0);
-			printf("%s: not queued", cd->sc_dev.dv_xname);
+			timeout_add(&cd->sc_timeout, 1);
+			return;
+		default:
+			disk_unbusy(&cd->sc_dk, 0, 0);
+			printf("%s: not queued, error %d\n",
+			    cd->sc_dev.dv_xname, error);
+			break;
 		}
 	}
+}
+
+void
+cdrestart(v)
+	void *v;
+{
+	int s;
+
+	s = splbio();
+	cdstart(v);
+	splx(s);
 }
 
 void
@@ -1196,7 +1232,6 @@ cdgetdisklabel(dev, cd, lp, clp, spoofonly)
 	lp->d_secperunit = cd->params.disksize;
 	lp->d_rpm = 300;
 	lp->d_interleave = 1;
-	lp->d_flags = D_REMOVABLE;
 
 	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
 	lp->d_bbsize = BBSIZE;
@@ -1821,6 +1856,33 @@ dvd_auth(cd, a)
 			return (error);
 		return (0);
 
+	case DVD_LU_SEND_RPC_STATE:
+		cmd.opcode = GPCMD_REPORT_KEY;
+		cmd.bytes[8] = 8;
+		cmd.bytes[9] = 8 | (0 << 6);
+		error = scsi_scsi_cmd(cd->sc_link, &cmd, sizeof(cmd), buf, 8,
+		    CDRETRIES, 30000, NULL, SCSI_DATA_IN);
+		if (error)
+			return (error);
+		a->lrpcs.type = (buf[4] >> 6) & 3;
+		a->lrpcs.vra = (buf[4] >> 3) & 7;
+		a->lrpcs.ucca = (buf[4]) & 7;
+		a->lrpcs.region_mask = buf[5];
+		a->lrpcs.rpc_scheme = buf[6];
+		return (0);
+
+	case DVD_HOST_SEND_RPC_STATE:
+		cmd.opcode = GPCMD_SEND_KEY;
+		cmd.bytes[8] = 8;
+		cmd.bytes[9] = 6 | (0 << 6);
+		buf[1] = 6;
+		buf[4] = a->hrpcs.pdrc;
+		error = scsi_scsi_cmd(cd->sc_link, &cmd, sizeof(cmd), buf, 8,
+		    CDRETRIES, 30000, NULL, SCSI_DATA_OUT);
+		if (error)
+			return (error);
+		return (0);
+
 	default:
 		return (ENOTTY);
 	}
@@ -2017,4 +2079,48 @@ cd_powerhook(int why, void *arg)
 	if (why == PWR_RESUME && cd->sc_dk.dk_openmask != 0)
 		scsi_prevent(cd->sc_link, PR_PREVENT,
 		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
+}
+
+int
+cd_interpret_sense(xs)
+	struct scsi_xfer *xs;
+{
+	struct scsi_sense_data *sense = &xs->sense;
+	struct scsi_link *sc_link = xs->sc_link;
+	u_int8_t skey = sense->flags & SSD_KEY;
+	u_int8_t serr = sense->error_code & SSD_ERRCODE;
+
+	if (((sc_link->flags & SDEV_OPEN) == 0) ||
+	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED))
+		return (EJUSTRETURN); /* let the generic code handle it */
+
+	/*
+	 * We do custom processing in cd for the unit becoming ready
+	 * case.  We do not allow xs->retries to be decremented on the
+	 * "Unit Becoming Ready" case. This is because CD drives
+	 * report "Unit Becoming Ready" when loading media and can
+	 * take a long time.  Rather than having a massive timeout for
+	 * all operations (which would cause other problems), we allow
+	 * operations to wait (but be interruptable with Ctrl-C)
+	 * forever as long as the drive is reporting that it is
+	 * becoming ready.  All other cases of not being ready are
+	 * handled by the default handler.
+	 */
+	switch(skey) {
+	case SKEY_NOT_READY:
+		if ((xs->flags & SCSI_IGNORE_NOT_READY) != 0)
+			return (0);
+		if (ASC_ASCQ(sense) == SENSE_NOT_READY_BECOMING_READY) {
+		    	SC_DEBUG(sc_link, SDEV_DB1, ("not ready: busy (%#x)\n",
+			    sense->add_sense_code_qual));
+			/* don't count this as a retry */
+			xs->retries++;
+			return (scsi_delay(xs, 1));
+		}
+		break;
+	/* XXX more to come here for a few other cases */
+	default:
+		break;
+	}
+	return (EJUSTRETURN); /* use generic handler in scsi_base */
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.7 2005/01/31 21:35:50 grange Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.9 2007/02/24 11:59:47 miod Exp $	*/
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1992, 1993
@@ -102,15 +102,6 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	pcb->pcb_context.val[8] = (register_t)(caddr_t)pcb + USPACE - 64;
 	pcb->pcb_context.val[0] = (register_t)func;
 	pcb->pcb_context.val[1] = (register_t)arg;
-}
-
-/*
- * Finish a swapin operation. Nothing to do.
- */
-void
-cpu_swapin(p)
-	struct proc *p;
-{
 }
 
 /*
@@ -219,21 +210,7 @@ pagemove(from, to, size)
 extern vm_map_t phys_map;
 
 /*
- * Map an IO request into kernel virtual address space.  Requests fall into
- * one of five catagories:
- *
- *	B_PHYS|B_UAREA:	User u-area swap.
- *			Address is relative to start of u-area (p_addr).
- *	B_PHYS|B_PAGET:	User page table swap.
- *			Address is a kernel VA in usrpt (Usrptmap).
- *	B_PHYS|B_DIRTY:	Dirty page push.
- *			Address is a VA in proc2's address space.
- *	B_PHYS|B_PGIN:	Kernel pagein of user pages.
- *			Address is VA in user's address space.
- *	B_PHYS:		User "raw" IO request.
- *			Address is VA in user's address space.
- *
- * All requests are (re)mapped into kernel VA space via the phys_map
+ * Map an user IO request into kernel virtual address space.
  */
 
 #define trunc_page_align(x) ((vaddr_t)(x) & ~(CpuCacheAliasMask | PAGE_SIZE))

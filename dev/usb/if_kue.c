@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.42 2006/06/23 06:27:11 miod Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.44 2007/02/11 20:29:22 miod Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -70,14 +70,7 @@
  * Ported to NetBSD and somewhat rewritten by Lennart Augustsson.
  */
 
-#if defined(__NetBSD__)
-#include "opt_inet.h"
-#include "opt_ns.h"
 #include "bpfilter.h"
-#include "rnd.h"
-#elif defined(__OpenBSD__)
-#include "bpfilter.h"
-#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -284,7 +277,7 @@ kue_load_fw(struct kue_softc *sc)
 	DPRINTFN(1,("%s: kue_load_fw: download code_seg\n",
 		    USBDEVNAME(sc->kue_dev)));
 	err = kue_ctl(sc, KUE_CTL_WRITE, KUE_CMD_SEND_SCAN,
-	    0, (void *)&fw->data[0], fw->codeseglen);
+	    0, (void *)&fw->data[0], ntohl(fw->codeseglen));
 	if (err) {
 		printf("%s: failed to load code segment: %s\n",
 		    USBDEVNAME(sc->kue_dev), usbd_errstr(err));
@@ -296,7 +289,7 @@ kue_load_fw(struct kue_softc *sc)
 	DPRINTFN(1,("%s: kue_load_fw: download fix_seg\n",
 		    USBDEVNAME(sc->kue_dev)));
 	err = kue_ctl(sc, KUE_CTL_WRITE, KUE_CMD_SEND_SCAN,
-	    0, (void *)&fw->data[fw->codeseglen], fw->fixseglen);
+	    0, (void *)&fw->data[ntohl(fw->codeseglen)], ntohl(fw->fixseglen));
 	if (err) {
 		printf("%s: failed to load fixup segment: %s\n",
 		    USBDEVNAME(sc->kue_dev), usbd_errstr(err));
@@ -308,8 +301,8 @@ kue_load_fw(struct kue_softc *sc)
 	DPRINTFN(1,("%s: kue_load_fw: download trig_seg\n",
 		    USBDEVNAME(sc->kue_dev)));
 	err = kue_ctl(sc, KUE_CTL_WRITE, KUE_CMD_SEND_SCAN,
-	    0, (void *)&fw->data[fw->codeseglen + fw->fixseglen],
-	    fw->trigseglen);
+	    0, (void *)&fw->data[ntohl(fw->codeseglen) + ntohl(fw->fixseglen)],
+	    ntohl(fw->trigseglen));
 	if (err) {
 		printf("%s: failed to load trigger segment: %s\n",
 		    USBDEVNAME(sc->kue_dev), usbd_errstr(err));

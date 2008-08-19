@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcibios.c,v 1.33 2006/04/27 15:37:55 mickey Exp $	*/
+/*	$OpenBSD: pcibios.c,v 1.36 2007/02/20 21:15:01 tom Exp $	*/
 /*	$NetBSD: pcibios.c,v 1.5 2000/08/01 05:23:59 uch Exp $	*/
 
 /*
@@ -107,6 +107,7 @@
 
 #include <machine/biosvar.h>
 
+int pcibios_flags;
 int pcibios_present;
 
 struct pcibios_pir_header pcibios_pir_header;
@@ -145,9 +146,7 @@ struct cfattach pcibios_ca = {
 };
 
 int
-pcibiosprobe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+pcibiosprobe(struct device *parent, void *match, void *aux)
 {
 	struct bios_attach_args *ba = aux;
 	u_int32_t rev_maj, rev_min, mech1, mech2, scmech1, scmech2, maxbus;
@@ -169,9 +168,7 @@ pcibiosprobe(parent, match, aux)
 }
 
 void
-pcibiosattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+pcibiosattach(struct device *parent, struct device *self, void *aux)
 {
 	struct pcibios_softc *sc = (struct pcibios_softc *)self;
 	u_int32_t rev_maj, rev_min, mech1, mech2, scmech1, scmech2;
@@ -241,8 +238,7 @@ pcibiosattach(parent, self, aux)
 }
 
 struct pcibios_intr_routing *
-pcibios_pir_init(sc)
-	struct pcibios_softc *sc;
+pcibios_pir_init(struct pcibios_softc *sc)
 {
 	paddr_t pa;
 
@@ -270,7 +266,7 @@ pcibios_pir_init(sc)
 		for (i = 0; i < pirh->tablesize; i++)
 			cksum += p[i];
 
-		printf("%s: PCI IRQ Routing Table rev %d.%d @ 0x%llx/%d "
+		printf("%s: PCI IRQ Routing Table rev %d.%d @ 0x%lx/%d "
 		    "(%d entries)\n", sc->sc_dev.dv_xname,
 		    pirh->version >> 8, pirh->version & 0xff, pa,
 		    pirh->tablesize, (pirh->tablesize - sizeof(*pirh)) / 16);
@@ -346,10 +342,9 @@ pcibios_pir_init(sc)
 }
 
 int
-pcibios_get_status(sc, rev_maj, rev_min, mech1, mech2, scmech1, scmech2, maxbus)
-	struct pcibios_softc *sc;
-	u_int32_t *rev_maj, *rev_min, *mech1, *mech2, *scmech1, *scmech2,
-	    *maxbus;
+pcibios_get_status(struct pcibios_softc *sc, u_int32_t *rev_maj,
+    u_int32_t *rev_min, u_int32_t *mech1, u_int32_t *mech2, u_int32_t *scmech1,
+    u_int32_t *scmech2, u_int32_t *maxbus)
 {
 	u_int32_t ax, bx, cx, edx;
 	int rv;
@@ -390,11 +385,8 @@ pcibios_get_status(sc, rev_maj, rev_min, mech1, mech2, scmech1, scmech2, maxbus)
 }
 
 int
-pcibios_get_intr_routing(sc, table, nentries, exclirq)
-	struct pcibios_softc *sc;
-	struct pcibios_intr_routing *table;
-	int *nentries;
-	u_int16_t *exclirq;
+pcibios_get_intr_routing(struct pcibios_softc *sc,
+    struct pcibios_intr_routing *table, int *nentries, u_int16_t *exclirq)
 {
 	u_int32_t ax, bx;
 	int rv;
@@ -435,10 +427,7 @@ pcibios_get_intr_routing(sc, table, nentries, exclirq)
 }
 
 int
-pcibios_return_code(sc, ax, func)
-	struct pcibios_softc *sc;
-	u_int16_t ax;
-	const char *func;
+pcibios_return_code(struct pcibios_softc *sc, u_int16_t ax, const char *func)
 {
 	const char *errstr;
 	int rv = ax >> 8;
@@ -492,8 +481,7 @@ pcibios_return_code(sc, ax, func)
 }
 
 void
-pcibios_print_exclirq(sc)
-	struct pcibios_softc *sc;
+pcibios_print_exclirq(struct pcibios_softc *sc)
 {
 	int i;
 
@@ -508,7 +496,7 @@ pcibios_print_exclirq(sc)
 }
 
 void
-pcibios_print_pir_table()
+pcibios_print_pir_table(void)
 {
 	int i, j;
 
@@ -527,11 +515,8 @@ pcibios_print_pir_table()
 }
 
 void
-pci_device_foreach(sc, pc, maxbus, func)
-	struct pcibios_softc *sc;
-	pci_chipset_tag_t pc;
-	int maxbus;
-	void (*func)(struct pcibios_softc *, pci_chipset_tag_t, pcitag_t);
+pci_device_foreach(struct pcibios_softc *sc, pci_chipset_tag_t pc, int maxbus,
+    void (*func)(struct pcibios_softc *, pci_chipset_tag_t, pcitag_t))
 {
 	const struct pci_quirkdata *qd;
 	int bus, device, function, maxdevs, nfuncs;

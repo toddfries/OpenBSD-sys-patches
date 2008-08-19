@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.149.2.1 2007/03/28 19:45:48 henning Exp $	*/
+/*	$OpenBSD: if.c,v 1.155 2007/02/14 00:53:48 jsg Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -658,7 +658,7 @@ if_clone_create(const char *name)
 	if (ifunit(name) != NULL)
 		return (EEXIST);
 
-	if ((ret = (*ifc->ifc_create)(ifc, unit)) != -1 &&
+	if ((ret = (*ifc->ifc_create)(ifc, unit)) == 0 &&
 	    (ifp = ifunit(name)) != NULL)
 		if_addgroup(ifp, ifc->ifc_name);
 
@@ -694,7 +694,7 @@ if_clone_destroy(const char *name)
 
 	if_delgroup(ifp, ifc->ifc_name);
 
-	if ((ret = (*ifc->ifc_destroy)(ifp)) == -1)
+	if ((ret = (*ifc->ifc_destroy)(ifp)) != 0)
 		if_addgroup(ifp, ifc->ifc_name);
 
 	return (ret);
@@ -1029,6 +1029,10 @@ if_down(struct ifnet *ifp)
 	if (ifp->if_carp)
 		carp_carpdev_state(ifp);
 #endif
+#if NBRIDGE > 0
+	if (ifp->if_bridge)
+		bstp_ifstate(ifp);
+#endif
 	rt_ifmsg(ifp);
 }
 
@@ -1057,6 +1061,10 @@ if_up(struct ifnet *ifp)
 #if NCARP > 0
 	if (ifp->if_carp)
 		carp_carpdev_state(ifp);
+#endif
+#if NBRIDGE > 0
+	if (ifp->if_bridge)
+		bstp_ifstate(ifp);
 #endif
 	rt_ifmsg(ifp);
 #ifdef INET6
@@ -1328,7 +1336,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	                bcopy((caddr_t)ifr->ifr_addr.sa_data,
 			      (caddr_t)((struct arpcom *)ifp)->ac_enaddr,
 			      ETHER_ADDR_LEN);
-			/* fall through */
+			/* FALLTHROUGH */
 		case IFT_ARCNET:
                         bcopy((caddr_t)ifr->ifr_addr.sa_data,
 			      LLADDR(sdl), ETHER_ADDR_LEN);
@@ -1337,11 +1345,14 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	                return (ENODEV);
 		}
 		if (ifp->if_flags & IFF_UP) {
+			struct ifreq ifrq;
 		        int s = splnet();
 			ifp->if_flags &= ~IFF_UP;
-			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
+			ifrq.ifr_flags = ifp->if_flags;
+			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
 			ifp->if_flags |= IFF_UP;
-			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
+			ifrq.ifr_flags = ifp->if_flags;
+			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
 			splx(s);
 			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			        if (ifa->ifa_addr != NULL &&
@@ -1558,6 +1569,30 @@ if_detached_watchdog(struct ifnet *ifp)
 }
 
 /*
+ * Create interface group without members
+ */
+struct ifg_group *
+if_creategroup(const char *groupname)
+{
+	struct ifg_group	*ifg = NULL;
+
+	if ((ifg = (struct ifg_group *)malloc(sizeof(struct ifg_group),
+	    M_TEMP, M_NOWAIT)) == NULL)
+		return (NULL);
+
+	strlcpy(ifg->ifg_group, groupname, sizeof(ifg->ifg_group));
+	ifg->ifg_refcnt = 0;
+	ifg->ifg_carp_demoted = 0;
+	TAILQ_INIT(&ifg->ifg_members);
+#if NPF > 0
+	pfi_attach_ifgroup(ifg);
+#endif
+	TAILQ_INSERT_TAIL(&ifg_head, ifg, ifg_next);
+
+	return (ifg);
+}
+
+/*
  * Add a group to an interface
  */
 int
@@ -1589,21 +1624,10 @@ if_addgroup(struct ifnet *ifp, const char *groupname)
 		if (!strcmp(ifg->ifg_group, groupname))
 			break;
 
-	if (ifg == NULL) {
-		if ((ifg = (struct ifg_group *)malloc(sizeof(struct ifg_group),
-		    M_TEMP, M_NOWAIT)) == NULL) {
-			free(ifgl, M_TEMP);
-			free(ifgm, M_TEMP);
-			return (ENOMEM);
-		}
-		strlcpy(ifg->ifg_group, groupname, sizeof(ifg->ifg_group));
-		ifg->ifg_refcnt = 0;
-		ifg->ifg_carp_demoted = 0;
-		TAILQ_INIT(&ifg->ifg_members);
-#if NPF > 0
-		pfi_attach_ifgroup(ifg);
-#endif
-		TAILQ_INSERT_TAIL(&ifg_head, ifg, ifg_next);
+	if (ifg == NULL && (ifg = if_creategroup(groupname)) == NULL) {
+		free(ifgl, M_TEMP);
+		free(ifgm, M_TEMP);
+		return (ENOMEM);
 	}
 
 	ifg->ifg_refcnt++;

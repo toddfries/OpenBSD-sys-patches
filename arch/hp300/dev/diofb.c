@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofb.c,v 1.14 2006/08/11 18:33:13 miod Exp $	*/
+/*	$OpenBSD: diofb.c,v 1.16 2006/11/29 19:08:19 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -320,6 +320,7 @@ diofb_end_attach(void *sc, struct wsdisplay_accessops *accessops,
 	waa.scrdata = &fb->wsl;
 	waa.accessops = accessops;
 	waa.accesscookie = fb;
+	waa.defaultscreens = 0;
 
 	config_found((struct device *)sc, &waa, wsemuldisplaydevprint);
 }
@@ -376,7 +377,7 @@ diofb_erasecols(void *cookie, int row, int col, int num, long attr)
 	int fg, bg;
 	int snum, scol, srow;
 
-	rasops_unpack_attr(attr, &fg, &bg, NULL);
+	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 
 	snum = num * ri->ri_font->fontwidth;
 	scol = col * ri->ri_font->fontwidth + ri->ri_xorigin;
@@ -400,7 +401,7 @@ diofb_eraserows(void *cookie, int row, int num, long attr)
 	int srow, snum;
 	int rc;
 
-	rasops_unpack_attr(attr, &fg, &bg, NULL);
+	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	bg ^= 0xff;
 
 	if (num == ri->ri_rows && (ri->ri_flg & RI_FULLCLEAR)) {

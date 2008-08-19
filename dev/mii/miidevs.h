@@ -1,10 +1,10 @@
-/*	$OpenBSD: miidevs.h,v 1.83 2006/08/21 03:01:34 brad Exp $	*/
+/*	$OpenBSD: miidevs.h,v 1.88 2006/11/28 18:20:03 brad Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: miidevs,v 1.80 2006/08/21 03:01:19 brad Exp 
+ *	OpenBSD: miidevs,v 1.85 2006/11/28 18:19:49 brad Exp 
  */
 /* $NetBSD: miidevs,v 1.3 1998/11/05 03:43:43 thorpej Exp $ */
 
@@ -49,6 +49,7 @@
  * List of known MII OUIs
  */
 
+#define	MII_OUI_VITESSE	0x0001c1	/* Vitesse */
 #define	MII_OUI_3COM	0x00105a	/* 3com */
 #define	MII_OUI_LUCENT	0x00601d	/* Lucent Technologies */
 #define	MII_OUI_ALTIMA	0x0010a9	/* Altima Communications */
@@ -56,7 +57,7 @@
 #define	MII_OUI_ASIX	0x000ec6	/* ASIX Electronics */
 #define	MII_OUI_BROADCOM	0x001018	/* Broadcom Corporation */
 #define	MII_OUI_CENIX	0x000749	/* CENiX Inc. */
-#define	MII_OUI_CICADA	0x0003F1	/* Cicada Semiconductor */
+#define	MII_OUI_CICADA	0x0003f1	/* Cicada Semiconductor */
 #define	MII_OUI_ENABLESEMI	0x0010dd	/* Enable Semiconductor */
 #define	MII_OUI_DAVICOM	0x00606e	/* Davicom Semiconductor */
 #define	MII_OUI_MARVELL	0x005043	/* Marvell Semiconductor */
@@ -103,6 +104,7 @@
 
 /* Don't know what's going on here. */
 #define	MII_OUI_xxDAVICOM	0x006040	/* Davicom Semiconductor */
+#define	MII_OUI_xxBROADCOM2	0x0050ef	/* Broadcom Corporation */
 
 /* This is the OUI of the gigE PHY in the RealTek 8169S/8110S chips */
 #define	MII_OUI_xxREALTEK	0x000732	/* Realtek Semiconductor */
@@ -165,6 +167,10 @@
 #define	MII_STR_xxBROADCOM_BCM5780	"BCM5780 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5708C	0x0036
 #define	MII_STR_xxBROADCOM_BCM5708C	"BCM5708C 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM2_BCM5755	0x000c
+#define	MII_STR_xxBROADCOM2_BCM5755	"BCM5755 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM2_BCM5787	0x000e
+#define	MII_STR_xxBROADCOM2_BCM5787	"BCM5787 10/100/1000baseT PHY"
 #define	MII_MODEL_BROADCOM_BCM5400	0x0004
 #define	MII_STR_BROADCOM_BCM5400	"BCM5400 1000baseT PHY"
 #define	MII_MODEL_BROADCOM_BCM5401	0x0005
@@ -191,12 +197,16 @@
 /* Cicada Semiconductor PHYs (now owned by Vitesse) */
 #define	MII_MODEL_CICADA_CS8201	0x0001
 #define	MII_STR_CICADA_CS8201	"Cicada CS8201 10/100/1000TX PHY"
+#define	MII_MODEL_CICADA_VSC8211	0x000b
+#define	MII_STR_CICADA_VSC8211	"VSC8211 10/100/1000 PHY"
 #define	MII_MODEL_CICADA_CS8201A	0x0020
 #define	MII_STR_CICADA_CS8201A	"Cicada CS8201 10/100/1000TX PHY"
 #define	MII_MODEL_CICADA_CS8201B	0x0021
 #define	MII_STR_CICADA_CS8201B	"Cicada CS8201 10/100/1000TX PHY"
 #define	MII_MODEL_xxCICADA_CS8201B	0x0021
 #define	MII_STR_xxCICADA_CS8201B	"Cicada CS8201 10/100/1000TX PHY"
+#define	MII_MODEL_VITESSE_VSC8601	0x0002
+#define	MII_STR_VITESSE_VSC8601	"VSC8601 10/100/1000 PHY"
 
 /* Davicom Semiconductor PHYs */
 #define	MII_MODEL_xxDAVICOM_DM9101	0x0000
@@ -215,30 +225,36 @@
 #define	MII_STR_ENABLESEMI_88E1000	"Enable 88E1000"
 
 /* Marvell Semiconductor PHYs */
-#define	MII_MODEL_MARVELL_E1000	0x0000
-#define	MII_STR_MARVELL_E1000	"Marvell 88E1000* Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1000_1	0x0000
+#define	MII_STR_MARVELL_E1000_1	"Marvell 88E1000 1 Gigabit PHY"
 #define	MII_MODEL_MARVELL_E1011	0x0002
 #define	MII_STR_MARVELL_E1011	"Marvell 88E1011 Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1000_3	0x0003
-#define	MII_STR_MARVELL_E1000_3	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1000_4	0x0004
-#define	MII_STR_MARVELL_E1000_4	"Marvell 88E1000S Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1000_5	0x0005
-#define	MII_STR_MARVELL_E1000_5	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1000_6	0x0006
-#define	MII_STR_MARVELL_E1000_6	"Marvell 88E1000 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1000_2	0x0003
+#define	MII_STR_MARVELL_E1000_2	"Marvell 88E1000 2 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1000S	0x0004
+#define	MII_STR_MARVELL_E1000S	"Marvell 88E1000S Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1000_3	0x0005
+#define	MII_STR_MARVELL_E1000_3	"Marvell 88E1000 3 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1000_4	0x0006
+#define	MII_STR_MARVELL_E1000_4	"Marvell 88E1000 4 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E3082	0x0008
+#define	MII_STR_MARVELL_E3082	"Marvell 88E3082 10/100 PHY"
+#define	MII_MODEL_MARVELL_E1112	0x0009
+#define	MII_STR_MARVELL_E1112	"Marvell 88E1112 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1149	0x000b
+#define	MII_STR_MARVELL_E1149	"Marvell 88E1149 Gigabit PHY"
 #define	MII_MODEL_MARVELL_E1111	0x000c
 #define	MII_STR_MARVELL_E1111	"Marvell 88E1111 Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1000_7	0x0021
-#define	MII_STR_MARVELL_E1000_7	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1000_8	0x0022
-#define	MII_STR_MARVELL_E1000_8	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_xxMARVELL_E1000_2	0x0002
-#define	MII_STR_xxMARVELL_E1000_2	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_xxMARVELL_E1000_3	0x0003
-#define	MII_STR_xxMARVELL_E1000_3	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_xxMARVELL_E1000_5	0x0005
-#define	MII_STR_xxMARVELL_E1000_5	"Marvell 88E1000 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1116	0x0021
+#define	MII_STR_MARVELL_E1116	"Marvell 88E1116 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1118	0x0022
+#define	MII_STR_MARVELL_E1118	"Marvell 88E1118 Gigabit PHY"
+#define	MII_MODEL_xxMARVELL_E1000_5	0x0002
+#define	MII_STR_xxMARVELL_E1000_5	"Marvell 88E1000 5 Gigabit PHY"
+#define	MII_MODEL_xxMARVELL_E1000_6	0x0003
+#define	MII_STR_xxMARVELL_E1000_6	"Marvell 88E1000 6 Gigabit PHY"
+#define	MII_MODEL_xxMARVELL_E1000_7	0x0005
+#define	MII_STR_xxMARVELL_E1000_7	"Marvell 88E1000 7 Gigabit PHY"
 #define	MII_MODEL_xxMARVELL_E1111	0x000c
 #define	MII_STR_xxMARVELL_E1111	"Marvell 88E1111 Gigabit PHY"
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5210reg.h,v 1.10 2005/12/18 17:59:58 reyk Exp $	*/
+/*	$OpenBSD: ar5210reg.h,v 1.12 2007/03/05 16:54:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>

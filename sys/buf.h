@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.47 2006/07/11 21:17:58 mickey Exp $	*/
+/*	$OpenBSD: buf.h,v 1.54 2007/02/24 11:59:47 miod Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -74,7 +74,7 @@ struct buf {
 	LIST_ENTRY(buf) b_vnbufs;	/* Buffer's associated vnode. */
 	TAILQ_ENTRY(buf) b_freelist;	/* Free list position if not active. */
 	TAILQ_ENTRY(buf) b_synclist;	/* List of dirty buffers to be written out */
-	long b_synctime;		/* Time this buffer should be flushed */
+	time_t	b_synctime;		/* Time this buffer should be flushed */
 	struct	buf *b_actf, **b_actb;	/* Device driver queue when active. */
 	struct  proc *b_proc;		/* Associated proc; NULL if kernel. */
 	volatile long	b_flags;	/* B_* flags. */
@@ -87,8 +87,8 @@ struct buf {
 		caddr_t	b_addr;		/* Memory, superblocks, indirect etc. */
 	} b_un;
 	void	*b_saveaddr;		/* Original b_addr for physio. */
-	daddr_t	b_lblkno;		/* Logical block number. */
-	daddr_t	b_blkno;		/* Underlying physical block number. */
+	daddr64_t	b_lblkno;	/* Logical block number. */
+	daddr64_t	b_blkno;	/* Underlying physical block number. */
 					/* Function to call upon completion.
 					 * Will be called at splbio(). */
 	void	(*b_iodone)(struct buf *);
@@ -147,21 +147,14 @@ struct buf *bufq_default_get(struct bufq *);
 #define	B_CACHE		0x00000020	/* Bread found us in the cache. */
 #define	B_CALL		0x00000040	/* Call b_iodone from biodone. */
 #define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. */
-#define	B_DIRTY		0x00000100	/* Dirty page to be pushed out async. */
 #define	B_DONE		0x00000200	/* I/O completed. */
 #define	B_EINTR		0x00000400	/* I/O was interrupted */
 #define	B_ERROR		0x00000800	/* I/O error occurred. */
-#define	B_GATHERED	0x00001000	/* LFS: already in a segment. */
 #define	B_INVAL		0x00002000	/* Does not contain valid info. */
-#define	B_LOCKED	0x00004000	/* Locked in core (not reusable). */
 #define	B_NOCACHE	0x00008000	/* Do not cache block after use. */
-#define	B_PAGET		0x00010000	/* Page in/out of page table space. */
-#define	B_PGIN		0x00020000	/* Pagein op, so swap() can count it. */
 #define	B_PHYS		0x00040000	/* I/O to user memory. */
 #define	B_RAW		0x00080000	/* Set by physio for raw transfers. */
 #define	B_READ		0x00100000	/* Read buffer. */
-#define	B_TAPE		0x00200000	/* Magnetic tape I/O. */
-#define	B_UAREA		0x00400000	/* Buffer describes Uarea I/O. */
 #define	B_WANTED	0x00800000	/* Process wants this buffer. */
 #define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
 #define	B_WRITEINPROG	0x01000000	/* Write in progress. */
@@ -171,9 +164,9 @@ struct buf *bufq_default_get(struct bufq *);
 #define	B_PDAEMON	0x10000000	/* I/O started by pagedaemon */
 
 #define	B_BITS	"\010\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY\006CACHE" \
-    "\007CALL\010DELWRI\011DIRTY\012DONE\013EINTR\014ERROR\015GATHERED" \
-    "\016INVAL\017LOCKED\020NOCACHE\021PAGET\022PGIN\023PHYS\024RAW\025READ" \
-    "\026TAPE\027UAREA\030WANTED\031WRITEINPROG\032XXX\033DEFERRED" \
+    "\007CALL\010DELWRI\012DONE\013EINTR\014ERROR" \
+    "\016INVAL\020NOCACHE\023PHYS\024RAW\025READ" \
+    "\030WANTED\031WRITEINPROG\032XXX\033DEFERRED" \
     "\034SCANNED\035PDAEMON"
 
 /*
@@ -204,13 +197,13 @@ struct cluster_save {
 #define B_SYNC		0x02	/* Do all allocations synchronously. */
 
 struct cluster_info {
-	daddr_t	ci_lastr;			/* last read (read-ahead) */
-	daddr_t	ci_lastw;			/* last write (write cluster) */
-	daddr_t	ci_cstart;			/* start block of cluster */
-	daddr_t	ci_lasta;			/* last allocation */
-	int	ci_clen;			/* length of current cluster */
-	int	ci_ralen;			/* Read-ahead length */
-	daddr_t	ci_maxra;			/* last readahead block */
+	daddr64_t	ci_lastr;	/* last read (read-ahead) */
+	daddr64_t	ci_lastw;	/* last write (write cluster) */
+	daddr64_t	ci_cstart;	/* start block of cluster */
+	daddr64_t	ci_lasta;	/* last allocation */
+	int		ci_clen; 	/* length of current cluster */
+	int		ci_ralen;	/* Read-ahead length */
+	daddr64_t	ci_maxra;	/* last readahead block */
 };
 
 #ifdef _KERNEL
@@ -227,19 +220,18 @@ void	bawrite(struct buf *);
 void	bdwrite(struct buf *);
 void	biodone(struct buf *);
 int	biowait(struct buf *);
-int	bread(struct vnode *, daddr_t, int,
-		   struct ucred *, struct buf **);
-int	breadn(struct vnode *, daddr_t, int, daddr_t *, int *, int,
-		    struct ucred *, struct buf **);
+int bread(struct vnode *, daddr64_t, int, struct ucred *, struct buf **);
+int breadn(struct vnode *, daddr64_t, int, daddr64_t *, int *, int,
+    struct ucred *, struct buf **);
 void	brelse(struct buf *);
 void	bremfree(struct buf *);
 void	bufinit(void);
 void	buf_dirty(struct buf *);
 void    buf_undirty(struct buf *);
 int	bwrite(struct buf *);
-struct buf *getblk(struct vnode *, daddr_t, int, int, int);
+struct buf *getblk(struct vnode *, daddr64_t, int, int, int);
 struct buf *geteblk(int);
-struct buf *incore(struct vnode *, daddr_t);
+struct buf *incore(struct vnode *, daddr64_t);
 
 void	minphys(struct buf *bp);
 int	physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev,
@@ -293,7 +285,7 @@ buf_countdeps(struct buf *bp, int i, int islocked)
 }
 
 int	cluster_read(struct vnode *, struct cluster_info *,
-	    u_quad_t, daddr_t, long, struct ucred *, struct buf **);
+	    u_quad_t, daddr64_t, long, struct ucred *, struct buf **);
 void	cluster_write(struct buf *, struct cluster_info *, u_quad_t);
 
 __END_DECLS

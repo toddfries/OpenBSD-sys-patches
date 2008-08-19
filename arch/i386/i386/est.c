@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.19 2006/06/12 13:18:18 dim Exp $ */
+/*	$OpenBSD: est.c,v 1.27 2006/12/22 01:34:46 dim Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -705,14 +705,12 @@ static const u_int16_t pm90_n765e[] = {
 
 /* Intel Pentium M processor 770 2.13 GHz */
 static const u_int16_t pm90_n770[] = {
-	ID16(2133, 1551, BUS133),
-	ID16(1800, 1429, BUS133),
-	ID16(1600, 1356, BUS133),
-	ID16(1400, 1180, BUS133),
-	ID16(1200, 1132, BUS133),
-	ID16(1000, 1084, BUS133),
-	ID16( 800, 1036, BUS133),
-	ID16( 600,  988, BUS133),
+	ID16(2133, 1356, BUS133),
+	ID16(1867, 1292, BUS133),
+	ID16(1600, 1212, BUS133),
+	ID16(1333, 1148, BUS133),
+	ID16(1067, 1068, BUS133),
+	ID16( 800,  988, BUS133),
 };
 
 /*
@@ -755,7 +753,7 @@ static const u_int16_t C7M_775_ULV[] = {
 	ID16( 400,  796, BUS100),
 };
 
-/* 1.20GHz Centaur C7-M 400 Mhz FSB */
+/* 1.20GHz Centaur C7-M 400 MHz FSB */
 static const u_int16_t C7M_771[] = {
 	ID16(1200,  860, BUS100),
 	ID16(1000,  860, BUS100),
@@ -764,7 +762,7 @@ static const u_int16_t C7M_771[] = {
 	ID16( 400,  844, BUS100),
 };
 
-/* 1.50GHz Centaur C7-M 400 Mhz FSB */
+/* 1.50GHz Centaur C7-M 400 MHz FSB */
 static const u_int16_t C7M_754[] = {
 	ID16(1500, 1004, BUS100),
 	ID16(1400,  988, BUS100),
@@ -774,7 +772,7 @@ static const u_int16_t C7M_754[] = {
 	ID16( 400,  844, BUS100),
 };
 
-/* 1.60GHz Centaur C7-M 400 Mhz FSB */
+/* 1.60GHz Centaur C7-M 400 MHz FSB */
 static const u_int16_t C7M_764[] = {
 	ID16(1600, 1084, BUS100),
 	ID16(1400, 1052, BUS100),
@@ -784,7 +782,7 @@ static const u_int16_t C7M_764[] = {
 	ID16( 400,  844, BUS100),
 };
 
-/* 1.80GHz Centaur C7-M 400 Mhz FSB */
+/* 1.80GHz Centaur C7-M 400 MHz FSB */
 static const u_int16_t C7M_784[] = {
 	ID16(1800, 1148, BUS100),
 	ID16(1600, 1100, BUS100),
@@ -795,7 +793,7 @@ static const u_int16_t C7M_784[] = {
 	ID16( 400,  844, BUS100),
 };
 
-/* 2.00GHz Centaur C7-M 400 Mhz FSB */
+/* 2.00GHz Centaur C7-M 400 MHz FSB */
 static const u_int16_t C7M_794[] = {
 	ID16(2000, 1148, BUS100),
 	ID16(1800, 1132, BUS100),
@@ -807,7 +805,7 @@ static const u_int16_t C7M_794[] = {
 	ID16( 400,  844, BUS100),
 };
 
-/* 1.60GHz Centaur C7-M 533 Mhz FSB */
+/* 1.60GHz Centaur C7-M 533 MHz FSB */
 static const u_int16_t C7M_765[] = {
 	ID16(1600, 1084, BUS133),
 	ID16(1467, 1052, BUS133),
@@ -817,7 +815,7 @@ static const u_int16_t C7M_765[] = {
 	ID16( 533,  844, BUS133),
 };
 
-/* 2.00GHz Centaur C7-M 533 Mhz FSB */
+/* 2.00GHz Centaur C7-M 533 MHz FSB */
 static const u_int16_t C7M_785[] = {
 	ID16(1867, 1148, BUS133),
 	ID16(1600, 1100, BUS133),
@@ -828,7 +826,7 @@ static const u_int16_t C7M_785[] = {
 	ID16( 533,  844, BUS133),
 };
 
-/* 2.00GHz Centaur C7-M 533 Mhz FSB */
+/* 2.00GHz Centaur C7-M 533 MHz FSB */
 static const u_int16_t C7M_795[] = {
 	ID16(2000, 1148, BUS133),
 	ID16(1867, 1132, BUS133),
@@ -838,6 +836,14 @@ static const u_int16_t C7M_795[] = {
 	ID16( 800,  844, BUS133),
 	ID16( 667,  844, BUS133),
 	ID16( 533,  844, BUS133),
+};
+
+/* 1.00GHz VIA Eden 90nm 'Esther' */
+static const u_int16_t eden90_1000[] = {
+	ID16(1000,  844, BUS100),
+	ID16( 800,  844, BUS100),
+	ID16( 600,  844, BUS100),
+	ID16( 400,  844, BUS100),
 };
 
 struct fqlist {
@@ -933,6 +939,8 @@ static const struct fqlist est_cpus[] = {
 	ENTRY(VIA,   BUS133, C7M_785),
 	ENTRY(VIA,   BUS100, C7M_794),
 	ENTRY(VIA,   BUS133, C7M_795),
+
+	ENTRY(VIA,   BUS100, eden90_1000),
 };
 
 
@@ -953,8 +961,9 @@ void
 est_init(const char *cpu_device, int vendor)
 {
 	int i, mhz, mv, low, high;
-	u_int16_t idhi, idlo, cur;
 	u_int64_t msr;
+	u_int16_t idhi, idlo, cur;
+	u_int8_t crhi, crlo, crcur;
 	const struct fqlist *fql;
 
 	if (setperf_prio > 3)
@@ -972,9 +981,25 @@ est_init(const char *cpu_device, int vendor)
 	idhi = (msr >> 32) & 0xffff;
 	idlo = (msr >> 48) & 0xffff;
 	cur = msr & 0xffff;
-	if (idhi == 0 || idlo == 0 || cur == 0 ||
-	    ((cur >> 8) & 0xff) < ((idlo >> 8) & 0xff) ||
-	    ((cur >> 8) & 0xff) > ((idhi >> 8) & 0xff)) {
+	crhi = (idhi  >> 8) & 0xff;
+	crlo = (idlo  >> 8) & 0xff;
+	crcur = (cur >> 8) & 0xff;
+	if (crlo == 0 || crhi == crlo) {
+		/*
+		 * Don't complain about these cases, and silently disable EST:
+		 * - A lowest clock ratio of 0, which seems to happen on all
+		 *   Pentium 4's that report EST.
+		 * - An equal highest and lowest clock ratio, which happens on
+		 *   at least the Core 2 Duo X6800, maybe on newer models too.
+		 */
+		return;
+	}
+	if (crhi == 0 || crcur == 0 || crlo > crhi ||
+	    crcur < crlo || crcur > crhi) {
+		/*
+		 * Do complain about other weirdness, because we first want to
+		 * know about it, before we decide what to do with it.
+		 */
 		printf("%s: EST: strange msr value 0x%016llx\n",
 		    cpu_device, msr);
 		return;
@@ -1048,14 +1073,14 @@ est_init(const char *cpu_device, int vendor)
 	setperf_prio = 3;
 }
 
-int
+void
 est_setperf(int level)
 {
 	int low, high, i, fq;
 	uint64_t msr;
 
 	if (est_fqlist == NULL)
-		return (EOPNOTSUPP);
+		return;
 
 	low = MSR2MHZ(est_fqlist->table[est_fqlist->n - 1], bus_clock);
 	high = MSR2MHZ(est_fqlist->table[0], bus_clock);
@@ -1068,7 +1093,5 @@ est_setperf(int level)
 	msr &= ~0xffffULL;
 	msr |= est_fqlist->table[i];
 	wrmsr(MSR_PERF_CTL, msr);
-	pentium_mhz = MSR2MHZ(est_fqlist->table[i], bus_clock);
-
-	return (0);
+	cpuspeed = MSR2MHZ(est_fqlist->table[i], bus_clock);
 }

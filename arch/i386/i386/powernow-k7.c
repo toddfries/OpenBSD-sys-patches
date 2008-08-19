@@ -1,31 +1,7 @@
-/* $OpenBSD: powernow-k7.c,v 1.24 2006/06/16 05:58:50 gwk Exp $ */
+/* $OpenBSD: powernow-k7.c,v 1.30 2006/12/20 17:50:40 gwk Exp $ */
 
 /*
  * Copyright (c) 2004 Martin Végiard.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  * Copyright (c) 2004-2005 Bruno Ducrot
  * Copyright (c) 2004 FUKUDA Nobuhiko <nfukuda@spa.is.uec.ac.jp>
  *
@@ -70,7 +46,7 @@
 #define BIOS_STEP			16
 
 /*
- * MSRs and bits used by Powernow technology
+ * MSRs and bits used by PowerNow! technology
  */
 #define MSR_AMDK7_FIDVID_CTL		0xc0010041
 #define MSR_AMDK7_FIDVID_STATUS		0xc0010042
@@ -144,7 +120,7 @@ struct psb_s {
 
 struct pst_s {
 	uint32_t signature;
-	uint8_t fsb;		/* Front Side Bus frequency (Mhz) */
+	uint8_t fsb;		/* Front Side Bus frequency (MHz) */
 	uint8_t fid;		/* Max Frequency code */
 	uint8_t vid;		/* Max Voltage code */
 	uint8_t n_states;	/* Number of states */
@@ -157,9 +133,10 @@ extern int setperf_prio;
  * Prototypes
  */
 int k7pnow_decode_pst(struct k7pnow_cpu_state *, uint8_t *, int);
-int k7pnow_states(struct k7pnow_cpu_state *, uint32_t, unsigned int, unsigned int);
+int k7pnow_states(struct k7pnow_cpu_state *, uint32_t, unsigned int,
+    unsigned int);
 
-int
+void
 k7_powernow_setperf(int level)
 {
 	unsigned int i, low, high, freq;
@@ -181,7 +158,7 @@ k7_powernow_setperf(int level)
 	}
 
 	if (fid == 0 || vid == 0)
-		return (0);
+		return;
 
 	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
 	cfid = PN7_STA_CFID(status);
@@ -191,7 +168,7 @@ k7_powernow_setperf(int level)
 	 * We're already at the requested level.
 	 */
 	if (fid == cfid && vid == cvid)
-		return (0);
+		return;
 
 	ctl = rdmsr(MSR_AMDK7_FIDVID_CTL) & PN7_CTR_FIDCHRATIO;
 
@@ -219,9 +196,7 @@ k7_powernow_setperf(int level)
 	cfid = PN7_STA_CFID(status);
 	cvid = PN7_STA_CVID(status);
 	if (cfid == fid || cvid == vid)
-		pentium_mhz = cstate->state_table[i].freq;
-
-	return (0);
+		cpuspeed = cstate->state_table[i].freq;
 }
 
 /*
@@ -335,11 +310,14 @@ k7_powernow_init(void)
 	if (!(regs[3] & AMD_PN_FID_VID))
 		return;
 
+	/* Extended CPUID signature value */
+	cpuid(0x80000001, regs);
+
 	cstate = malloc(sizeof(struct k7pnow_cpu_state), M_DEVBUF, M_NOWAIT);
 	if (!cstate)
 		return;
 
-	cstate->flags = 0;	
+	cstate->flags = cstate->n_states = 0;	
 	if (ci->ci_signature == AMD_ERRATA_A0_CPUSIG)
 		cstate->flags |= PN7_FLAG_ERRATA_A0;
 
@@ -348,26 +326,28 @@ k7_powernow_init(void)
 	startvid = PN7_STA_SVID(status);
 	currentfid = PN7_STA_CFID(status);
 
-	cstate->fsb = pentium_mhz / (k7pnow_fid_to_mult[currentfid]/10);
-	if (k7pnow_states(cstate, ci->ci_signature, maxfid, startvid)) {
-		if (cstate->n_states) {
-			if (cstate->flags & PN7_FLAG_DESKTOP_VRM)
-				techname = "Cool`n'Quiet K7";
-			else
-				techname = "Powernow! K7";
-			printf("%s: %s %d Mhz: speeds:",
-			    ci->ci_dev.dv_xname, techname, pentium_mhz);
-			for (i = cstate->n_states; i > 0; i--) {
-				state = &cstate->state_table[i-1];
-				printf(" %d", state->freq);
-			}
-			printf(" Mhz\n");	
-			
-			k7pnow_current_state = cstate;
-			cpu_setperf = k7_powernow_setperf;
-			setperf_prio = 1;
-			return;
+	cstate->fsb = cpuspeed / (k7pnow_fid_to_mult[currentfid]/10);
+
+	/* if the base CPUID signature fails to match try, the extended one */
+	if (!k7pnow_states(cstate, ci->ci_signature, maxfid, startvid))
+		k7pnow_states(cstate, regs[0], maxfid, startvid); 
+	if (cstate->n_states) {
+		if (cstate->flags & PN7_FLAG_DESKTOP_VRM)
+			techname = "Cool'n'Quiet K7";
+		else
+			techname = "PowerNow! K7";
+		printf("%s: %s %d MHz: speeds:",
+		    ci->ci_dev.dv_xname, techname, cpuspeed);
+		for (i = cstate->n_states; i > 0; i--) {
+			state = &cstate->state_table[i-1];
+			printf(" %d", state->freq);
 		}
+		printf(" MHz\n");	
+		
+		k7pnow_current_state = cstate;
+		cpu_setperf = k7_powernow_setperf;
+		setperf_prio = 1;
+		return;
 	}
 	free(cstate, M_DEVBUF);
 }

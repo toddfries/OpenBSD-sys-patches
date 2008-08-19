@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.12 2006/01/17 20:30:12 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.14 2007/02/11 21:59:32 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.34 2003/06/23 11:01:08 martin Exp $	*/
 
 /*
@@ -215,7 +215,6 @@ struct cpu_info {
 	u_int32_t ci_arm_cputype;	/* CPU type */
 	u_int32_t ci_arm_cpurev;	/* CPU revision */
 	u_int32_t ci_ctrl;		/* The CPU control register */
-	struct evcnt ci_arm700bugcount;
 #ifdef MULTIPROCESSOR
 	MP_CPU_INFO_MEMBERS
 #endif
@@ -287,7 +286,7 @@ struct pcb;
 void	savectx		(struct pcb *pcb);
 
 /* ast.c */
-void userret (register struct proc *p, u_int32_t pc, quad_t ticks);
+void userret		(struct proc *p);
 
 /* machdep.h */
 void bootsync		(int);

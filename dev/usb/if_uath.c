@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.4 2006/09/16 19:54:13 damien Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.17 2007/02/19 17:22:02 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -62,7 +62,6 @@
 #include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/rndvar.h>
@@ -70,6 +69,7 @@
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
+#include <dev/usb/usbdivar.h>	/* needs_reattach() */
 #include <dev/usb/usbdi_util.h>
 #include <dev/usb/usbdevs.h>
 
@@ -89,52 +89,47 @@ int uath_debug = 1;
 #define DPRINTFN(n, x)
 #endif
 
-/* various supported device vendors/products */
+/*-
+ * Various supported device vendors/products.
+ * UB51: AR5005UG 802.11b/g, UB52: AR5005UX 802.11a/b/g
+ */
 #define UATH_DEV(v, p, f)						\
-	{ { USB_VENDOR_##v, USB_PRODUCT_##v##_##p },			\
-	    (f) },							\
-	{ { USB_VENDOR_##v, USB_PRODUCT_##v##_##p##_NF }, 		\
+	{ { USB_VENDOR_##v, USB_PRODUCT_##v##_##p }, (f) },		\
+	{ { USB_VENDOR_##v, USB_PRODUCT_##v##_##p##_NF },		\
 	    (f) | UATH_FLAG_PRE_FIRMWARE }
+#define UATH_DEV_UG(v, p)	UATH_DEV(v, p, 0)
+#define UATH_DEV_UX(v, p)	UATH_DEV(v, p, UATH_FLAG_ABG)
 static const struct uath_type {
 	struct usb_devno	dev;
 	unsigned int		flags;
 #define UATH_FLAG_PRE_FIRMWARE	(1 << 0)
-#define UATH_FLAG_DUAL_BAND_RF	(1 << 1)
+#define UATH_FLAG_ABG		(1 << 1)
 } uath_devs[] = {
-	/* Atheros Communications */
-	UATH_DEV(ATHEROS, AR5523, 0),
-	UATH_DEV(ATHEROS2, AR5523_1, 0),
-	UATH_DEV(ATHEROS2, AR5523_2, 0),
-	UATH_DEV(ATHEROS2, AR5523_3, UATH_FLAG_DUAL_BAND_RF),
-
-	/* Conceptronic */
-	UATH_DEV(CONCEPTRONIC, AR5523_1, 0),
-	UATH_DEV(CONCEPTRONIC, AR5523_2, 0),
-
-	/* D-Link */
-	UATH_DEV(DLINK, DWLAG122, UATH_FLAG_DUAL_BAND_RF),
-	UATH_DEV(DLINK, DWLAG132, UATH_FLAG_DUAL_BAND_RF),	
-	UATH_DEV(DLINK, DWLG132, 0),
-
-	/* Global Sun Technology */
-	UATH_DEV(GLOBALSUN, AR5523_1, 0),
-	UATH_DEV(GLOBALSUN, AR5523_2, 0),
-
-	/* Netgear */
-	UATH_DEV(NETGEAR, WG111U, UATH_FLAG_DUAL_BAND_RF),
-	UATH_DEV(NETGEAR3, WG111T, 0),
-	UATH_DEV(NETGEAR3, WPN111, 0),
-
-	/* U-MEDIA Communications */
-	UATH_DEV(UMEDIA, AR5523_1, 0),
-	UATH_DEV(UMEDIA, AR5523_2, UATH_FLAG_DUAL_BAND_RF),
-
-	/* Wistron NeWeb */
-	UATH_DEV(WISTRONNEWEB, AR5523_1, 0),
-	UATH_DEV(WISTRONNEWEB, AR5523_2, 0)
+	UATH_DEV_UG(ATHEROS,		AR5523),
+	UATH_DEV_UG(ATHEROS2,		AR5523_1),
+	UATH_DEV_UG(ATHEROS2,		AR5523_2),
+	UATH_DEV_UX(ATHEROS2,		AR5523_3),
+	UATH_DEV_UG(CONCEPTRONIC,	AR5523_1),
+	UATH_DEV_UX(CONCEPTRONIC,	AR5523_2),
+	UATH_DEV_UX(DLINK,		DWLAG122),
+	UATH_DEV_UX(DLINK,		DWLAG132),	
+	UATH_DEV_UG(DLINK,		DWLG132),
+	UATH_DEV_UG(GIGASET,		AR5523),
+	UATH_DEV_UG(GIGASET,		SMCWUSBTG),
+	UATH_DEV_UG(GLOBALSUN,		AR5523_1),
+	UATH_DEV_UX(GLOBALSUN,		AR5523_2),
+	UATH_DEV_UX(NETGEAR,		WG111U),
+	UATH_DEV_UG(NETGEAR3,		WG111T),
+	UATH_DEV_UG(NETGEAR3,		WPN111),
+	UATH_DEV_UG(UMEDIA,		AR5523_1),
+	UATH_DEV_UX(UMEDIA,		AR5523_2),
+	UATH_DEV_UG(UMEDIA,		TEW444UBEU),
+	UATH_DEV_UG(WISTRONNEWEB,	AR5523_1),
+	UATH_DEV_UX(WISTRONNEWEB,	AR5523_2),
+	UATH_DEV_UG(ZCOM,		AR5523)
 };
 #define uath_lookup(v, p)	\
-	((struct uath_type *)usb_lookup(uath_devs, v, p))
+	((const struct uath_type *)usb_lookup(uath_devs, v, p))
 
 Static void	uath_attachhook(void *);
 Static int	uath_open_pipes(struct uath_softc *);
@@ -143,6 +138,7 @@ Static int	uath_alloc_tx_data_list(struct uath_softc *);
 Static void	uath_free_tx_data_list(struct uath_softc *);
 Static int	uath_alloc_rx_data_list(struct uath_softc *);
 Static void	uath_free_rx_data_list(struct uath_softc *);
+Static void	uath_free_rx_data(caddr_t, u_int, void *);
 Static int	uath_alloc_tx_cmd_list(struct uath_softc *);
 Static void	uath_free_tx_cmd_list(struct uath_softc *);
 Static int	uath_alloc_rx_cmd_list(struct uath_softc *);
@@ -198,15 +194,6 @@ Static void	uath_stop(struct ifnet *, int);
 Static int	uath_loadfirmware(struct uath_softc *, const u_char *, int);
 Static int	uath_activate(device_ptr_t, enum devact);
 
-/*
- * Supported rates for 802.11b/g modes (in 500Kbps unit).
- */
-static const struct ieee80211_rateset uath_rateset_11b =
-	{ 4, { 2, 4, 11, 22 } };
-
-static const struct ieee80211_rateset uath_rateset_11g =
-	{ 12, { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 } };
-
 USB_DECLARE_DRIVER(uath);
 
 USB_MATCH(uath)
@@ -234,12 +221,23 @@ uath_attachhook(void *xsc)
 		return;
 	}
 
-	if ((error = uath_loadfirmware(sc, fw, size)) != 0) {
+	error = uath_loadfirmware(sc, fw, size);
+	free(fw, M_DEVBUF);
+
+	if (error == 0) {
+		usb_port_status_t status;
+
+		/*
+		 * Hack alert: the device doesn't always gracefully detach
+		 * from the bus after a firmware upload.  We need to force
+		 * a port reset and a re-exploration on the parent hub.
+		 */
+		usbd_reset_port(sc->sc_uhub, sc->sc_port, &status);
+		usb_needs_reattach(sc->sc_udev);
+	} else {
 		printf("%s: could not load firmware (error=%s)\n",
 		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
 	}
-
-	free(fw, M_DEVBUF);
 }
 
 USB_ATTACH(uath)
@@ -252,6 +250,8 @@ USB_ATTACH(uath)
 	int i;
 
 	sc->sc_udev = uaa->device;
+	sc->sc_uhub = uaa->device->myhub;
+	sc->sc_port = uaa->port;
 
 	devinfop = usbd_devinfo_alloc(uaa->device, 0);
 	USB_ATTACH_SETUP;
@@ -344,8 +344,7 @@ USB_ATTACH(uath)
 	}
 
 	printf("%s: MAC/BBP AR5523, RF AR%c112, address %s\n",
-	    USBDEVNAME(sc->sc_dev),
-	    (sc->sc_flags & UATH_FLAG_DUAL_BAND_RF) ? '5': '2',
+	    USBDEVNAME(sc->sc_dev), (sc->sc_flags & UATH_FLAG_ABG) ? '5': '2',
 	    ether_sprintf(ic->ic_myaddr));
 
 	/*
@@ -374,8 +373,8 @@ USB_ATTACH(uath)
 	    IEEE80211_C_WEP;		/* h/w WEP */
 
 	/* set supported .11b and .11g rates */
-	ic->ic_sup_rates[IEEE80211_MODE_11B] = uath_rateset_11b;
-	ic->ic_sup_rates[IEEE80211_MODE_11G] = uath_rateset_11g;
+	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
+	ic->ic_sup_rates[IEEE80211_MODE_11G] = ieee80211_std_rateset_11g;
 
 	/* set supported .11b and .11g channels (1 through 14) */
 	for (i = 1; i <= 14; i++) {
@@ -435,7 +434,7 @@ USB_DETACH(uath)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
-	s = splusb();
+	s = splnet();
 
 	if (sc->sc_flags & UATH_FLAG_PRE_FIRMWARE) {
 		uath_close_pipes(sc);
@@ -449,6 +448,15 @@ USB_DETACH(uath)
 	timeout_del(&sc->scan_to);
 	timeout_del(&sc->stat_to);
 
+	ieee80211_ifdetach(ifp);	/* free all nodes */
+	if_detach(ifp);
+
+	sc->sc_dying = 1;
+	DPRINTF(("reclaiming %d references\n", sc->sc_refcnt));
+	while (sc->sc_refcnt > 0)
+		(void)tsleep(UATH_COND_NOREF(sc), 0, "uathdet", 0);
+	DPRINTF(("all references reclaimed\n"));
+
 	/* abort and free xfers */
 	uath_free_tx_data_list(sc);
 	uath_free_rx_data_list(sc);
@@ -457,9 +465,6 @@ USB_DETACH(uath)
 
 	/* close Tx/Rx pipes */
 	uath_close_pipes(sc);
-
-	ieee80211_ifdetach(ifp);	/* free all nodes */
-	if_detach(ifp);
 
 	splx(s);
 
@@ -584,7 +589,8 @@ uath_alloc_rx_data_list(struct uath_softc *sc)
 {
 	int i, error;
 
-	for (i = 0; i < UATH_RX_DATA_LIST_COUNT; i++) {
+	SLIST_INIT(&sc->rx_freelist);
+	for (i = 0; i < UATH_RX_DATA_POOL_COUNT; i++) {
 		struct uath_rx_data *data = &sc->rx_data[i];
 
 		data->sc = sc;	/* backpointer for callbacks */
@@ -596,29 +602,14 @@ uath_alloc_rx_data_list(struct uath_softc *sc)
 			error = ENOMEM;
 			goto fail;
 		}
-		if (usbd_alloc_buffer(data->xfer, sc->rxbufsz) == NULL) {
+		data->buf = usbd_alloc_buffer(data->xfer, sc->rxbufsz);
+		if (data->buf == NULL) {
 			printf("%s: could not allocate xfer buffer\n",
 			    USBDEVNAME(sc->sc_dev));
 			error = ENOMEM;
 			goto fail;
 		}
-
-		MGETHDR(data->m, M_DONTWAIT, MT_DATA);
-		if (data->m == NULL) {
-			printf("%s: could not allocate rx mbuf\n",
-			    USBDEVNAME(sc->sc_dev));
-			error = ENOMEM;
-			goto fail;
-		}
-		MCLGET(data->m, M_DONTWAIT);
-		if (!(data->m->m_flags & M_EXT)) {
-			printf("%s: could not allocate rx mbuf cluster\n",
-			    USBDEVNAME(sc->sc_dev));
-			error = ENOMEM;
-			goto fail;
-		}
-
-		data->buf = mtod(data->m, uint8_t *);
+		SLIST_INSERT_HEAD(&sc->rx_freelist, data, next);
 	}
 	return 0;
 
@@ -634,15 +625,23 @@ uath_free_rx_data_list(struct uath_softc *sc)
 	/* make sure no transfers are pending */
 	usbd_abort_pipe(sc->data_rx_pipe);
 
-	for (i = 0; i < UATH_RX_DATA_LIST_COUNT; i++) {
-		struct uath_rx_data *data = &sc->rx_data[i];
+	for (i = 0; i < UATH_RX_DATA_POOL_COUNT; i++)
+		if (sc->rx_data[i].xfer != NULL)
+			usbd_free_xfer(sc->rx_data[i].xfer);
+}
 
-		if (data->xfer != NULL)
-			usbd_free_xfer(data->xfer);
+Static void
+uath_free_rx_data(caddr_t buf, u_int size, void *arg)
+{
+	struct uath_rx_data *data = arg;
+	struct uath_softc *sc = data->sc;
 
-		if (data->m != NULL)
-			m_freem(data->m);
-	}
+	/* put the buffer back in the free list */
+	SLIST_INSERT_HEAD(&sc->rx_freelist, data, next);
+
+	/* release reference to softc */
+	if (--sc->sc_refcnt == 0 && sc->sc_dying)
+		wakeup(UATH_COND_NOREF(sc));
 }
 
 Static int
@@ -927,7 +926,6 @@ uath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	sc->sc_state = nstate;
 	sc->sc_arg = arg;
 	usb_add_task(sc->sc_udev, &sc->sc_task);
-
 	return 0;
 }
 
@@ -996,8 +994,8 @@ uath_cmd(struct uath_softc *sc, uint32_t code, const void *idata, int ilen,
 	if (error != USBD_IN_PROGRESS && error != 0) {
 		if (flags & UATH_CMD_FLAG_READ)
 			splx(s);
-		printf("%s: could not send command (error=%s)\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		printf("%s: could not send command 0x%x (error=%s)\n",
+		    USBDEVNAME(sc->sc_dev), code, usbd_errstr(error));
 		return error;
 	}
 	sc->cmd_idx = (sc->cmd_idx + 1) % UATH_TX_CMD_LIST_COUNT;
@@ -1007,6 +1005,7 @@ uath_cmd(struct uath_softc *sc, uint32_t code, const void *idata, int ilen,
 
 	/* wait at most two seconds for command reply */
 	error = tsleep(cmd, PCATCH, "uathcmd", 2 * hz);
+	cmd->odata = NULL;	/* in case answer is received too late */
 	splx(s);
 	if (error != 0) {
 		printf("%s: timeout waiting for command reply\n",
@@ -1180,8 +1179,9 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_frame *wh;
 	struct ieee80211_node *ni;
+	struct uath_rx_data *ndata;
 	struct uath_rx_desc *desc;
-	struct mbuf *mnew, *m;
+	struct mbuf *m;
 	uint32_t hdr;
 	int s, len;
 
@@ -1197,9 +1197,8 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	}
 	usbd_get_xfer_status(xfer, NULL, NULL, &len, NULL);
 
-	if (len < UATH_MIN_RXBUFSZ || len > sc->rxbufsz) {
-		DPRINTF(("wrong xfer size: !(%d <= %d <= %d)\n",
-		    UATH_MIN_RXBUFSZ, len, sc->rxbufsz));
+	if (len < UATH_MIN_RXBUFSZ) {
+		DPRINTF(("wrong xfer size (len=%d)\n", len));
 		ifp->if_ierrors++;
 		goto skip;
 	}
@@ -1210,34 +1209,40 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	desc = (struct uath_rx_desc *)
 	    (data->buf + len - sizeof (struct uath_rx_desc));
 
+	if (betoh32(desc->len) > sc->rxbufsz) {
+		DPRINTF(("bad descriptor (len=%d)\n", betoh32(desc->len)));
+		ifp->if_ierrors++;
+		goto skip;
+	}
+
 	/* there's probably a "bad CRC" flag somewhere in the descriptor.. */
 
-	MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-	if (mnew == NULL) {
-		printf("%s: could not allocate rx mbuf\n",
-		    USBDEVNAME(sc->sc_dev));
-		ifp->if_ierrors++;
-		goto skip;
-	}
-	MCLGET(mnew, M_DONTWAIT);
-	if (!(mnew->m_flags & M_EXT)) {
-		printf("%s: could not allocate rx mbuf cluster\n",
-		    USBDEVNAME(sc->sc_dev));
-		m_freem(mnew);
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
+	if (m == NULL) {
 		ifp->if_ierrors++;
 		goto skip;
 	}
 
-	m = data->m;
-	data->m = mnew;
+	/* grab a new Rx buffer */
+	ndata = SLIST_FIRST(&sc->rx_freelist);
+	if (ndata == NULL) {
+		printf("%s: could not allocate Rx buffer\n",
+		    USBDEVNAME(sc->sc_dev));
+		m_freem(m);
+		ifp->if_ierrors++;
+		goto skip;
+	}
+	SLIST_REMOVE_HEAD(&sc->rx_freelist, next);
+
+	MEXTADD(m, data->buf, sc->rxbufsz, 0, uath_free_rx_data, data);
 
 	/* finalize mbuf */
 	m->m_pkthdr.rcvif = ifp;
 	m->m_data = data->buf + sizeof (uint32_t);
-	m->m_pkthdr.len = m->m_len =
-	    betoh32(desc->len) - sizeof (struct uath_rx_desc);
+	m->m_pkthdr.len = m->m_len = betoh32(desc->len) -
+	    sizeof (struct uath_rx_desc) - IEEE80211_CRC_LEN;
 
-	data->buf = mtod(data->m, uint8_t *);
+	data = ndata;
 
 	wh = mtod(m, struct ieee80211_frame *);
 	if ((wh->i_fc[1] & IEEE80211_FC1_WEP) &&
@@ -1266,16 +1271,18 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 		tap->wr_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
 		tap->wr_dbm_antsignal = (int8_t)betoh32(desc->rssi);
 
-		M_DUP_PKTHDR(&mb, m);
 		mb.m_data = (caddr_t)tap;
 		mb.m_len = sc->sc_rxtap_len;
 		mb.m_next = m;
-		mb.m_pkthdr.len += mb.m_len;
+		mb.m_nextpkt = NULL;
+		mb.m_type = 0;
+		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif
 
 	s = splnet();
+	sc->sc_refcnt++;
 	ni = ieee80211_find_rxnode(ic, wh);
 	ieee80211_input(ifp, m, ni, (int)betoh32(desc->rssi), 0);
 
@@ -1284,9 +1291,10 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	splx(s);
 
 skip:	/* setup a new transfer */
-	usbd_setup_xfer(xfer, sc->data_rx_pipe, data, data->buf, sc->rxbufsz,
-	    USBD_SHORT_XFER_OK, USBD_NO_TIMEOUT, uath_data_rxeof);
-	(void)usbd_transfer(xfer);
+	usbd_setup_xfer(data->xfer, sc->data_rx_pipe, data, data->buf,
+	    sc->rxbufsz, USBD_SHORT_XFER_OK | USBD_NO_COPY, USBD_NO_TIMEOUT,
+	    uath_data_rxeof);
+	(void)usbd_transfer(data->xfer);
 }
 
 Static int
@@ -1379,11 +1387,12 @@ uath_tx_data(struct uath_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		tap->wt_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
 		tap->wt_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
 
-		M_DUP_PKTHDR(&mb, m0);
 		mb.m_data = (caddr_t)tap;
 		mb.m_len = sc->sc_txtap_len;
 		mb.m_next = m0;
-		mb.m_pkthdr.len += mb.m_len;
+		mb.m_nextpkt = NULL;
+		mb.m_type = 0;
+		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_OUT);
 	}
 #endif
@@ -1496,14 +1505,14 @@ uath_start(struct ifnet *ifp)
 		} else {
 			if (ic->ic_state != IEEE80211_S_RUN)
 				break;
-			IFQ_DEQUEUE(&ifp->if_snd, m0);
+			IFQ_POLL(&ifp->if_snd, m0);
 			if (m0 == NULL)
 				break;
 			if (sc->tx_queued >= UATH_TX_DATA_LIST_COUNT) {
-				IF_PREPEND(&ifp->if_snd, m0);
 				ifp->if_flags |= IFF_OACTIVE;
 				break;
 			}
+			IFQ_DEQUEUE(&ifp->if_snd, m0);
 #if NBPFILTER > 0
 			if (ifp->if_bpf != NULL)
 				bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
@@ -1649,11 +1658,14 @@ uath_reset(struct uath_softc *sc)
 	if (error == 0)
 		error = tsleep(UATH_COND_INIT(sc), PCATCH, "uathinit", 5 * hz);
 	splx(s);
+	if (error != 0)
+		return error;
 
 	/* read PHY registers */
 	for (reg = 0x09; reg <= 0x24; reg++) {
 		if (reg == 0x0b || reg == 0x0c)
 			continue;
+		DELAY(100);
 		if ((error = uath_read_reg(sc, reg, &val)) != 0)
 			return error;
 		DPRINTFN(2, ("reg 0x%02x=0x%08x\n", reg, val));
@@ -1716,9 +1728,6 @@ uath_wme_init(struct uath_softc *sc)
 Static int
 uath_set_chan(struct uath_softc *sc, struct ieee80211_channel *c)
 {
-#ifdef UATH_DEBUG
-	struct ieee80211com *ic = &sc->sc_ic;
-#endif
 	struct uath_set_chan chan;
 
 	bzero(&chan, sizeof chan);
@@ -1728,7 +1737,8 @@ uath_set_chan(struct uath_softc *sc, struct ieee80211_channel *c)
 	chan.magic2 = htobe32(50);
 	chan.magic3 = htobe32(1);
 
-	DPRINTF(("switching to channel %d\n", ieee80211_chan2ieee(ic, c)));
+	DPRINTF(("switching to channel %d\n",
+	    ieee80211_chan2ieee(&sc->sc_ic, c)));
 	return uath_cmd_write(sc, UATH_CMD_SET_CHAN, &chan, sizeof chan, 0);
 }
 
@@ -1784,13 +1794,12 @@ uath_set_rates(struct uath_softc *sc, const struct ieee80211_rateset *rs)
 
 	bzero(&rates, sizeof rates);
 	rates.magic1 = htobe32(0x02);
-	rates.magic2 = htobe32(0x21);
+	rates.size   = htobe32(1 + sizeof rates.rates);
 	rates.nrates = rs->rs_nrates;
 	bcopy(rs->rs_rates, rates.rates, rs->rs_nrates);
 
 	DPRINTF(("setting supported rates nrates=%d\n", rs->rs_nrates));
-	return uath_cmd_write(sc, UATH_CMD_SET_RATES, &rates,
-	    3 * 4 + 1 + rs->rs_nrates, 0);
+	return uath_cmd_write(sc, UATH_CMD_SET_RATES, &rates, sizeof rates, 0);
 }
 
 Static int
@@ -1884,17 +1893,18 @@ uath_init(struct ifnet *ifp)
 	 * Queue Rx data xfers.
 	 */
 	for (i = 0; i < UATH_RX_DATA_LIST_COUNT; i++) {
-		struct uath_rx_data *data = &sc->rx_data[i];
+		struct uath_rx_data *data = SLIST_FIRST(&sc->rx_freelist);
 
 		usbd_setup_xfer(data->xfer, sc->data_rx_pipe, data, data->buf,
-		    sc->rxbufsz, USBD_SHORT_XFER_OK, USBD_NO_TIMEOUT,
-		    uath_data_rxeof);
+		    sc->rxbufsz, USBD_SHORT_XFER_OK | USBD_NO_COPY,
+		    USBD_NO_TIMEOUT, uath_data_rxeof);
 		error = usbd_transfer(data->xfer);
 		if (error != USBD_IN_PROGRESS && error != 0) {
 			printf("%s: could not queue Rx transfer\n",
 			    USBDEVNAME(sc->sc_dev));
 			goto fail;
 		}
+		SLIST_REMOVE_HEAD(&sc->rx_freelist, next);
 	}
 
 	error = uath_cmd_read(sc, UATH_CMD_07, 0, NULL, &val,
@@ -1996,7 +2006,6 @@ uath_stop(struct ifnet *ifp, int disable)
 	usbd_abort_pipe(sc->data_tx_pipe);
 	usbd_abort_pipe(sc->data_rx_pipe);
 	usbd_abort_pipe(sc->cmd_tx_pipe);
-	usbd_abort_pipe(sc->cmd_rx_pipe);
 
 	splx(s);
 }

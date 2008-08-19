@@ -1,30 +1,6 @@
-/*	$OpenBSD: powernow-k8.c,v 1.10 2006/08/25 20:52:59 gwk Exp $ */
+/*	$OpenBSD: powernow-k8.c,v 1.16 2007/02/17 11:51:21 tom Exp $ */
 /*
  * Copyright (c) 2004 Martin Végiard.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  * Copyright (c) 2004-2005 Bruno Ducrot
  * Copyright (c) 2004 FUKUDA Nobuhiko <nfukuda@spa.is.uec.ac.jp>
  *
@@ -66,11 +42,10 @@
 #define BIOS_START			0xe0000
 #define	BIOS_LEN			0x20000
 
-extern int cpuspeed;
 extern int setperf_prio;
 
 /*
- * MSRs and bits used by Powernow technology
+ * MSRs and bits used by PowerNow technology
  */
 #define MSR_AMDK7_FIDVID_CTL		0xc0010041
 #define MSR_AMDK7_FIDVID_STATUS		0xc0010042
@@ -89,13 +64,13 @@ extern int setperf_prio;
 #define PN8_STA_SVID(x)			(((x) >> 40) & 0x1f)
 #define PN8_STA_MVID(x)			(((x) >> 48) & 0x1f)
 
-/* Reserved1 to powernow k8 configuration */
+/* Reserved1 to PowerNow K8 configuration */
 #define PN8_PSB_TO_RVO(x)		((x) & 0x03)
 #define PN8_PSB_TO_IRT(x)		(((x) >> 2) & 0x03)
 #define PN8_PSB_TO_MVS(x)		(((x) >> 4) & 0x03)
 #define PN8_PSB_TO_BATT(x)		(((x) >> 6) & 0x03)
 
-/* ACPI ctr_val status register to powernow k8 configuration */
+/* ACPI ctr_val status register to PowerNow K8 configuration */
 #define ACPI_PN8_CTRL_TO_FID(x)		((x) & 0x3f)
 #define ACPI_PN8_CTRL_TO_VID(x)		(((x) >> 6) & 0x1f)
 #define ACPI_PN8_CTRL_TO_VST(x)		(((x) >> 11) & 0x1f)
@@ -177,7 +152,7 @@ k8pnow_read_pending_wait(uint64_t *status)
 	return 1;
 }
 
-int
+void
 k8_powernow_setperf(int level)
 {
 	unsigned int i, low, high, freq;
@@ -193,7 +168,7 @@ k8_powernow_setperf(int level)
 	 */
 	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
 	if (PN8_STA_PENDING(status))
-		return 0;
+		return;
 	cfid = PN8_STA_CFID(status);
 	cvid = PN8_STA_CVID(status);
 
@@ -212,7 +187,7 @@ k8_powernow_setperf(int level)
 	}
 
 	if (fid == cfid && vid == cvid)
-		return (0);
+		return;
 
 	/*
 	 * Phase 1: Raise core voltage to requested VID if frequency is
@@ -222,7 +197,7 @@ k8_powernow_setperf(int level)
 		val = cvid - (1 << cstate->mvs);
 		WRITE_FIDVID(cfid, (val > 0) ? val : 0, 1ULL);
 		if (k8pnow_read_pending_wait(&status))
-			return 0;
+			return;
 		cvid = PN8_STA_CVID(status);
 		COUNT_OFF_VST(cstate->vst);
 	}
@@ -234,7 +209,7 @@ k8_powernow_setperf(int level)
 		 * under Linux */
 		WRITE_FIDVID(cfid, cvid - 1, 1ULL);
 		if (k8pnow_read_pending_wait(&status))
-			return 0;
+			return;
 		cvid = PN8_STA_CVID(status);
 		COUNT_OFF_VST(cstate->vst);
 	}
@@ -257,7 +232,7 @@ k8_powernow_setperf(int level)
 			WRITE_FIDVID(val, cvid, (uint64_t)cstate->pll * 1000 / 5);
 
 			if (k8pnow_read_pending_wait(&status))
-				return 0;
+				return;
 			cfid = PN8_STA_CFID(status);
 			COUNT_OFF_IRT(cstate->irt);
 
@@ -266,7 +241,7 @@ k8_powernow_setperf(int level)
 
 		WRITE_FIDVID(fid, cvid, (uint64_t) cstate->pll * 1000 / 5);
 		if (k8pnow_read_pending_wait(&status))
-			return 0;
+			return;
 		cfid = PN8_STA_CFID(status);
 		COUNT_OFF_IRT(cstate->irt);
 	}
@@ -275,15 +250,13 @@ k8_powernow_setperf(int level)
 	if (cvid != vid) {
 		WRITE_FIDVID(cfid, vid, 1ULL);
 		if (k8pnow_read_pending_wait(&status))
-			return 0;
+			return;
 		cvid = PN8_STA_CVID(status);
 		COUNT_OFF_VST(cstate->vst);
 	}
 
 	if (cfid == fid || cvid == vid)
 		cpuspeed = cstate->state_table[i].freq;
-
-	return (0);
 }
 
 /*
@@ -365,6 +338,7 @@ k8_powernow_init(void)
 {
 	uint64_t status;
 	u_int maxfid, maxvid, i;
+	u_int32_t extcpuid, dummy;
 	struct k8pnow_cpu_state *cstate;
 	struct k8pnow_state *state;
 	struct cpu_info * ci;
@@ -378,6 +352,7 @@ k8_powernow_init(void)
 	if (!cstate)
 		return;
 
+	cstate->n_states = 0;
 	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
 	maxfid = PN8_STA_MFID(status);
 	maxvid = PN8_STA_MVID(status);
@@ -390,22 +365,25 @@ k8_powernow_init(void)
 	if (PN8_STA_SFID(status) != PN8_STA_MFID(status))
 		techname = "PowerNow! K8";
 	else
-		techname = "Cool`n'Quiet K8";
+		techname = "Cool'n'Quiet K8";
 
-	if (k8pnow_states(cstate, ci->ci_signature, maxfid, maxvid)) {
-		if (cstate->n_states) {
-			printf("%s: %s %d Mhz: speeds:",
-			    ci->ci_dev->dv_xname, techname, cpuspeed);
-			for(i = cstate->n_states; i > 0; i--) {
-				state = &cstate->state_table[i-1];
-				printf(" %d", state->freq);
-			}
-			printf(" Mhz\n");
-			k8pnow_current_state = cstate;
-			cpu_setperf = k8_powernow_setperf;
-			setperf_prio = 1;
-			return;
+	/* Extended CPUID signature value */
+	CPUID(0x80000001, extcpuid, dummy, dummy, dummy);
+
+	if (!k8pnow_states(cstate, ci->ci_signature, maxfid, maxvid))
+		k8pnow_states(cstate, extcpuid, maxfid, maxvid);
+	if (cstate->n_states) {
+		printf("%s: %s %d MHz: speeds:",
+		    ci->ci_dev->dv_xname, techname, cpuspeed);
+		for (i = cstate->n_states; i > 0; i--) {
+			state = &cstate->state_table[i-1];
+			printf(" %d", state->freq);
 		}
+		printf(" MHz\n");
+		k8pnow_current_state = cstate;
+		cpu_setperf = k8_powernow_setperf;
+		setperf_prio = 1;
+		return;
 	}
 	free(cstate, M_DEVBUF);
 }

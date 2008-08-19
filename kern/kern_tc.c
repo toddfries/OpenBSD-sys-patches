@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $OpenBSD: kern_tc.c,v 1.5 2005/05/03 11:10:56 hshoexer Exp $
+ * $OpenBSD: kern_tc.c,v 1.7 2006/11/15 17:25:40 jmc Exp $
  * $FreeBSD: src/sys/kern/kern_tc.c,v 1.148 2003/03/18 08:45:23 phk Exp $
  */
 
@@ -588,7 +588,7 @@ ntp_update_second(int64_t *adjust, time_t *sec)
 {
 	struct timeval adj;
 
-	/* Slew time according to any adjtime(2) adjustments. */
+	/* Skew time according to any adjtime(2) adjustments. */
 	timerclear(&adj);
 	if (adjtimedelta.tv_sec > 0)
 		adj.tv_usec = 5000;
@@ -600,5 +600,18 @@ ntp_update_second(int64_t *adjust, time_t *sec)
 		adj.tv_usec = MAX(-500, adjtimedelta.tv_usec - 1000000);
 	timersub(&adjtimedelta, &adj, &adjtimedelta);
 	*adjust = ((int64_t)adj.tv_usec * 1000) << 32;
+	*adjust += timecounter->tc_freq_adj;
+}
+
+int
+tc_adjfreq(int64_t *old, int64_t *new)
+{
+	if (old != NULL) {
+		*old = timecounter->tc_freq_adj;
+	}
+	if (new != NULL) {
+		timecounter->tc_freq_adj = *new;
+	}
+	return 0;
 }
 #endif /* __HAVE_TIMECOUNTER */

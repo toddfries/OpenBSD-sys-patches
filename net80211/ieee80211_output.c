@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.21 2006/06/27 20:55:51 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.23 2006/12/25 19:24:26 reyk Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -179,13 +179,15 @@ ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
 #endif
 		    (type & IEEE80211_FC0_SUBTYPE_MASK) !=
 		    IEEE80211_FC0_SUBTYPE_PROBE_RESP)
-			printf("%s: sending %s to %s on channel %u\n",
+			printf("%s: sending %s to %s on channel %u mode %s\n",
 			    ifp->if_xname,
 			    ieee80211_mgt_subtype_name[
 			    (type & IEEE80211_FC0_SUBTYPE_MASK)
 			    >> IEEE80211_FC0_SUBTYPE_SHIFT],
 			    ether_sprintf(ni->ni_macaddr),
-			    ieee80211_chan2ieee(ic, ni->ni_chan));
+			    ieee80211_chan2ieee(ic, ni->ni_chan),
+			    ieee80211_phymode_name[
+			    ieee80211_chan2mode(ic, ni->ni_chan)]);
 	}
 
 	IF_ENQUEUE(&ic->ic_mgtq, m);
@@ -927,6 +929,60 @@ bad:
 	}
 	return ret;
 #undef senderr
+}
+
+/*
+ * Build a RTS (Request To Send) control frame.
+ */
+struct mbuf *
+ieee80211_get_rts(struct ieee80211com *ic, const struct ieee80211_frame *wh,
+    u_int16_t dur)
+{
+	struct ieee80211_frame_rts *rts;
+	struct mbuf *m;
+
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
+	if (m == NULL) {
+		ic->ic_stats.is_tx_nombuf++;
+		return NULL;
+	}
+	m->m_pkthdr.len = m->m_len = sizeof (struct ieee80211_frame_rts);
+
+	rts = mtod(m, struct ieee80211_frame_rts *);
+	rts->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_CTL |
+	    IEEE80211_FC0_SUBTYPE_RTS;
+	rts->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+	*(uint16_t *)rts->i_dur = htole16(dur);
+	IEEE80211_ADDR_COPY(rts->i_ra, wh->i_addr1);
+	IEEE80211_ADDR_COPY(rts->i_ta, wh->i_addr2);
+
+	return m;
+}
+
+/*
+ * Build a CTS-to-self (Clear To Send) control frame.
+ */
+struct mbuf *
+ieee80211_get_cts_to_self(struct ieee80211com *ic, u_int16_t dur)
+{
+	struct ieee80211_frame_cts *cts;
+	struct mbuf *m;
+
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
+	if (m == NULL) {
+		ic->ic_stats.is_tx_nombuf++;
+		return NULL;
+	}
+	m->m_pkthdr.len = m->m_len = sizeof (struct ieee80211_frame_cts);
+
+	cts = mtod(m, struct ieee80211_frame_cts *);
+	cts->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_CTL |
+	    IEEE80211_FC0_SUBTYPE_CTS;
+	cts->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+	*(uint16_t *)cts->i_dur = htole16(dur);
+	IEEE80211_ADDR_COPY(cts->i_ra, ic->ic_myaddr);
+
+	return m;
 }
 
 struct mbuf *

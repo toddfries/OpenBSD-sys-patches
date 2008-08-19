@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpireg.h,v 1.28 2006/07/09 13:29:30 dlg Exp $ */
+/*	$OpenBSD: mpireg.h,v 1.31 2006/09/21 08:35:39 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -284,6 +284,32 @@ struct mpi_fw_tce {
 #define MPI_REP_IOCLOGINFO_TYPE_ISCSI	(0x4<<28)
 #define MPI_REP_IOCLOGINFO_DATA		(0x0fffffff) /* logging info data */
 
+/* event notification types */
+#define MPI_EVENT_NONE					0x00
+#define MPI_EVENT_LOG_DATA				0x01
+#define MPI_EVENT_STATE_CHANGE				0x02
+#define MPI_EVENT_UNIT_ATTENTION			0x03
+#define MPI_EVENT_IOC_BUS_RESET				0x04
+#define MPI_EVENT_EXT_BUS_RESET				0x05
+#define MPI_EVENT_RESCAN				0x06
+#define MPI_EVENT_LINK_STATUS_CHANGE			0x07
+#define MPI_EVENT_LOOP_STATE_CHANGE			0x08
+#define MPI_EVENT_LOGOUT				0x09
+#define MPI_EVENT_EVENT_CHANGE				0x0a
+#define MPI_EVENT_INTEGRATED_RAID			0x0b
+#define MPI_EVENT_SCSI_DEVICE_STATUS_CHANGE		0x0c
+#define MPI_EVENT_ON_BUS_TIMER_EXPIRED			0x0d
+#define MPI_EVENT_QUEUE_FULL				0x0e
+#define MPI_EVENT_SAS_DEVICE_STATUS_CHANGE		0x0f
+#define MPI_EVENT_SAS_SES				0x10
+#define MPI_EVENT_PERSISTENT_TABLE_FULL			0x11
+#define MPI_EVENT_SAS_PHY_LINK_STATUS			0x12
+#define MPI_EVENT_SAS_DISCOVERY_ERROR			0x13
+#define MPI_EVENT_IR_RESYNC_UPDATE			0x14
+#define MPI_EVENT_IR2					0x15
+#define MPI_EVENT_SAS_DISCOVERY				0x16
+#define MPI_EVENT_LOG_ENTRY_ADDED			0x21
+
 /* messages */
 
 #define MPI_WHOINIT_NOONE		0x00
@@ -566,7 +592,9 @@ struct mpi_msg_portenable_reply {
 } __packed;
 
 struct mpi_msg_event_request {
-	u_int8_t		ev_switch;
+	u_int8_t		event_switch;
+#define MPI_EVENT_SWITCH_ON				(0x01)
+#define MPI_EVENT_SWITCH_OFF				(0x00)
 	u_int8_t		reserved1;
 	u_int8_t		chain_offset;
 	u_int8_t		function;
@@ -584,7 +612,9 @@ struct mpi_msg_event_reply {
 
 	u_int16_t		reserved1;
 	u_int8_t		ack_required;
+#define MPI_EVENT_ACK_REQUIRED				(0x01)
 	u_int8_t		msg_flags;
+#define MPI_EVENT_FLAGS_REPLY_KEPT			(1<<7)
 
 	u_int32_t		msg_context;
 
@@ -598,6 +628,99 @@ struct mpi_msg_event_reply {
 	u_int32_t		event_context;
 
 	/* event data follows */
+} __packed;
+
+struct mpi_evt_change {
+	u_int8_t		event_state;
+	u_int8_t		reserved[3];
+} __packed;
+
+struct mpi_evt_sas_phy {
+	u_int8_t		phy_num;
+	u_int8_t		link_rates;
+#define MPI_EVT_SASPHY_LINK_CUR(x)			(((x) & 0xf0) >> 4)
+#define MPI_EVT_SASPHY_LINK_PREV(x)			((x) & 0x0f)
+#define MPI_EVT_SASPHY_LINK_ENABLED			0x0
+#define MPI_EVT_SASPHY_LINK_DISABLED			0x1
+#define MPI_EVT_SASPHY_LINK_NEGFAIL			0x2
+#define MPI_EVT_SASPHY_LINK_SATAOOB			0x3
+#define MPI_EVT_SASPHY_LINK_1_5GBPS			0x8
+#define MPI_EVT_SASPHY_LINK_3_0GBPS			0x9
+	u_int16_t		dev_handle;
+
+	u_int64_t		sas_addr;
+} __packed;
+
+struct mpi_evt_sas_change {
+	u_int8_t		target;
+	u_int8_t		bus;
+	u_int8_t		reason;
+#define MPI_EVT_SASCH_REASON_ADDED			0x03
+#define MPI_EVT_SASCH_REASON_NOT_RESPONDING		0x04
+#define MPI_EVT_SASCH_REASON_SMART_DATA			0x05
+#define MPI_EVT_SASCH_REASON_NO_PERSIST_ADDED		0x06
+#define MPI_EVT_SASCH_REASON_UNSUPPORTED		0x07
+#define MPI_EVT_SASCH_REASON_INTERNAL_RESET		0x08
+	u_int8_t		reserved1;
+
+	u_int8_t		asc;
+	u_int8_t		ascq;
+	u_int16_t		dev_handle;
+
+	u_int32_t		device_info;
+#define MPI_EVT_SASCH_INFO_ATAPI			(1<<13)
+#define MPI_EVT_SASCH_INFO_LSI				(1<<12)
+#define MPI_EVT_SASCH_INFO_DIRECT_ATTACHED		(1<<11)
+#define MPI_EVT_SASCH_INFO_SSP				(1<<10)
+#define MPI_EVT_SASCH_INFO_STP				(1<<9)
+#define MPI_EVT_SASCH_INFO_SMP				(1<<8)
+#define MPI_EVT_SASCH_INFO_SATA				(1<<7)
+#define MPI_EVT_SASCH_INFO_SSP_INITIATOR		(1<<6)
+#define MPI_EVT_SASCH_INFO_STP_INITIATOR		(1<<5)
+#define MPI_EVT_SASCH_INFO_SMP_INITIATOR		(1<<4)
+#define MPI_EVT_SASCH_INFO_SATA_HOST			(1<<3)
+#define MPI_EVT_SASCH_INFO_TYPE_MASK			0x7
+#define MPI_EVT_SASCH_INFO_TYPE_NONE			0x0
+#define MPI_EVT_SASCH_INFO_TYPE_END			0x1
+#define MPI_EVT_SASCH_INFO_TYPE_EDGE			0x2
+#define MPI_EVT_SASCH_INFO_TYPE_FANOUT			0x3
+
+	u_int16_t		parent_dev_handle;
+	u_int8_t		phy_num;
+	u_int8_t		reserved2;
+
+	u_int64_t		sas_addr;
+} __packed;
+
+struct mpi_msg_eventack_request {
+	u_int16_t		reserved1;
+	u_int8_t		chain_offset;
+	u_int8_t		function;
+
+	u_int8_t		reserved2[3];
+	u_int8_t		msg_flags;
+
+	u_int32_t		msg_context;
+
+	u_int32_t		event;
+
+	u_int32_t		event_context;
+} __packed;
+
+struct mpi_msg_eventack_reply {
+	u_int16_t		reserved1;
+	u_int8_t		msg_length;
+	u_int8_t		function;
+
+	u_int8_t		reserved2[3];
+	u_int8_t		msg_flags;
+
+	u_int32_t		msg_context;
+
+	u_int16_t		reserved3;
+	u_int32_t		ioc_status;
+
+	u_int32_t		ioc_loginfo;
 } __packed;
 
 struct mpi_msg_fwupload_request {
@@ -718,7 +841,6 @@ struct mpi_msg_scsi_io_error {
 #define MPI_SCSIIO_ERR_STATE_TERMINATED			(1<<4)
 #define MPI_SCSIIO_ERR_STATE_RESPONSE_INFO_VALID	(1<<5)
 #define MPI_SCSIIO_ERR_STATE_QUEUE_TAG_REJECTED		(1<<6)
-
 	u_int16_t		ioc_status;
 
 	u_int32_t		ioc_loginfo;

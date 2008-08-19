@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.26 2006/05/29 16:49:42 avsm Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.28 2007/01/16 17:52:18 thib Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -49,6 +49,7 @@
 #define	NFS_MINTIMEO	(1 * NFS_HZ)	/* Min timeout to use */
 #define	NFS_MAXTIMEO	(60 * NFS_HZ)	/* Max timeout to backoff to */
 #define	NFS_MINIDEMTIMEO (5 * NFS_HZ)	/* Min timeout for non-idempotent ops*/
+#define	NFS_TIMEOUTMUL	2		/* Timeout/Delay multiplier */
 #define	NFS_MAXREXMIT	100		/* Stop counting after this many */
 #define	NFS_MAXWINDOW	1024		/* Max number of outstanding requests */
 #define	NFS_RETRANS	10		/* Num of retrans for soft mounts */
@@ -426,10 +427,6 @@ struct nfsrv_descript {
 };
 
 /* Bits for "nd_flag" */
-#define	ND_READ		LEASE_READ
-#define ND_WRITE	LEASE_WRITE
-#define ND_CHECK	0x04
-#define ND_LEASE	(ND_READ | ND_WRITE | ND_CHECK)
 #define ND_NFSV3	0x08
 #define ND_KERBNICK	0x20
 #define ND_KERBFULL	0x40

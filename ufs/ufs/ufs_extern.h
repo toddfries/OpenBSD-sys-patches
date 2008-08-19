@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_extern.h,v 1.25 2005/07/20 16:30:35 pedro Exp $	*/
+/*	$OpenBSD: ufs_extern.h,v 1.27 2007/01/16 17:52:18 thib Exp $	*/
 /*	$NetBSD: ufs_extern.h,v 1.5 1996/02/09 22:36:03 christos Exp $	*/
 
 /*-
@@ -63,12 +63,6 @@ int	 ufs_getattr(void *);
 int	 ufs_inactive(void *);
 int	 ufs_ioctl(void *);
 int	 ufs_islocked(void *);
-#ifdef NFSSERVER
-int	 lease_check(void *);
-#define	 ufs_lease_check lease_check
-#else
-#define	 ufs_lease_check ((int (*)(void *))nullop)
-#endif
 int	 ufs_link(void *);
 int	 ufs_lock(void *);
 int	 ufs_lookup(void *);
@@ -102,7 +96,7 @@ int	ufsfifo_close(void *);
 #endif
 
 /* ufs_bmap.c */
-int ufs_bmaparray(struct vnode *, daddr_t, daddr_t *, struct indir *,
+int ufs_bmaparray(struct vnode *, daddr_t, daddr64_t *, struct indir *,
 		       int *, int *);
 int ufs_getlbns(struct vnode *, daddr_t, struct indir *, int *);
 

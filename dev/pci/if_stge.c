@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.32 2006/08/04 15:00:18 brad Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.35 2006/12/29 22:16:05 kettenis Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -161,8 +161,8 @@ const struct pci_matchid stge_devices[] = {
 	 * The Sundance sample boards use the Sundance vendor ID,
 	 * but the Tamarack product ID.
 	 */
-	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_TAMARACK_TC9021 },
-	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_TAMARACK_TC9021_ALT },
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_TC9021 },
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_TC9021_ALT },
 	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE550T },
 	{ PCI_VENDOR_ANTARES, PCI_PRODUCT_ANTARES_TC9021 }
 };
@@ -387,7 +387,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	ifmedia_init(&sc->sc_mii.mii_media, 0, stge_mediachange,
 	    stge_mediastatus);
 	mii_attach(&sc->sc_dev, &sc->sc_mii, 0xffffffff, MII_PHY_ANY,
-	    MII_OFFSET_ANY, 0 /* MIIF_DOPAUSE */);
+	    MII_OFFSET_ANY, MIIF_DOPAUSE);
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) == NULL) {
 		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER|IFM_NONE, 0, NULL);
 		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|IFM_NONE);
@@ -743,8 +743,8 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
-			    ((ifp->if_flags ^ sc->stge_if_flags) &
-			     IFF_PROMISC)) {
+			    (ifp->if_flags ^ sc->stge_if_flags) &
+			     IFF_PROMISC) {
 				stge_set_filter(sc);
 			} else {
 				if (!(ifp->if_flags & IFF_RUNNING))
@@ -1282,6 +1282,13 @@ stge_init(struct ifnet *ifp)
 	/* RX DMA thresholds, from linux */
 	CSR_WRITE_1(sc, STGE_RxDMABurstThresh, 0x30);
 	CSR_WRITE_1(sc, STGE_RxDMAUrgentThresh, 0x30);
+
+	/* Rx early threhold, from Linux */
+	CSR_WRITE_2(sc, STGE_RxEarlyThresh, 0x7ff);
+
+	/* Tx DMA thresholds, from Linux */
+	CSR_WRITE_1(sc, STGE_TxDMABurstThresh, 0x30);
+	CSR_WRITE_1(sc, STGE_TxDMAUrgentThresh, 0x04);
 
 	/*
 	 * Initialize the Rx DMA interrupt control register.  We

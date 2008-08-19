@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.73 2006/08/10 17:45:16 brad Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.76 2006/12/03 16:23:41 grange Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -899,6 +899,8 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet		*ifp;
 	bus_size_t		size;
 
+	sc->sis_stopped = 1;
+
 	/*
 	 * Handle power management nonsense.
 	 */
@@ -1182,26 +1184,19 @@ sis_ring_init(struct sis_softc *sc)
 {
 	struct sis_list_data	*ld;
 	struct sis_ring_data	*cd;
-	int			i, error;
-	bus_addr_t		next;
+	int			i, error, nexti;
 
 	cd = &sc->sis_cdata;
 	ld = sc->sis_ldata;
 
 	for (i = 0; i < SIS_TX_LIST_CNT; i++) {
-		next = sc->sc_listmap->dm_segs[0].ds_addr;
-		if (i == (SIS_TX_LIST_CNT - 1)) {
-			ld->sis_tx_list[i].sis_nextdesc =
-			    &ld->sis_tx_list[0];
-			next +=
-			    offsetof(struct sis_list_data, sis_tx_list[0]);
-		} else {
-			ld->sis_tx_list[i].sis_nextdesc =
-			    &ld->sis_tx_list[i+1];
-			next +=
-			    offsetof(struct sis_list_data, sis_tx_list[i+1]);
-		}
-		ld->sis_tx_list[i].sis_next = next;
+		if (i == (SIS_TX_LIST_CNT - 1))
+			nexti = 0;
+		else
+			nexti = i + 1;
+		ld->sis_tx_list[i].sis_nextdesc = &ld->sis_tx_list[nexti];
+		ld->sis_tx_list[i].sis_next = sc->sc_listmap->dm_segs[0].ds_addr +
+			offsetof(struct sis_list_data, sis_tx_list[nexti]);
 		ld->sis_tx_list[i].sis_mbuf = NULL;
 		ld->sis_tx_list[i].sis_ptr = 0;
 		ld->sis_tx_list[i].sis_ctl = 0;
@@ -1218,17 +1213,13 @@ sis_ring_init(struct sis_softc *sc)
 		error = sis_newbuf(sc, &ld->sis_rx_list[i], NULL);
 		if (error)
 			return (error);
-		next = sc->sc_listmap->dm_segs[0].ds_addr;
-		if (i == (sc->sc_rxbufs - 1)) {
-			ld->sis_rx_list[i].sis_nextdesc = &ld->sis_rx_list[0];
-			next +=
-			    offsetof(struct sis_list_data, sis_rx_list[0]);
-		} else {
-			ld->sis_rx_list[i].sis_nextdesc = &ld->sis_rx_list[i+1];
-			next +=
-			    offsetof(struct sis_list_data, sis_rx_list[i+1]);
-		}
-		ld->sis_rx_list[i].sis_next = next;
+		if (i == (sc->sc_rxbufs - 1))
+			nexti = 0;
+		else
+			nexti = i + 1;
+		ld->sis_rx_list[i].sis_nextdesc = &ld->sis_rx_list[nexti];
+		ld->sis_rx_list[i].sis_next = sc->sc_listmap->dm_segs[0].ds_addr +
+			offsetof(struct sis_list_data, sis_rx_list[nexti]);
 	}
 
 	cd->sis_rx_pdsc = &ld->sis_rx_list[0];
@@ -1516,8 +1507,10 @@ sis_intr(void *arg)
 		if (status & (SIS_ISR_RX_ERR | SIS_ISR_RX_OFLOW))
 			sis_rxeoc(sc);
 
+#if 0
 		if (status & (SIS_ISR_RX_IDLE))
 			SIS_SETBIT(sc, SIS_CSR, SIS_CSR_RX_ENABLE);
+#endif
 
 		if (status & SIS_ISR_SYSERR) {
 			sis_reset(sc);
@@ -1527,6 +1520,12 @@ sis_intr(void *arg)
 
 	/* Re-enable interrupts. */
 	CSR_WRITE_4(sc, SIS_IER, 1);
+
+	/*
+	 * XXX: Re-enable RX engine every time otherwise it occasionally
+	 * stops under unknown circumstances.
+	 */
+	SIS_SETBIT(sc, SIS_CSR, SIS_CSR_RX_ENABLE);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
 		sis_start(ifp);
@@ -1661,7 +1660,6 @@ sis_init(void *xsc)
 	 * Cancel pending I/O and free all RX/TX buffers.
 	 */
 	sis_stop(sc);
-	sc->sis_stopped = 0;
 
 #if NS_IHR_DELAY > 0
 	/* Configure interrupt holdoff register. */
@@ -1837,6 +1835,7 @@ sis_init(void *xsc)
 	mii_mediachg(mii);
 #endif
 
+	sc->sis_stopped = 0;
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 

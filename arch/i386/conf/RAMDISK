@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.144 2006/07/25 19:16:51 kettenis Exp $
+#	$OpenBSD: RAMDISK,v 1.148 2007/02/17 23:59:03 marco Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -39,6 +39,17 @@ config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
 mainbus0 at root
 
+acpi0		at mainbus?	disable
+#acpitimer*	at acpi?
+#acpihpet*	at acpi?
+#acpiac*	at acpi?
+#acpibat*	at acpi?
+#acpibtn*	at acpi?
+#acpicpu*	at acpi?
+#acpiec*	at acpi?
+acpiprt*	at acpi?
+#acpitz*	at acpi?
+
 cpu0	at mainbus?
 bios0	at mainbus0
 apm0	at bios0 flags 0x0000	# flags 0x0101 to force protocol version 1.1
@@ -62,6 +73,7 @@ pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
 ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
 gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
+geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 
 # ISA PCMCIA controllers
 pcic0	at isa? port 0x3e0 iomem 0xd0000 iosiz 0x4000
@@ -119,7 +131,7 @@ bha*	at pci?
 scsibus* at bha?
 aha0	at isa? port 0x330	# Adaptec 154[02] SCSI controllers
 aha1	at isa? port 0x334	# Adaptec 154[02] SCSI controllers
-aha*	at isapnp?
+#aha*	at isapnp?
 scsibus* at aha?
 ahb*	at eisa?		# Adaptec 174[024] SCSI controllers
 scsibus* at ahb?
@@ -187,7 +199,7 @@ scsibus* at atapiscsi?
 we0	at isa? port 0x280 iomem 0xd0000 irq 9	# WD/SMC 80x3 ethernet series
 we1	at isa? port 0x300 iomem 0xcc000 irq 10	#
 we*	at isapnp?
-ec0	at isa? port 0x250 iomem 0xd8000 irq 9	# 3C503 ethernet card
+#ec0	at isa? port 0x250 iomem 0xd8000 irq 9	# 3C503 ethernet card
 ne0	at isa? port 0x240 irq 9	# NE[12]000 ethernet card
 ne1	at isa? port 0x300 irq 10	# NE[12]000 ethernet card
 ne2	at isa? port 0x280 irq 9	# NE[12]000 ethernet

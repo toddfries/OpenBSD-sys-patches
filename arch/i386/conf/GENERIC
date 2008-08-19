@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.525 2006/09/16 13:21:24 damien Exp $
+#	$OpenBSD: GENERIC,v 1.547 2007/02/28 21:54:43 grange Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -21,7 +21,7 @@ option		I686_CPU
 option		USER_PCICONF	# user-space PCI configuration
 
 #option		VM86		# Virtual 8086 emulation
-#option		KVM86		# Kernel Virtual 8086 emulation
+option		KVM86		# Kernel Virtual 8086 emulation
 option		USER_LDT	# user-settable LDT; see i386_set_ldt(2)
 option		APERTURE	# in-kernel aperture driver for XFree86
 
@@ -60,20 +60,21 @@ pci*	at mainbus0
 #option		ACPIVERBOSE
 #option		ACPI_ENABLE
 
-#acpi0		at mainbus?
+acpi0		at mainbus?	disable
 #acpitimer*	at acpi?
 #acpihpet*	at acpi?
 #acpiac*	at acpi?
 #acpibat*	at acpi?
 #acpibtn*	at acpi?
 #acpicpu*	at acpi?
-#acpiec*	at acpi?
+#acpidock*	at acpi?
+acpiec*		at acpi?	disable
+acpiprt*	at acpi?
 #acpitz*	at acpi?
 
 option		PCIVERBOSE
 option		EISAVERBOSE
 option		USBVERBOSE
-option		ONEWIREVERBOSE
 
 pchb*	at pci?			# PCI-Host bridges
 ppb*	at pci?			# PCI-PCI bridges
@@ -91,6 +92,7 @@ geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 #gscpm*	at pci?			# NS Geode SC1100 SMI/ACPI module
 #ichwdt* at pci?		# Intel 6300ESB ICH watchdog timer
 wdt0	at pci?			# Ind Computer Source PCI-WDT50x driver
+pwdog0	at pci?			# Quancom PWDOG1 watchdog timer
 
 # National Semiconductor LM7[89] and compatible hardware monitors
 lm0	at isa? port 0x290
@@ -202,6 +204,8 @@ uslcom*	at uhub?		# Silicon Laboratories CP210x serial
 ucom*	at uslcom?
 uark*	at uhub?		# Arkmicro ARK3116 serial
 ucom*	at uark?
+moscom*	at uhub?		# MosChip MCS7703 serial
+ucom*	at moscom?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
 umsm*	at uhub?		# Qualcomm MSM EVDO
@@ -240,14 +244,18 @@ scsibus* at usscanner?
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
+uberry*	at uhub?		# Research In Motion Blackberry
 ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
-#zyd*	at uhub?		# Zydas ZD1211
+zyd*	at uhub?		# Zydas ZD1211
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
+uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
+onewire* at uow?
+
 puc*	at pci?			# PCI "universal" communication device
 #puc*	at cardbus?
 
@@ -277,6 +285,11 @@ wsdisplay*	at pcdisplay?
 wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 wsmouse*	at pmsi? mux 0
+
+#vesabios0	at mainbus?
+# option	VESABIOSVERBOSE
+
+#option	VESAFB			# VESA bios framebuffer support for X11
 
 pcppi0		at isa?
 
@@ -342,9 +355,6 @@ arc*	at pci?			# Areca RAID Controllers
 scsibus* at arc?
 mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
 scsibus* at mpi?
-dpt*	at pci?			# DPT SmartCache/SmartRAID PCI
-dpt*	at eisa?		# DPT SmartCache/SmartRAID EISA
-scsibus* at dpt?
 gdt*	at pci?			# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
 twe*	at pci?			# 3ware Escalade RAID controllers
@@ -362,6 +372,8 @@ ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
 scsibus* at ciss?
 iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
 scsibus* at iha?
+ips*	at pci?			# IBM ServeRAID controllers
+scsibus* at ips?
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 scsibus* at isp?
 aic0	at isa? port 0x340 irq 11 # Adaptec 152[02] SCSI controllers
@@ -504,6 +516,8 @@ nfe*	at pci?				# NVIDIA nForce Ethernet
 musycc*	at pci?				# Conexant HDLC controller
 art*	at musycc?			# Accoom Artery E1/T1 cards
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
+gem*	at pci?				# Sun 'gem' ethernet
+vic*	at pci?				# VMware VMXnet virtual interface
 
 # Wireless network cards
 acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
@@ -528,6 +542,10 @@ ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180
 rtw*	at cardbus?			# Realtek 8180
 pgt*	at pci?				# Prism54 (only full-mac varients)
+pgt*	at cardbus?			# Prism54 (only full-mac varients)
+malo*	at pci?				# Marvell Libertas
+malo*	at cardbus?			# Marvell Libertas
+mbg*	at pci?				# Meinberg Funkuhren radio clocks
 
 # Media Independent Interface (mii) drivers
 exphy*	at mii?				# 3Com internal PHYs
@@ -554,6 +572,7 @@ nsgphy*	at mii?				# NS gigabit PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
 ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
+gentbi*	at mii?				# Generic 1000BASE-X ten-bit PHY
 ukphy*	at mii?				# "unknown" PHYs
 
 pss0	at isa? port 0x220 irq 7 drq 6	# Personal Sound System
@@ -665,6 +684,7 @@ nofn*	at pci?			# Hi/fn 7814/7851/7854 crypto card
 ubsec*	at pci?			# Bluesteel Networks 5xxx crypto card
 safe*	at pci?			# SafeNet SafeXcel 1141/1741
 #ises*	at pci?			# Pijnenburg PCC-ISES
+glxsb*	at pci?			# AMD Geode LX series processor security block
 
 # I2O
 iop*	at pci?			# I2O processor
@@ -680,8 +700,10 @@ scsibus* at iopsp?
 #onewire* at gpioow?
 
 # 1-Wire devices
-#owid*	at onewire?			# ID
-#owtemp* at onewire?			# Temperature
+option ONEWIREVERBOSE
+owid*	at onewire?		# ID
+owsbm*	at onewire?		# Smart Battery Monitor
+owtemp* at onewire?		# Temperature
 
 pseudo-device	pctr		1
 pseudo-device	mtrr		1	# Memory range attributes control

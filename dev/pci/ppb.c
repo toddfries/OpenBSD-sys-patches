@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.16 2006/07/04 18:26:30 kettenis Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.18 2007/02/13 18:35:32 tom Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -118,7 +118,7 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 #endif
 
 	/*
-	 * Attach the PCI bus than hangs off of it.
+	 * Attach the PCI bus that hangs off of it.
 	 *
 	 * XXX Don't pass-through Memory Read Multiple.  Should we?
 	 * XXX Consult the spec...
@@ -131,6 +131,7 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 #if 0
 	pba.pba_flags = pa->pa_flags & ~PCI_FLAGS_MRM_OKAY;
 #endif
+	pba.pba_domain = pa->pa_domain;
 	pba.pba_bus = PPB_BUSINFO_SECONDARY(busdata);
 	pba.pba_bridgetag = &sc->sc_tag;
 	pba.pba_intrswiz = pa->pa_intrswiz;

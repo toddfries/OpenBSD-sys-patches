@@ -1,4 +1,4 @@
-/*	$OpenBSD: nviic.c,v 1.7 2006/07/23 02:12:12 brad Exp $ */
+/*	$OpenBSD: nviic.c,v 1.9 2006/12/11 18:16:37 deraadt Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -122,7 +122,8 @@ const struct pci_matchid nviic_ids[] = {
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP51_SMB },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP55_SMB },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_SMB },
-	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_SMB }
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_SMB },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP67_SMB }
 };
 
 int
@@ -166,7 +167,8 @@ nviic_attach(struct device *parent, struct device *self, void *aux)
 		nc = &sc->sc_nc[i];
 
 		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, baseregs[i]);
-		if (bus_space_map(sc->sc_iot, NVI_SMBASE(reg), NVI_SMBASE_SIZE,
+		if (NVI_SMBASE(reg) == 0 ||
+		    bus_space_map(sc->sc_iot, NVI_SMBASE(reg), NVI_SMBASE_SIZE,
 		    0, &nc->nc_ioh)) {
 			printf("%s: unable to map space for bus %d\n",
 			    DEVNAME(sc), i);

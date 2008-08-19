@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.35 2006/08/17 10:34:14 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.37 2006/10/21 16:01:54 krw Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -82,6 +82,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	}
 	if (lp->d_partitions[i].p_size == 0)
 		lp->d_partitions[i].p_size = lp->d_secperunit;
+	lp->d_partitions[i].p_offset = 0;
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
@@ -209,7 +210,7 @@ int
 writedisklabel(dev, strat, lp, clp)
 	dev_t dev;
 	void (*strat)(struct buf *);
-	register struct disklabel *lp;
+	struct disklabel *lp;
 	struct cpu_disklabel *clp;
 {
 	struct buf *bp;

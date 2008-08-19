@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm78var.h,v 1.6 2006/05/07 17:45:16 kettenis Exp $	*/
+/*	$OpenBSD: lm78var.h,v 1.10 2007/02/22 20:44:51 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Mark Kettenis
@@ -67,6 +67,8 @@
 #define WB_BANK0_FAN4	0xba	/* Fan 4 reading (W83791D only) */
 #define WB_BANK0_FAN5	0xbb	/* Fan 5 reading (W83791D only) */
 
+#define WB_BANK0_CONFIG	0x18	/* VRM & OVT Config (W83627THF/W83637HF) */
+
 /* Bank 1 registers */
 #define WB_BANK1_T2H	0x50	/* Temperature 2 High Byte */
 #define WB_BANK1_T2L	0x51	/* Temperature 2 Low Byte */
@@ -91,7 +93,7 @@
 #define WB_BANKSEL_B3	0x03	/* Bank 3 */
 #define WB_BANKSEL_B4	0x04	/* Bank 4 */
 #define WB_BANKSEL_B5	0x05	/* Bank 5 */
-#define WB_BANKSEL_HBAC	0x80	/* Register 0x4f Hight Byte Access */
+#define WB_BANKSEL_HBAC	0x80	/* Register 0x4f High Byte Access */
 
 /* Vendor IDs */
 #define WB_VENDID_WINBOND	0x5ca3	/* Winbond */
@@ -110,9 +112,14 @@
 #define WB_CHIPID_W83792D	0x7a
 #define WB_CHIPID_W83637HF	0x80
 #define WB_CHIPID_W83627THF	0x90
+#define WB_CHIPID_W83627EHF	0xa1
+
+/* Config bits */
+#define WB_CONFIG_VMR9		0x01
 
 /* Reference voltage (mV) */
-#define WB_VREF		3600
+#define WB_VREF			3600
+#define WB_W83627EHF_VREF	2048
 
 #define WB_MAX_SENSORS  19
 
@@ -131,6 +138,7 @@ struct lm_softc {
 	struct device sc_dev;
 
 	struct sensor sensors[WB_MAX_SENSORS];
+	struct sensordev sensordev;
 	struct lm_sensor *lm_sensors;
 	u_int numsensors;
 	void (*refresh_sensor_data) (struct lm_softc *);
@@ -140,6 +148,7 @@ struct lm_softc {
 
 	u_int8_t sbusaddr;
 	u_int8_t chipid;
+	u_int8_t vrm9;
 };
 
 void lm_attach(struct lm_softc *);

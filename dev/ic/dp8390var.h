@@ -1,4 +1,4 @@
-/*	$OpenBSD: dp8390var.h,v 1.9 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: dp8390var.h,v 1.11 2006/10/20 18:12:50 brad Exp $	*/
 /*	$NetBSD: dp8390var.h,v 1.8 1998/08/12 07:19:09 scottr Exp $	*/
 
 /*
@@ -133,6 +133,13 @@ struct dp8390_softc {
  */
 #define DP8390_DO_AX88190_WORKAROUND	0x0020
 
+#define DP8390_ATTACHED			0x0040	/* attach has succeeded */
+
+/*
+ * ASIX AX88796 doesn't have remote DMA conmplete bit in ISR, so don't
+ * check ISR.RDC
+ */
+#define DP8390_NO_REMOTE_DMA_COMPLETE	0x0080
 
 /*
  * NIC register access macros
@@ -141,6 +148,8 @@ struct dp8390_softc {
 				    ((sc)->sc_reg_map[reg]))
 #define NIC_PUT(t, h, reg, val)	bus_space_write_1(t, h,			\
 				    ((sc)->sc_reg_map[reg]), (val))
+#define NIC_BARRIER(t, h)	bus_space_barrier(t, h, 0, 0x10,	\
+		    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE)
 
 int	dp8390_config(struct dp8390_softc *);
 int	dp8390_intr(void *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route6.c,v 1.10.14.1 2007/04/22 19:48:14 mbalmer Exp $	*/
+/*	$OpenBSD: route6.c,v 1.14.2.1 2007/04/28 05:01:02 ckuethe Exp $	*/
 /*	$KAME: route6.c,v 1.22 2000/12/03 00:54:00 itojun Exp $	*/
 
 /*
@@ -45,8 +45,7 @@
 #include <netinet/icmp6.h>
 
 #if 0
-static int ip6_rthdr0(struct mbuf *, struct ip6_hdr *,
-    struct ip6_rthdr0 *);
+static int ip6_rthdr0(struct mbuf *, struct ip6_hdr *, struct ip6_rthdr0 *);
 #endif
 
 int
@@ -70,6 +69,8 @@ route6_input(mp, offp, proto)
 #if 0
 	case IPV6_RTHDR_TYPE_0:
 		rhlen = (rh->ip6r_len + 1) << 3;
+		if (rh->ip6r_segleft == 0)
+			break;	/* Final dst. Just ignore the header. */
 		/*
 		 * note on option length:
 		 * maximum rhlen: 2048
@@ -122,14 +123,10 @@ ip6_rthdr0(m, ip6, rh0)
 	if (rh0->ip6r0_segleft == 0)
 		return (0);
 
-	if (rh0->ip6r0_len % 2
-#ifdef COMPAT_RFC1883
-	    || rh0->ip6r0_len > 46
-#endif
-		) {
+	if (rh0->ip6r0_len % 2) {
 		/*
 		 * Type 0 routing header can't contain more than 23 addresses.
-		 * RFC 2462: this limitation was removed since strict/loose
+		 * RFC 2460: this limitation was removed since strict/loose
 		 * bitmap field was deleted.
 		 */
 		ip6stat.ip6s_badoptions++;
@@ -180,14 +177,7 @@ ip6_rthdr0(m, ip6, rh0)
 	if (IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_dst))
 		ip6->ip6_dst.s6_addr16[1] = htons(m->m_pkthdr.rcvif->if_index);
 
-#ifdef COMPAT_RFC1883
-	if (rh0->ip6r0_slmap[index / 8] & (1 << (7 - (index % 8))))
-		ip6_forward(m, IPV6_SRCRT_NEIGHBOR);
-	else
-		ip6_forward(m, IPV6_SRCRT_NOTNEIGHBOR);
-#else
 	ip6_forward(m, 1);
-#endif
 
 	return (-1);			/* m would be freed in ip6_forward() */
 

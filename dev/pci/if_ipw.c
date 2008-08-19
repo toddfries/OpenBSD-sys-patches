@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.62 2006/08/19 14:57:37 damien Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.66 2007/01/03 18:19:06 claudio Exp $	*/
 
 /*-
  * Copyright (c) 2004-2006
@@ -73,12 +73,8 @@
 #include <dev/pci/if_ipwreg.h>
 #include <dev/pci/if_ipwvar.h>
 
-static const struct ieee80211_rateset ipw_rateset_11b =
-	{ 4, { 2, 4, 11, 22 } };
-
 int		ipw_match(struct device *, void *, void *);
 void		ipw_attach(struct device *, struct device *, void *);
-int		ipw_detach(struct device *, int);
 void		ipw_power(int, void *);
 int		ipw_dma_alloc(struct ipw_softc *);
 void		ipw_release(struct ipw_softc *);
@@ -143,7 +139,7 @@ int ipw_debug = 0;
 #endif
 
 struct cfattach ipw_ca = {
-	sizeof (struct ipw_softc), ipw_match, ipw_attach, ipw_detach
+	sizeof (struct ipw_softc), ipw_match, ipw_attach
 };
 
 int
@@ -254,7 +250,7 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
 	/* set supported .11b rates */
-	ic->ic_sup_rates[IEEE80211_MODE_11B] = ipw_rateset_11b;
+	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;
 
 	/* set supported .11b channels (1 through 14) */
 	for (i = 1; i <= 14; i++) {
@@ -296,29 +292,6 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(IPW_TX_RADIOTAP_PRESENT);
 #endif
-}
-
-int
-ipw_detach(struct device *self, int flags)
-{
-	struct ipw_softc *sc = (struct ipw_softc *)self;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-
-	ipw_stop(ifp, 1);
-
-	ieee80211_ifdetach(ifp);
-	if_detach(ifp);
-
-	ipw_release(sc);
-
-	if (sc->sc_ih != NULL) {
-		pci_intr_disestablish(sc->sc_pct, sc->sc_ih);
-		sc->sc_ih = NULL;
-	}
-
-	bus_space_unmap(sc->sc_st, sc->sc_sh, sc->sc_sz);
-
-	return 0;
 }
 
 void
@@ -910,11 +883,12 @@ ipw_data_intr(struct ipw_softc *sc, struct ipw_status *status,
 		tap->wr_chan_freq = htole16(ic->ic_ibss_chan->ic_freq);
 		tap->wr_chan_flags = htole16(ic->ic_ibss_chan->ic_flags);
 
-		M_DUP_PKTHDR(&mb, m);
 		mb.m_data = (caddr_t)tap;
 		mb.m_len = sc->sc_rxtap_len;
 		mb.m_next = m;
-		mb.m_pkthdr.len += mb.m_len;
+		mb.m_nextpkt = NULL;
+		mb.m_type = 0;
+		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif
@@ -1174,11 +1148,12 @@ ipw_tx_start(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni)
 		tap->wt_chan_freq = htole16(ic->ic_ibss_chan->ic_freq);
 		tap->wt_chan_flags = htole16(ic->ic_ibss_chan->ic_flags);
 
-		M_DUP_PKTHDR(&mb, m);
 		mb.m_data = (caddr_t)tap;
 		mb.m_len = sc->sc_txtap_len;
 		mb.m_next = m;
-		mb.m_pkthdr.len += mb.m_len;
+		mb.m_nextpkt = NULL;
+		mb.m_type = 0;
+		mb.m_flags = 0;
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_OUT);
 	}
 #endif
@@ -1329,16 +1304,15 @@ ipw_start(struct ifnet *ifp)
 		return;
 
 	for (;;) {
-		IF_DEQUEUE(&ifp->if_snd, m);
+		IFQ_POLL(&ifp->if_snd, m);
 		if (m == NULL)
 			break;
 
 		if (sc->txfree < 1 + IPW_MAX_NSEG) {
-			IF_PREPEND(&ifp->if_snd, m);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
-
+		IFQ_DEQUEUE(&ifp->if_snd, m);
 #if NBPFILTER > 0
 		if (ifp->if_bpf != NULL)
 			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.5 2005/06/17 22:33:34 niklas Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.10 2007/02/06 18:42:37 art Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -79,7 +79,7 @@ void updatepri(struct proc *);
 void endtsleep(void *);
 
 void
-scheduler_start()
+scheduler_start(void)
 {
 #ifndef __HAVE_CPUINFO
 	static struct timeout roundrobin_to;
@@ -159,7 +159,7 @@ roundrobin(void *arg)
 		splx(s);
 	}
 
-	need_resched(0);
+	need_resched(NULL);
 	timeout_add(to, hz / 10);
 }
 #endif
@@ -243,7 +243,7 @@ fixpt_t	ccpu = 0.95122942450071400909 * FSCALE;		/* exp(-1/20) */
  * To estimate CCPU_SHIFT for exp(-1/20), the following formula was used:
  *	1 - exp(-1/20) ~= 0.0487 ~= 0.0488 == 1 (fixed pt, *11* bits).
  *
- * If you dont want to bother with the faster/more-accurate formula, you
+ * If you don't want to bother with the faster/more-accurate formula, you
  * can set CCPU_SHIFT to (FSHIFT + 1) which will use a slower/less-accurate
  * (more general) method of calculating the %age of CPU used by a process.
  */
@@ -254,8 +254,7 @@ fixpt_t	ccpu = 0.95122942450071400909 * FSCALE;		/* exp(-1/20) */
  */
 /* ARGSUSED */
 void
-schedcpu(arg)
-	void *arg;
+schedcpu(void *arg)
 {
 	struct timeout *to = (struct timeout *)arg;
 	fixpt_t loadfac = loadfactor(averunnable.ldavg[0]);
@@ -273,7 +272,7 @@ schedcpu(arg)
 	phz = stathz ? stathz : profhz;
 	KASSERT(phz);
 
-	for (p = LIST_FIRST(&allproc); p != 0; p = LIST_NEXT(p, p_list)) {
+	for (p = LIST_FIRST(&allproc); p != NULL; p = LIST_NEXT(p, p_list)) {
 		/*
 		 * Increment time in/out of memory and sleep time
 		 * (if sleeping).  We ignore overflow; with 16-bit int's
@@ -311,7 +310,6 @@ schedcpu(arg)
 		if (p->p_priority >= PUSER) {
 			if ((p != curproc) &&
 			    p->p_stat == SRUN &&
-			    (p->p_flag & P_INMEM) &&
 			    (p->p_priority / PPQ) != (p->p_usrpri / PPQ)) {
 				remrunqueue(p);
 				p->p_priority = p->p_usrpri;
@@ -322,7 +320,7 @@ schedcpu(arg)
 		SCHED_UNLOCK(s);
 	}
 	uvm_meter();
-	wakeup((caddr_t)&lbolt);
+	wakeup(&lbolt);
 	timeout_add(to, hz);
 }
 
@@ -332,11 +330,10 @@ schedcpu(arg)
  * least six times the loadfactor will decay p_estcpu to zero.
  */
 void
-updatepri(p)
-	register struct proc *p;
+updatepri(struct proc *p)
 {
-	register unsigned int newcpu = p->p_estcpu;
-	register fixpt_t loadfac = loadfactor(averunnable.ldavg[0]);
+	unsigned int newcpu = p->p_estcpu;
+	fixpt_t loadfac = loadfactor(averunnable.ldavg[0]);
 
 	SCHED_ASSERT_LOCKED();
 
@@ -370,7 +367,7 @@ sched_lock_idle(void)
  * performs a voluntary context switch.
  */
 void
-yield()
+yield(void)
 {
 	struct proc *p = curproc;
 	int s;
@@ -391,8 +388,7 @@ yield()
  * criteria.
  */
 void
-preempt(newp)
-	struct proc *newp;
+preempt(struct proc *newp)
 {
 	struct proc *p = curproc;
 	int s;
@@ -417,7 +413,7 @@ preempt(newp)
  * Must be called at splstatclock() or higher.
  */
 void
-mi_switch()
+mi_switch(void)
 {
 	struct proc *p = curproc;	/* XXX */
 	struct rlimit *rlim;
@@ -541,9 +537,9 @@ mi_switch()
  * to be empty.
  */
 void
-rqinit()
+rqinit(void)
 {
-	register int i;
+	int i;
 
 	for (i = 0; i < NQS; i++)
 		qs[i].ph_link = qs[i].ph_rlink = (struct proc *)&qs[i];
@@ -585,7 +581,7 @@ resched_proc(struct proc *p, u_char pri)
 		need_resched(ci);
 #else
 	if (pri < curpriority)
-		need_resched(0);
+		need_resched(NULL);
 #endif
 }
 
@@ -595,8 +591,7 @@ resched_proc(struct proc *p, u_char pri)
  * and awakening the swapper if it isn't in memory.
  */
 void
-setrunnable(p)
-	register struct proc *p;
+setrunnable(struct proc *p)
 {
 	SCHED_ASSERT_LOCKED();
 
@@ -614,7 +609,7 @@ setrunnable(p)
 		 * while we were stopped), check for a signal from the debugger.
 		 */
 		if ((p->p_flag & P_TRACED) != 0 && p->p_xstat != 0)
-			p->p_siglist |= sigmask(p->p_xstat);
+			atomic_setbits_int(&p->p_siglist, sigmask(p->p_xstat));
 	case SSLEEP:
 		unsleep(p);		/* e.g. when sending signals */
 		break;
@@ -622,15 +617,11 @@ setrunnable(p)
 		break;
 	}
 	p->p_stat = SRUN;
-	if (p->p_flag & P_INMEM)
-		setrunqueue(p);
+	setrunqueue(p);
 	if (p->p_slptime > 1)
 		updatepri(p);
 	p->p_slptime = 0;
-	if ((p->p_flag & P_INMEM) == 0)
-		wakeup((caddr_t)&proc0);
-	else
-		resched_proc(p, p->p_priority);
+	resched_proc(p, p->p_priority);
 }
 
 /*
@@ -639,10 +630,9 @@ setrunnable(p)
  * than that of the current process.
  */
 void
-resetpriority(p)
-	register struct proc *p;
+resetpriority(struct proc *p)
 {
-	register unsigned int newpriority;
+	unsigned int newpriority;
 
 	SCHED_ASSERT_LOCKED();
 
@@ -668,8 +658,7 @@ resetpriority(p)
  */
 
 void
-schedclock(p)
-	struct proc *p;
+schedclock(struct proc *p)
 {
 	int s;
 

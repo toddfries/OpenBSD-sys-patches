@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.44 2006/03/15 20:20:41 miod Exp $	*/
+/*	$OpenBSD: fd.c,v 1.47 2007/02/15 00:53:26 krw Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -1895,7 +1895,6 @@ fdformat(dev, finfo, p)
 	if (bp == 0)
 		return (ENOBUFS);
 
-	PHOLD(p);
 	bzero((void *)bp, sizeof(struct buf));
 	bp->b_flags = B_BUSY | B_PHYS | B_FORMAT;
 	bp->b_proc = p;
@@ -1942,7 +1941,6 @@ fdformat(dev, finfo, p)
 
 	/* ...and wait for it to complete */
 	rv = biowait(bp);
-	PRELE(p);
 	free(bp, M_TEMP);
 	return (rv);
 }
@@ -1972,7 +1970,6 @@ fdgetdisklabel(dev)
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	lp->d_interleave = 1;
-	lp->d_flags = D_REMOVABLE;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
 	lp->d_partitions[RAW_PART].p_size = lp->d_secpercyl * lp->d_ncylinders;
@@ -1988,7 +1985,7 @@ fdgetdisklabel(dev)
 	 */
 	errstring = readdisklabel(dev, fdstrategy, lp, clp, 0);
 	if (errstring) {
-		printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);
+		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
 	}
 }
 

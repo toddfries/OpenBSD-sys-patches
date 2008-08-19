@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_skreg.h,v 1.39 2006/08/20 19:15:46 brad Exp $	*/
+/*	$OpenBSD: if_skreg.h,v 1.44 2007/02/26 20:27:17 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -347,13 +347,14 @@
 #define SK_YUKON_LP		0xB2
 #define SK_YUKON_XL		0xB3
 #define SK_YUKON_EC_U		0xB4
+#define SK_YUKON_EX		0xB5
 #define SK_YUKON_EC		0xB6
 #define SK_YUKON_FE		0xB7
 
 #define SK_IS_GENESIS(sc) \
     ((sc)->sk_type == SK_GENESIS)
 #define SK_IS_YUKON(sc) \
-    ((sc)->sk_type >= SK_YUKON && (sc)->sk_type <= SK_YUKON_FE)
+    ((sc)->sk_type >= SK_YUKON && (sc)->sk_type <= SK_YUKON_LP)
 #define SK_IS_YUKON2(sc) \
     ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_FE)
 
@@ -1052,8 +1053,8 @@
 #define SK_RFCTL_RD_PTR_TST_ON	0x00000400	/* Read pointer test on */
 #define SK_RFCTL_RD_PTR_TST_OFF	0x00000200	/* Read pointer test off */
 #define SK_RFCTL_RD_PTR_STEP	0x00000100	/* Read pointer increment */
-#define SK_RFCTL_FIFO_FLUSH_OFF	0x00000080	/* RX FIFO Flsuh mode off */
-#define SK_RFCTL_FIFO_FLUSH_ON	0x00000040	/* RX FIFO Flush mode on */
+#define SK_RFCTL_FIFO_FLUSH_ON	0x00000080	/* RX FIFO Flush mode on */
+#define SK_RFCTL_FIFO_FLUSH_OFF	0x00000040	/* RX FIFO Flush mode off */
 #define SK_RFCTL_RX_FIFO_OVER	0x00000020	/* Clear IRQ RX FIFO Overrun */
 #define SK_RFCTL_FRAME_RX_DONE	0x00000010	/* Clear IRQ Frame RX Done */
 #define SK_RFCTL_OPERATION_ON	0x00000008	/* Operational mode on */
@@ -1329,7 +1330,15 @@
 /* Block 32-33 -- Pattern Ram */
 #define SK_WOL_PRAM		0x1000
 
-/* Block 0x22 - 0x3f -- reserved */
+/* Block 0x22 - 0x37 -- reserved */
+
+/* Block 0x38 -- Y2 PCI config registers */
+#define SK_Y2_PCI_BASE		0x1c00
+
+/* Compute offset of mirrored PCI register */
+#define SK_Y2_PCI_REG(reg)	((reg) + SK_Y2_PCI_BASE)
+
+/* Block 0x39 - 0x3f -- reserved */
 
 /* Block 0x40 to 0x4F -- XMAC 1 registers */
 #define SK_XMAC1_BASE	0x2000
@@ -1448,6 +1457,9 @@
 #define SK_PCI_PWRMGMTCAP	0x004A /* 16 bits */
 #define SK_PCI_PWRMGMTCTRL	0x004C /* 16 bits */
 #define SK_PCI_PME_EVENT	0x004F
+
+#define SK_Y2_REG1_PHY1_COMA	0x10000000
+#define SK_Y2_REG1_PHY2_COMA	0x20000000
 
 #define SK_PSTATE_MASK		0x0003
 #define SK_PSTATE_D0		0x0000
@@ -2160,3 +2172,5 @@ struct msk_status_desc {
 #define XM_RESAB_FDMODESEL	0x0020
 #define XM_RESAB_HDMODESEL	0x0040
 #define XM_RESAB_PAUSEBITS	0x0180
+
+#define SK_HASH_BITS		6

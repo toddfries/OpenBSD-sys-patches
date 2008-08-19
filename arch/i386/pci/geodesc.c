@@ -1,4 +1,4 @@
-/*	$OpenBSD: geodesc.c,v 1.5 2006/02/01 13:08:12 mickey Exp $	*/
+/*	$OpenBSD: geodesc.c,v 1.9 2006/12/11 20:57:40 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Markus Friedl <markus@openbsd.org>
@@ -44,7 +44,11 @@ struct geodesc_softc {
 
 int	geodesc_match(struct device *, void *, void *);
 void	geodesc_attach(struct device *, struct device *, void *);
+void	sc1100_sysreset(void);
+
+#ifndef SMALL_KERNEL
 int	geodesc_wdogctl_cb(void *, int);
+#endif /* SMALL_KERNEL */
 
 struct cfattach geodesc_ca = {
 	sizeof(struct geodesc_softc), geodesc_match, geodesc_attach
@@ -89,10 +93,12 @@ geodesc_attach(struct device *parent, struct device *self, void *aux)
 	uint16_t cnfg, cba;
 	uint8_t sts, rev, iid;
 	pcireg_t reg;
+	extern void (*cpuresetfn)(void);
 
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, SC1100_F5_SCRATCHPAD);
 	sc->sc_iot = pa->pa_iot;
-	if (bus_space_map(sc->sc_iot, reg, 64, 0, &sc->sc_ioh)) {
+	if (reg == 0 ||
+	    bus_space_map(sc->sc_iot, reg, 64, 0, &sc->sc_ioh)) {
 		printf(": unable to map registers at 0x%x\n", reg);
 		return;
 	}
@@ -109,6 +115,7 @@ geodesc_attach(struct device *parent, struct device *self, void *aux)
 
 	printf(": iid %d revision %d wdstatus %b\n", iid, rev, sts, WDSTSBITS);
 
+#ifndef SMALL_KERNEL
 	/* setup and register watchdog */
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, GCB_WDTO, 0);
 	sts |= WDOVF_CLEAR;
@@ -118,14 +125,20 @@ geodesc_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, GCB_WDCNFG, cnfg);
 
 	wdog_register(sc, geodesc_wdogctl_cb);
+#endif /* SMALL_KERNEL */
+
 #ifdef __HAVE_TIMECOUNTER
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, GCB_TSCNFG, TSC_ENABLE);
 	/* Hook into the kern_tc */
 	geodesc_timecounter.tc_priv = sc;
-	tc_init(&geodesc_timecounter);  
+	tc_init(&geodesc_timecounter);
 #endif /* __HAVE_TIMECOUNTER */
+
+	/* We have a special way to reset the CPU on the SC1100 */
+	cpuresetfn = sc1100_sysreset;
 }
 
+#ifndef SMALL_KERNEL
 int
 geodesc_wdogctl_cb(void *self, int period)
 {
@@ -136,6 +149,7 @@ geodesc_wdogctl_cb(void *self, int period)
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, GCB_WDTO, period * 64);
 	return (period);
 }
+#endif /* SMALL_KERNEL */
 
 #ifdef __HAVE_TIMECOUNTER
 u_int
@@ -146,3 +160,25 @@ geodesc_get_timecount(struct timecounter *tc)
 	return (bus_space_read_4(sc->sc_iot, sc->sc_ioh, GCB_TSC));
 }
 #endif /* __HAVE_TIMECOUNTER */
+
+void
+sc1100_sysreset(void)
+{
+	/*
+	 * Reset AMD Geode SC1100.
+	 *
+	 * 1) Write PCI Configuration Address Register (0xcf8) to
+	 *    select Function 0, Register 0x44: Bridge Configuration,
+	 *    GPIO and LPC Configuration Register Space, Reset
+	 *    Control Register.
+	 *
+	 * 2) Write 0xf to PCI Configuration Data Register (0xcfc)
+	 *    to reset IDE controller, IDE bus, and PCI bus, and
+	 *    to trigger a system-wide reset.
+	 *
+	 * See AMD Geode SC1100 Processor Data Book, Revision 2.0,
+	 * sections 6.3.1, 6.3.2, and 6.4.1.
+	 */
+	outl(0xCF8, 0x80009044UL);
+	outb(0xCFC, 0x0F);
+}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ubsa.c,v 1.17 2006/08/07 18:16:10 fkr Exp $ 	*/
+/*	$OpenBSD: ubsa.c,v 1.20 2007/02/27 11:02:34 fkr Exp $ 	*/
 /*	$NetBSD: ubsa.c,v 1.5 2002/11/25 00:51:33 fvdl Exp $	*/
 /*-
  * Copyright (c) 2002, Alexander Kabaev <kan.FreeBSD.org>.
@@ -219,6 +219,8 @@ struct	ucom_methods ubsa_methods = {
 };
 
 Static const struct usb_devno ubsa_devs[] = {
+	/* AnyDATA ADU-E100H */
+	{ USB_VENDOR_ANYDATA, USB_PRODUCT_ANYDATA_ADU_E100H },
 	/* BELKIN F5U103 */
 	{ USB_VENDOR_BELKIN, USB_PRODUCT_BELKIN_F5U103 },
 	/* BELKIN F5U120 */
@@ -229,14 +231,18 @@ Static const struct usb_devno ubsa_devs[] = {
 	{ USB_VENDOR_GOHUBS, USB_PRODUCT_GOHUBS_GOCOM232 },
 	/* HUAWEI Mobile */
 	{ USB_VENDOR_HUAWEI, USB_PRODUCT_HUAWEI_E618 },
-	/* Peracom */
-	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
+	/* Novatel Wireless U740 */
+	{ USB_VENDOR_NOVATEL, USB_PRODUCT_NOVATEL_MERLINU740 },
 	/* Option Vodafone Mobile Connect 3G */
 	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_VODAFONEMC3G },
 	/* Option GlobeTrotter 3G FUSION */
 	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GFUSION },
 	/* Option GlobeTrotter 3G QUAD */
 	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUAD },
+	/* Option GlobeTrotter 3G QUAD PLUS */
+	{ USB_VENDOR_OPTION, USB_PRODUCT_OPTION_GT3GQUADPLUS },
+	/* Peracom */
+	{ USB_VENDOR_PERACOM, USB_PRODUCT_PERACOM_SERIAL1 },
 };
 #define ubsa_lookup(v, p) usb_lookup(ubsa_devs, v, p)
 

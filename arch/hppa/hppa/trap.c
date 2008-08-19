@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.93 2005/12/12 18:59:02 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.97 2007/03/05 17:13:59 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -131,41 +131,25 @@ u_char hppa_regmap[32] = {
 };
 
 void
-userret(struct proc *p, register_t pc, u_quad_t oticks)
+userret(struct proc *p)
 {
 	int sig;
 
-	/* take pending signals */
-	while ((sig = CURSIG(p)) != 0)
-		postsig(sig);
-
-	p->p_priority = p->p_usrpri;
 	if (astpending) {
 		astpending = 0;
+		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
 			p->p_flag &= ~P_OWEUPC;
 			ADDUPROF(p);
 		}
-	}
-	if (want_resched) {
-		/*
-		 * We're being preempted.
-		 */
-		preempt(NULL);
-		while ((sig = CURSIG(p)) != 0)
-			postsig(sig);
+		if (want_resched)
+			preempt(NULL);
 	}
 
-	/*
-	 * If profiling, charge recent system time to the trapped pc.
-	 */
-	if (p->p_flag & P_PROFIL) {
-		extern int psratio;
+	while ((sig = CURSIG(p)) != 0)
+		postsig(sig);
 
-		addupc_task(p, pc, (int)(p->p_sticks - oticks) * psratio);
-	}
-
-	curpriority = p->p_priority;
+	curpriority = p->p_priority = p->p_usrpri;
 }
 
 void
@@ -568,9 +552,9 @@ if (kdb_trap (type, va, frame))
 	 * for weird things start to happen on return to the userland
 	 * and also see a note in locore.S:TLABEL(all)
 	 */
-	if ((type & T_USER) &&
-	    (frame->tf_iioq_head & ~PAGE_MASK) != SYSCALLGATE)
-		userret(p, frame->tf_iioq_head, 0);
+	if ((type & T_USER) && !(frame->tf_iisq_head == HPPA_SID_KERNEL &&
+	    (frame->tf_iioq_head & ~PAGE_MASK) == SYSCALLGATE))
+		userret(p);
 }
 
 void
@@ -587,7 +571,7 @@ child_return(arg)
 	tf->tf_ret1 = 1;	/* ischild */
 	tf->tf_t1 = 0;		/* errno */
 
-	userret(p, tf->tf_iioq_head, 0);
+	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,
@@ -834,7 +818,7 @@ syscall(struct trapframe *frame)
 #ifdef SYSCALL_DEBUG
 	scdebug_ret(p, code, oerror, rval);
 #endif
-	userret(p, frame->tf_iioq_head, 0);
+	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p, code, oerror, rval[0]);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.33 2006/05/15 21:40:04 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.37 2007/02/09 14:26:09 aoyama Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -236,7 +236,6 @@ int hwplanebits;		/* set in locore.S */
 
 extern struct consdev syscons;	/* in dev/siotty.c */
 
-extern void greeting(void);	/* in dev/lcd.c */
 extern void syscnattach(int);	/* in dev/siotty.c */
 extern int omfb_cnattach(void);	/* in dev/lunafb.c */
 extern void ws_cnattach(void);	/* in dev/lunaws.c */
@@ -561,11 +560,6 @@ cpu_startup()
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-
-	/*
-	 * Say hello to the world on LCD.
-	 */
-	greeting();
 }
 
 /*
@@ -1071,6 +1065,10 @@ luna88k_bootstrap()
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
 #endif
+	cpuid_t cpu;
+	extern void m8820x_initialize_cpu(cpuid_t);
+	extern void m8820x_set_sapr(cpuid_t, apr_t);
+	extern void cpu_boot_secondary_processors(void);
 
 	cmmu = &cmmu8820x;
 
@@ -1093,6 +1091,8 @@ luna88k_bootstrap()
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+
+	m88100_apply_patches();
 
 	/*
 	 * Now that set_cpu_number() set us with a valid cpu_info pointer,
@@ -1127,6 +1127,24 @@ luna88k_bootstrap()
 
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
+
+	/*
+	 * On the luna88k, secondary processors are not disabled while the
+	 * kernel is initializing. We just initialized the CMMUs tied to the
+	 * currently-running CPU; initialize the others with similar settings
+	 * as well, after calling pmap_bootstrap() above.
+	 */
+	for (cpu = 0; cpu < max_cpus; cpu++) {
+		if (cpu == master_cpu)
+			continue;
+		if (m88k_cpus[cpu].ci_alive == 0)
+			continue;
+		m8820x_initialize_cpu(cpu);
+		cmmu_set_sapr(cpu, kernel_pmap->pm_apr);
+	}
+	/* Release the cpu_mutex */
+	cpu_boot_secondary_processors();
+
 #ifdef DEBUG
 	printf("leaving luna88k_bootstrap()\n");
 #endif

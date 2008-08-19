@@ -1,4 +1,4 @@
-/*	$OpenBSD: onewire.c,v 1.2 2006/08/03 18:48:13 grange Exp $	*/
+/*	$OpenBSD: onewire.c,v 1.7 2006/10/08 21:12:51 grange Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -25,10 +25,10 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
-#include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
+#include <sys/rwlock.h>
 
 #include <dev/onewire/onewirereg.h>
 #include <dev/onewire/onewirevar.h>
@@ -39,18 +39,19 @@
 #define DPRINTF(x)
 #endif
 
-#define ONEWIRE_MAXDEVS		256
+#define ONEWIRE_MAXDEVS		16
 #define ONEWIRE_SCANTIME	3
 
 struct onewire_softc {
 	struct device			sc_dev;
 
 	struct onewire_bus *		sc_bus;
-	struct lock			sc_lock;
+	struct rwlock			sc_lock;
 	struct proc *			sc_thread;
 	TAILQ_HEAD(, onewire_device)	sc_devs;
 
 	int				sc_dying;
+	u_int64_t			sc_rombuf[ONEWIRE_MAXDEVS];
 };
 
 struct onewire_device {
@@ -97,7 +98,7 @@ onewire_attach(struct device *parent, struct device *self, void *aux)
 	struct onewirebus_attach_args *oba = aux;
 
 	sc->sc_bus = oba->oba_bus;
-	lockinit(&sc->sc_lock, PRIBIO, "owlock", 0, 0);
+	rw_init(&sc->sc_lock, sc->sc_dev.dv_xname);
 	TAILQ_INIT(&sc->sc_devs);
 
 	printf("\n");
@@ -109,7 +110,6 @@ int
 onewire_detach(struct device *self, int flags)
 {
 	struct onewire_softc *sc = (struct onewire_softc *)self;
-	int rv;
 
 	sc->sc_dying = 1;
 	if (sc->sc_thread != NULL) {
@@ -117,11 +117,7 @@ onewire_detach(struct device *self, int flags)
 		tsleep(&sc->sc_dying, PWAIT, "owdt", 0);
 	}
 
-	onewire_lock(sc, 0);
-	rv = config_detach_children(self, flags);
-	onewire_unlock(sc);
-
-	return (rv);
+	return (config_detach_children(self, flags));
 }
 
 int
@@ -175,12 +171,12 @@ int
 onewire_lock(void *arg, int flags)
 {
 	struct onewire_softc *sc = arg;
-	int lflags = LK_EXCLUSIVE;
+	int lflags = RW_WRITE;
 
 	if (flags & ONEWIRE_NOWAIT)
-		lflags |= LK_NOWAIT;
+		lflags |= RW_NOSLEEP;
 
-	return (lockmgr(&sc->sc_lock, lflags, NULL));
+	return (rw_enter(&sc->sc_lock, lflags));
 }
 
 void
@@ -188,7 +184,7 @@ onewire_unlock(void *arg)
 {
 	struct onewire_softc *sc = arg;
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit(&sc->sc_lock);
 }
 
 int
@@ -240,6 +236,34 @@ onewire_write_byte(void *arg, int value)
 		bus->bus_bit(bus->bus_cookie, (value >> i) & 0x1);
 }
 
+void
+onewire_read_block(void *arg, void *buf, int len)
+{
+	struct onewire_softc *sc = arg;
+	struct onewire_bus *bus = sc->sc_bus;
+	u_int8_t *p = buf;
+
+	if (bus->bus_read_block != NULL)
+		return (bus->bus_read_block(bus->bus_cookie, buf, len));
+
+	while (len--)
+		*p++ = onewire_read_byte(arg);
+}
+
+void
+onewire_write_block(void *arg, const void *buf, int len)
+{
+	struct onewire_softc *sc = arg;
+	struct onewire_bus *bus = sc->sc_bus;
+	const u_int8_t *p = buf;
+
+	if (bus->bus_write_block != NULL)
+		return (bus->bus_write_block(bus->bus_cookie, buf, len));
+
+	while (len--)
+		onewire_write_byte(arg, *p++);
+}
+
 int
 onewire_triplet(void *arg, int dir)
 {
@@ -269,31 +293,97 @@ onewire_triplet(void *arg, int dir)
 }
 
 void
-onewire_read_block(void *arg, void *buf, int len)
-{
-	u_int8_t *p = buf;
-
-	while (len--)
-		*p++ = onewire_read_byte(arg);
-}
-
-void
-onewire_write_block(void *arg, const void *buf, int len)
-{
-	const u_int8_t *p = buf;
-
-	while (len--)
-		onewire_write_byte(arg, *p++);
-}
-
-void
 onewire_matchrom(void *arg, u_int64_t rom)
 {
+	struct onewire_softc *sc = arg;
+	struct onewire_bus *bus = sc->sc_bus;
 	int i;
+
+	if (bus->bus_matchrom != NULL)
+		return (bus->bus_matchrom(bus->bus_cookie, rom));
 
 	onewire_write_byte(arg, ONEWIRE_CMD_MATCH_ROM);
 	for (i = 0; i < 8; i++)
 		onewire_write_byte(arg, (rom >> (i * 8)) & 0xff);
+}
+
+int
+onewire_search(void *arg, u_int64_t *buf, int size, u_int64_t startrom)
+{
+	struct onewire_softc *sc = arg;
+	struct onewire_bus *bus = sc->sc_bus;
+	int search = 1, count = 0, lastd = -1, dir, rv, i, i0;
+	u_int64_t mask, rom = startrom, lastrom;
+	u_int8_t data[8];
+
+	if (bus->bus_search != NULL)
+		return (bus->bus_search(bus->bus_cookie, buf, size, rom));
+
+	while (search && count < size) {
+		/* XXX: yield processor */
+		tsleep(sc, PWAIT, "owscan", hz / 10);
+
+		/*
+		 * Start new search. Go through the previous path to
+		 * the point we made a decision last time and make an
+		 * opposite decision. If we didn't make any decision
+		 * stop searching.
+		 */
+		lastrom = rom;
+		rom = 0;
+		onewire_lock(sc, 0);
+		onewire_reset(sc);
+		onewire_write_byte(sc, ONEWIRE_CMD_SEARCH_ROM);
+		for (i = 0, i0 = -1; i < 64; i++) {
+			dir = (lastrom >> i) & 0x1;
+			if (i == lastd)
+				dir = 1;
+			else if (i > lastd)
+				dir = 0;
+			rv = onewire_triplet(sc, dir);
+			switch (rv) {
+			case 0x0:
+				if (i != lastd && dir == 0)
+					i0 = i;
+				mask = dir;
+				break;
+			case 0x1:
+				mask = 0;
+				break;
+			case 0x2:
+				mask = 1;
+				break;
+			default:
+				DPRINTF(("%s: search triplet error 0x%x, "
+				    "step %d\n",
+				    sc->sc_dev.dv_xname, rv, i));
+				onewire_unlock(sc);
+				return (-1);
+			}
+			rom |= (mask << i);
+		}
+		onewire_unlock(sc);
+
+		if ((lastd = i0) == -1)
+			search = 0;
+
+		if (rom == 0)
+			continue;
+
+		/*
+		 * The last byte of the ROM code contains a CRC calculated
+		 * from the first 7 bytes. Re-calculate it to make sure
+		 * we found a valid device.
+		 */
+		for (i = 0; i < 8; i++)
+			data[i] = (rom >> (i * 8)) & 0xff;
+		if (onewire_crc(data, 7) != data[7])
+			continue;
+
+		buf[count++] = rom;
+	}
+
+	return (count);
 }
 
 void
@@ -328,87 +418,36 @@ onewire_scan(struct onewire_softc *sc)
 	struct onewire_device *d, *next, *nd;
 	struct onewire_attach_args oa;
 	struct device *dev;
-	int search = 1, count = 0, present;
-	int dir, rv;
-	u_int64_t mask, rom = 0, lastrom;
-	u_int8_t data[8];
-	int i, i0, lastd = -1;
+	int present;
+	u_int64_t rom;
+	int i, rv;
 
+	/*
+	 * Mark all currently present devices as absent before
+	 * scanning. This allows to find out later which devices
+	 * have been disappeared.
+	 */
 	TAILQ_FOREACH(d, &sc->sc_devs, d_list)
 		d->d_present = 0;
 
-	while (search && count++ < ONEWIRE_MAXDEVS) {
-		/* XXX: yield processor */
-		tsleep(sc, PWAIT, "owscan", hz / 10);
+	/*
+	 * Reset the bus. If there's no presence pulse don't search
+	 * for any devices.
+	 */
+	onewire_lock(sc, 0);
+	rv = onewire_reset(sc);
+	onewire_unlock(sc);
+	if (rv != 0) {
+		DPRINTF(("%s: no presence pulse\n", sc->sc_dev.dv_xname));
+		goto out;
+	}
 
-		/*
-		 * Reset the bus. If there's no presence pulse
-		 * don't search for any devices.
-		 */
-		onewire_lock(sc, 0);
-		if (onewire_reset(sc) != 0) {
-			DPRINTF(("%s: scan: no presence pulse\n",
-			    sc->sc_dev.dv_xname));
-			onewire_unlock(sc);
-			break;
-		}
+	/* Scan the bus */
+	if ((rv = onewire_search(sc, sc->sc_rombuf, ONEWIRE_MAXDEVS, 0)) == -1)
+		return;
 
-		/*
-		 * Start new search. Go through the previous path to
-		 * the point we made a decision last time and make an
-		 * opposite decision. If we didn't make any decision
-		 * stop searching.
-		 */
-		search = 0;
-		lastrom = rom;
-		rom = 0;
-		onewire_write_byte(sc, ONEWIRE_CMD_SEARCH_ROM);
-		for (i = 0, i0 = -1; i < 64; i++) {
-			dir = (lastrom >> i) & 0x1;
-			if (i == lastd)
-				dir = 1;
-			else if (i > lastd)
-				dir = 0;
-			rv = onewire_triplet(sc, dir);
-			switch (rv) {
-			case 0x0:
-				if (i != lastd) {
-					if (dir == 0)
-						i0 = i;
-					search = 1;
-				}
-				mask = dir;
-				break;
-			case 0x1:
-				mask = 0;
-				break;
-			case 0x2:
-				mask = 1;
-				break;
-			default:
-				DPRINTF(("%s: scan: triplet error 0x%x, "
-				    "step %d\n",
-				    sc->sc_dev.dv_xname, rv, i));
-				onewire_unlock(sc);
-				return;
-			}
-			rom |= (mask << i);
-		}
-		lastd = i0;
-		onewire_unlock(sc);
-
-		if (rom == 0)
-			continue;
-
-		/*
-		 * The last byte of the ROM code contains a CRC calculated
-		 * from the first 7 bytes. Re-calculate it to make sure
-		 * we found a valid device.
-		 */
-		for (i = 0; i < 8; i++)
-			data[i] = (rom >> (i * 8)) & 0xff;
-		if (onewire_crc(data, 7) != data[7])
-			continue;
+	for (i = 0; i < rv; i++) {
+		rom = sc->sc_rombuf[i];
 
 		/*
 		 * Go through the list of attached devices to see if we
@@ -441,8 +480,8 @@ onewire_scan(struct onewire_softc *sc)
 		}
 	}
 
+out:
 	/* Detach disappeared devices */
-	onewire_lock(sc, 0);
 	for (d = TAILQ_FIRST(&sc->sc_devs);
 	    d != TAILQ_END(&sc->sc_dev); d = next) {
 		next = TAILQ_NEXT(d, d_list);
@@ -452,5 +491,4 @@ onewire_scan(struct onewire_softc *sc)
 			FREE(d, M_DEVBUF);
 		}
 	}
-	onewire_unlock(sc);
 }

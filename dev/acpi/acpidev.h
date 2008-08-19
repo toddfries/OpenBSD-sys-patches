@@ -1,4 +1,4 @@
-/* $OpenBSD: acpidev.h,v 1.8 2006/03/04 05:36:42 marco Exp $ */
+/* $OpenBSD: acpidev.h,v 1.20 2007/01/27 19:37:57 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
@@ -19,7 +19,13 @@
 #ifndef __DEV_ACPI_ACPIDEV_H__
 #define __DEV_ACPI_ACPIDEV_H__
 
+#include <sys/sensors.h>
+#include <sys/rwlock.h>
+
 #define DEVNAME(s)  ((s)->sc_dev.dv_xname)
+
+#define ACPIDEV_NOPOLL		0
+#define ACPIDEV_POLL		1
 
 /*
  * _BIF (Battery InFormation)
@@ -57,10 +63,10 @@ struct acpibat_bif {
 	u_int32_t	bif_low;
 	u_int32_t	bif_cap_granu1;
 	u_int32_t	bif_cap_granu2;
-	const char	*bif_model;
-	const char	*bif_serial;
-	const char	*bif_type;
-	const char	*bif_oem;
+	char	        bif_model[20];
+	char	        bif_serial[20];
+	char	        bif_type[20];
+	char	        bif_oem[20];
 };
 
 /*
@@ -82,11 +88,11 @@ struct acpibat_bif {
  * 	Battery Remaining Capacity	//DWORD
  * 	Battery Present Voltage		//DWORD
  * }
- * 
+ *
  * Per the spec section 10.2.2.3
  * Remaining Battery Percentage[%] = (Battery Remaining Capacity [=0 ~ 100] /
  *     Last Full Charged Capacity[=100]) * 100
- * 
+ *
  * Remaining Battery Life [h] = Battery Remaining Capacity [mAh/mWh] /
  *     Battery Present Rate [=0xFFFFFFFF] = unknown
  */
@@ -193,6 +199,9 @@ struct acpibat_bmd {
 #define	HPET_TIMER2_INTERRUPT	0x510
 
 #define STA_PRESENT   (1L << 0)
+#define STA_ENABLED   (1L << 1)
+#define STA_SHOW_UI   (1L << 2)
+#define STA_DEV_OK    (1L << 3)
 #define STA_BATTERY   (1L << 4)
 
 /*
@@ -242,5 +251,62 @@ struct acpicpu_pct {
 	struct acpi_grd	pct_ctrl;
 	struct acpi_grd	pct_status;
 };
+
+/* softc for fake apm devices */
+struct acpiac_softc {
+	struct device		sc_dev;
+
+	bus_space_tag_t		sc_iot;
+	bus_space_handle_t	sc_ioh;
+
+	struct acpi_softc	*sc_acpi;
+	struct aml_node		*sc_devnode;
+
+	int			sc_ac_stat;
+
+	struct sensor		sc_sens[1];
+	struct sensordev	sc_sensdev;
+};
+
+struct acpibat_softc {
+	struct device		sc_dev;
+
+	bus_space_tag_t		sc_iot;
+	bus_space_handle_t	sc_ioh;
+
+	struct acpi_softc	*sc_acpi;
+	struct aml_node		*sc_devnode;
+
+	struct acpibat_bif	sc_bif;
+	struct acpibat_bst	sc_bst;
+	volatile int		sc_bat_present;
+
+	struct sensor		sc_sens[8];
+	struct sensordev	sc_sensdev;
+};
+
+struct acpidock_softc {
+	struct device           sc_dev;
+
+	bus_space_tag_t         sc_iot;
+	bus_space_handle_t      sc_ioh;
+			 
+	struct acpi_softc       *sc_acpi;
+	struct aml_node		*sc_devnode;
+
+	struct sensor		sc_sens[1];
+	struct sensordev	sc_sensdev;
+
+	int			sc_docked;
+	int			sc_sta;
+
+#define ACPIDOCK_STATUS_UNKNOWN		-1
+#define ACPIDOCK_STATUS_UNDOCKED	0
+#define ACPIDOCK_STATUS_DOCKED		1
+};
+
+#define ACPIDOCK_EVENT_INSERT	0
+#define	ACPIDOCK_EVENT_EJECT	3
+
 
 #endif /* __DEV_ACPI_ACPIDEV_H__ */

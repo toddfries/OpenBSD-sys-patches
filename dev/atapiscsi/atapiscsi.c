@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.73 2006/01/13 19:23:55 miod Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.77 2007/02/14 00:53:47 jsg Exp $     */
 
 /*
  * This code is derived from code with the copyright below.
@@ -225,13 +225,14 @@ void
 atapiscsi_attach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
-
 {
 	struct atapiscsi_softc *as = (struct atapiscsi_softc *)self;
 	struct ata_atapi_attach *aa_link = aux;
+	struct scsibus_attach_args saa;
 	struct ata_drive_datas *drvp = aa_link->aa_drv_data;
 	struct channel_softc *chp = drvp->chnl_softc;
 	struct ataparams *id = &drvp->id;
+	struct device *child;
 
 	printf("\n");
 
@@ -254,8 +255,8 @@ atapiscsi_attach(parent, self, aux)
 	as->sc_adapterlink.openings = 1;
 	as->sc_adapterlink.flags = SDEV_ATAPI;
 
-	strncpy(drvp->drive_name, as->sc_dev.dv_xname,
-	    sizeof(drvp->drive_name) - 1);
+	strlcpy(drvp->drive_name, as->sc_dev.dv_xname,
+	    sizeof(drvp->drive_name));
 	drvp->cf_flags = as->sc_dev.dv_cfdata->cf_flags;
 
 	wdc_probe_caps(drvp, id);
@@ -286,22 +287,19 @@ atapiscsi_attach(parent, self, aux)
 	WDCDEBUG_PRINT(("driver caps %04x\n", drvp->atapi_cap),
 	    DEBUG_PROBE);
 
+	bzero(&saa, sizeof(saa));
+	saa.saa_sc_link = &as->sc_adapterlink;
 
-	as->sc_adapterlink.scsibus = (u_int8_t)-1;
+	child = config_found((struct device *)as, &saa, scsiprint);
 
-	config_found((struct device *)as,
-		     &as->sc_adapterlink, scsiprint);
-
-	if (as->sc_adapterlink.scsibus != (u_int8_t)-1) {
-		int bus = as->sc_adapterlink.scsibus;
-		extern struct cfdriver scsibus_cd;
-		struct scsibus_softc *scsi = scsibus_cd.cd_devs[bus];
+	if (child != NULL) {
+		struct scsibus_softc *scsi = (struct scsibus_softc *)child;
 		struct scsi_link *link = scsi->sc_link[0][0];
 
 		if (link) {
-			strncpy(drvp->drive_name,
+			strlcpy(drvp->drive_name,
 			    ((struct device *)(link->device_softc))->dv_xname,
-			    sizeof(drvp->drive_name) - 1);
+			    sizeof(drvp->drive_name));
 
 			wdc_print_caps(drvp);
 		}
@@ -1431,7 +1429,7 @@ wdc_atapi_ctrl(chp, xfer, timeout, ret)
 		break;
 
 	case ATAPI_DEVICE_RESET_WAIT_STATE:
-		/* fall through */
+		/* FALLTHROUGH */
 
 	case ATAPI_IDENTIFY_STATE:
 		wdccommandshort(chp, drvp->drive, ATAPI_IDENTIFY_DEVICE);
@@ -1484,7 +1482,7 @@ wdc_atapi_ctrl(chp, xfer, timeout, ret)
 			drvp->PIO_mode = 3;
 			chp->wdc->set_modes(chp);
 		}
-	/* fall through */
+	/* FALLTHROUGH */
 
 	case ATAPI_DMAMODE_STATE:
 		if (drvp->drive_flags & DRIVE_UDMA) {
@@ -1507,7 +1505,7 @@ wdc_atapi_ctrl(chp, xfer, timeout, ret)
 			chp->wdc->irqack(chp);
 		if (chp->ch_status & WDCS_ERR)
 			drvp->drive_flags &= ~(DRIVE_DMA | DRIVE_UDMA);
-	/* fall through */
+	/* FALLTHROUGH */
 
 	case ATAPI_READY_STATE:
 	ready:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: amivar.h,v 1.49 2006/06/28 08:26:00 dlg Exp $	*/
+/*	$OpenBSD: amivar.h,v 1.51 2007/01/27 05:09:51 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -26,6 +26,8 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include <sys/sensors.h>
 
 struct ami_mem {
 	bus_dmamap_t		am_map;
@@ -119,7 +121,7 @@ struct ami_softc {
 	struct timeout		sc_run_tmo;
 	int			sc_dis_poll;
 
-	struct lock		sc_lock;
+	struct rwlock		sc_lock;
 
 	char			sc_fwver[16];
 	char			sc_biosver[16];
@@ -140,6 +142,7 @@ struct ami_softc {
 	struct ami_rawsoftc	*sc_rawsoftcs;
 
 	struct sensor		*sc_sensors;
+	struct sensordev	sc_sensordev;
 	struct ami_big_diskarray *sc_bd;
 };
 

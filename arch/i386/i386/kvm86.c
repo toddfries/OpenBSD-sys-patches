@@ -1,4 +1,4 @@
-/* $OpenBSD: kvm86.c,v 1.1 2006/06/13 03:01:04 gwk Exp $ */
+/* $OpenBSD: kvm86.c,v 1.3 2007/02/20 21:15:01 tom Exp $ */
 /* $NetBSD: kvm86.c,v 1.10 2005/12/26 19:23:59 perry Exp $ */
 /*
  * Copyright (c) 2002
@@ -32,6 +32,8 @@
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/malloc.h>
+#include <sys/mutex.h>
+#include <sys/simplelock.h>
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm.h>
 #include <machine/pcb.h>
@@ -45,9 +47,6 @@ extern int kvm86_call(struct trapframe *);
 extern void kvm86_ret(struct trapframe *, int);
 
 #define PGTABLE_SIZE	((1024 + 64) * 1024 / PAGE_SIZE)
-
-/* XXX: not here */
-typedef u_int32_t pt_entry_t;
 
 struct kvm86_data {
 	pt_entry_t pgtbl[PGTABLE_SIZE];
@@ -71,6 +70,8 @@ void *bioscallscratchpage;
 #define BIOSCALLSCRATCHPAGE_VMVA 0x1000
 /* a virtual page to map in vm86 memory temporarily */
 vaddr_t bioscalltmpva;
+
+struct mutex kvm86_mp_mutex;
 
 #define KVM86_IOPL3 /* not strictly necessary, saves a lot of traps */
 
@@ -122,6 +123,7 @@ kvm86_init()
 	kvm86_map(vmd, pa, BIOSCALLSCRATCHPAGE_VMVA);
 	bioscallvmd = vmd;
 	bioscalltmpva = uvm_km_alloc(kernel_map, PAGE_SIZE);
+	mtx_init(&kvm86_mp_mutex, IPL_IPI);
 }
 
 /*
@@ -260,8 +262,10 @@ kvm86_simplecall(int no, struct kvm86regs *regs)
 	tf.tf_edi = regs->edi;
 	tf.tf_vm86_es = regs->es;
 	
+	mtx_enter(&kvm86_mp_mutex);	
 	res = kvm86_bioscall(no, &tf);
-	
+	mtx_leave(&kvm86_mp_mutex);
+
 	regs->eax = tf.tf_eax;
 	regs->ebx = tf.tf_ebx;
 	regs->ecx = tf.tf_ecx;

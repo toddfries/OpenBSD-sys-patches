@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.30 2006/08/17 10:34:14 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.33 2007/02/18 11:43:19 miod Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1999/06/30 18:48:06 ragge Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
-#include <sys/dkbad.h>
 #include <sys/disklabel.h>
 #include <sys/syslog.h>
 #include <sys/proc.h>
@@ -118,11 +117,11 @@ char *
 readdisklabel(dev, strat, lp, osdep, spoofonly)
 	dev_t dev;
 	void (*strat)(struct buf *);
-	register struct disklabel *lp;
+	struct disklabel *lp;
 	struct cpu_disklabel *osdep;
 	int spoofonly;
 {
-	register struct buf *bp;
+	struct buf *bp;
 	struct disklabel *dlp;
 	char *msg = NULL;
 	int i;
@@ -190,12 +189,12 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
  */
 int
 setdisklabel(olp, nlp, openmask, osdep)
-	register struct disklabel *olp, *nlp;
+	struct disklabel *olp, *nlp;
 	u_long openmask;
 	struct cpu_disklabel *osdep;
 {
-	register int i;
-	register struct partition *opp, *npp;
+	int i;
+	struct partition *opp, *npp;
 
 	/* sanity clause */
 	if (nlp->d_secpercyl == 0 || nlp->d_secsize == 0 ||
@@ -246,7 +245,7 @@ int
 writedisklabel(dev, strat, lp, osdep)
 	dev_t dev;
 	void (*strat)(struct buf *);
-	register struct disklabel *lp;
+	struct disklabel *lp;
 	struct cpu_disklabel *osdep;
 {
 	struct buf *bp;
@@ -254,19 +253,23 @@ writedisklabel(dev, strat, lp, osdep)
 	int error = 0;
 
 	bp = geteblk((int)lp->d_secsize);
-
-	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
-	bcopy(lp, dlp, sizeof(struct disklabel));
-
 	bp->b_dev = MAKEDISKDEV(major(dev), DISKUNIT(dev), RAW_PART);
 	bp->b_blkno = LABELSECTOR;
 	bp->b_cylinder = LABELSECTOR / lp->d_secpercyl;
 	bp->b_bcount = lp->d_secsize;
+	bp->b_flags = B_READ;
+	(*strat)(bp);
+	if ((error = biowait(bp)) != 0)
+		goto done;
+
+	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+	bcopy(lp, dlp, sizeof(struct disklabel));
 	bp->b_flags = B_WRITE;
 	(*strat)(bp);
 	error = biowait(bp);
-	brelse(bp);
 
+done:
+	brelse(bp);
 	return (error);
 }
 

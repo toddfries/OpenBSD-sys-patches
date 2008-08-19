@@ -1,4 +1,4 @@
-/*	$OpenBSD: gpx.c,v 1.10 2006/08/05 22:04:53 miod Exp $	*/
+/*	$OpenBSD: gpx.c,v 1.16 2006/11/29 19:08:22 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -104,14 +104,16 @@
 #include <dev/wsfont/wsfont.h>
 
 #include <dev/ic/bt458reg.h>
-/* #include <dev/ic/dc503reg.h> */
+#if 0
+#include <dev/ic/dc503reg.h>
+#endif
 #include <vax/qbus/qdreg.h>
 
 #define	GPXADDR		0x3c000000	/* base address on VAXstation 3100 */
 
 #define	GPX_ADDER_OFFSET	0x0000
 #define	GPX_VDAC_OFFSET		0x0300
-#define	GPX_CURSOR_OFFSET	0x0400
+#define	GPX_CURSOR_OFFSET	0x0400	/* DC503 */
 #define	GPX_READBACK_OFFSET	0x0500
 
 #define	GPX_WIDTH	1024
@@ -121,7 +123,9 @@
 /* 4 plane option RAMDAC */
 struct	ramdac4 {
 	u_int16_t	colormap[16];
-	u_int8_t	unknown[0x40];
+	u_int8_t	unknown[0x20];
+	u_int16_t	cursormap[4];
+	u_int8_t	unknown2[0x18];
 	u_int16_t	control;
 #define	RAMDAC4_INIT	0x0047
 #define	RAMDAC4_ENABLE	0x0002
@@ -146,7 +150,10 @@ struct	gpx_screen {
 	struct adder	*ss_adder;
 	void 		*ss_vdac;
 	u_int8_t	ss_cmap[256 * 3];
-	/* struct dc503reg *ss_cursor; */
+#if 0
+	struct dc503reg	*ss_cursor;
+	u_int16_t	ss_curcmd;
+#endif
 };
 
 /* for console */
@@ -307,8 +314,7 @@ gpx_attach(struct device *parent, struct device *self, void *aux)
 		tmp = vax_map_physmem(va->va_paddr + GPX_READBACK_OFFSET, 1);
 		if (tmp == 0L) {
 			printf(": can not probe depth\n");
-			free(scr, M_DEVBUF);
-			return;
+			goto bad1;
 		}
 		scr->ss_depth = (*(u_int16_t *)tmp & 0x00f0) == 0x00f0 ? 4 : 8;
 		vax_unmap_physmem(tmp, 1);
@@ -317,25 +323,29 @@ gpx_attach(struct device *parent, struct device *self, void *aux)
 		    GPX_ADDER_OFFSET, 1);
 		if (scr->ss_adder == NULL) {
 			printf(": can not map frame buffer registers\n");
-			free(scr, M_DEVBUF);
-			return;
+			goto bad1;
 		}
 
 		scr->ss_vdac = (void *)vax_map_physmem(va->va_paddr +
 		    GPX_VDAC_OFFSET, 1);
 		if (scr->ss_vdac == NULL) {
 			printf(": can not map RAMDAC\n");
-			vax_unmap_physmem((vaddr_t)scr->ss_adder, 1);
-			free(scr, M_DEVBUF);
-			return;
+			goto bad2;
 		}
+
+#if 0
+		scr->ss_cursor =
+		    (struct dc503reg *)vax_map_physmem(va->va_paddr +
+		    GPX_CURSOR_OFFSET, 1);
+		if (scr->ss_cursor == NULL) {
+			printf(": can not map cursor chip\n");
+			goto bad3;
+		}
+#endif
 
 		if (gpx_setup_screen(scr) != 0) {
 			printf(": initialization failed\n");
-			vax_unmap_physmem((vaddr_t)scr->ss_vdac, 1);
-			vax_unmap_physmem((vaddr_t)scr->ss_adder, 1);
-			free(scr, M_DEVBUF);
-			return;
+			goto bad4;
 		}
 	}
 	sc->sc_scr = scr;
@@ -347,8 +357,22 @@ gpx_attach(struct device *parent, struct device *self, void *aux)
 	aa.scrdata = &gpx_screenlist;
 	aa.accessops = &gpx_accessops;
 	aa.accesscookie = sc;
+	aa.defaultscreens = 0;
 
 	config_found(self, &aa, wsemuldisplaydevprint);
+
+	return;
+
+bad4:
+#if 0
+	vax_unmap_physmem((vaddr_t)scr->ss_cursor, 1);
+bad3:
+#endif
+	vax_unmap_physmem((vaddr_t)scr->ss_vdac, 1);
+bad2:
+	vax_unmap_physmem((vaddr_t)scr->ss_adder, 1);
+bad1:
+	free(scr, M_DEVBUF);
 }
 
 /*
@@ -453,11 +477,11 @@ gpx_burner(void *v, u_int on, u_int flags)
 		struct ramdac8 *rd = ss->ss_vdac;
 		rd->address = BT_CR;
 		if (on)
-			rd->cmapdata = BTCR_RAMENA | BTCR_BLINK_1648 |
-			    BTCR_MPLX_4 | BTCR_DISPENA_OV0 | BTCR_DISPENA_OV1;
+			rd->control = BTCR_RAMENA | BTCR_BLINK_1648 |
+			    BTCR_MPLX_4;
 		else
 			/* fade colormap to black as well? */
-			rd->cmapdata = BTCR_BLINK_1648 | BTCR_MPLX_4;
+			rd->control = BTCR_BLINK_1648 | BTCR_MPLX_4;
 	} else {
 		struct ramdac4 *rd = ss->ss_vdac;
 		if (on)
@@ -479,7 +503,7 @@ gpx_putchar(void *v, int row, int col, u_int uc, long attr)
 	struct wsdisplay_font *font = ri->ri_font;
 	int dx, dy, sx, sy, fg, bg, ul;
 
-	rasops_unpack_attr(attr, &fg, &bg, &ul);
+	ri->ri_ops.unpack_attr(v, attr, &fg, &bg, &ul);
 
 	/* find where to output the glyph... */
 	dx = col * font->fontwidth + ri->ri_xorigin;
@@ -728,7 +752,7 @@ gpx_reset_viper(struct gpx_screen *ss)
 	ss->ss_adder->source_2_y = 0;
 	ss->ss_adder->source_2_size = 0x0022;
 	/* initialize plane addresses for eight vipers */
-	for (i = 0; i < 7; i++) {
+	for (i = 0; i < 8; i++) {
 		gpx_viper_write(ss, CS_UPDATE_MASK, 1 << i);
 		gpx_viper_write(ss, PLANE_ADDRESS, i);
 	}
@@ -881,8 +905,7 @@ gpx_setup_screen(struct gpx_screen *ss)
 	if (ss->ss_depth == 8) {
 		struct ramdac8 *rd = ss->ss_vdac;
 		rd->address = BT_CR;
-		rd->cmapdata = BTCR_RAMENA | BTCR_BLINK_1648 | BTCR_MPLX_4 |
-		    BTCR_DISPENA_OV0 | BTCR_DISPENA_OV1;
+		rd->control = BTCR_RAMENA | BTCR_BLINK_1648 | BTCR_MPLX_4;
 	} else {
 		struct ramdac4 *rd = ss->ss_vdac;
 		rd->control = RAMDAC4_INIT;
@@ -907,6 +930,10 @@ gpx_setup_screen(struct gpx_screen *ss)
 	 * Copy our font to the offscreen area.
 	 */
 	gpx_upload_font(ss);
+
+#if 0
+	ss->ss_cursor->cmdr = ss->ss_curcmd = PCCCMD_HSHI;
+#endif
 
 	return (0);
 }
@@ -1036,9 +1063,10 @@ void
 gpx_fillrect(struct gpx_screen *ss, int x, int y, int dx, int dy, long attr,
     u_int function)
 {
+	struct rasops_info *ri = &ss->ss_ri;
 	int fg, bg;
 
-	rasops_unpack_attr(attr, &fg, &bg, NULL);
+	ri->ri_ops.unpack_attr(ri, attr, &fg, &bg, NULL);
 
 	while (gpx_viper_write(ss, CS_UPDATE_MASK, 0x00ff));
 	gpx_viper_write(ss, MASK_1, 0xffff);
@@ -1154,9 +1182,9 @@ gpx_loadcmap(struct gpx_screen *ss, int from, int count)
 
 		cmap = ss->ss_cmap + from;
 		for (i = from; i < from + count; i++) {
-			color12  = *cmap++ << 8;
-			color12 |= *cmap++ << 4;
-			color12 |= *cmap++ << 0;
+			color12  = (*cmap++ >> 4) << 0;
+			color12 |= (*cmap++ >> 4) << 8;
+			color12 |= (*cmap++ >> 4) << 4;
 			rd->colormap[i] = color12;
 		}
 	}
@@ -1172,6 +1200,16 @@ gpx_resetcmap(struct gpx_screen *ss)
 		bcopy(rasops_cmap + 0xf8 * 3, ss->ss_cmap + 8 * 3, 8 * 3);
 	}
 	gpx_loadcmap(ss, 0, 1 << ss->ss_depth);
+
+	/*
+	 * On the 4bit RAMDAC, make the hardware cursor black on black
+	 */
+	if (ss->ss_depth != 8) {
+		struct ramdac4 *rd = ss->ss_vdac;
+
+		rd->cursormap[0] = rd->cursormap[1] =
+		    rd->cursormap[2] = rd->cursormap[3] = 0x0000;
+	}
 }
 
 /*
@@ -1241,6 +1279,12 @@ gpxcninit()
 	ioaccess(virtual_avail, vax_trunc_page(GPXADDR + GPX_VDAC_OFFSET), 1);
 	ss->ss_vdac = (void *)(virtual_avail + (GPX_VDAC_OFFSET & VAX_PGOFSET));
 	virtual_avail += VAX_NBPG;
+
+#if 0
+	ioaccess(virtual_avail, GPXADDR + GPX_CURSOR_OFFSET, 1);
+	ss->ss_cursor = (struct dc503reg *)virtual_avail;
+	virtual_avail += VAX_NBPG;
+#endif
 
 	virtual_avail = round_page(virtual_avail);
 

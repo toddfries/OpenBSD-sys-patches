@@ -1,4 +1,4 @@
-/*	$OpenBSD: intio.c,v 1.4 2005/01/15 21:13:08 miod Exp $	*/
+/*	$OpenBSD: intio.c,v 1.6 2007/01/06 20:10:57 miod Exp $	*/
 /*	$NetBSD: intio.c,v 1.2 1997/01/30 09:18:54 thorpej Exp $	*/
 
 /*-
@@ -44,6 +44,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+
+#include <machine/bus.h>
 
 #include <hp300/dev/intiovar.h>
 
@@ -106,9 +108,13 @@ intiosearch(parent, match, aux)
 {
 	struct cfdata *cf = match;
 	struct intio_attach_args ia;
+	extern struct hp300_bus_space_tag hp300_mem_tag;
 
 	bzero(&ia, sizeof(ia));
+	ia.ia_tag = &hp300_mem_tag;
+
 	if ((*cf->cf_attach->ca_match)(parent, cf, &ia) > 0)
 		config_attach(parent, cf, &ia, intioprint);
+
 	return (0);
 }
