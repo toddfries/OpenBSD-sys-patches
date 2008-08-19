@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.118 2004/03/15 09:45:31 tedu Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.122.2.1 2005/06/14 01:49:24 brad Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -64,13 +64,6 @@
 #include <netinet/ip_ipsp.h>
 #endif /* IPSEC */
 
-#ifndef	IPFORWARDING
-#ifdef GATEWAY
-#define	IPFORWARDING	1	/* forward IP packets not for us */
-#else /* GATEWAY */
-#define	IPFORWARDING	0	/* don't forward IP packets not for us */
-#endif /* GATEWAY */
-#endif /* IPFORWARDING */
 #ifndef	IPSENDREDIRECTS
 #define	IPSENDREDIRECTS	1
 #endif
@@ -111,7 +104,7 @@ char ipsec_def_comp[20];
 #define	IPDIRECTEDBCAST	0
 #endif /* DIRECTED_BROADCAST */
 #endif /* IPDIRECTEDBCAST */
-int	ipforwarding = IPFORWARDING;
+int	ipforwarding = 0;	/* no forwarding unless sysctl'd to enable */
 int	ipsendredirects = IPSENDREDIRECTS;
 int	ip_dosourceroute = 0;	/* no src-routing unless sysctl'd to enable */
 int	ip_defttl = IPDEFTTL;
@@ -396,7 +389,7 @@ ipv4_input(m)
 	 * Packet filter
 	 */
 	pfrdr = ip->ip_dst.s_addr;
-	if (pf_test(PF_IN, m->m_pkthdr.rcvif, &m) != PF_PASS)
+	if (pf_test(PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
 		goto bad;
 	if (m == NULL)
 		return;
@@ -1144,6 +1137,8 @@ ip_dooptions(m)
 
 		case IPOPT_TS:
 			code = cp - (u_char *)ip;
+			if (optlen < sizeof(struct ip_timestamp))
+				goto bad;
 			bcopy(cp, &ipt, sizeof(struct ip_timestamp));
 			if (ipt.ipt_ptr < 5 || ipt.ipt_len < 5)
 				goto bad;

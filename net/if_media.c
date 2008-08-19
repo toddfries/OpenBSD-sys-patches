@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_media.c,v 1.10.2.1 2005/02/20 01:58:52 brad Exp $	*/
+/*	$OpenBSD: if_media.c,v 1.10.4.1 2005/02/20 01:54:07 brad Exp $	*/
 /*	$NetBSD: if_media.c,v 1.10 2000/03/13 23:52:39 soren Exp $	*/
 
 /*-

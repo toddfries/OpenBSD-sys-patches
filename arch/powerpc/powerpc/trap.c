@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.62 2003/12/21 15:17:32 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.64.2.1 2005/06/05 01:56:56 brad Exp $	*/
 /*	$NetBSD: trap.c,v 1.3 1996/10/13 03:31:37 christos Exp $	*/
 
 /*
@@ -318,11 +318,11 @@ trap(struct trapframe *frame)
 			
 			map = kernel_map;
 			va = frame->dar;
-			if ((va >> ADDR_SR_SHIFT) == USER_SR) {
+			if ((va >> ADDR_SR_SHIFT) == PPC_USER_SR) {
 				sr_t user_sr;
 				
 				asm ("mfsr %0, %1"
-				     : "=r"(user_sr) : "K"(USER_SR));
+				     : "=r"(user_sr) : "K"(PPC_USER_SR));
 				va &= ADDR_PIDX | ADDR_POFF;
 				va |= user_sr << ADDR_SR_SHIFT;
 				map = &p->p_vmspace->vm_map;
@@ -661,7 +661,7 @@ for (i = 0; i < errnum; i++) {
 	 */
 	if (p != fpuproc)
 		frame->srr1 &= ~PSL_FP;
-	else
+	else if (p->p_addr->u_pcb.pcb_flags & PCB_FPU)
 		frame->srr1 |= PSL_FP;
 
 #ifdef ALTIVEC
@@ -718,6 +718,8 @@ badaddr(char *addr, u_int32_t len)
 		v = *((volatile u_int8_t *)addr);
 		break;
 	}
+	/* Make sure all loads retire before turning off fault handling!! */
+	__asm__ volatile ("sync");
 	curpcb->pcb_onfault = oldh;
 	return(0);
 }

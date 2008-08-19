@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.61 2004/03/11 17:20:33 millert Exp $	*/
+/*	$OpenBSD: apm.c,v 1.63.2.1 2005/06/11 02:58:49 brad Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -147,6 +147,7 @@ u_char apm_minver;
 int apm_dobusy = 1;
 int apm_doidle = 1;
 int apm_bebatt = 0;
+int apm_idle_called = 0;
 
 struct {
 	u_int32_t entry;
@@ -347,6 +348,8 @@ apm_resume(sc, regs)
 	struct apm_softc *sc;
 	struct apmregs *regs;
 {
+	extern int perflevel;
+
 	apm_resumes = APM_RESUME_HOLDOFF;
 
 	/* they say that some machines may require reinitializing the clock */
@@ -359,6 +362,10 @@ apm_resume(sc, regs)
 	
 	/* acknowledge any rtc interrupt we may have missed */
 	rtcdrain(NULL);
+
+	/* restore hw.setperf */
+	if (cpu_setperf != NULL)
+		cpu_setperf(perflevel);
 }
 
 int
@@ -618,34 +625,65 @@ apm_set_powstate(dev, state)
 }
 
 void
-apm_cpu_busy()
+apm_cpu_busy(void)
 {
 	struct apmregs regs;
-	if (!apm_cd.cd_ndevs || !apm_doidle)
-		return;
-	bzero(&regs, sizeof(regs));
-	if ((apm_flags & APM_IDLE_SLOWS) &&
-		apmcall(APM_CPU_BUSY, 0, &regs) != 0) {
 
+	if (!apm_cd.cd_ndevs)	/* No APM device, punt */
+		return;
+	if (!apm_dobusy)
+		return;
+	if (!apm_idle_called)
+		return;
+
+	if (apm_flags & APM_IDLE_SLOWS) {
+		bzero(&regs, sizeof(regs));
+		if (apmcall(APM_CPU_BUSY, 0, &regs) != 0) {
 #ifdef DIAGNOSTIC
-		apm_perror("set CPU busy", &regs);
+			apm_perror("set CPU busy", &regs);
 #endif
+		}
+		apm_idle_called = 0;
 	}
 }
 
 void
-apm_cpu_idle()
+apm_cpu_idle(void)
 {
 	struct apmregs regs;
-	if (!apm_cd.cd_ndevs || !apm_doidle)
+	static int call_apm = 0;
+
+	if (!apm_cd.cd_ndevs) { /* No APM device, wait for next interrupt */
+		__asm __volatile("sti;hlt");
 		return;
+	}
 
-	bzero(&regs, sizeof(regs));
-	if (apmcall(APM_CPU_IDLE, 0, &regs) != 0) {
+	if (!apm_doidle) {
+		__asm __volatile("sti;hlt");
+		return;
+	}
 
+	/*
+	 * We call the bios APM_IDLE routine here only when we
+	 * have been idle for some time - otherwise we just hlt.
+	 */
+
+	if  (call_apm != curcpu()->ci_schedstate.spc_cp_time[CP_IDLE]) {
+		/* Always call BIOS halt/idle stuff */
+		bzero(&regs, sizeof(regs));
+		if (apmcall(APM_CPU_IDLE, 0, &regs) != 0) {
 #ifdef DIAGNOSTIC
-		apm_perror("set CPU idle", &regs);
+			apm_perror("set CPU idle", &regs);
 #endif
+		}
+		apm_idle_called = 1;
+		/* If BIOS did halt, don't do it again! */
+		if (apm_flags & APM_IDLE_SLOWS) {
+			__asm __volatile("sti;hlt");
+		}
+		call_apm = curcpu()->ci_schedstate.spc_cp_time[CP_IDLE];
+	} else {
+		__asm __volatile("sti;hlt");
 	}
 }
 
@@ -771,7 +809,6 @@ apmattach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
-	extern union descriptor *dynamic_gdt;
 	struct bios_attach_args *ba = aux;
 	bios_apminfo_t *ap = ba->bios_apmp;
 	struct apm_softc *sc = (void *)self;
@@ -837,12 +874,12 @@ apmattach(parent, self, aux)
 		else
 			ch16 += ap->apm_code16_base - cbase;
 
-		setsegment(&dynamic_gdt[GAPM32CODE_SEL].sd, (void *)ch32,
-			   ap->apm_code_len, SDT_MEMERA, SEL_KPL, 1, 0);
-		setsegment(&dynamic_gdt[GAPM16CODE_SEL].sd, (void *)ch16,
-			   ap->apm_code16_len, SDT_MEMERA, SEL_KPL, 0, 0);
-		setsegment(&dynamic_gdt[GAPMDATA_SEL].sd, (void *)dh,
-			   ap->apm_data_len, SDT_MEMRWA, SEL_KPL, 1, 0);
+		setgdt(GAPM32CODE_SEL, (void *)ch32, ap->apm_code_len,
+		    SDT_MEMERA, SEL_KPL, 1, 0);
+		setgdt(GAPM16CODE_SEL, (void *)ch16, ap->apm_code16_len,
+		    SDT_MEMERA, SEL_KPL, 0, 0);
+		setgdt(GAPMDATA_SEL, (void *)dh, ap->apm_data_len, SDT_MEMRWA,
+		    SEL_KPL, 1, 0);
 		DPRINTF((": flags %x code 32:%x/%x[%x] 16:%x/%x[%x] "
 		       "data %x/%x/%x ep %x (%x:%x)\n%s", apm_flags,
 		    ap->apm_code32_base, ch32, ap->apm_code_len,
@@ -884,9 +921,9 @@ apmattach(parent, self, aux)
 		} else
 			kthread_create_deferred(apm_thread_create, sc);
 	} else {
-		dynamic_gdt[GAPM32CODE_SEL] = dynamic_gdt[GNULL_SEL];
-		dynamic_gdt[GAPM16CODE_SEL] = dynamic_gdt[GNULL_SEL];
-		dynamic_gdt[GAPMDATA_SEL] = dynamic_gdt[GNULL_SEL];
+		setgdt(GAPM32CODE_SEL, NULL, 0, 0, 0, 0, 0);
+		setgdt(GAPM16CODE_SEL, NULL, 0, 0, 0, 0, 0);
+		setgdt(GAPMDATA_SEL, NULL, 0, 0, 0, 0, 0);
 	}
 }
 
@@ -895,6 +932,15 @@ apm_thread_create(v)
 	void *v;
 {
 	struct apm_softc *sc = v;
+
+#ifdef MULTIPROCESSOR
+	if (ncpus > 1) {
+		apm_disconnect(sc);
+		apm_dobusy = apm_doidle = 0;
+		return;
+	}
+#endif
+
 	if (kthread_create(apm_thread, sc, &sc->sc_thread,
 	    "%s", sc->sc_dev.dv_xname)) {
 		apm_disconnect(sc);

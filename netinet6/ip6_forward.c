@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.28 2004/02/02 20:13:01 cedric Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.34 2004/07/14 20:19:58 dhartmei Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -91,7 +91,7 @@ ip6_forward(m, srcrt)
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct sockaddr_in6 *dst;
 	struct rtentry *rt;
-	int error, type = 0, code = 0;
+	int error = 0, type = 0, code = 0;
 	struct mbuf *mcopy = NULL;
 	struct ifnet *origifp;	/* maybe unnecessary */
 #ifdef IPSEC
@@ -115,8 +115,8 @@ ip6_forward(m, srcrt)
 	    IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_src)) {
 		ip6stat.ip6s_cantforward++;
 		/* XXX in6_ifstat_inc(rt->rt_ifp, ifs6_in_discard) */
-		if (ip6_log_time + ip6_log_interval < time.tv_sec) {
-			ip6_log_time = time.tv_sec;
+		if (ip6_log_time + ip6_log_interval < time_second) {
+			ip6_log_time = time_second;
 			log(LOG_DEBUG,
 			    "cannot forward "
 			    "from %s to %s nxt %d received on %s\n",
@@ -289,8 +289,8 @@ ip6_forward(m, srcrt)
 		ip6stat.ip6s_badscope++;
 		in6_ifstat_inc(rt->rt_ifp, ifs6_in_discard);
 
-		if (ip6_log_time + ip6_log_interval < time.tv_sec) {
-			ip6_log_time = time.tv_sec;
+		if (ip6_log_time + ip6_log_interval < time_second) {
+			ip6_log_time = time_second;
 			log(LOG_DEBUG,
 			    "cannot forward "
 			    "src %s, dst %s, nxt %d, rcvif %s, outif %s\n",
@@ -429,7 +429,7 @@ ip6_forward(m, srcrt)
 		ip6->ip6_dst.s6_addr16[1] = 0;
 
 #if NPF > 0 
-	if (pf_test6(PF_OUT, rt->rt_ifp, &m) != PF_PASS) {
+	if (pf_test6(PF_OUT, rt->rt_ifp, &m, NULL) != PF_PASS) {
 		m_freem(m);
 		goto senderr;
 	}

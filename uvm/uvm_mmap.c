@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.53.4.1 2005/05/22 01:40:58 brad Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.54.2.1 2005/05/22 01:34:27 brad Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -62,6 +62,8 @@
 #include <sys/vnode.h>
 #include <sys/conf.h>
 #include <sys/stat.h>
+
+#include <machine/exec.h>	/* for __LDPGSZ */
 
 #include <miscfs/specfs/specdev.h>
 
@@ -1177,6 +1179,7 @@ uvm_mmap(map, addr, size, prot, maxprot, flags, handle, foff, locklimit)
 	int retval;
 	int advice = UVM_ADV_NORMAL;
 	uvm_flag_t uvmflag = 0;
+	vsize_t align = 0;	/* userland page size */
 
 	/*
 	 * check params
@@ -1197,7 +1200,6 @@ uvm_mmap(map, addr, size, prot, maxprot, flags, handle, foff, locklimit)
 	if ((flags & MAP_FIXED) == 0) {
 		*addr = round_page(*addr);	/* round */
 	} else {
-		
 		if (*addr & PAGE_MASK)
 			return(EINVAL);
 		uvmflag |= UVM_FLAG_FIXED;
@@ -1210,6 +1212,8 @@ uvm_mmap(map, addr, size, prot, maxprot, flags, handle, foff, locklimit)
 	 */
 
 	if (flags & MAP_ANON) {
+		if ((flags & MAP_FIXED) == 0 && size >= __LDPGSZ)
+			align = __LDPGSZ;
 		foff = UVM_UNKNOWN_OFFSET;
 		uobj = NULL;
 		if ((flags & MAP_SHARED) == 0)
@@ -1297,7 +1301,7 @@ uvm_mmap(map, addr, size, prot, maxprot, flags, handle, foff, locklimit)
 	 * do it!
 	 */
 
-	retval = uvm_map(map, addr, size, uobj, foff, 0, uvmflag);
+	retval = uvm_map(map, addr, size, uobj, foff, align, uvmflag);
 
 	if (retval == KERN_SUCCESS) {
 		/*

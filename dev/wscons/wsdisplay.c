@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.53.2.1 2004/11/02 01:49:22 brad Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.53.4.1 2004/11/02 01:32:22 brad Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.37.4.1 2000/06/30 16:27:53 simonb Exp $ */
 
 /*

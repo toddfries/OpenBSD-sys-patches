@@ -1,4 +1,4 @@
-/*	$OpenBSD: inflate.c,v 1.10.2.1 2004/08/28 16:21:46 brad Exp $	*/
+/*	$OpenBSD: inflate.c,v 1.11 2004/08/26 18:39:18 otto Exp $	*/
 /* inflate.c -- zlib decompression
  * Copyright (C) 1995-2003 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h

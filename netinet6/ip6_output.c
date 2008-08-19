@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.82 2004/02/04 08:47:41 itojun Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.86 2004/06/21 19:26:02 mcbride Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -788,7 +788,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	}
 
 #if NPF > 0
-	if (pf_test6(PF_OUT, ifp, &m) != PF_PASS) {
+	if (pf_test6(PF_OUT, ifp, &m, NULL) != PF_PASS) {
 		error = EHOSTUNREACH;
 		m_freem(m);
 		goto done;
@@ -1318,6 +1318,7 @@ ip6_ctloutput(op, so, level, optname, mp)
 			case IPV6_RTHDR:
 			case IPV6_FAITH:
 			case IPV6_V6ONLY:
+			case IPV6_USE_MIN_MTU:
 				if (optlen != sizeof(int)) {
 					error = EINVAL;
 					break;
@@ -1374,6 +1375,10 @@ do { \
 
 				case IPV6_FAITH:
 					OPTSET(IN6P_FAITH);
+					break;
+
+				case IPV6_USE_MIN_MTU:
+					OPTSET(IN6P_MINMTU);
 					break;
 
 				case IPV6_V6ONLY:
@@ -1543,6 +1548,7 @@ do { \
 			case IPV6_FAITH:
 			case IPV6_V6ONLY:
 			case IPV6_PORTRANGE:
+			case IPV6_USE_MIN_MTU:
 				switch (optname) {
 
 				case IPV6_UNICAST_HOPS:
@@ -1604,6 +1610,10 @@ do { \
 						optval = 0;
 					break;
 				    }
+
+				case IPV6_USE_MIN_MTU:
+					optval = OPTBIT(IN6P_MINMTU);
+					break;
 				}
 				*mp = m = m_get(M_WAIT, MT_SOOPTS);
 				m->m_len = sizeof(int);
