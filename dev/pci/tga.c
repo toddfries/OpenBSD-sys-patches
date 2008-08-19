@@ -1,4 +1,4 @@
-/* $OpenBSD: tga.c,v 1.6.2.1 2001/10/14 20:44:49 jason Exp $ */
+/* $OpenBSD: tga.c,v 1.9 2001/09/16 00:42:44 millert Exp $ */
 /* $NetBSD: tga.c,v 1.31 2001/02/11 19:34:58 nathanw Exp $ */
 
 /*
@@ -426,7 +426,9 @@ tgaattach(parent, self, aux)
 		sc->nscreens = 1;
 	} else {
 		sc->sc_dc = (struct tga_devconfig *)
-		    malloc(sizeof(struct tga_devconfig), M_DEVBUF, M_WAITOK);
+		    malloc(sizeof(struct tga_devconfig), M_DEVBUF, M_NOWAIT);
+		if (sc->sc_dc == NULL)
+			return;
 		bzero(sc->sc_dc, sizeof(struct tga_devconfig));
 		tga_getdevconfig(pa->pa_memt, pa->pa_pc, pa->pa_tag,
 		    sc->sc_dc);
@@ -438,8 +440,7 @@ tgaattach(parent, self, aux)
 
 	/* XXX say what's going on. */
 	intrstr = NULL;
-	if (pci_intr_map(pa->pa_pc, pa->pa_intrtag, pa->pa_intrpin,
-			 pa->pa_intrline, &intrh)) {
+	if (pci_intr_map(pa, &intrh)) {
 		printf(": couldn't map interrupt");
 		return;
 	}

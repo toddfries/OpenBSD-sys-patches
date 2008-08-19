@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_prefix.c,v 1.10 2001/03/25 09:24:26 itojun Exp $	*/
+/*	$OpenBSD: in6_prefix.c,v 1.12 2001/08/24 16:57:33 brian Exp $	*/
 /*	$KAME: in6_prefix.c,v 1.47 2001/03/25 08:41:39 itojun Exp $	*/
 
 /*
@@ -87,8 +87,6 @@
 struct rr_prhead rr_prefix;
 
 struct timeout in6_rr_timer_ch;
-
-#include <net/net_osdep.h>
 
 static void	add_each_addr __P((struct socket *so, struct rr_prefix *rpp,
 				   struct rp_addr *rap));
@@ -577,7 +575,7 @@ add_each_addr(struct socket *so, struct rr_prefix *rpp, struct rp_addr *rap)
 
 	/* init ifra */
 	bzero(&ifra, sizeof(ifra));
-	strncpy(ifra.ifra_name, if_name(rpp->rp_ifp), sizeof(ifra.ifra_name));
+	strncpy(ifra.ifra_name, rpp->rp_ifp->if_xname, sizeof(ifra.ifra_name));
 	ifra.ifra_addr.sin6_family = ifra.ifra_prefixmask.sin6_family =
 		AF_INET6;
 	ifra.ifra_addr.sin6_len = ifra.ifra_prefixmask.sin6_len =
@@ -623,7 +621,7 @@ add_each_addr(struct socket *so, struct rr_prefix *rpp, struct rp_addr *rap)
 		 *      Or, completely duplicated prefixes?
 		 * log it and return.
 		 */
-		log(LOG_ERR, "in6_prefix.c: add_each_addr: addition of an addr"
+		log(LOG_ERR, "in6_prefix.c: add_each_addr: addition of an addr "
 		    "%s/%d failed because there is already another addr %s/%d\n",
 		    ip6_sprintf(&ifra.ifra_addr.sin6_addr), rpp->rp_plen,
 		    ip6_sprintf(IA6_IN6(ia6)),

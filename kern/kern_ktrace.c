@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.22 2000/11/10 18:15:46 art Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.24.2.1 2002/06/27 08:21:32 miod Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -52,6 +52,8 @@
 #include <sys/syscallargs.h>
 
 #include <vm/vm.h>
+
+#define ISSET(t, f)    ((t) & (f))
 
 void ktrinitheader __P((struct ktr_header *, struct proc *, int));
 int ktrops __P((struct proc *, struct proc *, int, int, struct vnode *));
@@ -230,7 +232,7 @@ ktrgenio(p, fd, rw, iov, len, error)
 			break;
 
 		iov->iov_len -= count;
-		iov->iov_base += count;
+		iov->iov_base = (caddr_t)iov->iov_base + count;
 
 		if (iov->iov_len == 0)
 			iov++;
@@ -525,11 +527,12 @@ ktrcanset(callp, targetp)
 	struct pcred *target = targetp->p_cred;
 
 	if ((caller->pc_ucred->cr_uid == target->p_ruid &&
-	     target->p_ruid == target->p_svuid &&
-	     caller->p_rgid == target->p_rgid &&	/* XXX */
-	     target->p_rgid == target->p_svgid &&
-	     (targetp->p_traceflag & KTRFAC_ROOT) == 0) ||
-	     caller->pc_ucred->cr_uid == 0)
+	    target->p_ruid == target->p_svuid &&
+	    caller->p_rgid == target->p_rgid &&	/* XXX */
+	    target->p_rgid == target->p_svgid &&
+	    (targetp->p_traceflag & KTRFAC_ROOT) == 0 &&
+	    !ISSET(targetp->p_flag, P_SUGID)) ||
+	    caller->pc_ucred->cr_uid == 0)
 		return (1);
 
 	return (0);

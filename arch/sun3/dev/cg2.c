@@ -1,4 +1,4 @@
-/*	$OpenBSD: cg2.c,v 1.6.20.1 2001/10/14 20:44:48 jason Exp $	*/
+/*	$OpenBSD: cg2.c,v 1.7 2001/09/16 00:42:44 millert Exp $	*/
 /*	$NetBSD: cg2.c,v 1.7 1996/10/13 03:47:26 christos Exp $	*/
 
 /*

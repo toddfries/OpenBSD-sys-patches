@@ -1,4 +1,4 @@
-/*	$OpenBSD: umap_vfsops.c,v 1.16.2.1 2001/10/14 20:44:49 jason Exp $	*/
+/*	$OpenBSD: umap_vfsops.c,v 1.17 2001/09/16 00:42:44 millert Exp $	*/
 /*	$NetBSD: umap_vfsops.c,v 1.9 1996/02/09 22:41:05 christos Exp $	*/
 
 /*

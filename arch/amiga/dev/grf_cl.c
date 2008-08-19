@@ -1,4 +1,4 @@
-/*	$OpenBSD: grf_cl.c,v 1.14.6.1 2001/10/14 20:44:48 jason Exp $	*/
+/*	$OpenBSD: grf_cl.c,v 1.15 2001/09/13 13:20:22 jj Exp $	*/
 /*	$NetBSD: grf_cl.c,v 1.20 1997/07/29 17:46:24 veego Exp $	*/
 
 /*

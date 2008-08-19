@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.48.2.3 2002/05/08 23:00:22 millert Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.57.2.2 2002/05/08 22:56:55 miod Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -59,14 +59,19 @@
 #include <sys/syscallargs.h>
 
 #include <vm/vm.h>
-#include <vm/vm_kern.h>
-
-#if defined(UVM)
 #include <uvm/uvm_extern.h>
-#endif
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
+
+#include <dev/rndvar.h>
+
+/*
+ * stackgap_random specifies if the stackgap should have a random size added
+ * to it. Must be a n^2. If non-zero, the stack gap will be calculated as:
+ * (arc4random() * ALIGNBYTES) & (stackgap_random - 1) + STACKGAPLEN.
+ */
+int stackgap_random;
 
 /*
  * check exec:
@@ -129,18 +134,9 @@ check_exec(p, epp)
 		error = EACCES;
 		goto bad1;
 	}
-	if ((vp->v_mount->mnt_flag & MNT_NOSUID) ||
-	    (p->p_flag & P_TRACED) || p->p_fd->fd_refcnt > 1)
-		epp->ep_vap->va_mode &= ~(VSUID | VSGID);
 
-	/*
-	 * Set the P_SUID* flags early so that we won't be fiddled with when
-	 * we sleep later in this code.
-	 * XXX - this could give us a few false positives and the caller must
-	 *       make sure to save and restore the flags if exec fails.
-	 */
-	if (epp->ep_vap->va_mode & (VSUID|VSGID))
-		p->p_flag |= P_SUGID|P_SUGIDEXEC;
+	if ((vp->v_mount->mnt_flag & MNT_NOSUID))
+		epp->ep_vap->va_mode &= ~(VSUID | VSGID);
 
 	/* check access.  for root we have to see if any exec bit on */
 	if ((error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p)) != 0)
@@ -230,7 +226,7 @@ sys_execve(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct sys_execve_args /* {
+	struct sys_execve_args /* {
 		syscallarg(char *) path;
 		syscallarg(char * *) argp;
 		syscallarg(char * *) envp;
@@ -243,7 +239,7 @@ sys_execve(p, v, retval)
 	char *argp;
 	char * const *cpp, *dp, *sp;
 	long argc, envc;
-	size_t len;
+	size_t len, sgap;
 #ifdef MACHINE_STACK_GROWS_UP
 	size_t slen;
 #endif
@@ -253,7 +249,6 @@ sys_execve(p, v, retval)
 	char **tmpfap;
 	int szsigcode;
 	extern struct emul emul_native;
-	int saved_sugid;
 
 	/*
 	 * Cheap solution to complicated problems.
@@ -290,7 +285,6 @@ sys_execve(p, v, retval)
 	pack.ep_emul = &emul_native;
 	pack.ep_flags = 0;
 
-	saved_sugid = p->p_flag & (P_SUGID|P_SUGIDEXEC);
 	/* see if we can run it. */
 	if ((error = check_exec(p, &pack)) != 0) {
 		goto freehdr;
@@ -299,11 +293,7 @@ sys_execve(p, v, retval)
 	/* XXX -- THE FOLLOWING SECTION NEEDS MAJOR CLEANUP */
 
 	/* allocate an argument buffer */
-#if defined(UVM)
 	argp = (char *) uvm_km_valloc_wait(exec_map, NCARGS);
-#else
-	argp = (char *)kmem_alloc_wait(exec_map, NCARGS);
-#endif
 #ifdef DIAGNOSTIC
 	if (argp == (vaddr_t) 0)
 		panic("execve: argp == NULL");
@@ -378,9 +368,12 @@ sys_execve(p, v, retval)
 
 	szsigcode = pack.ep_emul->e_esigcode - pack.ep_emul->e_sigcode;
 
+	sgap = STACKGAPLEN;
+	if (stackgap_random != 0)
+		sgap += (arc4random() * ALIGNBYTES) & (stackgap_random - 1);
 	/* Now check if args & environ fit into new stack */
 	len = ((argc + envc + 2 + pack.ep_emul->e_arglen) * sizeof(char *) +
-	    sizeof(long) + dp + STACKGAPLEN + szsigcode +
+	    sizeof(long) + dp + sgap + szsigcode +
 	    sizeof(struct ps_strings)) - argp;
 
 	len = ALIGN(len);	/* make the stack "safely" aligned */
@@ -397,21 +390,7 @@ sys_execve(p, v, retval)
 	 * Prepare vmspace for remapping. Note that uvmspace_exec can replace
 	 * p_vmspace!
 	 */
-#if defined(UVM)
 	uvmspace_exec(p);
-#else
-	/* Unmap old program */
-#ifdef __sparc__
-	kill_user_windows(p);		/* before stack addresses go away */
-#endif
-	/* Kill shared memory and unmap old program */
-#ifdef SYSVSHM
-	if (vm->vm_shm && vm->vm_refcnt == 1)
-		shmexit(vm);
-#endif
-	vm_deallocate(&vm->vm_map, VM_MIN_ADDRESS,
-	    VM_MAXUSER_ADDRESS - VM_MIN_ADDRESS);
-#endif
 
 	vm = p->p_vmspace;
 	/* Now map address space */
@@ -481,8 +460,8 @@ sys_execve(p, v, retval)
 	p->p_acflag &= ~AFORK;
 
 	/* record proc's vnode, for use by procfs and others */
-        if (p->p_textvp)
-                vrele(p->p_textvp);
+	if (p->p_textvp)
+		vrele(p->p_textvp);
 	VREF(pack.ep_vp);
 	p->p_textvp = pack.ep_vp;
 
@@ -502,10 +481,13 @@ sys_execve(p, v, retval)
 
 	/*
 	 * deal with set[ug]id.
-	 * MNT_NOEXEC and P_TRACED have already been used to disable s[ug]id.
+	 * MNT_NOEXEC has already been used to disable s[ug]id.
 	 */
-	if ((attr.va_mode & (VSUID | VSGID))) {
+	if ((attr.va_mode & (VSUID | VSGID)) && proc_cansugid(p)) {
 		int i;
+
+		p->p_flag |= P_SUGID;
+		p->p_flag |= P_SUGIDEXEC;
 
 #ifdef KTRACE
 		/*
@@ -522,8 +504,6 @@ sys_execve(p, v, retval)
 			p->p_ucred->cr_uid = attr.va_uid;
 		if (attr.va_mode & VSGID)
 			p->p_ucred->cr_gid = attr.va_gid;
-		p->p_flag |= P_SUGID;
-		p->p_flag |= P_SUGIDEXEC;
 
 		/*
 		 * For set[ug]id processes, a few caveats apply to
@@ -602,11 +582,7 @@ sys_execve(p, v, retval)
 		splx(s);
 	}
 
-#if defined(UVM)
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
-#else
-	kmem_free_wakeup(exec_map, (vaddr_t)argp, NCARGS);
-#endif
 
 	FREE(nid.ni_cnd.cn_pnbuf, M_NAMEI);
 	VOP_CLOSE(pack.ep_vp, FREAD, cred, p);
@@ -618,8 +594,8 @@ sys_execve(p, v, retval)
 	KNOTE(&p->p_klist, NOTE_EXEC);
 
 	/* setup new registers and do misc. setup. */
-	if(pack.ep_emul->e_fixup != NULL) {
-		if((*pack.ep_emul->e_fixup)(p, &pack) != 0)
+	if (pack.ep_emul->e_fixup != NULL) {
+		if ((*pack.ep_emul->e_fixup)(p, &pack) != 0)
 			goto free_pack_abort;
 	}
 #ifdef MACHINE_STACK_GROWS_UP
@@ -653,15 +629,11 @@ bad:
 	VOP_CLOSE(pack.ep_vp, FREAD, cred, p);
 	vput(pack.ep_vp);
 	FREE(nid.ni_cnd.cn_pnbuf, M_NAMEI);
-#if defined(UVM)
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
-#else
-	kmem_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
-#endif
 
 freehdr:
 	free(pack.ep_hdr, M_EXEC);
-	p->p_flag = (p->p_flag & ~(P_SUGID|P_SUGIDEXEC|P_INEXEC)) | saved_sugid;
+	p->p_flag &= ~P_INEXEC;
 	return (error);
 
 exec_abort:
@@ -670,23 +642,14 @@ exec_abort:
 	 * get rid of the (new) address space we have created, if any, get rid
 	 * of our namei data and vnode, and exit noting failure
 	 */
-#if defined(UVM)
 	uvm_deallocate(&vm->vm_map, VM_MIN_ADDRESS,
 		VM_MAXUSER_ADDRESS - VM_MIN_ADDRESS);
-#else
-	vm_deallocate(&vm->vm_map, VM_MIN_ADDRESS,
-		VM_MAXUSER_ADDRESS - VM_MIN_ADDRESS);
-#endif
 	if (pack.ep_emul_arg)
 		FREE(pack.ep_emul_arg, M_TEMP);
 	FREE(nid.ni_cnd.cn_pnbuf, M_NAMEI);
 	VOP_CLOSE(pack.ep_vp, FREAD, cred, p);
 	vput(pack.ep_vp);
-#if defined(UVM)
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
-#else
-	kmem_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
-#endif
 
 free_pack_abort:
 	free(pack.ep_hdr, M_EXEC);
@@ -710,7 +673,7 @@ copyargs(pack, arginfo, stack, argp)
 	char *dp, *sp;
 	size_t len;
 	void *nullp = NULL;
-	int argc = arginfo->ps_nargvstr;
+	long argc = arginfo->ps_nargvstr;
 	int envc = arginfo->ps_nenvstr;
 
 	if (copyout(&argc, cpp++, sizeof(argc)))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccdvar.h,v 1.4.16.1 2001/10/14 20:44:48 jason Exp $	*/
+/*	$OpenBSD: ccdvar.h,v 1.5 2001/09/16 00:42:44 millert Exp $	*/
 /*	$NetBSD: ccdvar.h,v 1.11 1996/02/28 01:08:32 thorpej Exp $	*/
 
 /*-

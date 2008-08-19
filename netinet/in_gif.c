@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_gif.c,v 1.16 2001/04/14 00:30:58 angelos Exp $	*/
+/*	$OpenBSD: in_gif.c,v 1.21 2001/08/19 06:31:56 angelos Exp $	*/
 /*	$KAME: in_gif.c,v 1.50 2001/01/22 07:27:16 itojun Exp $	*/
 
 /*
@@ -37,11 +37,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/socket.h>
-#include <sys/sockio.h>
 #include <sys/mbuf.h>
-#include <sys/errno.h>
-#include <sys/ioctl.h>
-#include <sys/protosw.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -52,7 +48,6 @@
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_gif.h>
-#include <netinet/ip_ecn.h>
 #include <netinet/ip_ipsp.h>
 
 #ifdef INET6
@@ -63,14 +58,8 @@
 #include <netinet/ip_mroute.h>
 #endif /* MROUTING */
 
-#include <net/if_gif.h>	
-
 #include "gif.h"
 #include "bridge.h"
-
-#include <machine/stdarg.h>
-
-#include <net/net_osdep.h>
 
 int
 in_gif_output(ifp, family, m, rt)
@@ -159,7 +148,7 @@ in_gif_output(ifp, family, m, rt)
 
 	/* encapsulate into IPv4 packet */
 	mp = NULL;
-	error = ipip_output(m, &tdb, &mp, hlen, poff, NULL);
+	error = ipip_output(m, &tdb, &mp, hlen, poff);
 	if (error)
 		return error;
 	else if (mp == NULL)
@@ -208,7 +197,7 @@ in_gif_input(m, va_alist)
 
 	/* this code will be soon improved. */
 #define	satosin(sa)	((struct sockaddr_in *)(sa))	
-	for (i = 0, sc = gif; i < ngif; i++, sc++) {
+	for (i = 0, sc = gif_softc; i < ngif; i++, sc++) {
 		if (sc->gif_psrc == NULL
 		 || sc->gif_pdst == NULL
 		 || sc->gif_psrc->sa_family != AF_INET
@@ -238,7 +227,9 @@ in_gif_input(m, va_alist)
 
 	if (gifp) {
 		m->m_pkthdr.rcvif = gifp;
-		ipip_input(m, off); /* We have a configured GIF */
+		gifp->if_ipackets++;
+		gifp->if_ibytes += m->m_pkthdr.len;
+		ipip_input(m, off, gifp); /* We have a configured GIF */
 		return;
 	}
 

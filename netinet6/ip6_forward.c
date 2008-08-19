@@ -1,5 +1,5 @@
-/*	$OpenBSD: ip6_forward.c,v 1.13 2001/03/30 11:09:00 itojun Exp $	*/
-/*	$KAME: ip6_forward.c,v 1.67 2001/03/29 05:34:31 itojun Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.17 2001/09/29 08:02:07 jasoni Exp $	*/
+/*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -30,6 +30,8 @@
  * SUCH DAMAGE.
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -53,13 +55,15 @@
 #include <netinet/icmp6.h>
 #include <netinet6/nd6.h>
 
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
+
 #ifdef IPSEC_IPV6FWD
 #include <netinet6/ipsec.h>
 #include <netkey/key.h>
 #include <netkey/key_debug.h>
 #endif /* IPSEC_IPV6FWD */
-
-#include <net/net_osdep.h>
 
 struct	route_in6 ip6_forward_rt;
 
@@ -127,7 +131,7 @@ ip6_forward(m, srcrt)
 			    ip6_sprintf(&ip6->ip6_src),
 			    ip6_sprintf(&ip6->ip6_dst),
 			    ip6->ip6_nxt,
-			    if_name(m->m_pkthdr.rcvif));
+			    m->m_pkthdr.rcvif->if_xname);
 		}
 		m_freem(m);
 		return;
@@ -351,7 +355,7 @@ ip6_forward(m, srcrt)
 			    ip6_sprintf(&ip6->ip6_src),
 			    ip6_sprintf(&ip6->ip6_dst),
 			    ip6->ip6_nxt,
-			    if_name(m->m_pkthdr.rcvif), if_name(rt->rt_ifp));
+			    m->m_pkthdr.rcvif->if_xname, rt->rt_ifp->if_xname);
 		}
 		if (mcopy)
 			icmp6_error(mcopy, ICMP6_DST_UNREACH,
@@ -414,8 +418,31 @@ ip6_forward(m, srcrt)
 	 * modified by a redirect.
 	 */
 	if (rt->rt_ifp == m->m_pkthdr.rcvif && !srcrt &&
-	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0)
+	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0) {
+		if ((rt->rt_ifp->if_flags & IFF_POINTOPOINT) &&
+		    nd6_is_addr_neighbor((struct sockaddr_in6 *)&ip6_forward_rt.ro_dst, rt->rt_ifp)) {
+			/*
+			 * If the incoming interface is equal to the outgoing
+			 * one, the link attached to the interface is
+			 * point-to-point, and the IPv6 destination is
+			 * regarded as on-link on the link, then it will be
+			 * highly probable that the destination address does
+			 * not exist on the link and that the packet is going
+			 * to loop.  Thus, we immediately drop the packet and
+			 * send an ICMPv6 error message.
+			 * For other routing loops, we dare to let the packet
+			 * go to the loop, so that a remote diagnosing host
+			 * can detect the loop by traceroute.
+			 * type/code is based on suggestion by Rich Draves.
+			 * not sure if it is the best pick.
+			 */
+			icmp6_error(mcopy, ICMP6_DST_UNREACH,
+				    ICMP6_DST_UNREACH_ADDR, 0);
+			m_freem(m);
+			return;
+		}
 		type = ND_REDIRECT;
+	}
 
 	/*
 	 * Fake scoped addresses. Note that even link-local source or
@@ -445,8 +472,8 @@ ip6_forward(m, srcrt)
 			       "src %s, dst %s, nxt %d, rcvif %s, outif %s\n",
 			       ip6_sprintf(&ip6->ip6_src),
 			       ip6_sprintf(&ip6->ip6_dst),
-			       ip6->ip6_nxt, if_name(m->m_pkthdr.rcvif),
-			       if_name(rt->rt_ifp));
+			       ip6->ip6_nxt, m->m_pkthdr.rcvif->if_xname,
+			       rt->rt_ifp->if_xname);
 		}
 
 		/* we can just use rcvif in forwarding. */
@@ -458,6 +485,14 @@ ip6_forward(m, srcrt)
 		ip6->ip6_src.s6_addr16[1] = 0;
 	if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
 		ip6->ip6_dst.s6_addr16[1] = 0;
+
+#if NPF > 0 
+        if (pf_test6(PF_OUT, rt->rt_ifp, &m) != PF_PASS) {
+		m_freem(m);
+		goto senderr;
+	}
+	ip6 = mtod(m, struct ip6_hdr *);
+#endif 
 
 #ifdef OLDIP6OUTPUT
 	error = (*rt->rt_ifp->if_output)(rt->rt_ifp, m,
@@ -479,6 +514,10 @@ ip6_forward(m, srcrt)
 				goto freecopy;
 		}
 	}
+
+#if NPF > 0
+senderr:
+#endif
 	if (mcopy == NULL)
 		return;
 

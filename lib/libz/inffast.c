@@ -1,4 +1,4 @@
-/*	$OpenBSD: inffast.c,v 1.5.12.1 2002/03/14 00:08:41 miod Exp $	*/
+/*	$OpenBSD: inffast.c,v 1.5.14.1 2002/03/13 15:54:29 jason Exp $	*/
 /* inffast.c -- process literals and length/distance pairs fast
  * Copyright (C) 1995-2002 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h 

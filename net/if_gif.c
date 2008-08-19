@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.14 2001/02/20 13:50:53 itojun Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.20 2001/07/27 15:48:38 itojun Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -36,23 +36,16 @@
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
-#include <sys/errno.h>
-#include <sys/ioctl.h>
-#include <sys/time.h>
 #include <sys/syslog.h>
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
-#include <net/netisr.h>
 #include <net/route.h>
 #include <net/bpf.h>
 
 #ifdef	INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
-#include <netinet/ip.h>
 #include <netinet/in_gif.h>
 #endif	/* INET */
 
@@ -60,9 +53,6 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/in6_var.h>
-#include <netinet/ip6.h>
-#include <netinet6/ip6_var.h>
 #include <netinet6/in6_gif.h>
 #endif /* INET6 */
 
@@ -70,8 +60,6 @@
 
 #include "bpfilter.h"
 #include "bridge.h"
-
-#include <net/net_osdep.h>
 
 extern int ifqmaxlen;
 
@@ -81,7 +69,7 @@ void gifattach __P((int));
 /*
  * gif global variable definitions
  */
-struct gif_softc *gif = 0;
+struct gif_softc *gif_softc = 0;
 
 void
 gifattach(n)
@@ -91,7 +79,8 @@ gifattach(n)
 	register int i;
 
 	ngif = n;
-	gif = sc = malloc (ngif * sizeof(struct gif_softc), M_DEVBUF, M_WAIT);
+	gif_softc = sc = malloc (ngif * sizeof(struct gif_softc),
+	    M_DEVBUF, M_WAIT);
 	bzero(sc, ngif * sizeof(struct gif_softc));
 	for (i = 0; i < ngif; sc++, i++) {
 		sprintf(sc->gif_if.if_xname, "gif%d", i);
@@ -160,26 +149,33 @@ gif_output(ifp, m, dst, rt)
 {
 	register struct gif_softc *sc = (struct gif_softc*)ifp;
 	int error = 0;
-	static int called = 0;	/* XXX: MUTEX */
-	int calllimit = 3;	/* XXX: adhoc */
+	struct m_tag *mtag;
 
 	/*
 	 * gif may cause infinite recursion calls when misconfigured.
-	 * We'll prevent this by introducing upper limit.
-	 * XXX: this mechanism may introduce another problem about
-	 *      mutual exclusion of the variable CALLED, especially if we
-	 *      use kernel thread.
+	 * We'll prevent this by detecting loops.
 	 */
-	if (++called >= calllimit) {
-		log(LOG_NOTICE,
-		    "gif_output: recursively called too many times(%d)\n",
-		    called);
-		m_freem(m);
-		error = EIO;	/* is there better errno? */
-		goto end;
+	for (mtag = m_tag_find(m, PACKET_TAG_GIF, NULL); mtag;
+	     mtag = m_tag_find(m, PACKET_TAG_GIF, mtag)) {
+		if (!bcmp((caddr_t)(mtag + 1), &ifp, sizeof(struct ifnet *))) {
+			IF_DROP(&ifp->if_snd);
+			log(LOG_NOTICE,
+			    "gif_output: recursively called too many times\n");
+			m_freem(m);
+			error = EIO;	/* is there better errno? */
+			goto end;
+		}
 	}
 
-	ifp->if_lastchange = time;	
+	mtag = m_tag_get(PACKET_TAG_GIF, sizeof(struct ifnet *), M_NOWAIT);
+	if (mtag == NULL) {
+		IF_DROP(&ifp->if_snd);
+		m_freem(m);
+		error = ENOMEM;
+		goto end;
+	}
+	bcopy(&ifp, (caddr_t)(mtag + 1), sizeof(struct ifnet *));
+	m_tag_prepend(m, mtag);
 
 	m->m_flags &= ~(M_BCAST|M_MCAST);
 	if (!(ifp->if_flags & IFF_UP) ||
@@ -231,7 +227,6 @@ gif_output(ifp, m, dst, rt)
 	}
 
   end:
-	called = 0;		/* reset recursion counter */
 	if (error) ifp->if_oerrors++;
 	return error;
 }
@@ -248,6 +243,7 @@ gif_ioctl(ifp, cmd, data)
 	struct sockaddr *dst, *src;
 	struct sockaddr *sa;
 	int i;
+	int s;
 	struct gif_softc *sc2;
 		
 	switch (cmd) {
@@ -359,7 +355,7 @@ gif_ioctl(ifp, cmd, data)
 		}
 
 		for (i = 0; i < ngif; i++) {
-			sc2 = gif + i;
+			sc2 = gif_softc + i;
 			if (sc2 == sc)
 				continue;
 			if (!sc2->gif_pdst || !sc2->gif_psrc)
@@ -409,8 +405,10 @@ gif_ioctl(ifp, cmd, data)
 		bcopy((caddr_t)dst, (caddr_t)sa, dst->sa_len);
 		sc->gif_pdst = sa;
 
-		ifp->if_flags |= (IFF_UP | IFF_RUNNING);
+		s = splnet();
+		ifp->if_flags |= IFF_RUNNING;
 		if_up(ifp);		/* send up RTM_IFINFO */
+		splx(s);
 
 		error = 0;
 		break;

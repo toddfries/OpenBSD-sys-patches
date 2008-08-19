@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_gif.c,v 1.12 2001/04/14 00:30:59 angelos Exp $	*/
+/*	$OpenBSD: in6_gif.c,v 1.18 2001/08/19 06:31:56 angelos Exp $	*/
 /*	$KAME: in6_gif.c,v 1.43 2001/01/22 07:27:17 itojun Exp $	*/
 
 /*
@@ -66,8 +66,6 @@
 
 #include <net/if_gif.h>
 
-#include <net/net_osdep.h>
-
 #include "bridge.h"
 
 #ifndef offsetof
@@ -122,7 +120,7 @@ in6_gif_output(ifp, family, m, rt)
 	    {
 		if (m->m_len < sizeof(struct ip)) {
 			m = m_pullup(m, sizeof(struct ip));
-			if (!m)
+			if (m == NULL)
 				return ENOBUFS;
 		}
 		hlen = (mtod(m, struct ip *)->ip_hl) << 2;
@@ -167,7 +165,7 @@ in6_gif_output(ifp, family, m, rt)
 
 	/* encapsulate into IPv6 packet */
 	mp = NULL;
-	error = ipip_output(m, &tdb, &mp, hlen, poff, NULL);
+	error = ipip_output(m, &tdb, &mp, hlen, poff);
 	if (error)
 	        return error;
 	else if (mp == NULL)
@@ -220,7 +218,7 @@ int in6_gif_input(mp, offp, proto)
 	ip6 = mtod(m, struct ip6_hdr *);
 
 #define satoin6(sa)	(((struct sockaddr_in6 *)(sa))->sin6_addr)
-	for (i = 0, sc = gif; i < ngif; i++, sc++) {
+	for (i = 0, sc = gif_softc; i < ngif; i++, sc++) {
 		if (sc->gif_psrc == NULL ||
 		    sc->gif_pdst == NULL ||
 		    sc->gif_psrc->sa_family != AF_INET6 ||
@@ -250,7 +248,9 @@ int in6_gif_input(mp, offp, proto)
 
 	if (gifp) {
 	        m->m_pkthdr.rcvif = gifp;
-		ipip_input(m, *offp);
+		gifp->if_ipackets++;
+		gifp->if_ibytes += m->m_pkthdr.len;
+		ipip_input(m, *offp, gifp);
 		return IPPROTO_DONE;
 	}
 
