@@ -1,4 +1,4 @@
-/*	$OpenBSD: bktr_os.c,v 1.6 2001/09/11 20:05:25 miod Exp $	*/
+/*	$OpenBSD: bktr_os.c,v 1.13 2002/07/13 16:25:36 mickey Exp $	*/
 /* $FreeBSD: src/sys/dev/bktr/bktr_os.c,v 1.20 2000/10/20 08:16:53 roger Exp $ */
 
 /*
@@ -137,6 +137,8 @@ SYSCTL_INT(_hw_bt848, OID_AUTO, slow_msp_audio, CTLFLAG_RW, &bt848_slow_msp_audi
 /**************************/
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 
+#include "radio.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -147,8 +149,12 @@ SYSCTL_INT(_hw_bt848, OID_AUTO, slow_msp_audio, CTLFLAG_RW, &bt848_slow_msp_audi
 #include <sys/poll.h>
 #include <sys/select.h>
 #include <sys/vnode.h>
+#if NRADIO > 0
+#include <sys/radioio.h>
+#include <dev/radio_if.h>
+#endif
 
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 
 #include <sys/device.h>
 #include <dev/pci/pcivar.h>
@@ -374,12 +380,12 @@ bktr_attach( device_t dev )
         fun = fun | 1;	/* Enable writes to the sub-system vendor ID */
 
 #if defined( BKTR_430_FX_MODE )
-	if (bootverbose) printf("Using 430 FX chipset compatibilty mode\n");
+	if (bootverbose) printf("Using 430 FX chipset compatibility mode\n");
         fun = fun | 2;	/* Enable Intel 430 FX compatibility mode */
 #endif
 
 #if defined( BKTR_SIS_VIA_MODE )
-	if (bootverbose) printf("Using SiS/VIA chipset compatibilty mode\n");
+	if (bootverbose) printf("Using SiS/VIA chipset compatibility mode\n");
         fun = fun | 4;	/* Enable SiS/VIA compatibility mode (usefull for
                            OPTi chipset motherboards too */
 #endif
@@ -815,7 +821,7 @@ int bktr_poll( dev_t dev, int events, struct proc *p)
 
 static bktr_reg_t brooktree[ NBKTR ];
 
-static const char*	bktr_probe( pcici_t tag, pcidi_t type );
+static const char      *bktr_probe( pcici_t tag, pcidi_t type );
 static void		bktr_attach( pcici_t tag, int unit );
 static void		bktr_intr(void *arg) { common_bktr_intr(arg); }
 
@@ -866,7 +872,7 @@ SYSINIT(bktrdev,SI_SUB_DRIVERS,SI_ORDER_MIDDLE+CDEV_MAJOR,bktr_drvinit,NULL)
 /*
  * the boot time probe routine.
  */
-static const char*
+static const char *
 bktr_probe( pcici_t tag, pcidi_t type )
 {
         unsigned int rev = pci_conf_read( tag, PCIR_REVID) & 0x000000ff;
@@ -954,7 +960,7 @@ bktr_attach( pcici_t tag, int unit )
 	/*
 	 * setup the interrupt handling routine
 	 */
-	pci_map_int(tag, bktr_intr, (void*) bktr, &tty_imask);
+	pci_map_int(tag, bktr_intr, (void *) bktr, &tty_imask);
 
 
 	/* Update the Device Control Register */
@@ -963,12 +969,12 @@ bktr_attach( pcici_t tag, int unit )
         fun = fun | 1;	/* Enable writes to the sub-system vendor ID */
 
 #if defined( BKTR_430_FX_MODE )
-	if (bootverbose) printf("Using 430 FX chipset compatibilty mode\n");
+	if (bootverbose) printf("Using 430 FX chipset compatibility mode\n");
         fun = fun | 2;	/* Enable Intel 430 FX compatibility mode */
 #endif
 
 #if defined( BKTR_SIS_VIA_MODE )
-	if (bootverbose) printf("Using SiS/VIA chipset compatibilty mode\n");
+	if (bootverbose) printf("Using SiS/VIA chipset compatibility mode\n");
         fun = fun | 4;	/* Enable SiS/VIA compatibility mode (usefull for
                            OPTi chipset motherboards too */
 #endif
@@ -1296,23 +1302,23 @@ static	int		bktr_intr(void *arg) { return common_bktr_intr(arg); }
 #define bktr_mmap       bktrmmap
 
 #ifdef __OpenBSD__
-int	bktr_open __P((dev_t, int, int, struct proc *));
-int	bktr_close __P((dev_t, int, int, struct proc *));
-int	bktr_read __P((dev_t, struct uio *, int));
-int	bktr_write __P((dev_t, struct uio *, int));
-int	bktr_ioctl __P((dev_t, ioctl_cmd_t, caddr_t, int, struct proc *));
-paddr_t	bktr_mmap __P((dev_t, off_t, int));
+int	bktr_open(dev_t, int, int, struct proc *);
+int	bktr_close(dev_t, int, int, struct proc *);
+int	bktr_read(dev_t, struct uio *, int);
+int	bktr_write(dev_t, struct uio *, int);
+int	bktr_ioctl(dev_t, ioctl_cmd_t, caddr_t, int, struct proc *);
+paddr_t	bktr_mmap(dev_t, off_t, int);
 #endif
 
 vm_offset_t vm_page_alloc_contig(vm_offset_t, vm_offset_t,
                                  vm_offset_t, vm_offset_t);
 
 #if defined(__OpenBSD__)
-static int      bktr_probe __P((struct device *, void *, void *));
+static int      bktr_probe(struct device *, void *, void *);
 #else
-static int      bktr_probe __P((struct device *, struct cfdata *, void *));
+static int      bktr_probe(struct device *, struct cfdata *, void *);
 #endif
-static void     bktr_attach __P((struct device *, struct device *, void *));
+static void     bktr_attach(struct device *, struct device *, void *);
 
 struct cfattach bktr_ca = {
         sizeof(struct bktr_softc), bktr_probe, bktr_attach
@@ -1323,6 +1329,20 @@ extern struct cfdriver bktr_cd;
 #else
 struct cfdriver bktr_cd = {
         NULL, "bktr", DV_DULL
+};
+#endif
+
+#if NRADIO > 0
+/* for radio(4) */
+int	bktr_get_info(void *, struct radio_info *);
+int	bktr_set_info(void *, struct radio_info *);
+
+struct radio_hw_if bktr_hw_if = {
+	NULL,	/* open */
+	NULL,	/* close */
+	bktr_get_info,
+	bktr_set_info,
+	NULL	/* search */
 };
 #endif
 
@@ -1403,12 +1423,13 @@ bktr_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
-	bktr->ih = pci_intr_establish(pa->pa_pc, ih, IPL_VIDEO,
-				      bktr_intr, bktr
 #ifdef __OpenBSD__
-				      , bktr->bktr_dev.dv_xname
+	bktr->ih = pci_intr_establish(pa->pa_pc, ih, IPL_VIDEO,
+	    bktr_intr, bktr, bktr->bktr_dev.dv_xname);
+#else
+	bktr->ih = pci_intr_establish(pa->pa_pc, ih, IPL_VIDEO,
+	    bktr_intr, bktr);
 #endif
-	);
 	if (bktr->ih == NULL) {
 		printf("%s: couldn't establish interrupt",
 		       bktr_name(bktr));
@@ -1458,6 +1479,11 @@ bktr_attach(struct device *parent, struct device *self, void *aux)
         rev = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_CLASS_REG) & 0x000000ff;
 
 	common_bktr_attach(bktr, unit, fun, rev);
+
+#if NRADIO > 0
+	if (bktr->card.tuner->pllControl[3] != 0x00)
+		radio_attach_mi(&bktr_hw_if, bktr, &bktr->bktr_dev);
+#endif
 }
 
 
@@ -1690,5 +1716,67 @@ bktr_mmap(dev_t dev, off_t offset, int nprot)
 	return (bus_dmamem_mmap(bktr->dmat, bktr->dm_mem->dm_segs, 1,
 				(vaddr_t)offset, nprot, BUS_DMA_WAITOK));
 }
+
+#if NRADIO > 0
+int
+bktr_set_info(void *v, struct radio_info *ri)
+{
+	struct bktr_softc *sc = v;
+	u_int32_t freq;
+
+	if (ri->mute) {
+		/* mute the audio stream by switching the mux */
+		set_audio(sc, AUDIO_MUTE);
+
+		/* disable drivers on the GPIO port that controls the MUXes */
+		OUTL(sc, BKTR_GPIO_OUT_EN, INL(sc, BKTR_GPIO_OUT_EN) &
+		~sc->card.gpio_mux_bits);
+	} else {
+		/* enable drivers on the GPIO port that controls the MUXes */
+		OUTL(sc, BKTR_GPIO_OUT_EN, INL(sc, BKTR_GPIO_OUT_EN) |
+		sc->card.gpio_mux_bits);
+
+		/* unmute the audio stream */
+		set_audio(sc, AUDIO_UNMUTE);
+		init_audio_devices(sc);
+	}
+
+	freq = ri->freq / 10;
+	set_audio(sc, AUDIO_INTERN);	/* use internal audio */
+	temp_mute(sc, TRUE);
+	ri->freq = tv_freq(sc, freq, FM_RADIO_FREQUENCY) * 10;
+	temp_mute(sc, FALSE);
+
+	return (0);
+}
+
+int
+bktr_get_info(void *v, struct radio_info *ri)
+{
+	struct bktr_softc *sc = v;
+	struct TVTUNER *tv = &sc->tuner;
+	int status;
+
+	status = get_tuner_status(sc);
+
+#define	STATUSBIT_STEREO	0x10
+	ri->mute = (int)sc->audio_mute_state ? 1 : 0;
+	ri->caps = RADIO_CAPS_DETECT_STEREO | RADIO_CAPS_HW_AFC;
+	ri->freq = tv->frequency * 10;
+	ri->info = (status & STATUSBIT_STEREO) ? RADIO_INFO_STEREO : 0;
+
+	/* not yet supported */
+	ri->volume = ri->rfreq = ri->lock = 0;
+
+	/*
+	 * The field ri->stereo is used to forcible switch to
+	 * mono/stereo, not as an indicator of received signal quality.
+	 * The ri->info is for that purpose.
+	 */
+	ri->stereo = 1; /* Can't switch to mono, always stereo */
+
+	return (0);
+}
+#endif /* NRADIO */
 
 #endif /* __NetBSD__ || __OpenBSD__ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_gif.c,v 1.18 2001/08/19 06:31:56 angelos Exp $	*/
+/*	$OpenBSD: in6_gif.c,v 1.21 2002/05/30 04:19:44 itojun Exp $	*/
 /*	$KAME: in6_gif.c,v 1.43 2001/01/22 07:27:17 itojun Exp $	*/
 
 /*
@@ -28,10 +28,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- */
-
-/*
- * in6_gif.c
  */
 
 #include <sys/param.h>
@@ -94,12 +90,6 @@ in6_gif_output(ifp, family, m, rt)
 	    sin6_dst->sin6_family != AF_INET6) {
 		m_freem(m);
 		return EAFNOSUPPORT;
-	}
-
-	/* multi-destination mode is not supported */
-	if (ifp->if_flags & IFF_LINK0) {
-		m_freem(m);
-		return ENETUNREACH;
 	}
 
 	/* setup dummy tdb.  it highly depends on ipip_output() code. */
@@ -198,7 +188,14 @@ in6_gif_output(ifp, family, m, rt)
 		}
 	}
 	
-	return(ip6_output(m, 0, &sc->gif_ro6, 0, 0, NULL));
+	/*
+	 * force fragmentation to minimum MTU, to avoid path MTU discovery.
+	 * it is too painful to ask for resend of inner packet, to achieve
+	 * path MTU discovery for encapsulated packets.
+	 */
+	error = ip6_output(m, 0, &sc->gif_ro6, IPV6_MINMTU, 0, NULL);
+
+	return error;
 }
 
 int in6_gif_input(mp, offp, proto)
@@ -219,8 +216,7 @@ int in6_gif_input(mp, offp, proto)
 
 #define satoin6(sa)	(((struct sockaddr_in6 *)(sa))->sin6_addr)
 	for (i = 0, sc = gif_softc; i < ngif; i++, sc++) {
-		if (sc->gif_psrc == NULL ||
-		    sc->gif_pdst == NULL ||
+		if (sc->gif_psrc == NULL || sc->gif_pdst == NULL ||
 		    sc->gif_psrc->sa_family != AF_INET6 ||
 		    sc->gif_pdst->sa_family != AF_INET6) {
 			continue;
@@ -229,18 +225,8 @@ int in6_gif_input(mp, offp, proto)
 		if ((sc->gif_if.if_flags & IFF_UP) == 0)
 			continue;
 
-		if ((sc->gif_if.if_flags & IFF_LINK0) &&
-		    IN6_ARE_ADDR_EQUAL(&satoin6(sc->gif_psrc),
-				       &ip6->ip6_dst) &&
-		    IN6_IS_ADDR_UNSPECIFIED(&satoin6(sc->gif_pdst))) {
-			gifp = &sc->gif_if;
-			continue;
-		}
-
-		if (IN6_ARE_ADDR_EQUAL(&satoin6(sc->gif_psrc),
-				       &ip6->ip6_dst) &&
-		    IN6_ARE_ADDR_EQUAL(&satoin6(sc->gif_pdst),
-				       &ip6->ip6_src)) {
+		if (IN6_ARE_ADDR_EQUAL(&satoin6(sc->gif_psrc), &ip6->ip6_dst) &&
+		    IN6_ARE_ADDR_EQUAL(&satoin6(sc->gif_pdst), &ip6->ip6_src)) {
 			gifp = &sc->gif_if;
 			break;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pk_usrreq.c,v 1.3 2001/05/16 12:53:35 ho Exp $	*/
+/*	$OpenBSD: pk_usrreq.c,v 1.7 2002/08/08 19:18:12 provos Exp $	*/
 /*	$NetBSD: pk_usrreq.c,v 1.10 1996/02/13 22:05:43 christos Exp $	*/
 
 /*
@@ -63,8 +63,8 @@
 #include <netccitt/pk_var.h>
 #include <netccitt/pk_extern.h>
 
-static void old_to_new __P((struct mbuf *));
-static void new_to_old __P((struct mbuf *));
+static void old_to_new(struct mbuf *);
+static void new_to_old(struct mbuf *);
 /*
  *
  *  X.25 Packet level protocol interface to socket abstraction.
@@ -277,6 +277,7 @@ pk_usrreq(so, req, m, nam, control)
 			if (n && n->m_type == MT_OOBDATA) {
 				unsigned        len = n->m_pkthdr.len;
 				so->so_rcv.sb_mb = n->m_nextpkt;
+				SB_EMPTY_FIXUP(&so->so_rcv);
 				if (len != n->m_len &&
 				    (n = m_pullup(n, len)) == 0)
 					break;

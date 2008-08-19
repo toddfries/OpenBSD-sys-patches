@@ -1,5 +1,5 @@
-/*	$OpenBSD: openprom.c,v 1.3.2.1 2002/07/31 16:37:42 jason Exp $	*/
-/*	$NetBSD: openprom.c,v 1.2 2000/11/18 23:45:05 mrg Exp $ */
+/*	$OpenBSD: openprom.c,v 1.8 2002/07/31 18:39:22 jason Exp $	*/
+/*	$NetBSD: openprom.c,v 1.4 2002/01/10 06:21:53 briggs Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -73,10 +73,6 @@ openpromopen(dev, flags, mode, p)
 	int flags, mode;
 	struct proc *p;
 {
-#if defined(SUN4)
-	if (cputyp==CPU_SUN4)
-		return (ENODEV);
-#endif
 
 	return (0);
 }
@@ -111,8 +107,8 @@ openpromgetstr(len, user, cpp)
 	int len;
 	char *user, **cpp;
 {
-	register int error;
-	register char *cp;
+	int error;
+	char *cp;
 
 	/* Reject obvious bogus requests */
 	if ((u_int)len > (8 * 1024) - 1)
@@ -222,7 +218,7 @@ openpromioctl(dev, cmd, data, flags, p)
 		error = OF_nextprop(node, name, nextprop);
 		splx(s);
 		if (error == 0) {
-			op->op_buflen = len;
+			op->op_buflen = 0;
 			error = subyte(op->op_buf, 0);
 			break;
 		}

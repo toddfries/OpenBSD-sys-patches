@@ -1,4 +1,4 @@
-/*	$OpenBSD: slcompress.h,v 1.4 1998/05/08 05:02:02 millert Exp $	*/
+/*	$OpenBSD: slcompress.h,v 1.6 2002/06/14 21:35:00 todd Exp $	*/
 /*	$NetBSD: slcompress.h,v 1.11 1997/05/17 21:12:11 christos Exp $	*/
 
 /*
@@ -64,7 +64,7 @@
  * 
  * There are 5 numbers which can change (they are always inserted
  * in the following order): TCP urgent pointer, window,
- * acknowlegement, sequence number and IP ID.  (The urgent pointer
+ * acknowledgement, sequence number and IP ID.  (The urgent pointer
  * is different from the others in that its value is sent, not the
  * change in value.)  Since typical use of SLIP links is biased
  * toward small packets (see comments on MTU/MSS below), changes
@@ -158,12 +158,12 @@ struct slcompress {
 /* flag values */
 #define SLF_TOSS 1		/* tossing rcvd frames because of input err */
 
-void	sl_compress_init __P((struct slcompress *));
-void	sl_compress_setup __P((struct slcompress *, int));
-u_int	sl_compress_tcp __P((struct mbuf *,
-  	    struct ip *, struct slcompress *, int));
-int	sl_uncompress_tcp __P((u_char **, int, u_int, struct slcompress *));
-int	sl_uncompress_tcp_core __P((u_char *, int, int, u_int,
-  	    struct slcompress *, u_char **, u_int *));
+void	sl_compress_init(struct slcompress *);
+void	sl_compress_setup(struct slcompress *, int);
+u_int	sl_compress_tcp(struct mbuf *,
+  	    struct ip *, struct slcompress *, int);
+int	sl_uncompress_tcp(u_char **, int, u_int, struct slcompress *);
+int	sl_uncompress_tcp_core(u_char *, int, int, u_int,
+  	    struct slcompress *, u_char **, u_int *);
 
 #endif /* _NET_SLCOMPRESS_H_ */

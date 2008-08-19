@@ -1,31 +1,47 @@
-/*	$OpenBSD: ppp_tty.c,v 1.12 2001/06/15 03:38:34 itojun Exp $	*/
+/*	$OpenBSD: ppp_tty.c,v 1.15 2002/07/01 19:31:35 deraadt Exp $	*/
 /*	$NetBSD: ppp_tty.c,v 1.12 1997/03/24 21:23:10 christos Exp $	*/
 
 /*
  * ppp_tty.c - Point-to-Point Protocol (PPP) driver for asynchronous
  * 	       tty devices.
  *
- * Copyright (c) 1989 Carnegie Mellon University.
- * All rights reserved.
+ * Copyright (c) 1984-2000 Carnegie Mellon University. All rights reserved.
  *
- * Redistribution and use in source and binary forms are permitted
- * provided that the above copyright notice and this paragraph are
- * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
- * distribution and use acknowledge that the software was developed
- * by Carnegie Mellon University.  The name of the
- * University may not be used to endorse or promote products derived
- * from this software without specific prior written permission.
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
- * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * Drew D. Perkins
- * Carnegie Mellon University
- * 4910 Forbes Ave.
- * Pittsburgh, PA 15213
- * (412) 268-8576
- * ddp@andrew.cmu.edu
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any legal
+ *    details, please contact
+ *      Office of Technology Transfer
+ *      Carnegie Mellon University
+ *      5000 Forbes Avenue
+ *      Pittsburgh, PA  15213-3890
+ *      (412) 268-4387, fax: (412) 268-7395
+ *      tech-transfer@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * Based on:
  *	@(#)if_sl.c	7.6.1.2 (Berkeley) 2/15/89
@@ -110,23 +126,23 @@
 #include <net/if_ppp.h>
 #include <net/if_pppvar.h>
 
-int	pppopen __P((dev_t dev, struct tty *tp));
-int	pppclose __P((struct tty *tp, int flag));
-int	pppread __P((struct tty *tp, struct uio *uio, int flag));
-int	pppwrite __P((struct tty *tp, struct uio *uio, int flag));
-int	ppptioctl __P((struct tty *tp, u_long cmd, caddr_t data, int flag,
-		       struct proc *));
-int	pppinput __P((int c, struct tty *tp));
-int	pppstart __P((struct tty *tp, int));
+int	pppopen(dev_t dev, struct tty *tp);
+int	pppclose(struct tty *tp, int flag);
+int	pppread(struct tty *tp, struct uio *uio, int flag);
+int	pppwrite(struct tty *tp, struct uio *uio, int flag);
+int	ppptioctl(struct tty *tp, u_long cmd, caddr_t data, int flag,
+		       struct proc *);
+int	pppinput(int c, struct tty *tp);
+int	pppstart(struct tty *tp, int);
 
-u_int16_t pppfcs __P((u_int16_t fcs, u_char *cp, int len));
-void	pppasyncstart __P((struct ppp_softc *));
-void	pppasyncctlp __P((struct ppp_softc *));
-void	pppasyncrelinq __P((struct ppp_softc *));
-void	ppp_timeout __P((void *));
-void	pppgetm __P((struct ppp_softc *sc));
-void	pppdumpb __P((u_char *b, int l));
-void	ppplogchar __P((struct ppp_softc *, int));
+u_int16_t pppfcs(u_int16_t fcs, u_char *cp, int len);
+void	pppasyncstart(struct ppp_softc *);
+void	pppasyncctlp(struct ppp_softc *);
+void	pppasyncrelinq(struct ppp_softc *);
+void	ppp_timeout(void *);
+void	pppgetm(struct ppp_softc *sc);
+void	pppdumpb(u_char *b, int l);
+void	ppplogchar(struct ppp_softc *, int);
 
 /*
  * Some useful mbuf macros not in mbuf.h.
@@ -712,6 +728,15 @@ pppstart(tp, force)
     if (tp->t_oproc != NULL)
 	(*tp->t_oproc)(tp);
 
+#ifdef ALTQ
+    /*
+     * if ALTQ is enabled, don't invoke NETISR_PPP.
+     * pppintr() could loop without doing anything useful
+     * under rate-limiting.
+     */
+    if (ALTQ_IS_ENABLED(&sc->sc_if.if_snd))
+	return 0;
+#endif
     /*
      * If the transmit queue has drained and the tty has not hung up
      * or been disconnected from the ppp unit, then tell if_ppp.c that

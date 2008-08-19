@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_output.c,v 1.19 2001/08/08 15:07:04 jjbg Exp $ */
+/*	$OpenBSD: ipsec_output.c,v 1.25 2002/08/28 15:43:03 pefo Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -64,6 +64,7 @@
 int
 ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 {
+	struct timeval tv;
 	int i, off, error;
 	struct mbuf *mp;
 
@@ -79,7 +80,7 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 	if ((tdb->tdb_sproto == IPPROTO_ESP && !esp_enable) ||
 	    (tdb->tdb_sproto == IPPROTO_AH && !ah_enable) ||
 	    (tdb->tdb_sproto == IPPROTO_IPCOMP && !ipcomp_enable)) {
-		DPRINTF(("ipsp_process_packet(): IPSec outbound packet "
+		DPRINTF(("ipsp_process_packet(): IPsec outbound packet "
 		    "dropped due to policy (check your sysctls)\n"));
 		m_freem(m);
 		return EHOSTUNREACH;
@@ -126,13 +127,23 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 	 * Register first use if applicable, setup relevant expiration timer.
 	 */
 	if (tdb->tdb_first_use == 0) {
+		int pri;
+
+		pri = splhigh();
 		tdb->tdb_first_use = time.tv_sec;
+		splx(pri);
+
+		tv.tv_usec = 0;
+
+		tv.tv_sec = tdb->tdb_first_use + tdb->tdb_exp_first_use;
 		if (tdb->tdb_flags & TDBF_FIRSTUSE)
 			timeout_add(&tdb->tdb_first_tmo,
-			    hz * tdb->tdb_exp_first_use);
+			    hzto(&tv));
+
+		tv.tv_sec = tdb->tdb_first_use + tdb->tdb_soft_first_use;
 		if (tdb->tdb_flags & TDBF_SOFT_FIRSTUSE)
 			timeout_add(&tdb->tdb_sfirst_tmo,
-			    hz * tdb->tdb_soft_first_use);
+			    hzto(&tv));
 	}
 
 	/*
@@ -223,7 +234,7 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 					return ENXIO;	/*?*/
 				}
 				ip6 = mtod(m, struct ip6_hdr *);
-				ip6->ip6_plen = htons(m->m_pkthdr.len 
+				ip6->ip6_plen = htons(m->m_pkthdr.len
 				    - sizeof(*ip6));
 			}
 #endif /* INET6 */
@@ -245,12 +256,12 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 
 #ifdef INET
 			if (tdb->tdb_dst.sa.sa_family == AF_INET && setdf) {
-				ip = mtod(m, struct ip *);
 				if (m->m_len < sizeof(struct ip))
 					if ((m = m_pullup(m,
 					    sizeof(struct ip))) == NULL)
 						return ENOBUFS;
-		    
+
+				ip = mtod(m, struct ip *);
 				NTOHS(ip->ip_off);
 				ip->ip_off |= IP_DF;
 				HTONS(ip->ip_off);
@@ -328,29 +339,25 @@ ipsp_process_done(struct mbuf *m, struct tdb *tdb)
 #ifdef INET
 	case AF_INET:
 		/* Fix the header length, for AH processing. */
-		if (tdb->tdb_dst.sa.sa_family == AF_INET) {
-			ip = mtod(m, struct ip *);
-			ip->ip_len = htons(m->m_pkthdr.len);
-		}
+		ip = mtod(m, struct ip *);
+		ip->ip_len = htons(m->m_pkthdr.len);
 		break;
 #endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
 		/* Fix the header length, for AH processing. */
-		if (tdb->tdb_dst.sa.sa_family == AF_INET6) {
-			if (m->m_pkthdr.len < sizeof(*ip6)) {
-				m_freem(m);
-				return ENXIO;
-			}
-			if (m->m_pkthdr.len - sizeof(*ip6) > IPV6_MAXPACKET) {
-				/* No jumbogram support. */
-				m_freem(m);
-				return ENXIO;	/*?*/
-			}
-			ip6 = mtod(m, struct ip6_hdr *);
-			ip6->ip6_plen = htons(m->m_pkthdr.len - sizeof(*ip6));
+		if (m->m_pkthdr.len < sizeof(*ip6)) {
+			m_freem(m);
+			return ENXIO;
 		}
+		if (m->m_pkthdr.len - sizeof(*ip6) > IPV6_MAXPACKET) {
+			/* No jumbogram support. */
+			m_freem(m);
+			return ENXIO;
+		}
+		ip6 = mtod(m, struct ip6_hdr *);
+		ip6->ip6_plen = htons(m->m_pkthdr.len - sizeof(*ip6));
 		break;
 #endif /* INET6 */
 
@@ -403,7 +410,7 @@ ipsp_process_done(struct mbuf *m, struct tdb *tdb)
 		NTOHS(ip->ip_len);
 		NTOHS(ip->ip_off);
 
-		return ip_output(m, NULL, NULL, IP_RAWOUTPUT, NULL, NULL);
+		return ip_output(m, (void *)NULL, (void *)NULL, IP_RAWOUTPUT, (void *)NULL, (void *)NULL);
 #endif /* INET */
 
 #ifdef INET6
@@ -434,7 +441,7 @@ ipsec_hdrsz(struct tdb *tdbp)
 		else
 			adjust = 2 * sizeof(u_int32_t) + tdbp->tdb_ivlen;
 		/* Authenticator */
-		if (tdbp->tdb_authalgxform != NULL) 
+		if (tdbp->tdb_authalgxform != NULL)
 			adjust += AH_HMAC_HASHLEN;
 		/* Padding */
 		adjust += tdbp->tdb_encalgxform->blocksize;
@@ -485,7 +492,7 @@ ipsec_adjust_mtu(struct mbuf *m, u_int32_t mtu)
 	int s;
 
 	s = spltdb();
-	
+
 	for (mtag = m_tag_find(m, PACKET_TAG_IPSEC_OUT_DONE, NULL); mtag;
 	     mtag = m_tag_find(m, PACKET_TAG_IPSEC_OUT_DONE, mtag)) {
 		tdbi = (struct tdb_ident *)(mtag + 1);

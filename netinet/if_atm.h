@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_atm.h,v 1.4 2001/01/19 06:37:37 itojun Exp $       */
+/*      $OpenBSD: if_atm.h,v 1.6 2002/06/09 16:26:10 itojun Exp $       */
 
 /*
  *
@@ -15,7 +15,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Charles D. Cranor and 
+ *      This product includes software developed by Charles D. Cranor and
  * 	Washington University.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
@@ -36,6 +36,6 @@
  * if_atm.h
  */
 
-void atm_rtrequest __P((int, struct rtentry *, struct rt_addrinfo *));
-int atmresolve __P((struct rtentry *, struct mbuf *, struct sockaddr *, 
-		struct atm_pseudohdr *));
+void atm_rtrequest(int, struct rtentry *, struct rt_addrinfo *);
+int atmresolve(struct rtentry *, struct mbuf *, struct sockaddr *,
+		struct atm_pseudohdr *);

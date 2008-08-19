@@ -1,5 +1,5 @@
-/*	$OpenBSD: usb_quirks.c,v 1.9 2001/05/03 02:20:34 aaron Exp $ */
-/*	$NetBSD: usb_quirks.c,v 1.38 2001/04/15 10:26:36 augustss Exp $	*/
+/*	$OpenBSD: usb_quirks.c,v 1.15 2002/07/25 04:07:33 nate Exp $ */
+/*	$NetBSD: usb_quirks.c,v 1.40 2002/07/11 21:14:34 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.13 1999/11/17 22:33:47 n_hibma Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
- 
+
 #include <dev/usb/usb.h>
 
 #include <dev/usb/usbdevs.h>
@@ -60,7 +60,7 @@ Static const struct usbd_quirk_entry {
 	struct usbd_quirks quirks;
 } usb_quirks[] = {
  { USB_VENDOR_KYE, USB_PRODUCT_KYE_NICHE,	    0x100, { UQ_NO_SET_PROTO}},
- { USB_VENDOR_INSIDEOUT, USB_PRODUCT_INSIDEOUT_EDGEPORT4, 
+ { USB_VENDOR_INSIDEOUT, USB_PRODUCT_INSIDEOUT_EDGEPORT4,
    						    0x094, { UQ_SWAP_UNICODE}},
  { USB_VENDOR_BTC, USB_PRODUCT_BTC_BTC7932,	    0x100, { UQ_NO_STRINGS }},
  { USB_VENDOR_ADS, USB_PRODUCT_ADS_UBS10BT,	    0x002, { UQ_NO_STRINGS }},
@@ -83,13 +83,11 @@ Static const struct usbd_quirk_entry {
  { USB_VENDOR_SILICONPORTALS, USB_PRODUCT_SILICONPORTALS_YAPPHONE,
    						    0x100, { UQ_AU_INP_ASYNC }},
  /* XXX These should have a revision number, but I don't know what they are. */
-#ifdef notyet
- { USB_VENDOR_HP, USB_PRODUCT_HP_895C,		    ANY,  { UQ_BROKEN_BIDIR }},
- { USB_VENDOR_HP, USB_PRODUCT_HP_880C,		    ANY,  { UQ_BROKEN_BIDIR }},
- { USB_VENDOR_HP, USB_PRODUCT_HP_815C,		    ANY,  { UQ_BROKEN_BIDIR }},
- { USB_VENDOR_HP, USB_PRODUCT_HP_810C,		    ANY,  { UQ_BROKEN_BIDIR }},
- { USB_VENDOR_HP, USB_PRODUCT_HP_830C,		    ANY,  { UQ_BROKEN_BIDIR }},
-#endif
+ { USB_VENDOR_HP, USB_PRODUCT_HP_895C,		    ANY,   { UQ_BROKEN_BIDIR }},
+ { USB_VENDOR_HP, USB_PRODUCT_HP_880C,		    ANY,   { UQ_BROKEN_BIDIR }},
+ { USB_VENDOR_HP, USB_PRODUCT_HP_815C,		    ANY,   { UQ_BROKEN_BIDIR }},
+ { USB_VENDOR_HP, USB_PRODUCT_HP_810C,		    ANY,   { UQ_BROKEN_BIDIR }},
+ { USB_VENDOR_HP, USB_PRODUCT_HP_830C,		    ANY,   { UQ_BROKEN_BIDIR }},
 
  { 0, 0, 0, { 0 } }
 };
@@ -112,7 +110,7 @@ usbd_find_quirk(usb_device_descriptor_t *d)
 	}
 #ifdef USB_DEBUG
 	if (usbdebug && t->quirks.uq_flags)
-		logprintf("usbd_find_quirk 0x%04x/0x%04x/%x: %d\n", 
+		logprintf("usbd_find_quirk 0x%04x/0x%04x/%x: %d\n",
 			  UGETW(d->idVendor), UGETW(d->idProduct),
 			  UGETW(d->bcdDevice), t->quirks.uq_flags);
 #endif

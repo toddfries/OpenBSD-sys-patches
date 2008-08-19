@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tokensubr.c,v 1.4 2001/06/27 06:07:45 kjc Exp $	*/
+/*	$OpenBSD: if_tokensubr.c,v 1.8 2002/07/18 03:26:59 mickey Exp $	*/
 /*	$NetBSD: if_tokensubr.c,v 1.7 1999/05/30 00:39:07 bad Exp $	*/
 
 /*
@@ -123,8 +123,8 @@ extern struct ifqueue pkintrq;
 #define llc_snap	llc_un.type_snap
 #endif
 
-int	token_output __P((struct ifnet *, struct mbuf *, struct sockaddr *,
-	struct rtentry *)); 
+int	token_output(struct ifnet *, struct mbuf *, struct sockaddr *,
+	struct rtentry *); 
 
 /*
  * Token Ring output routine.
@@ -683,9 +683,6 @@ void
 token_ifattach(ifp)
 	register struct ifnet *ifp;
 {
-	register struct ifaddr *ifa;
-	register struct sockaddr_dl *sdl;
-
 	ifp->if_type = IFT_ISO88025;
 	ifp->if_addrlen = ISO88025_ADDR_LEN;
 	ifp->if_hdrlen = 14;
@@ -694,14 +691,7 @@ token_ifattach(ifp)
 #ifdef IFF_NOTRAILERS
 	ifp->if_flags |= IFF_NOTRAILERS;
 #endif
-	for (ifa = ifp->if_addrlist.tqh_first; ifa != 0;
-	    ifa = ifa->ifa_list.tqe_next)
-		if ((sdl = (struct sockaddr_dl *)ifa->ifa_addr) &&
-		    sdl->sdl_family == AF_LINK) {
-			sdl->sdl_type = IFT_ISO88025;
-			sdl->sdl_alen = ifp->if_addrlen;
-			bcopy((caddr_t)((struct arpcom *)ifp)->ac_enaddr,
-			    LLADDR(sdl), ifp->if_addrlen);
-			break;
-		}
+	if_alloc_sadl(ifp);
+	bcopy((caddr_t)((struct arpcom *)ifp)->ac_enaddr,
+	    LLADDR(ifp->if_sadl), ifp->if_addrlen);
 }

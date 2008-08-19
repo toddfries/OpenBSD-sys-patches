@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_arc.h,v 1.4 2001/06/09 07:03:40 angelos Exp $	*/
+/*	$OpenBSD: if_arc.h,v 1.6 2002/06/09 16:26:10 itojun Exp $	*/
 /*	$NetBSD: if_arc.h,v 1.5 1995/06/07 00:14:04 cgd Exp $	*/
 
 /*
@@ -111,7 +111,7 @@ struct	arccom {
 	struct ac_frag {
 		u_int8_t  af_maxflag;	/* from first packet */
 		u_int8_t  af_lastseen;	/* last split flag seen */
-		u_int16_t af_seqid;	
+		u_int16_t af_seqid;
 		struct mbuf *af_packet;
 	} ac_fragtab[256];		/* indexed by sender ll address */
 
@@ -120,11 +120,11 @@ struct	arccom {
 #ifdef _KERNEL
 u_int8_t arcbroadcastaddr;
 
-void	arc_ifattach __P((struct ifnet *));
-char	*arc_sprintf __P((u_int8_t *));
-void	arc_input __P((struct ifnet *, struct mbuf *));
-int	arc_output __P((struct ifnet *, struct mbuf *, struct sockaddr *,
-	    struct rtentry *));
-int	arc_isphds __P((int));
+void	arc_ifattach(struct ifnet *);
+char	*arc_sprintf(u_int8_t *);
+void	arc_input(struct ifnet *, struct mbuf *);
+int	arc_output(struct ifnet *, struct mbuf *, struct sockaddr *,
+	    struct rtentry *);
+int	arc_isphds(int);
 #endif /* _KERNEL */
 #endif /* _NETINET_IF_ARC_H_ */

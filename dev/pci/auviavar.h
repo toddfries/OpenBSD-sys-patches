@@ -1,4 +1,4 @@
-/*	$OpenBSD: auviavar.h,v 1.3 2000/12/27 02:50:07 mickey Exp $ */
+/*	$OpenBSD: auviavar.h,v 1.5 2002/05/30 15:13:20 mickey Exp $ */
 /*	$NetBSD: auviavar.h,v 1.1 2000/03/31 04:45:29 tsarna Exp $	*/
 
 /*-
@@ -53,21 +53,17 @@ struct auvia_softc_chan {
 
 struct auvia_softc {
 	struct device sc_dev;
+	void *sc_ih;			/* interrupt handle */
 
 	char sc_revision[8];
-	u_long sc_fixed_rate;		/* if codec doesn't support variable
-					 * rate audio, set to the fixed rate
-					 * it uses */
-
-	void *sc_ih;			/* interrupt handle */
+	u_int sc_flags;
+#define	AUVIA_FLAGS_VT8233	0x0001
 
 	pci_chipset_tag_t sc_pc;
 	pcitag_t sc_pt;
 
 	bus_space_tag_t sc_iot;
 	bus_space_handle_t sc_ioh;
-	bus_addr_t sc_ioaddr;
-	bus_size_t sc_iosize;
 	bus_dma_tag_t sc_dmat;
 
 	struct ac97_host_if host_if;

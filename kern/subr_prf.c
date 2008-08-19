@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_prf.c,v 1.35 2001/09/05 22:32:39 deraadt Exp $	*/
+/*	$OpenBSD: subr_prf.c,v 1.44 2002/05/20 22:16:36 art Exp $	*/
 /*	$NetBSD: subr_prf.c,v 1.45 1997/10/24 18:14:25 chuck Exp $	*/
 
 /*-
@@ -55,13 +55,13 @@
 #include <sys/tprintf.h>
 #include <sys/syslog.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 
 #include <dev/cons.h>
 
 /*
  * note that stdarg.h and the ansi style va_start macro is used for both
  * ansi and traditional c complers.
- * XXX: this requires that stdarg.h define: va_alist and va_dcl
  */
 #include <machine/stdarg.h>
 
@@ -97,9 +97,8 @@ extern int uvm_doswapencrypt;
  * local prototypes
  */
 
-static int	 kprintf __P((const char *, int, void *,
-		    char *, va_list));
-static void	 putchar __P((int, int, struct tty *));
+int	 kprintf(const char *, int, void *, char *, va_list);
+void	 putchar(int, int, struct tty *);
 
 
 /*
@@ -132,13 +131,18 @@ int	db_console = 0;
 #endif
 
 /*
+ * panic on spl assertion failure?
+ */
+int splassert_ctl = 0;
+
+/*
  * v_putc: routine to putc on virtual console
  *
  * the v_putc pointer can be used to redirect the console cnputc elsewhere
  * [e.g. to a "virtual console"].
  */
 
-void (*v_putc) __P((int)) = cnputc;	/* start with cnputc (normal cons) */
+void (*v_putc)(int) = cnputc;	/* start with cnputc (normal cons) */
 
 
 /*
@@ -179,13 +183,7 @@ tablefull(tab)
  */
 
 void
-#ifdef __STDC__
 panic(const char *fmt, ...)
-#else
-panic(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	static char panicbuf[512];
 	int bootopt;
@@ -221,8 +219,32 @@ panic(fmt, va_alist)
 #ifdef DDB
 	if (db_panic)
 		Debugger();
+	else
+		db_stack_dump();
 #endif
 	boot(bootopt);
+}
+
+/*
+ * We print only the function name. The file name is usually very long and
+ * would eat tons of space in the kernel.
+ */
+void
+splassert_fail(int wantipl, int haveipl, const char *func)
+{
+
+	printf("splassert: %s: want %d have %d\n", func, wantipl, haveipl);
+	switch (splassert_ctl) {
+	case 1:
+		break;
+	case 2:
+#ifdef DDB
+		db_stack_dump();
+#endif
+		break;
+	default:
+		panic("spl assertion failure in %s", func);
+	}
 }
 
 /*
@@ -237,14 +259,7 @@ panic(fmt, va_alist)
  */
 
 void
-#ifdef __STDC__
 log(int level, const char *fmt, ...)
-#else
-log(level, fmt, va_alist)
-	int level;
-	char *fmt;
-	va_dcl
-#endif
 {
 	register int s;
 	va_list ap;
@@ -267,7 +282,7 @@ log(level, fmt, va_alist)
  * logpri: log the priority level to the klog
  */
 
-void			/* XXXCDC: should be static? */
+void
 logpri(level)
 	int level;
 {
@@ -286,13 +301,7 @@ logpri(level)
  */
 
 int
-#ifdef __STDC__
 addlog(const char *fmt, ...)
-#else
-addlog(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	register int s;
 	va_list ap;
@@ -318,7 +327,7 @@ addlog(fmt, va_alist)
  * => if console, then the last MSGBUFS chars are saved in msgbuf
  *	for inspection later (e.g. dmesg/syslog)
  */
-static void
+void
 putchar(c, flags, tp)
 	register int c;
 	int flags;
@@ -370,13 +379,7 @@ putchar(c, flags, tp)
  */
 
 void
-#ifdef __STDC__
 uprintf(const char *fmt, ...)
-#else
-uprintf(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	register struct proc *p = curproc;
 	va_list ap;
@@ -435,14 +438,7 @@ tprintf_close(sess)
  * => also sends message to /dev/klog
  */
 void
-#ifdef __STDC__
 tprintf(tpr_t tpr, const char *fmt, ...)
-#else
-tprintf(tpr, fmt, va_alist)
-	tpr_t tpr;
-	char *fmt;
-	va_dcl
-#endif
 {
 	register struct session *sess = (struct session *)tpr;
 	struct tty *tp = NULL;
@@ -469,14 +465,7 @@ tprintf(tpr, fmt, va_alist)
  *	use tprintf]
  */
 void
-#ifdef __STDC__
 ttyprintf(struct tty *tp, const char *fmt, ...)
-#else
-ttyprintf(tp, fmt, va_alist)
-	struct tty *tp;
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
@@ -492,13 +481,7 @@ ttyprintf(tp, fmt, va_alist)
  */
 
 int
-#ifdef __STDC__
 db_printf(const char *fmt, ...)
-#else
-db_printf(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	int retval;
@@ -520,13 +503,7 @@ db_printf(fmt, va_alist)
  * printf: print a message to the console and the log
  */
 int
-#ifdef __STDC__
 printf(const char *fmt, ...)
-#else
-printf(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	int savintr, retval;
@@ -566,14 +543,7 @@ vprintf(fmt, ap)
  * sprintf: print a message to a buffer
  */
 int
-#ifdef __STDC__
 sprintf(char *buf, const char *fmt, ...)
-#else
-sprintf(buf, fmt, va_alist)
-	char *buf;
-	const char *cfmt;
-	va_dcl
-#endif
 {
 	int retval;
 	va_list ap;
@@ -613,15 +583,7 @@ vsprintf(buf, fmt, ap)
  * snprintf: print a message to a buffer
  */
 int
-#ifdef __STDC__
 snprintf(char *buf, size_t size, const char *fmt, ...)
-#else
-snprintf(buf, size, fmt, va_alist)
-	char *buf;
-	size_t size;
-	const char *cfmt;
-	va_dcl
-#endif
 {
 	int retval;
 	va_list ap;
@@ -746,7 +708,7 @@ vsnprintf(buf, size, fmt, ap)
 	}								\
 }
 
-static int
+int
 kprintf(fmt0, oflags, vp, sbuf, ap)
 	const char *fmt0;
 	int oflags;
@@ -757,7 +719,7 @@ kprintf(fmt0, oflags, vp, sbuf, ap)
 	char *fmt;		/* format string */
 	int ch;			/* character from fmt */
 	int n;			/* handy integer (short term usage) */
-	char *cp;		/* handy char pointer (short term usage) */
+	char *cp = NULL;	/* handy char pointer (short term usage) */
 	int flags;		/* flags as above */
 	int ret;		/* return value accumulator */
 	int width;		/* width from format (%8d), or 0 */
@@ -768,22 +730,16 @@ kprintf(fmt0, oflags, vp, sbuf, ap)
 	enum { OCT, DEC, HEX } base;/* base for [diouxX] conversion */
 	int dprec;		/* a copy of prec if [diouxX], 0 otherwise */
 	int realsz;		/* field size expanded by dprec */
-	int size;		/* size of converted field or string */
-	char *xdigs;		/* digits for [xX] conversion */
+	int size = 0;		/* size of converted field or string */
+	char *xdigs = NULL;	/* digits for [xX] conversion */
 	char buf[KPRINTF_BUFSIZE]; /* space for %c, %[diouxX] */
-	char *tailp;		/* tail pointer for snprintf */
+	char *tailp = NULL;	/* tail pointer for snprintf */
 
-	tailp = NULL;	/* XXX: shutup gcc */
 	if (oflags == TOBUFONLY && (vp != NULL))
 		tailp = *(char **)vp;
 
-	cp = NULL;	/* XXX: shutup gcc */
-	size = 0;	/* XXX: shutup gcc */
-
 	fmt = (char *)fmt0;
 	ret = 0;
-
-	xdigs = NULL;		/* XXX: shut up gcc warning */
 
 	/*
 	 * Scan the format for conversions (`%' character).

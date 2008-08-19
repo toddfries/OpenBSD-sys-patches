@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_gif.c,v 1.21 2001/08/19 06:31:56 angelos Exp $	*/
+/*	$OpenBSD: in_gif.c,v 1.26 2002/08/28 15:43:03 pefo Exp $	*/
 /*	$KAME: in_gif.c,v 1.50 2001/01/22 07:27:16 itojun Exp $	*/
 
 /*
@@ -28,10 +28,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- */
-
-/*
- * in_gif.c
  */
 
 #include <sys/param.h>
@@ -83,12 +79,6 @@ in_gif_output(ifp, family, m, rt)
 	    sin_dst->sin_family != AF_INET) {
 		m_freem(m);
 		return EAFNOSUPPORT;
-	}
-
-	/* multi-destination mode is not supported */
-	if (ifp->if_flags & IFF_LINK0) {
-		m_freem(m);
-		return ENETUNREACH;
 	}
 
 	/* setup dummy tdb.  it highly depends on ipipoutput() code. */
@@ -166,17 +156,11 @@ in_gif_output(ifp, family, m, rt)
 	m_copyback(m, offsetof(struct ip, ip_len), sizeof(u_int16_t),
 		   (caddr_t) &plen);
 
-	return ip_output(m, NULL, NULL, 0, NULL, NULL);
+	return ip_output(m, (void *)NULL, (void *)NULL, 0, (void *)NULL, (void *)NULL);
 }
 
 void
-#if __STDC__
 in_gif_input(struct mbuf *m, ...)
-#else
-in_gif_input(m, va_alist)
-	struct mbuf *m;
-	va_dcl
-#endif
 {
 	int off;
 	struct gif_softc *sc;
@@ -196,29 +180,19 @@ in_gif_input(m, va_alist)
 	ip = mtod(m, struct ip *);
 
 	/* this code will be soon improved. */
-#define	satosin(sa)	((struct sockaddr_in *)(sa))	
+#define	satosin(sa)	((struct sockaddr_in *)(sa))
 	for (i = 0, sc = gif_softc; i < ngif; i++, sc++) {
-		if (sc->gif_psrc == NULL
-		 || sc->gif_pdst == NULL
-		 || sc->gif_psrc->sa_family != AF_INET
-		 || sc->gif_pdst->sa_family != AF_INET) {
+		if (sc->gif_psrc == NULL || sc->gif_pdst == NULL ||
+		    sc->gif_psrc->sa_family != AF_INET ||
+		    sc->gif_pdst->sa_family != AF_INET) {
 			continue;
 		}
 
 		if ((sc->gif_if.if_flags & IFF_UP) == 0)
 			continue;
 
-		if ((sc->gif_if.if_flags & IFF_LINK0)
-		 && satosin(sc->gif_psrc)->sin_addr.s_addr == ip->ip_dst.s_addr
-		 && satosin(sc->gif_pdst)->sin_addr.s_addr == INADDR_ANY) {
-			gifp = &sc->gif_if;
-			continue;
-		}
-
-		if (satosin(sc->gif_psrc)->sin_addr.s_addr ==
-		    ip->ip_dst.s_addr
-		 && satosin(sc->gif_pdst)->sin_addr.s_addr ==
-		    ip->ip_src.s_addr)
+		if (in_hosteq(satosin(sc->gif_psrc)->sin_addr, ip->ip_dst) &&
+		    in_hosteq(satosin(sc->gif_pdst)->sin_addr, ip->ip_src))
 		{
 			gifp = &sc->gif_if;
 			break;

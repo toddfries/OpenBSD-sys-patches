@@ -1,10 +1,10 @@
-/*	$OpenBSD: in_proto.c,v 1.32 2001/08/08 15:07:04 jjbg Exp $	*/
+/*	$OpenBSD: in_proto.c,v 1.35 2002/06/09 16:26:10 itojun Exp $	*/
 /*	$NetBSD: in_proto.c,v 1.14 1996/02/18 18:58:32 christos Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -16,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -63,11 +63,11 @@
  * SUCH DAMAGE.
  *
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
- * 
+ *
  * NRL grants permission for redistribution and use in source and binary
  * forms, with or without modification, of the software and documentation
  * created at NRL provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
@@ -82,7 +82,7 @@
  * 4. Neither the name of the NRL nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THE SOFTWARE PROVIDED BY NRL IS PROVIDED BY NRL AND CONTRIBUTORS ``AS
  * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
@@ -94,7 +94,7 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * The views and conclusions contained in the software and documentation
  * are those of the authors and should not be interpreted as representing
  * official policies, either expressed or implied, of the US Naval
@@ -196,7 +196,7 @@ struct protosw inetsw[] = {
 { SOCK_STREAM,	&inetdomain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS,
   tcp_input,	0,		tcp_ctlinput,	tcp_ctloutput,
   tcp_usrreq,
-  tcp_init,	tcp_fasttimo,	tcp_slowtimo,	tcp_drain,	tcp_sysctl
+  tcp_init,	0,		tcp_slowtimo,	tcp_drain,	tcp_sysctl
 },
 { SOCK_RAW,	&inetdomain,	IPPROTO_RAW,	PR_ATOMIC|PR_ADDR,
   rip_input,	rip_output,	0,		rip_ctloutput,
@@ -206,7 +206,7 @@ struct protosw inetsw[] = {
 { SOCK_RAW,	&inetdomain,	IPPROTO_ICMP,	PR_ATOMIC|PR_ADDR,
   icmp_input,	rip_output,	0,		rip_ctloutput,
   rip_usrreq,
-  0,		0,		0,		0,		icmp_sysctl
+  icmp_init,	0,		0,		0,		icmp_sysctl
 },
 #if NGIF > 0
 { SOCK_RAW,	&inetdomain,	IPPROTO_IPV4,	PR_ATOMIC|PR_ADDR,
@@ -312,7 +312,7 @@ struct protosw inetsw[] = {
 };
 
 struct domain inetdomain =
-    { AF_INET, "internet", 0, 0, 0, 
+    { AF_INET, "internet", 0, 0, 0,
       inetsw, &inetsw[sizeof(inetsw)/sizeof(inetsw[0])], 0,
       rn_inithead, 32, sizeof(struct sockaddr_in) };
 

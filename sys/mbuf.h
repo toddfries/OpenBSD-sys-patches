@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.54 2001/09/12 00:23:33 art Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.66 2002/07/03 21:19:08 miod Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -36,7 +36,7 @@
  *	@(#)mbuf.h	8.5 (Berkeley) 2/19/95
  */
 
-#ifndef M_WAITOK
+#ifndef _SYS_MALLOC_H_
 #include <sys/malloc.h>
 #endif
 #include <sys/pool.h>
@@ -90,8 +90,8 @@ struct	pkthdr {
 /* description of external storage mapped into mbuf, valid if M_EXT set */
 struct m_ext {
 	caddr_t	ext_buf;		/* start of buffer */
-	void	(*ext_free)		/* free routine if not the usual */
-		    __P((caddr_t, u_int, void *));
+					/* free routine if not the usual */
+	void	(*ext_free)(caddr_t, u_int, void *);
 	void	*ext_arg;		/* argument for ext_free */
 	u_int	ext_size;		/* size of buffer, for ext_free */
 	int	ext_type;
@@ -140,13 +140,14 @@ struct mbuf {
 /* mbuf pkthdr flags, also in m_flags */
 #define	M_BCAST		0x0100	/* send/received as link-level broadcast */
 #define	M_MCAST		0x0200	/* send/received as link-level multicast */
-#define M_CONF		0x0400  /* packet was encrypted (ESP-transport) */
-#define M_AUTH		0x0800  /* packet was authenticated (AH) */
-#define M_COMP		0x1000  /* packet was compressed (IPCOMP) */
+#define M_CONF		0x0400  /* payload was encrypted (ESP-transport) */
+#define M_AUTH		0x0800  /* payload was authenticated (AH or ESP auth) */
+#define M_COMP		0x1000  /* payload was compressed (IPCOMP) */
+#define M_AUTH_AH	0x2000  /* header was authenticated (AH) */
 
 /* Checksumming flags */
 #define	M_IPV4_CSUM_OUT		0x0001	/* IPv4 checksum needed */
-#define M_TCPV4_CSUM_OUT	0x2002	/* TCP checksum needed */
+#define M_TCPV4_CSUM_OUT	0x0002	/* TCP checksum needed */
 #define	M_UDPV4_CSUM_OUT	0x0004	/* UDP checksum needed */
 #define	M_IPV4_CSUM_IN_OK	0x0008	/* IPv4 checksum verified */
 #define	M_IPV4_CSUM_IN_BAD	0x0010	/* IPv4 checksum bad */
@@ -201,7 +202,10 @@ struct mbuf {
  * and internal data.
  */
 #define	_MGET(m, how, type) do { \
-	MBUFLOCK((m) = pool_get(&mbpool, (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);); \
+	MBUFLOCK( \
+	    	(m) = pool_get(&mbpool, \
+		    (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0); \
+	); \
 	if (m) { \
 		(m)->m_type = (type); \
 		MBUFLOCK(mbstat.m_mtypes[type]++;) \
@@ -209,8 +213,7 @@ struct mbuf {
 		(m)->m_nextpkt = (struct mbuf *)NULL; \
 		(m)->m_data = (m)->m_dat; \
 		(m)->m_flags = 0; \
-	} else \
-		(m) = m_retry((how), (type)); \
+	} \
 } while(/* CONSTCOND */ 0)
 
 #ifdef SMALL_KERNEL
@@ -221,7 +224,10 @@ struct mbuf *_sk_mget(int, int);
 #endif
 
 #define	_MGETHDR(m, how, type) do { \
-	MBUFLOCK((m) = pool_get(&mbpool, (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);); \
+	MBUFLOCK( \
+		(m) = pool_get(&mbpool, \
+		    (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0); \
+	); \
 	if (m) { \
 		(m)->m_type = (type); \
 		MBUFLOCK(mbstat.m_mtypes[type]++;) \
@@ -231,8 +237,7 @@ struct mbuf *_sk_mget(int, int);
 		(m)->m_flags = M_PKTHDR; \
 		SLIST_INIT(&(m)->m_pkthdr.tags); \
 		(m)->m_pkthdr.csum = 0; \
-	} else \
-		(m) = m_retryhdr((how), (type)); \
+	} \
 } while (/* CONSTCOND */ 0)
 
 #ifdef SMALL_KERNEL
@@ -300,15 +305,8 @@ struct mbuf *_sk_mgethdr(int, int);
  */
 #define	_MCLGET(m, how) do { \
 	MBUFLOCK( \
-		(m)->m_ext.ext_buf = \
-		    pool_get(&mclpool, (how) == M_WAIT ? \
+		(m)->m_ext.ext_buf = pool_get(&mclpool, (how) == M_WAIT ? \
 		    (PR_WAITOK|PR_LIMITFAIL) : 0); \
-		if ((m)->m_ext.ext_buf == NULL) { \
-			m_reclaim(); \
-			(m)->m_ext.ext_buf = \
-			    pool_get(&mclpool, \
-			    (how) == M_WAIT ? PR_WAITOK : 0); \
-		} \
 	); \
 	if ((m)->m_ext.ext_buf != NULL) { \
 		(m)->m_data = (m)->m_ext.ext_buf; \
@@ -511,7 +509,7 @@ void _sk_mclget(struct mbuf *, int);
 /* length to m_copy to copy all */
 #define	M_COPYALL	1000000000
 
-/* compatiblity with 4.3 */
+/* compatibility with 4.3 */
 #define  m_copy(m, o, l)	m_copym((m), (o), (l), M_DONTWAIT)
 
 /*
@@ -532,62 +530,57 @@ struct mbstat {
 
 #ifdef	_KERNEL
 struct	mbstat mbstat;
-extern	int nmbclusters;		/* limit on the # of clusters */
+extern	int nmbclust;			/* limit on the # of clusters */
 extern	int mblowat;			/* mbuf low water mark */
 extern	int mcllowat;			/* mbuf cluster low water mark */
-int	max_linkhdr;			/* largest link-level header */
-int	max_protohdr;			/* largest protocol header */
-int	max_hdr;			/* largest link+protocol header */
-int	max_datalen;			/* MHLEN - max_hdr */
+extern	int max_linkhdr;		/* largest link-level header */
+extern	int max_protohdr;		/* largest protocol header */
+extern	int max_hdr;			/* largest link+protocol header */
+extern	int max_datalen;		/* MHLEN - max_hdr */
 extern	int mbtypes[];			/* XXX */
-extern	int needqueuedrain;		/* True if allocation failed at */
-					/* interrupt level */
 extern struct pool mbpool;
 extern struct pool mclpool;
 
-void	mbinit __P((void));
-struct	mbuf *m_copym2 __P((struct mbuf *, int, int, int));
-struct	mbuf *m_copym __P((struct mbuf *, int, int, int));
-struct	mbuf *m_free __P((struct mbuf *));
-struct	mbuf *m_get __P((int, int));
-struct	mbuf *m_getclr __P((int, int));
-struct	mbuf *m_gethdr __P((int, int));
-struct	mbuf *m_prepend __P((struct mbuf *, int, int));
-struct	mbuf *m_pulldown __P((struct mbuf *, int, int, int *));
-struct	mbuf *m_pullup __P((struct mbuf *, int));
-struct	mbuf *m_pullup2 __P((struct mbuf *, int));
-struct	mbuf *m_retry __P((int, int));
-struct	mbuf *m_retryhdr __P((int, int));
-struct	mbuf *m_split __P((struct mbuf *, int, int));
-struct  mbuf *m_inject __P((struct mbuf *, int, int, int));
-struct  mbuf *m_getptr __P((struct mbuf *, int, int *));
-void	m_adj __P((struct mbuf *, int));
-int	m_clalloc __P((int, int));
-void	m_copyback __P((struct mbuf *, int, int, caddr_t));
-void	m_freem __P((struct mbuf *));
-void	m_reclaim __P((void));
-void	m_copydata __P((struct mbuf *, int, int, caddr_t));
-void	m_cat __P((struct mbuf *, struct mbuf *));
-struct mbuf *m_devget __P((char *, int, int, struct ifnet *,
-	    void (*) __P((const void *, void *, size_t))));
-void	m_zero __P((struct mbuf *));
-int	m_apply __P((struct mbuf *, int, int,
-	    int (*)(caddr_t, caddr_t, unsigned int), caddr_t));
-void	mbinit __P((void));
+void	mbinit(void);
+struct	mbuf *m_copym2(struct mbuf *, int, int, int);
+struct	mbuf *m_copym(struct mbuf *, int, int, int);
+struct	mbuf *m_free(struct mbuf *);
+struct	mbuf *m_get(int, int);
+struct	mbuf *m_getclr(int, int);
+struct	mbuf *m_gethdr(int, int);
+struct	mbuf *m_prepend(struct mbuf *, int, int);
+struct	mbuf *m_pulldown(struct mbuf *, int, int, int *);
+struct	mbuf *m_pullup(struct mbuf *, int);
+struct	mbuf *m_pullup2(struct mbuf *, int);
+struct	mbuf *m_split(struct mbuf *, int, int);
+struct  mbuf *m_inject(struct mbuf *, int, int, int);
+struct  mbuf *m_getptr(struct mbuf *, int, int *);
+void	m_adj(struct mbuf *, int);
+int	m_clalloc(int, int);
+void	m_copyback(struct mbuf *, int, int, caddr_t);
+void	m_freem(struct mbuf *);
+void	m_reclaim(void *, int);
+void	m_copydata(struct mbuf *, int, int, caddr_t);
+void	m_cat(struct mbuf *, struct mbuf *);
+struct mbuf *m_devget(char *, int, int, struct ifnet *,
+	    void (*)(const void *, void *, size_t));
+void	m_zero(struct mbuf *);
+int	m_apply(struct mbuf *, int, int,
+	    int (*)(caddr_t, caddr_t, unsigned int), caddr_t);
 
 /* Packet tag routines */
-struct m_tag *m_tag_get __P((int, int, int));
-void	m_tag_free __P((struct m_tag *));
-void	m_tag_prepend __P((struct mbuf *, struct m_tag *));
-void	m_tag_unlink __P((struct mbuf *, struct m_tag *));
-void	m_tag_delete __P((struct mbuf *, struct m_tag *));
-void	m_tag_delete_chain __P((struct mbuf *, struct m_tag *));
-struct m_tag *m_tag_find __P((struct mbuf *, int, struct m_tag *));
-struct m_tag *m_tag_copy __P((struct m_tag *));
-int	m_tag_copy_chain __P((struct mbuf *, struct mbuf *));
-void	m_tag_init __P((struct mbuf *));
-struct m_tag *m_tag_first __P((struct mbuf *));
-struct m_tag *m_tag_next __P((struct mbuf *, struct m_tag *));
+struct m_tag *m_tag_get(int, int, int);
+void	m_tag_free(struct m_tag *);
+void	m_tag_prepend(struct mbuf *, struct m_tag *);
+void	m_tag_unlink(struct mbuf *, struct m_tag *);
+void	m_tag_delete(struct mbuf *, struct m_tag *);
+void	m_tag_delete_chain(struct mbuf *, struct m_tag *);
+struct m_tag *m_tag_find(struct mbuf *, int, struct m_tag *);
+struct m_tag *m_tag_copy(struct m_tag *);
+int	m_tag_copy_chain(struct mbuf *, struct mbuf *);
+void	m_tag_init(struct mbuf *);
+struct m_tag *m_tag_first(struct mbuf *);
+struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 
 /* Packet tag types */
 #define PACKET_TAG_NONE				0  /* Nadda */
@@ -602,6 +595,8 @@ struct m_tag *m_tag_next __P((struct mbuf *, struct m_tag *));
 #define PACKET_TAG_GRE				9  /* GRE processing done */
 #define PACKET_TAG_IN_PACKET_CHECKSUM		10 /* NIC checksumming done */
 #define PACKET_TAG_PF_GENERATED			11 /* PF generated, pass always */
+#define PACKET_TAG_PF_ROUTED			12 /* PF routed, no route loops */
+#define PACKET_TAG_PF_FRAGCACHE			13 /* PF fragment cached */
 
 #ifdef MBTYPES
 int mbtypes[] = {				/* XXX */

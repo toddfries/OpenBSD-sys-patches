@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.35 2001/09/11 20:05:25 miod Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.42 2002/05/16 16:16:51 provos Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -43,7 +43,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/map.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
@@ -72,16 +71,17 @@
 #include <sys/sem.h>
 #endif
 
+#include "systrace.h"
+#include <dev/systrace.h>
+
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
 #include <machine/cpu.h>
 
-#include <vm/vm.h>
-
 #include <uvm/uvm_extern.h>
 
-void proc_zap __P((struct proc *));
+void proc_zap(struct proc *);
 
 /*
  * exit --
@@ -121,8 +121,7 @@ exit1(p, rv)
 
 	if (p->p_flag & P_PROFIL)
 		stopprofclock(p);
-	MALLOC(p->p_ru, struct rusage *, sizeof(struct rusage),
-		M_ZOMBIE, M_WAITOK);
+	p->p_ru = pool_get(&rusage_pool, PR_WAITOK);
 	/*
 	 * If parent is waiting for us to exit or exec, P_PPWAIT is set; we
 	 * wake up the parent early to avoid deadlock.
@@ -145,10 +144,6 @@ exit1(p, rv)
 
 	/* The next three chunks should probably be moved to vmspace_exit. */
 	vm = p->p_vmspace;
-#ifdef SYSVSHM
-	if (vm->vm_shm && vm->vm_refcnt == 1)
-		shmexit(vm);
-#endif
 #ifdef SYSVSEM
 	semexit(p);
 #endif
@@ -205,6 +200,10 @@ exit1(p, rv)
 	p->p_traceflag = 0;	/* don't trace the vrele() */
 	if (p->p_tracep)
 		ktrsettracevnode(p, NULL);
+#endif
+#if NSYSTRACE > 0
+	if (ISSET(p->p_flag, P_SYSTRACE))
+		systrace_exit(p);
 #endif
 	/*
 	 * NOTE: WE ARE NO LONGER ALLOWED TO SLEEP!
@@ -524,7 +523,7 @@ proc_zap(p)
 	struct proc *p;
 {
 
-	FREE(p->p_ru, M_ZOMBIE);
+	pool_put(&rusage_pool, p->p_ru);
 
 	/*
 	 * Finally finished with old proc entry.
@@ -544,7 +543,7 @@ proc_zap(p)
 	 */
 	if (--p->p_cred->p_refcnt == 0) {
 		crfree(p->p_cred->pc_ucred);
-		FREE(p->p_cred, M_SUBPROC);
+		pool_put(&pcred_pool, p->p_cred);
 	}
 
 	/*

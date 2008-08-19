@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.22 2001/06/25 03:28:09 csapuntz Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.31 2002/08/01 22:38:44 csapuntz Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -136,16 +136,20 @@ static int nfs_backoff[8] = { 2, 4, 8, 16, 32, 64, 128, 256, };
 int nfsrtton = 0;
 struct nfsrtt nfsrtt;
 
+void nfs_realign(struct mbuf **, int);
+unsigned int nfs_realign_test = 0;
+unsigned int nfs_realign_count = 0;
+
 /*
  * Initialize sockets and congestion for a new NFS connection.
  * We do not free the sockaddr if error.
  */
 int
 nfs_connect(nmp, rep)
-	register struct nfsmount *nmp;
+	struct nfsmount *nmp;
 	struct nfsreq *rep;
 {
-	register struct socket *so;
+	struct socket *so;
 	int s, error, rcvreserve, sndreserve;
 	struct sockaddr *saddr;
 	struct sockaddr_in *sin;
@@ -303,10 +307,10 @@ bad:
  */
 int
 nfs_reconnect(rep)
-	register struct nfsreq *rep;
+	struct nfsreq *rep;
 {
-	register struct nfsreq *rp;
-	register struct nfsmount *nmp = rep->r_nmp;
+	struct nfsreq *rp;
+	struct nfsmount *nmp = rep->r_nmp;
 	int error;
 
 	nfs_disconnect(nmp);
@@ -320,7 +324,8 @@ nfs_reconnect(rep)
 	 * Loop through outstanding request list and fix up all requests
 	 * on old socket.
 	 */
-	for (rp = nfs_reqq.tqh_first; rp != 0; rp = rp->r_chain.tqe_next) {
+	for (rp = TAILQ_FIRST(&nfs_reqq); rp != NULL;
+	    rp = TAILQ_NEXT(rp, r_chain)) {
 		if (rp->r_nmp == nmp)
 			rp->r_flags |= R_MUSTRESEND;
 	}
@@ -332,9 +337,9 @@ nfs_reconnect(rep)
  */
 void
 nfs_disconnect(nmp)
-	register struct nfsmount *nmp;
+	struct nfsmount *nmp;
 {
-	register struct socket *so;
+	struct socket *so;
 
 	if (nmp->nm_so) {
 		so = nmp->nm_so;
@@ -359,9 +364,9 @@ nfs_disconnect(nmp)
  */
 int
 nfs_send(so, nam, top, rep)
-	register struct socket *so;
+	struct socket *so;
 	struct mbuf *nam;
-	register struct mbuf *top;
+	struct mbuf *top;
 	struct nfsreq *rep;
 {
 	struct mbuf *sendnam;
@@ -428,14 +433,14 @@ nfs_send(so, nam, top, rep)
  */
 int
 nfs_receive(rep, aname, mp)
-	register struct nfsreq *rep;
+	struct nfsreq *rep;
 	struct mbuf **aname;
 	struct mbuf **mp;
 {
-	register struct socket *so;
+	struct socket *so;
 	struct uio auio;
 	struct iovec aio;
-	register struct mbuf *m;
+	struct mbuf *m;
 	struct mbuf *control;
 	u_int32_t len;
 	struct mbuf **getnam;
@@ -527,6 +532,7 @@ tryagain:
 			}
 			if (error)
 				goto errout;
+
 			len = ntohl(len) & ~0x80000000;
 			/*
 			 * This is SERIOUS! We are out of sync with the sender
@@ -627,7 +633,7 @@ errout:
 	 * These could cause pointer alignment problems, so copy them to
 	 * well aligned mbufs.
 	 */
-	nfs_realign(*mp, 5 * NFSX_UNSIGNED);
+	nfs_realign(mp, 5 * NFSX_UNSIGNED);
 	return (error);
 }
 
@@ -641,9 +647,9 @@ int
 nfs_reply(myrep)
 	struct nfsreq *myrep;
 {
-	register struct nfsreq *rep;
-	register struct nfsmount *nmp = myrep->r_nmp;
-	register int32_t t1;
+	struct nfsreq *rep;
+	struct nfsmount *nmp = myrep->r_nmp;
+	int32_t t1;
 	struct mbuf *mrep, *nam, *md;
 	u_int32_t rxid, *tl;
 	caddr_t dpos, cp2;
@@ -708,8 +714,8 @@ nfsmout:
 		 * Loop through the request list to match up the reply
 		 * Iff no match, just drop the datagram
 		 */
-		for (rep = nfs_reqq.tqh_first; rep != 0;
-		    rep = rep->r_chain.tqe_next) {
+		for (rep = TAILQ_FIRST(&nfs_reqq); rep != NULL;
+		    rep = TAILQ_NEXT(rep, r_chain)) {
 			if (rep->r_mrep == NULL && rxid == rep->r_xid) {
 				/* Found it.. */
 				rep->r_mrep = mrep;
@@ -810,10 +816,10 @@ nfs_request(vp, mrest, procnum, procp, cred, mrp, mdp, dposp)
 	struct mbuf **mdp;
 	caddr_t *dposp;
 {
-	register struct mbuf *m, *mrep;
-	register struct nfsreq *rep;
-	register u_int32_t *tl;
-	register int i;
+	struct mbuf *m, *mrep;
+	struct nfsreq *rep;
+	u_int32_t *tl;
+	int i;
 	struct nfsmount *nmp;
 	struct mbuf *md, *mheadend;
 	char nickv[RPCX_NICKVERF];
@@ -1065,19 +1071,18 @@ nfsmout:
  * siz arg. is used to decide if adding a cluster is worthwhile
  */
 int
-nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
+nfs_rephead(siz, nd, slp, err, frev, mrq, mbp, bposp)
 	int siz;
 	struct nfsrv_descript *nd;
 	struct nfssvc_sock *slp;
 	int err;
-	int cache;
 	u_quad_t *frev;
 	struct mbuf **mrq;
 	struct mbuf **mbp;
 	caddr_t *bposp;
 {
-	register u_int32_t *tl;
-	register struct mbuf *mreq;
+	u_int32_t *tl;
+	struct mbuf *mreq;
 	caddr_t bpos;
 	struct mbuf *mb, *mb2;
 
@@ -1117,11 +1122,11 @@ nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
 		 * verifier back, otherwise just RPCAUTH_NULL.
 		 */
 		if (nd->nd_flag & ND_KERBFULL) {
-		    register struct nfsuid *nuidp;
+		    struct nfsuid *nuidp;
 		    struct timeval ktvin, ktvout;
 
 		    for (nuidp = NUIDHASH(slp, nd->nd_cr.cr_uid)->lh_first;
-			nuidp != 0; nuidp = nuidp->nu_hash.le_next) {
+		 	nuidp != NULL; nuidp = LIST_NEXT(nuidp, nu_hash)) {
 			if (nuidp->nu_cr.cr_uid == nd->nd_cr.cr_uid &&
 			    (!nd->nd_nam2 || netaddr_match(NU_NETFAM(nuidp),
 			     &nuidp->nu_haddr, nd->nd_nam2)))
@@ -1132,14 +1137,6 @@ nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
 			    txdr_unsigned(nuidp->nu_timestamp.tv_sec - 1);
 			ktvin.tv_usec =
 			    txdr_unsigned(nuidp->nu_timestamp.tv_usec);
-
-			/*
-			 * Encrypt the timestamp in ecb mode using the
-			 * session key.
-			 */
-#ifdef NFSKERB
-			XXX
-#endif
 
 			*tl++ = rpc_auth_kerb;
 			*tl++ = txdr_unsigned(3 * NFSX_UNSIGNED);
@@ -1185,7 +1182,7 @@ nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
 	}
 
 	*mrq = mreq;
-	if (mrq != NULL)
+	if (mbp != NULL)
 		*mbp = mb;
 	*bposp = bpos;
 	if (err != 0 && err != NFSERR_RETVOID)
@@ -1216,7 +1213,8 @@ nfs_timer(arg)
 #endif
 
 	s = splsoftnet();
-	for (rep = nfs_reqq.tqh_first; rep != 0; rep = rep->r_chain.tqe_next) {
+	for (rep = TAILQ_FIRST(&nfs_reqq); rep != NULL;
+	    rep = TAILQ_NEXT(rep, r_chain)) {
 		nmp = rep->r_nmp;
 		if (rep->r_mrep || (rep->r_flags & R_SOFTTERM))
 			continue;
@@ -1309,9 +1307,10 @@ nfs_timer(arg)
 	 * completed now.
 	 */
 	cur_usec = (u_quad_t)time.tv_sec * 1000000 + (u_quad_t)time.tv_usec;
-	for (slp = nfssvc_sockhead.tqh_first; slp != 0;
-	    slp = slp->ns_chain.tqe_next) {
-	    if (slp->ns_tq.lh_first && slp->ns_tq.lh_first->nd_time<=cur_usec)
+	for (slp = TAILQ_FIRST(&nfssvc_sockhead); slp != NULL;
+	    slp = TAILQ_NEXT(slp, ns_chain)) {
+	    if (LIST_FIRST(&slp->ns_tq) &&
+	        LIST_FIRST(&slp->ns_tq)->nd_time <= cur_usec)
 		nfsrv_wakenfsd(slp);
 	}
 #endif /* NFSSERVER */
@@ -1327,7 +1326,7 @@ int
 nfs_sigintr(nmp, rep, p)
 	struct nfsmount *nmp;
 	struct nfsreq *rep;
-	register struct proc *p;
+	struct proc *p;
 {
 
 	if (rep && (rep->r_flags & R_SOFTTERM))
@@ -1349,7 +1348,7 @@ nfs_sigintr(nmp, rep, p)
  */
 int
 nfs_sndlock(flagp, rep)
-	register int *flagp;
+	int *flagp;
 	struct nfsreq *rep;
 {
 	struct proc *p;
@@ -1381,7 +1380,7 @@ nfs_sndlock(flagp, rep)
  */
 void
 nfs_sndunlock(flagp)
-	register int *flagp;
+	int *flagp;
 {
 
 	if ((*flagp & NFSMNT_SNDLOCK) == 0)
@@ -1395,9 +1394,9 @@ nfs_sndunlock(flagp)
 
 int
 nfs_rcvlock(rep)
-	register struct nfsreq *rep;
+	struct nfsreq *rep;
 {
-	register int *flagp = &rep->r_nmp->nm_flag;
+	int *flagp = &rep->r_nmp->nm_flag;
 	int slpflag, slptimeo = 0;
 
 	if (*flagp & NFSMNT_INT)
@@ -1424,7 +1423,7 @@ nfs_rcvlock(rep)
  */
 void
 nfs_rcvunlock(flagp)
-	register int *flagp;
+	int *flagp;
 {
 
 	if ((*flagp & NFSMNT_RCVLOCK) == 0)
@@ -1437,96 +1436,43 @@ nfs_rcvunlock(flagp)
 }
 
 /*
- * Check for badly aligned mbuf data areas and
- * realign data in an mbuf list by copying the data areas up, as required.
+ *  NFS parsing code requires 32-bit alignment
  */
 void
-nfs_realign(m, hsiz)
-	register struct mbuf *m;
-	int hsiz;
+nfs_realign(struct mbuf **pm, int hsiz)
 {
-	register struct mbuf *m2;
-	register int siz, mlen, olen;
-	register caddr_t tcp, fcp;
-	struct mbuf *mnew;
+	struct mbuf *m;
+	struct mbuf *n = NULL;
+	int off = 0;
 
-	while (m) {
-	    /*
-	     * This never happens for UDP, rarely happens for TCP
-	     * but frequently happens for iso transport.
-	     */
-	    if ((m->m_len & 0x3) || (mtod(m, long) & 0x3)) {
-		olen = m->m_len;
-		fcp = mtod(m, caddr_t);
-		if ((long)fcp & 0x3) {
-		        if (m->m_flags & M_PKTHDR)
-				m_tag_delete_chain(m, NULL);
-			m->m_flags &= ~M_PKTHDR;
-			if (m->m_flags & M_EXT)
-				m->m_data = m->m_ext.ext_buf +
-					((m->m_ext.ext_size - olen) & ~0x3);
-			else
-				m->m_data = m->m_dat;
+	++nfs_realign_test;
+	while ((m = *pm) != NULL) {
+		if ((m->m_len & 0x3) || (mtod(m, long) & 0x3)) {
+			MGET(n, M_WAIT, MT_DATA);
+			if (m->m_len >= MINCLSIZE) {
+				MCLGET(n, M_WAIT);
+			}
+			n->m_len = 0;
+			break;
 		}
-		m->m_len = 0;
-		tcp = mtod(m, caddr_t);
-		mnew = m;
-		m2 = m->m_next;
-	
-		/*
-		 * If possible, only put the first invariant part
-		 * of the RPC header in the first mbuf.
-		 */
-		mlen = M_TRAILINGSPACE(m);
-		if (olen <= hsiz && mlen > hsiz)
-			mlen = hsiz;
-	
-		/* Loop through the mbuf list consolidating data. */
+		pm = &m->m_next;
+	}
+	/*
+	 * If n is non-NULL, loop on m copying data, then replace the
+	 * portion of the chain that had to be realigned.
+	 */
+	if (n != NULL) {
+		++nfs_realign_count;
 		while (m) {
-			while (olen > 0) {
-				if (mlen == 0) {
-				        if (m2->m_flags & M_PKTHDR)
-						m_tag_delete_chain(m2, NULL);
-					m2->m_flags &= ~M_PKTHDR;
-					if (m2->m_flags & M_EXT)
-						m2->m_data = m2->m_ext.ext_buf;
-					else
-						m2->m_data = m2->m_dat;
-					m2->m_len = 0;
-					mlen = M_TRAILINGSPACE(m2);
-					tcp = mtod(m2, caddr_t);
-					mnew = m2;
-					m2 = m2->m_next;
-				}
-				siz = min(mlen, olen);
-				if (tcp != fcp)
-					bcopy(fcp, tcp, siz);
-				mnew->m_len += siz;
-				mlen -= siz;
-				olen -= siz;
-				tcp += siz;
-				fcp += siz;
-			}
+			m_copyback(n, off, m->m_len, mtod(m, caddr_t));
+			off += m->m_len;
 			m = m->m_next;
-			if (m) {
-				olen = m->m_len;
-				fcp = mtod(m, caddr_t);
-			}
 		}
-	
-		/*
-		 * Finally, set m_len == 0 for any trailing mbufs that have
-		 * been copied out of.
-		 */
-		while (m2) {
-			m2->m_len = 0;
-			m2 = m2->m_next;
-		}
-		return;
-	    }
-	    m = m->m_next;
+		m_freem(*pm);
+		*pm = n;
 	}
 }
+
 
 /*
  * Parse an RPC request
@@ -1535,13 +1481,13 @@ nfs_realign(m, hsiz)
  */
 int
 nfs_getreq(nd, nfsd, has_header)
-	register struct nfsrv_descript *nd;
+	struct nfsrv_descript *nd;
 	struct nfsd *nfsd;
 	int has_header;
 {
-	register int len, i;
-	register u_int32_t *tl;
-	register int32_t t1;
+	int len, i;
+	u_int32_t *tl;
+	int32_t t1;
 	struct uio uio;
 	struct iovec iov;
 	caddr_t dpos, cp2, cp;
@@ -1549,7 +1495,7 @@ nfs_getreq(nd, nfsd, has_header)
 	uid_t nickuid;
 	int error = 0, ticklen;
 	struct mbuf *mrep, *md;
-	register struct nfsuid *nuidp;
+	struct nfsuid *nuidp;
 	struct timeval tvin, tvout;
 
 	mrep = nd->nd_mrep;
@@ -1702,7 +1648,7 @@ nfs_getreq(nd, nfsd, has_header)
 			tvin.tv_usec = *tl;
 
 			for (nuidp = NUIDHASH(nfsd->nfsd_slp,nickuid)->lh_first;
-			    nuidp != 0; nuidp = nuidp->nu_hash.le_next) {
+			    nuidp != NULL; nuidp = LIST_NEXT(nuidp, nu_hash)) {
 				if (nuidp->nu_cr.cr_uid == nickuid &&
 				    (!nd->nd_nam2 ||
 				     netaddr_match(NU_NETFAM(nuidp),
@@ -1715,14 +1661,6 @@ nfs_getreq(nd, nfsd, has_header)
 				nd->nd_procnum = NFSPROC_NOOP;
 				return (0);
 			}
-
-			/*
-			 * Now, decrypt the timestamp using the session key
-			 * and validate it.
-			 */
-#ifdef NFSKERB
-			XXX
-#endif
 
 			tvout.tv_sec = fxdr_unsigned(long, tvout.tv_sec);
 			tvout.tv_usec = fxdr_unsigned(long, tvout.tv_usec);
@@ -1769,9 +1707,9 @@ nfs_msg(p, server, msg)
 }
 
 #ifdef NFSSERVER
-int (*nfsrv3_procs[NFS_NPROCS]) __P((struct nfsrv_descript *,
+int (*nfsrv3_procs[NFS_NPROCS])(struct nfsrv_descript *,
 				    struct nfssvc_sock *, struct proc *,
-				    struct mbuf **)) = {
+				    struct mbuf **) = {
 	nfsrv_null,
 	nfsrv_getattr,
 	nfsrv_setattr,
@@ -1812,8 +1750,8 @@ nfsrv_rcv(so, arg, waitflag)
 	caddr_t arg;
 	int waitflag;
 {
-	register struct nfssvc_sock *slp = (struct nfssvc_sock *)arg;
-	register struct mbuf *m;
+	struct nfssvc_sock *slp = (struct nfssvc_sock *)arg;
+	struct mbuf *m;
 	struct mbuf *mp, *nam;
 	struct uio auio;
 	int flags, error;
@@ -1882,7 +1820,6 @@ nfsrv_rcv(so, arg, waitflag)
 			error = soreceive(so, &nam, &auio, &mp,
 						(struct mbuf **)0, &flags);
 			if (mp) {
-				nfs_realign(mp, 10 * NFSX_UNSIGNED);
 				if (nam) {
 					m = nam;
 					m->m_next = mp;
@@ -1921,13 +1858,13 @@ dorecs:
  */
 int
 nfsrv_getstream(slp, waitflag)
-	register struct nfssvc_sock *slp;
+	struct nfssvc_sock *slp;
 	int waitflag;
 {
-	register struct mbuf *m, **mpp;
-	register char *cp1, *cp2;
-	register int len;
-	struct mbuf *om, *m2, *recm = NULL;
+	struct mbuf *m, **mpp;
+	char *cp1, *cp2;
+	int len;
+	struct mbuf *om, *m2, *recm;
 	u_int32_t recmark;
 
 	if (slp->ns_flag & SLP_GETSTREAM)
@@ -1973,6 +1910,7 @@ nfsrv_getstream(slp, waitflag)
 	    /*
 	     * Now get the record part.
 	     */
+	    recm = NULL;
 	    if (slp->ns_cc == slp->ns_reclen) {
 		recm = slp->ns_raw;
 		slp->ns_raw = slp->ns_rawend = (struct mbuf *)0;
@@ -2026,7 +1964,6 @@ nfsrv_getstream(slp, waitflag)
 		mpp = &((*mpp)->m_next);
 	    *mpp = recm;
 	    if (slp->ns_flag & SLP_LASTFRAG) {
-		nfs_realign(slp->ns_frag, 10 * NFSX_UNSIGNED);
 		if (slp->ns_recend)
 		    slp->ns_recend->m_nextpkt = slp->ns_frag;
 		else
@@ -2042,12 +1979,12 @@ nfsrv_getstream(slp, waitflag)
  */
 int
 nfsrv_dorec(slp, nfsd, ndp)
-	register struct nfssvc_sock *slp;
+	struct nfssvc_sock *slp;
 	struct nfsd *nfsd;
 	struct nfsrv_descript **ndp;
 {
-	register struct mbuf *m, *nam;
-	register struct nfsrv_descript *nd;
+	struct mbuf *m, *nam;
+	struct nfsrv_descript *nd;
 	int error;
 
 	*ndp = NULL;
@@ -2067,6 +2004,7 @@ nfsrv_dorec(slp, nfsd, ndp)
 		nam = NULL;
 	MALLOC(nd, struct nfsrv_descript *, sizeof (struct nfsrv_descript),
 		M_NFSRVDESC, M_WAITOK);
+	nfs_realign(&m, 10 * NFSX_UNSIGNED);
 	nd->nd_md = nd->nd_mrep = m;
 	nd->nd_nam2 = nam;
 	nd->nd_dpos = mtod(m, caddr_t);
@@ -2091,11 +2029,12 @@ void
 nfsrv_wakenfsd(slp)
 	struct nfssvc_sock *slp;
 {
-	register struct nfsd *nd;
+	struct nfsd *nd;
 
 	if ((slp->ns_flag & SLP_VALID) == 0)
 		return;
-	for (nd = nfsd_head.tqh_first; nd != 0; nd = nd->nfsd_chain.tqe_next) {
+	for (nd = TAILQ_FIRST(&nfsd_head); nd != NULL;
+	    nd = TAILQ_NEXT(nd, nfsd_chain)) {
 		if (nd->nfsd_flag & NFSD_WAITING) {
 			nd->nfsd_flag &= ~NFSD_WAITING;
 			if (nd->nfsd_slp)

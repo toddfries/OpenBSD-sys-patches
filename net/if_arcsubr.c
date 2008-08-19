@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_arcsubr.c,v 1.7 2001/06/15 03:38:33 itojun Exp $	*/
+/*	$OpenBSD: if_arcsubr.c,v 1.13 2002/09/15 16:02:13 niklas Exp $	*/
 /*	$NetBSD: if_arcsubr.c,v 1.8 1996/05/07 02:40:29 thorpej Exp $	*/
 
 /*
@@ -68,7 +68,7 @@
 #define	ARC_PHDSMTU	1500
 #endif
 
-static struct mbuf *arc_defrag __P((struct ifnet *, struct mbuf *));
+static struct mbuf *arc_defrag(struct ifnet *, struct mbuf *);
 
 /*
  * RC1201 requires us to have this configurable. We have it only per 
@@ -101,12 +101,13 @@ arc_output(ifp, m0, dst, rt0)
 	struct rtentry		*rt;
 	struct arccom		*ac;
 	register struct arc_header *ah;
-	int			s, error, newencoding;
+	int			s, error, newencoding, len;
 	u_int8_t		atype, adst;
 	int			tfrags, sflag, fsflag, rsflag;
+	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) 
-		return(ENETDOWN); /* m, m1 aren't initialized yet */
+		return (ENETDOWN); /* m, m1 aren't initialized yet */
 
 	error = newencoding = 0;
 	ac = (struct arccom *)ifp;
@@ -135,6 +136,12 @@ arc_output(ifp, m0, dst, rt0)
 			    time.tv_sec < rt->rt_rmx.rmx_expire)
 				senderr(rt == rt0 ? EHOSTDOWN : EHOSTUNREACH);
 	}
+
+	/*
+	 * if the queueing discipline needs packet classification,
+	 * do it before prepending link headers.
+	 */
+	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family, &pktattr);
 
 	switch (dst->sa_family) {
 #ifdef INET
@@ -209,18 +216,19 @@ arc_output(ifp, m0, dst, rt0)
 			ah->arc_flag = rsflag;
 			ah->arc_seqid = ac->ac_seqid;
 
+			len = m->m_pkthdr.len;
 			s = splimp();
 			/*
 			 * Queue message on interface, and start output if 
 			 * interface not yet active.
 			 */
-			if (IF_QFULL(&ifp->if_snd)) {
-				IF_DROP(&ifp->if_snd);
+			IFQ_ENQUEUE(&ifp->if_snd, m, &pktattr, error);
+			if (error) {
+				/* mbuf is already freed */
 				splx(s);
-				senderr(ENOBUFS);
+				return (error);
 			}
-			ifp->if_obytes += m->m_pkthdr.len;
-			IF_ENQUEUE(&ifp->if_snd, m);
+			ifp->if_obytes += len;
 			if ((ifp->if_flags & IFF_OACTIVE) == 0)
 				(*ifp->if_start)(ifp);
 			splx(s);
@@ -267,18 +275,19 @@ arc_output(ifp, m0, dst, rt0)
 		ah->arc_shost = ac->ac_anaddr;
 	}
 
+	len = m->m_pkthdr.len;
 	s = splimp();
 	/*
 	 * Queue message on interface, and start output if interface
 	 * not yet active.
 	 */
-	if (IF_QFULL(&ifp->if_snd)) {
-		IF_DROP(&ifp->if_snd);
+	IFQ_ENQUEUE(&ifp->if_snd, m, &pktattr, error);
+	if (error) {
+		/* mbuf is already freed */
 		splx(s);
-		senderr(ENOBUFS);
+		return (error);
 	}
-	ifp->if_obytes += m->m_pkthdr.len;
-	IF_ENQUEUE(&ifp->if_snd, m);
+	ifp->if_obytes += len;
 	if ((ifp->if_flags & IFF_OACTIVE) == 0)
 		(*ifp->if_start)(ifp);
 	splx(s);
@@ -418,7 +427,7 @@ arc_defrag(ifp, m)
 			/* is it the last one? */
 			if (af->af_lastseen > af->af_maxflag) {
 				af->af_packet = NULL;
-				return(m1);
+				return (m1);
 			} else
 				return NULL;
 		}
@@ -542,8 +551,6 @@ void
 arc_ifattach(ifp)
 	register struct ifnet *ifp;
 {
-	register struct ifaddr *ifa;
-	register struct sockaddr_dl *sdl;
 	register struct arccom *ac;
 
 	ifp->if_type = IFT_ARCNET;
@@ -562,14 +569,7 @@ arc_ifattach(ifp)
 		log(LOG_ERR,"%s: link address 0 reserved for broadcasts.  Please change it and ifconfig %s down up\n",
 		   ifp->if_xname, ifp->if_xname); 
 	}
-	for (ifa = ifp->if_addrlist.tqh_first; ifa != 0;
-	    ifa = ifa->ifa_list.tqe_next)
-		if ((sdl = (struct sockaddr_dl *)ifa->ifa_addr) &&
-		    sdl->sdl_family == AF_LINK) {
-			sdl->sdl_type = IFT_ARCNET;
-			sdl->sdl_alen = ifp->if_addrlen;
-			bcopy((caddr_t)&((struct arccom *)ifp)->ac_anaddr,
-			      LLADDR(sdl), ifp->if_addrlen);
-			break;
-		}
+	if_alloc_sadl(ifp);
+	bcopy((caddr_t)&((struct arccom *)ifp)->ac_anaddr,
+	      LLADDR(ifp->if_sadl), ifp->if_addrlen);
 }

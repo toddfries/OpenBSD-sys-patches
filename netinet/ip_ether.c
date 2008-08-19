@@ -1,15 +1,15 @@
-/*	$OpenBSD: ip_ether.c,v 1.35 2001/07/27 15:48:38 itojun Exp $  */
+/*	$OpenBSD: ip_ether.c,v 1.40 2002/06/09 16:26:10 itojun Exp $  */
 /*
  * The author of this code is Angelos D. Keromytis (kermit@adk.gr)
  *
  * This code was written by Angelos D. Keromytis for OpenBSD in October 1999.
  *
  * Copyright (C) 1999-2001 Angelos D. Keromytis.
- *	
+ *
  * Permission to use, copy, and modify this software with or without fee
  * is hereby granted, provided that this entire notice is included in
  * all copies of any software which is or includes a copy or
- * modification of this software. 
+ * modification of this software.
  * You may use this code under the GNU public license if you so wish. Please
  * contribute changes back to the authors under this freer than GPL license
  * so that we may further the use of strong encryption without limitations to
@@ -69,18 +69,12 @@ struct etheripstat etheripstat;
 /*
  * etherip_input gets called when we receive an encapsulated packet,
  * either because we got it at a real interface, or because AH or ESP
- * were being used in tunnel mode (in which case the rcvif element will 
+ * were being used in tunnel mode (in which case the rcvif element will
  * contain the address of the encX interface associated with the tunnel.
  */
 
 void
-#if __STDC__
 etherip_input(struct mbuf *m, ...)
-#else
-etherip_input(m, va_alist)
-	struct mbuf *m;
-	va_dcl
-#endif
 {
 	union sockaddr_union ssrc, sdst;
 	struct ether_header eh;
@@ -161,7 +155,6 @@ etherip_input(m, va_alist)
 		    sizeof(struct etherip_header))) == NULL) {
 			DPRINTF(("etherip_input(): m_pullup() failed\n"));
 			etheripstat.etherip_adrops++;
-			m_freem(m);
 			return;
 		}
 	}
@@ -213,7 +206,7 @@ etherip_input(m, va_alist)
 	m_copydata(m, 0, sizeof(eh), (void *) &eh);
 
 	/* Reset the flags based on the inner packet */
-	m->m_flags &= ~(M_BCAST|M_MCAST|M_AUTH|M_CONF);
+	m->m_flags &= ~(M_BCAST|M_MCAST|M_AUTH|M_CONF|M_AUTH_AH);
 	if (eh.ether_dhost[0] & 1) {
 		if (bcmp((caddr_t) etherbroadcastaddr,
 		    (caddr_t)eh.ether_dhost, sizeof(etherbroadcastaddr)) == 0)
@@ -270,7 +263,6 @@ etherip_input(m, va_alist)
 	return;
 }
 
-#ifdef IPSEC
 int
 etherip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	       int protoff)
@@ -376,7 +368,7 @@ etherip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		ipo->ip_sum = 0;
 		ipo->ip_id = htons(ip_randomid());
 
-		/* 
+		/*
 		 * We should be keeping tunnel soft-state and send back
 		 * ICMPs as needed.
 		 */
@@ -410,7 +402,6 @@ etherip_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	return 0;
 }
-#endif /* IPSEC */
 
 int
 etherip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)

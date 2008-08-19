@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_pci.c,v 1.9 2001/08/25 10:13:29 art Exp $	*/
+/*	$OpenBSD: if_xl_pci.c,v 1.12 2002/06/15 05:14:41 aaron Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -71,7 +71,7 @@
 #include <net/bpf.h>
 #endif
 
-#include <vm/vm.h>              /* for vtophys */
+#include <uvm/uvm_extern.h>              /* for vtophys */
 
 /*
  * The following #define causes the code to use PIO to access the
@@ -91,9 +91,9 @@
 
 #include <dev/ic/xlreg.h>
 
-int xl_pci_match	__P((struct device *, void *, void *));
-void xl_pci_attach	__P((struct device *, struct device *, void *));
-void xl_pci_intr_ack	__P((struct xl_softc *));
+int xl_pci_match(struct device *, void *, void *);
+void xl_pci_attach(struct device *, struct device *, void *);
+void xl_pci_intr_ack(struct xl_softc *);
 
 struct cfattach xl_pci_ca = {
 	sizeof(struct xl_softc), xl_pci_match, xl_pci_attach,
@@ -151,6 +151,7 @@ xl_pci_attach(parent, self, aux)
 	bus_size_t iosize;
 	u_int32_t command;
 
+	sc->sc_dmat = pa->pa_dmat;
 	sc->xl_unit = sc->sc_dev.dv_unit;
 
 	sc->xl_flags = 0;

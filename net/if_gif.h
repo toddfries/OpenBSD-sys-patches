@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.h,v 1.6 2001/07/27 15:48:38 itojun Exp $	*/
+/*	$OpenBSD: if_gif.h,v 1.8 2002/03/14 01:27:09 millert Exp $	*/
 /*	$KAME: if_gif.h,v 1.17 2000/09/11 11:36:41 sumikawa Exp $	*/
 
 /*
@@ -59,8 +59,6 @@ struct gif_softc {
 #define gif_ro6 gifsc_gifscr.gifscr_ro6
 #endif
 
-#define	GIFF_INUSE	0x1	/* gif is in use */
-
 #define GIF_MTU		(1280)	/* Default MTU */
 #define	GIF_MTU_MIN	(1280)	/* Minimum MTU */
 #define	GIF_MTU_MAX	(8192)	/* Maximum MTU */
@@ -69,8 +67,8 @@ extern int ngif;
 extern struct gif_softc *gif_softc;
 
 /* Prototypes */
-int gif_output __P((struct ifnet *, struct mbuf *,
-		    struct sockaddr *, struct rtentry *));
-int gif_ioctl __P((struct ifnet *, u_long, caddr_t));
-void gif_start __P((struct ifnet *));
+int gif_output(struct ifnet *, struct mbuf *,
+		    struct sockaddr *, struct rtentry *);
+int gif_ioctl(struct ifnet *, u_long, caddr_t);
+void gif_start(struct ifnet *);
 #endif /* _NET_IF_GIF_H_ */

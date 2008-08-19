@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.49.2.1 2002/02/21 04:14:57 jason Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.61 2002/10/01 17:33:39 art Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -72,10 +72,8 @@
 
 #include <machine/cpu.h>
 
-#include <vm/vm.h>
-#include <sys/user.h>		/* for coredump */
-
 #include <uvm/uvm_extern.h>
+#include <sys/user.h>		/* for coredump */
 
 int	filt_sigattach(struct knote *kn);
 void	filt_sigdetach(struct knote *kn);
@@ -84,9 +82,9 @@ int	filt_signal(struct knote *kn, long hint);
 struct filterops sig_filtops =
 	{ 0, filt_sigattach, filt_sigdetach, filt_signal };
 
-void proc_stop __P((struct proc *p));
-void killproc __P((struct proc *, char *));
-int cansignal __P((struct proc *, struct pcred *, struct proc *, int));
+void proc_stop(struct proc *p);
+void killproc(struct proc *, char *);
+int cansignal(struct proc *, struct pcred *, struct proc *, int);
 
 struct pool sigacts_pool;	/* memory pool for sigacts structures */
 
@@ -103,6 +101,9 @@ cansignal(p, pc, q, signum)
 	if (pc->pc_ucred->cr_uid == 0)
 		return (1);		/* root can always signal */
 
+	if (p == q)
+		return (1);		/* process can always signal itself */
+
 	if (signum == SIGCONT && q->p_session == p->p_session)
 		return (1);		/* SIGCONT in session */
 
@@ -116,6 +117,7 @@ cansignal(p, pc, q, signum)
 		case SIGKILL:
 		case SIGINT:
 		case SIGTERM:
+		case SIGALRM:
 		case SIGSTOP:
 		case SIGTTIN:
 		case SIGTTOU:
@@ -154,7 +156,7 @@ void
 signal_init()
 {
 	pool_init(&sigacts_pool, sizeof(struct sigacts), 0, 0, 0, "sigapl",
-	    0, pool_page_alloc_nointr, pool_page_free_nointr, M_SUBPROC);
+	    &pool_allocator_nointr);
 }
 
 /*
@@ -304,18 +306,17 @@ setsigvec(p, signum, sa)
 			p->p_flag |= P_NOCLDSTOP;
 		else
 			p->p_flag &= ~P_NOCLDSTOP;
-		if (sa->sa_flags & SA_NOCLDWAIT) {
-			/*
-			 * Paranoia: since SA_NOCLDWAIT is implemented by
-			 * reparenting the dying child to PID 1 (and
-			 * trust it to reap the zombie), PID 1 itself is
-			 * forbidden to set SA_NOCLDWAIT.
-			 */
-			if (p->p_pid == 1)
-				p->p_flag &= ~P_NOCLDWAIT;
-			else
-				p->p_flag |= P_NOCLDWAIT;
-		} else
+		/*
+		 * If the SA_NOCLDWAIT flag is set or the handler
+		 * is SIG_IGN we reparent the dying child to PID 1
+		 * (init) which will reap the zombie.  Because we use
+		 * init to do our dirty work we never set P_NOCLDWAIT
+		 * for PID 1.
+		 */
+		if (p->p_pid != 1 && ((sa->sa_flags & SA_NOCLDWAIT) ||
+		    sa->sa_handler == SIG_IGN))
+			p->p_flag |= P_NOCLDWAIT;
+		else
 			p->p_flag &= ~P_NOCLDWAIT;
 	}
 	if ((sa->sa_flags & SA_RESETHAND) != 0)
@@ -418,6 +419,8 @@ execsigs(p)
 	ps->ps_sigstk.ss_sp = 0;
 	ps->ps_flags = 0;
 	p->p_flag &= ~P_NOCLDWAIT;
+	if (ps->ps_sigact[SIGCHLD] == SIG_IGN)
+		ps->ps_sigact[SIGCHLD] = SIG_DFL;
 }
 
 /*
@@ -720,15 +723,19 @@ trapsignal(p, signum, code, type, sigval)
 	register struct sigacts *ps = p->p_sigacts;
 	int mask;
 
+#ifdef KTRACE
+	if (KTRPOINT(p, KTR_PSIG)) {
+		siginfo_t si;
+
+		initsiginfo(&si, signum, code, type, sigval);
+		ktrpsig(p, signum, ps->ps_sigact[signum],
+		    p->p_sigmask, code, &si);
+	}
+#endif
 	mask = sigmask(signum);
 	if ((p->p_flag & P_TRACED) == 0 && (p->p_sigcatch & mask) != 0 &&
 	    (p->p_sigmask & mask) == 0) {
 		p->p_stats->p_ru.ru_nsignals++;
-#ifdef KTRACE
-		if (KTRPOINT(p, KTR_PSIG))
-			ktrpsig(p, signum, ps->ps_sigact[signum],
-			    p->p_sigmask, code);
-#endif
 		(*p->p_emul->e_sendsig)(ps->ps_sigact[signum], signum,
 		    p->p_sigmask, code, type, sigval);
 		p->p_sigmask |= ps->ps_catchmask[signum];
@@ -769,11 +776,11 @@ psignal(p, signum)
 	if ((u_int)signum >= NSIG || signum == 0)
 		panic("psignal signal number");
 
-	KNOTE(&p->p_klist, NOTE_SIGNAL | signum);
-
 	/* Ignore signal if we are exiting */
 	if (p->p_flag & P_WEXIT)
 		return;
+
+	KNOTE(&p->p_klist, NOTE_SIGNAL | signum);
 
 	mask = sigmask(signum);
 	prop = sigprop[signum];
@@ -972,10 +979,10 @@ out:
  *		postsig(signum);
  */
 int
-issignal(p)
-	register struct proc *p;
+issignal(struct proc *p)
 {
-	register int signum, mask, prop;
+	int signum, mask, prop;
+	int s;
 
 	for (;;) {
 		mask = p->p_siglist & ~p->p_sigmask;
@@ -1001,6 +1008,7 @@ issignal(p)
 			 */
 			p->p_xstat = signum;
 
+			s = splstatclock();	/* protect mi_switch */
 			if (p->p_flag & P_FSTRACE) {
 #ifdef	PROCFS
 				/* procfs debugging */
@@ -1016,6 +1024,7 @@ issignal(p)
 				proc_stop(p);
 				mi_switch();
 			}
+			splx(s);
 
 			/*
 			 * If we are no longer being traced, or the parent
@@ -1075,7 +1084,9 @@ issignal(p)
 				if ((p->p_pptr->p_flag & P_NOCLDSTOP) == 0)
 					psignal(p->p_pptr, SIGCHLD);
 				proc_stop(p);
+				s = splstatclock();
 				mi_switch();
+				splx(s);
 				break;
 			} else if (prop & SA_IGNORE) {
 				/*
@@ -1151,10 +1162,22 @@ postsig(signum)
 	mask = sigmask(signum);
 	p->p_siglist &= ~mask;
 	action = ps->ps_sigact[signum];
+
+	if (ps->ps_sig != signum) {
+		code = 0;
+	} else {
+		code = ps->ps_code;
+	}
+
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_PSIG))
+	if (KTRPOINT(p, KTR_PSIG)) {
+		siginfo_t si;
+		
+		null_sigval.sival_ptr = 0;
+		initsiginfo(&si, signum, 0, SI_USER, null_sigval);
 		ktrpsig(p, signum, action, ps->ps_flags & SAS_OLDMASK ?
-		    ps->ps_oldmask : p->p_sigmask, 0);
+		    ps->ps_oldmask : p->p_sigmask, code, &si);
+	}
 #endif
 	if (action == SIG_DFL) {
 		/*
@@ -1195,10 +1218,7 @@ postsig(signum)
 		}
 		splx(s);
 		p->p_stats->p_ru.ru_nsignals++;
-		if (ps->ps_sig != signum) {
-			code = 0;
-		} else {
-			code = ps->ps_code;
+		if (ps->ps_sig == signum) {
 			ps->ps_code = 0;
 		}
 		null_sigval.sival_ptr = 0;

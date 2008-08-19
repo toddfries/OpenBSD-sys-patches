@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.57.2.2 2002/05/08 22:56:55 miod Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.71 2002/09/23 01:41:09 art Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -58,7 +58,6 @@
 
 #include <sys/syscallargs.h>
 
-#include <vm/vm.h>
 #include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
@@ -67,11 +66,16 @@
 #include <dev/rndvar.h>
 
 /*
+ * Map the shared signal code.
+ */
+int exec_sigcode_map(struct proc *, struct emul *);
+
+/*
  * stackgap_random specifies if the stackgap should have a random size added
  * to it. Must be a n^2. If non-zero, the stack gap will be calculated as:
  * (arc4random() * ALIGNBYTES) & (stackgap_random - 1) + STACKGAPLEN.
  */
-int stackgap_random;
+int stackgap_random = 1024;
 
 /*
  * check exec:
@@ -150,9 +154,12 @@ check_exec(p, epp)
 	if ((error = VOP_OPEN(vp, FREAD, p->p_ucred, p)) != 0)
 		goto bad1;
 
+	/* unlock vp, we need it unlocked from here */
+	VOP_UNLOCK(vp, 0, p);
+
 	/* now we have the file, get the exec header */
 	error = vn_rdwr(UIO_READ, vp, epp->ep_hdr, epp->ep_hdrlen, 0,
-	    UIO_SYSSPACE, IO_NODELOCKED, p->p_ucred, &resid, p);
+	    UIO_SYSSPACE, 0, p->p_ucred, &resid, p);
 	if (error)
 		goto bad2;
 	epp->ep_hdrvalid = epp->ep_hdrlen - resid;
@@ -167,7 +174,6 @@ check_exec(p, epp)
 
 		if (execsw[i].es_check == NULL)
 			continue;
-
 		newerror = (*execsw[i].es_check)(p, epp);
 		/* make sure the first "interesting" error code is saved. */
 		if (!newerror || error == ENOEXEC)
@@ -198,10 +204,8 @@ check_exec(p, epp)
 
 bad2:
 	/*
-	 * unlock and close the vnode, free the
-	 * pathname buf, and punt.
+	 * close the vnode, free the pathname buf, and punt.
 	 */
-	VOP_UNLOCK(vp, 0, p);
 	vn_close(vp, FREAD, p->p_ucred, p);
 	FREE(ndp->ni_cnd.cn_pnbuf, M_NAMEI);
 	return (error);
@@ -247,8 +251,8 @@ sys_execve(p, v, retval)
 	struct ps_strings arginfo;
 	struct vmspace *vm = p->p_vmspace;
 	char **tmpfap;
-	int szsigcode;
 	extern struct emul emul_native;
+	struct exec_vmcmd *base_vc;
 
 	/*
 	 * Cheap solution to complicated problems.
@@ -295,7 +299,7 @@ sys_execve(p, v, retval)
 	/* allocate an argument buffer */
 	argp = (char *) uvm_km_valloc_wait(exec_map, NCARGS);
 #ifdef DIAGNOSTIC
-	if (argp == (vaddr_t) 0)
+	if (argp == NULL)
 		panic("execve: argp == NULL");
 #endif
 	dp = argp;
@@ -321,7 +325,7 @@ sys_execve(p, v, retval)
 
 	/* Now get argv & environment */
 	if (!(cpp = SCARG(uap, argp))) {
-		error = EINVAL;
+		error = EFAULT;
 		goto bad;
 	}
 
@@ -366,15 +370,12 @@ sys_execve(p, v, retval)
 
 	dp = (char *)ALIGN(dp);
 
-	szsigcode = pack.ep_emul->e_esigcode - pack.ep_emul->e_sigcode;
-
 	sgap = STACKGAPLEN;
 	if (stackgap_random != 0)
 		sgap += (arc4random() * ALIGNBYTES) & (stackgap_random - 1);
 	/* Now check if args & environ fit into new stack */
 	len = ((argc + envc + 2 + pack.ep_emul->e_arglen) * sizeof(char *) +
-	    sizeof(long) + dp + sgap + szsigcode +
-	    sizeof(struct ps_strings)) - argp;
+	    sizeof(long) + dp + sgap + sizeof(struct ps_strings)) - argp;
 
 	len = ALIGN(len);	/* make the stack "safely" aligned */
 
@@ -390,7 +391,7 @@ sys_execve(p, v, retval)
 	 * Prepare vmspace for remapping. Note that uvmspace_exec can replace
 	 * p_vmspace!
 	 */
-	uvmspace_exec(p);
+	uvmspace_exec(p, VM_MIN_ADDRESS, VM_MAXUSER_ADDRESS);
 
 	vm = p->p_vmspace;
 	/* Now map address space */
@@ -406,11 +407,23 @@ sys_execve(p, v, retval)
 	if (pack.ep_vmcmds.evs_used == 0)
 		panic("execve: no vmcmds");
 #endif
+	base_vc = NULL;
 	for (i = 0; i < pack.ep_vmcmds.evs_used && !error; i++) {
 		struct exec_vmcmd *vcp;
 
 		vcp = &pack.ep_vmcmds.evs_cmds[i];
+
+		if (vcp->ev_flags & VMCMD_RELATIVE) {
+#ifdef DIAGNOSTIC
+			if (base_vc == NULL)
+				panic("sys_execve: RELATIVE without base");
+#endif
+			vcp->ev_addr += base_vc->ev_addr;
+		}
+
 		error = (*vcp->ev_proc)(p, vcp);
+		if (vcp->ev_flags & VMCMD_BASE)
+			base_vc = vcp;
 	}
 
 	/* free the vmspace-creation commands, and release their references */
@@ -425,8 +438,8 @@ sys_execve(p, v, retval)
 	arginfo.ps_nenvstr = envc;
 
 #ifdef MACHINE_STACK_GROWS_UP
-	stack = (char *)USRSTACK + sizeof(arginfo) + szsigcode;
-	slen = len - sizeof(arginfo) - szsigcode;
+	stack = (char *)USRSTACK + sizeof(arginfo);
+	slen = len - sizeof(arginfo);
 #else
 	stack = (char *)(USRSTACK - len);
 #endif
@@ -437,17 +450,6 @@ sys_execve(p, v, retval)
 	/* copy out the process's ps_strings structure */
 	if (copyout(&arginfo, (char *)PS_STRINGS, sizeof(arginfo)))
 		goto exec_abort;
-
-	/* copy out the process's signal trampoline code */
-#ifdef MACHINE_STACK_GROWS_UP
-	if (szsigcode && copyout((char *)pack.ep_emul->e_sigcode,
-	    ((char *)PS_STRINGS) + sizeof(arginfo), szsigcode))
-		goto exec_abort;
-#else
-	if (szsigcode && copyout((char *)pack.ep_emul->e_sigcode,
-	    ((char *)PS_STRINGS) - szsigcode, szsigcode))
-		goto exec_abort;
-#endif
 
 	stopprofclock(p);	/* stop profiling */
 	fdcloseexec(p);		/* handle close on exec */
@@ -512,9 +514,12 @@ sys_execve(p, v, retval)
 		for (i = 0; i < 3; i++) {
 			struct file *fp = NULL;
 
-			if (i < p->p_fd->fd_nfiles)
-				fp = p->p_fd->fd_ofiles[i];
-
+			/*
+			 * NOTE - This will never return NULL because of
+			 * unmature fds. The file descriptor table is not
+			 * shared because we're suid.
+			 */
+			fp = fd_getfile(p->p_fd, i);
 #ifdef PROCFS
 			/*
 			 * Close descriptors that are writing to procfs.
@@ -545,13 +550,13 @@ sys_execve(p, v, retval)
 					panic("sys_execve: falloc indx != i");
 #endif
 				if ((error = cdevvp(getnulldev(), &vp)) != 0) {
-					ffree(fp);
 					fdremove(p->p_fd, indx);
+					closef(fp, p);
 					goto exec_abort;
 				}
 				if ((error = VOP_OPEN(vp, flags, p->p_ucred, p)) != 0) {
-					ffree(fp);
 					fdremove(p->p_fd, indx);
+					closef(fp, p);
 					vrele(vp);
 					goto exec_abort;
 				}
@@ -561,6 +566,7 @@ sys_execve(p, v, retval)
 				fp->f_type = DTYPE_VNODE;
 				fp->f_ops = &vnops;
 				fp->f_data = (caddr_t)vp;
+				FILE_SET_MATURE(fp);
 			}
 		}
 	} else
@@ -585,8 +591,7 @@ sys_execve(p, v, retval)
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
 
 	FREE(nid.ni_cnd.cn_pnbuf, M_NAMEI);
-	VOP_CLOSE(pack.ep_vp, FREAD, cred, p);
-	vput(pack.ep_vp);
+	vn_close(pack.ep_vp, FREAD, cred, p);
 
 	/*
 	 * notify others that we exec'd
@@ -603,6 +608,10 @@ sys_execve(p, v, retval)
 #else
 	(*pack.ep_emul->e_setregs)(p, &pack, (u_long)stack, retval);
 #endif
+
+	/* map the process's signal trampoline code */
+	if (exec_sigcode_map(p, pack.ep_emul))
+		goto exec_abort;
 
 	if (p->p_flag & P_TRACED)
 		psignal(p, SIGTRAP);
@@ -626,8 +635,7 @@ bad:
 		(void) fdrelease(p, pack.ep_fd);
 	}
 	/* close and put the exec'd file */
-	VOP_CLOSE(pack.ep_vp, FREAD, cred, p);
-	vput(pack.ep_vp);
+	vn_close(pack.ep_vp, FREAD, cred, p);
 	FREE(nid.ni_cnd.cn_pnbuf, M_NAMEI);
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
 
@@ -647,8 +655,7 @@ exec_abort:
 	if (pack.ep_emul_arg)
 		FREE(pack.ep_emul_arg, M_TEMP);
 	FREE(nid.ni_cnd.cn_pnbuf, M_NAMEI);
-	VOP_CLOSE(pack.ep_vp, FREAD, cred, p);
-	vput(pack.ep_vp);
+	vn_close(pack.ep_vp, FREAD, cred, p);
 	uvm_km_free_wakeup(exec_map, (vaddr_t) argp, NCARGS);
 
 free_pack_abort:
@@ -704,4 +711,53 @@ copyargs(pack, arginfo, stack, argp)
 		return (NULL);
 
 	return (cpp);
+}
+
+int
+exec_sigcode_map(struct proc *p, struct emul *e)
+{
+	vsize_t sz;
+
+	sz = (vaddr_t)e->e_esigcode - (vaddr_t)e->e_sigcode;
+
+	/*
+	 * If we don't have a sigobject for this emulation, create one.
+	 *
+	 * sigobject is an anonymous memory object (just like SYSV shared
+	 * memory) that we keep a permanent reference to and that we map
+	 * in all processes that need this sigcode. The creation is simple,
+	 * we create an object, add a permanent reference to it, map it in
+	 * kernel space, copy out the sigcode to it and unmap it.
+	 * The we map it with PROT_READ|PROT_EXEC into the process just
+	 * the way sys_mmap would map it.
+	 */
+	if (e->e_sigobject == NULL) {
+		vaddr_t va;
+		int r;
+
+		e->e_sigobject = uao_create(sz, 0);
+		uao_reference(e->e_sigobject);	/* permanent reference */
+
+		va = vm_map_min(kernel_map);	/* hint */
+		if ((r = uvm_map(kernel_map, &va, round_page(sz), e->e_sigobject,
+		    0, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
+		    UVM_INH_SHARE, UVM_ADV_RANDOM, 0)))) {
+			printf("kernel mapping failed %d\n", r);
+			return (ENOMEM);
+		}
+		memcpy((void *)va, e->e_sigcode, sz);
+		uvm_unmap(kernel_map, va, va + round_page(sz));
+	}
+
+	/* Just a hint to uvm_mmap where to put it. */
+	p->p_sigcode = round_page((vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ);
+	uao_reference(e->e_sigobject);
+	if (uvm_map(&p->p_vmspace->vm_map, &p->p_sigcode, round_page(sz),
+	    e->e_sigobject, 0, 0, UVM_MAPFLAG(UVM_PROT_RX, UVM_PROT_RX,
+	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0))) {
+		printf("user mapping failed\n");
+		return (ENOMEM);
+	}
+
+	return (0);
 }

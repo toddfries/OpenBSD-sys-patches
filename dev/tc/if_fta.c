@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fta.c,v 1.8 2001/09/11 20:05:25 miod Exp $	*/
+/*	$OpenBSD: if_fta.c,v 1.12 2002/06/09 21:25:40 art Exp $	*/
 /*	$NetBSD: if_fta.c,v 1.7 1996/10/22 21:37:26 cgd Exp $	*/
 
 /*-
@@ -11,7 +11,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software withough specific prior written permission
+ *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -56,14 +56,14 @@
 #endif
 #include <net/if_fddi.h>
 
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 
 #include <dev/tc/tcvar.h>
 #include <dev/ic/pdqvar.h>
 #include <dev/ic/pdqreg.h>
 
-int	pdq_tc_match __P((struct device *, void *, void *));
-void	pdq_tc_attach __P((struct device *, struct device *, void *));
+int	pdq_tc_match(struct device *, void *, void *);
+void	pdq_tc_attach(struct device *, struct device *, void *);
 
 int
 pdq_tc_match(parent, match, aux)
@@ -109,7 +109,7 @@ pdq_tc_attach(parent, self, aux)
 		return;
 	}
 	bcopy((caddr_t) sc->sc_pdq->pdq_hwaddr.lanaddr_bytes,
-	    sc->sc_ac.ac_enaddr, 6);
+	    sc->sc_arpcom.ac_enaddr, 6);
 	printf("\n");
 	pdq_ifattach(sc, NULL);
 

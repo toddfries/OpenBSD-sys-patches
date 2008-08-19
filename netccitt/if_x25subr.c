@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_x25subr.c,v 1.9 2001/06/27 03:49:53 angelos Exp $	*/
+/*	$OpenBSD: if_x25subr.c,v 1.13 2002/08/08 19:18:12 provos Exp $	*/
 /*	$NetBSD: if_x25subr.c,v 1.13 1996/05/09 22:29:25 scottr Exp $	*/
 
 /*
@@ -108,7 +108,7 @@ int x25_autoconnect = 0;
 
 #define senderr(x) {error = x; goto bad;}
 
-static struct llinfo_x25 *x25_lxalloc __P((struct rtentry *));
+static struct llinfo_x25 *x25_lxalloc(struct rtentry *);
 
 /*
  * Ancillary routines
@@ -716,7 +716,7 @@ pk_init()
 struct x25_dgproto {
 	u_char          spi;
 	u_char          spilen;
-	int             (*f) __P((struct mbuf *, void *));
+	int             (*f)(struct mbuf *, void *);
 } x25_dgprototab[] = {
 #if defined(ISO) && defined(TPCONS)
 	{ 0x0, 0, tp_incoming },
@@ -771,7 +771,13 @@ pk_rtattach(so, m0)
 	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 #define transfer_sockbuf(s, f, l) \
 	while ((m = (s)->sb_mb) != NULL) \
-		{(s)->sb_mb = m->m_act; m->m_act = 0; sbfree((s), m); f;}
+		{ \
+			(s)->sb_mb = m->m_nextpkt; \
+			SB_EMPTY_FIXUP((s)); \
+			m->m_nextpkt = 0; \
+			sbfree((s), m); \
+			f; \
+		}
 
 	if (rt)
 		rt->rt_refcnt--;

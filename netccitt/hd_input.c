@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd_input.c,v 1.3 1996/04/21 22:28:52 deraadt Exp $	*/
+/*	$OpenBSD: hd_input.c,v 1.5 2002/06/14 21:35:00 todd Exp $	*/
 /*	$NetBSD: hd_input.c,v 1.9 1996/04/13 01:34:16 cgd Exp $	*/
 
 /*
@@ -58,9 +58,9 @@
 #include <netccitt/x25.h>
 #include <netccitt/pk_extern.h>
 
-static void frame_reject __P((struct hdcb *, int, struct Hdlc_iframe *));
-static void rej_routine __P((register struct hdcb *, int));
-static void free_iframes __P((struct hdcb *, int *, int));
+static void frame_reject(struct hdcb *, int, struct Hdlc_iframe *);
+static void rej_routine(register struct hdcb *, int);
+static void free_iframes(struct hdcb *, int *, int);
 
 /*
  *      HDLC INPUT INTERFACE
@@ -569,7 +569,7 @@ valid_nr(hdp, nr, finalbit)
 
 	/*
 	 * This section validates the frame's  N(R) value.  It's N(R) value
-	 * must be  in syncronization  with  our V(S)  value and  our "last
+	 * must be  in synchronization  with  our V(S)  value and  our "last
 	 * received nr" variable. If it is correct then we are able to send
 	 * more IFRAME's, else frame reject condition is entered.
 	 */

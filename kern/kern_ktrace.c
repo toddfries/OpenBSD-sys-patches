@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.24.2.1 2002/06/27 08:21:32 miod Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.29 2002/06/27 02:15:52 deraadt Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -51,16 +51,14 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 
-#define ISSET(t, f)    ((t) & (f))
-
-void ktrinitheader __P((struct ktr_header *, struct proc *, int));
-int ktrops __P((struct proc *, struct proc *, int, int, struct vnode *));
-int ktrsetchildren __P((struct proc *, struct proc *, int, int,
-			struct vnode *));
-int ktrwrite __P((struct proc *, struct ktr_header *));
-int ktrcanset __P((struct proc *, struct proc *));
+void ktrinitheader(struct ktr_header *, struct proc *, int);
+int ktrops(struct proc *, struct proc *, int, int, struct vnode *);
+int ktrsetchildren(struct proc *, struct proc *, int, int,
+			struct vnode *);
+int ktrwrite(struct proc *, struct ktr_header *);
+int ktrcanset(struct proc *, struct proc *);
 
 /*
  * Change the trace vnode in a correct way (to avoid races).
@@ -246,14 +244,15 @@ ktrgenio(p, fd, rw, iov, len, error)
 }
 
 void
-ktrpsig(p, sig, action, mask, code)
+ktrpsig(p, sig, action, mask, code, si)
 	struct proc *p;
 	int sig;
 	sig_t action;
 	int mask, code;
+	siginfo_t *si;
 {
 	struct ktr_header kth;
-	struct ktr_psig	kp;
+	struct ktr_psig kp;
 
 	p->p_traceflag |= KTRFAC_ACTIVE;
 	ktrinitheader(&kth, p, KTR_PSIG);
@@ -261,6 +260,7 @@ ktrpsig(p, sig, action, mask, code)
 	kp.action = action;
 	kp.mask = mask;
 	kp.code = code;
+	kp.si = *si;
 	kth.ktr_buf = (caddr_t)&kp;
 	kth.ktr_len = sizeof (struct ktr_psig);
 
@@ -303,7 +303,7 @@ sys_ktrace(curp, v, retval)
 		syscallarg(char *) fname;
 		syscallarg(int) ops;
 		syscallarg(int) facs;
-		syscallarg(int) pid;
+		syscallarg(pid_t) pid;
 	} */ *uap = v;
 	struct vnode *vp = NULL;
 	struct proc *p = NULL;

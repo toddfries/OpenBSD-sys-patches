@@ -1,4 +1,4 @@
-/*	$OpenBSD: zlib.h,v 1.5.14.1 2002/03/13 15:54:29 jason Exp $	*/
+/*	$OpenBSD: zlib.h,v 1.6 2002/03/12 00:26:30 millert Exp $	*/
 /* zlib.h -- interface of the 'zlib' general purpose compression library
   version 1.1.4, March 11th, 2002
 

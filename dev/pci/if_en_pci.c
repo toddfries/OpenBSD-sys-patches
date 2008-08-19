@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_en_pci.c,v 1.8 2001/08/25 10:13:29 art Exp $	*/
+/*	$OpenBSD: if_en_pci.c,v 1.10 2002/06/19 18:46:41 fgsch Exp $	*/
 
 /*
  *
@@ -109,12 +109,8 @@ struct en_pci_softc {
  * prototypes
  */
 
-#ifdef __BROKEN_INDIRECT_CONFIG
-static	int en_pci_match __P((struct device *, void *, void *));
-#else
-static	int en_pci_match __P((struct device *, struct cfdata *, void *));
-#endif
-static	void en_pci_attach __P((struct device *, struct device *, void *));
+static	int en_pci_match(struct device *, void *, void *);
+static	void en_pci_attach(struct device *, struct device *, void *);
 
 /*
  * PCI autoconfig attachments
@@ -126,7 +122,7 @@ struct cfattach en_pci_ca = {
 
 #if !defined(MIDWAY_ENIONLY)
 
-static void adp_busreset __P((void *));
+static void adp_busreset(void *);
 
 /*
  * bus specific reset function [ADP only!]
@@ -162,11 +158,7 @@ void *v;
 static int en_pci_match(parent, match, aux)
 
 struct device *parent;
-#ifdef __BROKEN_INDIRECT_CONFIG
 void *match;
-#else
-struct cfdata *match;
-#endif
 void *aux;
 
 {

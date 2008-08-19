@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmc_obsd.c,v 1.11 2001/09/11 20:05:25 miod Exp $ */
+/*	$OpenBSD: if_lmc_obsd.c,v 1.13 2002/06/02 22:50:00 deraadt Exp $ */
 /*	$NetBSD: if_lmc_nbsd.c,v 1.1 1999/03/25 03:32:43 explorer Exp $	*/
 
 /*-
@@ -49,7 +49,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software withough specific prior written permission
+ *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -101,7 +101,7 @@
 #include <net/bpfdesc.h>
 #endif
 
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
 #include <net/if_sppp.h>

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.116 2001/10/05 18:57:28 nate Exp $
+#	$OpenBSD: files.pci,v 1.143 2002/09/24 18:56:01 nate Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -22,13 +22,14 @@ file	dev/pci/tga.c			tga		needs-flag
 file	dev/pci/tga_conf.c		tga
 file	dev/ic/bt463.c			tga
 file	dev/ic/bt485.c			tga
+file	dev/ic/ibm561.c			tga
 
 # Cypress 82c693 hyperCache(tm) Stand-Alone PCI Peripheral Controller
 # with USB.  This is a combo chip:
 #
-#       PCI-ISA bridge
-#       PCI IDE controller
-#       OHCI USB controller
+#	PCI-ISA bridge
+#	PCI IDE controller
+#	OHCI USB controller
 #
 # There are some common subroutines that each function needs.
 define	cy82c693
@@ -38,7 +39,6 @@ file	dev/pci/cy82c693.c		cy82c693
 # device declaration in sys/conf/files
 attach	ahc at pci with ahc_pci
 file	dev/pci/ahc_pci.c		ahc_pci
-file	dev/ic/smc93cx6.c		ahc_pci
 
 # DPT EATA SCSI controllers
 attach	dpt at pci with dpt_pci
@@ -59,7 +59,6 @@ file	dev/ic/adwlib.c			adw_pci
 file	dev/microcode/adw/adwmcode.c	adw_pci
 
 # BusLogic BT-9xx PCI family
-# device declaration in sys/dev/isa/files.isa
 attach	bha at pci with bha_pci
 file	dev/pci/bha_pci.c		bha_pci
 
@@ -93,6 +92,16 @@ device	auich: audio, auconv, mulaw, ac97
 attach	auich at pci
 file	dev/pci/auich.c			auich
 
+# Creative Labs EMU10k1 (SBLive! series and PCI512)
+device	emu: audio, auconv, mulaw, ac97
+attach	emu at pci
+file	dev/pci/emuxki.c		emu
+
+# Trident 4DWAVE based PCI audio (including SiS 7018, ALi M5451)
+device	autri: audio, auconv, mulaw, ac97, midibus
+attach	autri at pci
+file	dev/pci/autri.c			autri
+
 # CS4280 CrystalClear Audio
 device	clcs: audio, auconv, mulaw, ac97
 attach	clcs at pci
@@ -108,6 +117,11 @@ device	maestro: audio, auconv, mulaw, ac97
 attach	maestro at pci
 file	dev/pci/maestro.c		maestro
 
+# ESS Maestro3
+device	esa: audio, auconv, mulaw, ac97
+attach	esa at pci
+file	dev/pci/esa.c		esa
+
 # Yamaha YMF Audio
 device	yds { }: audio, auconv, mulaw, ac97
 attach	yds at pci
@@ -117,9 +131,10 @@ attach	opl at yds with opl_yds
 file	dev/pci/opl_yds.c		opl_yds
 
 # Forte Media FM801
-device	fms: audio, auconv, mulaw, ac97, midibus
+device	fms: audio, auconv, mulaw, ac97, midibus, tea5757, radiobus
 attach	fms at pci
 file	dev/pci/fms.c			fms
+file	dev/pci/fmsradio.c		fms & radio
 
 # VIA VT82C686A AC'97 Audio
 device	auvia: audio, auconv, mulaw, ac97
@@ -154,8 +169,8 @@ file	dev/pci/if_de.c			de
 # ENI ATM driver
 device	en: atm, ifnet
 attach	en at pci with en_pci
-file    dev/pci/if_en_pci.c		en
-file    dev/ic/midway.c			en
+file	dev/pci/if_en_pci.c		en
+file	dev/ic/midway.c			en
 
 # 3Com 3c590 and 3c595 Ethernet controllers
 # device declaration in sys/conf/files
@@ -189,7 +204,7 @@ file	dev/pci/siop_pci.c	siop_pci
 # NeoMagic 256AV and 256ZX
 device	neo: audio, auconv, mulaw, ac97
 attach	neo at pci
-file	dev/pci/neo.c		        neo
+file	dev/pci/neo.c			neo
 
 # PCI IDE controllers
 device	pciide {[channel = -1]}: cy82c693, wdc_base, ata, atapi
@@ -201,7 +216,7 @@ device	ppb: pcibus
 attach	ppb at pci
 file	dev/pci/ppb.c			ppb
 
-# Cyclades Cyclom-8/16/32 
+# Cyclades Cyclom-8/16/32
 attach	cy at pci with cy_pci
 file	dev/pci/cy_pci.c		cy_pci
 
@@ -243,7 +258,7 @@ attach	sv at pci
 file	dev/pci/sv.c			sv
 
 # Brooktree Bt848 video capture
-device	bktr: pcibus
+device	bktr: pcibus, radiobus
 attach	bktr at pci
 file	dev/pci/bktr/bktr_audio.c	bktr	needs-count
 file	dev/pci/bktr/bktr_card.c	bktr
@@ -258,6 +273,12 @@ file	dev/pci/if_xl_pci.c		xl_pci
 # Intel EtherExpress PRO 10/100B
 attach	fxp at pci with fxp_pci
 file	dev/pci/if_fxp_pci.c		fxp_pci
+
+# Intel Pro/1000
+device	em: ether, ifnet, ifmedia
+attach	em at pci
+file	dev/pci/if_em.c			em
+file	dev/pci/if_em_hw.c		em
 
 # DEC/Intel 21143 and "tulip" clone ethernet
 attach	dc at pci with dc_pci
@@ -286,15 +307,25 @@ device	lofn: crypto
 attach	lofn at pci
 file	dev/pci/lofn.c			lofn
 
-# Hi/fn 7751 
+# Hi/fn 7751/7811/7951
 device	hifn: crypto
 attach	hifn at pci
 file	dev/pci/hifn7751.c		hifn
+
+# Hi/fn 7814/7851/7854
+device	nofn: crypto
+attach	nofn at pci
+file	dev/pci/nofn.c			nofn
 
 # Bluesteelnet (Broadcom) 5501/5601
 device	ubsec: crypto
 attach	ubsec at pci
 file	dev/pci/ubsec.c			ubsec
+
+# Netoctave NSP2000
+device	noct: crypto
+attach	noct at pci
+file	dev/pci/noct.c			noct
 
 # Pijnenburg PCC-ISES
 device	ises: crypto
@@ -347,11 +378,6 @@ device	sk: ether, ifnet, mii, ifmedia
 attach	sk at skc
 file	dev/pci/if_sk.c			skc | sk
 
-# Intel 82452 (Pro/1000 gigabit server adapter)
-device wx: ether, ifnet, mii, ifmedia, mii_phy
-attach wx at pci
-file	dev/pci/if_wx.c			wx
-
 # PCI "universal" communication device driver, for PCI com, lpt, etc. ports
 # (see documentation in the driver for what, exactly, should be supported)
 device	puc { port = -1 }
@@ -378,20 +404,19 @@ file	dev/pci/cmpci.c			cmpci
 attach	iha at pci with iha_pci
 file	dev/pci/iha_pci.c		iha_pci
 
+# Tekram TRM-S1040 SCSI Cards (DC395U/UW/F,DC315/U)
+attach	trm at pci with trm_pci
+file	dev/pci/trm_pci.c		trm_pci
+
 # AMD Am53c974 PCscsi-PCI SCSI controllers
 device	pcscp: scsi, ncr53c9x
 attach	pcscp at pci
 file	dev/pci/pcscp.c			pcscp
 
-# Guillemot Maxi Radio FM 2000 Radio Card
-device	mr: radio, pci
-attach	mr at pci
-file	dev/pci/maxiradio.c		mr	needs-flag
-
-# MediaForte SoundForte SF64-PCR Radio card
-device	sf4r: radio, pci, tea5757
-attach	sf4r at pci
-file	dev/pci/sf64pcr.c		sf4r	needs-flag
+# Gemtek/Guillemot PCI Radio Card
+device	gtp: tea5757, radiobus
+attach	gtp at pci
+file	dev/pci/gtp.c			gtp
 
 # National Semiconductor DP83820/DP83821 based GigE
 device	nge: ether, ifnet, mii, ifmedia, mii_phy
@@ -412,3 +437,26 @@ file	dev/pci/if_lge.c		lge
 device	bge: ether, ifnet, mii, ifmedia, mii_phy
 attach	bge at pci
 file	dev/pci/if_bge.c		bge
+
+# Sundance Tech./Tamarack TC9021 Gigabit Ethernet
+device	stge: ether, ifnet, mii, ifmedia, mii_phy, mii_bitbang
+attach	stge at pci
+file	dev/pci/if_stge.c		stge
+
+# Intel gigabit ethernet
+device	gx: ether, ifnet, mii, ifmedia, mii_phy
+attach	gx at pci
+file	dev/pci/if_gx.c			gx
+
+# AMD 768MPX power management controller
+device	amdpm {}
+attach	amdpm at pci
+file	dev/pci/amdpm.c			amdpm
+
+# OHCI IEEE 1394 controller
+attach	fwohci at pci with fwohci_pci
+file	dev/pci/fwohci_pci.c		fwohci_pci
+
+# IEEE 1394 TI "Lynx" controller
+attach	fwlynx at pci with fwlynx_pci
+file	dev/pci/fwlynx_pci.c		fwlynx_pci

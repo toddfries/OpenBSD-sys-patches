@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppp-deflate.c,v 1.5 1998/05/08 05:02:07 millert Exp $	*/
+/*	$OpenBSD: ppp-deflate.c,v 1.7 2002/09/13 00:12:07 deraadt Exp $	*/
 /*	$NetBSD: ppp-deflate.c,v 1.1 1996/03/15 02:28:09 paulus Exp $	*/
 
 /*
@@ -6,28 +6,36 @@
  * and decompression (as used by gzip) to the PPP code.
  * This version is for use with mbufs on BSD-derived systems.
  *
- * Copyright (c) 1994 The Australian National University.
- * All rights reserved.
+ * Copyright (c) 1989-2002 Paul Mackerras. All rights reserved.
  *
- * Permission to use, copy, modify, and distribute this software and its
- * documentation is hereby granted, provided that the above copyright
- * notice appears in all copies.  This software is provided without any
- * warranty, express or implied. The Australian National University
- * makes no representations about the suitability of this software for
- * any purpose.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * IN NO EVENT SHALL THE AUSTRALIAN NATIONAL UNIVERSITY BE LIABLE TO ANY
- * PARTY FOR DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
- * ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION, EVEN IF
- * THE AUSTRALIAN NATIONAL UNIVERSITY HAS BEEN ADVISED OF THE POSSIBILITY
- * OF SUCH DAMAGE.
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
  *
- * THE AUSTRALIAN NATIONAL UNIVERSITY SPECIFICALLY DISCLAIMS ANY WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
- * ON AN "AS IS" BASIS, AND THE AUSTRALIAN NATIONAL UNIVERSITY HAS NO
- * OBLIGATION TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS,
- * OR MODIFICATIONS.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name(s) of the authors of this software must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission.
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Paul Mackerras
+ *     <paulus@samba.org>".
+ *
+ * THE AUTHORS OF THIS SOFTWARE DISCLAIM ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY
+ * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <sys/param.h>
@@ -58,24 +66,24 @@ struct deflate_state {
 
 #define DEFLATE_OVHD	2		/* Deflate overhead/packet */
 
-static void	*zalloc __P((void *, u_int items, u_int size));
-static void	zfree __P((void *, void *ptr, u_int nb));
-static void	*z_comp_alloc __P((u_char *options, int opt_len));
-static void	*z_decomp_alloc __P((u_char *options, int opt_len));
-static void	z_comp_free __P((void *state));
-static void	z_decomp_free __P((void *state));
-static int	z_comp_init __P((void *state, u_char *options, int opt_len,
-				 int unit, int hdrlen, int debug));
-static int	z_decomp_init __P((void *state, u_char *options, int opt_len,
-				     int unit, int hdrlen, int mru, int debug));
-static int	z_compress __P((void *state, struct mbuf **mret,
-				  struct mbuf *mp, int slen, int maxolen));
-static void	z_incomp __P((void *state, struct mbuf *dmsg));
-static int	z_decompress __P((void *state, struct mbuf *cmp,
-				    struct mbuf **dmpp));
-static void	z_comp_reset __P((void *state));
-static void	z_decomp_reset __P((void *state));
-static void	z_comp_stats __P((void *state, struct compstat *stats));
+static void	*zalloc(void *, u_int items, u_int size);
+static void	zfree(void *, void *ptr, u_int nb);
+static void	*z_comp_alloc(u_char *options, int opt_len);
+static void	*z_decomp_alloc(u_char *options, int opt_len);
+static void	z_comp_free(void *state);
+static void	z_decomp_free(void *state);
+static int	z_comp_init(void *state, u_char *options, int opt_len,
+				 int unit, int hdrlen, int debug);
+static int	z_decomp_init(void *state, u_char *options, int opt_len,
+				     int unit, int hdrlen, int mru, int debug);
+static int	z_compress(void *state, struct mbuf **mret,
+				  struct mbuf *mp, int slen, int maxolen);
+static void	z_incomp(void *state, struct mbuf *dmsg);
+static int	z_decompress(void *state, struct mbuf *cmp,
+				    struct mbuf **dmpp);
+static void	z_comp_reset(void *state);
+static void	z_decomp_reset(void *state);
+static void	z_comp_stats(void *state, struct compstat *stats);
 
 /*
  * Procedures exported to if_ppp.c.

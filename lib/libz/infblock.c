@@ -1,4 +1,4 @@
-/*	$OpenBSD: infblock.c,v 1.7.14.1 2002/03/13 15:54:29 jason Exp $	*/
+/*	$OpenBSD: infblock.c,v 1.9 2002/03/12 00:26:30 millert Exp $	*/
 /* infblock.c -- interpret and process block types to last block
  * Copyright (C) 1995-2002 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h 
@@ -247,10 +247,12 @@ int r;
                              &s->sub.trees.tb, s->hufts, z);
       if (t != Z_OK)
       {
-        ZFREE(z, s->sub.trees.blens);
         r = t;
         if (r == Z_DATA_ERROR)
+        {
+          ZFREE(z, s->sub.trees.blens);
           s->mode = BAD;
+        }
         LEAVE
       }
       s->sub.trees.index = 0;
@@ -311,11 +313,13 @@ int r;
         t = inflate_trees_dynamic(257 + (t & 0x1f), 1 + ((t >> 5) & 0x1f),
                                   s->sub.trees.blens, &bl, &bd, &tl, &td,
                                   s->hufts, z);
-        ZFREE(z, s->sub.trees.blens);
         if (t != Z_OK)
         {
           if (t == (uInt)Z_DATA_ERROR)
+          {
+            ZFREE(z, s->sub.trees.blens);
             s->mode = BAD;
+          }
           r = t;
           LEAVE
         }
@@ -327,6 +331,7 @@ int r;
         }
         s->sub.decode.codes = c;
       }
+      ZFREE(z, s->sub.trees.blens);
       s->mode = CODES;
     case CODES:
       UPDATE

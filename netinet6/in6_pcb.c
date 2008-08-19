@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_pcb.c,v 1.26 2001/06/05 02:31:37 deraadt Exp $	*/
+/*	$OpenBSD: in6_pcb.c,v 1.32 2002/09/11 03:15:36 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -247,46 +247,25 @@ in6_pcbbind(inp, nam)
 				return EADDRNOTAVAIL;
 
 			/*
-			 * XXX: bind to an anycast address might accidentally
-			 * cause sending a packet with anycast source address.
-			 * We should allow to bind to a deprecated address, since
-			 * the application dare to use it.
+			 * bind to an anycast address might accidentally
+			 * cause sending a packet with an anycast source
+			 * address, so we forbid it.
+			 *
+			 * We should allow to bind to a deprecated address,
+			 * since the application dare to use it.
+			 * But, can we assume that they are careful enough
+			 * to check if the address is deprecated or not?
+			 * Maybe, as a safeguard, we should have a setsockopt
+			 * flag to control the bind(2) behavior against
+			 * deprecated addresses (default: forbid bind(2)).
 			 */
 			if (ia &&
 			    ((struct in6_ifaddr *)ia)->ia6_flags &
 			    (IN6_IFF_ANYCAST|IN6_IFF_NOTREADY|IN6_IFF_DETACHED))
-				return(EADDRNOTAVAIL);
+				return (EADDRNOTAVAIL);
 		}
-#if 0 /* we don't support it */
-		else if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-			struct sockaddr_in sin;
-
-			bzero(&sin, sizeof(sin));
-			sin.sin_port = 0;
-			sin.sin_len = sizeof(sin);
-			sin.sin_family = AF_INET;
-			sin.sin_addr.s_addr = sin6->sin6_addr.s6_addr32[3];
-
-			/*
-			 * Yechhhh, because of upcoming call to
-			 * ifa_ifwithaddr(), which does bcmp's
-			 * over the PORTS as well.  (What about flow?)
-			 */
-			sin6->sin6_port = 0;
-			sin6->sin6_flowinfo = 0;
-			if (ifa_ifwithaddr((struct sockaddr *)sin6) == 0) {
-				if (!IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr) ||
-				    ifa_ifwithaddr((struct sockaddr *)&sin) == 0) {
-					return EADDRNOTAVAIL;
-				}
-			}
-		}
-#endif
 		if (lport) {
 			struct inpcb *t;
-#if 0 /* we don't support IPv4 mapped address */
-			struct in_addr fa,la;
-#endif
 
 			/*
 			 * Question:  Do we wish to continue the Berkeley
@@ -301,22 +280,10 @@ in6_pcbbind(inp, nam)
 			    (error = suser(p->p_ucred, &p->p_acflag)))
 				return error;
 
-#if 0 /* we don't support IPv4 mapped address */
-			if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
-				fa.s_addr = 0;
-				la.s_addr = sin6->sin6_addr.s6_addr32[3];
-				wild &= ~INPLOOKUP_IPV6;
-
-				t = in_pcblookup(head, (struct in_addr *)&fa, 0,
-				    (struct in_addr *)&la, lport, wild);
-			} else
-#endif
-			{
-				t = in_pcblookup(head,
-				    (struct in_addr *)&zeroin6_addr, 0,
-				    (struct in_addr *)&sin6->sin6_addr, lport,
-				    wild);
-			}
+			t = in_pcblookup(head,
+			    (struct in_addr *)&zeroin6_addr, 0,
+			    (struct in_addr *)&sin6->sin6_addr, lport,
+			    wild);
 
 			if (t && (reuseport & t->inp_socket->so_options) == 0)
 				return EADDRINUSE;
@@ -330,7 +297,7 @@ in6_pcbbind(inp, nam)
 	}
 
 	if (lport == 0) {
-		error = in6_pcbsetport(&inp->inp_laddr6, inp);
+		error = in6_pcbsetport(&inp->inp_laddr6, inp, p);
 		if (error != 0)
 			return error;
 	} else
@@ -342,9 +309,10 @@ in6_pcbbind(inp, nam)
 }
 
 int
-in6_pcbsetport(laddr, inp)
+in6_pcbsetport(laddr, inp, p)
 	struct in6_addr *laddr;
 	struct inpcb *inp;
+	struct proc *p;
 {
 	struct socket *so = inp->inp_socket;
 	struct inpcbtable *table = inp->inp_table;
@@ -354,7 +322,6 @@ in6_pcbsetport(laddr, inp)
 	int count;
 	int loopcount = 0;
 	int wild = INPLOOKUP_IPV6;
-	struct proc *p = curproc;		/* XXX */
 	int error;
 
 	/* XXX we no longer support IPv4 mapped address, so no tweaks here */
@@ -473,11 +440,11 @@ in6_pcbconnect(inp, nam)
 	(void)&in6a;				/* XXX fool gcc */
 
 	if (nam->m_len != sizeof(*sin6))
-		return(EINVAL);
+		return (EINVAL);
 	if (sin6->sin6_family != AF_INET6)
-		return(EAFNOSUPPORT);
+		return (EAFNOSUPPORT);
 	if (sin6->sin6_port == 0)
-		return(EADDRNOTAVAIL);
+		return (EADDRNOTAVAIL);
 
 	/* reject IPv4 mapped address, we have no support for it */
 	if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr))
@@ -519,7 +486,7 @@ in6_pcbconnect(inp, nam)
 		if (sinp == 0) {
 			if (error == 0)
 				error = EADDRNOTAVAIL;
-			return(error);
+			return (error);
 		}
 		bzero(&mapped, sizeof(mapped));
 		mapped.s6_addr16[5] = htons(0xffff);
@@ -537,7 +504,7 @@ in6_pcbconnect(inp, nam)
 		if (in6a == 0) {
 			if (error == 0)
 				error = EADDRNOTAVAIL;
-			return(error);
+			return (error);
 		}
 	}
 	if (inp->inp_route6.ro_rt)
@@ -548,7 +515,7 @@ in6_pcbconnect(inp, nam)
 	if (in_pcblookup(inp->inp_table, &sin6->sin6_addr, sin6->sin6_port,
 	    IN6_IS_ADDR_UNSPECIFIED(&inp->inp_laddr6) ? in6a : &inp->inp_laddr6,
 	    inp->inp_lport, INPLOOKUP_IPV6)) {
-		return(EADDRINUSE);
+		return (EADDRINUSE);
 	}
 	if (IN6_IS_ADDR_UNSPECIFIED(&inp->inp_laddr6) ||
 	    (IN6_IS_ADDR_V4MAPPED(&inp->inp_laddr6) &&
@@ -565,7 +532,7 @@ in6_pcbconnect(inp, nam)
 	 */
 	inp->inp_ipv6.ip6_flow = sin6->sin6_flowinfo;
 	in_pcbrehash(inp);
-	return(0);
+	return (0);
 }
 
 /*
@@ -590,7 +557,7 @@ in6_pcbnotify(head, dst, fport_arg, src, lport_arg, cmd, cmdarg, notify)
 	uint lport_arg;
 	int cmd;
 	void *cmdarg;
-	void (*notify) __P((struct inpcb *, int));
+	void (*notify)(struct inpcb *, int);
 {
 	struct inpcb *inp, *ninp;
 	u_short fport = fport_arg, lport = lport_arg;
@@ -757,6 +724,8 @@ in6_setpeeraddr(inp, nam)
 	sin6->sin6_len = sizeof(struct sockaddr_in6);
 	sin6->sin6_port = inp->inp_fport;
 	sin6->sin6_addr = inp->inp_faddr6;
+	/* KAME hack: recover scopeid */
+	(void)in6_recoverscope(sin6, &inp->inp_faddr6, NULL);
 
 	return 0;
 }

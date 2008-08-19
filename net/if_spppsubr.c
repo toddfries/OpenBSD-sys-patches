@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.10.2.2 2001/12/27 15:39:32 jason Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.16 2002/09/26 20:43:54 chris Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -9,15 +9,27 @@
  * Heavily revamped to conform to RFC 1661.
  * Copyright (C) 1997, Joerg Wunsch.
  *
- * This software is distributed with NO WARRANTIES, not even the implied
- * warranties for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- * Authors grant any other persons or organisations permission to use
- * or modify this software as long as this message is kept with the software,
- * all derivative works or modified versions.
+ * THIS SOFTWARE IS PROVIDED BY THE FREEBSD PROJECT ``AS IS'' AND ANY 
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE FREEBSD PROJECT OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE   
+ * POSSIBILITY OF SUCH DAMAGE.
  *
- * Version 2.6, Tue May 12 17:10:39 MSD 1998
- *
+ * From: Version 2.6, Tue May 12 17:10:39 MSD 1998
  */
 
 #include <sys/param.h>
@@ -695,9 +707,9 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 			m_freem(m);
 			splx(s);
 			if(ip->ip_p == IPPROTO_TCP)
-				return(EADDRNOTAVAIL);
+				return (EADDRNOTAVAIL);
 			else
-				return(0);
+				return (0);
 		}
 
 
@@ -801,8 +813,7 @@ nosupport:
 				rv = ENOBUFS;
 		}
 		IF_ENQUEUE (ifq, m);
-	}
-	else
+	} else
 		IFQ_ENQUEUE(&ifp->if_snd, m, &pktattr, rv);
 	if (rv != 0) {
 		++ifp->if_oerrors;
@@ -3903,16 +3914,17 @@ sppp_get_ip_addrs(struct sppp *sp, u_long *src, u_long *dst, u_long *srcmask)
 	     ifa;
 	     ifa = ifa->ifa_link.tqe_next)
 #else
-	for (ifa = ifp->if_addrlist.tqh_first, si = 0;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
+	si = 0;
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list)
 #endif
+	{
 		if (ifa->ifa_addr->sa_family == AF_INET) {
 			si = (struct sockaddr_in *)ifa->ifa_addr;
 			sm = (struct sockaddr_in *)ifa->ifa_netmask;
 			if (si)
 				break;
 		}
+	}
 	if (ifa) {
 		if (si && si->sin_addr.s_addr) {
 			ssrc = si->sin_addr.s_addr;
@@ -3949,9 +3961,8 @@ sppp_set_ip_addr(struct sppp *sp, u_long src)
 	     ifa;
 	     ifa = ifa->ifa_link.tqe_next)
 #else
-	for (ifa = ifp->if_addrlist.tqh_first, si = 0;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
+	si = 0;
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list)
 #endif
 	{
 		if (ifa->ifa_addr->sa_family == AF_INET)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_eon.c,v 1.13 2001/06/27 03:49:54 angelos Exp $	*/
+/*	$OpenBSD: if_eon.c,v 1.17 2002/08/28 15:43:03 pefo Exp $	*/
 /*	$NetBSD: if_eon.c,v 1.15 1996/05/09 22:29:37 scottr Exp $	*/
 
 /*-
@@ -305,7 +305,7 @@ eonrtrequest(cmd, rt, info)
 		el->el_rt = rt;
 		break;
 	}
-	if (info || (gate = info->rti_info[RTAX_GATEWAY]))	/*XXX*/
+	if (info && (gate = info->rti_info[RTAX_GATEWAY]))	/*XXX*/
 		switch (gate->sa_family) {
 		case AF_LINK:
 #define SDL(x) ((struct sockaddr_dl *)x)
@@ -433,7 +433,7 @@ send:
 	}
 #endif
 
-	error = ip_output(m, (struct mbuf *) 0, ro, 0, NULL);
+	error = ip_output(m, (struct mbuf *) 0, ro, (void *)NULL, (void *)NULL);
 	m = 0;
 	if (error) {
 		ifp->if_oerrors++;
@@ -447,13 +447,7 @@ flush:
 }
 
 void
-#if __STDC__
 eoninput(struct mbuf *m, ...)
-#else
-eoninput(m, va_alist)
-	struct mbuf *m;
-	va_dcl
-#endif
 {
 	int             iphlen;
 	register struct eon_hdr *eonhdr;
@@ -490,7 +484,8 @@ eoninput(m, va_alist)
 			}
 #endif
 			eonifp->if_ierrors++;
-			m_freem(m);
+			if (m != 0)
+				m_freem(m);
 			return;
 		}
 	}

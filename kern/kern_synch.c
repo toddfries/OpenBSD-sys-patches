@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.38 2001/09/13 14:41:50 art Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.45 2002/07/24 17:58:49 mickey Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -48,11 +48,9 @@
 #include <sys/buf.h>
 #include <sys/signalvar.h>
 #include <sys/resourcevar.h>
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 #include <sys/sched.h>
 #include <sys/timeout.h>
-
-#include <uvm/uvm_extern.h>
 
 #ifdef KTRACE
 #include <sys/ktrace.h>
@@ -63,12 +61,15 @@
 u_char	curpriority;		/* usrpri of curproc */
 int	lbolt;			/* once a second sleep address */
 
-void scheduler_start __P((void));
+int whichqs;			/* Bit mask summary of non-empty Q's. */
+struct prochd qs[NQS];
 
-void roundrobin __P((void *));
-void schedcpu __P((void *));
-void updatepri __P((struct proc *));
-void endtsleep __P((void *));
+void scheduler_start(void);
+
+void roundrobin(void *);
+void schedcpu(void *);
+void updatepri(struct proc *);
+void endtsleep(void *);
 
 void
 scheduler_start()
@@ -346,7 +347,7 @@ int
 ltsleep(ident, priority, wmesg, timo, interlock)
 	void *ident;
 	int priority, timo;
-	char *wmesg;
+	const char *wmesg;
 	volatile struct simplelock *interlock;
 {
 	struct proc *p = curproc;
@@ -429,7 +430,7 @@ ltsleep(ident, priority, wmesg, timo, interlock)
 	mi_switch();
 #ifdef	DDB
 	/* handy breakpoint location after process "wakes" */
-	__asm(".globl bpendtsleep ; bpendtsleep:");
+	__asm(".globl bpendtsleep\nbpendtsleep:");
 #endif
 resume:
 	curpriority = p->p_usrpri;
@@ -547,7 +548,7 @@ sleep(ident, priority)
 	mi_switch();
 #ifdef	DDB
 	/* handy breakpoint location after process "wakes" */
-	__asm(".globl bpendsleep ; bpendsleep:");
+	__asm(".globl bpendsleep\nbpendsleep:");
 #endif
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_CSW))
@@ -698,10 +699,12 @@ preempt(newp)
 void
 mi_switch()
 {
-	register struct proc *p = curproc;	/* XXX */
-	register struct rlimit *rlim;
-	register long s, u;
+	struct proc *p = curproc;	/* XXX */
+	struct rlimit *rlim;
+	long s, u;
 	struct timeval tv;
+
+	splassert(IPL_STATCLOCK);
 
 	/*
 	 * Compute the amount of time during which the current
@@ -892,15 +895,15 @@ db_show_all_procs(addr, haddr, count, modif)
 	switch (*mode) {
 
 	case 'a':
-		db_printf("  PID  %-10s  %18s  %18s  %18s\n",
+		db_printf("   PID  %-10s  %18s  %18s  %18s\n",
 		    "COMMAND", "STRUCT PROC *", "UAREA *", "VMSPACE/VM_MAP");
 		break;
 	case 'n':
-		db_printf("  PID  %5s  %5s  %5s  S  %10s  %-9s  %-16s\n",
+		db_printf("   PID  %5s  %5s  %5s  S  %10s  %-9s  %-16s\n",
 		    "PPID", "PGRP", "UID", "FLAGS", "WAIT", "COMMAND");
 		break;
 	case 'w':
-		db_printf("  PID  %-16s  %-8s  %18s  %s\n",
+		db_printf("   PID  %-16s  %-8s  %18s  %s\n",
 		    "COMMAND", "EMUL", "WAIT-CHANNEL", "WAIT-MSG");
 		break;
 	}

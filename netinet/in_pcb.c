@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.56 2001/07/05 16:45:54 jjbg Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.64 2002/09/11 03:15:36 itojun Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -34,11 +34,11 @@
  * SUCH DAMAGE.
  *
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
- * 
+ *
  * NRL grants permission for redistribution and use in source and binary
  * forms, with or without modification, of the software and documentation
  * created at NRL provided that the following conditions are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
@@ -53,7 +53,7 @@
  * 4. Neither the name of the NRL nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THE SOFTWARE PROVIDED BY NRL IS PROVIDED BY NRL AND CONTRIBUTORS ``AS
  * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
  * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
@@ -65,7 +65,7 @@
  * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * The views and conclusions contained in the software and documentation
  * are those of the authors and should not be interpreted as representing
  * official policies, either expressed or implied, of the US Naval
@@ -133,7 +133,7 @@ in_pcbinit(table, hashsize)
 }
 
 struct baddynamicports baddynamicports;
- 
+
 /*
  * Check if the specified port is invalid for dynamic allocation.
  */
@@ -144,7 +144,7 @@ in_baddynamic(port, proto)
 {
 
 	if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
-		return(0);
+		return (0);
 
 	switch (proto) {
 	case IPPROTO_TCP:
@@ -403,84 +403,6 @@ in_pcbconnect(v, nam)
 			sin->sin_addr = in_ifaddr.tqh_first->ia_broadaddr.sin_addr;
 	}
 	if (inp->inp_laddr.s_addr == INADDR_ANY) {
-#if 0
-		register struct route *ro;
-		struct sockaddr_in *sin2;
-		struct in_ifaddr *ia;
-
-		ia = (struct in_ifaddr *)0;
-		/* 
-		 * If route is known or can be allocated now,
-		 * our src addr is taken from the i/f, else punt.
-		 */
-		ro = &inp->inp_route;
-		if (ro->ro_rt &&
-		    (satosin(&ro->ro_dst)->sin_addr.s_addr !=
-			sin->sin_addr.s_addr || 
-		    inp->inp_socket->so_options & SO_DONTROUTE)) {
-			RTFREE(ro->ro_rt);
-			ro->ro_rt = (struct rtentry *)0;
-		}
-		if ((inp->inp_socket->so_options & SO_DONTROUTE) == 0 && /*XXX*/
-		    (ro->ro_rt == (struct rtentry *)0 ||
-		    ro->ro_rt->rt_ifp == (struct ifnet *)0)) {
-			/* No route yet, so try to acquire one */
-			ro->ro_dst.sa_family = AF_INET;
-			ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
-			satosin(&ro->ro_dst)->sin_addr = sin->sin_addr;
-			rtalloc(ro);
-
-			/*
-			 * It is important to bzero out the rest of the
-			 * struct sockaddr_in when mixing v6 & v4!
-			 */
-			sin2 = (struct sockaddr_in *)&ro->ro_dst;
-			bzero(sin2->sin_zero, sizeof(sin2->sin_zero));
-		}
-		/*
-		 * If we found a route, use the address
-		 * corresponding to the outgoing interface
-		 * unless it is the loopback (in case a route
-		 * to our address on another net goes to loopback).
-		 */
-		if (ro->ro_rt && !(ro->ro_rt->rt_ifp->if_flags & IFF_LOOPBACK))
-			ia = ifatoia(ro->ro_rt->rt_ifa);
-		if (ia == 0) {
-			u_int16_t fport = sin->sin_port;
-
-			sin->sin_port = 0;
-			ia = ifatoia(ifa_ifwithdstaddr(sintosa(sin)));
-			if (ia == 0)
-				ia = ifatoia(ifa_ifwithnet(sintosa(sin)));
-			sin->sin_port = fport;
-			if (ia == 0)
-				ia = in_ifaddr.tqh_first;
-			if (ia == 0)
-				return (EADDRNOTAVAIL);
-		}
-		/*
-		 * If the destination address is multicast and an outgoing
-		 * interface has been set as a multicast option, use the
-		 * address of that interface as our source address.
-		 */
-		if (IN_MULTICAST(sin->sin_addr.s_addr) &&
-		    inp->inp_moptions != NULL) {
-			struct ip_moptions *imo;
-			struct ifnet *ifp;
-
-			imo = inp->inp_moptions;
-			if (imo->imo_multicast_ifp != NULL) {
-				ifp = imo->imo_multicast_ifp;
-				for (ia = in_ifaddr.tqh_first; ia != 0;
-				    ia = ia->ia_list.tqe_next)
-					if (ia->ia_ifp == ifp)
-						break;
-				if (ia == 0)
-					return (EADDRNOTAVAIL);
-			}
-		}
-		ifaddr = satosin(&ia->ia_addr);
-#else
 		int error;
 		ifaddr = in_selectsrc(sin, &inp->inp_route,
 			inp->inp_socket->so_options, inp->inp_moptions, &error);
@@ -489,7 +411,6 @@ in_pcbconnect(v, nam)
 				error = EADDRNOTAVAIL;
 			return error;
 		}
-#endif
 	}
 	if (in_pcbhashlookup(inp->inp_table, sin->sin_addr, sin->sin_port,
 	    inp->inp_laddr.s_addr ? inp->inp_laddr : ifaddr->sin_addr,
@@ -505,11 +426,15 @@ in_pcbconnect(v, nam)
 	inp->inp_fport = sin->sin_port;
 	in_pcbrehash(inp);
 #ifdef IPSEC
-        /* XXX Find IPsec TDB */
-        return (0);
-#else
-	return (0);
+	{
+		int error; /* This is just ignored */
+
+		/* Cause an IPsec SA to be established. */
+		ipsp_spd_inp(NULL, AF_INET, 0, &error, IPSP_DIRECTION_OUT,
+		    NULL, inp, NULL);
+	}
 #endif
+	return (0);
 }
 
 void
@@ -543,14 +468,6 @@ in_pcbdetach(v)
 	struct socket *so = inp->inp_socket;
 	int s;
 
-#if 0 /*KAME IPSEC*/
-	if (so->so_pcb) {
-		KEYDEBUG(KEYDEBUG_KEY_STAMP,
-			printf("DP call free SO=%p from in_pcbdetach\n", so));
-		key_freeso(so);
-	}
-	ipsec4_delete_pcbpolicy(inp);
-#endif /*IPSEC*/
 	so->so_pcb = 0;
 	sofree(so);
 	if (inp->inp_options)
@@ -560,11 +477,11 @@ in_pcbdetach(v)
 #ifdef INET6
 	if (inp->inp_flags & INP_IPV6)
 		ip6_freemoptions(inp->inp_moptions6);
-	else 
+	else
 #endif
 		ip_freemoptions(inp->inp_moptions);
 #ifdef IPSEC
-	/* XXX IPsec cleanup here */
+	/* IPsec cleanup here */
 	s = spltdb();
 	if (inp->inp_tdb_in)
 		TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
@@ -572,18 +489,12 @@ in_pcbdetach(v)
 	if (inp->inp_tdb_out)
 	        TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out, inp,
 			     inp_tdb_out_next);
-	if (inp->inp_ipsec_localid)
-		ipsp_reffree(inp->inp_ipsec_localid);
-	if (inp->inp_ipsec_remoteid)
-		ipsp_reffree(inp->inp_ipsec_remoteid);
-	if (inp->inp_ipsec_localcred)
-		ipsp_reffree(inp->inp_ipsec_localcred);
 	if (inp->inp_ipsec_remotecred)
 		ipsp_reffree(inp->inp_ipsec_remotecred);
-	if (inp->inp_ipsec_localauth)
-		ipsp_reffree(inp->inp_ipsec_localauth);
 	if (inp->inp_ipsec_remoteauth)
 		ipsp_reffree(inp->inp_ipsec_remoteauth);
+	if (inp->inp_ipo)
+		ipsec_delete_policy(inp->inp_ipo);
 	splx(s);
 #endif
 	s = splnet();
@@ -599,7 +510,7 @@ in_setsockaddr(inp, nam)
 	struct mbuf *nam;
 {
 	register struct sockaddr_in *sin;
-	
+
 	nam->m_len = sizeof (*sin);
 	sin = mtod(nam, struct sockaddr_in *);
 	bzero((caddr_t)sin, sizeof (*sin));
@@ -615,7 +526,7 @@ in_setpeeraddr(inp, nam)
 	struct mbuf *nam;
 {
 	register struct sockaddr_in *sin;
-	
+
 #ifdef INET6
 	if (sotopf(inp->inp_socket) == PF_INET6) {
 		in6_setpeeraddr(inp, nam);
@@ -650,11 +561,13 @@ in_pcbnotify(table, dst, fport_arg, laddr, lport_arg, errno, notify)
 	u_int fport_arg, lport_arg;
 	struct in_addr laddr;
 	int errno;
-	void (*notify) __P((struct inpcb *, int));
+	void (*notify)(struct inpcb *, int);
 {
-	register struct inpcb *inp, *oinp;
+	struct inpcb *inp, *oinp;
 	struct in_addr faddr;
 	u_int16_t fport = fport_arg, lport = lport_arg;
+
+	splassert(IPL_SOFTNET);
 
 #ifdef INET6
 	/*
@@ -698,7 +611,7 @@ in_pcbnotifyall(table, dst, errno, notify)
 	struct inpcbtable *table;
 	struct sockaddr *dst;
 	int errno;
-	void (*notify) __P((struct inpcb *, int));
+	void (*notify)(struct inpcb *, int);
 {
 	register struct inpcb *inp, *oinp;
 	struct in_addr faddr;
@@ -759,9 +672,9 @@ in_losing(inp)
 		rt_missmsg(RTM_LOSING, &info, rt->rt_flags, 0);
 		if (rt->rt_flags & RTF_DYNAMIC)
 			(void) rtrequest(RTM_DELETE, rt_key(rt),
-				rt->rt_gateway, rt_mask(rt), rt->rt_flags, 
+				rt->rt_gateway, rt_mask(rt), rt->rt_flags,
 				(struct rtentry **)0);
-		else 
+		else
 		/*
 		 * A new route can be allocated
 		 * the next time output is attempted.
@@ -813,16 +726,6 @@ in_pcblookup(table, faddrp, fport_arg, laddrp, lport_arg, flags)
 			struct in6_addr *laddr6 = (struct in6_addr *)laddrp;
 			struct in6_addr *faddr6 = (struct in6_addr *)faddrp;
 
-			/* 
-			 * Always skip AF_INET sockets when looking
-			 * for AF_INET6 addresses.  The only problem
-			 * with this comes if the PF_INET6 addresses
-			 * are v4-mapped addresses.  From what I've
-			 * been able to see, none of the callers cause
-			 * such a situation to occur.  If such a
-			 * situation DID occur, then it is possible to
-			 * miss a matching PCB.
-			 */
 			if (!(inp->inp_flags & INP_IPV6))
 				continue;
 
@@ -939,13 +842,13 @@ in_selectsrc(sin, ro, soopts, mopts, errorp)
 	struct in_ifaddr *ia;
 
 	ia = (struct in_ifaddr *)0;
-	/* 
+	/*
 	 * If route is known or can be allocated now,
 	 * our src addr is taken from the i/f, else punt.
 	 */
 	if (ro->ro_rt &&
 	    (satosin(&ro->ro_dst)->sin_addr.s_addr !=
-		sin->sin_addr.s_addr || 
+		sin->sin_addr.s_addr ||
 	    soopts & SO_DONTROUTE)) {
 		RTFREE(ro->ro_rt);
 		ro->ro_rt = (struct rtentry *)0;

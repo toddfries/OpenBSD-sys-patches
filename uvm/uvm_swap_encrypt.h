@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap_encrypt.h,v 1.5 2001/01/29 02:07:50 niklas Exp $	*/
+/*	$OpenBSD: uvm_swap_encrypt.h,v 1.7 2002/07/02 19:38:55 nate Exp $	*/
 
 /*
  * Copyright 1999 Niels Provos <provos@citi.umich.edu>
@@ -52,14 +52,14 @@ struct swap_key {
 	u_int16_t refcount;		/* pages that still need it */
 };
 
-int swap_encrypt_ctl __P((int *, u_int, void *, size_t *, void *, size_t,
-			  struct proc *));
+int swap_encrypt_ctl(int *, u_int, void *, size_t *, void *, size_t,
+			  struct proc *);
 
-void swap_encrypt __P((struct swap_key *,caddr_t, caddr_t, u_int64_t, size_t));
-void swap_decrypt __P((struct swap_key *,caddr_t, caddr_t, u_int64_t, size_t));
+void swap_encrypt(struct swap_key *,caddr_t, caddr_t, u_int64_t, size_t);
+void swap_decrypt(struct swap_key *,caddr_t, caddr_t, u_int64_t, size_t);
 
-void swap_key_cleanup __P((struct swap_key *));
-void swap_key_prepare __P((struct swap_key *, int));
+void swap_key_cleanup(struct swap_key *);
+void swap_key_prepare(struct swap_key *, int);
 
 #define SWAP_KEY_GET(s,x) do { if ((x)->refcount == 0) {\
 					swap_key_create(x); \
@@ -71,12 +71,12 @@ void swap_key_prepare __P((struct swap_key *, int));
 			       } \
 			     } while(0);
 
-void swap_key_create __P((struct swap_key *));
-void swap_key_delete __P((struct swap_key *));
+void swap_key_create(struct swap_key *);
+void swap_key_delete(struct swap_key *);
 
 extern int uvm_doswapencrypt;		/* swapencrypt enabled/disabled */
 extern int uvm_swprekeyprint;
 extern u_int uvm_swpkeyexpire;		/* expiry time for keys (tR) */
-extern int swap_encrypt_initalized;
+extern int swap_encrypt_initialized;
 
 #endif /* _UVM_SWAP_ENCRYPT_H */

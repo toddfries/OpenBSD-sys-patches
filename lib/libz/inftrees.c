@@ -1,4 +1,4 @@
-/*	$OpenBSD: inftrees.c,v 1.8.16.1 2002/03/13 15:54:29 jason Exp $	*/
+/*	$OpenBSD: inftrees.c,v 1.9 2002/03/12 00:26:30 millert Exp $	*/
 /* inftrees.c -- generate Huffman trees for efficient decoding
  * Copyright (C) 1995-2002 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsksymdef.h,v 1.15 2001/09/30 05:49:58 mickey Exp $	*/
+/*	$OpenBSD: wsksymdef.h,v 1.21 2002/08/29 22:18:41 miod Exp $	*/
 /*	$NetBSD: wsksymdef.h,v 1.34.4.1 2000/07/07 09:49:54 hannken Exp $ */
 
 /*-
@@ -59,7 +59,7 @@
  * Group Ascii (ISO Latin1) character in low byte
  */
 
-#define	KS_BackSpace 		0x7f
+#define	KS_BackSpace 		0x08
 #define	KS_Tab 			0x09
 #define	KS_Linefeed 		0x0a
 #define	KS_Clear 		0x0b
@@ -355,6 +355,67 @@
 #define KS_Cyrillic_yeukr	0xa4
 #define KS_Cyrillic_YEUKR	0xb4
 
+ /*
+ * Group Latin-7 (iso8859-13)
+ */
+
+#define KS_L7_rightdblquot     0xa1
+#define KS_L7_dbllow9quot      0xa5
+#define KS_L7_Ostroke          0xa8
+#define KS_L7_Rcedilla         0xaa
+#define KS_L7_AE               0xaf
+#define KS_L7_leftdblquot      0xb4
+#define KS_L7_ostroke          0xb8
+#define KS_L7_rcedilla         0xba
+#define KS_L7_ae               0xbf
+#define KS_L7_Aogonek          0xc0
+#define KS_L7_Iogonek          0xc1
+#define KS_L7_Amacron          0xc2
+#define KS_L7_Cacute           0xc3
+#define KS_L7_Eogonek          0xc6
+#define KS_L7_Emacron          0xc7
+#define KS_L7_Ccaron           0xc8
+#define KS_L7_Zacute           0xca
+#define KS_L7_Edot             0xcb
+#define KS_L7_Gcedilla         0xcc
+#define KS_L7_Kcedilla         0xcd
+#define KS_L7_Imacron          0xce
+#define KS_L7_Lcedilla         0xcf
+#define KS_L7_Scaron           0xd0
+#define KS_L7_Nacute           0xd1
+#define KS_L7_Ncedilla         0xd2
+#define KS_L7_Omacron          0xd4
+#define KS_L7_Uogonek          0xd8
+#define KS_L7_Lstroke          0xd9
+#define KS_L7_Sacute           0xda
+#define KS_L7_Umacron          0xdb
+#define KS_L7_Zdot             0xdd
+#define KS_L7_Zcaron           0xde
+#define KS_L7_aogonek          0xe0
+#define KS_L7_iogonek          0xe1
+#define KS_L7_amacron          0xe2
+#define KS_L7_cacute           0xe3
+#define KS_L7_eogonek          0xe6
+#define KS_L7_emacron          0xe7
+#define KS_L7_ccaron           0xe8
+#define KS_L7_zacute           0xea
+#define KS_L7_edot             0xeb
+#define KS_L7_gcedilla         0xec
+#define KS_L7_kcedilla         0xed
+#define KS_L7_imacron          0xee
+#define KS_L7_lcedilla         0xef
+#define KS_L7_scaron           0xf0
+#define KS_L7_nacute           0xf1
+#define KS_L7_ncedilla         0xf2
+#define KS_L7_omacron          0xf4
+#define KS_L7_uogonek          0xf8
+#define KS_L7_lstroke          0xf9
+#define KS_L7_sacute           0xfa
+#define KS_L7_umacron          0xfb
+#define KS_L7_zdot             0xfd
+#define KS_L7_zcaron           0xfe
+#define KS_L7_rightsnglquot    0xff
+
 /*
  * Group 1 (modifiers)
  */
@@ -484,6 +545,14 @@
 #define KS_Execute		0xf38b
 #define KS_Find			0xf38c
 #define KS_Select		0xf38d
+#define KS_Again		0xf38e
+#define KS_Props		0xf38f
+#define KS_Undo			0xf390
+#define KS_Front		0xf391
+#define KS_Copy			0xf392
+#define KS_Open			0xf393
+#define KS_Paste		0xf394
+#define KS_Cut			0xf395
 
 #define KS_Menu			0xf3c0
 #define KS_Pause		0xf3c1
@@ -578,6 +647,9 @@
 #define KB_SF			0x1000
 #define KB_PT			0x1100
 #define KB_UA			0x1200
+#define KB_LT			0x1300
+#define KB_LA			0x1400
+#define KB_BR			0x1500
 
 #define KB_NODEAD		0x0001
 #define KB_DECLK		0x0002	/* DEC LKnnn layout */
@@ -606,7 +678,10 @@
 	{ KB_UA,	"ua" }, \
 	{ KB_SG,	"sg" }, \
 	{ KB_SF,	"sf" }, \
-	{ KB_PT,	"pt" }
+	{ KB_PT,	"pt" }, \
+	{ KB_LT,	"lt" }, \
+	{ KB_LA,	"la" }, \
+	{ KB_BR,	"br" }
 
 #define KB_VARTAB \
 	{ KB_NODEAD,	"nodead" }, \

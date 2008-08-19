@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp6_output.c,v 1.4 2001/06/09 06:43:38 angelos Exp $	*/
+/*	$OpenBSD: udp6_output.c,v 1.8 2002/09/11 03:15:36 itojun Exp $	*/
 /*	$KAME: udp6_output.c,v 1.21 2001/02/07 11:51:54 itojun Exp $	*/
 
 /*
@@ -74,6 +74,7 @@
 #include <sys/errno.h>
 #include <sys/stat.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/syslog.h>
 
 #include <net/if.h>
@@ -92,8 +93,6 @@
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
 #include <netinet6/ip6protosw.h>
-
-#undef IPSEC
 
 #include "faith.h"
 
@@ -134,6 +133,7 @@ udp6_output(in6p, m, addr6, control)
 	int af, hlen;
 	int flags;
 	struct sockaddr_in6 tmp;
+	struct proc *p = curproc;	/* XXX */
 
 	priv = 0;
 	if ((in6p->in6p_socket->so_state & SS_PRIV) != 0)
@@ -201,7 +201,7 @@ udp6_output(in6p, m, addr6, control)
 			goto release;
 		}
 		if (in6p->in6p_lport == 0 &&
-		    (error = in6_pcbsetport(laddr, in6p)) != 0)
+		    (error = in6_pcbsetport(laddr, in6p, p)) != 0)
 			goto release;
 	} else {
 		if (IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_faddr)) {
@@ -266,15 +266,12 @@ udp6_output(in6p, m, addr6, control)
 		}
 
 		flags = 0;
-#ifdef IPV6_MINMTU
+#ifdef IN6P_MINMTU
 		if (in6p->in6p_flags & IN6P_MINMTU)
 			flags |= IPV6_MINMTU;
 #endif
 
 		udp6stat.udp6s_opackets++;
-#ifdef IPSEC
-		ipsec_setsocket(m, in6p->in6p_socket);
-#endif /*IPSEC*/
 		error = ip6_output(m, in6p->in6p_outputopts, &in6p->in6p_route,
 			    flags, in6p->in6p_moptions, NULL);
 		break;
@@ -292,5 +289,5 @@ releaseopt:
 		in6p->in6p_outputopts = stickyopt;
 		m_freem(control);
 	}
-	return(error);
+	return (error);
 }

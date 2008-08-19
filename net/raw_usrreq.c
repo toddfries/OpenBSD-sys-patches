@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_usrreq.c,v 1.3 1998/09/17 12:29:55 deraadt Exp $	*/
+/*	$OpenBSD: raw_usrreq.c,v 1.6 2002/09/11 05:38:47 itojun Exp $	*/
 /*	$NetBSD: raw_usrreq.c,v 1.11 1996/02/13 22:00:43 christos Exp $	*/
 
 /*
@@ -71,13 +71,7 @@ raw_init()
  * Raw protocol interface.
  */
 void
-#if __STDC__
 raw_input(struct mbuf *m0, ...)
-#else
-raw_input(m0, va_alist)
-	struct mbuf *m0;
-	va_dcl
-#endif
 {
 	register struct rawcb *rp;
 	register struct mbuf *m = m0;
@@ -94,7 +88,7 @@ raw_input(m0, va_alist)
 	va_end(ap);
 
 	last = 0;
-	for (rp = rawcb.lh_first; rp != 0; rp = rp->rcb_list.le_next) {
+	LIST_FOREACH(rp, &rawcb, rcb_list) {
 		if (rp->rcb_proto.sp_family != proto->sp_family)
 			continue;
 		if (rp->rcb_proto.sp_protocol  &&
@@ -289,7 +283,7 @@ raw_usrreq(so, req, m, nam, control)
 	 */
 	case PRU_RCVOOB:
 	case PRU_RCVD:
-		return(EOPNOTSUPP);
+		return (EOPNOTSUPP);
 
 	case PRU_LISTEN:
 	case PRU_ACCEPT:

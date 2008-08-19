@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.80.2.1 2002/10/13 20:56:46 miod Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.98 2002/10/02 21:56:30 nordin Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -54,20 +54,19 @@
 #include <sys/uio.h>
 #include <sys/malloc.h>
 #include <sys/dirent.h>
+#include <sys/extattr.h>
 
 #include <sys/syscallargs.h>
 
-#include <vm/vm.h>
-#include <sys/sysctl.h>
-
 #include <uvm/uvm_extern.h>
+#include <sys/sysctl.h>
 
 extern int suid_clear;
 int	usermount = 0;		/* sysctl: by default, users may not mount */
 
-static int change_dir __P((struct nameidata *, struct proc *));
+static int change_dir(struct nameidata *, struct proc *);
 
-void checkdirs __P((struct vnode *));
+void checkdirs(struct vnode *);
 
 /*
  * Redirection info so we don't have to include the union fs routines in
@@ -77,8 +76,8 @@ void checkdirs __P((struct vnode *));
  * it to a stub routine.
  */
 
-int (*union_check_p) __P((struct proc *, struct vnode **,
-    struct file *, struct uio, int *)) = NULL;
+int (*union_check_p)(struct proc *, struct vnode **,
+    struct file *, struct uio, int *) = NULL;
 
 /*
  * Virtual File System System Calls
@@ -107,18 +106,26 @@ sys_mount(p, v, retval)
 	u_long fstypenum = 0;
 #endif
 	char fstypename[MFSNAMELEN];
+	char fspath[MNAMELEN];
 	struct vattr va;
 	struct nameidata nd;
 	struct vfsconf *vfsp;
+	struct timeval tv;
 
 	if (usermount == 0 && (error = suser(p->p_ucred, &p->p_acflag)))
 		return (error);
 
 	/*
+	 * Mount points must fit in MNAMELEN, not MAXPATHLEN.
+	 */
+	error = copyinstr(SCARG(uap, path), fspath, MNAMELEN, NULL);
+	if (error)
+		return(error);
+
+	/*
 	 * Get vnode to be covered
 	 */
-	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
-	    SCARG(uap, path), p);
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, fspath, p);
 	if ((error = namei(&nd)) != 0)
 		return (error);
 	vp = nd.ni_vp;
@@ -159,6 +166,10 @@ sys_mount(p, v, retval)
 				return (EPERM);
 			}
 			SCARG(uap, flags) |= MNT_NOSUID | MNT_NODEV;
+		}
+		if ((error = vfs_busy(mp, LK_NOWAIT, 0, p)) != 0) {
+			vput(vp);
+			return (error);
 		}
 		VOP_UNLOCK(vp, 0, p);
 		goto update;
@@ -237,7 +248,9 @@ sys_mount(p, v, retval)
 		M_MOUNT, M_WAITOK);
 	bzero((char *)mp, (u_long)sizeof(struct mount));
 	lockinit(&mp->mnt_lock, PVFS, "vfslock", 0, 0);
-	vfs_busy(mp, LK_NOWAIT, 0, p);
+	/* This error never happens, but it makes auditing easier */
+	if ((error = vfs_busy(mp, LK_NOWAIT, 0, p)))
+		return (error);
 	mp->mnt_op = vfsp->vfc_vfsops;
 	mp->mnt_vfc = vfsp;
 	mp->mnt_flag |= (vfsp->vfc_flags & MNT_VISFLAGMASK);
@@ -262,6 +275,10 @@ update:
 	 * Mount the filesystem.
 	 */
 	error = VFS_MOUNT(mp, SCARG(uap, path), SCARG(uap, data), &nd, p);
+	if (!error) {
+		microtime(&tv);
+		mp->mnt_stat.f_ctime = tv.tv_sec;
+	}
 	if (mp->mnt_flag & MNT_UPDATE) {
 		vrele(vp);
 		if (mp->mnt_flag & MNT_WANTRDWR)
@@ -410,7 +427,7 @@ sys_unmount(p, v, retval)
 	}
 	vput(vp);
 
-	if (vfs_busy(mp, 0, NULL, p))
+	if (vfs_busy(mp, LK_EXCLUSIVE, NULL, p))
 		return (EBUSY);
 
 	return (dounmount(mp, SCARG(uap, flags), p));
@@ -420,18 +437,11 @@ sys_unmount(p, v, retval)
  * Do the actual file system unmount.
  */
 int
-dounmount(mp, flags, p)
-	register struct mount *mp;
-	int flags;
-	struct proc *p;
+dounmount(struct mount *mp, int flags, struct proc *p)
 {
 	struct vnode *coveredvp;
 	int error;
 
-	simple_lock(&mountlist_slock);
-	mp->mnt_flag |= MNT_UNMOUNT;
-	vfs_unbusy(mp, p);
-	lockmgr(&mp->mnt_lock, LK_DRAIN | LK_INTERLOCK, &mountlist_slock, p);
  	mp->mnt_flag &=~ MNT_ASYNC;
  	cache_purgevfs(mp);	/* remove cache entries for this file sys */
  	if (mp->mnt_syncer != NULL)
@@ -444,12 +454,8 @@ dounmount(mp, flags, p)
  	if (error) {
  		if ((mp->mnt_flag & MNT_RDONLY) == 0 && mp->mnt_syncer == NULL)
  			(void) vfs_allocate_syncvnode(mp);
-		mp->mnt_flag &= ~MNT_UNMOUNT;
-		lockmgr(&mp->mnt_lock, LK_RELEASE | LK_INTERLOCK | LK_REENABLE,
+		lockmgr(&mp->mnt_lock, LK_RELEASE | LK_INTERLOCK,
 		    &mountlist_slock, p);
-		if (mp->mnt_flag & MNT_MWAIT)
-			wakeup((caddr_t)mp);
-		mp->mnt_flag &= ~MNT_MWAIT;
 		return (error);
 	}
 	CIRCLEQ_REMOVE(&mountlist, mp, mnt_list);
@@ -461,8 +467,6 @@ dounmount(mp, flags, p)
 	if (mp->mnt_vnodelist.lh_first != NULL)
 		panic("unmount: dangling vnode");
 	lockmgr(&mp->mnt_lock, LK_RELEASE | LK_INTERLOCK, &mountlist_slock, p);
-	if (mp->mnt_flag & MNT_MWAIT)
-		wakeup((caddr_t)mp);
 	free((caddr_t)mp, M_MOUNT);
 	return (0);
 }
@@ -594,13 +598,13 @@ sys_fstatfs(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct sys_fstatfs_args /* {
+	struct sys_fstatfs_args /* {
 		syscallarg(int) fd;
 		syscallarg(struct statfs *) buf;
 	} */ *uap = v;
 	struct file *fp;
 	struct mount *mp;
-	register struct statfs *sp;
+	struct statfs *sp;
 	int error;
 	struct statfs sb;
 
@@ -608,7 +612,9 @@ sys_fstatfs(p, v, retval)
 		return (error);
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	sp = &mp->mnt_stat;
-	if ((error = VFS_STATFS(mp, sp, p)) != 0)
+	error = VFS_STATFS(mp, sp, p);
+	FRELE(fp);
+	if (error)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
 #if notyet
@@ -713,7 +719,7 @@ sys_fchdir(p, v, retval)
 	struct sys_fchdir_args /* {
 		syscallarg(int) fd;
 	} */ *uap = v;
-	register struct filedesc *fdp = p->p_fd;
+	struct filedesc *fdp = p->p_fd;
 	struct vnode *vp, *tdp;
 	struct mount *mp;
 	struct file *fp;
@@ -723,6 +729,7 @@ sys_fchdir(p, v, retval)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	VREF(vp);
+	FRELE(fp);
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (vp->v_type != VDIR)
 		error = ENOTDIR;
@@ -873,17 +880,18 @@ sys_open(p, v, retval)
 		flags &= ~O_TRUNC;	/* Must do truncate ourselves */
 	}
 	if ((error = vn_open(&nd, flags, cmode)) != 0) {
-		ffree(fp);
 		if ((error == ENODEV || error == ENXIO) &&
 		    p->p_dupfd >= 0 &&			/* XXX from fdopen */
 		    (error =
 			dupfdopen(fdp, indx, p->p_dupfd, flags, error)) == 0) {
+			closef(fp, p);
 			*retval = indx;
 			return (0);
 		}
 		if (error == ERESTART)
 			error = EINTR;
 		fdremove(fdp, indx);
+		closef(fp, p);
 		return (error);
 	}
 	p->p_dupfd = 0;
@@ -906,9 +914,9 @@ sys_open(p, v, retval)
 		VOP_UNLOCK(vp, 0, p);
 		error = VOP_ADVLOCK(vp, (caddr_t)fp, F_SETLK, &lf, type);
 		if (error) {
-			(void) vn_close(vp, fp->f_flag, fp->f_cred, p);
-			ffree(fp);
+			/* closef will vn_close the file for us. */
 			fdremove(fdp, indx);
+			closef(fp, p);
 			return (error);
 		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -929,14 +937,15 @@ sys_open(p, v, retval)
 		}
 		if (error) {
 			VOP_UNLOCK(vp, 0, p);
-			(void) vn_close(vp, fp->f_flag, fp->f_cred, p);
-			ffree(fp);
+			/* closef will close the file for us. */
 			fdremove(fdp, indx);
+			closef(fp, p);
 			return (error);
 		}
 	}
 	VOP_UNLOCK(vp, 0, p);
 	*retval = indx;
+	FILE_SET_MATURE(fp);
 	return (0);
 }
 
@@ -1088,9 +1097,9 @@ sys_fhopen(p, v, retval)
 		VOP_UNLOCK(vp, 0, p);
 		error = VOP_ADVLOCK(vp, (caddr_t)fp, F_SETLK, &lf, type);
 		if (error) {
-			(void) vn_close(vp, fp->f_flag, fp->f_cred, p);
-			ffree(fp);
+			/* closef will vn_close the file for us. */
 			fdremove(fdp, indx);
+			closef(fp, p);
 			return (error);
 		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -1098,11 +1107,12 @@ sys_fhopen(p, v, retval)
 	}
 	VOP_UNLOCK(vp, 0, p);
 	*retval = indx;
+	FILE_SET_MATURE(fp);
 	return (0);
 
 bad:
-	ffree(fp);
 	fdremove(fdp, indx);
+	closef(fp, p);
 	if (vp != NULL)
 		vput(vp);
 	return (error);
@@ -1506,8 +1516,7 @@ sys_lseek(p, v, retval)
 	struct vnode *vp;
 	int error, special;
 
-	if ((u_int)SCARG(uap, fd) >= fdp->fd_nfiles ||
-	    (fp = fdp->fd_ofiles[SCARG(uap, fd)]) == NULL)
+	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
 		return (EBADF);
 	if (fp->f_type != DTYPE_VNODE)
 		return (ESPIPE);
@@ -1788,7 +1797,7 @@ sys_fchflags(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct sys_fchflags_args /* {
+	struct sys_fchflags_args /* {
 		syscallarg(int) fd;
 		syscallarg(unsigned int) flags;
 	} */ *uap = v;
@@ -1822,6 +1831,7 @@ sys_fchflags(p, v, retval)
 	}
 out:
 	VOP_UNLOCK(vp, 0, p);
+	FRELE(fp);
 	return (error);
 }
 
@@ -1874,7 +1884,7 @@ sys_fchmod(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct sys_fchmod_args /* {
+	struct sys_fchmod_args /* {
 		syscallarg(int) fd;
 		syscallarg(int) mode;
 	} */ *uap = v;
@@ -1899,6 +1909,7 @@ sys_fchmod(p, v, retval)
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
 	VOP_UNLOCK(vp, 0, p);
+	FRELE(fp);
 	return (error);
 }
 
@@ -2016,12 +2027,12 @@ sys_fchown(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct sys_fchown_args /* {
+	struct sys_fchown_args /* {
 		syscallarg(int) fd;
 		syscallarg(int) uid;
 		syscallarg(int) gid;
 	} */ *uap = v;
-	register struct vnode *vp;
+	struct vnode *vp;
 	struct vattr vattr;
 	int error;
 	struct file *fp;
@@ -2053,6 +2064,7 @@ sys_fchown(p, v, retval)
 	}
 out:
 	VOP_UNLOCK(vp, 0, p);
+	FRELE(fp);
 	return (error);
 }
 
@@ -2126,7 +2138,7 @@ sys_futimes(p, v, retval)
 		syscallarg(int) fd;
 		syscallarg(struct timeval *) tptr;
 	} */ *uap = v;
-	register struct vnode *vp;
+	struct vnode *vp;
 	struct timeval tv[2];
 	struct vattr vattr;
 	int error;
@@ -2163,6 +2175,7 @@ sys_futimes(p, v, retval)
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
 	VOP_UNLOCK(vp, 0, p);
+	FRELE(fp);
 	return (error);
 }
 
@@ -2214,7 +2227,7 @@ sys_ftruncate(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct sys_ftruncate_args /* {
+	struct sys_ftruncate_args /* {
 		syscallarg(int) fd;
 		syscallarg(int) pad;
 		syscallarg(off_t) length;
@@ -2226,8 +2239,10 @@ sys_ftruncate(p, v, retval)
 
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
-	if ((fp->f_flag & FWRITE) == 0)
-		return (EINVAL);
+	if ((fp->f_flag & FWRITE) == 0) {
+		error = EINVAL;
+		goto bad;
+	}
 	vp = (struct vnode *)fp->f_data;
 	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -2239,6 +2254,8 @@ sys_ftruncate(p, v, retval)
 		error = VOP_SETATTR(vp, &vattr, fp->f_cred, p);
 	}
 	VOP_UNLOCK(vp, 0, p);
+bad:
+	FRELE(fp);
 	return (error);
 }
 
@@ -2255,7 +2272,7 @@ sys_fsync(p, v, retval)
 	struct sys_fsync_args /* {
 		syscallarg(int) fd;
 	} */ *uap = v;
-	register struct vnode *vp;
+	struct vnode *vp;
 	struct file *fp;
 	int error;
 
@@ -2270,6 +2287,7 @@ sys_fsync(p, v, retval)
 #endif
 
 	VOP_UNLOCK(vp, 0, p);
+	FRELE(fp);
 	return (error);
 }
 
@@ -2473,7 +2491,7 @@ sys_getdirentries(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct sys_getdirentries_args /* {
+	struct sys_getdirentries_args /* {
 		syscallarg(int) fd;
 		syscallarg(char *) buf;
 		syscallarg(int) count;
@@ -2490,12 +2508,16 @@ sys_getdirentries(p, v, retval)
 		return EINVAL;
 	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
-	if ((fp->f_flag & FREAD) == 0)
-		return (EBADF);
+	if ((fp->f_flag & FREAD) == 0) {
+		error = EBADF;
+		goto bad;
+	}
 	vp = (struct vnode *)fp->f_data;
 unionread:
-	if (vp->v_type != VDIR)
-		return (EINVAL);
+	if (vp->v_type != VDIR) {
+		error = EINVAL;
+		goto bad;
+	}
 	aiov.iov_base = SCARG(uap, buf);
 	aiov.iov_len = SCARG(uap, count);
 	auio.uio_iov = &aiov;
@@ -2510,13 +2532,13 @@ unionread:
 	fp->f_offset = auio.uio_offset;
 	VOP_UNLOCK(vp, 0, p);
 	if (error)
-		return (error);
+		goto bad;
 	if ((SCARG(uap, count) == auio.uio_resid) &&
 	    union_check_p &&
 	    (union_check_p(p, &vp, fp, auio, &error) != 0))
 		goto unionread;
 	if (error)
-		return (error);
+		goto bad;
 
 	if ((SCARG(uap, count) == auio.uio_resid) &&
 	    (vp->v_flag & VROOT) &&
@@ -2532,6 +2554,8 @@ unionread:
 	error = copyout((caddr_t)&loff, (caddr_t)SCARG(uap, basep),
 	    sizeof(long));
 	*retval = SCARG(uap, count) - auio.uio_resid;
+bad:
+	FRELE(fp);
 	return (error);
 }
 
@@ -2592,6 +2616,8 @@ out:
 
 /*
  * Convert a user file descriptor to a kernel file entry.
+ *
+ * On return *fpp is FREF:ed.
  */
 int
 getvnode(fdp, fd, fpp)
@@ -2601,11 +2627,13 @@ getvnode(fdp, fd, fpp)
 {
 	struct file *fp;
 
-	if ((u_int)fd >= fdp->fd_nfiles || (fp = fdp->fd_ofiles[fd]) == NULL)
+	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return (EBADF);
 	if (fp->f_type != DTYPE_VNODE)
 		return (EINVAL);
+	FREF(fp);
 	*fpp = fp;
+
 	return (0);
 }
 
@@ -2629,37 +2657,25 @@ sys_pread(p, v, retval)
 	struct file *fp;
 	struct vnode *vp;
 	off_t offset;
-	int error, fd = SCARG(uap, fd);
+	int fd = SCARG(uap, fd);
 
-	if ((u_int)fd >= fdp->fd_nfiles ||
-	    (fp = fdp->fd_ofiles[fd]) == NULL ||
-#if notyet
-	    (fp->f_iflags & FIF_WANTCLOSE) != 0 ||
-#endif
-	    (fp->f_flag & FREAD) == 0)
+	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return (EBADF);
-
-#if notyet
-	FILE_USE(fp);
-#endif
+	if ((fp->f_flag & FREAD) == 0)
+		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
 	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
-		error = ESPIPE;
-		goto out;
+		return (ESPIPE);
 	}
 
 	offset = SCARG(uap, offset);
 
-	/* dofileread() will unuse the descriptor for us */
+	FREF(fp);
+
+	/* dofileread() will FRELE the descriptor for us */
 	return (dofileread(p, fd, fp, SCARG(uap, buf), SCARG(uap, nbyte),
 	    &offset, retval));
-
- out:
-#if notyet
-	FILE_UNUSE(fp, p);
-#endif
-	return (error);
 }
 
 /*
@@ -2682,37 +2698,25 @@ sys_preadv(p, v, retval)
 	struct file *fp;
 	struct vnode *vp;
 	off_t offset;
-	int error, fd = SCARG(uap, fd);
+	int fd = SCARG(uap, fd);
 
-	if ((u_int)fd >= fdp->fd_nfiles ||
-	    (fp = fdp->fd_ofiles[fd]) == NULL ||
-#if notyet
-	    (fp->f_iflags & FIF_WANTCLOSE) != 0 ||
-#endif
-	    (fp->f_flag & FREAD) == 0)
+	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return (EBADF);
-
-#if notyet
-	FILE_USE(fp);
-#endif
+	if ((fp->f_flag & FREAD) == 0)
+		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
 	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
-		error = ESPIPE;
-		goto out;
+		return (ESPIPE);
 	}
+
+	FREF(fp);
 
 	offset = SCARG(uap, offset);
 
-	/* dofilereadv() will unuse the descriptor for us */
+	/* dofilereadv() will FRELE the descriptor for us */
 	return (dofilereadv(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt),
 	    &offset, retval));
-
- out:
-#if notyet
-	FILE_UNUSE(fp, p);
-#endif
-	return (error);
 }
 
 /*
@@ -2735,37 +2739,25 @@ sys_pwrite(p, v, retval)
 	struct file *fp;
 	struct vnode *vp;
 	off_t offset;
-	int error, fd = SCARG(uap, fd);
+	int fd = SCARG(uap, fd);
 
-	if ((u_int)fd >= fdp->fd_nfiles ||
-	    (fp = fdp->fd_ofiles[fd]) == NULL ||
-#if notyet
-	    (fp->f_iflags & FIF_WANTCLOSE) != 0 ||
-#endif
-	    (fp->f_flag & FWRITE) == 0)
+	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return (EBADF);
-
-#if notyet
-	FILE_USE(fp);
-#endif
+	if ((fp->f_flag & FWRITE) == 0)
+		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
 	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
-		error = ESPIPE;
-		goto out;
+		return (ESPIPE);
 	}
+
+	FREF(fp);
 
 	offset = SCARG(uap, offset);
 
-	/* dofilewrite() will unuse the descriptor for us */
+	/* dofilewrite() will FRELE the descriptor for us */
 	return (dofilewrite(p, fd, fp, SCARG(uap, buf), SCARG(uap, nbyte),
 	    &offset, retval));
-
- out:
-#if notyet
-	FILE_UNUSE(fp, p);
-#endif
-	return (error);
 }
 
 
@@ -2789,34 +2781,425 @@ sys_pwritev(p, v, retval)
 	struct file *fp;
 	struct vnode *vp;
 	off_t offset;
-	int error, fd = SCARG(uap, fd);
+	int fd = SCARG(uap, fd);
 
-	if ((u_int)fd >= fdp->fd_nfiles ||
-	    (fp = fdp->fd_ofiles[fd]) == NULL ||
-#if notyet
-	    (fp->f_iflags & FIF_WANTCLOSE) != 0 ||
-#endif
-	    (fp->f_flag & FWRITE) == 0)
+	if ((fp = fd_getfile(fdp, fd)) == NULL)
+		return (EBADF);
+	if ((fp->f_flag & FWRITE) == 0)
 		return (EBADF);
 
-#if notyet
-	FILE_USE(fp);
-#endif
 	vp = (struct vnode *)fp->f_data;
 	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
-		error = ESPIPE;
-		goto out;
+		return (ESPIPE);
 	}
+
+	FREF(fp);
 
 	offset = SCARG(uap, offset);
 
-	/* dofilewritev() will unuse the descriptor for us */
+	/* dofilewritev() will FRELE the descriptor for us */
 	return (dofilewritev(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt),
 	    &offset, retval));
+}
 
- out:
-#if notyet
-	FILE_UNUSE(fp, p);
-#endif
+#ifdef UFS_EXTATTR
+/*
+ * Syscall to push extended attribute configuration information into the
+ * VFS.  Accepts a path, which it converts to a mountpoint, as well as
+ * a command (int cmd), and attribute name and misc data.  For now, the
+ * attribute name is left in userspace for consumption by the VFS_op.
+ * It will probably be changed to be copied into sysspace by the
+ * syscall in the future, once issues with various consumers of the
+ * attribute code have raised their hands.
+ *
+ * Currently this is used only by UFS Extended Attributes.
+ */
+int
+sys_extattrctl(struct proc *p, void *v, register_t *reval)
+{
+	struct sys_extattrctl_args /* {
+		syscallarg(const char *) path;
+		syscallarg(int) cmd;
+		syscallarg(const char *) filename;
+		syscallarg(int) attrnamespace;
+		syscallarg(const char *) attrname;
+	} */ *uap = v;
+	struct vnode *filename_vp;
+	struct nameidata nd;
+	struct mount *mp;
+	char attrname[EXTATTR_MAXNAMELEN];
+	int error;
+
+	/*
+	 * SCARG(uap, attrname) not always defined.  We check again later
+	 * when we invoke the VFS call so as to pass in NULL there if needed.
+	 */
+	if (SCARG(uap, attrname) != NULL) {
+		error = copyinstr(SCARG(uap, attrname), attrname,
+		    EXTATTR_MAXNAMELEN, NULL);
+		if (error)
+			return (error);
+	}
+
+	/*
+	 * SCARG(uap, filename) not always defined.  If it is, grab
+	 * a vnode lock, which VFS_EXTATTRCTL() will later release.
+	 */
+	filename_vp = NULL;
+	if (SCARG(uap, filename) != NULL) {
+		NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
+		    SCARG(uap, filename), p);
+		if ((error = namei(&nd)) != 0)
+			return (error);
+		filename_vp = nd.ni_vp;
+	}
+
+	/* SCARG(uap, path) always defined. */
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	if ((error = namei(&nd)) != 0) {
+		if (filename_vp != NULL)
+			vput(filename_vp);
+		return (error);
+	}
+
+	mp = nd.ni_vp->v_mount;
+	if (error) {
+		if (filename_vp != NULL)
+			vput(filename_vp);
+		return (error);
+	}
+
+	if (SCARG(uap, attrname) != NULL) {
+		error = VFS_EXTATTRCTL(mp, SCARG(uap, cmd), filename_vp,
+		    SCARG(uap, attrnamespace), attrname, p);
+	} else {
+		error = VFS_EXTATTRCTL(mp, SCARG(uap, cmd), filename_vp,
+		    SCARG(uap, attrnamespace), NULL, p);
+	}
+
+	/*
+	 * VFS_EXTATTRCTL will have unlocked, but not de-ref'd,
+	 * filename_vp, so vrele it if it is defined.
+	 */
+	if (filename_vp != NULL)
+		vrele(filename_vp);
+
 	return (error);
 }
+
+/*-
+ * Set a named extended attribute on a file or directory
+ * 
+ * Arguments: unlocked vnode "vp", attribute namespace "attrnamespace",
+ *            kernelspace string pointer "attrname", userspace buffer
+ *            pointer "data", buffer length "nbytes", thread "td".
+ * Returns: 0 on success, an error number otherwise
+ * Locks: none
+ * References: vp must be a valid reference for the duration of the call
+ */
+static int
+extattr_set_vp(struct vnode *vp, int attrnamespace, const char *attrname,
+    void *data, size_t nbytes, struct proc *p, register_t *retval)
+{
+	struct uio auio;
+	struct iovec aiov;
+	ssize_t cnt;
+	int error;
+
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+
+	aiov.iov_base = data;
+	aiov.iov_len = nbytes;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_offset = 0;
+	if (nbytes > INT_MAX) {
+		error = EINVAL;
+		goto done;
+	}
+	auio.uio_resid = nbytes;
+	auio.uio_rw = UIO_WRITE;
+	auio.uio_segflg = UIO_USERSPACE;
+	auio.uio_procp = p;
+	cnt = nbytes;
+
+	error = VOP_SETEXTATTR(vp, attrnamespace, attrname, &auio,
+	    p->p_ucred, p);
+	cnt -= auio.uio_resid;
+	retval[0] = cnt;
+
+done:
+	VOP_UNLOCK(vp, 0, p);
+	return (error);
+}
+
+int
+sys_extattr_set_file(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_extattr_set_file_args /* {
+		syscallarg(const char *) path;
+		syscallarg(int) attrnamespace;
+		syscallarg(const char *) attrname;
+		syscallarg(void *) data;
+		syscallarg(size_t) nbytes;
+	} */ *uap = v;
+	struct nameidata nd;
+	char attrname[EXTATTR_MAXNAMELEN];
+	int error;
+
+	error = copyinstr(SCARG(uap, attrname), attrname, EXTATTR_MAXNAMELEN,
+	    NULL);
+	if (error)
+		return (error);
+
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	if ((error = namei(&nd)) != 0)
+		return (error);
+
+	error = extattr_set_vp(nd.ni_vp, SCARG(uap, attrnamespace), attrname,
+	    SCARG(uap, data), SCARG(uap, nbytes), p, retval);
+
+	vrele(nd.ni_vp);
+	return (error);
+}
+
+int
+sys_extattr_set_fd(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_extattr_set_fd_args /* {
+		syscallarg(int) fd;
+		syscallarg(int) attrnamespace;
+		syscallarg(const char *) attrname;
+		syscallarg(struct iovec *) iovp;
+		syscallarg(int) iovcnt;
+	} */ *uap = v;
+	struct file *fp;
+	char attrname[EXTATTR_MAXNAMELEN];
+	int error;
+
+	error = copyinstr(SCARG(uap, attrname), attrname, EXTATTR_MAXNAMELEN,
+	    NULL);
+	if (error)
+		return (error);
+
+	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+		return (error);
+
+	error = extattr_set_vp((struct vnode *)fp->f_data,
+	    SCARG(uap, attrnamespace), attrname, SCARG(uap, data),
+	    SCARG(uap, nbytes), p, retval);
+	FRELE(fp);
+
+	return (error);
+}
+
+/*-
+ * Get a named extended attribute on a file or directory
+ * 
+ * Arguments: unlocked vnode "vp", attribute namespace "attrnamespace",
+ *            kernelspace string pointer "attrname", userspace buffer
+ *            pointer "data", buffer length "nbytes", thread "td".
+ * Returns: 0 on success, an error number otherwise
+ * Locks: none
+ * References: vp must be a valid reference for the duration of the call
+ */
+static int
+extattr_get_vp(struct vnode *vp, int attrnamespace, const char *attrname,
+    void *data, size_t nbytes, struct proc *p, register_t *retval)
+{
+	struct uio auio;
+	struct iovec aiov;
+	ssize_t cnt;
+	size_t size;
+	int error;
+
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_READ);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+
+	/*
+	 * Slightly unusual semantics: if the user provides a NULL data
+	 * pointer, they don't want to receive the data, just the
+	 * maximum read length.
+	 */
+	if (data != NULL) {
+		aiov.iov_base = data;
+		aiov.iov_len = nbytes;
+		auio.uio_iov = &aiov;
+		auio.uio_offset = 0;
+		if (nbytes > INT_MAX) {
+			error = EINVAL;
+			goto done;
+		}
+		auio.uio_resid = nbytes;
+		auio.uio_rw = UIO_READ;
+		auio.uio_segflg = UIO_USERSPACE;
+		auio.uio_procp = p;
+		cnt = nbytes;
+		error = VOP_GETEXTATTR(vp, attrnamespace, attrname, &auio,
+		    NULL, p->p_ucred, p);
+		cnt -= auio.uio_resid;
+		retval[0] = cnt;
+	} else {
+		error = VOP_GETEXTATTR(vp, attrnamespace, attrname, NULL,
+		    &size, p->p_ucred, p);
+		retval[0] = size;
+	}
+done:
+	VOP_UNLOCK(vp, 0, p);
+	return (error);
+}
+
+int
+sys_extattr_get_file(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct sys_extattr_get_file_args /* {
+		syscallarg(const char *) path;
+		syscallarg(int) attrnamespace;
+		syscallarg(const char *) attrname;
+		syscallarg(void *) data;
+		syscallarg(size_t) nbytes;
+	} */ *uap = v;
+	struct nameidata nd;
+	char attrname[EXTATTR_MAXNAMELEN];
+	int error;
+
+	error = copyinstr(SCARG(uap, attrname), attrname, EXTATTR_MAXNAMELEN,
+	    NULL);
+	if (error)
+		return (error);
+
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	if ((error = namei(&nd)) != 0)
+		return (error);
+
+	error = extattr_get_vp(nd.ni_vp, SCARG(uap, attrnamespace), attrname,
+	    SCARG(uap, data), SCARG(uap, nbytes), p, retval);
+
+	vrele(nd.ni_vp);
+	return (error);
+}
+
+int
+sys_extattr_get_fd(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct sys_extattr_get_fd_args /* {
+		syscallarg(int) fd;
+		syscallarg(int) attrnamespace;
+		syscallarg(const char *) attrname;
+		syscallarg(void *) data;
+		syscallarg(size_t) nbytes;
+	} */ *uap = v;
+	struct file *fp;
+	char attrname[EXTATTR_MAXNAMELEN];
+	int error;
+
+	error = copyinstr(SCARG(uap, attrname), attrname, EXTATTR_MAXNAMELEN,
+	    NULL);
+	if (error)
+		return (error);
+
+	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+		return (error);
+
+	error = extattr_get_vp((struct vnode *)fp->f_data,
+	    SCARG(uap, attrnamespace), attrname, SCARG(uap, data),
+	    SCARG(uap, nbytes), p, retval);
+	FRELE(fp);
+
+	return (error);
+}
+
+/*
+ * extattr_delete_vp(): Delete a named extended attribute on a file or
+ *                      directory
+ * 
+ * Arguments: unlocked vnode "vp", attribute namespace "attrnamespace",
+ *            kernelspace string pointer "attrname", proc "p"
+ * Returns: 0 on success, an error number otherwise
+ * Locks: none
+ * References: vp must be a valid reference for the duration of the call
+ */
+static int
+extattr_delete_vp(struct vnode *vp, int attrnamespace, const char *attrname,
+    struct proc *p)
+{
+	int error;
+
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+
+	error = VOP_SETEXTATTR(vp, attrnamespace, attrname, NULL,
+	    p->p_ucred, p);
+
+	VOP_UNLOCK(vp, 0, p);
+	return (error);
+}
+
+int
+sys_extattr_delete_file(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct sys_extattr_delete_file_args /* {
+		syscallarg(int) fd;
+		syscallarg(int) attrnamespace;
+		syscallarg(const char *) attrname;
+	} */ *uap = v;
+	struct nameidata nd;
+	char attrname[EXTATTR_MAXNAMELEN];
+	int error;
+
+	error = copyinstr(SCARG(uap, attrname), attrname, EXTATTR_MAXNAMELEN,
+	     NULL);
+	if (error)
+		return(error);
+
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	if ((error = namei(&nd)) != 0)
+		return(error);
+
+	error = extattr_delete_vp(nd.ni_vp, SCARG(uap, attrnamespace),
+	    attrname, p);
+
+	vrele(nd.ni_vp);
+	return(error);
+}
+
+int
+sys_extattr_delete_fd(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	struct sys_extattr_delete_fd_args /* {
+		syscallarg(int) fd;
+		syscallarg(int) attrnamespace;
+		syscallarg(const char *) attrname;
+	} */ *uap = v; 
+	struct file *fp;
+	char attrname[EXTATTR_MAXNAMELEN];
+	int error;
+
+	error = copyinstr(SCARG(uap, attrname), attrname, EXTATTR_MAXNAMELEN,
+	    NULL);
+	if (error)
+		return (error);
+
+	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+		return (error);
+
+	error = extattr_delete_vp((struct vnode *)fp->f_data,
+	    SCARG(uap, attrnamespace), attrname, p);
+	FRELE(fp);
+
+	return (error);
+}
+#endif 

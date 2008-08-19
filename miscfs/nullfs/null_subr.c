@@ -1,4 +1,4 @@
-/*	$OpenBSD: null_subr.c,v 1.9 1999/04/28 09:28:15 art Exp $	*/
+/*	$OpenBSD: null_subr.c,v 1.11 2002/06/14 21:35:00 todd Exp $	*/
 /*	$NetBSD: null_subr.c,v 1.6 1996/05/10 22:50:52 jtk Exp $	*/
 
 /*
@@ -69,9 +69,9 @@ LIST_HEAD(null_node_hashhead, null_node) *null_node_hashtbl;
 u_long null_node_hash;
 
 static struct vnode *
-	null_node_find __P((struct mount *, struct vnode *));
+	null_node_find(struct mount *, struct vnode *);
 static int
-	null_node_alloc __P((struct mount *, struct vnode *, struct vnode **));
+	null_node_alloc(struct mount *, struct vnode *, struct vnode **);
 /*
  * Initialise cache headers
  */
@@ -144,7 +144,7 @@ null_node_alloc(mp, lowervp, vpp)
 	struct null_node *xp;
 	struct vnode *vp, *nvp;
 	int error;
-	extern int (**dead_vnodeop_p) __P((void *));
+	extern int (**dead_vnodeop_p)(void *);
 	struct proc *p = curproc;
 
 
@@ -239,7 +239,7 @@ loop:
 
 
 /*
- * Try to find an existing null_node vnode refering
+ * Try to find an existing null_node vnode referring
  * to it, otherwise make a new null_node vnode which
  * contains a reference to the lower vnode.
  *

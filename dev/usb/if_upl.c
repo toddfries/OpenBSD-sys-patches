@@ -1,5 +1,5 @@
-/*	$OpenBSD: if_upl.c,v 1.3 2001/06/15 03:38:35 itojun Exp $ */
-/*	$NetBSD: if_upl.c,v 1.10 2000/12/08 02:24:07 augustss Exp $	*/
+/*	$OpenBSD: if_upl.c,v 1.12 2002/07/29 02:56:56 nate Exp $ */
+/*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -78,26 +78,18 @@
 #include <net/bpf.h>
 #endif
 
-#if defined(__NetBSD__)
-#ifdef INET
-#include <netinet/in.h> 
-#include <netinet/in_var.h> 
-#include <netinet/if_inarp.h>
-#else
-#error upl without INET?
-#endif
-#endif
-
-#if defined(__OpenBSD__)
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_systm.h>
 #include <netinet/in_var.h>
+#if defined(__NetBSD__)
+#include <netinet/if_inarp.h>
+#elif defined(__OpenBSD__)
+#include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#endif
 #else
 #error upl without INET?
-#endif
 #endif
 
 #ifdef NS
@@ -317,7 +309,7 @@ USB_ATTACH(upl)
 		USB_ATTACH_ERROR_RETURN;
 	}
 
-	s = splimp();
+	s = splnet();
 
 	/* Initialize interface info.*/
 	ifp = &sc->sc_if;
@@ -333,18 +325,19 @@ USB_ATTACH(upl)
 	ifp->if_addrlen = 0;
 	ifp->if_hdrlen = 0;
 	ifp->if_output = upl_output;
+	ifp->if_baudrate = 12000000;
 #if defined(__NetBSD__)
 	ifp->if_input = upl_input;
+	ifp->if_dlt = DLT_RAW;
 #endif
-	ifp->if_baudrate = 12000000;
+	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Attach the interface. */
 	if_attach(ifp);
+	if_alloc_sadl(ifp);
 
-#if NBPFILTER > 0
-#if defined(__NetBSD__) || defined(__FreeBSD__)
-	bpfattach(ifp, DLT_EN10MB, 0);
-#endif
+#if defined(__NetBSD__) && NBPFILTER > 0
+	bpfattach(ifp, DLT_RAW, 0);
 #endif
 #if NRND > 0
 	rnd_attach_source(&sc->sc_rnd_source, USBDEVNAME(sc->sc_dev),
@@ -366,7 +359,7 @@ USB_DETACH(upl)
 	struct ifnet		*ifp = &sc->sc_if;
 	int			s;
 
-	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __FUNCTION__));
+	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
 	s = splusb();
 
@@ -410,7 +403,7 @@ upl_activate(device_ptr_t self, enum devact act)
 {
 	struct upl_softc *sc = (struct upl_softc *)self;
 
-	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __FUNCTION__));
+	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
 	switch (act) {
 	case DVACT_ACTIVATE:
@@ -434,7 +427,7 @@ upl_newbuf(struct upl_softc *sc, struct upl_chain *c, struct mbuf *m)
 {
 	struct mbuf		*m_new = NULL;
 
-	DPRINTFN(8,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __FUNCTION__));
+	DPRINTFN(8,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
 	if (m == NULL) {
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
@@ -470,7 +463,7 @@ upl_rx_list_init(struct upl_softc *sc)
 	struct upl_chain	*c;
 	int			i;
 
-	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __FUNCTION__));
+	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
 	cd = &sc->sc_cdata;
 	for (i = 0; i < UPL_RX_LIST_CNT; i++) {
@@ -501,7 +494,7 @@ upl_tx_list_init(struct upl_softc *sc)
 	struct upl_chain	*c;
 	int			i;
 
-	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __FUNCTION__));
+	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
 	cd = &sc->sc_cdata;
 	for (i = 0; i < UPL_TX_LIST_CNT; i++) {
@@ -562,7 +555,7 @@ upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	usbd_get_xfer_status(xfer, NULL, NULL, &total_len, NULL);
 
 	DPRINTFN(9,("%s: %s: enter status=%d length=%d\n",
-		    USBDEVNAME(sc->sc_dev), __FUNCTION__, status, total_len));
+		    USBDEVNAME(sc->sc_dev), __func__, status, total_len));
 
 	m = c->upl_mbuf;
 	memcpy(mtod(c->upl_mbuf, char *), c->upl_buf, total_len);
@@ -572,7 +565,7 @@ upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	m->m_pkthdr.rcvif = ifp;
 
-	s = splimp();
+	s = splnet();
 
 	/* XXX ugly */
 	if (upl_newbuf(sc, c, NULL) == ENOBUFS) {
@@ -593,9 +586,9 @@ upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 #endif
 
 	DPRINTFN(10,("%s: %s: deliver %d\n", USBDEVNAME(sc->sc_dev),
-		    __FUNCTION__, m->m_len));
+		    __func__, m->m_len));
 
-#if defined(__NetBSD__)
+#if defined(__NetBSD__) || defined(__OpenBSD__)
 	IF_INPUT(ifp, m);
 #else
 	upl_input(ifp, m);
@@ -613,7 +606,7 @@ upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	usbd_transfer(c->upl_xfer);
 
 	DPRINTFN(10,("%s: %s: start rx\n", USBDEVNAME(sc->sc_dev),
-		    __FUNCTION__));
+		    __func__));
 #endif
 }
 
@@ -632,10 +625,10 @@ upl_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	if (sc->sc_dying)
 		return;
 
-	s = splimp();
+	s = splnet();
 
 	DPRINTFN(10,("%s: %s: enter status=%d\n", USBDEVNAME(sc->sc_dev),
-		    __FUNCTION__, status));
+		    __func__, status));
 
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -659,7 +652,7 @@ upl_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	m_freem(c->upl_mbuf);
 	c->upl_mbuf = NULL;
 
-	if (ifp->if_snd.ifq_head != NULL)
+	if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
 		upl_start(ifp);
 
 	splx(s);
@@ -684,7 +677,7 @@ upl_send(struct upl_softc *sc, struct mbuf *m, int idx)
 	total_len = m->m_pkthdr.len;
 
 	DPRINTFN(10,("%s: %s: total_len=%d\n",
-		     USBDEVNAME(sc->sc_dev), __FUNCTION__, total_len));
+		     USBDEVNAME(sc->sc_dev), __func__, total_len));
 
 	usbd_setup_xfer(c->upl_xfer, sc->sc_ep[UPL_ENDPT_TX],
 	    c, c->upl_buf, total_len, USBD_NO_COPY, USBD_DEFAULT_TIMEOUT,
@@ -713,20 +706,21 @@ upl_start(struct ifnet *ifp)
 	if (sc->sc_dying)
 		return;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__FUNCTION__));
+	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
 
 	if (ifp->if_flags & IFF_OACTIVE)
 		return;
 
-	IF_DEQUEUE(&ifp->if_snd, m_head);
+	IFQ_POLL(&ifp->if_snd, m_head);
 	if (m_head == NULL)
 		return;
 
 	if (upl_send(sc, m_head, 0)) {
-		IF_PREPEND(&ifp->if_snd, m_head);
 		ifp->if_flags |= IFF_OACTIVE;
 		return;
 	}
+
+	IFQ_DEQUEUE(&ifp->if_snd, m_head);
 
 #if NBPFILTER > 0
 	/*
@@ -755,12 +749,12 @@ upl_init(void *xsc)
 	if (sc->sc_dying)
 		return;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__FUNCTION__));
+	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
 
 	if (ifp->if_flags & IFF_RUNNING)
 		return;
 
-	s = splimp();
+	s = splnet();
 
 	/* Init TX ring. */
 	if (upl_tx_list_init(sc) == ENOBUFS) {
@@ -813,7 +807,7 @@ upl_openpipes(struct upl_softc *sc)
 	}
 	err = usbd_open_pipe_intr(sc->sc_iface, sc->sc_ed[UPL_ENDPT_INTR],
 	    USBD_EXCLUSIVE_USE, &sc->sc_ep[UPL_ENDPT_INTR], sc,
-	    &sc->sc_ibuf, UPL_INTR_PKTLEN, upl_intr, 
+	    &sc->sc_ibuf, UPL_INTR_PKTLEN, upl_intr,
 	    UPL_INTR_INTERVAL);
 	if (err) {
 		printf("%s: open intr pipe failed: %s\n",
@@ -844,7 +838,7 @@ upl_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	struct ifnet		*ifp = &sc->sc_if;
 	uByte			stat;
 
-	DPRINTFN(15,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__FUNCTION__));
+	DPRINTFN(15,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
 
 	if (sc->sc_dying)
 		return;
@@ -874,7 +868,7 @@ upl_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		return;
 
 	DPRINTFN(10,("%s: %s: stat=0x%02x\n", USBDEVNAME(sc->sc_dev),
-		     __FUNCTION__, stat));
+		     __func__, stat));
 
 }
 
@@ -890,9 +884,9 @@ upl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		return (EIO);
 
 	DPRINTFN(5,("%s: %s: cmd=0x%08lx\n",
-		    USBDEVNAME(sc->sc_dev), __FUNCTION__, command));
+		    USBDEVNAME(sc->sc_dev), __func__, command));
 
-	s = splimp();
+	s = splnet();
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -954,7 +948,7 @@ upl_watchdog(struct ifnet *ifp)
 {
 	struct upl_softc	*sc = ifp->if_softc;
 
-	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__FUNCTION__));
+	DPRINTFN(5,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
 
 	if (sc->sc_dying)
 		return;
@@ -965,7 +959,7 @@ upl_watchdog(struct ifnet *ifp)
 	upl_stop(sc);
 	upl_init(sc);
 
-	if (ifp->if_snd.ifq_head != NULL)
+	if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
 		upl_start(ifp);
 }
 
@@ -980,7 +974,7 @@ upl_stop(struct upl_softc *sc)
 	struct ifnet		*ifp;
 	int			i;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__FUNCTION__));
+	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
 
 	ifp = &sc->sc_if;
 	ifp->if_timer = 0;
@@ -1059,24 +1053,32 @@ Static int
 upl_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	   struct rtentry *rt0)
 {
-	int s;
+	int s, len, error;
+	ALTQ_DECL(struct altq_pktattr pktattr;)
 
 	DPRINTFN(10,("%s: %s: enter\n",
 		     USBDEVNAME(((struct upl_softc *)ifp->if_softc)->sc_dev),
-		     __FUNCTION__));
+		     __func__));
 
-	s = splimp();
+	/*
+	 * if the queueing discipline needs packet classification,
+	 * do it now.
+	 */
+	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family, &pktattr);
+
+	len = m->m_pkthdr.len;
+	s = splnet();
 	/*
 	 * Queue message on interface, and start output if interface
 	 * not yet active.
 	 */
-	if (IF_QFULL(&ifp->if_snd)) {
-		IF_DROP(&ifp->if_snd);
+	IFQ_ENQUEUE(&ifp->if_snd, m, &pktattr, error);
+	if (error) {
+		/* mbuf is already freed */
 		splx(s);
-		return (ENOBUFS);
+		return (error);
 	}
-	ifp->if_obytes += m->m_pkthdr.len;
-	IF_ENQUEUE(&ifp->if_snd, m);
+	ifp->if_obytes += len;
 	if ((ifp->if_flags & IFF_OACTIVE) == 0)
 		(*ifp->if_start)(ifp);
 	splx(s);
@@ -1095,7 +1097,7 @@ upl_input(struct ifnet *ifp, struct mbuf *m)
 	schednetisr(NETISR_IP);
 	inq = &ipintrq;
 
-	s = splimp();
+	s = splnet();
 	if (IF_QFULL(inq)) {
 		IF_DROP(inq);
 		splx(s);

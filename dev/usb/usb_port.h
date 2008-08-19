@@ -1,5 +1,5 @@
-/*	$OpenBSD: usb_port.h,v 1.29 2001/10/02 19:30:22 provos Exp $ */
-/*	$NetBSD: usb_port.h,v 1.42 2001/03/28 19:00:39 ichiro Exp $	*/
+/*	$OpenBSD: usb_port.h,v 1.40 2002/07/25 02:18:11 nate Exp $ */
+/*	$NetBSD: usb_port.h,v 1.44 2001/05/14 20:35:29 bouyer Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.21 1999/11/17 22:33:47 n_hibma Exp $	*/
 
 /*
@@ -39,8 +39,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef _USB_PORT_H
+#define _USB_PORT_H
 
-/* 
+/*
  * Macro's to cope with the differences between operating systems.
  */
 
@@ -50,6 +52,8 @@
  */
 
 #include "opt_usbverbose.h"
+
+#define USB_USE_SOFTINTR
 
 #ifdef USB_DEBUG
 #define UKBD_DEBUG 1
@@ -61,7 +65,6 @@
 #define ULPT_DEBUG 1
 #define UCOM_DEBUG 1
 #define UPLCOM_DEBUG 1
-#define UMCT_DEBUG 1
 #define UMODEM_DEBUG 1
 #define UAUDIO_DEBUG 1
 #define AUE_DEBUG 1
@@ -73,12 +76,15 @@
 #define UZCOM_DEBUG 1
 #define URIO_DEBUG 1
 #define UFTDI_DEBUG 1
+#define UMCT_DEBUG 1
 #define USCANNER_DEBUG 1
 #define USSCANNER_DEBUG 1
 #define Static
 #else
 #define Static static
 #endif
+
+#define SCSI_MODE_SENSE			MODE_SENSE
 
 typedef struct device *device_ptr_t;
 #define USBBASEDEVICE struct device
@@ -184,6 +190,7 @@ __CONCAT(dname,_detach)(self, flags) \
  */
 #ifdef USB_DEBUG
 #define UKBD_DEBUG 1
+#define UHIDEV_DEBUG 1
 #define UHID_DEBUG 1
 #define OHCI_DEBUG 1
 #define UGEN_DEBUG 1
@@ -202,6 +209,7 @@ __CONCAT(dname,_detach)(self, flags) \
 #define UZCOM_DEBUG 1
 #define URIO_DEBUG 1
 #define UFTDI_DEBUG 1
+#define UMCT_DEBUG 1
 #define USCANNER_DEBUG 1
 #define USSCANNER_DEBUG 1
 #endif
@@ -228,9 +236,9 @@ __CONCAT(dname,_detach)(self, flags) \
 #define show_scsipi_cmd         show_scsi_cmd
 #define xs_control		flags
 #define xs_status		status
+#define UHIDBUSCF_REPORTID		-1
+#define UHIDBUSCF_REPORTID_DEFAULT	-1
 
-#define	memcpy(d, s, l)		bcopy((s),(d),(l))
-#define	memset(d, v, l)		bzero((d),(l))
 #define bswap32(x)		swap32(x)
 #define bswap16(x)		swap16(x)
 
@@ -268,9 +276,15 @@ typedef int usb_malloc_type;
 #define change_sign16_swap_bytes_le change_sign16_swap_bytes
 #define change_sign16_le change_sign16
 
+#define ulinear8_to_slinear16_le ulinear8_to_linear16_le
+#define ulinear8_to_slinear16_be ulinear8_to_linear16_be
+#define slinear16_to_ulinear8_le linear16_to_ulinear8_le
+#define slinear16_to_ulinear8_be linear16_to_ulinear8_be
+
 #define realloc usb_realloc
 void *usb_realloc(void *, u_int, int, int);
 
+typedef struct proc *usb_proc_ptr;
 typedef struct device *device_ptr_t;
 #define USBBASEDEVICE struct device
 #define USBDEV(bdev) (&(bdev))
@@ -287,10 +301,16 @@ typedef struct device *device_ptr_t;
 	} usb_dma_t
 
 typedef struct timeout usb_callout_t;
-#define usb_callout_init(h)
+#define usb_callout_init(h)	timeout_set(&(h), NULL, NULL)
 #define usb_callout(h, t, f, d) \
-	{ timeout_set(&(h), (f), (d)); timeout_add(&(h), (t)); }
+	do { \
+		timeout_del(&(h)); \
+		timeout_set(&(h), (f), (d)); \
+		timeout_add(&(h), (t)); \
+	} while (0)
 #define usb_uncallout(h, f, d) timeout_del(&(h))
+
+#define usb_lockmgr(l, f, sl, p) lockmgr((l), (f), (sl), (p))
 
 #define USB_DECLARE_DRIVER(dname)  \
 int __CONCAT(dname,_match)(struct device *, void *, void *); \
@@ -494,3 +514,6 @@ __CONCAT(dname,_detach)(device_t self)
 #define logprintf		printf
 
 #endif /* __FreeBSD__ */
+
+#endif /* _USB_PORT_H */
+

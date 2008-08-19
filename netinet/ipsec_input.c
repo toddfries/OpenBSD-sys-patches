@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.53 2001/08/09 15:44:32 angelos Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.61 2002/06/28 19:07:03 angelos Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -103,13 +103,14 @@ int
 ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto)
 {
 #define IPSEC_ISTAT(x,y,z) (sproto == IPPROTO_ESP ? (x)++ : \
-			    IPPROTO_AH ? (y)++ : (z)++)
+			    sproto == IPPROTO_AH ? (y)++ : (z)++)
 
 	union sockaddr_union dst_address;
+	struct timeval tv;
 	struct tdb *tdbp;
 	u_int32_t spi;
 	u_int16_t cpi;
-	int s;
+	int s, error;
 
 	IPSEC_ISTAT(espstat.esps_input, ahstat.ahs_input,
 	    ipcompstat.ipcomps_input);
@@ -218,7 +219,7 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto)
 		return ENXIO;
 	}
 
-	if (tdbp->tdb_dst.sa.sa_family == AF_INET && 
+	if (tdbp->tdb_dst.sa.sa_family == AF_INET &&
 	    sproto != IPPROTO_IPCOMP) {
 		/*
 		 * XXX The fragment conflicts with scoped nature of
@@ -229,26 +230,30 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto)
 
 	/* Register first use, setup expiration timer. */
 	if (tdbp->tdb_first_use == 0) {
+		int pri;
+
+		pri = splhigh();
 		tdbp->tdb_first_use = time.tv_sec;
+		splx(pri);
+
+		tv.tv_usec = 0;
+
+		tv.tv_sec = tdbp->tdb_exp_first_use + tdbp->tdb_first_use;
 		if (tdbp->tdb_flags & TDBF_FIRSTUSE)
-			timeout_add(&tdbp->tdb_first_tmo, hz *
-			    tdbp->tdb_exp_first_use);
+			timeout_add(&tdbp->tdb_first_tmo, hzto(&tv));
+
+		tv.tv_sec = tdbp->tdb_first_use + tdbp->tdb_soft_first_use;
 		if (tdbp->tdb_flags & TDBF_SOFT_FIRSTUSE)
-			timeout_add(&tdbp->tdb_sfirst_tmo, hz *
-			    tdbp->tdb_soft_first_use);
+			timeout_add(&tdbp->tdb_sfirst_tmo, hzto(&tv));
 	}
 
 	/*
-     * Call appropriate transform and return -- callback takes care of
-     * everything else.
-     */
-	if ((*(tdbp->tdb_xform->xf_input))(m, tdbp, skip, protoff) == NULL) {
-		splx(s);
-		return EINVAL;
-	} else {
-		splx(s);
-		return 0;
-	}
+	 * Call appropriate transform and return -- callback takes care of
+	 * everything else.
+	 */
+	error = (*(tdbp->tdb_xform->xf_input))(m, tdbp, skip, protoff);
+	splx(s);
+	return error;
 }
 
 /*
@@ -514,7 +519,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 	else if (sproto == IPPROTO_IPCOMP)
 		m->m_flags |= M_COMP;
 	else
-		m->m_flags |= M_AUTH;
+		m->m_flags |= M_AUTH | M_AUTH_AH;
 
 #if NBPFILTER > 0
 	bpfif = &encif[0].sc_if;
@@ -531,7 +536,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 
 		hdr.af = af;
 		hdr.spi = tdbp->tdb_spi;
-		hdr.flags = m->m_flags & (M_AUTH|M_CONF);
+		hdr.flags = m->m_flags & (M_AUTH|M_CONF|M_AUTH_AH);
 
 		m1.m_next = m;
 		m1.m_len = ENC_HDRLEN;
@@ -636,13 +641,13 @@ ipcomp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlen, void *newp,
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
 		return ENOTDIR;
-    
+
 	switch (name[0]) {
 	case IPCOMPCTL_ENABLE:
 		return sysctl_int(oldp, oldlen, newp, newlen, &ipcomp_enable);
 	default:
 		return ENOPROTOOPT;
-	}	
+	}
 	/* NOTREACHED */
 }
 
@@ -766,7 +771,7 @@ ipcomp4_input_cb(struct mbuf *m, ...)
 {
 	struct ifqueue *ifq = &ipintrq;
 	int s = splimp();
-    
+
 	/*
 	 * Interface pointer is already in first mbuf; chop off the
 	 * `outer' header and reschedule.
@@ -775,7 +780,7 @@ ipcomp4_input_cb(struct mbuf *m, ...)
 		IF_DROP(ifq);
 		ipcompstat.ipcomps_qfull++;
 		splx(s);
-	
+
 		m_freem(m);
 		DPRINTF(("ipcomp4_input_cb(): dropped packet because of full IP queue\n"));
 		return ENOBUFS;
@@ -795,14 +800,14 @@ ipsec_common_ctlinput(int cmd, struct sockaddr *sa, void *v, int proto)
 	struct ip *ip = v;
 	int s;
 
-	if (cmd == PRC_MSGSIZE && ip && ip->ip_v == 4) {
+	if (cmd == PRC_MSGSIZE && ip && ip_mtudisc && ip->ip_v == 4) {
 		struct tdb *tdbp;
 		struct sockaddr_in dst;
 		struct icmp *icp;
 		int hlen = ip->ip_hl << 2;
 		u_int32_t spi, mtu;
 		ssize_t adjust;
-	
+
 		/* Find the right MTU. */
 		icp = (struct icmp *)((caddr_t) ip -
 		    offsetof(struct icmp, icmp_ip));
@@ -1021,7 +1026,7 @@ ipcomp6_input(struct mbuf **mp, int *offp, int proto)
 
 		do {
 			protoff += l;
-			m_copydata(*mp, protoff, sizeof(ip6e), 
+			m_copydata(*mp, protoff, sizeof(ip6e),
 			    (caddr_t) &ip6e);
 			if (ip6e.ip6e_nxt == IPPROTO_AH)
 				l = (ip6e.ip6e_len + 2) << 2;
@@ -1056,6 +1061,3 @@ ipcomp6_input_cb(struct mbuf *m, int skip, int protoff)
 }
 
 #endif /* INET6 */
-
-
-

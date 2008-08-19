@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.17 2001/09/29 08:02:07 jasoni Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.24 2002/06/09 14:38:39 itojun Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -263,7 +263,7 @@ ip6_forward(m, srcrt)
 			break;
 		default:
 			printf("ip6_output (ipsec): error code %d\n", error);
-			/*fall through*/
+			/* FALLTHROUGH */
 		case ENOENT:
 			/* don't show these error codes to the user */
 			break;
@@ -364,7 +364,7 @@ ip6_forward(m, srcrt)
 		return;
 	}
 
-	if (m->m_pkthdr.len > rt->rt_ifp->if_mtu) {
+	if (m->m_pkthdr.len > IN6_LINKMTU(rt->rt_ifp)) {
 		in6_ifstat_inc(rt->rt_ifp, ifs6_in_toobig);
 		if (mcopy) {
 			u_long mtu;
@@ -374,11 +374,11 @@ ip6_forward(m, srcrt)
 			size_t ipsechdrsiz;
 #endif
 
-			mtu = rt->rt_ifp->if_mtu;
+			mtu = IN6_LINKMTU(rt->rt_ifp);
 #ifdef IPSEC_IPV6FWD
 			/*
 			 * When we do IPsec tunnel ingress, we need to play
-			 * with if_mtu value (decrement IPsec header size
+			 * with the link value (decrement IPsec header size
 			 * from mtu value).  The code is much simpler than v4
 			 * case, as we have the outgoing interface for
 			 * encapsulated packet as "rt->rt_ifp".
@@ -403,7 +403,7 @@ ip6_forward(m, srcrt)
 		}
 		m_freem(m);
 		return;
- 	}
+	}
 
 	if (rt->rt_flags & RTF_GATEWAY)
 		dst = (struct sockaddr_in6 *)rt->rt_gateway;
@@ -487,20 +487,17 @@ ip6_forward(m, srcrt)
 		ip6->ip6_dst.s6_addr16[1] = 0;
 
 #if NPF > 0 
-        if (pf_test6(PF_OUT, rt->rt_ifp, &m) != PF_PASS) {
+	if (pf_test6(PF_OUT, rt->rt_ifp, &m) != PF_PASS) {
 		m_freem(m);
 		goto senderr;
 	}
+	if (m == NULL)
+		goto senderr;
+
 	ip6 = mtod(m, struct ip6_hdr *);
 #endif 
 
-#ifdef OLDIP6OUTPUT
-	error = (*rt->rt_ifp->if_output)(rt->rt_ifp, m,
-					 (struct sockaddr *)dst,
-					 ip6_forward_rt.ro_rt);
-#else
 	error = nd6_output(rt->rt_ifp, origifp, m, dst, rt);
-#endif
 	if (error) {
 		in6_ifstat_inc(rt->rt_ifp, ifs6_out_discard);
 		ip6stat.ip6s_cantforward++;
@@ -520,15 +517,12 @@ senderr:
 #endif
 	if (mcopy == NULL)
 		return;
-
 	switch (error) {
 	case 0:
-#if 1
 		if (type == ND_REDIRECT) {
 			icmp6_redirect_output(mcopy, rt);
 			return;
 		}
-#endif
 		goto freecopy;
 
 	case EMSGSIZE:

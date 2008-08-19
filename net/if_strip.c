@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_strip.c,v 1.15 2001/06/27 06:07:44 kjc Exp $	*/
+/*	$OpenBSD: if_strip.c,v 1.22 2002/09/11 05:38:47 itojun Exp $	*/
 /*	$NetBSD: if_strip.c,v 1.2.4.3 1996/08/03 00:58:32 jtc Exp $	*/
 /*	from: NetBSD: if_sl.c,v 1.38 1996/02/13 22:00:23 christos Exp $	*/
 
@@ -229,8 +229,8 @@ struct st_softc st_softc[NSTRIP];
 #define STRIP_FRAME_END		0x0D		/* carriage return */
 
 
-static int stripinit __P((struct st_softc *));
-static 	struct mbuf *strip_btom __P((struct st_softc *, int));
+static int stripinit(struct st_softc *);
+static 	struct mbuf *strip_btom(struct st_softc *, int);
 
 /*
  * STRIP header: '*' + modem address (dddd-dddd) + '*' + mactype ('SIP0')
@@ -259,23 +259,23 @@ struct st_header {
  * different STRIP implementations: *BSD, Linux, etc.
  *
  */
-static u_char* UnStuffData __P((u_char *src, u_char *end, u_char
-				*dest, u_long dest_length)); 
+static u_char *UnStuffData(u_char *src, u_char *end, u_char
+				*dest, u_long dest_length); 
 
-static u_char* StuffData __P((u_char *src, u_long length, u_char *dest,
-			      u_char **code_ptr_ptr));
+static u_char *StuffData(u_char *src, u_long length, u_char *dest,
+			      u_char **code_ptr_ptr);
 
-static void RecvErr __P((char *msg, struct st_softc *sc));
-static void RecvErr_Message __P((struct st_softc *strip_info,
-				u_char *sendername, u_char *msg));
-void	strip_resetradio __P((struct st_softc *sc, struct tty *tp));
-void	strip_proberadio __P((struct st_softc *sc, struct tty *tp));
-void	strip_watchdog __P((struct ifnet *ifp));
-void	strip_sendbody __P((struct st_softc *sc, struct mbuf *m));
-int	strip_newpacket __P((struct st_softc *sc, u_char *ptr, u_char *end));
-struct mbuf * strip_send __P((struct st_softc *sc, struct mbuf *m0));
+static void RecvErr(char *msg, struct st_softc *sc);
+static void RecvErr_Message(struct st_softc *strip_info,
+				u_char *sendername, u_char *msg);
+void	strip_resetradio(struct st_softc *sc, struct tty *tp);
+void	strip_proberadio(struct st_softc *sc, struct tty *tp);
+void	strip_watchdog(struct ifnet *ifp);
+void	strip_sendbody(struct st_softc *sc, struct mbuf *m);
+int	strip_newpacket(struct st_softc *sc, u_char *ptr, u_char *end);
+struct mbuf * strip_send(struct st_softc *sc, struct mbuf *m0);
 
-void strip_timeout __P((void *x));
+void strip_timeout(void *x);
 
 
 
@@ -369,6 +369,7 @@ stripattach(n)
 		sc->sc_if.if_timer = STRIP_WATCHDOG_INTERVAL;
 		IFQ_SET_READY(&sc->sc_if.if_snd);
 		if_attach(&sc->sc_if);
+		if_alloc_sadl(&sc->sc_if);
 #if NBPFILTER > 0
 		bpfattach(&sc->sc_bpf, &sc->sc_if, DLT_SLIP, SLIP_HDRLEN);
 #endif
@@ -481,7 +482,7 @@ stripopen(dev, tp)
 				error = clalloc(&tp->t_outq, 3*SLMTU, 0);
 				if (error) {
 					splx(s);
-					return(error);
+					return (error);
 				}
 			} else
 				sc->sc_oldbufsize = sc->sc_oldbufquot = 0;
@@ -646,7 +647,7 @@ strip_send(sc, m0)
 	/* The header has been enqueued in clear;  undo the M_PREPEND() of the header. */
 	m0->m_data += sizeof(struct st_header);
 	m0->m_len -= sizeof(struct st_header);
-	if (m0 && m0->m_flags & M_PKTHDR) {
+	if (m0->m_flags & M_PKTHDR) {
 		m0->m_pkthdr.len -= sizeof(struct st_header);
 	}
 #ifdef DIAGNOSTIC
@@ -691,7 +692,7 @@ strip_send(sc, m0)
 	if (time.tv_sec >= sc->sc_statetimo && sc->sc_state == ST_ALIVE)
 		strip_proberadio(sc, tp);
 
-	return(m0);
+	return (m0);
 }
 
 
@@ -744,10 +745,14 @@ stripoutput(ifp, m, dst, rt)
 		printf("\n");
 	}
 #endif
+	/*
+	 * if the queueing discipline needs packet classification,
+	 * do it before prepending link headers.
+	 */
+	IFQ_CLASSIFY(&ifp->if_snd, m, dst->sa_family, &pktattr);
+
 	switch (dst->sa_family) {
-
-            case AF_INET:
-
+	case AF_INET:
                 if (rt != NULL && rt->rt_gwroute != NULL)
                         rt = rt->rt_gwroute;
 
@@ -757,13 +762,13 @@ stripoutput(ifp, m, dst, rt)
 		  	DPRINTF(("strip: could not arp starmode addr %x\n",
 			 ((struct sockaddr_in *)dst)->sin_addr.s_addr));
 			m_freem(m);
-			return(EHOSTUNREACH);
+			return (EHOSTUNREACH);
 		}
 		/*bcopy(LLADDR(SDL(rt->rt_gateway)), dldst, ifp->if_addrlen);*/
                 dldst = LLADDR(SDL(rt->rt_gateway));
                 break;
 
-            case AF_LINK:
+	case AF_LINK:
 		/*bcopy(LLADDR(SDL(rt->rt_gateway)), dldst, ifp->if_addrlen);*/
 		dldst = LLADDR(SDL(dst));
 		break;
@@ -800,7 +805,7 @@ stripoutput(ifp, m, dst, rt)
 	M_PREPEND(m, sizeof(struct st_header), M_DONTWAIT);
 	if (m == 0) {
 	  	DPRINTF(("strip: could not prepend starmode header\n"));
-	  	return(ENOBUFS);
+	  	return (ENOBUFS);
 	}
 
 
@@ -1667,7 +1672,7 @@ strip_newpacket(sc, ptr, end)
 
 	/* XXX redundant copy */
 	bcopy(sc->sc_rxbuf, sc->sc_buf, packetlen );
-	return(packetlen);
+	return (packetlen);
 }
 
 
@@ -1712,14 +1717,14 @@ typedef enum
 #define StuffData_FinishBlock(X) \
 	(*code_ptr = (X) ^ Stuff_Magic, code = Stuff_NoCode)
 
-static u_char*
+static u_char *
 StuffData(u_char *src, u_long length, u_char *dest, u_char **code_ptr_ptr)
 {
 	u_char *end = src + length;
 	u_char *code_ptr = *code_ptr_ptr;
 	u_char code = Stuff_NoCode, count = 0;
 	
-	if (!length) return(dest);
+	if (!length) return (dest);
 	
 	if (code_ptr) {	/* Recover state from last call, if applicable */
 		code  = (*code_ptr ^ Stuff_Magic) & Stuff_CodeMask;
@@ -1813,7 +1818,7 @@ StuffData(u_char *src, u_long length, u_char *dest, u_char **code_ptr_ptr)
 		StuffData_FinishBlock(code + count);
 	}
 
-	return(dest);
+	return (dest);
 }
 
 
@@ -1840,14 +1845,14 @@ StuffData(u_char *src, u_long length, u_char *dest, u_char **code_ptr_ptr)
  * allow a follow-on  call to resume correctly).
  */
 
-static u_char*
+static u_char *
 UnStuffData(u_char *src, u_char *end, u_char *dst, u_long dst_length)
 {
 	u_char *dst_end = dst + dst_length;
 
 	/* Sanity check */
 	if (!src || !end || !dst || !dst_length)
-		return(NULL);
+		return (NULL);
 
 	while (src < end && dst < dst_end)
 	{
@@ -1856,7 +1861,7 @@ UnStuffData(u_char *src, u_char *end, u_char *dst, u_long dst_length)
 			{
 			case Stuff_Diff:
 				if (src+1+count >= end)
-					return(NULL);
+					return (NULL);
 				do
 				{
 					*dst++ = *++src ^ Stuff_Magic;
@@ -1872,7 +1877,7 @@ UnStuffData(u_char *src, u_char *end, u_char *dst, u_long dst_length)
 				break;
 			case Stuff_DiffZero:
 				if (src+1+count >= end)
-					return(NULL);
+					return (NULL);
 				do
 				{
 					*dst++ = *++src ^ Stuff_Magic;
@@ -1885,7 +1890,7 @@ UnStuffData(u_char *src, u_char *end, u_char *dst, u_long dst_length)
 				break;
 			case Stuff_Same:
 				if (src+1 >= end)
-					return(NULL);
+					return (NULL);
 				do
 				{
 					*dst++ = src[1] ^ Stuff_Magic;
@@ -1911,9 +1916,9 @@ UnStuffData(u_char *src, u_char *end, u_char *dst, u_long dst_length)
 	}
 
 	if (dst < dst_end)
-		return(NULL);
+		return (NULL);
 	else
-		return(src);
+		return (src);
 }
 
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.143 2001/10/03 02:08:41 angelos Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.149 2002/06/09 16:26:10 itojun Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -80,13 +80,13 @@ void tdb_hashstats(void);
 #define	INLINE	static __inline
 #endif
 
-int		ipsp_kern __P((int, char **, int));
-u_int8_t       	get_sa_require  __P((struct inpcb *));
-void		tdb_rehash __P((void));
-void		tdb_timeout __P((void *v));
-void		tdb_firstuse __P((void *v));
-void		tdb_soft_timeout __P((void *v));
-void		tdb_soft_firstuse __P((void *v));
+int		ipsp_kern(int, char **, int);
+u_int8_t	get_sa_require(struct inpcb *);
+void		tdb_rehash(void);
+void		tdb_timeout(void *v);
+void		tdb_firstuse(void *v);
+void		tdb_soft_timeout(void *v);
+void		tdb_soft_firstuse(void *v);
 
 extern int	ipsec_auth_default_level;
 extern int	ipsec_esp_trans_default_level;
@@ -108,7 +108,7 @@ struct ipsec_acquire_head ipsec_acquire_head =
  */
 
 struct xformsw xformsw[] = {
-	{ XF_IP4,	         0,               "IPv4 Simple Encapsulation",
+	{ XF_IP4,	     0,               "IPv4 Simple Encapsulation",
 	  ipe4_attach,       ipe4_init,       ipe4_zeroize,
 	  (int (*)(struct mbuf *, struct tdb *, int, int))ipe4_input,
 	  ipip_output, },
@@ -191,7 +191,7 @@ reserve_spi(u_int32_t sspi, u_int32_t tspi, union sockaddr_union *src,
 	int nums, s;
 
 	/* Don't accept ranges only encompassing reserved SPIs. */
-	if (sproto != IPPROTO_IPCOMP && 
+	if (sproto != IPPROTO_IPCOMP &&
 	    (tspi < sspi || tspi <= SPI_RESERVED_MAX)) {
 		(*errval) = EINVAL;
 		return 0;
@@ -300,12 +300,62 @@ gettdb(u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
 }
 
 /*
+ * Check that credentials and IDs match. Return true if so. The t*
+ * range of arguments contains information from TDBs; the p*
+ * range of arguments contains information from policies or
+ * already established TDBs.
+ */
+int
+ipsp_aux_match(struct ipsec_ref *tsrcid, struct ipsec_ref *psrcid,
+    struct ipsec_ref *tdstid, struct ipsec_ref *pdstid,
+    struct ipsec_ref *tlcred, struct ipsec_ref *plcred,
+    struct ipsec_ref *trcred, struct ipsec_ref *prcred,
+    struct sockaddr_encap *tfilter, struct sockaddr_encap *pfilter,
+    struct sockaddr_encap *tfiltermask, struct sockaddr_encap *pfiltermask)
+{
+	if (psrcid != NULL)
+		if (tsrcid == NULL || !ipsp_ref_match(tsrcid, psrcid))
+			return 0;
+
+	if (pdstid != NULL)
+		if (tdstid == NULL || !ipsp_ref_match(tdstid, pdstid))
+			return 0;
+
+	if (plcred != NULL)
+		if (tlcred == NULL || !ipsp_ref_match(tlcred, plcred))
+			return 0;
+
+	if (prcred != NULL)
+		if (trcred == NULL || !ipsp_ref_match(trcred, prcred))
+			return 0;
+
+	/* Check for filter matches. */
+	if (tfilter->sen_type) {
+		/*
+		 * XXX We should really be doing a subnet-check (see
+		 * whether the TDB-associated filter is a subset
+		 * of the policy's. For now, an exact match will solve
+		 * most problems (all this will do is make every
+		 * policy get its own SAs).
+		 */
+		if (bcmp(tfilter, pfilter, sizeof(struct sockaddr_encap)) ||
+		    bcmp(tfiltermask, pfiltermask,
+			sizeof(struct sockaddr_encap)))
+			return 0;
+	}
+
+	return 1;
+}
+
+/*
  * Get an SA given the remote address, the security protocol type, and
  * the desired IDs.
  */
 struct tdb *
-gettdbbyaddr(union sockaddr_union *dst, struct ipsec_policy *ipo,
-    struct mbuf *m, int af)
+gettdbbyaddr(union sockaddr_union *dst, u_int8_t sproto,
+    struct ipsec_ref *srcid, struct ipsec_ref *dstid,
+    struct ipsec_ref *local_cred, struct mbuf *m, int af,
+    struct sockaddr_encap *filter, struct sockaddr_encap *filtermask)
 {
 	u_int32_t hashval;
 	struct tdb *tdbp;
@@ -313,51 +363,18 @@ gettdbbyaddr(union sockaddr_union *dst, struct ipsec_policy *ipo,
 	if (tdbaddr == NULL)
 		return (struct tdb *) NULL;
 
-	hashval = tdb_hash(0, dst, ipo->ipo_sproto);
+	hashval = tdb_hash(0, dst, sproto);
 
 	for (tdbp = tdbaddr[hashval]; tdbp != NULL; tdbp = tdbp->tdb_anext)
-		if ((tdbp->tdb_sproto == ipo->ipo_sproto) &&
+		if ((tdbp->tdb_sproto == sproto) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (!bcmp(&tdbp->tdb_dst, dst, SA_LEN(&dst->sa)))) {
-			/*
-			 * If the IDs are not set, this was probably a
-			 * manually-keyed SA, so it can be used for
-			 * any type of traffic.
-			 */
-			if (tdbp->tdb_srcid != NULL) {
-				if (ipo->ipo_srcid != NULL &&
-				    !ipsp_ref_match(ipo->ipo_srcid,
-					tdbp->tdb_srcid))
-					continue;
-				/* Otherwise, this is fine. */
-			}
-
-			if (tdbp->tdb_dstid != NULL) {
-				if (ipo->ipo_dstid != NULL &&
-				    !ipsp_ref_match(ipo->ipo_dstid,
-					tdbp->tdb_dstid))
-					continue;
-				/* Otherwise, this is fine. */
-			}
-
-			/* Check for credential matches. */
-			if (tdbp->tdb_local_cred != NULL) {
-				if (ipo->ipo_local_cred != NULL &&
-				    !ipsp_ref_match(ipo->ipo_local_cred,
-					tdbp->tdb_local_cred))
-					continue;
-			} else if (ipo->ipo_local_cred != NULL)
-				continue; /* If no credential was used
-					   * in the TDB, try to
-					   * establish a new SA with
-					   * the given credential,
-					   * since some type of access
-					   * control may be done on
-					   * the other side based on
-					   * that credential.
-					   */
-
-			/* XXX Check for filter matches. */
+			/* Do IDs and local credentials match ? */
+			if (!ipsp_aux_match(tdbp->tdb_srcid, srcid,
+			    tdbp->tdb_dstid, dstid, tdbp->tdb_local_cred,
+			    local_cred, NULL, NULL, &tdbp->tdb_filter, filter,
+			    &tdbp->tdb_filtermask, filtermask))
+				continue;
 			break;
 		}
 
@@ -369,8 +386,10 @@ gettdbbyaddr(union sockaddr_union *dst, struct ipsec_policy *ipo,
  * the desired IDs.
  */
 struct tdb *
-gettdbbysrc(union sockaddr_union *src, struct ipsec_policy *ipo,
-    struct mbuf *m, int af)
+gettdbbysrc(union sockaddr_union *src, u_int8_t sproto,
+    struct ipsec_ref *srcid, struct ipsec_ref *dstid,
+    struct mbuf *m, int af, struct sockaddr_encap *filter,
+    struct sockaddr_encap *filtermask)
 {
 	u_int32_t hashval;
 	struct tdb *tdbp;
@@ -378,34 +397,18 @@ gettdbbysrc(union sockaddr_union *src, struct ipsec_policy *ipo,
 	if (tdbsrc == NULL)
 		return (struct tdb *) NULL;
 
-	hashval = tdb_hash(0, src, ipo->ipo_sproto);
+	hashval = tdb_hash(0, src, sproto);
 
 	for (tdbp = tdbsrc[hashval]; tdbp != NULL; tdbp = tdbp->tdb_snext)
-		if ((tdbp->tdb_sproto == ipo->ipo_sproto) &&
+		if ((tdbp->tdb_sproto == sproto) &&
 		    ((tdbp->tdb_flags & TDBF_INVALID) == 0) &&
 		    (!bcmp(&tdbp->tdb_src, src, SA_LEN(&src->sa)))) {
-			/*
-			 * If the IDs are not set, this was probably a
-			 * manually-keyed SA, so it can be used for
-			 * any type of traffic.
-			 */
-			if (tdbp->tdb_srcid != NULL) {
-				if (ipo->ipo_dstid != NULL &&
-				    !ipsp_ref_match(ipo->ipo_dstid,
-					tdbp->tdb_srcid))
-					continue;
-				/* Otherwise, this is fine. */
-			}
-
-			if (tdbp->tdb_dstid != NULL) {
-				if (ipo->ipo_srcid != NULL &&
-				    !ipsp_ref_match(ipo->ipo_srcid,
-					tdbp->tdb_dstid))
-					continue;
-				/* Otherwise, this is fine. */
-			}
-
-			/* XXX Check for filter matches. */
+			/* Check whether IDs match */
+			if (!ipsp_aux_match(tdbp->tdb_srcid, dstid,
+			    tdbp->tdb_dstid, srcid, NULL, NULL, NULL, NULL,
+			    &tdbp->tdb_filter, filter, &tdbp->tdb_filtermask,
+			    filtermask))
+				continue;
 			break;
 		}
 
@@ -428,7 +431,7 @@ tdb_hashstats(void)
 	for (i = 0; i <= tdb_hashmask; i++) {
 		cnt = 0;
 		for (tdbp = tdbh[i]; cnt < 16 && tdbp != NULL;
-		     tdbp = tdbp->tdb_hnext)
+		    tdbp = tdbp->tdb_hnext)
 			cnt++;
 		buckets[cnt]++;
 	}
@@ -490,7 +493,7 @@ tdb_firstuse(void *v)
 	if (!(tdb->tdb_flags & TDBF_SOFT_FIRSTUSE))
 		return;
 
-        /* If the TDB hasn't been used, don't renew it. */
+	/* If the TDB hasn't been used, don't renew it. */
 	if (tdb->tdb_first_use != 0)
 		pfkeyv2_expire(tdb, SADB_EXT_LIFETIME_HARD);
 	tdb_delete(tdb);
@@ -665,7 +668,7 @@ tdb_delete(struct tdb *tdbp)
 		tdbh[hashval] = tdbp->tdb_hnext;
 	} else {
 		for (tdbpp = tdbh[hashval]; tdbpp != NULL;
-		     tdbpp = tdbpp->tdb_hnext) {
+		    tdbpp = tdbpp->tdb_hnext) {
 			if (tdbpp->tdb_hnext == tdbp) {
 				tdbpp->tdb_hnext = tdbp->tdb_hnext;
 				tdbpp = tdbp;
@@ -683,7 +686,7 @@ tdb_delete(struct tdb *tdbp)
 		tdbaddr[hashval] = tdbp->tdb_anext;
 	} else {
 		for (tdbpp = tdbaddr[hashval]; tdbpp != NULL;
-		     tdbpp = tdbpp->tdb_anext) {
+		    tdbpp = tdbpp->tdb_anext) {
 			if (tdbpp->tdb_anext == tdbp) {
 				tdbpp->tdb_anext = tdbp->tdb_anext;
 				tdbpp = tdbp;
@@ -700,7 +703,7 @@ tdb_delete(struct tdb *tdbp)
 	}
 	else {
 		for (tdbpp = tdbsrc[hashval]; tdbpp != NULL;
-		     tdbpp = tdbpp->tdb_snext) {
+		    tdbpp = tdbpp->tdb_snext) {
 			if (tdbpp->tdb_snext == tdbp) {
 				tdbpp->tdb_snext = tdbp->tdb_snext;
 				tdbpp = tdbp;
@@ -718,20 +721,20 @@ tdb_delete(struct tdb *tdbp)
 
 	/* Cleanup inp references. */
 	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_in); inp;
-	     inp = TAILQ_FIRST(&tdbp->tdb_inp_in)) {
+	    inp = TAILQ_FIRST(&tdbp->tdb_inp_in)) {
 		TAILQ_REMOVE(&tdbp->tdb_inp_in, inp, inp_tdb_in_next);
 		inp->inp_tdb_in = NULL;
 	}
 
 	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_out); inp;
-	     inp = TAILQ_FIRST(&tdbp->tdb_inp_out)) {
+	    inp = TAILQ_FIRST(&tdbp->tdb_inp_out)) {
 		TAILQ_REMOVE(&tdbp->tdb_inp_out, inp, inp_tdb_out_next);
 		inp->inp_tdb_out = NULL;
 	}
 
 	/* Cleanup SPD references. */
 	for (ipo = TAILQ_FIRST(&tdbp->tdb_policy_head); ipo;
-	     ipo = TAILQ_FIRST(&tdbp->tdb_policy_head))	{
+	    ipo = TAILQ_FIRST(&tdbp->tdb_policy_head))	{
 		TAILQ_REMOVE(&tdbp->tdb_policy_head, ipo, ipo_tdb_next);
 		ipo->ipo_tdb = NULL;
 		ipo->ipo_last_searched = 0; /* Force a re-search. */
@@ -848,17 +851,16 @@ int
 ipsp_print_tdb(struct tdb *tdb, char *buffer)
 {
 	int l, i, k;
-
-	struct ctlname ipspflags[] = { \
-				       { "unique", TDBF_UNIQUE }, \
-				       { "invalid", TDBF_INVALID }, \
-				       { "halfiv", TDBF_HALFIV }, \
-				       { "pfs", TDBF_PFS }, \
-				       { "tunneling", TDBF_TUNNELING }, \
-				       { "noreplay", TDBF_NOREPLAY }, \
-				       { "random padding", TDBF_RANDOMPADDING }, \
-				       { "skipcrypto", TDBF_SKIPCRYPTO }, \
-				       { "usedtunnel", TDBF_USEDTUNNEL }, \
+	struct ctlname ipspflags[] = {
+		{ "unique", TDBF_UNIQUE },
+		{ "invalid", TDBF_INVALID },
+		{ "halfiv", TDBF_HALFIV },
+		{ "pfs", TDBF_PFS },
+		{ "tunneling", TDBF_TUNNELING },
+		{ "noreplay", TDBF_NOREPLAY },
+		{ "random padding", TDBF_RANDOMPADDING },
+		{ "skipcrypto", TDBF_SKIPCRYPTO },
+		{ "usedtunnel", TDBF_USEDTUNNEL },
 	};
 
 	l = sprintf(buffer,  "SPI = %08x, Destination = %s, Sproto = %u\n",
@@ -930,6 +932,10 @@ ipsp_print_tdb(struct tdb *tdb, char *buffer)
 	if (tdb->tdb_authalgxform)
 		l += sprintf(buffer + l, "\t\tAuthentication = <%s>\n",
 		    tdb->tdb_authalgxform->name);
+
+	if (tdb->tdb_compalgxform)
+		l += sprintf(buffer + l, "\t\tCompression = <%s>\n",
+		    tdb->tdb_compalgxform->name);
 
 	if (tdb->tdb_onext)
 		l += sprintf(buffer + l,
@@ -1136,7 +1142,7 @@ inet_ntoa4(struct in_addr ina)
 
 	i = (i + 1) % 4;
 	sprintf(buf[i], "%d.%d.%d.%d", ucp[0] & 0xff, ucp[1] & 0xff,
-            ucp[2] & 0xff, ucp[3] & 0xff);
+	    ucp[2] & 0xff, ucp[3] & 0xff);
 	return (buf[i]);
 }
 
@@ -1207,7 +1213,7 @@ ipsp_skipcrypto_mark(struct tdb_ident *tdbi)
 {
 	struct tdb *tdb;
 	int s = spltdb();
- 
+
 	tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
 	if (tdb != NULL) {
 		tdb->tdb_flags |= TDBF_SKIPCRYPTO;
@@ -1222,7 +1228,7 @@ ipsp_skipcrypto_unmark(struct tdb_ident *tdbi)
 {
 	struct tdb *tdb;
 	int s = spltdb();
- 
+
 	tdb = gettdb(tdbi->spi, &tdbi->dst, tdbi->proto);
 	if (tdb != NULL) {
 		tdb->tdb_flags &= ~TDBF_SKIPCRYPTO;
@@ -1231,6 +1237,19 @@ ipsp_skipcrypto_unmark(struct tdb_ident *tdbi)
 	splx(s);
 }
 
+/* Return true if the two structures match. */
+int
+ipsp_ref_match(struct ipsec_ref *ref1, struct ipsec_ref *ref2)
+{
+	if (ref1->ref_type != ref2->ref_type ||
+	    ref1->ref_len != ref2->ref_len ||
+	    bcmp(ref1 + 1, ref2 + 1, ref1->ref_len))
+		return 0;
+
+	return 1;
+}
+
+#ifdef notyet
 /*
  * Go down a chain of IPv4/IPv6/ESP/AH/IPiP chains creating an tag for each
  * IPsec header encountered. The offset where the first header, as well
@@ -1292,7 +1311,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 			 * non-option.
 			 */
 			for (l = ip6_nexthdr(m, off, proto, &nxtp); l != -1;
-			     l = ip6_nexthdr(m, off, proto, &nxtp)) {
+			    l = ip6_nexthdr(m, off, proto, &nxtp)) {
 				off += l;
 				proto = nxtp;
 
@@ -1466,15 +1485,4 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 		}
 	}
 }
-
-/* Return true if the two structures match. */
-int
-ipsp_ref_match(struct ipsec_ref *ref1, struct ipsec_ref *ref2)
-{
-	if (ref1->ref_type != ref2->ref_type ||
-	    ref1->ref_len != ref2->ref_len ||
-	    bcmp(ref1 + 1, ref2 + 1, ref1->ref_len))
-		return 0;
-
-	return 1;
-}
+#endif /* notyet */

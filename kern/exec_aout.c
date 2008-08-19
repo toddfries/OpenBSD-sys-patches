@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_aout.c,v 1.5 1999/09/10 22:11:49 art Exp $	*/
+/*	$OpenBSD: exec_aout.c,v 1.8 2002/07/26 23:32:50 deraadt Exp $	*/
 /*	$NetBSD: exec_aout.c,v 1.14 1996/02/04 02:15:01 christos Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #include <sys/vnode.h>
 #include <sys/exec.h>
 #include <sys/resourcevar.h>
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 
 #if defined(_KERN_DO_AOUT)
 
@@ -129,7 +129,7 @@ exec_aout_prep_zmagic(p, epp)
 #endif
 		return ETXTBSY;
 	}
-	epp->ep_vp->v_flag |= VTEXT;
+	vn_marktext(epp->ep_vp);
 
 	/* set up command for text segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_pagedvn, execp->a_text,
@@ -143,7 +143,7 @@ exec_aout_prep_zmagic(p, epp)
 	/* set up command for bss segment */
 	NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, execp->a_bss,
 	    epp->ep_daddr + execp->a_data, NULLVP, 0,
-	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
+	    VM_PROT_READ|VM_PROT_WRITE);
 
 	return exec_setup_stack(p, epp);
 }
@@ -181,7 +181,7 @@ exec_aout_prep_nmagic(p, epp)
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
-		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
+		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE);
 
 	return exec_setup_stack(p, epp);
 }
@@ -214,7 +214,7 @@ exec_aout_prep_omagic(p, epp)
 	bsize = epp->ep_daddr + epp->ep_dsize - baddr;
 	if (bsize > 0)
 		NEW_VMCMD(&epp->ep_vmcmds, vmcmd_map_zero, bsize, baddr,
-		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
+		    NULLVP, 0, VM_PROT_READ|VM_PROT_WRITE);
 
 	/*
 	 * Make sure (# of pages) mapped above equals (vm_tsize + vm_dsize);
