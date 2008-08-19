@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.149.2.1 2002/11/04 14:33:50 jason Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.152.2.1 2004/03/03 02:26:52 brad Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -66,10 +66,6 @@
 
 #if NPF > 0
 #include <net/pfvar.h>
-#endif
-
-#ifdef vax
-#include <machine/mtpr.h>
 #endif
 
 #ifdef IPSEC
@@ -443,7 +439,7 @@ ip_output(struct mbuf *m0, ...)
 		if ((((m->m_flags & M_MCAST) &&
 		      (ifp->if_flags & IFF_MULTICAST) == 0) ||
 		     ((m->m_flags & M_BCAST) &&
-		      (ifp->if_flags & IFF_BROADCAST) == 0)) && (sproto == 0))  {
+		      (ifp->if_flags & IFF_BROADCAST) == 0)) && (sproto == 0)) {
 			ipstat.ips_noroute++;
 			error = ENETUNREACH;
 			goto bad;
@@ -731,8 +727,10 @@ sendit:
 	}
 
 	error = ip_fragment(m, ifp, mtu);
-	if (error == EMSGSIZE)
+	if (error) {
+		m = m0 = NULL;
 		goto bad;
+	}
 
 	for (; m; m = m0) {
 		m0 = m->m_nextpkt;
@@ -753,7 +751,7 @@ done:
 	return (error);
 bad:
 #ifdef IPSEC
-	if (error == EMSGSIZE && ip_mtudisc && icmp_mtu != 0)
+	if (error == EMSGSIZE && ip_mtudisc && icmp_mtu != 0 && m != NULL)
 		ipsec_adjust_mtu(m, icmp_mtu);
 #endif
 	m_freem(m0);
@@ -768,13 +766,18 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	int len, hlen, off;
 	int mhlen, firstlen;
 	struct mbuf **mnext;
+	int fragments = 0;
+	int s;
+	int error = 0;
 
 	ip = mtod(m, struct ip *);
 	hlen = ip->ip_hl << 2;
 
 	len = (mtu - hlen) &~ 7;
-	if (len < 8)
+	if (len < 8) {
+		m_freem(m);
 		return (EMSGSIZE);
+	}
 
 	/*
 	 * If we are doing fragmentation, we can't defer TCP/UDP
@@ -798,7 +801,8 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		MGETHDR(m, M_DONTWAIT, MT_HEADER);
 		if (m == 0) {
 			ipstat.ips_odropped++;
-			return (ENOBUFS);
+			error = ENOBUFS;
+			goto sendorfree;
 		}
 		*mnext = m;
 		mnext = &m->m_nextpkt;
@@ -823,7 +827,8 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		m->m_next = m_copy(m0, off, len);
 		if (m->m_next == 0) {
 			ipstat.ips_odropped++;
-			return (ENOBUFS);	/* ??? */
+			error = ENOBUFS;
+			goto sendorfree;
 		}
 		m->m_pkthdr.len = mhlen + len;
 		m->m_pkthdr.rcvif = (struct ifnet *)0;
@@ -837,6 +842,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 			mhip->ip_sum = in_cksum(m, mhlen);
 		}
 		ipstat.ips_ofragments++;
+		fragments++;
 	}
 	/*
 	 * Update first fragment by trimming what's been copied out
@@ -855,8 +861,28 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		ip->ip_sum = 0;
 		ip->ip_sum = in_cksum(m, hlen);
 	}
+sendorfree:
+	/*
+	 * If there is no room for all the fragments, don't queue
+	 * any of them.
+	 */
+	s = splnet();
+	if (ifp->if_snd.ifq_maxlen - ifp->if_snd.ifq_len < fragments &&
+	    error == 0) {
+		error = ENOBUFS;
+		ipstat.ips_odropped++;
+		IFQ_INC_DROPS(&ifp->if_snd);
+	}
+	splx(s);
+	if (error) {
+		for (m = m0; m; m = m0) {
+			m0 = m->m_nextpkt;
+			m->m_nextpkt = NULL;
+			m_freem(m);
+		}
+	}
 
-	return (0);
+	return (error);
 }
 
 /*
@@ -1493,10 +1519,9 @@ ip_pcbopts(pcbopt, m)
 		return (0);
 	}
 
-#ifndef	vax
 	if (m->m_len % sizeof(int32_t))
 		goto bad;
-#endif
+
 	/*
 	 * IP first-hop destination address will be stored before
 	 * actual options; move other options back

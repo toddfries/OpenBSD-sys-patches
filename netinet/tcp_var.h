@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.44 2002/06/09 16:26:11 itojun Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.45.2.3 2004/03/04 03:35:15 brad Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -86,6 +86,7 @@ struct tcpcb {
 #define TF_SEND_CWR	0x00020000	/* send CWR in next seg */
 #define TF_DISABLE_ECN	0x00040000	/* disable ECN for this connection */
 #endif
+#define TF_REASSLOCK	0x00080000	/* reassembling or draining */
 
 	struct	mbuf *t_template;	/* skeletal packet for transmit */
 	struct	inpcb *t_inpcb;		/* back pointer to internet pcb */
@@ -209,6 +210,35 @@ do {									\
 		timeout_del(&(tp)->t_delack_to);			\
 	}								\
 } while (/*CONSTCOND*/0)
+
+static __inline int tcp_reass_lock_try(struct tcpcb *);
+static __inline void tcp_reass_unlock(struct tcpcb *);
+#define tcp_reass_lock(tp) tcp_reass_lock_try(tp)
+
+static __inline int
+tcp_reass_lock_try(struct tcpcb *tp)
+{
+	int s;
+
+	s = splimp();
+	if (tp->t_flags & TF_REASSLOCK) {
+		splx(s);
+		return (0);
+	}
+	tp->t_flags |= TF_REASSLOCK;
+	splx(s);
+	return (1);
+}
+
+static __inline void
+tcp_reass_unlock(struct tcpcb *tp)
+{
+	int s;
+
+	s = splimp();
+	tp->t_flags &= ~TF_REASSLOCK;
+	splx(s);
+}
 #endif /* _KERNEL */
 
 /*
@@ -323,6 +353,8 @@ struct	tcpstat {
 	u_int32_t tcps_cwr_ecn;		/* # of cwnd reduced by ecn */
 	u_int32_t tcps_cwr_frecovery;	/* # of cwnd reduced by fastrecovery */
 	u_int32_t tcps_cwr_timeout;	/* # of cwnd reduced by timeout */
+
+	u_int64_t tcps_conndrained;	/* # of connections drained */
 };
 
 /*
@@ -343,7 +375,8 @@ struct	tcpstat {
 #define	TCPCTL_RSTPPSLIMIT     12 /* RST pps limit */
 #define	TCPCTL_ACK_ON_PUSH     13 /* ACK immediately on PUSH */
 #define	TCPCTL_ECN	       14 /* RFC3168 ECN */
-#define	TCPCTL_MAXID	       15
+#define	TCPCTL_REASS_LIMIT     15 /* max entries for tcp reass queues */
+#define	TCPCTL_MAXID	       16
 
 #define	TCPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -361,6 +394,7 @@ struct	tcpstat {
 	{ "rstppslimit",	CTLTYPE_INT }, \
 	{ "ackonpush",	CTLTYPE_INT }, \
 	{ "ecn", 	CTLTYPE_INT }, \
+	{ "reasslimit",	CTLTYPE_INT }, \
 }
 
 struct tcp_ident_mapping {
@@ -369,7 +403,7 @@ struct tcp_ident_mapping {
 };
 
 #ifdef _KERNEL
-struct	inpcbtable tcbtable;	/* head of queue of active tcpcb's */
+extern	struct inpcbtable tcbtable;	/* head of queue of active tcpcb's */
 extern	struct tcpstat tcpstat;	/* tcp statistics */
 u_int32_t tcp_now;		/* for RFC 1323 timestamps */
 extern	int tcp_do_rfc1323;	/* enabled/disabled? */
@@ -381,10 +415,14 @@ extern	struct pool sackhl_pool;
 #endif
 extern	int tcp_do_ecn;		/* RFC3168 ECN enabled/disabled? */
 
+extern	struct pool tcpqe_pool;
+extern	int tcp_reass_limit;	/* max entries for tcp reass queues */
+
 int	 tcp_attach(struct socket *);
 void	 tcp_canceltimers(struct tcpcb *);
 struct tcpcb *
 	 tcp_close(struct tcpcb *);
+int	 tcp_freeq(struct tcpcb *);
 #if defined(INET6) && !defined(TCP6)
 void	 tcp6_ctlinput(int, struct sockaddr *, void *);
 #endif

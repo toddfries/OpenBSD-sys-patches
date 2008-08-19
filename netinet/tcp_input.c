@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.124.2.1 2003/02/22 05:18:55 margarida Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.125.2.2 2004/03/03 08:40:07 brad Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -204,11 +204,23 @@ tcp_reass(tp, th, m, tlen)
 	 * Allocate a new queue entry, before we throw away any data.
 	 * If we can't, just drop the packet.  XXX
 	 */
-	tiqe =  pool_get(&ipqent_pool, PR_NOWAIT);
+	tiqe = pool_get(&tcpqe_pool, PR_NOWAIT);
 	if (tiqe == NULL) {
-		tcpstat.tcps_rcvmemdrop++;
-		m_freem(m);
-		return (0);
+		tiqe = LIST_FIRST(&tp->segq);
+		if (tiqe != NULL && th->th_seq == tp->rcv_nxt) {
+			/* Reuse last entry since new segment fills a hole */
+			while ((p = LIST_NEXT(tiqe, ipqe_q)) != NULL)
+				tiqe = p;
+			m_freem(tiqe->ipqe_m);
+			LIST_REMOVE(tiqe, ipqe_q);
+		}
+		if (tiqe == NULL || th->th_seq != tp->rcv_nxt) {
+			/* Flush fragments for this connection */
+			tcp_freeq(tp);
+			tcpstat.tcps_rcvmemdrop++;
+			m_freem(m);
+			return (0);
+		}
 	}
 
 	/*
@@ -235,7 +247,7 @@ tcp_reass(tp, th, m, tlen)
 				tcpstat.tcps_rcvduppack++;
 				tcpstat.tcps_rcvdupbyte += *tlen;
 				m_freem(m);
-				pool_put(&ipqent_pool, tiqe);
+				pool_put(&tcpqe_pool, tiqe);
 				return (0);
 			}
 			m_adj(m, i);
@@ -265,7 +277,7 @@ tcp_reass(tp, th, m, tlen)
 		nq = q->ipqe_q.le_next;
 		m_freem(q->ipqe_m);
 		LIST_REMOVE(q, ipqe_q);
-		pool_put(&ipqent_pool, q);
+		pool_put(&tcpqe_pool, q);
 	}
 
 	/* Insert the new fragment queue entry into place. */
@@ -301,7 +313,7 @@ present:
 			m_freem(q->ipqe_m);
 		else
 			sbappendstream(&so->so_rcv, q->ipqe_m);
-		pool_put(&ipqent_pool, q);
+		pool_put(&tcpqe_pool, q);
 		q = nq;
 	} while (q != NULL && q->ipqe_tcp->th_seq == tp->rcv_nxt);
 	sorwakeup(so);
@@ -1388,8 +1400,10 @@ findpcb:
 				tp->snd_scale = tp->requested_s_scale;
 				tp->rcv_scale = tp->request_r_scale;
 			}
+			tcp_reass_lock(tp);
 			(void) tcp_reass(tp, (struct tcphdr *)0,
 				(struct mbuf *)0, &tlen);
+			tcp_reass_unlock(tp);
 			/*
 			 * if we didn't have to retransmit the SYN,
 			 * use its rtt as our initial srtt & rtt var.
@@ -1648,8 +1662,10 @@ trimthenstep6:
 			tp->snd_scale = tp->requested_s_scale;
 			tp->rcv_scale = tp->request_r_scale;
 		}
+		tcp_reass_lock(tp);
 		(void) tcp_reass(tp, (struct tcphdr *)0, (struct mbuf *)0,
 				 &tlen);
+		tcp_reass_unlock(tp);
 		tp->snd_wl1 = th->th_seq - 1;
 		/* fall into ... */
 
@@ -2152,8 +2168,10 @@ dodata:							/* XXX */
 	 */
 	if ((tlen || (tiflags & TH_FIN)) &&
 	    TCPS_HAVERCVDFIN(tp->t_state) == 0) {
+		tcp_reass_lock(tp);
 		if (th->th_seq == tp->rcv_nxt && tp->segq.lh_first == NULL &&
 		    tp->t_state == TCPS_ESTABLISHED) {
+			tcp_reass_unlock(tp);
 			TCP_SETUP_ACK(tp, tiflags);
 			tp->rcv_nxt += tlen;
 			tiflags = th->th_flags & TH_FIN;
@@ -2170,6 +2188,7 @@ dodata:							/* XXX */
 		} else {
 			m_adj(m, hdroptlen);
 			tiflags = tcp_reass(tp, th, m, &tlen);
+			tcp_reass_unlock(tp);
 			tp->t_flags |= TF_ACKNOW;
 		}
 #ifdef TCP_SACK

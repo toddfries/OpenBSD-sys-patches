@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_alloc.c,v 1.9.4.1 2003/08/03 23:18:51 brad Exp $	*/
+/*	$OpenBSD: ext2fs_alloc.c,v 1.9.6.1 2003/07/16 18:17:26 brad Exp $	*/
 /*	$NetBSD: ext2fs_alloc.c,v 1.10 2001/07/05 08:38:27 toshii Exp $	*/
 
 /*

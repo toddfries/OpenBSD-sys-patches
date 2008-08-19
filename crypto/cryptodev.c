@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.c,v 1.53 2002/07/10 22:21:30 mickey Exp $	*/
+/*	$OpenBSD: cryptodev.c,v 1.55.2.2 2003/06/12 18:54:31 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -175,6 +175,9 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 		case CRYPTO_ARC4:
 			txform = &enc_xform_arc4;
 			break;
+		case CRYPTO_NULL:
+			txform = &enc_xform_null;
+			break;
 		default:
 			return (EINVAL);
 		}
@@ -298,11 +301,12 @@ cryptodev_op(struct csession *cse, struct crypt_op *cop, struct proc *p)
 	struct cryptodesc *crde = NULL, *crda = NULL;
 	int i, error;
 
-	if (cop->len > 256*1024-4)
+	if (cop->len > 64*1024-4)
 		return (E2BIG);
 
-	if (cse->txform && (cop->len % cse->txform->blocksize) != 0)
+	if (cse->txform && (cop->len % cse->txform->blocksize) != 0) {
 		return (EINVAL);
+	}
 
 	bzero(&cse->uio, sizeof(cse->uio));
 	cse->uio.uio_iovcnt = 1;
@@ -600,7 +604,11 @@ cryptoopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	if (usercrypto == 0)
 		return (ENXIO);
+#ifdef CRYPTO
 	return (0);
+#else
+	return (ENXIO);
+#endif
 }
 
 int

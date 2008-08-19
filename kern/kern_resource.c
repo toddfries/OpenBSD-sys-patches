@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_resource.c,v 1.20.2.1 2002/11/04 15:03:32 jason Exp $	*/
+/*	$OpenBSD: kern_resource.c,v 1.21 2002/10/15 01:27:31 nordin Exp $	*/
 /*	$NetBSD: kern_resource.c,v 1.38 1996/10/23 07:19:38 matthias Exp $	*/
 
 /*-

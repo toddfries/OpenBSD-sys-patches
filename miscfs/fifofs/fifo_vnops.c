@@ -1,4 +1,4 @@
-/*	$OpenBSD: fifo_vnops.c,v 1.13 2002/03/14 01:27:07 millert Exp $	*/
+/*	$OpenBSD: fifo_vnops.c,v 1.14.2.1 2004/03/03 08:50:13 brad Exp $	*/
 /*	$NetBSD: fifo_vnops.c,v 1.18 1996/03/16 23:52:42 christos Exp $	*/
 
 /*
@@ -103,8 +103,19 @@ struct vnodeopv_entry_desc fifo_vnodeop_entries[] = {
 	{ &vop_pathconf_desc, fifo_pathconf },		/* pathconf */
 	{ &vop_advlock_desc, fifo_advlock },		/* advlock */
 	{ &vop_bwrite_desc, fifo_bwrite },		/* bwrite */
-	{ (struct vnodeop_desc*)NULL, (int(*)(void *))NULL }
+	{ NULL, NULL }
 };
+
+struct vnodeopv_desc fifo_vnodeop_opv_desc =
+	{ &fifo_vnodeop_p, fifo_vnodeop_entries };
+
+int
+fifo_vnoperate(void *v)
+{
+	struct vop_generic_args *ap = v;
+
+	return (VOCALL(fifo_vnodeop_p, ap->a_desc->vdesc_offset, ap));
+}
 
 void	filt_fifordetach(struct knote *kn);
 int	filt_fiforead(struct knote *kn, long hint);
@@ -115,9 +126,6 @@ struct filterops fiforead_filtops =
 	{ 1, NULL, filt_fifordetach, filt_fiforead };
 struct filterops fifowrite_filtops =
 	{ 1, NULL, filt_fifowdetach, filt_fifowrite };
-
-struct vnodeopv_desc fifo_vnodeop_opv_desc =
-	{ &fifo_vnodeop_p, fifo_vnodeop_entries };
 
 /*
  * Trivial lookup routine that always fails.
@@ -429,6 +437,9 @@ fifo_close(v)
 	register struct fifoinfo *fip = vp->v_fifoinfo;
 	int error1, error2;
 
+	if (fip == NULL)
+		return (0);
+
 	if (ap->a_fflag & FREAD) {
 		if (--fip->fi_readers == 0)
 			socantsendmore(fip->fi_writesock);
@@ -446,6 +457,24 @@ fifo_close(v)
 	if (error1)
 		return (error1);
 	return (error2);
+}
+
+int
+fifo_reclaim(void *v)
+{
+	struct vop_reclaim_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct fifoinfo *fip = vp->v_fifoinfo;
+
+	if (fip == NULL)
+		return (0);
+
+	soclose(fip->fi_readsock);
+	soclose(fip->fi_writesock);
+	FREE(fip, M_VNODE);
+	vp->v_fifoinfo = NULL;
+
+	return (0);
 }
 
 /*
