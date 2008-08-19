@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.7 1998/05/25 09:12:26 deraadt Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.10.2.1 2001/09/16 15:22:03 miod Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -177,9 +177,9 @@ struct nfsd_cargs {
 	char		*ncd_dirp;	/* Mount dir path */
 	uid_t		ncd_authuid;	/* Effective uid */
 	int		ncd_authtype;	/* Type of authenticator */
-	int		ncd_authlen;	/* Length of authenticator string */
+	u_int		ncd_authlen;	/* Length of authenticator string */
 	u_char		*ncd_authstr;	/* Authenticator string */
-	int		ncd_verflen;	/* and the verifier */
+	u_int		ncd_verflen;	/* and the verifier */
 	u_char		*ncd_verfstr;
 	NFSKERBKEY_T	ncd_key;	/* Session key */
 };
@@ -237,11 +237,14 @@ struct nfsstats {
 /*
  * fs.nfs sysctl(3) identifiers
  */
-#define NFS_NFSSTATS	1		/* struct: struct nfsstats */
+#define	NFS_NFSSTATS	1	/* struct: struct nfsstats */
+#define	NFS_NIOTHREADS	2	/* number of i/o threads */
+#define	NFS_MAXID	3
 
 #define FS_NFS_NAMES { \
-		       { 0, 0 }, \
-		       { "nfsstats", CTLTYPE_STRUCT }, \
+			{ 0, 0 }, \
+			{ "nfsstats", CTLTYPE_STRUCT }, \
+			{ "iothreads", CTLTYPE_INT } \
 }
 
 /*
@@ -253,6 +256,7 @@ struct nfsstats {
  * by them and break.
  */
 #ifdef _KERNEL
+extern int nfs_niothreads;
 
 struct uio; struct buf; struct vattr; struct nameidata;	/* XXX */
 
@@ -468,5 +472,4 @@ int nfsd_head_flag;
 		sizeof (struct ucred)))
 
 #endif	/* _KERNEL */
-
 #endif /* _NFS_NFS_H */

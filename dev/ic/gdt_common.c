@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt_common.c,v 1.5.2.1 2000/10/20 18:29:26 jason Exp $	*/
+/*	$OpenBSD: gdt_common.c,v 1.8 2000/08/19 14:25:15 nate Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
@@ -52,8 +52,6 @@
 
 #include <dev/ic/gdtreg.h>
 #include <dev/ic/gdtvar.h>
-
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
 int	gdt_async_event __P((struct gdt_softc *, int));
 void	gdt_chain __P((struct gdt_softc *));
@@ -373,8 +371,8 @@ gdt_attach(gdt)
 
 	config_found(&gdt->sc_dev, &gdt->sc_link, scsiprint);
 
-	MALLOC(gdt->sc_raw_link, struct scsi_link *,
-	    gdt->sc_bus_cnt * sizeof (struct scsi_link), M_DEVBUF, M_NOWAIT);
+	gdt->sc_raw_link = malloc(gdt->sc_bus_cnt * sizeof (struct scsi_link),
+				  M_DEVBUF, M_NOWAIT);
 	bzero(gdt->sc_raw_link, gdt->sc_bus_cnt * sizeof (struct scsi_link));
 
 	for (i = 0; i < gdt->sc_bus_cnt; i++) {

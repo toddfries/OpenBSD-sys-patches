@@ -1,9 +1,10 @@
-/*	$OpenBSD: ip6_output.c,v 1.4.4.1 2000/09/18 16:45:18 jason Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.17 2000/10/11 09:14:15 itojun Exp $	*/
+/*	$KAME: ip6_output.c,v 1.122 2000/08/19 02:12:02 jinmei Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -15,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -88,7 +89,19 @@
 #include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
 
-#undef IPSEC
+#ifdef IPSEC
+#include <netinet/ip_ah.h>
+#include <netinet/ip_esp.h>
+#include <netinet/udp.h>
+#include <netinet/tcp.h>
+#include <net/pfkeyv2.h>
+
+extern u_int8_t get_sa_require  __P((struct inpcb *));
+
+extern int ipsec_auth_default_level;
+extern int ipsec_esp_trans_default_level;
+extern int ipsec_esp_network_default_level;
+#endif /* IPSEC */
 
 #include "loop.h"
 
@@ -135,7 +148,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	struct ifnet **ifpp;		/* XXX: just for statistics */
 {
 	struct ip6_hdr *ip6, *mhip6;
-	struct ifnet *ifp;
+	struct ifnet *ifp, *origifp;
 	struct mbuf *m = m0;
 	int hlen, tlen, len, off;
 	struct route_in6 ip6route;
@@ -148,21 +161,23 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	struct in6_addr finaldst;
 	struct route_in6 *ro_pmtu = NULL;
 	int hdrsplit = 0;
-	int needipsec = 0;
-
+	u_int8_t sproto = 0;
 #ifdef IPSEC
-	int needipsectun = 0;
-	struct socket *so;
-	struct secpolicy *sp = NULL;
-
-	/* for AH processing. stupid to have "socket" variable in IP layer... */
-	so = (struct socket *)m->m_pkthdr.rcvif;
-	m->m_pkthdr.rcvif = NULL;
-	ip6 = mtod(m, struct ip6_hdr *);
+	union sockaddr_union sdst;
+	u_int32_t sspi;
+	struct inpcb *inp;
+	struct tdb *tdb;
+	int s;
 #endif /* IPSEC */
 
-#define MAKE_EXTHDR(hp,mp)						\
-    {									\
+#ifdef IPSEC
+	inp = NULL;	/*XXX*/
+	if (inp && (inp->inp_flags & INP_IPV6) == 0)
+		panic("ip6_output: IPv4 pcb is passed");
+#endif /* IPSEC */
+
+#define MAKE_EXTHDR(hp, mp)						\
+    do {								\
 	if (hp) {							\
 		struct ip6_ext *eh = (struct ip6_ext *)(hp);		\
 		error = ip6_copyexthdr((mp), (caddr_t)(hp), 		\
@@ -170,7 +185,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		if (error)						\
 			goto freehdrs;					\
 	}								\
-    }
+    } while (0)
 
 	bzero(&exthdrs, sizeof(exthdrs));
 	if (opt) {
@@ -185,48 +200,89 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	}
 
 #ifdef IPSEC
-	/* get a security policy for this packet */
-	if (so == NULL)
-		sp = ipsec6_getpolicybyaddr(m, IPSEC_DIR_OUTBOUND, 0, &error);
-	else
-		sp = ipsec6_getpolicybysock(m, IPSEC_DIR_OUTBOUND, so, &error);
+	/* Disallow nested IPsec for now */
+	if (flags & IPV6_ENCAPSULATED)
+		goto done_spd;
 
-	if (sp == NULL) {
-		ipsec6stat.out_inval++;
-		goto bad;
+	/*
+	 * splnet is chosen over spltdb because we are not allowed to
+	 * lower the level, and udp6_output calls us in splnet(). XXX check
+	 */
+	s = splnet();
+
+	/*
+	 * Check if there was an outgoing SA bound to the flow
+	 * from a transport protocol.
+	 */
+	ip6 = mtod(m, struct ip6_hdr *);
+	if (inp && inp->inp_tdb &&
+	    inp->inp_tdb->tdb_dst.sa.sa_family == AF_INET6 &&
+	    IN6_ARE_ADDR_EQUAL(&inp->inp_tdb->tdb_dst.sin6.sin6_addr,
+		  &ip6->ip6_dst)) {
+	        tdb = inp->inp_tdb;
+	} else {
+	        tdb = ipsp_spd_lookup(m, AF_INET6, sizeof(struct ip6_hdr),
+	            &error, IPSP_DIRECTION_OUT, NULL, NULL);
 	}
 
-	error = 0;
+	if (tdb == NULL) {
+	        splx(s);
 
-	/* check policy */
-	switch (sp->policy) {
-	case IPSEC_POLICY_DISCARD:
-		/*
-		 * This packet is just discarded.
-		 */
-		ipsec6stat.out_polvio++;
-		goto bad;
+		if (error == 0) {
+		        /*
+			 * No IPsec processing required, we'll just send the
+			 * packet out.
+			 */
+		        sproto = 0;
 
-	case IPSEC_POLICY_BYPASS:
-	case IPSEC_POLICY_NONE:
-		/* no need to do IPsec. */
-		needipsec = 0;
-		break;
-	
-	case IPSEC_POLICY_IPSEC:
-		if (sp->req == NULL) {
-			/* XXX should be panic ? */
-			printf("ip6_output: No IPsec request specified.\n");
-			error = EINVAL;
-			goto bad;
+			/* Fall through to routing/multicast handling */
+		} else {
+		        /*
+			 * -EINVAL is used to indicate that the packet should
+			 * be silently dropped, typically because we've asked
+			 * key management for an SA.
+			 */
+		        if (error == -EINVAL) /* Should silently drop packet */
+				error = 0;
+
+			goto freehdrs;
 		}
-		needipsec = 1;
-		break;
+	} else {
+	        /* We need to do IPsec */
+	        bcopy(&tdb->tdb_dst, &sdst, sizeof(sdst));
+		sspi = tdb->tdb_spi;
+		sproto = tdb->tdb_sproto;
 
-	case IPSEC_POLICY_ENTRUST:
-	default:
-		printf("ip6_output: Invalid policy found. %d\n", sp->policy);
+		/*
+		 * If the socket has set the bypass flags and SA destination
+		 * matches the IP destination, skip IPsec. This allows
+		 * IKE packets to travel through IPsec tunnels.
+		 */
+		if (inp != NULL && 
+		    inp->inp_seclevel[SL_AUTH] == IPSEC_LEVEL_BYPASS &&
+		    inp->inp_seclevel[SL_ESP_TRANS] == IPSEC_LEVEL_BYPASS &&
+		    inp->inp_seclevel[SL_ESP_NETWORK] == IPSEC_LEVEL_BYPASS &&
+		    sdst.sa.sa_family == AF_INET6 &&
+		    IN6_ARE_ADDR_EQUAL(&sdst.sin6.sin6_addr, &ip6->ip6_dst)) {
+		        splx(s);
+		        sproto = 0; /* mark as no-IPsec-needed */
+			goto done_spd;
+		}
+
+		/* XXX Take into consideration socket requirements ? */
+
+#if 1 /* XXX */
+		/* if we have any extension header, we cannot perform IPsec */
+		if (exthdrs.ip6e_hbh || exthdrs.ip6e_dest1 ||
+		    exthdrs.ip6e_rthdr || exthdrs.ip6e_dest2) {
+			error = EHOSTUNREACH;
+			goto freehdrs;
+		}
+#endif
 	}
+
+	/* Fall through to the routing/multicast handling code */
+ done_spd:
 #endif /* IPSEC */
 
 	/*
@@ -245,7 +301,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	 * If we need IPsec, or there is at least one extension header,
 	 * separate IP6 header from the payload.
 	 */
-	if ((needipsec || optlen) && !hdrsplit) {
+	if ((sproto || optlen) && !hdrsplit) {
 		if ((error = ip6_splithdr(m, &exthdrs)) != 0) {
 			m = NULL;
 			goto freehdrs;
@@ -309,8 +365,8 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 			ip6->ip6_nxt = IPPROTO_DSTOPTS;
 		}
 
-#define MAKE_CHAIN(m,mp,p,i)\
-    {\
+#define MAKE_CHAIN(m, mp, p, i)\
+    do {\
 	if (m) {\
 		if (!hdrsplit) \
 			panic("assumption failed: hdr not split"); \
@@ -321,7 +377,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		(mp)->m_next = (m);\
 		(mp) = (m);\
 	}\
-    }
+    } while (0)
 		/*
 		 * result: IPv6 hbh dest1 rthdr dest2 payload
 		 * m will point to IPv6 header.  mprev will point to the
@@ -334,7 +390,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		MAKE_CHAIN(exthdrs.ip6e_rthdr, mprev,
 			   nexthdrp, IPPROTO_ROUTING);
 
-#ifdef IPSEC
+#if 0 /*KAME IPSEC*/
 		if (!needipsec)
 			goto skip_ipsec2;
 
@@ -459,18 +515,10 @@ skip_ipsec2:;
 		dst->sin6_len = sizeof(struct sockaddr_in6);
 		dst->sin6_addr = ip6->ip6_dst;
 	}
-#ifdef IPSEC
+#if 0 /*KAME IPSEC*/
 	if (needipsec && needipsectun) {
 		struct ipsec_output_state state;
 
-		/*
-		 * All the extension headers will become inaccessible
-		 * (since they can be encrypted).
-		 * Don't panic, we need no more updates to extension headers
-		 * on inner IPv6 packet (since they are now encapsulated).
-		 *
-		 * IPv6 [ESP|AH] IPv6 [extension headers] payload
-		 */
 		bzero(&exthdrs, sizeof(exthdrs));
 		exthdrs.ip6e_ip6 = m;
 
@@ -508,7 +556,48 @@ skip_ipsec2:;
 
 		exthdrs.ip6e_ip6 = m;
 	}
-#endif /*IPESC*/
+#endif /*IPSEC*/
+#ifdef IPSEC
+	/*
+	 * Check if the packet needs encapsulation.
+	 * ipsp_process_packet will never come back to here.
+	 */
+	if (sproto != 0) {
+	        s = splnet();
+
+		/* fill in IPv6 header which would be filled later */
+		if (!IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
+			if (opt && opt->ip6po_hlim != -1)
+				ip6->ip6_hlim = opt->ip6po_hlim & 0xff;
+		} else {
+			if (im6o != NULL)
+				ip6->ip6_hlim = im6o->im6o_multicast_hlim;
+			else
+				ip6->ip6_hlim = ip6_defmcasthlim;
+			if (opt && opt->ip6po_hlim != -1)
+				ip6->ip6_hlim = opt->ip6po_hlim & 0xff;
+
+			/*
+			 * XXX what should we do if ip6_hlim == 0 and the packet
+			 * gets tunnelled?
+			 */
+		}
+
+		tdb = gettdb(sspi, &sdst, sproto);
+		if (tdb == NULL) {
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto done;
+		}
+
+		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
+
+		/* Callee frees mbuf */
+		error = ipsp_process_packet(m, tdb, AF_INET6, 0);
+		splx(s);
+		return error;  /* Nothing more to be done */
+	}
+#endif /* IPSEC */
 
 	if (!IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
 		/* Unicast */
@@ -522,7 +611,7 @@ skip_ipsec2:;
 		 */
 		if (ro->ro_rt == 0) {
 			/*
-			 * NetBSD/OpenBSD always clones routes, if parent is
+			 * non-bsdi always clone routes, if parent is
 			 * PRF_CLONING.
 			 */
 			rtalloc((struct route *)ro);
@@ -543,11 +632,11 @@ skip_ipsec2:;
 		in6_ifstat_inc(ifp, ifs6_out_request);
 
 		/*
-		 * Check if there is the outgoing interface conflicts with
-		 * the interface specified by ifi6_ifindex(if specified).
+		 * Check if the outgoing interface conflicts with
+		 * the interface specified by ifi6_ifindex (if specified).
 		 * Note that loopback interface is always okay.
-		 * (this happens when we are sending packet toward my
-		 * interface)
+		 * (this may happen when we are sending a packet to one of
+		 *  our own addresses.)
 		 */
 		if (opt && opt->ip6po_pktinfo
 		 && opt->ip6po_pktinfo->ipi6_ifindex) {
@@ -670,7 +759,7 @@ skip_ipsec2:;
 			 * if necessary.
 			 */
 			if (ip6_mrouter && (flags & IPV6_FORWARDING) == 0) {
-				if (ip6_mforward(ip6, ifp, m) != NULL) {
+				if (ip6_mforward(ip6, ifp, m) != 0) {
 					m_freem(m);
 					goto done;
 				}
@@ -740,10 +829,38 @@ skip_ipsec2:;
 		mtu = nd_ifinfo[ifp->if_index].linkmtu;
 	}
 
-	/*
-	 * Fake link-local scope-class addresses
-	 */
-	if ((ifp->if_flags & IFF_LOOPBACK) == 0) {
+	/* Fake scoped addresses */
+	if ((ifp->if_flags & IFF_LOOPBACK) != 0) {
+		/*
+		 * If source or destination address is a scoped address, and
+		 * the packet is going to be sent to a loopback interface,
+		 * we should keep the original interface.
+		 */
+
+		/*
+		 * XXX: this is a very experimental and temporary solution.
+		 * We eventually have sockaddr_in6 and use the sin6_scope_id
+		 * field of the structure here.
+		 * We rely on the consistency between two scope zone ids
+		 * of source add destination, which should already be assured
+		 * Larger scopes than link will be supported in the near
+		 * future.
+		 */
+		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
+			origifp = ifindex2ifnet[ntohs(ip6->ip6_src.s6_addr16[1])];
+		else if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
+			origifp = ifindex2ifnet[ntohs(ip6->ip6_dst.s6_addr16[1])];
+		else
+			origifp = ifp;
+	}
+	else
+		origifp = ifp;
+#ifndef FAKE_LOOPBACK_IF
+	if ((ifp->if_flags & IFF_LOOPBACK) == 0)
+#else
+	if (1)
+#endif
+	{
 		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
 			ip6->ip6_src.s6_addr16[1] = 0;
 		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
@@ -756,6 +873,7 @@ skip_ipsec2:;
 	 */
 	if (ip6_fw_chk_ptr) {
 		u_short port = 0;
+		m->m_pkthdr.rcvif = NULL;	/*XXX*/
 		/* If ipfw says divert, we have to just drop packet */
 		if ((*ip6_fw_chk_ptr)(&ip6, ifp, &port, &m)) {
 			m_freem(m);
@@ -802,7 +920,7 @@ skip_ipsec2:;
 
 	/*
 	 * Send the packet to the outgoing interface.
-	 * If necessary, do IPv6 fragmentation before sending. 
+	 * If necessary, do IPv6 fragmentation before sending.
 	 */
 	tlen = m->m_pkthdr.len;
 	if (tlen <= mtu
@@ -816,7 +934,7 @@ skip_ipsec2:;
 	     * larger than the link's MTU.
 	     * XXX: IFF_FRAGMENTABLE (or such) flag has not been defined yet...
 	     */
-	    
+	
 	    || ifp->if_flags & IFF_FRAGMENTABLE
 #endif
 	    )
@@ -825,7 +943,7 @@ skip_ipsec2:;
 		error = (*ifp->if_output)(ifp, m, (struct sockaddr *)dst,
 					  ro->ro_rt);
 #else
-		error = nd6_output(ifp, m, dst, ro->ro_rt);
+		error = nd6_output(ifp, origifp, m, dst, ro->ro_rt);
 #endif
 		goto done;
 	} else if (mtu < IPV6_MMTU) {
@@ -870,16 +988,13 @@ skip_ipsec2:;
 		if (exthdrs.ip6e_rthdr) {
 			nextproto = *mtod(exthdrs.ip6e_rthdr, u_char *);
 			*mtod(exthdrs.ip6e_rthdr, u_char *) = IPPROTO_FRAGMENT;
-		}
-		else if (exthdrs.ip6e_dest1) {
+		} else if (exthdrs.ip6e_dest1) {
 			nextproto = *mtod(exthdrs.ip6e_dest1, u_char *);
 			*mtod(exthdrs.ip6e_dest1, u_char *) = IPPROTO_FRAGMENT;
-		}
-		else if (exthdrs.ip6e_hbh) {
+		} else if (exthdrs.ip6e_hbh) {
 			nextproto = *mtod(exthdrs.ip6e_hbh, u_char *);
 			*mtod(exthdrs.ip6e_hbh, u_char *) = IPPROTO_FRAGMENT;
-		}
-		else {
+		} else {
 			nextproto = ip6->ip6_nxt;
 			ip6->ip6_nxt = IPPROTO_FRAGMENT;
 		}
@@ -950,10 +1065,9 @@ sendorfree:
 						  (struct sockaddr *)dst,
 						  ro->ro_rt);
 #else
-			error = nd6_output(ifp, m, dst, ro->ro_rt);
+			error = nd6_output(ifp, origifp, m, dst, ro->ro_rt);
 #endif
-		}
-		else
+		} else
 			m_freem(m);
 	}
 
@@ -966,11 +1080,6 @@ done:
 	} else if (ro_pmtu == &ip6route && ro_pmtu->ro_rt) {
 		RTFREE(ro_pmtu->ro_rt);
 	}
-
-#ifdef IPSEC
-	if (sp != NULL)
-		key_freesp(sp);
-#endif /* IPSEC */
 
 	return(error);
 
@@ -1016,7 +1125,7 @@ ip6_copyexthdr(mp, hdr, hlen)
 }
 
 /*
- * Insert jumbo payload option. 
+ * Insert jumbo payload option.
  */
 static int
 ip6_insert_jumboopt(exthdrs, plen)
@@ -1025,6 +1134,7 @@ ip6_insert_jumboopt(exthdrs, plen)
 {
 	struct mbuf *mopt;
 	u_char *optbuf;
+	u_int32_t v;
 
 #define JUMBOOPTLEN	8	/* length of jumbo payload option and padding */
 
@@ -1042,26 +1152,48 @@ ip6_insert_jumboopt(exthdrs, plen)
 		optbuf = mtod(mopt, u_char *);
 		optbuf[1] = 0;	/* = ((JUMBOOPTLEN) >> 3) - 1 */
 		exthdrs->ip6e_hbh = mopt;
-	}
-	else {
+	} else {
 		struct ip6_hbh *hbh;
 
 		mopt = exthdrs->ip6e_hbh;
 		if (M_TRAILINGSPACE(mopt) < JUMBOOPTLEN) {
-			caddr_t oldoptp = mtod(mopt, caddr_t);
+			/*
+			 * XXX assumption:
+			 * - exthdrs->ip6e_hbh is not referenced from places
+			 *   other than exthdrs.
+			 * - exthdrs->ip6e_hbh is not an mbuf chain.
+			 */
 			int oldoptlen = mopt->m_len;
+			struct mbuf *n;
 
-			if (mopt->m_flags & M_EXT)
-				return(ENOBUFS); /* XXX */
-			MCLGET(mopt, M_DONTWAIT);
-			if ((mopt->m_flags & M_EXT) == 0)
+			/*
+			 * XXX: give up if the whole (new) hbh header does
+			 * not fit even in an mbuf cluster.
+			 */
+			if (oldoptlen + JUMBOOPTLEN > MCLBYTES)
 				return(ENOBUFS);
 
-			bcopy(oldoptp, mtod(mopt, caddr_t), oldoptlen);
-			optbuf = mtod(mopt, caddr_t) + oldoptlen;
-			mopt->m_len = oldoptlen + JUMBOOPTLEN;
-		}
-		else {
+			/*
+			 * As a consequence, we must always prepare a cluster
+			 * at this point.
+			 */
+			MGET(n, M_DONTWAIT, MT_DATA);
+			if (n) {
+				MCLGET(n, M_DONTWAIT);
+				if ((n->m_flags & M_EXT) == 0) {
+					m_freem(n);
+					n = NULL;
+				}
+			}
+			if (!n)
+				return(ENOBUFS);
+			n->m_len = oldoptlen + JUMBOOPTLEN;
+			bcopy(mtod(mopt, caddr_t), mtod(n, caddr_t),
+			      oldoptlen);
+			optbuf = mtod(n, caddr_t) + oldoptlen;
+			m_freem(mopt);
+			exthdrs->ip6e_hbh = n;
+		} else {
 			optbuf = mtod(mopt, u_char *) + mopt->m_len;
 			mopt->m_len += JUMBOOPTLEN;
 		}
@@ -1079,7 +1211,8 @@ ip6_insert_jumboopt(exthdrs, plen)
 	/* fill in the option. */
 	optbuf[2] = IP6OPT_JUMBO;
 	optbuf[3] = 4;
-	*(u_int32_t *)&optbuf[4] = htonl(plen + JUMBOOPTLEN);
+	v = (u_int32_t)htonl(plen + JUMBOOPTLEN);
+	bcopy(&v, &optbuf[4], sizeof(u_int32_t));
 
 	/* finally, adjust the packet header length */
 	exthdrs->ip6e_ip6->m_pkthdr.len += JUMBOOPTLEN;
@@ -1105,8 +1238,7 @@ ip6_insertfraghdr(m0, m, hlen, frghdrp)
 		if (n == 0)
 			return(ENOBUFS);
 		m->m_next = n;
-	}
-	else
+	} else
 		n = m;
 
 	/* Search for the last mbuf of unfragmentable part. */
@@ -1114,14 +1246,13 @@ ip6_insertfraghdr(m0, m, hlen, frghdrp)
 		;
 
 	if ((mlast->m_flags & M_EXT) == 0 &&
-	    M_TRAILINGSPACE(mlast) < sizeof(struct ip6_frag)) {
+	    M_TRAILINGSPACE(mlast) >= sizeof(struct ip6_frag)) {
 		/* use the trailing space of the last mbuf for the fragment hdr */
 		*frghdrp =
 			(struct ip6_frag *)(mtod(mlast, caddr_t) + mlast->m_len);
 		mlast->m_len += sizeof(struct ip6_frag);
 		m->m_pkthdr.len += sizeof(struct ip6_frag);
-	}
-	else {
+	} else {
 		/* allocate a new mbuf for the fragment header */
 		struct mbuf *mfrg;
 
@@ -1151,6 +1282,12 @@ ip6_ctloutput(op, so, level, optname, mp)
 	register struct mbuf *m = *mp;
 	int error, optval;
 	int optlen;
+#ifdef IPSEC
+	struct proc *p = curproc; /* XXX */
+	struct tdb *tdb;
+	struct tdb_ident *tdbip, tdbi;
+	int s;
+#endif
 
 	optlen = m ? m->m_len : 0;
 	error = optval = 0;
@@ -1162,6 +1299,7 @@ ip6_ctloutput(op, so, level, optname, mp)
 		case PRCO_SETOPT:
 			switch (optname) {
 			case IPV6_PKTOPTIONS:
+				/* m is freed in ip6_pcbopts */
 				return(ip6_pcbopts(&inp->inp_outputopts6,
 						   m, so));
 			case IPV6_HOPOPTS:
@@ -1250,49 +1388,38 @@ ip6_ctloutput(op, so, level, optname, mp)
 			case IPV6_LEAVE_GROUP:
 				error =	ip6_setmoptions(optname,
 					&inp->inp_moptions6, m);
-				/*
-				 * XXX: setting the flag would be redundant
-				 *      except at the first time. Also, we
-				 *      actually don't have to reset the flag,
-				 *      since ip6_freemoptions() would simply
-				 *      return when the inp_moptions6 is NULL.
-				 */
-				if (inp->inp_moptions6)
-					inp->inp_flags |= INP_IPV6_MCAST;
-				else
-					inp->inp_flags &= ~INP_IPV6_MCAST;
 				break;
 
-		case IPV6_PORTRANGE:
-			optval = *mtod(m, int *);
+			case IPV6_PORTRANGE:
+				optval = *mtod(m, int *);
 
 # define in6p		inp
 # define in6p_flags	inp_flags
-			switch (optval) {
-			case IPV6_PORTRANGE_DEFAULT:
-				in6p->in6p_flags &= ~(IN6P_LOWPORT);
-				in6p->in6p_flags &= ~(IN6P_HIGHPORT);
-				break;
+				switch (optval) {
+				case IPV6_PORTRANGE_DEFAULT:
+					in6p->in6p_flags &= ~(IN6P_LOWPORT);
+					in6p->in6p_flags &= ~(IN6P_HIGHPORT);
+					break;
 
-			case IPV6_PORTRANGE_HIGH:
-				in6p->in6p_flags &= ~(IN6P_LOWPORT);
-				in6p->in6p_flags |= IN6P_HIGHPORT;
-				break;
+				case IPV6_PORTRANGE_HIGH:
+					in6p->in6p_flags &= ~(IN6P_LOWPORT);
+					in6p->in6p_flags |= IN6P_HIGHPORT;
+					break;
 
-			case IPV6_PORTRANGE_LOW:
-				in6p->in6p_flags &= ~(IN6P_HIGHPORT);
-				in6p->in6p_flags |= IN6P_LOWPORT;
-				break;
+				case IPV6_PORTRANGE_LOW:
+					in6p->in6p_flags &= ~(IN6P_HIGHPORT);
+					in6p->in6p_flags |= IN6P_LOWPORT;
+					break;
 
-			default:
-				error = EINVAL;
-				break;
-			}
+				default:
+					error = EINVAL;
+					break;
+				}
 # undef in6p
 # undef in6p_flags
-			break;
+				break;
 
-#ifdef IPSEC
+#if 0 /*KAME IPSEC*/
 			case IPV6_IPSEC_POLICY:
 			    {
 				caddr_t req = NULL;
@@ -1319,6 +1446,77 @@ ip6_ctloutput(op, so, level, optname, mp)
 			    }
 				break;
 #endif
+			case IPSEC6_OUTSA:
+#ifndef IPSEC
+				error = EINVAL;
+#else
+				s = spltdb();
+				if (m == 0 || m->m_len != sizeof(struct tdb_ident)) {
+					error = EINVAL;
+				} else {
+					tdbip = mtod(m, struct tdb_ident *);
+					tdb = gettdb(tdbip->spi, &tdbip->dst,
+					    tdbip->proto);
+					if (tdb == NULL)
+						error = ESRCH;
+					else
+						tdb_add_inp(tdb, inp);
+				}
+				splx(s);
+#endif /* IPSEC */
+				break;
+
+			case IPV6_AUTH_LEVEL:
+			case IPV6_ESP_TRANS_LEVEL:
+			case IPV6_ESP_NETWORK_LEVEL:
+#ifndef IPSEC
+				error = EINVAL;
+#else
+				if (m == 0 || m->m_len != sizeof(int)) {
+					error = EINVAL;
+					break;
+				}
+				optval = *mtod(m, int *);
+
+				if (optval < IPSEC_LEVEL_BYPASS || 
+				    optval > IPSEC_LEVEL_UNIQUE) {
+					error = EINVAL;
+					break;
+				}
+					
+				switch (optname) {
+				case IP_AUTH_LEVEL:
+				        if (optval < ipsec_auth_default_level &&
+					    suser(p->p_ucred, &p->p_acflag)) {
+						error = EACCES;
+						break;
+					}
+					inp->inp_seclevel[SL_AUTH] = optval;
+					break;
+
+				case IP_ESP_TRANS_LEVEL:
+				        if (optval < ipsec_esp_trans_default_level &&
+					    suser(p->p_ucred, &p->p_acflag)) {
+						error = EACCES;
+						break;
+					}
+					inp->inp_seclevel[SL_ESP_TRANS] = optval;
+					break;
+
+				case IP_ESP_NETWORK_LEVEL:
+				        if (optval < ipsec_esp_network_default_level &&
+					    suser(p->p_ucred, &p->p_acflag)) {
+						error = EACCES;
+						break;
+					}
+					inp->inp_seclevel[SL_ESP_NETWORK] = optval;
+					break;
+				}
+				if (!error)
+					inp->inp_secrequire = get_sa_require(inp);
+#endif
+				break;
+
 
 			default:
 				error = ENOPROTOOPT;
@@ -1450,7 +1648,7 @@ ip6_ctloutput(op, so, level, optname, mp)
 				error = ip6_getmoptions(optname, inp->inp_moptions6, mp);
 				break;
 
-#ifdef IPSEC
+#if 0 /*KAME IPSEC*/
 			case IPV6_IPSEC_POLICY:
 			  {
 				caddr_t req = NULL;
@@ -1478,6 +1676,53 @@ ip6_ctloutput(op, so, level, optname, mp)
 			  }
 				break;
 #endif
+
+			case IPSEC6_OUTSA:
+#ifndef IPSEC
+				error = EINVAL;
+#else
+				s = spltdb();
+				if (inp->inp_tdb == NULL) {
+					error = ENOENT;
+				} else {
+					tdbi.spi = inp->inp_tdb->tdb_spi;
+					tdbi.dst = inp->inp_tdb->tdb_dst;
+					tdbi.proto = inp->inp_tdb->tdb_sproto;
+					*mp = m = m_get(M_WAIT, MT_SOOPTS);
+					m->m_len = sizeof(tdbi);
+					bcopy((caddr_t)&tdbi, mtod(m, caddr_t),
+					    (unsigned)m->m_len);
+				}
+				splx(s);
+#endif /* IPSEC */
+				break;
+
+			case IPV6_AUTH_LEVEL:
+			case IPV6_ESP_TRANS_LEVEL:
+			case IPV6_ESP_NETWORK_LEVEL:
+#ifndef IPSEC
+				m->m_len = sizeof(int);
+				*mtod(m, int *) = IPSEC_LEVEL_NONE;
+#else
+				m->m_len = sizeof(int);
+				switch (optname) {
+				case IP_AUTH_LEVEL:
+					optval = inp->inp_seclevel[SL_AUTH];
+					break;
+
+				case IP_ESP_TRANS_LEVEL:
+					optval =
+					    inp->inp_seclevel[SL_ESP_TRANS];
+					break;
+
+				case IP_ESP_NETWORK_LEVEL:
+					optval =
+					    inp->inp_seclevel[SL_ESP_NETWORK];
+					break;
+				}
+				*mtod(m, int *) = optval;
+#endif
+				break;
 
 			default:
 				error = ENOPROTOOPT;
@@ -1942,6 +2187,10 @@ ip6_setpktoptions(control, opt, priv)
 				return(ENXIO);
 			}
 
+			/*
+			 * Check if the requested source address is indeed a
+			 * unicast address assigned to the node.
+			 */
 			if (!IN6_IS_ADDR_UNSPECIFIED(&opt->ip6po_pktinfo->ipi6_addr)) {
 				struct ifaddr *ia;
 				struct sockaddr_in6 sin6;
@@ -1980,7 +2229,9 @@ ip6_setpktoptions(control, opt, priv)
 		case IPV6_NEXTHOP:
 			if (!priv)
 				return(EPERM);
+			
 			if (cm->cmsg_len < sizeof(u_char) ||
+			    /* check if cmsg_len is large enough for sa_len */
 			    cm->cmsg_len < CMSG_LEN(*CMSG_DATA(cm)))
 				return(EINVAL);
 
@@ -2062,12 +2313,46 @@ ip6_mloopback(ifp, m, dst)
 	register struct mbuf *m;
 	register struct sockaddr_in6 *dst;
 {
-	struct	mbuf *copym;
+	struct mbuf *copym;
+	struct ip6_hdr *ip6;
 
 	copym = m_copy(m, 0, M_COPYALL);
-	if (copym != NULL) {
-		(void)looutput(ifp, copym, (struct sockaddr *)dst, NULL);
+	if (copym == NULL)
+		return;
+
+	/*
+	 * Make sure to deep-copy IPv6 header portion in case the data
+	 * is in an mbuf cluster, so that we can safely override the IPv6
+	 * header portion later.
+	 */
+	if ((copym->m_flags & M_EXT) != 0 ||
+	    copym->m_len < sizeof(struct ip6_hdr)) {
+		copym = m_pullup(copym, sizeof(struct ip6_hdr));
+		if (copym == NULL)
+			return;
 	}
+
+#ifdef DIAGNOSTIC
+	if (copym->m_len < sizeof(*ip6)) {
+		m_freem(copym);
+		return;
+	}
+#endif
+
+#ifndef FAKE_LOOPBACK_IF
+	if ((ifp->if_flags & IFF_LOOPBACK) == 0)
+#else
+	if (1)
+#endif
+	{
+		ip6 = mtod(copym, struct ip6_hdr *);
+		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
+			ip6->ip6_src.s6_addr16[1] = 0;
+		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
+			ip6->ip6_dst.s6_addr16[1] = 0;
+	}
+
+	(void)looutput(ifp, copym, (struct sockaddr *)dst, NULL);
 }
 
 /*

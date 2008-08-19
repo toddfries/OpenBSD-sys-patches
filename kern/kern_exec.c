@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.42 2000/04/20 10:03:42 art Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.44.2.1 2001/06/15 20:41:28 miod Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -51,6 +51,7 @@
 #include <sys/mman.h>
 #include <sys/signalvar.h>
 #include <sys/stat.h>
+#include <sys/conf.h>
 #ifdef SYSVSHM
 #include <sys/shm.h>
 #endif
@@ -131,6 +132,15 @@ check_exec(p, epp)
 	if ((vp->v_mount->mnt_flag & MNT_NOSUID) ||
 	    (p->p_flag & P_TRACED) || p->p_fd->fd_refcnt > 1)
 		epp->ep_vap->va_mode &= ~(VSUID | VSGID);
+
+	/*
+	 * Set the P_SUID* flags early so that we won't be fiddled with when
+	 * we sleep later in this code.
+	 * XXX - this could give us a few false positives and the caller must
+	 *       make sure to save and restore the flags if exec fails.
+	 */
+	if (epp->ep_vap->va_mode & (VSUID|VSGID))
+		p->p_flag |= P_SUGID|P_SUGIDEXEC;
 
 	/* check access.  for root we have to see if any exec bit on */
 	if ((error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p)) != 0)
@@ -243,6 +253,7 @@ sys_execve(p, v, retval)
 	char **tmpfap;
 	int szsigcode;
 	extern struct emul emul_native;
+	int saved_sugid;
 
 	/*
 	 * figure out the maximum size of an exec header, if necessary.
@@ -263,7 +274,7 @@ sys_execve(p, v, retval)
 	 * initialize the fields of the exec package.
 	 */
 	pack.ep_name = (char *)SCARG(uap, path);
-	MALLOC(pack.ep_hdr, void *, exec_maxhdrsz, M_EXEC, M_WAITOK);
+	pack.ep_hdr = malloc(exec_maxhdrsz, M_EXEC, M_WAITOK);
 	pack.ep_hdrlen = exec_maxhdrsz;
 	pack.ep_hdrvalid = 0;
 	pack.ep_ndp = &nid;
@@ -274,6 +285,7 @@ sys_execve(p, v, retval)
 	pack.ep_emul = &emul_native;
 	pack.ep_flags = 0;
 
+	saved_sugid = p->p_flag & (P_SUGID|P_SUGIDEXEC);
 	/* see if we can run it. */
 	if ((error = check_exec(p, &pack)) != 0) {
 		goto freehdr;
@@ -305,7 +317,7 @@ sys_execve(p, v, retval)
 				*dp++ = *cp++;
 			dp++;
 
-			FREE(*tmpfap, M_EXEC);
+			free(*tmpfap, M_EXEC);
 			tmpfap++; argc++;
 		}
 		FREE(pack.ep_fa, M_EXEC);
@@ -535,26 +547,38 @@ sys_execve(p, v, retval)
 			 * allocated.  We do not want userland to accidentally
 			 * allocate descriptors in this range which has implied
 			 * meaning to libc.
+			 *
+			 * XXX - Shouldn't the exec fail if we can't allocate
+			 *       resources here?
 			 */
 			if (fp == NULL) {
 				short flags = FREAD | (i == 0 ? 0 : FWRITE);
-				struct nameidata nd;
+				struct vnode *vp;
 				int indx;
 
 				if ((error = falloc(p, &fp, &indx)) != 0)
-					continue;
-				NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE,
-				    "/dev/null", p);
-				if ((error = vn_open(&nd, flags, 0)) != 0) {
+					break;
+#ifdef DIAGNOSTIC
+				if (indx != i)
+					panic("sys_execve: falloc indx != i");
+#endif
+				if ((error = cdevvp(getnulldev(), &vp)) != 0) {
 					ffree(fp);
 					fdremove(p->p_fd, indx);
 					break;
 				}
+				if ((error = VOP_OPEN(vp, flags, p->p_ucred, p)) != 0) {
+					ffree(fp);
+					fdremove(p->p_fd, indx);
+					vrele(vp);
+					break;
+				}
+				if (flags & FWRITE)
+					vp->v_writecount++;
 				fp->f_flag = flags;
 				fp->f_type = DTYPE_VNODE;
 				fp->f_ops = &vnops;
-				fp->f_data = (caddr_t)nd.ni_vp;
-				VOP_UNLOCK(nd.ni_vp, 0, p);
+				fp->f_data = (caddr_t)vp;
 			}
 		}
 	} else
@@ -601,7 +625,7 @@ sys_execve(p, v, retval)
 		psignal(p, SIGTRAP);
 
 	p->p_emul = pack.ep_emul;
-	FREE(pack.ep_hdr, M_EXEC);
+	free(pack.ep_hdr, M_EXEC);
 
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_EMUL))
@@ -628,7 +652,8 @@ bad:
 #endif
 
 freehdr:
-	FREE(pack.ep_hdr, M_EXEC);
+	free(pack.ep_hdr, M_EXEC);
+	p->p_flag = (p->p_flag & ~(P_SUGID|P_SUGIDEXEC)) | saved_sugid;
 	return (error);
 
 exec_abort:
@@ -656,7 +681,7 @@ exec_abort:
 #endif
 
 free_pack_abort:
-	FREE(pack.ep_hdr, M_EXEC);
+	free(pack.ep_hdr, M_EXEC);
 	exit1(p, W_EXITCODE(0, SIGABRT));
 	exit1(p, -1);
 

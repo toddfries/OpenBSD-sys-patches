@@ -1,4 +1,5 @@
-/*	$KAME: in6.c,v 1.75 2000/04/12 03:51:29 itojun Exp $	*/
+/*	$OpenBSD: in6.c,v 1.21 2000/10/06 05:52:01 itojun Exp $	*/
+/*	$KAME: in6.c,v 1.107 2000/10/06 04:58:30 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -80,10 +81,6 @@
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/route.h>
-#include "gif.h"
-#if NGIF > 0
-#include <net/if_gif.h>
-#endif
 #include <net/if_dl.h>
 
 #include <netinet/in.h>
@@ -155,7 +152,7 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 {
 	struct sockaddr_in6 lo_sa;
 	struct sockaddr_in6 all1_sa;
-	struct rtentry *nrt = NULL;
+	struct rtentry *nrt = NULL, **nrtp = NULL;
 	
 	bzero(&lo_sa, sizeof(lo_sa));
 	bzero(&all1_sa, sizeof(all1_sa));
@@ -165,11 +162,17 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 	lo_sa.sin6_addr = in6addr_loopback;
 	all1_sa.sin6_addr = in6mask128;
 	
-	/* So we add or remove static loopback entry, here. */
+	/*
+	 * So we add or remove static loopback entry, here.
+	 * This request for deletion could fail, e.g. when we remove
+	 * an address right after adding it.
+	 */
+	if (cmd == RTM_ADD)
+		nrtp = &nrt;
 	rtrequest(cmd, ifa->ifa_addr,
 		  (struct sockaddr *)&lo_sa,
 		  (struct sockaddr *)&all1_sa,
-		  RTF_UP|RTF_HOST, &nrt);
+		  RTF_UP|RTF_HOST, nrtp);
 
 	/*
 	 * Make sure rt_ifa be equal to IFA, the second argument of the
@@ -317,22 +320,6 @@ in6_control(so, cmd, data, ifp, p)
 	if ((so->so_state & SS_PRIV) != 0)
 		privileged++;
 
-	/*
-	 * xxx should prevent processes for link-local addresses?
-	 */
-#if NGIF > 0
-	if (ifp && ifp->if_type == IFT_GIF) {
-		switch (cmd) {
-		case SIOCSIFPHYADDR_IN6:
-			if (!privileged)
-				return(EPERM);
-			/*fall through*/
-		case SIOCGIFPSRCADDR_IN6:
-		case SIOCGIFPDSTADDR_IN6:
-			return gif_ioctl(ifp, cmd, data);
-		}
-	}
-#endif
 	switch (cmd) {
 	case SIOCGETSGCNT_IN6:
 	case SIOCGETMIFCNT_IN6:

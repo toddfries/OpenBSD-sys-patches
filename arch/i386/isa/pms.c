@@ -1,4 +1,4 @@
-/*	$OpenBSD: pms.c,v 1.25 2000/01/15 17:40:20 deraadt Exp $	*/
+/*	$OpenBSD: pms.c,v 1.27.2.1 2000/12/22 19:48:45 jason Exp $	*/
 /*	$NetBSD: pms.c,v 1.29 1996/05/12 23:12:42 mycroft Exp $	*/
 
 /*-
@@ -59,6 +59,7 @@
 #include <machine/conf.h>
 
 #include <dev/isa/isavar.h>
+#include <dev/rndvar.h>
 
 #define	PMS_DATA	0x60	/* offset for data port, read-write */
 #define	PMS_CNTRL	0x64	/* offset for control port, write-only */
@@ -243,6 +244,8 @@ pmsattach(parent, self, aux)
 
 	sc->sc_ih = isa_intr_establish(ic, irq, IST_EDGE, IPL_TTY,
 	    pmsintr, sc, sc->sc_dev.dv_xname);
+
+	pms_pit_cmd(PMS_INT_ENABLE);
 }
 
 int
@@ -317,9 +320,10 @@ pmsclose(dev, flag, mode, p)
 
 	/* Disable interrupts. */
 	/* pms_dev_cmd(PMS_DEV_DISABLE); */
+#if 0
 	pms_pit_cmd(PMS_INT_DISABLE);
 	pms_aux_cmd(PMS_AUX_DISABLE);
-
+#endif
 	sc->sc_state &= ~PMS_OPEN;
 	sc->sc_io = NULL;
 
@@ -544,6 +548,7 @@ pmsintr(arg)
 				buffer[2] = dy;
 				buffer[3] = buffer[4] = 0;
 				(void) b_to_q(buffer, sizeof buffer, &sc->sc_q);
+				add_mouse_randomness(*(u_int32_t*)buffer);
 
 				if (sc->sc_state & PMS_ASLP) {
 					sc->sc_state &= ~PMS_ASLP;
@@ -567,6 +572,7 @@ pmsintr(arg)
 	} else {
 		buffer[0] = inb(PMS_DATA);
 		(void) b_to_q(buffer, 1, &sc->sc_q);
+		add_mouse_randomness(*(u_int32_t*)buffer);
 		
 		if (sc->sc_state & PMS_ASLP) {
 			sc->sc_state &= ~PMS_ASLP;

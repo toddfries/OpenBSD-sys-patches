@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.21.8.1 2000/06/09 05:22:16 jason Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.22 2000/06/07 15:04:06 art Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-

@@ -1,10 +1,10 @@
-/*	$OpenBSD: ip6_input.c,v 1.10 2000/04/17 04:44:50 itojun Exp $	*/
-/*	$KAME: ip6_input.c,v 1.72 2000/03/21 09:23:19 itojun Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.19 2000/08/31 08:39:56 itojun Exp $	*/
+/*	$KAME: ip6_input.c,v 1.121 2000/08/31 06:07:29 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -16,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -140,12 +140,8 @@ struct ip6stat ip6stat;
 static void ip6_init2 __P((void *));
 
 static int ip6_hopopts_input __P((u_int32_t *, u_int32_t *, struct mbuf **, int *));
-
-#if defined(PTR)
-extern	int		ip6_protocol_tr;
-
-int	ptr_in6		__P((struct mbuf *, struct mbuf **));
-extern void ip_forward __P((struct mbuf *, int));
+#ifdef PULLDOWN_TEST
+static struct mbuf *ip6_pullexthdr __P((struct mbuf *, size_t, int));
 #endif
 
 /*
@@ -186,7 +182,7 @@ ip6_init2(dummy)
 #if 1
 	/*
 	 * to route local address of p2p link to loopback,
-	 * assign loopback address first. 
+	 * assign loopback address first.
 	 */
 	in6_ifattach(&loif[0], NULL);
 #else
@@ -214,6 +210,24 @@ ip6intr()
 		splx(s);
 		if (m == 0)
 			return;
+#ifndef PULLDOWN_TEST
+		/*
+		 * KAME requirement: make sure mbuf is packed well
+		 */
+
+		if (m->m_next) {
+			int l;
+			if (m->m_pkthdr.len > MCLBYTES)
+				l = MCLBYTES;
+			else
+				l = m->m_pkthdr.len;
+			if (l > m->m_len) {
+				m = m_pullup2(m, l);
+				if (!m)
+					continue;
+			}
+		}
+#endif
 		ip6_input(m);
 	}
 }
@@ -254,8 +268,7 @@ ip6_input(m)
 		if (m->m_next) {
 			if (m->m_flags & M_LOOP) {
 				ip6stat.ip6s_m2m[loif[0].if_index]++;	/*XXX*/
-			}
-			else if (m->m_pkthdr.rcvif->if_index <= 31)
+			} else if (m->m_pkthdr.rcvif->if_index <= 31)
 				ip6stat.ip6s_m2m[m->m_pkthdr.rcvif->if_index]++;
 			else
 				ip6stat.ip6s_m2m[0]++;
@@ -359,13 +372,12 @@ ip6_input(m)
 		}
 	}
 
-	if (m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) {
-		if (IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_dst)) {
-			ours = 1;
-			deliverifp = m->m_pkthdr.rcvif;
-			goto hbhcheck;
-		}
-	} else {
+#ifndef FAKE_LOOPBACK_IF
+	if ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0)
+#else
+	if (1)
+#endif
+	{
 		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
 			ip6->ip6_src.s6_addr16[1]
 				= htons(m->m_pkthdr.rcvif->if_index);
@@ -374,31 +386,19 @@ ip6_input(m)
 				= htons(m->m_pkthdr.rcvif->if_index);
 	}
 
-#if defined(PTR)
 	/*
-	 *
+	 * XXX we need this since we do not have "goto ours" hack route
+	 * for some of our ifaddrs on loopback interface.
+	 * we should correct it by changing in6_ifattach to install
+	 * "goto ours" hack route.
 	 */
-	if (ip6_protocol_tr)
-	{
-	    struct mbuf *m1 = NULL;
-
-	    switch (ptr_in6(m, &m1))
-	    {
-	      case IPPROTO_IP:					goto mcastcheck;
-	      case IPPROTO_IPV4:	ip_forward(m1, 0);	break;
-	      case IPPROTO_IPV6:	ip6_forward(m1, 0);	break;
-	      case IPPROTO_MAX:			/* discard this packet	*/
-	      default:
-	    }
-
-	    if (m != m1)
-		m_freem(m);
-
-	    return;
+	if ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) != 0) {
+		if (IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_dst)) {
+			ours = 1;
+			deliverifp = m->m_pkthdr.rcvif;
+			goto hbhcheck;
+		}
 	}
-
-  mcastcheck:
-#endif
 
 	/*
 	 * Multicast check
@@ -427,13 +427,19 @@ ip6_input(m)
 	/*
 	 *  Unicast check
 	 */
-	if (ip6_forward_rt.ro_rt == 0 ||
-	    !IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst,
-				&ip6_forward_rt.ro_dst.sin6_addr)) {
+	if (ip6_forward_rt.ro_rt != NULL &&
+	    (ip6_forward_rt.ro_rt->rt_flags & RTF_UP) != 0 && 
+	    IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst,
+			       &ip6_forward_rt.ro_dst.sin6_addr))
+		ip6stat.ip6s_forward_cachehit++;
+	else {
 		if (ip6_forward_rt.ro_rt) {
+			/* route is down or destination is different */
+			ip6stat.ip6s_forward_cachemiss++;
 			RTFREE(ip6_forward_rt.ro_rt);
 			ip6_forward_rt.ro_rt = 0;
 		}
+
 		bzero(&ip6_forward_rt.ro_dst, sizeof(struct sockaddr_in6));
 		ip6_forward_rt.ro_dst.sin6_len = sizeof(struct sockaddr_in6);
 		ip6_forward_rt.ro_dst.sin6_family = AF_INET6;
@@ -468,16 +474,25 @@ ip6_input(m)
 	    ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_LOOP) {
 		struct in6_ifaddr *ia6 =
 			(struct in6_ifaddr *)ip6_forward_rt.ro_rt->rt_ifa;
-		/* packet to tentative address must not be received */
 		if (ia6->ia6_flags & IN6_IFF_ANYCAST)
 			m->m_flags |= M_ANYCAST6;
+		/*
+		 * packets to a tentative, duplicated, or somehow invalid
+		 * address must not be accepted.
+		 */
 		if (!(ia6->ia6_flags & IN6_IFF_NOTREADY)) {
-			/* this interface is ready */
+			/* this address is ready */
 			ours = 1;
 			deliverifp = ia6->ia_ifp;	/* correct? */
 			goto hbhcheck;
 		} else {
-			/* this interface is not ready, fall through */
+			/* address is not ready, so discard the packet. */
+			log(LOG_INFO,
+			    "ip6_input: packet to an unready address %s->%s\n",
+			    ip6_sprintf(&ip6->ip6_src),
+			    ip6_sprintf(&ip6->ip6_dst));
+
+			goto bad;
 		}
 	}
 
@@ -546,8 +561,29 @@ ip6_input(m)
 #endif
 			return;	/* m have already been freed */
 		}
+
 		/* adjust pointer */
 		ip6 = mtod(m, struct ip6_hdr *);
+
+		/*
+		 * if the payload length field is 0 and the next header field  
+		 * indicates Hop-by-Hop Options header, then a Jumbo Payload
+		 * option MUST be included.
+		 */
+		if (ip6->ip6_plen == 0 && plen == 0) {
+			/*
+			 * Note that if a valid jumbo payload option is
+			 * contained, ip6_hoptops_input() must set a valid
+			 * (non-zero) payload length to the variable plen. 
+			 */
+			ip6stat.ip6s_badoptions++;
+			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
+			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_hdrerr);
+			icmp6_error(m, ICMP6_PARAM_PROB,
+				    ICMP6_PARAMPROB_HEADER,
+				    (caddr_t)&ip6->ip6_plen - (caddr_t)ip6);
+			return;
+		}
 #ifndef PULLDOWN_TEST
 		/* ip6_hopopts_input() ensures that mbuf is contiguous */
 		hbh = (struct ip6_hbh *)(ip6 + 1);
@@ -610,11 +646,28 @@ ip6_input(m)
 			m_freem(m);
 			return;
 		}
-	}
-	else if (!ours) {
+	} else if (!ours) {
 		ip6_forward(m, 0);
 		return;
 	}	
+
+	ip6 = mtod(m, struct ip6_hdr *);
+
+	/*
+	 * Malicious party may be able to use IPv4 mapped addr to confuse
+	 * tcp/udp stack and bypass security checks (act as if it was from
+	 * 127.0.0.1 by using IPv6 src ::ffff:127.0.0.1).  Be cautious.
+	 *
+	 * For SIIT end node behavior, you may want to disable the check.
+	 * However, you will  become vulnerable to attacks using IPv4 mapped
+	 * source.
+	 */
+	if (IN6_IS_ADDR_V4MAPPED(&ip6->ip6_src) ||
+	    IN6_IS_ADDR_V4MAPPED(&ip6->ip6_dst)) {
+		ip6stat.ip6s_badscope++;
+		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_addrerr);
+		goto bad;
+	}
 
 	/*
 	 * Tell launch routine the next header
@@ -715,6 +768,7 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 	int optlen = 0;
 	u_int8_t *opt = opthead;
 	u_int16_t rtalert_val;
+	u_int32_t jumboplen;
 
 	for (; hbhlen > 0; hbhlen -= optlen, opt += optlen) {
 		switch(*opt) {
@@ -743,57 +797,75 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 			 *rtalertp = ntohs(rtalert_val);
 			 break;
 		 case IP6OPT_JUMBO:
-			 /* XXX may need check for alignment */
-			 if (hbhlen < IP6OPT_JUMBO_LEN) {
-				 ip6stat.ip6s_toosmall++;
-				 goto bad;
-			 }
-			 if (*(opt + 1) != IP6OPT_JUMBO_LEN - 2)
-				  /* XXX: should we discard the packet? */
-				 log(LOG_ERR, "length of jumbopayload opt "
-				     "is inconsistent(%d)",
-				     *(opt + 1));
-			 optlen = IP6OPT_JUMBO_LEN;
+			/* XXX may need check for alignment */
+			if (hbhlen < IP6OPT_JUMBO_LEN) {
+				ip6stat.ip6s_toosmall++;
+				goto bad;
+			}
+			if (*(opt + 1) != IP6OPT_JUMBO_LEN - 2)
+				 /* XXX: should we discard the packet? */
+				log(LOG_ERR, "length of jumbopayload opt "
+				    "is inconsistent(%d)\n",
+				    *(opt + 1));
+			optlen = IP6OPT_JUMBO_LEN;
 
-			 /*
-			  * We can simply cast because of the alignment
-			  * requirement of the jumbo payload option.
-			  */
-#if 0
-			 *plenp = ntohl(*(u_int32_t *)(opt + 2));
-#else
-			 bcopy(opt + 2, plenp, sizeof(*plenp));
-			 *plenp = htonl(*plenp);
+			/*
+			 * IPv6 packets that have non 0 payload length
+			 * must not contain a jumbo paylod option.
+			 */
+			ip6 = mtod(m, struct ip6_hdr *);
+			if (ip6->ip6_plen) {
+				ip6stat.ip6s_badoptions++;
+				icmp6_error(m, ICMP6_PARAM_PROB,
+					    ICMP6_PARAMPROB_HEADER,
+					    sizeof(struct ip6_hdr) +
+					    sizeof(struct ip6_hbh) +
+					    opt - opthead);
+				return(-1);
+			}
+
+			/*
+			 * We may see jumbolen in unaligned location, so
+			 * we'd need to perform bcopy().
+			 */
+			bcopy(opt + 2, &jumboplen, sizeof(jumboplen));
+			jumboplen = (u_int32_t)htonl(jumboplen);
+
+#if 1
+			/*
+			 * if there are multiple jumbo payload options,
+			 * *plenp will be non-zero and the packet will be
+			 * rejected.
+			 * the behavior may need some debate in ipngwg -
+			 * multiple options does not make sense, however,
+			 * there's no explicit mention in specification.
+			 */
+			if (*plenp != 0) {
+				ip6stat.ip6s_badoptions++;
+				icmp6_error(m, ICMP6_PARAM_PROB,
+					    ICMP6_PARAMPROB_HEADER,
+					    sizeof(struct ip6_hdr) +
+					    sizeof(struct ip6_hbh) +
+					    opt + 2 - opthead);
+				return(-1);
+			}
 #endif
-			 if (*plenp <= IPV6_MAXPACKET) {
-				 /*
-				  * jumbo payload length must be larger
-				  * than 65535
-				  */
-				 ip6stat.ip6s_badoptions++;
-				 icmp6_error(m, ICMP6_PARAM_PROB,
-					     ICMP6_PARAMPROB_HEADER,
-					     sizeof(struct ip6_hdr) +
-					     sizeof(struct ip6_hbh) +
-					     opt + 2 - opthead);
-				 return(-1);
-			 }
 
-			 ip6 = mtod(m, struct ip6_hdr *);
-			 if (ip6->ip6_plen) {
-				 /*
-				  * IPv6 packets that have non 0 payload length
-				  * must not contain a jumbo paylod option.
-				  */
-				 ip6stat.ip6s_badoptions++;
-				 icmp6_error(m, ICMP6_PARAM_PROB,
-					     ICMP6_PARAMPROB_HEADER,
-					     sizeof(struct ip6_hdr) +
-					     sizeof(struct ip6_hbh) +
-					     opt - opthead);
-				 return(-1);
-			 }
-			 break;
+			/*
+			 * jumbo payload length must be larger than 65535.
+			 */
+			if (jumboplen <= IPV6_MAXPACKET) {
+				ip6stat.ip6s_badoptions++;
+				icmp6_error(m, ICMP6_PARAM_PROB,
+					    ICMP6_PARAMPROB_HEADER,
+					    sizeof(struct ip6_hdr) +
+					    sizeof(struct ip6_hbh) +
+					    opt + 2 - opthead);
+				return(-1);
+			}
+			*plenp = jumboplen;
+
+			break;
 		 default:		/* unknown option */
 			 if (hbhlen < IP6OPT_MINLEN) {
 				 ip6stat.ip6s_toosmall++;
@@ -950,21 +1022,24 @@ ip6_savecontrol(in6p, mp, ip6, m)
 		if (ip6->ip6_nxt == IPPROTO_HOPOPTS) {
 			struct ip6_hbh *hbh;
 			int hbhlen;
+#ifdef PULLDOWN_TEST
+			struct mbuf *ext;
+#endif
 
 #ifndef PULLDOWN_TEST
 			hbh = (struct ip6_hbh *)(ip6 + 1);
 			hbhlen = (hbh->ip6h_len + 1) << 3;
 #else
-			IP6_EXTHDR_GET(hbh, struct ip6_hbh *, m,
-				sizeof(struct ip6_hdr), sizeof(struct ip6_hbh));
-			if (hbh == NULL) {
+			ext = ip6_pullexthdr(m, sizeof(struct ip6_hdr),
+			    ip6->ip6_nxt);
+			if (ext == NULL) {
 				ip6stat.ip6s_tooshort++;
 				return;
 			}
+			hbh = mtod(ext, struct ip6_hbh *);
 			hbhlen = (hbh->ip6h_len + 1) << 3;
-			IP6_EXTHDR_GET(hbh, struct ip6_hbh *, m,
-				sizeof(struct ip6_hdr), hbhlen);
-			if (hbh == NULL) {
+			if (hbhlen != ext->m_len) {
+				m_freem(ext);
 				ip6stat.ip6s_tooshort++;
 				return;
 			}
@@ -980,13 +1055,16 @@ ip6_savecontrol(in6p, mp, ip6, m)
 					      IPV6_HOPOPTS, IPPROTO_IPV6);
 			if (*mp)
 				mp = &(*mp)->m_next;
+#ifdef PULLDOWN_TEST
+			m_freem(ext);
+#endif
 		}
 	}
 
 	/* IPV6_DSTOPTS and IPV6_RTHDR socket options */
 	if (in6p->in6p_flags & (IN6P_DSTOPTS | IN6P_RTHDR)) {
 		struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
-		int nxt = ip6->ip6_nxt, off = sizeof(struct ip6_hdr);;
+		int nxt = ip6->ip6_nxt, off = sizeof(struct ip6_hdr);
 
 		/*
 		 * Search for destination options headers or routing
@@ -995,83 +1073,112 @@ ip6_savecontrol(in6p, mp, ip6, m)
 		 * Note that the order of the headers remains in
 		 * the chain of ancillary data.
 		 */
-		while(1) {	/* is explicit loop prevention necessary? */
-			struct ip6_ext *ip6e;
+		while (1) {	/* is explicit loop prevention necessary? */
+			struct ip6_ext *ip6e = NULL;
 			int elen;
+#ifdef PULLDOWN_TEST
+			struct mbuf *ext = NULL;
+#endif
+
+			/*
+			 * if it is not an extension header, don't try to
+			 * pull it from the chain.
+			 */
+			switch (nxt) {
+			case IPPROTO_DSTOPTS:
+			case IPPROTO_ROUTING:
+			case IPPROTO_HOPOPTS:
+			case IPPROTO_AH: /* is it possible? */
+				break;
+			default:
+				goto loopend;
+			}
 
 #ifndef PULLDOWN_TEST
+			if (off + sizeof(*ip6e) > m->m_len)
+				goto loopend;
 			ip6e = (struct ip6_ext *)(mtod(m, caddr_t) + off);
 			if (nxt == IPPROTO_AH)
 				elen = (ip6e->ip6e_len + 2) << 2;
 			else
 				elen = (ip6e->ip6e_len + 1) << 3;
+			if (off + elen > m->m_len)
+				goto loopend;
 #else
-			IP6_EXTHDR_GET(ip6e, struct ip6_ext *, m, off,
-				sizeof(struct ip6_ext));
-			if (ip6e == NULL) {
+			ext = ip6_pullexthdr(m, off, nxt);
+			if (ext == NULL) {
 				ip6stat.ip6s_tooshort++;
 				return;
 			}
+			ip6e = mtod(ext, struct ip6_ext *);
 			if (nxt == IPPROTO_AH)
 				elen = (ip6e->ip6e_len + 2) << 2;
 			else
 				elen = (ip6e->ip6e_len + 1) << 3;
-			IP6_EXTHDR_GET(ip6e, struct ip6_ext *, m, off, elen);
-			if (ip6e == NULL) {
+			if (elen != ext->m_len) {
+				m_freem(ext);
 				ip6stat.ip6s_tooshort++;
 				return;
 			}
 #endif
 
-			switch(nxt) {
-		         case IPPROTO_DSTOPTS:
-				 if (!in6p->in6p_flags & IN6P_DSTOPTS)
-					 break;
+			switch (nxt) {
+		        case IPPROTO_DSTOPTS:
+				if (!in6p->in6p_flags & IN6P_DSTOPTS)
+					break;
 
-				 /*
-				  * We also require super-user privilege for
-				  * the option.
-				  * See the comments on IN6_HOPOPTS.
-				  */
-				 if (!privileged)
-					 break;
+				/*
+				 * We also require super-user privilege for
+				 * the option.
+				 * See the comments on IN6_HOPOPTS.
+				 */
+				if (!privileged)
+					break;
 
-				 *mp = sbcreatecontrol((caddr_t)ip6e, elen,
-						       IPV6_DSTOPTS,
-						       IPPROTO_IPV6);
-				 if (*mp)
-					 mp = &(*mp)->m_next;
-				 break;
+				*mp = sbcreatecontrol((caddr_t)ip6e, elen,
+						      IPV6_DSTOPTS,
+						      IPPROTO_IPV6);
+				if (*mp)
+					mp = &(*mp)->m_next;
+				break;
 
-			 case IPPROTO_ROUTING:
-				 if (!in6p->in6p_flags & IN6P_RTHDR)
-					 break;
+			case IPPROTO_ROUTING:
+				if (!in6p->in6p_flags & IN6P_RTHDR)
+					break;
 
-				 *mp = sbcreatecontrol((caddr_t)ip6e, elen,
-						       IPV6_RTHDR,
-						       IPPROTO_IPV6);
-				 if (*mp)
-					 mp = &(*mp)->m_next;
-				 break;
+				*mp = sbcreatecontrol((caddr_t)ip6e, elen,
+						      IPV6_RTHDR,
+						      IPPROTO_IPV6);
+				if (*mp)
+					mp = &(*mp)->m_next;
+				break;
 
-			 case IPPROTO_UDP:
-			 case IPPROTO_TCP:
-			 case IPPROTO_ICMPV6:
-			 default:
-				 /*
-				  * stop search if we encounter an upper
-				  * layer protocol headers.
-				  */
-				 goto loopend;
+			case IPPROTO_HOPOPTS:
+			case IPPROTO_AH: /* is it possible? */
+				break;
 
-			 case IPPROTO_HOPOPTS:
-			 case IPPROTO_AH: /* is it possible? */
-				 break;
+			default:
+				/*
+			 	 * other cases have been filtered in the above.
+				 * none will visit this case.  here we supply
+				 * the code just in case (nxt overwritten or
+				 * other cases).
+				 */
+#ifdef PULLDOWN_TEST
+				m_freem(ext);
+#endif
+				goto loopend;
+
 			}
 
 			/* proceed with the next header. */
 			off += elen;
 			nxt = ip6e->ip6e_nxt;
+			ip6e = NULL;
+#ifdef PULLDOWN_TEST
+			m_freem(ext);
+			ext = NULL;
+#endif
 		}
 	  loopend:
 	}
@@ -1084,6 +1191,62 @@ ip6_savecontrol(in6p, mp, ip6, m)
 	/* IN6P_RTHDR - to be done */
 # undef in6p_flags
 }
+
+#ifdef PULLDOWN_TEST
+/*
+ * pull single extension header from mbuf chain.  returns single mbuf that
+ * contains the result, or NULL on error.
+ */
+static struct mbuf *
+ip6_pullexthdr(m, off, nxt)
+	struct mbuf *m;
+	size_t off;
+	int nxt;
+{
+	struct ip6_ext ip6e;
+	size_t elen;
+	struct mbuf *n;
+
+#ifdef DIAGNOSTIC
+	switch (nxt) {
+	case IPPROTO_DSTOPTS:
+	case IPPROTO_ROUTING:
+	case IPPROTO_HOPOPTS:
+	case IPPROTO_AH: /* is it possible? */
+		break;
+	default:
+		printf("ip6_pullexthdr: invalid nxt=%d\n", nxt);
+	}
+#endif
+
+	m_copydata(m, off, sizeof(ip6e), (caddr_t)&ip6e);
+	if (nxt == IPPROTO_AH)
+		elen = (ip6e.ip6e_len + 2) << 2;
+	else
+		elen = (ip6e.ip6e_len + 1) << 3;
+
+	MGET(n, M_DONTWAIT, MT_DATA);
+	if (n && elen >= MLEN) {
+		MCLGET(n, M_DONTWAIT);
+		if ((n->m_flags & M_EXT) == 0) {
+			m_free(n);
+			n = NULL;
+		}
+	}
+	if (!n)
+		return NULL;
+
+	n->m_len = 0;
+	if (elen >= M_TRAILINGSPACE(n)) {
+		m_free(n);
+		return NULL;
+	}
+
+	m_copydata(m, off, elen, mtod(n, caddr_t));
+	n->m_len = elen;
+	return n;
+}
+#endif
 
 /*
  * Get pointer to the previous header followed by the header
@@ -1305,9 +1468,6 @@ ip6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	case IPV6CTL_DEFMCASTHLIM:
 		return sysctl_int(oldp, oldlenp, newp, newlen,
 				&ip6_defmcasthlim);
-	case IPV6CTL_GIF_HLIM:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_gif_hlim);
 	case IPV6CTL_KAME_VERSION:
 		return sysctl_rdstring(oldp, oldlenp, newp, __KAME_VERSION);
 	case IPV6CTL_USE_DEPRECATED:

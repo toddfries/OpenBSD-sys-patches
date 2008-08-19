@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_fil.c,v 1.34.2.1 2000/05/27 20:45:17 jason Exp $	*/
+/*	$OpenBSD: ip_fil.c,v 1.37 2000/09/07 19:45:04 art Exp $	*/
 
 /*
  * Copyright (C) 1993-1998 by Darren Reed.
@@ -9,7 +9,7 @@
  */
 #if !defined(lint)
 static const char sccsid[] = "@(#)ip_fil.c	2.41 6/5/96 (C) 1993-1995 Darren Reed";
-static const char rcsid[] = "@(#)$IPFilter: ip_fil.c,v 2.4.2.21 2000/05/22 06:57:47 darrenr Exp $";
+static const char rcsid[] = "@(#)$IPFilter: ip_fil.c,v 2.4.2.22 2000/07/08 02:43:47 darrenr Exp $";
 #endif
 
 #ifndef	SOLARIS
@@ -170,6 +170,11 @@ int	fr_running = 0;
 struct callout_handle ipfr_slowtimer_ch;
 #endif
 
+#ifdef __OpenBSD__
+#include <sys/timeout.h>
+struct timeout ipfr_slowtimer_to;
+#endif
+
 #if (_BSDI_VERSION >= 199510) && defined(_KERNEL)
 # include <sys/device.h>
 # include <sys/conf.h>
@@ -301,7 +306,10 @@ int iplattach()
 #ifdef	_KERNEL
 # if (__FreeBSD_version >= 300000) && defined(_KERNEL)
 	ipfr_slowtimer_ch = timeout(ipfr_slowtimer, NULL, hz/2);
-# else
+# elif defined(__OpenBSD__)
+	timeout_set(&ipfr_slowtimer_to, ipfr_slowtimer, NULL);
+	timeout_add(&ipfr_slowtimer_to, hz/2);
+#else
 	timeout(ipfr_slowtimer, NULL, hz/2);
 # endif
 #endif
@@ -323,6 +331,8 @@ int ipldetach()
 #ifdef	_KERNEL
 # if (__FreeBSD_version >= 300000)
 	untimeout(ipfr_slowtimer, NULL, ipfr_slowtimer_ch);
+# elif defined(__OpenBSD__)
+	timeout_del(&ipfr_slowtimer_to);
 # else
 #  ifdef __sgi
 	untimeout(ipfr_slowtimer);
@@ -1401,15 +1411,29 @@ char *name;
 
 	if (!ifneta) {
 		ifneta = (struct ifnet **)malloc(sizeof(ifp) * 2);
+		if (!ifneta)
+			return NULL;
 		ifneta[1] = NULL;
 		ifneta[0] = (struct ifnet *)calloc(1, sizeof(*ifp));
+		if (!ifneta[0]) {
+			free(ifneta);
+			return NULL;
+		}
 		nifs = 1;
 	} else {
 		nifs++;
 		ifneta = (struct ifnet **)realloc(ifneta,
 						  (nifs + 1) * sizeof(*ifa));
+		if (!ifneta) {
+			nifs = 0;
+			return NULL;
+		}
 		ifneta[nifs] = NULL;
 		ifneta[nifs - 1] = (struct ifnet *)malloc(sizeof(*ifp));
+		if (!ifneta[nifs - 1]) {
+			nifs--;
+			return NULL;
+		}
 	}
 	ifp = ifneta[nifs - 1];
 

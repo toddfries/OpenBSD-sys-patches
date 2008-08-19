@@ -1,9 +1,10 @@
-/*	$OpenBSD: in6_proto.c,v 1.19 2000/02/28 16:40:39 itojun Exp $	*/
+/*	$OpenBSD: in6_proto.c,v 1.25 2000/10/10 15:53:09 itojun Exp $	*/
+/*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
  * All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -15,7 +16,7 @@
  * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -125,7 +126,7 @@ struct ip6protosw inet6sw[] = {
 },
 { SOCK_DGRAM,	&inet6domain,	IPPROTO_UDP,	PR_ATOMIC | PR_ADDR,
   udp6_input,	0,		udp6_ctlinput,	ip6_ctloutput,
- udp6_usrreq,	0,
+  udp6_usrreq,	0,
   0,		0,		0,
   udp_sysctl,
 },
@@ -140,8 +141,8 @@ struct ip6protosw inet6sw[] = {
 { SOCK_STREAM,	&inet6domain,	IPPROTO_TCP,	PR_CONNREQUIRED | PR_WANTRCVD,
   tcp6_input,	0,		tcp6_ctlinput,	tcp_ctloutput,
   tcp6_usrreq,
-#ifdef INET	/* don't call timeout routines twice */
-  tcp_init,	0,		0,		tcp_drain,
+#ifdef INET	/* don't call initialization and timeout routines twice */
+  0,		0,		0,		tcp_drain,
 #else
   tcp_init,	tcp_fasttimo,	tcp_slowtimo,	tcp_drain,
 #endif
@@ -270,11 +271,6 @@ int	ip6_hdrnestlimit = 50;	/* appropriate? */
 int	ip6_dad_count = 1;	/* DupAddrDetectionTransmits */
 u_int32_t ip6_flow_seq;
 int	ip6_auto_flowlabel = 1;
-#if NGIF > 0
-int	ip6_gif_hlim = GIF_HLIM;
-#else
-int	ip6_gif_hlim = 0;
-#endif
 int	ip6_use_deprecated = 1;	/* allow deprecated addr (RFC2462 5.5.4) */
 int	ip6_rr_prune = 5;	/* router renumbering prefix
 				 * walk list every 5 sec.    */
@@ -304,7 +300,8 @@ u_long	rip6_recvspace = RIPV6RCVQ;
 /* ICMPV6 parameters */
 int	icmp6_rediraccept = 1;		/* accept and process redirects */
 int	icmp6_redirtimeout = 10 * 60;	/* 10 minutes */
-u_int	icmp6errratelim = 1000;		/* 1000usec = 1msec */
+struct timeval icmp6errratelim = { 0, 0 };	/* no ratelimit */
+int	icmp6errppslim = 100;		/* 100pps */
 int	icmp6_nodeinfo = 1;		/* enable/disable NI response */
 
 #ifdef TCP6

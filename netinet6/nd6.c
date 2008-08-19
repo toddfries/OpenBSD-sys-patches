@@ -1,5 +1,5 @@
-/*	$OpenBSD: nd6.c,v 1.13 2000/04/27 10:46:17 itojun Exp $	*/
-/*	$KAME: nd6.c,v 1.56 2000/04/19 06:17:43 itojun Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.19 2000/10/15 15:55:03 itojun Exp $	*/
+/*	$KAME: nd6.c,v 1.75 2000/10/15 15:23:11 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -91,6 +91,8 @@ int	nd6_useloopback = 1;	/* use loopback interface for local traffic */
 /* preventing too many loops in ND option parsing */
 int nd6_maxndopt = 10;	/* max # of ND options allowed */
 
+int nd6_maxnudhint = 0;	/* max # of subsequent upper layer hints */
+
 /* for debugging? */
 static int nd6_inuse, nd6_allocated;
 
@@ -169,15 +171,7 @@ nd6_ifattach(ifp)
 	ND.reachable = ND_COMPUTE_RTIME(ND.basereachable);
 	ND.retrans = RETRANS_TIMER;
 	ND.receivedra = 0;
-#if 1
-	/* XXX temporary workaround */
-	if (ifp->if_flags & IFF_POINTOPOINT)
-		ND.flags = 0;
-	else
-		ND.flags = ND6_IFF_PERFORMNUD;
-#else
 	ND.flags = ND6_IFF_PERFORMNUD;
-#endif
 	nd6_setmtu(ifp);
 #undef ND
 }
@@ -190,7 +184,6 @@ void
 nd6_setmtu(ifp)
 	struct ifnet *ifp;
 {
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
 	struct nd_ifinfo *ndi = &nd_ifinfo[ifp->if_index];
 	u_long oldmaxmtu = ndi->maxmtu;
 	u_long oldlinkmtu = ndi->linkmtu;
@@ -229,8 +222,7 @@ nd6_setmtu(ifp)
 				 */
 				if (in6_maxmtu < ndi->linkmtu)
 					in6_maxmtu = ndi->linkmtu;
-			}
-			else
+			} else
 				in6_setmaxmtu();
 		}
 	}
@@ -471,8 +463,7 @@ nd6_timer(ignored_arg)
 				nd6_ns_output(ifp, &dst->sin6_addr,
 					      &dst->sin6_addr,
 					      ln, 0);
-			}
-			else
+			} else
 				ln->ln_state = ND6_LLINFO_STALE; /* XXX */
 			break;
 		case ND6_LLINFO_PROBE:
@@ -713,8 +704,7 @@ nd6_lookup(addr6, create, ifp)
 					(struct llinfo_nd6 *)rt->rt_llinfo;
 				ln->ln_state = ND6_LLINFO_NOSTATE;
 			}
-		}
-		else
+		} else
 			return(NULL);
 	}
 	rt->rt_refcnt--;
@@ -744,7 +734,7 @@ nd6_lookup(addr6, create, ifp)
  */
 int
 nd6_is_addr_neighbor(addr, ifp)
-	struct in6_addr *addr;
+	struct sockaddr_in6 *addr;
 	struct ifnet *ifp;
 {
 	register struct ifaddr *ifa;
@@ -753,8 +743,13 @@ nd6_is_addr_neighbor(addr, ifp)
 #define IFADDR6(a) ((((struct in6_ifaddr *)(a))->ia_addr).sin6_addr)
 #define IFMASK6(a) ((((struct in6_ifaddr *)(a))->ia_prefixmask).sin6_addr)
 
-	/* A link-local address is always a neighbor. */
-	if (IN6_IS_ADDR_LINKLOCAL(addr))
+	/*
+	 * A link-local address is always a neighbor.
+	 * XXX: we should use the sin6_scope_id field rather than the embedded
+	 * interface index.
+	 */
+	if (IN6_IS_ADDR_LINKLOCAL(&addr->sin6_addr) &&
+	    ntohs(*(u_int16_t *)&addr->sin6_addr.s6_addr[2]) == ifp->if_index)
 		return(1);
 
 	/*
@@ -769,7 +764,8 @@ nd6_is_addr_neighbor(addr, ifp)
 			next: continue;
 
 		for (i = 0; i < 4; i++) {
-			if ((IFADDR6(ifa).s6_addr32[i] ^ addr->s6_addr32[i]) &
+			if ((IFADDR6(ifa).s6_addr32[i] ^
+			     addr->sin6_addr.s6_addr32[i]) &
 			    IFMASK6(ifa).s6_addr32[i])
 				goto next;
 		}
@@ -780,7 +776,7 @@ nd6_is_addr_neighbor(addr, ifp)
 	 * Even if the address matches none of our addresses, it might be
 	 * in the neighbor cache.
 	 */
-	if (nd6_lookup(addr, 0, ifp))
+	if (nd6_lookup(&addr->sin6_addr, 0, ifp))
 		return(1);
 
 	return(0);
@@ -873,9 +869,10 @@ nd6_free(rt)
  * XXX cost-effective metods?
  */
 void
-nd6_nud_hint(rt, dst6)
+nd6_nud_hint(rt, dst6, force)
 	struct rtentry *rt;
 	struct in6_addr *dst6;
+	int force;
 {
 	struct llinfo_nd6 *ln;
 	long time_second = time.tv_sec;
@@ -891,11 +888,10 @@ nd6_nud_hint(rt, dst6)
 			return;
 	}
 
-	if ((rt->rt_flags & RTF_GATEWAY)
-	 || (rt->rt_flags & RTF_LLINFO) == 0
-	 || !rt->rt_llinfo
-	 || !rt->rt_gateway
-	 || rt->rt_gateway->sa_family != AF_LINK) {
+	if ((rt->rt_flags & RTF_GATEWAY) != 0 ||
+	    (rt->rt_flags & RTF_LLINFO) == 0 ||
+	    !rt->rt_llinfo || !rt->rt_gateway ||
+	    rt->rt_gateway->sa_family != AF_LINK) {
 		/* This is not a host route. */
 		return;
 	}
@@ -903,6 +899,16 @@ nd6_nud_hint(rt, dst6)
 	ln = (struct llinfo_nd6 *)rt->rt_llinfo;
 	if (ln->ln_state < ND6_LLINFO_REACHABLE)
 		return;
+
+	/*
+	 * if we get upper-layer reachability confirmation many times,
+	 * it is possible we have false information.
+	 */
+	if (!force) {
+		ln->ln_byhint++;
+		if (ln->ln_byhint > nd6_maxnudhint)
+			return;
+	}
 
 	ln->ln_state = ND6_LLINFO_REACHABLE;
 	if (ln->ln_expire)
@@ -1125,6 +1131,7 @@ nd6_rtrequest(req, rt, sa)
 			 * which is specified by ndp command.
 			 */
 			ln->ln_state = ND6_LLINFO_REACHABLE;
+			ln->ln_byhint = 0;
 		} else {
 		        /*
 			 * When req == RTM_RESOLVE, rt is created and
@@ -1149,6 +1156,7 @@ nd6_rtrequest(req, rt, sa)
 			caddr_t macp = nd6_ifptomac(ifp);
 			ln->ln_expire = 0;
 			ln->ln_state = ND6_LLINFO_REACHABLE;
+			ln->ln_byhint = 0;
 			if (macp) {
 				Bcopy(macp, LLADDR(SDL(gate)), ifp->if_addrlen);
 				SDL(gate)->sdl_alen = ifp->if_addrlen;
@@ -1164,7 +1172,7 @@ nd6_rtrequest(req, rt, sa)
 				 * of the loopback address.
 				 */
 				if (ifa != rt->rt_ifa) {
-					rt->rt_ifa->ifa_refcnt--;
+					IFAFREE(rt->rt_ifa);
 					ifa->ifa_refcnt++;
 					rt->rt_ifa = ifa;
 				}
@@ -1172,6 +1180,7 @@ nd6_rtrequest(req, rt, sa)
 		} else if (rt->rt_flags & RTF_ANNOUNCE) {
 			ln->ln_expire = 0;
 			ln->ln_state = ND6_LLINFO_REACHABLE;
+			ln->ln_byhint = 0;
 
 			/* join solicited node multicast for proxy ND */
 			if (ifp->if_flags & IFF_MULTICAST) {
@@ -1311,8 +1320,7 @@ nd6_ioctl(cmd, data, ifp)
 			if (IN6_IS_ADDR_LINKLOCAL(&drl->defrouter[i].rtaddr)) {
 				/* XXX: need to this hack for KAME stack */
 				drl->defrouter[i].rtaddr.s6_addr16[1] = 0;
-			}
-			else
+			} else
 				log(LOG_ERR,
 				    "default router list contains a "
 				    "non-linklocal address(%s)\n",
@@ -1357,8 +1365,7 @@ nd6_ioctl(cmd, data, ifp)
 					if (IN6_IS_ADDR_LINKLOCAL(&RTRADDR)) {
 						/* XXX: hack for KAME */
 						RTRADDR.s6_addr16[1] = 0;
-					}
-					else
+					} else
 						log(LOG_ERR,
 						    "a router(%s) advertises "
 						    "a prefix with "
@@ -1630,7 +1637,11 @@ fail:
 				(*ifp->if_output)(ifp, ln->ln_hold,
 						  rt_key(rt), rt);
 #else
-				nd6_output(ifp, ln->ln_hold,
+				/*
+				 * we assume ifp is not a p2p here, so just
+				 * set the 2nd argument as the 1st one.
+				 */
+				nd6_output(ifp, ifp, ln->ln_hold,
 					   (struct sockaddr_in6 *)rt_key(rt),
 					   rt);
 #endif
@@ -1740,14 +1751,16 @@ nd6_slowtimo(ignored_arg)
 
 #define senderr(e) { error = (e); goto bad;}
 int
-nd6_output(ifp, m0, dst, rt0)
+nd6_output(ifp, origifp, m0, dst, rt0)
 	register struct ifnet *ifp;
+	struct ifnet *origifp;
 	struct mbuf *m0;
 	struct sockaddr_in6 *dst;
 	struct rtentry *rt0;
 {
 	register struct mbuf *m = m0;
 	register struct rtentry *rt = rt0;
+	struct sockaddr_in6 *gw6 = NULL;
 	struct llinfo_nd6 *ln = NULL;
 	int error = 0;
 	long time_second = time.tv_sec;
@@ -1759,7 +1772,7 @@ nd6_output(ifp, m0, dst, rt0)
 	 * XXX: we currently do not make neighbor cache on any interface
 	 * other than ARCnet, Ethernet, FDDI and GIF.
 	 *
-	 * draft-ietf-ngtrans-mech-04.txt says:
+	 * draft-ietf-ngtrans-mech-06.txt says:
 	 * - unidirectional tunnels needs no ND
 	 */
 	switch (ifp->if_type) {
@@ -1772,10 +1785,6 @@ nd6_output(ifp, m0, dst, rt0)
 		goto sendpkt;
 	}
 
-	if ((ifp->if_flags & IFF_POINTOPOINT) != 0 &&
-	    (nd_ifinfo[ifp->if_index].flags & ND6_IFF_PERFORMNUD) == 0)
-		goto sendpkt;
-
 	/*
 	 * next hop determination. This routine is derived from ether_outpout.
 	 */
@@ -1785,12 +1794,43 @@ nd6_output(ifp, m0, dst, rt0)
 				NULL)
 			{
 				rt->rt_refcnt--;
-				if (rt->rt_ifp != ifp)
-					return nd6_output(ifp, m0, dst, rt); /* XXX: loop care? */
+				if (rt->rt_ifp != ifp) {
+					/* XXX: loop care? */
+					return nd6_output(ifp, origifp, m0,
+							  dst, rt);
+				}
 			} else
 				senderr(EHOSTUNREACH);
 		}
+
 		if (rt->rt_flags & RTF_GATEWAY) {
+			gw6 = (struct sockaddr_in6 *)rt->rt_gateway;
+
+			/*
+			 * We skip link-layer address resolution and NUD
+			 * if the gateway is not a neighbor from ND point
+			 * of view, regardless the value of the value of
+			 * nd_ifinfo.flags.
+			 * The second condition is a bit tricky: we skip
+			 * if the gateway is our own address, which is
+			 * sometimes used to install a route to a p2p link.
+			 */
+			if (!nd6_is_addr_neighbor(gw6, ifp) ||
+			    in6ifa_ifpwithaddr(ifp, &gw6->sin6_addr)) {
+				if (rt->rt_flags & RTF_REJECT)
+					senderr(EHOSTDOWN);
+
+				/*
+				 * We allow this kind of tricky route only
+				 * when the outgoing interface is p2p.
+				 * XXX: we may need a more generic rule here.
+				 */
+				if ((ifp->if_flags & IFF_POINTOPOINT) == 0)
+					senderr(EHOSTUNREACH);
+
+				goto sendpkt;
+			}
+
 			if (rt->rt_gwroute == 0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
@@ -1815,14 +1855,26 @@ nd6_output(ifp, m0, dst, rt0)
 	if (rt && (rt->rt_flags & RTF_LLINFO) != 0)
 		ln = (struct llinfo_nd6 *)rt->rt_llinfo;
 	else {
-		if ((rt = nd6_lookup(&dst->sin6_addr, 1, ifp)) != NULL)
+		/*
+		 * Since nd6_is_addr_neighbor() internally calls nd6_lookup(),
+		 * the condition below is not very efficient. But we believe
+		 * it is tolerable, because this should be a rare case.
+		 */
+		if (nd6_is_addr_neighbor(dst, ifp) &&
+		    (rt = nd6_lookup(&dst->sin6_addr, 1, ifp)) != NULL)
 			ln = (struct llinfo_nd6 *)rt->rt_llinfo;
 	}
 	if (!ln || !rt) {
-		log(LOG_DEBUG, "nd6_output: can't allocate llinfo for %s "
-		    "(ln=%p, rt=%p)\n",
-		    ip6_sprintf(&dst->sin6_addr), ln, rt);
-		senderr(EIO);	/* XXX: good error? */
+		if ((ifp->if_flags & IFF_POINTOPOINT) == 0 &&
+		    !(nd_ifinfo[ifp->if_index].flags & ND6_IFF_PERFORMNUD)) {
+			log(LOG_DEBUG,
+			    "nd6_output: can't allocate llinfo for %s "
+			    "(ln=%p, rt=%p)\n",
+			    ip6_sprintf(&dst->sin6_addr), ln, rt);
+			senderr(EIO);	/* XXX: good error? */
+		}
+
+		goto sendpkt;	/* send anyway */
 	}
 
 	/* We don't have to do link-layer address resolution on a p2p link. */
@@ -1878,6 +1930,13 @@ nd6_output(ifp, m0, dst, rt0)
 	return(0);
 	
   sendpkt:
+
+#ifdef FAKE_LOOPBACK_IF
+	if (ifp->if_flags & IFF_LOOPBACK) {
+		return((*ifp->if_output)(origifp, m, (struct sockaddr *)dst,
+					 rt));
+	}
+#endif
 	return((*ifp->if_output)(ifp, m, (struct sockaddr *)dst, rt));
 
   bad:
@@ -1913,8 +1972,11 @@ nd6_storelladdr(ifp, rt, m, dst, desten)
 		}
 	}
 
-	if (rt == NULL ||
-	    rt->rt_gateway->sa_family != AF_LINK) {
+	if (rt == NULL) {
+		/* this could happen, if we could not allocate memory */
+		return(0);
+	}
+	if (rt->rt_gateway->sa_family != AF_LINK) {
 		printf("nd6_storelladdr: something odd happens\n");
 		return(0);
 	}

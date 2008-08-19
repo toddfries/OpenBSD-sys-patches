@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_frag.c,v 1.17 2000/03/13 23:40:18 kjell Exp $	*/
+/*	$OpenBSD: ip_frag.c,v 1.19.2.1 2001/04/18 01:02:44 jason Exp $	*/
 
 /*
  * Copyright (C) 1993-1998 by Darren Reed.
@@ -9,7 +9,7 @@
  */
 #if !defined(lint)
 static const char sccsid[] = "@(#)ip_frag.c	1.11 3/24/96 (C) 1993-1995 Darren Reed";
-static const char rcsid[] = "@(#)$IPFilter: ip_frag.c,v 2.4.2.4 1999/11/28 04:52:10 darrenr Exp $";
+static const char rcsid[] = "@(#)$IPFilter: ip_frag.c,v 2.4.2.5 2000/06/06 15:50:48 darrenr Exp $";
 #endif
 
 #if defined(KERNEL) && !defined(_KERNEL)
@@ -83,9 +83,13 @@ static const char rcsid[] = "@(#)$IPFilter: ip_frag.c,v 2.4.2.4 1999/11/28 04:52
 #  ifndef IPFILTER_LKM
 #   include <sys/libkern.h>
 #   include <sys/systm.h>
-# endif
+#  endif
 extern struct callout_handle ipfr_slowtimer_ch;
 # endif
+#endif
+#ifdef __OpenBSD__
+#include <sys/timeout.h>
+extern struct timeout ipfr_slowtimer_to;
 #endif
 
 
@@ -137,7 +141,13 @@ u_int pass;
 ipfr_t *table[];
 {
 	ipfr_t	**fp, *fra, frag;
-	u_int	idx;
+	u_int	idx, off;
+
+	if (ipfr_inuse >= IPFT_SIZE)
+		return NULL;
+
+	if (!(fin->fin_fi.fi_fl & FI_FRAG))
+		return NULL;
 
 	frag.ipfr_p = ip->ip_p;
 	idx = ip->ip_p;
@@ -191,7 +201,10 @@ ipfr_t *table[];
 	/*
 	 * Compute the offset of the expected start of the next packet.
 	 */
-	fra->ipfr_off = (ip->ip_off & IP_OFFMASK) + (fin->fin_dlen >> 3);
+	off = ip->ip_off & IP_OFFMASK;
+	if (!off)
+		fra->ipfr_seen0 = 1;
+	fra->ipfr_off = off + (fin->fin_dlen >> 3);
 	ATOMIC_INC(ipfr_stats.ifs_new);
 	ATOMIC_INC(ipfr_inuse);
 	return fra;
@@ -243,6 +256,9 @@ ipfr_t *table[];
 	ipfr_t	*f, frag;
 	u_int	idx;
 
+	if (!(fin->fin_fi.fi_fl & FI_FRAG))
+		return NULL;
+
 	/*
 	 * For fragments, we record protocol, packet id, TOS and both IP#'s
 	 * (these should all be the same for all fragments of a packet).
@@ -269,6 +285,19 @@ ipfr_t *table[];
 			  IPFR_CMPSZ)) {
 			u_short	atoff, off;
 
+			/*
+			 * XXX - We really need to be guarding against the
+			 * retransmission of (src,dst,id,offset-range) here
+			 * because a fragmented packet is never resent with
+			 * the same IP ID#.
+			 */
+			off = ip->ip_off & IP_OFFMASK;
+			if (f->ipfr_seen0) {
+				if (!off || (fin->fin_fi.fi_fl & FI_SHORT))
+					continue;
+			} else if (!off)
+				f->ipfr_seen0 = 1;
+
 			if (f != table[idx]) {
 				/*
 				 * move fragment info. to the top of the list
@@ -281,7 +310,6 @@ ipfr_t *table[];
 				f->ipfr_prev = NULL;
 				table[idx] = f;
 			}
-			off = ip->ip_off & IP_OFFMASK;
 			atoff = off + (fin->fin_dlen >> 3);
 			/*
 			 * If we've follwed the fragments, and this is the
@@ -511,6 +539,8 @@ int ipfr_slowtimer()
 #  ifndef linux
 #   if (__FreeBSD_version >= 300000)
 	ipfr_slowtimer_ch = timeout(ipfr_slowtimer, NULL, hz/2);
+#   elif defined(__OpenBSD__)
+	timeout_add(&ipfr_slowtimer_to, hz/2);
 #   else
 	timeout(ipfr_slowtimer, NULL, hz/2);
 #   endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.19.4.1 2000/06/09 05:17:51 jason Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.20 2000/06/07 23:25:08 millert Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-

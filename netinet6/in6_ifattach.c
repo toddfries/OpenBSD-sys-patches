@@ -1,5 +1,5 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.10 2000/05/05 07:58:15 itojun Exp $	*/
-/*	$KAME: in6_ifattach.c,v 1.53 2000/04/16 14:01:42 itojun Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.13 2000/10/25 22:01:02 jason Exp $	*/
+/*	$KAME: in6_ifattach.c,v 1.68 2000/10/18 18:44:24 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -270,7 +270,7 @@ get_ifid(ifp0, altifp, in6)
 	if (altifp && get_hw_ifid(altifp, in6) == 0) {
 #ifdef ND6_DEBUG
 		printf("%s: got interface identifier from %s\n",
-		    if_name(ifp0), ifname(altifp));
+		    if_name(ifp0), if_name(altifp));
 #endif
 		goto success;
 	}
@@ -306,7 +306,7 @@ get_ifid(ifp0, altifp, in6)
 		goto success;
 	}
 
-	printf("%s: failed to get interface identifier", if_name(ifp0));
+	printf("%s: failed to get interface identifier\n", if_name(ifp0));
 	return -1;
 
 success:
@@ -586,6 +586,19 @@ in6_ifattach(ifp, altifp)
 	struct in6_ifaddr *ia;
 	struct in6_addr in6;
 
+	/* some of the interfaces are inherently not IPv6 capable */
+	switch (ifp->if_type) {
+	case IFT_BRIDGE:
+	case IFT_ENC:
+		return;
+	case IFT_PROPVIRTUAL:
+		if (strncmp("bridge", ifp->if_xname, sizeof("bridge")) == 0 &&
+		    '0' <= ifp->if_xname[sizeof("bridge")] &&
+		    ifp->if_xname[sizeof("bridge")] <= '9')
+			return;
+		break;
+	}
+
 	/*
 	 * We have some arrays that should be indexed by if_index.
 	 * since if_index will grow dynamically, they should grow too.
@@ -662,7 +675,7 @@ in6_ifattach(ifp, altifp)
 		ia = in6ifa_ifpforlinklocal(ifp, 0);
 
 		if (ia == NULL) {
-			printf("%s: failed to add link-local address",
+			printf("%s: failed to add link-local address\n",
 			    if_name(ifp));
 
 			/* we can't initialize multicasts without link-local */

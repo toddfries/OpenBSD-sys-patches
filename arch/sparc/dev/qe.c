@@ -1,4 +1,4 @@
-/*	$OpenBSD: qe.c,v 1.8.4.1 2000/11/17 18:52:06 jason Exp $	*/
+/*	$OpenBSD: qe.c,v 1.9.2.1 2000/11/17 20:20:09 jason Exp $	*/
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.
@@ -648,12 +648,6 @@ qeioctl(ifp, cmd, data)
 			qestop(sc);
 			qeinit(sc);
 		}
-#ifdef IEDEBUG   
-		if (ifp->if_flags & IFF_DEBUG)
-			sc->sc_debug = IED_ALL;
-		else
-			sc->sc_debug = 0;
-#endif
 		break;
 
 	case SIOCADDMULTI:
