@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.57 2005/05/22 17:37:49 pedro Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.59 2005/12/27 18:31:12 miod Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -282,7 +282,7 @@ nfs_mountroot()
 	simple_lock(&mountlist_slock);
 	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 	simple_unlock(&mountlist_slock);
-	vfs_unbusy(mp, procp);
+	vfs_unbusy(mp);
 
 	/* Get root attributes (for the time). */
 	error = VOP_GETATTR(rootvp, &attr, procp->p_ucred, procp);
@@ -328,7 +328,7 @@ nfs_mountroot()
 	if (!error) {
 		mp = nfs_mount_diskless(&nd.nd_swap, "/swap", 0);
 		nfs_root(mp, &vp);
-		vfs_unbusy(mp, procp);
+		vfs_unbusy(mp);
 
 		/*
 		 * Since the swap file is not the root dir of a file system,
@@ -357,14 +357,12 @@ nfs_mountroot()
 #ifdef	DEBUG
 		printf("swap size: 0x%lx (blocks)\n", n);
 #endif
-		swdevt[0].sw_nblks = n;
 		return (0);
 	}
 
 	printf("WARNING: no swap\n");
 	swdevt[0].sw_dev = NODEV;
 	swdevt[0].sw_vp = NULL;
-	swdevt[0].sw_nblks = 0;
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.6 2005/07/31 15:31:12 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.9 2005/11/09 18:08:37 martin Exp $	*/
 /*	$NetBSD: param.h,v 1.9 2002/03/24 03:37:23 thorpej Exp $	*/
 
 /*
@@ -65,8 +65,8 @@
  * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
  * logical pages.
  */
-#define	NKMEMPAGES_MIN_DEFAULT	((6 * 1024 * 1024) >> PAGE_SHIFT)
-#define	NKMEMPAGES_MAX_DEFAULT	((7 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MIN_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MAX_DEFAULT	((64 * 1024 * 1024) >> PAGE_SHIFT)
 
 /* Constants used to divide the USPACE area */
 
@@ -100,10 +100,6 @@
 #define	USPACE_UNDEF_STACK_TOP		(USPACE_SVC_STACK_BOTTOM - 0x10)
 #define USPACE_UNDEF_STACK_BOTTOM	(sizeof(struct user) + FPCONTEXTSIZE + 10)
 
-#define arm_btop(x)			((x) >> PAGE_SHIFT)
-#define arm_ptob(x)			((x) << PAGE_SHIFT)
-#define arm_trunc_page(x)		((unsigned)(x) & ~PAGE_MASK)
-    
 #ifdef _KERNEL
 #ifndef _LOCORE
 void	delay (unsigned);

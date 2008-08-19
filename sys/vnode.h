@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.61 2005/05/26 00:33:45 pedro Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.66 2006/01/09 12:43:17 pedro Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 
 /* XXX: clean up includes later */
 #include <uvm/uvm_pglist.h>	/* XXX */
@@ -109,7 +109,6 @@ struct vnode {
 	} v_un;
 
 	struct  simplelock v_interlock;		/* lock on usecount and flag */
-	struct  lock *v_vnlock;			/* used for non-locking fs's */
 	enum	vtagtype v_tag;			/* type of underlying data */
 	void	*v_data;			/* private data for fs */
 	struct {
@@ -422,7 +421,6 @@ int	cdevvp(dev_t dev, struct vnode **vpp);
 int	getnewvnode(enum vtagtype tag, struct mount *mp,
 	    int (**vops)(void *), struct vnode **vpp);
 int	getvnode(struct filedesc *fdp, int fd, struct file **fpp);
-void	getnewfsid(struct mount *, int);
 void	vattr_null(struct vattr *vap);
 int	vcount(struct vnode *vp);
 int	vfinddev(dev_t, enum vtype, struct vnode **);
@@ -438,8 +436,11 @@ void	vgone(struct vnode *vp);
 void    vgonel(struct vnode *, struct proc *);
 int	vinvalbuf(struct vnode *vp, int save, struct ucred *cred,
 	    struct proc *p, int slpflag, int slptimeo);
-void	vprint(char *label, struct vnode *vp);
+#ifdef DIAGNOSTIC
+void	vprint(char *, struct vnode *);
+#endif
 int	vop_generic_bwrite(void *ap);
+int	vn_access(struct vnode *, int);
 void	vn_update(void);
 int	vn_close(struct vnode *vp,
 	    int flags, struct ucred *cred, struct proc *p);

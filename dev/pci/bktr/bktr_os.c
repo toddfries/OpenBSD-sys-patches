@@ -1,4 +1,4 @@
-/*	$OpenBSD: bktr_os.c,v 1.19 2004/06/29 12:24:57 mickey Exp $	*/
+/*	$OpenBSD: bktr_os.c,v 1.24 2006/02/05 23:52:58 jakemsr Exp $	*/
 /* $FreeBSD: src/sys/dev/bktr/bktr_os.c,v 1.20 2000/10/20 08:16:53 roger Exp $ */
 
 /*
@@ -74,7 +74,7 @@
 #include <sys/signalvar.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #include <sys/vnode.h>
 
 #include <vm/vm.h>
@@ -147,7 +147,7 @@ SYSCTL_INT(_hw_bt848, OID_AUTO, slow_msp_audio, CTLFLAG_RW, &bt848_slow_msp_audi
 #include <sys/signalvar.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #include <sys/vnode.h>
 #if NRADIO > 0
 #include <sys/radioio.h>
@@ -1259,29 +1259,55 @@ int
 bktr_set_info(void *v, struct radio_info *ri)
 {
 	struct bktr_softc *sc = v;
+	struct TVTUNER *tv = &sc->tuner;
 	u_int32_t freq;
+	u_int32_t chan;
 
 	if (ri->mute) {
 		/* mute the audio stream by switching the mux */
 		set_audio(sc, AUDIO_MUTE);
-
-		/* disable drivers on the GPIO port that controls the MUXes */
-		OUTL(sc, BKTR_GPIO_OUT_EN, INL(sc, BKTR_GPIO_OUT_EN) &
-		~sc->card.gpio_mux_bits);
 	} else {
-		/* enable drivers on the GPIO port that controls the MUXes */
-		OUTL(sc, BKTR_GPIO_OUT_EN, INL(sc, BKTR_GPIO_OUT_EN) |
-		sc->card.gpio_mux_bits);
-
 		/* unmute the audio stream */
 		set_audio(sc, AUDIO_UNMUTE);
 		init_audio_devices(sc);
 	}
 
-	freq = ri->freq / 10;
 	set_audio(sc, AUDIO_INTERN);	/* use internal audio */
 	temp_mute(sc, TRUE);
-	ri->freq = tv_freq(sc, freq, FM_RADIO_FREQUENCY) * 10;
+
+	if (ri->tuner_mode == RADIO_TUNER_MODE_TV) {
+		if (ri->chan) {
+			if (ri->chan < MIN_TV_CHAN)
+				ri->chan = MIN_TV_CHAN;
+			if (ri->chan > MAX_TV_CHAN)
+				ri->chan = MAX_TV_CHAN;
+
+			chan = ri->chan;
+			ri->chan = tv_channel(sc, chan);
+			tv->tuner_mode = BT848_TUNER_MODE_TV;
+		} else {
+			ri->chan = tv->channel;
+		}
+	} else {
+		if (ri->freq) {
+			if (ri->freq < MIN_FM_FREQ)
+				ri->freq = MIN_FM_FREQ;
+			if (ri->freq > MAX_FM_FREQ)
+				ri->freq = MAX_FM_FREQ;
+
+			freq = ri->freq / 10;
+			ri->freq = tv_freq(sc, freq, FM_RADIO_FREQUENCY) * 10;
+			tv->tuner_mode = BT848_TUNER_MODE_RADIO;
+		} else {
+			ri->freq = tv->frequency;
+		}
+	}
+
+	if (ri->chnlset >= CHNLSET_MIN && ri->chnlset <= CHNLSET_MAX)
+		tv->chnlset = ri->chnlset;
+	else
+		tv->chnlset = DEFAULT_CHNLSET;
+	
 	temp_mute(sc, FALSE);
 
 	return (0);
@@ -1299,11 +1325,21 @@ bktr_get_info(void *v, struct radio_info *ri)
 #define	STATUSBIT_STEREO	0x10
 	ri->mute = (int)sc->audio_mute_state ? 1 : 0;
 	ri->caps = RADIO_CAPS_DETECT_STEREO | RADIO_CAPS_HW_AFC;
-	ri->freq = tv->frequency * 10;
 	ri->info = (status & STATUSBIT_STEREO) ? RADIO_INFO_STEREO : 0;
 
 	/* not yet supported */
 	ri->volume = ri->rfreq = ri->lock = 0;
+
+	switch (tv->tuner_mode) {
+	case BT848_TUNER_MODE_TV:
+		ri->tuner_mode = RADIO_TUNER_MODE_TV;
+		ri->freq = tv->frequency * 1000 / 16;
+		break;
+	case BT848_TUNER_MODE_RADIO:
+		ri->tuner_mode = RADIO_TUNER_MODE_RADIO;
+		ri->freq = tv->frequency * 10;
+		break;
+	}
 
 	/*
 	 * The field ri->stereo is used to forcible switch to
@@ -1311,6 +1347,9 @@ bktr_get_info(void *v, struct radio_info *ri)
 	 * The ri->info is for that purpose.
 	 */
 	ri->stereo = 1; /* Can't switch to mono, always stereo */
+	
+	ri->chan = tv->channel;
+	ri->chnlset = tv->chnlset;
 
 	return (0);
 }

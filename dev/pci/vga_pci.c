@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.18 2005/06/11 00:48:06 miod Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.20.2.1 2007/01/03 21:11:10 miod Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*-
@@ -280,9 +280,7 @@ vga_pci_mmap(void *v, off_t off, int prot)
 		if (off > AGP_GET_APERTURE(sc))
 			return (-1);
 
-#ifdef __i386__
-		return i386_btop(sc->sc_apaddr + off);
-#endif
+		return atop(sc->sc_apaddr + off);
 	}
 #endif
 	return -1;
@@ -319,8 +317,6 @@ vga_pci_ioctl(v, cmd, addr, flag, p)
 
 	switch (cmd) {
 	case AGPIOC_INFO:
-		if (!sc->sc_chipc)
-			return (ENXIO);
 	case AGPIOC_ACQUIRE:
 	case AGPIOC_RELEASE:
 	case AGPIOC_SETUP:
@@ -328,6 +324,8 @@ vga_pci_ioctl(v, cmd, addr, flag, p)
 	case AGPIOC_DEALLOCATE:
 	case AGPIOC_BIND:
 	case AGPIOC_UNBIND:
+		if (sc->sc_methods == NULL || sc->sc_chipc == NULL)
+			return (ENXIO);
 		if (cmd != AGPIOC_INFO && !(flag & FWRITE))
 			return (EPERM);
 		break;
@@ -548,7 +546,7 @@ agp_free_gatt(struct vga_pci_softc *sc, struct agp_gatt *gatt)
 int
 agp_generic_detach(struct vga_pci_softc *sc)
 {
-	lockmgr(&sc->sc_lock, LK_DRAIN, NULL, curproc);
+	lockmgr(&sc->sc_lock, LK_DRAIN, NULL);
 	agp_flush_cache();
 	return 0;
 }
@@ -666,11 +664,11 @@ agp_generic_bind_memory(struct vga_pci_softc *sc, struct agp_memory *mem,
 	off_t i, k;
 	int contigpages, nseg, error;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL, curproc);
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
 
 	if (mem->am_is_bound) {
 		printf("AGP: memory already bound\n");
-		lockmgr(&sc->sc_lock, LK_RELEASE, NULL, curproc);
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return EINVAL;
 	}
 
@@ -679,7 +677,7 @@ agp_generic_bind_memory(struct vga_pci_softc *sc, struct agp_memory *mem,
 	    || offset + mem->am_size > AGP_GET_APERTURE(sc)) {
 		printf("AGP: binding memory at bad offset %#lx\n",
 			      (unsigned long) offset);
-		lockmgr(&sc->sc_lock, LK_RELEASE, NULL, curproc);
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return EINVAL;
 	}
 
@@ -731,7 +729,7 @@ agp_generic_bind_memory(struct vga_pci_softc *sc, struct agp_memory *mem,
 	}
 
 	if (contigpages == 0) {
-		lockmgr(&sc->sc_lock, LK_RELEASE, NULL, curproc);
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return ENOMEM;
 	}
 
@@ -769,7 +767,7 @@ agp_generic_bind_memory(struct vga_pci_softc *sc, struct agp_memory *mem,
 				bus_dmamem_free(sc->sc_dmat, mem->am_dmaseg,
 						mem->am_nseg);
 				free(mem->am_dmaseg, M_DEVBUF);
-				lockmgr(&sc->sc_lock, LK_RELEASE, NULL, curproc);
+				lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 				return error;
 			}
 		}
@@ -790,7 +788,7 @@ agp_generic_bind_memory(struct vga_pci_softc *sc, struct agp_memory *mem,
 	mem->am_offset = offset;
 	mem->am_is_bound = 1;
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL, curproc);
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 
 	return 0;
 }
@@ -800,11 +798,11 @@ agp_generic_unbind_memory(struct vga_pci_softc *sc, struct agp_memory *mem)
 {
 	int i;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL, curproc);
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
 
 	if (!mem->am_is_bound) {
 		printf("AGP: memory is not bound\n");
-		lockmgr(&sc->sc_lock, LK_RELEASE, NULL, curproc);
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return EINVAL;
 	}
 
@@ -828,7 +826,7 @@ agp_generic_unbind_memory(struct vga_pci_softc *sc, struct agp_memory *mem)
 	mem->am_offset = 0;
 	mem->am_is_bound = 0;
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL, curproc);
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 
 	return 0;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.h,v 1.32 2005/05/24 21:11:47 tedu Exp $	*/
+/*	$OpenBSD: uvm_map.h,v 1.34 2005/11/19 02:18:02 pedro Exp $	*/
 /*	$NetBSD: uvm_map.h,v 1.24 2001/02/18 21:19:08 chs Exp $	*/
 
 /* 
@@ -245,17 +245,11 @@ struct vm_map {
 
 /* XXX: number of kernel maps and entries to statically allocate */
 
-#if defined(__i386__) || defined(__amd64__) || defined (__sparc64__)
-#define _MAX_KMAPENT	2000
-#else
-#define _MAX_KMAPENT	1000
-#endif
-
 #if !defined(MAX_KMAPENT)
-#if (50 + (2 * NPROC) > _MAX_KMAPENT)
+#if (50 + (2 * NPROC) > 1000)
 #define MAX_KMAPENT (50 + (2 * NPROC))
 #else
-#define	MAX_KMAPENT	_MAX_KMAPENT  /* XXXCDC: no crash */
+#define	MAX_KMAPENT	1000  /* XXXCDC: no crash */
 #endif
 #endif	/* !defined MAX_KMAPENT */
 
@@ -416,7 +410,7 @@ vm_map_lock_try(map)
 			return (FALSE);
 		}
 		rv = (lockmgr(&map->lock, LK_EXCLUSIVE|LK_NOWAIT|LK_INTERLOCK,
-		    &map->flags_lock, curproc) == 0);
+		    &map->flags_lock) == 0);
 	}
 
 	if (rv)
@@ -444,7 +438,7 @@ vm_map_lock(map)
 	}
 
 	error = lockmgr(&map->lock, LK_EXCLUSIVE|LK_SLEEPFAIL|LK_INTERLOCK,
-	    &map->flags_lock, curproc);
+	    &map->flags_lock);
 
 	if (error) {
 		goto try_again;
@@ -458,11 +452,11 @@ vm_map_lock(map)
 do {									\
 	if (map->flags & VM_MAP_INTRSAFE)				\
 		panic("vm_map_lock_read: intrsafe map");		\
-	(void) lockmgr(&(map)->lock, LK_SHARED, NULL, curproc);		\
+	(void) lockmgr(&(map)->lock, LK_SHARED, NULL);			\
 } while (0)
 #else
 #define	vm_map_lock_read(map)						\
-	(void) lockmgr(&(map)->lock, LK_SHARED, NULL, curproc)
+	(void) lockmgr(&(map)->lock, LK_SHARED, NULL)
 #endif
 
 #define	vm_map_unlock(map)						\
@@ -470,24 +464,24 @@ do {									\
 	if ((map)->flags & VM_MAP_INTRSAFE)				\
 		simple_unlock(&(map)->lock.lk_interlock);		\
 	else								\
-		(void) lockmgr(&(map)->lock, LK_RELEASE, NULL, curproc);\
+		(void) lockmgr(&(map)->lock, LK_RELEASE, NULL);		\
 } while (0)
 
 #define	vm_map_unlock_read(map)						\
-	(void) lockmgr(&(map)->lock, LK_RELEASE, NULL, curproc)
+	(void) lockmgr(&(map)->lock, LK_RELEASE, NULL)
 
 #define	vm_map_downgrade(map)						\
-	(void) lockmgr(&(map)->lock, LK_DOWNGRADE, NULL, curproc)
+	(void) lockmgr(&(map)->lock, LK_DOWNGRADE, NULL)
 
 #ifdef DIAGNOSTIC
 #define	vm_map_upgrade(map)						\
 do {									\
-	if (lockmgr(&(map)->lock, LK_UPGRADE, NULL, curproc) != 0)	\
+	if (lockmgr(&(map)->lock, LK_UPGRADE, NULL) != 0)		\
 		panic("vm_map_upgrade: failed to upgrade lock");	\
 } while (0)
 #else
 #define	vm_map_upgrade(map)						\
-	(void) lockmgr(&(map)->lock, LK_UPGRADE, NULL, curproc)
+	(void) lockmgr(&(map)->lock, LK_UPGRADE, NULL)
 #endif
 
 #define	vm_map_busy(map)						\

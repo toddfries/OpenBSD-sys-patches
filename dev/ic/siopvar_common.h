@@ -1,5 +1,5 @@
-/*	$OpenBSD: siopvar_common.h,v 1.19 2004/06/12 22:22:26 krw Exp $ */
-/*	$NetBSD: siopvar_common.h,v 1.22 2002/10/23 02:32:36 christos Exp $ */
+/*	$OpenBSD: siopvar_common.h,v 1.23 2005/11/20 22:32:48 krw Exp $ */
+/*	$NetBSD: siopvar_common.h,v 1.33 2005/11/18 23:10:32 bouyer Exp $ */
 
 /*
  * Copyright (c) 2000 Manuel Bouyer.
@@ -21,7 +21,7 @@
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
  * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,     
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
  * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
  * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
  * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
@@ -45,7 +45,7 @@ typedef struct scr_table {
 
 /* Number of scatter/gather entries */
 /* XXX Ensure alignment of siop_xfer's. */
-#define SIOP_NSG	17	/* XXX (MAXPHYS/NBPG + 1) */
+#define SIOP_NSG	17	/* XXX (MAXPHYS/PAGE_SIZE + 1) */
 #define SIOP_MAXFER	((SIOP_NSG - 1) * PAGE_SIZE)
 
 /*
@@ -73,6 +73,9 @@ struct siop_common_xfer {
 #define SCSI_SIOP_NOCHECK	0xfe	/* don't check the scsi status */
 #define SCSI_SIOP_NOSTATUS	0xff	/* device didn't report status */
 
+/* offset is initialised to SIOP_NOOFFSET, used to check if it was updated */
+#define SIOP_NOOFFSET 0xffffffff
+
 /*
  * This describes a command handled by the SCSI controller
  */
@@ -86,6 +89,7 @@ struct siop_common_cmd {
 	int status;
 	int flags;
 	int tag;	/* tag used for tagged command queuing */
+	int resid;	/* valid when CMDFL_RESID is set */
 };
 
 /* status defs */
@@ -99,6 +103,7 @@ struct siop_common_cmd {
 /* flags defs */
 #define CMDFL_TIMEOUT	0x0001 /* cmd timed out */
 #define CMDFL_TAG	0x0002 /* tagged cmd */
+#define CMDFL_RESID	0x0004 /* current offset in table is partial */
 
 /* per-target struct */
 struct siop_common_target {
@@ -172,6 +177,7 @@ struct siop_common_softc {
 #define SF_CHIP_DFBC	0x00020000 /* Use DFBC register */
 #define SF_CHIP_DT	0x00040000 /* DT clocking */
 #define SF_CHIP_GEBUG	0x00080000 /* SCSI gross error bug */
+#define SF_CHIP_AAIP	0x00100000 /* Always generate AIP regardless of SNCTL4*/
 
 #define SF_PCI_RL	0x01000000 /* PCI read line */
 #define SF_PCI_RM	0x02000000 /* PCI read multiple */
@@ -191,12 +197,15 @@ void	siop_sdtr_msg(struct siop_common_cmd *, int, int, int);
 void	siop_wdtr_msg(struct siop_common_cmd *, int, int);
 void    siop_ppr_msg(struct siop_common_cmd *, int, int, int);
 void	siop_update_xfer_mode(struct siop_common_softc *, int);
+int	siop_iwr(struct siop_common_cmd *);
 /* actions to take at return of siop_wdtr_neg() and siop_sdtr_neg() */
 #define SIOP_NEG_NOP	0x0
 #define SIOP_NEG_MSGOUT	0x1
 #define SIOP_NEG_ACK	0x2
 
 void	siop_minphys(struct buf *);
-void 	siop_sdp(struct siop_common_cmd *);
+void 	siop_ma(struct siop_common_cmd *);
+void 	siop_sdp(struct siop_common_cmd *, int);
+void 	siop_update_resid(struct siop_common_cmd *, int);
 void	siop_clearfifo(struct siop_common_softc *);
 void	siop_resetbus(struct siop_common_softc *);

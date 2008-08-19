@@ -1,4 +1,4 @@
-/*	$OpenBSD: m188_machdep.c,v 1.8 2005/05/01 09:55:49 miod Exp $	*/
+/*	$OpenBSD: m188_machdep.c,v 1.12 2005/12/04 14:58:43 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -54,7 +54,6 @@
 #include <machine/asm_macro.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/cpu_number.h>
 #include <machine/locore.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
@@ -80,14 +79,14 @@ void	m188_startup(void);
  * *int_mask_reg[CPU]
  * Points to the hardware interrupt status register for each CPU.
  */
-unsigned int *volatile int_mask_reg[MAX_CPUS] = {
+unsigned int *volatile int_mask_reg[] = {
 	(unsigned int *)IEN0_REG,
 	(unsigned int *)IEN1_REG,
 	(unsigned int *)IEN2_REG,
 	(unsigned int *)IEN3_REG
 };
 
-unsigned int m188_curspl[MAX_CPUS] = {0, 0, 0, 0};
+unsigned int m188_curspl[] = {0, 0, 0, 0};
 
 unsigned int int_mask_val[INT_LEVEL] = {
 	MASK_LVL_0,
@@ -158,10 +157,10 @@ m188_bootstrap()
 	md_raiseipl = &m188_raiseipl;
 
 	/* clear and disable all interrupts */
-	*int_mask_reg[0] = 0;
-	*int_mask_reg[1] = 0;
-	*int_mask_reg[2] = 0;
-	*int_mask_reg[3] = 0;
+	*(volatile u_int32_t *)IEN0_REG = 0;
+	*(volatile u_int32_t *)IEN1_REG = 0;
+	*(volatile u_int32_t *)IEN2_REG = 0;
+	*(volatile u_int32_t *)IEN3_REG = 0;
 }
 
 void
@@ -169,6 +168,7 @@ m188_reset()
 {
 	volatile int cnt;
 
+	/* clear and disable all interrupts */
 	*(volatile u_int32_t *)IEN0_REG = 0;
 	*(volatile u_int32_t *)IEN1_REG = 0;
 	*(volatile u_int32_t *)IEN2_REG = 0;
@@ -218,7 +218,7 @@ safe_level(u_int mask, u_int curlevel)
 {
 	int i;
 
-	for (i = curlevel; i < 8; i++)
+	for (i = curlevel; i < INT_LEVEL; i++)
 		if (!(int_mask_val[i] & mask))
 			return i;
 
@@ -242,8 +242,10 @@ m188_setipl(u_int level)
 	curspl = m188_curspl[cpu];
 
 	mask = int_mask_val[level];
+#ifdef MULTIPROCESSOR
 	if (cpu != master_cpu)
 		mask &= SLAVE_MASK;
+#endif
 
 	*int_mask_reg[cpu] = mask;
 	m188_curspl[cpu] = level;
@@ -260,8 +262,10 @@ m188_raiseipl(u_int level)
 	curspl = m188_curspl[cpu];
 	if (curspl < level) {
 		mask = int_mask_val[level];
+#ifdef MULTIPROCESSOR
 		if (cpu != master_cpu)
 			mask &= SLAVE_MASK;
+#endif
 
 		*int_mask_reg[cpu] = mask;
 		m188_curspl[cpu] = level;
@@ -295,6 +299,7 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 	intrhand_t *list;
 	int ret, intbit;
 	u_int vec;
+	int unmasked = 0;
 
 	cur_mask = ISR_GET_CURRENT_MASK(cpu);
 	old_spl = m188_curspl[cpu];
@@ -320,6 +325,7 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 	do {
 		level = safe_level(cur_mask, old_spl);
 
+#ifdef DIAGNOSTIC
 		if (old_spl >= level) {
 			int i;
 
@@ -330,12 +336,13 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 			printf("\nCPU0 spl %d  CPU1 spl %d  CPU2 spl %d  CPU3 spl %d\n",
 			       m188_curspl[0], m188_curspl[1],
 			       m188_curspl[2], m188_curspl[3]);
-			for (i = 0; i < 8; i++)
+			for (i = 0; i < INT_LEVEL; i++)
 				printf("int_mask[%d] = 0x%08x\n", i, int_mask_val[i]);
 			printf("--CPU %d halted--\n", cpu_number());
 			setipl(IPL_ABORT);
 			for(;;) ;
 		}
+#endif
 
 #ifdef DEBUG
 		if (level > 7 || (int)level < 0) {
@@ -351,8 +358,9 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 		 * For now, only the timer interrupt requires its condition
 		 * to be cleared before interrupts are enabled.
 		 */
-		if ((cur_mask & DTI_BIT) == 0) {
+		if (unmasked == 0 && (cur_mask & DTI_BIT) == 0) {
 			set_psr(get_psr() & ~PSR_IND);
+			unmasked = 1;
 		}
 
 		/* generate IACK and get the vector */
@@ -366,17 +374,19 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 		/* find the first bit set in the current mask */
 		intbit = ff1(cur_mask);
 		if (OBIO_INTERRUPT_MASK & (1 << intbit)) {
-			vec = SYSCON_VECT + obio_vec[intbit];
+			vec = obio_vec[intbit];
 			if (vec == 0) {
 				panic("unknown onboard interrupt: mask = 0x%b",
 				    1 << intbit, IST_STRING);
 			}
+			vec += SYSCON_VECT;
 		} else if (HW_FAILURE_MASK & (1 << intbit)) {
-			vec = SYSCON_VECT + obio_vec[intbit];
+			vec = obio_vec[intbit];
 			if (vec == 0) {
 				panic("unknown hardware failure: mask = 0x%b",
 				    1 << intbit, IST_STRING);
 			}
+			vec += SYSCON_VECT;
 		} else if (VME_INTERRUPT_MASK & (1 << intbit)) {
 			vec = *(u_int32_t *)ivec[level] & VME_VECTOR_MASK;
 			if (vec & VME_BERR_MASK) {

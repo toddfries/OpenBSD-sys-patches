@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.3 2003/06/02 23:27:56 millert Exp $	*/
+/*	$OpenBSD: stdarg.h,v 1.5 2006/01/06 18:53:05 millert Exp $	*/
 /*	$NetBSD: stdarg.h,v 1.11 2000/07/23 21:36:56 mycroft Exp $ */
 
 /*
@@ -44,7 +44,8 @@
 #ifndef _SPARC64_STDARG_H_
 #define	_SPARC64_STDARG_H_
 
-#include <machine/ansi.h>
+#include <sys/cdefs.h>
+#include <machine/_types.h>
 
 #ifdef __lint__
 #define	__builtin_saveregs(t)		(0)
@@ -52,14 +53,12 @@
 #define	__builtin_next_arg(t)		((t) ? 0 : 0)
 #endif
 
-typedef _BSD_VA_LIST_	va_list;
+typedef __va_list	va_list;
 
 #define	va_start(ap, last) \
 	(__builtin_next_arg(last), (ap) = (va_list)__builtin_saveregs())
 
-#if !defined(_ANSI_SOURCE) && \
-    (!defined(_POSIX_C_SOURCE) && !defined(_XOPEN_SOURCE) || \
-     defined(_ISOC99_SOURCE) || (__STDC_VERSION__ - 0) >= 199901L)
+#if __BSD_VISIBLE
 #define	va_copy(dest, src) \
 	((dest) = (src))
 #endif

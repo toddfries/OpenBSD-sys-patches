@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2c.c,v 1.1 2004/05/23 17:33:43 grange Exp $	*/
+/*	$OpenBSD: i2c.c,v 1.14 2006/02/26 20:24:46 deraadt Exp $	*/
 /*	$NetBSD: i2c.c,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
 
 /*
@@ -42,10 +42,13 @@
 #include <sys/event.h>
 #include <sys/conf.h>
 
+#define _I2C_PRIVATE
 #include <dev/i2c/i2cvar.h>
 
 #define IICCF_ADDR	0
 #define IICCF_SIZE	1
+
+#include "ipmi.h"
 
 struct iic_softc {
 	struct device sc_dev;
@@ -55,7 +58,6 @@ struct iic_softc {
 int	iic_match(struct device *, void *, void *);
 void	iic_attach(struct device *, struct device *, void *);
 int	iic_search(struct device *, void *, void *);
-int	iic_print(void *, const char *);
 
 struct cfattach iic_ca = {
 	sizeof (struct iic_softc),
@@ -83,6 +85,8 @@ iic_print(void *aux, const char *pnp)
 {
 	struct i2c_attach_args *ia = aux;
 
+	if (pnp != NULL)
+		printf("\"%s\" at %s", ia->ia_name, pnp);
 	printf(" addr 0x%x", ia->ia_addr);
 
 	return (UNCONF);
@@ -95,13 +99,16 @@ iic_search(struct device *parent, void *arg, void *aux)
 	struct cfdata *cf = arg;
 	struct i2c_attach_args ia;
 
-	ia.ia_tag = sc->sc_tag;
-	ia.ia_addr = cf->cf_loc[IICCF_ADDR];
-	ia.ia_size = cf->cf_loc[IICCF_SIZE];
+	if (cf->cf_loc[IICCF_ADDR] != -1) {
+		memset(&ia, 0, sizeof(ia));
+		ia.ia_tag = sc->sc_tag;
+		ia.ia_addr = cf->cf_loc[IICCF_ADDR];
+		ia.ia_size = cf->cf_loc[IICCF_SIZE];
+		ia.ia_name = "unknown";
 
-	if (cf->cf_attach->ca_match(parent, cf, &ia) > 0)
-		config_attach(parent, cf, &ia, iic_print);
-
+		if (cf->cf_attach->ca_match(parent, cf, &ia) > 0)
+			config_attach(parent, cf, &ia, iic_print);
+	}
 	return (0);
 }
 
@@ -123,6 +130,15 @@ iic_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_tag = iba->iba_tag;
 
+#if NIPMI > 0
+	extern int ipmi_enabled;
+
+	if (ipmi_enabled) {
+		printf(": disabled to avoid ipmi0 interactions\n");
+		return;
+	}
+#endif
+
 	printf("\n");
 
 	/*
@@ -130,4 +146,12 @@ iic_attach(struct device *parent, struct device *self, void *aux)
 	 * configuration file.
 	 */
 	config_search(iic_search, self, NULL);
+
+	/*
+	 * Scan for known device signatures.
+	 */
+	if (iba->iba_bus_scan)
+		(iba->iba_bus_scan)(self, aux, iba->iba_bus_scan_arg);
+	else
+		iic_scan(self, aux);
 }

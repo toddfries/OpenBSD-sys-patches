@@ -1,4 +1,4 @@
-/*	$OpenBSD: viareg.h,v 1.15 2005/02/06 19:51:35 martin Exp $	*/
+/*	$OpenBSD: viareg.h,v 1.18 2006/01/13 21:02:01 miod Exp $	*/
 /*	$NetBSD: viareg.h,v 1.6 1997/02/28 07:41:41 scottr Exp $	*/
 
 /*-
@@ -56,6 +56,7 @@
 #define DB1I_Par_Err	0x80
 #define DB1O_vSndEnb	0x80
 #define DB1O_Par_Enb	0x40
+#define	DB1O_AuxIntEnb	0x40	/* 0 = enabled, 1 = disabled */
 #define DB1O_vFDesk2	0x20
 #define DB1O_vFDesk1	0x10
 #define DB1I_vFDBInt	0x08
@@ -142,8 +143,9 @@
 extern volatile unsigned char *Via1Base;
 extern volatile unsigned char *Via2Base;	/* init in VIA_Initialize */
 #define VIA1_addr	Via1Base	/* at PA 0x50f00000 */
-#define VIA2OFF		1		/* VIA2 addr = VIA1_addr * 0x2000 */
-#define RBVOFF		0x13		/* RBV addr = VIA1_addr * 0x13000 */
+
+#define VIA2OFF		1		/* VIA2 addr = VIA1_addr + 0x2000 */
+#define RBVOFF		0x13		/* RBV addr = VIA1_addr + 0x26000 */
 #define OSSOFF		0xd		/* OSS addr = VIA1_addr + 0x1A000 */
 
 #define VIA1		0
@@ -179,7 +181,7 @@ extern int VIA2;
 #define RBVMonitorMask	0x38	/* Type numbers */
 #define RBVOff		0x40	/* Monitor turned off */
 #define RBVMonIDBWP	0x08	/* 15 inch BW portrait */
-#define RBVMonIDRGB	0x10	/* 12 inch colorr */
+#define RBVMonIDRGB12	0x10	/* 12 inch color */
 #define RBVMonIDRGB15	0x28	/* 15 inch RGB */
 #define RBVMonIDStd	0x30	/* 12 inch BW or 13 inch color */
 #define RBVMonIDNone	0x38	/* No monitor connected */

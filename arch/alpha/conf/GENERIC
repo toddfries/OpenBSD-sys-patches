@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.153 2005/08/03 02:10:43 dlg Exp $
+#	$OpenBSD: GENERIC,v 1.165 2006/02/14 18:11:00 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -43,10 +43,10 @@ option		TCVERBOSE		# recognize "unknown" TC devices
 option		USBVERBOSE
 
 # Wscons options
-option		WSDISPLAY_COMPAT_USL		# VT handling
-option		WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
-option		WSDISPLAY_DEFAULTSCREENS=6
-option		WSDISPLAY_COMPAT_PCVT		# emulate some ioctls
+option	WSDISPLAY_COMPAT_USL		# VT handling
+option	WSDISPLAY_COMPAT_RAWKBD		# provide raw scancodes; needed for X11
+option	WSDISPLAY_DEFAULTSCREENS=6	# initial number of text consoles
+option	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls; needed for X11
 
 option		APERTURE		# in-kernel aperture driver for XFree86
 option		USER_PCICONF		# user-space PCI configuration
@@ -194,6 +194,9 @@ scsibus* at twe?
 #scsibus*	at ami?
 
 # PCI Network devices
+lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
+san*	at pci?				# Sangoma PCI AFT card
+pcn*	at pci?				# AMD PCnet-PCI Ethernet
 de*	at pci?				# 21x4[012]-based Ethernet
 dc*	at pci?				# 21143, "tulip" clone ethernet
 ne*	at pci?				# NE2000-compat ethernet cards
@@ -205,24 +208,25 @@ fpa*	at pci?				# DEC DEFPA FDDI cards
 bge*	at pci?				# Broadcom BCM570x (aka Tigon3)
 re*	at pci?				# Realtek 8169/8169S/8110S
 stge*	at pci?				# Sundance TC9021 GigE
+ti*	at pci?				# Alteon Tigon 1Gb ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
 vr*	at pci?				# VIA Rhine ethernet
 em*	at pci?				# Intel Pro/1000 ethernet
+#ixgb*	at pci?				# Intel Pro/10Gb ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
 epic*	at pci?				# SMC EPIC/100 ethernet
 skc*	at pci?				# SysKonnect GEnesis 984x
 sk*	at skc?				#  each port of above
-ral*	at pci?				# Ralink RT2500
+ral*	at pci?				# Ralink RT2500/RT2501/RT2600
+ath*	at pci?				# Atheros AR5k (802.11)
 
 #UNTESTED:  the following section of drivers is untested on alpha.
 en*	at pci?				# ENI PCI ATM (untested)
 tl*	at pci?				# Compaq Thunderlan ethernet
 le*	at pci?				# PCI LANCE Ethernet (untested)
-lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
 wb*	at pci?				# Winbond W89C840F ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 ste*	at pci?				# Sundance ST201 ethernet
-ti*	at pci?				# Alteon Tigon 1Gb ethernet
 an*	at pci?				# Cisco/Aironet 802.11DS
 
 vga*	at pci?				# PCI VGA graphics
@@ -252,6 +256,23 @@ urlphy*	at mii?				# Realtek RTL8150L internal PHY
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
 ukphy*	at mii?				# "unknown" PHYs
 
+# sensors
+alipm*	at pci?
+iic*	at alipm?
+
+adc*	at iic?				# Analog Devices AD7416/AD7417/7418
+admtemp* at iic?			# Analog Devices ADM1021
+admlc*	at iic?				# Analog Devices ADM1024
+admtm*	at iic?				# Analog Devices ADM1025
+admtmp*	at iic?				# Analog Devices ADM1030
+admtt*	at iic?				# Analog Devices ADM1031
+adt*	at iic?				# Analog Devices ADT7460
+lm*	at iic?				# LM78/79 and clones
+lmenv*	at iic?				# National Semiconductor LM87
+lmtemp*	at iic?				# NS LM75/LM77 temperature sensor
+maxds*	at iic?				# Maxim DS1631
+maxtmp*	at iic?				# Maxim MAX6642/MAX6690
+
 # ISA/EISA bus support
 isa*	at	pceb?
 eisa*	at	pceb?
@@ -263,7 +284,6 @@ isapnp0	at	isa?
 mcclock* at isa? port 0x70
 pcppi*	at isa?				# PC prog. periph. interface
 spkr0	at pcppi?			# IBM BASIC emulation
-isabeep0 at pcppi?			# "keyboard" beep
 midi*	at pcppi?
 pckbc*	at isa?				# PC keyboard controller
 pckbd*	at pckbc?			# PC keyboard (kbd port)
@@ -325,6 +345,7 @@ scsibus* at atapiscsi?
 
 # Audio devices
 eap*	at pci?				# Ensoniq AudioPCI S5016
+emu*	at pci?				# SB Live!
 
 puc*	at pci?				# PCI "universal" comm device
 com*	at puc?
@@ -341,16 +362,22 @@ opl*	at eso?
 
 # MIDI support
 midi*	at opl?				# OPL FM synth
-#midi*	at eap?
+midi*	at eap?
 
 #Audio Support
 audio*	at eap?
+audio*	at emu?
 audio*	at eso?
 audio*	at sv?
 audio*	at cmpci?
 audio*	at fms?
 audio*	at auvia?
 audio*	at uaudio?
+
+bktr0	at pci?
+
+# FM-Radio support
+radio*	at bktr?
 
 # Workstation Console attachments
 #wsdisplay*	at	cfb?
@@ -369,5 +396,5 @@ hifn*	at pci?				# Hi/fn 7751 crypto card
 #pseudo-device	raid		4	# RAIDframe disk driver
 pseudo-device	crypto		1
 pseudo-device	sequencer	1
-#pseudo-device	hotplug		1	# devices hot plugging
+pseudo-device	hotplug		1	# devices hot plugging
 pseudo-device	wsmux		2	# mouse & keyboard multiplexor

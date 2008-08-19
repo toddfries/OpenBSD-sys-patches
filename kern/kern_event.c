@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.25 2004/09/16 18:46:01 millert Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.26.2.1 2007/03/30 22:33:57 ckuethe Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -37,7 +37,7 @@
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/fcntl.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #include <sys/queue.h>
 #include <sys/event.h>
 #include <sys/eventvar.h>
@@ -703,7 +703,7 @@ kqueue_poll(struct file *fp, int events, struct proc *p)
 {
 	struct kqueue *kq = (struct kqueue *)fp->f_data;
 	int revents = 0;
-	int s = splnet();
+	int s = splhigh();
 
 	if (events & (POLLIN | POLLRDNORM)) {
 		if (kq->kq_count) {

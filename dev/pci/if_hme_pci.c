@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_hme_pci.c,v 1.8 2003/02/14 21:05:12 henric Exp $	*/
+/*	$OpenBSD: if_hme_pci.c,v 1.10 2005/10/27 03:43:30 brad Exp $	*/
 /*	$NetBSD: if_hme_pci.c,v 1.3 2000/12/28 22:59:13 sommerfeld Exp $	*/
 
 /*
@@ -201,11 +201,12 @@ hmeattach_pci(parent, self, aux)
 	struct pci_attach_args *pa = aux;
 	struct hme_pci_softc *hsc = (void *)self;
 	struct hme_softc *sc = &hsc->hsc_hme;
-	pci_intr_handle_t intrhandle;
+	pci_intr_handle_t ih;
 	/* XXX the following declarations should be elsewhere */
 	extern void myetheraddr(u_char *);
 	pcireg_t csr;
-	const char *intrstr;
+	const char *intrstr = NULL;
+	bus_size_t size;
 	int type, gotenaddr = 0;
 
 	/*
@@ -245,7 +246,7 @@ hmeattach_pci(parent, self, aux)
 
 #define PCI_HME_BASEADDR	0x10
 	if (pci_mapreg_map(pa, PCI_HME_BASEADDR, type, 0,
-	    &hsc->hsc_memt, &hsc->hsc_memh, NULL, NULL, 0) != 0) {
+	    &hsc->hsc_memt, &hsc->hsc_memh, NULL, &size, 0) != 0) {
 		printf(": could not map hme registers\n");
 		return;
 	}
@@ -262,7 +263,7 @@ hmeattach_pci(parent, self, aux)
 	if (hme_pci_enaddr(sc, pa) == 0)
 		gotenaddr = 1;
 
-#ifdef __sparc__
+#ifdef __sparc64__
 	if (!gotenaddr) {
 		if (OF_getprop(PCITAG_NODE(pa->pa_tag), "local-mac-address",
 		    sc->sc_enaddr, ETHER_ADDR_LEN) <= 0)
@@ -277,32 +278,29 @@ hmeattach_pci(parent, self, aux)
 	}
 #endif
 
-
 	sc->sc_burst = 16;	/* XXX */
+
+	if (pci_intr_map(pa, &ih) != 0) {
+		printf(": couldn't map interrupt\n");
+		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, size);
+		return;
+	}	
+	intrstr = pci_intr_string(pa->pa_pc, ih);
+	hsc->hsc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET,
+	    hme_intr, sc, self->dv_xname);
+	if (hsc->hsc_ih == NULL) {
+		printf(": couldn't establish interrupt");
+		if (intrstr != NULL)
+			printf(" at %s", intrstr);
+		printf("\n");
+		bus_space_unmap(hsc->hsc_memt, hsc->hsc_memh, size);
+		return;
+	}
+
+	printf(": %s", intrstr);
 
 	/*
 	 * call the main configure
 	 */
 	hme_config(sc);
-
-	if (pci_intr_map(pa, &intrhandle) != 0) {
-		printf("%s: couldn't map interrupt\n",
-		    sc->sc_dev.dv_xname);
-		return;	/* bus_unmap ? */
-	}	
-	intrstr = pci_intr_string(pa->pa_pc, intrhandle);
-	hsc->hsc_ih = pci_intr_establish(pa->pa_pc, intrhandle, IPL_NET,
-	    hme_intr, sc, self->dv_xname);
-	if (hsc->hsc_ih != NULL) {
-		printf("%s: using %s for interrupt\n",
-		    sc->sc_dev.dv_xname,
-		    intrstr ? intrstr : "unknown interrupt");
-	} else {
-		printf("%s: couldn't establish interrupt",
-		    sc->sc_dev.dv_xname);
-		if (intrstr != NULL)
-			printf(" at %s", intrstr);
-		printf("\n");
-		return;	/* bus_unmap ? */
-	}
 }

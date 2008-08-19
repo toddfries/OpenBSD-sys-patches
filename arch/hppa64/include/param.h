@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.2 2005/07/31 15:31:13 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.6 2005/12/13 01:56:43 martin Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -53,7 +53,6 @@
 #define	PGSHIFT		12		/* LOG2(NBPG) */
 
 #define	KERNBASE	0x00000000	/* start of kernel virtual */
-#define	BTOPKERNBASE	((u_long)KERNBASE >> PAGE_SHIFT)
 
 #define	DEV_BSIZE	512
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
@@ -86,8 +85,8 @@
  * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
  * logical pages.
  */
-#define	NKMEMPAGES_MIN_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
-#define	NKMEMPAGES_MAX_DEFAULT	((64 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MIN_DEFAULT	((8 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MAX_DEFAULT	((128 * 1024 * 1024) >> PAGE_SHIFT)
 
 /* pages ("clicks") (4096 bytes) to disk blocks */
 #define	ctod(x)		((x) << (PAGE_SHIFT - DEV_BSHIFT))
@@ -107,15 +106,6 @@
  * For now though just use DEV_BSIZE.
  */
 #define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE/DEV_BSIZE))
-
-/*
- * Mach derived conversion macros
- */
-#define hppa_round_page(x)	((((unsigned long)(x)) + NBPG - 1) & ~(NBPG-1))
-#define hppa_trunc_page(x)	((unsigned long)(x) & ~(NBPG-1))
-
-#define btop(x)		((unsigned long)(x) >> PAGE_SHIFT)
-#define ptob(x)		((unsigned long)(x) << PAGE_SHIFT)
 
 #ifndef _LOCORE
 #define	CONADDR	conaddr

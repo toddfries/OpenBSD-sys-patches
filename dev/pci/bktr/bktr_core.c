@@ -1,4 +1,4 @@
-/*	$OpenBSD: bktr_core.c,v 1.17 2005/06/23 14:57:48 robert Exp $	*/
+/*	$OpenBSD: bktr_core.c,v 1.19 2006/01/20 18:14:17 millert Exp $	*/
 /* $FreeBSD: src/sys/dev/bktr/bktr_core.c,v 1.114 2000/10/31 13:09:56 roger Exp $ */
 
 /*
@@ -193,6 +193,7 @@ typedef unsigned int uintptr_t;
 #include <sys/kernel.h>
 #include <sys/signalvar.h>
 #include <sys/vnode.h>
+#include <sys/stdint.h>		/* uintptr_t */
 
 #ifdef __NetBSD__
 #include <uvm/uvm_extern.h>
@@ -200,14 +201,9 @@ typedef unsigned int uintptr_t;
 
 #ifdef __OpenBSD__
 #include <dev/rndvar.h>
+typedef int intrmask_t;
 #endif
 
-#ifdef __OpenBSD__
-typedef unsigned long uintptr_t;
-typedef int intrmask_t;
-#else
-#include <sys/inttypes.h>		/* uintptr_t */
-#endif
 #include <dev/ic/bt8xx.h>
 #include <dev/pci/bktr/bktr_reg.h>
 #include <dev/pci/bktr/bktr_tuner.h>
@@ -387,8 +383,10 @@ static const struct {
 
 
 /* debug utility for holding previous INT_STAT contents */
-#define STATUS_SUM
+#undef STATUS_SUM
+#if defined( STATUS_SUM )
 static u_int	status_sum = 0;
+#endif
 
 /*
  * defines to make certain bit-fiddles understandable
@@ -2294,9 +2292,12 @@ tuner_ioctl( bktr_ptr_t bktr, int unit, ioctl_cmd_t cmd, caddr_t arg, struct pro
 int
 bktr_common_ioctl( bktr_ptr_t bktr, ioctl_cmd_t cmd, caddr_t arg )
 {
-        int                           pixfmt;
-	unsigned int	              temp;
+	int                           pixfmt;
 	struct meteor_pixfmt          *pf_pub;
+
+#if defined( STATUS_SUM )
+	unsigned int                  temp;
+#endif
 
 	switch (cmd) {
 

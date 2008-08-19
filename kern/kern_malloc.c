@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.59 2004/12/30 08:28:39 niklas Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.62 2005/11/28 00:14:28 jsg Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -56,7 +56,7 @@ struct vm_map *kmem_map = NULL;
 #ifndef NKMEMPAGES
 #define	NKMEMPAGES	0
 #endif
-int	nkmempages = NKMEMPAGES;
+u_int	nkmempages = NKMEMPAGES;
 
 /*
  * Defaults for lower- and upper-bounds for the kmem_map page count.
@@ -65,10 +65,12 @@ int	nkmempages = NKMEMPAGES;
 #ifndef	NKMEMPAGES_MIN
 #define	NKMEMPAGES_MIN	NKMEMPAGES_MIN_DEFAULT
 #endif
+u_int	nkmempages_min = 0;
 
 #ifndef NKMEMPAGES_MAX
 #define	NKMEMPAGES_MAX	NKMEMPAGES_MAX_DEFAULT
 #endif
+u_int	nkmempages_max = 0;
 
 struct kmembuckets bucket[MINBUCKET + 16];
 struct kmemstats kmemstats[M_LAST];
@@ -124,13 +126,11 @@ struct freelist {
  * Allocate a block of memory
  */
 void *
-malloc(size, type, flags)
-	unsigned long size;
-	int type, flags;
+malloc(unsigned long size, int type, int flags)
 {
-	register struct kmembuckets *kbp;
-	register struct kmemusage *kup;
-	register struct freelist *freep;
+	struct kmembuckets *kbp;
+	struct kmemusage *kup;
+	struct freelist *freep;
 	long indx, npg, allocsize;
 	int s;
 	caddr_t va, cp, savedlist;
@@ -140,7 +140,7 @@ malloc(size, type, flags)
 	char *savedtype;
 #endif
 #ifdef KMEMSTATS
-	register struct kmemstats *ksp = &kmemstats[type];
+	struct kmemstats *ksp = &kmemstats[type];
 
 	if (((unsigned long)type) >= M_LAST)
 		panic("malloc - bogus type");
@@ -315,13 +315,11 @@ out:
  * Free a block of memory allocated by malloc.
  */
 void
-free(addr, type)
-	void *addr;
-	int type;
+free(void *addr, int type)
 {
-	register struct kmembuckets *kbp;
-	register struct kmemusage *kup;
-	register struct freelist *freep;
+	struct kmembuckets *kbp;
+	struct kmemusage *kup;
+	struct freelist *freep;
 	long size;
 	int s;
 #ifdef DIAGNOSTIC
@@ -330,7 +328,7 @@ free(addr, type)
 	long alloc, copysize;
 #endif
 #ifdef KMEMSTATS
-	register struct kmemstats *ksp = &kmemstats[type];
+	struct kmemstats *ksp = &kmemstats[type];
 #endif
 
 #ifdef MALLOC_DEBUG
@@ -433,9 +431,9 @@ free(addr, type)
  * the size of the kernel malloc arena.
  */
 void
-kmeminit_nkmempages()
+kmeminit_nkmempages(void)
 {
-	int npages;
+	u_int npages;
 
 	if (nkmempages != 0) {
 		/*
@@ -446,21 +444,32 @@ kmeminit_nkmempages()
 	}
 
 	/*
+	 * We can't initialize these variables at compilation time, since
+	 * the page size may not be known (on sparc GENERIC kernels, for
+	 * example). But we still want the MD code to be able to provide
+	 * better values.
+	 */
+	if (nkmempages_min == 0)
+		nkmempages_min = NKMEMPAGES_MIN;
+	if (nkmempages_max == 0)
+		nkmempages_max = NKMEMPAGES_MAX;
+
+	/*
 	 * We use the following (simple) formula:
 	 *
 	 *	- Starting point is physical memory / 4.
 	 *
-	 *	- Clamp it down to NKMEMPAGES_MAX.
+	 *	- Clamp it down to nkmempages_max.
 	 *
-	 *	- Round it up to NKMEMPAGES_MIN.
+	 *	- Round it up to nkmempages_min.
 	 */
 	npages = physmem / 4;
 
-	if (npages > NKMEMPAGES_MAX)
-		npages = NKMEMPAGES_MAX;
+	if (npages > nkmempages_max)
+		npages = nkmempages_max;
 
-	if (npages < NKMEMPAGES_MIN)
-		npages = NKMEMPAGES_MIN;
+	if (npages < nkmempages_min)
+		npages = nkmempages_min;
 
 	nkmempages = npages;
 }
@@ -469,7 +478,7 @@ kmeminit_nkmempages()
  * Initialize the kernel memory allocator
  */
 void
-kmeminit()
+kmeminit(void)
 {
 	vaddr_t base, limit;
 #ifdef KMEMSTATS
@@ -514,14 +523,8 @@ kmeminit()
  * Return kernel malloc statistics information.
  */
 int
-sysctl_malloc(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
+sysctl_malloc(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
 {
 	struct kmembuckets kb;
 	int i, siz;
@@ -566,7 +569,7 @@ sysctl_malloc(name, namelen, oldp, oldlenp, newp, newlen, p)
 		if (memall == NULL) {
 			int totlen;
 
-			i = lockmgr(&sysctl_kmemlock, LK_EXCLUSIVE, NULL, p);
+			i = lockmgr(&sysctl_kmemlock, LK_EXCLUSIVE, NULL);
 			if (i)
 				return (i);
 
@@ -592,7 +595,7 @@ sysctl_malloc(name, namelen, oldp, oldlenp, newp, newlen, p)
 			for (i = 0; i < totlen; i++)
 				if (memall[i] == ' ')
 					memall[i] = '_';
-			lockmgr(&sysctl_kmemlock, LK_RELEASE, NULL, p);
+			lockmgr(&sysctl_kmemlock, LK_RELEASE, NULL);
 		}
 		return (sysctl_rdstring(oldp, oldlenp, newp, memall));
 #else

@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.3 2005/08/07 07:29:44 miod Exp $	*/
+/*	$OpenBSD: signal.h,v 1.8 2006/01/09 18:18:37 millert Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -37,6 +37,8 @@
 #ifndef _MIPS_SIGNAL_H_
 #define _MIPS_SIGNAL_H_
 
+#include <sys/cdefs.h>
+
 #if !defined(__LANGUAGE_ASSEMBLY)
 #include <sys/types.h>
 
@@ -45,8 +47,7 @@
  */
 typedef int sig_atomic_t;
 
-#ifndef _ANSI_SOURCE
-
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -57,16 +58,16 @@ typedef int sig_atomic_t;
 struct	sigcontext {
 	long	sc_onstack;	/* sigstack state to restore */
 	long	 sc_mask;	/* signal mask to restore */
-	register_t sc_pc;	/* pc at time of signal */
-	register_t sc_regs[32];	/* processor regs 0 to 31 */
-	register_t mullo;	/* mullo and mulhi registers... */
-	register_t mulhi;	/* mullo and mulhi registers... */
+	__register_t sc_pc;	/* pc at time of signal */
+	__register_t sc_regs[32]; /* processor regs 0 to 31 */
+	__register_t mullo;	/* mullo and mulhi registers... */
+	__register_t mulhi;	/* mullo and mulhi registers... */
 	f_register_t sc_fpregs[33]; /* fp regs 0 to 31 and csr */
 	long	sc_fpused;	/* fp has been used */
 	long	sc_fpc_eir;	/* floating point exception instruction reg */
 	long	xxx[8];		/* XXX reserved */
 };
-#endif	/* !_ANSI_SOURCE */
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 
 #else /* __LANGUAGE_ASSEMBLY */
 #define SC_ONSTACK	(0 * REGSZ)

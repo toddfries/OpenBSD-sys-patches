@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.36 2005/08/03 23:08:22 fgsch Exp $ */
+/*	$OpenBSD: pccbb.c,v 1.41 2005/11/26 14:31:26 krw Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -142,7 +142,7 @@ int	pccbb_pcmcia_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
 void	pccbb_pcmcia_mem_free(pcmcia_chipset_handle_t,
     struct pcmcia_mem_handle *);
 int	pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t, int, bus_addr_t,
-    bus_size_t, struct pcmcia_mem_handle *, bus_addr_t *, int *);
+    bus_size_t, struct pcmcia_mem_handle *, bus_size_t *, int *);
 void	pccbb_pcmcia_mem_unmap(pcmcia_chipset_handle_t, int);
 int	pccbb_pcmcia_io_alloc(pcmcia_chipset_handle_t, bus_addr_t,
     bus_size_t, bus_size_t, struct pcmcia_io_handle *);
@@ -301,6 +301,8 @@ struct yenta_chipinfo {
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI1451), CB_TI12XX,
 	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_TI, PCI_PRODUCT_TI_PCI7XX1), CB_TI12XX,
+	    PCCBB_PCMCIA_IO_RELOC | PCCBB_PCMCIA_MEM_32},
 
 	/* Ricoh chips */
 	{ MAKEID(PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_RF5C475), CB_RX5C47X,
@@ -331,6 +333,18 @@ struct yenta_chipinfo {
 	    CB_CIRRUS, PCCBB_PCMCIA_MEM_32},
 	{ MAKEID(PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CL_PD6833),
 	    CB_CIRRUS, PCCBB_PCMCIA_MEM_32},
+
+	/* older O2Micro bridges */
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6729),
+	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6730),
+	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6872), /* 68[71]2 */
+	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6832),
+	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
+	{ MAKEID(PCI_VENDOR_O2MICRO, PCI_PRODUCT_O2MICRO_OZ6836),
+	    CB_OLDO2MICRO, PCCBB_PCMCIA_MEM_32},
 
 	/* sentinel, or Generic chip */
 	{ 0 /* null id */ , CB_UNKNOWN, PCCBB_PCMCIA_MEM_32},
@@ -492,7 +506,7 @@ pccbbattach(parent, self, aux)
 
 	/*
 	 * XXX pccbbintr should be called under the priority lower
-	 * than any other hard interrputs.
+	 * than any other hard interrupts.
 	 */
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_BIO, pccbbintr, sc,
 	    sc->sc_dev.dv_xname);
@@ -578,7 +592,7 @@ pccbb_pci_callback(self)
 		}
 		sc->sc_base_memt = sc->sc_memt;
 		pci_conf_write(pc, sc->sc_tag, PCI_SOCKBASE, sockbase);
-		DPRINTF(("%s: CardBus resister address 0x%lx -> 0x%x\n",
+		DPRINTF(("%s: CardBus register address 0x%lx -> 0x%x\n",
 		    sc->sc_dev.dv_xname, sockbase, pci_conf_read(pc, sc->sc_tag,
 		    PCI_SOCKBASE)));
 #else
@@ -592,7 +606,7 @@ pccbb_pci_callback(self)
 			return;
 		}
 		pci_conf_write(pc, sc->sc_tag, PCI_SOCKBASE, sockbase);
-		DPRINTF(("%s: CardBus resister address 0x%x -> 0x%x\n",
+		DPRINTF(("%s: CardBus register address 0x%x -> 0x%x\n",
 		    sc->sc_dev.dv_xname, sock_base, pci_conf_read(pc,
 		    sc->sc_tag, PCI_SOCKBASE)));
 #endif
@@ -777,7 +791,7 @@ pccbb_chipinit(sc)
 			}
 			pci_conf_write(pc, tag, PCI12XX_MFUNC, reg);
 		}
-		/* fallthrough */
+		/* FALLTHROUGH */
 
 	case CB_TI125X:
 		/*
@@ -832,6 +846,24 @@ pccbb_chipinit(sc)
 		if ((reg & TOPIC100_PMCSR_MASK) != TOPIC100_PMCSR_D0)
 			pci_conf_write(pc, tag, TOPIC100_PMCSR,
 			    (reg & ~TOPIC100_PMCSR_MASK) | TOPIC100_PMCSR_D0);
+		break;
+
+	case CB_OLDO2MICRO:
+		/*
+		 * older bridges have problems with both read prefetch and
+		 * write bursting depending on the combination of the chipset,
+		 * bridge and the cardbus card. so disable them to be on the
+		 * safe side. One example is O2Micro 6812 with Atheros AR5012
+		 * chipsets
+		 */
+		DPRINTF(("%s: old O2Micro bridge found\n",
+		    sc->sc_dev.dv_xname, reg));
+		reg = pci_conf_read(pc, tag, O2MICRO_RESERVED1);
+		pci_conf_write(pc, tag, O2MICRO_RESERVED1, reg &
+		    ~(O2MICRO_RES_READ_PREFETCH | O2MICRO_RES_WRITE_BURST));
+		reg = pci_conf_read(pc, tag, O2MICRO_RESERVED2);
+		pci_conf_write(pc, tag, O2MICRO_RESERVED2, reg &
+		    ~(O2MICRO_RES_READ_PREFETCH | O2MICRO_RES_WRITE_BURST));
 		break;
 	}
 
@@ -1979,7 +2011,7 @@ pccbb_pcmcia_io_alloc(pch, start, size, align, pcihp)
 		 *  3. if size is larger, shift msb left once.
 		 *  4. obtain mask value to decrement msb.
 		 */
-		bus_size_t size_tmp = size;	
+		bus_size_t size_tmp = size;
 		int shifts = 0;
 
 		mask = 1;
@@ -2663,7 +2695,7 @@ pccbb_pcmcia_do_mem_map(ph, win)
  * int pccbb_pcmcia_mem_map(pcmcia_chipset_handle_t pch, int kind,
  *                                 bus_addr_t card_addr, bus_size_t size,
  *                                 struct pcmcia_mem_handle *pcmhp,
- *                                 bus_addr_t *offsetp, int *windowp)
+ *                                 bus_size_t *offsetp, int *windowp)
  *
  * This function maps memory space allocated by the function
  * pccbb_pcmcia_mem_alloc().
@@ -2675,7 +2707,7 @@ pccbb_pcmcia_mem_map(pch, kind, card_addr, size, pcmhp, offsetp, windowp)
 	bus_addr_t card_addr;
 	bus_size_t size;
 	struct pcmcia_mem_handle *pcmhp;
-	bus_addr_t *offsetp;
+	bus_size_t *offsetp;
 	int *windowp;
 {
 	struct pcic_handle *ph = (struct pcic_handle *)pch;

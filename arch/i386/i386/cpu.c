@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.15.2.1 2006/01/13 01:56:54 brad Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.17 2006/01/12 22:39:20 weingart Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -253,7 +253,7 @@ cpu_attach(parent, self, aux)
 	pcb->pcb_tss.tss_esp = kstack + USPACE - 16 -
 	    sizeof (struct trapframe);
 	pcb->pcb_pmap = pmap_kernel();
-	pcb->pcb_cr3 = vtophys(pcb->pcb_pmap->pm_pdir);
+	pcb->pcb_cr3 = vtophys((vaddr_t)pcb->pcb_pmap->pm_pdir);
 	/* pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdir - KERNBASE; XXX ??? */
 
 	cpu_default_ldt(ci);	/* Use the `global' ldt until one alloc'd */
@@ -417,7 +417,7 @@ cpu_boot_secondary (ci)
 		printf("%s: starting", ci->ci_dev.dv_xname);
 
 	/* XXX move elsewhere, not per CPU. */
-	mp_pdirpa = vtophys(kpm->pm_pdir);
+	mp_pdirpa = vtophys((vaddr_t)kpm->pm_pdir);
 
 	pcb = ci->ci_idle_pcb;
 

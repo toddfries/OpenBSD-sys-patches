@@ -1,4 +1,4 @@
-/*	$OpenBSD: ses.c,v 1.26 2005/08/23 23:44:28 dlg Exp $ */
+/*	$OpenBSD: ses.c,v 1.34 2006/01/19 17:08:40 grange Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -18,16 +18,14 @@
 
 #include "bio.h"
 
-#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
+#include <sys/device.h>
 #include <sys/scsiio.h>
 #include <sys/malloc.h>
-#include <sys/device.h>
-#include <sys/conf.h>
+#include <sys/proc.h>
+#include <sys/lock.h>
 #include <sys/queue.h>
-#include <sys/kthread.h>
 #include <sys/sensors.h>
 
 #if NBIO > 0
@@ -35,7 +33,6 @@
 #endif
 
 #include <scsi/scsi_all.h>
-#include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
 #include <scsi/ses.h>
@@ -69,11 +66,10 @@ struct ses_slot {
 };
 #endif
 
-struct ses_thread;
-
 struct ses_softc {
 	struct device		sc_dev;
 	struct scsi_link	*sc_link;
+	struct lock		sc_lock;
 
 	enum {
 		SES_ENC_STD,
@@ -87,7 +83,6 @@ struct ses_softc {
 	TAILQ_HEAD(, ses_slot)	sc_slots;
 #endif
 	TAILQ_HEAD(, ses_sensor) sc_sensors;
-	struct ses_thread	*sc_thread;
 };
 
 struct cfattach ses_ca = {
@@ -102,18 +97,10 @@ struct cfdriver ses_cd = {
 
 #define SES_BUFLEN	2048 /* XXX is this enough? */
 
-struct ses_thread {
-	struct ses_softc	*sc;
-	volatile int		running;
-};
-
-void	ses_create_thread(void *);
-void	ses_refresh(void *);
-
 int	ses_read_config(struct ses_softc *);
 int	ses_read_status(struct ses_softc *);
 int	ses_make_sensors(struct ses_softc *, struct ses_type_desc *, int);
-int	ses_refresh_sensors(struct ses_softc *);
+void	ses_refresh_sensors(void *);
 
 #if NBIO > 0
 int	ses_ioctl(struct device *, u_long, caddr_t);
@@ -156,50 +143,64 @@ ses_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ses_softc		*sc = (struct ses_softc *)self;
 	struct scsibus_attach_args	*sa = aux;
+	char				vendor[33];
+	struct ses_sensor		*sensor;
+#if NBIO > 0
+	struct ses_slot			*slot;
+#endif
 
 	sc->sc_link = sa->sa_sc_link;
-	sc->sc_thread = NULL;
 	sa->sa_sc_link->device_softc = sc;
+	lockinit(&sc->sc_lock, PZERO, DEVNAME(sc), 0, 0);
 
-	if (strncasecmp(sc->sc_link->inqdata.vendor, "dell",
-	    sizeof(sc->sc_link->inqdata.vendor)) == 0)
+	scsi_strvis(vendor, sc->sc_link->inqdata.vendor,
+	    sizeof(sc->sc_link->inqdata.vendor));
+	if (strncasecmp(vendor, "Dell", sizeof(vendor)) == 0)
 		sc->sc_enctype = SES_ENC_DELL;
 	else
 		sc->sc_enctype = SES_ENC_STD;
 
 	printf("\n");
 
-	sc->sc_thread = malloc(sizeof(struct ses_thread), M_DEVBUF, M_NOWAIT);
-	if (sc->sc_thread == NULL) {
-		printf("%s: unable to allocate thread information\n",
-		    DEVNAME(sc));
-		return;
-	}
-
-	sc->sc_thread->sc = sc;
-	sc->sc_thread->running = 1;
-
-#if NBIO > 0
-	if (bio_register(self, ses_ioctl) != 0) {
-		free(sc->sc_thread, M_DEVBUF);
-		sc->sc_thread = NULL;
-		printf("%s: unable to register ioctl\n", DEVNAME(sc));
-		return;
-	}
-#endif
-
 	if (ses_read_config(sc) != 0) {
-#if NBIO > 0
-		bio_unregister(self);
-#endif
-		free(sc->sc_thread, M_DEVBUF);
-		sc->sc_thread = NULL;
 		printf("%s: unable to read enclosure configuration\n",
 		    DEVNAME(sc));
 		return;
 	}
 
-	kthread_create_deferred(ses_create_thread, sc);
+	if (!TAILQ_EMPTY(&sc->sc_sensors) &&
+	    sensor_task_register(sc, ses_refresh_sensors, 10) != 0) {
+		printf("%s: unable to register update task\n", DEVNAME(sc));
+		while (!TAILQ_EMPTY(&sc->sc_sensors)) {
+			sensor = TAILQ_FIRST(&sc->sc_sensors);
+			TAILQ_REMOVE(&sc->sc_sensors, sensor, se_entry);
+			free(sensor, M_DEVBUF);
+		}
+	} else {
+		TAILQ_FOREACH(sensor, &sc->sc_sensors, se_entry)
+			sensor_add(&sensor->se_sensor);
+	}
+
+#if NBIO > 0
+	if (!TAILQ_EMPTY(&sc->sc_slots) &&
+	    bio_register(self, ses_ioctl) != 0) {
+		printf("%s: unable to register ioctl\n", DEVNAME(sc));
+		while (!TAILQ_EMPTY(&sc->sc_slots)) {
+			slot = TAILQ_FIRST(&sc->sc_slots);
+			TAILQ_REMOVE(&sc->sc_slots, slot, sl_entry);
+			free(slot, M_DEVBUF);
+		}
+	}
+#endif
+
+	if (TAILQ_EMPTY(&sc->sc_sensors)
+#if NBIO > 0
+	    && TAILQ_EMPTY(&sc->sc_slots)
+#endif
+	    ) {
+		free(sc->sc_buf, M_DEVBUF);
+		sc->sc_buf = NULL;
+	}
 }
 
 int
@@ -211,21 +212,21 @@ ses_detach(struct device *self, int flags)
 	struct ses_slot			*slot;
 #endif
 
-	if (sc->sc_thread != NULL) {
-		sc->sc_thread->running = 0;
-		wakeup(sc->sc_thread);
-		sc->sc_thread = NULL;
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
 
 #if NBIO > 0
+	if (!TAILQ_EMPTY(&sc->sc_slots)) {
 		bio_unregister(self);
-
 		while (!TAILQ_EMPTY(&sc->sc_slots)) {
 			slot = TAILQ_FIRST(&sc->sc_slots);
 			TAILQ_REMOVE(&sc->sc_slots, slot, sl_entry);
 			free(slot, M_DEVBUF);
 		}
+	}
 #endif
 
+	if (!TAILQ_EMPTY(&sc->sc_sensors)) {
+		sensor_task_unregister(sc);
 		/*
 		 * We can't free the sensors once theyre in the systems sensor
 		 * list, so just mark them as invalid.
@@ -233,45 +234,15 @@ ses_detach(struct device *self, int flags)
 		TAILQ_FOREACH(sensor, &sc->sc_sensors, se_entry)
 			sensor->se_sensor.flags |= SENSOR_FINVALID;
 
-		free(sc->sc_buf, M_DEVBUF);
 	}
+
+	if (sc->sc_buf != NULL)
+		free(sc->sc_buf, M_DEVBUF);
+
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	lockmgr(&sc->sc_lock, LK_DRAIN, NULL);
 
 	return (0);
-}
-
-void
-ses_create_thread(void *arg)
-{
-	struct ses_softc		*sc = arg;
-
-	if (kthread_create(ses_refresh, sc->sc_thread, NULL, DEVNAME(sc)) != 0)
-		panic("ses thread");
-}
-
-void
-ses_refresh(void *arg)
-{
-	struct ses_thread		*thread = arg;
-	struct ses_softc		*sc = thread->sc;
-	int				ok = 1;
-
-	while (thread->running) {
-		if (ses_refresh_sensors(sc) != 0) {
-			if (ok)
-				printf("%s: status read error\n", DEVNAME(sc));
-			ok = 0;
-		} else {
-			if (!ok)
-				printf("%s: status read ok\n", DEVNAME(sc));
-			ok = 1;
-		}
-
-		tsleep(thread, PWAIT, "timeout", 10 * hz);
-	}
-
-	free(thread, M_DEVBUF);
-
-	kthread_exit(0);
 }
 
 int
@@ -501,8 +472,6 @@ ses_make_sensors(struct ses_softc *sc, struct ses_type_desc *types, int ntypes)
 		status++;
 	}
 
-	TAILQ_FOREACH(sensor, &sc->sc_sensors, se_entry)
-		SENSOR_ADD(&sensor->se_sensor);
 	return (0);
 error:
 #if NBIO > 0
@@ -520,14 +489,19 @@ error:
 	return (1);
 }
 
-int
-ses_refresh_sensors(struct ses_softc *sc)
+void
+ses_refresh_sensors(void *arg)
 {
+	struct ses_softc		*sc = (struct ses_softc *)arg;
 	struct ses_sensor		*sensor;
 	int				ret = 0;
 
-	if (ses_read_status(sc) != 0)
-		return (1);
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+
+	if (ses_read_status(sc) != 0) {
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+		return;
+	}
 
 	TAILQ_FOREACH(sensor, &sc->sc_sensors, se_entry) {
 		DPRINTFN(10, "%s: %s 0x%02x 0x%02x%02x%02x\n", DEVNAME(sc),
@@ -575,7 +549,10 @@ ses_refresh_sensors(struct ses_softc *sc)
 		}
 	}
 
-	return (ret);
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+
+	if (ret)
+		printf("%s: error in sensor data\n");
 }
 
 #if NBIO > 0
@@ -628,16 +605,22 @@ ses_bio_blink(struct ses_softc *sc, struct bioc_blink *blink)
 {
 	struct ses_slot			*slot;
 
-	if (ses_read_status(sc) != 0)
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+
+	if (ses_read_status(sc) != 0) {
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return (EIO);
+	}
 
 	TAILQ_FOREACH(slot, &sc->sc_slots, sl_entry) {
 		if (slot->sl_stat->f1 == blink->bb_target)
 			break;
 	}
 
-	if (slot == TAILQ_END(&sc->sc_slots))
+	if (slot == TAILQ_END(&sc->sc_slots)) {
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return (EINVAL);
+	}
 
 	DPRINTFN(3, "%s: 0x%02x 0x%02x 0x%02x 0x%02x\n", DEVNAME(sc),
 	    slot->sl_stat->com, slot->sl_stat->f1, slot->sl_stat->f2,
@@ -657,6 +640,7 @@ ses_bio_blink(struct ses_softc *sc, struct bioc_blink *blink)
 		break;
 
 	default:
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return (EINVAL);
 	}
 
@@ -664,8 +648,12 @@ ses_bio_blink(struct ses_softc *sc, struct bioc_blink *blink)
 	    slot->sl_stat->com, slot->sl_stat->f1, slot->sl_stat->f2,
 	    slot->sl_stat->f3);
 
-	if (ses_write_config(sc) != 0)
+	if (ses_write_config(sc) != 0) {
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 		return (EIO);
+	}
+
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 
 	return (0);
 }

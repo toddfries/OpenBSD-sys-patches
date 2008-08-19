@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.30 2005/08/06 17:09:10 miod Exp $     */
+/*	$OpenBSD: trap.c,v 1.34 2006/01/30 21:26:19 miod Exp $     */
 /*	$NetBSD: trap.c,v 1.47 1999/08/21 19:26:20 matt Exp $     */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -298,13 +298,13 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 		break;
 
 	case T_XFCFLT|T_USER:
-		typ = ILL_ILLOPC;		/* XXX hmm */
+		typ = EMT_TAGOVF;
 		sig = SIGEMT;
 		break;
 
 	case T_ARITHFLT|T_USER:
 		sv.sival_int = frame->code;
-		typ = 0;				/* XXX */
+		typ = FPE_FLTINV;
 		sig = SIGFPE;
 		break;
 
@@ -430,7 +430,6 @@ if(startsysc)printf("trap syscall %s pc %lx, psl %lx, sp %lx, pid %d, frame %p\n
 	else
 #endif
 		err = (*callp->sy_call)(curproc, args, rval);
-	exptr = curproc->p_addr->u_pcb.framep;
 
 #ifdef TRAPDEBUG
 if(startsysc)
@@ -473,11 +472,17 @@ child_return(arg)
 	void *arg;
 {
 	struct proc *p = arg;
+	struct trapframe *frame;
 
-	userret(p, p->p_addr->u_pcb.framep, 0);
+	frame = p->p_addr->u_pcb.framep;
+	frame->r1 = frame->r0 = 0;
+	frame->psl &= ~PSL_C;
+
+	userret(p, frame, 0);
 
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, SYS_fork, 0, 0);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }

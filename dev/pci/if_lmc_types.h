@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmc_types.h,v 1.2 2000/02/01 18:01:42 chris Exp $ */
+/*	$OpenBSD: if_lmc_types.h,v 1.5 2005/11/14 14:56:02 mickey Exp $ */
 /*	$NetBSD: if_lmc_types.h,v 1.2 1999/03/25 04:09:33 explorer Exp $	*/
 
 /*-
@@ -42,43 +42,32 @@
 #ifndef LMC_TYPES_H
 #define LMC_TYPES_H
 
+#if defined(_KERNEL)
+
 /*
- * NetBSD uses _KERNEL, FreeBSD uses KERNEL.
+ * LMC has weird endianness issues, so we can't use the tulip_desc_t.
  */
-#if defined(_KERNEL) && (defined(__NetBSD__) || defined(__OpenBSD__))
-#define LMC_IS_KERNEL
-#endif
-#if defined(KERNEL) && defined(__FreeBSD__)
-#define LMC_IS_KERNEL
-#endif
-#if defined(__KERNEL__) && defined(linux)
-#define LMC_IS_KERNEL
-#endif
+typedef struct {
+    u_int32_t d_status;
+    u_int32_t d_ctl;
+    u_int32_t d_addr1;
+    u_int32_t d_addr2;
+} lmc_desc_t;
 
-#if defined(LMC_IS_KERNEL)
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-typedef bus_addr_t lmc_csrptr_t;
-#else
-typedef volatile u_int32_t *lmc_csrptr_t;
-#endif
+#define	LMC_CTL_FLGS(x)		(((x)>>22)&0x3ff)
+#define	LMC_CTL_LEN2(x)		(((x)>>11)&0x7ff)
+#define	LMC_CTL_LEN1(x)		((x)&0x7ff)
+#define	LMC_CTL(f,l1,l2)	((((f)&0x3ff)<<22)|(((l2)&0x7ff)<<11)|((l1)&0x7ff))
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
+typedef bus_size_t lmc_csrptr_t;
+
 #define	lmc_intrfunc_t	int
-#endif /* __NetBSD__ */
-
-#if defined(__FreeBSD__)
-#define	lmc_intrfunc_t	void
-#endif /* __FreeBSD__ */
-
-#if defined(__bsdi__)
-#define	lmc_intrfunc_t	int
-#endif /* __bsdi__ */
 
 typedef struct lmc___softc lmc_softc_t;
 typedef struct lmc___media lmc_media_t;
 typedef struct lmc_ringinfo lmc_ringinfo_t;
 
-#endif /* LMC_IS_KERNEL */
+#endif /* _KERNEL */
 
 typedef struct lmc___ctl lmc_ctl_t;
 

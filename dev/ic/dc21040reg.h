@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc21040reg.h,v 1.12 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: dc21040reg.h,v 1.15 2005/11/07 00:03:09 brad Exp $	*/
 /*	$NetBSD: dc21040reg.h,v 1.11 1997/06/08 18:44:02 thorpej Exp $	*/
 
 /*-
@@ -44,25 +44,13 @@
 #define	TULIP_BITFIELD4(a, b, c, d)	a, b, c, d
 #endif
 
-typedef union {
-	struct {
-	u_int32_t TULIP_BITFIELD3(bd_length1 : 11,
-			          bd_length2 : 11,
-			          bd_flag : 10);
-	}s;
-	u_int32_t f;
-} tulip_desc_bitfield_t;
-#define bd_length1 s.bd_length1
-#define bd_length2 s.bd_length2
-#define bd_flag    s.bd_flag
 typedef struct {
     u_int32_t d_status;
-    tulip_desc_bitfield_t u;
+    u_int32_t TULIP_BITFIELD3(d_length1 : 11,
+			      d_length2 : 11,
+			      d_flag : 10);
     u_int32_t d_addr1;
     u_int32_t d_addr2;
-#ifdef PPC_MPC106_BUG
-    u_int32_t fill[4];		/* Make descr. 32 bytes avoiding MPC106 bug! */
-#endif
 } tulip_desc_t;
 
 #define	TULIP_DSTS_OWNER	0x80000000	/* Owner (1 = 21040) */
@@ -228,15 +216,15 @@ typedef struct {
 #define	TULIP_21040_PROBE_AUIBNC_TIMEOUT	300
 #define	TULIP_21040_PROBE_EXTSIA_TIMEOUT	300
 
-#define	TULIP_21040_SIACONN_10BASET	0x00008F01L
+#define	TULIP_21040_SIACONN_10BASET	0x0000EF01L
 #define	TULIP_21040_SIATXRX_10BASET	0x0000FFFFL
 #define	TULIP_21040_SIAGEN_10BASET	0x00000000L
 
-#define	TULIP_21040_SIACONN_10BASET_FD	0x00008F01L
+#define	TULIP_21040_SIACONN_10BASET_FD	0x0000EF01L
 #define	TULIP_21040_SIATXRX_10BASET_FD	0x0000FFFDL
 #define	TULIP_21040_SIAGEN_10BASET_FD	0x00000000L
 
-#define	TULIP_21040_SIACONN_AUIBNC	0x00008F09L
+#define	TULIP_21040_SIACONN_AUIBNC	0x0000EF09L
 #define	TULIP_21040_SIATXRX_AUIBNC	0x00000705L
 #define	TULIP_21040_SIAGEN_AUIBNC	0x00000006L
 
@@ -534,17 +522,6 @@ typedef struct {
 #define	PHYCTL_ISOLATE		0x0400
 #define	PHYCTL_AUTONEG_RESTART	0x0200
 #define	PHYCTL_FULL_DUPLEX	0x0100
-
-
-#define MII_RD          0x00040000
-#define MII_WR          0x00000000
-#define MII_DIN         0x00080000
-#define MII_DOUT        0x00020000
-#define MII_DOUTON      MII_DOUT
-#define MII_DOUTOFF     MII_DOUT
-#define MII_CLK		0x00010000
-#define MII_CLKON       MII_CLK
-#define MII_CLKOFF      MII_CLK
 
 /*
  * Definitions for the DE425.

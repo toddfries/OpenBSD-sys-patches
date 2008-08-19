@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.83 2005/06/08 22:33:27 millert Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.86 2006/02/06 17:37:28 jmc Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -258,6 +258,7 @@ struct ctlname {
 	{ "evcount", CTLTYPE_NODE }, \
  	{ "timecounter", CTLTYPE_NODE }, \
  	{ "maxlocksperuid", CTLTYPE_INT }, \
+ 	{ "cp_time2", CTLTYPE_STRUCT }, \
 }
 
 /*
@@ -458,6 +459,7 @@ struct kinfo_proc2 {
 	char    p_emul[KI_EMULNAMELEN];	/* syscall emulation name */
 	u_int64_t p_rlim_rss_cur;	/* RLIM_T: soft limit for rss */
 	u_int64_t p_cpuid;		/* LONG: CPU id */
+	u_int64_t p_vm_map_size;	/* VSIZE_T: virtual size */
 };
 
 /*
@@ -616,7 +618,7 @@ struct kinfo_proc2 {
  * CTL_DEBUG definitions
  *
  * Second level identifier specifies which debug variable.
- * Third level identifier specifies which stucture component.
+ * Third level identifier specifies which structure component.
  */
 #define	CTL_DEBUG_NAME		0	/* string: variable name */
 #define	CTL_DEBUG_VALUE		1	/* int: variable value */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpt.c,v 1.16 2005/07/08 01:23:56 marco Exp $	*/
+/*	$OpenBSD: mpt.c,v 1.24 2006/02/11 01:20:43 krw Exp $	*/
 /*	$NetBSD: mpt.c,v 1.4 2003/11/02 11:07:45 wiz Exp $	*/
 
 /*
@@ -43,46 +43,52 @@
 
 #include <dev/ic/mpt.h>
 
-#define MPT_MAX_TRYS 3
+#define MPT_MAX_TRIES 3
 #define MPT_MAX_WAIT 300000
 
-static int maxwait_ack = 0;
-static int maxwait_int = 0;
-static int maxwait_state = 0;
+static int	maxwait_ack = 0;
+static int	maxwait_int = 0;
+static int	maxwait_state = 0;
 
-__inline u_int32_t mpt_rd_db(mpt_softc_t *);
-__inline u_int32_t mpt_rd_intr(mpt_softc_t *);
-int mpt_wait_db_ack(mpt_softc_t *);
-int mpt_wait_db_int(mpt_softc_t *);
-int mpt_wait_state(mpt_softc_t *, enum DB_STATE_BITS);
-int mpt_get_iocfacts(mpt_softc_t *, MSG_IOC_FACTS_REPLY *);
-int mpt_get_portfacts(mpt_softc_t *, MSG_PORT_FACTS_REPLY *);
-int mpt_send_ioc_init(mpt_softc_t *, u_int32_t);
-void mpt_print_header(mpt_softc_t *, char *, fCONFIG_PAGE_HEADER *);
-int mpt_read_config_info_mfg(mpt_softc_t *);
-int mpt_read_config_info_iou(mpt_softc_t *);
-int mpt_read_config_info_ioc(mpt_softc_t *);
-int mpt_read_config_info_raid(mpt_softc_t *);
-int mpt_read_config_info_spi(mpt_softc_t *);
-int mpt_set_initial_config_spi(mpt_softc_t *);
-int mpt_send_port_enable(mpt_softc_t *, int);
-int mpt_send_event_request(mpt_softc_t *, int);
+#ifdef MPT_DEBUG
+int		mpt_debug = 11;
+#endif /* MPT_DEBUG */
+
+__inline u_int32_t mpt_rd_db(struct mpt_softc *);
+__inline u_int32_t mpt_rd_intr(struct mpt_softc *);
+int mpt_wait_db_ack(struct mpt_softc *);
+int mpt_wait_db_int(struct mpt_softc *);
+int mpt_wait_state(struct mpt_softc *, enum DB_STATE_BITS);
+int mpt_get_iocfacts(struct mpt_softc *, MSG_IOC_FACTS_REPLY *);
+int mpt_get_portfacts(struct mpt_softc *, MSG_PORT_FACTS_REPLY *);
+int mpt_send_ioc_init(struct mpt_softc *, u_int32_t);
+#ifdef MPT_DEBUG
+void mpt_print_header(struct mpt_softc *, char *, CONFIG_PAGE_HEADER *);
+#endif /* MPT_DEBUG */
+int mpt_read_config_info_mfg(struct mpt_softc *);
+int mpt_read_config_info_iou(struct mpt_softc *);
+int mpt_read_config_info_ioc(struct mpt_softc *);
+int mpt_read_config_info_raid(struct mpt_softc *);
+int mpt_read_config_info_spi(struct mpt_softc *);
+int mpt_set_initial_config_spi(struct mpt_softc *);
+int mpt_send_port_enable(struct mpt_softc *, int);
+int mpt_send_event_request(struct mpt_softc *, int);
 
 __inline u_int32_t
-mpt_rd_db(mpt_softc_t *mpt)
+mpt_rd_db(struct mpt_softc *mpt)
 {
 	return mpt_read(mpt, MPT_OFFSET_DOORBELL);
 }
 
 __inline u_int32_t
-mpt_rd_intr(mpt_softc_t *mpt)
+mpt_rd_intr(struct mpt_softc *mpt)
 {
 	return mpt_read(mpt, MPT_OFFSET_INTR_STATUS);
 }
 
 /* Busy wait for a door bell to be read by IOC */
 int
-mpt_wait_db_ack(mpt_softc_t *mpt)
+mpt_wait_db_ack(struct mpt_softc *mpt)
 {
 	int i;
 	for (i=0; i < MPT_MAX_WAIT; i++) {
@@ -98,7 +104,7 @@ mpt_wait_db_ack(mpt_softc_t *mpt)
 
 /* Busy wait for a door bell interrupt */
 int
-mpt_wait_db_int(mpt_softc_t *mpt)
+mpt_wait_db_int(struct mpt_softc *mpt)
 {
 	int i;
 	for (i=0; i < MPT_MAX_WAIT; i++) {
@@ -113,7 +119,7 @@ mpt_wait_db_int(mpt_softc_t *mpt)
 
 /* Wait for IOC to transition to a give state */
 void
-mpt_check_doorbell(mpt_softc_t *mpt)
+mpt_check_doorbell(struct mpt_softc *mpt)
 {
 	u_int32_t db = mpt_rd_db(mpt);
 
@@ -137,7 +143,7 @@ mpt_check_doorbell(mpt_softc_t *mpt)
 
 /* Wait for IOC to transition to a give state */
 int
-mpt_wait_state(mpt_softc_t *mpt, enum DB_STATE_BITS state)
+mpt_wait_state(struct mpt_softc *mpt, enum DB_STATE_BITS state)
 {
 	int i;
 
@@ -155,11 +161,9 @@ mpt_wait_state(mpt_softc_t *mpt, enum DB_STATE_BITS state)
 
 /* Issue the reset COMMAND to the IOC */
 int
-mpt_soft_reset(mpt_softc_t *mpt)
+mpt_soft_reset(struct mpt_softc *mpt)
 {
-	if (mpt->verbose) {
-		mpt_prt(mpt, "soft reset");
-	}
+	DNPRINTF(10, "soft reset\n");
 
 	/* Have to use hard reset if we are not in Running state */
 	if (MPT_STATE(mpt_rd_db(mpt)) != MPT_DB_STATE_RUNNING) {
@@ -197,7 +201,7 @@ mpt_soft_reset(mpt_softc_t *mpt)
  * processors in the chip.
  */
 void
-mpt_hard_reset(mpt_softc_t *mpt)
+mpt_hard_reset(struct mpt_softc *mpt)
 {
 	u_int32_t	diag0;
 	int		count;
@@ -205,9 +209,7 @@ mpt_hard_reset(mpt_softc_t *mpt)
 	/* This extra read comes for the Linux source
 	 * released by LSI. It's function is undocumented!
 	 */
-	if (mpt->verbose) {
-		mpt_prt(mpt, "hard reset");
-	}
+	DNPRINTF(10, "hard reset\n");
 	mpt_read(mpt, MPT_OFFSET_FUBAR);
 
 	/* Enable diagnostic registers */
@@ -263,7 +265,7 @@ mpt_hard_reset(mpt_softc_t *mpt)
  * fouls up the PCI configuration registers.
  */
 int
-mpt_reset(mpt_softc_t *mpt)
+mpt_reset(struct mpt_softc *mpt)
 {
 	int ret;
 
@@ -284,7 +286,7 @@ mpt_reset(mpt_softc_t *mpt)
 
 /* Return a command buffer to the free queue */
 void
-mpt_free_request(mpt_softc_t *mpt, request_t *req)
+mpt_free_request(struct mpt_softc *mpt, struct req_entry *req)
 {
 	if (req == NULL || req != &mpt->request_pool[req->index]) {
 		panic("mpt_free_request bad req ptr");
@@ -306,7 +308,7 @@ mpt_free_request(mpt_softc_t *mpt, request_t *req)
 
 /* Initialize command buffer */
 void
-mpt_init_request(mpt_softc_t *mpt, request_t *req)
+mpt_init_request(struct mpt_softc *mpt, struct req_entry *req)
 {
 	if (req == NULL || req != &mpt->request_pool[req->index]) {
 		panic("mpt_init_request bad req ptr");
@@ -318,10 +320,10 @@ mpt_init_request(mpt_softc_t *mpt, request_t *req)
 	SLIST_INSERT_HEAD(&mpt->request_free_list, req, link);
 }
 /* Get a command buffer from the free queue */
-request_t *
-mpt_get_request(mpt_softc_t *mpt)
+struct req_entry *
+mpt_get_request(struct mpt_softc *mpt)
 {
-	request_t *req;
+	struct req_entry *req;
 	req = SLIST_FIRST(&mpt->request_free_list);
 	if (req != NULL) {
 		if (req != &mpt->request_pool[req->index]) {
@@ -339,24 +341,26 @@ mpt_get_request(mpt_softc_t *mpt)
 
 /* Pass the command to the IOC */
 void
-mpt_send_cmd(mpt_softc_t *mpt, request_t *req)
+mpt_send_cmd(struct mpt_softc *mpt, struct req_entry *req)
 {
+#ifdef MPT_DEBUG
+	u_int32_t *pReq = req->req_vbuf;
+
+	DNPRINTF(50, "%s: Send Request %d (0x%x):\n",
+	    DEVNAME(mpt), req->index, req->req_pbuf);
+	DNPRINTF(50, "%s: %08x %08x %08x %08x\n",
+	    DEVNAME(mpt), pReq[0], pReq[1], pReq[2], pReq[3]);
+	DNPRINTF(50, "%s: %08x %08x %08x %08x\n",
+	    DEVNAME(mpt), pReq[4], pReq[5], pReq[6], pReq[7]);
+	DNPRINTF(50, "%s: %08x %08x %08x %08x\n",
+	    DEVNAME(mpt), pReq[8], pReq[9], pReq[10], pReq[11]);
+	DNPRINTF(50, "%s: %08x %08x %08x %08x\n",
+	    DEVNAME(mpt), pReq[12], pReq[13], pReq[14], pReq[15]);
+#endif /* MPT_DEBUG */
+
 	req->sequence = mpt->sequence++;
-	if (mpt->verbose > 1) {
-		u_int32_t *pReq;
-		pReq = req->req_vbuf;
-		mpt_prt(mpt, "Send Request %d (0x%x):",
-		    req->index, req->req_pbuf);
-		mpt_prt(mpt, "%08x %08x %08x %08x",
-		    pReq[0], pReq[1], pReq[2], pReq[3]);
-		mpt_prt(mpt, "%08x %08x %08x %08x",
-		    pReq[4], pReq[5], pReq[6], pReq[7]);
-		mpt_prt(mpt, "%08x %08x %08x %08x",
-		    pReq[8], pReq[9], pReq[10], pReq[11]);
-		mpt_prt(mpt, "%08x %08x %08x %08x",
-		    pReq[12], pReq[13], pReq[14], pReq[15]);
-	}
 	MPT_SYNC_REQ(mpt, req, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
+
 	req->debug = REQ_ON_CHIP;
 	mpt_write(mpt, MPT_OFFSET_REQUEST_Q, (u_int32_t) req->req_pbuf);
 }
@@ -366,14 +370,14 @@ mpt_send_cmd(mpt_softc_t *mpt, request_t *req)
  * finished processing it.
  */
 void
-mpt_free_reply(mpt_softc_t *mpt, u_int32_t ptr)
+mpt_free_reply(struct mpt_softc *mpt, u_int32_t ptr)
 {
 	mpt_write(mpt, MPT_OFFSET_REPLY_Q, ptr);
 }
 
 /* Get a reply from the IOC */
 u_int32_t
-mpt_pop_reply_queue(mpt_softc_t *mpt)
+mpt_pop_reply_queue(struct mpt_softc *mpt)
 {
 	return mpt_read(mpt, MPT_OFFSET_REPLY_Q);
 }
@@ -385,7 +389,7 @@ mpt_pop_reply_queue(mpt_softc_t *mpt)
  * commands such as device/bus reset as specified by LSI.
  */
 int
-mpt_send_handshake_cmd(mpt_softc_t *mpt, size_t len, void *cmd)
+mpt_send_handshake_cmd(struct mpt_softc *mpt, size_t len, void *cmd)
 {
 	int i;
 	u_int32_t data, *data32;
@@ -397,7 +401,9 @@ mpt_send_handshake_cmd(mpt_softc_t *mpt, size_t len, void *cmd)
 	    (MPT_STATE(data) != MPT_DB_STATE_FAULT))	||
 	    (MPT_DB_IS_IN_USE(data))) {
 		mpt_prt(mpt, "handshake aborted due to invalid doorbell state");
+#ifdef MPT_DEBUG
 		mpt_print_db(data);
+#endif /* MPT_DEBUG */
 		return(EBUSY);
 	}
 
@@ -445,7 +451,7 @@ mpt_send_handshake_cmd(mpt_softc_t *mpt, size_t len, void *cmd)
 
 /* Get the response from the handshake register */
 int
-mpt_recv_handshake_reply(mpt_softc_t *mpt, size_t reply_len, void *reply)
+mpt_recv_handshake_reply(struct mpt_softc *mpt, size_t reply_len, void *reply)
 {
 	int left, reply_left;
 	u_int16_t *data16;
@@ -473,12 +479,14 @@ mpt_recv_handshake_reply(mpt_softc_t *mpt, size_t reply_len, void *reply)
 	*data16++ = mpt_read(mpt, MPT_OFFSET_DOORBELL) & MPT_DB_DATA_MASK;
 	mpt_write(mpt, MPT_OFFSET_INTR_STATUS, 0);
 
+#ifdef MPT_DEBUG
 	/* With the second word, we can now look at the length */
-	if (mpt->verbose > 1 && ((reply_len >> 1) != hdr->MsgLength)) {
-		mpt_prt(mpt, "reply length does not match message length: "
-			"got 0x%02x, expected 0x%02x",
-			hdr->MsgLength << 2, reply_len << 1);
-	}
+	if ((reply_len >> 1) != hdr->MsgLength)
+		/* XXX don't remove brackets! */
+		DNPRINTF(50, "%s: reply length does not match message length: "
+			"got 0x%02x, expected 0x%02x\n",
+			DEVNAME(mpt), hdr->MsgLength << 2, reply_len << 1);
+#endif /* MPT_DEBUG */
 
 	/* Get rest of the reply; but don't overflow the provided buffer */
 	left = (hdr->MsgLength << 1) - 2;
@@ -506,8 +514,10 @@ mpt_recv_handshake_reply(mpt_softc_t *mpt, size_t reply_len, void *reply)
 	mpt_write(mpt, MPT_OFFSET_INTR_STATUS, 0);
 
 	if ((hdr->IOCStatus & MPI_IOCSTATUS_MASK) != MPI_IOCSTATUS_SUCCESS) {
-		if (mpt->verbose > 1)
+#ifdef MPT_DEBUG
+		if (mpt_debug > 50)
 			mpt_print_reply(hdr);
+#endif
 		return (MPT_FAIL | hdr->IOCStatus);
 	}
 
@@ -515,7 +525,7 @@ mpt_recv_handshake_reply(mpt_softc_t *mpt, size_t reply_len, void *reply)
 }
 
 int
-mpt_get_iocfacts(mpt_softc_t *mpt, MSG_IOC_FACTS_REPLY *freplp)
+mpt_get_iocfacts(struct mpt_softc *mpt, MSG_IOC_FACTS_REPLY *freplp)
 {
 	MSG_IOC_FACTS f_req;
 	int error;
@@ -531,7 +541,7 @@ mpt_get_iocfacts(mpt_softc_t *mpt, MSG_IOC_FACTS_REPLY *freplp)
 }
 
 int
-mpt_get_portfacts(mpt_softc_t *mpt, MSG_PORT_FACTS_REPLY *freplp)
+mpt_get_portfacts(struct mpt_softc *mpt, MSG_PORT_FACTS_REPLY *freplp)
 {
 	MSG_PORT_FACTS f_req;
 	int error;
@@ -554,7 +564,7 @@ mpt_get_portfacts(mpt_softc_t *mpt, MSG_PORT_FACTS_REPLY *freplp)
  * frames from the IOC that we will be allocating.
  */
 int
-mpt_send_ioc_init(mpt_softc_t *mpt, u_int32_t who)
+mpt_send_ioc_init(struct mpt_softc *mpt, u_int32_t who)
 {
 	int error = 0;
 	MSG_IOC_INIT init;
@@ -587,10 +597,9 @@ mpt_send_ioc_init(mpt_softc_t *mpt, u_int32_t who)
 			mpt->upload_fw = 1;
 		}
 	}
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "flags %d, upload_fw %d", init.Flags,
-			mpt->upload_fw);
-	}
+
+	DNPRINTF(10, "%s: flags %d, upload_fw %d\n", DEVNAME(mpt), init.Flags,
+		mpt->upload_fw);
 
 	if ((error = mpt_send_handshake_cmd(mpt, sizeof init, &init)) != 0) {
 		return(error);
@@ -606,11 +615,11 @@ mpt_send_ioc_init(mpt_softc_t *mpt, u_int32_t who)
  */
 
 int
-mpt_read_cfg_header(mpt_softc_t *mpt, int PageType, int PageNumber,
-    int PageAddress, fCONFIG_PAGE_HEADER *rslt)
+mpt_read_cfg_header(struct mpt_softc *mpt, int PageType, int PageNumber,
+    int PageAddress, CONFIG_PAGE_HEADER *rslt)
 {
 	int count;
-	request_t *req;
+	struct req_entry *req;
 	MSG_CONFIG *cfgp;
 	MSG_CONFIG_REPLY *reply;
 
@@ -648,7 +657,7 @@ mpt_read_cfg_header(mpt_softc_t *mpt, int PageType, int PageNumber,
 		mpt_free_reply(mpt, (req->sequence << 1));
 		return (-1);
 	}
-	bcopy(&reply->Header, rslt, sizeof (fCONFIG_PAGE_HEADER));
+	bcopy(&reply->Header, rslt, sizeof (CONFIG_PAGE_HEADER));
 	mpt_free_reply(mpt, (req->sequence << 1));
 	mpt_free_request(mpt, req);
 	return (0);
@@ -657,10 +666,10 @@ mpt_read_cfg_header(mpt_softc_t *mpt, int PageType, int PageNumber,
 #define	CFG_DATA_OFF	128
 
 int
-mpt_read_cfg_page(mpt_softc_t *mpt, int PageAddress, fCONFIG_PAGE_HEADER *hdr)
+mpt_read_cfg_page(struct mpt_softc *mpt, int PageAddress, CONFIG_PAGE_HEADER *hdr)
 {
 	int count;
-	request_t *req;
+	struct req_entry *req;
 	SGE_SIMPLE32 *se;
 	MSG_CONFIG *cfgp;
 	size_t amt;
@@ -711,31 +720,31 @@ mpt_read_cfg_page(mpt_softc_t *mpt, int PageAddress, fCONFIG_PAGE_HEADER *hdr)
 #endif
 	if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_PORT &&
 	    cfgp->Header.PageNumber == 0) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_PORT_0);
+		amt = sizeof (CONFIG_PAGE_SCSI_PORT_0);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_PORT &&
 	    cfgp->Header.PageNumber == 1) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_PORT_1);
+		amt = sizeof (CONFIG_PAGE_SCSI_PORT_1);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_PORT &&
 	    cfgp->Header.PageNumber == 2) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_PORT_2);
+		amt = sizeof (CONFIG_PAGE_SCSI_PORT_2);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_DEVICE  &&
 	    cfgp->Header.PageNumber == 0) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_DEVICE_0);
+		amt = sizeof (CONFIG_PAGE_SCSI_DEVICE_0);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_DEVICE  &&
 	    cfgp->Header.PageNumber == 1) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_DEVICE_1);
+		amt = sizeof (CONFIG_PAGE_SCSI_DEVICE_1);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_MANUFACTURING &&
 	    cfgp->Header.PageNumber == 0) {
-		amt = sizeof (fCONFIG_PAGE_MANUFACTURING_0);
+		amt = sizeof (CONFIG_PAGE_MANUFACTURING_0);
 	} else if (cfgp->Header.PageType ==  MPI_CONFIG_PAGETYPE_IOC &&
 	    cfgp->Header.PageNumber == 2) {
-		amt = sizeof (fCONFIG_PAGE_IOC_2);
+		amt = sizeof (CONFIG_PAGE_IOC_2);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_RAID_VOLUME &&
 	    cfgp->Header.PageNumber == 0) {
-		amt = sizeof (fCONFIG_PAGE_RAID_VOL_0);
+		amt = sizeof (CONFIG_PAGE_RAID_VOL_0);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_RAID_PHYSDISK &&
 	    cfgp->Header.PageNumber == 0) {
-		amt = sizeof (fCONFIG_PAGE_RAID_PHYS_DISK_0);
+		amt = sizeof (CONFIG_PAGE_RAID_PHYS_DISK_0);
 	}
 
 	bcopy(((caddr_t)req->req_vbuf)+CFG_DATA_OFF, hdr, amt);
@@ -744,10 +753,10 @@ mpt_read_cfg_page(mpt_softc_t *mpt, int PageAddress, fCONFIG_PAGE_HEADER *hdr)
 }
 
 int
-mpt_write_cfg_page(mpt_softc_t *mpt, int PageAddress, fCONFIG_PAGE_HEADER *hdr)
+mpt_write_cfg_page(struct mpt_softc *mpt, int PageAddress, CONFIG_PAGE_HEADER *hdr)
 {
 	int count, hdr_attr;
-	request_t *req;
+	struct req_entry *req;
 	SGE_SIMPLE32 *se;
 	MSG_CONFIG *cfgp;
 	size_t amt;
@@ -784,19 +793,19 @@ mpt_write_cfg_page(mpt_softc_t *mpt, int PageAddress, fCONFIG_PAGE_HEADER *hdr)
 
 	if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_PORT &&
 	    cfgp->Header.PageNumber == 0) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_PORT_0);
+		amt = sizeof (CONFIG_PAGE_SCSI_PORT_0);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_PORT &&
 	    cfgp->Header.PageNumber == 1) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_PORT_1);
+		amt = sizeof (CONFIG_PAGE_SCSI_PORT_1);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_PORT &&
 	    cfgp->Header.PageNumber == 2) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_PORT_2);
+		amt = sizeof (CONFIG_PAGE_SCSI_PORT_2);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_DEVICE  &&
 	    cfgp->Header.PageNumber == 0) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_DEVICE_0);
+		amt = sizeof (CONFIG_PAGE_SCSI_DEVICE_0);
 	} else if (cfgp->Header.PageType == MPI_CONFIG_PAGETYPE_SCSI_DEVICE  &&
 	    cfgp->Header.PageNumber == 1) {
-		amt = sizeof (fCONFIG_PAGE_SCSI_DEVICE_1);
+		amt = sizeof (CONFIG_PAGE_SCSI_DEVICE_1);
 	}
 	bcopy(hdr, ((caddr_t)req->req_vbuf)+CFG_DATA_OFF, amt);
 	/* Restore stripped out attributes */
@@ -828,10 +837,12 @@ mpt_write_cfg_page(mpt_softc_t *mpt, int PageAddress, fCONFIG_PAGE_HEADER *hdr)
 	return (0);
 }
 
+#ifdef MPT_DEBUG
 void
-mpt_print_header(mpt_softc_t *mpt, char *s, fCONFIG_PAGE_HEADER *phdr)
+mpt_print_header(struct mpt_softc *mpt, char *s, CONFIG_PAGE_HEADER *phdr)
 {
-	mpt_prt(mpt, "%s %x: %x %x %x %x",
+	DNPRINTF(10,"%s: %s %x: %x %x %x %x\n",
+	    DEVNAME(mpt),
 	    s,
 	    phdr->PageNumber,
 	    phdr->PageType,
@@ -839,15 +850,16 @@ mpt_print_header(mpt_softc_t *mpt, char *s, fCONFIG_PAGE_HEADER *phdr)
 	    phdr->PageLength,
 	    phdr->PageVersion);
 }
+#endif /* MPT_DEBUG */
 
 /*
  * Read manufacturing configuration information
  */
 int
-mpt_read_config_info_mfg(mpt_softc_t *mpt)
+mpt_read_config_info_mfg(struct mpt_softc *mpt)
 {
 	int rv, i;
-	fCONFIG_PAGE_HEADER *phdr[5] = {
+	CONFIG_PAGE_HEADER *phdr[5] = {
 		phdr[0] = &mpt->mpt_mfg_page0.Header,
 		phdr[1] = &mpt->mpt_mfg_page1.Header,
 		phdr[2] = &mpt->mpt_mfg_page2.Header,
@@ -863,10 +875,10 @@ mpt_read_config_info_mfg(mpt_softc_t *mpt)
 			mpt_prt(mpt, "Could not retrieve Manufacturing Page "
 			    "%i Header.", i);
 			return (-1);
-		} else if (mpt->verbose > 1) {
-			mpt_print_header(mpt, "Manufacturing Header Page",
-			    phdr[i]);
 		}
+#ifdef MPT_DEBUG
+		mpt_print_header(mpt, "Manufacturing Header Page", phdr[i]);
+#endif /* MPT_DEBUG */
 
 		/* retrieve MFG config pages using retrieved headers */
 		rv = mpt_read_cfg_page(mpt, i, phdr[i]);
@@ -877,8 +889,8 @@ mpt_read_config_info_mfg(mpt_softc_t *mpt)
 		}
 	}
 
-	/* mpt->verbose = 2; */
-	if (mpt->verbose > 1) {
+#ifdef MPT_DEBUG
+	if (mpt_debug > 10) {
 		mpt_prt(mpt, "Manufacturing Page 0 data: %s %s %s %s %s",
 		    mpt->mpt_mfg_page0.ChipName,
 		    mpt->mpt_mfg_page0.ChipRevision,
@@ -925,7 +937,7 @@ mpt_read_config_info_mfg(mpt_softc_t *mpt)
 		}
 		printf("\n");
 	}
-	/* mpt->verbose = 1; */
+#endif /* MPT_DEBUG */
 
 	return (0);
 }
@@ -934,11 +946,11 @@ mpt_read_config_info_mfg(mpt_softc_t *mpt)
  * Read IO Unit configuration information
  */
 int
-mpt_read_config_info_iou(mpt_softc_t *mpt)
+mpt_read_config_info_iou(struct mpt_softc *mpt)
 {
 	int rv, i;
 
-	fCONFIG_PAGE_HEADER *phdr[4] = {
+	CONFIG_PAGE_HEADER *phdr[4] = {
 		phdr[0] = &mpt->mpt_iou_page0.Header,
 		phdr[1] = &mpt->mpt_iou_page1.Header,
 		phdr[2] = &mpt->mpt_iou_page2.Header,
@@ -953,9 +965,10 @@ mpt_read_config_info_iou(mpt_softc_t *mpt)
 			mpt_prt(mpt, "Could not retrieve IO Unit Page %i "
 			    "header.", i);
 			return (-1);
-		} else if (mpt->verbose > 1) {
-			mpt_print_header(mpt, "IO Unit Header Page", phdr[i]);
 		}
+#ifdef MPT_DEBUG
+		mpt_print_header(mpt, "IO Unit Header Page", phdr[i]);
+#endif /* MPT_DEBUG */
 
 		/* retrieve IO Unit config pages using retrieved headers */
 		rv = mpt_read_cfg_page(mpt, i, phdr[i]);
@@ -973,23 +986,20 @@ mpt_read_config_info_iou(mpt_softc_t *mpt)
 		}
 	}
 
-	/* mpt->verbose = 2; */
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "IO Unit Page 0 data: %llx",
-		    mpt->mpt_iou_page0.UniqueValue);
-
-		mpt_prt(mpt, "IO Unit Page 1 data: %x",
-		    mpt->mpt_iou_page1.Flags);
-
-		mpt_prt(mpt, "IO Unit Page 2 data: %x %x %x %x %x %x",
-		    mpt->mpt_iou_page2.Flags,
-		    mpt->mpt_iou_page2.BiosVersion,
-		    mpt->mpt_iou_page2.AdapterOrder[0],
-		    mpt->mpt_iou_page2.AdapterOrder[1],
-		    mpt->mpt_iou_page2.AdapterOrder[2],
-		    mpt->mpt_iou_page2.AdapterOrder[3]);
-	}
-	/* mpt->verbose = 1; */
+	DNPRINTF(10, "%s: IO Unit Page 0 data: %llx\n",
+	    DEVNAME(mpt),
+	    mpt->mpt_iou_page0.UniqueValue);
+	DNPRINTF(10, "%s: IO Unit Page 1 data: %x\n",
+	    DEVNAME(mpt),
+	    mpt->mpt_iou_page1.Flags);
+	DNPRINTF(10, "%s: IO Unit Page 2 data: %x %x %x %x %x %x\n",
+	    DEVNAME(mpt),
+	    mpt->mpt_iou_page2.Flags,
+	    mpt->mpt_iou_page2.BiosVersion,
+	    mpt->mpt_iou_page2.AdapterOrder[0],
+	    mpt->mpt_iou_page2.AdapterOrder[1],
+	    mpt->mpt_iou_page2.AdapterOrder[2],
+	    mpt->mpt_iou_page2.AdapterOrder[3]);
 
 	return (0);
 }
@@ -998,10 +1008,10 @@ mpt_read_config_info_iou(mpt_softc_t *mpt)
  * Read IOC configuration information
  */
 int
-mpt_read_config_info_ioc(mpt_softc_t *mpt)
+mpt_read_config_info_ioc(struct mpt_softc *mpt)
 {
 	int rv, i;
-	fCONFIG_PAGE_HEADER *phdr[5] = {
+	CONFIG_PAGE_HEADER *phdr[5] = {
 		phdr[0] = &mpt->mpt_ioc_page0.Header,
 		phdr[1] = &mpt->mpt_ioc_page1.Header,
 		phdr[2] = &mpt->mpt_ioc_page2.Header,
@@ -1017,9 +1027,10 @@ mpt_read_config_info_ioc(mpt_softc_t *mpt)
 			mpt_prt(mpt, "Could not retrieve IOC Page %i header.",
 			   i);
 			return (-1);
-		} else if (mpt->verbose > 1) {
-			mpt_print_header(mpt, "IOC Header Page", phdr[i]);
 		}
+#ifdef MPT_DEBUG
+		mpt_print_header(mpt, "IOC Header Page", phdr[i]);
+#endif /* MPT_DEBUG */
 
 		/* retrieve IOC config pages using retrieved headers */
 		rv = mpt_read_cfg_page(mpt, i, phdr[i]);
@@ -1029,8 +1040,8 @@ mpt_read_config_info_ioc(mpt_softc_t *mpt)
 		}
 	}
 
-	/* mpt->verbose = 2; */
-	if (mpt->verbose > 1) {
+#ifdef MPT_DEBUG
+	if (mpt_debug > 10) {
 		mpt_prt(mpt, "IOC Page 0 data: %x %x %x %x %x %x %x %x",
 		    mpt->mpt_ioc_page0.TotalNVStore,
 		    mpt->mpt_ioc_page0.FreeNVStore,
@@ -1089,7 +1100,7 @@ mpt_read_config_info_ioc(mpt_softc_t *mpt)
 			    mpt->mpt_ioc_page4.SEP[i].SEPBus);
 		}
 	}
-	/* mpt->verbose = 1; */
+#endif /* MPT_DEBUG */
 
 	return (0);
 }
@@ -1098,9 +1109,9 @@ mpt_read_config_info_ioc(mpt_softc_t *mpt)
  * Read RAID Volume pages
  */
 int
-mpt_read_config_info_raid(mpt_softc_t *mpt)
+mpt_read_config_info_raid(struct mpt_softc *mpt)
 {
-	int rv, i;
+	int rv;
 
 	/* retrieve raid volume headers */
 	rv = mpt_read_cfg_header(mpt, MPI_CONFIG_PAGETYPE_RAID_VOLUME, 0,
@@ -1108,10 +1119,11 @@ mpt_read_config_info_raid(mpt_softc_t *mpt)
 	if (rv) {
 		mpt_prt(mpt, "Could not retrieve RAID Volume Page 0 Header");
 		return (-1);
-	} else if (mpt->verbose > 1) {
-		mpt_print_header(mpt, "RAID Volume Header Page",
-		    &mpt->mpt_raidvol_page0.Header);
 	}
+#ifdef MPT_DEBUG
+	mpt_print_header(mpt, "RAID Volume Header Page",
+	    &mpt->mpt_raidvol_page0.Header);
+#endif /* MPT_DEBUG */
 
 	/* retrieve raid volume page using retrieved headers */
 	rv = mpt_read_cfg_page(mpt, 0, &mpt->mpt_raidvol_page0.Header);
@@ -1126,10 +1138,11 @@ mpt_read_config_info_raid(mpt_softc_t *mpt)
 	if (rv) {
 		mpt_prt(mpt, "Could not retrieve RAID Phys Disk Page 0 Header");
 		return (-1);
-	} else if (mpt->verbose > 1) {
-		mpt_print_header(mpt, "RAID Volume Physical Disk Page",
-		    &mpt->mpt_raidphys_page0.Header);
 	}
+#ifdef MPT_DEBUG
+	mpt_print_header(mpt, "RAID Volume Physical Disk Page",
+	    &mpt->mpt_raidphys_page0.Header);
+#endif /* MPT_DEBUG */
 
 	/* retrieve raid physical disk page using retrieved headers */
 	rv = mpt_read_cfg_page(mpt, 0, &mpt->mpt_raidphys_page0.Header);
@@ -1138,8 +1151,9 @@ mpt_read_config_info_raid(mpt_softc_t *mpt)
 		return (-1);
 	}
 
-	/* mpt->verbose = 2; */
-	if (mpt->verbose > 1) {
+#ifdef MPT_DEBUG
+	int i;
+	if (mpt_debug > 10) {
 		mpt_prt(mpt, "RAID Volume Page 0 data: %x %x %x %x %x"
 		    "%x %x %x %x",
 		    mpt->mpt_raidvol_page0.VolumeType,
@@ -1158,9 +1172,7 @@ mpt_read_config_info_raid(mpt_softc_t *mpt)
 			    mpt->mpt_raidvol_page0.PhysDisk[i].PhysDiskMap);
 		}
 		printf("\n");
-	}
 
-	if (mpt->verbose > 1) {
 		mpt_prt(mpt, "RAID Phyical Disk Page 0 data: %x %x %x %x %x"
 		    "%x %x %x",
 		    mpt->mpt_raidphys_page0.PhysDiskNum,
@@ -1205,7 +1217,7 @@ mpt_read_config_info_raid(mpt_softc_t *mpt)
 		    mpt->mpt_raidphys_page0.ErrorData.SmartCount
 		    );
 	}
-	/* mpt->verbose = 1; */
+#endif /* MPT_DEBUG */
 
 	return (0);
 }
@@ -1214,49 +1226,45 @@ mpt_read_config_info_raid(mpt_softc_t *mpt)
  * Read SCSI configuration information
  */
 int
-mpt_read_config_info_spi(mpt_softc_t *mpt)
+mpt_read_config_info_spi(struct mpt_softc *mpt)
 {
 	int rv, i;
 
 	rv = mpt_read_cfg_header(mpt, MPI_CONFIG_PAGETYPE_SCSI_PORT, 0,
 	    0, &mpt->mpt_port_page0.Header);
-	if (rv) {
+	if (rv)
 		return (-1);
-	}
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "SPI Port Page 0 Header: %x %x %x %x",
-		    mpt->mpt_port_page0.Header.PageVersion,
-		    mpt->mpt_port_page0.Header.PageLength,
-		    mpt->mpt_port_page0.Header.PageNumber,
-		    mpt->mpt_port_page0.Header.PageType);
-	}
+
+	DNPRINTF(10, "%s: SPI Port Page 0 Header: %x %x %x %x\n",
+	    DEVNAME(mpt),
+	    mpt->mpt_port_page0.Header.PageVersion,
+	    mpt->mpt_port_page0.Header.PageLength,
+	    mpt->mpt_port_page0.Header.PageNumber,
+	    mpt->mpt_port_page0.Header.PageType);
 
 	rv = mpt_read_cfg_header(mpt, MPI_CONFIG_PAGETYPE_SCSI_PORT, 1,
 	    0, &mpt->mpt_port_page1.Header);
-	if (rv) {
+	if (rv)
 		return (-1);
-	}
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "SPI Port Page 1 Header: %x %x %x %x",
-		    mpt->mpt_port_page1.Header.PageVersion,
-		    mpt->mpt_port_page1.Header.PageLength,
-		    mpt->mpt_port_page1.Header.PageNumber,
-		    mpt->mpt_port_page1.Header.PageType);
-	}
+
+	DNPRINTF(10, "%s: SPI Port Page 1 Header: %x %x %x %x\n",
+	    DEVNAME(mpt),
+	    mpt->mpt_port_page1.Header.PageVersion,
+	    mpt->mpt_port_page1.Header.PageLength,
+	    mpt->mpt_port_page1.Header.PageNumber,
+	    mpt->mpt_port_page1.Header.PageType);
 
 	rv = mpt_read_cfg_header(mpt, MPI_CONFIG_PAGETYPE_SCSI_PORT, 2,
 	    0, &mpt->mpt_port_page2.Header);
-	if (rv) {
+	if (rv)
 		return (-1);
-	}
 
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "SPI Port Page 2 Header: %x %x %x %x",
-		    mpt->mpt_port_page1.Header.PageVersion,
-		    mpt->mpt_port_page1.Header.PageLength,
-		    mpt->mpt_port_page1.Header.PageNumber,
-		    mpt->mpt_port_page1.Header.PageType);
-	}
+	DNPRINTF(10, "%s: SPI Port Page 2 Header: %x %x %x %x\n",
+	    DEVNAME(mpt),
+	    mpt->mpt_port_page1.Header.PageVersion,
+	    mpt->mpt_port_page1.Header.PageLength,
+	    mpt->mpt_port_page1.Header.PageNumber,
+	    mpt->mpt_port_page1.Header.PageType);
 
 	for (i = 0; i < 16; i++) {
 		rv = mpt_read_cfg_header(mpt, MPI_CONFIG_PAGETYPE_SCSI_DEVICE,
@@ -1264,28 +1272,26 @@ mpt_read_config_info_spi(mpt_softc_t *mpt)
 		if (rv) {
 			return (-1);
 		}
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "SPI Target %d Device Page 0 Header: %x %x %x %x",
-			    i, mpt->mpt_dev_page0[i].Header.PageVersion,
-			    mpt->mpt_dev_page0[i].Header.PageLength,
-			    mpt->mpt_dev_page0[i].Header.PageNumber,
-			    mpt->mpt_dev_page0[i].Header.PageType);
-		}
+		DNPRINTF(10,
+		    "%s: SPI Target %d Device Page 0 Header: %x %x %x %x\n",
+		    DEVNAME(mpt),
+		    i, mpt->mpt_dev_page0[i].Header.PageVersion,
+		    mpt->mpt_dev_page0[i].Header.PageLength,
+		    mpt->mpt_dev_page0[i].Header.PageNumber,
+		    mpt->mpt_dev_page0[i].Header.PageType);
 
 		rv = mpt_read_cfg_header(mpt, MPI_CONFIG_PAGETYPE_SCSI_DEVICE,
 		    1, i, &mpt->mpt_dev_page1[i].Header);
 		if (rv) {
 			return (-1);
 		}
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "SPI Target %d Device Page 1 Header: %x %x %x %x",
-			    i, mpt->mpt_dev_page1[i].Header.PageVersion,
-			    mpt->mpt_dev_page1[i].Header.PageLength,
-			    mpt->mpt_dev_page1[i].Header.PageNumber,
-			    mpt->mpt_dev_page1[i].Header.PageType);
-		}
+		DNPRINTF(10,
+		    "%s: SPI Target %d Device Page 1 Header: %x %x %x %x\n",
+		    DEVNAME(mpt),
+		    i, mpt->mpt_dev_page1[i].Header.PageVersion,
+		    mpt->mpt_dev_page1[i].Header.PageLength,
+		    mpt->mpt_dev_page1[i].Header.PageNumber,
+		    mpt->mpt_dev_page1[i].Header.PageType);
 	}
 
 	/*
@@ -1297,38 +1303,39 @@ mpt_read_config_info_spi(mpt_softc_t *mpt)
 	rv = mpt_read_cfg_page(mpt, 0, &mpt->mpt_port_page0.Header);
 	if (rv) {
 		mpt_prt(mpt, "failed to read SPI Port Page 0");
-	} else if (mpt->verbose > 1) {
-		mpt_prt(mpt,
-		    "SPI Port Page 0: Capabilities %x PhysicalInterface %x",
+	} else
+		DNPRINTF(10,
+		    "%s: SPI Port Page 0: Capabilities %x PhysicalInterface %x\n",
+		    DEVNAME(mpt),
 		    mpt->mpt_port_page0.Capabilities,
 		    mpt->mpt_port_page0.PhysicalInterface);
-	}
 
 	rv = mpt_read_cfg_page(mpt, 0, &mpt->mpt_port_page1.Header);
 	if (rv) {
 		mpt_prt(mpt, "failed to read SPI Port Page 1");
-	} else if (mpt->verbose > 1) {
-		mpt_prt(mpt,
-		    "SPI Port Page 1: Configuration %x OnBusTimerValue %x",
+	} else
+		DNPRINTF(10,
+		    "%s: SPI Port Page 1: Configuration %x OnBusTimerValue %x\n",
+		    DEVNAME(mpt),
 		    mpt->mpt_port_page1.Configuration,
 		    mpt->mpt_port_page1.OnBusTimerValue);
-	}
 
 	rv = mpt_read_cfg_page(mpt, 0, &mpt->mpt_port_page2.Header);
 	if (rv) {
 		mpt_prt(mpt, "failed to read SPI Port Page 2");
-	} else if (mpt->verbose > 1) {
-		mpt_prt(mpt,
-		    "SPI Port Page 2: Flags %x Settings %x",
+	} else {
+		DNPRINTF(10,
+		    "%s: SPI Port Page 2: Flags %x Settings %x\n",
+		    DEVNAME(mpt),
 		    mpt->mpt_port_page2.PortFlags,
 		    mpt->mpt_port_page2.PortSettings);
-		for (i = 0; i < 16; i++) {
-			mpt_prt(mpt,
-			    "SPI Port Page 2 Tgt %d: timo %x SF %x Flags %x",
+		for (i = 0; i < 16; i++)
+			DNPRINTF(10,
+			    "%s: SPI Port Page 2 Tgt %d: timo %x SF %x Flags %x\n",
+			    DEVNAME(mpt),
 			    i, mpt->mpt_port_page2.DeviceSettings[i].Timeout,
 			    mpt->mpt_port_page2.DeviceSettings[i].SyncFactor,
 			    mpt->mpt_port_page2.DeviceSettings[i].DeviceFlags);
-		}
 	}
 
 	for (i = 0; i < 16; i++) {
@@ -1337,23 +1344,23 @@ mpt_read_config_info_spi(mpt_softc_t *mpt)
 			mpt_prt(mpt, "cannot read SPI Tgt %d Device Page 0", i);
 			continue;
 		}
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "SPI Tgt %d Page 0: NParms %x Information %x",
-			    i, mpt->mpt_dev_page0[i].NegotiatedParameters,
-			    mpt->mpt_dev_page0[i].Information);
-		}
+		DNPRINTF(10,
+		    "%s: SPI Tgt %d Page 0: NParms %x Information %x\n",
+		    DEVNAME(mpt),
+		    i, mpt->mpt_dev_page0[i].NegotiatedParameters,
+		    mpt->mpt_dev_page0[i].Information);
+
 		rv = mpt_read_cfg_page(mpt, i, &mpt->mpt_dev_page1[i].Header);
 		if (rv) {
 			mpt_prt(mpt, "cannot read SPI Tgt %d Device Page 1", i);
 			continue;
 		}
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "SPI Tgt %d Page 1: RParms %x Configuration %x",
-			    i, mpt->mpt_dev_page1[i].RequestedParameters,
-			    mpt->mpt_dev_page1[i].Configuration);
-		}
+
+		DNPRINTF(10,
+		    "%s: SPI Tgt %d Page 1: RParms %x Configuration %x\n",
+		    DEVNAME(mpt),
+		    i, mpt->mpt_dev_page1[i].RequestedParameters,
+		    mpt->mpt_dev_page1[i].Configuration);
 	}
 	return (0);
 }
@@ -1364,7 +1371,7 @@ mpt_read_config_info_spi(mpt_softc_t *mpt)
  * In particular, validate SPI Port Page 1.
  */
 int
-mpt_set_initial_config_spi(mpt_softc_t *mpt)
+mpt_set_initial_config_spi(struct mpt_softc *mpt)
 {
 	int i, pp1val = ((1 << mpt->mpt_ini_id) << 16) | mpt->mpt_ini_id;
 
@@ -1372,7 +1379,7 @@ mpt_set_initial_config_spi(mpt_softc_t *mpt)
 	mpt->mpt_tag_enable = 0;
 
 	if (mpt->mpt_port_page1.Configuration != pp1val) {
-		fCONFIG_PAGE_SCSI_PORT_1 tmp;
+		CONFIG_PAGE_SCSI_PORT_1 tmp;
 		mpt_prt(mpt,
 		    "SPI Port Page 1 Config value bad (%x)- should be %x",
 		    mpt->mpt_port_page1.Configuration, pp1val);
@@ -1393,28 +1400,28 @@ mpt_set_initial_config_spi(mpt_softc_t *mpt)
 	}
 
 	for (i = 0; i < 16; i++) {
-		fCONFIG_PAGE_SCSI_DEVICE_1 tmp;
+		CONFIG_PAGE_SCSI_DEVICE_1 tmp;
 		tmp = mpt->mpt_dev_page1[i];
 		tmp.RequestedParameters = 0;
 		tmp.Configuration = 0;
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "Set Tgt %d SPI DevicePage 1 values to %x 0 %x",
-			    i, tmp.RequestedParameters, tmp.Configuration);
-		}
-		if (mpt_write_cfg_page(mpt, i, &tmp.Header)) {
+		DNPRINTF(10,
+		    "%s: Set Tgt %d SPI DevicePage 1 values to %x 0 %x\n",
+		    DEVNAME(mpt),
+		    i, tmp.RequestedParameters, tmp.Configuration);
+
+		if (mpt_write_cfg_page(mpt, i, &tmp.Header))
 			return (-1);
-		}
-		if (mpt_read_cfg_page(mpt, i, &tmp.Header)) {
+
+		if (mpt_read_cfg_page(mpt, i, &tmp.Header))
 			return (-1);
-		}
+
 		mpt->mpt_dev_page1[i] = tmp;
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "SPI Tgt %d Page 1: RParm %x Configuration %x", i,
-			    mpt->mpt_dev_page1[i].RequestedParameters,
-			    mpt->mpt_dev_page1[i].Configuration);
-		}
+		DNPRINTF(10,
+		    "%s: SPI Tgt %d Page 1: RParm %x Configuration %x\n",
+		    DEVNAME(mpt),
+		    i,
+		    mpt->mpt_dev_page1[i].RequestedParameters,
+		    mpt->mpt_dev_page1[i].Configuration);
 	}
 	return (0);
 }
@@ -1423,10 +1430,10 @@ mpt_set_initial_config_spi(mpt_softc_t *mpt)
  * Enable IOC port
  */
 int
-mpt_send_port_enable(mpt_softc_t *mpt, int port)
+mpt_send_port_enable(struct mpt_softc *mpt, int port)
 {
 	int count;
-	request_t *req;
+	struct req_entry *req;
 	MSG_PORT_ENABLE *enable_req;
 
 	req = mpt_get_request(mpt);
@@ -1439,9 +1446,8 @@ mpt_send_port_enable(mpt_softc_t *mpt, int port)
 	enable_req->PortNumber = port;
 
 	mpt_check_doorbell(mpt);
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "enabling port %d", port);
-	}
+	DNPRINTF(10, "%s: enabling port %d\n", DEVNAME(mpt), port);
+
 	mpt_send_cmd(mpt, req);
 
 	count = 0;
@@ -1464,9 +1470,9 @@ mpt_send_port_enable(mpt_softc_t *mpt, int port)
  * instead of the handshake register.
  */
 int
-mpt_send_event_request(mpt_softc_t *mpt, int onoff)
+mpt_send_event_request(struct mpt_softc *mpt, int onoff)
 {
-	request_t *req;
+	struct req_entry *req;
 	MSG_EVENT_NOTIFY *enable_req;
 
 	req = mpt_get_request(mpt);
@@ -1479,9 +1485,8 @@ mpt_send_event_request(mpt_softc_t *mpt, int onoff)
 	enable_req->Switch     = onoff;
 
 	mpt_check_doorbell(mpt);
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "%sabling async events", onoff? "en" : "dis");
-	}
+	DNPRINTF(10, "%s: %sabling async events\n",
+	    DEVNAME(mpt), onoff? "en" : "dis");
 	mpt_send_cmd(mpt, req);
 
 	return (0);
@@ -1491,7 +1496,7 @@ mpt_send_event_request(mpt_softc_t *mpt, int onoff)
  * Un-mask the interrupts on the chip.
  */
 void
-mpt_enable_ints(mpt_softc_t *mpt)
+mpt_enable_ints(struct mpt_softc *mpt)
 {
 	/* Unmask every thing except door bell int */
 	mpt_write(mpt, MPT_OFFSET_INTR_MASK, MPT_INTR_DB_MASK);
@@ -1501,7 +1506,7 @@ mpt_enable_ints(mpt_softc_t *mpt)
  * Mask the interrupts on the chip.
  */
 void
-mpt_disable_ints(mpt_softc_t *mpt)
+mpt_disable_ints(struct mpt_softc *mpt)
 {
 	/* Mask all interrupts */
 	mpt_write(mpt, MPT_OFFSET_INTR_MASK,
@@ -1510,7 +1515,7 @@ mpt_disable_ints(mpt_softc_t *mpt)
 
 /* (Re)Initialize the chip for use */
 int
-mpt_init(mpt_softc_t *mpt, u_int32_t who)
+mpt_init(struct mpt_softc *mpt, u_int32_t who)
 {
 	int try;
 	MSG_IOC_FACTS_REPLY facts;
@@ -1524,10 +1529,9 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 		mpt_init_request(mpt, &mpt->request_pool[val]);
 	}
 
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "doorbell req = %s",
-		    mpt_ioc_diag(mpt_read(mpt, MPT_OFFSET_DOORBELL)));
-	}
+	DNPRINTF(10, "%s: doorbell req = %s\n",
+	    DEVNAME(mpt),
+	    mpt_ioc_diag(mpt_read(mpt, MPT_OFFSET_DOORBELL)));
 
 	/*
 	 * Start by making sure we're not at FAULT or RESET state
@@ -1542,7 +1546,7 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 		break;
 	}
 
-	for (try = 0; try < MPT_MAX_TRYS; try++) {
+	for (try = 0; try < MPT_MAX_TRIES; try++) {
 		/*
 		 * No need to reset if the IOC is already in the READY state.
 		 *
@@ -1565,12 +1569,12 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 			continue;
 		}
 
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "IOCFACTS: GlobalCredits=%d BlockSize=%u "
-			    "Request Frame Size %u", facts.GlobalCredits,
-			    facts.BlockSize, facts.RequestFrameSize);
-		}
+		DNPRINTF(10,
+		    "%s: IOCFACTS: GlobalCredits=%d BlockSize=%u "
+		    "Request Frame Size %u\n",
+		    DEVNAME(mpt), facts.GlobalCredits,
+		    facts.BlockSize, facts.RequestFrameSize);
+
 		mpt->mpt_global_credits = facts.GlobalCredits;
 		mpt->request_frame_size = facts.RequestFrameSize;
 
@@ -1585,12 +1589,11 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 			continue;
 		}
 
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt,
-			    "PORTFACTS: Type %x PFlags %x IID %d MaxDev %d",
-			    pfp.PortType, pfp.ProtocolFlags, pfp.PortSCSIID,
-			    pfp.MaxDevices);
-		}
+		DNPRINTF(10,
+		    "%s: PORTFACTS: Type %x PFlags %x IID %d MaxDev %d\n",
+		    DEVNAME(mpt),
+		    pfp.PortType, pfp.ProtocolFlags, pfp.PortSCSIID,
+		    pfp.MaxDevices);
 
 		if (pfp.PortType != MPI_PORTFACTS_PORTTYPE_SCSI &&
 		    pfp.PortType != MPI_PORTFACTS_PORTTYPE_FC) {
@@ -1614,22 +1617,19 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 			continue;
 		}
 
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt, "mpt_send_ioc_init ok");
-		}
+		DNPRINTF(10, "%s: mpt_send_ioc_init ok\n", DEVNAME(mpt));
 
 		if (mpt_wait_state(mpt, MPT_DB_STATE_RUNNING) != MPT_OK) {
 			mpt_prt(mpt, "IOC failed to go to run state");
 			continue;
 		}
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt, "IOC now at RUNSTATE");
-		}
+
+		DNPRINTF(10, "%s: IOC now at RUNSTATE\n", DEVNAME(mpt));
 
 		/*
 		 * Give it reply buffers
 		 *
-		 * Do *not* except global credits.
+		 * Do *not* exceed global credits.
 		 */
 		for (val = 0, pptr = mpt->reply_phys;
 		    (pptr + MPT_REPLY_SIZE) < (mpt->reply_phys + PAGE_SIZE);
@@ -1641,21 +1641,16 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 
 		/* XXX MU correct place the call to fw_upload? */
 		if (mpt->upload_fw) {
-			if (mpt->verbose > 1) {
-				mpt_prt(mpt, "firmware upload required.");
-			}
+			DNPRINTF(10, "%s: firmware upload required\n",
+			    DEVNAME(mpt));
 
-			if (mpt_do_upload(mpt)) {
+			if (mpt_do_upload(mpt))
 				/* XXX MP should we panic? */
-				mpt_prt(mpt, "firmware upload failure!");
-			}
-			/* continue; */
+				mpt_prt(mpt, "firmware upload failure");
 		}
-		else {
-			if (mpt->verbose > 1) {
-				mpt_prt(mpt, "firmware upload not required.");
-			}
-		}
+		else
+			DNPRINTF(10, "%sfirmware upload not required\n",
+			    DEVNAME(mpt));
 
 		/*
 		 * Enable asynchronous event reporting
@@ -1669,12 +1664,11 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 		 */
 
 		if (mpt->is_fc == 0) {
-			if (mpt_read_config_info_spi(mpt)) {
+			if (mpt_read_config_info_spi(mpt))
 				return (EIO);
-			}
-			if (mpt_set_initial_config_spi(mpt)) {
+
+			if (mpt_set_initial_config_spi(mpt))
 				return (EIO);
-			}
 		}
 
 		/*
@@ -1689,11 +1683,9 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 		 * if the vmware flag is set skip page retrival since it does
 		 * not support all of them.
 		 */
-		if (mpt->vmware) {
-			if (mpt->verbose > 1)
-				mpt_prt(mpt, "running in vmware, skipping page"
-				    "retrieval");
-		}
+		if (mpt->vmware)
+			DNPRINTF(10, "%s: running in vmware, skipping page "
+			    "retrieval\n", DEVNAME(mpt));
 		else {
 			/*
 			 * Read manufacturing pages
@@ -1736,22 +1728,18 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
 			continue;
 		}
 
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt, "enabled port 0");
-		}
+		DNPRINTF(10, "%s: enabled port 0\n", DEVNAME(mpt));
 
 		/* Everything worked */
 		break;
 	}
 
-	if (try >= MPT_MAX_TRYS) {
+	if (try >= MPT_MAX_TRIES) {
 		mpt_prt(mpt, "failed to initialize IOC");
 		return (EIO);
 	}
 
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "enabling interrupts");
-	}
+	DNPRINTF(10, "%s: enabling interrupts\n", DEVNAME(mpt));
 
 	mpt_enable_ints(mpt);
 	return (0);
@@ -1763,7 +1751,7 @@ mpt_init(mpt_softc_t *mpt, u_int32_t who)
  * Returns 0 for success, error for failure
  */
 int
-mpt_do_upload(mpt_softc_t *mpt)
+mpt_do_upload(struct mpt_softc *mpt)
 {
 	u_int8_t        request[MPT_RQSL(mpt)];
 	FWUploadReply_t reply;
@@ -1785,7 +1773,7 @@ mpt_do_upload(mpt_softc_t *mpt)
 		sizeof(SGE_MPI_UNION) - sizeof(FWUploadTCSGE_t))
 		/ sizeof(SGE_SIMPLE32);
 
-	error = mpt_alloc_fw_mem(mpt, mpt->fw_image_size, maxsgl);
+	error = mpt_alloc_fw_mem(mpt, maxsgl);
 	if (error) {
 		mpt_prt(mpt,"mpt_alloc_fw_mem error: %d", error);
 		return error;
@@ -1822,10 +1810,8 @@ mpt_do_upload(mpt_softc_t *mpt)
 
 	flags = MPI_SGE_FLAGS_SIMPLE_ELEMENT;
 
-	if (mpt->verbose > 1) {
-		mpt_prt(mpt, "assembling SG list (%d entries)",
-			mpt->fw_dmap->dm_nsegs);
-	}
+	DNPRINTF(20, "%s: assembling SG list (%d entries)\n",
+	    DEVNAME(mpt), mpt->fw_dmap->dm_nsegs);
 
 	for (i = 0; i < mpt->fw_dmap->dm_nsegs; i++, se++) {
 		if (i == mpt->fw_dmap->dm_nsegs - 1) {
@@ -1841,8 +1827,8 @@ mpt_do_upload(mpt_softc_t *mpt)
 		sgeoffset += sizeof(*se);
 	}
 
-	mpt_prt(mpt, "sending FW Upload request to IOC (size: %d, "
-		"img size: %d)", sgeoffset, mpt->fw_image_size);
+	DNPRINTF(10, "%s: sending FW Upload request to IOC (size: %d, "
+		"img size: %d)\n", DEVNAME(mpt), sgeoffset, mpt->fw_image_size);
 
 	if ((error = mpt_send_handshake_cmd(mpt, sgeoffset, prequest)) != 0) {
 		return(error);
@@ -1858,18 +1844,16 @@ mpt_do_upload(mpt_softc_t *mpt)
 		int status, transfer_sz;
 
 		status = preply->IOCStatus;
-		if (mpt->verbose > 1) {
-			mpt_prt(mpt, "fw_upload reply status %d", status);
-		}
+		DNPRINTF(20, "%s: fw_upload reply status %d\n",
+		    DEVNAME(mpt), status);
 
 		if (status == MPI_IOCSTATUS_SUCCESS) {
 			transfer_sz = preply->ActualImageSize;
 			if (transfer_sz != mpt->fw_image_size)
 				error = EFAULT;
-			}
-			else {
-				error = EFAULT;
-			}
+		}
+		else
+			error = EFAULT;
 	}
 
 	if (error == 0) {
@@ -1889,13 +1873,13 @@ mpt_do_upload(mpt_softc_t *mpt)
  * Returns 0 for success, <0 for failure
  */
 int
-mpt_downloadboot(mpt_softc_t *mpt)
+mpt_downloadboot(struct mpt_softc *mpt)
 {
 	MpiFwHeader_t		*fwhdr = NULL;
 	MpiExtImageHeader_t	*exthdr = NULL;
 	int			fw_size;
 	u_int32_t		diag0;
-#if MPT_DEBUG
+#ifdef MPT_DEBUG
 	u_int32_t		diag1;
 #endif
 	int			count = 0;

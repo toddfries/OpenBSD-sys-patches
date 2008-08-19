@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.87 2005/08/29 00:41:44 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.99 2006/02/06 17:37:28 jmc Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -79,6 +79,11 @@ scsi_init()
 		return;
 	scsi_init_done = 1;
 
+#if defined(SCSI_DELAY) && SCSI_DELAY > 0
+	/* Historical. Older buses may need a moment to stabilize. */
+	delay(1000000 * SCSI_DELAY);
+#endif
+
 	/* Initialize the scsi_xfer pool. */
 	pool_init(&scsi_xfer_pool, sizeof(struct scsi_xfer), 0,
 	    0, 0, "scxspl", NULL);
@@ -113,7 +118,11 @@ scsi_get_xs(sc_link, flags)
 			return (NULL);
 		}
 		sc_link->flags |= SDEV_WAITING;
-		(void) tsleep(sc_link, PRIBIO, "getxs", 0);
+		if (tsleep(sc_link, PRIBIO, "getxs", 0)) {
+			/* Bail out on getting a signal. */
+			sc_link->flags &= ~SDEV_WAITING;
+			return (NULL);
+		}	
 	}
 	SC_DEBUG(sc_link, SDEV_DB3, ("calling pool_get\n"));
 	xs = pool_get(&scsi_xfer_pool,
@@ -227,6 +236,7 @@ scsi_size(sc_link, flags, blksize)
 	struct scsi_read_capacity scsi_cmd;
 	struct scsi_read_cap_data rdcap;
 	u_long max_addr;
+	int error;
 
 	if (blksize)
 		*blksize = 0;
@@ -242,13 +252,14 @@ scsi_size(sc_link, flags, blksize)
 	 * If the command works, interpret the result as a 4 byte
 	 * number of blocks
 	 */
-	if (scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-			  sizeof(scsi_cmd), (u_char *)&rdcap, sizeof(rdcap),
-			  2, 20000, NULL, flags | SCSI_DATA_IN) != 0) {
-		sc_print_addr(sc_link);
-		printf("could not get size\n");
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
+	    sizeof(scsi_cmd), (u_char *)&rdcap, sizeof(rdcap), 2, 20000, NULL,
+	    flags | SCSI_DATA_IN);
+	if (error) {
+		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY error (%#x)\n",
+		    error));
 		return (0);
-	}
+	}	
 
 	max_addr = _4btol(rdcap.addr);
 	if (blksize)
@@ -471,7 +482,7 @@ int
 scsi_do_mode_sense(sc_link, page, buf, page_data, density, block_count,
     block_size, page_len, flags, big)
 	struct scsi_link *sc_link;
-	struct scsi_mode_sense_buf *buf;
+	union scsi_mode_sense_buf *buf;
 	int page, page_len, flags, *big;
 	u_int32_t *density, *block_size;
 	u_int64_t *block_count;
@@ -492,21 +503,23 @@ scsi_do_mode_sense(sc_link, page, buf, page_data, density, block_count,
 	if (big)
 		*big = 0;
 
-	if ((sc_link->flags & SDEV_ATAPI) == 0) {
+	if ((sc_link->flags & SDEV_ATAPI) == 0 || 
+	    (sc_link->inqdata.device & SID_TYPE) == T_SEQUENTIAL) {
 		/*
 		 * Try 6 byte mode sense request first. Some devices don't
 		 * distinguish between 6 and 10 byte MODE SENSE commands,
-		 * returning 6 byte data for 10 byte requests. Don't bother
-		 * with SMS_DBD. Check returned data length to ensure that
-		 * at least a header (3 additional bytes) is returned.
+		 * returning 6 byte data for 10 byte requests. ATAPI tape
+		 * drives use MODE SENSE (6) even though ATAPI uses 10 byte
+		 * everything else. Don't bother with SMS_DBD. Check returned
+		 * data length to ensure that at least a header (3 additional
+		 * bytes) is returned.
 		 */
-		error = scsi_mode_sense(sc_link, 0, page, &buf->headers.hdr,
+		error = scsi_mode_sense(sc_link, 0, page, &buf->hdr,
 		    sizeof(*buf), flags, 20000);
-		if (error == 0 && buf->headers.hdr.data_length > 2) {
-			*page_data = scsi_mode_sense_page(&buf->headers.hdr,
-			    page_len);
+		if (error == 0 && buf->hdr.data_length > 2) {
+			*page_data = scsi_mode_sense_page(&buf->hdr, page_len);
 			offset = sizeof(struct scsi_mode_header);
-			blk_desc_len = buf->headers.hdr.blk_desc_len;
+			blk_desc_len = buf->hdr.blk_desc_len;
 			goto blk_desc;
 		}	
 	}	
@@ -516,18 +529,18 @@ scsi_do_mode_sense(sc_link, page, buf, page_data, density, block_count,
 	 * SMS_LLBAA. Bail out if the returned information is less than
 	 * a big header in size (6 additional bytes).
 	 */
-	error = scsi_mode_sense_big(sc_link, 0, page, &buf->headers.hdr_big,
+	error = scsi_mode_sense_big(sc_link, 0, page, &buf->hdr_big,
 	    sizeof(*buf), flags, 20000);
 	if (error != 0)
 		return (error);
-	if (_2btol(buf->headers.hdr_big.data_length) < 6)
+	if (_2btol(buf->hdr_big.data_length) < 6)
 		return (EIO);
 
 	if (big)
 		*big = 1;
 	offset = sizeof(struct scsi_mode_header_big);
-	*page_data = scsi_mode_sense_big_page(&buf->headers.hdr_big, page_len);
-	blk_desc_len = _2btol(buf->headers.hdr_big.blk_desc_len);
+	*page_data = scsi_mode_sense_big_page(&buf->hdr_big, page_len);
+	blk_desc_len = _2btol(buf->hdr_big.blk_desc_len);
 
 blk_desc:
 	/* Both scsi_blk_desc and scsi_direct_blk_desc are 8 bytes. */
@@ -539,7 +552,7 @@ blk_desc:
 		/*
 		 * XXX What other device types return general block descriptors?
 		 */
-		general = (struct scsi_blk_desc *)&buf->headers.buf[offset];	
+		general = (struct scsi_blk_desc *)&buf->buf[offset];	
 		if (density)
 			*density = general->density;
 		if (block_size)
@@ -549,8 +562,7 @@ blk_desc:
 		break;
 
 	default:
-		direct = (struct scsi_direct_blk_desc *)&buf->
-		    headers.buf[offset];
+		direct = (struct scsi_direct_blk_desc *)&buf->buf[offset];
 		if (density)
 			*density = direct->density;
 		if (block_size)
@@ -711,9 +723,7 @@ int
 scsi_execute_xs(xs)
 	struct scsi_xfer *xs;
 {
-	int error;
-	int s;
-	int flags;
+	int error, flags, rslt, s;
 
 	xs->flags &= ~ITSDONE;
 	xs->error = XS_NOERROR;
@@ -758,7 +768,8 @@ scsi_execute_xs(xs)
 		panic("scsi_execute_xs: USER with POLL");
 #endif
 retry:
-	switch ((*(xs->sc_link->adapter->scsi_cmd)) (xs)) {
+	rslt = (*(xs->sc_link->adapter->scsi_cmd))(xs);
+	switch (rslt) {
 	case SUCCESSFULLY_QUEUED:
 		if ((flags & (SCSI_NOSLEEP | SCSI_POLL)) == SCSI_NOSLEEP)
 			return EJUSTRETURN;
@@ -767,8 +778,9 @@ retry:
 			panic("scsi_execute_xs: NOSLEEP and POLL");
 #endif
 		s = splbio();
+		/* Since the xs is active we can't bail out on a signal. */
 		while ((xs->flags & ITSDONE) == 0)
-			tsleep(xs, PRIBIO + 1, "scsi_scsi_cmd", 0);
+			tsleep(xs, PRIBIO + 1, "scsicmd", 0);
 		splx(s);
 		/* FALLTHROUGH */
 	case COMPLETE:		/* Polling command completed ok */
@@ -787,7 +799,7 @@ retry:
 		goto doit;
 
 	default:
-		panic("scsi_execute_xs: invalid return code");
+		panic("scsi_execute_xs: invalid return code (%#x)", rslt);
 	}
 
 #ifdef DIAGNOSTIC
@@ -835,7 +847,7 @@ scsi_scsi_cmd(sc_link, scsi_cmd, cmdlen, data_addr, datalen,
 
 	s = splbio();
 	/*
-	 * we have finished with the xfer stuct, free it and
+	 * we have finished with the xfer struct, free it and
 	 * check if anyone else needs to be started up.
 	 */
 	scsi_free_xs(xs);
@@ -865,25 +877,15 @@ sc_err1(xs)
 
 	case XS_SENSE:
 	case XS_SHORTSENSE:
-		if ((error = scsi_interpret_sense(xs)) == ERESTART) {
-			if (xs->error == XS_BUSY) {
-				xs->error = XS_SENSE;
-				goto sense_retry;
-			}
+		if ((error = scsi_interpret_sense(xs)) == ERESTART)
 			goto retry;
-		}
 		SC_DEBUG(xs->sc_link, SDEV_DB3,
 		    ("scsi_interpret_sense returned %d\n", error));
 		break;
 
 	case XS_BUSY:
-	sense_retry:
 		if (xs->retries) {
-			if ((xs->flags & SCSI_POLL) != 0)
-				delay(1000000);
-			else if ((xs->flags & SCSI_NOSLEEP) == 0) {
-				tsleep(&lbolt, PRIBIO, "scbusy", 0);
-			} else
+			if ((error = scsi_delay(xs, 1)) == EIO)
 				goto lose;
 		}
 		/* FALLTHROUGH */
@@ -923,6 +925,31 @@ sc_err1(xs)
 	}
 
 	return error;
+}
+
+int
+scsi_delay(xs, seconds)
+	struct scsi_xfer *xs;
+	int seconds;
+{
+	switch (xs->flags & (SCSI_POLL | SCSI_NOSLEEP)) {
+	case SCSI_POLL:
+		delay(1000000 * seconds);
+		return (ERESTART);
+	case SCSI_NOSLEEP:	
+		/* Retry the command immediately since we can't delay. */
+		return (ERESTART);
+	case (SCSI_POLL | SCSI_NOSLEEP):
+		/* Invalid combination! */
+		return (EIO);
+	}
+	
+	while (seconds-- > 0)	
+		if (tsleep(&lbolt, PRIBIO, "scbusy", 0))
+			/* Signal == abort xs. */
+			return (EIO);
+
+	return (ERESTART);		
 }
 
 /*
@@ -1001,9 +1028,11 @@ scsi_interpret_sense(xs)
 				case 0x07: /* Operation In Progress */
 				case 0x08: /* Long Write In Progress */
 				case 0x09: /* Self-Test In Progress */
-					xs->error = XS_BUSY; /* wait & retry */
-					return (ERESTART);
-				}
+					SC_DEBUG(sc_link, SDEV_DB1,
+		    			    ("not ready: busy (%#x)\n",
+					    sense->add_sense_code_qual));
+					return (scsi_delay(xs, 1));
+				}	
 				break;
 			case 0x3a:	/* Medium not present */
 				sc_link->flags &= ~SDEV_MEDIA_LOADED;
@@ -1018,14 +1047,15 @@ scsi_interpret_sense(xs)
 		error = EINVAL;
 		break;
 	case SKEY_UNIT_ATTENTION:
-		if (sense->add_sense_code == 0x29)
-			return (ERESTART); /* device or bus reset */
+		if (sense->add_sense_code == 0x29 /* device or bus reset */)
+			return (scsi_delay(xs, 1));
 		if ((sc_link->flags & SDEV_REMOVABLE) != 0)
 			sc_link->flags &= ~SDEV_MEDIA_LOADED;
 		if ((xs->flags & SCSI_IGNORE_MEDIA_CHANGE) != 0 ||
 		    /* XXX Should reupload any transient state. */
-		    (sc_link->flags & SDEV_REMOVABLE) == 0)
-			return ERESTART;
+		    (sc_link->flags & SDEV_REMOVABLE) == 0) {
+			return (scsi_delay(xs, 1));
+		}
 		error = EIO;
 		break;
 	case SKEY_WRITE_PROTECT:

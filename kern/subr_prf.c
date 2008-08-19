@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_prf.c,v 1.61 2005/04/14 21:58:50 krw Exp $	*/
+/*	$OpenBSD: subr_prf.c,v 1.64 2005/12/27 18:35:34 miod Exp $	*/
 /*	$NetBSD: subr_prf.c,v 1.45 1997/10/24 18:14:25 chuck Exp $	*/
 
 /*-
@@ -83,7 +83,7 @@ extern int uvm_doswapencrypt;
 #define TOCONS		0x01	/* to the console */
 #define TOTTY		0x02	/* to the process' tty */
 #define TOLOG		0x04	/* to the kernel message buffer */
-#define TOBUFONLY	0x08	/* to the buffer (only) [for sprintf] */
+#define TOBUFONLY	0x08	/* to the buffer (only) [for snprintf] */
 #define TODDB		0x10	/* to ddb console */
 #define TOCOUNT		0x20	/* act like [v]snprintf */
 
@@ -153,9 +153,7 @@ void (*v_putc)(int) = cnputc;	/* start with cnputc (normal cons) */
  *	commonly found in userland.
  */
 void
-__assert(t, f, l, e)
-	const char *t, *f, *e;
-	int l;
+__assert(const char *t, const char *f, int l, const char *e)
 {
 
 	panic("kernel %sassertion \"%s\" failed: file \"%s\", line %d",
@@ -167,8 +165,7 @@ __assert(t, f, l, e)
  */
 
 void
-tablefull(tab)
-	const char *tab;
+tablefull(const char *tab)
 {
 	log(LOG_ERR, "%s: table is full\n", tab);
 }
@@ -378,6 +375,8 @@ uprintf(const char *fmt, ...)
 	}
 }
 
+#if defined(NFSSERVER) || defined(NFSCLIENT)
+
 /*
  * tprintf functions: used to send messages to a specific process
  *
@@ -441,6 +440,8 @@ tprintf(tpr_t tpr, const char *fmt, ...)
 	logwakeup();
 }
 
+#endif	/* NFSSERVER || NFSCLIENT */
+
 
 /*
  * ttyprintf: send a message to a specific tty
@@ -484,7 +485,7 @@ db_printf(const char *fmt, ...)
 
 
 /*
- * normal kernel printf functions: printf, vprintf, sprintf
+ * normal kernel printf functions: printf, vprintf, snprintf
  */
 
 /*

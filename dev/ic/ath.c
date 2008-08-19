@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.35 2005/08/21 18:40:17 reyk Exp $  */
+/*      $OpenBSD: ath.c,v 1.46.2.1 2006/05/09 18:41:17 brad Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -78,7 +78,7 @@
 #endif
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_compat.h>
+#include <net80211/ieee80211_rssadapt.h>
 
 #include <dev/pci/pcidevs.h>
 #include <dev/gpio/gpiovar.h>
@@ -131,12 +131,12 @@ void	ath_ledstate(struct ath_softc *, enum ieee80211_state);
 int	ath_newstate(struct ieee80211com *, enum ieee80211_state, int);
 void	ath_newassoc(struct ieee80211com *,
 	    struct ieee80211_node *, int);
-int	ath_getchannels(struct ath_softc *, u_int cc, HAL_BOOL outdoor,
+int	ath_getchannels(struct ath_softc *, HAL_BOOL outdoor,
 	    HAL_BOOL xchanmode);
 int	ath_rate_setup(struct ath_softc *sc, u_int mode);
 void	ath_setcurmode(struct ath_softc *, enum ieee80211_phymode);
-void	ath_rate_ctl_reset(struct ath_softc *, enum ieee80211_state);
-void	ath_rate_ctl(void *, struct ieee80211_node *);
+void	ath_rssadapt_updatenode(void *, struct ieee80211_node *);
+void	ath_rssadapt_updatestats(void *);
 void	ath_recv_mgmt(struct ieee80211com *, struct mbuf *,
 	    struct ieee80211_node *, int, int, u_int32_t);
 void	ath_disable(struct ath_softc *);
@@ -157,8 +157,6 @@ int ath_dwelltime = 200;		/* 5 channels/second */
 int ath_calinterval = 30;		/* calibrate every 30 secs */
 int ath_outdoor = AH_TRUE;		/* outdoor operation */
 int ath_xchanmode = AH_TRUE;		/* enable extended channels */
-int ath_countrycode = CTRY_DEFAULT;	/* country code */
-int ath_regdomain = DMN_DEFAULT;	/* regulatory domain */
 
 struct cfdriver ath_cd = {
 	NULL, "ath", DV_IFNET
@@ -222,55 +220,61 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	DPRINTF(ATH_DEBUG_ANY, ("%s: devid 0x%x\n", __func__, devid));
 
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	sc->sc_flags &= ~ATH_ATTACHED;	/* make sure that it's not attached */
 
 	ah = ath_hal_attach(devid, sc, sc->sc_st, sc->sc_sh, &status);
 	if (ah == NULL) {
-		if_printf(ifp, "unable to attach hardware; HAL status %d\n",
-			status);
+		printf("%s: unable to attach hardware; HAL status %d\n",
+			ifp->if_xname, status);
 		error = ENXIO;
 		goto bad;
 	}
 	if (ah->ah_abi != HAL_ABI_VERSION) {
-		if_printf(ifp, "HAL ABI mismatch detected (0x%x != 0x%x)\n",
-			ah->ah_abi, HAL_ABI_VERSION);
+		printf("%s: HAL ABI mismatch detected (0x%x != 0x%x)\n",
+			ifp->if_xname, ah->ah_abi, HAL_ABI_VERSION);
 		error = ENXIO;
 		goto bad;
 	}
 
-	if_printf(ifp, "AR%s %u.%u phy %u.%u",
-	    ar5k_printver(AR5K_VERSION_VER, ah->ah_macVersion),
-	    ah->ah_macVersion, ah->ah_macRev,
-	    ah->ah_phyRev >> 4, ah->ah_phyRev & 0xf);
+	printf("%s: AR%s %u.%u phy %u.%u", ifp->if_xname,
+	    ar5k_printver(AR5K_VERSION_VER, ah->ah_mac_srev),
+	    ah->ah_mac_version, ah->ah_mac_revision,
+	    ah->ah_phy_revision >> 4, ah->ah_phy_revision & 0xf);
 	printf(" rf%s %u.%u",
-	    ar5k_printver(AR5K_VERSION_RAD, ah->ah_analog5GhzRev),
-	    ah->ah_analog5GhzRev >> 4,
-	    ah->ah_analog5GhzRev & 0xf);
-	if (ah->ah_analog2GhzRev != 0) {
+	    ar5k_printver(AR5K_VERSION_RAD, ah->ah_radio_5ghz_revision),
+	    ah->ah_radio_5ghz_revision >> 4,
+	    ah->ah_radio_5ghz_revision & 0xf);
+	if (ah->ah_radio_2ghz_revision != 0) {
 		printf(" rf%s %u.%u",
-		    ar5k_printver(AR5K_VERSION_RAD, ah->ah_analog2GhzRev),
-		    ah->ah_analog2GhzRev >> 4,
-		    ah->ah_analog2GhzRev & 0xf);
+		    ar5k_printver(AR5K_VERSION_RAD,
+		    ah->ah_radio_2ghz_revision),
+		    ah->ah_radio_2ghz_revision >> 4,
+		    ah->ah_radio_2ghz_revision & 0xf);
+	}
+
+	if (ah->ah_radio_5ghz_revision >= AR5K_SREV_RAD_UNSUPP ||
+	    ah->ah_radio_2ghz_revision >= AR5K_SREV_RAD_UNSUPP) {
+		printf(": RF radio not supported\n");
+		error = EOPNOTSUPP;
+		goto bad;
 	}
 
 	sc->sc_ah = ah;
 	sc->sc_invalid = 0;	/* ready to go, enable interrupt handling */
 
 	/*
-	 * Collect the channel list using the default country
-	 * code and including outdoor channels.  The 802.11 layer
-	 * is resposible for filtering this list based on settings
-	 * like the phy mode.
+	 * Get regulation domain either stored in the EEPROM or defined
+	 * as the default value. Some devices are known to have broken
+	 * regulation domain values in their EEPROM.
 	 */
-	error = ath_getchannels(sc, ath_countrycode, ath_outdoor,
-	    ath_xchanmode);
+	ath_hal_get_regdomain(ah, &ah->ah_regdomain);
+
+	/*
+	 * Construct channel list based on the current regulation domain.
+	 */
+	error = ath_getchannels(sc, ath_outdoor, ath_xchanmode);
 	if (error != 0)
 		goto bad;
-	/*
-	 * Copy these back; they are set as a side effect
-	 * of constructing the channel list.
-	 */
-	ath_hal_get_regdomain(ah, &ath_regdomain);
-	ath_hal_getcountrycode(ah, &ath_countrycode);
 
 	/*
 	 * Setup rate tables for all potential media types.
@@ -282,11 +286,12 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 
 	error = ath_desc_alloc(sc);
 	if (error != 0) {
-		if_printf(ifp, "failed to allocate descriptors: %d\n", error);
+		printf(": failed to allocate descriptors: %d\n", error);
 		goto bad;
 	}
 	timeout_set(&sc->sc_scan_to, ath_next_scan, sc);
 	timeout_set(&sc->sc_cal_to, ath_calibrate, sc);
+	timeout_set(&sc->sc_rssadapt_to, ath_rssadapt_updatestats, sc);
 
 #ifdef __FreeBSD__
 	ATH_TXBUF_LOCK_INIT(sc);
@@ -309,7 +314,7 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	 */
 	sc->sc_bhalq = ath_hal_setup_tx_queue(ah,HAL_TX_QUEUE_BEACON,NULL);
 	if (sc->sc_bhalq == (u_int) -1) {
-		if_printf(ifp, "unable to setup a beacon xmit queue!\n");
+		printf(": unable to setup a beacon xmit queue!\n");
 		goto bad2;
 	}
 
@@ -319,8 +324,7 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 		sc->sc_txhalq[i] = ath_hal_setup_tx_queue(ah,
 		    HAL_TX_QUEUE_DATA, &qinfo);
 		if (sc->sc_txhalq[i] == (u_int) -1) {
-			if_printf(ifp,
-			    "unable to setup a data xmit queue %u!\n", i);
+			printf(": unable to setup a data xmit queue %u!\n", i);
 			goto bad2;
 		}
 	}
@@ -401,16 +405,19 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	 * Make sure the interface is shutdown during reboot.
 	 */
 	sc->sc_sdhook = shutdownhook_establish(ath_shutdown, sc);
-	if (sc->sc_sdhook == NULL) {
-		printf("%s: WARNING: unable to establish shutdown hook\n",
-			sc->sc_dev.dv_xname);
-	}
+	if (sc->sc_sdhook == NULL)
+		printf(": WARNING: unable to establish shutdown hook\n");
 	sc->sc_powerhook = powerhook_establish(ath_power, sc);
-	if (sc->sc_powerhook == NULL) {
-		printf("%s: WARNING: unable to establish power hook\n",
-			sc->sc_dev.dv_xname);
-	}
-	printf(", %s, address %s\n", ieee80211_regdomain2name(ath_regdomain),
+	if (sc->sc_powerhook == NULL)
+		printf(": WARNING: unable to establish power hook\n");
+
+	/*
+	 * Print regulation domain and the mac address. The regulation domain
+	 * will be marked with a * if the EEPROM value has been overwritten.
+	 */
+	printf(", %s%s, address %s\n",
+	    ieee80211_regdomain2name(ah->ah_regdomain),
+	    ah->ah_regdomain != ah->ah_regdomain_hw ? "*" : "",
 	    ether_sprintf(ic->ic_myaddr));
 
 	if (ath_gpio_attach(sc, devid) == 0)
@@ -432,18 +439,19 @@ ath_detach(struct ath_softc *sc, int flags)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
-	config_detach_children(&sc->sc_dev, flags);
-
 	if ((sc->sc_flags & ATH_ATTACHED) == 0)
 		return (0);
 
+	config_detach_children(&sc->sc_dev, flags);
+
 	DPRINTF(ATH_DEBUG_ANY, ("%s: if_flags %x\n", __func__, ifp->if_flags));
+
+	timeout_del(&sc->sc_scan_to);
+	timeout_del(&sc->sc_cal_to);
+	timeout_del(&sc->sc_rssadapt_to);
 
 	s = splnet();
 	ath_stop(ifp);
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif
 	ath_desc_free(sc);
 	ath_hal_detach(sc->sc_ah);
 
@@ -611,7 +619,7 @@ ath_fatal_proc(void *arg, int pending)
 	struct ifnet *ifp = &ic->ic_if;
 
 	if (ifp->if_flags & IFF_DEBUG)
-		if_printf(ifp, "hardware error; resetting\n");
+		printf("%s: hardware error; resetting\n", ifp->if_xname);
 	ath_reset(sc, 1);
 }
 
@@ -623,7 +631,7 @@ ath_rxorn_proc(void *arg, int pending)
 	struct ifnet *ifp = &ic->ic_if;
 
 	if (ifp->if_flags & IFF_DEBUG)
-		if_printf(ifp, "rx FIFO overrun; resetting\n");
+		printf("%s: rx FIFO overrun; resetting\n", ifp->if_xname);
 	ath_reset(sc, 1);
 }
 
@@ -716,8 +724,8 @@ ath_init1(struct ath_softc *sc)
 	hchan.channel = ic->ic_ibss_chan->ic_freq;
 	hchan.channelFlags = ath_chan2flags(ic, ic->ic_ibss_chan);
 	if (!ath_hal_reset(ah, ic->ic_opmode, &hchan, AH_FALSE, &status)) {
-		if_printf(ifp, "unable to reset hardware; hal status %u\n",
-			status);
+		printf("%s: unable to reset hardware; hal status %u\n",
+			ifp->if_xname, status);
 		error = EIO;
 		goto done;
 	}
@@ -731,12 +739,13 @@ ath_init1(struct ath_softc *sc)
 	 */
 	if (ic->ic_flags & IEEE80211_F_WEPON) {
 		if ((error = ath_initkeytable(sc)) != 0) {
-			if_printf(ifp, "unable to initialize the key cache\n");
+			printf("%s: unable to initialize the key cache\n",
+			    ifp->if_xname);
 			goto done;
 		}
 	}
 	if ((error = ath_startrecv(sc)) != 0) {
-		if_printf(ifp, "unable to start recv logic\n");
+		printf("%s: unable to start recv logic\n", ifp->if_xname);
 		goto done;
 	}
 
@@ -852,15 +861,16 @@ ath_reset(struct ath_softc *sc, int full)
 	/* NB: indicate channel change so we do a full reset */
 	if (!ath_hal_reset(ah, ic->ic_opmode, &hchan,
 	    full ? AH_TRUE : AH_FALSE, &status)) {
-		if_printf(ifp, "%s: unable to reset hardware; hal status %u\n",
-			__func__, status);
+		printf("%s: %s: unable to reset hardware; hal status %u\n",
+			ifp->if_xname, __func__, status);
 	}
 	ath_set_slot_time(sc);
 	/* In case channel changed, save as a node channel */
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 	ath_hal_set_intr(ah, sc->sc_imask);
 	if (ath_startrecv(sc) != 0)	/* restart recv */
-		if_printf(ifp, "%s: unable to start recv logic\n", __func__);
+		printf("%s: %s: unable to start recv logic\n", ifp->if_xname,
+		    __func__);
 	ath_start(ifp);			/* restart xmit */
 	if (ic->ic_state == IEEE80211_S_RUN)
 		ath_beacon_config(sc);	/* restart beacons */
@@ -1007,14 +1017,13 @@ void
 ath_watchdog(struct ifnet *ifp)
 {
 	struct ath_softc *sc = ifp->if_softc;
-	struct ieee80211com *ic = &sc->sc_ic;
 
 	ifp->if_timer = 0;
 	if ((ifp->if_flags & IFF_RUNNING) == 0 || sc->sc_invalid)
 		return;
 	if (sc->sc_tx_timer) {
 		if (--sc->sc_tx_timer == 0) {
-			if_printf(ifp, "device timeout\n");
+			printf("%s: device timeout\n", ifp->if_xname);
 			ath_reset(sc, 1);
 			ifp->if_oerrors++;
 			sc->sc_stats.ast_watchdog++;
@@ -1022,17 +1031,7 @@ ath_watchdog(struct ifnet *ifp)
 		}
 		ifp->if_timer = 1;
 	}
-	if (ic->ic_fixed_rate == -1) {
-		/*
-		 * Run the rate control algorithm if we're not
-		 * locked at a fixed rate.
-		 */
-		if (ic->ic_opmode == IEEE80211_M_STA) {
-			ath_rate_ctl(sc, ic->ic_bss);
-		} else {
-			ieee80211_iterate_nodes(ic, ath_rate_ctl, sc);
-		}
-	}
+
 	ieee80211_watchdog(ifp);
 }
 
@@ -1296,7 +1295,7 @@ ath_beacon_alloc(struct ath_softc *sc, struct ieee80211_node *ni)
 	int error;
 	u_int8_t rate;
 	const HAL_RATE_TABLE *rt;
-	u_int flags;
+	u_int flags = 0;
 
 	bf = sc->sc_bcbuf;
 	if (bf->bf_m != NULL) {
@@ -1460,7 +1459,7 @@ ath_beacon_config(struct ath_softc *sc)
 
 	nexttbtt = (LE_READ_4(ni->ni_tstamp + 4) << 22) |
 	    (LE_READ_4(ni->ni_tstamp) >> 10);
-	intval = MS_TO_TU(ni->ni_intval) & HAL_BEACON_PERIOD;
+	intval = MAX(1, ni->ni_intval) & HAL_BEACON_PERIOD;
 	if (nexttbtt == 0) {	/* e.g. for ap mode */
 		nexttbtt = intval;
 	} else if (intval) {
@@ -1485,7 +1484,7 @@ ath_beacon_config(struct ath_softc *sc)
 		 * TU's and then calculate based on the beacon interval.
 		 * Note that we clamp the result to at most 10 beacons.
 		 */
-		bmisstime = MS_TO_TU(ic->ic_bmisstimeout);
+		bmisstime = MAX(7, ic->ic_bmisstimeout);
 		bs.bs_bmissthreshold = howmany(bmisstime, intval);
 		if (bs.bs_bmissthreshold > 7) {
 			bs.bs_bmissthreshold = 7;
@@ -1893,7 +1892,7 @@ ath_rx_proc(void *arg, int npending)
 	do {
 		bf = TAILQ_FIRST(&sc->sc_rxbuf);
 		if (bf == NULL) {		/* NB: shouldn't happen */
-			if_printf(ifp, "ath_rx_proc: no buffer!\n");
+			printf("%s: ath_rx_proc: no buffer!\n", ifp->if_xname);
 			break;
 		}
 		ds = bf->bf_desc;
@@ -1903,7 +1902,7 @@ ath_rx_proc(void *arg, int npending)
 		}
 		m = bf->bf_m;
 		if (m == NULL) {		/* NB: shouldn't happen */
-			if_printf(ifp, "ath_rx_proc: no mbuf!\n");
+			printf("%s: ath_rx_proc: no mbuf!\n", ifp->if_xname);
 			continue;
 		}
 		/* XXX sync descriptor memory */
@@ -2058,7 +2057,11 @@ ath_rx_proc(void *arg, int npending)
 		 * Send frame up for processing.
 		 */
 		ieee80211_input(ifp, m, ni,
-			ds->ds_rxstat.rs_rssi, ds->ds_rxstat.rs_tstamp);
+		    ds->ds_rxstat.rs_rssi, ds->ds_rxstat.rs_tstamp);
+
+		/* Handle the rate adaption */
+		ieee80211_rssadapt_input(ic, ni, &an->an_rssadapt,
+		    ds->ds_rxstat.rs_rssi);
 
 		/*
 		 * The frame may have caused the node to be marked for
@@ -2231,6 +2234,7 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 	    bf->bf_dmamap->dm_mapsize, BUS_DMASYNC_PREWRITE);
 	bf->bf_m = m0;
 	bf->bf_node = ni;			/* NB: held reference */
+	an = ATH_NODE(ni);
 
 	/* setup descriptors */
 	ds = bf->bf_desc;
@@ -2241,6 +2245,7 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 	 * Calculate Atheros packet type from IEEE80211 packet header
 	 * and setup for rate calculations.
 	 */
+	bf->bf_id.id_node = NULL;
 	atype = HAL_PKT_TYPE_NORMAL;			/* default */
 	switch (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) {
 	case IEEE80211_FC0_TYPE_MGT:
@@ -2261,17 +2266,29 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 		rix = 0;			/* XXX lowest rate */
 		break;
 	default:
+		/* remember link conditions for rate adaptation algorithm */
+		if (ic->ic_fixed_rate == -1) {
+			bf->bf_id.id_len = m0->m_pkthdr.len;
+			bf->bf_id.id_rateidx = ni->ni_txrate;
+			bf->bf_id.id_node = ni;
+			bf->bf_id.id_rssi = ath_node_getrssi(ic, ni);
+		}
+		ni->ni_txrate = ieee80211_rssadapt_choose(&an->an_rssadapt,
+		    &ni->ni_rates, wh, m0->m_pkthdr.len, ic->ic_fixed_rate,
+		    ifp->if_xname, 0);
 		rix = sc->sc_rixmap[ni->ni_rates.rs_rates[ni->ni_txrate] &
-				IEEE80211_RATE_VAL];
+		    IEEE80211_RATE_VAL];
 		if (rix == 0xff) {
-			if_printf(ifp, "bogus xmit rate 0x%x\n",
-				ni->ni_rates.rs_rates[ni->ni_txrate]);
+			printf("%s: bogus xmit rate 0x%x (idx 0x%x)\n",
+			    ifp->if_xname, ni->ni_rates.rs_rates[ni->ni_txrate],
+			    ni->ni_txrate);
 			sc->sc_stats.ast_tx_badrate++;
 			m_freem(m0);
 			return EIO;
 		}
 		break;
 	}
+
 	/*
 	 * NB: the 802.11 layer marks whether or not we should
 	 * use short preamble based on the current mode and
@@ -2354,7 +2371,6 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 	 * initialized to 0 which gives us ``auto'' or the
 	 * ``default'' antenna.
 	 */
-	an = (struct ath_node *) ni;
 	if (an->an_tx_antenna) {
 		antenna = an->an_tx_antenna;
 	} else {
@@ -2495,10 +2511,14 @@ ath_tx_proc(void *arg, int npending)
 		if (ni != NULL) {
 			an = (struct ath_node *) ni;
 			if (ds->ds_txstat.ts_status == 0) {
-				an->an_tx_ok++;
+				if (bf->bf_id.id_node != NULL)
+					ieee80211_rssadapt_raise_rate(ic,
+					    &an->an_rssadapt, &bf->bf_id);
 				an->an_tx_antenna = ds->ds_txstat.ts_antenna;
 			} else {
-				an->an_tx_err++;
+				if (bf->bf_id.id_node != NULL)
+					ieee80211_rssadapt_lower_rate(ic, ni,
+					    &an->an_rssadapt, &bf->bf_id);
 				ifp->if_oerrors++;
 				if (ds->ds_txstat.ts_status & HAL_TXERR_XRETRY)
 					sc->sc_stats.ast_tx_xretries++;
@@ -2512,8 +2532,6 @@ ath_tx_proc(void *arg, int npending)
 			lr = ds->ds_txstat.ts_longretry;
 			sc->sc_stats.ast_tx_shortretry += sr;
 			sc->sc_stats.ast_tx_longretry += lr;
-			if (sr + lr)
-				an->an_tx_retr++;
 			/*
 			 * Reclaim reference to node.
 			 *
@@ -2674,6 +2692,7 @@ ath_chan_set(struct ath_softc *sc, struct ieee80211_channel *chan)
 {
 	struct ath_hal *ah = sc->sc_ah;
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = &ic->ic_if;
 
 	DPRINTF(ATH_DEBUG_ANY, ("%s: %u (%u MHz) -> %u (%u MHz)\n", __func__,
 	    ieee80211_chan2ieee(ic, ic->ic_ibss_chan),
@@ -2702,8 +2721,8 @@ ath_chan_set(struct ath_softc *sc, struct ieee80211_channel *chan)
 		hchan.channelFlags = ath_chan2flags(ic, chan);
 		if (!ath_hal_reset(ah, ic->ic_opmode, &hchan, AH_TRUE,
 		    &status)) {
-			if_printf(&ic->ic_if, "ath_chan_set: unable to reset "
-				"channel %u (%u Mhz)\n",
+			printf("%s: ath_chan_set: unable to reset "
+				"channel %u (%u Mhz)\n", ifp->if_xname,
 				ieee80211_chan2ieee(ic, chan), chan->ic_freq);
 			return EIO;
 		}
@@ -2712,11 +2731,12 @@ ath_chan_set(struct ath_softc *sc, struct ieee80211_channel *chan)
 		 * Re-enable rx framework.
 		 */
 		if (ath_startrecv(sc) != 0) {
-			if_printf(&ic->ic_if,
-				"ath_chan_set: unable to restart recv logic\n");
+			printf("%s: ath_chan_set: unable to restart recv ",
+			    "logic\n", ifp->if_xname);
 			return EIO;
 		}
 
+#if NBPFILTER > 0
 		/*
 		 * Update BPF state.
 		 */
@@ -2724,6 +2744,7 @@ ath_chan_set(struct ath_softc *sc, struct ieee80211_channel *chan)
 		    htole16(chan->ic_freq);
 		sc->sc_txtap.wt_chan_flags = sc->sc_rxtap.wr_chan_flags =
 		    htole16(chan->ic_flags);
+#endif
 
 		/*
 		 * Change channels and update the h/w rate map
@@ -2868,6 +2889,7 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	ath_ledstate(sc, nstate);
 
 	if (nstate == IEEE80211_S_INIT) {
+		timeout_del(&sc->sc_rssadapt_to);
 		sc->sc_imask &= ~(HAL_INT_SWBA | HAL_INT_BMISS);
 		ath_hal_set_intr(ah, sc->sc_imask);
 		return (*sc->sc_newstate)(ic, nstate, arg);
@@ -2933,10 +2955,6 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	}
 
 	/*
-	 * Reset the rate control state.
-	 */
-	ath_rate_ctl_reset(sc, nstate);
-	/*
 	 * Invoke the parent method to complete the work.
 	 */
 	error = (*sc->sc_newstate)(ic, nstate, arg);
@@ -2944,6 +2962,9 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	if (nstate == IEEE80211_S_RUN) {
 		/* start periodic recalibration timer */
 		timeout_add(&sc->sc_cal_to, hz * ath_calinterval);
+
+		if (ic->ic_opmode != IEEE80211_M_MONITOR)
+			timeout_add(&sc->sc_rssadapt_to, hz / 10);
 	} else if (nstate == IEEE80211_S_SCAN) {
 		/* start ap/neighbor scan timer */
 		timeout_add(&sc->sc_scan_to, (hz * ath_dwelltime) / 1000);
@@ -2987,26 +3008,10 @@ ath_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 {
 	if (ic->ic_opmode == IEEE80211_M_MONITOR)
 		return;
-
-	if (isnew) {
-		struct ath_node *an = (struct ath_node *) ni;
-
-		an->an_tx_ok = an->an_tx_err =
-			an->an_tx_retr = an->an_tx_upper = 0;
-		/* start with highest negotiated rate */
-		/*
-		 * XXX should do otherwise but only when
-		 * the rate control algorithm is better.
-		 */
-		KASSERT(ni->ni_rates.rs_nrates > 0,
-			("new association w/ no rates!"));
-		ni->ni_txrate = ni->ni_rates.rs_nrates - 1;
-	}
 }
 
 int
-ath_getchannels(struct ath_softc *sc, u_int cc, HAL_BOOL outdoor,
-    HAL_BOOL xchanmode)
+ath_getchannels(struct ath_softc *sc, HAL_BOOL outdoor, HAL_BOOL xchanmode)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
@@ -3018,12 +3023,13 @@ ath_getchannels(struct ath_softc *sc, u_int cc, HAL_BOOL outdoor,
 	chans = malloc(IEEE80211_CHAN_MAX * sizeof(HAL_CHANNEL),
 			M_TEMP, M_NOWAIT);
 	if (chans == NULL) {
-		if_printf(ifp, "unable to allocate channel table\n");
+		printf("%s: unable to allocate channel table\n", ifp->if_xname);
 		return ENOMEM;
 	}
 	if (!ath_hal_init_channels(ah, chans, IEEE80211_CHAN_MAX, &nchan,
-	    cc, HAL_MODE_ALL, outdoor, xchanmode)) {
-		if_printf(ifp, "unable to collect channel list from hal\n");
+	    HAL_MODE_ALL, outdoor, xchanmode)) {
+		printf("%s: unable to collect channel list from hal\n",
+		    ifp->if_xname);
 		free(chans, M_TEMP);
 		return EINVAL;
 	}
@@ -3036,8 +3042,8 @@ ath_getchannels(struct ath_softc *sc, u_int cc, HAL_BOOL outdoor,
 		HAL_CHANNEL *c = &chans[i];
 		ix = ath_hal_mhz2ieee(c->channel, c->channelFlags);
 		if (ix > IEEE80211_CHAN_MAX) {
-			if_printf(ifp, "bad hal channel %u (%u/%x) ignored\n",
-				ix, c->channel, c->channelFlags);
+			printf("%s: bad hal channel %u (%u/%x) ignored\n",
+				ifp->if_xname, ix, c->channel, c->channelFlags);
 			continue;
 		}
 		DPRINTF(ATH_DEBUG_ANY,
@@ -3058,9 +3064,9 @@ ath_getchannels(struct ath_softc *sc, u_int cc, HAL_BOOL outdoor,
 	free(chans, M_TEMP);
 
 	if (sc->sc_nchan < 1) {
-		if_printf(ifp, "no valid channels for regdomain %s(%u)\n",
-		    ieee80211_regdomain2name(ath_regdomain),
-		    sc->sc_ah->ah_capabilities.cap_eeprom.ee_regdomain);
+		printf("%s: no valid channels for regdomain %s(%u)\n",
+		    ifp->if_xname, ieee80211_regdomain2name(ah->ah_regdomain),
+		    ah->ah_regdomain);
 		return ENOENT;
 	}
 
@@ -3133,114 +3139,27 @@ ath_setcurmode(struct ath_softc *sc, enum ieee80211_phymode mode)
 	sc->sc_curmode = mode;
 }
 
-/*
- * Reset the rate control state for each 802.11 state transition.
- */
 void
-ath_rate_ctl_reset(struct ath_softc *sc, enum ieee80211_state state)
+ath_rssadapt_updatenode(void *arg, struct ieee80211_node *ni)
 {
-	struct ieee80211com *ic = &sc->sc_ic;
-	struct ieee80211_node *ni;
-	struct ath_node *an;
+	struct ath_node *an = ATH_NODE(ni);
 
-	if (ic->ic_opmode != IEEE80211_M_STA) {
-		/*
-		 * When operating as a station the node table holds
-		 * the AP's that were discovered during scanning.
-		 * For any other operating mode we want to reset the
-		 * tx rate state of each node.
-		 */
-		TAILQ_FOREACH(ni, &ic->ic_node, ni_list) {
-			ni->ni_txrate = 0;		/* use lowest rate */
-			an = (struct ath_node *) ni;
-			an->an_tx_ok = an->an_tx_err = an->an_tx_retr =
-			    an->an_tx_upper = 0;
-		}
-	}
-	/*
-	 * Reset local xmit state; this is really only meaningful
-	 * when operating in station or adhoc mode.
-	 */
-	ni = ic->ic_bss;
-	an = (struct ath_node *) ni;
-	an->an_tx_ok = an->an_tx_err = an->an_tx_retr = an->an_tx_upper = 0;
-	if (state == IEEE80211_S_RUN &&
-	    ic->ic_opmode != IEEE80211_M_MONITOR) {
-		/* start with highest negotiated rate */
-		KASSERT(ni->ni_rates.rs_nrates > 0,
-			("transition to RUN state w/ no rates!"));
-		ni->ni_txrate = ni->ni_rates.rs_nrates - 1;
-	} else {
-		/* use lowest rate */
-		ni->ni_txrate = 0;
-	}
+	ieee80211_rssadapt_updatestats(&an->an_rssadapt);
 }
 
-/* 
- * Examine and potentially adjust the transmit rate.
- */
 void
-ath_rate_ctl(void *arg, struct ieee80211_node *ni)
+ath_rssadapt_updatestats(void *arg)
 {
-	struct ath_softc *sc = arg;
-	struct ath_node *an = (struct ath_node *) ni;
-	struct ieee80211_rateset *rs = &ni->ni_rates;
-	int mod = 0, orate, enough;
+	struct ath_softc *sc = (struct ath_softc *)arg;
+	struct ieee80211com *ic = &sc->sc_ic;
 
-	/*
-	 * Rate control
-	 * XXX: very primitive version.
-	 */
-	sc->sc_stats.ast_rate_calls++;
-
-	enough = (an->an_tx_ok + an->an_tx_err >= 10);
-
-	/* no packet reached -> down */
-	if (an->an_tx_err > 0 && an->an_tx_ok == 0)
-		mod = -1;
-
-	/* all packets needs retry in average -> down */
-	if (enough && an->an_tx_ok < an->an_tx_retr)
-		mod = -1;
-
-	/* no error and less than 10% of packets needs retry -> up */
-	if (enough && an->an_tx_err == 0 && an->an_tx_ok > an->an_tx_retr * 10)
-		mod = 1;
-
-	orate = ni->ni_txrate;
-	switch (mod) {
-	case 0:
-		if (enough && an->an_tx_upper > 0)
-			an->an_tx_upper--;
-		break;
-	case -1:
-		if (ni->ni_txrate > 0) {
-			ni->ni_txrate--;
-			sc->sc_stats.ast_rate_drop++;
-		}
-		an->an_tx_upper = 0;
-		break;
-	case 1:
-		if (++an->an_tx_upper < 2)
-			break;
-		an->an_tx_upper = 0;
-		if (ni->ni_txrate + 1 < rs->rs_nrates) {
-			ni->ni_txrate++;
-			sc->sc_stats.ast_rate_raise++;
-		}
-		break;
+	if (ic->ic_opmode == IEEE80211_M_STA) {
+		ath_rssadapt_updatenode(arg, ic->ic_bss);
+	} else {
+		ieee80211_iterate_nodes(ic, ath_rssadapt_updatenode, arg);
 	}
 
-	if (ni->ni_txrate != orate) {
-		DPRINTF(ATH_DEBUG_RATE,
-		    ("%s: %dM -> %dM (%d ok, %d err, %d retr)\n",
-		    __func__,
-		    (rs->rs_rates[orate] & IEEE80211_RATE_VAL) / 2,
-		    (rs->rs_rates[ni->ni_txrate] & IEEE80211_RATE_VAL) / 2,
-		    an->an_tx_ok, an->an_tx_err, an->an_tx_retr));
-	}
-	if (ni->ni_txrate != orate || enough)
-		an->an_tx_ok = an->an_tx_err = an->an_tx_retr = 0;
+	timeout_add(&sc->sc_rssadapt_to, hz / 10);
 }
 
 #ifdef AR_DEBUG
@@ -3289,7 +3208,7 @@ ath_gpio_attach(struct ath_softc *sc, u_int16_t devid)
 		return 0;
 
 	/* Initialize gpio pins array */
-	for (i = 0; i < ah->ah_gpio_npins; i++) {
+	for (i = 0; i < ah->ah_gpio_npins && i < AR5K_MAX_GPIO; i++) {
 		sc->sc_gpio_pins[i].pin_num = i;
 		sc->sc_gpio_pins[i].pin_caps = GPIO_PIN_INPUT |
 		    GPIO_PIN_OUTPUT;

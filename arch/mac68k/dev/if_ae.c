@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ae.c,v 1.26 2005/08/05 14:22:21 martin Exp $	*/
+/*	$OpenBSD: if_ae.c,v 1.28 2006/01/09 20:51:48 miod Exp $	*/
 /*	$NetBSD: if_ae.c,v 1.62 1997/04/24 16:52:05 scottr Exp $	*/
 
 /*
@@ -55,10 +55,6 @@
 static inline void ae_rint(struct ae_softc *);
 static inline void ae_xmit(struct ae_softc *);
 static inline int ae_ring_copy( struct ae_softc *, int, caddr_t, int);
-
-#define	ETHER_MIN_LEN	64
-#define ETHER_MAX_LEN	1518
-#define	ETHER_ADDR_LEN	6
 
 #define NIC_GET(sc, reg)	(bus_space_read_1((sc)->sc_regt,	\
 				    (sc)->sc_regh,			\
@@ -507,7 +503,8 @@ loop:
 		 * the NIC.
 		 */
 		bus_space_read_region_1(sc->sc_buft, sc->sc_bufh,
-		    packet_ptr, &packet_hdr, sizeof(struct ae_ring));
+		    packet_ptr, (u_int8_t *)&packet_hdr,
+		    sizeof(struct ae_ring));
 		lenp = (u_int8_t *)&packet_hdr.count; /* sigh. */
 		len = lenp[0] | (lenp[1] << 8);
 		packet_hdr.count = len;
@@ -1070,7 +1067,7 @@ ae_put(sc, m, buf)
 			if (wantbyte) {
 				savebyte[1] = *data;
 				bus_space_write_region_2(sc->sc_buft,
-				    sc->sc_bufh, buf, savebyte, 1);
+				    sc->sc_bufh, buf, (u_int16_t *)savebyte, 1);
 				buf += 2;
 				data++;
 				len--;
@@ -1079,7 +1076,8 @@ ae_put(sc, m, buf)
 			/* Output contiguous words. */
 			if (len > 1) {
 				bus_space_write_region_2(sc->sc_buft,
-				    sc->sc_bufh, buf, data, len >> 1);
+				    sc->sc_bufh, buf, (u_int16_t *)data,
+				    len >> 1);
 				buf += len & ~1;
 				data += len & ~1;
 				len &= 1;
@@ -1095,7 +1093,7 @@ ae_put(sc, m, buf)
 	if (wantbyte) {
 		savebyte[1] = 0;
 		bus_space_write_region_2(sc->sc_buft, sc->sc_bufh,
-		    buf, savebyte, 1);
+		    buf, (u_int16_t *)savebyte, 1);
 	}
 	return (totlen);
 }

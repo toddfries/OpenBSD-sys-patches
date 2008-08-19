@@ -1,4 +1,4 @@
-/*	$OpenBSD: pm_direct.h,v 1.4 2005/02/11 20:09:30 martin Exp $	*/
+/*	$OpenBSD: pm_direct.h,v 1.5 2006/01/04 20:39:05 miod Exp $	*/
 /*	$NetBSD: pm_direct.h,v 1.1 1997/04/08 03:11:38 scottr Exp $	*/
 
 /*
@@ -30,6 +30,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+/* From: pm_direct.h 1.0 01/02/97 Takashi Hamada */
 
 /*
  * Public declarations that other routines may need.
@@ -45,10 +46,3 @@ typedef	struct	{
 }	PMData;
 
 int		pmgrop(PMData *);
-
-extern void pm_setup_adb(void);
-extern void pm_check_adb_devices(int);
-extern void pm_intr(void);
-extern int pm_adb_op(u_char *, void *, void *, int);
-extern void pm_init_adb_device(void);
-

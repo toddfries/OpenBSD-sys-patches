@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.56 2005/05/24 21:11:47 tedu Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.59 2005/11/04 21:48:07 miod Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -360,6 +360,7 @@ struct uvmexp {
 	struct uvm_object *kmem_object;
 
 	int fpswtch;	/* FPU context switches */
+	int kmapent;	/* number of kernel map entries */
 };
 
 #ifdef _KERNEL
@@ -490,7 +491,9 @@ void			uvm_init(void);
 				/* init the uvm system */
 
 /* uvm_io.c */
-int			uvm_io(vm_map_t, struct uio *);
+int			uvm_io(vm_map_t, struct uio *, int);
+
+#define	UVM_IO_FIXPROT	0x01
 
 /* uvm_km.c */
 vaddr_t			uvm_km_alloc1(vm_map_t, vsize_t, boolean_t);
@@ -603,7 +606,7 @@ struct uvm_object	*uvn_attach(void *, vm_prot_t);
 /* kern_malloc.c */
 void			kmeminit_nkmempages(void);
 void			kmeminit(void);
-extern int		nkmempages;
+extern u_int		nkmempages;
 
 #endif /* _KERNEL */
 

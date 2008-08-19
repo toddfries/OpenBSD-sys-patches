@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_extent.c,v 1.29 2005/07/08 14:05:28 krw Exp $	*/
+/*	$OpenBSD: subr_extent.c,v 1.31 2006/02/23 19:58:47 miod Exp $	*/
 /*	$NetBSD: subr_extent.c,v 1.7 1996/11/21 18:46:34 cgd Exp $	*/
 
 /*-
@@ -80,7 +80,6 @@ static	void extent_insert_and_optimize(struct extent *, u_long, u_long,
 static	struct extent_region *extent_alloc_region_descriptor(struct extent *, int);
 static	void extent_free_region_descriptor(struct extent *,
 	    struct extent_region *);
-static	void extent_register(struct extent *);
 
 /*
  * Macro to align to an arbitrary power-of-two boundary.
@@ -89,11 +88,13 @@ static	void extent_register(struct extent *);
 	(((((_start) - (_skew)) + ((_align) - 1)) & (-(_align))) + (_skew))
 
 
+#if defined(DIAGNOSTIC) || defined(DDB)
 /*
  * Register the extent on a doubly linked list.
  * Should work, no?
  */
 static LIST_HEAD(listhead, extent) ext_list;
+static	void extent_register(struct extent *);
 
 static void
 extent_register(struct extent *ex)
@@ -118,6 +119,7 @@ extent_register(struct extent *ex)
 	/* Insert into list */
 	LIST_INSERT_HEAD(&ext_list, ex, ex_link);
 }
+#endif	/* DIAGNOSTIC || DDB */
 
 struct pool ex_region_pl;
 
@@ -131,27 +133,6 @@ extent_pool_init(void)
 		    "extentpl", NULL);
 		inited = 1;
 	}
-}
-
-/*
- * Find a given extent, and return a pointer to
- * it so that other extent functions can be used
- * on it.
- *
- * Returns NULL on failure.
- */
-struct extent *
-extent_find(name)
-	char *name;
-{
-	struct extent *ep;
-
-	LIST_FOREACH(ep, &ext_list, ex_link) {
-		if (!strcmp(ep->ex_name, name))
-			return(ep);
-	}
-
-	return(NULL);
 }
 
 #ifdef DDB
@@ -174,13 +155,8 @@ extent_print_all(void)
  * Allocate and initialize an extent map.
  */
 struct extent *
-extent_create(name, start, end, mtype, storage, storagesize, flags)
-	char *name;
-	u_long start, end;
-	int mtype;
-	caddr_t storage;
-	size_t storagesize;
-	int flags;
+extent_create(char *name, u_long start, u_long end, int mtype, caddr_t storage,
+    size_t storagesize, int flags)
 {
 	struct extent *ex;
 	caddr_t cp = storage;
@@ -252,7 +228,9 @@ extent_create(name, start, end, mtype, storage, storagesize, flags)
 	if (flags & EX_NOCOALESCE)
 		ex->ex_flags |= EXF_NOCOALESCE;
 
+#if defined(DIAGNOSTIC) || defined(DDB)
 	extent_register(ex);
+#endif
 	return (ex);
 }
 
@@ -260,8 +238,7 @@ extent_create(name, start, end, mtype, storage, storagesize, flags)
  * Destroy an extent map.
  */
 void
-extent_destroy(ex)
-	struct extent *ex;
+extent_destroy(struct extent *ex)
 {
 	struct extent_region *rp, *orp;
 
@@ -296,10 +273,8 @@ extent_destroy(ex)
  * If we don't need the region descriptor, it will be freed here.
  */
 static void
-extent_insert_and_optimize(ex, start, size, after, rp)
-	struct extent *ex;
-	u_long start, size;
-	struct extent_region *after, *rp;
+extent_insert_and_optimize(struct extent *ex, u_long start, u_long size,
+    struct extent_region *after, struct extent_region *rp)
 {
 	struct extent_region *nextr;
 	int appended = 0;
@@ -403,10 +378,7 @@ extent_insert_and_optimize(ex, start, size, after, rp)
  * Allocate a specific region in an extent map.
  */
 int
-extent_alloc_region(ex, start, size, flags)
-	struct extent *ex;
-	u_long start, size;
-	int flags;
+extent_alloc_region(struct extent *ex, u_long start, u_long size, int flags)
 {
 	struct extent_region *rp, *last, *myrp;
 	u_long end = start + (size - 1);
@@ -539,12 +511,9 @@ extent_alloc_region(ex, start, size, flags)
  * a power of 2.
  */
 int
-extent_alloc_subregion(ex, substart, subend, size, alignment, skew, boundary,
-    flags, result)
-	struct extent *ex;
-	u_long substart, subend, size, alignment, skew, boundary;
-	int flags;
-	u_long *result;
+extent_alloc_subregion(struct extent *ex, u_long substart, u_long subend,
+    u_long size, u_long alignment, u_long skew, u_long boundary, int flags,
+    u_long *result)
 {
 	struct extent_region *rp, *myrp, *last, *bestlast;
 	u_long newstart, newend, exend, beststart, bestovh, ovh;
@@ -891,10 +860,7 @@ skip:
 }
 
 int
-extent_free(ex, start, size, flags)
-	struct extent *ex;
-	u_long start, size;
-	int flags;
+extent_free(struct extent *ex, u_long start, u_long size, int flags)
 {
 	struct extent_region *rp, *nrp = NULL;
 	u_long end = start + (size - 1);
@@ -1034,9 +1000,7 @@ extent_free(ex, start, size, flags)
 }
 
 static struct extent_region *
-extent_alloc_region_descriptor(ex, flags)
-	struct extent *ex;
-	int flags;
+extent_alloc_region_descriptor(struct extent *ex, int flags)
 {
 	struct extent_region *rp;
 	int s;
@@ -1080,9 +1044,7 @@ extent_alloc_region_descriptor(ex, flags)
 }
 
 static void
-extent_free_region_descriptor(ex, rp)
-	struct extent *ex;
-	struct extent_region *rp;
+extent_free_region_descriptor(struct extent *ex, struct extent_region *rp)
 {
 	int s;
 
@@ -1134,8 +1096,7 @@ extent_free_region_descriptor(ex, rp)
 
 #if defined(DIAGNOSTIC) || defined(DDB) || !defined(_KERNEL)
 void
-extent_print(ex)
-	struct extent *ex;
+extent_print(struct extent *ex)
 {
 	struct extent_region *rp;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.44 2004/12/30 21:28:48 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.51 2006/01/21 12:27:58 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.103 1998/07/09 06:02:50 scottr Exp $	*/
 
 /*
@@ -84,8 +84,6 @@
  */
 	.text
 GLOBAL(kernel_text)
-
-#include <mac68k/mac68k/macglobals.s>
 
 /*
  * Initialization
@@ -337,16 +335,10 @@ Lloaddone:
 	jeq	Lnocache0		| yes, cache already on
 	movl	#CACHE_ON,d0
 	movc	d0,cacr			| clear cache(s)
-#ifdef __notyet__
-	tstl	_C_LABEL(ectype)
-	jeq	Lnocache0
-					| Enable external cache here
-#endif
 
 Lnocache0:
 /* Final setup for call to main(). */
 	jbsr	_C_LABEL(mac68k_init)
-	movw	#PSL_LOWIPL,sr		| lower SPL ; enable interrupts
 
 /*
  * Create a fake exception frame so that cpu_fork() can copy it.
@@ -785,12 +777,7 @@ Lbrkpt2:
 	movl	d2,sp@-			| push trap type
 	jbsr	_C_LABEL(kdb_trap)	| handle the trap
 	addql	#8,sp			| pop args
-#if 0	/* not needed on mac68k */
-	cmpl	#0,d0			| did ddb handle it?
-	jne	Lbrkpt3			| yes, done
 #endif
-#endif
-	/* Sun 3 drops into PROM here. */
 Lbrkpt3:
 	| The stack pointer may have been modified, or
 	| data below it modified (by kgdb push call),
@@ -853,29 +840,6 @@ ENTRY_NOPROFILE(spurintr)
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	jra	_ASM_LABEL(rei)
 
-ENTRY_NOPROFILE(lev1intr)
-	clrl	sp@-
-	moveml	#0xFFFF,sp@-
-	movl	sp, sp@-
-	jbsr	_C_LABEL(via1_intr)
-	addql	#4,sp
-	moveml	sp@+,#0xFFFF
-	addql	#4,sp
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
-	jra	_ASM_LABEL(rei)
-
-ENTRY_NOPROFILE(lev2intr)
-	clrl	sp@-
-	moveml	#0xFFFF,sp@-
-	movl	sp, sp@-
-	movl	_C_LABEL(real_via2_intr),a2
-	jbsr	a2@
-	addql	#4,sp
-	moveml	sp@+,#0xFFFF
-	addql	#4,sp
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
-	jra	_ASM_LABEL(rei)
-
 ENTRY_NOPROFILE(intrhand)	/* levels 3 through 6 */
 	INTERRUPT_SAVEREG
 	movw	sp@(22),sp@-		| push exception vector info	
@@ -906,14 +870,13 @@ ENTRY_NOPROFILE(lev7intr)
 ENTRY_NOPROFILE(rtclock_intr)
 	movl	d2,sp@-			| save d2
 	movw	sr,d2			| save SPL
-	movw	#SPL2,sr		| raise SPL to splclock()
+	movw	_C_LABEL(mac68k_clockipl),sr	| raise SPL to splclock()
 	movl	a6@(8),a1		| get pointer to frame in via1_intr
 	movl	a1@(64),sp@-		| push ps
 	movl	a1@(68),sp@-		| push pc
 	movl	sp,sp@-			| push pointer to ps, pc
 	jbsr	_C_LABEL(hardclock)	| call generic clock int routine
 	lea	sp@(12),sp		| pop params
-	jbsr	_C_LABEL(mrg_VBLQueue)	| give programs in the VBLqueue a chance
 	movw	d2,sr			| restore SPL
 	movl	sp@+,d2			| restore d2
 	movl	#1,d0			| clock taken care of
@@ -1023,12 +986,7 @@ Ldorte:
 
 	.data
 GLOBAL(curpcb)
-GLOBAL(masterpaddr)		| XXX compatibility (debuggers)
 	.long	0
-
-ASLOCAL(mdpflag)
-	.byte	0		| copy of proc md_flags low byte
-	.align	2
 
 ASBSS(nullpcb,SIZEOF_PCB)
 
@@ -1147,7 +1105,6 @@ Lswnofpsave:
 #endif
 	movb	#SONPROC,a0@(P_STAT)
 	clrl	a0@(P_BACK)		| clear back link
-	movb	a0@(P_MD_FLAGS+3),mdpflag | low byte of p_md.md_flags
 	movl	a0@(P_ADDR),a1		| get p_addr
 	movl	a1,_C_LABEL(curpcb)
 
@@ -1537,7 +1494,7 @@ Lm68881rdone:
  * will be no prefetch stalls due to cache line burst operations and that
  * the loops will run from a single cache half-line.
  */
-	.align	8			| align to half-line boundary
+	.balign	8			| align to half-line boundary
 
 ALTENTRY(_delay, _delay)
 ENTRY(delay)
@@ -1900,11 +1857,6 @@ GLOBAL(mmutype)
 
 GLOBAL(cputype)
 	.long	CPU_68020	| default to 68020 CPU
-
-#ifdef __notyet__
-GLOBAL(ectype)
-	.long	EC_NONE		| external cache type, default to none
-#endif
 
 GLOBAL(fputype)
 	.long	FPU_68882	| default to 68882 FPU

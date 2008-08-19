@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.62 2005/07/03 20:14:00 drahn Exp $	*/
+/*	$OpenBSD: mount.h,v 1.67 2005/12/13 00:35:23 millert Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -35,6 +35,7 @@
 #ifndef _SYS_MOUNT_H_
 #define _SYS_MOUNT_H_
 
+#include <sys/cdefs.h>
 #ifndef _KERNEL
 #include <sys/ucred.h>
 #endif
@@ -345,10 +346,7 @@ struct ostatfs {
 #define	MOUNT_MFS	"mfs"		/* Memory Filesystem */
 #define	MOUNT_MSDOS	"msdos"		/* MSDOS Filesystem */
 #define	MOUNT_LFS	"lfs"		/* Log-based Filesystem */
-#define	MOUNT_LOFS	"lofs"		/* Loopback filesystem */
-#define	MOUNT_FDESC	"fdesc"		/* File Descriptor Filesystem */
 #define	MOUNT_PORTAL	"portal"	/* Portal Filesystem */
-#define	MOUNT_KERNFS	"kernfs"	/* Kernel Information Filesystem */
 #define	MOUNT_PROCFS	"procfs"	/* /proc Filesystem */
 #define	MOUNT_AFS	"afs"		/* Andrew Filesystem */
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
@@ -566,7 +564,7 @@ struct netexport {
 /*
  * exported vnode operations
  */
-int	vfs_busy(struct mount *, int, struct simplelock *, struct proc *);
+int	vfs_busy(struct mount *, int, struct simplelock *);
 int     vfs_isbusy(struct mount *);
 int     vfs_mount_foreach_vnode(struct mount *, int (*func)(struct vnode *,
 				    void *), void *);
@@ -575,7 +573,7 @@ struct	mount *vfs_getvfs(fsid_t *);
 int	vfs_mountedon(struct vnode *);
 int	vfs_mountroot(void);
 int	vfs_rootmountalloc(char *, char *, struct mount **);
-void	vfs_unbusy(struct mount *, struct proc *);
+void	vfs_unbusy(struct mount *);
 void	vfs_unmountall(void);
 extern	CIRCLEQ_HEAD(mntlist, mount) mountlist;
 extern	struct simplelock mountlist_slock;
@@ -601,8 +599,6 @@ int	vfs_register(struct vfsconf *);
 int	vfs_unregister(struct vfsconf *);
 #else /* _KERNEL */
 
-#include <sys/cdefs.h>
-
 #ifndef _SYS_STAT_H_
 struct stat;
 #endif
@@ -615,11 +611,11 @@ int	getmntinfo(struct statfs **, int);
 int	mount(const char *, const char *, int, void *);
 int	statfs(const char *, struct statfs *);
 int	unmount(const char *, int);
-#if !defined(_POSIX_C_SOURCE) && !defined(_XOPEN_SOURCE)
+#if __BSD_VISIBLE
 int	fhopen(const fhandle_t *, int);
 int	fhstat(const fhandle_t *, struct stat *);
 int	fhstatfs(const fhandle_t *, struct statfs *);
-#endif /* !_POSIX_C_SOURCE */
+#endif /* __BSD_VISIBLE */
 
 __END_DECLS
 

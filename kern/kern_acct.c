@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_acct.c,v 1.16 2005/05/28 07:30:25 marius Exp $	*/
+/*	$OpenBSD: kern_acct.c,v 1.18 2006/01/05 03:18:46 tedu Exp $	*/
 /*	$NetBSD: kern_acct.c,v 1.42 1996/02/04 02:15:12 christos Exp $	*/
 
 /*-
@@ -95,10 +95,7 @@ struct proc *acct_proc;
  * previous implementation done by Mark Tinguely.
  */
 int
-sys_acct(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_acct(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_acct_args /* {
 		syscallarg(const char *) path;
@@ -308,7 +305,7 @@ acct_thread(void *arg)
 			if (savacctp->v_type == VBAD) {
 				(void) vn_close(savacctp, FWRITE, NOCRED, p);
 				savacctp = NULL;
-				return;
+				break;
 			}
 			(void)VFS_STATFS(savacctp->v_mount, &sb, (struct proc *)0);
 			if (sb.f_bavail > acctresume * sb.f_blocks / 100) {
@@ -320,7 +317,7 @@ acct_thread(void *arg)
 			if (acctp->v_type == VBAD) {
 				(void) vn_close(acctp, FWRITE, NOCRED, p);
 				acctp = NULL;
-				return;
+				break;
 			}
 			(void)VFS_STATFS(acctp->v_mount, &sb, (struct proc *)0);
 			if (sb.f_bavail <= acctsuspend * sb.f_blocks / 100) {
@@ -329,11 +326,12 @@ acct_thread(void *arg)
 				log(LOG_NOTICE, "Accounting suspended\n");
 			}
 		} else {
-			acct_proc = NULL;
-			kthread_exit(0);
+			break;
 		}
 		tsleep(&acct_proc, PPAUSE, "acct", acctchkfreq *hz);
 	}
+	acct_proc = NULL;
+	kthread_exit(0);
 }
 
 void

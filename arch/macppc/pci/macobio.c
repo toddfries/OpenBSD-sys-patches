@@ -1,4 +1,4 @@
-/*	$OpenBSD: macobio.c,v 1.10 2005/06/08 19:08:23 drahn Exp $	*/
+/*	$OpenBSD: macobio.c,v 1.16 2006/02/14 23:05:28 kettenis Exp $	*/
 /*	$NetBSD: obio.c,v 1.6 1999/05/01 10:36:08 tsubai Exp $	*/
 
 /*-
@@ -86,6 +86,8 @@ macobio_match(struct device *parent, void *cf, void *aux)
 		case PCI_PRODUCT_APPLE_KEYLARGO:
 		case PCI_PRODUCT_APPLE_INTREPID:
 		case PCI_PRODUCT_APPLE_PANGEA_MACIO:
+		case PCI_PRODUCT_APPLE_SHASTA:
+		case PCI_PRODUCT_APPLE_K2_MACIO:
 			return 1;
 		}
 
@@ -141,13 +143,14 @@ macobio_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_APPLE_KEYLARGO:
 	case PCI_PRODUCT_APPLE_INTREPID:
 	case PCI_PRODUCT_APPLE_PANGEA_MACIO:
+	case PCI_PRODUCT_APPLE_SHASTA:
+	case PCI_PRODUCT_APPLE_K2_MACIO:
 		node = OF_finddevice("mac-io");
 		if (node == -1)
 			node = OF_finddevice("/pci/mac-io");
 		if (OF_getprop(node, "assigned-addresses", reg, sizeof(reg))
 		    == (sizeof (reg[0]) * 5))
 			 sc->obiomem = mapiodev(reg[2], 0x100);
-
 		break;
 	default:
 		printf(": unknown macobio controller\n");
@@ -213,19 +216,15 @@ macobio_attach(struct device *parent, struct device *self, void *aux)
 int
 macobio_print(void *aux, const char *macobio)
 {
-#ifdef MACOBIOVERBOSE
 	struct confargs *ca = aux;
 
 	if (macobio)
-		printf("%s at %s", ca->ca_name, macobio);
+		printf("\"%s\" at %s", ca->ca_name, macobio);
 
 	if (ca->ca_nreg > 0)
 		printf(" offset 0x%x", ca->ca_reg[0]);
 
 	return UNCONF;
-#else
-	return QUIET;
-#endif
 }
 
 void *
@@ -256,6 +255,41 @@ void
 mac_intr_disestablish(void *lcp, void *arg)
 {
 	(*mac_intr_disestablish_func)(lcp, arg);
+}
+
+void keylargo_fcr_enable(int offset, u_int32_t bits);
+void keylargo_fcr_disable(int offset, u_int32_t bits);
+u_int32_t keylargo_fcr_read(int offset);
+
+void
+keylargo_fcr_enable(int offset, u_int32_t bits)
+{
+	struct macobio_softc *sc = macobio_cd.cd_devs[0];
+	if (sc->obiomem == 0)
+		return;
+
+	bits |=  in32rb(sc->obiomem + offset);
+	out32rb(sc->obiomem + offset, bits);
+}
+void
+keylargo_fcr_disable(int offset, u_int32_t bits)
+{
+	struct macobio_softc *sc = macobio_cd.cd_devs[0];
+	if (sc->obiomem == 0)
+		return;
+
+	bits =  in32rb(sc->obiomem + offset) & ~bits;
+	out32rb(sc->obiomem + offset, bits);
+}
+
+u_int32_t
+keylargo_fcr_read(int offset)
+{
+	struct macobio_softc *sc = macobio_cd.cd_devs[0];
+	if (sc->obiomem == 0)
+		return -1;
+
+	return in32rb(sc->obiomem + offset);
 }
 
 void

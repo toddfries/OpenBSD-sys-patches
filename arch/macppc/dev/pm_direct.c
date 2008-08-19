@@ -1,4 +1,4 @@
-/*	$OpenBSD: pm_direct.c,v 1.13 2003/10/16 03:54:48 deraadt Exp $	*/
+/*	$OpenBSD: pm_direct.c,v 1.19 2006/02/22 07:02:23 miod Exp $	*/
 /*	$NetBSD: pm_direct.c,v 1.9 2000/06/08 22:10:46 tsubai Exp $	*/
 
 /*
@@ -44,9 +44,9 @@
 #include <sys/device.h>
 #include <sys/systm.h>
 
-#include <machine/adbsys.h>
 #include <machine/cpu.h>
 
+#include <dev/adb/adb.h>
 #include <macppc/dev/adbvar.h>
 #include <macppc/dev/pm_direct.h>
 #include <macppc/dev/viareg.h>
@@ -79,9 +79,6 @@
  * Variables for internal use
  */
 int	pmHardware = PM_HW_UNKNOWN;
-u_short	pm_existent_ADB_devices = 0x0;	/* each bit expresses the existent ADB device */
-u_int	pm_LCD_brightness = 0x0;
-u_int	pm_LCD_contrast = 0x0;
 
 /* these values shows that number of data returned after 'send' cmd is sent */
 signed char pm_send_cmd_type[] = {
@@ -174,9 +171,6 @@ int	pm_send_pm2(u_char);
 int	pm_pmgrop_pm2(PMData *);
 void	pm_intr_pm2(void);
 
-/* this function is MRG-Based (for testing) */
-int	pm_pmgrop_mrg(PMData *);
-
 /* these functions also use the variables of adb_direct.c */
 void	pm_adb_get_TALK_result(PMData *);
 void	pm_adb_get_ADB_data(PMData *);
@@ -236,19 +230,6 @@ void
 pm_setup_adb()
 {
 	pmHardware = PM_HW_PB5XX;	/* XXX */
-}
-
-
-/*
- * Check the existent ADB devices
- */
-void
-pm_check_adb_devices(int id)
-{
-	u_short ed = 0x1;
-
-	ed <<= id;
-	pm_existent_ADB_devices |= ed;
 }
 
 
@@ -379,7 +360,7 @@ pm_pmgrop_pm2(PMData *pmdata)
 
 	s = splhigh();
 
-	/* disable all inetrrupts but PM */
+	/* disable all interrupts but PM */
 	via1_vIER = 0x10;
 	via1_vIER &= read_via_reg(VIA1, vIER);
 	write_via_reg(VIA1, vIER, via1_vIER);
@@ -562,6 +543,11 @@ pm_adb_op(u_char *buffer, void *compRout, void *data, int command)
 	int s;
 	int rval;
 	int ndelay;
+	int waitfor;	/* interrupts to poll for */
+	int ifr;
+#ifdef ADB_DEBUG
+	int oldifr;
+#endif
 	PMData pmdata;
 	struct adbCommand packet;
 
@@ -588,6 +574,20 @@ pm_adb_op(u_char *buffer, void *compRout, void *data, int command)
 			pmdata.num_data = buffer[0] + 3;
 	} else
 		pmdata.num_data = 3;
+
+	/*
+	 * Resetting adb on several models, such as
+	 * - PowerBook3,*
+	 * - PowerBook5,*
+	 * - PowerMac10,1
+	 * causes several pmu interrupts with ifr set to PMU_INT_SNDBRT.
+	 * Not processing them prevents us from seeing the adb devices
+	 * afterwards.
+	 */
+	if (command == PMU_RESET_ADB)
+		waitfor = PMU_INT_ADB_AUTO | PMU_INT_ADB | PMU_INT_SNDBRT;
+	else
+		waitfor = PMU_INT_ALL;
 
 	pmdata.data[0] = (u_char)(command & 0xff);
 	pmdata.data[1] = 0;
@@ -634,12 +634,25 @@ pm_adb_op(u_char *buffer, void *compRout, void *data, int command)
 
 	/* wait until the PM interrupt is occurred */
 	ndelay = 0x8000;
+#ifdef ADB_DEBUG
+	oldifr = 0;
+#endif
 	while (adbWaiting == 1) {
-		if (read_via_reg(VIA1, vIFR) != 0)
+		ifr = read_via_reg(VIA1, vIFR);
+		if (ifr & waitfor) {
 			pm_intr();
 #ifdef PM_GRAB_SI
 			(void)intr_dispatch(0x70);
 #endif
+#ifdef ADB_DEBUG
+		} else if (ifr != oldifr) {
+			if (adb_debug)
+				printf("pm_adb_op: ignoring ifr %02x"
+				    ", expecting %02x\n",
+				    (u_int)ifr, (u_int)waitfor);
+			oldifr = ifr;
+#endif
+		}
 		if ((--ndelay) < 0) {
 			splx(s);
 			return 1;
@@ -734,7 +747,7 @@ pm_adb_poweroff()
 }
 
 void
-pm_read_date_time(u_long *time)
+pm_read_date_time(time_t *time)
 {
 	PMData p;
 
@@ -748,7 +761,7 @@ pm_read_date_time(u_long *time)
 }
 
 void
-pm_set_date_time(u_long time)
+pm_set_date_time(time_t time)
 {
 	PMData p;
 
@@ -759,47 +772,7 @@ pm_set_date_time(u_long time)
 	pmgrop(&p);
 }
 
-int
-pm_read_brightness()
-{
-	PMData p;
-
-	p.command = PMU_READ_BRIGHTNESS;
-	p.num_data = 1;		/* XXX why 1? */
-	p.s_buf = p.r_buf = p.data;
-	p.data[0] = 0;
-	pmgrop(&p);
-
-	return p.data[0];
-}
-
-void
-pm_set_brightness(int val)
-{
-	PMData p;
-
-	val = 0x7f - val / 2;
-	if (val < 0x08)
-		val = 0x08;
-	if (val > 0x78)
-		val = 0x78;
-
-	p.command = PMU_SET_BRIGHTNESS;
-	p.num_data = 1;
-	p.s_buf = p.r_buf = p.data;
-	p.data[0] = val;
-	pmgrop(&p);
-}
-
-void
-pm_init_brightness()
-{
-	int val;
-
-	val = pm_read_brightness();
-	pm_set_brightness(val);
-}
-
+#if 0
 void
 pm_eject_pcmcia(int slot)
 {
@@ -814,6 +787,7 @@ pm_eject_pcmcia(int slot)
 	p.data[0] = 5 + slot;	/* XXX */
 	pmgrop(&p);
 }
+#endif
 
 
 /*
@@ -858,35 +832,4 @@ pm_battery_info(int battery, struct pmu_battery_info *info)
 	}
 
 	return 1;
-}
-
-
-
-int
-pm_read_nvram(int addr)
-{
-	PMData p;
-
-	p.command = PMU_READ_NVRAM;
-	p.num_data = 2;
-	p.s_buf = p.r_buf = p.data;
-	p.data[0] = addr >> 8;
-	p.data[1] = addr;
-	pmgrop(&p);
-
-	return p.data[0];
-}
-
-void
-pm_write_nvram(int addr, int val)
-{
-	PMData p;
-
-	p.command = PMU_WRITE_NVRAM;
-	p.num_data = 3;
-	p.s_buf = p.r_buf = p.data;
-	p.data[0] = addr >> 8;
-	p.data[1] = addr;
-	p.data[2] = val;
-	pmgrop(&p);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtd8xx.c,v 1.9 2005/07/02 22:04:54 brad Exp $	*/
+/*	$OpenBSD: mtd8xx.c,v 1.11 2005/11/19 01:59:37 aaron Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>
@@ -295,7 +295,7 @@ mtd_miibus_writereg(struct device *self, int phy, int reg, int val)
 		for (mask = 0x8000; mask; mask >>= 1) {
 			miir &= ~(MIIMGT_MDC | MIIMGT_MDO);
 			if (mask & (u_int32_t)val)
-				miir |= MIIMGT_MDO;;
+				miir |= MIIMGT_MDO;
 			CSR_WRITE_4(MTD_MIIMGT, miir);
 			miir |= MIIMGT_MDC;
 			CSR_WRITE_4(MTD_MIIMGT, miir);
@@ -582,7 +582,7 @@ mtd_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error;
 
-	s = splimp();
+	s = splnet();
 	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
 		splx(s);
 		return (error);
@@ -652,7 +652,7 @@ mtd_init(struct ifnet *ifp)
 	struct mtd_softc *sc = ifp->if_softc;
 	int s;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.

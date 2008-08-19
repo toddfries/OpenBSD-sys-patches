@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.13 2005/06/17 19:25:39 marco Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.16 2005/09/29 21:30:42 marco Exp $	*/
 
 /*
  * Copyright (c) 2005 Jason L. Wright (jason@thought.net)
@@ -218,7 +218,7 @@ amdgart_dumpregs(void)
 		    amdgart_softcs[n].g_tag, GART_APBASE));
 		printf(" tblbase %x\n", pci_conf_read(amdgart_softcs[n].g_pc,
 		    amdgart_softcs[n].g_tag, GART_TBLBASE));
-		printf("cachectl %x\n", pci_conf_read(amdgart_softcs[n].g_pc,
+		printf(" cachectl %x\n", pci_conf_read(amdgart_softcs[n].g_pc,
 		    amdgart_softcs[n].g_tag, GART_CACHECTRL));
 
 		p = amdgart_softcs[n].g_scrib;
@@ -226,7 +226,7 @@ amdgart_dumpregs(void)
 		for (i = 0; i < PAGE_SIZE; i++, p++)
 			if (*p != '\0')
 				dirty++;
-		printf("scribble: %s\n", dirty ? "dirty" : "clean");
+		printf(" scribble: %s\n", dirty ? "dirty" : "clean");
 	}
 }
 
@@ -429,7 +429,9 @@ amdgart_reload(struct extent *ex, bus_dmamap_t dmam)
 		err = amdgart_iommu_map(dmam, ex, opa, &npa, len);
 		if (err) {
 			for (j = 0; j < i - 1; j++)
-				amdgart_iommu_unmap(ex, opa, len);
+				amdgart_iommu_unmap(ex,
+				    dmam->dm_segs[j].ds_addr,
+				    dmam->dm_segs[j].ds_len);
 			return (err);
 		}
 		dmam->dm_segs[i].ds_addr = npa;
@@ -482,17 +484,24 @@ amdgart_iommu_unmap(struct extent *ex, paddr_t pa, psize_t len)
 	base = trunc_page(pa);
 	end = roundup(pa + len, PAGE_SIZE);
 	alen = end - base;
+
+	/*
+	 * order is significant here; invalidate the iommu page table
+	 * entries, then mark them as freed in the extent.
+	 */
+
+	for (idx = 0; idx < alen; idx += PAGE_SIZE) {
+		pgno = ((base - amdgart_softcs[0].g_pa) + idx) >> PGSHIFT;
+		amdgart_softcs[0].g_pte[pgno] = 0;
+	}
+
 	s = splhigh();
 	err = extent_free(ex, base, alen, EX_NOWAIT);
 	splx(s);
 	if (err) {
+		/* XXX Shouldn't happen, but if it does, I think we lose. */
 		printf("GART: extent_free %d\n", err);
 		return (err);
-	}
-
-	for (idx = 0; idx < alen; idx += PAGE_SIZE) {
-		pgno = ((base - amdgart_softcs[0].g_pa) + idx) >> PGSHIFT;
-		amdgart_softcs[0].g_pte[pgno] = amdgart_softcs[0].g_scribpte;
 	}
 
 	return (0);

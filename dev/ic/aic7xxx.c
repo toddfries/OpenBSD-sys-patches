@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx.c,v 1.67 2005/08/07 17:14:57 deraadt Exp $	*/
+/*	$OpenBSD: aic7xxx.c,v 1.72 2006/02/06 17:29:10 jmc Exp $	*/
 /*	$NetBSD: aic7xxx.c,v 1.108 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: aic7xxx.c,v 1.67 2005/08/07 17:14:57 deraadt Exp $
+ * $Id: aic7xxx.c,v 1.72 2006/02/06 17:29:10 jmc Exp $
  */
 /*
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
@@ -953,8 +953,7 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 		       devinfo.lun);
 		scbindex = ahc_inb(ahc, SCB_TAG);
 		scb = ahc_lookup_scb(ahc, scbindex);
-		if (scb != NULL
-		 && (scb->flags & SCB_RECOVERY_SCB) != 0)
+		if (scb != NULL)
 			/*
 			 * Ensure that we didn't put a second instance of this
 			 * SCB into the QINFIFO.
@@ -4263,6 +4262,7 @@ static int
 ahc_init_scbdata(struct ahc_softc *ahc)
 {
 	struct scb_data *scb_data;
+	int i;
 
 	scb_data = ahc->scb_data;
 	SLIST_INIT(&scb_data->free_scbs);
@@ -4316,9 +4316,13 @@ ahc_init_scbdata(struct ahc_softc *ahc)
 	/* Perform initial CCB allocation */
 	memset(scb_data->hscbs, 0,
 	       AHC_SCB_MAX_ALLOC * sizeof(struct hardware_scb));
-	ahc_alloc_scbs(ahc);
+	do {
+		i = scb_data->numscbs;
+		ahc_alloc_scbs(ahc);
+	} while ((i != scb_data->numscbs) && 
+	    (scb_data->numscbs < AHC_SCB_MAX_ALLOC));
 
-	if (scb_data->numscbs == 0) {
+	if (scb_data->numscbs != AHC_SCB_MAX_ALLOC) {
 		printf("%s: ahc_init_scbdata - "
 		       "Unable to allocate initial scbs\n",
 		       ahc_name(ahc));
@@ -4650,7 +4654,7 @@ ahc_chip_init(struct ahc_softc *ahc)
 
 	/*
 	 * Setup the allowed SCSI Sequences based on operational mode.
-	 * If we are a target, we'll enalbe select in operations once
+	 * If we are a target, we'll enable select in operations once
 	 * we've had a lun enabled.
 	 */
 	scsiseq_template = ENSELO|ENAUTOATNO|ENAUTOATNP;
@@ -6259,9 +6263,9 @@ ahc_dumpseq(struct ahc_softc* ahc)
 static int
 ahc_loadseq(struct ahc_softc *ahc)
 {
-	struct	cs cs_table[num_critical_sections];
-	u_int	begin_set[num_critical_sections];
-	u_int	end_set[num_critical_sections];
+	struct	cs cs_table[NUM_CRITICAL_SECTIONS];
+	u_int	begin_set[NUM_CRITICAL_SECTIONS];
+	u_int	end_set[NUM_CRITICAL_SECTIONS];
 	const struct	patch *cur_patch;
 	u_int	cs_count;
 	u_int	cur_cs;
@@ -6326,7 +6330,7 @@ ahc_loadseq(struct ahc_softc *ahc)
 		 * Move through the CS table until we find a CS
 		 * that might apply to this instruction.
 		 */
-		for (; cur_cs < num_critical_sections; cur_cs++) {
+		for (; cur_cs < NUM_CRITICAL_SECTIONS; cur_cs++) {
 			if (critical_sections[cur_cs].end <= i) {
 				if (begin_set[cs_count] == TRUE
 				 && end_set[cs_count] == FALSE) {
@@ -7394,60 +7398,49 @@ ahc_createdmamem(bus_dma_tag_t tag, int size, int flags, bus_dmamap_t *mapp,
     caddr_t *vaddr, bus_addr_t *baddr, bus_dma_segment_t *seg, int *nseg,
     const char *myname, const char *what)
 {
-	int error, level = 0;
-
-	if ((error = bus_dmamem_alloc(tag, size, PAGE_SIZE, 0,
-				      seg, 1, nseg, BUS_DMA_NOWAIT)) != 0) {
-		printf("%s: failed to allocate DMA mem for %s, error = %d\n",
-			myname, what, error);
-		goto out;
-	}
-	level++;
-
-	if ((error = bus_dmamem_map(tag, seg, *nseg, size, vaddr,
-				    BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
-		printf("%s: failed to map DMA mem for %s, error = %d\n",
-			myname, what, error);
-		goto out;
-	}
-	level++;
+	int error;
 
 	if ((error = bus_dmamap_create(tag, size, 1, size, 0,
 				       BUS_DMA_NOWAIT | flags, mapp)) != 0) {
                 printf("%s: failed to create DMA map for %s, error = %d\n",
 			myname, what, error);
-		goto out;
+		return (error);
         }
-	level++;
 
+	if ((error = bus_dmamem_alloc(tag, size, PAGE_SIZE, 0,
+				      seg, 1, nseg, BUS_DMA_NOWAIT)) != 0) {
+		printf("%s: failed to allocate DMA mem for %s, error = %d\n",
+			myname, what, error);
+		goto destroy;
+	}
+
+	if ((error = bus_dmamem_map(tag, seg, *nseg, size, vaddr,
+				    BUS_DMA_NOWAIT|BUS_DMA_COHERENT)) != 0) {
+		printf("%s: failed to map DMA mem for %s, error = %d\n",
+			myname, what, error);
+		goto free;
+	}
 
 	if ((error = bus_dmamap_load(tag, *mapp, *vaddr, size, NULL,
 				     BUS_DMA_NOWAIT)) != 0) {
                 printf("%s: failed to load DMA map for %s, error = %d\n",
 			myname, what, error);
-		goto out;
+		goto unmap;
         }
 
 	*baddr = (*mapp)->dm_segs[0].ds_addr;
+	return (0);
 
-	return 0;
-out:
-	printf("ahc_createdmamem error (%d)\n", level);
-	switch (level) {
-	case 3:
-		bus_dmamap_destroy(tag, *mapp);
-		/* FALLTHROUGH */
-	case 2:
-		bus_dmamem_unmap(tag, *vaddr, size);
-		/* FALLTHROUGH */
-	case 1:
-		bus_dmamem_free(tag, seg, *nseg);
-		break;
-	default:
-		break;
-	}
+unmap:
+	bus_dmamem_unmap(tag, *vaddr, size);
+free:
+	bus_dmamem_free(tag, seg, *nseg);
+destroy:
+	bus_dmamap_destroy(tag, *mapp);
 
-	return error;
+	*vaddr = 0;
+	bzero(seg, sizeof(*seg));
+	return (error);
 }
 
 static void
@@ -7456,7 +7449,7 @@ ahc_freedmamem(bus_dma_tag_t tag, int size, bus_dmamap_t map, caddr_t vaddr,
 {
 
 	bus_dmamap_unload(tag, map);
-	bus_dmamap_destroy(tag, map);
 	bus_dmamem_unmap(tag, vaddr, size);
 	bus_dmamem_free(tag, seg, nseg);
+	bus_dmamap_destroy(tag, map);
 }

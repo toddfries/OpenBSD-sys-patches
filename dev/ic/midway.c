@@ -1,4 +1,4 @@
-/*	$OpenBSD: midway.c,v 1.33 2004/09/23 17:45:16 brad Exp $	*/
+/*	$OpenBSD: midway.c,v 1.35 2005/12/17 07:31:27 miod Exp $	*/
 /*	(sync'd to midway.c 1.68)	*/
 
 /*
@@ -156,7 +156,7 @@
 #if defined(__alpha__)
 /* XXX XXX NEED REAL DMA MAPPING SUPPORT XXX XXX */
 #undef vtophys
-#define	vtophys(va)	alpha_XXX_dmamap((vm_offset_t)(va))
+#define	vtophys(va)	alpha_XXX_dmamap((vaddr_t)(va))
 #endif
 #elif defined(__FreeBSD__)
 #include <machine/cpufunc.h>            /* for rdtsc proto for clock.h below */
@@ -1240,7 +1240,7 @@ int on;
   slot = sc->rxvc2slot[vci];
   if ((sc->rxslot[slot].oth_flags & (ENOTHER_FREE|ENOTHER_DRAIN)) != 0)
     return(EINVAL);
-  s = splimp();		/* block out enintr() */
+  s = splnet();		/* block out enintr() */
   oldmode = EN_READ(sc, MID_VC(vci));
   newmode = MIDV_SETMODE(oldmode, MIDV_TRASH) & ~MIDV_INSERVICE;
   EN_WRITE(sc, MID_VC(vci), (newmode | (oldmode & MIDV_INSERVICE)));
@@ -1481,7 +1481,7 @@ int vc;
 
 /*
  * en_start: start transmitting the next packet that needs to go out
- * if there is one.    note that atm_output() has already splimp()'d us.
+ * if there is one.    note that atm_output() has already splnet()'d us.
  */
 
 STATIC void en_start(ifp)

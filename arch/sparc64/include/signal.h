@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.5 2003/06/02 23:27:56 millert Exp $	*/
+/*	$OpenBSD: signal.h,v 1.8 2006/01/08 14:20:17 millert Exp $	*/
 /*	$NetBSD: signal.h,v 1.10 2001/05/09 19:50:49 kleink Exp $ */
 
 /*
@@ -41,17 +41,15 @@
  *	@(#)signal.h	8.1 (Berkeley) 6/11/93
  */
 
-#ifndef	_SPARC_SIGNAL_H_
-#define _SPARC_SIGNAL_H_
+#ifndef	_SPARC64_SIGNAL_H_
+#define _SPARC64_SIGNAL_H_
 
 #ifndef _LOCORE
+#include <sys/cdefs.h>
+
 typedef int sig_atomic_t;
-#endif
 
-#if !defined(_ANSI_SOURCE) && !defined(_POSIX_C_SOURCE) && \
-    !defined(_XOPEN_SOURCE)
-#ifndef _LOCORE
-
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -73,8 +71,10 @@ struct sigcontext {
 	long		sc_o0;		/* %o0 to restore */
 	int		sc_mask;	/* signal mask to restore (new style) */
 };
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #endif /* _LOCORE */
 
+#if defined(_LOCORE) || __BSD_VISIBLE
 /*
  * `Code' arguments to signal handlers.  The names, and the funny numbering.
  * are defined so as to match up with what SunOS uses; I have no idea why
@@ -87,6 +87,6 @@ struct sigcontext {
 #define	FPE_FLTUND_TRAP		0xcc	/* underflow */
 #define	FPE_FLTOPERR_TRAP	0xd0	/* operand error */
 #define	FPE_FLTOVF_TRAP		0xd4	/* overflow */
+#endif
 
-#endif	/* !_ANSI_SOURCE && !_POSIX_C_SOURCE && !_XOPEN_SOURCE */
-#endif	/* !_SPARC_SIGNAL_H_ */
+#endif	/* !_SPARC64_SIGNAL_H_ */

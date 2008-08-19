@@ -1,4 +1,4 @@
-/*      $OpenBSD: cpu.h,v 1.17 2004/07/07 23:10:45 deraadt Exp $      */
+/*      $OpenBSD: cpu.h,v 1.19 2006/01/04 15:41:29 martin Exp $      */
 /*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
 
 /*
@@ -45,7 +45,6 @@
 #include <machine/uvax.h>
 #include <machine/psl.h>
 
-#define enablertclock()
 #define	cpu_wait(p)
 #define	cpu_swapout(p)
 #define	cpu_number()			0
@@ -136,4 +135,16 @@ void	findcpu(void);
 int	kdbrint(int);
 #endif
 #endif /* _KERNEL */
+
+/*
+ * CTL_MACHDEP definitions.
+ */
+#define CPU_CONSDEV		1	/* dev_t: console terminal device */
+#define CPU_MAXID		2	/* number of valid machdep ids */
+
+#define CTL_MACHDEP_NAMES { \
+	{ 0, 0 }, \
+	{ "console_device", CTLTYPE_STRUCT }, \
+}
+
 #endif /* _VAX_CPU_H_ */

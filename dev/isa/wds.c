@@ -1,4 +1,4 @@
-/*	$OpenBSD: wds.c,v 1.20 2005/02/17 18:07:36 jfb Exp $	*/
+/*	$OpenBSD: wds.c,v 1.22 2005/12/03 17:13:22 krw Exp $	*/
 /*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG
@@ -104,7 +104,7 @@ struct wds_mbx {
 	struct wds_mbx_in *tmbi;	/* Target Mail Box in */
 };
 
-#define	KVTOPHYS(x)	vtophys(x)
+#define	KVTOPHYS(x)	vtophys((vaddr_t)(x))
 
 struct wds_softc {
 	struct device sc_dev;
@@ -1075,7 +1075,6 @@ wds_scsi_cmd(xs)
 		mflags = ISADMA_MAP_BOUNCE | ISADMA_MAP_WAITOK;
 #endif
 	if ((scb = wds_get_scb(sc, flags, NEEDBUFFER(sc))) == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
 		return TRY_AGAIN_LATER;
 	}
 	scb->xs = xs;

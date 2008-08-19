@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.c,v 1.13 2005/08/14 11:02:32 miod Exp $ */
+/*	$OpenBSD: macebus.c,v 1.18 2006/01/04 20:23:07 miod Exp $ */
 
 /*
  * Copyright (c) 2000-2004 Opsycon AB  (www.opsycon.se)
@@ -67,9 +67,6 @@ void macebus_intr_makemasks(void);
 void macebus_do_pending_int(int);
 intrmask_t macebus_iointr(intrmask_t, struct trap_frame *);
 intrmask_t macebus_aux(intrmask_t, struct trap_frame *);
-
-long mace_ext_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof (long)];
-long crime_ext_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof (long)];
 
 int maceticks;		/* Time tracker for special events */
 
@@ -200,13 +197,11 @@ macebusattach(struct device *parent, struct device *self, void *aux)
 	 */
 	macebus_tag.bus_extent = extent_create("mace_space",
 	    macebus_tag.bus_base, macebus_tag.bus_base + 0x00400000,
-	    M_DEVBUF, (caddr_t)mace_ext_storage,
-	    sizeof(mace_ext_storage), EX_NOCOALESCE|EX_NOWAIT);
+	    M_DEVBUF, NULL, 0, EX_NOCOALESCE | EX_NOWAIT);
 
 	crimebus_tag.bus_extent = extent_create("crime_space",
 	    crimebus_tag.bus_base, crimebus_tag.bus_base + 0x00400000,
-	    M_DEVBUF, (caddr_t)crime_ext_storage,
-	    sizeof(crime_ext_storage), EX_NOCOALESCE|EX_NOWAIT);
+	    M_DEVBUF, NULL, 0, EX_NOCOALESCE | EX_NOWAIT);
 
 	/*
 	 *  Map and set up CRIME control registers.
@@ -357,6 +352,8 @@ mace_write_8(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, u_int64_t v)
 #endif
 }
 
+extern int extent_malloc_flags;
+
 int
 mace_space_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
     int cacheable, bus_space_handle_t *bshp)
@@ -367,24 +364,26 @@ mace_space_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
 	bpa = t->bus_base + offs;
 
 	/* Handle special mapping separately */
-	if ((bpa >= 0x1f380000 && (bpa+size) <= 0x1f3a0000) ) {
+	if (bpa >= (MACEBUS_BASE + MACE_ISAX_OFFS) &&
+	    (bpa + size) < (MACEBUS_BASE + MACE_ISAX_OFFS + MACE_ISAX_SIZE)) {
 		*bshp = PHYS_TO_KSEG1(bpa);
 		return 0;
 	}
 
 	if ((error = extent_alloc_region(t->bus_extent, bpa, size,
-	    EX_NOWAIT | EX_MALLOCOK))) {
+	    EX_NOWAIT | extent_malloc_flags))) {
 		return error;
 	}
 
-	if ((error  = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
-		if (extent_free(t->bus_extent, bpa, size, EX_NOWAIT |
-		    ((phys_map != NULL) ? EX_MALLOCOK : 0))) {
+	if ((error = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
+		if (extent_free(t->bus_extent, bpa, size,
+		    EX_NOWAIT | extent_malloc_flags)) {
 			printf("bus_space_map: pa %p, size %p\n", bpa, size);
 			printf("bus_space_map: can't free region\n");
 		}
 	}
-	return 0;
+
+	return (error);
 }
 
 void
@@ -399,7 +398,8 @@ mace_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 	len = size+off;
 
 	paddr = KSEG1_TO_PHYS(bsh);
-	if (paddr >= 0x1f380000 && (paddr+size) <= 0x1f3a0000)
+	if (paddr >= (MACEBUS_BASE + MACE_ISAX_OFFS) &&
+	    (paddr+size) <= (MACEBUS_BASE + MACE_ISAX_OFFS + MACE_ISAX_SIZE))
 		return;
 
 	if (pmap_extract(pmap_kernel(), bsh, (void *)&paddr) == 0) {
@@ -407,14 +407,10 @@ mace_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 		return;
 	}
 
-	if (phys_map != NULL &&
-	    ((sva >= VM_MIN_KERNEL_ADDRESS) && (sva < VM_MAX_KERNEL_ADDRESS))) {
-		/* do not free memory which was stolen from the vm system */
-		uvm_km_free(kernel_map, sva, len);
-	}
+	uvm_km_free(kernel_map, sva, len);
 
-	if (extent_free(t->bus_extent, paddr, size, EX_NOWAIT |
-	    ((phys_map != NULL) ? EX_MALLOCOK : 0))) {
+	if (extent_free(t->bus_extent, paddr, size,
+	    EX_NOWAIT | extent_malloc_flags)) {
 		printf("bus_space_map: pa %p, size %p\n", paddr, size);
 		printf("bus_space_map: can't free region\n");
 	}

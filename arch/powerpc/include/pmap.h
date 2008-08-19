@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.38 2004/08/06 22:39:13 deraadt Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.41 2005/12/17 07:31:26 miod Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 1996/09/30 16:34:29 ws Exp $	*/
 
 /*-
@@ -101,13 +101,14 @@ boolean_t pteclrbits(paddr_t pa, u_int mask, u_int clear);
 
 
 #define pmap_clear_modify(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_CHG, TRUE))
+	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_CHG_32, TRUE))
 #define	pmap_clear_reference(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_REF, TRUE))
+	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_REF_32, TRUE))
 #define	pmap_is_modified(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_CHG, FALSE))
+	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_CHG_32, FALSE))
 #define	pmap_is_referenced(page) \
-	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_REF, FALSE))
+	(pteclrbits(VM_PAGE_TO_PHYS(page), PTE_REF_32, FALSE))
+
 #define	pmap_unwire(pm, va)
 #define	pmap_phys_address(x)		(x)
 #define pmap_update(pmap)	/* nothing (yet) */
@@ -128,11 +129,12 @@ void pmap_bootstrap(u_int kernelstart, u_int kernelend);
 void pmap_pinit(struct pmap *);
 void pmap_release(struct pmap *);
 
-void pmap_real_memory(vm_offset_t *start, vm_size_t *size);
+void pmap_real_memory(vaddr_t *start, vsize_t *size);
 void switchexit(struct proc *);
 
 int pte_spill_v(struct pmap *pm, u_int32_t va, u_int32_t dsisr, int exec_fault);
 #define pmap_copy(dst_pmap, src_pmap, dst_addr, len, src_addr) ;
+int reserve_dumppages(caddr_t p);
 
 void pmap_proc_iflush(struct proc *proc, vaddr_t va, vsize_t len);
 #define pmap_unuse_final(p)		/* nothing */

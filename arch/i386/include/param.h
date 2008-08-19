@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.30 2005/07/31 15:31:13 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.33 2005/12/13 01:56:43 martin Exp $	*/
 /*	$NetBSD: param.h,v 1.29 1996/03/04 05:04:26 cgd Exp $	*/
 
 /*-
@@ -84,7 +84,6 @@
 #define	KERNBASE	0xd0000000
 
 #define	KERNTEXTOFF	(KERNBASE+0x100000)	/* start of kernel text */
-#define	BTOPKERNBASE	((u_long)KERNBASE >> PGSHIFT)
 
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
@@ -146,9 +145,3 @@
  */
 #define	i386_round_pdr(x)	((((unsigned)(x)) + PDOFSET) & ~PDOFSET)
 #define	i386_trunc_pdr(x)	((unsigned)(x) & ~PDOFSET)
-#define	i386_btod(x)		((unsigned)(x) >> PDSHIFT)
-#define	i386_dtob(x)		((unsigned)(x) << PDSHIFT)
-#define	i386_round_page(x)	((((unsigned)(x)) + PGOFSET) & ~PGOFSET)
-#define	i386_trunc_page(x)	((unsigned)(x) & ~PGOFSET)
-#define	i386_btop(x)		((unsigned)(x) >> PGSHIFT)
-#define	i386_ptob(x)		((unsigned)(x) << PGSHIFT)

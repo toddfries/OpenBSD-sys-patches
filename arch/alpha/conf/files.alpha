@@ -1,4 +1,4 @@
-#	$OpenBSD: files.alpha,v 1.68 2005/07/14 02:09:46 uwe Exp $
+#	$OpenBSD: files.alpha,v 1.72 2006/02/23 23:54:59 miod Exp $
 #	$NetBSD: files.alpha,v 1.32 1996/11/25 04:03:21 cgd Exp $
 #
 # alpha-specific configuration info
@@ -75,7 +75,7 @@ attach	tc at tcbus
 
 device	tcasic: tcbus
 attach	tcasic at mainbus
-file	arch/alpha/tc/tcasic.c			tcasic
+file	arch/alpha/tc/tcasic.c			tcasic	needs-flag
 file	arch/alpha/tc/tc_bus_mem.c		tcasic
 file	arch/alpha/tc/tc_dma.c			tcasic
 file	arch/alpha/tc/tc_dma_3000_300.c		tcasic & dec_3000_300
@@ -134,9 +134,6 @@ file	arch/alpha/isa/isa_machdep.c		isa
 define	isadma_bounce
 file	arch/alpha/isa/isadma_bounce.c		isadma_bounce & isa_dma
 
-device	isabeep
-attach	isabeep at pcppi
-
 include	"dev/pckbc/files.pckbc"
 
 # Floppy disk controller
@@ -163,14 +160,14 @@ include	"dev/eisa/files.eisa"
 
 # include "dev/pci/files.pci" XXX SEE ABOVE
 
-file	arch/alpha/pci/pciide_machdep.c		pci
+file	arch/alpha/pci/pciide_machdep.c		pciide
 
 define	alpha_pci_sgmap_pte64
 file	arch/alpha/pci/pci_sgmap_pte64.c	alpha_pci_sgmap_pte64
 
 device	apecs: pcibus, alpha_sgmap, alpha_pci_sgmap_pte64
 attach	apecs at mainbus
-file	arch/alpha/pci/apecs.c			apecs
+file	arch/alpha/pci/apecs.c			apecs	needs-flag
 file	arch/alpha/pci/apecs_bus_io.c		apecs
 file	arch/alpha/pci/apecs_bus_mem.c		apecs
 file	arch/alpha/pci/apecs_pci.c		apecs
@@ -178,7 +175,7 @@ file	arch/alpha/pci/apecs_dma.c		apecs
 
 device	lca: pcibus, alpha_sgmap, alpha_pci_sgmap_pte64
 attach	lca at mainbus
-file	arch/alpha/pci/lca.c			lca
+file	arch/alpha/pci/lca.c			lca	needs-flag
 file	arch/alpha/pci/lca_bus_io.c		lca
 file	arch/alpha/pci/lca_bus_mem.c		lca
 file	arch/alpha/pci/lca_pci.c		lca
@@ -186,7 +183,7 @@ file	arch/alpha/pci/lca_dma.c		lca
 
 device	cia: pcibus, alpha_sgmap, alpha_pci_sgmap_pte64
 attach	cia at mainbus
-file	arch/alpha/pci/cia.c			cia
+file	arch/alpha/pci/cia.c			cia	needs-flag
 file	arch/alpha/pci/cia_dma.c		cia
 file	arch/alpha/pci/cia_pci.c		cia
 file	arch/alpha/pci/cia_bus_io.c		cia
@@ -204,7 +201,7 @@ file	arch/alpha/pci/irongate_pci.c		irongate
 
 device	tsc {}
 attach	tsc at mainbus
-file	arch/alpha/pci/tsc.c			dec_6600
+file	arch/alpha/pci/tsc.c			tsc
 
 device	tsp: pcibus, alpha_sgmap, alpha_pci_sgmap_pte64
 attach	tsp at tsc
@@ -278,7 +275,7 @@ file	arch/alpha/alpha/process_machdep.c
 file	arch/alpha/alpha/prom.c
 file	arch/alpha/alpha/sys_machdep.c
 file	arch/alpha/alpha/trap.c
-file	arch/alpha/alpha/fp_complete.c
+file	arch/alpha/alpha/fp_complete.c		!no_ieee
 file	arch/alpha/alpha/vm_machdep.c
 file	arch/alpha/alpha/disksubr.c
 file	arch/alpha/dev/bus_dma.c
@@ -294,7 +291,7 @@ file	arch/alpha/alpha/in_cksum.c		inet
 file	arch/alpha/alpha/promcons.c
 
 # XXX
-# file	arch/alpha/alpha/cpuconf.c
+file	arch/alpha/alpha/cpuconf.c
 file	arch/alpha/alpha/dec_2100_a50.c		dec_2100_a50	needs-flag
 file	arch/alpha/alpha/dec_21000.c		dec_21000	needs-flag
 file	arch/alpha/alpha/dec_3000_300.c		dec_3000_300	needs-flag
@@ -315,6 +312,11 @@ file	arch/alpha/alpha/osf1_locore.s		compat_osf1
 # NetBSD binary compatibility (COMPAT_NETBSD)
 include	"../../../compat/netbsd/files.netbsd"
 file	arch/alpha/alpha/netbsd_machdep.c	compat_netbsd
+
+#
+# Machine-independent I2C drivers
+#
+include "dev/i2c/files.i2c"
 
 #
 # Machine-independent USB drivers

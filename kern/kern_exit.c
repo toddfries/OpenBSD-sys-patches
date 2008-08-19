@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.54 2004/12/26 21:22:13 miod Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.59 2006/02/20 19:39:11 miod Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -82,19 +82,28 @@
  *	Death of process.
  */
 int
-sys_exit(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_exit(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_exit_args /* {
 		syscallarg(int) rval;
 	} */ *uap = v;
 
-	exit1(p, W_EXITCODE(SCARG(uap, rval), 0));
+	exit1(p, W_EXITCODE(SCARG(uap, rval), 0), EXIT_NORMAL);
 	/* NOTREACHED */
 	return (0);
 }
+
+#ifdef RTHREADS
+int
+sys_threxit(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_threxit_args *uap = v;
+
+	exit1(p, W_EXITCODE(SCARG(uap, rval), 0), EXIT_THREAD);
+
+	return (0);
+}
+#endif
 
 /*
  * Exit: deallocate address space and other resources, change proc state
@@ -102,15 +111,46 @@ sys_exit(p, v, retval)
  * status and rusage for wait().  Check for child processes and orphan them.
  */
 void
-exit1(p, rv)
-	struct proc *p;
-	int rv;
+exit1(struct proc *p, int rv, int flags)
 {
 	struct proc *q, *nq;
 
 	if (p->p_pid == 1)
 		panic("init died (signal %d, exit %d)",
 		    WTERMSIG(rv), WEXITSTATUS(rv));
+	
+#ifdef RTHREADS
+	/*
+	 * if one thread calls exit, we take down everybody.
+	 * we have to be careful not to get recursively caught.
+	 * this is kinda sick.
+	 */
+	if (flags == EXIT_NORMAL && p != p->p_thrparent &&
+	    (p->p_thrparent->p_flag & P_WEXIT) == 0) {
+		/*
+		 * we are one of the threads.  we SIGKILL the parent,
+		 * it will wake us up again, then we proceed.
+		 */
+		p->p_thrparent->p_flag |= P_IGNEXITRV;
+		p->p_thrparent->p_xstat = rv;
+		psignal(p->p_thrparent, SIGKILL);
+		tsleep(&p->p_thrparent->p_thrchildren, PUSER, "thrdying", 0);
+	} else if (p == p->p_thrparent) {
+		p->p_flag |= P_WEXIT;
+		if (flags == EXIT_NORMAL) {
+			q = LIST_FIRST(&p->p_thrchildren);
+			for (; q != NULL; q = nq) {
+				nq = LIST_NEXT(q, p_thrsib);
+				q->p_flag |= P_IGNEXITRV;
+				q->p_xstat = rv;
+				psignal(q, SIGKILL);
+			}
+		}
+		wakeup(&p->p_thrchildren);
+		while (!LIST_EMPTY(&p->p_thrchildren))
+			tsleep(&p->p_thrchildren, PUSER, "thrdeath", 0);
+	}
+#endif
 
 	if (p->p_flag & P_PROFIL)
 		stopprofclock(p);
@@ -141,7 +181,7 @@ exit1(p, rv)
 	semexit(p);
 #endif
 	if (SESS_LEADER(p)) {
-		register struct session *sp = p->p_session;
+		struct session *sp = p->p_session;
 
 		if (sp->s_ttyvp) {
 			/*
@@ -223,11 +263,21 @@ exit1(p, rv)
 		}
 	}
 
+#ifdef RTHREADS
+	/* unlink oursleves from the active threads */
+	if (p != p->p_thrparent) {
+		LIST_REMOVE(p, p_thrsib);
+		if (LIST_EMPTY(&p->p_thrparent->p_thrchildren))
+			wakeup(&p->p_thrparent->p_thrchildren);
+	}
+#endif
+
 	/*
 	 * Save exit status and final rusage info, adding in child rusage
 	 * info and self times.
 	 */
-	p->p_xstat = rv;
+	if (!(p->p_flag & P_IGNEXITRV))
+		p->p_xstat = rv;
 	*p->p_ru = p->p_stats->p_ru;
 	calcru(p, &p->p_ru->ru_utime, &p->p_ru->ru_stime, NULL);
 	ruadd(p->p_ru, &p->p_stats->p_cru);
@@ -404,19 +454,16 @@ reaper(void)
 }
 
 pid_t
-sys_wait4(q, v, retval)
-	register struct proc *q;
-	void *v;
-	register_t *retval;
+sys_wait4(struct proc *q, void *v, register_t *retval)
 {
-	register struct sys_wait4_args /* {
+	struct sys_wait4_args /* {
 		syscallarg(pid_t) pid;
 		syscallarg(int *) status;
 		syscallarg(int) options;
 		syscallarg(struct rusage *) rusage;
 	} */ *uap = v;
-	register int nfound;
-	register struct proc *p, *t;
+	int nfound;
+	struct proc *p, *t;
 	int status, error;
 
 	if (SCARG(uap, pid) == 0)
@@ -520,9 +567,7 @@ loop:
  * make process 'parent' the new parent of process 'child'.
  */
 void
-proc_reparent(child, parent)
-	register struct proc *child;
-	register struct proc *parent;
+proc_reparent(struct proc *child, struct proc *parent)
 {
 
 	if (child->p_pptr == parent)
@@ -540,6 +585,8 @@ void
 proc_zap(struct proc *p)
 {
 	pool_put(&rusage_pool, p->p_ru);
+	if (p->p_ptstat)
+		free(p->p_ptstat, M_SUBPROC);
 
 	/*
 	 * Finally finished with old proc entry.

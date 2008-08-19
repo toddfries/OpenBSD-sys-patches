@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.61 2005/08/01 03:03:13 david Exp $
+#	$OpenBSD: files.sparc64,v 1.65 2006/02/10 05:28:56 djm Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -192,6 +192,10 @@ device	fd: disk
 attach	fd at fdc
 file	arch/sparc64/dev/fd.c			fdc | fd	needs-flag
 
+# PCF8584 I2C Controller
+attach	pcfiic at ebus with pcfiic_ebus
+file	arch/sparc64/dev/pcfiic_ebus.c		pcfiic_ebus
+
 file	arch/sparc64/dev/consinit.c
 
 file	arch/sparc64/fpu/fpu.c
@@ -249,6 +253,22 @@ major	{cd = 18}
 major	{rd = 5}
 
 #
+# Machine-independent I2C drivers
+#
+include "dev/i2c/files.i2c"
+file	arch/sparc64/dev/ofwi2c.c		i2cbus
+
+#
 # Machine-independent USB drivers
 #
 include	"dev/usb/files.usb"
+
+#
+# Machine-dependent I2C drivers
+#
+
+# PCF8591 ADC I2C Sensor (needs ofw, so sparc64 only for now)
+device	pcfadc
+attach	pcfadc at i2c
+file	arch/sparc64/dev/pcf8591_ofw.c		pcfadc
+

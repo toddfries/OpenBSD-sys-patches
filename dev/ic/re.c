@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.14.2.1 2006/05/23 00:26:03 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.17 2006/01/30 00:32:45 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -359,7 +359,7 @@ re_miibus_readreg(struct device *dev, int phy, int reg)
 	u_int16_t		re8139_reg = 0;
 	int			s;
 
-	s = splimp();
+	s = splnet();
 
 	if (sc->rl_type == RL_8169) {
 		rval = re_gmii_readreg(dev, phy, reg);
@@ -419,7 +419,7 @@ re_miibus_writereg(struct device *dev, int phy, int reg, int data)
 	u_int16_t		re8139_reg = 0;
 	int			s;
 
-	s = splimp();
+	s = splnet();
 
 	if (sc->rl_type == RL_8169) {
 		re_gmii_writereg(dev, phy, reg, data);
@@ -1066,10 +1066,7 @@ re_rxeof(sc)
 	struct ifnet		*ifp;
 	int			i, total_len;
 	struct rl_desc		*cur_rx;
-#ifdef RE_VLAN
-	struct m_tag		*mtag;
-#endif
-	u_int32_t		rxstat, rxvlan;
+	u_int32_t		rxstat;
 
 	ifp = &sc->sc_arpcom.ac_if;
 	i = sc->rl_ldata.rl_rx_prodidx;
@@ -1087,7 +1084,6 @@ re_rxeof(sc)
 		m = sc->rl_ldata.rl_rx_mbuf[i];
 		total_len = RL_RXBYTES(cur_rx);
 		rxstat = letoh32(cur_rx->rl_cmdstat);
-		rxvlan = letoh32(cur_rx->rl_vlanctl);
 
 		/* Invalidate the RX mbuf and unload its map */
 
@@ -1205,20 +1201,6 @@ re_rxeof(sc)
 		    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
 			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 
-#ifdef RE_VLAN
-		if (rxvlan & RL_RDESC_VLANCTL_TAG) {
-			mtag = m_tag_get(PACKET_TAG_VLAN, sizeof(u_int),
-			    M_NOWAIT);
-			if (mtag == NULL) {
-				ifp->if_ierrors++;
-				m_freem(m);
-				continue;
-			}
-			*(u_int *)(mtag + 1) = 
-			    be16toh(rxvlan & RL_RDESC_VLANCTL_DATA);
-			m_tag_prepend(m, mtag);
-		}
-#endif
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
 			bpf_mtap(ifp->if_bpf, m);
@@ -1509,7 +1491,7 @@ re_start(ifp)
 {
 	struct rl_softc	*sc;
 	struct mbuf		*m_head = NULL;
-	int			idx;
+	int			idx, queued = 0;
 
 	sc = ifp->if_softc;
 
@@ -1532,7 +1514,11 @@ re_start(ifp)
 		if (ifp->if_bpf)
 			bpf_mtap(ifp->if_bpf, m_head);
 #endif
+		queued++;
 	}
+
+	if (queued == 0)
+		return;
 
 	/* Flush the TX descriptors */
 
@@ -1577,7 +1563,7 @@ re_init(struct ifnet *ifp)
 	u_int32_t		reg;
 	int			s;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
@@ -1764,7 +1750,7 @@ re_ioctl(ifp, command, data)
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int			s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command,
 	    data)) > 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pm_direct.h,v 1.5 2003/10/16 03:54:48 deraadt Exp $	*/
+/*	$OpenBSD: pm_direct.h,v 1.9 2005/12/22 22:55:25 miod Exp $	*/
 /*	$NetBSD: pm_direct.h,v 1.5 1999/07/12 15:54:55 tsubai Exp $	*/
 
 /*
@@ -51,10 +51,9 @@ int	pmgrop(PMData *);
 int	pm_adb_op(u_char *, void *, void *, int);
 void	pm_adb_restart(void);
 void	pm_adb_poweroff(void);
-void	pm_check_adb_devices(int);
 void	pm_intr(void);
-void	pm_read_date_time(u_long *);
-void	pm_set_date_time(u_long);
+void	pm_read_date_time(time_t *);
+void	pm_set_date_time(time_t);
 void	pm_setup_adb(void);
 
 struct pmu_battery_info
@@ -68,14 +67,10 @@ struct pmu_battery_info
 
 int pm_battery_info(int, struct pmu_battery_info *);
 
-int pm_read_nvram(int);
-void pm_write_nvram(int, int);
-int pm_read_brightness(void);
-void pm_set_brightness(int);
-void pm_init_brightness(void);
 void pm_eject_pcmcia(int);
 
 /* PMU commands */
+#define PMU_RESET_ADB		0x00	/* Reset ADB */
 #define PMU_POWER_OFF		0x7e	/* Turn Power off */
 #define PMU_RESET_CPU		0xd0	/* Reset CPU */
 
@@ -98,6 +93,8 @@ void pm_eject_pcmcia(int);
 
 #define PMU_SMART_BATTERY_STATE	0x6f	/* Read battery state */
 
+#define PMU_I2C			0x9a	/* I2C */
+
 /* Bits in PMU interrupt and interrupt mask bytes */
 #define PMU_INT_ADB_AUTO	0x04	/* ADB autopoll, when PMU_INT_ADB */
 #define PMU_INT_PCEJECT		0x04	/* PC-card eject buttons */
@@ -106,6 +103,7 @@ void pm_eject_pcmcia(int);
 #define PMU_INT_BATTERY		0x20
 #define PMU_INT_WAKEUP		0x40
 #define PMU_INT_TICK		0x80	/* 1-second tick interrupt */
+#define PMU_INT_ALL		0xff	/* Mask of all interrupts */
 
 /* Bits to use with the PMU_POWER_CTRL0 command */
 #define PMU_POW0_ON		0x80	/* OR this to power ON the device */
@@ -133,5 +131,10 @@ enum {
 
 #define PMU_PWR_AC_PRESENT	(1 << 0)
 #define PMU_PWR_BATT_PRESENT	(1 << 2)
+
+/* PMU I2C */
+#define PMU_I2C_SIMPLE		0x00
+#define PMU_I2C_NORMAL		0x01
+#define PMU_I2C_COMBINED	0x02
 
 #endif

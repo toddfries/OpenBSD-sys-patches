@@ -1,4 +1,4 @@
-/*	$OpenBSD: it.c,v 1.15 2005/07/26 19:08:09 grange Exp $	*/
+/*	$OpenBSD: it.c,v 1.18 2006/01/23 18:43:22 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2003 Julien Bordet <zejames@greyhats.org>
@@ -30,7 +30,6 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/sensors.h>
-#include <sys/timeout.h>
 #include <machine/bus.h>
 
 #include <dev/isa/isareg.h>
@@ -68,8 +67,6 @@ struct cfattach it_ca = {
 struct cfdriver it_cd = {
 	NULL, "it", DV_DULL
 };
-
-struct timeout it_timeout;
 
 int
 it_match(struct device *parent, void *match, void *aux)
@@ -136,6 +133,12 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	it_setup_volt(sc, 3, 9);
 	it_setup_temp(sc, 12, 3);
 
+	if (sensor_task_register(sc, it_refresh, 5)) {
+		printf("%s: unable to register update task\n",
+		    sc->sc_dev.dv_xname);
+		return;
+	}
+
 	/* Activate monitoring */
 	cr = it_readreg(sc, ITD_CONFIG);
 	cr |= 0x01 | 0x08;
@@ -145,11 +148,8 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	for (i = 0; i < sc->numsensors; ++i) {
 		strlcpy(sc->sensors[i].device, sc->sc_dev.dv_xname,
 		    sizeof(sc->sensors[i].device));
-		SENSOR_ADD(&sc->sensors[i]);
+		sensor_add(&sc->sensors[i]);
 	}
-
-	timeout_set(&it_timeout, it_refresh, sc);
-	timeout_add(&it_timeout, (15 * hz) / 10);
 }
 
 u_int8_t
@@ -202,9 +202,6 @@ it_setup_volt(struct it_softc *sc, int start, int n)
 	sc->sensors[start + 8].rfact = 10000;
 	snprintf(sc->sensors[start + 8].desc, sizeof(sc->sensors[8].desc),
 	    "VBAT");
-
-	/* Enable voltage monitoring */
-	it_writereg(sc, ITD_VOLTENABLE, 0xff);
 }
 
 void
@@ -218,11 +215,6 @@ it_setup_temp(struct it_softc *sc, int start, int n)
 		    sizeof(sc->sensors[start + i].desc),
 		    "Temp%d", i + 1);
 	}
-
-	/* Enable temperature monitoring
-	 * bits 7 and 8 are reserved, so we don't change them */
-	i = it_readreg(sc, ITD_TEMPENABLE) & 0xc0;
-	it_writereg(sc, ITD_TEMPENABLE, i | 0x38);
 }
 
 void
@@ -236,11 +228,6 @@ it_setup_fan(struct it_softc *sc, int start, int n)
 		    sizeof(sc->sensors[start + i].desc),
 		    "Fan%d", i + 1);
 	}
-
-	/* Enable fan rpm monitoring
-	 * bits 4 to 6 are the only interesting bits */
-	i = it_readreg(sc, ITD_FANENABLE) & 0x8f;
-	it_writereg(sc, ITD_FANENABLE, i | 0x70);
 }
 
 void
@@ -327,5 +314,4 @@ it_refresh(void *arg)
 	struct it_softc *sc = (struct it_softc *)arg;
 
 	it_refresh_sensor_data(sc);
-	timeout_add(&it_timeout, (15 * hz) / 10);
 }

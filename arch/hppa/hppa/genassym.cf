@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.27 2005/04/21 04:39:35 mickey Exp $
+#	$OpenBSD: genassym.cf,v 1.29 2006/01/10 01:17:28 martin Exp $
 
 #
 # Copyright (c) 1982, 1990, 1993
@@ -42,7 +42,6 @@ include <sys/user.h>
 
 include <uvm/uvm.h>
 
-include	<machine/types.h>
 include <machine/cpu.h>
 include <machine/psl.h>
 include <machine/reg.h>
@@ -165,3 +164,6 @@ export	SYSCALLGATE
 export	SYS_exit
 export	SYS_execve
 export	SYS_sigreturn
+
+# errno
+export	EFAULT

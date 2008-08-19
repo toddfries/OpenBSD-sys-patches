@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.9 2004/12/25 23:02:25 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.11 2005/12/27 18:31:10 miod Exp $	*/
 /*
  * Copyright (c) 1996 Per Fogelstrom
  * Copyright (c) 1995 Theo de Raadt
@@ -61,21 +61,20 @@
 struct  device *parsedisk(char *, int, int, dev_t *);
 void	disk_configure(void);
 void    rootconf(void);
-void	swapconf(void);
 extern void dumpconf(void);
-static int findblkmajor(struct device *);
-static struct device * getdisk(char *, int, int, dev_t *);
+int findblkmajor(struct device *);
+struct device * getdisk(char *, int, int, dev_t *);
 struct device *getdevunit(char *, int);
-struct devmap *boot_findtype(char *);
+const struct devmap *boot_findtype(char *);
 int makebootdev(const char *, int);
 const char *boot_get_path_component(const char *, char *, int *);
 const char *boot_getnr(const char *, int *);
 
 /* Struct translating from ARCS to bsd. */
 struct devmap {
-	char	*att;
-	char	*dev;
-	int	what;
+	const char	*att;
+	const char	*dev;
+	int		what;
 };
 #define	DEVMAP_TYPE	0x01
 #define	DEVMAP_UNIT	0x02
@@ -112,28 +111,7 @@ void
 disk_configure()
 {
 	rootconf();
-	swapconf();
 	dumpconf();
-}
-
-/*
- * Configure swap space and related parameters.
- */
-void
-swapconf()
-{
-	struct swdevt *swp;
-	int nblks;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		if (bdevsw[major(swp->sw_dev)].d_psize) {
-			nblks = (*bdevsw[major(swp->sw_dev)].d_psize)(swp->sw_dev);
-			if (nblks != -1 && (swp->sw_nblks == 0 || swp->sw_nblks > nblks)) {
-				swp->sw_nblks = nblks;
-			}
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
-	}
 }
 
 /*
@@ -141,15 +119,15 @@ swapconf()
  * code in the sparc port to nuke the "options GENERIC" stuff.
  */
 
-static	struct nam2blk {
-	char *name;
+const struct nam2blk {
+	const char *name;
 	int  maj;
 } nam2blk[] = {
 	{ "sd",	0 },	/* 0 = sd */
 	{ "wd",	4 },	/* 4 = wd */
 };
 
-static int
+int
 findblkmajor(dv)
 	struct device *dv;
 {
@@ -162,7 +140,7 @@ findblkmajor(dv)
 	 return (-1);
 }
 
-static struct device *
+struct device *
 getdisk(str, len, defpart, devp)
 	char *str;
 	int len, defpart;
@@ -449,17 +427,17 @@ getdevunit(name, unit)
 	return dev;
 }
 
-struct devmap *
+const struct devmap *
 boot_findtype(char *s)
 {
-	static struct devmap devmap[] = {
+	const struct devmap devmap[] = {
 		{ "scsi",	"sd",	DEVMAP_TYPE },
 		{ "disk",	"",	DEVMAP_UNIT },
 		{ "part",	"",	DEVMAP_PART },
 		{ "partition",	"",	DEVMAP_PART },
 		{ NULL, NULL }
 	};
-	struct devmap *dp = &devmap[0];
+	const struct devmap *dp = &devmap[0];
 
 	while (dp->att) {
 		if (strcmp (s, dp->att) == 0) {
@@ -468,7 +446,7 @@ boot_findtype(char *s)
 		dp++;
 	}
 	if (dp->att)
-		return dp ;
+		return dp;
 	else
 		return NULL;
 }
@@ -485,7 +463,7 @@ makebootdev(const char *bp, int offs)
 	char namebuf[256];
 	const char *cp, *ncp, *ecp, *devname;
 	int	i, unit, partition;
-	struct devmap *dp;
+	const struct devmap *dp;
 
 	if (bp == NULL)
 		return -1;

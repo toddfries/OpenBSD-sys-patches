@@ -1,4 +1,4 @@
-/*	$OpenBSD: cfb.c,v 1.14 2002/03/14 03:15:51 millert Exp $	*/
+/*	$OpenBSD: cfb.c,v 1.16 2006/01/02 05:21:28 brad Exp $	*/
 /*	$NetBSD: cfb.c,v 1.7 1996/12/05 01:39:39 cgd Exp $	*/
 
 /*
@@ -52,11 +52,7 @@
 #include <machine/autoconf.h>
 #include <machine/pte.h>
 
-#ifdef __BROKEN_INDIRECT_CONFIG
 int	cfbmatch(struct device *, void *, void *);
-#else
-int	cfbmatch(struct device *, struct cfdata *, void *);
-#endif
 void	cfbattach(struct device *, struct device *, void *);
 
 struct cfattach cfb_ca = {
@@ -119,11 +115,7 @@ struct wsdisplay_accessops cfb_accessops = {
 int
 cfbmatch(parent, match, aux)
 	struct device *parent;
-#ifdef __BROKEN_INDIRECT_CONFIG
 	void *match;
-#else
-	struct cfdata *match;
-#endif
 	void *aux;
 {
 	struct tc_attach_args *ta = aux;
@@ -314,7 +306,7 @@ cfbmmap(v, offset, prot)
 
 	if (offset > CFB_SIZE)
 		return (-1);
-	return alpha_btop(sc->sc_dc->dc_paddr + offset);
+	return atop(sc->sc_dc->dc_paddr + offset);
 }
 
 int

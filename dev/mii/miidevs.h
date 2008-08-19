@@ -1,10 +1,10 @@
-/*	$OpenBSD: miidevs.h,v 1.66 2005/08/27 14:15:57 brad Exp $	*/
+/*	$OpenBSD: miidevs.h,v 1.75 2006/02/12 00:38:50 brad Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: miidevs,v 1.63 2005/08/27 14:15:47 brad Exp 
+ *	OpenBSD: miidevs,v 1.72 2006/02/12 00:38:27 brad Exp 
  */
 /* $NetBSD: miidevs,v 1.3 1998/11/05 03:43:43 thorpej Exp $ */
 
@@ -53,11 +53,14 @@
 #define	MII_OUI_LUCENT	0x00601d	/* Lucent Technologies */
 #define	MII_OUI_ALTIMA	0x0010a9	/* Altima Communications */
 #define	MII_OUI_AMD	0x00001a	/* Advanced Micro Devices */
+#define	MII_OUI_ASIX	0x000ec6	/* ASIX Electronics */
 #define	MII_OUI_BROADCOM	0x001018	/* Broadcom Corporation */
+#define	MII_OUI_CENIX	0x000749	/* CENiX Inc. */
 #define	MII_OUI_CICADA	0x0003F1	/* Cicada Semiconductor */
 #define	MII_OUI_ENABLESEMI	0x0010dd	/* Enable Semiconductor */
 #define	MII_OUI_DAVICOM	0x00606e	/* Davicom Semiconductor */
 #define	MII_OUI_MARVELL	0x005043	/* Marvell Semiconductor */
+#define	MII_OUI_ICPLUS	0x0090c3	/* IC Plus Corp. */
 #define	MII_OUI_ICS	0x00a0be	/* Integrated Circuit Systems */
 #define	MII_OUI_INTEL	0x00aa00	/* Intel */
 #define	MII_OUI_JATO	0x00e083	/* Jato Technologies */
@@ -72,6 +75,7 @@
 #define	MII_OUI_SIS	0x00e006	/* Silicon Integrated Systems */
 #define	MII_OUI_TI	0x080028	/* Texas Instruments */
 #define	MII_OUI_TSC	0x00c039	/* TDK Semiconductor */
+#define	MII_OUI_VIA	0x004063	/* VIA Networking Technologies */
 #define	MII_OUI_XAQTI	0x00e0ae	/* XaQti Corp. */
 
 /* in the 79c873, AMD uses another OUI (which matches Davicom!) */
@@ -132,8 +136,10 @@
 #define	MII_STR_xxBROADCOM_BCM5401	"BCM5401 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5411	0x0007
 #define	MII_STR_xxBROADCOM_BCM5411	"BCM5411 10/100/1000baseT PHY"
-#define	MII_MODEL_xxBROADCOM_BCM5421S	0x000e
-#define	MII_STR_xxBROADCOM_BCM5421S	"BCM5421S 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM_BCM5462	0x000d
+#define	MII_STR_xxBROADCOM_BCM5462	"BCM5462 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM_BCM5421	0x000e
+#define	MII_STR_xxBROADCOM_BCM5421	"BCM5421 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5752	0x0010
 #define	MII_STR_xxBROADCOM_BCM5752	"BCM5752 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5701	0x0011
@@ -146,8 +152,12 @@
 #define	MII_STR_xxBROADCOM_BCM5705	"BCM5705 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5750	0x0018
 #define	MII_STR_xxBROADCOM_BCM5750	"BCM5750 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM_BCM54K2	0x002e
+#define	MII_STR_xxBROADCOM_BCM54K2	"BCM54K2 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5714	0x0034
 #define	MII_STR_xxBROADCOM_BCM5714	"BCM5714 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM_BCM5780	0x0035
+#define	MII_STR_xxBROADCOM_BCM5780	"BCM5780 10/100/1000baseT PHY"
 #define	MII_MODEL_BROADCOM_BCM5400	0x0004
 #define	MII_STR_BROADCOM_BCM5400	"BCM5400 1000baseT PHY"
 #define	MII_MODEL_BROADCOM_BCM5401	0x0005
@@ -210,8 +220,8 @@
 #define	MII_STR_MARVELL_E1000_5	"Marvell 88E1000 Gigabit PHY"
 #define	MII_MODEL_MARVELL_E1000_6	0x0006
 #define	MII_STR_MARVELL_E1000_6	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1111RCJ	0x000c
-#define	MII_STR_MARVELL_E1111RCJ	"Marvell 88E1111-RCJ Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1111	0x000c
+#define	MII_STR_MARVELL_E1111	"Marvell 88E1111 Gigabit PHY"
 #define	MII_MODEL_xxMARVELL_E1000_2	0x0002
 #define	MII_STR_xxMARVELL_E1000_2	"Marvell 88E1000 Gigabit PHY"
 #define	MII_MODEL_xxMARVELL_E1000_3	0x0003
@@ -224,6 +234,10 @@
 /* Contrived vendor/model for dcphy */
 #define	MII_MODEL_xxDEC_xxDC	0x0001
 #define	MII_STR_xxDEC_xxDC	"DC"
+
+/* IC Plus Corp. PHYs */
+#define	MII_MODEL_ICPLUS_IP101	0x0005
+#define	MII_STR_ICPLUS_IP101	"IP101 10/100 PHY"
 
 /* Integrated Circuit Systems PHYs */
 #define	MII_MODEL_xxICS_1890	0x0002
@@ -318,6 +332,12 @@
 #define	MII_STR_TSC_78Q2120	"78Q2120 10/100 PHY"
 #define	MII_MODEL_TSC_78Q2121	0x0015
 #define	MII_STR_TSC_78Q2121	"78Q2121 100baseTX PHY"
+
+/* VIA Networking Technologies PHYs */
+#define	MII_MODEL_VIA_VT6103	0x0032
+#define	MII_STR_VIA_VT6103	"VT6103 10/100 PHY"
+#define	MII_MODEL_VIA_VT6103_2	0x0034
+#define	MII_STR_VIA_VT6103_2	"VT6103 10/100 PHY"
 
 /* XaQti Corp. PHYs */
 #define	MII_MODEL_XAQTI_XMACII	0x0000

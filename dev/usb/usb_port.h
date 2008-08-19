@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_port.h,v 1.58 2005/06/17 23:50:33 deraadt Exp $ */
+/*	$OpenBSD: usb_port.h,v 1.60 2005/11/19 02:18:01 pedro Exp $ */
 /*	$NetBSD: usb_port.h,v 1.62 2003/02/15 18:33:30 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.21 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -205,7 +205,11 @@ int __CONCAT(dname,_detach)(struct device *self, int flags)
  */
 #include <sys/timeout.h>
 
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+#define USB_USE_SOFTINTR
+#else
 #undef USB_USE_SOFTINTR
+#endif
 
 #ifdef USB_DEBUG
 #define UKBD_DEBUG 1
@@ -318,7 +322,7 @@ typedef struct timeout usb_callout_t;
 #define usb_callout_pending(h)	timeout_pending(&(h))
 #define usb_uncallout(h, f, d) timeout_del(&(h))
 
-#define usb_lockmgr(l, f, sl, p) lockmgr((l), (f), (sl), (p))
+#define usb_lockmgr(l, f, sl, p) lockmgr((l), (f), (sl))
 
 #define USB_DECLARE_DRIVER_CLASS(dname, devclass)  \
 int __CONCAT(dname,_match)(struct device *, void *, void *); \

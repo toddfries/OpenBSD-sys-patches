@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.131.2.1 2006/03/05 03:08:25 brad Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.136 2006/01/03 14:53:50 mpf Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -86,6 +86,7 @@ char ipsec_def_comp[20];
 
 /* values controllable via sysctl */
 int	ipforwarding = 0;
+int	ipmforwarding = 0;
 int	ipsendredirects = 1;
 int	ip_dosourceroute = 0;
 int	ip_defttl = IPDEFTTL;
@@ -136,7 +137,8 @@ ipq_lock_try()
 {
 	int s;
 
-	s = splimp();
+	/* Use splvm() due to mbuf allocation. */
+	s = splvm();
 	if (ipq_locked) {
 		splx(s);
 		return (0);
@@ -153,7 +155,7 @@ ipq_unlock()
 {
 	int s;
 
-	s = splimp();
+	s = splvm();
 	ipq_locked = 0;
 	splx(s);
 }
@@ -226,7 +228,7 @@ ip_init()
 	for (i = 0; defbaddynamicports_tcp[i] != 0; i++)
 		DP_SET(baddynamicports.tcp, defbaddynamicports_tcp[i]);
 	for (i = 0; defbaddynamicports_udp[i] != 0; i++)
-		DP_SET(baddynamicports.udp, defbaddynamicports_tcp[i]);
+		DP_SET(baddynamicports.udp, defbaddynamicports_udp[i]);
 
 	strlcpy(ipsec_def_enc, IPSEC_DEFAULT_DEF_ENC, sizeof(ipsec_def_enc));
 	strlcpy(ipsec_def_auth, IPSEC_DEFAULT_DEF_AUTH, sizeof(ipsec_def_auth));
@@ -410,8 +412,7 @@ ipv4_input(m)
 			}
 			ip = mtod(m, struct ip *);
 		}
-
-		if (ip_mrouter) {
+		if (ipmforwarding && ip_mrouter) {
 			/*
 			 * If we are acting as a multicast router, all
 			 * incoming multicast packets are passed to the
@@ -431,7 +432,7 @@ ipv4_input(m)
 			}
 
 			/*
-			 * The process-level routing demon needs to receive
+			 * The process-level routing daemon needs to receive
 			 * all multicast IGMP packets, whether or not this
 			 * host belongs to their destination groups.
 			 */

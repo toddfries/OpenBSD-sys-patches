@@ -1,4 +1,4 @@
-/*	$OpenBSD: kauaiata.c,v 1.4 2005/06/08 19:08:23 drahn Exp $ */
+/*	$OpenBSD: kauaiata.c,v 1.6 2005/10/22 21:25:02 kettenis Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn
@@ -79,6 +79,8 @@ kauaiatamatch(struct device *parent, void *match, void *aux)
 		switch (PCI_PRODUCT(pa->pa_id)) {
 		case PCI_PRODUCT_APPLE_UNINORTH_ATA:
 		case PCI_PRODUCT_APPLE_INTREPID_ATA:
+		case PCI_PRODUCT_APPLE_K2_ATA:
+		case PCI_PRODUCT_APPLE_SHASTA_ATA:
 			return (1);
 		}
 		break;
@@ -100,13 +102,10 @@ kauaiataattach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 
-	/* XXX assumes that this is /pci@f400000/ata-6 */
-
-	/*
-vendor 0x106b product 0x003b (class undefined unknown subclass 0x00, rev 0x00) at pci2 dev 13 function 0 not configured
-	*/
-
-	node = OF_finddevice("/pci@f4000000/ata-6");
+	/* XXX not neccessarily the right device */
+	node = OF_finddevice("uata");
+	if (node == -1)
+		node = OF_finddevice("/pci@f4000000/ata-6");
 
 	/*
 	 * XXX - need to compare node and PCI id to verify this is the 
@@ -115,11 +114,19 @@ vendor 0x106b product 0x003b (class undefined unknown subclass 0x00, rev 0x00) a
 
 	ca.ca_nreg  = OF_getprop(node, "reg", reg, sizeof(reg));
 
-	intr[0] = PCI_INTERRUPT_LINE(pci_conf_read(pc, pa->pa_tag,
-	    PCI_INTERRUPT_REG));
-	ca.ca_nintr = 4; /* claim to have 4 bytes of interrupt info */
-	/* This needs to come from INTERRUPT REG above, but is not filled out */
-	intr[0] = 0x27;
+	/*
+	 * The PCI Interrupt Configuration Registers seems to be
+	 * hardwired to 0.  Get the interrupt line from OpenFirmware.
+	 */
+	/* XXX */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_APPLE &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_SHASTA_ATA) {
+		ca.ca_nintr = OF_getprop(node, "interrupts",
+		    intr, sizeof intr);
+	} else {
+		ca.ca_nintr = 4;
+		intr[0] = 0x27;
+	}
 
 	namelen = OF_getprop(node, "name", name, sizeof(name));
 	if ((namelen < 0) || (namelen >= sizeof(name))) {

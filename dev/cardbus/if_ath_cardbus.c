@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_ath_cardbus.c,v 1.5 2005/06/08 05:36:33 henning Exp $   */
+/*      $OpenBSD: if_ath_cardbus.c,v 1.8 2006/01/29 20:39:37 fgsch Exp $   */
 /*	$NetBSD: if_ath_cardbus.c,v 1.4 2004/08/02 19:14:28 mycroft Exp $ */
 
 /*
@@ -62,8 +62,8 @@
 #include <netinet/if_ether.h>
 #endif
 
-#include <net80211/ieee80211_compat.h>
 #include <net80211/ieee80211_var.h>
+#include <net80211/ieee80211_rssadapt.h>
 
 #if NBPFILTER > 0 
 #include <net/bpf.h>
@@ -277,9 +277,6 @@ ath_cardbus_disable(struct ath_softc *sc)
 void
 ath_cardbus_power(struct ath_softc *sc, int why)
 {
-
-	printf("%s: ath_cardbus_power\n", sc->sc_dev.dv_xname);
-
 	if (why == PWR_RESUME)
 		ath_enable(sc);
 }

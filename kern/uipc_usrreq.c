@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.29.2.1 2006/03/04 03:04:00 brad Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.31 2006/02/27 23:38:11 miod Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -61,14 +61,12 @@ ino_t	unp_ino;			/* prototype for fake inode numbers */
 
 /*ARGSUSED*/
 int
-uipc_usrreq(so, req, m, nam, control)
-	struct socket *so;
-	int req;
-	struct mbuf *m, *nam, *control;
+uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
+    struct mbuf *control)
 {
 	struct unpcb *unp = sotounpcb(so);
-	register struct socket *so2;
-	register int error = 0;
+	struct socket *so2;
+	int error = 0;
 	struct proc *p = curproc;	/* XXX */
 
 	if (req == PRU_CONTROL)
@@ -328,10 +326,9 @@ u_long	unpdg_recvspace = 4*1024;
 int	unp_rights;			/* file descriptors in flight */
 
 int
-unp_attach(so)
-	struct socket *so;
+unp_attach(struct socket *so)
 {
-	register struct unpcb *unp;
+	struct unpcb *unp;
 	int error;
 	
 	if (so->so_snd.sb_hiwat == 0 || so->so_rcv.sb_hiwat == 0) {
@@ -362,8 +359,7 @@ unp_attach(so)
 }
 
 void
-unp_detach(unp)
-	register struct unpcb *unp;
+unp_detach(struct unpcb *unp)
 {
 	
 	if (unp->unp_vnode) {
@@ -394,13 +390,10 @@ unp_detach(unp)
 }
 
 int
-unp_bind(unp, nam, p)
-	struct unpcb *unp;
-	struct mbuf *nam;
-	struct proc *p;
+unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p)
 {
 	struct sockaddr_un *soun = mtod(nam, struct sockaddr_un *);
-	register struct vnode *vp;
+	struct vnode *vp;
 	struct vattr vattr;
 	int error, namelen;
 	struct nameidata nd;
@@ -443,14 +436,11 @@ unp_bind(unp, nam, p)
 }
 
 int
-unp_connect(so, nam, p)
-	struct socket *so;
-	struct mbuf *nam;
-	struct proc *p;
+unp_connect(struct socket *so, struct mbuf *nam, struct proc *p)
 {
-	register struct sockaddr_un *soun = mtod(nam, struct sockaddr_un *);
-	register struct vnode *vp;
-	register struct socket *so2, *so3;
+	struct sockaddr_un *soun = mtod(nam, struct sockaddr_un *);
+	struct vnode *vp;
+	struct socket *so2, *so3;
 	struct unpcb *unp2, *unp3;
 	int error;
 	struct nameidata nd;
@@ -502,12 +492,10 @@ bad:
 }
 
 int
-unp_connect2(so, so2)
-	register struct socket *so;
-	register struct socket *so2;
+unp_connect2(struct socket *so, struct socket *so2)
 {
-	register struct unpcb *unp = sotounpcb(so);
-	register struct unpcb *unp2;
+	struct unpcb *unp = sotounpcb(so);
+	struct unpcb *unp2;
 
 	if (so2->so_type != so->so_type)
 		return (EPROTOTYPE);
@@ -534,10 +522,9 @@ unp_connect2(so, so2)
 }
 
 void
-unp_disconnect(unp)
-	struct unpcb *unp;
+unp_disconnect(struct unpcb *unp)
 {
-	register struct unpcb *unp2 = unp->unp_conn;
+	struct unpcb *unp2 = unp->unp_conn;
 
 	if (unp2 == NULL)
 		return;
@@ -571,17 +558,14 @@ unp_disconnect(unp)
 }
 
 #ifdef notdef
-unp_abort(unp)
-	struct unpcb *unp;
+unp_abort(struct unpcb *unp)
 {
-
 	unp_detach(unp);
 }
 #endif
 
 void
-unp_shutdown(unp)
-	struct unpcb *unp;
+unp_shutdown(struct unpcb *unp)
 {
 	struct socket *so;
 
@@ -591,9 +575,7 @@ unp_shutdown(unp)
 }
 
 void
-unp_drop(unp, errno)
-	struct unpcb *unp;
-	int errno;
+unp_drop(struct unpcb *unp, int errno)
 {
 	struct socket *so = unp->unp_socket;
 
@@ -608,15 +590,14 @@ unp_drop(unp, errno)
 }
 
 #ifdef notdef
-unp_drain()
+unp_drain(void)
 {
 
 }
 #endif
 
 int
-unp_externalize(rights)
-	struct mbuf *rights;
+unp_externalize(struct mbuf *rights)
 {
 	struct proc *p = curproc;		/* XXX */
 	struct cmsghdr *cm = mtod(rights, struct cmsghdr *);
@@ -734,9 +715,7 @@ restart:
 }
 
 int
-unp_internalize(control, p)
-	struct mbuf *control;
-	struct proc *p;
+unp_internalize(struct mbuf *control, struct proc *p)
 {
 	struct filedesc *fdp = p->p_fd;
 	struct cmsghdr *cm = mtod(control, struct cmsghdr *);
@@ -811,10 +790,10 @@ int	unp_defer, unp_gcing;
 extern	struct domain unixdomain;
 
 void
-unp_gc()
+unp_gc(void)
 {
-	register struct file *fp, *nextfp;
-	register struct socket *so;
+	struct file *fp, *nextfp;
+	struct socket *so;
 	struct file **extra_ref, **fpp;
 	int nunref, i;
 
@@ -926,8 +905,7 @@ unp_gc()
 }
 
 void
-unp_dispose(m)
-	struct mbuf *m;
+unp_dispose(struct mbuf *m)
 {
 
 	if (m)
@@ -935,10 +913,7 @@ unp_dispose(m)
 }
 
 void
-unp_scan(m0, op, discard)
-	struct mbuf *m0;
-	void (*op)(struct file *);
-	int discard;
+unp_scan(struct mbuf *m0, void (*op)(struct file *), int discard)
 {
 	struct mbuf *m;
 	struct file **rp, *fp;
@@ -972,8 +947,7 @@ unp_scan(m0, op, discard)
 }
 
 void
-unp_mark(fp)
-	struct file *fp;
+unp_mark(struct file *fp)
 {
 	if (fp == NULL)
 		return;
@@ -993,8 +967,7 @@ unp_mark(fp)
 }
 
 void
-unp_discard(fp)
-	struct file *fp;
+unp_discard(struct file *fp)
 {
 
 	if (fp == NULL)

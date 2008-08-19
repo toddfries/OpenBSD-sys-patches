@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.60 2004/10/07 12:08:25 henning Exp $	*/
+/*	$OpenBSD: in6.c,v 1.62.2.1 2006/11/09 02:31:28 brad Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -277,32 +277,6 @@ in6_ifremloop(struct ifaddr *ifa)
 }
 
 int
-in6_ifindex2scopeid(idx)
-	int idx;
-{
-	struct ifnet *ifp;
-	struct ifaddr *ifa;
-	struct sockaddr_in6 *sin6;
-
-	if (idx < 0 || if_indexlim <= idx)
-		return -1;
-	ifp = ifindex2ifnet[idx];
-	if (!ifp)
-		return -1;
-
-	for (ifa = ifp->if_addrlist.tqh_first; ifa; ifa = ifa->ifa_list.tqe_next)
-	{
-		if (ifa->ifa_addr->sa_family != AF_INET6)
-			continue;
-		sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
-		if (IN6_IS_ADDR_SITELOCAL(&sin6->sin6_addr))
-			return sin6->sin6_scope_id & 0xffff;
-	}
-
-	return -1;
-}
-
-int
 in6_mask2len(mask, lim0)
 	struct in6_addr *mask;
 	u_char *lim0;
@@ -575,7 +549,7 @@ in6_control(so, cmd, data, ifp, p)
 	case SIOCGIFSTAT_ICMP6:
 		if (ifp == NULL)
 			return EINVAL;
-		bzero(&ifr->ifr_ifru.ifru_stat,
+		bzero(&ifr->ifr_ifru.ifru_icmp6stat,
 		    sizeof(ifr->ifr_ifru.ifru_icmp6stat));
 		ifr->ifr_ifru.ifru_icmp6stat =
 		    *((struct in6_ifextra *)ifp->if_afdata[AF_INET6])->icmp6_ifstat;
@@ -728,6 +702,7 @@ in6_control(so, cmd, data, ifp, p)
 		 */
 		pfxlist_onlink_check();
 
+		dohooks(ifp->if_addrhooks, 0);
 		break;
 	}
 
@@ -768,6 +743,7 @@ in6_control(so, cmd, data, ifp, p)
 		in6_purgeaddr(&ia->ia_ifa);
 		if (pr && purgeprefix)
 			prelist_remove(pr);
+		dohooks(ifp->if_addrhooks, 0);
 		break;
 	}
 
@@ -777,7 +753,6 @@ in6_control(so, cmd, data, ifp, p)
 		return ((*ifp->if_ioctl)(ifp, cmd, data));
 	}
 
-	dohooks(ifp->if_addrhooks, 0);
 	return (0);
 }
 

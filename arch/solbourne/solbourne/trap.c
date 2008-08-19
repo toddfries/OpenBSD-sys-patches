@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.3 2005/07/18 02:43:26 fgsch Exp $	*/
+/*	$OpenBSD: trap.c,v 1.6 2006/01/30 21:26:19 miod Exp $	*/
 /*	OpenBSD: trap.c,v 1.42 2004/12/06 20:12:25 miod Exp 	*/
 
 /*
@@ -527,7 +527,7 @@ badtrap:
 
 	case T_CPDISABLED:
 		uprintf("coprocessor instruction\n");	/* XXX */
-		trapsignal(p, SIGILL, 0, FPE_FLTINV, sv);
+		trapsignal(p, SIGILL, 0, ILL_COPROC, sv);
 		break;
 
 	case T_BREAKPOINT:
@@ -984,14 +984,19 @@ child_return(arg)
 	void *arg;
 {
 	struct proc *p = arg;
+	struct trapframe *tf = p->p_md.md_tf;
 
 	/*
 	 * Return values in the frame set by cpu_fork().
 	 */
-	userret(p, p->p_md.md_tf->tf_pc, 0);
+	tf->tf_out[0] = 0;
+	tf->tf_out[1] = 0;
+	tf->tf_psr &= ~PSR_C;
+
+	userret(p, tf->tf_pc, 0);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,
-			  (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }

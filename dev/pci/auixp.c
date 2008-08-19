@@ -1,4 +1,4 @@
-/* $OpenBSD: auixp.c,v 1.1 2005/08/07 20:08:45 mickey Exp $ */
+/* $OpenBSD: auixp.c,v 1.4 2006/01/25 23:53:35 brad Exp $ */
 /* $NetBSD: auixp.c,v 1.9 2005/06/27 21:13:09 thorpej Exp $ */
 
 /*
@@ -58,7 +58,7 @@
 #include <sys/device.h>
 #include <sys/conf.h>
 #include <sys/exec.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #include <sys/audioio.h>
 #include <sys/queue.h>
 
@@ -312,11 +312,11 @@ auixp_commit_settings(void *hdl)
 	case 6:
 		value |= ATI_REG_OUT_DMA_SLOT_BIT(7) |
 			 ATI_REG_OUT_DMA_SLOT_BIT(8);
-		/* fallthru */
+		/* FALLTHRU */
 	case 4:
 		value |= ATI_REG_OUT_DMA_SLOT_BIT(6) |
 			 ATI_REG_OUT_DMA_SLOT_BIT(9);
-		/* fallthru */
+		/* FALLTHRU */
 	default:
 		value |= ATI_REG_OUT_DMA_SLOT_BIT(3) |
 			 ATI_REG_OUT_DMA_SLOT_BIT(4);
@@ -456,9 +456,11 @@ auixp_set_params(void *hdl, int setmode, int usemode,
 			case 1:
 				play->factor = 4;
 				play->sw_code = alaw_to_slinear16_mts;
+				break;
 			case 2:
 				play->factor = 2;
 				play->sw_code = alaw_to_slinear16;
+				break;
 			default:
 				return (EINVAL);
 			}
@@ -1017,7 +1019,7 @@ auixp_halt_input(void *hdl)
 
 	co = (struct auixp_codec *) hdl;
 	sc = co->sc;
-	dma = sc->sc_output_dma;
+	dma = sc->sc_input_dma;
 	auixp_disable_dma(sc, dma);
 
 	dma->running = 0;

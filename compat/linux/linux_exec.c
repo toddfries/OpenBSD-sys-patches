@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_exec.c,v 1.23 2004/04/15 00:22:42 tedu Exp $	*/
+/*	$OpenBSD: linux_exec.c,v 1.25 2006/01/19 17:54:52 mickey Exp $	*/
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
 /*-
@@ -266,6 +266,9 @@ exec_linux_aout_makecmds(p, epp)
 	int machtype, magic;
 	int error = ENOEXEC;
 
+	if (epp->ep_hdrvalid < sizeof(struct exec))
+		return (ENOEXEC);
+
 	magic = LINUX_N_MAGIC(linux_ep);
 	machtype = LINUX_N_MACHTYPE(linux_ep);
 
@@ -482,7 +485,7 @@ linux_elf_probe(p, epp, itp, pos, os)
 	brand = elf32_check_brand(eh);
 	if (brand && strcmp(brand, "Linux"))
 		return (EINVAL);
-	if (itp[0]) {
+	if (itp) {
 		if ((error = emul_find(p, NULL, linux_emul_path, itp, &bp, 0)))
 			return (error);
 		if ((error = copystr(bp, itp, MAXPATHLEN, &len)))

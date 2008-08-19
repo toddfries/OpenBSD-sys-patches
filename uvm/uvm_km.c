@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.46 2005/05/24 21:11:47 tedu Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.48 2005/10/06 03:59:50 brad Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -850,9 +850,9 @@ uvm_km_alloc_poolpage1(map, obj, waitok)
 	int s;
 
 	/*
-	 * NOTE: We may be called with a map that doens't require splvm
+	 * NOTE: We may be called with a map that doesn't require splvm
 	 * protection (e.g. kernel_map).  However, it does not hurt to
-	 * go to splvm in this case (since unprocted maps will never be
+	 * go to splvm in this case (since unprotected maps will never be
 	 * accessed in interrupt context).
 	 *
 	 * XXX We may want to consider changing the interface to this
@@ -884,7 +884,7 @@ uvm_km_free_poolpage1(map, addr)
 	int s;
 
 	/*
-	 * NOTE: We may be called with a map that doens't require splvm
+	 * NOTE: We may be called with a map that doesn't require splvm
 	 * protection (e.g. kernel_map).  However, it does not hurt to
 	 * go to splvm in this case (since unprocted maps will never be
 	 * accessed in interrupt context).

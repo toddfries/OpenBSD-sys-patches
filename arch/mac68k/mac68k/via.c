@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.22 2005/02/06 19:51:35 martin Exp $	*/
+/*	$OpenBSD: via.c,v 1.27 2006/01/16 21:48:22 miod Exp $	*/
 /*	$NetBSD: via.c,v 1.62 1997/09/10 04:38:48 scottr Exp $	*/
 
 /*-
@@ -50,21 +50,16 @@
 #include <machine/intr.h>
 #include <machine/viareg.h>
 
-int	mrg_adbintr(void *);
-int	mrg_pmintr(void *);
 int	rtclock_intr(void *);
-void	profclock(void *);
 
-void	via1_intr(struct frame *);
-void	via2_intr(struct frame *);
-void	rbv_intr(struct frame *);
-void	oss_intr(struct frame *);
+int	via1_intr(void *);
+int	via2_intr(void *);
+int	rbv_intr(void *);
+int	oss_intr(void *);
 int	via2_nubus_intr(void *);
 int	rbv_nubus_intr(void *);
 
 static	int slot_ignore(void *);
-
-void	(*real_via2_intr)(struct frame *);
 
 int	VIA2 = VIA2OFF;		/* default for II, IIx, IIcx, SE/30. */
 
@@ -98,9 +93,9 @@ via_init()
 	/* turn off timer latch */
 	via_reg(VIA1, vACR) &= 0x3f;
 
+	intr_establish(via1_intr, NULL, mac68k_machine.via1_ipl, "via1");
+
 	/* register default VIA1 interrupts */
-	via1_register_irq(2, mrg_adbintr, NULL, "adb");
-	via1_register_irq(4, mrg_pmintr, NULL, "pm");
 	via1_register_irq(VIA1_T1, rtclock_intr, NULL, "clock");
 
 	for (i = 0; i < 7; i++)
@@ -153,9 +148,14 @@ via_init()
 			break;
 		}
 
-		real_via2_intr = via2_intr;
+		intr_establish(via2_intr, NULL, mac68k_machine.via2_ipl,
+		    "via2");
 	} else if (current_mac_model->class == MACH_CLASSIIfx) { /* OSS */
-		real_via2_intr = oss_intr;
+		volatile u_char *ossintr;
+		ossintr = (volatile u_char *)IOBase + 0x1a006;
+		*ossintr = 0;
+		intr_establish(oss_intr, NULL, mac68k_machine.via2_ipl,
+		    "via2");
 	} else {	/* RBV */
 		if (current_mac_model->class == MACH_CLASSIIci) {
 			/*
@@ -163,7 +163,8 @@ via_init()
 			 */
 			via2_reg(rBufB) |= DB2O_CEnable;
 		}
-		real_via2_intr = rbv_intr;
+		intr_establish(rbv_intr, NULL, mac68k_machine.via2_ipl,
+		    "via2");
 
 		nubus_intr.vh_ipl = 1;
 		nubus_intr.vh_fn = rbv_nubus_intr;
@@ -186,8 +187,8 @@ via_set_modem(int onoff)
 		via_reg(VIA1, vBufA) &= ~DA1O_vSync;
 }
 
-void
-via1_intr(struct frame *fp)
+int
+via1_intr(void *arg)
 {
 	struct intrhand *ih;
 	u_int8_t intbits, bitnum;
@@ -197,7 +198,7 @@ via1_intr(struct frame *fp)
 	intbits &= via_reg(VIA1, vIER);		/* only care about enabled */
 
 	if (intbits == 0)
-		return;
+		return (0);
 
 	/*
 	 * Unflag interrupts here.  If we do it after each interrupt,
@@ -215,10 +216,12 @@ via1_intr(struct frame *fp)
 		if (intbits < mask)
 			break;
 	}
+
+	return (1);
 }
 
-void
-via2_intr(struct frame *fp)
+int
+via2_intr(void *arg)
 {
 	struct via2hand *v2h;
 	via2hand_t *anchor;
@@ -230,7 +233,7 @@ via2_intr(struct frame *fp)
 	intbits &= via2_reg(vIER);		/* only care about enabled */
 
 	if (intbits == 0)
-		return;
+		return (0);
 
 	via2_reg(vIFR) = intbits;
 
@@ -238,24 +241,26 @@ via2_intr(struct frame *fp)
 	mask = 1;
 	for (bitnum = 0, anchor = via2intrs; ; bitnum++, anchor++) {
 		if ((intbits & mask) != 0) {
-		handled = 0;
-		SLIST_FOREACH(v2h, anchor, v2h_link) {
-			struct intrhand *ih = &v2h->v2h_ih;
-			rc = (*ih->ih_fn)(ih->ih_arg);
-			if (rc != 0) {
-				ih->ih_count.ec_count++;
-				handled |= rc;
+			handled = 0;
+			SLIST_FOREACH(v2h, anchor, v2h_link) {
+				struct intrhand *ih = &v2h->v2h_ih;
+				rc = (*ih->ih_fn)(ih->ih_arg);
+				if (rc != 0) {
+					ih->ih_count.ec_count++;
+					handled |= rc;
+				}
 			}
 		}
+		mask <<= 1;
+		if (intbits < mask)
+			break;
 	}
-	mask <<= 1;
-	if (intbits < mask)
-		break;
-	}
+
+	return (1);
 }
 
-void
-rbv_intr(struct frame *fp)
+int
+rbv_intr(void *arg)
 {
 	struct via2hand *v2h;
 	via2hand_t *anchor;
@@ -267,7 +272,7 @@ rbv_intr(struct frame *fp)
 	intbits &= via2_reg(vIER + rIER);
 
 	if (intbits == 0)
-		return;
+		return (0);
 
 	via2_reg(rIFR) = intbits;
 
@@ -289,6 +294,8 @@ rbv_intr(struct frame *fp)
 		if (intbits < mask)
 			break;
 	}
+
+	return (1);
 }
 
 static int nubus_intr_mask = 0;
@@ -343,8 +350,8 @@ enable_nubus_intr()
 		via2_reg(rIER) = 0x80 | V2IF_SLOTINT;
 }
 
-void
-oss_intr(struct frame *fp)
+int
+oss_intr(void *arg)
 {
 	struct intrhand *ih;
 	u_int8_t intbits, bitnum;
@@ -353,7 +360,7 @@ oss_intr(struct frame *fp)
 	intbits = via2_reg(vIFR + rIFR);
 
 	if (intbits == 0)
-		return;
+		return (0);
 
 	intbits &= 0x7f;
 	mask = 1;
@@ -369,6 +376,8 @@ oss_intr(struct frame *fp)
 		if (intbits < mask)
 			break;
 	}
+
+	return (1);
 }
 
 /*ARGSUSED*/
@@ -444,8 +453,15 @@ via_powerdown()
 	if (VIA2 == VIA2OFF) {
 		via2_reg(vDirB) |= 0x04;  /* Set write for bit 2 */
 		via2_reg(vBufB) &= ~0x04; /* Shut down */
-	} else if (VIA2 == RBVOFF)
+	} else if (VIA2 == RBVOFF) {
 		via2_reg(rBufB) &= ~0x04;
+	} else if (VIA2 == OSSOFF) {
+		/*
+		 * Thanks to Brad Boyer <flar@cegt201.bradley.edu> for the
+		 * Linux/mac68k code that I derived this from.
+		 */
+		via2_reg(OSS_oRCR) |= OSS_POWEROFF;
+	}
 }
 
 void
@@ -462,22 +478,21 @@ via1_register_irq(int irq, int (*irq_func)(void *), void *client_data,
 	ih = &via1intrs[irq];
 
 	/*
-	 * VIA1_T1 is special, since we need to temporary replace
-	 * the callback during bootstrap, to compute the delay
-	 * values.
-	 * To avoid a loop in evcount lists, only invoke
-	 * evcount_attach() if name is non-NULL, and have the two
-	 * replacements calls in clock.c pass a NULL pointer.
+	 * VIA1 interrupts are special, since we start with temporary handlers,
+	 * and later switch to better routines whenever possible.
+	 * To avoid a loop in evcount lists, only invoke evcount_attach() if
+	 * name is non-NULL, and have the replacements calls in adb_direct.c,
+	 * clock.c and pm_direct.c pass a NULL pointer.
 	 */
 #ifdef DIAGNOSTIC
-	if (ih->ih_fn != NULL && irq != VIA1_T1)
-		panic("via1_register_irq: attempt to share irq %d", irq);
+	if (ih->ih_fn != NULL && name != NULL)
+		panic("via1_register_irq: improper invocation");
 #endif
 
 	ih->ih_fn = irq_func;
 	ih->ih_arg = client_data;
 	ih->ih_ipl = irq;
-	if (name != NULL || irq != VIA1_T1)
+	if (name != NULL)
 		evcount_attach(&ih->ih_count, name, (void *)&ih->ih_ipl,
 		    &evcount_intr);
 }

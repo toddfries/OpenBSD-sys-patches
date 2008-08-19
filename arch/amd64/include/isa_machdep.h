@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
+/*	$OpenBSD: isa_machdep.h,v 1.6 2006/03/01 21:51:39 deraadt Exp $	*/
 /*	$NetBSD: isa_machdep.h,v 1.2 2003/05/09 23:51:28 fvdl Exp $	*/
 
 /*-
@@ -53,11 +53,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -88,6 +84,11 @@
 #include <dev/isa/isadmavar.h>
 
 /*
+ * ISA can only DMA to 0-16M.
+ */
+#define	ISA_DMA_BOUNCE_THRESHOLD	0x00ffffff
+
+/*
  * XXX THIS FILE IS A MESS.  copyright: berkeley's probably.
  * contents from isavar.h and isareg.h, mostly the latter.
  * perhaps charles's?
@@ -110,60 +111,12 @@ struct isabus_attach_args;	/* XXX */
 void	isa_attach_hook(struct device *, struct device *,
 	    struct isabus_attach_args *);
 int	isa_intr_alloc(isa_chipset_tag_t, int, int, int *);
-const struct evcnt *isa_intr_evcnt(isa_chipset_tag_t ic, int irq);
 void	*isa_intr_establish(isa_chipset_tag_t ic, int irq, int type,
 	    int level, int (*ih_fun)(void *), void *ih_arg, char *);
 void	isa_intr_disestablish(isa_chipset_tag_t ic, void *handler);
 int	isa_mem_alloc(bus_space_tag_t, bus_size_t, bus_size_t,
 	    bus_addr_t, int, bus_addr_t *, bus_space_handle_t *);
 void	isa_mem_free(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-
-#define	isa_dmainit(ic, bst, dmat, d)					\
-	_isa_dmainit(&(ic)->ic_dmastate, (bst), (dmat), (d))
-#define	isa_dmacascade(ic, c)						\
-	_isa_dmacascade(&(ic)->ic_dmastate, (c))
-#define	isa_dmamaxsize(ic, c)						\
-	_isa_dmamaxsize(&(ic)->ic_dmastate, (c))
-#define	isa_dmamap_create(ic, c, s, f)					\
-	_isa_dmamap_create(&(ic)->ic_dmastate, (c), (s), (f))
-#define	isa_dmamap_destroy(ic, c)					\
-	_isa_dmamap_destroy(&(ic)->ic_dmastate, (c))
-#define	isa_dmastart(ic, c, a, n, p, f, bf)				\
-	_isa_dmastart(&(ic)->ic_dmastate, (c), (a), (n), (p), (f), (bf))
-#define	isa_dmaabort(ic, c)						\
-	_isa_dmaabort(&(ic)->ic_dmastate, (c))
-#define	isa_dmacount(ic, c)						\
-	_isa_dmacount(&(ic)->ic_dmastate, (c))
-#define	isa_dmafinished(ic, c)						\
-	_isa_dmafinished(&(ic)->ic_dmastate, (c))
-#define	isa_dmadone(ic, c)						\
-	_isa_dmadone(&(ic)->ic_dmastate, (c))
-#define	isa_dmafreeze(ic)						\
-	_isa_dmafreeze(&(ic)->ic_dmastate)
-#define	isa_dmathaw(ic)							\
-	_isa_dmathaw(&(ic)->ic_dmastate)
-#define	isa_dmamem_alloc(ic, c, s, ap, f)				\
-	_isa_dmamem_alloc(&(ic)->ic_dmastate, (c), (s), (ap), (f))
-#define	isa_dmamem_free(ic, c, a, s)					\
-	_isa_dmamem_free(&(ic)->ic_dmastate, (c), (a), (s))
-#define	isa_dmamem_map(ic, c, a, s, kp, f)				\
-	_isa_dmamem_map(&(ic)->ic_dmastate, (c), (a), (s), (kp), (f))
-#define	isa_dmamem_unmap(ic, c, k, s)					\
-	_isa_dmamem_unmap(&(ic)->ic_dmastate, (c), (k), (s))
-#define	isa_dmamem_mmap(ic, c, a, s, o, p, f)				\
-	_isa_dmamem_mmap(&(ic)->ic_dmastate, (c), (a), (s), (o), (p), (f))
-#define isa_drq_alloc(ic, c)						\
-	_isa_drq_alloc(&(ic)->ic_dmastate, c)
-#define isa_drq_free(ic, c)						\
-	_isa_drq_free(&(ic)->ic_dmastate, c)
-#define	isa_drq_isfree(ic, c)						\
-	_isa_drq_isfree(&(ic)->ic_dmastate, (c))
-#define	isa_malloc(ic, c, s, p, f)					\
-	_isa_malloc(&(ic)->ic_dmastate, (c), (s), (p), (f))
-#define	isa_free(a, p)							\
-	_isa_free((a), (p))
-#define	isa_mappage(m, o, p)						\
-	_isa_mappage((m), (o), (p))
 
 int isa_intr_check(isa_chipset_tag_t, int, int);
 
@@ -179,6 +132,31 @@ void	isa_reinit_irq(void);
  */
 
 extern struct x86_bus_dma_tag isa_bus_dma_tag;
+
+/*
+ * Cookie used by ISA dma.  A pointer to one of these it stashed in
+ * the DMA map.
+ */
+struct x86_isa_dma_cookie {
+	int	id_flags;		/* flags; see below */
+
+	void	*id_origbuf;		/* pointer to orig buffer if
+					   bouncing */
+	bus_size_t id_origbuflen;	/* ...and size */
+
+	void	*id_bouncebuf;		/* pointer to the bounce buffer */
+	bus_size_t id_bouncebuflen;	/* ...and size */
+	int	id_nbouncesegs;		/* number of valid bounce segs */
+	bus_dma_segment_t id_bouncesegs[0]; /* array of bounce buffer
+					       physical memory segments */
+};
+
+/* id_flags */
+#define	ID_MIGHT_NEED_BOUNCE	0x01	/* map could need bounce buffers */
+#define	ID_HAS_BOUNCE		0x02	/* map currently has bounce buffers */
+#define	ID_IS_BOUNCING		0x04	/* map is bouncing current xfer */
+
+
 
 /*
  * XXX Various seemingly PC-specific constants, some of which may be
@@ -227,11 +205,5 @@ extern u_long atdevbase;           /* kernel virtual address of "hole" */
  * return a kernel virtual address.
  */
 #define ISA_HOLE_VADDR(p)  ((void *) ((u_long)(p) - IOM_BEGIN + atdevbase))
-
-
-/*
- * Miscellanous functions.
- */
-void sysbeep(int, int);		/* beep with the system speaker */
 
 #endif /* _I386_ISA_MACHDEP_H_ XXX */

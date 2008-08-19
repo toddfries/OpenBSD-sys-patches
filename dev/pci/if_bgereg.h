@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.27 2005/08/30 03:18:30 brad Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.42 2006/02/21 01:45:48 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -76,6 +76,8 @@
 #define BGE_SOFTWARE_GENCOMM		0x00000B50
 #define BGE_SOFTWARE_GENCOMM_SIG	0x00000B54
 #define BGE_SOFTWARE_GENCOMM_NICCFG	0x00000B58
+#define BGE_SOFTWARE_GENCOMM_FW		0x00000B78
+#define    BGE_FW_PAUSE			0x00000002
 #define BGE_SOFTWARE_GENCOMM_END	0x00000FFF
 #define BGE_UNMAPPED			0x00001000
 #define BGE_UNMAPPED_END		0x00001FFF
@@ -198,6 +200,15 @@
 #define BGE_PCI_ISR_MBX_HI		0xB0
 #define BGE_PCI_ISR_MBX_LO		0xB4
 
+/* XXX:
+ * Used in PCI-Express code for 575x chips.
+ * Should be replaced with checking for a PCI config-space
+ * capability for PCI-Express, and PCI-Express standard 
+ * offsets into that capability block.
+ */
+#define BGE_PCI_CONF_DEV_CTRL		0xD8
+#define BGE_PCI_CONF_DEV_STUS		0xDA
+
 /* PCI Misc. Host control register */
 #define BGE_PCIMISCCTL_CLEAR_INTA	0x00000001
 #define BGE_PCIMISCCTL_MASK_PCI_INTR	0x00000002
@@ -209,7 +220,6 @@
 #define BGE_PCIMISCCTL_INDIRECT_ACCESS	0x00000080
 #define BGE_PCIMISCCTL_ASICREV		0xFFFF0000
 
-#define BGE_HIF_SWAP_OPTIONS	(BGE_PCIMISCCTL_ENDIAN_WORDSWAP)
 #if BYTE_ORDER == LITTLE_ENDIAN
 #define BGE_DMA_SWAP_OPTIONS \
 	BGE_MODECTL_WORDSWAP_NONFRAME| \
@@ -221,7 +231,7 @@
 #endif
 
 #define BGE_INIT \
-	(BGE_HIF_SWAP_OPTIONS|BGE_PCIMISCCTL_CLEAR_INTA| \
+	(BGE_PCIMISCCTL_ENDIAN_WORDSWAP|BGE_PCIMISCCTL_CLEAR_INTA| \
 	 BGE_PCIMISCCTL_MASK_PCI_INTR|BGE_PCIMISCCTL_INDIRECT_ACCESS)
 
 #define BGE_CHIPID_BCM5700_A0		0x70000000
@@ -255,10 +265,14 @@
 #define BGE_CHIPID_BCM5750_B0		0x40100000
 #define BGE_CHIPID_BCM5750_B1		0x41010000
 #define BGE_CHIPID_BCM5750_C0		0x42000000
+#define BGE_CHIPID_BCM5750_C1		0x42010000
 #define BGE_CHIPID_BCM5714_A0		0x50000000
 #define BGE_CHIPID_BCM5752_A0		0x60000000
 #define BGE_CHIPID_BCM5752_A1		0x60010000
-#define BGE_CHIPID_BCM5714		0x80000000
+#define BGE_CHIPID_BCM5714_B0		0x80000000
+#define BGE_CHIPID_BCM5714_B3		0x80030000
+#define BGE_CHIPID_BCM5715_A0		0x90000000
+#define BGE_CHIPID_BCM5715_A1		0x90010000
 
 /* shorthand one */
 #define BGE_ASICREV(x)			((x) >> 28)
@@ -268,9 +282,10 @@
 #define BGE_ASICREV_BCM5704		0x02
 #define BGE_ASICREV_BCM5705		0x03
 #define BGE_ASICREV_BCM5750		0x04
-#define BGE_ASICREV_BCM5714		0x05
+#define BGE_ASICREV_BCM5714_A0		0x05	/* 5714, 5715 */
 #define BGE_ASICREV_BCM5752		0x06
 #define BGE_ASICREV_BCM5780		0x08
+#define BGE_ASICREV_BCM5714		0x09	/* 5714, 5715 */
 
 /* chip revisions */
 #define BGE_CHIPREV(x)			((x) >> 24)
@@ -299,6 +314,10 @@
 #define BGE_PCIDMARWCTL_DFLT_PCI_RD_CMD_SHIFT	24
 #define BGE_PCIDMARWCTL_DFLT_PCI_WR_CMD	0xF0000000
 #define BGE_PCIDMARWCTL_DFLT_PCI_WR_CMD_SHIFT	28
+
+/* PCI DMA Read/Write Control register, alternate usage for PCI-Express */
+#define BGE_PCIDMA_RWCTL_PCIE_WRITE_WATRMARK_128	0x00180000 
+#define BGE_PCIDMA_RWCTL_PCIE_WRITE_WATRMARK_256	0x00380000
 
 #define BGE_PCI_READ_BNDRY_DISABLE	0x00000000
 #define BGE_PCI_READ_BNDRY_16BYTES	0x00000100
@@ -1330,6 +1349,10 @@
 #define BGE_RDMAMODE_LOCWRITE_TOOBIG	0x00000200
 #define BGE_RDMAMODE_ALL_ATTNS		0x000003FC
 
+/* Alternate encodings for PCI-Express, from Broadcom-supplied Linux driver */
+#define BGE_RDMA_MODE_FIFO_LONG_BURST	((1<<17) || (1 << 16))
+#define BGE_RDMA_MODE_FIFO_SIZE_128     (1 << 17)
+
 /* Read DMA status register */
 #define BGE_RDMASTAT_PCI_TGT_ABRT_ATTN	0x00000004
 #define BGE_RDMASTAT_PCI_MSTR_ABRT_ATTN	0x00000008
@@ -1650,11 +1673,27 @@
 #define BGE_MODE_CTL			0x6800
 #define BGE_MISC_CFG			0x6804
 #define BGE_MISC_LOCAL_CTL		0x6808
+#define BGE_CPU_EVENT			0x6810
 #define BGE_EE_ADDR			0x6838
 #define BGE_EE_DATA			0x683C
 #define BGE_EE_CTL			0x6840
 #define BGE_MDI_CTL			0x6844
 #define BGE_EE_DELAY			0x6848
+
+/*
+ * TLP Control Register
+ * Applicable to BCM5721 and BCM5751 only
+ */
+#define BGE_TLP_CONTROL_REG		0x7c00
+#define BGE_TLP_DATA_FIFO_PROTECT	0x02000000
+
+/*
+ * PHY Test Control Register
+ * Applicable to BCM5721 and BCM5751 only
+ */
+#define BGE_PHY_TEST_CTRL_REG		0x7e2c
+#define BGE_PHY_PCIE_SCRAM_MODE		0x0020
+#define BGE_PHY_PCIE_LTASS_MODE		0x0040
 
 /* Mode control register */
 #define BGE_MODECTL_INT_SNDCOAL_ONLY	0x00000001
@@ -1683,6 +1722,7 @@
 /* Misc. config register */
 #define BGE_MISCCFG_RESET_CORE_CLOCKS	0x00000001
 #define BGE_MISCCFG_TIMER_PRESCALER	0x000000FE
+#define BGE_MISCCFG_GPHY_POWER_RESET	0x04000000
 
 #define BGE_32BITTIME_66MHZ		(0x41 << 1)
 
@@ -1931,6 +1971,7 @@ struct bge_status_block {
 #define BGE_HWCFG_VOLTAGE		0x00000003
 #define BGE_HWCFG_PHYLED_MODE		0x0000000C
 #define BGE_HWCFG_MEDIA			0x00000030
+#define BGE_HWCFG_ASF			0x00000080
 
 #define BGE_VOLTAGE_1POINT3		0x00000000
 #define BGE_VOLTAGE_1POINT8		0x00000001
@@ -2162,23 +2203,10 @@ struct bge_gib {
  */
 #define BGE_VPD_FLAG		0x8000
  
-/* VPD structures */
-struct vpd_res {
-	u_int8_t		vr_id;
-	u_int8_t		vr_len;
-	u_int8_t		vr_pad;
-};
- 
-struct vpd_key {
-	char			vk_key[2];
-	u_int8_t		vk_len;
-};
- 
 #define VPD_RES_ID	0x82	/* ID string */
 #define VPD_RES_READ	0x90	/* start of read only area */
 #define VPD_RES_WRITE	0x81	/* start of read/write area */
 #define VPD_RES_END	0x78	/* end tag */
-
 
 /*
  * Register access macros. The Tigon always uses memory mapped register
@@ -2209,8 +2237,11 @@ struct vpd_key {
 
 #define BGE_SSLOTS	256
 #define BGE_MSLOTS	256
+#ifdef __sparc64__
+#define BGE_JSLOTS	54
+#else
 #define BGE_JSLOTS	384
-#define BGE_RSLOTS	256
+#endif
 
 #define BGE_JRAWLEN (ETHER_MAX_LEN_JUMBO + ETHER_ALIGN)
 #define BGE_JLEN (BGE_JRAWLEN + (sizeof(u_int64_t) - \
@@ -2301,6 +2332,10 @@ struct txdmamap_pool_entry {
 #define BGE_RXRING_VALID	0x0002
 #define BGE_JUMBO_RXRING_VALID	0x0004
 
+#define ASF_ENABLE		1
+#define ASF_NEW_HANDSHAKE	2
+#define ASF_STACKUP		4
+
 struct bge_softc {
 	struct device		bge_dev;
 	struct arpcom		arpcom;		/* interface info */
@@ -2315,9 +2350,10 @@ struct bge_softc {
 	u_int8_t		bge_rx_alignment_bug;
 	bus_dma_tag_t		bge_dmatag;
 	u_int32_t		bge_chipid;
-	u_int32_t		bge_quirks;
 	u_int8_t		bge_no_3_led;
+	u_int8_t		bge_asf_mode;
 	u_int8_t		bge_pcie;
+	u_int8_t		bge_pcix;
 	struct bge_ring_data	*bge_rdata;	/* rings */
 	struct bge_chain_data	bge_cdata;	/* mbufs */
 	bus_dmamap_t		bge_ring_map;
@@ -2325,6 +2361,7 @@ struct bge_softc {
 	u_int16_t		bge_rx_saved_considx;
 	u_int16_t		bge_ev_saved_considx;
 	u_int16_t		bge_return_ring_cnt;
+	u_int32_t		bge_tx_prodidx;
 	u_int16_t		bge_std;	/* current std ring head */
 	u_int16_t		bge_jumbo;	/* current jumo ring head */
 	SLIST_HEAD(__bge_jfreehead, bge_jpool_entry)	bge_jfree_listhead;
@@ -2338,10 +2375,12 @@ struct bge_softc {
 	int			bge_if_flags;
 	int			bge_flags;
 	int			bge_txcnt;
-	int			bge_link;
+	int			bge_link;	/* link state */
+	int			bge_link_evt;	/* pending link event */
 	struct timeout		bge_timeout;
-	char			*bge_vpd_prodname;
-	char			*bge_vpd_readonly;
+	u_long			bge_rx_discards;
+	u_long			bge_tx_discards;
+	u_long			bge_tx_collisions;
 	SLIST_HEAD(, txdmamap_pool_entry) txdma_list;
 	struct txdmamap_pool_entry *txdma[BGE_TX_RING_CNT];
 };

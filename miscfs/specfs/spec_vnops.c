@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.29 2005/05/24 04:45:13 pedro Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.32 2006/02/20 19:44:58 miod Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -389,10 +389,7 @@ spec_write(v)
 			bn = (uio->uio_offset / ssize) &~ (bscale - 1);
 			on = uio->uio_offset % bsize;
 			n = min((unsigned)(bsize - on), uio->uio_resid);
-			if (n == bsize)
-				bp = getblk(vp, bn, bsize, 0, 0);
-			else
-				error = bread(vp, bn, bsize, NOCRED, &bp);
+			error = bread(vp, bn, bsize, NOCRED, &bp);
 			n = min(n, bsize - bp->b_resid);
 			if (error) {
 				brelse(bp);
@@ -438,8 +435,6 @@ spec_ioctl(v)
 		    ap->a_fflag, ap->a_p));
 
 	case VBLK:
-		if (ap->a_command == 0 && (long)ap->a_data == B_TAPE) 
-			return ((bdevsw[maj].d_type == D_TAPE) ? 0 : 1);
 		return ((*bdevsw[maj].d_ioctl)(dev, ap->a_command, ap->a_data,
 		    ap->a_fflag, ap->a_p));
 
@@ -485,7 +480,7 @@ spec_kqfilter(v)
 	dev_t dev;
 
 	dev = ap->a_vp->v_rdev;
-	if (cdevsw[major(dev)].d_type & D_KQFILTER)
+	if (cdevsw[major(dev)].d_flags & D_KQFILTER)
 		return (*cdevsw[major(dev)].d_kqfilter)(dev, ap->a_kn);
 	return (1);
 }

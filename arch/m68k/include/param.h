@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.11 2005/07/31 15:31:14 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.17 2005/12/13 01:56:43 martin Exp $	*/
 /*	$NetBSD: param.h,v 1.2 1997/06/10 18:21:23 veego Exp $	*/
 
 /*
@@ -67,8 +67,6 @@
 #define	PGOFSET		(NBPG-1)	/* byte offset into page */
 #define	NPTEPG		(NBPG/(sizeof (pt_entry_t)))
 
-#define	BTOPKERNBASE	((u_long)KERNBASE >> PGSHIFT)
-
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
 #define BLKDEV_IOSIZE	2048
@@ -90,6 +88,13 @@
 #endif
 #define	USPACE		(UPAGES * NBPG)
 #define	USPACE_ALIGN	(0)		/* u-area alignment 0-none */
+
+/*
+ * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
+ * logical pages.
+ */
+#define	NKMEMPAGES_MIN_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MAX_DEFAULT	((64 * 1024 * 1024) >> PAGE_SHIFT)
 
 /*
  * Constants related to network buffer management.
@@ -133,10 +138,7 @@
  */
 #define	m68k_round_seg(x)	((((unsigned)(x)) + SEGOFSET) & ~SEGOFSET)
 #define	m68k_trunc_seg(x)	((unsigned)(x) & ~SEGOFSET)
-#define	m68k_round_page(x)	((((unsigned)(x)) + PGOFSET) & ~PGOFSET)
-#define	m68k_trunc_page(x)	((unsigned)(x) & ~PGOFSET)
-#define	m68k_btop(x)		((unsigned)(x) >> PGSHIFT)
-#define	m68k_ptob(x)		((unsigned)(x) << PGSHIFT)
+#define	m68k_page_offset(x)	((unsigned)(x) & PGOFSET)
 
 #ifdef COMPAT_HPUX
 /*
@@ -144,8 +146,8 @@
  * Pages in the first 256Mb are mapped in at every 256Mb segment.
  */
 #define HPMMMASK	0xF0000000
-#define ISHPMMADDR(v) \
-	((curproc->p_md.md_flags & MDP_HPUXMMAP) && \
+#define ISHPMMADDR(p, v) \
+	(((p)->p_md.md_flags & MDP_HPUXMMAP) && \
 	 ((unsigned)(v) & HPMMMASK) && \
 	 ((unsigned)(v) & HPMMMASK) != HPMMMASK)
 #define HPMMBASEADDR(v) \

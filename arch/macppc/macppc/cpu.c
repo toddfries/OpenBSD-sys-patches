@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.21 2005/03/10 19:24:30 otto Exp $ */
+/*	$OpenBSD: cpu.c,v 1.36 2006/02/10 21:31:04 kettenis Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -54,6 +54,26 @@
 #define HID0_FOLD	(1 << (31-28))
 #define HID0_BHT	(1 << (31-29))
 
+/* SCOM addresses (24-bit) */
+#define SCOM_PCR	0x0aa001 /* Power Control Register */
+#define SCOM_PSR	0x408001 /* Power Tuning Status Register */
+
+/* SCOMC format */
+#define SCOMC_ADDR_SHIFT	8
+#define SCOMC_ADDR_MASK		0xffff0000
+#define SCOMC_READ		0x00008000
+
+/* Frequency scaling */
+#define FREQ_FULL	0
+#define FREQ_HALF	1
+#define FREQ_QUARTER	2	/* Not supported on IBM 970FX */
+
+/* Power (Tuning) Status Register */
+#define PSR_CMD_RECEIVED	0x2000000000000000LL
+#define PSR_CMD_COMPLETED	0x1000000000000000LL
+#define PSR_FREQ_MASK		0x0300000000000000LL
+#define PSR_FREQ_HALF		0x0100000000000000LL
+
 char cpu_model[80];
 char machine[] = MACHINE;	/* cpu architecture */
 
@@ -69,7 +89,11 @@ struct cfdriver cpu_cd = {
 	NULL, "cpu", DV_DULL
 };
 
-void config_l2cr(int cpu);
+void ppc64_scale_frequency(u_int);
+void (*ppc64_slew_voltage)(u_int);
+int ppc64_setperf(int);
+
+void config_l2cr(int);
 
 int
 cpumatch(parent, cfdata, aux)
@@ -87,6 +111,8 @@ cpumatch(parent, cfdata, aux)
 }
 
 static u_int32_t ppc_curfreq;
+static u_int32_t ppc_maxfreq;
+int ppc_altivec;
 
 
 int
@@ -97,14 +123,124 @@ ppc_cpuspeed(int *freq)
 	return (0);
 }
 
+static u_int32_t ppc_power_mode_data[2];
+
+void
+ppc64_scale_frequency(u_int freq_scale)
+{
+	u_int64_t psr;
+	int s;
+
+	s = ppc_intr_disable();
+
+	/* Clear PCRH and PCR. */
+	ppc_mtscomd(0x00000000);
+	ppc_mtscomc(SCOM_PCR << SCOMC_ADDR_SHIFT);
+	ppc_mtscomd(0x80000000);
+	ppc_mtscomc(SCOM_PCR << SCOMC_ADDR_SHIFT);
+
+	/* Set PCR. */
+	ppc_mtscomd(ppc_power_mode_data[freq_scale] | 0x80000000);
+	ppc_mtscomc(SCOM_PCR << SCOMC_ADDR_SHIFT);
+
+	/* Wait until frequency change is completed. */
+	do {
+		ppc64_mtscomc((SCOM_PSR << SCOMC_ADDR_SHIFT) | SCOMC_READ);
+		psr = ppc64_mfscomd();
+		ppc64_mfscomc();
+		if (psr & PSR_CMD_COMPLETED)
+			break;
+		DELAY(100);
+	} while (psr & PSR_CMD_RECEIVED);
+
+	if ((psr & PSR_FREQ_MASK) == PSR_FREQ_HALF)
+		ppc_curfreq = ppc_maxfreq / 2;
+	else
+		ppc_curfreq = ppc_maxfreq;
+
+	ppc_intr_enable(s);
+}
+
+extern int perflevel;
+
+int
+ppc64_setperf(int speed)
+{
+	if (speed <= 50) {
+		if (ppc_curfreq == ppc_maxfreq / 2)
+			return (0);
+
+		ppc64_scale_frequency(FREQ_HALF);
+		if (ppc64_slew_voltage)
+			ppc64_slew_voltage(FREQ_HALF);
+		perflevel = 50;
+	} else {
+		if (ppc_curfreq == ppc_maxfreq)
+			return (0);
+
+		if (ppc64_slew_voltage)
+			ppc64_slew_voltage(FREQ_FULL);
+		ppc64_scale_frequency(FREQ_FULL);
+		perflevel = 100;
+	}
+
+	return (0);
+}
+
+int ppc_proc_is_64b;
+extern u_int32_t rfi_inst, rfid_inst, nop_inst;
+struct patch {
+	u_int32_t *s;
+	u_int32_t *e;
+};
+extern struct patch rfi_start;
+extern struct patch nop32_start;
+extern struct patch nop64_start;
+
+
+void
+ppc_check_procid()
+{
+	u_int32_t cpu, pvr;
+	u_int32_t *inst;
+	struct patch *p;
+
+	pvr = ppc_mfpvr();
+	cpu = pvr >> 16;
+
+	switch (cpu) {
+	case PPC_CPU_IBM970FX:
+	case PPC_CPU_IBM970MP:
+		ppc_proc_is_64b = 1;
+		for (p = &rfi_start; p->s; p++) {
+			for (inst = p->s; inst < p->e; inst++)
+				*inst = rfid_inst;
+			syncicache(p->s, (p->e - p->s) * sizeof(*p->e));
+		}
+		for (p = &nop64_start; p->s; p++) {
+			for (inst = p->s; inst < p->e; inst++)
+				*inst = nop_inst;
+			syncicache(p->s, (p->e - p->s) * sizeof(*p->e));
+		}
+
+		break;
+	default:
+		ppc_proc_is_64b = 0;
+		for (p = &nop32_start; p->s; p++) {
+			for (inst = p->s; inst < p->e; inst++)
+				*inst = nop_inst;
+			syncicache(p->s, (p->e - p->s) * sizeof(p->e));
+		}
+	}
+}
 
 void
 cpuattach(struct device *parent, struct device *dev, void *aux)
 {
-	unsigned int cpu, pvr, hid0;
+	u_int32_t cpu, pvr, hid0;
 	char name[32];
 	int qhandle, phandle;
-	unsigned int clock_freq = 0;
+	u_int32_t clock_freq = 0;
 
 	pvr = ppc_mfpvr();
 	cpu = pvr >> 16;
@@ -131,25 +267,38 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		snprintf(cpu_model, sizeof(cpu_model), "604ev");
 		break;
 	case PPC_CPU_MPC7400:
+		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "7400");
 		break;
 	case PPC_CPU_MPC7447A:
+		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "7447A");
+		break;
+	case PPC_CPU_IBM970FX:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "970FX");
 		break;
 	case PPC_CPU_IBM750FX:
 		snprintf(cpu_model, sizeof(cpu_model), "750FX");
 		break;
 	case PPC_CPU_MPC7410:
+		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "7410");
 		break;
 	case PPC_CPU_MPC7450:
+		ppc_altivec = 1;
 		if ((pvr & 0xf) < 3)
 			snprintf(cpu_model, sizeof(cpu_model), "7450");
 		 else
 			snprintf(cpu_model, sizeof(cpu_model), "7451");
 		break;
 	case PPC_CPU_MPC7455:
+		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "7455");
+		break;
+	case PPC_CPU_MPC7457:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "7457");
 		break;
 	default:
 		snprintf(cpu_model, sizeof(cpu_model), "Version %x", cpu);
@@ -166,7 +315,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
                 if (OF_getprop(qhandle, "device_type", name, sizeof name) >= 0
                     && !strcmp(name, "cpu")
                     && OF_getprop(qhandle, "clock-frequency",
-                        &clock_freq , sizeof clock_freq ) >= 0)
+                        &clock_freq, sizeof clock_freq) >= 0)
 		{
 			break;
 		}
@@ -183,11 +332,33 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		/* Openfirmware stores clock in Hz, not MHz */
 		clock_freq /= 1000000;
 		printf(": %d MHz", clock_freq);
-		ppc_curfreq = clock_freq;
+		ppc_curfreq = ppc_maxfreq = clock_freq;
 		cpu_cpuspeed = ppc_cpuspeed;
 	}
+
+	if (cpu == PPC_CPU_IBM970FX) {
+		u_int64_t psr;
+		int s;
+
+		s = ppc_intr_disable();
+		ppc64_mtscomc((SCOM_PSR << SCOMC_ADDR_SHIFT) | SCOMC_READ);
+		psr = ppc64_mfscomd();
+		ppc64_mfscomc();
+		ppc_intr_enable(s);
+
+		if ((psr & PSR_FREQ_MASK) == PSR_FREQ_HALF) {
+			ppc_curfreq = ppc_maxfreq / 2;
+			perflevel = 50;
+		}
+
+		if (OF_getprop(qhandle, "power-mode-data",
+		    &ppc_power_mode_data, sizeof ppc_power_mode_data) >= 8)
+			cpu_setperf = ppc64_setperf;
+	}
+
 	/* power savings mode */
-	hid0 = ppc_mfhid0();
+	if (ppc_proc_is_64b == 0)
+		hid0 = ppc_mfhid0();
 	switch (cpu) {
 	case PPC_CPU_MPC603:
 	case PPC_CPU_MPC603e:
@@ -199,8 +370,10 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		hid0 &= ~(HID0_NAP | HID0_SLEEP);
 		hid0 |= HID0_DOZE | HID0_DPM;
 		break;
+	case PPC_CPU_MPC7447A:
 	case PPC_CPU_MPC7450:
 	case PPC_CPU_MPC7455:
+	case PPC_CPU_MPC7457:
 		/* select NAP mode */
 		hid0 &= ~(HID0_DOZE | HID0_SLEEP);
 		hid0 |= HID0_NAP | HID0_DPM;
@@ -211,18 +384,23 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		if (cpu == PPC_CPU_MPC7450 && (pvr & 0xffff) < 0x0200)
 			hid0 &= ~HID0_BTIC;
 		break;
+	case PPC_CPU_IBM970FX:
+		/* select NAP mode */
+		hid0 &= ~(HID0_DOZE | HID0_SLEEP);
+		hid0 |= HID0_NAP | HID0_DPM;
+		break;
 	}
-	ppc_mthid0(hid0);
+	if (ppc_proc_is_64b == 0)
+		ppc_mthid0(hid0);
 
 	/* if processor is G3 or G4, configure l2 cache */
 	if (cpu == PPC_CPU_MPC750 || cpu == PPC_CPU_MPC7400 ||
 	    cpu == PPC_CPU_IBM750FX || cpu == PPC_CPU_MPC7410 ||
-	    cpu == PPC_CPU_MPC7450 || cpu == PPC_CPU_MPC7455) {
+	    cpu == PPC_CPU_MPC7447A || cpu == PPC_CPU_MPC7450 ||
+	    cpu == PPC_CPU_MPC7455 || cpu == PPC_CPU_MPC7457) {
 		config_l2cr(cpu);
 	}
 	printf("\n");
-
-
 }
 
 /* L2CR bit definitions */
@@ -309,7 +487,8 @@ config_l2cr(int cpu)
 			if (l3cr & L3CR_L3E)
 				printf(", %cMB L3 cache",
 				    l3cr & L3CR_L3SIZ ? '2' : '1');
-		} else if (cpu == PPC_CPU_IBM750FX)
+		} else if (cpu == PPC_CPU_IBM750FX ||
+			   cpu == PPC_CPU_MPC7447A || cpu == PPC_CPU_MPC7457)
 			printf(": 512KB L2 cache");
 		else {
 			switch (l2cr & L2CR_L2SIZ) {

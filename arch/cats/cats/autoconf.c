@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.5 2005/04/21 00:15:42 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.7 2005/12/27 18:31:08 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.2 2001/09/05 16:17:36 matt Exp $	*/
 
 /*
@@ -66,7 +66,6 @@ struct device *bootdv = NULL;
 int findblkmajor(struct device *dv);
 char * findblkname(int maj);
 
-void swapconf(void);
 void rootconf(void);
 void diskconf(void);
 
@@ -224,37 +223,9 @@ diskconf()
 #endif
 	rootconf();
 #if 0
-	swapconf();
 	dumpconf();
 #endif
 }
-
-/*
- * Configure swap space and related parameters.
- */
-void
-swapconf()
-{
-	register struct swdevt *swp;
-	register int nblks;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		int maj = major(swp->sw_dev);
-
-		if (maj > nblkdev)
-			break;
-		if (bdevsw[maj].d_psize) {
-			nblks = (*bdevsw[maj].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
-	}
-}
-
-void    rootconf(void);
-void    diskconf(void);
 
 
 /*
@@ -352,7 +323,7 @@ rootconf()
 					bootdv->dv_class == DV_DISK
 						? 'a' : ' ');
 			printf(": ");
-			s = splimp();
+			s = splhigh();
 			cnpollc(1);
 			len = getsn(buf, sizeof(buf));
 
@@ -391,7 +362,7 @@ rootconf()
 					bootdv->dv_xname,
 					bootdv->dv_class == DV_DISK?'b':' ');
 			printf(": ");
-			s = splimp();
+			s = splhigh();
 			cnpollc(1);
 			len = getsn(buf, sizeof(buf));
 			cnpollc(0);

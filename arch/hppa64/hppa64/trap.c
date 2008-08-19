@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.3 2005/08/14 10:54:17 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.6 2005/10/26 18:35:45 martin Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -379,7 +379,7 @@ trap(type, frame)
 			if ((type & T_USER && space == HPPA_SID_KERNEL) ||
 			    (type & T_USER && !pl) ||
 			    (type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
-			    uvm_fault(map, hppa_trunc_page(va), fault,
+			    uvm_fault(map, trunc_page(va), fault,
 			     opcode & 0x40? UVM_PROT_WRITE : UVM_PROT_READ)) {
 				frame_regmap(frame, opcode & 0x1f) = 0;
 				frame->tf_ipsw |= PSL_N;
@@ -428,7 +428,7 @@ trap(type, frame)
 		}
 
 printf("here\n");
-		ret = uvm_fault(map, hppa_trunc_page(va), fault, vftype);
+		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
 		/*
 		 * If this was a stack access we keep track of the maximum
@@ -558,7 +558,8 @@ child_return(arg)
 	userret(p, tf->tf_iioq[0], 0);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, SYS_fork, 0, 0);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }
 
@@ -682,8 +683,6 @@ syscall(struct trapframe *frame)
 	else
 #endif
 		oerror = error = (*callp->sy_call)(p, args, rval);
-	p = curproc;
-	frame = p->p_md.md_regs;
 	switch (error) {
 	case 0:
 		frame->tf_ret0 = rval[0];

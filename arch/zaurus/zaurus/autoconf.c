@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.2 2005/04/21 00:15:43 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.5 2005/12/27 18:31:11 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.2 2001/09/05 16:17:36 matt Exp $	*/
 
 /*
@@ -63,7 +63,6 @@ struct device *bootdv = NULL;
 int findblkmajor(struct device *dv);
 char * findblkname(int maj);
 
-void swapconf(void);
 void rootconf(void);
 void diskconf(void);
 
@@ -222,37 +221,9 @@ diskconf()
 #endif
 	rootconf();
 #if 0
-	swapconf();
 	dumpconf();
 #endif
 }
-
-/*
- * Configure swap space and related parameters.
- */
-void
-swapconf()
-{
-	register struct swdevt *swp;
-	register int nblks;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		int maj = major(swp->sw_dev);
-
-		if (maj > nblkdev)
-			break;
-		if (bdevsw[maj].d_psize) {
-			nblks = (*bdevsw[maj].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
-	}
-}
-
-void    rootconf(void);
-void    diskconf(void);
 
 
 /*
@@ -307,9 +278,7 @@ rootconf()
 	extern char *nfsbootdevname;
 #endif
 
-	printf("boot_file: '%s'\n", boot_file);
-
-	if(boothowto & RB_DFLTROOT)
+	if (boothowto & RB_DFLTROOT)
 		return;		/* Boot compiled in */
 
 	/*
@@ -330,10 +299,10 @@ rootconf()
 	}
 
 	/* Lookup boot device from boot if not set by configuration */
-	if(bootdv == NULL) {
+	if (bootdv == NULL) {
 		bootdv = parsedisk(boot_file, strlen(boot_file), 0, &temp);
 	}
-	if(bootdv == NULL) {
+	if (bootdv == NULL) {
 		printf("boot device: lookup '%s' failed.\n", boot_file);
 		boothowto |= RB_ASKNAME; /* Don't Panic :-) */
 		/* boothowto |= RB_SINGLE; */
@@ -349,7 +318,7 @@ rootconf()
 					bootdv->dv_class == DV_DISK
 						? 'a' : ' ');
 			printf(": ");
-			s = splimp();
+			s = splhigh();
 			cnpollc(1);
 			len = getsn(buf, sizeof(buf));
 
@@ -388,7 +357,7 @@ rootconf()
 					bootdv->dv_xname,
 					bootdv->dv_class == DV_DISK?'b':' ');
 			printf(": ");
-			s = splimp();
+			s = splhigh();
 			cnpollc(1);
 			len = getsn(buf, sizeof(buf));
 			cnpollc(0);
@@ -423,8 +392,7 @@ gotswap:
 		dumpdev = nswapdev;
 		swdevt[0].sw_dev = nswapdev;
 		swdevt[1].sw_dev = NODEV;
-	}
-	else if(mountroot == NULL) {
+	} else if (mountroot == NULL) {
 		/*
 		 * `swap generic': Use the device the ROM told us to use.
 		 */

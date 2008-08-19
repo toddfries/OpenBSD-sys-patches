@@ -1,4 +1,4 @@
-/*	$OpenBSD: firmload.c,v 1.5 2005/08/01 08:15:02 deraadt Exp $	*/
+/*	$OpenBSD: firmload.c,v 1.7 2006/01/19 17:49:50 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>
@@ -46,7 +46,11 @@ loadfirmware(const char *name, u_char **bufp, size_t *buflen)
 	if (path == NULL)
 		return (ENOMEM);
 		
-	snprintf(path, MAXPATHLEN, "/etc/firmware/%s", name);
+	if (snprintf(path, MAXPATHLEN, "/etc/firmware/%s", name) >=
+	    MAXPATHLEN) {
+		error = ENAMETOOLONG;
+		goto err;
+	}
 
 	NDINIT(&nid, LOOKUP, NOFOLLOW|LOCKLEAF, UIO_SYSSPACE, path, p);
 	error = namei(&nid);
@@ -55,7 +59,7 @@ loadfirmware(const char *name, u_char **bufp, size_t *buflen)
 	error = VOP_GETATTR(nid.ni_vp, &va, p->p_ucred, p);
 	if (error)
 		goto fail;
-	if (va.va_size == 0) {
+	if (nid.ni_vp->v_type != VREG || va.va_size == 0) {
 		error = EINVAL;
 		goto fail;
 	}

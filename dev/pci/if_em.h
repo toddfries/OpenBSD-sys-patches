@@ -32,7 +32,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 /* $FreeBSD: if_em.h,v 1.26 2004/09/01 23:22:41 pdeuskar Exp $ */
-/* $OpenBSD: if_em.h,v 1.14 2005/07/16 19:05:36 brad Exp $ */
+/* $OpenBSD: if_em.h,v 1.22 2006/02/22 06:02:09 brad Exp $ */
 
 #ifndef _EM_H_DEFINED_
 #define _EM_H_DEFINED_
@@ -83,7 +83,7 @@ POSSIBILITY OF SUCH DAMAGE.
 /* Tunables */
 
 /*
- * EM_MAX_TXD: Maximum number of Transmit Descriptors
+ * EM_(MIN/MAX)_TXD: Maximum number of Transmit Descriptors
  * Valid Range: 80-256 for 82542 and 82543-based adapters
  *              80-4096 for others
  * Default Value: 256
@@ -93,9 +93,10 @@ POSSIBILITY OF SUCH DAMAGE.
  */
 #define EM_MIN_TXD                      12
 #define EM_MAX_TXD                      256
+#define EM_MAX_TXD_82544                512
 
 /*
- * EM_MAX_RXD - Maximum number of receive Descriptors
+ * EM_(MIN/MAX)_RXD - Maximum number of receive Descriptors
  * Valid Range: 80-256 for 82542 and 82543-based adapters
  *              80-4096 for others
  * Default Value: 256
@@ -168,13 +169,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #define EM_RADV                         64
 
 /*
- * This parameter controls the maximum no of times the driver will loop
- * in the isr.
- *           Minimum Value = 1
- */
-#define EM_MAX_INTR                     3
-
-/*
  * This parameter controls the duration of transmit watchdog timer.
  */
 #define EM_TX_TIMEOUT                   5    /* set to 5 seconds */
@@ -183,7 +177,7 @@ POSSIBILITY OF SUCH DAMAGE.
  * This parameter controls when the driver calls the routine to reclaim
  * transmit descriptors.
  */
-#define EM_TX_CLEANUP_THRESHOLD         EM_MAX_TXD / 8
+#define EM_TX_CLEANUP_THRESHOLD         (sc->num_tx_desc / 8)
 
 /*
  * This parameter controls whether or not autonegotation is enabled.
@@ -280,7 +274,7 @@ typedef enum _XSUM_CONTEXT_T {
 	OFFLOAD_UDP_IP
 } XSUM_CONTEXT_T;
 
-/* For 82544 PCIX  Workaround */
+/* For 82544 PCI-X Workaround */
 typedef struct _ADDRESS_LENGTH_PAIR
 {
     u_int64_t   address;
@@ -297,8 +291,6 @@ typedef struct _DESCRIPTOR_PAIR
 struct em_softc {
 	struct device	sc_dv;
 	struct arpcom	interface_data;
-	struct em_softc *next;
-	struct em_softc *prev;
 	struct em_hw    hw;
 
 	/* OpenBSD operating-system-specific structures */
@@ -311,6 +303,7 @@ struct em_softc {
 	struct timeout	timer_handle;
 	struct timeout	tx_fifo_timer_handle;
 	void		*sc_powerhook;
+	void		*sc_shutdownhook;
 
 #ifdef __STRICT_ALIGNMENT
 	/* Used for carrying forward alignment adjustments */
@@ -377,7 +370,9 @@ struct em_softc {
 	unsigned long   no_tx_desc_avail1;
 	unsigned long   no_tx_desc_avail2;
 	unsigned long   no_tx_map_avail;
-        unsigned long   no_tx_dma_setup;
+	unsigned long   no_tx_dma_setup;
+	unsigned long   watchdog_events;
+	unsigned long	rx_overruns;
 
 	/* Used in for 82547 10Mb Half workaround */
 	#define EM_PBA_BYTES_SHIFT	0xA
@@ -394,20 +389,10 @@ struct em_softc {
 	u_int64_t       tx_fifo_wrk_cnt;
 	u_int32_t       tx_head_addr;
 
-        /* For 82544 PCIX Workaround */
+        /* For 82544 PCI-X Workaround */
         boolean_t       pcix_82544;
-        boolean_t       in_detach;
 
 	struct em_hw_stats stats;
 };
-
-static inline int spl_use_arg(void *);
-static inline int spl_use_arg(void *v) { return splnet(); }
-#define EM_LOCK_INIT(_sc, _name)
-#define EM_LOCK_DESTROY(_sc)
-#define EM_LOCK_STATE()		int em_hidden_splnet_s
-#define EM_LOCK(_sc)		em_hidden_splnet_s = spl_use_arg(_sc)
-#define EM_UNLOCK(_sc)		splx(em_hidden_splnet_s)
-#define EM_LOCK_ASSERT(_sc)	splassert(IPL_NET)
 
 #endif                                                  /* _EM_H_DEFINED_ */

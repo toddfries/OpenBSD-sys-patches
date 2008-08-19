@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.3 2005/05/01 09:55:49 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.6 2005/12/03 19:04:06 miod Exp $	*/
 /*
  * Copyright (C) 2000 Steve Murphree, Jr.
  * All rights reserved.
@@ -55,7 +55,6 @@ void splassert_check(int, const char *);
 
 #endif /* _LOCORE */
 
-#define splnone			spl0
 #define splsoftclock()		raiseipl(IPL_SOFTCLOCK)
 #define splsoftnet()		raiseipl(IPL_SOFTNET)
 #define splbio()		raiseipl(IPL_BIO)
@@ -63,11 +62,14 @@ void splassert_check(int, const char *);
 #define spltty()		raiseipl(IPL_TTY)
 #define splclock()		raiseipl(IPL_CLOCK)
 #define splstatclock()		raiseipl(IPL_STATCLOCK)
+#define	splsched()		raiseipl(IPL_SCHED)
 #define splimp()		raiseipl(IPL_IMP)
 #define splvm()			raiseipl(IPL_VM)
 #define splhigh()		setipl(IPL_HIGH)
 
+#define	spllock()		splhigh()
+
 #define splx(x)			((x) ? setipl((x)) : spl0())
 
 #endif /* _KERNEL */
-#endif /* _MVME88K_INTR_H_ */
+#endif /* _M88K_INTR_H_ */

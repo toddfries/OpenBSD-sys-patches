@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.5 2005/03/28 12:42:44 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.9 2005/12/11 21:45:28 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991 Carnegie Mellon University
@@ -23,15 +23,15 @@
 
 struct pmap {
 	sdt_entry_t		*pm_stab;	/* virtual pointer to sdt */
-	u_int32_t		pm_apr;
-	int			pm_count;	/* reference count */
+	apr_t			 pm_apr;
+	int			 pm_count;	/* reference count */
 	/* cpus using of this pmap; NCPU must be <= 32 */
-	u_int32_t		pm_cpus;
-	struct simplelock	pm_lock;
+	u_int32_t		 pm_cpus;
+#ifdef MULTIPROCESSOR
+	__cpu_simple_lock_t	 pm_lock;
+#endif
 	struct pmap_statistics	pm_stats;	/* pmap statistics */
 };
-
-#define PMAP_NULL ((pmap_t) 0)
 
 /* 	The PV (Physical to virtual) List.
  *
@@ -63,6 +63,7 @@ extern	caddr_t		vmmap;
 #define	pmap_clear_reference(pg)	pmap_unsetbit(pg, PG_U)
 
 void	pmap_bootstrap(vaddr_t);
+void	pmap_bootstrap_cpu(cpuid_t);
 void	pmap_cache_ctrl(pmap_t, vaddr_t, vaddr_t, u_int);
 void	pmap_proc_iflush(struct proc *, vaddr_t, vsize_t);
 #define pmap_unuse_final(p)		/* nothing */

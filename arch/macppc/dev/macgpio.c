@@ -1,4 +1,4 @@
-/*	$OpenBSD: macgpio.c,v 1.1 2005/05/04 02:24:17 drahn Exp $	*/
+/*	$OpenBSD: macgpio.c,v 1.4 2006/02/14 23:05:28 kettenis Exp $	*/
 /*	$NetBSD: gpio.c,v 1.2 2001/02/27 05:16:33 matt Exp $	*/
 
 /*-
@@ -130,9 +130,8 @@ int
 macgpio_print(void *aux, const char *gpio)
 {
 	struct confargs *ca = aux;
-
 	if (gpio)
-		printf("%s at %s", ca->ca_name, gpio);
+		printf("\"%s\" at %s", ca->ca_name, gpio);
 
 	if (ca->ca_nreg > 0)
 		printf(" offset 0x%x", ca->ca_reg[0]);
@@ -163,7 +162,7 @@ macgpio_gpio_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_port = ((struct gpio_softc *) parent)->sc_port;
 	mac_intr_establish(parent, ca->ca_intr[0], IST_LEVEL, IPL_HIGH,
-	gpio_intr, sc, "gpio/adb");
+	    gpio_intr, sc, "gpio/adb");
 
 	printf(" irq %d\n", ca->ca_intr[0]);
 }

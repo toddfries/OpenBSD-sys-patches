@@ -1,4 +1,4 @@
-/*	$OpenBSD: musyccvar.h,v 1.6 2005/08/27 13:32:01 claudio Exp $ */
+/*	$OpenBSD: musyccvar.h,v 1.9 2006/02/06 17:29:11 jmc Exp $ */
 
 /*
  * Copyright (c) 2004,2005  Internet Business Solutions AG, Zurich, Switzerland
@@ -33,8 +33,7 @@
 /* dma ring sizes */
 #define MUSYCC_DMA_CNT		256
 #define MUSYCC_DMA_MAPSIZE	(MUSYCC_DMA_CNT * sizeof(struct dma_desc))
-#define MUSYCC_DMA_MIN		3
-#define MUSYCC_DMA_MAX		64
+#define MUSYCC_DMA_SIZE		32
 
 struct musycc_softc;
 struct ebus_softc;
@@ -50,7 +49,7 @@ struct dma_desc {
 	bus_dmamap_t		 map;
 };
 
-#define MUSYCC_INTLEN		512	/* 512 pending interrups is enough */
+#define MUSYCC_INTLEN		512	/* 512 pending interrupts is enough */
 struct musycc_intdesc {
 	u_int32_t		 md_intrq[MUSYCC_INTLEN];
 };
@@ -202,7 +201,7 @@ int		ebus_attach_device(struct ebus_dev *, struct musycc_softc *,
 u_int8_t	ebus_read(struct ebus_dev *, bus_size_t);
 void		ebus_write(struct ebus_dev *, bus_size_t, u_int8_t);
 void		ebus_read_buf(struct ebus_dev *, bus_size_t, void *, size_t);
-void		ebus_set_led(struct channel_softc *, u_int8_t);
+void		ebus_set_led(struct channel_softc *, int, u_int8_t);
 
 #define MUSYCC_LED_GREEN	0x1
 #define MUSYCC_LED_RED		0x2

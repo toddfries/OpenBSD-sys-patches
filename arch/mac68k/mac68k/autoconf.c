@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.21 2005/08/01 14:49:55 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.25 2006/01/18 23:21:17 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.38 1996/12/18 05:46:09 scottr Exp $	*/
 
 /*
@@ -62,7 +62,6 @@
 #include <dev/cons.h>
 
 #include <machine/autoconf.h>
-#include <machine/adbsys.h>
 #include <machine/viareg.h>
 
 #include <scsi/scsi_all.h>
@@ -82,8 +81,8 @@ int getstr(char *, int);
 void findbootdev(void);
 int target_to_unit(u_long, u_long, u_long);
 
+void	diskconf(void);
 void	setroot(void);
-void	swapconf(void);
 
 #ifdef RAMDISK_HOOKS
 static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
@@ -92,40 +91,21 @@ static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
 void
 cpu_configure()
 {
-	mrg_init();		/* Init Mac ROM Glue */
-	startrtclock();		/* start before adb_init() */
-	adb_init();		/* ADB device subsystem & driver */
+	startrtclock();
 
 	if (config_rootfound("mainbus", "mainbus") == NULL)
 		panic("No mainbus found!");
+	spl0();
 
 	findbootdev();
-	setroot();
-	swapconf();
+	md_diskconf = diskconf;
 	cold = 0;
 }
 
-/*
- * Configure swap space and related parameters.
- */
 void
-swapconf()
+diskconf()
 {
-	struct swdevt *swp;
-	int nblks, maj;
-
-	for (swp = swdevt; swp->sw_dev != NODEV ; swp++) {
-		maj = major(swp->sw_dev);
-		if (maj > nblkdev)
-			break;
-		if (bdevsw[maj].d_psize) {
-			nblks = (*bdevsw[maj].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
-	}
+	setroot();
 	dumpconf();
 }
 

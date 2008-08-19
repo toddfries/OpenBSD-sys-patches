@@ -1,4 +1,4 @@
-/*	$OpenBSD: sfb.c,v 1.14 2002/03/14 03:15:51 millert Exp $	*/
+/*	$OpenBSD: sfb.c,v 1.16 2006/01/02 05:21:28 brad Exp $	*/
 /*	$NetBSD: sfb.c,v 1.7 1996/12/05 01:39:44 cgd Exp $	*/
 
 /*
@@ -52,11 +52,7 @@
 #include <machine/autoconf.h>
 #include <machine/pte.h>
 
-#ifdef __BROKEN_INDIRECT_CONFIG
 int	sfbmatch(struct device *, void *, void *);
-#else
-int	sfbmatch(struct device *, struct cfdata *, void *);
-#endif
 void	sfbattach(struct device *, struct device *, void *);
 
 struct cfattach sfb_ca = {
@@ -122,11 +118,7 @@ struct wsdisplay_accessops sfb_accessops = {
 int
 sfbmatch(parent, match, aux)
 	struct device *parent;
-#ifdef __BROKEN_INDIRECT_CONFIG
 	void *match;
-#else
-	struct cfdata *match;
-#endif
 	void *aux;
 {
 	struct tc_attach_args *ta = aux;
@@ -359,7 +351,7 @@ sfbmmap(v, offset, prot)
 
 	if (offset >= SFB_SIZE || offset < 0)
 		return (-1);
-	return alpha_btop(sc->sc_dc->dc_paddr + offset);
+	return atop(sc->sc_dc->dc_paddr + offset);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.44 2005/07/31 15:37:51 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.50 2006/01/30 21:26:17 miod Exp $	*/
 /*	$NetBSD: trap.c,v 1.68 1998/12/22 08:47:07 scottr Exp $	*/
 
 /*
@@ -365,24 +365,14 @@ copyfault:
 	 * User coprocessor violation
 	 */
 	case T_COPERR|T_USER:
-		typ = FPE_FLTINV;
+		typ = ILL_COPROC;
 		ucode = 0;
-		i = SIGFPE;	/* XXX What is a proper response here? */
+		i = SIGILL;
 		break;
 	/* 
 	 * 6888x exceptions 
 	 */
 	case T_FPERR|T_USER:
-		/*
-		 * We pass along the 68881 status register which locore
-		 * stashed in code for us.  Note that there is a
-		 * possibility that the bit pattern of this register
-		 * will conflict with one of the FPE_* codes defined
-		 * in signal.h.  Fortunately for us, the only such
-		 * codes we use are all in the range 1-7 and the low
-		 * 3 bits of the status register are defined as 0 so
-		 * there is no clash.
-		 */
 		typ = FPE_FLTRES;
 		ucode = code;
 		i = SIGFPE;
@@ -412,16 +402,19 @@ copyfault:
 	case T_FPEMULI|T_USER:
 	case T_FPEMULD|T_USER:
 #ifdef FPU_EMULATE
-		i = fpu_emulate(&frame, &p->p_addr->u_pcb.pcb_fpregs);
+		i = fpu_emulate(&frame, &p->p_addr->u_pcb.pcb_fpregs,
+		    &typ);
 		/* XXX -- deal with tracing? (frame.f_sr & PSL_T) */
+		if (i == 0)
+			goto out;
 #else
 		uprintf("pid %d killed: no floating point support.\n",
 			p->p_pid);
 		i = SIGILL;
-		ucode = frame.f_format;
 		typ = ILL_COPROC;
-		v = frame.f_pc;
 #endif
+		ucode = frame.f_format;
+		v = frame.f_pc;
 		break;
 
 	case T_COPERR:		/* Kernel coprocessor violation */
@@ -523,11 +516,11 @@ copyfault:
 			uvmexp.softs++;
 			softclock();
 		}
-		if (ssir & SIR_DTMGR) {
-			void mrg_execute_deferred(void);
-			siroff(SIR_DTMGR);
+		if (ssir & SIR_ADB) {
+			void adb_soft_intr(void);
+			siroff(SIR_ADB);
 			uvmexp.softs++;
-			mrg_execute_deferred();
+			adb_soft_intr();
 		}
 		/*
 		 * If this was not an AST trap, we are all done.
@@ -710,7 +703,7 @@ writeback(fp, docachepush)
 				   trunc_page((vaddr_t)f->f_fa), VM_PROT_WRITE,
 				   VM_PROT_WRITE|PMAP_WIRED);
 			pmap_update(pmap_kernel());
-			fa = (u_int)&vmmap[(f->f_fa & PGOFSET) & ~0xF];
+			fa = (u_int)&vmmap[m68k_page_offset(f->f_fa) & ~0xF];
 			bcopy((caddr_t)&f->f_pd0, (caddr_t)fa, 16);
 			pmap_extract(pmap_kernel(), (vaddr_t)fa, &pa);
 			DCFL(pa);

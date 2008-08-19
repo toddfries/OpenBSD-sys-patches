@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.36.2.1 2006/09/02 18:08:23 brad Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.38.2.1 2006/09/02 18:09:01 brad Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -70,6 +70,7 @@
 #include <net/if.h>
 #include <net/netisr.h>
 #include <net/if_types.h>
+#include <net/route.h>
 
 #if defined (__FreeBSD__) || defined(__OpenBSD_) || defined(__NetBSD__)
 #include <machine/random.h>
@@ -221,9 +222,9 @@ struct lcp_header {
 #define LCP_HEADER_LEN          sizeof (struct lcp_header)
 
 struct cisco_packet {
-	u_long type;
-	u_long par1;
-	u_long par2;
+	u_int32_t type;
+	u_int32_t par1;
+	u_int32_t par2;
 	u_short rel;
 	u_short time0;
 	u_short time1;
@@ -300,7 +301,7 @@ static u_short interactive_ports[8] = {
 HIDE int sppp_output(struct ifnet *ifp, struct mbuf *m,
 		       struct sockaddr *dst, struct rtentry *rt);
 
-HIDE void sppp_cisco_send(struct sppp *sp, int type, long par1, long par2);
+HIDE void sppp_cisco_send(struct sppp *sp, u_int32_t type, u_int32_t par1, u_int32_t par2);
 HIDE void sppp_cisco_input(struct sppp *sp, struct mbuf *m);
 
 HIDE void sppp_cp_input(const struct cp *cp, struct sppp *sp,
@@ -394,6 +395,7 @@ HIDE void sppp_print_bytes(const u_char *p, u_short len);
 HIDE void sppp_print_string(const char *p, u_short len);
 HIDE void sppp_qflush(struct ifqueue *ifq);
 HIDE void sppp_set_ip_addr(struct sppp *sp, u_long src);
+HIDE void sppp_set_phase(struct sppp *sp);
 
 /* our control protocol descriptors */
 static const struct cp lcp = {
@@ -1087,15 +1089,15 @@ sppp_cisco_input(struct sppp *sp, struct mbuf *m)
 	if (debug)
 		log(LOG_DEBUG,
 		    SPP_FMT "cisco input: %d bytes "
-		    "<0x%lx 0x%lx 0x%lx 0x%x 0x%x-0x%x>\n",
+		    "<0x%x 0x%x 0x%x 0x%x 0x%x-0x%x>\n",
 		    SPP_ARGS(ifp), m->m_pkthdr.len,
-		    (u_long)ntohl (h->type), (u_long)h->par1, (u_long)h->par2, (u_int)h->rel,
+		    ntohl(h->type), h->par1, h->par2, (u_int)h->rel,
 		    (u_int)h->time0, (u_int)h->time1);
 	switch (ntohl (h->type)) {
 	default:
 		if (debug)
-			addlog(SPP_FMT "cisco unknown packet type: 0x%lx\n",
-			       SPP_ARGS(ifp), (u_long)ntohl (h->type));
+			addlog(SPP_FMT "cisco unknown packet type: 0x%x\n",
+			       SPP_ARGS(ifp), ntohl(h->type));
 		break;
 	case CISCO_ADDR_REPLY:
 		/* Reply on address request, ignore */
@@ -1144,7 +1146,7 @@ sppp_cisco_input(struct sppp *sp, struct mbuf *m)
  * Send Cisco keepalive packet.
  */
 HIDE void
-sppp_cisco_send(struct sppp *sp, int type, long par1, long par2)
+sppp_cisco_send(struct sppp *sp, u_int32_t type, u_int32_t par1, u_int32_t par2)
 {
 	STDDCL;
 	struct ppp_header *h;
@@ -1175,10 +1177,10 @@ sppp_cisco_send(struct sppp *sp, int type, long par1, long par2)
 	ch->time1 = htons ((u_short) tv.tv_sec);
 
 	if (debug)
-		log(LOG_DEBUG,
-		    SPP_FMT "cisco output: <0x%lx 0x%lx 0x%lx 0x%x 0x%x-0x%x>\n",
-			SPP_ARGS(ifp), (u_long)ntohl (ch->type), (u_long)ch->par1,
-			(u_long)ch->par2, (u_int)ch->rel, (u_int)ch->time0, (u_int)ch->time1);
+		log(LOG_DEBUG, SPP_FMT
+		    "cisco output: <0x%lx 0x%lx 0x%lx 0x%x 0x%x-0x%x>\n",
+			SPP_ARGS(ifp), ntohl(ch->type), ch->par1, ch->par2,
+			(u_int)ch->rel, (u_int)ch->time0, (u_int)ch->time1);
 
 	if (IF_QFULL (&sp->pp_cpq)) {
 		IF_DROP (&sp->pp_fastq);
@@ -1910,8 +1912,13 @@ sppp_lcp_up(struct sppp *sp)
 	STDDCL;
 	struct timeval tv;
 
-	if (sp->pp_flags & PP_CISCO)
+	if (sp->pp_flags & PP_CISCO) {
+		int s = splsoftnet();
+		sp->pp_if.if_link_state = LINK_STATE_UP;
+		if_link_state_change(&sp->pp_if);
+		splx(s);
 		return;
+	}
 
  	sp->pp_alivecnt = 0;
  	sp->lcp.opts = (1 << LCP_OPT_MAGIC);
@@ -1953,8 +1960,13 @@ sppp_lcp_down(struct sppp *sp)
 {
 	STDDCL;
 
-	if (sp->pp_flags & PP_CISCO)
+	if (sp->pp_flags & PP_CISCO) {
+		int s = splsoftnet();
+		sp->pp_if.if_link_state = LINK_STATE_DOWN;
+		if_link_state_change(&sp->pp_if);
+		splx(s);
 		return;
+	}
 
 	sppp_down_event(&lcp, sp);
 
@@ -2381,8 +2393,7 @@ sppp_lcp_tlu(struct sppp *sp)
 	else
 		sp->pp_phase = PHASE_NETWORK;
 
-	log(LOG_INFO, SPP_FMT "phase %s\n", SPP_ARGS(ifp),
-	    sppp_phase_name(sp->pp_phase));
+	sppp_set_phase(sp);
 
 	/*
 	 * Open all authentication protocols.  This is even required
@@ -2419,14 +2430,12 @@ sppp_lcp_tlu(struct sppp *sp)
 HIDE void
 sppp_lcp_tld(struct sppp *sp)
 {
-	struct ifnet *ifp = &sp->pp_if;
 	int i;
 	u_long mask;
 
 	sp->pp_phase = PHASE_TERMINATE;
 
-	log(LOG_INFO, SPP_FMT "phase %s\n", SPP_ARGS(ifp),
-	    sppp_phase_name(sp->pp_phase));
+	sppp_set_phase(sp);
 
 	/*
 	 * Take upper layers down.  We send the Down event first and
@@ -2444,12 +2453,9 @@ sppp_lcp_tld(struct sppp *sp)
 HIDE void
 sppp_lcp_tls(struct sppp *sp)
 {
-	struct ifnet *ifp = &sp->pp_if;
-
 	sp->pp_phase = PHASE_ESTABLISH;
 
-	log(LOG_INFO, SPP_FMT "phase %s\n", SPP_ARGS(ifp),
-	    sppp_phase_name(sp->pp_phase));
+	sppp_set_phase(sp);
 
 	/* Notify lower layer if desired. */
 	if (sp->pp_tls)
@@ -2459,11 +2465,8 @@ sppp_lcp_tls(struct sppp *sp)
 HIDE void
 sppp_lcp_tlf(struct sppp *sp)
 {
-	struct ifnet *ifp = &sp->pp_if;
-
 	sp->pp_phase = PHASE_DEAD;
-	log(LOG_INFO, SPP_FMT "phase %s\n", SPP_ARGS(ifp),
-	    sppp_phase_name(sp->pp_phase));
+	sppp_set_phase(sp);
 
 	/* Notify lower layer if desired. */
 	if (sp->pp_tlf)
@@ -4128,14 +4131,12 @@ sppp_params(struct sppp *sp, u_long cmd, void *data)
 HIDE void
 sppp_phase_network(struct sppp *sp)
 {
-	struct ifnet *ifp = &sp->pp_if;
 	int i;
 	u_long mask;
 
 	sp->pp_phase = PHASE_NETWORK;
 
-	log(LOG_INFO, SPP_FMT "phase %s\n", SPP_ARGS(ifp),
-	    sppp_phase_name(sp->pp_phase));
+	sppp_set_phase(sp);
 
 	/* Notify NCPs now. */
 	for (i = 0; i < IDX_COUNT; i++)
@@ -4331,3 +4332,26 @@ sppp_null(struct sppp *unused)
  * hilit-auto-highlight-maxout: 120000
  * End:
  */
+
+HIDE void
+sppp_set_phase(struct sppp *sp)
+{
+	struct ifnet *ifp = &sp->pp_if;
+	int lstate, s;
+
+	log(LOG_INFO, SPP_FMT "phase %s\n", SPP_ARGS(ifp),
+	    sppp_phase_name(sp->pp_phase));
+
+	/* set link state */
+	if (sp->pp_phase == PHASE_NETWORK)
+		lstate = LINK_STATE_UP;
+	else
+		lstate = LINK_STATE_DOWN;
+
+	if (ifp->if_link_state != lstate) {
+		ifp->if_link_state = lstate;
+		s = splsoftnet();
+		if_link_state_change(ifp);
+		splx(s);
+	}
+}

@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.25 2005/06/29 06:07:04 deraadt Exp $     */
+/*      $OpenBSD: pmap.h,v 1.27 2006/01/01 01:08:57 millert Exp $     */
 /*	$NetBSD: pmap.h,v 1.37 1999/08/01 13:48:07 ragge Exp $	   */
 
 /* 
@@ -43,7 +43,6 @@
 #ifndef PMAP_H
 #define PMAP_H
 
-#include <machine/types.h>
 #include <machine/pte.h>
 #include <machine/mtpr.h>
 #include <machine/pcb.h>
@@ -91,11 +90,11 @@ struct pv_entry {
 
 /* Mapping macros used when allocating SPT */
 #define MAPVIRT(ptr, count)					\
-	(vm_offset_t)ptr = virtual_avail;			\
+	(vaddr_t)ptr = virtual_avail;				\
 	virtual_avail += (count) * VAX_NBPG;
 
 #define MAPPHYS(ptr, count, perm)				\
-	(vm_offset_t)ptr = avail_start + KERNBASE;		\
+	(paddr_t)ptr = avail_start + KERNBASE;			\
 	avail_start += (count) * VAX_NBPG;
 
 #ifdef	_KERNEL
@@ -148,7 +147,7 @@ extern	struct pmap kernel_pmap_store;
 
 /* Prototypes */
 void	pmap_bootstrap(void);
-vaddr_t pmap_map(vm_offset_t, vm_offset_t, vm_offset_t, int);
+vaddr_t pmap_map(vaddr_t, paddr_t, paddr_t, int);
 void	pmap_pinit(pmap_t);
 
 #endif	/* _KERNEL */

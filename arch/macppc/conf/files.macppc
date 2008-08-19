@@ -1,4 +1,4 @@
-#	$OpenBSD: files.macppc,v 1.25 2005/05/04 02:24:17 drahn Exp $
+#	$OpenBSD: files.macppc,v 1.46 2006/01/18 23:21:17 miod Exp $
 
 #
 # macppc-specific configuration info
@@ -73,6 +73,15 @@ attach	mpcpcibr at mainbus
 file	arch/macppc/pci/mpcpcibus.c			mpcpcibr
 file	arch/macppc/pci/pci_addr_fixup.c		mpcpcibr
 
+device  ht {} : pcibus
+attach	ht at mainbus
+file	arch/macppc/pci/ht.c				ht
+
+device	smu: i2cbus
+attach	smu at mainbus
+file	arch/macppc/dev/smu.c				smu
+file	dev/clock_subr.c				smu
+
 #
 # "workstation console" routines
 #
@@ -132,7 +141,7 @@ attach	macintr at macobio
 file	arch/macppc/dev/macintr.c			macintr
 
 device	openpic {}
-attach	openpic at macobio
+attach	openpic at macobio, memc
 file	arch/macppc/dev/openpic.c			openpic
 
 device	zsc {[channel = -1]}
@@ -147,24 +156,14 @@ file	arch/macppc/dev/z8530tty.c			zstty needs-flag
 device	adb {}
 attach	adb at macobio
 file	arch/macppc/dev/adb.c				adb needs-flag
-file	arch/macppc/dev/adb_direct.c			adb
 file	arch/macppc/dev/pm_direct.c			adb
+
+include	"dev/adb/files.adb"
+file	arch/macppc/dev/akbd_machdep.c			akbd
 
 device	apm
 attach	apm at adb
 file	arch/macppc/dev/apm.c				apm needs-count
-
-device	aed
-attach	aed at adb
-file	arch/macppc/dev/aed.c				aed needs-flag
-
-device	akbd: wskbddev
-attach	akbd at adb
-file	arch/macppc/dev/akbd.c				akbd needs-flag
-
-device	ams: wsmousedev
-attach	ams at adb
-file	arch/macppc/dev/ams.c				ams
 
 device	abtn
 attach	abtn at adb
@@ -180,14 +179,44 @@ attach	mediabay at macobio
 file	arch/macppc/dev/mediabay.c			mediabay
 
 # Keywest I2C
-device	ki2c {}
+device	ki2c: i2cbus
 attach	ki2c at macobio
+attach	ki2c at memc	with ki2c_memc
 file	arch/macppc/dev/ki2c.c				ki2c
 
+# PMU I2C
+device	pi2c: i2cbus
+attach	pi2c at adb
+file	arch/macppc/dev/pi2c.c				pi2c
+
+# I2S
+define	i2s
+file	arch/macppc/dev/i2s.c				i2s
+
 # snapper audio
-device	snapper: audio, auconv, mulaw
+device	snapper: audio, auconv, mulaw, i2s
 attach	snapper at macobio
 file	arch/macppc/dev/snapper.c			snapper
+
+# tumbler audio
+device	tumbler: audio, auconv, mulaw, i2s
+attach	tumbler at macobio
+file	arch/macppc/dev/tumbler.c			tumbler
+
+# onyx audio
+device	onyx: audio, auconv, mulaw, i2s
+attach	onyx at macobio
+file	arch/macppc/dev/onyx.c				onyx
+
+# aoa audio
+device	aoa: audio, auconv, mulaw, i2s
+attach	aoa at macobio
+file	arch/macppc/dev/aoa.c				aoa
+
+# daca audio
+device	daca: audio, auconv, mulaw, i2s
+attach	daca at macobio
+file	arch/macppc/dev/daca.c				daca
 
 #device	nvram
 #attach	nvram at macobio
@@ -232,9 +261,29 @@ include "dev/pcmcia/files.pcmcia"
 #
 include "dev/usb/files.usb"
 
+#
+# Machine-independent I2C drivers
+#
+include "dev/i2c/files.i2c"
+file	arch/macppc/dev/maci2c.c			i2cbus
+
+#
+# Machine-independent GPIO drivers
+#
+include "dev/gpio/files.gpio"
+
 # Sun HME Ethernet controllers
 device	hme: ether, ifnet, mii, ifmedia
 file	dev/ic/hme.c
 
 attach	hme at pci with hme_pci
 file	dev/pci/if_hme_pci.c				hme_pci
+
+device	tpms: hid, wsmousedev
+attach	tpms at uhidbus
+file	arch/macppc/dev/tpms.c				tpms
+
+# Apple Sudden Motion Sensor
+device	asms
+attach	asms at i2c
+file	arch/macppc/dev/asms.c			asms

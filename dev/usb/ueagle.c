@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueagle.c,v 1.7 2005/08/04 06:59:36 canacar Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.9 2006/01/29 03:22:52 brad Exp $	*/
 
 /*-
  * Copyright (c) 2003-2005
@@ -248,9 +248,6 @@ USB_DETACH(ueagle)
 		    USBDEVNAME(sc->sc_dev)));
 	}
 
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif
 	if_detach(ifp);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
@@ -947,7 +944,7 @@ ueagle_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 		    USBDEVNAME(sc->sc_dev), usbd_errstr(status));
 
 		if (status == USBD_STALLED)
-			usbd_clear_endpoint_stall(sc->pipeh_tx);
+			usbd_clear_endpoint_stall_async(sc->pipeh_tx);
 
 		ifp->if_oerrors++;
 		return;

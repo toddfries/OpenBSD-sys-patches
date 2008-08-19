@@ -1,7 +1,7 @@
-/*	$OpenBSD: rccosb4reg.h,v 1.1 2004/06/22 09:47:01 mickey Exp $	*/
+/*	$OpenBSD: rccosb4reg.h,v 1.3 2005/11/23 09:24:57 mickey Exp $	*/
 
 /*
- * Copyright (c) 2004, Michael Shalayeff
+ * Copyright (c) 2004,2005 Michael Shalayeff
  * Copyright (c) 1999, by UCHIYAMA Yasushi
  * All rights reserved.
  *
@@ -30,9 +30,9 @@
  * Register definitions for the RCC South Bridge interrupt controller.
  */
 
-#define	OSB4_LEGAL_LINK(link)	((link) >= 0 && (link) <= 15)
+#define	OSB4_LEGAL_LINK(link)	((link) >= 0 && (link) <= 0x1f)
 
-#define	OSB4_PIRQ_MASK		0xdef8
+#define	OSB4_PIRQ_MASK		0xdefa
 #define	OSB4_LEGAL_IRQ(irq)	((irq) > 0 && (irq) <= 15 &&		\
 				 ((1 << (irq)) & OSB4_PIRQ_MASK) != 0)
 
@@ -40,8 +40,8 @@
  * PCI Interrupts Address Index Register
  */
 #define	OSB4_PIAIR	0xc00
-#define	OSB4_PIAIR_PMASK 0x10
 #define	OSB4_PIRR	0xc01
+#define	OSB4_PISP	3	/* special lines assumed to route thru ISA */
 
 /*
  * ELCR - EDGE/LEVEL CONTROL REGISTER

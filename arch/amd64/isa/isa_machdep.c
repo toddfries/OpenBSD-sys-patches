@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.c,v 1.3 2004/06/28 01:52:26 deraadt Exp $	*/
+/*	$OpenBSD: isa_machdep.c,v 1.7 2006/03/01 21:51:39 deraadt Exp $	*/
 /*	$NetBSD: isa_machdep.c,v 1.22 1997/06/12 23:57:32 thorpej Exp $	*/
 
 #define ISA_DMA_STATS
@@ -94,11 +94,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -126,7 +122,7 @@
 
 #include <uvm/uvm_extern.h>
 
-#define _I386_BUS_DMA_PRIVATE
+#define _X86_BUS_DMA_PRIVATE
 #include <machine/bus.h>
 
 #include <machine/intr.h>
@@ -142,11 +138,6 @@
 #include <i386/isa/isa_machdep.h>
 
 #include "isadma.h"
-
-/*
- * ISA can only DMA to 0-16M.
- */
-#define	ISA_DMA_BOUNCE_THRESHOLD	0x00ffffff
 
 extern	paddr_t avail_end;
 
@@ -194,7 +185,7 @@ void	_isa_dma_free_bouncebuf(bus_dma_tag_t, bus_dmamap_t);
  * the generic functions that understand how to deal with bounce
  * buffers, if necessary.
  */
-struct i386_bus_dma_tag isa_bus_dma_tag = {
+struct x86_bus_dma_tag isa_bus_dma_tag = {
 	NULL,			/* _cookie */
 	_isa_bus_dmamap_create,
 	_isa_bus_dmamap_destroy,
@@ -367,71 +358,8 @@ isa_intr_establish(ic, irq, type, level, ih_fun, ih_arg, ih_what)
 	void *ih_arg;
 	char *ih_what;
 {
-	struct intrhand **p, *q, *ih;
-	static struct intrhand fakehand = {fakeintr};
-
 	return intr_establish(irq, &i8259_pic, irq, type, level, ih_fun,
 	    ih_arg, ih_what);
-
-	/* no point in sleeping unless someone can free memory. */
-	ih = malloc(sizeof *ih, M_DEVBUF, cold ? M_NOWAIT : M_WAITOK);
-	if (ih == NULL) {
-		printf("%s: isa_intr_establish: can't malloc handler info\n",
-		    ih_what);
-		return NULL;
-	}
-
-	if (!LEGAL_IRQ(irq) || type == IST_NONE) {
-		printf("%s: intr_establish: bogus irq or type\n", ih_what);
-		return NULL;
-	}
-	switch (intrtype[irq]) {
-	case IST_NONE:
-		intrtype[irq] = type;
-		break;
-	case IST_EDGE:
-	case IST_LEVEL:
-		if (type == intrtype[irq])
-			break;
-	case IST_PULSE:
-		if (type != IST_NONE) {
-			/*printf("%s: intr_establish: can't share %s with %s, irq %d\n",
-			    ih_what, isa_intr_typename(intrtype[irq]),
-			    isa_intr_typename(type), irq);*/
-			return NULL;
-		}
-		break;
-	}
-
-	/*
-	 * Figure out where to put the handler.
-	 * This is O(N^2), but we want to preserve the order, and N is
-	 * generally small.
-	 */
-	for (p = &intrhand[irq]; (q = *p) != NULL; p = &q->ih_next)
-		;
-
-	/*
-	 * Actually install a fake handler momentarily, since we might be doing
-	 * this with interrupts enabled and don't want the real routine called
-	 * until masking is set up.
-	 */
-	fakehand.ih_level = level;
-	*p = &fakehand;
-
-	/*
-	 * Poke the real handler in now.
-	 */
-	ih->ih_fun = ih_fun;
-	ih->ih_arg = ih_arg;
-	ih->ih_next = NULL;
-	ih->ih_level = level;
-	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, ih_what, (void *)&ih->ih_irq,
-	    &evcount_intr);
-	*p = ih;
-
-	return (ih);
 }
 
 /*
@@ -442,31 +370,8 @@ isa_intr_disestablish(ic, arg)
 	isa_chipset_tag_t ic;
 	void *arg;
 {
-	struct intrhand *ih = arg;
-	int irq = ih->ih_irq;
-	struct intrhand **p, *q;
-
 	intr_disestablish(arg);
 	return;
-
-	if (!LEGAL_IRQ(irq))
-		panic("intr_disestablish: bogus irq");
-
-	/*
-	 * Remove the handler from the chain.
-	 * This is O(n^2), too.
-	 */
-	for (p = &intrhand[irq]; (q = *p) != NULL && q != ih; p = &q->ih_next)
-		;
-	if (q)
-		*p = q->ih_next;
-	else
-		panic("intr_disestablish: handler not registered");
-	evcount_detach(&ih->ih_count);
-	free(ih, M_DEVBUF);
-
-	if (intrhand[irq] == NULL)
-		intrtype[irq] = IST_NONE;
 }
 
 void
@@ -519,7 +424,7 @@ _isa_bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
 	int flags;
 	bus_dmamap_t *dmamp;
 {
-	struct i386_isa_dma_cookie *cookie;
+	struct x86_isa_dma_cookie *cookie;
 	bus_dmamap_t map;
 	int error, cookieflags;
 	void *cookiestore;
@@ -534,7 +439,7 @@ _isa_bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
 	map = *dmamp;
 	map->_dm_cookie = NULL;
 
-	cookiesize = sizeof(struct i386_isa_dma_cookie);
+	cookiesize = sizeof(struct x86_isa_dma_cookie);
 
 	/*
 	 * ISA only has 24-bits of address space.  This means
@@ -575,7 +480,7 @@ _isa_bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
 		goto out;
 	}
 	bzero(cookiestore, cookiesize);
-	cookie = (struct i386_isa_dma_cookie *)cookiestore;
+	cookie = (struct x86_isa_dma_cookie *)cookiestore;
 	cookie->id_flags = cookieflags;
 	map->_dm_cookie = cookie;
 
@@ -607,7 +512,7 @@ _isa_bus_dmamap_destroy(t, map)
 	bus_dma_tag_t t;
 	bus_dmamap_t map;
 {
-	struct i386_isa_dma_cookie *cookie = map->_dm_cookie;
+	struct x86_isa_dma_cookie *cookie = map->_dm_cookie;
 
 	/*
 	 * Free any bounce pages this map might hold.
@@ -631,7 +536,7 @@ _isa_bus_dmamap_load(t, map, buf, buflen, p, flags)
 	struct proc *p;
 	int flags;
 {
-	struct i386_isa_dma_cookie *cookie = map->_dm_cookie;
+	struct x86_isa_dma_cookie *cookie = map->_dm_cookie;
 	int error;
 
 	STAT_INCR(isa_dma_stats_loads);
@@ -744,7 +649,7 @@ _isa_bus_dmamap_unload(t, map)
 	bus_dma_tag_t t;
 	bus_dmamap_t map;
 {
-	struct i386_isa_dma_cookie *cookie = map->_dm_cookie;
+	struct x86_isa_dma_cookie *cookie = map->_dm_cookie;
 
 	/*
 	 * If we have bounce pages, free them, unless they're
@@ -773,7 +678,7 @@ _isa_bus_dmamap_sync(t, map, offset, len, op)
 	bus_size_t len;
 	int op;
 {
-	struct i386_isa_dma_cookie *cookie = map->_dm_cookie;
+	struct x86_isa_dma_cookie *cookie = map->_dm_cookie;
 
 #ifdef DEBUG
 	if ((op & (BUS_DMASYNC_PREWRITE|BUS_DMASYNC_POSTREAD)) != 0) {
@@ -982,7 +887,7 @@ _isa_dma_alloc_bouncebuf(t, map, size, flags)
 	bus_size_t size;
 	int flags;
 {
-	struct i386_isa_dma_cookie *cookie = map->_dm_cookie;
+	struct x86_isa_dma_cookie *cookie = map->_dm_cookie;
 	int error = 0;
 
 	cookie->id_bouncebuflen = round_page(size);
@@ -1014,7 +919,7 @@ _isa_dma_free_bouncebuf(t, map)
 	bus_dma_tag_t t;
 	bus_dmamap_t map;
 {
-	struct i386_isa_dma_cookie *cookie = map->_dm_cookie;
+	struct x86_isa_dma_cookie *cookie = map->_dm_cookie;
 
 	STAT_DECR(isa_dma_stats_nbouncebufs);
 

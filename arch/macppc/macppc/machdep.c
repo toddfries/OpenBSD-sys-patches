@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.72 2005/07/04 01:02:10 mickey Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.83 2005/12/17 07:31:26 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -48,6 +48,9 @@
 #include <sys/extent.h>
 #include <sys/systm.h>
 #include <sys/user.h>
+#include <sys/conf.h>
+#include <sys/core.h>
+#include <sys/kcore.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -75,7 +78,6 @@
 #include "adb.h"
 #if NADB > 0
 #include <arch/macppc/dev/adbvar.h>
-#include <arch/macppc/dev/adb_direct.h>
 #endif
 
 #ifdef DDB
@@ -90,7 +92,6 @@
  */
 struct pcb *curpcb;
 struct pmap *curpm;
-struct proc *fpuproc;
 
 extern struct user *proc0paddr;
 struct pool ppc_vecpl;
@@ -208,6 +209,8 @@ initppc(startkernel, endkernel, args)
 
 	curpm = curpcb->pcb_pmreal = curpcb->pcb_pm = pmap_kernel();
 
+	ppc_check_procid();
+
 	/*
 	 * Initialize BAT registers to unmapped to not generate
 	 * overlapping mappings below.
@@ -308,20 +311,6 @@ initppc(startkernel, endkernel, args)
 	 */
 	pmap_bootstrap(startkernel, endkernel);
 
-	/* use BATs to map 1GB memory, no pageable BATs now */
-	if (physmem > btoc(0x10000000)) {
-		ppc_mtdbat1l(BATL(0x10000000, BAT_M));
-		ppc_mtdbat1u(BATU(0x10000000));
-	}
-	if (physmem > btoc(0x20000000)) {
-		ppc_mtdbat2l(BATL(0x20000000, BAT_M));
-		ppc_mtdbat2u(BATU(0x20000000));
-	}
-	if (physmem > btoc(0x30000000)) {
-		ppc_mtdbat3l(BATL(0x30000000, BAT_M));
-		ppc_mtdbat3u(BATU(0x30000000));
-	}
-#if 0
 	/* now that we know physmem size, map physical memory with BATs */
 	if (physmem > btoc(0x10000000)) {
 		battable[0x1].batl = BATL(0x10000000, BAT_M);
@@ -351,7 +340,6 @@ initppc(startkernel, endkernel, args)
 		battable[0x7].batl = BATL(0x70000000, BAT_M);
 		battable[0x7].batu = BATU(0x70000000);
 	}
-#endif
 
 	/*
 	 * Now enable translation (and machine checks/recoverable interrupts).
@@ -503,7 +491,7 @@ cpu_startup()
 {
 	int sz, i;
 	caddr_t v;
-	vm_offset_t minaddr, maxaddr;
+	vaddr_t minaddr, maxaddr;
 	int base, residual;
 	v = (caddr_t)proc0paddr + USPACE;
 
@@ -543,11 +531,11 @@ cpu_startup()
 		residual = 0;
 	}
 	for (i = 0; i < nbuf; i++) {
-		vm_size_t curbufsize;
-		vm_offset_t curbuf;
+		vsize_t curbufsize;
+		vaddr_t curbuf;
 		struct vm_page *pg;
 
-		curbuf = (vm_offset_t)buffers + i * MAXBSIZE;
+		curbuf = (vaddr_t)buffers + i * MAXBSIZE;
 		curbufsize = PAGE_SIZE * (i < residual ? base + 1 : base);
 		while (curbufsize) {
 			pg = uvm_pagealloc(NULL, 0, NULL, 0);
@@ -579,8 +567,8 @@ cpu_startup()
 
 	printf("avail mem = %ld (%ldK)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free) / 1024);
-	printf("using %d buffers containing %d bytes of memory\n", nbuf,
-	    bufpages * PAGE_SIZE);
+	printf("using %u buffers containing %u bytes (%uK) of memory\n",
+	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
 
 	/*
 	 * Set up the buffers.
@@ -784,15 +772,171 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #else
 		return (sysctl_rdint(oldp, oldlenp, newp, 0));
 #endif
+	case CPU_ALTIVEC:
+		return (sysctl_rdint(oldp, oldlenp, newp, ppc_altivec));
 	default:
 		return EOPNOTSUPP;
 	}
 }
 
+
+u_long dumpmag = 0x04959fca;			/* magic number */
+int dumpsize = 0;			/* size of dump in pages */
+long dumplo = -1;			/* blocks */
+
+/*
+ * This is called by configure to set dumplo and dumpsize.
+ * Dumps always skip the first CLBYTES of disk space
+ * in case there might be a disk label stored there.
+ * If there is extra space, put dump at the end to
+ * reduce the chance that swapping trashes it.
+ */
+void dumpconf(void);
+void
+dumpconf()
+{
+	int nblks;	/* size of dump area */
+	int maj;
+	int i;
+
+
+	if (dumpdev == NODEV)
+		return;
+	maj = major(dumpdev);
+	if (maj < 0 || maj >= nblkdev)
+		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
+	if (bdevsw[maj].d_psize == NULL)
+		return;
+	nblks = (*bdevsw[maj].d_psize)(dumpdev);
+	if (nblks <= ctod(1))
+		return;
+
+	/* Always skip the first block, in case there is a label there. */
+
+	if (dumplo < ctod(1))
+		dumplo = ctod(1);
+
+        for (i = 0; i < ndumpmem; i++)
+		dumpsize = max(dumpsize, dumpmem[i].end);
+
+	/* Put dump at end of partition, and make it fit. */
+	if (dumpsize > dtoc(nblks - dumplo - 1))
+		dumpsize = dtoc(nblks - dumplo - 1);
+	if (dumplo < nblks - ctod(dumpsize) - 1)
+		dumplo = nblks - ctod(dumpsize) - 1;
+
+}
+
+#define BYTES_PER_DUMP  (PAGE_SIZE)  /* must be a multiple of pagesize */
+vaddr_t dumpspace;
+
+int
+reserve_dumppages(caddr_t p)
+{
+	dumpspace = (vaddr_t)p;
+	return BYTES_PER_DUMP;
+}
+
+/*
+ * cpu_dump: dump machine-dependent kernel core dump headers.
+ */
+int cpu_dump(void);
+int
+cpu_dump()
+{
+	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
+	long buf[dbtob(1) / sizeof (long)];
+	kcore_seg_t	*segp;
+
+	dump = bdevsw[major(dumpdev)].d_dump;
+
+	segp = (kcore_seg_t *)buf;
+
+	/*
+	 * Generate a segment header.
+	 */
+	CORE_SETMAGIC(*segp, KCORE_MAGIC, MID_MACHINE, CORE_CPU);
+	segp->c_size = dbtob(1) - ALIGN(sizeof(*segp));
+
+	return (dump(dumpdev, dumplo, (caddr_t)buf, dbtob(1)));
+}
+
 void
 dumpsys()
 {
-	printf("dumpsys: TBD\n");
+#if 0
+	u_int npg;
+	u_int i, j;
+	daddr_t blkno;
+	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
+	char *str;
+	int maddr;
+	extern int msgbufmapped;
+	int error;
+
+	/* save registers */
+
+	msgbufmapped = 0;	/* don't record dump msgs in msgbuf */
+	if (dumpdev == NODEV)
+		return;
+	/*
+	 * For dumps during autoconfiguration,
+	 * if dump device has already configured...
+	 */
+	if (dumpsize == 0)
+		dumpconf();
+	if (dumplo < 0)
+		return;
+	printf("dumping to dev %x, offset %ld\n", dumpdev, dumplo);
+
+	error = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
+	if (error == -1) {
+		printf("area unavailable\n");
+		delay (10000000);
+		return;
+	}
+
+	dump = bdevsw[major(dumpdev)].d_dump;
+	error = cpu_dump();
+	for (i = 0; !error && i < ndumpmem; i++) {
+		npg = dumpmem[i].end - dumpmem[i].start;
+		maddr = ctob(dumpmem[i].start);
+		blkno = dumplo + btodb(maddr) + 1;
+
+		for (j = npg; j;
+			j--, maddr += PAGE_SIZE, blkno+= btodb(PAGE_SIZE))
+		{
+			/* Print out how many MBs we have to go. */
+                        if (dbtob(blkno - dumplo) % (1024 * 1024) < NBPG)
+                                printf("%d ",
+                                    (ctob(dumpsize) - maddr) / (1024 * 1024));
+
+			pmap_enter(pmap_kernel(), dumpspace, maddr,
+				VM_PROT_READ, PMAP_WIRED);
+			if ((error = (*dump)(dumpdev, blkno,
+			    (caddr_t)dumpspace, PAGE_SIZE)) != 0)
+				break;
+		}
+	}
+
+	switch (error) {
+
+	case 0:         str = "succeeded\n\n";                  break;
+	case ENXIO:     str = "device bad\n\n";                 break;
+	case EFAULT:    str = "device not ready\n\n";           break;
+	case EINVAL:    str = "area improper\n\n";              break;
+	case EIO:       str = "i/o error\n\n";                  break;
+	case EINTR:     str = "aborted from console\n\n";       break;
+	default:        str = "error %d\n\n";                   break;
+	}
+	printf(str, error);
+
+#else
+	printf("dumpsys() - no yet supported\n");
+	
+#endif
+	delay(5000000);         /* 5 seconds */
+
 }
 
 volatile int cpl, ipending, astpending;
@@ -846,16 +990,12 @@ void
 boot(int howto)
 {
 	static int syncing;
-	static char str[256];
 
 	boothowto = howto;
 	if (!cold && !(howto & RB_NOSYNC) && !syncing) {
 		syncing = 1;
 		vfs_shutdown();		/* sync */
-#if 0
-		/* resettodr does not currently do anything, address
-		 * this later
-		 */
+
 		/*
 		 * If we've been adjusting the clock, the todr
 		 * will be out of synch; adjust it now unless
@@ -866,7 +1006,6 @@ boot(int howto)
 		} else {
 			printf("WARNING: not updating battery clock\n");
 		}
-#endif
 	}
 	splhigh();
 	if (howto & RB_HALT) {
@@ -875,8 +1014,9 @@ boot(int howto)
 #if NADB > 0
 			delay(1000000);
 			adb_poweroff();
-			printf("WARNING: powerdown failed!\n");
+			printf("WARNING: adb powerdown failed!\n");
 #endif
+			OF_interpret("shut-down", 0);
 		}
 
 		printf("halted\n\n");
@@ -891,8 +1031,8 @@ boot(int howto)
 	adb_restart();  /* not return */
 #endif
 
+	OF_interpret("reset-all", 0);
 	OF_exit();
-	(fw->boot)(str);
 	printf("boot failed, spinning\n");
 	while(1) /* forever */;
 }
@@ -1082,7 +1222,7 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 	}
 }
 
-vm_offset_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
+vaddr_t ppc_kvm_stolen = VM_KERN_ADDRESS_SIZE;
 
 int
 bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,

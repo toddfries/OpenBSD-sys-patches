@@ -1,14 +1,12 @@
 #	from: @(#)Makefile	8.1 (Berkeley) 6/10/93
-#	$OpenBSD: Makefile,v 1.14 2005/08/03 00:16:01 millert Exp $
-
-RELOC=0x6F0000 
+#	$OpenBSD: Makefile,v 1.16 2006/01/10 07:36:31 miod Exp $
 
 S=	${.CURDIR}/../../../..
 DEFS= 
 INCPATH=-I${.CURDIR} -I${.CURDIR}/../libsa -I${.CURDIR}/../libbug \
 	-I${.CURDIR}/../../include -I${S} -I${S}/lib/libsa
-CFLAGS=	-O2 ${INCPATH} ${DEFS} ${COPTS}
-LDFLAGS=-N -T ${RELOC}
+CFLAGS+=-O2 ${INCPATH} ${DEFS} ${COPTS}
+LDFLAGS=-N -T ${STAGE2_RELOC}
 CLEANFILES+=bootsd
 
 .include "${S}/arch/mvme68k/stand/bugcrt/Makefile.inc"
@@ -32,6 +30,6 @@ bootsd: ${OBJS} ${BUGCRT} ${LIBS}
 		${BUGCRT} ${OBJS} ${LIBS} `cc -print-libgcc-file-name`
 #${SRTOBJ}
 install:
-	install -c -m 555 -g bin -o bin ${BOOTS} ${DESTDIR}${MDEC_DIR}
+	install ${INSTALL_STRIP} -c -m 555 -g bin -o bin ${BOOTS} ${DESTDIR}${MDEC_DIR}
 
 .include <bsd.prog.mk>

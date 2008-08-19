@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.21 2005/03/10 19:24:30 otto Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.27 2006/02/10 21:27:22 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
 
 /*
@@ -51,7 +51,7 @@ void	delay(unsigned);
 extern volatile int want_resched;
 extern volatile int astpending;
 
-#define	need_resched(ci)		(want_resched = 1, astpending = 1)
+#define	need_resched(ci)	(want_resched = 1, astpending = 1)
 #define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, astpending = 1)
 #define	signotify(p)		(astpending = 1)
 
@@ -103,7 +103,7 @@ invdcache(void *from, int len)
 #define FUNC_SPR(n, name) \
 static __inline u_int32_t ppc_mf ## name (void)			\
 {								\
-	int ret;						\
+	u_int32_t ret;						\
 	__asm __volatile ("mfspr %0," # n : "=r" (ret));	\
 	return ret;						\
 }								\
@@ -129,6 +129,7 @@ FUNC_SPR(272, sprg0)
 FUNC_SPR(273, sprg1)
 FUNC_SPR(274, sprg2)
 FUNC_SPR(275, sprg3)
+FUNC_SPR(280, asr)
 FUNC_SPR(282, ear)
 FUNC_SPR(287, pvr)
 FUNC_SPR(528, ibat0u)
@@ -169,8 +170,8 @@ ppc_mftb(void)
 	u_long scratch;
 	u_int64_t tb;
 
-	__asm __volatile ("1: mftbu %0; mftb %0+1; mftbu %1; cmpw 0,%0,%1; bne 1b"
-	     : "=r"(tb), "=r"(scratch));
+	__asm __volatile ("1: mftbu %0; mftb %0+1; mftbu %1;"
+	    " cmpw 0,%0,%1; bne 1b" : "=r"(tb), "=r"(scratch));
 	return tb;
 }
 
@@ -191,9 +192,14 @@ ppc_mtmsr (u_int32_t val)
 static __inline void
 ppc_mtsrin(u_int32_t val, u_int32_t sn_shifted)
 {
-	__asm __volatile ("mtsrin %0,%1" :: "r"(val), "r"(sn_shifted) );
-
+	__asm __volatile ("mtsrin %0,%1" :: "r"(val), "r"(sn_shifted));
 }
+
+u_int64_t ppc64_mfscomc(void);
+void ppc_mtscomc(u_int32_t);
+void ppc64_mtscomc(u_int64_t);
+u_int64_t ppc64_mfscomd(void);
+void ppc_mtscomd(u_int32_t);
 
 /*
  * General functions to enable and disable interrupts
@@ -203,7 +209,7 @@ static __inline void
 ppc_intr_enable(int enable)
 {
 	u_int32_t msr;
-	if (enable != 0)  {
+	if (enable != 0) {
 		msr = ppc_mfmsr();
 		msr |= PSL_EE;
 		ppc_mtmsr(msr);
@@ -221,6 +227,8 @@ ppc_intr_disable(void)
 }
 
 int ppc_cpuspeed(int *);
+void ppc_check_procid(void);
+extern int ppc_proc_is_64b;
 
 /*
  * PowerPC CPU types
@@ -233,10 +241,14 @@ int ppc_cpuspeed(int *);
 #define	PPC_CPU_MPC750		8
 #define	PPC_CPU_MPC604ev	9
 #define	PPC_CPU_MPC7400		12
+#define	PPC_CPU_IBM970FX	0x003c
+#define	PPC_CPU_IBM970MP	0x0044
 #define	PPC_CPU_IBM750FX	0x7000
 #define	PPC_CPU_MPC7410		0x800c
 #define	PPC_CPU_MPC7447A	0x8003
+#define	PPC_CPU_MPC7448		0x8004
 #define	PPC_CPU_MPC7450		0x8000
 #define	PPC_CPU_MPC7455		0x8001
+#define	PPC_CPU_MPC7457		0x8002
 
 #endif	/* _POWERPC_CPU_H_ */

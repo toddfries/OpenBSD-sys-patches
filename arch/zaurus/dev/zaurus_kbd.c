@@ -1,4 +1,4 @@
-/* $OpenBSD: zaurus_kbd.c,v 1.23 2005/05/25 07:29:17 drahn Exp $ */
+/* $OpenBSD: zaurus_kbd.c,v 1.28 2005/12/21 20:36:03 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>
  *
@@ -407,11 +407,6 @@ zkbd_poll(void *v)
 			type = keystate ? WSCONS_EVENT_KEY_DOWN :
 			    WSCONS_EVENT_KEY_UP;
 
-#if 0
-			printf("key %d %s\n", i,
-			    keystate ? "pressed" : "released");
-#endif
-
 			if (sc->sc_polling) {
 				sc->sc_pollkey = i;
 				sc->sc_pollUD = type;
@@ -434,7 +429,7 @@ zkbd_poll(void *v)
 	}
 #endif
 	if (keysdown)
-		timeout_add(&(sc->sc_roll_to), hz / 8); /* how long?*/
+		timeout_add(&(sc->sc_roll_to), hz * REP_DELAYN / 1000 / 2);
 	else 
 		timeout_del(&(sc->sc_roll_to)); /* always cancel? */
 
@@ -446,8 +441,9 @@ extern	int kbd_reset;
 extern	int apm_suspends;
 static	int zkbdondown;				/* on key is pressed */
 static	struct timeval zkbdontv = { 0, 0 };	/* last on key event */
-const	struct timeval zkbdhalttv = { 6, 0 };	/*  6s for shutdown */
-const	struct timeval zkbdsleeptv = { 2, 0 };	/*  2s for deep sleep */
+const	struct timeval zkbdhalttv = { 3, 0 };	/*  3s for safe shutdown */
+const	struct timeval zkbdsleeptv = { 0, 250000 };	/* .25s for suspend */
+extern	int lid_suspend;
 #endif
 
 int
@@ -483,18 +479,12 @@ zkbd_on(void *v)
 		zkbdondown = 0;
 	}
 #endif
-#if 0
-	printf("on key pressed\n");
-#endif
 	return 1;
 }
 
 int
 zkbd_sync(void *v)
 {
-#if 0
-	printf("sync button pressed\n");
-#endif
 	return 1;
 }
 
@@ -506,15 +496,17 @@ zkbd_hinge(void *v)
 	int b = pxa2x0_gpio_get_bit(sc->sc_swb_pin) ? 2 : 0;
 	extern void lcd_blank(int);
 
-#if 0
-	printf("hinge event A %d B %d\n", a, b);
-#endif
 	sc->sc_hinge = a | b;
 
-	if (sc->sc_hinge == 3)
+	if (sc->sc_hinge == 3) {
+#if NAPM > 0 
+		if (lid_suspend)
+			apm_suspends++;
+#endif
 		lcd_blank(1);
-	else
+	} else
 		lcd_blank(0);
+
 
 	return 1;
 }
@@ -585,10 +577,5 @@ zkbd_cnpollc(void *v, int on)
 void
 zkbd_power(int why, void *arg)
 {
-	struct zkbd_softc *sc = arg;
-	int a = pxa2x0_gpio_get_bit(sc->sc_swa_pin) ? 1 : 0;
-	int b = pxa2x0_gpio_get_bit(sc->sc_swb_pin) ? 2 : 0;
-
-	/* probably should check why */
-	sc->sc_hinge = a | b;
+	zkbd_hinge(arg);
 }

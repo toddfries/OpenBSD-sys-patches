@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.2 2005/07/02 09:15:41 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.5 2006/02/22 22:17:05 miod Exp $	*/
 /*	OpenBSD: locore.s,v 1.64 2005/04/17 18:47:50 miod Exp 	*/
 
 /*
@@ -771,7 +771,7 @@ Lpanic_red:
  * wmask[CWP] tells whether a `rett' would return into the invalid window.
  */
 	.data
-	.skip	32			! alignment byte & negative indicies
+	.skip	32			! alignment byte & negative indices
 uwtab:	.skip	32			! u_char uwtab[-31..31];
 wmask:	.skip	32			! u_char wmask[0..31];
 
@@ -3723,14 +3723,14 @@ ENTRY(proc_trampoline)
 	b	return_from_syscall
 	 add	%l1, 4, %l2		! npc = pc+4
 
-/* probeget and probeset are meant to be used during autoconfiguration */
+/* probeget is meant to be used during autoconfiguration */
 
 /*
  * probeget(addr, size) caddr_t addr; int size;
  *
- * Read or write a (byte,word,longword) from the given address.
- * Like {fu,su}{byte,halfword,word} but our caller is supposed
- * to know what he is doing... the address can be anywhere.
+ * Read a (byte,short,int) from the given address.
+ * Like copyin but our caller is supposed to know what he is doing...
+ * the address can be anywhere.
  *
  * We optimize for space, rather than time, here.
  */
@@ -3791,31 +3791,6 @@ ENTRY(probeset)
 0:	clr	%o0			! made it, clear onfault and return 0
 	retl
 	 st	%g0, [%o3 + PCB_ONFAULT]
-
-/*
- * Insert entry into doubly-linked queue.
- * We could just do this in C, but gcc does not do leaves well (yet).
- */
-ENTRY(_insque)
-	! %o0 = e = what to insert; %o1 = after = entry to insert after
-	st	%o1, [%o0 + 4]		! e->prev = after;
-	ld	[%o1], %o2		! tmp = after->next;
-	st	%o2, [%o0]		! e->next = tmp;
-	st	%o0, [%o1]		! after->next = e;
-	retl
-	st	%o0, [%o2 + 4]		! tmp->prev = e;
-
-
-/*
- * Remove entry from doubly-linked queue.
- */
-ENTRY(_remque)
-	! %o0 = e = what to remove
-	ld	[%o0], %o1		! n = e->next;
-	ld	[%o0 + 4], %o2		! p = e->prev;
-	st	%o2, [%o1 + 4]		! n->prev = p;
-	retl
-	st	%o1, [%o2]		! p->next = n;
 
 /*
  * copywords(src, dst, nbytes)

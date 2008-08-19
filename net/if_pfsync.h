@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.h,v 1.25 2005/08/16 11:26:48 pascoe Exp $	*/
+/*	$OpenBSD: if_pfsync.h,v 1.28 2005/11/04 08:24:14 mcbride Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -72,8 +72,8 @@ struct pfsync_state {
 	u_int32_t	 nat_rule;
 	u_int32_t	 creation;
 	u_int32_t	 expire;
-	u_int32_t	 packets[2];
-	u_int32_t	 bytes[2];
+	u_int32_t	 packets[2][2];
+	u_int32_t	 bytes[2][2];
 	u_int32_t	 creatorid;
 	sa_family_t	 af;
 	u_int8_t	 proto;
@@ -178,16 +178,20 @@ struct pfsync_softc {
 	union sc_tdb_statep	 sc_statep_tdb;
 	u_int32_t		 sc_ureq_received;
 	u_int32_t		 sc_ureq_sent;
+	struct pf_state		*sc_bulk_send_next;
+	struct pf_state		*sc_bulk_terminator;
 	int			 sc_bulk_tries;
 	int			 sc_maxcount;	/* number of states in mtu */
 	int			 sc_maxupdates;	/* number of updates/state */
 };
+
+extern struct pfsync_softc pfsyncif;
 #endif
 
 
 struct pfsync_header {
 	u_int8_t version;
-#define	PFSYNC_VERSION	2
+#define	PFSYNC_VERSION	3
 	u_int8_t af;
 	u_int8_t action;
 #define	PFSYNC_ACT_CLR		0	/* clear all states */
@@ -203,6 +207,7 @@ struct pfsync_header {
 #define PFSYNC_ACT_TDB_UPD	10	/* TDB replay counter update */
 #define	PFSYNC_ACT_MAX		11
 	u_int8_t count;
+	u_int8_t pf_chksum[PF_MD5_DIGEST_LENGTH];
 } __packed;
 
 #define PFSYNC_BULKPACKETS	1	/* # of packets per timeout */
@@ -288,6 +293,17 @@ struct pfsyncreq {
 #define pf_state_host_ntoh(s,d) do {				\
 	bcopy(&(s)->addr, &(d)->addr, sizeof((d)->addr));	\
 	(d)->port = (s)->port;					\
+} while (0)
+
+#define pf_state_counter_hton(s,d) do {				\
+	d[0] = htonl((s>>32)&0xffffffff);			\
+	d[1] = htonl(s&0xffffffff);				\
+} while (0)
+
+#define pf_state_counter_ntoh(s,d) do {				\
+	d = ntohl(s[0]);					\
+	d = d<<32;						\
+	d += ntohl(s[1]);					\
 } while (0)
 
 #ifdef _KERNEL

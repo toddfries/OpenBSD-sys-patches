@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.68.2.1 2006/01/13 01:56:55 brad Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.74 2006/01/12 22:39:21 weingart Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -169,8 +169,8 @@ extern struct cpu_info cpu_info_primary;
 extern struct cpu_info *cpu_info_list;
 
 #define	CPU_INFO_ITERATOR		int
-#define	CPU_INFO_FOREACH(cii, ci)	cii = 0, ci = cpu_info_list; \
-					ci != NULL; ci = ci->ci_next
+#define	CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = cpu_info_list; \
+					    ci != NULL; ci = ci->ci_next)
 
 #define CPU_INFO_UNIT(ci)	((ci)->ci_dev.dv_unit)
 
@@ -371,11 +371,19 @@ void	p4tcc_init(int, int);
 int     p4tcc_setperf(int);
 #endif
 
+#if !defined(SMALL_KERNEL) && defined(I586_CPU)
+/* powernow.c */
 void	k6_powernow_init(void);
 int	k6_powernow_setperf(int);
-void	k7_powernow_init(uint32_t);
+#endif
+#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+/* powernow-k7.c */
+void	k7_powernow_init(void);
 int	k7_powernow_setperf(int);
-
+/* powernow-k8.c */
+void 	k8_powernow_init(void);
+int 	k8_powernow_setperf(int);
+#endif
 
 /* npx.c */
 void	npxdrop(struct proc *);

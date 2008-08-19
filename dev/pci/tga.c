@@ -1,4 +1,4 @@
-/* $OpenBSD: tga.c,v 1.24 2005/01/05 23:04:25 miod Exp $ */
+/* $OpenBSD: tga.c,v 1.26 2006/02/16 23:05:46 miod Exp $ */
 /* $NetBSD: tga.c,v 1.40 2002/03/13 15:05:18 ad Exp $ */
 
 /*
@@ -55,6 +55,10 @@
 #include <dev/wscons/wscons_raster.h>
 #include <dev/rasops/rasops.h>
 #include <dev/wsfont/wsfont.h>
+
+#if defined(__alpha__) || defined(__mips__)
+#include <uvm/uvm_extern.h>
+#endif
 
 #ifdef __alpha__
 #include <machine/pte.h>
@@ -135,7 +139,8 @@ struct wsscreen_descr tga_stdscreen = {
 	0, 0,	/* will be filled in -- XXX shouldn't, it's global */
 	&tga_emulops,
 	0, 0,
-	WSSCREEN_REVERSE
+	WSSCREEN_UNDERLINE | WSSCREEN_HILIT |
+	    WSSCREEN_WSCOLORS | WSSCREEN_REVERSE
 };
 
 const struct wsscreen_descr *_tga_scrlist[] = {
@@ -715,10 +720,8 @@ tga_mmap(v, offset, prot)
 		 */
 		offset += dc->dc_tgaconf->tgac_cspace_size / 2;
 	}
-#if defined(__alpha__)
-	return alpha_btop(sc->sc_dc->dc_paddr + offset);
-#elif defined(__mips__)
-	return mips_btop(sc->sc_dc->dc_paddr + offset);
+#if defined(__alpha__) || defined(__mips__)
+	return atop(sc->sc_dc->dc_paddr + offset);
 #else
 	return (-1);
 #endif
@@ -1246,7 +1249,8 @@ tga_rop_vtov(dst, dx, dy, w, h, src, sx, sy)
 }
 
 
-void tga_putchar (c, row, col, uc, attr)
+void
+tga_putchar(c, row, col, uc, attr)
 	void *c;
 	int row, col;
 	u_int uc;
@@ -1255,6 +1259,7 @@ void tga_putchar (c, row, col, uc, attr)
 	struct rasops_info *ri = c;
 	struct tga_devconfig *dc = ri->ri_hw;
 	int fs, height, width;
+	int fg, bg, ul;
 	u_char *fr;
 	int32_t *rp;
 
@@ -1271,8 +1276,9 @@ void tga_putchar (c, row, col, uc, attr)
 	 * The rasops code has already expanded the color entry to 32 bits
 	 * for us, even for 8-bit displays, so we don't have to do anything.
 	 */
-	TGAWREG(dc, TGA_REG_GFGR, ri->ri_devcmap[(attr >> 24) & 15]);
-	TGAWREG(dc, TGA_REG_GBGR, ri->ri_devcmap[(attr >> 16) & 15]);
+	rasops_unpack_attr(attr, &fg, &bg, &ul);
+	TGAWREG(dc, TGA_REG_GFGR, ri->ri_devcmap[fg]);
+	TGAWREG(dc, TGA_REG_GBGR, ri->ri_devcmap[bg]);
 	
 	/* Set raster operation to "copy"... */
 	if (ri->ri_depth == 8)
@@ -1299,7 +1305,7 @@ void tga_putchar (c, row, col, uc, attr)
 	}
 
 	/* Do underline */
-	if ((attr & 1) != 0) {
+	if (ul) {
 		rp = (int32_t *)((caddr_t)rp - (ri->ri_stride << 1));
 		*rp = 0xffffffff;
 	}
@@ -1307,7 +1313,6 @@ void tga_putchar (c, row, col, uc, attr)
 	/* Set grapics mode back to normal. */
 	TGAWREG(dc, TGA_REG_GMOR, 0);
 	TGAWREG(dc, TGA_REG_GPXR_P, 0xffffffff);
-
 }
 
 void
@@ -1319,9 +1324,11 @@ tga_eraserows(c, row, num, attr)
 	struct rasops_info *ri = c;
 	struct tga_devconfig *dc = ri->ri_hw;
 	int32_t color, lines, pixels;
+	int fg, bg;
 	int32_t *rp;
 
-	color = ri->ri_devcmap[(attr >> 16) & 15];
+	rasops_unpack_attr(attr, &fg, &bg, NULL);
+	color = ri->ri_devcmap[bg];
 	rp = (int32_t *)(ri->ri_bits + row*ri->ri_yscale);
 	lines = num * ri->ri_font->fontheight;
 	pixels = ri->ri_emuwidth - 1;
@@ -1373,9 +1380,11 @@ tga_erasecols (c, row, col, num, attr)
 	struct rasops_info *ri = c;
 	struct tga_devconfig *dc = ri->ri_hw;
 	int32_t color, lines, pixels;
+	int fg, bg;
 	int32_t *rp;
 
-	color = ri->ri_devcmap[(attr >> 16) & 15];
+	rasops_unpack_attr(attr, &fg, &bg, NULL);
+	color = ri->ri_devcmap[bg];
 	rp = (int32_t *)(ri->ri_bits + row*ri->ri_yscale + col*ri->ri_xscale);
 	lines = ri->ri_font->fontheight;
 	pixels = (num * ri->ri_font->fontwidth) - 1;

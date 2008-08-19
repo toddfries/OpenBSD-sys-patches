@@ -1,4 +1,4 @@
-/*	$OpenBSD: apci.c,v 1.23 2005/04/22 11:59:11 miod Exp $	*/
+/*	$OpenBSD: apci.c,v 1.28 2006/01/01 11:59:37 miod Exp $	*/
 /*	$NetBSD: apci.c,v 1.9 2000/11/02 00:35:05 eeh Exp $	*/
 
 /*-
@@ -887,11 +887,6 @@ apcicnprobe(cp)
 
 	/* initialize the required fields */
 	cp->cn_dev = makedev(apcimajor, 0);	/* XXX */
-	cp->cn_pri = CN_DEAD;
-
-	/* Abort early if console is already forced. */
-	if (conforced)
-		return;
 
 	/*
 	 * The APCI can only be a console on a 425e; on other 4xx
@@ -910,20 +905,19 @@ apcicnprobe(cp)
 	 */
 	frodoregs = (volatile u_int8_t *)IIOV(FRODO_BASE);
 	if (badaddr((caddr_t)frodoregs) == 0 &&
-	    !ISSET(frodoregs[FRODO_IISR], FRODO_IISR_SERVICE)) {
+	    !ISSET(frodoregs[FRODO_IISR], FRODO_IISR_SERVICE))
 		cp->cn_pri = CN_REMOTE;
-		conforced = 1;
-		conscode = -2;			/* XXX */
-	} else {
+	else
 		cp->cn_pri = CN_NORMAL;
-	}
 
 	/*
 	 * If our priority is higher than the currently-remembered
 	 * console, install ourselves.
 	 */
-	if (((cn_tab == NULL) || (cp->cn_pri > cn_tab->cn_pri)) || conforced)
+	if (cn_tab == NULL || cp->cn_pri > cn_tab->cn_pri) {
 		cn_tab = cp;
+		conscode = CONSCODE_INVALID;
+	}
 }
 
 /* ARGSUSED */

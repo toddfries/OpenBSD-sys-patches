@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.63 2005/08/20 17:09:45 matthieu Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.65 2005/11/05 16:04:20 uwe Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -590,20 +590,6 @@ wsemuldisplaydevprint(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
-/* Print function (for parent devices). */
-int
-wsdisplaydevprint(void *aux, const char *pnp)
-{
-#if 0 /* -Wunused */
-	struct wsdisplaydev_attach_args *ap = aux;
-#endif
-
-	if (pnp)
-		printf("wsdisplay at %s", pnp);
-
-	return (UNCONF);
-}
-
 void
 wsdisplay_common_attach(struct wsdisplay_softc *sc, int console, int kbdmux,
     const struct wsscreen_list *scrdata,
@@ -933,6 +919,9 @@ wsdisplayioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	if (ISWSDISPLAYCTL(dev))
 		return (wsdisplay_cfg_ioctl(sc, cmd, data, flag, p));
+
+	if (WSDISPLAYSCREEN(dev) >= WSDISPLAY_MAXSCREEN)
+		return (ENODEV);
 
 	if ((scr = sc->sc_scr[WSDISPLAYSCREEN(dev)]) == NULL)
 		return (ENXIO);

@@ -1,4 +1,4 @@
-/* $OpenBSD: pmap.c,v 1.42 2004/06/13 21:49:11 niklas Exp $ */
+/* $OpenBSD: pmap.c,v 1.45 2006/02/07 07:59:22 martin Exp $ */
 /* $NetBSD: pmap.c,v 1.154 2000/12/07 22:18:55 thorpej Exp $ */
 
 /*-
@@ -436,7 +436,7 @@ struct pmap_tlb_shootdown_q {
 
 #define	PSJQ_LOCK(pq, s)						\
 do {									\
-	s = splimp();							\
+	s = splvm();							\
 	simple_lock(&(pq)->pq_slock);					\
 } while (0)
 
@@ -2531,22 +2531,6 @@ pmap_is_modified(struct vm_page *pg)
 	}
 #endif
 	return (rv);
-}
-
-/*
- * pmap_phys_address:		[ INTERFACE ]
- *
- *	Return the physical address corresponding to the specified
- *	cookie.  Used by the device pager to decode a device driver's
- *	mmap entry point return value.
- *
- *	Note: no locking is necessary in this function.
- */
-paddr_t
-pmap_phys_address(int ppn)
-{
-
-	return (alpha_ptob(ppn));
 }
 
 /*

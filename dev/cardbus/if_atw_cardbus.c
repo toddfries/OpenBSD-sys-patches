@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atw_cardbus.c,v 1.10 2005/06/08 05:36:33 henning Exp $	*/
+/*	$OpenBSD: if_atw_cardbus.c,v 1.12 2005/09/24 09:09:15 jsg Exp $	*/
 /*	$NetBSD: if_atw_cardbus.c,v 1.9 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -66,7 +66,6 @@
 #include <netinet/if_ether.h>
 #endif
 
-#include <net80211/ieee80211_compat.h>
 #include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_var.h>
 
@@ -326,8 +325,6 @@ atw_cardbus_disable(struct atw_softc *sc)
 void
 atw_cardbus_power(struct atw_softc *sc, int why)
 {
-	printf("%s: atw_cardbus_power\n", sc->sc_dev.dv_xname);
-
 	if (why == PWR_RESUME)
 		atw_enable(sc);
 }

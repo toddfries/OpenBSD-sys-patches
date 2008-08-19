@@ -1,6 +1,7 @@
-/*	$OpenBSD: acpireg.h,v 1.2 2005/07/10 17:24:18 grange Exp $	*/
+/*	$OpenBSD: acpireg.h,v 1.9 2006/01/19 00:08:46 jordan Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
+ * Copyright (c) 2005 Marco Peereboom <marco@opebsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -398,6 +399,15 @@ struct acpi_facs {
 #define ACPI_FREQUENCY	3579545		/* Per ACPI spec */
 
 /*
+ * PCI Configuration space
+ */
+#define ACPI_PCI_BUS(addr) (u_int16_t)((addr) >> 48)
+#define ACPI_PCI_DEV(addr) (u_int16_t)((addr) >> 32)
+#define ACPI_PCI_FN(addr)  (u_int16_t)((addr) >> 16)
+#define ACPI_PCI_REG(addr) (u_int16_t)(addr)
+#define ACPI_PCI_ADDR(b,d,f,r) ((u_int64_t)(b)<<48LL | (u_int64_t)(d)<<32LL | (f)<<16LL | (r))
+
+/*
  * PM1 Status Registers Fixed Hardware Feature Status Bits
  */
 #define	ACPI_PM1_STATUS			0x00
@@ -428,6 +438,44 @@ struct acpi_facs {
 #define		ACPI_PM1_SCI_EN			0x0001
 #define		ACPI_PM1_BM_RLD			0x0002
 #define		ACPI_PM1_GBL_RLS		0x0004
+#define		ACPI_PM1_SLP_TYPX(x)		((x) << 10)
+#define		ACPI_PM1_SLP_TYPX_MASK		0x1c00
 #define		ACPI_PM1_SLP_EN			0x2000
+
+/*
+ * Sleeping States
+ */
+#define ACPI_STATE_S0		0
+#define ACPI_STATE_S1		1
+#define ACPI_STATE_S2		2
+#define ACPI_STATE_S3		3
+#define ACPI_STATE_S4		4
+#define ACPI_STATE_S5		5
+
+/*
+ * ACPI Device IDs
+ */
+#define ACPI_DEV_ACPI	"PNP0C08"	/* ACPI device */
+#define ACPI_DEV_GISAB	"PNP0A05"	/* Generic ISA Bus */
+#define ACPI_DEV_EIOB	"PNP0A06"	/* Extended I/O Bus */
+#define ACPI_DEV_ECD	"PNP0C09"	/* Embedded Controller Device */
+#define ACPI_DEV_CMB	"PNP0C0A"	/* Control Method Battery */
+#define ACPI_DEV_FAN	"PNP0C0B"	/* Fan Device */
+#define ACPI_DEV_PBD	"PNP0C0C"	/* Power Button Device */
+#define ACPI_DEV_LD	"PNP0C0D"	/* Lid Device */
+#define ACPI_DEV_SBD	"PNP0C0E"	/* Sleep Button Device */
+#define ACPI_DEV_PILD	"PNP0C0F"	/* PCI Interrupt Link Device */
+#define ACPI_DEV_MEMD	"PNP0C80"	/* Memory Device */
+#define ACPI_DEV_SHC	"ACPI0001"	/* SMBus 1.0 Host Controller */
+#define ACPI_DEV_SMS1	"ACPI0002"	/* Smart Battery Subsystem */
+#define ACPI_DEV_AC	"ACPI0003"	/* AC Device */
+#define ACPI_DEV_MD	"ACPI0004"	/* Module Device */
+#define ACPI_DEV_SMS2	"ACPI0005"	/* SMBus 2.0 Host Controller */
+#define ACPI_DEV_GBD	"ACPI0006"	/* GPE Block Device */
+#define ACPI_DEV_PD	"ACPI0007"	/* Processor Device */
+#define ACPI_DEV_ALSD	"ACPI0008"	/* Ambient Light Sensor Device */
+#define ACPI_DEV_IOXA	"ACPI0009"	/* IO x APIC Device */
+#define ACPI_DEV_IOA	"ACPI000A"	/* IO APIC Device */
+#define ACPI_DEV_IOSA	"ACPI000B"	/* IO SAPIC Device */
 
 #endif	/* !_DEV_ACPI_ACPIREG_H_ */

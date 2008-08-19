@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.103 2005/08/23 19:59:35 fgsch Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.113 2006/02/16 21:11:19 brad Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -133,7 +133,7 @@ wi*	at uhub?		# WaveLAN IEEE 802.11DS
 #scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
-ural*	at uhub?		# Ralink
+ural*	at uhub?		# Ralink RT2500
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
@@ -183,7 +183,7 @@ aha*	at isapnp?
 scsibus* at aha?
 ahb*	at eisa?		# Adaptec 174[024] SCSI controllers
 scsibus* at ahb?
-ahc0	at isa?			# Adaptec 284x SCSI controllers
+#ahc0	at isa?			# Adaptec 284x SCSI controllers
 ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940/3940/78?? SCSI controllers
 scsibus* at ahc?
@@ -283,6 +283,7 @@ eg0	at isa? disable port 0x310 irq 5 # 3C505/Etherlink+ ethernet
 el0	at isa? disable port 0x300 irq 9 # 3C501 ethernet
 ep0	at isa?				# 3C509 ethernet
 ep*	at isa?				# 3C509 ethernet
+ep*	at isapnp?			# 3C509 PnP ethernet
 ef*	at isapnp?			# 3C515 PnP ethernet
 ie0	at isa? port 0x360 iomem 0xd0000 irq 7	# StarLAN and 3C507
 #ie1	at isa? port 0x300 irq 10	# EtherExpress
@@ -293,7 +294,6 @@ ep*	at eisa?			# 3C579 ethernet
 ef*	at isapnp?			# 3C515 ethernet
 #fea*	at eisa?			# DEC DEFEA FDDI
 le*	at pci?				# PCnet-PCI based ethernet
-ep*	at isapnp?			# 3C509 PnP ethernet
 le*	at isapnp?
 pcn*	at pci?				# AMD PCnet-PCI Ethernet
 de*	at pci?				# DC21X4X-based ethernet
@@ -319,21 +319,24 @@ dc*	at cardbus?			# 21143, "tulip" clone ethernet
 ste*	at pci?				# Sundance ST201 ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
 wb*	at pci?				# Winbond W89C840F ethernet
+sf*	at pci?				# Adaptec AIC-6915 ethernet
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
 skc*	at pci?				# SysKonnect GEnesis 984x
 sk*	at skc?				#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
+ixgb*	at pci?				# Intel Pro/10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 nge*	at pci?				# NS DP83820/DP83821 GigE
 re*	at pci?				# Realtek 8169/8169S/8110S
 re*	at cardbus?			# Realtek 8169/8169S/8110S
 stge*	at pci?				# Sundance TC9021 GigE
 bge*	at pci?				# Broadcom BCM570x (aka Tigon3)
-#lge*	at pci?				# Level1 LXT1001 GigE
+lge*	at pci?				# Level1 LXT1001 GigE
 mtd*	at pci?				# Myson MTD803
 hme*	at pci?				# Sun Happy Meal
 bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
+nfe*	at pci?				# NVIDIA nForce Ethernet
 
 # Wireless network cards
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)
@@ -346,8 +349,8 @@ wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
 ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
-ral*	at pci?				# Ralink RT2500
-ral*	at cardbus?			# Ralink RT2500
+ral*	at pci?				# Ralink RT2500/RT2501/RT2600
+ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180
 rtw*	at cardbus?			# Realtek 8180
 

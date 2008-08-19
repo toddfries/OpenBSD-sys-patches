@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.46 2005/04/28 17:19:27 deraadt Exp $ */
+/* $OpenBSD: trap.c,v 1.49 2005/12/25 00:22:45 miod Exp $ */
 /* $NetBSD: trap.c,v 1.52 2000/05/24 16:48:33 thorpej Exp $ */
 
 /*-
@@ -694,15 +694,9 @@ syscall(code, framep)
 		break;
 	}
 
-        /*
-         * Reinitialize proc pointer `p' as it may be different
-         * if this is a child returning from fork syscall.
-         */
-	p = curproc;
 #ifdef SYSCALL_DEBUG
 	scdebug_ret(p, code, error, rval);
 #endif
-
 	userret(p, framep->tf_regs[FRAME_PC], sticks);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
@@ -718,15 +712,20 @@ child_return(arg)
 	void *arg;
 {
 	struct proc *p = arg;
+	struct trapframe *framep = p->p_md.md_tf;
 
 	/*
 	 * Return values in the frame set by cpu_fork().
 	 */
+	framep->tf_regs[FRAME_V0] = 0;
+	framep->tf_regs[FRAME_A4] = 0;
+	framep->tf_regs[FRAME_A3] = 0;
 
-	userret(p, p->p_md.md_tf->tf_regs[FRAME_PC], 0);
+	userret(p, framep->tf_regs[FRAME_PC], 0);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, SYS_fork, 0, 0);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }
 

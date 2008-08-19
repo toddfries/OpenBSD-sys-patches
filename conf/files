@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.348 2005/07/17 12:21:28 miod Exp $
+#	$OpenBSD: files,v 1.365 2006/02/01 11:03:33 dlg Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -47,6 +47,7 @@ define	rasops15
 define	rasops16
 define	rasops24
 define	rasops32
+define	rasops_rotation
 
 # net device attributes - we have generic code for arc(net), ether(net),
 # and fddi.
@@ -78,10 +79,6 @@ define	wsemuldisplaydev	{[console = -1], [mux = 1]}
 define	wskbddev		{[console = -1], [mux = 1]}
 define	wsmousedev		{[mux = 0]}
 define	wsrasteremulops
-
-# i2c device attributes
-define	i2cexec
-define	i2c_bitbang
 
 # SMC 93Cx6 Serial EEPROM devices
 define	smc93cx6
@@ -222,7 +219,7 @@ file	dev/ic/if_wi.c			wi
 file	dev/ic/if_wi_hostap.c		wi
 
 # Aironet 802.11 DS Ethernet controller
-device	an: ether, ifnet, ifmedia
+device	an: ether, ifnet, ifmedia, wlan
 file	dev/ic/an.c			an
 
 # RangeLAN2
@@ -259,7 +256,7 @@ device	dc: ether, ifnet, ifmedia, mii
 file	dev/ic/dc.c			dc
 
 # SMC 91Cxx Ethernet Controller
-device	sm: ether, ifnet, ifmedia
+device	sm: ether, ifnet, ifmedia, mii, mii_bitbang
 file	dev/ic/smc91cxx.c		sm
 
 # SMC 83C170 EPIC/100 Fast Ethernet Controller
@@ -291,7 +288,9 @@ file	dev/ic/tropic.c			tr
 
 # 8250/16[45]50-based "com" ports
 device	com: tty
+device	pccom: tty			# XXX
 file	dev/ic/com.c			com needs-flag
+file	dev/ic/com_subr.c		com | pccom
 
 # PC-like keyboard controller
 device	pckbc {[slot = -1]}
@@ -299,6 +298,10 @@ file	dev/ic/pckbc.c			pckbc needs-flag
 
 # HPPA PS/2 input ports (forward definition)
 device	gsckbc {[slot = -1]}
+
+# PCF8584 I2C Controllers
+device	pcfiic: i2cbus
+file	dev/ic/pcf8584.c		pcfiic
 
 # OPL2/OPL3 FM synth driver
 device	opl: midibus, midisyn
@@ -332,9 +335,9 @@ file	dev/ic/iha.c			iha
 device	trm: scsi
 file	dev/ic/trm.c			trm
 
-# National Semiconductor LM7[89] and compatible hardware monitors
+# National Semiconductor LM78/79/81 and compatible hardware monitors
 device	lm
-file	dev/ic/nslm7x.c			lm
+file	dev/ic/lm78.c			lm
 
 # Atheros AR5k (802.11/a/b/g) Hardware Abstraction Layer
 define	ar5xxx
@@ -355,9 +358,10 @@ file	dev/ic/atw.c			atw
 device	rtw: ether, ifnet, ifmedia, smc93cx6, wlan
 file	dev/ic/rtw.c			rtw
 
-# Ralink RT2500 802.11
-device	ral: ether, ifnet, ifmedia, wlan
-file	dev/ic/ral.c			ral
+# Ralink RT2500/RT2600 802.11
+device	ral: ether, ifnet, ifmedia, firmload, wlan
+file	dev/ic/rt2560.c			ral
+file	dev/ic/rt2661.c			ral
 
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
@@ -388,6 +392,10 @@ file	dev/usb/ehci.c			ehci	needs-flag
 device	radio
 attach	radio at radiobus
 file dev/radio.c			radio	needs-flag
+
+# IPMI
+device	ipmi
+file	dev/ipmi.c			ipmi	needs-flag
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -567,7 +575,7 @@ file isofs/cd9660/cd9660_rrip.c		cd9660
 file isofs/cd9660/cd9660_util.c		cd9660
 file isofs/cd9660/cd9660_vfsops.c	cd9660
 file isofs/cd9660/cd9660_vnops.c	cd9660
-file isofs/udf/osta.c			udf
+file isofs/udf/udf_subr.c		udf
 file isofs/udf/udf_vfsops.c		udf
 file isofs/udf/udf_vnops.c		udf
 file kern/exec_aout.c
@@ -597,6 +605,7 @@ file kern/kern_physio.c
 file kern/kern_proc.c
 file kern/kern_prot.c
 file kern/kern_resource.c
+file kern/kern_sensors.c		!small_kernel
 file kern/kern_sig.c
 file kern/kern_subr.c
 file kern/kern_sysctl.c
@@ -656,17 +665,12 @@ file kern/vfs_syscalls.c
 file kern/vfs_vnops.c
 file kern/vnode_if.c
 file miscfs/deadfs/dead_vnops.c
-file miscfs/fdesc/fdesc_vfsops.c	fdesc
-file miscfs/fdesc/fdesc_vnops.c		fdesc
 file miscfs/fifofs/fifo_vnops.c		fifo
-file miscfs/kernfs/kernfs_vfsops.c	kernfs
-file miscfs/kernfs/kernfs_vnops.c	kernfs
 file miscfs/portal/portal_vfsops.c	portal
 file miscfs/portal/portal_vnops.c	portal
 file miscfs/procfs/procfs_cmdline.c	procfs
 file miscfs/procfs/procfs_ctl.c		procfs
 file miscfs/procfs/procfs_linux.c	procfs
-file miscfs/procfs/procfs_mem.c
 file miscfs/procfs/procfs_note.c	procfs
 file miscfs/procfs/procfs_status.c	procfs
 file miscfs/procfs/procfs_subr.c	procfs
@@ -718,7 +722,6 @@ file net/if_enc.c			enc			needs-count
 file net/if_gre.c			gre			needs-count
 file net/if_trunk.c			trunk			needs-count
 file net80211/ieee80211.c		wlan
-file net80211/ieee80211_compat.c	wlan
 file net80211/ieee80211_crypto.c	wlan
 file net80211/ieee80211_input.c		wlan
 file net80211/ieee80211_ioctl.c		wlan

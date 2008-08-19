@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppi.c,v 1.13 2005/02/13 23:13:25 mickey Exp $	*/
+/*	$OpenBSD: ppi.c,v 1.15 2006/01/19 23:54:41 miod Exp $	*/
 /*	$NetBSD: ppi.c,v 1.13 1997/04/02 22:37:33 scottr Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/conf.h>
 #include <sys/device.h>
 #include <sys/errno.h>
+#include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/timeout.h>
@@ -433,6 +434,7 @@ ppiioctl(dev, cmd, data, flag, p)
 {
 	struct ppi_softc *sc = ppi_cd.cd_devs[UNIT(dev)];
 	struct ppiparam *pp, *upp;
+	int tmp;
 	int error = 0;
 
 	switch (cmd) {
@@ -454,10 +456,14 @@ ppiioctl(dev, cmd, data, flag, p)
 		pp->delay = ppimstohz(upp->delay);
 		break;
 	case PPIIOCSSEC:
-		sc->sc_sec = *(int *)data;
+		tmp = *(int *)data;
+		if (tmp == -1 || (tmp >= 0 && tmp <= 0x1f))
+			sc->sc_sec = tmp;
+		else
+			error = EINVAL;
 		break;
 	default:
-		return(EINVAL);
+		return (ENOTTY);
 	}
 	return (error);
 }
@@ -466,7 +472,6 @@ int
 ppihztoms(h)
 	int h;
 {
-	extern int hz;
 	int m = h;
 
 	if (m > 0)
@@ -478,7 +483,6 @@ int
 ppimstohz(m)
 	int m;
 {
-	extern int hz;
 	int h = m;
 
 	if (h > 0) {

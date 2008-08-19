@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.7 2005/05/11 18:06:31 pedro Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.11 2006/01/18 19:27:48 pedro Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -52,7 +52,6 @@
 #include <miscfs/specfs/specdev.h>
 
 #include <isofs/udf/ecma167-udf.h>
-#include <isofs/udf/osta.h>
 #include <isofs/udf/udf.h>
 #include <isofs/udf/udf_extern.h>
 
@@ -345,6 +344,7 @@ udf_getattr(void *v)
 	vap->va_ctime = vap->va_mtime; /* XXX Stored as an Extended Attribute */
 	vap->va_rdev = 0; /* XXX */
 	if (vp->v_type & VDIR) {
+		vap->va_nlink++; /* Count a reference to ourselves */
 		/*
 		 * Directories that are recorded within their ICB will show
 		 * as having 0 blocks recorded.  Since tradition dictates
@@ -469,10 +469,9 @@ udf_read(void *v)
 }
 
 /*
- * Call the OSTA routines to translate the name from a CS0 dstring to a
- * 16-bit Unicode String.  Hooks need to be placed in here to translate from
- * Unicode to the encoding that the kernel/user expects.  Return the length
- * of the translated string.
+ * Translate the name from a CS0 dstring to a 16-bit Unicode String.
+ * Hooks need to be placed in here to translate from Unicode to the encoding
+ * that the kernel/user expects.  Return the length of the translated string.
  */
 int
 udf_transname(char *cs0string, char *destname, int len, struct udf_mnt *udfmp)
@@ -481,15 +480,19 @@ udf_transname(char *cs0string, char *destname, int len, struct udf_mnt *udfmp)
 	int i, unilen = 0, destlen;
 
 	if (len > MAXNAMLEN) {
+#ifdef DIAGNOSTIC
 		printf("udf_transname(): name too long\n");
+#endif
 		return (0);
 	}
 
 	/* allocate a buffer big enough to hold an 8->16 bit expansion */
 	transname = pool_get(&udf_trans_pool, PR_WAITOK);
 
-	if ((unilen = udf_UncompressUnicode(len, cs0string, transname)) == -1) {
-		printf("udf: Unicode translation failed\n");
+	if ((unilen = udf_rawnametounicode(len, cs0string, transname)) == -1) {
+#ifdef DIAGNOSTIC
+		printf("udf_transname(): Unicode translation failed\n");
+#endif
 		pool_put(&udf_trans_pool, transname);
 		return (0);
 	}
@@ -497,11 +500,13 @@ udf_transname(char *cs0string, char *destname, int len, struct udf_mnt *udfmp)
 	/* Pack it back to 8-bit Unicode. */
 	for (i = 0; i < unilen ; i++)
 		if (transname[i] & 0xff00)
-			destname[i] = '.';	/* Fudge the 16bit chars */
+			destname[i] = '?';	/* Fudge the 16bit chars */
 		else
 			destname[i] = transname[i] & 0xff;
 
 	pool_put(&udf_trans_pool, transname);
+
+	/* Don't forget to terminate the string. */
 	destname[unilen] = 0;
 	destlen = unilen;
 
@@ -914,8 +919,7 @@ udf_lock(void *v)
 
 	struct vnode *vp = ap->a_vp;
 
-	return (lockmgr(&VTON(vp)->i_lock, ap->a_flags, &vp->v_interlock,
-	    ap->a_p));
+	return (lockmgr(&VTON(vp)->i_lock, ap->a_flags, &vp->v_interlock));
 }
 
 int
@@ -930,7 +934,7 @@ udf_unlock(void *v)
 	struct vnode *vp = ap->a_vp;
 
 	return (lockmgr(&VTON(vp)->i_lock, ap->a_flags | LK_RELEASE,
-	    &vp->v_interlock, ap->a_p));
+	    &vp->v_interlock));
 }
 
 int
@@ -1318,7 +1322,7 @@ udf_bmap_internal(struct udf_node *node, off_t offset, daddr_t *sector,
 		} while(offset >= icblen);
 
 		lsector = (offset  >> udfmp->bshift) +
-		    ((struct short_ad *)(icb))->pos;
+		    letoh32(((struct short_ad *)(icb))->pos);
 
 		*max_size = GETICBLEN(short_ad, icb);
 

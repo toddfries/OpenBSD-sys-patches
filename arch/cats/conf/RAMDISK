@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.15 2005/06/14 13:32:49 drahn Exp $
+#	$OpenBSD: RAMDISK,v 1.17 2006/02/12 19:55:39 miod Exp $
 
 machine	cats	arm
 
@@ -16,7 +16,6 @@ option		EXT2FS		# Second Extended Filesystem
 option		FIFO		# FIFOs; RECOMMENDED
 
 options	ARM32
-options FOOTBRIDGE_INTR
 
 # estimated number of users
 
@@ -192,7 +191,6 @@ pckbd*	at pckbc?		# PC keyboard
 wskbd*	at pckbd? mux 1
 
 #pcppi0	at isa?
-#sysbeep0	at pcppi?
 
 # ISA Plug-and-Play serial interfaces
 #com*	at isapnp?			# Modems and serial boards

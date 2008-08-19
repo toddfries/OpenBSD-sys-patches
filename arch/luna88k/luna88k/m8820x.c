@@ -1,4 +1,4 @@
-/*	$OpenBSD: m8820x.c,v 1.6 2005/04/27 14:07:36 miod Exp $	*/
+/*	$OpenBSD: m8820x.c,v 1.10 2005/12/04 12:20:17 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  *
@@ -89,7 +89,6 @@
 #include <machine/asm_macro.h>
 #include <machine/board.h>
 #include <machine/cmmu.h>
-#include <machine/cpu_number.h>
 #include <machine/locore.h>
 #include <machine/m8820x.h>
 
@@ -101,8 +100,6 @@ m8820x_setup_board_config()
 {
 	struct m8820x_cmmu *cmmu;
 	int num;
-
-	master_cpu = 0;	/* temp to get things going */
 
 	m8820x_cmmu[0].cmmu_regs = (void *)CMMU_I0;
 	m8820x_cmmu[1].cmmu_regs = (void *)CMMU_D0;
@@ -151,7 +148,6 @@ m8820x_setup_board_config()
 	for (num = 0; num < max_cpus; num++) {
 		int type;
 
-		cpu_sets[num] = 1;   /* This cpu installed... */
 		type = CMMU_TYPE(m8820x_cmmu[num << cmmu_shift].
 		    cmmu_regs[CMMU_IDR]);
 
@@ -167,10 +163,10 @@ m8820x_setup_board_config()
  */
 #define ILLADDRESS	0x3ffffff0 	/* any faulty address for luna88k2 */
 
-unsigned
-m8820x_cmmu_cpu_number()
+cpuid_t
+m8820x_cpu_number()
 {
-	unsigned cmmu;
+	u_int cmmu;
 	u_int i;
 
 	CMMU_LOCK;
@@ -185,7 +181,7 @@ m8820x_cmmu_cpu_number()
 		/* access faulting address */
 		badwordaddr((vaddr_t)ILLADDRESS);
 
-		/* check which CMMU reporting the fault  */
+		/* check which CMMU is reporting the fault  */
 		for (cmmu = 0; cmmu < max_cmmus; cmmu++) {
 			if (CMMU_MODE(cmmu) != INST_CMMU &&
 			    CMMU_PFSR_FAULT(m8820x_cmmu[cmmu].
@@ -199,5 +195,5 @@ m8820x_cmmu_cpu_number()
 	}
 	CMMU_UNLOCK;
 
-	panic("m8820x_cmmu_cpu_number: could not determine my cpu number");
+	panic("m8820x_cpu_number: could not determine my cpu number");
 }

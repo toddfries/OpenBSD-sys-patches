@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.24 2005/08/06 14:26:52 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.29 2006/01/04 20:25:34 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -44,7 +44,8 @@
 #include <sys/sysctl.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
-#include <sys/exec_olf.h>
+#include <sys/exec_elf.h>
+#include <sys/extent.h>
 #ifdef SYSVSHM
 #include <sys/shm.h>
 #endif
@@ -53,9 +54,6 @@
 #endif
 #ifdef SYSVMSG
 #include <sys/msg.h>
-#endif
-#ifdef MFS
-#include <ufs/mfs/mfs_extern.h>
 #endif
 
 #include <uvm/uvm_extern.h>
@@ -71,7 +69,7 @@
 #include <machine/autoconf.h>
 #include <machine/memconf.h>
 #include <machine/regnum.h>
-#if defined(TGT_ORIGIN200) | defined(TGT_ORIGIN2000)
+#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 #include <machine/mnode.h>
 #endif
 
@@ -84,7 +82,7 @@
 #include <machine/bus.h>
 
 #include <sgi/localbus/macebus.h>
-#if defined(TGT_ORIGIN200) | defined(TGT_ORIGIN2000)
+#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 #include <sgi/localbus/xbowmux.h>
 #endif
 
@@ -125,6 +123,8 @@ int	bufcachepercent = BUFCACHEPERCENT;
 
 vm_map_t exec_map;
 vm_map_t phys_map;
+
+int	extent_malloc_flags = 0;
 
 caddr_t	msgbufbase;
 
@@ -220,8 +220,8 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	case SGI_O2:
 		bios_printf("Found SGI-IP32, setting up.\n");
 		strlcpy(cpu_model, "SGI-O2 (IP32)", sizeof(cpu_model));
-		sys_config.cons_ioaddr[0] = 0x00390000;	/*XXX*/
-		sys_config.cons_ioaddr[1] = 0x00398000;	/*XXX*/
+		sys_config.cons_ioaddr[0] = MACE_ISA_SER1_OFFS;
+		sys_config.cons_ioaddr[1] = MACE_ISA_SER2_OFFS;
 		sys_config.cons_baudclk = 1843200;		/*XXX*/
 		sys_config.cons_iot = &macebus_tag;
 		sys_config.local.bus_base = 0x0;		/*XXX*/
@@ -309,13 +309,15 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();
 
-	for(i = 0; i < MAXMEMSEGS && mem_layout[i].mem_first_page != 0; i++) {
+	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_first_page != 0; i++) {
 		u_int32_t fp, lp;
-		u_int32_t firstkernpage = atop(KSEG0_TO_PHYS(start));
-		u_int32_t lastkernpage = atop(KSEG0_TO_PHYS(ekern));
+		u_int32_t firstkernpage =
+		    atop(trunc_page(KSEG0_TO_PHYS(start)));
+		u_int32_t lastkernpage =
+		    atop(round_page(KSEG0_TO_PHYS(ekern)));
 
 		fp = mem_layout[i].mem_first_page;
-		lp = mem_layout[i].mem_last_page - 1;
+		lp = mem_layout[i].mem_last_page;
 
 		/* Account for kernel and kernel symbol table */
 		if (fp >= firstkernpage && lp < lastkernpage)
@@ -327,13 +329,13 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		}
 
 		if (fp >= firstkernpage)
-			fp = lastkernpage + 1;
+			fp = lastkernpage;
 		else if (lp < lastkernpage)
-			lp = firstkernpage - 1;
+			lp = firstkernpage;
 		else { /* Need to split! */
-			u_int32_t xp = firstkernpage - 1;
+			u_int32_t xp = firstkernpage;
 			uvm_page_physload(fp, xp, fp, xp, VM_FREELIST_DEFAULT);
-			fp = lastkernpage + 1;
+			fp = lastkernpage;
 		}
 		if (lp >= fp)
 			uvm_page_physload(fp, lp, fp, lp, VM_FREELIST_DEFAULT);
@@ -567,24 +569,17 @@ allocsys(caddr_t v)
 		if (nbuf < 16)
 			nbuf = 16;
 	}
-	/* Restrict to at most 70% filled kvm */
+	/* Restrict to at most 35% filled kvm */
 	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) * 7 / 10)
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) * 7 / 20)
 		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
+		    MAXBSIZE * 7 / 20;
 
 	/* More buffer pages than fits into the buffers is senseless.  */
 	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
 		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
 
 	valloc(buf, struct buf, nbuf);
-
-	/*
-	 * Clear allocated memory.
-	 */
-	if (start != 0) {
-		bzero(start, v - start);
-	}
 
 	return(v);
 }
@@ -671,16 +666,10 @@ cpu_startup()
 	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
 			NULL, UVM_UNKNOWN_OFFSET, 0,
 			UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-			UVM_ADV_NORMAL, 0)) != KERN_SUCCESS) {
+			UVM_ADV_NORMAL, 0)))
 		panic("cpu_startup: cannot allocate VM for buffers");
-	}
 	base = bufpages / nbuf;
 	residual = bufpages % nbuf;
-	if (base >= MAXBSIZE / PAGE_SIZE) {
-		/* don't want to alloc more physical mem than needed */
-		base = MAXBSIZE / PAGE_SIZE;
-		residual = 0;
-	}
 
 	for (i = 0; i < nbuf; i++) {
 		vsize_t curbufsize;
@@ -711,11 +700,11 @@ cpu_startup()
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
-	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr, 16 * NCARGS,
-					TRUE, FALSE, NULL);
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 	/* Allocate a submap for physio */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, TRUE, FALSE, NULL);
+	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
 #ifdef DEBUG
 	pmapdebugflag = opmapdebugflag;
@@ -723,6 +712,9 @@ cpu_startup()
 	printf("avail mem = %d\n", ptoa(uvmexp.free));
 	printf("using %d buffers containing %d bytes of memory\n",
 		nbuf, bufpages * PAGE_SIZE);
+
+	extent_malloc_flags = EX_MALLOCOK;
+
 	/*
 	 * Set up CPU-specific registers, cache, etc.
 	 */

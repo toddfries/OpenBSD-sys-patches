@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.10 2005/03/29 14:32:57 miod Exp $	*/
+/*	$OpenBSD: apm.c,v 1.12 2006/01/18 23:21:17 miod Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -54,8 +54,8 @@
 #include <machine/cpu.h>
 #include <machine/apmvar.h>
 
+#include <dev/adb/adb.h>
 #include <macppc/dev/adbvar.h>
-#include <macppc/dev/adb_direct.h>
 #include <macppc/dev/pm_direct.h>
 
 #if defined(APMDEBUG)
@@ -121,7 +121,7 @@ apmmatch(struct device *parent, void *match, void *aux)
 	    aa->adbaddr != ADBADDR_APM)
 		return 0;
 
-	if (adbHardware != ADB_HW_PB)
+	if (adbHardware != ADB_HW_PMU)
 		return 0;
 
 	return 1;

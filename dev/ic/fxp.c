@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.72 2005/06/08 17:02:59 henning Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.75 2006/01/05 21:22:24 brad Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -180,6 +180,7 @@ static int tx_threshold = 64;
  */
 int fxp_int_delay = FXP_INT_DELAY;
 int fxp_bundle_max = FXP_BUNDLE_MAX;
+int fxp_min_size_mask = FXP_MIN_SIZE_MASK;
 
 /*
  * TxCB list index mask. This is used to do list wrap-around.
@@ -324,7 +325,7 @@ fxp_power(why, arg)
 	struct ifnet *ifp;
 	int s;
 
-	s = splimp();
+	s = splnet();
 	if (why != PWR_RESUME)
 		fxp_stop(sc, 0);
 	else {
@@ -435,6 +436,7 @@ fxp_attach_common(sc, intrstr)
 	if (sc->sc_revision >= FXP_REV_82558_A4) {
 		sc->sc_int_delay = fxp_int_delay;
 		sc->sc_bundle_max = fxp_bundle_max;
+		sc->sc_min_size_mask = fxp_min_size_mask;
 	}
 	/*
 	 * Read MAC address.
@@ -1036,7 +1038,7 @@ fxp_stats_update(arg)
 		if (tx_threshold < 192)
 			tx_threshold += 64;
 	}
-	s = splimp();
+	s = splnet();
 	/*
 	 * If we haven't received any packets in FXP_MAX_RX_IDLE seconds,
 	 * then assume the receiver has locked up and attempt to clear
@@ -1153,7 +1155,7 @@ fxp_stop(sc, drain)
 		for (i = 0; i < FXP_NRFABUFS_MIN; i++) {
 			if (fxp_add_rfabuf(sc, NULL) != 0) {
 				/*
-				 * This "can't happen" - we're at splimp()
+				 * This "can't happen" - we're at splnet()
 				 * and we just freed all the buffers we need
 				 * above.
 				 */
@@ -1205,7 +1207,7 @@ fxp_init(xsc)
 	bus_dmamap_t rxmap;
 	int i, prm, save_bf, lrxen, allm, s, bufs;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Cancel any pending I/O
@@ -1669,7 +1671,7 @@ fxp_ioctl(ifp, command, data)
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
 		splx(s);
@@ -1754,7 +1756,7 @@ fxp_ioctl(ifp, command, data)
  * of it. We then can do 'CU_START' on the mcsetup descriptor and have it
  * lead into the regular TxCB ring when it completes.
  *
- * This function must be called at splimp.
+ * This function must be called at splnet.
  */
 void
 fxp_mc_setup(sc, doit)
@@ -1828,28 +1830,44 @@ struct ucode {
 	u_int16_t	revision;
 	u_int16_t	int_delay_offset;
 	u_int16_t	bundle_max_offset;
+	u_int16_t	min_size_mask_offset;
 	const char	*uname;
 } const ucode_table[] = {
-	{ FXP_REV_82558_A4, D101_CPUSAVER_DWORD, 0, "fxp-d101a" }, 
+	{ FXP_REV_82558_A4, D101_CPUSAVER_DWORD,
+	  0, 0,
+	  "fxp-d101a" }, 
 
-	{ FXP_REV_82558_B0, D101_CPUSAVER_DWORD, 0, "fxp-d101b0" },
+	{ FXP_REV_82558_B0, D101_CPUSAVER_DWORD,
+	  0, 0,
+	  "fxp-d101b0" },
 
 	{ FXP_REV_82559_A0, D101M_CPUSAVER_DWORD, 
-	    D101M_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d101ma" },
+	  D101M_CPUSAVER_BUNDLE_MAX_DWORD, D101M_CPUSAVER_MIN_SIZE_DWORD,
+	  "fxp-d101ma" },
 
 	{ FXP_REV_82559S_A, D101S_CPUSAVER_DWORD,
-	    D101S_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d101s" },
+	  D101S_CPUSAVER_BUNDLE_MAX_DWORD, D101S_CPUSAVER_MIN_SIZE_DWORD,
+	  "fxp-d101s" },
 
 	{ FXP_REV_82550, D102_B_CPUSAVER_DWORD,
-	    D102_B_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d102" },
+	  D102_B_CPUSAVER_BUNDLE_MAX_DWORD, D102_B_CPUSAVER_MIN_SIZE_DWORD,
+	  "fxp-d102" },
 
 	{ FXP_REV_82550_C, D102_C_CPUSAVER_DWORD,
-	    D102_C_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d102c" },
+	  D102_C_CPUSAVER_BUNDLE_MAX_DWORD, D102_C_CPUSAVER_MIN_SIZE_DWORD,
+	  "fxp-d102c" },
 
 	{ FXP_REV_82551_F, D102_E_CPUSAVER_DWORD,
-	    D102_E_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d102e" },
+	  D102_E_CPUSAVER_BUNDLE_MAX_DWORD, D102_E_CPUSAVER_MIN_SIZE_DWORD,
+	  "fxp-d102e" },
+
+	{ FXP_REV_82551_10, D102_E_CPUSAVER_DWORD,
+	  D102_E_CPUSAVER_BUNDLE_MAX_DWORD, D102_E_CPUSAVER_MIN_SIZE_DWORD,
+	  "fxp-d102e" },
 	
-	{ 0, 0, 0, NULL }
+	{ 0, 0,
+	  0, 0,
+	  NULL }
 };
 
 void
@@ -1892,6 +1910,10 @@ fxp_load_ucode(struct fxp_softc *sc)
 		*((u_int16_t *)&cbp->ucode[uc->bundle_max_offset]) =
 			htole16(sc->sc_bundle_max);
 
+	if (uc->min_size_mask_offset)
+		*((u_int16_t *)&cbp->ucode[uc->min_size_mask_offset]) =
+			htole16(sc->sc_min_size_mask);
+	
 	FXP_UCODE_SYNC(sc, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.37.4.1 2006/01/13 01:56:55 brad Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.41 2006/01/12 22:39:21 weingart Exp $	*/
 /*	$NetBSD: pmap.h,v 1.44 2000/04/24 17:18:18 thorpej Exp $	*/
 
 /*
@@ -166,13 +166,6 @@
 #define APDP_PDE	(PDP_BASE + PDSLOT_APTE)
 
 /*
- * XXXCDC: tmp xlate from old names:
- * PTDPTDI -> PDSLOT_PTE
- * KPTDI -> PDSLOT_KERN
- * APTDPTDI -> PDSLOT_APTE
- */
-
-/*
  * The following define determines how many PTPs should be set up for the
  * kernel by locore.s at boot time.  This should be large enough to
  * get the VM system running.  Once the VM system is running, the
@@ -197,13 +190,13 @@
  * plus alternative versions of the above
  */
 
-#define vtopte(VA)	(PTE_BASE + i386_btop(VA))
+#define vtopte(VA)	(PTE_BASE + atop(VA))
 #define kvtopte(VA)	vtopte(VA)
-#define ptetov(PT)	(i386_ptob(PT - PTE_BASE))
+#define ptetov(PT)	(ptoa(PT - PTE_BASE))
 #define	vtophys(VA)	((*vtopte(VA) & PG_FRAME) | \
 			 ((unsigned)(VA) & ~PG_FRAME))
-#define	avtopte(VA)	(APTE_BASE + i386_btop(VA))
-#define	ptetoav(PT)	(i386_ptob(PT - APTE_BASE))
+#define	avtopte(VA)	(APTE_BASE + atop(VA))
+#define	ptetoav(PT)	(ptoa(PT - APTE_BASE))
 #define	avtophys(VA)	((*avtopte(VA) & PG_FRAME) | \
 			 ((unsigned)(VA) & ~PG_FRAME))
 
@@ -268,7 +261,7 @@ struct pmap {
 #define	pm_lock	pm_obj.vmobjlock
 	LIST_ENTRY(pmap) pm_list;	/* list (lck by pm_list lock) */
 	pd_entry_t *pm_pdir;		/* VA of PD (lck by object lock) */
-	u_int32_t pm_pdirpa;		/* PA of PD (read-only after create) */
+	paddr_t pm_pdirpa;		/* PA of PD (read-only after create) */
 	struct vm_page *pm_ptphint;	/* pointer to a PTP in our pmap */
 	struct pmap_statistics pm_stats;  /* pmap stats (lck by object lock) */
 
@@ -344,7 +337,7 @@ struct pv_page {
 extern pd_entry_t	PTD[];
 
 /* PTDpaddr: is the physical address of the kernel's PDP */
-extern u_long PTDpaddr;
+extern u_int32_t PTDpaddr;
 
 extern struct pmap kernel_pmap_store;	/* kernel pmap */
 extern int nkpde;			/* current # of PDEs for kernel */
@@ -363,7 +356,7 @@ extern int pmap_pg_g;			/* do we support PG_G? */
 #define pmap_copy(DP,SP,D,L,S)
 #define pmap_is_modified(pg)		pmap_test_attrs(pg, PG_M)
 #define pmap_is_referenced(pg)		pmap_test_attrs(pg, PG_U)
-#define pmap_phys_address(ppn)		i386_ptob(ppn)
+#define pmap_phys_address(ppn)		ptoa(ppn)
 #define pmap_valid_entry(E) 		((E) & PG_V) /* is PDE or PTE valid? */
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */

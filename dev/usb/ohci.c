@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.61 2005/04/21 12:30:02 pascoe Exp $ */
+/*	$OpenBSD: ohci.c,v 1.65 2005/12/03 03:40:52 brad Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -52,7 +52,7 @@
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #elif defined(__FreeBSD__)
 #include <sys/module.h>
 #include <sys/bus.h>
@@ -827,7 +827,6 @@ ohci_init(ohci_softc_t *sc)
 	OWRITE4(sc, OHCI_BULK_HEAD_ED, sc->sc_bulk_head->physaddr);
 	/* disable all interrupts and then switch on all desired interrupts */
 	OWRITE4(sc, OHCI_INTERRUPT_DISABLE, OHCI_ALL_INTRS);
-	OWRITE4(sc, OHCI_INTERRUPT_ENABLE, sc->sc_eintrs | OHCI_MIE);
 	/* switch on desired functional features */
 	ctl = OREAD4(sc, OHCI_CONTROL);
 	ctl &= ~(OHCI_CBSR_MASK | OHCI_LES | OHCI_HCFS_MASK | OHCI_IR);
@@ -881,6 +880,10 @@ ohci_init(ohci_softc_t *sc)
 #endif
 
 	usb_callout_init(sc->sc_tmo_rhsc);
+
+	/* Finally, turn on interrupts. */
+	DPRINTFN(1,("ohci_init: enabling\n"));
+	OWRITE4(sc, OHCI_INTERRUPT_ENABLE, sc->sc_eintrs | OHCI_MIE);
 
 	return (USBD_NORMAL_COMPLETION);
 
@@ -2306,7 +2309,7 @@ Static usb_device_descriptor_t ohci_devd = {
 	UDPROTO_FSHUB,
 	64,			/* max packet */
 	{0},{0},{0x00,0x01},	/* device id */
-	1,2,0,			/* string indicies */
+	1,2,0,			/* string indices */
 	1			/* # of configurations */
 };
 
@@ -2473,6 +2476,9 @@ ohci_root_ctrl_start(usbd_xfer_handle xfer)
 			*(u_int8_t *)buf = 0;
 			totlen = 1;
 			switch (value & 0xff) {
+			case 0: /* Language table */
+				totlen = ohci_str(buf, len, "\001");
+				break;
 			case 1: /* Vendor */
 				totlen = ohci_str(buf, len, sc->sc_vendor);
 				break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.88 2005/08/06 14:26:52 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.94 2005/12/17 07:31:26 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -110,8 +110,6 @@
 #include <ddb/db_extern.h>
 #endif
 
-#define	MAXMEM	64*1024	/* XXX - from cmap.h */
-
 #include <uvm/uvm_extern.h>
 
 /* the following is used externally (sysctl_hw) */
@@ -120,7 +118,7 @@ char machine[] = MACHINE;		/* cpu "architecture" */
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
-extern vm_offset_t avail_end;
+extern vaddr_t avail_end;
 
 /*
  * Declare these as initialized data so we can patch them.
@@ -143,7 +141,7 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int   maxmem;			/* max memory per process */
-int   physmem = MAXMEM;	/* max supported memory, changes to actual */
+int   physmem;			/* max supported memory, changes to actual */
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -199,7 +197,7 @@ caddr_t allocsys(caddr_t);
 void
 mvme68k_init()
 {
-	extern vm_offset_t avail_start, avail_end;
+	extern vaddr_t avail_start;
 
 	/*
 	 * Tell the VM system about available physical memory.  The
@@ -257,7 +255,7 @@ cpu_startup()
 	int base, residual;
 	
 	vaddr_t minaddr, maxaddr;
-	vm_size_t size;
+	vsize_t size;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -270,7 +268,7 @@ cpu_startup()
 	 * avail_end was pre-decremented in pmap_bootstrap to compensate.
 	 */
 	for (i = 0; i < btoc(MSGBUFSIZE); i++)
-		pmap_kenter_pa((vm_offset_t)msgbufp + i * PAGE_SIZE,
+		pmap_kenter_pa((vaddr_t)msgbufp + i * PAGE_SIZE,
 		    avail_end + i * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
 	pmap_update(pmap_kernel());
 	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
@@ -286,7 +284,7 @@ cpu_startup()
 	 * Find out how much space we need, allocate it,
 	 * and then give everything true virtual addresses.
 	 */
-	size = (vm_size_t)allocsys((caddr_t)0);
+	size = (vsize_t)allocsys((caddr_t)0);
 	if ((v = (caddr_t) uvm_km_zalloc(kernel_map, round_page(size))) == 0)
 		panic("startup: no room for tables");
 	if (allocsys(v) - v != size)
@@ -321,7 +319,7 @@ cpu_startup()
 		 * for the first "residual" buffers, and then we allocate
 		 * "base" pages for the rest.
 		 */
-		curbuf = (vm_offset_t) buffers + (i * MAXBSIZE);
+		curbuf = (vaddr_t)buffers + (i * MAXBSIZE);
 		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
 
 		while (curbufsize) {
@@ -423,55 +421,6 @@ allocsys(caddr_t v)
 
 	valloc(buf, struct buf, nbuf);
 	return (v);
-}
-
-/*
- * Set registers on exec.
- */
-void
-setregs(p, pack, stack, retval)
-	register struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
-{
-	struct frame *frame = (struct frame *)p->p_md.md_regs;
-
-	frame->f_sr = PSL_USERSET;
-	frame->f_pc = pack->ep_entry & ~1;
-	frame->f_regs[D0] = 0;
-	frame->f_regs[D1] = 0;
-	frame->f_regs[D2] = 0;
-	frame->f_regs[D3] = 0;
-	frame->f_regs[D4] = 0;
-	frame->f_regs[D5] = 0;
-	frame->f_regs[D6] = 0;
-	frame->f_regs[D7] = 0;
-	frame->f_regs[A0] = 0;
-	frame->f_regs[A1] = 0;
-	frame->f_regs[A2] = (int)PS_STRINGS;
-	frame->f_regs[A3] = 0;
-	frame->f_regs[A4] = 0;
-	frame->f_regs[A5] = 0;
-	frame->f_regs[A6] = 0;
-	frame->f_regs[SP] = stack;
-
-	/* restore a null state frame */
-	p->p_addr->u_pcb.pcb_fpregs.fpf_null = 0;
-	if (fputype)
-		m68881_restore(&p->p_addr->u_pcb.pcb_fpregs);
-
-#ifdef COMPAT_SUNOS
-	/*
-	 * SunOS' ld.so does self-modifying code without knowing
-	 * about the 040's cache purging needs.  So we need to uncache
-	 * writeable executable pages.
-	 */
-	if (p->p_emul == &emul_sunos)
-		p->p_md.md_flags |= MDP_UNCACHE_WX;
-	else
-		p->p_md.md_flags &= ~MDP_UNCACHE_WX;
-#endif
 }
 
 /*
@@ -686,10 +635,12 @@ haltsys:
 	doshutdownhooks();
 
 	if (howto & RB_HALT) {
-		printf("halted\n\n");
-	} else {
-		doboot();
+		printf("System halted. Press any key to reboot...\n\n");
+		cngetc();
 	}
+
+	doboot();
+
 	for (;;);
 	/*NOTREACHED*/
 }
@@ -943,14 +894,14 @@ badpaddr(addr, size)
 	int size;
 {
 	int off = (int)addr & PGOFSET;
-	caddr_t v, p = (void *)((int)addr & ~PGOFSET);
+	vaddr_t v;
+	paddr_t p = trunc_page(addr);
 	int x;
 
 	v = mapiodev(p, NBPG);
-	if (v == NULL)
+	if (v == 0)
 		return (1);
-	v += off;
-	x = badvaddr((vaddr_t)v + off, size);
+	x = badvaddr(v + off, size);
 	unmapiodev(v, NBPG);
 	return (x);
 }

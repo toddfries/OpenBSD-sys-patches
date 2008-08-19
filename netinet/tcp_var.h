@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.77 2005/08/02 11:05:44 markus Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.80 2005/12/11 17:21:53 deraadt Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -148,7 +148,7 @@ struct tcpcb {
 					 */
 /* congestion control (for slow start, source quench, retransmit after loss) */
 	u_long	snd_cwnd;		/* congestion-controlled window */
-	u_long	snd_ssthresh;		/* snd_cwnd size threshhold for
+	u_long	snd_ssthresh;		/* snd_cwnd size threshold for
 					 * for slow start exponential to
 					 * linear switch
 					 */
@@ -290,8 +290,8 @@ struct syn_cache {
 	struct mbuf *sc_ipopts;			/* IP options */
 	u_int16_t sc_peermaxseg;
 	u_int16_t sc_ourmaxseg;
-	u_int8_t sc_request_r_scale	: 4,
-		 sc_requested_s_scale	: 4;
+	u_int     sc_request_r_scale	: 4,
+		  sc_requested_s_scale	: 4;
 
 	struct tcpcb *sc_tp;			/* tcb for listening socket */
 	LIST_ENTRY(syn_cache) sc_tpq;		/* list of entries by same tp */
@@ -311,7 +311,8 @@ tcp_reass_lock_try(struct tcpcb *tp)
 {
 	int s;
 
-	s = splimp();
+	/* Use splvm() due to mbuf allocation. */
+	s = splvm();
 	if (tp->t_flags & TF_REASSLOCK) {
 		splx(s);
 		return (0);
@@ -326,7 +327,7 @@ tcp_reass_unlock(struct tcpcb *tp)
 {
 	int s;
 
-	s = splimp();
+	s = splvm();
 	tp->t_flags &= ~TF_REASSLOCK;
 	splx(s);
 }

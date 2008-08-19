@@ -1,4 +1,4 @@
-/*	$OpenBSD: cissreg.h,v 1.1 2005/07/06 01:52:13 mickey Exp $	*/
+/*	$OpenBSD: cissreg.h,v 1.4 2005/12/13 15:55:59 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -51,7 +51,6 @@ struct ciss_config {
 	u_int32_t	signature;
 #define	CISS_SIGNATURE	(*(u_int32_t *)"CISS")
 	u_int32_t	version;
-#define	CISS_VERSION	1
 	u_int32_t	methods;
 #define	CISS_METH_READY	0x0001
 #define	CISS_METH_SIMPL	0x0002
@@ -116,6 +115,13 @@ struct ciss_ldmap {
 		u_int32_t tgt;
 		u_int32_t tgt2;
 	} map[1];
+} __packed;
+
+struct ciss_flush {
+	u_int16_t	flush;
+#define	CISS_FLUSH_ENABLE	0
+#define	CISS_FLUSH_DISABLE	1
+	u_int16_t	resv[255];
 } __packed;
 
 struct ciss_cmd {

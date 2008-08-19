@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_inode.c,v 1.30 2005/07/03 20:14:03 drahn Exp $	*/
+/*	$OpenBSD: ufs_inode.c,v 1.34 2006/01/09 12:43:17 pedro Exp $	*/
 /*	$NetBSD: ufs_inode.c,v 1.7 1996/05/11 18:27:52 mycroft Exp $	*/
 
 /*
@@ -61,8 +61,7 @@ u_long	nextgennumber;		/* Next generation number to assign. */
  * Last reference to an inode.  If necessary, write or delete it.
  */
 int
-ufs_inactive(v)
-	void *v;
+ufs_inactive(void *v)
 {
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
@@ -73,26 +72,28 @@ ufs_inactive(v)
 	struct proc *p = ap->a_p;
 	mode_t mode;
 	int error = 0;
+#ifdef DIAGNOSTIC
 	extern int prtactive;
 
 	if (prtactive && vp->v_usecount != 0)
 		vprint("ffs_inactive: pushing active", vp);
+#endif
 
 	/*
 	 * Ignore inodes related to stale file handles.
 	 */
-	if (ip->i_ffs_mode == 0)
+	if (ip->i_din1 == NULL || DIP(ip, mode) == 0)
 		goto out;
 
-	if (ip->i_ffs_nlink <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
+	if (DIP(ip, nlink) <= 0 && (vp->v_mount->mnt_flag & MNT_RDONLY) == 0) {
 		if (getinoquota(ip) == 0)
 			(void)ufs_quota_free_inode(ip, NOCRED);
 
 		error = UFS_TRUNCATE(ip, (off_t)0, 0, NOCRED);
 
-		ip->i_ffs_rdev = 0;
-		mode = ip->i_ffs_mode;
-		ip->i_ffs_mode = 0;
+		DIP_ASSIGN(ip, rdev, 0);
+		mode = DIP(ip, mode);
+		DIP_ASSIGN(ip, mode, 0);
 		ip->i_flag |= IN_CHANGE | IN_UPDATE;
 
 		/*
@@ -123,7 +124,7 @@ out:
 	 * If we are done with the inode, reclaim it
 	 * so that it can be reused immediately.
 	 */
-	if (ip->i_ffs_mode == 0)
+	if (ip->i_din1 == NULL || DIP(ip, mode) == 0)
 		vrecycle(vp, NULL, p);
 
 	return (error);
@@ -133,15 +134,16 @@ out:
  * Reclaim an inode so that it can be used for other purposes.
  */
 int
-ufs_reclaim(vp, p)
-	register struct vnode *vp;
-	struct proc *p;
+ufs_reclaim(struct vnode *vp, struct proc *p)
 {
-	register struct inode *ip;
+	struct inode *ip;
+#ifdef DIAGNOSTIC
 	extern int prtactive;
 
 	if (prtactive && vp->v_usecount != 0)
 		vprint("ufs_reclaim: pushing active", vp);
+#endif
+
 	/*
 	 * Remove the inode from its hash chain.
 	 */

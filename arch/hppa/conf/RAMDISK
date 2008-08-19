@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.53 2005/08/28 05:30:43 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.55 2006/01/09 21:29:38 jsg Exp $
 #
 # Diskless kernel config
 #
@@ -14,7 +14,6 @@ option		NFSCLIENT		# Network File System client
 option		CD9660			# ISO 9660 + Rock Ridge file system
 option		UDF			# UDF (DVD) file system
 option		MSDOSFS			# MS-DOS file system
-option		FDESC			# /dev/fd
 option		FIFO			# FIFOs; RECOMMENDED
 option		INET			# IP + ICMP + TCP + UDP
 option		INET6			# IPv6 (needs INET)
@@ -254,7 +253,7 @@ ne*	at pcmcia?
 #atw*	at pci?			# ADMtek ADM8211 (802.11)
 #atw*	at cardbus?
 #an*	at pci?			# Cisco/Aironet 802.11DS
-an*	at pcmcia?
+#an*	at pcmcia?
 #wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?
 

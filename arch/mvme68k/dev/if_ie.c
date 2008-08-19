@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.29 2005/07/31 03:52:18 pascoe Exp $ */
+/*	$OpenBSD: if_ie.c,v 1.33 2006/01/17 02:03:53 deraadt Exp $ */
 
 /*-
  * Copyright (c) 1999 Steve Murphree, Jr. 
@@ -174,7 +174,7 @@ struct ie_softc {
 	caddr_t sc_iobase;      /* KVA of base of 24 bit addr space */
 	caddr_t sc_maddr;       /* KVA of base of chip's RAM (16bit addr sp.)*/
 	u_int sc_msize;         /* how much RAM we have/use */
-	caddr_t sc_reg;         /* KVA of car's register */
+	vaddr_t sc_reg;         /* KVA of car's register */
 	int sc_bustype;
 
 	struct arpcom sc_arpcom;/* system arpcom structure */
@@ -182,9 +182,9 @@ struct ie_softc {
 	void (*reset_596)(void *);	/* card dependent reset function */
 	void (*chan_attn)(void *);	/* card dependent attn function */
 	void (*run_596)(void *);	/* card dependent "go on-line" func */
-	void (*memcopy)(const void *, void *, u_int);
+	void (*memcopy)(const void *, void *, size_t);
 	                        /* card dependent memory copy function */
-        void (*memzero)(void *, u_int);
+        void (*memzero)(void *, size_t);
 	                        /* card dependent memory zero function */
 	int want_mcsetup;       /* mcsetup flag */
 	int promisc;            /* are we in promisc mode? */
@@ -356,7 +356,7 @@ ie_obreset(arg)
 	void *arg;
 {
 	struct ie_softc *sc = (struct ie_softc *)arg;
-	volatile struct ieob *ieo = (struct ieob *) sc->sc_reg;
+	volatile struct ieob *ieo = (struct ieob *)sc->sc_reg;
 	volatile int t;
 	u_long	a;
 
@@ -366,7 +366,7 @@ ie_obreset(arg)
 	ieo->portlow = a >> 16;
 	delay(1000);
 
-	pmap_extract(pmap_kernel(), (vm_offset_t)sc->scp, &a);
+	pmap_extract(pmap_kernel(), (vaddr_t)sc->scp, &a);
 	a |= IE_PORT_NEWSCPADDR;
 	ieo->porthigh = a & 0xffff;
 	t = 0; t = 1;
@@ -379,7 +379,7 @@ ie_obattend(arg)
 	void *arg;
 {
 	struct ie_softc *sc = (struct ie_softc *)arg;
-	volatile struct ieob *ieo = (struct ieob *) sc->sc_reg;
+	volatile struct ieob *ieo = (struct ieob *)sc->sc_reg;
 
 	ieo->attn = 1;
 }
@@ -414,16 +414,12 @@ ieattach(parent, self, aux)
 	sc->memzero = bzero;
 	sc->sc_msize = etherlen;
 	sc->sc_reg = ca->ca_vaddr;
-	ieo = (volatile struct ieob *) sc->sc_reg;
-
-        /* Are we the boot device? */
-        if (ca->ca_paddr == bootaddr)
-                bootdv = self;
+	ieo = (volatile struct ieob *)sc->sc_reg;
 
 	/* get the first available etherbuf */
 	sc->sc_maddr = etherbuf;	/* maddr = vaddr */
 	if (sc->sc_maddr == NULL) panic("ie: too many ethernet boards");
-	if (pmap_extract(pmap_kernel(), (vm_offset_t)sc->sc_maddr, &pa) == FALSE)
+	if (pmap_extract(pmap_kernel(), (vaddr_t)sc->sc_maddr, &pa) == FALSE)
 		panic("ie: pmap_extract");
 	sc->sc_iobase = (caddr_t)pa;	/* iobase = paddr (24 bit) */
 
@@ -439,7 +435,7 @@ ieattach(parent, self, aux)
 	/*printf("scpV %x iscpV %x scbV %x\n", sc->scp, sc->iscp, sc->scb);*/
 
 	sc->scp->ie_bus_use = 0x44;
-	pmap_extract(pmap_kernel(), (vm_offset_t)sc->iscp, &pa);
+	pmap_extract(pmap_kernel(), (vaddr_t)sc->iscp, &pa);
 	SWT_32(sc->scp->ie_iscp_ptr, pa);
 	/*
 	 * rest of first page is unused (wasted!), rest of ram

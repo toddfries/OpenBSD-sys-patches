@@ -1,4 +1,4 @@
-/*	$OpenBSD: mt.c,v 1.13 2005/01/15 21:13:08 miod Exp $	*/
+/*	$OpenBSD: mt.c,v 1.17 2006/01/20 23:27:25 miod Exp $	*/
 /*	$NetBSD: mt.c,v 1.8 1997/03/31 07:37:29 scottr Exp $	*/
 
 /*
@@ -43,7 +43,6 @@
 #include <sys/syslog.h>
 #include <sys/tty.h>
 #include <sys/kernel.h>
-#include <sys/tprintf.h>
 #include <sys/device.h>
 #include <sys/conf.h>
 
@@ -75,7 +74,6 @@ struct	mt_softc {
 	short	sc_density;	/* current density of tape (mtio.h format) */
 	short	sc_type;	/* tape drive model (hardware IDs) */
 	struct	hpibqueue sc_hq; /* HPIB device queue member */
-	tpr_t	sc_ttyp;
 	struct buf sc_tab;	/* buf queue */
 	struct buf sc_bufstore;	/* XXX buffer storage */
 	struct timeout sc_start_to; /* spl_mtstart timeout */
@@ -173,7 +171,8 @@ mtident(sc, ha)
 	int i;
 
 	for (i = 0; i < nmtinfo; i++) {
-		if (ha->ha_id == mtinfo[i].hwid) {
+		if (ha->ha_id == mtinfo[i].hwid &&
+		    ha->ha_punit == 0) {
 			if (sc != NULL) {
 				sc->sc_type = mtinfo[i].hwid;
 				printf(": %s tape\n", mtinfo[i].desc);
@@ -289,7 +288,6 @@ mtopen(dev, flag, mode, p)
 	if (sc->sc_flags & MTF_OPEN)
 		return (EBUSY);
 	sc->sc_flags |= MTF_OPEN;
-	sc->sc_ttyp = tprintf_open(p);
 	if ((sc->sc_flags & MTF_ALIVE) == 0) {
 		error = mtcommand(dev, MTRESET, 0);
 		if (error != 0 || (sc->sc_flags & MTF_ALIVE) == 0)
@@ -389,7 +387,6 @@ mtclose(dev, flag, fmt, p)
 	if ((minor(dev) & T_NOREWIND) == 0)
 		(void) mtcommand(dev, MTREW, 0);
 	sc->sc_flags &= ~MTF_OPEN;
-	tprintf_close(sc->sc_ttyp);
 	return (0);
 }
 
@@ -445,8 +442,7 @@ mtstrategy(bp)
 #define WRITE_BITS_IGNORED	8
 #if 0
 		if (bp->b_bcount & ((1 << WRITE_BITS_IGNORED) - 1)) {
-			tprintf(sc->sc_ttyp,
-				"%s: write record must be multiple of %d\n",
+			printf("%s: write record must be multiple of %d\n",
 				sc->sc_dev.dv_xname, 1 << WRITE_BITS_IGNORED);
 			goto error;
 		}
@@ -465,8 +461,7 @@ mtstrategy(bp)
 			}
 		}
 		if (bp->b_bcount > s) {
-			tprintf(sc->sc_ttyp,
-				"%s: write record (%ld) too big: limit (%d)\n",
+			printf("%s: write record (%ld) too big: limit (%d)\n",
 				sc->sc_dev.dv_xname, bp->b_bcount, s);
 #if 0 /* XXX see above */
 	    error:
@@ -532,6 +527,7 @@ mtstart(arg)
 	struct buf *bp, *dp;
 	short	cmdcount = 1;
 	u_char	cmdbuf[2];
+	int s;
 
 	dlog(LOG_DEBUG, "%s start", sc->sc_dev.dv_xname);
 	sc->sc_flags &= ~MTF_WRT;
@@ -714,7 +710,9 @@ errdone:
 	bp->b_flags |= B_ERROR;
 done:
 	sc->sc_flags &= ~(MTF_HITEOF | MTF_HITBOF);
+	s = splbio();
 	biodone(bp);
+	splx(s);
 	if ((dp = bp->b_actf))
 		dp->b_actb = bp->b_actb;
 	else
@@ -744,7 +742,7 @@ mtgo(arg)
 	bp = sc->sc_tab.b_actf;
 	rw = bp->b_flags & B_READ;
 	hpibgo(sc->sc_hpibno, sc->sc_slave, rw ? MTT_READ : MTL_WRITE,
-	    bp->b_un.b_addr, bp->b_bcount, rw, rw != 0);
+	    bp->b_data, bp->b_bcount, rw, rw != 0);
 }
 
 void
@@ -887,8 +885,7 @@ mtintr(arg)
 			dlog(LOG_DEBUG, "%s intr: bcount %ld, resid %d",
 			    sc->sc_dev.dv_xname, bp->b_bcount, bp->b_resid);
 		} else {
-			tprintf(sc->sc_ttyp,
-				"%s: record (%d) larger than wanted (%ld)\n",
+			printf("%s: record (%d) larger than wanted (%ld)\n",
 				sc->sc_dev.dv_xname, i, bp->b_bcount);
     error:
 			sc->sc_flags &= ~MTF_IO;

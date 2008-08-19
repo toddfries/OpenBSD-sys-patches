@@ -1,4 +1,4 @@
-/*	$OpenBSD: amireg.h,v 1.22.2.1 2006/02/24 01:34:47 brad Exp $	*/
+/*	$OpenBSD: amireg.h,v 1.25 2005/10/03 21:11:14 krw Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff
@@ -253,7 +253,7 @@ struct ami_iocmd {
 			u_int8_t	aio_pad1[3];
 		} _ami_io;
 
-#define	acc_passthru	_._ami_passru
+#define	acc_passthru	_._ami_passthru
 		struct {
 			u_int16_t	apt_dummy0;
 			u_int32_t	apt_dummy1;
@@ -261,7 +261,7 @@ struct ami_iocmd {
 			u_int8_t	apt_dummy2;
 			u_int8_t	apt_dummy3;
 			u_int8_t	apt_reserved;
-		} _ami_passru;
+		} _ami_passthru;
 
 #define	acc_ldrv	_._ami_ldrv
 		struct {
@@ -316,7 +316,7 @@ struct ami_iocmd64 {
 			u_int8_t	apt_dummy2;
 			u_int8_t	apt_dummy3;
 			u_int8_t	apt_reserved;
-		} _ami_passru;
+		} _ami_passthru;
 
 		struct {
 			u_int16_t	ald_dummy0;
@@ -363,7 +363,7 @@ struct ami_passthrough {
 	u_int8_t	apt_nsense;
 #define	AMI_MAX_SENSE	32
 	u_int8_t	apt_sense[AMI_MAX_SENSE];
-	u_int8_t	apt_nsg;
+	u_int8_t	apt_nsge;
 	u_int8_t	apt_scsistat;
 	u_int32_t	apt_data;
 	u_int32_t	apt_datalen;

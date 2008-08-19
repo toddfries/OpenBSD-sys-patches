@@ -1,4 +1,4 @@
-/*	$OpenBSD: uio.h,v 1.11 2003/06/02 23:28:22 millert Exp $	*/
+/*	$OpenBSD: uio.h,v 1.13 2005/12/13 00:35:23 millert Exp $	*/
 /*	$NetBSD: uio.h,v 1.12 1996/02/09 18:25:45 christos Exp $	*/
 
 /*
@@ -56,7 +56,7 @@ struct uio {
 	size_t	uio_resid;	/* residual i/o count */
 	enum	uio_seg uio_segflg; /* see above */
 	enum	uio_rw uio_rw;	/* see above */
-	struct	proc *uio_procp;/* process if UIO_USERSPACE */
+	struct	proc *uio_procp;/* associated process or NULL */
 };
 
 /*
@@ -71,10 +71,10 @@ struct uio {
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-#if !defined(_POSIX_C_SOURCE) && !defined(_XOPEN_SOURCE)
+#if __BSD_VISIBLE
 ssize_t preadv(int, const struct iovec *, int, off_t);
 ssize_t pwritev(int, const struct iovec *, int, off_t);
-#endif /* !_POSIX_C_SOURCE && !_XOPEN_SOURCE */
+#endif /* __BSD_VISIBLE */
 ssize_t	readv(int, const struct iovec *, int);
 ssize_t	writev(int, const struct iovec *, int);
 __END_DECLS

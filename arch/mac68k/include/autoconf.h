@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.9 2005/07/23 23:30:55 martin Exp $	*/
+/*	$OpenBSD: autoconf.h,v 1.12 2006/01/13 21:01:28 miod Exp $	*/
 /*	$NetBSD: autoconf.h,v 1.5 1996/12/17 06:47:40 scottr Exp $	*/
 
 /*
@@ -48,24 +48,17 @@ void	setconf(void);
 /* machdep.c */
 void	mac68k_set_io_offsets(vaddr_t);
 void	dumpconf(void);
-int	badbaddr(register caddr_t addr);
-int	badwaddr(register caddr_t addr);
-int	badladdr(register caddr_t addr);
 
 /* clock.h */
 
-void	enablertclock(void);
 void	cpu_initclocks(void);
 void	setstatclockrate(int);
-void	disablertclock(void);
 u_long	clkread(void);
 void	inittodr(time_t);
 void	resettodr(void);
 void	mac68k_calibrate_delay(void);
 void	startrtclock(void);
 
-/* macrom.c */
-void	mrg_init(void);
 #endif	/* _KERNEL */
 
 #endif	/* _MAC68K_AUTOCONF_H_ */

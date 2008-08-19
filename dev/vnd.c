@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.56 2005/07/20 02:36:13 tedu Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.58 2006/01/22 00:40:02 miod Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -92,8 +92,6 @@ int vnddebug = 0x00;
 #define	VDB_INIT	0x02
 #define	VDB_IO		0x04
 #endif
-
-#define	b_cylin	b_resid
 
 /*
  * vndunit is a bit weird.  have to reconstitute the dev_t for
@@ -427,8 +425,8 @@ vndstrategy(bp)
 	}
 
 	bn = bp->b_blkno;
-	sz = howmany(bp->b_bcount, DEV_BSIZE);
 	bp->b_resid = bp->b_bcount;
+
 	if (bn < 0) {
 		bp->b_error = EINVAL;
 		bp->b_flags |= B_ERROR;
@@ -437,14 +435,24 @@ vndstrategy(bp)
 		splx(s);
 		return;
 	}
-	if (DISKPART(bp->b_dev) != RAW_PART &&
-	    bounds_check_with_label(bp, vnd->sc_dk.dk_label,
-	    vnd->sc_dk.dk_cpulabel, 1) <= 0) {
-		s = splbio();
-		biodone(bp);
-		splx(s);
-		return;
+
+	/* If we have a label, do a boundary check. */
+	if (vnd->sc_flags & VNF_HAVELABEL) {
+		if (bounds_check_with_label(bp, vnd->sc_dk.dk_label,
+		    vnd->sc_dk.dk_cpulabel, 1) <= 0) {
+			s = splbio();
+			biodone(bp);
+			splx(s);
+			return;
+		}
+
+		/*
+		 * bounds_check_with_label() changes bp->b_resid, reset it
+		 */
+		bp->b_resid = bp->b_bcount;
 	}
+
+	sz = howmany(bp->b_bcount, DEV_BSIZE);
 
 	/* No bypassing of buffer cache?  */
 	if (vndsimple(bp->b_dev)) {
@@ -604,7 +612,7 @@ vndstrategy(bp)
 		/*
 		 * Just sort by block number
 		 */
-		nbp->vb_buf.b_cylin = nbp->vb_buf.b_blkno;
+		nbp->vb_buf.b_cylinder = nbp->vb_buf.b_blkno;
 		s = splbio();
 		disksort(&vnd->sc_tab, &nbp->vb_buf);
 		if (vnd->sc_tab.b_active < vnd->sc_maxactive) {

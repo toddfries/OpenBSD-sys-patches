@@ -1,4 +1,4 @@
-/*	$OpenBSD: osiop.c,v 1.24 2005/04/27 21:34:18 miod Exp $	*/
+/*	$OpenBSD: osiop.c,v 1.26 2005/12/03 16:53:16 krw Exp $	*/
 /*	$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $	*/
 
 /*
@@ -404,7 +404,6 @@ osiop_scsicmd(xs)
 		printf("unable to allocate acb\n");
 		panic("osiop_scsipi_request");
 #endif
-		xs->error = XS_DRIVER_STUFFUP;
 		splx(s);
 		return (TRY_AGAIN_LATER);
 	}
@@ -546,11 +545,14 @@ osiop_sched(sc)
 	if ((sc->sc_nexus != NULL) || TAILQ_EMPTY(&sc->ready_list)) {
 #ifdef OSIOP_DEBUG
 		if (osiop_debug & DEBUG_SCHED)
-			printf("%s: osiop_sched- nexus %p/%d ready %p/%d\n",
+			printf("%s: osiop_sched->nexus %p/%d ready %p/%d\n",
 			    sc->sc_dev.dv_xname, sc->sc_nexus,
-			    sc->sc_nexus->xs->sc_link->target,
+			    sc->sc_nexus != NULL ?
+			     sc->sc_nexus->xs->sc_link->target : 0,
 			    TAILQ_FIRST(&sc->ready_list),
-			    TAILQ_FIRST(&sc->ready_list)->xs->sc_link->target);
+			    TAILQ_FIRST(&sc->ready_list) != NULL ?
+			     TAILQ_FIRST(&sc->ready_list)->xs->sc_link->target :
+			     0);
 #endif
 		return;
 	}

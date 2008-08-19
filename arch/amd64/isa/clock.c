@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.5 2004/06/28 01:52:26 deraadt Exp $	*/
+/*	$OpenBSD: clock.c,v 1.9 2006/02/12 19:55:38 miod Exp $	*/
 /*	$NetBSD: clock.c,v 1.1 2003/04/26 18:39:50 fvdl Exp $	*/
 
 /*-
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -113,44 +109,10 @@ WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <dev/clock_subr.h>
 #include <machine/specialreg.h> 
 
-#ifndef __x86_64__
-#include "mca.h"
-#endif
-#if NMCA > 0
-#include <machine/mca_machdep.h>	/* for MCA_system */
-#endif
-
-#include "pcppi.h"
-#if (NPCPPI > 0)
-#include <dev/isa/pcppivar.h>
-
-#ifdef CLOCKDEBUG
-int clock_debug = 0;
-#define DPRINTF(arg) if (clock_debug) printf arg
-#else
-#define DPRINTF(arg)
-#endif
-
-int sysbeepmatch(struct device *, void *, void *);
-void sysbeepattach(struct device *, struct device *, void *);
-
-struct cfattach sysbeep_ca = {
-	sizeof(struct device), sysbeepmatch, sysbeepattach
-};
-
-struct cfdriver sysbeep_cd = {
-	NULL, "sysbeep", DV_DULL
-};
-
-static int ppi_attached;
-static pcppi_tag_t ppicookie;
-#endif /* PCPPI */
-
 void	spinwait(int);
 int	clockintr(void *);
 int	rtcintr(void *);
 int	gettick(void);
-void	sysbeep(int, int);
 void	rtcdrain(void *v);
 int	rtcget(mc_todregs *);
 void	rtcput(mc_todregs *);
@@ -421,38 +383,6 @@ i8254_delay(int n)
 			n -= otick - tick;
 		otick = tick;
 	}
-}
-
-#if (NPCPPI > 0)
-int
-sysbeepmatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
-{
-	return (!ppi_attached);
-}
-
-void
-sysbeepattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
-{
-	printf("\n");
-
-	ppicookie = ((struct pcppi_attach_args *)aux)->pa_cookie;
-	ppi_attached = 1;
-}
-#endif
-
-void
-sysbeep(pitch, period)
-	int pitch, period;
-{
-#if (NPCPPI > 0)
-	if (ppi_attached)
-		pcppi_bell(ppicookie, pitch, period, 0);
-#endif
 }
 
 unsigned int delaycount;        /* calibrated loop variable (1 millisecond) */
@@ -743,7 +673,9 @@ inittodr(base)
 		}
 	}
 
-	time.tv_sec = clock_ymdhms_to_secs(&dt);
+	time.tv_sec = clock_ymdhms_to_secs(&dt) + tz.tz_minuteswest * 60;
+	if (tz.tz_dsttime)
+		time.tv_sec -= 3600;
 #ifdef DEBUG_CLOCK
 	printf("readclock: %ld (%ld)\n", time.tv_sec, base);
 #endif
@@ -779,8 +711,7 @@ resettodr()
 {
 	mc_todregs rtclk;
 	struct clock_ymdhms dt;
-	int century;
-	int s;
+	int century, diff, s;
 
 	/*
 	 * We might have been called by boot() due to a crash early
@@ -794,7 +725,10 @@ resettodr()
 		memset(&rtclk, 0, sizeof(rtclk));
 	splx(s);
 
-	clock_secs_to_ymdhms(time.tv_sec, &dt);
+	diff = tz.tz_minuteswest * 60;
+	if (tz.tz_dsttime)
+		diff -= 3600;
+	clock_secs_to_ymdhms(time.tv_sec - diff, &dt);
 
 	rtclk[MC_SEC] = bintobcd(dt.dt_sec);
 	rtclk[MC_MIN] = bintobcd(dt.dt_min);

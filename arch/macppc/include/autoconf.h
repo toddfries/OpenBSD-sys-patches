@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.5 2003/06/09 16:34:21 deraadt Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.7 2006/02/12 16:50:12 miod Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -91,7 +91,12 @@ void	set_clockintr(void (*)(struct clockframe *));
 void	set_iointr(void (*)(void *, int));
 int	badaddr(void *, u_int32_t);
 void calc_delayconst(void);
-void ofrootfound(void);
+
+typedef int (time_read_t)(time_t *sec);
+typedef int (time_write_t)(time_t sec);
+
+extern time_read_t *time_read;
+extern time_write_t *time_write;
 
 typedef int mac_intr_handle_t;
 typedef void     *(intr_establish_t)(void *, mac_intr_handle_t,

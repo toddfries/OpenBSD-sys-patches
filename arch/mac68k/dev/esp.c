@@ -1,4 +1,4 @@
-/*	$OpenBSD: esp.c,v 1.22 2005/08/09 09:15:53 martin Exp $	*/
+/*	$OpenBSD: esp.c,v 1.25 2006/01/22 18:37:56 miod Exp $	*/
 /*	$NetBSD: esp.c,v 1.17 1998/09/05 15:15:35 pk Exp $	*/
 
 /*
@@ -275,9 +275,6 @@ espattach(parent, self, aux)
 
 	sc->sc_id = 7;
 
-	/* gimme MHz */
-	sc->sc_freq /= 1000000;
-
 	/*
 	 * It is necessary to try to load the 2nd config register here,
 	 * to find out what rev the esp chip is, else the esp_reset
@@ -297,7 +294,7 @@ espattach(parent, self, aux)
 	 * Since the chip's clock is given in MHz, we have the following
 	 * formula: 4 * period = (1000 / freq) * 4
 	 */
-	sc->sc_minsync = 1000 / sc->sc_freq;
+	sc->sc_minsync = (1000 * 1000000) / sc->sc_freq;
 
 	/* We need this to fit into the TCR... */
 	sc->sc_maxxfer = 64 * 1024;
@@ -306,6 +303,9 @@ espattach(parent, self, aux)
 		sc->sc_minsync = 0;	/* No synchronous xfers w/o DMA */
 		sc->sc_maxxfer = 8 * 1024;
 	}
+
+	/* gimme MHz */
+	sc->sc_freq /= 1000000;
 
 	/*
 	 * Configure interrupts.
@@ -589,10 +589,8 @@ static __inline__ int
 esp_dafb_have_dreq(esc)
 	struct esp_softc *esc;
 {
-	u_int32_t r;
-
-	r = bus_space_read_4(esc->sc_tag, esc->sc_bsh, 0);
-	return (r & 0x200);
+	return (*(volatile u_int32_t *)
+	    bus_space_vaddr(esc->sc_tag, esc->sc_bsh) & 0x200);
 }
 
 static __inline__ int

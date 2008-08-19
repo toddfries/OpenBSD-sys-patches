@@ -1,4 +1,4 @@
-/*	$OpenBSD: ptrace.h,v 1.8 2003/06/02 23:28:21 millert Exp $	*/
+/*	$OpenBSD: ptrace.h,v 1.10 2005/12/11 21:30:31 miod Exp $	*/
 /*	$NetBSD: ptrace.h,v 1.21 1996/02/09 18:25:26 christos Exp $	*/
 
 /*-
@@ -61,6 +61,22 @@ struct ptrace_io_desc {
 #define PIOD_READ_I	3	/* Read from I space */
 #define PIOD_WRITE_I	4	/* Write to I space */
 
+#define PT_SET_EVENT_MASK	12
+#define PT_GET_EVENT_MASK	13
+
+typedef struct ptrace_event {
+	int	pe_set_event;
+} ptrace_event_t;
+
+#define PTRACE_FORK	0x0002	/* Report forks */
+
+#define PT_GET_PROCESS_STATE	14
+
+typedef struct ptrace_state {
+	int	pe_report_event;
+	pid_t	pe_other_pid;
+} ptrace_state_t;
+
 #define	PT_FIRSTMACH	32	/* for machine-specific requests */
 #include <machine/ptrace.h>	/* machine-specific requests, if any */
 
@@ -90,6 +106,8 @@ int	process_sstep(struct proc *p, int sstep);
 int	process_write_fpregs(struct proc *p, struct fpreg *regs);
 #endif
 int	process_write_regs(struct proc *p, struct reg *regs);
+int	process_checkioperm(struct proc *, struct proc *);
+int	process_domem(struct proc *, struct proc *, struct uio *, int);
 
 #ifndef FIX_SSTEP
 #define FIX_SSTEP(p)

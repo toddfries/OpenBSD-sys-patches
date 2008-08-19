@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.4 2004/07/07 23:10:46 deraadt Exp $ */
+/*	$OpenBSD: if_de.c,v 1.6 2006/01/17 20:26:16 miod Exp $ */
 /*	$NetBSD: if_de.c,v 1.11 2001/11/13 07:11:24 lukem Exp $	*/
 
 /*
@@ -46,10 +46,6 @@
  *	timeout routine (get statistics)
  */
 
-#include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_de.c,v 1.11 2001/11/13 07:11:24 lukem Exp $");
-
-#include "opt_inet.h"
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -83,8 +79,6 @@ __KERNEL_RCSID(0, "$NetBSD: if_de.c,v 1.11 2001/11/13 07:11:24 lukem Exp $");
 #include <dev/qbus/if_dereg.h>
 #include <dev/qbus/if_uba.h>
 
-#include "ioconf.h"
-
 /*
  * Be careful with transmit/receive buffers, each entry steals 4 map
  * registers, and there is only 496 on one unibus...
@@ -98,8 +92,8 @@ __KERNEL_RCSID(0, "$NetBSD: if_de.c,v 1.11 2001/11/13 07:11:24 lukem Exp $");
 struct	de_cdata {
 	/* the following structures are always mapped in */
 	struct	de_pcbb dc_pcbb;	/* port control block */
-	struct	de_ring dc_xrent[NXMT]; /* transmit ring entrys */
-	struct	de_ring dc_rrent[NRCV]; /* receive ring entrys */
+	struct	de_ring dc_xrent[NXMT]; /* transmit ring entries */
+	struct	de_ring dc_rrent[NRCV]; /* receive ring entries */
 	struct	de_udbbuf dc_udbbuf;	/* UNIBUS data buffer */
 	/* end mapped area */
 };

@@ -1,7 +1,7 @@
-/*	$OpenBSD: kern_synch.c,v 1.64 2005/06/17 22:33:34 niklas Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.73 2005/12/30 04:02:17 tedu Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
-/*-
+/*
  * Copyright (c) 1982, 1986, 1990, 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -47,6 +47,11 @@
 #include <uvm/uvm_extern.h>
 #include <sys/sched.h>
 #include <sys/timeout.h>
+#include <sys/mount.h>
+#include <sys/syscallargs.h>
+#include <sys/pool.h>
+
+#include <machine/spinlock.h>
 
 #ifdef KTRACE
 #include <sys/ktrace.h>
@@ -54,7 +59,6 @@
 
 void updatepri(struct proc *);
 void endtsleep(void *);
-
 
 /*
  * We're only looking at 7 bits of the address; everything is
@@ -96,11 +100,8 @@ int safepri;
  * interlock will always be unlocked upon return.
  */
 int
-ltsleep(ident, priority, wmesg, timo, interlock)
-	void *ident;
-	int priority, timo;
-	const char *wmesg;
-	volatile struct simplelock *interlock;
+ltsleep(void *ident, int priority, const char *wmesg, int timo,
+    volatile struct simplelock *interlock)
 {
 	struct proc *p = curproc;
 	struct slpque *qp;
@@ -131,8 +132,12 @@ ltsleep(ident, priority, wmesg, timo, interlock)
 	SCHED_LOCK(s);
 
 #ifdef DIAGNOSTIC
-	if (ident == NULL || p->p_stat != SONPROC || p->p_back != NULL)
-		panic("tsleep");
+	if (ident == NULL)
+		panic("tsleep: no ident");
+	if (p->p_stat != SONPROC)
+		panic("tsleep: not SONPROC");
+	if (p->p_back != NULL)
+		panic("tsleep: p_back not NULL");
 #endif
 
 	p->p_wchan = ident;
@@ -241,8 +246,7 @@ resume:
  * is stopped, just unsleep so it will remain stopped.
  */
 void
-endtsleep(arg)
-	void *arg;
+endtsleep(void *arg)
 {
 	struct proc *p;
 	int s;
@@ -263,11 +267,10 @@ endtsleep(arg)
  * Remove a process from its wait queue
  */
 void
-unsleep(p)
-	register struct proc *p;
+unsleep(struct proc *p)
 {
-	register struct slpque *qp;
-	register struct proc **hp;
+	struct slpque *qp;
+	struct proc **hp;
 #if 0
 	int s;
 
@@ -292,12 +295,10 @@ unsleep(p)
 }
 
 /*
- * Make all processes sleeping on the specified identifier runnable.
+ * Make a number of processes sleeping on the specified identifier runnable.
  */
 void
-wakeup_n(ident, n)
-	void *ident;
-	int n;
+wakeup_n(void *ident, int n)
 {
 	struct slpque *qp;
 	struct proc *p, **q;
@@ -308,8 +309,10 @@ wakeup_n(ident, n)
 restart:
 	for (q = &qp->sq_head; (p = *q) != NULL; ) {
 #ifdef DIAGNOSTIC
-		if (p->p_back || (p->p_stat != SSLEEP && p->p_stat != SSTOP))
-			panic("wakeup");
+		if (p->p_back)
+			panic("wakeup: p_back not NULL");
+		if (p->p_stat != SSLEEP && p->p_stat != SSTOP)
+			panic("wakeup: p_stat is %d", (int)p->p_stat);
 #endif
 		if (p->p_wchan == ident) {
 			--n;
@@ -357,9 +360,77 @@ restart:
 	SCHED_UNLOCK(s);
 }
 
+/*
+ * Make all processes sleeping on the specified identifier runnable.
+ */
 void
-wakeup(chan)
-	void *chan;
+wakeup(void *chan)
 {
 	wakeup_n(chan, -1);
 }
+
+int
+sys_sched_yield(struct proc *p, void *v, register_t *retval)
+{
+	yield();
+	return (0);
+}
+
+#ifdef RTHREADS
+
+int
+sys_thrsleep(struct proc *p, void *v, register_t *revtal)
+{
+	struct sys_thrsleep_args *uap = v;
+	long ident = (long)SCARG(uap, ident);
+	int timo = SCARG(uap, timeout);
+	_spinlock_lock_t *lock = SCARG(uap, lock);
+	_spinlock_lock_t unlocked = _SPINLOCK_UNLOCKED;
+	int error;
+
+	p->p_thrslpid = ident;
+
+	if (lock)
+		copyout(&unlocked, lock, sizeof(unlocked));
+	if (hz > 1000)
+		timo = timo * (hz / 1000);
+	else
+		timo = timo / (1000 / hz);
+	if (timo < 0)
+		timo = 0;
+	error = tsleep(&p->p_thrslpid, PUSER | PCATCH, "thrsleep", timo);
+
+	return (error);
+
+}
+
+int
+sys_thrwakeup(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_thrwakeup_args *uap = v;
+	long ident = (long)SCARG(uap, ident);
+	int n = SCARG(uap, n);
+	struct proc *q;
+	int found = 0;
+	
+	/* have to check the parent, it's not in the thread list */
+	if (p->p_thrparent->p_thrslpid == ident) {
+		wakeup(&p->p_thrparent->p_thrslpid);
+		p->p_thrparent->p_thrslpid = 0;
+		if (++found == n)
+			return (0);
+	}
+	LIST_FOREACH(q, &p->p_thrparent->p_thrchildren, p_thrsib) {
+		if (q->p_thrslpid == ident) {
+			wakeup(&q->p_thrslpid);
+			q->p_thrslpid = 0;
+			if (++found == n)
+				return (0);
+		}
+	}
+	if (!found)
+		return (ESRCH);
+
+	return (0);
+}
+#endif

@@ -1,4 +1,4 @@
-/* $OpenBSD: disksubr.c,v 1.4 2005/03/30 07:52:31 deraadt Exp $ */
+/* $OpenBSD: disksubr.c,v 1.6 2006/01/26 07:11:08 miod Exp $ */
 /* $NetBSD: disksubr.c,v 1.12 2002/02/19 17:09:44 wiz Exp $ */
 
 /*
@@ -52,11 +52,6 @@
 #include <sys/disk.h>
 #include <sys/dkbad.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-
-#include <machine/autoconf.h>
-
 #include <dev/sun/disklabel.h>
 
 /*
@@ -104,7 +99,6 @@
 
 char *disklabel_om_to_bsd(char *, struct disklabel *);
 int disklabel_bsd_to_om(struct disklabel *, char *);
-void get_autoboot_device(void);
 
 /*
  * Attempt to read a disk label from a device
@@ -129,14 +123,20 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	struct buf *bp;
 	struct disklabel *dlp;
 	struct sun_disklabel *slp;
-	int error;
+	int error, i;
 
-	/* minimal requirements for archtypal disk label */
+	/* minimal requirements for archetypal disk label */
+	if (lp->d_secsize < DEV_BSIZE)
+		lp->d_secsize = DEV_BSIZE;
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
-	lp->d_npartitions = 1;
-	if (lp->d_partitions[0].p_size == 0)
-		lp->d_partitions[0].p_size = 0x1fffffff;
+	lp->d_npartitions = RAW_PART + 1;
+	for (i = 0; i < RAW_PART; i++) {
+		lp->d_partitions[i].p_size = 0;
+		lp->d_partitions[i].p_offset = 0;
+	}
+	if (lp->d_partitions[i].p_size == 0)
+		lp->d_partitions[i].p_size = lp->d_secperunit;
 	lp->d_partitions[0].p_offset = 0;
 
         /* don't read the on-disk label if we are in spoofed-only mode */
@@ -151,7 +151,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_cylinder = 0;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags |= B_READ;
+	bp->b_flags = B_BUSY | B_READ;
 	(*strat)(bp);
 
 	/* if successful, locate disk label within block and validate */
@@ -160,6 +160,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 		/* Save the whole block in case it has info we need. */
 		bcopy(bp->b_data, clp->cd_block, sizeof(clp->cd_block));
 	}
+	bp->b_flags = B_INVAL | B_AGE | B_READ;
 	brelse(bp);
 	if (error)
 		return ("disk label read error");
@@ -255,7 +256,7 @@ writedisklabel(dev, strat, lp, clp)
 	struct disklabel *dlp;
 	int error;
 
-	/* implant NetBSD disklabel at LABELOFFSET. */
+	/* implant OpenBSD disklabel at LABELOFFSET. */
 	dlp = (struct disklabel *)(clp->cd_block + LABELOFFSET);
 	*dlp = *lp; 	/* struct assignment */
 
@@ -292,41 +293,44 @@ bounds_check_with_label(bp, lp, osdep, wlabel)
 	struct cpu_disklabel *osdep;
 	int wlabel;
 {
-	struct partition *p;
-	int sz, maxsz;
+#define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))
+	struct partition *p = lp->d_partitions + DISKPART(bp->b_dev);
+	int sz = howmany(bp->b_bcount, DEV_BSIZE);
 
-	p = lp->d_partitions + DISKPART(bp->b_dev);
-	maxsz = p->p_size;
-	sz = (bp->b_bcount + DEV_BSIZE - 1) >> DEV_BSHIFT;
+	/* avoid division by zero */
+	if (lp->d_secpercyl == 0) {
+		bp->b_error = EINVAL;
+		goto bad;
+	}
 
 	/* overwriting disk label ? */
-	/* XXX should also protect bootstrap in first 8K */
-	/* XXX PR#2598: labelsect is always sector zero. */
-	if (((bp->b_blkno + p->p_offset) <= LABELSECTOR) &&
-	    ((bp->b_flags & B_READ) == 0) && (wlabel == 0))
-	{
+	/* XXX this assumes everything <=LABELSECTOR is label! */
+	/*     But since LABELSECTOR is 0, that's ok for now. */
+	if (bp->b_blkno + blockpersec(p->p_offset, lp) <= LABELSECTOR &&
+	    (bp->b_flags & B_READ) == 0 && wlabel == 0) {
 		bp->b_error = EROFS;
 		goto bad;
 	}
 
 	/* beyond partition? */
-	if (bp->b_blkno < 0 || bp->b_blkno + sz > maxsz) {
-		/* if exactly at end of disk, return an EOF */
-		if (bp->b_blkno == maxsz) {
+	if (bp->b_blkno + sz > blockpersec(p->p_size, lp)) {
+		sz = blockpersec(p->p_size, lp) - bp->b_blkno;
+		if (sz == 0) {
+			/* if exactly at end of disk, return an EOF */
 			bp->b_resid = bp->b_bcount;
 			return (0);
 		}
-		/* or truncate if part of it fits */
-		sz = maxsz - bp->b_blkno;
-		if (sz <= 0) {
+		if (sz < 0) {
 			bp->b_error = EINVAL;
 			goto bad;
 		}
+		/* or truncate if part of it fits */
 		bp->b_bcount = sz << DEV_BSHIFT;
 	}
 
 	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylinder = (bp->b_blkno + p->p_offset) / lp->d_secpercyl;
+	bp->b_cylinder = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
+	    lp->d_secpercyl;
 	return (1);
 
 bad:
@@ -334,85 +338,11 @@ bad:
 	return (-1);
 }
 
-/*
- * Get 'auto-boot' information from NVRAM
- */
-struct autoboot_t
-{
-	char	cont[16];
-	int	targ;
-	int	part;
-} autoboot;
-
-char *nvram_by_symbol(char *);			/* in machdep.c */
-
-void
-get_autoboot_device(void)
-{
-	char *value, c;
-	int i, len, part;
-
-	/* Assume default controler is internal spc (spc0) */
-	strlcpy(autoboot.cont, "spc0", sizeof(autoboot.cont));
-
-	/* Get boot controler and SCSI target from NVRAM */
-	value = nvram_by_symbol("boot_unit");
-	if (value != NULL) {
-		len = strlen(value);
-		if (len == 1) {
-			c = value[0];
-		} else if (len == 2) {
-			if (value[0] == '1') {
-				/* External spc (spc1) */
-				strlcpy(autoboot.cont, "spc1", sizeof(autoboot.cont));
-				c = value[1];
-			}
-		}
-
-		if ((c >= '0') && (c <= '6'))
-			autoboot.targ = 6 - (c - '0');
-	}
-
-	/* Get partition number from NVRAM */
-	value = nvram_by_symbol("boot_partition");
-	if (value != NULL) {
-		len = strlen(value);
-		part = 0;
-		for (i = 0; i < len; i++)
-			part = part * 10 + (value[i] - '0');
-		autoboot.part = part;
-	}
-}
-
 void
 dk_establish(dk, dev)
         struct disk *dk;
         struct device *dev;
 {
-        struct scsibus_softc *sbsc;
-	struct device *spcsc;
-        int target, lun;
-
-        /*
-         * scsi: sd,cd  XXX: Can LUNA88K boot from CD-ROM?
-         */
-
-        if (strncmp("sd", dev->dv_xname, 2) == 0 ||
-            strncmp("cd", dev->dv_xname, 2) == 0) {
-
-                sbsc = (struct scsibus_softc *)dev->dv_parent;
-		spcsc = dev->dv_parent->dv_parent;
-                target = autoboot.targ;
-                lun = 0;
-
-                if (strncmp(autoboot.cont, spcsc->dv_xname, 4) == 0 &&
-		    sbsc->sc_link[target][lun] != NULL &&
-                    sbsc->sc_link[target][lun]->device_softc == (void *)dev) {
-                        bootdv = dev;
-			bootpart = autoboot.part;
-                        return;
-                }
-        }
 }
 
 /************************************************************************

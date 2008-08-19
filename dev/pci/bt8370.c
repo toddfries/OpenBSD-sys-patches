@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt8370.c,v 1.4 2005/08/27 13:32:01 claudio Exp $ */
+/*	$OpenBSD: bt8370.c,v 1.7 2006/01/31 16:51:13 claudio Exp $ */
 
 /*
  * Copyright (c) 2004,2005  Internet Business Solutions AG, Zurich, Switzerland
@@ -41,6 +41,9 @@
 #include "if_art.h"
 #include "bt8370reg.h"
 
+#define	FRAMER_LIU_E1_120	1
+#define	FRAMER_LIU_T1_133	2
+
 void	bt8370_set_sbi_clock_mode(struct art_softc *, enum art_sbi_type,
 	    u_int, int);
 void	bt8370_set_bus_mode(struct art_softc *, enum art_sbi_mode, int);
@@ -53,9 +56,11 @@ void	bt8370_intr_enable(struct art_softc *ac, int);
 
 #ifndef ACCOOM_DEBUG
 #define bt8370_print_status(x)
+#define bt8370_print_counters(x)
 #define bt8370_dump_registers(x)
 #else
 void	bt8370_print_status(struct art_softc *);
+void	bt8370_print_counters(struct art_softc *);
 void	bt8370_dump_registers(struct art_softc *);
 #endif
 
@@ -105,6 +110,8 @@ bt8370_set_frame_mode(struct art_softc *ac, enum art_sbi_type type, u_int mode,
 		bt8370_set_sbi_clock_mode(ac, type, clockmode, channels);
 
 		/* Receiver RLIU, RCVR */
+		bt8370_set_line_buildout(ac, FRAMER_LIU_E1_120);
+		/* This one is critical */
 		ebus_write(&ac->art_ebus, Bt8370_RCR0, RCR0_HDB3 |
 		    RCR0_RABORT | RCR0_LFA_FAS | RCR0_RZCS_NBPV);
 		ebus_write(&ac->art_ebus, Bt8370_RALM, 0x00);
@@ -151,7 +158,7 @@ bt8370_set_frame_mode(struct art_softc *ac, enum art_sbi_type type, u_int mode,
 		bt8370_set_sbi_clock_mode(ac, type, clockmode, channels);
 
 		/* Receiver RLIU, RCVR */
-		bt8370_set_line_buildout(ac, 0);
+		bt8370_set_line_buildout(ac, FRAMER_LIU_E1_120);
 		/* This one is critical */
 		ebus_write(&ac->art_ebus, Bt8370_RCR0, RCR0_RFORCE |
 		    RCR0_HDB3 | RCR0_LFA_FAS | RCR0_RZCS_NBPV);
@@ -207,7 +214,7 @@ bt8370_set_frame_mode(struct art_softc *ac, enum art_sbi_type type, u_int mode,
 		bt8370_set_sbi_clock_mode(ac, type, clockmode, channels);
 
 		/* Receiver RLIU, RCVR */
-		bt8370_set_line_buildout(ac, 0);
+		bt8370_set_line_buildout(ac, FRAMER_LIU_E1_120);
 		/* This one is critical */
 		ebus_write(&ac->art_ebus, Bt8370_RCR0, RCR0_RFORCE |
 		    RCR0_HDB3 | RCR0_LFA_FASCRC | RCR0_RZCS_NBPV);
@@ -257,7 +264,7 @@ bt8370_set_frame_mode(struct art_softc *ac, enum art_sbi_type type, u_int mode,
 		bt8370_set_sbi_clock_mode(ac, type, clockmode, channels);
 
 		/* Receiver RLIU, RCVR */
-		bt8370_set_line_buildout(ac, 0);
+		bt8370_set_line_buildout(ac, FRAMER_LIU_T1_133);
 		/* This one is critical */
 		ebus_write(&ac->art_ebus, Bt8370_RCR0, RCR0_RFORCE |
 		    RCR0_AMI | RCR0_LFA_26F | RCR0_RZCS_NBPV);
@@ -307,7 +314,7 @@ bt8370_set_frame_mode(struct art_softc *ac, enum art_sbi_type type, u_int mode,
 		bt8370_set_sbi_clock_mode(ac, type, clockmode, channels);
 
 		/* Receiver RLIU, RCVR */
-		bt8370_set_line_buildout(ac, 0);
+		bt8370_set_line_buildout(ac, FRAMER_LIU_T1_133);
 		/* This one is critical */
 		ebus_write(&ac->art_ebus, Bt8370_RCR0, RCR0_RFORCE |
 		    RCR0_B8ZS | RCR0_LFA_26F | RCR0_RZCS_NBPV);
@@ -524,6 +531,7 @@ bt8370_set_sbi_clock_mode(struct art_softc *ac, enum art_sbi_type mode,
 			musycc_set_port(ac->art_channel->cc_group,
 			    MUSYCC_PORT_MODE_E1);
 		}
+		break;
 	}
 	ebus_write(&ac->art_ebus, Bt8370_CLAD_CR, CLAD_CR_LFGAIN);
 }
@@ -607,7 +615,7 @@ bt8370_set_bus_mode(struct art_softc *ac, enum art_sbi_mode mode, int nchannels)
 		ebus_write(&ac->art_ebus, channel, SBCn_RINDO |
 		    SBCn_TINDO | SBCn_ASSIGN);
 		/* In T1 mode timeslot 0 must not be used. */
-		if (nchannels == 24 && channel == 0)
+		if (nchannels == 25 && channel == Bt8370_SBCn)
 			ebus_write(&ac->art_ebus, channel, 0x00);
 	}
 	for (channel = Bt8370_TPCn; channel < Bt8370_TPCn +
@@ -634,23 +642,22 @@ bt8370_set_line_buildout(struct art_softc *ac, int mode)
 	    RLIU_CR_AGC2048 | RLIU_CR_LONG_EYE);
 
 	switch (mode) {
-#if 0
 	case FRAMER_LIU_T1_133:
-		/* fallthrough */
+		/* Short haul */
+		ebus_write(&ac->art_ebus, Bt8370_VGA_MAX, 0x1F);
+		/* Force EQ off */
+		ebus_write(&ac->art_ebus, Bt8370_PRE_EQ, 0xA6);
+
+		ebus_write(&ac->art_ebus, Bt8370_TLIU_CR, TLIU_CR_100);
+		break;
+#if 0
 	case FRAMER_LIU_T1_266:
-		/* fallthrough */
 	case FRAMER_LIU_T1_399:
-		/* fallthrough */
 	case FRAMER_LIU_T1_533:
-		/* fallthrough */
 	case FRAMER_LIU_T1_655:
-		/* fallthrough */
 	case FRAMER_LIU_T1_LH68:
-		/* fallthrough */
-	case FRAMER_LIU_E1_120:
-		/* fallthrough */
 #endif
-	default:
+	case FRAMER_LIU_E1_120:
 		/* Short haul */
 		ebus_write(&ac->art_ebus, Bt8370_VGA_MAX, 0x1F);
 		/* Force EQ off */
@@ -786,7 +793,7 @@ bt8370_intr(struct art_softc *ac)
 int
 bt8370_link_status(struct art_softc *ac)
 {
-	u_int8_t rstat, alm1, alm2, alm3;
+	u_int8_t rstat, alm1, alm2, alm3, alm1mask;
 	int status = 1;
 
 	/*
@@ -795,14 +802,21 @@ bt8370_link_status(struct art_softc *ac)
 	 * -1 no link detected
 	 */
 
+	alm1mask = ALM1_RYEL | ALM1_RAIS | ALM1_RALOS | ALM1_RLOF;
+	/*
+	 * XXX don't check RYEL in T1 mode it toggles more or less
+	 * regular.
+	 */
+	if (IFM_SUBTYPE(ac->art_media) == IFM_TDM_T1)
+		alm1mask &= ~ALM1_RYEL;
+
 	rstat = ebus_read(&ac->art_ebus, Bt8370_RSTAT);
 	alm1 = ebus_read(&ac->art_ebus, Bt8370_ALM1);
 	alm2 = ebus_read(&ac->art_ebus, Bt8370_ALM2);
 	alm3 = ebus_read(&ac->art_ebus, Bt8370_ALM3);
 
 	if ((rstat & (RSTAT_EXZ | RSTAT_BPV)) ||
-	    (alm1 & (ALM1_RYEL | ALM1_RAIS | ALM1_RALOS | ALM1_RLOF)) ||
-	    (alm3 & (ALM3_SEF)))
+	    (alm1 & alm1mask) || (alm3 & (ALM3_SEF)))
 		status = 0;
 
 	if ((alm1 & (ALM1_RLOS)) ||
@@ -945,6 +959,26 @@ bt8370_print_status(struct art_softc *ac)
 		printf("\tNo active Loopbacks\n");
 }
 
+void
+bt8370_print_counters(struct art_softc *ac)
+{
+	u_int16_t	counters[5];
+	u_int16_t	hi, lo;
+	int		i;
+
+	for (i = 0; i < 5; i++) {
+		lo = ebus_read(&ac->art_ebus, Bt8370_FERR_LSB + i);
+		hi = ebus_read(&ac->art_ebus, Bt8370_FERR_LSB + i + 1);
+
+		counters[i] = lo | (hi << 8);
+	}
+
+	printf("%s: %hu framing bit errors, %hu CRC errors, ",
+	    ac->art_dev.dv_xname, counters[0], counters[1]);
+	printf("%hu line code violations\n", counters[2]);
+	printf("%s: %hu Far End Errors %hu PRBS bit errors\n",
+	    ac->art_dev.dv_xname, counters[3], counters[4]);
+}
 void
 bt8370_dump_registers(struct art_softc *ac)
 {

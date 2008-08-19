@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.19 2005/08/01 05:36:48 brad Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.29 2006/02/06 17:29:11 jmc Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -39,6 +39,7 @@
 #include <sys/socket.h>
 #include <sys/device.h>
 #include <sys/kthread.h>
+#include <sys/tree.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -62,6 +63,7 @@
 
 #include <net80211/ieee80211.h>
 #include <net80211/ieee80211_ioctl.h>
+#include <net80211/ieee80211_var.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -255,12 +257,13 @@ const struct wi_usb_type {
 	{{ USB_VENDOR_TEKRAM, USB_PRODUCT_TEKRAM_0193 }, 0 },
 	{{ USB_VENDOR_TEKRAM, USB_PRODUCT_TEKRAM_ZYAIR_B200 }, 0 },
 	{{ USB_VENDOR_USR, USB_PRODUCT_USR_USR1120 }, 0 },
+	{{ USB_VENDOR_VIEWSONIC, USB_PRODUCT_VIEWSONIC_AIRSYNC }, 0 },
 	{{ USB_VENDOR_ZCOM, USB_PRODUCT_ZCOM_XI725 }, 0 },
 	{{ USB_VENDOR_ZCOM, USB_PRODUCT_ZCOM_XI735 }, 0 }
 };
 #define wi_usb_lookup(v, p) ((struct wi_usb_type *)usb_lookup(wi_usb_devs, v, p))
 
-USB_DECLARE_DRIVER(wi_usb);
+USB_DECLARE_DRIVER_CLASS(wi_usb, DV_IFNET);
 
 USB_MATCH(wi_usb)
 {
@@ -372,10 +375,7 @@ USB_ATTACH(wi_usb)
 
 	sc->wi_usb_attached = 1;
 
-	if (cold)
-		kthread_create_deferred(wi_usb_start_thread, sc);
-	else
-		wi_usb_start_thread(sc);
+	kthread_create_deferred(wi_usb_start_thread, sc);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->wi_usb_udev,
 			   USBDEV(sc->wi_usb_dev));
@@ -538,8 +538,9 @@ wi_send_packet(struct wi_usb_softc *sc, int id)
 
 		err = usbd_transfer(c->wi_usb_xfer);
 		if (err != USBD_IN_PROGRESS && err != USBD_NORMAL_COMPLETION) {
-			printf("%s: wi_usb_send error=%s\n",
-			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+			printf("%s: %s: error=%s\n",
+			    USBDEVNAME(sc->wi_usb_dev), __func__,
+			    usbd_errstr(err));
 			/* Stop the interface from process context. */
 			wi_usb_stop(sc);
 			err = EIO;
@@ -1061,8 +1062,9 @@ wi_usb_do_transmit_sync(struct wi_usb_softc *sc, struct wi_usb_chain *c,
 	sc->wi_usb_refcnt++;
 	err = usbd_transfer(c->wi_usb_xfer);
 	if (err != USBD_IN_PROGRESS && err != USBD_NORMAL_COMPLETION) {
-		printf("%s: wi_usb_send error=%s\n",
-		    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+		printf("%s: %s error=%s\n",
+		    USBDEVNAME(sc->wi_usb_dev), __func__,
+		    usbd_errstr(err));
 		/* Stop the interface from process context. */
 		wi_usb_stop(sc);
 		err = EIO;
@@ -1112,7 +1114,7 @@ wi_usb_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 		    usbd_errstr(status));
 		if (status == USBD_STALLED) {
 			sc->wi_usb_refcnt++;
-			usbd_clear_endpoint_stall(
+			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 			if (--sc->wi_usb_refcnt < 0)
 				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
@@ -1136,7 +1138,7 @@ wi_usb_txeof_frm(usbd_xfer_handle xfer, usbd_private_handle priv,
 	struct wi_usb_chain	*c = priv;
 	struct wi_usb_softc	*sc = c->wi_usb_sc;
 	struct wi_softc		*wsc = &sc->sc_wi;
-	struct ifnet		*ifp = &wsc->sc_arpcom.ac_if;
+	struct ifnet		*ifp = &wsc->sc_ic.ic_if;
 
 	int			s;
 	int			err = 0;
@@ -1158,7 +1160,7 @@ wi_usb_txeof_frm(usbd_xfer_handle xfer, usbd_private_handle priv,
 		    usbd_errstr(status));
 		if (status == USBD_STALLED) {
 			sc->wi_usb_refcnt++;
-			usbd_clear_endpoint_stall(
+			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 			if (--sc->wi_usb_refcnt < 0)
 				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
@@ -1405,7 +1407,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 #endif
 		if (status == USBD_STALLED) {
 			sc->wi_usb_refcnt++;
-			usbd_clear_endpoint_stall(
+			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 			if (--sc->wi_usb_refcnt < 0)
 				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
@@ -1508,7 +1510,7 @@ wi_usb_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 		if (status == USBD_STALLED) {
 			sc->wi_usb_refcnt++;
-			usbd_clear_endpoint_stall(
+			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 			if (--sc->wi_usb_refcnt < 0)
 				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
@@ -1528,36 +1530,21 @@ wi_usb_cmdresp(struct wi_usb_chain *c)
 
 	type = htole16(presp->type);
 	cmdresperr = letoh16(presp->resp0);
-	DPRINTFN(10,("%s: %s: enter rid=%x status %x %x %x\n",
+	DPRINTFN(10,("%s: %s: enter type=%x, status=%x, cmdresp=%x, "
+	    "resp=%x,%x,%x\n",
 	    USBDEVNAME(sc->wi_usb_dev), __func__, type, status, sc->cmdresp,
-	    cmdresperr));
+	    cmdresperr, letoh16(presp->resp1),
+	    letoh16(presp->resp2)));
 
-	if (sc->cmdresp != status) {
-		DPRINTFN(1,("%s:cmd ty %x st %x cmd %x failed %x\n",
+	/* XXX */
+	if (sc->cmdresp != (status & WI_STAT_CMD_CODE)) {
+		DPRINTFN(1,("%s: cmd ty %x st %x cmd %x failed %x\n",
 		    USBDEVNAME(sc->wi_usb_dev),
 			type, status, sc->cmdresp, cmdresperr));
 		return;
 	}
 
-	if ((cmdresperr != 0) && ((sc->cmdresp == WI_CMD_INQUIRE) ||
-	    (sc->cmdresp == WI_CMD_DISABLE)) ) {
-		/*
-		 * For some reason MA111 does not like info frame requests,
-		 * or some DISABLES
-		 * It responds to the request with the info
-		 * but it claims the request failed
-		 * reset the error code.
-		 */
-		cmdresperr = 0;
-	}
-			
-	if (cmdresperr != 0) {
-		DPRINTFN(1,("%s:cmd ty %x st %x cmd %x failed %x\n",
-		    USBDEVNAME(sc->wi_usb_dev),
-			type, status, sc->cmdresp, cmdresperr));
-	}
-
-	sc->cmdresperr = cmdresperr;
+	sc->cmdresperr = (status & WI_STAT_CMD_RESULT) >> 8;
 
 	sc->cmdresp = 0; /* good value for idle == INI ?? XXX  */
 
@@ -1593,10 +1580,6 @@ wi_usb_rridresp(struct wi_usb_chain *c)
 		return;
 	}
 
-	/* XXX */
-	if (rid == WI_RID_DATA_RATES)
-		frmlen = 2;
-
 	if (frmlen > ltv->wi_len) {
 		sc->ridresperr = ENOSPC;
 		sc->ridltv = 0;
@@ -1606,7 +1589,7 @@ wi_usb_rridresp(struct wi_usb_chain *c)
 
 	ltv->wi_len = frmlen;
 
-	DPRINTFN(10,("%s: %s: copying %x  frmlen %d s %x d %x\n",
+	DPRINTFN(10,("%s: %s: copying %d frmlen %d\n",
 	    USBDEVNAME(sc->wi_usb_dev), __func__, (ltv->wi_len-1)*2,
 	    frmlen));
 
@@ -1632,7 +1615,7 @@ wi_usb_wridresp(struct wi_usb_chain *c)
 	DPRINTFN(10,("%s: %s: enter status=%x\n",
 	    USBDEVNAME(sc->wi_usb_dev), __func__, status));
 
-	sc->ridresperr = status;
+	sc->ridresperr = (status & WI_STAT_CMD_RESULT) >> 8;
 	sc->ridltv = 0;
 	wakeup(&sc->ridresperr);
 }
@@ -1656,7 +1639,7 @@ wi_usb_txfrm(struct wi_usb_softc *sc, wi_usb_usbin *uin, int total_len)
 	u_int16_t		status;
 	int 			s;
 	struct wi_softc		*wsc = &sc->sc_wi;
-	struct ifnet		*ifp = &wsc->sc_arpcom.ac_if;
+	struct ifnet		*ifp = &wsc->sc_ic.ic_if;
 
 	s = splnet();
 	status = letoh16(uin->type); /* XXX -- type == status */
@@ -1716,7 +1699,7 @@ wi_start_usb(struct ifnet *ifp)
 	wsc = ifp->if_softc;
 	sc  = wsc->wi_usb_cdata;
 
-	s = splimp();
+	s = splnet();
 
 	DPRINTFN(5,("%s: %s:\n",
 	    USBDEVNAME(sc->wi_usb_dev), __func__));
@@ -1762,7 +1745,7 @@ wi_inquire_usb(void *xsc)
 	int s;
 
 
-	s = splimp();
+	s = splnet();
 
 	DPRINTFN(2,("%s: %s:\n",
 	    USBDEVNAME(sc->wi_usb_dev), __func__));
@@ -1789,7 +1772,7 @@ wi_watchdog_usb(struct ifnet *ifp)
 	wsc = ifp->if_softc;
 	sc = wsc->wi_usb_cdata;
 
-	s = splimp();
+	s = splnet();
 
 	DPRINTFN(5,("%s: %s: ifp %x\n",
 	    USBDEVNAME(sc->wi_usb_dev), __func__, ifp));
@@ -1867,9 +1850,9 @@ wi_usb_thread(void *arg)
 		if (wi_thread_info->status & WI_START) {
 			wi_thread_info->status &= ~WI_START;
 			wi_usb_tx_lock(sc);
-			wi_func_io.f_start(&sc->sc_wi.sc_arpcom.ac_if);
+			wi_func_io.f_start(&sc->sc_wi.sc_ic.ic_if);
 			/*
-			 * tx_unlock is explictly missing here
+			 * tx_unlock is explicitly missing here
 			 * is is done in txeof_frm
 			 */
 		} else if (wi_thread_info->status & WI_INQUIRE) {
@@ -1877,7 +1860,7 @@ wi_usb_thread(void *arg)
 			wi_func_io.f_inquire(&sc->sc_wi);
 		} else if (wi_thread_info->status & WI_WATCHDOG) {
 			wi_thread_info->status &= ~WI_WATCHDOG;
-			wi_func_io.f_watchdog( &sc->sc_wi.sc_arpcom.ac_if);
+			wi_func_io.f_watchdog( &sc->sc_wi.sc_ic.ic_if);
 		}
 		splx(s);
 
@@ -1887,7 +1870,7 @@ wi_usb_thread(void *arg)
 		wi_usb_ctl_unlock(sc);
 
 		if (wi_thread_info->status == 0) {
-			s = splimp();
+			s = splnet();
 			wi_thread_info->idle = 1;
 			tsleep(wi_thread_info, PRIBIO, "wiIDL", 0);
 			wi_thread_info->idle = 0;
@@ -1901,7 +1884,7 @@ wi_usb_tx_lock_try(struct wi_usb_softc *sc)
 {
 	int s;
 
-	s = splimp(); /* right priority? */
+	s = splnet();
 
 	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
 
@@ -1920,7 +1903,7 @@ wi_usb_tx_lock(struct wi_usb_softc *sc)
 {
 	int s;
 
-	s = splimp(); /* right priority? */
+	s = splnet();
 
 	again:
 	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
@@ -1946,7 +1929,7 @@ void
 wi_usb_tx_unlock(struct wi_usb_softc *sc)
 {
 	int s;
-	s = splimp(); /* right priority? */
+	s = splnet();
 
 	sc->wi_lock = 0;
 
@@ -1967,7 +1950,7 @@ wi_usb_ctl_lock(struct wi_usb_softc *sc)
 {
 	int s;
 
-	s = splimp(); /* right priority? */
+	s = splnet();
 
 	again:
 	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev),
@@ -2002,7 +1985,7 @@ wi_usb_ctl_unlock(struct wi_usb_softc *sc)
 {
 	int s;
 
-	s = splimp(); /* right priority? */
+	s = splnet();
 
 	sc->wi_ctllock--;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_skreg.h,v 1.17 2005/07/21 15:23:27 brad Exp $	*/
+/*	$OpenBSD: if_skreg.h,v 1.28 2006/02/09 11:14:56 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -32,6 +32,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $FreeBSD: /c/ncvs/src/sys/pci/if_skreg.h,v 1.9 2000/04/22 02:16:37 wpaul Exp $
+ * $FreeBSD: /c/ncvs/src/sys/pci/xmaciireg.h,v 1.3 2000/04/22 02:16:37 wpaul Exp $
  */
 
 /*
@@ -61,7 +62,6 @@
  * blocks are actually used. Most registers are 32 bits wide, but
  * there are a few 16-bit and 8-bit ones as well.
  */
-
 
 /* Start of remappable register window. */
 #define SK_WIN_BASE		0x0080
@@ -277,8 +277,10 @@
 #define SK_CONFIG	0x011A
 #define SK_CHIPVER	0x011B
 #define SK_EPROM0	0x011C
-#define SK_EPROM1	0x011D
-#define SK_EPROM2	0x011E
+#define SK_EPROM1	0x011D		/* yukon/genesis */
+#define	SK_Y2_CLKGATE	0x011D		/* yukon 2 */
+#define SK_EPROM2	0x011E		/* yukon/genesis */
+#define SK_Y2_HWRES	0x011E		/* yukon 2 */
 #define SK_EPROM3	0x011F
 #define SK_EP_ADDR	0x0120
 #define SK_EP_DATA	0x0124
@@ -313,25 +315,43 @@
 #define SK_YUKON_LITE		0xB1
 #define SK_YUKON_LP		0xB2
 #define SK_YUKON_XL		0xB3
+#define SK_YUKON_EC_U		0xB4
 #define SK_YUKON_EC		0xB6
 #define SK_YUKON_FE		0xB7
 
 #define SK_YUKON_FAMILY(x) ((x) & 0xB0)
+#define SK_IS_GENESIS(sc) \
+    ((sc)->sk_type == SK_GENESIS)
+#define SK_IS_YUKON(sc) \
+    ((sc)->sk_type >= SK_YUKON && (sc)->sk_type <= SK_YUKON_FE)
+#define SK_IS_YUKON2(sc) \
+    ((sc)->sk_type >= SK_YUKON_XL && (sc)->sk_type <= SK_YUKON_FE)
 
 /* Known revisions in SK_CONFIG */
 #define SK_YUKON_LITE_REV_A0	0x0 /* invented, see test in skc_attach */
 #define SK_YUKON_LITE_REV_A1	0x3
 #define SK_YUKON_LITE_REV_A3	0x7
 
+#define SK_YUKON_XL_REV_A0	0x0
+#define SK_YUKON_XL_REV_A1	0x1
+#define SK_YUKON_XL_REV_A2	0x2
+#define SK_YUKON_XL_REV_A3	0x3
+
 #define SK_YUKON_EC_REV_A1	0x0
 #define SK_YUKON_EC_REV_A2	0x1
 #define SK_YUKON_EC_REV_A3	0x2
 
+#define SK_YUKON_EC_U_REV_A0	0x1
+#define SK_YUKON_EC_U_REV_A1	0x2
+
 #define SK_IMCTL_STOP	0x02
 #define SK_IMCTL_START	0x04
 
-#define SK_IMTIMER_TICKS	54
-#define SK_IM_USECS(x)		((x) * SK_IMTIMER_TICKS)
+/* Number of ticks per usec for interrupt moderation */
+#define SK_IMTIMER_TICKS_GENESIS	53
+#define SK_IMTIMER_TICKS_YUKON		78
+#define SK_IMTIMER_TICKS_YUKON_EC	125
+#define SK_IM_USECS(x)		((x) * imtimer_ticks)
 
 /*
  * The SK_EPROM0 register contains a byte that describes the
@@ -371,9 +391,10 @@
 #define SK_CONFIG_SINGLEMAC	0x01
 #define SK_CONFIG_DIS_DSL_CLK	0x02
 
+#define SK_PMD_1000BASETX_ALT	0x31
+#define SK_PMD_1000BASECX	0x43
 #define SK_PMD_1000BASELX	0x4C
 #define SK_PMD_1000BASESX	0x53
-#define SK_PMD_1000BASECX	0x43
 #define SK_PMD_1000BASETX	0x54
 
 /* GPIO bits */
@@ -397,6 +418,20 @@
 #define SK_GPIO_DIR7		0x00800000
 #define SK_GPIO_DIR8		0x01000000
 #define SK_GPIO_DIR9           0x02000000
+
+#define	SK_Y2_CLKGATE_LINK2_INACTIVE	0x80	/* port 2 inactive */
+#define	SK_Y2_CLKGATE_LINK2_GATE_DIS	0x40	/* disable clock gate, 2 */
+#define	SK_Y2_CLKGATE_LINK2_CORE_DIS	0x20	/* disable core clock, 2 */
+#define	SK_Y2_CLKGATE_LINK2_PCI_DIS	0x10	/* disable pci clock, 2 */
+#define	SK_Y2_CLKGATE_LINK1_INACTIVE	0x08	/* port 1 inactive */
+#define	SK_Y2_CLKGATE_LINK1_GATE_DIS	0x04	/* disable clock gate, 1 */
+#define	SK_Y2_CLKGATE_LINK1_CORE_DIS	0x02	/* disable core clock, 1 */
+#define	SK_Y2_CLKGATE_LINK1_PCI_DIS	0x01	/* disable pci clock, 1 */
+
+#define	SK_Y2_HWRES_LINK_1	0x01
+#define	SK_Y2_HWRES_LINK_2	0x02
+#define	SK_Y2_HWRES_LINK_MASK	(SK_Y2_HWRES_LINK_1 | SK_Y2_HWRES_LINK_2)
+#define	SK_Y2_HWRES_LINK_DUAL	(SK_Y2_HWRES_LINK_1 | SK_Y2_HWRES_LINK_2)
 
 /* Block 3 Ram interface and MAC arbiter registers */
 #define SK_RAMADDR	0x0180
@@ -563,6 +598,28 @@
 #define SK_RXQ1_TEST1		0x043C
 #define SK_RXQ1_TEST2		0x0440
 #define SK_RXQ1_TEST3		0x0444
+/* yukon-2 only */
+#define SK_RXQ1_Y2_WM		0x0440
+#define SK_RXQ1_Y2_AL		0x0442
+#define SK_RXQ1_Y2_RSP		0x0444
+#define SK_RXQ1_Y2_RSL		0x0446
+#define SK_RXQ1_Y2_RP		0x0448
+#define SK_RXQ1_Y2_RL		0x044A
+#define SK_RXQ1_Y2_WP		0x044C
+#define SK_RXQ1_Y2_WSP		0x044D
+#define SK_RXQ1_Y2_WL		0x044E
+#define SK_RXQ1_Y2_WSL		0x044F
+/* yukon-2 only (prefetch unit) */
+#define SK_RXQ1_Y2_PREF_CSR	0x0450
+#define SK_RXQ1_Y2_PREF_LIDX	0x0454
+#define SK_RXQ1_Y2_PREF_ADDRLO	0x0458
+#define SK_RXQ1_Y2_PREF_ADDRHI	0x045C
+#define SK_RXQ1_Y2_PREF_GETIDX	0x0460
+#define SK_RXQ1_Y2_PREF_PUTIDX	0x0464
+#define SK_RXQ1_Y2_PREF_FIFOWP	0x0470
+#define SK_RXQ1_Y2_PREF_FIFORP	0x0474
+#define SK_RXQ1_Y2_PREF_FIFOWM	0x0478
+#define SK_RXQ1_Y2_PREF_FIFOLV	0x047C
 
 /* Block 9 -- RX queue 2 */
 #define SK_RXQ2_BUFCNT		0x0480
@@ -587,6 +644,28 @@
 #define SK_RXQ2_TEST1		0x04BC
 #define SK_RXQ2_TEST2		0x04C0
 #define SK_RXQ2_TEST3		0x04C4
+/* yukon-2 only */
+#define SK_RXQ2_Y2_WM		0x04C0
+#define SK_RXQ2_Y2_AL		0x04C2
+#define SK_RXQ2_Y2_RSP		0x04C4
+#define SK_RXQ2_Y2_RSL		0x04C6
+#define SK_RXQ2_Y2_RP		0x04C8
+#define SK_RXQ2_Y2_RL		0x04CA
+#define SK_RXQ2_Y2_WP		0x04CC
+#define SK_RXQ2_Y2_WSP		0x04CD
+#define SK_RXQ2_Y2_WL		0x04CE
+#define SK_RXQ2_Y2_WSL		0x04CF
+/* yukon-2 only (prefetch unit) */
+#define SK_RXQ2_Y2_PREF_CSR	0x04D0
+#define SK_RXQ2_Y2_PREF_LIDX	0x04D4
+#define SK_RXQ2_Y2_PREF_ADDRLO	0x04D8
+#define SK_RXQ2_Y2_PREF_ADDRHI	0x04DC
+#define SK_RXQ2_Y2_PREF_GETIDX	0x04E0
+#define SK_RXQ2_Y2_PREF_PUTIDX	0x04E4
+#define SK_RXQ2_Y2_PREF_FIFOWP	0x04F0
+#define SK_RXQ2_Y2_PREF_FIFORP	0x04F4
+#define SK_RXQ2_Y2_PREF_FIFOWM	0x04F8
+#define SK_RXQ2_Y2_PREF_FIFOLV	0x04FC
 
 #define SK_RXBMU_CLR_IRQ_ERR		0x00000001
 #define SK_RXBMU_CLR_IRQ_EOF		0x00000002
@@ -645,6 +724,28 @@
 #define SK_TXQS1_TEST1		0x063C
 #define SK_TXQS1_TEST2		0x0640
 #define SK_TXQS1_TEST3		0x0644
+/* yukon-2 only */
+#define SK_TXQS1_Y2_WM		0x0640
+#define SK_TXQS1_Y2_AL		0x0642
+#define SK_TXQS1_Y2_RSP		0x0644
+#define SK_TXQS1_Y2_RSL		0x0646
+#define SK_TXQS1_Y2_RP		0x0648
+#define SK_TXQS1_Y2_RL		0x064A
+#define SK_TXQS1_Y2_WP		0x064C
+#define SK_TXQS1_Y2_WSP		0x064D
+#define SK_TXQS1_Y2_WL		0x064E
+#define SK_TXQS1_Y2_WSL		0x064F
+/* yukon-2 only (prefetch unit) */
+#define SK_TXQS1_Y2_PREF_CSR	0x0650
+#define SK_TXQS1_Y2_PREF_LIDX	0x0654
+#define SK_TXQS1_Y2_PREF_ADDRLO	0x0658
+#define SK_TXQS1_Y2_PREF_ADDRHI	0x065C
+#define SK_TXQS1_Y2_PREF_GETIDX	0x0660
+#define SK_TXQS1_Y2_PREF_PUTIDX	0x0664
+#define SK_TXQS1_Y2_PREF_FIFOWP	0x0670
+#define SK_TXQS1_Y2_PREF_FIFORP	0x0674
+#define SK_TXQS1_Y2_PREF_FIFOWM	0x0678
+#define SK_TXQS1_Y2_PREF_FIFOLV	0x067C
 
 /* Block 13 -- TX async queue 1 */
 #define SK_TXQA1_BUFCNT		0x0680
@@ -667,6 +768,28 @@
 #define SK_TXQA1_TEST1		0x06BC
 #define SK_TXQA1_TEST2		0x06C0
 #define SK_TXQA1_TEST3		0x06C4
+/* yukon-2 only */
+#define SK_TXQA1_Y2_WM		0x06C0
+#define SK_TXQA1_Y2_AL		0x06C2
+#define SK_TXQA1_Y2_RSP		0x06C4
+#define SK_TXQA1_Y2_RSL		0x06C6
+#define SK_TXQA1_Y2_RP		0x06C8
+#define SK_TXQA1_Y2_RL		0x06CA
+#define SK_TXQA1_Y2_WP		0x06CC
+#define SK_TXQA1_Y2_WSP		0x06CD
+#define SK_TXQA1_Y2_WL		0x06CE
+#define SK_TXQA1_Y2_WSL		0x06CF
+/* yukon-2 only (prefetch unit) */
+#define SK_TXQA1_Y2_PREF_CSR	0x06D0
+#define SK_TXQA1_Y2_PREF_LIDX	0x06D4
+#define SK_TXQA1_Y2_PREF_ADDRLO	0x06D8
+#define SK_TXQA1_Y2_PREF_ADDRHI	0x06DC
+#define SK_TXQA1_Y2_PREF_GETIDX	0x06E0
+#define SK_TXQA1_Y2_PREF_PUTIDX	0x06E4
+#define SK_TXQA1_Y2_PREF_FIFOWP	0x06F0
+#define SK_TXQA1_Y2_PREF_FIFORP	0x06F4
+#define SK_TXQA1_Y2_PREF_FIFOWM	0x06F8
+#define SK_TXQA1_Y2_PREF_FIFOLV	0x06FC
 
 /* Block 14 -- TX sync queue 2 */
 #define SK_TXQS2_BUFCNT		0x0700
@@ -689,6 +812,28 @@
 #define SK_TXQS2_TEST1		0x073C
 #define SK_TXQS2_TEST2		0x0740
 #define SK_TXQS2_TEST3		0x0744
+/* yukon-2 only */
+#define SK_TXQS2_Y2_WM		0x0740
+#define SK_TXQS2_Y2_AL		0x0742
+#define SK_TXQS2_Y2_RSP		0x0744
+#define SK_TXQS2_Y2_RSL		0x0746
+#define SK_TXQS2_Y2_RP		0x0748
+#define SK_TXQS2_Y2_RL		0x074A
+#define SK_TXQS2_Y2_WP		0x074C
+#define SK_TXQS2_Y2_WSP		0x074D
+#define SK_TXQS2_Y2_WL		0x074E
+#define SK_TXQS2_Y2_WSL		0x074F
+/* yukon-2 only (prefetch unit) */
+#define SK_TXQS2_Y2_PREF_CSR	0x0750
+#define SK_TXQS2_Y2_PREF_LIDX	0x0754
+#define SK_TXQS2_Y2_PREF_ADDRLO	0x0758
+#define SK_TXQS2_Y2_PREF_ADDRHI	0x075C
+#define SK_TXQS2_Y2_PREF_GETIDX	0x0760
+#define SK_TXQS2_Y2_PREF_PUTIDX	0x0764
+#define SK_TXQS2_Y2_PREF_FIFOWP	0x0770
+#define SK_TXQS2_Y2_PREF_FIFORP	0x0774
+#define SK_TXQS2_Y2_PREF_FIFOWM	0x0778
+#define SK_TXQS2_Y2_PREF_FIFOLV	0x077C
 
 /* Block 15 -- TX async queue 2 */
 #define SK_TXQA2_BUFCNT		0x0780
@@ -711,6 +856,28 @@
 #define SK_TXQA2_TEST1		0x07BC
 #define SK_TXQA2_TEST2		0x07C0
 #define SK_TXQA2_TEST3		0x07C4
+/* yukon-2 only */
+#define SK_TXQA2_Y2_WM		0x07C0
+#define SK_TXQA2_Y2_AL		0x07C2
+#define SK_TXQA2_Y2_RSP		0x07C4
+#define SK_TXQA2_Y2_RSL		0x07C6
+#define SK_TXQA2_Y2_RP		0x07C8
+#define SK_TXQA2_Y2_RL		0x07CA
+#define SK_TXQA2_Y2_WP		0x07CC
+#define SK_TXQA2_Y2_WSP		0x07CD
+#define SK_TXQA2_Y2_WL		0x07CE
+#define SK_TXQA2_Y2_WSL		0x07CF
+/* yukon-2 only (prefetch unit) */
+#define SK_TXQA2_Y2_PREF_CSR	0x07D0
+#define SK_TXQA2_Y2_PREF_LIDX	0x07D4
+#define SK_TXQA2_Y2_PREF_ADDRLO	0x07D8
+#define SK_TXQA2_Y2_PREF_ADDRHI	0x07DC
+#define SK_TXQA2_Y2_PREF_GETIDX	0x07E0
+#define SK_TXQA2_Y2_PREF_PUTIDX	0x07E4
+#define SK_TXQA2_Y2_PREF_FIFOWP	0x07F0
+#define SK_TXQA2_Y2_PREF_FIFORP	0x07F4
+#define SK_TXQA2_Y2_PREF_FIFOWM	0x07F8
+#define SK_TXQA2_Y2_PREF_FIFOLV	0x07FC
 
 #define SK_TXBMU_CLR_IRQ_ERR		0x00000001
 #define SK_TXBMU_CLR_IRQ_EOF		0x00000002
@@ -1200,10 +1367,6 @@
 #define SK_PCI_PWRMGMTCAP	0x004A /* 16 bits */
 #define SK_PCI_PWRMGMTCTRL	0x004C /* 16 bits */
 #define SK_PCI_PME_EVENT	0x004F
-#define SK_PCI_VPD_CAPID	0x0050
-#define SK_PCI_VPD_NEXTPTR	0x0051
-#define SK_PCI_VPD_ADDR		0x0052
-#define SK_PCI_VPD_DATA		0x0054
 
 #define SK_PSTATE_MASK		0x0003
 #define SK_PSTATE_D0		0x0000
@@ -1212,30 +1375,6 @@
 #define SK_PSTATE_D3		0x0003
 #define SK_PME_EN		0x0010
 #define SK_PME_STATUS		0x8000
-
-/*
- * VPD flag bit. Set to 0 to initiate a read, will become 1 when
- * read is complete. Set to 1 to initiate a write, will become 0
- * when write is finished.
- */
-#define SK_VPD_FLAG		0x8000
-
-/* VPD structures */
-struct vpd_res {
-	u_int8_t		vr_id;
-	u_int8_t		vr_len;
-	u_int8_t		vr_pad;
-};
-
-struct vpd_key {
-	char			vk_key[2];
-	u_int8_t		vk_len;
-};
-
-#define VPD_RES_ID	0x82	/* ID string */
-#define VPD_RES_READ	0x90	/* start of read only area */
-#define VPD_RES_WRITE	0x81	/* start of read/write area */
-#define VPD_RES_END	0x78	/* end tag */
 
 #define CSR_WRITE_4(sc, reg, val) \
 	bus_space_write_4((sc)->sk_btag, (sc)->sk_bhandle, (reg), (val))
@@ -1322,38 +1461,6 @@ struct sk_tx_desc {
 #define SK_TX_RING_CNT		512
 #define SK_RX_RING_CNT		256
 
-#define SK_CDOFF(x)	offsetof(struct sk_ring_data, x)
-#define SK_CDTXOFF(x)	SK_CDOFF(sk_tx_ring[(x)])
-#define SK_CDRXOFF(x)	SK_CDOFF(sk_rx_ring[(x)])
-
-#define SK_CDTXSYNC(sc, x, n, ops)					\
-do {									\
-	int __x, __n;							\
-									\
-	__x = (x);							\
-	__n = (n);							\
-									\
-	/* If it will wrap around, sync to the end of the ring. */	\
-	if ((__x + __n) > SK_TX_RING_CNT) {				\
-		bus_dmamap_sync((sc)->sk_softc->sc_dmatag,		\
-		    (sc)->sk_ring_map, SK_CDTXOFF(__x),			\
-		    sizeof(struct sk_tx_desc) *	 (SK_TX_RING_CNT - __x),\
-		    (ops));						\
-		__n -= (SK_TX_RING_CNT - __x);				\
-		__x = 0;						\
-	}								\
-									\
-	/* Now sync whatever is left. */				\
-	bus_dmamap_sync((sc)->sk_softc->sc_dmatag, (sc)->sk_ring_map,	\
-	    SK_CDTXOFF((__x)), sizeof(struct sk_tx_desc) * __n, (ops));	\
-} while (/*CONSTCOND*/0)
-
-#define SK_CDRXSYNC(sc, x, ops)						\
-do {									\
-	bus_dmamap_sync((sc)->sk_softc->sc_dmatag, (sc)->sk_ring_map,	\
-	    SK_CDRXOFF((x)), sizeof(struct sk_rx_desc), (ops));		\
-} while (/*CONSTCOND*/0)
-
 /*
  * Jumbo buffer stuff. Note that we must allocate more jumbo
  * buffers than there are descriptors in the receive ring. This
@@ -1362,7 +1469,11 @@ do {									\
  * layers. To be safe, we allocate 1.5 times the number of
  * receive descriptors.
  */
+#ifdef __sparc64__
+#define SK_JSLOTS		54
+#else
 #define SK_JSLOTS		384
+#endif
 
 #define SK_JRAWLEN	(ETHER_MAX_LEN_JUMBO + ETHER_ALIGN)
 #define SK_JLEN		SK_JRAWLEN
@@ -1371,123 +1482,530 @@ do {									\
 #define SK_RESID	(SK_JPAGESZ - (SK_JLEN * SK_JSLOTS) % SK_JPAGESZ)
 #define SK_JMEM		((SK_JLEN * SK_JSLOTS) + SK_RESID)
 
-struct sk_jpool_entry {
-	int                             slot;
-	LIST_ENTRY(sk_jpool_entry)	jpool_entries;
-};
-
-struct sk_chain {
-	void			*sk_desc;
-	struct mbuf		*sk_mbuf;
-	struct sk_chain		*sk_next;
-};
-
-/*
- * Number of DMA segments in a TxCB. Note that this is carefully
- * chosen to make the total struct size an even power of two. It's
- * critical that no TxCB be split across a page boundry since
- * no attempt is made to allocate physically contiguous memory.
- * 
- */
-#define SK_NTXSEG      30
-
-struct sk_txmap_entry {
-	bus_dmamap_t			dmamap;
-	SIMPLEQ_ENTRY(sk_txmap_entry)	link;
-};
-
-struct sk_chain_data {
-	struct sk_chain		sk_tx_chain[SK_TX_RING_CNT];
-	struct sk_chain		sk_rx_chain[SK_RX_RING_CNT];
-	struct sk_txmap_entry	*sk_tx_map[SK_TX_RING_CNT];
-	bus_dmamap_t		sk_rx_map[SK_RX_RING_CNT];
-	bus_dmamap_t		sk_rx_jumbo_map;
-	int			sk_tx_prod;
-	int			sk_tx_cons;
-	int			sk_tx_cnt;
-	int			sk_rx_prod;
-	int			sk_rx_cons;
-	int			sk_rx_cnt;
-	/* Stick the jumbo mem management stuff here too. */
-	caddr_t			sk_jslots[SK_JSLOTS];
-	void			*sk_jumbo_buf;
-
-};
-
-struct sk_ring_data {
-	struct sk_tx_desc	sk_tx_ring[SK_TX_RING_CNT];
-	struct sk_rx_desc	sk_rx_ring[SK_RX_RING_CNT];
-};
-
-#define SK_TX_RING_ADDR(sc, i) \
-    ((sc)->sk_ring_map->dm_segs[0].ds_addr + \
-     offsetof(struct sk_ring_data, sk_tx_ring[(i)]))
-
-#define SK_RX_RING_ADDR(sc, i) \
-    ((sc)->sk_ring_map->dm_segs[0].ds_addr + \
-     offsetof(struct sk_ring_data, sk_rx_ring[(i)]))
-
-struct sk_bcom_hack {
-	int			reg;
-	int			val;
-};
-
-#define SK_INC(x, y)	(x) = (x + 1) % y
-
-/* Forward decl. */
-struct sk_if_softc;
-
-/* Softc for the GEnesis controller. */
-struct sk_softc {
-	struct device		sk_dev;		/* generic device */
-	bus_space_handle_t	sk_bhandle;	/* bus space handle */
-	bus_space_tag_t		sk_btag;	/* bus space tag */
-	void			*sk_intrhand;	/* irq handler handle */
-	struct resource		*sk_irq;	/* IRQ resource handle */
-	struct resource		*sk_res;	/* I/O or shared mem handle */
-	u_int8_t		sk_type;
-	u_int8_t		sk_rev;
-	char			*sk_name;
-	char			*sk_vpd_prodname;
-	char			*sk_vpd_readonly;
-	u_int32_t		sk_rboff;	/* RAMbuffer offset */
-	u_int32_t		sk_ramsize;	/* amount of RAM on NIC */
-	u_int32_t		sk_pmd;		/* physical media type */
-	u_int32_t		sk_intrmask;
-	bus_dma_tag_t		sc_dmatag;
-	struct sk_if_softc	*sk_if[2];
-};
-
-/* Softc for each logical interface */
-struct sk_if_softc {
-	struct device		sk_dev;		/* generic device */
-	struct arpcom		arpcom;		/* interface info */
-	struct mii_data		sk_mii;
-	u_int8_t		sk_port;	/* port # on controller */
-	u_int8_t		sk_xmac_rev;	/* XMAC chip rev (B2 or C1) */
-	u_int32_t		sk_rx_ramstart;
-	u_int32_t		sk_rx_ramend;
-	u_int32_t		sk_tx_ramstart;
-	u_int32_t		sk_tx_ramend;
-	int			sk_phytype;
-	int			sk_phyaddr;
-	int			sk_cnt;
-	int			sk_link;
-	struct timeout		sk_tick_ch;
-	struct sk_chain_data	sk_cdata;
-	struct sk_ring_data	*sk_rdata;
-	bus_dmamap_t		sk_ring_map;
-	struct sk_softc		*sk_softc;	/* parent controller */
-	int			sk_tx_bmu;	/* TX BMU register */
-	int			sk_if_flags;
-	LIST_HEAD(__sk_jfreehead, sk_jpool_entry)	sk_jfree_listhead;
-	LIST_HEAD(__sk_jinusehead, sk_jpool_entry)	sk_jinuse_listhead;
-	SIMPLEQ_HEAD(__sk_txmaphead, sk_txmap_entry)	sk_txmap_head;
-};
-
-struct skc_attach_args {
-	u_int16_t	skc_port;
-};
-
 #define SK_MAXUNIT	256
 #define SK_TIMEOUT	1000
+
+/* YUKON registers */
+
+/* General Purpose Status Register (GPSR) */
+#define YUKON_GPSR		0x0000
+
+#define YU_GPSR_SPEED		0x8000	/* speed 0 - 10Mbps, 1 - 100Mbps */
+#define YU_GPSR_DUPLEX		0x4000	/* 0 - half duplex, 1 - full duplex */
+#define YU_GPSR_FCTL_TX		0x2000	/* flow control */
+#define YU_GPSR_LINK		0x1000	/* link status (down/up) */
+#define YU_GPSR_PAUSE		0x0800	/* flow control enable/disable */
+#define YU_GPSR_TX_IN_PROG	0x0400	/* transmit in progress */
+#define YU_GPSR_EXCESS_COL	0x0200	/* excessive collisions occurred */
+#define YU_GPSR_LATE_COL	0x0100	/* late collision occurred */
+#define YU_GPSR_MII_PHY_STC	0x0020	/* MII PHY status change */
+#define YU_GPSR_GIG_SPEED	0x0010	/* Gigabit Speed (0 - use speed bit) */
+#define YU_GPSR_PARTITION	0x0008	/* partition mode */
+#define YU_GPSR_FCTL_RX		0x0004	/* flow control enable/disable */
+#define YU_GPSR_PROMS_EN	0x0002	/* promiscuous mode enable/disable */
+
+/* General Purpose Control Register (GPCR) */
+#define YUKON_GPCR		0x0004
+
+#define YU_GPCR_FCTL_TX		0x2000	/* Transmit flow control 802.3x */
+#define YU_GPCR_TXEN		0x1000	/* Transmit Enable */
+#define YU_GPCR_RXEN		0x0800	/* Receive Enable */
+#define YU_GPCR_LPBK		0x0200	/* Loopback Enable */
+#define YU_GPCR_PAR		0x0100	/* Partition Enable */
+#define YU_GPCR_GIG		0x0080	/* Gigabit Speed */
+#define YU_GPCR_FLP		0x0040	/* Force Link Pass */
+#define YU_GPCR_DUPLEX		0x0020	/* Duplex Enable */
+#define YU_GPCR_FCTL_RX		0x0010	/* Receive flow control 802.3x */
+#define YU_GPCR_SPEED		0x0008	/* Port Speed */
+#define YU_GPCR_DPLX_EN		0x0004	/* Enable Auto-Update for duplex */
+#define YU_GPCR_FCTL_EN		0x0002	/* Enabel Auto-Update for 802.3x */
+#define YU_GPCR_SPEED_EN	0x0001	/* Enable Auto-Update for speed */
+
+/* Transmit Control Register (TCR) */
+#define YUKON_TCR		0x0008
+
+#define YU_TCR_FJ		0x8000	/* force jam / flow control */
+#define YU_TCR_CRCD		0x4000	/* insert CRC (0 - enable) */
+#define YU_TCR_PADD		0x2000	/* pad packets to 64b (0 - enable) */
+#define YU_TCR_COLTH		0x1c00	/* collision threshold */
+
+/* Receive Control Register (RCR) */
+#define YUKON_RCR		0x000c
+
+#define YU_RCR_UFLEN		0x8000	/* unicast filter enable */
+#define YU_RCR_MUFLEN		0x4000	/* multicast filter enable */
+#define YU_RCR_CRCR		0x2000	/* remove CRC */
+#define YU_RCR_PASSFC		0x1000	/* pass flow control packets */
+
+/* Transmit Flow Control Register (TFCR) */
+#define YUKON_TFCR		0x0010	/* Pause Time */
+
+/* Transmit Parameter Register (TPR) */
+#define YUKON_TPR		0x0014
+
+#define YU_TPR_JAM_LEN(x)	(((x) & 0x3) << 14)
+#define YU_TPR_JAM_IPG(x)	(((x) & 0x1f) << 9)
+#define YU_TPR_JAM2DATA_IPG(x)	(((x) & 0x1f) << 4)
+
+/* Serial Mode Register (SMR) */
+#define YUKON_SMR		0x0018
+
+#define YU_SMR_DATA_BLIND(x)	(((x) & 0x1f) << 11)
+#define YU_SMR_LIMIT4		0x0400	/* reset after 16 / 4 collisions */
+#define YU_SMR_MFL_JUMBO	0x0100	/* max frame length for jumbo frames */
+#define YU_SMR_MFL_VLAN		0x0200	/* max frame length + vlan tag */
+#define YU_SMR_IPG_DATA(x)	((x) & 0x1f)
+
+/* Source Address Low #1 (SAL1) */
+#define YUKON_SAL1		0x001c	/* SA1[15:0] */
+
+/* Source Address Middle #1 (SAM1) */
+#define YUKON_SAM1		0x0020	/* SA1[31:16] */
+
+/* Source Address High #1 (SAH1) */
+#define YUKON_SAH1		0x0024	/* SA1[47:32] */
+
+/* Source Address Low #2 (SAL2) */
+#define YUKON_SAL2		0x0028	/* SA2[15:0] */
+
+/* Source Address Middle #2 (SAM2) */
+#define YUKON_SAM2		0x002c	/* SA2[31:16] */
+
+/* Source Address High #2 (SAH2) */
+#define YUKON_SAH2		0x0030	/* SA2[47:32] */
+
+/* Multicatst Address Hash Register 1 (MCAH1) */
+#define YUKON_MCAH1		0x0034
+
+/* Multicatst Address Hash Register 2 (MCAH2) */
+#define YUKON_MCAH2		0x0038
+
+/* Multicatst Address Hash Register 3 (MCAH3) */
+#define YUKON_MCAH3		0x003c
+
+/* Multicatst Address Hash Register 4 (MCAH4) */
+#define YUKON_MCAH4		0x0040
+
+/* Transmit Interrupt Register (TIR) */
+#define YUKON_TIR		0x0044
+
+#define YU_TIR_OUT_UNICAST	0x0001	/* Num Unicast Packets Transmitted */
+#define YU_TIR_OUT_BROADCAST	0x0002	/* Num Broadcast Packets Transmitted */
+#define YU_TIR_OUT_PAUSE	0x0004	/* Num Pause Packets Transmitted */
+#define YU_TIR_OUT_MULTICAST	0x0008	/* Num Multicast Packets Transmitted */
+#define YU_TIR_OUT_OCTETS	0x0030	/* Num Bytes Transmitted */
+#define YU_TIR_OUT_64_OCTETS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_127_OCTETS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_255_OCTETS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_511_OCTETS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_1023_OCTETS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_1518_OCTETS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_MAX_OCTETS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_SPARE	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_COLLISIONS	0x0000	/* Num Packets Transmitted */
+#define YU_TIR_OUT_LATE		0x0000	/* Num Packets Transmitted */
+
+/* Receive Interrupt Register (RIR) */
+#define YUKON_RIR		0x0048
+
+/* Transmit and Receive Interrupt Register (TRIR) */
+#define YUKON_TRIR		0x004c
+
+/* Transmit Interrupt Mask Register (TIMR) */
+#define YUKON_TIMR		0x0050
+
+/* Receive Interrupt Mask Register (RIMR) */
+#define YUKON_RIMR		0x0054
+
+/* Transmit and Receive Interrupt Mask Register (TRIMR) */
+#define YUKON_TRIMR		0x0058
+
+/* SMI Control Register (SMICR) */
+#define YUKON_SMICR		0x0080
+
+#define YU_SMICR_PHYAD(x)	(((x) & 0x1f) << 11)
+#define YU_SMICR_REGAD(x)	(((x) & 0x1f) << 6)
+#define YU_SMICR_OPCODE		0x0020	/* opcode (0 - write, 1 - read) */
+#define YU_SMICR_OP_READ	0x0020	/* opcode read */
+#define YU_SMICR_OP_WRITE	0x0000	/* opcode write */
+#define YU_SMICR_READ_VALID	0x0010	/* read valid */
+#define YU_SMICR_BUSY		0x0008	/* busy (writing) */
+
+/* SMI Data Register (SMIDR) */
+#define YUKON_SMIDR		0x0084
+
+/* PHY Addres Register (PAR) */
+#define YUKON_PAR		0x0088
+
+#define YU_PAR_MIB_CLR		0x0020	/* MIB Counters Clear Mode */
+#define YU_PAR_LOAD_TSTCNT	0x0010	/* Load count 0xfffffff0 into cntr */
+
+/*
+ * Registers and data structures for the XaQti Corporation XMAC II
+ * Gigabit Ethernet MAC. Datasheet is available from http://www.xaqti.com.
+ * The XMAC can be programmed for 16-bit or 32-bit register access modes.
+ * The SysKonnect gigabit ethernet adapters use 16-bit mode, so that's
+ * how the registers are laid out here.
+ */
+
+#define XM_DEVICEID		0x00E0AE20
+#define XM_XAQTI_OUI		0x00E0AE
+
+#define XM_XMAC_REV(x)		(((x) & 0x000000E0) >> 5)
+
+#define XM_XMAC_REV_B2		0x0
+#define XM_XMAC_REV_C1		0x1
+
+#define XM_MMUCMD		0x0000
+#define XM_POFF			0x0008
+#define XM_BURST		0x000C
+#define XM_VLAN_TAGLEV1		0x0010
+#define XM_VLAN_TAGLEV2		0x0014
+#define XM_TXCMD		0x0020
+#define XM_TX_RETRYLIMIT	0x0024
+#define XM_TX_SLOTTIME		0x0028
+#define XM_TX_IPG		0x003C
+#define XM_RXCMD		0x0030
+#define XM_PHY_ADDR		0x0034
+#define XM_PHY_DATA		0x0038
+#define XM_GPIO			0x0040
+#define XM_IMR			0x0044
+#define XM_ISR			0x0048
+#define XM_HWCFG		0x004C
+#define XM_TX_LOWAT		0x0060
+#define XM_TX_HIWAT		0x0062
+#define XM_TX_REQTHRESH_LO	0x0064
+#define XM_TX_REQTHRESH_HI	0x0066
+#define XM_TX_REQTHRESH		XM_TX_REQTHRESH_LO
+#define XM_PAUSEDST0		0x0068
+#define XM_PAUSEDST1		0x006A
+#define XM_PAUSEDST2		0x006C
+#define XM_CTLPARM_LO		0x0070
+#define XM_CTLPARM_HI		0x0072
+#define XM_CTLPARM		XM_CTLPARM_LO
+#define XM_OPCODE_PAUSE_TIMER	0x0074
+#define XM_TXSTAT_LIFO		0x0078
+
+/*
+ * Perfect filter registers. The XMAC has a table of 16 perfect
+ * filter entries, spaced 8 bytes apart. This is in addition to
+ * the station address registers, which appear below.
+ */
+#define XM_RXFILT_BASE		0x0080
+#define XM_RXFILT_END		0x0107
+#define XM_RXFILT_MAX		16
+#define XM_RXFILT_ENTRY(ent)		(XM_RXFILT_BASE + ((ent * 8)))
+
+/* Primary station address. */
+#define XM_PAR0			0x0108
+#define XM_PAR1			0x010A
+#define XM_PAR2			0x010C
+
+/* 64-bit multicast hash table registers */
+#define XM_MAR0			0x0110
+#define XM_MAR1			0x0112
+#define XM_MAR2			0x0114
+#define XM_MAR3			0x0116
+#define XM_RX_LOWAT		0x0118
+#define XM_RX_HIWAT		0x011A
+#define XM_RX_REQTHRESH_LO	0x011C
+#define XM_RX_REQTHRESH_HI	0x011E
+#define XM_RX_REQTHRESH		XM_RX_REQTHRESH_LO
+#define XM_DEVID_LO		0x0120
+#define XM_DEVID_HI		0x0122
+#define XM_DEVID		XM_DEVID_LO
+#define XM_MODE_LO		0x0124
+#define XM_MODE_HI		0x0126
+#define XM_MODE			XM_MODE_LO
+#define XM_LASTSRC0		0x0128
+#define XM_LASTSRC1		0x012A
+#define XM_LASTSRC2		0x012C
+#define XM_TSTAMP_READ		0x0130
+#define XM_TSTAMP_LOAD		0x0134
+#define XM_STATS_CMD		0x0200
+#define XM_RXCNT_EVENT_LO	0x0204
+#define XM_RXCNT_EVENT_HI	0x0206
+#define XM_RXCNT_EVENT		XM_RXCNT_EVENT_LO
+#define XM_TXCNT_EVENT_LO	0x0208
+#define XM_TXCNT_EVENT_HI	0x020A
+#define XM_TXCNT_EVENT		XM_TXCNT_EVENT_LO
+#define XM_RXCNT_EVMASK_LO	0x020C
+#define XM_RXCNT_EVMASK_HI	0x020E
+#define XM_RXCNT_EVMASK		XM_RXCNT_EVMASK_LO
+#define XM_TXCNT_EVMASK_LO	0x0210
+#define XM_TXCNT_EVMASK_HI	0x0212
+#define XM_TXCNT_EVMASK		XM_TXCNT_EVMASK_LO
+
+/* Statistics command register */
+#define XM_STATCMD_CLR_TX	0x0001
+#define XM_STATCMD_CLR_RX	0x0002
+#define XM_STATCMD_COPY_TX	0x0004
+#define XM_STATCMD_COPY_RX	0x0008
+#define XM_STATCMD_SNAP_TX	0x0010
+#define XM_STATCMD_SNAP_RX	0x0020
+
+/* TX statistics registers */
+#define XM_TXSTATS_PKTSOK	0x280
+#define XM_TXSTATS_BYTESOK_HI	0x284
+#define XM_TXSTATS_BYTESOK_LO	0x288
+#define XM_TXSTATS_BCASTSOK	0x28C
+#define XM_TXSTATS_MCASTSOK	0x290
+#define XM_TXSTATS_UCASTSOK	0x294
+#define XM_TXSTATS_GIANTS	0x298
+#define XM_TXSTATS_BURSTCNT	0x29C
+#define XM_TXSTATS_PAUSEPKTS	0x2A0
+#define XM_TXSTATS_MACCTLPKTS	0x2A4
+#define XM_TXSTATS_SINGLECOLS	0x2A8
+#define XM_TXSTATS_MULTICOLS	0x2AC
+#define XM_TXSTATS_EXCESSCOLS	0x2B0
+#define XM_TXSTATS_LATECOLS	0x2B4
+#define XM_TXSTATS_DEFER	0x2B8
+#define XM_TXSTATS_EXCESSDEFER	0x2BC
+#define XM_TXSTATS_UNDERRUN	0x2C0
+#define XM_TXSTATS_CARRIERSENSE	0x2C4
+#define XM_TXSTATS_UTILIZATION	0x2C8
+#define XM_TXSTATS_64		0x2D0
+#define XM_TXSTATS_65_127	0x2D4
+#define XM_TXSTATS_128_255	0x2D8
+#define XM_TXSTATS_256_511	0x2DC
+#define XM_TXSTATS_512_1023	0x2E0
+#define XM_TXSTATS_1024_MAX	0x2E4
+
+/* RX statistics registers */
+#define XM_RXSTATS_PKTSOK	0x300
+#define XM_RXSTATS_BYTESOK_HI	0x304
+#define XM_RXSTATS_BYTESOK_LO	0x308
+#define XM_RXSTATS_BCASTSOK	0x30C
+#define XM_RXSTATS_MCASTSOK	0x310
+#define XM_RXSTATS_UCASTSOK	0x314
+#define XM_RXSTATS_PAUSEPKTS	0x318
+#define XM_RXSTATS_MACCTLPKTS	0x31C
+#define XM_RXSTATS_BADPAUSEPKTS	0x320
+#define XM_RXSTATS_BADMACCTLPKTS	0x324
+#define XM_RXSTATS_BURSTCNT	0x328
+#define XM_RXSTATS_MISSEDPKTS	0x32C
+#define XM_RXSTATS_FRAMEERRS	0x330
+#define XM_RXSTATS_OVERRUN	0x334
+#define XM_RXSTATS_JABBER	0x338
+#define XM_RXSTATS_CARRLOSS	0x33C
+#define XM_RXSTATS_INRNGLENERR	0x340
+#define XM_RXSTATS_SYMERR	0x344
+#define XM_RXSTATS_SHORTEVENT	0x348
+#define XM_RXSTATS_RUNTS	0x34C
+#define XM_RXSTATS_GIANTS	0x350
+#define XM_RXSTATS_CRCERRS	0x354
+#define XM_RXSTATS_CEXTERRS	0x35C
+#define XM_RXSTATS_UTILIZATION	0x360
+#define XM_RXSTATS_64		0x368
+#define XM_RXSTATS_65_127	0x36C
+#define XM_RXSTATS_128_255	0x370
+#define XM_RXSTATS_256_511	0x374
+#define XM_RXSTATS_512_1023	0x378
+#define XM_RXSTATS_1024_MAX	0x37C
+
+#define XM_MMUCMD_TX_ENB	0x0001
+#define XM_MMUCMD_RX_ENB	0x0002
+#define XM_MMUCMD_GMIILOOP	0x0004
+#define XM_MMUCMD_RATECTL	0x0008
+#define XM_MMUCMD_GMIIFDX	0x0010
+#define XM_MMUCMD_NO_MGMT_PRMB	0x0020
+#define XM_MMUCMD_SIMCOL	0x0040
+#define XM_MMUCMD_FORCETX	0x0080
+#define XM_MMUCMD_LOOPENB	0x0200
+#define XM_MMUCMD_IGNPAUSE	0x0400
+#define XM_MMUCMD_PHYBUSY	0x0800
+#define XM_MMUCMD_PHYDATARDY	0x1000
+
+#define XM_TXCMD_AUTOPAD	0x0001
+#define XM_TXCMD_NOCRC		0x0002
+#define XM_TXCMD_NOPREAMBLE	0x0004
+#define XM_TXCMD_NOGIGAMODE	0x0008
+#define XM_TXCMD_SAMPLELINE	0x0010
+#define XM_TXCMD_ENCBYPASS	0x0020
+#define XM_TXCMD_XMITBK2BK	0x0040
+#define XM_TXCMD_FAIRSHARE	0x0080
+
+#define XM_RXCMD_DISABLE_CEXT	0x0001
+#define XM_RXCMD_STRIPPAD	0x0002
+#define XM_RXCMD_SAMPLELINE	0x0004
+#define XM_RXCMD_SELFRX		0x0008
+#define XM_RXCMD_STRIPFCS	0x0010
+#define XM_RXCMD_TRANSPARENT	0x0020
+#define XM_RXCMD_IPGCAPTURE	0x0040
+#define XM_RXCMD_BIGPKTOK	0x0080
+#define XM_RXCMD_LENERROK	0x0100
+
+#define XM_GPIO_GP0_SET		0x0001
+#define XM_GPIO_RESETSTATS	0x0004
+#define XM_GPIO_RESETMAC	0x0008
+#define XM_GPIO_FORCEINT	0x0020
+#define XM_GPIO_ANEGINPROG	0x0040
+
+#define XM_IMR_RX_EOF		0x0001
+#define XM_IMR_TX_EOF		0x0002
+#define XM_IMR_TX_UNDERRUN	0x0004
+#define XM_IMR_RX_OVERRUN	0x0008
+#define XM_IMR_TX_STATS_OFLOW	0x0010
+#define XM_IMR_RX_STATS_OFLOW	0x0020
+#define XM_IMR_TSTAMP_OFLOW	0x0040
+#define XM_IMR_AUTONEG_DONE	0x0080
+#define XM_IMR_NEXTPAGE_RDY	0x0100
+#define XM_IMR_PAGE_RECEIVED	0x0200
+#define XM_IMR_LP_REQCFG	0x0400
+#define XM_IMR_GP0_SET		0x0800
+#define XM_IMR_FORCEINTR	0x1000
+#define XM_IMR_TX_ABORT		0x2000
+#define XM_IMR_LINKEVENT	0x4000
+
+#define XM_INTRS	\
+	(~(XM_IMR_GP0_SET|XM_IMR_AUTONEG_DONE|XM_IMR_TX_UNDERRUN))
+
+#define XM_ISR_RX_EOF		0x0001
+#define XM_ISR_TX_EOF		0x0002
+#define XM_ISR_TX_UNDERRUN	0x0004
+#define XM_ISR_RX_OVERRUN	0x0008
+#define XM_ISR_TX_STATS_OFLOW	0x0010
+#define XM_ISR_RX_STATS_OFLOW	0x0020
+#define XM_ISR_TSTAMP_OFLOW	0x0040
+#define XM_ISR_AUTONEG_DONE	0x0080
+#define XM_ISR_NEXTPAGE_RDY	0x0100
+#define XM_ISR_PAGE_RECEIVED	0x0200
+#define XM_ISR_LP_REQCFG	0x0400
+#define XM_ISR_GP0_SET		0x0800
+#define XM_ISR_FORCEINTR	0x1000
+#define XM_ISR_TX_ABORT		0x2000
+#define XM_ISR_LINKEVENT	0x4000
+
+#define XM_HWCFG_GENEOP		0x0008
+#define XM_HWCFG_SIGSTATCKH	0x0004
+#define XM_HWCFG_GMIIMODE	0x0001
+
+#define XM_MODE_FLUSH_RXFIFO	0x00000001
+#define XM_MODE_FLUSH_TXFIFO	0x00000002
+#define XM_MODE_BIGENDIAN	0x00000004
+#define XM_MODE_RX_PROMISC	0x00000008
+#define XM_MODE_RX_NOBROAD	0x00000010
+#define XM_MODE_RX_NOMULTI	0x00000020
+#define XM_MODE_RX_NOUNI	0x00000040
+#define XM_MODE_RX_BADFRAMES	0x00000080
+#define XM_MODE_RX_CRCERRS	0x00000100
+#define XM_MODE_RX_GIANTS	0x00000200
+#define XM_MODE_RX_INRANGELEN	0x00000400
+#define XM_MODE_RX_RUNTS	0x00000800
+#define XM_MODE_RX_MACCTL	0x00001000
+#define XM_MODE_RX_USE_PERFECT	0x00002000
+#define XM_MODE_RX_USE_STATION	0x00004000
+#define XM_MODE_RX_USE_HASH	0x00008000
+#define XM_MODE_RX_ADDRPAIR	0x00010000
+#define XM_MODE_PAUSEONHI	0x00020000
+#define XM_MODE_PAUSEONLO	0x00040000
+#define XM_MODE_TIMESTAMP	0x00080000
+#define XM_MODE_SENDPAUSE	0x00100000
+#define XM_MODE_SENDCONTINUOUS	0x00200000
+#define XM_MODE_LE_STATUSWORD	0x00400000
+#define XM_MODE_AUTOFIFOPAUSE	0x00800000
+#define XM_MODE_EXPAUSEGEN	0x02000000
+#define XM_MODE_RX_INVERSE	0x04000000
+
+#define XM_RXSTAT_MACCTL	0x00000001
+#define XM_RXSTAT_ERRFRAME	0x00000002
+#define XM_RXSTAT_CRCERR	0x00000004
+#define XM_RXSTAT_GIANT		0x00000008
+#define XM_RXSTAT_RUNT		0x00000010
+#define XM_RXSTAT_FRAMEERR	0x00000020
+#define XM_RXSTAT_INRANGEERR	0x00000040
+#define XM_RXSTAT_CARRIERERR	0x00000080
+#define XM_RXSTAT_COLLERR	0x00000100
+#define XM_RXSTAT_802_3		0x00000200
+#define XM_RXSTAT_CARREXTERR	0x00000400
+#define XM_RXSTAT_BURSTMODE	0x00000800
+#define XM_RXSTAT_UNICAST	0x00002000
+#define XM_RXSTAT_MULTICAST	0x00004000
+#define XM_RXSTAT_BROADCAST	0x00008000
+#define XM_RXSTAT_VLAN_LEV1	0x00010000
+#define XM_RXSTAT_VLAN_LEV2	0x00020000
+#define XM_RXSTAT_LEN		0xFFFC0000
+
+/*
+ * XMAC PHY registers, indirectly accessed through
+ * XM_PHY_ADDR and XM_PHY_REG.
+ */
+
+#define XM_PHY_BMCR		0x0000	/* control */
+#define XM_PHY_BMSR		0x0001	/* status */
+#define XM_PHY_VENID		0x0002	/* vendor id */
+#define XM_PHY_DEVID		0x0003	/* device id */
+#define XM_PHY_ANAR		0x0004	/* autoneg advertisenemt */
+#define XM_PHY_LPAR		0x0005	/* link partner ability */
+#define XM_PHY_ANEXP		0x0006	/* autoneg expansion */
+#define XM_PHY_NEXTP		0x0007	/* nextpage */
+#define XM_PHY_LPNEXTP		0x0008	/* link partner's nextpage */
+#define XM_PHY_EXTSTS		0x000F	/* extented status */
+#define XM_PHY_RESAB		0x0010	/* resolved ability */
+
+#define XM_BMCR_DUPLEX		0x0100
+#define XM_BMCR_RENEGOTIATE	0x0200
+#define XM_BMCR_AUTONEGENBL	0x1000
+#define XM_BMCR_LOOPBACK	0x4000
+#define XM_BMCR_RESET		0x8000
+
+#define XM_BMSR_EXTCAP		0x0001
+#define XM_BMSR_LINKSTAT	0x0004
+#define XM_BMSR_AUTONEGABLE	0x0008
+#define XM_BMSR_REMFAULT	0x0010
+#define XM_BMSR_AUTONEGDONE	0x0020
+#define XM_BMSR_EXTSTAT		0x0100
+
+#define XM_VENID_XAQTI		0xD14C
+#define XM_DEVID_XMAC		0x0002
+
+#define XM_ANAR_FULLDUPLEX	0x0020
+#define XM_ANAR_HALFDUPLEX	0x0040
+#define XM_ANAR_PAUSEBITS	0x0180
+#define XM_ANAR_REMFAULTBITS	0x1800
+#define XM_ANAR_ACK		0x4000
+#define XM_ANAR_NEXTPAGE	0x8000
+
+#define XM_LPAR_FULLDUPLEX	0x0020
+#define XM_LPAR_HALFDUPLEX	0x0040
+#define XM_LPAR_PAUSEBITS	0x0180
+#define XM_LPAR_REMFAULTBITS	0x1800
+#define XM_LPAR_ACK		0x4000
+#define XM_LPAR_NEXTPAGE	0x8000
+
+#define XM_PAUSE_NOPAUSE	0x0000
+#define XM_PAUSE_SYMPAUSE	0x0080
+#define XM_PAUSE_ASYMPAUSE	0x0100
+#define XM_PAUSE_BOTH		0x0180
+
+#define XM_REMFAULT_LINKOK	0x0000
+#define XM_REMFAULT_LINKFAIL	0x0800
+#define XM_REMFAULT_OFFLINE	0x1000
+#define XM_REMFAULT_ANEGERR	0x1800
+
+#define XM_ANEXP_GOTPAGE	0x0002
+#define XM_ANEXP_NEXTPAGE_SELF	0x0004
+#define XM_ANEXP_NEXTPAGE_LP	0x0008
+
+#define XM_NEXTP_MESSAGE	0x07FF
+#define XM_NEXTP_TOGGLE		0x0800
+#define XM_NEXTP_ACK2		0x1000
+#define XM_NEXTP_MPAGE		0x2000
+#define XM_NEXTP_ACK1		0x4000
+#define XM_NEXTP_NPAGE		0x8000
+
+#define XM_LPNEXTP_MESSAGE	0x07FF
+#define XM_LPNEXTP_TOGGLE	0x0800
+#define XM_LPNEXTP_ACK2		0x1000
+#define XM_LPNEXTP_MPAGE	0x2000
+#define XM_LPNEXTP_ACK1		0x4000
+#define XM_LPNEXTP_NPAGE	0x8000
+
+#define XM_EXTSTS_HALFDUPLEX	0x4000
+#define XM_EXTSTS_FULLDUPLEX	0x8000
+
+#define XM_RESAB_PAUSEMISMATCH	0x0008
+#define XM_RESAB_ABLMISMATCH	0x0010
+#define XM_RESAB_FDMODESEL	0x0020
+#define XM_RESAB_HDMODESEL	0x0040
+#define XM_RESAB_PAUSEBITS	0x0180

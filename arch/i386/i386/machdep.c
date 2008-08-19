@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.324.2.1 2006/01/13 01:56:54 brad Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.340 2006/02/22 22:16:05 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -131,6 +131,11 @@
 #include <dev/ic/mc146818reg.h>
 #include <i386/isa/isa_machdep.h>
 #include <i386/isa/nvram.h>
+
+#include "acpi.h"
+#if NACPI > 0
+#include <dev/acpi/acpivar.h>
+#endif
 
 #include "apm.h"
 #if NAPM > 0
@@ -1314,9 +1319,22 @@ void	natsem6x86_cpureset(void);
 void
 natsem6x86_cpureset(void)
 {
-	/* reset control SC1100 (datasheet page 170) */
+	/*
+	 * Reset AMD Geode SC1100.
+	 *
+	 * 1) Write PCI Configuration Address Register (0xcf8) to
+	 *    select Function 0, Register 0x44: Bridge Configuration,
+	 *    GPIO and LPC Configuration Register Space, Reset
+	 *    Control Register.
+	 *
+	 * 2) Write 0xf to PCI Configuration Data Register (0xcfc)
+	 *    to reset IDE controller, IDE bus, and PCI bus, and
+	 *    to trigger a system-wide reset.
+	 * 
+	 * See AMD Geode SC1100 Processor Data Book, Revision 2.0,
+	 * sections 6.3.1, 6.3.2, and 6.4.1.
+	 */
 	outl(0xCF8, 0x80009044UL);
-	/* system wide reset */
 	outb(0xCFC, 0x0F);
 }
 #endif
@@ -1374,7 +1392,7 @@ amd_family5_setup(struct cpu_info *ci)
 		break;
 	case 12:
 	case 13:
-#ifndef SMALL_KERNEL
+#if !defined(SMALL_KERNEL) && defined(I586_CPU)
 		k6_powernow_init();
 #endif
 		break;
@@ -1394,12 +1412,12 @@ amd_family6_setup(struct cpu_info *ci)
 	extern void sse2_pagezero(void *, size_t);
 	extern void i686_pagezero(void *, size_t);
 	static struct amd_pn_flag amd_pn_flags[] = {
-	    {0, "TS"},
-	    {1, "FID"},
-	    {2, "VID"},
-	    {4, "TTP"},
-	    {8, "TM"},
-	    {16, "STC"}
+	    {0x01, "TS"},
+	    {0x02, "FID"},
+	    {0x04, "VID"},
+	    {0x08, "TTP"},
+	    {0x10, "TM"},
+	    {0x20, "STC"}
 	};
 	u_int regs[4];
 	int i;
@@ -1417,8 +1435,17 @@ amd_family6_setup(struct cpu_info *ci)
 				printf(" %s", amd_pn_flags[i].name);
 		}
 		printf("\n");
-		if (regs[3] & 6)
-			k7_powernow_init(curcpu()->ci_signature);
+
+		if (regs[3] & 0x06) {
+			switch(ci->ci_signature & 0xF00) {
+			case 0x600:
+				k7_powernow_init();
+			break;
+			case 0xf00:
+				k8_powernow_init();
+			break;
+			}
+		}
 	}
 #endif
 }
@@ -2296,6 +2323,14 @@ haltsys:
 	doshutdownhooks();
 
 	if (howto & RB_HALT) {
+#if NACPI > 0
+		extern int acpi_s5;
+
+		delay(500000);
+		if (howto & RB_POWERDOWN || acpi_s5)
+			acpi_powerdown();
+#endif
+
 #if NAPM > 0
 		if (howto & RB_POWERDOWN) {
 			int rv;
@@ -2678,8 +2713,8 @@ setsegment(sd, base, limit, type, dpl, def32, gran)
 extern int IDTVEC(div), IDTVEC(dbg), IDTVEC(nmi), IDTVEC(bpt), IDTVEC(ofl),
     IDTVEC(bnd), IDTVEC(ill), IDTVEC(dna), IDTVEC(dble), IDTVEC(fpusegm),
     IDTVEC(tss), IDTVEC(missing), IDTVEC(stk), IDTVEC(prot), IDTVEC(page),
-    IDTVEC(rsvd), IDTVEC(fpu), IDTVEC(align), IDTVEC(syscall),
-    IDTVEC(osyscall);
+    IDTVEC(rsvd), IDTVEC(fpu), IDTVEC(align), IDTVEC(syscall), IDTVEC(mchk),
+    IDTVEC(osyscall), IDTVEC(simd);
 
 #if defined(I586_CPU)
 extern int IDTVEC(f00f_redirect);
@@ -2707,7 +2742,7 @@ fix_f00f(void)
 	    GCODE_SEL);
 
 	/* Map first page RO */
-	pte = PTE_BASE + i386_btop(va);
+	pte = PTE_BASE + atop(va);
 	*pte &= ~PG_RW;
 
 	/* Reload idtr */
@@ -2789,9 +2824,9 @@ init386(paddr_t first_avail)
 	setsegment(&gdt[GDATA_SEL].sd, 0, 0xfffff, SDT_MEMRWA, SEL_KPL, 1, 1);
 	setsegment(&gdt[GLDT_SEL].sd, ldt, sizeof(ldt) - 1, SDT_SYSLDT,
 	    SEL_KPL, 0, 0);
-	setsegment(&gdt[GUCODE_SEL].sd, 0, i386_btop(I386_MAX_EXE_ADDR) - 1,
+	setsegment(&gdt[GUCODE_SEL].sd, 0, atop(I386_MAX_EXE_ADDR) - 1,
 	    SDT_MEMERA, SEL_UPL, 1, 1);
-	setsegment(&gdt[GUDATA_SEL].sd, 0, i386_btop(VM_MAXUSER_ADDRESS) - 1,
+	setsegment(&gdt[GUDATA_SEL].sd, 0, atop(VM_MAXUSER_ADDRESS) - 1,
 	    SDT_MEMRWA, SEL_UPL, 1, 1);
 	setsegment(&gdt[GCPU_SEL].sd, &cpu_info_primary,
 	    sizeof(struct cpu_info)-1, SDT_MEMRWA, SEL_KPL, 0, 0);
@@ -2822,8 +2857,9 @@ init386(paddr_t first_avail)
 	setgate(&idt[ 15], &IDTVEC(rsvd),    0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
 	setgate(&idt[ 16], &IDTVEC(fpu),     0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
 	setgate(&idt[ 17], &IDTVEC(align),   0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
-	setgate(&idt[ 18], &IDTVEC(rsvd),    0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
-	for (i = 19; i < NRSVIDT; i++)
+	setgate(&idt[ 18], &IDTVEC(mchk),    0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
+	setgate(&idt[ 19], &IDTVEC(simd),    0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
+	for (i = 20; i < NRSVIDT; i++)
 		setgate(&idt[i], &IDTVEC(rsvd), 0, SDT_SYS386TGT, SEL_KPL, GCODE_SEL);
 	for (i = NRSVIDT; i < NIDT; i++)
 		unsetgate(&idt[i]);
@@ -2883,8 +2919,9 @@ init386(paddr_t first_avail)
 #if defined(MULTIPROCESSOR)
 	/* install the page after boot args as PT page for first 4M */
 	pmap_enter(pmap_kernel(), (u_long)vtopte(0),
-	   i386_round_page(bootargv + bootargc), VM_PROT_READ|VM_PROT_WRITE,
-	   VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
+	   round_page((vaddr_t)(bootargv + bootargc)),
+		VM_PROT_READ|VM_PROT_WRITE,
+		VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
 	memset(vtopte(0), 0, NBPG);  /* make sure it is clean before using */
 #endif
 
@@ -2900,15 +2937,30 @@ init386(paddr_t first_avail)
 	for(i = 0, im = bios_memmap; im->type != BIOS_MAP_END; im++)
 		if (im->type == BIOS_MAP_FREE) {
 			register paddr_t a, e;
+#ifdef DEBUG
+			printf(" %llx-%llx", im->addr, im->addr + im->size);
+#endif
 
-			a = i386_round_page(im->addr);
-			e = i386_trunc_page(im->addr + im->size);
+			if (im->addr >= 0x100000000ULL) {
+#ifdef DEBUG
+				printf("-H");
+#endif
+				continue;
+			}
+
+			a = round_page(im->addr);
+			if (im->addr + im->size <= 0xfffff000ULL)
+				e = trunc_page(im->addr + im->size);
+			else {
+#ifdef DEBUG
+				printf("-T");
+#endif
+				e = 0xfffff000;
+			}
+
 			/* skip first four pages */
 			if (a < 5 * NBPG)
 				a = 5 * NBPG;
-#ifdef DEBUG
-			printf(" %u-%u", a, e);
-#endif
 
 			/* skip shorter than page regions */
 			if (a >= e || (e - a) < NBPG) {
@@ -2938,7 +2990,7 @@ init386(paddr_t first_avail)
 		}
 
 	ndumpmem = i;
-	avail_end -= i386_round_page(MSGBUFSIZE);
+	avail_end -= round_page(MSGBUFSIZE);
 
 #ifdef DEBUG
 	printf(": %lx\n", avail_end);
@@ -3027,45 +3079,6 @@ init386(paddr_t first_avail)
 #endif /* KGDB */
 }
 
-struct queue {
-	struct queue *q_next, *q_prev;
-};
-
-/*
- * insert an element into a queue
- */
-void
-_insque(v1, v2)
-	void *v1;
-	void *v2;
-{
-	register struct queue *elem = v1, *head = v2;
-	register struct queue *next;
-
-	next = head->q_next;
-	elem->q_next = next;
-	head->q_next = elem;
-	elem->q_prev = head;
-	next->q_prev = elem;
-}
-
-/*
- * remove an element from a queue
- */
-void
-_remque(v)
-	void *v;
-{
-	register struct queue *elem = v;
-	register struct queue *next, *prev;
-
-	next = elem->q_next;
-	prev = elem->q_prev;
-	next->q_prev = prev;
-	prev->q_next = next;
-	elem->q_prev = 0;
-}
-
 /*
  * cpu_exec_aout_makecmds():
  *	cpu-dependent a.out format hook for execve().
@@ -3123,7 +3136,11 @@ cpu_reset()
 	if (cpuresetfn)
 		(*cpuresetfn)();
 
-	/* Toggle the hardware reset line on the keyboard controller. */
+	/*
+	 * The keyboard controller has 4 random output pins, one of which is
+	 * connected to the RESET pin on the CPU in many PCs.  We tell the
+	 * keyboard controller to pulse this line a couple of times.
+	 */
 	outb(IO_KBD + KBCMDP, KBC_PULSE0);
 	delay(100000);
 	outb(IO_KBD + KBCMDP, KBC_PULSE0);
@@ -3463,8 +3480,8 @@ bus_mem_add_mapping(bpa, size, cacheable, bshp)
 	u_int32_t cpumask = 0;
 #endif
 
-	pa = i386_trunc_page(bpa);
-	endpa = i386_round_page(bpa + size);
+	pa = trunc_page(bpa);
+	endpa = round_page(bpa + size);
 
 #ifdef DIAGNOSTIC
 	if (endpa <= pa && endpa != 0)
@@ -3532,8 +3549,8 @@ bus_space_unmap(t, bsh, size)
 		if (IOM_BEGIN <= bpa && bpa <= IOM_END)
 			goto ok;
 
-		va = i386_trunc_page(bsh);
-		endva = i386_round_page(bsh + size);
+		va = trunc_page(bsh);
+		endva = round_page(bsh + size);
 
 #ifdef DIAGNOSTIC
 		if (endva <= va)
@@ -3576,8 +3593,8 @@ _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
 		if (IOM_BEGIN <= bpa && bpa <= IOM_END)
 			goto ok;
 
-		va = i386_trunc_page(bsh);
-		endva = i386_round_page(bsh + size);
+		va = trunc_page(bsh);
+		endva = round_page(bsh + size);
 
 #ifdef DIAGNOSTIC
 		if (endva <= va)
@@ -4035,7 +4052,7 @@ _bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
 			continue;
 		}
 
-		return (i386_btop((caddr_t)segs[i].ds_addr + off));
+		return (atop(segs[i].ds_addr + off));
 	}
 
 	/* Page not found. */
@@ -4163,12 +4180,16 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	/* Always round the size. */
 	size = round_page(size);
 
+	TAILQ_INIT(&mlist);
 	/*
 	 * Allocate pages from the VM system.
+	 * For non-ISA mappings first try higher memory segments.
 	 */
-	TAILQ_INIT(&mlist);
-	error = uvm_pglistalloc(size, low, high,
-	    alignment, boundary, &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+	if (high <= ISA_DMA_BOUNCE_THRESHOLD || (error = uvm_pglistalloc(size,
+	    round_page(ISA_DMA_BOUNCE_THRESHOLD), high, alignment, boundary,
+	    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0)))
+		error = uvm_pglistalloc(size, low, high, alignment, boundary,
+		    &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
 	if (error)
 		return (error);
 

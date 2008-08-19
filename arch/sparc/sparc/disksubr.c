@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.32 2005/04/19 21:30:20 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.37 2006/01/27 23:03:12 miod Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.16 1996/04/28 20:25:59 thorpej Exp $ */
 
 /*
@@ -41,12 +41,11 @@
 
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
-#include <machine/sun_disklabel.h>
+#include <dev/sun/disklabel.h>
 #if defined(SUN4)
 #include <machine/oldmon.h>
 #endif
 
-#include <sparc/dev/sbusvar.h>
 #include "cd.h"
 
 #if MAXPARTITIONS != 16
@@ -56,8 +55,6 @@
 static	char *disklabel_sun_to_bsd(char *, struct disklabel *);
 static	int disklabel_bsd_to_sun(struct disklabel *, char *);
 static __inline u_long sun_extended_sum(struct sun_disklabel *);
-
-#define b_cylin		b_resid
 
 extern struct device *bootdv;
 
@@ -161,7 +158,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	}
 	if (lp->d_partitions[i].p_size == 0)
 		lp->d_partitions[i].p_size = 0x1fffffff;
-	lp->d_partitions[0].p_offset = 0;
+	lp->d_partitions[i].p_offset = 0;
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64*1024;		/* XXX ? */
 
@@ -175,7 +172,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	/* next, dig out disk label */
 	bp->b_dev = dev;
 	bp->b_blkno = LABELSECTOR;
-	bp->b_cylin = 0;
+	bp->b_cylinder = 0;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ;
 	(*strat)(bp);
@@ -184,7 +181,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	error = biowait(bp);
 	if (error == 0) {
 		/* Save the whole block in case it has info we need. */
-		bcopy(bp->b_un.b_addr, clp->cd_block, sizeof(clp->cd_block));
+		bcopy(bp->b_data, clp->cd_block, sizeof(clp->cd_block));
 	}
 	bp->b_flags = B_INVAL | B_AGE | B_READ;
 	brelse(bp);
@@ -301,12 +298,12 @@ writedisklabel(dev, strat, lp, clp)
 
 	/* Get a buffer and copy the new label into it. */
 	bp = geteblk((int)lp->d_secsize);
-	bcopy(clp->cd_block, bp->b_un.b_addr, sizeof(clp->cd_block));
+	bcopy(clp->cd_block, bp->b_data, sizeof(clp->cd_block));
 
 	/* Write out the updated label. */
 	bp->b_dev = dev;
 	bp->b_blkno = LABELSECTOR;
-	bp->b_cylin = 0;
+	bp->b_cylinder = 0;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_WRITE;
 	(*strat)(bp);
@@ -622,52 +619,6 @@ disklabel_bsd_to_sun(lp, cp)
 		cksum ^= *sp1++;
 	sl->sl_cksum = cksum;
 
-	return (0);
-}
-
-/* move this to compat/sunos */
-int
-sun_dkioctl(dk, cmd, data, partition)
-	struct disk *dk;
-	u_long cmd;
-	caddr_t data;
-	int partition;
-{
-	register struct partition *p;
-
-	switch (cmd) {
-	case DKIOCGGEOM:
-#define geom	((struct sun_dkgeom *)data)
-		bzero(data, sizeof(*geom));
-		geom->sdkc_ncylinders = dk->dk_label->d_ncylinders;
-		geom->sdkc_acylinders = dk->dk_label->d_acylinders;
-		geom->sdkc_ntracks = dk->dk_label->d_ntracks;
-		geom->sdkc_nsectors = dk->dk_label->d_nsectors;
-		geom->sdkc_interleave = dk->dk_label->d_interleave;
-		geom->sdkc_sparespercyl = dk->dk_label->d_sparespercyl;
-		geom->sdkc_rpm = dk->dk_label->d_rpm;
-		geom->sdkc_pcylinders =
-			dk->dk_label->d_ncylinders + dk->dk_label->d_acylinders;
-#undef geom
-		break;
-	case DKIOCINFO:
-		/* Homey don't do DKIOCINFO */
-		bzero(data, sizeof(struct sun_dkctlr));
-		break;
-	case DKIOCGPART:
-		if (dk->dk_label->d_secpercyl == 0)
-			return (ERANGE);	/* XXX */
-		p = &dk->dk_label->d_partitions[partition];
-		if (p->p_offset % dk->dk_label->d_secpercyl != 0)
-			return (ERANGE);	/* XXX */
-#define part	((struct sun_dkpart *)data)
-		part->sdkp_cyloffset = p->p_offset / dk->dk_label->d_secpercyl;
-		part->sdkp_nsectors = p->p_size;
-#undef part
-		break;
-	default:
-		return (-1);
-	}
 	return (0);
 }
 

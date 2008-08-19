@@ -1,4 +1,4 @@
-/* $OpenBSD: radioio.h,v 1.2 2001/12/05 10:27:05 mickey Exp $ */
+/* $OpenBSD: radioio.h,v 1.4 2006/02/05 23:52:57 jakemsr Exp $ */
 /* $RuOBSD: radioio.h,v 1.4 2001/10/18 16:51:36 pva Exp $ */
 
 /*
@@ -35,6 +35,9 @@
 #define MIN_FM_FREQ	87500
 #define MAX_FM_FREQ	108000
 
+#define MIN_TV_CHAN	0
+#define MAX_TV_CHAN	150
+
 #define IF_FREQ	10700
 
 struct radio_info {
@@ -58,6 +61,11 @@ struct radio_info {
 	u_int32_t	info;
 #define RADIO_INFO_STEREO		(1<<0)
 #define RADIO_INFO_SIGNAL		(1<<1)
+	u_int32_t	tuner_mode;
+#define RADIO_TUNER_MODE_RADIO         (1<<0)
+#define RADIO_TUNER_MODE_TV            (1<<1)
+	u_int32_t	chan;
+	u_int32_t	chnlset;
 };
 
 /* Radio device operations */

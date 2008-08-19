@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciphy.c,v 1.8 2005/08/02 03:46:07 pvalchev Exp $	*/
+/*	$OpenBSD: ciphy.c,v 1.11 2006/02/28 12:37:15 jsg Exp $	*/
 /*	$FreeBSD: ciphy.c,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -92,8 +92,8 @@ static const struct mii_phydesc ciphys[] = {
 	  MII_STR_CICADA_CS8201A },
 	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8201B,
 	  MII_STR_CICADA_CS8201B },
-	{ MII_OUI_xxCICADA,		MII_MODEL_CICADA_CS8201B,
-	  MII_STR_CICADA_CS8201B },
+	{ MII_OUI_xxCICADA,		MII_MODEL_xxCICADA_CS8201B,
+	  MII_STR_xxCICADA_CS8201B },
 
 	{ 0,			0,
 	  NULL },
@@ -336,6 +336,12 @@ ciphy_fixup(struct mii_softc *sc)
 	model = MII_MODEL(PHY_READ(sc, CIPHY_MII_PHYIDR2));
 	status = PHY_READ(sc, CIPHY_MII_AUXCSR);
 	speed = status & CIPHY_AUXCSR_SPEED;
+
+	if (strcmp(sc->mii_dev.dv_parent->dv_cfdata->cf_driver->cd_name, "nfe") == 0) {
+		/* need to set for 2.5V RGMII for NVIDIA adapters */
+		PHY_SETBIT(sc, CIPHY_MII_ECTL1, CIPHY_INTSEL_RGMII);
+		PHY_SETBIT(sc, CIPHY_MII_ECTL1, CIPHY_IOVOL_2500MV);
+	}
 
 	switch (model) {
 	case MII_MODEL_CICADA_CS8201:

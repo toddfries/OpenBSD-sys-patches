@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.25 2004/08/06 22:31:31 mickey Exp $	*/
+/*	$OpenBSD: param.h,v 1.27 2005/10/26 18:57:51 martin Exp $	*/
 /*	$NetBSD: param.h,v 1.1 1996/09/30 16:34:28 ws Exp $	*/
 
 /*-
@@ -70,6 +70,13 @@
 #define	USPACE_ALIGN	(0)		/* u-area alignment 0-none */
 
 /*
+ * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
+ * logical pages.
+ */
+#define	NKMEMPAGES_MIN_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MAX_DEFAULT	((64 * 1024 * 1024) >> PAGE_SHIFT)
+
+/*
  * Constants related to network buffer management.
  * MCLBYTES must be no larger than the software page size, and,
  * on machines that exchange pages of input or output buffers with mbuf
@@ -98,12 +105,6 @@
  */
 #define	dbtob(x)	((x) << DEV_BSHIFT)
 #define	btodb(x)	((x) >> DEV_BSHIFT)
-
-/*
- * Mach derived conversion macros
- */
-#define powerpc_btop(x)	((unsigned)(x) >> PGSHIFT)
-#define powerpc_ptob(x)	((unsigned)(x) << PGSHIFT)
 
 /*
  * Segment handling stuff

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.64 2005/08/01 05:36:47 brad Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.68 2006/02/20 20:12:14 damien Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -1250,7 +1250,7 @@ USB_ATTACH(atu)
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->atu_dev), devinfop);
+	printf("%s: %s", USBDEVNAME(sc->atu_dev), devinfop);
 	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, ATU_CONFIG_NO, 1);
@@ -1416,7 +1416,7 @@ atu_complete_attach(struct atu_softc *sc)
 #endif /* ATU_DEBUG */
 
 	/* Show the world our MAC address */
-	printf(": address %s\n", ether_sprintf(ic->ic_myaddr));
+	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
 	sc->atu_cdata.atu_tx_inuse = 0;
 
@@ -1494,9 +1494,6 @@ USB_DETACH(atu)
 
 	if (sc->sc_state != ATU_S_UNCONFIG) {
 		atu_stop(ifp, 1);
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif
 		ieee80211_ifdetach(ifp);
 		if_detach(ifp);
 
@@ -1701,7 +1698,7 @@ atu_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			    USBDEVNAME(sc->atu_dev), usbd_errstr(status)));
 		}
 		if (status == USBD_STALLED)
-			usbd_clear_endpoint_stall(
+			usbd_clear_endpoint_stall_async(
 			    sc->atu_ep[ATU_ENDPT_RX]);
 		goto done;
 	}
@@ -1804,7 +1801,7 @@ atu_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		DPRINTF(("%s: usb error on tx: %s\n", USBDEVNAME(sc->atu_dev),
 		    usbd_errstr(status)));
 		if (status == USBD_STALLED)
-			usbd_clear_endpoint_stall(sc->atu_ep[ATU_ENDPT_TX]);
+			usbd_clear_endpoint_stall_async(sc->atu_ep[ATU_ENDPT_TX]);
 		return;
 	}
 
@@ -1846,7 +1843,9 @@ atu_tx_start(struct atu_softc *sc, struct ieee80211_node *ni,
 	struct atu_tx_hdr	*h;
 	usbd_status		err;
 	u_int8_t		pad;
+#if NBPFILTER > 0
 	struct ieee80211com *ic = &sc->sc_ic;
+#endif
 
 	DPRINTFN(25, ("%s: atu_tx_start\n", USBDEVNAME(sc->atu_dev)));
 

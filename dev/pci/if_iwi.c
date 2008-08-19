@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_iwi.c,v 1.48 2005/08/09 04:10:12 mickey Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.60 2006/02/26 19:14:40 damien Exp $	*/
 
 /*-
- * Copyright (c) 2004, 2005
+ * Copyright (c) 2004-2006
  *      Damien Bergamini <damien.bergamini@free.fr>. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -93,56 +93,60 @@ static const struct ieee80211_rateset iwi_rateset_11b =
 static const struct ieee80211_rateset iwi_rateset_11g =
 	{ 12, { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 } };
 
-int iwi_match(struct device *, void *, void *);
-void iwi_attach(struct device *, struct device *, void *);
-int iwi_detach(struct device *, int);
-void iwi_power(int, void *);
-int iwi_dma_alloc(struct iwi_softc *);
-void iwi_release(struct iwi_softc *);
-int iwi_media_change(struct ifnet *);
-void iwi_media_status(struct ifnet *, struct ifmediareq *);
-u_int16_t iwi_read_prom_word(struct iwi_softc *, u_int8_t);
-int iwi_newstate(struct ieee80211com *, enum ieee80211_state, int);
-void iwi_frame_intr(struct iwi_softc *, struct iwi_rx_buf *, int,
-    struct iwi_frame *);
-void iwi_notification_intr(struct iwi_softc *, struct iwi_rx_buf *,
-    struct iwi_notif *);
-void iwi_rx_intr(struct iwi_softc *);
-void iwi_tx_intr(struct iwi_softc *);
-int iwi_intr(void *);
-int iwi_cmd(struct iwi_softc *, u_int8_t, void *, u_int8_t, int);
-int iwi_tx_start(struct ifnet *, struct mbuf *, struct ieee80211_node *);
-void iwi_start(struct ifnet *);
-void iwi_watchdog(struct ifnet *);
-int iwi_get_table0(struct iwi_softc *, u_int32_t *);
-int iwi_get_radio(struct iwi_softc *, int *);
-int iwi_ioctl(struct ifnet *, u_long, caddr_t);
-void iwi_stop_master(struct iwi_softc *);
-int iwi_reset(struct iwi_softc *);
-int iwi_load_ucode(struct iwi_softc *, const char *);
-int iwi_load_firmware(struct iwi_softc *, const char *);
-int iwi_config(struct iwi_softc *);
-int iwi_set_chan(struct iwi_softc *, struct ieee80211_channel *);
-int iwi_scan(struct iwi_softc *);
-int iwi_auth_and_assoc(struct iwi_softc *);
-int iwi_init(struct ifnet *);
-void iwi_stop(struct ifnet *, int);
+int		iwi_match(struct device *, void *, void *);
+void		iwi_attach(struct device *, struct device *, void *);
+int		iwi_detach(struct device *, int);
+void		iwi_power(int, void *);
+int		iwi_dma_alloc(struct iwi_softc *);
+void		iwi_release(struct iwi_softc *);
+int		iwi_media_change(struct ifnet *);
+void		iwi_media_status(struct ifnet *, struct ifmediareq *);
+uint16_t	iwi_read_prom_word(struct iwi_softc *, uint8_t);
+int		iwi_find_txnode(struct iwi_softc *, const uint8_t *);
+int		iwi_newstate(struct ieee80211com *, enum ieee80211_state, int);
+void		iwi_frame_intr(struct iwi_softc *, struct iwi_rx_buf *, int,
+		    struct iwi_frame *);
+void		iwi_notification_intr(struct iwi_softc *, struct iwi_rx_buf *,
+		    struct iwi_notif *);
+void		iwi_rx_intr(struct iwi_softc *);
+void		iwi_tx_intr(struct iwi_softc *);
+int		iwi_intr(void *);
+int		iwi_cmd(struct iwi_softc *, uint8_t, void *, uint8_t, int);
+int		iwi_tx_start(struct ifnet *, struct mbuf *,
+		    struct ieee80211_node *);
+void		iwi_start(struct ifnet *);
+void		iwi_watchdog(struct ifnet *);
+int		iwi_get_table0(struct iwi_softc *, uint32_t *);
+int		iwi_get_radio(struct iwi_softc *, int *);
+int		iwi_ioctl(struct ifnet *, u_long, caddr_t);
+void		iwi_stop_master(struct iwi_softc *);
+int		iwi_reset(struct iwi_softc *);
+int		iwi_load_ucode(struct iwi_softc *, const char *);
+int		iwi_load_firmware(struct iwi_softc *, const char *);
+int		iwi_config(struct iwi_softc *);
+int		iwi_set_chan(struct iwi_softc *, struct ieee80211_channel *);
+int		iwi_scan(struct iwi_softc *);
+int		iwi_auth_and_assoc(struct iwi_softc *);
+int		iwi_init(struct ifnet *);
+void		iwi_stop(struct ifnet *, int);
 
-static __inline u_int8_t MEM_READ_1(struct iwi_softc *sc, u_int32_t addr)
+static __inline uint8_t
+MEM_READ_1(struct iwi_softc *sc, uint32_t addr)
 {
 	CSR_WRITE_4(sc, IWI_CSR_INDIRECT_ADDR, addr);
 	return CSR_READ_1(sc, IWI_CSR_INDIRECT_DATA);
 }
 
-static __inline u_int32_t MEM_READ_4(struct iwi_softc *sc, u_int32_t addr)
+static __inline uint32_t
+MEM_READ_4(struct iwi_softc *sc, uint32_t addr)
 {
 	CSR_WRITE_4(sc, IWI_CSR_INDIRECT_ADDR, addr);
 	return CSR_READ_4(sc, IWI_CSR_INDIRECT_DATA);
 }
 
 #ifdef IWI_DEBUG
-#define DPRINTF(x)	if (iwi_debug > 0) printf x
-#define DPRINTFN(n, x)	if (iwi_debug >= (n)) printf x
+#define DPRINTF(x)	do { if (iwi_debug > 0) printf x; } while (0)
+#define DPRINTFN(n, x)	do { if (iwi_debug >= (n)) printf x; } while (0)
 int iwi_debug = 0;
 #else
 #define DPRINTF(x)
@@ -176,7 +180,7 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	bus_addr_t base;
 	pci_intr_handle_t ih;
 	pcireg_t data;
-	u_int16_t val;
+	uint16_t val;
 	int error, i;
 
 	sc->sc_pct = pa->pa_pc;
@@ -234,23 +238,23 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	ic->ic_state = IEEE80211_S_INIT;
 
 	/* set device capabilities */
-	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_WEP | IEEE80211_C_TXPMGT |
-	    IEEE80211_C_SHPREAMBLE | IEEE80211_C_MONITOR | IEEE80211_C_SCANALL;
+	ic->ic_caps = IEEE80211_C_IBSS | IEEE80211_C_PMGT | IEEE80211_C_WEP |
+	    IEEE80211_C_TXPMGT | IEEE80211_C_SHPREAMBLE | IEEE80211_C_MONITOR |
+	    IEEE80211_C_SCANALL;
 
 	/* read MAC address from EEPROM */
 	val = iwi_read_prom_word(sc, IWI_EEPROM_MAC + 0);
-	ic->ic_myaddr[0] = val >> 8;
-	ic->ic_myaddr[1] = val & 0xff;
+	ic->ic_myaddr[0] = val & 0xff;
+	ic->ic_myaddr[1] = val >> 8;
 	val = iwi_read_prom_word(sc, IWI_EEPROM_MAC + 1);
-	ic->ic_myaddr[2] = val >> 8;
-	ic->ic_myaddr[3] = val & 0xff;
+	ic->ic_myaddr[2] = val & 0xff;
+	ic->ic_myaddr[3] = val >> 8;
 	val = iwi_read_prom_word(sc, IWI_EEPROM_MAC + 2);
-	ic->ic_myaddr[4] = val >> 8;
-	ic->ic_myaddr[5] = val & 0xff;
+	ic->ic_myaddr[4] = val & 0xff;
+	ic->ic_myaddr[5] = val >> 8;
 
 	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
-#if 0
 	if (PCI_PRODUCT(pa->pa_id) >= PCI_PRODUCT_INTEL_PRO_WL_2915ABG_1) {
 		/* set supported .11a rates */
 		ic->ic_sup_rates[IEEE80211_MODE_11A] = iwi_rateset_11a;
@@ -267,7 +271,6 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 			ic->ic_channels[i].ic_flags = IEEE80211_CHAN_A;
 		}
 	}
-#endif
 
 	/* set supported .11b and .11g rates */
 	ic->ic_sup_rates[IEEE80211_MODE_11B] = iwi_rateset_11b;
@@ -328,9 +331,6 @@ iwi_detach(struct device* self, int flags)
 
 	iwi_stop(ifp, 1);
 
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif
 	ieee80211_ifdetach(ifp);
 	if_detach(ifp);
 
@@ -375,7 +375,7 @@ iwi_dma_alloc(struct iwi_softc *sc)
 	int i, nsegs, error;
 
 	/*
-	 * Allocate and map Tx ring
+	 * Allocate and map Tx ring.
 	 */
 	error = bus_dmamap_create(sc->sc_dmat,
 	    sizeof (struct iwi_tx_desc) * IWI_TX_RING_SIZE, 1,
@@ -417,7 +417,7 @@ iwi_dma_alloc(struct iwi_softc *sc)
 	bzero(sc->tx_desc, sizeof (struct iwi_tx_desc) * IWI_TX_RING_SIZE);
 
 	/*
-	 * Allocate and map command ring
+	 * Allocate and map command ring.
 	 */
 	error = bus_dmamap_create(sc->sc_dmat,
 	    sizeof (struct iwi_cmd_desc) * IWI_CMD_RING_SIZE, 1,
@@ -459,11 +459,12 @@ iwi_dma_alloc(struct iwi_softc *sc)
 	bzero(sc->cmd_desc, sizeof (struct iwi_cmd_desc) * IWI_CMD_RING_SIZE);
 
 	/*
-	 * Allocate Tx buffers DMA maps
+	 * Allocate Tx buffers DMA maps.
 	 */
 	for (i = 0; i < IWI_TX_RING_SIZE; i++) {
-		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
-		    0, BUS_DMA_NOWAIT, &sc->tx_buf[i].map);
+		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
+		    IWI_MAX_NSEG - 2, MCLBYTES, 0, BUS_DMA_NOWAIT,
+		    &sc->tx_buf[i].map);
 		if (error != 0) {
 			printf("%s: could not create tx buf DMA map",
 			    sc->sc_dev.dv_xname);
@@ -472,7 +473,7 @@ iwi_dma_alloc(struct iwi_softc *sc)
 	}
 
 	/*
-	 * Allocate and map Rx buffers
+	 * Allocate and map Rx buffers.
 	 */
 	for (i = 0; i < IWI_RX_RING_SIZE; i++) {
 
@@ -577,11 +578,11 @@ iwi_media_change(struct ifnet *ifp)
 void
 iwi_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 {
+#define N(a)	(sizeof (a) / sizeof (a[0]))
 	struct iwi_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
-#define N(a)	(sizeof (a) / sizeof (a[0]))
 	static const struct {
-		u_int32_t	val;
+		uint32_t	val;
 		int		rate;
 	} rates[] = {
 		{ IWI_RATE_DS1,      2 },
@@ -597,7 +598,7 @@ iwi_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 		{ IWI_RATE_OFDM48,  96 },
 		{ IWI_RATE_OFDM54, 108 },
 	};
-	u_int32_t val;
+	uint32_t val;
 	int rate, i;
 
 	imr->ifm_status = IFM_AVALID;
@@ -633,10 +634,45 @@ iwi_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 #undef N
 }
 
+/*
+ * This is only used for IBSS mode where the firmware expect an index to an
+ * internal node table instead of a destination address.
+ */
+int
+iwi_find_txnode(struct iwi_softc *sc, const uint8_t *macaddr)
+{
+	struct iwi_node node;
+	int i;
+
+	for (i = 0; i < sc->nsta; i++)
+		if (IEEE80211_ADDR_EQ(sc->sta[i], macaddr))
+			return i;	/* already existing node */
+
+	if (i == IWI_MAX_NODE)
+		return -1;	/* no place left in neighbor table */
+
+	/* save this new node in our softc table */
+	IEEE80211_ADDR_COPY(sc->sta[i], macaddr);
+	sc->nsta = i;
+
+	/* write node information into NIC memory */
+	bzero(&node, sizeof node);
+	IEEE80211_ADDR_COPY(node.bssid, macaddr);
+
+	CSR_WRITE_REGION_1(sc, IWI_CSR_NODE_BASE + i * sizeof node,
+	    (uint8_t *)&node, sizeof node);
+
+	return i;
+}
+
 int
 iwi_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
 	struct iwi_softc *sc = ic->ic_softc;
+	enum ieee80211_state ostate;
+	uint32_t tmp;
+
+	ostate = ic->ic_state;
 
 	switch (nstate) {
 	case IEEE80211_S_SCAN:
@@ -648,14 +684,27 @@ iwi_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		break;
 
 	case IEEE80211_S_RUN:
-		if (ic->ic_opmode == IEEE80211_M_IBSS)
+		if (ic->ic_opmode == IEEE80211_M_IBSS) {
+			sc->nsta = 0;	/* flush IBSS nodes */
 			ieee80211_new_state(ic, IEEE80211_S_AUTH, -1);
-		else if (ic->ic_opmode == IEEE80211_M_MONITOR)
+		} else if (ic->ic_opmode == IEEE80211_M_MONITOR)
 			iwi_set_chan(sc, ic->ic_ibss_chan);
+
+		/* assoc led on */
+		tmp = MEM_READ_4(sc, IWI_MEM_EVENT_CTL) & IWI_LED_MASK;
+		MEM_WRITE_4(sc, IWI_MEM_EVENT_CTL, tmp | IWI_LED_ASSOC);
+		break;
+
+	case IEEE80211_S_INIT:
+		if (ostate != IEEE80211_S_RUN)
+			break;
+
+		/* assoc led off */
+		tmp = MEM_READ_4(sc, IWI_MEM_EVENT_CTL) & IWI_LED_MASK;
+		MEM_WRITE_4(sc, IWI_MEM_EVENT_CTL, tmp & ~IWI_LED_ASSOC);
 		break;
 
 	case IEEE80211_S_ASSOC:
-	case IEEE80211_S_INIT:
 		break;
 	}
 
@@ -667,30 +716,30 @@ iwi_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
  * Read 16 bits at address 'addr' from the serial EEPROM.
  * DON'T PLAY WITH THIS CODE UNLESS YOU KNOW *EXACTLY* WHAT YOU'RE DOING!
  */
-u_int16_t
-iwi_read_prom_word(struct iwi_softc *sc, u_int8_t addr)
+uint16_t
+iwi_read_prom_word(struct iwi_softc *sc, uint8_t addr)
 {
-	u_int32_t tmp;
-	u_int16_t val;
+	uint32_t tmp;
+	uint16_t val;
 	int n;
 
-	/* Clock C once before the first command */
+	/* clock C once before the first command */
 	IWI_EEPROM_CTL(sc, 0);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S | IWI_EEPROM_C);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S);
 
-	/* Write start bit (1) */
+	/* write start bit (1) */
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S | IWI_EEPROM_D);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S | IWI_EEPROM_D | IWI_EEPROM_C);
 
-	/* Write READ opcode (10) */
+	/* write READ opcode (10) */
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S | IWI_EEPROM_D);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S | IWI_EEPROM_D | IWI_EEPROM_C);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S | IWI_EEPROM_C);
 
-	/* Write address A7-A0 */
+	/* write address A7-A0 */
 	for (n = 7; n >= 0; n--) {
 		IWI_EEPROM_CTL(sc, IWI_EEPROM_S |
 		    (((addr >> n) & 1) << IWI_EEPROM_SHIFT_D));
@@ -700,7 +749,7 @@ iwi_read_prom_word(struct iwi_softc *sc, u_int8_t addr)
 
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S);
 
-	/* Read data Q15-Q0 */
+	/* read data Q15-Q0 */
 	val = 0;
 	for (n = 15; n >= 0; n--) {
 		IWI_EEPROM_CTL(sc, IWI_EEPROM_S | IWI_EEPROM_C);
@@ -711,12 +760,12 @@ iwi_read_prom_word(struct iwi_softc *sc, u_int8_t addr)
 
 	IWI_EEPROM_CTL(sc, 0);
 
-	/* Clear Chip Select and clock C */
+	/* clear Chip Select and clock C */
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_S);
 	IWI_EEPROM_CTL(sc, 0);
 	IWI_EEPROM_CTL(sc, IWI_EEPROM_C);
 
-	return betoh16(val);
+	return val;
 }
 
 void
@@ -725,7 +774,7 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_buf *buf, int i,
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
-	struct mbuf *m;
+	struct mbuf *mnew, *m;
 	struct ieee80211_frame *wh;
 	struct ieee80211_node *ni;
 	int error;
@@ -744,10 +793,49 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_buf *buf, int i,
 		return;
 	}
 
+	/*
+	 * Try to allocate a new mbuf for this ring element and load it before
+	 * processing the current mbuf.  If the ring element cannot be loaded,
+	 * drop the received packet and reuse the old mbuf.  In the unlikely
+	 * case that the old mbuf can't be reloaded either, explicitly panic.
+	 */
+	MGETHDR(mnew, M_DONTWAIT, MT_DATA);
+	if (mnew == NULL) {
+		ifp->if_ierrors++;
+		return;
+	}
+
+	MCLGET(mnew, M_DONTWAIT);
+	if (!(mnew->m_flags & M_EXT)) {
+		m_freem(mnew);
+		ifp->if_ierrors++;
+		return;
+	}
+
 	bus_dmamap_unload(sc->sc_dmat, buf->map);
 
-	/* Finalize mbuf */
+	error = bus_dmamap_load(sc->sc_dmat, buf->map, mtod(mnew, void *),
+	    MCLBYTES, NULL, BUS_DMA_NOWAIT);
+	if (error != 0) {
+		m_freem(mnew);
+
+		/* try to reload the old mbuf */
+		error = bus_dmamap_load(sc->sc_dmat, buf->map,
+		    mtod(buf->m, void *), MCLBYTES, NULL, BUS_DMA_NOWAIT);
+		if (error != 0) {
+			/* very unlikely that it will fail... */
+			panic("%s: could not load old rx mbuf",
+			    sc->sc_dev.dv_xname);
+		}
+		ifp->if_ierrors++;
+		return;
+	}
+
 	m = buf->m;
+	buf->m = mnew;
+	CSR_WRITE_4(sc, IWI_CSR_RX_BASE + i * 4, buf->map->dm_segs->ds_addr);
+
+	/* finalize mbuf */
 	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = m->m_len = sizeof (struct iwi_hdr) +
 	    sizeof (struct iwi_frame) + letoh16(frame->len);
@@ -759,8 +847,8 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_buf *buf, int i,
 	    ic->ic_opmode != IEEE80211_M_MONITOR) {
 		/*
 		 * Hardware decrypts the frame itself but leaves the WEP bit
-		 * set in the 802.11 header and don't remove the iv and crc
-		 * fields
+		 * set in the 802.11 header and don't remove the IV and CRC
+		 * fields.
 		 */
 		wh->i_fc[1] &= ~IEEE80211_FC1_WEP;
 		bcopy(wh, (char *)wh + IEEE80211_WEP_IVLEN +
@@ -795,38 +883,10 @@ iwi_frame_intr(struct iwi_softc *sc, struct iwi_rx_buf *buf, int i,
 
 	ni = ieee80211_find_rxnode(ic, wh);
 
-	/* Send the frame to the upper layer */
+	/* send the frame to the upper layer */
 	ieee80211_input(ifp, m, ni, frame->rssi_dbm, 0);
 
 	ieee80211_release_node(ic, ni);
-
-	MGETHDR(buf->m, M_DONTWAIT, MT_DATA);
-	if (buf->m == NULL) {
-		printf("%s: could not allocate rx mbuf\n",
-		    sc->sc_dev.dv_xname);
-		return;
-	}
-
-	MCLGET(buf->m, M_DONTWAIT);
-	if (!(buf->m->m_flags & M_EXT)) {
-		printf("%s: could not allocate rx mbuf cluster\n",
-		    sc->sc_dev.dv_xname);
-		m_freem(buf->m);
-		buf->m = NULL;
-		return;
-	}
-
-	error = bus_dmamap_load(sc->sc_dmat, buf->map, mtod(buf->m, void *),
-	    MCLBYTES, NULL, BUS_DMA_NOWAIT);
-	if (error != 0) {
-		printf("%s: could not load rx buf DMA map\n",
-		    sc->sc_dev.dv_xname);
-		m_freem(buf->m);
-		buf->m = NULL;
-		return;
-	}
-
-	CSR_WRITE_4(sc, IWI_CSR_RX_BASE + i * 4, buf->map->dm_segs->ds_addr);
 }
 
 void
@@ -908,15 +968,8 @@ iwi_notification_intr(struct iwi_softc *sc, struct iwi_rx_buf *buf,
 		}
 		break;
 
-	case IWI_NOTIF_TYPE_CALIBRATION:
-	case IWI_NOTIF_TYPE_BEACON:
-	case IWI_NOTIF_TYPE_NOISE:
-		DPRINTFN(5, ("Notification (%u)\n", notif->type));
-		break;
-
 	default:
-		printf("%s: unknown notification type %u\n",
-		    sc->sc_dev.dv_xname, notif->type);
+		DPRINTFN(5, ("Notification (%u)\n", notif->type));
 	}
 }
 
@@ -925,7 +978,7 @@ iwi_rx_intr(struct iwi_softc *sc)
 {
 	struct iwi_rx_buf *buf;
 	struct iwi_hdr *hdr;
-	u_int32_t r, i;
+	uint32_t r, i;
 
 	r = CSR_READ_4(sc, IWI_CSR_RX_READ_INDEX);
 
@@ -956,7 +1009,7 @@ iwi_rx_intr(struct iwi_softc *sc)
 		}
 	}
 
-	/* Tell the firmware what we have processed */
+	/* tell the firmware what we have processed */
 	sc->rx_cur = (r == 0) ? IWI_RX_RING_SIZE - 1 : r - 1;
 	CSR_WRITE_4(sc, IWI_CSR_RX_WRITE_INDEX, sc->rx_cur);
 }
@@ -967,7 +1020,7 @@ iwi_tx_intr(struct iwi_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct iwi_tx_buf *buf;
-	u_int32_t r, i;
+	uint32_t r, i;
 
 	r = CSR_READ_4(sc, IWI_CSR_TX1_READ_INDEX);
 
@@ -989,10 +1042,10 @@ iwi_tx_intr(struct iwi_softc *sc)
 		sc->sc_tx_timer = 0;
 	}
 
-	/* Remember what the firmware has processed */
+	/* remember what the firmware has processed */
 	sc->tx_old = (r == 0) ? IWI_TX_RING_SIZE - 1 : r - 1;
 
-	/* Call start() since some buffer descriptors have been released */
+	/* call start() since some buffer descriptors have been released */
 	ifp->if_flags &= ~IFF_OACTIVE;
 	(*ifp->if_start)(ifp);
 }
@@ -1001,12 +1054,12 @@ int
 iwi_intr(void *arg)
 {
 	struct iwi_softc *sc = arg;
-	u_int32_t r;
+	uint32_t r;
 
 	if ((r = CSR_READ_4(sc, IWI_CSR_INTR)) == 0 || r == 0xffffffff)
 		return 0;
 
-	/* Disable interrupts */
+	/* disable interrupts */
 	CSR_WRITE_4(sc, IWI_CSR_INTR_MASK, 0);
 
 	DPRINTFN(8, ("INTR!0x%08x\n", r));
@@ -1035,18 +1088,17 @@ iwi_intr(void *arg)
 	if (r & IWI_INTR_TX1_TRANSFER)
 		iwi_tx_intr(sc);
 
-	/* Acknowledge interrupts */
+	/* acknowledge interrupts */
 	CSR_WRITE_4(sc, IWI_CSR_INTR, r);
 
-	/* Re-enable interrupts */
+	/* re-enable interrupts */
 	CSR_WRITE_4(sc, IWI_CSR_INTR_MASK, IWI_INTR_MASK);
 
 	return 1;
 }
 
 int
-iwi_cmd(struct iwi_softc *sc, u_int8_t type, void *data, u_int8_t len,
-    int async)
+iwi_cmd(struct iwi_softc *sc, uint8_t type, void *data, uint8_t len, int async)
 {
 	struct iwi_cmd_desc *desc;
 
@@ -1077,7 +1129,7 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	struct iwi_tx_buf *buf;
 	struct iwi_tx_desc *desc;
 	struct mbuf *mnew;
-	int error, i;
+	int error, i, station = 0;
 
 #if NBPFILTER > 0
 	if (sc->sc_drvbpf != NULL) {
@@ -1104,6 +1156,16 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	m_copydata(m0, 0, sizeof (struct ieee80211_frame), (caddr_t)&desc->wh);
 	m_adj(m0, sizeof (struct ieee80211_frame));
 
+	if (ic->ic_opmode == IEEE80211_M_IBSS) {
+		station = iwi_find_txnode(sc, desc->wh.i_addr1);
+		if (station == -1) {
+			m_freem(m0);
+			ieee80211_release_node(ic, ni);
+			ifp->if_oerrors++;
+			return 0;
+		}
+	}
+
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, buf->map, m0, BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
 		printf("%s: could not map mbuf (error %d)\n",
@@ -1121,11 +1183,13 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 		}
 
 		M_DUP_PKTHDR(mnew, m0);
-		MCLGET(mnew, M_DONTWAIT);
-		if (!(mnew->m_flags & M_EXT)) {
-			m_freem(m0);
-			m_freem(mnew);
-			return ENOMEM;
+		if (m0->m_pkthdr.len > MHLEN) {
+			MCLGET(mnew, M_DONTWAIT);
+			if (!(mnew->m_flags & M_EXT)) {
+				m_freem(m0);
+				m_freem(mnew);
+				return ENOMEM;
+			}
 		}
 
 		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(mnew, caddr_t));
@@ -1150,6 +1214,7 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	desc->hdr.flags = IWI_HDR_FLAG_IRQ;
 	desc->cmd = IWI_DATA_CMD_TX;
 	desc->len = htole16(m0->m_pkthdr.len);
+	desc->station = station;
 	desc->flags = 0;
 
 	if (!IEEE80211_IS_MULTICAST(desc->wh.i_addr1))
@@ -1167,7 +1232,7 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	desc->nseg = htole32(buf->map->dm_nsegs);
 	for (i = 0; i < buf->map->dm_nsegs; i++) {
 		desc->seg_addr[i] = htole32(buf->map->dm_segs[i].ds_addr);
-		desc->seg_len[i]  = htole32(buf->map->dm_segs[i].ds_len);
+		desc->seg_len[i]  = htole16(buf->map->dm_segs[i].ds_len);
 	}
 
 	bus_dmamap_sync(sc->sc_dmat, sc->tx_ring_map,
@@ -1177,9 +1242,9 @@ iwi_tx_start(struct ifnet *ifp, struct mbuf *m0, struct ieee80211_node *ni)
 	bus_dmamap_sync(sc->sc_dmat, buf->map, 0, MCLBYTES,
 	    BUS_DMASYNC_PREWRITE);
 
-	DPRINTFN(5, ("TX!DATA!%u!%u\n", desc->len, desc->nseg));
+	DPRINTFN(5, ("TX!DATA!%u!%u\n", letoh16(desc->len), desc->nseg));
 
-	/* Inform firmware about this new packet */
+	/* inform firmware about this new packet */
 	sc->tx_queued++;
 	sc->tx_cur = (sc->tx_cur + 1) % IWI_TX_RING_SIZE;
 	CSR_WRITE_4(sc, IWI_CSR_TX1_WRITE_INDEX, sc->tx_cur);
@@ -1203,7 +1268,7 @@ iwi_start(struct ifnet *ifp)
 		if (m0 == NULL)
 			break;
 
-		if (sc->tx_queued >= IWI_TX_RING_SIZE - 4) {
+		if (sc->tx_queued >= IWI_TX_RING_SIZE - 8) {
 			IF_PREPEND(&ifp->if_snd, m0);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
@@ -1340,7 +1405,7 @@ iwi_stop_master(struct iwi_softc *sc)
 {
 	int ntries;
 
-	/* Disable interrupts */
+	/* disable interrupts */
 	CSR_WRITE_4(sc, IWI_CSR_INTR_MASK, 0);
 
 	CSR_WRITE_4(sc, IWI_CSR_RST, IWI_RST_STOP_MASTER);
@@ -1365,14 +1430,14 @@ iwi_reset(struct iwi_softc *sc)
 
 	iwi_stop_master(sc);
 
-	/* Move adapter to D0 state */
+	/* move adapter to D0 state */
 	CSR_WRITE_4(sc, IWI_CSR_CTL, CSR_READ_4(sc, IWI_CSR_CTL) |
 	    IWI_CTL_INIT);
 
-	/* Initialize Phase-Locked Level  (PLL) */
+	/* initialize phase-locked level (PLL) */
 	CSR_WRITE_4(sc, IWI_CSR_READ_INT, IWI_READ_INT_INIT_HOST);
 
-	/* Wait for clock stabilization */
+	/* wait for clock stabilization */
 	for (ntries = 0; ntries < 1000; ntries++) {
 		if (CSR_READ_4(sc, IWI_CSR_CTL) & IWI_CTL_CLOCK_READY)
 			break;
@@ -1389,7 +1454,7 @@ iwi_reset(struct iwi_softc *sc)
 	CSR_WRITE_4(sc, IWI_CSR_CTL, CSR_READ_4(sc, IWI_CSR_CTL) |
 	    IWI_CTL_INIT);
 
-	/* Clear NIC memory */
+	/* clear NIC memory */
 	CSR_WRITE_4(sc, IWI_CSR_AUTOINC_ADDR, 0);
 	for (i = 0; i < 0xc000; i++)
 		CSR_WRITE_4(sc, IWI_CSR_AUTOINC_DATA, 0);
@@ -1402,7 +1467,7 @@ iwi_load_ucode(struct iwi_softc *sc, const char *name)
 {
 	u_char *uc, *data;
 	size_t size;
-	u_int16_t *w;
+	uint16_t *w;
 	int error, ntries, i;
 
 	if ((error = loadfirmware(name, &data, &size)) != 0) {
@@ -1440,21 +1505,21 @@ iwi_load_ucode(struct iwi_softc *sc, const char *name)
 	DELAY(5000);
 	MEM_WRITE_4(sc, 0x3000e0, 0);
 	DELAY(1000);
-	MEM_WRITE_4(sc, 0x300004, 1);
+	MEM_WRITE_4(sc, IWI_MEM_EVENT_CTL, 1);
 	DELAY(1000);
-	MEM_WRITE_4(sc, 0x300004, 0);
+	MEM_WRITE_4(sc, IWI_MEM_EVENT_CTL, 0);
 	DELAY(1000);
 	MEM_WRITE_1(sc, 0x200000, 0x00);
 	MEM_WRITE_1(sc, 0x200000, 0x40);
 
-	/* Adapter is buggy, we must set the address for each word */
-	for (w = (u_int16_t *)uc; size > 0; w++, size -= 2)
-		MEM_WRITE_2(sc, 0x200010, *w);
+	/* adapter is buggy, we must set the address for each word */
+	for (w = (uint16_t *)uc; size > 0; w++, size -= 2)
+		MEM_WRITE_2(sc, 0x200010, htole16(*w));
 
 	MEM_WRITE_1(sc, 0x200000, 0x00);
 	MEM_WRITE_1(sc, 0x200000, 0x80);
 
-	/* Wait until we get a response in the uc queue */
+	/* wait until we get a response in the uc queue */
 	for (ntries = 0; ntries < 100; ntries++) {
 		if (MEM_READ_1(sc, 0x200000) & 1)
 			break;
@@ -1467,7 +1532,7 @@ iwi_load_ucode(struct iwi_softc *sc, const char *name)
 		goto fail2;
 	}
 
-	/* Empty the uc queue or the firmware will not initialize properly */
+	/* empty the uc queue or the firmware will not initialize properly */
 	for (i = 0; i < 7; i++)
 		MEM_READ_4(sc, 0x200004);
 
@@ -1488,7 +1553,7 @@ iwi_load_firmware(struct iwi_softc *sc, const char *name)
 	bus_dma_segment_t seg;
 	caddr_t virtaddr;
 	u_char *p, *end;
-	u_int32_t sentinel, ctl, src, dst, sum, len, mlen;
+	uint32_t sentinel, ctl, src, dst, sum, len, mlen;
 	int ntries, nsegs, error;
 
 	if ((error = loadfirmware(name, &data, &size)) != 0) {
@@ -1506,7 +1571,7 @@ iwi_load_firmware(struct iwi_softc *sc, const char *name)
 	fw += sizeof (struct iwi_firmware_hdr);
 	size -= sizeof (struct iwi_firmware_hdr);
 
-	/* Allocate DMA memory for storing firmware image */
+	/* allocate DMA memory for storing firmware image */
 	error = bus_dmamap_create(sc->sc_dmat, size, 1, size, 0,
 	    BUS_DMA_NOWAIT, &map);
 	if (error != 0) {
@@ -1543,13 +1608,13 @@ iwi_load_firmware(struct iwi_softc *sc, const char *name)
 		goto fail5;
 	}
 
-	/* Copy firmware image to DMA memory */
+	/* copy firmware image to DMA memory */
 	bcopy(fw, virtaddr, size);
 
-	/* Make sure the adapter will get up-to-date values */
+	/* make sure the adapter will get up-to-date values */
 	bus_dmamap_sync(sc->sc_dmat, map, 0, size, BUS_DMASYNC_PREWRITE);
 
-	/* Tell the adapter where the command blocks are stored */
+	/* tell the adapter where the command blocks are stored */
 	MEM_WRITE_4(sc, 0x3000a0, 0x27000);
 
 	/*
@@ -1573,7 +1638,7 @@ iwi_load_firmware(struct iwi_softc *sc, const char *name)
 			ctl = IWI_CB_DEFAULT_CTL | mlen;
 			sum = ctl ^ src ^ dst;
 
-			/* Write a command block */
+			/* write a command block */
 			CSR_WRITE_4(sc, IWI_CSR_AUTOINC_DATA, ctl);
 			CSR_WRITE_4(sc, IWI_CSR_AUTOINC_DATA, src);
 			CSR_WRITE_4(sc, IWI_CSR_AUTOINC_DATA, dst);
@@ -1585,17 +1650,17 @@ iwi_load_firmware(struct iwi_softc *sc, const char *name)
 		}
 	}
 
-	/* Write a fictive final command block (sentinel) */
+	/* write a fictive final command block (sentinel) */
 	sentinel = CSR_READ_4(sc, IWI_CSR_AUTOINC_ADDR);
 	CSR_WRITE_4(sc, IWI_CSR_AUTOINC_DATA, 0);
 
 	CSR_WRITE_4(sc, IWI_CSR_RST, CSR_READ_4(sc, IWI_CSR_RST) &
 	    ~(IWI_RST_MASTER_DISABLED | IWI_RST_STOP_MASTER));
 
-	/* Tell the adapter to start processing command blocks */
+	/* tell the adapter to start processing command blocks */
 	MEM_WRITE_4(sc, 0x3000a4, 0x540100);
 
-	/* Wait until the adapter has processed all command blocks */
+	/* wait until the adapter has processed all command blocks */
 	for (ntries = 0; ntries < 400; ntries++) {
 		if (MEM_READ_4(sc, 0x3000d0) >= sentinel)
 			break;
@@ -1607,18 +1672,18 @@ iwi_load_firmware(struct iwi_softc *sc, const char *name)
 		goto fail6;
 	}
 
-	/* We're done with command blocks processing */
+	/* we're done with command blocks processing */
 	MEM_WRITE_4(sc, 0x3000a4, 0x540c00);
 
-	/* Allow interrupts so we know when the firmware is inited */
+	/* allow interrupts so we know when the firmware is inited */
 	CSR_WRITE_4(sc, IWI_CSR_INTR_MASK, IWI_INTR_MASK);
 
-	/* Tell the adapter to initialize the firmware */
+	/* tell the adapter to initialize the firmware */
 	CSR_WRITE_4(sc, IWI_CSR_RST, 0);
 	CSR_WRITE_4(sc, IWI_CSR_CTL, CSR_READ_4(sc, IWI_CSR_CTL) |
 	    IWI_CTL_ALLOW_STANDBY);
 
-	/* Wait at most one second for firmware initialization to complete */
+	/* wait at most one second for firmware initialization to complete */
 	if ((error = tsleep(sc, 0, "iwiinit", hz)) != 0) {
 		printf("%s: timeout waiting for firmware initialization to "
 		    "complete\n", sc->sc_dev.dv_xname);
@@ -1645,7 +1710,7 @@ iwi_config(struct iwi_softc *sc)
 	struct iwi_txpower power;
 	struct ieee80211_wepkey *k;
 	struct iwi_wep_key wepkey;
-	u_int32_t data;
+	uint32_t data;
 	int error, i;
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
@@ -1724,6 +1789,22 @@ iwi_config(struct iwi_softc *sc)
 	if (error != 0)
 		return error;
 
+	/* if we have a desired ESSID, set it now */
+	if (ic->ic_des_esslen != 0) {
+#ifdef IWI_DEBUG
+		if (iwi_debug > 0) {
+			printf("Setting desired ESSID to ");
+			ieee80211_print_essid(ic->ic_des_essid,
+			    ic->ic_des_esslen);
+			printf("\n");
+		}
+#endif
+		error = iwi_cmd(sc, IWI_CMD_SET_ESSID, ic->ic_des_essid,
+		    ic->ic_des_esslen, 0);
+		if (error != 0)
+			return error;
+	}
+
 	data = htole32(arc4random());
 	DPRINTF(("Setting initialization vector to %u\n", letoh32(data)));
 	error = iwi_cmd(sc, IWI_CMD_SET_IV, &data, sizeof data, 0);
@@ -1747,7 +1828,7 @@ iwi_config(struct iwi_softc *sc)
 		}
 	}
 
-	/* Enable adapter */
+	/* enable adapter */
 	DPRINTF(("Enabling adapter\n"));
 	return iwi_cmd(sc, IWI_CMD_ENABLE, NULL, 0, 0);
 }
@@ -1759,10 +1840,10 @@ iwi_set_chan(struct iwi_softc *sc, struct ieee80211_channel *chan)
 	struct iwi_scan scan;
 
 	bzero(&scan, sizeof scan);
-	scan.type = IWI_SCAN_TYPE_PASSIVE;
-	scan.intval = htole16(2000);
-	scan.channels[0] = 1 | (IEEE80211_IS_CHAN_5GHZ(chan) ? IWI_CHAN_5GHZ :
-	    IWI_CHAN_2GHZ);
+	memset(scan.type, IWI_SCAN_TYPE_PASSIVE, sizeof scan.type);
+	scan.passive = htole16(2000);
+	scan.channels[0] = 1 |
+	    (IEEE80211_IS_CHAN_5GHZ(chan) ? IWI_CHAN_5GHZ : IWI_CHAN_2GHZ);
 	scan.channels[1] = ieee80211_chan2ieee(ic, chan);
 
 	DPRINTF(("Setting channel to %u\n", ieee80211_chan2ieee(ic, chan)));
@@ -1774,12 +1855,18 @@ iwi_scan(struct iwi_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct iwi_scan scan;
-	u_int8_t *p;
+	uint8_t *p;
 	int i, count;
 
 	bzero(&scan, sizeof scan);
-	scan.type = IWI_SCAN_TYPE_BROADCAST;
-	scan.intval = htole16(40);
+
+	if (ic->ic_des_esslen != 0) {
+		scan.bdirected = htole16(40);
+		memset(scan.type, IWI_SCAN_TYPE_BDIRECTED, sizeof scan.type);
+	} else {
+		scan.broadcast = htole16(40);
+		memset(scan.type, IWI_SCAN_TYPE_BROADCAST, sizeof scan.type);
+	}
 
 	p = scan.channels;
 	count = 0;
@@ -1792,6 +1879,7 @@ iwi_scan(struct iwi_softc *sc)
 	}
 	*(p - count) = IWI_CHAN_5GHZ | count;
 
+	p = (count > 0) ? p + 1 : scan.channels;
 	count = 0;
 	for (i = 0; i <= IEEE80211_CHAN_MAX; i++) {
 		if (IEEE80211_IS_CHAN_2GHZ(&ic->ic_channels[i]) &&
@@ -1814,8 +1902,8 @@ iwi_auth_and_assoc(struct iwi_softc *sc)
 	struct iwi_configuration config;
 	struct iwi_associate assoc;
 	struct iwi_rateset rs;
-	u_int16_t capinfo;
-	u_int32_t data;
+	uint16_t capinfo;
+	uint32_t data;
 	int error;
 
 	if (IEEE80211_IS_CHAN_2GHZ(ni->ni_chan)) {
@@ -1844,10 +1932,10 @@ iwi_auth_and_assoc(struct iwi_softc *sc)
 	if (error != 0)
 		return error;
 
-	/* the rate set has already been "negociated" */
+	/* the rate set has already been "negotiated" */
 	rs.mode = IEEE80211_IS_CHAN_5GHZ(ni->ni_chan) ? IWI_MODE_11A :
 	    IWI_MODE_11G;
-	rs.type = IWI_RATESET_TYPE_NEGOCIATED;
+	rs.type = IWI_RATESET_TYPE_NEGOTIATED;
 	rs.nrates = ni->ni_rates.rs_nrates;
 	bcopy(ni->ni_rates.rs_rates, rs.rates, rs.nrates);
 	DPRINTF(("Setting negociated rates (%u)\n", rs.nrates));
@@ -2007,14 +2095,17 @@ iwi_stop(struct ifnet *ifp, int disable)
 	struct iwi_tx_buf *buf;
 	int i;
 
-	iwi_stop_master(sc);
-	CSR_WRITE_4(sc, IWI_CSR_RST, IWI_RST_SW_RESET);
-
+	sc->sc_tx_timer = 0;
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
+	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
+
+	iwi_stop_master(sc);
+	CSR_WRITE_4(sc, IWI_CSR_RST, IWI_RST_SW_RESET);
+
 	/*
-	 * Release Tx buffers
+	 * Release Tx buffers.
 	 */
 	for (i = 0; i < IWI_TX_RING_SIZE; i++) {
 		buf = &sc->tx_buf[i];
@@ -2023,15 +2114,9 @@ iwi_stop(struct ifnet *ifp, int disable)
 			bus_dmamap_unload(sc->sc_dmat, buf->map);
 			m_freem(buf->m);
 			buf->m = NULL;
-
-			if (buf->ni != NULL) {
-				ieee80211_release_node(ic, buf->ni);
-				buf->ni = NULL;
-			}
 		}
+		buf->ni = NULL;
 	}
-
-	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 }
 
 struct cfdriver iwi_cd = {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ct.c,v 1.11 2005/01/15 21:13:08 miod Exp $	*/
+/*	$OpenBSD: ct.c,v 1.16 2006/01/20 23:27:25 miod Exp $	*/
 /*	$NetBSD: ct.c,v 1.21 1997/04/02 22:37:23 scottr Exp $	*/
 
 /*
@@ -55,7 +55,6 @@
 #include <sys/ioctl.h>
 #include <sys/mtio.h>
 #include <sys/proc.h>
-#include <sys/tprintf.h>
 
 #include <hp300/dev/hpibvar.h>
 
@@ -86,7 +85,6 @@ struct	ct_softc {
 	char	*sc_addr;
 	int	sc_flags;
 	short	sc_type;
-	tpr_t	sc_tpr;
 	struct	hpibqueue sc_hq;	/* entry on hpib job queue */
 	int	sc_eofp;
 	int	sc_eofs[EOFS];
@@ -134,7 +132,7 @@ void	ctcommand(dev_t, int, int);
 cdev_decl(ct);
 bdev_decl(ct);
 
-struct	ctinfo {
+const struct	ctinfo {
 	short	hwid;
 	short	punit;
 	char	*desc;
@@ -204,7 +202,7 @@ ctident(parent, sc, ha)
 	struct ct_softc *sc;
 	struct hpibbus_attach_args *ha;
 {
-	struct ct_describe desc;
+	struct cs80_describe desc;
 	u_char stat, cmd[3];
 	char name[7];
 	int i, id, n, type, canstream;
@@ -217,12 +215,11 @@ ctident(parent, sc, ha)
 
 	/* Is it one of the tapes we support? */
 	for (id = 0; id < nctinfo; id++)
-		if (ha->ha_id == ctinfo[id].hwid)
+		if (ha->ha_id == ctinfo[id].hwid &&
+		    ha->ha_punit == ctinfo[id].punit)
 			break;
 	if (id == nctinfo)
 		return (0);
-
-	ha->ha_punit = ctinfo[id].punit;
 
 	/*
 	 * So far, so good.  Get drive parameters.  Note command
@@ -232,7 +229,7 @@ ctident(parent, sc, ha)
 	cmd[1] = C_SVOL(0);
 	cmd[2] = C_DESC;
 	hpibsend(parent->dv_unit, ha->ha_slave, C_CMD, cmd, sizeof(cmd));
-	hpibrecv(parent->dv_unit, ha->ha_slave, C_EXEC, &desc, 37);
+	hpibrecv(parent->dv_unit, ha->ha_slave, C_EXEC, &desc, sizeof(desc));
 	hpibrecv(parent->dv_unit, ha->ha_slave, C_QSTAT, &stat, sizeof(stat));
 
 	bzero(name, sizeof(name));
@@ -358,7 +355,6 @@ ctopen(dev, flag, type, p)
 	if (cc != sizeof(stat))
 		return(EBUSY);
 
-	sc->sc_tpr = tprintf_open(p);
 	sc->sc_flags |= CTF_OPEN;
 	return(0);
 }
@@ -390,7 +386,6 @@ ctclose(dev, flag, fmt, p)
 	if ((minor(dev) & CT_NOREW) == 0)
 		ctcommand(dev, MTREW, 1);
 	sc->sc_flags &= ~(CTF_OPEN | CTF_WRT | CTF_WRTTN);
-	tprintf_close(sc->sc_tpr);
 #ifdef DEBUG
 	if (ctdebug & CDB_FILES)
 		printf("ctclose: flags %x\n", sc->sc_flags);
@@ -427,7 +422,7 @@ ctcommand(dev, cmd, cnt)
 	bp->b_dev = dev;
 	if (cmd == MTFSF) {
 		nbp = (struct buf *)geteblk(MAXBSIZE);
-		bp->b_un.b_addr = nbp->b_un.b_addr;
+		bp->b_data = nbp->b_data;
 		bp->b_bcount = MAXBSIZE;
 	}
 
@@ -483,7 +478,7 @@ ctustart(sc)
 	struct buf *bp;
 
 	bp = sc->sc_tab.b_actf;
-	sc->sc_addr = bp->b_un.b_addr;
+	sc->sc_addr = bp->b_data;
 	sc->sc_resid = bp->b_bcount;
 	if (hpibreq(sc->sc_dev.dv_parent, &sc->sc_hq))
 		ctstart(sc);
@@ -761,16 +756,13 @@ ctintr(arg)
 			}
 			if (sc->sc_stat.c_aef & 0x5800) {
 				if (sc->sc_stat.c_aef & 0x4000)
-					tprintf(sc->sc_tpr,
-						"%s: uninitialized media\n",
+					printf("%s: uninitialized media\n",
 						sc->sc_dev.dv_xname);
 				if (sc->sc_stat.c_aef & 0x1000)
-					tprintf(sc->sc_tpr,
-						"%s: not ready\n",
+					printf("%s: not ready\n",
 						sc->sc_dev.dv_xname);
 				if (sc->sc_stat.c_aef & 0x0800)
-					tprintf(sc->sc_tpr,
-						"%s: write protect\n",
+					printf("%s: write protect\n",
 						sc->sc_dev.dv_xname);
 			} else {
 				printf("%s err: v%d u%d ru%d bn%ld, ",
@@ -844,13 +836,16 @@ ctdone(sc, bp)
 	struct buf *bp;
 {
 	struct buf *dp;
+	int s;
 
 	if ((dp = bp->b_actf) != NULL)
 		dp->b_actb = bp->b_actb;
 	else
 		sc->sc_tab.b_actb = bp->b_actb;
 	*bp->b_actb = dp;
+	s = splbio();
 	biodone(bp);
+	splx(s);
 	hpibfree(sc->sc_dev.dv_parent, &sc->sc_hq);
 	if (sc->sc_tab.b_actf == NULL) {
 		sc->sc_tab.b_active = 0;

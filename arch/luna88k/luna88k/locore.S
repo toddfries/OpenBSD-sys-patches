@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.7 2004/12/24 22:50:30 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.11 2005/12/03 18:20:48 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -120,7 +120,7 @@ GLOBAL(start_text)
 	or.u	r13, r0,  hi16(_C_LABEL(brdtyp))
 	st	r8,  r13, lo16(_C_LABEL(brdtyp))
 
-	/* set _cputyp */
+	/* set cputyp */
 	cmp	r2,  r8, BRD_197	/* r8 contains brdtyp */
 	bb1	ne, r2, 1f	/* if it's a '197, CPU is 88110 */
 	or.u	r13, r0,  hi16(CPU_88110)
@@ -157,12 +157,12 @@ GLOBAL(start_text)
 	 * The manual says not to disable interrupts and freeze shadowing
 	 * at the same time because interrupts are not actually disabled
 	 * until after the next instruction. Well, if an interrupt
-	 * occurs now, we're in deep   anyway, so I'm going to do
+	 * occurs now, we're in deep trouble anyway, so I'm going to do
 	 * the two together.
 	 *
 	 * Upon a reset (or poweron, I guess), the PSR indicates:
 	 *   supervisor mode
-	 *   interrupts, shadowing, FPU, missaligned exception: all disabled
+	 *   interrupts, shadowing, FPU, misaligned exception: all disabled
 	 *
 	 * We'll just construct our own turning on what we want.
 	 *
@@ -170,7 +170,6 @@ GLOBAL(start_text)
 	 */
 
 	stcr	r0, SSBR	/* clear this for later */
-	stcr	r0, SR0		/* clear "current thread" */
 	stcr	r0, SR1		/* clear the CPU flags */
 
 	set	r11, r0,  1<PSR_SUPERVISOR_MODE_BIT>
@@ -260,11 +259,9 @@ GLOBAL(start_text)
 ASLOCAL(master_start)
 	/*
 	 * Switch to interrupt stack
-	 * Use idle_u's stack instead?
 	 */
 	or.u	r31, r0,  hi16(_ASM_LABEL(intstack_end))
 	or	r31, r31, lo16(_ASM_LABEL(intstack_end))
-	clr	r31, r31, 3<0>	/* round down to 8-byte boundary */
 
 	or.u	r3, r0, hi16(_C_LABEL(vector_list))
 	or	r3, r3, lo16(_C_LABEL(vector_list))
@@ -311,34 +308,32 @@ ASLOCAL(master_start)
 	or.u	r2,  r0,  hi16(0x41000000)
 	st	r0,  r2,  lo16(0x41000000)
 
-	/* still on int stack */
+	/*
+	 * luna88k_bootstrap(), among other things, clears proc0's u area.
+	 * We are still using the interrupt stack here, thus we are not
+	 * affected...
+	 */
 	bsr	_C_LABEL(luna88k_bootstrap)
 
 	/*
-	 * we now know our cpu number, so we
-	 * can set interrupt_stack[cpu_number()] = intstack
+	 * ...and we can switch to the u area stack now.
 	 */
-	ldcr	r10, SR1
-	extu	r10, r10, FLAG_CPU_FIELD_WIDTH<0>	/* r10 <-- CPU# */
+	ldcr	r10, CPU
+	ld	r31, r10, CI_CURPCB
+	addu	r31, r31, USIZE
 
-	/* figure interrupt_stack[cpu_number()] */
-	or.u	r11,  r0, hi16(_C_LABEL(interrupt_stack))
-	or	r11, r11, lo16(_C_LABEL(interrupt_stack))
-	or.u	r12, r0,  hi16(_C_LABEL(intstack))
-	or	r12, r12, lo16(_C_LABEL(intstack))
-	st	r12, r11 [r10]
+	/* call main() - no arguments although main() still defines one */
+	bsr	_C_LABEL(main)
+	or.u	r2, r0, hi16(_ASM_LABEL(main_panic))
+	bsr.n	_C_LABEL(panic)
+	 or	r2, r2, lo16(_ASM_LABEL(main_panic))
 
-	/* switch to proc0 uarea */
-	or.u	r10, r0, hi16(UADDR)
-	or	r31, r10,lo16(UADDR)
-	addu	r31, r31, USIZE - 8
-
-	/* make the call: main() */
-	or.u	r2, r0, hi16(UADDR)
-	or	r2, r2,lo16(UADDR)
-	bsr.n	_C_LABEL(main)
-	 addu	r2, r2, USIZE - 8
-	bsr	_C_LABEL(panic)
+	data
+	.align	4
+ASLOCAL(main_panic)
+	string	"main() returned\0"
+	text
+	.align	8
 
 /*
  *	slave CPUs starts here
@@ -385,12 +380,6 @@ GLOBAL(spin_cpu)
  * The processor loops (busy waits) for the given number of microseconds:
  * Thus, delay(1000000) will delay for one second.
  * (originally from Mach 2.5)
- *
- * REGISTER USAGE:
- *  IN  r1   - return address
- *  IN  r2   - number of microseconds
- *      r3   - cpu speed in MHz
- *      r4   - number of cycles to delay
  */
 
 GLOBAL(delay)
@@ -409,16 +398,16 @@ GLOBAL(delay)
 /*****************************************************************************/
 
 	data
-	.align NBPG
+	.align	PAGE_SIZE
 GLOBAL(kernel_sdt)		/* SDT (segment descriptor table */
 	space	0x2000		/* 8K - 4K phys, 4K virt*/
 
-	.align NBPG
-GLOBAL(intstack)
-	space	INTSTACK_SIZE	/* 16K, just to be safe */
+	.align	PAGE_SIZE
+ASGLOBAL(intstack)
+	space	USIZE
 ASGLOBAL(intstack_end)
 ASGLOBAL(slavestack)
-	space	NBPG		/* 4K, small, interim stack */
+	space	PAGE_SIZE	/* 4K, small, interim stack */
 ASGLOBAL(slavestack_end)
 
 /*
@@ -430,22 +419,21 @@ ASGLOBAL(slavestack_end)
  * we feel like doing that).
  * Should be page aligned.
  */
-	.align NBPG
+	.align	PAGE_SIZE
 GLOBAL(idle_u)
-	space	UPAGES * NBPG
+	space	USIZE
 
 /*
  * Process 0's u.
  *
  * This must be page aligned
  */
-	.align	NBPG
+	.align	PAGE_SIZE
 ASLOCAL(u0)
-	space	UPAGES * NBPG
+	space	USIZE
+GLOBAL(proc0paddr)
+	word	_ASM_LABEL(u0)	/*  KVA of proc0 uarea */
 
-/* UPAGES get mapped to kstack */
-ASGLOBAL(kstack)
-	word	UADDR
 GLOBAL(ret_addr)
 	word 0
 /* XMEM spin lock -- to count CPUs */
@@ -460,49 +448,8 @@ ASLOCAL(master_processor_chosen)
 /* XMEM spin lock -- controls access to master_processor_chosen */
 ASLOCAL(inter_processor_lock)
 	word 0
+
 #if defined(DDB) || NKSYMS > 0
 GLOBAL(esym)
 	word 	0
 #endif /* DDB || NKSYMS > 0 */
-GLOBAL(proc0paddr)
-	word	_ASM_LABEL(u0)	/*  KVA of proc0 uarea */
-
-/*
- * curpcb points to the current pcb (and hence u. area).
- * Initially this is the special one.
- */
-/*
- * pcb is composed of kernel state + user state
- * I may have to change curpcb to u0 + PCB_USER based on what
- * other parts expect XXX nivas
- */
-GLOBAL(curpcb)
-	word	_ASM_LABEL(u0)	/* curpcb = &u0 */
-
-/*
- * Trampoline code. Gets copied to the top of
- * user stack in exec.
- */
-GLOBAL(sigcode)			/* r31 points to sigframe */
-	ld	r3, r31, 4	/* siginfo_t* */
-	ld	r4, r31, 8	/* sigcontext* */
-	ld	r5, r31, 12	/* handler */
-	jsr.n	r5
-	 ld	r2, r31, 0	/* signo */
-	ld	r2, r31, 8	/* sigcontext* */
-	or	r13,  r0, SYS_sigreturn
-	tb0	0, r0, 128	/* syscall trap, calling sigreturn */
-	NOP			| failure return
-#if 0
-	NOP			| success return
-#endif
-	/* sigreturn will not return unless it fails */
-	or	r13, r0, SYS_exit
-	tb0	0, r0, 128	/* syscall trap, exit */
-	/*
-	 * this never returns, but we need to provide fetchable instructions
-	 * for the 88100 pipeline.
-	 */
-	NOP
-	NOP
-GLOBAL(esigcode)

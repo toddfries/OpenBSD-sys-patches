@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.29 2005/05/26 00:33:45 pedro Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.32 2006/01/18 23:42:12 miod Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -233,13 +233,10 @@ ptyattach(int n)
 
 /*ARGSUSED*/
 int
-ptsopen(dev, flag, devtype, p)
-	dev_t dev;
-	int flag, devtype;
-	struct proc *p;
+ptsopen(dev_t dev, int flag, int devtype, struct proc *p)
 {
 	struct pt_softc *pti;
-	register struct tty *tp;
+	struct tty *tp;
 	int error;
 
 	if ((error = check_pty(minor(dev))))
@@ -278,13 +275,10 @@ ptsopen(dev, flag, devtype, p)
 }
 
 int
-ptsclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+ptsclose(dev_t dev, int flag, int mode, struct proc *p)
 {
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
 	int error;
 
 	error = (*linesw[tp->t_line].l_close)(tp, flag);
@@ -294,14 +288,11 @@ ptsclose(dev, flag, mode, p)
 }
 
 int
-ptsread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+ptsread(dev_t dev, struct uio *uio, int flag)
 {
 	struct proc *p = curproc;
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
 	int error = 0;
 
 again:
@@ -349,13 +340,10 @@ again:
  * indirectly, when tty driver calls ptsstart.
  */
 int
-ptswrite(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+ptswrite(dev_t dev, struct uio *uio, int flag)
 {
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
 
 	if (tp->t_oproc == 0)
 		return (EIO);
@@ -367,10 +355,9 @@ ptswrite(dev, uio, flag)
  * Wake up process polling or sleeping for input from controlling tty.
  */
 void
-ptsstart(tp)
-	struct tty *tp;
+ptsstart(struct tty *tp)
 {
-	register struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
+	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
 
 	if (tp->t_state & TS_TTSTOP)
 		return;
@@ -382,9 +369,7 @@ ptsstart(tp)
 }
 
 int
-ptsstop(tp, flush)
-	register struct tty *tp;
-	int flush;
+ptsstop(struct tty *tp, int flush)
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
 	int flag;
@@ -407,9 +392,7 @@ ptsstop(tp, flush)
 }
 
 void
-ptcwakeup(tp, flag)
-	struct tty *tp;
-	int flag;
+ptcwakeup(struct tty *tp, int flag)
 {
 	struct pt_softc *pti = pt_softc[minor(tp->t_dev)];
 
@@ -429,13 +412,10 @@ int ptcopen(dev_t, int, int, struct proc *);
 
 /*ARGSUSED*/
 int
-ptcopen(dev, flag, devtype, p)
-	dev_t dev;
-	int flag, devtype;
-	struct proc *p;
+ptcopen(dev_t dev, int flag, int devtype, struct proc *p)
 {
 	struct pt_softc *pti;
-	register struct tty *tp;
+	struct tty *tp;
 	int error;
 
 	if ((error = check_pty(minor(dev))))
@@ -459,13 +439,10 @@ ptcopen(dev, flag, devtype, p)
 
 /*ARGSUSED*/
 int
-ptcclose(dev, flag, devtype, p)
-	dev_t dev;
-	int flag, devtype;
-	struct proc *p;
+ptcclose(dev_t dev, int flag, int devtype, struct proc *p)
 {
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
 
 	(void)(*linesw[tp->t_line].l_modem)(tp, 0);
 	tp->t_state &= ~TS_CARR_ON;
@@ -474,13 +451,10 @@ ptcclose(dev, flag, devtype, p)
 }
 
 int
-ptcread(dev, uio, flag)
-	dev_t dev;
-	struct uio *uio;
-	int flag;
+ptcread(dev_t dev, struct uio *uio, int flag)
 {
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
 	char buf[BUFSIZ];
 	int error = 0, cc;
 
@@ -543,15 +517,12 @@ ptcread(dev, uio, flag)
 
 
 int
-ptcwrite(dev, uio, flag)
-	dev_t dev;
-	register struct uio *uio;
-	int flag;
+ptcwrite(dev_t dev, struct uio *uio, int flag)
 {
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
-	register u_char *cp = NULL;
-	register int cc = 0;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
+	u_char *cp = NULL;
+	int cc = 0;
 	u_char locbuf[BUFSIZ];
 	int cnt = 0;
 	int error = 0;
@@ -777,27 +748,21 @@ ptckqfilter(dev_t dev, struct knote *kn)
 }
 
 struct tty *
-ptytty(dev)
-	dev_t dev;
+ptytty(dev_t dev)
 {
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
 
 	return (tp);
 }
 
 /*ARGSUSED*/
 int
-ptyioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+ptyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
-	register struct pt_softc *pti = pt_softc[minor(dev)];
-	register struct tty *tp = pti->pt_tty;
-	register u_char *cc = tp->t_cc;
+	struct pt_softc *pti = pt_softc[minor(dev)];
+	struct tty *tp = pti->pt_tty;
+	u_char *cc = tp->t_cc;
 	int stop, error;
 
 	/*
@@ -831,17 +796,19 @@ ptyioctl(dev, cmd, data, flag, p)
 
 		case TIOCGPGRP:
 #ifdef COMPAT_SUNOS
-			{
+		    {
 			/*
 			 * I'm not sure about SunOS TIOCGPGRP semantics
 			 * on PTYs, but it's something like this:
 			 */
 			extern struct emul emul_sunos;
-			if (p->p_emul == &emul_sunos && tp->t_pgrp == 0)
-				return (EIO);
-			*(int *)data = tp->t_pgrp->pg_id;
-			return (0);
+			if (p->p_emul == &emul_sunos) {
+				if (tp->t_pgrp == 0)
+					return (EIO);
+				*(int *)data = tp->t_pgrp->pg_id;
+				return (0);
 			}
+		    }
 #endif
 			/*
 			 * We aviod calling ttioctl on the controller since,
@@ -1175,7 +1142,6 @@ retry:
 		cfp->f_ops = &vnops;
 		cfp->f_data = (caddr_t) cnd.ni_vp;
 		VOP_UNLOCK(cnd.ni_vp, 0, p);
-		FILE_SET_MATURE(cfp);
 
 		/*
 		 * Open the slave.
@@ -1229,13 +1195,16 @@ retry:
 		sfp->f_ops = &vnops;
 		sfp->f_data = (caddr_t) snd.ni_vp;
 		VOP_UNLOCK(snd.ni_vp, 0, p);
-		FILE_SET_MATURE(sfp);
 
 		/* now, put the indexen and names into struct ptmget */
 		ptm->cfd = cindx;
 		ptm->sfd = sindx;
 		memcpy(ptm->cn, pti->pty_pn, sizeof(pti->pty_pn));
 		memcpy(ptm->sn, pti->pty_sn, sizeof(pti->pty_sn));
+
+		/* mark the files mature now that we've passed all errors */
+		FILE_SET_MATURE(cfp);
+		FILE_SET_MATURE(sfp);
 
 		fdpunlock(fdp);
 		break;

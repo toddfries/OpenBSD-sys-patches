@@ -1,4 +1,4 @@
-/*	$OpenBSD: dvbox.c,v 1.8 2005/01/27 21:24:48 miod Exp $	*/
+/*	$OpenBSD: dvbox.c,v 1.12 2005/12/31 18:13:41 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -82,8 +82,6 @@
 #include <hp300/dev/diovar.h>
 #include <hp300/dev/diodevs.h>
 #include <hp300/dev/intiovar.h>
-
-#include <dev/cons.h>
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
@@ -169,7 +167,7 @@ dvbox_intio_attach(struct device *parent, struct device *self, void *aux)
 	struct diofbreg *fbr;
 
 	fbr = (struct diofbreg *)IIOV(GRFIADDR);
-	sc->sc_scode = -1;	/* XXX internal i/o */
+	sc->sc_scode = CONSCODE_INTERNAL;
 
         if (sc->sc_scode == conscode) {
                 sc->sc_fb = &diofb_cn;
@@ -420,105 +418,8 @@ dvbox_windowmove(struct diofb *fb, u_int16_t sx, u_int16_t sy,
  * DaVinci console support
  */
 
-int dvbox_console_scan(int, caddr_t, void *);
-cons_decl(dvbox);
-
-int
-dvbox_console_scan(int scode, caddr_t va, void *arg)
-{
-	struct diofbreg *fbr = (struct diofbreg *)va;
-	struct consdev *cp = arg;
-	int force = 0, pri;
-
-	if (fbr->id != GRFHWID || fbr->fbid != GID_DAVINCI)
-		return (0);
-
-	pri = CN_NORMAL;
-
-#ifdef CONSCODE
-	/*
-	 * Raise our priority, if appropriate.
-	 */
-	if (scode == CONSCODE) {
-		pri = CN_REMOTE;
-		force = conforced = 1;
-	}
-#endif
-
-	/* Only raise priority. */
-	if (pri > cp->cn_pri)
-		cp->cn_pri = pri;
-
-	/*
-	 * If our priority is higher than the currently-remembered
-	 * console, stash our priority.
-	 */
-	if (((cn_tab == NULL) || (cp->cn_pri > cn_tab->cn_pri)) || force) {
-		cn_tab = cp;
-		return (DIO_SIZE(scode, va));
-	}
-	return (0);
-}
-
 void
-dvboxcnprobe(struct consdev *cp)
-{
-	int maj;
-	caddr_t va;
-	struct diofbreg *fbr;
-	int force = 0;
-
-	/* Abort early if console is already forced. */
-	if (conforced)
-		return;
-
-	for (maj = 0; maj < nchrdev; maj++) {
-		if (cdevsw[maj].d_open == wsdisplayopen)
-			break;
-	}
-
-	if (maj == nchrdev)
-		return;
-
-	cp->cn_dev = makedev(maj, 0);
-	cp->cn_pri = CN_DEAD;
-
-	/* Look for "internal" framebuffer. */
-	va = (caddr_t)IIOV(GRFIADDR);
-	fbr = (struct diofbreg *)va;
-	if (!badaddr(va) &&
-	    fbr->id == GRFHWID && fbr->fbid == GID_DAVINCI) {
-		cp->cn_pri = CN_INTERNAL;
-
-#ifdef CONSCODE
-		if (CONSCODE == -1) {
-			force = conforced = 1;
-		}
-#endif
-
-		/*
-		 * If our priority is higher than the currently
-		 * remembered console, stash our priority, and
-		 * unmap whichever device might be currently mapped.
-		 * Since we're internal, we set the saved size to 0
-		 * so they don't attempt to unmap our fixed VA later.
-		 */
-		if (((cn_tab == NULL) || (cp->cn_pri > cn_tab->cn_pri)) ||
-		    force) {
-			cn_tab = cp;
-			if (convasize)
-				iounmap(conaddr, convasize);
-			conscode = -1;
-			conaddr = va;
-			convasize = 0;
-		}
-	}
-
-	console_scan(dvbox_console_scan, cp, HP300_BUS_DIO);
-}
-
-void
-dvboxcninit(struct consdev *cp)
+dvboxcninit()
 {
 	dvbox_reset(&diofb_cn, conscode, (struct diofbreg *)conaddr);
 	diofb_cnattach(&diofb_cn);

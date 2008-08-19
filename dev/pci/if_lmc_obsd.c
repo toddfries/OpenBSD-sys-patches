@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmc_obsd.c,v 1.16 2005/08/09 04:10:12 mickey Exp $ */
+/*	$OpenBSD: if_lmc_obsd.c,v 1.19 2005/11/07 00:29:21 brad Exp $ */
 /*	$NetBSD: if_lmc_nbsd.c,v 1.1 1999/03/25 03:32:43 explorer Exp $	*/
 
 /*-
@@ -63,6 +63,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "bpfilter.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -72,110 +74,39 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>	/* only for declaration of wakeup() used by vm.h */
-#if defined(__FreeBSD__)
-#include <machine/clock.h>
-#elif defined(__bsdi__) || defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/device.h>
-#endif
 
-#if defined(__NetBSD__)
 #include <dev/pci/pcidevs.h>
-#include "rnd.h"
-#if NRND > 0
-#include <sys/rnd.h>
-#endif
-#endif
-
-#if defined(__OpenBSD__)
-#include <dev/pci/pcidevs.h>
-#endif
 
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/if_dl.h>
 #include <net/netisr.h>
 
-#include "bpfilter.h"
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
 
-#include <uvm/uvm_extern.h>
-
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
 #include <net/if_sppp.h>
-#endif
 
-#if defined(__bsdi__)
-#if INET
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
-#endif
-
-#include <net/netisr.h>
-#include <net/if.h>
-#include <net/netisr.h>
-#include <net/if_types.h>
-#include <net/if_p2p.h>
-#include <net/if_c_hdlc.h>
-#endif
-
-#if defined(__FreeBSD__)
-#include <vm/pmap.h>
-#include <pci.h>
-#if NPCI > 0
-#include <pci/pcivar.h>
-#include <pci/dc21040reg.h>
-#define INCLUDE_PATH_PREFIX "pci/"
-#endif
-#endif /* __FreeBSD__ */
-
-#if defined(__bsdi__)
-#include <i386/pci/ic/dc21040.h>
-#include <i386/isa/isa.h>
-#include <i386/isa/icu.h>
-#include <i386/isa/dma.h>
-#include <i386/isa/isavar.h>
-#include <i386/pci/pci.h>
-
-#define	INCLUDE_PATH_PREFIX	"i386/pci/"
-#endif /* __bsdi__ */
-
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <machine/bus.h>
-#if defined(__alpha__) && defined(__NetBSD__)
-#include <machine/intr.h>
-#endif
+
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/ic/dc21040reg.h>
-#define	INCLUDE_PATH_PREFIX	"dev/pci/"
-#endif /* __NetBSD__ */
 
-/*
- * Sigh.  Every OS puts these in different places.  NetBSD and FreeBSD use
- * a C preprocessor that allows this hack, but BSDI does not.  Grr.
- */
-#if defined(__NetBSD__) || defined(__FreeBSD__)
-#include INCLUDE_PATH_PREFIX "if_lmc_types.h"
-#include INCLUDE_PATH_PREFIX "if_lmcioctl.h"
-#include INCLUDE_PATH_PREFIX "if_lmcvar.h"
-#elif defined(__OpenBSD__)
 #include <dev/pci/if_lmc_types.h>
 #include <dev/pci/if_lmcioctl.h>
 #include <dev/pci/if_lmcvar.h>
-#else /* BSDI */
-#include "i386/pci/if_lmctypes.h"
-#include "i386/pci/if_lmcioctl.h"
-#include "i386/pci/if_lmcvar.h"
-#endif
 
 /*
  * This file is INCLUDED (gross, I know, but...)
  */
 
 static void lmc_shutdown(void *arg);
+static int lmc_busdma_init(lmc_softc_t * const sc);
+static int lmc_busdma_allocmem(lmc_softc_t * const sc, size_t size,
+	bus_dmamap_t *map_p, lmc_desc_t **desc_p);
 
 static int
 lmc_pci_probe(struct device *parent,
@@ -205,12 +136,13 @@ lmc_pci_probe(struct device *parent,
 	if (PCI_VENDORID(id) != PCI_VENDOR_LMC)
 		return 0;
 	if ((PCI_CHIPID(id) != PCI_PRODUCT_LMC_HSSI)
+	    && (PCI_CHIPID(id) != PCI_PRODUCT_LMC_HSSIC)
 	    && (PCI_CHIPID(id) != PCI_PRODUCT_LMC_DS3)
 	    && (PCI_CHIPID(id) != PCI_PRODUCT_LMC_SSI)
 	    && (PCI_CHIPID(id) != PCI_PRODUCT_LMC_DS1))
 		return 0;
 
-	return 10; /* must be > than any other tulip driver */
+	return 20; /* must be > than any other tulip driver */
 }
 
 static void  lmc_pci_attach(struct device * const parent,
@@ -231,9 +163,6 @@ lmc_pci_attach(struct device * const parent,
 	u_int32_t revinfo, cfdainfo, id, ssid;
 	pci_intr_handle_t intrhandle;
 	const char *intrstr;
-#if 0
-	vm_offset_t pa_csrs;
-#endif
 	unsigned csroffset = LMC_PCI_CSROFFSET;
 	unsigned csrsize = LMC_PCI_CSRSIZE;
 	lmc_csrptr_t csr_base;
@@ -254,6 +183,10 @@ lmc_pci_attach(struct device * const parent,
 	switch (PCI_CHIPID(ssid)) {
 	case PCI_PRODUCT_LMC_HSSI:
 		printf(": HSSI\n");
+		sc->lmc_media = &lmc_hssi_media;
+		break;
+	case PCI_PRODUCT_LMC_HSSIC:
+		printf(": HSSIc\n");
 		sc->lmc_media = &lmc_hssi_media;
 		break;
 	case PCI_PRODUCT_LMC_DS3:
@@ -297,15 +230,11 @@ lmc_pci_attach(struct device * const parent,
 		bus_space_handle_t ioh, memh;
 		int ioh_valid, memh_valid;
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-
 		ioh_valid = (pci_mapreg_map(pa, PCI_CBIO, PCI_MAPREG_TYPE_IO,
 		    0, &iot, &ioh, NULL, NULL, 0) == 0);
 		memh_valid = (pci_mapreg_map(pa, PCI_CBMA,
 		    PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT, 0, &memt,
 		    &memh, NULL, NULL, 0) == 0);
-#endif
-
 
 		if (memh_valid) {
 			sc->lmc_bustag = memt;
@@ -318,6 +247,12 @@ lmc_pci_attach(struct device * const parent,
 			       sc->lmc_dev.dv_xname);
 			return;
 		}
+	}
+
+	sc->lmc_dmatag = pa->pa_dmat;
+	if ((lmc_busdma_init(sc)) != 0) {
+		printf("error initing bus_dma\n");
+		return;
 	}
 
 	lmc_initcsrs(sc, csr_base + csroffset, csrsize);
@@ -354,13 +289,8 @@ lmc_pci_attach(struct device * const parent,
 	}
 	intrstr = pci_intr_string(pa->pa_pc, intrhandle);
 
-#if defined(__OpenBSD__)
 	sc->lmc_ih = pci_intr_establish(pa->pa_pc, intrhandle, IPL_NET,
 						intr_rtn, sc, self->dv_xname);
-#else
-	sc->lmc_ih = pci_intr_establish(pa->pa_pc, intrhandle, IPL_NET,
-						intr_rtn, sc);
-#endif
 
 	if (sc->lmc_ih == NULL) {
 		printf("%s: couldn't establish interrupt",
@@ -397,4 +327,102 @@ lmc_shutdown(void *arg)
 
 	sc->lmc_miireg16 = 0;  /* deassert ready, and all others too */
 	lmc_led_on(sc, LMC_MII16_LED_ALL);
+}
+
+static int
+lmc_busdma_allocmem(
+    lmc_softc_t * const sc,
+    size_t size,
+    bus_dmamap_t *map_p,
+    lmc_desc_t **desc_p)
+{
+    bus_dma_segment_t segs[1];
+    int nsegs, error;
+    error = bus_dmamem_alloc(sc->lmc_dmatag, size, 1, NBPG,
+			     segs, sizeof(segs)/sizeof(segs[0]),
+			     &nsegs, BUS_DMA_NOWAIT);
+    if (error == 0) {
+	void *desc;
+	error = bus_dmamem_map(sc->lmc_dmatag, segs, nsegs, size,
+			       (void *) &desc, BUS_DMA_NOWAIT|BUS_DMA_COHERENT);
+	if (error == 0) {
+	    bus_dmamap_t map;
+	    error = bus_dmamap_create(sc->lmc_dmatag, size, 1, size, 0,
+				      BUS_DMA_NOWAIT, &map);
+	    if (error == 0) {
+		error = bus_dmamap_load(sc->lmc_dmatag, map, desc,
+					size, NULL, BUS_DMA_NOWAIT);
+		if (error)
+		    bus_dmamap_destroy(sc->lmc_dmatag, map);
+		else
+		    *map_p = map;
+	    }
+	    if (error)
+		bus_dmamem_unmap(sc->lmc_dmatag, desc, size);
+	}
+	if (error)
+	    bus_dmamem_free(sc->lmc_dmatag, segs, nsegs);
+	else
+	    *desc_p = desc;
+    }
+    return error;
+}
+
+static int
+lmc_busdma_init(
+    lmc_softc_t * const sc)
+{
+    int error = 0;
+
+    /*
+     * Allocate space and dmamap for transmit ring
+     */
+    if (error == 0) {
+	error = lmc_busdma_allocmem(sc, sizeof(lmc_desc_t) * LMC_TXDESCS,
+				      &sc->lmc_txdescmap,
+				      &sc->lmc_txdescs);
+    }
+
+    /*
+     * Allocate dmamaps for each transmit descriptors
+     */
+    if (error == 0) {
+	while (error == 0 && sc->lmc_txmaps_free < LMC_TXDESCS) {
+	    bus_dmamap_t map;
+	    if ((error = LMC_TXMAP_CREATE(sc, &map)) == 0)
+		sc->lmc_txmaps[sc->lmc_txmaps_free++] = map;
+	}
+	if (error) {
+	    while (sc->lmc_txmaps_free > 0) 
+		bus_dmamap_destroy(sc->lmc_dmatag,
+				   sc->lmc_txmaps[--sc->lmc_txmaps_free]);
+	}
+    }
+
+    /*
+     * Allocate space and dmamap for receive ring
+     */
+    if (error == 0) {
+	error = lmc_busdma_allocmem(sc, sizeof(lmc_desc_t) * LMC_RXDESCS,
+				      &sc->lmc_rxdescmap,
+				      &sc->lmc_rxdescs);
+    }
+
+    /*
+     * Allocate dmamaps for each receive descriptors
+     */
+    if (error == 0) {
+	while (error == 0 && sc->lmc_rxmaps_free < LMC_RXDESCS) {
+	    bus_dmamap_t map;
+	    if ((error = LMC_RXMAP_CREATE(sc, &map)) == 0)
+		sc->lmc_rxmaps[sc->lmc_rxmaps_free++] = map;
+	}
+	if (error) {
+	    while (sc->lmc_rxmaps_free > 0) 
+		bus_dmamap_destroy(sc->lmc_dmatag,
+				   sc->lmc_rxmaps[--sc->lmc_rxmaps_free]);
+	}
+    }
+
+    return error;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.101 2005/02/27 22:08:41 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.107 2005/12/30 18:14:12 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -86,7 +86,6 @@
 
 #include <dev/cons.h>
 
-#define	MAXMEM	64*1024	/* XXX - from cmap.h */
 #include <uvm/uvm_extern.h>
 
 #ifdef USELEDS
@@ -122,7 +121,7 @@ int	bufpages = 0;
 int	bufcachepercent = BUFCACHEPERCENT;
 
 int	maxmem;			/* max memory per process */
-int	physmem = MAXMEM;	/* max supported memory, changes to actual */
+int	physmem;		/* max supported memory, changes to actual */
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -143,7 +142,7 @@ extern struct emul emul_sunos;
  * Some storage space must be allocated statically because of the
  * early console initialization.
  */
-char	extiospace[EXTENT_FIXED_STORAGE_SIZE(16)];
+char	extiospace[EXTENT_FIXED_STORAGE_SIZE(8)];
 extern int eiomapsize;
 
 /* prototypes for local functions */
@@ -163,13 +162,12 @@ void    straytrap(int, u_short);
 void	nmihand(struct frame);
 
 /*
- * Select code of console.  Set to -1 if console is on
+ * Select code of console.  Set to CONSCODE_INTERNAL if console is on
  * "internal" framebuffer.
  */
 int	conscode;
 caddr_t	conaddr;		/* for drivers in cn_init() */
 int	convasize;		/* size of mapped console device */
-int	conforced;		/* console has been forced */
 
 /*
  * Note that the value of delay_divisor is roughly
@@ -215,8 +213,7 @@ consinit()
 	 * Initialize some variables for sanity.
 	 */
 	convasize = 0;
-	conforced = 0;
-	conscode = 1024;		/* invalid */
+	conscode = CONSCODE_INVALID;
 
 	/*
 	 * Initialize the bus resource map.
@@ -448,55 +445,6 @@ allocsys(v)
 }
 
 /*
- * Set registers on exec.
- */
-void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
-{
-	struct frame *frame = (struct frame *)p->p_md.md_regs;
-
-	frame->f_sr = PSL_USERSET;
-	frame->f_pc = pack->ep_entry & ~1;
-	frame->f_regs[D0] = 0;
-	frame->f_regs[D1] = 0;
-	frame->f_regs[D2] = 0;
-	frame->f_regs[D3] = 0;
-	frame->f_regs[D4] = 0;
-	frame->f_regs[D5] = 0;
-	frame->f_regs[D6] = 0;
-	frame->f_regs[D7] = 0;
-	frame->f_regs[A0] = 0;
-	frame->f_regs[A1] = 0;
-	frame->f_regs[A2] = (int)PS_STRINGS;
-	frame->f_regs[A3] = 0;
-	frame->f_regs[A4] = 0;
-	frame->f_regs[A5] = 0;
-	frame->f_regs[A6] = 0;
-	frame->f_regs[SP] = stack;
-
-	/* restore a null state frame */
-	p->p_addr->u_pcb.pcb_fpregs.fpf_null = 0;
-	if (fputype)
-		m68881_restore(&p->p_addr->u_pcb.pcb_fpregs);
-
-#ifdef COMPAT_SUNOS
-	/*
-	 * SunOS' ld.so does self-modifying code without knowing
-	 * about the 040's cache purging needs.  So we need to uncache
-	 * writeable executable pages.
-	 */
-	if (p->p_emul == &emul_sunos)
-		p->p_md.md_flags |= MDP_UNCACHE_WX;
-	else
-		p->p_md.md_flags &= ~MDP_UNCACHE_WX;
-#endif
-}
-
-/*
  * Info for CTL_HW
  */
 char	cpu_model[120];
@@ -517,7 +465,9 @@ const char *hp300_models[] = {
 	"380",		/* HP_380 */
 	"425",		/* HP_425 */
 	"433",		/* HP_433 */
-	"385"		/* HP_385 */
+	"385",		/* HP_385 */
+	"362",		/* HP_362 */
+	"382",		/* HP_382 */
 };
 
 /* Map mmuid to single letter designation in 4xx models (e.g. 425s, 425t) */
@@ -669,6 +619,9 @@ identifycpu()
 #if !defined(HP360)
 	case HP_360:
 #endif
+#if !defined(HP362)
+	case HP_362:
+#endif
 #if !defined(HP370)
 	case HP_370:
 #endif
@@ -677,6 +630,9 @@ identifycpu()
 #endif
 #if !defined(HP380)
 	case HP_380:
+#endif
+#if !defined(HP382)
+	case HP_382:
 #endif
 #if !defined(HP385)
 	case HP_385:

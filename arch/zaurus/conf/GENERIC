@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.44 2005/08/28 05:30:43 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.48 2006/02/14 18:11:04 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -14,8 +14,6 @@ include		"../../../conf/GENERIC"
 maxusers	32			# estimated number of users
 
 options		ARM32
-#options	ARM_INTR_IMPL="<arch/arm/xscale/pxa2x0_intr.h>"
-options		PXA2x0_INTR
 options		PXAGPIO_HAS_GPION_INTRS
 
 options		CACHE_CLEAN_BLOCK_INTR
@@ -32,10 +30,10 @@ options		CPU_XSCALE_PXA2X0	# Support the XScale core
 options		XSCALE_CACHE_WRITE_BACK
 makeoptions	CPUFLAGS="-mcpu=xscale"
 
-option WSDISPLAY_COMPAT_USL		# VT handling
-option WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
-option WSDISPLAY_DEFAULTSCREENS=2
-option WSDISPLAY_COMPAT_PCVT		# emulate some ioctls
+option	WSDISPLAY_COMPAT_USL		# VT handling
+option	WSDISPLAY_COMPAT_RAWKBD		# provide raw scancodes; needed for X11
+option	WSDISPLAY_DEFAULTSCREENS=2	# initial number of text consoles
+option	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls; needed for X11
 
 option USBVERBOSE
 
@@ -50,7 +48,7 @@ pxaip0		at mainbus?
 pxaintc0	at pxaip?		# interrupt controller
 pxagpio0	at pxaip?		# GPIO controller
 pxadmac0	at pxaip?		# DMA controller
-saost0		at pxaip? addr 0x40a00000 size 0x20
+pxaost0		at pxaip? addr 0x40a00000 size 0x20
 
 # PCMCIA/CF socket and GPIO controllers
 scoop0		at pxaip?
@@ -184,8 +182,10 @@ wsdisplay*	at lcd? console ?
 zssp0		at pxaip?		# ADC, touch screen, backlight
 apm0		at pxaip?		# APM emulation
 
-zaudio0	at pxaip?			# Zaurus I2S/I2C sound
-audio*	at zaudio?
+zaudio0		at pxaip?		# Zaurus I2S/I2C sound
+audio*		at zaudio?
+zrc0		at pxaip?		# Zaurus remote control
+wskbd*		at zrc? mux 1
 
 # Pseudo-Devices
 pseudo-device	wsmux		2	# mouse & keyboard multiplexor

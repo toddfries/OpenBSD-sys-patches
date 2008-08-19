@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.8 2002/03/19 17:51:04 millert Exp $	*/
+/*	$OpenBSD: bus.h,v 1.11 2006/01/22 18:37:58 miod Exp $	*/
 /*	$NetBSD: bus.h,v 1.9 1998/01/13 18:32:15 scottr Exp $	*/
 
 /*-
@@ -81,8 +81,92 @@ typedef u_long bus_size_t;
 /*
  * Access methods for bus resources and address space.
  */
+#define BSH_T	struct bus_space_handle_s
 typedef int	bus_space_tag_t;
-typedef u_long	bus_space_handle_t;
+typedef struct	bus_space_handle_s {
+	u_long	base;
+	int	swapped;
+
+	u_int8_t	(*bsr1)(bus_space_tag_t, BSH_T *, bus_size_t);
+	u_int16_t	(*bsr2)(bus_space_tag_t, BSH_T *, bus_size_t);
+	u_int32_t	(*bsr4)(bus_space_tag_t, BSH_T *, bus_size_t);
+	u_int8_t	(*bsrs1)(bus_space_tag_t, BSH_T *, bus_size_t);
+	u_int16_t	(*bsrs2)(bus_space_tag_t, BSH_T *, bus_size_t);
+	u_int32_t	(*bsrs4)(bus_space_tag_t, BSH_T *, bus_size_t);
+	void		(*bsrm1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int8_t *, size_t);
+	void		(*bsrm2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t *, size_t);
+	void		(*bsrm4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t *, size_t);
+	void		(*bsrms2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t *, size_t);
+	void		(*bsrms4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t *, size_t);
+	void		(*bsrr1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int8_t *, size_t);
+	void		(*bsrr2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t *, size_t);
+	void		(*bsrr4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t *, size_t);
+	void		(*bsrrs1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int8_t *, size_t);
+	void		(*bsrrs2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t *, size_t);
+	void		(*bsrrs4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t *, size_t);
+	void		(*bsw1)(bus_space_tag_t, BSH_T *, bus_size_t, u_int8_t);
+	void		(*bsw2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t);
+	void		(*bsw4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t);
+	void		(*bsws1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int8_t);
+	void		(*bsws2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t);
+	void		(*bsws4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t);
+	void		(*bswm1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int8_t *, size_t);
+	void		(*bswm2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int16_t *, size_t);
+	void		(*bswm4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int32_t *, size_t);
+	void		(*bswms1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int8_t *, size_t);
+	void		(*bswms2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int16_t *, size_t);
+	void		(*bswms4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int32_t *, size_t);
+	void		(*bswr1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int8_t *, size_t);
+	void		(*bswr2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int16_t *, size_t);
+	void		(*bswr4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int32_t *, size_t);
+	void		(*bswrs1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int8_t *, size_t);
+	void		(*bswrs2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int16_t *, size_t);
+	void		(*bswrs4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				const u_int32_t *, size_t);
+	void		(*bssm1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int8_t v, size_t);
+	void		(*bssm2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t v, size_t);
+	void		(*bssm4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t v, size_t);
+	void		(*bssr1)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int8_t v, size_t);
+	void		(*bssr2)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int16_t v, size_t);
+	void		(*bssr4)(bus_space_tag_t, BSH_T *, bus_size_t,
+				u_int32_t v, size_t);	
+} bus_space_handle_t;
+#undef BSH_T
+
+void	mac68k_bus_space_handle_swapped(bus_space_tag_t,
+		bus_space_handle_t *h);
 
 /*
  *	int bus_space_map(bus_space_tag_t t, bus_addr_t addr,
@@ -162,18 +246,23 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * described by tag/handle/offset.
  */
 
-#define	bus_space_read_1(t, h, o)					\
-    ((void) t, (*(volatile u_int8_t *)((h) + (o))))
+u_int8_t mac68k_bsr1(bus_space_tag_t tag, bus_space_handle_t *bsh,
+			  bus_size_t offset);
+u_int16_t mac68k_bsr2(bus_space_tag_t tag, bus_space_handle_t *bsh,
+			  bus_size_t offset);
+u_int16_t mac68k_bsr2_swap(bus_space_tag_t tag, bus_space_handle_t *bsh,
+				bus_size_t offset);
+u_int32_t mac68k_bsr4(bus_space_tag_t tag, bus_space_handle_t *bsh,
+				bus_size_t offset);
+u_int32_t mac68k_bsr4_swap(bus_space_tag_t tag, bus_space_handle_t *bsh,
+				bus_size_t offset);	
 
-#define	bus_space_read_2(t, h, o)					\
-    ((void) t, (*(volatile u_int16_t *)((h) + (o))))
-
-#define	bus_space_read_4(t, h, o)					\
-    ((void) t, (*(volatile u_int32_t *)((h) + (o))))
-
-#if 0	/* Cause a link error for bus_space_read_8 */
-#define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
-#endif
+#define	bus_space_read_1(t,h,o) (h).bsr1((t), &(h), (o))
+#define	bus_space_read_2(t,h,o) (h).bsr2((t), &(h), (o))
+#define	bus_space_read_4(t,h,o) (h).bsr4((t), &(h), (o))
+#define bus_space_read_stream_1(t,h,o)  (h).bsrs1((t), &(h), (o))
+#define bus_space_read_stream_2(t,h,o)  (h).bsrs2((t), &(h), (o))
+#define bus_space_read_stream_4(t,h,o)  (h).bsrs4((t), &(h), (o))
 
 /*
  *	void bus_space_read_multi_N(bus_space_tag_t tag,
@@ -184,51 +273,22 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * described by tag/handle/offset and copy into buffer provided.
  */
 
-#define	bus_space_read_multi_1(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movb	a0@,a1@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
+void mac68k_bsrm1(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int8_t *, size_t);
+void mac68k_bsrm2(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int16_t *, size_t);
+void mac68k_bsrm2_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int16_t *, size_t);
+void mac68k_bsrm4(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int32_t *, size_t);
+void mac68k_bsrms4(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int32_t *, size_t);
+void mac68k_bsrm4_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int32_t *, size_t);
 
-#define	bus_space_read_multi_2(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movw	a0@,a1@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#define	bus_space_read_multi_4(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movl	a0@,a1@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#if 0	/* Cause a link error for bus_space_read_multi_8 */
-#define	bus_space_read_multi_8	!!! bus_space_read_multi_8 unimplemented !!!
-#endif
+#define bus_space_read_multi_1(t, h, o, a, c) (h).bsrm1(t, &(h), o, a, c)
+#define bus_space_read_multi_2(t, h, o, a, c) (h).bsrm2(t, &(h), o, a, c)
+#define bus_space_read_multi_4(t, h, o, a, c) (h).bsrm4(t, &(h), o, a, c)
 
 /*
  *	void bus_space_read_region_N(bus_space_tag_t tag,
@@ -240,51 +300,20 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * buffer provided.
  */
 
-#define	bus_space_read_region_1(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movb	a0@+,a1@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
+void mac68k_bsrr1(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int8_t *, size_t);
+void mac68k_bsrr2(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int16_t *, size_t);
+void mac68k_bsrr2_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int16_t *, size_t);
+void mac68k_bsrr4(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int32_t *, size_t);
+void mac68k_bsrr4_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int32_t *, size_t);
 
-#define	bus_space_read_region_2(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movw	a0@+,a1@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#define	bus_space_read_region_4(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movl	a0@+,a1@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#if 0	/* Cause a link error for bus_space_read_region_8 */
-#define	bus_space_read_region_8	!!! bus_space_read_region_8 unimplemented !!!
-#endif
+#define bus_space_read_region_1(t, h, o, a, c) (h).bsrr1(t,&(h),o,a,c)
+#define bus_space_read_region_2(t, h, o, a, c) (h).bsrr2(t,&(h),o,a,c)
+#define bus_space_read_region_4(t, h, o, a, c) (h).bsrr4(t,&(h),o,a,c)
 
 /*
  *	void bus_space_write_N(bus_space_tag_t tag,
@@ -295,18 +324,20 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * described by tag/handle/offset.
  */
 
-#define	bus_space_write_1(t, h, o, v)					\
-    ((void) t, ((void)(*(volatile u_int8_t *)((h) + (o)) = (v))))
+void mac68k_bsw1(bus_space_tag_t, bus_space_handle_t *, bus_size_t, u_int8_t);
+void mac68k_bsw2(bus_space_tag_t, bus_space_handle_t *, bus_size_t, u_int16_t);
+void mac68k_bsw2_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int16_t);
+void mac68k_bsw4(bus_space_tag_t, bus_space_handle_t *, bus_size_t, u_int32_t);
+void mac68k_bsw4_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	u_int32_t);
 
-#define	bus_space_write_2(t, h, o, v)					\
-    ((void) t, ((void)(*(volatile u_int16_t *)((h) + (o)) = (v))))
-
-#define	bus_space_write_4(t, h, o, v)					\
-    ((void) t, ((void)(*(volatile u_int32_t *)((h) + (o)) = (v))))
-
-#if 0	/* Cause a link error for bus_space_write_8 */
-#define	bus_space_write_8	!!! bus_space_write_8 not implemented !!!
-#endif
+#define bus_space_write_1(t, h, o, v) (h).bsw1(t, &(h), o, v)
+#define bus_space_write_2(t, h, o, v) (h).bsw2(t, &(h), o, v)
+#define bus_space_write_4(t, h, o, v) (h).bsw4(t, &(h), o, v)
+#define bus_space_write_stream_1(t, h, o, v) (h).bsws1(t, &(h), o, v)
+#define bus_space_write_stream_2(t, h, o, v) (h).bsws2(t, &(h), o, v)
+#define bus_space_write_stream_4(t, h, o, v) (h).bsws4(t, &(h), o, v)
 
 /*
  *	void bus_space_write_multi_N(bus_space_tag_t tag,
@@ -317,52 +348,20 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * provided to bus space described by tag/handle/offset.
  */
 
-#define	bus_space_write_multi_1(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movb	a1@+,a0@				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
+void mac68k_bswm1(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int8_t *, size_t);
+void mac68k_bswm2(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int16_t *, size_t);
+void mac68k_bswm2_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int16_t *, size_t);
+void mac68k_bswm4(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int32_t *, size_t);
+void mac68k_bswm4_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int32_t *, size_t);
 
-#define	bus_space_write_multi_2(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movw	a1@+,a0@				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#define	bus_space_write_multi_4(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movl	a1@+,a0@				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#if 0	/* Cause a link error for bus_space_write_8 */
-#define	bus_space_write_multi_8(t, h, o, a, c)				\
-			!!! bus_space_write_multi_8 unimplemented !!!
-#endif
+#define bus_space_write_multi_1(t, h, o, a, c) (h).bswm1(t, &(h), o, a, c)
+#define bus_space_write_multi_2(t, h, o, a, c) (h).bswm2(t, &(h), o, a, c)
+#define bus_space_write_multi_4(t, h, o, a, c) (h).bswm4(t, &(h), o, a, c)
 
 /*
  *	void bus_space_write_region_N(bus_space_tag_t tag,
@@ -373,52 +372,20 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * to bus space described by tag/handle starting at `offset'.
  */
 
-#define	bus_space_write_region_1(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movb	a1@+,a0@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
+void mac68k_bswr1(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int8_t *, size_t);
+void mac68k_bswr2(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int16_t *, size_t);
+void mac68k_bswr2_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int16_t *, size_t);
+void mac68k_bswr4(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int32_t *, size_t);
+void mac68k_bswr4_swap(bus_space_tag_t, bus_space_handle_t *, bus_size_t,
+	const u_int32_t *, size_t);
 
-#define	bus_space_write_region_2(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movw	a1@+,a0@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#define	bus_space_write_region_4(t, h, o, a, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,a1					;	\
-		movl	%2,d0					;	\
-	1:	movl	a1@+,a0@+				;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (a), "g" (c)		:	\
-		    "a0","a1","d0");					\
-} while (0);
-
-#if 0	/* Cause a link error for bus_space_write_region_8 */
-#define	bus_space_write_region_8					\
-			!!! bus_space_write_region_8 unimplemented !!!
-#endif
+#define bus_space_write_region_1(t, h, o, a, c) (h).bswr1(t, &(h), o, a, c)
+#define bus_space_write_region_2(t, h, o, a, c) (h).bswr2(t, &(h), o, a, c)
+#define bus_space_write_region_4(t, h, o, a, c) (h).bswr4(t, &(h), o, a, c)
 
 /*
  *	void bus_space_set_multi_N(bus_space_tag_t tag,
@@ -429,52 +396,20 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * by tag/handle/offset `count' times.
  */
 
-#define	bus_space_set_multi_1(t, h, o, val, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,d1					;	\
-		movl	%2,d0					;	\
-	1:	movb	d1,a0@					;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (val), "g" (c)		:	\
-		    "a0","d0","d1");					\
-} while (0);
+void mac68k_bssm1(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int8_t v, size_t c);
+void mac68k_bssm2(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int16_t v, size_t c);
+void mac68k_bssm2_swap(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int16_t v, size_t c);
+void mac68k_bssm4(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int32_t v, size_t c);
+void mac68k_bssm4_swap(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int32_t v, size_t c);
 
-#define	bus_space_set_multi_2(t, h, o, val, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,d1					;	\
-		movl	%2,d0					;	\
-	1:	movw	d1,a0@					;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (val), "g" (c)		:	\
-		    "a0","d0","d1");					\
-} while (0);
-
-#define	bus_space_set_multi_4(t, h, o, val, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,d1					;	\
-		movl	%2,d0					;	\
-	1:	movl	d1,a0@					;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (val), "g" (c)		:	\
-		    "a0","d0","d1");					\
-} while (0);
-
-#if 0	/* Cause a link error for bus_space_set_multi_8 */
-#define	bus_space_set_multi_8						\
-			!!! bus_space_set_multi_8 unimplemented !!!
-#endif
+#define bus_space_set_multi_1(t, h, o, val, c) (h).bssm1(t, &(h), o, val, c)
+#define bus_space_set_multi_2(t, h, o, val, c) (h).bssm2(t, &(h), o, val, c)
+#define bus_space_set_multi_4(t, h, o, val, c) (h).bssm4(t, &(h), o, val, c)
 
 /*
  *	void bus_space_set_region_N(bus_space_tag_t tag,
@@ -485,52 +420,20 @@ int	mac68k_bus_space_probe(bus_space_tag_t t,
  * by tag/handle starting at `offset'.
  */
 
-#define	bus_space_set_region_1(t, h, o, val, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,d1					;	\
-		movl	%2,d0					;	\
-	1:	movb	d1,a0@+					;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (val), "g" (c)		:	\
-		    "a0","d0","d1");					\
-} while (0);
+void mac68k_bssr1(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int8_t v, size_t c);
+void mac68k_bssr2(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int16_t v, size_t c);
+void mac68k_bssr2_swap(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int16_t v, size_t c);
+void mac68k_bssr4(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int32_t v, size_t c);
+void mac68k_bssr4_swap(bus_space_tag_t t, bus_space_handle_t *h,
+			bus_size_t o, u_int32_t v, size_t c);
 
-#define	bus_space_set_region_2(t, h, o, val, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,d1					;	\
-		movl	%2,d0					;	\
-	1:	movw	d1,a0@+					;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (val), "g" (c)		:	\
-		    "a0","d0","d1");					\
-} while (0);
-
-#define	bus_space_set_region_4(t, h, o, val, c) do {			\
-	(void) t;							\
-	__asm __volatile ("						\
-		movl	%0,a0					;	\
-		movl	%1,d1					;	\
-		movl	%2,d0					;	\
-	1:	movl	d1,a0@+					;	\
-		subql	#1,d0					;	\
-		jne	1b"					:	\
-								:	\
-		    "r" ((h) + (o)), "g" (val), "g" (c)		:	\
-		    "a0","d0","d1");					\
-} while (0);
-
-#if 0	/* Cause a link error for bus_space_set_region_8 */
-#define	bus_space_set_region_8						\
-			!!! bus_space_set_region_8 unimplemented !!!
-#endif
+#define bus_space_set_region_1(t, h, o, val, c) (h).bssr1(t, &(h), o, val, c)
+#define bus_space_set_region_2(t, h, o, val, c) (h).bssr2(t, &(h), o, val, c)
+#define bus_space_set_region_4(t, h, o, val, c) (h).bssr4(t, &(h), o, val, c)
 
 /*
  *	void bus_space_copy_N(bus_space_tag_t tag,
@@ -557,7 +460,7 @@ __CONCAT(bus_space_copy_region_,BYTES)(t, h1, o1, h2, o2, c)		\
 {									\
 	bus_size_t o;							\
 									\
-	if ((h1 + o1) >= (h2 + o2)) {					\
+	if ((h1.base + o1) >= (h2.base + o2)) {			\
 		/* src after dest: copy forward */			\
 		for (o = 0; c != 0; c--, o += BYTES)			\
 			__CONCAT(bus_space_write_,BYTES)(t, h2, o2 + o,	\
@@ -572,10 +475,6 @@ __CONCAT(bus_space_copy_region_,BYTES)(t, h1, o1, h2, o2, c)		\
 __MAC68K_copy_region_N(1)
 __MAC68K_copy_region_N(2)
 __MAC68K_copy_region_N(4)
-#if 0	/* Cause a link error for bus_space_copy_8 */
-#define	bus_space_copy_8						\
-			!!! bus_space_copy_8 unimplemented !!!
-#endif
 
 #undef __MAC68K_copy_region_N
 
@@ -593,5 +492,7 @@ __MAC68K_copy_region_N(4)
 	((void)((void)(t), (void)(h), (void)(o), (void)(l), (void)(f)))
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
+
+#define	bus_space_vaddr(t, h)			(void *)((h).base)
 
 #endif /* _MAC68K_BUS_H_ */

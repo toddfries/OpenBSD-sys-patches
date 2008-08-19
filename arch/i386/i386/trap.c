@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.69 2005/05/29 03:20:38 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.72 2005/10/26 20:32:59 marco Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -155,7 +155,8 @@ char	*trap_type[] = {
 	"segment not present fault",		/* 16 T_SEGNPFLT */
 	"stack fault",				/* 17 T_STKFLT */
 	"machine check",			/* 18 T_MACHK ([P]Pro) */
-	"reserved trap",			/* 19 T_RESERVED */
+	"SIMD FP fault",			/* 19 T_XFTRAP */
+	"reserved trap",			/* 20 T_RESERVED */
 };
 int	trap_types = sizeof trap_type / sizeof trap_type[0];
 
@@ -771,11 +772,6 @@ syscall(frame)
 	KERNEL_PROC_UNLOCK(p);
 	switch (error) {
 	case 0:
-		/*
-		 * Reinitialize proc pointer `p' as it may be different
-		 * if this is a child returning from fork syscall.
-		 */
-		p = curproc;
 		frame.tf_eax = rval[0];
 		frame.tf_edx = rval[1];
 		frame.tf_eflags &= ~PSL_C;	/* carry bit */
@@ -839,7 +835,8 @@ child_return(arg)
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET)) {
 		KERNEL_PROC_LOCK(p);
-		ktrsysret(p, SYS_fork, 0, 0);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 		KERNEL_PROC_UNLOCK(p);
 	}
 #endif

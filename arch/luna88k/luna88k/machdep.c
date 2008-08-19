@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.21 2005/08/01 15:42:46 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.30 2005/12/11 21:36:04 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -79,14 +79,11 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <net/netisr.h>
-
 #include <machine/asm.h>
 #include <machine/asm_macro.h>
 #include <machine/board.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/cpu_number.h>
 #include <machine/kcore.h>
 #include <machine/locore.h>
 #include <machine/reg.h>
@@ -112,9 +109,7 @@ typedef struct {
 } m88k_exception_vector_area;
 
 caddr_t	allocsys(caddr_t);
-void	bugsyscall(void);
 void	consinit(void);
-void	dosoftint(void);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(void);
@@ -128,9 +123,6 @@ void	slave_pre_main(void);
 int	slave_main(void);
 void	vector_init(m88k_exception_vector_area *, unsigned *);
 
-extern void load_u_area(struct proc *);
-extern void save_u_area(struct proc *, vaddr_t);
-
 vaddr_t size_memory(void);
 void powerdown(void);
 void get_fuse_rom_data(void);
@@ -139,20 +131,18 @@ char *nvram_by_symbol(char *);
 void get_autoboot_device(void);			/* in disksubr.c */
 int clockintr(void *);				/* in clock.c */
 
-vaddr_t interrupt_stack[MAX_CPUS];
-
 /*
  * *int_mask_reg[CPU]
  * Points to the hardware interrupt status register for each CPU.
  */
-unsigned int *volatile int_mask_reg[MAX_CPUS] = {
+unsigned int *volatile int_mask_reg[] = {
 	(unsigned int *)INT_ST_MASK0,
 	(unsigned int *)INT_ST_MASK1,
 	(unsigned int *)INT_ST_MASK2,
 	(unsigned int *)INT_ST_MASK3
 };
 
-unsigned int luna88k_curspl[MAX_CPUS] = {0, 0, 0, 0};
+unsigned int luna88k_curspl[] = {0, 0, 0, 0};
 
 unsigned int int_mask_val[INT_LEVEL] = {
 	INT_MASK_LV0,
@@ -179,7 +169,7 @@ unsigned int int_set_val[INT_LEVEL] = {
 /*
  * *clock_reg[CPU]
  */
-unsigned int *volatile clock_reg[MAX_CPUS] = {
+unsigned int *volatile clock_reg[] = {
 	(unsigned int *)OBIO_CLOCK0,
 	(unsigned int *)OBIO_CLOCK1,
 	(unsigned int *)OBIO_CLOCK2,
@@ -205,10 +195,6 @@ struct nvram_t {
 } nvram[NNVSYM];
 
 vaddr_t obiova;
-
-int ssir;
-int want_ast;
-int want_resched;
 
 int physmem;	  /* available physical memory, in pages */
 
@@ -254,8 +240,6 @@ int sysconsole = 1;		/* 0 = ttya, 1 = keyboard/mouse, used in dev/sio.c */
 u_int16_t dipswitch = 0;	/* set in locore.S */
 int hwplanebits;		/* set in locore.S */
 
-int netisr;
-
 extern struct consdev syscons;	/* in dev/siotty.c */
 
 extern void greeting(void);	/* in dev/lcd.c */
@@ -269,7 +253,6 @@ vaddr_t last_addr;
 vaddr_t avail_start, avail_end;
 vaddr_t virtual_avail, virtual_end;
 
-extern struct pcb *curpcb;
 extern struct user *proc0paddr;
 
 /*
@@ -398,7 +381,7 @@ cpu_startup()
 	int sz, i;
 	vsize_t size;
 	int base, residual;
-	vaddr_t minaddr, maxaddr, uarea_pages;
+	vaddr_t minaddr, maxaddr;
 
 	/*
 	 * Initialize error message buffer (at end of core).
@@ -490,17 +473,6 @@ cpu_startup()
 		panic("startup: no room for tables");
 	if (allocsys(v) - v != sz)
 		panic("startup: table size inconsistency");
-
-	/*
-	 * Grab UADDR virtual address
-	 */
-	uarea_pages = UADDR;
-	uvm_map(kernel_map, (vaddr_t *)&uarea_pages, USPACE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
-	if (uarea_pages != UADDR)
-		panic("uarea_pages %lx: UADDR not free", uarea_pages);
 
 	/*
 	 * Grab the OBIO space that we hardwired in pmap_bootstrap
@@ -892,7 +864,6 @@ get_slave_stack()
 		panic("Cannot allocate slave stack for cpu %d",
 		    cpu_number());
 
-	interrupt_stack[cpu_number()] = addr;
 	return addr;
 }
 
@@ -1076,50 +1047,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	/*NOTREACHED*/
 }
 
-void
-bugsyscall()
-{
-}
-
-void
-dosoftint()
-{
-	if (ssir & SIR_NET) {
-		siroff(SIR_NET);
-		uvmexp.softs++;
-#define DONETISR(bit, fn) \
-	do { \
-		if (netisr & (1 << bit)) { \
-			netisr &= ~(1 << bit); \
-			fn(); \
-		} \
-	} while (0)
-#include <net/netisr_dispatch.h>
-#undef DONETISR
-	}
-
-	if (ssir & SIR_CLOCK) {
-		siroff(SIR_CLOCK);
-		uvmexp.softs++;
-		softclock();
-	}
-}
-
-int
-spl0()
-{
-	int x;
-	x = splsoftclock();
-
-	if (ssir) {
-		dosoftint();
-	}
-
-	setipl(0);
-
-	return (x);
-}
-
 /*
  * Called from locore.S during boot,
  * this is the first C code that's run.
@@ -1131,16 +1058,9 @@ luna88k_bootstrap()
 	extern struct consdev *cn_tab;
 	extern struct cmmu_p cmmu8820x;
 	extern char *end;
-
-	/*
-	 * Must initialize p_addr before autoconfig or
-	 * the fault handler will get a NULL reference.
-	 * Do this early so that we can take a data or 
-	 * instruction fault and survive it.
-	 */
-	proc0.p_addr = proc0paddr;
-	curproc = &proc0;
-	curpcb = &proc0paddr->u_pcb;
+#ifndef MULTIPROCESSOR
+	cpuid_t master_cpu;
+#endif
 
 	cmmu = &cmmu8820x;
 
@@ -1160,12 +1080,19 @@ luna88k_bootstrap()
 	last_addr = size_memory();
 	physmem = btoc(last_addr);
 
-	cmmu_parity_enable();
-
 	setup_board_config();
-	cmmu_init();
-	master_cpu = cmmu_cpu_number();
+	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+
+	/*
+	 * Now that set_cpu_number() set us with a valid cpu_info pointer,
+	 * we need to initialize p_addr and curpcb before autoconf, for the
+	 * fault handler to behave properly [except for badaddr() faults,
+	 * which can be taken care of without a valid curcpu()].
+	 */
+	proc0.p_addr = proc0paddr;
+	curproc = &proc0;
+	curpcb = &proc0paddr->u_pcb;
 
 	/*
 	 * We may have more than one CPU, so mention which one is the master.
@@ -1202,16 +1129,8 @@ luna88k_bootstrap()
 	uvm_page_physload(atop(avail_start), atop(avail_end),
 	    atop(avail_start), atop(avail_end),VM_FREELIST_DEFAULT);
 
-	/* Initialize cached PTEs for u-area mapping. */
-	save_u_area(&proc0, (vaddr_t)proc0paddr);
-
-	/*
-	 * Map proc0's u-area at the standard address (UADDR).
-	 */
-	load_u_area(&proc0);
-
 	/* Initialize the "u-area" pages. */
-	bzero((caddr_t)UADDR, UPAGES * PAGE_SIZE);
+	bzero((caddr_t)curpcb, USPACE);
 #ifdef DEBUG
 	printf("leaving luna88k_bootstrap()\n");
 #endif
@@ -1427,7 +1346,6 @@ vector_init(m88k_exception_vector_area *vector, unsigned *vector_init_list)
 {
 	unsigned num;
 	unsigned vec;
-	extern void bugtrap(void);
 
 	for (num = 0; (vec = vector_init_list[num]) != END_OF_VECTOR_LIST;
 	    num++) {
@@ -1475,8 +1393,10 @@ setlevel(unsigned int level)
 
 	set_value = int_set_val[level];
 
+#ifdef MULTIPROCESSOR
 	if (cpu != master_cpu)
 		set_value &= INT_SLAVE_MASK;
+#endif
 
 	*int_mask_reg[cpu] = set_value;
 	luna88k_curspl[cpu] = level;

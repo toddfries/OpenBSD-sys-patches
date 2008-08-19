@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.19 2005/05/29 03:20:41 deraadt Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.22 2006/01/03 15:34:21 jmc Exp $	*/
 
 /* 
  * Copyright (c) 1995
@@ -55,11 +55,6 @@
 
 void record_stacktrace(int *, int);
 void playback_stacktrace(int *, int);
-
-/*
- * Locking primitives implementation.
- * Locks provide shared/exclusive sychronization.
- */
 
 /*
  * Locking primitives implementation.
@@ -303,12 +298,7 @@ lock_printf(const char *fmt, ...)
  * Initialize a lock; required before use.
  */
 void
-lockinit(lkp, prio, wmesg, timo, flags)
-	struct lock *lkp;
-	int prio;
-	char *wmesg;
-	int timo;
-	int flags;
+lockinit(struct lock *lkp, int prio, char *wmesg, int timo, int flags)
 {
 
 	bzero(lkp, sizeof(struct lock));
@@ -332,8 +322,7 @@ lockinit(lkp, prio, wmesg, timo, flags)
  * Determine the status of a lock.
  */
 int
-lockstatus(lkp)
-	struct lock *lkp;
+lockstatus(struct lock *lkp)
 {
 	int s = 0, lock_type = 0;
 
@@ -354,17 +343,14 @@ lockstatus(lkp)
  * accepted shared locks and shared-to-exclusive upgrades to go away.
  */
 int
-lockmgr(lkp, flags, interlkp, p)
-	__volatile struct lock *lkp;
-	u_int flags;
-	struct simplelock *interlkp;
-	struct proc *p;
+lockmgr(__volatile struct lock *lkp, u_int flags, struct simplelock *interlkp)
 {
 	int error;
 	pid_t pid;
 	int extflags;
 	cpuid_t cpu_id;
 	int s = 0;
+	struct proc *p = curproc;
 
 	error = 0;
 
@@ -816,8 +802,7 @@ spinlock_acquire_count(__volatile struct lock *lkp, int count)
  * routines to display ststus about contained locks.
  */
 void
-lockmgr_printinfo(lkp)
-	__volatile struct lock *lkp;
+lockmgr_printinfo(__volatile struct lock *lkp)
 {
 
 	if (lkp->lk_sharecount)
@@ -889,8 +874,7 @@ do {									\
  * they are being called.
  */
 void
-simple_lock_init(lkp)
-	struct simplelock *lkp;
+simple_lock_init(struct simplelock *lkp)
 {
 
 #if defined(MULTIPROCESSOR) /* { */
@@ -906,10 +890,7 @@ simple_lock_init(lkp)
 }
 
 void
-_simple_lock(lkp, id, l)
-	__volatile struct simplelock *lkp;
-	const char *id;
-	int l;
+_simple_lock(__volatile struct simplelock *lkp, const char *id, int l)
 {
 	cpuid_t cpu_id = CPU_NUMBER();
 	int s;
@@ -987,10 +968,7 @@ _simple_lock_held(__volatile struct simplelock *alp)
 }
 
 int
-_simple_lock_try(lkp, id, l)
-	__volatile struct simplelock *lkp;
-	const char *id;
-	int l;
+_simple_lock_try(__volatile struct simplelock *lkp, const char *id, int l)
 {
 	cpuid_t cpu_id = CPU_NUMBER();
 	int s, rv = 0;
@@ -1039,10 +1017,7 @@ _simple_lock_try(lkp, id, l)
 }
 
 void
-_simple_unlock(lkp, id, l)
-	__volatile struct simplelock *lkp;
-	const char *id;
-	int l;
+_simple_unlock(__volatile struct simplelock *lkp, const char *id, int l)
 {
 	int s;
 

@@ -1,9 +1,9 @@
-;	$OpenBSD: siop.ss,v 1.5 2003/07/01 17:15:06 krw Exp $
-;	$NetBSD: siop.ss,v 1.17 2002/07/26 14:11:34 wiz Exp $
+;	$OpenBSD: siop.ss,v 1.8 2005/11/20 22:28:11 krw Exp $
+;	$NetBSD: siop.ss,v 1.20 2005/11/18 23:10:32 bouyer Exp $
 
 ;
 ;  Copyright (c) 2000 Manuel Bouyer.
-; 
+;
 ;  Redistribution and use in source and binary forms, with or without
 ;  modification, are permitted provided that the following conditions
 ;  are met:
@@ -17,11 +17,11 @@
 ; 	This product includes software developed by Manuel Bouyer.
 ;  4. The name of the author may not be used to endorse or promote products
 ;     derived from this software without specific prior written permission.
-; 
+;
 ;  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 ;  IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
 ;  OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-;  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,     
+;  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
 ;  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
 ;  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
 ;  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
@@ -48,6 +48,7 @@ ABSOLUTE int_msgin	= 0xff01;
 ABSOLUTE int_extmsgin	= 0xff02;
 ABSOLUTE int_extmsgdata	= 0xff03;
 ABSOLUTE int_disc	= 0xff04;
+ABSOLUTE int_saveoffset	= 0xff05;
 ; interrupts that don't have a valid DSA
 ABSOLUTE int_reseltarg	= 0xff80;
 ABSOLUTE int_resellun	= 0xff81;
@@ -150,7 +151,7 @@ script_sched:
 	MOVE 0xff to DSA3;
 	MOVE 0 to SCRATCHA0	; flags
 	MOVE 0 to SCRATCHA1	; DSA offset (for S/G save data pointer)
-; the script scheduler: siop_start() we set the absolute jump addr, and then 
+; the script scheduler: siop_start() we set the absolute jump addr, and then
 ; changes the FALSE to TRUE. The select script will change it back to false
 ; once the target is selected.
 ; The RAM could hold 370 slot entry, we limit it to 40. Should be more than
@@ -261,13 +262,14 @@ handle_msgin:
 	JUMP REL(handle_extin), IF 0x01	      ; extended message
 	INT int_msgin, IF not 0x04;
 	CALL REL(disconnect)                  ; disconnect message;
-; if we didn't get sdp, or if offset is 0, no need to interrupt
+; if we didn't get sdp, no need to interrupt
 	MOVE SCRATCHA0 & flag_sdp TO SFBR;
-	JUMP REL(script_sched), if 0x00; 
+	INT int_disc, IF not 0x00;
+; update offset if we did some data transfer
 	MOVE SCRATCHA1 TO SFBR;
-	JUMP REL(script_sched), if 0x00; 
-; Ok, we need to save data pointers
-	INT int_disc;
+	JUMP REL(script_sched), if 0x00;
+	INT int_saveoffset;
+
 msgin_ack:
 selected:
 	CLEAR ACK;

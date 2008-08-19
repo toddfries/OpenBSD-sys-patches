@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_apm.c,v 1.15 2005/08/12 03:23:02 uwe Exp $	*/
+/*	$OpenBSD: pxa2x0_apm.c,v 1.25 2005/12/22 00:42:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -62,8 +62,8 @@
 #define	DPRINTF(x)	/**/
 #endif
 
-#define APM_LOCK(sc)    lockmgr(&(sc)->sc_lock, LK_EXCLUSIVE, NULL, curproc)
-#define APM_UNLOCK(sc)  lockmgr(&(sc)->sc_lock, LK_RELEASE, NULL, curproc)
+#define APM_LOCK(sc)    lockmgr(&(sc)->sc_lock, LK_EXCLUSIVE, NULL)
+#define APM_UNLOCK(sc)  lockmgr(&(sc)->sc_lock, LK_RELEASE, NULL)
 
 struct cfdriver apm_cd = {
 	NULL, "apm", DV_DULL
@@ -91,6 +91,11 @@ int	apm_get_event(struct pxa2x0_apm_softc *, u_int *);
 int	apm_handle_event(struct pxa2x0_apm_softc *, u_int);
 void	apm_thread_create(void *);
 void	apm_thread(void *);
+
+extern int perflevel;
+int	freq;
+int pxa2x0_setperf(int speed);
+int pxa2x0_cpuspeed(int *speed);
 
 int	apm_record_event(struct pxa2x0_apm_softc *, u_int);
 void	filt_apmrdetach(struct knote *kn);
@@ -291,7 +296,7 @@ apm_power_info(struct pxa2x0_apm_softc *sc,
 {
 
 	power->ac_state = APM_AC_UNKNOWN;
-	power->battery_state = APM_BATT_UNKNOWN;;
+	power->battery_state = APM_BATT_UNKNOWN;
 	power->battery_life = 0 /* APM_BATT_LIFE_UNKNOWN */;
 	power->minutes_left = 0;
 
@@ -302,6 +307,8 @@ apm_power_info(struct pxa2x0_apm_softc *sc,
 void
 apm_suspend(struct pxa2x0_apm_softc *sc)
 {
+
+	resettodr();
 
 	dopowerhooks(PWR_SUSPEND);
 
@@ -321,6 +328,8 @@ apm_resume(struct pxa2x0_apm_softc *sc)
 {
 
 	dopowerhooks(PWR_RESUME);
+
+	inittodr(0);
 
 	/*
 	 * Clear the OTG Peripheral hold after running the pxaudc and pxaohci
@@ -819,6 +828,9 @@ struct pxa2x0_sleep_data {
 	/* OS timer registers */
 	u_int32_t sd_osmr0, sd_osmr1, sd_osmr2, sd_osmr3;
 	u_int32_t sd_oscr0;
+	u_int32_t sd_osmr4, sd_osmr5;
+	u_int32_t sd_oscr4;
+	u_int32_t sd_omcr4, sd_omcr5;
 	u_int32_t sd_oier;
 	/* GPIO registers */
 	u_int32_t sd_gpdr0, sd_gpdr1, sd_gpdr2, sd_gpdr3;
@@ -858,10 +870,15 @@ pxa2x0_apm_sleep(struct pxa2x0_apm_softc *sc)
 	save = disable_interrupts(I32_bit|F32_bit);
 
 	sd.sd_oscr0 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSCR0);
+	sd.sd_oscr4 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSCR4);
+	sd.sd_omcr4 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OMCR4);
+	sd.sd_omcr5 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OMCR5);
 	sd.sd_osmr0 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSMR0);
 	sd.sd_osmr1 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSMR1);
 	sd.sd_osmr2 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSMR2);
 	sd.sd_osmr3 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSMR3);
+	sd.sd_osmr4 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSMR4);
+	sd.sd_osmr5 = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OSMR5);
 	sd.sd_oier = bus_space_read_4(sc->sc_iot, ost_ioh, OST_OIER);
 
 	/* Bring the PXA27x into 416Mhz turbo mode. */
@@ -891,8 +908,6 @@ suspend_again:
 	scoop_check_mcr();
 
 	/* XXX control battery charging in sleep mode. */
-
-	resettodr();
 
 	/* XXX schedule RTC alarm to check the battery, or schedule
 	   XXX wake-up shortly before an already programmed alarm? */
@@ -1112,6 +1127,18 @@ suspend_again:
 	scoop_check_mcr();
 	scoop_resume();
 
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR0, sd.sd_osmr0);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR1, sd.sd_osmr1);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR2, sd.sd_osmr2);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR3, sd.sd_osmr3);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR4, sd.sd_osmr4);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR5, sd.sd_osmr5);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OMCR4, sd.sd_omcr4);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OMCR5, sd.sd_omcr5);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSCR0, sd.sd_oscr0);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSCR4, sd.sd_oscr4);
+	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OIER, sd.sd_oier);
+
 	pxa2x0_pi2c_setvoltage(sc->sc_iot, sc->sc_pm_ioh, PI2C_VOLTAGE_HIGH);
 
 	/* Change to 208Mhz run mode with fast-bus still disabled. */
@@ -1125,12 +1152,6 @@ suspend_again:
 	    CLKCFG_B | CLKCFG_F | CLKCFG_T, &pxa2x0_memcfg);
 
 	if (sc->sc_resume != NULL) {
-		/* Restore OS timers only to allow the use of delay(). */
-		bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR1, sd.sd_osmr1);
-		bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR2, sd.sd_osmr2);
-		bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR3, sd.sd_osmr3);
-		bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSCR0, sd.sd_oscr0);
-		bus_space_write_4(sc->sc_iot, ost_ioh, OST_OIER, sd.sd_oier);
 		if (!sc->sc_resume(sc))
 			goto suspend_again;
 	}
@@ -1141,16 +1162,10 @@ suspend_again:
 	 */
 	bus_space_write_4(sc->sc_iot, sc->sc_pm_ioh, POWMAN_PMCR, 0);
 
-	inittodr(0);
-
-	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR0, sd.sd_osmr0);
-	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR1, sd.sd_osmr1);
-	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR2, sd.sd_osmr2);
-	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSMR3, sd.sd_osmr3);
-	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OSCR0, sd.sd_oscr0);
-	bus_space_write_4(sc->sc_iot, ost_ioh, OST_OIER, sd.sd_oier);
 
 	restore_interrupts(save);
+
+	pxa2x0_setperf(perflevel);
 
  out:
 	if (ost_ioh != (bus_space_handle_t)0)
@@ -1378,3 +1393,170 @@ pxa2x0_pi2c_print(struct pxa2x0_apm_softc *sc)
 }
 #endif
 
+struct {
+	int maxspeed;
+	int numspeeds;
+	int hz [6];
+	int rate [6]; /* could this be simplfied by not having 100% in table? */
+}
+speedtables[] = {
+	{ 91, 1, { 91 }, { 100 }},
+	{ 208, 2, { 91, 208}, {50, 100}},
+	{ 416, 3, { 91, 208, 416}, {25, 50, 100}},
+	{ 520, 4, { 91, 208, 416, 520}, {18, 40 ,80, 100}},
+	{ 624, 5, { 91, 208, 416, 520, 624}, {15, 34, 67, 82, 100}},
+	{ 0 }
+};
+int xscale_maxspeed = 416; /* XXX */
+
+int speed_to_freq(int speed);
+
+int
+speed_to_freq(int speed)
+{
+	int i, j;
+	int newspeed = 0;
+	int numspeeds;
+	for (i = 0; speedtables[i].maxspeed != 0; i++) {
+		if (speedtables[i].maxspeed != xscale_maxspeed)
+			continue;
+
+		if (speed <= speedtables[i].rate[0]) {
+			return speedtables[i].hz[0];
+			
+		}
+		numspeeds = speedtables[i].numspeeds;
+		if (speed == speedtables[i].rate[numspeeds-1]) {
+			return speedtables[i].hz[numspeeds-1];
+		}
+		for (j = 1; j < numspeeds; j++) {
+			if (speed < speedtables[i].rate[j]) {
+				return speedtables[i].hz[j-1];
+			}
+		}
+	}
+	return newspeed;
+}
+
+
+int
+pxa2x0_setperf(int speed)
+{
+	struct pxa2x0_apm_softc *sc;
+	int s;
+	int newfreq;
+
+	sc = apm_cd.cd_devs[0];
+
+	newfreq = speed_to_freq(speed);
+
+	if (newfreq == 0) {
+		printf("bogus new frequency 0 for rate %d maxclock %d\n",
+		    speed, xscale_maxspeed);
+	}
+
+	DPRINTF(("setperf speed %d newfreq %d, maxfreq %d\n",
+	    speed, newfreq, xscale_maxspeed));
+
+	s = disable_interrupts(I32_bit|F32_bit);
+
+	if (newfreq == 91) {
+		if (freq > 91) {
+			pxa27x_run_mode();
+			pxa27x_fastbus_run_mode(0, MDREFR_LOW);
+			pxa27x_cpu_speed_91();
+			pxa2x0_pi2c_setvoltage(sc->sc_iot, sc->sc_pm_ioh,
+			    PI2C_VOLTAGE_LOW);
+			freq = 91;
+		}
+	} else if (newfreq == 208) {
+		if (freq < 208)
+			pxa2x0_pi2c_setvoltage(sc->sc_iot, sc->sc_pm_ioh,
+			    PI2C_VOLTAGE_HIGH);
+		if (freq != 208) {
+			pxa27x_frequency_change(CCCR_A | CCCR_TURBO_X2 |
+			    CCCR_RUN_X16, CLKCFG_F, &pxa2x0_memcfg);
+			pxa27x_fastbus_run_mode(1, pxa2x0_memcfg.mdrefr_high);
+			freq = 208;
+		}
+	} else if (newfreq == 416) {
+		if (freq < 208) {
+			pxa2x0_pi2c_setvoltage(sc->sc_iot, sc->sc_pm_ioh,
+			    PI2C_VOLTAGE_HIGH);
+			pxa27x_frequency_change(CCCR_A | CCCR_TURBO_X2 |
+			    CCCR_RUN_X16, CLKCFG_F, &pxa2x0_memcfg);
+			pxa27x_fastbus_run_mode(1, pxa2x0_memcfg.mdrefr_high);
+		}
+		if (freq != 416) {
+			pxa27x_frequency_change(CCCR_A | CCCR_TURBO_X2 |
+			    CCCR_RUN_X16, CLKCFG_B | CLKCFG_F | CLKCFG_T,
+			    &pxa2x0_memcfg);
+			freq = 416;
+		}
+	} else if (newfreq == 520) {
+		if (freq < 208) {
+			pxa2x0_pi2c_setvoltage(sc->sc_iot, sc->sc_pm_ioh,
+			    PI2C_VOLTAGE_HIGH);
+			pxa27x_frequency_change(CCCR_A | CCCR_TURBO_X2 |
+			    CCCR_RUN_X16, CLKCFG_F, &pxa2x0_memcfg);
+			pxa27x_fastbus_run_mode(1, pxa2x0_memcfg.mdrefr_high);
+		}
+		if (freq != 520) {
+			pxa27x_frequency_change(CCCR_A | CCCR_TURBO_X25 |
+			    CCCR_RUN_X16, CLKCFG_B | CLKCFG_F | CLKCFG_T,
+			    &pxa2x0_memcfg);
+			freq = 520;
+		}
+	} else if (newfreq == 624) {
+		if (freq < 208) {
+			pxa2x0_pi2c_setvoltage(sc->sc_iot, sc->sc_pm_ioh,
+			    PI2C_VOLTAGE_HIGH);
+			pxa27x_frequency_change(CCCR_A | CCCR_TURBO_X2 |
+			    CCCR_RUN_X16, CLKCFG_F, &pxa2x0_memcfg);
+			pxa27x_fastbus_run_mode(1, pxa2x0_memcfg.mdrefr_high);
+		}
+		if (freq != 624) {
+			pxa27x_frequency_change(CCCR_A | CCCR_TURBO_X3 |
+			    CCCR_RUN_X16, CLKCFG_B | CLKCFG_F | CLKCFG_T,
+			    &pxa2x0_memcfg);
+			freq = 624;
+		}
+	}
+
+	restore_interrupts(s);
+
+	return 0;
+}
+
+int
+pxa2x0_cpuspeed(int *freqp)
+{
+	*freqp = freq;
+	return 0;
+}
+
+void pxa2x0_maxspeed(int *speedp);
+
+void
+pxa2x0_maxspeed(int *speedp)
+{
+	/* XXX assumes a pxa270 */
+
+	if (*speedp < 207) {
+		*speedp = 91;
+	} else if (*speedp < 415) {
+		*speedp = 208;
+	} else if (*speedp < 519) {
+		*speedp = 416;
+	} else if (*speedp < 624) {
+		*speedp = 520;
+#if 0
+	} else if (*speedp < 651) {
+		*speedp = 624;
+#endif
+	} else {
+		*speedp = 520; /* hope this is safe. */
+	}
+	xscale_maxspeed = *speedp;
+	pxa2x0_setperf(perflevel);
+}

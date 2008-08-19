@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_ieee.h,v 1.24 2004/06/22 20:51:01 millert Exp $	*/
+/*	$OpenBSD: if_wi_ieee.h,v 1.27 2005/12/13 10:30:35 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -45,13 +45,8 @@
  * interface, didn't I.
  */
 
-#ifndef SIOCSWAVELAN
-#define SIOCSWAVELAN	SIOCSIFGENERIC
-#endif
-
-#ifndef SIOCGWAVELAN
-#define SIOCGWAVELAN	SIOCGIFGENERIC
-#endif
+#define SIOCSWAVELAN	_IOW('i', 249, struct ifreq)	/* wavelan set op */
+#define SIOCGWAVELAN	_IOWR('i', 250, struct ifreq)	/* wavelan get op */
 
 /*
  * Technically I don't think there's a limit to a record
@@ -297,7 +292,7 @@ struct wi_ltv_keys {
 #define WI_RID_MFI_SUP_RANGE	0xFD0C /* modem supplier compatibility */
 #define WI_RID_CFI_SUP_RANGE	0xFD0D /* controller sup. compatibility */
 #define WI_RID_CHANNEL_LIST	0xFD10 /* allowed comm. frequencies. */
-#define WI_RID_REG_DOMAINS	0xFD11 /* list of intendted regulatory doms */
+#define WI_RID_REG_DOMAINS	0xFD11 /* list of intended regulatory doms */
 #define WI_RID_TEMP_TYPE	0xFD12 /* hw temp range code */
 #define WI_RID_CIS		0xFD13 /* PC card info struct */
 #define WI_RID_STA_IDENTITY	0xFD20 /* station funcs firmware ident */
@@ -315,7 +310,7 @@ struct wi_ltv_keys {
 #define WI_RID_COMMS_QUALITY	0xFD43 /* quality of BSS connection */
 #define WI_RID_CUR_TX_RATE	0xFD44 /* current TX rate */
 #define WI_RID_OWN_BEACON_INT	0xFD45 /* beacon xmit time for BSS creation */
-#define WI_RID_CUR_SCALE_THRESH	0xFD46 /* actual system scane thresh setting */
+#define WI_RID_CUR_SCALE_THRESH	0xFD46 /* actual system scale thresh setting */
 #define WI_RID_PROT_RESP_TIME	0xFD47 /* time to wait for resp to req msg */
 #define WI_RID_SHORT_RTR_LIM	0xFD48 /* max tx attempts for short frames */
 #define WI_RID_LONG_RTS_LIM	0xFD49 /* max tx attempts for long frames */
@@ -756,6 +751,10 @@ struct wi_scan_p2_hdr {
 #define	WI_NIC_3842_PCMCIA_ATL	0x800D
 #define	WI_NIC_3842_PCMCIA_ATS	0x800E
 
+#define WI_NIC_3842_USB_AMD	0x800f	/* Prism2.5 USB */
+#define WI_NIC_3842_USB_SST	0x8010
+#define WI_NIC_3842_USB_ATL	0x8011
+
 #define	WI_NIC_3842_MINI_AMD	0x8012	/* Prism2.5 Mini-PCI */
 #define	WI_NIC_3842_MINI_SST	0x8013
 #define	WI_NIC_3842_MINI_ATL	0x8014
@@ -771,12 +770,18 @@ struct wi_scan_p2_hdr {
 #define	WI_NIC_P3_PCMCIA_ATL	0x801C
 #define	WI_NIC_P3_PCMCIA_ATS	0x801D
 
+#define WI_NIC_3842_USB_AMD_2	0x801E	/* Prism2.5 USB */
+#define WI_NIC_3842_USB_SST_2	0x801F
+#define WI_NIC_3842_USB_ATL_2	0x8020
+
 #define	WI_NIC_P3_MINI_AMD	0x8021	/* Prism3 Mini-PCI */
 #define	WI_NIC_P3_MINI_SST	0x8022
 #define	WI_NIC_P3_MINI_ATL	0x8023
 #define	WI_NIC_P3_MINI_ATS	0x8024
 
-#define	WI_NIC_P3_USB_NETGEAR	0x8026 	/* Prism3 USB */
+#define WI_NIC_P3_USB		0x8025 	/* Prism3 USB */
+#define	WI_NIC_P3_USB_NETGEAR	0x8026
+#define WI_NIC_P3_USB_2		0x8027
 
 struct wi_card_ident {
 	const u_int16_t	card_id;
@@ -850,6 +855,18 @@ struct wi_card_ident {
 		"PRISM2.5 ISL3873",					\
 		WI_INTERSIL						\
 	}, {								\
+		WI_NIC_3842_USB_AMD,					\
+		"PRISM2.5 USB",						\
+		WI_INTERSIL						\
+	}, {								\
+		WI_NIC_3842_USB_SST,					\
+		"PRISM2.5 USB",						\
+		WI_INTERSIL						\
+	}, {								\
+		WI_NIC_3842_USB_ATL,					\
+		"PRISM2.5 USB",						\
+		WI_INTERSIL						\
+	}, {								\
 		WI_NIC_3842_MINI_AMD,					\
 		"PRISM2.5 ISL3874A(Mini-PCI)",				\
 		WI_INTERSIL						\
@@ -898,6 +915,18 @@ struct wi_card_ident {
 		"PRISM3 ISL37300P",					\
 		WI_INTERSIL						\
 	}, {								\
+		WI_NIC_3842_USB_AMD_2,					\
+		"PRISM2.5 USB",						\
+		WI_INTERSIL						\
+	}, {								\
+		WI_NIC_3842_USB_SST_2,					\
+		"PRISM2.5 USB",						\
+		WI_INTERSIL						\
+	}, {								\
+		WI_NIC_3842_USB_ATL_2,					\
+		"PRISM2.5 USB",						\
+		WI_INTERSIL						\
+	}, {								\
 		WI_NIC_P3_MINI_AMD,					\
 		"PRISM3 ISL37300P(PCI)",				\
 		WI_INTERSIL						\
@@ -914,7 +943,15 @@ struct wi_card_ident {
 		"PRISM3 ISL37300P(PCI)",				\
 		WI_INTERSIL						\
 	}, {								\
+		WI_NIC_P3_USB,						\
+		"PRISM3 (USB)",						\
+		WI_INTERSIL						\
+	}, {								\
 		WI_NIC_P3_USB_NETGEAR,					\
+		"PRISM3 (USB)",						\
+		WI_INTERSIL						\
+	}, {								\
+		WI_NIC_P3_USB_2,						\
 		"PRISM3 (USB)",						\
 		WI_INTERSIL						\
 	}, {								\

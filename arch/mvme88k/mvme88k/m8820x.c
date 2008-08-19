@@ -1,4 +1,4 @@
-/*	$OpenBSD: m8820x.c,v 1.41 2005/04/27 14:07:38 miod Exp $	*/
+/*	$OpenBSD: m8820x.c,v 1.45 2005/12/04 12:20:19 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  *
@@ -30,7 +30,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/asm_macro.h>
-#include <machine/cpu_number.h>
+#include <machine/cpu.h>
 #ifdef DEBUG
 #include <machine/locore.h>
 #endif
@@ -91,7 +91,6 @@ m8820x_setup_board_config()
 	u_int32_t whoami;
 #endif
 
-	master_cpu = 0;	/* temp to get things going */
 	switch (brdtyp) {
 #ifdef MVME187
 	case BRD_187:
@@ -163,7 +162,6 @@ m8820x_setup_board_config()
 	for (num = 0; num < max_cpus; num++) {
 		int type;
 
-		cpu_sets[num] = 1;   /* This cpu installed... */
 		type = CMMU_TYPE(m8820x_cmmu[num << cmmu_shift].
 		    cmmu_regs[CMMU_IDR]);
 
@@ -255,12 +253,12 @@ m8820x_setup_board_config()
  * its value will let us know which data CMMU has been used to perform
  * the read, and we can reliably compute the CPU number from it.
  */
-unsigned
-m8820x_cmmu_cpu_number()
+cpuid_t
+m8820x_cpu_number()
 {
 #ifdef MVME188
 	u_int32_t whoami;
-	unsigned int cpu;
+	cpuid_t cpu;
 #endif
 
 #ifdef MVME187

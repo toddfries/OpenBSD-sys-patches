@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.12 2002/05/18 09:49:17 art Exp $	*/
+/*	$OpenBSD: db_machdep.c,v 1.15 2006/01/02 21:44:52 miod Exp $	*/
 /*	$NetBSD: db_machdep.c,v 1.17 1999/06/20 00:58:23 ragge Exp $	*/
 
 /* 
@@ -59,6 +59,7 @@
 #include <ddb/db_extern.h>
 #include <ddb/db_access.h>
 #include <ddb/db_interface.h>
+#include <ddb/db_var.h>
 #include <ddb/db_variables.h>
 
 extern	label_t	*db_recover;
@@ -140,7 +141,7 @@ kdb_trap(frame)
 
 	/* XXX Should switch to interrupt stack here, if needed. */
 
-	s = splimp();
+	s = splhigh();
 	db_active++;
 	cnpollc(TRUE);
 	db_trap(frame->trap, frame->code);
@@ -178,7 +179,7 @@ kdbprinttrap(type, code)
  */
 void
 db_read_bytes(addr, size, data)
-	vm_offset_t	addr;
+	db_addr_t addr;
 	size_t	size;
 	char	*data;
 {
@@ -190,7 +191,7 @@ db_read_bytes(addr, size, data)
  */
 void
 db_write_bytes(addr, size, data)
-	vm_offset_t	addr;
+	db_addr_t addr;
 	size_t	size;
 	char	*data;
 {
@@ -507,7 +508,8 @@ kdbrint(tkn)
 {
 
 	if (ddbescape && ((tkn & 0x7f) == 'D')) {
-		mtpr(0xf, PR_SIRR);
+		if (db_console)
+			mtpr(0xf, PR_SIRR);
 		ddbescape = 0;
 		return 1;
 	}

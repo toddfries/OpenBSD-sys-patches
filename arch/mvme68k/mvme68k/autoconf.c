@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.28 2004/12/25 23:02:25 miod Exp $ */
+/*	$OpenBSD: autoconf.c,v 1.33 2006/01/11 07:22:00 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -86,8 +86,10 @@
 #include <machine/cpu.h>
 #include <machine/pte.h>
 
+#include <scsi/scsi_all.h>
+#include <scsi/scsiconf.h>
+
 void	setroot(void);
-void	swapconf(void);
 int	mainbus_print(void *, const char *);
 int	mainbus_scan(struct device *, void *, void *);
 int	findblkmajor(struct device *);
@@ -97,14 +99,19 @@ struct	device *parsedisk(char *, int, int, dev_t *);
 extern void init_intrs(void);
 extern void dumpconf(void);
 
+/* boot device information */
+paddr_t	bootaddr;
+int	bootctrllun, bootdevlun, bootpart;
+struct	device *bootdv;
+
 /*
  * XXX some storage space must be allocated statically because of
  * early console init
  */
-char	extiospace[EXTENT_FIXED_STORAGE_SIZE(EIOMAPSIZE / 16)];
+char	extiospace[EXTENT_FIXED_STORAGE_SIZE(8)];
 
 struct	extent *extio;
-extern	void *extiobase;
+extern	vaddr_t extiobase;
 
 void mainbus_attach(struct device *, struct device *, void *);
 int  mainbus_match(struct device *, void *, void *);
@@ -133,7 +140,7 @@ mainbus_print(args, bus)
 {
 	struct confargs *ca = args;
 
-	if (ca->ca_paddr != (void *)-1)
+	if (ca->ca_paddr != (paddr_t)-1)
 		printf(" addr 0x%x", (u_int32_t)ca->ca_paddr);
 	return (UNCONF);
 }
@@ -147,8 +154,8 @@ mainbus_scan(parent, child, args)
 	struct confargs oca;
 
 	bzero(&oca, sizeof oca);
-	oca.ca_paddr = (void *)cf->cf_loc[0];
-	oca.ca_vaddr = (void *)-1;
+	oca.ca_paddr = cf->cf_loc[0];
+	oca.ca_vaddr = (vaddr_t)-1;
 	oca.ca_ipl = -1;
 	oca.ca_bustype = BUS_MAIN;
 	oca.ca_name = cf->cf_driver->cd_name;
@@ -192,7 +199,7 @@ cpu_configure()
 		panic("autoconfig failed, no root");
 
 	setroot();
-	swapconf();
+	dumpconf();
 	cold = 0;
 }
 
@@ -200,19 +207,19 @@ cpu_configure()
  * Allocate/deallocate a cache-inhibited range of kernel virtual address
  * space mapping the indicated physical address range [pa - pa+size)
  */
-void *
+vaddr_t
 mapiodev(pa, size)
-	void *pa;
+	paddr_t pa;
 	int size;
 {
 	int error;
-	void *kva;
+	vaddr_t kva;
 
-	if (size == 0)
+	if (size <= 0)
 		return NULL;
 
 #ifdef DEBUG
-	if (((int)pa & PGOFSET) || (size & PGOFSET))
+	if ((pa & PGOFSET) || (size & PGOFSET))
 		panic("mapiodev: unaligned");
 #endif
 
@@ -222,49 +229,29 @@ mapiodev(pa, size)
 	if (error != 0)
 	        return NULL;
 
-	physaccess((vaddr_t)kva, (paddr_t)pa, size, PG_RW|PG_CI);
+	physaccess(kva, pa, size, PG_RW | PG_CI);
 	return (kva);
 }
 
 void
 unmapiodev(kva, size)
-	void *kva;
+	vaddr_t kva;
 	int size;
 {
 	int error;
 
 #ifdef DEBUG
-	if (((int)kva & PGOFSET) || (size & PGOFSET))
+	if ((kva & PGOFSET) || (size & PGOFSET))
 	        panic("unmapiodev: unaligned");
 	if (kva < extiobase || kva >= extiobase + ctob(EIOMAPSIZE))
 	        panic("unmapiodev: bad address");
 #endif
-	physunaccess((vaddr_t)kva, size);
+	physunaccess(kva, size);
 
 	error = extent_free(extio, (u_long)kva, size, EX_NOWAIT);
 
 	if (error != 0)
 		printf("unmapiodev: extent_free failed\n");
-}
-
-/*
- * Configure swap space and related parameters.
- */
-void
-swapconf()
-{
-	register struct swdevt *swp;
-	register int nblks;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++)
-		if (bdevsw[major(swp->sw_dev)].d_psize) {
-			nblks =
-			    (*bdevsw[major(swp->sw_dev)].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-		}
-	dumpconf();
 }
 
 /*
@@ -542,4 +529,53 @@ gotswap:
 	 */
 	if (temp == dumpdev)
 		dumpdev = swdevt[0].sw_dev;
+}
+
+void
+device_register(struct device *dev, void *aux)
+{
+	if (bootpart == -1) /* ignore flag from controller driver? */
+		return;
+
+	/*
+	 * scsi: sd,cd
+	 */
+	if (strncmp("sd", dev->dv_xname, 2) == 0 ||
+	    strncmp("cd", dev->dv_xname, 2) == 0) {
+		struct scsibus_attach_args *sa = aux;
+		int target, lun;
+#ifdef MVME147
+		/*
+		 * The 147 can only boot from the built-in scsi controller,
+		 * and stores the scsi id as the controller number.
+		 */
+		if (cputyp == CPU_147) {
+			target = bootctrllun;
+			lun = 0;
+		} else
+#endif
+		{
+			target = bootdevlun >> 4;
+			lun = bootdevlun & 0x0f;
+		}
+    		
+		if (sa->sa_sc_link->target == target &&
+		    sa->sa_sc_link->lun == lun) {
+			bootdv = dev;
+			return;
+		}
+	}
+
+	/*
+	 * ethernet: ie,le
+	 */
+	else if (strncmp("ie", dev->dv_xname, 2) == 0 ||
+	    strncmp("le", dev->dv_xname, 2) == 0) {
+		struct confargs *ca = aux;
+
+		if (ca->ca_paddr == bootaddr) {
+			bootdv = dev;
+			return;
+		}
+	}
 }

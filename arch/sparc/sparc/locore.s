@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.65 2005/08/18 18:40:51 kettenis Exp $	*/
+/*	$OpenBSD: locore.s,v 1.68 2006/02/22 22:17:07 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.73 1997/09/13 20:36:48 pk Exp $	*/
 
 /*
@@ -1383,7 +1383,7 @@ label:	b,a	1f; \
  * wmask[CWP] tells whether a `rett' would return into the invalid window.
  */
 	.data
-	.skip	32			! alignment byte & negative indicies
+	.skip	32			! alignment byte & negative indices
 uwtab:	.skip	32			! u_char uwtab[-31..31];
 wmask:	.skip	32			! u_char wmask[0..31];
 
@@ -4833,14 +4833,14 @@ ENTRY(proc_trampoline)
 	b	return_from_syscall
 	 ld	[%sp + CCFSZ + 8], %l2	! npc
 
-/* probeget and probeset are meant to be used during autoconfiguration */
+/* probeget is meant to be used during autoconfiguration */
 
 /*
  * probeget(addr, size) caddr_t addr; int size;
  *
- * Read or write a (byte,word,longword) from the given address.
- * Like {fu,su}{byte,halfword,word} but our caller is supposed
- * to know what he is doing... the address can be anywhere.
+ * Read a (byte,short,int) from the given address.
+ * Like copyin but our caller is supposed to know what he is doing...
+ * the address can be anywhere.
  *
  * We optimize for space, rather than time, here.
  */
@@ -4879,30 +4879,6 @@ Lfsbail:
 	 mov	-1, %o0
 
 /*
- * probeset(addr, size, val) caddr_t addr; int size, val;
- *
- * As above, but we return 0 on success.
- */
-ENTRY(probeset)
-	! %o0 = addr, %o1 = (1,2,4), %o2 = val
-	sethi	%hi(_C_LABEL(cpcb)), %o3
-	ld	[%o3 + %lo(_C_LABEL(cpcb))], %o3	! cpcb->pcb_onfault = Lfserr;
-	set	Lfserr, %o5
-	st	%o5, [%o3 + PCB_ONFAULT]
-	btst	1, %o1
-	bnz,a	0f			! if (len & 1)
-	 stb	%o2, [%o0]		!	*(char *)addr = value;
-0:	btst	2, %o1
-	bnz,a	0f			! if (len & 2)
-	 sth	%o2, [%o0]		!	*(short *)addr = value;
-0:	btst	4, %o1
-	bnz,a	0f			! if (len & 4)
-	 st	%o2, [%o0]		!	*(int *)addr = value;
-0:	clr	%o0			! made it, clear onfault and return 0
-	retl
-	 st	%g0, [%o3 + PCB_ONFAULT]
-
-/*
  * int xldcontrolb(caddr_t, pcb)
  *		    %o0     %o1
  *
@@ -4917,31 +4893,6 @@ ENTRY(xldcontrolb)
 	lduba	[%o0] ASI_CONTROL, %o0	! read
 0:	retl
 	 st	%g0, [%o2 + PCB_ONFAULT]
-
-/*
- * Insert entry into doubly-linked queue.
- * We could just do this in C, but gcc does not do leaves well (yet).
- */
-ENTRY(_insque)
-	! %o0 = e = what to insert; %o1 = after = entry to insert after
-	st	%o1, [%o0 + 4]		! e->prev = after;
-	ld	[%o1], %o2		! tmp = after->next;
-	st	%o2, [%o0]		! e->next = tmp;
-	st	%o0, [%o1]		! after->next = e;
-	retl
-	st	%o0, [%o2 + 4]		! tmp->prev = e;
-
-
-/*
- * Remove entry from doubly-linked queue.
- */
-ENTRY(_remque)
-	! %o0 = e = what to remove
-	ld	[%o0], %o1		! n = e->next;
-	ld	[%o0 + 4], %o2		! p = e->prev;
-	st	%o2, [%o1 + 4]		! n->prev = p;
-	retl
-	st	%o1, [%o2]		! p->next = n;
 
 /*
  * copywords(src, dst, nbytes)

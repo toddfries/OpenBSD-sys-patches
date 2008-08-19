@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.19 2005/08/06 09:53:36 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.29 2005/12/11 21:45:30 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -81,9 +81,6 @@
 #define USERMODE(PSR)   (((PSR) & PSR_MODE) == 0)
 #define SYSTEMMODE(PSR) (((PSR) & PSR_MODE) != 0)
 
-/* sigh */
-extern int procfs_domem(struct proc *, struct proc *, void *, struct uio *);
-
 __dead void panictrap(int, struct trapframe *);
 __dead void error_fatal(struct trapframe *);
 int double_reg_fixup(struct trapframe *);
@@ -107,6 +104,7 @@ const char *trap_type[] = {
 };
 const int trap_types = sizeof trap_type / sizeof trap_type[0];
 
+#ifdef M88100
 const char *pbus_exception_type[] = {
 	"Success (No Fault)",
 	"unknown 1",
@@ -117,18 +115,20 @@ const char *pbus_exception_type[] = {
 	"Supervisor Violation",
 	"Write Violation",
 };
+#endif
 
 static inline void
 userret(struct proc *p, struct trapframe *frame, u_quad_t oticks)
 {
 	int sig;
+	struct cpu_info *cpu = curcpu();
 
 	/* take pending signals */
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 	p->p_priority = p->p_usrpri;
 
-	if (want_resched) {
+	if (cpu->ci_want_resched) {
 		/*
 		 * We're being preempted.
 		 */
@@ -146,7 +146,7 @@ userret(struct proc *p, struct trapframe *frame, u_quad_t oticks)
 		addupc_task(p, frame->tf_sxip & XIP_ADDR,
 		    (int)(p->p_sticks - oticks) * psratio);
 	}
-	curpriority = p->p_priority;
+	cpu->ci_schedstate.spc_curpriority = p->p_priority;
 }
 
 __dead void
@@ -257,10 +257,9 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		break;
 	case T_INT:
 	case T_INT+T_USER:
-		/* This function pointer is set in machdep.c
-		   It calls m188_ext_int or sbc_ext_int depending
-		   on the value of brdtyp - smurph */
+		curcpu()->ci_intrdepth++;
 		md_interrupt_func(T_INT, frame);
+		curcpu()->ci_intrdepth--;
 		return;
 
 	case T_MISALGNFLT:
@@ -275,7 +274,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		 */
 #ifdef TRAPDEBUG
 		pbus_type = CMMU_PFSR_FAULT(frame->tf_ipfsr);
-		printf("Kernel Instruction fault #%d (%s) v = 0x%x, frame 0x%x cpu %d\n",
+		printf("Kernel Instruction fault #%d (%s) v = 0x%x, frame 0x%x cpu %p\n",
 		    pbus_type, pbus_exception_type[pbus_type],
 		    fault_addr, frame, frame->tf_cpu);
 #endif
@@ -305,12 +304,13 @@ m88100_trap(unsigned type, struct trapframe *frame)
 			panic("trap: bad kernel access at %x", fault_addr);
 		}
 
+		KERNEL_LOCK(LK_CANRECURSE | LK_EXCLUSIVE);
 		vm = p->p_vmspace;
 		map = kernel_map;
 
 		pbus_type = CMMU_PFSR_FAULT(frame->tf_dpfsr);
 #ifdef TRAPDEBUG
-		printf("Kernel Data access fault #%d (%s) v = 0x%x, frame 0x%x cpu %d\n",
+		printf("Kernel Data access fault #%d (%s) v = 0x%x, frame 0x%x cpu %p\n",
 		    pbus_type, pbus_exception_type[pbus_type],
 		    fault_addr, frame, frame->tf_cpu);
 #endif
@@ -325,6 +325,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 			data_access_emulation((unsigned *)frame);
 			frame->tf_dpfsr = 0;
 			frame->tf_dmt0 = 0;
+			KERNEL_UNLOCK();
 			return;
 		case CMMU_PFSR_SFAULT:
 		case CMMU_PFSR_PFAULT:
@@ -342,6 +343,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 				data_access_emulation((unsigned *)frame);
 				frame->tf_dpfsr = 0;
 				frame->tf_dmt0 = 0;
+				KERNEL_UNLOCK();
 				return;
 			}
 			break;
@@ -350,6 +352,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		printf("PBUS Fault %d (%s) va = 0x%x\n", pbus_type,
 		    pbus_exception_type[pbus_type], va);
 #endif
+		KERNEL_UNLOCK();
 		panictrap(frame->tf_vector, frame);
 		/* NOTREACHED */
 	case T_INSTFLT+T_USER:
@@ -360,7 +363,7 @@ user_fault:
 		if (type == T_INSTFLT + T_USER) {
 			pbus_type = CMMU_PFSR_FAULT(frame->tf_ipfsr);
 #ifdef TRAPDEBUG
-			printf("User Instruction fault #%d (%s) v = 0x%x, frame 0x%x cpu %d\n",
+			printf("User Instruction fault #%d (%s) v = 0x%x, frame 0x%x cpu %p\n",
 			    pbus_type, pbus_exception_type[pbus_type],
 			    fault_addr, frame, frame->tf_cpu);
 #endif
@@ -368,7 +371,7 @@ user_fault:
 			fault_addr = frame->tf_dma0;
 			pbus_type = CMMU_PFSR_FAULT(frame->tf_dpfsr);
 #ifdef TRAPDEBUG
-			printf("User Data access fault #%d (%s) v = 0x%x, frame 0x%x cpu %d\n",
+			printf("User Data access fault #%d (%s) v = 0x%x, frame 0x%x cpu %p\n",
 			    pbus_type, pbus_exception_type[pbus_type],
 			    fault_addr, frame, frame->tf_cpu);
 #endif
@@ -384,6 +387,7 @@ user_fault:
 
 		va = trunc_page((vaddr_t)fault_addr);
 
+		KERNEL_PROC_LOCK(p);
 		vm = p->p_vmspace;
 		map = &vm->vm_map;
 		if ((pcb_onfault = p->p_addr->u_pcb.pcb_onfault) != 0)
@@ -410,6 +414,7 @@ user_fault:
 			else if (result == EACCES)
 				result = EFAULT;
 		}
+		KERNEL_PROC_UNLOCK(p);
 
 		/*
 		 * This could be a fault caused in copyin*()
@@ -558,10 +563,12 @@ user_fault:
 
 	case T_ASTFLT+T_USER:
 		uvmexp.softs++;
-		want_ast = 0;
+		p->p_md.md_astpending = 0;
 		if (p->p_flag & P_OWEUPC) {
 			p->p_flag &= ~P_OWEUPC;
+			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
+			KERNEL_PROC_UNLOCK(p);
 		}
 		break;
 	}
@@ -574,7 +581,9 @@ user_fault:
 
 	if (sig) {
 		sv.sival_int = fault_addr;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, sig, fault_code, fault_type, sv);
+		KERNEL_PROC_UNLOCK(p);
 		/*
 		 * don't want multiple faults - we are going to
 		 * deliver signal.
@@ -693,11 +702,15 @@ m88110_trap(unsigned type, struct trapframe *frame)
 		break;
 	case T_NON_MASK:
 	case T_NON_MASK+T_USER:
+		curcpu()->ci_intrdepth++;
 		md_interrupt_func(T_NON_MASK, frame);
+		curcpu()->ci_intrdepth--;
 		return;
 	case T_INT:
 	case T_INT+T_USER:
+		curcpu()->ci_intrdepth++;
 		md_interrupt_func(T_INT, frame);
+		curcpu()->ci_intrdepth--;
 		return;
 	case T_MISALGNFLT:
 		printf("kernel mode misaligned access exception @ 0x%08x\n",
@@ -746,6 +759,7 @@ m88110_trap(unsigned type, struct trapframe *frame)
 			panic("trap: bad kernel access at %x", fault_addr);
 		}
 
+		KERNEL_LOCK(LK_CANRECURSE | LK_EXCLUSIVE);
 		vm = p->p_vmspace;
 		map = kernel_map;
 
@@ -759,8 +773,10 @@ m88110_trap(unsigned type, struct trapframe *frame)
 				p->p_addr->u_pcb.pcb_onfault = 0;
 			result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 			p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-			if (result == 0)
+			if (result == 0) {
+				KERNEL_UNLOCK();
 				return;
+			}
 		}
 		if (frame->tf_dsr & CMMU_DSR_WE) {	/* write fault  */
 			/*
@@ -775,8 +791,10 @@ m88110_trap(unsigned type, struct trapframe *frame)
 			 */
 			pte = pmap_pte(map->pmap, va);
 #ifdef DEBUG
-			if (pte == PT_ENTRY_NULL)
+			if (pte == NULL) {
+				KERNEL_UNLOCK();
 				panic("NULL pte on write fault??");
+			}
 #endif
 			if (!(*pte & PG_M) && !(*pte & PG_RO)) {
 				/* Set modified bit and try the write again. */
@@ -785,6 +803,7 @@ m88110_trap(unsigned type, struct trapframe *frame)
 				    map->pmap, *pte);
 #endif
 				*pte |= PG_M;
+				KERNEL_UNLOCK();
 				return;
 #if 1	/* shouldn't happen */
 			} else {
@@ -797,11 +816,14 @@ m88110_trap(unsigned type, struct trapframe *frame)
 					p->p_addr->u_pcb.pcb_onfault = 0;
 				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-				if (result == 0)
+				if (result == 0) {
+					KERNEL_UNLOCK();
 					return;
+				}
 #endif
 			}
 		}
+		KERNEL_UNLOCK();
 		panictrap(frame->tf_vector, frame);
 		/* NOTREACHED */
 	case T_INSTFLT+T_USER:
@@ -833,6 +855,7 @@ m88110_user_fault:
 
 		va = trunc_page((vaddr_t)fault_addr);
 
+		KERNEL_PROC_LOCK(p);
 		vm = p->p_vmspace;
 		map = &vm->vm_map;
 		if ((pcb_onfault = p->p_addr->u_pcb.pcb_onfault) != 0)
@@ -871,8 +894,10 @@ m88110_user_fault:
 				 */
 				pte = pmap_pte(vm_map_pmap(map), va);
 #ifdef DEBUG
-				if (pte == PT_ENTRY_NULL)
+				if (pte == NULL) {
+					KERNEL_PROC_UNLOCK(p);
 					panic("NULL pte on write fault??");
+				}
 #endif
 				if (!(*pte & PG_M) && !(*pte & PG_RO)) {
 					/*
@@ -889,6 +914,7 @@ m88110_user_fault:
 					 * table search
 					 */
 					set_dcmd(CMMU_DCMD_INV_UATC);
+					KERNEL_PROC_UNLOCK(p);
 					return;
 				} else {
 					/* must be a real wp fault */
@@ -904,6 +930,7 @@ m88110_user_fault:
 				printf("Unexpected Data access fault dsr %x\n",
 				    frame->tf_dsr);
 #endif
+				KERNEL_PROC_UNLOCK(p);
 				panictrap(frame->tf_vector, frame);
 			}
 		} else {
@@ -922,6 +949,7 @@ m88110_user_fault:
 				printf("Unexpected Instruction fault isr %x\n",
 				    frame->tf_isr);
 #endif
+				KERNEL_PROC_UNLOCK(p);
 				panictrap(frame->tf_vector, frame);
 			}
 		}
@@ -932,6 +960,7 @@ m88110_user_fault:
 			else if (result == EACCES)
 				result = EFAULT;
 		}
+		KERNEL_PROC_UNLOCK(p);
 
 		/*
 		 * This could be a fault caused in copyin*()
@@ -1049,10 +1078,12 @@ m88110_user_fault:
 
 	case T_ASTFLT+T_USER:
 		uvmexp.softs++;
-		want_ast = 0;
+		p->p_md.md_astpending = 0;
 		if (p->p_flag & P_OWEUPC) {
 			p->p_flag &= ~P_OWEUPC;
+			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
+			KERNEL_PROC_UNLOCK(p);
 		}
 		break;
 	}
@@ -1065,7 +1096,9 @@ m88110_user_fault:
 
 	if (sig) {
 		sv.sival_int = fault_addr;
+		KERNEL_PROC_LOCK(p);
 		trapsignal(p, sig, fault_code, fault_type, sv);
+		KERNEL_PROC_UNLOCK(p);
 	}
 
 	userret(p, frame, sticks);
@@ -1076,9 +1109,9 @@ __dead void
 error_fatal(struct trapframe *frame)
 {
 	if (frame->tf_vector == 0)
-		printf("\nReset Exception\n");
+		printf("\nCPU %d Reset Exception\n", cpu_number());
 	else
-		printf("\nError Exception\n");
+		printf("\nCPU %d Error Exception\n", cpu_number());
 
 #ifdef DDB
 	regdump((struct trapframe*)frame);
@@ -1096,9 +1129,6 @@ m88100_syscall(register_t code, struct trapframe *tf)
 	int error;
 	register_t args[11], rval[2], *ap;
 	u_quad_t sticks;
-#ifdef DIAGNOSTIC
-	extern struct pcb *curpcb;
-#endif
 
 	uvmexp.syscalls++;
 
@@ -1106,15 +1136,6 @@ m88100_syscall(register_t code, struct trapframe *tf)
 
 	callp = p->p_emul->e_sysent;
 	nsys  = p->p_emul->e_nsysent;
-
-#ifdef DIAGNOSTIC
-	if (USERMODE(tf->tf_epsr) == 0)
-		panic("syscall");
-	if (curpcb != &p->p_addr->u_pcb)
-		panic("syscall curpcb/ppcb");
-	if (tf != (struct trapframe *)&curpcb->user_state)
-		panic("syscall trapframe");
-#endif
 
 	sticks = p->p_sticks;
 	p->p_md.md_tf = tf;
@@ -1157,6 +1178,7 @@ m88100_syscall(register_t code, struct trapframe *tf)
 		bcopy((caddr_t)ap, (caddr_t)args, i * sizeof(register_t));
 	}
 
+	KERNEL_PROC_LOCK(p);
 #ifdef SYSCALL_DEBUG
 	scdebug_call(p, code, args);
 #endif
@@ -1204,17 +1226,9 @@ m88100_syscall(register_t code, struct trapframe *tf)
 	 *    any pointers.
 	 */
 
+	KERNEL_PROC_UNLOCK(p);
 	switch (error) {
 	case 0:
-		/*
-		 * If fork succeeded and we are the child, our stack
-		 * has moved and the pointer tf is no longer valid,
-		 * and p is wrong.  Compute the new trapframe pointer.
-		 * (The trap frame invariably resides at the
-		 * tippity-top of the u. area.)
-		 */
-		p = curproc;
-		tf = (struct trapframe *)USER_REGS(p);
 		tf->tf_r[2] = rval[0];
 		tf->tf_r[3] = rval[1];
 		tf->tf_epsr &= ~PSR_C;
@@ -1222,20 +1236,14 @@ m88100_syscall(register_t code, struct trapframe *tf)
 		tf->tf_sfip = tf->tf_snip + 4;
 		break;
 	case ERESTART:
-		/*
-		 * If (error == ERESTART), back up the pipe line. This
-		 * will end up reexecuting the trap.
-		 */
 		tf->tf_epsr &= ~PSR_C;
 		tf->tf_sfip = tf->tf_snip & ~FIP_E;
 		tf->tf_snip = tf->tf_sxip & ~NIP_E;
 		break;
 	case EJUSTRETURN:
-		/* if (error == EJUSTRETURN), leave the ip's alone */
 		tf->tf_epsr &= ~PSR_C;
 		break;
 	default:
-		/* error != ERESTART && error != EJUSTRETURN*/
 		if (p->p_emul->e_errno)
 			error = p->p_emul->e_errno[error];
 		tf->tf_r[2] = error;
@@ -1245,12 +1253,17 @@ m88100_syscall(register_t code, struct trapframe *tf)
 		break;
 	}
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_ret(p, code, error, rval);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 	userret(p, tf, sticks);
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
+	if (KTRPOINT(p, KTR_SYSRET)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsysret(p, code, error, rval[0]);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
 }
 #endif /* M88100 */
@@ -1266,9 +1279,6 @@ m88110_syscall(register_t code, struct trapframe *tf)
 	int error;
 	register_t args[11], rval[2], *ap;
 	u_quad_t sticks;
-#ifdef DIAGNOSTIC
-	extern struct pcb *curpcb;
-#endif
 
 	uvmexp.syscalls++;
 
@@ -1276,15 +1286,6 @@ m88110_syscall(register_t code, struct trapframe *tf)
 
 	callp = p->p_emul->e_sysent;
 	nsys  = p->p_emul->e_nsysent;
-
-#ifdef DIAGNOSTIC
-	if (USERMODE(tf->tf_epsr) == 0)
-		panic("syscall");
-	if (curpcb != &p->p_addr->u_pcb)
-		panic("syscall curpcb/ppcb");
-	if (tf != (struct trapframe *)&curpcb->user_state)
-		panic("syscall trapframe");
-#endif
 
 	sticks = p->p_sticks;
 	p->p_md.md_tf = tf;
@@ -1326,6 +1327,7 @@ m88110_syscall(register_t code, struct trapframe *tf)
 		 */
 		bcopy((caddr_t)ap, (caddr_t)args, i * sizeof(register_t));
 	}
+	KERNEL_PROC_LOCK(p);
 #ifdef SYSCALL_DEBUG
 	scdebug_call(p, code, args);
 #endif
@@ -1369,17 +1371,9 @@ m88110_syscall(register_t code, struct trapframe *tf)
 	 *    exip += 4
 	 */
 
+	KERNEL_PROC_UNLOCK(p);
 	switch (error) {
 	case 0:
-		/*
-		 * If fork succeeded and we are the child, our stack
-		 * has moved and the pointer tf is no longer valid,
-		 * and p is wrong.  Compute the new trapframe pointer.
-		 * (The trap frame invariably resides at the
-		 * tippity-top of the u. area.)
-		 */
-		p = curproc;
-		tf = (struct trapframe *)USER_REGS(p);
 		tf->tf_r[2] = rval[0];
 		tf->tf_r[3] = rval[1];
 		tf->tf_epsr &= ~PSR_C;
@@ -1419,12 +1413,17 @@ m88110_syscall(register_t code, struct trapframe *tf)
 	}
 
 #ifdef SYSCALL_DEBUG
+	KERNEL_PROC_LOCK(p);
 	scdebug_ret(p, code, error, rval);
+	KERNEL_PROC_UNLOCK(p);
 #endif
 	userret(p, tf, sticks);
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
+	if (KTRPOINT(p, KTR_SYSRET)) {
+		KERNEL_PROC_LOCK(p);
 		ktrsysret(p, code, error, rval[0]);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
 }
 #endif	/* M88110 */
@@ -1444,6 +1443,7 @@ child_return(arg)
 	tf->tf_r[2] = 0;
 	tf->tf_r[3] = 0;
 	tf->tf_epsr &= ~PSR_C;
+	/* skip br instruction as in syscall() */
 #ifdef M88100
 	if (CPU_IS88100) {
 		tf->tf_snip = tf->tf_sfip & XIP_ADDR;
@@ -1460,10 +1460,16 @@ child_return(arg)
 	}
 #endif
 
+	KERNEL_PROC_UNLOCK(p);
 	userret(p, tf, p->p_sticks);
+
 #ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, SYS_fork, 0, 0);
+	if (KTRPOINT(p, KTR_SYSRET)) {
+		KERNEL_PROC_LOCK(p);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+		KERNEL_PROC_UNLOCK(p);
+	}
 #endif
 }
 
@@ -1475,12 +1481,9 @@ child_return(arg)
 
 #include <sys/ptrace.h>
 
-vaddr_t	ss_branch_taken(u_int, vaddr_t, u_int (*func)(u_int, struct reg *),
-	    struct reg *);
-u_int	ss_getreg_val(u_int, struct reg *);
+vaddr_t	ss_branch_taken(u_int, vaddr_t, struct reg *);
 int	ss_get_value(struct proc *, vaddr_t, u_int *);
-int	ss_inst_branch(unsigned);
-int	ss_inst_delayed(unsigned);
+int	ss_inst_branch_or_call(u_int);
 int	ss_put_breakpoint(struct proc *, vaddr_t, vaddr_t *, u_int *);
 
 #define	SYSCALL_INSTR	0xf000d080	/* tb0 0,r0,128 */
@@ -1500,7 +1503,7 @@ ss_get_value(struct proc *p, vaddr_t addr, u_int *value)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
 	uio.uio_procp = curproc;
-	return (procfs_domem(curproc, p, NULL, &uio));
+	return (process_domem(curproc, p, &uio, PT_READ_I));
 }
 
 int
@@ -1518,26 +1521,54 @@ ss_put_value(struct proc *p, vaddr_t addr, u_int value)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_WRITE;
 	uio.uio_procp = curproc;
-	return (procfs_domem(curproc, p, NULL, &uio));
+	return (process_domem(curproc, p, &uio, PT_WRITE_I));
 }
 
 /*
- * ss_branch_taken(instruction, program counter, func, func_data)
+ * ss_branch_taken(instruction, pc, regs)
  *
  * instruction will be a control flow instruction location at address pc.
  * Branch taken is supposed to return the address to which the instruction
- * would jump if the branch is taken. Func can be used to get the current
- * register values when invoked with a register number and func_data as
- * arguments.
+ * would jump if the branch is taken.
  *
- * If the instruction is not a control flow instruction, panic.
+ * This is different from branch_taken() in ddb, as we also need to process
+ * system calls.
  */
 vaddr_t
-ss_branch_taken(u_int inst, vaddr_t pc, u_int (*func)(u_int, struct reg *),
-    struct reg *func_data)
+ss_branch_taken(u_int inst, vaddr_t pc, struct reg *regs)
 {
-	/* check for system call */
-	if (inst == SYSCALL_INSTR) {
+	u_int regno;
+
+	/*
+	 * Quick check of the instruction. Note that we know we are only
+	 * invoked if ss_inst_branch_or_call() returns TRUE, so we do not
+	 * need to repeat the jpm, jsr and syscall stricter checks here.
+	 */
+	switch (inst >> (32 - 5)) {
+	case 0x18:	/* br */
+	case 0x19:	/* bsr */
+		/* signed 26 bit pc relative displacement, shift left 2 bits */
+		inst = (inst & 0x03ffffff) << 2;
+		/* check if sign extension is needed */
+		if (inst & 0x08000000)
+			inst |= 0xf0000000;
+		return (pc + inst);
+
+	case 0x1a:	/* bb0 */
+	case 0x1b:	/* bb1 */
+	case 0x1d:	/* bcnd */
+		/* signed 16 bit pc relative displacement, shift left 2 bits */
+		inst = (inst & 0x0000ffff) << 2;
+		/* check if sign extension is needed */
+		if (inst & 0x00020000)
+			inst |= 0xfffc0000;
+		return (pc + inst);
+
+	case 0x1e:	/* jmp or jsr */
+		regno = inst & 0x1f;	/* get the register value */
+		return (regno == 0 ? 0 : regs->r[regno]);
+
+	default:	/* system call */
 		/*
 		 * The regular (pc + 4) breakpoint will match the error
 		 * return. Successfull system calls return at (pc + 8),
@@ -1545,89 +1576,25 @@ ss_branch_taken(u_int inst, vaddr_t pc, u_int (*func)(u_int, struct reg *),
 		 */
 		return (pc + 8);
 	}
-
-	/* check if br/bsr */
-	if ((inst & 0xf0000000) == 0xc0000000) {
-		/* signed 26 bit pc relative displacement, shift left two bits */
-		inst = (inst & 0x03ffffff) << 2;
-		/* check if sign extension is needed */
-		if (inst & 0x08000000)
-			inst |= 0xf0000000;
-		return (pc + inst);
-	}
-
-	/* check if bb0/bb1/bcnd case */
-	switch (inst & 0xf8000000) {
-	case 0xd0000000: /* bb0 */
-	case 0xd8000000: /* bb1 */
-	case 0xe8000000: /* bcnd */
-		/* signed 16 bit pc relative displacement, shift left two bits */
-		inst = (inst & 0x0000ffff) << 2;
-		/* check if sign extension is needed */
-		if (inst & 0x00020000)
-			inst |= 0xfffc0000;
-		return (pc + inst);
-	}
-
-	/* check jmp/jsr case */
-	/* check bits 5-31, skipping 10 & 11 */
-	if ((inst & 0xfffff3e0) == 0xf400c000)
-		return (*func)(inst & 0x1f, func_data);	 /* the register value */
-
-	/* can't happen */
-	return (0);
-}
-
-/*
- * ss_getreg_val - handed a register number and an exception frame.
- *              Returns the value of the register in the specified
- *              frame. Only makes sense for general registers.
- */
-u_int
-ss_getreg_val(u_int regno, struct reg *regs)
-{
-	return (regno == 0 ? 0 : regs->r[regno]);
 }
 
 int
-ss_inst_branch(u_int ins)
+ss_inst_branch_or_call(u_int ins)
 {
 	/* check high five bits */
-
 	switch (ins >> (32 - 5)) {
 	case 0x18: /* br */
+	case 0x19: /* bsr */
 	case 0x1a: /* bb0 */
 	case 0x1b: /* bb1 */
 	case 0x1d: /* bcnd */
 		return (TRUE);
-		break;
-	case 0x1e: /* could be jmp */
-		if ((ins & 0xfffffbe0) == 0xf400c000)
+	case 0x1e: /* could be jmp or jsr */
+		if ((ins & 0xfffff3e0) == 0xf400c000)
 			return (TRUE);
 	}
 
 	return (FALSE);
-}
-
-/* ss_inst_delayed - this instruction is followed by a delay slot. Could be
-   br.n, bsr.n bb0.n, bb1.n, bcnd.n or jmp.n or jsr.n */
-
-int
-ss_inst_delayed(u_int ins)
-{
-	/* check the br, bsr, bb0, bb1, bcnd cases */
-	switch ((ins & 0xfc000000) >> (32 - 6)) {
-	case 0x31: /* br */
-	case 0x33: /* bsr */
-	case 0x35: /* bb0 */
-	case 0x37: /* bb1 */
-	case 0x3b: /* bcnd */
-		return (TRUE);
-	}
-
-	/* check the jmp, jsr cases */
-	/* mask out bits 0-4, bit 11 */
-	return (((ins & 0xfffff7e0) == 0xf400c400) ? TRUE : FALSE);
 }
 
 int
@@ -1684,9 +1651,8 @@ process_sstep(struct proc *p, int sstep)
 	 * Find if this instruction may cause a branch, and set up a breakpoint
 	 * at the branch location.
 	 */
-	if (ss_inst_branch(instr) || inst_call(instr) || inst_return(instr) ||
-	    instr == SYSCALL_INSTR) {
-		brpc = ss_branch_taken(instr, pc, ss_getreg_val, sstf);
+	if (ss_inst_branch_or_call(instr) || instr == SYSCALL_INSTR) {
+		brpc = ss_branch_taken(instr, pc, sstf);
 
 		/* self-branches are hopeless */
 		if (brpc != pc && brpc != 0) {

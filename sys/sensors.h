@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensors.h,v 1.7 2005/08/05 03:07:41 dlg Exp $	*/
+/*	$OpenBSD: sensors.h,v 1.14 2006/01/28 09:53:37 dlg Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexander Yurchenko <grange@openbsd.org>
@@ -30,19 +30,32 @@
 
 /* Sensor types */
 enum sensor_type {
-	SENSOR_TEMP,			/* temperature */
+	SENSOR_TEMP,			/* temperature (muK) */
 	SENSOR_FANRPM,			/* fan revolution speed */
-	SENSOR_VOLTS_DC,		/* voltage */
-	SENSOR_VOLTS_AC,		/* voltage (alternating-current) */
+	SENSOR_VOLTS_DC,		/* voltage (muV DC) */
+	SENSOR_VOLTS_AC,		/* voltage (muV AC) */
 	SENSOR_OHMS,			/* resistance */
 	SENSOR_WATTS,			/* power */
-	SENSOR_AMPS,			/* current */
+	SENSOR_AMPS,			/* current (muA) */
 	SENSOR_WATTHOUR,		/* power capacity */
 	SENSOR_AMPHOUR,			/* power capacity */
 	SENSOR_INDICATOR,		/* boolean indicator */
 	SENSOR_INTEGER,			/* generic integer value */
-	SENSOR_PERCENT			/* percent */
+	SENSOR_PERCENT,			/* percent */
+	SENSOR_LUX,			/* illuminance (mulx) */
+	SENSOR_DRIVE			/* disk */
 };
+
+#define SENSOR_DRIVE_EMPTY	1
+#define SENSOR_DRIVE_READY	2
+#define SENSOR_DRIVE_POWERUP	3
+#define SENSOR_DRIVE_ONLINE	4
+#define SENSOR_DRIVE_IDLE	5
+#define SENSOR_DRIVE_ACTIVE	6
+#define SENSOR_DRIVE_REBUILD	7
+#define SENSOR_DRIVE_POWERDOWN	8
+#define SENSOR_DRIVE_FAIL	9
+#define SENSOR_DRIVE_PFAIL	10
 
 /* Sensor states */
 enum sensor_status {
@@ -71,13 +84,14 @@ struct sensor {
 SLIST_HEAD(sensors_head, sensor);
 
 #ifdef _KERNEL
-extern int nsensors;
-extern struct sensors_head sensors;
 
-#define SENSOR_ADD(s) do { \
-	(s)->num = nsensors++;				\
-	SLIST_INSERT_HEAD(&sensors, (s), list);		\
-} while (0)
+void		sensor_add(struct sensor *);
+void		sensor_del(struct sensor *);
+struct sensor	*sensor_get(int);
+
+int		sensor_task_register(void *, void (*)(void *), int);
+void		sensor_task_unregister(void *);
+
 #endif	/* _KERNEL */
 
 #endif	/* !_SYS_SENSORS_H_ */

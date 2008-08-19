@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.102.2.2 2006/05/02 22:08:47 brad Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.104.2.2 2006/06/30 08:32:56 brad Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -927,6 +927,18 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 		if (m == NULL)
 			return (PF_DROP);
 
+		/* use mtag from concatenated mbuf chain */
+		pd->pf_mtag = pf_find_mtag(m);
+#ifdef DIAGNOSTIC
+		if (pd->pf_mtag == NULL) {
+			printf("%s: pf_find_mtag returned NULL(1)\n", __func__);
+			if ((pd->pf_mtag = pf_get_mtag(m)) == NULL) {
+				m_freem(m);
+				*m0 = NULL;
+				goto no_mem;
+			}
+		}
+#endif
 		if (frag != NULL && (frag->fr_flags & PFFRAG_DROP))
 			goto drop;
 
@@ -935,15 +947,13 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 		/* non-buffering fragment cache (drops or masks overlaps) */
 		int	nomem = 0;
 
-		if (dir == PF_OUT) {
-			if (m_tag_find(m, PACKET_TAG_PF_FRAGCACHE, NULL) !=
-			    NULL) {
-				/* Already passed the fragment cache in the
-				 * input direction.  If we continued, it would
-				 * appear to be a dup and would be dropped.
-				 */
-				goto fragment_pass;
-			}
+		if (dir == PF_OUT && pd->pf_mtag->flags & PF_TAG_FRAGCACHE) {
+			/*
+			 * Already passed the fragment cache in the
+			 * input direction.  If we continued, it would
+			 * appear to be a dup and would be dropped.
+			 */
+			goto fragment_pass;
 		}
 
 		frag = pf_find_fragment(h, &pf_cache_tree);
@@ -964,14 +974,21 @@ pf_normalize_ip(struct mbuf **m0, int dir, struct pfi_kif *kif, u_short *reason,
 			goto drop;
 		}
 
-		if (dir == PF_IN) {
-			struct m_tag	*mtag;
-
-			mtag = m_tag_get(PACKET_TAG_PF_FRAGCACHE, 0, M_NOWAIT);
-			if (mtag == NULL)
+		/* use mtag from copied and trimmed mbuf chain */
+		pd->pf_mtag = pf_find_mtag(m);
+#ifdef DIAGNOSTIC
+		if (pd->pf_mtag == NULL) {
+			printf("%s: pf_find_mtag returned NULL(2)\n", __func__);
+			if ((pd->pf_mtag = pf_get_mtag(m)) == NULL) {
+				m_freem(m);
+				*m0 = NULL;
 				goto no_mem;
-			m_tag_prepend(m, mtag);
+			}
 		}
+#endif
+		if (dir == PF_IN)
+			pd->pf_mtag->flags |= PF_TAG_FRAGCACHE;
+
 		if (frag != NULL && (frag->fr_flags & PFFRAG_DROP))
 			goto drop;
 		goto fragment_pass;

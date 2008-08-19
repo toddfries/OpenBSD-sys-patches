@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.26 2005/07/31 15:31:12 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.31 2005/12/22 00:37:25 marco Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -54,7 +54,6 @@
 #define	PGSHIFT		12		/* LOG2(NBPG) */
 
 #define	KERNBASE	0x00000000	/* start of kernel virtual */
-#define	BTOPKERNBASE	((u_long)KERNBASE >> PGSHIFT)
 
 #define	DEV_BSIZE	512
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
@@ -108,15 +107,6 @@
  * For now though just use DEV_BSIZE.
  */
 #define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE/DEV_BSIZE))
-
-/*
- * Mach derived conversion macros
- */
-#define hppa_round_page(x)	((((unsigned long)(x)) + NBPG - 1) & ~(NBPG-1))
-#define hppa_trunc_page(x)	((unsigned long)(x) & ~(NBPG-1))
-
-#define btop(x)		((unsigned long)(x) >> PGSHIFT)
-#define ptob(x)		((unsigned long)(x) << PGSHIFT)
 
 #ifdef _KERNEL
 #ifdef COMPAT_HPUX

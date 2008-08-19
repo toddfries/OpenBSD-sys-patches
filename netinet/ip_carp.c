@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.109.2.1 2005/12/16 23:47:44 brad Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.119 2006/01/28 23:47:20 mpf Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -136,6 +136,7 @@ struct carp_softc {
 	unsigned char sc_key[CARP_KEY_LEN];
 	unsigned char sc_pad[CARP_HMAC_PAD];
 	SHA1_CTX sc_sha1;
+	u_int32_t sc_hashkey[2];
 
 	struct timeout sc_ad_tmo;	/* advertisement timeout */
 	struct timeout sc_md_tmo;	/* master down timeout */
@@ -192,6 +193,7 @@ void	carp_multicast_cleanup(struct carp_softc *);
 int	carp_set_ifp(struct carp_softc *, struct ifnet *);
 void	carp_set_enaddr(struct carp_softc *);
 void	carp_addr_updated(void *);
+u_int32_t	carp_hash(struct carp_softc *, u_char *);
 int	carp_set_addr(struct carp_softc *, struct sockaddr_in *);
 int	carp_join_multicast(struct carp_softc *);
 #ifdef INET6
@@ -219,10 +221,13 @@ carp_hmac_prepare(struct carp_softc *sc)
 {
 	u_int8_t version = CARP_VERSION, type = CARP_ADVERTISEMENT;
 	u_int8_t vhid = sc->sc_vhid & 0xff;
+	SHA1_CTX sha1ctx;
+	u_int32_t kmd[5];
 	struct ifaddr *ifa;
-	int i;
+	int i, found;
+	struct in_addr last, cur, in;
 #ifdef INET6
-	struct in6_addr in6;
+	struct in6_addr last6, cur6, in6;
 #endif /* INET6 */
 
 	/* compute ipad from key */
@@ -236,24 +241,56 @@ carp_hmac_prepare(struct carp_softc *sc)
 	SHA1Update(&sc->sc_sha1, sc->sc_pad, sizeof(sc->sc_pad));
 	SHA1Update(&sc->sc_sha1, (void *)&version, sizeof(version));
 	SHA1Update(&sc->sc_sha1, (void *)&type, sizeof(type));
+
+	/* generate a key for the arpbalance hash, before the vhid is hashed */
+	bcopy(&sc->sc_sha1, &sha1ctx, sizeof(sha1ctx));
+	SHA1Final((unsigned char *)kmd, &sha1ctx);
+	sc->sc_hashkey[0] = kmd[0] ^ kmd[1];
+	sc->sc_hashkey[1] = kmd[2] ^ kmd[3];
+
+	/* the rest of the precomputation */
 	SHA1Update(&sc->sc_sha1, (void *)&vhid, sizeof(vhid));
+
+	/* Hash the addresses from smallest to largest, not interface order */
 #ifdef INET
-	TAILQ_FOREACH(ifa, &sc->sc_if.if_addrlist, ifa_list) {
-		if (ifa->ifa_addr->sa_family == AF_INET)
-			SHA1Update(&sc->sc_sha1,
-			    (void *)&ifatoia(ifa)->ia_addr.sin_addr.s_addr,
-			    sizeof(struct in_addr));
-	}
+	cur.s_addr = 0;
+	do {
+		found = 0;
+		last = cur;
+		cur.s_addr = 0xffffffff;
+		TAILQ_FOREACH(ifa, &sc->sc_if.if_addrlist, ifa_list) {
+			in.s_addr = ifatoia(ifa)->ia_addr.sin_addr.s_addr;
+			if (ifa->ifa_addr->sa_family == AF_INET &&
+			    ntohl(in.s_addr) > ntohl(last.s_addr) &&
+			    ntohl(in.s_addr) < ntohl(cur.s_addr)) {
+				cur.s_addr = in.s_addr;
+				found++;
+			}
+		}
+		if (found)
+			SHA1Update(&sc->sc_sha1, (void *)&cur, sizeof(cur));
+	} while (found);
 #endif /* INET */
 #ifdef INET6
-	TAILQ_FOREACH(ifa, &sc->sc_if.if_addrlist, ifa_list) {
-		if (ifa->ifa_addr->sa_family == AF_INET6) {
+	memset(&cur6, 0x00, sizeof(cur6));
+	do {
+		found = 0;
+		last6 = cur6;
+		memset(&cur6, 0xff, sizeof(cur6));
+		TAILQ_FOREACH(ifa, &sc->sc_if.if_addrlist, ifa_list) {
 			in6 = ifatoia6(ifa)->ia_addr.sin6_addr;
 			if (IN6_IS_ADDR_LINKLOCAL(&in6))
 				in6.s6_addr16[1] = 0;
-			SHA1Update(&sc->sc_sha1, (void *)&in6, sizeof(in6));
+			if (ifa->ifa_addr->sa_family == AF_INET6 &&
+			    memcmp(&in6, &last6, sizeof(in6)) > 0 &&
+			    memcmp(&in6, &cur6, sizeof(in6)) < 0) {
+				cur6 = in6;
+				found++;
+			}
 		}
-	}
+		if (found)
+			SHA1Update(&sc->sc_sha1, (void *)&cur6, sizeof(cur6));
+	} while (found);
 #endif /* INET6 */
 
 	/* convert ipad to opad */
@@ -435,31 +472,11 @@ carp_proto_input(struct mbuf *m, ...)
 		return;
 	}
 
-	iplen = ip->ip_hl << 2;
-
-	if (m->m_pkthdr.len < iplen + sizeof(*ch)) {
-		carpstats.carps_badlen++;
-		CARP_LOG(sc, ("received len %d < %d on %s",
-		    m->m_len - sizeof(struct ip), sizeof(*ch),
-		    m->m_pkthdr.rcvif->if_xname));
-		m_freem(m);
-		return;
-	}
-
-	if (iplen + sizeof(*ch) < m->m_len) {
-		if ((m = m_pullup2(m, iplen + sizeof(*ch))) == NULL) {
-			carpstats.carps_hdrops++;
-			/* CARP_LOG ? */
-			return;
-		}
-		ip = mtod(m, struct ip *);
-	}
-	ch = (void *)ip + iplen;
-
 	/*
 	 * verify that the received packet length is
 	 * equal to the CARP header
 	 */
+	iplen = ip->ip_hl << 2;
 	len = iplen + sizeof(*ch);
 	if (len > m->m_pkthdr.len) {
 		carpstats.carps_badlen++;
@@ -789,14 +806,17 @@ carpdetach(struct carp_softc *sc)
 	splx(s);
 }
 
-/* Detach an interface from the carp.  */
+/* Detach an interface from the carp. */
 void
 carp_ifdetach(struct ifnet *ifp)
 {
-	struct carp_softc *sc;
+	struct carp_softc *sc, *nextsc;
+	struct carp_if *cif = (struct carp_if *)ifp->if_carp;
 
-	TAILQ_FOREACH(sc, &((struct carp_if *)ifp->if_carp)->vhif_vrs, sc_list)
+	for (sc = TAILQ_FIRST(&cif->vhif_vrs); sc; sc = nextsc) {
+		nextsc = TAILQ_NEXT(sc, sc_list);
 		carpdetach(sc);
+	}
 }
 
 int
@@ -1096,6 +1116,42 @@ carp_send_na(struct carp_softc *sc)
 }
 #endif /* INET6 */
 
+/*
+ * Based on bridge_hash() in if_bridge.c
+ */
+#define	mix(a,b,c) \
+	do {						\
+		a -= b; a -= c; a ^= (c >> 13);		\
+		b -= c; b -= a; b ^= (a << 8);		\
+		c -= a; c -= b; c ^= (b >> 13);		\
+		a -= b; a -= c; a ^= (c >> 12);		\
+		b -= c; b -= a; b ^= (a << 16);		\
+		c -= a; c -= b; c ^= (b >> 5);		\
+		a -= b; a -= c; a ^= (c >> 3);		\
+		b -= c; b -= a; b ^= (a << 10);		\
+		c -= a; c -= b; c ^= (b >> 15);		\
+	} while (0)
+
+u_int32_t
+carp_hash(struct carp_softc *sc, u_char *src)
+{
+	u_int32_t a = 0x9e3779b9, b = sc->sc_hashkey[0], c = sc->sc_hashkey[1];
+
+	c += sc->sc_key[3] << 24;
+	c += sc->sc_key[2] << 16;
+	c += sc->sc_key[1] << 8;
+	c += sc->sc_key[0];
+	b += src[5] << 8;
+	b += src[4];
+	a += src[3] << 24;
+	a += src[2] << 16;
+	a += src[1] << 8;
+	a += src[0];
+
+	mix(a, b, c);
+	return (c);
+}
+
 int
 carp_addrcount(struct carp_if *cif, struct in_ifaddr *ia, int type)
 {
@@ -1143,9 +1199,8 @@ carp_iamatch(struct in_ifaddr *ia, u_char *src,
 		if (*count == 0)
 			return (0);
 
-		/* this should be a hash, like pf_hash() */
-		if (ia->ia_addr.sin_addr.s_addr % *count == index - 1 &&
-                    sc->sc_state == MASTER) {
+		if (carp_hash(sc, src) % *count == index - 1 &&
+		    sc->sc_state == MASTER) {
 			return (1);
 		}
 	} else {
@@ -2081,6 +2136,16 @@ carp_ether_delmulti(struct carp_softc *sc, struct ifreq *ifr)
 	if ((error = ether_multiaddr(&ifr->ifr_addr, addrlo, addrhi)) != 0)
 		return (error);
 	ETHER_LOOKUP_MULTI(addrlo, addrhi, &sc->sc_ac, enm);
+	if (enm == NULL)
+		return (EINVAL);
+
+	LIST_FOREACH(mc, &sc->carp_mc_listhead, mc_entries)
+		if (mc->mc_enm == enm)
+			break;
+
+	/* We won't delete entries we didn't add */
+	if (mc == NULL)
+		return (EINVAL);
 
 	error = ether_delmulti(ifr, (struct arpcom *)&sc->sc_ac);
 	if (error != ENETRESET)
@@ -2090,19 +2155,8 @@ carp_ether_delmulti(struct carp_softc *sc, struct ifreq *ifr)
 	error = (*ifp->if_ioctl)(ifp, SIOCDELMULTI, (caddr_t)ifr);
 	if (error == 0) {
 		/* And forget about this address. */
-		for (mc = LIST_FIRST(&sc->carp_mc_listhead); mc != NULL;
-		    mc = LIST_NEXT(mc, mc_entries)) {
-			if (mc->mc_enm == enm) {
-				LIST_REMOVE(mc, mc_entries);
-				FREE(mc, M_DEVBUF);
-				break;
-			}
-		}
-		/*
-		 * XXX We don't actually want KASSERT(mc != NULL) here
-		 * because we mess with the multicast addresses elsewhere.
-		 * Clean up after release.
-		 */
+		LIST_REMOVE(mc, mc_entries);
+		FREE(mc, M_DEVBUF);
 	} else
 		(void)ether_addmulti(ifr, (struct arpcom *)&sc->sc_ac);
 	return (error);

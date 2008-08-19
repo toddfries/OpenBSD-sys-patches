@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.25 2005/01/15 21:13:08 miod Exp $	*/
+/*	$OpenBSD: hd.c,v 1.39 2006/01/22 00:40:01 miod Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include <sys/disklabel.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
 
@@ -67,90 +68,112 @@
 #include <hp300/hp300/leds.h>
 #endif
 
-int	hderrthresh = HDRETRY-1;	/* when to start reporting errors */
+#define	HDUNIT(x)	DISKUNIT(x)
+#define HDPART(x)	DISKPART(x)
+#define HDLABELDEV(d)	MAKEDISKDEV(major(d), HDUNIT(d), RAW_PART)
+
+#ifndef	HDRETRY
+#define	HDRETRY		5
+#endif
+
+#ifndef	HDWAITC
+#define HDWAITC		1	/* min time for timeout in seconds */
+#endif
+
+int	hderrthresh = HDRETRY - 1;	/* when to start reporting errors */
 
 #ifdef DEBUG
 /* error message tables */
-char *err_reject[] = {
-	0, 0,
+const char *err_reject[16] = {
+	NULL,
+	NULL,
 	"channel parity error",		/* 0x2000 */
-	0, 0,
+	NULL,
+	NULL,
 	"illegal opcode",		/* 0x0400 */
 	"module addressing",		/* 0x0200 */
 	"address bounds",		/* 0x0100 */
 	"parameter bounds",		/* 0x0080 */
 	"illegal parameter",		/* 0x0040 */
 	"message sequence",		/* 0x0020 */
-	0,
+	NULL,
 	"message length",		/* 0x0008 */
-	0, 0, 0
+	NULL,
+	NULL,
+	NULL
 };
 
-char *err_fault[] = {
-	0,
+const char *err_fault[16] = {
+	NULL,
 	"cross unit",			/* 0x4000 */
-	0,
+	NULL,
 	"controller fault",		/* 0x1000 */
-	0, 0,
+	NULL,
+	NULL,
 	"unit fault",			/* 0x0200 */
-	0,
+	NULL,
 	"diagnostic result",		/* 0x0080 */
-	0,
+	NULL,
 	"operator release request",	/* 0x0020 */
 	"diagnostic release request",	/* 0x0010 */
 	"internal maintenance release request",	/* 0x0008 */
-	0,
+	NULL,
 	"power fail",			/* 0x0002 */
 	"retransmit"			/* 0x0001 */
 };
 
-char *err_access[] = {
+const char *err_access[16] = {
 	"illegal parallel operation",	/* 0x8000 */
 	"uninitialized media",		/* 0x4000 */
 	"no spares available",		/* 0x2000 */
 	"not ready",			/* 0x1000 */
 	"write protect",		/* 0x0800 */
 	"no data found",		/* 0x0400 */
-	0, 0,
+	NULL,
+	NULL,
 	"unrecoverable data overflow",	/* 0x0080 */
 	"unrecoverable data",		/* 0x0040 */
-	0,
+	NULL,
 	"end of file",			/* 0x0010 */
 	"end of volume",		/* 0x0008 */
-	0, 0, 0
+	NULL,
+	NULL,
+	NULL
 };
 
-char *err_info[] = {
+const char *err_info[16] = {
 	"operator release request",	/* 0x8000 */
 	"diagnostic release request",	/* 0x4000 */
 	"internal maintenance release request",	/* 0x2000 */
 	"media wear",			/* 0x1000 */
 	"latency induced",		/* 0x0800 */
-	0, 0,
+	NULL,
+	NULL,
 	"auto sparing invoked",		/* 0x0100 */
-	0,
+	NULL,
 	"recoverable data overflow",	/* 0x0040 */
 	"marginal data",		/* 0x0020 */
 	"recoverable data",		/* 0x0010 */
-	0,
+	NULL,
 	"maintenance track overflow",	/* 0x0004 */
-	0, 0
+	NULL,
+	NULL
 };
 
-int	hddebug = 0x80;
 #define HDB_FOLLOW	0x01
 #define HDB_STATUS	0x02
 #define HDB_IDENT	0x04
 #define HDB_IO		0x08
 #define HDB_ASYNC	0x10
 #define HDB_ERROR	0x80
+int	hddebug = HDB_ERROR | HDB_IDENT;
 #endif
 
 /*
  * Misc. HW description, indexed by sc_type.
  * Nothing really critical here, could do without it.
  */
-struct hdidentinfo hdidentinfo[] = {
+const struct hdidentinfo hdidentinfo[] = {
 	{ HD7946AID,	0,	"7945A",	NHD7945ABPT,
 	  NHD7945ATRK,	968,	 108416 },
 
@@ -208,7 +231,7 @@ struct hdidentinfo hdidentinfo[] = {
 	{ HD2203AID,	0,	"2203A",	NHD2203ABPT,
 	  NHD2203ATRK,	1449,	1309896 }
 };
-int numhdidentinfo = sizeof(hdidentinfo) / sizeof(hdidentinfo[0]);
+const int numhdidentinfo = sizeof(hdidentinfo) / sizeof(hdidentinfo[0]);
 
 bdev_decl(hd);
 cdev_decl(hd);
@@ -227,7 +250,7 @@ void	hdgo(void *);
 int	hdstatus(struct hd_softc *);
 int	hderror(int);
 #ifdef DEBUG
-void	hdprinterr(char *, short, char **);
+void	hdprinterr(const char *, short, const char **);
 #endif
 
 int	hdmatch(struct device *, void *, void *);
@@ -246,28 +269,9 @@ hdmatch(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
-	struct cfdata *cf = match;
 	struct hpibbus_attach_args *ha = aux;
 
-	/*
-	 * Set punit if operator specified one in the kernel
-	 * configuration file.
-	 */
-	if (cf->hpibbuscf_punit != HPIBBUS_PUNIT_UNK &&
-	    cf->hpibbuscf_punit < HPIB_NPUNITS)
-		ha->ha_punit = cf->hpibbuscf_punit;
-
-	if (hdident(parent, NULL, ha) == 0) {
-		/*
-		 * XXX Some aging HP-IB drives are slow to
-		 * XXX respond; give them a chance to catch
-		 * XXX up and probe them again.
-		 */
-		delay(10000);
-		ha->ha_id = hpibid(parent->dv_unit, ha->ha_slave);
-		return (hdident(parent, NULL, ha));
-	}
-	return (1);
+	return (hdident(parent, NULL, ha));
 }
 
 void
@@ -320,7 +324,7 @@ hdident(parent, sc, ha)
 	struct hd_softc *sc;
 	struct hpibbus_attach_args *ha;
 {
-	struct hd_describe *desc = sc != NULL ? &sc->sc_hddesc : NULL;
+	struct cs80_describe desc;
 	u_char stat, cmd[3];
 	char name[7];
 	int i, id, n, ctlr, slave;
@@ -334,9 +338,10 @@ hdident(parent, sc, ha)
 
 	/* Is it one of the disks we support? */
 	for (id = 0; id < numhdidentinfo; id++)
-		if (ha->ha_id == hdidentinfo[id].ri_hwid)
+		if (ha->ha_id == hdidentinfo[id].ri_hwid &&
+		    ha->ha_punit <= hdidentinfo[id].ri_maxunum)
 			break;
-	if (id == numhdidentinfo || ha->ha_punit > hdidentinfo[id].ri_maxunum)
+	if (id == numhdidentinfo)
 		return (0);
 
 	/*
@@ -354,11 +359,12 @@ hdident(parent, sc, ha)
 	cmd[1] = C_SVOL(0);
 	cmd[2] = C_DESC;
 	hpibsend(ctlr, slave, C_CMD, cmd, sizeof(cmd));
-	hpibrecv(ctlr, slave, C_EXEC, desc, 37);
+	hpibrecv(ctlr, slave, C_EXEC, &desc, sizeof(desc));
 	hpibrecv(ctlr, slave, C_QSTAT, &stat, sizeof(stat));
+
 	bzero(name, sizeof(name));
 	if (stat == 0) {
-		n = desc->d_name;
+		n = desc.d_name;
 		for (i = 5; i >= 0; i--) {
 			name[i] = (n & 0xf) + '0';
 			n >>= 4;
@@ -368,24 +374,24 @@ hdident(parent, sc, ha)
 #ifdef DEBUG
 	if (hddebug & HDB_IDENT) {
 		printf("\n%s: name: %x ('%s')\n",
-		    sc->sc_dev.dv_xname, desc->d_name, name);
+		    sc->sc_dev.dv_xname, desc.d_name, name);
 		printf("  iuw %x, maxxfr %d, ctype %d\n",
-		    desc->d_iuw, desc->d_cmaxxfr, desc->d_ctype);
+		    desc.d_iuw, desc.d_cmaxxfr, desc.d_ctype);
 		printf("  utype %d, bps %d, blkbuf %d, burst %d, blktime %d\n",
-		    desc->d_utype, desc->d_sectsize,
-		    desc->d_blkbuf, desc->d_burstsize, desc->d_blocktime);
+		    desc.d_utype, desc.d_sectsize,
+		    desc.d_blkbuf, desc.d_burstsize, desc.d_blocktime);
 		printf("  avxfr %d, ort %d, atp %d, maxint %d, fv %x, rv %x\n",
-		    desc->d_uavexfr, desc->d_retry, desc->d_access,
-		    desc->d_maxint, desc->d_fvbyte, desc->d_rvbyte);
+		    desc.d_uavexfr, desc.d_retry, desc.d_access,
+		    desc.d_maxint, desc.d_fvbyte, desc.d_rvbyte);
 		printf("  maxcyl/head/sect %d/%d/%d, maxvsect %d, inter %d\n",
-		    desc->d_maxcyl, desc->d_maxhead, desc->d_maxsect,
-		    desc->d_maxvsectl, desc->d_interleave);
+		    desc.d_maxcyl, desc.d_maxhead, desc.d_maxsect,
+		    desc.d_maxvsectl, desc.d_interleave);
 		printf("%s", sc->sc_dev.dv_xname);
 	}
 #endif
 
 	/*
-	 * Take care of a couple of anomolies:
+	 * Take care of a couple of anomalies:
 	 * 1. 7945A and 7946A both return same HW id
 	 * 2. 9122S and 9134D both return same HW id
 	 * 3. 9122D and 9134L both return same HW id
@@ -421,10 +427,11 @@ hdident(parent, sc, ha)
 	 * XXX blocks.  ICK!
 	 */
 	printf(": %s\n", hdidentinfo[id].ri_desc);
-	printf("%s: %d cylinders, %d heads, %d blocks, %d bytes/block\n",
-	    sc->sc_dev.dv_xname, hdidentinfo[id].ri_ncyl,
-	    hdidentinfo[id].ri_ntpc, hdidentinfo[id].ri_nblocks,
-	    DEV_BSIZE);
+	printf("%s: %luMB, %lu cyl, %lu head, %lu sec, %lu bytes/sec, %lu sec total\n",
+	    sc->sc_dev.dv_xname,
+	    hdidentinfo[id].ri_nblocks / (1048576 / DEV_BSIZE),
+	    hdidentinfo[id].ri_ncyl, hdidentinfo[id].ri_ntpc,
+	    hdidentinfo[id].ri_nbpt, DEV_BSIZE, hdidentinfo[id].ri_nblocks);
 
 	return (1);
 }
@@ -466,7 +473,7 @@ hdreset(rs)
 }
 
 /*
- * Read or constuct a disklabel
+ * Read or construct a disklabel
  */
 int
 hdgetinfo(dev, rs, lp, spoofonly)
@@ -490,16 +497,10 @@ hdgetinfo(dev, rs, lp, spoofonly)
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
 
-	if (rs->sc_type > -1) {
-		lp->d_nsectors = hdidentinfo[rs->sc_type].ri_nbpt;
-		lp->d_ntracks = hdidentinfo[rs->sc_type].ri_ntpc;
-		lp->d_ncylinders = hdidentinfo[rs->sc_type].ri_ncyl;
-		lp->d_secperunit = hdidentinfo[rs->sc_type].ri_nblocks;
-	} else {
-		lp->d_nsectors = 32;
-		lp->d_ntracks = 20;
-		lp->d_ncylinders = 1;
-	}
+	lp->d_nsectors = hdidentinfo[rs->sc_type].ri_nbpt;
+	lp->d_ntracks = hdidentinfo[rs->sc_type].ri_ntpc;
+	lp->d_ncylinders = hdidentinfo[rs->sc_type].ri_ncyl;
+	lp->d_secperunit = hdidentinfo[rs->sc_type].ri_nblocks;
 	lp->d_secpercyl = lp->d_nsectors * lp->d_ntracks;
 
 	/* XXX - these values for BBSIZE and SBSIZE assume ffs */
@@ -522,8 +523,6 @@ hdgetinfo(dev, rs, lp, spoofonly)
 	errstring = readdisklabel(HDLABELDEV(dev), hdstrategy, lp, NULL,
 	    spoofonly);
 	if (errstring) {
-		printf("%s: WARNING: %s, defining `c' partition as entire disk\n",
-		    rs->sc_dev.dv_xname, errstring);
 		/* XXX reset partition info as readdisklabel screws with it */
 		lp->d_partitions[0].p_size = 0;
 		lp->d_partitions[RAW_PART].p_offset = 0;
@@ -689,7 +688,7 @@ hdstrategy(bp)
 			goto bad;
 		}
 	}
-	bp->b_cylin = bn + offset;
+	bp->b_cylinder = bn + offset;
 	s = splbio();
 	disksort(dp, bp);
 	if (dp->b_active == 0) {
@@ -725,7 +724,7 @@ hdustart(rs)
 	struct buf *bp;
 
 	bp = rs->sc_tab.b_actf;
-	rs->sc_addr = bp->b_un.b_addr;
+	rs->sc_addr = bp->b_data;
 	rs->sc_resid = bp->b_bcount;
 	if (hpibreq(rs->sc_dev.dv_parent, &rs->sc_hq))
 		hdstart(rs);
@@ -737,11 +736,14 @@ hdfinish(rs, bp)
 	struct buf *bp;
 {
 	struct buf *dp = &rs->sc_tab;
+	int s;
 
 	dp->b_errcnt = 0;
 	dp->b_actf = bp->b_actf;
 	bp->b_resid = 0;
+	s = splbio();
 	biodone(bp);
+	splx(s);
 	hpibfree(rs->sc_dev.dv_parent, &rs->sc_hq);
 	if (dp->b_actf)
 		return (dp->b_actf);
@@ -776,7 +778,7 @@ again:
 	rs->sc_ioc.c_volume = C_SVOL(0);
 	rs->sc_ioc.c_saddr = C_SADDR;
 	rs->sc_ioc.c_hiaddr = 0;
-	rs->sc_ioc.c_addr = HDBTOS(bp->b_cylin);
+	rs->sc_ioc.c_addr = HDBTOS(bp->b_cylinder);
 	rs->sc_ioc.c_nop2 = C_NOP;
 	rs->sc_ioc.c_slen = C_SLEN;
 	rs->sc_ioc.c_len = rs->sc_resid;
@@ -825,7 +827,7 @@ again:
 	bp->b_error = EIO;
 	bp = hdfinish(rs, bp);
 	if (bp) {
-		rs->sc_addr = bp->b_un.b_addr;
+		rs->sc_addr = bp->b_data;
 		rs->sc_resid = bp->b_bcount;
 		if (hpibreq(rs->sc_dev.dv_parent, &rs->sc_hq))
 			goto again;
@@ -1000,13 +1002,12 @@ hderror(unit)
 	}
 	/*
 	 * Unit requests release for internal maintenance.
-	 * We just delay awhile and try again later.  Use expontially
-	 * increasing backoff ala ethernet drivers since we don't really
+	 * We just delay a while and try again later.  Use exponentially
+	 * increasing backoff a la ethernet drivers since we don't really
 	 * know how long the maintenance will take.  With HDWAITC and
 	 * HDRETRY as defined, the range is 1 to 32 seconds.
 	 */
 	if (sp->c_fef & FEF_IMR) {
-		extern int hz;
 		int hdtimo = HDWAITC << rs->sc_tab.b_errcnt;
 #ifdef DEBUG
 		printf("%s: internal maintenance, %d second timeout\n",
@@ -1019,7 +1020,7 @@ hderror(unit)
 	}
 	/*
 	 * Only report error if we have reached the error reporting
-	 * threshhold.  By default, this will only report after the
+	 * threshold.  By default, this will only report after the
 	 * retry limit has been exceeded.
 	 */
 	if (rs->sc_tab.b_errcnt < hderrthresh)
@@ -1044,15 +1045,15 @@ hderror(unit)
 	 * Now output a generic message suitable for badsect.
 	 * Note that we don't use harderr because it just prints
 	 * out b_blkno which is just the beginning block number
-	 * of the transfer, not necessary where the error occurred.
+	 * of the transfer, not necessarily where the error occurred.
 	 */
 	printf("%s%c: hard error sn%d\n", rs->sc_dev.dv_xname,
-	    'a'+HDPART(bp->b_dev), pbn);
+	    'a' + HDPART(bp->b_dev), pbn);
 	/*
 	 * Now report the status as returned by the hardware with
-	 * attempt at interpretation (unless debugging).
+	 * no attempt at interpretation (unless debugging).
 	 */
-	printf("%s %s error:", rs->sc_dev.dv_xname,
+	printf("%s: %s error:", rs->sc_dev.dv_xname,
 	    (bp->b_flags & B_READ) ? "read" : "write");
 #ifdef DEBUG
 	if (hddebug & HDB_ERROR) {
@@ -1064,9 +1065,9 @@ hderror(unit)
 		hdprinterr("access", sp->c_aef, err_access);
 		hdprinterr("info", sp->c_ief, err_info);
 		printf("    block: %d, P1-P10: ", hwbn);
-		printf("0x%x", *(u_int *)&sp->c_raw[0]);
-		printf("0x%x", *(u_int *)&sp->c_raw[4]);
-		printf("0x%x\n", *(u_short *)&sp->c_raw[8]);
+		printf("0x%04x", *(u_int *)&sp->c_raw[0]);
+		printf("%04x", *(u_int *)&sp->c_raw[4]);
+		printf("%02x\n", *(u_short *)&sp->c_raw[8]);
 		/* command */
 		printf("    ioc: ");
 		printf("0x%x", *(u_int *)&rs->sc_ioc.c_pad);
@@ -1078,13 +1079,12 @@ hderror(unit)
 		return (1);
 	}
 #endif
-	printf(" v%d u%d, R0x%x F0x%x A0x%x I0x%x\n",
+	printf(" v%d u%d, R0x%x F0x%x A0x%x I0x%x",
 	       (sp->c_vu>>4)&0xF, sp->c_vu&0xF,
 	       sp->c_ref, sp->c_fef, sp->c_aef, sp->c_ief);
-	printf("P1-P10: ");
-	printf("0x%x", *(u_int *)&sp->c_raw[0]);
-	printf("0x%x", *(u_int *)&sp->c_raw[4]);
-	printf("0x%x\n", *(u_short *)&sp->c_raw[8]);
+	printf(" P1-P10: 0x%04x%04x%02x\n",
+	    *(u_int *)&sp->c_raw[0], *(u_int *)&sp->c_raw[4],
+	    *(u_short *)&sp->c_raw[8]);
 	return (1);
 }
 
@@ -1205,9 +1205,9 @@ hdsize(dev)
 #ifdef DEBUG
 void
 hdprinterr(str, err, tab)
-	char *str;
+	const char *str;
 	short err;
-	char **tab;
+	const char **tab;
 {
 	int i;
 	int printed;

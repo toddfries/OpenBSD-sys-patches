@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.18 2005/05/27 21:28:12 millert Exp $	*/
+/*	$OpenBSD: cdefs.h,v 1.22 2005/12/15 17:48:32 millert Exp $	*/
 /*	$NetBSD: cdefs.h,v 1.16 1996/04/03 20:46:39 christos Exp $	*/
 
 /*
@@ -35,8 +35,8 @@
  *	@(#)cdefs.h	8.7 (Berkeley) 1/21/94
  */
 
-#ifndef	_CDEFS_H_
-#define	_CDEFS_H_
+#ifndef	_SYS_CDEFS_H_
+#define	_SYS_CDEFS_H_
 
 #include <machine/cdefs.h>
 
@@ -179,6 +179,14 @@
 #define	__extension__
 #endif
 
+#if __GNUC_PREREQ__(2, 8)
+#define __statement(x)	__extension__(x)
+#elif defined(lint)
+#define __statement(x)	(0)
+#else
+#define __statement(x)	(x)
+#endif
+
 /*
  * "The nice thing about standards is that there are so many to choose from."
  * There are a number of "feature test macros" specified by (different)
@@ -196,7 +204,7 @@
  *	__POSIX_VISIBLE
  *	__XPG_VISIBLE
  *	__ISO_C_VISIBLE
- *	__OPENBSD_VISIBLE
+ *	__BSD_VISIBLE
  */
 
 /*
@@ -292,25 +300,11 @@
 /*
  * Finally deal with BSD-specific interfaces that are not covered
  * by any standards.  We expose these when one of the POSIX or XPG
- * macros is not defined or if the user explicitly asks for them.
+ * macros is defined or if the user explicitly asks for them.
  */
-#if !defined(_OPENBSD_SOURCE) && \
+#if !defined(_BSD_SOURCE) && \
    (defined(_ANSI_SOURCE) || defined(__XPG_VISIBLE) || defined(__POSIX_VISIBLE))
-# define __OPENBSD_VISIBLE	0
-#endif
-
-/*
- * __STRICT_ANSI__ (gcc -ansi) overrides everything else.
- */
-#ifdef __STRICT_ANSI__
-# undef __POSIX_VISIBLE
-# define __POSIX_VISIBLE	0
-# undef __XPG_VISIBLE
-# define __XPG_VISIBLE		0
-# undef __ISO_C_VISIBLE
-# define __ISO_C_VISIBLE	1990
-# undef __OPENBSD_VISIBLE
-# define __OPENBSD_VISIBLE	0
+# define __BSD_VISIBLE		0
 #endif
 
 /*
@@ -325,8 +319,8 @@
 #ifndef __ISO_C_VISIBLE
 # define __ISO_C_VISIBLE	1999
 #endif
-#ifndef __OPENBSD_VISIBLE
-# define __OPENBSD_VISIBLE	1
+#ifndef __BSD_VISIBLE
+# define __BSD_VISIBLE		1
 #endif
 
-#endif /* !_CDEFS_H_ */
+#endif /* !_SYS_CDEFS_H_ */

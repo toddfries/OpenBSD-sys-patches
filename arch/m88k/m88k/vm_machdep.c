@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.4 2004/11/09 15:02:22 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.10 2005/12/11 21:45:30 miod Exp $	*/
 
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -58,7 +58,6 @@
 #include <machine/mmu.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/cpu_number.h>
 #include <machine/locore.h>
 #include <machine/trap.h>
 
@@ -89,9 +88,7 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 		void (*func)(void *);
 		void *proc;
 	} *ksfp;
-	extern struct pcb *curpcb;
 	extern void proc_trampoline(void);
-        extern void save_u_area(struct proc *, vaddr_t);
 
 	/* Copy pcb from p1 to p2. */
 	if (p1 == curproc) {
@@ -104,11 +101,7 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 #endif
 
 	bcopy(&p1->p_addr->u_pcb, &p2->p_addr->u_pcb, sizeof(struct pcb));
-	p2->p_addr->u_pcb.kernel_state.pcb_ipl = IPL_NONE;	/* XXX */
 	p2->p_md.md_tf = (struct trapframe *)USER_REGS(p2);
-
-	/*XXX these may not be necessary nivas */
-	save_u_area(p2, (vaddr_t)p2->p_addr);
 
 	/*
 	 * Create a switch frame for proc 2
@@ -153,10 +146,9 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 void
 cpu_exit(struct proc *p)
 {
-	pmap_deactivate(p);
-
 	splhigh();
 
+	pmap_deactivate(p);
 	uvmexp.swtch++;
 	switch_exit(p);
 	/* NOTREACHED */
@@ -207,40 +199,7 @@ cpu_coredump(p, vp, cred, chdr)
 }
 
 /*
- * Finish a swapin operation.
- * We neded to update the cached PTEs for the user area in the
- * machine dependent part of the proc structure.
- */
-
-void
-cpu_swapin(struct proc *p)
-{
-        extern void save_u_area(struct proc *, vaddr_t);
-
-	save_u_area(p, (vaddr_t)p->p_addr);
-}
-
-/*
- * Map an IO request into kernel virtual address space.  Requests fall into
- * one of five catagories:
- *
- *	B_PHYS|B_UAREA:	User u-area swap.
- *			Address is relative to start of u-area (p_addr).
- *	B_PHYS|B_PAGET:	User page table swap.
- *			Address is a kernel VA in usrpt (Usrptmap).
- *	B_PHYS|B_DIRTY:	Dirty page push.
- *			Address is a VA in proc2's address space.
- *	B_PHYS|B_PGIN:	Kernel pagein of user pages.
- *			Address is VA in user's address space.
- *	B_PHYS:		User "raw" IO request.
- *			Address is VA in user's address space.
- *
- * All requests are (re)mapped into kernel VA space via phys_map
- *
- * XXX we allocate KVA space by using kmem_alloc_wait which we know
- * allocates space without backing physical memory.  This implementation
- * is a total crock, the multiple mappings of these physical pages should
- * be reflected in the higher-level VM structures to avoid problems.
+ * Map an IO request into kernel virtual address space via phys_map.
  */
 void
 vmapbuf(bp, len)
@@ -277,7 +236,7 @@ vmapbuf(bp, len)
 	 * new pages get mapped in.
 	 */
 
-	cmmu_flush_tlb(cpu_number(), 1, kva, len);
+	cmmu_flush_tlb(cpu_number(), 1, kva, btoc(len));
 
 	bp->b_data = (caddr_t)(kva + off);
 	while (len > 0) {

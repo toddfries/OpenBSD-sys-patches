@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.15 2005/08/06 14:26:51 miod Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.19 2006/01/17 20:30:10 miod Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -96,10 +96,6 @@ int     bufcachepercent = BUFCACHEPERCENT;
 
 int cold = 1;
 
-#if NMD > 0 && defined(MEMORY_DISK_HOOKS) && !defined(MEMORY_DISK_ROOT_SIZE)
-extern size_t md_root_size;		/* Memory disc size */
-#endif	/* NMD && MEMORY_DISK_HOOKS && !MEMORY_DISK_ROOT_SIZE */
-
 pv_addr_t kernelstack;
 
 /* the following is used externally (sysctl_hw) */
@@ -129,6 +125,7 @@ int allowaperture = 0;
 #if defined(__zaurus__)
 /* Permit console keyboard to do a nice halt. */
 int kbd_reset;
+int lid_suspend;
 
 /* Touch pad scaling disable flag and scaling parameters. */
 extern int zts_rawmode;
@@ -139,6 +136,7 @@ struct ztsscale {
 	int ts_maxy;
 };
 extern struct ztsscale zts_scale;
+extern int xscale_maxspeed;
 #endif
 
 /* Prototypes */
@@ -218,7 +216,7 @@ halt()
 /* Sync the discs and unmount the filesystems */
 
 void
-bootsync(void)
+bootsync(int howto)
 {
 	static int bootsyncdone = 0;
 
@@ -239,6 +237,17 @@ bootsync(void)
 	}
 
 	vfs_shutdown();
+
+	/*
+	 * If we've been adjusting the clock, the todr
+	 * will be out of synch; adjust it now unless
+	 * the system has been sitting in ddb.
+	 */
+	if ((howto & RB_TIMEBAD) == 0) {
+		resettodr();
+	} else {
+		printf("WARNING: not updating battery clock\n");
+	}
 }
 
 /*
@@ -304,8 +313,8 @@ cpu_startup()
 	 */
 	printf(version);
 
-	printf("real mem  = %u (%uK)\n", ctob(physmem), ctob(physmem)/1024);
-
+	printf("real mem  = %u (%uK) %uMB\n", ctob(physmem),
+	    ctob(physmem)/1024, ctob(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -424,14 +433,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_DEBUG:
 		return(sysctl_int(oldp, oldlenp, newp, newlen, &kernel_debug));
 
-#if 0
-	case CPU_BOOTED_DEVICE:
-		if (booted_device != NULL)
-			return (sysctl_rdstring(oldp, oldlenp, newp,
-			    booted_device->dv_xname));
-		return (EOPNOTSUPP);
-#endif
-
 	case CPU_CONSDEV: {
 		dev_t consdev;
 		if (cn_tab != NULL)
@@ -472,7 +473,23 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			    kbd_reset));
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &kbd_reset));
+	case CPU_LIDSUSPEND:
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &lid_suspend));
+	case CPU_MAXSPEED:
+	{
+		extern void pxa2x0_maxspeed(int *);
+		int err = EINVAL;
 
+		if (!newp && newlen == 0)
+			return (sysctl_int(oldp, oldlenp, 0, 0,
+			    &xscale_maxspeed));
+		err = (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &xscale_maxspeed));
+		pxa2x0_maxspeed(&xscale_maxspeed);
+		return err;
+	}
+		
 	case CPU_ZTSRAWMODE:
 #if NZTS > 0
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
@@ -518,123 +535,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	}
 	/* NOTREACHED */
 }
-
-#if 0
-/*
- * machine dependent system variables.
- */
-static int
-sysctl_machdep_booted_device(SYSCTLFN_ARGS)
-{
-	struct sysctlnode node;
-
-	if (booted_device == NULL)
-		return (EOPNOTSUPP);
-
-	node = *rnode;
-	node.sysctl_data = booted_device->dv_xname;
-	node.sysctl_size = strlen(booted_device->dv_xname) + 1;
-	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
-}
-
-static int
-sysctl_machdep_booted_kernel(SYSCTLFN_ARGS)
-{
-	struct sysctlnode node;
-
-	if (booted_kernel == NULL || booted_kernel[0] == '\0')
-		return (EOPNOTSUPP);
-
-	node = *rnode;
-	node.sysctl_data = booted_kernel;
-	node.sysctl_size = strlen(booted_kernel) + 1;
-	return (sysctl_lookup(SYSCTLFN_CALL(&node)));
-}
-
-static int
-sysctl_machdep_powersave(SYSCTLFN_ARGS)
-{
-	struct sysctlnode node = *rnode;
-	int error, newval;
-
-	newval = cpu_do_powersave;
-	node.sysctl_data = &newval;
-	if (cpufuncs.cf_sleep == (void *) cpufunc_nullop)
-		node.sysctl_flags &= ~SYSCTL_READWRITE;
-	error = sysctl_lookup(SYSCTLFN_CALL(&node));
-	if (error || newp == NULL || newval == cpu_do_powersave)
-		return (error);
-
-	if (newval < 0 || newval > 1)
-		return (EINVAL);
-	cpu_do_powersave = newval;
-
-	return (0);
-}
-
-SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
-{
-
-	sysctl_createv(SYSCTL_PERMANENT,
-		       CTLTYPE_NODE, "machdep", NULL,
-		       NULL, 0, NULL, 0,
-		       CTL_MACHDEP, CTL_EOL);
-
-	sysctl_createv(SYSCTL_PERMANENT|SYSCTL_READWRITE,
-		       CTLTYPE_INT, "debug", NULL,
-		       NULL, 0, &kernel_debug, 0,
-		       CTL_MACHDEP, CPU_DEBUG, CTL_EOL);
-	sysctl_createv(SYSCTL_PERMANENT,
-		       CTLTYPE_STRING, "booted_device", NULL,
-		       sysctl_machdep_booted_device, 0, NULL, 0,
-		       CTL_MACHDEP, CPU_BOOTED_DEVICE, CTL_EOL);
-	sysctl_createv(SYSCTL_PERMANENT,
-		       CTLTYPE_STRING, "booted_kernel", NULL,
-		       sysctl_machdep_booted_kernel, 0, NULL, 0,
-		       CTL_MACHDEP, CPU_BOOTED_KERNEL, CTL_EOL);
-	sysctl_createv(SYSCTL_PERMANENT,
-		       CTLTYPE_STRUCT, "console_device", NULL,
-		       sysctl_consdev, 0, NULL, sizeof(dev_t),
-		       CTL_MACHDEP, CPU_CONSDEV, CTL_EOL);
-	sysctl_createv(SYSCTL_PERMANENT|SYSCTL_READWRITE,
-		       CTLTYPE_INT, "powersave", NULL,
-		       sysctl_machdep_powersave, 0, &cpu_do_powersave, 0,
-		       CTL_MACHDEP, CPU_POWERSAVE, CTL_EOL);
-}
-#endif
-
-#if 0
-void
-parse_mi_bootargs(args)
-	char *args;
-{
-	int integer;
-
-	if (get_bootconf_option(args, "single", BOOTOPT_TYPE_BOOLEAN, &integer)
-	    || get_bootconf_option(args, "-s", BOOTOPT_TYPE_BOOLEAN, &integer))
-		if (integer)
-			boothowto |= RB_SINGLE;
-	if (get_bootconf_option(args, "kdb", BOOTOPT_TYPE_BOOLEAN, &integer)
-	    || get_bootconf_option(args, "-k", BOOTOPT_TYPE_BOOLEAN, &integer))
-		if (integer)
-			boothowto |= RB_KDB;
-	if (get_bootconf_option(args, "ask", BOOTOPT_TYPE_BOOLEAN, &integer)
-	    || get_bootconf_option(args, "-a", BOOTOPT_TYPE_BOOLEAN, &integer))
-		if (integer)
-			boothowto |= RB_ASKNAME;
-
-#ifdef PMAP_DEBUG
-	if (get_bootconf_option(args, "pmapdebug", BOOTOPT_TYPE_INT, &integer)) {
-		pmap_debug_level = integer;
-		pmap_debug(pmap_debug_level);
-	}
-#endif	/* PMAP_DEBUG */
-
-/*	if (get_bootconf_option(args, "nbuf", BOOTOPT_TYPE_INT, &integer))
-		bufpages = integer;*/
-
-}
-#endif
 
 /*
  * Allocate space for system data structures.  We are given

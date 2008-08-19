@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_pcmcia.c,v 1.79 2005/03/24 01:47:30 deraadt Exp $	*/
+/*	$OpenBSD: if_ne_pcmcia.c,v 1.86 2005/12/09 06:23:49 uwe Exp $	*/
 /*	$NetBSD: if_ne_pcmcia.c,v 1.17 1998/08/15 19:00:04 thorpej Exp $	*/
 
 /*
@@ -32,7 +32,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #include <sys/device.h>
 #include <sys/socket.h>
 
@@ -145,7 +145,7 @@ const struct ne2000dev {
       0, 0x0ff0, { 0x00, 0x00, 0xe8 } },
 
     { PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
-      PCMCIA_CIS_ADDTRON_W89C926, 
+      PCMCIA_CIS_ADDTRON_W89C926,
       0, -1, { 0x00, 0x40, 0x33 } },
 
     { PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
@@ -266,6 +266,10 @@ const struct ne2000dev {
     { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_COMBO_ECARD,
       PCMCIA_CIS_SVEC_PN650TX,
       0, -1, { 0x00, 0xe0, 0x98 } },
+
+    { PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_COMBO_ECARD,
+      PCMCIA_CIS_TRENDNET_TECF100,
+      0, -1, { 0x00, 0x12, 0x0e } },
 
     /*
      * This entry should be here so that above two cards doesn't
@@ -395,12 +399,12 @@ const struct ne2000dev {
       0, 0x01c0, { 0x00, 0xe0, 0x29 } },
 
     { PCMCIA_VENDOR_IODATA, PCMCIA_PRODUCT_IODATA_8041TX,
-	  PCMCIA_CIS_IODATA_8041TX,
-	  0, -1, { 0x00, 0x04, 0xe2 } },
+      PCMCIA_CIS_IODATA_8041TX,
+      0, -1, { 0x00, 0x04, 0xe2 } },
 
     { PCMCIA_VENDOR_SMC, PCMCIA_PRODUCT_SMC_8041,
-	  PCMCIA_CIS_SMC_8041,
-	  0, -1, { 0x00, 0x04, 0xe2 } },
+      PCMCIA_CIS_SMC_8041,
+      0, -1, { 0x00, 0x04, 0xe2 } },
 
     { PCMCIA_VENDOR_SOCKET, PCMCIA_PRODUCT_SOCKET_LP_ETHER_CF,
       PCMCIA_CIS_SOCKET_LP_ETHER_CF,
@@ -469,6 +473,10 @@ const struct ne2000dev {
     { PCMCIA_VENDOR_NETGEAR, PCMCIA_PRODUCT_NETGEAR_FA410TXC,
       PCMCIA_CIS_DLINK_DFE670TXD,
       0, -1, { 0x00, 0x11, 0x95 } },
+
+     { PCMCIA_VENDOR_NETGEAR, PCMCIA_PRODUCT_NETGEAR_FA410TXC,
+       PCMCIA_CIS_DLINK_DFE670TXD,
+       0, -1, { 0x00, 0x0d, 0x88 } },
 
     { PCMCIA_VENDOR_NETGEAR, PCMCIA_PRODUCT_NETGEAR_FA411,
       PCMCIA_CIS_NETGEAR_FA411,
@@ -776,8 +784,6 @@ again:
 	if (*intrstr)
 		printf(", %s", intrstr);
 
-	printf("\n");
-
 	if (ne2000_attach(nsc, enaddr))
 		goto fail_5;
 
@@ -854,7 +860,10 @@ ne_pcmcia_activate(dev, act)
 		ifp->if_timer = 0;
 		if (ifp->if_flags & IFF_RUNNING)
 			dp8390_stop(esc);
-		pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+		if (sc->sc_ih != NULL) {
+			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
+			sc->sc_ih = NULL;
+		}
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
@@ -899,7 +908,7 @@ ne_pcmcia_get_enaddr(psc, maddr, myea)
 	struct ne2000_softc *nsc = &psc->sc_ne2000;
 	struct dp8390_softc *dsc = &nsc->sc_dp8390;
 	struct pcmcia_mem_handle pcmh;
-	bus_addr_t offset;
+	bus_size_t offset;
 	u_int8_t *enaddr = NULL;
 	int j, mwindow;
 
@@ -967,7 +976,7 @@ ne_pcmcia_ax88190_set_iobase(psc)
 	struct ne2000_softc *nsc = &psc->sc_ne2000;
 	struct dp8390_softc *dsc = &nsc->sc_dp8390;
 	struct pcmcia_mem_handle pcmh;
-	bus_addr_t offset;
+	bus_size_t offset;
 	int rv = 1, mwindow;
 
 	if (pcmcia_mem_alloc(psc->sc_pf, AX88190_LAN_IOSIZE, &pcmh)) {

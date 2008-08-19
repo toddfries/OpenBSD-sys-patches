@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.20 2005/07/28 00:16:29 brad Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.22 2005/09/11 18:17:08 mickey Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -187,7 +187,8 @@ struct stge_softc {
 	struct mbuf **sc_rxtailp;
 
 	int	sc_txthresh;		/* Tx threshold */
-	int	sc_usefiber;		/* if we're fiber */
+	uint32_t sc_usefiber:1;		/* if we're fiber */
+	uint32_t sc_stge1023:1;		/* are we a 1023 */
 	uint32_t sc_DMACtrl;		/* prototype DMACtrl register */
 	uint32_t sc_MACCtrl;		/* prototype MacCtrl register */
 	uint16_t sc_IntEnable;		/* prototype IntEnable register */
@@ -273,7 +274,6 @@ int	stge_match(struct device *, void *, void *);
 void	stge_attach(struct device *, struct device *, void *);
 
 int	stge_copy_small = 0;
-int  	stge_1023_bug = 0;	/* XXX: ST1023 works only in promisc mode */
 
 struct cfattach stge_ca = {
 	sizeof(struct stge_softc), stge_match, stge_attach,
@@ -335,6 +335,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_tag_t iot, memt;
 	bus_space_handle_t ioh, memh;
 	bus_dma_segment_t seg;
+	bus_size_t iosize;
 	int ioh_valid, memh_valid;
 	int i, rseg, error;
 	pcireg_t pmode;
@@ -349,10 +350,10 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	ioh_valid = (pci_mapreg_map(pa, STGE_PCI_IOBA,
 	    PCI_MAPREG_TYPE_IO, 0,
-	    &iot, &ioh, NULL, NULL, 0) == 0);
+	    &iot, &ioh, NULL, &iosize, 0) == 0);
 	memh_valid = (pci_mapreg_map(pa, STGE_PCI_MMBA,
 	    PCI_MAPREG_TYPE_MEM|PCI_MAPREG_MEM_TYPE_32BIT, 0,
-	    &memt, &memh, NULL, NULL, 0) == 0);
+	    &memt, &memh, NULL, &iosize, 0) == 0);
 
 	if (memh_valid) {
 		sc->sc_st = memt;
@@ -391,7 +392,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": unable to map interrupt\n");
-		return;
+		goto fail_0;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, stge_intr, sc,
@@ -401,7 +402,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		return;
+		goto fail_0;
 	}
 	printf(": %s", intrstr);
 
@@ -505,6 +506,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 		    sc->sc_sh, STGE_StationAddress2) & 0xff;
 		sc->sc_arpcom.ac_enaddr[5] = bus_space_read_2(sc->sc_st,
 		    sc->sc_sh, STGE_StationAddress2) >> 8;
+		sc->sc_stge1023 = 0;
 	} else {
 		uint16_t myaddr[ETHER_ADDR_LEN / 2];
 		for (i = 0; i <ETHER_ADDR_LEN / 2; i++) {
@@ -514,7 +516,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 		}
 		(void)memcpy(sc->sc_arpcom.ac_enaddr, myaddr,
 		    sizeof(sc->sc_arpcom.ac_enaddr));
-		stge_1023_bug = 1;
+		sc->sc_stge1023 = 1;
 	}
 
 	printf(", address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
@@ -619,6 +621,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
  fail_1:
 	bus_dmamem_free(sc->sc_dmat, &seg, rseg);
  fail_0:
+	bus_space_unmap(sc->sc_st, sc->sc_sh, iosize);
 	return;
 }
 
@@ -1714,7 +1717,7 @@ stge_set_filter(struct stge_softc *sc)
 		sc->sc_ReceiveMode |= RM_ReceiveBroadcast;
 
 	/* XXX: ST1023 only works in promiscuous mode */
-	if (stge_1023_bug)
+	if (sc->sc_stge1023)
 		ifp->if_flags |= IFF_PROMISC;
 
 	if (ifp->if_flags & IFF_PROMISC) {

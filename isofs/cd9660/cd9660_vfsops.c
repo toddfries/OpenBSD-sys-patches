@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.35.10.1 2005/12/01 00:42:13 brad Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.38 2006/01/22 00:40:02 miod Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -55,8 +55,6 @@
 #include <sys/malloc.h>
 #include <sys/stat.h>
 
-#define	b_cylin	b_resid
-
 #include <isofs/cd9660/iso.h>
 #include <isofs/cd9660/cd9660_extern.h>
 #include <isofs/cd9660/iso_rrip.h>
@@ -110,7 +108,7 @@ cd9660_mountroot()
 	args.flags = ISOFSMNT_ROOT;
 	if ((error = iso_mountfs(rootvp, mp, p, &args)) != 0) {
 		mp->mnt_vfc->vfc_refcount--;
-		vfs_unbusy(mp, p);
+		vfs_unbusy(mp);
                 free(mp, M_MOUNT);
                 return (error);
         }
@@ -118,7 +116,7 @@ cd9660_mountroot()
         CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 	simple_unlock(&mountlist_slock);
         (void)cd9660_statfs(mp, &mp->mnt_stat, p);
-	vfs_unbusy(mp, p);
+	vfs_unbusy(mp);
 	inittodr(0);
         return (0);
 }
@@ -466,7 +464,7 @@ iso_disklabelspoof(dev, strat, lp)
 		bp->b_blkno = iso_blknum * btodb(ISO_DEFAULT_BLOCK_SIZE);
 		bp->b_bcount = ISO_DEFAULT_BLOCK_SIZE;
 		bp->b_flags = B_BUSY | B_READ;
-		bp->b_cylin = bp->b_blkno / lp->d_secpercyl;
+		bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 
 		/*printf("d_secsize %d iso_blknum %d b_blkno %d bcount %d\n",
 		    lp->d_secsize, iso_blknum, bp->b_blkno, bp->b_bcount);*/

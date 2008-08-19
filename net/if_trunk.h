@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_trunk.h,v 1.2 2005/05/24 07:51:53 reyk Exp $	*/
+/*	$OpenBSD: if_trunk.h,v 1.7 2006/02/09 13:33:38 reyk Exp $	*/
 
 /*
- * Copyright (c) 2005 Reyk Floeter <reyk@vantronix.net>
+ * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -31,14 +31,16 @@
 #define TRUNK_PORT_SLAVE	0x00000000	/* normal enslaved port */
 #define TRUNK_PORT_MASTER	0x00000001	/* primary port */
 #define TRUNK_PORT_STACK	0x00000002	/* stacked trunk port */
+#define TRUNK_PORT_ACTIVE	0x00000004	/* port is active */
 #define TRUNK_PORT_GLOBAL	0x80000000	/* IOCTL: global flag */
-#define TRUNK_PORT_BITS		"\20\01MASTER\02STACK"
+#define TRUNK_PORT_BITS		"\20\01MASTER\02STACK\03ACTIVE"
 
 /* Supported trunk PROTOs */
 enum trunk_proto {
 	TRUNK_PROTO_NONE	= 0,		/* no trunk protocol defined */
 	TRUNK_PROTO_ROUNDROBIN	= 1,		/* simple round robin */
-	TRUNK_PROTO_MAX		= 3,
+	TRUNK_PROTO_FAILOVER	= 2,		/* active failover */
+	TRUNK_PROTO_MAX		= 3
 };
 
 struct trunk_protos {
@@ -49,6 +51,7 @@ struct trunk_protos {
 #define	TRUNK_PROTO_DEFAULT	TRUNK_PROTO_ROUNDROBIN
 #define TRUNK_PROTOS	{						\
 	{ "roundrobin",	TRUNK_PROTO_ROUNDROBIN },			\
+	{ "failover",	TRUNK_PROTO_FAILOVER },				\
 	{ "none",	TRUNK_PROTO_NONE },				\
 	{ "default",	TRUNK_PROTO_DEFAULT }				\
 }
@@ -61,6 +64,7 @@ struct trunk_protos {
 struct trunk_reqport {
 	char			rp_ifname[IFNAMSIZ];	/* name of the trunk */
 	char			rp_portname[IFNAMSIZ];	/* name of the port */
+	u_int32_t		rp_prio;		/* port priority */
 	u_int32_t		rp_flags;		/* port flags */
 };
 
@@ -89,9 +93,12 @@ struct trunk_reqall {
 struct trunk_port {
 	struct ifnet			*tp_if;		/* physical interface */
 	caddr_t				tp_trunk;	/* parent trunk */
+	u_int8_t			tp_lladdr[ETHER_ADDR_LEN];
 
 	u_char				tp_iftype;	/* interface type */
+	u_int32_t			tp_prio;	/* port priority */
 	u_int32_t			tp_flags;	/* port flags */
+	void				*lh_cookie;	/* if state hook */
 
 	/* Redirected callbacks */
 	void	(*tp_watchdog)(struct ifnet *);
@@ -102,6 +109,28 @@ struct trunk_port {
 
 #define tp_ifname		tp_if->if_xname		/* interface name */
 #define tp_link_state		tp_if->if_link_state	/* link state */
+#define tp_capabilities		tp_if->if_capabilities	/* capabilities */
+
+struct trunk_mc {
+	union {
+		struct ether_multi	*mcu_enm;
+	} mc_u;
+	struct sockaddr_storage		mc_addr;
+
+	SLIST_ENTRY(trunk_mc)		mc_entries;
+};
+
+#define mc_enm	mc_u.mcu_enm
+
+struct trunk_ifreq {
+	union {
+		struct ifreq ifreq;
+		struct {
+			char ifr_name[IFNAMSIZ];
+			struct sockaddr_storage ifr_ss;
+		} ifreq_storage;
+	} ifreq;
+};
 
 struct trunk_softc {
 	struct arpcom			tr_ac;		/* virtual interface */
@@ -115,16 +144,21 @@ struct trunk_softc {
 	SLIST_HEAD(__tplhd, trunk_port)	tr_ports;	/* list of interfaces */
 	SLIST_ENTRY(trunk_softc)	tr_entries;
 
+	SLIST_HEAD(__mclhd, trunk_mc)	tr_mc_head;	/* multicast addresses */
+
 	/* Trunk protocol callbacks */
 	int	(*tr_detach)(struct trunk_softc *);
 	int	(*tr_start)(struct trunk_softc *, struct mbuf *);
 	int	(*tr_watchdog)(struct trunk_softc *);
 	int	(*tr_input)(struct trunk_softc *, struct trunk_port *,
 		    struct ether_header *, struct mbuf *);
+	int	(*tr_port_create)(struct trunk_port *);
+	void	(*tr_port_destroy)(struct trunk_port *);
 };
 
-#define tr_ifflags		tr_ac.ac_if.if_flags	/* interface flags */
-#define tr_ifname		tr_ac.ac_if.if_xname	/* interface name */
+#define tr_ifflags		tr_ac.ac_if.if_flags		/* flags */
+#define tr_ifname		tr_ac.ac_if.if_xname		/* name */
+#define tr_capabilities		tr_ac.ac_if.if_capabilities	/* capabilities */
 
 void	 trunk_port_ifdetach(struct ifnet *);
 int	 trunk_input(struct ifnet *, struct ether_header *, struct mbuf *);

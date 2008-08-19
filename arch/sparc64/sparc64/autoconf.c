@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.41 2005/05/14 19:27:38 brad Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.44 2006/02/06 17:19:31 jmc Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -111,7 +111,6 @@ int	mainbus_match(struct device *, void *, void *);
 static	void mainbus_attach(struct device *, struct device *, void *);
 static	int getstr(char *, int);
 void	setroot(void);
-void	swapconf(void);
 void	diskconf(void);
 static	struct device *getdisk(char *, int, int, dev_t *);
 int	findblkmajor(struct device *);
@@ -325,7 +324,7 @@ bootpath_build()
 			}
 		} else {
 			bp->val[0] = -1; /* no #'s: assume unit 0, no
-					    sbus offset/adddress */
+					    sbus offset/address */
 		}
 		++bp;
 		++nbootpath;
@@ -503,25 +502,7 @@ void
 diskconf(void)
 {
 	setroot();
-	swapconf();
 	dumpconf();
-}
-
-void
-swapconf()
-{
-	struct swdevt *swp;
-	int nblks;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++)
-		if (bdevsw[major(swp->sw_dev)].d_psize) {
-			nblks =
-			  (*bdevsw[major(swp->sw_dev)].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
 }
 
 void
@@ -1380,6 +1361,7 @@ static struct {
 	{ "ledma",	BUSCLASS_SBUS },
 	{ "simba",	BUSCLASS_PCI },
 	{ "ppb",	BUSCLASS_PCI },
+	{ "isp",	BUSCLASS_PCI },
 	{ "pciide",	BUSCLASS_PCI },
 	{ "siop",	BUSCLASS_PCI },
 	{ "pci",	BUSCLASS_PCI },
@@ -1399,6 +1381,7 @@ static struct {
 	{ "QLGC,isp",	BUSCLASS_NONE,		"isp" },
 	{ "PTI,isp",	BUSCLASS_NONE,		"isp" },
 	{ "ptisp",	BUSCLASS_NONE,		"isp" },
+	{ "SUNW,isptwo", BUSCLASS_NONE,		"isp" },
 	{ "SUNW,fdtwo",	BUSCLASS_NONE,		"fdc" },
 	{ "pci",	BUSCLASS_MAINBUS,	"psycho" },
 	{ "pci",	BUSCLASS_PCI,		"ppb" },

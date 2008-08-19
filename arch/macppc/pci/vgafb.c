@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.24 2005/01/05 23:04:24 miod Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.27 2006/01/01 11:59:39 miod Exp $	*/
 /*	$NetBSD: vga.c,v 1.3 1996/12/02 22:24:54 cgd Exp $	*/
 
 /*
@@ -172,7 +172,8 @@ vgafb_common_setup(bus_space_tag_t iot, bus_space_tag_t  memt,
 
 	/* memsize should only be visible region for console */
 	memsize = cons_height * cons_linebytes;
-        if (bus_space_map(vc->vc_memt, membase, memsize, 1, &vc->vc_memh))
+        if (bus_space_map(vc->vc_memt, membase, memsize, 
+	    /* XXX */ppc_proc_is_64b ? 0 : 1, &vc->vc_memh))
 		panic("vgafb_common_setup: couldn't map memory"); 
 	cons_display_mem_h = vc->vc_memh;
 	vc->vc_ofh = cons_display_ofh;
@@ -365,31 +366,15 @@ vgafb_mmap(void *v, off_t offset, int prot)
 		h = -1;
 	}
 
-#ifdef alpha
-	port = (u_int32_t *)(h << 5);
-	return alpha_btop(port);		/* XXX */
-#elif defined(i386)
-	port = (u_int32_t *)(h << 5);
-	return i386_btop(port);
-#elif defined(__powerpc__)
-	{
-	/* huh ??? */
 	return h;
-	/*
-	return powerpc_btop(port);
-	*/
-	}
-#endif
 }
 
 
 void
 vgafb_cnprobe(struct consdev *cp)
 {
-	if (cons_displaytype != 1) {
-		cp->cn_pri = CN_DEAD;
+	if (cons_displaytype != 1)
 		return;
-	} 
 
 	cp->cn_pri = CN_INTERNAL;
 }

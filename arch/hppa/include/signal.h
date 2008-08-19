@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.5 2004/04/03 01:03:11 mickey Exp $	*/
+/*	$OpenBSD: signal.h,v 1.7 2006/01/08 14:20:17 millert Exp $	*/
 
 /* 
  * Copyright (c) 1994, The University of Utah and
@@ -26,15 +26,19 @@
 #ifndef	_HPPA_SIGNAL_H_
 #define	_HPPA_SIGNAL_H_
 
+#include <sys/cdefs.h>
+
 /*
  * Machine-dependent signal definitions
  */
 
 typedef int sig_atomic_t;
 
-#ifndef _ANSI_SOURCE
+#if __BSD_VISIBLE
 #include <machine/trap.h>
+#endif
 
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -53,5 +57,5 @@ struct	sigcontext {
 	unsigned	sc_regs[32];
 	unsigned	sc_fpregs[64];
 };
-#endif  /* !_ANSI_SOURCE */
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #endif  /* !_HPPA_SIGNAL_H_ */

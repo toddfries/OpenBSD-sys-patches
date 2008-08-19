@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_common.c,v 1.9 2005/09/01 23:35:42 canacar Exp $	*/
+/*	$OpenBSD: if_san_common.c,v 1.11 2005/11/08 20:23:42 canacar Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -394,11 +394,11 @@ wan_mbuf_alloc(int len)
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 
-	if (m == NULL || len < MHLEN)
+	if (m == NULL || len <= MHLEN)
 		return (m);
 
-	m->m_pkthdr.len = 0;
-	m->m_len = 0;
+	m->m_pkthdr.len = len;
+	m->m_len = len;
 	MCLGET(m, M_DONTWAIT);
 
 	if ((m->m_flags & M_EXT) == 0) {
@@ -446,9 +446,9 @@ wan_mbuf_to_buffer(struct mbuf **m_org)
 	len -= 16;
 	buffer += 16;
 
-	/* make sure the buffer is aligned to an 8-byte boundary */
-	if (mtod(m, u_int32_t) & 0x03) {
-		unsigned int inc = 4 - (mtod(m, u_int32_t) & 0x03);
+	/* make sure the buffer is aligned to a 4-byte boundary */
+	if (ADDR_MASK(buffer, 0x03)) {
+		unsigned int inc = 4 - ADDR_MASK(buffer, 0x03);
 		buffer += inc;
 		len -= inc;
 	}

@@ -1,4 +1,4 @@
-/* $OpenBSD: tsreg.h,v 1.2 2003/10/18 20:14:42 jmc Exp $ */
+/* $OpenBSD: tsreg.h,v 1.4 2006/01/04 10:32:10 martin Exp $ */
 /* $NetBSD: tsreg.h,v 1.1 1999/06/29 06:46:47 ross Exp $ */
 
 /*-
@@ -176,7 +176,7 @@
  */
 
 #define	P_CSRBASE	 0x001##8000##0000UL
-#define	P_PCI_MEM	 0
+#define	P_PCI_MEM	 0x800##0000##0000UL
 #define	P_PCI_IO	 0x001##fc00##0000UL
 #define	P_PCI_CONFIG	 0x001##fe00##0000UL
 

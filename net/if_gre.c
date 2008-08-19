@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.36 2005/08/14 09:55:56 markus Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.38 2006/01/04 06:04:42 canacar Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -179,9 +179,6 @@ gre_clone_destroy(struct ifnet *ifp)
 	LIST_REMOVE(sc, sc_list);
 	splx(s);
 
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif  
 	if_detach(ifp);
 
 	free(sc, M_DEVBUF);
@@ -265,8 +262,7 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 					inp = mtod(m, struct ip *);
 
 				if (m->m_len < inp->ip_hl << 2) {
-					m = m_pullup(m,
-					    sizeof(inp->ip_hl << 2));
+					m = m_pullup(m, inp->ip_hl << 2);
 					if (m == NULL) {
 						IF_DROP(&ifp->if_snd);
 						error = ENOBUFS;

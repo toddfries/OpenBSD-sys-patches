@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.88 2005/06/25 23:27:43 brad Exp $	*/
+/*	$OpenBSD: dc.c,v 1.91 2006/01/28 10:08:38 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -547,7 +547,7 @@ dc_mii_readreg(sc, frame)
 {
 	int i, ack, s;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Set up frame for RX.
@@ -619,7 +619,7 @@ dc_mii_writereg(sc, frame)
 {
 	int s;
 
-	s = splimp();
+	s = splnet();
 	/*
 	 * Set up frame for TX.
 	 */
@@ -1962,23 +1962,17 @@ dc_newbuf(sc, i, m)
 
 	if (m == NULL) {
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-		if (m_new == NULL) {
-			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n", sc->sc_dev.dv_xname);
+		if (m_new == NULL)
 			return (ENOBUFS);
-		}
 
 		MCLGET(m_new, M_DONTWAIT);
 		if (!(m_new->m_flags & M_EXT)) {
-			printf("%s: no memory for rx list "
-			    "-- packet dropped!\n", sc->sc_dev.dv_xname);
 			m_freem(m_new);
 			return (ENOBUFS);
 		}
 		m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
 		if (bus_dmamap_load_mbuf(sc->sc_dmat, sc->sc_rx_sparemap,
 		    m_new, BUS_DMA_NOWAIT) != 0) {
-			printf("%s: rx load failed\n", sc->sc_dev.dv_xname);
 			m_freem(m_new);
 			return (ENOBUFS);
 		}
@@ -1986,6 +1980,11 @@ dc_newbuf(sc, i, m)
 		sc->dc_cdata.dc_rx_chain[i].sd_map = sc->sc_rx_sparemap;
 		sc->sc_rx_sparemap = map;
 	} else {
+		/*
+		 * We're re-using a previously allocated mbuf;
+		 * be sure to re-init pointers and lengths to
+		 * default values.
+		 */
 		m_new = m;
 		m_new->m_len = m_new->m_pkthdr.len = MCLBYTES;
 		m_new->m_data = m_new->m_ext.ext_buf;
@@ -2410,7 +2409,7 @@ dc_tick(xsc)
 	int s;
 	u_int32_t r;
 
-	s = splimp();
+	s = splnet();
 
 	ifp = &sc->sc_arpcom.ac_if;
 	mii = &sc->sc_mii;
@@ -2704,16 +2703,12 @@ dc_coal(sc, m_head)
 
 	m = *m_head;
 	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
-	if (m_new == NULL) {
-		printf("%s: no memory for tx list", sc->sc_dev.dv_xname);
+	if (m_new == NULL)
 		return (ENOBUFS);
-	}
 	if (m->m_pkthdr.len > MHLEN) {
 		MCLGET(m_new, M_DONTWAIT);
 		if (!(m_new->m_flags & M_EXT)) {
 			m_freem(m_new);
-			printf("%s: no memory for tx list",
-			    sc->sc_dev.dv_xname);
 			return (ENOBUFS);
 		}
 	}
@@ -2815,7 +2810,7 @@ dc_init(xsc)
 	struct mii_data *mii;
 	int s;
 
-	s = splimp();
+	s = splnet();
 
 	mii = &sc->sc_mii;
 
@@ -3058,7 +3053,7 @@ dc_ioctl(ifp, command, data)
 	struct mii_data		*mii;
 	int			s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
 		splx(s);
@@ -3254,7 +3249,7 @@ dc_power(why, arg)
 	struct ifnet *ifp;
 	int s;
 
-	s = splimp();
+	s = splnet();
 	if (why != PWR_RESUME)
 		dc_stop(sc);
 	else {

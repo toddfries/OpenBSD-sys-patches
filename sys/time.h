@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.h,v 1.19 2004/06/24 19:35:26 tholo Exp $	*/
+/*	$OpenBSD: time.h,v 1.21 2005/12/13 00:35:23 millert Exp $	*/
 /*	$NetBSD: time.h,v 1.18 1996/04/23 10:29:33 mycroft Exp $	*/
 
 /*
@@ -35,7 +35,12 @@
 #ifndef _SYS_TIME_H_
 #define _SYS_TIME_H_
 
+#include <sys/cdefs.h>
 #include <sys/types.h>
+
+#if __XPG_VISIBLE >= 420 && __XPG_VISIBLE < 600
+#include <sys/select.h>
+#endif
 
 /*
  * Structure returned by gettimeofday(2) system call,
@@ -46,6 +51,8 @@ struct timeval {
 	long	tv_usec;	/* and microseconds */
 };
 
+#ifndef _TIMESPEC_DECLARED
+#define _TIMESPEC_DECLARED
 /*
  * Structure defined by POSIX.1b to be like a timeval.
  */
@@ -53,6 +60,7 @@ struct timespec {
 	time_t	tv_sec;		/* seconds */
 	long	tv_nsec;	/* and nanoseconds */
 };
+#endif
 
 #define	TIMEVAL_TO_TIMESPEC(tv, ts) {					\
 	(ts)->tv_sec = (tv)->tv_sec;					\
@@ -187,7 +195,7 @@ bintime2timespec(struct bintime *bt, struct timespec *ts)
 {
 
 	ts->tv_sec = bt->sec;
-	ts->tv_nsec = ((uint64_t)1000000000 * (uint32_t)(bt->frac >> 32)) >> 32;
+	ts->tv_nsec = (long)(((uint64_t)1000000000 * (uint32_t)(bt->frac >> 32)) >> 32);
 }
 
 static __inline void
@@ -204,14 +212,14 @@ bintime2timeval(struct bintime *bt, struct timeval *tv)
 {
 
 	tv->tv_sec = bt->sec;
-	tv->tv_usec = ((uint64_t)1000000 * (uint32_t)(bt->frac >> 32)) >> 32;
+	tv->tv_usec = (long)(((uint64_t)1000000 * (uint32_t)(bt->frac >> 32)) >> 32);
 }
 
 static __inline void
 timeval2bintime(struct timeval *tv, struct bintime *bt)
 {
 
-	bt->sec = tv->tv_sec;
+	bt->sec = (time_t)tv->tv_sec;
 	/* 18446744073709 = int(2^64 / 1000000) */
 	bt->frac = tv->tv_usec * (uint64_t)18446744073709LL;
 }
@@ -306,11 +314,12 @@ int	ppsratecheck(struct timeval *, int *, int);
 #else /* !_KERNEL */
 #include <time.h>
 
-#ifndef _POSIX_SOURCE
-#include <sys/cdefs.h>
-
+#if __BSD_VISIBLE || __XPG_VISIBLE
 __BEGIN_DECLS
+#if __BSD_VISIBLE
 int	adjtime(const struct timeval *, struct timeval *);
+#endif
+#if __XPG_VISIBLE
 int	clock_getres(clockid_t, struct timespec *);
 int	clock_gettime(clockid_t, struct timespec *);
 int	clock_settime(clockid_t, const struct timespec *);
@@ -320,8 +329,9 @@ int	gettimeofday(struct timeval *, struct timezone *);
 int	setitimer(int, const struct itimerval *, struct itimerval *);
 int	settimeofday(const struct timeval *, const struct timezone *);
 int	utimes(const char *, const struct timeval *);
+#endif /* __XPG_VISIBLE */
 __END_DECLS
-#endif /* !POSIX */
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE */
 
 #endif /* !_KERNEL */
 

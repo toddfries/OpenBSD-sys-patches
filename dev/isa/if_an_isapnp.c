@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_an_isapnp.c,v 1.4 2005/06/20 22:42:29 jsg Exp $	*/
+/*	$OpenBSD: if_an_isapnp.c,v 1.8 2006/01/30 11:41:00 jsg Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -31,6 +31,7 @@
 #include <sys/device.h>
 #include <sys/timeout.h>
 #include <sys/socket.h>
+#include <sys/tree.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -39,6 +40,7 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
+#include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_var.h>
 
 #include <machine/bus.h>
@@ -46,8 +48,8 @@
 
 #include <dev/isa/isavar.h>
 
-#include <dev/ic/anvar.h>
 #include <dev/ic/anreg.h>
+#include <dev/ic/anvar.h>
 
 int an_isapnp_match(struct device *, void *, void *);
 void an_isapnp_attach(struct device *, struct device *, void *);
@@ -72,8 +74,8 @@ an_isapnp_attach(parent, self, aux)
 	struct an_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 
-	sc->an_btag = ia->ia_iot;
-	sc->an_bhandle = ia->ipa_io[0].h;
+	sc->sc_iot = ia->ia_iot;
+	sc->sc_ioh = ia->ipa_io[0].h;
 
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
 	    IPL_NET, an_intr, sc, sc->sc_dev.dv_xname);

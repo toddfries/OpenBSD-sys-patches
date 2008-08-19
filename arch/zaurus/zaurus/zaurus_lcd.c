@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_lcd.c,v 1.16 2005/07/01 23:57:28 uwe Exp $	*/
+/*	$OpenBSD: zaurus_lcd.c,v 1.19 2006/02/02 04:02:59 drahn Exp $	*/
 /* $NetBSD: lubbock_lcd.c,v 1.1 2003/08/09 19:38:53 bsh Exp $ */
 
 /*
@@ -13,7 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of Genetec Corporation may not be used to endorse or 
+ * 3. The name of Genetec Corporation may not be used to endorse or
  *    promote products derived from this software without specific prior
  *    written permission.
  *
@@ -47,9 +47,9 @@
 #include <sys/uio.h>
 #include <sys/malloc.h>
 
-#include <dev/cons.h> 
+#include <dev/cons.h>
 #include <dev/wscons/wsconsio.h>
-#include <dev/wscons/wsdisplayvar.h> 
+#include <dev/wscons/wsdisplayvar.h>
 #include <dev/wscons/wscons_callbacks.h>
 
 #include <machine/bus.h>
@@ -59,6 +59,8 @@
 
 #include <zaurus/dev/zaurus_scoopvar.h>
 #include <zaurus/dev/zaurus_sspvar.h>
+
+#include <dev/rasops/rasops.h>
 
 void	lcd_attach(struct device *, struct device *, void *);
 int	lcd_match(struct device *, void *, void *);
@@ -72,7 +74,8 @@ lcd_bpp16_screen = {
 	{
 		"std"
 	},
-	16				/* bits per pixel */
+	16,				/* bits per pixel */
+	RI_ROTATE_CW			/* quarter clockwise rotation */
 };
 
 static const struct wsscreen_descr *lcd_scr_descr[] = {
@@ -106,7 +109,7 @@ const struct wsdisplay_accessops lcd_accessops = {
 struct cfattach lcd_pxaip_ca = {
 	sizeof (struct pxa2x0_lcd_softc), lcd_match, lcd_attach
 };
-	 
+
 struct cfdriver lcd_cd = {
 	NULL, "lcd_pxaip", DV_DULL
 };
@@ -236,7 +239,7 @@ lcd_show_screen(void *v, void *cookie, int waitok,
 
 	if ((rc = pxa2x0_lcd_show_screen(v, cookie, waitok, cb, cbarg)) != 0)
 		return (rc);
-	
+
 	/* Turn on LCD */
 	lcd_burner(v, 1, 0);
 
@@ -300,7 +303,8 @@ lcd_max_brightness(void)
 {
 	int i;
 
-	for (i = 0; CURRENT_BACKLIGHT[i].duty != -1; i++);
+	for (i = 0; CURRENT_BACKLIGHT[i].duty != -1; i++)
+		;
 	return i - 1;
 }
 

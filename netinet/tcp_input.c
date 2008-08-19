@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.190 2005/08/11 11:39:36 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.195.2.2 2006/11/17 04:03:35 brad Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -604,19 +604,25 @@ findpcb:
 		break;
 	}
 	if (inp == 0) {
+		int	inpl_flags = 0;
+#if NPF > 0
+		struct pf_mtag *t;
+
+		if ((t = pf_find_mtag(m)) != NULL &&
+		    t->flags & PF_TAG_TRANSLATE_LOCALHOST)
+			inpl_flags = INPLOOKUP_WILDCARD;
+#endif
 		++tcpstat.tcps_pcbhashmiss;
 		switch (af) {
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
-			    &ip6->ip6_dst, th->th_dport, m_tag_find(m,
-			    PACKET_TAG_PF_TRANSLATE_LOCALHOST, NULL) != NULL);
+			    &ip6->ip6_dst, th->th_dport, inpl_flags);
 			break;
 #endif /* INET6 */
 		case AF_INET:
 			inp = in_pcblookup_listen(&tcbtable,
-			    ip->ip_dst, th->th_dport, m_tag_find(m,
-			    PACKET_TAG_PF_TRANSLATE_LOCALHOST, NULL) != NULL);
+			    ip->ip_dst, th->th_dport, inpl_flags);
 			break;
 		}
 		/*
@@ -1417,7 +1423,8 @@ trimthenstep6:
 	 *	Close the tcb.
 	 */
 	if (tiflags & TH_RST) {
-		if (th->th_seq != tp->last_ack_sent)
+		if (th->th_seq != tp->last_ack_sent &&
+		    th->th_seq != tp->rcv_nxt)
 			goto drop;
 
 		switch (tp->t_state) {
@@ -1582,7 +1589,7 @@ trimthenstep6:
 				 * duplicate ack (ie, window info didn't
 				 * change), the ack is the biggest we've
 				 * seen and we've seen exactly our rexmt
-				 * threshhold of them, assume a packet
+				 * threshold of them, assume a packet
 				 * has been dropped and retransmit it.
 				 * Kludge snd_nxt & the congestion
 				 * window so we send only this one
@@ -1931,9 +1938,10 @@ step6:
 	 * Update window information.
 	 * Don't look at window if no ACK: TAC's send garbage on first SYN.
 	 */
-	if ((tiflags & TH_ACK) && (SEQ_LT(tp->snd_wl1, th->th_seq) ||
-	    (tp->snd_wl1 == th->th_seq && SEQ_LT(tp->snd_wl2, th->th_ack)) ||
-	    (tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd))) {
+	if ((tiflags & TH_ACK) &&
+	    (SEQ_LT(tp->snd_wl1, th->th_seq) || (tp->snd_wl1 == th->th_seq &&
+	    (SEQ_LT(tp->snd_wl2, th->th_ack) ||
+	    (tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd))))) {
 		/* keep track of pure window updates */
 		if (tlen == 0 &&
 		    tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd)
@@ -2017,6 +2025,10 @@ dodata:							/* XXX */
 	 */
 	if ((tlen || (tiflags & TH_FIN)) &&
 	    TCPS_HAVERCVDFIN(tp->t_state) == 0) {
+#ifdef TCP_SACK
+		tcp_seq laststart = th->th_seq;
+		tcp_seq lastend = th->th_seq + tlen;
+#endif
 		tcp_reass_lock(tp);
 		if (th->th_seq == tp->rcv_nxt && TAILQ_EMPTY(&tp->t_segq) &&
 		    tp->t_state == TCPS_ESTABLISHED) {
@@ -2042,7 +2054,7 @@ dodata:							/* XXX */
 		}
 #ifdef TCP_SACK
 		if (tp->sack_enable)
-			tcp_update_sack_list(tp, th->th_seq, th->th_seq + tlen);
+			tcp_update_sack_list(tp, laststart, lastend);
 #endif
 
 		/*
@@ -3970,7 +3982,7 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
 #endif
 		tb.pf = tp->pf;
 #ifdef TCP_SACK
-		tb.sack_enable = tcp_do_sack;
+		tb.sack_enable = tp->sack_enable;
 #endif
 		tb.t_flags = tcp_do_rfc1323 ? (TF_REQ_SCALE|TF_REQ_TSTMP) : 0;
 #ifdef TCP_SIGNATURE
@@ -4051,8 +4063,10 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
 	sc->sc_win = win;
 	sc->sc_timestamp = tb.ts_recent;
 	if ((tb.t_flags & (TF_REQ_TSTMP|TF_RCVD_TSTMP)) ==
-	    (TF_REQ_TSTMP|TF_RCVD_TSTMP))
+	    (TF_REQ_TSTMP|TF_RCVD_TSTMP)) {
 		sc->sc_flags |= SCF_TIMESTAMP;
+		sc->sc_modulate = arc4random();
+	}
 	if ((tb.t_flags & (TF_RCVD_SCALE|TF_REQ_SCALE)) ==
 	    (TF_RCVD_SCALE|TF_REQ_SCALE)) {
 		sc->sc_requested_s_scale = tb.requested_s_scale;
@@ -4234,7 +4248,6 @@ syn_cache_respond(sc, m)
 		u_int32_t *lp = (u_int32_t *)(optp);
 		/* Form timestamp option as shown in appendix A of RFC 1323. */
 		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
-		sc->sc_modulate = arc4random();
 		*lp++ = htonl(SYN_CACHE_TIMESTAMP(sc));
 		*lp   = htonl(sc->sc_timestamp);
 		optp += TCPOLEN_TSTAMP_APPA;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.9 2005/01/01 03:11:02 millert Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.11 2005/12/27 18:31:08 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -79,7 +75,6 @@
 
 void setroot(void);
 void rootconf(void);
-void swapconf(void);
 void diskconf(void);
 int findblkmajor(struct device *);
 char *findblkname(int);
@@ -143,26 +138,7 @@ diskconf(void)
 	dkcsumattach();
 
 	rootconf();
-	swapconf();
 	dumpconf();
-}
-
-void
-swapconf(void)
-{
-	struct swdevt *swp;
-	int nblks;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		if (bdevsw[major(swp->sw_dev)].d_psize) {
-			nblks =
-			    (*bdevsw[major(swp->sw_dev)].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
-	}
 }
 
 struct device *

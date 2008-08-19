@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.130 2005/05/28 15:10:07 ho Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.132 2006/01/13 10:11:23 mpf Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -353,7 +353,6 @@ struct tdb {				/* tunnel descriptor block */
 	u_int32_t	tdb_rpl;	/* Replay counter */
 	u_int32_t	tdb_bitmap;	/* Used for replay sliding window */
 
-	u_int32_t	tdb_epoch;	/* Used by the kernfs interface */
 	u_int8_t	tdb_iv[4];	/* Used for HALF-IV ESP */
 
 	struct ipsec_ref	*tdb_local_cred;
@@ -414,7 +413,6 @@ struct ipsecinit {
 #define	XFT_COMP	0x1000
 
 #define	IPSEC_ZEROES_SIZE	256	/* Larger than an IP6 extension hdr. */
-#define	IPSEC_KERNFS_BUFSIZE	4096
 
 #if BYTE_ORDER == LITTLE_ENDIAN
 static __inline u_int64_t
@@ -581,6 +579,7 @@ extern int ah_massage_headers(struct mbuf **, int, int, int, int);
 extern void ah4_input(struct mbuf *, ...);
 extern int ah4_input_cb(struct mbuf *, ...);
 extern void *ah4_ctlinput(int, struct sockaddr *, void *);
+extern void *udpencap_ctlinput(int, struct sockaddr *, void *);
 #endif /* INET */
 
 #ifdef INET6

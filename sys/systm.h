@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.66 2005/01/14 04:31:33 djm Exp $	*/
+/*	$OpenBSD: systm.h,v 1.68 2006/02/22 22:16:08 miod Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -128,13 +128,6 @@ void scdebug_ret(struct proc *p, register_t code, int error, register_t retval[]
 extern int boothowto;		/* reboot flags, from console subsystem */
 
 extern void (*v_putc)(int); /* Virtual console putc routine */
-
-extern	void	_insque(void *, void *);
-extern	void	_remque(void *);
-
-/* casts to keep lint happy, but it should be happy with void * */
-#define	insque(q,p)	_insque(q, p)
-#define	remque(q)	_remque(q)
 
 /*
  * General function declarations.
@@ -287,8 +280,10 @@ void	dopowerhooks(int);
 struct uio;
 int	uiomove(void *, int, struct uio *);
 
+#if defined(_KERNEL)
 int	setjmp(label_t *);
 void	longjmp(label_t *);
+#endif
 
 void	consinit(void);
 

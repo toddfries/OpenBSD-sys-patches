@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.59 2005/07/31 03:52:18 pascoe Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.63 2006/02/09 00:05:55 reyk Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -97,6 +97,7 @@ int	vlan_ether_delmulti(struct ifvlan *, struct ifreq *);
 void	vlan_ether_purgemulti(struct ifvlan *);
 int	vlan_clone_create(struct if_clone *, int);
 int	vlan_clone_destroy(struct ifnet *);
+void	vlan_ifdetach(void *);
 
 struct if_clone vlan_cloner =
     IF_CLONE_INITIALIZER("vlan", vlan_clone_create, vlan_clone_destroy);
@@ -151,14 +152,25 @@ vlan_clone_destroy(struct ifnet *ifp)
 	struct ifvlan *ifv = ifp->if_softc;
 
 	vlan_unconfig(ifp);
-#if NBPFILTER > 0
-	bpfdetach(ifp);
-#endif  
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
 	free(ifv, M_DEVBUF);
 	return (0);
+}
+
+void
+vlan_ifdetach(void *ptr)
+{
+	struct ifvlan *ifv = (struct ifvlan *)ptr;
+	/*
+	 * Destroy the vlan interface because the parent has been
+	 * detached. Set the dh_cookie to NULL because we're running
+	 * inside of dohooks which is told to disestablish the hook
+	 * for us (otherwise we would kill the TAILQ element...).
+	 */
+	ifv->dh_cookie = NULL;
+	vlan_clone_destroy(&ifv->ifv_if);
 }
 
 void
@@ -219,7 +231,8 @@ vlan_start(struct ifnet *ifp)
 			m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&evh);
 			evh.evl_proto = evh.evl_encap_proto;
 			evh.evl_encap_proto = htons(ETHERTYPE_VLAN);
-			evh.evl_tag = htons(ifv->ifv_tag);
+			evh.evl_tag = htons(ifv->ifv_tag +
+			    (ifv->ifv_prio << EVL_PRIO_BITS));
 
 			m_adj(m, ETHER_HDR_LEN);
 			M_PREPEND(m, sizeof(evh), M_DONTWAIT);
@@ -391,6 +404,11 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 	/* Register callback for physical link state changes */
 	ifv->lh_cookie = hook_establish(p->if_linkstatehooks, 1,
 	    vlan_vlandev_state, ifv);
+
+	/* Register callback if parent wants to unregister */
+	ifv->dh_cookie = hook_establish(p->if_detachhooks, 1,
+	    vlan_ifdetach, ifv);
+
 	vlan_vlandev_state(ifv);
 	splx(s);
 
@@ -409,15 +427,18 @@ vlan_unconfig(struct ifnet *ifp)
 
 	ifv = ifp->if_softc;
 	p = ifv->ifv_p;
-	ifr = (struct ifreq *)&ifp->if_data;
-	ifr_p = (struct ifreq *)&ifv->ifv_p->if_data;
-
 	if (p == NULL)
 		return 0;
+
+	ifr = (struct ifreq *)&ifp->if_data;
+	ifr_p = (struct ifreq *)&ifv->ifv_p->if_data;
 
 	s = splnet();
 	LIST_REMOVE(ifv, ifv_list);
 	hook_disestablish(p->if_linkstatehooks, ifv->lh_cookie);
+	/* The cookie is NULL if disestablished externally */
+	if (ifv->dh_cookie != NULL)
+		hook_disestablish(p->if_detachhooks, ifv->dh_cookie);
 	splx(s);
 
 	/*
@@ -583,7 +604,39 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		error = copyout(&vlr, ifr->ifr_data, sizeof vlr);
 		break;
-		
+	case SIOCSETVLANPRIO:
+		if ((error = suser(p, 0)) != 0)
+			break;
+		if ((error = copyin(ifr->ifr_data, &vlr, sizeof vlr)))
+			break;
+		if (vlr.vlr_parent[0] == '\0')
+			break;
+
+		pr = ifunit(vlr.vlr_parent);
+		if (pr == NULL) {
+			error = ENOENT;
+			break;
+		}
+		/*
+		 * Don't let the caller set up a VLAN priority
+		 * outside the range 0-7
+		 */
+		if (vlr.vlr_tag > EVL_PRIO_MAX) {
+			error = EINVAL;
+			break;
+		}
+
+		ifv->ifv_prio = vlr.vlr_tag;
+		break;
+	case SIOCGETVLANPRIO:
+		bzero(&vlr, sizeof vlr);
+		if (ifv->ifv_p) {
+			strlcpy(vlr.vlr_parent, ifv->ifv_p->if_xname,
+                            sizeof(vlr.vlr_parent));
+			vlr.vlr_tag = ifv->ifv_prio;
+		}
+		error = copyout(&vlr, ifr->ifr_data, sizeof vlr);
+		break;
 	case SIOCSIFFLAGS:
 		/*
 		 * For promiscuous mode, we enable promiscuous mode on
@@ -677,6 +730,16 @@ vlan_ether_delmulti(struct ifvlan *ifv, struct ifreq *ifr)
 	if ((error = ether_multiaddr(&ifr->ifr_addr, addrlo, addrhi)) != 0)
 		return (error);
 	ETHER_LOOKUP_MULTI(addrlo, addrhi, &ifv->ifv_ac, enm);
+	if (enm == NULL)
+		return (EINVAL);
+
+	LIST_FOREACH(mc, &ifv->vlan_mc_listhead, mc_entries)
+		if (mc->mc_enm == enm)
+			break;
+
+	/* We won't delete entries we didn't add */
+	if (mc == NULL)
+		return (EINVAL);
 
 	error = ether_delmulti(ifr, (struct arpcom *)&ifv->ifv_ac);
 	if (error != ENETRESET)
@@ -686,15 +749,8 @@ vlan_ether_delmulti(struct ifvlan *ifv, struct ifreq *ifr)
 	error = (*ifp->if_ioctl)(ifp, SIOCDELMULTI, (caddr_t)ifr);
 	if (error == 0) {
 		/* And forget about this address. */
-		for (mc = LIST_FIRST(&ifv->vlan_mc_listhead); mc != NULL;
-		    mc = LIST_NEXT(mc, mc_entries)) {
-			if (mc->mc_enm == enm) {
-				LIST_REMOVE(mc, mc_entries);
-				FREE(mc, M_DEVBUF);
-				break;
-			}
-		}
-		KASSERT(mc != NULL);
+		LIST_REMOVE(mc, mc_entries);
+		FREE(mc, M_DEVBUF);
 	} else
 		(void)ether_addmulti(ifr, (struct arpcom *)&ifv->ifv_ac);
 	return (error);

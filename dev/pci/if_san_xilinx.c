@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.c,v 1.11 2005/09/01 23:35:42 canacar Exp $	*/
+/*	$OpenBSD: if_san_xilinx.c,v 1.17 2005/12/13 05:56:22 canacar Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -94,8 +94,17 @@ enum {
 # define HARD_FIFO_CODE 0x01
 #endif
 
-static int aft_rx_copyback = 1000;
+static int aft_rx_copyback = MHLEN;
 
+
+struct xilinx_rx_buffer {
+	SIMPLEQ_ENTRY(xilinx_rx_buffer) entry;
+	struct mbuf *mbuf;
+	bus_dmamap_t dma_map;
+	wp_rx_element_t rx_el;
+};
+
+SIMPLEQ_HEAD(xilinx_rx_head, xilinx_rx_buffer);
 
 /*
  * This structure is placed in the private data area of the device structure.
@@ -106,16 +115,18 @@ static int aft_rx_copyback = 1000;
 typedef struct {
 	wanpipe_common_t	common;
 
-	struct ifqueue	wp_tx_free_list;
 	struct ifqueue	wp_tx_pending_list;
 	struct ifqueue	wp_tx_complete_list;
-	struct ifqueue	wp_rx_free_list;
-	struct ifqueue	wp_rx_complete_list;
+	struct xilinx_rx_head	wp_rx_free_list;
+	struct xilinx_rx_head	wp_rx_complete_list;
+	struct xilinx_rx_buffer *wp_rx_buffers;
+	struct xilinx_rx_buffer *wp_rx_buffer_last;
+	struct xilinx_rx_buffer	*rx_dma_buf;
 
+	bus_dma_tag_t	dmatag;
+	bus_dmamap_t	tx_dmamap;
 	struct mbuf	*tx_dma_mbuf;
 	u_int8_t	tx_dma_cnt;
-
-	struct mbuf	*rx_dma_mbuf;
 
 	unsigned long	time_slot_map;
 	unsigned char	num_of_time_slots;
@@ -150,7 +161,6 @@ typedef struct {
 
 	int		first_time_slot;
 
-	struct mbuf	*tx_idle_mbuf;
 	unsigned long	tx_dma_addr;
 	unsigned int	tx_dma_len;
 	unsigned char	rx_dma;
@@ -231,7 +241,7 @@ static int	xilinx_init_tx_dev_fifo(sdla_t *, xilinx_softc_t *,
 static void	xilinx_tx_post_complete(sdla_t *, xilinx_softc_t *,
 		    struct mbuf *);
 static void	xilinx_rx_post_complete(sdla_t *, xilinx_softc_t *,
-		    struct mbuf *, struct mbuf **, unsigned char *);
+		    struct xilinx_rx_buffer *, struct mbuf **, u_char *);
 
 
 static char	request_xilinx_logical_channel_num(sdla_t *, xilinx_softc_t *,
@@ -262,9 +272,15 @@ static int	free_fifo_baddr_and_size(sdla_t *, xilinx_softc_t *);
 static void	aft_red_led_ctrl(sdla_t *, int);
 static void	aft_led_timer(void *);
 
-static int	aft_alloc_rx_dma_buff(sdla_t *, xilinx_softc_t *, int);
-static int	aft_init_requeue_free_m(xilinx_softc_t *, struct mbuf *);
 static int	aft_core_ready(sdla_t *);
+static int	aft_alloc_rx_buffers(xilinx_softc_t *);
+static void	aft_release_rx_buffers(xilinx_softc_t *);
+static int	aft_alloc_rx_dma_buff(xilinx_softc_t *, int);
+static void	aft_reload_rx_dma_buff(xilinx_softc_t *,
+		    struct xilinx_rx_buffer *);
+static void	aft_release_rx_dma_buff(xilinx_softc_t *,
+		    struct xilinx_rx_buffer *);
+
 
 /* TE1 Control registers  */
 static WRITE_FRONT_END_REG_T write_front_end_reg;
@@ -300,14 +316,12 @@ wan_xilinx_init(sdla_t *card)
 	/* TE1 Make special hardware initialization for T1/E1 board */
 
 	if (IS_TE1(&card->fe_te.te_cfg)) {
-
 		card->write_front_end_reg = write_front_end_reg;
 		card->read_front_end_reg = read_front_end_reg;
 		card->te_enable_timer = enable_timer;
 		card->te_link_state = handle_front_end_state;
-	} else {
+	} else
 		card->front_end_status = FE_CONNECTED;
-	}
 
 	/* WARNING: After this point the init function
 	 * must return with 0.  The following bind
@@ -330,9 +344,9 @@ wan_xilinx_init(sdla_t *card)
 
 	/* allocate and initialize private data */
 	sc = malloc(sizeof(xilinx_softc_t), M_DEVBUF, M_NOWAIT);
-	if (sc == NULL) {
+	if (sc == NULL)
 		return (NULL);
-	}
+
 	memset(sc, 0, sizeof(xilinx_softc_t));
 	ifp = (struct ifnet *)&sc->common.ifp;
 	ifp->if_softc = sc;
@@ -342,25 +356,22 @@ wan_xilinx_init(sdla_t *card)
 		return (NULL);
 	}
 
-
 	strlcpy(sc->if_name, ifp->if_xname, IFNAMSIZ);
-	sc->first_time_slot=-1;
+	sc->first_time_slot = -1;
 	sc->time_slot_map = 0;
+	sdla_getcfg(card->hw, SDLA_DMATAG, &sc->dmatag);
 
-	IFQ_SET_MAXLEN(&sc->wp_tx_free_list, MAX_TX_BUF);
-	sc->wp_tx_free_list.ifq_len = 0;
 	IFQ_SET_MAXLEN(&sc->wp_tx_pending_list, MAX_TX_BUF);
 	sc->wp_tx_pending_list.ifq_len = 0;
 	IFQ_SET_MAXLEN(&sc->wp_tx_complete_list, MAX_TX_BUF);
 	sc->wp_tx_complete_list.ifq_len = 0;
-	IFQ_SET_MAXLEN(&sc->wp_rx_free_list, MAX_RX_BUF);
-	sc->wp_rx_free_list.ifq_len = 0;
-	IFQ_SET_MAXLEN(&sc->wp_rx_complete_list, MAX_RX_BUF);
-	sc->wp_rx_complete_list.ifq_len = 0;
+
+	aft_alloc_rx_buffers(sc);
 
 	xilinx_delay(1);
 
 	ifmedia_init(&sc->common.ifm, 0, wan_ifmedia_upd, wan_ifmedia_sts);
+
 	if (IS_TE1(&card->fe_te.te_cfg)) {
 		ifmedia_add(&sc->common.ifm, IFM_TDM|IFM_TDM_T1, 0, NULL);
 		ifmedia_add(&sc->common.ifm, IFM_TDM|IFM_TDM_T1_AMI, 0, NULL);
@@ -382,6 +393,7 @@ wan_xilinx_init(sdla_t *card)
 		 * front end types.
 		 */
 	}
+
 	return (sc);
 }
 
@@ -390,9 +402,6 @@ wan_xilinx_release(sdla_t* card, struct ifnet* ifp)
 {
 	xilinx_softc_t *sc = ifp->if_softc;
 
-	IF_PURGE(&sc->wp_rx_free_list);
-	IF_PURGE(&sc->wp_rx_complete_list);
-	IF_PURGE(&sc->wp_tx_free_list);
 	IF_PURGE(&sc->wp_tx_pending_list);
 
 	if (sc->tx_dma_addr && sc->tx_dma_len) {
@@ -402,23 +411,26 @@ wan_xilinx_release(sdla_t* card, struct ifnet* ifp)
 
 	if (sc->tx_dma_mbuf) {
 		log(LOG_INFO, "freeing tx dma mbuf\n");
+		bus_dmamap_unload(sc->dmatag, sc->tx_dmamap);
 		m_freem(sc->tx_dma_mbuf);
 		sc->tx_dma_mbuf = NULL;
 	}
 
-	if (sc->tx_idle_mbuf) {
-		log(LOG_INFO, "freeing idle tx dma mbuf\n");
-		m_freem(sc->tx_idle_mbuf);
-		sc->tx_idle_mbuf = NULL;
+#if 0
+	bus_dmamap_destroy(sc->dmatag, sc->tx_dmamap);
+#endif
+	if (sc->rx_dma_buf) {
+		SIMPLEQ_INSERT_TAIL(&sc->wp_rx_free_list,
+		    sc->rx_dma_buf, entry);
+		sc->rx_dma_buf = NULL;
 	}
 
-	if (sc->rx_dma_mbuf) {
-		m_freem(sc->rx_dma_mbuf);
-		sc->rx_dma_mbuf = NULL;
-	}
+	aft_release_rx_buffers(sc);
+
 	wanpipe_generic_unregister(ifp);
 	ifp->if_softc = NULL;
 	free(sc, M_DEVBUF);
+
 	return (0);
 }
 
@@ -431,7 +443,6 @@ wan_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmreq)
 	WAN_ASSERT1(common == NULL);
 	ifm = &common->ifm;
 	ifmreq->ifm_active = ifm->ifm_cur->ifm_media;
-	return;
 }
 
 static int
@@ -443,6 +454,7 @@ wan_ifmedia_upd(struct ifnet *ifp)
 	WAN_ASSERT(common == NULL);
 	WAN_ASSERT(common->card == NULL);
 	card = (sdla_t *)common->card;
+
 	if (IS_TE1(&card->fe_te.te_cfg))
 		return (sdla_te_setcfg(ifp, &common->ifm));
 
@@ -465,11 +477,13 @@ wan_xilinx_up(struct ifnet *ifp)
 	WAN_ASSERT(sc == NULL);
 	WAN_ASSERT(sc->common.card == NULL);
 	card = (sdla_t *)sc->common.card;
-	if (card->state != WAN_DISCONNECTED) {
+
+	if (card->state != WAN_DISCONNECTED)
 		return (0);
-	}
+
 	sc->time_slot_map = card->fe_te.te_cfg.active_ch;
 	sc->dma_mtu = xilinx_valid_mtu(ifp->if_mtu+100);
+
 	if (!sc->dma_mtu) {
 		log(LOG_INFO, "%s:%s: Error invalid MTU %d\n",
 		    card->devname, sc->if_name, ifp->if_mtu);
@@ -480,15 +494,19 @@ wan_xilinx_up(struct ifnet *ifp)
 	log(LOG_INFO, "%s: Allocating %d dma mbuf len=%d\n",
 	    card->devname, card->u.xilinx.dma_per_ch, sc->dma_mtu);
 #endif
-	err = aft_alloc_rx_dma_buff(card, sc, card->u.xilinx.dma_per_ch);
-	if (err) {
-		return (EINVAL);
+	if (aft_alloc_rx_dma_buff(sc, card->u.xilinx.dma_per_ch) == 0)
+		return (ENOMEM);
+
+	if (bus_dmamap_create(sc->dmatag, sc->dma_mtu, 1, sc->dma_mtu,
+	      0, BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW, &sc->tx_dmamap)) {
+		log(LOG_INFO, "%s: Failed to allocate tx dmamap\n",
+		    sc->if_name);
+		return (ENOMEM);
 	}
 
 	err = xilinx_chip_configure(card);
-	if (err) {
+	if (err)
 		return (EINVAL);
-	}
 
 	card->isr = &wp_xilinx_isr;
 
@@ -511,6 +529,7 @@ wan_xilinx_up(struct ifnet *ifp)
 	sc->ignore_modem = 0x0F;
 	bit_clear((u_int8_t *)&card->critical, CARD_DOWN);
 	port_set_state(card, WAN_CONNECTING);
+
 	return (err);
 }
 
@@ -519,12 +538,12 @@ wan_xilinx_down(struct ifnet *ifp)
 {
 	xilinx_softc_t	*sc = ifp->if_softc;
 	sdla_t		*card = (sdla_t *)sc->common.card;
-	struct mbuf	*m;
+	struct xilinx_rx_buffer *buf;
 	int		s;
 
-	if (card->state == WAN_DISCONNECTED) {
+	if (card->state == WAN_DISCONNECTED)
 		return (0);
-	}
+
 	xilinx_dev_close(card, sc);
 
 	/* Disable DMA ENGINE before we perform
@@ -537,9 +556,8 @@ wan_xilinx_down(struct ifnet *ifp)
 	timeout_del(&card->u.xilinx.led_timer);
 
 	/* TE1 - Unconfiging, only on shutdown */
-	if (IS_TE1(&card->fe_te.te_cfg)) {
+	if (IS_TE1(&card->fe_te.te_cfg))
 		sdla_te_unconfig(card);
-	}
 
 	s = splnet();
 
@@ -551,30 +569,29 @@ wan_xilinx_down(struct ifnet *ifp)
 	}
 
 	if (sc->tx_dma_mbuf) {
+		bus_dmamap_unload(sc->dmatag, sc->tx_dmamap);
 		m_freem(sc->tx_dma_mbuf);
 		sc->tx_dma_mbuf = NULL;
 	}
 
-	if (sc->tx_idle_mbuf) {
-		m_freem(sc->tx_idle_mbuf);
-		sc->tx_idle_mbuf = NULL;
+	bus_dmamap_destroy(sc->dmatag, sc->tx_dmamap);
+
+	/* If there is something left in rx_dma_buf, then move it to
+	 * rx_free_list.
+	 */
+	if (sc->rx_dma_buf) {
+		aft_reload_rx_dma_buff(sc, sc->rx_dma_buf);
+		sc->rx_dma_buf = NULL;
 	}
 
-	/* If there is something left in rx_dma_buf, then
-	** move it to rx_free_list. */
-	if (sc->rx_dma_mbuf) {
-		m = sc->rx_dma_mbuf;
-		aft_init_requeue_free_m(sc, m);
-		sc->rx_dma_mbuf = NULL;
+	while ((buf = SIMPLEQ_FIRST(&sc->wp_rx_free_list)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&sc->wp_rx_free_list, entry);
+		aft_release_rx_dma_buff(sc, buf);
 	}
 
-	/* If there is something in rx_complete_list, then
-	** move evething to rx_free_list. */
-	for (;;) {
-		IF_DEQUEUE(&sc->wp_rx_complete_list, m);
-		if (m == NULL)
-			break;
-		IF_ENQUEUE(&sc->wp_rx_free_list, m);
+	while ((buf = SIMPLEQ_FIRST(&sc->wp_rx_complete_list)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&sc->wp_rx_complete_list, entry);
+		aft_release_rx_dma_buff(sc, buf);		
 	}
 
 	splx(s);
@@ -600,11 +617,10 @@ wan_xilinx_send(struct mbuf* m, struct ifnet* ifp)
 	 * attempt to send any more packets until we clear
 	 * this condition */
 
-	if (m == NULL) {
+	if (m == NULL)
 		/* This should never happen. Just a sanity check.
 		 */
 		return (EINVAL);
-	}
 
 	if (card->state != WAN_CONNECTED) {
 		/*
@@ -615,7 +631,6 @@ wan_xilinx_send(struct mbuf* m, struct ifnet* ifp)
 		return (EINVAL);
 
 	} else {
-
 		if (IF_QFULL(&sc->wp_tx_pending_list)) {
 			int err;
 #ifdef DEBUG_TX
@@ -627,13 +642,13 @@ wan_xilinx_send(struct mbuf* m, struct ifnet* ifp)
 			 * from tx_pending queue (first)
 			 */
 			err = xilinx_dma_tx(card, sc);
-			if (!err && !IF_QFULL(&sc->wp_tx_pending_list)) {
+			if (!err && !IF_QFULL(&sc->wp_tx_pending_list))
 				/*
 				 * On success, we have place for the new
 				 * tx packet, try to send it now!
 				 */
 				goto wan_xilinx_dma_tx_try;
-			}
+
 			/*
 			 * Tx pedning queue is full. I can't accept new
 			 * tx packet, drop this packet and set interface
@@ -641,6 +656,7 @@ wan_xilinx_send(struct mbuf* m, struct ifnet* ifp)
 			 */
 			m_freem(m);
 			ifp->if_flags |= IFF_OACTIVE;
+
 			return (EBUSY);
 		} else {
 wan_xilinx_dma_tx_try:
@@ -661,59 +677,55 @@ wan_xilinx_ioctl(struct ifnet *ifp, int cmd, struct ifreq *ifr)
 	wan_udp_pkt_t	*wan_udp_pkt;
 	int err = 0;
 
-	if (!sc) {
+	if (!sc)
 		return (ENODEV);
-	}
+
 	card = (sdla_t *)sc->common.card;
 
-	switch (cmd)
-	{
-		case SIOC_WANPIPE_PIPEMON:
+	switch (cmd) {
+	case SIOC_WANPIPE_PIPEMON:
 
-			if ((err = suser(curproc, 0)) != 0)
-				break;
-
-			if (IF_QFULL(&sc->udp_queue)) {
-				return (EBUSY);
-			}
-
-			/*
-			 * For performance reasons test the critical
-			 * here before spin lock
-			 */
-			if (bit_test((u_int8_t *)&card->in_isr, 0)) {
-				return (EBUSY);
-			}
-
-			m = wan_mbuf_alloc(sizeof(wan_udp_pkt_t));
-			if (m == NULL) {
-				return (ENOMEM);
-			}
-			wan_udp_pkt = mtod(m, wan_udp_pkt_t *);
-			if (copyin(ifr->ifr_data, &wan_udp_pkt->wan_udp_hdr,
-			    sizeof(wan_udp_hdr_t))) {
-				m_freem(m);
-				return (EFAULT);
-			}
-			IF_ENQUEUE(&sc->udp_queue, m);
-
-			process_udp_mgmt_pkt(card, ifp, sc, 1);
-
-			if (copyout(&wan_udp_pkt->wan_udp_hdr, ifr->ifr_data,
-			    sizeof(wan_udp_hdr_t))) {
-				m_freem(m);
-				return (EFAULT);
-			}
-
-			IF_DEQUEUE(&sc->udp_queue, m);
-			m_freem(m);
-			return (0);
-
-		default:
-			if (card->ioctl) {
-				err = card->ioctl(ifp, cmd, ifr);
-			}
+		if ((err = suser(curproc, 0)) != 0)
 			break;
+
+		if (IF_QFULL(&sc->udp_queue))
+			return (EBUSY);
+
+		/*
+		 * For performance reasons test the critical
+		 * here before spin lock
+		 */
+		if (bit_test((u_int8_t *)&card->in_isr, 0))
+			return (EBUSY);
+
+		m = wan_mbuf_alloc(sizeof(wan_udp_pkt_t));
+		if (m == NULL)
+			return (ENOMEM);
+
+		wan_udp_pkt = mtod(m, wan_udp_pkt_t *);
+		if (copyin(ifr->ifr_data, &wan_udp_pkt->wan_udp_hdr,
+		    sizeof(wan_udp_hdr_t))) {
+			m_freem(m);
+			return (EFAULT);
+		}
+		IF_ENQUEUE(&sc->udp_queue, m);
+
+		process_udp_mgmt_pkt(card, ifp, sc, 1);
+
+		if (copyout(&wan_udp_pkt->wan_udp_hdr, ifr->ifr_data,
+		    sizeof(wan_udp_hdr_t))) {
+			m_freem(m);
+			return (EFAULT);
+		}
+
+		IF_DEQUEUE(&sc->udp_queue, m);
+		m_freem(m);
+		return (0);
+
+	default:
+		if (card->ioctl)
+			err = card->ioctl(ifp, cmd, ifr);
+		break;
 	}
 
 	return (err);
@@ -804,7 +816,6 @@ process_udp_mgmt_pkt(sdla_t* card, struct ifnet* ifp,
 			break;
 
 		case DISABLE_TRACING:
-
 			wan_udp_pkt->wan_udp_return_code = WAN_CMD_OK;
 
 			if (bit_test((u_int8_t *)
@@ -818,7 +829,6 @@ process_udp_mgmt_pkt(sdla_t* card, struct ifnet* ifp,
 				IF_PURGE(&trace_info->ifq);
 				log(LOG_INFO, "%s: Disabling ADSL trace\n",
 				    card->devname);
-
 			} else {
 				/*
 				 * set return code to line trace already
@@ -830,7 +840,6 @@ process_udp_mgmt_pkt(sdla_t* card, struct ifnet* ifp,
 			break;
 
 		case GET_TRACE_INFO:
-
 			if (bit_test((u_int8_t *)
 			    &trace_info->tracing_enabled, 0)) {
 				trace_info->trace_timeout = ticks;
@@ -869,9 +878,8 @@ process_udp_mgmt_pkt(sdla_t* card, struct ifnet* ifp,
 				    &wan_udp_pkt->wan_udp_data[buffer_length]);
 				buffer_length += m0->m_pkthdr.len;
 				IF_DEQUEUE(&trace_info->ifq, m0);
-				if (m0) {
+				if (m0)
 					m_freem(m0);
-				}
 				wan_udp_pkt->wan_udp_aft_num_frames++;
 			}
 			/* set the data length and return code */
@@ -897,8 +905,8 @@ process_udp_mgmt_pkt(sdla_t* card, struct ifnet* ifp,
 
 			if (IS_TE1(&card->fe_te.te_cfg)) {
 				sdla_te_udp(card,
-					    &wan_udp_pkt->wan_udp_cmd,
-					    &wan_udp_pkt->wan_udp_data[0]);
+				    &wan_udp_pkt->wan_udp_cmd,
+				    &wan_udp_pkt->wan_udp_data[0]);
 			} else {
 				if (wan_udp_pkt->wan_udp_command ==
 				    WAN_GET_MEDIA_TYPE) {
@@ -938,7 +946,6 @@ process_udp_mgmt_pkt(sdla_t* card, struct ifnet* ifp,
 
 	wan_udp_pkt->wan_udp_request_reply = UDPMGMT_REPLY;
 	return (1);
-
 }
 
 /*
@@ -1051,11 +1058,9 @@ xilinx_chip_configure(sdla_t *card)
 	DELAY(10);
 
 	err = aft_core_ready(card);
-	if (err != 0) {
+	if (err != 0)
 		log(LOG_INFO, "%s: WARNING: HDLC Core Not Ready: B4 TE CFG!\n",
 		    card->devname);
-
-	}
 
 	log(LOG_INFO, "%s: Configuring A101 PMC T1/E1/J1 Front End\n",
 	    card->devname);
@@ -1080,12 +1085,12 @@ xilinx_chip_configure(sdla_t *card)
 
 		sdla_bus_write_4(card->hw, XILINX_CHIP_CFG_REG, reg);
 		return (err);
-	} else {
+	}
+
 #ifdef DEBUG_INIT
-		log(LOG_INFO, "%s: HDLC Core Ready 0x%08X\n",
-		    card->devname, reg);
+	log(LOG_INFO, "%s: HDLC Core Ready 0x%08X\n",
+	    card->devname, reg);
 #endif
- }
 
 	xilinx_delay(1);
 
@@ -1187,9 +1192,8 @@ xilinx_dev_configure(sdla_t *card, xilinx_softc_t *sc)
 
 	sc->logic_ch_num=-1;
 
-	if (!IS_TE1(&card->fe_te.te_cfg)) {
+	if (!IS_TE1(&card->fe_te.te_cfg))
 		return (EINVAL);
-	}
 
 	if (IS_E1(&card->fe_te.te_cfg)) {
 		log(LOG_DEBUG, "%s: Time Slot Orig 0x%lX  Shifted 0x%lX\n",
@@ -1239,8 +1243,8 @@ xilinx_dev_configure(sdla_t *card, xilinx_softc_t *sc)
 #endif
 			if (bit_test((u_int8_t *)
 			    &card->u.xilinx.time_slot_map, i)) {
-				log(LOG_INFO, "%s: Channel/Time "
-				    "Slot resource conflict!\n", card->devname);
+				log(LOG_INFO, "%s: Channel/Time Slot "
+				    "resource conflict!\n", card->devname);
 				log(LOG_INFO, "%s: %s: Channel/Time Slot "
 				    "%ld, aready in use!\n",
 				    card->devname, sc->if_name, (i+1));
@@ -1257,9 +1261,8 @@ xilinx_dev_configure(sdla_t *card, xilinx_softc_t *sc)
 
 	sc->logic_ch_num = request_xilinx_logical_channel_num(card,
 	    sc, &free_logic_ch);
-	if (sc->logic_ch_num == -1) {
+	if (sc->logic_ch_num == -1)
 		return (EBUSY);
-	}
 
 	xilinx_delay(1);
 
@@ -1270,30 +1273,28 @@ xilinx_dev_configure(sdla_t *card, xilinx_softc_t *sc)
 
 			sdla_bus_read_4(card->hw,
 			    XILINX_TIMESLOT_HDLC_CHAN_REG, &reg);
-			reg&=~TIMESLOT_BIT_MASK;
+			reg &= ~TIMESLOT_BIT_MASK;
 
 			/* FIXME do not hardcode !*/
-			reg &= HDLC_LCH_TIMESLOT_MASK; /* mask not valid bits */
-
+			reg &= HDLC_LCH_TIMESLOT_MASK; /* mask not valid bits*/
 
 			/* Select a Timeslot for configuration */
 			sdla_bus_write_4(card->hw,
 			    XILINX_TIMESLOT_HDLC_CHAN_REG,
 			    (reg | (i << TIMESLOT_BIT_SHIFT)));
 
-
-			reg = sc->logic_ch_num&CONTROL_RAM_DATA_MASK;
+			reg = sc->logic_ch_num & CONTROL_RAM_DATA_MASK;
 
 #ifdef TRUE_FIFO_SIZE
-			reg |= (sc->fifo_size_code&HDLC_FIFO_SIZE_MASK) <<
+			reg |= (sc->fifo_size_code & HDLC_FIFO_SIZE_MASK) <<
 			    HDLC_FIFO_SIZE_SHIFT;
 #else
-			reg |= (HARD_FIFO_CODE&HDLC_FIFO_SIZE_MASK) <<
-			    HDLC_FIFO_SIZE_SHIFT;
+			reg |= (HARD_FIFO_CODE &
+			    HDLC_FIFO_SIZE_MASK) << HDLC_FIFO_SIZE_SHIFT;
 #endif /* TRUE_FIFO_SIZE */
 
-			reg |= (sc->fifo_base_addr&HDLC_FIFO_BASE_ADDR_MASK) <<
-			    HDLC_FIFO_BASE_ADDR_SHIFT;
+			reg |= (sc->fifo_base_addr & HDLC_FIFO_BASE_ADDR_MASK)
+			    << HDLC_FIFO_BASE_ADDR_SHIFT;
 
 #ifdef DEBUG_INIT
 			log(LOG_INFO, "Setting Timeslot %ld to logic "
@@ -1322,7 +1323,7 @@ xilinx_dev_configure(sdla_t *card, xilinx_softc_t *sc)
 				/* Select a Timeslot for configuration */
 				sdla_bus_write_4(card->hw,
 				    XILINX_TIMESLOT_HDLC_CHAN_REG,
-				    (reg|(i<<TIMESLOT_BIT_SHIFT)));
+				    (reg | (i << TIMESLOT_BIT_SHIFT)));
 
 				reg = free_logic_ch&CONTROL_RAM_DATA_MASK;
 
@@ -1385,11 +1386,11 @@ xilinx_dev_configure(sdla_t *card, xilinx_softc_t *sc)
 	/* Select an HDLC logic channel for configuration */
 	sdla_bus_read_4(card->hw, XILINX_TIMESLOT_HDLC_CHAN_REG, &reg);
 
-	reg&=~HDLC_LOGIC_CH_BIT_MASK;
-	reg&= HDLC_LCH_TIMESLOT_MASK;         /* mask not valid bits */
+	reg &= ~HDLC_LOGIC_CH_BIT_MASK;
+	reg &= HDLC_LCH_TIMESLOT_MASK;         /* mask not valid bits */
 
 	sdla_bus_write_4(card->hw, XILINX_TIMESLOT_HDLC_CHAN_REG,
-	    (reg|(sc->logic_ch_num&HDLC_LOGIC_CH_BIT_MASK)));
+	    (reg | (sc->logic_ch_num & HDLC_LOGIC_CH_BIT_MASK)));
 
 	reg = 0;
 
@@ -1421,10 +1422,10 @@ xilinx_dev_unconfigure(sdla_t *card, xilinx_softc_t *sc)
 
 		sdla_bus_read_4(card->hw, XILINX_TIMESLOT_HDLC_CHAN_REG, &reg);
 		reg &= ~HDLC_LOGIC_CH_BIT_MASK;
-		reg &= HDLC_LCH_TIMESLOT_MASK;         /* mask not valid bits */
+		reg &= HDLC_LCH_TIMESLOT_MASK;	/* mask not valid bits */
 
 		sdla_bus_write_4(card->hw, XILINX_TIMESLOT_HDLC_CHAN_REG,
-		    (reg | (sc->logic_ch_num&HDLC_LOGIC_CH_BIT_MASK)));
+		    (reg | (sc->logic_ch_num & HDLC_LOGIC_CH_BIT_MASK)));
 
 		reg = 0x00020000;
 		xilinx_write_ctrl_hdlc(card, sc->first_time_slot,
@@ -1464,22 +1465,19 @@ xilinx_dev_unconfigure(sdla_t *card, xilinx_softc_t *sc)
 		 */
 		s = splnet();
 		free_xilinx_logical_channel_num(card, sc->logic_ch_num);
-		for (i = 0; i < card->u.xilinx.num_of_time_slots; i++) {
-			if (bit_test((u_int8_t *)&sc->time_slot_map, i)) {
+		for (i = 0; i < card->u.xilinx.num_of_time_slots; i++)
+			if (bit_test((u_int8_t *)&sc->time_slot_map, i))
 				--sc->num_of_time_slots;
-			}
-		}
+
 		free_fifo_baddr_and_size(card, sc);
 		splx(s);
 
 		sc->logic_ch_num = -1;
 
-		for (i = 0; i < card->u.xilinx.num_of_time_slots; i++) {
-			if (bit_test((u_int8_t *)&sc->time_slot_map, i)) {
+		for (i = 0; i < card->u.xilinx.num_of_time_slots; i++)
+			if (bit_test((u_int8_t *)&sc->time_slot_map, i))
 				bit_clear((u_int8_t *)
 				    &card->u.xilinx.time_slot_map, i);
-			}
-		}
 	}
 }
 
@@ -1500,7 +1498,8 @@ xilinx_init_rx_dev_fifo(sdla_t *card, xilinx_softc_t *sc, unsigned char wait)
 	bit_set((u_int8_t *)&reg, INIT_DMA_FIFO_CMD_BIT);
 
 #ifdef DEBUG_INIT
-	log(LOG_DEBUG, "%s: Clearing RX Fifo DmaDescr=(0x%X) Reg=(0x%X) (%s)\n",
+	log(LOG_DEBUG,
+	    "%s: Clearing RX Fifo DmaDescr=(0x%X) Reg=(0x%X) (%s)\n",
 	    sc->if_name, dma_descr, reg, __FUNCTION__);
 #endif
 
@@ -1518,19 +1517,17 @@ xilinx_init_rx_dev_fifo(sdla_t *card, xilinx_softc_t *sc, unsigned char wait)
 		}
 
 #ifdef DEBUG_INIT
-		if (timeout) {
+		if (timeout)
 			log(LOG_INFO, "%s:%s: Error: Rx fifo reset "
 			    "timedout %u us\n", card->devname,
 			    sc->if_name, i * FIFO_RESET_TIMEOUT_US);
-		} else {
+		else
 			log(LOG_INFO, "%s:%s: Rx Fifo reset "
 			    "successful %u us\n", card->devname, sc->if_name,
 			    i * FIFO_RESET_TIMEOUT_US);
-		}
 #endif
-	} else {
+	} else
 		timeout = 0;
-	}
 
 	return (timeout);
 }
@@ -1550,7 +1547,8 @@ xilinx_init_tx_dev_fifo(sdla_t *card, xilinx_softc_t *sc, unsigned char wait)
 	bit_set((u_int8_t *)&reg, INIT_DMA_FIFO_CMD_BIT);
 
 #ifdef DEBUG_INIT
-	log(LOG_DEBUG, "%s: Clearing TX Fifo DmaDescr=(0x%X) Reg=(0x%X) (%s)\n",
+	log(LOG_DEBUG,
+	    "%s: Clearing TX Fifo DmaDescr=(0x%X) Reg=(0x%X) (%s)\n",
 	    sc->if_name, dma_descr, reg, __FUNCTION__);
 #endif
 	sdla_bus_write_4(card->hw, dma_descr, reg);
@@ -1567,19 +1565,17 @@ xilinx_init_tx_dev_fifo(sdla_t *card, xilinx_softc_t *sc, unsigned char wait)
 		}
 
 #ifdef DEBUG_INIT
-		if (timeout) {
+		if (timeout)
 			log(LOG_INFO, "%s:%s: Error: Tx fifo reset "
 			    "timedout %u us\n", card->devname, sc->if_name,
 			    i * FIFO_RESET_TIMEOUT_US);
-		} else {
+		else
 			log(LOG_INFO, "%s:%s: Tx Fifo reset "
 			    "successful %u us\n", card->devname, sc->if_name,
 			    i * FIFO_RESET_TIMEOUT_US);
-		}
 #endif
-	} else {
+	} else
 		timeout = 0;
-	}
 
 	return (timeout);
 }
@@ -1629,14 +1625,14 @@ xilinx_dev_close(sdla_t *card, xilinx_softc_t *sc)
 
 	reg = 0;
 
-       /* Select an HDLC logic channel for configuration */
+	/* Select an HDLC logic channel for configuration */
 	sdla_bus_read_4(card->hw, XILINX_TIMESLOT_HDLC_CHAN_REG, &reg);
 
 	reg &= ~HDLC_LOGIC_CH_BIT_MASK;
 	reg &= HDLC_LCH_TIMESLOT_MASK;         /* mask not valid bits */
 
 	sdla_bus_write_4(card->hw, XILINX_TIMESLOT_HDLC_CHAN_REG,
-	    (reg|(sc->logic_ch_num&HDLC_LOGIC_CH_BIT_MASK)));
+	    (reg | (sc->logic_ch_num & HDLC_LOGIC_CH_BIT_MASK)));
 
 
 	reg = 0;
@@ -1653,7 +1649,8 @@ xilinx_dev_close(sdla_t *card, xilinx_softc_t *sc)
 	/* FIXME: Cleanp up Tx and Rx buffers */
 }
 
-static int xilinx_dma_rx(sdla_t *card, xilinx_softc_t *sc)
+static int
+xilinx_dma_rx(sdla_t *card, xilinx_softc_t *sc)
 {
 	u_int32_t reg;
 	unsigned long dma_descr;
@@ -1672,36 +1669,32 @@ static int xilinx_dma_rx(sdla_t *card, xilinx_softc_t *sc)
 	}
 #endif
 
-	if (sc->rx_dma_mbuf) {
+	if (sc->rx_dma_buf) {
 		log(LOG_INFO, "%s: Critial Error: Rx Dma Buf busy!\n",
 		    sc->if_name);
 		return (EINVAL);
 	}
 
-	IF_DEQUEUE(&sc->wp_rx_free_list, sc->rx_dma_mbuf);
+	sc->rx_dma_buf = SIMPLEQ_FIRST(&sc->wp_rx_free_list);
 
-	if (!sc->rx_dma_mbuf) {
-		log(LOG_INFO, "%s: Critical Error no rx dma buf "
-		    "Free=%d Comp=%d!\n", sc->if_name,
-		    sc->wp_rx_free_list.ifq_len,
-		    sc->wp_rx_complete_list.ifq_len);
-		return (ENOMEM);
+	if (sc->rx_dma_buf == NULL) {
+		if (aft_alloc_rx_dma_buff(sc, 1) == 0) {
+			log(LOG_INFO, "%s: Critical Error no rx dma buf!",
+			    sc->if_name);
+			return (ENOMEM);
+		}
+		sc->rx_dma_buf = SIMPLEQ_FIRST(&sc->wp_rx_free_list);
 	}
 
-	rx_el = mtod(sc->rx_dma_mbuf, wp_rx_element_t *);
-	sc->rx_dma_mbuf->m_len = sizeof(wp_rx_element_t);
-	sc->rx_dma_mbuf->m_pkthdr.len = sc->rx_dma_mbuf->m_len;
-	memset(rx_el, 0, sizeof(wp_rx_element_t));
+	SIMPLEQ_REMOVE_HEAD(&sc->wp_rx_free_list, entry);
 
-	bus_addr = kvtop(mtod(sc->rx_dma_mbuf, caddr_t) +
-	    sc->rx_dma_mbuf->m_len);
+	bus_dmamap_sync(sc->dmatag, sc->rx_dma_buf->dma_map, 0, sc->dma_mtu,
+             BUS_DMASYNC_PREREAD);
 
-	if (!bus_addr) {
-		log(LOG_INFO, "%s: %s Critical error pci_map_single() "
-		    "failed!\n", sc->if_name, __FUNCTION__);
-		return EINVAL;
-	}
+	rx_el = &sc->rx_dma_buf->rx_el;
+	memset(rx_el, 0, sizeof(*rx_el));
 
+	bus_addr = sc->rx_dma_buf->dma_map->dm_segs[0].ds_addr;
 	rx_el->dma_addr = bus_addr;
 
 	/* Write the pointer of the data packet to the
@@ -1711,9 +1704,9 @@ static int xilinx_dma_rx(sdla_t *card, xilinx_softc_t *sc)
 	/* Set the 32bit alignment of the data length.
 	 * Since we are setting up for rx, set this value
 	 * to Zero */
-	reg&=~(RxDMA_LO_ALIGNMENT_BIT_MASK);
+	reg &= ~(RxDMA_LO_ALIGNMENT_BIT_MASK);
 
-	dma_descr=(sc->logic_ch_num<<4) + XILINX_RxDMA_DESCRIPTOR_LO;
+	dma_descr = (sc->logic_ch_num<<4) + XILINX_RxDMA_DESCRIPTOR_LO;
 
 #ifdef DEBUG_RX
 	log(LOG_INFO, "%s: RxDMA_LO = 0x%X, BusAddr=0x%lX "
@@ -1793,14 +1786,12 @@ xilinx_dma_tx(sdla_t *card, xilinx_softc_t *sc)
 	 * minimize tx isr, the previously transmitted
 	 * packet is deallocated here */
 	if (sc->tx_dma_mbuf) {
-		log(LOG_INFO, "%s: Deallocating tx_dma_mbuf in %s\n",
-		    sc->if_name, __FUNCTION__);
+		bus_dmamap_unload(sc->dmatag, sc->tx_dmamap);
 		m_freem(sc->tx_dma_mbuf);
 		sc->tx_dma_mbuf = NULL;
 	}
 
-
-	/* check queue pointers befor start transmittion */
+	/* check queue pointers before starting transmission */
 
 	/* sanity check: make sure that DMA is in ready state */
 	dma_descr = (sc->logic_ch_num << 4) + XILINX_TxDMA_DESCRIPTOR_HI;
@@ -1824,49 +1815,52 @@ xilinx_dma_tx(sdla_t *card, xilinx_softc_t *sc)
 	if (!m) {
 		bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
 		return (ENOBUFS);
-	} else {
-		len = m->m_len;
-		if (len > MAX_XILINX_TX_DMA_SIZE) {
-			/* FIXME: We need to split this frame into
-			 *        multiple parts.  For now thought
-			 *        just drop it :) */
-			log(LOG_INFO, "%s: Tx len %d > %d (MAX TX DMA LEN) "
-			    "(%s:%d)!\n", sc->if_name, len,
-			    MAX_XILINX_TX_DMA_SIZE, __FUNCTION__, __LINE__);
-			m_freem(m);
-			bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
-			return (EINVAL);
-		}
-
-		if (mtod(m, u_int32_t)  & 0x03) {
-			/* The mbuf should already be aligned */
-			log(LOG_INFO, "%s: TX packed not aligned "
-			    "(%s:%d)!\n", sc->if_name,
-			    MAX_XILINX_TX_DMA_SIZE, __FUNCTION__, __LINE__);
-			m_freem(m);
-			bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
-			return (EINVAL);
-		}
-			
-		sc->tx_dma_addr = kvtop(mtod(m, caddr_t));
-		sc->tx_dma_len = len;
 	}
+
+	len = m->m_len;
+	if (len > MAX_XILINX_TX_DMA_SIZE) {
+		/* FIXME: We need to split this frame into
+		 *        multiple parts.  For now though
+		 *        just drop it :) */
+		log(LOG_INFO, "%s: Tx len %d > %d (MAX TX DMA LEN)\n",
+		    sc->if_name, len, MAX_XILINX_TX_DMA_SIZE);
+		m_freem(m);
+		bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
+		return (EINVAL);
+	}
+
+	if (ADDR_MASK(mtod(m, caddr_t), 0x03)) {
+		/* The mbuf should already be aligned */
+		log(LOG_INFO, "%s: TX packet not aligned!\n",
+		    sc->if_name, MAX_XILINX_TX_DMA_SIZE);
+		m_freem(m);
+		bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
+		return (EINVAL);
+	}
+
+	if (bus_dmamap_load(sc->dmatag, sc->tx_dmamap,
+	    mtod(m, void *), len, NULL, BUS_DMA_NOWAIT | BUS_DMA_WRITE)) {
+		log(LOG_INFO, "%s: Failed to load TX mbuf for DMA!\n",
+		    sc->if_name);
+		m_freem(m);
+		bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
+		return (EINVAL);		
+	}
+
+	sc->tx_dma_addr = sc->tx_dmamap->dm_segs[0].ds_addr;
+	sc->tx_dma_len = len;
 
 	if (sc->tx_dma_addr & 0x03) {
 		log(LOG_INFO, "%s: Error: Tx Ptr not aligned "
-		    "to 32bit boudary!\n", card->devname);
-
-		if (m) {
-			m_freem(m);
-		}
-
+		    "to 32bit boundary!\n", card->devname);
+		m_freem(m);
 		bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
 		return (EINVAL);
 	}
 
 	sc->tx_dma_mbuf = m;
 
-	/* WARNING: Do ont use the "skb" pointer from
+	/* WARNING: Do not use the "skb" pointer from
 	 *          here on.  The skb pointer might not exist if
 	 *          we are in transparent mode */
 
@@ -1876,15 +1870,17 @@ xilinx_dma_tx(sdla_t *card, xilinx_softc_t *sc)
 	 * DMA address register */
 	reg = sc->tx_dma_addr;
 
+	bus_dmamap_sync(sc->dmatag, sc->tx_dmamap, 0, len,
+	    BUS_DMASYNC_PREWRITE);
+
 	/* Set the 32bit alignment of the data length.
 	 * Used to pad the tx packet to the 32 bit
 	 * boundary */
 	reg &= ~(TxDMA_LO_ALIGNMENT_BIT_MASK);
 	reg |= (len & 0x03);
 
-	if (len & 0x03) {
+	if (len & 0x03)
 		len_align = 1;
-	}
 
 #ifdef DEBUG_TX
 	log(LOG_INFO, "%s: TXDMA_LO=0x%X PhyAddr=0x%lX DmaDescr=0x%lX (%s)\n",
@@ -1899,7 +1895,8 @@ xilinx_dma_tx(sdla_t *card, xilinx_softc_t *sc)
 	reg |= (((len >> 2) + len_align) & TxDMA_HI_DMA_DATA_LENGTH_MASK);
 
 #ifdef TRUE_FIFO_SIZE
-	reg |= (sc->fifo_size_code & DMA_FIFO_SIZE_MASK) << DMA_FIFO_SIZE_SHIFT;
+	reg |= (sc->fifo_size_code & DMA_FIFO_SIZE_MASK) <<
+	    DMA_FIFO_SIZE_SHIFT;
 #else
 
 	reg |= (HARD_FIFO_CODE & DMA_FIFO_SIZE_MASK) << DMA_FIFO_SIZE_SHIFT;
@@ -1937,60 +1934,58 @@ xilinx_dma_tx_complete(sdla_t *card, xilinx_softc_t *sc)
 	log(LOG_INFO, "%s: TX DMA complete\n", card->devname);
 #endif
 	/* DEBUGTX */
-/*      sdla_bus_read_4(card->hw, 0x78, &tmp1); */
+/*	sdla_bus_read_4(card->hw, 0x78, &tmp1); */
 
 	dma_descr = (sc->logic_ch_num << 4) + XILINX_TxDMA_DESCRIPTOR_HI;
 	sdla_bus_read_4(card->hw, dma_descr, &reg);
 
-	if (!sc->tx_dma_mbuf) {
-
-		log(LOG_INFO, "%s: Critical Error: Tx DMA intr: no tx mbuf !\n",
+	if (sc->tx_dma_mbuf == NULL) {
+		log(LOG_INFO,
+		    "%s: Critical Error: Tx DMA intr: no tx mbuf !\n",
 		    card->devname);
 		bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
 		return;
-
-	} else {
-		sc->tx_dma_addr = 0;
-		sc->tx_dma_len = 0;
-
-
-		/* Do not free the packet here,
-		 * copy the packet dma info into csum
-		 * field and let the bh handler analyze
-		 * the transmitted packet.
-		 */
-
-		if (reg & TxDMA_HI_DMA_PCI_ERROR_RETRY_TOUT) {
-
-			log(LOG_INFO, "%s:%s: PCI Error: 'Retry' "
-			    "exceeds maximum (64k): Reg=0x%X!\n",
-			    card->devname, sc->if_name, reg);
-
-			if (++sc->pci_retry < 3) {
-				bit_set((u_int8_t *)&reg,
-				    TxDMA_HI_DMA_GO_READY_BIT);
-
-				log(LOG_INFO, "%s: Retry: TXDMA_HI=0x%X "
-				    "DmaDescr=0x%lX (%s)\n",
-				    sc->if_name, reg, dma_descr, __FUNCTION__);
-
-				sdla_bus_write_4(card->hw, dma_descr, reg);
-				return;
-			}
-		}
-
-		sc->pci_retry = 0;
-		sc->tx_dma_mbuf->m_pkthdr.csum_flags = reg;
-		IF_ENQUEUE(&sc->wp_tx_complete_list, sc->tx_dma_mbuf);
-		sc->tx_dma_mbuf = NULL;
-
-		bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
-
-		xilinx_process_packet(sc);
 	}
 
-}
+	bus_dmamap_sync(sc->dmatag, sc->tx_dmamap, 0, sc->tx_dma_len,
+             BUS_DMASYNC_POSTWRITE);
 
+	sc->tx_dma_addr = 0;
+	sc->tx_dma_len = 0;
+
+	/* Do not free the packet here,
+	 * copy the packet dma info into csum
+	 * field and let the bh handler analyze
+	 * the transmitted packet.
+	 */
+
+	if (reg & TxDMA_HI_DMA_PCI_ERROR_RETRY_TOUT) {
+		log(LOG_INFO, "%s:%s: PCI Error: 'Retry' "
+		    "exceeds maximum (64k): Reg=0x%X!\n",
+		    card->devname, sc->if_name, reg);
+
+		if (++sc->pci_retry < 3) {
+			bit_set((u_int8_t *)&reg,
+				TxDMA_HI_DMA_GO_READY_BIT);
+
+			log(LOG_INFO, "%s: Retry: TXDMA_HI=0x%X "
+			    "DmaDescr=0x%lX (%s)\n",
+			    sc->if_name, reg, dma_descr, __FUNCTION__);
+
+			sdla_bus_write_4(card->hw, dma_descr, reg);
+			return;
+		}
+	}
+
+	sc->pci_retry = 0;
+	sc->tx_dma_mbuf->m_pkthdr.csum_flags = reg;
+	IF_ENQUEUE(&sc->wp_tx_complete_list, sc->tx_dma_mbuf);
+	sc->tx_dma_mbuf = NULL;
+
+	bit_clear((u_int8_t *)&sc->dma_status, TX_BUSY);
+
+	xilinx_process_packet(sc);
+}
 
 static void
 xilinx_tx_post_complete(sdla_t *card, xilinx_softc_t *sc, struct mbuf *m)
@@ -2010,51 +2005,46 @@ xilinx_tx_post_complete(sdla_t *card, xilinx_softc_t *sc, struct mbuf *m)
 #endif
 
 		/* Checking Tx DMA Go bit. Has to be '0' */
-		if (bit_test((u_int8_t *)&reg, TxDMA_HI_DMA_GO_READY_BIT)) {
+		if (bit_test((u_int8_t *)&reg, TxDMA_HI_DMA_GO_READY_BIT))
 			log(LOG_INFO, "%s:%s: Error: TxDMA Intr: "
 			    "GO bit set on Tx intr\n",
 			    card->devname, sc->if_name);
-		}
 
-		if (reg & TxDMA_HI_DMA_DATA_LENGTH_MASK) {
+		if (reg & TxDMA_HI_DMA_DATA_LENGTH_MASK)
 			log(LOG_INFO, "%s:%s: Error: TxDMA Length "
 			"not equal 0 \n", card->devname, sc->if_name);
-		}
 
 		/* Checking Tx DMA PCI error status. Has to be '0's */
-		if (reg&TxDMA_HI_DMA_PCI_ERROR_MASK) {
+		if (reg & TxDMA_HI_DMA_PCI_ERROR_MASK) {
 
-			if (reg & TxDMA_HI_DMA_PCI_ERROR_M_ABRT) {
+			if (reg & TxDMA_HI_DMA_PCI_ERROR_M_ABRT)
 				log(LOG_INFO, "%s:%s: Tx Error: "
 				    "Abort from Master: pci fatal error!\n",
 				    card->devname, sc->if_name);
-			}
-			if (reg & TxDMA_HI_DMA_PCI_ERROR_T_ABRT) {
+
+			if (reg & TxDMA_HI_DMA_PCI_ERROR_T_ABRT)
 				log(LOG_INFO, "%s:%s: Tx Error: "
 				    "Abort from Target: pci fatal error!\n",
 				    card->devname, sc->if_name);
-			}
+
 			if (reg & TxDMA_HI_DMA_PCI_ERROR_DS_TOUT) {
 				log(LOG_INFO, "%s:%s: Tx Warning: "
 				    "PCI Latency Timeout!\n",
 				    card->devname, sc->if_name);
 				goto tx_post_ok;
 			}
-			if (reg & TxDMA_HI_DMA_PCI_ERROR_RETRY_TOUT) {
+			if (reg & TxDMA_HI_DMA_PCI_ERROR_RETRY_TOUT)
 				log(LOG_INFO, "%s:%s: Tx Error: 'Retry' "
 				    "exceeds maximum (64k): pci fatal error!\n",
 				    card->devname, sc->if_name);
-			}
 		}
 		goto tx_post_exit;
 	}
 
 tx_post_ok:
 
-	if (ifp) {
+	if (ifp)
 		ifp->if_opackets++;
-		ifp->if_obytes += m->m_len;
-	}
 
 	/* Indicate that the first tx frame went
 	 * out on the transparent link */
@@ -2067,9 +2057,8 @@ tx_post_exit:
 		 * If we were able to transmit and the interface is set to
 		 * OACTIVE remove this flag and let kernel try to transmit.
 		 */
-		if (ifp->if_flags & IFF_OACTIVE) {
+		if (ifp->if_flags & IFF_OACTIVE)
 			ifp->if_flags &= ~IFF_OACTIVE;
-		}
 	}
 	return;
 }
@@ -2077,18 +2066,19 @@ tx_post_exit:
 static void
 xilinx_dma_rx_complete(sdla_t *card, xilinx_softc_t *sc)
 {
+	struct xilinx_rx_buffer *buf;
 	unsigned long dma_descr;
-	struct mbuf *m;
 	wp_rx_element_t *rx_el;
 
 	bit_clear((u_int8_t *)&sc->rx_dma, 0);
 
-	if (!sc->rx_dma_mbuf) {
-		log(LOG_INFO, "%s: Critical Error: rx_dma_mbuf\n", sc->if_name);
+	if (sc->rx_dma_buf == NULL) {
+		log(LOG_INFO,
+		    "%s: Critical Error: rx_dma_mbuf\n", sc->if_name);
 		return;
 	}
 
-	rx_el = mtod(sc->rx_dma_mbuf, wp_rx_element_t *);
+	rx_el = &sc->rx_dma_buf->rx_el;
 
 	/* Reading Rx DMA descriptor information */
 	dma_descr=(sc->logic_ch_num << 4) + XILINX_RxDMA_DESCRIPTOR_LO;
@@ -2107,12 +2097,12 @@ xilinx_dma_rx_complete(sdla_t *card, xilinx_softc_t *sc)
 	    __FUNCTION__, __LINE__);
 #endif
 
-	m = sc->rx_dma_mbuf;
-	sc->rx_dma_mbuf = NULL;
+	buf = sc->rx_dma_buf;
+	sc->rx_dma_buf = NULL;
 
 	xilinx_dma_rx(card, sc);
 
-	IF_ENQUEUE(&sc->wp_rx_complete_list, m);
+	SIMPLEQ_INSERT_TAIL(&sc->wp_rx_complete_list, buf, entry);
 
 	xilinx_process_packet(sc);
 
@@ -2122,11 +2112,12 @@ xilinx_dma_rx_complete(sdla_t *card, xilinx_softc_t *sc)
 
 static void
 xilinx_rx_post_complete(sdla_t *card, xilinx_softc_t *sc,
-    struct mbuf *m, struct mbuf **new_m, unsigned char *pkt_error)
+    struct xilinx_rx_buffer *buf, struct mbuf **new_m, u_char *pkt_error)
 {
 	struct ifnet	*ifp;
 	unsigned int len, data_error = 0;
-	wp_rx_element_t *rx_el = mtod(m, wp_rx_element_t *);
+	wp_rx_element_t *rx_el = &buf->rx_el;
+	struct mbuf *m = buf->mbuf;
 
 	WAN_ASSERT1(sc == NULL);
 	ifp = (struct ifnet *)&sc->common.ifp;	/*m->m_pkthdr.rcvif;*/
@@ -2150,38 +2141,30 @@ xilinx_rx_post_complete(sdla_t *card, xilinx_softc_t *sc,
 	}
 
 	/* Checking Rx DMA PCI error status. Has to be '0's */
-	if (rx_el->reg&RxDMA_HI_DMA_PCI_ERROR_MASK) {
-
-		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_M_ABRT) {
+	if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_MASK) {
 #ifdef DEBUG_ERR
+		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_M_ABRT)
 			log(LOG_INFO, "%s: Rx Error: Abort from Master: "
 			    "pci fatal error!\n", card->devname);
-#endif
-		}
-		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_T_ABRT) {
-#ifdef DEBUG_ERR
+
+		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_T_ABRT)
 			log(LOG_INFO, "%s: Rx Error: Abort from Target: "
 			    "pci fatal error!\n", card->devname);
-#endif
-		}
-		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_DS_TOUT) {
-#ifdef DEBUG_ERR
+
+		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_DS_TOUT)
 			log(LOG_INFO, "%s: Rx Error: No 'DeviceSelect' "
 			    "from target: pci fatal error!\n", card->devname);
-#endif
-		}
-		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_RETRY_TOUT) {
-#ifdef DEBUG_ERR
+
+		if (rx_el->reg & RxDMA_HI_DMA_PCI_ERROR_RETRY_TOUT)
 			log(LOG_INFO, "%s: Rx Error: 'Retry' exceeds maximum "
 			    "(64k): pci fatal error!\n", card->devname);
-#endif
-		}
-#ifdef DEBUG_ERR
+
 		log(LOG_INFO, "%s: RXDMA PCI ERROR = 0x%x\n",
 		    card->devname, rx_el->reg);
 #endif
 		if (ifp)
-		    ifp->if_ierrors++;
+			ifp->if_ierrors++;
+
 		goto rx_comp_error;
 	}
 
@@ -2202,7 +2185,8 @@ xilinx_rx_post_complete(sdla_t *card, xilinx_softc_t *sc,
 		log(LOG_INFO, "%s: RxDMA Intr: End flag missing: "
 		    "MTU Mismatch! Reg=0x%X\n", card->devname, rx_el->reg);
 #endif
-		if (ifp) ifp->if_ierrors++;
+		if (ifp)
+			ifp->if_ierrors++;
 		goto rx_comp_error;
 
 	} else {  /* Check CRC error flag only if this is the end of Frame */
@@ -2214,7 +2198,7 @@ xilinx_rx_post_complete(sdla_t *card, xilinx_softc_t *sc,
 			    card->devname, rx_el->reg);
 #endif
 			if (ifp)
-			    ifp->if_ierrors++;
+				ifp->if_ierrors++;
 
 			bit_set((u_int8_t *)&rx_el->pkt_error,
 			    WP_CRC_ERROR_BIT);
@@ -2231,14 +2215,14 @@ xilinx_rx_post_complete(sdla_t *card, xilinx_softc_t *sc,
 #endif
 			if (ifp)
 			    ifp->if_ierrors++;
+
 			bit_set((u_int8_t *)&rx_el->pkt_error,
 			    WP_ABORT_ERROR_BIT);
 			data_error = 1;
 		}
 
-		if (data_error) {
+		if (data_error)
 			goto rx_comp_error;
-		}
 	}
 
 	len = rx_el->reg & RxDMA_HI_DMA_DATA_LENGTH_MASK;
@@ -2268,45 +2252,34 @@ xilinx_rx_post_complete(sdla_t *card, xilinx_softc_t *sc,
 		}
 	}
 
+	bus_dmamap_sync(sc->dmatag, sc->rx_dma_buf->dma_map, 0, len,
+             BUS_DMASYNC_POSTREAD);
+
+	m->m_len = m->m_pkthdr.len = len;
+
 	if (len > aft_rx_copyback) {
 		/* The rx size is big enough, thus
 		 * send this buffer up the stack
 		 * and allocate another one */
-#if 0
-		memset(&skb->cb[0], 0, sizeof(wp_rx_element_t));
-#endif
-		memset(mtod(m, caddr_t), 0, sizeof(wp_rx_element_t));
-		m->m_len += len;
-		m->m_pkthdr.len = m->m_len;
-		m_adj(m, sizeof(wp_rx_element_t));
 		*new_m = m;
-
-		aft_alloc_rx_dma_buff(card, sc, 1);
+		buf->mbuf = NULL;
 	} else {
-		struct mbuf	*m0;
+		struct mbuf *m0;
 		/* The rx packet is very
 		 * small thus, allocate a new
 		 * buffer and pass it up */
-		m0 = wan_mbuf_alloc(len);
-		if (m0 == NULL) {
+		if ((m0 = m_copym2(m, 0, len, M_NOWAIT)) == NULL) {
 			log(LOG_INFO, "%s: Failed to allocate mbuf!\n",
 			    sc->if_name);
 			if (ifp)
 			    ifp->if_ierrors++;
-			goto rx_comp_error;
-		}
-
-		m0->m_len = m0->m_pkthdr.len = len;
-		memcpy(mtod(m0, caddr_t), mtod(m, caddr_t) + m->m_len, len);
-		*new_m = m0;
-		aft_init_requeue_free_m(sc, m);
+		} else
+			*new_m = m0;
 	}
 
-	return;
+ rx_comp_error:
+	aft_reload_rx_dma_buff(sc, buf);
 
-rx_comp_error:
-
-	aft_init_requeue_free_m(sc, m);
 	return;
 }
 
@@ -2329,9 +2302,8 @@ request_xilinx_logical_channel_num(sdla_t *card, xilinx_softc_t *sc,
 #endif
 
 	err = request_fifo_baddr_and_size(card, sc);
-	if (err) {
+	if (err)
 		return (-1);
-	}
 
 	for (i = 0; i < card->u.xilinx.num_of_time_slots; i++) {
 		if (!bit_test((u_int8_t *)&card->u.xilinx.logic_ch_map, i)) {
@@ -2341,9 +2313,8 @@ request_xilinx_logical_channel_num(sdla_t *card, xilinx_softc_t *sc,
 		}
 	}
 
-	if (logic_ch == -1) {
+	if (logic_ch == -1)
 		return (logic_ch);
-	}
 
 	for (i = 0; i < card->u.xilinx.num_of_time_slots; i++) {
 		if (!bit_test((u_int8_t *)&card->u.xilinx.logic_ch_map, i)) {
@@ -2367,7 +2338,6 @@ request_xilinx_logical_channel_num(sdla_t *card, xilinx_softc_t *sc,
 		xilinx_dma_max_logic_ch(card);
 	}
 
-
 	return (logic_ch);
 }
 
@@ -2383,9 +2353,8 @@ free_xilinx_logical_channel_num(sdla_t *card, int logic_ch)
 		card->u.xilinx.top_logic_ch = XILINX_DEFLT_ACTIVE_CH;
 
 		for (i = 0; i < card->u.xilinx.num_of_time_slots; i++) {
-			if (card->u.xilinx.dev_to_ch_map[logic_ch]) {
+			if (card->u.xilinx.dev_to_ch_map[logic_ch])
 				card->u.xilinx.top_logic_ch = i;
-			}
 		}
 
 		xilinx_dma_max_logic_ch(card);
@@ -2413,35 +2382,123 @@ xilinx_dma_max_logic_ch(sdla_t *card)
 }
 
 static int
-aft_init_requeue_free_m(xilinx_softc_t *sc, struct mbuf *m)
+aft_alloc_rx_buffers(xilinx_softc_t *sc)
 {
-	int			err;
+	struct xilinx_rx_buffer *buf;
 
-	m->m_data	= (m->m_flags & M_EXT) ? m->m_ext.ext_buf : m->m_pktdat;
-	m->m_pkthdr.len	= m->m_len = 0;
+	SIMPLEQ_INIT(&sc->wp_rx_free_list);
+	SIMPLEQ_INIT(&sc->wp_rx_complete_list);
 
-	memset(mtod(m, caddr_t), 0, sizeof(wp_rx_element_t));
-	IF_ENQUEUE(&sc->wp_rx_free_list, m);
-	return (err);
-}
+	/* allocate receive buffers in one cluster */
+	buf = malloc(sizeof(*buf) * MAX_RX_BUF, M_DEVBUF, M_NOWAIT);
+	if (buf == NULL)
+		return (1);
 
-static int
-aft_alloc_rx_dma_buff(sdla_t *card, xilinx_softc_t *sc, int num)
-{
-	int i;
-	struct mbuf *m;
-
-	for (i = 0; i < num; i++) {
-		m = wan_mbuf_alloc(sc->dma_mtu);
-		if (m == NULL) {
-			log(LOG_INFO, "%s: %s  no memory\n",
-					sc->if_name, __FUNCTION__);
-			return (ENOMEM);
-		}
-		IF_ENQUEUE(&sc->wp_rx_free_list, m);
-	}
+	bzero(buf, sizeof(*buf) * MAX_RX_BUF);
+	sc->wp_rx_buffers = buf;
+	sc->wp_rx_buffer_last = buf;
 
 	return (0);
+}
+
+static void
+aft_release_rx_buffers(xilinx_softc_t *sc)
+{
+	struct xilinx_rx_buffer *buf;
+
+	if (sc->wp_rx_buffers == NULL)
+		return;
+
+	while ((buf = SIMPLEQ_FIRST(&sc->wp_rx_free_list)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&sc->wp_rx_free_list, entry);
+		aft_release_rx_dma_buff(sc, buf);
+	}
+
+	while ((buf = SIMPLEQ_FIRST(&sc->wp_rx_complete_list)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&sc->wp_rx_complete_list, entry);
+		aft_release_rx_dma_buff(sc, buf);		
+	}
+
+	free(sc->wp_rx_buffers, M_DEVBUF);
+
+	sc->wp_rx_buffers = NULL;
+	sc->wp_rx_buffer_last = NULL;
+}
+
+/* Allocate an mbuf and setup dma_map. */
+static int
+aft_alloc_rx_dma_buff(xilinx_softc_t *sc, int num)
+{
+	struct xilinx_rx_buffer *buf, *ebuf;
+	int n;
+
+	ebuf = sc->wp_rx_buffers + MAX_RX_BUF;
+	buf = sc->wp_rx_buffer_last;
+
+	for (n = 0; n < num; n++) {
+		int i;
+		for (i = 0; i < MAX_RX_BUF; i++) {
+			if (buf->mbuf == NULL)
+				break;
+			if (++buf == ebuf)
+				buf = sc->wp_rx_buffers;
+		}
+
+		if (buf->mbuf != NULL)
+			break;
+
+		sc->wp_rx_buffer_last = buf;
+
+		buf->mbuf = wan_mbuf_alloc(sc->dma_mtu);
+		if (buf->mbuf == NULL)
+			break;
+
+		if (bus_dmamap_create(sc->dmatag, sc->dma_mtu, 1, sc->dma_mtu,
+		    0, BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW, &buf->dma_map)) {
+			m_freem(buf->mbuf);
+			buf->mbuf = NULL;
+			break;
+		}
+
+		if (bus_dmamap_load(sc->dmatag, buf->dma_map,
+		    mtod(buf->mbuf, void *), sc->dma_mtu, NULL,
+		    BUS_DMA_NOWAIT | BUS_DMA_READ)) {
+			aft_release_rx_dma_buff(sc, buf);
+			break;
+		}
+
+		SIMPLEQ_INSERT_TAIL(&sc->wp_rx_free_list, buf, entry);
+	}
+
+	return (n);
+}
+
+static void
+aft_reload_rx_dma_buff(xilinx_softc_t *sc, struct xilinx_rx_buffer *buf)
+{
+	bus_dmamap_unload(sc->dmatag, buf->dma_map);
+	if (buf->mbuf == NULL) {
+		buf->mbuf = wan_mbuf_alloc(sc->dma_mtu);
+		if (buf->mbuf == NULL) {
+			bus_dmamap_destroy(sc->dmatag, buf->dma_map);
+			return;
+		}
+	}
+	if (bus_dmamap_load(sc->dmatag, buf->dma_map, mtod(buf->mbuf, void *),
+	    sc->dma_mtu, NULL, BUS_DMA_NOWAIT | BUS_DMA_READ)) {
+		aft_release_rx_dma_buff(sc, buf);
+		return;
+	}
+
+	SIMPLEQ_INSERT_TAIL(&sc->wp_rx_free_list, buf, entry);
+}
+
+static void
+aft_release_rx_dma_buff(xilinx_softc_t *sc, struct xilinx_rx_buffer *buf)
+{
+	bus_dmamap_destroy(sc->dmatag, buf->dma_map);
+	m_freem(buf->mbuf);
+	buf->mbuf = NULL;
 }
 
 static void
@@ -2453,6 +2510,7 @@ enable_timer(void *card_id)
 	s = splnet();
 	sdla_te_polling(card);
 	splx(s);
+
 	return;
 }
 
@@ -2465,19 +2523,17 @@ xilinx_process_packet(xilinx_softc_t *sc)
 
 	WAN_ASSERT1(sc == NULL);
 	for (;;) {
-		IF_DEQUEUE(&sc->wp_rx_complete_list, m);
-		if (m == NULL)
+		struct xilinx_rx_buffer *buf;
+		buf = SIMPLEQ_FIRST(&sc->wp_rx_complete_list);
+		if (buf == NULL)
 			break;
+
+		SIMPLEQ_REMOVE_HEAD(&sc->wp_rx_complete_list, entry);
 
 		new_m = NULL;
 		pkt_error = 0;
 
-		/*
-		 * The post function will take care of the skb and new_skb
-		 * buffer.  If new_skb buffer exists, driver must pass it up
-		 * the stack, or free it
-		 */
-		xilinx_rx_post_complete(sc->common.card, sc, m, &new_m,
+		xilinx_rx_post_complete(sc->common.card, sc, buf, &new_m,
 		    &pkt_error);
 		if (new_m) {
 			ifp = (struct ifnet *)&sc->common.ifp;
@@ -2580,9 +2636,8 @@ fifo_error_interrupt(sdla_t *card, unsigned long reg)
 				struct ifnet	*ifp;
 				sc = (xilinx_softc_t *)
 				    card->u.xilinx.dev_to_ch_map[i];
-				if (!sc) {
+				if (!sc)
 					continue;
-				}
 
 				ifp = (struct ifnet *)&sc->common.ifp;
 #if 0
@@ -2590,7 +2645,8 @@ fifo_error_interrupt(sdla_t *card, unsigned long reg)
 					log(LOG_INFO, "%s: Warning: ignoring "
 					    "rx error intr: dev down "
 					    "0x%X UP=0x%X!\n", ifp->if_xname,
-					    sc->common.state, sc->ignore_modem);
+					    sc->common.state,
+					    sc->ignore_modem);
 					continue;
 				}
 #endif
@@ -2604,11 +2660,9 @@ fifo_error_interrupt(sdla_t *card, unsigned long reg)
 
 #ifdef DEBUG_ERR
 				log(LOG_INFO, "%s:%s: Warning RX Fifo Error "
-				    "on LCh=%ld Slot=%d RxCL=%d RxFL=%d "
-				    "RxDMA=%d\n", card->devname, sc->if_name,
+				    "on LCh=%ld Slot=%d RxDMA=%d\n",
+				    card->devname, sc->if_name,
 				     sc->logic_ch_num, i,
-				     sc->wp_rx_complete_list.ifq_len,
-				     sc->wp_rx_free_list.ifq_len,
 				     sc->rx_dma);
 #endif
 
@@ -2616,7 +2670,7 @@ fifo_error_interrupt(sdla_t *card, unsigned long reg)
 {
 				unsigned long dma_descr;
 				unsigned int reg;
-				dma_descr=(sc->logic_ch_num<<4) +
+				dma_descr = (sc->logic_ch_num << 4) +
 				    XILINX_RxDMA_DESCRIPTOR_HI;
 				sdla_bus_read_4(card->hw, dma_descr, &reg);
 				log(LOG_INFO, "%s: Hi Descriptor 0x%X\n",
@@ -2652,7 +2706,8 @@ front_end_interrupt(sdla_t *card, unsigned long reg)
  * Main interrupt service routine.
  * Determine the interrupt received and handle it.
  */
-static void wp_xilinx_isr(sdla_t* card)
+static void
+wp_xilinx_isr(sdla_t* card)
 {
 	int i;
 	u_int32_t reg;
@@ -2709,11 +2764,9 @@ static void wp_xilinx_isr(sdla_t* card)
 	 * Test Fifo Error Interrupt
 	 * If set shutdown all interfaces and reconfigure
 	 */
-	if (bit_test((u_int8_t *)&reg, ERROR_INTR_ENABLE_BIT)) {
-		if (bit_test((u_int8_t *)&reg, ERROR_INTR_FLAG)) {
+	if (bit_test((u_int8_t *)&reg, ERROR_INTR_ENABLE_BIT))
+		if (bit_test((u_int8_t *)&reg, ERROR_INTR_FLAG))
 			fifo_error_interrupt(card, reg);
-		}
-	}
 
 	/*
 	 * Checking for Interrupt source:
@@ -2724,16 +2777,14 @@ static void wp_xilinx_isr(sdla_t* card)
 	if (bit_test((u_int8_t *)&reg, GLOBAL_INTR_ENABLE_BIT) &&
 		bit_test((u_int8_t *)&reg, DMA_INTR_FLAG)) {
 
-
 		/* Receive DMA Engine */
 		sdla_bus_read_4(card->hw, XILINX_DMA_RX_INTR_PENDING_REG,
 		    &dma_rx_reg);
 
 		dma_rx_reg &= card->u.xilinx.active_ch_map;
 
-		if (dma_rx_reg == 0) {
+		if (dma_rx_reg == 0)
 			goto isr_rx;
-		}
 
 		for (i = 0; i < card->u.xilinx.num_of_time_slots; i++) {
 			if (bit_test((u_int8_t *)&dma_rx_reg, i) &&
@@ -2759,9 +2810,8 @@ isr_rx:
 
 		dma_tx_reg &= card->u.xilinx.active_ch_map;
 
-		if (dma_tx_reg == 0) {
+		if (dma_tx_reg == 0)
 			goto isr_tx;
-		}
 
 		for (i = 0; i < card->u.xilinx.num_of_time_slots; i++) {
 			if (bit_test((u_int8_t *)&dma_tx_reg, i) &&
@@ -2832,9 +2882,8 @@ port_set_state(sdla_t *card, int state)
 		card->state = state;
 		LIST_FOREACH(common, &card->dev_head, next) {
 			struct ifnet *ifp = (struct ifnet *)&common->ifp;
-			if (ifp) {
+			if (ifp)
 				set_chan_state(card, ifp, state);
-			}
 		}
 	}
 }
@@ -2844,7 +2893,8 @@ port_set_state(sdla_t *card, int state)
  * handle_front_end_state
  */
 
-static void handle_front_end_state(void *card_id)
+static void
+handle_front_end_state(void *card_id)
 {
 	sdla_t *card = (sdla_t *)card_id;
 
@@ -2877,6 +2927,7 @@ read_cpld(sdla_t *card, unsigned short cpld_off)
 
 	/* Restore original address */
 	sdla_bus_write_2(card->hw, XILINX_MCPU_INTERFACE_ADDR, org_off);
+
 	return (tmp);
 }
 
@@ -2905,6 +2956,7 @@ write_cpld(sdla_t *card, unsigned short off, unsigned char data)
 
 	/* Restore the original address */
 	sdla_bus_write_2(card->hw, XILINX_MCPU_INTERFACE_ADDR, org_off);
+
 	return (0);
 }
 
@@ -2969,7 +3021,8 @@ read_front_end_reg(void *card1, unsigned short off)
  *
  */
 
-static void enable_data_error_intr(sdla_t *card)
+static void
+enable_data_error_intr(sdla_t *card)
 {
 	wanpipe_common_t	*common;
 	struct ifnet		*ifp;
@@ -2988,9 +3041,8 @@ static void enable_data_error_intr(sdla_t *card)
 			continue;
 		sc = ifp->if_softc;
 #if 0
-		if (!(ifp->if_flags & IFF_UP)) {
+		if (!(ifp->if_flags & IFF_UP))
 			continue;
-		}
 #endif
 
 #ifdef DEBUG_INIT
@@ -3018,9 +3070,8 @@ static void enable_data_error_intr(sdla_t *card)
 			continue;
 		sc = ifp->if_softc;
 #if 0
-		if (!(ifp->if_flags & IFF_UP)) {
+		if (!(ifp->if_flags & IFF_UP))
 			continue;
-		}
 #endif
 
 
@@ -3060,13 +3111,9 @@ static void enable_data_error_intr(sdla_t *card)
 		    sc->if_name, __FUNCTION__);
 #endif
 
-		if (sc->rx_dma_mbuf) {
-			wp_rx_element_t *rx_el;
-			struct mbuf *m = sc->rx_dma_mbuf;
-
-			sc->rx_dma_mbuf = NULL;
-			rx_el = mtod(m, wp_rx_element_t *);
-			aft_init_requeue_free_m(sc, m);
+		if (sc->rx_dma_buf) {
+			aft_reload_rx_dma_buff(sc, sc->rx_dma_buf);
+			sc->rx_dma_buf = NULL;
 		}
 
 		xilinx_dma_rx(card, sc);
@@ -3077,6 +3124,7 @@ static void enable_data_error_intr(sdla_t *card)
 		}
 
 		if (sc->tx_dma_mbuf) {
+			bus_dmamap_unload(sc->dmatag, sc->tx_dmamap);
 			m_freem(sc->tx_dma_mbuf);
 			sc->tx_dma_mbuf = NULL;
 		}
@@ -3108,16 +3156,17 @@ static void enable_data_error_intr(sdla_t *card)
 	return;
 }
 
-static void disable_data_error_intr(sdla_t *card, unsigned char event)
+static void
+disable_data_error_intr(sdla_t *card, unsigned char event)
 {
 	u_int32_t reg;
 
 	sdla_bus_read_4(card->hw, XILINX_CHIP_CFG_REG, &reg);
 	bit_clear((u_int8_t *)&reg, GLOBAL_INTR_ENABLE_BIT);
 	bit_clear((u_int8_t *)&reg, ERROR_INTR_ENABLE_BIT);
-	if (event == DEVICE_DOWN) {
+	if (event == DEVICE_DOWN)
 		bit_clear((u_int8_t *)&reg, FRONT_END_INTR_ENABLE_BIT);
-	}
+
 	sdla_bus_write_4(card->hw, XILINX_CHIP_CFG_REG, reg);
 
 	sdla_bus_read_4(card->hw, XILINX_DMA_CONTROL_REG, &reg);
@@ -3132,7 +3181,7 @@ xilinx_init_tx_dma_descr(sdla_t *card, xilinx_softc_t *sc)
 	unsigned long dma_descr;
 	unsigned long reg = 0;
 
-	dma_descr=(sc->logic_ch_num << 4) + XILINX_TxDMA_DESCRIPTOR_HI;
+	dma_descr = (sc->logic_ch_num << 4) + XILINX_TxDMA_DESCRIPTOR_HI;
 	sdla_bus_write_4(card->hw, dma_descr, reg);
 }
 
@@ -3146,7 +3195,8 @@ xilinx_tx_fifo_under_recover(sdla_t *card, xilinx_softc_t *sc)
 	unsigned long dma_descr;
 
 #ifdef DEBUG_ERR
-	log(LOG_INFO, "%s:%s: Tx Fifo Recovery \n", card->devname, sc->if_name);
+	log(LOG_INFO, "%s:%s: Tx Fifo Recovery \n",
+	    card->devname, sc->if_name);
 #endif
 
 	/* Initialize Tx DMA descriptor: Stop DMA */
@@ -3170,7 +3220,8 @@ xilinx_tx_fifo_under_recover(sdla_t *card, xilinx_softc_t *sc)
 	/*
 	 * Wake up the stack, because tx dma interrupt failed
 	 */
-	if (ifp) ifp->if_oerrors++;
+	if (ifp)
+		ifp->if_oerrors++;
 
 #ifdef DEBUG_ERR
 	log(LOG_INFO, "%s:%s: Tx Fifo Recovery: Restarting Transmission \n",
@@ -3184,9 +3235,8 @@ xilinx_tx_fifo_under_recover(sdla_t *card, xilinx_softc_t *sc)
 		 * to OACTIVE remove this flag and let kernel try to
 		 * transmit.
 		 */
-		if (ifp->if_flags & IFF_OACTIVE) {
+		if (ifp->if_flags & IFF_OACTIVE)
 			ifp->if_flags &= ~IFF_OACTIVE;
-		}
 	}
 	return;
 }
@@ -3199,13 +3249,12 @@ xilinx_write_ctrl_hdlc(sdla_t *card, u_int32_t timeslot,
 	u_int32_t ts_orig = timeslot;
 	unsigned long timeout = ticks;
 
-	if (timeslot == 0) {
+	if (timeslot == 0)
 		timeslot = card->u.xilinx.num_of_time_slots - 2;
-	} else if (timeslot == 1) {
+	else if (timeslot == 1)
 		timeslot = card->u.xilinx.num_of_time_slots - 1;
-	} else {
+	else
 		timeslot -= 2;
-	}
 
 	timeslot = timeslot << XILINX_CURRENT_TIMESLOT_SHIFT;
 	timeslot &= XILINX_CURRENT_TIMESLOT_MASK;
@@ -3234,9 +3283,9 @@ set_chan_state(sdla_t *card, struct ifnet *ifp, int state)
 {
 	xilinx_softc_t *sc = ifp->if_softc;
 
-	if (sc == NULL) {
+	if (sc == NULL)
 		return (0);
-	}
+
 	if (state == WAN_CONNECTED) {
 #ifdef DEBUG_INIT
 		log(LOG_INFO, "%s: Setting idle_start to 0\n", sc->if_name);
@@ -3253,7 +3302,8 @@ set_chan_state(sdla_t *card, struct ifnet *ifp, int state)
 static char fifo_size_vector[] = {1, 2, 4, 8, 16, 32};
 static char fifo_code_vector[] = {0, 1, 3, 7, 0xF, 0x1F};
 
-static int request_fifo_baddr_and_size(sdla_t *card, xilinx_softc_t *sc)
+static int
+request_fifo_baddr_and_size(sdla_t *card, xilinx_softc_t *sc)
 {
 	unsigned char req_fifo_size, fifo_size;
 	int i;
@@ -3264,47 +3314,47 @@ static int request_fifo_baddr_and_size(sdla_t *card, xilinx_softc_t *sc)
 	 */
 
 	if (IS_T1(&card->fe_te.te_cfg)) {
-
-		if (sc->num_of_time_slots == NUM_OF_T1_CHANNELS) {
+		if (sc->num_of_time_slots == NUM_OF_T1_CHANNELS)
 			req_fifo_size = 32;
-		} else if (sc->num_of_time_slots == 1) {
+		else if (sc->num_of_time_slots == 1)
 			req_fifo_size = 1;
-		} else if (sc->num_of_time_slots == 2 ||
-		    sc->num_of_time_slots == 3) {
+		else if (sc->num_of_time_slots == 2 ||
+		    sc->num_of_time_slots == 3)
 			req_fifo_size = 2;
-		} else if (sc->num_of_time_slots >= 4 &&
-		    sc->num_of_time_slots <= 7) {
+		else if (sc->num_of_time_slots >= 4 &&
+		    sc->num_of_time_slots <= 7)
 			req_fifo_size = 4;
-		} else if (sc->num_of_time_slots >= 8 &&
-		    sc->num_of_time_slots <= 15) {
+		else if (sc->num_of_time_slots >= 8 &&
+		    sc->num_of_time_slots <= 15)
 			req_fifo_size = 8;
-		} else if (sc->num_of_time_slots >= 16 &&
-		    sc->num_of_time_slots <= 23) {
+		else if (sc->num_of_time_slots >= 16 &&
+		    sc->num_of_time_slots <= 23)
 			req_fifo_size = 16;
-		} else {
+		else {
 			log(LOG_INFO, "%s: Invalid number of timeslots %d\n",
 			    card->devname, sc->num_of_time_slots);
 			return (EINVAL);
 		}
 	} else {
-		if (sc->num_of_time_slots == (NUM_OF_E1_CHANNELS-1)) {
+		if (sc->num_of_time_slots == (NUM_OF_E1_CHANNELS-1))
 			req_fifo_size = 32;
-		} else if (sc->num_of_time_slots == 1) {
+		else if (sc->num_of_time_slots == 1)
 			req_fifo_size = 1;
-		} else if (sc->num_of_time_slots == 2 ||
-		    sc->num_of_time_slots == 3) {
+		else if (sc->num_of_time_slots == 2 ||
+		    sc->num_of_time_slots == 3)
 			req_fifo_size = 2;
-		} else if (sc->num_of_time_slots >= 4 &&
-		    sc->num_of_time_slots <= 7) {
+		else if (sc->num_of_time_slots >= 4 &&
+		    sc->num_of_time_slots <= 7)
 			req_fifo_size = 4;
-		} else if (sc->num_of_time_slots >= 8 &&
-		    sc->num_of_time_slots <= 15) {
+		else if (sc->num_of_time_slots >= 8 &&
+		    sc->num_of_time_slots <= 15)
 			req_fifo_size = 8;
-		} else if (sc->num_of_time_slots >= 16 &&
-		    sc->num_of_time_slots <= 31) {
+		else if (sc->num_of_time_slots >= 16 &&
+		    sc->num_of_time_slots <= 31)
 			req_fifo_size = 16;
-		} else {
-			log(LOG_INFO, "%s:%s: Invalid number of timeslots %d\n",
+		else {
+			log(LOG_INFO,
+			    "%s:%s: Invalid number of timeslots %d\n",
 			    card->devname, sc->if_name, sc->num_of_time_slots);
 			return (EINVAL);
 		}
@@ -3316,6 +3366,7 @@ static int request_fifo_baddr_and_size(sdla_t *card, xilinx_softc_t *sc)
 #endif
 	fifo_size = map_fifo_baddr_and_size(card, req_fifo_size,
 	    &sc->fifo_base_addr);
+
 	if (fifo_size == 0 || sc->fifo_base_addr == 31) {
 		log(LOG_INFO, "%s:%s: Error: Failed to obtain fifo size %d "
 		    "or addr %d\n", card->devname, sc->if_name, fifo_size,
@@ -3336,11 +3387,10 @@ static int request_fifo_baddr_and_size(sdla_t *card, xilinx_softc_t *sc)
 		}
 	}
 
-	if (fifo_size != req_fifo_size) {
+	if (fifo_size != req_fifo_size)
 		log(LOG_INFO, "%s:%s: WARN: Failed to obtain the req "
 		    "fifo %d got %d\n", card->devname, sc->if_name,
 		    req_fifo_size, fifo_size);
-	}
 
 #ifdef DEBUG_INIT
 	log(LOG_INFO, "%s: %s:Fifo Size=%d  TS=%d Fifo Code=%d Addr=%d\n",
@@ -3360,18 +3410,16 @@ map_fifo_baddr_and_size(sdla_t *card, unsigned char fifo_size,
 	u_int32_t reg = 0;
 	int i;
 
-	for (i = 0; i < fifo_size; i++) {
+	for (i = 0; i < fifo_size; i++)
 		bit_set((u_int8_t *)&reg, i);
-	}
 
 #ifdef DEBUG_INIT
 	log(LOG_INFO, "%s: Trying to MAP 0x%X  to 0x%lX\n",
 	     card->devname, reg, card->u.xilinx.fifo_addr_map);
 #endif
 	for (i = 0; i < 32; i += fifo_size) {
-		if (card->u.xilinx.fifo_addr_map & (reg << i)) {
+		if (card->u.xilinx.fifo_addr_map & (reg << i))
 			continue;
-		}
 		card->u.xilinx.fifo_addr_map |= reg << i;
 		*addr = i;
 
@@ -3382,9 +3430,8 @@ map_fifo_baddr_and_size(sdla_t *card, unsigned char fifo_size,
 		return (fifo_size);
 	}
 
-	if (fifo_size == 1) {
+	if (fifo_size == 1)
 		return (0);
-	}
 
 	fifo_size = fifo_size >> 1;
 
@@ -3398,9 +3445,8 @@ free_fifo_baddr_and_size(sdla_t *card, xilinx_softc_t *sc)
 	u_int32_t reg = 0;
 	int i;
 
-	for (i = 0; i < sc->fifo_size; i++) {
+	for (i = 0; i < sc->fifo_size; i++)
 		bit_set((u_int8_t *)&reg, i);
-	}
 
 #ifdef DEBUG_INIT
 	log(LOG_INFO, "%s: Unmapping 0x%X from 0x%lX\n", card->devname,
@@ -3426,16 +3472,15 @@ aft_red_led_ctrl(sdla_t *card, int mode)
 
 	sdla_bus_read_4(card->hw, XILINX_CHIP_CFG_REG, &led);
 
-	if (mode == AFT_LED_ON) {
+	if (mode == AFT_LED_ON)
 		bit_clear((u_int8_t *)&led, XILINX_RED_LED);
-	} else if (mode == AFT_LED_OFF) {
+	else if (mode == AFT_LED_OFF)
 		bit_set((u_int8_t *)&led, XILINX_RED_LED);
-	} else {
-		if (bit_test((u_int8_t *)&led, XILINX_RED_LED)) {
+	else {
+		if (bit_test((u_int8_t *)&led, XILINX_RED_LED))
 			bit_clear((u_int8_t *)&led, XILINX_RED_LED);
-		} else {
+		else
 			bit_set((u_int8_t *)&led, XILINX_RED_LED);
-		}
 	}
 
 	sdla_bus_write_4(card->hw, XILINX_CHIP_CFG_REG, led);
@@ -3447,9 +3492,8 @@ aft_led_timer(void *data)
 	sdla_t *card=(sdla_t *)data;
 	unsigned int te_alarm;
 
-	if (bit_test((u_int8_t *)&card->critical, CARD_DOWN)) {
+	if (bit_test((u_int8_t *)&card->critical, CARD_DOWN))
 		return;
-	}
 
 	if (IS_TE1(&card->fe_te.te_cfg)) {
 		int s = splnet();
@@ -3508,16 +3552,14 @@ aft_core_ready(sdla_t *card)
 		if (!bit_test((u_int8_t *)&reg, HDLC_CORE_READY_FLAG_BIT)) {
 			/* The HDLC Core is not ready! we have
 			** an error. */
-			if (++cnt > 5) {
+			if (++cnt > 5)
 				return  (EINVAL);
-			} else {
+			else
 				DELAY(500);
 				/* WARNING: we cannot do this while in
 				 * critical area */
-			}
-		} else {
+		} else
 			return (0);
-		}
 	}
 
 	return (EINVAL);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.7 2005/03/29 19:34:07 kettenis Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.10 2005/12/31 23:50:39 kettenis Exp $	*/
 /*	$NetBSD: process_machdep.c,v 1.10 2000/09/26 22:05:50 eeh Exp $ */
 
 /*
@@ -62,6 +62,7 @@
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/vnode.h>
@@ -117,22 +118,24 @@ process_read_fpregs(p, regs)
 	struct fpreg	*regs;
 {
 	extern struct fpstate64	initfpstate;
-	struct fpstate64	*statep = &initfpstate;
-	struct fpreg32		*regp = (struct fpreg32 *)regs;
+	struct fpstate64 *statep = &initfpstate;
+	struct fpreg32 *regp = (struct fpreg32 *)regs;
 	int i;
+
+	/* NOTE: struct fpreg == struct fpstate */
+	if (p->p_md.md_fpstate) {
+		if (p == fpproc)
+			savefpstate(p->p_md.md_fpstate);
+		statep = p->p_md.md_fpstate;
+	}
 
 	if (!(curproc->p_flag & P_32)) {
 		/* 64-bit mode -- copy in fregs */
-		/* NOTE: struct fpreg == struct fpstate */
-		if (p->p_md.md_fpstate)
-			statep = p->p_md.md_fpstate;
 		bcopy(statep, regs, sizeof(struct fpreg64));
 		return 0;
 	}
 	/* 32-bit mode -- copy out & convert 32-bit fregs */
-	if (p->p_md.md_fpstate)
-		statep = p->p_md.md_fpstate;
-	for (i=0; i<32; i++)
+	for (i = 0; i < 32; i++)
 		regp->fr_regs[i] = statep->fs_regs[i];
 
 	return 0;
@@ -178,6 +181,7 @@ process_write_regs(p, regs)
 	return (0);
 }
 
+#ifdef PT_STEP
 int
 process_sstep(p, sstep)
 	struct proc *p;
@@ -187,6 +191,7 @@ process_sstep(p, sstep)
 		return EINVAL;
 	return (0);
 }
+#endif
 
 int
 process_set_pc(p, addr)
@@ -203,30 +208,31 @@ process_write_fpregs(p, regs)
 	struct proc	*p;
 	struct fpreg	*regs;
 {
-
-	extern struct fpstate64	initfpstate;
-	struct fpstate64	*statep = &initfpstate;
-	struct fpreg32		*regp = (struct fpreg32 *)regs;
+	struct fpreg32 *regp = (struct fpreg32 *)regs;
 	int i;
+
+	if (p->p_md.md_fpstate == NULL) {
+		p->p_md.md_fpstate = malloc(sizeof(struct fpstate64),
+		    M_SUBPROC, M_WAITOK);
+	}
+
+	if (p == fpproc) {
+		/* Release the fpu. */
+		savefpstate(p->p_md.md_fpstate);
+		fpproc = NULL;
+	}
 
 	if (!(curproc->p_flag & P_32)) {
 		/* 64-bit mode -- copy in fregs */
-		if (p->p_md.md_fpstate == NULL)
-			return EINVAL;
-
-		/* NOTE: struct fpreg == struct fpstate */
 		bcopy(regs, p->p_md.md_fpstate, sizeof(struct fpreg64));
-		statep = p->p_md.md_fpstate;
-		statep->fs_qsize = 0;
+		p->p_md.md_fpstate->fs_qsize = 0;
 		return 0;
 	}
 	/* 32-bit mode -- copy in & convert 32-bit fregs */
-	if (p->p_md.md_fpstate)
-		statep = p->p_md.md_fpstate;
-	for (i=0; i<32; i++)
-		statep->fs_regs[i] = regp->fr_regs[i];
-	statep->fs_fsr = regp->fr_fsr;
-	statep->fs_qsize = 0;
+	for (i = 0; i < 32; i++)
+		p->p_md.md_fpstate->fs_regs[i] = regp->fr_regs[i];
+	p->p_md.md_fpstate->fs_fsr = regp->fr_fsr;
+	p->p_md.md_fpstate->fs_qsize = 0;
 
 	return 0;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: grf_mv.c,v 1.25 2005/08/06 19:51:43 martin Exp $	*/
+/*	$OpenBSD: grf_mv.c,v 1.32 2006/02/26 22:23:15 martin Exp $	*/
 /*	$NetBSD: grf_nubus.c,v 1.62 2001/01/22 20:27:02 briggs Exp $	*/
 
 /*
@@ -36,54 +36,50 @@
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/malloc.h>
-#include <sys/mman.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
 
 #include <machine/bus.h>
 #include <machine/cpu.h>
-#include <machine/grfioctl.h>
 #include <machine/viareg.h>
 
 #include <mac68k/dev/nubus.h>
-#include <mac68k/dev/grfvar.h>
 
-static void	load_image_data(caddr_t data, struct image_data *image);
+#include <dev/wscons/wsdisplayvar.h>
+#include <dev/rasops/rasops.h>
+#include <mac68k/dev/macfbvar.h>
 
-static int	grfmv_intr_generic_write1(void *vsc);
-static int	grfmv_intr_generic_write4(void *vsc);
-static int	grfmv_intr_generic_or4(void *vsc);
+int	macfb_nubus_match(struct device *, void *, void *);
+void	macfb_nubus_attach(struct device *, struct device *, void *);
 
-static int	grfmv_intr_cb264(void *vsc);
-static int	grfmv_intr_cb364(void *vsc);
-static int	grfmv_intr_cmax(void *vsc);
-static int	grfmv_intr_cti(void *vsc);
-static int	grfmv_intr_radius(void *vsc);
-static int	grfmv_intr_radius24(void *vsc);
-static int	grfmv_intr_supermacgfx(void *vsc);
-static int	grfmv_intr_lapis(void *vsc);
-static int	grfmv_intr_formac(void *vsc);
-static int	grfmv_intr_vimage(void *vsc);
-static int	grfmv_intr_gvimage(void *vsc);
-static int	grfmv_intr_radius_gsc(void *vsc);
-static int	grfmv_intr_radius_gx(void *vsc);
-
-static int	grfmv_mode(struct grf_softc *gp, int cmd, void *arg);
-static int	grfmv_match(struct device *, void *, void *);
-static void	grfmv_attach(struct device *, struct device *, void *);
-
-struct cfdriver macvid_cd = {
-	NULL, "macvid", DV_DULL
+struct cfattach macfb_nubus_ca = {
+	sizeof(struct macfb_softc), macfb_nubus_match, macfb_nubus_attach
 };
 
-struct cfattach macvid_ca = {
-	sizeof(struct grfbus_softc), grfmv_match, grfmv_attach
-};
+void	load_image_data(caddr_t data, struct image_data *image);
 
-static void
-load_image_data(data, image)
-	caddr_t	data;
-	struct	image_data *image;
+int	grfmv_intr_generic_write1(void *vsc);
+int	grfmv_intr_generic_write4(void *vsc);
+int	grfmv_intr_generic_or4(void *vsc);
+
+int	grfmv_intr_cb264(void *vsc);
+int	grfmv_intr_cb364(void *vsc);
+int	grfmv_intr_cmax(void *vsc);
+int	grfmv_intr_cti(void *vsc);
+int	grfmv_intr_radius(void *vsc);
+int	grfmv_intr_radius24(void *vsc);
+int	grfmv_intr_supermacgfx(void *vsc);
+int	grfmv_intr_lapis(void *vsc);
+int	grfmv_intr_formac(void *vsc);
+int	grfmv_intr_vimage(void *vsc);
+int	grfmv_intr_gvimage(void *vsc);
+int	grfmv_intr_radius_gsc(void *vsc);
+int	grfmv_intr_radius_gx(void *vsc);
+
+#define CARD_NAME_LEN	64
+
+void
+load_image_data(caddr_t data, struct image_data *image)
 {
 	bcopy(data     , &image->size,       4);
 	bcopy(data +  4, &image->offset,     4);
@@ -104,22 +100,19 @@ load_image_data(data, image)
 	bcopy(data + 42, &image->planeBytes, 4);
 }
 
-static int
-grfmv_match(parent, vcf, aux)
-	struct device *parent;
-	void *vcf;
-	void *aux;
+int
+macfb_nubus_match(struct device *parent, void *vcf, void *aux)
 {
 	struct nubus_attach_args *na = (struct nubus_attach_args *)aux;
 
 	if (na->category != NUBUS_CATEGORY_DISPLAY)
-		return 0;
+		return (0);
 
 	if (na->type != NUBUS_TYPE_VIDEO)
-		return 0;
+		return (0);
 
 	if (na->drsw != NUBUS_DRSW_APPLE)
-		return 0;
+		return (0);
 
 	/*
 	 * If we've gotten this far, then we're dealing with a real-live
@@ -127,23 +120,20 @@ grfmv_match(parent, vcf, aux)
 	 * determine that this is an active resource???  Dunno.  But we'll
 	 * proceed like it is.
 	 */
-
-	return 1;
+	return (1);
 }
 
-static void
-grfmv_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+void
+macfb_nubus_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)self;
 	struct nubus_attach_args *na = (struct nubus_attach_args *)aux;
+	struct macfb_softc *sc = (struct macfb_softc *)self;
 	struct image_data image_store, image;
-	struct grfmode *gm;
 	char cardname[CARD_NAME_LEN];
 	nubus_dirent dirent;
-	nubus_dir dir, mode_dir;
+	nubus_dir dir, mode_dir, board_dir;
 	int mode;
+	struct macfb_devconfig *dc;
 
 	bcopy(na->fmt, &sc->sc_slot, sizeof(nubus_slot));
 
@@ -154,7 +144,7 @@ grfmv_attach(parent, self, aux)
 
 	if (bus_space_map(sc->sc_tag, sc->sc_basepa, NBMEMSIZE,
 	    0, &sc->sc_regh)) {
-		printf(": grfmv_attach: failed to map slot %d\n", na->slot);
+		printf(": failed to map slot %d\n", na->slot);
 		return;
 	}
 
@@ -162,23 +152,24 @@ grfmv_attach(parent, self, aux)
 
 	if (nubus_find_rsrc(sc->sc_tag, sc->sc_regh,
 	    &sc->sc_slot, &dir, na->rsrcid, &dirent) <= 0) {
-bad:
-		bus_space_unmap(sc->sc_tag, sc->sc_regh, NBMEMSIZE);
-		return;
+		printf(": failed to get board rsrc.\n");
+		goto bad;
 	}
 
-	nubus_get_dir_from_rsrc(&sc->sc_slot, &dirent, &sc->board_dir);
+	nubus_get_dir_from_rsrc(&sc->sc_slot, &dirent, &board_dir);
 
 	if (nubus_find_rsrc(sc->sc_tag, sc->sc_regh,
-	    &sc->sc_slot, &sc->board_dir, NUBUS_RSRC_TYPE, &dirent) <= 0)
+	    &sc->sc_slot, &board_dir, NUBUS_RSRC_TYPE, &dirent) <= 0)
 		if ((na->rsrcid != 128) ||
 		    (nubus_find_rsrc(sc->sc_tag, sc->sc_regh,
-		    &sc->sc_slot, &dir, 129, &dirent) <= 0))
+		    &sc->sc_slot, &dir, 129, &dirent) <= 0)) {
+			printf(": failed to get board rsrc.\n");
 			goto bad;
+		}
 
 	mode = NUBUS_RSRC_FIRSTMODE;
 	if (nubus_find_rsrc(sc->sc_tag, sc->sc_regh,
-	    &sc->sc_slot, &sc->board_dir, mode, &dirent) <= 0) {
+	    &sc->sc_slot, &board_dir, mode, &dirent) <= 0) {
 		printf(": probe failed to get board rsrc.\n");
 		goto bad;
 	}
@@ -201,22 +192,22 @@ bad:
 
 	load_image_data((caddr_t)&image_store, &image);
 
-	gm = &sc->curr_mode;
-	gm->mode_id = mode;
-	gm->ptype = image.pixelType;
-	gm->psize = image.pixelSize;
-	gm->width = image.right - image.left;
-	gm->height = image.bottom - image.top;
-	gm->rowbytes = image.rowbytes;
-	gm->hres = image.hRes;
-	gm->vres = image.vRes;
-	gm->fbsize = gm->height * gm->rowbytes;
-	gm->fbbase = (caddr_t)sc->sc_regh;	/* XXX evil hack */
-	gm->fboff = image.offset;
+	dc = malloc(sizeof(*dc), M_DEVBUF, M_WAITOK);
+	bzero(dc, sizeof(*dc));
+	
+	dc->dc_vaddr = (vaddr_t)bus_space_vaddr(sc->sc_tag, sc->sc_handle);
+	dc->dc_paddr = sc->sc_basepa;
+	dc->dc_offset = image.offset;
+	dc->dc_wid = image.right - image.left;
+	dc->dc_ht = image.bottom - image.top;
+	dc->dc_depth = image.pixelSize;
+	dc->dc_rowbytes = image.rowbytes;
+	dc->dc_size = dc->dc_ht * dc->dc_rowbytes;
 
-	strncpy(cardname, nubus_get_card_name(sc->sc_tag, sc->sc_regh,
-	    &sc->sc_slot), CARD_NAME_LEN);
-	cardname[CARD_NAME_LEN-1] = '\0';
+	/* Perform common video attachment. */
+
+	strlcpy(cardname, nubus_get_card_name(sc->sc_tag, sc->sc_regh,
+	    &sc->sc_slot), sizeof cardname);
 	printf(": %s\n", cardname);
 
 	if (sc->card_id == NUBUS_DRHW_TFB) {
@@ -228,9 +219,11 @@ bad:
 		 */
 		if (strncmp(cardname, "Samsung 768", 11) == 0)
 			sc->card_id = NUBUS_DRHW_SAM768;
+#ifdef DEBUG
 		else if (strncmp(cardname, "Toby frame", 10) != 0)
 			printf("%s: This display card pretends to be a TFB!\n",
 			    sc->sc_dev.dv_xname);
+#endif
 	}
 
 	switch (sc->card_id) {
@@ -368,34 +361,17 @@ bad:
 		    sc->sc_dev.dv_xname);
 		break;
 	default:
-		printf("%s: Unknown video card ID 0x%x --",
+		printf("%s: Unknown video card ID 0x%x\n",
 		    sc->sc_dev.dv_xname, sc->card_id);
-		printf(" Not installing interrupt routine.\n");
-		break;
+		goto bad;
 	}
 
 	/* Perform common video attachment. */
-	grf_establish(sc, &sc->sc_slot, grfmv_mode);
-}
+	macfb_attach_common(sc, dc);
+	return;
 
-static int
-grfmv_mode(gp, cmd, arg)
-	struct grf_softc *gp;
-	int cmd;
-	void *arg;
-{
-	switch (cmd) {
-	case GM_GRFON:
-	case GM_GRFOFF:
-		return 0;
-	case GM_CURRMODE:
-		break;
-	case GM_NEWMODE:
-		break;
-	case GM_LISTMODES:
-		break;
-	}
-	return EINVAL;
+bad:
+	bus_space_unmap(sc->sc_tag, sc->sc_regh, NBMEMSIZE);
 }
 
 /* Interrupt handlers... */
@@ -405,11 +381,10 @@ grfmv_mode(gp, cmd, arg)
  * varies between cards.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_generic_write1(vsc)
-	void	*vsc;
+int
+grfmv_intr_generic_write1(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 
 	bus_space_write_1(sc->sc_tag, sc->sc_regh,
 	    sc->cli_offset, (u_int8_t)sc->cli_value);
@@ -422,11 +397,10 @@ grfmv_intr_generic_write1(vsc)
  * varies between cards.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_generic_write4(vsc)
-	void	*vsc;
+int
+grfmv_intr_generic_write4(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 
 	bus_space_write_4(sc->sc_tag, sc->sc_regh,
 	    sc->cli_offset, sc->cli_value);
@@ -439,11 +413,10 @@ grfmv_intr_generic_write4(vsc)
  * varies between cards.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_generic_or4(vsc)
-	void	*vsc;
+int
+grfmv_intr_generic_or4(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	unsigned long	scratch;
 
 	scratch = bus_space_read_4(sc->sc_tag, sc->sc_regh, sc->cli_offset);
@@ -456,11 +429,10 @@ grfmv_intr_generic_or4(vsc)
  * Routine to clear interrupts for the Radius PrecisionColor 8xj card.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_radius(vsc)
-	void	*vsc;
+int
+grfmv_intr_radius(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int8_t c;
 
 	c = sc->cli_value;
@@ -477,11 +449,10 @@ grfmv_intr_radius(vsc)
  * Is this what the 8xj routine is doing, too?
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_radius24(vsc)
-	void	*vsc;
+int
+grfmv_intr_radius24(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int8_t c;
 
 	c = 0x80 | bus_space_read_1(sc->sc_tag, sc->sc_regh, 0xfffd8);
@@ -501,11 +472,10 @@ grfmv_intr_radius24(vsc)
  *	Information for this provided by Brad Salai <bsalai@servtech.com>
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_cti(vsc)
-	void	*vsc;
+int
+grfmv_intr_cti(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int8_t c;
 
 	c = bus_space_read_1(sc->sc_tag, sc->sc_regh, 0x80000);
@@ -517,15 +487,13 @@ grfmv_intr_cti(vsc)
 }
 
 /*ARGSUSED*/
-static int
-grfmv_intr_cb264(vsc)
-	void	*vsc;
+int
+grfmv_intr_cb264(void *vsc)
 {
-	struct grfbus_softc *sc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	volatile char *slotbase;
 
-	sc = (struct grfbus_softc *)vsc;
-	slotbase = (volatile char *)sc->sc_regh; /* XXX evil hack */
+	slotbase = (volatile char *)bus_space_vaddr(sc->sc_tag, sc->sc_handle);
 	asm volatile("	movl	%0,a0
 			movl	a0@(0xff6028),d0
 			andl	#0x2,d0
@@ -572,15 +540,13 @@ grfmv_intr_cb264(vsc)
  * significantly simplified.  Contributions welcome...  :-)
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_cb364(vsc)
-	void	*vsc;
+int
+grfmv_intr_cb364(void *vsc)
 {
-	struct grfbus_softc *sc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	volatile char *slotbase;
 
-	sc = (struct grfbus_softc *)vsc;
-	slotbase = (volatile char *)sc->sc_regh; /* XXX evil hack */
+	slotbase = (volatile char *)bus_space_vaddr(sc->sc_tag, sc->sc_handle);
 	asm volatile("	movl	%0,a0
 			movl	a0@(0xfe6028),d0
 			andl	#0x2,d0
@@ -661,11 +627,10 @@ grfmv_intr_cb364(vsc)
  * Interrupt clearing routine for SuperMac GFX card.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_supermacgfx(vsc)
-	void	*vsc;
+int
+grfmv_intr_supermacgfx(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int8_t dummy;
 
 	dummy = bus_space_read_1(sc->sc_tag, sc->sc_regh, 0xE70D3);
@@ -676,11 +641,10 @@ grfmv_intr_supermacgfx(vsc)
  * Routine to clear interrupts for the Sigma Designs ColorMax card.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_cmax(vsc)
-	void	*vsc;
+int
+grfmv_intr_cmax(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int32_t dummy;
 
 	dummy = bus_space_read_4(sc->sc_tag, sc->sc_regh, 0xf501c);
@@ -693,11 +657,10 @@ grfmv_intr_cmax(vsc)
  * (for the SE/30).
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_lapis(vsc)
-	void	*vsc;
+int
+grfmv_intr_lapis(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 
 	bus_space_write_1(sc->sc_tag, sc->sc_regh, 0xff7000, 0x08);
 	bus_space_write_1(sc->sc_tag, sc->sc_regh, 0xff7000, 0x0C);
@@ -708,11 +671,10 @@ grfmv_intr_lapis(vsc)
  * Routine to clear interrupts for the Formac Color Card II
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_formac(vsc)
-	void	*vsc;
+int
+grfmv_intr_formac(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int8_t dummy;
 
 	dummy = bus_space_read_1(sc->sc_tag, sc->sc_regh, 0xde80db);
@@ -724,11 +686,10 @@ grfmv_intr_formac(vsc)
  * Routine to clear interrupts for the Vimage by Interware Co., Ltd.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_vimage(vsc)
-	void	*vsc;
+int
+grfmv_intr_vimage(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 
 	bus_space_write_1(sc->sc_tag, sc->sc_regh, 0x800000, 0x67);
 	bus_space_write_1(sc->sc_tag, sc->sc_regh, 0x800000, 0xE7);
@@ -739,11 +700,10 @@ grfmv_intr_vimage(vsc)
  * Routine to clear interrupts for the Grand Vimage by Interware Co., Ltd.
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_gvimage(vsc)
-	void	*vsc;
+int
+grfmv_intr_gvimage(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int8_t dummy;
 
 	dummy = bus_space_read_1(sc->sc_tag, sc->sc_regh, 0xf00000);
@@ -754,11 +714,10 @@ grfmv_intr_gvimage(vsc)
  * Routine to clear interrupts for the Radius GS/C
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_radius_gsc(vsc)
-	void	*vsc;
+int
+grfmv_intr_radius_gsc(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 	u_int8_t dummy;
 
 	dummy = bus_space_read_1(sc->sc_tag, sc->sc_regh, 0xfb802);
@@ -770,11 +729,10 @@ grfmv_intr_radius_gsc(vsc)
  * Routine to clear interrupts for the Radius GS/C
  */
 /*ARGSUSED*/
-static int
-grfmv_intr_radius_gx(vsc)
-	void	*vsc;
+int
+grfmv_intr_radius_gx(void *vsc)
 {
-	struct grfbus_softc *sc = (struct grfbus_softc *)vsc;
+	struct macfb_softc *sc = (struct macfb_softc *)vsc;
 
 	bus_space_write_1(sc->sc_tag, sc->sc_regh, 0x600000, 0x00);
 	bus_space_write_1(sc->sc_tag, sc->sc_regh, 0x600000, 0x20);

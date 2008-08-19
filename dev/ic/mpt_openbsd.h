@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpt_openbsd.h,v 1.15 2004/12/29 06:57:11 deraadt Exp $	*/
+/*	$OpenBSD: mpt_openbsd.h,v 1.20 2006/02/04 19:05:00 marco Exp $	*/
 /*	$NetBSD: mpt_netbsd.h,v 1.2 2003/04/16 23:02:14 thorpej Exp $	*/
 
 /*
@@ -121,11 +121,7 @@
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 
-#include <dev/biovar.h>
-#include <dev/ic/mpt_ioctl.h>
 #include <dev/ic/mpt_mpilib.h>
-
-#include "bio.h"
 
 /*
  * macro to convert from milliseconds to hz without integer overflow
@@ -188,7 +184,8 @@ enum mpt_req_state {
 	REQ_ON_CHIP,
 	REQ_DONE
 };
-typedef struct req_entry {
+
+struct req_entry {
 	uint16_t	index;		/* index of this entry */
 	struct scsi_xfer *xfer;		/* scsipi xfer request */
 	void		*req_vbuf;	/* virtual address of entry */
@@ -199,12 +196,11 @@ typedef struct req_entry {
 	SLIST_ENTRY(req_entry) link;	/* pointer to next in list */
 	enum mpt_req_state debug;	/* debugging */
 	uint32_t	sequence;	/* sequence number */
-} request_t;
+};
 
-typedef struct mpt_softc {
+struct mpt_softc {
 	struct device	mpt_dev;		/* base device glue */
 
-	int		verbose;
 	int		is_fc;
 	int		bus;
 
@@ -223,11 +219,11 @@ typedef struct mpt_softc {
 	/* Device configuration information */
 	struct {
 		struct mpt_spi_cfg {
-			fCONFIG_PAGE_SCSI_PORT_0	_port_page0;
-			fCONFIG_PAGE_SCSI_PORT_1	_port_page1;
-			fCONFIG_PAGE_SCSI_PORT_2	_port_page2;
-			fCONFIG_PAGE_SCSI_DEVICE_0	_dev_page0[16];
-			fCONFIG_PAGE_SCSI_DEVICE_1	_dev_page1[16];
+			CONFIG_PAGE_SCSI_PORT_0	_port_page0;
+			CONFIG_PAGE_SCSI_PORT_1	_port_page1;
+			CONFIG_PAGE_SCSI_PORT_2	_port_page2;
+			CONFIG_PAGE_SCSI_DEVICE_0	_dev_page0[16];
+			CONFIG_PAGE_SCSI_DEVICE_1	_dev_page1[16];
 			uint16_t			_negotiated_speed[16];
 			uint16_t			_tag_enable;
 			uint16_t			_disc_enable;
@@ -252,11 +248,11 @@ typedef struct mpt_softc {
 		} fc;
 
 		struct mpt_mfg_cfg {
-			fCONFIG_PAGE_MANUFACTURING_0 _mfg_page0;
-			fCONFIG_PAGE_MANUFACTURING_1 _mfg_page1;
-			fCONFIG_PAGE_MANUFACTURING_2 _mfg_page2;
-			fCONFIG_PAGE_MANUFACTURING_3 _mfg_page3;
-			fCONFIG_PAGE_MANUFACTURING_4 _mfg_page4;
+			CONFIG_PAGE_MANUFACTURING_0 _mfg_page0;
+			CONFIG_PAGE_MANUFACTURING_1 _mfg_page1;
+			CONFIG_PAGE_MANUFACTURING_2 _mfg_page2;
+			CONFIG_PAGE_MANUFACTURING_3 _mfg_page3;
+			CONFIG_PAGE_MANUFACTURING_4 _mfg_page4;
 		} mfg;
 #define mpt_mfg_page0		cfg.mfg._mfg_page0
 #define mpt_mfg_page1		cfg.mfg._mfg_page1
@@ -265,10 +261,10 @@ typedef struct mpt_softc {
 #define mpt_mfg_page4		cfg.mfg._mfg_page4
 
 		struct mpt_iou_cfg {
-			fCONFIG_PAGE_IO_UNIT_0 _iou_page0;
-			fCONFIG_PAGE_IO_UNIT_1 _iou_page1;
-			fCONFIG_PAGE_IO_UNIT_2 _iou_page2;
-			fCONFIG_PAGE_IO_UNIT_3 _iou_page3;
+			CONFIG_PAGE_IO_UNIT_0 _iou_page0;
+			CONFIG_PAGE_IO_UNIT_1 _iou_page1;
+			CONFIG_PAGE_IO_UNIT_2 _iou_page2;
+			CONFIG_PAGE_IO_UNIT_3 _iou_page3;
 		} iou;
 #define mpt_iou_page0		cfg.iou._iou_page0
 #define mpt_iou_page1		cfg.iou._iou_page1
@@ -276,11 +272,11 @@ typedef struct mpt_softc {
 #define mpt_iou_page3		cfg.iou._iou_page3
 
 		struct mpt_ioc_cfg {
-			fCONFIG_PAGE_IOC_0 _ioc_page0;
-			fCONFIG_PAGE_IOC_1 _ioc_page1;
-			fCONFIG_PAGE_IOC_2 _ioc_page2;
-			fCONFIG_PAGE_IOC_3 _ioc_page3;
-			fCONFIG_PAGE_IOC_4 _ioc_page4;
+			CONFIG_PAGE_IOC_0 _ioc_page0;
+			CONFIG_PAGE_IOC_1 _ioc_page1;
+			CONFIG_PAGE_IOC_2 _ioc_page2;
+			CONFIG_PAGE_IOC_3 _ioc_page3;
+			CONFIG_PAGE_IOC_4 _ioc_page4;
 		} ioc;
 #define mpt_ioc_page0		cfg.ioc._ioc_page0
 #define mpt_ioc_page1		cfg.ioc._ioc_page1
@@ -289,8 +285,8 @@ typedef struct mpt_softc {
 #define mpt_ioc_page4		cfg.ioc._ioc_page4
 
 		struct mpt_raid_cfg {
-			fCONFIG_PAGE_RAID_VOL_0 _raidvol_page0;
-			fCONFIG_PAGE_RAID_PHYS_DISK_0 _raidphys_page0;
+			CONFIG_PAGE_RAID_VOL_0 _raidvol_page0;
+			CONFIG_PAGE_RAID_PHYS_DISK_0 _raidphys_page0;
 		} raid;
 #define mpt_raidvol_page0		cfg.raid._raidvol_page0
 #define mpt_raidphys_page0		cfg.raid._raidphys_page0
@@ -311,7 +307,7 @@ typedef struct mpt_softc {
 	bus_addr_t		request_phys;
 
 	/* scsi linkage */
-	request_t		*request_pool;
+	struct req_entry		*request_pool;
 	SLIST_HEAD(req_queue, req_entry) request_free_list;
 
 	struct scsi_link	sc_link;
@@ -325,7 +321,6 @@ typedef struct mpt_softc {
 	uint8_t                 upload_fw;      /* If set, do a fw upload */
 	/* Firmware memory */
 	bus_dmamap_t            fw_dmap;
-	int                     fw_rseg;
 	bus_dma_segment_t       fw_seg;
 	char                    *fw;
 
@@ -334,7 +329,7 @@ typedef struct mpt_softc {
 
 	/* To restore configuration after hard reset. */
 	void			(*sc_set_config_regs)(struct mpt_softc *);
-} mpt_softc_t;
+};
 
 #define	MPT_SYNC_REQ(mpt, req, ops)				\
 	bus_dmamap_sync((mpt)->sc_dmat, (mpt)->request_dmap,	\
@@ -346,10 +341,10 @@ typedef struct mpt_softc {
 #define	mpt_write(mpt, reg, val)				\
 	bus_space_write_4((mpt)->sc_st, (mpt)->sc_sh, (reg), (val))
 
-void	mpt_attach(mpt_softc_t *);
-int	mpt_dma_mem_alloc(mpt_softc_t *);
+void	mpt_attach(struct mpt_softc *);
+int	mpt_dma_mem_alloc(struct mpt_softc *);
 int	mpt_intr(void *);
-void	mpt_prt(mpt_softc_t *, const char *, ...);
+void	mpt_prt(struct mpt_softc *, const char *, ...);
 
 
 #define	mpt_set_config_regs(mpt)				\

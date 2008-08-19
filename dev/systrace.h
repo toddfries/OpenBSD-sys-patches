@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.h,v 1.18.4.1 2006/10/06 05:53:38 brad Exp $	*/
+/*	$OpenBSD: systrace.h,v 1.18.6.1 2006/10/06 05:51:12 brad Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.

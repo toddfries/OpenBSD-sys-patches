@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_pcic.c,v 1.14 2005/07/01 23:51:55 uwe Exp $	*/
+/*	$OpenBSD: pxa2x0_pcic.c,v 1.17 2005/12/14 15:08:51 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Dale Rahn <drahn@openbsd.org>
@@ -51,7 +51,7 @@ int	pxapcic_mem_alloc(pcmcia_chipset_handle_t, bus_size_t,
 void	pxapcic_mem_free(pcmcia_chipset_handle_t,
     struct pcmcia_mem_handle *);
 int	pxapcic_mem_map(pcmcia_chipset_handle_t, int, bus_addr_t,
-    bus_size_t, struct pcmcia_mem_handle *, bus_addr_t *, int *);
+    bus_size_t, struct pcmcia_mem_handle *, bus_size_t *, int *);
 void	pxapcic_mem_unmap(pcmcia_chipset_handle_t, int);
 
 int	pxapcic_io_alloc(pcmcia_chipset_handle_t, bus_addr_t,
@@ -120,7 +120,7 @@ pxapcic_mem_free(pcmcia_chipset_handle_t pch, struct pcmcia_mem_handle *pmh)
 
 int
 pxapcic_mem_map(pcmcia_chipset_handle_t pch, int kind, bus_addr_t card_addr,
-    bus_size_t size, struct pcmcia_mem_handle *pmh, bus_addr_t *offsetp,
+    bus_size_t size, struct pcmcia_mem_handle *pmh, bus_size_t *offsetp,
     int *windowp)
 {
 	struct pxapcic_socket *so = pch;
@@ -273,6 +273,8 @@ pxapcic_socket_enable(pcmcia_chipset_handle_t pch)
 	/* Hold RESET at least 10us. */
 	so->pcictag->write(so, PXAPCIC_CARD_RESET, 1);
 	delay(10);
+	/* XXX wrong, but lets TE-CF100 cards work for some reason. */
+	delay(3000);
 	so->pcictag->write(so, PXAPCIC_CARD_RESET, 0);
 
 	/* Wait 20ms as per PC Card standard (r2.01) section 4.3.6. */
@@ -331,6 +333,16 @@ pxapcic_attach(struct pxapcic_softc *sc,
 	int i;
 
 	printf(": %d slot%s\n", sc->sc_nslots, sc->sc_nslots==1 ? "" : "s");
+
+	if (bus_space_map(sc->sc_iot, PXA2X0_MEMCTL_BASE, PXA2X0_MEMCTL_SIZE,
+	    0, &sc->sc_memctl_ioh)) {
+		printf("%s: failed to map MEMCTL\n", sc->sc_dev.dv_xname);
+		return;
+	}
+
+	/* Clear CIT (card present) and set NOS correctly. */
+	bus_space_write_4(sc->sc_iot, sc->sc_memctl_ioh, MEMCTL_MECR,
+	    sc->sc_nslots == 2 ? MECR_NOS : 0);
 
 	/* zaurus: configure slot 1 first to make internal drive be wd0. */
 	for (i = sc->sc_nslots-1; i >= 0; i--) {
@@ -461,9 +473,17 @@ pxapcic_event_process(struct pxapcic_socket *sock)
 void
 pxapcic_attach_card(struct pxapcic_socket *h)
 {
+	struct pxapcic_softc *sc = h->sc;
+	u_int32_t rv;
+
 	if (h->flags & PXAPCIC_FLAG_CARDP)
 		panic("pcic_attach_card: already attached"); 
 	h->flags |= PXAPCIC_FLAG_CARDP;
+
+	/* Set CIT if any card is present. */
+	rv = bus_space_read_4(sc->sc_iot, sc->sc_memctl_ioh, MEMCTL_MECR);
+	bus_space_write_4(sc->sc_iot, sc->sc_memctl_ioh, MEMCTL_MECR,
+	    rv | MECR_CIT);
  
 	/* call the MI attach function */
 	pcmcia_card_attach(h->pcmcia);
@@ -472,10 +492,22 @@ pxapcic_attach_card(struct pxapcic_socket *h)
 void
 pxapcic_detach_card(struct pxapcic_socket *h, int flags)
 {
+	struct pxapcic_softc *sc = h->sc;
+	u_int32_t rv;
+	int i;
+
 	if (h->flags & PXAPCIC_FLAG_CARDP) {
 		h->flags &= ~PXAPCIC_FLAG_CARDP;
 	 
 		/* call the MI detach function */
 		pcmcia_card_detach(h->pcmcia, flags);
 	}
+
+	/* Clear CIT if no other card is present. */
+	for (i = 0; i < sc->sc_nslots; i++)
+		if (sc->sc_socket[i].flags & PXAPCIC_FLAG_CARDP)
+			return;
+	rv = bus_space_read_4(sc->sc_iot, sc->sc_memctl_ioh, MEMCTL_MECR);
+	bus_space_write_4(sc->sc_iot, sc->sc_memctl_ioh, MEMCTL_MECR,
+	    rv & ~MECR_CIT);
 }

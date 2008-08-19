@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.1 2005/04/01 10:40:47 mickey Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.3 2005/12/25 21:39:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -451,7 +451,7 @@ pmap_bootstrap(vstart)
 	vaddr_t vstart;
 {
 	extern int resvphysmem, __rodata_end, __data_start;
-	vaddr_t va, eaddr, addr = hppa_round_page(vstart);
+	vaddr_t va, eaddr, addr = round_page(vstart);
 	struct pmap *kpm;
 
 	DPRINTF(PDB_FOLLOW|PDB_INIT, ("pmap_bootstrap(0x%lx)\n", vstart));
@@ -710,7 +710,7 @@ pmap_enter(pmap, va, pa, prot, flags)
 	    !(pde = pmap_pde_alloc(pmap, va, &ptp))) {
 		if (flags & PMAP_CANFAIL) {
 			simple_unlock(&pmap->pm_lock);
-			return (KERN_RESOURCE_SHORTAGE);
+			return (ENOMEM);
 		}
 
 		panic("pmap_enter: cannot allocate pde");
@@ -759,7 +759,7 @@ pmap_enter(pmap, va, pa, prot, flags)
 			if (flags & PMAP_CANFAIL) {
 				simple_unlock(&pg->mdpage.pvh_lock);
 				simple_unlock(&pmap->pm_lock);
-				return (KERN_RESOURCE_SHORTAGE);
+				return (ENOMEM);
 			}
 			panic("pmap_enter: no pv entries available");
 		}
@@ -857,7 +857,7 @@ pmap_write_protect(pmap, sva, eva, prot)
 	DPRINTF(PDB_FOLLOW|PDB_PMAP,
 	    ("pmap_write_protect(%p, %lx, %lx, %x)\n", pmap, sva, eva, prot));
 
-	sva = hppa_trunc_page(sva);
+	sva = trunc_page(sva);
 	tlbprot = pmap_prot(pmap, prot);
 
 	simple_lock(&pmap->pm_lock);

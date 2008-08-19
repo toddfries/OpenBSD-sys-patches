@@ -1,4 +1,4 @@
-/*      $OpenBSD: param.h,v 1.8 2005/08/07 07:29:44 miod Exp $ */
+/*      $OpenBSD: param.h,v 1.13 2006/01/14 11:45:43 miod Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -76,12 +76,10 @@
 #else
 #define	KERNBASE	0x80000000	/* start of kernel virtual */
 #endif
-#define	BTOPKERNBASE	((u_long)KERNBASE >> PGSHIFT)
 
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
 #define BLKDEV_IOSIZE	2048
-/* XXX Maxphys temporary changed to 32K while SCSI driver is fixed. */
 #define	MAXPHYS		(32 * 1024)	/* max raw I/O transfer size */
 
 #ifdef __LP64__
@@ -112,7 +110,7 @@
 
 /* Default malloc arena size */
 #define	NKMEMPAGES_MIN_DEFAULT  ((8 * 1024 * 1024) >> PAGE_SHIFT)
-#define	NKMEMPAGES_MAX_DEFAULT  ((64 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MAX_DEFAULT  ((128 * 1024 * 1024) >> PAGE_SHIFT)
 
 /* pages ("clicks") (4096 bytes) to disk blocks */
 #define	ctod(x)	((x) << (PGSHIFT - DEV_BSHIFT))
@@ -133,14 +131,6 @@
  * For now though just use DEV_BSIZE.
  */
 #define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE/DEV_BSIZE))
-
-/*
- * Conversion macros
- */
-#define mips_round_page(x)	((((u_long)(x)) + NBPG - 1) & ~(NBPG-1))
-#define mips_trunc_page(x)	((u_long)(x) & ~(NBPG-1))
-#define mips_btop(x)		((u_long)(x) >> PGSHIFT)
-#define mips_ptob(x)		((u_long)(x) << PGSHIFT)
 
 #ifdef _KERNEL
 #ifndef _LOCORE

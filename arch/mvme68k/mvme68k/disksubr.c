@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.31 2005/03/30 07:52:32 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.33 2006/01/22 00:40:01 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -34,13 +34,6 @@
 #include <sys/disklabel.h>
 #include <sys/disk.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-
-#include <machine/autoconf.h>
-
-#define b_cylin b_resid
-
 #ifdef DEBUG
 int disksubr_debug = 0;
 #endif
@@ -60,41 +53,6 @@ dk_establish(dk, dev)
 	struct disk *dk;
 	struct device *dev;
 {
-	struct scsibus_softc *sbsc;
-	int target, lun;
-
-	if (bootpart == -1) /* ignore flag from controller driver? */
-		return;
-
-	/*
-	 * scsi: sd,cd
-	 */
-
-	if (strncmp("sd", dev->dv_xname, 2) == 0 ||
-	    strncmp("cd", dev->dv_xname, 2) == 0) {
-
-		sbsc = (struct scsibus_softc *)dev->dv_parent;
-#ifdef MVME147
-		/*
-		 * The 147 can only boot from the built-in scsi controller,
-		 * and stores the scsi id as the controller number.
-		 */
-		if (cputyp == CPU_147) {
-			target = bootctrllun;
-			lun = 0;
-		} else
-#endif
-		{
-			target = bootdevlun >> 4;
-			lun = bootdevlun & 0x0f;
-		}
-    		
-		if (sbsc->sc_link[target][lun] != NULL &&
-		    sbsc->sc_link[target][lun]->device_softc == (void *)dev) {
-			bootdv = dev;
-			return;
-		}
-	}
 }
 
 
@@ -143,7 +101,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylin = 0; /* contained in block 0 */
+	bp->b_cylinder = 0; /* contained in block 0 */
 	(*strat)(bp);
 
 	error = biowait(bp);
@@ -277,7 +235,7 @@ writedisklabel(dev, strat, lp, clp)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylin = 0; /* contained in block 0 */
+	bp->b_cylinder = 0; /* contained in block 0 */
 	(*strat)(bp);
 
 	if ((error = biowait(bp)) != 0) {
@@ -313,7 +271,7 @@ writedisklabel(dev, strat, lp, clp)
 		bp->b_blkno = 0; /* contained in block 0 */
 		bp->b_bcount = lp->d_secsize;
 		bp->b_flags = B_WRITE;
-		bp->b_cylin = 0; /* contained in block 0 */
+		bp->b_cylinder = 0; /* contained in block 0 */
 		(*strat)(bp);
 
 		error = biowait(bp);
@@ -372,7 +330,7 @@ bounds_check_with_label(bp, lp, osdep, wlabel)
 	}
 
 	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylin = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
+	bp->b_cylinder = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
 	    lp->d_secpercyl;
 	return(1);
 

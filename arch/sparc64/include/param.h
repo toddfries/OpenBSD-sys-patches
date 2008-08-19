@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.16 2005/07/31 15:31:17 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.19 2005/10/24 19:07:40 martin Exp $	*/
 /*	$NetBSD: param.h,v 1.25 2001/05/30 12:28:51 mrg Exp $ */
 
 /*
@@ -191,7 +191,7 @@ extern int nbpg, pgofset, pgshift;
  * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
  * logical pages.
  */
-#define	NKMEMPAGES_MIN_DEFAULT	((6 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MIN_DEFAULT	((8 * 1024 * 1024) >> PAGE_SHIFT)
 #define	NKMEMPAGES_MAX_DEFAULT	((128 * 1024 * 1024) >> PAGE_SHIFT)
 
 /* pages ("clicks") to disk blocks */
@@ -213,11 +213,6 @@ extern int nbpg, pgofset, pgshift;
  * For now though just use DEV_BSIZE.
  */
 #define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE / DEV_BSIZE))
-
-/*
- * Mach derived conversion macros
- */
-#define sparc64_btop(x)	((unsigned long)(x) >> PGSHIFT)
 
 /*
  * dvmamap manages a range of DVMA addresses intended to create double
@@ -247,13 +242,10 @@ extern void	delay(unsigned int);
 #define CPU_SUN4U	3
 
 /*
- * Shorthand CPU-type macros. Enumerate all eight cases.
+ * Shorthand CPU-type macros. Enumerate all seven cases.
  * Let compiler optimize away code conditional on constants.
  *
- * On a sun4 machine, the page size is 8192, while on a sun4c and sun4m
- * it is 4096. Therefore, in the (SUN4 && (SUN4C || SUN4M)) cases below,
- * NBPG, PGOFSET and PGSHIFT are defined as variables which are initialized
- * early in locore.s after the machine type has been detected.
+ * On a sun4u machine, the page size is 8192.
  *
  * Note that whenever the macros defined below evaluate to expressions
  * involving variables, the kernel will perform slighly worse due to the

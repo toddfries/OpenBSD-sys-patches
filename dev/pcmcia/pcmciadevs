@@ -1,4 +1,4 @@
-	$OpenBSD: pcmciadevs,v 1.123 2005/04/27 15:39:39 jakob Exp $
+	$OpenBSD: pcmciadevs,v 1.127 2005/12/17 02:59:25 jsg Exp $
 /* $NetBSD: pcmciadevs,v 1.13 1998/08/17 23:10:12 thorpej Exp $ */
 
 /*
@@ -126,6 +126,7 @@ product 3COM 3CCFEM556BI	0x0556 3Com 3CCFEM556BI
 product 3COM 3C562		0x0562 3Com 3c562
 product 3COM 3C589		0x0589 3Com 3c589
 product 3COM 3C574		0x0574 3Com 3c574
+product 3COM 3CRWE62092B	0x0620 3Com 3CRWE62092B
 product 3COM 3C1		0x0cf1 3Com 3C1
 product 3COM 3CRWE62092A	0x2092 3Com Wireless LAN
 
@@ -208,6 +209,7 @@ product ELSA MC2_IEEE		0x0001 AirLancer MC-2 IEEE
 product ELSA XI300_IEEE		0x0002 XI300 Wireless LAN
 product ELSA XI800_IEEE		0x0004 XI800 CF Wireless LAN
 product ELSA XI325_IEEE		0x0005 XI325 Wireless LAN
+product ELSA CONNECTPLUS	0x0101 SanDisk ConnectPlus
 
 /* EMTAC */
 product EMTAC WLAN		0x0002 EMTAC A2424i 11Mbps WLAN Card
@@ -361,6 +363,7 @@ product SIMPLETECH COMMUNICATOR288 0x0100 Simple Technology 28.8 Communicator
 product SIEMENS SS1021		0x0002 Siemens SpeedStream 1021
 
 /* Sierra */
+product SIERRA	AC710		0x0710 AC710/AC750
 product SIERRA	A550		0xa550 A550
 product SIERRA	A555		0xa555 A555
 product SIERRA	A710		0xa710 A710/A750
@@ -420,6 +423,7 @@ vendor GEMTEK			-1	GEMTEK
 vendor GVC			-1	GVC
 vendor ICOM			-1	ICOM Inc
 vendor INTERSIL			-1	Intersil
+vendor NOVATEL			-1	Novatel
 vendor PLANET			-1	Planet
 vendor PLANEX			-1	Planex
 vendor PREMAX			-1	Premax
@@ -471,10 +475,11 @@ product COREGA WIRELESS_LAN_WLCFL_11    { "corega", "WLCFL-11", NULL, NULL }
 product SVEC COMBOCARD		{ "Ethernet", "Adapter", NULL, NULL }
 product SVEC LANCARD		{ "SVEC", "FD605&spPCMCIA&spEtherNet&spCard", "V1-1", NULL }
 /*
- * vendor ID of PN650TX is LINKSYS (0x0149) and product ID is 0xc1ab, but
- * it conflicts with LINKSYS Combo EthernetCard.
+ * vendor ID of PN650TX and TECF100 is LINKSYS (0x0149) and product ID is
+ * 0xc1ab, but it conflicts with LINKSYS Combo EthernetCard.
  */
 product SVEC PN650TX		-1
+product TRENDNET TECF100	-1
 product AMBICOM AMB8002T	{ "AmbiCom&spInc", "AMB8002T", NULL, NULL }
 product IODATA PCLAT		{ "I-O&spDATA", "PCLA", "ETHERNET", NULL }
 product EPSON EEN10B		{ "Seiko&spEpson&spCorp.", "Ethernet", "P/N:&spEEN10B&spRev.&sp00", NULL }
@@ -515,3 +520,4 @@ product GVC NP0335		{ "ETHER-C16", "ETHER-C16", "Fast&spEthernet", NULL }
 product RELIA RE2408T		{ "PCMCIA&spLAN", "Ethernet", "A", "004743118001" }
 product ALLIEDTELESIS WR211PCM	{ "Allied&spTelesis&spK.K.", "WR211PCM", NULL, NULL }
 product BILLIONTON CFLT2	{ "CF", "10Base-Ethernet", NULL, NULL }
+product NOVATEL NRM6831		{ "Novatel&spWireless", "Merlin&spUMTS&spModem", "NRM6831", NULL }

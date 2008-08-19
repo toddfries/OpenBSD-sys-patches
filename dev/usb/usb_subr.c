@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_subr.c,v 1.38 2005/08/01 05:36:49 brad Exp $ */
+/*	$OpenBSD: usb_subr.c,v 1.41 2005/11/21 18:16:44 millert Exp $ */
 /*	$NetBSD: usb_subr.c,v 1.103 2003/01/10 11:19:13 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_subr.c,v 1.18 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -45,7 +45,7 @@
 #include <sys/malloc.h>
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/device.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #elif defined(__FreeBSD__)
 #include <sys/module.h>
 #include <sys/bus.h>
@@ -102,13 +102,16 @@ typedef u_int16_t usb_product_id_t;
 /*
  * Descriptions of of known vendors and devices ("products").
  */
-struct usb_knowndev {
+struct usb_known_vendor {
+	usb_vendor_id_t		vendor;
+	char			*vendorname;
+};
+
+struct usb_known_product {
 	usb_vendor_id_t		vendor;
 	usb_product_id_t	product;
-	int			flags;
-	char			*vendorname, *productname;
+	char			*productname;
 };
-#define	USB_KNOWNDEV_NOPROD	0x01		/* match on vendor only */
 
 #include <dev/usb/usbdevs_data.h>
 #endif /* USBVERBOSE */
@@ -252,7 +255,8 @@ usbd_devinfo_vp(usbd_device_handle dev, char *v, char *p, int usedev)
 	usb_device_descriptor_t *udd = &dev->ddesc;
 	char *vendor = 0, *product = 0;
 #ifdef USBVERBOSE
-	const struct usb_knowndev *kdp;
+	const struct usb_known_vendor *ukv;
+	const struct usb_known_product *ukp;
 #endif
 
 	if (dev == NULL) {
@@ -271,20 +275,24 @@ usbd_devinfo_vp(usbd_device_handle dev, char *v, char *p, int usedev)
 	}
 #ifdef USBVERBOSE
 	if (vendor == NULL || product == NULL) {
-		for(kdp = usb_knowndevs;
-		    kdp->vendorname != NULL;
-		    kdp++) {
-			if (kdp->vendor == UGETW(udd->idVendor) &&
-			    (kdp->product == UGETW(udd->idProduct) ||
-			     (kdp->flags & USB_KNOWNDEV_NOPROD) != 0))
+		for(ukv = usb_known_vendors;
+		    ukv->vendorname != NULL;
+		    ukv++) {
+			if (ukv->vendor == UGETW(udd->idVendor)) {
+				vendor = ukv->vendorname;
 				break;
+			}
 		}
-		if (kdp->vendorname != NULL) {
-			if (vendor == NULL)
-			    vendor = kdp->vendorname;
-			if (product == NULL)
-			    product = (kdp->flags & USB_KNOWNDEV_NOPROD) == 0 ?
-				kdp->productname : NULL;
+		if (vendor != NULL) {
+			for(ukp = usb_known_products;
+			    ukp->productname != NULL;
+			    ukp++) {
+				if (ukp->vendor == UGETW(udd->idVendor) &&
+				    (ukp->product == UGETW(udd->idProduct))) {
+					product = ukp->productname;
+					break;
+				}
+			}
 		}
 	}
 #endif
@@ -819,9 +827,6 @@ usbd_setup_pipe(usbd_device_handle dev, usbd_interface_handle iface,
 		free(p, M_USB);
 		return (err);
 	}
-	/* Clear any stall and make sure DATA0 toggle will be used next. */
-	if (UE_GET_ADDR(ep->edesc->bEndpointAddress) != USB_CONTROL_ENDPOINT)
-		usbd_clear_endpoint_stall(p);
 	*pipe = p;
 	return (USBD_NORMAL_COMPLETION);
 }

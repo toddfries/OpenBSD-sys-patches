@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendsig.c,v 1.6 2004/11/02 21:05:34 pefo Exp $ */
+/*	$OpenBSD: sendsig.c,v 1.8 2005/12/20 06:58:19 miod Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -71,8 +71,6 @@
 #include <sys/syscallargs.h>
 
 #include <machine/regnum.h>
-
-struct proc *machFPCurProcPtr;		/* pointer to last proc to use FP */
 
 /*
  * WARNING: code in locore.s assumes the layout shown for sf_signum
@@ -149,7 +147,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	ksc.sc_pc = regs->pc;
 	ksc.mullo = regs->mullo;
 	ksc.mulhi = regs->mulhi;
-	ksc.sc_regs[0] = 0xACEDBADE;		/* magic number */
+	ksc.sc_regs[ZERO] = 0xACEDBADE;		/* magic number */
 	bcopy((caddr_t)&regs->ast, (caddr_t)&ksc.sc_regs[1],
 		sizeof(ksc.sc_regs) - sizeof(register_t));
 	ksc.sc_fpused = p->p_md.md_flags & MDP_FPUSED;
@@ -229,6 +227,7 @@ sys_sigreturn(p, v, retval)
 	struct trap_frame *regs;
 	struct sigcontext ksc;
 	int error;
+	extern struct proc *machFPCurProcPtr;
 
 	scp = SCARG(uap, sigcntxp);
 #ifdef DEBUG
@@ -257,7 +256,7 @@ sys_sigreturn(p, v, retval)
 	/*
 	 * Restore the user supplied information
 	 */
-	if (scp->sc_onstack & 01)
+	if (scp->sc_onstack & SA_ONSTACK)
 		p->p_sigacts->ps_sigstk.ss_flags |= SA_ONSTACK;
 	else
 		p->p_sigacts->ps_sigstk.ss_flags &= ~SA_ONSTACK;

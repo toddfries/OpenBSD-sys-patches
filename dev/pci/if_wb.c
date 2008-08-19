@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.29 2005/08/09 04:10:12 mickey Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.32 2005/11/23 11:30:14 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -117,6 +117,7 @@
 #endif
 
 #include <uvm/uvm_extern.h>		/* for vtophys */
+#define	VTOPHYS(v)	vtophys((vaddr_t)(v))
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -341,7 +342,7 @@ int wb_mii_readreg(sc, frame)
 {
 	int			i, ack, s;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Set up frame for RX.
@@ -437,7 +438,7 @@ int wb_mii_writereg(sc, frame)
 {
 	int			s;
 
-	s = splimp();
+	s = splnet();
 	/*
 	 * Set up frame for TX.
 	 */
@@ -715,15 +716,12 @@ wb_attach(parent, self, aux)
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	struct ifnet *ifp = &sc->arpcom.ac_if;
-	bus_addr_t iobase;
-	bus_size_t iosize;
-	int s, rseg;
+	bus_size_t size;
+	int rseg;
 	pcireg_t command;
 	bus_dma_segment_t seg;
 	bus_dmamap_t dmamap;
 	caddr_t kva;
-
-	s = splimp();
 
 	/*
 	 * Handle power management nonsense.
@@ -759,42 +757,25 @@ wb_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef WB_USEIOSPACE
-	if (!(command & PCI_COMMAND_IO_ENABLE)) {
-		printf(": failed to enable I/O ports!\n");
-		goto fail;
-	}
-	if (pci_io_find(pc, pa->pa_tag, WB_PCI_LOIO, &iobase, &iosize)) {
-		printf(": can't find i/o space\n");
-		goto fail;
-	}
-	if (bus_space_map(pa->pa_iot, iobase, iosize, 0, &sc->wb_bhandle)) {
+	if (pci_mapreg_map(pa, WB_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
+	    &sc->wb_btag, &sc->wb_bhandle, NULL, &size, 0)) {
 		printf(": can't map i/o space\n");
-		goto fail;
+		return;
 	}
-	sc->wb_btag = pa->pa_iot;
 #else
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf(": failed to enable memory mapping!\n");
-		goto fail;
-	}
-	if (pci_mem_find(pc, pa->pa_tag, WB_PCI_LOMEM, &iobase, &iosize, NULL)){
-		printf(": can't find mem space\n");
-		goto fail;
-	}
-	if (bus_space_map(pa->pa_memt, iobase, iosize, 0, &sc->wb_bhandle)) {
+	if (pci_mapreg_map(pa, WB_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->wb_btag, &sc->wb_bhandle, NULL, &size, 0)){
 		printf(": can't map mem space\n");
-		goto fail;
+		return;
 	}
-	sc->wb_btag = pa->pa_memt;
 #endif
 
 	/* Allocate interrupt */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
-		goto fail;
+		goto fail_1;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, wb_intr, sc,
@@ -804,7 +785,7 @@ wb_attach(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		goto fail;
+		goto fail_1;
 	}
 	printf(": %s", intrstr);
 
@@ -817,36 +798,28 @@ wb_attach(parent, self, aux)
 	 * Get station address from the EEPROM.
 	 */
 	wb_read_eeprom(sc, (caddr_t)&sc->arpcom.ac_enaddr, 0, 3, 0);
-	printf(" address %s\n", ether_sprintf(sc->arpcom.ac_enaddr));
+	printf(", address %s\n", ether_sprintf(sc->arpcom.ac_enaddr));
 
 	if (bus_dmamem_alloc(pa->pa_dmat, sizeof(struct wb_list_data),
 	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
-		printf("%s: can't alloc list data\n", sc->sc_dev.dv_xname);
-		goto fail;
+		printf(": can't alloc list data\n");
+		goto fail_2;
 	}
 	if (bus_dmamem_map(pa->pa_dmat, &seg, rseg,
 	    sizeof(struct wb_list_data), &kva, BUS_DMA_NOWAIT)) {
-		printf("%s: can't map list data, size %d\n",
-		    sc->sc_dev.dv_xname, sizeof(struct wb_list_data));
-		bus_dmamem_free(pa->pa_dmat, &seg, rseg);
-		goto fail;
+		printf(": can't map list data, size %d\n",
+		    sizeof(struct wb_list_data));
+		goto fail_3;
 	}
 	if (bus_dmamap_create(pa->pa_dmat, sizeof(struct wb_list_data), 1,
 	    sizeof(struct wb_list_data), 0, BUS_DMA_NOWAIT, &dmamap)) {
-		printf("%s: can't create dma map\n", sc->sc_dev.dv_xname);
-		bus_dmamem_unmap(pa->pa_dmat, kva,
-		    sizeof(struct wb_list_data));
-		bus_dmamem_free(pa->pa_dmat, &seg, rseg);
-		goto fail;
+		printf(": can't create dma map\n");
+		goto fail_4;
 	}
 	if (bus_dmamap_load(pa->pa_dmat, dmamap, kva,
 	    sizeof(struct wb_list_data), NULL, BUS_DMA_NOWAIT)) {
-		printf("%s: can't load dma map\n", sc->sc_dev.dv_xname);
-		bus_dmamap_destroy(pa->pa_dmat, dmamap);
-		bus_dmamem_unmap(pa->pa_dmat, kva,
-		    sizeof(struct wb_list_data));
-		bus_dmamem_free(pa->pa_dmat, &seg, rseg);
-		goto fail;
+		printf(": can't load dma map\n");
+		goto fail_5;
 	}
 	sc->wb_ldata = (struct wb_list_data *)kva;
 	bzero(sc->wb_ldata, sizeof(struct wb_list_data));
@@ -887,10 +860,23 @@ wb_attach(parent, self, aux)
 	ether_ifattach(ifp);
 
 	shutdownhook_establish(wb_shutdown, sc);
-
-fail:
-	splx(s);
 	return;
+
+fail_5:
+	bus_dmamap_destroy(pa->pa_dmat, dmamap);
+
+fail_4:
+	bus_dmamem_unmap(pa->pa_dmat, kva,
+	    sizeof(struct wb_list_data));
+
+fail_3:
+	bus_dmamem_free(pa->pa_dmat, &seg, rseg);
+
+fail_2:
+	pci_intr_disestablish(pc, sc->sc_ih);
+
+fail_1:
+	bus_space_unmap(sc->wb_btag, sc->wb_bhandle, size);
 }
 
 /*
@@ -948,12 +934,12 @@ int wb_list_rx_init(sc)
 		if (i == (WB_RX_LIST_CNT - 1)) {
 			cd->wb_rx_chain[i].wb_nextdesc = &cd->wb_rx_chain[0];
 			ld->wb_rx_list[i].wb_next = 
-					vtophys(&ld->wb_rx_list[0]);
+					VTOPHYS(&ld->wb_rx_list[0]);
 		} else {
 			cd->wb_rx_chain[i].wb_nextdesc =
 					&cd->wb_rx_chain[i + 1];
 			ld->wb_rx_list[i].wb_next =
-					vtophys(&ld->wb_rx_list[i + 1]);
+					VTOPHYS(&ld->wb_rx_list[i + 1]);
 		}
 	}
 
@@ -1001,7 +987,7 @@ wb_newbuf(sc, c, m)
 	m_adj(m_new, sizeof(u_int64_t));
 
 	c->wb_mbuf = m_new;
-	c->wb_ptr->wb_data = vtophys(mtod(m_new, caddr_t));
+	c->wb_ptr->wb_data = VTOPHYS(mtod(m_new, caddr_t));
 	c->wb_ptr->wb_ctl = WB_RXCTL_RLINK | ETHER_MAX_DIX_LEN;
 	c->wb_ptr->wb_status = WB_RXSTAT;
 
@@ -1097,7 +1083,7 @@ void wb_rxeoc(sc)
 	wb_rxeof(sc);
 
 	WB_CLRBIT(sc, WB_NETCFG, WB_NETCFG_RX_ON);
-	CSR_WRITE_4(sc, WB_RXADDR, vtophys(&sc->wb_ldata->wb_rx_list[0]));
+	CSR_WRITE_4(sc, WB_RXADDR, VTOPHYS(&sc->wb_ldata->wb_rx_list[0]));
 	WB_SETBIT(sc, WB_NETCFG, WB_NETCFG_RX_ON);
 	if (CSR_READ_4(sc, WB_ISR) & WB_RXSTATE_SUSPEND)
 		CSR_WRITE_4(sc, WB_RXSTART, 0xFFFFFFFF);
@@ -1280,7 +1266,7 @@ wb_tick(xsc)
 	struct wb_softc *sc = xsc;
 	int s;
 
-	s = splimp();
+	s = splnet();
 	mii_tick(&sc->sc_mii);
 	splx(s);
 	timeout_add(&sc->wb_tick_tmo, hz);
@@ -1320,8 +1306,8 @@ int wb_encap(sc, c, m_head)
 				f->wb_status = 0;
 			} else
 				f->wb_status = WB_TXSTAT_OWN;
-			f->wb_next = vtophys(&c->wb_ptr->wb_frag[frag + 1]);
-			f->wb_data = vtophys(mtod(m, vaddr_t));
+			f->wb_next = VTOPHYS(&c->wb_ptr->wb_frag[frag + 1]);
+			f->wb_data = VTOPHYS(mtod(m, vaddr_t));
 			frag++;
 		}
 	}
@@ -1354,7 +1340,7 @@ int wb_encap(sc, c, m_head)
 		m_head = m_new;
 		f = &c->wb_ptr->wb_frag[0];
 		f->wb_status = 0;
-		f->wb_data = vtophys(mtod(m_new, caddr_t));
+		f->wb_data = VTOPHYS(mtod(m_new, caddr_t));
 		f->wb_ctl = total_len = m_new->m_len;
 		f->wb_ctl |= WB_TXCTL_TLINK|WB_TXCTL_FIRSTFRAG;
 		frag = 1;
@@ -1363,7 +1349,7 @@ int wb_encap(sc, c, m_head)
 	if (total_len < WB_MIN_FRAMELEN) {
 		f = &c->wb_ptr->wb_frag[frag];
 		f->wb_ctl = WB_MIN_FRAMELEN - total_len;
-		f->wb_data = vtophys(&sc->wb_cdata.wb_pad);
+		f->wb_data = VTOPHYS(&sc->wb_cdata.wb_pad);
 		f->wb_ctl |= WB_TXCTL_TLINK;
 		f->wb_status = WB_TXSTAT_OWN;
 		frag++;
@@ -1372,7 +1358,7 @@ int wb_encap(sc, c, m_head)
 	c->wb_mbuf = m_head;
 	c->wb_lastdesc = frag - 1;
 	WB_TXCTL(c) |= WB_TXCTL_LASTFRAG;
-	WB_TXNEXT(c) = vtophys(&c->wb_nextdesc->wb_ptr->wb_frag[0]);
+	WB_TXNEXT(c) = VTOPHYS(&c->wb_nextdesc->wb_ptr->wb_frag[0]);
 
 	return(0);
 }
@@ -1481,7 +1467,7 @@ void wb_init(xsc)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	int s, i;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
@@ -1563,7 +1549,7 @@ void wb_init(xsc)
 	 * Load the address of the RX list.
 	 */
 	WB_CLRBIT(sc, WB_NETCFG, WB_NETCFG_RX_ON);
-	CSR_WRITE_4(sc, WB_RXADDR, vtophys(&sc->wb_ldata->wb_rx_list[0]));
+	CSR_WRITE_4(sc, WB_RXADDR, VTOPHYS(&sc->wb_ldata->wb_rx_list[0]));
 
 	/*
 	 * Enable interrupts.
@@ -1576,7 +1562,7 @@ void wb_init(xsc)
 	CSR_WRITE_4(sc, WB_RXSTART, 0xFFFFFFFF);
 
 	WB_CLRBIT(sc, WB_NETCFG, WB_NETCFG_TX_ON);
-	CSR_WRITE_4(sc, WB_TXADDR, vtophys(&sc->wb_ldata->wb_tx_list[0]));
+	CSR_WRITE_4(sc, WB_TXADDR, VTOPHYS(&sc->wb_ldata->wb_tx_list[0]));
 	WB_SETBIT(sc, WB_NETCFG, WB_NETCFG_TX_ON);
 
 	ifp->if_flags |= IFF_RUNNING;
@@ -1631,7 +1617,7 @@ int wb_ioctl(ifp, command, data)
 	struct ifaddr		*ifa = (struct ifaddr *)data;
 	int			s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
 		splx(s);

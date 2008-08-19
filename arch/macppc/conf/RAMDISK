@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.51 2005/06/02 23:21:03 drahn Exp $
+#	$OpenBSD: RAMDISK,v 1.61 2006/02/28 18:45:54 kettenis Exp $
 #
 # PPC GENERIC config file
 #
@@ -23,7 +23,7 @@ option		CD9660		# ISO 9660 + Rock Ridge file system
 option		UDF		# UDF (DVD) file system
 option		MSDOSFS		# MS-DOS file system
 option		INET		# IP + ICMP + TCP + UDP
-#option		INET6		# IPv6 (needs INET)
+option		INET6		# IPv6 (needs INET)
 option		DDB		# kernel debugger
 
 config		bsd	root on rd0a swap on rd0b
@@ -33,11 +33,16 @@ cpu*		at mainbus0
 
 mpcpcibr*	at mainbus0	# MPC106 PCI Bridge.
 memc*		at mainbus0
+openpic*	at memc?	# openpic interrupt controller
+ki2c*           at memc?        # Keywest I2C
 pchb*		at pci?		# host bridge identifiers
+ht*		at mainbus0
+smu*		at mainbus0
 
 #### PCI Bus devices.
 
 pci*		at mpcpcibr?
+pci*		at ht?
 ppb*		at pci?		# PCI-PCI bridges
 pci*		at ppb?
 
@@ -64,14 +69,16 @@ vge*		at pci?		# VIA VT612x
 dc*		at pci?		# DEC Tulip 21143 clones
 xl*		at pci?		# 3C9xx ethernet
 em*		at pci?		# Intel Pro/1000 ethernet
+#ixgb*		at pci?		# Intel Pro/10Gb ethernet
 epic*		at pci?		# SMC EPIC/100 ethernet
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 ti*		at pci?		# Alteon Tigon 1Gb ethernet
 re*		at pci?		# Realtek 8169/8169S/8110S
 rl*		at pci?		# Realtek 81[23]9 ethernet
 stge*		at pci?		# Sundance TC9021 GigE
-an*		at pci?		# Cisco/Aironet 802.11DS
+#an*		at pci?		# Cisco/Aironet 802.11DS
 wi*		at pci?		# WaveLAN IEEE 802.11DS
+vr*		at pci?		# VIA Rhine ethernet
 
 # how many of these are needed?
 amphy*		at mii?		# AMD 79C873 PHYs
@@ -101,7 +108,7 @@ ciphy*		at mii?		# Cicada CS8201 10/100/1000 copper PHY
 ukphy*		at mii?		# generic unknown PHYs
 
 macintr0	at macobio?	# old interrupt controller
-openpic0	at macobio?	# openpic interrupt controller
+openpic*	at macobio?	# openpic interrupt controller
 bm*		at macobio?	# bmac ethernet
 #mc*		at macobio?	# MACE ethernet
 #esp*		at macobio? flags 0x00ff# 53c9x SCSI
@@ -111,7 +118,6 @@ adb*		at macobio?	# Apple Desktop Bus
 wi*		at macobio?	# Apple Airport 802.11DS
 macgpio*	at macobio?	# GPIO, PMU interrupt router.
 macgpio*	at macgpio?	# GPIO, PMU interrupt router.
-aed*		at adb?		# ADB Event Device
 akbd*		at adb?		# ADB keyboard
 wskbd*		at akbd? mux 1
 #ams*		at adb?		# ADB mouse

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sf.c,v 1.31 2005/08/09 04:10:12 mickey Exp $ */
+/*	$OpenBSD: if_sf.c,v 1.34 2005/11/07 02:57:45 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -460,7 +460,7 @@ int sf_ioctl(ifp, command, data)
 	struct mii_data		*mii;
 	int			s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
 		splx(s);
@@ -584,7 +584,7 @@ void sf_attach(parent, self, aux)
 	struct device		*parent, *self;
 	void			*aux;
 {
-	int			s, i;
+	int			i;
 	const char		*intrstr = NULL;
 	u_int32_t		command;
 	struct sf_softc		*sc = (struct sf_softc *)self;
@@ -592,10 +592,7 @@ void sf_attach(parent, self, aux)
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	struct ifnet		*ifp;
-	bus_addr_t		iobase;
-	bus_size_t		iosize;
-
-	s = splimp();
+	bus_size_t		size;
 
 	/*
 	 * Handle power management nonsense.
@@ -628,42 +625,25 @@ void sf_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef SF_USEIOSPACE
-	if (!(command & PCI_COMMAND_IO_ENABLE)) {
-		printf(": failed to enable I/O ports\n");
-		goto fail;
-	}
-	if (pci_io_find(pc, pa->pa_tag, SF_PCI_LOIO, &iobase, &iosize)) {
-		printf(": can't find I/O space\n");
-		goto fail;
-	}
-	if (bus_space_map(pa->pa_iot, iobase, iosize, 0, &sc->sf_bhandle)) {
+	if (pci_mapreg_map(pa, SF_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
+	    &sc->sf_btag, &sc->sf_bhandle, NULL, &size, 0)) {
 		printf(": can't map I/O space\n");
-		goto fail;
+		return;
 	}
-	sc->sf_btag = pa->pa_iot;
 #else
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf(": failed to enable memory mapping\n");
-		goto fail;
-	}
-	if (pci_mem_find(pc, pa->pa_tag, SF_PCI_LOMEM, &iobase, &iosize, NULL)){
-		printf(": can't find mem space\n");
-		goto fail;
-	}
-	if (bus_space_map(pa->pa_memt, iobase, iosize, 0, &sc->sf_bhandle)) {
+	if (pci_mapreg_map(pa, SF_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->sf_btag, &sc->sf_bhandle, NULL, &size, 0)){
 		printf(": can't map mem space\n");
-		goto fail;
+		return;
 	}
-	sc->sf_btag = pa->pa_memt;
 #endif
 
 	/* Allocate interrupt */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
-		goto fail;
+		goto fail_1;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, sf_intr, sc,
@@ -673,7 +653,7 @@ void sf_attach(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		goto fail;
+		goto fail_1;
 	}
 	printf(": %s", intrstr);
 
@@ -687,14 +667,14 @@ void sf_attach(parent, self, aux)
 		sc->arpcom.ac_enaddr[i] =
 		    sf_read_eeprom(sc, SF_EE_NODEADDR + ETHER_ADDR_LEN - i);
 
-	printf(" address %s\n", ether_sprintf(sc->arpcom.ac_enaddr));
+	printf(", address %s\n", ether_sprintf(sc->arpcom.ac_enaddr));
 
 	/* Allocate the descriptor queues. */
 	sc->sf_ldata_ptr = malloc(sizeof(struct sf_list_data) + 8,
 				M_DEVBUF, M_NOWAIT);
 	if (sc->sf_ldata_ptr == NULL) {
-		printf("%s: no memory for list buffers!\n", sc->sc_dev.dv_xname);
-		goto fail;
+		printf(": no memory for list buffers!\n");
+		goto fail_2;
 	}
 
 	sc->sf_ldata = (struct sf_list_data *)sc->sf_ldata_ptr;
@@ -734,10 +714,13 @@ void sf_attach(parent, self, aux)
 	ether_ifattach(ifp);
 
 	shutdownhook_establish(sf_shutdown, sc);
-
-fail:
-	splx(s);
 	return;
+
+fail_2:
+	pci_intr_disestablish(pc, sc->sc_ih);
+
+fail_1:
+	bus_space_unmap(sc->sf_btag, sc->sf_bhandle, size);
 }
 
 int sf_init_rx_ring(sc)
@@ -1040,7 +1023,7 @@ void sf_init(xsc)
 	struct mii_data		*mii;
 	int			i, s;
 
-	s = splimp();
+	s = splnet();
 
 	mii = &sc->sc_mii;
 
@@ -1341,7 +1324,7 @@ void sf_stats_update(xsc)
 	u_int32_t		*ptr;
 	int			i, s;
 
-	s = splimp();
+	s = splnet();
 
 	sc = xsc;
 	ifp = &sc->arpcom.ac_if;

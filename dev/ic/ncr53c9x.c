@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.25 2004/10/28 08:11:09 xsa Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.29 2006/01/09 23:11:49 miod Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -442,6 +442,20 @@ ncr53c9x_init(sc, doreset)
 	if (doreset) {
 		sc->sc_state = NCR_SBR;
 		NCRCMD(sc, NCRCMD_RSTSCSI);
+		/*
+		 * XXX gross...
+		 * On some systems, commands issued too close to a reset
+		 * do not work correctly. We'll force a short delay on
+		 * known-to-be-sensitive chips.
+		 */
+		switch (sc->sc_rev) {
+		case NCR_VARIANT_NCR53C94:
+			DELAY(600000);	/* 600ms */
+			break;
+		case NCR_VARIANT_NCR53C96:
+			DELAY(100000);	/* 100ms */
+			break;
+		}
 	} else {
 		sc->sc_state = NCR_IDLE;
 		ncr53c9x_sched(sc);
@@ -615,6 +629,8 @@ ncr53c9x_select(sc, ecb)
 			sc->sc_cmdlen = clen;
 			sc->sc_cmdp = (caddr_t)&ecb->cmd.cmd;
 
+			NCRDMA_SETUP(sc, &sc->sc_cmdp, &sc->sc_cmdlen, 0,
+			    &dmasize);
 			/* Program the SCSI counter */
 			NCR_SET_COUNT(sc, dmasize);
 
@@ -623,7 +639,6 @@ ncr53c9x_select(sc, ecb)
 
 			/* And get the targets attention */
 			NCRCMD(sc, NCRCMD_SELNATN | NCRCMD_DMA);
-			NCRDMA_SETUP(sc, &sc->sc_cmdp, &sc->sc_cmdlen, 0, &dmasize);
 			NCRDMA_GO(sc);
 		} else {
 			ncr53c9x_wrfifo(sc, (u_char *)&ecb->cmd.cmd, ecb->clen);
@@ -671,6 +686,7 @@ ncr53c9x_select(sc, ecb)
 		sc->sc_cmdlen = clen;
 		sc->sc_cmdp = cmd;
 
+		NCRDMA_SETUP(sc, &sc->sc_cmdp, &sc->sc_cmdlen, 0, &dmasize);
 		/* Program the SCSI counter */
 		NCR_SET_COUNT(sc, dmasize);
 
@@ -685,7 +701,6 @@ ncr53c9x_select(sc, ecb)
 			NCRCMD(sc, NCRCMD_SELATN3 | NCRCMD_DMA);
 		} else
 			NCRCMD(sc, NCRCMD_SELATN | NCRCMD_DMA);
-		NCRDMA_SETUP(sc, &sc->sc_cmdp, &sc->sc_cmdlen, 0, &dmasize);
 		NCRDMA_GO(sc);
 		return;
 	}
@@ -2034,6 +2049,7 @@ again:
 			printf("%s: DMA error; resetting\n",
 				sc->sc_dev.dv_xname);
 			ncr53c9x_init(sc, 1);
+			return (1);
 		}
 		/* If DMA active here, then go back to work... */
 		if (NCRDMA_ISACTIVE(sc))
@@ -2679,8 +2695,7 @@ shortcut:
 			if (NCRDMA_ISINTR(sc))
 				goto again;
 			microtime(&cur);
-		} while (cur.tv_sec <= wait.tv_sec &&
-		    cur.tv_usec <= wait.tv_usec);
+		} while (timercmp(&cur, &wait, <=));
 	}
 	goto out;
 }

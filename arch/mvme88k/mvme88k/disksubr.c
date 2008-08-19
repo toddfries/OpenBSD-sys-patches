@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.28 2005/03/30 07:52:32 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.31 2006/01/22 00:40:01 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -34,92 +34,23 @@
 #include <sys/disklabel.h>
 #include <sys/disk.h>
 
-#include <scsi/scsi_all.h>
-#include <scsi/scsiconf.h>
-
-#include <machine/autoconf.h>
-
-#define b_cylin b_resid
-
 #ifdef DEBUG
 int disksubr_debug;
 #endif
 
 void bsdtocpulabel(struct disklabel *, struct cpu_disklabel *);
 void cputobsdlabel(struct disklabel *, struct cpu_disklabel *);
-int get_target(int *, int *);
 
 #ifdef DEBUG
 void printlp(struct disklabel *, char *);
 void printclp(struct cpu_disklabel *, char *);
 #endif
 
-/*
- * Returns the ID of the SCSI disk based on Motorola's CLUN/DLUN stuff
- * bootdev == CLUN << 8 | DLUN.
- * This handles SBC SCSI and MVME32[78].
- */
-int
-get_target(int *target, int *bus)
-{
-	extern int bootdev;
-
-	switch (bootdev >> 8) {
-	/* built-in controller */
-	case 0x00:
-	/* MVME327 */
-	case 0x02:
-	case 0x03:
-		*bus = 0;
-		*target = (bootdev & 0x70) >> 4;
-		return 0;
-	/* MVME328 */
-	case 0x06:
-	case 0x07:
-	case 0x16:
-	case 0x17:
-	case 0x18:
-	case 0x19:
-		*bus = (bootdev & 0x40) >> 6;
-		*target = (bootdev & 0x38) >> 3;
-		return 0;
-	default:
-		return ENODEV;
-	}
-}
-
 void
 dk_establish(dk, dev)
 	struct disk *dk;
 	struct device *dev;
 {
-	struct scsibus_softc *sbsc;
-	int target, bus;
-
-	if (bootpart == -1) /* ignore flag from controller driver? */
-		return;
-
-	/*
-	 * scsi: sd,cd,st
-	 */
-
-	if (strncmp("cd", dev->dv_xname, 2) == 0 ||
-	    strncmp("sd", dev->dv_xname, 2) == 0 ||
-	    strncmp("st", dev->dv_xname, 2) == 0) {
-		sbsc = (struct scsibus_softc *)dev->dv_parent;
-		if (get_target(&target, &bus) != 0)
-			return;
-    
-		/* make sure we are on the expected scsibus */
-		if (bootbus != bus)
-			return;
-
-		if (sbsc->sc_link[target][0] != NULL &&
-		    sbsc->sc_link[target][0]->device_softc == (void *)dev) {
-			bootdv = dev;
-			return;
-		}
-	}
 }
 
 
@@ -155,6 +86,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	}
 	if (lp->d_partitions[i].p_size == 0)
 		lp->d_partitions[i].p_size = lp->d_secperunit;
+	lp->d_partitions[i].p_offset = 0;
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
@@ -168,7 +100,7 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylin = 0; /* contained in block 0 */
+	bp->b_cylinder = 0; /* contained in block 0 */
 	(*strat)(bp);
 
 	error = biowait(bp);
@@ -301,7 +233,7 @@ writedisklabel(dev, strat, lp, clp)
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ;
-	bp->b_cylin = 0; /* contained in block 0 */
+	bp->b_cylinder = 0; /* contained in block 0 */
 	(*strat)(bp);
 
 	if ((error = biowait(bp)) != 0) {
@@ -337,7 +269,7 @@ writedisklabel(dev, strat, lp, clp)
 		bp->b_blkno = 0; /* contained in block 0 */
 		bp->b_bcount = lp->d_secsize;
 		bp->b_flags = B_WRITE;
-		bp->b_cylin = 0; /* contained in block 0 */
+		bp->b_cylinder = 0; /* contained in block 0 */
 		(*strat)(bp);
 
 		error = biowait(bp);
@@ -396,7 +328,7 @@ bounds_check_with_label(bp, lp, osdep, wlabel)
 	}
 
 	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylin = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
+	bp->b_cylinder = (bp->b_blkno + blockpersec(p->p_offset, lp)) /
 	    lp->d_secpercyl;
 	return(1);
 

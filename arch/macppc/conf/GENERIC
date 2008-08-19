@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.89 2005/08/03 02:10:44 dlg Exp $g
+#	$OpenBSD: GENERIC,v 1.127 2006/02/14 18:11:04 miod Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -20,9 +20,10 @@ option		SYS_TYPE=APPL
 option		PCIVERBOSE
 option		USBVERBOSE
 #option		MACOBIOVERBOSE
+option		ADBVERBOSE
 option		ALTIVEC
 option		APERTURE	# in-kernel aperture driver for XFree86
-option		WSDISPLAY_COMPAT_RAWKBD
+option	WSDISPLAY_COMPAT_RAWKBD		# provide raw scancodes; needed for X11
 
 option		USER_PCICONF	# user-space PCI configuration
 
@@ -33,15 +34,21 @@ cpu*		at mainbus0
 
 mpcpcibr*	at mainbus0	# MPC106 PCI Bridge.
 memc*		at mainbus0
+openpic*	at memc?	# openpic interrupt controller
+ki2c*           at memc?        # Keywest I2C
 pchb*		at pci?
+ht*		at mainbus0
+smu*		at mainbus0
 
 #### PCI Bus devices.
 
 pci*		at mpcpcibr?
+pci*		at ht?
 ppb*		at pci?		# PCI-PCI bridges
 pci*		at ppb?
 
 siop*		at pci?
+lmc*		at pci?		# Lan Media Corp SSI/T3/HSSI
 fxp*		at pci?
 de*		at pci?
 #vme*		at pci?
@@ -66,16 +73,21 @@ dc*		at pci?		# DEC Tulip 21143 clones
 xl*		at pci?		# 3C9xx ethernet
 rl*		at pci?		# RealTek 81[23]9 ethernet
 em*		at pci?		# Intel Pro/1000 ethernet
+#ixgb*		at pci?		# Intel Pro/10Gb ethernet
 epic*		at pci?		# SMC EPIC/100 ethernet
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 ti*		at pci?		# Alteon Tigon 1Gb ethernet
 re*		at pci?		# Realtek 8169/8169S/8110S
 stge*		at pci?		# Sundance TC9021 GigE
-an*		at pci?		# Cisco/Aironet
+#an*		at pci?		# Cisco/Aironet
 atw*		at pci?		# ADMtek ADM8211 (802.11)
 wi*		at pci?		# WaveLAN IEEE 802.11DS
-ral*		at pci?		# Ralink RT2500
+ral*		at pci?		# Ralink RT2500/RT2501/RT2600
 #rtw*		at pci?		# Realtek 8180
+vr*		at pci?		# VIA Rhine ethernet
+musycc*		at pci?		# Conexant HDLC controller
+art*		at musycc?	# Accoom Artery E1/T1 cards
+
 iop*		at pci?		# I2O processor
 ioprbs*		at iop?		# I2O arrays
 iopsp*		at iop?		# I2O SCSI pass-through
@@ -113,7 +125,7 @@ ubsec*		at pci?		# Broadcom 58xx
 safe*		at pci?		# SafeNet SafeXcel 1141/1741
 
 macintr0	at macobio?	# old interrupt controller
-openpic0	at macobio?	# openpic interrupt controller
+openpic*	at macobio?	# openpic interrupt controller
 bm*		at macobio?	# BMAC ethernet
 #mc*		at macobio?	# MACE ethernet
 #esp*		at macobio? flags 0x00ff # 53c9x SCSI
@@ -121,10 +133,10 @@ bm*		at macobio?	# BMAC ethernet
 #nvram*		at macobio?	# nvram
 adb*		at macobio?	# Apple Desktop Bus
 apm0		at adb?		# APM emulation
+pi2c0		at adb?		# PMU I2C
 wi*		at macobio?	# airport
 macgpio*	at macobio?	# GPIO, PMU interrupt router.
 macgpio*	at macgpio?	# GPIO, PMU interrupt router.
-aed*		at adb?		# ADB Event Device
 akbd*		at adb?		# ADB keyboard
 
 wskbd*		at akbd? mux 1
@@ -134,18 +146,20 @@ abtn*		at adb?		# ADB button?
 zsc*		at macobio?
 zstty*		at zsc?
 
-#i2c*		at macobio?
-#tas*		at i2c?
-
 awacs*		at macobio?	# Apple audio device
 ki2c*		at macobio?	# Keywest I2C
 snapper*	at macobio?	# Snapper audio device
+tumbler*	at macobio?	# Tumbler audio device
+onyx*		at macobio?	# Onyx audio device
+aoa*		at macobio?	# Aoa audio device
+daca*		at macobio?	# Daca audio device
 
 bktr0		at pci?		# Bt8[47][89] tv/fmradio/video
 radio*		at bktr?
 
 # PCI audio devices
 eap*		at pci?		# Ensoniq AudioPCI S5016
+emu*		at pci?		# SB Live!
 
 #scsibus*	at adv?
 scsibus*	at ahc?
@@ -203,12 +217,13 @@ ucom*	at uipaq?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
-midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
 atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
+tpms*	at uhidev?		# Apple touchpad mouse
+wsmouse* at tpms? mux 0
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 ukbd*	at uhidev?		# USB keyboard
@@ -235,13 +250,32 @@ radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
 
+# I2C bus support
+iic*		at ki2c?
+iic*		at pi2c?
+iic*		at smu?
+
+# I2C devices
+lmtemp*		at iic?
+lmenv*		at iic?
+maxtmp*		at iic?
+adc*		at iic?
+tsl*		at iic?
+admtmp*		at iic?
+pcagpio*	at iic?
+gpio*		at pcagpio?
+maxds*		at iic?
+fcu*		at iic?
+adt*		at iic?
+asms*		at iic?
+
 # CardBus bus support
 cardbus*	at cardslot?
 pcmcia*		at cardslot?
 cbb*		at pci?
 cardslot*	at cbb?
 ep*		at pcmcia?	# PCMCIA based 3C5xx ethernet
-an*		at pcmcia?	# Cisco/Aironet
+#an*		at pcmcia?	# Cisco/Aironet
 wi*		at pcmcia?	# WaveLAN IEEE 802.11DS
 dc*		at cardbus?	# 21143, "tulip" clone ethernet
 #fxp*		at cardbus?	# Intel PRO/100 ethernet
@@ -253,13 +287,19 @@ wdc*		at pcmcia?
 wsdisplay*	at vgafb?
 
 # MIDI support
-#midi*		at eap?
+midi*		at eap?
+midi*		at umidi?
 
 # Audio support
 audio*		at awacs?
 audio*		at snapper?
+audio*		at tumbler?
+audio*		at onyx?
 audio*		at eap?
+audio*		at emu?
 audio*		at uaudio?
+audio*		at aoa?
+audio*		at daca?
 
 sd*		at scsibus?
 st*		at scsibus?

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt.c,v 1.5 2004/07/08 04:23:04 david Exp $	*/
+/*	$OpenBSD: gdt.c,v 1.7 2005/11/19 02:18:00 pedro Exp $	*/
 /*	$NetBSD: gdt.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -82,14 +82,14 @@ static __inline void
 gdt_lock()
 {
 	if (curproc != NULL)		/* XXX - ugh. needed for startup */
-		(void) lockmgr(&gdt_lock_store, LK_EXCLUSIVE, NULL, curproc);
+		(void) lockmgr(&gdt_lock_store, LK_EXCLUSIVE, NULL);
 }
 
 static __inline void
 gdt_unlock()
 {
 	if (curproc != NULL)
-		(void) lockmgr(&gdt_lock_store, LK_RELEASE, NULL, curproc);
+		(void) lockmgr(&gdt_lock_store, LK_RELEASE, NULL);
 }
 
 void
@@ -105,7 +105,7 @@ set_mem_gdt(sd, base, limit, type, dpl, gran, def32, is64)
 
         set_mem_segment(sd, base, limit, type, dpl, gran, def32, is64);
 	off = (char *)sd - gdtstore;
-        for (CPU_INFO_FOREACH(cii, ci)) {
+        CPU_INFO_FOREACH(cii, ci) {
                 if (ci->ci_gdt != NULL)
 			*(struct mem_segment_descriptor *)(ci->ci_gdt + off) =
 			    *sd;
@@ -125,7 +125,7 @@ set_sys_gdt(sd, base, limit, type, dpl, gran)
 
         set_sys_segment(sd, base, limit, type, dpl, gran);
 	off = (char *)sd - gdtstore;
-        for (CPU_INFO_FOREACH(cii, ci)) {
+        CPU_INFO_FOREACH(cii, ci) {
                 if (ci->ci_gdt != NULL)
 			*(struct sys_segment_descriptor *)(ci->ci_gdt + off) =
 			    *sd;

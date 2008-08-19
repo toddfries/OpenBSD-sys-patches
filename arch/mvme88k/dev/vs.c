@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.55 2005/04/27 14:09:45 miod Exp $	*/
+/*	$OpenBSD: vs.c,v 1.60 2005/12/27 22:48:01 miod Exp $	*/
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.
@@ -97,7 +97,6 @@ M328_SG	vs_build_memory_structure(struct vs_softc *, struct scsi_xfer *,
 void	vs_chksense(struct scsi_xfer *);
 void	vs_dealloc_scatter_gather(M328_SG);
 int	vs_eintr(void *);
-void	vs_free(M328_CMD *);
 bus_addr_t vs_getcqe(struct vs_softc *);
 bus_addr_t vs_getiopb(struct vs_softc *);
 int	vs_initialize(struct vs_softc *);
@@ -105,13 +104,14 @@ int	vs_intr(struct vs_softc *);
 void	vs_link_sg_element(sg_list_element_t *, vaddr_t, int);
 void	vs_link_sg_list(sg_list_element_t *, vaddr_t, int);
 int	vs_nintr(void *);
-int	vs_poll(struct vs_softc *, M328_CMD *);
+int	vs_poll(struct vs_softc *, struct vs_cb *);
 void	vs_print_addr(struct vs_softc *, struct scsi_xfer *);
-int	vs_queue_number(struct scsi_link *, struct vs_softc *);
+struct vs_cb *vs_find_queue(struct scsi_link *, struct vs_softc *);
 void	vs_reset(struct vs_softc *, int);
 void	vs_resync(struct vs_softc *);
-void	vs_scsidone(struct vs_softc *, struct scsi_xfer *);
+void	vs_scsidone(struct vs_softc *, struct vs_cb *);
 
+static __inline__ void vs_free(struct vs_cb *);
 static __inline__ void vs_clear_return_info(struct vs_softc *);
 static __inline__ paddr_t kvtop(vaddr_t);
 
@@ -274,15 +274,16 @@ do_vspoll(struct vs_softc *sc, struct scsi_xfer *xs, int canreset)
 }
 
 int
-vs_poll(struct vs_softc *sc, M328_CMD *cmd)
+vs_poll(struct vs_softc *sc, struct vs_cb *cb)
 {
 	struct scsi_xfer *xs;
+	int s;
 	int rc;
 
-	xs = cmd->xs;
+	xs = cb->cb_xs;
 	rc = do_vspoll(sc, xs, 1);
-	vs_free(cmd);
 
+	s = splbio();
 	if (rc != 0) {
 		xs->error = XS_SELTIMEOUT;
 		xs->status = -1;
@@ -290,8 +291,10 @@ vs_poll(struct vs_softc *sc, M328_CMD *cmd)
 #if 0
 		scsi_done(xs);
 #endif
+		vs_free(cb);
 	} else
-		vs_scsidone(sc, xs);
+		vs_scsidone(sc, cb);
+	splx(s);
 
 	if (CRSW & M_CRSW_ER)
 		CRB_CLR_ER;
@@ -321,11 +324,11 @@ thaw_all_queues(struct vs_softc *sc)
 }
 
 void
-vs_scsidone(struct vs_softc *sc, struct scsi_xfer *xs)
+vs_scsidone(struct vs_softc *sc, struct vs_cb *cb)
 {
+	struct scsi_xfer *xs = cb->cb_xs;
 	u_int32_t len;
 	int error;
-	int tgt;
 
 	len = vs_read(4, sh_RET_IOPB + IOPB_LENGTH);
 	xs->resid = xs->datalen - len;
@@ -337,16 +340,16 @@ vs_scsidone(struct vs_softc *sc, struct scsi_xfer *xs)
 	} else
 		xs->status = error >> 8;
 
-	tgt = vs_queue_number(xs->sc_link, sc);
 	while (xs->status == SCSI_CHECK) {
 		vs_chksense(xs);
-		thaw_queue(sc, tgt);
 	}
 
 	xs->flags |= ITSDONE;
-	thaw_queue(sc, tgt);
+	thaw_queue(sc, cb->cb_q);
 
 	scsi_done(xs);
+
+	vs_free(cb);
 }
 
 int
@@ -357,24 +360,51 @@ vs_scsicmd(struct scsi_xfer *xs)
 	int flags, option;
 	unsigned int iopb_len;
 	bus_addr_t cqep, iopb;
-	M328_CMD *m328_cmd;
+	struct vs_cb *cb;
+	u_int queue;
+	int s;
 
 	flags = xs->flags;
 	if (flags & SCSI_POLL) {
+		cb = &sc->sc_cb[0];
 		cqep = sh_MCE;
 		iopb = sh_MCE_IOPB;
 
+#ifdef VS_DEBUG
+		if (mce_read(2, CQE_QECR) & M_QECR_GO)
+			printf("%s: master command queue busy\n",
+			    sc->sc_dev.dv_xname);
+#endif
 		/* Wait until we can use the command queue entry. */
 		while (mce_read(2, CQE_QECR) & M_QECR_GO)
 			;
+#ifdef VS_DEBUG
+		if (cb->cb_xs != NULL) {
+			printf("%s: master command not idle\n",
+			    sc->sc_dev.dv_xname);
+			return (TRY_AGAIN_LATER);
+		}
+#endif
+		s = splbio();
 	} else {
+		s = splbio();
+		cb = vs_find_queue(slp, sc);
+		if (cb == NULL) {
+			splx(s);
+#ifdef VS_DEBUG
+			printf("%s: no free queues\n", sc->sc_dev.dv_xname);
+#endif
+			return (TRY_AGAIN_LATER);
+		}
 		cqep = vs_getcqe(sc);
 		if (cqep == 0) {
-			xs->error = XS_DRIVER_STUFFUP;
+			splx(s);
 			return (TRY_AGAIN_LATER);
 		}
 		iopb = vs_getiopb(sc);
 	}
+
+	queue = cb->cb_q;
 
 	vs_bzero(iopb, IOPB_LONG_SIZE);
 
@@ -426,18 +456,17 @@ vs_scsicmd(struct scsi_xfer *xs)
 
 	vs_write(2, cqep + CQE_IOPB_ADDR, iopb);
 	vs_write(1, cqep + CQE_IOPB_LENGTH, iopb_len);
-	vs_write(1, cqep + CQE_WORK_QUEUE,
-	    flags & SCSI_POLL ? 0 : vs_queue_number(slp, sc));
+	vs_write(1, cqep + CQE_WORK_QUEUE, queue);
 
-	MALLOC(m328_cmd, M328_CMD*, sizeof(M328_CMD), M_DEVBUF, M_WAITOK);
+	cb->cb_xs = xs;
+	splx(s);
 
-	m328_cmd->xs = xs;
 	if (xs->datalen != 0)
-		m328_cmd->top_sg_list = vs_build_memory_structure(sc, xs, iopb);
+		cb->cb_sg = vs_build_memory_structure(sc, xs, iopb);
 	else
-		m328_cmd->top_sg_list = NULL;
+		cb->cb_sg = NULL;
 
-	vs_write(4, cqep + CQE_CTAG, (u_int32_t)m328_cmd);
+	vs_write(4, cqep + CQE_CTAG, (u_int32_t)cb);
 
 	if (crb_read(2, CRB_CRSW) & M_CRSW_AQ)
 		vs_write(2, cqep + CQE_QECR, M_QECR_AA | M_QECR_GO);
@@ -446,7 +475,7 @@ vs_scsicmd(struct scsi_xfer *xs)
 
 	if (flags & SCSI_POLL) {
 		/* poll for the command to complete */
-		return vs_poll(sc, m328_cmd);
+		return vs_poll(sc, cb);
 	}
 
 	return (SUCCESSFULLY_QUEUED);
@@ -546,6 +575,9 @@ int
 vs_initialize(struct vs_softc *sc)
 {
 	int i, msr, dbid;
+
+	for (i = 0; i < NUM_WQ; i++)
+		sc->sc_cb[i].cb_q = i;
 
 	/*
 	 * Reset the board, and wait for it to get ready.
@@ -764,14 +796,15 @@ vs_reset(struct vs_softc *sc, int bus)
 	splx(s);
 }
 
-void
-vs_free(M328_CMD *m328_cmd)
+/* free a cb; invoked at splbio */
+static __inline__ void
+vs_free(struct vs_cb *cb)
 {
-	if (m328_cmd->top_sg_list != NULL) {
-		vs_dealloc_scatter_gather(m328_cmd->top_sg_list);
-		m328_cmd->top_sg_list = (M328_SG)NULL;
+	if (cb->cb_sg != NULL) {
+		vs_dealloc_scatter_gather(cb->cb_sg);
+		cb->cb_sg = NULL;
 	}
-	FREE(m328_cmd, M_DEVBUF); /* free the command tag */
+	cb->cb_xs = NULL;
 }
 
 /* normal interrupt routine */
@@ -779,8 +812,7 @@ int
 vs_nintr(void *vsc)
 {
 	struct vs_softc *sc = (struct vs_softc *)vsc;
-	M328_CMD *m328_cmd;
-	struct scsi_xfer *xs;
+	struct vs_cb *cb;
 	int s;
 
 	if ((CRSW & CONTROLLER_ERROR) == CONTROLLER_ERROR)
@@ -788,20 +820,16 @@ vs_nintr(void *vsc)
 
 	/* Got a valid interrupt on this device */
 	s = splbio();
-	m328_cmd = (void *)crb_read(4, CRB_CTAG);
+	cb = (struct vs_cb *)crb_read(4, CRB_CTAG);
 
 	/*
-	 * If this is a controller error, there won't be a m328_cmd
+	 * If this is a controller error, there won't be a cb
 	 * pointer in the CTAG field.  Bad things happen if you try
 	 * to point to address 0.  But then, we should have caught
 	 * the controller error above.
 	 */
-	if (m328_cmd != NULL) {
-		xs = m328_cmd->xs;
-		vs_free(m328_cmd);
-
-		vs_scsidone(sc, xs);
-	}
+	if (cb != NULL)
+		vs_scsidone(sc, cb);
 
 	/* ack the interrupt */
 	if (CRSW & M_CRSW_ER)
@@ -819,7 +847,7 @@ int
 vs_eintr(void *vsc)
 {
 	struct vs_softc *sc = (struct vs_softc *)vsc;
-	M328_CMD *m328_cmd;
+	struct vs_cb *cb;
 	struct scsi_xfer *xs;
 	int crsw, ecode;
 	int s;
@@ -829,43 +857,40 @@ vs_eintr(void *vsc)
 
 	crsw = vs_read(2, sh_CEVSB + CEVSB_CRSW);
 	ecode = vs_read(1, sh_CEVSB + CEVSB_ERROR);
-	m328_cmd = (void *)crb_read(4, CRB_CTAG);
-	xs = m328_cmd != NULL ? m328_cmd->xs : NULL;
-
-	if (crsw & M_CRSW_RST) {
-		printf("%s: bus reset\n", sc->sc_dev.dv_xname);
-		vs_clear_return_info(sc);
-		splx(s);
-		return 1;
-	}
+	cb = (struct vs_cb *)crb_read(4, CRB_CTAG);
+	xs = cb != NULL ? cb->cb_xs : NULL;
 
 	vs_print_addr(sc, xs);
 
-	switch (ecode) {
-	case CEVSB_ERR_TYPE:
-		printf("IOPB type error\n");
-		break;
-	case CEVSB_ERR_TO:
-		printf("timeout\n");
-		break;
-	case CEVSB_ERR_TR:
-		printf("reconnect error\n");
-		break;
-	case CEVSB_ERR_OF:
-		printf("overflow\n");
-		break;
-	case CEVSB_ERR_BD:
-		printf("bad direction\n");
-		break;
-	case CEVSB_ERR_NR:
-		printf("non-recoverable error\n");
-		break;
-	case CEVSB_ERR_PANIC:
-		printf("board panic\n");
-		break;
-	default:
-		printf("unexpected error %x\n", ecode);
-		break;
+	if (crsw & M_CRSW_RST) {
+		printf("bus reset\n");
+	} else {
+		switch (ecode) {
+		case CEVSB_ERR_TYPE:
+			printf("IOPB type error\n");
+			break;
+		case CEVSB_ERR_TO:
+			printf("timeout\n");
+			break;
+		case CEVSB_ERR_TR:
+			printf("reconnect error\n");
+			break;
+		case CEVSB_ERR_OF:
+			printf("overflow\n");
+			break;
+		case CEVSB_ERR_BD:
+			printf("bad direction\n");
+			break;
+		case CEVSB_ERR_NR:
+			printf("non-recoverable error\n");
+			break;
+		case CEVSB_ERR_PANIC:
+			printf("board panic\n");
+			break;
+		default:
+			printf("unexpected error %x\n", ecode);
+			break;
+		}
 	}
 
 	if (xs != NULL) {
@@ -893,30 +918,31 @@ vs_clear_return_info(struct vs_softc *sc)
 }
 
 /*
- * Choose the work queue number for a specific target.
- *
- * Targets on the primary channel are mapped to queues 1-7, while targets
- * on the secondary channel are mapped to queues 8-14.
- * To do so, we assign each target the queue matching its own number,
- * plus eight on the secondary bus, except for target 0 on the first channel
- * and 7 on the secondary channel which gets assigned to the queue matching
- * the controller id.
+ * Choose the first available work queue (invoked at splbio).
+ * We used a simple round-robin mechanism which is faster than rescanning
+ * from the beginning if we have more than one target on the bus.
  */
-int
-vs_queue_number(struct scsi_link *sl, struct vs_softc *sc)
+struct vs_cb *
+vs_find_queue(struct scsi_link *sl, struct vs_softc *sc)
 {
-	int bus, target;
+	struct vs_cb *cb;
+	static u_int last = 0;
+	u_int q;
 
-	bus = !!(sl->flags & SDEV_2NDBUS);
-	target = sl->target;
+	q = last;
+	for (;;) {
+		if (++q == NUM_WQ)
+			q = 1;
+		if (q == last)
+			break;
 
-	if (target == sc->sc_id[bus])
-		return 0;
+		if ((cb = &sc->sc_cb[q])->cb_xs == NULL) {
+			last = q;
+			return (cb);
+		}
+	}
 
-	if (target > sc->sc_id[bus])
-		target--;
-
-	return (bus == 0 ? 1 : 8) + target;
+	return (NULL);
 }
 
 /*

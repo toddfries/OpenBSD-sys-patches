@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.68 2005/05/30 22:12:32 drahn Exp $	*/
+/*	$OpenBSD: trap.c,v 1.72.2.1 2007/04/26 23:56:01 ckuethe Exp $	*/
 /*	$NetBSD: trap.c,v 1.3 1996/10/13 03:31:37 christos Exp $	*/
 
 /*
@@ -73,6 +73,7 @@ void trap(struct trapframe *frame);
 
 volatile int want_resched;
 struct proc *ppc_vecproc;
+struct proc *fpuproc;
 
 #ifdef DDB
 void ppc_dumpbt(struct trapframe *frame);
@@ -312,7 +313,7 @@ trap(struct trapframe *frame)
 	case EXC_DSI:
 		{
 			struct vm_map *map;
-			vm_offset_t va;
+			vaddr_t va;
 			int ftype;
 			faultbuf *fb;
 			
@@ -523,8 +524,7 @@ syscall_bad:
 
 	case EXC_FPU|EXC_USER:
 		if (fpuproc)
-			save_fpu(fpuproc);
-		fpuproc = p;
+			save_fpu();
 		uvmexp.fpswtch++;
 		enable_fpu(p);
 		break;
@@ -646,6 +646,12 @@ for (i = 0; i < errnum; i++) {
 		break;
 #endif
 
+	case EXC_VECAST|EXC_USER:
+		KERNEL_PROC_LOCK(p);
+		trapsignal(p, SIGFPE, 0, FPE_FLTRES, sv);
+		KERNEL_PROC_UNLOCK(p);
+		break;
+
 	case EXC_AST|EXC_USER:
 		uvmexp.softs++;
 		/* This is just here that we trap */
@@ -673,10 +679,10 @@ for (i = 0; i < errnum; i++) {
 	/*
 	 * If someone stole the vector unit while we were away, disable it
 	 */
-	if (p != ppc_vecproc)
-		frame->srr1 &= ~PSL_VEC;
-	else
+	if (p == ppc_vecproc)
 		frame->srr1 |= PSL_VEC;
+	else 
+		frame->srr1 &= ~PSL_VEC;
 #endif /* ALTIVEC */
 }
 
@@ -697,7 +703,8 @@ child_return(void *arg)
 
 #ifdef	KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, SYS_fork, 0, 0);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }
 
@@ -754,21 +761,21 @@ fix_unaligned(struct proc *p, struct trapframe *frame)
 			 */
 			if (fpuproc != p) {
 				if (fpuproc)
-					save_fpu(fpuproc);
+					save_fpu();
 				enable_fpu(p);
 			}
-			save_fpu(p);
+			save_fpu();
 
 			if (indicator == EXC_ALI_LFD) {
 				if (copyin((void *)frame->dar, fpr,
 				    sizeof(double)) != 0)
 					return -1;
-				enable_fpu(p);
 			} else {
 				if (copyout(fpr, (void *)frame->dar,
 				    sizeof(double)) != 0)
 					return -1;
 			}
+			enable_fpu(p);
 			return 0;
 		}
 		break;

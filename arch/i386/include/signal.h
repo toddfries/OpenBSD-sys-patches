@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.4 2003/06/02 23:27:47 millert Exp $	*/
+/*	$OpenBSD: signal.h,v 1.6 2006/01/08 14:20:17 millert Exp $	*/
 /*	$NetBSD: signal.h,v 1.6 1996/01/08 13:51:43 mycroft Exp $	*/
 
 /*
@@ -35,14 +35,18 @@
 #ifndef _I386_SIGNAL_H_
 #define _I386_SIGNAL_H_
 
+#include <sys/cdefs.h>
+
 typedef int sig_atomic_t;
 
-#ifndef _ANSI_SOURCE
+#if __BSD_VISIBLE
 /*
  * Get the "code" values
  */
 #include <machine/trap.h>
+#endif
 
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -81,5 +85,5 @@ struct	sigcontext {
 #define sc_pc sc_eip
 #define sc_ps sc_eflags
 
-#endif	/* !_ANSI_SOURCE */
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #endif	/* !_I386_SIGNAL_H_ */

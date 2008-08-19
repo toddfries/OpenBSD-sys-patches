@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_machdep.c,v 1.18 2005/07/01 23:56:47 uwe Exp $	*/
+/*	$OpenBSD: zaurus_machdep.c,v 1.23 2006/01/17 20:30:12 miod Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -197,12 +197,11 @@ BootConfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
 char *boot_file = NULL;
 
-vm_offset_t physical_start;
-vm_offset_t physical_freestart;
-vm_offset_t physical_freeend;
-vm_offset_t physical_end;
+paddr_t physical_start;
+paddr_t physical_freestart;
+paddr_t physical_freeend;
+paddr_t physical_end;
 u_int free_pages;
-vm_offset_t pagetables_start;
 int physmem = 0;
 
 /*int debug_flags;*/
@@ -218,7 +217,7 @@ pv_addr_t abtstack;
 extern pv_addr_t kernelstack;
 pv_addr_t minidataclean;
 
-vm_offset_t msgbufphys;
+paddr_t msgbufphys;
 
 extern u_int data_abort_handler_address;
 extern u_int prefetch_abort_handler_address;
@@ -233,7 +232,7 @@ extern int pmap_debug_level;
 #define	KERNEL_PT_KERNEL_NUM	32
 #define KERNEL_PT_VMDATA	(KERNEL_PT_KERNEL+KERNEL_PT_KERNEL_NUM)
 				        /* Page tables for mapping kernel VM */
-#define	KERNEL_PT_VMDATA_NUM	8	/* start with 16MB of KVM */
+#define	KERNEL_PT_VMDATA_NUM	8	/* start with 32MB of KVM */
 #define NUM_KERNEL_PTS		(KERNEL_PT_VMDATA + KERNEL_PT_VMDATA_NUM)
 
 pv_addr_t kernel_pt_table[NUM_KERNEL_PTS];
@@ -282,11 +281,6 @@ int comcnmode = CONMODE;
 void
 boot(int howto)
 {
-#ifdef DIAGNOSTIC
-	/* info */
-	printf("boot: howto=%08x curproc=%p\n", howto, curproc);
-#endif
-
 	/*
 	 * If we are still cold then hit the air brakes
 	 * and crash to earth fast
@@ -319,7 +313,7 @@ boot(int howto)
 	 * been unmounted.
 	 */
 	if (!(howto & RB_NOSYNC))
-		bootsync();
+		bootsync(howto);
 
 	/* Say NO to interrupts */
 	splhigh();
@@ -400,12 +394,6 @@ struct l1_sec_map {
 	    PTE_NOCACHE,
     },
     {
-	    ZAURUS_INTCTL_VBASE,
-	    PXA2X0_INTCTL_BASE,
-	    PXA2X0_INTCTL_SIZE,
-	    PTE_NOCACHE,
-    },
-    {
 	    ZAURUS_SCOOP0_VBASE,
 	    C3000_SCOOP0_BASE,
 	    SCOOP_SIZE,
@@ -430,7 +418,7 @@ map_io_area(paddr_t pagedir)
 	 */
 	loop = 0;
 	while (l1_sec_table[loop].size) {
-		vm_size_t sz;
+		vsize_t sz;
 
 #define VERBOSE_INIT_ARM
 #ifdef VERBOSE_INIT_ARM
@@ -730,39 +718,6 @@ initarm(void *arg)
 
 	/* Talk to the user */
 	printf("\nOpenBSD/zaurus booting ...\n");
-
-	/* Tweak memory controller */
-	{
-		/* Modify access timing for CS3 (91c96) */
-
-		uint32_t tmp = 
-			ioreg_read(PXA2X0_MEMCTL_BASE+MEMCTL_MSC1);
-		ioreg_write(PXA2X0_MEMCTL_BASE+MEMCTL_MSC1,
-			     (tmp & 0xffff) | (0x3881<<16));
-		/* RRR=3, RDN=8, RDF=8
-		 * XXX: can be faster?
-		 */
-	}
-
-
-	/* Initialize for PCMCIA/CF sockets */
-	{
-		uint32_t tmp;
-
-		/* Activate two sockets.
-		   XXX: This code segment should be moved to
-		        pcmcia MD attach routine.
-		   XXX: These bits should be toggled based on
-		        existene of PCMCIA/CF cards
-		*/
-		ioreg_write(PXA2X0_MEMCTL_BASE+MEMCTL_MECR,
-			     MECR_NOS|MECR_CIT);
-
-		tmp = ioreg_read(ZAURUS_SACC_PBASE+SACCSBI_SKCR);
-		ioreg_write(ZAURUS_SACC_PBASE+SACCSBI_SKCR,
-			     (tmp & ~(1<<4)) | (1<<0));
-	}
-
 
 	{
 		/* XXX - all Zaurus have this for now, fix memory sizing */

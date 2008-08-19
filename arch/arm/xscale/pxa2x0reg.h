@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0reg.h,v 1.23 2005/08/08 16:30:47 uwe Exp $ */
+/*	$OpenBSD: pxa2x0reg.h,v 1.25 2005/12/22 18:45:47 deraadt Exp $ */
 /* $NetBSD: pxa2x0reg.h,v 1.4 2003/06/11 20:43:01 scw Exp $ */
 
 /*
@@ -121,7 +121,7 @@
 #define PXA2X0_LCDC_BASE	0x44000000 /* LCD Controller */
 #define PXA2X0_LCDC_SIZE	0x220
 #define PXA2X0_MEMCTL_BASE	0x48000000 /* Memory Controller */
-#define PXA2X0_MEMCTL_SIZE	0x48
+#define PXA2X0_MEMCTL_SIZE	0x84
 #define PXA2X0_USBHC_BASE	0x4c000000 /* USB Host Controller */
 #define PXA2X0_USBHC_SIZE	0x70
 
@@ -518,6 +518,8 @@ struct pxa2x0_dma_desc {
 
 #define MEMCTL_MDMRS	0x0040
 
+#define MEMCTL_ARB_CNTRL 0x0048	/* System Bus Arbiter */
+
 /*
  * LCD Controller
  */
@@ -844,6 +846,14 @@ struct pxa2x0_dma_desc {
 #define OST_OSMR2	0x0008	/* Match 2 */
 #define OST_OSMR3	0x000c	/* Match 3 */
 #define OST_OSCR0	0x0010	/* Counter 0 */
+
+#define OST_OSCR4	0x0040	/* Counter 4 */
+#define OST_OMCR4	0x00c0	/* Counter 4 match control */
+#define OST_OSMR4	0x0080	/* Counter 4 match */
+#define OST_OSCR5	0x0044	/* Counter 5 */
+#define OST_OMCR5	0x00c4	/* Counter 5 match control */
+#define OST_OSMR5	0x0084	/* Counter 4 match */
+
 #define OST_OSSR	0x0014	/* Status (all counters) */
 #define OST_OWER	0x0018	/* Watchdog Enable */
 #define  OWER_WME	 (1<<0)

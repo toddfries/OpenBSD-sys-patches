@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tl.c,v 1.34 2005/07/02 22:52:16 brad Exp $	*/
+/*	$OpenBSD: if_tl.c,v 1.37 2005/11/23 11:30:14 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -210,6 +210,7 @@
 #endif
 
 #include <uvm/uvm_extern.h>              /* for vtophys */
+#define	VTOPHYS(v)	vtophys((vaddr_t)(v))
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -589,7 +590,7 @@ int tl_mii_readreg(sc, frame)
 	int			i, ack, s;
 	int			minten = 0;
 
-	s = splimp();
+	s = splnet();
 
 	tl_mii_sync(sc);
 
@@ -686,7 +687,7 @@ int tl_mii_writereg(sc, frame)
 
 	tl_mii_sync(sc);
 
-	s = splimp();
+	s = splnet();
 	/*
 	 * Set up frame for TX.
 	 */
@@ -1038,7 +1039,7 @@ int tl_list_rx_init(sc)
 		} else {
 			cd->tl_rx_chain[i].tl_next = &cd->tl_rx_chain[i + 1];
 			ld->tl_rx_list[i].tlist_fptr =
-					vtophys(&ld->tl_rx_list[i + 1]);
+					VTOPHYS(&ld->tl_rx_list[i + 1]);
 		}
 	}
 
@@ -1073,7 +1074,7 @@ int tl_newbuf(sc, c)
 	c->tl_next = NULL;
 	c->tl_ptr->tlist_frsize = MCLBYTES;
 	c->tl_ptr->tlist_fptr = 0;
-	c->tl_ptr->tl_frag.tlist_dadr = vtophys(mtod(m_new, caddr_t));
+	c->tl_ptr->tl_frag.tlist_dadr = VTOPHYS(mtod(m_new, caddr_t));
 	c->tl_ptr->tl_frag.tlist_dcnt = MCLBYTES;
 	c->tl_ptr->tlist_cstat = TL_CSTAT_READY;
 
@@ -1134,7 +1135,7 @@ int tl_intvec_rxeof(xsc, type)
 		}
 
 		sc->tl_cdata.tl_rx_tail->tl_ptr->tlist_fptr =
-						vtophys(cur_rx->tl_ptr);
+						VTOPHYS(cur_rx->tl_ptr);
 		sc->tl_cdata.tl_rx_tail->tl_next = cur_rx;
 		sc->tl_cdata.tl_rx_tail = cur_rx;
 
@@ -1199,7 +1200,7 @@ int tl_intvec_rxeoc(xsc, type)
 	r = 1;
 	cd->tl_rx_head = &cd->tl_rx_chain[0];
 	cd->tl_rx_tail = &cd->tl_rx_chain[TL_RX_LIST_CNT - 1];
-	CSR_WRITE_4(sc, TL_CH_PARM, vtophys(sc->tl_cdata.tl_rx_head->tl_ptr));
+	CSR_WRITE_4(sc, TL_CH_PARM, VTOPHYS(sc->tl_cdata.tl_rx_head->tl_ptr));
 	r |= (TL_CMD_GO|TL_CMD_RT);
 	return(r);
 }
@@ -1280,7 +1281,7 @@ int tl_intvec_txeoc(xsc, type)
 		CMD_PUT(sc, TL_CMD_ACK | 0x00000001 | type);
 		/* Then load the address of the next TX list. */
 		CSR_WRITE_4(sc, TL_CH_PARM,
-		    vtophys(sc->tl_cdata.tl_tx_head->tl_ptr));
+		    VTOPHYS(sc->tl_cdata.tl_tx_head->tl_ptr));
 		/* Restart TX channel. */
 		cmd = CSR_READ_4(sc, TL_HOSTCMD);
 		cmd &= ~TL_CMD_RT;
@@ -1407,7 +1408,7 @@ void tl_stats_update(xsc)
 	u_int32_t		*p;
 	int			s;
 
-	s = splimp();
+	s = splnet();
 
 	bzero((char *)&tl_stats, sizeof(struct tl_stats));
 
@@ -1479,7 +1480,7 @@ int tl_encap(sc, c, m_head)
 				break;
 			total_len+= m->m_len;
 			c->tl_ptr->tl_frag[frag].tlist_dadr =
-				vtophys(mtod(m, vaddr_t));
+				VTOPHYS(mtod(m, vaddr_t));
 			c->tl_ptr->tl_frag[frag].tlist_dcnt = m->m_len;
 			frag++;
 		}
@@ -1514,7 +1515,7 @@ int tl_encap(sc, c, m_head)
 		m_freem(m_head);
 		m_head = m_new;
 		f = &c->tl_ptr->tl_frag[0];
-		f->tlist_dadr = vtophys(mtod(m_new, caddr_t));
+		f->tlist_dadr = VTOPHYS(mtod(m_new, caddr_t));
 		f->tlist_dcnt = total_len = m_new->m_len;
 		frag = 1;
 	}
@@ -1526,7 +1527,7 @@ int tl_encap(sc, c, m_head)
 	if (total_len < TL_MIN_FRAMELEN) {
 		f = &c->tl_ptr->tl_frag[frag];
 		f->tlist_dcnt = TL_MIN_FRAMELEN - total_len;
-		f->tlist_dadr = vtophys(&sc->tl_ldata->tl_pad);
+		f->tlist_dadr = VTOPHYS(&sc->tl_ldata->tl_pad);
 		total_len += f->tlist_dcnt;
 		frag++;
 	}
@@ -1584,7 +1585,7 @@ void tl_start(ifp)
 		/* Chain it together */
 		if (prev != NULL) {
 			prev->tl_next = cur_tx;
-			prev->tl_ptr->tlist_fptr = vtophys(cur_tx->tl_ptr);
+			prev->tl_ptr->tlist_fptr = VTOPHYS(cur_tx->tl_ptr);
 		}
 		prev = cur_tx;
 
@@ -1617,7 +1618,7 @@ void tl_start(ifp)
 
 		if (sc->tl_txeoc) {
 			sc->tl_txeoc = 0;
-			CSR_WRITE_4(sc, TL_CH_PARM, vtophys(start_tx->tl_ptr));
+			CSR_WRITE_4(sc, TL_CH_PARM, VTOPHYS(start_tx->tl_ptr));
 			cmd = CSR_READ_4(sc, TL_HOSTCMD);
 			cmd &= ~TL_CMD_RT;
 			cmd |= TL_CMD_GO|TL_CMD_INTSON;
@@ -1643,7 +1644,7 @@ void tl_init(xsc)
 	struct ifnet		*ifp = &sc->arpcom.ac_if;
         int			s;
 
-	s = splimp();
+	s = splnet();
 
 	ifp = &sc->arpcom.ac_if;
 
@@ -1700,7 +1701,7 @@ void tl_init(xsc)
 
 	/* Load the address of the rx list */
 	CMD_SET(sc, TL_CMD_RT);
-	CSR_WRITE_4(sc, TL_CH_PARM, vtophys(&sc->tl_ldata->tl_rx_list[0]));
+	CSR_WRITE_4(sc, TL_CH_PARM, VTOPHYS(&sc->tl_ldata->tl_rx_list[0]));
 
 	if (!sc->tl_bitrate) {
 		mii_mediachg(&sc->sc_mii);
@@ -1782,7 +1783,7 @@ int tl_ioctl(ifp, command, data)
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int			s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
 		splx(s);
@@ -1996,7 +1997,6 @@ tl_attach(parent, self, aux)
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	struct ifnet *ifp = &sc->arpcom.ac_if;
-	bus_addr_t iobase;
 	bus_size_t iosize;
 	u_int32_t command;
 	int i, rseg;
@@ -2014,35 +2014,27 @@ tl_attach(parent, self, aux)
 		printf(": failed to enable I/O ports\n");
 		return;
 	}
-	if (pci_io_find(pc, pa->pa_tag, TL_PCI_LOIO, &iobase, &iosize)) {
-		if (pci_io_find(pc, pa->pa_tag, TL_PCI_LOMEM,
-		    &iobase, &iosize)) {
-			printf(": failed to find i/o space\n");
+	if (pci_mapreg_map(pa, TL_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
+	    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)) {
+		if (pci_mapreg_map(pa, TL_PCI_LOMEM, PCI_MAPREG_TYPE_IO, 0,
+		    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)) {
+			printf(": failed to map i/o space\n");
 			return;
 		}
 	}
-	if (bus_space_map(pa->pa_iot, iobase, iosize, 0, &sc->tl_bhandle)) {
-		printf(": failed map i/o space\n");
-		return;
-	}
-	sc->tl_btag = pa->pa_iot;
 #else
 	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
 		printf(": failed to enable memory mapping\n");
 		return;
 	}
-	if (pci_mem_find(pc, pa->pa_tag, TL_PCI_LOMEM, &iobase, &iosize, NULL)){
-		if (pci_mem_find(pc, pa->pa_tag, TL_PCI_LOIO,
-		    &iobase, &iosize, NULL)) {
-			printf(": failed to find memory space\n");
+	if (pci_mapreg_map(pa, TL_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)){
+		if (pci_mapreg_map(pa, TL_PCI_LOIO, PCI_MAPREG_TYPE_MEM, 0,
+		    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)){
+			printf(": failed to map memory space\n");
 			return;
 		}
 	}
-	if (bus_space_map(pa->pa_memt, iobase, iosize, 0, &sc->tl_bhandle)) {
-		printf(": failed map memory space\n");
-		return;
-	}
-	sc->tl_btag = pa->pa_memt;
 #endif
 
 	/*
@@ -2057,6 +2049,7 @@ tl_attach(parent, self, aux)
 	 */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
+		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
@@ -2067,6 +2060,7 @@ tl_attach(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
+		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
 		return;
 	}
 	printf(": %s", intrstr);
@@ -2075,6 +2069,7 @@ tl_attach(parent, self, aux)
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(struct tl_list_data),
 	    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
 		printf("%s: can't alloc list\n", sc->sc_dev.dv_xname);
+		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
 		return;
 	}
 	if (bus_dmamem_map(sc->sc_dmat, &seg, rseg, sizeof(struct tl_list_data),
@@ -2089,6 +2084,7 @@ tl_attach(parent, self, aux)
 		printf("%s: can't create dma map\n", sc->sc_dev.dv_xname);
 		bus_dmamem_unmap(sc->sc_dmat, kva, sizeof(struct tl_list_data));
 		bus_dmamem_free(sc->sc_dmat, &seg, rseg);
+		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
 		return;
 	}
 	if (bus_dmamap_load(sc->sc_dmat, dmamap, kva,
@@ -2097,6 +2093,7 @@ tl_attach(parent, self, aux)
 		bus_dmamap_destroy(sc->sc_dmat, dmamap);
 		bus_dmamem_unmap(sc->sc_dmat, kva, sizeof(struct tl_list_data));
 		bus_dmamem_free(sc->sc_dmat, &seg, rseg);
+		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
 		return;
 	}
 	sc->tl_ldata = (struct tl_list_data *)kva;
@@ -2130,7 +2127,8 @@ tl_attach(parent, self, aux)
 	    sc->tl_eeaddr, ETHER_ADDR_LEN)) {
 		printf("\n%s: failed to read station address\n",
 		    sc->sc_dev.dv_xname);
-	    return;
+		bus_space_unmap(sc->tl_btag, sc->tl_bhandle, iosize);
+		return;
 	}
 
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_OLICOM) {

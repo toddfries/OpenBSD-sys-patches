@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide_sii3112_reg.h,v 1.3 2005/06/08 20:43:40 fgsch Exp $	*/
+/*	$OpenBSD: pciide_sii3112_reg.h,v 1.5 2006/02/10 21:45:41 kettenis Exp $	*/
 /*	$NetBSD: pciide_sii3112_reg.h,v 1.1 2003/03/20 04:22:50 thorpej Exp $	*/
 
 /*
@@ -338,7 +338,7 @@ struct pciide_satalink {
 };
 
 static INLINE uint32_t
-ba5_read_4_ind(struct pciide_softc *sc, bus_addr_t reg)
+ba5_read_4_ind(struct pciide_softc *sc, pcireg_t reg)
 {
 	uint32_t rv;
 	int s;
@@ -352,7 +352,7 @@ ba5_read_4_ind(struct pciide_softc *sc, bus_addr_t reg)
 }
 
 static INLINE uint32_t
-ba5_read_4(struct pciide_softc *sc, bus_addr_t reg)
+ba5_read_4(struct pciide_softc *sc, bus_size_t reg)
 {
 	struct pciide_satalink *sl = sc->sc_cookie;
 
@@ -366,7 +366,7 @@ ba5_read_4(struct pciide_softc *sc, bus_addr_t reg)
 	ba5_read_4((sc), satalink_ba5_regmap[(chan)].reg)
 
 static INLINE void
-ba5_write_4_ind(struct pciide_softc *sc, bus_addr_t reg, uint32_t val)
+ba5_write_4_ind(struct pciide_softc *sc, pcireg_t reg, uint32_t val)
 {
 	int s;
 
@@ -377,7 +377,7 @@ ba5_write_4_ind(struct pciide_softc *sc, bus_addr_t reg, uint32_t val)
 }
 
 static INLINE void
-ba5_write_4(struct pciide_softc *sc, bus_addr_t reg, uint32_t val)
+ba5_write_4(struct pciide_softc *sc, bus_size_t reg, uint32_t val)
 {
 	struct pciide_satalink *sl = sc->sc_cookie;
 
@@ -396,6 +396,7 @@ void     sii3114_write_reg(struct channel_softc *, enum wdc_regs, u_int8_t);
 struct channel_softc_vtbl wdc_sii3114_vtbl = {
 	sii3114_read_reg,
 	sii3114_write_reg,
+	wdc_default_lba48_write_reg,
 	wdc_default_read_raw_multi_2,
 	wdc_default_write_raw_multi_2,
 	wdc_default_read_raw_multi_4,

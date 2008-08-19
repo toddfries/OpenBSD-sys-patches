@@ -1,4 +1,4 @@
-/*	$OpenBSD: gscsio.c,v 1.3 2004/11/17 16:53:05 mickey Exp $	*/
+/*	$OpenBSD: gscsio.c,v 1.8 2006/01/05 10:43:15 grange Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -250,6 +250,7 @@ gscsio_acb_init(struct gscsio_acb *acb, i2c_tag_t tag)
 	tag->ic_read_byte = gscsio_acb_read_byte;
 	tag->ic_write_byte = gscsio_acb_write_byte;
 
+	bzero(&iba, sizeof(iba));
 	iba.iba_name = "iic";
 	iba.iba_tag = tag;
 	config_found(&sc->sc_dev, &iba, iicbus_print);
@@ -271,8 +272,10 @@ gscsio_acb_wait(struct gscsio_acb *acb, int bits, int flags)
 			return (EIO);
 		}
 		if (st & GSCSIO_ACB_ST_NEGACK) {
+#if 0
 			printf("%s: negative ack, flags=0x%x\n",
 			    sc->sc_dev.dv_xname, flags);
+#endif
 			gscsio_acb_reset(acb);
 			return (EIO);
 		}
@@ -317,10 +320,10 @@ gscsio_acb_acquire_bus(void *cookie, int flags)
 {
 	struct gscsio_acb *acb = cookie;
 
-	if (flags & I2C_F_POLL)
+	if (cold || flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&acb->buslock, LK_EXCLUSIVE, NULL, curproc));
+	return (lockmgr(&acb->buslock, LK_EXCLUSIVE, NULL));
 }
 
 void
@@ -328,10 +331,10 @@ gscsio_acb_release_bus(void *cookie, int flags)
 {
 	struct gscsio_acb *acb = cookie;
 
-	if (flags & I2C_F_POLL)
+	if (cold || flags & I2C_F_POLL)
 		return;
 
-	lockmgr(&acb->buslock, LK_RELEASE, NULL, curproc);
+	lockmgr(&acb->buslock, LK_RELEASE, NULL);
 }
 
 int

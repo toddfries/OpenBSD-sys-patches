@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.76 2005/05/29 03:20:41 deraadt Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.82 2006/02/20 19:39:11 miod Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -55,6 +55,7 @@
 #include <dev/rndvar.h>
 #include <sys/pool.h>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 
 #include <sys/syscallargs.h>
 
@@ -69,14 +70,31 @@ int	randompid;		/* when set to 1, pid's go random */
 pid_t	lastpid;
 struct	forkstat forkstat;
 
+void fork_return(void *);
 int pidtaken(pid_t);
+
+void
+fork_return(void *arg)
+{
+	struct proc *p = (struct proc *)arg;
+
+	if (p->p_flag & P_TRACED)
+		psignal(p, SIGTRAP);
+
+	child_return(p);
+}
 
 /*ARGSUSED*/
 int
 sys_fork(struct proc *p, void *v, register_t *retval)
 {
-	return (fork1(p, SIGCHLD, FORK_FORK, NULL, 0, NULL,
-	    NULL, retval, NULL));
+	int flags;
+
+	flags = FORK_FORK;
+	if (p->p_ptmask & PTRACE_FORK)
+		flags |= FORK_PTRACE;
+	return (fork1(p, SIGCHLD, flags, NULL, 0,
+	    fork_return, NULL, retval, NULL));
 }
 
 /*ARGSUSED*/
@@ -121,6 +139,10 @@ sys_rfork(struct proc *p, void *v, register_t *retval)
 
 	if (rforkflags & RFMEM)
 		flags |= FORK_SHAREVM;
+#ifdef RTHREADS
+	if (rforkflags & RFTHREAD)
+		flags |= FORK_THREAD;
+#endif
 
 	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
 }
@@ -220,6 +242,8 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
 	p2->p_flag |= (p1->p_flag & (P_SUGID | P_SUGIDEXEC));
+	if (flags & FORK_PTRACE)
+		p2->p_flag |= (p1->p_flag & P_TRACED);
 	p2->p_cred = pool_get(&pcred_pool, PR_WAITOK);
 	bcopy(p1->p_cred, p2->p_cred, sizeof(*p2->p_cred));
 	p2->p_cred->p_refcnt = 1;
@@ -260,6 +284,20 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		p2->p_flag |= P_NOZOMBIE;
 	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
 	LIST_INIT(&p2->p_children);
+
+#ifdef RTHREADS
+	if (flags & FORK_THREAD) {
+		p2->p_flag |= P_THREAD;
+		p2->p_thrparent = p1->p_thrparent;
+		LIST_INSERT_HEAD(&p1->p_thrparent->p_thrchildren, p2, p_thrsib);
+	} else {
+		p2->p_thrparent = p2;
+	}
+#else
+	p2->p_thrparent = p2;
+#endif
+
+	LIST_INIT(&p2->p_thrchildren);
 
 #ifdef KTRACE
 	/*
@@ -329,6 +367,23 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
 	} while (pidtaken(lastpid));
 	p2->p_pid = lastpid;
+	if (p2->p_flag & P_TRACED) {
+		p2->p_oppid = p1->p_pid;
+		if (p2->p_pptr != p1->p_pptr)
+			proc_reparent(p2, p1->p_pptr);
+
+		/*
+		 * Set ptrace status.
+		 */
+		if (flags & FORK_FORK) {
+			p2->p_ptstat = malloc(sizeof(*p2->p_ptstat),
+			    M_SUBPROC, M_WAITOK);
+			p1->p_ptstat->pe_report_event = PTRACE_FORK;
+			p2->p_ptstat->pe_report_event = PTRACE_FORK;
+			p1->p_ptstat->pe_other_pid = p2->p_pid;
+			p2->p_ptstat->pe_other_pid = p1->p_pid;
+		}
+	}
 
 	LIST_INSERT_HEAD(&allproc, p2, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
@@ -337,6 +392,9 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	if (ISSET(p1->p_flag, P_SYSTRACE))
 		systrace_fork(p1, p2);
 #endif
+
+	timeout_set(&p2->p_stats->p_virt_to, virttimer_trampoline, p2);
+	timeout_set(&p2->p_stats->p_prof_to, proftimer_trampoline, p2);
 
 	/*
 	 * Make child runnable, set start time, and add to run queue.
@@ -347,9 +405,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	p2->p_stat = SRUN;
 	setrunqueue(p2);
 	SCHED_UNLOCK(s);
-
-	timeout_set(&p2->p_stats->p_virt_to, virttimer_trampoline, p2);
-	timeout_set(&p2->p_stats->p_prof_to, proftimer_trampoline, p2);
 
 	/*
 	 * Now can be swapped.
@@ -384,6 +439,12 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	if (flags & FORK_PPWAIT)
 		while (p2->p_flag & P_PPWAIT)
 			tsleep(p1, PWAIT, "ppwait", 0);
+
+	/*
+	 * If we're tracing the child, alert the parent too.
+	 */
+	if ((flags & FORK_PTRACE) && (p1->p_flag & P_TRACED))
+		psignal(p1, SIGTRAP);
 
 	/*
 	 * Return child pid to parent process,

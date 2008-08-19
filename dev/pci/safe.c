@@ -1,4 +1,4 @@
-/*	$OpenBSD: safe.c,v 1.15 2005/08/09 04:10:13 mickey Exp $	*/
+/*	$OpenBSD: safe.c,v 1.18 2006/02/06 17:29:11 jmc Exp $	*/
 
 /*-
  * Copyright (c) 2003 Sam Leffler, Errno Consulting
@@ -744,7 +744,7 @@ safe_process(struct cryptop *crp)
 					 * an error.  Note that uio requests
 					 * > SAFE_MAX_DSIZE are handled because
 					 * the DMA map and segment list for the
-					 * destination wil result in a
+					 * destination will result in a
 					 * destination particle list that does
 					 * the necessary scatter DMA.
 					 */ 
@@ -1488,7 +1488,7 @@ safe_dmamap_aligned(const struct safe_operand *op)
 
 /*
  * Clean up after a chip crash.
- * It is assumed that the caller in splimp()
+ * It is assumed that the caller in splnet()
  */
 void
 safe_cleanchip(struct safe_softc *sc)
@@ -1510,7 +1510,7 @@ safe_cleanchip(struct safe_softc *sc)
 
 /*
  * free a safe_q
- * It is assumed that the caller is within splimp().
+ * It is assumed that the caller is within splnet().
  */
 int
 safe_free_entry(struct safe_softc *sc, struct safe_ringentry *re)
@@ -1600,10 +1600,7 @@ safe_mcopy(struct mbuf *srcm, struct mbuf *dstm, u_int offset)
 	/*
 	 * Advance src and dst to offset.
 	 */
-	j = offset;
-	while (j >= 0) {
-		if (srcm->m_len > j)
-			break;
+	for (j = offset; srcm->m_len <= j;) {
 		j -= srcm->m_len;
 		srcm = srcm->m_next;
 		if (srcm == NULL)
@@ -1612,10 +1609,7 @@ safe_mcopy(struct mbuf *srcm, struct mbuf *dstm, u_int offset)
 	sptr = mtod(srcm, caddr_t) + j;
 	slen = srcm->m_len - j;
 
-	j = offset;
-	while (j >= 0) {
-		if (dstm->m_len > j)
-			break;
+	for (j = offset; dstm->m_len <= j;) {
 		j -= dstm->m_len;
 		dstm = dstm->m_next;
 		if (dstm == NULL)

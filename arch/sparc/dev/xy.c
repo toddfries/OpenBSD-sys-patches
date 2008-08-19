@@ -1,4 +1,4 @@
-/*	$OpenBSD: xy.c,v 1.25 2004/09/29 07:35:11 miod Exp $	*/
+/*	$OpenBSD: xy.c,v 1.27 2006/01/20 23:27:25 miod Exp $	*/
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -79,7 +79,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
-#include <machine/sun_disklabel.h>
+#include <dev/sun/disklabel.h>
 #include <machine/conf.h>
 
 #include <sparc/dev/xyreg.h>
@@ -225,7 +225,7 @@ xydummystrat(bp)
 {
 	if (bp->b_bcount != XYFM_BPS)
 		panic("xydummystrat");
-	bcopy(xy_labeldata, bp->b_un.b_addr, XYFM_BPS);
+	bcopy(xy_labeldata, bp->b_data, XYFM_BPS);
 	bp->b_flags |= B_DONE;
 	bp->b_flags &= ~B_BUSY;
 }
@@ -1634,7 +1634,7 @@ xyc_reset(xycsc, quiet, blastmode, error, xysc)
 			    iorq->buf->b_flags |= B_ERROR;
 			    iorq->buf->b_resid = iorq->sectcnt * XYFM_BPS;
 			    dvma_mapout((vaddr_t)iorq->dbufbase,
-					(vaddr_t)iorq->buf->b_un.b_addr,
+					(vaddr_t)iorq->buf->b_data,
 					iorq->buf->b_bcount);
 			    iorq->xy->xyq.b_actf = iorq->buf->b_actf;
 			    disk_unbusy(&xycsc->reqs[lcv].xy->sc_dk,
@@ -1813,7 +1813,7 @@ xyc_remove_iorq(xycsc)
 				bp->b_resid = 0;	/* done */
 			}
 			dvma_mapout((vaddr_t) iorq->dbufbase,
-				    (vaddr_t) bp->b_un.b_addr,
+				    (vaddr_t) bp->b_data,
 				    bp->b_bcount);
 			iorq->xy->xyq.b_actf = bp->b_actf;
 			disk_unbusy(&iorq->xy->sc_dk,

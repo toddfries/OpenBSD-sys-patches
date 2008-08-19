@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.19 2005/07/30 20:50:35 brad Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.21 2006/01/06 20:30:09 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.22 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -159,7 +159,8 @@ pci_dev_funcorder(pc, busno, device, funcs)
 	char *funcs;
 {
 	struct ofw_pci_register reg;
-	int node, len, i = 0;
+	int node, len, function, i = 0;
+	u_int8_t done = 0;
 #ifdef DEBUG
 	char name[80];
 #endif
@@ -188,7 +189,14 @@ pci_dev_funcorder(pc, busno, device, funcs)
 		if (device != OFW_PCI_PHYS_HI_DEVICE(reg.phys_hi))
 			continue;
 
-		funcs[i++] = OFW_PCI_PHYS_HI_FUNCTION(reg.phys_hi);
+		
+		function = OFW_PCI_PHYS_HI_FUNCTION(reg.phys_hi);
+
+		if (done & (1 << function))
+			continue;
+
+		funcs[i++] = function;
+		done |= 1 << function;
 #ifdef DEBUG
 	if (sparc_pci_debug & SPDB_PROBE) {
 		OF_getprop(node, "name", &name, sizeof(name));
@@ -449,16 +457,6 @@ pci_intr_string(pc, ih)
 	DPRINTF(SPDB_INTR, ("; returning %s\n", str));
 
 	return (str);
-}
-
-const struct evcnt *
-pci_intr_evcnt(pc, ih)
-	pci_chipset_tag_t pc;
-	pci_intr_handle_t ih;
-{
-
-	/* XXX for now, no evcnt parent reported */
-	return NULL;
 }
 
 void *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.9 2005/05/25 07:40:49 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.12 2005/09/13 12:11:03 reyk Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -77,7 +77,7 @@ enum ieee80211_phymode {
 
 enum ieee80211_opmode {
 	IEEE80211_M_STA		= 1,	/* infrastructure station */
-	IEEE80211_M_IBSS 	= 0,	/* IBSS (adhoc) station */
+	IEEE80211_M_IBSS	= 0,	/* IBSS (adhoc) station */
 	IEEE80211_M_AHDEMO	= 3,	/* Old lucent compatible adhoc demo */
 	IEEE80211_M_HOSTAP	= 6,	/* Software Access Point */
 	IEEE80211_M_MONITOR	= 8	/* Monitor mode */
@@ -144,11 +144,7 @@ struct ieee80211_channel {
 #define	IEEE80211_SCAN_RESUME	0x4
 
 struct ieee80211com {
-#ifdef __NetBSD__
-	struct ethercom		ic_ec;
-#else
 	struct arpcom		ic_ac;
-#endif
 	LIST_ENTRY(ieee80211com) ic_list;	/* chain of all ieee80211com */
 	void			(*ic_recv_mgmt)(struct ieee80211com *,
 				    struct mbuf *, struct ieee80211_node *,
@@ -181,11 +177,7 @@ struct ieee80211com {
 	u_int16_t		ic_max_aid;
 	enum ieee80211_protmode	ic_protmode;	/* 802.11g protection mode */
 	struct ifmedia		ic_media;	/* interface media config */
-#ifdef __FreeBSD__
-	struct bpf_if		*ic_rawbpf;	/* packet filter structure */
-#else
 	caddr_t			ic_rawbpf;	/* packet filter structure */
-#endif
 	struct ieee80211_node	*ic_bss;	/* information for this node */
 	struct ieee80211_channel *ic_ibss_chan;
 	int			ic_fixed_rate;	/* index to ic_sup_rates[] */
@@ -201,12 +193,9 @@ struct ieee80211com {
 					const struct ieee80211_node *);
 	u_int8_t		(*ic_node_getrssi)(struct ieee80211com *,
 					struct ieee80211_node *);
-	TAILQ_HEAD(, ieee80211_node) ic_node;	/* information of all nodes
-						 * LRU at tail
-						 */
+	struct ieee80211_tree	ic_tree;
 	int			ic_nnodes;	/* length of ic_nnodes */
 	int			ic_max_nnodes;	/* max length of ic_nnodes */
-	LIST_HEAD(, ieee80211_node) ic_hash[IEEE80211_NODE_HASHSIZE];
 	u_int16_t		ic_lintval;	/* listen interval */
 	u_int16_t		ic_holdover;	/* PM hold over duration */
 	u_int16_t		ic_txmin;	/* min tx retry count */
@@ -229,11 +218,7 @@ struct ieee80211com {
 							 * IBSS merge print-outs
 							 */
 };
-#ifdef __NetBSD__
-#define	ic_if		ic_ec.ec_if
-#else
 #define	ic_if		ic_ac.ac_if
-#endif
 #define	ic_softc	ic_if.if_softc
 
 LIST_HEAD(ieee80211com_head, ieee80211com);

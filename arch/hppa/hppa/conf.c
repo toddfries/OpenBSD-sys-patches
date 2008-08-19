@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.34 2005/07/31 06:39:06 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.36 2006/01/11 21:57:53 martin Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -81,12 +81,6 @@ struct bdevsw   bdevsw[] =
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
-/* open, close, read, write, ioctl, tty, mmap */
-#define cdev_wscons_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), dev_init(c,n,stop), \
-	dev_init(c,n,tty), ttpoll, dev_init(c,n,mmap) }
-
 #include "audio.h"
 #include "pty.h"
 #include "wsdisplay.h"
@@ -113,6 +107,7 @@ cdev_decl(com);
 #include "pf.h"
 
 #include "systrace.h"
+#include "hotplug.h"
 
 #ifdef USER_PCICONF
 #include "pci.h"
@@ -185,6 +180,7 @@ struct cdevsw   cdevsw[] =
 	cdev_urio_init(NURIO,urio),	/* 44: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 45: USB tty */
 	cdev_usbdev_init(NUSCANNER,uscanner), /* 46: USB scanners */
+	cdev_hotplug_init(NHOTPLUG,hotplug), /* 47: devices hot plugging */
 	cdev_lkm_dummy(),
 	cdev_lkm_dummy(),
 	cdev_lkm_dummy(),

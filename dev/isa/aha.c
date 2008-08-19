@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha.c,v 1.53 2004/12/26 21:22:13 miod Exp $	*/
+/*	$OpenBSD: aha.c,v 1.55 2005/12/03 17:13:22 krw Exp $	*/
 /*	$NetBSD: aha.c,v 1.11 1996/05/12 23:51:23 mycroft Exp $	*/
 
 #undef AHADIAG
@@ -1147,7 +1147,7 @@ aha_init(sc)
 	/* Initialize mail box. */
 	mailbox.cmd.opcode = AHA_MBX_INIT;
 	mailbox.cmd.nmbx = AHA_MBX_SIZE;
-	ltophys(vtophys(wmbx), mailbox.cmd.addr);
+	ltophys(vtophys((vaddr_t)wmbx), mailbox.cmd.addr);
 	aha_cmd(iobase, sc, sizeof(mailbox.cmd), (u_char *)&mailbox.cmd,
 	    0, (u_char *)0);
 }
@@ -1271,7 +1271,6 @@ aha_scsi_cmd(xs)
 	 */
 	flags = xs->flags;
 	if ((ccb = aha_get_ccb(sc, flags)) == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
 		return (TRY_AGAIN_LATER);
 	}
 	ccb->xs = xs;

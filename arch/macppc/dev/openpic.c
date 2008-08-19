@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.28 2004/07/14 11:36:16 miod Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.33 2005/11/17 15:03:51 drahn Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -108,13 +108,19 @@ int
 openpic_match(struct device *parent, void *cf, void *aux)
 {
 	char type[40];
+	int pirq;
 	struct confargs *ca = aux;
 
 	bzero (type, sizeof(type));
 
-	if (strcmp(ca->ca_name, "interrupt-controller") == 0 ) {
+	if (OF_getprop(ca->ca_node, "interrupt-parent", &pirq, sizeof(pirq))
+	    == sizeof(pirq))
+		return 0; /* XXX */
+
+	if (strcmp(ca->ca_name, "interrupt-controller") == 0 ||
+	    strcmp(ca->ca_name, "mpic") == 0) {
 		OF_getprop(ca->ca_node, "device_type", type, sizeof(type));
-		if (strcmp(type,  "open-pic") == 0)
+		if (strcmp(type, "open-pic") == 0)
 			return 1;
 	}
 	return 0;
@@ -139,7 +145,7 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	extern intr_disestablish_t *mac_intr_disestablish_func;
 
 	openpic_base = (vaddr_t) mapiodev (ca->ca_baseaddr +
-			ca->ca_reg[0], 0x22000);
+			ca->ca_reg[0], 0x40000);
 
 	printf(": version 0x%x", openpic_read(OPENPIC_VENDOR_ID));
 
@@ -262,7 +268,8 @@ printf("vI %d ", irq);
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_irq, &evcount_intr);
+	evcount_attach(&ih->ih_count, name, (void *)&o_hwirq[irq],
+	    &evcount_intr);
 	*p = ih;
 
 	return (ih);
@@ -406,7 +413,7 @@ mapirq(int irq)
 		return o_virq[irq];
 
 	if (irq < 0 || irq >= ICU_LEN)
-		panic("invalid irq");
+		panic("invalid irq %d", irq);
 
 	o_virq_max++;
 	v = o_virq_max;
@@ -462,8 +469,13 @@ openpic_do_pending_int()
 		hwpend &= ~(1L << irq);
 		ih = o_intrhand[irq];
 		while(ih) {
+			ppc_intr_enable(1);
+
 			if ((*ih->ih_fun)(ih->ih_arg))
 				ih->ih_count.ec_count++;
+
+			(void)ppc_intr_disable();
+			
 			ih = ih->ih_next;
 		}
 	}
@@ -634,6 +646,7 @@ ext_intr_openpic()
 
 	splx(pcpl);	/* Process pendings. */
 }
+
 void
 openpic_init()
 {

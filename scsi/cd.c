@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.87 2005/08/23 23:38:00 krw Exp $	*/
+/*	$OpenBSD: cd.c,v 1.104 2006/01/21 12:18:49 miod Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -88,17 +88,6 @@
 #define CD_FRAMES	75
 #define CD_SECS		60
 
-#define TOC_HEADER_LEN			0
-#define TOC_HEADER_STARTING_TRACK	2
-#define TOC_HEADER_ENDING_TRACK		3
-#define TOC_HEADER_SZ			4
-
-#define TOC_ENTRY_CONTROL_ADDR_TYPE	1
-#define TOC_ENTRY_TRACK			2
-#define TOC_ENTRY_MSF_LBA		4
-#define TOC_ENTRY_SZ			8
-
-
 struct cd_toc {
 	struct ioc_toc_header header;
 	struct cd_toc_entry entries[MAXTRACK+1]; /* One extra for the */
@@ -111,7 +100,6 @@ int	cdmatch(struct device *, void *, void *);
 void	cdattach(struct device *, struct device *, void *);
 int	cdactivate(struct device *, enum devact);
 int	cddetach(struct device *, int);
-void    cdzeroref(struct device *);
 
 void	cdstart(void *);
 void	cdminphys(struct buf *);
@@ -133,10 +121,9 @@ int	cd_pause(struct cd_softc *, int);
 int	cd_reset(struct cd_softc *);
 int	cd_read_subchannel(struct cd_softc *, int, int, int,
 	    struct cd_sub_channel_info *, int );
-int	cd_read_toc(struct cd_softc *, int, int, void *,
-			 int, int );
+int	cd_read_toc(struct cd_softc *, int, int, void *, int, int);
 int	cd_get_parms(struct cd_softc *, int);
-int	cd_load_toc(struct cd_softc *, struct cd_toc *);
+int	cd_load_toc(struct cd_softc *, struct cd_toc *, int);
 
 int    dvd_auth(struct cd_softc *, union dvd_authinfo *);
 int    dvd_read_physical(struct cd_softc *, union dvd_struct *);
@@ -148,7 +135,7 @@ int    dvd_read_struct(struct cd_softc *, union dvd_struct *);
 
 struct cfattach cd_ca = {
 	sizeof(struct cd_softc), cdmatch, cdattach,
-	cddetach, cdactivate, cdzeroref
+	cddetach, cdactivate
 };
 
 struct cfdriver cd_cd = {
@@ -289,19 +276,12 @@ cddetach(self, flags)
 	for (cmaj = 0; cmaj < nchrdev; cmaj++)
 		if (cdevsw[cmaj].d_open == cdopen)
 			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
-	return (0);
-}
-
-void
-cdzeroref(self)
-	struct device *self;
-{
-	struct cd_softc *cd = (struct cd_softc *)self;
 
 	/* Detach disk. */
-	disk_detach(&cd->sc_dk);
-}
+	disk_detach(&sc->sc_dk);
 
+	return (0);
+}
 
 /*
  * Open the device. Make sure the partition info is as up-to-date as can be.
@@ -314,11 +294,12 @@ cdopen(dev, flag, fmt, p)
 {
 	struct scsi_link *sc_link;
 	struct cd_softc *cd;
-	int unit, part;
-	int error = 0;
+	int error = 0, part, rawopen, unit;
 
 	unit = CDUNIT(dev);
 	part = CDPART(dev);
+
+	rawopen = (part == RAW_PART) && (fmt == S_IFCHR);
 
 	cd = cdlookup(unit);
 	if (cd == NULL)
@@ -340,7 +321,7 @@ cdopen(dev, flag, fmt, p)
 		 * disallow further opens.
 		 */
 		if ((sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
-			if (part == RAW_PART && fmt == S_IFCHR)
+			if (rawopen)
 				goto out;
 			error = EIO;
 			goto bad;
@@ -352,8 +333,8 @@ cdopen(dev, flag, fmt, p)
 		 * and don't ignore NOT_READY.
 		 */
 		error = scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_CD,
-		    (part == RAW_PART && fmt == S_IFCHR) ? SCSI_SILENT : 0 |
-		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
+		    (rawopen ? SCSI_SILENT : 0) | SCSI_IGNORE_ILLEGAL_REQUEST |
+		    SCSI_IGNORE_MEDIA_CHANGE);
 			
 		/* Start the cd spinning if necessary. */
 		if (error == EIO)
@@ -362,7 +343,7 @@ cdopen(dev, flag, fmt, p)
 			    SCSI_IGNORE_MEDIA_CHANGE | SCSI_SILENT);
 
 		if (error) {
-			if (part == RAW_PART && fmt == S_IFCHR) {
+			if (rawopen) {
 				error = 0;
 				goto out;
 			} else
@@ -461,7 +442,7 @@ cdclose(dev, flag, fmt, p)
 
 		scsi_prevent(cd->sc_link, PR_ALLOW,
 		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_NOT_READY);
-		cd->sc_link->flags &= ~SDEV_OPEN;
+		cd->sc_link->flags &= ~(SDEV_OPEN | SDEV_MEDIA_LOADED);
 
 		if (cd->sc_link->flags & SDEV_EJECTING) {
 			scsi_start(cd->sc_link, SSS_STOP|SSS_LOEJ, 0);
@@ -729,6 +710,8 @@ cdminphys(bp)
 	}
 
 	(*cd->sc_link->adapter->scsi_minphys)(bp);
+
+	device_unref(&cd->sc_dev);
 }
 
 int
@@ -940,7 +923,7 @@ cdioctl(dev, cmd, addr, flag, p)
 		if (cd->sc_link->quirks & ADEV_LITTLETOC) 
 			th.len = letoh16(th.len);
 		else
-			th.len = ntohs(th.len);
+			th.len = betoh16(th.len);
 		bcopy(&th, addr, sizeof(th));
 		break;
 	}
@@ -953,21 +936,22 @@ cdioctl(dev, cmd, addr, flag, p)
 		int len = te->data_len;
 		int ntracks;
 
-		MALLOC (toc, struct cd_toc *, sizeof (struct cd_toc),
-			M_DEVBUF, M_WAITOK);
+		MALLOC(toc, struct cd_toc *, sizeof(struct cd_toc), M_TEMP,
+		    M_WAITOK);
+		bzero(toc, sizeof(*toc));
 
 		th = &toc->header;
 
 		if (len > sizeof(toc->entries) ||
 		    len < sizeof(struct cd_toc_entry)) {
-			FREE(toc, M_DEVBUF);
+			FREE(toc, M_TEMP);
 			error = EINVAL;
 			break;
 		}
 		error = cd_read_toc(cd, te->address_format, te->starting_track,
 		    toc, len + sizeof(struct ioc_toc_header), 0);
 		if (error) {
-			FREE(toc, M_DEVBUF);
+			FREE(toc, M_TEMP);
 			break;
 		}
 		if (te->address_format == CD_LBA_FORMAT)
@@ -982,17 +966,17 @@ cdioctl(dev, cmd, addr, flag, p)
 					    sizeof(cte->addr) / 2);
 #endif
 				} else
-					cte->addr.lba = ntohl(cte->addr.lba);
+					cte->addr.lba = betoh32(cte->addr.lba);
 			}
 		if (cd->sc_link->quirks & ADEV_LITTLETOC) {
 			th->len = letoh16(th->len);
 		} else
-			th->len = ntohs(th->len);
+			th->len = betoh16(th->len);
 		len = min(len, th->len - (sizeof(th->starting_track) +
 		    sizeof(th->ending_track)));
 
 		error = copyout(toc->entries, te->data, len);
-		FREE(toc, M_DEVBUF);
+		FREE(toc, M_TEMP);
 		break;
 	}
 	case CDIOREADMSADDR: {
@@ -1005,15 +989,16 @@ cdioctl(dev, cmd, addr, flag, p)
 			break;
 		}
 
-		MALLOC (toc, struct cd_toc *, sizeof (struct cd_toc),
-			M_DEVBUF, M_WAITOK);
+		MALLOC(toc, struct cd_toc *, sizeof(struct cd_toc), M_TEMP,
+		    M_WAITOK);
+		bzero(toc, sizeof(*toc));
 
 		error = cd_read_toc(cd, 0, 0, toc,
 		  sizeof(struct ioc_toc_header) + sizeof(struct cd_toc_entry),
 		  0x40 /* control word for "get MS info" */);
 
 		if (error) {
-			FREE(toc, M_DEVBUF);
+			FREE(toc, M_TEMP);
 			break;
 		}
 
@@ -1024,15 +1009,15 @@ cdioctl(dev, cmd, addr, flag, p)
 			    sizeof(cte->addr) / 2);
 #endif
 		} else
-			cte->addr.lba = ntohl(cte->addr.lba);
+			cte->addr.lba = betoh32(cte->addr.lba);
 		if (cd->sc_link->quirks & ADEV_LITTLETOC)
 			toc->header.len = letoh16(toc->header.len);
 		else
-			toc->header.len = ntohs(toc->header.len);
+			toc->header.len = betoh16(toc->header.len);
 
 		*(int *)addr = (toc->header.len >= 10 && cte->track > 1) ?
 			cte->addr.lba : 0;
-		FREE(toc, M_DEVBUF);
+		FREE(toc, M_TEMP);
 		break;
 	}
 	case CDIOCSETPATCH: {
@@ -1176,24 +1161,21 @@ cdgetdisklabel(dev, cd, lp, clp, spoofonly)
 	struct cpu_disklabel *clp;
 	int spoofonly;
 {
+	struct cd_toc *toc;
 	char *errstring;
-	u_int8_t hdr[TOC_HEADER_SZ],  *ent, *toc = NULL;
-	u_int32_t lba, nlba;
-	int tocidx, i, n, len, is_data, data_track = -1;
-	int toc_valid = 0;
+	int tocidx, n, audioonly = 1;
 
 	bzero(lp, sizeof(struct disklabel));
 	bzero(clp, sizeof(struct cpu_disklabel));
 
+	MALLOC(toc, struct cd_toc *, sizeof(struct cd_toc), M_TEMP, M_WAITOK);
+	bzero(toc, sizeof(*toc));
+
 	lp->d_secsize = cd->params.blksize;
 	lp->d_ntracks = 1;
 	lp->d_nsectors = 100;
+	lp->d_secpercyl = 100;
 	lp->d_ncylinders = (cd->params.disksize / 100) + 1;
-	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
-	if (lp->d_secpercyl == 0) {
-		lp->d_secpercyl = 100;
-		/* as long as it's not 0 - readdisklabel divides by it */
-	}
 
 	if (cd->sc_link->flags & SDEV_ATAPI) {
 		strncpy(lp->d_typename, "ATAPI CD-ROM", sizeof(lp->d_typename));
@@ -1223,84 +1205,24 @@ cdgetdisklabel(dev, cd, lp, clp, spoofonly)
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 
-	/*
-	 * Read the TOC and loop through the individual tracks and lay them
-	 * out in our disklabel.  If there is a data track, call the generic
-	 * disklabel read routine.  XXX should we move all data tracks up front
-	 * before any other tracks?
-	 */
-	bzero(hdr, sizeof(hdr));
-	if (cd_read_toc(cd, 0, 0, hdr, TOC_HEADER_SZ, 0))
+	if (cd_load_toc(cd, toc, CD_LBA_FORMAT)) {
+		audioonly = 0; /* No valid TOC found == not an audio CD. */
 		goto done;
-
-	n = hdr[TOC_HEADER_ENDING_TRACK] - hdr[TOC_HEADER_STARTING_TRACK] + 1;
-
-	if (n <= 0)
-		goto done;
-
-	/* n + 1 because of leadout track */
-	len = TOC_HEADER_SZ + (n + 1) * TOC_ENTRY_SZ;
-	MALLOC(toc, u_int8_t *, len, M_TEMP, M_WAITOK);
-	if (cd_read_toc (cd, CD_LBA_FORMAT, 0, toc, len, 0))
-		goto done;
-
-	/* Create the partition table.  */
-	/* Probably should sanity-check the drive's values */
-	toc_valid = 1;  
-	ent = toc + TOC_HEADER_SZ;
-	lba = ((cd->sc_link->quirks & ADEV_LITTLETOC) ?
-	    ent[TOC_ENTRY_MSF_LBA] | ent[TOC_ENTRY_MSF_LBA + 1] << 8 |
-	    ent[TOC_ENTRY_MSF_LBA + 2] << 16 |
-	    ent[TOC_ENTRY_MSF_LBA + 3] << 24 :
-	    ent[TOC_ENTRY_MSF_LBA] << 24 | ent[TOC_ENTRY_MSF_LBA + 1] << 16 |
-	    ent[TOC_ENTRY_MSF_LBA + 2] << 8 | ent[TOC_ENTRY_MSF_LBA + 3]);
-
-	i = 0;
-	for (tocidx = 1; tocidx <= n; tocidx++) {
-		is_data = ent[TOC_ENTRY_CONTROL_ADDR_TYPE] & 4;
-		ent += TOC_ENTRY_SZ;
-		nlba = ((cd->sc_link->quirks & ADEV_LITTLETOC) ?
-			ent[TOC_ENTRY_MSF_LBA] |
-			ent[TOC_ENTRY_MSF_LBA + 1] << 8 |
-			ent[TOC_ENTRY_MSF_LBA + 2] << 16 |
-			ent[TOC_ENTRY_MSF_LBA + 3] << 24 :
-			ent[TOC_ENTRY_MSF_LBA] << 24 |
-			ent[TOC_ENTRY_MSF_LBA + 1] << 16 |
-			ent[TOC_ENTRY_MSF_LBA + 2] << 8 |
-			ent[TOC_ENTRY_MSF_LBA + 3]);
-
-		lp->d_partitions[i].p_fstype =
-			is_data ? FS_UNUSED : FS_OTHER;
-		lp->d_partitions[i].p_offset = lba;
-		lp->d_partitions[i].p_size = nlba - lba;
-		lba = nlba;
-
-		if (is_data) { 
-			if (data_track == -1)
-				data_track = i;
-
-			i++;
-			if (i == RAW_PART)
-				i++;
-
-			if (i >= MAXPARTITIONS)
-				break;
-		}
 	}
 
-	if (i < MAXPARTITIONS)
-		bzero(&lp->d_partitions[i], sizeof(lp->d_partitions[i]));
-
-	lp->d_npartitions = max((RAW_PART + 1), i);
+	n = toc->header.ending_track - toc->header.starting_track + 1;
+	for (tocidx = 0; tocidx < n; tocidx++)
+		if (toc->entries[tocidx].control & 4) {
+			audioonly = 0; /* Found a non-audio track. */
+			goto done;
+		}
 
 done:
-	if (toc)
-		FREE(toc, M_TEMP);
+	free(toc, M_TEMP);
 
-	/* We have a data track, look in there for a real disklabel.  */
-	if (data_track != -1 || !toc_valid) {
-		errstring = readdisklabel(CDLABELDEV(dev),
-		    cdstrategy, lp, clp, spoofonly);
+	if (!audioonly) {
+		errstring = readdisklabel(CDLABELDEV(dev), cdstrategy, lp, clp,
+		    spoofonly);
 		/*if (errstring)
 			printf("%s: %s\n", cd->sc_dev.dv_xname, errstring);*/
 	}
@@ -1364,7 +1286,7 @@ cd_setchan(cd, p0, p1, p2, p3, flags)
 	struct cd_softc *cd;
 	int p0, p1, p2, p3, flags;
 {
-	struct scsi_mode_sense_buf *data;
+	union scsi_mode_sense_buf *data;
 	struct cd_audio_page *audio = NULL;
 	int error, big;
 
@@ -1384,10 +1306,10 @@ cd_setchan(cd, p0, p1, p2, p3, flags)
 		audio->port[3].channels = p3;
 		if (big)
 			error = scsi_mode_select_big(cd->sc_link, SMS_PF,
-			    &data->headers.hdr_big, flags, 20000);
+			    &data->hdr_big, flags, 20000);
 		else
 			error = scsi_mode_select(cd->sc_link, SMS_PF,
-			    &data->headers.hdr, flags, 20000);
+			    &data->hdr, flags, 20000);
 	}	
 
 	free(data, M_TEMP);
@@ -1400,7 +1322,7 @@ cd_getvol(cd, arg, flags)
 	struct ioc_vol *arg;
 	int flags;
 {
-	struct scsi_mode_sense_buf *data;
+	union scsi_mode_sense_buf *data;
 	struct cd_audio_page *audio = NULL;
 	int error;
 
@@ -1430,7 +1352,7 @@ cd_setvol(cd, arg, flags)
 	const struct ioc_vol *arg;
 	int flags;
 {
-	struct scsi_mode_sense_buf *data;
+	union scsi_mode_sense_buf *data;
 	struct cd_audio_page *audio = NULL;
 	u_int8_t mask_volume[4];
 	int error, big;
@@ -1470,10 +1392,10 @@ cd_setvol(cd, arg, flags)
 
 	if (big)
 		error = scsi_mode_select_big(cd->sc_link, SMS_PF,
-		    &data->headers.hdr_big, flags, 20000);
+		    &data->hdr_big, flags, 20000);
 	else
 		error = scsi_mode_select(cd->sc_link, SMS_PF,
-		    &data->headers.hdr, flags, 20000);
+		    &data->hdr, flags, 20000);
 
 	free(data, M_TEMP);
 	return (error);
@@ -1500,7 +1422,7 @@ cd_set_pa_immed(cd, flags)
 	struct cd_softc *cd;
 	int flags;
 {
-	struct scsi_mode_sense_buf *data;
+	union scsi_mode_sense_buf *data;
 	struct cd_audio_page *audio = NULL;
 	int error, oflags, big;
 
@@ -1524,11 +1446,11 @@ cd_set_pa_immed(cd, flags)
 		if (audio->flags != oflags) {
 			if (big)
 				error = scsi_mode_select_big(cd->sc_link,
-				    SMS_PF, &data->headers.hdr_big, flags,
+				    SMS_PF, &data->hdr_big, flags,
 				    20000);
 			else
 				error = scsi_mode_select(cd->sc_link, SMS_PF,
-				    &data->headers.hdr, flags, 20000);
+				    &data->hdr, flags, 20000);
 		}
 	}
 
@@ -1563,7 +1485,7 @@ cd_play_tracks(cd, strack, sindex, etrack, eindex)
 	struct cd_softc *cd;
 	int strack, sindex, etrack, eindex;
 {
-	struct cd_toc toc;
+	struct cd_toc *toc;
 	u_char endf, ends, endm;
 	int error;
 
@@ -1572,37 +1494,48 @@ cd_play_tracks(cd, strack, sindex, etrack, eindex)
 	if (strack > etrack)
 		return (EINVAL);
 
-	if ((error = cd_load_toc(cd, &toc)) != 0)
-		return (error);
+	MALLOC(toc, struct cd_toc *, sizeof(struct cd_toc), M_TEMP, M_WAITOK);
+	bzero(toc, sizeof(*toc));
 
-	if (++etrack > (toc.header.ending_track+1))
-		etrack = toc.header.ending_track+1;
+	if ((error = cd_load_toc(cd, toc, CD_MSF_FORMAT)) != 0)
+		goto done;
 
-	strack -= toc.header.starting_track;
-	etrack -= toc.header.starting_track;
-	if (strack < 0)
-		return (EINVAL);
+	if (++etrack > (toc->header.ending_track+1))
+		etrack = toc->header.ending_track+1;
+
+	strack -= toc->header.starting_track;
+	etrack -= toc->header.starting_track;
+	if (strack < 0) {
+		error = EINVAL;
+		goto done;
+	}
 
 	/*
 	 * The track ends one frame before the next begins.  The last track
 	 * is taken care of by the leadoff track.
 	 */
-	endm = toc.entries[etrack].addr.msf.minute;
-	ends = toc.entries[etrack].addr.msf.second;
-	endf = toc.entries[etrack].addr.msf.frame;
+	endm = toc->entries[etrack].addr.msf.minute;
+	ends = toc->entries[etrack].addr.msf.second;
+	endf = toc->entries[etrack].addr.msf.frame;
 	if (endf-- == 0) {
 		endf = CD_FRAMES - 1;
 		if (ends-- == 0) {
 			ends = CD_SECS - 1;
-			if (endm-- == 0)
-				return (EINVAL);
+			if (endm-- == 0) {
+				error = EINVAL;
+				goto done;
+			}
 		}
 	}
 
-	return (cd_play_msf(cd, toc.entries[strack].addr.msf.minute,
-	    toc.entries[strack].addr.msf.second,
-	    toc.entries[strack].addr.msf.frame,
-	    endm, ends, endf));
+	error = cd_play_msf(cd, toc->entries[strack].addr.msf.minute,
+	    toc->entries[strack].addr.msf.second,
+	    toc->entries[strack].addr.msf.frame,
+	    endm, ends, endf);
+
+done:
+	FREE(toc, M_TEMP);
+	return (error);
 }
 
 /*
@@ -1691,43 +1624,42 @@ cd_read_toc(cd, mode, start, data, len, control)
 	void *data;
 {
 	struct scsi_read_toc scsi_cmd;
-	int ntoc;
 
 	bzero(&scsi_cmd, sizeof(scsi_cmd));
-#if 0
-	if (len!=sizeof(struct ioc_toc_header))
-		ntoc=((len)-sizeof(struct ioc_toc_header))/sizeof(struct cd_toc_entry);
-	else 
-#endif
-	ntoc = len;
+	bzero(data, len);
+
 	scsi_cmd.opcode = READ_TOC;
 	if (mode == CD_MSF_FORMAT)
 		scsi_cmd.byte2 |= CD_MSF;
 	scsi_cmd.from_track = start;
-	_lto2b(ntoc, scsi_cmd.data_len);
+	_lto2b(len, scsi_cmd.data_len);
 	scsi_cmd.control = control;
 
 	return scsi_scsi_cmd(cd->sc_link, (struct scsi_generic *)&scsi_cmd,
 	    sizeof(struct scsi_read_toc), (u_char *)data, len, CDRETRIES,
-	    5000, NULL, SCSI_DATA_IN);
+	    5000, NULL, SCSI_DATA_IN | SCSI_IGNORE_ILLEGAL_REQUEST);
 }
 
 int
-cd_load_toc(cd, toc)
+cd_load_toc(cd, toc, fmt)
 	struct cd_softc *cd;
 	struct cd_toc *toc;
+	int fmt;
 {
-	int ntracks, len, error;
+	int n, len, error;
 
-	if ((error = cd_read_toc(cd, 0, 0, toc, sizeof(toc->header), 0)) != 0)
-		return (error);
+	error = cd_read_toc(cd, 0, 0, toc, sizeof(toc->header), 0);
 
-	ntracks = toc->header.ending_track - toc->header.starting_track + 1;
-	len = (ntracks + 1) * sizeof(struct cd_toc_entry) +
-	    sizeof(toc->header);
-	if ((error = cd_read_toc(cd, CD_MSF_FORMAT, 0, toc, len, 0)) != 0)
-		return (error);
-	return (0);
+	if (error == 0) {
+		if (toc->header.ending_track < toc->header.starting_track)
+			return (EIO);
+		/* +2 to account for leading out track. */
+		n = toc->header.ending_track - toc->header.starting_track + 2;
+		len = n * sizeof(struct cd_toc_entry) + sizeof(toc->header);
+		error = cd_read_toc(cd, fmt, 0, toc, len, 0);
+	}
+
+	return (error);
 }
 
 

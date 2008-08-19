@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.12 2005/08/01 12:06:39 miod Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.14 2005/11/12 23:11:37 miod Exp $	*/
 
 /* 
  * Copyright (c) 1995 Theo de Raadt
@@ -165,17 +165,51 @@ pmap_bootstrap(nextpa, firstpa)
 	kptpa = nextpa;
 
 	iiopa = nextpa + RELOC(Sysptsize, int) * NBPG;
-	iiobase = m68k_ptob(RELOC(Sysptsize, int) * NPTEPG);
+	iiobase = ptoa(RELOC(Sysptsize, int) * NPTEPG);
 	eiopa = iiopa + MACHINE_IIOMAPSIZE * sizeof(pt_entry_t);
-	eiobase = iiobase + m68k_ptob(MACHINE_IIOMAPSIZE);
+	eiobase = iiobase + ptoa(MACHINE_IIOMAPSIZE);
 
 	/*
-	 * We need to be able to map a whole UPT here as well. Adjust
-	 * nptpages if necessary.
+	 * Compute how many PT pages we will need to have initialized.
+	 * We need to have enough of them for the vm system to initialize
+	 * up to the point we can use it to allocate more PT pages - i.e.
+	 * when we can afford using pmap_enter_ptpage().
+	 *
+	 * Aside from the IO maps, we need to be able to successfully
+	 * allocate:
+	 * - nkmempages_max pages in kmeminit().
+	 * - PAGER_MAP_SIZE bytes in uvm_pager_init().
+	 * - 93.75 % of physmem anons in amap_init().
+	 * - 4 * uvm_km_pages_lowat pages in uvm_km_page_init().
+	 *
+	 * We'll compute this size in bytes, then round it to pages,
+	 * then to a multiple of NPTEPG.
 	 */
-	nptpages = (MACHINE_IIOMAPSIZE + MACHINE_EIOMAPSIZE +
-	    m68k_btop(MACHINE_MAX_PTSIZE) * sizeof(pt_entry_t) + NPTEPG - 1) /
-	    NPTEPG;
+
+	nptpages = ptoa(MACHINE_IIOMAPSIZE + MACHINE_EIOMAPSIZE);
+
+	num = RELOC(physmem, int) / 4;
+	if (num > NKMEMPAGES_MAX_DEFAULT)
+		num = NKMEMPAGES_MAX_DEFAULT;
+	nptpages += ptoa(num);
+
+	nptpages += PAGER_MAP_SIZE;
+
+	nptpages += (RELOC(physmem, int) * 15 * sizeof(struct vm_anon)) / 16;
+
+	{
+		extern int uvm_km_pages_lowat;
+
+		if ((num = RELOC(uvm_km_pages_lowat, int)) == 0) {
+			num = RELOC(physmem, int) / 256;
+			if (num < 128)
+				num = 128;
+		}
+	}
+	nptpages += ptoa(num);
+
+	nptpages = (atop(round_page(nptpages)) + NPTEPG - 1) / NPTEPG;
+
 	nextpa += nptpages * NBPG;
 
 	kptmpa = nextpa;
@@ -357,8 +391,8 @@ pmap_bootstrap(nextpa, firstpa)
 	 * of kernel text will remain invalid to force *NULL in the
 	 * kernel to fault.
 	 */
-	pte = &(PA2VA(kptpa, u_int *))[m68k_btop(KERNBASE)];
-	epte = &pte[m68k_btop(trunc_page((vaddr_t)&etext))];
+	pte = &(PA2VA(kptpa, u_int *))[atop(KERNBASE)];
+	epte = &pte[atop(trunc_page((vaddr_t)&etext))];
 
 #if defined(KGDB) || defined(DDB)
 	protopte = firstpa | PG_RW | PG_V | PG_U; /* XXX RW for now */
@@ -383,7 +417,7 @@ pmap_bootstrap(nextpa, firstpa)
 	 * by us so far (nextpa - firstpa bytes), and pages for proc0
 	 * u-area and page table allocated below (RW).
 	 */
-	epte = &(PA2VA(kptpa, u_int *))[m68k_btop(nextpa - firstpa)];
+	epte = &(PA2VA(kptpa, u_int *))[atop(nextpa - firstpa)];
 	protopte = (protopte & ~PG_PROT) | PG_RW | PG_U;
 	/*
 	 * Enable copy-back caching of data pages on 040, and write-through
@@ -434,7 +468,7 @@ pmap_bootstrap(nextpa, firstpa)
 	 * Immediately follows `nptpages' of static kernel page table.
 	 */
 	RELOC(Sysmap, pt_entry_t *) =
-	    (pt_entry_t *)m68k_ptob(nptpages * NPTEPG);
+	    (pt_entry_t *)ptoa(nptpages * NPTEPG);
 
 	PMAP_MD_RELOC2();
 
@@ -468,7 +502,7 @@ pmap_bootstrap(nextpa, firstpa)
 	 */
 	RELOC(avail_start, paddr_t) = nextpa;
 	PMAP_MD_MEMSIZE();
-	RELOC(mem_size, vsize_t) = m68k_ptob(RELOC(physmem, int));
+	RELOC(mem_size, vsize_t) = ptoa(RELOC(physmem, int));
 	RELOC(virtual_avail, vaddr_t) =
 	    VM_MIN_KERNEL_ADDRESS + (nextpa - firstpa);
 	RELOC(virtual_end, vaddr_t) = VM_MAX_KERNEL_ADDRESS;

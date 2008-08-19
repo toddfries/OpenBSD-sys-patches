@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.33 2005/02/27 22:08:41 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.37 2005/12/31 18:13:44 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.45 1999/04/10 17:31:02 kleink Exp $	*/
 
 /*
@@ -167,7 +167,6 @@ ddlist_t	dev_data_list_scsi;	/* scsi controller dev_datas */
 
 void	diskconf(void);
 void	setroot(void);
-void	swapconf(void);
 void	findbootdev(void);
 void	findbootdev_slave(ddlist_t *, int, int, int);
 void	setbootdev(void);
@@ -286,7 +285,7 @@ diskconf()
 {
 
 	setroot();
-	swapconf();
+	dumpconf();
 
 	/*
 	 * Set bootdev based on the device we booted from.
@@ -403,30 +402,6 @@ device_register(dev, aux)
 		dev_data_insert(dd, &dev_data_list_scsi);
 		return;
 	}
-}
-
-/*
- * Configure swap space and related parameters.
- */
-void
-swapconf()
-{
-	struct swdevt *swp;
-	int nblks, maj;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
-		maj = major(swp->sw_dev);
-		if (maj > nblkdev)
-			break;
-		if (bdevsw[maj].d_psize) {
-			nblks = (*bdevsw[maj].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
-	}
-	dumpconf();
 }
 
 struct nam2blk {
@@ -1123,118 +1098,61 @@ dev_data_insert(dd, ddlist)
  * hardware.
  */
 void
-console_scan(func, arg, bus)
+console_scan(func, arg)
 	int (*func)(int, caddr_t, void *);
 	void *arg;
-	int bus;
 {
 	int size, scode, sctop;
 	caddr_t pa, va;
 
-	switch (bus) {
-	case HP300_BUS_DIO:
+	/*
+	 * Scan all select codes.  Check each location for some
+	 * hardware.  If there's something there, call (*func)().
+	 */
+	sctop = DIO_SCMAX(machineid);
+	for (scode = 0; scode < sctop; ++scode) {
 		/*
-		 * Scan all select codes.  Check each location for some
-		 * hardware.  If there's something there, call (*func)().
+		 * Skip over the select code hole and
+		 * the internal HP-IB controller.
 		 */
-		sctop = DIO_SCMAX(machineid);
-		for (scode = 0; scode < sctop; ++scode) {
-			/*
-			 * Abort mission if console has been forced.
-			 */
-			if (conforced)
-				return;
+		if (DIO_INHOLE(scode) ||
+		    ((scode == 7) && internalhpib))
+			continue;
 
-			/*
-			 * Skip over the select code hole and
-			 * the internal HP-IB controller.
-			 */
-			if (DIO_INHOLE(scode) ||
-			    ((scode == 7) && internalhpib))
-				continue;
+		/* Map current PA. */
+		pa = dio_scodetopa(scode);
+		va = iomap(pa, PAGE_SIZE);
+		if (va == NULL)
+			continue;
 
-			/* Map current PA. */
-			pa = dio_scodetopa(scode);
-			va = iomap(pa, PAGE_SIZE);
+		/* Check to see if hardware exists. */
+		if (badaddr(va)) {
+			iounmap(va, PAGE_SIZE);
+			continue;
+		}
+
+		/*
+		 * Hardware present, call callback.  Driver returns
+		 * size of region to map if console probe successful
+		 * and worthwhile.
+		 */
+		size = (*func)(scode, va, arg);
+		iounmap(va, PAGE_SIZE);
+		if (size != 0 && conscode == scode) {
+			/* Free last mapping. */
+			if (convasize)
+				iounmap(conaddr, convasize);
+			convasize = 0;
+
+			/* Remap to correct size. */
+			va = iomap(pa, size);
 			if (va == NULL)
 				continue;
 
-			/* Check to see if hardware exists. */
-			if (badaddr(va)) {
-				iounmap(va, PAGE_SIZE);
-				continue;
-			}
-
-			/*
-			 * Hardware present, call callback.  Driver returns
-			 * size of region to map if console probe successful
-			 * and worthwhile.
-			 */
-			size = (*func)(scode, va, arg);
-			iounmap(va, PAGE_SIZE);
-			if (size != 0) {
-				/* Free last mapping. */
-				if (convasize)
-					iounmap(conaddr, convasize);
-				convasize = 0;
-
-				/* Remap to correct size. */
-				va = iomap(pa, size);
-				if (va == NULL)
-					continue;
-
-				/* Save this state for next time. */
-				conscode = scode;
-				conaddr = va;
-				convasize = size;
-			}
+			/* Save this state for next time. */
+			conaddr = va;
+			convasize = size;
 		}
-		break;
-#if NSGC > 0
-	case HP300_BUS_SGC:
-		/*
-		 * Scan all slots.  Check each location for some
-		 * hardware.  If there's something there, call (*func)().
-		 */
-		for (scode = 0; scode < SGC_NSLOTS; ++scode) {
-			int rv;
-
-			/*
-			 * Abort mission if console has been forced.
-			 */
-			if (conforced)
-				return;
-
-			/* Map current PA. */
-			pa = sgc_slottopa(scode);
-			va = iomap(pa, PAGE_SIZE);
-			if (va == NULL)
-				continue;
-
-			/* Check for hardware. */
-			rv = badaddr(va);
-			iounmap(va, PAGE_SIZE);
-			if (rv != 0)
-				continue;
-
-			/*
-			 * Invoke the callback. Driver will return
-			 * non-zero if console probe successfull
-			 * and worthwhile.
-			 */
-			if ((*func)(scode, NULL, arg) != 0) {
-				/* Free last mapping. */
-				if (convasize)
-					iounmap(conaddr, convasize);
-
-				/* Save this state for next time. */
-				conscode = SGC_SLOT_TO_CONSCODE(scode);
-				conaddr = NULL;
-				convasize = 0;
-			}
-		}
-		break;
-#endif
 	}
 }
 

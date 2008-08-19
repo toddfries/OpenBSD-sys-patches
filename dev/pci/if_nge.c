@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.44 2005/08/09 04:10:12 mickey Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.49 2006/02/16 20:54:35 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -122,6 +122,7 @@
 #endif
 
 #include <uvm/uvm_extern.h>              /* for vtophys */
+#define	VTOPHYS(v)	vtophys((vaddr_t)(v))
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -399,7 +400,7 @@ nge_mii_readreg(sc, frame)
 {
 	int			i, ack, s;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Set up frame for RX.
@@ -491,7 +492,7 @@ nge_mii_writereg(sc, frame)
 {
 	int			s;
 
-	s = splimp();
+	s = splnet();
 	/*
 	 * Set up frame for TX.
 	 */
@@ -724,18 +725,17 @@ nge_attach(parent, self, aux)
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	const char		*intrstr = NULL;
-	bus_addr_t		iobase;
-	bus_size_t		iosize;
+	bus_size_t		size;
 	bus_dma_segment_t	seg;
 	bus_dmamap_t		dmamap;
-	int			s, rseg;
+	int			rseg;
 	u_char			eaddr[ETHER_ADDR_LEN];
-	u_int32_t		command;
+	pcireg_t		command;
+#ifndef NGE_USEIOSPACE
+	pcireg_t		memtype;
+#endif
 	struct ifnet		*ifp;
-	int			error = 0;
 	caddr_t			kva;
-
-	s = splimp();
 
 	/*
 	 * Handle power management nonsense.
@@ -745,7 +745,7 @@ nge_attach(parent, self, aux)
 	if (command == 0x01) {
 		command = pci_conf_read(pc, pa->pa_tag, NGE_PCI_PWRMGMTCTRL);
 		if (command & NGE_PSTATE_MASK) {
-			u_int32_t		iobase, membase, irq;
+			pcireg_t	iobase, membase, irq;
 
 			/* Save important PCI config data. */
 			iobase = pci_conf_read(pc, pa->pa_tag, NGE_PCI_LOIO);
@@ -771,49 +771,28 @@ nge_attach(parent, self, aux)
 	 * Map control/status registers.
 	 */
 	DPRINTFN(5, ("%s: map control/status regs\n", sc->sc_dv.dv_xname));
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef NGE_USEIOSPACE
-	if (!(command & PCI_COMMAND_IO_ENABLE)) {
-		printf("%s: failed to enable I/O ports!\n",
-		       sc->sc_dv.dv_xname);
-		error = ENXIO;
-		goto fail;
-	}
-	/*
-	 * Map control/status registers.
-	 */
-	DPRINTFN(5, ("%s: pci_io_find\n", sc->sc_dv.dv_xname));
-	if (pci_io_find(pc, pa->pa_tag, NGE_PCI_LOIO, &iobase, &iosize)) {
-		printf(": can't find i/o space\n");
-		goto fail;
-	}
-	DPRINTFN(5, ("%s: bus_space_map\n", sc->sc_dv.dv_xname));
-	if (bus_space_map(pa->pa_iot, iobase, iosize, 0, &sc->nge_bhandle)) {
+	DPRINTFN(5, ("%s: pci_mapreg_map\n", sc->sc_dv.dv_xname));
+	if (pci_mapreg_map(pa, NGE_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
+	    &sc->nge_btag, &sc->nge_bhandle, NULL, &size, 0)) {
 		printf(": can't map i/o space\n");
-		goto fail;
+		return;
 	}
-	sc->nge_btag = pa->pa_iot;
 #else
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf("%s: failed to enable memory mapping!\n",
-		       sc->sc_dv.dv_xname);
-		error = ENXIO;
-		goto fail;
-	}
-	DPRINTFN(5, ("%s: pci_mem_find\n", sc->sc_dv.dv_xname));
-	if (pci_mem_find(pc, pa->pa_tag, NGE_PCI_LOMEM, &iobase,
-			 &iosize, NULL)) {
-		printf(": can't find mem space\n");
-		goto fail;
-	}
-	DPRINTFN(5, ("%s: bus_space_map\n", sc->sc_dv.dv_xname));
-	if (bus_space_map(pa->pa_memt, iobase, iosize, 0, &sc->nge_bhandle)) {
+	DPRINTFN(5, ("%s: pci_mapreg_map\n", sc->sc_dv.dv_xname));
+	memtype = pci_mapreg_type(pc, pa->pa_tag, NGE_PCI_LOMEM);
+	switch (memtype) {
+	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
+	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
+		if (pci_mapreg_map(pa, NGE_PCI_LOMEM,
+				   memtype, 0, &sc->nge_btag, &sc->nge_bhandle,
+				   NULL, &size, 0) == 0)
+			break;
+	default:
 		printf(": can't map mem space\n");
-		goto fail;
+		return;
 	}
-
-	sc->nge_btag = pa->pa_memt;
 #endif
 
 	/* Disable all interrupts */
@@ -822,7 +801,7 @@ nge_attach(parent, self, aux)
 	DPRINTFN(5, ("%s: pci_intr_map\n", sc->sc_dv.dv_xname));
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
-		goto fail;
+		goto fail_1;
 	}
 
 	DPRINTFN(5, ("%s: pci_intr_string\n", sc->sc_dv.dv_xname));
@@ -835,7 +814,7 @@ nge_attach(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		goto fail;
+		goto fail_1;
 	}
 	printf(": %s", intrstr);
 
@@ -854,7 +833,7 @@ nge_attach(parent, self, aux)
 	/*
 	 * A NatSemi chip was detected. Inform the world.
 	 */
-	printf(": address: %s\n", ether_sprintf(eaddr));
+	printf(", address: %s\n", ether_sprintf(eaddr));
 
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 
@@ -863,7 +842,7 @@ nge_attach(parent, self, aux)
 	if (bus_dmamem_alloc(sc->sc_dmatag, sizeof(struct nge_list_data),
 			     PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
-		goto fail;
+		goto fail_2;
 	}
 	DPRINTFN(5, ("%s: bus_dmamem_map\n", sc->sc_dv.dv_xname));
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg,
@@ -871,28 +850,20 @@ nge_attach(parent, self, aux)
 			   BUS_DMA_NOWAIT)) {
 		printf("%s: can't map dma buffers (%d bytes)\n",
 		       sc->sc_dv.dv_xname, sizeof(struct nge_list_data));
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		goto fail;
+		goto fail_3;
 	}
 	DPRINTFN(5, ("%s: bus_dmamem_create\n", sc->sc_dv.dv_xname));
 	if (bus_dmamap_create(sc->sc_dmatag, sizeof(struct nge_list_data), 1,
 			      sizeof(struct nge_list_data), 0,
 			      BUS_DMA_NOWAIT, &dmamap)) {
 		printf("%s: can't create dma map\n", sc->sc_dv.dv_xname);
-		bus_dmamem_unmap(sc->sc_dmatag, kva,
-				 sizeof(struct nge_list_data));
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		goto fail;
+		goto fail_4;
 	}
 	DPRINTFN(5, ("%s: bus_dmamem_load\n", sc->sc_dv.dv_xname));
 	if (bus_dmamap_load(sc->sc_dmatag, dmamap, kva,
 			    sizeof(struct nge_list_data), NULL,
 			    BUS_DMA_NOWAIT)) {
-		bus_dmamap_destroy(sc->sc_dmatag, dmamap);
-		bus_dmamem_unmap(sc->sc_dmatag, kva,
-				 sizeof(struct nge_list_data));
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		goto fail;
+		goto fail_5;
 	}
 
 	DPRINTFN(5, ("%s: bzero\n", sc->sc_dv.dv_xname));
@@ -904,7 +875,7 @@ nge_attach(parent, self, aux)
 	if (nge_alloc_jumbo_mem(sc)) {
 		printf("%s: jumbo buffer allocation failed\n",
 		       sc->sc_dv.dv_xname);
-		goto fail;
+		goto fail_5;
 	}
 
 	ifp = &sc->arpcom.ac_if;
@@ -920,6 +891,10 @@ nge_attach(parent, self, aux)
 	bcopy(sc->sc_dv.dv_xname, ifp->if_xname, IFNAMSIZ);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#ifdef NGE_VLAN
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 	/*
 	 * Do MII setup.
@@ -981,9 +956,23 @@ nge_attach(parent, self, aux)
 	DPRINTFN(5, ("%s: timeout_set\n", sc->sc_dv.dv_xname));
 	timeout_set(&sc->nge_timeout, nge_tick, sc);
 	timeout_add(&sc->nge_timeout, hz);
+	return;
 
-fail:
-	splx(s);
+fail_5:
+	bus_dmamap_destroy(sc->sc_dmatag, dmamap);
+
+fail_4:
+	bus_dmamem_unmap(sc->sc_dmatag, kva,
+	    sizeof(struct nge_list_data));
+
+fail_3:
+	bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
+
+fail_2:
+	pci_intr_disestablish(pc, sc->nge_intrhand);
+
+fail_1:
+	bus_space_unmap(sc->nge_btag, sc->nge_bhandle, size);
 }
 
 /*
@@ -1005,12 +994,12 @@ nge_list_tx_init(sc)
 			ld->nge_tx_list[i].nge_nextdesc =
 			    &ld->nge_tx_list[0];
 			ld->nge_tx_list[i].nge_next =
-			    vtophys(&ld->nge_tx_list[0]);
+			    VTOPHYS(&ld->nge_tx_list[0]);
 		} else {
 			ld->nge_tx_list[i].nge_nextdesc =
 			    &ld->nge_tx_list[i + 1];
 			ld->nge_tx_list[i].nge_next =
-			    vtophys(&ld->nge_tx_list[i + 1]);
+			    VTOPHYS(&ld->nge_tx_list[i + 1]);
 		}
 		ld->nge_tx_list[i].nge_mbuf = NULL;
 		ld->nge_tx_list[i].nge_ptr = 0;
@@ -1046,12 +1035,12 @@ nge_list_rx_init(sc)
 			ld->nge_rx_list[i].nge_nextdesc =
 			    &ld->nge_rx_list[0];
 			ld->nge_rx_list[i].nge_next =
-			    vtophys(&ld->nge_rx_list[0]);
+			    VTOPHYS(&ld->nge_rx_list[0]);
 		} else {
 			ld->nge_rx_list[i].nge_nextdesc =
 			    &ld->nge_rx_list[i + 1];
 			ld->nge_rx_list[i].nge_next =
-			    vtophys(&ld->nge_rx_list[i + 1]);
+			    VTOPHYS(&ld->nge_rx_list[i + 1]);
 		}
 	}
 
@@ -1102,7 +1091,7 @@ nge_newbuf(sc, c, m)
 	m_adj(m_new, sizeof(u_int64_t));
 
 	c->nge_mbuf = m_new;
-	c->nge_ptr = vtophys(mtod(m_new, caddr_t));
+	c->nge_ptr = VTOPHYS(mtod(m_new, caddr_t));
 	DPRINTFN(7,("%s: c->nge_ptr=%#x\n", sc->sc_dv.dv_xname,
 		    c->nge_ptr));
 	c->nge_ctl = m_new->m_len;
@@ -1126,8 +1115,7 @@ nge_alloc_jumbo_mem(sc)
 	if (bus_dmamem_alloc(sc->sc_dmatag, NGE_JMEM, PAGE_SIZE, 0,
 			     &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
-		error = ENOBUFS;
-		goto out;
+		return (ENOBUFS);
 	}
 
 	state = 1;
@@ -1442,7 +1430,7 @@ nge_tick(xsc)
 	struct ifnet		*ifp = &sc->arpcom.ac_if;
 	int			s;
 
-	s = splimp();
+	s = splnet();
 
 	DPRINTFN(10, ("%s: nge_tick: link=%d\n", sc->sc_dv.dv_xname,
 		      sc->nge_link));
@@ -1633,7 +1621,7 @@ nge_encap(sc, m_head, txidx)
 				return(ENOBUFS);
 			f = &sc->nge_ldata->nge_tx_list[frag];
 			f->nge_ctl = NGE_CMDSTS_MORE | m->m_len;
-			f->nge_ptr = vtophys(mtod(m, vaddr_t));
+			f->nge_ptr = VTOPHYS(mtod(m, vaddr_t));
 			DPRINTFN(7,("%s: f->nge_ptr=%#x\n",
 				    sc->sc_dv.dv_xname, f->nge_ptr));
 			if (cnt != 0)
@@ -1740,7 +1728,7 @@ nge_init(xsc)
 	if (ifp->if_flags & IFF_RUNNING)
 		return;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
@@ -1784,20 +1772,18 @@ nge_init(xsc)
 	NGE_SETBIT(sc, NGE_RXFILT_CTL, NGE_RXFILTCTL_PERFECT);
 
 	 /* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC) {
+	if (ifp->if_flags & IFF_PROMISC)
 		NGE_SETBIT(sc, NGE_RXFILT_CTL, NGE_RXFILTCTL_ALLPHYS);
-	} else {
+	else
 		NGE_CLRBIT(sc, NGE_RXFILT_CTL, NGE_RXFILTCTL_ALLPHYS);
-	}
 
 	/*
 	 * Set the capture broadcast bit to capture broadcast frames.
 	 */
-	if (ifp->if_flags & IFF_BROADCAST) {
+	if (ifp->if_flags & IFF_BROADCAST)
 		NGE_SETBIT(sc, NGE_RXFILT_CTL, NGE_RXFILTCTL_BROAD);
-	} else {
+	else
 		NGE_CLRBIT(sc, NGE_RXFILT_CTL, NGE_RXFILTCTL_BROAD);
-	}
 
 	/*
 	 * Load the multicast filter.
@@ -1811,9 +1797,9 @@ nge_init(xsc)
 	 * Load the address of the RX and TX lists.
 	 */
 	CSR_WRITE_4(sc, NGE_RX_LISTPTR,
-	    vtophys(&sc->nge_ldata->nge_rx_list[0]));
+	    VTOPHYS(&sc->nge_ldata->nge_rx_list[0]));
 	CSR_WRITE_4(sc, NGE_TX_LISTPTR,
-	    vtophys(&sc->nge_ldata->nge_tx_list[0]));
+	    VTOPHYS(&sc->nge_ldata->nge_tx_list[0]));
 
 	/* Set RX configuration */
 	CSR_WRITE_4(sc, NGE_RX_CFG, NGE_RXCFG);
@@ -1826,11 +1812,6 @@ nge_init(xsc)
 
 	/* Set TX configuration */
 	CSR_WRITE_4(sc, NGE_TX_CFG, NGE_TXCFG);
-
-	/*
-	 * Enable TX IPv4 checksumming on a per-packet basis.
-	 */
-	CSR_WRITE_4(sc, NGE_VLAN_IP_TXCTL, NGE_VIPTXCTL_CSUM_PER_PKT);
 
 #if NVLAN > 0
 	/*
@@ -2069,7 +2050,7 @@ nge_ioctl(ifp, command, data)
 	struct mii_data		*mii;
 	int			s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
 		splx(s);
@@ -2114,6 +2095,7 @@ nge_ioctl(ifp, command, data)
 					NGE_CLRBIT(sc, NGE_RXFILT_CTL,
 					    NGE_RXFILTCTL_ALLMULTI);
 			} else {
+				ifp->if_flags &= ~IFF_RUNNING;
 				nge_init(sc);
 			}
 		} else {

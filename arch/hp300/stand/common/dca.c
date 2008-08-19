@@ -1,4 +1,4 @@
-/*	$OpenBSD: dca.c,v 1.2 2003/06/02 23:27:46 millert Exp $	*/
+/*	$OpenBSD: dca.c,v 1.5 2006/01/01 11:59:39 miod Exp $	*/
 /*	$NetBSD: dca.c,v 1.10 1996/10/06 01:42:48 mycroft Exp $	*/
 
 /*
@@ -63,29 +63,23 @@ dcaprobe(cp)
 	register struct dcadevice *dca;
 
 	dcacnaddr = (struct dcadevice *) sctoaddr(DCACONSCODE);
-	if (badaddr((char *)dcacnaddr)) {
-		cp->cn_pri = CN_DEAD;
+	if (badaddr((char *)dcacnaddr))
 		return;
-	}
-#ifdef FORCEDCACONSOLE
-	cp->cn_pri = CN_REMOTE;
-#else
+
 	dca = dcacnaddr;
 	switch (dca->dca_id) {
 	case DCAID0:
 	case DCAID1:
 		cp->cn_pri = CN_NORMAL;
 		break;
-	case DCAREMID0:
-	case DCAREMID1:
+	case DCAID0 | DCACON:
+	case DCAID1 | DCACON:
 		cp->cn_pri = CN_REMOTE;
 		break;
 	default:
-		cp->cn_pri = CN_DEAD;
 		break;
 	}
 
-#endif
 	curcons_scode = DCACONSCODE;
 }
 

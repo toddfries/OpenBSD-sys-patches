@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_subr.c,v 1.22 2005/04/16 22:19:28 kettenis Exp $	*/
+/*	$OpenBSD: procfs_subr.c,v 1.24 2005/12/11 21:30:31 miod Exp $	*/
 /*	$NetBSD: procfs_subr.c,v 1.15 1996/02/12 15:01:42 christos Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/vnode.h>
 #include <sys/malloc.h>
 #include <sys/stat.h>
+#include <sys/ptrace.h>
 
 #include <miscfs/procfs/procfs.h>
 
@@ -102,7 +103,7 @@ procfs_allocvp(mp, vpp, pid, pfs_type)
 	/*
 	 * Lock the vp list, getnewvnode can sleep.
 	 */
-	error = lockmgr(&pfs_vlock, LK_EXCLUSIVE, NULL, p);
+	error = lockmgr(&pfs_vlock, LK_EXCLUSIVE, NULL);
 	if (error)
 		return (error);
 loop:
@@ -180,7 +181,7 @@ loop:
 	TAILQ_INSERT_TAIL(&pfshead, pfs, list);
 	uvm_vnp_setsize(vp, 0);
 out:
-	lockmgr(&pfs_vlock, LK_RELEASE, NULL, p);
+	lockmgr(&pfs_vlock, LK_RELEASE, NULL);
 
 	return (error);
 }
@@ -229,7 +230,7 @@ procfs_rw(v)
 		return (procfs_dostatus(curp, p, pfs, uio));
 
 	case Pmem:
-		return (procfs_domem(curp, p, pfs, uio));
+		return (process_domem(curp, p, uio, PT_WRITE_I));
 
 	case Pcmdline:
 		return (procfs_docmdline(curp, p, pfs, uio));

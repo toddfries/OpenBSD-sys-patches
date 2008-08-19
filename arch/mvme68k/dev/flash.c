@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.14 2004/07/03 14:36:34 miod Exp $ */
+/*	$OpenBSD: flash.c,v 1.17 2005/12/17 07:31:26 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -52,13 +52,13 @@
 #include <mvme68k/dev/flashreg.h>
 
 struct flashsoftc {
-	struct device		sc_dev;
-	u_char *		sc_paddr;
-	volatile u_char *	sc_vaddr;
-	u_char			sc_manu;
-	u_char			sc_ii;
-	int			sc_len;
-	int			sc_zonesize;
+	struct device	 sc_dev;
+	paddr_t		 sc_paddr;
+	volatile u_char *sc_vaddr;
+	u_char		 sc_manu;
+	u_char		 sc_ii;
+	int		 sc_len;
+	int		 sc_zonesize;
 };
 
 void flashattach(struct device *, struct device *, void *);
@@ -123,7 +123,7 @@ flashmatch(parent, cf, args)
 		return (0);
 #endif
 
-	if (badpaddr((paddr_t)ca->ca_paddr, 1))
+	if (badpaddr(ca->ca_paddr, 1))
 		return (0);
 
 	if (!mc_hasflash())
@@ -142,7 +142,7 @@ flashattach(parent, self, args)
 	int manu, ident;
 
 	sc->sc_paddr = ca->ca_paddr;
-	sc->sc_vaddr = mapiodev(sc->sc_paddr, NBPG);
+	sc->sc_vaddr = (volatile u_char *)mapiodev(sc->sc_paddr, NBPG);
 
 	switch (cputyp) {
 #ifdef MVME162
@@ -187,8 +187,8 @@ flashattach(parent, self, args)
 	sc->sc_vaddr[0] = FLCMD_CLEARSTAT;
 	sc->sc_vaddr[0] = FLCMD_RESET;
 
-	unmapiodev((void *)sc->sc_vaddr, NBPG);
-	sc->sc_vaddr = mapiodev(sc->sc_paddr, sc->sc_len);
+	unmapiodev((vaddr_t)sc->sc_vaddr, NBPG);
+	sc->sc_vaddr = (volatile u_char *)mapiodev(sc->sc_paddr, sc->sc_len);
 	if (sc->sc_vaddr == NULL) {
 		sc->sc_len = 0;
 		printf(" -- failed to map");
@@ -350,9 +350,9 @@ flashread(dev, uio, flags)
 {
 	int unit = minor(dev);
 	struct flashsoftc *sc = (struct flashsoftc *) flash_cd.cd_devs[unit];
-	register vm_offset_t v;
-	register int c;
-	register struct iovec *iov;
+	vaddr_t v;
+	int c;
+	struct iovec *iov;
 	int error = 0;
 
 	while (uio->uio_resid > 0 && error == 0) {
@@ -385,9 +385,9 @@ flashwrite(dev, uio, flags)
 {
 	int unit = minor(dev);
 	struct flashsoftc *sc = (struct flashsoftc *) flash_cd.cd_devs[unit];
-	register vm_offset_t v;
-	register int c, i, r;
-	register struct iovec *iov;
+	vaddr_t v;
+	int c, i, r;
+	struct iovec *iov;
 	int error = 0;
 	u_char *cmpbuf;
 	int neederase = 0, needwrite = 0;
@@ -488,5 +488,5 @@ flashmmap(dev, off, prot)
 	/* allow access only in RAM */
 	if (off < 0 || off > sc->sc_len)
 		return (-1);
-	return (m68k_btop(sc->sc_paddr + off));
+	return (atop(sc->sc_paddr + off));
 }

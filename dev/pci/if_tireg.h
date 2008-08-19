@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tireg.h,v 1.18 2005/07/03 02:04:15 brad Exp $	*/
+/*	$OpenBSD: if_tireg.h,v 1.21 2006/01/16 01:47:39 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -981,7 +981,11 @@ struct ti_event_desc {
 
 #define TI_SSLOTS	256
 #define TI_MSLOTS	256
+#ifdef __sparc64__
+#define TI_JSLOTS	54
+#else
 #define TI_JSLOTS	384
+#endif
 
 #define TI_JRAWLEN	(ETHER_MAX_LEN_JUMBO + ETHER_ALIGN)
 #define TI_JLEN		(TI_JRAWLEN + (sizeof(u_int64_t) - \
@@ -1113,6 +1117,7 @@ struct ti_softc {
 #define ti_tx_considx		ti_rdata->ti_tx_considx_r
 	struct ti_tx_desc	*ti_tx_ring_nic;/* pointer to shared mem */
 	bus_dmamap_t		ti_ring_map;
+	u_int16_t		ti_tx_saved_prodidx;
 	u_int16_t		ti_tx_saved_considx;
 	u_int16_t		ti_rx_saved_considx;
 	u_int16_t		ti_ev_saved_considx;
@@ -1162,11 +1167,3 @@ struct ti_softc {
 	TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_DOUT); /* Toggle DATA to 1 */	\
 	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_TXEN); /* Disable xmit. */	\
 	TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK); /* Pull clock low again */
-
-#ifndef ETHER_CRC_LEN
-#define ETHER_CRC_LEN	4
-#endif
-
-#ifndef ETHER_HDR_LEN
-#define	ETHER_HDR_LEN	14
-#endif

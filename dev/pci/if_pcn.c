@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pcn.c,v 1.2 2005/08/01 22:30:47 kettenis Exp $	*/
+/*	$OpenBSD: if_pcn.c,v 1.6 2006/02/22 18:12:24 brad Exp $	*/
 /*	$NetBSD: if_pcn.c,v 1.26 2005/05/07 09:15:44 is Exp $	*/
 
 /*
@@ -508,6 +508,17 @@ pcn_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
+	/*
+	 * IBM makes a PCI variant of this card which shows up as a
+	 * Trident Microsystems 4DWAVE DX (ethernet network, revision 0x25)
+	 * this card is truly a pcn card, so we have a special case match for
+	 * it.
+	 */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_TRIDENT &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_TRIDENT_4DWAVE_DX &&
+	    PCI_CLASS(pa->pa_class) == PCI_CLASS_NETWORK)
+		return(1);
+
 	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_AMD)
 		return (0);
 
@@ -557,8 +568,7 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_st = iot;
 		sc->sc_sh = ioh;
 	} else {
-		printf("%s: unable to map device registers\n",
-		    sc->sc_dev.dv_xname);
+		printf(": unable to map device registers\n");
 		return;
 	}
 
@@ -639,8 +649,6 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 		printf("\n");
 		return;
 	}
-	printf(", %s, rev %d: %s, address %s\n", sc->sc_variant->pcv_desc,
-	    CHIPID_VER(chipid), intrstr, ether_sprintf(enaddr));
 
 	/*
 	 * Allocate the control data structures, and create and load the
@@ -649,32 +657,32 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 	if ((error = bus_dmamem_alloc(sc->sc_dmat,
 	     sizeof(struct pcn_control_data), PAGE_SIZE, 0, &seg, 1, &rseg,
 	     0)) != 0) {
-		printf("%s: unable to allocate control data, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
-		goto fail_0;
+		printf(": unable to allocate control data, error = %d\n",
+		    error);
+		return;
 	}
 
 	if ((error = bus_dmamem_map(sc->sc_dmat, &seg, rseg,
 	     sizeof(struct pcn_control_data), (caddr_t *)&sc->sc_control_data,
 	     BUS_DMA_COHERENT)) != 0) {
-		printf("%s: unable to map control data, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
+		printf(": unable to map control data, error = %d\n",
+		    error);
 		goto fail_1;
 	}
 
 	if ((error = bus_dmamap_create(sc->sc_dmat,
 	     sizeof(struct pcn_control_data), 1,
 	     sizeof(struct pcn_control_data), 0, 0, &sc->sc_cddmamap)) != 0) {
-		printf("%s: unable to create control data DMA map, "
-		    "error = %d\n", sc->sc_dev.dv_xname, error);
+		printf(": unable to create control data DMA map, "
+		    "error = %d\n", error);
 		goto fail_2;
 	}
 
 	if ((error = bus_dmamap_load(sc->sc_dmat, sc->sc_cddmamap,
 	     sc->sc_control_data, sizeof(struct pcn_control_data), NULL,
 	     0)) != 0) {
-		printf("%s: unable to load control data DMA map, error = %d\n",
-		    sc->sc_dev.dv_xname, error);
+		printf(": unable to load control data DMA map, error = %d\n",
+		    error);
 		goto fail_3;
 	}
 
@@ -683,8 +691,8 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 		if ((error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
 		     PCN_NTXSEGS, MCLBYTES, 0, 0,
 		     &sc->sc_txsoft[i].txs_dmamap)) != 0) {
-			printf("%s: unable to create tx DMA map %d, "
-			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
+			printf(": unable to create tx DMA map %d, "
+			    "error = %d\n", i, error);
 			goto fail_4;
 		}
 	}
@@ -693,12 +701,15 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 	for (i = 0; i < PCN_NRXDESC; i++) {
 		if ((error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1,
 		     MCLBYTES, 0, 0, &sc->sc_rxsoft[i].rxs_dmamap)) != 0) {
-			printf("%s: unable to create rx DMA map %d, "
-			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
+			printf(": unable to create rx DMA map %d, "
+			    "error = %d\n", i, error);
 			goto fail_5;
 		}
 		sc->sc_rxsoft[i].rxs_mbuf = NULL;
 	}
+
+	printf(", %s, rev %d: %s, address %s\n", sc->sc_variant->pcv_desc,
+	    CHIPID_VER(chipid), intrstr, ether_sprintf(enaddr));
 
 	/* Initialize our media structures. */
 	(*sc->sc_variant->pcv_mediainit)(sc);
@@ -791,8 +802,6 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof(struct pcn_control_data));
  fail_1:
 	bus_dmamem_free(sc->sc_dmat, &seg, rseg);
- fail_0:
-	return;
 }
 
 /*
@@ -1050,7 +1059,7 @@ pcn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct pcn_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *) data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s, error;
+	int s, error = 0;
 
 	s = splnet();
 
@@ -1869,7 +1878,7 @@ pcn_set_filter(struct pcn_softc *sc)
 	 * of the bits select the bit within the word.
 	 */
 
-	if (ifp->if_flags & IFF_PROMISC)
+	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC)
 		goto allmulti;
 
 	sc->sc_initblock.init_ladrf[0] =

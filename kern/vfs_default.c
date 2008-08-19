@@ -1,7 +1,7 @@
-/*	$OpenBSD: vfs_default.c,v 1.26 2005/07/03 20:13:59 drahn Exp $  */
+/*	$OpenBSD: vfs_default.c,v 1.30 2005/11/07 01:02:32 pedro Exp $  */
 
 /*
- *    Portions of this code are:
+ * Portions of this code are:
  *
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -36,7 +36,6 @@
  * SUCH DAMAGE.
  */
 
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
@@ -48,19 +47,17 @@
 #include <sys/event.h>
 #include <miscfs/specfs/specdev.h>
 
-
 extern struct simplelock spechash_slock;
 
-int filt_generic_readwrite(struct knote *kn, long hint);
-void filt_generic_detach(struct knote *kn);
+int filt_generic_readwrite(struct knote *, long);
+void filt_generic_detach(struct knote *);
 
 /*
- * Eliminate all activity associated with  the requested vnode
+ * Eliminate all activity associated with the requested vnode
  * and with all vnodes aliased to the requested vnode.
  */
 int
-vop_generic_revoke(v)
-	void *v;
+vop_generic_revoke(void *v)
 {
 	struct vop_revoke_args /* {
 		struct vnodeop_desc *a_desc;
@@ -87,8 +84,10 @@ vop_generic_revoke(v)
 			vp->v_flag |= VXWANT;
 			simple_unlock(&vp->v_interlock);
 			tsleep(vp, PINOD, "vop_generic_revokeall", 0);
+
 			return(0);
 		}
+
 		/*
 		 * Ensure that vp will not be vgone'd while we
 		 * are eliminating its aliases.
@@ -107,6 +106,7 @@ vop_generic_revoke(v)
 			}
 			simple_unlock(&spechash_slock);
 		}
+
 		/*
 		 * Remove the lock so that vgone below will
 		 * really eliminate the vnode after which time
@@ -115,24 +115,22 @@ vop_generic_revoke(v)
 		simple_lock(&vp->v_interlock);
 		vp->v_flag &= ~VXLOCK;
 	}
+
 	vgonel(vp, p);
+
 	return (0);
 }
 
-
 int
-vop_generic_bwrite(v)
-	void *v;
+vop_generic_bwrite(void *v)
 {
 	struct vop_bwrite_args *ap = v;
 
 	return (bwrite(ap->a_bp));
 }
 
-
 int
-vop_generic_abortop(v)
-	void *v;
+vop_generic_abortop(void *v)
 {
 	struct vop_abortop_args /* {
 		struct vnodeop_desc *a_desc;
@@ -142,6 +140,7 @@ vop_generic_abortop(v)
  
 	if ((ap->a_cnp->cn_flags & (HASBUF | SAVESTART)) == HASBUF)
 		pool_put(&namei_pool, ap->a_cnp->cn_pnbuf);
+
 	return (0);
 }
 
@@ -149,11 +148,11 @@ vop_generic_abortop(v)
  * Stubs to use when there is no locking to be done on the underlying object.
  * A minimal shared lock is necessary to ensure that the underlying object
  * is not revoked while an operation is in progress. So, an active shared
- * count is maintained in an auxiliary vnode lock structure.
+ * count should be maintained in an auxiliary vnode lock structure. However,
+ * that's not done now.
  */
 int
-vop_generic_lock(v)
-	void *v;
+vop_generic_lock(void *v)
 {
 	struct vop_lock_args /* {
 		struct vnodeop_desc *a_desc;
@@ -162,78 +161,30 @@ vop_generic_lock(v)
 		struct proc *a_p;
 	} */ *ap = v;
 
-#ifdef notyet
-	/*
-	 * This code cannot be used until all the non-locking filesystems
-	 * (notably NFS) are converted to properly lock and release nodes.
-	 * Also, certain vnode operations change the locking state within
-	 * the operation (create, mknod, remove, link, rename, mkdir, rmdir,
-	 * and symlink). Ideally these operations should not change the
-	 * lock state, but should be changed to let the caller of the
-	 * function unlock them. Otherwise all intermediate vnode layers
-	 * (such as union, umapfs, etc) must catch these functions to do
-	 * the necessary locking at their layer. Note that the inactive
-	 * and lookup operations also change their lock state, but this 
-	 * cannot be avoided, so these two operations will always need
-	 * to be handled in intermediate layers.
-	 */
-	struct vnode *vp = ap->a_vp;
-	int vnflags, flags = ap->a_flags;
-
-	if (vp->v_vnlock == NULL) {
-		if ((flags & LK_TYPE_MASK) == LK_DRAIN)
-			return (0);
-		MALLOC(vp->v_vnlock, struct lock *, sizeof(struct lock),
-		    M_VNODE, M_WAITOK);
-		lockinit(vp->v_vnlock, PVFS, "vnlock", 0, 0);
-	}
-	switch (flags & LK_TYPE_MASK) {
-	case LK_DRAIN:
-		vnflags = LK_DRAIN;
-		break;
-	case LK_EXCLUSIVE:
-	case LK_SHARED:
-		vnflags = LK_SHARED;
-		break;
-	case LK_UPGRADE:
-	case LK_EXCLUPGRADE:
-	case LK_DOWNGRADE:
-		return (0);
-	case LK_RELEASE:
-	default:
-		panic("vop_generic_lock: bad operation %d", flags & LK_TYPE_MASK);
-	}
-	if (flags & LK_INTERLOCK)
-		vnflags |= LK_INTERLOCK;
-	return(lockmgr(vp->v_vnlock, vnflags, &vp->v_interlock, ap->a_p));
-#else /* for now */
 	/*
 	 * Since we are not using the lock manager, we must clear
 	 * the interlock here.
 	 */
 	if (ap->a_flags & LK_INTERLOCK)
 		simple_unlock(&ap->a_vp->v_interlock);
+
 	return (0);
-#endif
 }
  
 /*
- * Decrement the active use count.
+ * Decrement the active use count. (Not done currently)
  */
-
 int
-vop_generic_unlock(v)
-	void *v;
+vop_generic_unlock(void *v)
 {
 	return (0);
 }
 
 /*
- * Return whether or not the node is in use.
+ * Return whether or not the node is in use. (Not done currently)
  */
 int
-vop_generic_islocked(v)
-	void *v;
+vop_generic_islocked(void *v)
 {
 	return (0);
 }
@@ -242,8 +193,7 @@ struct filterops generic_filtops =
 	{ 1, NULL, filt_generic_detach, filt_generic_readwrite };
 
 int
-vop_generic_kqfilter(v)
-	void *v;
+vop_generic_kqfilter(void *v)
 {
 	struct vop_kqfilter_args /* {
 		struct vnodeop_desc *a_desc;
@@ -282,6 +232,7 @@ filt_generic_readwrite(struct knote *kn, long hint)
 	}
 
         kn->kn_data = 0;
+
         return (1);
 }
 

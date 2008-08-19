@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_an_pci.c,v 1.11 2005/08/09 04:10:11 mickey Exp $	*/
+/*	$OpenBSD: if_an_pci.c,v 1.15 2006/01/30 11:41:00 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -59,6 +59,7 @@
 #include <sys/device.h>
 #include <sys/timeout.h>
 #include <sys/socket.h>
+#include <sys/tree.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -67,6 +68,7 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 
+#include <net80211/ieee80211_radiotap.h>
 #include <net80211/ieee80211_var.h>
 
 #include <machine/bus.h>
@@ -76,8 +78,8 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
-#include <dev/ic/anvar.h>
 #include <dev/ic/anreg.h>
+#include <dev/ic/anvar.h>
 
 #define AN_PCI_PLX_LOIO		0x14	/* PLX chip iobase */
 #define AN_PCI_LOIO		0x18	/* Aironet iobase */
@@ -126,8 +128,8 @@ an_pci_attach(parent, self, aux)
 		printf(": can't map I/O space\n");
 		return;
 	}
-	sc->an_btag = iot;
-	sc->an_bhandle = ioh;
+	sc->sc_iot = iot;
+	sc->sc_ioh = ioh;
 
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
@@ -146,6 +148,8 @@ an_pci_attach(parent, self, aux)
 		return;
 	}
 	printf(": %s", intrstr);
+
+	sc->sc_enabled = 1;
 
 	an_attach(sc);
 }

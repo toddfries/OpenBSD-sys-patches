@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.10 2003/10/16 04:30:09 drahn Exp $	*/
+/*	$OpenBSD: boot.c,v 1.13 2005/12/24 01:05:17 kettenis Exp $	*/
 /*	$NetBSD: boot.c,v 1.1 1997/04/16 20:29:17 thorpej Exp $	*/
 
 /*
@@ -158,6 +158,12 @@ chain(void (*entry)(), char *args, void *ssym, void *esym)
 	panic("chain");
 }
 
+/*
+ * XXX This limits the maximum size of the (uncompressed) bsd.rd to a
+ * little under 11MB.
+ */
+#define CLAIM_LIMIT	0x00c00000
+
 int
 main()
 {
@@ -188,6 +194,7 @@ main()
 			gets(bootline);
 			parseargs(bootline, &boothowto);
 		}
+		OF_claim((void *)0x00100000, CLAIM_LIMIT, 0); /* XXX */
 		marks[MARK_START] = 0;
 		if (loadfile(bootline, marks, LOAD_ALL) >= 0)
 			break;
@@ -226,6 +233,11 @@ main()
 	entry = marks[MARK_ENTRY];
 	ssym = (void *)marks[MARK_SYM];
 	esym = (void *)marks[MARK_END];
+	{
+		u_int32_t lastpage;
+		lastpage = roundup(marks[MARK_END], NBPG);
+		OF_release((void*)lastpage, CLAIM_LIMIT - lastpage);
+	}
 
 	chain((void *)entry, bootline, ssym, esym);
 

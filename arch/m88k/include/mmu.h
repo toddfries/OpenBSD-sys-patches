@@ -1,4 +1,4 @@
-/*	$OpenBSD: mmu.h,v 1.3 2005/04/27 14:07:09 miod Exp $ */
+/*	$OpenBSD: mmu.h,v 1.6 2005/12/02 21:16:45 miod Exp $ */
 
 /*
  * This file bears almost no resemblance to the original m68k file,
@@ -76,6 +76,8 @@
  * Area descriptors
  */
 
+typedef	u_int32_t	apr_t;
+
 #define	APR_V		0x00000001	/* valid bit */
 
 /*
@@ -102,8 +104,6 @@
 
 typedef u_int32_t	sdt_entry_t;
 
-#define	SDT_ENTRY_NULL	((sdt_entry_t *) 0)
-
 #define	SG_V		0x00000001
 #define	SG_NV		0x00000000
 #define	SG_PROT		0x00000004
@@ -121,13 +121,12 @@ typedef u_int32_t	sdt_entry_t;
 
 typedef u_int32_t	pt_entry_t;
 
-#define	PT_ENTRY_NULL	((pt_entry_t *) 0)
-
 #define	PG_V		0x00000001
 #define	PG_NV		0x00000000
 #define	PG_PROT		0x00000004
 #define	PG_U		0x00000008
 #define	PG_M		0x00000010
+#define	PG_M_U		0x00000018
 #define	PG_RO		0x00000004
 #define	PG_RW		0x00000000
 #define	PG_SO		0x00000100

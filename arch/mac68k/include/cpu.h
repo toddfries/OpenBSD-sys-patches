@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.34 2005/08/01 11:54:24 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.37 2006/01/24 06:50:11 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.45 1997/02/10 22:13:40 scottr Exp $	*/
 
 /*
@@ -217,7 +217,6 @@ struct mac68k_machine_S {
 	 * Misc. info from booter.
 	 */
 	int			machineid;
-	int			mach_processor;
 	int			mach_memsize;
 	int			booter_version;
 	/*
@@ -227,8 +226,6 @@ struct mac68k_machine_S {
 	int			serial_boot_echo;
 	int			serial_console;
 
-	int			zs_chip;	/* what type of chip we've got */
-	int			sccClkConst;	/* Compatibility information */
 	int			modem_flags;
 	int			modem_cts_clk;
 	int			modem_dcd_clk;
@@ -244,16 +241,17 @@ struct mac68k_machine_S {
 	int			scsi96;		/* Has NCR 53C96 */
 	int			scsi96_2;	/* Has 2nd 53C96 */
 	int			sonic;		/* Has SONIC e-net */
+
+	int			via1_ipl;
+	int			via2_ipl;
+	int			aux_interrupts;
 };
 
 	/* What kind of model is this */
 struct cpu_model_info {
-	int	machineid;	/* MacOS Gestalt value. */
-	char	*model_major;	/* Make this distinction to save a few */
-	char	*model_minor;	/*      bytes--might be useful, too. */
-	int	class;		/* Rough class of machine. */
-	  /* forwarded romvec_s is defined in mac68k/macrom.h */
-	struct romvec_s *rom_vectors; /* Pointer to our known rom vectors */
+	int		machineid;	/* MacOS Gestalt value. */
+	const char	*model;		/* Model description */
+	int		class;		/* Rough class of machine. */
 };
 extern struct cpu_model_info *current_mac_model;
 
@@ -263,11 +261,6 @@ extern unsigned long		NuBusBase;	/* Base address of NuBus */
 extern  struct mac68k_machine_S	mac68k_machine;
 extern	unsigned long		load_addr;
 #endif /* _KERNEL */
-
-/* physical memory sections */
-#define	ROMBASE		(0x40800000)
-#define	ROMLEN		(0x00200000)		/* 2MB will work for all 68k */
-#define	ROMMAPSIZE	btoc(ROMLEN)		/* 32k of page tables.  */
 
 #define IIOMAPSIZE	btoc(0x00100000)	/* 1MB should be enough */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.35 2005/08/27 09:13:50 avsm Exp $	*/
+/*	$OpenBSD: atw.c,v 1.43 2006/02/28 06:52:35 jsg Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -77,7 +77,6 @@ __KERNEL_RCSID(0, "$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $");
 #endif
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_compat.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <machine/bus.h>
@@ -190,6 +189,8 @@ void atw_si4126_print(struct atw_softc *);
 void	atw_print_stats(struct atw_softc *);
 #endif
 
+const char *atw_printmac(u_int8_t);
+
 /* ifnet methods */
 void	atw_start(struct ifnet *);
 void	atw_watchdog(struct ifnet *);
@@ -239,7 +240,7 @@ void	atw_write_sram(struct atw_softc *, u_int, u_int8_t *, u_int);
 int	atw_read_srom(struct atw_softc *);
 
 /* BSS setup */
-void	atw_tsf(struct atw_softc *);
+void	atw_predict_beacon(struct atw_softc *sc);
 void	atw_start_beacon(struct atw_softc *, int);
 void	atw_write_bssid(struct atw_softc *);
 void	atw_write_ssid(struct atw_softc *);
@@ -253,13 +254,11 @@ void	atw_media_status(struct ifnet *, struct ifmediareq *);
 void	atw_filter_setup(struct atw_softc *);
 
 /* 802.11 utilities */
-void	atw_frame_setdurs(struct atw_softc *, struct atw_frame *, int, int);
 struct	ieee80211_node *atw_node_alloc(struct ieee80211com *);
 void	atw_node_free(struct ieee80211com *, struct ieee80211_node *);
-void	atw_recv_beacon(struct ieee80211com *, struct mbuf *,
-	    struct ieee80211_node *, int, int, u_int32_t);
 static	__inline uint32_t atw_last_even_tsft(uint32_t, uint32_t, uint32_t);
-static	__inline void atw_tsft(struct atw_softc *, uint32_t *, uint32_t *);
+uint64_t atw_get_tsft(struct atw_softc *sc);
+void	atw_change_ibss(struct atw_softc *);
 
 /*
  * Tuner/transceiver/modem
@@ -274,12 +273,23 @@ int	atw_rf3000_write(struct atw_softc *, u_int, u_int);
 /* Silicon Laboratories Si4126 RF/IF Synthesizer */
 void	atw_si4126_tune(struct atw_softc *, u_int);
 void	atw_si4126_write(struct atw_softc *, u_int, u_int);
+void	atw_si4126_init(struct atw_softc *);
 
 const struct atw_txthresh_tab atw_txthresh_tab_lo[] = ATW_TXTHRESH_TAB_LO_RATE;
 const struct atw_txthresh_tab atw_txthresh_tab_hi[] = ATW_TXTHRESH_TAB_HI_RATE;
 
 struct cfdriver atw_cd = {
     NULL, "atw", DV_IFNET
+};
+
+static const u_int atw_rfmd2958_ifn[] = {
+	0x22bd, 0x22d2, 0x22e8, 0x22fe, 0x2314, 0x232a, 0x2340,
+	0x2355, 0x236b, 0x2381, 0x2397, 0x23ad, 0x23c2, 0x23f7
+};
+
+static const u_int atw_rfmd2958_rf1r[] = {
+	0x05d17, 0x3a2e8, 0x2e8ba, 0x22e8b, 0x1745d, 0x0ba2e, 0x00000,
+	0x345d1, 0x28ba2, 0x1d174, 0x11745, 0x05d17, 0x3a2e8, 0x11745
 };
 
 const char *atw_tx_state[] = {
@@ -532,6 +542,22 @@ atw_print_regs(struct atw_softc *sc, const char *where)
 }
 #endif /* ATW_DEBUG */
 
+const char*
+atw_printmac(u_int8_t rev) {
+	switch (rev) {
+	case ATW_REVISION_AB:
+		return "ADM8211AB";
+	case ATW_REVISION_AF:
+		return "ADM8211AF";
+	case ATW_REVISION_BA:
+		return "ADM8211BA";
+	case ATW_REVISION_CA:
+		return "ADM8211CA";
+	default:
+		return "unknown";
+	}
+}
+
 /*
  * Finish attaching an ADMtek ADM8211 MAC.  Called by bus-specific front-end.
  */
@@ -654,8 +680,9 @@ atw_attach(struct atw_softc *sc)
 		return;
 	}
 
-	printf("%s: %s RF, %s BBP", sc->sc_dev.dv_xname,
-	    type_strings[sc->sc_rftype], type_strings[sc->sc_bbptype]);
+	printf("%s: MAC %s, BBP %s, RF %s", sc->sc_dev.dv_xname,
+	    atw_printmac(sc->sc_rev), type_strings[sc->sc_bbptype],
+	    type_strings[sc->sc_rftype]);
 
 	/* XXX There exists a Linux driver which seems to use RFType = 0 for
 	 * MARVEL. My bug, or theirs?
@@ -777,7 +804,7 @@ atw_attach(struct atw_softc *sc)
 		return;
 	}
 
-	printf(" 802.11 address %s\n", ether_sprintf(ic->ic_myaddr));
+	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
 	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
@@ -1211,7 +1238,31 @@ atw_bbp_io_init(struct atw_softc *sc)
 		break;
 	}
 	ATW_WRITE(sc, ATW_MMIRADDR2, mmiraddr2);
+
+	atw_si4126_init(sc);
+
 	ATW_WRITE(sc, ATW_MACTEST, ATW_MACTEST_MMI_USETXCLK);
+}
+
+void
+atw_si4126_init(struct atw_softc *sc)
+{
+	switch (sc->sc_rftype) {
+	case ATW_RFTYPE_RFMD:
+		if (sc->sc_rev >= ATW_REVISION_BA) {
+			atw_si4126_write(sc, 0x1f, 0x00000);
+			atw_si4126_write(sc, 0x0c, 0x3001f);
+			atw_si4126_write(sc, SI4126_GAIN, 0x29c03);
+			atw_si4126_write(sc, SI4126_RF1N, 0x1ff6f);
+			atw_si4126_write(sc, SI4126_RF2N, 0x29403);
+			atw_si4126_write(sc, SI4126_RF2R, 0x1456f);
+			atw_si4126_write(sc, 0x09, 0x10050);
+			atw_si4126_write(sc, SI4126_IFR, 0x3fff8);
+		}
+		break;
+	default:
+		break;
+	}
 }
 
 /*
@@ -1553,6 +1604,28 @@ atw_si4126_tune(struct atw_softc *sc, u_int chan)
 	atw_si4126_print(sc);
 #endif /* ATW_SYNDEBUG */
 
+	if (sc->sc_rev >= ATW_REVISION_BA) {
+		atw_si4126_write(sc, SI4126_MAIN, 0x04007);
+		atw_si4126_write(sc, SI4126_POWER, 0x00033);
+		atw_si4126_write(sc, SI4126_IFN,
+		    atw_rfmd2958_ifn[chan - 1]);
+		atw_si4126_write(sc, SI4126_RF1R,
+		    atw_rfmd2958_rf1r[chan - 1]);
+#ifdef NOTYET
+		/* set TX POWER? */
+		atw_si4126_write(sc, 0x0a,
+		    (sc->sc_srom[ATW_SR_CSR20] & mask) |
+		    power << 9);
+#endif
+		/* set TX GAIN */
+		atw_si4126_write(sc, 0x09, 0x00050 |
+		    sc->sc_srom[ATW_SR_TXPOWER(chan - 1)]);
+		/* wait 100us from power-up for RF, IF to settle */
+		DELAY(100);
+
+		return;
+	}
+
 	if (chan == 14)
 		mhz = 2484;
 	else
@@ -1688,7 +1761,8 @@ atw_rf3000_init(struct atw_softc *sc)
 	if (rc != 0)
 		goto out;
 
-	/* XXX Reference driver remarks that Abocom sets this to 50.
+	/*
+	 * XXX Reference driver remarks that Abocom sets this to 50.
 	 * Meaning 0x50, I think....  50 = 0x32, which would set a bit
 	 * in the "reserved" area of register RF3000_OPTIONS1.
 	 */
@@ -1891,13 +1965,23 @@ void
 atw_si4126_write(struct atw_softc *sc, u_int addr, u_int val)
 {
 	uint32_t bits, mask, reg;
-	const int nbits = 22;
+	int nbits;
 
-	KASSERT((addr & ~PRESHIFT(SI4126_TWI_ADDR_MASK)) == 0);
-	KASSERT((val & ~PRESHIFT(SI4126_TWI_DATA_MASK)) == 0);
+	if (sc->sc_rev >= ATW_REVISION_BA) {
+		nbits = 24;
 
-	bits = LSHIFT(val, SI4126_TWI_DATA_MASK) |
-	       LSHIFT(addr, SI4126_TWI_ADDR_MASK);
+		val &= 0x3ffff;
+		addr &= 0x1f;
+		bits = val | (addr << 18);
+	} else {
+		nbits = 22;
+
+		KASSERT((addr & ~PRESHIFT(SI4126_TWI_ADDR_MASK)) == 0);
+		KASSERT((val & ~PRESHIFT(SI4126_TWI_DATA_MASK)) == 0);
+
+		bits = LSHIFT(val, SI4126_TWI_DATA_MASK) |
+		    LSHIFT(addr, SI4126_TWI_ADDR_MASK);
+	}
 
 	reg = ATW_SYNRF_SELSYN;
 	/* reference driver: reset Si4126 serial bus to initial
@@ -2042,6 +2126,7 @@ setit:
 	ATW_WRITE(sc, ATW_MAR1, hashes[1]);
 	ATW_WRITE(sc, ATW_NAR, sc->sc_opmode);
 	DELAY(20 * 1000);
+	ATW_WRITE(sc, ATW_RDR, 0x1);
 
 	DPRINTF(sc, ("%s: ATW_NAR %08x opmode %08x\n", sc->sc_dev.dv_xname,
 	    ATW_READ(sc, ATW_NAR), sc->sc_opmode));
@@ -2127,11 +2212,13 @@ void
 atw_write_wep(struct atw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+#if 0
+	u_int32_t reg;
+	int i;
+#endif
 	/* SRAM shared-key record format: key0 flags key1 ... key12 */
 	u_int8_t buf[IEEE80211_WEP_NKID]
 	            [1 /* key[0] */ + 1 /* flags */ + 12 /* key[1 .. 12] */];
-	u_int32_t reg;
-	int i;
 
 	sc->sc_wepctl = 0;
 	ATW_WRITE(sc, ATW_WEPCTL, sc->sc_wepctl);
@@ -2141,6 +2228,7 @@ atw_write_wep(struct atw_softc *sc)
 
 	memset(&buf[0][0], 0, sizeof(buf));
 
+#if 0
 	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
 		if (ic->ic_nw_keys[i].wk_len > 5) {
 			buf[i][1] = ATW_WEP_ENABLED | ATW_WEP_104BIT;
@@ -2172,12 +2260,19 @@ atw_write_wep(struct atw_softc *sc)
 	default:
 		break;
 	}
+#endif
 
 	atw_write_sram(sc, ATW_SRAM_ADDR_SHARED_KEY, (u_int8_t*)&buf[0][0],
 	    sizeof(buf));
 }
 
-const struct timeval atw_beacon_mininterval = {.tv_sec = 1, .tv_usec = 0};
+void
+atw_change_ibss(struct atw_softc *sc)
+{
+	atw_predict_beacon(sc);
+	atw_write_bssid(sc);
+	atw_start_beacon(sc, 1);
+}
 
 void
 atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
@@ -2185,146 +2280,26 @@ atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
 {
 	struct atw_softc *sc = (struct atw_softc*)ic->ic_softc;
 
+	/* The ADM8211A answers probe requests. */
+	if (subtype == IEEE80211_FC0_SUBTYPE_PROBE_REQ &&
+	    sc->sc_rev < ATW_REVISION_BA)
+		return;
+
+	(*sc->sc_recv_mgmt)(ic, m, ni, subtype, rssi, rstamp);
+
 	switch (subtype) {
-	case IEEE80211_FC0_SUBTYPE_PROBE_REQ:
-		/* do nothing: hardware answers probe request */
-		break;
 	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
 	case IEEE80211_FC0_SUBTYPE_BEACON:
-		atw_recv_beacon(ic, m, ni, subtype, rssi, rstamp);
+		if (ic->ic_opmode != IEEE80211_M_IBSS ||
+		    ic->ic_state != IEEE80211_S_RUN)
+			break;
+		if (ieee80211_ibss_merge(ic, ni, atw_get_tsft(sc)) == ENETRESET)
+			atw_change_ibss(sc);
 		break;
 	default:
-		(*sc->sc_recv_mgmt)(ic, m, ni, subtype, rssi, rstamp);
 		break;
 	}
 	return;
-}
-
-static int
-do_slow_print(struct atw_softc *sc, int *did_print)
-{
-	if ((sc->sc_if.if_flags & IFF_LINK0) == 0)
-		return 0;
-	if (!*did_print && (sc->sc_if.if_flags & IFF_DEBUG) == 0 &&
-	    !ratecheck(&sc->sc_last_beacon, &atw_beacon_mininterval))
-		return 0;
-
-	*did_print = 1;
-	return 1;
-}
-
-/* In ad hoc mode, atw_recv_beacon is responsible for the coalescence
- * of IBSSs with like SSID/channel but different BSSID. It joins the
- * oldest IBSS (i.e., with greatest TSF time), since that is the WECA
- * convention. Possibly the ADMtek chip does this for us; I will have
- * to test to find out.
- *
- * XXX we should add the duration field of the received beacon to
- * the TSF time it contains before comparing it with the ADM8211's
- * TSF.
- */
-void
-atw_recv_beacon(struct ieee80211com *ic, struct mbuf *m0,
-    struct ieee80211_node *ni, int subtype, int rssi, u_int32_t rstamp)
-{
-	struct atw_softc *sc = (struct atw_softc*)ic->ic_softc;
-	struct ieee80211_frame *wh;
-	uint32_t tsftl, tsfth;
-	uint32_t bcn_tsftl, bcn_tsfth;
-	int did_print = 0, sign;
-	union {
-		uint32_t	words[2];
-		uint8_t		tstamp[8];
-	} u;
-
-	(*sc->sc_recv_mgmt)(ic, m0, ni, subtype, rssi, rstamp);
-
-	if (ic->ic_state != IEEE80211_S_RUN)
-		return;
-
-	atw_tsft(sc, &tsfth, &tsftl);
-
-	(void)memcpy(&u, &ni->ni_tstamp[0], sizeof(u));
-	bcn_tsftl = letoh32(u.words[0]);
-	bcn_tsfth = letoh32(u.words[1]);
-
-	/* we are faster, let the other guy catch up */
-	if (bcn_tsfth < tsfth)
-		sign = -1;
-	else if (bcn_tsfth == tsfth && bcn_tsftl < tsftl)
-		sign = -1;
-	else
-		sign = 1;
-
-	if (memcmp(ni->ni_bssid, ic->ic_bss->ni_bssid,
-	    IEEE80211_ADDR_LEN) == 0) {
-		if (!do_slow_print(sc, &did_print))
-			return;
-		printf("%s: tsft offset %s%ull\n", sc->sc_dev.dv_xname,
-		    (sign < 0) ? "-" : "",
-		    (sign < 0)
-			? ((((uint64_t)tsfth << 32) | tsftl) -
-			    (((uint64_t)bcn_tsfth << 32) | bcn_tsftl))
-			    : ((((uint64_t)bcn_tsfth << 32) | bcn_tsftl) -
-				(((uint64_t)tsfth << 32) | tsftl)));
-		return;
-	}
-
-	if (sign < 0)
-		return;
-
-	if (ieee80211_match_bss(ic, ni) != 0)
-		return;
-
-	if (do_slow_print(sc, &did_print)) {
-		printf("%s: atw_recv_beacon: bssid mismatch %s\n",
-		    sc->sc_dev.dv_xname, ether_sprintf(ni->ni_bssid));
-	}
-
-	if (ic->ic_opmode != IEEE80211_M_IBSS)
-		return;
-
-	if (do_slow_print(sc, &did_print)) {
-		printf("%s: my tsft %llx beacon tsft %llx\n",
-		    sc->sc_dev.dv_xname, ((uint64_t)tsfth << 32) | tsftl,
-		    ((uint64_t)bcn_tsfth << 32) | bcn_tsftl);
-	}
-
-	wh = mtod(m0, struct ieee80211_frame *);
-
-	if (do_slow_print(sc, &did_print)) {
-		printf("%s: sync TSF with %s\n",
-		    sc->sc_dev.dv_xname, ether_sprintf(wh->i_addr2));
-	}
-
-	ic->ic_flags &= ~IEEE80211_F_SIBSS;
-
-	(void)memcpy(&ic->ic_bss->ni_tstamp[0], &u, sizeof(u));
-
-	atw_tsf(sc);
-
-	/* negotiate rates with new IBSS */
-	ieee80211_fix_rate(ic, ni, IEEE80211_F_DOFRATE |
-	    IEEE80211_F_DONEGO | IEEE80211_F_DODEL);
-	if (ni->ni_rates.rs_nrates == 0) {
-		if (do_slow_print(sc, &did_print)) {
-			printf("%s: rates mismatch, BSSID %s\n",
-			    sc->sc_dev.dv_xname, ether_sprintf(ni->ni_bssid));
-		}
-		return;
-	}
-
-	if (do_slow_print(sc, &did_print)) {
-		printf("%s: sync BSSID %s -> ",
-		    sc->sc_dev.dv_xname, ether_sprintf(ic->ic_bss->ni_bssid));
-		printf("%s ", ether_sprintf(ni->ni_bssid));
-		printf("(from %s)\n", ether_sprintf(wh->i_addr2));
-	}
-
-	(*ic->ic_node_copy)(ic, ic->ic_bss, ni);
-
-	atw_write_bssid(sc);
-	atw_start_beacon(sc, 1);
 }
 
 /* Write the SSID in the ieee80211com to the SRAM on the ADM8211.
@@ -2367,6 +2342,8 @@ atw_write_sup_rates(struct atw_softc *sc)
 	buf[0] = ic->ic_bss->ni_rates.rs_nrates;
 	memcpy(&buf[1], ic->ic_bss->ni_rates.rs_rates,
 	    ic->ic_bss->ni_rates.rs_nrates);
+
+	/* XXX deal with rev BA bug linux driver talks of? */
 
 	atw_write_sram(sc, ATW_SRAM_ADDR_SUPRATES, buf, sizeof(buf));
 }
@@ -2467,16 +2444,18 @@ atw_last_even_tsft(uint32_t tsfth, uint32_t tsftl, uint32_t ival)
 	return ((0xFFFFFFFF % ival + 1) * tsfth + tsftl) % ival;
 }
 
-static __inline void
-atw_tsft(struct atw_softc *sc, uint32_t *tsfth, uint32_t *tsftl)
+uint64_t
+atw_get_tsft(struct atw_softc *sc)
 {
 	int i;
+	uint32_t tsfth, tsftl;
 	for (i = 0; i < 2; i++) {
-		*tsfth = ATW_READ(sc, ATW_TSFTH);
-		*tsftl = ATW_READ(sc, ATW_TSFTL);
-		if (ATW_READ(sc, ATW_TSFTH) == *tsfth)
+		tsfth = ATW_READ(sc, ATW_TSFTH);
+		tsftl = ATW_READ(sc, ATW_TSFTL);
+		if (ATW_READ(sc, ATW_TSFTH) == tsfth)
 			break;
 	}
+	return ((uint64_t)tsfth << 32) | tsftl;
 }
 
 /* If we've created an IBSS, write the TSF time in the ADM8211 to
@@ -2486,32 +2465,34 @@ atw_tsft(struct atw_softc *sc, uint32_t *tsfth, uint32_t *tsftl)
  * write it to the ADM8211.
  */
 void
-atw_tsf(struct atw_softc *sc)
+atw_predict_beacon(struct atw_softc *sc)
 {
 #define TBTTOFS 20 /* TU */
 
 	struct ieee80211com *ic = &sc->sc_ic;
+	uint64_t tsft;
 	uint32_t ival, past_even, tbtt, tsfth, tsftl;
 	union {
-		uint32_t	words[2];
+		uint64_t	word;
 		uint8_t		tstamp[8];
 	} u;
 
 	if ((ic->ic_opmode == IEEE80211_M_HOSTAP) ||
 	    ((ic->ic_opmode == IEEE80211_M_IBSS) &&
 	     (ic->ic_flags & IEEE80211_F_SIBSS))) {
-		atw_tsft(sc, &tsfth, &tsftl);
-		u.words[0] = htole32(tsftl);
-		u.words[1] = htole32(tsfth);
-		(void)memcpy(&ic->ic_bss->ni_tstamp[0], &u,
+		tsft = atw_get_tsft(sc);
+		u.word = htole64(tsft);
+		(void)memcpy(&ic->ic_bss->ni_tstamp[0], &u.tstamp[0],
 		    sizeof(ic->ic_bss->ni_tstamp));
 	} else {
 		(void)memcpy(&u, &ic->ic_bss->ni_tstamp[0], sizeof(u));
-		tsftl = letoh32(u.words[0]);
-		tsfth = letoh32(u.words[1]);
+		tsft = letoh64(u.word);
 	}
 
 	ival = ic->ic_bss->ni_intval * IEEE80211_DUR_TU;
+
+	tsftl = tsft & 0xFFFFFFFF;
+	tsfth = tsft >> 32;
 
 	/* We sent/received the last beacon `past' microseconds
 	 * after the interval divided the TSF timer.
@@ -2527,7 +2508,7 @@ atw_tsf(struct atw_softc *sc)
 	    LSHIFT(1, ATW_TOFS1_TSFTOFSR_MASK) |
 	    LSHIFT(TBTTOFS, ATW_TOFS1_TBTTOFS_MASK) |
 	    LSHIFT(MASK_AND_RSHIFT(tbtt - TBTTOFS * IEEE80211_DUR_TU,
-		ATW_TBTTPRE_MASK), ATW_TOFS1_TBTTPRE_MASK));
+	        ATW_TBTTPRE_MASK), ATW_TOFS1_TBTTPRE_MASK));
 #undef TBTTOFS
 }
 
@@ -2598,7 +2579,7 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		DPRINTF(sc, ("%s: reg[ATW_BPLI] = %08x\n",
 		    sc->sc_dev.dv_xname, ATW_READ(sc, ATW_BPLI)));
 
-		atw_tsf(sc);
+		atw_predict_beacon(sc);
 		break;
 	}
 
@@ -3197,7 +3178,7 @@ atw_rxintr(struct atw_softc *sc)
 
 		ifp->if_ipackets++;
 		if (sc->sc_opmode & ATW_NAR_PR)
-			m->m_flags |= M_HASFCS;
+			len -= IEEE80211_CRC_LEN;
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = m->m_len = MIN(m->m_ext.ext_size, len);
 
@@ -3244,8 +3225,10 @@ atw_rxintr(struct atw_softc *sc)
 
 		wh = mtod(m, struct ieee80211_frame *);
 		ni = ieee80211_find_rxnode(ic, wh);
+#if 0
 		if (atw_hw_decrypted(sc, wh))
 			wh->i_fc[1] &= ~IEEE80211_FC1_WEP;
+#endif
 		ieee80211_input(ifp, m, ni, (int)rssi, 0);
 		/*
 		 * The frame may have caused the node to be marked for
@@ -3388,6 +3371,7 @@ atw_watchdog(struct ifnet *ifp)
 {
 	struct atw_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
+	uint32_t test1, rra, rwa;
 
 	ifp->if_timer = 0;
 	if (ATW_IS_ENABLED(sc) == 0)
@@ -3408,91 +3392,24 @@ atw_watchdog(struct ifnet *ifp)
 	}
 	if (sc->sc_tx_timer != 0 || sc->sc_rescan_timer != 0)
 		ifp->if_timer = 1;
-	ieee80211_watchdog(ifp);
-}
 
-/* Compute the 802.11 Duration field and the PLCP Length fields for
- * a len-byte frame (HEADER + PAYLOAD + FCS) sent at rate * 500Kbps.
- * Write the fields to the ADM8211 Tx header, frm.
- *
- * TBD use the fragmentation threshold to find the right duration for
- * the first & last fragments.
- *
- * TBD make certain of the duration fields applied by the ADM8211 to each
- * fragment. I think that the ADM8211 knows how to subtract the CTS
- * duration when ATW_HDRCTL_RTSCTS is clear; that is why I add it regardless.
- * I also think that the ADM8211 does *some* arithmetic for us, because
- * otherwise I think we would have to set a first duration for CTS/first
- * fragment, a second duration for fragments between the first and the
- * last, and a third duration for the last fragment.
- *
- * TBD make certain that duration fields reflect addition of FCS/WEP
- * and correct duration arithmetic as necessary.
- */
-void
-atw_frame_setdurs(struct atw_softc *sc, struct atw_frame *frm, int rate,
-    int len)
-{
-	int remainder;
-
-	/* deal also with encrypted fragments */
-	if (frm->atw_hdrctl & htole16(ATW_HDRCTL_WEP)) {
-		DPRINTF2(sc, ("%s: atw_frame_setdurs len += 8\n",
-		    sc->sc_dev.dv_xname));
-		len += IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN +
-		       IEEE80211_WEP_CRCLEN;
-	}
-
-	/* 802.11 Duration Field for CTS/Data/ACK sequence minus FCS & WEP
-	 * duration (XXX added by MAC?).
+	/*
+	 * ADM8211B seems to stall every so often, check for this.
+	 * These bits are what the Linux driver checks, they don't
+	 * seem to be documented by ADMTek/Infineon?
 	 */
-	frm->atw_head_dur = (16 * (len - IEEE80211_CRC_LEN)) / rate;
-	remainder = (16 * (len - IEEE80211_CRC_LEN)) % rate;
+	if (sc->sc_rev == ATW_REVISION_BA) {
+		test1 = ATW_READ(sc, ATW_TEST1);
+		rra = (test1 >> 12) & 0x1ff;
+		rwa = (test1 >> 2) & 0x1ff;
 
-	if (rate <= 4)
-		/* 1-2Mbps WLAN: send ACK/CTS at 1Mbps */
-		frm->atw_head_dur += 3 * (IEEE80211_DUR_DS_SIFS +
-		    IEEE80211_DUR_DS_SHORT_PREAMBLE +
-		    IEEE80211_DUR_DS_FAST_PLCPHDR) +
-		    IEEE80211_DUR_DS_SLOW_CTS + IEEE80211_DUR_DS_SLOW_ACK;
-	else
-		/* 5-11Mbps WLAN: send ACK/CTS at 2Mbps */
-		frm->atw_head_dur += 3 * (IEEE80211_DUR_DS_SIFS +
-		    IEEE80211_DUR_DS_SHORT_PREAMBLE +
-		    IEEE80211_DUR_DS_FAST_PLCPHDR) +
-		    IEEE80211_DUR_DS_FAST_CTS + IEEE80211_DUR_DS_FAST_ACK;
-
-	/* lengthen duration if long preamble */
-	if ((sc->sc_flags & ATWF_SHORT_PREAMBLE) == 0)
-		frm->atw_head_dur +=
-		    3 * (IEEE80211_DUR_DS_LONG_PREAMBLE -
-		         IEEE80211_DUR_DS_SHORT_PREAMBLE) +
-		    3 * (IEEE80211_DUR_DS_SLOW_PLCPHDR -
-		         IEEE80211_DUR_DS_FAST_PLCPHDR);
-
-	if (remainder != 0)
-		frm->atw_head_dur++;
-
-	if ((atw_voodoo & VOODOO_DUR_2_4_SPECIALCASE) &&
-	    (rate == 2 || rate == 4)) {
-		/* derived from Linux: how could this be right? */
-		frm->atw_head_plcplen = frm->atw_head_dur;
-	} else {
-		frm->atw_head_plcplen = (16 * len) / rate;
-		remainder = (80 * len) % (rate * 5);
-
-		if (remainder != 0) {
-			frm->atw_head_plcplen++;
-
-			/* XXX magic */
-			if ((atw_voodoo & VOODOO_DUR_11_ROUNDING) &&
-			    rate == 22 && remainder <= 30)
-				frm->atw_head_plcplen |= 0x8000;
+		if ((rra != rwa) && !(test1 & 0x2)) {
+			atw_init(ifp);
+			atw_start(ifp);
 		}
 	}
-	frm->atw_tail_plcplen = frm->atw_head_plcplen =
-	    htole16(frm->atw_head_plcplen);
-	frm->atw_tail_dur = frm->atw_head_dur = htole16(frm->atw_head_dur);
+
+	ieee80211_watchdog(ifp);
 }
 
 #ifdef ATW_DEBUG
@@ -3536,7 +3453,7 @@ atw_start(struct ifnet *ifp)
 	struct mbuf *m0, *m;
 	struct atw_txsoft *txs, *last_txs;
 	struct atw_txdesc *txd;
-	int do_encrypt, rate;
+	int do_encrypt, npkt, rate;
 	bus_dmamap_t dmamap;
 	int ctl, error, firsttx, nexttx, lasttx = -1, first, ofree, seg;
 
@@ -3587,9 +3504,39 @@ atw_start(struct ifnet *ifp)
 				ifp->if_oerrors++;
 				break;
 			}
+
+			if (sc->sc_ic.ic_flags & IEEE80211_F_WEPON) {
+				if ((m0 = ieee80211_wep_crypt(ifp, m0, 1)) == NULL) {
+					ifp->if_oerrors++;
+					break;	
+				}
+			}
 		}
 
-		rate = MAX(ieee80211_get_rate(ic), 2);
+		wh = mtod(m0, struct ieee80211_frame *);
+
+		/* XXX do real rate control */
+		if ((wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+		    IEEE80211_FC0_TYPE_MGT)
+			rate = 2;
+		else
+			rate = MAX(2, ieee80211_get_rate(ic));
+
+		if (ieee80211_compute_duration(wh, m0->m_pkthdr.len,
+		    ic->ic_flags & ~IEEE80211_F_WEPON, ic->ic_fragthreshold,
+		    rate, &txs->txs_d0, &txs->txs_dn, &npkt,
+		    (sc->sc_if.if_flags & (IFF_DEBUG|IFF_LINK2)) ==
+		    (IFF_DEBUG|IFF_LINK2)) == -1) {
+			DPRINTF2(sc, ("%s: fail compute duration\n", __func__));
+			m_freem(m0);
+			break;
+		}
+
+		/*
+		 * XXX Misleading if fragmentation is enabled.  Better
+		 * to fragment in software?
+		 */
+		*(uint16_t *)wh->i_dur = htole16(txs->txs_d0.d_rts_dur);
 
 #if NBPFILTER > 0
 		/*
@@ -3669,15 +3616,21 @@ atw_start(struct ifnet *ifp)
 		hh->atw_fragthr = htole16(ATW_FRAGTHR_FRAGTHR_MASK);
 		hh->atw_rtylmt = 3;
 		hh->atw_hdrctl = htole16(ATW_HDRCTL_UNKNOWN1);
+#if 0
 		if (do_encrypt) {
 			hh->atw_hdrctl |= htole16(ATW_HDRCTL_WEP);
 			hh->atw_keyid = ic->ic_wep_txkey;
 		}
+#endif
 
-		/* TBD 4-addr frames */
-		atw_frame_setdurs(sc, hh, rate,
-		    m0->m_pkthdr.len - sizeof(struct atw_frame) +
-		    sizeof(struct ieee80211_frame) + IEEE80211_CRC_LEN);
+		hh->atw_head_plcplen = htole16(txs->txs_d0.d_plcp_len);
+		hh->atw_tail_plcplen = htole16(txs->txs_dn.d_plcp_len);
+		if (txs->txs_d0.d_residue)
+			hh->atw_head_plcplen |= htole16(0x8000);
+		if (txs->txs_dn.d_residue)
+			hh->atw_tail_plcplen |= htole16(0x8000);
+		hh->atw_head_dur = htole16(txs->txs_d0.d_rts_dur);
+		hh->atw_tail_dur = htole16(txs->txs_dn.d_rts_dur);
 
 		/* never fragment multicast frames */
 		if (IEEE80211_IS_MULTICAST(hh->atw_dst)) {
@@ -3814,7 +3767,8 @@ atw_start(struct ifnet *ifp)
 			lasttx = nexttx;
 		}
 
-		IASSERT(lasttx != -1, ("bad lastx"));
+		if (lasttx == -1)
+			panic("%s: bad lastx", ifp->if_xname);
 		/* Set `first segment' and `last segment' appropriately. */
 		sc->sc_txdescs[sc->sc_txnext].at_flags |=
 		    htole32(ATW_TXFLAG_FS);

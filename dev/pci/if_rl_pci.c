@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rl_pci.c,v 1.9 2003/12/29 23:06:55 brad Exp $ */
+/*	$OpenBSD: if_rl_pci.c,v 1.12 2006/02/24 00:26:16 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -97,6 +97,7 @@ const struct pci_matchid rl_pci_devices[] = {
 	{ PCI_VENDOR_NORTEL, PCI_PRODUCT_NORTEL_BS21 },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8129 },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8139 },
+	{ PCI_VENDOR_TTTECH, PCI_PRODUCT_TTTECH_MC322 }
 };
 
 int
@@ -119,44 +120,24 @@ rl_pci_attach(parent, self, aux)
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
-	bus_addr_t iobase;
-	bus_size_t iosize;
-	u_int32_t command;
-
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-
-#ifdef RL_USEIOSPACE
-	if (!(command & PCI_COMMAND_IO_ENABLE)) {
-		printf(": failed to enable i/o ports\n");
-		return;
-	}
+	bus_size_t size;
 
 	/*
 	 * Map control/status registers.
 	 */
-	if (pci_io_find(pc, pa->pa_tag, RL_PCI_LOIO, &iobase, &iosize)) {
-		printf(": can't find i/o space\n");
-		return;
-	}
-	if (bus_space_map(pa->pa_iot, iobase, iosize, 0, &sc->rl_bhandle)) {
+
+#ifdef RL_USEIOSPACE
+	if (pci_mapreg_map(pa, RL_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
+	    &sc->rl_btag, &sc->rl_bhandle, NULL, &size, 0)) {
 		printf(": can't map i/o space\n");
 		return;
 	}
-	sc->rl_btag = pa->pa_iot;
 #else
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf(": failed to enable memory mapping\n");
-		return;
-	}
-	if (pci_mem_find(pc, pa->pa_tag, RL_PCI_LOMEM, &iobase, &iosize, NULL)){
-		printf(": can't find mem space\n");
-		return;
-	}
-	if (bus_space_map(pa->pa_memt, iobase, iosize, 0, &sc->rl_bhandle)) {
+	if (pci_mapreg_map(pa, RL_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->rl_btag, &sc->rl_bhandle, NULL, &size, 0)){
 		printf(": can't map mem space\n");
 		return;
 	}
-	sc->rl_btag = pa->pa_memt;
 #endif
 
 	/*
@@ -164,6 +145,7 @@ rl_pci_attach(parent, self, aux)
 	 */
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
+		bus_space_unmap(sc->rl_btag, sc->rl_bhandle, size);
 		return;
 	}
 
@@ -175,6 +157,7 @@ rl_pci_attach(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
+		bus_space_unmap(sc->rl_btag, sc->rl_bhandle, size);
 		return;
 	}
 	printf(": %s", intrstr);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ray.c,v 1.27 2005/04/03 01:35:06 uwe Exp $	*/
+/*	$OpenBSD: if_ray.c,v 1.30 2005/11/23 11:39:37 mickey Exp $	*/
 /*	$NetBSD: if_ray.c,v 1.21 2000/07/05 02:35:54 onoe Exp $	*/
 
 /*
@@ -123,7 +123,7 @@
 #define	RAY_CHECK_CCS_TIMEOUT	(hz / 2)
 #endif
 
-/* ammount of time to consider start/join failed */
+/* amount of time to consider start/join failed */
 #ifndef	RAY_START_TIMEOUT
 #define	RAY_START_TIMEOUT	(10 * hz)
 #endif
@@ -521,7 +521,7 @@ ray_attach(parent, self, aux)
 	struct pcmcia_attach_args *pa;
 	struct ray_softc *sc;
 	struct ifnet *ifp;
-	bus_addr_t memoff;
+	bus_size_t memoff;
 
 	pa = aux;
 	sc = (struct ray_softc *)self;
@@ -1635,7 +1635,6 @@ done:
 	if (ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m);
 #endif
-	/* XXX doesn't appear to be included m->m_flags |= M_HASFCS; */
 	ifp->if_ipackets++;
 
 	ether_input_mbuf(ifp, m);

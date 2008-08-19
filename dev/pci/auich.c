@@ -1,4 +1,4 @@
-/*	$OpenBSD: auich.c,v 1.56 2005/08/10 15:28:35 jsg Exp $	*/
+/*	$OpenBSD: auich.c,v 1.58 2006/02/13 06:15:32 brad Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Michael Shalayeff
@@ -129,7 +129,7 @@
 #define	AUICH_SEMATIMO		1000	/* us */
 #define	AUICH_RESETIMO		500000	/* us */
 
-#define	ICH_SIS_NV_CTL	0x4c	/* some SiS/nVidia register.  From Linux */
+#define	ICH_SIS_NV_CTL	0x4c	/* some SiS/NVIDIA register.  From Linux */
 #define		ICH_SIS_CTL_UNMUTE	0x01	/* un-mute the output */
 
 /*
@@ -802,9 +802,11 @@ auich_set_params(v, setmode, usemode, play, rec)
 			case 1:
 				play->factor = 4;
 				play->sw_code = alaw_to_slinear16_mts;
+				break;
 			case 2:
 				play->factor = 2;
 				play->sw_code = alaw_to_slinear16;
+				break;
 			default:
 				return (EINVAL);
 			}

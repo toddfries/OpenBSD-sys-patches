@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.5 2005/04/30 16:42:33 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.7 2006/01/26 07:11:08 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -47,6 +47,9 @@
 #include <machine/disklabel.h>
 #include <machine/vmparam.h>
 
+#include <scsi/scsi_all.h>
+#include <scsi/scsiconf.h>
+
 #include <dev/cons.h>
 
 /*
@@ -57,9 +60,9 @@
 
 struct	device *parsedisk(char *, int, int, dev_t *);
 void	setroot(void);
-void	swapconf(void);
 void	dumpconf(void);
 int	findblkmajor(struct device *);
+void	get_autoboot_device(void);
 struct device *getdisk(char *, int, int, dev_t *);
 
 int cold = 1;   /* 1 if still booting */
@@ -87,31 +90,9 @@ cpu_configure()
 	set_psr(get_psr() & ~PSR_IND);
 	spl0();
 	setroot();
-	swapconf();
+	dumpconf();
 
 	cold = 0;
-}
-
-/*
- * Configure swap space and related parameters.
- */
-void
-swapconf()
-{
-	struct swdevt *swp;
-	int nblks;
-
-	for (swp = swdevt; swp->sw_dev != NODEV; swp++)
-		if (bdevsw[major(swp->sw_dev)].d_psize) {
-			nblks =
-			    (*bdevsw[major(swp->sw_dev)].d_psize)(swp->sw_dev);
-			if (nblks != -1 &&
-			    (swp->sw_nblks == 0 || swp->sw_nblks > nblks))
-				swp->sw_nblks = nblks;
-			swp->sw_nblks = ctod(dtoc(swp->sw_nblks));
-		}
-
-	dumpconf();
 }
 
 struct nam2blk {
@@ -384,4 +365,78 @@ gotswap:
 	 */
 	if (temp == dumpdev)
 		dumpdev = swdevt[0].sw_dev;
+}
+
+/*
+ * Get 'auto-boot' information from NVRAM
+ *
+ * XXX Right now we can not handle network boot.
+ */
+struct autoboot_t
+{
+	char	cont[16];
+	int	targ;
+	int	part;
+} autoboot;
+
+void
+get_autoboot_device(void)
+{
+	char *value, c;
+	int i, len, part;
+	extern char *nvram_by_symbol(char *);		/* machdep.c */
+
+	/* Assume default controller is internal spc (spc0) */
+	strlcpy(autoboot.cont, "spc0", sizeof(autoboot.cont));
+
+	/* Get boot controler and SCSI target from NVRAM */
+	value = nvram_by_symbol("boot_unit");
+	if (value != NULL) {
+		len = strlen(value);
+		if (len == 1) {
+			c = value[0];
+		} else if (len == 2) {
+			if (value[0] == '1') {
+				/* External spc (spc1) */
+				strlcpy(autoboot.cont, "spc1", sizeof(autoboot.cont));
+				c = value[1];
+			}
+		}
+
+		if ((c >= '0') && (c <= '6'))
+			autoboot.targ = 6 - (c - '0');
+	}
+
+	/* Get partition number from NVRAM */
+	value = nvram_by_symbol("boot_partition");
+	if (value != NULL) {
+		len = strlen(value);
+		part = 0;
+		for (i = 0; i < len; i++)
+			part = part * 10 + (value[i] - '0');
+		autoboot.part = part;
+	}
+}
+
+void
+device_register(struct device *dev, void *aux)
+{
+        /*
+         * scsi: sd,cd  XXX: Can LUNA88K boot from CD-ROM?
+         */
+        if (strncmp("sd", dev->dv_xname, 2) == 0 ||
+            strncmp("cd", dev->dv_xname, 2) == 0) {
+		struct scsibus_attach_args *sa = aux;
+		struct device *spcsc;
+
+		spcsc = dev->dv_parent->dv_parent;
+
+                if (strncmp(autoboot.cont, spcsc->dv_xname, 4) == 0 &&
+		    sa->sa_sc_link->target == autoboot.targ &&
+		    sa->sa_sc_link->lun == 0) {
+                        bootdv = dev;
+			bootpart = autoboot.part;
+                        return;
+                }
+        }
 }

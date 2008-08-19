@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.63 2005/08/09 00:46:12 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.66 2006/01/19 03:30:05 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200511		/* OpenBSD version (year & month). */
-#define OpenBSD3_8 1		/* OpenBSD 3.8 */
+#define OpenBSD	200605		/* OpenBSD version (year & month). */
+#define OpenBSD3_9 1		/* OpenBSD 3.9 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -68,7 +68,7 @@
 
 #define	MAXCOMLEN	16		/* max command name remembered */
 #define	MAXINTERP	64		/* max interpreter file name length */
-#define	MAXLOGNAME	32		/* max login name length */
+#define	MAXLOGNAME	LOGIN_NAME_MAX	/* max login name length w/ NUL */
 #define	MAXUPRC		CHILD_MAX	/* max simultaneous processes */
 #define	NCARGS		ARG_MAX		/* max bytes for an exec function */
 #define	NGROUPS		NGROUPS_MAX	/* max number groups */
@@ -241,3 +241,4 @@
 #define RFCNAMEG	(1<<10) /* UNIMPL zero plan9 `name space' */
 #define RFCENVG		(1<<11) /* UNIMPL zero plan9 `env space' */
 #define RFCFDG		(1<<12)	/* zero fd table */
+#define RFTHREAD	(1<<13)	/* create a thread, not a process */

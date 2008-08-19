@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.31 2005/08/28 05:30:43 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.34 2006/02/14 18:11:04 miod Exp $
 
 machine	zaurus	arm
 
@@ -14,8 +14,6 @@ options	EXT2FS		# Second Extended Filesystem
 options	FIFO		# FIFOs; RECOMMENDED
 
 options		ARM32
-#options	ARM_INTR_IMPL="<arch/arm/xscale/pxa2x0_intr.h>"
-options		PXA2x0_INTR
 options		PXAGPIO_HAS_GPION_INTRS
 
 options		CACHE_CLEAN_BLOCK_INTR
@@ -34,10 +32,10 @@ options		CPU_XSCALE_PXA2X0	# Support the XScale core
 options		XSCALE_CACHE_WRITE_BACK
 makeoptions	CPUFLAGS="-mcpu=xscale"
 
-#option WSDISPLAY_COMPAT_USL		# VT handling
-#option WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
-#option WSDISPLAY_DEFAULTSCREENS=2
-#option WSDISPLAY_COMPAT_PCVT		# emulate some ioctls
+#option	WSDISPLAY_COMPAT_USL		# VT handling
+#option	WSDISPLAY_COMPAT_RAWKBD		# provide raw scancodes; needed for X11
+#option	WSDISPLAY_DEFAULTSCREENS=2	# initial number of text consoles
+#option	WSDISPLAY_COMPAT_PCVT		# emulate some ioctls; needed for X11
 
 config		bsd	root on rd0a swap on rd0b
 
@@ -50,7 +48,7 @@ pxaintc0	at pxaip?	# interrupt controller
 pxagpio0	at pxaip?	# GPIO
 scoop0		at pxaip?
 scoop1		at pxaip?
-saost0		at pxaip? addr 0x40a00000 size 0x20
+pxaost0		at pxaip? addr 0x40a00000 size 0x20
 
 # touch screen
 zts0		at pxaip?

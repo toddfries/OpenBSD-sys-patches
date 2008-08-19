@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.16 2005/08/24 03:39:52 dlg Exp $ */
+/*	$OpenBSD: safte.c,v 1.26 2006/01/19 17:08:40 grange Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -18,18 +18,14 @@
 
 #include "bio.h"
 
-#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/stat.h>
-#include <sys/scsiio.h>
-#include <sys/uio.h>
-#include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/conf.h>
+#include <sys/scsiio.h>
+#include <sys/malloc.h>
+#include <sys/proc.h>
+#include <sys/lock.h>
 #include <sys/queue.h>
-#include <sys/kthread.h>
 #include <sys/sensors.h>
 
 #if NBIO > 0
@@ -37,7 +33,6 @@
 #endif
 
 #include <scsi/scsi_all.h>
-#include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
 #include <scsi/safte.h>
@@ -66,11 +61,10 @@ struct safte_sensor {
 	u_int8_t		*se_field;
 };
 
-struct safte_thread;
-
 struct safte_softc {
 	struct device		sc_dev;
 	struct scsi_link	 *sc_link;
+	struct lock		sc_lock;
 
 	u_int			sc_encbuflen;
 	u_char			*sc_encbuf;
@@ -87,8 +81,6 @@ struct safte_softc {
 	int			sc_nslots;
 	u_int8_t		*sc_slots;
 #endif
-
-	struct safte_thread	*sc_thread;
 };
 
 struct cfattach safte_ca = {
@@ -101,15 +93,8 @@ struct cfdriver safte_cd = {
 
 #define DEVNAME(s)	((s)->sc_dev.dv_xname)
 
-struct safte_thread {
-	struct safte_softc	*sc;
-	volatile int		running;
-};
-
-void	safte_create_thread(void *);
-void	safte_refresh(void *);
 int	safte_read_config(struct safte_softc *);
-int	safte_read_encstat(struct safte_softc *);
+void	safte_read_encstat(void *);
 
 #if NBIO > 0
 int	safte_ioctl(struct device *, u_long, caddr_t);
@@ -173,42 +158,51 @@ safte_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct safte_softc		*sc = (struct safte_softc *)self;
 	struct scsibus_attach_args	*sa = aux;
+	int				i = 0;
 
 	sc->sc_link = sa->sa_sc_link;
 	sa->sa_sc_link->device_softc = sc;
+	lockinit(&sc->sc_lock, PZERO, DEVNAME(sc), 0, 0);
 
 	printf("\n");
 
-	sc->sc_thread = malloc(sizeof(struct safte_thread), M_DEVBUF, M_NOWAIT);
-	if (sc->sc_thread == NULL) {
-		printf("%s: unable to allocate thread information\n",
-		    DEVNAME(sc));
-		return;
-	}
-
-	sc->sc_thread->sc = sc;
-	sc->sc_thread->running = 1;
-
+	sc->sc_encbuf = NULL;
+	sc->sc_nsensors = 0;
 #if NBIO > 0
-	if (bio_register(self, safte_ioctl) != 0) {
-		free(sc->sc_thread, M_DEVBUF);
-		printf("%s: unable to register ioctl with bio\n", DEVNAME(sc));
-		return;
-	}
+	sc->sc_nslots = 0;
 #endif
 
 	if (safte_read_config(sc) != 0) {
-#if NBIO > 0
-		bio_unregister(self);
-#endif
-		free(sc->sc_thread, M_DEVBUF);
-		sc->sc_thread = NULL;
 		printf("%s: unable to read enclosure configuration\n",
 		    DEVNAME(sc));
 		return;
 	}
 
-	kthread_create_deferred(safte_create_thread, sc);
+	if (sc->sc_nsensors > 0 &&
+	    sensor_task_register(sc, safte_read_encstat, 10) != 0) {
+		printf("%s: unable to register update task\n", DEVNAME(sc));
+		sc->sc_nsensors = sc->sc_ntemps = 0;
+		free(sc->sc_sensors, M_DEVBUF);
+	} else {
+		for (i = 0; i < sc->sc_nsensors; i++)
+			sensor_add(&sc->sc_sensors[i].se_sensor);
+	}
+
+#if NBIO > 0
+	if (sc->sc_nslots > 0 &&
+	    bio_register(self, safte_ioctl) != 0) {
+		printf("%s: unable to register ioctl with bio\n", DEVNAME(sc));
+		sc->sc_nslots = 0;
+	} else
+		i++;
+#endif
+
+	if (i) /* if we're doing something, then preinit encbuf and sensors */
+		safte_read_encstat(sc);
+	else {
+		free(sc->sc_encbuf, M_DEVBUF);
+		sc->sc_encbuf = NULL;
+	}
 }
 
 int
@@ -217,14 +211,15 @@ safte_detach(struct device *self, int flags)
 	struct safte_softc		*sc = (struct safte_softc *)self;
 	int				i;
 
-	if (sc->sc_thread != NULL) {
-		sc->sc_thread->running = 0;
-		wakeup(sc->sc_thread);
-		sc->sc_thread = NULL;
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
 
 #if NBIO > 0
+	if (sc->sc_nslots > 0)
 		bio_unregister(self);
 #endif
+
+	if (sc->sc_nsensors > 0) {
+		sensor_task_unregister(sc);
 
 		/*
 		 * we can't free the sensors since there is no mechanism to
@@ -232,48 +227,15 @@ safte_detach(struct device *self, int flags)
 		 */
 		for (i = 0; i < sc->sc_nsensors; i++)
 			sc->sc_sensors[i].se_sensor.flags |= SENSOR_FINVALID;
-
-		free(sc->sc_encbuf, M_DEVBUF);
 	}
+
+	if (sc->sc_encbuf != NULL)
+		free(sc->sc_encbuf, M_DEVBUF);
+
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	lockmgr(&sc->sc_lock, LK_DRAIN, NULL);
 
 	return (0);
-}
-
-void
-safte_create_thread(void *arg)
-{
-	struct safte_softc		*sc = arg;
-
-	if (kthread_create(safte_refresh, sc->sc_thread, NULL,
-	    DEVNAME(sc)) != 0)
-		panic("safte thread");
-}
-
-void
-safte_refresh(void *arg)
-{
-	struct safte_thread		*thread = arg;
-	struct safte_softc		*sc = thread->sc;
-	int				ok = 1;
-
-	while (thread->running) {
-		if (safte_read_encstat(sc) != 0) {
-			if (ok)
-				printf("%s: error getting enclosure status\n",
-				    DEVNAME(sc));
-			ok = 0;
-		} else {
-			if (!ok)
-				printf("%s: enclosure back online\n",
-				    DEVNAME(sc));
-			ok = 1;
-		}
-		tsleep(thread, PWAIT, "timeout", 10 * hz);
-	}
-
-	free(thread, M_DEVBUF);
-
-	kthread_exit(0);
 }
 
 int
@@ -327,6 +289,8 @@ safte_read_config(struct safte_softc *sc)
 	    M_DEVBUF, M_NOWAIT);
 	if (sc->sc_sensors == NULL) {
 		free(sc->sc_encbuf, M_DEVBUF);
+		sc->sc_encbuf = NULL;
+		sc->sc_nsensors = 0;
 		return (1);
 	}
 
@@ -403,22 +367,23 @@ safte_read_config(struct safte_softc *sc)
 
 	sc->sc_temperrs = (u_int16_t *)(sc->sc_encbuf + j);
 
-	for (i = 0; i < sc->sc_nsensors; i++) {
+	for (i = 0; i < sc->sc_nsensors; i++)
 		strlcpy(sc->sc_sensors[i].se_sensor.device, DEVNAME(sc),
 		    sizeof(sc->sc_sensors[i].se_sensor.device));
-		SENSOR_ADD(&sc->sc_sensors[i].se_sensor);
-	}
 
 	return (0);
 }
 
-int
-safte_read_encstat(struct safte_softc *sc)
+void
+safte_read_encstat(void *arg)
 {
+	struct safte_softc		*sc = (struct safte_softc *)arg;
 	struct safte_readbuf_cmd	cmd;
 	int				flags, i;
 	struct safte_sensor		*s;
 	u_int16_t			oot;
+
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
 
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.opcode = READ_BUFFER;
@@ -435,8 +400,10 @@ safte_read_encstat(struct safte_softc *sc)
 
 	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
 	    sizeof(cmd), sc->sc_encbuf, sc->sc_encbuflen, 2, 30000, NULL,
-	    flags) != 0)
-		return (1);
+	    flags) != 0) {
+		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+		return;
+	}
 
 	for (i = 0; i < sc->sc_nsensors; i++) {
 		s = &sc->sc_sensors[i];
@@ -523,6 +490,7 @@ safte_read_encstat(struct safte_softc *sc)
 				s->se_sensor.status = SENSOR_S_CRIT;
 				break;
 			}
+			break;
 
 		case SAFTE_T_TEMP:
 			s->se_sensor.value = safte_temp2uK(*s->se_field,
@@ -536,7 +504,7 @@ safte_read_encstat(struct safte_softc *sc)
 		sc->sc_temps[i].se_sensor.status = 
 		    (oot & (1 << i)) ? SENSOR_S_CRIT : SENSOR_S_OK;
 
-	return(0);
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 }
 
 #if NBIO > 0
@@ -579,10 +547,12 @@ safte_bio_blink(struct safte_softc *sc, struct bioc_blink *blink)
 		return (EINVAL);
 	}
 
+	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
 	for (slot = 0; slot < sc->sc_nslots; slot++) {
 		if (sc->sc_slots[slot] == blink->bb_target)
 			break;
 	}
+	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 
 	if (slot >= sc->sc_nslots)
 		return (ENODEV);

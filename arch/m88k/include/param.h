@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.5 2005/07/31 15:31:14 miod Exp $ */
+/*	$OpenBSD: param.h,v 1.8 2005/10/13 19:47:12 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1988 University of Utah.
@@ -81,8 +81,6 @@
 #define USPACE		(UPAGES * NBPG)
 #define	USPACE_ALIGN	(0)		/* u-area alignment 0-none */
 
-#define UADDR		0xeee00000	/* address of u */
-
 /*
  * Constants related to network buffer management.
  * MCLBYTES must be no larger than the software page size, and,
@@ -102,7 +100,7 @@
  * logical pages.
  */
 #define	NKMEMPAGES_MIN_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
-#define	NKMEMPAGES_MAX_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
+#define	NKMEMPAGES_MAX_DEFAULT	((64 * 1024 * 1024) >> PAGE_SHIFT)
 
 #define MSGBUFSIZE	PAGE_SIZE
 
@@ -132,9 +130,11 @@
 #include <machine/intr.h>
 
 #ifdef   _KERNEL
-extern void delay(int);
+
 #define  DELAY(x)             delay(x)
 
+#if !defined(_LOCORE)
+extern void delay(int);
 extern int cputyp;
 #endif
 
@@ -157,4 +157,5 @@ extern int cputyp;
 #define	CPU_IS88110	1
 #endif
 
-#endif /* !_M88K_PARAM_H_ */
+#endif	/* _KERNEL */
+#endif	/* !_M88K_PARAM_H_ */

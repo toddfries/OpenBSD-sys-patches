@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.90 2005/08/27 03:50:04 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.101 2006/01/21 12:18:49 miod Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -93,7 +93,6 @@ int	sdmatch(struct device *, void *, void *);
 void	sdattach(struct device *, struct device *, void *);
 int	sdactivate(struct device *, enum devact);
 int	sddetach(struct device *, int);
-void	sdzeroref(struct device *);
 
 void	sdminphys(struct buf *);
 void	sdgetdisklabel(dev_t, struct sd_softc *, struct disklabel *,
@@ -110,7 +109,7 @@ void	viscpy(u_char *, u_char *, int);
 
 struct cfattach sd_ca = {
 	sizeof(struct sd_softc), sdmatch, sdattach,
-	sddetach, sdactivate, sdzeroref
+	sddetach, sdactivate
 };
 
 struct cfdriver sd_cd = {
@@ -240,7 +239,7 @@ sdattach(parent, self, aux)
 
 #ifdef DIAGNOSTIC
 	default:
-		panic("sdattach: unknown result from get_parms");
+		panic("sdattach: unknown result (%#x) from get_parms", result);
 		break;
 #endif
 	}
@@ -315,22 +314,15 @@ sddetach(self, flags)
 	if (sc->sc_sdhook != NULL)
 		shutdownhook_disestablish(sc->sc_sdhook);
 
+	/* Detach disk. */
+	disk_detach(&sc->sc_dk);
+
 #if NRND > 0
 	/* Unhook the entropy source. */
 	rnd_detach_source(&sc->rnd_source);
 #endif
 
 	return (0);
-}
-
-void
-sdzeroref(self)
-	struct device *self;
-{
-	struct sd_softc *sd = (struct sd_softc *)self;
-
-	/* Detach disk. */
-	disk_detach(&sd->sc_dk);
 }
 
 /*
@@ -344,11 +336,12 @@ sdopen(dev, flag, fmt, p)
 {
 	struct scsi_link *sc_link;
 	struct sd_softc *sd;
-	int unit, part;
-	int error = 0;
+	int error = 0, part, rawopen, unit;
 
 	unit = SDUNIT(dev);
 	part = SDPART(dev);
+
+	rawopen = (part == RAW_PART) && (fmt == S_IFCHR);
 
 	sd = sdlookup(unit);
 	if (sd == NULL)
@@ -370,7 +363,7 @@ sdopen(dev, flag, fmt, p)
 		 * disallow further opens of non-raw partition.
 		 */
 		if ((sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
-			if (part == RAW_PART && fmt == S_IFCHR)
+			if (rawopen)
 				goto out;
 			error = EIO;
 			goto bad;
@@ -381,17 +374,16 @@ sdopen(dev, flag, fmt, p)
 
 		/* Check that it is still responding and ok. */
 		error = scsi_test_unit_ready(sc_link,
-		    TEST_READY_RETRIES_DEFAULT,
-		    ((part == RAW_PART && fmt == S_IFCHR) ? SCSI_SILENT : 0) |
+		    TEST_READY_RETRIES_DEFAULT, (rawopen ? SCSI_SILENT : 0) |
 		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
 
 		/* Spin up the unit, ready or not. */
 		error = scsi_start(sc_link, SSS_START,
-		    ((part == RAW_PART && fmt == S_IFCHR) ? SCSI_SILENT : 0) |
-		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
+		    (rawopen ? SCSI_SILENT : 0) | SCSI_IGNORE_ILLEGAL_REQUEST |
+		    SCSI_IGNORE_MEDIA_CHANGE);
 
 		if (error) {
-			if (part == RAW_PART && fmt == S_IFCHR) {
+			if (rawopen) {
 				error = 0;
 				goto out;
 			} else
@@ -408,7 +400,8 @@ sdopen(dev, flag, fmt, p)
 		}
 		/* Load the physical device parameters. */
 		sc_link->flags |= SDEV_MEDIA_LOADED;
-		if (sd_get_parms(sd, &sd->params, 0) == SDGP_RESULT_OFFLINE) {
+		if (sd_get_parms(sd, &sd->params, (rawopen ? SCSI_SILENT : 0))
+		    == SDGP_RESULT_OFFLINE) {
 			sc_link->flags &= ~SDEV_MEDIA_LOADED;
 			error = ENXIO;
 			goto bad;
@@ -474,8 +467,10 @@ sdclose(dev, flag, fmt, p)
 	if (sd == NULL)
 		return ENXIO;
 
-	if ((error = sdlock(sd)) != 0)
-		return error;
+	if ((error = sdlock(sd)) != 0) {
+		device_unref(&sd->sc_dev);
+		return (error);
+	}
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -1019,8 +1014,7 @@ sdgetdisklabel(dev, sd, lp, clp, spoofonly)
 	lp->d_sbsize = SBSIZE;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size =
-	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
+	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 
@@ -1103,33 +1097,22 @@ sd_interpret_sense(xs)
 		return (EJUSTRETURN);
 
 	switch (sense->add_sense_code_qual) {
-	case 0x01:
-		printf("%s: ..is spinning up...waiting\n", sd->sc_dev.dv_xname);
-		/*
-		 * I really need a sdrestart function I can call here.
-		 */
-		delay(1000000 * 5);	/* 5 seconds */
-		retval = ERESTART;
+	case 0x01: /* In process of becoming ready. */
+		SC_DEBUG(sc_link, SDEV_DB1, ("becoming ready.\n"));
+		retval = scsi_delay(xs, 5);
 		break;
-	case 0x02:
-		if (sd->sc_link->flags & SDEV_REMOVABLE) {
-			printf("%s: removable disk stopped - not restarting\n",
-			    sd->sc_dev.dv_xname);
-			retval = EIO;
-		} else {
-			printf("%s: respinning up disk\n", sd->sc_dev.dv_xname);
-			retval = scsi_start(sd->sc_link, SSS_START,
-		    	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_URGENT |
-			    SCSI_NOSLEEP);
-			if (retval != 0) {
-				printf("%s: respin of disk failed - %d\n",
-				    sd->sc_dev.dv_xname, retval);
-				retval = EIO;
-			} else {
-				retval = ERESTART;
-			}
-		}
+
+	case 0x02: /* Initialization command required. */
+		SC_DEBUG(sc_link, SDEV_DB1, ("spinning up\n"));
+		retval = scsi_start(sd->sc_link, SSS_START,
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_URGENT | SCSI_NOSLEEP);
+		if (retval == 0)
+			retval = ERESTART;
+		else
+			SC_DEBUG(sc_link, SDEV_DB1, ("spin up failed (%#x)\n",
+			    retval));
 		break;
+
 	default:
 		retval = EJUSTRETURN;
 		break;
@@ -1328,7 +1311,7 @@ sd_get_parms(sd, dp, flags)
 	struct disk_parms *dp;
 	int flags;
 {
-	struct scsi_mode_sense_buf *buf;
+	union scsi_mode_sense_buf *buf = NULL;
 	struct page_rigid_geometry *rigid;
 	struct page_flex_geometry *flex;
 	struct page_reduced_geometry *reduced;
@@ -1337,7 +1320,15 @@ sd_get_parms(sd, dp, flags)
 
 	dp->disksize = scsi_size(sd->sc_link, flags, &ssblksize);
 
-	buf = malloc(sizeof(*buf) ,M_TEMP, M_NOWAIT);
+	/*
+	 * Many UMASS devices choke when asked about their geometry. Most
+	 * don't have a meaningful geometry anyway, so just fake it if
+	 * scsi_size() worked.
+	 */
+	if ((sd->sc_link->flags & SDEV_UMASS) && (dp->disksize > 0))
+		goto validate;	 /* N.B. buf will be NULL at validate. */
+
+	buf = malloc(sizeof(*buf), M_TEMP, M_NOWAIT);
 	if (buf == NULL)
 		goto validate;
 
@@ -1398,10 +1389,12 @@ sd_get_parms(sd, dp, flags)
 	}
 
 validate:	
-	if (dp->disksize == 0) {
+	if (buf)
 		free(buf, M_TEMP);
+
+	if (dp->disksize == 0)
 		return (SDGP_RESULT_OFFLINE);
-	}
+
 	if (ssblksize > 0)
 		dp->blksize = ssblksize;
 	else
@@ -1423,7 +1416,6 @@ validate:
 	default:
 		SC_DEBUG(sd->sc_link, SDEV_DB1,
 		    ("sd_get_parms: bad blksize: %#x\n", dp->blksize));
-		free(buf, M_TEMP);
 		return (SDGP_RESULT_OFFLINE);
 	}
 
@@ -1445,7 +1437,6 @@ validate:
 	dp->cyls = (cyls == 0) ? dp->disksize / (dp->heads * dp->sectors) :
 	    cyls;
 
-	free(buf, M_TEMP);
 	return (SDGP_RESULT_OK);
 }
 

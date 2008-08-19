@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.10 2005/07/26 08:07:39 art Exp $	*/
+/*	$OpenBSD: intr.c,v 1.12 2006/01/22 04:52:23 brad Exp $	*/
 /*	$NetBSD: intr.c,v 1.3 2003/03/03 22:16:20 fvdl Exp $	*/
 
 /*
@@ -266,6 +266,14 @@ intr_allocate_slot(struct pic *pic, int legacy_irq, int pin, int level,
 	 */
 	if (legacy_irq != -1) {
 		ci = &cpu_info_primary;
+		/* must check for duplicate pic + pin first */
+		for (slot = 0 ; slot < MAX_INTR_SOURCES ; slot++) {
+			isp = ci->ci_isources[slot];
+			if (isp != NULL && isp->is_pic == pic &&
+			    isp->is_pin == pin ) {
+				goto duplicate;
+			}
+		}
 		slot = legacy_irq;
 		isp = ci->ci_isources[slot];
 		if (isp == NULL) {
@@ -292,7 +300,7 @@ intr_allocate_slot(struct pic *pic, int legacy_irq, int pin, int level,
 				goto other;
 			}
 		}
-
+duplicate:
 		if (pic == &i8259_pic)
 			idtvec = ICU_OFFSET + legacy_irq;
 		else {
@@ -322,7 +330,7 @@ other:
 		/*
 		 * ..now try the others.
 		 */
-		for (CPU_INFO_FOREACH(cii, ci)) {
+		CPU_INFO_FOREACH(cii, ci) {
 			if (CPU_IS_PRIMARY(ci))
 				continue;
 			error = intr_allocate_slot_cpu(ci, pic, pin, &slot);
@@ -687,7 +695,7 @@ intr_printconfig(void)
 	struct cpu_info *ci;
 	CPU_INFO_ITERATOR cii;
 
-	for (CPU_INFO_FOREACH(cii, ci)) {
+	CPU_INFO_FOREACH(cii, ci) {
 		printf("cpu%d: interrupt masks:\n", ci->ci_apicid);
 		for (i = 0; i < NIPL; i++)
 			printf("IPL %d mask %lx unmask %lx\n", i,

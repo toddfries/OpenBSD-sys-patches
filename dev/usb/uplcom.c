@@ -1,4 +1,4 @@
-/*	$OpenBSD: uplcom.c,v 1.24 2005/08/01 05:36:49 brad Exp $	*/
+/*	$OpenBSD: uplcom.c,v 1.28 2006/02/16 10:37:51 jsg Exp $	*/
 /*	$NetBSD: uplcom.c,v 1.29 2002/09/23 05:51:23 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -52,7 +52,7 @@
 #include <sys/conf.h>
 #include <sys/tty.h>
 #include <sys/file.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/device.h>
@@ -87,15 +87,6 @@ int	uplcomdebug = 0;
 #define RSAQ_STATUS_CTS		0x80
 #define RSAQ_STATUS_DSR		0x02
 #define RSAQ_STATUS_DCD		0x01
-
-#define UPLCOM_FLOW_OUT_CTS	0x0001
-#define UPLCOM_FLOW_OUT_DSR	0x0002
-#define UPLCOM_FLOW_IN_DSR	0x0004
-#define UPLCOM_FLOW_IN_DTR	0x0008
-#define UPLCOM_FLOW_IN_RTS	0x0010
-#define UPLCOM_FLOW_OUT_RTS	0x0020
-#define UPLCOM_FLOW_OUT_XON	0x0080
-#define UPLCOM_FLOW_IN_XON	0x0100
 
 struct	uplcom_softc {
 	USBBASEDEVICE		sc_dev;		/* base device */
@@ -173,6 +164,8 @@ static const struct usb_devno uplcom_devs[] = {
 	/* ELECOM UC-SGT */
 	{ USB_VENDOR_ELECOM, USB_PRODUCT_ELECOM_UCSGT },
 	{ USB_VENDOR_ELECOM, USB_PRODUCT_ELECOM_UCSGT0 },
+	/* Panasonic 50" Touch Panel */
+	{ USB_VENDOR_PANASONIC, USB_PRODUCT_PANASONIC_TYTP50P6S },
 	/* RATOC REX-USB60 */
 	{ USB_VENDOR_RATOC, USB_PRODUCT_RATOC_REXUSB60 },
 	/* TDK USB-PHS Adapter UHA6400 */
@@ -192,9 +185,7 @@ static const struct usb_devno uplcom_devs[] = {
 	/* SOURCENEXT KeikaiDenwa 8 with charger */
 	{ USB_VENDOR_SOURCENEXT, USB_PRODUCT_SOURCENEXT_KEIKAI8_CHG },
 	/* HAL Corporation Crossam2+USB */
-	{ USB_VENDOR_HAL, USB_PRODUCT_HAL_IMR001 },
-	/* AirPrime CDMA Wireless EVDO card */
-	{ USB_VENDOR_AIRPRIME, USB_PRODUCT_AIRPRIME_PC5220 },
+	{ USB_VENDOR_HAL, USB_PRODUCT_HAL_IMR001 }
 };
 #define uplcom_lookup(v, p) usb_lookup(uplcom_devs, v, p)
 
@@ -487,8 +478,8 @@ uplcom_set_line_state(struct uplcom_softc *sc)
 	if (sc->sc_rts == -1)
 		sc->sc_rts = 0;
 
-	ls = (sc->sc_dtr ? UPLCOM_FLOW_OUT_DSR : 0) |
-	    (sc->sc_rts ? UPLCOM_FLOW_OUT_CTS : 0);
+	ls = (sc->sc_dtr ? UCDC_LINE_DTR : 0) |
+	    (sc->sc_rts ? UCDC_LINE_RTS : 0);
 
 	req.bmRequestType = UT_WRITE_CLASS_INTERFACE;
 	req.bRequest = UCDC_SET_CONTROL_LINE_STATE;

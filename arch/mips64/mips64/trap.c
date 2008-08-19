@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.22 2005/01/31 21:35:50 grange Exp $	*/
+/*	$OpenBSD: trap.c,v 1.29 2005/12/17 20:13:44 miod Exp $	*/
 /* tracked to 1.23 */
 
 /*
@@ -60,8 +60,12 @@
 #ifdef KTRACE
 #include <sys/ktrace.h>
 #endif
+#ifdef PTRACE
+#include <sys/ptrace.h>
+#endif
 #include <net/netisr.h>
-#include <miscfs/procfs/procfs.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/trap.h>
 #include <machine/psl.h>
@@ -148,7 +152,9 @@ extern void MipsSwitchFPState16(struct proc *, struct trap_frame *);
 extern void MipsFPTrap(u_int, u_int, u_int, union sigval);
 
 register_t trap(struct trap_frame *);
+#ifdef PTRACE
 int cpu_singlestep(struct proc *);
+#endif
 u_long MipsEmulateBranch(struct trap_frame *, long, int, u_int);
 
 /*
@@ -208,7 +214,7 @@ trap(trapframe)
 				panic("trap: ktlbmod: invalid pte");
 #endif
 			if (pmap_is_page_ro(pmap_kernel(),
-			    mips_trunc_page(trapframe->badvaddr), entry)) {
+			    trunc_page(trapframe->badvaddr), entry)) {
 				/* write to read only page in the kernel */
 				ftype = VM_PROT_WRITE;
 				goto kernel_fault;
@@ -242,10 +248,10 @@ trap(trapframe)
 			panic("trap: utlbmod: invalid pte");
 #endif
 		if (pmap_is_page_ro(pmap,
-		    mips_trunc_page(trapframe->badvaddr), entry)) {
+		    trunc_page(trapframe->badvaddr), entry)) {
 			/* write to read only page */
 			ftype = VM_PROT_WRITE;
-			goto dofault;
+			goto fault_common;
 		}
 		entry |= PG_M;
 		pte->pt_entry = entry;
@@ -288,21 +294,21 @@ trap(trapframe)
 #define szsigcode ((long)(p->p_emul->e_esigcode - p->p_emul->e_sigcode))
 		if (trapframe->badvaddr < VM_MAXUSER_ADDRESS &&
 		    trapframe->badvaddr >= (long)STACKGAPBASE)
-			goto dofault;
+			goto fault_common;
 
 		if ((i = p->p_addr->u_pcb.pcb_onfault) == 0) {
-			goto dofault;
+			goto fault_common;
 		}
 #undef szsigcode
-		goto dofault;
+		goto fault_common;
 
 	case T_TLB_LD_MISS+T_USER:
 		ftype = VM_PROT_READ;
-		goto dofault;
+		goto fault_common;
 
 	case T_TLB_ST_MISS+T_USER:
 		ftype = VM_PROT_WRITE;
-	dofault:
+fault_common:
 	    {
 		vaddr_t va;
 		struct vmspace *vm;
@@ -529,14 +535,6 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		else
 #endif
 			i = (*callp->sy_call)(p, &args, rval);
-		/*
-		 * Reinitialize proc pointer `p' as it may be different
-		 * if this is a child returning from fork syscall.
-		 */
-		p = curproc;
-		locr0 = p->p_md.md_regs;
-
-		trapdebug_enter(locr0, -code);
 
 		switch (i) {
 		case 0:
@@ -578,10 +576,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 	    {
 		caddr_t va;
 		u_int32_t instr;
-		struct uio uio;
-		struct iovec iov;
 		struct trap_frame *locr0 = p->p_md.md_regs;
-		int error;
 
 		/* compute address of break instruction */
 		va = (caddr_t)trapframe->pc;
@@ -618,8 +613,13 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			else
 				locr0->pc += 4;
 			break;
+#ifdef PTRACE
 		case BREAK_SSTEP_VAL:
 			if (p->p_md.md_ss_addr == (long)va) {
+				struct uio uio;
+				struct iovec iov;
+				int error;
+
 				/*
 				 * Restore original instruction and clear BP
 				 */
@@ -632,7 +632,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 				uio.uio_segflg = UIO_SYSSPACE;
 				uio.uio_rw = UIO_WRITE;
 				uio.uio_procp = curproc;
-				error = procfs_domem(p, p, NULL, &uio);
+				error = process_domem(curproc, p, &uio,
+				    PT_WRITE_I);
 				Mips_SyncCache();
 
 				if (error)
@@ -647,6 +648,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			}
 			i = SIGTRAP;
 			break;
+#endif
 		default:
 			typ = TRAP_TRACE;
 			i = SIGTRAP;
@@ -837,7 +839,8 @@ child_return(arg)
 
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, SYS_fork, 0, 0);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }
 
@@ -1036,6 +1039,8 @@ MipsEmulateBranch(framePtr, instPC, fpcCSR, curinst)
 	return (retAddr);
 }
 
+#ifdef PTRACE
+
 /*
  * This routine is called by procxmt() to single step one instruction.
  * We do this by storing a break instruction after the current instruction,
@@ -1065,7 +1070,7 @@ cpu_singlestep(p)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
 	uio.uio_procp = curproc;
-	procfs_domem(curproc, p, NULL, &uio);
+	process_domem(curproc, p, &uio, PT_READ_I);
 
 	/* compute next address after current location */
 	if (curinstr != 0) {
@@ -1092,7 +1097,7 @@ cpu_singlestep(p)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
 	uio.uio_procp = curproc;
-	procfs_domem(curproc, p, NULL, &uio);
+	process_domem(curproc, p, &uio, PT_READ_I);
 
 	/*
 	 * Store breakpoint instruction at the "next" location now.
@@ -1106,7 +1111,7 @@ cpu_singlestep(p)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_WRITE;
 	uio.uio_procp = curproc;
-	error = procfs_domem(curproc, p, NULL, &uio);
+	error = process_domem(curproc, p, &uio, PT_WRITE_I);
 	Mips_SyncCache();
 	if (error)
 		return (EFAULT);
@@ -1119,6 +1124,8 @@ cpu_singlestep(p)
 #endif
 	return (0);
 }
+
+#endif /* PTRACE */
 
 #if defined(DDB) || defined(DEBUG)
 #define MIPS_JR_RA	0x03e00008	/* instruction code for jr ra */

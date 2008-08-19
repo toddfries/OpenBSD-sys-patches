@@ -1,4 +1,4 @@
-/*	$OpenBSD: atwvar.h,v 1.8 2005/05/27 18:57:19 robert Exp $	*/
+/*	$OpenBSD: atwvar.h,v 1.11 2006/02/17 11:07:44 jsg Exp $	*/
 /*	$NetBSD: atwvar.h,v 1.13 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*
@@ -104,6 +104,8 @@ struct atw_txsoft {
 	int txs_firstdesc;		/* first descriptor in packet */
 	int txs_lastdesc;		/* last descriptor in packet */
 	int txs_ndescs;			/* number of descriptors */
+	struct ieee80211_duration txs_d0;
+	struct ieee80211_duration txs_dn;
 	SIMPLEQ_ENTRY(atw_txsoft) txs_q;
 };
 
@@ -277,7 +279,7 @@ struct atw_softc {
 	u_int8_t	sc_sram[ATW_SRAM_MAXSIZE];
 	u_int		sc_sramlen;
 	u_int8_t	sc_bssid[IEEE80211_ADDR_LEN];
-	u_int8_t	sc_rev;;
+	u_int8_t	sc_rev;
 	u_int8_t	sc_rf3000_options1;
 	u_int8_t	sc_rf3000_options2;
 
@@ -427,29 +429,6 @@ do {									\
 #define	ATW_COUNTRY_FRANCE 4		/* 10-13 */
 #define	ATW_COUNTRY_MKK 5		/* Japan: 14 */
 #define	ATW_COUNTRY_MKK2 6		/* Japan: 1-14 */
-
-/* One Time Unit (TU) is 1Kus = 1024 microseconds. */
-#define IEEE80211_DUR_TU		1024
-
-/* IEEE 802.11b durations for DSSS PHY in microseconds */
-#define IEEE80211_DUR_DS_LONG_PREAMBLE	144
-#define IEEE80211_DUR_DS_SHORT_PREAMBLE	72
-#define IEEE80211_DUR_DS_FAST_PLCPHDR	24
-#define IEEE80211_DUR_DS_SLOW_PLCPHDR	48
-#define IEEE80211_DUR_DS_SLOW_ACK	112
-#define IEEE80211_DUR_DS_FAST_ACK	56
-#define IEEE80211_DUR_DS_SLOW_CTS	112
-#define IEEE80211_DUR_DS_FAST_CTS	56
-#define IEEE80211_DUR_DS_SLOT		20
-#define IEEE80211_DUR_DS_SIFS		10
-#define IEEE80211_DUR_DS_PIFS	(IEEE80211_DUR_DS_SIFS + IEEE80211_DUR_DS_SLOT)
-#define IEEE80211_DUR_DS_DIFS	(IEEE80211_DUR_DS_SIFS + \
-				 2 * IEEE80211_DUR_DS_SLOT)
-#define IEEE80211_DUR_DS_EIFS	(IEEE80211_DUR_DS_SIFS + \
-				 IEEE80211_DUR_DS_SLOW_ACK + \
-				 IEEE80211_DUR_DS_LONG_PREAMBLE + \
-				 IEEE80211_DUR_DS_SLOW_PLCPHDR + \
-				 IEEE80211_DUR_DIFS)
 
 /*
  * register space access macros

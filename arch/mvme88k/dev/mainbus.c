@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.14 2004/11/09 15:02:23 miod Exp $ */
+/*	$OpenBSD: mainbus.c,v 1.18 2005/12/11 21:45:31 miod Exp $ */
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 2004, Miodrag Vallat.
@@ -39,7 +39,6 @@
 #include <machine/autoconf.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/cpu_number.h>
 
 #ifdef MVME188
 #include <machine/mvme188.h>
@@ -72,9 +71,6 @@ const struct mvme88k_bus_space_tag mainbus_bustag = {
 
 extern struct extent *iomap_extent;
 extern struct vm_map *iomap_map;
-
-void	*mapiodev(void *, int);
-void	unmapiodev(void *, int);
 
 /*
  * Obio (internal IO) space is mapped 1:1 (see pmap_bootstrap() for details).
@@ -113,7 +109,7 @@ mainbus_map(bus_addr_t addr, bus_size_t size, int flags,
 	if (addr >= threshold)
 		map = (vaddr_t)addr;
 	else {
-		map = (vaddr_t)mapiodev((void *)addr, size);
+		map = mapiodev((paddr_t)addr, size);
 	}
 
 	if (map == NULL)
@@ -151,9 +147,9 @@ mainbus_vaddr(bus_space_handle_t handle)
  * of pa. However, it is advisable to have pa page aligned since otherwise,
  * we might have several mappings for a given chunk of the IO page.
  */
-void *
+vaddr_t
 mapiodev(pa, size)
-	void *pa;
+	paddr_t pa;
 	int size;
 {
 	vaddr_t	iova, tva, off;
@@ -163,8 +159,8 @@ mapiodev(pa, size)
 	if (size <= 0)
 		return NULL;
 
-	ppa = trunc_page((paddr_t)pa);
-	off = (paddr_t)pa & PGOFSET;
+	ppa = trunc_page(pa);
+	off = pa & PGOFSET;
 	size = round_page(off + size);
 
 	s = splhigh();
@@ -174,8 +170,6 @@ mapiodev(pa, size)
 
 	if (error != 0)
 		return NULL;
-
-	cmmu_flush_tlb(cpu_number(), 1, iova, size);	/* necessary? */
 
 	tva = iova;
 	while (size != 0) {
@@ -188,7 +182,7 @@ mapiodev(pa, size)
 	}
 	pmap_update(vm_map_pmap(iomap_map));
 
-	return (void *)(iova + off);
+	return (iova + off);
 }
 
 /*
@@ -196,14 +190,14 @@ mapiodev(pa, size)
  */
 void
 unmapiodev(va, size)
-	void *va;
+	vaddr_t va;
 	int size;
 {
 	vaddr_t kva, off;
 	int s, error;
 
-	off = (vaddr_t)va & PGOFSET;
-	kva = trunc_page((vaddr_t)va);
+	off = va & PGOFSET;
+	kva = trunc_page(va);
 	size = round_page(off + size);
 
 	pmap_remove(vm_map_pmap(iomap_map), kva, kva + size);
@@ -282,7 +276,7 @@ mainbus_attach(parent, self, args)
 	printf(": %s\n", cpu_model);
 
 	/*
-	 * Display cpu/mmu details. Only for the master CPU so far.
+	 * Display cpu/mmu details for the main processor.
 	 */
 	cpu_configuration_print(1);
 

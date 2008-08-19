@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.137.2.1 2006/01/26 20:52:57 brad Exp $	*/
+/*	$OpenBSD: if.c,v 1.143.2.1 2007/03/28 19:47:57 henning Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -405,6 +405,11 @@ if_attachhead(struct ifnet *ifp)
 	if (ifp->if_linkstatehooks == NULL)
 		panic("if_attachhead: malloc");
 	TAILQ_INIT(ifp->if_linkstatehooks);
+	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
+	    M_TEMP, M_NOWAIT);
+	if (ifp->if_detachhooks == NULL)
+		panic("if_attachhead: malloc");
+	TAILQ_INIT(ifp->if_detachhooks);
 	TAILQ_INSERT_HEAD(&ifnet, ifp, if_list);
 	if_attachsetup(ifp);
 }
@@ -431,6 +436,11 @@ if_attach(struct ifnet *ifp)
 	if (ifp->if_linkstatehooks == NULL)
 		panic("if_attach: malloc");
 	TAILQ_INIT(ifp->if_linkstatehooks);
+	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
+	    M_TEMP, M_NOWAIT);
+	if (ifp->if_detachhooks == NULL)
+		panic("if_attach: malloc");
+	TAILQ_INIT(ifp->if_detachhooks);
 
 #if NCARP > 0
 	if (ifp->if_type != IFT_CARP)
@@ -500,6 +510,9 @@ if_detach(struct ifnet *ifp)
 	ifp->if_init = if_detached_init;
 	ifp->if_watchdog = if_detached_watchdog;
 
+	/* Call detach hooks, ie. to remove vlan interfaces */
+	dohooks(ifp->if_detachhooks, HOOK_REMOVE | HOOK_FREE);
+
 #if NTRUNK > 0
 	if (ifp->if_type == IFT_IEEE8023ADLAG)
 		trunk_port_ifdetach(ifp);
@@ -518,9 +531,7 @@ if_detach(struct ifnet *ifp)
 #endif
 
 #if NBPFILTER > 0
-	/* If there is a bpf device attached, detach from it.  */
-	if (ifp->if_bpf)
-		bpfdetach(ifp);
+	bpfdetach(ifp);
 #endif
 #ifdef ALTQ
 	if (ALTQ_IS_ENABLED(&ifp->if_snd))
@@ -600,10 +611,8 @@ do { \
 
 	/*
 	 * Deallocate private resources.
-	 * XXX should consult refcnt and use IFAFREE
 	 */
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist); ifa;
-	    ifa = TAILQ_FIRST(&ifp->if_addrlist)) {
+	while ((ifa = TAILQ_FIRST(&ifp->if_addrlist)) != NULL) {
 		TAILQ_REMOVE(&ifp->if_addrlist, ifa, ifa_list);
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
@@ -614,7 +623,7 @@ do { \
 		if (ifa == ifnet_addrs[ifp->if_index])
 			continue;
 
-		free(ifa, M_IFADDR);
+		IFAFREE(ifa);
 	}
 
 	for (ifg = TAILQ_FIRST(&ifp->if_groups); ifg;
@@ -623,11 +632,12 @@ do { \
 
 	if_free_sadl(ifp);
 
-	free(ifnet_addrs[ifp->if_index], M_IFADDR);
+	IFAFREE(ifnet_addrs[ifp->if_index]);
 	ifnet_addrs[ifp->if_index] = NULL;
 
 	free(ifp->if_addrhooks, M_TEMP);
 	free(ifp->if_linkstatehooks, M_TEMP);
+	free(ifp->if_detachhooks, M_TEMP);
 
 	for (dp = domains; dp; dp = dp->dom_next) {
 		if (dp->dom_ifdetach && ifp->if_afdata[dp->dom_family])
@@ -1032,9 +1042,9 @@ link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 	    ((ifp = ifa->ifa_ifp) == 0) || ((dst = rt_key(rt)) == 0))
 		return;
 	if ((ifa = ifaof_ifpforaddr(dst, ifp)) != NULL) {
+		ifa->ifa_refcnt++;
 		IFAFREE(rt->rt_ifa);
 		rt->rt_ifa = ifa;
-		ifa->ifa_refcnt++;
 		if (ifa->ifa_rtrequest && ifa->ifa_rtrequest != link_rtrequest)
 			ifa->ifa_rtrequest(cmd, rt, info);
 	}

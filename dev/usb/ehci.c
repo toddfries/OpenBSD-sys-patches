@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.48 2005/04/11 08:09:32 dlg Exp $ */
+/*	$OpenBSD: ehci.c,v 1.53 2005/12/03 03:40:52 brad Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -64,7 +64,7 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/select.h>
+#include <sys/selinfo.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
 
@@ -477,12 +477,9 @@ ehci_init(ehci_softc_t *sc)
 
 	lockinit(&sc->sc_doorbell_lock, PZERO, "ehcidb", 0, 0);
 
-	/* Enable interrupts */
-	EOWRITE4(sc, EHCI_USBINTR, sc->sc_eintrs);
-
 	/* Turn on controller */
 	EOWRITE4(sc, EHCI_USBCMD,
-	    EHCI_CMD_ITC_2 | /* 2 microframes */
+	    EHCI_CMD_ITC_2 | /* 2 microframes interrupt delay */
 	    (EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_FLS_M) |
 	    EHCI_CMD_ASE |
 	    EHCI_CMD_PSE |
@@ -501,6 +498,10 @@ ehci_init(ehci_softc_t *sc)
 		printf("%s: run timeout\n", USBDEVNAME(sc->sc_bus.bdev));
 		return (USBD_IOERROR);
 	}
+
+	/* Enable interrupts */
+	DPRINTFN(1,("ehci_init: enabling\n"));
+	EOWRITE4(sc, EHCI_USBINTR, sc->sc_eintrs);
 
 	return (USBD_NORMAL_COMPLETION);
 
@@ -1048,8 +1049,10 @@ ehci_power(int why, void *v)
 			}
 		}
 
-
 		EOWRITE4(sc, EHCI_USBCMD, sc->sc_cmd);
+
+		/* Take over port ownership */
+		EOWRITE4(sc, EHCI_CONFIGFLAG, EHCI_CONF_CF);
 
 		for (i = 0; i < 100; i++) {
 			hcr = EOREAD4(sc, EHCI_USBSTS) & EHCI_STS_HCH;
@@ -1559,7 +1562,7 @@ Static usb_device_descriptor_t ehci_devd = {
 	UDPROTO_HSHUBSTT,	/* protocol */
 	64,			/* max packet */
 	{0},{0},{0x00,0x01},	/* device id */
-	1,2,0,			/* string indicies */
+	1,2,0,			/* string indices */
 	1			/* # of configurations */
 };
 
@@ -1757,6 +1760,9 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 			*(u_int8_t *)buf = 0;
 			totlen = 1;
 			switch (value & 0xff) {
+			case 0: /* Language table */
+				totlen = ehci_str(buf, len, "\001");
+				break;
 			case 1: /* Vendor */
 				totlen = ehci_str(buf, len, sc->sc_vendor);
 				break;

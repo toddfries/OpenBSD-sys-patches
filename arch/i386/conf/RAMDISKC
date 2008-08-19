@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKC,v 1.62 2005/07/30 22:17:10 deraadt Exp $
+#	$OpenBSD: RAMDISKC,v 1.64 2006/02/08 23:56:29 pvalchev Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -282,6 +282,7 @@ re*	at cardbus?			# Realtek 8169/8169S/8110S
 #hme*	at pci?				# Sun Happy Meal
 #bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
+nfe*	at pci?				# NVIDIA nForce Ethernet
 
 # Wireless network cards
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)
@@ -296,8 +297,8 @@ wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 #an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
 #ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
-ral*	at pci?				# Ralink RT2500
-ral*	at cardbus?			# Ralink RT2500
+ral*	at pci?				# Ralink RT2500/RT2501/RT2600
+ral*	at cardbus?			# Ralink RT2500/RT2501/RT2600
 rtw*	at pci?				# Realtek 8180
 rtw*	at cardbus?			# Realtek 8180
 

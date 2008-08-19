@@ -1,4 +1,4 @@
-/*	$OpenBSD: i8259.c,v 1.2 2004/06/25 11:03:27 art Exp $	*/
+/*	$OpenBSD: i8259.c,v 1.4 2005/12/13 00:18:19 jsg Exp $	*/
 /*	$NetBSD: i8259.c,v 1.2 2003/03/02 18:27:15 fvdl Exp $	*/
 
 /*
@@ -51,11 +51,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -89,14 +85,6 @@
 #include <machine/cpu.h>
 #include <machine/pic.h>
 #include <machine/i8259.h>
-
-
-#ifndef __x86_64__
-#include "mca.h"
-#if NMCA > 0
-#include <machine/mca_machdep.h>                /* for MCA_system */
-#endif
-#endif
 
 static void i8259_hwmask(struct pic *, int);
 static void i8259_hwunmask(struct pic *, int);

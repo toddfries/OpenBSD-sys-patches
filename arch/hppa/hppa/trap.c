@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.88 2005/08/14 10:54:15 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.93 2005/12/12 18:59:02 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -53,7 +53,6 @@
 #endif
 
 #ifdef PTRACE
-#include <miscfs/procfs/procfs.h>
 void ss_clear_breakpoints(struct proc *p);
 #endif
 
@@ -414,7 +413,7 @@ trap(type, frame)
 			if ((type & T_USER && space == HPPA_SID_KERNEL) ||
 			    (frame->tf_iioq_head & 3) != pl ||
 			    (type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
-			    uvm_fault(map, hppa_trunc_page(va), fault,
+			    uvm_fault(map, trunc_page(va), fault,
 			     opcode & 0x40? UVM_PROT_WRITE : UVM_PROT_READ)) {
 				frame_regmap(frame, opcode & 0x1f) = 0;
 				frame->tf_ipsw |= PSL_N;
@@ -462,7 +461,7 @@ trap(type, frame)
 			break;
 		}
 
-		ret = uvm_fault(map, hppa_trunc_page(va), fault, vftype);
+		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
 		/*
 		 * If this was a stack access we keep track of the maximum
@@ -591,7 +590,8 @@ child_return(arg)
 	userret(p, tf->tf_iioq_head, 0);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, SYS_fork, 0, 0);
+		ktrsysret(p,
+		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
 #endif
 }
 
@@ -614,7 +614,7 @@ ss_get_value(struct proc *p, vaddr_t addr, u_int *value)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
 	uio.uio_procp = curproc;
-	return (procfs_domem(curproc, p, NULL, &uio));
+	return (process_domem(curproc, p, &uio, PT_READ_I));
 }
 
 int
@@ -632,7 +632,7 @@ ss_put_value(struct proc *p, vaddr_t addr, u_int value)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_WRITE;
 	uio.uio_procp = curproc;
-	return (procfs_domem(curproc, p, NULL, &uio));
+	return (process_domem(curproc, p, &uio, PT_WRITE_I));
 }
 
 void
@@ -811,8 +811,6 @@ syscall(struct trapframe *frame)
 	else
 #endif
 		oerror = error = (*callp->sy_call)(p, args, rval);
-	p = curproc;
-	frame = p->p_md.md_regs;
 	switch (error) {
 	case 0:
 		frame->tf_ret0 = rval[0];

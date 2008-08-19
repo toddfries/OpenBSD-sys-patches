@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvram.c,v 1.14 2004/07/02 18:00:50 miod Exp $ */
+/*	$OpenBSD: nvram.c,v 1.16 2005/11/24 22:43:16 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -42,6 +42,8 @@
 #include <machine/mioctl.h>
 #include <machine/psl.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <mvme68k/dev/memdevs.h>
 #include <mvme68k/dev/nvramreg.h>
 
@@ -50,9 +52,9 @@
 #endif
 
 struct nvramsoftc {
-	struct device   sc_dev;
-	void *          sc_paddr;
-	void *          sc_vaddr;
+	struct device	sc_dev;
+	paddr_t		sc_paddr;
+	vaddr_t		sc_vaddr;
 	int             sc_len;
 	struct clockreg *sc_regs;
 };
@@ -75,9 +77,9 @@ nvrammatch(parent, vcf, args)
 {
 	struct confargs *ca = args;   
 
-/*X*/	if (ca->ca_vaddr == (void *)-1)
+/*X*/	if (ca->ca_vaddr == (vaddr_t)-1)
 /*X*/		return (1);
-	return (!badvaddr((vaddr_t)ca->ca_vaddr, 1));
+	return (!badvaddr(ca->ca_vaddr, 1));
 }
 
 void
@@ -89,17 +91,16 @@ nvramattach(parent, self, args)
 	struct nvramsoftc *sc = (struct nvramsoftc *)self;
 
 	sc->sc_paddr = ca->ca_paddr;
-	sc->sc_vaddr = ca->ca_vaddr;
+	sc->sc_vaddr = (vaddr_t)ca->ca_vaddr;
 
 	sc->sc_len = MK48T08_SIZE;
 	if (cputyp == CPU_147)
 		sc->sc_len = MK48T02_SIZE;
 
 
-/*X*/	if (sc->sc_vaddr == (void *)-1)
-/*X*/		sc->sc_vaddr = mapiodev((void *)sc->sc_paddr,
-/*X*/		    MAX(sc->sc_len, NBPG));
-/*X*/	if (sc->sc_vaddr == NULL)
+/*X*/	if (sc->sc_vaddr == -1)
+/*X*/		sc->sc_vaddr = mapiodev(sc->sc_paddr, MAX(sc->sc_len, NBPG));
+/*X*/	if (sc->sc_vaddr == 0)
 /*X*/		panic("failed to map!");
 
 	sc->sc_regs = (struct clockreg *)(sc->sc_vaddr + sc->sc_len -
@@ -417,5 +418,5 @@ nvrammmap(dev, off, prot)
 	/* allow access only in RAM */
 	if (off < 0 || off > sc->sc_len)
 		return (-1);
-	return (m68k_btop(sc->sc_paddr + off));
+	return (atop(sc->sc_paddr + off));
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
+/*	$OpenBSD: signal.h,v 1.4 2006/01/08 14:20:17 millert Exp $	*/
 /*	$NetBSD: signal.h,v 1.5 2003/10/18 17:57:21 briggs Exp $	*/
 
 /*
@@ -48,13 +48,11 @@
 #define _ARM32_SIGNAL_H_
 
 #ifndef _LOCORE
+#include <sys/cdefs.h>
+
 typedef int sig_atomic_t;
-#endif
 
-#define __HAVE_SIGINFO
-
-
-#ifndef _LOCORE
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
 /*
  * Information pushed on stack when a signal is delivered.
  * This is used by the kernel to restore state following
@@ -62,7 +60,6 @@ typedef int sig_atomic_t;
  * to the handler to allow it to restore state properly if
  * a non-standard exit is performed.
  */
-
 struct sigcontext {
 	int	sc_onstack;		/* sigstack state to restore */
 	int	sc_mask;		/* signal mask to restore (old style) */
@@ -90,17 +87,16 @@ struct sigcontext {
 	sigset_t sc_mask;		/* signal mask to restore (new style) */
 #endif
 };
-
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #endif /* !_LOCORE */
 
-/* Signals codes */
+#if defined(_LOCORE) || __BSD_VISIBLE
 
 /*
  * SIGFPE codes
  *
  * see ieeefp.h for definition of FP exception codes
  */
-
 #define SIG_CODE_FPE_CODE_MASK	0x00000f00	/* Mask for exception code */
 #define SIG_CODE_FPE_CODE_SHIFT	8		/* Shift for exception code */
 #define SIG_CODE_FPE_TYPE_MASK	0x000000ff	/* Mask for specific code */
@@ -123,12 +119,10 @@ struct sigcontext {
  * should be treated as undefined (in practice it is the bottom 4 bits
  * of the fault address).
  */
-
 #define SIG_CODE_BUS_ADDR_MASK	0xfffffff0
 #define SIG_CODE_BUS_TYPE_MASK	0x0000000f
 #define SIG_CODE_SEGV_ADDR_MASK	SIG_CODE_BUS_ADDR_MASK
 #define SIG_CODE_SEGV_TYPE_MASK	SIG_CODE_BUS_TYPE_MASK
 
-#endif	/* !_ARM_SIGNAL_H_ */
-
-/* End of signal.h */
+#endif /* _LOCORE || __BSD_VISIBLE */
+#endif	/* !_ARM32_SIGNAL_H_ */

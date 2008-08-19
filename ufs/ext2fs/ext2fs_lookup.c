@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_lookup.c,v 1.19 2005/07/03 20:14:01 drahn Exp $	*/
+/*	$OpenBSD: ext2fs_lookup.c,v 1.21 2005/12/28 20:48:17 pedro Exp $	*/
 /*	$NetBSD: ext2fs_lookup.c,v 1.16 2000/08/03 20:29:26 thorpej Exp $	*/
 
 /* 
@@ -139,7 +139,7 @@ ext2fs_readdir(v)
 	} */ *ap = v;
 	struct uio *uio = ap->a_uio;
 	int error;
-	size_t e2fs_count, readcnt;
+	size_t e2fs_count, readcnt, entries;
 	struct vnode *vp = ap->a_vp;
 	struct m_ext2fs *fs = VTOI(vp)->i_e2fs;
 
@@ -157,11 +157,13 @@ ext2fs_readdir(v)
 		return (ENOTDIR);
 
 	e2fs_count = uio->uio_resid;
+	entries = (uio->uio_offset + e2fs_count) & (fs->e2fs_bsize - 1);
+
 	/* Make sure we don't return partial entries. */
-	e2fs_count -= (uio->uio_offset + e2fs_count) & (fs->e2fs_bsize -1);
-	if (e2fs_count <= 0)
+	if (e2fs_count <= entries)
 		return (EINVAL);
 
+	e2fs_count -= entries;
 	auio = *uio;
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
@@ -779,7 +781,7 @@ ext2fs_direnter(ip, dvp, cnp)
 	newdir.e2d_namlen = cnp->cn_namelen;
 	if (ip->i_e2fs->e2fs.e2fs_rev > E2FS_REV0 &&
 	    (ip->i_e2fs->e2fs.e2fs_features_incompat & EXT2F_INCOMPAT_FTYPE)) {
-		newdir.e2d_type = inot2ext2dt(IFTODT(ip->i_ffs_mode));
+		newdir.e2d_type = inot2ext2dt(IFTODT(ip->i_e2fs_mode));
 	} else {
 		newdir.e2d_type = 0;
 	};
@@ -959,7 +961,7 @@ ext2fs_dirrewrite(dp, ip, cnp)
 	ep->e2d_ino = h2fs32(ip->i_number);
 	if (ip->i_e2fs->e2fs.e2fs_rev > E2FS_REV0 &&
 	    (ip->i_e2fs->e2fs.e2fs_features_incompat & EXT2F_INCOMPAT_FTYPE)) {
-		ep->e2d_type = inot2ext2dt(IFTODT(ip->i_ffs_mode));
+		ep->e2d_type = inot2ext2dt(IFTODT(ip->i_e2fs_mode));
 	} else {
 		ep->e2d_type = 0;
 	}

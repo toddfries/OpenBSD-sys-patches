@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.35 2005/08/06 14:26:50 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.45 2006/01/19 18:21:03 grange Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -53,11 +53,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -131,21 +127,21 @@
 #include <dev/isa/isareg.h>
 #include <machine/isa_machdep.h>
 #include <dev/ic/i8042reg.h>
-#include <dev/acpi/acpivar.h>
 
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
 #endif
 
-#include "acpi.h"
 #include "isa.h"
 #include "isadma.h"
 #include "ksyms.h"
 
+#include "acpi.h"
 #if NACPI > 0
-extern struct acpi_softc *acpi_softc;
+#include <dev/acpi/acpivar.h>
 #endif
+
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
@@ -164,8 +160,6 @@ int	cpu_class;
 
 char	*ssym = NULL;
 vaddr_t kern_end;
-
-#define	CPUID2MODEL(cpuid)	(((cpuid) >> 4) & 15)
 
 vaddr_t	msgbuf_vaddr;
 paddr_t msgbuf_paddr;
@@ -254,6 +248,28 @@ int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
 void	dumpsys(void);
 void	init_x86_64(paddr_t);
+
+#ifdef KGDB
+#ifndef KGDB_DEVNAME
+#define KGDB_DEVNAME	"com"
+#endif /* KGDB_DEVNAME */
+char kgdb_devname[] = KGDB_DEVNAME;
+#if NCOM > 0
+#ifndef KGDBADDR
+#define KGDBADDR	0x3f8
+#endif /* KGDBADDR */
+int comkgdbaddr = KGDBADDR;
+#ifndef KGDBRATE
+#define KGDBRATE	TTYDEF_SPEED
+#endif /* KGDBRATE */
+int comkgdbrate = KGDBRATE;
+#ifndef KGDBMODE
+#define KGDBMODE	((TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) | CS8)
+#endif /* KGDBMODE */
+int comkgdbmode = KGDBMODE;
+#endif /* NCOM */
+void	kgdb_port_init(void);
+#endif /* KGDB */
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -886,16 +902,13 @@ haltsys:
 #endif
 
 	if (howto & RB_HALT) {
-	        if (howto & RB_POWERDOWN) {
 #if NACPI > 0
-			if (acpi_softc) {
-				delay(500000);
-				acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
-				printf("WARNING: powerdown failed!\n");
-			}
-#endif
-		}
+		extern int acpi_s5;
 
+		delay(500000);
+		if (howto & RB_POWERDOWN || acpi_s5)
+			acpi_powerdown();
+#endif
 		printf("\n");
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
@@ -1377,6 +1390,7 @@ init_x86_64(first_avail)
 			printf("WARNING: CAN'T ALLOCATE EXTENDED MEMORY FROM "
 			    "IOMEM EXTENT MAP!\n");
 		}
+#if 0
 #if NISADMA > 0
 		/*
 		 * Some motherboards/BIOSes remap the 384K of RAM that would
@@ -1398,6 +1412,7 @@ init_x86_64(first_avail)
 			    pbuf);
 			biosextmem = (15*1024);
 		}
+#endif
 #endif
 		mem_clusters[1].start = IOM_END;
 		mem_clusters[1].size = trunc_page(KBTOB(biosextmem));
@@ -1612,10 +1627,10 @@ init_x86_64(first_avail)
 	    SDT_SYSLDT, SEL_KPL, 0);
 
 	set_mem_segment(GDT_ADDR_MEM(gdtstore, GUCODE_SEL), 0,
-	    x86_btop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMERA, SEL_UPL, 1, 0, 1);
+	    atop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMERA, SEL_UPL, 1, 0, 1);
 
 	set_mem_segment(GDT_ADDR_MEM(gdtstore, GUDATA_SEL), 0,
-	    x86_btop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMRWA, SEL_UPL, 1, 0, 1);
+	    atop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMRWA, SEL_UPL, 1, 0, 1);
 
 	/* make ldt gates and memory segments */
 	setgate((struct gate_descriptor *)(ldtstore + LSYS5CALLS_SEL),
@@ -1632,19 +1647,19 @@ init_x86_64(first_avail)
 	 */
 
 	set_mem_segment(GDT_ADDR_MEM(gdtstore, GUCODE32_SEL), 0,
-	    x86_btop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMERA, SEL_UPL, 1, 1, 0);
+	    atop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMERA, SEL_UPL, 1, 1, 0);
 
 	set_mem_segment(GDT_ADDR_MEM(gdtstore, GUDATA32_SEL), 0,
-	    x86_btop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMRWA, SEL_UPL, 1, 1, 0);
+	    atop(VM_MAXUSER_ADDRESS) - 1, SDT_MEMRWA, SEL_UPL, 1, 1, 0);
 
 	/*
 	 * 32 bit LDT entries.
 	 */
 	ldt_segp = (struct mem_segment_descriptor *)(ldtstore + LUCODE32_SEL);
-	set_mem_segment(ldt_segp, 0, x86_btop(VM_MAXUSER_ADDRESS32) - 1,
+	set_mem_segment(ldt_segp, 0, atop(VM_MAXUSER_ADDRESS32) - 1,
 	    SDT_MEMERA, SEL_UPL, 1, 1, 0);
 	ldt_segp = (struct mem_segment_descriptor *)(ldtstore + LUDATA32_SEL);
-	set_mem_segment(ldt_segp, 0, x86_btop(VM_MAXUSER_ADDRESS32) - 1,
+	set_mem_segment(ldt_segp, 0, atop(VM_MAXUSER_ADDRESS32) - 1,
 	    SDT_MEMRWA, SEL_UPL, 1, 1, 0);
 
 	/*
@@ -1659,7 +1674,7 @@ init_x86_64(first_avail)
 
 	/* exceptions */
 	for (x = 0; x < 32; x++) {
-		ist = (x == 8 || x == 3) ? 1 : 0;
+		ist = (x == 8) ? 1 : 0;
 		setgate(&idt[x], IDTVEC(exceptions)[x], ist, SDT_SYS386IGT,
 		    (x == 3 || x == 4) ? SEL_UPL : SEL_KPL,
 		    GSEL(GCODE_SEL, SEL_KPL));
@@ -1700,6 +1715,20 @@ init_x86_64(first_avail)
         if (maxproc > cpu_maxproc())
                 maxproc = cpu_maxproc();
 }
+
+#ifdef KGDB
+void
+kgdb_port_init()
+{
+#if NCOM > 0
+	if (!strcmp(kgdb_devname, "com")) {
+		bus_space_tag_t tag = X86_BUS_SPACE_IO;
+		com_kgdb_attach(tag, comkgdbaddr, comkgdbrate, COM_FREQ,
+		    comkgdbmode);
+	}
+#endif
+} 
+#endif /* KGDB */
 
 void
 cpu_reset()

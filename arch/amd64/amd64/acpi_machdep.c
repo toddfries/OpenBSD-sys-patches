@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.1 2005/06/02 20:09:38 tholo Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.4 2006/02/20 05:16:20 marco Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -38,8 +38,8 @@ u_int8_t	*acpi_scan(struct acpi_mem_map *, paddr_t, size_t);
 int
 acpi_map(paddr_t pa, size_t len, struct acpi_mem_map *handle)
 {
-	paddr_t pgpa = x86_trunc_page(pa);
-	paddr_t endpa = x86_round_page(pa + len);
+	paddr_t pgpa = trunc_page(pa);
+	paddr_t endpa = round_page(pa + len);
 	vaddr_t va = uvm_km_valloc(kernel_map, endpa - pgpa);
 
 	if (va == 0)
@@ -51,7 +51,7 @@ acpi_map(paddr_t pa, size_t len, struct acpi_mem_map *handle)
 	handle->pa = pa;
 
 	do {
-		pmap_kenter_pa(va, pgpa, VM_PROT_READ);
+		pmap_kenter_pa(va, pgpa, VM_PROT_READ | VM_PROT_WRITE);
 		va += NBPG;
 		pgpa += NBPG;
 	} while (pgpa < endpa);
@@ -149,6 +149,7 @@ havebase:
 void
 acpi_attach_machdep(struct acpi_softc *sc)
 {
-	sc->sc_interrupt = intr_establish(sc->sc_fadt->sci_int, &i8259_pic, sc->sc_fadt->sci_int,
-					  IST_LEVEL, IPL_TTY, acpi_interrupt, sc, "acpi");
+	sc->sc_interrupt = intr_establish(sc->sc_fadt->sci_int, &i8259_pic,
+	    sc->sc_fadt->sci_int, IST_LEVEL, IPL_TTY, acpi_interrupt, sc,
+	    "acpi");
 }

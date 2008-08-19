@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88k_machdep.c,v 1.3 2005/04/30 16:44:08 miod Exp $	*/
+/*	$OpenBSD: m88k_machdep.c,v 1.13 2005/12/11 21:36:06 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -52,13 +52,12 @@
 #include <sys/msgbuf.h>
 #include <sys/exec.h>
 #include <sys/errno.h>
+#include <sys/lock.h>
 
+#include <machine/asm_macro.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/cpu_number.h>
-/*
 #include <machine/locore.h>
-*/
 #include <machine/reg.h>
 #ifdef M88100
 #include <machine/m88100.h>
@@ -66,18 +65,32 @@
 
 #include <uvm/uvm_extern.h>
 
-#if DDB
+#include <net/netisr.h>
+
+#ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
 #include <ddb/db_interface.h>
 #endif /* DDB */
 
-/* prototypes */
-void regdump(struct trapframe *f);
-void dumpsys(void);
-void save_u_area(struct proc *, vaddr_t);
-void load_u_area(struct proc *);
-void dumpconf(void);
+void	dosoftint(void);
+void	dumpconf(void);
+void	dumpsys(void);
+void	regdump(struct trapframe *f);
+
+/*
+ * CMMU and CPU variables
+ */
+
+#ifdef MULTIPROCESSOR
+__cpu_simple_lock_t cmmu_cpu_lock = __SIMPLELOCK_UNLOCKED;
+cpuid_t	master_cpu;
+#endif
+
+struct cpu_info m88k_cpus[MAX_CPUS];
+u_int	max_cpus;
+
+struct cmmu_p *cmmu;
 
 int longformat = 1;  /* for regdump() */
 
@@ -86,36 +99,6 @@ int longformat = 1;  /* for regdump() */
  * during autoconfiguration or after a panic.
  */
 int   safepri = IPL_NONE;
-
-/*
- * Setup u area ptes for u area double mapping.
- */
-
-void
-save_u_area(struct proc *p, vaddr_t va)
-{
-	int i;
-
-	for (i = 0; i < UPAGES; i++) {
-		p->p_md.md_upte[i] = *((pt_entry_t *)kvtopte(va));
-		va += PAGE_SIZE;
-	}
-}
-
-void
-load_u_area(struct proc *p)
-{
-	int i;
-	vaddr_t va;
-	pt_entry_t *t;
-
-	for (i = 0, va = UADDR; i < UPAGES; i++) {
-		t = kvtopte(va);
-		*t = p->p_md.md_upte[i];
-		va += PAGE_SIZE;
-	}
-	cmmu_flush_tlb(cpu_number(), 1, UADDR, USPACE);
-}
 
 /*
  * Set registers on exec.
@@ -136,26 +119,6 @@ setregs(p, pack, stack, retval)
 	 * Point r2 to the stack. crt0 should extract envp from
 	 * argc & argv before calling user's main.
 	 */
-#if 0
-	/*
-	 * I don't think I need to mess with fpstate on 88k because
-	 * we make sure the floating point pipeline is drained in
-	 * the trap handlers. Should check on this later. XXX Nivas.
-	 */
-	if ((fs = p->p_md.md_fpstate) != NULL) {
-		/*
-		 * We hold an FPU state.  If we own *the* FPU chip state
-		 * we must get rid of it, and the only way to do that is
-		 * to save it.  In any case, get rid of our FPU state.
-		 */
-		if (p == fpproc) {
-			savefpstate(fs);
-			fpproc = NULL;
-		}
-		free((void *)fs, M_SUBPROC);
-		p->p_md.md_fpstate = NULL;
-	}
-#endif
 
 	bzero((caddr_t)tf, sizeof *tf);
 
@@ -239,8 +202,10 @@ setrunqueue(p)
 	struct proc *oldlast;
 	int which = p->p_priority >> 2;
 
+#ifdef DIAGNOSTIC
 	if (p->p_back != NULL)
 		panic("setrunqueue %p", p);
+#endif
 	q = &qs[which];
 	whichqs |= 1 << which;
 	p->p_forw = (struct proc *)q;
@@ -261,8 +226,10 @@ remrunqueue(vp)
 	int which = p->p_priority >> 2;
 	struct prochd *q;
 
+#ifdef DIAGNOSTIC
 	if ((whichqs & (1 << which)) == 0)
 		panic("remrq %p", p);
+#endif
 	p->p_forw->p_back = p->p_back;
 	p->p_back->p_forw = p->p_forw;
 	p->p_back = NULL;
@@ -274,15 +241,14 @@ remrunqueue(vp)
 void
 nmihand(void *framep)
 {
-#if 0
-	struct trapframe *frame = framep;
-#endif
-
-#if DDB
+#ifdef DDB
 	printf("Abort Pressed\n");
 	Debugger();
 #else
+	struct trapframe *frame = framep;
+
 	printf("Spurious NMI?\n");
+	regdump(frame);
 #endif /* DDB */
 }
 
@@ -330,7 +296,7 @@ regdump(struct trapframe *f)
 		    f->tf_fphs2, f->tf_fpls2);
 		printf("fppt %x fprh %x fprl %x fpit %x\n",
 		    f->tf_fppt, f->tf_fprh, f->tf_fprl, f->tf_fpit);
-		printf("vector %d mask %x mode %x scratch1 %x cpu %x\n",
+		printf("vector %d mask %x mode %x scratch1 %x cpu %p\n",
 		    f->tf_vector, f->tf_mask, f->tf_mode,
 		    f->tf_scratch1, f->tf_cpu);
 	}
@@ -343,9 +309,109 @@ regdump(struct trapframe *f)
 		    f->tf_dsap, f->tf_duap, f->tf_dsr, f->tf_dlar, f->tf_dpar);
 		printf("isap %x iuap %x isr %x ilar %x ipar %x\n",
 		    f->tf_isap, f->tf_iuap, f->tf_isr, f->tf_ilar, f->tf_ipar);
-		printf("vector %d mask %x mode %x scratch1 %x cpu %x\n",
+		printf("vector %d mask %x mode %x scratch1 %x cpu %p\n",
 		    f->tf_vector, f->tf_mask, f->tf_mode,
 		    f->tf_scratch1, f->tf_cpu);
 	}
 #endif
+}
+
+/*
+ * Set up the cpu_info pointer and the cpu number for the current processor.
+ */
+void
+set_cpu_number(cpuid_t number)
+{
+	struct cpu_info *ci;
+	extern struct pcb idle_u;
+
+#ifdef MULTIPROCESSOR
+	ci = &m88k_cpus[number];
+#else
+	ci = &m88k_cpus[0];
+#endif
+	ci->ci_cpuid = number;
+
+	__asm__ __volatile__ ("stcr %0, cr17" :: "r" (ci));
+	flush_pipeline();
+
+#ifdef MULTIPROCESSOR
+	if (number == master_cpu)
+#endif
+	{
+		ci->ci_primary = 1;
+		ci->ci_idle_pcb = &idle_u;
+	}
+
+	ci->ci_alive = 1;
+}
+
+/*
+ * Soft interrupt interface
+ */
+
+int ssir;
+int netisr;
+
+#ifdef MULTIPROCESSOR
+#include <sys/lock.h>
+
+__cpu_simple_lock_t sir_lock = __SIMPLELOCK_UNLOCKED;
+
+void
+setsoftint(int sir)
+{
+	__cpu_simple_lock(&sir_lock);
+	ssir |= sir;
+	__cpu_simple_unlock(&sir_lock);
+}
+
+int
+clrsoftint(int sir)
+{
+	int tmpsir;
+
+	__cpu_simple_lock(&sir_lock);
+	tmpsir = ssir & sir;
+	ssir ^= tmpsir;
+	__cpu_simple_unlock(&sir_lock);
+
+	return (tmpsir);
+}
+#endif
+
+void
+dosoftint()
+{
+	if (clrsoftint(SIR_NET)) {
+		uvmexp.softs++;
+#define DONETISR(bit, fn) \
+	do { \
+		if (netisr & (1 << bit)) { \
+			netisr &= ~(1 << bit); \
+			fn(); \
+		} \
+	} while (0)
+#include <net/netisr_dispatch.h>
+#undef DONETISR
+	}
+
+	if (clrsoftint(SIR_CLOCK)) {
+		uvmexp.softs++;
+		softclock();
+	}
+}
+
+int
+spl0()
+{
+	int s;
+
+	s = splsoftclock();
+
+	if (ssir)
+		dosoftint();
+
+	setipl(0);
+	return (s);
 }

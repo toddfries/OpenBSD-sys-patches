@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpt.h,v 1.4 2004/07/12 23:57:14 marco Exp $	*/
+/*	$OpenBSD: mpt.h,v 1.8 2006/02/04 19:05:00 marco Exp $	*/
 /*	$NetBSD: mpt.h,v 1.2 2003/07/08 10:06:31 itojun Exp $	*/
 
 /*
@@ -40,6 +40,18 @@
 
 #ifndef _DEV_IC_MPT_H_
 #define	_DEV_IC_MPT_H_
+
+#define DEVNAME(s)  ((s)->mpt_dev.dv_xname)
+
+/* #define MPT_DEBUG */
+#ifdef MPT_DEBUG
+extern int mpt_debug;
+#define DPRINTF(x...)     do { if (mpt_debug) printf(x); } while(0)
+#define DNPRINTF(n,x...)  do { if (mpt_debug > (n)) printf(x); } while(0)
+#else
+#define DPRINTF(x...) do { } while (0)
+#define DNPRINTF(n,x...) do { } while (0)
+#endif
 
 #include <dev/ic/mpt_openbsd.h>
 
@@ -158,43 +170,48 @@ enum _MPT_DIAG_BITS {
 #define MPT_CONTEXT_MASK  (~0xE0000000)
 
 #ifdef _KERNEL
-int mpt_soft_reset(mpt_softc_t *);
-void mpt_hard_reset(mpt_softc_t *);
-int mpt_recv_handshake_reply(mpt_softc_t *, size_t, void *);
+int mpt_soft_reset(struct mpt_softc *);
+void mpt_hard_reset(struct mpt_softc *);
+int mpt_recv_handshake_reply(struct mpt_softc *, size_t, void *);
 
-void mpt_send_cmd(mpt_softc_t *, request_t *);
-void mpt_free_reply(mpt_softc_t *, u_int32_t);
-void mpt_enable_ints(mpt_softc_t *);
-void mpt_disable_ints(mpt_softc_t *);
-u_int32_t mpt_pop_reply_queue(mpt_softc_t *);
-int mpt_init(mpt_softc_t *, u_int32_t);
-int mpt_reset(mpt_softc_t *);
-int mpt_send_handshake_cmd(mpt_softc_t *, size_t, void *);
-request_t * mpt_get_request(mpt_softc_t *);
-void mpt_free_request(mpt_softc_t *, request_t *);
-void mpt_init_request(mpt_softc_t *, request_t *);
+void mpt_send_cmd(struct mpt_softc *, struct req_entry *);
+void mpt_free_reply(struct mpt_softc *, u_int32_t);
+void mpt_enable_ints(struct mpt_softc *);
+void mpt_disable_ints(struct mpt_softc *);
+u_int32_t mpt_pop_reply_queue(struct mpt_softc *);
+int mpt_init(struct mpt_softc *, u_int32_t);
+int mpt_reset(struct mpt_softc *);
+int mpt_send_handshake_cmd(struct mpt_softc *, size_t, void *);
+struct req_entry * mpt_get_request(struct mpt_softc *);
+void mpt_free_request(struct mpt_softc *, struct req_entry *);
+void mpt_init_request(struct mpt_softc *, struct req_entry *);
 int mpt_intr(void *);
-void mpt_check_doorbell(mpt_softc_t *);
+void mpt_check_doorbell(struct mpt_softc *);
 
-int mpt_read_cfg_page(mpt_softc_t *, int, fCONFIG_PAGE_HEADER *);
-int mpt_write_cfg_page(mpt_softc_t *, int, fCONFIG_PAGE_HEADER *);
-int mpt_read_cfg_header(mpt_softc_t *, int, int, int, fCONFIG_PAGE_HEADER *);
+int mpt_read_cfg_page(struct mpt_softc *, int, CONFIG_PAGE_HEADER *);
+int mpt_write_cfg_page(struct mpt_softc *, int, CONFIG_PAGE_HEADER *);
+int mpt_read_cfg_header(struct mpt_softc *, int, int, int, CONFIG_PAGE_HEADER *);
 
 /* FW Download Boot */
-int mpt_downloadboot(mpt_softc_t *);
-int mpt_do_upload(mpt_softc_t *);
-int mpt_alloc_fw_mem(mpt_softc_t *, uint32_t , int);
-void mpt_free_fw_mem(mpt_softc_t *);
+int mpt_downloadboot(struct mpt_softc *);
+int mpt_do_upload(struct mpt_softc *);
+int mpt_alloc_fw_mem(struct mpt_softc *, int);
+void mpt_free_fw_mem(struct mpt_softc *);
 
 /* mpt_debug.c functions */
-void mpt_print_reply(void *);
-void mpt_print_db(u_int32_t);
+#ifdef MPT_DEBUG
 void mpt_print_config_reply(void *);
-char *mpt_ioc_diag(u_int32_t);
-char *mpt_req_state(enum mpt_req_state);
 void mpt_print_scsi_io_request(MSG_SCSI_IO_REQUEST *);
 void mpt_print_config_request(void *);
 void mpt_print_request(void *);
+void mpt_print_db(u_int32_t);
+void mpt_print_reply(void *);
+char *mpt_ioc_diag(u_int32_t);
+char *mpt_req_state(enum mpt_req_state);
+#else
+#define mpt_print_db(x)
+#endif /* MPT_DEBUG */
+
 #endif /* _KERNEL */
 
 #endif /* _DEV_IC_MPT_H_ */

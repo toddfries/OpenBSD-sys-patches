@@ -1,4 +1,4 @@
-/* $OpenBSD: pcppi.c,v 1.5 2002/03/14 03:16:05 millert Exp $ */
+/* $OpenBSD: pcppi.c,v 1.7 2006/02/12 20:04:16 miod Exp $ */
 /* $NetBSD: pcppi.c,v 1.1 1998/04/15 20:26:18 drochner Exp $ */
 
 /*
@@ -65,12 +65,7 @@ struct pcppi_softc {
 	int sc_timeout;
 };
 
-#define __BROKEN_INDIRECT_CONFIG /* XXX */
-#ifdef __BROKEN_INDIRECT_CONFIG
 int	pcppi_match(struct device *, void *, void *);
-#else
-int	pcppi_match(struct device *, struct cfdata *, void *);
-#endif
 void	pcppi_attach(struct device *, struct device *, void *);
 
 struct cfattach pcppi_ca = {
@@ -88,11 +83,7 @@ static void pcppi_bell_stop(void *);
 int
 pcppi_match(parent, match, aux)
 	struct device *parent;
-#ifdef __BROKEN_INDIRECT_CONFIG
 	void *match;
-#else
-	struct cfdata *match;
-#endif
 	void *aux;
 {
 	struct isa_attach_args *ia = aux;
@@ -274,7 +265,7 @@ pcppi_pckbd_bell(arg, pitch, period, volume, poll)
 	/*
 	 * Comes in as ms, goes out as ticks; volume ignored.
 	 */
-	pcppi_bell(arg, pitch, (period * hz) / 1000,
+	pcppi_bell(arg, volume ? pitch : 0, (period * hz) / 1000,
 	    poll ? PCPPI_BELL_POLL : 0);
 }
 #endif /* NPCKBD > 0 */

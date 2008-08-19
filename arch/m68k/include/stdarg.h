@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.6 2003/06/02 23:27:48 millert Exp $	*/
+/*	$OpenBSD: stdarg.h,v 1.9 2006/01/06 18:53:05 millert Exp $	*/
 /*	$NetBSD: stdarg.h,v 1.14 1995/12/25 23:15:33 mycroft Exp $	*/
 
 /*-
@@ -35,9 +35,10 @@
 #ifndef _M68K_STDARG_H_
 #define	_M68K_STDARG_H_
 
-#include <machine/ansi.h>
+#include <sys/cdefs.h>
+#include <machine/_types.h>
 
-typedef _BSD_VA_LIST_	va_list;
+typedef __va_list	va_list;
 
 #define	__va_size(type) \
 	(((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
@@ -56,13 +57,11 @@ typedef _BSD_VA_LIST_	va_list;
 			   sizeof(type) != __va_size(type) ?	\
 			   sizeof(type) : __va_size(type))))
 
-#if !defined(_ANSI_SOURCE) && \
-    (!defined(_POSIX_C_SOURCE) && !defined(_XOPEN_SOURCE) || \
-     defined(_ISOC99_SOURCE) || (__STDC_VERSION__ - 0) >= 199901L)
+#if __ISO_C_VISIBLE >= 1999
 #define va_copy(dest, src) \
 	((dest) = (src))
 #endif
 
-#define	va_end(ap)	((void)0)
+#define	va_end(ap)	
 
 #endif /* !_M68K_STDARG_H_ */

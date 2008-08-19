@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.6 2005/07/31 15:31:11 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.12 2006/02/05 15:55:50 martin Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -79,7 +75,6 @@
 
 #define	KERNBASE	0xffffffff80000000 /* start of kernel virtual space */
 #define KERNTEXTOFF	(KERNBASE+0x100000)	/* start of kernel text */
-#define	BTOPKERNBASE	((u_long)KERNBASE >> PGSHIFT)
 
 #define KERNTEXTOFF_HI	0xffffffff
 #define KERNTEXTOFF_LO	0x80100000
@@ -143,21 +138,8 @@
 #define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE / DEV_BSIZE))
 
 /*
- * XXXfvdl the PD* stuff is different from i386.
- */
-/*
  * Mach derived conversion macros
  */
 #define	x86_round_pdr(x) \
 	((((unsigned long)(x)) + (NBPD_L2 - 1)) & ~(NBPD_L2 - 1))
 #define	x86_trunc_pdr(x)	((unsigned long)(x) & ~(NBPD_L2 - 1))
-#define	x86_btod(x)		((unsigned long)(x) >> L2_SHIFT)
-#define	x86_dtob(x)		((unsigned long)(x) << L2_SHIFT)
-#define	x86_round_page(x)	((((unsigned long)(x)) + PGOFSET) & ~PGOFSET)
-#define	x86_trunc_page(x)	((unsigned long)(x) & ~PGOFSET)
-#define	x86_btop(x)		((unsigned long)(x) >> PGSHIFT)
-#define	x86_ptob(x)		((unsigned long)(x) << PGSHIFT)
-
-#define btop(x)				x86_btop(x)
-#define ptob(x)				x86_ptob(x)
-#define round_pdr(x)			x86_round_pdr(x)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.82 2005/05/26 01:49:15 markus Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.85 2005/11/12 20:27:46 brad Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -143,10 +143,11 @@ struct mbuf {
 #define M_ANYCAST6	0x4000	/* received as IPv6 anycast */
 #define M_LINK0		0x8000	/* link layer specific flag */
 #define M_LOOP		0x0040	/* for Mbuf statistics */
+#define M_FILDROP	0x0080	/* dropped by bpf filter */
 
 /* flags copied when copying m_pkthdr */
 #define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_PROTO1|M_BCAST|M_MCAST|M_CONF|\
-			 M_AUTH|M_ANYCAST6|M_LOOP|M_TUNNEL|M_LINK0)
+			 M_AUTH|M_ANYCAST6|M_LOOP|M_TUNNEL|M_LINK0|M_FILDROP)
 
 /* Checksumming flags */
 #define	M_IPV4_CSUM_OUT		0x0001	/* IPv4 checksum needed */
@@ -181,7 +182,7 @@ struct mbuf {
  * drivers.
  */
 #define	MBUFLOCK(code) do {\
-	int ms = splimp(); \
+	int ms = splvm(); \
 	  { code } \
 	  splx(ms); \
 } while(/* CONSTCOND */ 0)
@@ -585,12 +586,7 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define PACKET_TAG_GIF				8  /* GIF processing done */
 #define PACKET_TAG_GRE				9  /* GRE processing done */
 #define PACKET_TAG_IN_PACKET_CHECKSUM		10 /* NIC checksumming done */
-#define PACKET_TAG_PF_GENERATED			11 /* PF generated, pass always */
-#define PACKET_TAG_PF_ROUTED			12 /* PF routed, no route loops */
-#define PACKET_TAG_PF_FRAGCACHE			13 /* PF fragment cached */
-#define	PACKET_TAG_PF_QID			14 /* PF queue id */
-#define PACKET_TAG_PF_TAG			15 /* PF tags */
-#define PACKET_TAG_PF_TRANSLATE_LOCALHOST	16 /* translated to localhost */
+#define PACKET_TAG_PF				11 /* PF */
 #define PACKET_TAG_DLT				17 /* data link layer type */
 
 #ifdef MBTYPES

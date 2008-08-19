@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.45 2005/08/03 16:27:39 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.47 2005/11/07 03:20:00 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -326,7 +326,7 @@ int rl_mii_readreg(sc, frame)
 {
 	int			i, ack, s;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Set up frame for RX.
@@ -418,7 +418,7 @@ int rl_mii_writereg(sc, frame)
 {
 	int			s;
 
-	s = splimp();
+	s = splnet();
 	/*
 	 * Set up frame for TX.
 	 */
@@ -964,7 +964,7 @@ void rl_init(xsc)
 	int			s;
 	u_int32_t		rxcfg = 0;
 
-	s = splimp();
+	s = splnet();
 
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
@@ -1088,7 +1088,7 @@ int rl_ioctl(ifp, command, data)
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int			s, error = 0;
 
-	s = splimp();
+	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
 		splx(s);
@@ -1236,7 +1236,7 @@ rl_attach(sc)
 	rl_read_eeprom(sc, (caddr_t)sc->sc_arpcom.ac_enaddr, RL_EE_EADDR,
 	    addr_len, 3, 1);
 
-	printf(" address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(", address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
 	rl_read_eeprom(sc, (caddr_t)&rl_did, RL_EE_PCI_DID, addr_len, 1, 0);
 

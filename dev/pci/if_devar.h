@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_devar.h,v 1.18 2005/07/16 17:20:47 brad Exp $	*/
+/*	$OpenBSD: if_devar.h,v 1.24 2005/11/15 10:43:35 mickey Exp $	*/
 /*	$NetBSD: if_devar.h,v 1.13 1997/06/08 18:46:36 thorpej Exp $	*/
 
 /*-
@@ -27,13 +27,6 @@
  * Id: if_devar.h,v 1.23 1997/06/03 18:51:16 thomas Exp
  */
 
-#if !defined(_DEVAR_H)
-#define _DEVAR_H
-
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-
-typedef bus_addr_t tulip_csrptr_t;
-
 #define TULIP_CSR_READ(sc, csr) \
     bus_space_read_4((sc)->tulip_bustag, (sc)->tulip_bushandle, (sc)->tulip_csrs.csr)
 #define TULIP_CSR_WRITE(sc, csr, val) \
@@ -43,76 +36,16 @@ typedef bus_addr_t tulip_csrptr_t;
     bus_space_read_1((sc)->tulip_bustag, (sc)->tulip_bushandle, (sc)->tulip_csrs.csr)
 #define TULIP_CSR_WRITEBYTE(sc, csr, val) \
     bus_space_write_1((sc)->tulip_bustag, (sc)->tulip_bushandle, (sc)->tulip_csrs.csr, (val))
-#endif /* __NetBSD__ */
 
 #ifdef TULIP_IOMAPPED
 #define	TULIP_EISA_CSRSIZE	16
 #define	TULIP_EISA_CSROFFSET	0
 #define	TULIP_PCI_CSRSIZE	8
 #define	TULIP_PCI_CSROFFSET	0
-
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
-typedef u_int16_t tulip_csrptr_t;
-
-#define	TULIP_CSR_READ(sc, csr)			(inl((sc)->tulip_csrs.csr))
-#define	TULIP_CSR_WRITE(sc, csr, val)   	outl((sc)->tulip_csrs.csr, val)
-
-#define	TULIP_CSR_READBYTE(sc, csr)		(inb((sc)->tulip_csrs.csr))
-#define	TULIP_CSR_WRITEBYTE(sc, csr, val)	outb((sc)->tulip_csrs.csr, val)
-#endif /* __NetBSD__ */
-
 #else /* TULIP_IOMAPPED */
-
 #define	TULIP_PCI_CSRSIZE	8
 #define	TULIP_PCI_CSROFFSET	0
-
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
-typedef volatile u_int32_t *tulip_csrptr_t;
-
-/*
- * macros to read and write CSRs.  Note that the "0 +" in
- * READ_CSR is to prevent the macro from being an lvalue
- * and WRITE_CSR shouldn't be assigned from.
- */
-#define	TULIP_CSR_READ(sc, csr)		(0 + *(sc)->tulip_csrs.csr)
-#define	TULIP_CSR_WRITE(sc, csr, val)	((void)(*(sc)->tulip_csrs.csr = (val)))
-#endif /* __NetBSD__ */
-
 #endif /* TULIP_IOMAPPED */
-
-/*
- *  Swap macro to access certain data types.
- */
-#if defined(BYTE_ORDER) && BYTE_ORDER == BIG_ENDIAN
-__inline__ static u_int32_t FILT_BO(u_int32_t);
-__inline__ static u_int32_t DESC_BO(u_int32_t);
-
-__inline__ static u_int32_t
-FILT_BO(x)
-    u_int32_t x;
-{
-	u_int32_t s;
-
-	s = (x & 0xffff) << 16 | ((x & 0xff) << 8) | ((x & 0xff00) >> 8);
-	return s;
-}
-
-__inline__ static u_int32_t
-DESC_BO(x)
-    u_int32_t x;
-{
-	u_int32_t s;
-
-	s = x;
-	x = (((s) >> 24) | (((s) >> 8) & 0xff00) | 
-             ((s) << 24) | (((s) & 0xff00) << 8));
-	return x;
-}
-
-#else
-#define FILT_BO(x)	(x)
-#define DESC_BO(x)	(x)
-#endif
 
 /*
  * This structure contains "pointers" for the registers on
@@ -120,22 +53,22 @@ DESC_BO(x)
  * to all chips.  After that, it gets messy...
  */
 typedef struct {
-    tulip_csrptr_t csr_busmode;			/* CSR0 */
-    tulip_csrptr_t csr_txpoll;			/* CSR1 */
-    tulip_csrptr_t csr_rxpoll;			/* CSR2 */
-    tulip_csrptr_t csr_rxlist;			/* CSR3 */
-    tulip_csrptr_t csr_txlist;			/* CSR4 */
-    tulip_csrptr_t csr_status;			/* CSR5 */
-    tulip_csrptr_t csr_command;			/* CSR6 */
-    tulip_csrptr_t csr_intr;			/* CSR7 */
-    tulip_csrptr_t csr_missed_frames;		/* CSR8 */
-    tulip_csrptr_t csr_9;			/* CSR9 */
-    tulip_csrptr_t csr_10;			/* CSR10 */
-    tulip_csrptr_t csr_11;			/* CSR11 */
-    tulip_csrptr_t csr_12;			/* CSR12 */
-    tulip_csrptr_t csr_13;			/* CSR13 */
-    tulip_csrptr_t csr_14;			/* CSR14 */
-    tulip_csrptr_t csr_15;			/* CSR15 */
+    bus_size_t csr_busmode;			/* CSR0 */
+    bus_size_t csr_txpoll;			/* CSR1 */
+    bus_size_t csr_rxpoll;			/* CSR2 */
+    bus_size_t csr_rxlist;			/* CSR3 */
+    bus_size_t csr_txlist;			/* CSR4 */
+    bus_size_t csr_status;			/* CSR5 */
+    bus_size_t csr_command;			/* CSR6 */
+    bus_size_t csr_intr;			/* CSR7 */
+    bus_size_t csr_missed_frames;		/* CSR8 */
+    bus_size_t csr_9;			/* CSR9 */
+    bus_size_t csr_10;			/* CSR10 */
+    bus_size_t csr_11;			/* CSR11 */
+    bus_size_t csr_12;			/* CSR12 */
+    bus_size_t csr_13;			/* CSR13 */
+    bus_size_t csr_14;			/* CSR14 */
+    bus_size_t csr_15;			/* CSR15 */
 } tulip_regfile_t;
 
 #define	csr_enetrom		csr_9	/* 21040 */
@@ -154,7 +87,7 @@ typedef struct {
 /*
  * While 21x4x allows chaining of its descriptors, this driver
  * doesn't take advantage of it.  We keep the descriptors in a
- * traditional FIFO ring.  
+ * traditional FIFO ring.
  */
 typedef struct {
     tulip_desc_t *ri_first;	/* first entry in ring */
@@ -182,21 +115,22 @@ typedef struct {
  * And the number of receive descriptors multiplied by the size
  * of the receive buffers must equal the recevive space.  This
  * is so that we can manipulate the page tables so that even if a
- * packet wraps around the end of the receive space, we can 
+ * packet wraps around the end of the receive space, we can
  * treat it as virtually contiguous.
  *
  * The above used to be true (the stupid restriction is still true)
- * but we gone to directly DMA'ing into MBUFs (unless it's on an 
+ * but we gone to directly DMA'ing into MBUFs (unless it's on an
  * architecture which can't handle unaligned accesses) because with
  * 100Mb/s cards the copying is just too much of a hit.
  */
-#if defined(__alpha__) || defined(__mips__)
+#if !defined(__i386__)
 #define	TULIP_COPY_RXDATA	1
 #endif
 
+#define	TULIP_DATA_PER_DESC	2032
 #define	TULIP_TXTIMER		4
 #define	TULIP_RXDESCS		48
-#define	TULIP_TXDESCS		128
+#define	TULIP_TXDESCS		32
 #define	TULIP_RXQ_TARGET	32
 #if TULIP_RXQ_TARGET >= TULIP_RXDESCS
 #error TULIP_RXQ_TARGET must be less than TULIP_RXDESCS
@@ -392,7 +326,6 @@ typedef enum {
     TULIP_LINK_UNKNOWN			/* we can't tell either way */
 } tulip_link_status_t;
 
-
 /*
  * This data structure is used to abstract out the quirks.
  * media_probe  = tries to determine the media type.
@@ -409,11 +342,6 @@ typedef struct {
     void (*bd_media_select)(tulip_softc_t * const sc);
     void (*bd_media_poll)(tulip_softc_t * const sc, tulip_mediapoll_event_t event);
     void (*bd_media_preset)(tulip_softc_t * const sc);
-#if defined(__bsdi__) && _BSDI_VERSION >= 199701
-    struct ifmedia_entry *bd_media_list;
-    int bd_media_cnt;
-    int bd_media_options_mask;
-#endif
 } tulip_boardsw_t;
 
 /*
@@ -493,26 +421,10 @@ typedef struct {
 
 /*
  * Now to important stuff.  This is softc structure (where does softc
- * come from??? No idea) for the tulip device.  
+ * come from??? No idea) for the tulip device.
  *
  */
 struct _tulip_softc_t {
-#if defined(__bsdi__)
-    struct device tulip_dev;		/* base device */
-    struct isadev tulip_id;		/* ISA device */
-    struct intrhand tulip_ih;		/* intrrupt vectoring */
-    struct atshutdown tulip_ats;	/* shutdown hook */
-#if _BSDI_VERSION < 199401
-    caddr_t tulip_bpf;			/* for BPF */
-#else
-    prf_t tulip_pf;			/* printf function */
-#if _BSDI_VERSION >= 199701
-    struct mii_data tulip_mii;		/* Generic MII and media data */
-#define	tulip_ifmedia tulip_mii.mii_media
-#endif /* _BSDI_VERSION >= 199701 */
-#endif /* _BSDI_VERSION < 199401 */
-#endif /* __bsdi__ */
-#if defined(__NetBSD__) || defined(__OpenBSD__)
     struct device tulip_dev;		/* base device */
     void *tulip_ih;			/* intrrupt vectoring */
     void *tulip_ats;			/* shutdown hook */
@@ -520,18 +432,18 @@ struct _tulip_softc_t {
     bus_space_tag_t tulip_bustag;	/* tag of CSR region being used */
     bus_space_handle_t tulip_bushandle;	/* handle for CSR region being used */
     pci_chipset_tag_t tulip_pc;
-#if !defined(__OpenBSD__)
-    struct ethercom tulip_ec;
-#endif
     u_int8_t tulip_enaddr[ETHER_ADDR_LEN];
-#endif
-#if !defined(tulip_ifmedia) && defined(IFM_ETHER)
     struct ifmedia tulip_ifmedia;
-#endif
-#if !defined(__NetBSD__)
+    bus_dma_tag_t tulip_dmatag;		/* bus DMA tag */
+    bus_dmamap_t tulip_setupmap;
+    bus_dmamap_t tulip_txdescmap;
+    bus_dmamap_t tulip_txmaps[TULIP_TXDESCS];
+    unsigned tulip_txmaps_free;
+    bus_dmamap_t tulip_rxdescmap;
+    bus_dmamap_t tulip_rxmaps[TULIP_RXDESCS];
+    unsigned tulip_rxmaps_free;
     struct arpcom tulip_ac;
     struct timeout tulip_ftmo, tulip_stmo;
-#endif
     tulip_regfile_t tulip_csrs;
     u_int32_t tulip_flags;
 #define	TULIP_WANTSETUP		0x00000001
@@ -588,7 +500,8 @@ struct _tulip_softc_t {
 #define	TULIP_HAVE_OKSROM	0x00020000	/* SROM CRC is OK */
     u_int32_t tulip_intrmask;	/* our copy of csr_intr */
     u_int32_t tulip_cmdmode;	/* our copy of csr_cmdmode */
-    u_int32_t tulip_last_system_error : 3;	/* last system error (only value is TULIP_SYSTEMERROR is also set) */
+    u_int32_t tulip_last_system_error : 3;	/* last system error (only value is
+						   TULIP_SYSTEMERROR is also set) */
     u_int32_t tulip_txtimer : 2;	/* transmission timer */
     u_int32_t tulip_system_errors;	/* number of system errors encountered */
     u_int32_t tulip_statusbits;	/* status bits from CSR5 that may need to be printed */
@@ -643,6 +556,8 @@ struct _tulip_softc_t {
 	u_int32_t dbg_rxintrs;
 	u_int32_t dbg_last_rxintrs;
 	u_int32_t dbg_high_rxintrs_hz;
+	u_int32_t dbg_no_txmaps;
+	u_int32_t dbg_txput_finishes[8];
 	u_int32_t dbg_txprobes_ok[TULIP_MEDIA_MAX];
 	u_int32_t dbg_txprobes_failed[TULIP_MEDIA_MAX];
 	u_int32_t dbg_events[TULIP_MEDIAPOLL_MAX];
@@ -693,32 +608,18 @@ struct _tulip_softc_t {
     u_int32_t tulip_setupdata[192/sizeof(u_int32_t)];
     char tulip_boardid[16];		/* buffer for board ID */
     u_int8_t tulip_rombuf[128];
-#ifndef __OpenBSD__
-    u_int8_t tulip_pci_busno;		/* needed for multiport boards */
-#else
     struct device *tulip_pci_busno;	/* needed for multiport boards */
-#endif
     u_int8_t tulip_pci_devno;		/* needed for multiport boards */
     u_int8_t tulip_connidx;
     tulip_srom_connection_t tulip_conntype;
-    tulip_desc_t tulip_rxdescs[TULIP_RXDESCS];
-    tulip_desc_t tulip_txdescs[TULIP_TXDESCS];
-#if defined(__NetBSD__) && NRND > 0
-    rndsource_element_t    tulip_rndsource;
-#endif
+    tulip_desc_t *tulip_rxdescs;
+    tulip_desc_t *tulip_txdescs;
 };
 
-#if defined(IFM_ETHER)
 #define	TULIP_DO_AUTOSENSE(sc)	(IFM_SUBTYPE((sc)->tulip_ifmedia.ifm_media) == IFM_AUTO)
-#else
-#define	TULIP_DO_AUTOSENSE(sc)	(((sc)->tulip_flags & TULIP_NOAUTOSENSE) == 0)
-#endif
-
-
-#if defined(TULIP_HDR_DATA)
 
 #ifdef TULIP_DEBUG
-static const char * const tulip_chipdescs[] = { 
+static const char * const tulip_chipdescs[] = {
     "21040 [10Mb/s]",
 #if defined(TULIP_EISA)
     "DE425 [10Mb/s]",
@@ -751,7 +652,6 @@ static const char * const tulip_mediums[] = {
 };
 #endif
 
-#if defined(IFM_ETHER)
 static const int tulip_media_to_ifmedia[] = {
     IFM_ETHER | IFM_NONE,		/* TULIP_MEDIA_UNKNOWN */
     IFM_ETHER | IFM_10_T,		/* TULIP_MEDIA_10BASET */
@@ -766,7 +666,6 @@ static const int tulip_media_to_ifmedia[] = {
     IFM_ETHER | IFM_100_FX,		/* TULIP_MEDIA_100BASEFX */
     IFM_ETHER | IFM_100_FX | IFM_FDX,	/* TULIP_MEDIA_100BASEFX_FD */
 };
-#endif /* defined(IFM_ETHER) */
 
 #ifdef TULIP_DEBUG
 static const char * const tulip_system_errors[] = {
@@ -857,7 +756,6 @@ static const struct {
     {	TULIP_MEDIA_10BASET,		TULIP_SROM_MEDIA_10BASET	},
     {	TULIP_MEDIA_UNKNOWN						}
 };
-#endif /* TULIP_HDR_DATA */
 
 /*
  * This driver supports a maximum of 32 tulip boards.
@@ -865,193 +763,64 @@ static const struct {
  */
 #define	TULIP_MAX_DEVICES	32
 
-#if defined(TULIP_USE_SOFTINTR) && defined(TULIP_HDR_DATA)
-static u_int32_t tulip_softintr_mask;
-static int tulip_softintr_last_unit;
-static int tulip_softintr_max_unit;
-static void tulip_softintr(void);
-#endif
+#define TULIP_RXDESC_PRESYNC(sc, di, s)	\
+	bus_dmamap_sync((sc)->tulip_dmatag, (sc)->tulip_rxdescmap, \
+		   (caddr_t) di - (caddr_t) (sc)->tulip_rxdescs, \
+		   (s), BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE)
+#define TULIP_RXDESC_POSTSYNC(sc, di, s)	\
+	bus_dmamap_sync((sc)->tulip_dmatag, (sc)->tulip_rxdescmap, \
+		   (caddr_t) di - (caddr_t) (sc)->tulip_rxdescs, \
+		   (s), BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE)
+#define	TULIP_RXMAP_PRESYNC(sc, map) \
+	bus_dmamap_sync((sc)->tulip_dmatag, (map), 0, (map)->dm_mapsize, \
+			BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE)
+#define	TULIP_RXMAP_POSTSYNC(sc, map) \
+	bus_dmamap_sync((sc)->tulip_dmatag, (map), 0, (map)->dm_mapsize, \
+			BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE)
+#define	TULIP_RXMAP_CREATE(sc, mapp) \
+	bus_dmamap_create((sc)->tulip_dmatag, TULIP_RX_BUFLEN, 2, \
+			  TULIP_DATA_PER_DESC, 0, \
+			  BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW, (mapp))
 
-#ifdef notyet
-#define	SIOCGADDRROM		_IOW('i', 240, struct ifreq)	/* get 128 bytes of ROM */
-#define	SIOCGCHIPID		_IOWR('i', 241, struct ifreq)	/* get chipid */
-#endif
+#define TULIP_TXDESC_PRESYNC(sc, di, s)	\
+	bus_dmamap_sync((sc)->tulip_dmatag, (sc)->tulip_txdescmap, \
+			(caddr_t) di - (caddr_t) (sc)->tulip_txdescs, \
+			(s), BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE)
+#define TULIP_TXDESC_POSTSYNC(sc, di, s)	\
+	bus_dmamap_sync((sc)->tulip_dmatag, (sc)->tulip_txdescmap, \
+			(caddr_t) di - (caddr_t) (sc)->tulip_txdescs, \
+			(s), BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE)
+#define	TULIP_TXMAP_PRESYNC(sc, map) \
+	bus_dmamap_sync((sc)->tulip_dmatag, (map), 0, (map)->dm_mapsize, \
+			BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE)
+#define	TULIP_TXMAP_POSTSYNC(sc, map) \
+	bus_dmamap_sync((sc)->tulip_dmatag, (map), 0, (map)->dm_mapsize, \
+			BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE)
+#define	TULIP_TXMAP_CREATE(sc, mapp) \
+	bus_dmamap_create((sc)->tulip_dmatag, TULIP_DATA_PER_DESC, \
+			  TULIP_MAX_TXSEG, TULIP_DATA_PER_DESC, \
+			  0, BUS_DMA_NOWAIT, (mapp))
 
-#if defined(__FreeBSD__)
-typedef void ifnet_ret_t;
-typedef int ioctl_cmd_t;
-#if defined(TULIP_HDR_DATA)
-static tulip_softc_t *tulips[TULIP_MAX_DEVICES];
-#endif
-#if BSD >= 199506
-#define TULIP_IFP_TO_SOFTC(ifp) ((tulip_softc_t *)((ifp)->if_softc))
-#if NBPFILTER > 0
-#define	TULIP_BPF_MTAP(sc, m)	bpf_mtap(&(sc)->tulip_if, m)
-#define	TULIP_BPF_TAP(sc, p, l)	bpf_tap(&(sc)->tulip_if, p, l)
-#define	TULIP_BPF_ATTACH(sc)	bpfattach(&(sc)->tulip_if, DLT_EN10MB, sizeof(struct ether_header))
-#endif
-#define	tulip_intrfunc_t	void
-#define	TULIP_VOID_INTRFUNC
-#define	IFF_NOTRAILERS		0
-#if 0
-#define	TULIP_KVATOPHYS(sc, va)	kvtop(va)
-#endif
-#define	TULIP_EADDR_FMT		"%6D"
-#define	TULIP_EADDR_ARGS(addr)	addr, ":"
-#else
-extern int bootverbose;
-#define TULIP_IFP_TO_SOFTC(ifp)         (TULIP_UNIT_TO_SOFTC((ifp)->if_unit))
-#include <sys/devconf.h>
-#define	TULIP_DEVCONF
-#endif
-#if defined(TULIP_USE_SOFTINTR)
-NETISR_SET(NETISR_DE, tulip_softintr);
-#endif
-#define	TULIP_UNIT_TO_SOFTC(unit)	(tulips[unit])
-#define	TULIP_BURSTSIZE(unit)		pci_max_burst_len
-#define	loudprintf			if (bootverbose) printf
-#endif
-
-#if defined(__bsdi__)
-typedef int ifnet_ret_t;
-typedef u_long ioctl_cmd_t;
-extern struct cfdriver decd;
-#define	TULIP_UNIT_TO_SOFTC(unit)	((tulip_softc_t *) decd.cd_devs[unit])
-#define TULIP_IFP_TO_SOFTC(ifp)		(TULIP_UNIT_TO_SOFTC((ifp)->if_unit))
-#define	TULIP_ETHER_IFATTACH(sc)	ether_attach(&(sc)->tulip_if)
-#if _BSDI_VERSION >= 199510
-#if 0
-#define	TULIP_BURSTSIZE(unit)		log2_burst_size
-#endif
-#define	loudprintf			aprint_verbose
-#define	printf				(*sc->tulip_pf)
-#define	MCNT(x) (sizeof(x) / sizeof(struct ifmedia_entry))
-#elif _BSDI_VERSION <= 199401
-#define	DRQNONE				0
-#define	loudprintf			printf
-static void
-arp_ifinit(
-    struct arpcom *ac,
-    struct ifaddr *ifa)
-{
-    ac->ac_ipaddr = IA_SIN(ifa)->sin_addr;
-    arpwhohas(ac, &ac->ac_ipaddr);
-}
-#endif
-#endif	/* __bsdi__ */
-
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-typedef void ifnet_ret_t;
-typedef u_long ioctl_cmd_t;
 extern struct cfattach de_ca;
 extern struct cfdriver de_cd;
 #define	TULIP_UNIT_TO_SOFTC(unit)	((tulip_softc_t *) de_cd.cd_devs[unit])
 #define TULIP_IFP_TO_SOFTC(ifp)         ((tulip_softc_t *)((ifp)->if_softc))
 #define	tulip_unit			tulip_dev.dv_unit
-#if defined(__OpenBSD__)
 #define tulip_xname                     tulip_dev.dv_cfdata->cf_driver->cd_name
-#else
-#define	tulip_xname			tulip_if.if_xname
-#endif
 
-#if NBPFILTER > 0
-#define	TULIP_BPF_MTAP(sc, m)	bpf_mtap((sc)->tulip_if.if_bpf, m)
-#define	TULIP_BPF_TAP(sc, p, l)	bpf_tap((sc)->tulip_if.if_bpf, p, l)
-#define	TULIP_BPF_ATTACH(sc)
-#endif
-#define	TULIP_RAISESPL()		splnet()
-#define	TULIP_RAISESOFTSPL()		splsoftnet()
-#define	TULIP_RESTORESPL(s)		splx(s)
-#define	loudprintf			printf
-
-#if !defined(__OpenBSD__)
-#define	tulip_if			tulip_ec.ec_if
-#define	tulip_enaddr			tulip_enaddr
-#define	tulip_multicnt			tulip_ec.ec_multicnt
-#define	TULIP_ETHERCOM(sc)		(&(sc)->tulip_ec)
-#define	TULIP_ARP_IFINIT(sc, ifa)	arp_ifinit(&(sc)->tulip_if, (ifa))
-#define	TULIP_ETHER_IFATTACH(sc)	ether_ifattach(&(sc)->tulip_if, (sc)->tulip_enaddr)
-#define	TULIP_PRINTF_FMT		"%s"
-#define	TULIP_PRINTF_ARGS		sc->tulip_xname
-#else
 #define	TULIP_PRINTF_FMT		"%s%d"
 #define	TULIP_PRINTF_ARGS		sc->tulip_xname, sc->tulip_unit
-#endif
-#endif	/* __NetBSD__ */
 
-#if defined(__alpha__)
-/* XXX XXX NEED REAL DMA MAPPING SUPPORT XXX XXX */
-#define TULIP_KVATOPHYS(sc, va)		alpha_XXX_dmamap((vm_offset_t)(va))
-#endif
-
-#ifndef TULIP_PRINTF_FMT
-#define	TULIP_PRINTF_FMT		"%s%d"
-#endif
-#ifndef TULIP_PRINTF_ARGS
-#define	TULIP_PRINTF_ARGS		sc->tulip_name, sc->tulip_unit
-#endif
-
-#ifndef TULIP_BURSTSIZE
 #define	TULIP_BURSTSIZE(unit)		3
-#endif
 
-#ifndef	tulip_if
 #define	tulip_if	tulip_ac.ac_if
-#endif
-#ifndef tulip_unit
-#define	tulip_unit	tulip_if.if_unit
-#endif
 #define	tulip_name	tulip_if.if_name
-#ifndef tulip_enaddr
 #define	tulip_enaddr	tulip_ac.ac_enaddr
-#endif
-#ifndef tulip_multicnt
 #define	tulip_multicnt	tulip_ac.ac_multicnt
-#endif
 
-#if !defined(TULIP_ETHERCOM)
-#define	TULIP_ETHERCOM(sc)		(&(sc)->tulip_ac)
-#endif
-
-#if !defined(TULIP_ARP_IFINIT)
-#define	TULIP_ARP_IFINIT(sc, ifa)	arp_ifinit(TULIP_ETHERCOM(sc), (ifa))
-#endif
-
-#if !defined(TULIP_ETHER_IFATTACH)
-#define	TULIP_ETHER_IFATTACH(sc)	ether_ifattach(&(sc)->tulip_if)
-#endif
-
-#if !defined(tulip_bpf) && (!defined(__bsdi__) || _BSDI_VERSION >= 199401)
 #define	tulip_bpf	tulip_if.if_bpf
-#endif
 
-#if !defined(tulip_intrfunc_t)
 #define	tulip_intrfunc_t	int
-#endif
-
-#if !defined(TULIP_KVATOPHYS)
-#define	TULIP_KVATOPHYS(sc, va)	vtophys((vaddr_t)va)
-#endif
-
-#ifndef TULIP_RAISESPL
-#define	TULIP_RAISESPL()		splimp()
-#endif
-#ifndef TULIP_RAISESOFTSPL
-#define	TULIP_RAISESOFTSPL()		splnet()
-#endif
-#ifndef TULUP_RESTORESPL
-#define	TULIP_RESTORESPL(s)		splx(s)
-#endif
-
-/*
- * While I think FreeBSD's 2.2 change to the bpf is a nice simplification,
- * it does add yet more conditional code to this driver.  Sigh.
- */
-#if !defined(TULIP_BPF_MTAP) && NBPFILTER > 0
-#define	TULIP_BPF_MTAP(sc, m)	bpf_mtap((sc)->tulip_bpf, m)
-#define	TULIP_BPF_TAP(sc, p, l)	bpf_tap((sc)->tulip_bpf, p, l)
-#define	TULIP_BPF_ATTACH(sc)	bpfattach(&(sc)->tulip_bpf, &(sc)->tulip_if, DLT_EN10MB, sizeof(struct ether_header))
-#endif
 
 #if defined(TULIP_PERFSTATS)
 #define	TULIP_PERFMERGE(sc, member) \
@@ -1063,7 +832,7 @@ extern struct cfdriver de_cd;
 #define	TULIP_PERFSTART(name) const tulip_cycle_t perfstart_ ## name = TULIP_PERFREAD();
 #define	TULIP_PERFEND(name)	do { \
 	    (sc)->tulip_curperfstats.perf_ ## name ## _cycles += TULIP_PERFDIFF(perfstart_ ## name, TULIP_PERFREAD()); \
-	    (sc)->tulip_curperfstats.perf_ ## name ++; \
+	    (sc)->tulip_curperfstats.perf_ ## name++; \
 	} while (0)
 #if defined(__i386__)
 typedef u_quad_t tulip_cycle_t;
@@ -1094,15 +863,6 @@ TULIP_PERFREAD(
 #define	TULIP_PERFMERGE(s,n)	do { } while (0)
 #endif /* TULIP_PERFSTATS */
 
-/*
- * However, this change to FreeBSD I am much less enamored with.
- */
-#if !defined(TULIP_EADDR_FMT)
-#define	TULIP_EADDR_FMT		"%s"
-#define	TULIP_EADDR_ARGS(addr)	ether_sprintf(addr)
-#endif
-
-#define	TULIP_CRC32_POLY	0xEDB88320UL	/* CRC-32 Poly -- Little Endian */
 #define	TULIP_MAX_TXSEG		30
 
 #define	TULIP_ADDREQUAL(a1, a2) \
@@ -1114,6 +874,5 @@ TULIP_PERFREAD(
 	 && ((u_int16_t *)a1)[1] == 0xFFFFU \
 	 && ((u_int16_t *)a1)[2] == 0xFFFFU)
 
-typedef int tulip_spl_t;
-
-#endif /* !defined(_DEVAR_H) */
+#define TULIP_GETCTX(m, t)	((t) (m)->m_pkthdr.rcvif + 0)
+#define TULIP_SETCTX(m, c)	((void) ((m)->m_pkthdr.rcvif = (void *) (c)))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_conf.c,v 1.27 2005/05/27 00:58:24 pedro Exp $	*/
+/*	$OpenBSD: vfs_conf.c,v 1.29 2005/12/06 20:18:57 pedro Exp $	*/
 /*	$NetBSD: vfs_conf.c,v 1.21.4.1 1995/11/01 00:06:26 jtc Exp $	*/
 
 /*
@@ -100,16 +100,8 @@ extern	const struct vfsops msdosfs_vfsops;
 extern	const struct vfsops nfs_vfsops;
 #endif
 
-#ifdef FDESC
-extern	const struct vfsops fdesc_vfsops;
-#endif
-
 #ifdef PORTAL
 extern	const struct vfsops portal_vfsops;
-#endif
-
-#ifdef KERNFS
-extern	const struct vfsops kernfs_vfsops;
 #endif
 
 #ifdef PROCFS
@@ -198,16 +190,6 @@ static struct vfsconf vfsconflist[] = {
         { &portal_vfsops, MOUNT_PORTAL, 8, 0, 0, NULL, NULL },
 #endif
 
-        /* File Descriptor Filesystem */
-#ifdef FDESC
-        { &fdesc_vfsops, MOUNT_FDESC, 7, 0, 0, NULL, NULL },
-#endif
-
-        /* Kernel Information Filesystem */
-#ifdef KERNFS
-        { &kernfs_vfsops, MOUNT_KERNFS, 11, 0, 0, NULL, NULL },
-#endif
-
 	/* NTFS Filesystem */
 #ifdef NTFS
 	{ &ntfs_vfsops, MOUNT_NTFS, 6, 0, MNT_LOCAL, NULL, NULL },
@@ -248,9 +230,7 @@ extern struct vnodeopv_desc spec_vnodeop_opv_desc;
 extern struct vnodeopv_desc nfsv2_vnodeop_opv_desc;
 extern struct vnodeopv_desc spec_nfsv2nodeop_opv_desc;
 extern struct vnodeopv_desc fifo_nfsv2nodeop_opv_desc;
-extern struct vnodeopv_desc fdesc_vnodeop_opv_desc;
 extern struct vnodeopv_desc portal_vnodeop_opv_desc;
-extern struct vnodeopv_desc kernfs_vnodeop_opv_desc;
 extern struct vnodeopv_desc procfs_vnodeop_opv_desc;
 extern struct vnodeopv_desc cd9660_vnodeop_opv_desc;
 extern struct vnodeopv_desc cd9660_specop_opv_desc;
@@ -295,14 +275,8 @@ struct vnodeopv_desc *vfs_opv_descs[] = {
 	&fifo_nfsv2nodeop_opv_desc,
 #endif
 #endif
-#ifdef FDESC
-	&fdesc_vnodeop_opv_desc,
-#endif
 #ifdef PORTAL
 	&portal_vnodeop_opv_desc,
-#endif
-#ifdef KERNFS
-	&kernfs_vnodeop_opv_desc,
 #endif
 #ifdef PROCFS
 	&procfs_vnodeop_opv_desc,

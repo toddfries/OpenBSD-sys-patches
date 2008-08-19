@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.59 2005/07/31 15:38:12 miod Exp $ */
+/*	$OpenBSD: trap.c,v 1.62 2006/01/30 21:26:19 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -344,15 +344,6 @@ copyfault:
 		break;
 
 	case T_FPERR|T_USER:	/* 68881 exceptions */
-		/*
-		 * We pass along the 68881 status register which locore stashed
-		 * in code for us.  Note that there is a possibility that the
-		 * bit pattern of this register will conflict with one of the
-		 * FPE_* codes defined in signal.h.  Fortunately for us, the
-		 * only such codes we use are all in the range 1-7 and the low
-		 * 3 bits of the status register are defined as 0 so there is
-		 * no clash.
-		 */
 		typ = FPE_FLTRES;
 		ucode = code;
 		i = SIGFPE;
@@ -526,105 +517,105 @@ copyfault:
 
 	case T_MMUFLT:		/* kernel mode page fault */
 	case T_MMUFLT|T_USER:	/* page fault */
-		{
-			vm_offset_t va;
-			struct vmspace *vm = NULL;
-			struct vm_map *map;
-			int rv;
-			vm_prot_t ftype, vftype;
-			extern struct vm_map *kernel_map;
+	    {
+		vaddr_t va;
+		struct vmspace *vm = NULL;
+		struct vm_map *map;
+		int rv;
+		vm_prot_t ftype, vftype;
+		extern struct vm_map *kernel_map;
 
-			/* vmspace only significant if T_USER */
-			if (p)
-				vm = p->p_vmspace;
+		/* vmspace only significant if T_USER */
+		if (p)
+			vm = p->p_vmspace;
 
 #ifdef DEBUG
-			if ((mmudebug & MDB_WBFOLLOW) || MDB_ISPID(p->p_pid))
-				printf("trap: T_MMUFLT pid=%d, code=%x, v=%x, pc=%x, sr=%x\n",
-				    p->p_pid, code, v, frame.f_pc, frame.f_sr);
+		if ((mmudebug & MDB_WBFOLLOW) || MDB_ISPID(p->p_pid))
+			printf("trap: T_MMUFLT pid=%d, code=%x, v=%x, pc=%x, sr=%x\n",
+			    p->p_pid, code, v, frame.f_pc, frame.f_sr);
 #endif
-			/*
-			 * It is only a kernel address space fault iff:
-			 * 	1. (type & T_USER) == 0  and
-			 * 	2. pcb_onfault not set or
-			 *	3. pcb_onfault set but supervisor space data fault
-			 * The last can occur during an exec() copyin where the
-			 * argument space is lazy-allocated.
-			 */
-			if (type == T_MMUFLT &&
-			    ((p && !p->p_addr->u_pcb.pcb_onfault) || KDFAULT(code)))
-				map = kernel_map;
-			else
-				map = vm ? &vm->vm_map : kernel_map;
-			if (WRFAULT(code)) {
-				vftype = VM_PROT_WRITE;
-				ftype = VM_PROT_READ | VM_PROT_WRITE;
-			} else
-				vftype = ftype = VM_PROT_READ;
-			va = trunc_page((vm_offset_t)v);
+		/*
+		 * It is only a kernel address space fault iff:
+		 * 	1. (type & T_USER) == 0  and
+		 * 	2. pcb_onfault not set or
+		 *	3. pcb_onfault set but supervisor space data fault
+		 * The last can occur during an exec() copyin where the
+		 * argument space is lazy-allocated.
+		 */
+		if (type == T_MMUFLT &&
+		    ((p && !p->p_addr->u_pcb.pcb_onfault) || KDFAULT(code)))
+			map = kernel_map;
+		else
+			map = vm ? &vm->vm_map : kernel_map;
+		if (WRFAULT(code)) {
+			vftype = VM_PROT_WRITE;
+			ftype = VM_PROT_READ | VM_PROT_WRITE;
+		} else
+			vftype = ftype = VM_PROT_READ;
+		va = trunc_page((vaddr_t)v);
 
-			if (map == kernel_map && va == 0) {
-				printf("trap: bad kernel access at %x\n", v);
-				goto dopanic;
-			}
-#ifdef COMPAT_HPUX
-			if (ISHPMMADDR(va)) {
-				vm_offset_t bva;
-
-				rv = pmap_mapmulti(map->pmap, va);
-				if (rv) {
-					bva = HPMMBASEADDR(va);
-					rv = uvm_fault(map, bva, 0, ftype);
-					if (rv == 0)
-						(void) pmap_mapmulti(map->pmap, va);
-				}
-			} else
-#endif
-			rv = uvm_fault(map, va, 0, ftype);
-#ifdef DEBUG
-			if (rv && MDB_ISPID(p->p_pid))
-				printf("uvm_fault(%x, %x, 0, %x) -> %x\n",
-					 map, va, ftype, rv);
-#endif
-			/*
-			 * If this was a stack access we keep track of the maximum
-			 * accessed stack size.  Also, if vm_fault gets a protection
-			 * failure it is due to accessing the stack region outside
-			 * the current limit and we need to reflect that as an access
-			 * error.
-			 */
-			if ((vm != NULL && (caddr_t)va >= vm->vm_maxsaddr)
-			    && map != kernel_map) {
-				if (rv == 0)
-					uvm_grow(p, va);
-				else if (rv == EACCES)
-					rv = EFAULT;
-			}
-			if (rv == 0) {
-				if (type == T_MMUFLT) {
-#if defined(M68040)
-					if (mmutype == MMU_68040)
-						(void) writeback(&frame, 1);
-#endif
-					return;
-				}
-				goto out;
-			}
-			if (type == T_MMUFLT) {
-				if (p && p->p_addr->u_pcb.pcb_onfault)
-					goto copyfault;
-				printf("uvm_fault(%p, %lx, 0, %x) -> %x\n",
-					 map, va, ftype, rv);
-				printf("  type %x, code [mmu,,ssw]: %x\n",
-					 type, code);
-				goto dopanic;
-			}
-			frame.f_pad = code & 0xffff;
-			ucode = vftype;
-			typ = SEGV_MAPERR;
-			i = SIGSEGV;
-			break;
+		if (map == kernel_map && va == 0) {
+			printf("trap: bad kernel access at %x\n", v);
+			goto dopanic;
 		}
+#ifdef COMPAT_HPUX
+		if (ISHPMMADDR(p, va)) {
+			vaddr_t bva;
+
+			rv = pmap_mapmulti(map->pmap, va);
+			if (rv) {
+				bva = HPMMBASEADDR(va);
+				rv = uvm_fault(map, bva, 0, ftype);
+				if (rv == 0)
+					(void)pmap_mapmulti(map->pmap, va);
+			}
+		} else
+#endif
+		rv = uvm_fault(map, va, 0, ftype);
+#ifdef DEBUG
+		if (rv && MDB_ISPID(p->p_pid))
+			printf("uvm_fault(%x, %x, 0, %x) -> %x\n",
+				 map, va, ftype, rv);
+#endif
+		/*
+		 * If this was a stack access we keep track of the maximum
+		 * accessed stack size.  Also, if vm_fault gets a protection
+		 * failure it is due to accessing the stack region outside
+		 * the current limit and we need to reflect that as an access
+		 * error.
+		 */
+		if ((vm != NULL && (caddr_t)va >= vm->vm_maxsaddr)
+		    && map != kernel_map) {
+			if (rv == 0)
+				uvm_grow(p, va);
+			else if (rv == EACCES)
+				rv = EFAULT;
+		}
+		if (rv == 0) {
+			if (type == T_MMUFLT) {
+#if defined(M68040)
+				if (mmutype == MMU_68040)
+					(void) writeback(&frame, 1);
+#endif
+				return;
+			}
+			goto out;
+		}
+		if (type == T_MMUFLT) {
+			if (p && p->p_addr->u_pcb.pcb_onfault)
+				goto copyfault;
+			printf("uvm_fault(%p, %lx, 0, %x) -> %x\n",
+				 map, va, ftype, rv);
+			printf("  type %x, code [mmu,,ssw]: %x\n",
+				 type, code);
+			goto dopanic;
+		}
+		frame.f_pad = code & 0xffff;
+		ucode = vftype;
+		typ = SEGV_MAPERR;
+		i = SIGSEGV;
+	    }
+		break;
 	}
 	sv.sival_int = v;
 	trapsignal(p, i, ucode, typ, sv);
@@ -700,15 +691,15 @@ writeback(fp, docachepush)
 		if (docachepush) {
 			paddr_t pa;
 
-			pmap_enter(pmap_kernel(), (vm_offset_t)vmmap,
+			pmap_enter(pmap_kernel(), (vaddr_t)vmmap,
 						  trunc_page(f->f_fa), VM_PROT_WRITE, VM_PROT_WRITE|PMAP_WIRED);
 			pmap_update(pmap_kernel());
 			fa = (u_int)&vmmap[(f->f_fa & PGOFSET) & ~0xF];
 			bcopy((caddr_t)&f->f_pd0, (caddr_t)fa, 16);
-			pmap_extract(pmap_kernel(), (vm_offset_t)fa, &pa);
+			pmap_extract(pmap_kernel(), (vaddr_t)fa, &pa);
 			DCFL(pa);
-			pmap_remove(pmap_kernel(), (vm_offset_t)vmmap,
-							(vm_offset_t)&vmmap[NBPG]);
+			pmap_remove(pmap_kernel(), (vaddr_t)vmmap,
+							(vaddr_t)&vmmap[NBPG]);
 			pmap_update(pmap_kernel());
 		} else
 			printf("WARNING: pid %d(%s) uid %u: CPUSH not done\n",
@@ -953,14 +944,14 @@ dumpwb(num, s, a, d)
 	u_int a, d;
 {
 	register struct proc *p = curproc;
-	vm_offset_t pa;
+	paddr_t pa;
 	int tmp;
 
 	printf(" writeback #%d: VA %x, data %x, SZ=%s, TT=%s, TM=%s\n",
 			 num, a, d, f7sz[(s & SSW4_SZMASK) >> 5],
 			 f7tt[(s & SSW4_TTMASK) >> 3], f7tm[s & SSW4_TMMASK]);
 	printf("	       PA ");
-	if (pmap_extract(p->p_vmspace->vm_map.pmap, (vm_offset_t)a, &pa) == FALSE)
+	if (pmap_extract(p->p_vmspace->vm_map.pmap, (vaddr_t)a, &pa) == FALSE)
 		printf("<invalid address>");
 	else {
 		if (copyin((caddr_t)a, &tmp, sizeof(int)) == 0)

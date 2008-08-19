@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.165 2005/04/30 16:42:37 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.176 2005/12/11 21:45:31 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -66,15 +66,12 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
-#include <net/netisr.h>
-
 #include <machine/asm.h>
 #include <machine/asm_macro.h>
 #include <machine/bug.h>
 #include <machine/bugio.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/cpu_number.h>
 #include <machine/kcore.h>
 #include <machine/locore.h>
 #include <machine/reg.h>
@@ -96,24 +93,19 @@ typedef struct {
 } m88k_exception_vector_area;
 
 caddr_t	allocsys(caddr_t);
-void	bugsyscall(void);
 void	consinit(void);
-void	dosoftint(void);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(struct mvmeprom_brdid *);
-vaddr_t	get_slave_stack(void);
 void	identifycpu(void);
 void	mvme_bootstrap(void);
 void	savectx(struct pcb *);
+void	secondary_main(void);
+void	secondary_pre_main(void);
 void	setupiackvectors(void);
-void	slave_pre_main(void);
-int	slave_main(void);
 void	vector_init(m88k_exception_vector_area *, unsigned *);
 void	_doboot(void);
 
-extern void load_u_area(struct proc *);
-extern void save_u_area(struct proc *, vaddr_t);
 extern void setlevel(unsigned int);
 
 extern void m187_bootstrap(void);
@@ -130,7 +122,6 @@ extern void m197_setupiackvectors(void);
 extern void m197_startup(void);
 
 intrhand_t intr_handlers[NVMEINTR];
-vaddr_t interrupt_stack[MAX_CPUS];
 
 /* board dependent pointers */
 void (*md_interrupt_func_ptr)(u_int, struct trapframe *);
@@ -139,11 +130,11 @@ u_int (*md_getipl)(void);
 u_int (*md_setipl)(u_int);
 u_int (*md_raiseipl)(u_int);
 
+#ifdef MVME188
+volatile u_int8_t *ivec[8 + 1];
+#else
 volatile u_int8_t *ivec[8];
-
-int ssir;
-int want_ast;
-int want_resched;
+#endif
 
 int physmem;	  /* available physical memory, in pages */
 
@@ -161,6 +152,10 @@ vaddr_t iomapbase;
 
 struct extent *iomap_extent;
 struct vm_map *iomap_map;
+
+#ifdef MULTIPROCESSOR
+__cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
+#endif
 
 /*
  * Declare these as initialized data so we can patch them.
@@ -205,7 +200,6 @@ vaddr_t last_addr;
 vaddr_t avail_start, avail_end;
 vaddr_t virtual_avail, virtual_end;
 
-extern struct pcb *curpcb;
 extern struct user *proc0paddr;
 
 /*
@@ -338,7 +332,7 @@ identifycpu()
 
 /*
  * Set up real-time clocks.
- * These function pointers are set in dev/clock.c and dev/sclock.c
+ * These function pointers are set in dev/clock.c.
  */
 void
 cpu_initclocks()
@@ -360,7 +354,7 @@ cpu_startup()
 	int sz, i;
 	vsize_t size;
 	int base, residual;
-	vaddr_t minaddr, maxaddr, uarea_pages;
+	vaddr_t minaddr, maxaddr;
 
 	/*
 	 * Initialize error message buffer (at end of core).
@@ -389,17 +383,6 @@ cpu_startup()
 		panic("startup: no room for tables");
 	if (allocsys(v) - v != sz)
 		panic("startup: table size inconsistency");
-
-	/*
-	 * Grab UADDR virtual address
-	 */
-	uarea_pages = UADDR;
-	uvm_map(kernel_map, (vaddr_t *)&uarea_pages, USPACE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
-	if (uarea_pages != UADDR)
-		panic("uarea_pages %lx: UADDR not free", uarea_pages);
 
 	/*
 	 * Grab machine dependent memory spaces
@@ -453,7 +436,7 @@ cpu_startup()
 		 * "base" pages for the rest.
 		 */
 		curbuf = (vaddr_t)buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
+		curbufsize = PAGE_SIZE * ((i < residual) ? (base + 1) : base);
 
 		while (curbufsize) {
 			pg = uvm_pagealloc(NULL, 0, NULL, 0);
@@ -578,7 +561,7 @@ allocsys(v)
 __dead void
 _doboot()
 {
-	cmmu_shutdown_now();
+	cmmu_shutdown();
 	bugreturn();
 	/*NOTREACHED*/
 	for (;;);		/* appease gcc */
@@ -626,10 +609,11 @@ haltsys:
 	doshutdownhooks();
 
 	if (howto & RB_HALT) {
-		printf("halted\n\n");
-	} else {
-		doboot();
+		printf("System halted. Press any key to reboot...\n\n");
+		cngetc();
 	}
+
+	doboot();
 
 	for (;;);
 	/*NOTREACHED*/
@@ -825,44 +809,64 @@ setupiackvectors()
 	}
 }
 
-/* gets an interrupt stack for slave processors */
-vaddr_t
-get_slave_stack()
+#ifdef MULTIPROCESSOR
+
+/*
+ * Secondary CPU early initialization routine.
+ * Determine CPU number and set it, then allocate the idle pcb (and stack).
+ *
+ * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
+ */
+void
+secondary_pre_main()
 {
-	vaddr_t addr;
+	struct cpu_info *ci;
 
-	addr = (vaddr_t)uvm_km_zalloc(kernel_map, INTSTACK_SIZE);
+	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
+	ci = curcpu();
+	ci->ci_curproc = &proc0;
 
-	if (addr == NULL)
-		panic("Cannot allocate slave stack for cpu %d",
-		    cpu_number());
+	splhigh();
 
-	interrupt_stack[cpu_number()] = addr;
-	return addr;
+	/*
+	 * Setup CMMUs and translation tables (shared with the master cpu).
+	 */
+	pmap_bootstrap_cpu(ci->ci_cpuid);
+
+	/*
+	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
+	 */
+	ci->ci_idle_pcb = (struct pcb *)uvm_km_zalloc(kernel_map, USPACE);
+	if (ci->ci_idle_pcb == NULL) {
+		printf("cpu%d: unable to allocate idle stack\n", ci->ci_cpuid);
+	}
 }
 
 /*
- * Slave CPU pre-main routine.
- * Determine CPU number and set it.
+ * Further secondary CPU initialization.
  *
- * Running on an interrupt stack here; do nothing fancy.
+ * We are now running on our idle stack, with proper page tables.
+ * There is nothing to do but display some details about the CPU and its CMMUs.
  */
 void
-slave_pre_main()
+secondary_main()
 {
-	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
-	splhigh();
-	set_psr(get_psr() & ~PSR_IND);
+	struct cpu_info *ci = curcpu();
+
+	cpu_configuration_print(0);
+	__cpu_simple_unlock(&cpu_mutex);
+
+	microuptime(&ci->ci_schedstate.spc_runtime);
+	ci->ci_curproc = NULL;
+
+	/*
+	 * Upon return, the secondary cpu bootstrap code in locore will
+	 * enter the idle loop, waiting for some food to process on this
+	 * processor.
+	 */
 }
 
-/* dummy main routine for slave processors */
-int
-slave_main()
-{
-	printf("slave CPU%d started\n", cpu_number());
-	while (1); /* spin forever */
-	return 0;
-}
+#endif	/* MULTIPROCESSOR */
 
 /*
  * Search for the first available interrupt vector in the range start, end.
@@ -987,11 +991,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 }
 
 void
-bugsyscall()
-{
-}
-
-void
 myetheraddr(cp)
 	u_char *cp;
 {
@@ -999,47 +998,6 @@ myetheraddr(cp)
 
 	bugbrdid(&brdid);
 	bcopy(&brdid.etheraddr, cp, 6);
-}
-
-int netisr;
-
-void
-dosoftint()
-{
-	if (ssir & SIR_NET) {
-		siroff(SIR_NET);
-		uvmexp.softs++;
-#define DONETISR(bit, fn) \
-	do { \
-		if (netisr & (1 << bit)) { \
-			netisr &= ~(1 << bit); \
-			fn(); \
-		} \
-	} while (0)
-#include <net/netisr_dispatch.h>
-#undef DONETISR
-	}
-
-	if (ssir & SIR_CLOCK) {
-		siroff(SIR_CLOCK);
-		uvmexp.softs++;
-		softclock();
-	}
-}
-
-int
-spl0()
-{
-	int x;
-	x = splsoftclock();
-
-	if (ssir) {
-		dosoftint();
-	}
-
-	setipl(0);
-
-	return (x);
 }
 
 /*
@@ -1051,18 +1009,10 @@ mvme_bootstrap()
 {
 	extern int kernelstart;
 	extern struct consdev *cn_tab;
-
 	struct mvmeprom_brdid brdid;
-
-	/*
-	 * Must initialize p_addr before autoconfig or
-	 * the fault handler will get a NULL reference.
-	 * Do this early so that we can take a data or
-	 * instruction fault and survive it.
-	 */
-	proc0.p_addr = proc0paddr;
-	curproc = &proc0;
-	curpcb = &proc0paddr->u_pcb;
+#ifndef MULTIPROCESSOR
+	cpuid_t master_cpu;
+#endif
 
 	buginit();
 	bugbrdid(&brdid);
@@ -1122,45 +1072,19 @@ mvme_bootstrap()
 	}
 	physmem = btoc(last_addr);
 
-	cmmu_parity_enable();
-
 	setup_board_config();
-	cmmu_init();
-	master_cpu = cmmu_cpu_number();
+	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
 
 	/*
-	 * If we have more than one CPU, mention which one is the master.
-	 * We will also want to spin up slave CPUs on the long run...
+	 * Now that set_cpu_number() set us with a valid cpu_info pointer,
+	 * we need to initialize p_addr and curpcb before autoconf, for the
+	 * fault handler to behave properly [except for badaddr() faults,
+	 * which can be taken care of without a valid curcpu()].
 	 */
-	switch (brdtyp) {
-#ifdef MVME188
-	case BRD_188:
-		printf("CPU%d is master CPU\n", master_cpu);
-
-#if 0
-		int i;
-		for (i = 0; i < MAX_CPUS; i++) {
-			if (!spin_cpu(i))
-				printf("CPU%d started\n", i);
-		}
-#endif
-		break;
-#endif
-#ifdef MVME197
-	case BRD_197:
-		/*
-		 * In the 197DP case, mention which CPU is the master
-		 * there too...
-		 * XXX TBD
-		 */
-		break;
-#endif
-#ifdef MVME187
-	default:
-		break;
-#endif
-	}
+	proc0.p_addr = proc0paddr;
+	curproc = &proc0;
+	curpcb = &proc0paddr->u_pcb;
 
 	avail_start = first_addr;
 	avail_end = last_addr;
@@ -1186,20 +1110,44 @@ mvme_bootstrap()
 	uvm_page_physload(atop(avail_start), atop(avail_end),
 	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
 
-	/* Initialize cached PTEs for u-area mapping. */
-	save_u_area(&proc0, (vaddr_t)proc0paddr);
-
-	/*
-	 * Map proc0's u-area at the standard address (UADDR).
-	 */
-	load_u_area(&proc0);
-
 	/* Initialize the "u-area" pages. */
-	bzero((caddr_t)UADDR, UPAGES * PAGE_SIZE);
+	bzero((caddr_t)curpcb, USPACE);
 #ifdef DEBUG
 	printf("leaving mvme_bootstrap()\n");
 #endif
 }
+
+#ifdef MULTIPROCESSOR
+void
+cpu_boot_secondary_processors()
+{
+	cpuid_t cpu;
+	int rc;
+	extern void secondary_start(void);
+
+	switch (brdtyp) {
+#if defined(MVME188) || defined(MVME197)
+#ifdef MVME188
+	case BRD_188:
+#endif
+#ifdef MVME197
+	case BRD_197:
+#endif
+		for (cpu = 0; cpu < max_cpus; cpu++) {
+			if (cpu != curcpu()->ci_cpuid) {
+				rc = spin_cpu(cpu, (vaddr_t)secondary_start);
+				if (rc != 0 && rc != FORKMPU_NO_MPU)
+					printf("cpu%d: spin_cpu error %d\n",
+					    cpu, rc);
+			}
+		}
+		break;
+#endif
+	default:
+		break;
+	}
+}
+#endif
 
 /*
  * Boot console routines:
@@ -1244,7 +1192,7 @@ bootcnputc(dev, c)
 #define NO_OP 		0xf4005800	/* "or r0, r0, r0" */
 
 #define BRANCH(FROM, TO) \
-	(EMPTY_BR | ((unsigned)(TO) - (unsigned)(FROM)) >> 2)
+	(EMPTY_BR | ((vaddr_t)(TO) - (vaddr_t)(FROM)) >> 2)
 
 #define SET_VECTOR(NUM, VALUE) \
 	do { \
@@ -1264,8 +1212,6 @@ vector_init(m88k_exception_vector_area *vector, unsigned *vector_init_list)
 {
 	unsigned num;
 	unsigned vec;
-	extern void bugtrap(void);
-	extern void m88110_bugtrap(void);
 
 	for (num = 0; (vec = vector_init_list[num]) != END_OF_VECTOR_LIST;
 	    num++) {
@@ -1287,7 +1233,6 @@ vector_init(m88k_exception_vector_area *vector, unsigned *vector_init_list)
 
 		SET_VECTOR(450, m88110_syscall_handler);
 		SET_VECTOR(451, m88110_cache_flush_handler);
-		SET_VECTOR(MVMEPROM_VECTOR, m88110_bugtrap);
 		SET_VECTOR(504, m88110_stepbpt);
 		SET_VECTOR(511, m88110_userbpt);
 	}
@@ -1302,7 +1247,6 @@ vector_init(m88k_exception_vector_area *vector, unsigned *vector_init_list)
 
 		SET_VECTOR(450, syscall_handler);
 		SET_VECTOR(451, cache_flush_handler);
-		SET_VECTOR(MVMEPROM_VECTOR, bugtrap);
 		SET_VECTOR(504, stepbpt);
 		SET_VECTOR(511, userbpt);
 	}

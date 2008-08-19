@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtwreg.h,v 1.7 2005/05/29 03:49:52 reyk Exp $	*/
+/*	$OpenBSD: rtwreg.h,v 1.13 2006/01/05 05:40:35 jsg Exp $	*/
 /*	$NetBSD: rtwreg.h,v 1.12 2005/01/16 11:50:43 dyoung Exp $	*/
 /*-
  * Copyright (c) 2004, 2005 David Young.  All rights reserved.
@@ -188,7 +188,7 @@
 #define	RTW_IMR		0x3c	/* Interrupt Mask Register, 16b */
 #define	RTW_ISR		0x3e	/* Interrupt status register, 16b */
 
-#define RTW_INTR_TXFOVW	BIT(15)		/* Tx FIFO Overflow */
+#define RTW_INTR_TXFOVW	BIT(15)		/* Tx FIFO underrflow */
 #define RTW_INTR_TIMEOUT	BIT(14)	/* Time Out: 1 indicates
 					 * RTW_TSFTR[0:31] = RTW_TINT
 					 */
@@ -231,7 +231,7 @@
 #define RTW_INTR_TX	(RTW_INTR_TLPDER|RTW_INTR_TLPDOK|RTW_INTR_THPDER|\
 			 RTW_INTR_THPDOK|RTW_INTR_TNPDER|RTW_INTR_TNPDOK|\
 			 RTW_INTR_TBDER|RTW_INTR_TBDOK)
-#define RTW_INTR_BEACON	(RTW_INTR_BCNINT)
+#define RTW_INTR_BEACON	(RTW_INTR_BCNINT|RTW_INTR_TBDER|RTW_INTR_TBDOK)
 #define RTW_INTR_IOERROR	(RTW_INTR_TXFOVW|RTW_INTR_RXFOVW|RTW_INTR_RDU)
 
 #define	RTW_TCR		0x40	/* Transmit Configuration Register, 32b */
@@ -471,7 +471,9 @@
 #define RTW_CONFIG2_PAPESIGN		BIT(2)		/* TBD, from EEPROM */
 #define RTW_CONFIG2_PAPETIME_MASK	BITS(1,0)	/* TBD, from EEPROM */
 
-#define	RTW_ANAPARM	0x54	/* Analog parameter, 32b */
+#define	RTW_ANAPARM_0		0x54	/* Analog parameter, 32b */
+#define RTW8185_ANAPARM_1	0x60
+
 #define RTW_ANAPARM_RFPOW0_MASK	BITS(30,28)		/* undocumented bits
 							 * which appear to
 							 * control the power
@@ -715,6 +717,9 @@
 #define RTW8185_RFPINSENABLE		0x82
 #define RTW8185_RFPINSENABLE_ENABLE	0x0007
 
+#define RTW8185_INSSELECT		0x84
+#define RTW8185_SW_GPIO			0x400
+
 #define	RTW_MAXIM_HIDATA_MASK			BITS(11,4)
 #define	RTW_MAXIM_LODATA_MASK			BITS(3,0)
 
@@ -878,6 +883,8 @@
 /* Start all queues. */
 #define	RTW_TPPOLL_ALL	(RTW_TPPOLL_BQ | RTW_TPPOLL_HPQ | \
 			 RTW_TPPOLL_NPQ | RTW_TPPOLL_LPQ)
+/* Check all queues' activity. */
+#define RTW_TPPOLL_ACTIVE	 RTW_TPPOLL_ALL
 /* Stop all queues. */
 #define	RTW_TPPOLL_SALL	(RTW_TPPOLL_SBQ | RTW_TPPOLL_SHPQ | \
 			 RTW_TPPOLL_SNPQ | RTW_TPPOLL_SLPQ)
@@ -1113,22 +1120,22 @@ struct rtw_rxdesc {
 #define RTW_RXRSSI_SQ		BITS(7,0)	/* Barker code-lock quality */
 
 #define RTW_READ8(regs, ofs)						\
-	bus_space_read_1((regs)->r_bt, (regs)->r_bh, (ofs))
+	((*(regs)->r_read8)(regs, ofs))
 
 #define RTW_READ16(regs, ofs)						\
-	bus_space_read_2((regs)->r_bt, (regs)->r_bh, (ofs))
+	((*(regs)->r_read16)(regs, ofs))
 
 #define RTW_READ(regs, ofs)						\
-	bus_space_read_4((regs)->r_bt, (regs)->r_bh, (ofs))
+	((*(regs)->r_read32)(regs, ofs))
 
 #define RTW_WRITE8(regs, ofs, val)					\
-	bus_space_write_1((regs)->r_bt, (regs)->r_bh, (ofs), (val))
+	((*(regs)->r_write8)(regs, ofs, val))
 
 #define RTW_WRITE16(regs, ofs, val)					\
-	bus_space_write_2((regs)->r_bt, (regs)->r_bh, (ofs), (val))
+	((*(regs)->r_write16)(regs, ofs, val))
 
 #define RTW_WRITE(regs, ofs, val)					\
-	bus_space_write_4((regs)->r_bt, (regs)->r_bh, (ofs), (val))
+	((*(regs)->r_write32)(regs, ofs, val))
 
 #define	RTW_ISSET(regs, reg, mask)					\
 	(RTW_READ((regs), (reg)) & (mask))
@@ -1165,8 +1172,7 @@ struct rtw_rxdesc {
  * acceptable bus_space_barrier(9) for the flag definitions.
  */
 #define RTW_BARRIER(regs, reg0, reg1, flags)			\
-	bus_space_barrier((regs)->r_bh, (regs)->r_bt,		\
-	    MIN(reg0, reg1), MAX(reg0, reg1) - MIN(reg0, reg1) + 4, flags)
+	((*(regs)->r_barrier)(regs, reg0, reg1, flags))
 
 /*
  * Barrier convenience macros.
@@ -1216,6 +1222,7 @@ struct rtw_rxdesc {
 #define RTW_BBP_ANTATTEN_PHILIPS_MAGIC		0x91
 #define RTW_BBP_ANTATTEN_INTERSIL_MAGIC		0x92
 #define RTW_BBP_ANTATTEN_RFMD_MAGIC		0x93
+#define RTW_BBP_ANTATTEN_GCT_MAGIC		0xa3
 #define RTW_BBP_ANTATTEN_MAXIM_MAGIC		0xb3
 #define	RTW_BBP_ANTATTEN_DFLANTB		0x40
 #define	RTW_BBP_ANTATTEN_CHAN14			0x0c

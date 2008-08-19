@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.124 2005/07/18 11:43:14 tom Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.128 2006/01/01 11:54:31 miod Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -100,7 +100,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2005 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2006 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -178,8 +178,7 @@ struct emul emul_native = {
  */
 /* XXX return int, so gcc -Werror won't complain */
 int
-main(framep)
-	void *framep;				/* XXX should go away */
+main(void *framep)
 {
 	struct proc *p;
 	struct pdevinit *pdev;
@@ -270,6 +269,9 @@ main(framep)
 	pgrp0.pg_session = &session0;
 	session0.s_count = 1;
 	session0.s_leader = p;
+
+	p->p_thrparent = p;
+	LIST_INIT(&p->p_thrchildren);
 
 	p->p_flag = P_INMEM | P_SYSTEM | P_NOCLDWAIT;
 	p->p_stat = SONPROC;
@@ -538,8 +540,7 @@ static char *initpaths[] = {
 };
 
 void
-check_console(p)
-	struct proc *p;
+check_console(struct proc *p)
 {
 	struct nameidata nd;
 	int error;
@@ -560,8 +561,7 @@ check_console(p)
  * The program is invoked with one argument containing the boot flags.
  */
 void
-start_init(arg)
-	void *arg;
+start_init(void *arg)
 {
 	struct proc *p = arg;
 	vaddr_t addr;
@@ -697,24 +697,21 @@ start_init(arg)
 }
 
 void
-start_update(arg)
-	void *arg;
+start_update(void *arg)
 {
 	sched_sync(curproc);
 	/* NOTREACHED */
 }
 
 void
-start_cleaner(arg)
-	void *arg;
+start_cleaner(void *arg)
 {
 	buf_daemon(curproc);
 	/* NOTREACHED */
 }
 
 void
-start_reaper(arg)
-	void *arg;
+start_reaper(void *arg)
 {
 	reaper();
 	/* NOTREACHED */
@@ -722,8 +719,7 @@ start_reaper(arg)
 
 #ifdef CRYPTO
 void
-start_crypto(arg)
-	void *arg;
+start_crypto(void *arg)
 {
 	crypto_thread();
 	/* NOTREACHED */

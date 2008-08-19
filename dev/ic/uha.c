@@ -1,4 +1,4 @@
-/*	$OpenBSD: uha.c,v 1.6 2005/02/17 18:07:36 jfb Exp $	*/
+/*	$OpenBSD: uha.c,v 1.8 2005/12/03 16:53:16 krw Exp $	*/
 /*	$NetBSD: uha.c,v 1.3 1996/10/13 01:37:29 christos Exp $	*/
 
 #undef UHADEBUG
@@ -84,7 +84,7 @@
 #define Debugger() panic("should call debugger here (ultra14f.c)")
 #endif /* ! DDB */
 
-#define KVTOPHYS(x)	vtophys(x)
+#define KVTOPHYS(x)	vtophys((vaddr_t)x)
 
 integrate void uha_reset_mscp(struct uha_softc *, struct uha_mscp *);
 void uha_free_mscp(struct uha_softc *, struct uha_mscp *);
@@ -376,7 +376,6 @@ uha_scsi_cmd(xs)
 	 */
 	flags = xs->flags;
 	if ((mscp = uha_get_mscp(sc, flags)) == NULL) {
-		xs->error = XS_DRIVER_STUFFUP;
 		return (TRY_AGAIN_LATER);
 	}
 	mscp->xs = xs;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.10 2003/10/30 03:17:32 itojun Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.14 2005/10/31 06:14:53 drahn Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Carnegie-Mellon University.
@@ -73,7 +73,15 @@ mbattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mainbus_softc *sc = (struct mainbus_softc *)self;
 	struct confargs nca;
-	extern int system_type;
+	char name[64];
+	int node, len;
+
+	node = OF_peer(0);
+	len = OF_getprop(node, "model", name, sizeof(name));
+	if (len > 1) {
+		name[len] = '\0';
+		printf(": model %s", name);
+	}
 
 	printf("\n");
 
@@ -93,52 +101,46 @@ mbattach(struct device *parent, struct device *self, void *aux)
 	config_found(self, &nca, mbprint);
 
 	/* Set up Openfirmware.*/
-	if (system_type != POWER4e) { /* for now */
+	{ /* legacy? */
 		nca.ca_name = "ofroot";
 		nca.ca_bus = &sc->sc_bus;
 		config_found(self, &nca, mbprint);
 	}
 
-	/* The following machines have an ISA bus */
-	/* Do ISA first so the interrupt controller is set up! */
-	if (system_type == POWER4e) {
-		nca.ca_name = "isabr";
-		nca.ca_bus = &sc->sc_bus;
-		config_found(self, &nca, mbprint);
-	}
-
-	/* The following machines have a PCI bus */
-	if (system_type == APPL) {
-		char name[32];
-		int node;
-		for (node = OF_child(OF_peer(0)); node; node=OF_peer(node)) {
-			bzero (name, sizeof(name));
-			if (OF_getprop(node, "device_type", name,
-			    sizeof(name)) <= 0) {
-				if (OF_getprop(node, "name", name,
-				    sizeof(name)) <= 0)
-					printf ("name not found on node %x\n",
-					    node);
-					continue;
-			}
-			if (strcmp(name, "memory-controller") == 0) {
-				nca.ca_name = "memc";
-				nca.ca_node = node;
-				nca.ca_bus = &sc->sc_bus;
-				config_found(self, &nca, mbprint);
-			}
-			if (strcmp(name, "pci") == 0) {
-				nca.ca_name = "mpcpcibr";
-				nca.ca_node = node;
-				nca.ca_bus = &sc->sc_bus;
-				config_found(self, &nca, mbprint);
-			}
+	for (node = OF_child(OF_peer(0)); node; node=OF_peer(node)) {
+		bzero (name, sizeof(name));
+		if (OF_getprop(node, "device_type", name,
+		    sizeof(name)) <= 0) {
+			if (OF_getprop(node, "name", name,
+			    sizeof(name)) <= 0)
+				printf ("name not found on node %x\n",
+				    node);
+				continue;
 		}
-	} else if (system_type != OFWMACH) {
-		nca.ca_name = "mpcpcibr";
-		nca.ca_bus = &sc->sc_bus;
-		nca.ca_node = OF_finddevice("/pci");
-		config_found(self, &nca, mbprint);
+		if (strcmp(name, "memory-controller") == 0) {
+			nca.ca_name = "memc";
+			nca.ca_node = node;
+			nca.ca_bus = &sc->sc_bus;
+			config_found(self, &nca, mbprint);
+		}
+		if (strcmp(name, "pci") == 0) {
+			nca.ca_name = "mpcpcibr";
+			nca.ca_node = node;
+			nca.ca_bus = &sc->sc_bus;
+			config_found(self, &nca, mbprint);
+		}
+		if (strcmp(name, "ht") == 0) {
+			nca.ca_name = "ht";
+			nca.ca_node = node;
+			nca.ca_bus = &sc->sc_bus;
+			config_found(self, &nca, mbprint);
+		}
+		if (strcmp(name, "smu") == 0) {
+			nca.ca_name = "smu";
+			nca.ca_node = node;
+			nca.ca_bus = &sc->sc_bus;
+			config_found(self, &nca, mbprint);
+		}
 	}
 }
 

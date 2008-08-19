@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.17 2005/06/02 20:09:39 tholo Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.23 2006/01/19 03:50:44 marco Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.21 1997/06/06 23:14:20 thorpej Exp $	*/
 
 /*
@@ -51,6 +51,8 @@
 #include "bios.h"
 #include "mpbios.h"
 #include "acpi.h"
+#include "ipmi.h"
+#include "esm.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
@@ -63,6 +65,14 @@
 #if NACPI > 0
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
+#endif
+
+#if NIPMI > 0
+#include <dev/ipmivar.h>
+#endif
+
+#if NESM > 0
+#include <arch/i386/i386/esmvar.h>
 #endif
 
 #if 0
@@ -97,6 +107,12 @@ union mainbus_attach_args {
 #if NACPI > 0
 	struct acpi_attach_args mba_aaa;
 #endif
+#if NIPMI > 0
+	struct ipmi_attach_args mba_iaa;
+#endif
+#if NESM > 0
+	struct esm_attach_args mba_eaa;
+#endif
 };
 
 /*
@@ -130,6 +146,14 @@ mainbus_attach(parent, self, aux)
 
 	printf("\n");
 
+#if NBIOS > 0
+	{
+		mba.mba_bios.bios_dev = "bios";
+		mba.mba_bios.bios_iot = I386_BUS_SPACE_IO;
+		mba.mba_bios.bios_memt = I386_BUS_SPACE_MEM;
+		config_found(self, &mba.mba_bios, mainbus_print);
+	}
+#endif
 #if NACPI > 0
 	{
 		memset(&mba.mba_aaa, 0, sizeof(mba.mba_aaa));
@@ -137,15 +161,18 @@ mainbus_attach(parent, self, aux)
 		mba.mba_aaa.aaa_iot = I386_BUS_SPACE_IO;
 		mba.mba_aaa.aaa_memt = I386_BUS_SPACE_MEM;
 
-		config_found(self, &mba.mba_aaa, mainbus_print);
+		if (acpi_probe(self, aux, &mba.mba_aaa))
+			config_found(self, &mba.mba_aaa, mainbus_print);
 	}
 #endif
-#if NBIOS > 0
+#if NIPMI > 0
 	{
-		mba.mba_bios.bios_dev = "bios";
-		mba.mba_bios.bios_iot = I386_BUS_SPACE_IO;
-		mba.mba_bios.bios_memt = I386_BUS_SPACE_MEM;
-		config_found(self, &mba.mba_bios, mainbus_print);
+		memset(&mba.mba_iaa, 0, sizeof(mba.mba_iaa));
+		mba.mba_iaa.iaa_name = "ipmi";
+		mba.mba_iaa.iaa_iot  = I386_BUS_SPACE_IO;
+		mba.mba_iaa.iaa_memt = I386_BUS_SPACE_MEM;
+		if (ipmi_probe(&mba.mba_iaa))
+			config_found(self, &mba.mba_iaa, mainbus_print);
 	}
 #endif
 
@@ -181,6 +208,17 @@ mainbus_attach(parent, self, aux)
 		printf ("%s: No MP configuration found.", self->dv_xname);
 #endif
 #endif
+#endif
+
+#if NESM > 0
+	{
+		memset(&mba.mba_eaa, 0, sizeof(mba.mba_eaa));
+		mba.mba_eaa.eaa_name = "esm";
+		mba.mba_eaa.eaa_iot  = I386_BUS_SPACE_IO;
+		mba.mba_eaa.eaa_memt = I386_BUS_SPACE_MEM;
+		if (esm_probe(&mba.mba_eaa))
+			config_found(self, &mba.mba_eaa, mainbus_print);
+	}
 #endif
 
 	/*

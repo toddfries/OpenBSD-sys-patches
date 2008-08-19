@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.3 2005/05/15 14:12:22 miod Exp $	*/
+/*	$OpenBSD: db_disasm.c,v 1.6 2005/12/02 20:01:33 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -48,6 +48,7 @@ static const char *condname[6] = {
 	"gt0 ", "eq0 ", "ge0 ", "lt0 ", "ne0 ", "le0 "
 };
 
+#ifdef M88100
 static const char *m88100_ctrlreg[64] = {
 	"cr0(PID)   ",
 	"cr1(PSR)   ",
@@ -86,7 +87,8 @@ static const char *m88100_ctrlreg[64] = {
 	"fcr62(FPSR)",
 	"fcr63(FPCR)"
 };
-
+#endif
+#ifdef M88110
 static const char *m88110_ctrlreg[64] = {
 	"cr0(PID)   ",
 	"cr1(PSR)   ",
@@ -104,11 +106,11 @@ static const char *m88110_ctrlreg[64] = {
 	NULL,
 	"cr14(RES1) ",
 	"cr15(RES2) ",
-	"cr16(SR0)  ",
-	"cr17(SR1)  ",
-	"cr18(SR2)  ",
-	"cr19(SR3)  ",
-	"cr20(SR4)  ",
+	"cr16(SRX)  ",
+	"cr17(SR0)  ",
+	"cr18(SR1)  ",
+	"cr19(SR2)  ",
+	"cr20(SR3)  ",
 	"fcr0(FPECR)",
 	NULL,
 	NULL,
@@ -145,6 +147,14 @@ static const char *m88110_ctrlreg[64] = {
 	"fcr62(FPSR)",
 	"fcr63(FPCR)"
 };
+#endif
+#if defined(M88100) && defined(M88110)
+#define	ctrlreg	(CPU_IS88100 ? m88100_ctrlreg : m88110_ctrlreg)
+#elif defined(M88100)
+#define	ctrlreg	m88100_ctrlreg
+#else
+#define	ctrlreg	m88110_ctrlreg
+#endif
 
 #define printval(x) \
 	do { \
@@ -202,14 +212,11 @@ ctrlregs(int inst, const char *opcode, long iadr)
 	db_printf("\t%s", opcode);
 
 	if (L6inst == 010 || L6inst == 011)
-		db_printf("\t\tr%-3d,%s", rd,
-		    CPU_IS88100 ? m88100_ctrlreg[creg] : m88110_ctrlreg[creg]);
+		db_printf("\t\tr%-3d,%s", rd, ctrlreg[creg]);
 	else if (L6inst == 020 || L6inst == 021)
-		db_printf("\t\tr%-3d,%s", rs1,
-		    CPU_IS88100 ? m88100_ctrlreg[creg] : m88110_ctrlreg[creg]);
+		db_printf("\t\tr%-3d,%s", rs1, ctrlreg[creg]);
 	else
-		db_printf("\t\tr%-3d,r%-3d,%s", rd, rs1,
-		    CPU_IS88100 ? m88100_ctrlreg[creg] : m88110_ctrlreg[creg]);
+		db_printf("\t\tr%-3d,r%-3d,%s", rd, rs1, ctrlreg[creg]);
 }
 
 void
@@ -437,7 +444,8 @@ immem(int inst, const char *opcode, long iadr)
 	int aryno = (inst >> 26) & 03;
 	char c = ' ';
 
-	if (!st_lda) {
+	switch (st_lda) {
+	case 0:
 		if (aryno == 0 || aryno == 01)
 			opcode = "xmem";
 		else
@@ -446,9 +454,10 @@ immem(int inst, const char *opcode, long iadr)
 			aryno = 03;
 		if (aryno != 01)
 			c = 'u';
-	} else {
-		if (st_lda == 01)
-			opcode = "ld";
+		break;
+	case 1:
+		opcode = "ld";
+		break;
 	}
 
 	db_printf("\t%s%s%c\t\tr%-3d,r%-3d,",
@@ -466,11 +475,11 @@ nimmem(int inst, const char *opcode, long iadr)
 	int rs2 = inst & 037;
 	int st_lda = (inst >> 12) & 03;
 	int aryno = (inst >> 10) & 03;
-	int user_bit = 0;
-	int signed_fg = 1;
-	char *user = "    ";
+	char c = ' ';
+	const char *user;
 
-	if (!st_lda) {
+	switch (st_lda) {
+	case 0:
 		if (aryno == 0 || aryno == 01)
 			opcode = "xmem";
 		else
@@ -478,28 +487,21 @@ nimmem(int inst, const char *opcode, long iadr)
 		if (aryno == 0)
 			aryno = 03;
 		if (aryno != 01)
-			signed_fg = 0;
-	} else {
-		if (st_lda == 01)
-			opcode = "ld";
+			c = 'u';
+		break;
+	case 1:
+		opcode = "ld";
+		break;
 	}
 
-	if (st_lda != 03) {
-		user_bit = (inst >> 8) & 01;
-		if (user_bit)
-			user = ".usr";
-	}
 
-	if (user_bit && signed_fg && aryno == 01)
-		db_printf("\t%s%s\tr%-3d,r%-3d", opcode, user, rd, rs1);
-	else {
-		if (user_bit && signed_fg)
-			db_printf("\t%s%s%s\tr%-3d,r%-3d",
-			    opcode, instwidth[aryno], user, rd, rs1);
-		else
-			db_printf("\t%s%su%s\tr%-3d,r%-3d",
-			    opcode, instwidth[aryno], user, rd, rs1);
-	}
+	if (st_lda != 03 && ((inst >> 8) & 01) != 0)
+		user = ".usr";
+	else
+		user = "    ";
+
+	db_printf("\t%s%s%c%s\tr%-3d,r%-3d",
+	    opcode, instwidth[aryno], c, user, rd, rs1);
 
 	if (scaled)
 		db_printf("[r%-3d]", rs2);
@@ -562,7 +564,7 @@ onimmed(int inst, const char *opcode, long iadr)
 }
 
 static const struct opdesc {
-	unsigned mask, match;
+	u_int mask, match;
 	void (*opfun)(int, const char *, long);
 	const char *farg;
 } opdecode[] = {
@@ -661,7 +663,7 @@ static const struct opdesc {
 };
 
 int
-m88k_print_instruction(unsigned iadr, long inst)
+m88k_print_instruction(u_int iadr, long inst)
 {
 	const struct opdesc *p;
 

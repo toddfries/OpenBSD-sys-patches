@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.11 2005/07/26 08:38:29 art Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.14 2005/11/28 16:56:31 martin Exp $	*/
 /*	$NetBSD: pmap.c,v 1.3 2003/05/08 18:13:13 thorpej Exp $	*/
 
 /*
@@ -489,7 +489,7 @@ pmap_apte_flush(struct pmap *pmap)
 	 *
 	 * XXXthorpej -- find a way to defer the IPI.
 	 */
-	for (CPU_INFO_FOREACH(cii, ci)) {
+	CPU_INFO_FOREACH(cii, ci) {
 		if (ci == self)
 			continue;
 		if (pmap_is_active(pmap, ci->ci_cpuid)) {
@@ -747,7 +747,7 @@ pmap_bootstrap(vaddr_t kva_start, paddr_t max_pa)
 	kpm->pm_pdir = (pd_entry_t *)(proc0.p_addr->u_pcb.pcb_cr3 + KERNBASE);
 	kpm->pm_pdirpa = (u_int32_t) proc0.p_addr->u_pcb.pcb_cr3;
 	kpm->pm_stats.wired_count = kpm->pm_stats.resident_count =
-		btop(kva_start - VM_MIN_KERNEL_ADDRESS);
+		atop(kva_start - VM_MIN_KERNEL_ADDRESS);
 
 	/*
 	 * the above is just a rough estimate and not critical to the proper
@@ -1024,7 +1024,7 @@ pmap_init(void)
  *   pmap_remove_pv: remove a mappiing from a pv_head list
  *
  * NOTE: pmap_enter_pv expects to lock the pvh itself
- *       pmap_remove_pv expects te caller to lock the pvh before calling
+ *       pmap_remove_pv expects the caller to lock the pvh before calling
  */
 
 /*
@@ -1790,7 +1790,7 @@ pmap_remove_ptes(pmap, ptp, ptpva, startva, endva, cpumaskp, flags)
 
 		if ((opte & PG_PVLIST) == 0) {
 #ifdef DIAGNOSTIC
-			if (vm_physseg_find(btop(opte & PG_FRAME), &off)
+			if (vm_physseg_find(atop(opte & PG_FRAME), &off)
 			    != -1)
 				panic("pmap_remove_ptes: managed page without "
 				      "PG_PVLIST for 0x%lx", startva);
@@ -1798,7 +1798,7 @@ pmap_remove_ptes(pmap, ptp, ptpva, startva, endva, cpumaskp, flags)
 			continue;
 		}
 
-		bank = vm_physseg_find(btop(opte & PG_FRAME), &off);
+		bank = vm_physseg_find(atop(opte & PG_FRAME), &off);
 #ifdef DIAGNOSTIC
 		if (bank == -1)
 			panic("pmap_remove_ptes: unmanaged page marked "
@@ -1869,7 +1869,7 @@ pmap_remove_pte(pmap, ptp, pte, va, cpumaskp, flags)
 
 	if ((opte & PG_PVLIST) == 0) {
 #ifdef DIAGNOSTIC
-		if (vm_physseg_find(btop(opte & PG_FRAME), &off) != -1) {
+		if (vm_physseg_find(atop(opte & PG_FRAME), &off) != -1) {
 			panic("pmap_remove_pte: managed page without "
 			      "PG_PVLIST for 0x%lx", va);
 		}
@@ -1877,7 +1877,7 @@ pmap_remove_pte(pmap, ptp, pte, va, cpumaskp, flags)
 		return(TRUE);
 	}
 
-	bank = vm_physseg_find(btop(opte & PG_FRAME), &off);
+	bank = vm_physseg_find(atop(opte & PG_FRAME), &off);
 #ifdef DIAGNOSTIC
 	if (bank == -1)
 		panic("pmap_remove_pte: unmanaged page marked "
@@ -2348,7 +2348,7 @@ pmap_write_protect(pmap, sva, eva, prot)
 			pmap_pte_clearbits(spte, PG_RW);
 			pmap_pte_setbits(spte, nx);
 			if (opte != *spte)
-				pmap_tlb_shootdown(pmap, ptob(spte - ptes),
+				pmap_tlb_shootdown(pmap, ptoa(spte - ptes),
 				    *spte, &cpumask);
 		}
 	}
@@ -2759,7 +2759,7 @@ pmap_growkernel(maxkvaddr)
 	if (maxkvaddr <= pmap_maxkvaddr)
 		return pmap_maxkvaddr;
 
-	maxkvaddr = round_pdr(maxkvaddr);
+	maxkvaddr = x86_round_pdr(maxkvaddr);
 	old = nkptp[PTP_LEVELS - 1];
 	/*
 	 * This loop could be optimized more, but pmap_growkernel()
@@ -2901,7 +2901,7 @@ pmap_tlb_shootnow(int32_t cpumask)
 	/*
 	 * Send the TLB IPI to other CPUs pending shootdowns.
 	 */
-	for (CPU_INFO_FOREACH(cii, ci)) {
+	CPU_INFO_FOREACH(cii, ci) {
 		if (ci == self)
 			continue;
 		if (cpumask & (1U << ci->ci_cpuid))
@@ -2953,7 +2953,7 @@ pmap_tlb_shootdown(pmap, va, pte, cpumaskp)
 	printf("doshootdown %lx\n", va);
 #endif
 
-	for (CPU_INFO_FOREACH(cii, ci)) {
+	CPU_INFO_FOREACH(cii, ci) {
 		/* Note: we queue shootdown events for ourselves here! */
 		if (pmap_is_active(pmap, ci->ci_cpuid) == 0)
 			continue;
@@ -3055,7 +3055,7 @@ pmap_do_tlb_shootdown(struct cpu_info *self)
 	}
 
 #ifdef MULTIPROCESSOR
-	for (CPU_INFO_FOREACH(cii, ci))
+	CPU_INFO_FOREACH(cii, ci)
 		x86_atomic_clearbits_ul(&ci->ci_tlb_ipi_mask,
 		    (1U << cpu_id));
 #endif

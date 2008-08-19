@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.1 2004/04/26 12:34:05 miod Exp $ */
+/*	$OpenBSD: signal.h,v 1.4 2006/01/09 23:53:41 millert Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * All rights reserved.
@@ -33,9 +33,12 @@
 #ifndef __MACHINE_SIGNAL_H__
 #define __MACHINE_SIGNAL_H__
 
-#include <machine/reg.h>
+#include <sys/cdefs.h>
 
 typedef int sig_atomic_t;
+
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
+#include <machine/reg.h>
 
 /*
  * Information pushed on stack when a signal is delivered.
@@ -52,5 +55,5 @@ struct  sigcontext {
 	/* begin machine dependent portion */
 	struct reg sc_regs;
 };
-
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #endif /* __MACHINE_SIGNAL_H__ */

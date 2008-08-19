@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.188 2005/08/20 22:51:38 brad Exp $
+#	$OpenBSD: files.pci,v 1.199 2006/02/25 23:54:43 reyk Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -56,7 +56,7 @@ file	dev/pci/dpt_pci.c		dpt_pci
 attach	adv at pci with adv_pci
 file	dev/pci/adv_pci.c		adv_pci
 file	dev/ic/advlib.c			adv_pci
-file	dev/ic/advmcode.c		adv_pci
+file	dev/microcode/adw/advmcode.c	adv_pci
 
 # AdvanSys ULTRA WIDE SCSI controllers
 # device declaration in sys/conf/files
@@ -309,6 +309,13 @@ attach	em at pci
 file	dev/pci/if_em.c			em
 file	dev/pci/if_em_hw.c		em
 
+# Intel Pro/10GbE
+device	ixgb: ether, ifnet, ifmedia
+attach	ixgb at pci
+file	dev/pci/if_ixgb.c		ixgb   
+file	dev/pci/ixgb_ee.c		ixgb
+file	dev/pci/ixgb_hw.c		ixgb
+
 # DEC/Intel 21143 and "tulip" clone ethernet
 attach	dc at pci with dc_pci
 file	dev/pci/if_dc_pci.c		dc_pci
@@ -495,8 +502,13 @@ device	stge: ether, ifnet, mii, ifmedia, mii_phy, mii_bitbang
 attach	stge at pci
 file	dev/pci/if_stge.c		stge
 
-# AMD 768MPX power management controller
-device	amdpm {}
+# NVIDIA nForce Ethernet 
+device	nfe: ether, ifnet, mii, ifmedia, mii_phy
+attach	nfe at pci
+file	dev/pci/if_nfe.c		nfe
+
+# AMD-76x PM and SMBus controller
+device	amdpm: i2cbus
 attach	amdpm at pci
 file	dev/pci/amdpm.c			amdpm
 
@@ -536,7 +548,7 @@ file	dev/pci/if_san_te1.c		san
 file	dev/pci/if_san_xilinx.c		san
 
 # PIIX4 power management controller
-device	piixpm {}
+device	piixpm: i2cbus
 attach	piixpm at pci
 file	dev/pci/piixpm.c		piixpm
 
@@ -556,3 +568,33 @@ device	art: musycc, ifnet, ifmedia, sppp
 attach	art at musycc
 file	dev/pci/if_art.c		art
 file	dev/pci/bt8370.c		art
+
+# VMware Virtual NIC
+device	vic: ether, ifnet, ifmedia
+attach	vic at pci
+file	dev/pci/if_vic.c		vic
+
+# Intel ICH SMBus controller
+device	ichiic: i2cbus
+attach	ichiic at pci
+file	dev/pci/ichiic.c		ichiic
+
+# Acer Labs M7101 power management controller
+device	alipm: i2cbus
+attach	alipm at pci
+file	dev/pci/alipm.c			alipm
+
+# VIA VT8237 bus control and power management controller
+device	viapm: i2cbus
+attach	viapm at pci
+file	dev/pci/viapm.c			viapm
+
+# AMD-8111 SMBus controller
+device	amdiic: i2cbus
+attach	amdiic at pci
+file	dev/pci/amdiic.c		amdiic
+
+# NVIDIA nForce2/3/4 SMBus controller
+device	nviic: i2cbus
+attach	nviic at pci
+file	dev/pci/nviic.c			nviic

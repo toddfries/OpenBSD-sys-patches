@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2cvar.h,v 1.1 2004/05/23 17:33:43 grange Exp $	*/
+/*	$OpenBSD: i2cvar.h,v 1.10 2006/02/08 23:15:58 dlg Exp $	*/
 /*	$NetBSD: i2cvar.h,v 1.1 2003/09/30 00:35:31 thorpej Exp $	*/
 
 /*
@@ -94,6 +94,9 @@ typedef struct i2c_controller {
 struct i2cbus_attach_args {
 	const char *iba_name;		/* bus name ("iic") */
 	i2c_tag_t iba_tag;		/* the controller */
+	void	(*iba_bus_scan)(struct device *, struct i2cbus_attach_args *,
+		    void *);
+	void	*iba_bus_scan_arg;
 };
 
 /* Used to attach devices on the i2c bus. */
@@ -101,6 +104,8 @@ struct i2c_attach_args {
 	i2c_tag_t	ia_tag;		/* our controller */
 	i2c_addr_t	ia_addr;	/* address of device */
 	int		ia_size;	/* size (for EEPROMs) */
+	char		*ia_name;	/* chip name */
+	void		*ia_cookie;	/* pass extra info from bus to dev */
 };
 
 /*
@@ -123,6 +128,9 @@ int	iicbus_print(void *, const char *);
 	(*(ic)->ic_read_byte)((ic)->ic_cookie, (bytep), (flags))
 #define	iic_write_byte(ic, byte, flags)					\
 	(*(ic)->ic_write_byte)((ic)->ic_cookie, (byte), (flags))
+
+void	iic_scan(struct device *, struct i2cbus_attach_args *);
+int	iic_print(void *, const char *);
 #endif /* _I2C_PRIVATE */
 
 /*
@@ -140,5 +148,7 @@ int	iic_exec(i2c_tag_t, i2c_op_t, i2c_addr_t, const void *,
 int	iic_smbus_write_byte(i2c_tag_t, i2c_addr_t, uint8_t, uint8_t, int);
 int	iic_smbus_read_byte(i2c_tag_t, i2c_addr_t, uint8_t, uint8_t *, int);
 int	iic_smbus_receive_byte(i2c_tag_t, i2c_addr_t, uint8_t *, int);
+
+void	iic_ignore_addr(u_int8_t addr);
 
 #endif /* _DEV_I2C_I2CVAR_H_ */

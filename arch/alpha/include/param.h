@@ -1,4 +1,4 @@
-/* $OpenBSD: param.h,v 1.26 2005/07/31 15:31:08 miod Exp $ */
+/* $OpenBSD: param.h,v 1.29 2005/12/13 01:56:43 martin Exp $ */
 /* $NetBSD: param.h,v 1.30 2000/06/09 16:03:04 thorpej Exp $ */
 
 /*
@@ -75,7 +75,6 @@
 #define PAGE_MASK	(PAGE_SIZE - 1)
 
 #define	KERNBASE	0xfffffc0000230000	/* start of kernel virtual */
-#define	BTOPKERNBASE	((u_long)KERNBASE >> PGSHIFT)
 
 #define	DEV_BSIZE	512
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
@@ -135,14 +134,6 @@
  * For now though just use DEV_BSIZE.
  */
 #define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE/DEV_BSIZE))
-
-/*
- * Mach derived conversion macros
- */
-#define	alpha_round_page(x)	((((unsigned long)(x)) + NBPG - 1) & ~(NBPG-1))
-#define	alpha_trunc_page(x)	((unsigned long)(x) & ~(NBPG-1))
-#define	alpha_btop(x)		((unsigned long)(x) >> PGSHIFT)
-#define	alpha_ptob(x)		((unsigned long)(x) << PGSHIFT)
 
 #ifdef _KERNEL
 #ifndef _LOCORE

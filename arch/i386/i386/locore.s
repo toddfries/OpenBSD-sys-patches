@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.91 2005/07/18 14:55:49 mickey Exp $	*/
+/*	$OpenBSD: locore.s,v 1.96 2006/01/12 15:59:03 mickey Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -191,10 +191,10 @@
  * It's used when modifying another process's page tables.
  */
 	.globl	_C_LABEL(APTmap), _C_LABEL(APTD), _C_LABEL(APTDpde)
-	.set	_C_LABEL(APTmap), (APTDPTDI << PDSHIFT)
-	.set	_C_LABEL(APTD), (_C_LABEL(APTmap) + APTDPTDI * NBPG)
+	.set	_C_LABEL(APTmap), (PDSLOT_APTE << PDSHIFT)
+	.set	_C_LABEL(APTD), (_C_LABEL(APTmap) + PDSLOT_APTE * NBPG)
 	# XXX 4 == sizeof pde
-	.set	_C_LABEL(APTDpde), (_C_LABEL(PTD) + APTDPTDI * 4)
+	.set	_C_LABEL(APTDpde), (_C_LABEL(PTD) + PDSLOT_APTE * 4)
 
 /*
  * Initialization
@@ -479,7 +479,7 @@ try586:	/* Use the `cpuid' instruction. */
 	movl	%edx,RELOC(_C_LABEL(cpu_feature))
 	movl	%ecx,RELOC(_C_LABEL(cpu_ecxfeature))
 
-	movl	$RELOC(_C_LABEL(cpuid_level)),%eax
+	movl	RELOC(_C_LABEL(cpuid_level)),%eax
 	cmp	$2,%eax
 	jl	1f
 
@@ -587,7 +587,7 @@ try586:	/* Use the `cpuid' instruction. */
 1:	cmpl	$NKPTP_MAX,%ecx			# larger than max?
 	jle	2f
 	movl	$NKPTP_MAX,%ecx
-2:
+2:	movl	%ecx,RELOC(_C_LABEL(nkpde))	# and store it back
 
 	/* Clear memory for bootstrap tables. */
 	shll	$PGSHIFT,%ecx
@@ -1537,7 +1537,7 @@ NENTRY(remrunqueue)
 #endif /* DIAGNOSTIC */
 
 #if NAPM > 0
-	.globl _C_LABEL(apm_cpu_idle),_C_LABEL(apm_cpu_busy),_C_LABEL(apm_dobusy)
+	.globl _C_LABEL(apm_cpu_idle),_C_LABEL(apm_cpu_busy)
 #endif
 /*
  * When no processes are on the runq, cpu_switch() branches to here to wait for
@@ -2043,6 +2043,10 @@ IDTVEC(page)
 	TRAP(T_PAGEFLT)
 IDTVEC(rsvd)
 	ZTRAP(T_RESERVED)
+IDTVEC(mchk)
+	ZTRAP(T_MACHK)
+IDTVEC(simd)
+	ZTRAP(T_XFTRAP)
 IDTVEC(intrspurious)
 	/*
 	 * The Pentium Pro local APIC may erroneously call this vector for a

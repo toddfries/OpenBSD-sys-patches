@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.2 2004/12/07 02:29:40 brad Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.4 2005/10/05 21:48:34 tdeval Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.1 2003/02/26 21:26:11 fvdl Exp $	*/
 
 /*
@@ -64,6 +64,8 @@ typedef void *pci_chipset_tag_t;
 typedef union x86_pci_tag_u pcitag_t;
 typedef int pci_intr_handle_t;
 
+#define	pci_intr_line(ih)	((ih) & 0xff)
+
 /*
  * i386-specific PCI variables and functions.
  * NOT TO BE USED DIRECTLY BY MACHINE INDEPENDENT CODE.
@@ -87,7 +89,6 @@ void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 		    pcireg_t);
 int		pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
-const struct evcnt *pci_intr_evcnt(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
 		    int, int (*)(void *), void *, char *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);

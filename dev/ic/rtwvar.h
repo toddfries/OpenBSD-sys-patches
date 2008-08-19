@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtwvar.h,v 1.13 2005/06/15 01:33:50 jsg Exp $	*/
+/*	$OpenBSD: rtwvar.h,v 1.21 2006/01/05 05:36:06 jsg Exp $	*/
 /*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
 
 /*-
@@ -40,30 +40,33 @@
 #include <sys/timeout.h>
 
 #ifdef RTW_DEBUG
-#define	RTW_DEBUG_TUNE		0x000001
-#define	RTW_DEBUG_PKTFILT	0x000002
-#define	RTW_DEBUG_XMIT		0x000004
-#define	RTW_DEBUG_XMIT_DESC	0x000008
-#define	RTW_DEBUG_NODE		0x000010
-#define	RTW_DEBUG_PWR		0x000020
-#define	RTW_DEBUG_ATTACH	0x000040
-#define	RTW_DEBUG_REGDUMP	0x000080
-#define	RTW_DEBUG_ACCESS	0x000100
-#define	RTW_DEBUG_RESET		0x000200
-#define	RTW_DEBUG_INIT		0x000400
-#define	RTW_DEBUG_IOSTATE	0x000800
-#define	RTW_DEBUG_RECV		0x001000
-#define	RTW_DEBUG_RECV_DESC	0x002000
-#define	RTW_DEBUG_IO_KICK	0x004000
-#define	RTW_DEBUG_INTR		0x008000
-#define	RTW_DEBUG_PHY		0x010000
-#define	RTW_DEBUG_PHYIO		0x020000
-#define	RTW_DEBUG_PHYBITIO	0x040000
-#define	RTW_DEBUG_TIMEOUT	0x080000
-#define	RTW_DEBUG_BUGS		0x100000
-#define	RTW_DEBUG_BEACON	0x200000
-#define	RTW_DEBUG_LED		0x400000
-#define	RTW_DEBUG_MAX		0x7fffff
+#define	RTW_DEBUG_TUNE		0x0000001
+#define	RTW_DEBUG_PKTFILT	0x0000002
+#define	RTW_DEBUG_XMIT		0x0000004
+#define	RTW_DEBUG_XMIT_DESC	0x0000008
+#define	RTW_DEBUG_NODE		0x0000010
+#define	RTW_DEBUG_PWR		0x0000020
+#define	RTW_DEBUG_ATTACH	0x0000040
+#define	RTW_DEBUG_REGDUMP	0x0000080
+#define	RTW_DEBUG_ACCESS	0x0000100
+#define	RTW_DEBUG_RESET		0x0000200
+#define	RTW_DEBUG_INIT		0x0000400
+#define	RTW_DEBUG_IOSTATE	0x0000800
+#define	RTW_DEBUG_RECV		0x0001000
+#define	RTW_DEBUG_RECV_DESC	0x0002000
+#define	RTW_DEBUG_IO_KICK	0x0004000
+#define	RTW_DEBUG_INTR		0x0008000
+#define	RTW_DEBUG_PHY		0x0010000
+#define	RTW_DEBUG_PHYIO		0x0020000
+#define	RTW_DEBUG_PHYBITIO	0x0040000
+#define	RTW_DEBUG_TIMEOUT	0x0080000
+#define	RTW_DEBUG_BUGS		0x0100000
+#define	RTW_DEBUG_BEACON	0x0200000
+#define	RTW_DEBUG_LED		0x0400000
+#define	RTW_DEBUG_KEY		0x0800000
+#define	RTW_DEBUG_XMIT_RSRC	0x1000000
+#define	RTW_DEBUG_OACTIVE	0x2000000
+#define	RTW_DEBUG_MAX		0x3ffffff
 
 extern int rtw_debug;
 #define RTW_DPRINTF(__flags, __x)	\
@@ -82,12 +85,6 @@ extern int rtw_debug;
 			panic __msg ;	\
 	} while (0)
 
-#define NEXT_ATTACH_STATE(sc, state) do {			\
-	DPRINTF(sc, RTW_DEBUG_ATTACH,				\
-	    ("%s: attach state %s\n", __func__, #state));	\
-	sc->sc_attach_state = state;				\
-} while (0)
-
 enum rtw_locale {
 	RTW_LOCALE_USA = 0,
 	RTW_LOCALE_EUROPE,
@@ -95,19 +92,17 @@ enum rtw_locale {
 	RTW_LOCALE_UNKNOWN
 };
 
-enum rtw_rfchipid {
-	RTW_RFCHIPID_RESERVED	= 0x00,
-	RTW_RFCHIPID_INTERSIL	= 0x01,
-	RTW_RFCHIPID_RFMD2948	= 0x02,
-	RTW_RFCHIPID_PHILIPS	= 0x03,
-	RTW_RFCHIPID_MAXIM2820	= 0x04,
-	RTW_RFCHIPID_GCT	= 0x05,
-	RTW_RFCHIPID_RFMD2958	= 0x06,
-	RTW_RFCHIPID_MAXIM2822	= 0x07,
-	RTW_RFCHIPID_MAXIM2825	= 0x08,
-	RTW_RFCHIPID_RTL8225	= 0x09,
-	RTW_RFCHIPID_RTL8255	= 0x0a
-};
+#define	RTW_RFCHIPID_RESERVED	0x00
+#define	RTW_RFCHIPID_INTERSIL	0x01
+#define	RTW_RFCHIPID_RFMD2948	0x02
+#define	RTW_RFCHIPID_PHILIPS	0x03
+#define	RTW_RFCHIPID_MAXIM2820	0x04
+#define	RTW_RFCHIPID_GCT	0x05
+#define	RTW_RFCHIPID_RFMD2958	0x06
+#define	RTW_RFCHIPID_MAXIM2822	0x07
+#define	RTW_RFCHIPID_MAXIM2825	0x08
+#define	RTW_RFCHIPID_RTL8225	0x09
+#define	RTW_RFCHIPID_RTL8255	0x0a
 
 /* sc_flags */
 #define RTW_F_ENABLED		0x00000001	/* chip is enabled */
@@ -131,6 +126,16 @@ struct rtw_regs {
 	bus_space_tag_t		r_bt;
 	bus_space_handle_t	r_bh;
 	enum rtw_access		r_access;
+	void			*r_priv;
+
+	/* bus independent I/O callbacks */
+	u_int8_t	(*r_read8)(void *, u_int32_t);
+	u_int16_t	(*r_read16)(void *, u_int32_t);
+	u_int32_t	(*r_read32)(void *, u_int32_t);
+	void		(*r_write8)(void *, u_int32_t, u_int8_t);
+	void		(*r_write16)(void *, u_int32_t, u_int16_t);
+	void		(*r_write32)(void *, u_int32_t, u_int32_t);
+	void		(*r_barrier)(void *, u_int32_t, u_int32_t, int);
 };
 
 #define RTW_SR_GET(sr, ofs) \
@@ -178,7 +183,7 @@ struct rtw_txsoft {
 #define RTW_TXQLENLO	64	/* low-priority queue length */
 #define RTW_TXQLENMD	64	/* medium-priority */
 #define RTW_TXQLENHI	64	/* high-priority */
-#define RTW_TXQLENBCN	1	/* beacon */
+#define RTW_TXQLENBCN	8	/* beacon */
 
 #define RTW_NTXDESCLO	RTW_TXQLENLO
 #define RTW_NTXDESCMD	RTW_TXQLENMD
@@ -206,6 +211,9 @@ struct rtw_txdesc_blk {
 	bus_dmamap_t		tdb_dmamap;
 	bus_addr_t		tdb_physbase;
 	bus_addr_t		tdb_ofs;
+	bus_size_t		tdb_basereg;
+	uint32_t		tdb_base;
+
 	struct rtw_txdesc	*tdb_desc;
 };
 
@@ -275,12 +283,6 @@ struct rtw_tx_radiotap_header {
 	u_int16_t				rt_chan_flags;
 } __attribute__((__packed__));
 
-enum rtw_attach_state {FINISHED, FINISH_DESCMAP_LOAD, FINISH_DESCMAP_CREATE,
-	FINISH_DESC_MAP, FINISH_DESC_ALLOC, FINISH_RXMAPS_CREATE,
-	FINISH_TXMAPS_CREATE, FINISH_RESET, FINISH_READ_SROM, FINISH_PARSE_SROM,
-	FINISH_RF_ATTACH, FINISH_ID_STA, FINISH_TXDESCBLK_SETUP,
-	FINISH_TXCTLBLK_SETUP, DETACHED};
-
 struct rtw_hooks {
 	void			*rh_shutdown;	/* shutdown hook */
 	void			*rh_power;	/* power management hook */
@@ -298,8 +300,6 @@ struct rtw_mtbl {
 };
 
 enum rtw_pwrstate { RTW_OFF = 0, RTW_SLEEP, RTW_ON };
-
-typedef void (*rtw_continuous_tx_cb_t)(void *arg, int);
 
 struct rtw_phy {
 	struct rtw_rf	*p_rf;
@@ -321,58 +321,8 @@ struct rtw_bbpset {
 	u_int	bb_txagc;
 };
 
-struct rtw_rf {
-	void	(*rf_destroy)(struct rtw_rf *);
-	/* args: frequency, txpower, power state */
-	int	(*rf_init)(struct rtw_rf *, u_int, u_int8_t,
-		    enum rtw_pwrstate);
-	/* arg: power state */
-	int	(*rf_pwrstate)(struct rtw_rf *, enum rtw_pwrstate);
-	/* arg: frequency */
-	int	(*rf_tune)(struct rtw_rf *, u_int);
-	/* arg: txpower */
-	int	(*rf_txpower)(struct rtw_rf *, u_int8_t);
-	rtw_continuous_tx_cb_t	rf_continuous_tx_cb;
-	void			*rf_continuous_tx_arg;
-	struct rtw_bbpset	rf_bbpset;
-};
-
-typedef int (*rtw_rf_write_t)(struct rtw_regs *, enum rtw_rfchipid, u_int,
+typedef int (*rtw_rf_write_t)(struct rtw_regs *, int, u_int,
     u_int32_t);
-
-struct rtw_rfbus {
-	struct rtw_regs		*b_regs;
-	rtw_rf_write_t		b_write;
-};
-
-void rtw_rf_destroy(struct rtw_rf *);
-int rtw_rf_init(struct rtw_rf *, u_int, u_int8_t, enum rtw_pwrstate);
-int rtw_rf_pwrstate(struct rtw_rf *, enum rtw_pwrstate);
-int rtw_rf_tune(struct rtw_rf *, u_int);
-int rtw_rf_txpower(struct rtw_rf *, u_int8_t);
-int rtw_rfbus_write(struct rtw_rfbus *, enum rtw_rfchipid, u_int, u_int32_t);
-
-struct rtw_max2820 {
-	struct rtw_rf		mx_rf;
-	struct rtw_rfbus	mx_bus;
-	int			mx_is_a;	/* 1: MAX2820A/MAX2821A */
-};
-
-struct rtw_sa2400 {
-	struct rtw_rf		sa_rf;
-	struct rtw_rfbus	sa_bus;
-	int			sa_digphy;	/* 1: digital PHY */
-};
-
-struct rtw_rtl8225 {
-	struct rtw_rf		rt_rf;
-	struct rtw_rfbus	rt_bus;
-};
-
-struct rtw_rtl8255 {
-	struct rtw_rf		rt_rf;
-	struct rtw_rfbus	rt_bus;
-};
 
 typedef void (*rtw_pwrstate_t)(struct rtw_regs *, enum rtw_pwrstate, int, int);
 
@@ -406,10 +356,10 @@ struct rtw_softc {
 	bus_dma_tag_t		sc_dmat;
 	u_int32_t		sc_flags;
 
-	enum rtw_attach_state	sc_attach_state;
-	enum rtw_rfchipid	sc_rfchipid;
+	int			sc_rfchipid;
 	enum rtw_locale		sc_locale;
 	u_int8_t		sc_phydelay;
+	struct rtw_bbpset       sc_bbpset;
 
 	/* s/w Tx/Rx descriptors */
 	struct rtw_txsoft_blk	sc_txsoft_blk[RTW_NTXPRI];
@@ -431,9 +381,13 @@ struct rtw_softc {
 
 	rtw_pwrstate_t		sc_pwrstate_cb;
 
-	struct rtw_rf		*sc_rf;
-
 	u_int16_t		sc_inten;
+	int			(*sc_rf_init)(struct rtw_softc *, u_int,
+				    u_int8_t, enum rtw_pwrstate);
+	int			(*sc_rf_pwrstate)(struct rtw_softc *,
+				    enum rtw_pwrstate);
+	int			(*sc_rf_tune)(struct rtw_softc *, u_int);
+	int			(*sc_rf_txpower)(struct rtw_softc *, u_int8_t);
 
 	/* interrupt acknowledge hook */
 	void			(*sc_intr_ack)(struct rtw_regs *);
@@ -459,7 +413,7 @@ struct rtw_softc {
 
 	u_int8_t		sc_rev;		/* PCI/Cardbus revision */
 
-	u_int32_t		sc_anaparm;	/* register RTW_ANAPARM */
+	u_int32_t		sc_anaparm[2];	/* RTW_ANAPARM_? registers */
 
 	union {
 		struct rtw_rx_radiotap_header	tap;

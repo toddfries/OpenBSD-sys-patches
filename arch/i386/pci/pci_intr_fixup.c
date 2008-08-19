@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_intr_fixup.c,v 1.38 2005/08/04 13:57:29 mickey Exp $	*/
+/*	$OpenBSD: pci_intr_fixup.c,v 1.52 2006/01/12 12:17:02 jsg Exp $	*/
 /*	$NetBSD: pci_intr_fixup.c,v 1.10 2000/08/10 21:18:27 soda Exp $	*/
 
 /*
@@ -101,6 +101,7 @@
 #include <machine/bus.h>
 #include <machine/intr.h>
 #include <machine/i8259.h>
+#include <machine/i82093var.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -134,6 +135,8 @@ const struct pciintr_icu_table {
 		bus_space_tag_t, pcitag_t, pciintr_icu_tag_t *,
 		pciintr_icu_handle_t *);
 } pciintr_icu_table[] = {
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_6300ESB_LPC,
+	  piix_init },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82371MX,
 	  piix_init },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82371AB_ISA,
@@ -142,7 +145,11 @@ const struct pciintr_icu_table {
 	  piix_init },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82371SB_ISA,
 	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82440MX_ISA,
+	  piix_init },
 	{ PCI_VENDOR_INTEL,     PCI_PRODUCT_INTEL_82801AA_LPC,
+	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801AB_LPC,
 	  piix_init },
 	{ PCI_VENDOR_INTEL,     PCI_PRODUCT_INTEL_82801BA_LPC,
 	  piix_init },
@@ -154,9 +161,19 @@ const struct pciintr_icu_table {
 	  piix_init },
 	{ PCI_VENDOR_INTEL,     PCI_PRODUCT_INTEL_82801DB_LPC,
 	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801E_LPC,
+	  piix_init },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801EB_LPC,
 	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801FB_LPC,
+	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801FBM_LPC,
+	  piix_init },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801GB_LPC,
+	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801GBM_LPC,
+	  piix_init },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801GH_LPC,
 	  piix_init },
 
 	{ PCI_VENDOR_OPTI,	PCI_PRODUCT_OPTI_82C558,
@@ -164,7 +181,7 @@ const struct pciintr_icu_table {
 	{ PCI_VENDOR_OPTI,	PCI_PRODUCT_OPTI_82C700,
 	  opti82c700_init },
 
-	{ PCI_VENDOR_RCC,	PCI_PRODUCT_RCC_ROSB4,
+	{ PCI_VENDOR_RCC,	PCI_PRODUCT_RCC_OSB4,
 	  osb4_init },
 	{ PCI_VENDOR_RCC,	PCI_PRODUCT_RCC_CSB5,
 	  osb4_init },
@@ -175,18 +192,28 @@ const struct pciintr_icu_table {
 	  via82c586_init, },
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT82C686A_ISA,
 	  via82c586_init },
-	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8366_ISA,
+	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8233_ISA,
 	  via82c586_init },
 
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8231_ISA,
 	  via8231_init },
+	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8233A_ISA,
+	  via8231_init },
+	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8235_ISA,
+	  via8231_init },
+	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8237_ISA,
+	  via8231_init },
 
 	{ PCI_VENDOR_SIS,	PCI_PRODUCT_SIS_85C503,
+	  sis85c503_init },
+	{ PCI_VENDOR_SIS,	PCI_PRODUCT_SIS_963,
 	  sis85c503_init },
 
 	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_PBC756_PMC,
 	  amd756_init },
-	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_766_ISA,
+	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_766_PMC,
+	  amd756_init },
+	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_PBC768_PMC,
 	  amd756_init },
 
 	{ PCI_VENDOR_ALI,	PCI_PRODUCT_ALI_M1533,
@@ -513,15 +540,15 @@ pci_intr_route_link(pc, ihp)
 {
 	struct pciintr_link_map *l;
 	pcireg_t intr;
-	int rv = 1;
+	int irq, rv = 1;
 	char *p = NULL;
 
 	if (pcibios_flags & PCIBIOS_INTR_FIXUP)
 		return 1;
 
-	if (ihp->line != 0 &&
-	    ihp->line != I386_PCI_INTERRUPT_LINE_NO_CONNECTION)
-		pcibios_pir_header.exclusive_irq |= (1 << ihp->line);
+	irq = ihp->line & APIC_INT_LINE_MASK;
+	if (irq != 0 && irq != I386_PCI_INTERRUPT_LINE_NO_CONNECTION)
+		pcibios_pir_header.exclusive_irq |= 1 << irq;
 
 	l = ihp->link;
 	if (!l || pciintr_icu_tag == NULL)
@@ -562,13 +589,13 @@ pci_intr_route_link(pc, ihp)
 	 * IRQs 14 and 15 are reserved for PCI IDE interrupts; don't muck
 	 * with them.
 	 */
-	if (ihp->line == 14 || ihp->line == 15)
+	if (irq == 14 || irq == 15)
 		return (1);
 
 	intr = pci_conf_read(pc, ihp->tag, PCI_INTERRUPT_REG);
-	if (ihp->line != PCI_INTERRUPT_LINE(intr)) {
+	if (irq != PCI_INTERRUPT_LINE(intr)) {
 		intr &= ~(PCI_INTERRUPT_LINE_MASK << PCI_INTERRUPT_LINE_SHIFT);
-		intr |= (ihp->line << PCI_INTERRUPT_LINE_SHIFT);
+		intr |= irq << PCI_INTERRUPT_LINE_SHIFT;
 		pci_conf_write(pc, ihp->tag, PCI_INTERRUPT_REG, intr);
 	}
 
@@ -629,7 +656,7 @@ pci_intr_header_fixup(pc, tag, ihp)
 	if (pcibios_flags & PCIBIOS_INTR_FIXUP)
 		return 1;
 
-	irq = ihp->line;
+	irq = ihp->line & APIC_INT_LINE_MASK;
 	ihp->link = NULL;
 	ihp->tag = tag;
 	pci_decompose_tag(pc, tag, &bus, &device, &function);
@@ -644,7 +671,7 @@ pci_intr_header_fixup(pc, tag, ihp)
 		/*
 		 * No link map entry.
 		 * Probably pciintr_icu_getclink() or pciintr_icu_get_intr()
-		 * was failed.
+		 * has failed.
 		 */
 		if (pcibios_flags & PCIBIOS_INTRDEBUG)
 			printf("pci_intr_header_fixup: no entry for link "
@@ -660,8 +687,8 @@ pci_intr_header_fixup(pc, tag, ihp)
 	} else if (l->irq == I386_PCI_INTERRUPT_LINE_NO_CONNECTION) {
 
 		/* Appropriate interrupt was not found. */
-		if (pciintr_icu_tag == NULL && ihp->line != 0 &&
-		    ihp->line != I386_PCI_INTERRUPT_LINE_NO_CONNECTION)
+		if (pciintr_icu_tag == NULL && irq != 0 &&
+		    irq != I386_PCI_INTERRUPT_LINE_NO_CONNECTION)
 			/*
 			 * Do not print warning,
 			 * if no compatible PCI ICU found,
@@ -673,22 +700,24 @@ pci_intr_header_fixup(pc, tag, ihp)
 	} else if (irq == 0 || irq == I386_PCI_INTERRUPT_LINE_NO_CONNECTION) {
 
 		p = " fixed up";
-		ihp->line = l->irq;
+		ihp->line = irq = l->irq;
 
 	} else if (pcibios_flags & PCIBIOS_FIXUP_FORCE) {
 		/* routed by BIOS, but inconsistent */
 		/* believe PCI IRQ Routing table */
 		p = " WARNING: overriding";
-		ihp->line = l->irq;
-	} else
+		ihp->line = irq = l->irq;
+	} else {
 		/* believe PCI Interrupt Configuration Register (default) */
 		p = " WARNING: preserving";
+		ihp->line = (l->irq = irq) | (l->clink & PCI_INT_VIA_ISA);
+	}
 
 	if (pcibios_flags & PCIBIOS_INTRDEBUG) {
 		register pcireg_t id = pci_conf_read(pc, tag, PCI_ID_REG);
 
-		printf("%d:%d:%d %04x:%04x pin %c clink 0x%02x irq %d stage %d"
-		    "%s irq %d\n", bus, device, function,
+		printf("\n%d:%d:%d %04x:%04x pin %c clink 0x%02x irq %d "
+		    "stage %d %s irq %d\n", bus, device, function,
 		    PCI_VENDOR(id), PCI_PRODUCT(id), '@' + ihp->pin, l->clink,
 		    ((l->irq == I386_PCI_INTERRUPT_LINE_NO_CONNECTION)?
 		    -1 : l->irq), l->fixup_stage, p, irq);
@@ -810,9 +839,8 @@ pci_intr_fixup(sc, pc, iot)
 				return (-1);	/* non-fatal */
 			if (pciintr_guess_irq())
 				return (-1);	/* non-fatal */
-			return (0);		/* success! */
-		} else
-			return (-1);		/* non-fatal */
+		}
+		return (0);
 	} else {
 		char devinfo[256];
 

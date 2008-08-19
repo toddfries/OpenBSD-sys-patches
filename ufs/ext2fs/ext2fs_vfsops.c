@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vfsops.c,v 1.38 2005/07/28 23:11:25 pedro Exp $	*/
+/*	$OpenBSD: ext2fs_vfsops.c,v 1.44 2005/12/14 22:03:01 pedro Exp $	*/
 /*	$NetBSD: ext2fs_vfsops.c,v 1.1 1997/06/11 09:34:07 bouyer Exp $	*/
 
 /*
@@ -100,7 +100,8 @@ const struct vfsops ext2fs_vfsops = {
 	ufs_check_export
 };
 
-/* struct pool ext2fs_inode_pool; */
+struct pool ext2fs_inode_pool;
+struct pool ext2fs_dinode_pool;
 
 extern u_long ext2gennumber;
 
@@ -108,6 +109,11 @@ int
 ext2fs_init(vfsp)
 	struct vfsconf *vfsp;
 {
+	pool_init(&ext2fs_inode_pool, sizeof(struct inode), 0, 0, 0,
+	    "ext2inopl", &pool_allocator_nointr);
+	pool_init(&ext2fs_dinode_pool, sizeof(struct ext2fs_dinode), 0, 0, 0,
+	    "ext2dinopl", &pool_allocator_nointr);
+
 	return (ufs_init(vfsp));
 }
 
@@ -140,7 +146,7 @@ ext2fs_mountroot()
 
 	if ((error = ext2fs_mountfs(rootvp, mp, p)) != 0) {
 		mp->mnt_vfc->vfc_refcount--;
-		vfs_unbusy(mp, p);
+		vfs_unbusy(mp);
 		free(mp, M_MOUNT);
 		vrele(rootvp);
 		return (error);
@@ -159,7 +165,7 @@ ext2fs_mountroot()
 		    sizeof(fs->e2fs.e2fs_fsmnt) - 1, 0);
 	}
 	(void)ext2fs_statfs(mp, &mp->mnt_stat, p);
-	vfs_unbusy(mp, p);
+	vfs_unbusy(mp);
 	inittodr(fs->e2fs.e2fs_wtime);
 	return (0);
 }
@@ -363,7 +369,7 @@ ext2fs_reload_vnode(struct vnode *vp, void *args) {
 	}
 	cp = (caddr_t)bp->b_data +
 	    (ino_to_fsbo(era->fs, ip->i_number) * EXT2_DINODE_SIZE);
-	e2fs_iload((struct ext2fs_dinode *)cp, &ip->i_e2din);
+	e2fs_iload((struct ext2fs_dinode *)cp, ip->i_e2din);
 	brelse(bp);
 	vput(vp);
 	return (0);
@@ -764,7 +770,7 @@ ext2fs_sync_vnode(struct vnode *vp, void *args)
  * go through the inodes to write those that have been modified;
  * initiate the writing of the super block if it has been modified.
  *
- * Note: we are always called with the filesystem marked `MPBUSY'.
+ * Should always be called with the mount point locked.
  */
 int
 ext2fs_sync(mp, waitfor, cred, p)
@@ -831,6 +837,7 @@ ext2fs_vget(mp, ino, vpp)
 {
 	register struct m_ext2fs *fs;
 	register struct inode *ip;
+	struct ext2fs_dinode *dp;
 	struct ufsmount *ump;
 	struct buf *bp;
 	struct vnode *vp;
@@ -849,8 +856,9 @@ ext2fs_vget(mp, ino, vpp)
 		*vpp = NULL;
 		return (error);
 	}
-	MALLOC(ip, struct inode *, sizeof(struct inode), M_EXT2FSNODE, M_WAITOK);
-	bzero((caddr_t)ip, sizeof(struct inode));
+
+	ip = pool_get(&ext2fs_inode_pool, PR_WAITOK);
+	memset(ip, 0, sizeof(struct inode));
 	lockinit(&ip->i_lock, PINOD, "inode", 0, 0);
 	vp->v_data = ip;
 	ip->i_vnode = vp;
@@ -893,10 +901,24 @@ ext2fs_vget(mp, ino, vpp)
 		*vpp = NULL;
 		return (error);
 	}
-	bcopy(((struct ext2fs_dinode*)bp->b_data + ino_to_fsbo(fs, ino)),
-				&ip->i_e2din, sizeof(struct ext2fs_dinode));
-	ip->i_effnlink = ip->i_e2fs_nlink;
+
+	dp = (struct ext2fs_dinode *) bp->b_data + ino_to_fsbo(fs, ino);
+	ip->i_e2din = pool_get(&ext2fs_dinode_pool, PR_WAITOK);
+	e2fs_iload(dp, ip->i_e2din);
 	brelse(bp);
+
+	ip->i_effnlink = ip->i_e2fs_nlink;
+
+	/*
+	 * The fields for storing the UID and GID of an ext2fs inode are
+	 * limited to 16 bits. To overcome this limitation, Linux decided to
+	 * scatter the highest bits of these values into a previously reserved
+	 * area on the disk inode. We deal with this situation by having two
+	 * 32-bit fields *out* of the disk inode to hold the complete values.
+	 * Now that we are reading in the inode, compute these fields.
+	 */
+	ip->i_e2fs_uid = ip->i_e2fs_uid_low | (ip->i_e2fs_uid_high << 16);
+	ip->i_e2fs_gid = ip->i_e2fs_gid_low | (ip->i_e2fs_gid_high << 16);
 
 	/* If the inode was deleted, reset all fields */
 	if (ip->i_e2fs_dtime != 0) {
@@ -908,12 +930,13 @@ ext2fs_vget(mp, ino, vpp)
 	 * Initialize the vnode from the inode, check for aliases.
 	 * Note that the underlying vnode may have changed.
 	 */
-	error = ufs_vinit(mp, ext2fs_specop_p, EXT2FS_FIFOOPS, &vp);
+	error = ext2fs_vinit(mp, ext2fs_specop_p, EXT2FS_FIFOOPS, &vp);
 	if (error) {
 		vput(vp);
 		*vpp = NULL;
 		return (error);
 	}
+
 	/*
 	 * Finish inode initialization now that aliasing has been resolved.
 	 */
@@ -1027,7 +1050,7 @@ ext2fs_sbupdate(mp, waitfor)
 	int error = 0;
 
 	bp = getblk(mp->um_devvp, SBLOCK, SBSIZE, 0, 0);
-	bcopy((caddr_t)(&fs->e2fs), bp->b_data, SBSIZE);
+	e2fs_sbsave(&fs->e2fs, (struct ext2fs *) bp->b_data);
 	if (waitfor == MNT_WAIT)
 		error = bwrite(bp);
 	else
