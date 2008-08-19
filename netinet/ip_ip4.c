@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ip4.c,v 1.20 1998/07/29 22:18:49 angelos Exp $	*/
+/*	$OpenBSD: ip_ip4.c,v 1.28 1999/04/09 23:28:45 niklas Exp $	*/
 
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -14,8 +14,10 @@
  * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
  * and Niels Provos.
  *
- * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
- * and Niels Provos.
+ * Additional features in 1999 by Angelos D. Keromytis.
+ *
+ * Copyright (C) 1995, 1996, 1997, 1998, 1999 by John Ioannidis,
+ * Angelos D. Keromytis and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -48,6 +50,7 @@
 #include <sys/errno.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
+#include <sys/sysctl.h>
 #include <machine/cpu.h>
 
 #include <net/if.h>
@@ -64,13 +67,23 @@
 
 #include <sys/socketvar.h>
 #include <net/raw_cb.h>
-#include <net/encap.h>
 
 #include <netinet/ip_ipsp.h>
 #include <netinet/ip_ip4.h>
 #include <dev/rndvar.h>
-#include <sys/syslog.h>
 
+#ifdef ENCDEBUG
+#define DPRINTF(x)	if (encdebug) printf x
+#else
+#define DPRINTF(x)
+#endif
+
+/*
+ * We can control the acceptance of IP4 packets by altering the sysctl
+ * net.inet.ip4.allow value.  Zero means drop them, all ilse is acceptance.
+ */
+int ip4_allow = 0;
+struct ip4stat ip4stat;
 
 /*
  * ip4_input gets called when we receive an encapsulated packet,
@@ -88,6 +101,9 @@ ip4_input(m, va_alist)
 	va_dcl
 #endif
 {
+    register struct ifnet *ifp;
+    register struct ifaddr *ifa;
+    register struct sockaddr_in *sin;
     int iphlen;
     struct ip *ipo, *ipi;
     struct ifqueue *ifq = NULL;
@@ -100,16 +116,20 @@ ip4_input(m, va_alist)
 
     ip4stat.ip4s_ipackets++;
 
+    /* If we do not accept IP4 explicitly, drop.  */
+    if (!ip4_allow && (m->m_flags & (M_AUTH|M_CONF)) == 0)
+    {
+	DPRINTF(("ip4_input(): dropped due to policy\n"));
+	ip4stat.ip4s_pdrops++;
+	m_freem(m);
+	return;
+    }
+
     /*
      * Strip IP options, if any.
      */
     if (iphlen > sizeof(struct ip))
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ip4_input(): stripping options\n");
-#endif /* ENCDEBUG */
-
 	ip_stripoptions(m, (struct mbuf *) 0);
 	iphlen = sizeof(struct ip);
     }
@@ -128,12 +148,9 @@ ip4_input(m, va_alist)
     {
 	if ((m = m_pullup(m, iphlen + sizeof(struct ip))) == 0)
 	{
-#ifdef ENCDEBUG
-	    if (encdebug)
-	      printf("ip4_input(): m_pullup() failed\n");
-#endif /* ENCDEBUG */
-
+	    DPRINTF(("ip4_input(): m_pullup() failed\n"));
 	    ip4stat.ip4s_hdrops++;
+	    m_freem(m);
 	    return;
 	}
 
@@ -141,7 +158,6 @@ ip4_input(m, va_alist)
     }
 
     ipi = (struct ip *) ((caddr_t) ipo + iphlen);
-    ip4stat.ip4s_ibytes += ntohs(ipi->ip_len);
 
     /*
      * RFC 1853 specifies that the inner TTL should not be touched on
@@ -151,12 +167,50 @@ ip4_input(m, va_alist)
 
     if (ipi->ip_v != IPVERSION)
     {
-	if (encdebug)
-	  log(LOG_WARNING, "ip4_input(): wrong version %d on IP packet from %x to %x (%x->%x)\n", ipi->ip_v, ipo->ip_src, ipo->ip_dst, ipi->ip_src, ipi->ip_dst);
+	DPRINTF(("ip4_input(): wrong version %d on packet from %s to %s (%s->%s)\n", ipi->ip_v, inet_ntoa4(ipo->ip_src), inet_ntoa4(ipo->ip_dst), inet_ntoa4(ipi->ip_src), inet_ntoa4(ipi->ip_dst)));
 	ip4stat.ip4s_notip4++;
+	m_freem(m);
 	return;
     }
-	
+
+     /*
+      * If we do not accept IP4 other than part of ESP & AH, we should
+      * not accept a packet with double ip4 headers neither.
+      */
+ 
+     if (!ip4_allow && ipi->ip_p == IPPROTO_IPIP)
+     {
+ 	DPRINTF(("ip4_input(): dropped due to policy\n"));
+ 	ip4stat.ip4s_pdrops++;
+ 	m_freem(m);
+ 	return;
+     }
+ 
+    /*
+     * Check for local address spoofing.
+     */
+    for (ifp = ifnet.tqh_first; ifp != 0; ifp = ifp->if_list.tqe_next)
+      for (ifa = ifp->if_addrlist.tqh_first;
+	   ifa != 0;
+	   ifa = ifa->ifa_list.tqe_next)
+      {
+	  if (ifa->ifa_addr->sa_family != AF_INET)
+	    continue;
+
+	  sin = (struct sockaddr_in *) ifa->ifa_addr;
+
+	  if (sin->sin_addr.s_addr == ipi->ip_src.s_addr)
+	  {
+	      DPRINTF(("ip_input(): possible local address spoofing detected on packet from %s to %s (%s->%s)\n", inet_ntoa4(ipo->ip_src), inet_ntoa4(ipo->ip_dst), inet_ntoa4(ipi->ip_src), inet_ntoa4(ipi->ip_dst)));
+ 	      ip4stat.ip4s_spoof++;
+	      m_freem(m);
+	      return;
+	  }
+      }
+    
+    /* Statistics */
+    ip4stat.ip4s_ibytes += ntohs(ipi->ip_len);
+
     /*
      * Interface pointer is already in first mbuf; chop off the 
      * `outer' header and reschedule.
@@ -165,7 +219,10 @@ ip4_input(m, va_alist)
     m->m_len -= iphlen;
     m->m_pkthdr.len -= iphlen;
     m->m_data += iphlen;
-    m->m_flags |= M_TUNNEL;
+
+    /* tdbi is only set in esp or ah, if next protocol is udp or tcp */
+    if (m->m_flags & (M_CONF|M_AUTH))
+	m->m_pkthdr.tdbi = NULL;
 
     /*
      * Interface pointer stays the same; if no IPsec processing has
@@ -184,10 +241,8 @@ ip4_input(m, va_alist)
 	m_freem(m);
 	ip4stat.ip4s_qfull++;
 	splx(s);
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ip4_input(): packet dropped because of full queue\n");
-#endif /* ENCDEBUG */
+
+	DPRINTF(("ip4_input(): packet dropped because of full queue\n"));
 	return;
     }
 
@@ -204,6 +259,23 @@ ipe4_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     struct ip *ipo, *ipi;
     ushort ilen;
 
+    /* Check that the source address, if present, is from AF_INET */
+    if ((tdb->tdb_src.sa.sa_family != 0) &&
+	(tdb->tdb_src.sa.sa_family != AF_INET))
+    {
+	DPRINTF(("ipe4_output(): IP in protocol-family <%d> attempted, aborting", tdb->tdb_src.sa.sa_family));
+	m_freem(m);
+	return EINVAL;
+    }
+
+    /* Check that the destination address is AF_INET */
+    if (tdb->tdb_src.sa.sa_family != AF_INET)
+    {
+	DPRINTF(("ipe4_output(): IP in protocol-family <%d> attempted, aborting", tdb->tdb_dst.sa.sa_family));
+	m_freem(m);
+	return EINVAL;
+    }
+
     ip4stat.ip4s_opackets++;
     ipi = mtod(m, struct ip *);
     ilen = ntohs(ipi->ip_len);
@@ -211,10 +283,7 @@ ipe4_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     M_PREPEND(m, sizeof(struct ip), M_DONTWAIT);
     if (m == 0)
     {
-#ifdef ENCDEBUG
-	if (encdebug)
-	  printf("ipe4_output(): M_PREPEND failed\n");
-#endif /* ENCDEBUG */
+	DPRINTF(("ipe4_output(): M_PREPEND failed\n"));
       	return ENOBUFS;
     }
 
@@ -224,65 +293,41 @@ ipe4_output(struct mbuf *m, struct sockaddr_encap *gw, struct tdb *tdb,
     ipo->ip_hl = 5;
     ipo->ip_tos = ipi->ip_tos;
     ipo->ip_len = htons(ilen + sizeof(struct ip));
-/*  ipo->ip_id = htons(ip_id++); */
-    get_random_bytes((void *) &(ipo->ip_id), sizeof(ipo->ip_id));
-    ipo->ip_off = ipi->ip_off & ~(IP_MF | IP_OFFMASK); /* keep C and DF */
-
-    if (tdb->tdb_flags & TDBF_SAME_TTL)
-      ipo->ip_ttl = ipi->ip_ttl;
-    else
-      if (tdb->tdb_ttl == 0)
-        ipo->ip_ttl = ip_defttl;
-      else
-        ipo->ip_ttl = tdb->tdb_ttl;
-	
+    ipo->ip_ttl = ip_defttl;
     ipo->ip_p = IPPROTO_IPIP;
-    ipo->ip_sum = 0;
-    ipo->ip_src = tdb->tdb_osrc;
-    ipo->ip_dst = tdb->tdb_odst;
+    ipo->ip_id = ip_randomid();
+    HTONS(ipo->ip_id);
 
-/* 
- *  printf("ip4_output: [%x->%x](l=%d, p=%d)", 
- *  	   ntohl(ipi->ip_src.s_addr), ntohl(ipi->ip_dst.s_addr),
- *	   ilen, ipi->ip_p);
- *  printf(" through [%x->%x](l=%d, p=%d)\n", 
- *	   ntohl(ipo->ip_src.s_addr), ntohl(ipo->ip_dst.s_addr),
- *	   ipo->ip_len, ipo->ip_p);
- */
+    /*
+     * XXX We should be keeping tunnel soft-state and send back ICMPs
+     * if needed
+     */
+    ipo->ip_off = ipi->ip_off & ~(IP_DF | IP_MF | IP_OFFMASK);
+
+    ipo->ip_sum = 0;
+
+    ipo->ip_src = tdb->tdb_src.sin.sin_addr;
+    ipo->ip_dst = tdb->tdb_dst.sin.sin_addr;
 
     *mp = m;
 
     /* Update the counters */
     if (tdb->tdb_xform->xf_type == XF_IP4)
-    {
-	tdb->tdb_cur_packets++;
-	tdb->tdb_cur_bytes += ntohs(ipo->ip_len) - (ipo->ip_hl << 2);
-    }
+      tdb->tdb_cur_bytes += ntohs(ipo->ip_len) - (ipo->ip_hl << 2);
 
     ip4stat.ip4s_obytes += ntohs(ipo->ip_len) - (ipo->ip_hl << 2);
-
     return 0;
-
-/*  return ip_output(m, NULL, NULL, IP_ENCAPSULATED, NULL); */
 }
 
 int
 ipe4_attach()
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ipe4_attach(): setting up\n");
-#endif /* ENCDEBUG */
     return 0;
 }
 
 int
-ipe4_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
+ipe4_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ipe4_init(): setting up\n");
-#endif /* ENCDEBUG */
     tdbp->tdb_xform = xsp;
     return 0;
 }
@@ -290,10 +335,6 @@ ipe4_init(struct tdb *tdbp, struct xformsw *xsp, struct mbuf *m)
 int
 ipe4_zeroize(struct tdb *tdbp)
 {
-#ifdef ENCDEBUG
-    if (encdebug)
-      printf("ipe4_zeroize(): nothing to do really...\n");
-#endif /* ENCDEBUG */
     return 0;
 }
 
@@ -301,7 +342,29 @@ void
 ipe4_input(struct mbuf *m, ...)
 {
     /* This is a rather serious mistake, so no conditional printing */
-    log(LOG_ALERT, "ipe4_input(): should never be called\n");
+    printf("ipe4_input(): should never be called\n");
     if (m)
       m_freem(m);
+}
+
+int
+ip4_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+{
+	/* All sysctl names at this level are terminal. */
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	switch (name[0]) {
+	case IP4CTL_ALLOW:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &ip4_allow));
+	default:
+		return (ENOPROTOOPT);
+	}
+	/* NOTREACHED */
 }

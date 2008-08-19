@@ -1,4 +1,4 @@
-/*	$OpenBSD: wds.c,v 1.13 1998/01/18 18:48:40 niklas Exp $	*/
+/*	$OpenBSD: wds.c,v 1.16 1999/02/13 00:59:28 fgsch Exp $	*/
 /*	$NetBSD: wds.c,v 1.13 1996/11/03 16:20:31 mycroft Exp $	*/
 
 #undef	WDSDIAG
@@ -71,7 +71,6 @@
 
 #include <machine/bus.h>
 #include <machine/intr.h>
-#include <machine/pio.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -248,19 +247,24 @@ wdsprobe(parent, match, aux)
 	void *match, *aux;
 {
 	register struct isa_attach_args *ia = aux;
+	bus_space_tag_t iot = ia->ia_iot;
+	bus_space_handle_t ioh;
+	int rv;
 
-#ifdef NEWCONFIG
-	if (ia->ia_iobase == IOBASEUNK)
-		return 0;
-#endif
+	if (bus_space_map(iot, ia->ia_iobase, WDS_IO_PORTS, 0, &ioh))
+		return (0);
 
 	/* See if there is a unit at this location. */
-	if (wds_find(ia, NULL) != 0)
-		return 0;
+	rv = wds_find(ia, NULL);
 
-	ia->ia_msize = 0;
-	ia->ia_iosize = WDS_IO_PORTS;
-	return 1;
+	bus_space_unmap(iot, ioh, WDS_IO_PORTS);
+
+	if (rv) {
+		ia->ia_msize = 0;
+		ia->ia_iosize = WDS_IO_PORTS;
+	}
+
+	return (rv);
 }
 
 int
@@ -284,8 +288,15 @@ wdsattach(parent, self, aux)
 {
 	struct isa_attach_args *ia = aux;
 	struct wds_softc *sc = (void *)self;
+	bus_space_tag_t iot = ia->ia_iot;
+	bus_space_handle_t ioh;
 
-	if (wds_find(ia, sc) != 0)
+	if (bus_space_map(iot, ia->ia_iobase, WDS_IO_PORTS, 0, &ioh)) {
+		printf("%s: can't map i/o space\n", sc->sc_dev.dv_xname);
+		return;
+	}
+
+	if (!wds_find(ia, sc))
 		panic("wdsattach: wds_find of %s failed", self->dv_xname);
 	wds_init(sc);
 
@@ -311,9 +322,6 @@ wdsattach(parent, self, aux)
 	/* It gives Vendor Error 26 whenever I try it.     */
 	sc->sc_link.openings = 1;
 
-#ifdef NEWCONFIG
-	isa_establish(&sc->sc_id, &sc->sc_dev);
-#endif
 	sc->sc_ih = isa_intr_establish(ia->ia_ic, sc->sc_irq, IST_EDGE,
 	    IPL_BIO, wdsintr, sc, sc->sc_dev.dv_xname);
 
@@ -850,11 +858,6 @@ wds_find(ia, sc)
 	u_char c;
 	int i;
 
-	/* XXXXX */
-
-	if (bus_space_map(iot, ia->ia_iobase, WDS_IO_PORTS, 0, &ioh))
-		return (1);
-
 	/*
 	 * Sending a command causes the CMDRDY bit to clear.
  	 */
@@ -864,12 +867,12 @@ wds_find(ia, sc)
 			goto ready;
 		delay(10);
 	}
-	return (1);
+	return (0);
 
 ready:
 	bus_space_write_1(iot, ioh, WDS_CMD, WDSC_NOOP);
 	if (bus_space_read_1(iot, ioh, WDS_STAT) & WDSS_RDY)
-		return 1;
+		return (0);
 
 	bus_space_write_1(iot, ioh, WDS_HCR, WDSH_SCSIRESET|WDSH_ASCRESET);
 	delay(10000);
@@ -895,7 +898,7 @@ ready:
 		if ((bus_space_read_1(iot, ioh, WDS_STAT) & (WDSS_RDY)) !=
 		    WDSS_RDY) {
 			printf(" failed\n");
-			return (1);
+			return (0);
 		}
 		printf("\n");
 	}
@@ -909,10 +912,9 @@ ready:
 		sc->sc_ioh = ioh;
 		sc->sc_irq = ia->ia_irq;
 		sc->sc_drq = ia->ia_drq;
-	} else
-		bus_space_unmap(iot, ioh, WDS_IO_PORTS);
+	}
 
-	return (0);
+	return (1);
 }
 
 /*

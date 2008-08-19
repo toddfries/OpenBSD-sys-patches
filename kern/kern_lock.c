@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.5 1997/11/07 10:27:43 niklas Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.8 1999/01/11 05:12:22 millert Exp $	*/
 
 /* 
  * Copyright (c) 1995
@@ -199,13 +199,13 @@ lockmgr(lkp, flags, interlkp, p)
 			panic("lockmgr: using decommissioned lock");
 		if ((flags & LK_TYPE_MASK) != LK_RELEASE ||
 		    lkp->lk_lockholder != pid)
-			panic("lockmgr: non-release on draining lock: %d\n",
+			panic("lockmgr: non-release on draining lock: %d",
 			    flags & LK_TYPE_MASK);
 		lkp->lk_flags &= ~LK_DRAINING;
 		if ((flags & LK_REENABLE) == 0)
 			lkp->lk_flags |= LK_DRAINED;
 	}
-#endif DIAGNOSTIC
+#endif /* DIAGNOSTIC */
 
 	switch (flags & LK_TYPE_MASK) {
 
@@ -451,13 +451,8 @@ lockmgr_printinfo(lkp)
 		printf(" with %d pending", lkp->lk_waitcount);
 }
 
-#if defined(DEBUG) && NCPUS == 1
-#include <sys/kernel.h>
-#include <vm/vm.h>
-#include <sys/sysctl.h>
-int lockpausetime = 0;
-struct ctldebug debug2 = { "lockpausetime", &lockpausetime };
-int simplelockrecurse;
+#if defined(SIMPLELOCK_DEBUG) && NCPUS == 1
+
 /*
  * Simple lock functions so that the debugger can see from whence
  * they are being called.
@@ -476,28 +471,10 @@ _simple_lock(alp, id, l)
 	const char *id;
 	int l;
 {
-#if 0
-	if (simplelockrecurse)
-		return;
-	if (alp->lock_data == 1) {
-		if (lockpausetime == -1)
-			panic("%s:%d: simple_lock: lock held", id, l);
-		printf("%s:%d: simple_lock: lock held\n", id, l);
-		if (lockpausetime == 1) {
-			BACKTRACE(curproc);
-		} else if (lockpausetime > 1) {
-			printf("%s:%d: simple_lock: lock held...", id, l);
-			tsleep(&lockpausetime, PCATCH | PPAUSE, "slock",
-			    lockpausetime * hz);
-			printf(" continuing\n");
-		}
-	}
 
+	if (alp->lock_data)
+		printf("%s:%d simple_lock: lock held...\n", id, l);
 	alp->lock_data = 1;
-
-	if (curproc)
-		curproc->p_simple_locks++;
-#endif
 }
 
 
@@ -507,17 +484,10 @@ _simple_lock_try(alp, id, l)
 	const char *id;
 	int l;
 {
-#if 0
 
 	if (alp->lock_data)
-		return (0);
-	if (simplelockrecurse)
-		return (1);
-	alp->lock_data = 1;
-	if (curproc)
-		curproc->p_simple_locks++;
-#endif
-	return (1);
+		printf("%s:%d simple_lock: lock held...\n", id, l);
+	return alp->lock_data = 1;
 }
 
 void
@@ -526,25 +496,9 @@ _simple_unlock(alp, id, l)
 	const char *id;
 	int l;
 {
-#if 0
-	if (simplelockrecurse)
-		return;
-	if (alp->lock_data == 0) {
-		if (lockpausetime == -1)
-			panic("%s:%d: simple_unlock: lock not held", id, l);
-		printf("%s:%d: simple_unlock: lock not held\n", id, l);
-		if (lockpausetime == 1) {
-			BACKTRACE(curproc);
-		} else if (lockpausetime > 1) {
-			printf("%s:%d: simple_unlock: lock not held...", id, l);
-			tsleep(&lockpausetime, PCATCH | PPAUSE, "sunlock",
-			    lockpausetime * hz);
-			printf(" continuing\n");
-		}
-	}
+
+	if (!alp->lock_data)
+		printf("%s:%d simple_unlock: lock not held...\n", id, l);
 	alp->lock_data = 0;
-	if (curproc)
-		curproc->p_simple_locks--;
-#endif
 }
-#endif /* DEBUG && NCPUS == 1 */
+#endif /* SIMPLELOCK_DEBUG && NCPUS == 1 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.49 1998/09/11 09:45:14 fgsch Exp $	*/
+/*	$OpenBSD: conf.c,v 1.51 1999/01/11 14:28:57 niklas Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -62,6 +62,7 @@ bdev_decl(mcd);
 #include "scd.h"
 bdev_decl(scd);
 #include "ccd.h"
+#include "raid.h"
 #include "rd.h"
 bdev_decl(rd);
 cdev_decl(rd);
@@ -87,6 +88,7 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NCCD,ccd),	/* 16: concatenated disk driver */
 	bdev_disk_init(NRD,rd),		/* 17: ram disk driver */
 	bdev_disk_init(NACD,acd),	/* 18: ATAPI CD-ROM */
+	bdev_disk_init(NRAID,raid),	/* 19: RAIDframe disk driver */
 };
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
@@ -170,6 +172,10 @@ cdev_decl(mcd);
 #include "tun.h"
 #include "audio.h"
 cdev_decl(audio);
+#include "midi.h"
+cdev_decl(midi);
+#include "sequencer.h"
+cdev_decl(music);
 cdev_decl(svr4_net);
 #include "joy.h"
 #include "apm.h"
@@ -269,6 +275,9 @@ struct cdevsw	cdevsw[] =
 #else
 	cdev_notdef(),			/* 51 */
 #endif
+	cdev_midi_init(NMIDI,midi),	/* 52: MIDI I/O */
+	cdev_midi_init(NSEQUENCER,sequencer),	/* 53: sequencer I/O */
+	cdev_disk_init(NRAID,raid),	/* 54: RAIDframe disk driver */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

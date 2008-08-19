@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.17 1998/10/21 04:12:09 jason Exp $	*/
+/*	$OpenBSD: be.c,v 1.21 1999/02/15 16:22:26 jason Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -131,6 +131,7 @@ beattach(parent, self, aux)
 	struct besoftc *sc = (struct besoftc *)self;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct confargs *ca = aux;
+	struct bootpath *bp;
 	extern void myetheraddr __P((u_char *));
 	int pri, bmsr;
 
@@ -148,8 +149,9 @@ beattach(parent, self, aux)
 	sc->sc_qr = qec->sc_regs;
 	bestop(sc);
 
-	sc->sc_mem = qec->sc_buffer;
-	sc->sc_memsize = qec->sc_bufsiz;
+	sc->sc_channel = getpropint(ca->ca_ra.ra_node, "channel#", -1);
+	if (sc->sc_channel == -1)
+		sc->sc_channel = 0;
 
 	sc->sc_burst = getpropint(ca->ca_ra.ra_node, "burst-sizes", -1);
 	if (sc->sc_burst == -1)
@@ -230,6 +232,11 @@ beattach(parent, self, aux)
 	bpfattach(&sc->sc_arpcom.ac_if.if_bpf, ifp, DLT_EN10MB,
 	    sizeof(struct ether_header));
 #endif
+
+	bp = ca->ca_ra.ra_bp;
+	if (bp != NULL && strcmp(bp->name, "be") == 0 &&
+	    sc->sc_dev.dv_unit == bp->val[1])
+		bp->dev = &sc->sc_dev;
 }
 
 /*
@@ -379,63 +386,15 @@ beqint(sc, why)
 	if (why & BE_CR_STAT_RXIRQ)
 		r |= 1;
 
-	if (why & BE_CR_STAT_BERROR) {
+	if (why & BE_CR_STAT_ERRORS) {
 		r |= 1;
 		rst = 1;
-		printf("%s: bigmac error\n", sc->sc_dev.dv_xname);
 	}
 
-	if (why & BE_CR_STAT_TXDERR) {
-		r |= 1;
-		rst = 1;
-		printf("%s: bogus tx descriptor\n", sc->sc_dev.dv_xname);
-	}
-
-	if (why & (BE_CR_STAT_TXLERR | BE_CR_STAT_TXPERR | BE_CR_STAT_TXSERR)) {
-		r |= 1;
-		rst = 1;
-		printf("%s: tx dma error ( ", sc->sc_dev.dv_xname);
-		if (why & BE_CR_STAT_TXLERR)
-			printf("Late ");
-		if (why & BE_CR_STAT_TXPERR)
-			printf("Parity ");
-		if (why & BE_CR_STAT_TXSERR)
-			printf("Generic ");
-		printf(")\n");
-	}
-
-	if (why & BE_CR_STAT_RXDROP) {
-		r |= 1;
-		rst = 1;
-		printf("%s: out of rx descriptors\n", sc->sc_dev.dv_xname);
-	}
-
-	if (why & BE_CR_STAT_RXSMALL) {
-		r |= 1;
-		rst = 1;
-		printf("%s: rx descriptor too small\n", sc->sc_dev.dv_xname);
-	}
-
-	if (why & (BE_CR_STAT_RXLERR | BE_CR_STAT_RXPERR | BE_CR_STAT_RXSERR)) {
-		r |= 1;
-		rst = 1;
-		printf("%s: rx dma error ( ", sc->sc_dev.dv_xname);
-		if (why & BE_CR_STAT_RXLERR)
-			printf("Late ");
-		if (why & BE_CR_STAT_RXPERR)
-			printf("Parity ");
-		if (why & BE_CR_STAT_RXSERR)
-			printf("Generic ");
-		printf(")\n");
-	}
-
-	if (!r) {
-		rst = 1;
-		printf("%s: unexpected error interrupt %08x\n",
-			sc->sc_dev.dv_xname, why);
-	}
-
-	if (rst) {
+	if (rst || r == 0) {
+		printf("%s:%s qstat=%b\n", sc->sc_dev.dv_xname,
+		    (r) ? "" : " unexpected",
+		    why, BE_CR_STAT_BITS);
 		printf("%s: resetting\n", sc->sc_dev.dv_xname);
 		bereset(sc);
 	}
@@ -451,34 +410,18 @@ beeint(sc, why)
 	struct besoftc *sc;
 	u_int32_t why;
 {
-	int r = 0, rst = 0;
+	int r = 0;
 
-	if (why & BE_BR_STAT_RFIFOVF) {
+	if (why & (BE_BR_STAT_RFIFOVF | BE_BR_STAT_TFIFO_UND |
+		   BE_BR_STAT_MAXPKTERR)) {
 		r |= 1;
-		rst = 1;
-		printf("%s: receive fifo overrun\n", sc->sc_dev.dv_xname);
-	}
-	if (why & BE_BR_STAT_TFIFO_UND) {
-		r |= 1;
-		rst = 1;
-		printf("%s: transmit fifo underrun\n", sc->sc_dev.dv_xname);
-	}
-	if (why & BE_BR_STAT_MAXPKTERR) {
-		r |= 1;
-		rst = 1;
-		printf("%s: max packet size error\n", sc->sc_dev.dv_xname);
 	}
 
-	if (!r) {
-		rst = 1;
-		printf("%s: unexpected error interrupt %08x\n",
-			sc->sc_dev.dv_xname, why);
-	}
+	printf("%s:%s stat=%b\n", sc->sc_dev.dv_xname,
+	    (r) ? "" : " unexpected", why, BE_BR_STAT_BITS);
 
-	if (rst) {
-		printf("%s: resetting\n", sc->sc_dev.dv_xname);
-		bereset(sc);
-	}
+	printf("%s: resetting\n", sc->sc_dev.dv_xname);
+	bereset(sc);
 
 	return r;
 }
@@ -615,7 +558,6 @@ beioctl(ifp, cmd, data)
 		break;
 
 	case SIOCSIFFLAGS:
-		sc->sc_promisc = ifp->if_flags & (IFF_PROMISC | IFF_ALLMULTI);
 		if ((ifp->if_flags & IFF_UP) == 0 &&
 		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
@@ -682,26 +624,14 @@ void
 beinit(sc)
 	struct besoftc *sc;
 {
+	struct be_bregs *br = sc->sc_br;
+	struct be_cregs *cr = sc->sc_cr;
+	struct qec_softc *qec = sc->sc_qec;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int s = splimp();
 	int i;
 
 	sc->sc_nticks = 0;
-
-	/*
-	 * init QEC: 'be' specific initializations
-	 */
-	sc->sc_qr->msize = sc->sc_memsize;
-	sc->sc_qr->rsize = sc->sc_memsize / 2;
-	sc->sc_qr->tsize = sc->sc_memsize / 2;
-	sc->sc_qr->psize = QEC_PSIZE_2048;
-	if (sc->sc_burst & SBUS_BURST_64)
-		i = QEC_CTRL_B64;
-	else if (sc->sc_burst & SBUS_BURST_32)
-		i = QEC_CTRL_B32;
-	else
-		i = QEC_CTRL_B16;
-	sc->sc_qr->ctrl = QEC_CTRL_BMODE | i;
 
 	/*
 	 * Allocate descriptor ring and buffers, if not already done
@@ -738,62 +668,58 @@ beinit(sc)
 
 	bestop(sc);
 
-	sc->sc_br->mac_addr2 = (sc->sc_arpcom.ac_enaddr[4] << 8) |
+	br->mac_addr2 = (sc->sc_arpcom.ac_enaddr[4] << 8) |
 	    sc->sc_arpcom.ac_enaddr[5];
-	sc->sc_br->mac_addr1 = (sc->sc_arpcom.ac_enaddr[2] << 8) |
+	br->mac_addr1 = (sc->sc_arpcom.ac_enaddr[2] << 8) |
 	    sc->sc_arpcom.ac_enaddr[3];
-	sc->sc_br->mac_addr0 = (sc->sc_arpcom.ac_enaddr[0] << 8) |
+	br->mac_addr0 = (sc->sc_arpcom.ac_enaddr[0] << 8) |
 	    sc->sc_arpcom.ac_enaddr[1];
 
-	sc->sc_br->htable3 = 0;
-	sc->sc_br->htable2 = 0;
-	sc->sc_br->htable1 = 0;
-	sc->sc_br->htable0 = 0;
+	br->rx_cfg = BE_BR_RXCFG_HENABLE | BE_BR_RXCFG_FIFO;
 
-	sc->sc_br->rx_cfg = BE_BR_RXCFG_HENABLE | BE_BR_RXCFG_FIFO;
+	be_mcreset(sc);
+
 	DELAY(20);
 
-	sc->sc_br->tx_cfg = BE_BR_TXCFG_FIFO;
-	sc->sc_br->rand_seed = 0xbd;
+	br->tx_cfg = BE_BR_TXCFG_FIFO;
+	br->rand_seed = 0xbd;
 
-	sc->sc_br->xif_cfg = BE_BR_XCFG_ODENABLE | BE_BR_XCFG_RESV;
+	br->xif_cfg = BE_BR_XCFG_ODENABLE | BE_BR_XCFG_RESV;
 
-	sc->sc_cr->rxds = (u_int32_t) &sc->sc_desc_dva->be_rxd[0];
-	sc->sc_cr->txds = (u_int32_t) &sc->sc_desc_dva->be_txd[0];
+	cr->rxds = (u_int32_t) &sc->sc_desc_dva->be_rxd[0];
+	cr->txds = (u_int32_t) &sc->sc_desc_dva->be_txd[0];
 
-	sc->sc_cr->rxwbufptr = 0;
-	sc->sc_cr->rxrbufptr = 0;
-	sc->sc_cr->txwbufptr = sc->sc_qr->tsize;
-	sc->sc_cr->txrbufptr = sc->sc_qr->tsize;
+	cr->rxwbufptr = cr->rxrbufptr = sc->sc_channel * qec->sc_msize;
+	cr->txwbufptr = cr->txrbufptr = cr->rxrbufptr + qec->sc_rsize;
 
 	/*
 	 * Turn off counter expiration interrupts as well as
 	 * 'gotframe' and 'sentframe'
 	 */
-	sc->sc_br->imask = BE_BR_IMASK_GOTFRAME	|
-			   BE_BR_IMASK_RCNTEXP	|
-			   BE_BR_IMASK_ACNTEXP	|
-			   BE_BR_IMASK_CCNTEXP	|
-			   BE_BR_IMASK_LCNTEXP	|
-			   BE_BR_IMASK_CVCNTEXP	|
-			   BE_BR_IMASK_SENTFRAME|
-			   BE_BR_IMASK_NCNTEXP	|
-			   BE_BR_IMASK_ECNTEXP	|
-			   BE_BR_IMASK_LCCNTEXP	|
-			   BE_BR_IMASK_FCNTEXP	|
-			   BE_BR_IMASK_DTIMEXP;
+	br->imask = BE_BR_IMASK_GOTFRAME	|
+		    BE_BR_IMASK_RCNTEXP		|
+		    BE_BR_IMASK_ACNTEXP		|
+		    BE_BR_IMASK_CCNTEXP		|
+		    BE_BR_IMASK_LCNTEXP		|
+		    BE_BR_IMASK_CVCNTEXP	|
+		    BE_BR_IMASK_SENTFRAME	|
+		    BE_BR_IMASK_NCNTEXP		|
+		    BE_BR_IMASK_ECNTEXP		|
+		    BE_BR_IMASK_LCCNTEXP	|
+		    BE_BR_IMASK_FCNTEXP		|
+		    BE_BR_IMASK_DTIMEXP;
 
-	sc->sc_cr->rimask = 0;
-	sc->sc_cr->timask = 0;
-	sc->sc_cr->qmask = 0;
-	sc->sc_cr->bmask = 0;
+	cr->rimask = 0;
+	cr->timask = 0;
+	cr->qmask = 0;
+	cr->bmask = 0;
 
-	sc->sc_br->jsize = 4;
+	br->jsize = 4;
 
-	sc->sc_cr->ccnt = 0;
+	cr->ccnt = 0;
 
-	sc->sc_br->tx_cfg |= BE_BR_TXCFG_ENABLE;
-	sc->sc_br->rx_cfg |= BE_BR_RXCFG_ENABLE;
+	br->tx_cfg |= BE_BR_TXCFG_ENABLE;
+	br->rx_cfg |= BE_BR_RXCFG_ENABLE;
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1298,16 +1224,18 @@ be_mcreset(sc)
 	struct ether_multi *enm;
 	struct ether_multistep step;
 
+	if (ifp->if_flags & IFF_PROMISC) {
+		br->rx_cfg |= BE_BR_RXCFG_PMISC;
+		return;
+	}
+	else
+		br->rx_cfg &= ~BE_BR_RXCFG_PMISC;
+
 	if (ifp->if_flags & IFF_ALLMULTI) {
 		br->htable3 = 0xffff;
 		br->htable2 = 0xffff;
 		br->htable1 = 0xffff;
 		br->htable0 = 0xffff;
-		return;
-	}
-
-	if (ifp->if_flags & IFF_PROMISC) {
-		br->rx_cfg |= BE_BR_RXCFG_PMISC;
 		return;
 	}
 

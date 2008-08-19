@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.17 1998/09/06 01:44:08 art Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.20 1999/02/26 02:48:36 art Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -38,6 +38,13 @@
 
 #include <sys/queue.h>
 #include <sys/lock.h>
+#ifdef UVM			/* XXX: clean up includes later */
+#include <vm/pglist.h>		/* XXX */
+#include <vm/vm_param.h>	/* XXX */
+#include <sys/lock.h>		/* XXX */
+#include <uvm/uvm_object.h>	/* XXX */
+#include <uvm/uvm_vnode.h>	/* XXX */
+#endif /* UVM */
 
 /*
  * The vnode is the focus of all file activity in UNIX.  There is a
@@ -79,6 +86,9 @@ LIST_HEAD(buflists, buf);
  */
 
 struct vnode {
+#ifdef UVM
+	struct uvm_vnode v_uvm;			/* uvm data */
+#endif
 	u_long	v_flag;				/* vnode flags (see below) */
 	short	v_usecount;			/* reference count of users */
 	short	v_writecount;			/* reference count of writers */
@@ -108,9 +118,12 @@ struct vnode {
 	int	v_clen;				/* length of current cluster */
 	int	v_ralen;			/* Read-ahead length */
 	daddr_t	v_maxra;			/* last readahead block */
-	struct  simplelock v_interlock;        /* lock on usecount and flag */
-	struct  lock *v_vnlock;                 /* used for non-locking fs's */
+	struct  simplelock v_interlock;		/* lock on usecount and flag */
+	struct  lock *v_vnlock;			/* used for non-locking fs's */
+#ifdef UVM
+#else
 	long	v_spare[3];			/* round to 128 bytes */
+#endif
 	enum	vtagtype v_tag;			/* type of underlying data */
 	void 	*v_data;			/* private data for fs */
 };
@@ -133,6 +146,7 @@ struct vnode {
 #define	VALIASED	0x0800	/* vnode has an alias */
 #define	VDIROP		0x1000	/* LFS: vnode is involved in a directory op */
 #define VONFREELIST     0x2000  /* Vnode is on a free list */
+#define VLOCKSWORK      0x4000  /* FS supports locking discipline */
 
 /*
  * Vnode attributes.  A field value of VNOVAL represents a field whose value

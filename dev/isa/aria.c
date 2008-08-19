@@ -1,4 +1,4 @@
-/*	$OpenBSD: aria.c,v 1.3 1997/07/10 23:06:32 provos Exp $ */
+/*	$OpenBSD: aria.c,v 1.5 1999/01/07 06:14:47 niklas Exp $ */
 
 /*
  * Copyright (c) 1995, 1996 Roland C. Dowdeswell.  All rights reserved.
@@ -259,7 +259,9 @@ struct audio_hw_if aria_hw_if = {
 	aria_mixer_get_port,
 	aria_mixer_query_devinfo,
 	1,	/* full-duplex */
-	0
+	0,
+	NULL,
+	NULL
 };
 
 /*
@@ -398,18 +400,6 @@ aria_do_kludge(func, bits, and, or, rba)
 	outw(0x200, func);
 	outb(0x201, (i&and) | or);
 }
-
-#ifdef NEWCONFIG
-void
-ariaforceintr(aux)
-	void *aux;
-{
-	struct isa_attach_args *ia = aux;
-	u_short iobase = ia->ia_iobase;
-
-	(void)aria_sendcmd(iobase, ARIADSPC_FORCEINTR, -1, -1, -1);
-}
-#endif
 
 /*
  * Attach hardware to driver, attach hardware driver to audio

@@ -1,12 +1,12 @@
-/*	$OpenBSD: miidevs.h,v 1.2 1998/09/10 17:25:10 jason Exp $	*/
+/*	$OpenBSD: miidevs.h,v 1.6 1999/02/08 13:31:21 jason Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: miidevs,v 1.1 1998/09/10 17:17:33 jason Exp 
+ *	OpenBSD: miidevs,v 1.4 1999/02/08 13:29:04 jason Exp 
  */
-/* $NetBSD: miidevs,v 1.1 1998/08/10 23:55:17 thorpej Exp $ */
+/* $NetBSD: miidevs,v 1.3 1998/11/05 03:43:43 thorpej Exp $ */
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -49,9 +49,12 @@
  * List of known MII OUIs
  */
 
+#define	MII_OUI_AMD	0x00606e	/* Advanced Micro Devices */
+#define	MII_OUI_DAVICOM	0x006040	/* Davicom Semiconductor */
 #define	MII_OUI_ICS	0x00057d	/* Integrated Circuit Systems */
 #define	MII_OUI_INTEL	0x00aa00	/* Intel */
 #define	MII_OUI_LEVEL1	0x1e0400	/* Level 1 */
+#define	MII_OUI_MYSON	0x00c0b4	/* Myson Technology */
 #define	MII_OUI_NATSEMI	0x080017	/* National Semiconductor */
 #define	MII_OUI_QUALSEMI	0x006051	/* Quality Semiconductor */
 #define	MII_OUI_SEEQ	0x0005be	/* Seeq */
@@ -60,6 +63,14 @@
 /*
  * List of known models.  Grouped by oui.
  */
+
+/* Advanced Micro Devices PHYs */
+#define	MII_MODEL_AMD_79C873	0x0000
+#define	MII_STR_AMD_79C873	"Am79C873 10/100 media interface"
+
+/* Davicom Semiconductor PHYs */
+#define	MII_MODEL_DAVICOM_DM9101	0x0000
+#define	MII_STR_DAVICOM_DM9101	"DM9101 10/100 media interface"
 
 /* Integrated Circuit Systems PHYs */
 #define	MII_MODEL_ICS_1890	0x0002
@@ -72,6 +83,10 @@
 /* Level 1 PHYs */
 #define	MII_MODEL_LEVEL1_LXT970	0x0000
 #define	MII_STR_LEVEL1_LXT970	"LXT970 10/100 media interface"
+
+/* Myson Technology PHYs */
+#define	MII_MODEL_MYSON_MTD972	0x0000
+#define	MII_STR_MYSON_MTD972	"MTD972 10/100 media interface"
 
 /* National Semiconductor PHYs */
 #define	MII_MODEL_NATSEMI_DP83840	0x0000
@@ -86,6 +101,8 @@
 /* Seeq PHYs */
 #define	MII_MODEL_SEEQ_80220	0x0003
 #define	MII_STR_SEEQ_80220	"Seeq 80220 10/100 media interface"
+#define	MII_MODEL_SEEQ_84220	0x0004
+#define	MII_STR_SEEQ_84220	"Seeq 84220 10/100 media interface"
 
 /* Texas Instruments PHYs */
 #define	MII_MODEL_TI_TLAN10T	0x0001

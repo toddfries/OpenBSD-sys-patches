@@ -1,4 +1,4 @@
-/*      $OpenBSD: sv.c,v 1.4 1998/10/05 20:47:45 niklas Exp $ */
+/*      $OpenBSD: sv.c,v 1.6 1999/01/02 00:02:49 niklas Exp $ */
 
 /*
  * Copyright (c) 1998 Constantine Paul Sapuntzakis
@@ -191,6 +191,8 @@ struct audio_hw_if sv_hw_if = {
 	sv_round,
 	sv_mappage,
 	sv_get_props,
+	NULL,
+	NULL
 };
 
 
@@ -410,7 +412,7 @@ sv_attach(parent, self, aux)
 
   sv_init_mixer(sc);
 
-  audio_attach_mi(&sv_hw_if, 0, sc, &sc->sc_dev);
+  audio_attach_mi(&sv_hw_if, sc, &sc->sc_dev);
 }
 
 #ifdef AUDIO_DEBUG

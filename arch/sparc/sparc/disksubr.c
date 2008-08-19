@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.21 1998/10/03 21:18:56 millert Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.23 1999/01/08 04:29:10 millert Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.16 1996/04/28 20:25:59 thorpej Exp $ */
 
 /*
@@ -308,6 +308,12 @@ bounds_check_with_label(bp, lp, osdep, wlabel)
 	struct partition *p = lp->d_partitions + DISKPART(bp->b_dev);
 	int sz = howmany(bp->b_bcount, DEV_BSIZE);
 
+	/* avoid division by zero */
+	if (lp->d_secpercyl == 0) {
+		bp->b_error = EINVAL;
+		goto bad;
+	}
+
 	/* overwriting disk label ? */
 	/* XXX should also protect bootstrap in first 8K */
 	/* XXX this assumes everything <=LABELSECTOR is label! */
@@ -521,7 +527,8 @@ disklabel_bsd_to_sun(lp, cp)
 	int i, secpercyl;
 	u_short cksum, *sp1, *sp2;
 
-	if (lp->d_secsize != 512)
+	/* Enforce preconditions */
+	if (lp->d_secsize != 512 || lp->d_nsectors == 0 || lp->d_ntracks == 0)
 		return (EINVAL);
 
 	sl = (struct sun_disklabel *)cp;

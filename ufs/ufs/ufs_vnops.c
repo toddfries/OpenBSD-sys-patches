@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.20 1998/08/06 19:35:15 csapuntz Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.27 1999/03/09 21:16:28 art Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -58,6 +58,10 @@
 #include <sys/lockf.h>
 
 #include <vm/vm.h>
+
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
 
 #include <miscfs/specfs/specdev.h>
 #include <miscfs/fifofs/fifo.h>
@@ -180,14 +184,19 @@ ufs_open(v)
 				int  a_mode;
 				struct ucred *a_cred;
 				struct proc *a_p;
-				} */ *ap = v;
+	} */ *ap = v;
+	struct inode *ip = VTOI(ap->a_vp);
 
 	/*
 	 * Files marked append-only must be opened for appending.
 	 */
-	if ((VTOI(ap->a_vp)->i_ffs_flags & APPEND) &&
+	if ((ip->i_ffs_flags & APPEND) &&
 	    (ap->a_mode & (FWRITE | O_APPEND)) == FWRITE)
 		return (EPERM);
+
+	if (ap->a_mode & O_TRUNC)
+		ip->i_flag |= IN_CHANGE | IN_UPDATE;
+
 	return (0);
 }
 
@@ -312,7 +321,7 @@ ufs_getattr(v)
 		vap->va_blocksize = MAXBSIZE;
 	else
 		vap->va_blocksize = vp->v_mount->mnt_stat.f_iosize;
-	vap->va_bytes = dbtob(ip->i_ffs_blocks);
+	vap->va_bytes = dbtob((u_quad_t)ip->i_ffs_blocks);
 	vap->va_type = vp->v_type;
 	vap->va_filerev = ip->i_modrev;
 	return (0);
@@ -454,7 +463,11 @@ ufs_chmod(vp, mode, cred, p)
 	ip->i_ffs_mode |= (mode & ALLPERMS);
 	ip->i_flag |= IN_CHANGE;
 	if ((vp->v_flag & VTEXT) && (ip->i_ffs_mode & S_ISTXT) == 0)
+#if defined(UVM)
+		(void) uvm_vnp_uncache(vp);
+#else
 		(void) vnode_pager_uncache(vp);
+#endif
 	return (0);
 }
 
@@ -664,13 +677,11 @@ ufs_remove(v)
 
 	ip = VTOI(vp);
 	if (vp->v_type == VDIR || (ip->i_ffs_flags & (IMMUTABLE | APPEND)) ||
-	    (VTOI(dvp)->i_ffs_flags & APPEND)) {
+	    (VTOI(dvp)->i_ffs_flags & APPEND))
 		error = EPERM;
-		goto out;
-	}
-	if ((error = ufs_dirremove(dvp, ip, ap->a_cnp->cn_flags, 0)) != 0)
-		goto out;
-out:
+	else
+		error = ufs_dirremove(dvp, ip, ap->a_cnp->cn_flags, 0);
+
 	if (dvp == vp)
 		vrele(vp);
 	else
@@ -926,6 +937,11 @@ abortit:
 	/* fvp, tdvp, tvp now locked */
 	dp = VTOI(fdvp);
 	ip = VTOI(fvp);
+	if ((nlink_t)ip->i_ffs_nlink >= LINK_MAX) {
+		VOP_UNLOCK(fvp, 0, p);
+		error = EMLINK;
+		goto abortit;
+	}
 	if ((ip->i_ffs_flags & (IMMUTABLE | APPEND)) ||
 	    (dp->i_ffs_flags & APPEND)) {
 		VOP_UNLOCK(fvp, 0, p);
@@ -955,7 +971,7 @@ abortit:
 		}
 		ip->i_flag |= IN_RENAME;
 		oldparent = dp->i_number;
-		doingdirectory++;
+		doingdirectory = 1;
 	}
 	/* Why? */
 	vrele(fdvp);
@@ -1046,8 +1062,12 @@ abortit:
 			if (DOINGSOFTDEP(tdvp))
                                softdep_increase_linkcnt(dp);
 			if ((error = VOP_UPDATE(tdvp, &ts, &ts,
-						!DOINGSOFTDEP(tdvp))) != 0)
+						!DOINGSOFTDEP(tdvp))) != 0) {
+				dp->i_effnlink--;
+				dp->i_ffs_nlink--;
+				dp->i_flag |= IN_CHANGE;
 				goto bad;
+			}
 		}
 		ufs_makedirentry(ip, tcnp, &newdir);
 		if ((error = ufs_direnter(tdvp, NULL, &newdir, tcnp, NULL)) != 0) {
@@ -1102,11 +1122,14 @@ abortit:
 		}
 		
 		if ((error = ufs_dirrewrite(dp, xp, ip->i_number,
-                   IFTODT(ip->i_ffs_mode), doingdirectory)) != 0)
+                   IFTODT(ip->i_ffs_mode), (doingdirectory && newparent) ?
+		   newparent : doingdirectory)) != 0)
                         goto bad;
 		if (doingdirectory) {
-			dp->i_effnlink--;
-			dp->i_flag |= IN_CHANGE;
+			if (!newparent) {
+				dp->i_effnlink--;
+				dp->i_flag |= IN_CHANGE;
+			}
 			xp->i_effnlink--;
 			xp->i_flag |= IN_CHANGE;
 		}
@@ -1122,7 +1145,9 @@ abortit:
                         * disk, so when running with that code we avoid doing
                         * them now.
                         */
-			dp->i_ffs_nlink--;
+			if (!newparent)
+				dp->i_ffs_nlink--;
+
 			xp->i_ffs_nlink--;
 			if ((error = VOP_TRUNCATE(tvp, (off_t)0, IO_SYNC,
 			        tcnp->cn_cred, tcnp->cn_proc)) != 0)
@@ -1226,7 +1251,7 @@ ufs_mkdir(v)
 	struct direct newdir;
 	struct dirtemplate dirtemplate, *dtp;
 	struct timespec ts;
-	int error, dmode;
+	int error, dmode, blkoff;
 
 #ifdef DIAGNOSTIC
 	if ((cnp->cn_flags & HASBUF) == 0)
@@ -1300,8 +1325,26 @@ ufs_mkdir(v)
 		goto bad;
 	ip->i_ffs_size = DIRBLKSIZ;
 	ip->i_flag |= IN_CHANGE | IN_UPDATE;
+#if defined(UVM)
+	uvm_vnp_setsize(tvp, ip->i_ffs_size);
+#else
 	vnode_pager_setsize(tvp, (u_long)ip->i_ffs_size);
+#endif
 	bcopy((caddr_t)&dirtemplate, (caddr_t)bp->b_data, sizeof dirtemplate);
+	if (DOINGSOFTDEP(tvp)) {
+		/*
+		 * Ensure that the entire newly allocated block is a
+		 * valid directory so that future growth within the
+		 * block does not have to ensure that the block is
+		 * written before the inode
+		 */
+		blkoff = DIRBLKSIZ;
+		while (blkoff < bp->b_bcount) {
+			((struct direct *)
+			 (bp->b_data + blkoff))->d_reclen = DIRBLKSIZ;
+			blkoff += DIRBLKSIZ;
+		}
+	}
 	if ((error = VOP_UPDATE(tvp, &ts, &ts, !DOINGSOFTDEP(tvp))) != 0) {
 		(void)VOP_BWRITE(bp);
 		goto bad;
@@ -1368,10 +1411,13 @@ ufs_rmdir(v)
 	ip = VTOI(vp);
 	dp = VTOI(dvp);
 	/*
-	 * No rmdir "." please.
+	 * No rmdir "." or of mounted on directories.
 	 */
-	if (dp == ip) {
-		vrele(dvp);
+	if (dp == ip || vp->v_mountedhere != 0) {
+		if (dp == ip)
+			vrele(dvp);
+		else
+			vput(dvp);
 		vput(vp);
 		return (EINVAL);
 	}
@@ -1408,12 +1454,10 @@ ufs_rmdir(v)
 	 * Truncate inode. The only stuff left in the directory is "." and
 	 * "..". The "." reference is inconsequential since we are quashing
 	 * it. We have removed the "." reference and the reference in the
-	 * parent directory, but there may be other hard links. So,
-	 * ufs_dirremove will set the UF_IMMUTABLE flag to ensure that no
-	 * new entries are made. The soft dependency code will arrange to
-	 * do these operations after the parent directory entry has been
-	 * deleted on disk, so when running with that code we avoid doing
-	 * them now.
+	 * parent directory, but there may be other hard links. The soft
+	 * update code will arange to do these operations after the parent
+	 * directory has been deleted on disk, so when running with
+	 * that code we avoid doing them now.
 	 */
 	dp->i_effnlink--;
 	dp->i_flag |= IN_CHANGE;
@@ -1958,6 +2002,9 @@ ufs_vinit(mntp, specops, fifoops, vpp)
 			nvp->v_data = vp->v_data;
 			vp->v_data = NULL;
 			vp->v_op = spec_vnodeop_p;
+#ifdef DIAGNOSTIC
+			vp->v_flag &= ~VLOCKSWORK;
+#endif
 			vrele(vp);
 			vgone(vp);
 			/*

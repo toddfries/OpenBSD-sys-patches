@@ -1,3 +1,4 @@
+/*	$OpenBSD: locore.h,v 1.5 1999/02/09 06:36:26 smurph Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -72,6 +73,7 @@
  *	hence to debuggers, and such).
  */
 #define LABEL(name)	name:	global name NEWLINE
+
 #if EH_DEBUG
 #  define _LABEL(name)	name:	global name NEWLINE
 #else

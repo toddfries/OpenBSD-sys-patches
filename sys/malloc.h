@@ -1,5 +1,5 @@
-/*	$OpenBSD: malloc.h,v 1.14 1998/03/01 00:37:56 niklas Exp $	*/
-/*	$NetBSD: malloc.h,v 1.23 1996/04/05 04:52:52 mhitch Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.21 1999/02/26 01:57:58 art Exp $	*/
+/*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -33,14 +33,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)malloc.h	8.3 (Berkeley) 1/12/94
+ *	@(#)malloc.h	8.5 (Berkeley) 5/3/95
  */
 
 #ifndef _SYS_MALLOC_H_
 #define	_SYS_MALLOC_H_
 
 #ifndef NO_KMEMSTATS
-#define	KMEMSTATS
+#define KMEMSTATS
 #endif
 
 /*
@@ -143,8 +143,19 @@
 #define	M_DIRADD	88	/* New directory entry */
 #define	M_MKDIR		89	/* New directory */
 #define	M_DIRREM	90	/* Directory entry deleted */
-
 #define M_VMPBUCKET	91	/* VM page buckets */
+#define M_VMSWAP	92	/* VM swap structures */
+
+#define M_DISCQ		93	/* IPv6 discq */
+#define M_FRAGQ		94	/* IPv6 fragq */
+#define M_SECA		95	/* Sec Assoc */
+#define M_I6IFP		96	/* IPv6 if info */
+
+#define	M_RAIDFRAME	97	/* Raidframe data */
+
+#define M_UVMAMAP	98	/* UVM amap and realted */
+#define M_UVMAOBJ	99	/* UVM aobj and realted */
+#define M_POOL		100	/* Pool memory */
 
 #define	M_TEMP		127	/* misc temporary data buffers */
 #define M_LAST          128     /* Must be last type + 1 */
@@ -243,8 +254,16 @@
  	"mkdir",	/* 89 M_MKDIR */ \
  	"dirrem",	/* 90 M_DIRREM */ \
  	"VM page bucket", /* 91 M_VMPBUCKET */ \
-	NULL, NULL, NULL, NULL, NULL, \
-	NULL, NULL, NULL, NULL, NULL, \
+	"VM swap",	/* 92 M_VMSWAP */ \
+	"IPv6 discq",	/* 93 M_DISCQ */ \
+	"IPv6 fragq",	/* 94 M_FRAGQ */ \
+	"Sec Assoc",	/* 95 M_SECA */ \
+	"IPv6 if info",	/* 96 M_I6IFP */ \
+	"RaidFrame data", /* 97 M_RAIDFRAME */ \
+	"UVM amap",	/* 93 M_UVMAMAP */ \
+	"UVM aobj",	/* 94 M_UVMAOBJ */ \
+	"pool",		/* 95 M_POOL */ \
+	NULL, \
 	NULL, NULL, NULL, NULL, NULL, \
 	NULL, NULL, NULL, NULL, NULL, \
 	NULL, NULL, NULL, NULL, NULL, \
@@ -295,7 +314,7 @@ struct kmembuckets {
 #ifdef _KERNEL
 #define	MINALLOCSIZE	(1 << MINBUCKET)
 #define	BUCKETINDX(size) \
-	(size) <= (MINALLOCSIZE * 128) \
+	((size) <= (MINALLOCSIZE * 128) \
 		? (size) <= (MINALLOCSIZE * 8) \
 			? (size) <= (MINALLOCSIZE * 2) \
 				? (size) <= (MINALLOCSIZE * 1) \
@@ -325,7 +344,7 @@ struct kmembuckets {
 					: (MINBUCKET + 13) \
 				: (size) <= (MINALLOCSIZE * 16384) \
 					? (MINBUCKET + 14) \
-					: (MINBUCKET + 15)
+					: (MINBUCKET + 15))
 
 /*
  * Turn virtual addresses into kmem map indicies
@@ -337,13 +356,13 @@ struct kmembuckets {
 /*
  * Macro versions for the usual cases of malloc/free
  */
-#if defined(KMEMSTATS) || defined(DIAGNOSTIC)
+#if defined(KMEMSTATS) || defined(DIAGNOSTIC) || defined(_LKM)
 #define	MALLOC(space, cast, size, type, flags) \
 	(space) = (cast)malloc((u_long)(size), type, flags)
 #define	FREE(addr, type) free((caddr_t)(addr), type)
 
 #else /* do not collect statistics */
-#define	MALLOC(space, cast, size, type, flags) { \
+#define	MALLOC(space, cast, size, type, flags) do { \
 	register struct kmembuckets *kbp = &bucket[BUCKETINDX(size)]; \
 	long s = splimp(); \
 	if (kbp->kb_next == NULL) { \
@@ -353,9 +372,9 @@ struct kmembuckets {
 		kbp->kb_next = *(caddr_t *)(space); \
 	} \
 	splx(s); \
-}
+} while (0)
 
-#define	FREE(addr, type) { \
+#define	FREE(addr, type) do { \
 	register struct kmembuckets *kbp; \
 	register struct kmemusage *kup = btokup(addr); \
 	long s = splimp(); \
@@ -371,14 +390,16 @@ struct kmembuckets {
 		kbp->kb_last = (caddr_t)(addr); \
 	} \
 	splx(s); \
-}
+} while(0)
 #endif /* do not collect statistics */
 
 extern struct kmemstats kmemstats[];
 extern struct kmemusage *kmemusage;
 extern char *kmembase;
 extern struct kmembuckets bucket[];
+
 extern void *malloc __P((unsigned long size, int type, int flags));
 extern void free __P((void *addr, int type));
+
 #endif /* _KERNEL */
 #endif /* !_SYS_MALLOC_H_ */

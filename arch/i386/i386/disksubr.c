@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.34 1998/10/03 21:18:54 millert Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.36 1999/01/08 04:29:06 millert Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -91,6 +91,10 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	/* minimal requirements for archtypal disk label */
 	if (lp->d_secsize == 0)
 		lp->d_secsize = DEV_BSIZE;
+	if (lp->d_secpercyl == 0) {
+		msg = "invalid geometry";
+		goto done;
+	}
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
 	lp->d_npartitions = RAW_PART + 1;
@@ -496,6 +500,13 @@ bounds_check_with_label(bp, lp, osdep, wlabel)
 	    LABELSECTOR;
 	int sz = howmany(bp->b_bcount, DEV_BSIZE);
 
+	/* avoid division by zero */
+	if (lp->d_secpercyl == 0) {
+		bp->b_error = EINVAL;
+		goto bad;
+	}
+
+	/* beyond partition? */
 	if (bp->b_blkno + sz > blockpersec(p->p_size, lp)) {
 		sz = blockpersec(p->p_size, lp) - bp->b_blkno;
 		if (sz == 0) {

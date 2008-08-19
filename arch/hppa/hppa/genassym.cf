@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.2 1998/09/14 18:59:50 mickey Exp $
+#	$OpenBSD: genassym.cf,v 1.5 1999/02/02 15:13:57 mickey Exp $
 
 #
 # Copyright (c) 1982, 1990, 1993
@@ -66,16 +66,9 @@ define	INTSTACK_SIZE		INTSTACK_SIZE
 define	HPPA_PID_KERNEL		HPPA_PID_KERNEL
 
 # pte things
-define	TLB_ICACHE_POS		TLB_ICACHE_POS
-define	TLB_DCACHE_POS		TLB_DCACHE_POS
 define	TLB_REF_POS		TLB_REF_POS
 define	TLB_GATE_PROT		TLB_GATE_PROT
 define	TLB_DIRTY_POS		TLB_DIRTY_POS
-define	TLB_ALIGNED_POS		TLB_ALIGNED_POS
-define	TLB_AR_KRW		TLB_AR_KRW
-
-# cpu stuff
-define	CACHE_LINE_SIZE		CACHE_LINE_SIZE
 
 # hpt_table fields
 struct	hpt_entry
@@ -92,7 +85,6 @@ member	pv_space
 member	pv_va
 member	pv_tlbpage
 member	pv_tlbprot
-member	pv_tlbsw
 
 # pmap
 struct	pmap
@@ -105,6 +97,12 @@ define vmmap_pmap	offsetof(struct vm_map, pmap)
 # export iomod
 struct	iomod
 member	io_command
+
+# export mbuf
+struct	mbuf
+member	m_len
+member	m_next
+member	m_data
 
 # saved state fields
 define	TF_SIZE		sizeof(struct trapframe)

@@ -1,4 +1,4 @@
-/*	$NetBSD$ */
+/*	$OpenBSD: memdevs.c,v 1.2 1998/12/15 05:52:30 smurph Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt

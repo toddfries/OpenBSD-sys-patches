@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_page.c,v 1.14 1998/06/09 18:10:02 mickey Exp $	*/
+/*	$OpenBSD: vm_page.c,v 1.16 1999/02/19 02:54:36 deraadt Exp $	*/
 /*	$NetBSD: vm_page.c,v 1.41 1998/02/08 18:24:52 thorpej Exp $	*/
 
 #define	VM_PAGE_ALLOC_MEMORY_STATS
@@ -115,6 +115,7 @@
 
 #include <vm/vm.h>
 #include <vm/vm_page.h>
+#include <vm/vm_kern.h>
 #include <vm/vm_map.h>
 #include <vm/vm_pageout.h>
 
@@ -565,10 +566,11 @@ vm_page_physload(start, end, avail_start, avail_end)
 		/* # of pages */
 		npages = end - start;
 		MALLOC(pgs, struct vm_page *, sizeof(struct vm_page) * npages, 
-		    M_VMPAGE, M_NOWAIT);
+		    M_VMPGDATA, M_NOWAIT);
 		if (pgs == NULL) {
-	printf("vm_page_physload: can not malloc vm_page structs for segment\n");
-			printf("\tignoring 0x%lx -> 0x%lx\n", start, end);
+			printf("vm_page_physload: "
+			       "can not malloc vm_page structs for segment\n"
+			       "\tignoring 0x%lx -> 0x%lx\n", start, end);
 			return;
 		}
 		/* zero data, init phys_addr, and free pages */
@@ -578,9 +580,10 @@ vm_page_physload(start, end, avail_start, avail_end)
 			pgs[lcv].phys_addr = paddr;
 			if (atop(paddr) >= avail_start &&
 			    atop(paddr) <= avail_end)
-				vm_page_free(&pgs[i]);
+				vm_page_free(&pgs[lcv]);
 		}
-/* XXXCDC: incomplete: need to update v_free_count, what else? */
+/* XXXCDC: incomplete: need to update v_free_count, what else?
+	   v_free_count is updated in vm_page_free, actualy */
 /* XXXCDC: need hook to tell pmap to rebuild pv_list, etc... */
 #endif
 	} else {
@@ -680,10 +683,11 @@ vm_page_physrehash()
 	/*
 	 * malloc new buckets
 	 */
-	MALLOC(newbuckets, struct pglist *, sizeof(struct pglist) * bucketcount, 
-	    M_VMPBUCKET, M_NOWAIT);
+	MALLOC(newbuckets, struct pglist*, sizeof(struct pglist) * bucketcount, 
+	       M_VMPBUCKET, M_NOWAIT);
 	if (newbuckets == NULL) {
-    printf("vm_page_physrehash: WARNING: could not grow page hash table\n");
+		printf("vm_page_physrehash: "
+		       "WARNING: could not grow page hash table\n");
 		return;
 	}
 	for (lcv = 0; lcv < bucketcount; lcv++)
@@ -1813,6 +1817,33 @@ vm_page_alloc_memory(size, low, high, alignment, boundary,
 	simple_unlock(&vm_page_queue_free_lock);
 	splx(s);
 	return (error);
+}
+
+vm_offset_t
+vm_page_alloc_contig(size, low, high, alignment)
+	vm_offset_t size;
+	vm_offset_t low;
+	vm_offset_t high;
+	vm_offset_t alignment;
+{
+	struct pglist mlist;
+	struct vm_page  *m;
+	vm_offset_t addr, tmp_addr;
+
+	TAILQ_INIT(&mlist);
+	if (vm_page_alloc_memory(size, low, high, alignment, 0,
+	    &mlist, 1, FALSE))
+		return 0;
+	addr = tmp_addr = kmem_alloc_pageable(kernel_map, size);
+	for (m = TAILQ_FIRST(&mlist); m != NULL; m = TAILQ_NEXT(m, pageq)) {
+		vm_page_insert(m, kernel_object,
+		    tmp_addr - VM_MIN_KERNEL_ADDRESS);
+		vm_page_wire(m);
+		pmap_enter(pmap_kernel(), tmp_addr, VM_PAGE_TO_PHYS(m),
+		    VM_PROT_READ|VM_PROT_WRITE, TRUE);
+		tmp_addr += PAGE_SIZE;
+	}
+	return addr;
 }
 
 /*

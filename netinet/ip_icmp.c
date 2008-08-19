@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.10 1998/05/27 20:28:35 deraadt Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.16 1999/01/08 11:35:09 deraadt Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -35,6 +35,18 @@
  *
  *	@(#)ip_icmp.c	8.2 (Berkeley) 1/4/94
  */
+
+/*
+%%% portions-copyright-nrl-95
+Portions of this software are Copyright 1995-1998 by Randall Atkinson,
+Ronald Lee, Daniel McDonald, Bao Phan, and Chris Winters. All Rights
+Reserved. All rights under this copyright have been assigned to the US
+Naval Research Laboratory (NRL). The NRL Copyright Notice and License
+Agreement Version 1.1 (January 17, 1995) applies to these portions of the
+software.
+You should have received a copy of the license with this software. If you
+didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
+*/
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -90,7 +102,7 @@ icmp_error(n, type, code, dest, destifp)
 	register struct ip *oip = mtod(n, struct ip *), *nip;
 	register unsigned oiplen = oip->ip_hl << 2;
 	register struct icmp *icp;
-	register struct mbuf *m;
+	struct mbuf *m, m0;
 	unsigned icmplen;
 
 #ifdef ICMPPRINTFS
@@ -104,7 +116,7 @@ icmp_error(n, type, code, dest, destifp)
 	 * Don't error if the old packet protocol was ICMP
 	 * error message, only known informational types.
 	 */
-	if (oip->ip_off &~ (IP_MF|IP_DF))
+	if (ntohs(oip->ip_off) &~ (IP_MF|IP_DF))
 		goto freeit;
 	if (oip->ip_p == IPPROTO_ICMP && type != ICMP_REDIRECT &&
 	  n->m_len >= oiplen + ICMP_MINLEN &&
@@ -121,7 +133,7 @@ icmp_error(n, type, code, dest, destifp)
 	m = m_gethdr(M_DONTWAIT, MT_HEADER);
 	if (m == NULL)
 		goto freeit;
-	icmplen = oiplen + min(8,oip->ip_len);
+	icmplen = oiplen + min(8, ntohs(oip->ip_len));
 	m->m_len = icmplen + ICMP_MINLEN;
 	MH_ALIGN(m, m->m_len);
 	icp = mtod(m, struct icmp *);
@@ -148,7 +160,13 @@ icmp_error(n, type, code, dest, destifp)
 	icp->icmp_code = code;
 	bcopy((caddr_t)oip, (caddr_t)&icp->icmp_ip, icmplen);
 	nip = &icp->icmp_ip;
-	nip->ip_len = htons((u_int16_t)(nip->ip_len + oiplen));
+	nip->ip_len = htons((u_int16_t)(ntohs(nip->ip_len) + oiplen));
+
+	m0.m_next = NULL;			/* correct nip->ip_sum */
+	m0.m_data = (char *)nip;
+	m0.m_len = nip->ip_hl << 2;
+	nip->ip_sum = 0;
+	nip->ip_sum = in_cksum(&m0, nip->ip_hl << 2);
 
 	/*
 	 * Now, copy old ip header (without options)
@@ -253,36 +271,62 @@ icmp_input(m, va_alist)
 
 	case ICMP_UNREACH:
 		switch (code) {
-			case ICMP_UNREACH_NET:
-			case ICMP_UNREACH_HOST:
-			case ICMP_UNREACH_PROTOCOL:
-			case ICMP_UNREACH_PORT:
-			case ICMP_UNREACH_SRCFAIL:
-				code += PRC_UNREACH_NET;
-				break;
+		case ICMP_UNREACH_NET:
+		case ICMP_UNREACH_HOST:
+		case ICMP_UNREACH_PROTOCOL:
+		case ICMP_UNREACH_PORT:
+		case ICMP_UNREACH_SRCFAIL:
+			code += PRC_UNREACH_NET;
+			break;
 
-			case ICMP_UNREACH_NEEDFRAG:
-				code = PRC_MSGSIZE;
-				break;
+		case ICMP_UNREACH_NEEDFRAG:
+#ifdef INET6
+			if (icp->icmp_nextmtu) {
+				extern int ipv6_trans_mtu
+				    __P((struct mbuf **, int, int));
+				struct mbuf *m0 = m;
+
+				/*
+				 * Do cool v4-related path MTU, for now,
+				 * only v6-in-v4 can handle it.
+				 */
+				if (icmplen >= ICMP_V6ADVLENMIN &&
+				    icmplen >= ICMP_V6ADVLEN(icp) &&
+				    icp->icmp_ip.ip_p == IPPROTO_IPV6) {
+					/*
+					 * ipv6_trans_mtu returns 1 if
+					 * the mbuf is still intact.
+					 */
+					if (ipv6_trans_mtu(&m0,icp->icmp_nextmtu,
+					    hlen + ICMP_V6ADVLEN(icp))) {
+						m = m0;
+						goto raw;
+					} else
+						return;
+				}
+			}
+#endif /* INET6 */
+			code = PRC_MSGSIZE;
+			break;
 				
-			case ICMP_UNREACH_NET_UNKNOWN:
-			case ICMP_UNREACH_NET_PROHIB:
-			case ICMP_UNREACH_TOSNET:
-				code = PRC_UNREACH_NET;
-				break;
+		case ICMP_UNREACH_NET_UNKNOWN:
+		case ICMP_UNREACH_NET_PROHIB:
+		case ICMP_UNREACH_TOSNET:
+			code = PRC_UNREACH_NET;
+			break;
 
-			case ICMP_UNREACH_HOST_UNKNOWN:
-			case ICMP_UNREACH_ISOLATED:
-			case ICMP_UNREACH_HOST_PROHIB:
-			case ICMP_UNREACH_TOSHOST:
-			case ICMP_UNREACH_FILTER_PROHIB:
-			case ICMP_UNREACH_HOST_PRECEDENCE:
-			case ICMP_UNREACH_PRECEDENCE_CUTOFF:
-				code = PRC_UNREACH_HOST;
-				break;
+		case ICMP_UNREACH_HOST_UNKNOWN:
+		case ICMP_UNREACH_ISOLATED:
+		case ICMP_UNREACH_HOST_PROHIB:
+		case ICMP_UNREACH_TOSHOST:
+		case ICMP_UNREACH_FILTER_PROHIB:
+		case ICMP_UNREACH_HOST_PRECEDENCE:
+		case ICMP_UNREACH_PRECEDENCE_CUTOFF:
+			code = PRC_UNREACH_HOST;
+			break;
 
-			default:
-				goto badcode;
+		default:
+			goto badcode;
 		}
 		goto deliver;
 
@@ -314,6 +358,24 @@ icmp_input(m, va_alist)
 		if (IN_MULTICAST(icp->icmp_ip.ip_dst.s_addr))
 			goto badcode;
 		NTOHS(icp->icmp_ip.ip_len);
+#ifdef INET6
+		/* Get more contiguous data for a v6 in v4 ICMP message. */
+		if (icp->icmp_ip.ip_p == IPPROTO_IPV6) {
+			if (icmplen < ICMP_V6ADVLENMIN || 
+			    icmplen < ICMP_V6ADVLEN(icp)) {
+				icmpstat.icps_badlen++;
+				goto freeit;
+			} else {
+				if (!(m = m_pullup(m, (ip->ip_hl << 2) +
+				    ICMP_V6ADVLEN(icp)))) {
+					icmpstat.icps_tooshort++;
+					return;
+				}
+				ip = mtod(m, struct ip *);
+				icp = (struct icmp *)(m->m_data + (ip->ip_hl << 2));
+			}
+		}
+#endif /* INET6 */
 #ifdef ICMPPRINTFS
 		if (icmpprintfs)
 			printf("deliver to protocol %d\n", icp->icmp_ip.ip_p);
@@ -435,7 +497,7 @@ reflect:
 	}
 
 raw:
-	rip_input(m);
+	rip_input(m, 0);
 	return;
 
 freeit:

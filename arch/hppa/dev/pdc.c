@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdc.c,v 1.2 1998/09/14 18:59:49 mickey Exp $	*/
+/*	$OpenBSD: pdc.c,v 1.5 1998/12/29 21:40:21 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998 Michael Shalayeff
@@ -42,10 +42,10 @@
 
 #include <dev/cons.h>
 
-#include <machine/autoconf.h>
 #include <machine/conf.h>
 #include <machine/pdc.h>
 #include <machine/iomod.h>
+#include <machine/autoconf.h>
 
 typedef
 struct pdc_softc {
@@ -53,8 +53,8 @@ struct pdc_softc {
 } pdcsoftc_t;
 
 pdcio_t pdc;
-int pdcret[32] __attribute__ ((aligned(8)));
-char pdc_consbuf[MINIOSIZ] __attribute__ ((aligned(MINIOSIZ)));
+int pdcret[32] PDC_ALIGNMENT;
+char pdc_consbuf[MINIOSIZ] PDC_ALIGNMENT;
 iodcio_t pdc_cniodc, pdc_kbdiodc;
 pz_device_t *pz_kbd, *pz_cons;
 struct tty *pdc_tty[1];
@@ -73,13 +73,29 @@ struct cfdriver pdc_cd = {
 void
 pdc_init()
 {
+	static int kbd_iodc[IODC_MAXSIZE/sizeof(int)];
+	static int cn_iodc[IODC_MAXSIZE/sizeof(int)];
+	int err;
+
 	/* XXX locore've done it XXX pdc = (pdcio_t)PAGE0->mem_pdc; */
 	pz_kbd = &PAGE0->mem_kbd;
 	pz_cons = &PAGE0->mem_cons;
 
-	/* following the memory mappings, console iodc is at `mem_free' */
-	pdc_cniodc = (iodcio_t)PAGE0->mem_free;
-	pdc_kbdiodc = (iodcio_t)PAGE0->mem_free;
+	/* XXX should we reset the console/kbd here?
+	   well, /boot did that for us anyway */
+	if ((err = pdc_call((iodcio_t)pdc, 0, PDC_IODC, PDC_IODC_READ,
+			    pdcret, pz_cons->pz_hpa,
+			    IODC_IO, cn_iodc, IODC_MAXSIZE)) < 0 ||
+	    (err = pdc_call((iodcio_t)pdc, 0, PDC_IODC, PDC_IODC_READ,
+			    pdcret, pz_kbd->pz_hpa,
+			    IODC_IO, kbd_iodc, IODC_MAXSIZE)) < 0) {
+#ifdef DEBUG
+		printf("pdc_init: failed reading IODC (%d)\n", err);
+#endif
+	}
+
+	pdc_cniodc = (iodcio_t)cn_iodc;
+	pdc_kbdiodc = (iodcio_t)kbd_iodc;
 
 	/* XXX make pdc current console */
 	cn_tab = &constab[0];
@@ -91,11 +107,11 @@ pdcmatch(parent, cfdata, aux)
 	void *cfdata;
 	void *aux;
 {
-	/* struct cfdata *cf = cfdata; */
+	struct cfdata *cf = cfdata;
 	struct confargs *ca = aux;
 
 	/* there could be only one */
-	if (pdc_cd.cd_ndevs || strcmp(ca->ca_name, pdc_cd.cd_name))
+	if (cf->cf_unit > 0 && !strcmp(ca->ca_name, "pdc"))
 		return 0;
 
 	return 1;
@@ -107,9 +123,10 @@ pdcattach(parent, self, aux)
 	struct device *self;
 	void *aux;
 {
-	printf("\n");
 	if (!pdc)
 		pdc_init();
+
+	printf("\n");
 }
 
 int
@@ -226,33 +243,51 @@ void
 pdccninit(cn)
 	struct consdev *cn;
 {
-
+#ifdef DEBUG
+	printf("pdc0: console init\n");
+#endif
 }
 
 int
 pdccngetc(dev)
 	dev_t dev;
 {
-	int err;
+	static int stash = 0;
+	register int err, c, l;
 
 	if (!pdc)
 		return 0;
 
-	if ((err = pdc_call(pdc_kbdiodc, 0, pz_kbd->pz_hpa, IODC_IO_CONSIN,
-			    &pz_kbd->pz_spa, pz_kbd->pz_layers, pdcret,
-			    0, pdc_consbuf, 1, 0)) < 0) {
-#ifdef DEBUG
-		printf("pdc_getc: input error: %d\n", err);
-#endif
+	if (stash) {
+		c = stash;
+		if (!(dev & 0x80))
+			stash = 0;
+		return c;
 	}
 
-	if (pdcret[0] == 0)
-		return (0);
+	do {
+		err = pdc_call(pdc_kbdiodc, 0, pz_kbd->pz_hpa,
+			       IODC_IO_CONSIN, pz_kbd->pz_spa,
+			       pz_kbd->pz_layers, pdcret,
+			       0, pdc_consbuf, 1, 0);
+
+		l = pdcret[0];
+		c = pdc_consbuf[0];
 #ifdef DEBUG
-	if (pdcret[0] > 1)
-		printf("pdc_getc: input got too much (%d)\n", pdcret[0]);
+		if (err < 0)
+			printf("pdccngetc: input error: %d\n", err);
 #endif
-	return *pdc_consbuf;
+
+		/* if we are doing ischar() report immidiatelly */
+		if (dev & 0x80 && l == 0)
+			return (0);
+
+	} while(!l);
+
+	if (dev & 0x80)
+		stash = c;
+
+	return (c);
 }
 
 void
@@ -267,7 +302,7 @@ pdccnputc(dev, c)
 			    pz_cons->pz_spa, pz_cons->pz_layers,
 			    pdcret, 0, pdc_consbuf, 1, 0)) < 0) {
 #ifdef DEBUG
-		printf("pdc_putc: output error: %d\n", err);
+		printf("pdccnputc: output error: %d\n", err);
 #endif
 	}
 
@@ -281,3 +316,35 @@ pdccnpollc(dev, on)
 
 }
 
+int
+pdc_call(func, pdc_flag)
+	iodcio_t func;
+	int pdc_flag;
+{
+	register register_t ret, psw;
+	va_list va;
+	int args[11], i;
+
+	va_start(va, pdc_flag);
+	for (i = 0; i < sizeof(args)/sizeof(args[0]); i++)
+		args[i] = va_arg(va, int);
+	va_end(va);
+	
+	if (kernelmapped) {
+		psw = PSW_Q;
+		
+		if (!pdc_flag && args[0] == PDC_PIM)
+			psw |= PSW_M;
+
+		set_psw(psw);
+	}
+
+	ret = (func)((void *)args[0], args[1], args[2], args[3], args[4],
+		     args[5], args[6], args[7], args[8], args[9], args[10]);
+
+	if (kernelmapped) {
+		set_psw(KERNEL_PSW);
+	}
+
+	return ret;
+}

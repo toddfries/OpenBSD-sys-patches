@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_timer.c,v 1.8 1997/08/26 20:02:34 deraadt Exp $	*/
+/*	$OpenBSD: tcp_timer.c,v 1.11 1999/01/27 16:47:29 provos Exp $	*/
 /*	$NetBSD: tcp_timer.c,v 1.14 1996/02/13 23:44:09 christos Exp $	*/
 
 /*
@@ -178,6 +178,26 @@ tcp_timers(tp, timer)
 	int timer;
 {
 	register int rexmt;
+#ifdef TCP_SACK
+	struct sackhole *p, *q;
+	/*
+	 * Free SACK holes for 2MSL and REXMT timers.
+	 */
+	if (timer == TCPT_2MSL || timer == TCPT_REXMT) {
+		q = p = tp->snd_holes;
+		while (p != 0) {
+			q = p->next;
+			free(p, M_PCB);
+			p = q;
+		}
+		tp->snd_holes = 0;
+#if defined(TCP_SACK) && defined(TCP_FACK)
+		tp->snd_fack = tp->snd_una;
+		tp->retran_data = 0;
+		tp->snd_awnd = 0;
+#endif /* TCP_FACK */
+	}
+#endif /* TCP_SACK */
 
 	switch (timer) {
 
@@ -256,7 +276,7 @@ tcp_timers(tp, timer)
 		 * to go below this.)
 		 */
 		{
-		u_int win = min(tp->snd_wnd, tp->snd_cwnd) / 2 / tp->t_maxseg;
+		u_long win = ulmin(tp->snd_wnd, tp->snd_cwnd) / 2 / tp->t_maxseg;
 		if (win < 2)
 			win = 2;
 		tp->snd_cwnd = tp->t_maxseg;

@@ -1,4 +1,4 @@
-/*	$NetBSD: process_machdep.c,v 1.5 1994/11/20 20:54:37 deraadt Exp $ */
+/*	$OpenBSD: process_machdep.c,v 1.5 1999/02/09 06:36:30 smurph Exp $ */
 
 /*
  * Copyright (c) 1993 The Regents of the University of California.
@@ -93,9 +93,9 @@ process_write_regs(p, regs)
 	struct reg *regs;
 {
 #if 0
-	int	psr = p->p_md.md_tf->tf_psr & ~PSR_ICC;
+	int	psr = p->p_md.md_tf->tf_epsr & ~PSR_ICC;
 	bcopy((caddr_t)regs, p->p_md.md_tf, sizeof(struct reg));
-	p->p_md.md_tf->tf_psr = psr | (regs->r_psr & PSR_ICC);
+	p->p_md.md_tf->tf_epsr = psr | (regs->r_epsr & PSR_ICC);
 #endif
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_proto.c,v 1.9 1998/07/30 03:53:22 angelos Exp $	*/
+/*	$OpenBSD: in_proto.c,v 1.13 1999/04/11 19:41:36 niklas Exp $	*/
 /*	$NetBSD: in_proto.c,v 1.14 1996/02/18 18:58:32 christos Exp $	*/
 
 /*
@@ -35,6 +35,18 @@
  *
  *	@(#)in_proto.c	8.1 (Berkeley) 6/10/93
  */
+
+/*
+%%% portions-copyright-nrl-95
+Portions of this software are Copyright 1995-1998 by Randall Atkinson,
+Ronald Lee, Daniel McDonald, Bao Phan, and Chris Winters. All Rights
+Reserved. All rights under this copyright have been assigned to the US
+Naval Research Laboratory (NRL). The NRL Copyright Notice and License
+Agreement Version 1.1 (January 17, 1995) applies to these portions of the
+software.
+You should have received a copy of the license with this software. If you
+didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
+*/
 
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -94,16 +106,15 @@ void	iplinit __P((void));
 #define ip_init	iplinit
 #endif
 
-#ifdef IPSEC
-#include <net/encap.h>
-#include <netinet/ip_ipsp.h>
+#ifdef INET6
+#include <netinet6/ipv6_var.h>
+#endif /* INET6 */
 
-extern void ah_input __P((struct mbuf *, ...));
-extern void esp_input __P((struct mbuf *, ...));
-extern int ah_output __P((struct mbuf *, struct sockaddr_encap *,
-    struct tdb *, struct mbuf **));
-extern int esp_output __P((struct mbuf *, struct sockaddr_encap *,
-    struct tdb *, struct mbuf **));
+#ifdef IPSEC
+#include <netinet/ip_ipsp.h>
+#include <netinet/ip_ah.h>
+#include <netinet/ip_esp.h>
+#include <netinet/ip_ip4.h>
 #endif
 
 extern	struct domain inetdomain;
@@ -138,7 +149,7 @@ struct protosw inetsw[] = {
 { SOCK_RAW,	&inetdomain,	IPPROTO_IPIP,	PR_ATOMIC|PR_ADDR,
   ip4_input,	rip_output,	0,		rip_ctloutput,
   rip_usrreq,	/* XXX */
-  0,		0,		0,		0,
+  0,		0,		0,		0,		ip4_sysctl
 },
 #elif defined(MROUTING)
 { SOCK_RAW,     &inetdomain,    IPPROTO_IPIP,   PR_ATOMIC|PR_ADDR,
@@ -185,14 +196,28 @@ struct protosw inetsw[] = {
 { SOCK_RAW,   &inetdomain,    IPPROTO_AH,     PR_ATOMIC|PR_ADDR,
   ah_input,   rip_output,     0,              rip_ctloutput,
   rip_usrreq,
-  0,          0,              0,              0,
+  0,          0,              0,              0,		ah_sysctl
 },
 { SOCK_RAW,   &inetdomain,    IPPROTO_ESP,    PR_ATOMIC|PR_ADDR,
   esp_input,  rip_output,     0,              rip_ctloutput,
   rip_usrreq,
-  0,          0,              0,              0,
+  0,          0,              0,              0,		esp_sysctl
 },
 #endif
+#ifdef INET6
+/* IPv6 in IPv4 tunneled packets... */
+{ SOCK_RAW,   &inetdomain,    IPPROTO_IPV6,   PR_ATOMIC|PR_ADDR,
+  ipv6_input, rip_output,     ipv6_trans_ctlinput, rip_ctloutput,
+  rip_usrreq,
+  0,          0,              0,              0
+},
+/* IPv4 in IPv4 tunneled packets... */
+{ SOCK_RAW,   &inetdomain,    IPPROTO_IPV4,   PR_ATOMIC|PR_ADDR,
+  ipv4_input, 0,              0,              0,
+  0,
+  0,          0,              0,              0
+},
+#endif /* defined(INET6) */
 /* raw wildcard */
 { SOCK_RAW,	&inetdomain,	0,		PR_ATOMIC|PR_ADDR,
   rip_input,	rip_output,	0,		rip_ctloutput,

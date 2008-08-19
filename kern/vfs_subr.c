@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.23 1998/10/13 16:42:01 csapuntz Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.36 1999/03/11 19:47:25 deraadt Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -67,6 +67,10 @@
 #include <sys/sysctl.h>
 
 #include <miscfs/specfs/specdev.h>
+
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
 
 enum vtype iftovt_tab[16] = {
 	VNON, VFIFO, VCHR, VNON, VDIR, VNON, VBLK, VNON,
@@ -457,6 +461,9 @@ getnewvnode(tag, mp, vops, vpp)
 	*vpp = vp;
 	vp->v_usecount = 1;
 	vp->v_data = 0;
+#ifdef UVM
+	simple_lock_init(&vp->v_uvm.u_obj.vmobjlock);
+#endif
 	return (0);
 }
 
@@ -571,8 +578,10 @@ loop:
 	simple_lock(&spechash_slock);
 	for (vp = *vpp; vp; vp = vp->v_specnext) {
 		simple_lock(&vp->v_interlock);
-		if (nvp_rdev != vp->v_rdev || nvp->v_type != vp->v_type)
+		if (nvp_rdev != vp->v_rdev || nvp->v_type != vp->v_type) {
+			simple_unlock(&vp->v_interlock);
 			continue;
+		}
 		/*
 		 * Alias, but not in use, so flush it out.
 		 */
@@ -771,6 +780,7 @@ vput(vp)
 	vputonfreelist(vp);
 
 	VOP_INACTIVE(vp, p);
+
 	simple_unlock(&vp->v_interlock);
 }
 
@@ -802,10 +812,8 @@ vrele(vp)
 #endif
 	vputonfreelist(vp);
 
-	if (vn_lock(vp, LK_EXCLUSIVE |LK_INTERLOCK, p) == 0)
+	if (vn_lock(vp, LK_EXCLUSIVE|LK_INTERLOCK, p) == 0)
 		VOP_INACTIVE(vp, p);
-
-	simple_unlock(&vp->v_interlock);
 }
 
 #ifdef DIAGNOSTIC
@@ -980,8 +988,12 @@ vclean(vp, flags, p)
 	if (vp->v_flag & VXLOCK)
 		panic("vclean: deadlock");
 	vp->v_flag |= VXLOCK;
-
-	
+#ifdef UVM
+	/*
+	 * clean out any VM data associated with the vnode.
+	 */
+	uvm_vnp_terminate(vp);
+#endif
 	/*
 	 * Even if the count is zero, the VOP_INACTIVE routine may still
 	 * have the object locked while it cleans it out. The VOP_LOCK
@@ -1019,6 +1031,8 @@ vclean(vp, flags, p)
 	if (VOP_RECLAIM(vp, p))
 		panic("vclean: cannot reclaim");
 	if (active) {
+		simple_lock(&vp->v_interlock);
+
 		vp->v_usecount--;
 		if (vp->v_usecount == 0) {
 			if (vp->v_holdcnt > 0)
@@ -1042,6 +1056,9 @@ vclean(vp, flags, p)
 	vp->v_op = dead_vnodeop_p;
 	vp->v_tag = VT_NON;
 	vp->v_flag &= ~VXLOCK;
+#ifdef DIAGNOSTIC
+	vp->v_flag &= ~VLOCKSWORK;
+#endif
 	if (vp->v_flag & VXWANT) {
 		vp->v_flag &= ~VXWANT;
 		wakeup((caddr_t)vp);
@@ -1244,7 +1261,7 @@ vprint(label, vp)
 
 	if (label != NULL)
 		printf("%s: ", label);
-	printf("type %s, usecount %d, writecount %d, refcount %ld,",
+	printf("type %s, usecount %d, writecount %d, holdcount %ld,",
 		typename[vp->v_type], vp->v_usecount, vp->v_writecount,
 		vp->v_holdcnt);
 	buf[0] = '\0';
@@ -1681,8 +1698,9 @@ void
 vfs_unmountall()
 {
 	register struct mount *mp, *nmp;
-	int allerror, error;
+	int allerror, error, again = 1;
 
+ retry:
 	for (allerror = 0,
 	     mp = mountlist.cqh_last; mp != (void *)&mountlist; mp = nmp) {
 		nmp = mp->mnt_list.cqe_prev;
@@ -1692,8 +1710,15 @@ vfs_unmountall()
 			allerror = 1;
 		}
 	}
-	if (allerror)
+
+	if (allerror) {
 		printf("WARNING: some file systems would not unmount\n");
+		if (again) {
+			printf("retrying\n");
+			again = 0;
+			goto retry;
+		}
+	}
 }
 
 /*
@@ -1712,7 +1737,9 @@ vfs_shutdown()
 
 	if (panicstr == 0) {
 		/* Release inodes held by texts before update. */
+#if !defined(UVM)
 		vnode_pager_umount(NULL);
+#endif
 #ifdef notdef
 		vnshutdown();
 #endif
@@ -1804,6 +1831,8 @@ fs_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 
 /*
  * Update outstanding I/O count and do wakeup if requested.
+ *
+ * Manipulates v_numoutput. Must be called at splbio()
  */
 void
 vwakeup(bp)
@@ -1838,12 +1867,25 @@ vinvalbuf(vp, flags, cred, p, slpflag, slptimeo)
 	struct buf *nbp, *blist;
 	int s, error;
 
-	if ((flags & V_SAVE) && vp->v_dirtyblkhd.lh_first != NULL) {
-		if ((error = VOP_FSYNC(vp, cred, MNT_WAIT, p)) != 0)
-			return (error);
-		if (vp->v_dirtyblkhd.lh_first != NULL)
-			panic("vinvalbuf: dirty bufs");
+	if (flags & V_SAVE) {
+		s = splbio();
+		while (vp->v_numoutput) {
+			vp->v_flag |= VBWAIT;
+			sleep((caddr_t)&vp->v_numoutput, PRIBIO + 1);
+		}
+		if (vp->v_dirtyblkhd.lh_first != NULL) {
+			splx(s);
+			if ((error = VOP_FSYNC(vp, cred, MNT_WAIT, p)) != 0)
+				return (error);
+			s = splbio();
+			if (vp->v_numoutput > 0 ||
+			    vp->v_dirtyblkhd.lh_first != NULL)
+				panic("vinvalbuf: dirty bufs");
+		}
+		splx(s);
 	}
+loop:
+	s = splbio();
 	for (;;) {
 		if ((blist = vp->v_cleanblkhd.lh_first) && 
 		    (flags & V_SAVEMETA))
@@ -1860,27 +1902,27 @@ vinvalbuf(vp, flags, cred, p, slpflag, slptimeo)
 			nbp = bp->b_vnbufs.le_next;
 			if (flags & V_SAVEMETA && bp->b_lblkno < 0)
 				continue;
-			s = splbio();
 			if (bp->b_flags & B_BUSY) {
 				bp->b_flags |= B_WANTED;
 				error = tsleep((caddr_t)bp,
 					slpflag | (PRIBIO + 1), "vinvalbuf",
 					slptimeo);
-				splx(s);
-				if (error)
+				if (error) {
+					splx(s);
 					return (error);
+				}
 				break;
 			}
 			bp->b_flags |= B_BUSY | B_VFLUSH;
-			splx(s);
 			/*
 			 * XXX Since there are no node locks for NFS, I believe
 			 * there is a slight chance that a delayed write will
 			 * occur while sleeping just above, so check for it.
 			 */
 			if ((bp->b_flags & B_DELWRI) && (flags & V_SAVE)) {
+				splx(s);
 				(void) VOP_BWRITE(bp);
-				break;
+				goto loop;
 			}
 			bp->b_flags |= B_INVAL;
 			brelse(bp);
@@ -1889,6 +1931,7 @@ vinvalbuf(vp, flags, cred, p, slpflag, slptimeo)
 	if (!(flags & V_SAVEMETA) &&
 	    (vp->v_dirtyblkhd.lh_first || vp->v_cleanblkhd.lh_first))
 		panic("vinvalbuf: flush failed");
+	splx(s);
 	return (0);
 }
 
@@ -1937,6 +1980,8 @@ loop:
 
 /*
  * Associate a buffer with a vnode.
+ *
+ * Manipulates buffer vnode queues. Must be called at splbio().
  */
 void
 bgetvp(vp, bp)
@@ -1960,6 +2005,8 @@ bgetvp(vp, bp)
 
 /*
  * Disassociate a buffer from a vnode.
+ * 
+ * Manipulates vnode buffer queues. Must be called at splbio().
  */
 void
 brelvp(bp)
@@ -1986,6 +2033,8 @@ brelvp(bp)
  * Reassign a buffer from one vnode to another. Used to assign buffers
  * to the appropriate clean or dirty list and to add newly dirty vnodes
  * to the appropriate filesystem syncer list.
+ *
+ * Manipulates vnode buffer queues. Must be called at splbio().
  */
 void
 reassignbuf(bp, newvp)
@@ -2034,4 +2083,75 @@ reassignbuf(bp, newvp)
 		}
 	}
 	bufinsvn(bp, listheadp);
+}
+
+int
+vfs_register(vfs)
+	struct vfsconf *vfs;
+{
+	struct vfsconf *vfsp;
+	struct vfsconf **vfspp;
+
+#ifdef DIAGNOSTIC
+	/* Paranoia? */
+	if (vfs->vfc_refcount > 0)
+		printf("vfs_register called with vfc_refcount > 0\n");
+#endif
+
+	/* Check if filesystem already known */
+	for (vfspp = &vfsconf, vfsp = vfsconf;
+	     vfsp;
+	     vfspp = &vfsp->vfc_next, vfsp = vfsp->vfc_next)
+		if (strcmp(vfsp->vfc_name, vfs->vfc_name) == 0)
+			return (EEXIST);
+
+	if (vfs->vfc_typenum > maxvfsconf)
+		maxvfsconf = vfs->vfc_typenum;
+
+	vfs->vfc_next = NULL;
+
+	/* Add to the end of the list */
+	*vfspp = vfs;
+
+	/* Call vfs_init() */
+	if (vfs->vfc_vfsops->vfs_init)
+		(*(vfs->vfc_vfsops->vfs_init))(vfs);
+
+	return 0;
+}
+ 
+int
+vfs_unregister(vfs)
+	struct vfsconf *vfs;
+{
+	struct vfsconf *vfsp;
+	struct vfsconf **vfspp;
+	int maxtypenum;
+
+	/* Find our vfsconf struct */
+	for (vfspp = &vfsconf, vfsp = vfsconf;
+	     vfsp;
+	     vfspp = &vfsp->vfc_next, vfsp = vfsp->vfc_next) {
+		if (strcmp(vfsp->vfc_name, vfs->vfc_name) == 0)
+			break;
+	}
+
+	if (!vfsp)                         /* Not found */
+		return (ENOENT);
+
+	if (vfsp->vfc_refcount)            /* In use */
+		return (EBUSY);
+
+	/* Remove from list and free  */
+	*vfspp = vfsp->vfc_next;
+
+	maxtypenum = 0;
+
+	for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next)
+		if (vfsp->vfc_typenum > maxtypenum)
+			maxtypenum = vfsp->vfc_typenum;
+
+	maxvfsconf = maxtypenum;
+
+	return 0;
 }

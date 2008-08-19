@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl.c,v 1.12 1998/10/09 00:15:35 deraadt Exp $	*/
+/*	$OpenBSD: if_xl.c,v 1.23 1999/03/03 22:51:51 jason Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -31,7 +31,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- *	$FreeBSD: if_xl.c,v 1.12 1998/09/25 17:34:19 wpaul Exp $
+ *	$FreeBSD: if_xl.c,v 1.25 1999/02/26 08:39:24 wpaul Exp $
  */
 
 /*
@@ -114,8 +114,6 @@
 
 #elif defined(__OpenBSD__)
 
-#define bootverbose 0
-
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
@@ -194,8 +192,8 @@
 #endif
 
 #if !defined(lint) && !defined(__OpenBSD__)
-static char rcsid[] =
-	"$FreeBSD: if_xl.c,v 1.12 1998/09/25 17:34:19 wpaul Exp $";
+static const char rcsid[] =
+	"$FreeBSD: if_xl.c,v 1.25 1999/02/26 08:39:24 wpaul Exp $";
 #endif
 
 #ifdef __FreeBSD__
@@ -219,11 +217,12 @@ static struct xl_type xl_devs[] = {
 		"3Com 3c905B Fast Etherlink XL 10/100BaseTX" },
 	{ TC_VENDORID, TC_DEVICEID_CYCLONE_10_100BT4,
 		"3Com 3c905B Fast Etherlink XL 10/100BaseT4" },
+	{ TC_VENDORID, TC_DEVICEID_CYCLONE_10_100FX,
+		"3Com 3c905B Fast Etherlink XL 10/100BaseFX/SC" },
 	{ TC_VENDORID, TC_DEVICEID_CYCLONE_10_100BT_SERV,
 		"3Com 3c980 Fast Etherlink XL 10/100BaseTX" },
 	{ 0, 0, NULL }
 };
-#endif
 
 /*
  * Various supported PHY vendors/types and their names. Note that
@@ -240,10 +239,11 @@ static struct xl_type xl_phys[] = {
 	{ SEEQ_PHY_VENDORID, SEEQ_PHY_80220, "<SEEQ 80220>" },
 	{ 0, 0, "<MII-compliant physical interface>" }
 };
+#endif
 
 #if defined(__FreeBSD__)
 static unsigned long xl_count = 0;
-static char *xl_probe		__P((pcici_t, pcidi_t));
+static const char *xl_probe	__P((pcici_t, pcidi_t));
 static void xl_attach		__P((pcici_t, int));
 static void xl_intr		__P((void *));
 static void xl_shutdown		__P((int, void *));
@@ -268,7 +268,7 @@ static int xl_ioctl		__P((struct ifnet *, u_long, caddr_t));
 static void xl_init		__P((void *));
 static void xl_stop		__P((struct xl_softc *));
 static void xl_watchdog		__P((struct ifnet *));
-static u_int8_t xl_calchash	__P((u_int8_t *));
+static u_int8_t xl_calchash	__P((caddr_t));
 static void xl_mediacheck	__P((struct xl_softc *));
 static void xl_autoneg_mii	__P((struct xl_softc *, int, int));
 static void xl_setmode_mii	__P((struct xl_softc *, int));
@@ -286,7 +286,7 @@ static void xl_mii_send		__P((struct xl_softc *, u_int32_t, int));
 static int xl_mii_readreg	__P((struct xl_softc *, struct xl_mii_frame *));
 static int xl_mii_writereg	__P((struct xl_softc *, struct xl_mii_frame *));
 static u_int16_t xl_phy_readreg	__P((struct xl_softc *, int));
-static void xl_phy_writereg	__P((struct xl_softc *, u_int16_t, u_int16_t));
+static void xl_phy_writereg	__P((struct xl_softc *, int, int));
 
 static void xl_setmulti		__P((struct xl_softc *));
 static void xl_setmulti_hash	__P((struct xl_softc *));
@@ -557,8 +557,8 @@ static u_int16_t xl_phy_readreg(sc, reg)
 
 static void xl_phy_writereg(sc, reg, data)
 	struct xl_softc		*sc;
-	u_int16_t		reg;
-	u_int16_t		data;
+	int			reg;
+	int			data;
 {
 	struct xl_mii_frame	frame;
 
@@ -647,7 +647,7 @@ static int xl_read_eeprom(sc, dest, off, cnt, swap)
  * On older cards, the upper 2 bits will be ignored. Grrrr....
  */
 static u_int8_t xl_calchash(addr)
-	u_int8_t		*addr;
+	caddr_t			addr;
 {
 	u_int32_t		crc, carry;
 	int			i, j;
@@ -1011,34 +1011,23 @@ static void xl_getmode_mii(sc)
 	ifp = &sc->arpcom.ac_if;
 
 	bmsr = xl_phy_readreg(sc, PHY_BMSR);
-	if (bootverbose)
-		printf("xl%d: PHY status word: %x\n", sc->xl_unit, bmsr);
 
 	/* fallback */
 	sc->ifmedia.ifm_media = IFM_ETHER|IFM_10_T|IFM_HDX;
 
 	if (bmsr & PHY_BMSR_10BTHALF) {
-		if (bootverbose)
-			printf("xl%d: 10Mbps half-duplex mode supported\n",
-								sc->xl_unit);
 		ifmedia_add(&sc->ifmedia,
 			IFM_ETHER|IFM_10_T|IFM_HDX, 0, NULL);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_T, 0, NULL);
 	}
 
 	if (bmsr & PHY_BMSR_10BTFULL) {
-		if (bootverbose)
-			printf("xl%d: 10Mbps full-duplex mode supported\n",
-								sc->xl_unit);
 		ifmedia_add(&sc->ifmedia,
 			IFM_ETHER|IFM_10_T|IFM_FDX, 0, NULL);
 		sc->ifmedia.ifm_media = IFM_ETHER|IFM_10_T|IFM_FDX;
 	}
 
 	if (bmsr & PHY_BMSR_100BTXHALF) {
-		if (bootverbose)
-			printf("xl%d: 100Mbps half-duplex mode supported\n",
-								sc->xl_unit);
 		ifp->if_baudrate = 100000000;
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_100_TX, 0, NULL);
 		ifmedia_add(&sc->ifmedia,
@@ -1047,9 +1036,6 @@ static void xl_getmode_mii(sc)
 	}
 
 	if (bmsr & PHY_BMSR_100BTXFULL) {
-		if (bootverbose)
-			printf("xl%d: 100Mbps full-duplex mode supported\n",
-								sc->xl_unit);
 		ifp->if_baudrate = 100000000;
 		ifmedia_add(&sc->ifmedia,
 			IFM_ETHER|IFM_100_TX|IFM_FDX, 0, NULL);
@@ -1058,23 +1044,16 @@ static void xl_getmode_mii(sc)
 
 	/* Some also support 100BaseT4. */
 	if (bmsr & PHY_BMSR_100BT4) {
-		if (bootverbose)
-			printf("xl%d: 100baseT4 mode supported\n", sc->xl_unit);
 		ifp->if_baudrate = 100000000;
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_100_T4, 0, NULL);
 		sc->ifmedia.ifm_media = IFM_ETHER|IFM_100_T4;
 #ifdef FORCE_AUTONEG_TFOUR
-		if (bootverbose)
-			printf("xl%d: forcing on autoneg support for BT4\n",
-							 sc->xl_unit);
-		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_AUTO, 0 NULL):
+		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_AUTO, 0, NULL);
 		sc->ifmedia.ifm_media = IFM_ETHER|IFM_AUTO;
 #endif
 	}
 
 	if (bmsr & PHY_BMSR_CANAUTONEG) {
-		if (bootverbose)
-			printf("xl%d: autoneg supported\n", sc->xl_unit);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_AUTO, 0, NULL);
 		sc->ifmedia.ifm_media = IFM_ETHER|IFM_AUTO;
 	}
@@ -1270,7 +1249,7 @@ static void xl_reset(sc)
  * Probe for a 3Com Etherlink XL chip. Check the PCI vendor and device
  * IDs against our list and return a device name if we find a match.
  */
-static char *
+static const char *
 xl_probe(config_id, device_id)
 	pcici_t			config_id;
 	pcidi_t			device_id;
@@ -1531,7 +1510,7 @@ xl_attach(config_id, unit)
 		if (round % 8) {
 			round++;
 			roundptr++;
-		}
+		} else
 			break;
 	}
 	sc->xl_ldata = (struct xl_list_data *)roundptr;
@@ -1549,6 +1528,7 @@ xl_attach(config_id, unit)
 	ifp->if_watchdog = xl_watchdog;
 	ifp->if_init = xl_init;
 	ifp->if_baudrate = 10000000;
+	ifp->if_snd.ifq_maxlen = XL_TX_LIST_CNT - 1;
 
 	/*
 	 * Figure out the card type. 3c905B adapters have the
@@ -1568,9 +1548,6 @@ xl_attach(config_id, unit)
 	 */
 	XL_SEL_WIN(3);
 	sc->xl_media = CSR_READ_2(sc, XL_W3_MEDIA_OPT);
-	if (bootverbose)
-		printf("xl%d: media options word: %x\n", sc->xl_unit,
-							 sc->xl_media);
 
 	xl_read_eeprom(sc, (char *)&sc->xl_xcvr, XL_EE_ICFG_0, 2, 0);
 	sc->xl_xcvr &= XL_ICFG_CONNECTOR_MASK;
@@ -1600,12 +1577,7 @@ xl_attach(config_id, unit)
 			icfg |= (XL_XCVR_100BFX << XL_ICFG_CONNECTOR_BITS);
 		CSR_WRITE_4(sc, XL_W3_INTERNAL_CFG, icfg);
 
-		if (bootverbose)
-			printf("xl%d: probing for a PHY\n", sc->xl_unit);
 		for (i = XL_PHYADDR_MIN; i < XL_PHYADDR_MAX + 1; i++) {
-			if (bootverbose)
-				printf("xl%d: checking address: %d\n",
-							sc->xl_unit, i);
 			sc->xl_phy_addr = i;
 			xl_phy_writereg(sc, XL_PHY_GENCTL, PHY_BMCR_RESET);
 			DELAY(500);
@@ -1617,12 +1589,6 @@ xl_attach(config_id, unit)
 		if (phy_sts) {
 			phy_vid = xl_phy_readreg(sc, XL_PHY_VENID);
 			phy_did = xl_phy_readreg(sc, XL_PHY_DEVID);
-			if (bootverbose)
-				printf("xl%d: found PHY at address %d, ",
-						sc->xl_unit, sc->xl_phy_addr);
-			if (bootverbose)
-				printf("vendor id: %x device id: %x\n",
-					phy_vid, phy_did);
 			p = xl_phys;
 			while(p->xl_vid) {
 				if (phy_vid == p->xl_vid &&
@@ -1634,9 +1600,6 @@ xl_attach(config_id, unit)
 			}
 			if (sc->xl_pinfo == NULL)
 				sc->xl_pinfo = &xl_phys[PHY_UNKNOWN];
-			if (bootverbose)
-				printf("xl%d: PHY type: %s\n",
-					sc->xl_unit, sc->xl_pinfo->xl_name);
 		} else {
 			printf("xl%d: MII without any phy!\n", sc->xl_unit);
 		}
@@ -1648,8 +1611,6 @@ xl_attach(config_id, unit)
 	ifmedia_init(&sc->ifmedia, 0, xl_ifmedia_upd, xl_ifmedia_sts);
 
 	if (sc->xl_media & XL_MEDIAOPT_BT) {
-		if (bootverbose)
-			printf("xl%d: found 10baseT\n", sc->xl_unit);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_T, 0, NULL);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_T|IFM_HDX, 0, NULL);
 		if (sc->xl_caps & XL_CAPS_FULL_DUPLEX)
@@ -1658,14 +1619,10 @@ xl_attach(config_id, unit)
 	}
 
 	if (sc->xl_media & XL_MEDIAOPT_AUI) {
-		if (bootverbose)
-			printf("xl%d: found AUI\n", sc->xl_unit);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_5, 0, NULL);
 	}
 
 	if (sc->xl_media & XL_MEDIAOPT_BNC) {
-		if (bootverbose)
-			printf("xl%d: found BNC\n", sc->xl_unit);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_2, 0, NULL);
 	}
 
@@ -1676,8 +1633,6 @@ xl_attach(config_id, unit)
 	 * do it and get it over with.
 	 */
 	if (sc->xl_media & XL_MEDIAOPT_BTX) {
-		if (bootverbose)
-			printf("xl%d: found 100baseTX\n", sc->xl_unit);
 		ifp->if_baudrate = 100000000;
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_100_TX, 0, NULL);
 		ifmedia_add(&sc->ifmedia,
@@ -1685,13 +1640,11 @@ xl_attach(config_id, unit)
 		if (sc->xl_caps & XL_CAPS_FULL_DUPLEX)
 			ifmedia_add(&sc->ifmedia,
 				IFM_ETHER|IFM_100_TX|IFM_FDX, 0, NULL);
-		if (sc->xl_pinfo != NULL)
+		if (sc->xl_hasmii != 0)
 			ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_AUTO, 0, NULL);
 	}
 
 	if (sc->xl_media & XL_MEDIAOPT_BFX) {
-		if (bootverbose)
-			printf("xl%d: found 100baseFX\n", sc->xl_unit);
 		ifp->if_baudrate = 100000000;
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_100_FX, 0, NULL);
 	}
@@ -1701,8 +1654,6 @@ xl_attach(config_id, unit)
 	 * separately.
 	 */
 	if (sc->xl_media & XL_MEDIAOPT_MII || sc->xl_media & XL_MEDIAOPT_BT4) {
-		if (bootverbose)
-			printf("xl%d: found MII\n", sc->xl_unit);
 		xl_getmode_mii(sc);
 	}
 
@@ -1846,8 +1797,10 @@ static int xl_newbuf(sc, c)
 
 	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
 	if (m_new == NULL) {
+#if defined(__FreeBSD__)
 		printf("xl%d: no memory for rx list -- packet dropped!\n",
 								sc->xl_unit);
+#endif
 		return(ENOBUFS);
 	}
 
@@ -1859,8 +1812,10 @@ static int xl_newbuf(sc, c)
 
 	MCLGET(m_new, M_DONTWAIT);
 	if (!(m_new->m_flags & M_EXT)) {
+#if defined(__FreeBSD__)
 		printf("xl%d: no memory for rx list -- packet dropped!\n",
 								sc->xl_unit);
+#endif
 		m_freem(m_new);
 		return(ENOBUFS);
 	}
@@ -1959,13 +1914,6 @@ again:
 #else
 			bpf_mtap(ifp->if_bpf, m);
 #endif
-			if (ifp->if_flags & IFF_PROMISC &&
-				(bcmp(eh->ether_dhost, sc->arpcom.ac_enaddr,
-						ETHER_ADDR_LEN) &&
-					(eh->ether_dhost[0] & 1) == 0)) {
-				m_freem(m);
-				continue;
-			}
 		}
 #endif
 		/* Remove header from mbuf and pass it on. */
@@ -2039,8 +1987,6 @@ static void xl_txeof(sc)
 
 		cur_tx->xl_next = sc->xl_cdata.xl_tx_free;
 		sc->xl_cdata.xl_tx_free = cur_tx;
-		if (!cur_tx->xl_ptr->xl_next);
-			break;
 	}
 
 	if (sc->xl_cdata.xl_tx_head == NULL) {
@@ -2087,6 +2033,10 @@ static void xl_txeoc(sc)
 			 * first generation 3c90X chips.
 			 */
 			CSR_WRITE_1(sc, XL_TX_FREETHRESH, XL_PACKET_SIZE >> 8);
+			if (sc->xl_type == XL_TYPE_905B) {
+				CSR_WRITE_2(sc, XL_COMMAND,
+				XL_CMD_SET_TX_RECLAIM|(XL_PACKET_SIZE >> 4));
+			}
 			CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_ENABLE);
 			CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_DOWN_UNSTALL);
 		} else {
@@ -2285,15 +2235,19 @@ static int xl_encap(sc, c, m_head)
 
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
 		if (m_new == NULL) {
+#if defined(__FreeBSD__)
 			printf("xl%d: no memory for tx list", sc->xl_unit);
+#endif
 			return(1);
 		}
 		if (m_head->m_pkthdr.len > MHLEN) {
 			MCLGET(m_new, M_DONTWAIT);
 			if (!(m_new->m_flags & M_EXT)) {
 				m_freem(m_new);
+#if defined(__FreeBSD__)
 				printf("xl%d: no memory for tx list",
 						sc->xl_unit);
+#endif
 				return(1);
 			}
 		}
@@ -2389,6 +2343,12 @@ static void xl_start(ifp)
 	}
 
 	/*
+	 * If there are no packets queued, bail.
+	 */
+	if (cur_tx == NULL)
+		return;
+
+	/*
 	 * Place the request for the upload interrupt
 	 * in the last descriptor in the chain. This way, if
 	 * we're chaining several packets at once, we'll only
@@ -2410,6 +2370,7 @@ static void xl_start(ifp)
 					vtophys(start_tx->xl_ptr);
 		sc->xl_cdata.xl_tx_tail->xl_ptr->xl_status &=
 					~XL_TXSTAT_DL_INTR;
+		sc->xl_cdata.xl_tx_tail = cur_tx;
 	} else {
 		sc->xl_cdata.xl_tx_head = start_tx;
 		sc->xl_cdata.xl_tx_tail = cur_tx;
@@ -2464,7 +2425,7 @@ static void xl_init(xsc)
 	 * to preserve it. (For 3c905 cards with real external PHYs,
 	 * the BMCR register doesn't change, but this doesn't hurt.)
 	 */
-	if (sc->xl_pinfo != NULL)
+	if (sc->xl_hasmii != 0)
 		phy_bmcr = xl_phy_readreg(sc, PHY_BMCR);
 
 	/*
@@ -2485,11 +2446,13 @@ static void xl_init(xsc)
 	for (i = 0; i < 3; i++)
 		CSR_WRITE_2(sc, XL_W2_STATION_MASK_LO + (i * 2), 0);
 
+#ifdef notdef
 	/* Reset TX and RX. */
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_RESET);
 	xl_wait(sc);
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_RESET);
 	xl_wait(sc);
+#endif
 
 	/* Init circular RX list. */
 	if (xl_list_rx_init(sc) == ENOBUFS) {
@@ -2509,6 +2472,20 @@ static void xl_init(xsc)
 	 * cards in order to enable the download engine.
 	 */
 	CSR_WRITE_1(sc, XL_TX_FREETHRESH, XL_PACKET_SIZE >> 8);
+
+	/*
+	 * If this is a 3c905B, also set the tx reclaim threshold.
+	 * This helps cut down on the number of tx reclaim errors
+	 * that could happen on a busy network. The chip multiplies
+	 * the register value by 16 to obtain the actual threshold
+	 * in bytes, so we divide by 16 when setting the value here.
+	 * The existing threshold value can be examined by reading
+	 * the register at offset 9 in window 5.
+	 */
+	if (sc->xl_type == XL_TYPE_905B) {
+		CSR_WRITE_2(sc, XL_COMMAND,
+			XL_CMD_SET_TX_RECLAIM|(XL_PACKET_SIZE >> 4));
+	}
 
 	/* Set RX filter bits. */
 	XL_SEL_WIN(5);
@@ -2595,7 +2572,7 @@ static void xl_init(xsc)
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_ENABLE);
 
 	/* Restore state of BMCR */
-	if (sc->xl_pinfo != NULL)
+	if (sc->xl_hasmii != 0)
 		xl_phy_writereg(sc, PHY_BMCR, phy_bmcr);
 
 	/* Select window 7 for normal operations. */
@@ -2852,10 +2829,12 @@ static void xl_stop(sc)
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_DISABLE);
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_COAX_STOP);
 	DELAY(800);
+#ifdef notdef
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_RESET);
 	xl_wait(sc);
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_RESET);
 	xl_wait(sc);
+#endif
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_INTR_ACK|XL_STAT_INTLATCH);
 
 	/* Stop the stats updater. */
@@ -2967,7 +2946,6 @@ xl_attach(parent, self, aux)
 	caddr_t roundptr;
 	u_int round;
 	int i, media = IFM_ETHER|IFM_100_TX|IFM_FDX;
-	struct xl_type *p;
 
 	sc->xl_unit = sc->sc_dev.dv_unit;
 
@@ -2988,31 +2966,42 @@ xl_attach(parent, self, aux)
 	 * us to save the PCI iobase, membase and IRQ, put the chip
 	 * back in the D0 state, then restore the PCI config ourselves.
 	 */
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, XL_PCI_CAPID) & 0xff;
+	command = pci_conf_read(pc, pa->pa_tag, XL_PCI_CAPID) & 0xff;
 	if (command == 0x01) {
 
-		command = pci_conf_read(pa->pa_pc, pa->pa_tag,
+		command = pci_conf_read(pc, pa->pa_tag,
 		    XL_PCI_PWRMGMTCTRL);
 		if (command & XL_PSTATE_MASK) {
+			u_int32_t io, mem, irq;
+
+			/* Save PCI config */
+			io = pci_conf_read(pc, pa->pa_tag, XL_PCI_LOIO);
+			mem = pci_conf_read(pc, pa->pa_tag, XL_PCI_LOMEM);
+			irq = pci_conf_read(pc, pa->pa_tag, XL_PCI_INTLINE);
+
 			/* Reset the power state. */
 			printf("%s: chip is in D%d power mode "
 			    "-- setting to D0\n",
 			    sc->sc_dev.dv_xname, command & XL_PSTATE_MASK);
 			command &= 0xFFFFFFFC;
-			pci_conf_write(pa->pa_pc, pa->pa_tag,
+			pci_conf_write(pc, pa->pa_tag,
 			    XL_PCI_PWRMGMTCTRL, command);
+
+			pci_conf_write(pc, pa->pa_tag, XL_PCI_LOIO, io);
+			pci_conf_write(pc, pa->pa_tag, XL_PCI_LOMEM, mem);
+			pci_conf_write(pc, pa->pa_tag, XL_PCI_INTLINE, irq);
 		}
 	}
 
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	command |= PCI_COMMAND_IO_ENABLE |
 		   PCI_COMMAND_MEM_ENABLE |
 		   PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
+	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef XL_USEIOSPACE
 	if (!(command & PCI_COMMAND_IO_ENABLE)) {
@@ -3034,8 +3023,7 @@ xl_attach(parent, self, aux)
 	sc->sc_st = pa->pa_iot;
 #else
 	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf("%s: failed to enable memory mapping\n",
-		    sc->sc_dev.dv_xname);
+		printf(": failed to enable memory mapping\n");
 		return;
 	}
 	if (pci_mem_find(pc, pa->pa_tag, XL_PCI_LOMEM, &iobase, &iosize, NULL)){
@@ -3046,7 +3034,6 @@ xl_attach(parent, self, aux)
 		printf(": can't map mem space\n");
 		return;
 	}
-	sc->csr = (volatile caddr_t)&iobase;
 	sc->sc_st = pa->pa_memt;
 #endif
 
@@ -3076,7 +3063,7 @@ xl_attach(parent, self, aux)
 	 * Get station address from the EEPROM.
 	 */
 	if (xl_read_eeprom(sc, (caddr_t)&enaddr, XL_EE_OEM_ADR0, 3, 1)) {
-		printf("%s: failed to read station address\n",
+		printf("\n%s: failed to read station address\n",
 		    sc->sc_dev.dv_xname);
 		return;
 	}
@@ -3102,8 +3089,8 @@ xl_attach(parent, self, aux)
 		if (round % 8) {
 			round++;
 			roundptr++;
-		}
-		break;
+		} else
+			break;
 	}
 	sc->xl_ldata = (struct xl_list_data *)roundptr;
 	bzero(sc->xl_ldata, sizeof(struct xl_list_data));
@@ -3116,6 +3103,7 @@ xl_attach(parent, self, aux)
 	ifp->if_start = xl_start;
 	ifp->if_watchdog = xl_watchdog;
 	ifp->if_baudrate = 10000000;
+	ifp->if_snd.ifq_maxlen = XL_TX_LIST_CNT - 1;
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
 	/*
@@ -3131,9 +3119,6 @@ xl_attach(parent, self, aux)
 
 	XL_SEL_WIN(3);
 	sc->xl_media = CSR_READ_2(sc, XL_W3_MEDIA_OPT);
-	if (bootverbose)
-		printf("xl%d: media options word: %x\n",
-		    sc->xl_unit, sc->xl_media);
 
 	xl_read_eeprom(sc, (char *)&sc->xl_xcvr, XL_EE_ICFG_0, 2, 0);
 	sc->xl_xcvr &= XL_ICFG_CONNECTOR_MASK;
@@ -3175,30 +3160,12 @@ xl_attach(parent, self, aux)
 		if (phy_sts) {
 			phy_vid = xl_phy_readreg(sc, XL_PHY_VENID);
 			phy_did = xl_phy_readreg(sc, XL_PHY_DEVID);
-			if (bootverbose)
-				printf("xl%d: found PHY at address %d, ",
-						sc->xl_unit, sc->xl_phy_addr);
-			if (bootverbose)
-				printf("vendor id: %x device id: %x\n",
-					phy_vid, phy_did);
-			p = xl_phys;
-			while(p->xl_vid) {
-				if (phy_vid == p->xl_vid &&
-					(phy_did | 0x000F) == p->xl_did) {
-					sc->xl_pinfo = p;
-					break;
-				}
-				p++;
-			}
-			if (sc->xl_pinfo == NULL)
-				sc->xl_pinfo = &xl_phys[PHY_UNKNOWN];
-			if (bootverbose)
-				printf("xl%d: PHY type: %s\n",
-					sc->xl_unit, sc->xl_pinfo->xl_name);
+			sc->xl_hasmii = 1;
 		}
 		else {
 			printf("%s: MII without any phy!\n",
 			    sc->sc_dev.dv_xname);
+			return;
 		}
 	}
 
@@ -3208,8 +3175,6 @@ xl_attach(parent, self, aux)
 	ifmedia_init(&sc->ifmedia, 0, xl_ifmedia_upd, xl_ifmedia_sts);
 
 	if (sc->xl_media & XL_MEDIAOPT_BT) {
-		if (bootverbose)
-			printf("xl%d: found 10baseT\n", sc->xl_unit);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_T, 0, NULL);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_T|IFM_HDX, 0, NULL);
 		if (sc->xl_caps & XL_CAPS_FULL_DUPLEX)
@@ -3218,14 +3183,10 @@ xl_attach(parent, self, aux)
 	}
 
 	if (sc->xl_media & XL_MEDIAOPT_AUI) {
-		if (bootverbose)
-			printf("xl%d: found AUI\n", sc->xl_unit);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_5, 0, NULL);
 	}
 
 	if (sc->xl_media & XL_MEDIAOPT_BNC) {
-		if (bootverbose)
-			printf("xl%d: found BNC\n", sc->xl_unit);
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_10_2, 0, NULL);
 	}
 
@@ -3236,8 +3197,6 @@ xl_attach(parent, self, aux)
 	 * do it and get it over with.
 	 */
 	if (sc->xl_media & XL_MEDIAOPT_BTX) {
-		if (bootverbose)
-			printf("xl%d: found 100baseTX\n", sc->xl_unit);
 		ifp->if_baudrate = 100000000;
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_100_TX, 0, NULL);
 		ifmedia_add(&sc->ifmedia,
@@ -3245,13 +3204,11 @@ xl_attach(parent, self, aux)
 		if (sc->xl_caps & XL_CAPS_FULL_DUPLEX)
 			ifmedia_add(&sc->ifmedia,
 				IFM_ETHER|IFM_100_TX|IFM_FDX, 0, NULL);
-		if (sc->xl_pinfo != NULL)
+		if (sc->xl_hasmii != 0)
 			ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_AUTO, 0, NULL);
 	}
 
 	if (sc->xl_media & XL_MEDIAOPT_BFX) {
-		if (bootverbose)
-			printf("xl%d: found 100baseFX\n", sc->xl_unit);
 		ifp->if_baudrate = 100000000;
 		ifmedia_add(&sc->ifmedia, IFM_ETHER|IFM_100_FX, 0, NULL);
 	}
@@ -3261,8 +3218,6 @@ xl_attach(parent, self, aux)
 	 * separately.
 	 */
 	if (sc->xl_media & XL_MEDIAOPT_MII || sc->xl_media & XL_MEDIAOPT_BT4) {
-		if (bootverbose)
-			printf("xl%d: found MII\n", sc->xl_unit);
 		xl_getmode_mii(sc);
 	}
 

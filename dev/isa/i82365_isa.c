@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365_isa.c,v 1.1 1998/09/11 08:02:50 fgsch Exp $	*/
+/*	$OpenBSD: i82365_isa.c,v 1.7 1999/01/28 07:51:36 fgsch Exp $	*/
 /*	$NetBSD: i82365_isa.c,v 1.11 1998/06/09 07:25:00 thorpej Exp $	*/
 
 /*
@@ -54,8 +54,7 @@
 #include <dev/isa/i82365_isavar.h>
 
 #ifdef PCICISADEBUG
-int	pcicisa_debug = 1 /* XXX */ ;
-#define	DPRINTF(arg) if (pcicisa_debug) printf arg;
+#define	DPRINTF(arg)	printf arg;
 #else
 #define	DPRINTF(arg)
 #endif
@@ -174,6 +173,7 @@ pcic_isa_attach(parent, self, aux)
 	bus_space_tag_t memt = ia->ia_memt;
 	bus_space_handle_t ioh;
 	bus_space_handle_t memh;
+	int i;
 
 	/* Map i/o space. */
 	if (bus_space_map(iot, ia->ia_iobase, ia->ia_iosize, 0, &ioh)) {
@@ -198,34 +198,41 @@ pcic_isa_attach(parent, self, aux)
 	sc->memt = memt;
 	sc->memh = memh;
 
+	printf("\n");
+
+	pcic_attach(sc);
+	pcic_isa_bus_width_probe (sc, iot, ioh, ia->ia_iobase, ia->ia_iosize);
+	pcic_attach_sockets(sc);
+
 	/*
-	 * allocate an irq.  it will be used by both controllers.  I could
+	 * We allocate the card event IRQ late because it is more important
+	 * that the cards will get their interrupt than that we get a
+	 * card event interrupt vector that works.
+	 *
+	 * Allocate an irq.  It will be used by both controllers.  I could
 	 * use two different interrupts, but interrupts are relatively
 	 * scarce, shareable, and for PCIC controllers, very infrequent.
 	 */
 
 	if ((sc->irq = ia->ia_irq) == IRQUNK) {
-		if (isa_intr_alloc(ic,
-		    PCIC_CSC_INTR_IRQ_VALIDMASK & pcic_isa_intr_alloc_mask,
-		    IST_EDGE, &sc->irq)) {
-			printf("\n%s: can't allocate interrupt\n",
-			    sc->dev.dv_xname);
-			return;
-		}
-		printf(": using irq %d", sc->irq);
+		for (i = 0; i < npcic_isa_intr_list; i++)
+			if (isa_intr_check(ic, pcic_isa_intr_list[i],
+			    IST_EDGE) == 2)
+				goto found;
+		for (i = 0; i < npcic_isa_intr_list; i++)
+			if (isa_intr_check(ic, pcic_isa_intr_list[i],
+			    IST_EDGE) == 1)
+				goto found;
+		printf("%s: no irq\n", sc->dev.dv_xname);
+		return;
+found:
+		sc->irq = pcic_isa_intr_list[i];
 	}
-	printf("\n");
-
-	pcic_attach(sc);
-
-	pcic_isa_bus_width_probe (sc, iot, ioh, ia->ia_iobase, ia->ia_iosize);
 
 	sc->ih = isa_intr_establish(ic, sc->irq, IST_EDGE, IPL_TTY,
 	    pcic_intr, sc, sc->dev.dv_xname);
-	if (sc->ih == NULL) {
-		printf("%s: can't establish interrupt\n", sc->dev.dv_xname);
-		return;
-	}
-
-	pcic_attach_sockets(sc);
+	if (sc->ih)
+		printf("%s: irq %d\n", sc->dev.dv_xname, sc->irq);
+	else
+		printf("%s: no irq\n", sc->dev.dv_xname);
 }

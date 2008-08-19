@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.13 1998/07/28 00:13:36 millert Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.16 1999/02/26 10:37:51 art Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.61 1996/05/03 19:42:35 christos Exp $	*/
 
 /*-
@@ -60,6 +60,10 @@
 #include <vm/vm.h>
 #include <vm/vm_kern.h>
 
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
+
 #include <machine/cpu.h>
 #include <machine/gdt.h>
 #include <machine/reg.h>
@@ -107,7 +111,7 @@ cpu_fork(p1, p2)
 	/* Sync curpcb (which is presumably p1's PCB) and copy it to p2. */
 	savectx(curpcb);
 	*pcb = p1->p_addr->u_pcb;
-	pmap_activate(&p2->p_vmspace->vm_pmap, pcb);
+	pmap_activate(p2);
 
 	/*
 	 * Preset these so that gdt_compact() doesn't get confused if called
@@ -128,7 +132,11 @@ cpu_fork(p1, p2)
 		union descriptor *new_ldt;
 
 		len = pcb->pcb_ldt_len * sizeof(union descriptor);
+#if defined(UVM)
+		new_ldt = (union descriptor *)uvm_km_alloc(kernel_map, len);
+#else
 		new_ldt = (union descriptor *)kmem_alloc(kernel_map, len);
+#endif
 		bcopy(pcb->pcb_ldt, new_ldt, len);
 		pcb->pcb_ldt = new_ldt;
 		ldt_alloc(pcb, new_ldt, len);
@@ -137,7 +145,7 @@ cpu_fork(p1, p2)
 
 	/*
 	 * Copy the trapframe, and arrange for the child to return directly
-	 * through rei().
+	 * through rei().  Note the inline version of cpu_set_kpc().
 	 */
 	p2->p_md.md_regs = tf = (struct trapframe *)pcb->pcb_tss.tss_esp0 - 1;
 	*tf = *p1->p_md.md_regs;
@@ -150,13 +158,17 @@ cpu_fork(p1, p2)
 }
 
 void
-cpu_set_kpc(p, pc)
+cpu_set_kpc(p, pc, arg)
 	struct proc *p;
-	void (*pc) __P((struct proc *));
+	void (*pc) __P((void *));
+	void *arg;
 {
-	struct switchframe *sf = (struct switchframe *)p->p_addr->u_pcb.pcb_esp;
+	struct switchframe *sf =
+	    (struct switchframe *)p->p_addr->u_pcb.pcb_esp;
 
-	sf->sf_esi = (int) pc;
+	sf->sf_esi = (int)pc;
+	sf->sf_ebx = (int)arg;
+	sf->sf_eip = (int)proc_trampoline;
 }
 
 void
@@ -203,10 +215,16 @@ cpu_exit(p)
 #endif
 
 	vm = p->p_vmspace;
+#if !defined(UVM)
 	if (vm->vm_refcnt == 1)
 		vm_map_remove(&vm->vm_map, VM_MIN_ADDRESS, VM_MAXUSER_ADDRESS);
+#endif
 
+#if defined(UVM)
+	uvmexp.swtch++;
+#else
 	cnt.v_swtch++;
+#endif
 	switch_exit(p);
 }
 
@@ -358,7 +376,11 @@ vmapbuf(bp, len)
 	faddr = trunc_page(bp->b_saveaddr = bp->b_data);
 	off = (vm_offset_t)bp->b_data - faddr;
 	len = round_page(off + len);
+#if defined(UVM)
+	taddr= uvm_km_valloc_wait(phys_map, len);
+#else
 	taddr = kmem_alloc_wait(phys_map, len);
+#endif
 	bp->b_data = (caddr_t)(taddr + off);
 	/*
 	 * The region is locked, so we expect that pmap_pte() will return
@@ -388,7 +410,11 @@ vunmapbuf(bp, len)
 	addr = trunc_page(bp->b_data);
 	off = (vm_offset_t)bp->b_data - addr;
 	len = round_page(off + len);
+#if defined(UVM)
+	uvm_km_free_wakeup(phys_map, addr, len);
+#else
 	kmem_free_wakeup(phys_map, addr, len);
+#endif
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = 0;
 }

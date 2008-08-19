@@ -1,5 +1,5 @@
 /*	$NetBSD: mem.c,v 1.31 1996/05/03 19:42:19 christos Exp $	*/
-/*	$OpenBSD: mem.c,v 1.9 1998/08/31 17:42:30 millert Exp $ */
+/*	$OpenBSD: mem.c,v 1.11 1999/02/26 04:41:13 art Exp $ */
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -56,6 +56,10 @@
 #include <machine/conf.h>
 
 #include <vm/vm.h>
+
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
 
 extern char *vmmap;            /* poor name! */
 caddr_t zeropage;
@@ -176,9 +180,15 @@ mmrw(dev, uio, flags)
 		case 1:
 			v = uio->uio_offset;
 			c = min(iov->iov_len, MAXPHYS);
+#if defined(UVM)
+			if (!uvm_kernacc((caddr_t)v, c,
+			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
+				return (EFAULT);
+#else
 			if (!kernacc((caddr_t)v, c,
 			    uio->uio_rw == UIO_READ ? B_READ : B_WRITE))
 				return (EFAULT);
+#endif
 			error = uiomove((caddr_t)v, c, uio);
 			continue;
 
@@ -231,15 +241,19 @@ mmmmap(dev, off, prot)
 	switch (minor(dev)) {
 /* minor device 0 is physical memory */
 	case 0:
-		if (off > ctob(physmem) &&
+		if ((u_int)off > ctob(physmem) &&
 		    suser(p->p_ucred, &p->p_acflag) != 0)
 			return -1;
-		return i386_btop(off);
+		return i386_btop((u_int)off);
 
 /* minor device 1 is kernel memory */
 	case 1:
 		/* XXX - writability, executability checks? */
+#if defined(UVM)
+		if (!uvm_kernacc((caddr_t)off, NBPG, B_READ))
+#else
 		if (!kernacc((caddr_t)off, NBPG, B_READ))
+#endif
 			return -1;
 		return i386_btop(vtophys(off));
 #ifdef APERTURE

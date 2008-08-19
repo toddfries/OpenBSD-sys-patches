@@ -1,12 +1,12 @@
-/*	$OpenBSD: pss.c,v 1.15 1998/05/13 10:25:07 provos Exp $ */
+/*	$OpenBSD: pss.c,v 1.18 1999/01/07 06:14:49 niklas Exp $ */
 /*	$NetBSD: pss.c,v 1.38 1998/01/12 09:43:44 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1994 John Brezak
  * Copyright (c) 1991-1993 Regents of the University of California.
- * All rightOAs reserved.
+ * All rights reserved.
  *
-x * Redistribution and use in source and binary forms, with or without
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
@@ -110,9 +110,6 @@ x * Redistribution and use in source and binary forms, with or without
 
 struct pss_softc {
 	struct	device sc_dev;		/* base device */
-#ifdef NEWCONFIG
-	struct	isadev sc_id;		/* ISA device */
-#endif
 	void	*sc_ih;			/* interrupt vectoring */
 
 	int	sc_iobase;		/* I/O port base address */
@@ -134,9 +131,6 @@ struct pss_softc {
 #ifdef notyet
 struct mpu_softc {
 	struct	device sc_dev;		/* base device */
-#ifdef NEWCONFIG
-	struct	isadev sc_id;		/* ISA device */
-#endif
 	void	*sc_ih;			/* interrupt vectoring */
     
 	int	sc_iobase;		/* MIDI I/O port base address */
@@ -145,9 +139,6 @@ struct mpu_softc {
 
 struct pcd_softc {
 	struct	device sc_dev;		/* base device */
-#ifdef NEWCONFIG
-	struct	isadev sc_id;		/* ISA device */
-#endif
 	void	*sc_ih;			/* interrupt vectoring */
 
 	int	sc_iobase;		/* CD I/O port base address */
@@ -246,6 +237,8 @@ struct audio_hw_if pss_audio_if = {
 	ad1848_round,
         ad1848_mappage,
 	ad1848_get_props,
+	NULL,
+	NULL
 };
 
 
@@ -1028,10 +1021,6 @@ pssattach(parent, self, aux)
     sc->sc_iobase = iobase;
     sc->sc_drq = ia->ia_drq;
 
-#ifdef NEWCONFIG
-    isa_establish(&sc->sc_id, &sc->sc_dev);
-#endif
-
     /* Setup interrupt handler for PSS */
     sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE, IPL_AUDIO,
 	pssintr, sc, sc->sc_dev.dv_xname);
@@ -1048,7 +1037,7 @@ pssattach(parent, self, aux)
     (void)pss_set_treble(sc, AUDIO_MAX_GAIN/2);
     (void)pss_set_bass(sc, AUDIO_MAX_GAIN/2);
 
-    audio_attach_mi(&pss_audio_if, 0, sc->ad1848_sc, &sc->ad1848_sc->sc_dev);
+    audio_attach_mi(&pss_audio_if, sc->ad1848_sc, &sc->ad1848_sc->sc_dev);
 }
 
 void
@@ -1063,10 +1052,6 @@ spattach(parent, self, aux)
 
     sc->sc_iobase = iobase;
     sc->sc_drq = cf->cf_drq;
-
-#ifdef NEWCONFIG
-    isa_establish(&sc->sc_id, &sc->sc_dev);
-#endif
 
     sc->sc_ih = isa_intr_establish(ic, cf->cf_irq, IST_EDGE, IPL_AUDIO,
 	ad1848_intr, sc, sc->sc_dev.dv_xname);
@@ -1090,10 +1075,6 @@ mpuattach(parent, self, aux)
     int iobase = cf->cf_iobase;
 
     sc->sc_iobase = iobase;
-
-#ifdef NEWCONFIG
-    isa_establish(&sc->sc_id, &sc->sc_dev);
-#endif
 
     sc->sc_ih = isa_intr_establish(ic, cf->cf_irq, IST_EDGE, IPL_AUDIO,
         mpuintr, sc, sc->sc_dev.dv_xname);
@@ -1119,10 +1100,6 @@ pcdattach(parent, self, aux)
      * used after this to handle the device.
      */
     sc->sc_iobase = iobase;
-
-#ifdef NEWCONFIG
-    isa_establish(&sc->sc_id, &sc->sc_dev);
-#endif
 
     /* XXX might use pssprint func ?? */
     printf(" port 0x%x-0x%x irq %d\n",

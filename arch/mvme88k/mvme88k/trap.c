@@ -1,4 +1,6 @@
+/*	$OpenBSD: trap.c,v 1.6 1999/02/09 06:36:30 smurph Exp $	*/
 /*
+ * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
  * All rights reserved.
  *
@@ -43,10 +45,10 @@
  */
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <vm/vm.h>
 #include <vm/vm_kern.h>			/* kernel_map */
 
-#include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/syscall.h>
@@ -102,6 +104,11 @@ char	*pbus_exception_type[] = {
 	"Supervisor Violation",
 	"Write Violation",
 };
+extern ret_addr;
+#define NSIR	8
+void (*sir_routines[NSIR])();
+void *sir_args[NSIR];
+u_char next_sir;
 
 int	trap_types = sizeof trap_type / sizeof trap_type[0];
 
@@ -181,6 +188,7 @@ trap(unsigned type, struct m88100_saved_state *frame)
     u_long fault_code;
     unsigned nss, fault_addr;
     struct vmspace *vm;
+    union sigval sv;
     int result;
     int sig = 0;
 
@@ -318,8 +326,10 @@ trap(unsigned type, struct m88100_saved_state *frame)
 
 	if ((frame->dpfsr >> 16 & 0x7) == 0x3) {
 #ifdef DIAGNOSTIC 
+#if DDB
 		printf("sxip %x dpfsr %x\n", frame->sxip, frame->dpfsr);
 		gimmeabreak();
+#endif
 #endif
 	}
 
@@ -408,8 +418,10 @@ trap(unsigned type, struct m88100_saved_state *frame)
 		result = vm_fault(map, va, ftype, FALSE); 
 		frame->ipfsr = frame->dpfsr = 0;
 
+/*	printf("vm_fault(%x, %x, %x, 0) -> %x\n",
+	       map, va, ftype, result);
+*/
 	}
-
 
 	if ((caddr_t)va >= vm->vm_maxsaddr) {
 		if (result == KERN_SUCCESS) {
@@ -445,8 +457,10 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	break;
 
     case T_MISALGNFLT+T_USER:
+/*	DEBUG_MSG("T_MISALGNFLT\n");*/
 	sig = SIGBUS;
 	fault_type = BUS_ADRALN;
+/*	panictrap(fault_type, frame);*/
 	break;
 
     case T_PRIVINFLT+T_USER:
@@ -498,7 +512,6 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	 * breakpoint debugging.  When we get this trap, we just
 	 * return a signal which gets caught by the debugger.
 	 */
-
 	frame->sfip = frame->snip;    /* set up the next FIP */
 	frame->snip = frame->sxip;    /* set up the next NIP */
 	sig = SIGTRAP;
@@ -521,8 +534,10 @@ trap(unsigned type, struct m88100_saved_state *frame)
 	 return;
 
     if (sig) {
-	trapsignal(p, sig, fault_code, fault_type, (caddr_t)fault_addr);
-	/*
+/*	trapsignal(p, sig, fault_code, fault_type, (caddr_t)fault_addr); */
+	sv.sival_int = fault_addr;
+	trapsignal(p, sig, fault_code, fault_type, sv);
+	/*		
          * don't want multiple faults - we are going to
 	 * deliver signal.
 	 */
@@ -534,14 +549,36 @@ trap(unsigned type, struct m88100_saved_state *frame)
 }
 
 void
+test_trap(struct m88100_saved_state *frame)
+{
+    DEBUG_MSG("\n[test_trap (Good News[tm]) frame 0x%08x]\n", frame);
+    regdump((struct trapframe*)frame);
+    bugreturn();
+}
+void
 error_fault(struct m88100_saved_state *frame)
 {
     DEBUG_MSG("\n[ERROR FAULT (Bad News[tm]) frame 0x%08x]\n", frame);
-#if DDB
+
+#if DDB 
     gimmeabreak();
     DEBUG_MSG("[you really can't restart after an error fault.]\n");
     gimmeabreak();
 #endif /* DDB */
+    bugreturn();  /* This gets us to Bug instead of a loop forever */
+}
+
+void
+error_reset(struct m88100_saved_state *frame) 
+{
+    DEBUG_MSG("\n[ERROR RESET (Really Bad News[tm]) frame 0x%08x]\n", frame);
+
+#if DDB 
+    gimmeabreak();
+    DEBUG_MSG("[It's useless to restart after an error reset. You might as well reboot.]\n");
+    gimmeabreak();
+#endif /* DDB */
+    bugreturn();  /* This gets us to Bug instead of a loop forever */
 }
 
 syscall(register_t code, struct m88100_saved_state *tf)
@@ -720,4 +757,32 @@ child_return(struct proc *p)
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p->p_tracep, SYS_fork, 0, 0);
 #endif
+}
+
+/*
+ * Allocation routines for software interrupts.
+ */
+u_long
+allocate_sir(proc, arg)
+	void (*proc)();
+	void *arg;
+{
+	int bit;
+
+	if (next_sir >= NSIR)
+		panic("allocate_sir: none left");
+	bit = next_sir++;
+	sir_routines[bit] = proc;
+	sir_args[bit] = arg;
+	return (1 << bit);
+}
+
+void
+init_sir()
+{
+	extern void netintr();
+
+	sir_routines[0] = netintr;
+	sir_routines[1] = softclock;
+	next_sir = 2;
 }

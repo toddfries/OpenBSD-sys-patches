@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_misc.c,v 1.20 1998/03/06 21:58:09 niklas Exp $	 */
+/*	$OpenBSD: svr4_misc.c,v 1.22 1999/02/26 04:12:00 art Exp $	 */
 /*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
 
 /*
@@ -86,6 +86,10 @@
 #include <compat/svr4/svr4_acl.h>
 
 #include <vm/vm.h>
+
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
 
 static __inline clock_t timeval_to_clock_t __P((struct timeval *));
 static int svr4_setinfo	__P((struct proc *, int, svr4_siginfo_t *));
@@ -267,7 +271,7 @@ again:
 	if (error)
 		goto out;
 
-	if (!error && !cookiebuf) {
+	if (!error && !cookiebuf && !eofflag) {
 		error = EPERM;
 		goto out;
 	}
@@ -282,10 +286,10 @@ again:
 		bdp = (struct dirent *)inp;
 		reclen = bdp->d_reclen;
 		if (reclen & 3)
-			panic("svr4_getdents");
-		off = *cookie++;	/* each entry points to the next */
+			panic("svr4_getdents: bad reclen");
 		if (bdp->d_fileno == 0) {
 			inp += reclen;	/* it is a hole; squish it out */
+			off = *cookie++;
 			continue;
 		}
 		svr4_reclen = SVR4_RECLEN(&idb, bdp->d_namlen);
@@ -294,6 +298,8 @@ again:
 			outp++;
 			break;
 		}
+		off = *cookie++;	/* each entry points to the next */
+
 		/*
 		 * Massage in place to make a SVR4-shaped dirent (otherwise
 		 * we have to worry about touching user memory outside of
@@ -305,8 +311,10 @@ again:
 		strcpy(idb.d_name, bdp->d_name);
 		if ((error = copyout((caddr_t)&idb, outp, svr4_reclen)))
 			goto out;
+
 		/* advance past this real entry */
 		inp += reclen;
+
 		/* advance output past SVR4-shaped entry */
 		outp += svr4_reclen;
 		resid -= svr4_reclen;
@@ -531,10 +539,18 @@ svr4_sys_sysconfig(p, v, retval)
 		*retval = 3;	/* XXX: real, virtual, profiling */
 		break;
 	case SVR4_CONFIG_PHYS_PAGES:
+#if defined(UVM)
+		*retval = uvmexp.npages;
+#else
 		*retval = cnt.v_free_count;	/* XXX: free instead of total */
+#endif
 		break;
 	case SVR4_CONFIG_AVPHYS_PAGES:
+#if defined(UVM)
+		*retval = uvmexp.active;	/* XXX: active instead of avg */
+#else
 		*retval = cnt.v_active_count;	/* XXX: active instead of avg */
+#endif
 		break;
 	default:
 		return EINVAL;
@@ -623,7 +639,15 @@ svr4_sys_break(p, v, retval)
 	DPRINTF(("break(3): old %lx new %lx diff %x\n", old, new, diff));
 
 	if (diff > 0) {
+#if defined(UVM)
+		rv = uvm_map(&vm->vm_map, &old, diff, NULL, UVM_UNKNOWN_OFFSET,
+			UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL, UVM_INH_COPY,
+				    UVM_ADV_NORMAL,
+				    UVM_FLAG_AMAPPAD|UVM_FLAG_FIXED|
+				    UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW));
+#else
 		rv = vm_allocate(&vm->vm_map, &old, diff, FALSE);
+#endif
 		if (rv != KERN_SUCCESS) {
 			uprintf("sbrk: grow failed, return = %d\n", rv);
 			return ENOMEM;
@@ -631,7 +655,11 @@ svr4_sys_break(p, v, retval)
 		vm->vm_dsize += btoc(diff);
 	} else if (diff < 0) {
 		diff = -diff;
+#if defined(UVM)
+		rv = uvm_deallocate(&vm->vm_map, new, diff);
+#else
 		rv = vm_deallocate(&vm->vm_map, new, diff);
+#endif
 		if (rv != KERN_SUCCESS) {
 			uprintf("sbrk: shrink failed, return = %d\n", rv);
 			return ENOMEM;
@@ -1385,7 +1413,7 @@ svr4_sys_rdebug(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-#ifdef SVR4_COMPAT_NCR
+#ifdef COMPAT_SVR4_NCR
 	return (ENXIO);
 #else
 	return (p->p_os == OOS_NCR ? ENXIO : sys_nosys(p, v, retval));

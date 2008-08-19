@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365.c,v 1.1 1998/09/11 07:53:57 fgsch Exp $	*/
+/*	$OpenBSD: i82365.c,v 1.6 1999/02/13 09:58:38 fgsch Exp $	*/
 /*	$NetBSD: i82365.c,v 1.10 1998/06/09 07:36:55 thorpej Exp $	*/
 
 /*
@@ -49,8 +49,7 @@
 #include <dev/ic/i82365var.h>
 
 #ifdef PCICDEBUG
-int	pcic_debug = 1;
-#define	DPRINTF(arg) if (pcic_debug) printf arg;
+#define	DPRINTF(arg)	printf arg;
 #else
 #define	DPRINTF(arg)
 #endif
@@ -130,7 +129,6 @@ pcic_vendor(h)
 				return (PCIC_VENDOR_CIRRUS_PD6710);
 		}
 	}
-	/* XXX how do I identify the GD6729? */
 
 	reg = pcic_read(h, PCIC_IDENT);
 
@@ -199,27 +197,40 @@ pcic_attach(sc)
 
 	DPRINTF((" 0x%02x", reg));
 
+	/*
+	 * The CL-PD6729 has only one controller and always returns 0
+	 * if you try to read from the second one. Maybe pcic_ident_ok
+	 * shouldn't accept 0?
+	 */
 	sc->handle[2].sc = sc;
 	sc->handle[2].sock = C1SA;
-	if (pcic_ident_ok(reg = pcic_read(&sc->handle[2], PCIC_IDENT))) {
-		sc->handle[2].flags = PCIC_FLAG_SOCKETP;
-		count++;
+	if (pcic_vendor(&sc->handle[0]) != PCIC_VENDOR_CIRRUS_PD672X ||
+	    pcic_read(&sc->handle[2], PCIC_IDENT) != 0) {
+		if (pcic_ident_ok(reg = pcic_read(&sc->handle[2],
+						  PCIC_IDENT))) {
+			sc->handle[2].flags = PCIC_FLAG_SOCKETP;
+			count++;
+		} else {
+			sc->handle[2].flags = 0;
+		}
+
+		DPRINTF((" 0x%02x", reg));
+
+		sc->handle[3].sc = sc;
+		sc->handle[3].sock = C1SB;
+		if (pcic_ident_ok(reg = pcic_read(&sc->handle[3],
+						  PCIC_IDENT))) {
+			sc->handle[3].flags = PCIC_FLAG_SOCKETP;
+			count++;
+		} else {
+			sc->handle[3].flags = 0;
+		}
+
+		DPRINTF((" 0x%02x\n", reg));
 	} else {
 		sc->handle[2].flags = 0;
-	}
-
-	DPRINTF((" 0x%02x", reg));
-
-	sc->handle[3].sc = sc;
-	sc->handle[3].sock = C1SB;
-	if (pcic_ident_ok(reg = pcic_read(&sc->handle[3], PCIC_IDENT))) {
-		sc->handle[3].flags = PCIC_FLAG_SOCKETP;
-		count++;
-	} else {
 		sc->handle[3].flags = 0;
 	}
-
-	DPRINTF((" 0x%02x\n", reg));
 
 	if (count == 0)
 		panic("pcic_attach: attach found no sockets");
@@ -229,13 +240,11 @@ pcic_attach(sc)
 	/* XXX block interrupts? */
 
 	for (i = 0; i < PCIC_NSLOTS; i++) {
-#if 0
 		/*
 		 * this should work, but w/o it, setting tty flags hangs at
 		 * boot time.
 		 */
 		if (sc->handle[i].flags & PCIC_FLAG_SOCKETP)
-#endif
 		{
 			pcic_write(&sc->handle[i], PCIC_CSC_INTR, 0);
 			pcic_read(&sc->handle[i], PCIC_CSC);
@@ -767,8 +776,8 @@ pcic_chip_mem_map(pch, kind, card_addr, size, pcmhp, offsetp, windowp)
 	busaddr = pcmhp->addr;
 
 	/*
-	 * compute the address offset to the pcmcia address space for the
-	 * pcic.  this is intentionally signed.  The masks and shifts below
+	 * Compute the address offset to the pcmcia address space for the
+	 * pcic.  This is intentionally signed.  The masks and shifts below
 	 * will cause TRT to happen in the pcic registers.  Deal with making
 	 * sure the address is aligned, and return the alignment offset.
 	 */
@@ -827,8 +836,9 @@ pcic_chip_io_alloc(pch, start, size, align, pcihp)
 	struct pcic_handle *h = (struct pcic_handle *) pch;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
-	bus_addr_t ioaddr;
+	bus_addr_t ioaddr, beg, fin;
 	int flags = 0;
+	struct pcic_ranges *range;
 
 	/*
 	 * Allocate some arbitrary I/O space.
@@ -841,7 +851,49 @@ pcic_chip_io_alloc(pch, start, size, align, pcihp)
 		if (bus_space_map(iot, start, size, 0, &ioh))
 			return (1);
 		DPRINTF(("pcic_chip_io_alloc map port %lx+%lx\n",
-		    (u_long) ioaddr, (u_long) size));
+		    (u_long)ioaddr, (u_long)size));
+	} else if (h->sc->ranges) {
+		flags |= PCMCIA_IO_ALLOCATED;
+
+ 		/*
+		 * In this case, we know the "size" and "align" that
+		 * we want.  So we need to start walking down
+		 * h->sc->ranges, searching for a similar space that
+		 * is (1) large enough for the size and alignment
+		 * (2) then we need to try to allocate
+		 * (3) if it fails to allocate, we try next range.
+		 *
+		 * We must also check that the start/size of each
+		 * allocation we are about to do is within the bounds
+		 * of "h->sc->iobase" and "h->sc->iosize".
+		 * (Some pcmcia controllers handle a 12 bits of addressing,
+		 * but we want to use the same range structure)
+		 */
+		for (range = h->sc->ranges; range->start; range++) {
+			/* Potentially trim the range because of bounds. */
+			beg = max(range->start, h->sc->iobase);
+			fin = min(range->start + range->len,
+			    h->sc->iobase + h->sc->iosize);
+
+			/* Short-circuit easy cases. */
+			if (fin < beg || fin - beg < size)
+				continue;
+
+			/*
+			 * This call magically fulfills our alignment
+			 * requirements.
+			 */
+			DPRINTF(("pcic_chip_io_alloc beg-fin %lx-%lx\n",
+			    (u_long)beg, (u_long)fin));
+			if (bus_space_alloc(iot, beg, fin, size, align, 0, 0,
+			    &ioaddr, &ioh) == 0)
+				break;
+		}
+		if (range->start == 0)
+			return (1);
+		DPRINTF(("pcic_chip_io_alloc alloc port %lx+%lx\n",
+		    (u_long)ioaddr, (u_long)size));
+
 	} else {
 		flags |= PCMCIA_IO_ALLOCATED;
 		if (bus_space_alloc(iot, h->sc->iobase,
@@ -849,7 +901,7 @@ pcic_chip_io_alloc(pch, start, size, align, pcihp)
 		    &ioaddr, &ioh))
 			return (1);
 		DPRINTF(("pcic_chip_io_alloc alloc port %lx+%lx\n",
-		    (u_long) ioaddr, (u_long) size));
+		    (u_long)ioaddr, (u_long)size));
 	}
 
 	pcihp->iot = iot;
@@ -1034,15 +1086,14 @@ pcic_wait_ready(h)
 			return;
 		delay(500);
 #ifdef PCICDEBUG
-		if (pcic_debug) {
 			if ((i>5000) && (i%100 == 99))
 				printf(".");
-		}
 #endif
 	}
 
 #ifdef DIAGNOSTIC
-	printf("pcic_wait_ready ready never happened\n");
+	printf("pcic_wait_ready: ready never happened, status = %02x\n",
+	    pcic_read(h, PCIC_IF_STATUS));
 #endif
 }
 
@@ -1067,27 +1118,26 @@ pcic_chip_socket_enable(pch)
 
 	/* power up the socket */
 
-	pcic_write(h, PCIC_PWRCTL, PCIC_PWRCTL_PWR_ENABLE);
+	pcic_write(h, PCIC_PWRCTL, PCIC_PWRCTL_DISABLE_RESETDRV
+			   | PCIC_PWRCTL_PWR_ENABLE);
 
 	/*
 	 * wait 100ms until power raise (Tpr) and 20ms to become
 	 * stable (Tsu(Vcc)).
+	 *
+	 * some machines require some more time to be settled
+	 * (another 200ms is added here).
 	 */
-	delay((100 + 20) * 1000);
+	delay((100 + 20 + 200) * 1000);
 
-	pcic_write(h, PCIC_PWRCTL, PCIC_PWRCTL_PWR_ENABLE | PCIC_PWRCTL_OE);
+	pcic_write(h, PCIC_PWRCTL, PCIC_PWRCTL_DISABLE_RESETDRV | PCIC_PWRCTL_OE
+			   | PCIC_PWRCTL_PWR_ENABLE);
+	pcic_write(h, PCIC_INTR, 0);
 
-#if 0
 	/*
 	 * hold RESET at least 10us.
 	 */
 	delay(10);
-#else
-	/*
-	 * at least one card i've tested needs this. -fgsch
-	 */
-	delay(250 * 1000);
-#endif
 
 	/* clear the reset flag */
 
@@ -1098,6 +1148,13 @@ pcic_chip_socket_enable(pch)
 	delay(20000);
 
 	/* wait for the chip to finish initializing */
+
+#ifdef DIAGNOSTIC
+	reg = pcic_read(h, PCIC_IF_STATUS);
+	if (!(reg & PCIC_IF_STATUS_POWERACTIVE)) {
+		printf("pcic_chip_socket_enable: status %x", reg);
+	}
+#endif
 
 	pcic_wait_ready(h);
 

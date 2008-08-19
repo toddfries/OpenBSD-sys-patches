@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_pipe.c,v 1.8 1997/11/06 05:58:21 csapuntz Exp $	*/
+/*	$OpenBSD: sys_pipe.c,v 1.10 1999/02/26 05:12:18 art Exp $	*/
 
 /*
  * Copyright (c) 1996 John S. Dyson
@@ -86,15 +86,6 @@
 #include <vm/vm_page.h>
 
 #include <sys/pipe.h>
-
-/*
- * Use this define if you want to disable *fancy* VM things.  Expect an
- * approx 30% decrease in transfer rate.  This could be useful for
- * NetBSD or OpenBSD.
- */
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-#define PIPE_NODIRECT
-#endif
 
 /*
  * interfaces to the outside world
@@ -224,6 +215,12 @@ void
 pipespace(cpipe)
 	struct pipe *cpipe;
 {
+#if defined(UVM)
+	cpipe->pipe_buffer.buffer = (caddr_t) uvm_km_valloc(kernel_map,
+						cpipe->pipe_buffer.size);
+	if (cpipe->pipe_buffer.buffer == NULL)
+		panic("pipespace: out of kvm");
+#else
 	int npages, error;
 
 	npages = round_page(cpipe->pipe_buffer.size)/PAGE_SIZE;
@@ -257,6 +254,7 @@ pipespace(cpipe)
 
 	if (error != KERN_SUCCESS)
 		panic("pipeinit: cannot allocate pipe -- out of kvm -- code = %d", error);
+#endif
 	amountpipekva += cpipe->pipe_buffer.size;
 }
 
@@ -748,9 +746,15 @@ pipe_write(fp, uio, cred)
 
 		if (wpipe->pipe_buffer.buffer) {
 			amountpipekva -= wpipe->pipe_buffer.size;
+#if defined(UVM)
+			uvm_km_free(kernel_map,
+				(vm_offset_t)wpipe->pipe_buffer.buffer,
+				wpipe->pipe_buffer.size);
+#else
 			kmem_free(kernel_map,
 				(vm_offset_t)wpipe->pipe_buffer.buffer,
 				wpipe->pipe_buffer.size);
+#endif
 		}
 
 #ifndef PIPE_NODIRECT
@@ -779,7 +783,7 @@ pipe_write(fp, uio, cred)
 	}
 		
 
-	if( wpipe->pipe_buffer.buffer == NULL) {
+	if (wpipe->pipe_buffer.buffer == NULL) {
 		if ((error = pipelock(wpipe,1)) == 0) {
 			pipespace(wpipe);
 			pipeunlock(wpipe);
@@ -981,9 +985,11 @@ pipe_ioctl(fp, cmd, data, p)
 		return (0);
 
 	case FIONREAD:
+#ifndef PIPE_NODIRECT
 		if (mpipe->pipe_state & PIPE_DIRECTW)
 			*(int *)data = mpipe->pipe_map.cnt;
 		else
+#endif
 			*(int *)data = mpipe->pipe_buffer.cnt;
 		return (0);
 
@@ -1120,9 +1126,15 @@ pipeclose(cpipe)
 			if (cpipe->pipe_buffer.size > PIPE_SIZE)
 				--nbigpipe;
 			amountpipekva -= cpipe->pipe_buffer.size;
+#if defined(UVM)
+			uvm_km_free(kernel_map,
+				(vm_offset_t)cpipe->pipe_buffer.buffer,
+				cpipe->pipe_buffer.size);
+#else
 			kmem_free(kernel_map,
 				(vm_offset_t)cpipe->pipe_buffer.buffer,
 				cpipe->pipe_buffer.size);
+#endif
 		}
 #ifndef PIPE_NODIRECT
 		if (cpipe->pipe_map.kva) {

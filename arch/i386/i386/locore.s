@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.45 1998/09/06 20:09:58 millert Exp $	*/
+/*	$OpenBSD: locore.s,v 1.48 1999/03/08 23:47:26 downsj Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -141,16 +141,21 @@
 	.data
 
 	.globl	_cpu,_cpu_id,_cpu_vendor,_cpuid_level,_cpu_feature
+	.globl	_cpu_cache_eax,_cpu_cache_ebx,_cpu_cache_ecx,_cpu_cache_edx
 	.globl	_cold,_cnvmem,_extmem,_esym
 	.globl	_boothowto,_bootdev,_atdevbase
 	.globl	_proc0paddr,_curpcb,_PTDpaddr,_dynamic_gdt
 	.globl	_bootapiver, _bootargc, _bootargv
 
 _cpu:		.long	0	# are we 386, 386sx, 486, 586 or 686
-_cpu_id:	.long	0	# saved from `cpuid' instruction
+_cpu_id:	.long	0	# saved from 'cpuid' instruction
 _cpu_feature:	.long	0	# feature flags from 'cpuid' instruction
 _cpuid_level:	.long	-1	# max. level accepted by 'cpuid' instruction
-_cpu_vendor:	.space	16	# vendor string returned by `cpuid' instruction
+_cpu_cache_eax:	.long	0
+_cpu_cache_ebx:	.long	0
+_cpu_cache_ecx:	.long	0
+_cpu_cache_edx:	.long	0
+_cpu_vendor:	.space	16	# vendor string returned by 'cpuid' instruction
 _cold:		.long	1	# cold till we are not
 _esym:		.long	0	# ptr to end of syms
 _cnvmem:	.long	0	# conventional memory size
@@ -375,6 +380,22 @@ try586:	/* Use the `cpuid' instruction. */
 	cpuid
 	movl	%eax,RELOC(_cpu_id)	# store cpu_id and features
 	movl	%edx,RELOC(_cpu_feature)
+
+	movl	$RELOC(_cpuid_level),%eax
+	cmp	$2,%eax
+	jl	2f
+
+	movl	$2,%eax
+	cpuid
+/*
+	cmp	$1,%al
+	jne	2f
+*/
+
+	movl	%eax,RELOC(_cpu_cache_eax)
+	movl	%ebx,RELOC(_cpu_cache_ebx)
+	movl	%ecx,RELOC(_cpu_cache_ecx)
+	movl	%edx,RELOC(_cpu_cache_edx)
 
 2:
 	/*
@@ -720,6 +741,66 @@ ENTRY(bcopyb)
 	cld
 	ret
 
+#if defined(UVM)
+/*
+ * kcopy(caddr_t from, caddr_t to, size_t len);
+ * Copy len bytes, abort on fault.
+ */
+ENTRY(kcopy)
+	pushl	%esi
+	pushl	%edi
+	movl	_C_LABEL(curpcb),%eax	# load curpcb into eax and set on-fault
+	pushl	PCB_ONFAULT(%eax)
+	movl	$_C_LABEL(copy_fault), PCB_ONFAULT(%eax)
+
+	movl	16(%esp),%esi
+	movl	20(%esp),%edi
+	movl	24(%esp),%ecx
+	movl	%edi,%eax
+	subl	%esi,%eax
+	cmpl	%ecx,%eax		# overlapping?
+	jb	1f
+	cld				# nope, copy forward
+	shrl	$2,%ecx			# copy by 32-bit words
+	rep
+	movsl
+	movl	24(%esp),%ecx
+	andl	$3,%ecx			# any bytes left?
+	rep
+	movsb
+
+	movl	_C_LABEL(curpcb),%edx
+	popl	PCB_ONFAULT(%edx)
+	popl	%edi
+	popl	%esi
+	xorl	%eax,%eax
+	ret
+
+	ALIGN_TEXT
+1:	addl	%ecx,%edi		# copy backward
+	addl	%ecx,%esi
+	std
+	andl	$3,%ecx			# any fractional bytes?
+	decl	%edi
+	decl	%esi
+	rep
+	movsb
+	movl	24(%esp),%ecx		# copy remainder by 32-bit words
+	shrl	$2,%ecx
+	subl	$3,%esi
+	subl	$3,%edi
+	rep
+	movsl
+	cld
+
+	movl	_C_LABEL(curpcb),%edx
+	popl	PCB_ONFAULT(%edx)
+	popl	%edi
+	popl	%esi
+	xorl	%eax,%eax
+	ret
+#endif
+	
 /*
  * bcopyw(caddr_t from, caddr_t to, size_t len);
  * Copy len bytes, two bytes at a time.
@@ -1495,8 +1576,12 @@ ENTRY(longjmp)
  * actually to shrink the 0-127 range of priorities into the 32 available
  * queues.
  */
+#ifdef UVM
+	.globl	_C_LABEL(whichqs),_C_LABEL(qs),_C_LABEL(uvmexp),_C_LABEL(panic)
+#else
 	.globl	_whichqs,_qs,_cnt,_panic
-
+#endif
+	
 /*
  * setrunqueue(struct proc *p);
  * Insert a process on the appropriate queue.  Should be called at splclock().
@@ -1790,7 +1875,12 @@ switch_return:
  * Switch to proc0's saved context and deallocate the address space and kernel
  * stack for p.  Then jump into cpu_switch(), as if we were in proc0 all along.
  */
+#if defined(UVM)
+	.globl	_C_LABEL(proc0),_C_LABEL(uvmspace_free),_C_LABEL(kernel_map)
+	.globl	_C_LABEL(uvm_km_free),_C_LABEL(tss_free)
+#else
 	.globl	_proc0,_vmspace_free,_kernel_map,_kmem_free,_tss_free
+#endif
 ENTRY(switch_exit)
 	movl	4(%esp),%edi		# old process
 	movl	$_proc0,%ebx
@@ -1839,11 +1929,19 @@ ENTRY(switch_exit)
 	pushl	P_ADDR(%edi)
 	call	_tss_free
 	pushl	P_VMSPACE(%edi)
+#if defined(UVM)
+	call	_C_LABEL(uvmspace_free)
+#else
 	call	_vmspace_free
+#endif
 	pushl	$USPACE
 	pushl	P_ADDR(%edi)
 	pushl	_kernel_map
+#if defined(UVM)
+	call	_C_LABEL(uvm_km_free)
+#else
 	call	_kmem_free
+#endif
 	addl	$20,%esp
 
 	/* Jump into cpu_switch() with the right state. */
@@ -1975,7 +2073,11 @@ IDTVEC(fpu)
 	INTRENTRY
 	pushl	_cpl			# if_ppl in intrframe
 	pushl	%esp			# push address of intrframe
+#if defined(UVM)
+	incl	_C_LABEL(uvmexp)+V_TRAP
+#else
 	incl	_cnt+V_TRAP
+#endif
 	call	_npxintr
 	addl	$8,%esp			# pop address and if_ppl
 	INTRFASTEXIT
@@ -2067,6 +2169,7 @@ IDTVEC(osyscall)
 	popfl
 	pushl	$7		# size of instruction for restart
 	jmp	syscall1
+IDTVEC(osyscall_end)
 
 /*
  * Trap gate entry for syscall

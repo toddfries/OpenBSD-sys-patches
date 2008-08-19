@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.35 1998/09/19 20:03:18 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.47 1999/04/11 19:47:10 niklas Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -37,6 +37,9 @@ option		EXT2FS		# Second Extended Filesystem
 option		MFS		# memory file system
 #option		XFS		# xfs filesystem
 
+#option		TCP_SACK	# Selective Acknowledgements for TCP
+#option		TCP_FACK	# Forward Acknowledgements for TCP
+
 option		NFSCLIENT	# Network File System client
 option		NFSSERVER	# Network File System server
 
@@ -54,6 +57,7 @@ option		UNION		# union file system
 #option		GATEWAY		# packet forwarding
 option		INET		# IP + ICMP + TCP + UDP
 option		IPSEC		# IPsec
+#option		KEY		# PF_KEY (implied by IPSEC)
 #option		NS		# XNS
 #option		NSIP		# XNS tunneling over IP
 #option		IPX		# IPX+SPX
@@ -71,7 +75,7 @@ pseudo-device	bpfilter 8	# packet filter
 pseudo-device	sl	2	# CSLIP
 pseudo-device	ppp	2	# PPP
 pseudo-device	tun	2	# network tunneling over tty
-pseudo-device	enc	1	# encryption device
+pseudo-device	enc	1	# IPSEC needs the encapsulation interface
 #pseudo-device	strip	1	# Starmode Radio IP interface
 
 pseudo-device	pty	64	# pseudo-terminals
@@ -79,5 +83,6 @@ pseudo-device	tb	1	# tablet line discipline
 pseudo-device	vnd	4	# paging to files
 pseudo-device	ccd	4	# concatenated disk devices
 pseudo-device	ksyms	1	# kernel symbols device
+pseudo-device	bridge	2	# network bridging support
 
 option		BOOT_CONFIG	# add support for boot -c

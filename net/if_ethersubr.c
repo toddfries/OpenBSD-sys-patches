@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.26 1998/07/07 19:26:18 ryker Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.28 1999/02/26 17:01:32 jason Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -36,6 +36,18 @@
  *	@(#)if_ethersubr.c	8.1 (Berkeley) 6/10/93
  */
 
+/*
+%%% portions-copyright-nrl-95
+Portions of this software are Copyright 1995-1998 by Randall Atkinson,
+Ronald Lee, Daniel McDonald, Bao Phan, and Chris Winters. All Rights
+Reserved. All rights under this copyright have been assigned to the US
+Naval Research Laboratory (NRL). The NRL Copyright Notice and License
+Agreement Version 1.1 (January 17, 1995) applies to these portions of the
+software.
+You should have received a copy of the license with this software. If you
+didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
+*/
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -61,6 +73,11 @@
 #include <netinet/in_var.h>
 #endif
 #include <netinet/if_ether.h>
+
+#include "bridge.h"
+#if NBRIDGE > 0
+#include <net/if_bridge.h>
+#endif
 
 #ifdef NS
 #include <netns/ns.h>
@@ -101,6 +118,11 @@ extern u_char	aarp_org_code[ 3 ];
 #include <sys/socketvar.h>
 #endif
 
+#ifdef INET6
+#include <netinet6/in6.h>
+#include <netinet6/in6_var.h>
+#endif /* INET6 */
+
 u_char	etherbroadcastaddr[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 #define senderr(e) { error = (e); goto bad;}
 
@@ -133,10 +155,10 @@ ether_ioctl(ifp, arp, cmd, data)
 
 			if (ipx_nullhost(*ina))
 				ina->ipx_host =
-					*(union ipx_host *)(arp->ac_enaddr);
+				    *(union ipx_host *)(arp->ac_enaddr);
 			else
-				bcopy (ina->ipx_host.c_host,
-				       arp->ac_enaddr, sizeof(arp->ac_enaddr));
+				bcopy(ina->ipx_host.c_host,
+				    arp->ac_enaddr, sizeof(arp->ac_enaddr));
 			break;
 		    }
 #endif /* IPX */
@@ -153,10 +175,10 @@ ether_ioctl(ifp, arp, cmd, data)
 
 			if (ns_nullhost(*ina))
 				ina->x_host =
-					*(union ns_host *)(arp->ac_enaddr);
+				    *(union ns_host *)(arp->ac_enaddr);
 			else
 				bcopy(ina->x_host.c_host,
-				      arp->ac_enaddr, sizeof(arp->ac_enaddr));
+				    arp->ac_enaddr, sizeof(arp->ac_enaddr));
 			break;
 		    }
 #endif /* NS */
@@ -197,7 +219,7 @@ ether_output(ifp, m0, dst, rt0)
 		if ((rt->rt_flags & RTF_UP) == 0) {
 			if ((rt0 = rt = rtalloc1(dst, 1)) != NULL)
 				rt->rt_refcnt--;
-			else 
+			else
 				senderr(EHOSTUNREACH);
 		}
 		if (rt->rt_flags & RTF_GATEWAY) {
@@ -251,6 +273,28 @@ ether_output(ifp, m0, dst, rt0)
 			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		break;
 #endif
+#ifdef INET6
+	case AF_INET6:
+		/*
+		 * The bottom line here is to either queue the outgoing packet
+		 * in the discovery engine, or fill in edst with something
+		 * that'll work.
+		 */
+		if (m->m_flags & M_MCAST) {
+			/*
+			 * If multicast dest., then use IPv6 -> Ethernet
+			 * mcast mapping.  Really simple.
+			 */
+			ETHER_MAP_IN6_MULTICAST(((struct sockaddr_in6 *)dst)->sin6_addr,
+			    edst);
+		} else {
+			/* Do unicast neighbor discovery stuff. */
+			if (!ipv6_discov_resolve(ifp, rt, m, dst, edst))
+				return 0;
+		}
+		etype = htons(ETHERTYPE_IPV6);
+		break;
+#endif /* INET6 */
 #ifdef NETATALK
 	case AF_APPLETALK: {
 		struct at_ifaddr *aa;
@@ -323,10 +367,9 @@ ether_output(ifp, m0, dst, rt0)
 			M_PREPEND(mcopy, sizeof (*eh), M_DONTWAIT);
 			if (mcopy) {
 				eh = mtod(mcopy, struct ether_header *);
-				bcopy((caddr_t)edst,
-				      (caddr_t)eh->ether_dhost, sizeof (edst));
-				bcopy((caddr_t)ac->ac_enaddr,
-				      (caddr_t)eh->ether_shost, sizeof (edst));
+				bcopy(edst, eh->ether_dhost, sizeof (edst));
+				bcopy(ac->ac_enaddr, eh->ether_shost,
+				    sizeof (edst));
 			}
 		}
 		M_PREPEND(m, 3, M_DONTWAIT);
@@ -349,7 +392,7 @@ ether_output(ifp, m0, dst, rt0)
 #endif /* ISO */
 /*	case AF_NSAP: */
 	case AF_CCITT: {
-		register struct sockaddr_dl *sdl = 
+		register struct sockaddr_dl *sdl =
 			(struct sockaddr_dl *) rt -> rt_gateway;
 
 		if (sdl && sdl->sdl_family == AF_LINK
@@ -362,10 +405,9 @@ ether_output(ifp, m0, dst, rt0)
 			M_PREPEND(mcopy, sizeof (*eh), M_DONTWAIT);
 			if (mcopy) {
 				eh = mtod(mcopy, struct ether_header *);
-				bcopy((caddr_t)edst,
-				      (caddr_t)eh->ether_dhost, sizeof (edst));
-				bcopy((caddr_t)ac->ac_enaddr,
-				      (caddr_t)eh->ether_shost, sizeof (edst));
+				bcopy(edst, eh->ether_dhost, sizeof (edst));
+				bcopy(ac->ac_enaddr, eh->ether_shost,
+				    sizeof (edst));
 			}
 		}
 		etype = htons(m->m_pkthdr.len);
@@ -377,7 +419,7 @@ ether_output(ifp, m0, dst, rt0)
 			printf("ether_output: sending LLC2 pkt to: ");
 			for (i=0; i<6; i++)
 				printf("%x ", edst[i] & 0xff);
-			printf(" len 0x%x dsap 0x%x ssap 0x%x control 0x%x\n", 
+			printf(" len 0x%x dsap 0x%x ssap 0x%x control 0x%x\n",
 			    m->m_pkthdr.len, l->llc_dsap & 0xff, l->llc_ssap &0xff,
 			    l->llc_control & 0xff);
 
@@ -414,6 +456,18 @@ ether_output(ifp, m0, dst, rt0)
  	bcopy((caddr_t)edst, (caddr_t)eh->ether_dhost, sizeof (edst));
  	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)eh->ether_shost,
 	    sizeof(eh->ether_shost));
+
+#if NBRIDGE > 0
+	/*
+	 * Interfaces that are bridge members need special handling
+	 * for output.
+	 */
+	if (ifp->if_bridge) {
+		bridge_output(ifp, m, NULL, NULL);
+		return (error);
+	}
+#endif
+
 	s = splimp();
 	/*
 	 * Queue message on interface, and start output if interface
@@ -454,9 +508,7 @@ ether_input(ifp, eh, m)
 	u_int16_t etype;
 	int s, llcfound = 0;
 	register struct llc *l;
-#if defined(ISO)
 	struct arpcom *ac = (struct arpcom *)ifp;
-#endif
 
 	if ((ifp->if_flags & IFF_UP) == 0) {
 		m_freem(m);
@@ -473,6 +525,32 @@ ether_input(ifp, eh, m)
 	}
 	if (m->m_flags & (M_BCAST|M_MCAST))
 		ifp->if_imcasts++;
+
+#if NBRIDGE > 0
+	/*
+	 * Tap the packet off here for a bridge, if configured and
+	 * active for this interface.  bridge_input returns
+	 * NULL if it has consumed the packet, otherwise, it
+	 * gets processed as normal.
+	 */
+	if (ifp->if_bridge) {
+		m = bridge_input(ifp, eh, m);
+		if (m == NULL)
+			return;
+	}
+#endif
+	/*
+	 * If packet is unicast and we're in promiscuous mode, make sure it
+	 * is for us.  Drop otherwise.
+	 */
+	if ((m->m_flags & (M_BCAST|M_MCAST)) == 0 &&
+	    (ifp->if_flags & IFF_PROMISC)) {
+		if (bcmp(ac->ac_enaddr, (caddr_t)eh->ether_dhost,
+		    ETHER_ADDR_LEN)) {
+			m_freem(m);
+			return;
+		}
+	}
 
 decapsulate:
 	etype = ntohs(eh->ether_type);
@@ -497,6 +575,15 @@ decapsulate:
 		return;
 
 #endif
+#ifdef INET6
+	/*
+	 * Schedule IPv6 software interrupt for incoming IPv6 packet.
+	 */
+	case ETHERTYPE_IPV6:
+		schednetisr(NETISR_IPV6);
+		inq = &ipv6intrq;
+		break;
+#endif /* INET6 */
 #ifdef IPX
 	case ETHERTYPE_IPX:
 		schednetisr(NETISR_IPX);
@@ -574,7 +661,7 @@ decapsulate:
 			}
 			goto dropanyway;
 #ifdef	ISO
-		case LLC_ISO_LSAP: 
+		case LLC_ISO_LSAP:
 			switch (l->llc_control) {
 			case LLC_UI:
 				/* LLC_UI_P forbidden in class 1 service */
@@ -599,7 +686,7 @@ decapsulate:
 					break;
 				}
 				goto dropanyway;
-				
+
 			case LLC_XID:
 			case LLC_XID_P:
 				if(m->m_len < 6)
@@ -620,14 +707,14 @@ decapsulate:
 				l->llc_dsap = l->llc_ssap;
 				l->llc_ssap = c;
 				if (m->m_flags & (M_BCAST | M_MCAST))
-					bcopy((caddr_t)ac->ac_enaddr,
-					      (caddr_t)eh->ether_dhost, 6);
+					bcopy(ac->ac_enaddr,
+					    eh->ether_dhost, 6);
 				sa.sa_family = AF_UNSPEC;
 				sa.sa_len = sizeof(sa);
 				eh2 = (struct ether_header *)sa.sa_data;
 				for (i = 0; i < 6; i++) {
 					eh2->ether_shost[i] = c = eh->ether_dhost[i];
-					eh2->ether_dhost[i] = 
+					eh2->ether_dhost[i] =
 						eh->ether_dhost[i] = eh->ether_shost[i];
 					eh->ether_shost[i] = c;
 				}
@@ -715,7 +802,7 @@ ether_ifattach(ifp)
 			sdl->sdl_type = IFT_ETHER;
 			sdl->sdl_alen = ifp->if_addrlen;
 			bcopy((caddr_t)((struct arpcom *)ifp)->ac_enaddr,
-			      LLADDR(sdl), ifp->if_addrlen);
+			    LLADDR(sdl), ifp->if_addrlen);
 			break;
 		}
 	LIST_INIT(&((struct arpcom *)ifp)->ac_multiaddrs);
@@ -723,6 +810,12 @@ ether_ifattach(ifp)
 
 u_char	ether_ipmulticast_min[6] = { 0x01, 0x00, 0x5e, 0x00, 0x00, 0x00 };
 u_char	ether_ipmulticast_max[6] = { 0x01, 0x00, 0x5e, 0x7f, 0xff, 0xff };
+
+#ifdef INET6
+u_char	ether_ipv6multicast_min[6] = { 0x33, 0x33, 0x00, 0x00, 0x00, 0x00 };
+u_char	ether_ipv6multicast_max[6] = { 0x33, 0x33, 0xff, 0xff, 0xff, 0xff };
+#endif /* INET6 */
+
 /*
  * Add an Ethernet multicast address or range of addresses to the list for a
  * given interface.
@@ -734,6 +827,9 @@ ether_addmulti(ifr, ac)
 {
 	register struct ether_multi *enm;
 	struct sockaddr_in *sin;
+#ifdef INET6
+	struct sockaddr_in6 *sin6;
+#endif /* INET6 */
 	u_char addrlo[6];
 	u_char addrhi[6];
 	int s = splimp();
@@ -763,6 +859,23 @@ ether_addmulti(ifr, ac)
 		}
 		break;
 #endif
+#ifdef INET6
+	case AF_INET6:
+		sin6 = (struct sockaddr_in6 *)&(ifr->ifr_addr);
+		if (IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
+			/*
+			 * An unspecified IPv6 address means listen to all
+			 * of the IPv6 multicast addresses on this Ethernet.
+			 * (Multicast routers like this.)
+			 */
+			bcopy(ether_ipv6multicast_min, addrlo, ETHER_ADDR_LEN);
+			bcopy(ether_ipv6multicast_max, addrhi, ETHER_ADDR_LEN);
+		} else {
+			ETHER_MAP_IN6_MULTICAST(sin6->sin6_addr, addrlo);
+			bcopy(addrlo, addrhi, ETHER_ADDR_LEN);
+		}
+		break;
+#endif /* INET6 */
 
 	default:
 		splx(s);
@@ -821,6 +934,9 @@ ether_delmulti(ifr, ac)
 {
 	register struct ether_multi *enm;
 	struct sockaddr_in *sin;
+#ifdef INET6
+	struct sockaddr_in6 *sin6;
+#endif /* INET6 */
 	u_char addrlo[6];
 	u_char addrhi[6];
 	int s = splimp();
@@ -850,6 +966,28 @@ ether_delmulti(ifr, ac)
 		}
 		break;
 #endif
+#ifdef INET6
+	case AF_INET6:
+		sin6 = (struct sockaddr_in6 *)&(ifr->ifr_addr);
+		if (IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
+			/*
+			 * An unspecified IPv6 address means stop listening to
+			 * all IPv6 multicast addresses on this Ethernet.'
+			 *
+			 * (This might not be healthy, given IPv6's reliance on
+			 * multicast for things like neighbor discovery.
+			 * Perhaps initializing all-nodes, solicited nodes, and
+			 * possibly all-routers for this interface afterwards
+			 * is not a bad idea.)
+			 */
+			bcopy(ether_ipv6multicast_min, addrlo, ETHER_ADDR_LEN);
+			bcopy(ether_ipv6multicast_max, addrhi, ETHER_ADDR_LEN);
+		} else {
+			ETHER_MAP_IN6_MULTICAST(sin6->sin6_addr, addrlo);
+			bcopy(addrlo, addrhi, ETHER_ADDR_LEN);
+		}
+		break;
+#endif /* INET6 */
 
 	default:
 		splx(s);

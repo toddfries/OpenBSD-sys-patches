@@ -1,4 +1,4 @@
-/*	$OpenBSD: pte.h,v 1.2 1998/08/29 01:27:35 mickey Exp $	*/
+/*	$OpenBSD: pte.h,v 1.4 1999/02/25 17:26:06 mickey Exp $	*/
 
 /*
  * Copyright 1996 1995 by Open Software Foundation, Inc.   
@@ -24,8 +24,8 @@
  * pmk1.1
  */
 
-#ifndef	_HPPA_PTE_H_
-#define	_HPPA_PTE_H_
+#ifndef	_MACHINE_PTE_H_
+#define	_MACHINE_PTE_H_
 
 
 /* TLB access/protection values */
@@ -45,9 +45,7 @@
 #define		TLB_AR_URX	0x02f00000
 #define		TLB_AR_URWX	0x03f00000
 #define TLB_UNCACHEABLE	0x00080000
-#define TLB_ICACHE	0x00040000	/* software only */
 #define TLB_NOTUSED	0x00020000      /* software only */
-#define TLB_DCACHE	0x00010000      /* software only */
 #define TLB_PID_MASK	0x0000fffe
 #define TLB_WIRED	0x00000001	/* software only */
 
@@ -57,9 +55,7 @@
 #define TLB_DIRTY_POS	3
 #define TLB_BREAK_POS	4
 #define TLB_ITLB_POS    12
-#define TLB_ICACHE_POS  13
 #define TLB_DTLB_POS    14
-#define TLB_DCACHE_POS  15
 #define TLB_WIRED_POS	31
 
 /* protection for a gateway page */
@@ -106,4 +102,4 @@ extern struct tlbd_stats dtlb_stats;
 
 #endif	/* TLB_STATS && !_LOCORE */
 
-#endif /* _HPPA_PTE_H_ */
+#endif /* _MACHINE_PTE_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp.c,v 1.17 1998/09/22 18:58:03 deraadt Exp $	*/
+/*	$OpenBSD: if_fxp.c,v 1.19 1999/02/26 17:05:53 jason Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -427,11 +427,13 @@ fxp_attach(parent, self, aux)
 	ifmedia_init(&sc->sc_mii.mii_media, 0, fxp_mediachange,
 	    fxp_mediastatus);
 	mii_phy_probe(self, &sc->sc_mii, 0xffffffff);
+	/* If no phy found, just use auto mode */
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) == NULL) {
-		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER|IFM_NONE, 0, NULL);
-		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|IFM_NONE);
-	} else
-		ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|IFM_AUTO);
+		ifmedia_add(&sc->sc_mii.mii_media, IFM_ETHER|IFM_AUTO, 0, NULL);
+		printf(FXP_FORMAT ": no phy found, using auto mode\n",
+		    FXP_ARGS(sc));
+	}
+	ifmedia_set(&sc->sc_mii.mii_media, IFM_ETHER|IFM_AUTO);
 
 #if 0
 	printf(FXP_FORMAT ": %s (%s) address %s\n", FXP_ARGS(sc),
@@ -1061,26 +1063,10 @@ rcvloop:
 					    sizeof(struct ether_header);
 					eh = mtod(m, struct ether_header *);
 #if NBPFILTER > 0
-					if (ifp->if_bpf) {
+					if (ifp->if_bpf)
 						bpf_tap(FXP_BPFTAP_ARG(ifp),
 						    mtod(m, caddr_t),
 						    total_len); 
-						/*
-						 * Only pass this packet up
-						 * if it is for us.
-						 */
-						if ((ifp->if_flags &
-						    IFF_PROMISC) &&
-						    (*(u_int16_t *)(rfap +
-						    offsetof(struct fxp_rfa,
-						    rfa_status)) &
-						    FXP_RFA_STATUS_IAMATCH) &&
-						    (eh->ether_dhost[0] & 1)
-						    == 0) {
-							m_freem(m);
-							goto rcvloop;
-						}
-					}
 #endif /* NBPFILTER > 0 */
 					m->m_data +=
 					    sizeof(struct ether_header);

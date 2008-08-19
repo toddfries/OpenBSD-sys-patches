@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.16 1998/08/19 22:26:52 csapuntz Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.20 1999/03/15 15:58:09 deraadt Exp $	*/
 /*	$NetBSD: nfs_serv.c,v 1.25 1996/03/02 15:55:52 jtk Exp $	*/
 
 /*
@@ -586,7 +586,7 @@ nfsrv_read(nfsd, slp, procp, mrq)
 	if (off >= va.va_size)
 		cnt = 0;
 	else if ((off + reqlen) > va.va_size)
-		cnt = nfsm_rndup(va.va_size - off);
+		cnt = va.va_size - off;
 	else
 		cnt = reqlen;
 	nfsm_reply(NFSX_POSTOPORFATTR(v3) + 3 * NFSX_UNSIGNED+nfsm_rndup(cnt));
@@ -600,7 +600,7 @@ nfsrv_read(nfsd, slp, procp, mrq)
 		fp = (struct nfs_fattr *)tl;
 		tl += (NFSX_V2FATTR / sizeof (u_int32_t));
 	}
-	len = left = cnt;
+	len = left = nfsm_rndup (cnt);
 	if (cnt > 0) {
 		/*
 		 * Generate the mbuf list with the uio_iov ref. to it.
@@ -625,7 +625,7 @@ nfsrv_read(nfsd, slp, procp, mrq)
 		       M_TEMP, M_WAITOK);
 		uiop->uio_iov = iv2 = iv;
 		m = mb;
-		left = cnt;
+		left = len;
 		i = 0;
 		while (left > 0) {
 			if (m == NULL)
@@ -643,7 +643,7 @@ nfsrv_read(nfsd, slp, procp, mrq)
 		}
 		uiop->uio_iovcnt = i;
 		uiop->uio_offset = off;
-		uiop->uio_resid = cnt;
+		uiop->uio_resid = len;
 		uiop->uio_rw = UIO_READ;
 		uiop->uio_segflg = UIO_SYSSPACE;
 		error = VOP_READ(vp, uiop, IO_NODELOCKED, cred);
@@ -662,18 +662,19 @@ nfsrv_read(nfsd, slp, procp, mrq)
 		uiop->uio_resid = 0;
 	vput(vp);
 	nfsm_srvfillattr(&va, fp);
-	len -= uiop->uio_resid;
-	tlen = nfsm_rndup(len);
-	if (cnt != tlen || tlen != len)
-		nfsm_adj(mb, cnt - tlen, tlen - len);
+	tlen = len - uiop->uio_resid;
+	cnt = cnt < tlen ? cnt : tlen;
+	tlen = nfsm_rndup (cnt);
+	if (len != tlen || tlen != cnt)
+		nfsm_adj(mb, len - tlen, tlen - cnt);
 	if (v3) {
-		*tl++ = txdr_unsigned(len);
+		*tl++ = txdr_unsigned(cnt);
 		if (len < reqlen)
 			*tl++ = nfs_true;
 		else
 			*tl++ = nfs_false;
 	}
-	*tl = txdr_unsigned(len);
+	*tl = txdr_unsigned(cnt);
 	nfsm_srvdone;
 }
 
@@ -1339,8 +1340,8 @@ nfsrv_create(nfsd, slp, procp, mrq)
 			va.va_type == VFIFO) {
 			if (va.va_type == VCHR && rdev == 0xffffffff)
 				va.va_type = VFIFO;
-			error = suser(cred, (u_short *)0);
-			if (error) {
+			if (va.va_type != VFIFO &&
+			    (error = suser(cred, (u_short *)0))) {
 				vrele(nd.ni_startdir);
 				free(nd.ni_cnd.cn_pnbuf, M_NAMEI);
 				VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
@@ -1534,8 +1535,8 @@ nfsrv_mknod(nfsd, slp, procp, mrq)
 		if (!error)
 			FREE(nd.ni_cnd.cn_pnbuf, M_NAMEI);
 	} else {
-		error = suser(cred, (u_short *)0);
-		if (error) {
+		if (va.va_type != VFIFO &&
+		    (error = suser(cred, (u_short *)0))) {
 			vrele(nd.ni_startdir);
 			free((caddr_t)nd.ni_cnd.cn_pnbuf, M_NAMEI);
 			VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
@@ -1658,7 +1659,11 @@ nfsrv_remove(nfsd, slp, procp, mrq)
 			goto out;
 		}
 		if (vp->v_flag & VTEXT)
+#if defined(UVM)
+			uvm_vnp_uncache(vp);
+#else
 			(void) vnode_pager_uncache(vp);
+#endif
 out:
 		if (!error) {
 			nqsrv_getl(nd.ni_dvp, ND_WRITE);
@@ -2490,7 +2495,7 @@ again:
 			if (v3) {
 				nfsm_srvpostop_attr(getret, &at);
 				nfsm_build(tl, u_int32_t *, 4 * NFSX_UNSIGNED);
-				txdr_hyper(&at.va_filerev, tl);
+				txdr_hyper(at.va_filerev, tl);
 				tl += 2;
 			} else
 				nfsm_build(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
@@ -2529,7 +2534,7 @@ again:
 	if (v3) {
 		nfsm_srvpostop_attr(getret, &at);
 		nfsm_build(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
-		txdr_hyper(&at.va_filerev, tl);
+		txdr_hyper(at.va_filerev, tl);
 	}
 	mp = mp2 = mb;
 	bp = bpos;
@@ -2747,7 +2752,7 @@ again:
 				2 * NFSX_UNSIGNED);
 			nfsm_srvpostop_attr(getret, &at);
 			nfsm_build(tl, u_int32_t *, 4 * NFSX_UNSIGNED);
-			txdr_hyper(&at.va_filerev, tl);
+			txdr_hyper(at.va_filerev, tl);
 			tl += 2;
 			*tl++ = nfs_false;
 			*tl = nfs_true;
@@ -2783,7 +2788,7 @@ again:
 	nfsm_reply(cnt);
 	nfsm_srvpostop_attr(getret, &at);
 	nfsm_build(tl, u_int32_t *, 2 * NFSX_UNSIGNED);
-	txdr_hyper(&at.va_filerev, tl);
+	txdr_hyper(at.va_filerev, tl);
 	mp = mp2 = mb;
 	bp = bpos;
 	be = bp + M_TRAILINGSPACE(mp);
@@ -3032,13 +3037,13 @@ nfsrv_statfs(nfsd, slp, procp, mrq)
 	if (v3) {
 		tval = (u_quad_t)sf->f_blocks;
 		tval *= (u_quad_t)sf->f_bsize;
-		txdr_hyper(&tval, &sfp->sf_tbytes);
+		txdr_hyper(tval, &sfp->sf_tbytes);
 		tval = (u_quad_t)sf->f_bfree;
 		tval *= (u_quad_t)sf->f_bsize;
-		txdr_hyper(&tval, &sfp->sf_fbytes);
+		txdr_hyper(tval, &sfp->sf_fbytes);
 		tval = (u_quad_t)sf->f_bavail;
 		tval *= (u_quad_t)sf->f_bsize;
-		txdr_hyper(&tval, &sfp->sf_abytes);
+		txdr_hyper(tval, &sfp->sf_abytes);
 		sfp->sf_tfiles.nfsuquad[0] = 0;
 		sfp->sf_tfiles.nfsuquad[1] = txdr_unsigned(sf->f_files);
 		sfp->sf_ffiles.nfsuquad[0] = 0;
@@ -3288,7 +3293,11 @@ nfsrv_access(vp, flags, cred, rdonly, p, override)
 		 * the inode, try to free it up once.  If
 		 * we fail, we can't allow writing.
 		 */
+#if defined(UVM)
+		if ((vp->v_flag & VTEXT) && !uvm_vnp_uncache(vp))
+#else
 		if ((vp->v_flag & VTEXT) && !vnode_pager_uncache(vp))
+#endif
 			return (ETXTBSY);
 	}
 	error = VOP_ACCESS(vp, flags, cred, p);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.3 1998/02/22 01:23:29 niklas Exp $	*/
+/*	$OpenBSD: route.h,v 1.5 1999/02/04 00:04:35 deraadt Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -94,8 +94,9 @@ struct rtentry {
 #define	rt_key(r)	((struct sockaddr *)((r)->rt_nodes->rn_key))
 #define	rt_mask(r)	((struct sockaddr *)((r)->rt_nodes->rn_mask))
 	struct	sockaddr *rt_gateway;	/* value */
-	short	rt_flags;		/* up/down?, host/net */
+	u_int	rt_flags;		/* up/down?, host/net */
 	short	rt_refcnt;		/* # held references */
+	short	rt_filler;		/* XXX */
 	u_long	rt_use;			/* raw # packets forwarded */
 	struct	ifnet *rt_ifp;		/* the answer: interface to use */
 	struct	ifaddr *rt_ifa;		/* the answer: interface to use */
@@ -103,7 +104,9 @@ struct rtentry {
 	caddr_t	rt_llinfo;		/* pointer to link level info cache */
 	struct	rt_metrics rt_rmx;	/* metrics used by rx'ing protocols */
 	struct	rtentry *rt_gwroute;	/* implied entry for gatewayed routes */
+	struct	rtentry *rt_parent;	/* If cloned, parent of this route. */
 };
+#define	rt_use	rt_rmx.rmx_pksent
 
 /*
  * Following structure necessary for 4.3 compatibility;
@@ -115,7 +118,7 @@ struct ortentry {
 	struct sockaddr rt_gateway;	/* value */
 	int16_t	  rt_flags;		/* up/down?, host/net */
 	int16_t	  rt_refcnt;		/* # held references */
-	u_int32_t rt_use;		/* raw # packets forwarded */
+	u_int32_t rt_ouse;		/* raw # packets forwarded (was: rt_use) */
 	struct ifnet *rt_ifp;		/* the answer: interface to use */
 };
 
@@ -135,17 +138,24 @@ struct ortentry {
 #define RTF_PROTO2	0x4000		/* protocol specific routing flag */
 #define RTF_PROTO1	0x8000		/* protocol specific routing flag */
 
+/*
+ * New IPv6 routing flags.
+ *
+ * PROTO1 and PROTO2 are used, and defined in netinet6/ipv6_var.h.
+ */
+#define	RTF_TUNNEL	0x100000	/* Tunnelling bit. */
 
 /*
  * Routing statistics.
  */
 struct	rtstat {
-	short	rts_badredirect;	/* bogus redirect calls */
-	short	rts_dynamic;		/* routes created by redirects */
-	short	rts_newgateway;		/* routes modified by redirects */
-	short	rts_unreach;		/* lookups which failed */
-	short	rts_wildcard;		/* lookups satisfied by a wildcard */
+	u_int32_t rts_badredirect;	/* bogus redirect calls */
+	u_int32_t rts_dynamic;		/* routes created by redirects */
+	u_int32_t rts_newgateway;		/* routes modified by redirects */
+	u_int32_t rts_unreach;		/* lookups which failed */
+	u_int32_t rts_wildcard;		/* lookups satisfied by a wildcard */
 };
+
 /*
  * Structures for routing messages.
  */
@@ -235,6 +245,13 @@ struct route_cb {
 		(rt)->rt_refcnt--; \
 } while (0)
 
+/*
+ * Values for additional argument to rtalloc_noclone() and rtalloc2()
+ */
+#define	ALL_CLONING 0
+#define	ONNET_CLONING 1
+#define	NO_CLONING 2
+
 struct	route_cb route_cb;
 struct	rtstat	rtstat;
 struct	radix_node_head *rt_tables[AF_MAX+1];
@@ -256,6 +273,9 @@ void	 rtable_init __P((void **));
 void	 rtalloc __P((struct route *));
 struct rtentry *
 	 rtalloc1 __P((struct sockaddr *, int));
+void	 rtalloc_noclone __P((struct route *, int));
+struct rtentry *
+	 rtalloc2 __P((struct sockaddr *, int, int));
 void	 rtfree __P((struct rtentry *));
 int	 rtinit __P((struct ifaddr *, int, int));
 int	 rtioctl __P((u_long, caddr_t, struct proc *));
@@ -265,4 +285,5 @@ void	 rtredirect __P((struct sockaddr *, struct sockaddr *,
 int	 rtrequest __P((int, struct sockaddr *,
 			struct sockaddr *, struct sockaddr *, int,
 			struct rtentry **));
+void	 ipv4_tunnelsetup __P((struct rtentry *));
 #endif /* _KERNEL */

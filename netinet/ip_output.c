@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.36 1998/08/02 22:20:30 provos Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.45 1999/04/11 19:41:39 niklas Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -64,11 +64,16 @@
 #include <machine/stdarg.h>
 
 #ifdef IPSEC
-#include <net/encap.h>
-#include <netinet/ip_ipsp.h>
+#include <netinet/ip_ah.h>
+#include <netinet/ip_esp.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
-#include <sys/syslog.h>
+
+#ifdef ENCDEBUG
+#define DPRINTF(x)	if (encdebug) printf x
+#else
+#define DPRINTF(x)
+#endif
 
 extern u_int8_t get_sa_require  __P((struct inpcb *));
 
@@ -82,7 +87,6 @@ int (*fr_checkp) __P((struct ip *, int, struct ifnet *, int, struct mbuf **));
 #endif
 
 #ifdef IPSEC
-extern void	encap_sendnotify __P((int, struct tdb *, void *));
 extern int ipsec_auth_default_level;
 extern int ipsec_esp_trans_default_level;
 extern int ipsec_esp_network_default_level;
@@ -117,6 +121,7 @@ ip_output(m0, va_alist)
 	struct ip_moptions *imo;
 	va_list ap;
 #ifdef IPSEC
+	union sockaddr_union sunion;
 	struct mbuf *mp;
 	struct udphdr *udp;
 	struct tcphdr *tcp;
@@ -151,7 +156,8 @@ ip_output(m0, va_alist)
 	if ((flags & (IP_FORWARDING|IP_RAWOUTPUT)) == 0) {
 		ip->ip_v = IPVERSION;
 		ip->ip_off &= IP_DF;
-		ip->ip_id = htons(ip_id++);
+		ip->ip_id = ip_randomid();
+		HTONS(ip->ip_id);
 		ip->ip_hl = hlen >> 2;
 		ipstat.ips_localout++;
 	} else {
@@ -162,14 +168,14 @@ ip_output(m0, va_alist)
 	/*
 	 * Check if the packet needs encapsulation
 	 */
-	if (!(flags & IP_ENCAPSULATED) && 
+	if (!(flags & IP_ENCAPSULATED) &&
 	    (inp == NULL || 
-	     (inp->inp_seclevel[SL_AUTH] != IPSEC_LEVEL_BYPASS ||
-	      inp->inp_seclevel[SL_ESP_TRANS] != IPSEC_LEVEL_BYPASS ||
-	      inp->inp_seclevel[SL_ESP_NETWORK] != IPSEC_LEVEL_BYPASS))) {
+	     inp->inp_seclevel[SL_AUTH] != IPSEC_LEVEL_BYPASS ||
+	     inp->inp_seclevel[SL_ESP_TRANS] != IPSEC_LEVEL_BYPASS ||
+	     inp->inp_seclevel[SL_ESP_NETWORK] != IPSEC_LEVEL_BYPASS)) {
 		struct route_enc re0, *re = &re0;
 		struct sockaddr_encap *ddst, *gw;
-		struct tdb *tdb;
+		struct tdb *tdb, *t;
 		u_int8_t sa_require, sa_have = 0;
 
 		if (inp == NULL)
@@ -178,8 +184,22 @@ ip_output(m0, va_alist)
 			sa_require = inp->inp_secrequire;
 
 		bzero((caddr_t) re, sizeof(*re));
+
+		/* Check if there was a bound outgoing SA */
+		if (inp && inp->inp_tdb &&
+		    (inp->inp_tdb->tdb_dst.sin.sin_addr.s_addr ==
+		     INADDR_ANY ||
+		     !bcmp(&inp->inp_tdb->tdb_dst.sin.sin_addr,
+			   &ip->ip_dst, sizeof(ip->ip_dst)))) {
+			tdb = inp->inp_tdb;
+			goto have_tdb;
+		}
+
+		if (!ipsec_in_use)
+			goto no_encap;
+
 		ddst = (struct sockaddr_encap *) &re->re_dst;
-		ddst->sen_family = AF_ENCAP;
+		ddst->sen_family = PF_KEY;
 		ddst->sen_len = SENT_IP4_LEN;
 		ddst->sen_type = SENT_IP4;
 		ddst->sen_ip_src = ip->ip_src;
@@ -233,10 +253,8 @@ ip_output(m0, va_alist)
 			goto no_encap;
 
 		if (gw == NULL || gw->sen_type != SENT_IPSP) {
-#ifdef ENCDEBUG
-			if (encdebug)
-				printf("ip_output(): no gw or gw data not IPSP\n");
-#endif /* ENCDEBUG */
+		        DPRINTF(("ip_output(): no gw or gw data not IPSP\n"));
+
 			if (re->re_rt)
 				RTFREE(re->re_rt);
 			error = EHOSTUNREACH;
@@ -249,17 +267,11 @@ ip_output(m0, va_alist)
 		 * indicate the need for an SA when none is established.
 		 */
 		if (ntohl(gw->sen_ipsp_spi) == 0x1) {
-			struct tdb tmptdb;
-
 			sa_require = NOTIFY_SATYPE_AUTH | NOTIFY_SATYPE_TUNNEL;
 			if (gw->sen_ipsp_sproto == IPPROTO_ESP)
 			    sa_require |= NOTIFY_SATYPE_CONF;
 
-			tmptdb.tdb_dst.s_addr = gw->sen_ipsp_dst.s_addr;
-			tmptdb.tdb_satype = sa_require;
-			       
-			/* Request SA with key management */
-			encap_sendnotify(NOTIFY_REQUEST_SA, &tmptdb, NULL);
+			/* XXX PF_KEYv2 notification message */
 			
 			/* 
 			 * When sa_require is set, the packet will be dropped
@@ -268,10 +280,6 @@ ip_output(m0, va_alist)
 			goto no_encap;
 		}
 
-		ip->ip_len = htons((u_short)ip->ip_len);
-		ip->ip_off = htons((u_short)ip->ip_off);
-		ip->ip_sum = 0;
-
 		/*
 		 * At this point we have an IPSP "gateway" (tunnel) spec.
 		 * Use the destination of the tunnel and the SPI to
@@ -279,8 +287,18 @@ ip_output(m0, va_alist)
 		 * and then pass it, along with the packet and the gw,
 		 * to the appropriate transformation.
 		 */
-		tdb = (struct tdb *) gettdb(gw->sen_ipsp_spi, gw->sen_ipsp_dst,
-		    gw->sen_ipsp_sproto);
+		bzero(&sunion, sizeof(sunion));
+		sunion.sin.sin_family = AF_INET;
+		sunion.sin.sin_len = sizeof(struct sockaddr_in);
+		sunion.sin.sin_addr = gw->sen_ipsp_dst;
+		tdb = (struct tdb *) gettdb(gw->sen_ipsp_spi, &sunion,
+					    gw->sen_ipsp_sproto);
+
+	      have_tdb:
+
+		ip->ip_len = htons((u_short)ip->ip_len);
+		ip->ip_off = htons((u_short)ip->ip_off);
+		ip->ip_sum = 0;
 
 		/*
 		 * Now we check if this tdb has all the transforms which
@@ -292,10 +310,8 @@ ip_output(m0, va_alist)
 			goto no_encap;
 
 		if (tdb == NULL) {
-#ifdef ENCDEBUG
-			if (encdebug)
-				printf("ip_output(): non-existant TDB for SA %08x/%x/%d\n", ntohl(gw->sen_ipsp_spi), gw->sen_ipsp_dst, gw->sen_ipsp_sproto);
-#endif
+		        DPRINTF(("ip_output(): non-existant TDB for SA %s/%08x/%u\n", inet_ntoa4(gw->sen_ipsp_dst), ntohl(gw->sen_ipsp_spi), gw->sen_ipsp_sproto));
+
 			if (re->re_rt)
                         	RTFREE(re->re_rt);
 			error = EHOSTUNREACH;
@@ -303,10 +319,23 @@ ip_output(m0, va_alist)
 			goto done;
 		}
 
+		for (t = tdb; t != NULL; t = t->tdb_onext)
+		    if ((t->tdb_sproto == IPPROTO_ESP && !esp_enable) ||
+			(t->tdb_sproto == IPPROTO_AH && !ah_enable)) {
+		        DPRINTF(("ip_output(): IPSec outbound packet dropped due to policy\n"));
+
+			if (re->re_rt)
+                        	RTFREE(re->re_rt);
+			error = EHOSTUNREACH;
+			m_freem(m);
+			goto done;
+		    }
+
 		/* Fix the ip_src field if necessary */
 		if (ip->ip_src.s_addr == INADDR_ANY) {
-		    if (tdb && tdb->tdb_src.s_addr != 0)   /* Provided */
-			ip->ip_src = tdb->tdb_src;
+		    if (tdb && tdb->tdb_src.sin.sin_addr.s_addr != 0 &&
+			tdb->tdb_src.sa.sa_family == AF_INET)
+		      ip->ip_src = tdb->tdb_src.sin.sin_addr;
 		    else
 		    {
 			if (ro == 0) {
@@ -348,74 +377,54 @@ ip_output(m0, va_alist)
 		    }
 		}
 
-#ifdef ENCDEBUG
-		if (encdebug) {
-			printf("ip_output(): tdb=%08x, tdb->tdb_xform=0x%x,",
-			    tdb, tdb->tdb_xform);
-			printf(" tdb->tdb_xform->xf_output=%x, sproto=%x\n",
-			    tdb->tdb_xform->xf_output, tdb->tdb_sproto);
-		}
-#endif /* ENCDEBUG */
-
 		while (tdb && tdb->tdb_xform) {
 			/* Check if the SPI is invalid */
 			if (tdb->tdb_flags & TDBF_INVALID) {
-			 	if (encdebug)
-				  log(LOG_ALERT, "ip_output(): attempt to use invalid SA %08x/%x/%x\n", ntohl(tdb->tdb_spi), tdb->tdb_dst,
-				    tdb->tdb_sproto);
+			        DPRINTF(("ip_output(): attempt to use invalid SA %s/%08x/%u\n", ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi), tdb->tdb_sproto));
 				m_freem(m);
-				RTFREE(re->re_rt);
+				if (re->re_rt)
+					RTFREE(re->re_rt);
 				return ENXIO;
 			}
 
-			/* Check for tunneling */
-			if ((tdb->tdb_flags & TDBF_TUNNELING) &&
-			    (tdb->tdb_xform->xf_type != XF_IP4)){
-#ifdef ENCDEBUG
-				if (encdebug)
-					printf("ip_output(): tunneling\n");
-#endif /* ENCDEBUG */
-
-				/*
-				 * Register first use,
-				 * setup expiration timer
-				 */
-				if (tdb->tdb_first_use == 0) {
-					tdb->tdb_first_use = time.tv_sec;
-
-					if (tdb->tdb_flags & TDBF_FIRSTUSE) {
-						exp = get_expiration();
-						if (exp == NULL)
-							goto expbail;
-						exp->exp_dst.s_addr =
-						    tdb->tdb_dst.s_addr;
-						exp->exp_spi = tdb->tdb_spi;
-						exp->exp_sproto =
-						    tdb->tdb_sproto;
-						exp->exp_timeout =
-						    tdb->tdb_first_use +
-						    tdb->tdb_exp_first_use;
-						put_expiration(exp);
-					}
-
-					if ((tdb->tdb_flags &
-					    TDBF_SOFT_FIRSTUSE) &&
-					    (tdb->tdb_soft_first_use <=
-						tdb->tdb_exp_first_use)) {
-						exp = get_expiration();
-						if (exp == NULL)
-							goto expbail;
-						exp->exp_dst.s_addr =
-						    tdb->tdb_dst.s_addr;
-						exp->exp_spi = tdb->tdb_spi;
-						exp->exp_sproto =
-						    tdb->tdb_sproto;
-						exp->exp_timeout =
-						    tdb->tdb_first_use +
-						    tdb->tdb_soft_first_use;
-						put_expiration(exp);
-					}
+			/* Register first use, setup expiration timer */
+			if (tdb->tdb_first_use == 0) {
+			        tdb->tdb_first_use = time.tv_sec;
+			    
+ 			        if (tdb->tdb_flags & TDBF_FIRSTUSE) {
+				    exp = get_expiration();
+				    bcopy(&tdb->tdb_dst, &exp->exp_dst,
+					  SA_LEN(&tdb->tdb_dst.sa));
+				    exp->exp_spi = tdb->tdb_spi;
+				    exp->exp_sproto = tdb->tdb_sproto;
+				    exp->exp_timeout = tdb->tdb_first_use +
+						   tdb->tdb_exp_first_use;
+				    put_expiration(exp);
 				}
+
+				if ((tdb->tdb_flags & TDBF_SOFT_FIRSTUSE) &&
+				    (tdb->tdb_soft_first_use <=
+				    tdb->tdb_exp_first_use)) {
+					exp = get_expiration();
+					bcopy(&tdb->tdb_dst, &exp->exp_dst,
+					      SA_LEN(&tdb->tdb_dst.sa));
+					exp->exp_spi = tdb->tdb_spi;
+					exp->exp_sproto = tdb->tdb_sproto;
+					exp->exp_timeout = tdb->tdb_first_use +
+					    tdb->tdb_soft_first_use;
+					put_expiration(exp);
+				}
+			}
+
+			/* Check for tunneling */
+			if (((tdb->tdb_dst.sin.sin_addr.s_addr !=
+			      INADDR_ANY &&
+			      tdb->tdb_dst.sin.sin_addr.s_addr !=
+			      ip->ip_dst.s_addr) ||
+			     (tdb->tdb_flags & TDBF_TUNNELING)) &&
+			     (tdb->tdb_xform->xf_type != XF_IP4))
+			{
+			        DPRINTF(("ip_output(): tunneling\n"));
 
 				/*
 				 * Fix checksum here, AH and ESP fix the
@@ -426,55 +435,11 @@ ip_output(m0, va_alist)
 				if (mp == NULL)
 					error = EFAULT;
 				if (error) {
-					RTFREE(re->re_rt);
+					if (re->re_rt)
+						RTFREE(re->re_rt);
 					return error;
 				}
 				m = mp;
-			}
-
-#ifdef ENCDEBUG
-			if (encdebug)
-				printf("ip_output(): calling %s\n",
-				       tdb->tdb_xform->xf_name);
-#endif /* ENCDEBUG */
-
-			/* Register first use, setup expiration timer */
-			if (tdb->tdb_first_use == 0) {
-			    tdb->tdb_first_use = time.tv_sec;
-
-				if (tdb->tdb_flags & TDBF_FIRSTUSE) {
-					exp = get_expiration();
-					if (exp == NULL)
-						goto expbail;
-					exp->exp_dst.s_addr =
-					    tdb->tdb_dst.s_addr;
-					exp->exp_spi = tdb->tdb_spi;
-					exp->exp_sproto = tdb->tdb_sproto;
-					exp->exp_timeout = tdb->tdb_first_use +
-					    tdb->tdb_exp_first_use;
-					put_expiration(exp);
-				}
-
-				if ((tdb->tdb_flags & TDBF_SOFT_FIRSTUSE) &&
-				    (tdb->tdb_soft_first_use <=
-				    tdb->tdb_exp_first_use)) {
-					exp = get_expiration();
-					if (exp == NULL) {
-expbail:
-						if (encdebug)
-						  log(LOG_WARNING, "ip_output(): no memory for exp timer\n");
-						m_freem(m);
-						RTFREE(re->re_rt);
-						return ENOBUFS;
-					}
-					exp->exp_dst.s_addr =
-					    tdb->tdb_dst.s_addr;
-					exp->exp_spi = tdb->tdb_spi;
-					exp->exp_sproto = tdb->tdb_sproto;
-					exp->exp_timeout = tdb->tdb_first_use +
-					    tdb->tdb_soft_first_use;
-					put_expiration(exp);
-				}
 			}
 
 			if (tdb->tdb_xform->xf_type == XF_IP4) {
@@ -494,16 +459,15 @@ expbail:
 			if (error) {
 				if (mp != NULL)
 					m_freem(mp);
-				RTFREE(re->re_rt);
+				if (re->re_rt)
+					RTFREE(re->re_rt);
 				return error;
 			}
 
 			m = mp;
-			if (tdb->tdb_xform->xf_type == XF_IP4) {
-			        /* If IP-IP, calculate outter header cksum */
-			        ip = mtod(m, struct ip *);
-				ip->ip_sum = in_cksum(m, ip->ip_hl << 2);
-			}
+			ip = mtod(m, struct ip *);
+			if (tdb->tdb_xform->xf_type == XF_IP4)
+			  ip->ip_sum = in_cksum(m, ip->ip_hl << 2);
 
 			tdb = tdb->tdb_onext;
 		}
@@ -513,7 +477,8 @@ expbail:
 		 * processed packet. Call ourselves recursively, but
 		 * bypass the encap code.
 		 */
-		RTFREE(re->re_rt);
+		if (re->re_rt)
+			RTFREE(re->re_rt);
 		ip = mtod(m, struct ip *);
 		NTOHS(ip->ip_len);
 		NTOHS(ip->ip_off);
@@ -1022,6 +987,28 @@ ip_ctloutput(op, so, level, optname, mp)
 				}
 			}
 			break;
+		case IPSEC_OUTSA:
+#ifndef IPSEC
+			error = EINVAL;
+#else
+			if (m == 0 || m->m_len != sizeof(struct tdb_ident)) {
+				error = EINVAL;
+				break;
+			} else {
+				struct tdb *tdb;
+				struct tdb_ident *tdbi;
+
+				tdbi = mtod(m, struct tdb_ident *);
+				tdb = gettdb(tdbi->spi, &tdbi->dst,
+					     tdbi->proto);
+				if (tdb == NULL) {
+					error = ESRCH;
+					break;
+				}
+				tdb_add_inp(tdb, inp);
+			}
+#endif /* IPSEC */
+			break;
 
 		case IP_AUTH_LEVEL:
 		case IP_ESP_TRANS_LEVEL:
@@ -1149,6 +1136,26 @@ ip_ctloutput(op, so, level, optname, mp)
 				optval = 0;
 
 			*mtod(m, int *) = optval;
+			break;
+
+		case IPSEC_OUTSA:
+#ifndef IPSEC
+			error = EINVAL;
+#else
+			if (inp->inp_tdb == NULL) {
+				error = ENOENT;
+				break;
+			} else {
+				struct tdb_ident tdbi;
+				tdbi.spi = inp->inp_tdb->tdb_spi;
+				tdbi.dst = inp->inp_tdb->tdb_dst;
+				tdbi.proto = inp->inp_tdb->tdb_sproto;
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
+				m->m_len = sizeof(tdbi);
+				bcopy((caddr_t)&tdbi, mtod(m, caddr_t),
+				      (unsigned)m->m_len);
+			}
+#endif /* IPSEC */
 			break;
 
 		case IP_AUTH_LEVEL:

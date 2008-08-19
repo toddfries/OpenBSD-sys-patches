@@ -1,4 +1,4 @@
-/* $OpenBSD: ym.c,v 1.1 1998/05/08 18:37:25 csapuntz Exp $ */
+/* $OpenBSD: ym.c,v 1.5 1999/01/24 15:58:54 mickey Exp $ */
 
 
 /*
@@ -41,7 +41,6 @@
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #include <machine/bus.h>
-#include <machine/pio.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -91,6 +90,8 @@ struct audio_hw_if ym_hw_if = {
 	ad1848_round,
 	ad1848_mappage,
 	ad1848_get_props,
+	NULL,
+	NULL
 };
 
 
@@ -119,6 +120,7 @@ ym_attach(sc)
 			    ad1848_intr, &sc->sc_ad1848, sc->sc_dev.dv_xname);
 
   ad1848_attach(&sc->sc_ad1848);
+  printf("\n");
   sc->sc_ad1848.parent = sc;
 
   /* Establish chip in well known mode */
@@ -131,7 +133,7 @@ ym_attach(sc)
   sc->mic_mute = 1;
   ym_mute(sc, SA3_MIC, sc->mic_mute);
 
-  audio_attach_mi(&ym_hw_if, 0, &sc->sc_ad1848, &sc->sc_dev);
+  audio_attach_mi(&ym_hw_if, &sc->sc_ad1848, &sc->sc_dev);
 }
 
 static __inline int

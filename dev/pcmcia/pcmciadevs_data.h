@@ -1,10 +1,10 @@
-/*	$OpenBSD: pcmciadevs_data.h,v 1.5 1998/10/14 07:34:43 fgsch Exp $	*/
+/*	$OpenBSD: pcmciadevs_data.h,v 1.12 1999/03/04 05:53:46 fgsch Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *		OpenBSD: pcmciadevs,v 1.3 1998/09/14 19:21:15 deraadt Exp 
+ *		OpenBSD: pcmciadevs,v 1.10 1999/03/04 05:50:28 fgsch Exp 
  */
 /* $NetBSD: pcmciadevs,v 1.13 1998/08/17 23:10:12 thorpej Exp $ */
 
@@ -55,6 +55,13 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    "Adaptec APA-1460/B SCSI Host Adapter"	},
 	},
 	{
+	    PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3CXEM556,
+	    PCMCIA_CIS_3COM_3CXEM556,
+	    0,
+	    "3Com",
+	    "3Com/Megahertz 3XEM556 Ethernet/Modem"	},
+	},
+	{
 	    PCMCIA_VENDOR_3COM, PCMCIA_PRODUCT_3COM_3C562,
 	    PCMCIA_CIS_3COM_3C562,
 	    0,
@@ -74,6 +81,13 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    0,
 	    "3Com",
 	    "3Com 3c574-TX 10/100Mbps Ethernet"	},
+	},
+	{
+	    PCMCIA_VENDOR_COMPEX, PCMCIA_PRODUCT_COMPEX_LINKPORT_ENET_B,
+	    PCMCIA_CIS_COMPEX_LINKPORT_ENET_B,
+	    0,
+	    "Compex",
+	    "Compex Linkport ENET-B Ethernet"	},
 	},
 	{
 	    PCMCIA_VENDOR_DAYNA, PCMCIA_PRODUCT_DAYNA_COMMUNICARD_E_1,
@@ -132,6 +146,13 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    "IBM Home and Away Modem"	},
 	},
 	{
+	    PCMCIA_VENDOR_IBM, PCMCIA_PRODUCT_IBM_WIRELESS_LAN_ENTRY,
+	    PCMCIA_CIS_IBM_WIRELESS_LAN_ENTRY,
+	    0,
+	    "IBM",
+	    "Wireless LAN Entry"	},
+	},
+	{
 	    PCMCIA_VENDOR_IODATA, PCMCIA_PRODUCT_IODATA_PCLAT,
 	    PCMCIA_CIS_IODATA_PCLAT,
 	    0,
@@ -139,18 +160,18 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    "I-O DATA PCLA/T"	},
 	},
 	{
-	    PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_ECARD_1,
-	    PCMCIA_CIS_LINKSYS_ECARD_1,
+	    PCMCIA_VENDOR_INTEL, PCMCIA_PRODUCT_INTEL_EEPRO100,
+	    PCMCIA_CIS_INTEL_EEPRO100,
 	    0,
-	    "Linksys",
-	    "Linksys EthernetCard"	},
+	    "Intel",
+	    "Intel EtherExpress PRO/100"	},
 	},
 	{
-	    PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_COMBO_ECARD,
-	    PCMCIA_CIS_LINKSYS_COMBO_ECARD,
+	    PCMCIA_VENDOR_KINGSTON, PCMCIA_PRODUCT_KINGSTON_KNE_PC2,
+	    PCMCIA_CIS_KINGSTON_KNE_PC2,
 	    0,
-	    "Linksys",
-	    "Linksys Combo EthernetCard"	},
+	    "Kingston",
+	    "Kingston KNE-PC2"	},
 	},
 	{
 	    PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_TRUST_COMBO_ECARD,
@@ -158,6 +179,27 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    0,
 	    "Linksys",
 	    "Trust (Linksys) Combo EthernetCard"	},
+	},
+	{
+	    PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_FAST_ECARD,
+	    PCMCIA_CIS_LINKSYS_FAST_ECARD,
+	    0,
+	    "Linksys",
+	    "D-Link DFE-650 or Netgear FA410TX"	},
+	},
+	{
+	    PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_ECARD_1,
+	    PCMCIA_CIS_LINKSYS_ECARD_1,
+	    0,
+	    "Linksys",
+	    "Linksys EthernetCard or D-Link DE-650"	},
+	},
+	{
+	    PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_COMBO_ECARD,
+	    PCMCIA_CIS_LINKSYS_COMBO_ECARD,
+	    0,
+	    "Linksys",
+	    "Linksys Combo EthernetCard"	},
 	},
 	{
 	    PCMCIA_VENDOR_MEGAHERTZ, PCMCIA_PRODUCT_MEGAHERTZ_XJ4288,
@@ -186,6 +228,13 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    0,
 	    "Megahertz",
 	    "Megahertz X-JACK Ethernet"	},
+	},
+	{
+	    PCMCIA_VENDOR_QUATECH, PCMCIA_PRODUCT_QUATECH_DSP_225,
+	    PCMCIA_CIS_QUATECH_DSP_225,
+	    0,
+	    "Quatech",
+	    "Quatech Dual Serial Port"	},
 	},
 	{
 	    PCMCIA_VENDOR_USROBOTICS, PCMCIA_PRODUCT_USROBOTICS_WORLDPORT144,
@@ -235,6 +284,34 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    0,
 	    "TDK",
 	    "TDK DFL9610 Ethernet & Digital Cellular"	},
+	},
+	{
+	    PCMCIA_VENDOR_TDK, PCMCIA_PRODUCT_TDK_XIR_CE_10,
+	    PCMCIA_CIS_TDK_XIR_CE_10,
+	    0,
+	    "TDK",
+	    "Xircom CreditCard Ethernet"	},
+	},
+	{
+	    PCMCIA_VENDOR_TDK, PCMCIA_PRODUCT_TDK_XIR_PS_CE2_10,
+	    PCMCIA_CIS_TDK_XIR_PS_CE2_10,
+	    0,
+	    "TDK",
+	    "Xircom CreditCard CE2 Ethernet"	},
+	},
+	{
+	    PCMCIA_VENDOR_TDK, PCMCIA_PRODUCT_TDK_XIR_CNW,
+	    PCMCIA_CIS_TDK_XIR_CNW,
+	    0,
+	    "TDK",
+	    "Xircom CreditCard Netwave"	},
+	},
+	{
+	    PCMCIA_VENDOR_TDK, PCMCIA_PRODUCT_TDK_XIR_CEM_10,
+	    PCMCIA_CIS_TDK_XIR_CEM_10,
+	    0,
+	    "TDK",
+	    "Xircom CreditCard Ethernet + Modem"	},
 	},
 	{
 	    PCMCIA_VENDOR_NEWMEDIA, PCMCIA_PRODUCT_NEWMEDIA_BASICS,
@@ -328,6 +405,27 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    "Linksys E-Card"	},
 	},
 	{
+	    PCMCIA_VENDOR_UNKNOWN, PCMCIA_PRODUCT_COREGA_PCC_2,
+	    PCMCIA_CIS_COREGA_PCC_2,
+	    0,
+	    "Corega K.K.",
+	    "Corega"	},
+	},
+	{
+	    PCMCIA_VENDOR_UNKNOWN, PCMCIA_PRODUCT_SVEC_COMBOCARD,
+	    PCMCIA_CIS_SVEC_COMBOCARD,
+	    0,
+	    "SVEC/Hawking Technology",
+	    "SVEC/Hawking Tech. Combo Card"	},
+	},
+	{
+	    PCMCIA_VENDOR_UNKNOWN, PCMCIA_PRODUCT_SVEC_LANCARD,
+	    PCMCIA_CIS_SVEC_LANCARD,
+	    0,
+	    "SVEC/Hawking Technology",
+	    "SVEC PCMCIA Lan Card"	},
+	},
+	{
 	    PCMCIA_VENDOR_SANDISK, 0,
 	    PCMCIA_KNOWNDEV_NOPROD,
 	    PCMCIA_CIS_INVALID,
@@ -339,6 +437,13 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    PCMCIA_KNOWNDEV_NOPROD,
 	    PCMCIA_CIS_INVALID,
 	    "NewMedia",
+	    NULL,
+	},
+	{
+	    PCMCIA_VENDOR_INTEL, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "Intel",
 	    NULL,
 	},
 	{
@@ -412,6 +517,20 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    NULL,
 	},
 	{
+	    PCMCIA_VENDOR_QUATECH, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "Quatech",
+	    NULL,
+	},
+	{
+	    PCMCIA_VENDOR_COMPAQ, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "Compaq",
+	    NULL,
+	},
+	{
 	    PCMCIA_VENDOR_LINKSYS, 0,
 	    PCMCIA_KNOWNDEV_NOPROD,
 	    PCMCIA_CIS_INVALID,
@@ -426,6 +545,20 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    NULL,
 	},
 	{
+	    PCMCIA_VENDOR_COMPAQ2, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "Compaq",
+	    NULL,
+	},
+	{
+	    PCMCIA_VENDOR_KINGSTON, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "Kingston",
+	    NULL,
+	},
+	{
 	    PCMCIA_VENDOR_DAYNA, 0,
 	    PCMCIA_KNOWNDEV_NOPROD,
 	    PCMCIA_CIS_INVALID,
@@ -437,6 +570,20 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    PCMCIA_KNOWNDEV_NOPROD,
 	    PCMCIA_CIS_INVALID,
 	    "I-O DATA",
+	    NULL,
+	},
+	{
+	    PCMCIA_VENDOR_COMPEX, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "Compex",
+	    NULL,
+	},
+	{
+	    PCMCIA_VENDOR_COREGA, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "Corega K.K.",
 	    NULL,
 	},
 	{
@@ -500,6 +647,13 @@ struct pcmcia_knowndev pcmcia_knowndevs[] = {
 	    PCMCIA_KNOWNDEV_NOPROD,
 	    PCMCIA_CIS_INVALID,
 	    "TEAC",
+	    NULL,
+	},
+	{
+	    PCMCIA_VENDOR_SVEC, 0,
+	    PCMCIA_KNOWNDEV_NOPROD,
+	    PCMCIA_CIS_INVALID,
+	    "SVEC/Hawking Technology",
 	    NULL,
 	},
 	{ 0, 0, { NULL, NULL, NULL, NULL }, 0, NULL, NULL, }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: shared_intr.c,v 1.3 1998/06/29 05:32:50 downsj Exp $	*/
+/*	$OpenBSD: shared_intr.c,v 1.7 1999/02/08 18:14:11 millert Exp $	*/
 /*	$NetBSD: shared_intr.c,v 1.1 1996/11/17 02:03:08 cgd Exp $	*/
 
 /*
@@ -115,25 +115,33 @@ alpha_shared_intr_dispatch(intr, num)
 	return (handled);
 }
 
+/*
+ * Just check to see if an IRQ is available/can be shared.
+ * 0 = interrupt not available
+ * 1 = interrupt shareable
+ * 2 = interrupt all to ourself
+ */
 int
 alpha_shared_intr_check(intr, num, type)
 	struct alpha_shared_intr *intr;
 	unsigned int num;
 	int type;
 {
-	if (intr[num].intr_sharetype == IST_UNUSABLE)
-		return (0);
 
 	switch (intr[num].intr_sharetype) {
-	case IST_EDGE:
+	case IST_UNUSABLE:
+		return (0);
+		break;
+	case IST_NONE:
+		return (2);
+		break;
 	case IST_LEVEL:
 		if (type == intr[num].intr_sharetype)
 			break;
+	case IST_EDGE:
 	case IST_PULSE:
 		if ((type != IST_NONE) && (intr[num].intr_q.tqh_first != NULL))
-				return (0);
-	case IST_NONE:
-		break;
+			return (0);
 	}
 
 	return (1);
@@ -259,6 +267,10 @@ alpha_shared_intr_stray(intr, num, basename)
 {
 
 	intr[num].intr_nstrays++;
+
+	if (intr[num].intr_maxstrays == 0)
+		return;
+
 	if (intr[num].intr_nstrays <= intr[num].intr_maxstrays)
 		log(LOG_ERR, "stray %s %d%s\n", basename, num,
 		    intr[num].intr_nstrays >= intr[num].intr_maxstrays ?

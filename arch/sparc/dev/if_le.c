@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le.c,v 1.12 1998/09/28 05:15:57 jason Exp $	*/
+/*	$OpenBSD: if_le.c,v 1.16 1999/02/28 19:12:34 jason Exp $	*/
 /*	$NetBSD: if_le.c,v 1.50 1997/09/09 20:54:48 pk Exp $	*/
 
 /*-
@@ -105,7 +105,7 @@ myleintr(arg)
 	void	*arg;
 {
 	register struct le_softc *lesc = arg;
-static int dodrain=0;
+	static int dodrain=0;
 
 	if (lesc->sc_dma->sc_regs->csr & D_ERR_PEND) {
 		dodrain = 1;
@@ -186,7 +186,6 @@ lesetutp(sc)
 		if (lesc->sc_dma->sc_regs->csr & DE_AUI_TP)
 			return;
 	}
-	printf("Setting utp: bit won't stick\n");
 }
 
 void
@@ -205,7 +204,6 @@ lesetaui(sc)
 		if ((lesc->sc_dma->sc_regs->csr & DE_AUI_TP) == 0)
 			return;
 	}
-	printf("Setting aui: bit won't stick\n");
 }
 #endif
 
@@ -215,6 +213,9 @@ lemediachange(ifp)
 {
 	struct am7990_softc *sc = ifp->if_softc;
 	struct ifmedia *ifm = &sc->sc_ifmedia;
+#if defined(SUN4M)
+	struct le_softc *lesc = (struct le_softc *)sc;
+#endif
 
 	if (IFM_TYPE(ifm->ifm_media) != IFM_ETHER)
 		return (EINVAL);
@@ -228,14 +229,14 @@ lemediachange(ifp)
 	switch (IFM_SUBTYPE(ifm->ifm_media)) {
 #if defined(SUN4M)
 	case IFM_10_T:
-		if (CPU_ISSUN4M)
+		if (CPU_ISSUN4M && lesc->sc_dma)
 			lesetutp(sc);
 		else
 			return (EOPNOTSUPP);
 		break;
 
 	case IFM_AUTO:
-		if (CPU_ISSUN4M)
+		if (CPU_ISSUN4M && lesc->sc_dma)
 			return (0);
 		else
 			return (EOPNOTSUPP);
@@ -244,7 +245,7 @@ lemediachange(ifp)
 
 	case IFM_10_5:
 #if defined(SUN4M)
-		if (CPU_ISSUN4M)
+		if (CPU_ISSUN4M && lesc->sc_dma)
 			lesetaui(sc);
 #else
 		return (0);
@@ -393,8 +394,13 @@ lematch(parent, vcf, aux)
 
 	if (strcmp(cf->cf_driver->cd_name, ra->ra_name))
 		return (0);
-	if (ca->ca_bustype == BUS_SBUS)
+#if defined(SUN4C) || defined(SUN4M)
+	if (ca->ca_bustype == BUS_SBUS) {
+		if (!sbus_testdma((struct sbus_softc *)parent, ca))
+			return (0);
 		return (1);
+	}
+#endif
 
 	return (probeget(ra->ra_vaddr, 2) != -1);
 }

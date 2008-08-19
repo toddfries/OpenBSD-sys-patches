@@ -1,4 +1,4 @@
-/*	$OpenBSD: qec.c,v 1.7 1998/10/21 04:12:10 jason Exp $	*/
+/*	$OpenBSD: qec.c,v 1.10 1998/11/16 06:20:36 jason Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -48,12 +48,13 @@
 #include <sparc/dev/qecvar.h>
 
 int	qecprint	__P((void *, const char *));
+int	qecmatch	__P((struct device *, void *, void *));
 void	qecattach	__P((struct device *, struct device *, void *));
 void	qec_fix_range	__P((struct qec_softc *, struct sbus_softc *));
 void	qec_translate	__P((struct qec_softc *, struct confargs *));
 
 struct cfattach qec_ca = {
-	sizeof(struct qec_softc), matchbyname, qecattach
+	sizeof(struct qec_softc), qecmatch, qecattach
 };
 
 struct cfdriver qec_cd = {
@@ -74,6 +75,27 @@ qecprint(aux, name)
 }
 
 /*
+ * match a QEC device in a slot capable of DMA
+ */
+int
+qecmatch(parent, vcf, aux)
+	struct device *parent;
+	void *vcf, *aux;
+{
+	struct cfdata *cf = vcf;
+	struct confargs *ca = aux;
+	struct romaux *ra = &ca->ca_ra;
+
+	if (strcmp(cf->cf_driver->cd_name, ra->ra_name))
+		return (0);
+
+	if (!sbus_testdma((struct sbus_softc *)parent, ca))
+		return (0);
+
+	return (1);
+}
+
+/*
  * Attach all the sub-devices we can find
  */
 void
@@ -89,13 +111,13 @@ qecattach(parent, self, aux)
 	int sbusburst;
 
 	/*
-	 * The first IO space is the QEC registers, the second IO
-	 * space is the QEC (64K we hope) ram buffer
+	 * The first i/o space is the qec global registers, and
+	 * the second is a buffer used by the qec channels internally.
+	 * (It's not necessary to map the second i/o space, but knowing
+	 * its size is necessary).
 	 */
 	sc->sc_regs = mapiodev(&ca->ca_ra.ra_reg[0], 0,
 	    sizeof(struct qecregs));
-	sc->sc_buffer = mapiodev(&ca->ca_ra.ra_reg[1], 0,
-	    ca->ca_ra.ra_reg[1].rr_len);
 	sc->sc_bufsiz = ca->ca_ra.ra_reg[1].rr_len;
 
 	/*
@@ -134,9 +156,9 @@ qecattach(parent, self, aux)
 	/* Clamp at parent's burst sizes */
 	sc->sc_burst &= sbusburst;
 
-	printf(": %dK memory %d %s",
+	printf(": %dK memory %d channel%s",
 	    sc->sc_bufsiz / 1024, sc->sc_nchannels,
-	    (sc->sc_nchannels == 1) ? "channel" : "channels");
+	    (sc->sc_nchannels == 1) ? "" : "s");
 
 	node = sc->sc_node = ca->ca_ra.ra_node;
 
@@ -226,17 +248,18 @@ qec_translate(sc, ca)
 }
 
 /*
- * Reset the QEC
+ * Reset the QEC and initialize its global registers.
  */
 void
 qec_reset(sc)
 	struct qec_softc *sc;
 {
+	struct qecregs *qr = sc->sc_regs;
 	int i = 200;
 
-	sc->sc_regs->ctrl = QEC_CTRL_RESET;
+	qr->ctrl = QEC_CTRL_RESET;
 	while (--i) {
-		if ((sc->sc_regs->ctrl & QEC_CTRL_RESET) == 0)
+		if ((qr->ctrl & QEC_CTRL_RESET) == 0)
 			break;
 		DELAY(20);
 	}
@@ -244,4 +267,23 @@ qec_reset(sc)
 		printf("%s: reset failed.\n", sc->sc_dev.dv_xname);
 		return;
 	}
+
+	qr->msize = sc->sc_bufsiz / sc->sc_nchannels;
+	sc->sc_msize = qr->msize;
+
+	qr->rsize = sc->sc_bufsiz / (sc->sc_nchannels * 2);
+	sc->sc_rsize = qr->rsize;
+
+	qr->tsize = sc->sc_bufsiz / (sc->sc_nchannels * 2);
+
+	qr->psize = QEC_PSIZE_2048;
+
+        if (sc->sc_burst & SBUS_BURST_64)
+		i = QEC_CTRL_B64;
+	else if (sc->sc_burst & SBUS_BURST_32)
+		i = QEC_CTRL_B32;
+	else
+		i = QEC_CTRL_B16;
+
+	qr->ctrl = (qr->ctrl & QEC_CTRL_MODEMASK) | i;
 }

@@ -1,3 +1,4 @@
+/*	$OpenBSD: pmap.h,v 1.5 1999/02/09 06:36:27 smurph Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1991 Carnegie Mellon University
@@ -32,7 +33,7 @@ struct pmap {
     sdt_ptr_t		sdt_paddr;	/* physical pointer to sdt */
     sdt_ptr_t		sdt_vaddr;	/* virtual pointer to sdt */
     int			ref_count;	/* reference count */
-
+    simple_lock_data_t	lock;
     struct pmap_statistics stats;	/* pmap statistics */
 
 #ifdef DEBUG

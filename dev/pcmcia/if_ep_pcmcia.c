@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ep_pcmcia.c,v 1.11 1998/09/19 10:08:06 maja Exp $	*/
+/*	$OpenBSD: if_ep_pcmcia.c,v 1.13 1999/01/28 04:58:30 fgsch Exp $	*/
 /*	$NetBSD: if_ep_pcmcia.c,v 1.16 1998/08/17 23:20:40 thorpej Exp $  */
 
 /*-
@@ -147,13 +147,20 @@ struct ep_pcmcia_product {
 	{ PCMCIA_PRODUCT_3COM_3C562,	EP_CHIPSET_3C509,
 	  0,				0,
 	  PCMCIA_STR_3COM_3C562 },
+
 	{ PCMCIA_PRODUCT_3COM_3C589,	EP_CHIPSET_3C509,
 	  0,				0,
 	  PCMCIA_STR_3COM_3C589 },
 
+	{ PCMCIA_PRODUCT_3COM_3CXEM556,	EP_CHIPSET_3C509,
+	  0,				0,
+	  PCMCIA_STR_3COM_3CXEM556 },
+
+#ifdef notyet
 	{ PCMCIA_PRODUCT_3COM_3C574,	EP_CHIPSET_BOOMERANG,
 	  EP_FLAGS_MII,			0,
 	  PCMCIA_STR_3COM_3C574 },
+#endif
 
 	{ 0,				0,
 	  0,				0,
@@ -221,7 +228,8 @@ ep_pcmcia_enable1(sc)
 	if ((ret = pcmcia_function_enable(pf)))
 		return (ret);
 
-	if (psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3C562) {
+	if ((psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3C562) ||
+	    (psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3CXEM556)) {
 		int reg;
 
 		/* turn off the serial-disable bit */

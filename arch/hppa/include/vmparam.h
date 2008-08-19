@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.3 1998/08/29 01:20:38 mickey Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.5 1998/11/23 03:32:54 mickey Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -23,8 +23,8 @@
  * 	Utah $Hdr: vmparam.h 1.16 94/12/16$
  */
 
-#ifndef _HPPA_VMPARAM_H_
-#define _HPPA_VMPARAM_H_
+#ifndef _MACHINE_VMPARAM_H_
+#define _MACHINE_VMPARAM_H_
 
 /*
  * Machine dependent constants for HP PA
@@ -72,16 +72,12 @@
  * DMMIN should be at least ctod(1) so that vtod() works.
  * vminit() ensures this.
  */
-#define	DMMIN	64			/* smallest swap allocation */
+#define	DMMIN	32			/* smallest swap allocation */
 #define	DMMAX	4096			/* largest potential swap allocation */
-#define	DMTEXT	4096			/* swap allocation for text */
 
-/*
- * Sizes of the system and user portions of the system page table.
- */
-/* SYSPTSIZE IS SILLY; IT SHOULD BE COMPUTED AT BOOT TIME */
-#define	SYSPTSIZE	((1024*1024*64)/NBPG)	/* 64mb */
-#define	USRPTSIZE	(8 * NPTEPG)		/* 32mb */
+#ifndef USRIOSIZE
+#define	USRIOSIZE	128
+#endif
 
 /*
  * PTEs for system V style shared memory.
@@ -128,7 +124,7 @@
 #define	VM_MAXUSER_ADDRESS	((vm_offset_t)0xc0000000)
 #define	VM_MAX_ADDRESS		VM_MAXUSER_ADDRESS
 #define	VM_MIN_KERNEL_ADDRESS	((vm_offset_t)0)
-#define	VM_MAX_KERNEL_ADDRESS	((vm_offset_t)0xFFFF0000)
+#define	VM_MAX_KERNEL_ADDRESS	((vm_offset_t)0xF0000000)
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_MBUF_SIZE		(NMBCLUSTERS*MCLBYTES)
@@ -140,4 +136,4 @@
 #define	VM_PHYSSEG_MAX	8	/* this many physmem segments */
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_BIGFIRST
 
-#endif	/* _HPPA_VMPARAM_H_ */
+#endif	/* _MACHINE_VMPARAM_H_ */

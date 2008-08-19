@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_isa.c,v 1.1 1998/09/22 06:33:19 fgsch Exp $	*/
+/*	$OpenBSD: if_ne_isa.c,v 1.3 1999/03/26 06:34:27 fgsch Exp $	*/
 /*	$NetBSD: if_ne_isa.c,v 1.6 1998/07/05 06:49:13 jonathan Exp $	*/
 
 /*-
@@ -88,6 +88,9 @@
 #include <dev/ic/ne2000reg.h>
 #include <dev/ic/ne2000var.h>
 
+#include <dev/ic/rtl80x9reg.h>
+#include <dev/ic/rtl80x9var.h>          
+
 #include <dev/isa/isavar.h>
 
 int	ne_isa_match __P((struct device *, void *, void *));
@@ -109,6 +112,9 @@ ne_isa_match(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
+	struct ne_isa_softc *isc = match;
+	struct ne2000_softc *nsc = &isc->sc_ne2000;
+	struct dp8390_softc *dsc = &nsc->sc_dp8390;
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t nict = ia->ia_iot;
 	bus_space_handle_t nich;
@@ -135,8 +141,14 @@ ne_isa_match(parent, match, aux)
 	    NE2000_ASIC_NPORTS, &asich))
 		goto out;
 
+	dsc->sc_regt = nict;
+	dsc->sc_regh = nich;
+
+	nsc->sc_asict = asict;
+	nsc->sc_asich = asich;
+
 	/* Look for an NE2000-compatible card. */
-	rv = ne2000_detect(nict, nich, asict, asich);
+	rv = ne2000_detect(nsc);
 
 	if (rv)
 		ia->ia_iosize = NE2000_NPORTS;
@@ -159,9 +171,17 @@ ne_isa_attach(parent, self, aux)
 	bus_space_handle_t nich;
 	bus_space_tag_t asict = nict;
 	bus_space_handle_t asich;
+	void (*npp_init_media) __P((struct dp8390_softc *, int **,
+	    int *, int *));
+	int *media, nmedia, defmedia;
 	const char *typestr;
+	int netype;
 
 	printf("\n");
+
+	npp_init_media = NULL;
+	media = NULL;
+	nmedia = defmedia = 0;
 
 	/* Map i/o space. */
 	if (bus_space_map(nict, ia->ia_iobase, NE2000_NPORTS, 0, &nich)) {
@@ -185,13 +205,29 @@ ne_isa_attach(parent, self, aux)
 	 * Detect it again, so we can print some information about the
 	 * interface.
 	 */
-	switch (ne2000_detect(nict, nich, asict, asich)) {
+	netype = ne2000_detect(nsc);
+	switch (netype) {
 	case NE2000_TYPE_NE1000:
 		typestr = "NE1000";
 		break;
 
 	case NE2000_TYPE_NE2000:
 		typestr = "NE2000";
+		/*
+		 * Check for a RealTek 8019.
+		 */
+		bus_space_write_1(nict, nich, ED_P0_CR,
+		    ED_CR_PAGE_0 | ED_CR_STP);
+		if (bus_space_read_1(nict, nich, NERTL_RTL0_8019ID0) ==
+								RTL0_8019ID0 &&
+		    bus_space_read_1(nict, nich, NERTL_RTL0_8019ID1) ==
+								RTL0_8019ID1) {
+			typestr = "NE2000 (RTL8019)";
+			npp_init_media = rtl80x9_init_media;
+			dsc->sc_mediachange = rtl80x9_mediachange;
+			dsc->sc_mediastatus = rtl80x9_mediastatus;
+			dsc->init_card = rtl80x9_init_card;
+		}
 		break;
 
 	default:
@@ -201,6 +237,10 @@ ne_isa_attach(parent, self, aux)
 
 	printf("%s: %s Ethernet\n", dsc->sc_dev.dv_xname, typestr);
 
+	/* Initialize media, if we have it. */
+	if (npp_init_media != NULL)
+		(*npp_init_media)(dsc, &media, &nmedia, &defmedia);
+
 	/* This interface is always enabled. */
 	dsc->sc_enabled = 1;
 
@@ -208,7 +248,7 @@ ne_isa_attach(parent, self, aux)
 	 * Do generic NE2000 attach.  This will read the station address
 	 * from the EEPROM.
 	 */
-	ne2000_attach(nsc, NULL);
+	ne2000_attach(nsc, NULL, media, nmedia, defmedia);
 
 	/* Establish the interrupt handler. */
 	isc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,

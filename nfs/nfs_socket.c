@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.13 1998/08/19 22:26:53 csapuntz Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.15 1999/03/02 20:59:55 millert Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -928,8 +928,9 @@ tryagain:
 		if (nmp->nm_soflags & PR_CONNREQUIRED)
 			error = nfs_sndlock(&nmp->nm_flag, rep);
 		if (!error) {
-			m = m_copym(m, 0, M_COPYALL, M_WAIT);
-			error = nfs_send(nmp->nm_so, nmp->nm_nam, m, rep);
+			error = nfs_send(nmp->nm_so, nmp->nm_nam,
+					m_copym(m, 0, M_COPYALL, M_WAIT),
+					rep);
 			if (nmp->nm_soflags & PR_CONNREQUIRED)
 				nfs_sndunlock(&nmp->nm_flag);
 		}
@@ -1224,7 +1225,7 @@ nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
 			*tl++ = txdr_unsigned(nd->nd_flag & ND_LEASE);
 			*tl++ = txdr_unsigned(cache);
 			*tl++ = txdr_unsigned(nd->nd_duration);
-			txdr_hyper(frev, tl);
+			txdr_hyper(*frev, tl);
 		} else {
 			nfsm_build(tl, u_int32_t *, NFSX_UNSIGNED);
 			*tl = 0;

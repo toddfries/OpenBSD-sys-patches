@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82365_isasubr.c,v 1.1 1998/09/11 08:02:50 fgsch Exp $	*/
+/*	$OpenBSD: i82365_isasubr.c,v 1.7 1999/03/31 05:48:25 deraadt Exp $	*/
 /*	$NetBSD: i82365_isasubr.c,v 1.1 1998/06/07 18:28:31 sommerfe Exp $  */
 
 /*
@@ -83,16 +83,23 @@ int	pcic_isa_alloc_iosize = PCIC_ISA_ALLOC_IOSIZE;
  * IRQs for PCMCIA slots.  Useful if order of probing would screw up other
  * devices, or if PCIC hardware/cards have trouble with certain interrupt
  * lines.
- *
- * We disable IRQ 10 by default, since some common laptops (namely, the
- * NEC Versa series) reserve IRQ 10 for the docking station SCSI interface.
  */
 
-#ifndef PCIC_ISA_INTR_ALLOC_MASK
-#define	PCIC_ISA_INTR_ALLOC_MASK	0xfbff
-#endif
+char	pcic_isa_intr_list[] = {
+	3, 4, 14, 9, 5, 12, 10, 11, 15, 13, 7
+};
 
-int	pcic_isa_intr_alloc_mask = PCIC_ISA_INTR_ALLOC_MASK;
+int	npcic_isa_intr_list =
+	sizeof(pcic_isa_intr_list) / sizeof(pcic_isa_intr_list[0]);
+
+struct pcic_ranges pcic_isa_addr[] = {
+	{ 0x340, 0x040 },
+	{ 0x300, 0x030 },
+	{ 0x390, 0x020 },
+	{ 0x400, 0xbff },
+	{ 0, 0 },		/* terminator */
+};
+
 
 /*****************************************************************************
  * End of configurable parameters.
@@ -165,6 +172,7 @@ void pcic_isa_bus_width_probe (sc, iot, ioh, base, length)
 	 * and also a config file option to override the probe.
 	 */
 
+	sc->ranges = pcic_isa_addr;
 	if (iobuswidth == 10) {
 		sc->iobase = 0x300;
 		sc->iosize = 0x0ff;
@@ -215,7 +223,7 @@ pcic_isa_chip_intr_establish(pch, pf, ipl, fct, arg)
 	isa_chipset_tag_t ic = h->sc->intr_est;
 	int irq, ist;
 	void *ih;
-	int reg;
+	int i, reg;
 
 	if (pf->cfe->flags & PCMCIA_CFE_IRQLEVEL)
 		ist = IST_LEVEL;
@@ -224,9 +232,16 @@ pcic_isa_chip_intr_establish(pch, pf, ipl, fct, arg)
 	else
 		ist = IST_LEVEL;
 
-	if (isa_intr_alloc(ic,
-	    PCIC_INTR_IRQ_VALIDMASK & pcic_isa_intr_alloc_mask, ist, &irq))
-		return (NULL);
+	for (i = 0; i < npcic_isa_intr_list; i++)
+		if (isa_intr_check(ic, pcic_isa_intr_list[i], ist) == 2)
+			goto found;
+	for (i = 0; i < npcic_isa_intr_list; i++)
+		if (isa_intr_check(ic, pcic_isa_intr_list[i], ist) == 1)
+			goto found;
+	return (NULL);
+
+found:
+	irq = pcic_isa_intr_list[i];
 	if ((ih = isa_intr_establish(ic, irq, ist, ipl,
 	    fct, arg, h->pcmcia->dv_xname)) == NULL)
 		return (NULL);

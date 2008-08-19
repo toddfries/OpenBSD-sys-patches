@@ -1,4 +1,4 @@
-/*	$OpenBSD: sb_isapnp.c,v 1.5 1998/05/13 20:07:47 deraadt Exp $	*/
+/*	$OpenBSD: sb_isapnp.c,v 1.12 1999/03/16 17:56:13 deraadt Exp $	*/
 /*	$NetBSD: sb_isa.c,v 1.3 1997/03/20 11:03:11 mycroft Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
+#include <dev/midi_if.h>
 #include <dev/mulaw.h>
 
 #include <dev/isa/isavar.h>
@@ -74,6 +75,10 @@ sb_isapnp_match(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
+	struct isa_attach_args *ia = aux;
+
+	if (ia->ipa_ndrq < 1)
+		return 0;
 	return 1;
 }
 
@@ -86,15 +91,14 @@ sb_isapnp_attach(parent, self, aux)
 	struct device *parent, *self;
 	void *aux;
 {
-	register struct sbdsp_softc *sc = (struct sbdsp_softc *) self;
-	register struct isa_attach_args *ia = aux;
+	struct sbdsp_softc *sc = (struct sbdsp_softc *) self;
+	struct isa_attach_args *ia = aux;
 
 	sc->sc_iot = ia->ia_iot;
 	sc->sc_ioh = ia->ipa_io[0].h;
-	sc->sc_ic = ia->ia_ic;
-
-	sc->sc_iobase = ia->ipa_io[0].base;
 	sc->sc_irq = ia->ipa_irq[0].num;
+	sc->sc_iobase = ia->ipa_io[0].base;
+	sc->sc_ic = ia->ia_ic;
 	sc->sc_drq8 = ia->ipa_drq[0].num;
 	
 	if (ia->ipa_ndrq > 1 && ia->ipa_drq[0].num != ia->ipa_drq[1].num) {
@@ -107,14 +111,19 @@ sb_isapnp_attach(parent, self, aux)
 	} else
 		sc->sc_drq16 = DRQUNK;
 
-	/*
-	 * isapnp is a child if isa, and we needs isa for the dma
-	 * routines
-	 */
-	sc->sc_isa = parent->dv_parent;
+#if NMIDI > 0
+	if (ia->ipa_nio > 1) {
+		sc->sc_mpu_sc.iobase = ia->ipa_io[1].base;
+		sc->sc_mpu_sc.ioh = ia->ipa_io[1].h;
+	} else
+		sc->sc_mpu_sc.iobase = 0;
+#endif
 
-	if (!sbmatch(sc))
+	if (!sbmatch(sc)) {
+		printf(": sbmatch failed\n");
 		return;
+	}
 
+	sc->sc_isa = parent->dv_parent;
 	sbattach(sc);
 }

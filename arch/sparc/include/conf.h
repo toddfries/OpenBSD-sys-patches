@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.7 1998/08/24 05:30:00 millert Exp $	*/
+/*	$OpenBSD: conf.h,v 1.9 1999/02/01 00:30:43 jason Exp $	*/
 /*	$NetBSD: conf.h,v 1.8 1996/12/31 07:12:43 mrg Exp $	*/
 
 /*
@@ -95,7 +95,18 @@ cdev_decl(sw);
 bdev_decl(rd);
 cdev_decl(rd);
 
+/* open, close, write, ioctl */
+#define	cdev_bpp_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
+	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) nullop, \
+	0, seltrue, (dev_type_mmap((*))) enodev }
+
+cdev_decl(bpp);
+
 cdev_decl(mtty);
 cdev_decl(mbpp);
+
+cdev_decl(stty);
+cdev_decl(sbpp);
 
 cdev_decl(ksyms);

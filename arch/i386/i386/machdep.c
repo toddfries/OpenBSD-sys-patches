@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.94 1998/09/28 05:13:13 downsj Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.105 1999/03/16 08:34:40 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -117,6 +117,10 @@
 #include <vm/vm_kern.h>
 #include <vm/vm_page.h>
 
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
+
 #include <sys/sysctl.h>
 
 #define _I386_BUS_DMA_PRIVATE
@@ -193,7 +197,14 @@ struct	msgbuf *msgbufp;
 int	msgbufmapped;
 
 bootarg_t *bootargp;
+
+#if defined(UVM)
+vm_map_t exec_map = NULL;
+vm_map_t mb_map = NULL;
+vm_map_t phys_map = NULL;
+#else
 vm_map_t buffer_map;
+#endif
 
 extern	vm_offset_t avail_start, avail_end;
 vm_offset_t hole_start, hole_end;
@@ -240,8 +251,10 @@ int allowaperture = 0;
 #endif
 #endif
 
-void	cyrix6x86_cpu_setup __P((const char *, int));
-void	intel586_cpu_setup __P((const char *, int));
+void	cyrix6x86_cpu_setup __P((const char *, int, int));
+void	intel586_cpu_setup __P((const char *, int, int));
+void	intel686_cpu_setup __P((const char *, int, int));
+char *	intel686_cpu_name __P((int));
 
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 static __inline u_char
@@ -285,7 +298,7 @@ cpu_startup()
 
 	/* Boot arguments are in page 1 */
 	if (bootapiver >= 2) {
-		pa = NBPG;
+		pa = (vm_offset_t)bootargv;
 		for (i = 0; i < btoc(bootargc); i++, pa += NBPG)
 			pmap_enter(pmap_kernel(),
 			    (vm_offset_t)((caddr_t)bootargp + i * NBPG),
@@ -306,7 +319,11 @@ cpu_startup()
 	 * and then give everything true virtual addresses.
 	 */
 	sz = (int)allocsys((caddr_t)0);
+#if defined(UVM)
+	if ((v = (caddr_t)uvm_km_zalloc(kernel_map, round_page(sz))) == 0)
+#else
 	if ((v = (caddr_t)kmem_alloc(kernel_map, round_page(sz))) == 0)
+#endif
 		panic("startup: no room for tables");
 	if (allocsys(v) - v != sz)
 		panic("startup: table size inconsistency");
@@ -321,14 +338,24 @@ cpu_startup()
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+#if defined(UVM)
+	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+				   16*NCARGS, TRUE, FALSE, NULL);
+#else
 	exec_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr, 16*NCARGS,
 	    TRUE);
+#endif
 
 	/*
 	 * Allocate a submap for physio
 	 */
+#if defined(UVM)
+	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
+				   VM_PHYS_SIZE, TRUE, FALSE, NULL);
+#else
 	phys_map = kmem_suballoc(kernel_map, &minaddr, &maxaddr, VM_PHYS_SIZE,
 	    TRUE);
+#endif
 
 	/*
 	 * Finally, allocate mbuf pool.  Since mclrefcnt is an off-size
@@ -337,8 +364,13 @@ cpu_startup()
 	mclrefcnt = (char *)malloc(NMBCLUSTERS+CLBYTES/MCLBYTES, M_MBUF,
 	    M_NOWAIT);
 	bzero(mclrefcnt, NMBCLUSTERS+CLBYTES/MCLBYTES);
+#if defined(UVM)
+	mb_map = uvm_km_suballoc(kernel_map, (vm_offset_t *)&mbutl, &maxaddr,
+	    VM_MBUF_SIZE, FALSE, FALSE, NULL);
+#else
 	mb_map = kmem_suballoc(kernel_map, (vm_offset_t *)&mbutl, &maxaddr,
 	    VM_MBUF_SIZE, FALSE);
+#endif
 
 	/*
 	 * Initialize callouts
@@ -347,7 +379,11 @@ cpu_startup()
 	for (i = 1; i < ncallout; i++)
 		callout[i-1].c_next = &callout[i];
 
+#if defined(UVM)
+	printf("avail mem = %ld\n", ptoa(uvmexp.free));
+#else
 	printf("avail mem = %ld\n", ptoa(cnt.v_free_count));
+#endif
 	printf("using %d buffers containing %d bytes of memory\n",
 		nbuf, bufpages * CLBYTES);
 
@@ -465,7 +501,9 @@ allocsys(v)
 		if (nswbuf > 256)
 			nswbuf = 256;		/* sanity */
 	}
+#if !defined(UVM)
 	valloc(swbuf, struct buf, nswbuf);
+#endif
 	valloc(buf, struct buf, nbuf);
 	return v;
 }
@@ -481,12 +519,21 @@ setup_buffers(maxaddr)
 	vm_page_t pg, *last, *last2;
 
 	size = MAXBSIZE * nbuf;
+#if defined(UVM)
+	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
+		    NULL, UVM_UNKNOWN_OFFSET,
+		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
+				UVM_ADV_NORMAL, 0)) != KERN_SUCCESS)
+		panic("cpu_startup: cannot allocate VM for buffers");
+	addr = (vaddr_t)buffers;
+#else
 	buffer_map = kmem_suballoc(kernel_map, (vm_offset_t *)&buffers,
 	    maxaddr, size, TRUE);
 	addr = (vm_offset_t)buffers;
 	if (vm_map_find(buffer_map, vm_object_allocate(size), (vm_offset_t)0,
 	    &addr, size, FALSE) != KERN_SUCCESS)
 		panic("startup: cannot allocate buffers");
+#endif
 
 	base = bufpages / nbuf;
 	residual = bufpages % nbuf;
@@ -514,8 +561,13 @@ setup_buffers(maxaddr)
 	addr = 0;
 	for (left = bufpages; left > 2 * 1024 * 1024 / CLBYTES;
 	    left -= 2 * 1024 * 1024 / CLBYTES) {
+#if defined(UVM)
+		if (uvm_pglistalloc(2 * 1024 * 1024, 0, 16 * 1024 * 1024,
+		    CLBYTES, 0, &pgs, 1, 0)) {
+#else
 		if (vm_page_alloc_memory(2 * 1024 * 1024, 0, 16 * 1024 * 1024,
 		    CLBYTES, 0, &pgs, 1, 0)) {
+#endif
 			if (last2) {
 				TAILQ_INIT(&freepgs);
 				freepgs.tqh_first = *last2;
@@ -523,7 +575,11 @@ setup_buffers(maxaddr)
 				(*last2)->pageq.tqe_prev = &freepgs.tqh_first;
 				pgs.tqh_last = last2;
 				*last2 = NULL;
+#if defined(UVM)
+				uvm_pglistfree(&freepgs);
+#else
 				vm_page_free_memory(&freepgs);
+#endif
 				left += 2 * 1024 * 1024 / CLBYTES;
 				addr = 16 * 1024 * 1024;
 			}
@@ -533,8 +589,13 @@ setup_buffers(maxaddr)
 		last = pgs.tqh_last;
 	}
 	if (left > 0)
+#if defined(UVM)
+		if (uvm_pglistalloc(left * CLBYTES, addr, avail_end,
+		    CLBYTES, 0, &pgs, 1, 0))
+#else
 		if (vm_page_alloc_memory(left * CLBYTES, addr, avail_end,
 		    CLBYTES, 0, &pgs, 1, 0))
+#endif
 			panic("cannot get physical memory for buffer cache");
 
 	pg = pgs.tqh_first;
@@ -629,11 +690,11 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 			CPUCLASS_686,
 			{
 				0, "Pentium Pro", 0, "Pentium II",
-				"Pentium Pro", "Pentium II", "Pentium II",
-				0, 0, 0, 0, 0, 0, 0, 0, 0,
+				"Pentium Pro", "Pentium II", "Celeron",
+				"Pentium III", 0, 0, 0, 0, 0, 0, 0, 0,
 				"Pentium Pro"	/* Default */
 			},
-			NULL
+			intel686_cpu_setup
 		} }
 	},
 	{
@@ -659,7 +720,7 @@ struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 			CPUCLASS_586,
 			{
 				"K5", "K5", "K5", "K5", 0, 0, "K6",
-				"K6", "K6-2", "K6-2", 0, 0, 0, 0, 0, 0,
+				"K6", "K6-2", "K6-3", 0, 0, 0, 0, 0, 0,
 				"K5 or K6"		/* Default */
 			},
 			NULL
@@ -729,15 +790,19 @@ struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_PGE,	"PGE" },
 	{ CPUID_MCA,	"MCA" },
 	{ CPUID_CMOV,	"CMOV" },
+	{ CPUID_PAT,	"PAT" },
+	{ CPUID_PSE36,	"PSE36" },
+	{ CPUID_SER,	"SER" },
 	{ CPUID_MMX,	"MMX" },
-	{ CPUID_EMMX,	"EMMX" },
-	{ CPUID_3D,	"AMD3D" }
+	{ CPUID_FXSR,	"FXSR" },
+	{ CPUID_SIMD,	"SIMD" },
+	{ CPUID_3DNOW,	"3DNOW" },
 };
 
 void
-cyrix6x86_cpu_setup(cpu_device, model)
+cyrix6x86_cpu_setup(cpu_device, model, step)
 	const char *cpu_device;
-	int model;
+	int model, step;
 {
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	extern int cpu_feature;
@@ -768,9 +833,9 @@ cyrix6x86_cpu_setup(cpu_device, model)
 }
 
 void
-intel586_cpu_setup(cpu_device, model)
+intel586_cpu_setup(cpu_device, model, step)
 	const char *cpu_device;
-	int model;
+	int model, step;
 {
 #if defined(I586_CPU)
 	fix_f00f();
@@ -779,23 +844,108 @@ intel586_cpu_setup(cpu_device, model)
 }
 
 void
+intel686_cpu_setup(cpu_device, model, step)
+	const char *cpu_device;
+	int model, step;
+{
+	extern int cpu_feature, cpuid_level;
+	u_quad_t msr119;
+#define rdmsr(msr)	\
+({			\
+	u_quad_t v;	\
+	__asm __volatile (".byte 0xf, 0x32" : "=A" (v) : "c" (msr));	\
+	v;		\
+})
+#define wrmsr(msr, v)	\
+	__asm __volatile (".byte 0xf, 0x30" :: "A" ((u_quad_t) (v)), "c" (msr));
+
+	/*
+	 * Original PPro returns SYSCALL in CPUID but is non-functional.
+	 * From Intel Application Note #485.
+	 */
+	if ((model == 1) && (step < 3))
+		cpu_feature &= ~CPUID_SYS2;
+
+	/*
+	 * Disable the Pentium3 serial number.
+	 */
+	if ((model == 7) && (cpu_feature & CPUID_SER)) {
+		msr119 = rdmsr(0x119);
+		msr119 |= 0x0000000000200000;
+		wrmsr(0x119, msr119);
+
+		printf("%s: disabling processor serial number\n", cpu_device);
+		cpu_feature &= ~CPUID_SER;
+		cpuid_level = 2;
+	}
+#undef rdmsr
+#undef wrmsr
+}
+
+char *
+intel686_cpu_name(model)
+	int model;
+{
+	extern int cpu_cache_edx;
+	char *ret = NULL;
+
+	switch (model) {
+	case 5:
+		switch (cpu_cache_edx & 0xFF) {
+		case 0x40:
+		case 0x41:
+			ret = "Celeron";
+			break;
+		/* 0x42 should not exist in this model. */
+		case 0x43:
+			ret = "Pentium II";
+			break;
+		case 0x44:
+		case 0x45:
+			ret = "Pentium II Xeon";
+			break;
+		}
+		break;
+	case 7:
+		switch (cpu_cache_edx & 0xFF) {
+		/* 0x40 - 0x42 should not exist in this model. */
+		case 0x43:
+			ret = "Pentium III";
+			break;
+		case 0x44:
+		case 0x45:
+			ret = "Pentium III Xeon";
+			break;
+		}
+		break;
+	}
+
+	return (ret);
+}
+
+void
 identifycpu()
 {
 	extern char cpu_vendor[];
 	extern int cpu_id;
 	extern int cpu_feature;
+#ifdef CPUDEBUG
+	extern int cpu_cache_eax, cpu_cache_ebx, cpu_cache_ecx, cpu_cache_edx;
+#else
+	extern int cpu_cache_edx;
+#endif
 	const char *name, *modifier, *vendorname, *token;
 	const char *cpu_device = "cpu0";
 	int class = CPUCLASS_386, vendor, i, max;
-	int family, model, step, modif;
+	int family, model, step, modif, cachesize;
 	struct cpu_cpuid_nameclass *cpup = NULL;
-	void (*cpu_setup) __P((const char *, int));
+	void (*cpu_setup) __P((const char *, int, int));
 
 	if (cpuid_level == -1) {
 #ifdef DIAGNOSTIC
 		if (cpu < 0 || cpu >=
 		    (sizeof i386_nocpuid_cpus/sizeof(struct cpu_nocpuid_nameclass)))
-			panic("unknown cpu type %d\n", cpu);
+			panic("unknown cpu type %d", cpu);
 #endif
 		name = i386_nocpuid_cpus[cpu].cpu_name;
 		vendor = i386_nocpuid_cpus[cpu].cpu_vendor;
@@ -815,6 +965,9 @@ identifycpu()
 #ifdef CPUDEBUG
 		printf("%s: family %x model %x step %x\n", cpu_device, family,
 			model, step);
+		printf("%s: cpuid level %d cache eax %x ebx %x ecx %x edx %x\n",
+			cpu_device, cpuid_level, cpu_cache_eax, cpu_cache_ebx,
+			cpu_cache_ecx, cpu_cache_edx);
 #endif
 
 		for (i = 0; i < max; i++) {
@@ -849,7 +1002,13 @@ identifycpu()
 			} else if (model > CPU_MAXMODEL)
 				model = CPU_DEFMODEL;
 			i = family - CPU_MINFAMILY;
-			name = cpup->cpu_family[i].cpu_models[model];
+
+			/* Special hack for the PentiumII/III series. */
+			if ((vendor == CPUVENDOR_INTEL) && (family == 6)
+				&& ((model == 5) || (model == 7))) {
+				name = intel686_cpu_name(model);
+			} else
+				name = cpup->cpu_family[i].cpu_models[model];
 			if (name == NULL)
 			    name = cpup->cpu_family[i].cpu_models[CPU_DEFMODEL];
 			class = cpup->cpu_family[i].cpu_class;
@@ -857,16 +1016,31 @@ identifycpu()
 		}
 	}
 
-	if (*token)
-		sprintf(cpu_model, "%s %s%s (\"%s\" %s-class)", vendorname,
-			modifier, name, token, classnames[class]);
-	else
-		sprintf(cpu_model, "%s %s%s (%s-class)", vendorname, modifier,
-			name, classnames[class]);
+	/* Find the amount of on-chip L2 cache.  Add support for AMD K6-3...*/
+	cachesize = -1;
+	if ((vendor == CPUVENDOR_INTEL) && (cpuid_level >= 2)) {
+		int intel_cachetable[] = { 0, 128, 256, 512, 1024, 2048 };
+		if ((cpu_cache_edx & 0xFF) >= 0x40
+		    && (cpu_cache_edx & 0xFF) <= 0x45) {
+			cachesize = intel_cachetable[(cpu_cache_edx & 0xFF) - 0x40];
+		}
+	}
+
+	if (cachesize > -1) {
+		sprintf(cpu_model, "%s %s%s (%s%s%s%s-class, %dKB L2 cache)",
+			vendorname, modifier, name,
+			((*token) ? "\"" : ""), ((*token) ? token : ""),
+			((*token) ? "\" " : ""), classnames[class], cachesize);
+	} else {
+		sprintf(cpu_model, "%s %s%s (%s%s%s%s-class)",
+			vendorname, modifier, name,
+			((*token) ? "\"" : ""), ((*token) ? token : ""),
+			((*token) ? "\" " : ""), classnames[class]);
+	}
 
 	/* configure the CPU if needed */
 	if (cpu_setup != NULL)
-		cpu_setup(cpu_device, model);
+		cpu_setup(cpu_device, model, step);
 
 	printf("%s: %s", cpu_device, cpu_model);
 
@@ -1065,6 +1239,10 @@ sendsig(catcher, sig, mask, code, type, val)
 	if (psp->ps_siginfo & sigmask(sig)) {
 		frame.sf_sip = &fp->sf_si;
 		initsiginfo(&frame.sf_si, sig, code, type, val);
+#ifdef VM86
+		if (sig == SIGURG)	/* VM86 userland trap */
+			frame.sf_si.si_trapno = code;
+#endif
 	}
 
 	/* XXX don't copyout siginfo if not needed? */
@@ -1225,6 +1403,8 @@ haltsys:
 	if (howto & RB_HALT) {
 #if NAPM > 0
 		if (howto & RB_POWERDOWN) {
+			int rv;
+
 			printf("\nAttempting to power down...\n");
 			/*
 			 * Turn off, if we can.  But try to turn disk off and
@@ -1235,8 +1415,8 @@ haltsys:
 			 * try to turn the system off.
 		 	 */
 			delay(500000);
-			if (apm_set_powstate(APM_DEV_DISK(0xff),
-					     APM_SYS_OFF) == 0) {
+			rv = apm_set_powstate(APM_DEV_DISK(0xff), APM_SYS_OFF);
+			if (rv == 0 || rv == ENXIO) {
 				delay(500000);
 				(void) apm_set_powstate(APM_DEV_ALLDEVS,
 							APM_SYS_OFF);
@@ -1573,7 +1753,11 @@ fix_f00f()
 	void *p;
 
 	/* Allocate two new pages */
+#if defined(UVM)
+	va = uvm_km_zalloc(kernel_map, NBPG*2);
+#else
 	va = kmem_alloc(kernel_map, NBPG*2);
+#endif
 	p = (void *)(va + NBPG - 7*sizeof(*idt));
 
 	/* Copy over old IDT */
@@ -1701,7 +1885,7 @@ init386(first_avail)
 #if !defined(MACHINE_NEW_NONCONTIG)
 	avail_next =
 #endif
-	avail_start = bootapiver >= 2 ? NBPG + i386_round_page(bootargc) : NBPG;
+	avail_start = bootapiver >= 2? i386_round_page(bootargv+bootargc): NBPG;
 	avail_end = extmem ? IOM_END + extmem * 1024
 		: cnvmem * 1024;	/* just temporary use */
 
@@ -1934,6 +2118,9 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	extern char cpu_vendor[];
 	extern int cpu_id;
 	extern int cpu_feature;
+#if NAPM > 0
+	extern int cpu_apmwarn;
+#endif
 	dev_t dev;
 
 	switch (name[0]) {
@@ -1978,6 +2165,10 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_rdint(oldp, oldlenp, newp, cpu_id));
 	case CPU_CPUFEATURE:
 		return (sysctl_rdint(oldp, oldlenp, newp, cpu_feature));
+#if NAPM > 0
+	case CPU_APMWARN:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &cpu_apmwarn));
+#endif
 	default:
 		return EOPNOTSUPP;
 	}
@@ -2136,7 +2327,11 @@ bus_mem_add_mapping(bpa, size, cacheable, bshp)
 		panic("bus_mem_add_mapping: overflow");
 #endif
 
+#if defined(UVM)
+	va = uvm_km_valloc(kernel_map, endpa - pa);
+#else
 	va = kmem_alloc_pageable(kernel_map, endpa - pa);
+#endif
 	if (va == 0)
 		return (ENOMEM);
 
@@ -2188,7 +2383,11 @@ bus_space_unmap(t, bsh, size)
 		/*
 		 * Free the kernel virtual mapping.
 		 */
+#if defined(UVM)
+		uvm_km_free(kernel_map, va, endva - va);
+#else
 		kmem_free(kernel_map, va, endva - va);
+#endif
 		break;
 
 	default:
@@ -2505,7 +2704,11 @@ _bus_dmamem_free(t, segs, nsegs)
 		}
 	}
 
+#if defined(UVM)
+	uvm_pglistfree(&mlist);
+#else
 	vm_page_free_memory(&mlist);
+#endif
 }
 
 /*
@@ -2526,7 +2729,11 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	int curseg;
 
 	size = round_page(size);
+#if defined(UVM)
+	va = uvm_km_valloc(kmem_map, size);
+#else
 	va = kmem_alloc_pageable(kmem_map, size);
+#endif
 	if (va == 0)
 		return (ENOMEM);
 
@@ -2569,7 +2776,11 @@ _bus_dmamem_unmap(t, kva, size)
 #endif
 
 	size = round_page(size);
+#if defined(UVM)
+	uvm_km_free(kmem_map, (vm_offset_t)kva, size);
+#else
 	kmem_free(kmem_map, (vm_offset_t)kva, size);
+#endif
 }
 
 /*
@@ -2638,8 +2849,13 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	 * Allocate pages from the VM system.
 	 */
 	TAILQ_INIT(&mlist);
+#if defined(UVM)
+	error = uvm_pglistalloc(size, low, high,
+	    alignment, boundary, &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+#else
 	error = vm_page_alloc_memory(size, low, high,
 	    alignment, boundary, &mlist, nsegs, (flags & BUS_DMA_NOWAIT) == 0);
+#endif
 	if (error)
 		return (error);
 

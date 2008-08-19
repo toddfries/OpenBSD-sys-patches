@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_pcmcia.c,v 1.2 1998/10/14 07:34:43 fgsch Exp $	*/
+/*	$OpenBSD: if_ne_pcmcia.c,v 1.8 1999/03/26 06:34:28 fgsch Exp $	*/
 /*	$NetBSD: if_ne_pcmcia.c,v 1.17 1998/08/15 19:00:04 thorpej Exp $	*/
 
 /*
@@ -59,6 +59,9 @@
 #include <dev/ic/ne2000reg.h>
 #include <dev/ic/ne2000var.h>
 
+#include <dev/ic/rtl80x9reg.h>
+#include <dev/ic/rtl80x9var.h>
+
 int ne_pcmcia_match __P((struct device *, void *, void *));
 void ne_pcmcia_attach __P((struct device *, struct device *, void *));
 
@@ -104,11 +107,6 @@ struct ne2000dev {
       PCMCIA_CIS_PLANET_SMARTCOM2000,
       0, 0xff0, { 0x00, 0x00, 0xe8 } },
 
-    { PCMCIA_STR_DLINK_DE650,
-      PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
-      PCMCIA_CIS_DLINK_DE650,
-      0, 0x0040, { 0x00, 0x80, 0xc8 } },
-
     { PCMCIA_STR_DLINK_DE660,
       PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
       PCMCIA_CIS_DLINK_DE660,
@@ -123,6 +121,16 @@ struct ne2000dev {
       PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
       PCMCIA_CIS_ACCTON_EN2212,
       0, 0x0ff0, { 0x00, 0x00, 0xe8 } },
+
+    { PCMCIA_STR_SVEC_COMBOCARD,
+      PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
+      PCMCIA_CIS_SVEC_COMBOCARD,
+      0, -1, { 0x00, 0xe0, 0x98 } },
+
+    { PCMCIA_STR_SVEC_LANCARD,
+      PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
+      PCMCIA_CIS_SVEC_LANCARD,
+      0, 0x7f0, { 0x00, 0xc0, 0x6c } },
 
     /*
      * You have to add new entries which contains
@@ -140,9 +148,9 @@ struct ne2000dev {
       PCMCIA_CIS_IBM_INFOMOVER,
       0, 0x0ff0, { 0x08, 0x00, 0x5a } },
 
-    { PCMCIA_STR_LINKSYS_ECARD_1, 
+    { PCMCIA_STR_LINKSYS_ECARD_1,
       PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_ECARD_1,
-      PCMCIA_CIS_LINKSYS_ECARD_1, 
+      PCMCIA_CIS_LINKSYS_ECARD_1,
       0, -1, { 0x00, 0x80, 0xc8 } },
 
     { PCMCIA_STR_LINKSYS_COMBO_ECARD, 
@@ -164,6 +172,24 @@ struct ne2000dev {
       PCMCIA_CIS_LINKSYS_ECARD_2,
       0, -1, { 0x00, 0x80, 0xc8 } },
 
+    /*
+     * D-Link DE-650 has many minor versions:
+     *
+     *   CIS information          Manufacturer Product  Note
+     * 1 "D-Link, DE-650"             INVALID  INVALID  white card
+     * 2 "D-Link, DE-650, Ver 01.00"  INVALID  INVALID  became bare metal
+     * 3 "D-Link, DE-650, Ver 01.00"   0x149    0x265   minor change in look
+     * 4 "D-Link, DE-650, Ver 01.00"   0x149    0x265   collision LED added
+     *
+     * While the 1st and the 2nd types should use the "D-Link DE-650" entry,
+     * the 3rd and the 4th types should use the "Linksys EtherCard" entry.
+     * Therefore, this enty must be below the LINKSYS_ECARD_1.  --itohy
+     */
+    { PCMCIA_STR_DLINK_DE650,
+      PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
+      PCMCIA_CIS_DLINK_DE650,
+      0, 0x0040, { 0x00, 0x80, 0xc8 } },
+
     { PCMCIA_STR_IODATA_PCLAT,
       PCMCIA_VENDOR_IODATA, PCMCIA_PRODUCT_IODATA_PCLAT,
       PCMCIA_CIS_IODATA_PCLAT,
@@ -179,6 +205,26 @@ struct ne2000dev {
       PCMCIA_VENDOR_DAYNA, PCMCIA_PRODUCT_DAYNA_COMMUNICARD_E_2,
       PCMCIA_CIS_DAYNA_COMMUNICARD_E_2,
       0, -1, { 0x00, 0x80, 0x19 } },
+
+    { PCMCIA_STR_COREGA_PCC_2,
+      PCMCIA_VENDOR_COREGA, PCMCIA_PRODUCT_COREGA_PCC_2,
+      PCMCIA_CIS_COREGA_PCC_2,
+      0, -1, { 0x00, 0x00, 0xf4 } },
+
+    { PCMCIA_STR_COMPEX_LINKPORT_ENET_B,
+      PCMCIA_VENDOR_COMPEX, PCMCIA_PRODUCT_COMPEX_LINKPORT_ENET_B,
+      PCMCIA_CIS_COMPEX_LINKPORT_ENET_B,
+      0, 0xd400, { 0x01, 0x03, 0xdc } },
+
+    { PCMCIA_STR_KINGSTON_KNE_PC2,
+      PCMCIA_VENDOR_KINGSTON, PCMCIA_PRODUCT_KINGSTON_KNE_PC2,
+      PCMCIA_CIS_KINGSTON_KNE_PC2,
+      0, 0x0180, { 0x00, 0xc0, 0xf0 } },
+
+    { PCMCIA_STR_LINKSYS_FAST_ECARD,
+      PCMCIA_VENDOR_LINKSYS, PCMCIA_PRODUCT_LINKSYS_FAST_ECARD,
+      PCMCIA_CIS_LINKSYS_FAST_ECARD,
+      0, -1, { 0x00, 0x80, 0xc8} },
 #if 0
     /* the rest of these are stolen from the linux pcnet pcmcia device
        driver.  Since I don't know the manfid or cis info strings for
@@ -240,9 +286,6 @@ struct ne2000dev {
     { "Kingston KNE-PCM/x",
       0x0000, 0x0000, NULL, NULL, 0,
       0x0ff0, { 0xe2, 0x0c, 0x0f } },
-    { "Kingston KNE-PC2",
-      0x0000, 0x0000, NULL, NULL, 0,
-      0x0180, { 0x00, 0xc0, 0xf0 } },
     { "Longshine LCS-8534",
       0x0000, 0x0000, NULL, NULL, 0,
       0x0000, { 0x08, 0x00, 0x00 } },
@@ -316,7 +359,15 @@ ne_pcmcia_attach(parent, self, aux)
 	struct pcmcia_mem_handle pcmh;
 	bus_addr_t offset;
 	int i, j, mwindow;
-	u_int8_t myea[6], *enaddr = NULL;
+	u_int8_t *enaddr = NULL;
+	void (*npp_init_media) __P((struct dp8390_softc *, int **,
+	    int *, int *));
+	int *media, nmedia, defmedia;
+	const char *typestr = "";
+
+	npp_init_media = NULL;
+	media = NULL;
+	nmedia = defmedia = 0;
 
 	psc->sc_pf = pa->pf;
 	cfe = pa->pf->cfe_head.sqh_first;
@@ -428,11 +479,12 @@ ne_pcmcia_attach(parent, self, aux)
 					return;
 				}
 				for (j = 0; j < ETHER_ADDR_LEN; j++)
-					myea[j] = bus_space_read_1(pcmh.memt,
+					dsc->sc_arpcom.ac_enaddr[j] =
+					    bus_space_read_1(pcmh.memt,
 					    pcmh.memh, offset + (j * 2));
 				pcmcia_mem_unmap(pa->pf, mwindow);
 				pcmcia_mem_free(pa->pf, &pcmh);
-				enaddr = myea;
+				enaddr = dsc->sc_arpcom.ac_enaddr;
 			}
 			break;
 		}
@@ -457,9 +509,30 @@ ne_pcmcia_attach(parent, self, aux)
 		}
 	}
 
-	printf("%s: %s Ethernet\n", dsc->sc_dev.dv_xname, ne_dev->name);
+	/*
+	 * Check for a RealTek 8019.
+	 */
+	bus_space_write_1(dsc->sc_regt, dsc->sc_regh, ED_P0_CR,
+	    ED_CR_PAGE_0 | ED_CR_STP);
+	if (bus_space_read_1(dsc->sc_regt, dsc->sc_regh, NERTL_RTL0_8019ID0)
+		== RTL0_8019ID0 &&
+	    bus_space_read_1(dsc->sc_regt, dsc->sc_regh, NERTL_RTL0_8019ID1)
+		== RTL0_8019ID1) {
+		typestr = " (RTL8019)";
+		npp_init_media = rtl80x9_init_media;
+		dsc->sc_mediachange = rtl80x9_mediachange;
+		dsc->sc_mediastatus = rtl80x9_mediastatus;
+		dsc->init_card = rtl80x9_init_card;
+	}
 
-	ne2000_attach(nsc, enaddr);
+	printf("%s: %s%s Ethernet\n", dsc->sc_dev.dv_xname, ne_dev->name,
+	    typestr);
+
+	/* Initialize media, if we have it. */
+	if (npp_init_media != NULL)
+		(*npp_init_media)(dsc, &media, &nmedia, &defmedia);
+
+	ne2000_attach(nsc, enaddr, media, nmedia, defmedia);
 
 #if 0
 	pcmcia_function_disable(pa->pf);

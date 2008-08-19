@@ -1,4 +1,4 @@
-#	$OpenBSD: OPRAH,v 1.21 1998/07/11 15:31:25 todd Exp $
+#	$OpenBSD: OPRAH,v 1.24 1999/02/04 23:16:06 niklas Exp $
 #
 #	OPRAH -- Niklas Hallqvist's test machine
 #
@@ -84,8 +84,11 @@ isadma0	at isa?
 
 vt0	at isa? port 0x60 irq 1
 
-com0	at isa? port 0x3f8 irq 4	# standard PC serial ports
-com1	at isa? port 0x2f8 irq 3
+pcppi0	at isa?
+sysbeep0	at pcppi?
+
+pccom0	at isa? port 0x3f8 irq 4	# standard PC serial ports
+pccom1	at isa? port 0x2f8 irq 3
 
 lpt0	at isa? port 0x378 irq 7	# standard PC parallel ports
 
@@ -121,8 +124,6 @@ acd*	at atapibus? drive ?
 
 ed0	at isa? port 0x320 iomem 0xd0000 irq 5
 
-#spkr0	at isa? ...
-
 pseudo-device	loop	1		# network loopback
 pseudo-device	bpfilter 8		# packet filter
 #pseudo-device	sl	2		# CSLIP
@@ -131,5 +132,6 @@ pseudo-device	tun	2		# network tunneling over tty
 
 pseudo-device	pty	64		# pseudo-terminals
 #pseudo-device	tb	1		# tablet line discipline
-pseudo-device	vnd	4		# paging to files
+pseudo-device	vnd	4		# vnode disk
+pseudo-device	ccd	4		# concatenated disk
 pseudo-device	enc

@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.32 1998/09/16 06:21:08 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.37 1999/03/01 04:41:38 deraadt Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -48,6 +48,7 @@
 #include <sys/errno.h>
 #include <sys/exec.h>
 #include <sys/kernel.h>
+#include <sys/kthread.h>
 #include <sys/mount.h>
 #include <sys/map.h>
 #include <sys/proc.h>
@@ -88,6 +89,10 @@
 #include <vm/vm.h>
 #include <vm/vm_pageout.h>
 
+#if defined(UVM)
+#include <uvm/uvm.h>
+#endif
+
 #include <net/if.h>
 #include <net/raw_cb.h>
 
@@ -100,9 +105,9 @@ extern void nfs_init __P((void));
 #endif
 
 char	copyright[] =
-"Copyright (c) 1982, 1986, 1989, 1991, 1993\n\tThe Regents of the University of California.  All rights reserved.\n";
-char	copyright_openbsd[] =
-"Copyright (c) 1995-1998 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n\n";
+"Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
+"\tThe Regents of the University of California.  All rights reserved.\n"
+"Copyright (c) 1995-1999 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -126,9 +131,9 @@ struct	timeval runtime;
 /* XXX return int so gcc -Werror won't complain */
 int	main __P((void *));
 void	check_console __P((struct proc *));
-void	start_init __P((struct proc *));
-void	start_pagedaemon __P((struct proc *));
-void	start_update __P((struct proc *));
+void	start_init __P((void *));
+void	start_pagedaemon __P((void *));
+void	start_update __P((void *));
 
 #ifdef cpu_set_init_frame
 void *initframep;				/* XXX should go away */
@@ -195,13 +200,17 @@ main(framep)
 	config_init();		/* init autoconfiguration data structures */
 	consinit();
 	printf(copyright);
-	printf(copyright_openbsd);
+	printf("\n");
 
+#if defined(UVM)
+	uvm_init();
+#else
 	vm_mem_init();
 	kmeminit();
 #if defined(MACHINE_NEW_NONCONTIG)
 	vm_page_physrehash();
 #endif
+#endif /* UVM */
 	disk_init();		/* must come before autoconfiguration */
 	tty_init();		/* initialise tty's */
 	cpu_startup();
@@ -224,7 +233,7 @@ main(framep)
 	session0.s_count = 1;
 	session0.s_leader = p;
 
-	p->p_flag = P_INMEM | P_SYSTEM;
+	p->p_flag = P_INMEM | P_SYSTEM | P_NOCLDWAIT;
 	p->p_stat = SRUN;
 	p->p_nice = NZERO;
 	p->p_emul = &emul_native;
@@ -253,19 +262,30 @@ main(framep)
 	limit0.pl_rlimit[RLIMIT_NOFILE].rlim_max = MIN(NOFILE_MAX,
 	    (maxfiles - NOFILE > NOFILE) ?  maxfiles - NOFILE : NOFILE);
 	limit0.pl_rlimit[RLIMIT_NPROC].rlim_cur = MAXUPRC;
+#if defined(UVM)
+	i = ptoa(uvmexp.free);
+#else
 	i = ptoa(cnt.v_free_count);
+#endif /* UVM */
 	limit0.pl_rlimit[RLIMIT_RSS].rlim_max = i;
 	limit0.pl_rlimit[RLIMIT_MEMLOCK].rlim_max = i;
 	limit0.pl_rlimit[RLIMIT_MEMLOCK].rlim_cur = i / 3;
 	limit0.p_refcnt = 1;
 
 	/* Allocate a prototype map so we have something to fork. */
+#if defined(UVM)
+	uvmspace_init(&vmspace0, pmap_kernel(), round_page(VM_MIN_ADDRESS),
+	    trunc_page(VM_MAX_ADDRESS), TRUE);
+	p->p_vmspace = &vmspace0;
+#else
 	p->p_vmspace = &vmspace0;
 	vmspace0.vm_refcnt = 1;
 	pmap_pinit(&vmspace0.vm_pmap);
 	vm_map_init(&p->p_vmspace->vm_map, round_page(VM_MIN_ADDRESS),
 	    trunc_page(VM_MAX_ADDRESS), TRUE);
 	vmspace0.vm_map.pmap = &vmspace0.vm_pmap;
+#endif /* UVM */
+
 	p->p_addr = proc0paddr;				/* XXX */
 
 	/*
@@ -283,7 +303,11 @@ main(framep)
 	rqinit();
 
 	/* Configure virtual memory system, set vm rlimits. */
+#if defined(UVM)
+	uvm_init_limits(p);
+#else
 	vm_init_limits(p);
+#endif
 
 	/* Initialize the file systems. */
 #if defined(NFSSERVER) || defined(NFSCLIENT)
@@ -363,7 +387,11 @@ main(framep)
 	VREF(filedesc0.fd_fd.fd_cdir);
 	VOP_UNLOCK(rootvnode, 0, p);
 	filedesc0.fd_fd.fd_rdir = NULL;
+#if defined(UVM)
+	uvm_swap_init();
+#else
 	swapinit();
+#endif
 
 	/*
 	 * Now can look at time, having had a chance to verify the time
@@ -377,7 +405,7 @@ main(framep)
 	siginit(p);
 
 	/* Create process 1 (init(8)). */
-	if (sys_fork(p, NULL, rval))
+	if (fork1(p, ISFORK, 0, rval))
 		panic("fork init");
 #ifdef cpu_set_init_frame			/* XXX should go away */
 	if (rval[1]) {
@@ -386,46 +414,36 @@ main(framep)
 		 */
 		initframep = framep;
 		start_init(curproc);
-		return 0;
+		return (0);
 	}
 #else
-	cpu_set_kpc(pfind(1), start_init);
+	cpu_set_kpc(pfind(rval[0]), start_init, pfind(rval[0]));
 #endif
 
-	/* Create process 2 (the pageout daemon). */
-	if (sys_fork(p, NULL, rval))
+	/* Create process 2, the pageout daemon kernel thread. */
+	if (kthread_create(start_pagedaemon, NULL, NULL, "pagedaemon"))
 		panic("fork pager");
-#ifdef cpu_set_init_frame			/* XXX should go away */
-	if (rval[1]) {
-		/*
-		 * Now in process 2.
-		 */
-		start_pagedaemon(curproc);
-	}
-#else
-	cpu_set_kpc(pfind(2), start_pagedaemon);
-#endif
 
-	/* Create process 3 (the update daemon). */
-	if (sys_fork(p, NULL, rval))
+	/* Create process 3, the update daemon kernel thread. */
+	if (kthread_create(start_update, NULL, NULL, "update")) {
+#ifdef DIAGNOSTIC
 		panic("fork update");
-#ifdef cpu_set_init_frame			/* XXX should go away */
-	if (rval[1]) {
-		/*
-		 * Now in process 3.
-		 */
-		start_update(curproc);
-	}
-#else
-	cpu_set_kpc(pfind(3), start_update);
 #endif
+	}
+
+	/* Create any other deferred kernel threads. */
+	kthread_run_deferred_queue();
 
 	microtime(&rtv);
 	srandom((u_long)(rtv.tv_sec ^ rtv.tv_usec));
 
 	randompid = 1;
 	/* The scheduler is an infinite loop. */
+#if defined(UVM)
+	uvm_scheduler();
+#else
 	scheduler();
+#endif
 	/* NOTREACHED */
 }
 
@@ -462,9 +480,10 @@ check_console(p)
  * The program is invoked with one argument containing the boot flags.
  */
 void
-start_init(p)
-	struct proc *p;
+start_init(arg)
+	void *arg;
 {
+	struct proc *p = arg;
 	vm_offset_t addr;
 	struct sys_execve_args /* {
 		syscallarg(char *) path;
@@ -498,9 +517,19 @@ start_init(p)
 	 * Need just enough stack to hold the faked-up "execve()" arguments.
 	 */
 	addr = USRSTACK - PAGE_SIZE;
+#if defined(UVM)
+	if (uvm_map(&p->p_vmspace->vm_map, &addr, PAGE_SIZE, 
+                    NULL, UVM_UNKNOWN_OFFSET, 
+                    UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL, UVM_INH_COPY,
+		    UVM_ADV_NORMAL,
+                    UVM_FLAG_FIXED|UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW))
+		!= KERN_SUCCESS)
+		panic("init: couldn't allocate argument space");
+#else
 	if (vm_allocate(&p->p_vmspace->vm_map, &addr, (vm_size_t)PAGE_SIZE,
 	    FALSE) != 0)
 		panic("init: couldn't allocate argument space");
+#endif
 	p->p_vmspace->vm_maxsaddr = (caddr_t)addr;
 
 	for (pathp = &initpaths[0]; (path = *pathp) != NULL; pathp++) {
@@ -577,29 +606,21 @@ start_init(p)
 }
 
 void
-start_pagedaemon(p)
-	struct proc *p;
+start_pagedaemon(arg)
+	void *arg;
 {
-
-	/*
-	 * Now in process 2.
-	 */
-	p->p_flag |= P_INMEM | P_SYSTEM;	/* XXX */
-	bcopy("pagedaemon", curproc->p_comm, sizeof ("pagedaemon"));
+#if defined(UVM)
+	uvm_pageout();
+#else
 	vm_pageout();
+#endif
 	/* NOTREACHED */
 }
 
 void
-start_update(p)
-	struct proc *p;
+start_update(arg)
+	void *arg;
 {
-
-	/*
-	 * Now in process 3.
-	 */
-	p->p_flag |= P_INMEM | P_SYSTEM;	/* XXX */
-	bcopy("update", curproc->p_comm, sizeof ("update"));
-	sched_sync(p);
+	sched_sync(curproc);
 	/* NOTREACHED */
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.18 1998/07/05 20:49:12 downsj Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.20 1999/02/10 08:01:52 deraadt Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*
@@ -391,12 +391,18 @@ linux_sys_uname(p, v, retval)
 	int len;
 	char *cp;
 
-	strncpy(luts.l_sysname, ostype, sizeof(luts.l_sysname));
-	strncpy(luts.l_nodename, hostname, sizeof(luts.l_nodename));
-	strncpy(luts.l_release, osrelease, sizeof(luts.l_release));
-	strncpy(luts.l_version, version, sizeof(luts.l_version));
-	strncpy(luts.l_machine, machine, sizeof(luts.l_machine));
-	strncpy(luts.l_domainname, domainname, sizeof(luts.l_domainname));
+	strncpy(luts.l_sysname, ostype, sizeof(luts.l_sysname) - 1);
+	luts.l_sysname[sizeof(luts.l_sysname) - 1] = '\0';
+	strncpy(luts.l_nodename, hostname, sizeof(luts.l_nodename) - 1);
+	luts.l_nodename[sizeof(luts.l_nodename) - 1] = '\0';
+	strncpy(luts.l_release, osrelease, sizeof(luts.l_release) - 1);
+	luts.l_release[sizeof(luts.l_release) - 1] = '\0';
+	strncpy(luts.l_version, version, sizeof(luts.l_version) - 1);
+	luts.l_version[sizeof(luts.l_version) - 1] = '\0';
+	strncpy(luts.l_machine, machine, sizeof(luts.l_machine) - 1);
+	luts.l_machine[sizeof(luts.l_machine) - 1] = '\0';
+	strncpy(luts.l_domainname, domainname, sizeof(luts.l_domainname) - 1);
+	luts.l_domainname[sizeof(luts.l_domainname) - 1] = '\0';
 
 	/* This part taken from the the uname() in libc */
 	len = sizeof(luts.l_version);
@@ -611,16 +617,30 @@ linux_sys_pipe(p, v, retval)
 		syscallarg(int *) pfds;
 	} */ *uap = v;
 	int error;
+#ifdef __i386__
+	int reg_edx = retval[1];
+#endif /* __i386__ */
 
-	if ((error = sys_pipe(p, 0, retval)))
+	if ((error = sys_pipe(p, 0, retval))) {
+#ifdef __i386__
+		retval[1] = reg_edx;
+#endif /* __i386__ */
 		return error;
+	}
 
 	/* Assumes register_t is an int */
 
-	if ((error = copyout(retval, SCARG(uap, pfds), 2 * sizeof (int))))
+	if ((error = copyout(retval, SCARG(uap, pfds), 2 * sizeof (int)))) {
+#ifdef __i386__
+		retval[1] = reg_edx;
+#endif /* __i386__ */
 		return error;
+	}
 
 	retval[0] = 0;
+#ifdef __i386__
+	retval[1] = reg_edx;
+#endif /* __i386__ */
 	return 0;
 }
 
@@ -853,7 +873,7 @@ again:
 		bdp = (struct dirent *)inp;
 		reclen = bdp->d_reclen;
 		if (reclen & 3)
-			panic("linux_readdir");
+			panic("linux_readdir: bad reclen");
 		if (bdp->d_fileno == 0) {
 			inp += reclen;	/* it is a hole; squish it out */
 			off = *cookie++;
@@ -863,15 +883,16 @@ again:
 		if (reclen > len || resid < linux_reclen) {
 			/* entry too big for buffer, so just stop */
 			outp++;
-			off = *cookie++;
 			break;
 		}
+
 		/*
 		 * Massage in place to make a Linux-shaped dirent (otherwise
 		 * we have to worry about touching user memory outside of
 		 * the copyout() call).
 		 */
 		idb.d_ino = (linux_ino_t)bdp->d_fileno;
+
 		/*
 		 * The old readdir() call misuses the offset and reclen fields.
 		 */
@@ -882,7 +903,8 @@ again:
 			idb.d_off = (linux_off_t)off;
 			idb.d_reclen = (u_short)linux_reclen;
 		}
-		strcpy(idb.d_name, bdp->d_name);
+		strncpy(idb.d_name, bdp->d_name, sizeof(idb.d_name) - 1);
+		idb.d_name[sizeof(idb.d_name) - 1] = '\0';
 		if ((error = copyout((caddr_t)&idb, outp, linux_reclen)))
 			goto out;
 		/* advance past this real entry */

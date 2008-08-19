@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.20 1998/07/15 23:12:55 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.23 1999/02/28 06:25:30 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -45,8 +45,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	199806		/* OpenBSD version (year & month). */
-#define OpenBSD2_3 1		/* OpenBSD 2.3 */
+#define OpenBSD	199905		/* OpenBSD version (year & month). */
+#define OpenBSD2_5 1		/* OpenBSD 2.5 */
 
 #ifndef NULL
 #define	NULL	0
@@ -234,7 +234,7 @@
 #define RFNOTEG		(1<<3)	/* UNIMPL create new plan9 `note group' */
 #define RFPROC		(1<<4)	/* change child (else changes curproc) */
 #define RFMEM		(1<<5)	/* share `address space' */
-#define RFNOWAIT	(1<<6)	/* UNIMPL parent need not wait() on child */ 
+#define RFNOWAIT	(1<<6)	/* parent need not wait() on child */ 
 #define RFCNAMEG	(1<<10) /* UNIMPL zero plan9 `name space' */
 #define RFCENVG		(1<<11) /* UNIMPL zero plan9 `env space' */
 #define RFCFDG		(1<<12)	/* zero fd table */

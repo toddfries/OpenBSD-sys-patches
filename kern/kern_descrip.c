@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.15 1998/03/01 19:34:12 deraadt Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.17 1999/02/26 05:10:40 art Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -377,8 +377,15 @@ fdrelease(p, fd)
 	if (fp == NULL)
 		return (EBADF);
 	pf = &fdp->fd_ofileflags[fd];
+#if defined(UVM)
+	if (*pf & UF_MAPPED) {
+		/* XXX: USELESS? XXXCDC check it */
+		p->p_fd->fd_ofileflags[fd] &= ~UF_MAPPED;
+	}
+#else
 	if (*pf & UF_MAPPED)
 		(void) munmapfd(p, fd);
+#endif
 	*fpp = NULL;
 	*pf = 0;
 	fd_unused(fdp, fd);
@@ -589,7 +596,7 @@ fdavail(p, n)
 	if ((i = lim - fdp->fd_nfiles) > 0 && (n -= i) <= 0)
 		return (1);
 	fpp = &fdp->fd_ofiles[fdp->fd_freefile];
-	for (i = fdp->fd_nfiles - fdp->fd_freefile; --i >= 0; fpp++)
+	for (i = min(lim, fdp->fd_nfiles) - fdp->fd_freefile; --i >= 0; fpp++)
 		if (*fpp == NULL && --n <= 0)
 			return (1);
 	return (0);

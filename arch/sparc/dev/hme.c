@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.12 1998/10/02 17:42:24 jason Exp $	*/
+/*	$OpenBSD: hme.c,v 1.18 1999/02/23 23:44:48 jason Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -36,7 +36,7 @@
  * Based on information gleaned from reading the
  *	S/Linux driver by David Miller
  *
- * Thanks go to the Univeristy of North Carolina at Greensboro Systems
+ * Thanks go to the University of North Carolina at Greensboro, Systems
  * and Networks Department for some of the resources used to develop
  * this driver.
  */
@@ -143,9 +143,12 @@ hmematch(parent, vcf, aux)
 	register struct romaux *ra = &ca->ca_ra;
 
 	if (strcmp(cf->cf_driver->cd_name, ra->ra_name) &&
-	    strcmp("SUNW,hme", ra->ra_name)) {
+	    strcmp("SUNW,hme", ra->ra_name) &&
+	    strcmp("SUNW,qfe", ra->ra_name)) {
 		return (0);
 	}
+	if (!sbus_testdma((struct sbus_softc *)parent, ca))
+		return(0);
 	return (1);
 }
 
@@ -194,7 +197,12 @@ hmeattach(parent, self, aux)
 	else if (sc->sc_rev != 0xa0)
 		sc->sc_flags = HME_FLAG_NOT_A0;
 
-	sc->sc_burst = ((struct sbus_softc *)parent)->sc_burst;
+	sc->sc_burst = getpropint(ca->ca_ra.ra_node, "burst-sizes", -1);
+	if (sc->sc_burst == -1)
+		sc->sc_burst = ((struct sbus_softc *)parent)->sc_burst;
+
+        /* Clamp at parent's burst sizes */
+	sc->sc_burst &= ((struct sbus_softc *)parent)->sc_burst;
 
 	hme_meminit(sc);
 
@@ -409,7 +417,6 @@ hmeioctl(ifp, cmd, data)
 		break;
 
 	case SIOCSIFFLAGS:
-		sc->sc_promisc = ifp->if_flags & IFF_PROMISC;
 		if ((ifp->if_flags & IFF_UP) == 0 &&
 		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
@@ -546,11 +553,6 @@ hmeinit(sc)
 	cr->ipkt_gap1 = HME_DEFAULT_IPKT_GAP1;
 	cr->ipkt_gap2 = HME_DEFAULT_IPKT_GAP2;
 
-	cr->htable3 = 0;
-	cr->htable2 = 0;
-	cr->htable1 = 0;
-	cr->htable0 = 0;
-
 	rxr->rx_ring = (u_int32_t)&sc->sc_desc_dva->hme_rxd[0];
 	txr->tx_ring = (u_int32_t)&sc->sc_desc_dva->hme_txd[0];
 
@@ -588,7 +590,8 @@ hmeinit(sc)
 	if (c != rxr->cfg)	/* the receiver sometimes misses bits */
 	    printf("%s: setting rxreg->cfg failed.\n", sc->sc_dev.dv_xname);
 
-	cr->rx_cfg = CR_RXCFG_HENABLE;
+	cr->rx_cfg = 0;
+	hme_mcreset(sc);
 	DELAY(10);
 
 	cr->tx_cfg |= CR_TXCFG_DGIVEUP;
@@ -765,68 +768,9 @@ hme_eint(sc, why)
 	struct hme_softc *sc;
 	u_int32_t why;
 {
-	if (why &  GR_STAT_RFIFOVF) {	/* probably dma error */
-		printf("%s: receive fifo overflow\n", sc->sc_dev.dv_xname);
-		hmereset(sc);
-	}
-
-	if (why & GR_STAT_STSTERR) {
-		printf("%s: SQE test failed: resetting\n", sc->sc_dev.dv_xname);
-		hmereset(sc);
-	}
-
-	if (why & GR_STAT_TFIFO_UND) {	/* probably dma error */
-		printf("%s: tx fifo underrun\n", sc->sc_dev.dv_xname);
-		hmereset(sc);
-	}
-
-	if (why & GR_STAT_MAXPKTERR) {	/* driver bug */
-		printf("%s: tx max packet size error\n", sc->sc_dev.dv_xname);
-		hmereset(sc);
-	}
-
-	if (why & GR_STAT_NORXD) {	/* driver bug */
-		printf("%s: out of receive descriptors\n", sc->sc_dev.dv_xname);
-		hmereset(sc);
-	}
-
-	if (why & GR_STAT_EOPERR) {
-		printf("%s: eop not set in tx descriptor\n",
-		    sc->sc_dev.dv_xname);
-		hmereset(sc);
-	}
-
-	if (why & (GR_STAT_RXERR | GR_STAT_RXPERR | GR_STAT_RXTERR)) {
-		printf("%s: rx dma error < ", sc->sc_dev.dv_xname);
-		if (why & GR_STAT_RXERR)
-			printf("Generic ");
-		if (why & GR_STAT_RXPERR);
-			printf("Parity ");
-		if (why & GR_STAT_RXTERR)
-			printf("RxTag ");
-		printf(" >\n");
-		hmereset(sc);
-	}
-
-	if (why &
-	    (GR_STAT_TXEACK|GR_STAT_TXLERR|GR_STAT_TXPERR|GR_STAT_TXTERR)) {
-		printf("%s: rx dma error < ", sc->sc_dev.dv_xname);
-		if (why & GR_STAT_TXEACK)
-			printf("Generic ");
-		if (why & GR_STAT_TXLERR);
-			printf("Late ");
-		if (why & GR_STAT_TXPERR)
-			printf("Parity ");
-		if (why & GR_STAT_TXTERR);
-			printf("TxTag ");
-		printf(" >\n");
-		hmereset(sc);
-	}
-
-	if (why & (GR_STAT_SLVERR | GR_STAT_SLVPERR)) {
-		printf("%s: sbus %s error accessing registers\n",
-			sc->sc_dev.dv_xname,
-			(why & GR_STAT_SLVPERR) ? "parity" : "generic");
+	if (why & GR_STAT_ALL_ERRORS) {
+		printf("%s: stat=%b, resetting.\n", sc->sc_dev.dv_xname,
+		    why, GR_STAT_BITS);
 		hmereset(sc);
 	}
 
@@ -991,16 +935,19 @@ hme_mcreset(sc)
 	struct ether_multi *enm;
 	struct ether_multistep step;
 
+	if (ifp->if_flags & IFF_PROMISC) {
+		cr->rx_cfg |= CR_RXCFG_PMISC;
+		return;
+	}
+	else
+		cr->rx_cfg &= ~CR_RXCFG_PMISC;
+
 	if (ifp->if_flags & IFF_ALLMULTI) {
 		cr->htable3 = 0xffff;
 		cr->htable2 = 0xffff;
 		cr->htable1 = 0xffff;
 		cr->htable0 = 0xffff;
-		return;
-	}
-
-	if (ifp->if_flags & IFF_PROMISC) {
-		cr->rx_cfg |= CR_RXCFG_PMISC;
+		cr->rx_cfg |= CR_RXCFG_HENABLE;
 		return;
 	}
 
@@ -1023,6 +970,7 @@ hme_mcreset(sc)
 			cr->htable2 = 0xffff;
 			cr->htable1 = 0xffff;
 			cr->htable0 = 0xffff;
+			cr->rx_cfg |= CR_RXCFG_HENABLE;
 			ifp->if_flags |= IFF_ALLMULTI;
 			return;
 		}
@@ -1051,6 +999,7 @@ hme_mcreset(sc)
 	cr->htable2 = hash[2];
 	cr->htable1 = hash[1];
 	cr->htable0 = hash[0];
+	cr->rx_cfg |= CR_RXCFG_HENABLE;
 	ifp->if_flags &= ~IFF_ALLMULTI;
 }
 

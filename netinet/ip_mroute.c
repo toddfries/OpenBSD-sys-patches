@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.c,v 1.10 1998/07/29 22:18:50 angelos Exp $	*/
+/*	$OpenBSD: ip_mroute.c,v 1.14 1999/02/05 04:23:43 angelos Exp $	*/
 /*	$NetBSD: ip_mroute.c,v 1.27 1996/05/07 02:40:50 thorpej Exp $	*/
 
 /*
@@ -463,7 +463,9 @@ ip_mrouter_done()
 			expire_mfc(rt);
 		}
 	}
+
 	free(mfchashtbl, M_MRTABLE);
+	mfchashtbl = 0;
 	
 	/* Reset de-encapsulation cache. */
 	have_encap_tunnel = 0;
@@ -1397,11 +1399,8 @@ encap_send(ip, vifp, m)
 	 */
 	ip_copy = mtod(mb_copy, struct ip *);
 	*ip_copy = multicast_encap_iphdr;
-#ifdef IPSEC
-	get_random_bytes((void *)&(ip_copy->ip_id), sizeof(ip_copy->ip_id));
-#else
-	ip_copy->ip_id = htons(ip_id++);
-#endif
+	ip_copy->ip_id = ip_randomid();
+	HTONS(ip_copy->ip_id);
 	ip_copy->ip_len = len;
 	ip_copy->ip_src = vifp->v_lcl_addr;
 	ip_copy->ip_dst = vifp->v_rmt_addr;
@@ -1458,7 +1457,7 @@ ipip_input(m, va_alist)
 
 #ifndef IPSEC
 	if (!have_encap_tunnel) {
-		rip_input(m);
+		rip_input(m, 0);
 		return;
 	}
 #endif
@@ -1482,7 +1481,7 @@ ipip_input(m, va_alist)
 
 #ifdef IPSEC
 	if (!have_encap_tunnel) {
-		rip_input(m);
+		rip_input(m, 0);
 		return;
 	}
 #endif
@@ -1983,7 +1982,7 @@ rsvp_input(m, ifp)
     if (ip_rsvpd != NULL) {
 	if (rsvpdebug)
 	    printf("rsvp_input: Sending packet up old-style socket\n");
-	rip_input(m);
+	rip_input(m, 0);
 	return;
     }
 

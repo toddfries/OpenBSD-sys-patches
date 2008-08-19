@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.46 1998/09/27 03:23:47 millert Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.56 1999/02/26 04:51:17 art Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -60,13 +60,16 @@
 #include <vm/vm.h>
 #include <sys/sysctl.h>
 
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
+
 extern int suid_clear;
 int	usermount = 0;		/* sysctl: by default, users may not mount */
 
 static int change_dir __P((struct nameidata *, struct proc *));
 
 void checkdirs __P((struct vnode *));
-int dounmount __P((struct mount *, int, struct proc *));
 
 /*
  * Redirection info so we don't have to include the union fs routines in 
@@ -200,17 +203,15 @@ sys_mount(p, v, retval)
 		 */     
 		fstypenum = (u_long)SCARG(uap, type);
 		
-		if (fstypenum < maxvfsconf) {
-			for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next)
-				if (vfsp->vfc_typenum == fstypenum)
-					break;
-			if (vfsp == NULL) {
-				vput(vp);
-				return (ENODEV);
-			}
-			strncpy(fstypename, vfsp->vfc_name, MFSNAMELEN);
-
+		for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next)
+			if (vfsp->vfc_typenum == fstypenum)
+				break;
+		if (vfsp == NULL) {
+			vput(vp);
+			return (ENODEV);
 		}
+		strncpy(fstypename, vfsp->vfc_name, MFSNAMELEN);
+
 #else
 		vput(vp);
 		return (error);
@@ -229,7 +230,7 @@ sys_mount(p, v, retval)
 
 	if (vfsp == NULL) {
 		vput(vp);
-		return (ENODEV);
+		return EOPNOTSUPP;
 	}
 
 	if (vp->v_mountedhere != NULL) {
@@ -427,10 +428,18 @@ dounmount(mp, flags, p)
 	int error;
 
 	simple_lock(&mountlist_slock);
+	if (mp->mnt_flag & MNT_UNMOUNT) {
+		mp->mnt_flag |= MNT_MWAIT;
+		simple_unlock(&mountlist_slock);
+		sleep(mp, PVFS);
+		return ENOENT;
+	}
 	mp->mnt_flag |= MNT_UNMOUNT;
 	lockmgr(&mp->mnt_lock, LK_DRAIN | LK_INTERLOCK, &mountlist_slock, p);
  	mp->mnt_flag &=~ MNT_ASYNC;
+#if !defined(UVM)
  	vnode_pager_umount(mp);	/* release cached vnodes */
+#endif
  	cache_purgevfs(mp);	/* remove cache entries for this file sys */
  	if (mp->mnt_syncer != NULL)
  		vgone(mp->mnt_syncer);
@@ -447,6 +456,7 @@ dounmount(mp, flags, p)
 		    &mountlist_slock, p);
 		if (mp->mnt_flag & MNT_MWAIT)
 			wakeup((caddr_t)mp);
+		mp->mnt_flag &= ~MNT_MWAIT;
 		return (error);
 	}
 	CIRCLEQ_REMOVE(&mountlist, mp, mnt_list);
@@ -491,6 +501,9 @@ sys_sync(p, v, retval)
 		if ((mp->mnt_flag & MNT_RDONLY) == 0) {
 			asyncflag = mp->mnt_flag & MNT_ASYNC;
 			mp->mnt_flag &= ~MNT_ASYNC;
+#if defined(UVM)
+			uvm_vnp_sync(mp);
+#endif
 			VFS_SYNC(mp, MNT_NOWAIT, p->p_ucred, p);
 			if (asyncflag)
 				mp->mnt_flag |= MNT_ASYNC;
@@ -566,6 +579,10 @@ sys_statfs(p, v, retval)
 	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+#if notyet
+	if (mp->mnt_flag & MNT_SOFTDEP)
+		sp->f_eflags = STATFS_SOFTUPD;
+#endif
 	/* Don't let non-root see filesystem id (for NFS security) */
 	if (suser(p->p_ucred, &p->p_acflag)) {
 		bcopy((caddr_t)sp, (caddr_t)&sb, sizeof(sb));
@@ -602,6 +619,10 @@ sys_fstatfs(p, v, retval)
 	if ((error = VFS_STATFS(mp, sp, p)) != 0)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+#if notyet
+	if (mp->mnt_flag & MNT_SOFTDEP)
+		sp->f_eflags = STATFS_SOFTUPD;
+#endif
 	/* Don't let non-root see filesystem id (for NFS security) */
 	if (suser(p->p_ucred, &p->p_acflag)) {
 		bcopy((caddr_t)sp, (caddr_t)&sb, sizeof(sb));
@@ -645,7 +666,10 @@ sys_getfsstat(p, v, retval)
 			sp = &mp->mnt_stat;
 
 			/* Refresh stats unless MNT_NOWAIT is specified */
-			if ((flags != MNT_NOWAIT) &&
+			if (flags != MNT_NOWAIT &&
+			    flags != MNT_LAZY &&
+			    (flags == MNT_WAIT ||
+			     flags == 0) &&
 			    (error = VFS_STATFS(mp, sp, p))) {
 				simple_lock(&mountlist_slock);
 				nmp = mp->mnt_list.cqe_next;
@@ -654,6 +678,10 @@ sys_getfsstat(p, v, retval)
 			}
 
 			sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+#if notyet
+			if (mp->mnt_flag & MNT_SOFTDEP)
+				sp->f_eflags = STATFS_SOFTUPD;
+#endif
 			if (suser(p->p_ucred, &p->p_acflag)) {
 				bcopy((caddr_t)sp, (caddr_t)&sb, sizeof(sb));
 				sb.f_fsid.val[0] = sb.f_fsid.val[1] = 0;
@@ -707,17 +735,7 @@ sys_fchdir(p, v, retval)
 		error = ENOTDIR;
 	else
 		error = VOP_ACCESS(vp, VEXEC, p->p_ucred, p);
-	while (!error && (mp = vp->v_mountedhere) != NULL) {
-		if (mp->mnt_flag & MNT_MLOCK) {
-			mp->mnt_flag |= MNT_MWAIT;
-			sleep((caddr_t)mp, PVFS);
-			continue;
-		}
-		if ((error = VFS_ROOT(mp, &tdp)) != 0)
-			break;
-		vput(vp);
-		vp = tdp;
-	}
+
 	while (!error && (mp = vp->v_mountedhere) != NULL) {
 		if (vfs_busy(mp, 0, 0, p)) 
 			continue;
@@ -1222,7 +1240,11 @@ sys_unlink(p, v, retval)
 		goto out;
 	}
 
+#if defined(UVM)
+	(void)uvm_vnp_uncache(vp);
+#else
 	(void)vnode_pager_uncache(vp);
+#endif
 
 	VOP_LEASE(nd.ni_dvp, p, p->p_ucred, LEASE_WRITE);
 	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
@@ -1991,7 +2013,10 @@ sys_fsync(p, v, retval)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	error = VOP_FSYNC(vp, fp->f_cred, MNT_WAIT, p);
+	if ((error = VOP_FSYNC(vp, fp->f_cred, MNT_WAIT, p)) == 0 &&
+	    bioops.io_fsync != NULL)
+		error = (*bioops.io_fsync)(vp);
+
 	VOP_UNLOCK(vp, 0, p);
 	return (error);
 }
@@ -2061,8 +2086,14 @@ out:
 		VOP_LEASE(tdvp, p, p->p_ucred, LEASE_WRITE);
 		if (fromnd.ni_dvp != tdvp)
 			VOP_LEASE(fromnd.ni_dvp, p, p->p_ucred, LEASE_WRITE);
-		if (tvp)
+		if (tvp) {
+#if defined(UVM)
+			(void)uvm_vnp_uncache(tvp);
+#else
+			(void)vnode_pager_uncache(tvp); /* XXX - I think we need this */
+#endif
 			VOP_LEASE(tvp, p, p->p_ucred, LEASE_WRITE);
+		}
 		error = VOP_RENAME(fromnd.ni_dvp, fromnd.ni_vp, &fromnd.ni_cnd,
 				   tond.ni_dvp, tond.ni_vp, &tond.ni_cnd);
 	} else {
@@ -2162,7 +2193,7 @@ sys_rmdir(p, v, retval)
 	 * No rmdir "." please.
 	 */
 	if (nd.ni_dvp == vp) {
-		error = EINVAL;
+		error = EBUSY;
 		goto out;
 	}
 	/*

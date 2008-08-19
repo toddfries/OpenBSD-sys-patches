@@ -1,4 +1,4 @@
-/*	$OpenBSD: midway.c,v 1.22 1998/10/20 23:31:06 deraadt Exp $	*/
+/*	$OpenBSD: midway.c,v 1.24 1999/01/11 05:12:17 millert Exp $	*/
 /*	(sync'd to midway.c 1.68)	*/
 
 /*
@@ -430,8 +430,7 @@ u_int32_t r;
 
 #ifdef EN_DEBUG_RANGE
   if (r > MID_MAXOFF || (r % 4)) {
-    printf("en_read out of range, r=0x%x\n", r);
-    panic("en_read");
+    panic("en_read: out of range, r=0x%x", r);
   }
 #endif
 
@@ -451,8 +450,7 @@ u_int32_t r, v;
 {
 #ifdef EN_DEBUG_RANGE
   if (r > MID_MAXOFF || (r % 4)) {
-    printf("en_write out of range, r=0x%x\n", r);
-    panic("en_write");
+    panic("en_write: out of range, r=0x%x", r);
   }
 #endif
 
@@ -2451,8 +2449,8 @@ void *arg;
         } else {
 	  IF_DEQUEUE(&sc->rxslot[slot].indma, m);
 	  if (!m) {
-	    printf("%s: lost mbuf in slot %d!\n", sc->sc_dev.dv_xname, slot);
-	    panic("enintr: drqsync");
+	    panic("enintr: drqsync: %s: lost mbuf in slot %d!",
+		sc->sc_dev.dv_xname, slot);
 	  }
         }
 	/* do something with this mbuf */
@@ -2673,7 +2671,7 @@ defer:					/* defer processing */
     llc = (aal5 && (sc->rxslot[slot].atm_flags & ATM_PH_LLCSNAP)) ? 1 : 0;
     rbd = EN_READ(sc, cur);
     if (MID_RBD_ID(rbd) != MID_RBD_STDID) 
-      panic("en_service: id mismatch\n");
+      panic("en_service: id mismatch");
 
     if (rbd & MID_RBD_T) {
       mlen = 0;			/* we've got trash */

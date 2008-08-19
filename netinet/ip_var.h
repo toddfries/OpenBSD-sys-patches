@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_var.h,v 1.8 1998/02/14 18:50:36 mickey Exp $	*/
+/*	$OpenBSD: ip_var.h,v 1.11 1999/02/17 23:51:12 deraadt Exp $	*/
 /*	$NetBSD: ip_var.h,v 1.16 1996/02/13 23:43:20 christos Exp $	*/
 
 /*
@@ -65,7 +65,7 @@ struct ipqent {
 	LIST_ENTRY(ipqent) ipqe_q;
 	union {
 		struct ip	*_ip;
-		struct tcpiphdr *_tcp;
+		struct tcphdr	*_tcp;
 	} _ipqe_u1;
 	union {
 		u_int8_t	_mff;	/* for IP fragmentation */
@@ -160,12 +160,12 @@ struct	ipstat {
 
 struct	  ipstat ipstat;
 LIST_HEAD(ipqhead, ipq)	ipq;		/* ip reass. queue */
-u_int16_t ip_id;			/* ip packet ctr, for ids */
 int	  ip_defttl;			/* default IP ttl */
 
 int	 ip_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
 int	 ip_dooptions __P((struct mbuf *));
 void	 ip_drain __P((void));
+void	 ip_flush __P((void));
 void	 ip_forward __P((struct mbuf *, int));
 void	 ip_freef __P((struct ipq *));
 void	 ip_freemoptions __P((struct ip_moptions *));
@@ -181,6 +181,8 @@ struct in_ifaddr *
 	 in_iawithaddr __P((struct in_addr, struct mbuf *));
 struct in_ifaddr *
 	 ip_rtaddr __P((struct in_addr));
+u_int16_t	
+	 ip_randomid __P((void));
 int	 ip_setmoptions __P((int, struct ip_moptions **, struct mbuf *));
 void	 ip_slowtimo __P((void));
 struct mbuf *
@@ -188,6 +190,7 @@ struct mbuf *
 void	 ip_stripoptions __P((struct mbuf *, struct mbuf *));
 int	 ip_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
 void	 ipintr __P((void));
+void	 ipv4_input __P((struct mbuf *, ...));
 int	 rip_ctloutput __P((int, struct socket *, int, int, struct mbuf **));
 void	 rip_init __P((void));
 void	 rip_input __P((struct mbuf *, ...));

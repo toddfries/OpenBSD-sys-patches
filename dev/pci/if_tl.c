@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tl.c,v 1.1 1998/10/10 03:55:05 jason Exp $	*/
+/*	$OpenBSD: if_tl.c,v 1.9 1999/03/03 22:51:50 jason Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -31,7 +31,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- *	$FreeBSD: if_tl.c,v 1.18 1998/10/08 15:45:36 wpaul Exp $
+ *	$FreeBSD: if_tl.c,v 1.26 1999/02/01 21:25:51 wpaul Exp $
  */
 
 /*
@@ -225,8 +225,6 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
-
-#define bootverbose 0
 #endif
 
 /*
@@ -248,7 +246,7 @@
 
 #if !defined(lint) && !defined(__OpenBSD__)
 static char rcsid[] =
-	"$FreeBSD: if_tl.c,v 1.18 1998/10/08 15:45:36 wpaul Exp $";
+	"$FreeBSD: if_tl.c,v 1.26 1999/02/01 21:25:51 wpaul Exp $";
 #endif
 
 #ifdef TL_DEBUG
@@ -331,7 +329,6 @@ static struct tl_type tl_devs[] = {
 		"Olicom OC-2326 10/100 TX UTP" },
 	{ 0, 0, NULL }
 };
-#endif
 
 /*
  * Various supported PHY vendors/types and their names. Note that
@@ -348,11 +345,12 @@ static struct tl_type tl_phys[] = {
 	{ SEEQ_PHY_VENDORID, SEEQ_PHY_80220, "<SEEQ 80220>" },
 	{ 0, 0, "<MII-compliant physical interface>" }
 };
+#endif
 
 #ifdef __FreeBSD__
 static unsigned long		tl_count;
 
-static char *tl_probe		__P((pcici_t, pcidi_t));
+static const char *tl_probe	__P((pcici_t, pcidi_t));
 static void tl_attach		__P((pcici_t, int));
 #else
 static int tl_probe	__P((struct device *, void *, void *));
@@ -392,9 +390,9 @@ static void tl_shutdown		__P((void *));
 static int tl_ifmedia_upd	__P((struct ifnet *));
 static void tl_ifmedia_sts	__P((struct ifnet *, struct ifmediareq *));
 
-static u_int8_t tl_eeprom_putbyte	__P((struct tl_softc *, u_int8_t));
+static u_int8_t tl_eeprom_putbyte	__P((struct tl_softc *, int));
 static u_int8_t	tl_eeprom_getbyte	__P((struct tl_softc *,
-						u_int8_t, u_int8_t *));
+						int, u_int8_t *));
 static int tl_read_eeprom	__P((struct tl_softc *, caddr_t, int, int));
 
 static void tl_mii_sync		__P((struct tl_softc *));
@@ -402,57 +400,57 @@ static void tl_mii_send		__P((struct tl_softc *, u_int32_t, int));
 static int tl_mii_readreg	__P((struct tl_softc *, struct tl_mii_frame *));
 static int tl_mii_writereg	__P((struct tl_softc *, struct tl_mii_frame *));
 static u_int16_t tl_phy_readreg	__P((struct tl_softc *, int));
-static void tl_phy_writereg	__P((struct tl_softc *, u_int16_t, u_int16_t));
+static void tl_phy_writereg	__P((struct tl_softc *, int, int));
 
 static void tl_autoneg		__P((struct tl_softc *, int, int));
 static void tl_setmode		__P((struct tl_softc *, int));
-static int tl_calchash		__P((unsigned char *));
+static int tl_calchash		__P((caddr_t));
 static void tl_setmulti		__P((struct tl_softc *));
-static void tl_setfilt		__P((struct tl_softc *, u_int8_t *, int));
+static void tl_setfilt		__P((struct tl_softc *, caddr_t, int));
 static void tl_softreset	__P((struct tl_softc *, int));
 static void tl_hardreset	__P((struct tl_softc *));
 static int tl_list_rx_init	__P((struct tl_softc *));
 static int tl_list_tx_init	__P((struct tl_softc *));
 
-static u_int8_t tl_dio_read8	__P((struct tl_softc *, u_int8_t));
-static u_int16_t tl_dio_read16	__P((struct tl_softc *, u_int8_t));
-static u_int32_t tl_dio_read32	__P((struct tl_softc *, u_int8_t));
-static void tl_dio_write8	__P((struct tl_softc *, u_int8_t, u_int8_t));
-static void tl_dio_write16	__P((struct tl_softc *, u_int8_t, u_int16_t));
-static void tl_dio_write32	__P((struct tl_softc *, u_int8_t, u_int32_t));
-static void tl_dio_setbit	__P((struct tl_softc *, u_int8_t, u_int8_t));
-static void tl_dio_clrbit	__P((struct tl_softc *, u_int8_t, u_int8_t));
-static void tl_dio_setbit16	__P((struct tl_softc *, u_int8_t, u_int16_t));
-static void tl_dio_clrbit16	__P((struct tl_softc *, u_int8_t, u_int16_t));
+static u_int8_t tl_dio_read8	__P((struct tl_softc *, int));
+static u_int16_t tl_dio_read16	__P((struct tl_softc *, int));
+static u_int32_t tl_dio_read32	__P((struct tl_softc *, int));
+static void tl_dio_write8	__P((struct tl_softc *, int, int));
+static void tl_dio_write16	__P((struct tl_softc *, int, int));
+static void tl_dio_write32	__P((struct tl_softc *, int, int));
+static void tl_dio_setbit	__P((struct tl_softc *, int, int));
+static void tl_dio_clrbit	__P((struct tl_softc *, int, int));
+static void tl_dio_setbit16	__P((struct tl_softc *, int, int));
+static void tl_dio_clrbit16	__P((struct tl_softc *, int, int));
 
 static u_int8_t tl_dio_read8(sc, reg)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
+	struct tl_softc		*sc;
+	int			reg;
 {
 	CSR_WRITE_2(sc, TL_DIO_ADDR, reg);
 	return(CSR_READ_1(sc, TL_DIO_DATA + (reg & 3)));
 }
 
 static u_int16_t tl_dio_read16(sc, reg)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
+	struct tl_softc		*sc;
+	int			reg;
 {
 	CSR_WRITE_2(sc, TL_DIO_ADDR, reg);
 	return(CSR_READ_2(sc, TL_DIO_DATA + (reg & 3)));
 }
 
 static u_int32_t tl_dio_read32(sc, reg)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
+	struct tl_softc		*sc;
+	int			reg;
 {
 	CSR_WRITE_2(sc, TL_DIO_ADDR, reg);
 	return(CSR_READ_4(sc, TL_DIO_DATA + (reg & 3)));
 }
 
 static void tl_dio_write8(sc, reg, val)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
-	u_int8_t			val;
+	struct tl_softc		*sc;
+	int			reg;
+	int			val;
 {
 	CSR_WRITE_2(sc, TL_DIO_ADDR, reg);
 	CSR_WRITE_1(sc, TL_DIO_DATA + (reg & 3), val);
@@ -460,9 +458,9 @@ static void tl_dio_write8(sc, reg, val)
 }
 
 static void tl_dio_write16(sc, reg, val)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
-	u_int16_t			val;
+	struct tl_softc		*sc;
+	int			reg;
+	int			val;
 {
 	CSR_WRITE_2(sc, TL_DIO_ADDR, reg);
 	CSR_WRITE_2(sc, TL_DIO_DATA + (reg & 3), val);
@@ -470,9 +468,9 @@ static void tl_dio_write16(sc, reg, val)
 }
 
 static void tl_dio_write32(sc, reg, val)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
-	u_int32_t			val;
+	struct tl_softc		*sc;
+	int			reg;
+	int			val;
 {
 	CSR_WRITE_2(sc, TL_DIO_ADDR, reg);
 	CSR_WRITE_4(sc, TL_DIO_DATA + (reg & 3), val);
@@ -480,9 +478,9 @@ static void tl_dio_write32(sc, reg, val)
 }
 
 static void tl_dio_setbit(sc, reg, bit)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
-	u_int8_t			bit;
+	struct tl_softc		*sc;
+	int			reg;
+	int			bit;
 {
 	u_int8_t			f;
 
@@ -495,9 +493,9 @@ static void tl_dio_setbit(sc, reg, bit)
 }
 
 static void tl_dio_clrbit(sc, reg, bit)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
-	u_int8_t			bit;
+	struct tl_softc		*sc;
+	int			reg;
+	int			bit;
 {
 	u_int8_t			f;
 
@@ -510,9 +508,9 @@ static void tl_dio_clrbit(sc, reg, bit)
 }
 
 static void tl_dio_setbit16(sc, reg, bit)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
-	u_int16_t			bit;
+	struct tl_softc		*sc;
+	int			reg;
+	int			bit;
 {
 	u_int16_t			f;
 
@@ -525,9 +523,9 @@ static void tl_dio_setbit16(sc, reg, bit)
 }
 
 static void tl_dio_clrbit16(sc, reg, bit)
-	struct tl_softc			*sc;
-	u_int8_t			reg;
-	u_int16_t			bit;
+	struct tl_softc		*sc;
+	int			reg;
+	int			bit;
 {
 	u_int16_t			f;
 
@@ -544,7 +542,7 @@ static void tl_dio_clrbit16(sc, reg, bit)
  */
 static u_int8_t tl_eeprom_putbyte(sc, byte)
 	struct tl_softc		*sc;
-	u_int8_t		byte;
+	int			byte;
 {
 	register int		i, ack = 0;
 
@@ -588,7 +586,7 @@ static u_int8_t tl_eeprom_putbyte(sc, byte)
  */
 static u_int8_t tl_eeprom_getbyte(sc, addr, dest)
 	struct tl_softc		*sc;
-	u_int8_t		addr;
+	int			addr;
 	u_int8_t		*dest;
 {
 	register int		i;
@@ -877,8 +875,8 @@ static u_int16_t tl_phy_readreg(sc, reg)
 
 static void tl_phy_writereg(sc, reg, data)
 	struct tl_softc		*sc;
-	u_int16_t		reg;
-	u_int16_t		data;
+	int			reg;
+	int			data;
 {
 	struct tl_mii_frame	frame;
 
@@ -1195,7 +1193,7 @@ static void tl_setmode(sc, media)
  * the folded 24-bit value is split into 6-bit portions and XOR'd.
  */
 static int tl_calchash(addr)
-	unsigned char		*addr;
+	caddr_t			addr;
 {
 	int			t;
 
@@ -1213,7 +1211,7 @@ static int tl_calchash(addr)
  */
 static void tl_setfilt(sc, addr, slot)
 	struct tl_softc		*sc;
-	u_int8_t		*addr;
+	caddr_t			addr;
 	int			slot;
 {
 	int			i;
@@ -1261,7 +1259,7 @@ static void tl_setmulti(sc)
 
 	/* First, zot all the existing filters. */
 	for (i = 1; i < 4; i++)
-		tl_setfilt(sc, dummy, i);
+		tl_setfilt(sc, (caddr_t)&dummy, i);
 	tl_dio_write32(sc, TL_HASH1, 0);
 	tl_dio_write32(sc, TL_HASH2, 0);
 
@@ -1442,7 +1440,7 @@ static void tl_softreset(sc, internal)
  * Probe for a ThunderLAN chip. Check the PCI vendor and device IDs
  * against our list and return its name if we find a match.
  */
-static char *
+static const char *
 tl_probe(config_id, device_id)
 	pcici_t			config_id;
 	pcidi_t			device_id;
@@ -1470,7 +1468,6 @@ static int tl_attach_phy(sc)
 	struct tl_softc		*sc;
 {
 	int			phy_ctl;
-	struct tl_type		*p = tl_phys;
 	int			media = IFM_ETHER|IFM_100_TX|IFM_FDX;
 	struct ifnet		*ifp;
 
@@ -1481,22 +1478,6 @@ static int tl_attach_phy(sc)
 	sc->tl_phy_sts = tl_phy_readreg(sc, TL_PHY_GENSTS);
 	phy_ctl = tl_phy_readreg(sc, TL_PHY_GENCTL);
 
-	/*
-	 * PHY revision numbers tend to vary a bit. Our algorithm here
-	 * is to check everything but the 8 least significant bits.
-	 */
-	while(p->tl_vid) {
-		if (sc->tl_phy_vid  == p->tl_vid &&
-			(sc->tl_phy_did | 0x000F) == p->tl_did) {
-			sc->tl_pinfo = p;
-			break;
-		}
-		p++;
-	}
-	if (sc->tl_pinfo == NULL) {
-		sc->tl_pinfo = &tl_phys[PHY_UNKNOWN];
-	}
-
 	if (sc->tl_phy_sts & PHY_BMSR_100BT4 ||
 		sc->tl_phy_sts & PHY_BMSR_100BTXFULL ||
 		sc->tl_phy_sts & PHY_BMSR_100BTXHALF)
@@ -1504,47 +1485,23 @@ static int tl_attach_phy(sc)
 	else
 		ifp->if_baudrate = 10000000;
 
-	if (bootverbose) {
-		printf("tl%d: phy at mii address %d\n", sc->tl_unit,
-							sc->tl_phy_addr);
-
-		printf("tl%d: %s ", sc->tl_unit, sc->tl_pinfo->tl_name);
-	}
-
 	if (sc->tl_phy_sts & PHY_BMSR_100BT4 ||
 		sc->tl_phy_sts & PHY_BMSR_100BTXHALF ||
 		sc->tl_phy_sts & PHY_BMSR_100BTXHALF) {
-		if (bootverbose)
-			printf("10/100Mbps ");
 	} else {
 		media &= ~IFM_100_TX;
 		media |= IFM_10_T;
-		if (bootverbose)
-			printf("10Mbps ");
 	}
 
 	if (sc->tl_phy_sts & PHY_BMSR_100BTXFULL ||
 		sc->tl_phy_sts & PHY_BMSR_10BTFULL) {
-		if (bootverbose)
-			printf("full duplex ");
 	} else {
-		if (bootverbose)
-			printf("half duplex ");
 		media &= ~IFM_FDX;
 	}
 
 	if (sc->tl_phy_sts & PHY_BMSR_CANAUTONEG) {
 		media = IFM_ETHER|IFM_AUTO;
-		if (bootverbose)
-			printf("autonegotiating\n");
-	} else
-		if (bootverbose)
-			printf("\n");
-
-	/* If this isn't a known PHY, print the PHY indentifier info. */
-	if (sc->tl_pinfo->tl_vid == 0 && bootverbose)
-		printf("tl%d: vendor id: %04x product id: %04x\n",
-			sc->tl_unit, sc->tl_phy_vid, sc->tl_phy_did);
+	}
 
 	/* Set up ifmedia data and callbacks. */
 	ifmedia_init(&sc->ifmedia, 0, tl_ifmedia_upd, tl_ifmedia_sts);
@@ -1739,7 +1696,7 @@ tl_attach(config_id, unit)
 
 	sc->tl_unit = unit;
 	sc->tl_dinfo = t;
-	if (t->tl_vid == COMPAQ_VENDORID)
+	if (t->tl_vid == COMPAQ_VENDORID || t->tl_vid == TI_VENDORID)
 		sc->tl_eeaddr = TL_EEPROM_EADDR;
 	if (t->tl_vid == OLICOM_VENDORID)
 		sc->tl_eeaddr = TL_EEPROM_EADDR_OC;
@@ -1797,6 +1754,7 @@ tl_attach(config_id, unit)
 	ifp->if_watchdog = tl_watchdog;
 	ifp->if_init = tl_init;
 	ifp->if_mtu = ETHERMTU;
+	ifp->if_snd.ifq_maxlen = TL_TX_LIST_CNT - 1;
 	callout_handle_init(&sc->tl_stat_ch);
 
 	/* Reset the adapter again. */
@@ -1812,14 +1770,10 @@ tl_attach(config_id, unit)
 
 	for (i = TL_PHYADDR_MIN; i < TL_PHYADDR_MAX + 1; i++) {
 		sc->tl_phy_addr = i;
-		if (bootverbose)
-			printf("tl%d: looking for phy at addr %x\n", unit, i);
 		tl_phy_writereg(sc, PHY_BMCR, PHY_BMCR_RESET);
 		DELAY(500);
 		while(tl_phy_readreg(sc, PHY_BMCR) & PHY_BMCR_RESET);
 		sc->tl_phy_sts = tl_phy_readreg(sc, PHY_BMSR);
-		if (bootverbose)
-			printf("tl%d: status: %x\n", unit, sc->tl_phy_sts);
 		if (!sc->tl_phy_sts)
 			continue;
 		if (tl_attach_phy(sc)) {
@@ -1903,12 +1857,12 @@ static int tl_list_rx_init(sc)
 	cd = &sc->tl_cdata;
 	ld = sc->tl_ldata;
 
-	for (i = 0; i < TL_TX_LIST_CNT; i++) {
+	for (i = 0; i < TL_RX_LIST_CNT; i++) {
 		cd->tl_rx_chain[i].tl_ptr =
 			(struct tl_list_onefrag *)&ld->tl_rx_list[i];
 		if (tl_newbuf(sc, &cd->tl_rx_chain[i]) == ENOBUFS)
 			return(ENOBUFS);
-		if (i == (TL_TX_LIST_CNT - 1)) {
+		if (i == (TL_RX_LIST_CNT - 1)) {
 			cd->tl_rx_chain[i].tl_next = NULL;
 			ld->tl_rx_list[i].tlist_fptr = 0;
 		} else {
@@ -1932,15 +1886,19 @@ static int tl_newbuf(sc, c)
 
 	MGETHDR(m_new, M_DONTWAIT, MT_DATA);
 	if (m_new == NULL) {
+#if defined(__FreeBSD__)
 		printf("tl%d: no memory for rx list -- packet dropped!",
 				sc->tl_unit);
+#endif
 		return(ENOBUFS);
 	}
 
 	MCLGET(m_new, M_DONTWAIT);
 	if (!(m_new->m_flags & M_EXT)) {
+#if defined(__FreeBSD__)
 		printf("tl%d: no memory for rx list -- packet dropped!",
 				 sc->tl_unit);
+#endif
 		m_freem(m_new);
 		return(ENOBUFS);
 	}
@@ -2213,7 +2171,7 @@ static int tl_intvec_adchk(xsc, type)
 
 	if (type)
 		printf("tl%d: adapter check: %x\n", sc->tl_unit,
-			CSR_READ_4(sc, TL_CH_PARM));
+			(unsigned int)CSR_READ_4(sc, TL_CH_PARM));
 #ifdef TL_DEBUG
 	evshow(sc);
 #endif
@@ -2426,15 +2384,19 @@ static int tl_encap(sc, c, m_head)
 
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
 		if (m_new == NULL) {
+#if defined(__FreeBSD__)
 			printf("tl%d: no memory for tx list", sc->tl_unit);
+#endif
 			return(1);
 		}
 		if (m_head->m_pkthdr.len > MHLEN) {
 			MCLGET(m_new, M_DONTWAIT);
 			if (!(m_new->m_flags & M_EXT)) {
 				m_freem(m_new);
+#if defined(__FreeBSD__)
 				printf("tl%d: no memory for tx list",
 				sc->tl_unit);
+#endif
 				return(1);
 			}
 		}
@@ -2454,9 +2416,11 @@ static int tl_encap(sc, c, m_head)
 	 * frame size. We have to pad it to make the chip happy.
 	 */
 	if (total_len < TL_MIN_FRAMELEN) {
+#if defined(__FreeBSD__)
 		if (frag == TL_MAXFRAGS)
 			printf("tl%d: all frags filled but "
 				"frame still to small!\n", sc->tl_unit);
+#endif
 		f = &c->tl_ptr->tl_frag[frag];
 		f->tlist_dcnt = TL_MIN_FRAMELEN - total_len;
 		f->tlist_dadr = vtophys(&sc->tl_ldata->tl_pad);
@@ -2541,6 +2505,12 @@ static void tl_start(ifp)
 	}
 
 	/*
+	 * If there are no packets queued, bail.
+	 */
+	if (cur_tx == NULL)
+		return;
+
+	/*
 	 * That's all we can stands, we can't stands no more.
 	 * If there are no other transfers pending, then issue the
 	 * TX GO command to the adapter to start things moving.
@@ -2570,7 +2540,7 @@ static void tl_start(ifp)
 		evset(sc, EV_START_Q);
 #endif
 		sc->tl_cdata.tl_tx_tail->tl_next = start_tx;
-		sc->tl_cdata.tl_tx_tail = start_tx;
+		sc->tl_cdata.tl_tx_tail = cur_tx;
 	}
 
 	/*
@@ -2622,7 +2592,7 @@ static void tl_init(xsc)
 		tl_dio_setbit(sc, TL_NETCMD, TL_CMD_NOBRX);
 
 	/* Init our MAC address */
-	tl_setfilt(sc, sc->arpcom.ac_enaddr, 0);
+	tl_setfilt(sc, (caddr_t)&sc->arpcom.ac_enaddr, 0);
 
 	/* Init multicast filter, if needed. */
 	tl_setmulti(sc);
@@ -2991,38 +2961,29 @@ tl_probe(parent, match, aux)
 	}
 
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_COMPAQ) {
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_N100TX)
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_COMPAQ_N100TX:
+		case PCI_PRODUCT_COMPAQ_N10T:
+		case PCI_PRODUCT_COMPAQ_IntNF3P:
+		case PCI_PRODUCT_COMPAQ_DPNet100TX:
+		case PCI_PRODUCT_COMPAQ_IntPL100TX:
+		case PCI_PRODUCT_COMPAQ_DP4000:
+		case PCI_PRODUCT_COMPAQ_N10T2:
+		case PCI_PRODUCT_COMPAQ_N10_TX_UTP:
+		case PCI_PRODUCT_COMPAQ_NF3P:
+		case PCI_PRODUCT_COMPAQ_NF3P_BNC:
 			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_Nunknown)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_N10T)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_IntNF3P)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_DPNet100TX)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_IntPL100TX)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_DP4000)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_N10T2)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_N10_TX_UTP)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_NF3P)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPAQ_NF3P_BNC)
-			return 1;
+		}
 		return 0;
 	}
 
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_OLICOM) {
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_OLICOM_OC2183)
+		switch (PCI_PRODUCT(pa->pa_id)) {
+		case PCI_PRODUCT_OLICOM_OC2183:
+		case PCI_PRODUCT_OLICOM_OC2325:
+		case PCI_PRODUCT_OLICOM_OC2326:
 			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_OLICOM_OC2325)
-			return 1;
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_OLICOM_OC2326)
-			return 1;
+		}
 		return 0;
 	}
 
@@ -3050,11 +3011,6 @@ tl_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE |
-		   PCI_COMMAND_MEM_ENABLE |
-		   PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef TL_USEIOSPACE
@@ -3136,7 +3092,8 @@ tl_attach(parent, self, aux)
 	sc->tl_ldata = (struct tl_list_data *)roundptr;
 
 	sc->tl_unit = sc->sc_dev.dv_unit;
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_COMPAQ)
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_COMPAQ ||
+	    PCI_VENDOR(pa->pa_id) == PCI_VENDOR_TI)
 		sc->tl_eeaddr = TL_EEPROM_EADDR;
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_OLICOM)
 		sc->tl_eeaddr = TL_EEPROM_EADDR_OC;
@@ -3179,6 +3136,7 @@ tl_attach(parent, self, aux)
 	ifp->if_start = tl_start;
 	ifp->if_watchdog = tl_watchdog;
 	ifp->if_baudrate = 10000000;
+	ifp->if_snd.ifq_maxlen = TL_TX_LIST_CNT - 1;
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
 	/*
@@ -3191,16 +3149,10 @@ tl_attach(parent, self, aux)
 
 	for (i = TL_PHYADDR_MIN; i < TL_PHYADDR_MAX + 1; i++) {
 		sc->tl_phy_addr = i;
-		if (bootverbose)
-			printf("%s: looking for phy at addr %x\n",
-			    sc->sc_dev.dv_xname, i);
 		tl_phy_writereg(sc, PHY_BMCR, PHY_BMCR_RESET);
 		DELAY(500);
 		while(tl_phy_readreg(sc, PHY_BMCR) & PHY_BMCR_RESET);
 		sc->tl_phy_sts = tl_phy_readreg(sc, PHY_BMSR);
-		if (bootverbose)
-			printf("%s: status: %x\n", sc->sc_dev.dv_xname,
-			    sc->tl_phy_sts);
 		if (!sc->tl_phy_sts)
 			continue;
 		if (tl_attach_phy(sc)) {

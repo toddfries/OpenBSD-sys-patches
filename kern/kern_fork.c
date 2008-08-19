@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.11 1997/08/01 22:54:49 deraadt Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.20 1999/03/12 17:49:37 deraadt Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -59,16 +59,16 @@
 #include <sys/syscallargs.h>
 
 #include <vm/vm.h>
+#include <vm/vm_kern.h>
+
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#include <uvm/uvm_map.h>
+#endif
 
 int	nprocs = 1;		/* process 0 */
 int	randompid;		/* when set to 1, pid's go random */
 pid_t	lastpid;
-
-#define	ISFORK	0
-#define	ISVFORK	1
-#define	ISRFORK	2
-
-int fork1 __P((struct proc *, int, int, register_t *));
 
 /*ARGSUSED*/
 int
@@ -117,6 +117,7 @@ fork1(p1, forktype, rforkflags, retval)
 	int count;
 	static int pidchecked = 0;
 	int dupfd = 1, cleanfd = 0;
+	vm_offset_t uaddr;
 
 	if (forktype == ISRFORK) {
 		dupfd = 0;
@@ -126,21 +127,18 @@ fork1(p1, forktype, rforkflags, retval)
 			return (EINVAL);
 		if (rforkflags & RFFDG)
 			dupfd = 1;
-		if (rforkflags & RFNOWAIT)
-			return (EINVAL);	/* XXX unimplimented */
 		if (rforkflags & RFCFDG)
 			cleanfd = 1;
 	}
 
 	/*
 	 * Although process entries are dynamically created, we still keep
-	 * a global limit on the maximum number we will create.  Don't allow
-	 * a nonprivileged user to use the last process; don't let root
-	 * exceed the limit. The variable nprocs is the current number of
-	 * processes, maxproc is the limit.
+	 * a global limit on the maximum number we will create. We reserve
+	 * the last 5 processes to root. The variable nprocs is the current
+	 * number of processes, maxproc is the limit.
 	 */
 	uid = p1->p_cred->p_ruid;
-	if ((nprocs >= maxproc - 1 && uid != 0) || nprocs >= maxproc) {
+	if ((nprocs >= maxproc - 5 && uid != 0) || nprocs >= maxproc) {
 		tablefull("proc");
 		return (EAGAIN);
 	}
@@ -154,6 +152,21 @@ fork1(p1, forktype, rforkflags, retval)
 		(void)chgproccnt(uid, -1);
 		return (EAGAIN);
 	}
+
+	/*
+	 * Allocate a pcb and kernel stack for the process
+	 */
+#if defined(arc) || defined(mips_cachealias)
+	uaddr = kmem_alloc_upage(kernel_map, USPACE);
+#else
+#if defined(UVM)
+	uaddr = uvm_km_valloc(kernel_map, USPACE);
+#else
+	uaddr = kmem_alloc_pageable(kernel_map, USPACE);
+#endif
+#endif
+	if (uaddr == 0)
+		return ENOMEM;
 
 	/* Allocate new proc. */
 	MALLOC(newproc, struct proc *, sizeof(struct proc), M_PROC, M_WAITOK);
@@ -267,11 +280,9 @@ again:
 		p2->p_flag |= P_PPWAIT;
 	LIST_INSERT_AFTER(p1, p2, p_pglist);
 	p2->p_pptr = p1;
-	if (rforkflags & RFNOWAIT) {
-		/* XXX should we do anything? */
-	} else {
-		LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
-	}
+	if (forktype == ISRFORK && (rforkflags & RFNOWAIT))
+		p2->p_flag |= P_NOZOMBIE;
+	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
 	LIST_INIT(&p2->p_children);
 
 #ifdef KTRACE
@@ -287,17 +298,28 @@ again:
 #endif
 
 	/*
+	 * set priority of child to be that of parent
+	 * XXX should move p_estcpu into the region of struct proc which gets
+	 * copied.
+	 */
+	p2->p_estcpu = p1->p_estcpu;
+
+	/*
 	 * This begins the section where we must prevent the parent
 	 * from being swapped.
 	 */
 	p1->p_holdcnt++;
 
+#if !defined(UVM) /* We do this later for UVM */
 	if (forktype == ISRFORK && (rforkflags & RFMEM)) {
 		/* share as much address space as possible */
 		(void) vm_map_inherit(&p1->p_vmspace->vm_map,
 		    VM_MIN_ADDRESS, VM_MAXUSER_ADDRESS - MAXSSIZ,
 		    VM_INHERIT_SHARE);
 	}
+#endif
+
+	p2->p_addr = (struct user *)uaddr;
 
 #ifdef __FORK_BRAINDAMAGE
 	/*
@@ -318,7 +340,11 @@ again:
 	 * Finish creating the child process.  It will return through a
 	 * different path later.
 	 */
+#if defined(UVM)
+	uvm_fork(p1, p2, (forktype == ISRFORK && (rforkflags & RFMEM)) ? TRUE : FALSE);
+#else /* UVM */
 	vm_fork(p1, p2);
+#endif /* UVM */
 #endif
 	vm = p2->p_vmspace;
 
@@ -352,6 +378,16 @@ again:
 	 */
 	p1->p_holdcnt--;
 
+#if defined(UVM) /* ART_UVM_XXX */
+	uvmexp.forks++;
+#ifdef notyet
+	if (rforkflags & FORK_PPWAIT)
+		uvmexp.forks_ppwait++;
+#endif
+	if (rforkflags & RFMEM)
+		uvmexp.forks_sharevm++;
+#endif
+
 	/*
 	 * Preserve synchronization semantics of vfork.  If waiting for
 	 * child to exec or exit, set P_PPWAIT on child, and sleep on our
@@ -369,3 +405,4 @@ again:
 	retval[1] = 0;
 	return (0);
 }
+

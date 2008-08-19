@@ -1,4 +1,4 @@
-/*	$OpenBSD: isa_machdep.c,v 1.31 1998/07/17 22:00:00 deraadt Exp $	*/
+/*	$OpenBSD: isa_machdep.c,v 1.33 1998/12/31 09:17:52 deraadt Exp $	*/
 /*	$NetBSD: isa_machdep.c,v 1.22 1997/06/12 23:57:32 thorpej Exp $	*/
 
 #define ISA_DMA_STATS
@@ -446,6 +446,9 @@ isa_intr_alloc(ic, mask, type, irq)
 
 /*
  * Just check to see if an IRQ is available/can be shared.
+ * 0 = interrupt not available
+ * 1 = interrupt shareable
+ * 2 = interrupt all to ourself
  */
 int
 isa_intr_check(ic, irq, type)
@@ -458,12 +461,14 @@ isa_intr_check(ic, irq, type)
 
 	switch (intrtype[irq]) {
 	case IST_NONE:
+		return (2);
 		break;
-	case IST_EDGE:
 	case IST_LEVEL:
 		if (type != intrtype[irq])
 			return (0);
+		return (1);
 		break;
+	case IST_EDGE:
 	case IST_PULSE:
 		if (type != IST_NONE)
 			return (0);

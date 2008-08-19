@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ip4.h,v 1.10 1998/05/18 21:10:55 provos Exp $	*/
+/*	$OpenBSD: ip_ip4.h,v 1.14 1999/04/09 23:28:45 niklas Exp $	*/
 
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
@@ -14,8 +14,10 @@
  * Additional transforms and features in 1997 and 1998 by Angelos D. Keromytis
  * and Niels Provos.
  *
- * Copyright (C) 1995, 1996, 1997, 1998 by John Ioannidis, Angelos D. Keromytis
- * and Niels Provos.
+ * Additional features in 1999 by Angelos D. Keromytis.
+ *
+ * Copyright (C) 1995, 1996, 1997, 1998, 1999 by John Ioannidis,
+ * Angelos D. Keromytis and Niels Provos.
  *	
  * Permission to use, copy, and modify this software without fee
  * is hereby granted, provided that this entire notice is included in
@@ -48,11 +50,27 @@ struct ip4stat
     u_int32_t	ip4s_qfull;
     u_int64_t   ip4s_ibytes;
     u_int64_t   ip4s_obytes;
+    u_int32_t	ip4s_pdrops;		/* packet dropped due to policy */
+    u_int32_t	ip4s_spoof;		/* IP spoofing attempts */
 };
 
 #define IP4_DEFAULT_TTL    0
 #define IP4_SAME_TTL	  -1
 
+/*
+ * Names for IP4 sysctl objects
+ */
+#define	IP4CTL_ALLOW	1		/* accept incoming IP4 packets */
+#define IP4CTL_MAXID	2
+
+#define IP4CTL_NAMES { \
+	{ 0, 0 }, \
+	{ "allow", CTLTYPE_INT }, \
+}
+
 #ifdef _KERNEL
-struct ip4stat ip4stat;
+int	ip4_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
+
+extern int ip4_allow;
+extern struct ip4stat ip4stat;
 #endif

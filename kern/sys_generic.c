@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.15 1998/07/28 22:36:42 millert Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.18 1999/03/22 02:22:15 deraadt Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -163,7 +163,7 @@ sys_readv(p, v, retval)
 	/* note: can't use iovlen until iovcnt is validated */
 	iovlen = SCARG(uap, iovcnt) * sizeof (struct iovec);
 	if (SCARG(uap, iovcnt) > UIO_SMALLIOV) {
-		if (SCARG(uap, iovcnt) > UIO_MAXIOV)
+		if (SCARG(uap, iovcnt) > IOV_MAX)
 			return (EINVAL);
 		MALLOC(iov, struct iovec *, iovlen, M_IOV, M_WAITOK);
 		needfree = iov;
@@ -182,7 +182,8 @@ sys_readv(p, v, retval)
 	auio.uio_resid = 0;
 	for (i = 0; i < SCARG(uap, iovcnt); i++, iov++) {
 		/* Don't allow sum > SSIZE_MAX */
-		if ((ssize_t)(auio.uio_resid += iov->iov_len) <= 0) {
+		if (iov->iov_len > SSIZE_MAX ||
+		    (auio.uio_resid += iov->iov_len) > SSIZE_MAX) {
 			error = EINVAL;
 			goto done;
 		}
@@ -317,7 +318,7 @@ sys_writev(p, v, retval)
 	/* note: can't use iovlen until iovcnt is validated */
 	iovlen = SCARG(uap, iovcnt) * sizeof (struct iovec);
 	if (SCARG(uap, iovcnt) > UIO_SMALLIOV) {
-		if (SCARG(uap, iovcnt) > UIO_MAXIOV)
+		if (SCARG(uap, iovcnt) > IOV_MAX)
 			return (EINVAL);
 		MALLOC(iov, struct iovec *, iovlen, M_IOV, M_WAITOK);
 		needfree = iov;
@@ -336,7 +337,8 @@ sys_writev(p, v, retval)
 	auio.uio_resid = 0;
 	for (i = 0; i < SCARG(uap, iovcnt); i++, iov++) {
 		/* Don't allow sum > SSIZE_MAX */
-		if ((ssize_t)(auio.uio_resid += iov->iov_len) <= 0) {
+		if (iov->iov_len > SSIZE_MAX ||
+		    (auio.uio_resid += iov->iov_len) > SSIZE_MAX) {
 			error = EINVAL;
 			goto done;
 		}
@@ -805,13 +807,18 @@ sys_poll(p, v, retval)
 	register_t *retval;
 {
 	struct sys_poll_args *uap = v;
-	size_t sz = sizeof(struct pollfd) * SCARG(uap, nfds);
+	size_t sz;
 	struct pollfd *pl;
 	int msec = SCARG(uap, timeout);
 	struct timeval atv;
 	int timo, ncoll, i, s, error, error2;
 	extern int nselcoll, selwait;
 
+	/* XXX constrain; This may not match standards */
+	if (SCARG(uap, nfds) > p->p_fd->fd_nfiles)
+		SCARG(uap, nfds) = p->p_fd->fd_nfiles;
+	sz = sizeof(struct pollfd) * SCARG(uap, nfds);
+	
 	pl = (struct pollfd *) malloc(sz, M_TEMP, M_WAITOK);
 
 	if ((error = copyin(SCARG(uap, fds), pl, sz)) != 0)

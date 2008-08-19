@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xlreg.h,v 1.6 1998/09/29 02:14:29 jason Exp $	*/
+/*	$OpenBSD: if_xlreg.h,v 1.10 1999/03/03 22:51:52 jason Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -31,7 +31,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- *	$FreeBSD: if_xlreg.h,v 1.5 1998/09/25 17:34:19 wpaul Exp $
+ *	$FreeBSD: if_xlreg.h,v 1.9 1998/12/10 16:18:43 wpaul Exp $
  */
 
 #define XL_EE_READ	0x0080	/* read, 5 bit address */
@@ -363,6 +363,7 @@
  */
 #define XL_W5_STAT_ENB		0x0C
 #define XL_W5_INTR_ENB		0x0A
+#define XL_W5_RECLAIM_THRESH	0x09	/* 3c905B only */
 #define XL_W5_RX_FILTER		0x08
 #define XL_W5_RX_EARLYTHRESH	0x06
 #define XL_W5_TX_AVAILTHRESH	0x02
@@ -547,11 +548,11 @@ struct xl_softc {
 	struct arpcom		arpcom;		/* interface info */
 	struct ifmedia		ifmedia;	/* media info */
 	u_int32_t		iobase;		/* pointer to PIO space */
-#ifndef XL_USEIOSPACE
+#if defined(XL_USEIOSPACE) && defined(__FreeBSD__)
 	volatile caddr_t	csr;		/* pointer to register map */
 #endif
 	struct xl_type		*xl_info;	/* 3Com adapter info */
-	struct xl_type		*xl_pinfo;	/* phy info */
+	u_int8_t		xl_hasmii;	/* whether we have mii or not */
 	u_int8_t		xl_unit;	/* interface number */
 	u_int8_t		xl_type;
 	u_int8_t		xl_phy_addr;	/* PHY address */

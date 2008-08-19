@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.39 1998/07/19 06:08:28 downsj Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.42 1999/02/24 07:36:02 downsj Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -276,9 +276,10 @@ scsi_strvis(dst, src, len)
 {
 
 	/* Trim leading and trailing blanks and NULs. */
-	while (len > 0 && (src[0] == ' ' || src[0] == '\0'))
+	while (len > 0 && (src[0] == ' ' || src[0] == '\0' || src[0] == 0xff))
 		++src, --len;
-	while (len > 0 && (src[len-1] == ' ' || src[len-1] == '\0'))
+	while (len > 0 && (src[len-1] == ' ' || src[len-1] == '\0' ||
+	    src[len-1] == 0xff))
 		--len;
 
 	while (len > 0) {
@@ -344,6 +345,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	 "SONY    ", "CD-ROM CDU-541  ", ""},     SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
 	 "SONY    ", "CD-ROM CDU-55S  ", ""},     SDEV_NOLUNS},
+	{{T_CDROM, T_REMOV,
+	 "SONY    ", "CD-ROM CDU-561  ", ""},     SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
 	 "SONY    ", "CD-ROM CDU-8003A", ""},     SDEV_NOLUNS},
 	{{T_CDROM, T_REMOV,
@@ -453,6 +456,8 @@ struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	 "iomega", "jaz 1GB",		 ""},	  SDEV_NOMODESENSE|SDEV_NOTAGS},
 	{{T_DIRECT, T_REMOV,
 	 "IOMEGA", "ZIP 100",		 ""},	  SDEV_NOMODESENSE},
+	{{T_DIRECT, T_REMOV,
+	 "IOMEGA", "ZIP 250",		 ""},	  SDEV_NOMODESENSE},
 	{{T_DIRECT, T_FIXED,
 	 "IBM", "0661467",               "G"},    SDEV_NOMODESENSE},
 	/* Letting the motor run kills floppy drives and disks quit fast. */

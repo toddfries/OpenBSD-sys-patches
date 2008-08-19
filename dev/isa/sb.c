@@ -1,4 +1,4 @@
-/*	$OpenBSD: sb.c,v 1.15 1998/05/13 10:25:10 provos Exp $	*/
+/*	$OpenBSD: sb.c,v 1.19 1999/01/24 15:58:54 mickey Exp $	*/
 /*	$NetBSD: sb.c,v 1.57 1998/01/12 09:43:46 thorpej Exp $	*/
 
 /*
@@ -35,6 +35,8 @@
  *
  */
 
+#include "midi.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/errno.h>
@@ -46,10 +48,10 @@
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #include <machine/bus.h>
-#include <machine/pio.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
+#include <dev/midi_if.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/isa/isadmavar.h>
@@ -61,6 +63,31 @@
 struct cfdriver sb_cd = {
 	NULL, "sb", DV_DULL
 };
+
+#if NMIDI > 0
+int	sb_mpu401_open __P((void *, int, 
+			     void (*iintr)__P((void *, int)),
+			     void (*ointr)__P((void *)), void *arg));
+void	sb_mpu401_close __P((void *));
+int	sb_mpu401_output __P((void *, int));
+void	sb_mpu401_getinfo __P((void *, struct midi_info *));
+
+struct midi_hw_if sb_midi_hw_if = {
+	sbdsp_midi_open,
+	sbdsp_midi_close,
+	sbdsp_midi_output,
+	sbdsp_midi_getinfo,
+	0,			/* ioctl */
+};
+
+struct midi_hw_if sb_mpu401_hw_if = {
+	sb_mpu401_open,
+	sb_mpu401_close,
+	sb_mpu401_output,
+	sb_mpu401_getinfo,
+	0,			/* ioctl */
+};
+#endif
 
 struct audio_device sb_device = {
 	"SoundBlaster",
@@ -82,10 +109,10 @@ struct audio_hw_if sb_hw_if = {
 	sbdsp_set_params,
 	sbdsp_round_blocksize,
 	0,
-	sbdsp_dma_init_output,
-	sbdsp_dma_init_input,
-	sbdsp_dma_output,
-	sbdsp_dma_input,
+	0,
+	0,
+	0,
+	0,
 	sbdsp_haltdma,
 	sbdsp_haltdma,
 	sbdsp_speaker_ctl,
@@ -99,6 +126,8 @@ struct audio_hw_if sb_hw_if = {
 	sb_round,
         sb_mappage,
 	sbdsp_get_props,
+	sbdsp_trigger_output,
+	sbdsp_trigger_input
 };
 
 #ifdef AUDIO_DEBUG
@@ -164,27 +193,6 @@ sbmatch(sc)
 	} else
 		sc->sc_drq16 = sc->sc_drq8;
 	
-#ifdef NEWCONFIG
-	/*
-	 * If the IRQ wasn't compiled in, auto-detect it.
-	 */
-	if (sc->sc_irq == IRQUNK) {
-		sc->sc_irq = isa_discoverintr(sbforceintr, sc);
-		sbdsp_reset(sc);
-		if (ISSBPROCLASS(sc)) {
-			if (!SBP_IRQ_VALID(sc->sc_irq)) {
-				DPRINTF(("%s: couldn't auto-detect interrupt\n", sc->sc_dev.dv_xname));
-				return 0;
-			}
-		}
-		else {
-			if (!SB_IRQ_VALID(sc->sc_irq)) {
-				DPRINTF(("%s: couldn't auto-detect interrupt\n", sc->sc_dev.dv_xname));
-				return 0;
-			}
-		}
-	} else
-#endif
 	if (ISSBPROCLASS(sc)) {
 		if (!SBP_IRQ_VALID(sc->sc_irq)) {
 			DPRINTF(("%s: configured irq %d invalid\n",
@@ -247,41 +255,35 @@ void
 sbattach(sc)
 	struct sbdsp_softc *sc;
 {
+	struct audio_attach_args arg;
+#if NMIDI > 0
+	struct midi_hw_if *mhw = &sb_midi_hw_if;
+#endif
+
 	sc->sc_ih = isa_intr_establish(sc->sc_ic, sc->sc_irq, IST_EDGE,
 	    IPL_AUDIO, sbdsp_intr, sc, sc->sc_dev.dv_xname);
 
 	sbdsp_attach(sc);
 
-	audio_attach_mi(&sb_hw_if, 0, sc, &sc->sc_dev);
-}
-
-#ifdef NEWCONFIG
-void
-sbforceintr(aux)
-	void *aux;
-{
-	static char dmabuf;
-	struct sbdsp_softc *sc = aux;
-
-	/*
-	 * Set up a DMA read of one byte.
-	 * XXX Note that at this point we haven't called 
-	 * at_setup_dmachan().  This is okay because it just
-	 * allocates a buffer in case it needs to make a copy,
-	 * and it won't need to make a copy for a 1 byte buffer.
-	 * (I think that calling at_setup_dmachan() should be optional;
-	 * if you don't call it, it will be called the first time
-	 * it is needed (and you pay the latency).  Also, you might
-	 * never need the buffer anyway.)
-	 */
-	at_dma(DMAMODE_READ, &dmabuf, 1, sc->sc_drq8);
-	if (sbdsp_wdsp(sc, SB_DSP_RDMA) == 0) {
-		(void)sbdsp_wdsp(sc, 0);
-		(void)sbdsp_wdsp(sc, 0);
+#if NMIDI > 0
+	sc->sc_hasmpu = 0;
+	if (ISSB16CLASS(sc) && sc->sc_mpu_sc.iobase != 0) {
+		sc->sc_mpu_sc.iot = sc->sc_iot;
+		if (mpu401_find(&sc->sc_mpu_sc)) {
+			sc->sc_hasmpu = 1;
+			mhw = &sb_mpu401_hw_if;
+		}
 	}
-}
+	midi_attach_mi(mhw, sc, &sc->sc_dev);
 #endif
 
+	audio_attach_mi(&sb_hw_if, sc, &sc->sc_dev);
+
+	arg.type = AUDIODEV_TYPE_OPL;
+	arg.hwif = 0;
+	arg.hdl = 0;
+	(void)config_found(&sc->sc_dev, &arg, audioprint);
+}
 
 /*
  * Various routines to interface to higher level audio driver
@@ -311,3 +313,43 @@ sb_getdev(addr, retp)
 		
 	return 0;
 }
+
+#if NMIDI > 0
+
+#define SBMPU(a) (&((struct sbdsp_softc *)addr)->sc_mpu_sc)
+
+int
+sb_mpu401_open(addr, flags, iintr, ointr, arg)
+	void *addr;
+	int flags;
+	void (*iintr)__P((void *, int));
+	void (*ointr)__P((void *));
+	void *arg;
+{
+	return mpu401_open(SBMPU(addr), flags, iintr, ointr, arg);
+}
+
+int
+sb_mpu401_output(addr, d)
+	void *addr;
+	int d;
+{
+	return mpu401_output(SBMPU(addr), d);
+}
+
+void
+sb_mpu401_close(addr)
+	void *addr;
+{
+	mpu401_close(SBMPU(addr));
+}
+
+void
+sb_mpu401_getinfo(addr, mi)
+	void *addr;
+	struct midi_info *mi;
+{
+	mi->name = "SB MPU-401 UART";
+	mi->props = 0;
+}
+#endif

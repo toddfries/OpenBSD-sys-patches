@@ -1,4 +1,4 @@
-/*	$OpenBSD: gus.c,v 1.17 1998/08/20 08:37:47 provos Exp $	*/
+/*	$OpenBSD: gus.c,v 1.20 1999/01/24 15:58:53 mickey Exp $	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -113,7 +113,6 @@
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #include <machine/bus.h>
-#include <machine/pio.h>
 #include <machine/cpufunc.h>
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -620,6 +619,9 @@ struct audio_hw_if gus_hw_if = {
 	ad1848_round,
 	ad1848_mappage,
 	gus_get_props,
+
+	NULL,
+	NULL
 };
 
 static struct audio_hw_if gusmax_hw_if = {
@@ -1036,7 +1038,8 @@ gusattach(parent, self, aux)
 	 * Attach to the generic audio layer
 	 */
 
-	audio_attach_mi(&gus_hw_if, 0, HAS_CODEC(sc) ? (void *)&sc->sc_codec : (void *)sc, &sc->sc_dev);
+	audio_attach_mi(&gus_hw_if,
+	    HAS_CODEC(sc) ? (void *)&sc->sc_codec : (void *)sc, &sc->sc_dev);
 }
 
 int

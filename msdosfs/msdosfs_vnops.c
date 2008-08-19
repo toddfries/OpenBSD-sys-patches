@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.18 1998/08/06 19:34:54 csapuntz Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.21 1999/02/26 03:28:13 art Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -485,10 +485,10 @@ msdosfs_read(v)
 			return (error);
 		}
 		error = uiomove(bp->b_data + on, (int) n, uio);
-		if (!isadir)
-			dep->de_flag |= DE_ACCESS;
 		brelse(bp);
 	} while (error == 0 && uio->uio_resid > 0 && n != 0);
+	if (!isadir && !(vp->v_mount->mnt_flag & MNT_NOATIME))
+		dep->de_flag |= DE_ACCESS;
 	return (error);
 }
 
@@ -638,9 +638,17 @@ msdosfs_write(v)
 		n = min(uio->uio_resid, pmp->pm_bpcluster - croffset);
 		if (uio->uio_offset + n > dep->de_FileSize) {
 			dep->de_FileSize = uio->uio_offset + n;
+#if defined(UVM)
+			uvm_vnp_setsize(vp, dep->de_FileSize);
+#else
 			vnode_pager_setsize(vp, dep->de_FileSize);	/* why? */
+#endif
 		}
+#if defined(UVM)
+		uvm_vnp_uncache(vp);
+#else
 		(void) vnode_pager_uncache(vp);	/* why not? */
+#endif
 		/*
 		 * Should these vnode_pager_* functions be done on dir
 		 * files?
@@ -1205,7 +1213,7 @@ abortit:
 		cn = ip->de_StartCluster;
 		if (cn == MSDOSFSROOT) {
 			/* this should never happen */
-			panic("msdosfs_rename: updating .. in root directory?\n");
+			panic("msdosfs_rename: updating .. in root directory?");
 		} else
 			bn = cntobn(pmp, cn);
 		error = bread(pmp->pm_devvp, bn, pmp->pm_bpcluster,

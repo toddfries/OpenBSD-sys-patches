@@ -1,4 +1,4 @@
-/*	$OpenBSD: cread.c,v 1.6 1998/09/08 03:33:06 millert Exp $	*/
+/*	$OpenBSD: cread.c,v 1.8 1999/02/14 20:07:46 mickey Exp $	*/
 /*	$NetBSD: cread.c,v 1.2 1997/02/04 18:38:20 thorpej Exp $	*/
 
 /*
@@ -79,6 +79,10 @@ static struct sd {
   int      transparent; /* 1 if input file is not a .gz file */
 } *ss[SOPEN_MAX];
 
+#ifdef DEBUG
+int z_verbose = 0;
+#endif
+
 /*
  * compression utilities
  */
@@ -105,7 +109,7 @@ static int get_byte(s)
     if (s->stream.avail_in == 0) {
 	errno = 0;
 	s->stream.avail_in = oread(s->fd, s->inbuf, Z_BUFSIZE);
-	if (s->stream.avail_in == 0) {
+	if (s->stream.avail_in <= 0) {
 	    s->z_eof = 1;
 	    if (errno) s->z_err = Z_ERRNO;
 	    return EOF;
@@ -279,7 +283,16 @@ read(fd, buf, len)
 		s->stream.avail_in  -= n;
 	      }
 	      if (s->stream.avail_out > 0) {
-		s->stream.avail_out -= oread(fd, s->stream.next_out, s->stream.avail_out);
+		int n;
+		n = oread(fd, s->stream.next_out, s->stream.avail_out);
+		if (n <= 0) {
+		  s->z_eof = 1;
+		  if (errno) {
+		    s->z_err = Z_ERRNO;
+		    break;
+		  }
+	        }
+		s->stream.avail_out -= n;
 	      }
 	      len -= s->stream.avail_out;
 	      s->stream.total_in  += (unsigned long)len;
@@ -292,7 +305,7 @@ read(fd, buf, len)
 
 	      errno = 0;
 	      s->stream.avail_in = oread(fd, s->inbuf, Z_BUFSIZE);
-	      if (s->stream.avail_in == 0) {
+	      if (s->stream.avail_in <= 0) {
 		s->z_eof = 1;
 		if (errno) {
 		  s->z_err = Z_ERRNO;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: adv_pci.c,v 1.2 1998/09/28 01:56:58 downsj Exp $	*/
+/*	$OpenBSD: adv_pci.c,v 1.4 1998/11/17 07:55:46 downsj Exp $	*/
 /*	$NetBSD: adv_pci.c,v 1.5 1998/09/26 15:52:55 dante Exp $	*/
 
 /*
@@ -51,7 +51,6 @@
  *      ABP940U - Bus-Master PCI Ultra (240 CDB)
  *      ABP970 - Bus-Master PCI MAC/PC (240 CDB)
  *      ABP970U - Bus-Master PCI MAC/PC Ultra (240 CDB)
- *      ABP940UW - Bus-Master PCI Ultra-Wide (240 CDB)
  *
  *   Multi Channel Products:
  *      ABP950 - Dual Channel Bus-Master PCI (240 CDB Per Channel)
@@ -135,23 +134,11 @@ adv_pci_attach(parent, self, aux)
 	bus_size_t advsize;
 	pci_intr_handle_t ih;
 	pci_chipset_tag_t pc = pa->pa_pc;
-	u_int32_t       command;
 	const char     *intrstr;
 	int retval;
 
 	sc->sc_flags = 0x0;
-	/*
-	 * Make sure IO/MEM/MASTER are enabled
-	 */
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	if ((command & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-			PCI_COMMAND_MASTER_ENABLE)) !=
-	    (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	     PCI_COMMAND_MASTER_ENABLE)) {
-		pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
-		 command | (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-			    PCI_COMMAND_MASTER_ENABLE));
-	}
+
 	/*
 	 * Latency timer settings.
 	 */

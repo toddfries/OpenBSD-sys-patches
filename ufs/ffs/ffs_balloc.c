@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_balloc.c,v 1.6 1997/11/06 05:59:17 csapuntz Exp $	*/
+/*	$OpenBSD: ffs_balloc.c,v 1.8 1999/02/26 03:56:30 art Exp $	*/
 /*	$NetBSD: ffs_balloc.c,v 1.3 1996/02/09 22:22:21 christos Exp $	*/
 
 /*
@@ -45,6 +45,10 @@
 #include <sys/vnode.h>
 
 #include <vm/vm.h>
+
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -118,7 +122,11 @@ ffs_balloc(v)
 				    fs->fs_bsize, osize, bp);
 
 			ip->i_ffs_size = (nb + 1) * fs->fs_bsize;
+#if defined(UVM)
+			uvm_vnp_setsize(vp, ip->i_ffs_size);
+#else
 			vnode_pager_setsize(vp, (u_long)ip->i_ffs_size);
+#endif
 			ip->i_ffs_db[nb] = dbtofsb(fs, bp->b_blkno);
 			ip->i_flag |= IN_CHANGE | IN_UPDATE;
 			if (flags & B_SYNC)
@@ -197,7 +205,7 @@ ffs_balloc(v)
 		return(error);
 #ifdef DIAGNOSTIC
 	if (num < 1)
-		panic ("ffs_balloc: ufs_bmaparray returned indirect block\n");
+		panic ("ffs_balloc: ufs_bmaparray returned indirect block");
 #endif
 	/*
 	 * Fetch the first indirect block allocating if necessary.

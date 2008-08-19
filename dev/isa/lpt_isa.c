@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpt_isa.c,v 1.8 1997/10/07 05:58:26 mickey Exp $	*/
+/*	$OpenBSD: lpt_isa.c,v 1.10 1999/01/30 01:41:48 imp Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 Charles Hannum.
@@ -97,6 +97,9 @@ lpt_isa_probe(parent, match, aux)
 	struct device *parent;
 	void *match, *aux;
 {
+#if !defined(__NO_ISA_INTR_CHECK)
+	struct isa_softc *sc = (struct isa_softc *)parent;
+#endif
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -147,6 +150,15 @@ lpt_isa_probe(parent, match, aux)
 	bus_space_write_1(iot, ioh, lpt_data, 0);
 	bus_space_write_1(iot, ioh, lpt_control, 0);
 
+	/*
+	 * Check if the specified IRQ is available.  If not revert to
+	 * polled mode.
+	 */
+#if !defined(__NO_ISA_INTR_CHECK)
+	if (ia->ia_irq != IRQUNK &&
+	    !isa_intr_check(sc->sc_ic, ia->ia_irq, IST_EDGE))
+		ia->ia_irq = IRQUNK;
+#endif
 	ia->ia_msize = 0;
 	ia->ia_iosize = iosz;
 

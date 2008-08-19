@@ -1,4 +1,4 @@
-/*	$OpenBSD: pio.h,v 1.5 1997/11/10 23:40:45 niklas Exp $	*/
+/*	$OpenBSD: pio.h,v 1.7 1999/03/09 15:39:08 mickey Exp $	*/
 /*	$NetBSD: pio.h,v 1.13 1996/03/08 20:15:23 cgd Exp $	*/
 
 /*
@@ -77,9 +77,9 @@ static __inline void
 insb(int port, void *addr, int cnt)
 {
 	__asm __volatile("cld\n\trepne\n\tinsb"			:
-								:
-			 "d" (port), "D" (addr), "c" (cnt)	:
-			 "%edi", "%ecx", "memory");
+			 "=D" (addr), "=c" (cnt)		:
+			 "d" (port), "0" (addr), "1" (cnt)	:
+			 "memory", "cc");
 }
 
 #define	inw(port) \
@@ -105,9 +105,9 @@ static __inline void
 insw(int port, void *addr, int cnt)
 {
 	__asm __volatile("cld\n\trepne\n\tinsw"			:
-								:
-			 "d" (port), "D" (addr), "c" (cnt)	:
-			 "%edi", "%ecx", "memory");
+			 "=D" (addr), "=c" (cnt)		:
+			 "d" (port), "0" (addr), "1" (cnt)	:
+			 "memory", "cc");
 }
 
 #define	inl(port) \
@@ -133,9 +133,9 @@ static __inline void
 insl(int port, void *addr, int cnt)
 {
 	__asm __volatile("cld\n\trepne\n\tinsl"			:
-								:
-			 "d" (port), "D" (addr), "c" (cnt)	:
-			 "%edi", "%ecx", "memory");
+			 "=D" (addr), "=c" (cnt)		:
+			 "d" (port), "0" (addr), "1" (cnt)	:
+			 "memory", "cc");
 }
 
 #define	outb(port, data) \
@@ -157,9 +157,9 @@ static __inline void
 outsb(int port, const void *addr, int cnt)
 {
 	__asm __volatile("cld\n\trepne\n\toutsb"		:
-								:
-			 "d" (port), "S" (addr), "c" (cnt)	:
-			 "%esi", "%ecx");
+			 "=S" (addr), "=c" (cnt)		:
+			 "d" (port), "0" (addr), "1" (cnt)	:
+			 "cc");
 }
 
 #define	outw(port, data) \
@@ -181,9 +181,9 @@ static __inline void
 outsw(int port, const void *addr, int cnt)
 {
 	__asm __volatile("cld\n\trepne\n\toutsw"		:
-								:
-			 "d" (port), "S" (addr), "c" (cnt)	:
-			 "%esi", "%ecx");
+			 "=S" (addr), "=c" (cnt)		:
+			 "d" (port), "0" (addr), "1" (cnt)	:
+			 "cc");
 }
 
 #define	outl(port, data) \
@@ -205,9 +205,9 @@ static __inline void
 outsl(int port, const void *addr, int cnt)
 {
 	__asm __volatile("cld\n\trepne\n\toutsl"		:
-								:
-			 "d" (port), "S" (addr), "c" (cnt)	:
-			 "%esi", "%ecx");
+			 "=S" (addr), "=c" (cnt)		:
+			 "d" (port), "0" (addr), "1" (cnt)	:
+			 "cc");
 }
 
 #endif /* _I386_PIO_H_ */

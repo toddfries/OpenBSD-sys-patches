@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.12 1998/02/14 10:55:08 deraadt Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.16 1999/02/19 15:06:52 millert Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -113,6 +113,7 @@ struct socket {
 #define	SS_CANTSENDMORE		0x010	/* can't send more data to peer */
 #define	SS_CANTRCVMORE		0x020	/* can't receive more data from peer */
 #define	SS_RCVATMARK		0x040	/* at mark on input */
+#define	SS_ISDISCONNECTED	0x800	/* socket disconnected from peer */
 
 #define	SS_PRIV			0x080	/* privileged for broadcast, raw... */
 #define	SS_NBIO			0x100	/* non-blocking ops */
@@ -274,7 +275,7 @@ int	sosetopt __P((struct socket *so, int level, int optname,
 	    struct mbuf *m0));
 int	soshutdown __P((struct socket *so, int how));
 void	sowakeup __P((struct socket *so, struct sockbuf *sb));
-int	sockargs __P((struct mbuf **, caddr_t, int, int));
+int	sockargs __P((struct mbuf **, caddr_t, socklen_t, int));
 
 int	sendit __P((struct proc *, int, struct msghdr *, int, register_t *));
 int	recvit __P((struct proc *, int, struct msghdr *, caddr_t,

@@ -1,7 +1,7 @@
-#	$OpenBSD: files.pci,v 1.27 1998/10/10 03:55:05 jason Exp $
+#	$OpenBSD: files.pci,v 1.37 1999/03/11 18:20:13 jason Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
-# Config.new file and device description for machine-independent PCI code.
+# Config file and device description for machine-independent PCI code.
 # Included by ports that need it.  Requires that the SCSI files be
 # defined first.
 
@@ -30,6 +30,13 @@ attach	adv at pci with adv_pci
 file	dev/pci/adv_pci.c		adv_pci
 file	dev/ic/advlib.c			adv_pci
 file	dev/ic/advmcode.c		adv_pci
+
+# AdvanSys ULTRA WIDE SCSI controllers
+# device declaration in sys/conf/files
+attach	adw at pci with adw_pci
+file	dev/pci/adw_pci.c		adw_pci
+file	dev/ic/adwlib.c			adw_pci
+file	dev/ic/adwmcode.c		adw_pci
 
 # BusLogic BT-9xx PCI family
 # device declaration in sys/dev/isa/files.isa
@@ -91,6 +98,26 @@ device	fxp: ether, ifnet, mii, ifmedia
 attach	fxp at pci 
 file	dev/pci/if_fxp.c		fxp
 
+# RealTek 8129/8139
+device	rl: ether, ifnet, mii, ifmedia
+attach	rl at pci
+file	dev/pci/if_rl.c			rl
+
+# Lite-On PNIC
+device	pn: ether, ifnet, ifmedia
+attach	pn at pci
+file	dev/pci/if_pn.c			pn
+
+# Macronix
+device	mx: ether, ifnet, ifmedia
+attach	mx at pci
+file	dev/pci/if_mx.c			mx
+
+# Via Rhine
+device	vr: ether, ifnet, ifmedia
+attach	vr at pci
+file	dev/pci/if_vr.c			vr
+
 # Texas Instruments ThunderLAN
 device	tl: ether, ifnet, mii, ifmedia
 attach	tl at pci
@@ -117,5 +144,15 @@ attach	tx at pci
 file	dev/pci/if_tx.c			tx
 
 # NE2000-compatible PCI Ethernet cards
-attach	ne at pci with ne_pci
+attach	ne at pci with ne_pci: rtl80x9
 file	dev/pci/if_ne_pci.c		ne_pci
+
+# Invertix AEON
+device	aeon: crypto
+attach	aeon at pci
+file	dev/pci/aeon.c			aeon
+
+# Winbond W89C840F ethernet
+device	wb: ether, ifnet
+attach	wb at pci
+file	dev/pci/if_wb.c			wb

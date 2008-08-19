@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.h,v 1.12 1998/02/22 01:00:26 niklas Exp $	*/
+/*	$OpenBSD: exec_elf.h,v 1.14 1999/02/10 08:07:20 deraadt Exp $	*/
 /*
  * Copyright (c) 1995, 1996 Erik Theisen.  All rights reserved.
  *
@@ -55,6 +55,7 @@ typedef u_int16_t	Elf32_Half;	/* Unsigned medium integer */
 #define EI_DATA		5		/* data encoding */
 #define EI_VERSION	6		/* ELF header version */
 #define EI_PAD		7		/* start of pad bytes */
+#define EI_BRAND	8		/* brand */ 
 #define EI_NIDENT	16		/* Size of e_ident[] */
 
 /* e_ident[] magic number */
@@ -338,7 +339,8 @@ extern Elf32_Dyn	_DYNAMIC[];
 #define DT_DEBUG	21		/* bugger */
 #define DT_TEXTREL	22		/* Allow rel. mod. to unwritable seg */
 #define DT_JMPREL	23		/* add. of PLT's relocation entries */
-#define DT_NUM		24		/* Number used. */
+#define DT_BIND_NOW	24		/* Bind now regardless of env setting */
+#define DT_NUM		25		/* Number used. */
 #define DT_LOPROC	0x70000000	/* reserved range for processor */
 #define DT_HIPROC	0x7fffffff	/*  specific dynamic array tags */
 	
@@ -348,7 +350,7 @@ unsigned int elf_hash(const unsigned char *name);
 /*
  * XXX - these _KERNEL items aren't part of the ABI!
  */
-#ifdef _KERNEL
+#if defined(_KERNEL) || defined(_DYN_LOADER)
 
 #define ELF32_NO_ADDR	((u_long) ~0)	/* Indicates addr. not yet filled in */
 #define ELF_AUX_ENTRIES	8		/* Size of aux array passed to loader */
@@ -384,10 +386,14 @@ struct elf_args {
         u_long  arg_os;			/* OS tag */
 };
 
+#endif
+
+#ifdef	_KERNEL
 int exec_elf_makecmds __P((struct proc *, struct exec_package *));
 void *elf_copyargs __P((struct exec_package *, struct ps_strings *,
         void *, void *));
 int exec_elf_fixup __P((struct proc *, struct exec_package *));
+char *elf_check_brand __P((Elf32_Ehdr *));
 
 #endif /* _KERNEL */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_pcmcia.c,v 1.5 1998/10/14 07:34:43 fgsch Exp $	*/
+/*	$OpenBSD: com_pcmcia.c,v 1.12 1999/01/28 04:58:29 fgsch Exp $	*/
 /*	$NetBSD: com_pcmcia.c,v 1.15 1998/08/22 17:47:58 msaitoh Exp $	*/
 
 /*-
@@ -106,6 +106,11 @@
 
 #include <dev/isa/isareg.h>
 
+#include "com.h"
+#ifdef i386
+#include "pccom.h"
+#endif
+
 #define	com_lcr		com_cfcr
 #define	SET(t, f)	(t) |= (f)
 
@@ -145,9 +150,15 @@ struct com_pcmcia_softc {
 	void *sc_ih;				/* interrupt handler */
 };
 
+#if NCOM_PCMCIA
 struct cfattach com_pcmcia_ca = {
 	sizeof(struct com_pcmcia_softc), com_pcmcia_match, com_pcmcia_attach
 };
+#elif NPCCOM_PCMCIA
+struct cfattach pccom_pcmcia_ca = {
+	sizeof(struct com_pcmcia_softc), com_pcmcia_match, com_pcmcia_attach
+};
+#endif
 
 /* Look for pcmcia cards with particular CIS strings */
 static struct com_dev *
@@ -158,7 +169,7 @@ com_dev_match(card)
 
 	for (i = 0; i < com_devs_size; i++) {
 		for (j = 0; j < 4; j++)
-		       	if (com_devs[i].cis1_info[j] &&
+			if (com_devs[i].cis1_info[j] &&
 			    strcmp(com_devs[i].cis1_info[j],
 				   card->cis1_info[j]))
 				break;
@@ -187,28 +198,28 @@ com_pcmcia_match(parent, match, aux)
 	comportmask = 0;
 	for (cfe = pa->pf->cfe_head.sqh_first; cfe;
 	     cfe = cfe->cfe_list.sqe_next) {
-	  switch (cfe->iospace[0].start) {
-	  case IO_COM1:
-	    comportmask |= 1;
-	    break;
-	  case IO_COM2:
-	    comportmask |= 2;
-	    break;
-	  case IO_COM3:
-	    comportmask |= 4;
-	    break;
-	  case IO_COM4:
-	    comportmask |= 8;
-	    break;
-	  }
+		switch (cfe->iospace[0].start) {
+		case IO_COM1:
+			comportmask |= 1;
+			break;
+		case IO_COM2:
+			comportmask |= 2;
+			break;
+		case IO_COM3:
+			comportmask |= 4;
+			break;
+		case IO_COM4:
+			comportmask |= 8;
+			break;
+		}
 	}
 
 	if (comportmask == 15)
-	    return 1;
+		return 1;
 
 	/* 3. Is this a card we know about? */
 	if (com_dev_match(pa->card) != NULL)
-	    return 1;
+		return 1;
 
 	return 0;
 }
@@ -243,19 +254,11 @@ retry:
 		if (cfe->num_iospace != 1)
 			continue;
 
-		if (autoalloc == 1) {
-			if (cfe->iomask == 3) {
-				if (!pcmcia_io_alloc(pa->pf, 0, cfe->iospace[0].length,
-									 cfe->iospace[0].length,
-									 &psc->sc_pcioh)) {
-					goto found;
-				}
-			}
-		} else {
-			if (!pcmcia_io_alloc(pa->pf, cfe->iospace[0].start,
-								 cfe->iospace[0].length, 0, &psc->sc_pcioh)) {
-				goto found;
-			}
+		if (!pcmcia_io_alloc(pa->pf,
+		    autoalloc ? 0 : cfe->iospace[0].start,
+		    cfe->iospace[0].length, (1 << cfe->iomask),
+		    &psc->sc_pcioh)) {
+			goto found;
 		}
 	}
 	if (autoalloc == 0) {
@@ -305,7 +308,7 @@ found:
 	psc->sc_ih = pcmcia_intr_establish(pa->pf, IPL_TTY, comintr, sc);
 	if (psc->sc_ih == NULL)
 		printf("%s: couldn't establish interrupt\n",
-		       sc->sc_dev.dv_xname);
+		    sc->sc_dev.dv_xname);
 
 #ifdef notyet
 	sc->enabled = 0;
@@ -325,7 +328,7 @@ com_pcmcia_enable(sc)
 	psc->sc_ih = pcmcia_intr_establish(pf, IPL_TTY, comintr, sc);
 	if (psc->sc_ih == NULL) {
 		printf("%s: couldn't establish interrupt\n",
-		       sc->sc_dev.dv_xname);
+		    sc->sc_dev.dv_xname);
 		return (1);
 	}
 	return com_pcmcia_enable1(sc);
@@ -342,7 +345,8 @@ com_pcmcia_enable1(sc)
 	if ((ret = pcmcia_function_enable(pf)))
 	    return(ret);
 
-	if (psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3C562) {
+	if ((psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3C562) ||
+	    (psc->sc_pf->sc->card.product == PCMCIA_PRODUCT_3COM_3CXEM556)) {
 		int reg;
 
 		/* turn off the ethernet-disable bit */
@@ -506,7 +510,7 @@ com_attach(sc)
 		break;
 #endif
 	default:
-		panic("comattach: bad fifo type\n");
+		panic("comattach: bad fifo type");
 	}
 
 	/* clear and disable fifo */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: types.h,v 1.3 1998/10/15 21:30:14 imp Exp $	*/
+/*	$OpenBSD: types.h,v 1.6 1999/01/27 04:46:06 imp Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -38,8 +38,8 @@
  *	@(#)types.h	8.3 (Berkeley) 1/5/94
  */
 
-#ifndef	_MACHINE_TYPES_H_
-#define	_MACHINE_TYPES_H_
+#ifndef	_MIPS_TYPES_H_
+#define	_MIPS_TYPES_H_
 
 #include <sys/cdefs.h>
 
@@ -63,18 +63,23 @@ typedef	unsigned long	vm_size_t;
 #define	__BIT_TYPES_DEFINED__
 typedef	__signed char		   int8_t;
 typedef	unsigned char		 u_int8_t;
+typedef	unsigned char		  uint8_t;
 typedef	short			  int16_t;
 typedef	unsigned short		u_int16_t;
+typedef	unsigned short		 uint16_t;
 typedef	int			  int32_t;
 typedef	unsigned int		u_int32_t;
+typedef	unsigned int		 uint32_t;
 /* LONGLONG */
 typedef	long long		  int64_t;
 /* LONGLONG */
 typedef	unsigned long long	u_int64_t;
+/* LONGLONG */
+typedef	unsigned long long	 uint64_t;
 
 typedef int32_t			register_t;
 
 #define	__SWAP_BROKEN
 #define __FORK_BRAINDAMAGE
 
-#endif	/* _MACHINE_TYPES_H_ */
+#endif	/* _MIPS_TYPES_H_ */

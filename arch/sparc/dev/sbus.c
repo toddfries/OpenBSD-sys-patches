@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbus.c,v 1.5 1997/08/08 08:25:27 downsj Exp $	*/
+/*	$OpenBSD: sbus.c,v 1.7 1998/12/14 17:51:35 deraadt Exp $	*/
 /*	$NetBSD: sbus.c,v 1.17 1997/06/01 22:10:39 pk Exp $ */
 
 /*
@@ -59,6 +59,7 @@
 
 #include <sparc/dev/sbusreg.h>
 #include <sparc/dev/sbusvar.h>
+#include <sparc/dev/dmareg.h>
 
 int sbus_print __P((void *, const char *));
 void sbusreset __P((int));
@@ -87,9 +88,13 @@ sbus_print(args, sbus)
 	const char *sbus;
 {
 	register struct confargs *ca = args;
+	static char *sl = "slave-only";
 
 	if (sbus)
 		printf("%s at %s", ca->ca_ra.ra_name, sbus);
+	/* Check root node for 'slave-only' property */
+	if (getpropint(0, sl, 0) & (1 << ca->ca_slot))
+		printf(" %s", sl);
 	printf(" slot %d offset 0x%x", ca->ca_slot, ca->ca_offset);
 	return (UNCONF);
 }
@@ -147,6 +152,7 @@ sbus_attach(parent, self, aux)
 	 * Get the SBus burst transfer size if burst transfers are supported
 	 */
 	sc->sc_burst = getpropint(node, "burst-sizes", 0);
+	sc->sc_burst = sc->sc_burst & ~SBUS_BURST_64;
 
 	if (ra->ra_bp != NULL && strcmp(ra->ra_bp->name, "sbus") == 0)
 		oca.ca_ra.ra_bp = ra->ra_bp + 1;
@@ -286,4 +292,27 @@ sbusreset(sbus)
 			printf(" %s", dev->dv_xname);
 		}
 	}
+}
+
+/*
+ * Returns true if this sbus slot is capable of dma
+ */
+int
+sbus_testdma(sc, ca)
+	struct sbus_softc *sc;
+	struct confargs *ca;
+{
+        struct romaux *ra = &ca->ca_ra;
+
+	/*
+	 * XXX how to handle more then one sbus?
+	 */
+
+	if (getpropint(0, "slave-only", 0) & (1 << ca->ca_slot)) {
+		printf("%s: dma card found in non-dma sbus slot %d"
+			": not supported\n", ra->ra_name, ca->ca_slot);
+		return (0);
+	}
+
+	return (1);
 }

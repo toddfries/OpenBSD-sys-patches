@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.29 1998/03/01 14:35:42 niklas Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.31 1999/01/20 12:06:52 niklas Exp $	*/
 /*	$NetBSD: machdep.c,v 1.95 1997/08/27 18:31:17 is Exp $	*/
 
 /*
@@ -109,31 +109,7 @@
 #include "ether.h"
 #include "ppp.h"
 
-#include <net/netisr.h>
 #include <net/if.h>
-
-#ifdef INET
-#include <netinet/in.h>
-#ifdef NETHER
-#include <netinet/if_ether.h>
-#endif
-#include <netinet/ip_var.h>
-#endif 
-#ifdef NS
-#include <netns/ns_var.h>
-#endif
-#ifdef ISO
-#include <netiso/iso.h>
-#include <netiso/clnp.h>
-#endif
-#ifdef NETATALK
-#include <netatalk/at_extern.h>
-#endif
-#if NPPP > 0
-#include <net/ppp_defs.h>
-#include <net/if_ppp.h>
-#endif
-
 
 /* vm_map_t buffer_map; */
 extern vm_offset_t avail_end;
@@ -573,8 +549,6 @@ again:
 
 /*
  * Set registers on exec.
- * XXX Should clear registers except sp, pc,
- * but would break init; should be fixed soon.
  */
 void
 setregs(p, pack, stack, retval)
@@ -585,9 +559,24 @@ setregs(p, pack, stack, retval)
 {
 	struct frame *frame = (struct frame *)p->p_md.md_regs;
 	
+	frame->f_sr = PSL_USERSET;
 	frame->f_pc = pack->ep_entry & ~1;
-	frame->f_regs[SP] = stack;
+	frame->f_regs[D0] = 0;
+	frame->f_regs[D1] = 0;
+	frame->f_regs[D2] = 0;
+	frame->f_regs[D3] = 0;
+	frame->f_regs[D4] = 0;
+	frame->f_regs[D5] = 0;
+	frame->f_regs[D6] = 0;
+	frame->f_regs[D7] = 0;
+	frame->f_regs[A0] = 0;
+	frame->f_regs[A1] = 0;
 	frame->f_regs[A2] = (int)PS_STRINGS;
+	frame->f_regs[A3] = 0;
+	frame->f_regs[A4] = 0;
+	frame->f_regs[A5] = 0;
+	frame->f_regs[A6] = 0;
+	frame->f_regs[SP] = stack;
 
 	/* restore a null state frame */
 	p->p_addr->u_pcb.pcb_fpregs.fpf_null = 0;
@@ -1210,6 +1199,12 @@ netintr()
 	if (netisr & (1 << NETISR_IP)) {
 		netisr &= ~(1 << NETISR_IP);
 		ipintr();
+	}
+#endif
+#ifdef INET6
+	if (netisr & (1 << NETISR_IPV6)) {
+		netisr &= ~(1 << NETISR_IPV6);
+		ipv6intr();
 	}
 #endif
 #ifdef NETATALK

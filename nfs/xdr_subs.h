@@ -1,4 +1,4 @@
-/*	$OpenBSD: xdr_subs.h,v 1.5 1998/08/19 22:26:59 csapuntz Exp $	*/
+/*	$OpenBSD: xdr_subs.h,v 1.7 1999/02/06 23:07:47 millert Exp $	*/
 /*	$NetBSD: xdr_subs.h,v 1.11 1996/02/18 11:54:12 fvdl Exp $	*/
 
 /*
@@ -82,13 +82,13 @@
 }
 
 #define	fxdr_hyper(f) 						\
-        ((((u_quad_t)ntohl(((int32_t *)(f))[0])) << 32) |	\
-	 (u_quad_t)(ntohl(((int32_t *)(f))[1])))
+        ((((u_quad_t)ntohl(((u_int32_t *)(f))[0])) << 32) |	\
+	 (u_quad_t)(ntohl(((u_int32_t *)(f))[1])))
 
 
-#define	txdr_hyper(f, t) { \
-	((int32_t *)(t))[0] = htonl(((int32_t *)(f))[_QUAD_HIGHWORD]); \
-	((int32_t *)(t))[1] = htonl(((int32_t *)(f))[_QUAD_LOWWORD]); \
+#define	txdr_hyper(f, t) {						\
+	((u_int32_t *)(t))[0] = htonl((u_int32_t)((f) >> 32));		\
+	((u_int32_t *)(t))[1] = htonl((u_int32_t)((f) & 0xffffffff));	\
 }
 
 #endif

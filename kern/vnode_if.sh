@@ -33,7 +33,7 @@ copyright="\
  * SUCH DAMAGE.
  */
 "
-SCRIPT_ID='$OpenBSD: vnode_if.sh,v 1.3 1996/04/19 16:09:13 niklas Exp $'
+SCRIPT_ID='$OpenBSD: vnode_if.sh,v 1.6 1999/03/03 20:58:27 deraadt Exp $'
 # SCRIPT_ID='$NetBSD: vnode_if.sh,v 1.9 1996/02/29 20:58:22 cgd Exp $'
 
 # Script to produce VFS front-end sugar.
@@ -108,11 +108,19 @@ awk_parser='
 # Middle lines of description
 {
 	argdir[argc] = $1; i=2;
-	if ($2 == "WILLRELE") {
+	if ($2 == "WILLRELE" ||
+	    $3 == "WILLRELE") {
 		willrele[argc] = 1;
 		i++;
 	} else
 		willrele[argc] = 0;
+
+    if ($2 == "SHOULDBELOCKED") {
+	   shouldbelocked[argc] = 1;
+	   i++;
+	} else
+	   shouldbelocked[argc] = 0;
+
 	argtype[argc] = $i; i++;
 	while (i < NF) {
 		argtype[argc] = argtype[argc]" "$i;
@@ -154,6 +162,8 @@ echo '
 extern struct vnodeop_desc vop_default_desc;
 '
 
+echo '#include "systm.h"'
+
 # Body stuff
 # This awk program needs toupper() so define it if necessary.
 sed -e "$sed_prep" $src | $awk "$toupper"'
@@ -167,7 +177,7 @@ function doit() {
 	printf("};\n");
 	printf("extern struct vnodeop_desc %s_desc;\n", name);
 	# Prototype it.
-	protoarg = sprintf("static __inline int %s __P((", toupper(name));
+	protoarg = sprintf("int %s __P((", toupper(name));
 	protolen = length(protoarg);
 	printf("%s", protoarg);
 	for (i=0; i<argc; i++) {
@@ -183,23 +193,6 @@ function doit() {
 		protolen += arglen;
 	}
 	printf("));\n");
-	# Define inline function.
-	printf("static __inline int %s(", toupper(name));
-	for (i=0; i<argc; i++) {
-		printf("%s", argname[i]);
-		if (i < (argc-1)) printf(", ");
-	}
-	printf(")\n");
-	for (i=0; i<argc; i++) {
-		printf("\t%s %s;\n", argtype[i], argname[i]);
-	}
-	printf("{\n\tstruct %s_args a;\n", name);
-	printf("\ta.a_desc = VDESC(%s);\n", name);
-	for (i=0; i<argc; i++) {
-		printf("\ta.a_%s = %s;\n", argname[i], argname[i]);
-	}
-	printf("\treturn (VCALL(%s%s, VOFFSET(%s), &a));\n}\n",
-		argname[0], arg0special, name);
 }
 BEGIN	{
 	arg0special="";
@@ -209,6 +202,7 @@ END	{
 	argc=1;
 	argtype[0]="struct buf *";
 	argname[0]="bp";
+	shouldbelocked[0] = 0;
 	arg0special="->b_vp";
 	name="vop_strategy";
 	doit();
@@ -307,13 +301,42 @@ function doit() {
 	do_offset("struct componentname *");
 	# transport layer information
 	printf ("\tNULL,\n};\n");
+
+	# Define inline function.
+	printf("\nint %s(", toupper(name));
+	for (i=0; i<argc; i++) {
+		printf("%s", argname[i]);
+		if (i < (argc-1)) printf(", ");
+	}
+	printf(")\n");
+	for (i=0; i<argc; i++) {
+		printf("\t%s %s;\n", argtype[i], argname[i]);
+	}
+	printf("{\n\tstruct %s_args a;\n", name);
+	printf("\ta.a_desc = VDESC(%s);\n", name);
+	for (i=0; i<argc; i++) {
+		printf("\ta.a_%s = %s;\n", argname[i], argname[i]);
+		if (shouldbelocked[i]) {
+		    printf ("#ifdef DIAGNOSTIC\n");
+			printf ("\tif ((%s->v_flag & VLOCKSWORK) && !VOP_ISLOCKED(%s)) panic(\"%s: %s\");\n", argname[i], argname[i], name, argname[i]);
+			printf ("#endif\n");
+		}
+	}
+	printf("\treturn (VCALL(%s%s, VOFFSET(%s), &a));\n}\n",
+		argname[0], arg0special, name);
+
+}
+BEGIN	{
+	arg0special="";
 }
 END	{
 	printf("\n/* Special cases: */\n");
 	argc=1;
-	argdir[0]="IN";
 	argtype[0]="struct buf *";
+	argdir[0]="IN";
 	argname[0]="bp";
+	shouldbelocked[0] = 0;
+	arg0special="->b_vp";
 	willrele[0]=0;
 	name="vop_strategy";
 	doit();

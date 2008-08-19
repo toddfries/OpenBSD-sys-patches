@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.24 1997/11/06 05:59:12 csapuntz Exp $	*/
+/*	$OpenBSD: systm.h,v 1.27 1999/02/26 03:19:57 art Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -80,8 +80,10 @@ extern char copyright[];	/* system copyright */
 
 extern int nblkdev;		/* number of entries in bdevsw */
 extern int nchrdev;		/* number of entries in cdevsw */
+#if !defined(UVM)
 extern int nswdev;		/* number of swap devices */
 extern int nswap;		/* size of swap space */
+#endif
 
 extern int selwait;		/* select timeout address */
 
@@ -140,6 +142,7 @@ void vfs_op_init __P((void));
 
 int	seltrue __P((dev_t dev, int which, struct proc *));
 void	*hashinit __P((int, int, u_long *));
+void	*newhashinit __P((int, int, int, u_long *));
 int	sys_nosys __P((struct proc *, void *, register_t *));
 
 void	panic __P((const char *, ...))
@@ -164,6 +167,10 @@ void	ttyprintf __P((struct tty *, const char *, ...))
     __kprintf_attribute__((__format__(__kprintf__,2,3)));
 
 void	tablefull __P((const char *));
+
+#if defined(UVM)
+int	kcopy __P((const void *, void *, size_t));
+#endif
 
 void	bcopy __P((const void *, void *, size_t));
 void	ovbcopy __P((const void *, void *, size_t));
@@ -232,7 +239,7 @@ void	longjmp	__P((label_t *));
 void	consinit __P((void));
 
 void	cpu_startup __P((void));
-void	cpu_set_kpc __P((struct proc *, void (*)(struct proc *)));
+void	cpu_set_kpc __P((struct proc *, void (*)(void *), void *));
 
 
 #ifdef GPROF

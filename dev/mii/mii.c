@@ -1,5 +1,5 @@
-/*	$OpenBSD: mii.c,v 1.1 1998/09/10 17:17:33 jason Exp $	*/
-/*	$NetBSD: mii.c,v 1.7 1998/08/11 00:41:44 thorpej Exp $	*/
+/*	$OpenBSD: mii.c,v 1.4 1999/02/04 23:00:57 jason Exp $	*/
+/*	$NetBSD: mii.c,v 1.9 1998/11/05 04:08:02 thorpej Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -91,8 +91,8 @@ mii_phy_probe(parent, mii, capmask)
 		    MII_PHYIDR1);
 		ma.mii_id2 = (*mii->mii_readreg)(parent, ma.mii_phyno,
 		    MII_PHYIDR2);
-		if (ma.mii_id1 == 0 || ma.mii_id1 == 0xffff ||
-		    ma.mii_id2 == 0 || ma.mii_id2 == 0xffff) {
+		if ((ma.mii_id1 == 0 || ma.mii_id1 == 0xffff) &&
+		    (ma.mii_id2 == 0 || ma.mii_id2 == 0xffff)) {
 			/*
 			 * ARGH!!  3Com internal PHYs report 0/0 in their
 			 * ID registers!  If we spot this, check to see
@@ -131,7 +131,7 @@ mii_print(aux, pnp)
 	struct mii_attach_args *ma = aux;
 
 	if (pnp != NULL)
-		printf("PHY oui 0x%x model 0x%x rev 0x%x at %s",
+		printf("OUI 0x%06x model 0x%04x rev %d at %s",
 		    MII_OUI(ma->mii_id1, ma->mii_id2), MII_MODEL(ma->mii_id2),
 		    MII_REV(ma->mii_id2), pnp);
 
@@ -192,6 +192,25 @@ mii_anar(media)
 		rv = 0;
 		break;
 	}
+
+	return (rv);
+}
+
+/*
+ * Given a BMCR value, return the corresponding ifmedia word.
+ */
+int
+mii_media_from_bmcr(bmcr)
+	int bmcr;
+{
+	int rv = IFM_ETHER;
+
+	if (bmcr & BMCR_S100)
+		rv |= IFM_100_TX;
+	else
+		rv |= IFM_10_T;
+	if (bmcr & BMCR_FDX)
+		rv |= IFM_FDX;
 
 	return (rv);
 }

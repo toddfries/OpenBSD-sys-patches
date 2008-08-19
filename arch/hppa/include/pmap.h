@@ -1,5 +1,34 @@
-/* $OpenBSD: pmap.h,v 1.3 1998/09/12 03:14:49 mickey Exp $ */
+/*	$OpenBSD: pmap.h,v 1.7 1999/01/20 19:39:53 mickey Exp $	*/
 
+/*
+ * Copyright (c) 1998 Michael Shalayeff
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by Michael Shalayeff.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
 /*
  * Copyright 1996 1995 by Open Software Foundation, Inc.   
  *              All Rights Reserved 
@@ -48,14 +77,10 @@
  *	Pmap header for hppa.
  */
 
-#ifndef	_HPPA_PMAP_H_
-#define	_HPPA_PMAP_H_
+#ifndef	_MACHINE_PMAP_H_
+#define	_MACHINE_PMAP_H_
 
 #include <machine/pte.h>
-
-#define EQUIV_HACK	/* no multiple mapping of kernel equiv space allowed */
-
-#define BTLB		/* Use block TLBs: PA 1.1 and above */
 
 /*
  * This hash function is the one used by the hardware TLB walker on the 7100.
@@ -106,7 +131,7 @@ struct pv_entry {
 	u_int		pv_va;		/* virtual page number */
 	u_int		pv_tlbprot;	/* TLB format protection */
 	u_int		pv_tlbpage;	/* physical page (for TLB load) */
-	u_int		pv_tlbsw;
+	u_int		pv_pad;		/* pad to 32 bytes */
 };
 
 #define NPVPPG (NBPG/32-1)
@@ -123,7 +148,7 @@ struct pmap_physseg {
 	struct pv_entry *pvent;
 };
 
-#define MAX_PID		0xfffa
+#define HPPA_MAX_PID	0xfffa
 #define	HPPA_SID_KERNEL	0
 #define	HPPA_PID_KERNEL	2
 
@@ -167,12 +192,8 @@ pmap_prot(struct pmap *pmap, int prot)
 	return (pmap == kernel_pmap? kern_prot: user_prot)[prot];
 }
 
-/* 
- * prototypes.
- */
-vm_offset_t kvtophys __P((vm_offset_t addr));
-vm_offset_t pmap_map __P((vm_offset_t, vm_offset_t, vm_offset_t, vm_prot_t));
-void pmap_bootstrap __P((vm_offset_t *,	vm_offset_t *));
+void pmap_bootstrap __P((vm_offset_t *, vm_offset_t *));
+void pmap_changebit __P((vm_offset_t, u_int, u_int));
 #endif /* _KERNEL */
 
-#endif /* _HPPA_PMAP_H_ */
+#endif /* _MACHINE_PMAP_H_ */

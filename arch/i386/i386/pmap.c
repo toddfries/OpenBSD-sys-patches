@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.25 1998/04/25 20:31:30 mickey Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.27 1999/02/26 10:37:51 art Exp $	*/
 /*	$NetBSD: pmap.c,v 1.36 1996/05/03 19:42:22 christos Exp $	*/
 
 /*
@@ -88,6 +88,10 @@
 #include <vm/vm.h>
 #include <vm/vm_kern.h>
 #include <vm/vm_page.h>
+
+#if defined(UVM)
+#include <uvm/uvm.h>
+#endif
 
 #include <machine/cpu.h>
 
@@ -194,7 +198,6 @@ void i386_protection_init __P((void));
 void pmap_collect_pv __P((void));
 __inline void pmap_remove_pv __P((pmap_t, vm_offset_t, struct pv_entry *));
 __inline void pmap_enter_pv __P((pmap_t, vm_offset_t, struct pv_entry *));
-void pmap_deactivate __P((pmap_t, struct pcb *));
 void pmap_remove_all __P((vm_offset_t));
 void pads __P((pmap_t pm));
 void pmap_dump_pvlist __P((vm_offset_t phys, char *m));
@@ -231,6 +234,17 @@ pmap_bootstrap(virtual_start)
 	vm_offset_t va;
 	pt_entry_t *pte;
 #endif
+#if defined(UVM)
+	int first16q;
+#endif
+
+	/* Register the page size with the vm system */
+#if defined(UVM)
+	uvm_setpagesize();
+#else
+	vm_set_page_size();
+#endif
+
 
 	/* XXX: allow for msgbuf */
 	avail_end -= i386_round_page(sizeof(struct msgbuf));
@@ -291,9 +305,6 @@ pmap_bootstrap(virtual_start)
 	 */
 	virtual_avail = reserve_dumppages(virtual_avail);
 
-	/* Register the page size with the vm system */
-	vm_set_page_size();
-
 	/* flawed, no mappings?? */
 	if (ctob(physmem) > 31*1024*1024 && MAXKPDE != NKPDE) {
 		vm_offset_t p;
@@ -314,17 +325,30 @@ pmap_bootstrap(virtual_start)
 	 * [i.e. here]
 	 */                               
 #if defined(UVM)
+	if (avail_end < (16 * 1024 * 1024))
+		first16q = VM_FREELIST_DEFAULT;
+	else
+		first16q = VM_FREELIST_FIRST16;
+
 	if (avail_start < hole_start)
 		uvm_page_physload(atop(avail_start), atop(hole_start),
-			atop(avail_start), atop(hole_start));
+			atop(avail_start), atop(hole_start), first16q);
+	if (first16q == VM_FREELIST_FIRST16) {
+		uvm_page_physload(atop(hole_end), atop(16 * 1024 * 1024),
+		    atop(hole_end), atop(16 * 1024 * 1024), first16q);
+		uvm_page_physload(atop(16 * 1024 * 1024), atop(avail_end),
+		    atop(16 * 1024 * 1024), atop(avail_end),
+		    VM_FREELIST_DEFAULT);
+	} else {
 		uvm_page_physload(atop(hole_end), atop(avail_end),
-			atop(hole_end), atop(avail_end));
+		    atop(hole_end), atop(avail_end), first16q);
+	}
 #else
 	if (avail_start < hole_start)
 		vm_page_physload(atop(avail_start), atop(hole_start),
 				 atop(avail_start), atop(hole_start));      
-		vm_page_physload(atop(hole_end), atop(avail_end),
-				 atop(hole_end), atop(avail_end));
+	vm_page_physload(atop(hole_end), atop(avail_end),
+			 atop(hole_end), atop(avail_end));
 #endif          
 #endif
 	pmap_update();
@@ -439,7 +463,12 @@ pmap_alloc_pv()
 	int i;
 
 	if (pv_nfree == 0) {
+#if defined(UVM)
+		/* NOTE: can't lock kernel_map here */
+		MALLOC(pvp, struct pv_page *, NBPG, M_VMPVENT, M_WAITOK);
+#else
 		pvp = (struct pv_page *)kmem_alloc(kernel_map, NBPG);
+#endif
 		if (pvp == 0)
 			panic("pmap_alloc_pv: kmem_alloc() failed");
 		pvp->pvp_pgi.pgi_freelist = pv = &pvp->pvp_pv[1];
@@ -483,7 +512,11 @@ pmap_free_pv(pv)
 	case NPVPPG:
 		pv_nfree -= NPVPPG - 1;
 		TAILQ_REMOVE(&pv_page_freelist, pvp, pvp_pgi.pgi_list);
+#if defined(UVM)
+		FREE((vaddr_t) pvp, M_VMPVENT);
+#else
 		kmem_free(kernel_map, (vm_offset_t)pvp, NBPG);
+#endif
 		break;
 	}
 }
@@ -553,7 +586,11 @@ pmap_collect_pv()
 
 	for (pvp = pv_page_collectlist.tqh_first; pvp; pvp = npvp) {
 		npvp = pvp->pvp_pgi.pgi_list.tqe_next;
+#if defined(UVM)
+		FREE((vaddr_t) pvp, M_VMPVENT);
+#else
 		kmem_free(kernel_map, (vm_offset_t)pvp, NBPG);
+#endif
 	}
 }
 
@@ -732,8 +769,16 @@ pmap_pinit(pmap)
 	 * No need to allocate page table space yet but we do need a
 	 * valid page directory table.
 	 */
+#if defined(UVM)
+	pmap->pm_pdir = (pd_entry_t *) uvm_km_zalloc(kernel_map, NBPG);
+#else
 	pmap->pm_pdir = (pd_entry_t *) kmem_alloc(kernel_map, NBPG);
+#endif
 
+#ifdef DIAGNOSTIC
+	if (pmap->pm_pdir == NULL)
+		panic("pmap_pinit: alloc failed");
+#endif
 	/* wire in kernel global address entries */
 	bcopy(&PTD[KPTDI], &pmap->pm_pdir[KPTDI], MAXKPDE *
 	    sizeof(pd_entry_t));
@@ -795,7 +840,11 @@ pmap_release(pmap)
 		panic("pmap_release count");
 #endif
 
+#if defined(UVM)
+	uvm_km_free(kernel_map, (vaddr_t)pmap->pm_pdir, NBPG);
+#else
 	kmem_free(kernel_map, (vm_offset_t)pmap->pm_pdir, NBPG);
+#endif
 }
 
 /*
@@ -820,24 +869,20 @@ pmap_reference(pmap)
 }
 
 void
-pmap_activate(pmap, pcb)
-	pmap_t pmap;
-	struct pcb *pcb;
+pmap_activate(p)
+	struct proc *p;
 {
+	struct pcb *pcb = &p->p_addr->u_pcb;
+	pmap_t pmap = p->p_vmspace->vm_map.pmap;
 
-	if (pmap /*&& pmap->pm_pdchanged */) {
-		pcb->pcb_cr3 =
-		    pmap_extract(pmap_kernel(), (vm_offset_t)pmap->pm_pdir);
-		if (pmap == &curproc->p_vmspace->vm_pmap)
-			lcr3(pcb->pcb_cr3);
-		pmap->pm_pdchanged = FALSE;
-	}
+	pcb->pcb_cr3 = pmap_extract(pmap_kernel(), (vm_offset_t)pmap->pm_pdir);
+	if (p == curproc)
+		lcr3(pcb->pcb_cr3);
 }
 
 void
-pmap_deactivate(pmap, pcb)
-	pmap_t pmap;
-	struct pcb *pcb;
+pmap_deactivate(p)
+	struct proc *p;
 {
 }
 
@@ -1256,10 +1301,18 @@ pmap_enter(pmap, va, pa, prot, wired)
 		vmap = &curproc->p_vmspace->vm_map;
 		v = trunc_page(vtopte(va));
 		printf("faulting in a pt page map %x va %x\n", vmap, v);
+#if defined(UVM)
+		rv = uvm_fault(vmap, v, 0, VM_PROT_READ|VM_PROT_WRITE);
+#else
 		rv = vm_fault(vmap, v, VM_PROT_READ|VM_PROT_WRITE, FALSE);
+#endif
 		if (rv != KERN_SUCCESS)
 			panic("ptdi2 %x", pmap->pm_pdir[PTDPTDI]);
+#if defined(UVM)
+		uvm_map_pageable(vmap, v, round_page(v+1), FALSE);
+#else
 		vm_map_pageable(vmap, v, round_page(v+1), FALSE);
+#endif
 		pte = pmap_pte(pmap, va);
 		if (!pte) 
 			panic("ptdi3 %x", pmap->pm_pdir[PTDPTDI]);
@@ -1901,10 +1954,15 @@ pmap_changebit(pa, setbits, maskbits)
 			 */
 			if ((PG_RO && setbits == PG_RO) ||
 			    (PG_RW && maskbits == ~PG_RW)) {
+#if defined(UVM)
+				if (va >= uvm.pager_sva && va < uvm.pager_eva)
+					continue;
+#else
 				extern vm_offset_t pager_sva, pager_eva;
 
 				if (va >= pager_sva && va < pager_eva)
 					continue;
+#endif
 			}
 
 			pte = pmap_pte(pv->pv_pmap, va);
@@ -1926,7 +1984,11 @@ pmap_prefault(map, v, l)
 	for (pv = v; pv < v + l ; pv += ~PD_MASK + 1) {
 		if (!pmap_pde_v(pmap_pde(map->pmap, pv))) {
 			pv2 = trunc_page(vtopte(pv));
+#if defined(UVM)
+			uvm_fault(map, pv2, 0, VM_PROT_READ);
+#else
 			vm_fault(map, pv2, VM_PROT_READ, FALSE);
+#endif
 		}
 		pv &= PD_MASK;
 	}

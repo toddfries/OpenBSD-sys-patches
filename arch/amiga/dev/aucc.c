@@ -1,4 +1,4 @@
-/*	$OpenBSD: aucc.c,v 1.3 1998/04/26 22:31:03 niklas Exp $	*/
+/*	$OpenBSD: aucc.c,v 1.5 1999/01/02 00:02:49 niklas Exp $	*/
 /*	$NetBSD: aucc.c,v 1.22 1998/01/12 10:39:10 thorpej Exp $	*/
 
 /*
@@ -211,6 +211,8 @@ struct audio_hw_if sa_hw_if = {
 	NULL,
 	NULL,
 	aucc_get_props,
+	NULL,
+	NULL
 };
 
 /* autoconfig routines */
@@ -251,7 +253,7 @@ auccattach(parent, self, args)
 		return;
 	}
 
-	audio_attach_mi(&sa_hw_if, 0, sc, &sc->sc_dev);
+	audio_attach_mi(&sa_hw_if, sc, &sc->sc_dev);
 }
 
 int

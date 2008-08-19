@@ -1,4 +1,4 @@
-/*	$OpenBSD: pas.c,v 1.16 1998/05/13 10:25:11 provos Exp $	*/
+/*	$OpenBSD: pas.c,v 1.20 1999/01/24 15:58:54 mickey Exp $	*/
 /*	$NetBSD: pas.c,v 1.37 1998/01/12 09:43:43 thorpej Exp $	*/
 
 /*
@@ -58,10 +58,10 @@
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #include <machine/bus.h>
-#include <machine/pio.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
+#include <dev/midi_if.h>
 
 #include <dev/isa/isavar.h>
 #include <dev/isa/isadmavar.h>
@@ -118,10 +118,10 @@ struct audio_hw_if pas_hw_if = {
 	sbdsp_set_params,
 	sbdsp_round_blocksize,
 	0,
-	sbdsp_dma_init_output,
-	sbdsp_dma_init_input,
-	sbdsp_dma_output,
-	sbdsp_dma_input,
+	0,
+	0,
+	0,
+	0,
 	sbdsp_haltdma,
 	sbdsp_haltdma,
 	sbdsp_speaker_ctl,
@@ -135,6 +135,8 @@ struct audio_hw_if pas_hw_if = {
 	sb_round,
         sb_mappage,
 	sbdsp_get_props,
+	sbdsp_trigger_output,
+	sbdsp_trigger_input
 };
 
 /* The Address Translation code is used to convert I/O register addresses to
@@ -370,19 +372,6 @@ pasprobe(parent, match, aux)
 		DPRINTF(("pas: configured dma chan %d invalid\n", ia->ia_drq));
 		goto unmap;
 	}
-#ifdef NEWCONFIG
-	/*
-	 * If the IRQ wasn't compiled in, auto-detect it.
-	 */
-	if (ia->ia_irq == IRQUNK) {
-		ia->ia_irq = isa_discoverintr(pasforceintr, aux);
-		sbdsp_reset(&sc->sc_sbdsp);
-		if (!SB_IRQ_VALID(ia->ia_irq)) {
-			DPRINTF(("pas: couldn't auto-detect interrupt"));
-			goto unmap;
-		}
-	} else
-#endif
 	if (!SB_IRQ_VALID(ia->ia_irq)) {
 		DPRINTF(("pas: configured irq chan %d invalid\n", ia->ia_irq));
 		goto unmap;
@@ -404,34 +393,6 @@ pasprobe(parent, match, aux)
 	bus_space_unmap(sc->sc_sbdsp.sc_iot, sc->sc_sbdsp.sc_ioh, SBP_NPORT);
 	return 0;
 }
-
-#ifdef NEWCONFIG
-void
-pasforceintr(aux)
-	void *aux;
-{
-	static char dmabuf;
-	struct isa_attach_args *ia = aux;
-	int iobase = ia->ia_iobase;
-
-	/*
-	 * Set up a DMA read of one byte.
-	 * XXX Note that at this point we haven't called 
-	 * at_setup_dmachan().  This is okay because it just
-	 * allocates a buffer in case it needs to make a copy,
-	 * and it won't need to make a copy for a 1 byte buffer.
-	 * (I think that calling at_setup_dmachan() should be optional;
-	 * if you don't call it, it will be called the first time
-	 * it is needed (and you pay the latency).  Also, you might
-	 * never need the buffer anyway.)
-	 */
-	at_dma(DMAMODE_READ, &dmabuf, 1, ia->ia_drq);
-	if (pas_wdsp(iobase, SB_DSP_RDMA) == 0) {
-		(void)pas_wdsp(iobase, 0);
-		(void)pas_wdsp(iobase, 0);
-	}
-}
-#endif
 
 /*
  * Attach hardware to driver, attach hardware driver to audio
@@ -457,7 +418,7 @@ pasattach(parent, self, aux)
 	sprintf(pas_device.name, "pas,%s", pasnames[sc->model]);
 	sprintf(pas_device.version, "%d", sc->rev);
 
-	audio_attach_mi(&pas_hw_if, 0, &sc->sc_sbdsp, &sc->sc_sbdsp.sc_dev);
+	audio_attach_mi(&pas_hw_if, &sc->sc_sbdsp, &sc->sc_sbdsp.sc_dev);
 }
 
 int

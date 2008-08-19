@@ -1,4 +1,4 @@
-/*	$OpenBSD: wss.c,v 1.16 1998/05/08 18:37:24 csapuntz Exp $	*/
+/*	$OpenBSD: wss.c,v 1.20 1999/01/24 15:58:54 mickey Exp $	*/
 /*	$NetBSD: wss.c,v 1.42 1998/01/19 22:18:23 augustss Exp $	*/
 
 /*
@@ -48,7 +48,6 @@
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #include <machine/bus.h>
-#include <machine/pio.h>
 
 #include <sys/audioio.h>
 #include <dev/audio_if.h>
@@ -110,6 +109,8 @@ struct audio_hw_if wss_hw_if = {
 	ad1848_round,
 	ad1848_mappage,
 	ad1848_get_props,
+	NULL,
+	NULL
 };
 
 /*
@@ -151,7 +152,7 @@ wssattach(sc)
 
     sc->sc_ad1848.parent = sc;
 
-    audio_attach_mi(&wss_hw_if, 0, &sc->sc_ad1848, &sc->sc_dev);
+    audio_attach_mi(&wss_hw_if, &sc->sc_ad1848, &sc->sc_dev);
 }
 
 int
@@ -382,7 +383,7 @@ mad_read(sc, port)
 	pwd = M_PASSWD_931;
 	break;
     default:
-	panic("mad_read: Bad chip type=%d\n", sc->mad_chip_type);
+	panic("mad_read: Bad chip type=%d", sc->mad_chip_type);
     }
     s = splaudio();		/* don't want an interrupt between outb&inb */
     bus_space_write_1(sc->sc_iot, sc->mad_ioh, MC_PASSWD_REG, pwd);
@@ -412,7 +413,7 @@ mad_write(sc, port, value)
 	pwd = M_PASSWD_931;
 	break;
     default:
-	panic("mad_write: Bad chip type=%d\n", sc->mad_chip_type);
+	panic("mad_write: Bad chip type=%d", sc->mad_chip_type);
     }
     s = splaudio();
     bus_space_write_1(sc->sc_iot, sc->mad_ioh, MC_PASSWD_REG, pwd);

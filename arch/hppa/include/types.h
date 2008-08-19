@@ -1,4 +1,4 @@
-/*	$OpenBSD: types.h,v 1.1 1998/06/23 19:45:28 mickey Exp $	*/
+/*	$OpenBSD: types.h,v 1.4 1999/01/08 03:04:07 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -35,8 +35,8 @@
  *	@(#)types.h	8.3 (Berkeley) 1/5/94
  */
 
-#ifndef	_HPPA_TYPES_H_
-#define	_HPPA_TYPES_H_
+#ifndef	_MACHINE_TYPES_H_
+#define	_MACHINE_TYPES_H_
 
 #if !defined(_ANSI_SOURCE) && !defined(_POSIX_SOURCE)
 typedef struct _physadr {
@@ -53,6 +53,8 @@ typedef struct label_t {
 
 #endif
 
+typedef	unsigned long		hppa_hpa_t;
+typedef	unsigned long		hppa_spa_t;
 typedef	unsigned int		pa_space_t;
 typedef unsigned long		vm_size_t;
 typedef	unsigned long		vm_offset_t;
@@ -68,18 +70,23 @@ typedef	__signed char		   int8_t;
 typedef	char			   int8_t;
 #endif
 typedef	unsigned char		 u_int8_t;
+typedef	unsigned char		  uint8_t;
 typedef	short			  int16_t;
 typedef	unsigned short		u_int16_t;
+typedef	unsigned short		 uint16_t;
 typedef	int			  int32_t;
 typedef	unsigned int		u_int32_t;
+typedef	unsigned int		 uint32_t;
 #ifdef __STDC__
 typedef	long long		  int64_t;
 typedef	unsigned long long	u_int64_t;
+typedef	unsigned long long	 uint64_t;
 #else
-typedef	long		  int64_t;
-typedef	unsigned long	u_int64_t;
+typedef	long			  int64_t;
+typedef	unsigned long		u_int64_t;
+typedef	unsigned long		 uint64_t;
 #endif
 
 typedef int32_t			register_t;
 
-#endif	/* _HPPA_TYPES_H_ */
+#endif	/* _MACHINE_TYPES_H_ */

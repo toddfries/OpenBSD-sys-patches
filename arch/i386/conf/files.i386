@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.48 1998/10/04 23:34:37 niklas Exp $
+#	$OpenBSD: files.i386,v 1.51 1999/01/21 08:26:48 niklas Exp $
 #	$NetBSD: files.i386,v 1.73 1996/05/07 00:58:36 thorpej Exp $
 #
 # new style config file for i386 architecture
@@ -97,12 +97,6 @@ attach	pcib at pci
 file	arch/i386/pci/pcib.c		pcib
 
 #
-# Pcmcia, before ISA (to define device stuff)
-#
-
-#include "../../../dev/pcmcia/files.pcmcia"
-
-#
 # ISA and mixed ISA+EISA or ISA+PCI or ISA+PCMCIA drivers
 #
 
@@ -162,6 +156,9 @@ device	pms
 attach	pms at pckbd
 file	arch/i386/isa/pms.c		pms needs-flag
 
+device sysbeep
+attach sysbeep at pcppi
+
 # Floppy disk controller
 # XXX temporarily conflicts with arc, will soon move to files.isa
 device	fdc {drive = -1}
@@ -172,11 +169,6 @@ device	fd: disk, isa_dma
 attach	fd at fdc
 file	dev/isa/fd.c		fd needs-flag
 major	{fd = 2}
-
-# PC speaker
-device	spkr: tty
-attach	spkr at pckbd
-file	arch/i386/isa/spkr.c		spkr needs-flag
 
 # Adaptec AHA-284x VL SCSI controllers
 # device declaration in sys/conf/files
@@ -274,9 +266,12 @@ file	dev/isa/i82365_isa.c		pcic_isa
 # Code common to ISA and ISAPnP attachments
 file	dev/isa/i82365_isasubr.c	pcic_isa | pcic_isapnp
 
-# this wants to be probed as late as possible.
+# PCMCIA wants to be probed as late as possible.
+
 #
 # Machine-independent PCMCIA drivers
 #
 include "dev/pcmcia/files.pcmcia"
 
+# i386-specific PCMCIA drivers
+attach	pccom at pcmcia with pccom_pcmcia

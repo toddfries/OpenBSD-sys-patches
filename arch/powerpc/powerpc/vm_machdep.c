@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.4 1998/08/07 02:22:10 rahnds Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.6 1999/01/23 19:41:33 rahnds Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.1 1996/09/30 16:34:57 ws Exp $	*/
 
 /*
@@ -103,16 +103,17 @@ cpu_fork(p1, p2)
  * Set initial pc of process forked by above.
  */
 void
-cpu_set_kpc(p, pc)
+cpu_set_kpc(p, pc, arg)
 	struct proc *p;
-	u_long pc;
+	void (*pc) __P((void *));
+	void *arg;
 {
 	struct switchframe *sf = (struct switchframe *)p->p_addr->u_pcb.pcb_sp;
 	struct callframe *cf = (struct callframe *)sf->sp;
 	
-	cf->r30 = (int)p;
-	cf->r31 = pc;
-	cf++->lr = pc;
+	cf->r30 = (register_t)arg;
+	cf->r31 = (register_t)pc;
+	cf++->lr = (register_t)pc;
 }
 
 void

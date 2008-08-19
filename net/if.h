@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.8 1998/09/03 06:24:20 jason Exp $	*/
+/*	$OpenBSD: if.h,v 1.11 1999/03/13 19:06:16 deraadt Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -119,6 +119,7 @@ struct ifnet {				/* and the entries */
 	char	if_xname[IFNAMSIZ];	/* external name (name + unit) */
 	int	if_pcount;		/* number of promiscuous listeners */
 	caddr_t	if_bpf;			/* packet filter structure */
+	caddr_t	if_bridge;		/* bridge structure */
 	u_short	if_index;		/* numeric abbreviation for this if */
 	short	if_timer;		/* time 'til if_watchdog called */
 	short	if_flags;		/* up/down, broadcast, etc. */
@@ -237,7 +238,7 @@ struct ifaddr {
 	void	(*ifa_rtrequest)	/* check or clean routes (+ or -)'d */
 		    __P((int, struct rtentry *, struct sockaddr *));
 	u_short	ifa_flags;		/* mostly rt_flags for cloning */
-	short	ifa_refcnt;		/* count of references */
+	u_int	ifa_refcnt;		/* count of references */
 	int	ifa_metric;		/* cost of going out this interface */
 };
 #define	IFA_ROUTE	RTF_UP		/* route installed */
@@ -333,11 +334,12 @@ struct	ifconf {
 #include <net/if_arp.h>
 
 #ifdef _KERNEL
-#define	IFAFREE(ifa) \
+#define	IFAFREE(ifa) { \
 	if ((ifa)->ifa_refcnt <= 0) \
 		ifafree(ifa); \
 	else \
-		(ifa)->ifa_refcnt--;
+		(ifa)->ifa_refcnt--; \
+	}
 
 struct ifnet_head ifnet;
 

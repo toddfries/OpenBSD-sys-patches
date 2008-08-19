@@ -1,4 +1,6 @@
+/*	$OpenBSD: param.h,v 1.8 1999/02/09 06:36:27 smurph Exp $ */
 /*
+ * Copyright (c) 1999 Steve Murphree, Jr.
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990 The Regents of the University of California.
  * All rights reserved.
@@ -38,24 +40,28 @@
  * from: Utah $Hdr: machparam.h 1.11 89/08/14$
  *
  *	@(#)param.h	7.8 (Berkeley) 6/28/91
- *	$Id: param.h,v 1.6 1998/08/18 21:18:47 millert Exp $
+ *	$Id: param.h,v 1.8 1999/02/09 06:36:27 smurph Exp $
  */
 #ifndef _MACHINE_PARAM_H_
 #define _MACHINE_PARAM_H_
 
-#define	MACHINE		"m88k"
-#define MACHINE_ARCH	"m88k"
-#define MID_MACHINE	MID_M88K
+#define	_MACHINE 	mvme88k
+#define	MACHINE 	"mvme88k"
+#define	_MACHINE_ARCH	m88k
+#define	MACHINE_ARCH	"m88k"
+#define	MID_MACHINE	MID_M88K
 
 /*
- * Round p (pointer or byte index) up to a correctly-aligned value
+ * Round p (pointer or byte index) down to a correctly-aligned value
  * for all data types (int, long, ...).   The result is u_int and
  * must be cast to any desired pointer type. ALIGN() is used for
  * aligning stack, which needs to be on a double word boundary for
  * 88k.
  */
-#define ALIGNBYTES	(sizeof(int) - 1)
-#define	ALIGN(p)	(((u_int)(p) + (sizeof(double) - 1)) & ~(sizeof(double) - 1))
+
+#define ALIGNBYTES	15	/* 64 bit alignment */
+#define	ALIGN(p)		(((u_int)(p) + ALIGNBYTES) & ~ALIGNBYTES)
+#define ALIGNED_POINTER(p,t)	((((u_long)(p)) & (sizeof(t)-1)) == 0)
 
 #ifndef NBPG
 #define	NBPG		4096		/* bytes/page */
@@ -114,9 +120,9 @@
 #define	MCLOFSET	(MCLBYTES - 1)
 #ifndef NMBCLUSTERS
 #ifdef GATEWAY
-#define	NMBCLUSTERS	512		/* map size, max cluster allocation */
+#define	NMBCLUSTERS	1024		/* map size, max cluster allocation */
 #else
-#define	NMBCLUSTERS	256		/* map size, max cluster allocation */
+#define	NMBCLUSTERS	512		/* map size, max cluster allocation */
 #endif
 #endif
 
@@ -124,7 +130,7 @@
  * Size of kernel malloc arena in CLBYTES-sized logical pages
  */ 
 #ifndef NKMEMCLUSTERS
-#define	NKMEMCLUSTERS	(3072*1024/CLBYTES)
+#define	NKMEMCLUSTERS	(4096*1024/CLBYTES)
 #endif
 
 /* pages ("clicks") to disk blocks */
@@ -171,4 +177,6 @@ extern int cpumod;
  * Values for the cputyp variable.
  */
 #define CPU_187		0x187
+#define CPU_188		0x188
+#define CPU_197		0x197
 #endif /* !_MACHINE_PARAM_H_ */

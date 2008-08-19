@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_shm.c,v 1.9 1998/06/14 18:57:09 matthieu Exp $	*/
+/*	$OpenBSD: sysv_shm.c,v 1.11 1999/02/22 00:43:55 art Exp $	*/
 /*	$NetBSD: sysv_shm.c,v 1.37 1996/03/16 23:17:13 christos Exp $	*/
 
 /*
@@ -48,11 +48,9 @@
 
 #include <vm/vm.h>
 #include <vm/vm_map.h>
-#include <vm/vm_map.h>
 #include <vm/vm_kern.h>
 
 struct shmid_ds *shm_find_segment_by_shmid __P((int));
-void shmexit __P((struct proc *));
 
 /*
  * Provides the following externally accessible functions:

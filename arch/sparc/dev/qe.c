@@ -1,4 +1,4 @@
-/*	$OpenBSD: qe.c,v 1.4 1998/10/21 04:12:10 jason Exp $	*/
+/*	$OpenBSD: qe.c,v 1.7 1999/02/24 06:57:45 jason Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright.
@@ -128,6 +128,7 @@ qeattach(parent, self, aux)
 	struct qesoftc *sc = (struct qesoftc *)self;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct confargs *ca = aux;
+	struct bootpath *bp;
 	extern void myetheraddr __P((u_char *));
 	int pri;
 
@@ -144,9 +145,6 @@ qeattach(parent, self, aux)
 	sc->sc_qec = qec;
 	sc->sc_qr = qec->sc_regs;
 	qestop(sc);
-
-	sc->sc_mem = qec->sc_buffer;
-	sc->sc_memsize = qec->sc_bufsiz;
 
 	sc->sc_channel = getpropint(ca->ca_ra.ra_node, "channel#", -1);
 	sc->sc_burst = qec->sc_burst;
@@ -176,6 +174,11 @@ qeattach(parent, self, aux)
 	bpfattach(&sc->sc_arpcom.ac_if.if_bpf, ifp, DLT_EN10MB,
 	    sizeof(struct ether_header));
 #endif
+
+	bp = ca->ca_ra.ra_bp;
+	if (bp != NULL && strcmp(bp->name, "qe") == 0 &&
+	    sc->sc_dev.dv_unit == bp->val[1])
+		bp->dev = &sc->sc_dev;
 }
 
 /*
@@ -611,7 +614,6 @@ qeioctl(ifp, cmd, data)
 		break;
 
 	case SIOCSIFFLAGS:
-		sc->sc_promisc = ifp->if_flags & (IFF_PROMISC | IFF_ALLMULTI);
 		if ((ifp->if_flags & IFF_UP) == 0 &&
 		    (ifp->if_flags & IFF_RUNNING) != 0) {
 			/*
@@ -676,25 +678,10 @@ qeinit(sc)
 {
 	struct qe_mregs *mr = sc->sc_mr;
 	struct qe_cregs *cr = sc->sc_cr;
-	struct qecregs *qr = sc->sc_qr;
+	struct qec_softc *qec = sc->sc_qec;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	int s = splimp();
 	int i;
-
-	/*
-	 * init QEC: 'qe' specific initializations
-	 */
-	qr->msize = sc->sc_memsize / 4;
-	qr->rsize = sc->sc_memsize / 8;
-	qr->tsize = sc->sc_memsize / 8;
-	qr->psize = QEC_PSIZE_2048;
-	if (sc->sc_burst & SBUS_BURST_64)
-		i = QEC_CTRL_B64;
-	else if (sc->sc_burst & SBUS_BURST_32)
-		i = QEC_CTRL_B32;
-	else
-		i = QEC_CTRL_B16;
-	qr->ctrl = QEC_CTRL_MMODE | i;
 
 	/*
 	 * Allocate descriptor ring and buffers, if not already done
@@ -733,8 +720,8 @@ qeinit(sc)
 	cr->timask = 0;
 	cr->qmask = 0;
 	cr->mmask = QE_CR_MMASK_RXCOLL;
-	cr->rxwbufptr = cr->rxrbufptr = sc->sc_channel * sc->sc_qr->msize;
-	cr->txwbufptr = cr->txrbufptr = cr->rxrbufptr + sc->sc_qr->rsize;
+	cr->rxwbufptr = cr->rxrbufptr = sc->sc_channel * qec->sc_msize;
+	cr->txwbufptr = cr->txrbufptr = cr->rxrbufptr + qec->sc_rsize;
 	cr->ccnt = 0;
 	cr->pipg = 0;
 
@@ -766,8 +753,7 @@ qeinit(sc)
 
 	i = mr->mpc;	/* cleared on read */
 
-	mr->maccc = QE_MR_MACCC_ENXMT | QE_MR_MACCC_ENRCV |
-		((ifp->if_flags & IFF_PROMISC) ? QE_MR_MACCC_PROM : 0);
+	qe_mcreset(sc);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -917,70 +903,73 @@ qe_mcreset(sc)
 	struct ether_multistep step;
 	u_int32_t crc;
 	u_int16_t hash[4];
-	u_int8_t octet, maccc = 0, *ladrp = (u_int8_t *)&hash[0];
+	u_int8_t octet, *ladrp = (u_int8_t *)&hash[0];
 	int i, j;
+
+	if (ifp->if_flags & IFF_PROMISC) {
+		mr->maccc = QE_MR_MACCC_PROM | QE_MR_MACCC_ENXMT |
+		    QE_MR_MACCC_ENRCV;
+		return;
+	}
 
 	if (ifp->if_flags & IFF_ALLMULTI) {
 		mr->iac = QE_MR_IAC_ADDRCHG | QE_MR_IAC_LOGADDR;
 		for (i = 0; i < 8; i++)
 			mr->ladrf = 0xff;
 		mr->iac = 0;
+		mr->maccc = QE_MR_MACCC_ENXMT | QE_MR_MACCC_ENRCV;
+		return;
 	}
-	else if (ifp->if_flags & IFF_PROMISC) {
-		maccc |= QE_MR_MACCC_PROM;
-	}
-	else {
 
-		hash[3] = hash[2] = hash[1] = hash[0] = 0;
+	hash[3] = hash[2] = hash[1] = hash[0] = 0;
 
-		ETHER_FIRST_MULTI(step, ac, enm);
-		while (enm != NULL) {
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-			    ETHER_ADDR_LEN)) {
-				/*
-				 * We must listen to a range of multicast
-				 * addresses. For now, just accept all
-				 * multicasts, rather than trying to set only
-				 * those filter bits needed to match the range.
-				 * (At this time, the only use of address
-				 * ranges is for IP multicast routing, for
-				 * which the range is big enough to require
-				 * all bits set.)
-				 */
-				mr->iac = QE_MR_IAC_ADDRCHG | QE_MR_IAC_LOGADDR;
-				for (i = 0; i < 8; i++)
-					mr->ladrf = 0xff;
-				mr->iac = 0;
-				ifp->if_flags |= IFF_ALLMULTI;
-				break;
-			}
-
-			crc = 0xffffffff;
-
-			for (i = 0; i < ETHER_ADDR_LEN; i++) {
-				octet = enm->enm_addrlo[i];
-
-				for (j = 0; j < 8; j++) {
-					if ((crc & 1) ^ (octet & 1)) {
-						crc >>= 1;
-						crc ^= MC_POLY_LE;
-					}
-					else
-						crc >>= 1;
-					octet >>= 1;
-				}
-			}
-
-			crc >>= 26;
-			hash[crc >> 4] |= 1 << (crc & 0xf);
-			ETHER_NEXT_MULTI(step, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
+	while (enm != NULL) {
+		if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
+		    ETHER_ADDR_LEN)) {
+			/*
+			 * We must listen to a range of multicast
+			 * addresses. For now, just accept all
+			 * multicasts, rather than trying to set only
+			 * those filter bits needed to match the range.
+			 * (At this time, the only use of address
+			 * ranges is for IP multicast routing, for
+			 * which the range is big enough to require
+			 * all bits set.)
+			 */
+			mr->iac = QE_MR_IAC_ADDRCHG | QE_MR_IAC_LOGADDR;
+			for (i = 0; i < 8; i++)
+				mr->ladrf = 0xff;
+			mr->iac = 0;
+			ifp->if_flags |= IFF_ALLMULTI;
+			break;
 		}
 
-		mr->iac = QE_MR_IAC_ADDRCHG | QE_MR_IAC_LOGADDR;
-		for (i = 0; i < 8; i++)
-			mr->ladrf = ladrp[i];
-		mr->iac = 0;
+		crc = 0xffffffff;
+
+		for (i = 0; i < ETHER_ADDR_LEN; i++) {
+			octet = enm->enm_addrlo[i];
+
+			for (j = 0; j < 8; j++) {
+				if ((crc & 1) ^ (octet & 1)) {
+					crc >>= 1;
+					crc ^= MC_POLY_LE;
+				}
+				else
+					crc >>= 1;
+				octet >>= 1;
+			}
+		}
+
+		crc >>= 26;
+		hash[crc >> 4] |= 1 << (crc & 0xf);
+		ETHER_NEXT_MULTI(step, enm);
 	}
 
-	mr->maccc = maccc | QE_MR_MACCC_ENXMT | QE_MR_MACCC_ENRCV;
+	mr->iac = QE_MR_IAC_ADDRCHG | QE_MR_IAC_LOGADDR;
+	for (i = 0; i < 8; i++)
+		mr->ladrf = ladrp[i];
+	mr->iac = 0;
+
+	mr->maccc = QE_MR_MACCC_ENXMT | QE_MR_MACCC_ENRCV;
 }

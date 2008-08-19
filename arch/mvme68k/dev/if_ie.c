@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.7 1996/05/29 17:54:11 chuck Exp $ */
+/*	$OpenBSD: if_ie.c,v 1.9 1999/03/03 22:10:29 jason Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt
@@ -816,13 +816,16 @@ check_eh(sc, eh, to_bpf)
 		 * Receiving all packets.  These need to be passed on to BPF.
 		 */
 #if NBPFILTER > 0
-		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0);
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0) ||
+		    (sc->sc_arpcom.ac_if.if_bridge != NULL);
+#else
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bridge != NULL);
 #endif
 		/* If for us, accept and hand up to BPF */
 		if (ether_equal(eh->ether_dhost, sc->sc_arpcom.ac_enaddr)) return 1;
 
 #if NBPFILTER > 0
-		if (*to_bpf)
+		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridge == NULL)
 			*to_bpf = 2; /* we don't need to see it */
 #endif
 
@@ -853,7 +856,10 @@ check_eh(sc, eh, to_bpf)
 		 * time.  Whew!  (Hope this is a fast machine...)
 		 */
 #if NBPFILTER > 0
-		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0);
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0) ||
+		    (sc->sc_arpcom.ac_if.if_bridge != NULL);
+#else
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bridge != NULL);
 #endif
 		/* We want to see multicasts. */
 		if (eh->ether_dhost[0] & 1)
@@ -865,7 +871,7 @@ check_eh(sc, eh, to_bpf)
 
 		/* Anything else goes to BPF but nothing else. */
 #if NBPFILTER > 0
-		if (*to_bpf)
+		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridge == NULL)
 			*to_bpf = 2;
 #endif
 		return 1;
@@ -1403,7 +1409,7 @@ iereset(sc)
 
 #ifdef notdef
 	if (!check_ie_present(sc, sc->sc_maddr, sc->sc_msize))
-		panic("ie disappeared!\n");
+		panic("ie disappeared!");
 #endif
 
 	sc->sc_arpcom.ac_if.if_flags |= IFF_UP;
@@ -1593,7 +1599,7 @@ setup_bufs(sc)
 
 	sc->nframes = n / r;
 	if (sc->nframes <= 0)
-		panic("ie: bogus buffer calc\n");
+		panic("ie: bogus buffer calc");
 	if (sc->nframes > MXFRAMES)
 		sc->nframes = MXFRAMES;
 

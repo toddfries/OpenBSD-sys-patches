@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.19 1997/11/30 18:50:17 millert Exp $	*/
+/*	$OpenBSD: socket.h,v 1.28 1999/02/25 03:31:34 deraadt Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -69,14 +69,15 @@
 /*
  * Additional options, not kept in so_options.
  */
-#define SO_SNDBUF	0x1001		/* send buffer size */
-#define SO_RCVBUF	0x1002		/* receive buffer size */
-#define SO_SNDLOWAT	0x1003		/* send low-water mark */
-#define SO_RCVLOWAT	0x1004		/* receive low-water mark */
-#define SO_SNDTIMEO	0x1005		/* send timeout */
-#define SO_RCVTIMEO	0x1006		/* receive timeout */
+#define	SO_SNDBUF	0x1001		/* send buffer size */
+#define	SO_RCVBUF	0x1002		/* receive buffer size */
+#define	SO_SNDLOWAT	0x1003		/* send low-water mark */
+#define	SO_RCVLOWAT	0x1004		/* receive low-water mark */
+#define	SO_SNDTIMEO	0x1005		/* send timeout */
+#define	SO_RCVTIMEO	0x1006		/* receive timeout */
 #define	SO_ERROR	0x1007		/* get error status and clear */
 #define	SO_TYPE		0x1008		/* get socket type */
+#define	SO_NETPROC	0x1020		/* multiplex; network processing */
 
 /*
  * Structure used for manipulating linger option.
@@ -195,6 +196,24 @@ struct sockproto {
 #define	SHUT_RDWR	2
 
 /*
+ * Socket credentials.
+ */
+struct sockcred {
+	uid_t	sc_uid;			/* real user id */
+	uid_t	sc_euid;		/* effective user id */
+	gid_t	sc_gid;			/* real group id */
+	gid_t	sc_egid;		/* effective group id */
+	int	sc_ngroups;		/* number of supplemental groups */
+	gid_t	sc_groups[1];		/* variable length */
+};
+
+/*
+ * Compute size of a sockcred structure with groups.
+ */
+#define SOCKCREDSIZE(ngrps) \
+	(sizeof(struct sockcred) + (sizeof(gid_t) * ((ngrps) - 1)))
+
+/*
  * Definitions for network related sysctl, CTL_NET.
  *
  * Second level is protocol family.
@@ -233,9 +252,9 @@ struct sockproto {
 	{ "pip", CTLTYPE_NODE }, \
 	{ "isdn", CTLTYPE_NODE }, \
 	{ "natm", CTLTYPE_NODE }, \
-	{ "ipsec", CTLTYPE_NODE }, \
+	{ "encap", CTLTYPE_NODE }, \
 	{ "sip", CTLTYPE_NODE }, \
-	{ "pfkey", CTLTYPE_NODE }, \
+	{ "key", CTLTYPE_NODE }, \
 }
 
 /*
@@ -268,13 +287,13 @@ struct sockproto {
  * Used value-result for recvmsg, value only for sendmsg.
  */
 struct msghdr {
-	caddr_t	msg_name;		/* optional address */
-	u_int	msg_namelen;		/* size of address */
-	struct	iovec *msg_iov;		/* scatter/gather array */
-	u_int	msg_iovlen;		/* # elements in msg_iov */
-	caddr_t	msg_control;		/* ancillary data, see below */
-	u_int	msg_controllen;		/* ancillary data buffer len */
-	int	msg_flags;		/* flags on received message */
+	caddr_t		msg_name;	/* optional address */
+	socklen_t	msg_namelen;	/* size of address */
+	struct		iovec *msg_iov;	/* scatter/gather array */
+	u_int		msg_iovlen;	/* # elements in msg_iov */
+	caddr_t		msg_control;	/* ancillary data, see below */
+	socklen_t	msg_controllen;	/* ancillary data buffer len */
+	int		msg_flags;	/* flags on received message */
 };
 
 #define	MSG_OOB		0x1		/* process out-of-band data */
@@ -285,6 +304,8 @@ struct msghdr {
 #define	MSG_CTRUNC	0x20		/* control data lost before delivery */
 #define	MSG_WAITALL	0x40		/* wait for full request or error */
 #define	MSG_DONTWAIT	0x80		/* this message should be nonblocking */
+#define	MSG_BCAST	0x100		/* this message rec'd as broadcast */
+#define	MSG_MCAST	0x200		/* this message rec'd as multicast */
 
 /*
  * Header for ancillary data objects in msg_control buffer.
@@ -293,9 +314,9 @@ struct msghdr {
  * of message elements headed by cmsghdr structures.
  */
 struct cmsghdr {
-	u_int	cmsg_len;		/* data byte count, including hdr */
-	int	cmsg_level;		/* originating protocol */
-	int	cmsg_type;		/* protocol-specific type */
+	socklen_t	cmsg_len;	/* data byte count, including hdr */
+	int		cmsg_level;	/* originating protocol */
+	int		cmsg_type;	/* protocol-specific type */
 /* followed by	u_char  cmsg_data[]; */
 };
 
@@ -311,8 +332,18 @@ struct cmsghdr {
 
 #define	CMSG_FIRSTHDR(mhdr)	((struct cmsghdr *)(mhdr)->msg_control)
 
+/* Round len up to next alignment boundary */
+#define	CMSG_ALIGN(len)	(((len)+sizeof(long)-1) & ~(sizeof(long)-1))
+
+/* Length of the contents of a control message of length len */
+#define	CMSG_LEN(len)	(CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+
+/* Length of the space taken up by a padded control message of length len */
+#define	CMSG_SPACE(len)	(CMSG_ALIGN(sizeof(struct cmsghdr)) + CMSG_ALIGN(len))
+
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
+#define SCM_CREDS	0x02		/* credientials (struct sockcred) */
 
 /*
  * 4.3 compat sockaddr, move to compat file later
@@ -334,26 +365,28 @@ struct omsghdr {
 	int	msg_accrightslen;
 };
 
+#define SA_LEN(x) ((x)->sa_len)
+
 #ifndef	_KERNEL
 
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int	accept __P((int, struct sockaddr *, int *));
-int	bind __P((int, const struct sockaddr *, int));
-int	connect __P((int, const struct sockaddr *, int));
-int	getpeername __P((int, struct sockaddr *, int *));
-int	getsockname __P((int, struct sockaddr *, int *));
-int	getsockopt __P((int, int, int, void *, int *));
+int	accept __P((int, struct sockaddr *, socklen_t *));
+int	bind __P((int, const struct sockaddr *, socklen_t));
+int	connect __P((int, const struct sockaddr *, socklen_t));
+int	getpeername __P((int, struct sockaddr *, socklen_t *));
+int	getsockname __P((int, struct sockaddr *, socklen_t *));
+int	getsockopt __P((int, int, int, void *, socklen_t *));
 int	listen __P((int, int));
 ssize_t	recv __P((int, void *, size_t, int));
-ssize_t	recvfrom __P((int, void *, size_t, int, struct sockaddr *, int *));
+ssize_t	recvfrom __P((int, void *, size_t, int, struct sockaddr *, socklen_t *));
 ssize_t	recvmsg __P((int, struct msghdr *, int));
 ssize_t	send __P((int, const void *, size_t, int));
 ssize_t	sendto __P((int, const void *,
-	    size_t, int, const struct sockaddr *, int));
+	    size_t, int, const struct sockaddr *, socklen_t));
 ssize_t	sendmsg __P((int, const struct msghdr *, int));
-int	setsockopt __P((int, int, int, const void *, int));
+int	setsockopt __P((int, int, int, const void *, socklen_t));
 int	shutdown __P((int, int));
 int	socket __P((int, int, int));
 int	socketpair __P((int, int, int, int *));

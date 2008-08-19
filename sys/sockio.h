@@ -1,4 +1,4 @@
-/*	$OpenBSD: sockio.h,v 1.4 1998/09/03 13:00:03 jason Exp $	*/
+/*	$OpenBSD: sockio.h,v 1.9 1999/03/19 02:46:55 jason Exp $	*/
 /*	$NetBSD: sockio.h,v 1.5 1995/08/23 00:40:47 thorpej Exp $	*/
 
 /*-
@@ -82,6 +82,20 @@
 
 #define	SIOCSIFMEDIA	_IOWR('i', 53, struct ifreq)	/* set net media */
 #define	SIOCGIFMEDIA	_IOWR('i', 54, struct ifmediareq) /* get net media */
+
+#define	SIOCBRDGADD	_IOWR('i', 60, struct ifbreq)	/* add bridge ifs */
+#define	SIOCBRDGDEL	_IOWR('i', 61, struct ifbreq)	/* del bridge ifs */
+#define	SIOCBRDGGIFFLGS	_IOWR('i', 62, struct ifbreq)	/* get brdg if flags */
+#define	SIOCBRDGSIFFLGS	_IOWR('i', 63, struct ifbreq)	/* set brdg if flags */
+#define	SIOCBRDGSCACHE	_IOWR('i', 64, struct ifbcachereq) /* set cache size */
+#define	SIOCBRDGGCACHE	_IOWR('i', 65, struct ifbcachereq) /* get cache size */
+#define	SIOCBRDGIFS	_IOWR('i', 66, struct ifbreq)	/* get member ifs */
+#define	SIOCBRDGRTS	_IOWR('i', 67, struct ifbaconf)	/* get addresses */
+#define	SIOCBRDGSADDR	_IOWR('i', 68, struct ifbareq)	/* set addr flags */
+#define	SIOCBRDGSTO	_IOWR('i', 69, struct ifbcachetoreq) /* cache timeout */
+#define	SIOCBRDGGTO	_IOWR('i', 70, struct ifbcachetoreq) /* cache timeout */
+#define	SIOCBRDGDADDR	_IOWR('i', 71, struct ifbareq)	/* delete addr */
+#define	SIOCBRDGFLUSH	_IOWR('i', 72, struct ifbreq)	/* flush addr cache */
 
 #define	SIOCSIFMTU	 _IOW('i', 127, struct ifreq)	/* set ifnet mtu */
 #define	SIOCGIFMTU	_IOWR('i', 126, struct ifreq)	/* get ifnet mtu */

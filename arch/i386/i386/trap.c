@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.27 1998/08/20 19:46:35 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.31 1999/03/21 03:30:01 weingart Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 #undef DEBUG
@@ -62,6 +62,10 @@
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
 
+#if defined(UVM)
+#include <uvm/uvm_extern.h>
+#endif
+
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
 #include <machine/psl.h>
@@ -82,7 +86,7 @@ extern struct emul emul_ibcs2;
 extern struct emul emul_linux_aout, emul_linux_elf;
 #endif
 #ifdef COMPAT_FREEBSD
-extern struct emul emul_freebsd;
+extern struct emul emul_aout_freebsd, emul_elf_freebsd;
 #endif
 #ifdef COMPAT_BSDOS
 extern struct emul emul_bsdos;
@@ -193,7 +197,11 @@ trap(frame)
 	vm_prot_t vftype, ftype;
 	union sigval sv;
 
+#if defined(UVM)
+	uvmexp.traps++;
+#else
 	cnt.v_trap++;
+#endif
 
 	/* SIGSEGV and SIGBUS need this */
 	if (frame.tf_err & PGEX_W) {
@@ -219,6 +227,26 @@ trap(frame)
 		sticks = 0;
 
 	switch (type) {
+
+	/* trace trap */
+	case T_TRCTRAP: {
+#ifdef DDB
+		/* Make sure nobody is single stepping into kernel land.
+		 * The syscall has to turn off the trace bit itself.  The
+		 * easiest way, is to simply not call the debugger, until
+		 * we are through the problematic "osyscall" stub.  This
+		 * is a hack, but it does seem to work.
+		 */
+		extern int Xosyscall, Xosyscall_end;
+
+		if (frame.tf_eip >= (int)&Xosyscall &&
+		    frame.tf_eip <= (int)&Xosyscall_end)
+			return;
+#else
+		return; /* Just return if no DDB */
+#endif
+	}
+	/* FALLTHROUGH */
 
 	default:
 	we_re_toast:
@@ -298,6 +326,11 @@ trap(frame)
 		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, sv);
 		goto out;
 
+	case T_TSSFLT|T_USER:
+		sv.sival_int = frame.tf_eip;
+		trapsignal(p, SIGBUS, vftype, BUS_OBJERR, sv);
+		goto out;
+
 	case T_SEGNPFLT|T_USER:
 	case T_STKFLT|T_USER:
 		sv.sival_int = frame.tf_eip;
@@ -320,7 +353,11 @@ trap(frame)
 		goto out;
 
 	case T_ASTFLT|T_USER:		/* Allow process switch */
+#if defined(UVM)
+		uvmexp.softs++;
+#else
 		cnt.v_soft++;
+#endif
 		if (p->p_flag & P_OWEUPC) {
 			p->p_flag &= ~P_OWEUPC;
 			ADDUPROF(p);
@@ -427,15 +464,27 @@ trap(frame)
 		/* check if page table is mapped, if not, fault it first */
 		if ((PTD[pdei(va)] & PG_V) == 0) {
 			v = trunc_page(vtopte(va));
+#if defined(UVM)
+			rv = uvm_fault(map, v, 0, ftype);
+#else
 			rv = vm_fault(map, v, ftype, FALSE);
+#endif
 			if (rv != KERN_SUCCESS)
 				goto nogo;
 			/* check if page table fault, increment wiring */
+#if defined(UVM)
+			uvm_map_pageable(map, v, round_page(v+1), FALSE);
+#else
 			vm_map_pageable(map, v, round_page(v+1), FALSE);
+#endif
 		} else
 			v = 0;
 
+#if defined(UVM)
+		rv = uvm_fault(map, va, 0, ftype);
+#else
 		rv = vm_fault(map, va, ftype, FALSE);
+#endif
 		if (rv == KERN_SUCCESS) {
 			if (nss > vm->vm_ssize)
 				vm->vm_ssize = nss;
@@ -448,21 +497,19 @@ trap(frame)
 		if (type == T_PAGEFLT) {
 			if (pcb->pcb_onfault != 0)
 				goto copyfault;
+#if defined(UVM)
+			printf("uvm_fault(%p, 0x%lx, 0, %d) -> %x\n",
+			    map, va, ftype, rv);
+#else
 			printf("vm_fault(%p, %lx, %x, 0) -> %x\n",
 			    map, va, ftype, rv);
+#endif
 			goto we_re_toast;
 		}
 		sv.sival_int = rcr2();
 		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, sv);
 		break;
 	}
-
-#ifndef DDB
-	/* XXX need to deal with this when DDB is present, too */
-	case T_TRCTRAP:	/* kernel trace trap; someone single stepping lcall's */
-			/* syscall has to turn off the trace bit itself */
-		return;
-#endif
 
 	case T_BPTFLT|T_USER:		/* bpt instruction fault */
 		sv.sival_int = rcr2();
@@ -525,9 +572,15 @@ trapwrite(addr)
 			return 1;
 	}
 
+#if defined(UVM)
+	if (uvm_fault(&vm->vm_map, va, 0, VM_PROT_READ | VM_PROT_WRITE)
+	    != KERN_SUCCESS)
+		return 1;
+#else
 	if (vm_fault(&vm->vm_map, va, VM_PROT_READ | VM_PROT_WRITE, FALSE)
 	    != KERN_SUCCESS)
 		return 1;
+#endif
 
 	if (nss > vm->vm_ssize)
 		vm->vm_ssize = nss;
@@ -553,7 +606,11 @@ syscall(frame)
 	register_t code, args[8], rval[2];
 	u_quad_t sticks;
 
+#if defined(UVM)
+	uvmexp.syscalls++;
+#else
 	cnt.v_syscall++;
+#endif
 	if (!USERMODE(frame.tf_cs, frame.tf_eflags))
 		panic("syscall");
 	p = curproc;
@@ -604,7 +661,8 @@ syscall(frame)
 		 */
 		if (callp != sysent
 #ifdef COMPAT_FREEBSD
-		    && p->p_emul != &emul_freebsd
+		    && p->p_emul != &emul_aout_freebsd
+		    && p->p_emul != &emul_elf_freebsd
 #endif
 #ifdef COMPAT_BSDOS
 		    && p->p_emul != &emul_bsdos

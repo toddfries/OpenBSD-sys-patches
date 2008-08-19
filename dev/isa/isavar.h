@@ -1,4 +1,4 @@
-/*	$OpenBSD: isavar.h,v 1.30 1998/08/22 17:58:04 rahnds Exp $	*/
+/*	$OpenBSD: isavar.h,v 1.34 1999/01/20 18:21:00 niklas Exp $	*/
 /*	$NetBSD: isavar.h,v 1.26 1997/06/06 23:43:57 thorpej Exp $	*/
 
 /*-
@@ -122,26 +122,29 @@
  */
 struct isabus_attach_args;
 
-#if (alpha + amiga + i386 + arc + wgrisc + powerpc != 1)
-ERROR: COMPILING ISA FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
+#if (alpha + amiga + i386 + arc + wgrisc + powerpc + hppa != 1)
+#error "COMPILING ISA FOR UNSUPPORTED MACHINE, OR MORE THAN ONE."
 #endif
-#if alpha
+#ifdef alpha
 #include <alpha/isa/isa_machdep.h>
 #endif
-#if amiga
+#ifdef amiga
 #include <amiga/isa/isa_machdep.h>
 #endif
-#if i386
+#ifdef i386
 #include <i386/isa/isa_machdep.h>
 #endif
-#if arc
+#ifdef arc
 #include <arc/isa/isa_machdep.h>
 #endif
-#if wgrisc
+#ifdef wgrisc
 #include <wgrisc/isa/isa_machdep.h>
 #endif
-#if powerpc
+#ifdef powerpc
 #include <powerpc/isa/isa_machdep.h>
+#endif
+#ifdef hppa
+#include <hppa/isa/isa_machdep.h>
 #endif
 
 #include "isapnp.h"
@@ -293,6 +296,7 @@ struct isa_attach_args {
 #define ia_maddr	ipa_mem[0].base
 #define ia_msize	ipa_mem[0].length
 #define ia_ioh		ipa_io[0].h
+#define ia_memh		ipa_mem[0].h
 
 	void	*ia_aux;		/* driver specific */
 };
@@ -396,13 +400,6 @@ char	*isa_intr_typename __P((int type));
 
 void	isascan __P((struct device *parent, void *match));
 int	isaprint __P((void *, const char *));
-
-#ifdef NEWCONFIG
-/*
- * Establish a device as being on the ISA bus (XXX NOT IMPLEMENTED).
- */
-void isa_establish __P((struct isadev *, struct device *));
-#endif
 
 /*
  * Some ISA devices (e.g. on a VLB) can perform 32-bit DMA.  This

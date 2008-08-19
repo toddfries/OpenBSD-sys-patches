@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache.c,v 1.4 1997/08/08 08:27:03 downsj Exp $	*/
+/*	$OpenBSD: cache.c,v 1.7 1999/03/22 07:17:13 deraadt Exp $	*/
 /*	$NetBSD: cache.c,v 1.33 1997/07/29 09:41:56 fair Exp $ */
 
 /*
@@ -202,8 +202,11 @@ hypersparc_cache_enable()
 
 	/* Now reset cache tag memory if cache not yet enabled */
 	if ((pcr & HYPERSPARC_PCR_CE) == 0)
-		for (i = 0; i < ts; i += ls)
+		for (i = 0; i < ts; i += ls) {
 			sta(i, ASI_DCACHETAG, 0);
+			while (lda(i, ASI_DCACHETAG))
+				sta(i, ASI_DCACHETAG, 0);
+		}
 
 	/* Enable write-back cache */
 	pcr |= (HYPERSPARC_PCR_CE | HYPERSPARC_PCR_CM);
@@ -242,8 +245,11 @@ swift_cache_enable()
 	ls = CACHEINFO.dc_linesize;
 	ts = CACHEINFO.dc_totalsize;
 	if ((pcr & SWIFT_PCR_DCE) == 0)
-		for (i = 0; i < ts; i += ls)
+		for (i = 0; i < ts; i += ls) {
 			sta(i, ASI_DCACHETAG, 0);
+			while (lda(i, ASI_DCACHETAG))
+				sta(i, ASI_DCACHETAG, 0);
+		}
 
 	/* XXX - assume that an MS2 with ecache is really a turbo in disguise */
 	if (CACHEINFO.ec_totalsize == 0)
@@ -268,13 +274,22 @@ cypress_cache_enable()
 	ls = CACHEINFO.c_linesize;
 	ts = CACHEINFO.c_totalsize;
 	if ((pcr & CYPRESS_PCR_CE) == 0)
-		for (i = 0; i < ts; i += ls)
+		for (i = 0; i < ts; i += ls) {
 			sta(i, ASI_DCACHETAG, 0);
+			while (lda(i, ASI_DCACHETAG))
+				sta(i, ASI_DCACHETAG, 0);
+		}
 
 	pcr |= CYPRESS_PCR_CE;
+
+#if 1
+	pcr &= ~CYPRESS_PCR_CM;		/* XXX Disable write-back mode */
+#else
 	/* If put in write-back mode, turn it on */
 	if (CACHEINFO.c_vactype == VAC_WRITEBACK)
 		pcr |= CYPRESS_PCR_CM;
+#endif
+
 	sta(SRMMU_PCR, ASI_SRMMU, pcr);
 	CACHEINFO.c_enabled = 1;
 	printf("cache enabled\n");
@@ -303,8 +318,11 @@ turbosparc_cache_enable()
 	ls = CACHEINFO.dc_linesize;
 	ts = CACHEINFO.dc_totalsize;
 	if ((pcr & TURBOSPARC_PCR_DCE) == 0)
-		for (i = 0; i < ts; i += ls)
+		for (i = 0; i < ts; i += ls) {
 			sta(i, ASI_DCACHETAG, 0);
+			while (lda(i, ASI_DCACHETAG))
+				sta(i, ASI_DCACHETAG, 0);
+		}
 
 	pcr |= (TURBOSPARC_PCR_ICE | TURBOSPARC_PCR_DCE);
 	sta(SRMMU_PCR, ASI_SRMMU, pcr);
@@ -739,7 +757,7 @@ viking_pcache_flush_line(va, pa)
 #define cass	4			/* CACHEINFO.dc_associativity */
 
 	if (base == 0)
-		base = (char *)roundup((int)etext, csize);
+		base = (char *)roundup((unsigned int)etext, csize);
 
 	v = base + (((pa & cmask) >> cshift) << cshift);
 	i = 2 * cass - 1;
