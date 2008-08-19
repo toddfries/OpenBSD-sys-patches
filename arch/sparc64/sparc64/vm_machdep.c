@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.10 2004/05/23 06:46:09 deraadt Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.12 2005/08/08 19:48:37 kettenis Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.38 2001/06/30 00:02:20 eeh Exp $ */
 
 /*
@@ -302,6 +302,10 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	tf2->tf_out[0] = 0;
 	tf2->tf_out[1] = 1;
 
+	/* Skip trap instruction. */
+	tf2->tf_pc = tf2->tf_npc;
+	tf2->tf_npc += 4;
+
 	/* Construct kernel frame to return to in cpu_switch() */
 	rp = (struct rwindow *)((u_long)npcb + TOPFRAMEOFF);
 	*rp = *(struct rwindow *)((u_long)opcb + TOPFRAMEOFF);
@@ -378,6 +382,7 @@ cpu_coredump(p, vp, cred, chdr)
 	chdr->c_cpusize = sizeof(md_core);
 
 	md_core.md_tf = *p->p_md.md_tf;
+	md_core.md_wcookie = p->p_addr->u_pcb.pcb_wcookie;
 	if (p->p_md.md_fpstate) {
 		if (p == fpproc) {
 			savefpstate(p->p_md.md_fpstate);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0reg.h,v 1.13 2005/03/02 22:18:52 dlg Exp $ */
+/*	$OpenBSD: pxa2x0reg.h,v 1.23 2005/08/08 16:30:47 uwe Exp $ */
 /* $NetBSD: pxa2x0reg.h,v 1.4 2003/06/11 20:43:01 scw Exp $ */
 
 /*
@@ -85,14 +85,16 @@
 
 #define PXA2X0_DMAC_BASE	0x40000000
 #define PXA2X0_DMAC_SIZE	0x300
+#define PXA27X_DMAC_SIZE	0x0400
 #define PXA2X0_FFUART_BASE	0x40100000 /* Full Function UART */
 #define PXA2X0_BTUART_BASE	0x40200000 /* Bluetooth UART */
-#define PXA2X0_I2C_BASE		0x40300000
-#define PXA2X0_I2C_SIZE		0x000016a4
-#define PXA2X0_I2S_BASE 	0x40400000
-#define PXA2X0_AC97_BASE	0x40500000
-#define PXA2X0_AC97_SIZE	0x600
-#define PXA2X0_USBDC_BASE 	0x40600000 /* USB Client */
+#define PXA2X0_I2C_BASE		0x40300000 /* I2C Bus Interface Unit */
+#define PXA2X0_I2C_SIZE		0x16a4
+#define PXA2X0_I2S_BASE		0x40400000 /* Inter-IC Sound Controller */
+#define PXA2X0_I2S_SIZE		0x0084
+#define PXA2X0_AC97_BASE	0x40500000 /* AC '97 Controller */
+#define PXA2X0_AC97_SIZE	0x0600
+#define PXA2X0_USBDC_BASE 	0x40600000 /* USB Client Controller */
 #define PXA2X0_USBDC_SIZE 	0x0460
 #define PXA2X0_STUART_BASE	0x40700000 /* Standard UART */
 #define PXA2X0_ICP_BASE 	0x40800000
@@ -124,15 +126,19 @@
 #define PXA2X0_USBHC_SIZE	0x70
 
 /* width of interrupt controller */
-#define ICU_LEN			32   /* but [0..7,15,16] is not used */
-#define ICU_INT_HWMASK		0xffffff00
+#define ICU_LEN			32	/* but some are not used */
+#define ICU_INT_HWMASK		0xffffff0f
 #define PXA2X0_IRQ_MIN		1
 
-#define PXA2X0_INT_USBH2	2
-#define PXA2X0_INT_USBH1	3	/* OHCI */
+/*
+ * [4..7] are used as soft intrs by SI_TO_IRQBIT,
+ * and [0,1,15,16] are not used by us.
+ */
+#define PXA2X0_INT_USBH2	2	/* USB host (all other events) */
+#define PXA2X0_INT_USBH1	3	/* USB host (OHCI) */
 #define PXA2X0_INT_GPIO0	8
 #define PXA2X0_INT_GPIO1	9
-#define PXA2X0_INT_GPION	10	/* irq from GPIO[2..80] */
+#define PXA2X0_INT_GPION	10	/* IRQ from GPIO[2..80] */
 #define PXA2X0_INT_USB  	11
 #define PXA2X0_INT_PMU  	12
 #define PXA2X0_INT_I2S  	13
@@ -163,8 +169,10 @@
 #define  ICCR_DIM	(1<<0)
 
 /* DMAC */
-#define DMAC_N_CHANNELS	16
-#define	DMAC_N_PRIORITIES 3
+#define DMAC_N_CHANNELS 		16
+#define DMAC_N_CHANNELS_PXA27X		32
+#define DMAC_N_PRIORITIES		3
+#define DMAC_N_PRIORITIES_PXA27X	4
 
 #define DMAC_DCSR(n)	((n)*4)
 #define  DCSR_BUSERRINTR    (1<<0)	/* bus error interrupt */
@@ -175,7 +183,7 @@
 #define  DCSR_STOPIRQEN     (1<<29)     /* stop interrupt enable */
 #define  DCSR_NODESCFETCH   (1<<30)	/* no-descriptor fetch mode */
 #define  DCSR_RUN  	    (1<<31)
-#define DMAC_DINT 	0x00f0		/* DAM interrupt */
+#define DMAC_DINT 	0x00f0		/* DMA interrupt */
 #define  DMAC_DINT_MASK	0xffffu
 #define DMAC_DRCMR(n)	(0x100+(n)*4)	/* Channel map register */
 #define  DRCMR_CHLNUM	0x0f		/* channel number */
@@ -195,7 +203,7 @@
 #define  DCMD_SIZE_8	(1<<DCMD_SIZE_SHIFT)
 #define  DCMD_SIZE_16	(2<<DCMD_SIZE_SHIFT)
 #define  DCMD_SIZE_32	(3<<DCMD_SIZE_SHIFT)
-#define  DCMD_LITTLE_ENDIEN	(0<<18)
+#define  DCMD_LITTLE_ENDIAN	(0<<18)
 #define	 DCMD_ENDIRQEN	  (1<<21)
 #define  DCMD_STARTIRQEN  (1<<22)
 #define  DCMD_FLOWTRG     (1<<28)	/* flow control by target */
@@ -226,13 +234,26 @@ struct pxa2x0_dma_desc {
 #define  ICR_ACKNAK	(1<<2)
 #define  ICR_TB  	(1<<3)
 #define  ICR_MA  	(1<<4)
+#define  ICR_SCLE	(1<<5)		/* PXA270? */
+#define  ICR_IUE	(1<<6)		/* PXA270? */
+#define  ICR_UR		(1<<14)		/* PXA270? */
+#define  ICR_FM		(1<<15)		/* PXA270? */
 #define I2C_ISR  	0x1698		/* Status register */
+#define  ISR_ACKNAK	(1<<1)
+#define  ISR_ITE	(1<<6)
+#define  ISR_IRF	(1<<7)
 #define I2C_ISAR	0x16a0		/* Slave address */
 
 /* Power Manager */
 #define POWMAN_PMCR	0x00
 #define POWMAN_PSSR	0x04	/* Sleep Status register */
-#define  PSSR_RDH	 (1<<5)
+#define  PSSR_SSS	 (1<<0)		/* Software Sleep Status */
+#define  PSSR_BFS	 (1<<1)		/* Battery Fault Status */
+#define  PSSR_VFS	 (1<<2)		/* VCC Fault Status */
+#define  PSSR_STS	 (1<<3)		/* Standby Mode Status */
+#define  PSSR_PH	 (1<<4)		/* Peripheral Control Hold */
+#define  PSSR_RDH	 (1<<5)		/* Read Disable Hold */
+#define  PSSR_OTGPH	 (1<<6)		/* OTG Peripheral Control Hold */
 #define POWMAN_PSPR	0x08
 #define POWMAN_PWER	0x0c
 #define POWMAN_PRER	0x10
@@ -298,7 +319,7 @@ struct pxa2x0_dma_desc {
 #define  CCCR_RUN_X16	 (16<<0) /* 208Mhz, 104/208Mhz mem, 104Mhz LCD */
 
 #define CLKMAN_CKEN	0x04	/* Clock Enable Register */
-#define CLKMAN_OSCC	0x08	/* Osillcator Configuration Register */
+#define CLKMAN_OSCC	0x08	/* Oscillator Configuration Register */
 
 #define CCCR_N_SHIFT	7
 #define CCCR_N_MASK	(0x07<<CCCR_N_SHIFT)
@@ -323,6 +344,7 @@ struct pxa2x0_dma_desc {
 #define CKEN_LCD	(1<<16)
 #define CKEN_KEY	(1<<19)	/* PXA270? */
 #define CKEN_MEM	(1<<22)	/* PXA270? */
+#define CKEN_AC97CC	(1<<31) /* PXA27x */
 
 #define OSCC_OOK	(1<<0)	/* 32.768KHz oscillator status */
 #define OSCC_OON	(1<<1)	/* 32.768KHz oscillator */
@@ -458,9 +480,9 @@ struct pxa2x0_dma_desc {
 #define  MDREFR_K1FREE	(1<<24)	/* SDCLK1 free run */
 #define  MDREFR_K2FREE	(1<<25)	/* SDCLK2 free run */
 
-#define MEMCTL_MSC0	0x08	/* Asychronous Statis memory Control CS[01] */
-#define MEMCTL_MSC1	0x0c	/* Asychronous Statis memory Control CS[23] */
-#define MEMCTL_MSC2	0x10	/* Asychronous Statis memory Control CS[45] */
+#define MEMCTL_MSC0	0x08	/* Asynchronous Static memory Control CS[01] */
+#define MEMCTL_MSC1	0x0c	/* Asynchronous Static memory Control CS[23] */
+#define MEMCTL_MSC2	0x10	/* Asynchronous Static memory Control CS[45] */
 #define  MSC_RBUFF_SHIFT 15	/* return data buffer */
 #define  MSC_RBUFF	(1<<MSC_RBUFF_SHIFT)
 #define  MSC_RRR_SHIFT   12  	/* recovery time */
@@ -518,7 +540,7 @@ struct pxa2x0_dma_desc {
 #define  LCCR0_RDSTM	(1U<<23) /* Read Status Interrupt Mask */
 #define  LCCR0_CMDIM	(1U<<24) /* Command Interrupt Mask */
 #define  LCCR0_OUC	(1U<<25) /* Overlay Underlay Control */
-#define  LCCR0_LDDALT	(1U<<26) /* LDD Alernate Mapping Control Bit */
+#define  LCCR0_LDDALT	(1U<<26) /* LDD Alternate Mapping Control Bit */
 
 #define  LCCR0_IMASK	(LCCR0_LDM|LCCR0_SFM|LCCR0_IUM|LCCR0_EFM|LCCR0_QDM|LCCR0_BM|LCCR0_OUM)
 
@@ -588,7 +610,7 @@ struct pxa2x0_dma_desc {
 #define  CMDAT_WRITE		(1<<3) /* 1=write 0=read operation */
 #define  CMDAT_STREAM_BLOCK	(1<<4) /* stream mode */
 #define  CMDAT_BUSY		(1<<5) /* busy signal is expected */
-#define  CMDAT_INIT		(1<<6) /* preceede command with 80 clocks */
+#define  CMDAT_INIT		(1<<6) /* precede command with 80 clocks */
 #define  CMDAT_MMC_DMA_EN	(1<<7) /* DMA enable */
 #define MMC_RESTO	0x14	/* expected response time out */
 #define MMC_RDTO 	0x18	/* expected data read time out */
@@ -612,69 +634,149 @@ struct pxa2x0_dma_desc {
 #define MMC_RXFIFO	0x40	/* receive FIFO */
 #define MMC_TXFIFO	0x44 	/* transmit FIFO */
 
+
 /*
- * AC97
+ * Inter-IC Sound (I2S) Controller
  */
-#define	AC97_N_CODECS	2
-#define AC97_GCR 	0x000c	/* Global control register */
-#define  GCR_GIE       	(1<<0)	/* interrupt enable */
-#define  GCR_COLD_RST	(1<<1)
-#define  GCR_WARM_RST	(1<<2)
-#define  GCR_ACLINK_OFF	(1<<3)
-#define  GCR_PRIRES_IEN	(1<<4)	/* Primary resume interrupt enable */
-#define  GCR_SECRES_IEN	(1<<5)	/* Secondary resume interrupt enable */
-#define  GCR_PRIRDY_IEN	(1<<8)	/* Primary ready interrupt enable */
-#define  GCR_SECRDY_IEN	(1<<9)	/* Primary ready interrupt enable */
-#define  GCR_SDONE_IE 	(1<<18)	/* Status done interrupt enable */
-#define  GCR_CDONE_IE	(1<<19)	/* Command done interrupt enable */
-
-#define AC97_GSR 	0x001c	/* Global status register */
-#define  GSR_GSCI	(1<<0)	/* codec GPI status change interrupt */
-#define  GSR_MIINT	(1<<1)	/* modem in interrupt */
-#define  GSR_MOINT	(1<<2)	/* modem out interrupt */
-#define  GSR_PIINT	(1<<5)	/* PCM in interrupt */
-#define  GSR_POINT	(1<<6)	/* PCM out interrupt */
-#define  GSR_MINT	(1<<7)	/* Mic in interrupt */
-#define  GSR_PCR	(1<<8)	/* primary code ready */
-#define  GSR_SCR	(1<<9)	/* secondary code ready */
-#define  GSR_PRIRES	(1<<10)	/* primary resume interrupt */
-#define  GSR_SECRES	(1<<11)	/* secondary resume interrupt */
-#define  GSR_BIT1SLT12	(1<<12)	/* Bit 1 of slot 12 */
-#define  GSR_BIT2SLT12	(1<<13)	/* Bit 2 of slot 12 */
-#define  GSR_BIT3SLT12	(1<<14)	/* Bit 3 of slot 12 */
-#define  GSR_RDCS 	(1<<15)	/* Read completion status */
-#define  GSR_SDONE 	(1<<18)	/* status done */
-#define  GSR_CDONE 	(1<<19)	/* command done */
-
-#define AC97_POCR 	0x0000	/* PCM-out control */
-#define AC97_PICR 	0x0004	/* PCM-in control */
-#define AC97_POSR 	0x0010	/* PCM-out status */
-#define AC97_PISR 	0x0014	/* PCM-out status */
-#define AC97_MCCR	0x0008	/* MIC-in control register */
-#define AC97_MCSR	0x0018	/* MIC-in status register */
-#define AC97_MICR	0x0100	/* Modem-in control register */
-#define AC97_MISR	0x0108	/* Modem-in status register */
-#define AC97_MOCR	0x0110	/* Modem-out control register */
-#define AC97_MOSR	0x0118	/* Modem-out status register */
-#define  AC97_FEFIE	(1<<3)	/* fifo error interrupt enable */
-#define  AC97_FIFOE	(1<<4)	/* fifo error */
-
-#define AC97_CAR  	0x0020	/* Codec access register */
-#define  CAR_CAIP  	(1<<0)	/* Codec access in progress */
-
-#define AC97_PCDR	0x0040	/* PCM data register */
-#define AC97_MCDR 	0x0060	/* MIC-in data register */
-#define AC97_MODR 	0x0140	/* Modem data register */
-
-/* address to access codec registers */
-#define AC97_PRIAUDIO	0x0200	/* Primary audio codec */
-#define AC97_SECAUDIO	0x0300	/* Secondary autio codec */
-#define AC97_PRIMODEM	0x0400	/* Primary modem codec */
-#define AC97_SECMODEM	0x0500	/* Secondary modem codec */
-#define	AC97_CODEC_BASE(c)	(AC97_PRIAUDIO + ((c) * 0x100))
+#define I2S_SACR0	0x0000	/* Serial Audio Global Control */
+#define  SACR0_ENB		(1<<0)	/* Enable I2S Function */
+#define  SACR0_BCKD		(1<<2)	/* I/O Direction of I2S_BITCLK */
+#define  SACR0_RST		(1<<3)	/* FIFO Reset */
+#define  SACR0_EFWR		(1<<4)	/* Special-Purpose FIFO W/R Func */
+#define  SACR0_STRF		(1<<5)	/* Select TX or RX FIFO */
+#define  SACR0_TFTH_MASK	(0xf<<8) /* Trans FIFO Intr/DMA Trig Thresh */
+#define  SACR0_RFTH_MASK	(0xf<<12) /* Recv FIFO Intr/DMA Trig Thresh */
+#define  SACR0_SET_TFTH(x)	(((x) & 0xf)<<8)
+#define  SACR0_SET_RFTH(x)	(((x) & 0xf)<<12)
+#define I2S_SACR1	0x0004	/* Serial Audio I2S/MSB-Justified Control */
+#define  SACR1_AMSL		(1<<0)	/* Specify Alt Mode (I2S or MSB) */
+#define  SACR1_DREC		(1<<3)	/* Disable Recording Func */
+#define  SACR1_DRPL		(1<<4)	/* Disable Replay Func */
+#define  SACR1_ENLBF		(1<<5)	/* Enable Interface Loopback Func */
+#define I2S_SASR0	0x000c	/* Serial Audio I2S/MSB-Justified Status */
+#define  SASR0_TNF		(1<<0)	/* Transmit FIFO Not Full */
+#define  SASR0_RNE		(1<<1)	/* Recv FIFO Not Empty */
+#define  SASR0_BSY		(1<<2)	/* I2S Busy */
+#define  SASR0_TFS		(1<<3)	/* Trans FIFO Service Request */
+#define  SASR0_RFS		(1<<4)	/* Recv FIFO Service Request */
+#define  SASR0_TUR		(1<<5)	/* Trans FIFO Underrun */
+#define  SASR0_ROR		(1<<6)	/* Recv FIFO Overrun */
+#define  SASR0_I2SOFF		(1<<7)	/* I2S Controller Off */
+#define  SASR0_TFL_MASK		(0xf<<8) /* Trans FIFO Level */
+#define  SASR0_RFL_MASK		(0xf<<12) /* Recv FIFO Level */
+#define  SASR0_GET_TFL(x)	(((x) & 0xf) >> 8)
+#define  SASR0_GET_RFL(x)	(((x) & 0xf) >> 12)
+#define I2S_SAIMR	0x0014	/* Serial Audio Interrupt Mask */
+#define  SAIMR_TFS		(1<<3)	/* Enable TX FIFO Service Req Intr */
+#define  SAIMR_RFS		(1<<4)	/* Enable RX FIFO Service Req Intr */
+#define  SAIMR_TUR		(1<<5)	/* Enable TX FIFO Underrun Intr */
+#define  SAIMR_ROR		(1<<6)	/* Enable RX FIFO Overrun Intr */
+#define I2S_SAICR	0x0018	/* Serial Audio Interrupt Clear */
+#define  SAICR_TUR		(1<<5)	/* Clear Intr and SASR0_TUR */
+#define  SAICR_ROR		(1<<6)	/* Clear Intr and SASR0_ROR */
+#define I2S_SADIV	0x0060	/* Audio Clock Divider */
+#define  SADIV_MASK		0x7f
+#define  SADIV_3_058MHz		0x0c	/* 3.058 MHz */
+#define  SADIV_2_836MHz		0x0d	/* 2.836 MHz */
+#define  SADIV_1_405MHz		0x1a	/* 1.405 MHz */
+#define  SADIV_1_026MHz		0x24	/* 1.026 MHz */
+#define  SADIV_702_75kHz	0x34	/* 702.75 kHz */
+#define  SADIV_513_25kHz	0x48	/* 513.25 kHz */
+#define I2S_SADR	0x0080	/* Serial Audio Data Register */
+#define  SADR_DTL		(0xffff<<0) /* Left Data Sample */
+#define  SADR_DTH		(0xffff<<16) /* Right Data Sample */
 
 /*
- * USB device controller differs between pxa255 and pxa27x, defined seperately
+ * AC '97 Controller
+ */
+#define AC97_POCR	0x0000	/* PCM Out Control Register */
+#define  POCR_FSRIE		(1<<1)	/* FIFO Service Request Intr Enable */
+#define  POCR_FEIE		(1<<3)	/* FIFO Error Intr Enable */
+#define AC97_PCMICR	0x0004	/* PCM In Control Register */
+#define  PCMICR_FSRIE		(1<<1)	/* FIFO Service Request Intr Enable */
+#define  PCMICR_FEIE		(1<<3)	/* FIFO Error Intr Enable */
+#define AC97_MCCR	0x0008	/* Microphone In Control Register */
+#define  MCCR_FSRIE		(1<<1)	/* FIFO Service Request Intr Enable */
+#define  MCCR_FEIE		(1<<3)	/* FIFO Error Intr Enable */
+#define AC97_GCR	0x000c	/* Global Control Register */
+#define  GCR_GPI_IE		(1<<0)	/* Codec GPI Interupt Enable */
+#define  GCR_nCRST		(1<<1)	/* AC '97 Cold Reset */
+#define  GCR_WRST		(1<<2)	/* AC '97 Warm Reset */
+#define  GCR_ACOFF		(1<<3)	/* AC-Link Shut Off */
+#define  GCR_PRES_IE		(1<<4)	/* Primary Resume Intr Enable */
+#define  GCR_SRES_IE		(1<<5)	/* Secondary Resume Intr Enable */
+#define  GCR_PRDY_IE		(1<<8)	/* Primary Ready Intr Enable */
+#define  GCR_SRDY_IE		(1<<9)	/* Secondary Ready Intr Enable */
+#define  GCR_SDONE_IE		(1<<18)	/* Status Done Intr Enable */
+#define  GCR_CDONE_IE		(1<<19)	/* Command Done Intr Enable */
+#define  GCR_nDMAEN		(1<<24)	/* DMA Enable (PXA27x) */
+#define AC97_POSR	0x0010	/* PCM Out Status Register */
+#define  POSR_FSR		(1<<2)	/* FIFO Service Request */
+#define  POSR_FIFOE		(1<<4)	/* FIFO Error */
+#define AC97_PCMISR	0x0014	/* PCM In Status Register */
+#define  PCMISR_FSR		(1<<2)	/* FIFO Service Request */
+#define  PCMISR_ECC		(1<<3)	/* DMA End of Chain Intr */
+#define  PCMISR_FIFOE		(1<<4)	/* FIFO Error */
+#define AC97_MCSR	0x0018	/* Microphone In Status Register */
+#define  MCSR_FSR		(1<<2)	/* FIFO Service Request */
+#define  MCSR_ECC		(1<<3)	/* DMA End of Chain Intr */
+#define  MCSR_FIFOE		(1<<4)	/* FIFO Error */
+#define AC97_GSR	0x001c	/* Global Status Register */
+#define  GSR_GSCI		(1<<0)	/* Codec GPI Status Change Intr */
+#define  GSR_MIINT		(1<<1)	/* Modem-In Intr */
+#define  GSR_MOINT		(1<<2)	/* Modem-Out Intr */
+#define  GSR_ACOFFD		(1<<3)	/* AC-link Shut Off Done */
+#define  GSR_PIINT		(1<<5)	/* PCM-In Intr */
+#define  GSR_POINT		(1<<6)	/* PCM-Out Intr */
+#define  GSR_MCINT		(1<<7)	/* Mic-In Intr */
+#define  GSR_PCRDY		(1<<8)	/* Primay Codec Ready */
+#define  GSR_SCRDY		(1<<9)	/* Secondary Codec Ready */
+#define  GSR_PRESINT		(1<<10)	/* Primary Resume Intr */
+#define  GSR_SRESINT		(1<<11)	/* Secondary Resume Intr */
+#define  GSR_B1S12		(1<<12)	/* Bit 1 of Slot 12 */
+#define  GSR_B2S12		(1<<13)	/* Bit 2 of Slot 12 */
+#define  GSR_B3S12		(1<<14)	/* Bit 3 of Slot 12 */
+#define  GSR_RCS		(1<<15)	/* Read Completion Status */
+#define  GSR_SDONE		(1<<18)	/* Status Done */
+#define  GSR_CDONE		(1<<19)	/* Command Done */
+#define AC97_CAR	0x0020	/* Codec Access Register */
+#define  CAR_CAIP		(1<<0)	/* Codec Access In Progress */
+/* 0x0024 to 0x003c is reserved */
+#define AC97_PCDR	0x0040	/* PCM Data Register */
+#define  PCDR_PCML		(0xffff<<0)	/* PCM Left Channel Data */
+#define  PCDR_PCMR		(0xffff<<16)	/* PCM Right Channel Data */
+/* 0x0044 to 0x005c is reserved */
+#define AC97_MCDR	0x0060	/* Microphone In Data Register */
+#define  MCDR_MCDAT		(0xffff<<0)	/* Mic-In Data */
+/* 0x0064 to 0x00fc is reserved */
+#define AC97_MOCR	0x0100	/* Modem Out Control Register */
+#define  MOCR_FSRIE		(1<<1)	/* FIFO Service Request Intr Enable */
+#define  MOCR_FEIE		(1<<3)	/* FIFO Error Intr Enable */
+/* 0x0104 is reserved */
+#define AC97_MICR	0x0108	/* Modem In Control Register */
+#define  MICR_FSRIE		(1<<1)	/* FIFO Service Request Intr Enable */
+#define  MICR_FEIE		(1<<3)	/* FIFO Error Intr Enable */
+/* 0x010c is reserved */
+#define AC97_MOSR	0x0110	/* Modem Out Status Register */
+#define  MOSR_FSR		(1<<2)	/* FIFO Service Request */
+#define  MOSR_FIFOE		(1<<2)	/* FIFO Error */
+/* 0x0114 is reserved */
+#define AC97_MISR	0x0118	/* Modem In Status Register */
+#define  MOSR_FSR		(1<<2)	/* FIFO Service Request */
+#define  MOSR_EOC		(1<<2)	/* DMA End of Chain Intr */
+#define  MOSR_FIFOE		(1<<2)	/* FIFO Error */
+/* 0x011c  to 0x013c is reserved */
+#define AC97_MODR	0x0140	/* Modem Data Register */
+#define  MODR_MODAT		(0xffff<<0)	/* Modem Data */
+/* 0x0144 to 0x01fc is reserved */
+
+#define AC97_PRIAUDIO	0x0200	/* Primary Audio Codec Registers */
+#define AC97_SECAUDIO	0x0300	/* Secondary Audio Codec Registers */
+#define AC97_PRIMODEM	0x0400	/* Primary Modem Codec Registers */
+#define AC97_SECMODEM	0x0500	/* Secondary modem Codec Registers */
+
+/*
+ * USB device controller differs between pxa255 and pxa27x, defined separately
  */
 
 /*
@@ -682,7 +784,7 @@ struct pxa2x0_dma_desc {
  */
 #define USBHC_STAT	0x0060	/* UHC Status Register */
 #define  USBHC_STAT_RWUE	(1<<7)	/* HCI Remote Wake-Up Event */
-#define  USBHC_STAT_HBA		(1<<8)	/* HCI Buffer Acrive */
+#define  USBHC_STAT_HBA		(1<<8)	/* HCI Buffer Active */
 #define  USBHC_STAT_HTA		(1<<10)	/* HCI Transfer Abort */
 #define  USBHC_STAT_UPS1	(1<<11)	/* USB Power Sense Port 1 */
 #define  USBHC_STAT_UPS2	(1<<12)	/* USB Power Sense Port 2 */
@@ -734,7 +836,7 @@ struct pxa2x0_dma_desc {
 #define  USBHC_HIT_MASK		(USBHC_HIT_RWUT | USBHC_HIT_BAT | \
     USBHC_HIT_IRQT | USBHC_HIT_TAT | USBHC_HIT_UPS1T | USBHC_HIT_UPS2T | \
     USBHC_HIT_UPRT | USBHC_HIT_STAT | USBHC_HIT_SMAT | USBHC_HIT_UPS3T)
-#define USBHC_RST_WAIT	10	/* ms to wait for reset */
+#define USBHC_RST_WAIT	10000	/* usecs to wait for reset */
 
 /* OS Timer */
 #define OST_OSMR0	0x0000	/* Match 0 */

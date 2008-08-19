@@ -1,11 +1,17 @@
-#	$OpenBSD: GENERIC,v 1.406 2005/03/18 22:39:59 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.431 2005/08/16 16:40:48 deraadt Exp $
 #
-#	GENERIC -- everything that's currently supported
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
 #
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
-machine		i386		# architecture, used by config; REQUIRED
-
-include "../../../conf/GENERIC"
+machine		i386
+include		"../../../conf/GENERIC"
+maxusers	32			# estimated number of users
 
 option		I386_CPU	# CPU classes; at least one is REQUIRED
 option		I486_CPU
@@ -33,8 +39,6 @@ option		COMPAT_AOUT	# a.out binaries are emulated
 
 #option		NTFS		# Experimental NTFS support
 
-maxusers	32		# estimated number of users
-
 # or use		root on nfs swap on nfs
 config		bsd	swap generic
 
@@ -51,6 +55,13 @@ isa0	at ichpcib?
 isa0	at gscpcib?
 eisa0	at mainbus0
 pci*	at mainbus0
+
+#acpi0	at mainbus?
+#acpitimer* at acpi?
+#hpet*	at acpi?
+
+option		ACPIVERBOSE
+#option		ACPI_ENABLE
 
 option		PCIVERBOSE
 option		EISAVERBOSE
@@ -72,6 +83,7 @@ gpio*	at elansc?
 geodesc* at pci?		# Geode SC1100/SCx200 IAOC
 #piixpm* at pci?		# Intel PIIX PM
 #gscpm*	at pci?			# NS Geode SC1100 SMI/ACPI module
+#ichwdt* at pci?		# Intel 6300ESB ICH watchdog timer
 
 # National Semiconductor LM7[89] and compatible hardware monitors
 lm0	at isa? port 0x290
@@ -89,6 +101,9 @@ lmtemp0	at iic1 addr 0x48		# NS LM75/LM77 temperature sensor
 it0	at isa? port 0x290		# IT8705F, IT8712F and SiS970 hardware
 					# monitors
 viaenv*	at pci?				# VIA VT82C686A hardware monitor
+viasio*	at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
+viasio*	at isa? port 0x4e flags 0x0000
+aps0	at isa? port 0x1600		# ThinkPad Active Protection System
 
 # ISA PCMCIA controllers
 #option PCMCIAVERBOSE
@@ -143,6 +158,8 @@ uplcom* at uhub?		# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?		# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uipaq*	at uhub?		# iPAQ serial adapter
+ucom*	at uipaq?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -150,6 +167,7 @@ midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
+atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -176,7 +194,8 @@ radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
-
+#option	NATM
+#ueagle* at uhub?		# Analog Devices Eagle ADSL
 puc*	at pci?			# PCI "universal" communication device
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
@@ -223,6 +242,7 @@ pccom*	at ast?
 pccom*	at pcmcia?			# PCMCIA modems/serial ports
 pccom*	at isapnp?
 pccom*	at puc?
+pccom*	at cardbus?
 
 # option for using CD1400 handshaking for incoming data
 # requires a special cable that exchanges the RTS and DTR lines
@@ -275,21 +295,21 @@ scsibus* at twe?
 #scsibus* at aac?
 ami*	at pci?			# AMI MegaRAID controllers
 scsibus* at ami?
-cac*	at pci?			# Compaq Smart ARRAY RAID controllers
+cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 cac*	at eisa?
 scsibus* at cac?
+ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
+scsibus* at ciss?
 iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
 scsibus* at iha?
 isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 scsibus* at isp?
 aic0	at isa? port 0x340 irq 11 # Adaptec 152[02] SCSI controllers
 aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
-aic*	at isapnp? 		# isapnp configured aic SCSI controllers
+aic*	at isapnp?		# isapnp configured aic SCSI controllers
 scsibus* at aic?
 #esp*	at pcmcia?		# PCMCIA based NCR 53C9X SCSI
 #scsibus* at esp?
-#ncr*	at pci?			# NCR 538XX SCSI controllers(old)
-#scsibus* at ncr?
 siop*	at pci?			# NCR 538XX SCSI controllers(new)
 scsibus* at siop?
 adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
@@ -315,6 +335,8 @@ st*	at scsibus?		# SCSI tape drives
 cd*	at scsibus?		# SCSI CD-ROM drives
 ch*	at scsibus?		# SCSI autochangers
 ss*	at scsibus?		# SCSI scanners
+safte*	at scsibus?		# SCSI accessed fault-tolerant enclosures
+ses*	at scsibus?		# SCSI enclosure services
 uk*	at scsibus?		# unknown SCSI
 
 fdc0	at isa? port 0x3f0 irq 6 drq 2	# standard PC floppy controllers
@@ -353,7 +375,7 @@ ne1	at isa? port 0x300 irq 10		# NE[12]000 ethernet
 ne2	at isa? port 0x280 irq 9		# NE[12]000 ethernet
 ne*	at isapnp?				# NE[12]000 PnP ethernet
 eg0	at isa? disable port 0x310 irq 5	# 3C505/Etherlink+ ethernet
-el0	at isa? disable port 0x300 irq 9 	# 3C501 ethernet
+el0	at isa? disable port 0x300 irq 9	# 3C501 ethernet
 ep0	at isa?					# 3C509 ethernet
 ep*	at isapnp?				# 3C509 PnP ethernet
 ep*	at isa?					# 3C509 ethernet
@@ -371,9 +393,10 @@ ep0	at eisa?
 ep*	at eisa?			# 3C579 ethernet
 fea*	at eisa?			# DEC DEFEA FDDI
 lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
-san* 	at pci?				# Sangoma PCI AFT card
+san*	at pci?				# Sangoma PCI AFT card
 le*	at pci?				# PCnet-PCI based ethernet
 le*	at isapnp?
+pcn*	at pci?				# AMD PCnet-PCI Ethernet
 de*	at pci?				# DC21X4X-based ethernet
 fxp*	at pci?				# EtherExpress 10/100B ethernet
 fxp*	at cardbus?			# Intel PRO/100 ethernet
@@ -390,7 +413,7 @@ xl*	at cardbus?			# 3C575/3C656 ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
 rl*	at cardbus?			# RealTek 81[23]9 ethernet
 mtd*	at pci?				# Myson MTD800/803/891
-tx*	at pci?				# SMC 83C170 EPIC ethernet
+epic*	at pci?				# SMC EPIC/100 ethernet
 tl*	at pci?				# Compaq Thunderlan ethernet
 vr*	at pci?				# VIA Rhine ethernet
 wb*	at pci?				# Winbond W89C840F ethernet
@@ -412,7 +435,9 @@ stge*	at pci?				# Sundance TC9021 GigE
 #lge*	at pci?				# Level1 LXT1001 GigE
 hme*	at pci?				# Sun Happy Meal
 bce*	at pci?				# Broadcom BCM4401
-vge*	at pci? 			# VIA VT612x
+vge*	at pci?				# VIA VT612x
+musycc*	at pci?				# Conexant HDLC controller
+art*	at musycc?			# Accoom Artery E1/T1 cards
 
 # Wireless network cards
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)
@@ -443,6 +468,7 @@ lxtphy*	at mii?				# Level1 LXT970 PHYs
 nsphy*	at mii?				# NS and compatible PHYs
 nsphyter*	at mii?			# NS and compatible PHYs
 qsphy*	at mii?				# Quality Semi QS6612 PHYs
+luphy*	at mii?				# Lucent LU6612 PHY
 sqphy*	at mii?				# Seeq 8x220 PHYs
 rlphy* at mii?				# RealTek 8139 internal PHYs
 mtdphy* at mii?				# Myson MTD972 PHYs
@@ -457,7 +483,7 @@ xmphy*	at mii?				# XaQti XMAC-II PHYs
 nsgphy*	at mii?				# NS gigabit PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
-ciphy*  at mii?				# Cicada CS8201 10/100/1000 copper PHY
+ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
 ukphy*	at mii?				# "unknown" PHYs
 
 pss0	at isa? port 0x220 irq 7 drq 6	# Personal Sound System
@@ -469,6 +495,7 @@ sv*	at pci?				# S3 SonicVibes (S3 617)
 neo*	at pci?				# NeoMagic 256AV/ZX
 cmpci*	at pci?				# C-Media CMI8338/8738
 auich*	at pci? flags 0x0000		# i82801 ICH AC'97 audio
+auixp*	at pci?				# ATI IXP AC'97 Audio
 autri*	at pci? flags 0x0000		# Trident 4D WAVE
 auvia*	at pci?				# VIA VT82C686A
 clcs*	at pci?				# CS4280 CrystalClear audio
@@ -487,7 +514,7 @@ pas0	at isa? port 0x220 irq 7 drq 1	# ProAudio Spectrum
 gus0	at isa? port 0x220 irq 7 drq 1 drq2 6	# Gravis (drq2 is record drq)
 ym*	at isapnp?
 mpu*	at isapnp?
-mpu*	at isa? port 0x300 		# generic MPU, Yamaha SW60XG
+mpu*	at isa? port 0x300		# generic MPU, Yamaha SW60XG
 #aria0	at isa? port 0x280 irq 10 drq 0 flags 0x1 # Prometheus Aria 16
 
 # OPL[23] FM synthesizers
@@ -506,8 +533,7 @@ midi*	at mpu?
 midi*	at autri?
 midi*	at eap?
 
-# The spkr driver provides a simple tone interface to the built in speaker.
-#spkr0	at pcppi?		# PC speaker
+spkr0	at pcppi?		# PC speaker
 
 # Audio Support
 audio*	at sb?
@@ -525,6 +551,7 @@ audio*	at cmpci?
 audio*	at clcs?
 audio*	at clct?
 audio*	at auich?
+audio*	at auixp?
 audio*	at autri?
 audio*	at auvia?
 audio*	at fms?

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.44 2005/03/17 20:08:13 damien Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.50 2005/08/09 04:10:12 mickey Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005
@@ -148,7 +148,7 @@ ipw_match(struct device *parent, void *match, void *aux)
 	struct pci_attach_args *pa = aux;
 
 	if (PCI_VENDOR (pa->pa_id) == PCI_VENDOR_INTEL &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_PRO_2100_3B)
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_PRO_WL_2100)
 		return 1;
 
 	return 0;
@@ -180,11 +180,6 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	data &= ~0x0000ff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
-
-	/* enable bus-mastering */
-	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, PCI_COMMAND_STATUS_REG);
-	data |= PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(sc->sc_pct, sc->sc_pcitag, PCI_COMMAND_STATUS_REG, data);
 
 	/* map the register window */
 	error = pci_mapreg_map(pa, IPW_PCI_BAR0, PCI_MAPREG_TYPE_MEM |
@@ -870,8 +865,8 @@ ipw_data_intr(struct ipw_softc *sc, struct ipw_status *status,
 
 		tap->wr_flags = 0;
 		tap->wr_antsignal = status->rssi;
-		tap->wr_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
-		tap->wr_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
+		tap->wr_chan_freq = htole16(ic->ic_ibss_chan->ic_freq);
+		tap->wr_chan_flags = htole16(ic->ic_ibss_chan->ic_flags);
 
 		M_DUP_PKTHDR(&mb, m);
 		mb.m_data = (caddr_t)tap;
@@ -1021,12 +1016,18 @@ void
 ipw_tx_intr(struct ipw_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
+	struct ipw_soft_bd *sbd;
 	u_int32_t r, i;
 
 	r = CSR_READ_4(sc, IPW_CSR_TX_READ_INDEX);
 
 	for (i = (sc->txold + 1) % IPW_NTBD; i != r; i = (i + 1) % IPW_NTBD) {
-		ipw_release_sbd(sc, &sc->stbd_list[i]);
+		sbd = &sc->stbd_list[i];
+
+		if (sbd->type == IPW_SBD_TYPE_DATA)
+			ifp->if_opackets++;
+
+		ipw_release_sbd(sc, sbd);
 		sc->txfree++;
 	}
 
@@ -1148,8 +1149,8 @@ ipw_tx_start(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni)
 		struct ipw_tx_radiotap_header *tap = &sc->sc_txtap;
 
 		tap->wt_flags = 0;
-		tap->wt_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
-		tap->wt_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
+		tap->wt_chan_freq = htole16(ic->ic_ibss_chan->ic_freq);
+		tap->wt_chan_flags = htole16(ic->ic_ibss_chan->ic_flags);
 
 		M_DUP_PKTHDR(&mb, m);
 		mb.m_data = (caddr_t)tap;
@@ -1334,6 +1335,7 @@ ipw_start(struct ifnet *ifp)
 		if (ipw_tx_start(ifp, m, ni) != 0) {
 			if (ni != NULL)
 				ieee80211_release_node(ic, ni);
+			ifp->if_oerrors++;
 			break;
 		}
 
@@ -1354,6 +1356,7 @@ ipw_watchdog(struct ifnet *ifp)
 		if (--sc->sc_tx_timer == 0) {
 			printf("%s: device timeout\n", sc->sc_dev.dv_xname);
 			ipw_stop(ifp, 1);
+			ifp->if_oerrors++;
 			return;
 		}
 		ifp->if_timer = 1;
@@ -1375,20 +1378,13 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	switch (cmd) {
 	case SIOCSIFADDR:
-		ifa = (struct ifaddr *) data;
+		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-			ipw_init(ifp);
-			break;
 #endif
-		default:
-			ipw_init(ifp);
-		}
-		break;
-
+		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_flags & IFF_RUNNING))
@@ -1979,14 +1975,14 @@ ipw_stop(struct ifnet *ifp, int disable)
 	ipw_stop_master(sc);
 	CSR_WRITE_4(sc, IPW_CSR_RST, IPW_RST_SW_RESET);
 
+	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	/*
 	 * Release tx buffers
 	 */
 	for (i = 0; i < IPW_NTBD; i++)
 		ipw_release_sbd(sc, &sc->stbd_list[i]);
-
-	ifp->if_timer = 0;
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 }

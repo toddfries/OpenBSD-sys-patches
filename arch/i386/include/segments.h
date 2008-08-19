@@ -1,4 +1,4 @@
-/*	$OpenBSD: segments.h,v 1.13.4.1 2006/01/13 00:49:21 brad Exp $	*/
+/*	$OpenBSD: segments.h,v 1.13.6.1 2006/01/13 01:56:55 brad Exp $	*/
 /*	$NetBSD: segments.h,v 1.23 1996/02/01 22:31:03 mycroft Exp $	*/
 
 /*-

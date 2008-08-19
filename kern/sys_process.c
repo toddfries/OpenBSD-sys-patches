@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_process.c,v 1.28 2004/06/13 21:49:26 niklas Exp $	*/
+/*	$OpenBSD: sys_process.c,v 1.31 2005/08/02 18:04:07 kettenis Exp $	*/
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -54,6 +54,7 @@
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/errno.h>
+#include <sys/malloc.h>
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/user.h>
@@ -87,6 +88,13 @@ sys_ptrace(p, v, retval)
 	struct uio uio;
 	struct iovec iov;
 	struct ptrace_io_desc piod;
+	struct reg *regs;
+#if defined (PT_SETFPREGS) || defined (PT_GETFPREGS)
+	struct fpreg *fpregs;
+#endif
+#if defined (PT_SETXMMREGS) || defined (PT_GETXMMREGS)
+	struct xmmregs *xmmregs;
+#endif
 #ifdef PT_WCOOKIE
 	register_t wcookie;
 #endif
@@ -178,6 +186,12 @@ sys_ptrace(p, v, retval)
 #endif
 #ifdef PT_SETFPREGS
 	case  PT_SETFPREGS:
+#endif
+#ifdef PT_GETXMMREGS
+	case  PT_GETXMMREGS:
+#endif
+#ifdef PT_SETXMMREGS
+	case  PT_SETXMMREGS:
 #endif
 #ifdef PT_WCOOKIE
 	case  PT_WCOOKIE:
@@ -391,46 +405,96 @@ sys_ptrace(p, v, retval)
 		goto sendsig;
 
 	case  PT_SETREGS:
-		write = 1;
-	case  PT_GETREGS:
-		/* write = 0 done above. */
-		if (!procfs_validregs(t, NULL))
-			return (EINVAL);
-		else {
-			iov.iov_base = SCARG(uap, addr);
-			iov.iov_len = sizeof(struct reg);
-			uio.uio_iov = &iov;
-			uio.uio_iovcnt = 1;
-			uio.uio_offset = 0;
-			uio.uio_resid = sizeof(struct reg);
-			uio.uio_segflg = UIO_USERSPACE;
-			uio.uio_rw = write ? UIO_WRITE : UIO_READ;
-			uio.uio_procp = p;
-			return (procfs_doregs(p, t, NULL, &uio));
+		KASSERT((p->p_flag & P_SYSTEM) == 0);
+		if ((error = procfs_checkioperm(p, t)) != 0)
+			return (error);
+
+		regs = malloc(sizeof(*regs), M_TEMP, M_WAITOK);
+		error = copyin(SCARG(uap, addr), regs, sizeof(*regs));
+		if (error == 0) {
+			PHOLD(p);
+			error = process_write_regs(t, regs);
+			PRELE(p);
 		}
+		free(regs, M_TEMP);
+		return (error);
+	case  PT_GETREGS:
+		KASSERT((p->p_flag & P_SYSTEM) == 0);
+		if ((error = procfs_checkioperm(p, t)) != 0)
+			return (error);
+
+		regs = malloc(sizeof(*regs), M_TEMP, M_WAITOK);
+		PHOLD(p);
+		error = process_read_regs(t, regs);
+		PRELE(p);
+		if (error == 0)
+			error = copyout(regs,
+			    SCARG(uap, addr), sizeof (*regs));
+		free(regs, M_TEMP);
+		return (error);
 #ifdef PT_SETFPREGS
 	case  PT_SETFPREGS:
-		write = 1;
+		KASSERT((p->p_flag & P_SYSTEM) == 0);
+		if ((error = procfs_checkioperm(p, t)) != 0)
+			return (error);
+
+		fpregs = malloc(sizeof(*fpregs), M_TEMP, M_WAITOK);
+		error = copyin(SCARG(uap, addr), fpregs, sizeof(*fpregs));
+		if (error == 0) {
+			PHOLD(p);
+			error = process_write_fpregs(t, fpregs);
+			PRELE(p);
+		}
+		free(fpregs, M_TEMP);
+		return (error);
 #endif
 #ifdef PT_GETFPREGS
 	case  PT_GETFPREGS:
-		/* write = 0 done above. */
+		KASSERT((p->p_flag & P_SYSTEM) == 0);
+		if ((error = procfs_checkioperm(p, t)) != 0)
+			return (error);
+
+		fpregs = malloc(sizeof(*fpregs), M_TEMP, M_WAITOK);
+		PHOLD(p);
+		error = process_read_fpregs(t, fpregs);
+		PRELE(p);
+		if (error == 0)
+			error = copyout(fpregs,
+			    SCARG(uap, addr), sizeof(*fpregs));
+		free(fpregs, M_TEMP);
+		return (error);
 #endif
-#if defined(PT_SETFPREGS) || defined(PT_GETFPREGS)
-		if (!procfs_validfpregs(t, NULL))
-			return (EINVAL);
-		else {
-			iov.iov_base = SCARG(uap, addr);
-			iov.iov_len = sizeof(struct fpreg);
-			uio.uio_iov = &iov;
-			uio.uio_iovcnt = 1;
-			uio.uio_offset = 0;
-			uio.uio_resid = sizeof(struct fpreg);
-			uio.uio_segflg = UIO_USERSPACE;
-			uio.uio_rw = write ? UIO_WRITE : UIO_READ;
-			uio.uio_procp = p;
-			return (procfs_dofpregs(p, t, NULL, &uio));
+#ifdef PT_SETXMMREGS
+	case  PT_SETXMMREGS:
+		KASSERT((p->p_flag & P_SYSTEM) == 0);
+		if ((error = procfs_checkioperm(p, t)) != 0)
+			return (error);
+
+		xmmregs = malloc(sizeof(*xmmregs), M_TEMP, M_WAITOK);
+		error = copyin(SCARG(uap, addr), xmmregs, sizeof(*xmmregs));
+		if (error == 0) {
+			PHOLD(p);
+			error = process_write_xmmregs(t, xmmregs);
+			PRELE(p);
 		}
+		free(xmmregs, M_TEMP);
+		return (error);
+#endif
+#ifdef PT_GETXMMREGS
+	case  PT_GETXMMREGS:
+		KASSERT((p->p_flag & P_SYSTEM) == 0);
+		if ((error = procfs_checkioperm(p, t)) != 0)
+			return (error);
+
+		xmmregs = malloc(sizeof(*xmmregs), M_TEMP, M_WAITOK);
+		PHOLD(p);
+		error = process_read_xmmregs(t, xmmregs);
+		PRELE(p);
+		if (error == 0)
+			error = copyout(xmmregs,
+			    SCARG(uap, addr), sizeof(*xmmregs));
+		free(xmmregs, M_TEMP);
+		return (error);
 #endif
 #ifdef PT_WCOOKIE
 	case  PT_WCOOKIE:

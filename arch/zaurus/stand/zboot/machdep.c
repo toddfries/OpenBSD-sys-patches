@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.1 2005/01/10 00:25:03 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.4 2005/05/24 20:38:20 uwe Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove
@@ -31,8 +31,6 @@
 
 char _alloc_heap[4 * 1024 * 1024];
 
-int debug;
-
 void
 machdep(void)
 {
@@ -47,10 +45,8 @@ machdep(void)
 		if (pr != NULL) {
 			printf("%s: ", pr->name);
 
-			for (j = 0; j < pr->count; j++) {
+			for (j = 0; j < pr->count; j++)
 				(*(pr->probes)[j])();
-			}
-
 			printf("\n");
 		}
 	}

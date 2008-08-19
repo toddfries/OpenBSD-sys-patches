@@ -1,4 +1,4 @@
-#	$OpenBSD: files.alpha,v 1.65 2005/03/08 20:00:22 tdeval Exp $
+#	$OpenBSD: files.alpha,v 1.68 2005/07/14 02:09:46 uwe Exp $
 #	$NetBSD: files.alpha,v 1.32 1996/11/25 04:03:21 cgd Exp $
 #
 # alpha-specific configuration info
@@ -284,14 +284,11 @@ file	arch/alpha/alpha/disksubr.c
 file	arch/alpha/dev/bus_dma.c
 file	dev/clock_subr.c
 
-
 #
-# Optional/miscellaneous files
+# Network protocol checksum routines
 #
 
-file	arch/alpha/alpha/in_cksum.c		inet & !generic_in_cksum
-file	netinet/in_cksum.c			inet & generic_in_cksum
-file	netns/ns_cksum.c			ns
+file	arch/alpha/alpha/in_cksum.c		inet
 
 # XXX
 file	arch/alpha/alpha/promcons.c

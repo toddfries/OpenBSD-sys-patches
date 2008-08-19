@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.24 2005/01/03 22:45:52 brad Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.27 2005/08/01 05:36:48 brad Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -110,11 +110,6 @@
 #include <netinet/if_ether.h>
 #endif
 #endif /* defined(__OpenBSD__) */
-
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -467,7 +462,7 @@ USB_MATCH(cue)
 USB_ATTACH(cue)
 {
 	USB_ATTACH_START(cue, sc, uaa);
-	char			devinfo[1024];
+	char			*devinfop;
 	int			s;
 	u_char			eaddr[ETHER_ADDR_LEN];
 	usbd_device_handle	dev = uaa->device;
@@ -480,9 +475,10 @@ USB_ATTACH(cue)
 
 	DPRINTFN(5,(" : cue_attach: sc=%p, dev=%p", sc, dev));
 
-	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
+	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->cue_dev), devinfo);
+	printf("%s: %s\n", USBDEVNAME(sc->cue_dev), devinfop);
+	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, CUE_CONFIG_NO, 1);
 	if (err) {
@@ -1167,21 +1163,6 @@ cue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #endif
 			break;
 #endif /* INET */
-#ifdef NS
-		case AF_NS:
-		    {
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host = *(union ns_host *)
-					LLADDR(ifp->if_sadl);
-			else
-				memcpy(LLADDR(ifp->if_sadl),
-				       ina->x_host.c_host,
-				       ifp->if_addrlen);
-			break;
-		    }
-#endif /* NS */
 		}
 		break;
 
@@ -1280,6 +1261,7 @@ cue_stop(struct cue_softc *sc)
 
 	ifp = GET_IFP(sc);
 	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	cue_csr_write_1(sc, CUE_ETHCTL, 0);
 	cue_reset(sc);
@@ -1351,6 +1333,4 @@ cue_stop(struct cue_softc *sc)
 			sc->cue_cdata.cue_tx_chain[i].cue_xfer = NULL;
 		}
 	}
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }

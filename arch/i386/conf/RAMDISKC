@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKC,v 1.53 2005/03/19 23:39:27 deraadt Exp $
+#	$OpenBSD: RAMDISKC,v 1.62 2005/07/30 22:17:10 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -99,12 +99,13 @@ uhub*	at usb?			# USB Hubs
 uhub*	at uhub?		# USB Hubs
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
+atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
-aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
+#aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 #atu*	at uhub?		# Atmel AT76c50x based 802.11b
-axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
+#axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 #cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 #kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 #cdce*	at uhub?		# CDC Ethernet
@@ -112,7 +113,7 @@ axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 #udav*	at uhub?		# Davicom DM9601 based Ethernet
 #url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
-ural*	at uhub?		# Ralink RT2500
+#ural*	at uhub?		# Ralink RT2500
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
@@ -137,7 +138,7 @@ pccom2	at isa? port 0x3e8 irq 5
 #pccom*	at boca?
 #rtfps0	at isa? port 0x1230 irq 10	# RT 4-port serial cards
 #pccom*	at rtfps?
-pccom*	at pcmcia?			# PCMCIA modem cards
+#pccom*	at pcmcia?			# PCMCIA modem cards
 #pccom*	at isapnp?
 
 # option for using CD1400 handshaking for incoming data
@@ -176,8 +177,6 @@ pccom*	at pcmcia?			# PCMCIA modem cards
 #aic*	at isapnp?
 #aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
 #scsibus* at aic?
-#ncr*	at pci?			# NCR 538XX SCSI controllers(old)
-#scsibus* at ncr?
 #siop*	at pci?			# NCR 538XX SCSI controllers(new)
 #scsibus* at siop?
 #adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
@@ -263,7 +262,7 @@ xl*	at pci?				# 3C9xx ethernet
 xl*	at cardbus?			# 3C575 ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
 rl*	at cardbus?			# RealTek 81[23]9 ethernet
-#tx*	at pci?				# SMC 83C170 EPIC ethernet
+#epic*	at pci?				# SMC EPIC/100 ethernet
 #tl*	at pci?				# Compaq Thunderlan ethernet
 #vr*	at pci?				# VIA Rhine ethernet
 #wb*	at pci?				# Winbond W89C840F ethernet
@@ -281,8 +280,8 @@ re*	at cardbus?			# Realtek 8169/8169S/8110S
 #stge*	at pci?				# Sundance TC9021 GigE
 #lge*	at pci?				# Level1 LXT1001 GigE
 #hme*	at pci?				# Sun Happy Meal
-bce*	at pci?				# Broadcom BCM4401
-vge*	at pci? 			# VIA VT612x
+#bce*	at pci?				# Broadcom BCM4401
+vge*	at pci?				# VIA VT612x
 
 # Wireless network cards
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)

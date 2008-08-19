@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.3 2004/06/28 01:52:26 deraadt Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.6 2005/06/25 21:00:56 brad Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -136,10 +136,6 @@ do {									\
 #define	PCI_MODE2_ENABLE_REG	0x0cf8
 #define	PCI_MODE2_FORWARD_REG	0x0cfa
 
-#define PCI_ID_CODE(vid,pid)					\
-	((((vid) & PCI_VENDOR_MASK) << PCI_VENDOR_SHIFT) |	\
-	 (((pid) & PCI_PRODUCT_MASK) << PCI_PRODUCT_SHIFT))	\
-
 #define _m1tag(b, d, f) \
 	(PCI_MODE1_ENABLE | ((b) << 16) | ((d) << 11) | ((f) << 8))
 #define _qe(bus, dev, fcn, vend, prod) \
@@ -159,7 +155,6 @@ struct {
 	{0, 0xffffffff} /* patchable */
 };
 #undef _m1tag
-#undef _id
 #undef _qe
 
 /*
@@ -183,14 +178,17 @@ struct x86_bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamem_mmap,
 };
 
+extern void amdgart_probe(struct pcibus_attach_args *);
+
 void
 pci_attach_hook(parent, self, pba)
 	struct device *parent, *self;
 	struct pcibus_attach_args *pba;
 {
-
-	if (pba->pba_bus == 0)
+	if (pba->pba_bus == 0) {
 		printf(": configuration mode %d", pci_mode);
+		amdgart_probe(pba);
+	}
 }
 
 int

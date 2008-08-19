@@ -1,4 +1,4 @@
-/*	$OpenBSD: maestro.c,v 1.16 2003/06/06 02:56:39 fgsch Exp $	*/
+/*	$OpenBSD: maestro.c,v 1.19 2005/08/09 04:10:13 mickey Exp $	*/
 /* $FreeBSD: /c/ncvs/src/sys/dev/sound/pci/maestro.c,v 1.3 2000/11/21 12:22:11 julian Exp $ */
 /*
  * FreeBSD's ESS Agogo/Maestro driver 
@@ -179,7 +179,6 @@ int	maestro_get_port(void *, mixer_ctrl_t *);
 int	maestro_query_devinfo(void *, mixer_devinfo_t *);
 void	*maestro_malloc(void *, int, size_t, int, int);
 void	maestro_free(void *, void *, int);
-size_t	maestro_round_buffersize(void *, int, size_t);
 paddr_t	maestro_mappage(void *, void *, off_t, int);
 int	maestro_get_props(void *);
 int	maestro_trigger_output(void *, void *, void *, int, void (*)(void *),
@@ -254,7 +253,7 @@ struct audio_hw_if maestro_hw_if = {
 	maestro_query_devinfo,
 	maestro_malloc,
 	maestro_free,
-	maestro_round_buffersize,
+	NULL,
 	maestro_mappage,
 	maestro_get_props,
 	maestro_trigger_output,
@@ -325,7 +324,6 @@ maestro_attach(parent, self, aux)
 	char const *intrstr;
 	pci_intr_handle_t ih;
 	int error;
-	pcireg_t data;
 	u_int16_t cdata;
 	int dmastage = 0;
 	int rseg;
@@ -363,12 +361,6 @@ maestro_attach(parent, self, aux)
 		printf(", couldn't map i/o space\n");
 		goto bad;
 	};
-
-	/* Enable bus mastering */
-	data = pci_conf_read(sc->pc, sc->pt, PCI_COMMAND_STATUS_REG);
-	if ((data & PCI_COMMAND_MASTER_ENABLE) == 0)
-		pci_conf_write(sc->pc, sc->pt, PCI_COMMAND_STATUS_REG,
-			data | PCI_COMMAND_MASTER_ENABLE);
 
 	/* Allocate fixed DMA segment :-( */
 	sc->dmasize = MAESTRO_BUFSIZ * 16;
@@ -567,16 +559,7 @@ maestro_round_blocksize(self, blk)
 	void *self;
 	int blk;
 {
-	return (blk & ~0xf);
-}
-
-size_t
-maestro_round_buffersize(self, direction, size)
-	void *self;
-	int direction;
-	size_t size;
-{
-	return (size);
+	return ((blk + 0xf) & ~0xf);
 }
 
 void *

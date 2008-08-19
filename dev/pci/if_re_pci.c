@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.1 2005/01/14 01:08:11 pvalchev Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.4 2005/08/09 04:10:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -65,7 +65,11 @@ struct re_pci_softc {
 const struct pci_matchid re_pci_devices[] = {
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8169 },
 	{ PCI_VENDOR_COREGA, PCI_PRODUCT_COREGA_CGLAPCIGT },
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE528T },
+	{ PCI_VENDOR_USR2, PCI_PRODUCT_USR2_USR997902 },
 };
+
+#define RE_LINKSYS_EG1032_SUBID 0x00241737
 
 int re_pci_probe(struct device *, void *, void *);
 void re_pci_attach(struct device *, struct device *, void *);
@@ -86,6 +90,17 @@ struct cfattach re_pci_ca = {
 int
 re_pci_probe(struct device *parent, void *match, void *aux)
 {
+	struct pci_attach_args *pa = aux;
+	pci_chipset_tag_t pc = pa->pa_pc;
+	pcireg_t subid;
+
+	subid = pci_conf_read(pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_LINKSYS &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_LINKSYS_EG1032 &&
+	    subid == RE_LINKSYS_EG1032_SUBID)
+		return (1);
+
 	return (pci_matchbyid((struct pci_attach_args *)aux, re_pci_devices,
 	    sizeof(re_pci_devices)/sizeof(re_pci_devices[0])));
 }
@@ -136,10 +151,6 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	    PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 	if ((command & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE)) == 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.39 2005/03/04 19:30:43 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.45 2005/08/03 16:27:39 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -84,7 +84,6 @@
  */
 
 #include "bpfilter.h"
-#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -962,7 +961,7 @@ void rl_init(xsc)
 {
 	struct rl_softc		*sc = xsc;
 	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
-	int			s, i;
+	int			s;
 	u_int32_t		rxcfg = 0;
 
 	s = splimp();
@@ -972,10 +971,17 @@ void rl_init(xsc)
 	 */
 	rl_stop(sc);
 
-	/* Init our MAC address */
-	for (i = 0; i < ETHER_ADDR_LEN; i++) {
-		CSR_WRITE_1(sc, RL_IDR0 + i, sc->sc_arpcom.ac_enaddr[i]);
-	}
+	/*
+	 * Init our MAC address.  Even though the chipset
+	 * documentation doesn't mention it, we need to enter "Config
+	 * register write enable" mode to modify the ID registers.
+	 */
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_WRITECFG);
+	CSR_WRITE_RAW_4(sc, RL_IDR0,
+	    (u_int8_t *)(&sc->sc_arpcom.ac_enaddr[0]));
+	CSR_WRITE_RAW_4(sc, RL_IDR4,
+	    (u_int8_t *)(&sc->sc_arpcom.ac_enaddr[4]));
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
 
 	/* Init the RX buffer pointer register. */
 	CSR_WRITE_4(sc, RL_RXADDR, sc->rl_cdata.rl_rx_buf_pa);
@@ -1179,6 +1185,8 @@ void rl_stop(sc)
 
 	timeout_del(&sc->sc_tick_tmo);
 
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	CSR_WRITE_1(sc, RL_COMMAND, 0x00);
 	CSR_WRITE_2(sc, RL_IMR, 0x0000);
 
@@ -1199,8 +1207,6 @@ void rl_stop(sc)
 				0x00000000);
 		}
 	}
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
 int

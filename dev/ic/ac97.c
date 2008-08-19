@@ -1,4 +1,4 @@
-/*	$OpenBSD: ac97.c,v 1.52 2005/02/16 22:26:39 todd Exp $	*/
+/*	$OpenBSD: ac97.c,v 1.56 2005/06/18 21:23:59 canacar Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Constantine Sapuntzakis
@@ -294,6 +294,7 @@ int ac97_get_portnum_by_name(struct ac97_codec_if *, char *, char *,
 				  char *);
 void ac97_restore_shadow(struct ac97_codec_if *self);
 
+void ac97_ad1886_init(struct ac97_softc *);
 void ac97_ad198x_init(struct ac97_softc *);
 void ac97_alc655_init(struct ac97_softc *);
 void ac97_cx20468_init(struct ac97_softc *);
@@ -319,10 +320,10 @@ const struct ac97_codecid {
 	{ 0x40, 0xff, 0, 0,	"AD1881" },
 	{ 0x48, 0xff, 0, 0,	"AD1881A" },
 	{ 0x60, 0xff, 0, 0,	"AD1885" },
-	{ 0x61, 0xff, 0, 0,	"AD1886" },
+	{ 0x61, 0xff, 0, 0,	"AD1886",	ac97_ad1886_init },
 	{ 0x63, 0xff, 0, 0,	"AD1886A" },
 	{ 0x68, 0xff, 0, 0,	"AD1888",	ac97_ad198x_init },
-	{ 0x70, 0xff, 0, 0,	"AD1981" },
+	{ 0x70, 0xff, 0, 0,	"AD1980" },
 	{ 0x72, 0xff, 0, 0,	"AD1981A" },
 	{ 0x74, 0xff, 0, 0,	"AD1981B" },
 	{ 0x75, 0xff, 0, 0,	"AD1985",	ac97_ad198x_init },
@@ -804,6 +805,10 @@ ac97_attach(host_if)
 
 	ac97_setup_source_info(as);
 
+	/* use initfunc for specific device */
+	if (initfunc != NULL)
+		initfunc(as);
+
 	/* Just enable the DAC and master volumes by default */
 	bzero(&ctl, sizeof(ctl));
 
@@ -826,10 +831,6 @@ ac97_attach(host_if)
 	ctl.dev = ac97_get_portnum_by_name(&as->codec_if, AudioCrecord,
 	    AudioNsource, NULL);
 	ac97_mixer_set_port(&as->codec_if, &ctl);
-
-	/* use initfunc for specific device */
-	if (initfunc != NULL)
-		initfunc(as);
 
 	return (0);
 }
@@ -903,6 +904,12 @@ ac97_mixer_set_port(codec_if, cp)
 			newval |= (newval << (8 + si->ofs));
 			mask |= (mask << 8);
 		}
+
+		if (si->mute) {
+			newval |= newval << 8;
+			mask |= mask << 8;
+		}
+
 		break;
 	case AUDIO_MIXER_VALUE:
 	{
@@ -1104,14 +1111,35 @@ ac97_set_rate(codec_if, p, mode)
  * Codec-dependent initialization
  */
 
+#define AC97_AD1886_JACK_SENSE	0x72
+
+void
+ac97_ad1886_init(struct ac97_softc *as)
+{
+	ac97_write(as, AC97_AD1886_JACK_SENSE, 0x0010);
+}
+	
 void
 ac97_ad198x_init(struct ac97_softc *as)
 {
+	int i;
 	u_int16_t misc;
 
 	ac97_read(as, AC97_AD_REG_MISC, &misc);
 	ac97_write(as, AC97_AD_REG_MISC,
-	    misc|AC97_AD_MISC_DAM|AC97_AD_MISC_MADPD);
+	    misc|AC97_AD_MISC_HPSEL|AC97_AD_MISC_LOSEL);
+
+	for (i = 0; i < as->num_source_info; i++) {
+		if (as->source_info[i].reg == AC97_REG_SURROUND_VOLUME)
+			as->source_info[i].reg = AC97_REG_MASTER_VOLUME;
+		else if (as->source_info[i].reg == AC97_REG_MASTER_VOLUME) {
+			as->source_info[i].reg = AC97_REG_SURROUND_VOLUME;
+			if (as->source_info[i].type == AUDIO_MIXER_ENUM) {
+				as->source_info[i].mute = 1;
+				as->source_info[i].ofs = 7;
+			}
+		}
+	}
 }
 
 void

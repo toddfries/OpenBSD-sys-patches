@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.11 2004/06/15 05:44:45 brad Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.14 2005/07/01 01:12:04 brad Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.16 2001/07/20 00:07:14 eeh Exp $	*/
 
 /*
@@ -602,6 +602,10 @@ prom_printf(const char *fmt, ...)
 
 	va_start(ap, fmt);
 	len = vsnprintf(buf, sizeof buf, fmt, ap);
+	if (len == -1)
+		len = 0;
+	else if (len >= sizeof buf)
+		len = sizeof buf - 1;
 	va_end(ap);
 
 	OF_write(OF_stdout(), buf, len);
@@ -687,7 +691,7 @@ OF_mapintr(int node, int *interrupt, int validlen, int buflen)
 {
 	int i, len;
 	int address_cells, size_cells, interrupt_cells, interrupt_map_len;
-	int interrupt_map[100];
+	int interrupt_map[256];
 	int interrupt_map_mask[10];
 	int reg[10];
 	char dev_type[32];
@@ -792,13 +796,13 @@ OF_mapintr(int node, int *interrupt, int validlen, int buflen)
 
 		/* finally we can attempt the compare */
 		i=0;
-		while ( i < interrupt_map_len ) {
+		while ( i < interrupt_map_len + address_cells + interrupt_cells) {
 			int pintr_cells;
 			int *imap = &interrupt_map[i];
 			int *parent = &imap[address_cells + interrupt_cells];
 
 #ifdef DEBUG
-			DPRINTF(("\ninterrupt-map addr "));
+			DPRINTF(("\ninterrupt-map addr (a %d, i %d p %p) ", address_cells, interrupt_cells, parent));
 			for (len=0; len<address_cells; len++)
 				DPRINTF(("%x.", imap[len]));
 			DPRINTF((" intr "));
@@ -827,7 +831,7 @@ OF_mapintr(int node, int *interrupt, int validlen, int buflen)
 					/* Error -- ran out of storage. */
 					return (-1);
 				}
-				parent ++;
+				parent++;
 #ifdef DEBUG
 				DPRINTF(("Match! using "));
 				for (len=0; len<pintr_cells; len++)

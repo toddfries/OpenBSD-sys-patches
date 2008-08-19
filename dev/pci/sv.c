@@ -1,4 +1,4 @@
-/*      $OpenBSD: sv.c,v 1.16 2003/04/27 11:22:54 ho Exp $ */
+/*      $OpenBSD: sv.c,v 1.20 2005/08/09 04:10:13 mickey Exp $ */
 
 /*
  * Copyright (c) 1998 Constantine Paul Sapuntzakis
@@ -72,12 +72,7 @@ static int	svdebug = 100;
 #define DPRINTFN(n,x)
 #endif
 
-#define __BROKEN_INDIRECT_CONFIG
-#ifdef __BROKEN_INDIRECT_CONFIG
 int	sv_match(struct device *, void *, void *);
-#else
-int	sv_match(struct device *, struct cfdata *, void *);
-#endif
 static void	sv_attach(struct device *, struct device *, void *);
 int	sv_intr(void *);
 
@@ -159,7 +154,6 @@ int	sv_mixer_get_port(void *, mixer_ctrl_t *);
 int	sv_query_devinfo(void *, mixer_devinfo_t *);
 void   *sv_malloc(void *, int, size_t, int, int);
 void	sv_free(void *, void *, int);
-size_t	sv_round(void *, int, size_t);
 paddr_t	sv_mappage(void *, void *, off_t, int);
 int	sv_get_props(void *);
 
@@ -187,7 +181,7 @@ struct audio_hw_if sv_hw_if = {
 	sv_query_devinfo,
 	sv_malloc,
 	sv_free,
-	sv_round,
+	NULL,
 	sv_mappage,
 	sv_get_props,
 	NULL,
@@ -285,7 +279,6 @@ sv_attach(parent, self, aux)
   pci_intr_handle_t ih;
   bus_addr_t iobase;
   bus_size_t iosize;
-  pcireg_t csr;
   char const *intrstr;
   u_int32_t  dmareg, dmaio; 
   u_int8_t   reg;
@@ -350,11 +343,6 @@ sv_attach(parent, self, aux)
 
   /* Enable the device. */
  enable:
-  csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-  pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
-		 csr | PCI_COMMAND_MASTER_ENABLE 
-		 /* | PCI_COMMAND_IO_ENABLE | PCI_COMMAND_PARITY_ENABLE */);
-
   sv_write_indirect(sc, SV_ANALOG_POWER_DOWN_CONTROL, 0);
   sv_write_indirect(sc, SV_DIGITAL_POWER_DOWN_CONTROL, 0);
 
@@ -813,7 +801,7 @@ sv_round_blocksize(addr, blk)
 	void *addr;
 	int blk;
 {
-	return (blk & -32);	/* keep good alignment */
+	return ((blk + 31) & -32);	/* keep good alignment */
 }
 
 int
@@ -1485,15 +1473,6 @@ sv_free(addr, ptr, pool)
                         return;
                 }
         }
-}
-
-size_t
-sv_round(addr, direction, size)
-	void *addr;
-	int direction;
-	size_t size;
-{
-	return (size);
 }
 
 paddr_t

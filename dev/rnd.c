@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.76 2005/03/04 17:09:21 robert Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.79 2005/07/31 05:13:08 djm Exp $	*/
 
 /*
  * rnd.c -- A strong random number generator
@@ -472,10 +472,10 @@ rnd_qlen(void)
 void dequeue_randomness(void *);
 
 static void add_entropy_words(const u_int32_t *, u_int n);
-static __inline void extract_entropy(register u_int8_t *, int);
+void extract_entropy(register u_int8_t *, int);
 
 static u_int8_t arc4_getbyte(void);
-static __inline void arc4_stir(void);
+void arc4_stir(void);
 void arc4_reinit(void *v);
 void arc4maybeinit(void);
 
@@ -517,7 +517,7 @@ arc4_getbyte(void)
 	return (ret);
 }
 
-static __inline void
+void
 arc4_stir(void)
 {
 	u_int8_t buf[256];
@@ -738,7 +738,7 @@ enqueue_randomness(state, val)
 	val += state << 13;
 
 	microtime(&tv);
-	time = tv.tv_usec ^ tv.tv_sec;
+	time = tv.tv_usec + (tv.tv_sec << 20);
 	nbits = 0;
 
 	/*
@@ -882,31 +882,35 @@ dequeue_randomness(v)
  * bits of entropy are left in the pool, but it does not restrict the
  * number of bytes that are actually obtained.
  */
-static __inline void
+void
 extract_entropy(buf, nbytes)
 	register u_int8_t *buf;
 	int	nbytes;
 {
 	struct random_bucket *rs = &random_state;
 	u_char buffer[16];
+	MD5_CTX tmp;
+	u_int i;
+	int s;
 
 	add_timer_randomness(nbytes);
 
 	while (nbytes) {
-		MD5_CTX tmp;
-		int i, s;
+		if (nbytes < sizeof(buffer) / 2)
+			i = nbytes;
+		else
+			i = sizeof(buffer) / 2;
 
 		/* Hash the pool to get the output */
 		MD5Init(&tmp);
 		s = splhigh();
 		MD5Update(&tmp, (u_int8_t*)rs->pool, sizeof(rs->pool));
-		if (rs->entropy_count / 8 > nbytes)
-			rs->entropy_count -= nbytes * 8;
+		if (rs->entropy_count / 8 > i)
+			rs->entropy_count -= i * 8;
 		else
 			rs->entropy_count = 0;
 		splx(s);
 		MD5Final(buffer, &tmp);
-		bzero(&tmp, sizeof(tmp));
 
 		/*
 		 * In case the hash function has some recognizable
@@ -922,10 +926,7 @@ extract_entropy(buf, nbytes)
 		buffer[7] ^= buffer[ 8];
 
 		/* Copy data to destination buffer */
-		if (nbytes < sizeof(buffer) / 2)
-			bcopy(buffer, buf, i = nbytes);
-		else
-			bcopy(buffer, buf, i = sizeof(buffer) / 2);
+		bcopy(buffer, buf, i);
 		nbytes -= i;
 		buf += i;
 
@@ -935,6 +936,7 @@ extract_entropy(buf, nbytes)
 	}
 
 	/* Wipe data from memory */
+	bzero(&tmp, sizeof(tmp));
 	bzero(&buffer, sizeof(buffer));
 }
 

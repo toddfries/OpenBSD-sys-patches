@@ -1,9 +1,17 @@
-#	$OpenBSD: GENERIC,v 1.36 2004/09/16 09:35:37 deraadt Exp $
-#	$NetBSD: GENERIC,v 1.61 2000/04/19 06:50:36 itojun Exp $
+#	$OpenBSD: GENERIC,v 1.40 2005/08/03 02:10:44 dlg Exp $
+#
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
+#
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
-machine 	vax			# machine type; required
-
-include "../../../conf/GENERIC"
+machine		vax
+include		"../../../conf/GENERIC"
+maxusers	8		# estimated number of users
 
 # Here are all different supported CPU types listed.
 # One of these is required.
@@ -22,9 +30,6 @@ option		VAX46		# VS 4000/60
 option		VAX48		# VS 4000 VLC
 option		VAX49		# VS 4000/90
 option		VAX53		# VAX 4000 10X, MicroVAX 3100m9X
-
-# Max users on system; this is just a hint
-maxusers	8
 
 option		SCSIVERBOSE	# Verbose SCSI errors
 
@@ -70,10 +75,10 @@ smg0		at vsbus0 csr 0x200f0000 # Small monochrome display ctlr.
 #ry*		at hdc0 drive?		# RX floppies
 
 # Ibus, the internal bus on most Microvaxen
-uba0		at ibus0 		# Qbus adapter
-ze0		at ibus0 		# SGEC on-board ethernet
+uba0		at ibus0		# Qbus adapter
+ze0		at ibus0		# SGEC on-board ethernet
 le0		at ibus0		# LANCE ethernet (MV3400)
-#shac0		at ibus0 		# DSSI controller
+#shac0		at ibus0		# DSSI controller
 
 # Devices connected at VAXBI
 #cpu*		at bi? node?		# KA820/KA825 cpu
@@ -132,6 +137,8 @@ st*		at scsibus?
 cd*		at scsibus?
 ch*		at scsibus?
 ss*		at scsibus?
+safte*		at scsibus?
+ses*		at scsibus?
 uk*		at scsibus?
 
 # Workstation console

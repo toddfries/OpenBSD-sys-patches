@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lge.c,v 1.17 2004/09/23 17:45:16 brad Exp $	*/
+/*	$OpenBSD: if_lge.c,v 1.22 2005/08/09 04:10:12 mickey Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -361,9 +361,8 @@ allmulti:
 			ifp->if_flags |= IFF_ALLMULTI;
 			goto allmulti;
 		}
-		h = ( ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26) &
+		h = (ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26) &
 		    0x0000003F;
-		h = lge_crc(sc, LLADDR((struct sockaddr_dl *)enm->enm_addrlo));
 		if (h < 32)
 			hashes[0] |= (1 << h);
 		else
@@ -478,10 +477,6 @@ void lge_attach(parent, self, aux)
 	 * Map control/status registers.
 	 */
 	DPRINTFN(5, ("Map control/status regs\n"));
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	  PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef LGE_USEIOSPACE
@@ -1007,21 +1002,21 @@ void lge_rxeof(sc, cnt)
 
 		if (rxsts & LGE_RXSTS_ISIP) {
 			if (rxsts & LGE_RXSTS_IPCSUMERR)
-				m->m_pkthdr.csum |= M_IPV4_CSUM_IN_BAD;
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_BAD;
 			else
-				m->m_pkthdr.csum |= M_IPV4_CSUM_IN_OK;
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 		}
 		if (rxsts & LGE_RXSTS_ISTCP) {
 			if (rxsts & LGE_RXSTS_TCPCSUMERR)
-				m->m_pkthdr.csum |= M_TCP_CSUM_IN_BAD;
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_BAD;
 			else
-				m->m_pkthdr.csum |= M_TCP_CSUM_IN_OK;
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
 		}
 		if (rxsts & LGE_RXSTS_ISUDP) {
 			if (rxsts & LGE_RXSTS_UDPCSUMERR)
-				m->m_pkthdr.csum |= M_UDP_CSUM_IN_BAD;
+				m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_BAD;
 			else
-				m->m_pkthdr.csum |= M_UDP_CSUM_IN_OK;
+				m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
 		}
 
 		ether_input_mbuf(ifp, m);
@@ -1107,7 +1102,6 @@ void lge_tick(xsc)
 
 	if (!sc->lge_link) {
 		mii_tick(mii);
-		mii_pollstat(mii);
 		if (mii->mii_media_status & IFM_ACTIVE &&
 		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
 			sc->lge_link++;
@@ -1581,6 +1575,9 @@ void lge_stop(sc)
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_timer = 0;
 	timeout_del(&sc->lge_timeout);
+
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	CSR_WRITE_4(sc, LGE_IMR, LGE_IMR_INTR_ENB);
 
 	/* Disable receiver and transmitter. */
@@ -1611,8 +1608,6 @@ void lge_stop(sc)
 
 	bzero((char *)&sc->lge_ldata->lge_tx_list,
 		sizeof(sc->lge_ldata->lge_tx_list));
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	return;
 }

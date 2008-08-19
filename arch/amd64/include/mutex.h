@@ -1,3 +1,5 @@
+/*	$OpenBSD: mutex.h,v 1.3 2005/07/18 02:43:24 fgsch Exp $	*/
+
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -35,12 +37,12 @@ struct mutex {
 
 #define MUTEX_ASSERT_LOCKED(mtx) do {					\
 	if ((mtx)->mtx_owner != curcpu())				\
-		panic("mutex %p not held in %s\n", (mtx), __func__);	\
+		panic("mutex %p not held in %s", (mtx), __func__);	\
 } while (0)
 
 #define MUTEX_ASSERT_UNLOCKED(mtx) do {					\
 	if ((mtx)->mtx_owner == curcpu())				\
-		panic("mutex %p held in %s\n", (mtx), __func__);	\
+		panic("mutex %p held in %s", (mtx), __func__);		\
 } while (0)
 
 #define MUTEX_OLDIPL(mtx)	(mtx)->mtx_oldipl

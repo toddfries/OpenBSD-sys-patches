@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.132 2005/03/08 20:00:23 tdeval Exp $
+#	$OpenBSD: files.i386,v 1.136 2005/07/14 02:09:46 uwe Exp $
 #
 # new style config file for i386 architecture
 #
@@ -30,7 +30,6 @@ file	arch/i386/i386/mem.c
 file	arch/i386/i386/i686_mem.c	mtrr
 file	arch/i386/i386/k6_mem.c		mtrr
 file	arch/i386/i386/microtime.s
-file	arch/i386/i386/ns_cksum.c	ns
 file	arch/i386/i386/p4tcc.c		!small_kernel & i686_cpu
 file	arch/i386/i386/pmap.c
 file	arch/i386/i386/powernow.c	!small_kernel
@@ -396,3 +395,6 @@ include "dev/i2c/files.i2c"
 # Machine-independent GPIO drivers
 #
 include "dev/gpio/files.gpio"
+
+include "../../../dev/acpi/files.acpi"
+file	arch/i386/i386/acpi_machdep.c		acpi

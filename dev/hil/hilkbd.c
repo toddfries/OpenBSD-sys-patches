@@ -1,4 +1,4 @@
-/*	$OpenBSD: hilkbd.c,v 1.10 2005/01/18 18:52:31 miod Exp $	*/
+/*	$OpenBSD: hilkbd.c,v 1.12 2005/05/13 14:54:44 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.
@@ -112,6 +112,15 @@ struct wskbd_mapdata hilkbd_keymapdata = {
 #endif
 };
 
+struct wskbd_mapdata hilkbd_keymapdata_ps2 = {
+	hilkbd_keydesctab_ps2,
+#ifdef HILKBD_LAYOUT
+	HILKBD_LAYOUT,
+#else
+	KB_US,
+#endif
+};
+
 void	hilkbd_bell(struct hil_softc *, u_int, u_int, u_int);
 void	hilkbd_callback(struct hildev_softc *, u_int, u_int8_t *);
 void	hilkbd_decode(u_int8_t, u_int8_t, u_int *, int *);
@@ -125,7 +134,8 @@ hilkbdprobe(struct device *parent, void *match, void *aux)
 {
 	struct hil_attach_args *ha = aux;
 
-	if (ha->ha_type != HIL_DEVICE_KEYBOARD)
+	if (ha->ha_type != HIL_DEVICE_KEYBOARD &&
+	    ha->ha_type != HIL_DEVICE_BUTTONBOX)
 		return (0);
 
 	return (1);
@@ -138,6 +148,7 @@ hilkbdattach(struct device *parent, struct device *self, void *aux)
 	struct hil_attach_args *ha = aux;
 	struct wskbddev_attach_args a;
 	u_int8_t layoutcode;
+	int ps2;
 
 	sc->hd_code = ha->ha_code;
 	sc->hd_type = ha->ha_type;
@@ -145,18 +156,22 @@ hilkbdattach(struct device *parent, struct device *self, void *aux)
 	bcopy(ha->ha_info, sc->hd_info, ha->ha_infolen);
 	sc->hd_fn = hilkbd_callback;
 
-	/*
-	 * Determine the keyboard language configuration, but don't
-	 * override a user-specified setting.
-	 */
-	layoutcode = ha->ha_id & (MAXHILKBDLAYOUT - 1);
+	if (ha->ha_type == HIL_DEVICE_KEYBOARD) {
+		/*
+		 * Determine the keyboard language configuration, but don't
+		 * override a user-specified setting.
+		 */
+		layoutcode = ha->ha_id & (MAXHILKBDLAYOUT - 1);
 #ifndef HILKBD_LAYOUT
-	if (layoutcode < MAXHILKBDLAYOUT &&
-	    hilkbd_layouts[layoutcode] != -1)
-		hilkbd_keymapdata.layout = hilkbd_layouts[layoutcode];
+		if (layoutcode < MAXHILKBDLAYOUT &&
+		    hilkbd_layouts[layoutcode] != -1)
+			hilkbd_keymapdata.layout =
+			hilkbd_keymapdata_ps2.layout =
+			    hilkbd_layouts[layoutcode];
 #endif
 
-	printf(", layout %x", layoutcode);
+		printf(", layout %x", layoutcode);
+	}
 
 	/*
 	 * Interpret the identification bytes, if any
@@ -170,18 +185,32 @@ hilkbdattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
+	/*
+	 * Red lettered keyboards come in two flavours, the old one
+	 * with only one control key, to the left of the escape key,
+	 * and the modern one which has a PS/2 like layout, and leds.
+	 *
+	 * Unfortunately for us, they use the same device ID range.
+	 * We'll differentiate them by looking at the leds property.
+	 */
+	ps2 = (sc->sc_numleds != 0);
+
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 	timeout_set(&sc->sc_rawrepeat_ch, hilkbd_rawrepeat, sc);
 #endif
 
-	a.console = hilkbd_is_console(ha->ha_console);
-	a.keymap = &hilkbd_keymapdata;
+	/* Do not consider button boxes as console devices. */
+	if (ha->ha_type == HIL_DEVICE_BUTTONBOX)
+		a.console = 0;
+	else
+		a.console = hilkbd_is_console(ha->ha_console);
+	a.keymap = ps2 ? &hilkbd_keymapdata_ps2 : &hilkbd_keymapdata;
 	a.accessops = &hilkbd_accessops;
 	a.accesscookie = sc;
 
 	if (a.console) {
 		sc->sc_console = sc->sc_enabled = 1;
-		wskbd_cnattach(&hilkbd_consops, sc, &hilkbd_keymapdata);
+		wskbd_cnattach(&hilkbd_consops, sc, a.keymap);
 	} else {
 		sc->sc_console = sc->sc_enabled = 0;
 	}
@@ -193,7 +222,7 @@ hilkbdattach(struct device *parent, struct device *self, void *aux)
 	 * key, simulate it being pressed so that the keyboard runs in
 	 * numeric mode.
 	 */
-	if (sc->sc_numleds == 0 && sc->sc_wskbddev != NULL) {
+	if (!ps2 && sc->sc_wskbddev != NULL) {
 		wskbd_input(sc->sc_wskbddev, WSCONS_EVENT_KEY_DOWN, 80);
 		wskbd_input(sc->sc_wskbddev, WSCONS_EVENT_KEY_UP, 80);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.31 2005/02/17 18:07:36 jfb Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.44 2005/08/09 04:10:12 mickey Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -205,10 +205,10 @@ int	ngedebug = 0;
 		CSR_READ_4(sc, reg) & ~(x))
 
 #define SIO_SET(x)					\
-	CSR_WRITE_4(sc, NGE_MEAR, CSR_READ_4(sc, NGE_MEAR) | x)
+	CSR_WRITE_4(sc, NGE_MEAR, CSR_READ_4(sc, NGE_MEAR) | (x))
 
 #define SIO_CLR(x)					\
-	CSR_WRITE_4(sc, NGE_MEAR, CSR_READ_4(sc, NGE_MEAR) & ~x)
+	CSR_WRITE_4(sc, NGE_MEAR, CSR_READ_4(sc, NGE_MEAR) & ~(x))
 
 void
 nge_delay(sc)
@@ -437,9 +437,9 @@ nge_mii_readreg(sc, frame)
 	/* Check for ack */
 	SIO_CLR(NGE_MEAR_MII_CLK);
 	DELAY(1);
+	ack = CSR_READ_4(sc, NGE_MEAR) & NGE_MEAR_MII_DATA;
 	SIO_SET(NGE_MEAR_MII_CLK);
 	DELAY(1);
-	ack = CSR_READ_4(sc, NGE_MEAR) & NGE_MEAR_MII_DATA;
 
 	/*
 	 * Now try reading data bits. If the ack failed, we still
@@ -772,10 +772,6 @@ nge_attach(parent, self, aux)
 	 */
 	DPRINTFN(5, ("%s: map control/status regs\n", sc->sc_dv.dv_xname));
 	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	  PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef NGE_USEIOSPACE
 	if (!(command & PCI_COMMAND_IO_ENABLE)) {
@@ -920,13 +916,10 @@ nge_attach(parent, self, aux)
 	ifp->if_baudrate = 1000000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, NGE_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
-	ifp->if_capabilities =
-	    IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
-#if NVLAN > 0
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
-#endif
 	DPRINTFN(5, ("%s: bcopy\n", sc->sc_dv.dv_xname));
 	bcopy(sc->sc_dv.dv_xname, ifp->if_xname, IFNAMSIZ);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	/*
 	 * Do MII setup.
@@ -1077,28 +1070,30 @@ nge_newbuf(sc, c, m)
 	struct mbuf		*m;
 {
 	struct mbuf		*m_new = NULL;
-	caddr_t			*buf = NULL;
 
 	if (m == NULL) {
+		caddr_t buf = NULL;
+
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
 		if (m_new == NULL)
-			return(ENOBUFS);
+			return (ENOBUFS);
 
 		/* Allocate the jumbo buffer */
 		buf = nge_jalloc(sc);
 		if (buf == NULL) {
 			m_freem(m_new);
-			return(ENOBUFS);
+			return (ENOBUFS);
 		}
+
 		/* Attach the buffer to the mbuf */
-		m_new->m_data = m_new->m_ext.ext_buf = (void *)buf;
-		m_new->m_flags |= M_EXT;
-		m_new->m_ext.ext_size = m_new->m_pkthdr.len =
-			m_new->m_len = NGE_MCLBYTES;
-		m_new->m_ext.ext_free = nge_jfree;
-		m_new->m_ext.ext_arg = sc;
-		MCLINITREFERENCE(m_new);
+		m_new->m_len = m_new->m_pkthdr.len = NGE_MCLBYTES;
+		MEXTADD(m_new, buf, NGE_MCLBYTES, 0, nge_jfree, sc);
 	} else {
+		/*
+		 * We're re-using a previously allocated mbuf;
+		 * be sure to re-init pointers and lengths to
+		 * default values.
+		 */
 		m_new = m;
 		m_new->m_len = m_new->m_pkthdr.len = NGE_MCLBYTES;
 		m_new->m_data = m_new->m_ext.ext_buf;
@@ -1123,36 +1118,44 @@ nge_alloc_jumbo_mem(sc)
 	caddr_t			ptr, kva;
 	bus_dma_segment_t	seg;
 	bus_dmamap_t		dmamap;
-	int			i, rseg;
+	int			i, rseg, state, error;
 	struct nge_jpool_entry	*entry;
+
+	state = error = 0;
 
 	if (bus_dmamem_alloc(sc->sc_dmatag, NGE_JMEM, PAGE_SIZE, 0,
 			     &seg, 1, &rseg, BUS_DMA_NOWAIT)) {
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
-		return (ENOBUFS);
+		error = ENOBUFS;
+		goto out;
 	}
+
+	state = 1;
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg, NGE_JMEM, &kva,
 			   BUS_DMA_NOWAIT)) {
 		printf("%s: can't map dma buffers (%d bytes)\n",
 		       sc->sc_dv.dv_xname, NGE_JMEM);
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		return (ENOBUFS);
+		error = ENOBUFS;
+		goto out;
 	}
+
+	state = 2;
 	if (bus_dmamap_create(sc->sc_dmatag, NGE_JMEM, 1,
 			      NGE_JMEM, 0, BUS_DMA_NOWAIT, &dmamap)) {
 		printf("%s: can't create dma map\n", sc->sc_dv.dv_xname);
-		bus_dmamem_unmap(sc->sc_dmatag, kva, NGE_JMEM);
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		return (ENOBUFS);
+		error = ENOBUFS;
+		goto out;
 	}
+
+	state = 3;
 	if (bus_dmamap_load(sc->sc_dmatag, dmamap, kva, NGE_JMEM,
 			    NULL, BUS_DMA_NOWAIT)) {
 		printf("%s: can't load dma map\n", sc->sc_dv.dv_xname);
-		bus_dmamap_destroy(sc->sc_dmatag, dmamap);
-		bus_dmamem_unmap(sc->sc_dmatag, kva, NGE_JMEM);
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		return (ENOBUFS);
+		error = ENOBUFS;
+		goto out;
         }
+
+	state = 4;
 	sc->nge_cdata.nge_jumbo_buf = (caddr_t)kva;
 	DPRINTFN(1,("%s: nge_jumbo_buf=%#x, NGE_MCLBYTES=%#x\n",
 		    sc->sc_dv.dv_xname , sc->nge_cdata.nge_jumbo_buf,
@@ -1177,21 +1180,34 @@ nge_alloc_jumbo_mem(sc)
 		entry = malloc(sizeof(struct nge_jpool_entry),
 			       M_DEVBUF, M_NOWAIT);
 		if (entry == NULL) {
-			bus_dmamap_unload(sc->sc_dmatag, dmamap);
-			bus_dmamap_destroy(sc->sc_dmatag, dmamap);
-			bus_dmamem_unmap(sc->sc_dmatag, kva, NGE_JMEM);
-			bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
 			sc->nge_cdata.nge_jumbo_buf = NULL;
 			printf("%s: no memory for jumbo buffer queue!\n",
 			       sc->sc_dv.dv_xname);
-			return(ENOBUFS);
+			error = ENOBUFS;
+			goto out;
 		}
 		entry->slot = i;
 		LIST_INSERT_HEAD(&sc->nge_jfree_listhead, entry,
 				 jpool_entries);
 	}
-
-	return(0);
+out:
+	if (error != 0) {
+		switch (state) {
+		case 4:
+			bus_dmamap_unload(sc->sc_dmatag, dmamap);
+		case 3:
+			bus_dmamap_destroy(sc->sc_dmatag, dmamap);
+		case 2:
+			bus_dmamem_unmap(sc->sc_dmatag, kva, NGE_JMEM);
+		case 1:
+			bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
+			break;
+		default:
+			break;
+		}
+	}
+ 
+	return (error);
 }
 
 /*
@@ -1205,12 +1221,8 @@ nge_jalloc(sc)
 
 	entry = LIST_FIRST(&sc->nge_jfree_listhead);
 
-	if (entry == NULL) {
-#ifdef NGE_VERBOSE
-		printf("%s: no free jumbo buffers\n", sc->sc_dv.dv_xname);
-#endif
-		return(NULL);
-	}
+	if (entry == NULL)
+		return (NULL);
 
 	LIST_REMOVE(entry, jpool_entries);
 	LIST_INSERT_HEAD(&sc->nge_jinuse_listhead, entry, jpool_entries);
@@ -1345,35 +1357,15 @@ nge_rxeof(sc)
 
 		/* Do IP checksum checking. */
 		if (extsts & NGE_RXEXTSTS_IPPKT) {
-			if (extsts & NGE_RXEXTSTS_IPCSUMERR)
-				m->m_pkthdr.csum |= M_IPV4_CSUM_IN_BAD;
-			else
-				m->m_pkthdr.csum |= M_IPV4_CSUM_IN_OK;
+			if (!(extsts & NGE_RXEXTSTS_IPCSUMERR))
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+			if ((extsts & NGE_RXEXTSTS_TCPPKT) &&
+			    (!(extsts & NGE_RXEXTSTS_TCPCSUMERR)))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
+			else if ((extsts & NGE_RXEXTSTS_UDPPKT) &&
+				 (!(extsts & NGE_RXEXTSTS_UDPCSUMERR)))
+				m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
 		}
-		if (extsts & NGE_RXEXTSTS_TCPPKT) {
-			if (extsts & NGE_RXEXTSTS_TCPCSUMERR)
-				m->m_pkthdr.csum |= M_TCP_CSUM_IN_BAD;
-			else
-				m->m_pkthdr.csum |= M_TCP_CSUM_IN_OK;
-		}
-		if (extsts & NGE_RXEXTSTS_UDPPKT) {
-			if (extsts & NGE_RXEXTSTS_UDPCSUMERR)
-				m->m_pkthdr.csum |= M_UDP_CSUM_IN_BAD;
-			else
-				m->m_pkthdr.csum |= M_UDP_CSUM_IN_OK;
-		}
-
-#if NVLAN > 0
-		/*
-		 * If we received a packet with a vlan tag, pass it
-		 * to vlan_input() instead of ether_input().
-		 */
-		if (extsts & NGE_RXEXTSTS_VLANPKT) {
-			if (vlan_input_tag(m, extsts & NGE_RXEXTSTS_VTCI) < 0)
-				ifp->if_data.ifi_noproto++;
-                        continue;
-                }
-#endif
 
 		ether_input_mbuf(ifp, m);
 	}
@@ -1390,14 +1382,11 @@ void
 nge_txeof(sc)
 	struct nge_softc	*sc;
 {
-	struct nge_desc		*cur_tx = NULL;
+	struct nge_desc		*cur_tx;
 	struct ifnet		*ifp;
 	u_int32_t		idx;
 
 	ifp = &sc->arpcom.ac_if;
-
-	/* Clear the timeout timer. */
-	ifp->if_timer = 0;
 
 	/*
 	 * Go through our tx list and free mbufs for those
@@ -1431,17 +1420,17 @@ nge_txeof(sc)
 		if (cur_tx->nge_mbuf != NULL) {
 			m_freem(cur_tx->nge_mbuf);
 			cur_tx->nge_mbuf = NULL;
+			ifp->if_flags &= ~IFF_OACTIVE;
 		}
 
 		sc->nge_cdata.nge_tx_cnt--;
 		NGE_INC(idx, NGE_TX_LIST_CNT);
-		ifp->if_timer = 0;
 	}
 
 	sc->nge_cdata.nge_tx_cons = idx;
 
-	if (cur_tx != NULL)
-		ifp->if_flags &= ~IFF_OACTIVE;
+	if (idx == sc->nge_cdata.nge_tx_prod)
+		ifp->if_timer = 0;
 }
 
 void
@@ -1508,7 +1497,6 @@ nge_tick(xsc)
 			nge_start(ifp);
 	} else {
 		mii_tick(mii);
-		mii_pollstat(mii);
 		if (mii->mii_media_status & IFM_ACTIVE &&
 		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
 			sc->nge_link++;
@@ -1659,22 +1647,7 @@ nge_encap(sc, m_head, txidx)
 	if (m != NULL)
 		return(ENOBUFS);
 
-	/*
-	 * Card handles checksumming on a packet by packet
-	 * basis.
-	 */
 	sc->nge_ldata->nge_tx_list[*txidx].nge_extsts = 0;
-	if (m_head->m_pkthdr.csum) {
-		if (m_head->m_pkthdr.csum & M_IPV4_CSUM_OUT)
-			sc->nge_ldata->nge_tx_list[*txidx].nge_extsts |=
-			    NGE_TXEXTSTS_IPCSUM;
-		if (m_head->m_pkthdr.csum & M_TCPV4_CSUM_OUT)
-			sc->nge_ldata->nge_tx_list[*txidx].nge_extsts |=
-			    NGE_TXEXTSTS_TCPCSUM;
-		if (m_head->m_pkthdr.csum & M_UDPV4_CSUM_OUT)
-			sc->nge_ldata->nge_tx_list[*txidx].nge_extsts |=
-			    NGE_TXEXTSTS_UDPCSUM;
-	}
 
 #if NVLAN > 0
 	if (ifv != NULL) {
@@ -1850,17 +1823,6 @@ nge_init(xsc)
 	 * packets, do not reject packets with bad checksums.
 	 */
 	CSR_WRITE_4(sc, NGE_VLAN_IP_RXCTL, NGE_VIPRXCTL_IPCSUM_ENB);
-
-#if NVLAN > 0
-	/*
-	 * If VLAN support is enabled, tell the chip to detect
-	 * and strip VLAN tag info from received frames. The tag
-	 * will be provided in the extsts field in the RX descriptors.
-	 */
-	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
-		NGE_SETBIT(sc, NGE_VLAN_IP_RXCTL,
-		    NGE_VIPRXCTL_TAG_DETECT_ENB|NGE_VIPRXCTL_TAG_STRIP_ENB);
-#endif
 
 	/* Set TX configuration */
 	CSR_WRITE_4(sc, NGE_TX_CFG, NGE_TXCFG);
@@ -2116,22 +2078,10 @@ nge_ioctl(ifp, command, data)
 
 	switch(command) {
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU_JUMBO || ifr->ifr_mtu < ETHERMIN)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU_JUMBO)
 			error = EINVAL;
-		else {
+		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
-			/*
-			 * Workaround: if the MTU is larger than
-			 * 8152 (TX FIFO size minus 64 minus 18), turn off
-			 * TX checksum offloading.
-			 */
-			if (ifr->ifr_mtu >= 8152)
-				ifp->if_capabilities &= ~(IFCAP_CSUM_IPv4 |
-				    IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4);
-			else
-				ifp->if_capabilities = IFCAP_CSUM_IPv4 |
-					IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
-		}
 		break;
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2164,7 +2114,6 @@ nge_ioctl(ifp, command, data)
 					NGE_CLRBIT(sc, NGE_RXFILT_CTL,
 					    NGE_RXFILTCTL_ALLMULTI);
 			} else {
-				ifp->if_flags &= ~IFF_RUNNING;
 				nge_init(sc);
 			}
 		} else {
@@ -2248,6 +2197,9 @@ nge_stop(sc)
 	}
 
 	timeout_del(&sc->nge_timeout);
+
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	CSR_WRITE_4(sc, NGE_IER, 0);
 	CSR_WRITE_4(sc, NGE_IMR, 0);
 	NGE_SETBIT(sc, NGE_CSR, NGE_CSR_TX_DISABLE|NGE_CSR_RX_DISABLE);
@@ -2284,8 +2236,6 @@ nge_stop(sc)
 
 	bzero((char *)&sc->nge_ldata->nge_tx_list,
 		sizeof(sc->nge_ldata->nge_tx_list));
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
 /*

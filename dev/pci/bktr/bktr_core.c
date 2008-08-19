@@ -1,4 +1,4 @@
-/*	$OpenBSD: bktr_core.c,v 1.13 2004/06/29 12:24:57 mickey Exp $	*/
+/*	$OpenBSD: bktr_core.c,v 1.17 2005/06/23 14:57:48 robert Exp $	*/
 /* $FreeBSD: src/sys/dev/bktr/bktr_core.c,v 1.114 2000/10/31 13:09:56 roger Exp $ */
 
 /*
@@ -615,8 +615,15 @@ bktr_store_address(unit, BKTR_MEM_BUF,          buf);
 
 	probeCard(bktr, TRUE, unit);
 
+	/* enable drivers on the GPIO port that control the MUXes */
+	OUTL(bktr, BKTR_GPIO_OUT_EN, INL(bktr, BKTR_GPIO_OUT_EN) | bktr->card.gpio_mux_bits);
+
+	/* mute the audio stream */
+	set_audio( bktr, AUDIO_MUTE );
+
 	/* Initialise any MSP34xx or TDA98xx audio chips */
 	init_audio_devices(bktr);
+
 }
 
 
@@ -992,7 +999,8 @@ video_open( bktr_ptr_t bktr )
 
 	}
 
-	OUTB(bktr, BKTR_IFORM, INB(bktr, BKTR_IFORM) | format_params[bktr->format_params].iform_xtsel);
+	OUTB(bktr, BKTR_IFORM, INB(bktr, BKTR_IFORM) |
+	    format_params[bktr->format_params].iform_xtsel);
 
 	/* work around for new Hauppauge 878 cards */
 	if ((bktr->card.card_id == CARD_HAUPPAUGE) &&
@@ -1017,7 +1025,8 @@ video_open( bktr_ptr_t bktr )
 
 	bktr->max_clip_node = 0;
 
-	OUTB(bktr, BKTR_COLOR_CTL, BT848_COLOR_CTL_GAMMA | BT848_COLOR_CTL_RGB_DED);
+	OUTB(bktr, BKTR_COLOR_CTL,
+	    BT848_COLOR_CTL_GAMMA | BT848_COLOR_CTL_RGB_DED);
 
 	OUTB(bktr, BKTR_E_HSCALE_LO, 170);
 	OUTB(bktr, BKTR_O_HSCALE_LO, 170);
@@ -1047,9 +1056,9 @@ video_open( bktr_ptr_t bktr )
 
 	bktr->capture_area_enabled = FALSE;
 
-	OUTL(bktr, BKTR_INT_MASK, BT848_INT_MYSTERYBIT);	/* if you take this out triton
-                                                   based motherboards will
-						   operate unreliably */
+	/* if you take this out triton-based mobos will operate unreliably */
+	OUTL(bktr, BKTR_INT_MASK, BT848_INT_MYSTERYBIT);
+
 	return( 0 );
 }
 
@@ -1087,20 +1096,6 @@ tuner_open( bktr_ptr_t bktr )
 		return( 0 );
 
 	bktr->tflags |= TUNER_OPEN;
-	bktr->tuner.frequency = 0;
-	bktr->tuner.channel = 0;
-	bktr->tuner.chnlset = DEFAULT_CHNLSET;
-	bktr->tuner.afc = 0;
-	bktr->tuner.radio_mode = 0;
-
-	/* enable drivers on the GPIO port that control the MUXes */
-	OUTL(bktr, BKTR_GPIO_OUT_EN, INL(bktr, BKTR_GPIO_OUT_EN) | bktr->card.gpio_mux_bits);
-
-	/* unmute the audio stream */
-	set_audio( bktr, AUDIO_UNMUTE );
-
-	/* Initialise any audio chips, eg MSP34xx or TDA98xx */
-	init_audio_devices( bktr );
 
 	return( 0 );
 }
@@ -1142,12 +1137,6 @@ int
 tuner_close( bktr_ptr_t bktr )
 {
 	bktr->tflags &= ~TUNER_OPEN;
-
-	/* mute the audio by switching the mux */
-	set_audio( bktr, AUDIO_MUTE );
-
-	/* disable drivers on the GPIO port that control the MUXes */
-	OUTL(bktr, BKTR_GPIO_OUT_EN, INL(bktr, BKTR_GPIO_OUT_EN) & ~bktr->card.gpio_mux_bits);
 
 	return( 0 );
 }
@@ -1357,7 +1346,7 @@ video_ioctl( bktr_ptr_t bktr, int unit, ioctl_cmd_t cmd, caddr_t arg, struct pro
 		break;
 
 	case BT848SFMT:		/* set input format */
-		temp = *(unsigned long *)arg & BT848_IFORM_FORMAT;
+		temp = *(unsigned int *)arg & BT848_IFORM_FORMAT;
 		temp_iform = INB(bktr, BKTR_IFORM);
 		temp_iform &= ~BT848_IFORM_FORMAT;
 		temp_iform &= ~BT848_IFORM_XTSEL;
@@ -1397,7 +1386,7 @@ video_ioctl( bktr_ptr_t bktr, int unit, ioctl_cmd_t cmd, caddr_t arg, struct pro
 		temp_iform = INB(bktr, BKTR_IFORM);
 		temp_iform &= ~BT848_IFORM_FORMAT;
 		temp_iform &= ~BT848_IFORM_XTSEL;
-		switch(*(unsigned long *)arg & METEOR_FORM_MASK ) {
+		switch(*(unsigned int *)arg & METEOR_FORM_MASK ) {
 		case 0:		/* default */
 		case METEOR_FMT_NTSC:
 			bktr->flags = (bktr->flags & ~METEOR_FORM_MASK) |
@@ -1917,12 +1906,12 @@ tuner_ioctl( bktr_ptr_t bktr, int unit, ioctl_cmd_t cmd, caddr_t arg, struct pro
 
 	case TVTUNER_SETCHNL:
 		temp_mute( bktr, TRUE );
-		temp = tv_channel( bktr, (int)*(unsigned long *)arg );
+		temp = tv_channel( bktr, (int)*(unsigned int *)arg );
 		if ( temp < 0 ) {
 			temp_mute( bktr, FALSE );
 			return( EINVAL );
 		}
-		*(unsigned long *)arg = temp;
+		*(unsigned int *)arg = temp;
 
 		/* after every channel change, we must restart the MSP34xx */
 		/* audio chip to reselect NICAM STEREO or MONO audio */
@@ -1937,34 +1926,34 @@ tuner_ioctl( bktr_ptr_t bktr, int unit, ioctl_cmd_t cmd, caddr_t arg, struct pro
 		break;
 
 	case TVTUNER_GETCHNL:
-		*(unsigned long *)arg = bktr->tuner.channel;
+		*(unsigned int *)arg = bktr->tuner.channel;
 		break;
 
 	case TVTUNER_SETTYPE:
-		temp = *(unsigned long *)arg;
+		temp = *(unsigned int *)arg;
 		if ( (temp < CHNLSET_MIN) || (temp > CHNLSET_MAX) )
 			return( EINVAL );
 		bktr->tuner.chnlset = temp;
 		break;
 
 	case TVTUNER_GETTYPE:
-		*(unsigned long *)arg = bktr->tuner.chnlset;
+		*(unsigned int *)arg = bktr->tuner.chnlset;
 		break;
 
 	case TVTUNER_GETSTATUS:
 		temp = get_tuner_status( bktr );
-		*(unsigned long *)arg = temp & 0xff;
+		*(unsigned int *)arg = temp & 0xff;
 		break;
 
 	case TVTUNER_SETFREQ:
 		temp_mute( bktr, TRUE );
-		temp = tv_freq( bktr, (int)*(unsigned long *)arg, TV_FREQUENCY);
+		temp = tv_freq( bktr, (int)*(unsigned int *)arg, TV_FREQUENCY);
 		temp_mute( bktr, FALSE );
 		if ( temp < 0 ) {
 			temp_mute( bktr, FALSE );
 			return( EINVAL );
 		}
-		*(unsigned long *)arg = temp;
+		*(unsigned int *)arg = temp;
 
 		/* after every channel change, we must restart the MSP34xx */
 		/* audio chip to reselect NICAM STEREO or MONO audio */
@@ -1979,7 +1968,7 @@ tuner_ioctl( bktr_ptr_t bktr, int unit, ioctl_cmd_t cmd, caddr_t arg, struct pro
 		break;
 
 	case TVTUNER_GETFREQ:
-		*(unsigned long *)arg = bktr->tuner.frequency;
+		*(unsigned int *)arg = bktr->tuner.frequency;
 		break;
 
 	case TVTUNER_GETCHNLSET:
@@ -2320,7 +2309,7 @@ bktr_common_ioctl( bktr_ptr_t bktr, ioctl_cmd_t cmd, caddr_t arg )
 		/* Unfortunatly Meteor driver codes DEV_RCA as DEV_0, so we */
 		/* stick with this system in our Meteor Emulation */
 
-		switch(*(unsigned long *)arg & METEOR_DEV_MASK) {
+		switch(*(unsigned int *)arg & METEOR_DEV_MASK) {
 
 		/* this is the RCA video input */
 		case 0:		/* default */

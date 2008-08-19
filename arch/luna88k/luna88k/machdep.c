@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.17 2004/11/09 15:02:19 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.21 2005/08/01 15:42:46 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -633,11 +633,8 @@ allocsys(v)
 	 * i/o buffers.
 	 */
 	if (bufpages == 0) {
-		if (physmem < btoc(2 * 1024 * 1024))
-			bufpages = physmem / 10;
-		else
-			bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-			    bufcachepercent / 100;
+		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
+		    bufcachepercent / 100;
 	}
 	if (nbuf == 0) {
 		nbuf = bufpages;
@@ -910,7 +907,7 @@ slave_pre_main()
 {
 	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
 	splhigh();
-	enable_interrupt();
+	set_psr(get_psr() & ~PSR_IND);
 }
 
 /* dummy main routine for slave processors */
@@ -975,7 +972,7 @@ luna88k_ext_int(u_int v, struct trapframe *eframe)
 			for (i = 0; i < 8; i++)
 				printf("int_mask[%d] = 0x%08x\n", i, int_mask_val[i]);
 			printf("--CPU %d halted--\n", cpu_number());
-			spl7();
+			setipl(IPL_ABORT);
 			for(;;) ;
 		}
 
@@ -987,7 +984,7 @@ luna88k_ext_int(u_int v, struct trapframe *eframe)
 
 		setipl(level);
 	  
-		enable_interrupt();
+		set_psr(get_psr() & ~PSR_IND);
 
 		switch(cur_int) {
 		case CLOCK_INT_LEVEL:
@@ -1008,7 +1005,7 @@ luna88k_ext_int(u_int v, struct trapframe *eframe)
 	 * process any remaining data access exceptions before
 	 * returning to assembler
 	 */
-	disable_interrupt();
+	set_psr(get_psr() | PSR_IND);
 out:
 	if (eframe->tf_dmt0 & DMT_VALID)
 		m88100_trap(T_DATAFLT, eframe);
@@ -1445,6 +1442,7 @@ vector_init(m88k_exception_vector_area *vector, unsigned *vector_init_list)
 		SET_VECTOR(num, sigtrap);
 
 	SET_VECTOR(450, syscall_handler);
+	SET_VECTOR(451, cache_flush_handler);
 	SET_VECTOR(504, stepbpt);
 	SET_VECTOR(511, userbpt);
 
@@ -1487,10 +1485,9 @@ setlevel(unsigned int level)
 unsigned
 getipl(void)
 {
-	unsigned curspl;
-	m88k_psr_type psr;
+	unsigned int curspl, psr;
 
-	psr = disable_interrupts_return_psr();
+	disable_interrupt(psr);
 	curspl = luna88k_curspl[cpu_number()];
 	set_psr(psr);
 	return curspl;
@@ -1499,10 +1496,9 @@ getipl(void)
 unsigned
 setipl(unsigned level)
 {
-	unsigned curspl;
-	m88k_psr_type psr;
+	unsigned int curspl, psr;
 
-	psr = disable_interrupts_return_psr();
+	disable_interrupt(psr);
 	curspl = luna88k_curspl[cpu_number()];
 	setlevel(level);
 
@@ -1520,10 +1516,9 @@ setipl(unsigned level)
 unsigned
 raiseipl(unsigned level)
 {
-	unsigned curspl;
-	m88k_psr_type psr;
+	unsigned int curspl, psr;
 
-	psr = disable_interrupts_return_psr();
+	disable_interrupt(psr);
 	curspl = luna88k_curspl[cpu_number()];
 	if (curspl < level)
 		setlevel(level);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atureg.h,v 1.23 2005/03/08 12:15:12 dlg Exp $ */
+/*	$OpenBSD: if_atureg.h,v 1.25 2005/07/07 22:47:08 dlg Exp $ */
 /*
  * Copyright (c) 2003
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -116,6 +116,42 @@ struct atu_chain {
 	SLIST_ENTRY(atu_chain)	atu_list;
 };
 
+/* Radio capture format */
+
+#define ATU_RX_RADIOTAP_PRESENT					\
+	((1 << IEEE80211_RADIOTAP_TSFT)			|	\
+	 (1 << IEEE80211_RADIOTAP_FLAGS)		|	\
+	 (1 << IEEE80211_RADIOTAP_RATE)			|	\
+	 (1 << IEEE80211_RADIOTAP_CHANNEL)		|	\
+	 (1 << IEEE80211_RADIOTAP_LOCK_QUALITY)		|	\
+	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL)		|	\
+	 0)
+
+struct atu_rx_radiotap_header {
+	struct ieee80211_radiotap_header	rr_ihdr;
+	u_int64_t				rr_tsft;
+	u_int8_t				rr_flags;
+	u_int8_t				rr_rate;
+	u_int16_t				rr_chan_freq;
+	u_int16_t				rr_chan_flags;
+	u_int16_t				rr_barker_lock;
+	u_int8_t				rr_antsignal;
+} __attribute__((__packed__));
+
+#define ATU_TX_RADIOTAP_PRESENT				\
+	((1 << IEEE80211_RADIOTAP_FLAGS)	|	\
+	 (1 << IEEE80211_RADIOTAP_RATE)		|	\
+	 (1 << IEEE80211_RADIOTAP_CHANNEL)	|	\
+	 0)
+
+struct atu_tx_radiotap_header {
+	struct ieee80211_radiotap_header	rt_ihdr;
+	u_int8_t				rt_flags;
+	u_int8_t				rt_rate;
+	u_int16_t				rt_chan_freq;
+	u_int16_t				rt_chan_flags;
+} __attribute__((__packed__));
+
 struct atu_cdata {
 	struct atu_chain	atu_tx_chain[ATU_TX_LIST_CNT];
 	struct atu_chain	atu_rx_chain[ATU_RX_LIST_CNT];
@@ -162,8 +198,6 @@ struct atu_softc {
 	enum atu_radio_type	atu_radio;
 	u_int16_t		atu_quirk;
 	
-	u_int8_t		atu_ssid[MAX_SSID_LEN];
-	u_int8_t		atu_ssidlen;
 	u_int8_t		atu_channel;
 	u_int16_t		atu_desired_channel;
 	u_int8_t		atu_mode;
@@ -172,7 +206,21 @@ struct atu_softc {
 #define INFRASTRUCTURE_MODE	2
 
 	u_int8_t		atu_radio_on;
+	caddr_t			sc_radiobpf;
+
+	union {
+		struct atu_rx_radiotap_header	tap;
+		u_int8_t			pad[64];
+	} sc_rxtapu;
+	union {
+		struct atu_tx_radiotap_header	tap;
+		u_int8_t			pad[64];
+	} sc_txtapu;
+
 };
+
+#define sc_rxtap	sc_rxtapu.tap
+#define sc_txtap	sc_txtapu.tap
 
 /* Commands for uploading the firmware (standard DFU interface) */
 #define DFU_DNLOAD		UT_WRITE_CLASS_INTERFACE, 0x01

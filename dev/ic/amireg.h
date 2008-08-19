@@ -1,7 +1,8 @@
-/*	$OpenBSD: amireg.h,v 1.5 2004/12/26 00:11:24 marco Exp $	*/
+/*	$OpenBSD: amireg.h,v 1.22.2.1 2006/02/24 01:34:47 brad Exp $	*/
 
 /*
  * Copyright (c) 2000 Michael Shalayeff
+ * Copyright (c) 2005 Marco Peereboom
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,18 +31,23 @@
 #define	AMI_MAX_LDRIVES		8
 #define	AMI_MAX_SPANDEPTH	4
 #define	AMI_MAX_DEVDEPTH	8
+#define	AMI_MAX_TARGET		16
 
 #define	AMI_BIG_MAX_PDRIVES	(256)
 #define	AMI_BIG_MAX_LDRIVES	40
 #define	AMI_BIG_MAX_SPANDEPTH	8
 #define	AMI_BIG_MAX_DEVDEPTH	32
 
-#define	AMI_MAXCMDS	126	/* theoretical limit is 250 */
+#define	AMI_MAXCMDS	126		/* theoretical limit is 250 */
 #define	AMI_SECTOR_SIZE	512
 #define	AMI_MAXOFFSETS	26
-#define	AMI_SGEPERCMD	32	/* to prevent page boundary crossing */
-#define AMI_MAX_BUSYWAIT 10	/* wait up to 10 usecs */
-
+#define	AMI_SGEPERCMD	32		/* to prevent page boundary crossing */
+#define AMI_MAX_BUSYWAIT 10		/* wait up to 10 usecs */
+#define AMI_MAX_POLLWAIT 1000000	/* wait up to 1000 000 usecs */
+#define AMI_MAXIOCTLCMDS 1		/* number of parallel ioctl calls */
+#define AMI_MAXPROCS	 2		/* number of processors on a channel */
+#define AMI_MAXRAWCMDS	 2		/* number of parallel processor cmds */
+ 
 #define	AMI_MAXFER	(AMI_MAXOFFSETS * PAGE_SIZE)
 
 #define	AMI_QIDB	0x20
@@ -69,11 +75,11 @@
 #define	AMI_EINQUIRY	0x04	/* extended inquiry */
 #define	AMI_INQUIRY	0x05	/* inquiry */
 #define	AMI_CHSTATE	0x06	/* pad[0] -- state */
-#define	AMI_RCONFIG	0x07	/* read configuration up to 4 spans */
-#define	AMI_REBUILDPD	0x08	/* rebuild physical drive */
 #define		AMI_STATE_ON	3
 #define		AMI_STATE_FAIL	4
 #define		AMI_STATE_SPARE	6
+#define	AMI_RCONFIG	0x07	/* read configuration up to 4 spans */
+#define	AMI_REBUILDPD	0x08	/* rebuild physical drive */
 #define	AMI_CHECK	0x09	/* check consistency */
 #define	AMI_FLUSH	0x0a
 #define	AMI_ILDRIVE	0x0b	/* init logical drive */
@@ -117,6 +123,7 @@
 #define		AMI_SPKR_ON	1
 #define		AMI_SPKR_SHUT	2
 #define		AMI_SPKR_GVAL	3
+#define		AMI_SPKR_TEST	4
 #define	AMI_GDUMP	0x52	/* get error condition in text */
 #define	AMI_SENSEDUMPA	0x53	/* get SCSI sense dump area */
 #define	AMI_STDIAG	0x54	/* start diagnostics -- 2.1 */
@@ -202,10 +209,13 @@
 #define		AMI_FC_WRCONF	0x0d
 #define		AMI_FC_PRODINF	0x0e
 #define		AMI_FC_EINQ3	0x0f
+#define		AMI_FC_EINQ4	0x1f
 #define			AMI_FC_EINQ3_SOLICITED_NOTIFY	0x01
 #define			AMI_FC_EINQ3_SOLICITED_FULL	0x02
 #define			AMI_FC_EINQ3_UNSOLICITED	0x03
 #define	AMI_MISC	0xa4
+#define		AMI_GET_IO_CMPL	0x5b
+#define		AMI_SET_IO_CMPL	0x5c
 #define	AMI_CHFUNC	0xa9
 #define	AMI_MANAGE	0xb0	/* manage functions */
 #define		AMI_MGR_LUN	0x00
@@ -401,11 +411,94 @@ struct ami_inquiry {
 #define	AMI_SIGN466	0xfffa0005
 };
 
+#define MAX_NOTIFY_SIZE	0x80
+#define CUR_NOTIFY_SIZE (sizeof(struct ami_notify))
+struct ami_notify
+{
+	u_int32_t	ano_eventcounter;	/* incremented for changes */
+
+	u_int8_t	ano_paramcounter;	/* param change */
+	u_int8_t	ano_paramid;		/* param modified */
+#define AMI_PARAM_RBLD_RATE		0x01 /* new rebuild rate */
+#define AMI_PARAM_CACHE_FLUSH_INTERVAL	0x02 /* new cache flush interval */
+#define AMI_PARAM_SENSE_ALERT		0x03 /* pd caused check condition */
+#define AMI_PARAM_DRIVE_INSERTED	0x04 /* pd inserted */
+#define AMI_PARAM_BATTERY_STATUS	0x05 /* battery status */
+#define AMI_PARAM_NVRAM_EVENT_ALERT	0x06 /* NVRAM # of entries */
+#define AMI_PARAM_PATROL_READ_UPDATE	0x07 /* # pd done with patrol read */
+#define AMI_PARAM_PATROL_READ_STATUS	0x08 /* 0 stopped
+					      * 2 aborted
+					      * 4 started */
+
+	u_int16_t	ano_paramval;		/* new val modified param */
+
+	u_int8_t	ano_writeconfcounter;	/* write config */
+	u_int8_t	ano_writeconfrsvd[3];
+
+	u_int8_t	ano_ldopcounter;	/* ld op started/completed */
+	u_int8_t	ano_ldopid;		/* ld modified */
+	u_int8_t	ano_ldopcmd;		/* ld operation */
+#define AMI_LDCMD_CHKCONSISTANCY	0x01
+#define AMI_LDCMD_INITIALIZE		0x02
+#define AMI_LDCMD_RECONSTRUCTION	0x03
+	u_int8_t	ano_ldopstatus;		/* status of the operation */
+#define AMI_LDOP_SUCCESS		0x00
+#define AMI_LDOP_FAILED			0x01
+#define AMI_LDOP_ABORTED		0x02
+#define AMI_LDOP_CORRECTED		0x03
+#define AMI_LDOP_STARTED		0x04
+
+	u_int8_t	ano_ldstatecounter;	/* change of ld state */
+	u_int8_t	ano_ldstateid;		/* ld state changed */
+	u_int8_t	ano_ldstatenew;		/* new state */
+	u_int8_t	ano_ldstateold;		/* old state */
+#define AMI_RDRV_OFFLINE		0
+#define AMI_RDRV_DEGRADED		1
+#define AMI_RDRV_OPTIMAL		2
+#define AMI_RDRV_DELETED		3
+
+	u_int8_t	ano_pdstatecounter;	/* change of pd state */
+	u_int8_t	ano_pdstateid;		/* pd state changed */
+	u_int8_t	ano_pdstatenew;		/* new state */
+	u_int8_t	ano_pdstateold;		/* old state */
+#define AMI_PD_UNCNF			0
+#define AMI_PD_ONLINE			3
+#define AMI_PD_FAILED			4
+#define AMI_PD_RBLD			5
+#define AMI_PD_HOTSPARE			6
+
+	u_int8_t	ano_pdfmtcounter;	/* pd format started/over */
+	u_int8_t	ano_pdfmtid;		/* pd id */
+	u_int8_t	ano_pdfmtval;		/* format started/over */
+#define AMI_PDFMT_START			0x01
+#define AMI_PDFMT_OVER			0x02
+	u_int8_t	ano_pdfmtrsvd;
+
+	u_int8_t	ano_targxfercounter;	/* SCSI-2 Xfer rate change */
+	u_int8_t	ano_targxferid;		/* pd that changed  */
+	u_int8_t	ano_targxferval;	/* new xfer parameters */
+	u_int8_t	ano_targxferrsvd;
+
+	u_int8_t	ano_fclidchgcounter;	/* loop id changed */
+	u_int8_t	ano_fclidpdid;		/* pd id */
+	u_int8_t	ano_fclid0;		/* loop id on fc loop 0 */
+	u_int8_t	ano_fclid1;		/* loop id on fc loop 1 */
+
+	u_int8_t	ano_fclstatecounter;	/* loop state changed */
+	u_int8_t	ano_fclstate0;		/* state of fc loop 0 */
+	u_int8_t	ano_fclstate1;		/* state of fc loop 1 */
+#define AMI_FCLOOP_FAILED		0
+#define AMI_FCLOOP_ACTIVE		1
+#define AMI_FCLOOP_TRANSIENT		2
+	u_int8_t	ano_fclstatersvd;
+};
+
 struct ami_fc_einquiry {
 	u_int32_t	ain_size;	/* size of this structure */
 
 	/* notify */
-	u_int8_t	ain_notify[0x80];
+	struct	ami_notify ain_notify;
+	u_int8_t	ain_notifyrsvd[MAX_NOTIFY_SIZE - CUR_NOTIFY_SIZE];
 
 	u_int8_t	ain_rbldrate;	/* rebuild rate %% */
 	u_int8_t	ain_flushintvl;
@@ -421,8 +514,10 @@ struct ami_fc_einquiry {
 	u_int8_t	ain_ldprop[AMI_BIG_MAX_LDRIVES];
 	u_int8_t	ain_ldstat[AMI_BIG_MAX_LDRIVES];
 
+	u_int8_t	ain_pdstat[AMI_BIG_MAX_PDRIVES];
 	u_int16_t	ain_pdfmtinp[AMI_BIG_MAX_PDRIVES];
 	u_int8_t	ain_pdrates [80];	/* pdrv xfer rates */
+	u_int8_t	ain_pad[263];		/* pad to 1k */
 };
 
 struct ami_fc_prodinfo {
@@ -470,6 +565,40 @@ struct ami_diskarray {
 		u_int8_t	adp_sneg;	/* sync negotiation */
 		u_int32_t	adp_size;
 	} ada_pdrv[AMI_MAX_PDRIVES];
+};
+
+struct ami_big_diskarray {
+	u_int8_t	ada_nld;
+	u_int8_t	ada_pad[3];
+#define ald ada_ldrv
+	struct {
+		u_int8_t	adl_spandepth;
+		u_int8_t	adl_raidlvl;
+		u_int8_t	adl_rdahead;
+		u_int8_t	adl_stripesz;
+		u_int8_t	adl_status;
+		u_int8_t	adl_wrpolicy;
+		u_int8_t	adl_directio;
+		u_int8_t	adl_nstripes;
+#define 	asp adl_spans
+		struct {
+			u_int32_t	ads_start;
+			u_int32_t	ads_length;	/* blocks */
+#define 		adv ads_devs
+			struct {
+				u_int8_t	add_channel;
+				u_int8_t	add_target;
+			} ads_devs[AMI_BIG_MAX_DEVDEPTH];
+		} adl_spans[AMI_BIG_MAX_SPANDEPTH];
+	} ada_ldrv[AMI_BIG_MAX_LDRIVES];
+#define apd ada_pdrv
+	struct {
+		u_int8_t	adp_type;	/* SCSI device type */
+		u_int8_t	adp_ostatus;	/* status during config */
+		u_int8_t	adp_tagdepth;	/* level of tagging */
+		u_int8_t	adp_sneg;	/* sync negotiation */
+		u_int32_t	adp_size;
+	} ada_pdrv[AMI_BIG_MAX_PDRIVES];
 };
 
 struct ami_scsisense {
@@ -533,6 +662,24 @@ struct ami_drivehistory {
 
 #define	AMI_FAILHISTORY		10
 	} adh_fail[AMI_FAILHISTORY];
+};
+
+struct ami_inq_data {
+	u_int8_t	aid_peri;
+	u_int8_t	aid_scsitype;
+	u_int8_t	aid_ver;
+	u_int8_t	aid_datatrans;
+	u_int8_t	aid_addlen;
+	u_int8_t	aid_resv[2];
+	u_int8_t	aid_scsival;
+	u_int8_t	aid_vendor[8];
+	u_int8_t	aid_prod[16];
+	u_int8_t	aid_prodver[4];
+	u_int8_t	aid_mederr;
+	u_int8_t	aid_otherr;
+	u_int8_t	aid_proctype;
+
+	u_int8_t	resv2[20];
 };
 
 #pragma pack()

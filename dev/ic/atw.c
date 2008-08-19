@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.29 2005/02/17 18:28:05 reyk Exp $	*/
+/*	$OpenBSD: atw.c,v 1.35 2005/08/27 09:13:50 avsm Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -197,10 +197,6 @@ int	atw_ioctl(struct ifnet *, u_long, caddr_t);
 int	atw_init(struct ifnet *);
 void	atw_stop(struct ifnet *, int);
 
-/* Device attachment */
-void	atw_attach(struct atw_softc *);
-int	atw_detach(struct atw_softc *);
-
 /* Rx/Tx process */
 void	atw_rxdrain(struct atw_softc *);
 void	atw_txdrain(struct atw_softc *);
@@ -208,10 +204,7 @@ int	atw_add_rxbuf(struct atw_softc *, int);
 void	atw_idle(struct atw_softc *, u_int32_t);
 
 /* Device (de)activation and power state */
-int	atw_enable(struct atw_softc *);
 void	atw_disable(struct atw_softc *);
-void	atw_power(int, void *);
-void	atw_shutdown(void *);
 void	atw_reset(struct atw_softc *);
 
 /* Interrupt handlers */
@@ -1485,7 +1478,7 @@ atw_tune(struct atw_softc *sc)
 
 	chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
 	if (chan == IEEE80211_CHAN_ANY)
-		panic("%s: chan == IEEE80211_CHAN_ANY\n", __func__);
+		panic("%s: chan == IEEE80211_CHAN_ANY", __func__);
 
 	if (chan == sc->sc_cur_chan)
 		return 0;
@@ -2034,11 +2027,13 @@ atw_filter_setup(struct atw_softc *sc)
 		hash = atw_calchash(enm->enm_addrlo);
 		hashes[hash >> 5] |= 1 << (hash & 0x1f);
 		ETHER_NEXT_MULTI(step, enm);
+		sc->sc_opmode |= ATW_NAR_MM;
 	}
 	ifp->if_flags &= ~IFF_ALLMULTI;
 	goto setit;
 
 allmulti:
+	sc->sc_opmode |= ATW_NAR_MM;
 	ifp->if_flags |= IFF_ALLMULTI;
 	hashes[0] = hashes[1] = 0xffffffff;
 
@@ -2574,7 +2569,7 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	case IEEE80211_S_ASSOC:
 		break;
 	case IEEE80211_S_INIT:
-		panic("%s: unexpected state IEEE80211_S_INIT\n", __func__);
+		panic("%s: unexpected state IEEE80211_S_INIT", __func__);
 		break;
 	case IEEE80211_S_SCAN:
 		timeout_add(&sc->sc_scan_to, atw_dwelltime * hz / 1000);
@@ -2702,6 +2697,12 @@ atw_stop(struct ifnet *ifp, int disable)
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 
+	/*
+	 * Mark the interface down and cancel the watchdog timer.
+	*/
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
+
 	/* Disable interrupts. */
 	ATW_WRITE(sc, ATW_IER, 0);
 
@@ -2719,12 +2720,6 @@ atw_stop(struct ifnet *ifp, int disable)
 		atw_rxdrain(sc);
 		atw_disable(sc);
 	}
-
-	/*
-	 * Mark the interface down and cancel the watchdog timer.
-	 */
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-	ifp->if_timer = 0;
 
 	if (!disable)
 		atw_reset(sc);
@@ -3035,11 +3030,11 @@ atw_idle(struct atw_softc *sc, u_int32_t bits)
 
 	if ((bits & ATW_NAR_ST) != 0 && (stsr & ATW_INTR_TPS) == 0 &&
 	    (test0 & ATW_TEST0_TS_MASK) != ATW_TEST0_TS_STOPPED) {
-		printf("%s: transmit process not idle [%s]\n",
+		DPRINTF2(sc, ("%s: transmit process not idle [%s]\n",
 		    sc->sc_dev.dv_xname,
-		    atw_tx_state[MASK_AND_RSHIFT(test0, ATW_TEST0_TS_MASK)]);
-		printf("%s: bits %08x test0 %08x stsr %08x\n",
-		    sc->sc_dev.dv_xname, bits, test0, stsr);
+		    atw_tx_state[MASK_AND_RSHIFT(test0, ATW_TEST0_TS_MASK)]));
+		DPRINTF2(sc, ("%s: bits %08x test0 %08x stsr %08x\n",
+		    sc->sc_dev.dv_xname, bits, test0, stsr));
 	}
 
 	if ((bits & ATW_NAR_SR) != 0 && (stsr & ATW_INTR_RPS) == 0 &&
@@ -3921,7 +3916,7 @@ atw_power(int why, void *arg)
 		/* XXX do nothing. */
 		break;
 	case PWR_SUSPEND:
-		atw_stop(ifp, 0);
+		atw_stop(ifp, 1);
 		if (sc->sc_power != NULL)
 			(*sc->sc_power)(sc, why);
 		break;

@@ -1,5 +1,5 @@
-/*	$OpenBSD: if_stge.c,v 1.10 2005/01/15 05:24:11 brad Exp $	*/
-/*	$NetBSD: if_stge.c,v 1.4 2001/07/25 15:44:48 thorpej Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.20 2005/07/28 00:16:29 brad Exp $	*/
+/*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -47,16 +47,18 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/sockio.h>
+#include <sys/timeout.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/errno.h>
 #include <sys/device.h>
+#include <sys/queue.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -65,6 +67,8 @@
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
+
+#include <net/if_media.h>
 
 #if NVLAN > 0
 #include <net/if_types.h>
@@ -75,13 +79,16 @@
 #include <net/bpf.h>
 #endif
 
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcivar.h>
-#include <dev/pci/pcidevs.h>
+#include <machine/bus.h>
+#include <machine/intr.h>
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/mii_bitbang.h>
+
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
 
 #include <dev/pci/if_stgereg.h>
 
@@ -145,7 +152,7 @@ struct stge_softc {
 	struct arpcom sc_arpcom;	/* ethernet common data */
 	void *sc_sdhook;		/* shutdown hook */
 	int sc_rev;			/* silicon revision */
-
+	int stge_if_flags;
 	void *sc_ih;			/* interrupt cookie */
 
 	struct mii_data sc_mii;		/* MII/media information */
@@ -167,32 +174,6 @@ struct stge_softc {
 	struct stge_control_data *sc_control_data;
 #define	sc_txdescs	sc_control_data->scd_txdescs
 #define	sc_rxdescs	sc_control_data->scd_rxdescs
-
-#ifdef STGE_EVENT_COUNTERS
-	/*
-	 * Event counters.
-	 */
-	struct evcnt sc_ev_txstall;	/* Tx stalled */
-	struct evcnt sc_ev_txdmaintr;	/* Tx DMA interrupts */
-	struct evcnt sc_ev_txindintr;	/* Tx Indicate interrupts */
-	struct evcnt sc_ev_rxintr;	/* Rx interrupts */
-
-	struct evcnt sc_ev_txseg1;	/* Tx packets w/ 1 segment */
-	struct evcnt sc_ev_txseg2;	/* Tx packets w/ 2 segments */
-	struct evcnt sc_ev_txseg3;	/* Tx packets w/ 3 segments */
-	struct evcnt sc_ev_txseg4;	/* Tx packets w/ 4 segments */
-	struct evcnt sc_ev_txseg5;	/* Tx packets w/ 5 segments */
-	struct evcnt sc_ev_txsegmore;	/* Tx packets w/ more than 5 segments */
-	struct evcnt sc_ev_txcopy;	/* Tx packets that we had to copy */
-
-	struct evcnt sc_ev_rxipsum;	/* IP checksums checked in-bound */
-	struct evcnt sc_ev_rxtcpsum;	/* TCP checksums checked in-bound */
-	struct evcnt sc_ev_rxudpsum;	/* UDP checksums checked in-bound */
-
-	struct evcnt sc_ev_txipsum;	/* IP checksums comp. out-bound */
-	struct evcnt sc_ev_txtcpsum;	/* TCP checksums comp. out-bound */
-	struct evcnt sc_ev_txudpsum;	/* UDP checksums comp. out-bound */
-#endif /* STGE_EVENT_COUNTERS */
 
 	int	sc_txpending;		/* number of Tx requests pending */
 	int	sc_txdirty;		/* first dirty Tx descriptor */
@@ -226,12 +207,6 @@ do {									\
 	*(sc)->sc_rxtailp = (sc)->sc_rxtail = (m);			\
 	(sc)->sc_rxtailp = &(m)->m_next;				\
 } while (/*CONSTCOND*/0)
-
-#ifdef STGE_EVENT_COUNTERS
-#define	STGE_EVCNT_INCR(ev)	(ev)->ev_count++
-#else
-#define	STGE_EVCNT_INCR(ev)	/* nothing */
-#endif
 
 #define	STGE_CDTXADDR(sc, x)	((sc)->sc_cddma + STGE_CDTXOFF((x)))
 #define	STGE_CDRXADDR(sc, x)	((sc)->sc_cddma + STGE_CDRXOFF((x)))
@@ -276,9 +251,7 @@ void	stge_shutdown(void *);
 void	stge_reset(struct stge_softc *);
 void	stge_rxdrain(struct stge_softc *);
 int	stge_add_rxbuf(struct stge_softc *, int);
-#if 0
 void	stge_read_eeprom(struct stge_softc *, int, uint16_t *);
-#endif
 void	stge_tick(void *);
 
 void	stge_stats_update(struct stge_softc *);
@@ -300,6 +273,7 @@ int	stge_match(struct device *, void *, void *);
 void	stge_attach(struct device *, struct device *, void *);
 
 int	stge_copy_small = 0;
+int  	stge_1023_bug = 0;	/* XXX: ST1023 works only in promisc mode */
 
 struct cfattach stge_ca = {
 	sizeof(struct stge_softc), stge_match, stge_attach,
@@ -328,6 +302,7 @@ const struct mii_bitbang_ops stge_mii_bitbang_ops = {
  * Devices supported by this driver.
  */
 const struct pci_matchid stge_devices[] = {
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST1023 },
 	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST2021 },
 	{ PCI_VENDOR_TAMARACK, PCI_PRODUCT_TAMARACK_TC9021 },
 	{ PCI_VENDOR_TAMARACK, PCI_PRODUCT_TAMARACK_TC9021_ALT },
@@ -392,15 +367,11 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_dmat = pa->pa_dmat;
 
-	/* Enable bus mastering. */
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
-	    pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG) |
-	    PCI_COMMAND_MASTER_ENABLE);
-
 	/* Get it out of power save mode if needed. */
 	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PWRMGMT, &pmreg, 0)) {
-		pmode = pci_conf_read(pc, pa->pa_tag, pmreg + PCI_PMCSR) & 0x3;
-		if (pmode == 3) {
+		pmode = pci_conf_read(pc, pa->pa_tag, pmreg + PCI_PMCSR) &
+		    PCI_PMCSR_STATE_MASK;
+		if (pmode == PCI_PMCSR_STATE_D3) {
 			/*
 			 * The card has lost all configuration data in
 			 * this state, so punt.
@@ -410,7 +381,8 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 		}
 		if (pmode != 0) {
 			printf(": waking up from power state D%d\n", pmode);
-			pci_conf_write(pc, pa->pa_tag, pmreg + PCI_PMCSR, 0);
+			pci_conf_write(pc, pa->pa_tag, pmreg + PCI_PMCSR,
+			    PCI_PMCSR_STATE_D0);
 		}
 	}
 
@@ -476,8 +448,8 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 * such chips to 1.
 	 */
 	for (i = 0; i < STGE_NTXDESC; i++) {
-		if ((error = bus_dmamap_create(sc->sc_dmat, MCLBYTES,
-		    STGE_NTXFRAGS, MCLBYTES, 0, 0,
+		if ((error = bus_dmamap_create(sc->sc_dmat,
+		    ETHER_MAX_LEN_JUMBO, STGE_NTXFRAGS, MCLBYTES, 0, 0,
 		    &sc->sc_txsoft[i].ds_dmamap)) != 0) {
 			printf("%s: unable to create tx DMA map %d, "
 			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
@@ -515,22 +487,35 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 
 	/*
 	 * Reading the station address from the EEPROM doesn't seem
-	 * to work, at least on my sample boards.  Instread, since
+	 * to work, at least on my sample boards.  Instead, since
 	 * the reset sequence does AutoInit, read it from the station
-	 * address registers.
+	 * address registers. For Sundance 1023 you can only read it
+	 * from EEPROM.
 	 */
-	sc->sc_arpcom.ac_enaddr[0] = bus_space_read_2(sc->sc_st, sc->sc_sh,
-	    STGE_StationAddress0) & 0xff;
-	sc->sc_arpcom.ac_enaddr[1] = bus_space_read_2(sc->sc_st, sc->sc_sh,
-	    STGE_StationAddress0) >> 8;
-	sc->sc_arpcom.ac_enaddr[2] = bus_space_read_2(sc->sc_st, sc->sc_sh,
-	    STGE_StationAddress1) & 0xff;
-	sc->sc_arpcom.ac_enaddr[3] = bus_space_read_2(sc->sc_st, sc->sc_sh,
-	    STGE_StationAddress1) >> 8;
-	sc->sc_arpcom.ac_enaddr[4] = bus_space_read_2(sc->sc_st, sc->sc_sh,
-	    STGE_StationAddress2) & 0xff;
-	sc->sc_arpcom.ac_enaddr[5] = bus_space_read_2(sc->sc_st, sc->sc_sh,
-	    STGE_StationAddress2) >> 8;
+	if (PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_SUNDANCE_ST1023) {
+		sc->sc_arpcom.ac_enaddr[0] = bus_space_read_2(sc->sc_st,
+		    sc->sc_sh, STGE_StationAddress0) & 0xff;
+		sc->sc_arpcom.ac_enaddr[1] = bus_space_read_2(sc->sc_st,
+		    sc->sc_sh, STGE_StationAddress0) >> 8;
+		sc->sc_arpcom.ac_enaddr[2] = bus_space_read_2(sc->sc_st,
+		    sc->sc_sh, STGE_StationAddress1) & 0xff;
+		sc->sc_arpcom.ac_enaddr[3] = bus_space_read_2(sc->sc_st,
+		    sc->sc_sh, STGE_StationAddress1) >> 8;
+		sc->sc_arpcom.ac_enaddr[4] = bus_space_read_2(sc->sc_st,
+		    sc->sc_sh, STGE_StationAddress2) & 0xff;
+		sc->sc_arpcom.ac_enaddr[5] = bus_space_read_2(sc->sc_st,
+		    sc->sc_sh, STGE_StationAddress2) >> 8;
+	} else {
+		uint16_t myaddr[ETHER_ADDR_LEN / 2];
+		for (i = 0; i <ETHER_ADDR_LEN / 2; i++) {
+			stge_read_eeprom(sc, STGE_EEPROM_StationAddress0 + i, 
+			    &myaddr[i]);
+			myaddr[i] = letoh16(myaddr[i]);
+		}
+		(void)memcpy(sc->sc_arpcom.ac_enaddr, myaddr,
+		    sizeof(sc->sc_arpcom.ac_enaddr));
+		stge_1023_bug = 1;
+	}
 
 	printf(", address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
 
@@ -564,11 +549,10 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = stge_ioctl;
 	ifp->if_start = stge_start;
 	ifp->if_watchdog = stge_watchdog;
-#ifdef fake
-	ifp->if_init = stge_init;
-	ifp->if_stop = stge_stop;
-#endif
+	IFQ_SET_MAXLEN(&ifp->if_snd, STGE_NTXDESC - 1);
 	IFQ_SET_READY(&ifp->if_snd);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	/*
 	 * The manual recommends disabling early transmit, so we
@@ -587,18 +571,6 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_DMACtrl |= DMAC_MWIDisable;
 #endif
 
-#ifdef fake
-	/*
-	 * We can support 802.1Q VLAN-sized frames and jumbo
-	 * Ethernet frames.
-	 *
-	 * XXX Figure out how to do hw-assisted VLAN tagging in
-	 * XXX a reasonable way on this chip.
-	 */
-	sc->sc_arpcom.ac_capabilities |=
-	    ETHERCAP_VLAN_MTU /* XXX | ETHERCAP_JUMBO_MTU */;
-#endif
-
 #ifdef STGE_CHECKSUM
 	/*
 	 * We can do IPv4/TCPv4/UDPv4 checksums in hardware.
@@ -612,48 +584,6 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-#ifdef STGE_EVENT_COUNTERS
-	/*
-	 * Attach event counters.
-	 */
-	evcnt_attach_dynamic(&sc->sc_ev_txstall, EVCNT_TYPE_MISC,
-	    NULL, sc->sc_dev.dv_xname, "txstall");
-	evcnt_attach_dynamic(&sc->sc_ev_txdmaintr, EVCNT_TYPE_INTR,
-	    NULL, sc->sc_dev.dv_xname, "txdmaintr");
-	evcnt_attach_dynamic(&sc->sc_ev_txindintr, EVCNT_TYPE_INTR,
-	    NULL, sc->sc_dev.dv_xname, "txindintr");
-	evcnt_attach_dynamic(&sc->sc_ev_rxintr, EVCNT_TYPE_INTR,        
-	    NULL, sc->sc_dev.dv_xname, "rxintr");
-
-	evcnt_attach_dynamic(&sc->sc_ev_txseg1, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "txseg1");                      
-	evcnt_attach_dynamic(&sc->sc_ev_txseg2, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "txseg2");                      
-	evcnt_attach_dynamic(&sc->sc_ev_txseg3, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "txseg3");                      
-	evcnt_attach_dynamic(&sc->sc_ev_txseg4, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "txseg4");                      
-	evcnt_attach_dynamic(&sc->sc_ev_txseg5, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "txseg5");                      
-	evcnt_attach_dynamic(&sc->sc_ev_txsegmore, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "txsegmore");                      
-	evcnt_attach_dynamic(&sc->sc_ev_txcopy, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "txcopy");                      
-
-	evcnt_attach_dynamic(&sc->sc_ev_rxipsum, EVCNT_TYPE_MISC,       
-	    NULL, sc->sc_dev.dv_xname, "rxipsum");                      
-	evcnt_attach_dynamic(&sc->sc_ev_rxtcpsum, EVCNT_TYPE_MISC,      
-	    NULL, sc->sc_dev.dv_xname, "rxtcpsum");
-	evcnt_attach_dynamic(&sc->sc_ev_rxudpsum, EVCNT_TYPE_MISC,      
-	    NULL, sc->sc_dev.dv_xname, "rxudpsum");
-	evcnt_attach_dynamic(&sc->sc_ev_txipsum, EVCNT_TYPE_MISC,
-	    NULL, sc->sc_dev.dv_xname, "txipsum");
-	evcnt_attach_dynamic(&sc->sc_ev_txtcpsum, EVCNT_TYPE_MISC,
-	    NULL, sc->sc_dev.dv_xname, "txtcpsum");
-	evcnt_attach_dynamic(&sc->sc_ev_txudpsum, EVCNT_TYPE_MISC,
-	    NULL, sc->sc_dev.dv_xname, "txudpsum");
-#endif /* STGE_EVENT_COUNTERS */
 
 	/*
 	 * Make sure the interface is shutdown during reboot.
@@ -764,10 +694,8 @@ stge_start(struct ifnet *ifp)
 		 * Leave one unused descriptor at the end of the
 		 * list to prevent wrapping completely around.
 		 */
-		if (sc->sc_txpending == (STGE_NTXDESC - 1)) {
-			STGE_EVCNT_INCR(&sc->sc_ev_txstall);
+		if (sc->sc_txpending == (STGE_NTXDESC - 1))
 			break;
-		}
 
 		/*
 		 * Get the last and next available transmit descriptor.
@@ -821,47 +749,18 @@ stge_start(struct ifnet *ifp)
 			totlen += dmamap->dm_segs[seg].ds_len;
 		}
 
-#ifdef STGE_EVENT_COUNTERS
-		switch (dmamap->dm_nsegs) {
-		case 1:
-			STGE_EVCNT_INCR(&sc->sc_ev_txseg1);
-			break;
-		case 2:
-			STGE_EVCNT_INCR(&sc->sc_ev_txseg2);
-			break;
-		case 3:
-			STGE_EVCNT_INCR(&sc->sc_ev_txseg3);
-			break;
-		case 4:
-			STGE_EVCNT_INCR(&sc->sc_ev_txseg4);
-			break;
-		case 5:
-			STGE_EVCNT_INCR(&sc->sc_ev_txseg5);
-			break;
-		default:
-			STGE_EVCNT_INCR(&sc->sc_ev_txsegmore);
-			break;
-		}
-#endif /* STGE_EVENT_COUNTERS */
-
 #ifdef STGE_CHECKSUM
 		/*
 		 * Initialize checksumming flags in the descriptor.
 		 * Byte-swap constants so the compiler can optimize.
 		 */
-		if (m0->m_pkthdr.csum & M_IPV4_CSUM_OUT) {
-			STGE_EVCNT_INCR(&sc->sc_ev_txipsum);
-			csum_flags |= htole64(TFD_IPChecksumEnable);
-		}
+		if (m0->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+			csum_flags |= TFD_IPChecksumEnable;
 
-		if (m0->m_pkthdr.csum & M_TCPV4_CSUM_OUT) {
-			STGE_EVCNT_INCR(&sc->sc_ev_txtcpsum);
-			csum_flags |= htole64(TFD_TCPChecksumEnable);
-		}
-		else if (m0->m_pkthdr.csum & M_UDPV4_CSUM_OUT) {
-			STGE_EVCNT_INCR(&sc->sc_ev_txudpsum);
-			csum_flags |= htole64(TFD_UDPChecksumEnable);
-		}
+		if (m0->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			csum_flags |= TFD_TCPChecksumEnable;
+		else if (m0->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			csum_flags |= TFD_UDPChecksumEnable;
 #endif
 
 		/*
@@ -960,6 +859,9 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
+		/* Try to get more packets going. */
+		stge_start(ifp);
+
 		splx(s);
 		return (error);
 	}
@@ -975,23 +877,6 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
 #endif
-#ifdef NS
-		case AF_NS:
-		    {
-			 register struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			 if (ns_nullhost(*ina))
-				ina->x_host = (union ns_host *)
-				  &sc->sc_arpcom.ac_enaddr;
-			 else
-				bcopy(ina->x_host.c_host,
-				      &sc->sc_arpcom.ac_enaddr,
-				      ifp->if_addrlen);
-			 /* Set new address. */
-			 stge_init(ifp);
-			 break;
-		    }
-#endif
 		default:
 			stge_init(ifp);
 			break;
@@ -999,24 +884,29 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
 			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
+		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
-		}
 		break;
 
 	case SIOCSIFFLAGS:
-		/*
-		 * If interface is marked up and not running, then start it.
-		 * If it is marked down and running, stop it.
-		 * XXX If it's up then re-initialize it. This is so flags
-		 * such as IFF_PROMISC are handled.
-		 */
-		if (ifp->if_flags & IFF_UP)
-			stge_init(ifp);
-		else if (ifp->if_flags & IFF_RUNNING)
-			stge_stop(ifp, 1);
+		if (ifp->if_flags & IFF_UP) {
+			if (ifp->if_flags & IFF_RUNNING &&
+			    ifp->if_flags & IFF_PROMISC &&
+			    !(sc->stge_if_flags & IFF_PROMISC))
+				stge_set_filter(sc);
+			else if (ifp->if_flags & IFF_RUNNING &&
+			    !(ifp->if_flags & IFF_PROMISC) &&
+			    sc->stge_if_flags & IFF_PROMISC)
+				stge_set_filter(sc);
+			else
+				stge_init(ifp);
+		} else {
+			if (ifp->if_flags & IFF_RUNNING)
+				stge_stop(ifp, 1);
+		}
+		sc->stge_if_flags = ifp->if_flags;
 		break;
 
 	case SIOCADDMULTI:
@@ -1031,9 +921,8 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			 * filter accordingly.
 			 */
 			if (ifp->if_flags & IFF_RUNNING)
-				error = stge_init(ifp);
-			else
-				error = 0;
+				stge_set_filter(sc);
+			error = 0;
 		}
 		break;
 
@@ -1045,6 +934,9 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	default:
 		error = EINVAL;
 	}
+
+	/* Try to get more packets going. */
+	stge_start(ifp);
 
 	splx(s);
 	return (error);
@@ -1072,12 +964,19 @@ stge_intr(void *arg)
 		isr = bus_space_read_2(sc->sc_st, sc->sc_sh, STGE_IntStatusAck);
 		if ((isr & sc->sc_IntEnable) == 0)
 			break;
-		
+
+		/* Host interface errors. */
+		if (isr & IS_HostError) {
+			printf("%s: Host interface error\n",
+			    sc->sc_dev.dv_xname);
+			wantinit = 1;
+			continue;
+		}
+
 		/* Receive interrupts. */
-		if (isr & (IE_RxDMAComplete|IE_RFDListEnd)) {
-			STGE_EVCNT_INCR(&sc->sc_ev_rxintr);
+		if (isr & (IS_RxDMAComplete|IS_RFDListEnd)) {
 			stge_rxintr(sc);
-			if (isr & IE_RFDListEnd) {
+			if (isr & IS_RFDListEnd) {
 				printf("%s: receive ring overflow\n",
 				    sc->sc_dev.dv_xname);
 				/*
@@ -1089,21 +988,15 @@ stge_intr(void *arg)
 		}
 
 		/* Transmit interrupts. */
-		if (isr & (IE_TxDMAComplete|IE_TxComplete)) {
-#ifdef STGE_EVENT_COUNTERS
-			if (isr & IE_TxDMAComplete)
-				STGE_EVCNT_INCR(&sc->sc_ev_txdmaintr);
-#endif
+		if (isr & (IS_TxDMAComplete|IS_TxComplete))
 			stge_txintr(sc);
-		}
 
 		/* Statistics overflow. */
-		if (isr & IE_UpdateStats)
+		if (isr & IS_UpdateStats)
 			stge_stats_update(sc);
 
 		/* Transmission errors. */
-		if (isr & IE_TxComplete) {
-			STGE_EVCNT_INCR(&sc->sc_ev_txindintr);
+		if (isr & IS_TxComplete) {
 			for (;;) {
 				txstat = bus_space_read_4(sc->sc_st, sc->sc_sh,
 				    STGE_TxStatus);
@@ -1125,12 +1018,6 @@ stge_intr(void *arg)
 			wantinit = 1;
 		}
 
-		/* Host interface errors. */
-		if (isr & IE_HostError) {
-			printf("%s: Host interface error\n",
-			    sc->sc_dev.dv_xname);
-			wantinit = 1;
-		}
 	}
 
 	if (wantinit)
@@ -1321,25 +1208,19 @@ stge_rxintr(struct stge_softc *sc)
 			m = nm;
 		}
 
-#ifdef STGE_CHECKSUM
 		/*
 		 * Set the incoming checksum information for the packet.
 		 */
 		if (status & RFD_IPDetected) {
-			STGE_EVCNT_INCR(&sc->sc_ev_rxipsum);
-			m->m_pkthdr.csum |= (status & RFD_IPError) ?
-			  M_IPV4_CSUM_IN_BAD : M_IPV4_CSUM_IN_OK;
-			if (status & RFD_TCPDetected) {
-				STGE_EVCNT_INCR(&sc->sc_ev_rxtcpsum);
-				m->m_pkthdr.csum |= (status & RFD_TCPError) ?
-				  M_TCP_CSUM_IN_BAD : M_TCP_CSUM_IN_OK;
-			} else if (status & RFD_UDPDetected) {
-				STGE_EVCNT_INCR(&sc->sc_ev_rxudpsum);
-				m->m_pkthdr.csum |= (status & RFD_UDPError) ?
-				  M_UDP_CSUM_IN_BAD : M_UDP_CSUM_IN_OK;
-			}
+			if (!(status & RFD_IPError))
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+			if ((status & RFD_TCPDetected) &&
+			   (!(status & RFD_TCPError)))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
+			else if ((status & RFD_UDPDetected) &&
+				(!(status & RFD_UDPError)))
+				m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
 		}
-#endif
 
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = len;
@@ -1482,8 +1363,8 @@ stge_init(struct ifnet *ifp)
 	 */
 	memset(sc->sc_txdescs, 0, sizeof(sc->sc_txdescs));
 	for (i = 0; i < STGE_NTXDESC; i++) {
-		sc->sc_txdescs[i].tfd_next =
-		    (uint64_t) STGE_CDTXADDR(sc, STGE_NEXTTX(i));
+		sc->sc_txdescs[i].tfd_next = htole64(
+		    STGE_CDTXADDR(sc, STGE_NEXTTX(i)));
 		sc->sc_txdescs[i].tfd_control = htole64(TFD_TFDDone);
 	}
 	sc->sc_txpending = 0;
@@ -1516,12 +1397,9 @@ stge_init(struct ifnet *ifp)
 	STGE_RXCHAIN_RESET(sc);
 
 	/* Set the station address. */
-	bus_space_write_2(st, sh, STGE_StationAddress0,
-	    sc->sc_arpcom.ac_enaddr[0] | sc->sc_arpcom.ac_enaddr[1] << 8);
-	bus_space_write_2(st, sh, STGE_StationAddress1,
-	    sc->sc_arpcom.ac_enaddr[2] | sc->sc_arpcom.ac_enaddr[3] << 8);
-	bus_space_write_2(st, sh, STGE_StationAddress2,
-	    sc->sc_arpcom.ac_enaddr[4] | sc->sc_arpcom.ac_enaddr[5] << 8);
+	for (i = 0; i < 6; i++)
+		bus_space_write_1(st, sh, STGE_StationAddress0 + i,
+		    sc->sc_arpcom.ac_enaddr[i]);
 
 	/*
 	 * Set the statistics masks.  Disable all the RMON stats,
@@ -1561,19 +1439,25 @@ stge_init(struct ifnet *ifp)
 	/* Initialize the Tx start threshold. */
 	bus_space_write_2(st, sh, STGE_TxStartThresh, sc->sc_txthresh);
 
+	/* RX DMA thresholds, from linux */
+	bus_space_write_1(st, sh, STGE_RxDMABurstThresh, 0x30);
+	bus_space_write_1(st, sh, STGE_RxDMAUrgentThresh, 0x30);
+
 	/*
 	 * Initialize the Rx DMA interrupt control register.  We
 	 * request an interrupt after every incoming packet, but
-	 * defer it for 32us (64 * 512 ns).
+	 * defer it for 32us (64 * 512 ns).  When the number of
+	 * interrupts pending reaches 8, we stop deferring the
+	 * interrupt, and signal it immediately.
 	 */
 	bus_space_write_4(st, sh, STGE_RxDMAIntCtrl,
-	    RDIC_RxFrameCount(1) | RDIC_RxDMAWaitTime(512));
+	    RDIC_RxFrameCount(8) | RDIC_RxDMAWaitTime(512));
 
 	/*
 	 * Initialize the interrupt mask.
 	 */
-	sc->sc_IntEnable = IE_HostError | IE_TxComplete | IE_UpdateStats |
-	    IE_TxDMAComplete | IE_RxDMAComplete | IE_RFDListEnd;
+	sc->sc_IntEnable = IS_HostError | IS_TxComplete | IS_UpdateStats |
+	    IS_TxDMAComplete | IS_RxDMAComplete | IS_RFDListEnd;
 	bus_space_write_2(st, sh, STGE_IntStatus, 0xffff);
 	bus_space_write_2(st, sh, STGE_IntEnable, sc->sc_IntEnable);
 
@@ -1589,26 +1473,16 @@ stge_init(struct ifnet *ifp)
 	 * FIFO, and send an un-PAUSE frame when the FIFO is totally
 	 * empty again.
 	 */
-	bus_space_write_4(st, sh, STGE_FlowOnTresh, 29696 / 16);
-	bus_space_write_4(st, sh, STGE_FlowOffThresh, 0);
+	bus_space_write_2(st, sh, STGE_FlowOnTresh, 29696 / 16);
+	bus_space_write_2(st, sh, STGE_FlowOffThresh, 0);
 
 	/*
 	 * Set the maximum frame size.
 	 */
-#ifdef fake
 	bus_space_write_2(st, sh, STGE_MaxFrameSize,
 	    ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN +
-	    ((sc->sc_arpcom.ac_capenable & ETHERCAP_VLAN_MTU) ?
-	     ETHER_VLAN_ENCAP_LEN : 0));
-#else
-#if NVLAN > 0
-	bus_space_write_2(st, sh, STGE_MaxFrameSize,
-	    ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN + 4);
-#else
-	bus_space_write_2(st, sh, STGE_MaxFrameSize,
-	    ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN);
-#endif
-#endif
+	    ETHER_VLAN_ENCAP_LEN);
+
 	/*
 	 * Initialize MacCtrl -- do it before setting the media,
 	 * as setting the media will actually program the register.
@@ -1628,6 +1502,9 @@ stge_init(struct ifnet *ifp)
 		/* Tx Poll Now bug work-around. */
 		bus_space_write_2(st, sh, STGE_DebugCtrl,
 		    bus_space_read_2(st, sh, STGE_DebugCtrl) | 0x0010);
+		/* XXX ? from linux */
+		bus_space_write_2(st, sh, STGE_DebugCtrl,
+		    bus_space_read_2(st, sh, STGE_DebugCtrl) | 0x0020);
 	}
 
 	/*
@@ -1691,6 +1568,12 @@ stge_stop(struct ifnet *ifp, int disable)
 	 */
 	timeout_del(&sc->sc_timeout);
 
+	/*
+	 * Mark the interface down and cancel the watchdog timer.
+	 */
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
+
 	/* Down the MII. */
 	mii_down(&sc->sc_mii);
 
@@ -1728,15 +1611,8 @@ stge_stop(struct ifnet *ifp, int disable)
 
 	if (disable)
 		stge_rxdrain(sc);
-
-	/*
-	 * Mark the interface down and cancel the watchdog timer.
-	 */
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-	ifp->if_timer = 0;
 }
 
-#if 0
 static int
 stge_eeprom_wait(struct stge_softc *sc)
 {
@@ -1771,7 +1647,6 @@ stge_read_eeprom(struct stge_softc *sc, int offset, uint16_t *data)
 		    sc->sc_dev.dv_xname);
 	*data = bus_space_read_2(sc->sc_st, sc->sc_sh, STGE_EepromData);
 }
-#endif /* 0 */
 
 /*
  * stge_add_rxbuf:
@@ -1786,7 +1661,7 @@ stge_add_rxbuf(struct stge_softc *sc, int idx)
 	int error;
 
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
-	if (m == NULL)  
+	if (m == NULL)
 		return (ENOBUFS);
 
 	MCLGET(m, M_DONTWAIT);
@@ -1827,15 +1702,20 @@ stge_add_rxbuf(struct stge_softc *sc, int idx)
 void
 stge_set_filter(struct stge_softc *sc)
 {
+	struct arpcom *ac = &sc->sc_arpcom;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
-        int h = 0;
-        u_int32_t mchash[2] = { 0, 0 };
+	uint32_t crc;
+	uint32_t mchash[2];
 
 	sc->sc_ReceiveMode = RM_ReceiveUnicast;
 	if (ifp->if_flags & IFF_BROADCAST)
 		sc->sc_ReceiveMode |= RM_ReceiveBroadcast;
+
+	/* XXX: ST1023 only works in promiscuous mode */
+	if (stge_1023_bug)
+		ifp->if_flags |= IFF_PROMISC;
 
 	if (ifp->if_flags & IFF_PROMISC) {
 		sc->sc_ReceiveMode |= RM_ReceiveAllFrames;
@@ -1850,20 +1730,34 @@ stge_set_filter(struct stge_softc *sc)
 	 * select the bit within the register.
 	 */
 
-	ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
+	memset(mchash, 0, sizeof(mchash));
+
+	ETHER_FIRST_MULTI(step, ac, enm);
 	if (enm == NULL)
 		goto done;
 
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN))
+		if (memcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
+			/*
+			 * We must listen to a range of multicast addresses.
+			 * For now, just accept all multicasts, rather than
+			 * trying to set only those filter bits needed to match
+			 * the range.  (At this time, the only use of address
+			 * ranges is for IP multicast routing, for which the
+			 * range is big enough to require all bits set.)
+			 */
 			goto allmulti;
-		h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) & 
-		    0x0000003F;
-                if (h < 32)
-                        mchash[0] |= (1 << h);
-                else
-                        mchash[1] |= (1 << (h - 32));
-                ETHER_NEXT_MULTI(step, enm);
+		}
+
+		crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN);
+
+		/* Just want the 6 least significant bits. */
+		crc &= 0x3f;
+
+		/* Set the corresponding bit in the hash table. */
+		mchash[crc >> 5] |= 1 << (crc & 0x1f);
+
+		ETHER_NEXT_MULTI(step, enm);
 	}
 
 	sc->sc_ReceiveMode |= RM_ReceiveMulticastHash;
@@ -1886,7 +1780,7 @@ stge_set_filter(struct stge_softc *sc)
 		    mchash[1]);
 	}
 
-	bus_space_write_1(sc->sc_st, sc->sc_sh, STGE_ReceiveMode,
+	bus_space_write_2(sc->sc_st, sc->sc_sh, STGE_ReceiveMode,
 	    sc->sc_ReceiveMode);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_machdep.c,v 1.11 2005/02/23 00:01:09 drahn Exp $	*/
+/*	$OpenBSD: zaurus_machdep.c,v 1.18 2005/07/01 23:56:47 uwe Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -151,6 +151,13 @@
 #include <machine/zaurus_reg.h>
 #include <machine/zaurus_var.h>
 
+#include <zaurus/dev/zaurus_scoopreg.h>
+
+#include "apm.h"
+#if NAPM > 0
+#include <zaurus/dev/zaurus_apm.h>
+#endif
+
 #include "wsdisplay.h"
 
 /* Kernel text starts 2MB in from the bottom of the kernel address space. */
@@ -183,6 +190,8 @@ u_int cpu_reset_address = 0;
 #else
 #define UND_STACK_SIZE	1
 #endif
+
+int zaurusmod;
 
 BootConfig bootconfig;		/* Boot config storage */
 char *boot_args = NULL;
@@ -233,9 +242,6 @@ extern struct user *proc0paddr;
 
 /* Prototypes */
 
-void	zaurus_reset(void);
-void	zaurus_powerdown(void);
-
 #define	BOOT_STRING_MAGIC 0x4f425344
 
 char	bootargs[MAX_BOOT_STRING];
@@ -250,8 +256,8 @@ bs_protos(bs_notimpl);
 
 #include "com.h"
 #if NCOM > 0
-#include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
+#include <dev/ic/comreg.h>
 #endif
 
 #ifndef CONSPEED
@@ -264,54 +270,6 @@ bs_protos(bs_notimpl);
 int comcnspeed = CONSPEED;
 int comcnmode = CONMODE;
 
-
-/*
- *
- */
-void
-zaurus_reset(void)
-{
-	bus_space_tag_t bust = &pxa2x0_bs_tag;
-	bus_space_handle_t bush_pow;
-	bus_space_handle_t bush_mc;
-	int rv;
-
-	if (bus_space_map(bust, PXA2X0_POWMAN_BASE, PXA2X0_POWMAN_SIZE, 0,
-	    &bush_pow))
-		panic("pxa2x0_gpio_boot: failed to map POWMAN");
-
-	if (bus_space_map(bust, PXA2X0_MEMCTL_BASE, PXA2X0_MEMCTL_SIZE, 0,
-	    &bush_mc))
-		panic("zaurus_reset: failed to map MEMCTL");
-
-	bus_space_write_4(bust, bush_pow, POWMAN_RCSR,
-	    RCSR_GPR | RCSR_SMR | RCSR_WDR | RCSR_HWR);
-
-	rv = bus_space_read_4(bust, bush_mc, MEMCTL_MSC0);
-        if ((rv & 0xffff0000) == 0x7ff00000)
-		bus_space_write_4(bust, bush_mc, MEMCTL_MSC0,
-		    (rv & 0xffff) | 0x7ee00000);
-
-	pxa2x0_gpio_set_function(89, GPIO_OUT | GPIO_SET);
-
-	/* Wait for the external reset circuit to kick the CPU. */
-	delay(1000000);
-}
-
-/*
- *
- */
-void
-zaurus_powerdown(void)
-{
-
-	/*
-	 * XXX most of the time this does the right thing, but
-	 * XXX sometimes the zaurus can't be turned on by pressing
-	 * XXX the power button until the battery is replaced.
-	 */
-	pxa2x0_watchdog_boot();
-}
 
 /*
  * void boot(int howto, char *bootstr)
@@ -341,8 +299,10 @@ boot(int howto)
 			cngetc();
 		}
 		printf("rebooting...\n");
-		delay(500000);
-		zaurus_reset();
+		delay(6000000);
+#if NAPM > 0
+		zapm_restart();
+#endif
 		printf("reboot failed; spinning\n");
 		while(1);
 		/*NOTREACHED*/
@@ -375,12 +335,14 @@ boot(int howto)
 	IRQdisable;
 
 	if (howto & RB_HALT) {
+#if NAPM > 0
 		if (howto & RB_POWERDOWN) {
 
 			printf("\nAttempting to power down...\n");
-			delay(500000);
-			zaurus_powerdown();
+			delay(6000000);
+			zapm_poweroff();
 		}
+#endif
 
 		printf("The operating system has halted.\n");
 		printf("Please press any key to reboot.\n\n");
@@ -388,8 +350,10 @@ boot(int howto)
 	}
 
 	printf("rebooting...\n");
-	delay(500000);
-	zaurus_reset();
+	delay(6000000);
+#if NAPM > 0
+	zapm_restart();
+#endif
 	printf("reboot failed; spinning\n");
 	while(1);
 	/*NOTREACHED*/
@@ -442,9 +406,15 @@ struct l1_sec_map {
 	    PTE_NOCACHE,
     },
     {
-	    ZAURUS_AGPIO_VBASE,
-	    0x10800000,
-	    0x00010000, /* XXX */
+	    ZAURUS_SCOOP0_VBASE,
+	    C3000_SCOOP0_BASE,
+	    SCOOP_SIZE,
+	    PTE_NOCACHE,
+    },
+    {
+	    ZAURUS_SCOOP1_VBASE,
+	    trunc_page(C3000_SCOOP1_BASE),
+	    round_page(SCOOP_SIZE),
 	    PTE_NOCACHE,
     },
     {0, 0, 0, 0,}
@@ -523,6 +493,7 @@ copy_io_area_map(pd_entry_t *new_pd)
 	}
 }
 
+/* XXX tidy up! */
 void green_on(int virt);
 void
 green_on(int virt)
@@ -530,11 +501,27 @@ green_on(int virt)
 	/* clobber green led p */
 	volatile u_int16_t *p;
 	if (virt)
-		p = (u_int16_t *)(ZAURUS_AGPIO_VBASE+0x24);
+		p = (u_int16_t *)(ZAURUS_SCOOP0_VBASE+SCOOP_GPWR);
 	else
-		p = (u_int16_t *)0x10800024;
+		p = (u_int16_t *)(C3000_SCOOP0_BASE+SCOOP_GPWR);
 
-	*p = *p | 2;
+	*p = *p | (1<<SCOOP0_LED_GREEN);
+}
+void irda_on(int virt);
+void
+irda_on(int virt)
+{
+	/* clobber IrDA led p */
+	volatile u_int16_t *p;
+	/* XXX scoop1 registers are not page-aligned! */
+	int ofs = C3000_SCOOP1_BASE - trunc_page(C3000_SCOOP1_BASE);
+
+	if (virt)
+		p = (u_int16_t *)(ZAURUS_SCOOP1_VBASE+ofs+SCOOP_GPWR);
+	else
+		p = (u_int16_t *)(C3000_SCOOP1_BASE+SCOOP_GPWR);
+
+	*p = *p & ~(1<<SCOOP1_IR_ON);
 }
 
 #if 0
@@ -587,6 +574,7 @@ initarm(void *arg)
 	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
 	psize_t memsize;
+	extern u_int32_t esym;	/* &_end if no symbols are loaded */
 
 #if 0
 	int led_data = 0;
@@ -670,6 +658,26 @@ initarm(void *arg)
 		cpu_tlb_flushD();
 	}
 
+	/*
+	 * Examine the boot args string for options we need to know about
+	 * now.
+	 */
+	/* XXX should really be done after setting up the console, but we
+	 * XXX need to parse the console selection flags right now. */
+	process_kernel_args((char *)0xa0200000 - MAX_BOOT_STRING - 1);
+#ifdef RAMDISK_HOOKS
+        boothowto |= RB_DFLTROOT;
+#endif /* RAMDISK_HOOKS */
+
+	/*
+	 * This test will work for now but has to be revised when support
+	 * for other models is added.
+	 */
+	if ((cputype & ~CPU_ID_XSCALE_COREREV_MASK) == CPU_ID_PXA27X)
+		zaurusmod = ZAURUS_C3000;
+	else
+		zaurusmod = ZAURUS_C860;
+
 	/* setup GPIO for BTUART, in case bootloader doesn't take care of it */
 	pxa2x0_gpio_bootstrap(ZAURUS_GPIO_VBASE);
 #if 0
@@ -684,12 +692,19 @@ initarm(void *arg)
 	pxa2x0_gpio_set_function(35, GPIO_ALT_FN_1_IN);
 	pxa2x0_gpio_set_function(40, GPIO_ALT_FN_2_OUT);
 	pxa2x0_gpio_set_function(41, GPIO_ALT_FN_2_OUT);
+
+	/* STUART */
+	pxa2x0_gpio_set_function(46, GPIO_ALT_FN_2_IN);
+	pxa2x0_gpio_set_function(47, GPIO_ALT_FN_1_OUT);
 #endif
+
+	/* tell com to drive STUART in slow infrared mode */
+	comsiraddr = (bus_addr_t)PXA2X0_STUART_BASE;
 
 #if 1
 	/* turn on clock to UART block.
 	   XXX this should not be necessary, consinit() will do it */
-	early_clkman(CKEN_FFUART | CKEN_BTUART, 1);
+	early_clkman(CKEN_FFUART | CKEN_BTUART | CKEN_STUART, 1);
 #endif
 
 	green_on(0);
@@ -747,15 +762,6 @@ initarm(void *arg)
 		ioreg_write(ZAURUS_SACC_PBASE+SACCSBI_SKCR,
 			     (tmp & ~(1<<4)) | (1<<0));
 	}
-
-	/*
-	 * Examine the boot args string for options we need to know about
-	 * now.
-	 */
-	process_kernel_args((char *)0xa0200000 - MAX_BOOT_STRING - 1);
-#ifdef RAMDISK_HOOKS
-        boothowto |= RB_DFLTROOT;
-#endif /* RAMDISK_HOOKS */
 
 
 	{
@@ -957,11 +963,12 @@ initarm(void *arg)
 	printf("Mapping kernel\n");
 #endif
 
-	/* Now we fill in the L2 pagetable for the kernel static code/data */
+	/* Now we fill in the L2 pagetable for the kernel static code/data
+	 * and the symbol table. */
 	{
-		extern char etext[], _end[];
+		extern char etext[];
 		size_t textsize = (u_int32_t) etext - KERNEL_TEXT_BASE;
-		size_t totalsize = (u_int32_t) _end - KERNEL_TEXT_BASE;
+		size_t totalsize = esym - KERNEL_TEXT_BASE;
 		u_int logical;
 
 		textsize = (textsize + PGOFSET) & ~PGOFSET;
@@ -972,7 +979,7 @@ initarm(void *arg)
 		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, textsize,
 		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
-		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
+		pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, totalsize - textsize,
 		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
 	}
@@ -1039,11 +1046,8 @@ initarm(void *arg)
 	 * variables.
 	 */
 	{
-		extern char _end[];
-
 		physical_freestart = physical_start +
-		    (((((u_int32_t) _end) + PGOFSET) & ~PGOFSET) -
-		     KERNEL_BASE);
+		    (((esym + PGOFSET) & ~PGOFSET) - KERNEL_BASE);
 		physical_freeend = physical_end;
 		free_pages =
 		    (physical_freeend - physical_freestart) / PAGE_SIZE;
@@ -1174,44 +1178,83 @@ initarm(void *arg)
 	return(kernelstack.pv_va + USPACE_SVC_STACK_TOP);
 }
 
+const char *console = "glass";
+
 void
 process_kernel_args(char *args)
 {
+	char *cp = args;
 
-	if (*(int *)args != BOOT_STRING_MAGIC) {
+	if (cp == NULL || *(int *)cp != BOOT_STRING_MAGIC) {
 		boothowto = RB_AUTOBOOT;
 		return;
 	}
 
-	*(int *)args = 0;
-	args += sizeof(int);
+	/* Eat the cookie */
+	*(int *)cp = 0;
+	cp += sizeof(int);
 
 	boothowto = 0;
 
 	/* Make a local copy of the bootargs */
-	strncpy(bootargs, args, MAX_BOOT_STRING - sizeof(int));
+	strncpy(bootargs, cp, MAX_BOOT_STRING - sizeof(int));
 
-	args = bootargs;
+	cp = bootargs;
 	boot_file = bootargs;
 
 	/* Skip the kernel image filename */
-	while (*args != ' ' && *args != 0)
-		++args;
+	while (*cp != ' ' && *cp != 0)
+		++cp;
 
-	if (*args != 0)
-		*args++ = 0;
+	if (*cp != 0)
+		*cp++ = 0;
 
-	while (*args == ' ')
-		++args;
+	while (*cp == ' ')
+		++cp;
 
-	boot_args = args;
+	boot_args = cp;
 
 	printf("bootfile: %s\n", boot_file);
 	printf("bootargs: %s\n", boot_args);
 
-#if 1
-	parse_mi_bootargs(boot_args);
-#endif
+	/* Setup pointer to boot flags */
+	while (*cp != '-')
+		if (*cp++ == '\0')
+			return;
+
+	for (;*++cp;) {
+		int fl;
+
+		fl = 0;
+		switch(*cp) {
+		case 'a':
+			fl |= RB_ASKNAME;
+			break;
+		case 'c':
+			fl |= RB_CONFIG;
+			break;
+		case 'd':
+			fl |= RB_KDB;
+			break;
+		case 's':
+			fl |= RB_SINGLE;
+			break;
+		/* XXX undocumented console switching flags */
+		case '0':
+			console = "ffuart";
+			break;
+		case '1':
+			console = "btuart";
+			break;
+		case '2':
+			console = "stuart";
+			break;
+		default:
+			printf("unknown option `%c'\n", *cp);
+			break;
+		}
+		boothowto |= fl;
+	}
 }
 
 #ifdef KGDB
@@ -1232,44 +1275,36 @@ int comkgdbmode = KGDB_DEVMODE;
 void
 consinit(void)
 {
+#if NCOM > 0
 	static int consinit_called = 0;
-#if 0
-	char *console = CONSDEVNAME;
-#endif
+	paddr_t paddr;
+	u_int cken = 0;
 
 	if (consinit_called != 0)
 		return;
 
 	consinit_called = 1;
 
-#if NCOM > 0
-
-#ifdef FFUARTCONSOLE
 #ifdef KGDB
-	if (strcmp(kgdb_devname, "ffuart") == 0) {
+	if (strcmp(kgdb_devname, console) == 0) {
 		/* port is reserved for kgdb */
 	} else
 #endif
-	if (comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_FFUART_BASE, comcnspeed,
-	    PXA2X0_COM_FREQ, comcnmode) == 0) {
-		early_clkman(CKEN_FFUART, 1);
-		return;
+	if (strcmp(console, "ffuart") == 0) {
+		paddr = PXA2X0_FFUART_BASE;
+		cken = CKEN_FFUART;
+	} else if (strcmp(console, "btuart") == 0) {
+		paddr = PXA2X0_BTUART_BASE;
+		cken = CKEN_BTUART;
+	} else if (strcmp(console, "stuart") == 0) {
+		paddr = PXA2X0_STUART_BASE;
+		cken = CKEN_STUART;
+		irda_on(0);
 	}
-#endif /* FFUARTCONSOLE */
-
-#ifdef BTUARTCONSOLE
-#ifdef KGDB
-	if (strcmp(kgdb_devname, "btuart") == 0) {
-		/* port is reserved for kgdb */
-	} else
-#endif
-	if (comcnattach(&pxa2x0_a4x_bs_tag, PXA2X0_BTUART_BASE, comcnspeed,
+	if (cken != 0 && comcnattach(&pxa2x0_a4x_bs_tag, paddr, comcnspeed,
 	    PXA2X0_COM_FREQ, comcnmode) == 0) {
-		early_clkman(CKEN_BTUART, 1);
-		return;
+		early_clkman(cken, 1);
 	}
-#endif /* BTUARTCONSOLE */
-
 #endif /* NCOM */
 }
 
@@ -1287,6 +1322,10 @@ kgdb_port_init(void)
 	} else if (strcmp(kgdb_devname, "btuart") == 0) {
 		paddr = PXA2X0_BTUART_BASE;
 		cken = CKEN_BTUART;
+	} else if (strcmp(kgdb_devname, "stuart") == 0) {
+		paddr = PXA2X0_STUART_BASE;
+		cken = CKEN_STUART;
+		irda_on(0);
 	} else
 		return;
 
@@ -1312,6 +1351,8 @@ early_clkman(u_int clk, int enable)
 	ioreg_write(ZAURUS_CLKMAN_VBASE + CLKMAN_CKEN, rv);
 }
 
+int glass_console = 0;
+
 void
 board_startup(void)
 {
@@ -1324,17 +1365,25 @@ board_startup(void)
 	 * are available.
 	 */
 
-	printf("attempting to switch console to lcd screen\n");
-	if (lcd_cnattach(early_clkman) == 0) {
-		/*
-		 * Kill the existing serial console.
-		 * XXX need to bus_space_unmap resources and disable
-		 *     clocks...
-		 */
-		comconsaddr = 0;
+	if ((cputype & ~CPU_ID_XSCALE_COREREV_MASK) == CPU_ID_PXA27X) {
+		if (strcmp(console, "glass") == 0) {
+			printf("attempting to switch console to lcd screen\n");
+			glass_console = 1;
+		}
+		if (glass_console == 1 && lcd_cnattach(early_clkman) == 0) {
+			/*
+			 * Kill the existing serial console.
+			 * XXX need to bus_space_unmap resources and disable
+			 *     clocks...
+			 */
+			comconsaddr = 0;
 
-		/* Display the copyright notice again on the new console */
-		printf("%s\n", copyright);
+			/*
+			 * Display the copyright notice again on the new console
+			 */
+			extern const char copyright[];
+			printf("%s\n", copyright);
+		}
 	}
 #endif
 

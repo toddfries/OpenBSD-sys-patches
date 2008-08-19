@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_output.c,v 1.75 2005/02/27 13:22:56 markus Exp $	*/
+/*	$OpenBSD: tcp_output.c,v 1.79 2005/06/30 08:51:31 markus Exp $	*/
 /*	$NetBSD: tcp_output.c,v 1.16 1997/06/03 16:17:09 kml Exp $	*/
 
 /*
@@ -214,7 +214,7 @@ tcp_output(tp)
 	struct mbuf *m;
 	struct tcphdr *th;
 	u_char opt[MAX_TCPOPTLEN];
-	unsigned int optlen, hdrlen;
+	unsigned int optlen, hdrlen, packetlen;
 	int idle, sendalot = 0;
 #ifdef TCP_SACK
 	int i, sack_rxmit = 0;
@@ -640,6 +640,7 @@ send:
 		int count = 0;  /* actual number of SACKs inserted */
 		int maxsack = (MAX_TCPOPTLEN - (optlen + 4))/TCPOLEN_SACK;
 
+		tcpstat.tcps_sack_snd_opts++;
 		maxsack = min(maxsack, TCP_MAX_SACK);
 		for (i = 0; (i < tp->rcv_numsacks && count < maxsack); i++) {
 			struct sackblk sack = tp->sackblks[i];
@@ -817,6 +818,8 @@ send:
 #if defined(TCP_SACK) && defined(TCP_FACK)
 		tp->retran_data += len;
 #endif /* TCP_FACK */
+		tcpstat.tcps_sack_rexmits++;
+		tcpstat.tcps_sack_rexmit_bytes += len;
 	}
 #endif /* TCP_SACK */
 
@@ -944,7 +947,7 @@ send:
 #ifdef INET
 	case AF_INET:
 		/* Defer checksumming until later (ip_output() or hardware) */
-		m->m_pkthdr.csum |= M_TCPV4_CSUM_OUT;
+		m->m_pkthdr.csum_flags |= M_TCPV4_CSUM_OUT;
 		if (len + optlen)
 			th->th_sum = in_cksum_addword(th->th_sum,
 			    htons((u_int16_t)(len + optlen)));
@@ -1070,6 +1073,7 @@ send:
 
 			ip = mtod(m, struct ip *);
 			ip->ip_len = htons(m->m_pkthdr.len);
+			packetlen = m->m_pkthdr.len;
 			ip->ip_ttl = tp->t_inpcb->inp_ip.ip_ttl;
 			ip->ip_tos = tp->t_inpcb->inp_ip.ip_tos;
 #ifdef TCP_ECN
@@ -1092,6 +1096,7 @@ send:
 			ip6 = mtod(m, struct ip6_hdr *);
 			ip6->ip6_plen = m->m_pkthdr.len -
 				sizeof(struct ip6_hdr);
+			packetlen = m->m_pkthdr.len;
 			ip6->ip6_nxt = IPPROTO_TCP;
 			ip6->ip6_hlim = in6_selecthlim(tp->t_inpcb, NULL);
 #ifdef TCP_ECN
@@ -1115,7 +1120,11 @@ send:
 	if (error) {
 out:
 		if (error == ENOBUFS) {
-			tcp_quench(tp->t_inpcb, 0);
+			/* 
+			 * If the interface queue is full, or IP cannot
+			 * get an mbuf, trigger TCP slow start.
+			 */ 
+			tp->snd_cwnd = tp->t_maxseg;
 			return (0);
 		}
 		if (error == EMSGSIZE) {
@@ -1140,6 +1149,10 @@ out:
 
 		return (error);
 	}
+	
+	if (packetlen > tp->t_pmtud_mtu_sent)
+		tp->t_pmtud_mtu_sent = packetlen;
+	
 	tcpstat.tcps_sndtotal++;
 	if (tp->t_flags & TF_DELACK)
 		tcpstat.tcps_delack++;

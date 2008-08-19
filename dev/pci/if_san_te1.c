@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_te1.c,v 1.7 2005/03/01 18:37:07 mcbride Exp $	*/
+/*	$OpenBSD: if_san_te1.c,v 1.9 2005/07/07 20:58:50 canacar Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -41,6 +41,7 @@
 #include <sys/errno.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/sockio.h>
 #include <sys/kernel.h>
 #include <sys/time.h>
 #include <sys/timeout.h>
@@ -55,6 +56,7 @@
 #include <netinet/ip.h>
 
 #include <dev/pci/if_san_common.h>
+#include <dev/pci/if_san_obsd.h>
 
 
 
@@ -1567,7 +1569,7 @@ WriteTPSCReg(sdla_t *card, int reg, int channel, unsigned char value)
 	if (busy_flag == 1) {
 		log(LOG_INFO, "%s: Failed to write to TPSC Reg[%02x]<-%02x!\n",
 					card->devname, reg, value);
-		err = -EBUSY;
+		err = EBUSY;
 		goto write_tpsc_done;
 	}
 
@@ -1579,7 +1581,7 @@ WriteTPSCReg(sdla_t *card, int reg, int channel, unsigned char value)
 	for (i = 0; i < MAX_BUSY_READ; i++) {
 		temp = READ_REG(REG_TPSC_MICRO_ACCESS_STATUS);
 		if ((temp & BIT_TPSC_BUSY) == 0x0) {
-			err = -EBUSY;
+			err = EBUSY;
 			goto write_tpsc_done;
 		}
 	}
@@ -1672,7 +1674,7 @@ WriteRPSCReg(sdla_t* card, int reg, int channel, unsigned char value)
 	if (busy_flag == 1) {
 		log(LOG_INFO, "%s: Failed to write to RPSC Reg[%02x]<-%02x!\n",
 		    card->devname, reg, value);
-		err = -EBUSY;
+		err = EBUSY;
 		goto write_rpsc_done;
 	}
 
@@ -1683,7 +1685,7 @@ WriteRPSCReg(sdla_t* card, int reg, int channel, unsigned char value)
 	for (i = 0; i < MAX_BUSY_READ; i++) {
 		temp = READ_REG(REG_RPSC_MICRO_ACCESS_STATUS);
 		if ((temp & BIT_RPSC_BUSY) == 0x0) {
-			err = -EBUSY;
+			err = EBUSY;
 			goto write_rpsc_done;
 		}
 	}
@@ -1901,7 +1903,8 @@ static int DisableRxChannel(sdla_t* card, int channel)
 /*
  * Set default T1 configuration
  */
-int sdla_te_defcfg(void *pte_cfg)
+int
+sdla_te_defcfg(void *pte_cfg)
 {
 	sdla_te_cfg_t	*te_cfg = (sdla_te_cfg_t*)pte_cfg;
 
@@ -1916,13 +1919,40 @@ int sdla_te_defcfg(void *pte_cfg)
 }
 
 
-int sdla_te_setcfg(void *pcard, struct ifmedia *ifm)
+int
+sdla_te_setcfg(struct ifnet *ifp, struct ifmedia *ifm)
 {
-	sdla_t		*card = (sdla_t*)pcard;
-	sdla_te_cfg_t	*te_cfg = (sdla_te_cfg_t*)&card->fe_te.te_cfg;
+	struct ifreq		 ifr;
+	struct if_settings	 ifs;
 
-	switch (ifm->ifm_media) {
-	case(IFM_TDM|IFM_TDM_T1):
+	wanpipe_common_t	*common = (wanpipe_common_t *)ifp->if_softc;
+	sdla_t			*card = (sdla_t*)common->card;
+	sdla_te_cfg_t		*te_cfg = (sdla_te_cfg_t*)&card->fe_te.te_cfg;
+	int			 ret;
+
+	if (IFM_TYPE(ifm->ifm_media) != IFM_TDM)
+		return (EINVAL);
+
+	bcopy(ifp->if_xname, ifr.ifr_name, sizeof(ifr.ifr_name));
+	bzero(&ifs, sizeof(ifs));
+	ifr.ifr_data = (caddr_t) &ifs;
+
+	if ((ifm->ifm_media & IFM_OMASK) == IFM_TDM_PPP)
+	       ifs.type = IF_PROTO_PPP;
+	else if ((ifm->ifm_media & IFM_OMASK) == 0)
+		ifs.type = IF_PROTO_CISCO;
+	else {
+		log(LOG_INFO, "%s: Unsupported ifmedia options\n",
+		    card->devname);
+		return (EINVAL);
+	}
+
+	ret = wp_lite_set_proto(ifp, &ifr);
+	if (ret != 0)
+		return (ret);
+
+	switch (IFM_SUBTYPE(ifm->ifm_media)) {
+	case IFM_TDM_T1:
 #ifdef DEBUG_INIT
 		log(LOG_INFO, "%s: Setting T1 media type!\n",
 				card->devname);
@@ -1931,7 +1961,7 @@ int sdla_te_setcfg(void *pcard, struct ifmedia *ifm)
 		te_cfg->lcode = WAN_LC_B8ZS;
 		te_cfg->frame = WAN_FR_ESF;
 		break;
-	case(IFM_TDM|IFM_TDM_T1_AMI):
+	case IFM_TDM_T1_AMI:
 #ifdef DEBUG_INIT
 		log(LOG_INFO, "%s: Setting T1 AMI media type!\n",
 				card->devname);
@@ -1940,7 +1970,7 @@ int sdla_te_setcfg(void *pcard, struct ifmedia *ifm)
 		te_cfg->lcode = WAN_LC_AMI;
 		te_cfg->frame = WAN_FR_ESF;
 		break;
-	case(IFM_TDM|IFM_TDM_E1):
+	case IFM_TDM_E1:
 #ifdef DEBUG_INIT
 		log(LOG_INFO, "%s: Setting E1 media type!\n",
 				card->devname);
@@ -1949,7 +1979,7 @@ int sdla_te_setcfg(void *pcard, struct ifmedia *ifm)
 		te_cfg->lcode = WAN_LC_HDB3;
 		te_cfg->frame = WAN_FR_NCRC4;
 		break;
-	case(IFM_TDM|IFM_TDM_E1_AMI):
+	case IFM_TDM_E1_AMI:
 #ifdef DEBUG_INIT
 		log(LOG_INFO, "%s: Setting E1 AMI media type!\n",
 				card->devname);
@@ -1961,9 +1991,10 @@ int sdla_te_setcfg(void *pcard, struct ifmedia *ifm)
 	default:
 		log(LOG_INFO, "%s: Unsupported ifmedia type (%04X)\n",
 		    card->devname, ifm->ifm_media);
-		return -EINVAL;
+		return (EINVAL);
 	}
-	return 0;
+
+	return (0);
 }
 
 /*
@@ -1978,6 +2009,12 @@ sdla_te_settimeslot(void* pcard, unsigned long ts_map)
 	log(LOG_INFO, "%s: Setting timeslot map to %08lX\n",
 			card->devname, ts_map);
 #endif /* DEBUG_INIT */
+	if (IS_T1(&card->fe_te.te_cfg)) {
+		/* For T1, Shift timeslot map left by 1, because bit 0
+		** is not been used by T1 timeslot map (bit 1 is used for
+		** channel 1, bit 2 is used for channel 2 and so on). */
+		ts_map = ts_map >> 1;	
+	}
 	card->fe_te.te_cfg.active_ch = ts_map;
 	return;
 }
@@ -1985,14 +2022,21 @@ sdla_te_settimeslot(void* pcard, unsigned long ts_map)
 unsigned long
 sdla_te_gettimeslot(void* pcard)
 {
-	return ((sdla_t*)pcard)->fe_te.te_cfg.active_ch;
+	sdla_t		*card = (sdla_t*)pcard;
+	unsigned long	ts_map = card->fe_te.te_cfg.active_ch;
+ 
+	if (IS_T1(&card->fe_te.te_cfg)) {
+		/* See explaination before. */
+		ts_map = ts_map << 1;
+	}
+	return ts_map;
 }
 
 /*
  * Configure Sangoma TE1 board
  *
  * Arguments:	
- * Returns:	0 - TE1 configred successfully, otherwise -EINVAL.
+ * Returns:	0 - TE1 configred successfully, otherwise EINVAL.
  */
 short
 sdla_te_config(void* card_id)
@@ -2337,7 +2381,7 @@ sdla_te_config(void* card_id)
 		EnableAllChannels(card);
 	} else {
 		for (i = 1; i <= channel_range; i++) {
-			if (te_cfg->active_ch & (1 << i)) {
+			if (te_cfg->active_ch & (1 << (i-1))) {
 #ifdef DEBUG_INIT
 				log(LOG_DEBUG, "%s: Enable channel %d\n",
 						card->devname, i);

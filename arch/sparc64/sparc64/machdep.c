@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.74 2004/11/02 21:20:59 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.76 2005/07/09 22:51:13 robert Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -102,6 +102,7 @@
 
 #include <sys/sysctl.h>
 #include <sys/exec_elf.h>
+#include <dev/rndvar.h>
 
 #ifdef SYSVMSG
 #include <sys/msg.h>
@@ -397,6 +398,28 @@ setregs(p, pack, stack, retval)
 	int64_t tstate;
 	int pstate = PSTATE_USER;
 	Elf_Ehdr *eh = pack->ep_hdr;
+
+	/* 
+	 * Setup the process StackGhost cookie which will be XORed into
+	 * the return pointer as register windows are over/underflowed.
+	 */
+	p->p_addr->u_pcb.pcb_wcookie = ((u_int64_t)arc4random() << 32) |
+	    arc4random();
+
+	/* The cookie needs to guarantee invalid alignment after the XOR. */
+	switch (p->p_addr->u_pcb.pcb_wcookie % 3) {
+	case 0: /* Two lsb's already both set except if the cookie is 0. */
+		p->p_addr->u_pcb.pcb_wcookie |= 0x3;
+		break;
+	case 1: /* Set the lsb. */
+		p->p_addr->u_pcb.pcb_wcookie = 1 |
+		    (p->p_addr->u_pcb.pcb_wcookie & ~0x3);
+		break;
+	case 2: /* Set the second most lsb. */
+		p->p_addr->u_pcb.pcb_wcookie = 2 |
+		    (p->p_addr->u_pcb.pcb_wcookie & ~0x3);
+		break;
+	}
 
 	/* Don't allow misaligned code by default */
 	p->p_md.md_flags &= ~MDP_FIXALIGN;
@@ -1598,10 +1621,29 @@ _bus_dmamem_mmap(t, t0, segs, nsegs, off, prot, flags)
 	off_t off;
 	int prot, flags;
 {
+	int i;
 
-	panic("_bus_dmamem_mmap: not implemented");
+	for (i = 0; i < nsegs; i++) {
+#ifdef DIAGNOSTIC
+		if (off & PGOFSET)
+			panic("_bus_dmamem_mmap: offset unaligned");
+		if (segs[i].ds_addr & PGOFSET)
+			panic("_bus_dmamem_mmap: segment unaligned");
+		if (segs[i].ds_len & PGOFSET)
+			panic("_bus_dmamem_mmap: segment size not multiple"
+					" of page size");
+#endif
+		if (off >= segs[i].ds_len) {
+			off -= segs[i].ds_len;
+			continue;
+		}
+
+		return (sparc64_btop((caddr_t)segs[i].ds_addr + off));
+	}
+
+	/* Page not found. */
+	return (-1);
 }
-
 
 struct sparc_bus_dma_tag mainbus_dma_tag = {
 	NULL,

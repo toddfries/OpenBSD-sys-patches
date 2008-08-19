@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5xxx.c,v 1.20 2005/03/20 04:21:55 reyk Exp $	*/
+/*	$OpenBSD: ar5xxx.c,v 1.28 2005/08/17 12:22:49 reyk Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@vantronix.net>
@@ -66,6 +66,12 @@ static const struct {
 	{ PCI_VENDOR_3COM2, PCI_PRODUCT_3COM2_3CRPAG175,
 	    ar5k_ar5212_attach }
 };
+
+static const HAL_RATE_TABLE ar5k_rt_11a = AR5K_RATES_11A;
+static const HAL_RATE_TABLE ar5k_rt_11b = AR5K_RATES_11B;
+static const HAL_RATE_TABLE ar5k_rt_11g = AR5K_RATES_11G;
+static const HAL_RATE_TABLE ar5k_rt_turbo = AR5K_RATES_TURBO;
+static const HAL_RATE_TABLE ar5k_rt_xr = AR5K_RATES_XR;
 
 int		 ar5k_eeprom_read_ants(struct ath_hal *, u_int32_t *, u_int);
 int		 ar5k_eeprom_read_modes(struct ath_hal *, u_int32_t *, u_int);
@@ -145,11 +151,6 @@ ath_hal_attach(device, sc, st, sh, status)
 	int *status;
 {
 	ieee80211_regdomain_t ieee_regdomain;
-	HAL_RATE_TABLE rt_11a = AR5K_RATES_11A;
-	HAL_RATE_TABLE rt_11b = AR5K_RATES_11B;
-	HAL_RATE_TABLE rt_11g = AR5K_RATES_11G;
-	HAL_RATE_TABLE rt_turbo = AR5K_RATES_TURBO;
-	HAL_RATE_TABLE rt_xr = AR5K_RATES_XR;
 	u_int16_t regdomain;
 	struct ath_hal *hal = NULL;
 	ar5k_attach_t *attach = NULL;
@@ -210,7 +211,7 @@ ath_hal_attach(device, sc, st, sh, status)
 		goto failed;
 
 #ifdef AR5K_DEBUG
-	hal->ah_dumpState(hal);
+	hal->ah_dump_state(hal);
 #endif
 
 	/*
@@ -245,25 +246,25 @@ ath_hal_attach(device, sc, st, sh, status)
 	}
 
 	/* Get MAC address */
-	if ((*status = ar5k_eeprom_read_mac(hal, mac)) != HAL_OK) {
+	if ((*status = ar5k_eeprom_read_mac(hal, mac)) != 0) {
 		AR5K_PRINTF("unable to read address from EEPROM: 0x%04x\n",
 		    device);
 		goto failed;
 	}
 
-	hal->ah_setMacAddress(hal, mac);
+	hal->ah_set_lladdr(hal, mac);
 
 	/* Get rate tables */
 	if (hal->ah_capabilities.cap_mode & HAL_MODE_11A)
-		ar5k_rt_copy(&hal->ah_rt_11a, &rt_11a);
+		ar5k_rt_copy(&hal->ah_rt_11a, &ar5k_rt_11a);
 	if (hal->ah_capabilities.cap_mode & HAL_MODE_11B)
-		ar5k_rt_copy(&hal->ah_rt_11b, &rt_11b);
+		ar5k_rt_copy(&hal->ah_rt_11b, &ar5k_rt_11b);
 	if (hal->ah_capabilities.cap_mode & HAL_MODE_11G)
-		ar5k_rt_copy(&hal->ah_rt_11g, &rt_11g);
+		ar5k_rt_copy(&hal->ah_rt_11g, &ar5k_rt_11g);
 	if (hal->ah_capabilities.cap_mode & HAL_MODE_TURBO)
-		ar5k_rt_copy(&hal->ah_rt_turbo, &rt_turbo);
+		ar5k_rt_copy(&hal->ah_rt_turbo, &ar5k_rt_turbo);
 	if (hal->ah_capabilities.cap_mode & HAL_MODE_XR)
-		ar5k_rt_copy(&hal->ah_rt_xr, &rt_xr);
+		ar5k_rt_copy(&hal->ah_rt_xr, &ar5k_rt_xr);
 
 	/* Initialize the gain optimization values */
 	if (hal->ah_radio == AR5K_AR5111) {
@@ -408,10 +409,14 @@ ath_hal_init_channels(hal, channels, max_channels, channels_size, country, mode,
 	u_int i, c;
 	u_int32_t domain_current;
 	u_int domain_5ghz, domain_2ghz;
-	HAL_CHANNEL all_channels[max_channels];
+	HAL_CHANNEL *all_channels;
+
+	if ((all_channels = malloc(sizeof(HAL_CHANNEL) * max_channels,
+	    M_TEMP, M_NOWAIT)) == NULL)
+		return (AH_FALSE);
 
 	i = c = 0;
-	domain_current = hal->ah_getRegDomain(hal);
+	domain_current = hal->ah_get_regdomain(hal);
 
 	/*
 	 * In debugging mode, enable all channels supported by the chipset
@@ -520,15 +525,37 @@ ath_hal_init_channels(hal, channels, max_channels, channels_size, country, mode,
 	}
 
  done:
-	bcopy(all_channels, channels, sizeof(all_channels));
+	bcopy(all_channels, channels, sizeof(HAL_CHANNEL) * max_channels);
 	*channels_size = c;
-
+	free(all_channels, M_TEMP);
 	return (AH_TRUE);
 }
 
 /*
  * Common internal functions
  */
+
+const char *
+ar5k_printver(type, val)
+	enum ar5k_srev_type type;
+	u_int32_t val;
+{
+	struct ar5k_srev_name names[] = AR5K_SREV_NAME;
+	const char *name = "xxxx";
+	int i;
+
+	for (i = 0; i < AR5K_ELEMENTS(names); i++) {
+		if (names[i].sr_type != type ||
+		    names[i].sr_val == AR5K_SREV_UNKNOWN)
+			continue;
+		if (val < names[i + 1].sr_val) {
+			name = names[i].sr_name;
+			break;
+		}
+	}
+
+	return (name);
+}
 
 void
 ar5k_radar_alert(hal)
@@ -586,7 +613,7 @@ ar5k_get_regdomain(hal)
 	ieee80211_regdomain_t ieee_regdomain;
 
 	if (ar5k_eeprom_regulation_domain(hal,
-		AH_FALSE, &ieee_regdomain) == AH_TRUE) {
+	    AH_FALSE, &ieee_regdomain) == AH_TRUE) {
 		if ((regdomain = ar5k_regdomain_from_ieee(ieee_regdomain)))
 			return (regdomain);
 	}
@@ -638,7 +665,7 @@ ar5k_clocktoh(clock, turbo)
 void
 ar5k_rt_copy(dst, src)
 	HAL_RATE_TABLE *dst;
-	HAL_RATE_TABLE *src;
+	const HAL_RATE_TABLE *src;
 {
 	bzero(dst, sizeof(HAL_RATE_TABLE));
 	dst->rateCount = src->rateCount;
@@ -856,10 +883,6 @@ ar5k_eeprom_init(hal)
 	int ret, i;
 	u_int mode;
 
-	/* Check if EEPROM is busy */
-	if (hal->ah_eeprom_is_busy(hal) == AH_TRUE)
-		return (EBUSY);
-
 	/* Initial TX thermal adjustment values */
 	ee->ee_tx_clip = 4;
 	ee->ee_pwd_84 = ee->ee_pwd_90 = 1;
@@ -1041,9 +1064,6 @@ ar5k_eeprom_read_mac(hal, mac)
 
 	bzero(mac, IEEE80211_ADDR_LEN);
 	bzero(&mac_d, IEEE80211_ADDR_LEN);
-
-	if (hal->ah_eeprom_is_busy(hal))
-		return (EBUSY);
 
 	if (hal->ah_eeprom_read(hal, 0x20, &data) != 0)
 		return (EIO);
@@ -1474,7 +1494,7 @@ ar5k_rfregs_gain_adjust(hal)
  done:
 #ifdef AR5K_DEBUG
 	AR5K_PRINTF("ret %d, gain step %u, current gain %u, target gain %u\n",
-	    g,
+	    ret,
 	    hal->ah_gain.g_step_idx,
 	    hal->ah_gain.g_current,
 	    hal->ah_gain.g_target);
@@ -1495,7 +1515,7 @@ ar5k_rfregs(hal, channel, mode)
 	if (hal->ah_radio == AR5K_AR5111) {
 		hal->ah_rf_banks_size = sizeof(ar5111_rf);
 		func = ar5k_ar5111_rfregs;
-	} else if (hal->ah_radio == AR5K_AR5112) {		
+	} else if (hal->ah_radio == AR5K_AR5112) {
 		hal->ah_rf_banks_size = sizeof(ar5112_rf);
 		func = ar5k_ar5112_rfregs;
 	} else
@@ -1503,8 +1523,8 @@ ar5k_rfregs(hal, channel, mode)
 
 	if (hal->ah_rf_banks == NULL) {
 		/* XXX do extra checks? */
-		if ((hal->ah_rf_banks =
-		    malloc(hal->ah_rf_banks_size, M_DEVBUF, M_NOWAIT)) == NULL) {
+		if ((hal->ah_rf_banks = malloc(hal->ah_rf_banks_size,
+		    M_DEVBUF, M_NOWAIT)) == NULL) {
 			AR5K_PRINT("out of memory\n");
 			return (AH_FALSE);
 		}
@@ -1695,10 +1715,8 @@ ar5k_ar5112_rfregs(hal, channel, mode)
 		return (AH_FALSE);
 
 	/* Write RF values */
-	for (i = 0; i < rf_size; i++) {
+	for (i = 0; i < rf_size; i++)
 		AR5K_REG_WRITE(ar5112_rf[i].rf_register, rf[i]);
-		AR5K_DELAY(1);
-	}
 
 	return (AH_TRUE);
 }
@@ -1746,7 +1764,7 @@ ar5k_txpower_table(hal, channel, max_power)
 {
 	u_int16_t txpower, *rates;
 	int i;
-	
+
 	rates = hal->ah_txpower.txp_rates;
 
 	txpower = AR5K_TUNE_DEFAULT_TXPOWER * 2;

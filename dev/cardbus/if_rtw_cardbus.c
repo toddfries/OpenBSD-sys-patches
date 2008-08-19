@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rtw_cardbus.c,v 1.4 2005/02/10 12:14:53 jsg Exp $	*/
+/*	$OpenBSD: if_rtw_cardbus.c,v 1.8 2005/06/08 05:36:33 henning Exp $	*/
 /* $NetBSD: if_rtw_cardbus.c,v 1.4 2004/12/20 21:05:34 dyoung Exp $ */
 
 /*-
@@ -106,11 +106,6 @@
 #include <net/bpf.h>
 #endif 
 
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
-
 #include <machine/bus.h>
 #include <machine/intr.h>
 
@@ -166,38 +161,19 @@ int rtw_cardbus_enable(struct rtw_softc *);
 void rtw_cardbus_disable(struct rtw_softc *);
 void rtw_cardbus_power(struct rtw_softc *, int);
 
-const struct rtw_cardbus_product *rtw_cardbus_lookup(
-     const struct cardbus_attach_args *);
-
-const struct rtw_cardbus_product {
-	u_int32_t	 rcp_vendor;	/* PCI vendor ID */
-	u_int32_t	 rcp_product;	/* PCI product ID */
-} rtw_cardbus_products[] = {
-	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8180 },
-	{ PCI_VENDOR_BELKIN2, PCI_PRODUCT_BELKIN2_F5D6020V3 },
-	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DWL610 },
-	{ 0, 0 }
+const struct cardbus_matchid rtw_cardbus_devices[] = {
+	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8185 },
+	{ PCI_VENDOR_REALTEK,	PCI_PRODUCT_REALTEK_RT8180 },
+	{ PCI_VENDOR_BELKIN2,	PCI_PRODUCT_BELKIN2_F5D6020V3 },
+	{ PCI_VENDOR_DLINK,	PCI_PRODUCT_DLINK_DWL610 },
 };
-
-const struct rtw_cardbus_product *
-rtw_cardbus_lookup(const struct cardbus_attach_args *ca)
-{
-	const struct rtw_cardbus_product *rcp;
-
-	for (rcp = rtw_cardbus_products; rcp->rcp_product != 0; rcp++) {
-		if (PCI_VENDOR(ca->ca_id) == rcp->rcp_vendor &&
-		    PCI_PRODUCT(ca->ca_id) == rcp->rcp_product)
-			return (rcp);
-	}
-	return (NULL);
-}
 
 int
 rtw_cardbus_match(struct device *parent, void *match, void *aux)
 {
-	struct cardbus_attach_args *ca = aux;
-
-	return (rtw_cardbus_lookup(ca) != NULL);
+	return (cardbus_matchbyid((struct cardbus_attach_args *)aux,
+	    rtw_cardbus_devices,
+	    sizeof(rtw_cardbus_devices)/sizeof(rtw_cardbus_devices[0])));
 }
 
 void
@@ -228,19 +204,12 @@ rtw_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	struct rtw_regs *regs = &sc->sc_regs;
 	struct cardbus_attach_args *ca = aux;
 	cardbus_devfunc_t ct = ca->ca_ct;
-	const struct rtw_cardbus_product *rcp;
 	bus_addr_t adr;
 	int rev;
 
 	sc->sc_dmat = ca->ca_dmat;
 	csc->sc_ct = ct;
 	csc->sc_tag = ca->ca_tag;
-
-	rcp = rtw_cardbus_lookup(ca);
-	if (rcp == NULL) {
-		printf("\n");
-		panic("rtw_cardbus_attach: impossible");
-	}
 
 	/*
 	 * Power management hooks.
@@ -422,22 +391,11 @@ rtw_cardbus_disable(struct rtw_softc *sc)
 void
 rtw_cardbus_power(struct rtw_softc *sc, int why)
 {
-	struct rtw_cardbus_softc *csc = (void *) sc;
-
 	RTW_DPRINTF(RTW_DEBUG_ATTACH,
 	    ("%s: rtw_cardbus_power\n", sc->sc_dev.dv_xname));
 
-	if (why == PWR_RESUME) {
-		/*
-		 * Give the PCI configuration registers a kick
-		 * in the head.
-		 */
-#ifdef DIAGNOSTIC
-		if ((sc->sc_flags & RTW_F_ENABLED) == 0)
-			panic("rtw_cardbus_power");
-#endif
-		rtw_cardbus_setup(csc);
-	}
+	if (why == PWR_RESUME)
+		rtw_enable(sc);
 }
 
 void

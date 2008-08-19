@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.1 2005/01/10 00:25:03 deraadt Exp $	*/
+/*	$OpenBSD: devopen.c,v 1.5 2005/05/24 20:38:20 uwe Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff
@@ -26,11 +26,11 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "libsa.h"
 #include <sys/param.h>
+#include <sys/disklabel.h>
 #include <dev/cons.h>
-
-extern int debug;
+#include "libsa.h"
+#include <stand/boot/cmd.h>
 
 /* XXX use slot for 'rd' for 'hd' pseudo-device */
 const char bdevs[][4] = {
@@ -42,7 +42,7 @@ const int nbdevs = NENTS(bdevs);
 
 const char cdevs[][4] = {
 	"cn", "", "", "", "", "", "", "",
-	"com", "", "", "", "pc"
+	"", "", "", "", "com"
 };
 const int ncdevs = NENTS(cdevs);
 
@@ -89,8 +89,13 @@ devopen(struct open_file *f, const char *fname, char **file)
 void
 devboot(dev_t bootdev, char *p)
 {
-	/* XXX */
-	strlcpy(p, "/dev/hda4", 10);
+	dev_t unit = 0;		/* XXX */
+
+	*p++ = 'h';
+	*p++ = 'd';
+	*p++ = '0' + unit;
+	*p++ = 'a';
+	*p = '\0';
 }
 
 int pch_pos = 0;
@@ -135,9 +140,7 @@ getchar(void)
 	if ((c < ' ' && c != '\n') || c == '\177')
 		return c;
 
-#if 0
 	putchar(c);
-#endif
 
 	return c;
 }

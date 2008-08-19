@@ -1,4 +1,4 @@
-/*	$OpenBSD: unimpl_emul.s,v 1.6 2001/07/16 22:03:52 hugh Exp $	*/
+/*	$OpenBSD: unimpl_emul.s,v 1.8 2005/05/06 18:55:02 miod Exp $	*/
 /*	$NetBSD: unimpl_emul.s,v 1.2 2000/08/14 11:16:52 ragge Exp $	*/
 
 /*
@@ -32,9 +32,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "assym.h"
 
 #include <machine/asm.h>
-#include "assym.h"
+#include <machine/psl.h>
 
 # Only intended for debugging emulation code (security hole)
 #undef	EMULATE_INKERNEL
@@ -58,13 +59,7 @@
 #define	S_PC	60(fp)
 #define	S_PSL	64(fp)
 
-# The condition codes.
-
-#define PSL_C	1
-#define PSL_V	2
-#define PSL_Z	4
-#define PSL_N	8
-#define PSL_Q  15		# all four
+#define PSL_Q  	(PSL_N | PSL_Z | PSL_V | PSL_C)
 				
 #
 # Emulation of instruction trapped via SCB vector 0x18. (reserved op)
@@ -469,7 +464,7 @@ die:	pushl	r1
 emodd:	bsbw	touser
 
 	/* Clear the condition codes; we will set them as needed later. */
-	bicl2 $(PSL_C|PSL_V|PSL_Z|PSL_N), S_PSL
+	bicl2 $PSL_Q, S_PSL
 
 	/* 
 	 * We temporarily appropriate ap for the use of TMPFRAC*.
@@ -778,9 +773,7 @@ zeroexit:
  * returns number of bits, unless there aren't any;
  * in that case it will return $0xffffffff
  */
-bitcnt:	
-	.word 0xffe	/* r1-r12 */
-
+ASENTRY(bitcnt, R1|R2|R3|R4|R5|R6|R7|R8|R9|R10|R11)
 	/* 
 	 * Our goal is to factor a common power of 2 out of each of the
 	 * two factors involved in the multiplication.  Once we have that,
@@ -829,9 +822,7 @@ bitcnt:
  * The fourth argument to fltext_De is the eight extra bits for use
  * in EMOD*, et al.  If these bits are not in use, specify 0.
  */
-fltext_De:
-	.word 0x831	# r0 r1 r2 r3 r4 ap (no return)
-
+ASENTRY(fltext_De, R0|R1|R2)
 	movl 0x4(ap), r0	# r0 - addr of source
 	movl 0x8(ap), r1	# r1 - addr of fraction destination
 
@@ -855,4 +846,3 @@ fltext_De:
 	movl 0xc(ap), r2	# r2 - addr of exponent destination
 	extzv $0x7, $0x8, (r0), (r2)		# get exponent out
 	ret
-

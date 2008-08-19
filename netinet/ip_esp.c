@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_esp.c,v 1.88 2003/12/10 07:22:43 itojun Exp $ */
+/*	$OpenBSD: ip_esp.c,v 1.95 2005/08/05 12:16:13 markus Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -35,6 +35,8 @@
  * PURPOSE.
  */
 
+#include "pfsync.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -49,6 +51,7 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #endif /* INET */
 
 #ifdef INET6
@@ -62,6 +65,11 @@
 #include <netinet/ip_esp.h>
 #include <net/pfkeyv2.h>
 #include <net/if_enc.h>
+
+#if NPFSYNC > 0
+#include <net/pfvar.h>
+#include <net/if_pfsync.h>
+#endif /* NPFSYNC > 0 */
 
 #include <crypto/cryptodev.h>
 #include <crypto/xform.h>
@@ -95,8 +103,18 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 	struct auth_hash *thash = NULL;
 	struct cryptoini cria, crie;
 
+	if (!ii->ii_encalg && !ii->ii_authalg) {
+		DPRINTF(("esp_init(): neither authentication nor encryption "       
+		    "algorithm given"));                                            
+		return EINVAL;                                                      
+	}                                 
+
 	if (ii->ii_encalg) {
 		switch (ii->ii_encalg) {
+		case SADB_EALG_NULL:
+			txform = &enc_xform_null;
+			break;
+
 		case SADB_EALG_DESCBC:
 			txform = &enc_xform_des;
 			break;
@@ -107,6 +125,10 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 
 		case SADB_X_EALG_AES:
 			txform = &enc_xform_rijndael128;
+			break;
+
+		case SADB_X_EALG_AESCTR:
+			txform = &enc_xform_aes_ctr;
 			break;
 
 		case SADB_X_EALG_BLF:
@@ -141,7 +163,7 @@ esp_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 		DPRINTF(("esp_init(): initialized TDB with enc algorithm %s\n",
 		    txform->name));
 
-		tdbp->tdb_ivlen = txform->blocksize;
+		tdbp->tdb_ivlen = txform->ivsize;
 		if (tdbp->tdb_flags & TDBF_HALFIV)
 			tdbp->tdb_ivlen /= 2;
 	}
@@ -268,7 +290,6 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 {
 	struct auth_hash *esph = (struct auth_hash *) tdb->tdb_authalgxform;
 	struct enc_xform *espx = (struct enc_xform *) tdb->tdb_encalgxform;
-	struct tdb_ident *tdbi;
 	struct tdb_crypto *tc;
 	int plen, alen, hlen;
 	struct m_tag *mtag;
@@ -360,15 +381,21 @@ esp_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 		tdb->tdb_flags &= ~TDBF_SOFT_BYTES;       /* Turn off checking */
 	}
 
+#ifdef notyet
 	/* Find out if we've already done crypto */
 	for (mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, NULL);
 	     mtag != NULL;
 	     mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, mtag)) {
+		struct tdb_ident *tdbi;
+
 		tdbi = (struct tdb_ident *) (mtag + 1);
 		if (tdbi->proto == tdb->tdb_sproto && tdbi->spi == tdb->tdb_spi &&
 		    !bcmp(&tdbi->dst, &tdb->tdb_dst, sizeof(union sockaddr_union)))
 			break;
 	}
+#else
+	mtag = NULL;
+#endif
 
 	/* Get crypto descriptors */
 	crp = crypto_getreq(esph && espx ? 2 : 1);
@@ -560,6 +587,9 @@ esp_input_cb(void *op)
 		switch (checkreplaywindow32(btsx, 0, &(tdb->tdb_rpl),
 		    tdb->tdb_wnd, &(tdb->tdb_bitmap), 1)) {
 		case 0: /* All's well */
+#if NPFSYNC > 0
+			pfsync_update_tdb(tdb);
+#endif
 			break;
 
 		case 1:
@@ -707,12 +737,11 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 	struct cryptodesc *crde = NULL, *crda = NULL;
 	struct cryptop *crp;
-
 #if NBPFILTER > 0
-	{
-		struct ifnet *ifn;
+	struct ifnet *ifn = &(encif[0].sc_if);
+
+	if (ifn->if_bpf) {
 		struct enchdr hdr;
-		struct mbuf m1;
 
 		bzero (&hdr, sizeof(hdr));
 
@@ -723,15 +752,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		if (esph)
 			hdr.flags |= M_AUTH;
 
-		m1.m_flags = 0;
-		m1.m_next = m;
-		m1.m_len = ENC_HDRLEN;
-		m1.m_data = (char *) &hdr;
-
-		ifn = &(encif[0].sc_if);
-
-		if (ifn->if_bpf)
-			bpf_mtap(ifn->if_bpf, &m1);
+		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m);
 	}
 #endif
 
@@ -862,6 +883,9 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		u_int32_t replay = htonl(tdb->tdb_rpl++);
 		bcopy((caddr_t) &replay, mtod(mo, caddr_t) + sizeof(u_int32_t),
 		    sizeof(u_int32_t));
+#if NPFSYNC > 0
+		pfsync_update_tdb(tdb);
+#endif
 	}
 
 	/*
@@ -880,7 +904,7 @@ esp_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		for (ilen = 0; ilen < padding - 2; ilen++)
 			pad[ilen] = ilen + 1;
 	else
-		get_random_bytes((void *) pad, padding - 2);
+		arc4random_bytes((void *) pad, padding - 2);
 
 	/* Fix padding length and Next Protocol in padding itself. */
 	pad[padding - 2] = padding - 2;

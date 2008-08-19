@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.28 2004/12/30 21:22:20 miod Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.31 2005/08/06 19:51:44 martin Exp $	*/
 /*	$NetBSD: pmap_bootstrap.c,v 1.50 1999/04/07 06:14:33 scottr Exp $	*/
 
 /* 
@@ -67,14 +67,11 @@ u_long	high[8];
 u_long	maxaddr;	/* PA of the last physical page */
 int	vidlen;
 #define VIDMAPSIZE	btoc(vidlen)
-extern u_int32_t	mac68k_vidlog;
 extern u_int32_t	mac68k_vidphys;
 extern u_int32_t	videoaddr;
 extern u_int32_t	videorowbytes;
 extern u_int32_t	videosize;
 static u_int32_t	newvideoaddr;
-
-extern vm_offset_t	tmp_vpages[1];	/* nubus.c */
 
 extern caddr_t	ROMBase;
 
@@ -168,8 +165,6 @@ do { \
 	if (vidlen != 0) { \
 		newvideoaddr = iiobase + m68k_ptob(IIOMAPSIZE + ROMMAPSIZE) \
 				+ (mac68k_vidphys & PGOFSET); \
-		if (mac68k_vidlog) \
-			mac68k_vidlog = newvideoaddr; \
 	} \
 } while (0)
 
@@ -198,11 +193,7 @@ do { \
 	avail_end = high[numranges - 1]; \
 } while (0)
 
-#define	PMAP_MD_RELOC3() \
-do { \
-	tmp_vpages[0] = va; \
-	va += NBPG; \
-} while (0)
+#define PMAP_MD_RELOC3()	/* nothing */
 
 #include <m68k/m68k/pmap_bootstrap.c>
 
@@ -268,7 +259,7 @@ bootstrap_mac68k(tc)
 	 *
 	 * WARNING!!! No printfs() (etc) BETWEEN zs_init() and the end
 	 * of this function (where we start using the MMU, so the new
-	 * address is correct.
+	 * address is correct).
 	 */
 	if (zsinited != 0)
 		zs_init();

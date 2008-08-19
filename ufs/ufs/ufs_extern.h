@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_extern.h,v 1.22 2004/12/07 04:37:28 tedu Exp $	*/
+/*	$OpenBSD: ufs_extern.h,v 1.25 2005/07/20 16:30:35 pedro Exp $	*/
 /*	$NetBSD: ufs_extern.h,v 1.5 1996/02/09 22:36:03 christos Exp $	*/
 
 /*-
@@ -91,7 +91,6 @@ int	 ufs_setattr(void *);
 int	 ufs_strategy(void *);
 int	 ufs_symlink(void *);
 int	 ufs_unlock(void *);
-int	 ufs_whiteout(void *);
 int	 ufsspec_close(void *);
 int	 ufsspec_read(void *);
 int	 ufsspec_write(void *);
@@ -149,15 +148,15 @@ int ufs_makeinode(int, struct vnode *, struct vnode **,
 /*
  * Soft dependency function prototypes.
  */
-void  softdep_setup_directory_add(struct buf *, struct inode *, off_t,
-          long, struct buf *);
+int  softdep_setup_directory_add(struct buf *, struct inode *, off_t,
+          long, struct buf *, int);
 void  softdep_change_directoryentry_offset(struct inode *, caddr_t,
           caddr_t, caddr_t, int);
 void  softdep_setup_remove(struct buf *,struct inode *, struct inode *,
           int);
 void  softdep_setup_directory_change(struct buf *, struct inode *,
           struct inode *, long, int);
-void  softdep_change_linkcnt(struct inode *);
+void  softdep_change_linkcnt(struct inode *, int);
 int   softdep_slowdown(struct vnode *);
 
 __END_DECLS

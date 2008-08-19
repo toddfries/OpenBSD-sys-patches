@@ -1,4 +1,4 @@
-/*	$OpenBSD: macrom.c,v 1.27 2005/02/20 18:08:08 martin Exp $	*/
+/*	$OpenBSD: macrom.c,v 1.29 2005/05/22 19:40:51 art Exp $	*/
 /*	$NetBSD: macrom.c,v 1.47 2000/11/15 07:15:36 scottr Exp $	*/
 
 /*-
@@ -791,6 +791,7 @@ void
 mrg_init()
 {
 	char *findername = "MacBSD FakeFinder";
+	vaddr_t va;
 	int i;
 #if defined(MRG_TEST)
 	caddr_t ptr;
@@ -838,7 +839,7 @@ mrg_init()
 			.word   0xa99d
 			movl    sp@+, %0"
 			: "=g" (handle));
-		printf("Handle to first DRVR resource is 0x%p\n", handle);
+		printf("Handle to first DRVR resource is %p\n", handle);
 		printf("DRVR: 0x%08lx -> 0x%08lx -> 0x%08lx\n",
 		    (long)Get_Ind_Resource(0x44525652, 1),
 		    (long)*Get_Ind_Resource(0x44525652, 1),
@@ -850,7 +851,7 @@ mrg_init()
 			.word   0xa99d
 			movl    sp@+, %0"
 			: "=g" (handle));
-		printf("Handle to second DRVR resource is 0x%p\n", handle);
+		printf("Handle to second DRVR resource is %p\n", handle);
 		printf("DRVR: 0x%08lx -> 0x%08lx -> 0x%08lx\n",
 		    (long)Get_Ind_Resource(0x44525652, 2),
 		    (long)*Get_Ind_Resource(0x44525652, 2),
@@ -1018,8 +1019,9 @@ mrg_init()
 		printf("mrg: I/O map kludge for ROMs that use hardware %s",
 			"addresses directly.\n");
 #endif
-		pmap_map(0x50f00000, 0x50f00000, 0x50f00000 + 0x4000,
-			 VM_PROT_READ|VM_PROT_WRITE);
+		for (va = 0x50f00000; va < 0x50f04000; va += PAGE_SIZE)
+			pmap_kenter_pa(va, (paddr_t)va, UVM_PROT_RW);
+		pmap_update(pmap_kernel());
 	}
 }
 

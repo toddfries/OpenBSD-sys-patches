@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.185 2005/03/12 08:07:09 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.190 2005/08/11 11:39:36 markus Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -191,7 +191,7 @@ tcp_reass(tp, th, m, tlen)
 	struct mbuf *m;
 	int *tlen;
 {
-	struct ipqent *p, *q, *nq, *tiqe;
+	struct tcpqent *p, *q, *nq, *tiqe;
 	struct socket *so = tp->t_inpcb->inp_socket;
 	int flags;
 
@@ -208,13 +208,11 @@ tcp_reass(tp, th, m, tlen)
 	 */
 	tiqe = pool_get(&tcpqe_pool, PR_NOWAIT);
 	if (tiqe == NULL) {
-		tiqe = LIST_FIRST(&tp->segq);
+		tiqe = TAILQ_LAST(&tp->t_segq, tcpqehead);
 		if (tiqe != NULL && th->th_seq == tp->rcv_nxt) {
 			/* Reuse last entry since new segment fills a hole */
-			while ((p = LIST_NEXT(tiqe, ipqe_q)) != NULL)
-				tiqe = p;
-			m_freem(tiqe->ipqe_m);
-			LIST_REMOVE(tiqe, ipqe_q);
+			m_freem(tiqe->tcpqe_m);
+			TAILQ_REMOVE(&tp->t_segq, tiqe, tcpqe_q);
 		}
 		if (tiqe == NULL || th->th_seq != tp->rcv_nxt) {
 			/* Flush segment queue for this connection */
@@ -228,9 +226,9 @@ tcp_reass(tp, th, m, tlen)
 	/*
 	 * Find a segment which begins after this one does.
 	 */
-	for (p = NULL, q = tp->segq.lh_first; q != NULL;
-	    p = q, q = q->ipqe_q.le_next)
-		if (SEQ_GT(q->ipqe_tcp->th_seq, th->th_seq))
+	for (p = NULL, q = TAILQ_FIRST(&tp->t_segq); q != NULL;
+	    p = q, q = TAILQ_NEXT(q, tcpqe_q))
+		if (SEQ_GT(q->tcpqe_tcp->th_seq, th->th_seq))
 			break;
 
 	/*
@@ -239,7 +237,7 @@ tcp_reass(tp, th, m, tlen)
 	 * segment.  If it provides all of our data, drop us.
 	 */
 	if (p != NULL) {
-		struct tcphdr *phdr = p->ipqe_tcp;
+		struct tcphdr *phdr = p->tcpqe_tcp;
 		int i;
 
 		/* conversion to int (in i) handles seq wraparound */
@@ -265,7 +263,7 @@ tcp_reass(tp, th, m, tlen)
 	 * if they are completely covered, dequeue them.
 	 */
 	for (; q != NULL; q = nq) {
-		struct tcphdr *qhdr = q->ipqe_tcp;
+		struct tcphdr *qhdr = q->tcpqe_tcp;
 		int i = (th->th_seq + *tlen) - qhdr->th_seq;
 
 		if (i <= 0)
@@ -273,23 +271,23 @@ tcp_reass(tp, th, m, tlen)
 		if (i < qhdr->th_reseqlen) {
 			qhdr->th_seq += i;
 			qhdr->th_reseqlen -= i;
-			m_adj(q->ipqe_m, i);
+			m_adj(q->tcpqe_m, i);
 			break;
 		}
-		nq = q->ipqe_q.le_next;
-		m_freem(q->ipqe_m);
-		LIST_REMOVE(q, ipqe_q);
+		nq = TAILQ_NEXT(q, tcpqe_q);
+		m_freem(q->tcpqe_m);
+		TAILQ_REMOVE(&tp->t_segq, q, tcpqe_q);
 		pool_put(&tcpqe_pool, q);
 	}
 
 	/* Insert the new segment queue entry into place. */
-	tiqe->ipqe_m = m;
+	tiqe->tcpqe_m = m;
 	th->th_reseqlen = *tlen;
-	tiqe->ipqe_tcp = th;
+	tiqe->tcpqe_tcp = th;
 	if (p == NULL) {
-		LIST_INSERT_HEAD(&tp->segq, tiqe, ipqe_q);
+		TAILQ_INSERT_HEAD(&tp->t_segq, tiqe, tcpqe_q);
 	} else {
-		LIST_INSERT_AFTER(p, tiqe, ipqe_q);
+		TAILQ_INSERT_AFTER(&tp->t_segq, p, tiqe, tcpqe_q);
 	}
 
 present:
@@ -299,25 +297,25 @@ present:
 	 */
 	if (TCPS_HAVEESTABLISHED(tp->t_state) == 0)
 		return (0);
-	q = tp->segq.lh_first;
-	if (q == NULL || q->ipqe_tcp->th_seq != tp->rcv_nxt)
+	q = TAILQ_FIRST(&tp->t_segq);
+	if (q == NULL || q->tcpqe_tcp->th_seq != tp->rcv_nxt)
 		return (0);
-	if (tp->t_state == TCPS_SYN_RECEIVED && q->ipqe_tcp->th_reseqlen)
+	if (tp->t_state == TCPS_SYN_RECEIVED && q->tcpqe_tcp->th_reseqlen)
 		return (0);
 	do {
-		tp->rcv_nxt += q->ipqe_tcp->th_reseqlen;
-		flags = q->ipqe_tcp->th_flags & TH_FIN;
+		tp->rcv_nxt += q->tcpqe_tcp->th_reseqlen;
+		flags = q->tcpqe_tcp->th_flags & TH_FIN;
 
-		nq = q->ipqe_q.le_next;
-		LIST_REMOVE(q, ipqe_q);
+		nq = TAILQ_NEXT(q, tcpqe_q);
+		TAILQ_REMOVE(&tp->t_segq, q, tcpqe_q);
 		ND6_HINT(tp);
 		if (so->so_state & SS_CANTRCVMORE)
-			m_freem(q->ipqe_m);
+			m_freem(q->tcpqe_m);
 		else
-			sbappendstream(&so->so_rcv, q->ipqe_m);
+			sbappendstream(&so->so_rcv, q->tcpqe_m);
 		pool_put(&tcpqe_pool, q);
 		q = nq;
-	} while (q != NULL && q->ipqe_tcp->th_seq == tp->rcv_nxt);
+	} while (q != NULL && q->tcpqe_tcp->th_seq == tp->rcv_nxt);
 	sorwakeup(so);
 	return (flags);
 }
@@ -484,8 +482,8 @@ tcp_input(struct mbuf *m, ...)
 		/*
 		 * Checksum extended TCP header and data.
 		 */
-		if ((m->m_pkthdr.csum & M_TCP_CSUM_IN_OK) == 0) {
-			if (m->m_pkthdr.csum & M_TCP_CSUM_IN_BAD) {
+		if ((m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_OK) == 0) {
+			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_BAD) {
 				tcpstat.tcps_inhwcsum++;
 				tcpstat.tcps_rcvbadsum++;
 				goto drop;
@@ -495,7 +493,7 @@ tcp_input(struct mbuf *m, ...)
 				goto drop;
 			}
 		} else {
-			m->m_pkthdr.csum &= ~M_TCP_CSUM_IN_OK;
+			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_IN_OK;
 			tcpstat.tcps_inhwcsum++;
 		}
 		break;
@@ -1010,6 +1008,24 @@ after_listen:
 				tcpstat.tcps_rcvackbyte += acked;
 				ND6_HINT(tp);
 				sbdrop(&so->so_snd, acked);
+
+				/*
+				 * If we had a pending ICMP message that
+				 * referres to data that have just been 
+				 * acknowledged, disregard the recorded ICMP 
+				 * message.
+				 */
+				if ((tp->t_flags & TF_PMTUD_PEND) && 
+				    SEQ_GT(th->th_ack, tp->t_pmtud_th_seq))
+					tp->t_flags &= ~TF_PMTUD_PEND;
+
+				/*
+				 * Keep track of the largest chunk of data 
+				 * acknowledged since last PMTU update
+				 */
+				if (tp->t_pmtud_mss_acked < acked)
+					tp->t_pmtud_mss_acked = acked;
+
 				tp->snd_una = th->th_ack;
 #if defined(TCP_SACK) || defined(TCP_ECN)
 				/*
@@ -1049,7 +1065,7 @@ after_listen:
 				return;
 			}
 		} else if (th->th_ack == tp->snd_una &&
-		    tp->segq.lh_first == NULL &&
+		    TAILQ_EMPTY(&tp->t_segq) &&
 		    tlen <= sbspace(&so->so_rcv)) {
 			/*
 			 * This is a pure, in-sequence data packet
@@ -1629,7 +1645,7 @@ trimthenstep6:
 #if 1 /* TCP_ECN */
 						tcpstat.tcps_cwr_frecovery++;
 #endif
-						tcpstat.tcps_sndrexmitfast++;
+						tcpstat.tcps_sack_recovery_episode++;
 #if defined(TCP_SACK) && defined(TCP_FACK)
 						tp->t_dupacks = tcprexmtthresh;
 						(void) tcp_output(tp);
@@ -1811,6 +1827,23 @@ trimthenstep6:
 		}
 		if (sb_notify(&so->so_snd))
 			sowwakeup(so);
+
+		/*
+		 * If we had a pending ICMP message that referred to data
+		 * that have just been acknowledged, disregard the recorded
+		 * ICMP message.
+		 */
+		if ((tp->t_flags & TF_PMTUD_PEND) && 
+		    SEQ_GT(th->th_ack, tp->t_pmtud_th_seq))
+			tp->t_flags &= ~TF_PMTUD_PEND;
+
+		/*
+		 * Keep track of the largest chunk of data acknowledged
+		 * since last PMTU update
+		 */
+		if (tp->t_pmtud_mss_acked < acked)
+		    tp->t_pmtud_mss_acked = acked;
+
 		tp->snd_una = th->th_ack;
 #ifdef TCP_ECN
 		/* sync snd_last with snd_una */
@@ -1985,7 +2018,7 @@ dodata:							/* XXX */
 	if ((tlen || (tiflags & TH_FIN)) &&
 	    TCPS_HAVERCVDFIN(tp->t_state) == 0) {
 		tcp_reass_lock(tp);
-		if (th->th_seq == tp->rcv_nxt && tp->segq.lh_first == NULL &&
+		if (th->th_seq == tp->rcv_nxt && TAILQ_EMPTY(&tp->t_segq) &&
 		    tp->t_state == TCPS_ESTABLISHED) {
 			tcp_reass_unlock(tp);
 			TCP_SETUP_ACK(tp, tiflags);
@@ -2224,6 +2257,8 @@ tcp_dooptions(tp, cp, cnt, th, m, iphlen, oi)
 				continue;
 			if (!(th->th_flags & TH_SYN))
 				continue;
+			if (TCPS_HAVERCVDSYN(tp->t_state))
+				continue;
 			bcopy((char *) cp + 2, (char *) &mss, sizeof(mss));
 			NTOHS(mss);
 			oi->maxseg = mss;
@@ -2233,6 +2268,8 @@ tcp_dooptions(tp, cp, cnt, th, m, iphlen, oi)
 			if (optlen != TCPOLEN_WINDOW)
 				continue;
 			if (!(th->th_flags & TH_SYN))
+				continue;
+			if (TCPS_HAVERCVDSYN(tp->t_state))
 				continue;
 			tp->t_flags |= TF_RCVD_SCALE;
 			tp->requested_s_scale = min(cp[2], TCP_MAX_WINSHIFT);
@@ -2247,24 +2284,29 @@ tcp_dooptions(tp, cp, cnt, th, m, iphlen, oi)
 			bcopy(cp + 6, &oi->ts_ecr, sizeof(oi->ts_ecr));
 			NTOHL(oi->ts_ecr);
 
+			if (!(th->th_flags & TH_SYN))
+				continue;
+			if (TCPS_HAVERCVDSYN(tp->t_state))
+				continue;
 			/*
 			 * A timestamp received in a SYN makes
 			 * it ok to send timestamp requests and replies.
 			 */
-			if (th->th_flags & TH_SYN) {
-				tp->t_flags |= TF_RCVD_TSTMP;
-				tp->ts_recent = oi->ts_val;
-				tp->ts_recent_age = tcp_now;
-			}
+			tp->t_flags |= TF_RCVD_TSTMP;
+			tp->ts_recent = oi->ts_val;
+			tp->ts_recent_age = tcp_now;
 			break;
 
 #ifdef TCP_SACK
 		case TCPOPT_SACK_PERMITTED:
 			if (!tp->sack_enable || optlen!=TCPOLEN_SACK_PERMITTED)
 				continue;
-			if (th->th_flags & TH_SYN)
-				/* MUST only be set on SYN */
-				tp->t_flags |= TF_SACK_PERMIT;
+			if (!(th->th_flags & TH_SYN))
+				continue;
+			if (TCPS_HAVERCVDSYN(tp->t_state))
+				continue;
+			/* MUST only be set on SYN */
+			tp->t_flags |= TF_SACK_PERMIT;
 			break;
 		case TCPOPT_SACK:
 			tcp_sack_option(tp, th, cp, optlen);
@@ -2486,6 +2528,7 @@ tcp_sack_option(struct tcpcb *tp, struct tcphdr *th, u_char *cp, int optlen)
 	/* Note: TCPOLEN_SACK must be 2*sizeof(tcp_seq) */
 	tmp_cp = cp + 2;
 	tmp_olen = optlen - 2;
+	tcpstat.tcps_sack_rcv_opts++;
 	if (tp->snd_numholes < 0)
 		tp->snd_numholes = 0;
 	if (tp->t_maxseg == 0)
@@ -3044,6 +3087,9 @@ tcp_mss(tp, offer)
 
 	if (offer == -1) {
 		/* mss changed due to Path MTU discovery */
+		tp->t_flags &= ~TF_PMTUD_PEND;
+		tp->t_pmtud_mtu_sent = 0;
+		tp->t_pmtud_mss_acked = 0;
 		if (mss < tp->t_maxseg) {
 			/*
 			 * Follow suggestion in RFC 2414 to reduce the
@@ -3062,6 +3108,36 @@ tcp_mss(tp, offer)
 	tp->t_maxseg = mss;
 
 	return (offer != -1 ? mssopt : mss);
+}
+
+u_int
+tcp_hdrsz(struct tcpcb *tp)
+{
+	u_int hlen;
+
+	switch (tp->pf) {
+#ifdef INET6
+	case AF_INET6:
+		hlen = sizeof(struct ip6_hdr);
+		break;
+#endif
+	case AF_INET:
+		hlen = sizeof(struct ip);
+		break;
+	default:
+		hlen = 0;
+		break;
+	}
+	hlen += sizeof(struct tcphdr);
+
+	if ((tp->t_flags & (TF_REQ_TSTMP|TF_NOOPT)) == TF_REQ_TSTMP &&
+	    (tp->t_flags & TF_RCVD_TSTMP) == TF_RCVD_TSTMP)
+		hlen += TCPOLEN_TSTAMP_APPA;
+#ifdef TCP_SIGNATURE
+	if (tp->t_flags & TF_SIGNATURE)
+		hlen += TCPOLEN_SIGLEN;
+#endif
+	return (hlen);
 }
 
 /*
@@ -3898,10 +3974,10 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
 #endif
 		tb.t_flags = tcp_do_rfc1323 ? (TF_REQ_SCALE|TF_REQ_TSTMP) : 0;
 #ifdef TCP_SIGNATURE
-		tb.t_state = TCPS_LISTEN;
 		if (tp->t_flags & TF_SIGNATURE)
 			tb.t_flags |= TF_SIGNATURE;
 #endif
+		tb.t_state = TCPS_LISTEN;
 		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi))
 			return (0);
 	} else

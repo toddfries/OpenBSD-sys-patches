@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.12.4.1 2006/01/13 00:49:20 brad Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.15.2.1 2006/01/13 01:56:54 brad Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -200,7 +200,7 @@ cpu_attach(parent, self, aux)
 	if (caa->cpu_role != CPU_ROLE_AP) {
 		if (cpunum != cpu_number()) {
 			panic("%s: running cpu is at apic %d"
-			    " instead of at expected %d\n",
+			    " instead of at expected %d",
 			    self->dv_xname, cpu_number(), cpunum);
 		}
 
@@ -296,8 +296,6 @@ cpu_attach(parent, self, aux)
 		 * report on an AP
 		 */
 		printf("apid %d (application processor)\n", caa->cpu_number);
-
-#ifdef MULTIPROCESSOR
 		gdt_alloc_cpu(ci);
 		cpu_alloc_ldt(ci);
 		ci->ci_flags |= CPUF_PRESENT | CPUF_AP;
@@ -305,13 +303,10 @@ cpu_attach(parent, self, aux)
 		ci->ci_next = cpu_info_list->ci_next;
 		cpu_info_list->ci_next = ci;
 		ncpus++;
-#else
-		printf("%s: not started\n", ci->ci_dev.dv_xname);
-#endif
 		break;
 
 	default:
-		panic("unknown processor type??\n");
+		panic("unknown processor type??");
 	}
 
 	/* Mark this ID as taken if it's in the I/O APIC ID area */
@@ -339,7 +334,7 @@ cpu_init(ci)
 {
 	/* configure the CPU if needed */
 	if (ci->cpu_setup != NULL)
-		(*ci->cpu_setup)(ci->ci_dev.dv_xname, 0, 0);
+		(*ci->cpu_setup)(ci);
 
 #if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	/*
@@ -352,6 +347,20 @@ cpu_init(ci)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
 	ci->ci_flags |= CPUF_RUNNING;
+#if defined(I686_CPU)
+	/*
+	 * If we have FXSAVE/FXRESTOR, use them.
+	 */
+	if (cpu_feature & CPUID_FXSR) {
+		lcr4(rcr4() | CR4_OSFXSR);
+
+		/*
+		 * If we have SSE/SSE2, enable XMM exceptions.
+		 */
+		if (cpu_feature & (CPUID_SSE|CPUID_SSE2))
+			lcr4(rcr4() | CR4_OSXMMEXCPT);
+	}
+#endif /* I686_CPU */
 }
 
 

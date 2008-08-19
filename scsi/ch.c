@@ -1,4 +1,4 @@
-/*	$OpenBSD: ch.c,v 1.17 2004/11/30 19:28:36 krw Exp $	*/
+/*	$OpenBSD: ch.c,v 1.22 2005/08/23 23:38:00 krw Exp $	*/
 /*	$NetBSD: ch.c,v 1.26 1997/02/21 22:06:52 thorpej Exp $	*/
 
 /*
@@ -609,79 +609,70 @@ ch_getelemstatus(sc, first, count, data, datalen)
  * softc.
  */
 int
-ch_get_params(sc, scsiflags)
+ch_get_params(sc, flags)
 	struct ch_softc *sc;
-	int scsiflags;
+	int flags;
 {
-	struct scsi_mode_sense cmd;
-	struct scsi_mode_sense_data {
-		struct scsi_mode_header header;
-		union {
-			struct page_element_address_assignment ea;
-			struct page_transport_geometry_parameters tg;
-			struct page_device_capabilities cap;
-		} pages;
-	} sense_data;
+	struct scsi_mode_sense_buf *data;
+	struct page_element_address_assignment *ea;
+	struct page_device_capabilities *cap;
 	int error, from;
 	u_int8_t *moves, *exchanges;
 
+	data = malloc(sizeof(*data), M_TEMP, M_NOWAIT);
+	if (data == NULL)
+		return (ENOMEM);
+
 	/*
-	 * Grab info from the element address assignment page.
+	 * Grab info from the element address assignment page (0x1d).
 	 */
-	bzero(&cmd, sizeof(cmd));
-	bzero(&sense_data, sizeof(sense_data));
-	cmd.opcode = MODE_SENSE;
-	cmd.byte2 |= 0x08;	/* disable block descriptors */
-	cmd.page = 0x1d;
-	cmd.length = (sizeof(sense_data) & 0xff);
-	error = scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)&sense_data, sizeof(sense_data), CHRETRIES,
-	    6000, NULL, scsiflags | SCSI_DATA_IN);
-	if (error) {
+	error = scsi_do_mode_sense(sc->sc_link, 0x1d, data,
+	    (void **)&ea, NULL, NULL, NULL, sizeof(*ea), flags, NULL);
+	if (error == 0 && ea == NULL)
+		error = EIO;
+	if (error != 0) {
 		printf("%s: could not sense element address page\n",
 		    sc->sc_dev.dv_xname);
+		free(data, M_TEMP);
 		return (error);
 	}
 
-	sc->sc_firsts[CHET_MT] = _2btol(sense_data.pages.ea.mtea);
-	sc->sc_counts[CHET_MT] = _2btol(sense_data.pages.ea.nmte);
-	sc->sc_firsts[CHET_ST] = _2btol(sense_data.pages.ea.fsea);
-	sc->sc_counts[CHET_ST] = _2btol(sense_data.pages.ea.nse);
-	sc->sc_firsts[CHET_IE] = _2btol(sense_data.pages.ea.fieea);
-	sc->sc_counts[CHET_IE] = _2btol(sense_data.pages.ea.niee);
-	sc->sc_firsts[CHET_DT] = _2btol(sense_data.pages.ea.fdtea);
-	sc->sc_counts[CHET_DT] = _2btol(sense_data.pages.ea.ndte);
+	sc->sc_firsts[CHET_MT] = _2btol(ea->mtea);
+	sc->sc_counts[CHET_MT] = _2btol(ea->nmte);
+	sc->sc_firsts[CHET_ST] = _2btol(ea->fsea);
+	sc->sc_counts[CHET_ST] = _2btol(ea->nse);
+	sc->sc_firsts[CHET_IE] = _2btol(ea->fieea);
+	sc->sc_counts[CHET_IE] = _2btol(ea->niee);
+	sc->sc_firsts[CHET_DT] = _2btol(ea->fdtea);
+	sc->sc_counts[CHET_DT] = _2btol(ea->ndte);
 
-	/* XXX ask for page trasport geom */
+	/* XXX Ask for transport geometry page. */
 
 	/*
-	 * Grab info from the capabilities page.
+	 * Grab info from the capabilities page (0x1f).
 	 */
-	bzero(&cmd, sizeof(cmd));
-	bzero(&sense_data, sizeof(sense_data));
-	cmd.opcode = MODE_SENSE;
-	cmd.byte2 |= 0x08;	/* disable block descriptors */
-	cmd.page = 0x1f;
-	cmd.length = (sizeof(sense_data) & 0xff);
-	error = scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)&sense_data, sizeof(sense_data), CHRETRIES,
-	    6000, NULL, scsiflags | SCSI_DATA_IN);
-	if (error) {
+	error = scsi_do_mode_sense(sc->sc_link, 0x1f, data,
+	    (void **)&cap, NULL, NULL, NULL, sizeof(*cap), flags, NULL);
+	if (cap == NULL)
+		error = EIO;
+	if (error != 0) {
 		printf("%s: could not sense capabilities page\n",
 		    sc->sc_dev.dv_xname);
+		free(data, M_TEMP);
 		return (error);
 	}
 
 	bzero(sc->sc_movemask, sizeof(sc->sc_movemask));
 	bzero(sc->sc_exchangemask, sizeof(sc->sc_exchangemask));
-	moves = &sense_data.pages.cap.move_from_mt;
-	exchanges = &sense_data.pages.cap.exchange_with_mt;
+	moves = &cap->move_from_mt;
+	exchanges = &cap->exchange_with_mt;
 	for (from = CHET_MT; from <= CHET_DT; ++from) {
 		sc->sc_movemask[from] = moves[from];
 		sc->sc_exchangemask[from] = exchanges[from];
 	}
 
 	sc->sc_link->flags |= SDEV_MEDIA_LOADED;
+	free(data, M_TEMP);
 	return (0);
 }
 

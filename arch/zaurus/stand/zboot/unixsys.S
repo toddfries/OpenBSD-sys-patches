@@ -1,4 +1,4 @@
-/*	$OpenBSD: unixsys.S,v 1.4 2005/01/24 22:20:33 uwe Exp $	*/
+/*	$OpenBSD: unixsys.S,v 1.6 2005/05/24 20:38:20 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>
@@ -27,32 +27,49 @@
 		swi	__NR_##x; \
 		b	1f
 
-RSYSCALL(open)
+RSYSCALL(exit)
 RSYSCALL(read)
 RSYSCALL(write)
+RSYSCALL(open)
+RSYSCALL(close)
 RSYSCALL(lseek32)
 RSYSCALL(ioctl)
-RSYSCALL(close)
-RSYSCALL(exit)
+RSYSCALL(stat)
 
 1:
 	cmn	r0, #4096
 	movcc	pc, lr
 	rsb	r0, r0, #0
-	ldr	r1, Lerrno	/* XXX clobbers arg1 */
+	ldr	r1, .Lerrno	/* XXX clobbers arg1 */
 	str	r0, [r1]
 	mvn	r0, #0
 	mov	pc, lr
 
-Lerrno:
+.Lerrno:
 	.word	errno
 
-ENTRY(__syscall)
+/* XXX only works for up to four arguments. */
 ENTRY(syscall)
 	swi	__NR_syscall
 	b	1b
 
-	.data
+ENTRY(uselect)
+	str	r4, [sp, #-4]!
+	ldr	r4, [sp, #4]
+	swi	__NR_select
+	ldr	r4, [sp], #4
+	cmn	r0, #4096
+	movcc	pc, lr
+	rsb	r0, r0, #0
+	str	r1, [sp, #-4]!
+	ldr	r1, .Lerrno
+	str	r0, [r1]
+	ldr	r1, [sp], #4
+	mvn	r0, #0
+	mov	pc, lr
+
+.data
+
 	.global errno
 errno:
 	.word	0

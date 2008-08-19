@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.137 2005/03/18 19:24:27 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.139 2005/05/27 02:08:14 martin Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -140,8 +140,6 @@ scsibus* at ahc?
 #aic*	at isapnp?
 #aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
 #scsibus* at aic?
-#ncr*	at pci?			# NCR 538XX SCSI controllers(old)
-#scsibus* at ncr?
 siop*	at pci?			# NCR 538XX SCSI controllers(new)
 scsibus* at siop?
 #adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
@@ -224,7 +222,7 @@ ep*	at pcmcia?			# PCMCIA based 3c5xx cards
 #fpa*	at pci?				# DEC DEFPA FDDI cards
 xl*	at pci?				# 3C9xx ethernet cards
 rl*	at pci?				# RealTek 81[23]9 ethernet
-tx*	at pci?				# SMC 83C170 EPIC ethernet cards
+epic*	at pci?				# SMC EPIC/100 ethernet
 tl*	at pci?				# Compaq Thunderlan ethernet cards
 vr*	at pci?				# VIA Rhine ethernet
 #wb*	at pci?				# Winbond W89C840F ethernet

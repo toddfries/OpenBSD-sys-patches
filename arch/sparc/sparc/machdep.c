@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.102 2004/09/29 07:35:14 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.106 2005/08/18 18:40:51 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -73,6 +73,7 @@
 #include <machine/frame.h>
 #include <machine/cpu.h>
 #include <machine/pmap.h>
+#include <machine/vmparam.h>
 #include <machine/oldmon.h>
 #include <machine/bsd_openprom.h>
 
@@ -84,8 +85,10 @@
 #include <uvm/uvm.h>
 
 #ifdef SUN4M
-#include <sparc/dev/power.h>
 #include "power.h"
+#if NPOWER > 0
+#include <sparc/dev/power.h>
+#endif
 #include "scf.h"
 #include "tctrl.h"
 #if NTCTRL > 0
@@ -166,6 +169,12 @@ cpu_startup()
 #ifdef DEBUG
 	pmapdebug = 0;
 #endif
+
+	if (CPU_ISSUN4M) {
+		extern int stackgap_random;
+
+		stackgap_random = STACKGAP_RANDOM_SUN4M;
+	}
 
 	/*
 	 * fix message buffer mapping, note phys addr of msgbuf is 0
@@ -404,6 +413,11 @@ setregs(p, pack, stack, retval)
 	tf->tf_npc = pack->ep_entry & ~3;
 	tf->tf_global[1] = (int)PS_STRINGS;
 	tf->tf_global[2] = tf->tf_global[7] = tf->tf_npc;
+	/* XXX exec of init(8) returns via proc_trampoline() */
+	if (p->p_pid == 1) {
+		tf->tf_pc = tf->tf_npc;
+		tf->tf_npc += 4;
+	}
 	stack -= sizeof(struct rwindow);
 	tf->tf_out[6] = stack;
 	retval[1] = 0;
@@ -443,7 +457,7 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	size_t newlen;
 	struct proc *p;
 {
-#if (NAUXREG > 0) || (NLED > 0)
+#if (NLED > 0) || (NAUXREG > 0) || (NSCF > 0)
 	int oldval;
 #endif
 	int ret;
@@ -725,15 +739,13 @@ haltsys:
 	if ((howto & RB_HALT) || (howto & RB_POWERDOWN)) {
 #if defined(SUN4M)
 		if (howto & RB_POWERDOWN) {
-#if NPOWER > 0 || NTCTRL >0
 			printf("attempting to power down...\n");
-#if NPOWER > 0
-			powerdown();
-#endif
 #if NTCTRL > 0
 			tadpole_powerdown();
 #endif
-#endif /* NPOWER || MTCTRL */
+#if NPOWER > 0
+			auxio_powerdown();
+#endif
 			rominterpret("power-off");
 			printf("WARNING: powerdown failed!\n");
 		}
@@ -1091,74 +1103,4 @@ caddr_t addr;
 
 	splx(s);
 	return (res);
-}
-
-void
-wzero(vb, l)
-	void *vb;
-	u_int l;
-{
-	u_char *b = vb;
-	u_char *be = b + l;
-	u_short *sp;
-
-	if (l == 0)
-		return;
-
-	/* front, */
-	if ((u_long)b & 1)
-		*b++ = 0;
-
-	/* back, */
-	if (b != be && ((u_long)be & 1) != 0) {
-		be--;
-		*be = 0;
-	}
-
-	/* and middle. */
-	sp = (u_short *)b;
-	while (sp != (u_short *)be)
-		*sp++ = 0;
-}
-
-void
-wcopy(vb1, vb2, l)
-	const void *vb1;
-	void *vb2;
-	u_int l;
-{
-	const u_char *b1e, *b1 = vb1;
-	u_char *b2 = vb2;
-	u_short *sp;
-	int bstore = 0;
-
-	if (l == 0)
-		return;
-
-	/* front, */
-	if ((u_long)b1 & 1) {
-		*b2++ = *b1++;
-		l--;
-	}
-
-	/* middle, */
-	sp = (u_short *)b1;
-	b1e = b1 + l;
-	if (l & 1)
-		b1e--;
-	bstore = (u_long)b2 & 1;
-
-	while (sp < (u_short *)b1e) {
-		if (bstore) {
-			b2[1] = *sp & 0xff;
-			b2[0] = *sp >> 8;
-		} else
-			*((short *)b2) = *sp;
-		sp++;
-		b2 += 2;
-	}
-
-	/* and back. */
-	if (l & 1)
-		*b2 = *b1e;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.7 2005/03/15 17:06:10 pvalchev Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.16 2005/08/09 04:10:12 mickey Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -146,7 +146,9 @@ void vge_watchdog	(struct ifnet *);
 int vge_ifmedia_upd	(struct ifnet *);
 void vge_ifmedia_sts	(struct ifnet *, struct ifmediareq *);
 
+#ifdef VGE_EEPROM
 void vge_eeprom_getword	(struct vge_softc *, int, u_int16_t *);
+#endif
 void vge_read_eeprom	(struct vge_softc *, caddr_t, int, int, int);
 
 void vge_miipoll_start	(struct vge_softc *);
@@ -179,6 +181,7 @@ const struct pci_matchid vge_devices[] = {
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT612x },
 };
 
+#ifdef VGE_EEPROM
 /*
  * Read a word of data stored in the EEPROM at address 'addr.'
  */
@@ -223,6 +226,7 @@ vge_eeprom_getword(struct vge_softc *sc, int addr, u_int16_t *dest)
 
 	*dest = word;
 }
+#endif
 
 /*
  * Read a sequence of words from the EEPROM.
@@ -232,6 +236,7 @@ vge_read_eeprom(struct vge_softc *sc, caddr_t dest, int off, int cnt,
     int swap)
 {
 	int			i;
+#ifdef VGE_EEPROM
 	u_int16_t		word = 0, *ptr;
 
 	for (i = 0; i < cnt; i++) {
@@ -242,6 +247,10 @@ vge_read_eeprom(struct vge_softc *sc, caddr_t dest, int off, int cnt,
 		else
 			*ptr = word;
 	}
+#else
+	for (i = 0; i < ETHER_ADDR_LEN; i++)
+		dest[i] = CSR_READ_1(sc, VGE_PAR0 + i);
+#endif
 }
 
 void
@@ -468,42 +477,8 @@ vge_setmulti(struct vge_softc *sc)
 	struct ifnet		*ifp = &ac->ac_if;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
+	int			error;
 	u_int32_t		h = 0, hashes[2] = { 0, 0 };
-
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-		CSR_WRITE_4(sc, VGE_MAR0, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, VGE_MAR1, 0xFFFFFFFF);
-		return;
-	}
-	/* reset existing hash bits */
-	CSR_WRITE_4(sc, VGE_MAR0, 0);
-	CSR_WRITE_4(sc, VGE_MAR1, 0);
-
-	/* program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN))
-			ifp->if_flags |= IFF_ALLMULTI;
-		h = (ether_crc32_be(enm->enm_addrlo,
-		    ETHER_ADDR_LEN) >> 26) & 0x0000003F;
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		ETHER_NEXT_MULTI(step, enm);
-	}
-	CSR_WRITE_4(sc, VGE_MAR0, hashes[0]);
-	CSR_WRITE_4(sc, VGE_MAR1, hashes[1]);
-
-#ifdef CAM_FILTERING
-	struct ifnet		*ifp;
-	u_int32_t		h, hashes[2] = { 0, 0 };
-	int			mcnt = 0;
-	struct arpcom		*ac = &sc->arpcom;
-	struct ether_multi	*enm;
-	struct ether_multistep	step;
-
-	ifp = &sc->arpcom.ac_if;
 
 	/* First, zot all the multicast entries. */
 	vge_cam_clear(sc);
@@ -514,34 +489,44 @@ vge_setmulti(struct vge_softc *sc)
 	 * If the user wants allmulti or promisc mode, enable reception
 	 * of all multicast frames.
 	 */
+allmulti:
 	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
 		CSR_WRITE_4(sc, VGE_MAR0, 0xFFFFFFFF);
 		CSR_WRITE_4(sc, VGE_MAR1, 0xFFFFFFFF);
 		return;
 	}
 
+	/* Now program new ones */
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
 		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
 			ifp->if_flags |= IFF_ALLMULTI;
-			mcnt = MAX_NUM_MULTICAST_ADDRESSES;
+			goto allmulti;
 		}
-		if (mcnt == MAX_NUM_MULTICAST_ADDRESSES)
+		error = vge_cam_set(sc, enm->enm_addrlo);
+		if (error)
 			break;
-
-		h = (ether_crc32_be(enm->enm_addrlo,
-		    ETHER_ADDR_LEN) >> 26) & 0x0000003F;
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		mcnt++;
 		ETHER_NEXT_MULTI(step, enm);
 	}
-	
-	CSR_WRITE_4(sc, VGE_MAR0, hashes[0]);
-	CSR_WRITE_4(sc, VGE_MAR1, hashes[1]);
-#endif
+
+	/* If there were too many addresses, use the hash filter. */
+	if (error) {
+		vge_cam_clear(sc);
+
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = (ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) >> 26) & 0x0000003F;
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+			ETHER_NEXT_MULTI(step, enm);
+		}
+
+		CSR_WRITE_4(sc, VGE_MAR0, hashes[0]);
+		CSR_WRITE_4(sc, VGE_MAR1, hashes[1]);
+	}
 }
 
 void
@@ -730,11 +715,6 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	 * Map control/status registers.
 	 */
 	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	    PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-
 	if ((command & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE)) == 0) {
 		printf(": neither i/o nor mem enabled\n");
 		return;
@@ -799,16 +779,18 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = vge_ioctl;
 	ifp->if_start = vge_start;
-#ifdef VGE_CSUM_OFFLOAD
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
-	ifp->if_hwassist = VGE_CSUM_FEATURES;
-	ifp->if_capabilities |= IFCAP_HWCSUM|IFCAP_VLAN_HWTAGGING;
-#endif
 	ifp->if_watchdog = vge_watchdog;
 	ifp->if_init = vge_init;
 	ifp->if_baudrate = 1000000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, VGE_IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU|IFCAP_CSUM_IPv4|
+				IFCAP_CSUM_TCPv4|IFCAP_CSUM_UDPv4;
+
+#ifdef VGE_VLAN
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 	/* Set interface name */
 	strlcpy(ifp->if_xname, sc->vge_dev.dv_xname, IFNAMSIZ);
@@ -1114,25 +1096,19 @@ vge_rxeof(struct vge_softc *sc)
 		ifp->if_ipackets++;
 		m->m_pkthdr.rcvif = ifp;
 
-		/* Do RX checksumming if enabled */
-#ifdef VGE_CSUM_OFFLOAD
-		if (ifp->if_capenable & IFCAP_RXCSUM) {
+		/* Do RX checksumming */
 
-			/* Check IP header checksum */
-			if (rxctl & VGE_RDCTL_IPPKT)
-				m->m_pkthdr.csum_flags |= CSUM_IP_CHECKED;
-			if (rxctl & VGE_RDCTL_IPCSUMOK)
-				m->m_pkthdr.csum_flags |= CSUM_IP_VALID;
+		/* Check IP header checksum */
+		if ((rxctl & VGE_RDCTL_IPPKT) &&
+		    (rxctl & VGE_RDCTL_IPCSUMOK))
+			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
-			/* Check TCP/UDP checksum */
-			if (rxctl & (VGE_RDCTL_TCPPKT|VGE_RDCTL_UDPPKT) &&
-			    rxctl & VGE_RDCTL_PROTOCSUMOK) {
-				m->m_pkthdr.csum_flags |=
-				    CSUM_DATA_VALID|CSUM_PSEUDO_HDR;
-				m->m_pkthdr.csum_data = 0xffff;
-			}
-		}
+		/* Check TCP/UDP checksum */
+		if ((rxctl & (VGE_RDCTL_TCPPKT|VGE_RDCTL_UDPPKT)) &&
+		    (rxctl & VGE_RDCTL_PROTOCSUMOK))
+			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 
+#ifdef VGE_VLAN
 		if (rxstat & VGE_RDSTS_VTAG)
 			VLAN_INPUT_TAG(ifp, m,
 			    ntohs((rxctl & VGE_RDCTL_VLANID)), continue);
@@ -1230,10 +1206,14 @@ vge_tick(void *xsc)
 	if (sc->vge_link) {
 		if (!(mii->mii_media_status & IFM_ACTIVE))
 			sc->vge_link = 0;
+			ifp->if_link_state = LINK_STATE_DOWN;
+			if_link_state_change(ifp);
 	} else {
 		if (mii->mii_media_status & IFM_ACTIVE &&
 		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
 			sc->vge_link = 1;
+			ifp->if_link_state = LINK_STATE_UP;
+			if_link_state_change(ifp);
 			if (!IFQ_IS_EMPTY(&ifp->if_snd))
 				vge_start(ifp);
 		}
@@ -1319,6 +1299,16 @@ vge_encap(struct vge_softc *sc, struct mbuf *m_head, int idx)
 	struct vge_tx_desc	*d = NULL;
 	struct vge_tx_frag	*f;
 	int			error, frag;
+	u_int32_t		vge_flags;
+
+	vge_flags = 0;
+
+	if (m_head->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
+		vge_flags |= VGE_TDCTL_IPCSUM;
+	if (m_head->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+		vge_flags |= VGE_TDCTL_TCPCSUM;
+	if (m_head->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+		vge_flags |= VGE_TDCTL_UDPCSUM;
 
 	txmap = sc->vge_ldata.vge_tx_dmamap[idx];
 repack:
@@ -1391,7 +1381,7 @@ repack:
 	    BUS_DMASYNC_PREWRITE);
 
 	d->vge_sts = htole32(m_head->m_pkthdr.len << 16);
-	d->vge_ctl = htole32((frag << 28) | VGE_TD_LS_NORM);
+	d->vge_ctl = htole32(vge_flags|(frag << 28) | VGE_TD_LS_NORM);
 
 	if (m_head->m_pkthdr.len > ETHERMTU + ETHER_HDR_LEN)
 		d->vge_ctl |= htole32(VGE_TDCTL_JUMBO);
@@ -1592,9 +1582,7 @@ vge_init(struct ifnet *ifp)
 	}
 
 	/* Init the cam filter. */
-#ifdef CAM_FILTERING
 	vge_cam_clear(sc);
-#endif
 
 	/* Init the multicast filter. */
 	vge_setmulti(sc);
@@ -1768,14 +1756,13 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			vge_init(ifp);
 			break;
 		}
-#if 0 /* XXX mtu gets reset to 0 at ifconfig up for some reason with this */
+		break;
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU_JUMBO)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU_JUMBO)
 			error = EINVAL;
-		else
+		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
 		break;
-#endif
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&

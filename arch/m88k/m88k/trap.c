@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.15 2004/12/06 20:12:24 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.19 2005/08/06 09:53:36 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -60,6 +60,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/asm_macro.h>   /* enable/disable interrupts */
+#include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/locore.h>
 #ifdef M88100
@@ -86,7 +87,7 @@ extern int procfs_domem(struct proc *, struct proc *, void *, struct uio *);
 __dead void panictrap(int, struct trapframe *);
 __dead void error_fatal(struct trapframe *);
 int double_reg_fixup(struct trapframe *);
-int ss_put_value(struct proc *, unsigned, unsigned, int);
+int ss_put_value(struct proc *, vaddr_t, u_int);
 
 extern void regdump(struct trapframe *f);
 
@@ -209,6 +210,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 	int result;
 #ifdef DDB
 	int s;
+	u_int psr;
 #endif
 	int sig = 0;
 
@@ -236,16 +238,16 @@ m88100_trap(unsigned type, struct trapframe *frame)
 #if defined(DDB)
 	case T_KDB_BREAK:
 		s = splhigh();
-		db_enable_interrupt();
+		db_enable_interrupt(psr);
 		ddb_break_trap(T_KDB_BREAK, (db_regs_t*)frame);
-		db_disable_interrupt();
+		db_disable_interrupt(psr);
 		splx(s);
 		return;
 	case T_KDB_ENTRY:
 		s = splhigh();
-		db_enable_interrupt();
+		db_enable_interrupt(psr);
 		ddb_entry_trap(T_KDB_ENTRY, (db_regs_t*)frame);
-		db_disable_interrupt();
+		db_disable_interrupt(psr);
 		splx(s);
 		return;
 #endif /* DDB */
@@ -504,46 +506,35 @@ user_fault:
 		 * T_STEPBPT trap.
 		 */
 		{
-			unsigned va;
-			unsigned instr;
-			unsigned pc = PC_REGS(&frame->tf_regs);
+			u_int instr;
+			vaddr_t pc = PC_REGS(&frame->tf_regs);
 
 			/* read break instruction */
-			copyin((caddr_t)pc, &instr, sizeof(unsigned));
-#if 0
-			printf("trap: %s (%d) breakpoint %x at %x: (adr %x ins %x)\n",
-			       p->p_comm, p->p_pid, instr, pc,
-			       p->p_md.md_ss_addr, p->p_md.md_ss_instr); /* XXX */
-#endif
+			copyin((caddr_t)pc, &instr, sizeof(u_int));
+
 			/* check and see if we got here by accident */
-			if ((p->p_md.md_ss_addr != pc &&
-			     p->p_md.md_ss_taken_addr != pc) ||
+			if ((p->p_md.md_bp0va != pc &&
+			     p->p_md.md_bp1va != pc) ||
 			    instr != SSBREAKPOINT) {
 				sig = SIGTRAP;
 				fault_type = TRAP_TRACE;
 				break;
 			}
-			/* restore original instruction and clear BP  */
-			va = p->p_md.md_ss_addr;
-			if (va != 0) {
-				instr = p->p_md.md_ss_instr;
-				ss_put_value(p, va, instr, sizeof(instr));
+
+			/* restore original instruction and clear breakpoint */
+			if (p->p_md.md_bp0va == pc) {
+				ss_put_value(p, pc, p->p_md.md_bp0save);
+				p->p_md.md_bp0va = 0;
+			}
+			if (p->p_md.md_bp1va == pc) {
+				ss_put_value(p, pc, p->p_md.md_bp1save);
+				p->p_md.md_bp1va = 0;
 			}
 
-			/* branch taken instruction */
-			instr = p->p_md.md_ss_taken_instr;
-			if (instr != 0) {
-				va = p->p_md.md_ss_taken_addr;
-				ss_put_value(p, va, instr, sizeof(instr));
-			}
 #if 1
 			frame->tf_sfip = frame->tf_snip;
 			frame->tf_snip = pc | NIP_V;
 #endif
-			p->p_md.md_ss_addr = 0;
-			p->p_md.md_ss_instr = 0;
-			p->p_md.md_ss_taken_addr = 0;
-			p->p_md.md_ss_taken_instr = 0;
 			sig = SIGTRAP;
 			fault_type = TRAP_BRKPT;
 		}
@@ -613,6 +604,7 @@ m88110_trap(unsigned type, struct trapframe *frame)
 	int result;
 #ifdef DDB
         int s;
+	u_int psr;
 #endif
 	int sig = 0;
 	pt_entry_t *pte;
@@ -660,23 +652,23 @@ m88110_trap(unsigned type, struct trapframe *frame)
 #ifdef DDB
 	case T_KDB_TRACE:
 		s = splhigh();
-		db_enable_interrupt();
+		db_enable_interrupt(psr);
 		ddb_break_trap(T_KDB_TRACE, (db_regs_t*)frame);
-		db_disable_interrupt();
+		db_disable_interrupt(psr);
 		splx(s);
 		return;
 	case T_KDB_BREAK:
 		s = splhigh();
-		db_enable_interrupt();
+		db_enable_interrupt(psr);
 		ddb_break_trap(T_KDB_BREAK, (db_regs_t*)frame);
-		db_disable_interrupt();
+		db_disable_interrupt(psr);
 		splx(s);
 		return;
 	case T_KDB_ENTRY:
 		s = splhigh();
-		db_enable_interrupt();
+		db_enable_interrupt(psr);
 		ddb_entry_trap(T_KDB_ENTRY, (db_regs_t*)frame);
-		db_disable_interrupt();
+		db_disable_interrupt(psr);
 		/* skip one instruction */
 		if (frame->tf_exip & 1)
 			frame->tf_exip = frame->tf_enip;
@@ -687,10 +679,10 @@ m88110_trap(unsigned type, struct trapframe *frame)
 #if 0
 	case T_ILLFLT:
 		s = splhigh();
-		db_enable_interrupt();
+		db_enable_interrupt(psr);
 		ddb_error_trap(type == T_ILLFLT ? "unimplemented opcode" :
 		       "error fault", (db_regs_t*)frame);
-		db_disable_interrupt();
+		db_disable_interrupt(psr);
 		splx(s);
 		return;
 #endif /* 0 */
@@ -1012,31 +1004,31 @@ m88110_user_fault:
 		 * T_STEPBPT trap.
 		 */
 		{
-			unsigned instr;
-			unsigned pc = PC_REGS(&frame->tf_regs);
+			u_int instr;
+			vaddr_t pc = PC_REGS(&frame->tf_regs);
 
 			/* read break instruction */
-			copyin((caddr_t)pc, &instr, sizeof(unsigned));
-#if 0
-			printf("trap: %s (%d) breakpoint %x at %x: (adr %x ins %x)\n",
-			       p->p_comm, p->p_pid, instr, pc,
-			       p->p_md.md_ss_addr, p->p_md.md_ss_instr); /* XXX */
-#endif
+			copyin((caddr_t)pc, &instr, sizeof(u_int));
+
 			/* check and see if we got here by accident */
-#ifdef notyet
-			if (p->p_md.md_ss_addr != pc || instr != SSBREAKPOINT) {
+			if ((p->p_md.md_bp0va != pc &&
+			     p->p_md.md_bp1va != pc) ||
+			    instr != SSBREAKPOINT) {
 				sig = SIGTRAP;
 				fault_type = TRAP_TRACE;
 				break;
 			}
-#endif
-			/* restore original instruction and clear BP  */
-			instr = p->p_md.md_ss_instr;
-			if (instr != 0)
-				ss_put_value(p, pc, instr, sizeof(instr));
 
-			p->p_md.md_ss_addr = 0;
-			p->p_md.md_ss_instr = 0;
+			/* restore original instruction and clear breakpoint */
+			if (p->p_md.md_bp0va == pc) {
+				ss_put_value(p, pc, p->p_md.md_bp0save);
+				p->p_md.md_bp0va = 0;
+			}
+			if (p->p_md.md_bp1va == pc) {
+				ss_put_value(p, pc, p->p_md.md_bp1save);
+				p->p_md.md_bp1va = 0;
+			}
+
 			sig = SIGTRAP;
 			fault_type = TRAP_BRKPT;
 		}
@@ -1483,50 +1475,50 @@ child_return(arg)
 
 #include <sys/ptrace.h>
 
-unsigned ss_get_value(struct proc *, unsigned, int);
-unsigned ss_branch_taken(unsigned, unsigned,
-    unsigned (*func)(unsigned int, struct reg *), struct reg *);
-unsigned int ss_getreg_val(unsigned int, struct reg *);
-int ss_inst_branch(unsigned);
-int ss_inst_delayed(unsigned);
-unsigned ss_next_instr_address(struct proc *, unsigned, unsigned);
+vaddr_t	ss_branch_taken(u_int, vaddr_t, u_int (*func)(u_int, struct reg *),
+	    struct reg *);
+u_int	ss_getreg_val(u_int, struct reg *);
+int	ss_get_value(struct proc *, vaddr_t, u_int *);
+int	ss_inst_branch(unsigned);
+int	ss_inst_delayed(unsigned);
+int	ss_put_breakpoint(struct proc *, vaddr_t, vaddr_t *, u_int *);
 
-unsigned
-ss_get_value(struct proc *p, unsigned addr, int size)
+#define	SYSCALL_INSTR	0xf000d080	/* tb0 0,r0,128 */
+
+int
+ss_get_value(struct proc *p, vaddr_t addr, u_int *value)
 {
 	struct uio uio;
 	struct iovec iov;
-	unsigned value;
 
-	iov.iov_base = (caddr_t)&value;
-	iov.iov_len = size;
+	iov.iov_base = (caddr_t)value;
+	iov.iov_len = sizeof(u_int);
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;
 	uio.uio_offset = (off_t)addr;
-	uio.uio_resid = size;
+	uio.uio_resid = sizeof(u_int);
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_READ;
 	uio.uio_procp = curproc;
-	procfs_domem(curproc, p, NULL, &uio);
-	return value;
+	return (procfs_domem(curproc, p, NULL, &uio));
 }
 
 int
-ss_put_value(struct proc *p, unsigned addr, unsigned value, int size)
+ss_put_value(struct proc *p, vaddr_t addr, u_int value)
 {
 	struct uio uio;
 	struct iovec iov;
 
 	iov.iov_base = (caddr_t)&value;
-	iov.iov_len = size;
+	iov.iov_len = sizeof(u_int);
 	uio.uio_iov = &iov;
 	uio.uio_iovcnt = 1;
 	uio.uio_offset = (off_t)addr;
-	uio.uio_resid = size;
+	uio.uio_resid = sizeof(u_int);
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_WRITE;
 	uio.uio_procp = curproc;
-	return procfs_domem(curproc, p, NULL, &uio);
+	return (procfs_domem(curproc, p, NULL, &uio));
 }
 
 /*
@@ -1540,10 +1532,20 @@ ss_put_value(struct proc *p, unsigned addr, unsigned value, int size)
  *
  * If the instruction is not a control flow instruction, panic.
  */
-unsigned
-ss_branch_taken(unsigned inst, unsigned pc,
-    unsigned (*func)(unsigned int, struct reg *), struct reg *func_data)
+vaddr_t
+ss_branch_taken(u_int inst, vaddr_t pc, u_int (*func)(u_int, struct reg *),
+    struct reg *func_data)
 {
+	/* check for system call */
+	if (inst == SYSCALL_INSTR) {
+		/*
+		 * The regular (pc + 4) breakpoint will match the error
+		 * return. Successfull system calls return at (pc + 8),
+		 * so we'll set up a branch breakpoint there.
+		 */
+		return (pc + 8);
+	}
+
 	/* check if br/bsr */
 	if ((inst & 0xf0000000) == 0xc0000000) {
 		/* signed 26 bit pc relative displacement, shift left two bits */
@@ -1581,14 +1583,14 @@ ss_branch_taken(unsigned inst, unsigned pc,
  *              Returns the value of the register in the specified
  *              frame. Only makes sense for general registers.
  */
-unsigned int
-ss_getreg_val(unsigned int regno, struct reg *regs)
+u_int
+ss_getreg_val(u_int regno, struct reg *regs)
 {
 	return (regno == 0 ? 0 : regs->r[regno]);
 }
 
 int
-ss_inst_branch(unsigned ins)
+ss_inst_branch(u_int ins)
 {
 	/* check high five bits */
 
@@ -1597,21 +1599,21 @@ ss_inst_branch(unsigned ins)
 	case 0x1a: /* bb0 */
 	case 0x1b: /* bb1 */
 	case 0x1d: /* bcnd */
-		return TRUE;
+		return (TRUE);
 		break;
 	case 0x1e: /* could be jmp */
 		if ((ins & 0xfffffbe0) == 0xf400c000)
-			return TRUE;
+			return (TRUE);
 	}
 
-	return FALSE;
+	return (FALSE);
 }
 
 /* ss_inst_delayed - this instruction is followed by a delay slot. Could be
    br.n, bsr.n bb0.n, bb1.n, bcnd.n or jmp.n or jsr.n */
 
 int
-ss_inst_delayed(unsigned ins)
+ss_inst_delayed(u_int ins)
 {
 	/* check the br, bsr, bb0, bb1, bcnd cases */
 	switch ((ins & 0xfc000000) >> (32 - 6)) {
@@ -1620,77 +1622,83 @@ ss_inst_delayed(unsigned ins)
 	case 0x35: /* bb0 */
 	case 0x37: /* bb1 */
 	case 0x3b: /* bcnd */
-		return TRUE;
+		return (TRUE);
 	}
 
 	/* check the jmp, jsr cases */
 	/* mask out bits 0-4, bit 11 */
-	return ((ins & 0xfffff7e0) == 0xf400c400) ? TRUE : FALSE;
-}
-
-unsigned
-ss_next_instr_address(struct proc *p, unsigned pc, unsigned delay_slot)
-{
-	if (delay_slot == 0)
-		return (pc + 4);
-	else {
-		if (ss_inst_delayed(ss_get_value(p, pc, sizeof(int))))
-			return (pc + 4);
-		else
-			return pc;
-	}
+	return (((ins & 0xfffff7e0) == 0xf400c400) ? TRUE : FALSE);
 }
 
 int
-cpu_singlestep(p)
-	struct proc *p;
+ss_put_breakpoint(struct proc *p, vaddr_t va, vaddr_t *bpva, u_int *bpsave)
+{
+	int rc;
+
+	/* Restore previous breakpoint if we did not trigger it. */
+	if (*bpva != 0) {
+		ss_put_value(p, *bpva, *bpsave);
+		*bpva = 0;
+	}
+
+	/* Save instruction. */
+	if ((rc = ss_get_value(p, va, bpsave)) != 0)
+		return (rc);
+
+	/* Store breakpoint instruction at the location now. */
+	*bpva = va;
+	return (ss_put_value(p, va, SSBREAKPOINT));
+}
+
+int
+process_sstep(struct proc *p, int sstep)
 {
 	struct reg *sstf = USER_REGS(p);
 	unsigned pc, brpc;
-	int bpinstr = SSBREAKPOINT;
-	unsigned curinstr;
+	unsigned instr;
+	int rc;
 
-	pc = PC_REGS(sstf);
+	if (sstep == 0) {
+		/* Restore previous breakpoints if any. */
+		if (p->p_md.md_bp0va != 0) {
+			ss_put_value(p, p->p_md.md_bp0va, p->p_md.md_bp0save);
+			p->p_md.md_bp0va = 0;
+		}
+		if (p->p_md.md_bp1va != 0) {
+			ss_put_value(p, p->p_md.md_bp1va, p->p_md.md_bp1save);
+			p->p_md.md_bp1va = 0;
+		}
+
+		return (0);
+	}
+
 	/*
-	 * User was stopped at pc, e.g. the instruction
-	 * at pc was not executed.
+	 * User was stopped at pc, e.g. the instruction at pc was not executed.
 	 * Fetch what's at the current location.
 	 */
-	curinstr = ss_get_value(p, pc, sizeof(int));
+	pc = PC_REGS(sstf);
+	if ((rc = ss_get_value(p, pc, &instr)) != 0)
+		return (rc);
 
-	/* compute next address after current location */
-	if (curinstr != 0) {
-		if (ss_inst_branch(curinstr) ||
-		    inst_call(curinstr) || inst_return(curinstr)) {
-			brpc = ss_branch_taken(curinstr, pc, ss_getreg_val, sstf);
-			if (brpc != pc) {   /* self-branches are hopeless */
-				p->p_md.md_ss_taken_addr = brpc;
-				p->p_md.md_ss_taken_instr =
-				    ss_get_value(p, brpc, sizeof(int));
-				/* Store breakpoint instruction at the
-				   "next" location now. */
-				if (ss_put_value(p, brpc, bpinstr,
-				    sizeof(int)) != 0)
-					return (EFAULT);
-			}
+	/*
+	 * Find if this instruction may cause a branch, and set up a breakpoint
+	 * at the branch location.
+	 */
+	if (ss_inst_branch(instr) || inst_call(instr) || inst_return(instr) ||
+	    instr == SYSCALL_INSTR) {
+		brpc = ss_branch_taken(instr, pc, ss_getreg_val, sstf);
+
+		/* self-branches are hopeless */
+		if (brpc != pc && brpc != 0) {
+			if ((rc = ss_put_breakpoint(p, brpc,
+			    &p->p_md.md_bp1va, &p->p_md.md_bp1save)) != 0)
+				return (rc);
 		}
-		pc = ss_next_instr_address(p, pc, 0);
-	} else {
-		pc = PC_REGS(sstf) + 4;
 	}
 
-	if (p->p_md.md_ss_addr != NULL) {
-		return (EFAULT);
-	}
-
-	p->p_md.md_ss_addr = pc;
-
-	/* Fetch what's at the "next" location. */
-	p->p_md.md_ss_instr = ss_get_value(p, pc, sizeof(int));
-
-	/* Store breakpoint instruction at the "next" location now. */
-	if (ss_put_value(p, pc, bpinstr, sizeof(int)) != 0)
-		return (EFAULT);
+	if ((rc = ss_put_breakpoint(p, pc + 4,
+	    &p->p_md.md_bp0va, &p->p_md.md_bp0save)) != 0)
+		return (rc);
 
 	return (0);
 }
@@ -1720,8 +1728,8 @@ splassert_check(int wantipl, const char *func)
  * aligned addresses will trigger a misaligned address exception.
  *
  * This routine attempts to recover these (valid) statements, by simulating
- * the splitted form of the instruction. If it fails, it returns the
- * appropriate signal number to deliver.
+ * the split form of the instruction. If it fails, it returns the appropriate
+ * signal number to deliver.
  */
 int
 double_reg_fixup(struct trapframe *frame)
@@ -1812,4 +1820,26 @@ double_reg_fixup(struct trapframe *frame)
 	}
 
 	return 0;
+}
+
+void
+cache_flush(struct trapframe *tf)
+{
+	struct proc *p;
+	struct pmap *pmap;
+	u_quad_t sticks;
+
+	if ((p = curproc) == NULL)
+		p = &proc0;
+
+	sticks = p->p_sticks;
+	p->p_md.md_tf = tf;
+
+	pmap = vm_map_pmap(&p->p_vmspace->vm_map);
+	dma_cachectl(pmap, tf->tf_r[2], tf->tf_r[3], DMA_CACHE_SYNC);
+
+	tf->tf_snip = tf->tf_snip & ~NIP_E;
+	tf->tf_sfip = tf->tf_sfip & ~FIP_E;
+
+	userret(p, tf, sticks);
 }

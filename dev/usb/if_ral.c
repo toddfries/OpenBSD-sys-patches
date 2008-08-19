@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.14 2005/03/19 10:18:49 damien Exp $  */
+/*	$OpenBSD: if_ral.c,v 1.44.2.1 2006/05/06 18:51:07 brad Exp $  */
 
 /*-
  * Copyright (c) 2005
@@ -67,10 +67,14 @@
 #include <dev/usb/if_ralreg.h>
 #include <dev/usb/if_ralvar.h>
 
-#ifdef RAL_DEBUG
-#define DPRINTF(x)	if (ural_debug > 0) printf x
-#define DPRINTFN(n, x)	if (ural_debug >= (n)) printf x
-int ural_debug = 14;
+#ifdef USB_DEBUG
+#define URAL_DEBUG
+#endif
+
+#ifdef URAL_DEBUG
+#define DPRINTF(x)	do { if (ural_debug) logprintf x; } while (0)
+#define DPRINTFN(n, x)	do { if (ural_debug >= (n)) logprintf x; } while (0)
+int ural_debug = 0;
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n, x)
@@ -79,12 +83,27 @@ int ural_debug = 14;
 /* various supported device vendors/products */
 static const struct usb_devno ural_devs[] = {
 	{ USB_VENDOR_ASUS,		USB_PRODUCT_ASUS_RT2570 },
-	{ USB_VENDOR_ASUS,		USB_PRODUCT_RALINK_RT2570 },
-	{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_RT2570 },
+	{ USB_VENDOR_ASUS,		USB_PRODUCT_ASUS_RT2570_2 },
+	{ USB_VENDOR_BELKIN,		USB_PRODUCT_BELKIN_F5D7050 },
 	{ USB_VENDOR_CISCOLINKSYS,	USB_PRODUCT_CISCOLINKSYS_WUSB54G },
 	{ USB_VENDOR_CISCOLINKSYS,	USB_PRODUCT_CISCOLINKSYS_WUSB54GP },
+	{ USB_VENDOR_CONCEPTRONIC2,	USB_PRODUCT_CONCEPTRONIC2_C54RU },
+	{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_RT2570 },
+	{ USB_VENDOR_GIGABYTE,		USB_PRODUCT_GIGABYTE_GNWBKG },
+	{ USB_VENDOR_GUILLEMOT,		USB_PRODUCT_GUILLEMOT_HWGUSB254 },
+	{ USB_VENDOR_MELCO,		USB_PRODUCT_MELCO_KG54 },
+	{ USB_VENDOR_MELCO,		USB_PRODUCT_MELCO_KG54AI },
+	{ USB_VENDOR_MELCO,		USB_PRODUCT_MELCO_KG54YB },
+	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2570 },
+	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2570_2 },
+	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2570_3 },
 	{ USB_VENDOR_RALINK,		USB_PRODUCT_RALINK_RT2570 },
-	{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_RT2570 }
+	{ USB_VENDOR_RALINK,		USB_PRODUCT_RALINK_RT2570_2 },
+	{ USB_VENDOR_RALINK,		USB_PRODUCT_RALINK_RT2570_3 },
+	{ USB_VENDOR_SPHAIRON,		USB_PRODUCT_SPHAIRON_UB801R },
+	{ USB_VENDOR_SURECOM,		USB_PRODUCT_SURECOM_RT2570 },
+	{ USB_VENDOR_VTECH,		USB_PRODUCT_VTECH_RT2570 },
+	{ USB_VENDOR_ZINWELL,		USB_PRODUCT_ZINWELL_RT2570 }
 };
 
 Static int		ural_alloc_tx_list(struct ural_softc *);
@@ -100,7 +119,7 @@ Static void		ural_txeof(usbd_xfer_handle, usbd_private_handle,
 			    usbd_status);
 Static void		ural_rxeof(usbd_xfer_handle, usbd_private_handle,
 			    usbd_status);
-Static int		ural_ack_rate(int);
+Static int		ural_ack_rate(struct ieee80211com *, int);
 Static uint16_t		ural_txtime(int, int, uint32_t);
 Static uint8_t		ural_plcp_signal(int);
 Static void		ural_setup_tx_desc(struct ural_softc *,
@@ -337,14 +356,15 @@ USB_ATTACH(ural)
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	usbd_status error;
-	char devinfo[1024];
+	char *devinfop;
 	int i;
 
 	sc->sc_udev = uaa->device;
 
-	usbd_devinfo(sc->sc_udev, 0, devinfo, sizeof devinfo);
+	devinfop = usbd_devinfo_alloc(uaa->device, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfo);
+	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_no(sc->sc_udev, RAL_CONFIG_NO, 0) != 0) {
 		printf("%s: could not set configuration no\n",
@@ -366,10 +386,11 @@ USB_ATTACH(ural)
 	 */
 	id = usbd_get_interface_descriptor(sc->sc_iface);
 
+	sc->sc_rx_no = sc->sc_tx_no = -1;
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
-			printf("%s: no endpoint descriptor for %d\n",
+			printf("%s: no endpoint descriptor for iface %d\n",
 			    USBDEVNAME(sc->sc_dev), i);
 			USB_ATTACH_ERROR_RETURN;
 		}
@@ -381,6 +402,10 @@ USB_ATTACH(ural)
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK)
 			sc->sc_tx_no = ed->bEndpointAddress;
 	}
+	if (sc->sc_rx_no == -1 || sc->sc_tx_no == -1) {
+		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
+		USB_ATTACH_ERROR_RETURN;
+	}
 
 	usb_init_task(&sc->sc_task, ural_task, sc);
 	timeout_set(&sc->scan_ch, ural_next_scan, sc);
@@ -391,8 +416,9 @@ USB_ATTACH(ural)
 	/* retrieve MAC address and various other things from EEPROM */
 	ural_read_eeprom(sc);
 
-	printf("%s: MAC/BBP RT2570 (rev 0x%02x), RF %s\n",
-	    USBDEVNAME(sc->sc_dev), sc->asic_rev, ural_get_rf(sc->rf_rev));
+	printf("%s: MAC/BBP RT2570 (rev 0x%02x), RF %s, address %s\n",
+	    USBDEVNAME(sc->sc_dev), sc->asic_rev, ural_get_rf(sc->rf_rev),
+	    ether_sprintf(ic->ic_myaddr));
 
 	ic->ic_phytype = IEEE80211_T_OFDM; /* not only, but not used */
 	ic->ic_opmode = IEEE80211_M_STA; /* default to BSS mode */
@@ -708,8 +734,21 @@ ural_task(void *arg)
 		break;
 
 	case IEEE80211_S_RUN:
-		if (ic->ic_opmode != IEEE80211_M_MONITOR &&
-		    ic->ic_opmode != IEEE80211_M_HOSTAP)
+		ural_set_chan(sc, ic->ic_bss->ni_chan);
+
+		/* update basic rate set */
+		if (ic->ic_curmode == IEEE80211_MODE_11B) {
+			/* 11b basic rates: 1, 2Mbps */
+			ural_write(sc, RAL_TXRX_CSR11, 0x3);
+		} else if (IEEE80211_IS_CHAN_5GHZ(ic->ic_bss->ni_chan)) {
+			/* 11a basic rates: 6, 12, 24Mbps */
+			ural_write(sc, RAL_TXRX_CSR11, 0x150);
+		} else {
+			/* 11g basic rates: 1, 2, 5.5, 11, 6, 12, 24Mbps */
+			ural_write(sc, RAL_TXRX_CSR11, 0x15f);
+		}
+
+		if (ic->ic_opmode != IEEE80211_M_MONITOR)
 			ural_set_bssid(sc, ic->ic_bss->ni_bssid);
 
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP ||
@@ -782,7 +821,9 @@ ural_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		    USBDEVNAME(sc->sc_dev), usbd_errstr(status));
 
 		if (status == USBD_STALLED)
-			usbd_clear_endpoint_stall(sc->sc_rx_pipeh);
+			usbd_clear_endpoint_stall(sc->sc_tx_pipeh);
+
+		ifp->if_oerrors++;
 		return;
 	}
 
@@ -794,6 +835,7 @@ ural_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	data->ni = NULL;
 
 	sc->tx_queued--;
+	ifp->if_opackets++;
 
 	DPRINTFN(10, ("tx done\n"));
 
@@ -830,19 +872,20 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	if (len < RAL_RX_DESC_SIZE) {
 		printf("%s: xfer too short %d\n", USBDEVNAME(sc->sc_dev), len);
+		ifp->if_ierrors++;
 		goto skip;
 	}
 
 	/* rx descriptor is located at the end */
 	desc = (struct ural_rx_desc *)(data->buf + len - RAL_RX_DESC_SIZE);
 
-	if ((letoh32(desc->flags) & RAL_RX_PHY_ERROR) ||
-	    (letoh32(desc->flags) & RAL_RX_CRC_ERROR)) {
+	if (letoh32(desc->flags) & (RAL_RX_PHY_ERROR | RAL_RX_CRC_ERROR)) {
 		/*
 		 * This should not happen since we did not request to receive
 		 * those frames when we filled RAL_TXRX_CSR2.
 		 */
 		DPRINTFN(5, ("PHY or CRC error\n"));
+		ifp->if_ierrors++;
 		goto skip;
 	}
 
@@ -883,6 +926,13 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
 
+	/*
+	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
+	 * without calling if_start().
+	 */
+	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
+		ural_start(ifp);
+
 	splx(s);
 
 	MGETHDR(data->m, M_DONTWAIT, MT_DATA);
@@ -916,7 +966,7 @@ skip:	/* setup a new transfer */
  * XXX: this should depend on the destination node basic rate set.
  */
 Static int
-ural_ack_rate(int rate)
+ural_ack_rate(struct ieee80211com *ic, int rate)
 {
 	switch (rate) {
 	/* CCK rates */
@@ -925,7 +975,7 @@ ural_ack_rate(int rate)
 	case 4:
 	case 11:
 	case 22:
-		return 4;
+		return (ic->ic_curmode == IEEE80211_MODE_11B) ? 4 : rate;
 
 	/* OFDM rates */
 	case 12:
@@ -1026,10 +1076,7 @@ ural_setup_tx_desc(struct ural_softc *sc, struct ural_tx_desc *desc,
 	if (RAL_RATE_IS_OFDM(rate))
 		desc->flags |= htole32(RAL_TX_OFDM);
 
-	desc->wme = htole32(
-	    5 << RAL_WME_CWMAX_BITS_SHIFT |
-	    3 << RAL_WME_CWMIN_BITS_SHIFT |
-	    2 << RAL_WME_AIFSN_BITS_SHIFT);
+	desc->wme = htole16(RAL_AIFSN(3) | RAL_LOGCWMIN(4) | RAL_LOGCWMAX(6));
 
 	/*
 	 * Fill PLCP fields.
@@ -1076,7 +1123,6 @@ ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	struct ural_tx_desc *desc;
 	usbd_xfer_handle xfer;
 	usbd_status error;
-	uint32_t flags = 0;
 	uint8_t cmd = 0;
 	uint8_t *buf;
 	int xferlen, rate;
@@ -1087,7 +1133,10 @@ ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	if (xfer == NULL)
 		return ENOMEM;
 
-	buf = usbd_alloc_buffer(xfer, RAL_TX_DESC_SIZE + m0->m_pkthdr.len);
+	/* xfer length needs to be a multiple of two! */
+	xferlen = (RAL_TX_DESC_SIZE + m0->m_pkthdr.len + 1) & ~1;
+
+	buf = usbd_alloc_buffer(xfer, xferlen);
 	if (buf == NULL) {
 		usbd_free_xfer(xfer);
 		return ENOMEM;
@@ -1105,10 +1154,8 @@ ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	desc = (struct ural_tx_desc *)buf;
 
 	m_copydata(m0, 0, m0->m_pkthdr.len, buf + RAL_TX_DESC_SIZE);
-	ural_setup_tx_desc(sc, desc, flags, m0->m_pkthdr.len, rate);
-
-	/* xfer length needs to be a multiple of two! */
-	xferlen = (RAL_TX_DESC_SIZE + m0->m_pkthdr.len + 1) & ~1;
+	ural_setup_tx_desc(sc, desc, RAL_TX_IFS_NEWBACKOFF | RAL_TX_TIMESTAMP,
+	    m0->m_pkthdr.len, rate);
 
 	DPRINTFN(10, ("sending beacon frame len=%u rate=%u xfer len=%u\n",
 	    m0->m_pkthdr.len, rate, xferlen));
@@ -1165,17 +1212,16 @@ ural_tx_mgt(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	wh = mtod(m0, struct ieee80211_frame *);
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
-		flags |= RAL_TX_NEED_ACK;
+		flags |= RAL_TX_ACK;
 
 		dur = ural_txtime(RAL_ACK_SIZE, rate, ic->ic_flags) + RAL_SIFS;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 
 		/* tell hardware to add timestamp for probe responses */
-		if ((wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
-		    IEEE80211_FC0_TYPE_MGT &&
-		    (wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK) ==
-		    IEEE80211_FC0_SUBTYPE_PROBE_RESP)
-			flags |= RAL_TX_INSERT_TIMESTAMP;
+		if ((wh->i_fc[0] &
+		    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_MASK)) ==
+		    (IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_RESP))
+			flags |= RAL_TX_TIMESTAMP;
 	}
 
 	m_copydata(m0, 0, m0->m_pkthdr.len, data->buf + RAL_TX_DESC_SIZE);
@@ -1191,8 +1237,10 @@ ural_tx_mgt(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	    USBD_FORCE_SHORT_XFER | USBD_NO_COPY, RAL_TX_TIMEOUT, ural_txeof);
 
 	error = usbd_transfer(data->xfer);
-	if (error != USBD_NORMAL_COMPLETION && error != USBD_IN_PROGRESS)
+	if (error != USBD_NORMAL_COMPLETION && error != USBD_IN_PROGRESS) {
+		m_freem(m0);
 		return error;
+	}
 
 	sc->tx_queued++;
 
@@ -1213,8 +1261,13 @@ ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	usbd_status error;
 	int xferlen, rate;
 
+	/* XXX this should be reworked! */
 	if (ic->ic_fixed_rate != -1) {
-		rs = &ic->ic_sup_rates[ic->ic_curmode];
+		if (ic->ic_curmode != IEEE80211_MODE_AUTO)
+			rs = &ic->ic_sup_rates[ic->ic_curmode];
+		else
+			rs = &ic->ic_sup_rates[IEEE80211_MODE_11G];
+
 		rate = rs->rs_rates[ic->ic_fixed_rate];
 	} else {
 		rs = &ni->ni_rates;
@@ -1225,7 +1278,7 @@ ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	if (ic->ic_flags & IEEE80211_F_WEPON) {
 		m0 = ieee80211_wep_crypt(ifp, m0, 1);
 		if (m0 == NULL)
-		return ENOBUFS;
+			return ENOBUFS;
 	}
 
 #if NBPFILTER > 0
@@ -1257,10 +1310,10 @@ ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	wh = mtod(m0, struct ieee80211_frame *);
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
-		flags |= RAL_TX_NEED_ACK;
+		flags |= RAL_TX_ACK;
 		flags |= RAL_TX_RETRY(7);
 
-		dur = ural_txtime(RAL_ACK_SIZE, ural_ack_rate(rate),
+		dur = ural_txtime(RAL_ACK_SIZE, ural_ack_rate(ic, rate),
 		    ic->ic_flags) + RAL_SIFS;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 	}
@@ -1278,8 +1331,10 @@ ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	    USBD_FORCE_SHORT_XFER | USBD_NO_COPY, RAL_TX_TIMEOUT, ural_txeof);
 
 	error = usbd_transfer(data->xfer);
-	if (error != USBD_NORMAL_COMPLETION && error != USBD_IN_PROGRESS)
+	if (error != USBD_NORMAL_COMPLETION && error != USBD_IN_PROGRESS) {
+		m_freem(m0);
 		return error;
+	}
 
 	sc->tx_queued++;
 
@@ -1359,6 +1414,7 @@ ural_watchdog(struct ifnet *ifp)
 		if (--sc->sc_tx_timer == 0) {
 			printf("%s: device timeout\n", USBDEVNAME(sc->sc_dev));
 			/*ural_init(ifp); XXX needs a process context! */
+			ifp->if_oerrors++;
 			return;
 		}
 		ifp->if_timer = 1;
@@ -1382,18 +1438,11 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-			ural_init(ifp);
-			break;
 #endif
-		default:
-			ural_init(ifp);
-		}
-		break;
-
+		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -1757,12 +1806,12 @@ ural_enable_tsf_sync(struct ural_softc *sc)
 	ural_write(sc, RAL_TXRX_CSR20, tmp);
 
 	/* finally, enable TSF synchronization */
+	tmp = RAL_ENABLE_TSF | RAL_ENABLE_TBCN;
 	if (ic->ic_opmode == IEEE80211_M_STA)
-		ural_write(sc, RAL_TXRX_CSR19, RAL_TSF_SYNC_BSS |
-		    RAL_TSF_AUTOCOUNT | RAL_BCN_RELOAD);
+		tmp |= RAL_ENABLE_TSF_SYNC(1);
 	else
-		ural_write(sc, RAL_TXRX_CSR19, RAL_TSF_SYNC_IBSS |
-		    RAL_TSF_AUTOCOUNT | RAL_BCN_RELOAD | RAL_GENERATE_BEACON);
+		tmp |= RAL_ENABLE_TSF_SYNC(2) | RAL_ENABLE_BEACON_GENERATOR;
+	ural_write(sc, RAL_TXRX_CSR19, tmp);
 
 	DPRINTF(("enabling TSF synchronization\n"));
 }
@@ -1781,7 +1830,7 @@ ural_set_bssid(struct ural_softc *sc, uint8_t *bssid)
 	tmp = bssid[4] | bssid[5] << 8;
 	ural_write(sc, RAL_MAC_CSR7, tmp);
 
-	DPRINTF(("setting BSSID to %6D\n", bssid, ":"));
+	DPRINTF(("setting BSSID to %s\n", ether_sprintf(bssid)));
 }
 
 Static void
@@ -1798,7 +1847,7 @@ ural_set_macaddr(struct ural_softc *sc, uint8_t *addr)
 	tmp = addr[4] | addr[5] << 8;
 	ural_write(sc, RAL_MAC_CSR4, tmp);
 
-	DPRINTF(("setting MAC address to %6D\n", addr, ":"));
+	DPRINTF(("setting MAC address to %s\n", ether_sprintf(addr)));
 }
 
 Static void
@@ -1948,6 +1997,7 @@ ural_init(struct ifnet *ifp)
 #define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	struct ural_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211_wepkey *wk;
 	struct ural_rx_data *data;
 	uint16_t sta[11], tmp;
 	usbd_status error;
@@ -1977,7 +2027,7 @@ ural_init(struct ifnet *ifp)
 	/* we're ready! */
 	ural_write(sc, RAL_MAC_CSR1, RAL_HOST_READY);
 
-	/* set supported basic rates (1, 2, 6, 12, 24) */
+	/* set basic rate set (will be updated later) */
 	ural_write(sc, RAL_TXRX_CSR11, 0x153);
 
 	error = ural_bbp_init(sc);
@@ -1991,11 +2041,23 @@ ural_init(struct ifnet *ifp)
 	/* clear statistic registers (STA_CSR0 to STA_CSR10) */
 	ural_read_multi(sc, RAL_STA_CSR0, sta, sizeof sta);
 
+	/* set default sensitivity */
+	ural_bbp_write(sc, 17, 0x48);
+
 	ural_set_txantenna(sc, 1);
 	ural_set_rxantenna(sc, 1);
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
 	ural_set_macaddr(sc, ic->ic_myaddr);
+
+	/*
+	 * Copy WEP keys into adapter's memory (SEC_CSR0 to SEC_CSR31).
+	 */
+	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
+		wk = &ic->ic_nw_keys[i];
+		ural_write_multi(sc, RAL_SEC_CSR0 + i * IEEE80211_KEYBUF_SIZE,
+		    wk->wk_key, IEEE80211_KEYBUF_SIZE);
+	}
 
 	/*
 	 * Open Tx and Rx USB bulk pipes.
@@ -2045,9 +2107,9 @@ ural_init(struct ifnet *ifp)
 	}
 
 	/* kick Rx */
-	tmp = RAL_DROP_PHY | RAL_DROP_CRC;
+	tmp = RAL_DROP_PHY_ERROR | RAL_DROP_CRC_ERROR;
 	if (ic->ic_opmode != IEEE80211_M_MONITOR) {
-		tmp |= RAL_DROP_CTL | RAL_DROP_BAD_VERSION;
+		tmp |= RAL_DROP_CTL | RAL_DROP_VERSION_ERROR;
 		if (ic->ic_opmode != IEEE80211_M_HOSTAP)
 			tmp |= RAL_DROP_TODS;
 		if (!(ifp->if_flags & IFF_PROMISC))
@@ -2076,14 +2138,14 @@ ural_stop(struct ifnet *ifp, int disable)
 	struct ural_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 
+	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
+
 	/* disable Rx */
 	ural_write(sc, RAL_TXRX_CSR2, RAL_DISABLE_RX);
 
 	/* reset ASIC and BBP (but won't reset MAC registers!) */
 	ural_write(sc, RAL_MAC_CSR1, RAL_RESET_ASIC | RAL_RESET_BBP);
 	ural_write(sc, RAL_MAC_CSR1, 0);
-
-	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 
 	sc->sc_tx_timer = 0;
 	ifp->if_timer = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.h,v 1.1 1999/07/20 06:21:59 csapuntz Exp $	*/
+/*	$OpenBSD: cd.h,v 1.9 2005/08/03 23:37:07 krw Exp $	*/
 /*	$NetBSD: scsi_cd.h,v 1.6 1996/03/19 03:06:39 mycroft Exp $	*/
 
 /*
@@ -29,14 +29,6 @@
 /*
  * SCSI command format
  */
-
-struct scsi_read_capacity_cd {
-	u_int8_t opcode;
-	u_int8_t byte2;
-	u_int8_t addr[4];
-	u_int8_t unused[3];
-	u_int8_t control;
-};
 
 struct scsi_pause {
 	u_int8_t opcode;
@@ -129,13 +121,26 @@ struct scsi_read_toc {
 	u_int8_t data_len[2];
 	u_int8_t control;
 };
-;
 
 struct scsi_read_cd_capacity {
 	u_int8_t opcode;
 	u_int8_t byte2;
 	u_int8_t addr[4];
 	u_int8_t unused[3];
+	u_int8_t control;
+};
+
+struct scsi_load_unload {
+	u_int8_t opcode;
+	u_int8_t reserved;
+#define	IMMED	0x1	
+	u_int8_t reserved2[2];
+	u_int8_t options;
+#define START	0x1
+#define	LOUNLO	0x2
+	u_int8_t reserved4[3];
+	u_int8_t slot;
+	u_int8_t reserved5[2];
 	u_int8_t control;
 };
 
@@ -153,6 +158,7 @@ struct scsi_read_cd_capacity {
 #define PLAY_TRACK_REL		0x49	/* cdrom play track/index mode */
 #define PAUSE			0x4b	/* cdrom pause in 'play audio' mode */
 #define PLAY_BIG		0xa5	/* cdrom pause in 'play audio' mode */
+#define	LOAD_UNLOAD		0xa6	/* cdrom load/unload media */
 #define PLAY_TRACK_REL_BIG	0xa9	/* cdrom play track/index mode */
 
 
@@ -192,7 +198,6 @@ struct cd_audio_page {
 #define	RIGHT_PORT	1
 };
 
-#ifdef CDDA
 /*
  * There are 2352 bytes in a CD digital audio frame.  One frame is 1/75 of a
  * second, at 44.1kHz sample rate, 16 bits/sample, 2 channels.
@@ -201,13 +206,57 @@ struct cd_audio_page {
  * channel first.  Samples are little endian 16-bit signed values.
  */
 #define CD_DA_BLKSIZ		2352	/* # bytes in CD-DA frame */
-#ifndef CD_NORMAL_DENSITY_CODE
 #define CD_NORMAL_DENSITY_CODE	0x00	/* from Toshiba CD-ROM specs */
-#endif
-#ifndef CD_DA_DENSITY_CODE
 #define CD_DA_DENSITY_CODE	0x82	/* from Toshiba CD-ROM specs */
+
+#define	CDRETRIES	4
+
+struct scsi_read_dvd_structure {
+	u_int8_t	opcode;		/* GPCMD_READ_DVD_STRUCTURE */
+	u_int8_t	reserved;
+	u_int8_t	address[4];
+	u_int8_t	layer;
+	u_int8_t	format;
+	u_int8_t	length[2];
+	u_int8_t	agid;		/* bottom 6 bits reserved */
+	u_int8_t	control;
+};
+
+struct scsi_read_dvd_structure_data {
+	u_int8_t	len[2];		/* Big-endian length of valid data. */
+	u_int8_t	reserved[2];
+	u_int8_t	data[2048];
+};
+
+#ifdef _KERNEL
+
+struct cd_softc {
+	struct device sc_dev;
+	struct disk sc_dk;
+
+	int flags;
+#define	CDF_LOCKED	0x01
+#define	CDF_WANTED	0x02
+#define	CDF_WLABEL	0x04		/* label is writable */
+#define	CDF_LABELLING	0x08		/* writing label */
+#define	CDF_ANCIENT	0x10		/* disk is ancient; for minphys */
+#ifdef CDDA
+#define CDF_CDDA	0x20
 #endif
-#endif /* CDDA */
+	struct scsi_link *sc_link;	/* contains our targ, lun, etc. */
+	struct cd_parms {
+		int blksize;
+		u_long disksize;	/* total number sectors */
+	} params;
+#ifdef CDDA
+	struct cd_parms orig_params;    /* filled in when CD-DA mode starts */
+#endif
+	struct buf buf_queue;
 
-#endif /*_SCSI_CD_H*/
+#if NRND > 0
+	rndsource_element_t	rnd_source;
+#endif
+};
 
+#endif /* _KERNEL */
+#endif

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.mips64,v 1.4 2004/10/08 07:12:55 grange Exp $
+#	$OpenBSD: files.mips64,v 1.7 2005/07/14 02:09:46 uwe Exp $
 
 file	arch/mips64/mips64/disksubr.c		disk
 file	arch/mips64/mips64/mem.c
@@ -30,3 +30,5 @@ file	arch/mips64/mips64/db_disasm.c		ddb
 file	arch/mips64/mips64/db_machdep.c		ddb
 file	arch/mips64/mips64/lcore_ddb.S		ddb|debug
 
+file	netinet/in_cksum.c			inet
+file	netinet/in4_cksum.c			inet

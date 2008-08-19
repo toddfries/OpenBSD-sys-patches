@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.9 2005/03/07 02:08:45 uwe Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.15 2005/08/06 14:26:51 miod Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -104,7 +104,6 @@ pv_addr_t kernelstack;
 
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
-char	machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 
 /* Our exported CPU info; we can have only one. */
 struct cpu_info cpu_info_store;
@@ -125,6 +124,21 @@ int allowaperture = 1;
 #else
 int allowaperture = 0;
 #endif
+#endif
+
+#if defined(__zaurus__)
+/* Permit console keyboard to do a nice halt. */
+int kbd_reset;
+
+/* Touch pad scaling disable flag and scaling parameters. */
+extern int zts_rawmode;
+struct ztsscale {
+	int ts_minx;
+	int ts_maxx;
+	int ts_miny;
+	int ts_maxy;
+};
+extern struct ztsscale zts_scale;
 #endif
 
 /* Prototypes */
@@ -450,6 +464,54 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_APMWARN:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &cpu_apmwarn));
 #endif
+#if defined(__zaurus__)
+#include "zts.h"
+	case CPU_KBDRESET:
+		if (securelevel > 0)
+			return (sysctl_rdint(oldp, oldlenp, newp,
+			    kbd_reset));
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &kbd_reset));
+
+	case CPU_ZTSRAWMODE:
+#if NZTS > 0
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &zts_rawmode));
+#else
+		return (EINVAL);
+#endif /* NZTS > 0 */
+	case CPU_ZTSSCALE:
+	{
+		int err = EINVAL;
+#if NZTS > 0
+		struct ztsscale *p = newp;
+		struct ztsscale ts;
+		int s;
+
+		if (!newp && newlen == 0)
+			return (sysctl_struct(oldp, oldlenp, 0, 0,
+			    &zts_scale, sizeof zts_scale));
+
+		if (!(newlen == sizeof zts_scale &&
+		    p->ts_minx < p->ts_maxx && p->ts_miny < p->ts_maxy &&
+		    p->ts_minx >= 0 && p->ts_maxx >= 0 &&
+		    p->ts_miny >= 0 && p->ts_maxy >= 0 &&
+		    p->ts_minx < 32768 && p->ts_maxx < 32768 &&
+		    p->ts_miny < 32768 && p->ts_maxy < 32768))
+			return (EINVAL);
+
+		ts = zts_scale;
+		err = sysctl_struct(oldp, oldlenp, newp, newlen,
+		    &ts, sizeof ts);
+		if (err == 0) {
+			s = splhigh();
+			zts_scale = ts;
+			splx(s);
+		}
+#endif /* NZTS > 0 */
+		return (err);
+	}
+#endif
 
 	default:
 		return (EOPNOTSUPP);
@@ -541,7 +603,7 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 }
 #endif
 
-#if 1
+#if 0
 void
 parse_mi_bootargs(args)
 	char *args;
@@ -603,11 +665,8 @@ allocsys(caddr_t v)
 	 * i/o buffers.
 	 */
 	if (bufpages == 0) {
-		if (physmem < btoc(2 * 1024 * 1024))
-			bufpages = physmem / 10;
-		else
-			bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-			    bufcachepercent / 100;
+		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
+		    bufcachepercent / 100;
 	}
 	if (nbuf == 0) {
 		nbuf = bufpages;

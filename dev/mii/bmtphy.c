@@ -1,4 +1,4 @@
-/*	$OpenBSD: bmtphy.c,v 1.12 2005/02/04 23:23:56 brad Exp $	*/
+/*	$OpenBSD: bmtphy.c,v 1.14 2005/05/25 20:05:44 brad Exp $	*/
 /*	$NetBSD: bmtphy.c,v 1.17 2005/01/17 13:17:45 scw Exp $	*/
 
 /*-
@@ -78,6 +78,8 @@ static const struct mii_phydesc bmtphys[] = {
 	  MII_STR_BROADCOM_BCM5201 },
 	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5214,
 	  MII_STR_BROADCOM_BCM5214 },
+	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5220,
+	  MII_STR_BROADCOM_BCM5220 },
 	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5221,
 	  MII_STR_BROADCOM_BCM5221 },
 	{ MII_OUI_BROADCOM,		MII_MODEL_BROADCOM_BCM5222,
@@ -114,7 +116,7 @@ bmtphyattach(struct device *parent, struct device *self, void *aux)
 	sc->mii_funcs = &bmtphy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = 5;
+	sc->mii_anegticks = MII_ANEGTICKS;
 
 	PHY_RESET(sc);
 

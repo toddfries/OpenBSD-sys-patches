@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.28 2005/03/13 17:24:12 deraadt Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.40 2005/08/03 22:42:46 brad Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -18,6 +18,7 @@ option		FFS		# UFS
 #option		NFSCLIENT	# Network File System client
 
 option		CD9660		# ISO 9660 + Rock Ridge file system
+option		UDF
 option		MSDOSFS		# MS-DOS file system
 option		FIFO		# FIFOs; RECOMMENDED
 
@@ -86,6 +87,7 @@ ukbd*	at uhidev?
 wskbd*	at ukbd? mux 1
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
+atapiscsi* at umass?
 #ums*	at uhidev?
 #wsmouse* at ums? mux 0
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
@@ -103,6 +105,7 @@ upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 #scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
+ural*	at uhub?		# Ralink RT2500
 
 pckbc0	at isa?			# PC keyboard controller
 pckbd*	at pckbc?		# PC keyboard
@@ -148,8 +151,10 @@ scsibus* at gdt?
 #scsibus* at aac?
 ami*	at pci?			# AMI MegaRAID controllers
 scsibus* at ami?
-#cac*	at pci?			# Compaq Smart ARRAY RAID controllers
+#cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 #scsibus* at cac?
+ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
+scsibus* at ciss?
 #twe*	at pci?			# 3ware Escalade RAID controllers
 #scsibus* at twe?
 #iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
@@ -158,8 +163,6 @@ isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 scsibus* at isp?
 #aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
 #scsibus* at aic?
-#ncr*	at pci?			# NCR 538XX SCSI controllers(old)
-#scsibus* at ncr?
 #siop*	at pci?			# NCR 538XX SCSI controllers(new)
 #scsibus* at siop?
 #adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
@@ -204,18 +207,17 @@ scsibus* at atapiscsi?
 #de*	at pci?			# DC21X4X-based ethernet
 fxp*	at pci?			# EtherExpress 10/100B ethernet
 #fxp*	at cardbus?		# Intel PRO/100 ethernet
-#ep0	at pci?			# 3C59x ethernet
-#ep*	at pci?			# 3C59x ethernet
+ep*	at pci?			# 3C59x ethernet
 #ne*	at pci?			# NE2000-compat ethernet
 #ne*	at pcmcia?		# PCMCIA based NE2000 ethernet
 #ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
 #sm*	at pcmcia?		# PCMCIA based sm ethernet
 #xe*	at pcmcia?		# Xircom ethernet
 #fpa*	at pci?			# DEC DEFPA FDDI
-#xl*	at pci?			# 3C9xx ethernet
+xl*	at pci?			# 3C9xx ethernet
 #xl*	at cardbus?		# 3C575 ethernet
 rl*	at pci?			# RealTek 81[23]9 ethernet
-#tx*	at pci?			# SMC 83C170 EPIC ethernet
+epic*	at pci?			# SMC EPIC/100 ethernet
 #tl*	at pci?			# Compaq Thunderlan ethernet
 vr*	at pci?			# VIA Rhine ethernet
 dc*	at pci?			# 21143, "tulip" clone ethernet
@@ -227,9 +229,10 @@ sk*	at skc?			#  each port of above
 em*	at pci?			# Intel Pro/1000 ethernet
 #txp*	at pci?			# 3com 3CR990
 #nge*	at pci?			# NS DP83820/DP83821 GigE
-sf*	at pci?			# Adaptec AIC-6915 ethernet
+#sf*	at pci?			# Adaptec AIC-6915 ethernet
 bge*	at pci?			# Broadcom BCM570x (aka Tigon3)
 re*	at pci?			# Realtek 8169/8169S/8110S
+stge*	at pci?			# Sundance TC9021 GigE
 #lge*	at pci?			# Level1 LXT1001 GigE
 #mtd*	at pci?			# Myson MTD803
 vge*	at pci?			# VIA VT612x

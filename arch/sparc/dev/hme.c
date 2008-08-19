@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.47 2005/02/22 20:44:26 brad Exp $	*/
+/*	$OpenBSD: hme.c,v 1.49 2005/06/08 17:03:02 henning Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -406,24 +406,6 @@ hmeioctl(ifp, cmd, data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
 #endif /* INET */
-#ifdef NS
-		/* XXX - This code is probably wrong. */
-		case AF_NS:
-		    {
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host = 
-				    *(union ns_host *)(sc->sc_arpcom.ac_enaddr);
-			else
-				bcopy(ina->x_host.c_host,
-				    sc->sc_arpcom.ac_enaddr,
-				    sizeof(sc->sc_arpcom.ac_enaddr));
-			/* Set new address. */
-			hmeinit(sc);
-			break;
-		    }
-#endif /* NS */
 		default:
 			ifp->if_flags |= IFF_UP;
 			hmeinit(sc);
@@ -845,9 +827,9 @@ hme_rxcksum(struct mbuf *m, u_int32_t flags)
 	temp32 += (temp32 >> 16);
 	cksum = ~temp32;
 	if (cksum != 0)
-		m->m_pkthdr.csum |= flag_bad;
+		m->m_pkthdr.csum_flags |= flag_bad;
 	else
-		m->m_pkthdr.csum |= flag_ok;
+		m->m_pkthdr.csum_flags |= flag_ok;
 }
 
 int

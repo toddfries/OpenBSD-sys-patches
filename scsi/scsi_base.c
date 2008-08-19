@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.62 2004/07/31 11:31:30 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.87 2005/08/29 00:41:44 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -56,7 +56,7 @@ static __inline struct scsi_xfer *scsi_make_xs(struct scsi_link *,
     int datalen, int retries, int timeout, struct buf *, int flags);
 static __inline void asc2ascii(u_int8_t, u_int8_t ascq, char *result,
     size_t len);
-int	sc_err1(struct scsi_xfer *, int);
+int	sc_err1(struct scsi_xfer *);
 int	scsi_interpret_sense(struct scsi_xfer *);
 char   *scsi_decode_sense(struct scsi_sense_data *, int);
 
@@ -106,7 +106,7 @@ scsi_get_xs(sc_link, flags)
 	SC_DEBUG(sc_link, SDEV_DB3, ("scsi_get_xs\n"));
 
 	s = splbio();
-	while (sc_link->openings <= 0) {
+	while (sc_link->openings == 0) {
 		SC_DEBUG(sc_link, SDEV_DB3, ("sleeping\n"));
 		if ((flags & SCSI_NOSLEEP) != 0) {
 			splx(s);
@@ -219,12 +219,17 @@ scsi_make_xs(sc_link, scsi_cmd, cmdlen, data_addr, datalen,
  * Find out from the device what its capacity is.
  */
 u_long
-scsi_size(sc_link, flags)
+scsi_size(sc_link, flags, blksize)
 	struct scsi_link *sc_link;
 	int flags;
+	u_int32_t *blksize;
 {
-	struct scsi_read_cap_data rdcap;
 	struct scsi_read_capacity scsi_cmd;
+	struct scsi_read_cap_data rdcap;
+	u_long max_addr;
+
+	if (blksize)
+		*blksize = 0;
 
 	/*
 	 * make up a scsi command and ask the scsi driver to do
@@ -242,10 +247,25 @@ scsi_size(sc_link, flags)
 			  2, 20000, NULL, flags | SCSI_DATA_IN) != 0) {
 		sc_print_addr(sc_link);
 		printf("could not get size\n");
-		return 0;
+		return (0);
 	}
 
-	return _4btol(rdcap.addr) + 1;
+	max_addr = _4btol(rdcap.addr);
+	if (blksize)
+		*blksize = _4btol(rdcap.length);
+
+	if (max_addr == 0xffffffffUL) {
+		/*
+		 * The device is reporting it has more than 2^32-1 sectors. The
+		 * 16-byte READ CAPACITY command must be issued to get full
+		 * capacity.
+		 */
+		sc_print_addr(sc_link);
+		printf("only the first 4,294,967,295 sectors will be used.\n");
+		return (0xffffffffUL);
+	}
+	
+	return (max_addr + 1);
 }
 
 /*
@@ -343,6 +363,262 @@ scsi_start(sc_link, type, flags)
 	    type == SSS_START ? 30000 : 10000, NULL, flags);
 }
 
+int
+scsi_mode_sense(sc_link, byte2, page, data, len, flags, timeout)
+	struct scsi_link *sc_link;
+	int byte2, page, flags, timeout;
+	size_t len;
+	struct scsi_mode_header *data;
+{
+	struct scsi_mode_sense scsi_cmd;
+	int error;
+
+	/*
+	 * Make sure the sense buffer is clean before we do the mode sense, so
+	 * that checks for bogus values of 0 will work in case the mode sense
+	 * fails.
+	 */
+	bzero(data, len);
+
+	bzero(&scsi_cmd, sizeof(scsi_cmd));
+	scsi_cmd.opcode = MODE_SENSE;
+	scsi_cmd.byte2 = byte2;
+	scsi_cmd.page = page;
+
+	if (len > 0xff) 
+		len = 0xff;
+	scsi_cmd.length = len;
+
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
+	    sizeof(scsi_cmd), (u_char *)data, len, 4, timeout, NULL,
+	    flags | SCSI_DATA_IN);
+
+	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_mode_sense: page %#x, error = %d\n",
+	    page, error));
+
+	return (error);
+}
+
+int
+scsi_mode_sense_big(sc_link, byte2, page, data, len, flags, timeout)
+	struct scsi_link *sc_link;
+	int byte2, page, flags, timeout;
+	size_t len;
+	struct scsi_mode_header_big *data;
+{
+	struct scsi_mode_sense_big scsi_cmd;
+	int error;
+
+	/*
+	 * Make sure the sense buffer is clean before we do the mode sense, so
+	 * that checks for bogus values of 0 will work in case the mode sense
+	 * fails.
+	 */
+	bzero(data, len);
+
+	bzero(&scsi_cmd, sizeof(scsi_cmd));
+	scsi_cmd.opcode = MODE_SENSE_BIG;
+	scsi_cmd.byte2 = byte2;
+	scsi_cmd.page = page;
+
+	if (len > 0xffff)
+		len = 0xffff;
+	_lto2b(len, scsi_cmd.length);
+
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
+	    sizeof(scsi_cmd), (u_char *)data, len, 4, timeout, NULL,
+	    flags | SCSI_DATA_IN);
+
+	SC_DEBUG(sc_link, SDEV_DB2,
+	    ("scsi_mode_sense_big: page %#x, error = %d\n", page, error));
+
+	return (error);
+}
+
+void *
+scsi_mode_sense_page(hdr, page_len)
+	struct scsi_mode_header *hdr;
+	const int page_len;
+{
+	int total_length, header_length;
+
+	total_length = hdr->data_length + sizeof(hdr->data_length);
+	header_length = sizeof(*hdr) + hdr->blk_desc_len;
+
+	if ((total_length - header_length) < page_len)
+		return (NULL);
+		
+	return ((u_char *)hdr + header_length);	
+}
+
+void *
+scsi_mode_sense_big_page(hdr, page_len)
+	struct scsi_mode_header_big *hdr;
+	const int page_len;
+{
+	int total_length, header_length;
+
+	total_length = _2btol(hdr->data_length) + sizeof(hdr->data_length);
+	header_length = sizeof(*hdr) + _2btol(hdr->blk_desc_len);
+
+	if ((total_length - header_length) < page_len)
+		return (NULL);
+
+	return ((u_char *)hdr + header_length);
+}
+
+int
+scsi_do_mode_sense(sc_link, page, buf, page_data, density, block_count,
+    block_size, page_len, flags, big)
+	struct scsi_link *sc_link;
+	struct scsi_mode_sense_buf *buf;
+	int page, page_len, flags, *big;
+	u_int32_t *density, *block_size;
+	u_int64_t *block_count;
+	void **page_data;
+{
+	struct scsi_direct_blk_desc *direct;
+	struct scsi_blk_desc *general;
+	int error, blk_desc_len, offset;
+	
+	*page_data = NULL;
+
+	if (density)
+		*density = 0;
+	if (block_count)
+		*block_count = 0;
+	if (block_size)
+		*block_size = 0;
+	if (big)
+		*big = 0;
+
+	if ((sc_link->flags & SDEV_ATAPI) == 0) {
+		/*
+		 * Try 6 byte mode sense request first. Some devices don't
+		 * distinguish between 6 and 10 byte MODE SENSE commands,
+		 * returning 6 byte data for 10 byte requests. Don't bother
+		 * with SMS_DBD. Check returned data length to ensure that
+		 * at least a header (3 additional bytes) is returned.
+		 */
+		error = scsi_mode_sense(sc_link, 0, page, &buf->headers.hdr,
+		    sizeof(*buf), flags, 20000);
+		if (error == 0 && buf->headers.hdr.data_length > 2) {
+			*page_data = scsi_mode_sense_page(&buf->headers.hdr,
+			    page_len);
+			offset = sizeof(struct scsi_mode_header);
+			blk_desc_len = buf->headers.hdr.blk_desc_len;
+			goto blk_desc;
+		}	
+	}	
+
+	/*
+	 * Try 10 byte mode sense request. Don't bother with SMS_DBD or
+	 * SMS_LLBAA. Bail out if the returned information is less than
+	 * a big header in size (6 additional bytes).
+	 */
+	error = scsi_mode_sense_big(sc_link, 0, page, &buf->headers.hdr_big,
+	    sizeof(*buf), flags, 20000);
+	if (error != 0)
+		return (error);
+	if (_2btol(buf->headers.hdr_big.data_length) < 6)
+		return (EIO);
+
+	if (big)
+		*big = 1;
+	offset = sizeof(struct scsi_mode_header_big);
+	*page_data = scsi_mode_sense_big_page(&buf->headers.hdr_big, page_len);
+	blk_desc_len = _2btol(buf->headers.hdr_big.blk_desc_len);
+
+blk_desc:
+	/* Both scsi_blk_desc and scsi_direct_blk_desc are 8 bytes. */
+	if (blk_desc_len == 0 || (blk_desc_len % 8 != 0))
+		return (0);
+
+	switch (sc_link->inqdata.device & SID_TYPE) {
+	case T_SEQUENTIAL:
+		/*
+		 * XXX What other device types return general block descriptors?
+		 */
+		general = (struct scsi_blk_desc *)&buf->headers.buf[offset];	
+		if (density)
+			*density = general->density;
+		if (block_size)
+			*block_size = _3btol(general->blklen);
+		if (block_count)
+			*block_count = (u_int64_t)_3btol(general->nblocks);
+		break;
+
+	default:
+		direct = (struct scsi_direct_blk_desc *)&buf->
+		    headers.buf[offset];
+		if (density)
+			*density = direct->density;
+		if (block_size)
+			*block_size = _3btol(direct->blklen);
+		if (block_count)
+			*block_count = (u_int64_t)_4btol(direct->nblocks);
+		break;
+	}
+
+	return (0);
+}
+
+int
+scsi_mode_select(sc_link, byte2, data, flags, timeout)
+	struct scsi_link *sc_link;
+	int byte2, flags, timeout;
+	struct scsi_mode_header *data;
+{
+	struct scsi_mode_select scsi_cmd;
+	int error;
+
+	bzero(&scsi_cmd, sizeof(scsi_cmd));
+	scsi_cmd.opcode = MODE_SELECT;
+	scsi_cmd.byte2 = byte2;
+	scsi_cmd.length = data->data_length + 1; /* 1 == sizeof(data_length) */
+
+	/* Length is reserved when doing mode select so zero it. */
+	data->data_length = 0;
+
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
+	    sizeof(scsi_cmd), (u_char *)data, scsi_cmd.length, 4, timeout, NULL,
+	    flags | SCSI_DATA_OUT);
+
+	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_mode_select: error = %d\n", error));
+
+	return (error);
+}
+
+int
+scsi_mode_select_big(sc_link, byte2, data, flags, timeout)
+	struct scsi_link *sc_link;
+	int byte2, flags, timeout;
+	struct scsi_mode_header_big *data;
+{
+	struct scsi_mode_select_big scsi_cmd;
+	u_int32_t len;
+	int error;
+
+	len = _2btol(data->data_length) + 2; /* 2 == sizeof data->data_length */
+
+	bzero(&scsi_cmd, sizeof(scsi_cmd));
+	scsi_cmd.opcode = MODE_SELECT_BIG;
+	scsi_cmd.byte2 = byte2;
+	_lto2b(len, scsi_cmd.length);
+
+	/* Length is reserved when doing mode select so zero it. */
+	_lto2b(0, data->data_length);
+
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
+	    sizeof(scsi_cmd), (u_char *)data, len, 4, timeout, NULL,
+	    flags | SCSI_DATA_OUT);
+
+	SC_DEBUG(sc_link, SDEV_DB2, ("scsi_mode_select_big: error = %d\n",
+	    error));
+
+	return (error);
+}
+
 /*
  * This routine is called by the scsi interrupt when the transfer is complete.
  */
@@ -392,7 +668,7 @@ scsi_done(xs)
 	 * If it returns ERESTART then we should RETRY
 	 */
 retry:
-	error = sc_err1(xs, 1);
+	error = sc_err1(xs);
 	if (error == ERESTART) {
 		switch ((*(sc_link->adapter->scsi_cmd)) (xs)) {
 		case SUCCESSFULLY_QUEUED:
@@ -400,6 +676,7 @@ retry:
 
 		case TRY_AGAIN_LATER:
 			xs->error = XS_BUSY;
+			/* FALLTHROUGH */
 		case COMPLETE:
 			goto retry;
 		}
@@ -443,7 +720,6 @@ scsi_execute_xs(xs)
 	xs->resid = xs->datalen;
 	xs->status = 0;
 
-retry:
 	/*
 	 * Do the transfer. If we are polling we will return:
 	 * COMPLETE,  Was poll, and scsi_done has been called
@@ -481,7 +757,7 @@ retry:
 	if ((flags & (SCSI_USER | SCSI_POLL)) == (SCSI_USER | SCSI_POLL))
 		panic("scsi_execute_xs: USER with POLL");
 #endif
-
+retry:
 	switch ((*(xs->sc_link->adapter->scsi_cmd)) (xs)) {
 	case SUCCESSFULLY_QUEUED:
 		if ((flags & (SCSI_NOSLEEP | SCSI_POLL)) == SCSI_NOSLEEP)
@@ -494,12 +770,15 @@ retry:
 		while ((xs->flags & ITSDONE) == 0)
 			tsleep(xs, PRIBIO + 1, "scsi_scsi_cmd", 0);
 		splx(s);
+		/* FALLTHROUGH */
 	case COMPLETE:		/* Polling command completed ok */
+		if ((flags & (SCSI_NOSLEEP | SCSI_POLL)) == SCSI_NOSLEEP)
+			return EJUSTRETURN;
 		if (xs->bp)
 			return EJUSTRETURN;
 	doit:
 		SC_DEBUG(xs->sc_link, SDEV_DB3, ("back in cmd()\n"));
-		if ((error = sc_err1(xs, 0)) != ERESTART)
+		if ((error = sc_err1(xs)) != ERESTART)
 			return error;
 		goto retry;
 
@@ -565,9 +844,8 @@ scsi_scsi_cmd(sc_link, scsi_cmd, cmdlen, data_addr, datalen,
 }
 
 int 
-sc_err1(xs, async)
+sc_err1(xs)
 	struct scsi_xfer *xs;
-	int async;
 {
 	int error;
 
@@ -608,6 +886,7 @@ sc_err1(xs, async)
 			} else
 				goto lose;
 		}
+		/* FALLTHROUGH */
 	case XS_TIMEOUT:
 	retry:
 		if (xs->retries--) {
@@ -615,6 +894,7 @@ sc_err1(xs, async)
 			xs->flags &= ~ITSDONE;
 			return ERESTART;
 		}
+		/* FALLTHROUGH */
 	case XS_DRIVER_STUFFUP:
 	lose:
 		error = EIO;
@@ -707,20 +987,30 @@ scsi_interpret_sense(xs)
 	case SKEY_EQUAL:
 		break;
 	case SKEY_NOT_READY:
-		if ((sc_link->flags & SDEV_REMOVABLE) != 0)
-			sc_link->flags &= ~SDEV_MEDIA_LOADED;
 		if ((xs->flags & SCSI_IGNORE_NOT_READY) != 0)
-			return 0;
-		if (xs->retries && sense->add_sense_code == 0x04 &&
-		    sense->add_sense_code_qual == 0x01) {
-			xs->error = XS_BUSY;	/* ie. sense_retry */
-			return ERESTART;
-		}
-		if (xs->retries && !(sc_link->flags & SDEV_REMOVABLE)) {
-			delay(1000000);
-			return ERESTART;
-		}
+			return (0);
 		error = EIO;
+		if (xs->retries) {
+			switch (sense->add_sense_code) {
+			case 0x04:	/* LUN not ready */
+				switch (sense->add_sense_code_qual) {
+				case 0x01: /* Becoming Ready */
+				case 0x04: /* Format In Progress */
+				case 0x05: /* Rebuild In Progress */
+				case 0x06: /* Recalculation In Progress */
+				case 0x07: /* Operation In Progress */
+				case 0x08: /* Long Write In Progress */
+				case 0x09: /* Self-Test In Progress */
+					xs->error = XS_BUSY; /* wait & retry */
+					return (ERESTART);
+				}
+				break;
+			case 0x3a:	/* Medium not present */
+				sc_link->flags &= ~SDEV_MEDIA_LOADED;
+				error = ENODEV;
+				break;
+			}
+		}
 		break;
 	case SKEY_ILLEGAL_REQUEST:
 		if ((xs->flags & SCSI_IGNORE_ILLEGAL_REQUEST) != 0)
@@ -971,7 +1261,7 @@ static const struct {
 	{ 0x20, 0x08, "Access Denied - Enrollment Conflict" },
 	{ 0x20, 0x09, "Access Denied - Invalid LU Identifier" },
 	{ 0x20, 0x0A, "Access Denied - Invalid Proxy Token" },
-	{ 0x20, 0x0B, "Access DEnied - ACL LUN Conflict" },
+	{ 0x20, 0x0B, "Access Denied - ACL LUN Conflict" },
 	{ 0x21, 0x00, "Logical Block Address Out of Range" },
 	{ 0x21, 0x01, "Invalid Element Address" },
 	{ 0x21, 0x02, "Invalid Address For Write" },
@@ -1085,7 +1375,7 @@ static const struct {
 	{ 0x3B, 0x07, "Failed To Sense Bottom-Of-Form" },
 	{ 0x3B, 0x08, "Reposition Error" },
 	{ 0x3B, 0x09, "Read Past End Of Medium" },
-	{ 0x3B, 0x0A, "Read Past Begining Of Medium" },
+	{ 0x3B, 0x0A, "Read Past Beginning Of Medium" },
 	{ 0x3B, 0x0B, "Position Past End Of Medium" },
 	{ 0x3B, 0x0C, "Position Past Beginning Of Medium" },
 	{ 0x3B, 0x0D, "Medium Destination Element Full" },
@@ -1462,7 +1752,7 @@ scsi_decode_sense(sense, flag)
 	static char rqsbuf[132];
 	u_int16_t count;
 	u_int8_t skey, spec_1;
-	size_t len;
+	int len;
 
 	bzero(rqsbuf, sizeof rqsbuf);
 
@@ -1487,7 +1777,7 @@ scsi_decode_sense(sense, flag)
 			    "Error in %s, Offset %d",
 			    (spec_1 & SSD_SCS_CDB_ERROR) ? "CDB" : "Parameters",
 			    count);
-			if ((len < sizeof rqsbuf) &&
+			if ((len != -1 && len < sizeof rqsbuf) &&
 			    (spec_1 & SSD_SCS_VALID_BIT_INDEX))
 				snprintf(rqsbuf+len, sizeof rqsbuf - len,
 				    ", bit %d", spec_1 & SSD_SCS_BIT_INDEX);

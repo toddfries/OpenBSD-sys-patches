@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.21 2005/03/03 07:16:53 itojun Exp $ */
+/*	$OpenBSD: if_url.c,v 1.26 2005/08/01 05:36:48 brad Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -94,11 +94,6 @@
 #endif
 #endif /* defined(__OpenBSD__) */
 
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
-
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/urlphyreg.h>
@@ -176,9 +171,9 @@ static const struct url_type {
 	/* MELCO LUA-KTX */
 	{{ USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAKTX }, 0},
 	/* GREEN HOUSE USBKR100 */
-	{{ USB_VENDOR_GREENHOUSE2, USB_PRODUCT_GREENHOUSE2_USBKR100}, 0},
+	{{ USB_VENDOR_REALTEK, USB_PRODUCT_REALTEK_RTL8150}, 0},
 	/* GREEN HOUSE USBKR100PNA */
-	{{ USB_VENDOR_GREENHOUSE2, USB_PRODUCT_GREENHOUSE2_USBKR100PNA}, 0},
+	{{ USB_VENDOR_REALTEK, USB_PRODUCT_REALTEK_RTL8151}, 0},
 	/* Longshine LCS-8138TX */
 	{{ USB_VENDOR_ABOCOM, USB_PRODUCT_ABOCOM_LCS8138TX}, 0},
 	/* Micronet SP128AR */
@@ -211,16 +206,17 @@ USB_ATTACH(url)
 	usbd_status err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char devinfo[1024];
+	char *devinfop;
 	char *devname = USBDEVNAME(sc->sc_dev);
 	struct ifnet *ifp;
 	struct mii_data *mii;
 	u_char eaddr[ETHER_ADDR_LEN];
 	int i, s;
 
-	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
+	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", devname, devinfo);
+	printf("%s: %s\n", devname, devinfop);
+	usbd_devinfo_free(devinfop);
 
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, URL_CONFIG_NO, 1);
@@ -1150,21 +1146,6 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(&sc->sc_ac, ifa);
 			break;
 #endif /* INET */
-#ifdef NS
-		case AF_NS:
-		    {
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host = *(union ns_host *)
-					LLADDR(ifp->if_sadl);
-			else
-				memcpy(LLADDR(ifp->if_sadl),
-				       ina->x_host.c_host,
-				       ifp->if_addrlen);
-			break;
-		    }
-#endif /* NS */
 		}
 		break;
 
@@ -1260,6 +1241,7 @@ url_stop(struct ifnet *ifp, int disable)
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
 	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	url_reset(sc);
 
@@ -1333,7 +1315,6 @@ url_stop(struct ifnet *ifp, int disable)
 	}
 
 	sc->sc_link = 0;
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
 /* Set media options */
@@ -1426,16 +1407,13 @@ url_tick_task(void *xsc)
 	s = splnet();
 
 	mii_tick(mii);
-	if (!sc->sc_link) {
-		mii_pollstat(mii);
-		if (mii->mii_media_status & IFM_ACTIVE &&
-		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
-			DPRINTF(("%s: %s: got link\n",
-				 USBDEVNAME(sc->sc_dev), __func__));
-			sc->sc_link++;
-			if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
-				   url_start(ifp);
-		}
+	if (!sc->sc_link && mii->mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
+		DPRINTF(("%s: %s: got link\n",
+			 USBDEVNAME(sc->sc_dev), __func__));
+		sc->sc_link++;
+		if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
+			   url_start(ifp);
 	}
 
 	usb_callout(sc->sc_stat_ch, hz, url_tick, sc);

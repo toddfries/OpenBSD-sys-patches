@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.140 2005/03/07 16:43:54 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.143 2005/04/17 18:47:50 miod Exp $	*/
 /*	$NetBSD: pmap.c,v 1.118 1998/05/19 19:00:18 thorpej Exp $ */
 
 /*
@@ -379,7 +379,9 @@ static void pmap_page_upload(paddr_t);
 void pmap_pinit(pmap_t);
 void pmap_release(pmap_t);
 
+#if defined(SUN4) || defined(SUN4C)
 int mmu_has_hole;
+#endif
 
 vaddr_t prom_vstart;	/* For /dev/kmem */
 vaddr_t prom_vend;
@@ -509,7 +511,6 @@ boolean_t	(*pmap_extract_p)(pmap_t, vaddr_t, paddr_t *);
 boolean_t	(*pmap_is_modified_p)(struct vm_page *);
 boolean_t	(*pmap_is_referenced_p)(struct vm_page *);
 void		(*pmap_kenter_pa_p)(vaddr_t, paddr_t, vm_prot_t);
-void		(*pmap_kremove_p)(vaddr_t, vsize_t);
 void		(*pmap_page_protect_p)(struct vm_page *, vm_prot_t);
 void		(*pmap_protect_p)(pmap_t, vaddr_t, vaddr_t, vm_prot_t);
 void		(*pmap_copy_page_p)(struct vm_page *, struct vm_page *);
@@ -865,13 +866,6 @@ mmu_reservemon4_4c(nrp, nsp)
 #endif
 	struct regmap *rp;
 
-#if defined(SUN4M)
-	if (CPU_ISSUN4M) {
-		panic("mmu_reservemon4_4c called on Sun4M machine");
-		return;
-	}
-#endif
-
 #if defined(SUN4)
 	if (CPU_ISSUN4) {
 		prom_vstart = va = OLDMON_STARTVADDR;
@@ -961,8 +955,6 @@ mmu_reservemon4m(kpmap)
 	int te;
 	unsigned int mmupcrsave;
 
-/*XXX-GCC!*/mmupcrsave = 0;
-
 	/*
 	 * XXX: although the Sun4M can handle 36 bits of physical
 	 * address space, we assume that all these page tables, etc
@@ -1026,17 +1018,17 @@ mmu_setup4m_L1(regtblptd, kpmap)
 	/*
 	 * Here we scan the region table to copy any entries which appear.
 	 * We are only concerned with regions in kernel space and above
-	 * (i.e. regions VA_VREG(KERNBASE)+1 to 0xff). We ignore the first
-	 * region (at VA_VREG(KERNBASE)), since that is the 16MB L1 mapping
-	 * that the ROM used to map the kernel in initially. Later, we will
-	 * rebuild a new L3 mapping for the kernel and install it before
-	 * switching to the new pagetables.
+	 * (i.e. regions VA_VREG(VM_MIN_KERNEL_ADDRESS)+1 to 0xff). We ignore
+	 * the first region (at VA_VREG(VM_MIN_KERNEL_ADDRESS)), since that
+	 * is the 16MB L1 mapping that the ROM used to map the kernel in
+	 * initially. Later, we will rebuild a new L3 mapping for the kernel
+	 * and install it before switching to the new pagetables.
 	 */
 	regtblrover =
 		((regtblptd & ~SRMMU_TETYPE) << SRMMU_PPNPASHIFT) +
-		(VA_VREG(KERNBASE)+1) * sizeof(long);	/* kernel only */
+		(VA_VREG(VM_MIN_KERNEL_ADDRESS)+1) * sizeof(long);	/* kernel only */
 
-	for (i = VA_VREG(KERNBASE) + 1; i < SRMMU_L1SIZE;
+	for (i = VA_VREG(VM_MIN_KERNEL_ADDRESS) + 1; i < SRMMU_L1SIZE;
 	     i++, regtblrover += sizeof(long)) {
 
 		/* The region we're dealing with */
@@ -1666,7 +1658,6 @@ ctx_alloc(pm)
 	int gap_start, gap_end;
 	unsigned long va;
 
-/*XXX-GCC!*/gap_start=gap_end=0;
 #ifdef DEBUG
 	if (pm->pm_ctx)
 		panic("ctx_alloc pm_ctx");
@@ -2683,7 +2674,6 @@ pmap_bootstrap4_4c(nctx, nregion, nsegment)
 	pmap_is_modified_p 	=	pmap_is_modified4_4c;
 	pmap_is_referenced_p	=	pmap_is_referenced4_4c;
 	pmap_kenter_pa_p	=	pmap_kenter_pa4_4c;
-	pmap_kremove_p		=	pmap_kremove4_4c;
 	pmap_page_protect_p	=	pmap_page_protect4_4c;
 	pmap_protect_p		=	pmap_protect4_4c;
 	pmap_zero_page_p	=	pmap_zero_page4_4c;
@@ -2826,9 +2816,9 @@ pmap_bootstrap4_4c(nctx, nregion, nsegment)
 		 */
 		lastpage = NPTESG;
 
-	p = (caddr_t)KERNBASE;		/* first va */
-	vs = VA_VSEG(KERNBASE);		/* first virtual segment */
-	vr = VA_VREG(KERNBASE);		/* first virtual region */
+	p = (caddr_t)VM_MIN_KERNEL_ADDRESS;	/* first va */
+	vs = VA_VSEG(VM_MIN_KERNEL_ADDRESS);	/* first virtual segment */
+	vr = VA_VREG(VM_MIN_KERNEL_ADDRESS);	/* first virtual region */
 	rp = &pmap_kernel()->pm_regmap[vr];
 
 	for (rcookie = 0, scookie = 0;;) {
@@ -2996,7 +2986,6 @@ pmap_bootstrap4m(void)
 	pmap_is_modified_p 	=	pmap_is_modified4m;
 	pmap_is_referenced_p	=	pmap_is_referenced4m;
 	pmap_kenter_pa_p	=	pmap_kenter_pa4m;
-	pmap_kremove_p		=	pmap_kremove4m;
 	pmap_page_protect_p	=	pmap_page_protect4m;
 	pmap_protect_p		=	pmap_protect4m;
 	pmap_zero_page_p	=	pmap_zero_page4m;
@@ -3132,12 +3121,12 @@ pmap_bootstrap4m(void)
 		 * Entering new region; install & build segtbl
 		 */
 
-		rp = &pmap_kernel()->pm_regmap[reg + VA_VREG(KERNBASE)];
+		rp = &pmap_kernel()->pm_regmap[reg + VA_VREG(VM_MIN_KERNEL_ADDRESS)];
 
 		kphyssegtbl = (caddr_t)
 		    &kernel_segtable_store[reg * SRMMU_L2SIZE];
 
-		setpgt4m(&pmap_kernel()->pm_reg_ptps[reg + VA_VREG(KERNBASE)],
+		setpgt4m(&pmap_kernel()->pm_reg_ptps[reg + VA_VREG(VM_MIN_KERNEL_ADDRESS)],
 		    (VA2PA(kphyssegtbl) >> SRMMU_PPNPASHIFT) | SRMMU_TEPTD);
 
 		rp->rg_seg_ptps = (int *)kphyssegtbl;
@@ -3202,17 +3191,17 @@ pmap_bootstrap4m(void)
 	/*
 	 * Now map the kernel into our new set of page tables, then
 	 * (finally) switch over to our running page tables.
-	 * We map from KERNBASE to p into context 0's page tables (and
-	 * the kernel pmap).
+	 * We map from VM_MIN_KERNEL_ADDRESS to p into context 0's
+	 * page tables (and the kernel pmap).
 	 */
 #ifdef DEBUG			/* Sanity checks */
 	if ((u_int)p % NBPG != 0)
 		panic("pmap_bootstrap4m: p misaligned?!?");
-	if (KERNBASE % NBPRG != 0)
-		panic("pmap_bootstrap4m: KERNBASE not region-aligned");
+	if (VM_MIN_KERNEL_ADDRESS % NBPRG != 0)
+		panic("pmap_bootstrap4m: VM_MIN_KERNEL_ADDRESS not region-aligned");
 #endif
 
-	for (q = (caddr_t) KERNBASE; q < p; q += NBPG) {
+	for (q = (caddr_t) VM_MIN_KERNEL_ADDRESS; q < p; q += NBPG) {
 		struct regmap *rp;
 		struct segmap *sp;
 		int pte;
@@ -3224,7 +3213,7 @@ pmap_bootstrap4m(void)
 		sp = &rp->rg_segmap[VA_VSEG(q)];
 		sp->sg_npte++;
 
-		pte = ((int)q - KERNBASE) >> SRMMU_PPNPASHIFT;
+		pte = ((int)q - VM_MIN_KERNEL_ADDRESS) >> SRMMU_PPNPASHIFT;
 		pte |= PPROT_N_RX | SRMMU_TEPTE;
 
 		if ((cpuinfo.flags & CPUFLG_CACHEPAGETABLES) != 0 ||
@@ -3439,6 +3428,8 @@ struct pmap *
 pmap_create()
 {
 	struct pmap *pm;
+	int size;
+	void *urp;
 
 	pm = (struct pmap *)malloc(sizeof *pm, M_VMPMAP, M_WAITOK);
 #ifdef DEBUG
@@ -3446,25 +3437,6 @@ pmap_create()
 		printf("pmap_create: created %p\n", pm);
 #endif
 	bzero((caddr_t)pm, sizeof *pm);
-	pmap_pinit(pm);
-	return (pm);
-}
-
-/*
- * Initialize a preallocated and zeroed pmap structure,
- * such as one in a vmspace structure.
- */
-void
-pmap_pinit(pm)
-	struct pmap *pm;
-{
-	int size;
-	void *urp;
-
-#ifdef DEBUG
-	if (pmapdebug & PDB_CREATE)
-		printf("pmap_pinit(%p)\n", pm);
-#endif
 
 	size = NUREG * sizeof(struct regmap);
 
@@ -3510,15 +3482,15 @@ pmap_pinit(pm)
 
 		/* Copy kernel regions */
 		for (i = 0; i < NKREG; i++) {
-			setpgt4m(&pm->pm_reg_ptps[VA_VREG(KERNBASE) + i],
-				 cpuinfo.L1_ptps[VA_VREG(KERNBASE) + i]);
+			setpgt4m(&pm->pm_reg_ptps[VA_VREG(VM_MIN_KERNEL_ADDRESS) + i],
+				 cpuinfo.L1_ptps[VA_VREG(VM_MIN_KERNEL_ADDRESS) + i]);
 		}
 	}
 #endif
 
 	pm->pm_gap_end = VA_VREG(VM_MAXUSER_ADDRESS);
 
-	return;
+	return (pm);
 }
 
 /*
@@ -3686,6 +3658,40 @@ pmap_remove(pm, va, endva)
 			(*rm)(pm, va, nva, vr, vs);
 	}
 	simple_unlock(&pm->pm_lock);
+	splx(s);
+	setcontext(ctx);
+}
+
+void
+pmap_kremove(va, len)
+	vaddr_t va;
+	vsize_t len;
+{
+	struct pmap *pm = pmap_kernel();
+	vaddr_t nva, endva = va + len;
+	int vr, vs, s, ctx;
+
+#ifdef DEBUG
+	if (pmapdebug & PDB_REMOVE)
+		printf("pmap_kremove(0x%lx, 0x%lx)\n", va, len);
+#endif
+
+	ctx = getcontext();
+	s = splvm();		/* XXX conservative */
+	simple_lock(pm->pm_lock);
+
+	for (; va < endva; va = nva) {
+		/* do one virtual segment at a time */
+		vr = VA_VREG(va);
+		vs = VA_VSEG(va);
+		nva = VSTOVA(vr, vs + 1);
+		if (nva == 0 || nva > endva)
+			nva = endva;
+		if (pm->pm_regmap[vr].rg_nsegmap != 0)
+			pmap_rmk(pm, va, nva, vr, vs);
+	}
+
+	simple_unlock(pm->pm_lock);
 	splx(s);
 	setcontext(ctx);
 }
@@ -5232,14 +5238,6 @@ pmap_kenter_pa4_4c(va, pa, prot)
 	setcontext4(ctx);
 }
 
-void
-pmap_kremove4_4c(va, len)
-	vaddr_t va;
-	vsize_t len;
-{
-	pmap_remove(pmap_kernel(), va, va + len);
-}
-
 #endif /*sun4,4c*/
 
 #if defined(SUN4M)		/* Sun4M versions of enter routines */
@@ -5339,8 +5337,8 @@ pmap_enk4m(pm, va, prot, flags, pv, pteproto)
 	int wired = (flags & PMAP_WIRED) != 0;
 
 #ifdef DIAGNOSTIC
-	if (va < KERNBASE)
-		panic("pmap_enk4m: can't enter va 0x%lx below KERNBASE", va);
+	if (va < VM_MIN_KERNEL_ADDRESS)
+		panic("pmap_enk4m: can't enter va 0x%lx below VM_MIN_KERNEL_ADDRESS", va);
 #endif
 	rp = &pm->pm_regmap[VA_VREG(va)];
 	sp = &rp->rg_segmap[VA_VSEG(va)];
@@ -5418,8 +5416,8 @@ pmap_enu4m(pm, va, prot, flags, pv, pteproto)
 	int wired = (flags & PMAP_WIRED) != 0;
 
 #ifdef DEBUG
-	if (KERNBASE < va)
-		panic("pmap_enu4m: can't enter va 0x%lx above KERNBASE", va);
+	if (VM_MIN_KERNEL_ADDRESS < va)
+		panic("pmap_enu4m: can't enter va 0x%lx above VM_MIN_KERNEL_ADDRESS", va);
 #endif
 
 	write_user_windows();		/* XXX conservative */
@@ -5564,14 +5562,6 @@ pmap_kenter_pa4m(va, pa, prot)
 	ctx = getcontext4m();
 	pmap_enk4m(pmap_kernel(), va, prot, PMAP_WIRED, pv, pteproto);
 	setcontext4m(ctx);
-}
-
-void
-pmap_kremove4m(va, len)
-	vaddr_t va;
-	vsize_t len;
-{
-	pmap_remove(pmap_kernel(), va, va + len);
 }
 
 #endif /* sun4m */
@@ -5730,21 +5720,6 @@ pmap_extract4m(pm, va, pa)
 	return (TRUE);
 }
 #endif /* sun4m */
-
-/*
- * Garbage collects the physical map system for
- * pages which are no longer used.
- * Success need not be guaranteed -- that is, there
- * may well be pages which are not referenced, but
- * others may be collected.
- * Called by the pageout daemon when pages are scarce.
- */
-/* ARGSUSED */
-void
-pmap_collect(pm)
-	struct pmap *pm;
-{
-}
 
 #if defined(SUN4) || defined(SUN4C)
 
@@ -6047,19 +6022,6 @@ pmap_copy_page4m(struct vm_page *srcpg, struct vm_page *dstpg)
 #endif /* Sun4M */
 
 /*
- * Turn a cdevsw d_mmap value into a byte address for pmap_enter.
- * XXX	this should almost certainly be done differently, and
- *	elsewhere, or even not at all
- */
-paddr_t
-pmap_phys_address(x)
-	int x;
-{
-
-	return (x);
-}
-
-/*
  * Turn on/off cache for a given (va, number of pages).
  *
  * We just assert PG_NC for each PTE; the addresses must reside
@@ -6174,8 +6136,10 @@ pmap_prefer(foff, vap)
 	vaddr_t va = *vap;
 	long d, m;
 
+#if defined(SUN4) || defined(SUN4C)
 	if (VA_INHOLE(va))
 		va = MMU_HOLE_END;
+#endif
 
 	m = CACHE_ALIAS_DIST;
 	if (m == 0)		/* m=0 => no cache aliasing */
@@ -6233,15 +6197,6 @@ pmap_activate(p)
 		}
 	}
 	splx(s);
-}
-
-/*
- * Deactivate the address space of the specified process.
- */
-void
-pmap_deactivate(p)
-	struct proc *p;
-{
 }
 
 #ifdef DEBUG
@@ -6303,12 +6258,12 @@ pm_check_u(s, pm)
 					    SRMMU_PPNPASHIFT) | SRMMU_TEPTD))
 		    panic("%s: CHK(vr %d): SRMMU segtbl not installed",s,vr);
 #endif
-		if ((unsigned int)rp < KERNBASE)
+		if ((unsigned int)rp < VM_MIN_KERNEL_ADDRESS)
 			panic("%s: rp=%p", s, rp);
 		n = 0;
 		for (vs = 0; vs < NSEGRG; vs++) {
 			sp = &rp->rg_segmap[vs];
-			if ((unsigned int)sp < KERNBASE)
+			if ((unsigned int)sp < VM_MIN_KERNEL_ADDRESS)
 				panic("%s: sp=%p", s, sp);
 			if (sp->sg_npte != 0) {
 				n++;
@@ -6617,8 +6572,8 @@ debug_pagetables()
 	printf("Testing region 0xff: ");
 	test_region(0xff,0,16*1024*1024);
 #if 0	/* XXX avail_start */
-	printf("Testing kernel region 0x%x: ", VA_VREG(KERNBASE));
-	test_region(VA_VREG(KERNBASE), 4096, avail_start);
+	printf("Testing kernel region 0x%x: ", VA_VREG(VM_MIN_KERNEL_ADDRESS));
+	test_region(VA_VREG(VM_MIN_KERNEL_ADDRESS), 4096, avail_start);
 #endif
 	cngetc();
 
@@ -6666,7 +6621,7 @@ VA2PAsw(ctx, addr, pte)
 		return 0;
 	}
 	/* L1 */
-	curtbl = ((curpte & ~0x3) << 4) | KERNBASE; /* correct for krn*/
+	curtbl = ((curpte & ~0x3) << 4) | VM_MIN_KERNEL_ADDRESS; /* correct for krn*/
 	*pte = curpte = curtbl[VA_VREG(addr)];
 #ifdef EXTREME_EXTREME_DEBUG
 	printf("L1 table at 0x%x.\nGot L1 pte 0x%x\n",curtbl,curpte);
@@ -6680,7 +6635,7 @@ VA2PAsw(ctx, addr, pte)
 		return 0;
 	}
 	/* L2 */
-	curtbl = ((curpte & ~0x3) << 4) | KERNBASE; /* correct for krn*/
+	curtbl = ((curpte & ~0x3) << 4) | VM_MIN_KERNEL_ADDRESS; /* correct for krn*/
 	*pte = curpte = curtbl[VA_VSEG(addr)];
 #ifdef EXTREME_EXTREME_DEBUG
 	printf("L2 table at 0x%x.\nGot L2 pte 0x%x\n",curtbl,curpte);
@@ -6694,7 +6649,7 @@ VA2PAsw(ctx, addr, pte)
 		return 0;
 	}
 	/* L3 */
-	curtbl = ((curpte & ~0x3) << 4) | KERNBASE; /* correct for krn*/
+	curtbl = ((curpte & ~0x3) << 4) | VM_MIN_KERNEL_ADDRESS; /* correct for krn*/
 	*pte = curpte = curtbl[VA_VPG(addr)];
 #ifdef EXTREME_EXTREME_DEBUG
 	printf("L3 table at 0x%x.\nGot L3 pte 0x%x\n",curtbl,curpte);
@@ -6735,7 +6690,7 @@ void test_region(reg, start, stop)
 				printf("Mismatch at address 0x%x.\n",addr);
 				if (cngetc()=='q') break;
 			}
-			if (reg == VA_VREG(KERNBASE))
+			if (reg == VA_VREG(VM_MIN_KERNEL_ADDRESS))
 				/* kernel permissions are different */
 				continue;
 			if ((pte&SRMMU_PROT_MASK)!=(ptesw&SRMMU_PROT_MASK)) {

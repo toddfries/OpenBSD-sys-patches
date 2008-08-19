@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_scoop.c,v 1.7 2005/03/08 23:29:06 uwe Exp $	*/
+/*	$OpenBSD: zaurus_scoop.c,v 1.11 2005/07/01 23:51:55 uwe Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@bsdx.de>
@@ -25,6 +25,9 @@
 
 #include <arm/xscale/pxa2x0var.h>
 
+#include <machine/zaurus_reg.h>
+#include <machine/zaurus_var.h>
+
 #include <zaurus/dev/zaurus_scoopreg.h>
 #include <zaurus/dev/zaurus_scoopvar.h>
 
@@ -38,7 +41,7 @@ struct scoop_softc {
 int	scoopmatch(struct device *, void *, void *);
 void	scoopattach(struct device *, struct device *, void *);
 
-struct cfattach scoop_pxaip_ca = {
+struct cfattach scoop_ca = {
 	sizeof (struct scoop_softc), scoopmatch, scoopattach
 };
 
@@ -57,10 +60,9 @@ scoopmatch(struct device *parent, void *match, void *aux)
 	struct cfdata *cf = match;
 
 	/*
-	 * Only the C3000 models (pxa270) are known to have two SCOOPs,
-	 * on other models we only find the first one.
+	 * Only C3000-like models are known to have two SCOOPs.
 	 */
-        if ((cputype & ~CPU_ID_XSCALE_COREREV_MASK) == CPU_ID_PXA27X)
+        if (ZAURUS_ISC3000)
 	    	return (cf->cf_unit < 2);
 
 	return (cf->cf_unit == 0);
@@ -79,9 +81,9 @@ scoopattach(struct device *parent, struct device *self, void *aux)
 	if (pxa->pxa_addr != -1)
 		addr = pxa->pxa_addr;
 	else if (sc->sc_dev.dv_unit == 0)
-		addr = SCOOP0_BASE;
+		addr = C3000_SCOOP0_BASE;
 	else
-		addr = SCOOP1_BASE;
+		addr = C3000_SCOOP1_BASE;
 
 	size = pxa->pxa_size < SCOOP_SIZE ? SCOOP_SIZE : pxa->pxa_size;
 
@@ -90,7 +92,7 @@ scoopattach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	printf(": Onboard Peripheral Controller\n");
+	printf(": PCMCIA/GPIO controller\n");
 }
 
 int
@@ -132,6 +134,9 @@ scoop_gpio_pin_ctl(struct scoop_softc *sc, int pin, int flags)
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, SCOOP_GPCR, rv);
 }
 
+/*
+ * Turn the LCD background light and contrast signal on or off.
+ */
 void
 scoop_set_backlight(int on, int cont)
 {
@@ -151,6 +156,23 @@ scoop_set_backlight(int on, int cont)
 #endif
 }
 
+/*
+ * Turn the infrared LED on or off (must be on while transmitting).
+ */
+void
+scoop_set_irled(int on)
+{
+	if (scoop_cd.cd_ndevs > 1 && scoop_cd.cd_devs[1] != NULL)
+		/* IR_ON is inverted */
+		scoop_gpio_pin_write(scoop_cd.cd_devs[1],
+		    SCOOP1_IR_ON, !on);
+}
+
+/*
+ * Turn the green and orange LEDs on or off.  If the orange LED is on,
+ * then it is wired to indicate if A/C is connected.  The green LED has
+ * no such predefined function.
+ */
 void
 scoop_led_set(int led, int on)
 {
@@ -162,6 +184,33 @@ scoop_led_set(int led, int on)
 		if (scoop_cd.cd_ndevs > 1 && (led & SCOOP_LED_ORANGE) != 0)
 			scoop_gpio_pin_write(scoop_cd.cd_devs[0],
 			    SCOOP0_LED_ORANGE_C3000, on);
+	}
+}
+
+/*
+ * Enable or disable the headphone output connection.
+ */
+void
+scoop_set_headphone(int on)
+{
+	if (scoop_cd.cd_ndevs < 1 || scoop_cd.cd_devs[0] == NULL)
+		return;
+
+	scoop_gpio_pin_ctl(scoop_cd.cd_devs[0], SCOOP0_MUTE_L,
+	    GPIO_PIN_OUTPUT);
+	scoop_gpio_pin_ctl(scoop_cd.cd_devs[0], SCOOP0_MUTE_R,
+	    GPIO_PIN_OUTPUT);
+
+	if (on) {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_L,
+		    GPIO_PIN_HIGH);
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_R,
+		    GPIO_PIN_HIGH);
+	} else {
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_L,
+		    GPIO_PIN_LOW);
+		scoop_gpio_pin_write(scoop_cd.cd_devs[0], SCOOP0_MUTE_R,
+		    GPIO_PIN_LOW);
 	}
 }
 

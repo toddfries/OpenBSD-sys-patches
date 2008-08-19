@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.77 2005/03/04 22:41:04 reyk Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.79 2005/07/03 20:14:00 drahn Exp $	*/
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -146,8 +146,7 @@
 #define	M_USBHC		103	/* USB host controller */
 /* 104 - free */
 #define M_MEMDESC	105	/* Memory range */
-#define M_UFS_EXTATTR	106	/* Extended Attributes */
-/* 107 - free */
+/* 106-107 - free */
 #define M_CRYPTO_DATA	108	/* Crypto framework data buffers (keys etc.) */
 /* 109 - free */
 #define M_CREDENTIALS	110	/* IPsec-related credentials and ID info */
@@ -179,8 +178,12 @@
 #define	M_BLUETOOTH	138	/* Bluetooth */
 
 #define M_BWMETER	139	/* Multicast upcall bw meters */
-#define	M_LAST		140	/* Must be last type + 1 */
 
+#define M_UDFMOUNT	140	/* UDF mount */
+#define M_UDFFENTRY	141	/* UDF file entry */
+#define M_UDFFID	142	/* UDF file id */
+
+#define	M_LAST		143	/* Must be last type + 1 */
 
 #define	INITKMEMNAMES { \
 	"free",		/* 0 M_FREE */ \
@@ -308,6 +311,9 @@
 	"kqueue",	/* 137 M_KEVENT */ \
 	"bluetooth",	/* 138 M_BLUETOOTH */ \
 	"bwmeter",	/* 139 M_BWMETER */ \
+	"UDF mount",	/* 140 M_UDFMOUNT */ \
+	"UDF file entry",	/* 141 M_UDFFENTRY */ \
+	"UDF file id",	/* 142 M_UDFFID */ \
 }
 
 struct kmemstats {

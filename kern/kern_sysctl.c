@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.124 2005/03/10 17:26:10 tedu Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.128 2005/07/31 04:36:51 deraadt Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -101,6 +101,7 @@ int sysctl_proc_args(int *, u_int, void *, size_t *, struct proc *);
 int sysctl_intrcnt(int *, u_int, void *, size_t *);
 int sysctl_sensors(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_emul(int *, u_int, void *, size_t *, void *, size_t);
+int sysctl_cptime2(int *, u_int, void *, size_t *, void *, size_t);
 
 int (*cpu_cpuspeed)(int *);
 int (*cpu_setperf)(int);
@@ -288,6 +289,7 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 #ifdef __HAVE_TIMECOUNTER
 		case KERN_TIMECOUNTER:
 #endif
+		case KERN_CPTIME2:
 			break;
 		default:
 			return (ENOTDIR);	/* overloaded */
@@ -398,8 +400,18 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case KERN_RND:
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &rndstats,
 		    sizeof(rndstats)));
-	case KERN_ARND:
-		return (sysctl_rdint(oldp, oldlenp, newp, arc4random()));
+	case KERN_ARND: {
+		char buf[256];
+
+		if (*oldlenp > sizeof(buf))
+			*oldlenp = sizeof(buf);
+		if (oldp) {
+			arc4random_bytes(buf, *oldlenp);
+			if ((error = copyout(buf, oldp, *oldlenp)))
+				return (error);
+		}
+		return (0);
+	}
 	case KERN_NOSUIDCOREDUMP:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &nosuidcoredump));
 	case KERN_FSYNC:
@@ -540,6 +552,11 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 #endif
 	case KERN_MAXLOCKSPERUID:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxlocksperuid));
+#ifdef __HAVE_CPUINFO
+	case KERN_CPTIME2:
+		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
+		    newp, newlen));
+#endif
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1001,8 +1018,8 @@ sysctl_doproc(name, namelen, where, sizep)
 	char *where;
 	size_t *sizep;
 {
-	struct kinfo_proc2 kproc2;
-	struct eproc eproc;
+	struct kinfo_proc2 *kproc2 = NULL;
+	struct eproc *eproc = NULL;
 	struct proc *p;
 	char *dp;
 	int arg, buflen, doingzomb, elem_size, elem_count;
@@ -1020,6 +1037,7 @@ sysctl_doproc(name, namelen, where, sizep)
 		op = name[1];
 		arg = op == KERN_PROC_ALL ? 0 : name[2];
 		elem_size = elem_count = 0;
+		eproc = malloc(sizeof(struct eproc), M_TEMP, M_WAITOK);
 	} else /* if (type == KERN_PROC2) */ {
 		if (namelen != 5 || name[3] < 0 || name[4] < 0)
 			return (EINVAL);
@@ -1027,6 +1045,7 @@ sysctl_doproc(name, namelen, where, sizep)
 		arg = name[2];
 		elem_size = name[3];
 		elem_count = name[4];
+		kproc2 = malloc(sizeof(struct kinfo_proc2), M_TEMP, M_WAITOK);
 	}
 	p = LIST_FIRST(&allproc);
 	doingzomb = 0;
@@ -1085,36 +1104,37 @@ again:
 			/* no filtering */
 			break;
 		default:
-			return (EINVAL);
+			error = EINVAL;
+			goto err;
 		}
 		if (type == KERN_PROC) {
 			if (buflen >= sizeof(struct kinfo_proc)) {
-				fill_eproc(p, &eproc);
+				fill_eproc(p, eproc);
 				error = copyout((caddr_t)p,
 				    &((struct kinfo_proc *)dp)->kp_proc,
 				    sizeof(struct proc));
 				if (error)
-					return (error);
-				error = copyout((caddr_t)&eproc,
+					goto err;
+				error = copyout((caddr_t)eproc,
 				    &((struct kinfo_proc *)dp)->kp_eproc,
-				    sizeof(eproc));
+				    sizeof(*eproc));
 				if (error)
-					return (error);
+					goto err;
 				dp += sizeof(struct kinfo_proc);
 				buflen -= sizeof(struct kinfo_proc);
 			}
 			needed += sizeof(struct kinfo_proc);
 		} else /* if (type == KERN_PROC2) */ {
 			if (buflen >= elem_size && elem_count > 0) {
-				fill_kproc2(p, &kproc2);
+				fill_kproc2(p, kproc2);
 				/*
 				 * Copy out elem_size, but not larger than
 				 * the size of a struct kinfo_proc2.
 				 */
-				error = copyout(&kproc2, dp,
-				    min(sizeof(kproc2), elem_size));
+				error = copyout(kproc2, dp,
+				    min(sizeof(*kproc2), elem_size));
 				if (error)
-					return (error);
+					goto err;
 				dp += elem_size;
 				buflen -= elem_size;
 				elem_count--;
@@ -1129,13 +1149,20 @@ again:
 	}
 	if (where != NULL) {
 		*sizep = dp - where;
-		if (needed > *sizep)
-			return (ENOMEM);
+		if (needed > *sizep) {
+			error = ENOMEM;
+			goto err;
+		}
 	} else {
 		needed += KERN_PROCSLOP;
 		*sizep = needed;
 	}
-	return (0);
+err:
+	if (eproc)
+		free(eproc, M_TEMP);
+	if (kproc2)
+		free(kproc2, M_TEMP);
+	return (error);
 }
 
 #endif	/* SMALL_KERNEL */
@@ -1165,7 +1192,7 @@ fill_eproc(struct proc *p, struct eproc *ep)
 		PHOLD(p);	/* need for pstats */
 		ep->e_vm.vm_rssize = vm_resident_count(vm);
 		ep->e_vm.vm_tsize = vm->vm_tsize;
-		ep->e_vm.vm_dsize = vm->vm_dsize;
+		ep->e_vm.vm_dsize = vm->vm_dused;
 		ep->e_vm.vm_ssize = vm->vm_ssize;
 		ep->e_pstats = *p->p_stats;
 		ep->e_pstats_valid = 1;
@@ -1297,7 +1324,7 @@ fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 
 		ki->p_vm_rssize = vm_resident_count(vm);
 		ki->p_vm_tsize = vm->vm_tsize;
-		ki->p_vm_dsize = vm->vm_dsize;
+		ki->p_vm_dsize = vm->vm_dused;
 		ki->p_vm_ssize = vm->vm_ssize;
 
 		ki->p_forw = PTRTOINT64(p->p_forw);
@@ -1860,3 +1887,30 @@ sysctl_emul(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 }
 
 #endif	/* SMALL_KERNEL */
+
+#ifdef __HAVE_CPUINFO
+int
+sysctl_cptime2(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen)
+{
+	CPU_INFO_ITERATOR cii;
+	struct cpu_info *ci;
+	int i;
+
+	if (namelen != 1)
+		return (ENOTDIR);
+
+	i = name[0];
+
+	for (CPU_INFO_FOREACH(cii, ci)) {
+		if (i-- == 0)
+			break;
+	}
+	if (i > 0)
+		return (ENOENT);
+
+	return (sysctl_rdstruct(oldp, oldlenp, newp,
+	    &ci->ci_schedstate.spc_cp_time,
+	    sizeof(ci->ci_schedstate.spc_cp_time)));
+}
+#endif

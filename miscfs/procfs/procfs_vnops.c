@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vnops.c,v 1.33 2004/10/19 12:42:28 pedro Exp $	*/
+/*	$OpenBSD: procfs_vnops.c,v 1.36 2005/04/21 23:28:55 deraadt Exp $	*/
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*
@@ -86,10 +86,6 @@ struct proc_target {
 	{ DT_DIR, N(".."),	Proot,		NULL },
 	{ DT_REG, N("file"),	Pfile,		procfs_validfile },
 	{ DT_REG, N("mem"),	Pmem,		NULL },
-#ifdef PTRACE
-	{ DT_REG, N("regs"),	Pregs,		procfs_validregs },
-	{ DT_REG, N("fpregs"),	Pfpregs,	procfs_validfpregs },
-#endif
 	{ DT_REG, N("ctl"),	Pctl,		NULL },
 	{ DT_REG, N("status"),	Pstatus,	NULL },
 	{ DT_REG, N("note"),	Pnote,		NULL },
@@ -354,10 +350,11 @@ procfs_inactive(v)
 	struct vop_inactive_args /* {
 		struct vnode *a_vp;
 	} */ *ap = v;
-	struct pfsnode *pfs = VTOPFS(ap->a_vp);
+	struct vnode *vp = ap->a_vp;
+	struct pfsnode *pfs = VTOPFS(vp);
 
-	if (pfind(pfs->pfs_pid) == 0)
-		vgone(ap->a_vp);
+	if (pfind(pfs->pfs_pid) == NULL && !(vp->v_flag & VXLOCK))
+		vgone(vp);
 
 	return (0);
 }
@@ -605,11 +602,17 @@ procfs_getattr(v)
 
 	case Pcurproc: {
 		char buf[16];		/* should be enough */
+		int len;
+
+		len = snprintf(buf, sizeof buf, "%ld", (long)curproc->p_pid);
+		if (len == -1 || len >= sizeof buf) {
+			error = EINVAL;
+			break;
+		}
 		vap->va_nlink = 1;
 		vap->va_uid = 0;
 		vap->va_gid = 0;
-		vap->va_size = vap->va_bytes =
-		    snprintf(buf, sizeof buf, "%ld", (long)curproc->p_pid);
+		vap->va_size = vap->va_bytes = len;
 		break;
 	}
 
@@ -1094,6 +1097,8 @@ procfs_readlink(v)
 	else if (VTOPFS(ap->a_vp)->pfs_fileno == PROCFS_FILENO(0, Pself))
 		len = strlcpy(buf, "curproc", sizeof buf);
 	else
+		return (EINVAL);
+	if (len == -1 || len >= sizeof buf)
 		return (EINVAL);
 
 	return (uiomove(buf, len, ap->a_uio));

@@ -1,10 +1,17 @@
-#	$OpenBSD: GENERIC,v 1.142 2005/02/25 12:57:49 jsg Exp $
-#	$NetBSD: GENERIC,v 1.31 1996/12/03 17:25:29 cgd Exp $
+#	$OpenBSD: GENERIC,v 1.153 2005/08/03 02:10:43 dlg Exp $
+#
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
+#
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
-machine	alpha
-
-include "../../../conf/GENERIC"
-maxusers	32
+machine		alpha
+include		"../../../conf/GENERIC"
+maxusers	32			# estimated number of users
 
 # CPU Support
 option		DEC_3000_500	# Flamingo etc:	3000/[4-9]00*
@@ -76,6 +83,8 @@ uplcom* at uhub?			# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?			# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uipaq*	at uhub?			# iPAQ serial adapter
+ucom*	at uipaq?
 uaudio* at uhub?			# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?			# USB MIDI
@@ -83,6 +92,7 @@ midi*	at umidi?
 ulpt*	at uhub?			# USB Printers
 umass*	at uhub?			# USB Mass Storage devices
 scsibus* at umass?
+atapiscsi* at umass?
 uhidev*	at uhub?			# Human Interface Devices
 ums*	at uhidev?			# USB mouse
 wsmouse* at ums? mux 0
@@ -108,6 +118,7 @@ udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
 #ubt*	at uhub?			# USB Bluetooth
 ugen*	at uhub?			# USB Generic driver
+ural*	at uhub?			# Ralink RT2500
 
 # EV6 Tsunami Core Logic
 tsc*	at	mainbus0
@@ -198,6 +209,10 @@ rl*	at pci?				# RealTek 81[23]9 ethernet
 vr*	at pci?				# VIA Rhine ethernet
 em*	at pci?				# Intel Pro/1000 ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
+epic*	at pci?				# SMC EPIC/100 ethernet
+skc*	at pci?				# SysKonnect GEnesis 984x
+sk*	at skc?				#  each port of above
+ral*	at pci?				# Ralink RT2500
 
 #UNTESTED:  the following section of drivers is untested on alpha.
 en*	at pci?				# ENI PCI ATM (untested)
@@ -208,18 +223,12 @@ wb*	at pci?				# Winbond W89C840F ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 ste*	at pci?				# Sundance ST201 ethernet
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
-skc*	at pci?				# SysKonnect GEnesis 984x
-sk*	at skc?				#  each port of above
 an*	at pci?				# Cisco/Aironet 802.11DS
-
-#BROKEN: The following driver has 64-bit issues
-#tx*	at pci?				# SMC 83C170 EPIC ethernet
 
 vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics
 
 # Media Independent Interface (mii) drivers
-# UNTESTED: some of the following PHY's are untested.
 eephy*	at mii?				# Marvell PHYs for Intel GigE
 exphy*	at mii?				# 3Com internal PHYs
 inphy*	at mii?				# Intel 82555 PHYs
@@ -298,6 +307,8 @@ sd*	at scsibus?
 ss*	at scsibus?
 st*	at scsibus?
 ch*	at scsibus?
+safte*	at scsibus?
+ses*	at scsibus?
 uk*	at scsibus?
 
 # IDE controllers
@@ -325,7 +336,7 @@ cmpci*	at pci?				# C-Media CMI8338/8738
 fms*	at pci?				# Forte Media FM801
 auvia*	at pci?				# VIA VT82C686A
 
-# OPL[23] FM syntheziers
+# OPL[23] FM synthesizers
 opl*	at eso?
 
 # MIDI support

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.63.4.1 2005/06/12 16:07:34 brad Exp $	*/
+/*	$OpenBSD: apm.c,v 1.66 2005/06/16 16:49:04 beck Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -144,8 +144,8 @@ int apm_op_inprog;
 u_int apm_flags;
 u_char apm_majver;
 u_char apm_minver;
-int apm_dobusy = 1;
-int apm_doidle = 1;
+int apm_dobusy = 0;
+int apm_doidle = 0;
 int apm_bebatt = 0;
 int apm_idle_called = 0;
 
@@ -653,7 +653,7 @@ apm_cpu_idle(void)
 	struct apmregs regs;
 	static int call_apm = 0;
 
-	if (!apm_cd.cd_ndevs) { /* No APM device, wait for next interrupt */
+	if (!apm_cd.cd_ndevs) {	/* No APM device, wait for next interrupt */
 		__asm __volatile("sti;hlt");
 		return;
 	}
@@ -662,9 +662,9 @@ apm_cpu_idle(void)
 		__asm __volatile("sti;hlt");
 		return;
 	}
-
-	/*
-	 * We call the bios APM_IDLE routine here only when we
+		
+	/* 
+	 * We call the bios APM_IDLE routine here only when we 
 	 * have been idle for some time - otherwise we just hlt.
 	 */
 
@@ -672,7 +672,7 @@ apm_cpu_idle(void)
 		/* Always call BIOS halt/idle stuff */
 		bzero(&regs, sizeof(regs));
 		if (apmcall(APM_CPU_IDLE, 0, &regs) != 0) {
-#ifdef DIAGNOSTIC
+#ifdef APMDEBUG
 			apm_perror("set CPU idle", &regs);
 #endif
 		}
@@ -731,8 +731,12 @@ apm_set_ver(self)
 	printf(": Power Management spec V%d.%d", apm_majver, apm_minver);
 	if (apm_flags & APM_IDLE_SLOWS) {
 		DPRINTF((" (slowidle)"));
-	} else
+		apm_dobusy = 1;
+		apm_doidle = 1;
+	} else {
 		apm_dobusy = 0;
+		apm_doidle = 1;
+	}
 #ifdef DIAGNOSTIC
 	if (apm_flags & APM_BIOS_PM_DISABLED)
 		printf(" (BIOS mgmt disabled)");
@@ -925,6 +929,9 @@ apmattach(parent, self, aux)
 		setgdt(GAPM16CODE_SEL, NULL, 0, 0, 0, 0, 0);
 		setgdt(GAPMDATA_SEL, NULL, 0, 0, 0, 0, 0);
 	}
+	/* XXX - To go away */
+	printf("apm0: flags %x dobusy %d doidle %d\n",
+		apm_flags, apm_dobusy, apm_doidle);
 }
 
 void
@@ -946,6 +953,7 @@ apm_thread_create(v)
 		apm_disconnect(sc);
 		printf("%s: failed to create kernel thread, disabled",
 		    sc->sc_dev.dv_xname);
+		apm_dobusy = apm_doidle = 0;
 	}
 }
 

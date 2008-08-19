@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.30 2004/06/13 21:49:17 niklas Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.34 2005/08/01 11:54:24 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.45 1997/02/10 22:13:40 scottr Exp $	*/
 
 /*
@@ -64,8 +64,6 @@
 /*
  * Exported definitions unique to mac68k/68k cpu support.
  */
-
-#include <machine/pcb.h>
 
 /*
  * Get common m68k definitions.
@@ -176,6 +174,7 @@ extern int astpending;		/* need to trap before returning to user mode */
 #define MACH_MACP550		80
 #define MACH_MACCCLASSICII	83
 #define MACH_MACPB165		84
+#define MACH_MACPB190CS		85
 #define MACH_MACTV		88
 #define MACH_MACLC475		89
 #define MACH_MACLC475_33	90
@@ -187,6 +186,7 @@ extern int astpending;		/* need to trap before returning to user mode */
 #define MACH_MACPB280		102
 #define MACH_MACPB280C		103
 #define MACH_MACPB150		115
+#define MACH_MACPB190		122
 
 /*
  * Machine classes.  These define subsets of the above machines.
@@ -308,7 +308,7 @@ void	PCIA(void);
 void	TBIA(void);
 void	TBIAS(void);
 void	TBIAU(void);
-void	TBIS(vm_offset_t);
+void	TBIS(vaddr_t);
 #if defined(M68040)
 void	DCFA(void);
 void	DCFP(paddr_t);
@@ -322,9 +322,6 @@ int	suline(caddr_t, caddr_t);
 void	savectx(struct pcb *);
 void	proc_trampoline(void);
 void	loadustp(int);
-
-/* sys_machdep.c */
-int	cachectl(struct proc *, int, vaddr_t, int);
 
 /* vm_machdep.c */
 void	physaccess(caddr_t, caddr_t, register int, register int);

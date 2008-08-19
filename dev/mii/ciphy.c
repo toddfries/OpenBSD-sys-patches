@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciphy.c,v 1.4 2005/02/19 06:00:03 brad Exp $	*/
+/*	$OpenBSD: ciphy.c,v 1.8 2005/08/02 03:46:07 pvalchev Exp $	*/
 /*	$FreeBSD: ciphy.c,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -92,6 +92,8 @@ static const struct mii_phydesc ciphys[] = {
 	  MII_STR_CICADA_CS8201A },
 	{ MII_OUI_CICADA,		MII_MODEL_CICADA_CS8201B,
 	  MII_STR_CICADA_CS8201B },
+	{ MII_OUI_xxCICADA,		MII_MODEL_CICADA_CS8201B,
+	  MII_STR_CICADA_CS8201B },
 
 	{ 0,			0,
 	  NULL },
@@ -121,14 +123,10 @@ ciphyattach(struct device *parent, struct device *self, void *aux)
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	//sc->mii_service = ciphy_service;
 	sc->mii_funcs = &ciphy_funcs;
-	sc->mii_model = MII_MODEL(ma->mii_id2);
-	sc->mii_rev = MII_REV(ma->mii_id2);
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
-	sc->mii_ticks = 0; /* XXX */
-	sc->mii_anegticks = 5;
+	sc->mii_anegticks = MII_ANEGTICKS;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
@@ -248,37 +246,9 @@ setit:
 		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
 
-		/*
-		 * Is the interface even up?
-		 */
-		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
+		if (mii_phy_tick(sc) == EJUSTRETURN)
 			return (0);
-
-		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
-			break;
-
-		/*
-		 * Check to see if we have link.  If we do, we don't
-		 * need to restart the autonegotiation process.  Read
-		 * the BMSR twice in case it's latched.
-		 */
-		reg = PHY_READ(sc, MII_BMSR) | PHY_READ(sc, MII_BMSR);
-		if (reg & BMSR_LINK)
-			break;
-
-		/*
-		 * Only retry autonegotiation every 5 seconds.
-		 */
-		//if (++sc->mii_ticks <= 5/*10*/)
-		if (++sc->mii_ticks <= sc->mii_anegticks /*10*/)
-			break;
-		
-		sc->mii_ticks = 0;
-		mii_phy_auto(sc, 0);
-		return (0);
+		break;
 	}
 
 	/* Update the media status. */

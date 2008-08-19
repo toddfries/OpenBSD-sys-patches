@@ -1,4 +1,4 @@
-/*	$OpenBSD: yds.c,v 1.25 2004/12/30 20:45:12 miod Exp $	*/
+/*	$OpenBSD: yds.c,v 1.27 2005/08/09 04:10:13 mickey Exp $	*/
 /*	$NetBSD: yds.c,v 1.5 2001/05/21 23:55:04 minoura Exp $	*/
 
 /*
@@ -66,11 +66,6 @@
 
 #include <dev/pci/ydsreg.h>
 #include <dev/pci/ydsvar.h>
-
-#ifdef AUDIO_DEBUG
-#include <uvm/uvm_extern.h>    /* for vtophys */
-#include <uvm/uvm_pmap.h>      /* for vtophys */
-#endif
 
 /* Debug */
 #undef YDS_USE_REC_SLOT
@@ -305,8 +300,6 @@ yds_dump_play_slot(sc, bank)
 
 		dma = yds_find_dma(sc,(void *)p);
 
-		printf("  pbankp[%d] : %p(%p)\n",
-		       i, p, (void *)vtophys((vaddr_t)p));
 		for (j = 0; j < sizeof(struct play_slot_ctrl_bank) /
 		    sizeof(u_int32_t); j++) {
 			printf("    0x%02x: 0x%08x\n",
@@ -715,14 +708,6 @@ yds_attach(parent, self, aux)
 	reg = pci_conf_read(pc, pa->pa_tag, YDS_PCI_LEGACY);
 	pci_conf_write(pc, pa->pa_tag, YDS_PCI_LEGACY,
 		       reg & YDS_PCI_LEGACY_LAD);
-
-	/* Enable the device. */
-	reg = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	reg |= (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-		PCI_COMMAND_MASTER_ENABLE);
-
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, reg);
-	reg = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 	/* Mute all volumes */
 	for (i = 0x80; i < 0xc0; i += 2)

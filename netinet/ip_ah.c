@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.c,v 1.79 2003/08/14 19:00:12 jason Exp $ */
+/*	$OpenBSD: ip_ah.c,v 1.82 2005/07/31 03:52:19 pascoe Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -36,6 +36,8 @@
  * PURPOSE.
  */
 
+#include "pfsync.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -48,6 +50,7 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #endif /* INET */
 
 #ifdef INET6
@@ -61,6 +64,11 @@
 #include <netinet/ip_ah.h>
 #include <net/pfkeyv2.h>
 #include <net/if_enc.h>
+
+#if NPFSYNC > 0
+#include <net/pfvar.h>
+#include <net/if_pfsync.h>
+#endif /* NPFSYNC > 0 */
 
 #include <crypto/cryptodev.h>
 #include <crypto/xform.h>
@@ -494,7 +502,6 @@ int
 ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 {
 	struct auth_hash *ahx = (struct auth_hash *) tdb->tdb_authalgxform;
-	struct tdb_ident *tdbi;
 	struct tdb_crypto *tc;
 	struct m_tag *mtag;
 	u_int32_t btsx;
@@ -606,10 +613,13 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	crda->crd_key = tdb->tdb_amxkey;
 	crda->crd_klen = tdb->tdb_amxkeylen * 8;
 
+#ifdef notyet
 	/* Find out if we've already done crypto. */
 	for (mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, NULL);
 	     mtag != NULL;
 	     mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_CRYPTO_DONE, mtag)) {
+		struct tdb_ident *tdbi;
+
 		tdbi = (struct tdb_ident *) (mtag + 1);
 		if (tdbi->proto == tdb->tdb_sproto &&
 		    tdbi->spi == tdb->tdb_spi &&
@@ -617,6 +627,9 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 			sizeof(union sockaddr_union)))
 			break;
 	}
+#else
+	mtag = NULL;
+#endif
 
 	/* Allocate IPsec-specific opaque crypto info. */
 	if (mtag == NULL)
@@ -800,6 +813,9 @@ ah_input_cb(void *op)
 		switch (checkreplaywindow32(btsx, 0, &(tdb->tdb_rpl),
 		    tdb->tdb_wnd, &(tdb->tdb_bitmap), 1)) {
 		case 0: /* All's well. */
+#if NPFSYNC > 0
+			pfsync_update_tdb(tdb);
+#endif
 			break;
 
 		case 1:
@@ -935,12 +951,11 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	int len, rplen;
 	u_int8_t prot;
 	struct ah *ah;
-
 #if NBPFILTER > 0
-	{
-		struct ifnet *ifn;
+	struct ifnet *ifn = &(encif[0].sc_if);
+
+	if (ifn->if_bpf) {
 		struct enchdr hdr;
-		struct mbuf m1;
 
 		bzero (&hdr, sizeof(hdr));
 
@@ -948,15 +963,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		hdr.spi = tdb->tdb_spi;
 		hdr.flags |= M_AUTH | M_AUTH_AH;
 
-		m1.m_flags = 0;
-		m1.m_next = m;
-		m1.m_len = ENC_HDRLEN;
-		m1.m_data = (char *) &hdr;
-
-		ifn = &(encif[0].sc_if);
-
-		if (ifn->if_bpf)
-			bpf_mtap(ifn->if_bpf, &m1);
+		bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, ENC_HDRLEN, m);
 	}
 #endif
 
@@ -1095,8 +1102,12 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	/* Zeroize authenticator. */
 	m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes);
 
-	if (!(tdb->tdb_flags & TDBF_NOREPLAY))
+	if (!(tdb->tdb_flags & TDBF_NOREPLAY)) {
 		ah->ah_rpl = htonl(tdb->tdb_rpl++);
+#if NPFSYNC > 0
+		pfsync_update_tdb(tdb);
+#endif
+	}
 
 	/* Get crypto descriptors. */
 	crp = crypto_getreq(1);

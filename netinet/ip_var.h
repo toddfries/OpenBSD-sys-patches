@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_var.h,v 1.32 2004/06/22 07:35:20 cedric Exp $	*/
+/*	$OpenBSD: ip_var.h,v 1.35 2005/08/11 12:55:31 mpf Exp $	*/
 /*	$NetBSD: ip_var.h,v 1.16 1996/02/13 23:43:20 christos Exp $	*/
 
 /*
@@ -49,28 +49,15 @@ struct ipovly {
 };
 
 /*
- * Ip (reassembly or sequence) queue structures.
- *
- * XXX -- The following explains why the ipqe_m field is here, for TCP's use:
- * We want to avoid doing m_pullup on incoming packets but that
- * means avoiding dtom on the tcp reassembly code.  That in turn means
- * keeping an mbuf pointer in the reassembly queue (since we might
- * have a cluster).  As a quick hack, the source & destination
- * port numbers (which are no longer needed once we've located the
- * tcpcb) are overlayed with an mbuf pointer.
+ * Ip reassembly queue structures.
  */
 LIST_HEAD(ipqehead, ipqent);
 struct ipqent {
 	LIST_ENTRY(ipqent) ipqe_q;
-	union {
-		struct ip	*_ip;
-		struct tcphdr	*_tcp;
-	} _ipqe_u1;
+	struct ip	*ipqe_ip;
 	struct mbuf	*ipqe_m;	/* mbuf contains packet */
 	u_int8_t	ipqe_mff;	/* for IP fragmentation */
 };
-#define	ipqe_ip		_ipqe_u1._ip
-#define	ipqe_tcp	_ipqe_u1._tcp
 
 /*
  * Ip reassembly queue structure.  Each fragment
@@ -144,6 +131,7 @@ struct	ipstat {
 	u_long	ips_badaddr;		/* invalid address on header */
 	u_long	ips_inhwcsum;		/* hardware checksummed on input */
 	u_long	ips_outhwcsum;		/* hardware checksummed on output */
+	u_long	ips_notmember;		/* multicasts for unregistered groups */
 };
 
 #ifdef _KERNEL
@@ -152,8 +140,9 @@ struct	ipstat {
 #define	IP_RAWOUTPUT		0x2		/* raw ip header exists */
 #define	IP_ROUTETOIF		SO_DONTROUTE	/* bypass routing tables */
 #define	IP_ALLOWBROADCAST	SO_BROADCAST	/* can send broadcast packets */
-#define	IP_MTUDISC		0x0400		/* pmtu discovery, set DF */
-#define IP_ROUTETOETHER		0x0800		/* ether addresses given */
+#define IP_JUMBO		SO_JUMBO	/* try to use the jumbo mtu */
+#define	IP_MTUDISC		0x0800		/* pmtu discovery, set DF */
+#define IP_ROUTETOETHER		0x1000		/* ether addresses given */
 
 extern struct ipstat ipstat;
 extern LIST_HEAD(ipqhead, ipq)	ipq;	/* ip reass. queue */

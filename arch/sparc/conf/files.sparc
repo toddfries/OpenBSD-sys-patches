@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.63 2005/03/08 20:00:24 tdeval Exp $
+#	$OpenBSD: files.sparc,v 1.70 2005/07/17 12:21:25 miod Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
@@ -26,11 +26,11 @@ device	vmel {[addr = -1], [level = -1], [vect = -1]}
 attach	vmel at mainbus, vme
 device	vmes {[addr = -1], [level = -1], [vect = -1]}
 attach	vmes at mainbus, vme
-file	arch/sparc/dev/obio.c		obio | vmel | vmes | vme
+file	arch/sparc/dev/obio.c		(obio | vmel | vmes | vme) & !solbourne
 
 device	auxreg
 attach	auxreg at mainbus, obio
-file	arch/sparc/sparc/auxreg.c		auxreg needs-count
+file	arch/sparc/sparc/auxreg.c		auxreg needs-flag
 
 device	clock
 attach	clock at mainbus, obio
@@ -43,7 +43,7 @@ attach	timer at mainbus, obio
 
 device	eeprom
 attach	eeprom at obio
-file	arch/sparc/sparc/clock.c
+file	arch/sparc/sparc/clock.c		!solbourne
 
 device	power
 attach	power at obio
@@ -283,25 +283,23 @@ file	arch/sparc/fpu/fpu_mul.c
 file	arch/sparc/fpu/fpu_sqrt.c
 file	arch/sparc/fpu/fpu_subr.c
 
-file	arch/sparc/sparc/autoconf.c
+file	arch/sparc/sparc/autoconf.c		!solbourne
 file	arch/sparc/sparc/cache.c
 file	arch/sparc/sparc/conf.c
 file	arch/sparc/sparc/emul.c
-file	arch/sparc/sparc/in_cksum.c
+file	arch/sparc/sparc/in_cksum.c		inet
 file	arch/sparc/sparc/intr.c
 file	arch/sparc/sparc/kgdb_machdep.c	kgdb
 file	arch/sparc/sparc/locore2.c
-file	arch/sparc/sparc/machdep.c
+file	arch/sparc/sparc/machdep.c		!solbourne
 file	arch/sparc/sparc/process_machdep.c
-file	arch/sparc/sparc/mem.c
-file	arch/sparc/sparc/openprom.c
-file	arch/sparc/sparc/pmap.c
+file	arch/sparc/sparc/mem.c			!solbourne
+file	arch/sparc/sparc/openprom.c		!solbourne
+file	arch/sparc/sparc/pmap.c			!solbourne
 file	arch/sparc/sparc/sys_machdep.c
-file	arch/sparc/sparc/trap.c
+file	arch/sparc/sparc/trap.c			!solbourne
 file	arch/sparc/sparc/vm_machdep.c
 file	arch/sparc/sparc/disksubr.c
-
-file	kludge_for_in_proto.c		hy needs-flag
 
 file	arch/sparc/sparc/db_interface.c	ddb | kgdb
 file	arch/sparc/sparc/db_trace.c	ddb
@@ -318,9 +316,6 @@ file	arch/sparc/sparc/sunos_machdep.c compat_sunos
 
 # SunOS Binary Compatibility (COMPAT_SUNOS)
 include	"../../../compat/sunos/files.sunos"
-
-# Miscellaneous
-file	netns/ns_cksum.c		ns
 
 # Magma Serial/Parallel boards
 device	magma {}
@@ -388,3 +383,7 @@ file	dev/sbus/stp4020.c		stp
 file	arch/sparc/dev/stp_sbus.c	stp_sbus
 
 include	"dev/pcmcia/files.pcmcia"
+
+# built-in modem on Tadpole SPARCbook
+attach	com at obio with com_obio
+file	arch/sparc/dev/com_obio.c	com_obio

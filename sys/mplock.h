@@ -1,4 +1,4 @@
-/*	$OpenBSD: mplock.h,v 1.4 2004/07/22 15:42:11 art Exp $	*/
+/*	$OpenBSD: mplock.h,v 1.8 2005/06/17 22:33:34 niklas Exp $	*/
 
 /*
  * Copyright (c) 2004 Niklas Hallqvist.  All rights reserved.
@@ -107,6 +107,28 @@ __mp_lock(struct __mp_lock *lock)
 	splx(s);
 }
 
+/*
+ * Try to acquire the lock, if another cpu has it, fill it in the
+ * call-by-reference cpu parameter.  Return true if acquired.
+ */
+static __inline int
+__mp_lock_try(struct __mp_lock *lock, cpuid_t *cpu)
+{
+	int s = spllock();
+
+	if (lock->mpl_cpu != cpu_number()) {
+		if (!__cpu_simple_lock_try(&lock->mpl_lock)) {
+			*cpu = lock->mpl_cpu;
+			splx(s);
+			return 0;
+		}
+		lock->mpl_cpu = cpu_number();
+	}
+	lock->mpl_count++;
+	splx(s);
+	return 1;
+}
+
 static __inline void
 __mp_unlock(struct __mp_lock *lock)
 {
@@ -148,19 +170,37 @@ __mp_release_all(struct __mp_lock *lock) {
 	return (rv);
 }
 
+static __inline int
+__mp_release_all_but_one(struct __mp_lock *lock) {
+	int s = spllock();
+	int rv = lock->mpl_count - 1;
+
+#ifdef MP_LOCKDEBUG
+	if (lock->mpl_count == 0 || lock->mpl_cpu == LK_NOCPU) {
+		db_printf(
+		    "__mp_release_all_but_one(0x%x): releasing not locked lock\n",
+		    lock);
+		Debugger();
+	}
+#endif
+
+	lock->mpl_count = 1;
+	splx(s);
+	return (rv);
+}
+
 static __inline void
 __mp_acquire_count(struct __mp_lock *lock, int count) {
 	int s = spllock();
 
-	__cpu_simple_lock(&lock->mpl_lock);
-	lock->mpl_cpu = cpu_number();
-	lock->mpl_count = count;
+	while (count--)
+		__mp_lock(lock);
 	splx(s);
 }
 
 static __inline int
 __mp_lock_held(struct __mp_lock *lock) {
-	return lock->mpl_count;
+	return lock->mpl_count && lock->mpl_cpu == cpu_number();
 }
 
 extern struct __mp_lock kernel_lock;

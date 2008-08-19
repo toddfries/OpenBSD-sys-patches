@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.88 2005/03/04 13:21:42 markus Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.91 2005/08/02 11:05:44 markus Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -177,7 +177,7 @@ tcp_init()
 #endif /* TCP_COMPAT_42 */
 	pool_init(&tcpcb_pool, sizeof(struct tcpcb), 0, 0, 0, "tcpcbpl",
 	    NULL);
-	pool_init(&tcpqe_pool, sizeof(struct ipqent), 0, 0, 0, "tcpqepl",
+	pool_init(&tcpqe_pool, sizeof(struct tcpqent), 0, 0, 0, "tcpqepl",
 	    NULL);
 	pool_sethardlimit(&tcpqe_pool, tcp_reass_limit, NULL, 0);
 #ifdef TCP_SACK
@@ -492,7 +492,7 @@ tcp_newtcpcb(struct inpcb *inp)
 	if (tp == NULL)
 		return ((struct tcpcb *)0);
 	bzero((char *) tp, sizeof(struct tcpcb));
-	LIST_INIT(&tp->segq);
+	TAILQ_INIT(&tp->t_segq);
 	tp->t_maxseg = tcp_mssdflt;
 	tp->t_maxopd = 0;
 
@@ -519,6 +519,10 @@ tcp_newtcpcb(struct inpcb *inp)
 	    TCPTV_MIN, TCPTV_REXMTMAX);
 	tp->snd_cwnd = TCP_MAXWIN << TCP_MAX_WINSHIFT;
 	tp->snd_ssthresh = TCP_MAXWIN << TCP_MAX_WINSHIFT;
+	
+	tp->t_pmtud_mtu_sent = 0;
+	tp->t_pmtud_mss_acked = 0;
+	
 #ifdef INET6
 	/* we disallow IPv4 mapped address completely. */
 	if ((inp->inp_flags & INP_IPV6) == 0)
@@ -624,12 +628,12 @@ tcp_reaper(void *arg)
 int
 tcp_freeq(struct tcpcb *tp)
 {
-	struct ipqent *qe;
+	struct tcpqent *qe;
 	int rv = 0;
 
-	while ((qe = LIST_FIRST(&tp->segq)) != NULL) {
-		LIST_REMOVE(qe, ipqe_q);
-		m_freem(qe->ipqe_m);
+	while ((qe = TAILQ_FIRST(&tp->t_segq)) != NULL) {
+		TAILQ_REMOVE(&tp->t_segq, qe, tcpqe_q);
+		m_freem(qe->tcpqe_m);
 		pool_put(&tcpqe_pool, qe);
 		rv = 1;
 	}
@@ -733,8 +737,12 @@ tcp6_ctlinput(cmd, sa, d)
 	if ((unsigned)cmd >= PRC_NCMDS)
 		return;
 	else if (cmd == PRC_QUENCH) {
+		/* 
+		 * Don't honor ICMP Source Quench messages meant for
+		 * TCP connections.
+		 */
 		/* XXX there's no PRC_QUENCH in IPv6 */
-		notify = tcp_quench;
+		return;
 	} else if (PRC_IS_REDIRECT(cmd))
 		notify = in_rtchange, d = NULL;
 	else if (cmd == PRC_MSGSIZE)
@@ -825,6 +833,7 @@ tcp_ctlinput(cmd, sa, v)
 	struct inpcb *inp;
 	struct in_addr faddr;
 	tcp_seq seq;
+	u_int mtu;
 	extern int inetctlerrmap[];
 	void (*notify)(struct inpcb *, int) = tcp_notify;
 	int errno;
@@ -839,7 +848,11 @@ tcp_ctlinput(cmd, sa, v)
 		return NULL;
 	errno = inetctlerrmap[cmd];
 	if (cmd == PRC_QUENCH)
-		notify = tcp_quench;
+		/* 
+		 * Don't honor ICMP Source Quench messages meant for
+		 * TCP connections.
+		 */
+		return NULL;
 	else if (PRC_IS_REDIRECT(cmd))
 		notify = in_rtchange, ip = 0;
 	else if (cmd == PRC_MSGSIZE && ip_mtudisc && ip) {
@@ -858,8 +871,40 @@ tcp_ctlinput(cmd, sa, v)
 			icp = (struct icmp *)((caddr_t)ip -
 					      offsetof(struct icmp, icmp_ip));
 
-			/* Calculate new mtu and create corresponding route */
-			icmp_mtudisc(icp);
+			/* 
+			 * If the ICMP message advertises a Next-Hop MTU
+			 * equal or larger than the maximum packet size we have
+			 * ever sent, drop the message.
+			 */
+			mtu = (u_int)ntohs(icp->icmp_nextmtu);
+			if (mtu >= tp->t_pmtud_mtu_sent)
+				return NULL;
+			if (mtu >= tcp_hdrsz(tp) + tp->t_pmtud_mss_acked) {
+				/* 
+				 * Calculate new MTU, and create corresponding
+				 * route (traditional PMTUD).
+				 */
+				tp->t_flags &= ~TF_PMTUD_PEND;
+				icmp_mtudisc(icp);    
+			} else {
+				/*
+				 * Record the information got in the ICMP
+				 * message; act on it later.
+				 * If we had already recorded an ICMP message,
+				 * replace the old one only if the new message
+				 * refers to an older TCP segment
+				 */
+				if (tp->t_flags & TF_PMTUD_PEND) {
+					if (SEQ_LT(tp->t_pmtud_th_seq, seq))
+						return NULL;
+				} else
+					tp->t_flags |= TF_PMTUD_PEND;
+				tp->t_pmtud_th_seq = seq;
+				tp->t_pmtud_nextmtu = icp->icmp_nextmtu;
+				tp->t_pmtud_ip_len = icp->icmp_ip.ip_len;
+				tp->t_pmtud_ip_hl = icp->icmp_ip.ip_hl;
+				return NULL;
+			}
 		} else {
 			/* ignore if we don't have a matching connection */
 			return NULL;
@@ -903,20 +948,6 @@ tcp_ctlinput(cmd, sa, v)
 	return NULL;
 }
 
-/*
- * When a source quench is received, close congestion window
- * to one segment.  We will gradually open it again as we proceed.
- */
-void
-tcp_quench(inp, errno)
-	struct inpcb *inp;
-	int errno;
-{
-	struct tcpcb *tp = intotcpcb(inp);
-
-	if (tp)
-		tp->snd_cwnd = tp->t_maxseg;
-}
 
 #ifdef INET6
 /*

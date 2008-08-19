@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sf.c,v 1.28 2005/01/15 05:24:11 brad Exp $ */
+/*	$OpenBSD: if_sf.c,v 1.31 2005/08/09 04:10:12 mickey Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -628,10 +628,6 @@ void sf_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	    PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef SF_USEIOSPACE
@@ -1296,6 +1292,8 @@ void sf_stop(sc)
 
 	timeout_del(&sc->sc_stats_tmo);
 
+	ifp->if_flags &= ~(IFF_RUNNING|IFF_OACTIVE);
+
 	csr_write_4(sc, SF_GEN_ETH_CTL, 0);
 	csr_write_4(sc, SF_CQ_CONSIDX, 0);
 	csr_write_4(sc, SF_CQ_PRODIDX, 0);
@@ -1322,8 +1320,6 @@ void sf_stop(sc)
 			sc->sf_ldata->sf_tx_dlist[i].sf_mbuf = NULL;
 		}
 	}
-
-	ifp->if_flags &= ~(IFF_RUNNING|IFF_OACTIVE);
 
 	return;
 }
@@ -1364,11 +1360,9 @@ void sf_stats_update(xsc)
 	    stats.sf_tx_multi_colls + stats.sf_tx_excess_colls;
 
 	mii_tick(mii);
-	if (!sc->sf_link) {
-		mii_pollstat(mii);
-		if (mii->mii_media_status & IFM_ACTIVE &&
-		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE)
-			sc->sf_link++;
+	if (!sc->sf_link && mii->mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
+		sc->sf_link++;
 		if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
 			sf_start(ifp);
 	}

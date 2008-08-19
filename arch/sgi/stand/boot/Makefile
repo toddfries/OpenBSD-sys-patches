@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2004/09/16 18:54:48 pefo Exp $
+#	$OpenBSD: Makefile,v 1.5 2005/07/21 13:22:53 deraadt Exp $
 
 
 PROG=		boot
@@ -14,7 +14,7 @@ AFLAGS+=	${SAABI}
 
 LDFLAGS+=	${SALDFLAGS} -T ${.CURDIR}/ld.script -e __start
 
-SRCS=		start.S boot.c filesystem.c conf.c diskio.c arcbios.c
+SRCS=		start.S boot.c filesystem.c conf.c diskio.c arcbios.c strstr.c
 
 CLEANFILES+= machine mips64
 
@@ -26,7 +26,7 @@ CLEANFILES+= machine mips64
 
 ${PROG}: $(OBJS) $(LDADD)
 	$(LD) $(LDFLAGS) -o boot $(OBJS) -L${LIBSADIR} ${LIBSA} \
-	-L${LIBKERNDIR} ${LIBKERN}  -L${LIBZDIR} ${LIBZ}
+	-L${LIBZDIR} ${LIBZ} -L${LIBKERNDIR} ${LIBKERN}
 
 
 install:

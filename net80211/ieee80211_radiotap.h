@@ -1,4 +1,4 @@
-/* $OpenBSD: ieee80211_radiotap.h,v 1.5 2005/01/07 16:28:38 reyk Exp $ */
+/* $OpenBSD: ieee80211_radiotap.h,v 1.7 2005/07/30 17:13:17 reyk Exp $ */
 /* $FreeBSD: src/sys/net80211/ieee80211_radiotap.h,v 1.3 2004/04/05 22:13:21 sam Exp $ */
 /* $NetBSD: ieee80211_radiotap.h,v 1.9 2004/06/06 04:13:28 dyoung Exp $ */
 
@@ -158,6 +158,10 @@ struct ieee80211_radiotap_header {
  * IEEE80211_RADIOTAP_FCS           	u_int32_t       data
  *
  *	FCS from frame in network byte order.
+ *
+ * IEEE80211_RADIOTAP_HWQUEUE           u_int8_t       data
+ *
+ *	A specific hardware queue (used by WME)
  */
 enum ieee80211_radiotap_type {
 	IEEE80211_RADIOTAP_TSFT = 0,
@@ -175,21 +179,9 @@ enum ieee80211_radiotap_type {
 	IEEE80211_RADIOTAP_DB_ANTSIGNAL = 12,
 	IEEE80211_RADIOTAP_DB_ANTNOISE = 13,
 	IEEE80211_RADIOTAP_FCS = 14,
+	IEEE80211_RADIOTAP_HWQUEUE = 15,
 	IEEE80211_RADIOTAP_EXT = 31
 };
-
-#ifndef _KERNEL
-/* Channel flags. */
-#define	IEEE80211_CHAN_TURBO	0x0010	/* Turbo channel */
-#define	IEEE80211_CHAN_CCK	0x0020	/* CCK channel */
-#define	IEEE80211_CHAN_OFDM	0x0040	/* OFDM channel */
-#define	IEEE80211_CHAN_2GHZ	0x0080	/* 2 GHz spectrum channel. */
-#define	IEEE80211_CHAN_5GHZ	0x0100	/* 5 GHz spectrum channel */
-#define	IEEE80211_CHAN_PASSIVE	0x0200	/* Only passive scan allowed */
-#define	IEEE80211_CHAN_DYN	0x0400	/* Dynamic CCK-OFDM channel */
-#define	IEEE80211_CHAN_GFSK	0x0800	/* GFSK channel (FHSS PHY) */
-#define	IEEE80211_CHAN_XR	0x1000	/* eXtended Range */
-#endif /* !_KERNEL */
 
 /* For IEEE80211_RADIOTAP_FLAGS */
 #define	IEEE80211_RADIOTAP_F_CFP	0x01	/* sent/received

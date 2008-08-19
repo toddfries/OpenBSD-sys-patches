@@ -1,5 +1,8 @@
+
+SUBDIR= zboot
+
 .if ${MACHINE} == "zaurus"
-SUBDIR= zbsdmod zboot
+SUBDIR+= zbsdmod
 .endif
 
 .include <bsd.subdir.mk>

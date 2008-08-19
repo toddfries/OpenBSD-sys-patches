@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.92 2005/03/18 22:39:59 deraadt Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.103 2005/08/23 19:59:35 fgsch Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -28,6 +28,7 @@ option		EXT2FS		# Linux ext2fs
 #option		NFSCLIENT	# Network File System client
 
 option		CD9660		# ISO 9660 + Rock Ridge file system
+option		UDF		# UDF (DVD) file system
 option		MSDOSFS		# MS-DOS file system
 option		FIFO		# FIFOs; RECOMMENDED
 
@@ -112,6 +113,7 @@ ukbd*	at uhidev?
 wskbd*	at ukbd? mux 1
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
+atapiscsi* at umass?
 #ums*	at uhidev?
 #wsmouse* at ums? mux 0
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
@@ -198,9 +200,11 @@ scsibus* at gdt?
 #scsibus* at aac?
 ami*	at pci?			# AMI MegaRAID controllers
 scsibus* at ami?
-cac*	at pci?			# Compaq Smart ARRAY RAID controllers
+cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 cac*	at eisa?
 scsibus* at cac?
+ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
+scsibus* at ciss?
 twe*	at pci?			# 3ware Escalade RAID controllers
 scsibus* at twe?
 iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
@@ -211,8 +215,6 @@ aic0	at isa? port 0x340 irq 11	# Adaptec 152[02] SCSI controllers
 aic*	at isapnp?
 aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
 scsibus* at aic?
-#ncr*	at pci?			# NCR 538XX SCSI controllers(old)
-#scsibus* at ncr?
 siop*	at pci?			# NCR 538XX SCSI controllers(new)
 scsibus* at siop?
 adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
@@ -293,6 +295,7 @@ ef*	at isapnp?			# 3C515 ethernet
 le*	at pci?				# PCnet-PCI based ethernet
 ep*	at isapnp?			# 3C509 PnP ethernet
 le*	at isapnp?
+pcn*	at pci?				# AMD PCnet-PCI Ethernet
 de*	at pci?				# DC21X4X-based ethernet
 fxp*	at pci?				# EtherExpress 10/100B ethernet
 fxp*	at cardbus?			# Intel PRO/100 ethernet
@@ -307,11 +310,13 @@ fpa*	at pci?				# DEC DEFPA FDDI
 xl*	at pci?				# 3C9xx ethernet
 xl*	at cardbus?			# 3C575 ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
-tx*	at pci?				# SMC 83C170 EPIC ethernet
+rl*	at cardbus?			# RealTek 81[23]9 ethernet
+epic*	at pci?				# SMC EPIC/100 ethernet
 tl*	at pci?				# Compaq Thunderlan ethernet
 vr*	at pci?				# VIA Rhine ethernet
 dc*	at pci?				# 21143, "tulip" clone ethernet
 dc*	at cardbus?			# 21143, "tulip" clone ethernet
+ste*	at pci?				# Sundance ST201 ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
 wb*	at pci?				# Winbond W89C840F ethernet
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
@@ -326,6 +331,7 @@ stge*	at pci?				# Sundance TC9021 GigE
 bge*	at pci?				# Broadcom BCM570x (aka Tigon3)
 #lge*	at pci?				# Level1 LXT1001 GigE
 mtd*	at pci?				# Myson MTD803
+hme*	at pci?				# Sun Happy Meal
 bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
 
@@ -354,6 +360,7 @@ lxtphy*	at mii?				# Level1 LXT970 PHYs
 nsphy*	at mii?				# NS and compatible PHYs
 nsphyter*	at mii?			# NS and compatible PHYs
 qsphy*	at mii?				# Quality Semi QS6612 PHYs
+luphy*	at mii?				# Lucent LU6612 PHY
 sqphy*	at mii?				# Seeq 8x220 PHYs
 rlphy* at mii?				# RealTek 8139 internal PHYs
 mtdphy*	at mii?				# Myson MTD972 PHYs

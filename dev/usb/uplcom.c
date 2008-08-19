@@ -1,4 +1,4 @@
-/*	$OpenBSD: uplcom.c,v 1.21 2005/01/28 22:35:16 djm Exp $	*/
+/*	$OpenBSD: uplcom.c,v 1.24 2005/08/01 05:36:49 brad Exp $	*/
 /*	$NetBSD: uplcom.c,v 1.29 2002/09/23 05:51:23 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -185,12 +185,16 @@ static const struct usb_devno uplcom_devs[] = {
 	{ USB_VENDOR_SITECOM, USB_PRODUCT_SITECOM_CN104 },
 	/* Pharos USB GPS - Microsoft version */
 	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2303X },
+	/* IODATA USB-RSAQ3 */
+	{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2303X2 },
 	/* SOURCENEXT KeikaiDenwa 8 */
 	{ USB_VENDOR_SOURCENEXT, USB_PRODUCT_SOURCENEXT_KEIKAI8 },
 	/* SOURCENEXT KeikaiDenwa 8 with charger */
 	{ USB_VENDOR_SOURCENEXT, USB_PRODUCT_SOURCENEXT_KEIKAI8_CHG },
 	/* HAL Corporation Crossam2+USB */
 	{ USB_VENDOR_HAL, USB_PRODUCT_HAL_IMR001 },
+	/* AirPrime CDMA Wireless EVDO card */
+	{ USB_VENDOR_AIRPRIME, USB_PRODUCT_AIRPRIME_PC5220 },
 };
 #define uplcom_lookup(v, p) usb_lookup(uplcom_devs, v, p)
 
@@ -216,15 +220,16 @@ USB_ATTACH(uplcom)
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 
-	char devinfo[1024];
+	char *devinfop;
 	char *devname = USBDEVNAME(sc->sc_dev);
 	usbd_status err;
 	int i;
 	struct ucom_attach_args uca;
 
-        usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
-        USB_ATTACH_SETUP;
-        printf("%s: %s\n", devname, devinfo);
+	devinfop = usbd_devinfo_alloc(dev, 0);
+	USB_ATTACH_SETUP;
+	printf("%s: %s\n", devname, devinfop);
+	usbd_devinfo_free(devinfop);
 
         sc->sc_udev = dev;
 

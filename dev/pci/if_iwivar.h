@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwivar.h,v 1.9 2005/03/12 13:31:26 damien Exp $	*/
+/*	$OpenBSD: if_iwivar.h,v 1.11 2005/07/07 07:55:19 kevlo Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005
@@ -34,7 +34,6 @@ struct iwi_rx_radiotap_header {
 	u_int16_t	wr_chan_freq;
 	u_int16_t	wr_chan_flags;
 	u_int8_t	wr_antsignal;
-	u_int8_t	wr_antnoise;
 	u_int8_t	wr_antenna;
 } __packed;
 
@@ -43,7 +42,6 @@ struct iwi_rx_radiotap_header {
 	 (1 << IEEE80211_RADIOTAP_RATE) |				\
 	 (1 << IEEE80211_RADIOTAP_CHANNEL) |				\
 	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL) |			\
-	 (1 << IEEE80211_RADIOTAP_DB_ANTNOISE) |			\
 	 (1 << IEEE80211_RADIOTAP_ANTENNA))
 
 struct iwi_tx_radiotap_header {
@@ -95,8 +93,6 @@ struct iwi_softc {
 
 	int			rx_cur;
 
-	struct resource		*irq;
-	struct resource		*mem;
 	bus_space_tag_t		sc_st;
 	bus_space_handle_t	sc_sh;
 	void 			*sc_ih;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.10 2004/06/25 17:27:01 andreas Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.13 2005/08/20 00:33:59 jsg Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -213,7 +213,6 @@ extern u_int32_t cpus_attached;
 #define clockframe intrframe
 
 #define	CLKF_USERMODE(frame)	USERMODE((frame)->if_cs, (frame)->if_rflags)
-#define CLKF_BASEPRI(frame)	(0)
 #define CLKF_PC(frame)		((frame)->if_rip)
 #define CLKF_INTR(frame)	(curcpu()->ci_idepth > 1)
 
@@ -251,6 +250,7 @@ extern int biosbasemem;
 extern int biosextmem;
 extern int cpu;
 extern int cpu_feature;
+extern int cpu_ecxfeature;
 extern int cpu_id;
 extern char cpu_vendor[];
 extern int cpuid_level;
@@ -343,5 +343,13 @@ void x86_bus_space_mallocok(void);
 	{ "apmhalt", CTLTYPE_INT }, \
 	{ "userldt", CTLTYPE_INT }, \
 }
+
+/*
+ * Default cr4 flags.
+ * Doesn't really belong here, but doesn't really belong anywhere else
+ * either. Just to avoid painful mismatches of cr4 flags since they are
+ * set in three different places.
+ */
+#define CR4_DEFAULT (CR4_PAE|CR4_PGE|CR4_PSE|CR4_OSFXSR|CR4_OSXMMEXCPT)
 
 #endif /* !_AMD64_CPU_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.35 2005/02/04 05:02:38 brad Exp $	*/
+/*	$OpenBSD: hme.c,v 1.38 2005/06/26 04:27:19 brad Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-
@@ -621,6 +621,9 @@ hme_init(sc)
 	if (sc->sc_hwinit)
 		(*sc->sc_hwinit)(sc);
 
+	/* Set the current media. */
+	mii_mediachg(&sc->sc_mii);
+
 	/* Start the one second timer. */
 	timeout_add(&sc->sc_tick_ch, hz);
 
@@ -828,9 +831,9 @@ hme_rxcksum(struct mbuf *m, u_int32_t flags)
 	temp32 += (temp32 >> 16);
 	cksum = ~temp32;
 	if (cksum != 0)
-		m->m_pkthdr.csum |= flag_bad;
+		m->m_pkthdr.csum_flags |= flag_bad;
 	else
-		m->m_pkthdr.csum |= flag_ok;
+		m->m_pkthdr.csum_flags |= flag_ok;
 }
 
 /*
@@ -877,7 +880,9 @@ hme_rint(sc)
 		}
 
 		ifp->if_ipackets++;
+#if 0
 		hme_rxcksum(m, flags);
+#endif
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf) {

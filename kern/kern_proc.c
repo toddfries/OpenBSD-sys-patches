@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_proc.c,v 1.25 2005/03/10 17:26:10 tedu Exp $	*/
+/*	$OpenBSD: kern_proc.c,v 1.27 2005/07/04 00:20:42 tedu Exp $	*/
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -85,9 +85,11 @@ procinit()
 	LIST_INIT(&allproc);
 	LIST_INIT(&zombproc);
 
-	pidhashtbl = hashinit(maxproc / 4, M_PROC, M_WAITOK, &pidhash);
-	pgrphashtbl = hashinit(maxproc / 4, M_PROC, M_WAITOK, &pgrphash);
-	uihashtbl = hashinit(maxproc / 16, M_PROC, M_WAITOK, &uihash);
+	pidhashtbl = hashinit(maxproc / 4, M_PROC, M_NOWAIT, &pidhash);
+	pgrphashtbl = hashinit(maxproc / 4, M_PROC, M_NOWAIT, &pgrphash);
+	uihashtbl = hashinit(maxproc / 16, M_PROC, M_NOWAIT, &uihash);
+	if (!pidhashtbl || !pgrphashtbl || !uihashtbl)
+		panic("procinit: malloc");
 
 	pool_init(&proc_pool, sizeof(struct proc), 0, 0, 0, "procpl",
 	    &pool_allocator_nointr);
@@ -110,7 +112,7 @@ procinit()
 struct uidinfo *
 uid_find(uid_t uid)
 {
-	struct uidinfo *uip;
+	struct uidinfo *uip, *nuip;
 	struct uihashhead *uipp;
 
 	uipp = UIHASH(uid);
@@ -119,12 +121,20 @@ uid_find(uid_t uid)
 			break;
 	if (uip)
 		return (uip);
-	MALLOC(uip, struct uidinfo *, sizeof(*uip), M_PROC, M_WAITOK);
-	bzero(uip, sizeof(*uip));
-	LIST_INSERT_HEAD(uipp, uip, ui_hash);
-	uip->ui_uid = uid;
+	MALLOC(nuip, struct uidinfo *, sizeof(*nuip), M_PROC, M_WAITOK);
+	/* may have slept, have to check again */
+	LIST_FOREACH(uip, uipp, ui_hash)
+		if (uip->ui_uid == uid)
+			break;
+	if (uip) {
+		free(nuip, M_PROC);
+		return (uip);
+	}
+	bzero(nuip, sizeof(*nuip));
+	nuip->ui_uid = uid;
+	LIST_INSERT_HEAD(uipp, nuip, ui_hash);
 
-	return (uip);
+	return (nuip);
 }
 
 int

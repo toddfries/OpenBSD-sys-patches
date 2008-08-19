@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.55 2005/03/06 06:51:53 pascoe Exp $ */
+/*	$OpenBSD: ohci.c,v 1.61 2005/04/21 12:30:02 pascoe Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -135,7 +135,6 @@ Static usbd_status	ohci_alloc_std_chain(struct ohci_pipe *,
 			    ohci_soft_td_t *, ohci_soft_td_t **);
 
 Static void		ohci_shutdown(void *v);
-Static void		ohci_power(int, void *);
 Static usbd_status	ohci_open(usbd_pipe_handle);
 Static void		ohci_poll(struct usbd_bus *);
 Static void		ohci_softintr(void *);
@@ -374,7 +373,6 @@ ohci_detach(struct ohci_softc *sc, int flags)
 	usb_uncallout(sc->sc_tmo_rhsc, ohci_rhsc_enable, sc);
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-	powerhook_disestablish(sc->sc_powerhook);
 	shutdownhook_disestablish(sc->sc_shutdownhook);
 #endif
 
@@ -650,7 +648,7 @@ ohci_init(ohci_softc_t *sc)
 	ohci_soft_ed_t *sed, *psed;
 	usbd_status err;
 	int i;
-	u_int32_t s, ctl, ival, hcr, fm, per, rev, desca;
+	u_int32_t s, ctl, rwc, ival, hcr, fm, per, rev, desca, descb;
 
 	DPRINTF(("ohci_init: start\n"));
 #if defined(__OpenBSD__)
@@ -749,22 +747,31 @@ ohci_init(ohci_softc_t *sc)
 		ohci_dump_ed(sc->sc_isoc_head);
 	}
 #endif
+	/* Preserve values programmed by SMM/BIOS but lost over reset. */
+	ctl = OREAD4(sc, OHCI_CONTROL);
+	rwc = ctl & OHCI_RWC;
+	fm = OREAD4(sc, OHCI_FM_INTERVAL);
+	desca = OREAD4(sc, OHCI_RH_DESCRIPTOR_A);
+	descb = OREAD4(sc, OHCI_RH_DESCRIPTOR_B);
 
 	/* Determine in what context we are running. */
-	ctl = OREAD4(sc, OHCI_CONTROL);
 	if (ctl & OHCI_IR) {
 		/* SMM active, request change */
 		DPRINTF(("ohci_init: SMM active, request owner change\n"));
+		if ((sc->sc_intre & (OHCI_OC | OHCI_MIE)) == 
+		    (OHCI_OC | OHCI_MIE))
+			OWRITE4(sc, OHCI_INTERRUPT_ENABLE, OHCI_MIE);
 		s = OREAD4(sc, OHCI_COMMAND_STATUS);
 		OWRITE4(sc, OHCI_COMMAND_STATUS, s | OHCI_OCR);
 		for (i = 0; i < 100 && (ctl & OHCI_IR); i++) {
 			usb_delay_ms(&sc->sc_bus, 1);
 			ctl = OREAD4(sc, OHCI_CONTROL);
 		}
-		if ((ctl & OHCI_IR) == 0) {
+		OWRITE4(sc, OHCI_INTERRUPT_DISABLE, OHCI_MIE);
+		if (ctl & OHCI_IR) {
 			printf("%s: SMM does not respond, resetting\n",
 			       USBDEVNAME(sc->sc_bus.bdev));
-			OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_RESET);
+			OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_RESET | rwc);
 			goto reset;
 		}
 #if 0
@@ -773,7 +780,7 @@ ohci_init(ohci_softc_t *sc)
 		/* BIOS started controller. */
 		DPRINTF(("ohci_init: BIOS active\n"));
 		if ((ctl & OHCI_HCFS_MASK) != OHCI_HCFS_OPERATIONAL) {
-			OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_OPERATIONAL);
+			OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_OPERATIONAL | rwc);
 			usb_delay_ms(&sc->sc_bus, USB_RESUME_DELAY);
 		}
 #endif
@@ -789,11 +796,10 @@ ohci_init(ohci_softc_t *sc)
 	 * without it some controllers do not start.
 	 */
 	DPRINTF(("%s: resetting\n", USBDEVNAME(sc->sc_bus.bdev)));
-	OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_RESET);
+	OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_RESET | rwc);
 	usb_delay_ms(&sc->sc_bus, USB_BUS_RESET_DELAY);
 
 	/* We now own the host controller and the bus has been reset. */
-	ival = OHCI_GET_IVAL(OREAD4(sc, OHCI_FM_INTERVAL));
 
 	OWRITE4(sc, OHCI_COMMAND_STATUS, OHCI_HCR); /* Reset HC */
 	/* Nominal time for a reset is 10 us. */
@@ -826,7 +832,7 @@ ohci_init(ohci_softc_t *sc)
 	ctl = OREAD4(sc, OHCI_CONTROL);
 	ctl &= ~(OHCI_CBSR_MASK | OHCI_LES | OHCI_HCFS_MASK | OHCI_IR);
 	ctl |= OHCI_PLE | OHCI_IE | OHCI_CLE | OHCI_BLE |
-		OHCI_RATIO_1_4 | OHCI_HCFS_OPERATIONAL;
+		OHCI_RATIO_1_4 | OHCI_HCFS_OPERATIONAL | rwc;
 	/* And finally start it! */
 	OWRITE4(sc, OHCI_CONTROL, ctl);
 
@@ -835,18 +841,20 @@ ohci_init(ohci_softc_t *sc)
 	 * registers that should be set earlier, but that the
 	 * controller ignores when in the SUSPEND state.
 	 */
-	fm = (OREAD4(sc, OHCI_FM_INTERVAL) & OHCI_FIT) ^ OHCI_FIT;
+	ival = OHCI_GET_IVAL(fm);
+	fm = (OREAD4(sc, OHCI_FM_REMAINING) & OHCI_FIT) ^ OHCI_FIT;
 	fm |= OHCI_FSMPS(ival) | ival;
 	OWRITE4(sc, OHCI_FM_INTERVAL, fm);
 	per = OHCI_PERIODIC(ival); /* 90% periodic */
 	OWRITE4(sc, OHCI_PERIODIC_START, per);
 
 	/* Fiddle the No OverCurrent Protection bit to avoid chip bug. */
-	desca = OREAD4(sc, OHCI_RH_DESCRIPTOR_A);
 	OWRITE4(sc, OHCI_RH_DESCRIPTOR_A, desca | OHCI_NOCP);
 	OWRITE4(sc, OHCI_RH_STATUS, OHCI_LPSC); /* Enable port power */
 	usb_delay_ms(&sc->sc_bus, OHCI_ENABLE_POWER_DELAY);
 	OWRITE4(sc, OHCI_RH_DESCRIPTOR_A, desca);
+	OWRITE4(sc, OHCI_RH_DESCRIPTOR_B, descb);
+	usb_delay_ms(&sc->sc_bus, OHCI_GET_POTPGT(desca) * UHD_PWRON_FACTOR);
 
 	/*
 	 * The AMD756 requires a delay before re-reading the register,
@@ -869,7 +877,6 @@ ohci_init(ohci_softc_t *sc)
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 	sc->sc_control = sc->sc_intre = 0;
-	sc->sc_powerhook = powerhook_establish(ohci_power, sc);
 	sc->sc_shutdownhook = shutdownhook_establish(ohci_shutdown, sc);
 #endif
 
@@ -977,7 +984,7 @@ void
 ohci_power(int why, void *v)
 {
 	ohci_softc_t *sc = v;
-	u_int32_t ctl;
+	u_int32_t reg;
 	int s;
 
 #ifdef OHCI_DEBUG
@@ -990,40 +997,56 @@ ohci_power(int why, void *v)
 	case PWR_SUSPEND:
 	case PWR_STANDBY:
 		sc->sc_bus.use_polling++;
-		ctl = OREAD4(sc, OHCI_CONTROL) & ~OHCI_HCFS_MASK;
+		reg = OREAD4(sc, OHCI_CONTROL) & ~OHCI_HCFS_MASK;
 		if (sc->sc_control == 0) {
 			/*
 			 * Preserve register values, in case that APM BIOS
 			 * does not recover them.
 			 */
-			sc->sc_control = ctl;
+			sc->sc_control = reg;
 			sc->sc_intre = OREAD4(sc, OHCI_INTERRUPT_ENABLE);
+			sc->sc_ival = OHCI_GET_IVAL(OREAD4(sc,
+			    OHCI_FM_INTERVAL));
 		}
-		ctl |= OHCI_HCFS_SUSPEND;
-		OWRITE4(sc, OHCI_CONTROL, ctl);
+		reg |= OHCI_HCFS_SUSPEND;
+		OWRITE4(sc, OHCI_CONTROL, reg);
 		usb_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
 		sc->sc_bus.use_polling--;
 		break;
 	case PWR_RESUME:
 		sc->sc_bus.use_polling++;
+
 		/* Some broken BIOSes do not recover these values */
 		OWRITE4(sc, OHCI_HCCA, DMAADDR(&sc->sc_hccadma, 0));
 		OWRITE4(sc, OHCI_CONTROL_HEAD_ED, sc->sc_ctrl_head->physaddr);
 		OWRITE4(sc, OHCI_BULK_HEAD_ED, sc->sc_bulk_head->physaddr);
 		if (sc->sc_intre)
 			OWRITE4(sc, OHCI_INTERRUPT_ENABLE,
-				sc->sc_intre & (OHCI_ALL_INTRS | OHCI_MIE));
+			    sc->sc_intre & (OHCI_ALL_INTRS | OHCI_MIE));
 		if (sc->sc_control)
-			ctl = sc->sc_control;
+			reg = sc->sc_control;
 		else
-			ctl = OREAD4(sc, OHCI_CONTROL);
-		ctl |= OHCI_HCFS_RESUME;
-		OWRITE4(sc, OHCI_CONTROL, ctl);
+			reg = OREAD4(sc, OHCI_CONTROL);
+		reg |= OHCI_HCFS_RESUME;
+		OWRITE4(sc, OHCI_CONTROL, reg);
 		usb_delay_ms(&sc->sc_bus, USB_RESUME_DELAY);
-		ctl = (ctl & ~OHCI_HCFS_MASK) | OHCI_HCFS_OPERATIONAL;
-		OWRITE4(sc, OHCI_CONTROL, ctl);
+		reg = (reg & ~OHCI_HCFS_MASK) | OHCI_HCFS_OPERATIONAL;
+		OWRITE4(sc, OHCI_CONTROL, reg);
+
+		reg = (OREAD4(sc, OHCI_FM_REMAINING) & OHCI_FIT) ^ OHCI_FIT;
+		reg |= OHCI_FSMPS(sc->sc_ival) | sc->sc_ival;
+		OWRITE4(sc, OHCI_FM_INTERVAL, reg);
+		OWRITE4(sc, OHCI_PERIODIC_START, OHCI_PERIODIC(sc->sc_ival));
+
+		/* Fiddle the No OverCurrent Protection to avoid a chip bug */
+		reg = OREAD4(sc, OHCI_RH_DESCRIPTOR_A);
+		OWRITE4(sc, OHCI_RH_DESCRIPTOR_A, reg | OHCI_NOCP);
+		OWRITE4(sc, OHCI_RH_STATUS, OHCI_LPSC); /* Enable port power */
+		usb_delay_ms(&sc->sc_bus, OHCI_ENABLE_POWER_DELAY);
+		OWRITE4(sc, OHCI_RH_DESCRIPTOR_A, reg);
+
 		usb_delay_ms(&sc->sc_bus, USB_RESUME_RECOVERY);
-		sc->sc_control = sc->sc_intre = 0;
+		sc->sc_control = sc->sc_intre = sc->sc_ival = 0;
 		sc->sc_bus.use_polling--;
 		break;
 #if defined(__NetBSD__)

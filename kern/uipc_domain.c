@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_domain.c,v 1.21 2005/01/14 12:04:02 grange Exp $	*/
+/*	$OpenBSD: uipc_domain.c,v 1.23 2005/06/08 06:18:54 henning Exp $	*/
 /*	$NetBSD: uipc_domain.c,v 1.14 1996/02/09 19:00:44 christos Exp $	*/
 
 /*
@@ -93,12 +93,6 @@ domaininit(void)
 #endif
 #ifdef NETATALK
 	ADDDOMAIN(atalk);
-#endif
-#ifdef NS
-	ADDDOMAIN(ns);
-#endif
-#ifdef CCITT
-	ADDDOMAIN(ccitt);
 #endif
 #ifdef NATM
 	ADDDOMAIN(natm);

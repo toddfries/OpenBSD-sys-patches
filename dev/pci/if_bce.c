@@ -1,4 +1,4 @@
-/* $OpenBSD: if_bce.c,v 1.5 2005/01/04 02:32:18 brad Exp $ */
+/* $OpenBSD: if_bce.c,v 1.9 2005/08/09 04:10:11 mickey Exp $ */
 /* $NetBSD: if_bce.c,v 1.3 2003/09/29 01:53:02 mrg Exp $	 */
 
 /*
@@ -36,7 +36,6 @@
  */
 
 #include "bpfilter.h"
-#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -251,7 +250,6 @@ bce_attach(parent, self, aux)
 	caddr_t         kva;
 	bus_dma_segment_t seg;
 	int             rseg;
-	u_int32_t       command;
 	struct ifnet   *ifp;
 	pcireg_t        memtype;
 	bus_addr_t      memaddr;
@@ -269,16 +267,6 @@ bce_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		APRINT_ERROR("%s: failed to enable memory mapping!\n",
-		    sc->bce_dev.dv_xname);
-		return;
-	}
 	memtype = pci_mapreg_type(pa->pa_pc, pa->pa_tag, BCE_PCI_BAR0);
 	switch (memtype) {
 	case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
@@ -409,6 +397,8 @@ bce_attach(parent, self, aux)
 	ifp->if_init = bce_init;
 	IFQ_SET_READY(&ifp->if_snd);
 
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	/* MAC address */
 	sc->bce_ac.ac_enaddr[0] =
 	    bus_space_read_1(sc->bce_btag, sc->bce_bhandle, BCE_MAGIC_ENET0);
@@ -482,6 +472,7 @@ bce_ioctl(ifp, cmd, data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
+
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
 		case AF_INET:
@@ -495,7 +486,10 @@ bce_ioctl(ifp, cmd, data)
 		}
 		break;
 	case SIOCSIFMTU:
-		ifp->if_mtu = ifr->ifr_mtu;
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
+			error = EINVAL;
+		else if (ifp->if_mtu != ifr->ifr_mtu)
+			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 	case SIOCSIFFLAGS:
 		if(ifp->if_flags & IFF_UP)
@@ -971,11 +965,11 @@ bce_init(ifp)
 	/* setup packet filter */
 	bce_set_filter(ifp);
 
-	/* set max frame length, account for possible vlan tag */
+	/* set max frame length, account for possible VLAN tag */
 	bus_space_write_4(sc->bce_btag, sc->bce_bhandle, BCE_RX_MAX,
-	    ETHER_MAX_LEN + 32);
+	    ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN);
 	bus_space_write_4(sc->bce_btag, sc->bce_bhandle, BCE_TX_MAX,
-	    ETHER_MAX_LEN + 32);
+	    ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN);
 
 	/* set tx watermark */
 	bus_space_write_4(sc->bce_btag, sc->bce_bhandle, BCE_TX_WATER, 56);
@@ -1140,6 +1134,10 @@ bce_stop(ifp, disable)
 	/* Stop the 1 second timer */
 	timeout_del(&sc->bce_timeout);
 
+	/* Mark the interface down and cancel the watchdog timer. */
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	ifp->if_timer = 0;
+
 	/* Down the MII. */
 	mii_down(&sc->bce_mii);
 
@@ -1176,10 +1174,6 @@ bce_stop(ifp, disable)
 	/* drain receive queue */
 	if (disable)
 		bce_rxdrain(sc);
-
-	/* Mark the interface down and cancel the watchdog timer. */
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-	ifp->if_timer = 0;
 }
 
 /* reset the chip */

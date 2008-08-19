@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioprbs.c,v 1.5 2004/04/12 22:12:32 jmc Exp $	*/
+/*	$OpenBSD: ioprbs.c,v 1.8 2005/08/24 01:19:47 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -608,12 +608,14 @@ ioprbs_intr(struct device *dv, struct iop_msg *im, void *reply)
 		err = 1;
 	}
 
-	if (err) {
-		bp->b_flags |= B_ERROR;
-		bp->b_error = EIO;
-		bp->b_resid = bp->b_bcount;
-	} else
-		bp->b_resid = bp->b_bcount - letoh32(rb->transfercount);
+	if (bp) {
+		if (err) {
+			bp->b_flags |= B_ERROR;
+			bp->b_error = EIO;
+			bp->b_resid = bp->b_bcount;
+		} else
+			bp->b_resid = bp->b_bcount - letoh32(rb->transfercount);
+	}
 
 	iop_msg_unmap(iop, im);
 	iop_msg_free(iop, im);
@@ -654,7 +656,7 @@ ioprbs_adjqparam(struct device *dv, int mpi)
 	struct iop_softc *iop;
 
 	/*
-	 * AMI controllers seem to loose the plot if you hand off lots of
+	 * AMI controllers seem to lose the plot if you hand off lots of
 	 * queued commands.
 	 */
 	iop = (struct iop_softc *)dv->dv_parent;
@@ -800,8 +802,9 @@ ioprbs_internal_cache_cmd(xs)
 		case 4:
 			/* scsi_disk.h says this should be 0x16 */
 			mpd.dp.rigid_geometry.pg_length = 0x16;
-			mpd.hd.data_length = sizeof mpd.hd + sizeof mpd.bd +
-			    mpd.dp.rigid_geometry.pg_length;
+			mpd.hd.data_length = sizeof mpd.hd -
+			    sizeof mpd.hd.data_length + sizeof mpd.bd +
+			    sizeof mpd.dp.rigid_geometry;
 			mpd.hd.blk_desc_len = sizeof mpd.bd;
 
 			/* XXX */

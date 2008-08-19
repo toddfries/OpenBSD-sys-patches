@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.38 2005/01/03 22:45:52 brad Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.42 2005/08/01 05:36:47 brad Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -132,11 +132,6 @@
 #include <netinet/if_ether.h>
 #endif
 #endif /* defined(__OpenBSD__) */
-
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -730,7 +725,7 @@ USB_MATCH(aue)
 USB_ATTACH(aue)
 {
 	USB_ATTACH_START(aue, sc, uaa);
-	char			devinfo[1024];
+	char			*devinfop;
 	int			s;
 	u_char			eaddr[ETHER_ADDR_LEN];
 	struct ifnet		*ifp;
@@ -744,9 +739,10 @@ USB_ATTACH(aue)
 
 	DPRINTFN(5,(" : aue_attach: sc=%p", sc));
 
-	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
+	devinfop = usbd_devinfo_alloc(uaa->device, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->aue_dev), devinfo);
+	printf("%s: %s\n", USBDEVNAME(sc->aue_dev), devinfop);
+	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, AUE_CONFIG_NO, 1);
 	if (err) {
@@ -1267,16 +1263,13 @@ aue_tick_task(void *xsc)
 	s = splnet();
 
 	mii_tick(mii);
-	if (!sc->aue_link) {
-		mii_pollstat(mii); /* XXX FreeBSD has removed this call */
-		if (mii->mii_media_status & IFM_ACTIVE &&
-		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
-			DPRINTFN(2,("%s: %s: got link\n",
-				    USBDEVNAME(sc->aue_dev),__func__));
-			sc->aue_link++;
-			if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
-				aue_start(ifp);
-		}
+	if (!sc->aue_link && mii->mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
+		DPRINTFN(2,("%s: %s: got link\n",
+			    USBDEVNAME(sc->aue_dev),__func__));
+		sc->aue_link++;
+		if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
+			aue_start(ifp);
 	}
 
 	usb_callout(sc->aue_stat_ch, hz, aue_tick, sc);
@@ -1574,21 +1567,6 @@ aue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #endif
 			break;
 #endif /* INET */
-#ifdef NS
-		case AF_NS:
-		    {
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host = *(union ns_host *)
-					LLADDR(ifp->if_sadl);
-			else
-				memcpy(LLADDR(ifp->if_sadl),
-				       ina->x_host.c_host,
-				       ifp->if_addrlen);
-			break;
-		    }
-#endif /* NS */
 		}
 		break;
 
@@ -1683,6 +1661,7 @@ aue_stop(struct aue_softc *sc)
 
 	ifp = GET_IFP(sc);
 	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	aue_csr_write_1(sc, AUE_CTL0, 0);
 	aue_csr_write_1(sc, AUE_CTL1, 0);
@@ -1757,6 +1736,4 @@ aue_stop(struct aue_softc *sc)
 	}
 
 	sc->aue_link = 0;
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }

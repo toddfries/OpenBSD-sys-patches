@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.30 2004/03/17 14:16:04 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.32 2005/04/19 21:30:20 miod Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.16 1996/04/28 20:25:59 thorpej Exp $ */
 
 /*
@@ -92,6 +92,7 @@ dk_establish(dk, dev)
 		target = bp->val[0];
 		lun = bp->val[1];
 
+#if defined(SUN4)
 		if (CPU_ISSUN4 && dev->dv_xname[0] == 's' &&
 		    target == 0 && sbsc->sc_link[0][0] == NULL) {
 			/*
@@ -103,9 +104,12 @@ dk_establish(dk, dev)
 			target = 3;	/* remap to 3 */
 			lun = 0;
 		}
+#endif
 
+#if defined(SUN4C)
 		if (CPU_ISSUN4C && dev->dv_xname[0] == 's')
 			target = sd_crazymap(target);
+#endif
 
 		if (sbsc->sc_link[target][lun] != NULL &&
 		    sbsc->sc_link[target][lun]->device_softc == (void *)dev) {
@@ -187,11 +191,18 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	if (error)
 		return ("disk label read error");
 
-#if defined(CD9660) && (NCD > 0)
-	if ((strat == cdstrategy) &&
-	    (iso_disklabelspoof(dev, strat, lp) == NULL))
-		return (NULL);
+#if NCD > 0
+	if (strat == cdstrategy) {
+#if defined(CD9660)
+		if (iso_disklabelspoof(dev, strat, lp) == 0)
+			return (NULL);
 #endif
+#if defined(UDF)
+		if (udf_disklabelspoof(dev, strat, lp) == 0)
+			return (NULL);
+#endif
+	}
+#endif /* NCD > 0 */
 
 	/* Check for a Sun disk label (for PROM compatibility). */
 	slp = (struct sun_disklabel *) clp->cd_block;
@@ -209,6 +220,10 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 
 #if defined(CD9660)
 	if (iso_disklabelspoof(dev, strat, lp) == 0)
+		return (NULL);
+#endif
+#if defined(UDF)
+	if (udf_disklabelspoof(dev, strat, lp) == 0)
 		return (NULL);
 #endif
 	bzero(clp->cd_block, sizeof(clp->cd_block));

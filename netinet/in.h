@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.64 2005/01/14 14:51:27 mcbride Exp $	*/
+/*	$OpenBSD: in.h,v 1.67 2005/06/06 04:49:10 henning Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -217,15 +217,6 @@ struct sockaddr_in {
 	int8_t	    sin_zero[8];
 };
 
-struct sockaddr_rtin {
-	u_int8_t    rtin_len;
-	sa_family_t rtin_family;
-	in_port_t   rtin_port;
-	struct      in_addr rtin_dst;
-	struct	    in_addr rtin_src;
-	int8_t      rtin_zero[4];
-};
-
 /*
  * Structure used to describe IP options.
  * Used to store options internally, to pass them to a process,
@@ -318,6 +309,11 @@ struct ip_mreq {
  * Buffer lengths for strings containing printable IP addresses
  */
 #define INET_ADDRSTRLEN		16
+
+/*
+ * JUMBO MTU
+ */
+#define IP_JUMBO_MTU	9000
 
 /*
  * Definitions for inet sysctl operations.
@@ -479,7 +475,8 @@ struct ip_mreq {
 #define	IPCTL_MTUDISC		27	/* allow path MTU discovery */
 #define	IPCTL_MTUDISCTIMEOUT	28	/* allow path MTU discovery */
 #define	IPCTL_IPSEC_IPCOMP_ALGORITHM	29
-#define	IPCTL_MAXID		30
+#define	IPCTL_IFQUEUE		30
+#define	IPCTL_MAXID		31
 
 #define	IPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -512,6 +509,7 @@ struct ip_mreq {
 	{ "mtudisc", CTLTYPE_INT }, \
 	{ "mtudisctimeout", CTLTYPE_INT }, \
 	{ "ipsec-comp-alg", CTLTYPE_STRING }, \
+	{ "ifq", CTLTYPE_NODE }, \
 }
 #define	IPCTL_VARS { \
 	NULL, \
@@ -539,6 +537,7 @@ struct ip_mreq {
 	&ipsec_soft_timeout, \
 	&ipsec_soft_first_use, \
 	&ipsec_exp_first_use, \
+	NULL, \
 	NULL, \
 	NULL, \
 	NULL, \
@@ -627,6 +626,4 @@ char	  *inet_ntoa(struct in_addr);
 #define	sintosa(sin)	((struct sockaddr *)(sin))
 #define	ifatoia(ifa)	((struct in_ifaddr *)(ifa))
 #endif /* _KERNEL */
-#define satortin(rtin)	((struct sockaddr_rtin *)(rtin))
-
 #endif /* _NETINET_IN_H_ */

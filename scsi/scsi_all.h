@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_all.h,v 1.18 2004/12/18 18:23:53 krw Exp $	*/
+/*	$OpenBSD: scsi_all.h,v 1.33 2005/08/29 00:33:55 krw Exp $	*/
 /*	$NetBSD: scsi_all.h,v 1.10 1996/09/12 01:57:17 thorpej Exp $	*/
 
 /*
@@ -80,6 +80,7 @@ struct scsi_sense {
 struct scsi_inquiry {
 	u_int8_t opcode;
 	u_int8_t byte2;
+#define SI_EVPD		0x01
 	u_int8_t unused[2];
 	u_int8_t length;
 	u_int8_t control;
@@ -88,7 +89,7 @@ struct scsi_inquiry {
 struct scsi_mode_sense {
 	u_int8_t opcode;
 	u_int8_t byte2;
-#define	SMS_DBD				0x08
+#define	SMS_DBD				0x08	/* Disable Block Descriptors */
 	u_int8_t page;
 #define	SMS_PAGE_CODE 			0x3F
 #define	SMS_PAGE_CTRL 			0xC0
@@ -103,8 +104,9 @@ struct scsi_mode_sense {
 
 struct scsi_mode_sense_big {
 	u_int8_t opcode;
-	u_int8_t byte2;		/* same bits as small version */
-	u_int8_t page; 		/* same bits as small version */
+	u_int8_t byte2;				/* same bits as small version */
+#define SMS_LLBAA			0x10	/*    plus: Long LBA Accepted */
+	u_int8_t page;				/* same bits as small version */
 	u_int8_t unused[4];
 	u_int8_t length[2];
 	u_int8_t control;
@@ -161,12 +163,16 @@ struct scsi_prevent {
 #define REQUEST_SENSE		0x03
 #define INQUIRY			0x12
 #define MODE_SELECT		0x15
-#define MODE_SENSE		0x1a
-#define START_STOP		0x1b
 #define RESERVE			0x16
 #define RELEASE			0x17
+#define MODE_SENSE		0x1a
+#define START_STOP		0x1b
+#define RECEIVE_DIAGNOSTIC	0x1c
+#define SEND_DIAGNOSTIC		0x1d
 #define PREVENT_ALLOW		0x1e
 #define POSITION_TO_ELEMENT	0x2b
+#define WRITE_BUFFER		0x3b
+#define READ_BUFFER		0x3c
 #define	CHANGE_DEFINITION	0x40
 #define	MODE_SELECT_BIG		0x55
 #define	MODE_SENSE_BIG		0x5a
@@ -210,6 +216,8 @@ struct scsi_inquiry_data {
 #define	SID_REMOVABLE	0x80
 	u_int8_t version;
 #define SID_ANSII	0x07
+#define SID_ANSII_SCSI2	0x02
+#define SID_ANSII_SCSI3	0x03
 #define SID_ECMA	0x38
 #define SID_ISO		0xC0
 	u_int8_t response_format;
@@ -234,6 +242,14 @@ struct scsi_inquiry_data {
 #define SID_QAS		0x02
 #define SID_CLOCKING	0x0c /* 0 == ST only, 1 == DT only, 3 == both */
 	u_int8_t reserved;
+};
+
+struct scsi_inquiry_vpd {
+	u_int8_t device;
+	u_int8_t page_code;
+	u_int8_t reserved;
+	u_int8_t page_length;
+	char serial[32];
 };
 
 struct scsi_sense_data_unextended {
@@ -292,6 +308,19 @@ struct scsi_blk_desc {
 	u_int8_t blklen[3];
 };
 
+struct scsi_direct_blk_desc {
+	u_int8_t nblocks[4];
+	u_int8_t density;
+	u_int8_t blklen[3];
+};
+
+struct scsi_blk_desc_big {
+	u_int8_t nblocks[8];
+	u_int8_t density;
+	u_int8_t reserved[3];
+	u_int8_t blklen[4];
+};
+
 struct scsi_mode_header {
 	u_int8_t data_length;		/* Sense data length */
 	u_int8_t medium_type;
@@ -303,9 +332,19 @@ struct scsi_mode_header_big {
 	u_int8_t data_length[2];	/* Sense data length */
 	u_int8_t medium_type;
 	u_int8_t dev_spec;
-	u_int8_t unused[2];
+	u_int8_t reserved;
+#define LONGLBA	0x01	
+	u_int8_t reserved2;
 	u_int8_t blk_desc_len[2];
 };
+
+struct scsi_mode_sense_buf {
+	union {
+		struct scsi_mode_header hdr;
+		struct scsi_mode_header_big hdr_big;
+		u_char buf[255];	/* 256 bytes breaks some devices. */
+	} __packed headers;		/* Ensure sizeof() is 255! */
+} __packed;
 
 /*
  * SPI status information unit. See section 14.3.5 of SPI-3.

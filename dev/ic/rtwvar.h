@@ -1,5 +1,6 @@
-/*	$OpenBSD: rtwvar.h,v 1.8 2005/03/02 11:14:12 jsg Exp $	*/
-/* $NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $ */
+/*	$OpenBSD: rtwvar.h,v 1.13 2005/06/15 01:33:50 jsg Exp $	*/
+/*	$NetBSD: rtwvar.h,v 1.10 2004/12/26 22:37:57 mycroft Exp $	*/
+
 /*-
  * Copyright (c) 2004, 2005 David Young.  All rights reserved.
  *
@@ -34,6 +35,7 @@
 #ifndef _DEV_IC_RTWVAR_H_
 #define	_DEV_IC_RTWVAR_H_
 
+#include <sys/device.h>
 #include <sys/queue.h>
 #include <sys/timeout.h>
 
@@ -74,6 +76,18 @@ extern int rtw_debug;
 #define	DPRINTF(__sc, __flags, __x)
 #endif /* RTW_DEBUG */
 
+#define	KASSERT2(__cond, __msg)		\
+	do {				\
+		if (!(__cond))		\
+			panic __msg ;	\
+	} while (0)
+
+#define NEXT_ATTACH_STATE(sc, state) do {			\
+	DPRINTF(sc, RTW_DEBUG_ATTACH,				\
+	    ("%s: attach state %s\n", __func__, #state));	\
+	sc->sc_attach_state = state;				\
+} while (0)
+
 enum rtw_locale {
 	RTW_LOCALE_USA = 0,
 	RTW_LOCALE_EUROPE,
@@ -82,18 +96,24 @@ enum rtw_locale {
 };
 
 enum rtw_rfchipid {
-	RTW_RFCHIPID_RESERVED = 0,
-	RTW_RFCHIPID_INTERSIL = 1,
-	RTW_RFCHIPID_RFMD = 2,
-	RTW_RFCHIPID_PHILIPS = 3,
-	RTW_RFCHIPID_MAXIM = 4,
-	RTW_RFCHIPID_GCT = 5
-}; 
+	RTW_RFCHIPID_RESERVED	= 0x00,
+	RTW_RFCHIPID_INTERSIL	= 0x01,
+	RTW_RFCHIPID_RFMD2948	= 0x02,
+	RTW_RFCHIPID_PHILIPS	= 0x03,
+	RTW_RFCHIPID_MAXIM2820	= 0x04,
+	RTW_RFCHIPID_GCT	= 0x05,
+	RTW_RFCHIPID_RFMD2958	= 0x06,
+	RTW_RFCHIPID_MAXIM2822	= 0x07,
+	RTW_RFCHIPID_MAXIM2825	= 0x08,
+	RTW_RFCHIPID_RTL8225	= 0x09,
+	RTW_RFCHIPID_RTL8255	= 0x0a
+};
 
 /* sc_flags */
 #define RTW_F_ENABLED		0x00000001	/* chip is enabled */
 #define RTW_F_DIGPHY		0x00000002	/* digital PHY */
 #define RTW_F_DFLANTB		0x00000004	/* B antenna is default */
+#define RTW_F_RTL8185		0x00000008	/* RTL8185 or newer */
 #define RTW_F_ANTDIV		0x00000010	/* h/w antenna diversity */
 #define RTW_F_9356SROM		0x00000020	/* 93c56 SROM */
 #define RTW_F_SLEEP		0x00000040	/* chip is asleep */
@@ -148,7 +168,8 @@ struct rtw_txsoft {
 
 #define RTW_MAXPKTSEGS		64	/* max 64 segments per Tx packet */
 
-#define CASSERT(cond, complaint) complaint[(cond) ? 0 : -1] = complaint[(cond) ? 0 : -1]
+#define CASSERT(cond, complaint)					\
+	complaint[(cond) ? 0 : -1] = complaint[(cond) ? 0 : -1]
 
 /* Note well: the descriptor rings must begin on RTW_DESC_ALIGNMENT
  * boundaries.  I allocate them consecutively from one buffer, so
@@ -304,7 +325,7 @@ struct rtw_rf {
 	void	(*rf_destroy)(struct rtw_rf *);
 	/* args: frequency, txpower, power state */
 	int	(*rf_init)(struct rtw_rf *, u_int, u_int8_t,
-	                  enum rtw_pwrstate);
+		    enum rtw_pwrstate);
 	/* arg: power state */
 	int	(*rf_pwrstate)(struct rtw_rf *, enum rtw_pwrstate);
 	/* arg: frequency */
@@ -341,6 +362,16 @@ struct rtw_sa2400 {
 	struct rtw_rf		sa_rf;
 	struct rtw_rfbus	sa_bus;
 	int			sa_digphy;	/* 1: digital PHY */
+};
+
+struct rtw_rtl8225 {
+	struct rtw_rf		rt_rf;
+	struct rtw_rfbus	rt_bus;
+};
+
+struct rtw_rtl8255 {
+	struct rtw_rf		rt_rf;
+	struct rtw_rfbus	rt_bus;
 };
 
 typedef void (*rtw_pwrstate_t)(struct rtw_regs *, enum rtw_pwrstate, int, int);
@@ -405,7 +436,7 @@ struct rtw_softc {
 	u_int16_t		sc_inten;
 
 	/* interrupt acknowledge hook */
-	void (*sc_intr_ack)(struct rtw_regs *);
+	void			(*sc_intr_ack)(struct rtw_regs *);
 
 	int			(*sc_enable)(struct rtw_softc *);
 	void			(*sc_disable)(struct rtw_softc *);
@@ -442,7 +473,7 @@ struct rtw_softc {
 	int			sc_txkey;
 	struct ifqueue		sc_beaconq;
 	struct rtw_led_state	sc_led_state;
-	int			sc_hwverid;
+	u_int			sc_hwverid;
 };
 
 #define	sc_if		sc_ic.ic_if

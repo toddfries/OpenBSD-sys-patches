@@ -1,22 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.21 2005/03/18 07:48:43 dlg Exp $
-#
-# GENERIC machine description file
-#
-# This machine description file is used to generate the default OpenBSD
-# kernel.  The generic kernel does not include all options, subsystems
-# and device drivers, but should be useful for most applications.
-#
-# The machine description file can be customised for your specific
-# machine to reduce the kernel size and improve its performance.
-#
-# For further information on compiling OpenBSD kernels, see the config(8)
-# man page.
-#
-# For further information on hardware support for this architecture, see
-# the intro(4) man page.  For further information about kernel options
-# for this architecture, see the options(4) man page.  For an explanation
-# of each device driver in this file see the section 4 man page for the
-# device.
+#	$OpenBSD: RAMDISK,v 1.31 2005/08/28 05:30:43 deraadt Exp $
 
 machine	zaurus	arm
 
@@ -32,7 +14,7 @@ options	EXT2FS		# Second Extended Filesystem
 options	FIFO		# FIFOs; RECOMMENDED
 
 options		ARM32
-#options 	ARM_INTR_IMPL="<arch/arm/xscale/pxa2x0_intr.h>"
+#options	ARM_INTR_IMPL="<arch/arm/xscale/pxa2x0_intr.h>"
 options		PXA2x0_INTR
 options		PXAGPIO_HAS_GPION_INTRS
 
@@ -47,9 +29,9 @@ makeoptions	BOARDTYPE="zaurus"
 maxusers	32
 
 # CPU options
-options 	CPU_XSCALE_PXA2X0	# Support the XScale core
-#options 	XSCALE_CACHE_WRITE_THROUGH
-options 	XSCALE_CACHE_WRITE_BACK
+options		CPU_XSCALE_PXA2X0	# Support the XScale core
+#options	XSCALE_CACHE_WRITE_THROUGH
+options		XSCALE_CACHE_WRITE_BACK
 makeoptions	CPUFLAGS="-mcpu=xscale"
 
 #option WSDISPLAY_COMPAT_USL		# VT handling
@@ -69,19 +51,25 @@ pxagpio0	at pxaip?	# GPIO
 scoop0		at pxaip?
 scoop1		at pxaip?
 saost0		at pxaip? addr 0x40a00000 size 0x20
-pxaudc0		at pxaip?
-ohci0		at pxaip?
-usb*		at ohci?
+
+# touch screen
+zts0		at pxaip?
+wsmouse*	at zts? mux 0
 
 # keyboard
 zkbd0		at pxaip?
 wskbd*		at zkbd? mux 1
 
-# USB bus support
-usb*		at ohci?	flags 0x1
-uhub*		at usb?
-uhub*		at uhub?
+# USB controllers
+pxaudc0		at pxaip?		# USB Device Controller
+ohci0		at pxaip?		# Open Host Controller
 
+# USB bus support
+usb*		at ohci?
+uhub*		at usb?			# USB Root Hub
+uhub*		at uhub?		# USB Hubs
+
+# USB devices
 uhidev*		at uhub?
 uhid*		at uhidev?		# USB Generic HID devices
 ukbd*		at uhidev?		# USB HID Keyboard devices
@@ -89,16 +77,17 @@ wskbd*		at ukbd? mux 1
 #ums*		at uhub?		# USB Mice
 #wsmouse*	at ums? mux 0
 #ulpt*		at uhub?		# USB Printer
+#atu*		at uhub?		# Atmel AT76C50x based 802.11b
 aue*		at uhub?		# ADMtek AN986 Pegasus Ethernet
 axe*		at uhub?		# ASIX Electronics AX88172 USB Ethernet
+cdce*		at uhub?		# CDC Ethernet
 cue*		at uhub?		# CATC USB-EL1201A based Ethernet
 kue*		at uhub?		# Kawasaki KL5KUSB101B based Ethernet
-cdce*		at uhub?		# CDC Ethernet
-upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 udav*		at uhub?		# Davicom DM9601 based Ethernet
 ural*		at uhub?		# Ralink RT2500
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
+upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 #uscanner*	at uhub?		# USB Scanner driver
 #usscanner*	at uhub?		# USB SCSI scanners
 #scsibus*	at usscanner?
@@ -116,11 +105,9 @@ cd*		at scsibus?
 
 # integrated 16550 UARTs
 options COM_PXA2X0
-com0	at pxaip?  addr 0x40100000 intr 22	# Full Function UART
-com1	at pxaip?  addr 0x40200000 intr 21	# BlueTootth UART
-#com2	at pxaip?  addr 0x40700000 intr 20	# Standard UART (for IrDA)
-options FFUARTCONSOLE
-#options BTUARTCONSOLE
+com0	at pxaip? addr 0x40100000 intr 22	# Full Function UART
+com1	at pxaip? addr 0x40200000 intr 21	# BlueTooth UART
+com2	at pxaip? addr 0x40700000 intr 20	# Standard UART (for IrDA)
 
 #aupxa0	at pxaip?		# AC97 interface
 
@@ -128,7 +115,7 @@ options FFUARTCONSOLE
 pxapcic0	at pxaip?
 pcmcia*		at pxapcic?
 wi*		at pcmcia?
-ne* 		at pcmcia?
+ne*		at pcmcia?
 wdc*		at pcmcia?
 
 # IDE hard drives
@@ -152,7 +139,7 @@ amphy*	at mii?			# AMD 79C873 PHYs
 tqphy*	at mii?			# TDK 78Q212x PHYs
 bmtphy*	at mii?			# Broadcom 10/100 PHYs
 #brgphy* at mii?		# Broadcom Gigabit PHYs
-#eephy* at mii?			# Marvell 88E1000 series PHY
+eephy* at mii?			# Marvell 88E1000 series PHY
 #xmphy*	at mii?			# XaQti XMAC-II PHYs
 nsgphy*	at mii?			# NS gigabit PHYs
 urlphy*	at mii?			# Realtek RTL8150L internal PHY

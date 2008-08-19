@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.104.2.1 2005/12/18 04:24:05 brad Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.109.2.1 2005/12/16 23:47:44 brad Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -106,6 +106,7 @@ struct carp_softc {
 #define	sc_if		sc_ac.ac_if
 #define	sc_carpdev	sc_ac.ac_if.if_carpdev
 	void *ah_cookie;
+	void *lh_cookie;
 	struct ip_moptions sc_imo;
 #ifdef INET6
 	struct ip6_moptions sc_im6o;
@@ -114,7 +115,6 @@ struct carp_softc {
 
 	enum { INIT = 0, BACKUP, MASTER }	sc_state;
 
-	int sc_flags_backup;
 	int sc_suppress;
 	int sc_bow_out;
 
@@ -699,7 +699,6 @@ carp_clone_create(ifc, unit)
 		return (ENOMEM);
 	bzero(sc, sizeof(*sc));
 
-	sc->sc_flags_backup = 0;
 	sc->sc_suppress = 0;
 	sc->sc_advbase = CARP_DFLTINTV;
 	sc->sc_vhid = -1;	/* required setting */
@@ -755,6 +754,7 @@ void
 carpdetach(struct carp_softc *sc)
 {
 	struct carp_if *cif;
+	int s;
 
 	timeout_del(&sc->sc_ad_tmo);
 	timeout_del(&sc->sc_md_tmo);
@@ -773,7 +773,10 @@ carpdetach(struct carp_softc *sc)
 	carp_setrun(sc, 0);
 	carp_multicast_cleanup(sc);
 
+	s = splnet();
 	if (sc->sc_carpdev != NULL) {
+		hook_disestablish(sc->sc_carpdev->if_linkstatehooks,
+		    sc->lh_cookie);
 		cif = (struct carp_if *)sc->sc_carpdev->if_carp;
 		TAILQ_REMOVE(&cif->vhif_vrs, sc, sc_list);
 		if (!--cif->vhif_nvrs) {
@@ -783,6 +786,7 @@ carpdetach(struct carp_softc *sc)
 		}
 	}
 	sc->sc_carpdev = NULL;
+	splx(s);
 }
 
 /* Detach an interface from the carp.  */
@@ -827,8 +831,8 @@ carp_send_ad_all(void)
 
 		cif = (struct carp_if *)ifp->if_carp;
 		TAILQ_FOREACH(vh, &cif->vhif_vrs, sc_list) {
-			if ((vh->sc_if.if_flags & (IFF_UP|IFF_RUNNING)) &&
-			    vh->sc_state == MASTER)
+			if ((vh->sc_if.if_flags & (IFF_UP|IFF_RUNNING)) ==
+			    (IFF_UP|IFF_RUNNING) && vh->sc_state == MASTER)
 				carp_send_ad(vh);
 		}
 	}
@@ -1247,21 +1251,8 @@ carp_input(struct mbuf *m, u_int8_t *shost, u_int8_t *dhost, u_int16_t etype)
 	m->m_pkthdr.rcvif = ifp;
 
 #if NBPFILTER > 0
-	if (ifp->if_bpf) {
-		/*
-		 * Do the usual BPF fakery.  Note that we don't support
-		 * promiscuous mode here, since it would require the
-		 * drivers to know about CARP and we're not ready for
-		 * that yet.
-		 */
-		struct mbuf m0;
-
-		m0.m_flags = 0;
-		m0.m_next = m;
-		m0.m_len = ETHER_HDR_LEN;
-		m0.m_data = (char *)&eh;
-		bpf_mtap(ifp->if_bpf, &m0);
-	}
+	if (ifp->if_bpf)
+		bpf_mtap_hdr(ifp->if_bpf, (char *)&eh, ETHER_HDR_LEN, m);
 #endif
 	ifp->if_ipackets++;
 	ether_input(ifp, &eh, m);
@@ -1310,7 +1301,7 @@ carp_setrun(struct carp_softc *sc, sa_family_t af)
 	}
 
 	if (sc->sc_if.if_flags & IFF_UP && sc->sc_vhid > 0 &&
-	    (sc->sc_naddrs || sc->sc_naddrs6)) {
+	    (sc->sc_naddrs || sc->sc_naddrs6) && !sc->sc_suppress) {
 		sc->sc_if.if_flags |= IFF_RUNNING;
 	} else {
 		sc->sc_if.if_flags &= ~IFF_RUNNING;
@@ -1395,6 +1386,7 @@ carp_set_ifp(struct carp_softc *sc, struct ifnet *ifp)
 	struct carp_if *cif, *ncif = NULL;
 	struct carp_softc *vr, *after = NULL;
 	int myself = 0, error = 0;
+	int s;
 
 	if (ifp == sc->sc_carpdev)
 		return (0);
@@ -1472,13 +1464,16 @@ carp_set_ifp(struct carp_softc *sc, struct ifnet *ifp)
 		if (sc->sc_naddrs || sc->sc_naddrs6)
 			sc->sc_if.if_flags |= IFF_UP;
 		carp_set_enaddr(sc);
+		s = splnet();
+		sc->lh_cookie = hook_establish(ifp->if_linkstatehooks, 1,
+		    carp_carpdev_state, ifp);
 		carp_carpdev_state(ifp);
+		splx(s);
 	} else {
 		carpdetach(sc);
 		sc->sc_if.if_flags &= ~(IFF_UP|IFF_RUNNING);
 	}
 	return (0);
-
 }
 
 void
@@ -1976,10 +1971,11 @@ carp_set_state(struct carp_softc *sc, int state)
 }
 
 void
-carp_carpdev_state(struct ifnet *ifp)
+carp_carpdev_state(void *v)
 {
 	struct carp_if *cif;
 	struct carp_softc *sc;
+	struct ifnet *ifp = v;
 
 	if (ifp->if_type == IFT_CARP)
 		return;
@@ -1987,28 +1983,28 @@ carp_carpdev_state(struct ifnet *ifp)
 	cif = (struct carp_if *)ifp->if_carp;
 
 	TAILQ_FOREACH(sc, &cif->vhif_vrs, sc_list) {
+		int suppressed = sc->sc_suppress;
+
 		if (sc->sc_carpdev->if_link_state == LINK_STATE_DOWN ||
 		    !(sc->sc_carpdev->if_flags & IFF_UP)) {
-			sc->sc_flags_backup = sc->sc_if.if_flags;
-			sc->sc_if.if_flags &= ~(IFF_UP|IFF_RUNNING);
+			sc->sc_if.if_flags &= ~IFF_RUNNING;
 			timeout_del(&sc->sc_ad_tmo);
 			timeout_del(&sc->sc_md_tmo);
 			timeout_del(&sc->sc_md6_tmo);
 			carp_set_state(sc, INIT);
+			sc->sc_suppress = 1;
 			carp_setrun(sc, 0);
-			if (!sc->sc_suppress) {
+			if (!suppressed) {
 				carp_suppress_preempt++;
 				if (carp_suppress_preempt == 1)
 					carp_send_ad_all();
 			}
-			sc->sc_suppress = 1;
 		} else {
-			sc->sc_if.if_flags |= sc->sc_flags_backup;
 			carp_set_state(sc, INIT);
-			carp_setrun(sc, 0);
-			if (sc->sc_suppress)
-				carp_suppress_preempt--;
 			sc->sc_suppress = 0;
+			carp_setrun(sc, 0);
+			if (suppressed)
+				carp_suppress_preempt--;
 		}
 	}
 }
@@ -2102,7 +2098,11 @@ carp_ether_delmulti(struct carp_softc *sc, struct ifreq *ifr)
 				break;
 			}
 		}
-		KASSERT(mc != NULL);
+		/*
+		 * XXX We don't actually want KASSERT(mc != NULL) here
+		 * because we mess with the multicast addresses elsewhere.
+		 * Clean up after release.
+		 */
 	} else
 		(void)ether_addmulti(ifr, (struct arpcom *)&sc->sc_ac);
 	return (error);

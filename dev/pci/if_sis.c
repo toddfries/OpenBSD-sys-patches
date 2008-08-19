@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.43 2005/01/15 05:24:11 brad Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.51 2005/08/09 04:10:12 mickey Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -527,7 +527,7 @@ int sis_mii_writereg(sc, frame)
 {
 	int			s;
  
-	 s = splimp();
+	s = splimp();
  	/*
  	 * Set up frame for TX.
  	 */
@@ -858,13 +858,12 @@ void sis_attach(parent, self, aux)
 {
 	int			i, s;
 	const char		*intrstr = NULL;
-	u_int32_t		command;
+	pcireg_t		command;
 	struct sis_softc	*sc = (struct sis_softc *)self;
 	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	struct ifnet		*ifp;
-	bus_addr_t		iobase;
 	bus_size_t		iosize;
 
 	s = splnet();
@@ -915,39 +914,19 @@ void sis_attach(parent, self, aux)
 	 * Map control/status registers.
 	 */
 	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	    PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef SIS_USEIOSPACE
-	if (!(command & PCI_COMMAND_IO_ENABLE)) {
-		printf(": failed to enable I/O ports\n");
-		goto fail;
-	}
-	if (pci_io_find(pc, pa->pa_tag, SIS_PCI_LOIO, &iobase, &iosize)) {
-		printf(": can't find I/O space\n");
-		goto fail;
-	}
-	if (bus_space_map(pa->pa_iot, iobase, iosize, 0, &sc->sis_bhandle)) {
-		printf(": can't map I/O space\n");
-		goto fail;
-	}
-	sc->sis_btag = pa->pa_iot;
+	if (pci_mapreg_map(pa, SIS_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
+	    &sc->sis_btag, &sc->sis_bhandle, NULL, &iosize, 0)) {
+		printf(": can't map i/o space\n");
+		return;
+ 	}
 #else
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf(": failed to enable memory mapping\n");
-		goto fail;
-	}
-	if (pci_mem_find(pc, pa->pa_tag, SIS_PCI_LOMEM, &iobase, &iosize,NULL)){
-		printf(": can't find mem space\n");
-		goto fail;
-	}
-	if (bus_space_map(pa->pa_memt, iobase, iosize, 0, &sc->sis_bhandle)) {
-		printf(": can't map mem space\n");
-		goto fail;
-	}
-	sc->sis_btag = pa->pa_memt;
+	if (pci_mapreg_map(pa, SIS_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->sis_btag, &sc->sis_bhandle, NULL, &iosize, 0)) {
+ 		printf(": can't map mem space\n");
+		return;
+ 	}
 #endif
 
 	/* Allocate interrupt */
@@ -970,6 +949,13 @@ void sis_attach(parent, self, aux)
 
 	/* Reset the adapter. */
 	sis_reset(sc);
+
+	if (sc->sis_type == SIS_TYPE_900 &&
+	   (sc->sis_rev == SIS_REV_635 ||
+	    sc->sis_rev == SIS_REV_900B)) {
+		SIO_SET(SIS_CFG_RND_CNT);
+		SIO_SET(SIS_CFG_PERR_DETECT);
+	}
 
 	printf(":");
 
@@ -1482,13 +1468,11 @@ void sis_tick(xsc)
 	mii = &sc->sc_mii;
 	mii_tick(mii);
 
-	if (!sc->sis_link) {
-		mii_pollstat(mii);
-		if (mii->mii_media_status & IFM_ACTIVE &&
-		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE)
-			sc->sis_link++;
-			if (!IFQ_IS_EMPTY(&ifp->if_snd))
-				sis_start(ifp);
+	if (!sc->sis_link && mii->mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
+		sc->sis_link++;
+		if (!IFQ_IS_EMPTY(&ifp->if_snd))
+			sis_start(ifp);
 	}
 	timeout_add(&sc->sis_timeout, hz);
 
@@ -1508,11 +1492,8 @@ int sis_intr(arg)
 	sc = arg;
 	ifp = &sc->arpcom.ac_if;
 
-	/* Supress unwanted interrupts */
-	if (!(ifp->if_flags & IFF_UP)) {
-		sis_stop(sc);
+	if (sc->sis_stopped)	/* Most likely shared interrupt */
 		return claimed;
-	}
 
 	/* Disable interrupts. */
 	CSR_WRITE_4(sc, SIS_IER, 0);
@@ -1623,7 +1604,7 @@ void sis_start(ifp)
 {
 	struct sis_softc	*sc;
 	struct mbuf		*m_head = NULL;
-	u_int32_t		idx;
+	u_int32_t		idx, queued = 0;
 
 	sc = ifp->if_softc;
 
@@ -1648,6 +1629,8 @@ void sis_start(ifp)
 		/* now we are committed to transmit the packet */
 		IFQ_DEQUEUE(&ifp->if_snd, m_head);
 
+		queued++;
+
 		/*
 		 * If there's a BPF listener, bounce a copy of this frame
 		 * to him.
@@ -1657,17 +1640,17 @@ void sis_start(ifp)
 			bpf_mtap(ifp->if_bpf, m_head);
 #endif
 	}
-	if (idx == sc->sis_cdata.sis_tx_prod)
-		return;
 
-	/* Transmit */
-	sc->sis_cdata.sis_tx_prod = idx;
-	SIS_SETBIT(sc, SIS_CSR, SIS_CSR_TX_ENABLE);
+	if (queued) {
+		/* Transmit */
+		sc->sis_cdata.sis_tx_prod = idx;
+		SIS_SETBIT(sc, SIS_CSR, SIS_CSR_TX_ENABLE);
 
-	/*
-	 * Set a timeout in case the chip goes out to lunch.
-	 */
-	ifp->if_timer = 5;
+		/*
+		 * Set a timeout in case the chip goes out to lunch.
+		 */
+		ifp->if_timer = 5;
+	}
 
 	return;
 }
@@ -1728,14 +1711,14 @@ void sis_init(xsc)
 	sis_list_tx_init(sc);
 
         /*
-	 * Page 78 of the DP83815 data sheet (september 2002 version)
+	 * Short Cable Receive Errors (MP21.E)
+	 * also: Page 78 of the DP83815 data sheet (september 2002 version)
 	 * recommends the following register settings "for optimum
 	 * performance." for rev 15C.  The driver from NS also sets  
 	 * the PHY_CR register for later versions.
 	 */
-	 if (sc->sis_type == SIS_TYPE_83815) {
+	 if (sc->sis_type == SIS_TYPE_83815 && sc->sis_srr <= NS_SRR_15D) {
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0x0001);
-		/* DC speed = 01 */
 		CSR_WRITE_4(sc, NS_PHY_CR, 0x189C);
 		if (sc->sis_srr == NS_SRR_15C) {  
 			/* set val for c2 */
@@ -1794,8 +1777,15 @@ void sis_init(xsc)
 	CSR_WRITE_4(sc, SIS_TX_LISTPTR, sc->sc_listmap->dm_segs[0].ds_addr +
 	    offsetof(struct sis_list_data, sis_tx_list[0]));
 
-	/* Set RX configuration */
-	CSR_WRITE_4(sc, SIS_RX_CFG, SIS_RXCFG);
+	/* SIS_CFG_EDB_MASTER_EN indicates the EDB bus is used instead of
+	 * the PCI bus. When this bit is set, the Max DMA Burst Size
+	 * for TX/RX DMA should be no larger than 16 double words.
+	 */
+	if (CSR_READ_4(sc, SIS_CFG) & SIS_CFG_EDB_MASTER_EN) {
+		CSR_WRITE_4(sc, SIS_RX_CFG, SIS_RXCFG64);
+	} else {
+		CSR_WRITE_4(sc, SIS_RX_CFG, SIS_RXCFG256);
+	}
 
 	/* Accept Long Packets for VLAN support */
 	SIS_SETBIT(sc, SIS_RX_CFG, SIS_RXCFG_RX_JABBER);
@@ -1817,32 +1807,34 @@ void sis_init(xsc)
 		SIS_CLRBIT(sc, SIS_RX_CFG, SIS_RXCFG_RX_TXPKTS);
 	}
 
+	if (sc->sis_type == SIS_TYPE_83815 && sc->sis_srr >= NS_SRR_16A) {
+		/*
+		 * MPII03.D: Half Duplex Excessive Collisions.
+		 * Also page 49 in 83816 manual
+		 */
+		SIS_SETBIT(sc, SIS_TX_CFG, SIS_TXCFG_MPII03D);
+ 	}
+
 	if (sc->sis_type == SIS_TYPE_83815 && sc->sis_srr < NS_SRR_16A &&
 	     IFM_SUBTYPE(mii->mii_media_active) == IFM_100_TX) {
 		uint32_t reg;
 
 		/*
-		 * Some DP83815s experience problems when used with short
-		 * (< 30m/100ft) Ethernet cables in 100BaseTX mode.  This
-		 * sequence adjusts the DSP's signal attenuation to fix the
-		 * problem.
+		 * Short Cable Receive Errors (MP21.E)
 		 */
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0x0001);
-
-		reg = CSR_READ_4(sc, NS_PHY_DSPCFG);
-		/* Allow coefficient to be read */
-		CSR_WRITE_4(sc, NS_PHY_DSPCFG, (reg & 0xfff) | 0x1000);
-		DELAY(100);
-		reg = CSR_READ_4(sc, NS_PHY_TDATA);
-		if ((reg & 0x0080) == 0 ||
-		    (reg > 0xd8 && reg <= 0xff)) {
+		reg = CSR_READ_4(sc, NS_PHY_DSPCFG) & 0xfff;
+		CSR_WRITE_4(sc, NS_PHY_DSPCFG, reg | 0x1000);
+		DELAY(100000);
+		reg = CSR_READ_4(sc, NS_PHY_TDATA) & 0xff;
+		if ((reg & 0x0080) == 0 || (reg > 0xd8 && reg <= 0xff)) {
 #ifdef DEBUG
 			printf("%s: Applying short cable fix (reg=%x)\n",
 			    sc->sc_dev.dv_xname, reg);
 #endif
 			CSR_WRITE_4(sc, NS_PHY_TDATA, 0x00e8);
-			/* Adjust coefficient and prevent change */
-			SIS_SETBIT(sc, NS_PHY_DSPCFG, 0x20);
+			reg = CSR_READ_4(sc, NS_PHY_DSPCFG);
+			SIS_SETBIT(sc, NS_PHY_DSPCFG, reg | 0x20);
 		}
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0);
 	}
@@ -1955,6 +1947,12 @@ int sis_ioctl(ifp, command, data)
 		}
 		error = 0;
 		break;
+	case SIOCSIFMTU:
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
+			error = EINVAL;
+		else if (ifp->if_mtu != ifr->ifr_mtu)
+			ifp->if_mtu = ifr->ifr_mtu;
+		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		error = (command == SIOCADDMULTI) ?
@@ -1998,6 +1996,10 @@ void sis_watchdog(ifp)
 
 	sc = ifp->if_softc;
 
+	if (sc->sis_stopped) {
+		return;
+	}
+
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 
@@ -2030,8 +2032,13 @@ void sis_stop(sc)
 	ifp->if_timer = 0;
 
 	timeout_del(&sc->sis_timeout);
+
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+	sc->sis_stopped = 1;
+
 	CSR_WRITE_4(sc, SIS_IER, 0);
 	CSR_WRITE_4(sc, SIS_IMR, 0);
+	CSR_READ_4(sc, SIS_ISR); /* clear any interrupts already pending */
 	SIS_SETBIT(sc, SIS_CSR, SIS_CSR_TX_DISABLE|SIS_CSR_RX_DISABLE);
 	DELAY(1000);
 	CSR_WRITE_4(sc, SIS_TX_LISTPTR, 0);
@@ -2076,11 +2083,6 @@ void sis_stop(sc)
 		bzero((char *)&sc->sis_ldata->sis_tx_list[i],
 		    sizeof(struct sis_desc) - sizeof(bus_dmamap_t));
 	}
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-	sc->sis_stopped = 1;
-
-	return;
 }
 
 /*

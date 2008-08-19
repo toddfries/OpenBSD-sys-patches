@@ -1,4 +1,4 @@
-/*	$OpenBSD: bio.c,v 1.3 2003/08/06 21:08:06 millert Exp $	*/
+/*	$OpenBSD: bio.c,v 1.6 2005/08/17 02:32:23 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -89,27 +89,28 @@ bioioctl(dev, cmd, addr, flag, p)
 	struct proc *p;
 {
 	char name[16];
-	int len, error;
+	size_t len;
+	int error;
 	struct bio_locate *locate;
 	struct bio_common *common;
 
 	switch (cmd) {
 	case BIOCLOCATE:
 		locate = (struct bio_locate *)addr;
-		error = copyinstr(locate->name, name, 16, &len);
+		error = copyinstr(locate->bl_name, name, 16, &len);
 		if (error != 0)
 			return (error);
-		locate->cookie = bio_lookup(name);
-		if (locate->cookie == NULL)
+		locate->bl_cookie = bio_lookup(name);
+		if (locate->bl_cookie == NULL)
 			return (ENOENT);
 		break;
 
 	default:
 		common = (struct bio_common *)addr;
-		if (!bio_validate(common->cookie))
+		if (!bio_validate(common->bc_cookie))
 			return (ENOENT);
 		return (bio_delegate_ioctl(
-		    (struct bio_mapping *)common->cookie, cmd, addr));
+		    (struct bio_mapping *)common->bc_cookie, cmd, addr));
 	}
 	return (0);
 }
@@ -128,6 +129,22 @@ bio_register(dev, ioctl)
 	bm->bm_ioctl = ioctl;
 	LIST_INSERT_HEAD(&bios, bm, bm_link);
 	return (0);
+}
+
+void
+bio_unregister(dev)
+	struct device *dev;
+{
+	struct bio_mapping *bm, *next;
+
+	for (bm = LIST_FIRST(&bios); bm != NULL; bm = next) {
+		next = LIST_NEXT(bm, bm_link);
+
+		if (dev == bm->bm_dev) {
+			LIST_REMOVE(bm, bm_link);
+			free(bm, M_DEVBUF);
+		}
+	}
 }
 
 struct bio_mapping *

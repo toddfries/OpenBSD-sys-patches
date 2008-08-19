@@ -1,18 +1,24 @@
-#	$OpenBSD: GENERIC,v 1.121 2005/03/17 21:47:40 dlg Exp $
-# 	$NetBSD: GENERIC32,v 1.18 2001/07/20 00:07:12 eeh Exp $
+#	$OpenBSD: GENERIC,v 1.133 2005/08/03 02:10:44 dlg Exp $
+#
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
+#
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
 machine		sparc64
-
-include "../../../conf/GENERIC"
+include		"../../../conf/GENERIC"
+maxusers	64			# estimated number of users
 
 option		SUN4U
 
 option		PCIVERBOSE
-option		USER_PCICONF	# user-space PCI configuration
+option		USER_PCICONF		# user-space PCI configuration
 option		APERTURE
 option		USBVERBOSE
-
-maxusers	64
 
 config		bsd	swap generic
 
@@ -45,9 +51,13 @@ gem*	at pci?
 fxp*	at pci?			# EtherExpress 10/100B ethernet
 xl*	at pci?			# 3C9xx ethernet
 dc*	at pci?			# 21143, "tulip" clone ethernet
+epic*	at pci?			# SMC EPIC/100 ethernet
 em*	at pci?			# Intel Pro/1000 ethernet
+bge*	at pci?			# Broadcom BCM570x (aka Tigon3)
+stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
-vr*	at pci?				# VIA Rhine ethernet
+vr*	at pci?			# VIA Rhine ethernet
+re*	at pci?			# RealTek 8169/8169S/8110S
 
 # PCI SCSI
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
@@ -114,6 +124,8 @@ uplcom* at uhub?		# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?		# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uipaq*	at uhub?		# iPAQ serial adapter
+ucom*	at uipaq?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -121,6 +133,7 @@ midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
+atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -259,15 +272,19 @@ st*		at scsibus?		# SCSI tapes
 cd*		at scsibus?		# SCSI CD-ROMs
 ch*		at scsibus?		# SCSI changer devices
 ss*		at scsibus?		# SCSI scanners
+safte*		at scsibus?		# SCSI accessed fault-tolerant encl
+ses*		at scsibus?		# SCSI enclosure services
 uk*		at scsibus?		# unknown SCSI devices
 
-# Media Independent Interface (mii) drivers)
+# Media Independent Interface (mii) drivers
 acphy*	at mii?				# Altima AC101 PHYs
 exphy*	at mii?				# 3Com internal PHYs
 bmtphy*	at mii?				# Broadcom 10/100 PHYs
 brgphy*	at mii?				# Broadcom PHYs
+eephy*	at mii?				# Marvell 88E1000 series PHY
 nsphy*	at mii?				# NS and compatible PHYs
 qsphy*	at mii?				# Quality Semi QS6612 PHYs
+luphy*	at mii?				# Lucent LU6612 PHY
 sqphy*	at mii?				# Seeq 8x220 PHYs
 dcphy*	at mii?				# Digital clone PHYs
 amphy*	at mii?				# AMD AM79c873 PHYs
@@ -276,6 +293,7 @@ inphy*	at mii?				# Intel 82555 PHYs
 lxtphy*	at mii?				# Level1 LXT970 PHYs
 rlphy*	at mii?				# RealTek 8139 internal PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
+rgephy*	at mii?				# Realtek 8169S/8110S PHY
 ukphy*	at mii?				# Unknown PHYs
 
 # Framebuffers
@@ -330,4 +348,4 @@ fd*	at fdc?
 #pseudo-device	hotplug	1		# devices hot plugging
 
 # mouse & keyboard multiplexor pseudo-devices
-#pseudo-device	wsmux 	2
+#pseudo-device	wsmux	2

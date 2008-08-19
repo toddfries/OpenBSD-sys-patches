@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.69.4.1 2005/12/30 01:28:02 brad Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.70.2.1 2005/12/22 02:41:54 brad Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -680,7 +680,9 @@ sys_fpathconf(p, v, retval)
 
 	case DTYPE_VNODE:
 		vp = (struct vnode *)fp->f_data;
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		error = VOP_PATHCONF(vp, SCARG(uap, name), retval);
+		VOP_UNLOCK(vp, 0, p);
 		break;
 
 	default:

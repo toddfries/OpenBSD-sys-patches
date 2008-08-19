@@ -1,4 +1,4 @@
-/*	$OpenBSD: ral.c,v 1.37 2005/03/19 09:49:35 damien Exp $  */
+/*	$OpenBSD: ral.c,v 1.59.2.1 2006/05/06 18:51:06 brad Exp $  */
 
 /*-
  * Copyright (c) 2005
@@ -67,8 +67,8 @@
 #include <dev/pci/pcidevs.h>
 
 #ifdef RAL_DEBUG
-#define DPRINTF(x)	if (ral_debug > 0) printf x
-#define DPRINTFN(n, x)	if (ral_debug >= (n)) printf x
+#define DPRINTF(x)	do { if (ral_debug > 0) printf x; } while (0)
+#define DPRINTFN(n, x)	do { if (ral_debug >= (n)) printf x; } while (0)
 int ral_debug = 0;
 #else
 #define DPRINTF(x)
@@ -99,7 +99,7 @@ void		ral_decryption_intr(struct ral_softc *);
 void		ral_rx_intr(struct ral_softc *);
 void		ral_beacon_expire(struct ral_softc *);
 void		ral_wakeup_expire(struct ral_softc *);
-int		ral_ack_rate(int);
+int		ral_ack_rate(struct ieee80211com *, int);
 uint16_t	ral_txtime(int, int, uint32_t);
 uint8_t		ral_plcp_signal(int);
 void		ral_setup_tx_desc(struct ral_softc *, struct ral_tx_desc *,
@@ -128,6 +128,8 @@ void		ral_set_bssid(struct ral_softc *, uint8_t *);
 void		ral_set_macaddr(struct ral_softc *, uint8_t *);
 void		ral_get_macaddr(struct ral_softc *, uint8_t *);
 void		ral_update_promisc(struct ral_softc *);
+void		ral_set_txantenna(struct ral_softc *, int);
+void		ral_set_rxantenna(struct ral_softc *, int);
 const char	*ral_get_rf(int);
 void		ral_read_eeprom(struct ral_softc *);
 int		ral_bbp_init(struct ral_softc *);
@@ -153,34 +155,34 @@ static const struct {
 	uint32_t	reg;
 	uint32_t	val;
 } ral_def_mac[] = {
-	{ RAL_PSCSR0,    0x00020002 },
-	{ RAL_PSCSR1,    0x00000002 },
-	{ RAL_PSCSR2,    0x00020002 },
-	{ RAL_PSCSR3,    0x00000002 },
-	{ RAL_TIMECSR,   0x00003f21 },
-	{ RAL_CSR9,      0x00000780 },
-	{ RAL_CSR11,     0x07041483 },
-	{ RAL_CNT3,      0x00000000 },
-	{ RAL_TXCSR1,    0x07614562 },
-	{ RAL_TXCSR8,    0x8c8d8b8a },
-	{ RAL_ARTCSR0,   0x7038140a },
-	{ RAL_ARTCSR1,   0x1d21252d },
-	{ RAL_ARTCSR2,   0x1919191d },
-	{ RAL_RXCSR0,    0xffffffff },
-	{ RAL_RXCSR3,    0xb3aab3af },
-	{ RAL_PCICSR,    0x000003b8 },
-	{ RAL_PWRCSR0,   0x3f3b3100 },
-	{ RAL_GPIOCSR,   0x0000ff00 },
-	{ RAL_TESTCSR,   0x000000f0 },
-	{ RAL_PWRCSR1,   0x000001ff },
-	{ RAL_MACCSR0,   0x00213223 },
-	{ RAL_MACCSR1,   0x00235518 },
-	{ RAL_MACCSR2,   0x00000040 },
-	{ RAL_RALINKCSR, 0x9a009a11 },
-	{ RAL_CSR7,      0xffffffff },
-	{ RAL_BBPCSR1,   0x82188200 },
-	{ RAL_TXACKCSR0, 0x00000020 },
-	{ RAL_SECCSR3,   0x0000e78f }
+	{ RAL_PSCSR0,      0x00020002 },
+	{ RAL_PSCSR1,      0x00000002 },
+	{ RAL_PSCSR2,      0x00020002 },
+	{ RAL_PSCSR3,      0x00000002 },
+	{ RAL_TIMECSR,     0x00003f21 },
+	{ RAL_CSR9,        0x00000780 },
+	{ RAL_CSR11,       0x07041483 },
+	{ RAL_CNT3,        0x00000000 },
+	{ RAL_TXCSR1,      0x07614562 },
+	{ RAL_ARSP_PLCP_0, 0x8c8d8b8a },
+	{ RAL_ACKPCTCSR,   0x7038140a },
+	{ RAL_ARTCSR1,     0x1d21252d },
+	{ RAL_ARTCSR2,     0x1919191d },
+	{ RAL_RXCSR0,      0xffffffff },
+	{ RAL_RXCSR3,      0xb3aab3af },
+	{ RAL_PCICSR,      0x000003b8 },
+	{ RAL_PWRCSR0,     0x3f3b3100 },
+	{ RAL_GPIOCSR,     0x0000ff00 },
+	{ RAL_TESTCSR,     0x000000f0 },
+	{ RAL_PWRCSR1,     0x000001ff },
+	{ RAL_MACCSR0,     0x00213223 },
+	{ RAL_MACCSR1,     0x00235518 },
+	{ RAL_RLPWCSR,     0x00000040 },
+	{ RAL_RALINKCSR,   0x9a009a11 },
+	{ RAL_CSR7,        0xffffffff },
+	{ RAL_BBPCSR1,     0x82188200 },
+	{ RAL_TXACKCSR0,   0x00000020 },
+	{ RAL_SECCSR3,     0x0000e78f }
 };
 
 /*
@@ -202,8 +204,8 @@ static const struct {
 	{ 21, 0x08 },
 	{ 22, 0x08 },
 	{ 23, 0x08 },
-	{ 24, 0x70 },
-	{ 25, 0x40 },
+	{ 24, 0x80 },
+	{ 25, 0x50 },
 	{ 26, 0x08 },
 	{ 27, 0x23 },
 	{ 30, 0x10 },
@@ -219,8 +221,9 @@ static const struct {
 	{ 56, 0x08 },
 	{ 57, 0x10 },
 	{ 58, 0x08 },
-	{ 61, 0x6d },
-	{ 62, 0x10 }
+	{ 61, 0x60 },
+	{ 62, 0x10 },
+	{ 75, 0xff }
 };
 
 /*
@@ -255,6 +258,16 @@ static const uint32_t ral_rf2525_hi_r2[] = {
 static const uint32_t ral_rf2525e_r2[] = {
 	0x2044d, 0x2044e, 0x2044f, 0x20460, 0x20461, 0x20462, 0x20463,
 	0x20464, 0x20465, 0x20466, 0x20467, 0x20468, 0x20469, 0x2046b
+};
+
+static const uint32_t ral_rf2526_hi_r2[] = {
+	0x0022a, 0x0022b, 0x0022b, 0x0022c, 0x0022c, 0x0022d, 0x0022d,
+	0x0022e, 0x0022e, 0x0022f, 0x0022d, 0x00240, 0x00240, 0x00241
+};
+
+static const uint32_t ral_rf2526_r2[] = {
+	0x00226, 0x00227, 0x00227, 0x00228, 0x00228, 0x00229, 0x00229,
+	0x0022a, 0x0022a, 0x0022b, 0x0022b, 0x0022c, 0x0022c, 0x0022d
 };
 
 /*
@@ -467,8 +480,8 @@ ral_detach(struct ral_softc *sc)
 	if_detach(ifp);
 
 	ral_free_tx_ring(sc, &sc->txq);
-	ral_free_tx_ring(sc, &sc->prioq);
 	ral_free_tx_ring(sc, &sc->atimq);
+	ral_free_tx_ring(sc, &sc->prioq);
 	ral_free_tx_ring(sc, &sc->bcnq);
 	ral_free_rx_ring(sc, &sc->rxq);
 
@@ -677,7 +690,7 @@ ral_alloc_rx_ring(struct ral_softc *sc, struct ral_rx_ring *ring, int count)
 	}
 
 	/*
-	 * Pre-allocate Rx buffers and populate Rx ring
+	 * Pre-allocate Rx buffers and populate Rx ring.
 	 */
 	memset(ring->data, 0, count * sizeof (struct ral_rx_data));
 	for (i = 0; i < count; i++) {
@@ -702,7 +715,6 @@ ral_alloc_rx_ring(struct ral_softc *sc, struct ral_rx_ring *ring, int count)
 
 		MCLGET(data->m, M_DONTWAIT);
 		if (!(data->m->m_flags & M_EXT)) {
-			m_freem(data->m);
 			printf("%s: could not allocate rx mbuf cluster\n",
 			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
@@ -892,12 +904,26 @@ ral_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		break;
 
 	case IEEE80211_S_ASSOC:
+		ral_set_chan(sc, ic->ic_bss->ni_chan);
 		break;
 
 	case IEEE80211_S_RUN:
+		ral_set_chan(sc, ic->ic_bss->ni_chan);
+
+		/* update basic rate set */
+		if (ic->ic_curmode == IEEE80211_MODE_11B) {
+			/* 11b basic rates: 1, 2Mbps */
+			RAL_WRITE(sc, RAL_ARSP_PLCP_1, 0x3);
+		} else if (IEEE80211_IS_CHAN_5GHZ(ic->ic_bss->ni_chan)) {
+			/* 11a basic rates: 6, 12, 24Mbps */
+			RAL_WRITE(sc, RAL_ARSP_PLCP_1, 0x150);
+		} else {
+			/* 11g basic rates: 1, 2, 5.5, 11, 6, 12, 24Mbps */
+			RAL_WRITE(sc, RAL_ARSP_PLCP_1, 0x15f);
+		}
+
 		if (ic->ic_opmode != IEEE80211_M_MONITOR) {
-			if (ic->ic_opmode != IEEE80211_M_HOSTAP)
-				ral_set_bssid(sc, ic->ic_bss->ni_bssid);
+			ral_set_bssid(sc, ic->ic_bss->ni_bssid);
 			ral_update_slot(sc);
 		}
 
@@ -940,25 +966,25 @@ ral_eeprom_read(struct ral_softc *sc, uint8_t addr)
 	uint16_t val;
 	int n;
 
-	/* Clock C once before the first command */
+	/* clock C once before the first command */
 	RAL_EEPROM_CTL(sc, 0);
 
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S);
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S | RAL_EEPROM_C);
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S);
 
-	/* Write start bit (1) */
+	/* write start bit (1) */
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S | RAL_EEPROM_D);
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S | RAL_EEPROM_D | RAL_EEPROM_C);
 
-	/* Write READ opcode (10) */
+	/* write READ opcode (10) */
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S | RAL_EEPROM_D);
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S | RAL_EEPROM_D | RAL_EEPROM_C);
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S);
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S | RAL_EEPROM_C);
 
-	/* Write address (A5-A0 or A7-A0) */
-	n = (RAL_READ(sc, RAL_CSR21) & RAL_CSR21_93C46) ? 5 : 7;
+	/* write address (A5-A0 or A7-A0) */
+	n = (RAL_READ(sc, RAL_CSR21) & RAL_EEPROM_93C46) ? 5 : 7;
 	for (; n >= 0; n--) {
 		RAL_EEPROM_CTL(sc, RAL_EEPROM_S |
 		    (((addr >> n) & 1) << RAL_EEPROM_SHIFT_D));
@@ -968,7 +994,7 @@ ral_eeprom_read(struct ral_softc *sc, uint8_t addr)
 
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S);
 
-	/* Read data Q15-Q0 */
+	/* read data Q15-Q0 */
 	val = 0;
 	for (n = 15; n >= 0; n--) {
 		RAL_EEPROM_CTL(sc, RAL_EEPROM_S | RAL_EEPROM_C);
@@ -979,7 +1005,7 @@ ral_eeprom_read(struct ral_softc *sc, uint8_t addr)
 
 	RAL_EEPROM_CTL(sc, 0);
 
-	/* Clear Chip Select and clock C */
+	/* clear Chip Select and clock C */
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_S);
 	RAL_EEPROM_CTL(sc, 0);
 	RAL_EEPROM_CTL(sc, RAL_EEPROM_C);
@@ -1007,8 +1033,7 @@ ral_encryption_intr(struct ral_softc *sc)
 		    sc->txq.next_encrypt * RAL_TX_DESC_SIZE, RAL_TX_DESC_SIZE,
 		    BUS_DMASYNC_POSTREAD);
 
-		if ((letoh32(desc->flags) & RAL_TX_BUSY) ||
-		    (letoh32(desc->flags) & RAL_TX_CIPHER_BUSY))
+		if (letoh32(desc->flags) & (RAL_TX_BUSY | RAL_TX_CIPHER_BUSY))
 			break;
 
 		/* for TKIP, swap eiv field to fix a bug in ASIC */
@@ -1031,7 +1056,7 @@ ral_encryption_intr(struct ral_softc *sc)
 	}
 
 	/* kick Tx */
-	RAL_WRITE(sc, RAL_TXCSR0, RAL_TXCSR0_KICK_TX);
+	RAL_WRITE(sc, RAL_TXCSR0, RAL_KICK_TX);
 }
 
 void
@@ -1065,11 +1090,13 @@ ral_tx_intr(struct ral_softc *sc)
 				ieee80211_rssadapt_raise_rate(ic,
 				    &rn->rssadapt, &data->id);
 			}
+			ifp->if_opackets++;
 			break;
 
 		case RAL_TX_SUCCESS_RETRY:
 			DPRINTFN(9, ("data frame sent after %u retries\n",
 			    (letoh32(desc->flags) >> 5) & 0x7));
+			ifp->if_opackets++;
 			break;
 
 		case RAL_TX_FAIL_RETRY:
@@ -1079,6 +1106,7 @@ ral_tx_intr(struct ral_softc *sc)
 				ieee80211_rssadapt_lower_rate(ic, data->ni,
 				    &rn->rssadapt, &data->id);
 			}
+			ifp->if_oerrors++;
 			break;
 
 		case RAL_TX_FAIL_INVALID:
@@ -1086,6 +1114,7 @@ ral_tx_intr(struct ral_softc *sc)
 		default:
 			printf("%s: sending data frame failed 0x%08x\n",
 			    sc->sc_dev.dv_xname, letoh32(desc->flags));
+			ifp->if_oerrors++;
 		}
 
 		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
@@ -1210,16 +1239,19 @@ ral_decryption_intr(struct ral_softc *sc)
 		    sc->rxq.cur_decrypt * RAL_TX_DESC_SIZE, RAL_TX_DESC_SIZE,
 		    BUS_DMASYNC_POSTREAD);
 
-		if ((letoh32(desc->flags) & RAL_RX_BUSY) ||
-		    (letoh32(desc->flags) & RAL_RX_CIPHER_BUSY))
+		if (letoh32(desc->flags) & (RAL_RX_BUSY | RAL_RX_CIPHER_BUSY))
 			break;
 
-		if (data->drop)
+		if (data->drop) {
+			ifp->if_ierrors++;
 			goto skip;
+		}
 
 		if ((letoh32(desc->flags) & RAL_RX_CIPHER_MASK) != 0 &&
-		    (letoh32(desc->flags) & RAL_RX_ICV_ERROR))
+		    (letoh32(desc->flags) & RAL_RX_ICV_ERROR)) {
+			ifp->if_ierrors++;
 			goto skip;
+		}
 
 		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
 		    data->map->dm_mapsize, BUS_DMASYNC_POSTREAD);
@@ -1310,6 +1342,13 @@ skip:		desc->flags = htole32(RAL_RX_BUSY);
 		sc->rxq.cur_decrypt =
 		    (sc->rxq.cur_decrypt + 1) % RAL_RX_RING_COUNT;
 	}
+
+	/*
+	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
+	 * without calling if_start().
+	 */
+	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
+		ral_start(ifp);
 }
 
 /*
@@ -1330,14 +1369,13 @@ ral_rx_intr(struct ral_softc *sc)
 		    sc->rxq.cur * RAL_RX_DESC_SIZE, RAL_RX_DESC_SIZE,
 		    BUS_DMASYNC_POSTREAD);
 
-		if ((letoh32(desc->flags) & RAL_RX_BUSY) ||
-		    (letoh32(desc->flags) & RAL_RX_CIPHER_BUSY))
+		if (letoh32(desc->flags) & (RAL_RX_BUSY | RAL_RX_CIPHER_BUSY))
 			break;
 
 		data->drop = 0;
 
-		if ((letoh32(desc->flags) & RAL_RX_PHY_ERROR) ||
-		    (letoh32(desc->flags) & RAL_RX_CRC_ERROR)) {
+		if (letoh32(desc->flags) &
+		    (RAL_RX_PHY_ERROR | RAL_RX_CRC_ERROR)) {
 			/*
 			 * This should not happen since we did not request
 			 * to receive those frames when we filled RXCSR0.
@@ -1365,7 +1403,7 @@ ral_rx_intr(struct ral_softc *sc)
 	}
 
 	/* kick decrypt */
-	RAL_WRITE(sc, RAL_SECCSR0, RAL_SECCSR0_KICK);
+	RAL_WRITE(sc, RAL_SECCSR0, RAL_KICK_DECRYPT);
 }
 
 /*
@@ -1410,29 +1448,29 @@ ral_intr(void *arg)
 	r = RAL_READ(sc, RAL_CSR7);
 	RAL_WRITE(sc, RAL_CSR7, r);
 
-	if (r & RAL_CSR7_BEACON_EXPIRE)
+	if (r & RAL_BEACON_EXPIRE)
 		ral_beacon_expire(sc);
 
-	if (r & RAL_CSR7_WAKEUP_EXPIRE)
+	if (r & RAL_WAKEUP_EXPIRE)
 		ral_wakeup_expire(sc);
 
-	if (r & RAL_CSR7_ENCRYPTION_DONE)
+	if (r & RAL_ENCRYPTION_DONE)
 		ral_encryption_intr(sc);
 
-	if (r & RAL_CSR7_TX_DONE)
+	if (r & RAL_TX_DONE)
 		ral_tx_intr(sc);
 
-	if (r & RAL_CSR7_PRIO_DONE)
+	if (r & RAL_PRIO_DONE)
 		ral_prio_intr(sc);
 
-	if (r & RAL_CSR7_DECRYPTION_DONE)
+	if (r & RAL_DECRYPTION_DONE)
 		ral_decryption_intr(sc);
 
-	if (r & RAL_CSR7_RX_DONE)
+	if (r & RAL_RX_DONE)
 		ral_rx_intr(sc);
 
 	/* re-enable interrupts */
-	RAL_WRITE(sc, RAL_CSR8, RAL_CSR8_MASK);
+	RAL_WRITE(sc, RAL_CSR8, RAL_INTR_MASK);
 	
 	return 1;
 }
@@ -1442,14 +1480,16 @@ ral_intr(void *arg)
 
 #define RAL_ACK_SIZE	14	/* 10 + 4(FCS) */
 #define RAL_CTS_SIZE	14	/* 10 + 4(FCS) */
-#define RAL_SIFS	10
+
+#define RAL_SIFS		10	/* us */
+#define RAL_RXTX_TURNAROUND	10	/* us */
 
 /*
  * Return the expected ack rate for a frame transmitted at rate `rate'.
  * XXX: this should depend on the destination node basic rate set.
  */
 int
-ral_ack_rate(int rate)
+ral_ack_rate(struct ieee80211com *ic, int rate)
 {
 	switch (rate) {
 	/* CCK rates */
@@ -1458,7 +1498,7 @@ ral_ack_rate(int rate)
 	case 4:
 	case 11:
 	case 22:
-		return 4;
+		return (ic->ic_curmode == IEEE80211_MODE_11B) ? 4 : rate;
 
 	/* OFDM rates */
 	case 12:
@@ -1560,10 +1600,7 @@ ral_setup_tx_desc(struct ral_softc *sc, struct ral_tx_desc *desc,
 		desc->flags |= htole32(RAL_TX_OFDM);
 
 	desc->physaddr = htole32(physaddr);
-	desc->wme = htole32(
-	    8 << RAL_WME_CWMAX_BITS_SHIFT |
-	    3 << RAL_WME_CWMIN_BITS_SHIFT |
-	    2 << RAL_WME_AIFSN_BITS_SHIFT);
+	desc->wme = htole16(RAL_AIFSN(3) | RAL_LOGCWMIN(4) | RAL_LOGCWMAX(6));
 
 	/*
 	 * Fill PLCP fields.
@@ -1623,9 +1660,8 @@ ral_tx_bcn(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	data->m = m0;
 	data->ni = ni;
 
-	ral_setup_tx_desc(sc, desc, RAL_TX_IFS_NEW_BACKOFF |
-	    RAL_TX_INSERT_TIMESTAMP, m0->m_pkthdr.len, rate, 0,
-	    data->map->dm_segs->ds_addr);
+	ral_setup_tx_desc(sc, desc, RAL_TX_IFS_NEWBACKOFF | RAL_TX_TIMESTAMP,
+	    m0->m_pkthdr.len, rate, 0, data->map->dm_segs->ds_addr);
 
 	bus_dmamap_sync(sc->sc_dmat, data->map, 0, data->map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
@@ -1687,17 +1723,16 @@ ral_tx_mgt(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	wh = mtod(m0, struct ieee80211_frame *);
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
-		flags |= RAL_TX_NEED_ACK;
+		flags |= RAL_TX_ACK;
 
 		dur = ral_txtime(RAL_ACK_SIZE, rate, ic->ic_flags) + RAL_SIFS;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 
 		/* tell hardware to add timestamp for probe responses */
-		if ((wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
-		    IEEE80211_FC0_TYPE_MGT &&
-		    (wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK) ==
-		    IEEE80211_FC0_SUBTYPE_PROBE_RESP)
-			flags |= RAL_TX_INSERT_TIMESTAMP;
+		if ((wh->i_fc[0] &
+		    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_MASK)) ==
+		    (IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_RESP))
+			flags |= RAL_TX_TIMESTAMP;
 	}
 
 	ral_setup_tx_desc(sc, desc, flags, m0->m_pkthdr.len, rate, 0,
@@ -1715,7 +1750,7 @@ ral_tx_mgt(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	/* kick prio */
 	sc->prioq.queued++;
 	sc->prioq.cur = (sc->prioq.cur + 1) % RAL_PRIO_RING_COUNT;
-	RAL_WRITE(sc, RAL_TXCSR0, RAL_TXCSR0_KICK_PRIO);
+	RAL_WRITE(sc, RAL_TXCSR0, RAL_KICK_PRIO);
 
 	return 0;
 }
@@ -1759,6 +1794,7 @@ ral_tx_data(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	struct ral_tx_desc *desc;
 	struct ral_tx_data *data;
 	struct ral_node *rn;
+	struct ieee80211_rateset *rs;
 	struct ieee80211_frame *wh;
 	struct mbuf *mnew;
 	uint16_t dur;
@@ -1767,15 +1803,30 @@ ral_tx_data(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 
 	wh = mtod(m0, struct ieee80211_frame *);
 
-	rn = (struct ral_node *)ni;
-	ni->ni_txrate = ieee80211_rssadapt_choose(&rn->rssadapt, &ni->ni_rates,
-	    wh, m0->m_pkthdr.len, ic->ic_fixed_rate, NULL, 0);
-	rate = ni->ni_rates.rs_rates[ni->ni_txrate] & IEEE80211_RATE_VAL;
+	/* XXX this should be reworked! */
+	if (ic->ic_fixed_rate != -1) {
+		if (ic->ic_curmode != IEEE80211_MODE_AUTO)
+			rs = &ic->ic_sup_rates[ic->ic_curmode];
+		else
+			rs = &ic->ic_sup_rates[IEEE80211_MODE_11G];
+
+		rate = rs->rs_rates[ic->ic_fixed_rate];
+	} else {
+		rs = &ni->ni_rates;
+		rn = (struct ral_node *)ni;
+		ni->ni_txrate = ieee80211_rssadapt_choose(&rn->rssadapt, rs,
+		    wh, m0->m_pkthdr.len, -1, NULL, 0);
+		rate = rs->rs_rates[ni->ni_txrate];
+	}
+	rate &= IEEE80211_RATE_VAL;
 
 	if (ic->ic_flags & IEEE80211_F_WEPON) {
 		m0 = ieee80211_wep_crypt(ifp, m0, 1);
 		if (m0 == NULL)
 			return ENOBUFS;
+
+		/* packet header may have moved, reset our local pointer */
+		wh = mtod(m0, struct ieee80211_frame *);
 	}
 
 	/*
@@ -1790,7 +1841,7 @@ ral_tx_data(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		int rtsrate, ackrate;
 
 		rtsrate = IEEE80211_IS_CHAN_5GHZ(ni->ni_chan) ? 12 : 4;
-		ackrate = ral_ack_rate(rate);
+		ackrate = ral_ack_rate(ic, rate);
 
 		dur = ral_txtime(m0->m_pkthdr.len + 4, rate, ic->ic_flags) +
 		      ral_txtime(RAL_CTS_SIZE, rtsrate, ic->ic_flags) +
@@ -1821,7 +1872,7 @@ ral_tx_data(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		/* RTS frames are not taken into account for rssadapt */
 		data->id.id_node = NULL;
 
-		ral_setup_tx_desc(sc, desc, RAL_TX_NEED_ACK | RAL_TX_NOT_LAST,
+		ral_setup_tx_desc(sc, desc, RAL_TX_ACK | RAL_TX_MORE_FRAG,
 		    m->m_pkthdr.len, rtsrate, 1, data->map->dm_segs->ds_addr);
 
 		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
@@ -1883,6 +1934,9 @@ ral_tx_data(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 			m_freem(m0);
 			return error;
 		}
+
+		/* packet header have moved, reset our local pointer */
+		wh = mtod(m0, struct ieee80211_frame *);
 	}
 
 #if NBPFILTER > 0
@@ -1909,15 +1963,18 @@ ral_tx_data(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	data->ni = ni;
 
 	/* remember link conditions for rate adaptation algorithm */
-	data->id.id_len = m0->m_pkthdr.len;
-	data->id.id_rateidx = ni->ni_txrate;
-	data->id.id_node = ni;
-	data->id.id_rssi = ni->ni_rssi;
+	if (ic->ic_fixed_rate == -1) {
+		data->id.id_len = m0->m_pkthdr.len;
+		data->id.id_rateidx = ni->ni_txrate;
+		data->id.id_node = ni;
+		data->id.id_rssi = ni->ni_rssi;
+	} else
+		data->id.id_node = NULL;
 
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
-		flags |= RAL_TX_NEED_ACK;
+		flags |= RAL_TX_ACK;
 
-		dur = ral_txtime(RAL_ACK_SIZE, ral_ack_rate(rate),
+		dur = ral_txtime(RAL_ACK_SIZE, ral_ack_rate(ic, rate),
 		    ic->ic_flags) + RAL_SIFS;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 	}
@@ -1937,7 +1994,7 @@ ral_tx_data(struct ral_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	/* kick encrypt */
 	sc->txq.queued++;
 	sc->txq.cur_encrypt = (sc->txq.cur_encrypt + 1) % RAL_TX_RING_COUNT;
-	RAL_WRITE(sc, RAL_SECCSR1, RAL_SECCSR1_KICK);
+	RAL_WRITE(sc, RAL_SECCSR1, RAL_KICK_ENCRYPT);
 
 	return 0;
 }
@@ -2014,6 +2071,7 @@ ral_watchdog(struct ifnet *ifp)
 		if (--sc->sc_tx_timer == 0) {
 			printf("%s: device timeout\n", sc->sc_dev.dv_xname);
 			ral_init(ifp);
+			ifp->if_oerrors++;
 			return;
 		}
 		ifp->if_timer = 1;
@@ -2037,18 +2095,11 @@ ral_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&ic->ic_ac, ifa);
-			ral_init(ifp);
-			break;
 #endif
-		default:
-			ral_init(ifp);
-		}
-		break;
-
+		/* FALLTHROUGH */
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -2228,6 +2279,16 @@ ral_set_chan(struct ral_softc *sc, struct ieee80211_channel *c)
 		ral_rf_write(sc, RAL_RF4, (chan == 14) ? 0x00286 : 0x00282);
 		break;
 
+	case RAL_RF_2526:
+		ral_rf_write(sc, RAL_RF2, ral_rf2526_hi_r2[chan - 1]);
+		ral_rf_write(sc, RAL_RF4, (chan & 1) ? 0x00386 : 0x00381);
+		ral_rf_write(sc, RAL_RF1, 0x08804);
+
+		ral_rf_write(sc, RAL_RF2, ral_rf2526_r2[chan - 1]);
+		ral_rf_write(sc, RAL_RF3, power << 7 | 0x18044);
+		ral_rf_write(sc, RAL_RF4, (chan & 1) ? 0x00386 : 0x00381);
+		break;
+
 	/* dual-band RF */
 	case RAL_RF_5222:
 		for (i = 0; i < N(ral_rf5222); i++)
@@ -2304,16 +2365,15 @@ ral_enable_tsf_sync(struct ral_softc *sc)
 	logcwmin = 5;
 	preload = (ic->ic_opmode == IEEE80211_M_STA) ? 384 : 1024;
 	tmp = logcwmin << 16 | preload;
-	RAL_WRITE(sc, RAL_BCNCSR1, tmp);
+	RAL_WRITE(sc, RAL_BCNOCSR, tmp);
 
 	/* finally, enable TSF synchronization */
+	tmp = RAL_ENABLE_TSF | RAL_ENABLE_TBCN;
 	if (ic->ic_opmode == IEEE80211_M_STA)
-		RAL_WRITE(sc, RAL_CSR14, RAL_CSR14_TSF_SYNC_BSS |
-		    RAL_CSR14_TSF_AUTOCOUNT | RAL_CSR14_BCN_RELOAD);
+		tmp |= RAL_ENABLE_TSF_SYNC(1);
 	else
-		RAL_WRITE(sc, RAL_CSR14, RAL_CSR14_TSF_SYNC_IBSS |
-		    RAL_CSR14_TSF_AUTOCOUNT | RAL_CSR14_BCN_RELOAD |
-		    RAL_CSR14_GENERATE_BEACON);
+		tmp |= RAL_ENABLE_TSF_SYNC(2) | RAL_ENABLE_BEACON_GENERATOR;
+	RAL_WRITE(sc, RAL_CSR14, tmp);
 
 	DPRINTF(("enabling TSF synchronization\n"));
 }
@@ -2324,18 +2384,18 @@ ral_update_plcp(struct ral_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 
 	/* no short preamble for 1Mbps */
-	RAL_WRITE(sc, RAL_ARCSR2, 0x00700400);
+	RAL_WRITE(sc, RAL_PLCP1MCSR, 0x00700400);
 
 	if (!(ic->ic_flags & IEEE80211_F_SHPREAMBLE)) {
 		/* values taken from the reference driver */
-		RAL_WRITE(sc, RAL_ARCSR3, 0x00380401);
-		RAL_WRITE(sc, RAL_ARCSR4, 0x00150402);
-		RAL_WRITE(sc, RAL_ARCSR5, 0x000b8403);
+		RAL_WRITE(sc, RAL_PLCP2MCSR,   0x00380401);
+		RAL_WRITE(sc, RAL_PLCP5p5MCSR, 0x00150402);
+		RAL_WRITE(sc, RAL_PLCP11MCSR,  0x000b8403);
 	} else {
 		/* same values as above or'ed 0x8 */
-		RAL_WRITE(sc, RAL_ARCSR3, 0x00380409);
-		RAL_WRITE(sc, RAL_ARCSR4, 0x0015040a);
-		RAL_WRITE(sc, RAL_ARCSR5, 0x000b840b);
+		RAL_WRITE(sc, RAL_PLCP2MCSR,   0x00380409);
+		RAL_WRITE(sc, RAL_PLCP5p5MCSR, 0x0015040a);
+		RAL_WRITE(sc, RAL_PLCP11MCSR,  0x000b840b);
 	}
 
 	DPRINTF(("updating PLCP for %s preamble\n",
@@ -2357,11 +2417,10 @@ ral_update_slot(struct ral_softc *sc)
 	slottime = (ic->ic_curmode == IEEE80211_MODE_11A) ? 9 : 20;
 
 	/* define the MAC slot boundaries */
-	sifs = RAL_SIFS;
+	sifs = RAL_SIFS - RAL_RXTX_TURNAROUND;
 	pifs = sifs + slottime;
 	difs = sifs + 2 * slottime;
-	eifs = sifs + ral_txtime(RAL_ACK_SIZE,
-	    (ic->ic_curmode == IEEE80211_MODE_11A) ? 12 : 2, 0) + difs;
+	eifs = (ic->ic_curmode == IEEE80211_MODE_11B) ? 364 : 60;
 
 	tmp = RAL_READ(sc, RAL_CSR11);
 	tmp = (tmp & ~0x1f00) | slottime << 8;
@@ -2438,14 +2497,61 @@ ral_update_promisc(struct ral_softc *sc)
 
 	tmp = RAL_READ(sc, RAL_RXCSR0);
 
-	tmp &= ~RAL_RXCSR0_DROP_NOT_TO_ME;
+	tmp &= ~RAL_DROP_NOT_TO_ME;
 	if (!(ifp->if_flags & IFF_PROMISC))
-		tmp |= RAL_RXCSR0_DROP_NOT_TO_ME;
+		tmp |= RAL_DROP_NOT_TO_ME;
 
 	RAL_WRITE(sc, RAL_RXCSR0, tmp);
 
 	DPRINTF(("%s promiscuous mode\n", (ifp->if_flags & IFF_PROMISC) ?
 	    "entering" : "leaving"));
+}
+
+void
+ral_set_txantenna(struct ral_softc *sc, int antenna)
+{
+	uint32_t tmp;
+	uint8_t tx;
+
+	tx = ral_bbp_read(sc, RAL_BBP_TX) & ~RAL_BBP_ANTMASK;
+	if (antenna == 1)
+		tx |= RAL_BBP_ANTA;
+	else if (antenna == 2)
+		tx |= RAL_BBP_ANTB;
+	else
+		tx |= RAL_BBP_DIVERSITY;
+
+	/* need to force I/Q flip for RF 2525e, 2526 and 5222 */
+	if (sc->rf_rev == RAL_RF_2525E || sc->rf_rev == RAL_RF_2526 ||
+	    sc->rf_rev == RAL_RF_5222)
+		tx |= RAL_BBP_FLIPIQ;
+
+	ral_bbp_write(sc, RAL_BBP_TX, tx);
+
+	/* update values for CCK and OFDM in BBPCSR1 */
+	tmp = RAL_READ(sc, RAL_BBPCSR1) & ~0x00070007;
+	tmp |= (tx & 0x7) << 16 | (tx & 0x7);
+	RAL_WRITE(sc, RAL_BBPCSR1, tmp);
+}
+
+void
+ral_set_rxantenna(struct ral_softc *sc, int antenna)
+{
+	uint8_t rx;
+
+	rx = ral_bbp_read(sc, RAL_BBP_RX) & ~RAL_BBP_ANTMASK;
+	if (antenna == 1)
+		rx |= RAL_BBP_ANTA;
+	else if (antenna == 2)
+		rx |= RAL_BBP_ANTB;
+	else
+		rx |= RAL_BBP_DIVERSITY;
+
+	/* need to force no I/Q flip for RF 2525e and 2526 */
+	if (sc->rf_rev == RAL_RF_2525E || sc->rf_rev == RAL_RF_2526)
+		rx &= ~RAL_BBP_FLIPIQ;
+
+	ral_bbp_write(sc, RAL_BBP_RX, rx);
 }
 
 const char *
@@ -2457,6 +2563,7 @@ ral_get_rf(int rev)
 	case RAL_RF_2524:	return "RT2524";
 	case RAL_RF_2525:	return "RT2525";
 	case RAL_RF_2525E:	return "RT2525e";
+	case RAL_RF_2526:	return "RT2526";
 	case RAL_RF_5222:	return "RT5222";
 	default:		return "unknown";
 	}
@@ -2468,7 +2575,7 @@ ral_read_eeprom(struct ral_softc *sc)
 	uint16_t val;
 	int i;
 
-	val = ral_eeprom_read(sc, RAL_EEPROM_ANTENNA);
+	val = ral_eeprom_read(sc, RAL_EEPROM_CONFIG0);
 	sc->rf_rev =   (val >> 11) & 0x1f;
 	sc->hw_radio = (val >> 10) & 0x1;
 	sc->led_mode = (val >> 6)  & 0x7;
@@ -2485,7 +2592,7 @@ ral_read_eeprom(struct ral_softc *sc)
 
 	/* read Tx power for all b/g channels */
 	for (i = 0; i < 14 / 2; i++) {
-		val = ral_eeprom_read(sc, RAL_EEPROM_TXPOWER_BASE + i);
+		val = ral_eeprom_read(sc, RAL_EEPROM_TXPOWER + i);
 		sc->txpow[i * 2] = val >> 8;
 		sc->txpow[i * 2 + 1] = val & 0xff;
 	}
@@ -2546,10 +2653,11 @@ ral_init(struct ifnet *ifp)
 	      RAL_TX_RING_COUNT   <<  8 |
 	      RAL_TX_DESC_SIZE;
 
+	/* rings _must_ be initialized in this _exact_ order! */
 	RAL_WRITE(sc, RAL_TXCSR2, tmp);
 	RAL_WRITE(sc, RAL_TXCSR3, sc->txq.physaddr);
-	RAL_WRITE(sc, RAL_TXCSR4, sc->atimq.physaddr);
 	RAL_WRITE(sc, RAL_TXCSR5, sc->prioq.physaddr);
+	RAL_WRITE(sc, RAL_TXCSR4, sc->atimq.physaddr);
 	RAL_WRITE(sc, RAL_TXCSR6, sc->bcnq.physaddr);
 
 	/* setup rx ring */
@@ -2565,19 +2673,17 @@ ral_init(struct ifnet *ifp)
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
 	ral_set_macaddr(sc, ic->ic_myaddr);
 
-	/* set power mode (CAM) */
-	RAL_WRITE(sc, RAL_TXCSR7, 0);
+	/* set basic rate set (will be updated later) */
+	RAL_WRITE(sc, RAL_ARSP_PLCP_1, 0x153);
 
-	/* set supported basic rates (1, 2, 6, 12, 24) */
-	RAL_WRITE(sc, RAL_ARCSR1, 0x153);
-
+	ral_set_txantenna(sc, 1);
+	ral_set_rxantenna(sc, 1);
 	ral_update_slot(sc);
 	ral_update_plcp(sc);
 	ral_update_led(sc, 0, 0);
 
-	/* set soft reset and host ready */
-	RAL_WRITE(sc, RAL_CSR1, RAL_CSR1_SOFT_RESET);
-	RAL_WRITE(sc, RAL_CSR1, RAL_CSR1_HOST_READY);
+	RAL_WRITE(sc, RAL_CSR1, RAL_RESET_ASIC);
+	RAL_WRITE(sc, RAL_CSR1, RAL_HOST_READY);
 
 	if (ral_bbp_init(sc) != 0) {
 		ral_stop(ifp, 1);
@@ -2589,13 +2695,13 @@ ral_init(struct ifnet *ifp)
 	ral_set_chan(sc, ic->ic_bss->ni_chan);
 
 	/* kick Rx */
-	tmp = RAL_RXCSR0_DROP_PHY | RAL_RXCSR0_DROP_CRC;
+	tmp = RAL_DROP_PHY_ERROR | RAL_DROP_CRC_ERROR;
 	if (ic->ic_opmode != IEEE80211_M_MONITOR) {
-		tmp |= RAL_RXCSR0_DROP_CTL | RAL_RXCSR0_DROP_BAD_VERSION;
+		tmp |= RAL_DROP_CTL | RAL_DROP_VERSION_ERROR;
 		if (ic->ic_opmode != IEEE80211_M_HOSTAP)
-			tmp |= RAL_RXCSR0_DROP_TODS;
+			tmp |= RAL_DROP_TODS;
 		if (!(ifp->if_flags & IFF_PROMISC))
-			tmp |= RAL_RXCSR0_DROP_NOT_TO_ME;
+			tmp |= RAL_DROP_NOT_TO_ME;
 	}
 	RAL_WRITE(sc, RAL_RXCSR0, tmp);
 
@@ -2607,7 +2713,7 @@ ral_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RAL_CSR7, 0xffffffff);
 
 	/* enable interrupts */
-	RAL_WRITE(sc, RAL_CSR8, RAL_CSR8_MASK);
+	RAL_WRITE(sc, RAL_CSR8, RAL_INTR_MASK);
 
 	ifp->if_flags &= ~IFF_OACTIVE;
 	ifp->if_flags |= IFF_RUNNING;
@@ -2629,14 +2735,18 @@ ral_stop(struct ifnet *ifp, int disable)
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 
+	sc->sc_tx_timer = 0;
+	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	/* abort Tx */
-	RAL_WRITE(sc, RAL_TXCSR0, RAL_TXCSR0_ABORT);
+	RAL_WRITE(sc, RAL_TXCSR0, RAL_ABORT_TX);
 
 	/* disable Rx */
-	RAL_WRITE(sc, RAL_RXCSR0, RAL_RXCSR0_DISABLE);
+	RAL_WRITE(sc, RAL_RXCSR0, RAL_DISABLE_RX);
 
 	/* reset ASIC (and thus, BBP) */
-	RAL_WRITE(sc, RAL_CSR1, RAL_CSR1_SOFT_RESET);
+	RAL_WRITE(sc, RAL_CSR1, RAL_RESET_ASIC);
 	RAL_WRITE(sc, RAL_CSR1, 0);
 
 	/* disable interrupts */
@@ -2644,18 +2754,14 @@ ral_stop(struct ifnet *ifp, int disable)
 
 	/* reset Tx and Rx rings */
 	ral_reset_tx_ring(sc, &sc->txq);
-	ral_reset_tx_ring(sc, &sc->prioq);
 	ral_reset_tx_ring(sc, &sc->atimq);
+	ral_reset_tx_ring(sc, &sc->prioq);
 	ral_reset_tx_ring(sc, &sc->bcnq);
 	ral_reset_rx_ring(sc, &sc->rxq);
 
 	/* for CardBus, power down the socket */
 	if (disable && sc->sc_disable != NULL)
 		(*sc->sc_disable)(sc);
-
-	sc->sc_tx_timer = 0;
-	ifp->if_timer = 0;
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
 struct cfdriver ral_cd = {

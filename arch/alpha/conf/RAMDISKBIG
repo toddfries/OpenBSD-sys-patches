@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKBIG,v 1.51 2005/02/25 12:57:49 jsg Exp $
+#	$OpenBSD: RAMDISKBIG,v 1.57 2005/06/20 23:09:28 martin Exp $
 #	$NetBSD: GENERIC,v 1.31 1996/12/03 17:25:29 cgd Exp $
 #
 # Generic Alpha kernel.  Enough to get booted, etc., but not much more.
@@ -74,6 +74,7 @@ uhid*	at uhidev?			# USB Generic HID devices
 # USB Mass Storage devices
 umass*	at uhub?
 scsibus* at umass?
+atapiscsi* at umass?
 
 # USB Modems
 #umodem*	at uhub?
@@ -187,6 +188,10 @@ rl*	at pci?				# RealTek 81[23]9 ethernet
 vr*	at pci?				# VIA Rhine ethernet
 em*	at pci?				# Intel Pro/1000 ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
+epic*	at pci?				# SMC EPIC/100 ethernet
+skc*	at pci?				# SysKonnect GEnesis 984x
+sk*	at skc?				#  each port of above
+ral*	at pci?				# Ralink RT2500
 
 #UNTESTED:  the following section of drivers is untested on alpha.
 en*	at pci?				# ENI PCI ATM (untested)
@@ -197,18 +202,12 @@ wb*	at pci?				# Winbond W89C840F ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
 ste*	at pci?				# Sundance ST201 ethernet
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
-skc*	at pci?				# SysKonnect GEnesis 984x
-sk*	at skc?				#  each port of above
 an*	at pci?				# Cisco/Aironet 802.11DS
-
-#BROKEN: The following driver has 64-bit issues
-#tx*	at pci?				# SMC 83C170 EPIC ethernet
 
 vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics
 
 # Media Independent Interface (mii) drivers
-# UNTESTED: some of the following PHY's are untested.
 eephy*	at mii?				# Marvell PHYs for Intel GigE
 exphy*	at mii?				# 3Com internal PHYs
 inphy*	at mii?				# Intel 82555 PHYs
@@ -216,7 +215,7 @@ iophy*	at mii?				# Intel 82553 PHYs
 icsphy*	at mii?				# ICS 1890 PHYs
 lxtphy*	at mii?				# Level1 LXT970 PHYs
 nsphy*	at mii?				# NS and compatible PHYs
-nsphyter*	at mii?			# NS and compatible PHYs
+nsphyter* at mii?			# NS and compatible PHYs
 qsphy*	at mii?				# Quality Semi QS6612 PHYs
 sqphy*	at mii?				# Seeq 8x220 PHYs
 rlphy*	at mii?				# RealTek 8139 internal PHYs
@@ -262,7 +261,7 @@ ep*	at isapnp?
 lc0	at isa? port 0x200		# DEC EtherWorks
 lc1	at isa? port 0x280		# DEC EtherWorks
 
-cy0     at isa? iomem 0xd4000 irq 12	# ISA cyclom card
+cy0	at isa? iomem 0xd4000 irq 12	# ISA cyclom card
 
 #aic0	at isa? port 0x340 irq 11	# Adaptec 152[02] SCSI
 #scsibus* at aic?

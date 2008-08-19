@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.19 2004/12/08 02:47:30 jsg Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.25 2005/08/01 05:36:48 brad Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -65,8 +65,8 @@
 #include <dev/usb/uftdireg.h>
 
 #ifdef UFTDI_DEBUG
-#define DPRINTF(x)	if (uftdidebug) printf x
-#define DPRINTFN(n,x)	if (uftdidebug>(n)) printf x
+#define DPRINTF(x)	do { if (uftdidebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (uftdidebug>(n)) printf x; } while (0)
 int uftdidebug = 0;
 #else
 #define DPRINTF(x)
@@ -129,8 +129,12 @@ USB_MATCH(uftdi)
 {
 	USB_MATCH_START(uftdi, uaa);
 
-	if (uaa->iface != NULL)
+	if (uaa->iface != NULL) {
+		if (uaa->vendor == USB_VENDOR_FTDI &&
+		    (uaa->product == USB_PRODUCT_FTDI_SERIAL_2232C))
+			return (UMATCH_VENDOR_IFACESUBCLASS);
 		return (UMATCH_NONE);
+	}
 
 	DPRINTFN(20,("uftdi: vendor=0x%x, product=0x%x\n",
 		     uaa->vendor, uaa->product));
@@ -160,6 +164,9 @@ USB_MATCH(uftdi)
 	if (uaa->vendor == USB_VENDOR_FALCOM &&
 	    (uaa->product == USB_PRODUCT_FALCOM_TWIST))
 		 return (UMATCH_VENDOR_PRODUCT);
+	if (uaa->vendor == USB_VENDOR_SEALEVEL &&
+	    uaa->product == USB_PRODUCT_SEALEVEL_USBSERIAL)
+		return (UMATCH_VENDOR_PRODUCT);
 
 	return (UMATCH_NONE);
 }
@@ -171,7 +178,7 @@ USB_ATTACH(uftdi)
 	usbd_interface_handle iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char devinfo[1024];
+	char *devinfop;
 	char *devname = USBDEVNAME(sc->sc_dev);
 	int i;
 	usbd_status err;
@@ -179,24 +186,28 @@ USB_ATTACH(uftdi)
 
 	DPRINTFN(10,("\nuftdi_attach: sc=%p\n", sc));
 
-	/* Move the device into the configured state. */
-	err = usbd_set_config_index(dev, UFTDI_CONFIG_INDEX, 1);
-	if (err) {
-		printf("\n%s: failed to set configuration, err=%s\n",
-		       devname, usbd_errstr(err));
-		goto bad;
-	}
+	if (uaa->iface == NULL) {
+		/* Move the device into the configured state. */
+		err = usbd_set_config_index(dev, UFTDI_CONFIG_INDEX, 1);
+		if (err) {
+			printf("\n%s: failed to set configuration, err=%s\n",
+			       devname, usbd_errstr(err));
+			goto bad;
+		}
 
-	err = usbd_device2interface_handle(dev, UFTDI_IFACE_INDEX, &iface);
-	if (err) {
-		printf("\n%s: failed to get interface, err=%s\n",
-		       devname, usbd_errstr(err));
-		goto bad;
-	}
+		err = usbd_device2interface_handle(dev, UFTDI_IFACE_INDEX, &iface);
+		if (err) {
+			printf("\n%s: failed to get interface, err=%s\n",
+			       devname, usbd_errstr(err));
+			goto bad;
+		}
+	} else
+		iface = uaa->iface;
 
-	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
+	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", devname, devinfo);
+	printf("%s: %s\n", devname, devinfop);
+	usbd_devinfo_free(devinfop);
 
 	id = usbd_get_interface_descriptor(iface);
 
@@ -213,6 +224,7 @@ USB_ATTACH(uftdi)
 
 		case USB_PRODUCT_FTDI_SEMC_DSS20:
 		case USB_PRODUCT_FTDI_SERIAL_8U232AM:
+		case USB_PRODUCT_FTDI_SERIAL_2232C:
 		case USB_PRODUCT_FTDI_LCD_LK202_24:
 		case USB_PRODUCT_FTDI_LCD_LK204_24:
 		case USB_PRODUCT_FTDI_LCD_MX200:
@@ -220,6 +232,7 @@ USB_ATTACH(uftdi)
 		case USB_PRODUCT_FTDI_LCD_CFA_632:
 		case USB_PRODUCT_FTDI_LCD_CFA_633:
 		case USB_PRODUCT_FTDI_LCD_CFA_634:
+		case USB_PRODUCT_SEALEVEL_USBSERIAL:
 			sc->sc_type = UFTDI_TYPE_8U232AM;
 			sc->sc_hdrlen = 0;
 			break;
@@ -283,8 +296,8 @@ USB_ATTACH(uftdi)
 		int addr, dir, attr;
 		ed = usbd_interface2endpoint_descriptor(iface, i);
 		if (ed == NULL) {
-			printf("%s: could not read endpoint descriptor"
-			       ": %s\n", devname, usbd_errstr(err));
+			printf("%s: could not read endpoint descriptor\n",
+			    devname);
 			goto bad;
 		}
 
@@ -311,7 +324,10 @@ USB_ATTACH(uftdi)
 		goto bad;
 	}
 
-	uca.portno = FTDI_PIT_SIOA;
+	if (uaa->iface == NULL)
+		uca.portno = FTDI_PIT_SIOA;
+	else
+		uca.portno = FTDI_PIT_SIOA + id->bInterfaceNumber;
 	/* bulkin, bulkout set above */
 	uca.ibufsize = UFTDIIBUFSIZE;
 	uca.obufsize = UFTDIOBUFSIZE - sc->sc_hdrlen;

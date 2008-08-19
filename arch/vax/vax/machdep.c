@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.71 2004/12/02 19:40:46 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.73 2005/08/06 14:26:52 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -88,9 +88,6 @@
 #ifdef NETATALK
 #include <netatalk/at_extern.h>
 #endif
-#ifdef NS
-#include <netns/ns_var.h>
-#endif
 #include "ppp.h"	/* For NPPP */
 #include "bridge.h"	/* For NBRIDGE */
 #if NPPP > 0
@@ -142,7 +139,6 @@ extern int virtual_avail, virtual_end;
  */
 int		want_resched;
 char		machine[] = MACHINE;		/* from <machine/param.h> */
-char		machine_arch[] = MACHINE_ARCH;	/* from <machine/param.h> */
 int		physmem;
 int		dumpsize = 0;
 int		cold = 1; /* coldstart */

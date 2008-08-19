@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.32 2004/08/18 18:37:53 canacar Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.36 2005/08/14 09:55:56 markus Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -7,6 +7,8 @@
  *
  * This code is derived from software contributed to The NetBSD Foundation
  * by Heiko W.Rupp <hwr@pilhuhn.de>
+ *
+ * IPv6-over-GRE contributed by Gert Doering <gert@greenie.muc.de>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -72,11 +74,6 @@
 #error "if_gre used without inet"
 #endif
 
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
-
 #ifdef NETATALK
 #include <netatalk/at.h>
 #include <netatalk/at_var.h>
@@ -93,11 +90,12 @@
 #define GRE_RECURSION_LIMIT	3   /* How many levels of recursion allowed */
 #endif /* GRE_RECURSION_LIMIT */
 
-#define GREMTU 1450	/* XXX this is below the standard MTU of
-                         1500 Bytes, allowing for headers,
-                         but we should possibly do path mtu discovery
-                         before changing if state to up to find the
-                         correct value */
+/*
+ * It is not easy to calculate the right value for a GRE MTU.
+ * We leave this task to the admin and use the same default that
+ * other vendors use.
+ */
+#define GREMTU 1476
 
 int	gre_clone_create(struct if_clone *, int);
 int	gre_clone_destroy(struct ifnet *);
@@ -141,7 +139,7 @@ gre_clone_create(struct if_clone *ifc, int unit)
 	snprintf(sc->sc_if.if_xname, sizeof sc->sc_if.if_xname, "%s%d",
 	    ifc->ifc_name, unit);
 	sc->sc_if.if_softc = sc;
-	sc->sc_if.if_type = IFT_OTHER;
+	sc->sc_if.if_type = IFT_TUNNEL;
 	sc->sc_if.if_addrlen = 0;
 	sc->sc_if.if_hdrlen = 24; /* IP + GRE */
 	sc->sc_if.if_mtu = GREMTU;
@@ -203,7 +201,8 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	struct gre_softc *sc = (struct gre_softc *) (ifp->if_softc);
 	struct greip *gh = NULL;
 	struct ip *inp = NULL;
-	u_short etype = 0;
+	u_int8_t ip_tos = 0;
+	u_int16_t etype = 0;
 	struct mobile_h mob_h;
 	struct m_tag *mtag;
 
@@ -236,24 +235,8 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	m_tag_prepend(m, mtag);
 
 #if NBPFILTER >0
-	if (ifp->if_bpf) {
-		/*
-		 * We need to prepend the address family as a four
-		 * byte field.  Cons up a fake header to pacify bpf.
-		 * This is safe because bpf will only read from the
-		 * mbuf (i.e., it won't try to free it or keep a
-		 * pointer a to it).
-		 */
-		struct mbuf m0;
-		u_int32_t af = dst->sa_family;
-
-		m0.m_flags = 0;
-		m0.m_next = m;
-		m0.m_len = 4;
-		m0.m_data = (char *) &af;
-
-		bpf_mtap(ifp->if_bpf, &m0);
-	}
+	if (ifp->if_bpf)
+		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m);
 #endif
 
 	if (sc->g_proto == IPPROTO_MOBILE) {
@@ -314,7 +297,7 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 			}
 
 			HTONS(mob_h.proto);
-			mob_h.hcrc = gre_in_cksum((u_short *) &mob_h, msiz);
+			mob_h.hcrc = gre_in_cksum((u_int16_t *) &mob_h, msiz);
 
 			/* Squeeze in the mobility header */
 			if ((m->m_data - msiz) < m->m_pktdat) {
@@ -377,6 +360,7 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 			}
 
 			inp = mtod(m, struct ip *);
+			ip_tos = inp->ip_tos;
 			etype = ETHERTYPE_IP;
 			break;
 #ifdef NETATALK
@@ -384,9 +368,9 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 			etype = ETHERTYPE_AT;
 			break;
 #endif
-#ifdef NS
-		case AF_NS:
-			etype = ETHERTYPE_NS;
+#ifdef INET6
+		case AF_INET6:
+			etype = ETHERTYPE_IPV6;
 			break;
 #endif
 		default:
@@ -424,7 +408,7 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		gh->gi_dst = sc->g_dst;
 		((struct ip *) gh)->ip_hl = (sizeof(struct ip)) >> 2;
 		((struct ip *) gh)->ip_ttl = ip_defttl;
-		((struct ip *) gh)->ip_tos = inp->ip_tos;
+		((struct ip *) gh)->ip_tos = ip_tos;
 		gh->gi_len = htons(m->m_pkthdr.len);
 	}
 
@@ -465,6 +449,16 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		else
 			sc->g_proto = IPPROTO_MOBILE;
 		break;
+	case SIOCSIFMTU:
+		if (ifr->ifr_mtu < 576) {
+			error = EINVAL;
+			break;
+		}
+		ifp->if_mtu = ifr->ifr_mtu;
+		break;
+	case SIOCGIFMTU:
+		ifr->ifr_mtu = sc->sc_if.if_mtu;
+		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		if (ifr == 0) {
@@ -474,6 +468,10 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		switch (ifr->ifr_addr.sa_family) {
 #ifdef INET
 		case AF_INET:
+			break;
+#endif
+#ifdef INET6
+		case AF_INET6:
 			break;
 #endif
 		default:
@@ -525,15 +523,7 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				RTFREE(sc->route.ro_rt);
 				sc->route.ro_rt = (struct rtentry *) 0;
 			}
-
 			gre_compute_route(sc);
-			if (sc->route.ro_rt == 0)
-			{
-				sc->g_src.s_addr = INADDR_ANY;
-				sc->g_dst.s_addr = INADDR_ANY;
-				splx(s);
-				return EIO; /* Is this is good ? */
-			}
 			ifp->if_flags |= IFF_UP;
 		}
 		break;
@@ -665,10 +655,10 @@ gre_compute_route(struct gre_softc *sc)
  * do a checksum of a buffer - much like in_cksum, which operates on
  * mbufs.
  */
-u_short
-gre_in_cksum(u_short *p, u_int len)
+u_int16_t
+gre_in_cksum(u_int16_t *p, u_int len)
 {
-	u_int sum = 0;
+	u_int32_t sum = 0;
 	int nwords = len >> 1;
 
 	while (nwords-- != 0)

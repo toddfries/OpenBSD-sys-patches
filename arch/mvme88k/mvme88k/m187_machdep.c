@@ -1,4 +1,4 @@
-/*	$OpenBSD: m187_machdep.c,v 1.5 2004/12/24 22:50:30 miod Exp $	*/
+/*	$OpenBSD: m187_machdep.c,v 1.7 2005/04/30 16:42:37 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -49,6 +49,8 @@
 #include <sys/kernel.h>
 #include <sys/errno.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/asm_macro.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
@@ -57,8 +59,6 @@
 #include <machine/trap.h>
 #include <machine/m88100.h>
 #include <machine/mvme187.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <mvme88k/dev/memcreg.h>
 
@@ -169,7 +169,7 @@ m187_ext_int(u_int v, struct trapframe *eframe)
 	/* block interrupts at level or lower */
 	m187_setipl(level);
 	flush_pipeline();
-	enable_interrupt();
+	set_psr(get_psr() & ~PSR_IND);
 
 	list = &intr_handlers[vec];
 	if (SLIST_EMPTY(list)) {
@@ -214,7 +214,7 @@ m187_ext_int(u_int v, struct trapframe *eframe)
 	 * process any remaining data access exceptions before
 	 * returning to assembler
 	 */
-	disable_interrupt();
+	set_psr(get_psr() | PSR_IND);
 	if (eframe->tf_dmt0 & DMT_VALID)
 		m88100_trap(T_DATAFLT, eframe);
 

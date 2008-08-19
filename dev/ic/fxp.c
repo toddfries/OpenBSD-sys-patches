@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.68 2005/02/03 14:46:42 hshoexer Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.72 2005/06/08 17:02:59 henning Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -64,11 +64,6 @@
 #ifdef IPX
 #include <netipx/ipx.h>
 #include <netipx/ipx_if.h>
-#endif
-
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
 #endif
 
 #if NBPFILTER > 0
@@ -454,13 +449,10 @@ fxp_attach_common(sc, intrstr)
 	ifp->if_ioctl = fxp_ioctl;
 	ifp->if_start = fxp_start;
 	ifp->if_watchdog = fxp_watchdog;
+	IFQ_SET_MAXLEN(&ifp->if_snd, FXP_NTXCB - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	/*
-	 * Only 82558 and newer cards have a bit to ignore oversized frames.
-	 */
-	if (sc->not_82557)
-		ifp->if_capabilities = IFCAP_VLAN_MTU;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	printf(": %s, address %s\n", intrstr,
 	    ether_sprintf(sc->sc_arpcom.ac_enaddr));
@@ -526,11 +518,6 @@ fxp_attach_common(sc, intrstr)
 	 * Attach the interface.
 	 */
 	if_attach(ifp);
-	/*
-	 * Let the system queue as many packets as we have available
-	 * TX descriptors.
-	 */
-	IFQ_SET_MAXLEN(&ifp->if_snd, FXP_NTXCB - 1);
 	ether_ifattach(ifp);
 
 	/*
@@ -1216,7 +1203,7 @@ fxp_init(xsc)
 	struct fxp_cb_ias *cb_ias;
 	struct fxp_cb_tx *txp;
 	bus_dmamap_t rxmap;
-	int i, prm, allm, s, bufs;
+	int i, prm, save_bf, lrxen, allm, s, bufs;
 
 	s = splimp();
 
@@ -1242,6 +1229,20 @@ fxp_init(xsc)
 #endif
 	/* Once through to set flags */
 	fxp_mc_setup(sc, 0);
+
+        /*
+	 * In order to support receiving 802.1Q VLAN frames, we have to
+	 * enable "save bad frames", since they are 4 bytes larger than
+	 * the normal Ethernet maximum frame length. On i82558 and later,
+	 * we have a better mechanism for this.
+	 */
+	save_bf = 0;
+	lrxen = 0;
+
+	if (sc->sc_revision >= FXP_REV_82558_A4)
+		lrxen = 1;
+	else
+		save_bf = 1;
 
 	/*
 	 * Initialize base of dump-stats buffer.
@@ -1278,7 +1279,7 @@ fxp_init(xsc)
 	cbp->late_scb =		0;	/* (don't) defer SCB update */
 	cbp->tno_int =		0;	/* (disable) tx not okay interrupt */
 	cbp->ci_int =		1;	/* interrupt on CU idle */
-	cbp->save_bf =		prm;	/* save bad frames */
+	cbp->save_bf =		save_bf ? 1 : prm; /* save bad frames */
 	cbp->disc_short_rx =	!prm;	/* discard short packets */
 	cbp->underrun_retry =	1;	/* retry mode (1) on DMA underrun */
 	cbp->mediatype =	!sc->phy_10Mbps_only; /* interface mode */
@@ -1294,7 +1295,7 @@ fxp_init(xsc)
 	cbp->stripping =	!prm;	/* truncate rx packet to byte count */
 	cbp->padding =		1;	/* (do) pad short tx packets */
 	cbp->rcv_crc_xfer =	0;	/* (don't) xfer CRC to host */
-	cbp->long_rx =		sc->not_82557; /* (enable) long packets */
+	cbp->long_rx =		lrxen;	/* (enable) long packets */
 	cbp->force_fdx =	0;	/* (don't) force full duplex */
 	cbp->fdx_pin_en =	1;	/* (enable) FDX# pin */
 	cbp->multi_ia =		0;	/* (don't) accept multiple IAs */
@@ -1308,16 +1309,18 @@ fxp_init(xsc)
 
 	if (prm) {
 		cbp->promiscuous |= 1;		/* promiscuous mode */
-		cbp->ctrl1 |= 0x80;		/* save bad frames */
 		cbp->ctrl2 &= ~0x01;		/* save short packets */
 		cbp->stripping &= ~0x01;	/* don't truncate rx packets */
-	}
-	else {
+	} else {
 		cbp->promiscuous &= ~1;		/* no promiscuous mode */
-		cbp->ctrl1 &= ~0x80;		/* discard bad frames */
 		cbp->ctrl2 |= 0x01;		/* discard short packets */
 		cbp->stripping |= 0x01;		/* truncate rx packets */
 	}
+
+	if (prm || save_bf)
+		cbp->ctrl1 |= 0x80;		/* save bad frames */
+	else
+		cbp->ctrl1 &= ~0x80;		/* discard bad frames */
 
 	if (sc->sc_flags & FXPF_MWI_ENABLE)
 		cbp->ctrl0 |= 0x01;		/* enable PCI MWI command */
@@ -1327,7 +1330,7 @@ fxp_init(xsc)
 	else
 		cbp->mediatype &= ~0x01;
 
-	if(sc->not_82557)			/* long packets */
+	if(lrxen)			/* long packets */
 		cbp->stripping |= 0x08;
 	else
 		cbp->stripping &= ~0x08;
@@ -1684,22 +1687,6 @@ fxp_ioctl(ifp, command, data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
 #endif
-#ifdef NS
-		case AF_NS:
-		    {
-			 register struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			 if (ns_nullhost(*ina))
-				ina->x_host = *(union ns_host *)
-				    LLADDR(ifp->if_sadl);
-			 else
-				bcopy(ina->x_host.c_host, LLADDR(ifp->if_sadl),
-				    ifp->if_addrlen);
-			 /* Set new address. */
-			 fxp_init(sc);
-			 break;
-		    }
-#endif
 		default:
 			fxp_init(sc);
 			break;
@@ -1859,6 +1846,9 @@ struct ucode {
 	{ FXP_REV_82550_C, D102_C_CPUSAVER_DWORD,
 	    D102_C_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d102c" },
 
+	{ FXP_REV_82551_F, D102_E_CPUSAVER_DWORD,
+	    D102_E_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d102e" },
+	
 	{ 0, 0, 0, NULL }
 };
 

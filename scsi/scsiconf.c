@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.92 2004/07/31 11:31:30 krw Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.96 2005/06/03 15:24:05 krw Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -384,16 +384,6 @@ const struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	{{T_CDROM, T_REMOV,
 	 "PLEXTOR", "CD-ROM PX-40TS", "1.01"}, SDEV_NOSYNC},
 
-	{{T_OPTICAL, T_REMOV,
-	 "FUJITSU", "M2513A",            "0800"}, SDEV_NOMODESENSE},
-	{{T_OPTICAL, T_REMOV,
-	 "DELTIS  ", "MOS321          ", "3.30"}, SDEV_NOMODESENSE},
- 
-	{{T_OPTICAL, T_REMOV,
-	 "FUJITSU", "M2513A",            "0800"}, SDEV_NOMODESENSE},
-	{{T_OPTICAL, T_REMOV,
-	 "DELTIS  ", "MOS321          ", "3.30"}, SDEV_NOMODESENSE},
-
 	{{T_DIRECT, T_FIXED,
 	 "MICROP  ", "1588-15MBSUN0669", ""},     SDEV_AUTOSAVE},
 	{{T_DIRECT, T_FIXED,
@@ -415,18 +405,8 @@ const struct scsi_quirk_inquiry_pattern scsi_quirk_patterns[] = {
 	 ""	   , "DFRSS2F",		 ""},	  SDEV_AUTOSAVE},
 	{{T_DIRECT, T_FIXED,
 	 "QUANTUM ", "ELS85S          ", ""},	  SDEV_AUTOSAVE},
-	{{T_DIRECT, T_FIXED,
-	 "SEAGATE ", "ST19171FC",	 ""},	  SDEV_NOMODESENSE},
-	{{T_DIRECT, T_FIXED,
-	 "SEAGATE ", "ST34501FC       ", ""},     SDEV_NOMODESENSE},
 	{{T_DIRECT, T_REMOV,
-	 "iomega", "jaz 1GB",		 ""},	  SDEV_NOMODESENSE|SDEV_NOTAGS},
-	{{T_DIRECT, T_REMOV,
-	 "IOMEGA", "ZIP 100",		 ""},	  SDEV_NOMODESENSE},
-	{{T_DIRECT, T_REMOV,
-	 "IOMEGA", "ZIP 250",		 ""},	  SDEV_NOMODESENSE},
-	{{T_DIRECT, T_FIXED,
-	 "IBM", "0661467",               "G"},    SDEV_NOMODESENSE},
+	 "iomega", "jaz 1GB",		 ""},	  SDEV_NOTAGS},
         {{T_DIRECT, T_FIXED,
          "MICROP", "4421-07",		 ""},     SDEV_NOTAGS},
         {{T_DIRECT, T_FIXED,
@@ -688,7 +668,9 @@ scsi_probedev(scsi, inqbuflun0, target, lun)
 		bcopy(&inqbuf, inqbuflun0, sizeof *inqbuflun0);
 	else if (((1 << sc_link->scsibus) & scsiforcelun_buses) &&
 	    ((1 << target) & scsiforcelun_targets))
-		    ;
+		;
+	else if (sc_link->flags & SDEV_UMASS)
+		;
 	else if (memcmp(&inqbuf, inqbuflun0, sizeof inqbuf) == 0) {
 		/* The device doesn't distinguish between LUNs. */
 		SC_DEBUG(sc_link, SDEV_DB1, ("IDENTIFY not supported.\n"));
@@ -724,6 +706,7 @@ scsi_probedev(scsi, inqbuflun0, target, lun)
 	 * Save INQUIRY "flags" (SID_Linked, etc.) for low-level drivers.
 	 */
 	sc_link->inquiry_flags = inqbuf.flags;
+	memcpy(&sc_link->inqdata, &inqbuf, sizeof(sc_link->inqdata));
 
 	/*
 	 * note what BASIC type of device it is
@@ -738,6 +721,20 @@ scsi_probedev(scsi, inqbuflun0, target, lun)
 		scsibusprint(&sa, scsi->sc_dev.dv_xname);
 		printf(" not configured\n");
 		goto bad;
+	}
+
+	/*
+	 * Braindead USB devices, especially some x-in-1 media readers, try to
+	 * 'help' by pretending any LUN is actually LUN 0 until they see a
+	 * different LUN used in a command. So do an INQUIRY on LUN 1 at this
+	 * point (since we are done with the data in inqbuf) to prevent such
+	 * helpfulness before it causes confusion.
+	 */
+	if (lun == 0 && (sc_link->flags & SDEV_UMASS) &&
+	    scsi->sc_link[target][1] == NULL && sc_link->luns > 1) {
+		sc_link->lun = 1;
+		scsi_inquire(sc_link, &inqbuf, scsi_autoconf | SCSI_SILENT);
+	    	sc_link->lun = 0;
 	}
 
 	scsi->sc_link[target][lun] = sc_link;

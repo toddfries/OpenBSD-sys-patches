@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.19 2004/03/20 03:58:09 aaron Exp $	*/
+/*	$OpenBSD: aac.c,v 1.23 2005/08/24 01:19:47 krw Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -95,7 +95,7 @@ int	aac_init(struct aac_softc *);
 int	aac_internal_cache_cmd(struct scsi_xfer *);
 int	aac_map_command(struct aac_ccb *);
 #ifdef AAC_DEBUG
-void	aac_print_fib(struct aac_softc *, struct aac_fib *, char *);
+void	aac_print_fib(struct aac_softc *, struct aac_fib *, const char *);
 #endif
 int	aac_raw_scsi_cmd(struct scsi_xfer *);
 int	aac_scsi_cmd(struct scsi_xfer *);
@@ -868,8 +868,9 @@ aac_internal_cache_cmd(xs)
 		case 4:
 			/* scsi_disk.h says this should be 0x16 */
 			mpd.dp.rigid_geometry.pg_length = 0x16;
-			mpd.hd.data_length = sizeof mpd.hd + sizeof mpd.bd +
-			    mpd.dp.rigid_geometry.pg_length;
+			mpd.hd.data_length = sizeof mpd.hd -
+			    sizeof mpd.hd.data_length + sizeof mpd.bd +
+			    sizeof mpd.dp.rigid_geometry;
 			mpd.hd.blk_desc_len = sizeof mpd.bd;
 
 			/* XXX */
@@ -1079,6 +1080,9 @@ aac_bio_complete(struct aac_ccb *ccb)
 	struct aac_blockwrite_response *bwr;
 	AAC_FSAStatus status;
 
+	if (bp == NULL)
+		goto done;
+
 	/* fetch relevant status and then release the command */
 	if (bp->b_flags & B_READ) {
 		brr = (struct aac_blockread_response *)&ccb->ac_fib->data[0];
@@ -1100,6 +1104,8 @@ aac_bio_complete(struct aac_ccb *ccb)
 		printf("%s: I/O error %d (%s)\n", sc->sc_dev.dv_xname,
 		    status, AAC_COMMAND_STATUS(status));
 	}
+
+done:
 	scsi_done(xs);
 }
 
@@ -1223,19 +1229,6 @@ aacminphys(bp)
 
 	AAC_DPRINTF(AAC_D_MISC, ("aacminphys(0x%x) ", bp));
 
-#if 1
-#if 0	/* As this is way more than MAXPHYS it's really not necessary. */
-	if (bp->b_bcount > ((AAC_MAXOFFSETS - 1) * PAGE_SIZE))
-		bp->b_bcount = ((AAC_MAXOFFSETS - 1) * PAGE_SIZE);
-#endif
-#else
-	for (off = PAGE_SIZE, pa = vtophys(buf); off < bp->b_bcount;
-	    off += PAGE_SIZE)
-		if (pa + off != vtophys(buf + off)) {
-			bp->b_bcount = off;
-			break;
-		}
-#endif
 	minphys(bp);
 }
 
@@ -1886,7 +1879,7 @@ out:
  * Print a FIB
  */
 void
-aac_print_fib(struct aac_softc *sc, struct aac_fib *fib, char *caller)
+aac_print_fib(struct aac_softc *sc, struct aac_fib *fib, const char *caller)
 {
 	printf("%s: FIB @ %p\n", caller, fib);
 	printf("  XferState %b\n", fib->Header.XferState, "\20"

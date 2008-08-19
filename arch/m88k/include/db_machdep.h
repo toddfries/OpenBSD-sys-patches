@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.3 2005/01/04 21:32:40 miod Exp $ */
+/*	$OpenBSD: db_machdep.h,v 1.6 2005/04/30 16:43:11 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -49,14 +49,8 @@
 
 #define	SET_PC_REGS(regs, value)					\
 do {									\
-	if (CPU_IS88110)						\
-		(regs)->exip = ((regs)->exip & ~XIP_ADDR) | old_pc;	\
-	else if ((regs)->sxip & XIP_V)					\
-		(regs)->sxip = ((regs)->sxip & ~XIP_ADDR) | old_pc;	\
-	else if ((regs)->snip & NIP_V)					\
-		(regs)->snip = ((regs)->snip & ~NIP_ADDR) | old_pc;	\
-	else								\
-		(regs)->sfip = ((regs)->sfip & ~FIP_ADDR) | old_pc;	\
+	(regs)->sxip = (value);						\
+	(regs)->snip = (value) + 4;					\
 } while (0)
 
 /* inst_return(ins) - is the instruction a function call return.
@@ -124,12 +118,17 @@ void db_clear_single_step(db_regs_t *);
 
 /* instruction type checking - others are implemented in db_sstep.c */
 
-#define inst_trap_return(ins)  ((ins) == 0xf400fc00U)
+#define inst_trap_return(ins)  ((ins) == 0xf400fc00)
 
 /* machine specific commands have been added to ddb */
 #define DB_MACHINE_COMMANDS
 
-int m88k_print_instruction(unsigned iadr, long inst);
+int m88k_print_instruction(unsigned, long);
+
+#define	DB_AOUT_SYMBOLS
+
+#define	db_enable_interrupt(psr)	set_psr(((psr) = get_psr()) & ~PSR_IND)
+#define	db_disable_interrupt(psr)	set_psr(psr)
 
 #endif	/* DDB */
 #endif	/* _LOCORE */

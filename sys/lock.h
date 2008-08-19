@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock.h,v 1.12 2004/06/13 21:49:28 niklas Exp $	*/
+/*	$OpenBSD: lock.h,v 1.14 2005/05/29 03:20:42 deraadt Exp $	*/
 
 /* 
  * Copyright (c) 1995

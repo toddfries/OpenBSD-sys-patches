@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptodev.c,v 1.62 2004/05/07 14:42:26 millert Exp $	*/
+/*	$OpenBSD: cryptodev.c,v 1.64 2005/08/18 13:10:02 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -173,6 +173,9 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 		case CRYPTO_AES_CBC:
 			txform = &enc_xform_rijndael128;
 			break;
+		case CRYPTO_AES_CTR:
+			txform = &enc_xform_aes_ctr;
+			break;
 		case CRYPTO_ARC4:
 			txform = &enc_xform_arc4;
 			break;
@@ -308,8 +311,9 @@ cryptodev_op(struct csession *cse, struct crypt_op *cop, struct proc *p)
 	if (cop->len > 64*1024-4)
 		return (E2BIG);
 
-	if (cse->txform && (cop->len % cse->txform->blocksize) != 0) {
-		return (EINVAL);
+	if (cse->txform) {
+		if (cop->len == 0 || (cop->len % cse->txform->blocksize) != 0)
+			return (EINVAL);
 	}
 
 	bzero(&cse->uio, sizeof(cse->uio));

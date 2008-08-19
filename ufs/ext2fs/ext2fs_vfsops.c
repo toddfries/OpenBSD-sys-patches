@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vfsops.c,v 1.35 2004/12/26 21:22:14 miod Exp $	*/
+/*	$OpenBSD: ext2fs_vfsops.c,v 1.38 2005/07/28 23:11:25 pedro Exp $	*/
 /*	$NetBSD: ext2fs_vfsops.c,v 1.1 1997/06/11 09:34:07 bouyer Exp $	*/
 
 /*
@@ -55,7 +55,6 @@
 
 #include <miscfs/specfs/specdev.h>
 
-#include <ufs/ufs/extattr.h>
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/ufsmount.h>
 #include <ufs/ufs/inode.h>
@@ -98,11 +97,10 @@ const struct vfsops ext2fs_vfsops = {
 	ext2fs_vptofh,
 	ext2fs_init,
 	ext2fs_sysctl,
-	ufs_check_export,
-	vfs_stdextattrctl
+	ufs_check_export
 };
 
-struct pool ext2fs_inode_pool;
+/* struct pool ext2fs_inode_pool; */
 
 extern u_long ext2gennumber;
 
@@ -902,7 +900,8 @@ ext2fs_vget(mp, ino, vpp)
 
 	/* If the inode was deleted, reset all fields */
 	if (ip->i_e2fs_dtime != 0) {
-		ip->i_e2fs_mode = ip->i_e2fs_size = ip->i_e2fs_nblock = 0;
+		ip->i_e2fs_mode = ip->i_e2fs_nblock = 0;
+		(void)ext2fs_setsize(ip, 0);
 	}
 
 	/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cardbus.c,v 1.15 2004/10/07 21:16:59 brad Exp $ */
+/*	$OpenBSD: cardbus.c,v 1.23 2005/08/22 18:00:37 fgsch Exp $ */
 /*	$NetBSD: cardbus.c,v 1.24 2000/04/02 19:11:37 mycroft Exp $	*/
 
 /*
@@ -385,7 +385,7 @@ cardbus_attach_card(sc)
   cardbustag_t tag;
   cardbusreg_t id, class, cis_ptr;
   cardbusreg_t bhlc;
-  u_int8_t tuple[2048];
+  u_int8_t *tuple;
   int function, nfunction;
   struct cardbus_devfunc **previous_next = &(sc->sc_funcs);
   struct device *csc;
@@ -437,6 +437,11 @@ cardbus_attach_card(sc)
   bhlc = cardbus_conf_read(cc, cf, tag, CARDBUS_BHLC_REG);
   DPRINTF(("%s bhlc 0x%08x -> ", sc->sc_dev.dv_xname, bhlc));
   nfunction = CARDBUS_HDRTYPE_MULTIFN(bhlc) ? 8 : 1;
+
+  tuple = malloc(2048, M_TEMP, M_NOWAIT);
+  if (tuple == NULL) {
+     panic("no room for cardbus tuples");
+  }
 
   for(function = 0; function < nfunction; function++) {
     struct cardbus_attach_args ca;
@@ -527,7 +532,7 @@ cardbus_attach_card(sc)
     ca.ca_intrline = sc->sc_intrline;
 
     if (cis_ptr != 0) {
-	if(cardbus_read_tuples(&ca, cis_ptr, tuple, sizeof(tuple))) {
+	if(cardbus_read_tuples(&ca, cis_ptr, tuple, 2048)) {
 	   printf("cardbus_attach_card: failed to read CIS\n");
 	} else {
 #ifdef CARDBUS_DEBUG
@@ -554,6 +559,7 @@ cardbus_attach_card(sc)
    * if no functions were attached).
    */
   disable_function(sc, 8);
+  free(tuple, M_TEMP);
 
   return no_work_funcs;
 }
@@ -601,9 +607,11 @@ cardbusprint(aux, pnp)
 	}
 	if (i)
 	    printf(" ");
-	printf("(manufacturer 0x%x, product 0x%x)", ca->ca_cis.manufacturer,
-	       ca->ca_cis.product);
-	printf(" %s at %s", devinfo, pnp);
+	if (ca->ca_cis.manufacturer)
+		printf("(manufacturer 0x%x, product 0x%x) ",
+		    ca->ca_cis.manufacturer,
+		    ca->ca_cis.product);
+	printf("%s at %s", devinfo, pnp);
     }
     printf(" dev %d function %d", ca->ca_device, ca->ca_function);
 
@@ -830,7 +838,7 @@ cardbus_get_capability(cc, cf, tag, capid, offset, value)
 	while (ofs != 0) {
 #ifdef DIAGNOSTIC
 		if ((ofs & 3) || (ofs < 0x40))
-			panic("cardbus_get_capability");
+			panic("cardbus_get_capability 0x%x", ofs);
 #endif
 		reg = cardbus_conf_read(cc, cf, tag, ofs);
 		if (PCI_CAPLIST_CAP(reg) == capid) {
@@ -846,6 +854,19 @@ cardbus_get_capability(cc, cf, tag, capid, offset, value)
 	return (0);
 }
 
+int
+cardbus_matchbyid(struct cardbus_attach_args *ca, const struct cardbus_matchid *ids,
+    int nent)
+{
+	const struct cardbus_matchid *cm;
+	int i;
+
+	for (i = 0, cm = ids; i < nent; i++, cm++)
+		if (CARDBUS_VENDOR(ca->ca_id) == cm->cm_vid &&
+		    CARDBUS_PRODUCT(ca->ca_id) == cm->cm_pid)
+			return (1);
+	return (0);
+}
 
 /*
  * below this line, there are some functions for decoding tuples.
@@ -853,7 +874,7 @@ cardbus_get_capability(cc, cf, tag, capid, offset, value)
  */
 
 static u_int8_t *
-decode_tuple(u_int8_t *tuple, tuple_decode_func func, void *data);
+decode_tuple(u_int8_t *, u_int8_t *, tuple_decode_func, void *);
 
 static int
 decode_tuples(tuple, buflen, func, data)
@@ -869,19 +890,17 @@ decode_tuples(tuple, buflen, func, data)
     return 0;
   }
 
-  while (NULL != (tp = decode_tuple(tp, func, data))) {
-    if (tuple + buflen < tp) {
-      break;
-    }
-  }
+  while ((tp = decode_tuple(tp, tuple + buflen, func, data)) != NULL)
+    ;
   
   return 1;
 }
 
 
 static u_int8_t *
-decode_tuple(tuple, func, data)
+decode_tuple(tuple, end, func, data)
      u_int8_t *tuple;
+     u_int8_t *end;
      tuple_decode_func func;
      void *data;
 {
@@ -889,11 +908,24 @@ decode_tuple(tuple, func, data)
     u_int8_t len;
 
     type = tuple[0];
-    len = tuple[1] + 2;
+    switch (type) {
+    case PCMCIA_CISTPL_NULL:
+    case PCMCIA_CISTPL_END:
+        len = 1;
+        break;
+    default:
+        if (tuple + 2 > end)
+            return NULL;
+        len = tuple[1] + 2;
+        break;
+    }
+
+    if (tuple + len > end)
+        return NULL;
 
     (*func)(tuple, len, data);
 
-    if (PCMCIA_CISTPL_END == type) {
+    if (PCMCIA_CISTPL_END == type || tuple + len == end) {
 	return NULL;
     }
 
@@ -947,11 +979,11 @@ print_tuple(tuple, len, data)
 {
     int i;
 
-    printf("tuple: %s len %d\n", tuple_name(tuple[0]), len);
+    printf("tuple: %s/%d len %d\n", tuple_name(tuple[0]), tuple[0], len);
 
     for (i = 0; i < len; ++i) {
 	if (i % 16 == 0) {
-	    printf("  0x%2x:", i);
+	    printf("  0x%02x:", i);
 	}
 	printf(" %x",tuple[i]);
 	if (i % 16 == 15) {

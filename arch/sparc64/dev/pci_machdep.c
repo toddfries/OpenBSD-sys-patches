@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.15 2004/12/02 02:41:02 brad Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.19 2005/07/30 20:50:35 brad Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.22 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -83,7 +83,7 @@ pci_attach_hook(parent, self, pba)
 	struct device *self;
 	struct pcibus_attach_args *pba;
 {
-	/* Don't do nothing */
+	/* Don't do anything */
 }
 
 int
@@ -490,5 +490,5 @@ pci_intr_disestablish(pc, cookie)
 	DPRINTF(SPDB_INTR, ("pci_intr_disestablish: cookie %p\n", cookie));
 
 	/* XXX */
-	panic("can't disestablish PCI interrupts yet");
+	printf("can't disestablish PCI interrupts yet\n");
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.13 2005/03/15 18:46:30 miod Exp $	*/
+/*	$OpenBSD: autoconf.h,v 1.15 2005/07/08 12:42:57 miod Exp $	*/
 /*	$NetBSD: autoconf.h,v 1.20 1997/05/24 20:03:03 pk Exp $ */
 
 /*
@@ -147,6 +147,8 @@ int	getpropint(int node, char *name, int deflt);
 
 /* Frequently used options node */
 extern int optionsnode;
+/* Machine type */
+extern char mainbus_model[30];
 
 /*
  * The romprop function gets physical and virtual addresses from the PROM
@@ -190,9 +192,6 @@ int		sd_crazymap(int);
 
 /* Parse a disk string into a dev_t, return device struct pointer */
 struct	device *parsedisk(char *, int, int, dev_t *);
-
-/* Establish a mountroot_hook, for benefit of floppy drive, mostly. */
-void	mountroot_hook_establish(void (*)(struct device *), struct device *);
 
 void	bootstrap(void);
 int	firstchild(int);

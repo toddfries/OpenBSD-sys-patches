@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.64 2005/02/07 15:00:17 mcbride Exp $	*/
+/*	$OpenBSD: if.h,v 1.76 2005/06/14 04:00:39 henning Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -176,10 +176,13 @@ struct ifnet {				/* and the entries */
 	TAILQ_HEAD(, ifaddr) if_addrlist; /* linked list of addresses per if */
 	TAILQ_HEAD(, ifg_list) if_groups; /* linked list of groups per if */
 	struct hook_desc_head *if_addrhooks; /* address change callbacks */
+	struct hook_desc_head *if_linkstatehooks; /* link change callbacks */
 	char	if_xname[IFNAMSIZ];	/* external name (name + unit) */
 	int	if_pcount;		/* number of promiscuous listeners */
 	caddr_t	if_bpf;			/* packet filter structure */
 	caddr_t	if_bridge;		/* bridge structure */
+	caddr_t	if_tp;			/* used by trunk ports */
+	caddr_t	if_pf_kif;		/* pf interface abstraction */
 	union {
 		caddr_t	carp_s;		/* carp structure (used by !carp ifs) */
 		struct ifnet *carp_d;	/* ptr to carpdev (used by carp ifs) */
@@ -337,6 +340,22 @@ do {									\
 #define	IFQ_MAXLEN	50
 #define	IFNET_SLOWHZ	1		/* granularity is 1 second */
 
+/* symbolic names for terminal (per-protocol) CTL_IFQ_ nodes */
+#define IFQCTL_LEN 1
+#define IFQCTL_MAXLEN 2
+#define IFQCTL_DROPS 3
+#define IFQCTL_CONGESTION 4
+#define IFQCTL_MAXID 5
+
+/* sysctl for ifq (per-protocol packet input queue variant of ifqueue) */
+#define CTL_IFQ_NAMES  { \
+	{ 0, 0 }, \
+	{ "len", CTLTYPE_INT }, \
+	{ "maxlen", CTLTYPE_INT }, \
+	{ "drops", CTLTYPE_INT }, \
+	{ "congestion", CTLTYPE_INT }, \
+}
+
 /*
  * The ifaddr structure contains information about one address
  * of an interface.  They are maintained by the different address families,
@@ -405,10 +424,21 @@ struct if_announcemsghdr {
 /*
  * interface groups
  */
+
+#define	IFG_ALL		"all"		/* group contains all interfaces */
+#define	IFG_EGRESS	"egress"	/* if(s) default route(s) point to */
+
 struct ifg_group {
-	char			 ifg_group[IFNAMSIZ];
-	u_int			 ifg_refcnt;
-	TAILQ_ENTRY(ifg_group)	 ifg_next;
+	char				 ifg_group[IFNAMSIZ];
+	u_int				 ifg_refcnt;
+	caddr_t				 ifg_pf_kif;
+	TAILQ_HEAD(, ifg_member)	 ifg_members;
+	TAILQ_ENTRY(ifg_group)		 ifg_next;
+};
+
+struct ifg_member {
+	TAILQ_ENTRY(ifg_member)	 ifgm_next;
+	struct ifnet		*ifgm_ifp;
 };
 
 struct ifg_list {
@@ -417,7 +447,12 @@ struct ifg_list {
 };
 
 struct ifg_req {
-	char			 ifgrq_group[IFNAMSIZ];
+	union {
+		char			 ifgrqu_group[IFNAMSIZ];
+		char			 ifgrqu_member[IFNAMSIZ];
+	} ifgrq_ifgrqu;
+#define	ifgrq_group	ifgrq_ifgrqu.ifgrqu_group
+#define	ifgrq_member	ifgrq_ifgrqu.ifgrqu_member
 };
 
 /*
@@ -658,9 +693,9 @@ int	ifconf(u_long, caddr_t);
 void	ifinit(void);
 int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
 int	ifpromisc(struct ifnet *, int);
-int	if_addgroup(struct ifnet *, char *);
-int	if_delgroup(struct ifnet *, char *);
-int	if_getgroup(caddr_t, struct ifnet *);
+int	if_addgroup(struct ifnet *, const char *);
+int	if_delgroup(struct ifnet *, const char *);
+void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
 
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *);
@@ -680,6 +715,8 @@ int	if_clone_create(const char *);
 int	if_clone_destroy(const char *);
 
 void	if_congestion(struct ifqueue *);
+int     sysctl_ifq(int *, u_int, void *, size_t *, void *, size_t,
+	    struct ifqueue *);
 
 int	loioctl(struct ifnet *, u_long, caddr_t);
 void	loopattach(int);

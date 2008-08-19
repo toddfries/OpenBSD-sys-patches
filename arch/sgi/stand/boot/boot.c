@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.3 2004/09/16 18:54:48 pefo Exp $ */
+/*	$OpenBSD: boot.c,v 1.7 2005/08/01 19:58:13 kettenis Exp $ */
 
 /*
  * Copyright (c) 2004 Opsycon AB, www.opsycon.se.
@@ -46,17 +46,23 @@ Elf32_Addr loadfile64(int, Elf64_Ehdr *);
 int loadsymtab32(int, Elf32_Ehdr *, int);
 int loadsymtab64(int, Elf64_Ehdr *, int);
 
-enum { AUTO_NONE, AUTO_YES, AUTO_NO, AUTO_DEBUG } bootauto = AUTO_NONE;
+enum {
+	AUTO_NONE,
+	AUTO_YES,
+	AUTO_NO,
+	AUTO_MINI,
+	AUTO_DEBUG
+} bootauto = AUTO_NONE;
 char *OSLoadPartition = NULL;
 char *OSLoadFilename = NULL;
 
 unsigned long tablebase;
 
 static void *
-readtable (int fd, int offs, void *base, int size, char *name, int flags)
+readtable(int fd, int offs, void *base, int size, char *name, int flags)
 {
-	if (olseek(fd, offs, SEEK_SET) != offs ||
-	    oread(fd, base, size) != size) {
+	if (lseek(fd, offs, SEEK_SET) != offs ||
+	    read(fd, base, size) != size) {
 		printf("\ncannot read %s table", name);
 		return 0;
 	}
@@ -64,9 +70,10 @@ readtable (int fd, int offs, void *base, int size, char *name, int flags)
 }
 
 static void *
-gettable (int size, char *name, int flags, size_t align)
+gettable(int size, char *name, int flags, size_t align)
 {
 	long base;
+
 	/* Put table after loaded code to support kernel DDB */
 	tablebase = roundup(tablebase, align);
 	base = tablebase;
@@ -77,9 +84,7 @@ gettable (int size, char *name, int flags, size_t align)
 /*
  */
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	char  line[1024];
 	int   i;
@@ -94,17 +99,15 @@ main(argc, argv)
 	} else
 		strlcpy("invalid argument setup", line, sizeof(line));
 
-	printf("\nOpenBSD/sgi Arcbios boot\n");
-
 	for (entry = 0; entry < argc; entry++)
 		printf("arg %d: %s\n", entry, argv[entry]);
+	printf("\nOpenBSD/sgi Arcbios boot\n");
 
 	printf("Boot: %s\n", line);
 
 	entry = loadfile(line);
-	if (entry != NULL) {
+	if (entry != NULL)
 		((void (*)())entry)(argc, argv);
-	}
 	printf("Boot FAILED!\n                ");
 	Bios_Restart();
 }
@@ -115,31 +118,47 @@ main(argc, argv)
 void
 dobootopts(int argc, char **argv)
 {
+	char *SystemPartition = NULL;
 	char *cp;
 	int i;
 
-	/* XXX Should this be done differently, eg env vs. args? */
 	for (i = 1; i < argc; i++) {
 		cp = argv[i];
 		if (cp == NULL)
 			continue;
-
 		if (strncmp(cp, "OSLoadOptions=", 14) == 0) {
 			if (strcmp(&cp[14], "auto") == 0)
-					bootauto = AUTO_YES;
+				bootauto = AUTO_YES;
 			else if (strcmp(&cp[14], "single") == 0)
-					bootauto = AUTO_NO;
+				bootauto = AUTO_NO;
+			else if (strcmp(&cp[14], "mini") == 0)
+				bootauto = AUTO_MINI;
 			else if (strcmp(&cp[14], "debug") == 0)
-					bootauto = AUTO_DEBUG;
-		}
-		else if (strncmp(cp, "OSLoadPartition=", 16) == 0)
+				bootauto = AUTO_DEBUG;
+		} else if (strncmp(cp, "OSLoadPartition=", 16) == 0)
 			OSLoadPartition = &cp[16];
 		else if (strncmp(cp, "OSLoadFilename=", 15) == 0)
 			OSLoadFilename = &cp[15];
+		else if (strncmp(cp, "SystemPartition=", 16) == 0)
+			SystemPartition = &cp[16];
 	}
 	/* If "OSLoadOptions=" is missing, see if any arg was given */
 	if (bootauto == AUTO_NONE && *argv[1] == '/')
 		OSLoadFilename = argv[1];
+
+	if (bootauto == AUTO_MINI) {
+		static char loadpart[64];
+		char *p;
+
+		strlcpy(loadpart, argv[0], sizeof loadpart);
+		p = strstr(loadpart, "partition(8)");
+		if (p) {
+			p += strlen("partition(");
+			p[0] = '0'; p[2] = 0;
+			OSLoadPartition = loadpart;
+			OSLoadFilename = "/bsd.rd";
+		}
+	}
 }
 
 /*
@@ -156,13 +175,13 @@ loadfile(fname)
 	int fd;
 	Elf32_Addr entry;
 
-	if ((fd = oopen(fname, 0)) < 0) {
+	if ((fd = open(fname, 0)) < 0) {
 		printf("can't open file %s\n", fname);
 		return NULL;
 	}
 
 	/* read the ELF header and check that it IS an ELF header */
-	if (oread(fd, (char *)&eh, sizeof(eh)) != sizeof(eh)) {
+	if (read(fd, (char *)&eh, sizeof(eh)) != sizeof(eh)) {
 		printf("error: ELF header read error\n");
 		return NULL;
 	}
@@ -191,8 +210,8 @@ loadfile32(int fd, Elf32_Ehdr *eh)
 	int i;
 
 	ph = (Elf32_Phdr *) buf;
-	olseek(fd, eh->e_phoff, 0);
-	if (oread(fd, (char *)ph, 4096) != 4096) {
+	lseek(fd, eh->e_phoff, 0);
+	if (read(fd, (char *)ph, 4096) != 4096) {
 		printf("unexpected EOF\n");
 		return NULL;
 	}
@@ -202,22 +221,22 @@ loadfile32(int fd, Elf32_Ehdr *eh)
 
 	for (i = 0; i < eh->e_phnum; i++, ph++) {
 		if (ph->p_type == PT_LOAD) {
-			olseek(fd, ph->p_offset, 0);
+			lseek(fd, ph->p_offset, 0);
 			printf("0x%x:0x%x, ",(long)ph->p_paddr, (long)ph->p_filesz);
-			if (oread(fd, (char *)ph->p_paddr, ph->p_filesz) !=  ph->p_filesz) {
+			if (read(fd, (char *)ph->p_paddr,
+			    ph->p_filesz) != ph->p_filesz) {
 				printf("unexpected EOF\n");
 				return NULL;
 			}
 			if(ph->p_memsz > ph->p_filesz) {
 				printf("Zero 0x%x:0x%x, ",
-					(long)(ph->p_paddr + ph->p_filesz),
-					(long)(ph->p_memsz - ph->p_filesz));
+				    (long)(ph->p_paddr + ph->p_filesz),
+				    (long)(ph->p_memsz - ph->p_filesz));
 				bzero((void *)(ph->p_paddr + ph->p_filesz),
-					ph->p_memsz - ph->p_filesz);
+				    ph->p_memsz - ph->p_filesz);
 			}
-			if((ph->p_paddr + ph->p_memsz) > tablebase) {
+			if((ph->p_paddr + ph->p_memsz) > tablebase)
 				tablebase = ph->p_paddr + ph->p_memsz;
-			}
 		}
 	}
 	memset((void *)tablebase, 0, 4096);
@@ -234,8 +253,8 @@ loadfile64(int fd, Elf64_Ehdr *eh)
 	int i;
 
 	ph = (Elf64_Phdr *) buf;
-	olseek(fd, eh->e_phoff, 0);
-	if (oread(fd, (char *)ph, 4096) != 4096) {
+	lseek(fd, eh->e_phoff, 0);
+	if (read(fd, (char *)ph, 4096) != 4096) {
 		printf("unexpected EOF\n");
 		return NULL;
 	}
@@ -245,22 +264,22 @@ loadfile64(int fd, Elf64_Ehdr *eh)
 
 	for (i = 0; i < eh->e_phnum; i++, ph++) {
 		if (ph->p_type == PT_LOAD) {
-			olseek(fd, ph->p_offset, 0);
+			lseek(fd, ph->p_offset, 0);
 			printf("0x%llx:0x%llx, ",ph->p_paddr, ph->p_filesz);
-			if (oread(fd, (char *)(long)ph->p_paddr, ph->p_filesz) !=  ph->p_filesz) {
+			if (read(fd, (char *)(long)ph->p_paddr,
+			    ph->p_filesz) != ph->p_filesz) {
 				printf("unexpected EOF\n");
 				return NULL;
 			}
 			if(ph->p_memsz > ph->p_filesz) {
 				printf("Zero 0x%llx:0x%llx, ",
-					ph->p_paddr + ph->p_filesz,
-					ph->p_memsz - ph->p_filesz);
+				    ph->p_paddr + ph->p_filesz,
+				    ph->p_memsz - ph->p_filesz);
 				bzero((void *)(long)(ph->p_paddr + ph->p_filesz),
-					ph->p_memsz - ph->p_filesz);
+				    ph->p_memsz - ph->p_filesz);
 			}
-			if((ph->p_paddr + ph->p_memsz) > tablebase) {
+			if((ph->p_paddr + ph->p_memsz) > tablebase)
 				tablebase = ph->p_paddr + ph->p_memsz;
-			}
 		}
 	}
 	memset((void *)tablebase, 0, 4096);
@@ -283,8 +302,8 @@ loadsymtab32(int fd, Elf32_Ehdr *eh, int flags)
 	printf("Loading symbol table\n");
 	size =  eh->e_shnum * sizeof(Elf32_Shdr);
 	shtab = (Elf32_Shdr *) alloc(size);
-	if (olseek (fd, eh->e_shoff, SEEK_SET) != eh->e_shoff ||
-	    oread (fd, shtab, size) != size) {
+	if (lseek (fd, eh->e_shoff, SEEK_SET) != eh->e_shoff ||
+	    read (fd, shtab, size) != size) {
 		printf("Seek to section headers failed.\n");
 		return -1;
         }
@@ -303,9 +322,8 @@ loadsymtab32(int fd, Elf32_Ehdr *eh, int flags)
 	shstrh = &sh[eh->e_shstrndx];
 
 	for (i = 0; i < eh->e_shnum; sh++, i++) {
-		if (sh->sh_type == SHT_SYMTAB) {
+		if (sh->sh_type == SHT_SYMTAB)
 			break;
-		}
 	}
 	if (i >= eh->e_shnum) {
 		printf("No symbol table found!\n");
@@ -330,16 +348,17 @@ loadsymtab32(int fd, Elf32_Ehdr *eh, int flags)
 		if(shstrh->sh_offset < offs && shstrh->sh_offset < strh->sh_offset) {
 #if 0
 			/*
-			 *  We would like to read the shstrtab from the file but since this
-			 *  table is located in front of the shtab it is already gone. We can't
-			 *  position backwards outside the current segment when using tftp.
-			 *  Instead we create the names we need in the string table because
-			 *  it can be reconstructed from the info we now have access to.
+			 * We would like to read the shstrtab from the file
+			 * but since this table is located in front of the shtab
+			 * it is already gone. We can't position backwards
+			 * outside the current segment when using tftp.
+			 * Instead we create the names we need in the string
+			 * table because it can be reconstructed from the info
+			 * we now have access to.
 			 */
 			if (!readtable (shstrh->sh_offset, (void *)shstrtab,
-					shstrh->sh_size, "shstring", flags)) {
+			    shstrh->sh_size, "shstring", flags))
 				return(0);
-			}
 #else
 			memset(shstrtab, 0, shstrh->sh_size);
 			strncpy(shstrtab + shstrh->sh_name, ".shstrtab", 10);
@@ -349,24 +368,22 @@ loadsymtab32(int fd, Elf32_Ehdr *eh, int flags)
 			shstrh->sh_offset = 0x7fffffff;
 		}
 
-			if (offs < strh->sh_offset && offs < shstrh->sh_offset) {
-			if (!(readtable(fd, offs, (void *)symtab, size, "sym", flags))) {
+		if (offs < strh->sh_offset && offs < shstrh->sh_offset) {
+			if (!(readtable(fd, offs, (void *)symtab, size,
+			    "sym", flags)))
 				return (0);
-			}
 			offs = 0x7fffffff;
 		}
 
 		if (strh->sh_offset < offs && strh->sh_offset < shstrh->sh_offset) {
-		if (!(readtable (fd, strh->sh_offset, (void *)strtab,
-					 strh->sh_size, "string", flags))) {
+			if (!(readtable (fd, strh->sh_offset, (void *)strtab,
+			    strh->sh_size, "string", flags)))
 				return (0);
-			}
 			strh->sh_offset = 0x7fffffff;
 		}
 		if (offs == 0x7fffffff && strh->sh_offset == 0x7fffffff &&
-		    shstrh->sh_offset == 0x7fffffff) {
+		    shstrh->sh_offset == 0x7fffffff)
 			break;
-		}
 	} while(1);
 
 	/*
@@ -404,8 +421,8 @@ loadsymtab64(int fd, Elf64_Ehdr *eh, int flags)
 	printf("Loading symbol table\n");
 	size =  eh->e_shnum * sizeof(Elf64_Shdr);
 	shtab = (Elf64_Shdr *) alloc(size);
-	if (olseek (fd, (int)eh->e_shoff, SEEK_SET) != (int)eh->e_shoff ||
-	    oread (fd, shtab, size) != size) {
+	if (lseek (fd, (int)eh->e_shoff, SEEK_SET) != (int)eh->e_shoff ||
+	    read (fd, shtab, size) != size) {
 		printf("Seek to section headers failed.\n");
 		return -1;
         }
@@ -418,7 +435,8 @@ loadsymtab64(int fd, Elf64_Ehdr *eh, int flags)
 	tablebase = roundup(tablebase, sizeof(u_int64_t));
 	ksh = (Elf64_Shdr *)tablebase;
 	tablebase += roundup((sizeof(Elf64_Shdr) * eh->e_shnum), sizeof(u_int64_t));
-	memcpy(ksh, shtab, roundup((sizeof(Elf64_Shdr) * eh->e_shnum), sizeof(u_int64_t)));
+	memcpy(ksh, shtab, roundup((sizeof(Elf64_Shdr) * eh->e_shnum),
+	    sizeof(u_int64_t)));
 	sh = ksh;
 
 	shstrh = &sh[eh->e_shstrndx];
@@ -451,16 +469,17 @@ loadsymtab64(int fd, Elf64_Ehdr *eh, int flags)
 		if(shstrh->sh_offset < offs && shstrh->sh_offset < strh->sh_offset) {
 #if 0
 			/*
-			 *  We would like to read the shstrtab from the file but since this
-			 *  table is located in front of the shtab it is already gone. We can't
-			 *  position backwards outside the current segment when using tftp.
-			 *  Instead we create the names we need in the string table because
-			 *  it can be reconstructed from the info we now have access to.
+			 * We would like to read the shstrtab from the file
+			 * but since this table is located in front of the shtab
+			 * it is already gone. We can't position backwards
+			 * outside the current segment when using tftp.
+			 * Instead we create the names we need in the string
+			 * table because it can be reconstructed from the
+			 * info we now have access to.
 			 */
 			if (!readtable (shstrh->sh_offset, (void *)shstrtab,
-					shstrh->sh_size, "shstring", flags)) {
+			    shstrh->sh_size, "shstring", flags))
 				return(0);
-			}
 #else
 			memset(shstrtab, 0, shstrh->sh_size);
 			strncpy(shstrtab + shstrh->sh_name, ".shstrtab", 10);
@@ -470,24 +489,23 @@ loadsymtab64(int fd, Elf64_Ehdr *eh, int flags)
 			shstrh->sh_offset = 0x7fffffff;
 		}
 
-			if (offs < strh->sh_offset && offs < shstrh->sh_offset) {
-			if (!(readtable(fd, offs, (void *)symtab, size, "sym", flags))) {
+		if (offs < strh->sh_offset && offs < shstrh->sh_offset) {
+			if (!(readtable(fd, offs, (void *)symtab,
+			    size, "sym", flags)))
 				return (0);
-			}
 			offs = 0x7fffffff;
 		}
 
 		if (strh->sh_offset < offs && strh->sh_offset < shstrh->sh_offset) {
-		if (!(readtable (fd, strh->sh_offset, (void *)strtab,
-					 strh->sh_size, "string", flags))) {
+			if (!(readtable (fd, strh->sh_offset, (void *)strtab,
+			    strh->sh_size, "string", flags))) {
 				return (0);
 			}
 			strh->sh_offset = 0x7fffffff;
 		}
 		if (offs == 0x7fffffff && strh->sh_offset == 0x7fffffff &&
-		    shstrh->sh_offset == 0x7fffffff) {
+		    shstrh->sh_offset == 0x7fffffff)
 			break;
-		}
 	} while(1);
 
 	/*

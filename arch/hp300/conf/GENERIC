@@ -1,13 +1,17 @@
-#	$OpenBSD: GENERIC,v 1.37 2005/02/27 22:21:47 miod Exp $
-#	$NetBSD: GENERIC,v 1.23 1997/01/31 06:12:57 thorpej Exp $
+#	$OpenBSD: GENERIC,v 1.42 2005/08/03 02:10:43 dlg Exp $
 #
-# Generic kernel - one size fits all.
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
 #
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
-machine hp300 m68k
-
-# Include all GENERIC options
-include "../../../conf/GENERIC"
+machine		hp300 m68k
+include		"../../../conf/GENERIC"
+maxusers	32			# estimated number of users
 
 # Support for various CPU types
 option		HP320
@@ -23,9 +27,6 @@ option		HP385
 option		HP400
 option		HP425
 option		HP433
-
-# Need to set locally
-maxusers	32
 
 # Options for HP hardware
 option		USELEDS		# make the lights twinkle
@@ -63,7 +64,9 @@ hilid*		at hil?		# ID module
 frodo0		at intio?
 
 # 8250-like serial ports found on Frodo ASIC
-#dnkbd0		at frodo? offset 0x0	# Domain keyboard flavor
+dnkbd0		at frodo?	# Domain keyboard flavor
+wskbd*		at dnkbd? mux 1
+wsmouse*	at dnkbd? mux 0
 apci*		at frodo?	# tty flavor
 
 # Davinci framebuffer
@@ -123,6 +126,8 @@ st*		at scsibus?			# SCSI tapes
 cd*		at scsibus?			# SCSI CD-ROMs
 ch*		at scsibus?			# SCSI changer devices
 ss*		at scsibus?			# SCSI scanners
+safte*		at scsibus?			# SCSI AF-TE
+ses*		at scsibus?			# SCSI enclosure services
 uk*		at scsibus?			# unknown SCSI devices
 
 pseudo-device	wsmux	2	# mouse and keyboard multiplexor

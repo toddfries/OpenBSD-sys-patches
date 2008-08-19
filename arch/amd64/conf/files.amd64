@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.9 2005/03/08 20:00:23 tdeval Exp $
+#	$OpenBSD: files.amd64,v 1.12 2005/06/02 20:09:39 tholo Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -48,6 +48,7 @@ file	arch/amd64/amd64/db_memrw.c		ddb
 file	arch/amd64/amd64/db_trace.c		ddb
 
 file	netinet/in_cksum.c			inet
+file	netinet/in4_cksum.c			inet
 
 # Basic clock - required
 file	arch/amd64/isa/clock.c
@@ -87,6 +88,7 @@ file	arch/amd64/amd64/ioapic.c		ioapic needs-flag
 
 include	"dev/pci/files.pci"
 file	arch/amd64/pci/pci_machdep.c		pci
+file	arch/amd64/pci/iommu.c			pci
 file	arch/amd64/pci/pciide_machdep.c		pciide
 
 include	"dev/puc/files.puc"
@@ -138,6 +140,12 @@ file	dev/isa/fd.c				fd needs-flag
 # USB
 #
 include	"dev/usb/files.usb"
+
+#
+# ACPI
+#
+include "../../../dev/acpi/files.acpi"
+file	arch/amd64/amd64/acpi_machdep.c		acpi
 
 #
 # device major numbers

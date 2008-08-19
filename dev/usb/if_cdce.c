@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdce.c,v 1.8 2005/01/27 21:49:53 dlg Exp $ */
+/*	$OpenBSD: if_cdce.c,v 1.10 2005/08/01 05:36:48 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
@@ -126,7 +126,7 @@ USB_MATCH(cdce)
 USB_ATTACH(cdce)
 {
 	USB_ATTACH_START(cdce, sc, uaa);
-	char				 devinfo[1024];
+	char				 *devinfop;
 	int				 s;
 	struct ifnet			*ifp;
 	usbd_device_handle		 dev = uaa->device;
@@ -138,9 +138,10 @@ USB_ATTACH(cdce)
 	u_int16_t			 macaddr_hi;
 	int				 i;
 
-	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
+	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->cdce_dev), devinfo);
+	printf("%s: %s\n", USBDEVNAME(sc->cdce_dev), devinfop);
+	usbd_devinfo_free(devinfop);
 
 	sc->cdce_udev = uaa->device;
 	sc->cdce_ctl_iface = uaa->iface;
@@ -345,6 +346,7 @@ cdce_stop(struct cdce_softc *sc)
 	int		 i;
 
 	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	if (sc->cdce_bulkin_pipe != NULL) {
 		err = usbd_abort_pipe(sc->cdce_bulkin_pipe);
@@ -391,8 +393,6 @@ cdce_stop(struct cdce_softc *sc)
 			sc->cdce_cdata.cdce_tx_chain[i].cdce_xfer = NULL;
 		}
 	}
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
 Static int

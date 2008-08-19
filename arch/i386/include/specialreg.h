@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.24 2004/06/25 01:02:53 tom Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.26 2005/08/20 00:27:08 jsg Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.7 1994/10/27 04:16:26 cgd Exp $	*/
 
 /*-
@@ -131,7 +131,7 @@
 #define CPUID_3DNOW	0x40000000	/* has 3DNow! instructions (AMD) */
 #define CPUID_LONG	0x20000000	/* long mode (AMD64, ext cpuid) */
 
-#define CPUIDECX_PNI	0x00000001	/* Prescott New Instructions */
+#define CPUIDECX_SSE3	0x00000001	/* has SSE3 instructions */
 #define CPUIDECX_MWAIT	0x00000008	/* Monitor/Mwait */
 #define CPUIDECX_EST	0x00000080	/* enhanced SpeedStep */
 #define CPUIDECX_TM2	0x00000100	/* thermal monitor 2 */
@@ -433,6 +433,19 @@
 #define C3_HAS_AES			1	/* cpu has AES */
 #define C3_HAS_SHA			2	/* cpu has SHA1 & SHA256 */
 #define C3_HAS_MM			4	/* cpu has RSA instructions */
+#define C3_HAS_AESCTR			8	/* cpu has AES-CTR instructions */
+
+/* Centaur Extended Feature flags */
+#define C3_CPUID_HAS_RNG		0x000004
+#define C3_CPUID_DO_RNG			0x000008
+#define C3_CPUID_HAS_ACE		0x000040
+#define C3_CPUID_DO_ACE			0x000080
+#define C3_CPUID_HAS_ACE2		0x000100
+#define C3_CPUID_DO_ACE2		0x000200
+#define C3_CPUID_HAS_PHE		0x000400
+#define C3_CPUID_DO_PHE			0x000800
+#define C3_CPUID_HAS_PMM		0x001000
+#define C3_CPUID_DO_PMM			0x002000
 
 /* VIA C3 xcrypt-* instruction context control options */
 #define	C3_CRYPT_CWLO_ROUND_M		0x0000000f

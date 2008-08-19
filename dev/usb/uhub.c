@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhub.c,v 1.30 2005/03/13 02:54:04 pascoe Exp $ */
+/*	$OpenBSD: uhub.c,v 1.32 2005/08/01 05:36:48 brad Exp $ */
 /*	$NetBSD: uhub.c,v 1.64 2003/02/08 03:32:51 ichiro Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhub.c,v 1.18 1999/11/17 22:33:43 n_hibma Exp $	*/
 
@@ -153,7 +153,7 @@ USB_ATTACH(uhub)
 {
 	USB_ATTACH_START(uhub, sc, uaa);
 	usbd_device_handle dev = uaa->device;
-	char devinfo[1024];
+	char *devinfop;
 	usbd_status err;
 	struct usbd_hub *hub = NULL;
 	usb_device_request_t req;
@@ -165,16 +165,11 @@ USB_ATTACH(uhub)
 
 	DPRINTFN(1,("uhub_attach\n"));
 	sc->sc_hub = dev;
-	usbd_devinfo(dev, 1, devinfo, sizeof devinfo);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfo);
 
-	if (UHUB_IS_HIGH_SPEED(sc)) {
-		printf("%s: %s transaction translator%s\n",
-		    USBDEVNAME(sc->sc_dev),
-		    UHUB_IS_SINGLE_TT(sc) ? "single" : "multiple",
-		    UHUB_IS_SINGLE_TT(sc) ? "" : "s");
-	}
+	devinfop = usbd_devinfo_alloc(dev, 0);
+	USB_ATTACH_SETUP;
+	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_index(dev, 0, 1);
 	if (err) {
@@ -211,9 +206,16 @@ USB_ATTACH(uhub)
 	for (nremov = 0, port = 1; port <= nports; port++)
 		if (!UHD_NOT_REMOV(&hubdesc, port))
 			nremov++;
-	printf("%s: %d port%s with %d removable, %s powered\n",
+	printf("%s: %d port%s with %d removable, %s powered",
 	       USBDEVNAME(sc->sc_dev), nports, nports != 1 ? "s" : "",
 	       nremov, dev->self_powered ? "self" : "bus");
+
+	if (dev->depth > 0 && UHUB_IS_HIGH_SPEED(sc)) {
+		printf(", %s transaction translator%s",
+		    UHUB_IS_SINGLE_TT(sc) ? "single" : "multiple",
+		    UHUB_IS_SINGLE_TT(sc) ? "" : "s");
+	}
+	printf("\n");
 
 	if (nports == 0) {
 		printf("%s: no ports, hub ignored\n", USBDEVNAME(sc->sc_dev));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.128 2004/11/19 10:11:52 hshoexer Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.130 2005/05/28 15:10:07 ho Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -186,11 +186,13 @@ struct ipsec_policy {
 
 	union sockaddr_union	ipo_src;	/* Local address to use */
 	union sockaddr_union	ipo_dst;	/* Remote gateway -- if it's zeroed:
-						 * - on output, we try to contact the
-						 * remote host directly (if needed).
-						 * - on input, we accept on if the
-						 * inner source is the same as the
-						 * outer source address, or if transport
+						 * - on output, we try to
+						 * contact the remote host
+						 * directly (if needed).  
+						 * - on input, we accept on if
+						 * the inner source is the
+						 * same as the outer source
+						 * address, or if transport
 						 * mode was used.
 						 */
 
@@ -539,6 +541,7 @@ extern void puttdb(struct tdb *);
 extern void tdb_delete(struct tdb *);
 extern struct tdb *tdb_alloc(void);
 extern void tdb_free(struct tdb *);
+extern int tdb_hash(u_int32_t, union sockaddr_union *, u_int8_t);
 extern int tdb_init(struct tdb *, u_int16_t, struct ipsecinit *);
 extern int tdb_walk(int (*)(struct tdb *, void *, int), void *);
 

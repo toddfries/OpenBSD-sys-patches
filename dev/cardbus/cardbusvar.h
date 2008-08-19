@@ -1,4 +1,4 @@
-/*	$OpenBSD: cardbusvar.h,v 1.6 2002/03/14 03:16:04 millert Exp $	*/
+/*	$OpenBSD: cardbusvar.h,v 1.8 2005/06/27 21:38:27 deraadt Exp $	*/
 /*	$NetBSD: cardbusvar.h,v 1.17 2000/04/02 19:11:37 mycroft Exp $	*/
 
 /*
@@ -150,7 +150,7 @@ typedef u_int16_t cardbus_product_id_t;
 	    (((bhlcr) >> CARDBUS_CACHELINE_SHIFT) & CARDBUS_CACHELINE_MASK)
 
 
-/* Base Resisters */
+/* Base Registers */
 #define CARDBUS_BASE0_REG  0x10
 #define CARDBUS_BASE1_REG  0x14
 #define CARDBUS_BASE2_REG  0x18
@@ -429,6 +429,13 @@ int cardbus_function_disable(struct cardbus_softc *, int function);
 
 int cardbus_get_capability(cardbus_chipset_tag_t, cardbus_function_tag_t,
     cardbustag_t, int, int *, cardbusreg_t *);
+
+struct cardbus_matchid {
+	cardbus_vendor_id_t	cm_vid;
+	cardbus_product_id_t	cm_pid;
+};
+
+int cardbus_matchbyid(struct cardbus_attach_args *, const struct cardbus_matchid *, int);
 
 #define Cardbus_function_enable(ct) cardbus_function_enable((ct)->ct_sc, (ct)->ct_func)
 #define Cardbus_function_disable(ct) cardbus_function_disable((ct)->ct_sc, (ct)->ct_func)

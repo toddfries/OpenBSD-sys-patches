@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan_var.h,v 1.11 2004/02/12 18:07:29 henning Exp $	*/
+/*	$OpenBSD: if_vlan_var.h,v 1.16 2005/07/19 11:50:20 camield Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -56,6 +56,7 @@ struct	ifvlan {
 	LIST_HEAD(__vlan_mchead, vlan_mc_entry)	vlan_mc_listhead;
 	LIST_ENTRY(ifvlan) ifv_list;
 	int ifv_flags;
+	void *lh_cookie;
 };
 
 #define	ifv_if		ifv_ac.ac_if
@@ -71,12 +72,10 @@ struct	ether_vlan_header {
 	u_int16_t evl_proto;
 };
 
-#define	EVL_VLANOFTAG(tag) ((tag) & 4095)
+#define	EVL_VLID_MASK	0x0FFF
+#define	EVL_VLANOFTAG(tag) ((tag) & EVL_VLID_MASK)
 #define	EVL_PRIOFTAG(tag) (((tag) >> 13) & 7)
 #define	EVL_ENCAPLEN	4	/* length in octets of encapsulation */
-
-/* When these sorts of interfaces get their own identifier... */
-#define	IFT_8021_VLAN	IFT_PROPVIRTUAL
 
 /* sysctl(3) tags, for compatibility purposes */
 #define	VLANCTL_PROTO	1
@@ -93,7 +92,6 @@ struct	vlanreq {
 #define	SIOCGETVLAN	SIOCGIFGENERIC
 
 #ifdef _KERNEL
-extern	int vlan_input(register struct ether_header *eh, struct mbuf *m);
-extern	int vlan_input_tag(struct mbuf *m, u_int16_t t);
+extern	int vlan_input(struct ether_header *eh, struct mbuf *m);
 #endif /* _KERNEL */
 #endif /* _NET_IF_VLAN_VAR_H_ */

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.173 2005/03/08 20:00:25 tdeval Exp $
+#	$OpenBSD: files.pci,v 1.188 2005/08/20 22:51:38 brad Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -109,6 +109,11 @@ device	autri: audio, auconv, mulaw, ac97, midibus
 attach	autri at pci
 file	dev/pci/autri.c			autri
 
+# ATI IXP 200/300/400 series AC'97 Audio
+device	auixp: audio, auconv, mulaw, ac97
+attach	auixp at pci
+file	dev/pci/auixp.c			auixp
+
 # CS4280 CrystalClear Audio
 device	clcs: audio, auconv, mulaw, ac97, firmload
 attach	clcs at pci
@@ -159,9 +164,13 @@ attach	aac at pci with aac_pci
 file	dev/pci/aac_pci.c		aac_pci
 file	dev/ic/aac.c			aac
 
-# Compaq Array Controllers
+# Compaq Smart ARRAY [234]* RAID controllers
 attach	cac at pci with cac_pci
 file	dev/pci/cac_pci.c		cac_pci
+
+# Compaq Smart ARRAY [56]* RAID controllers
+attach	ciss at pci with ciss_pci
+file	dev/pci/ciss_pci.c		ciss_pci
 
 # Qlogic ISP 10x0 (PCI) family
 # device declaration in sys/conf/files
@@ -198,10 +207,11 @@ file	dev/pci/if_fpa.c		fpa
 attach	le at pci with le_pci
 file	dev/pci/if_le_pci.c		le_pci
 
-# NCR 53c8xx SCSI chips
-device	ncr: scsi
-attach	ncr at pci
-file	dev/pci/ncr.c			ncr
+# AMD PCnet-PCI Ethernet controller family
+# Supersedes if_le_pci.c
+device pcn: ether, ifnet, ifmedia, mii
+attach pcn at pci
+file	dev/pci/if_pcn.c		pcn
 
 # common code for siop/esiop pci front end
 define	siop_pci_common
@@ -210,7 +220,7 @@ file	dev/pci/siop_pci_common.c	siop_pci_common
 # Symbios 53c8xx SCSI chips
 # device declaration in sys/conf/files
 attach	siop at pci with siop_pci: siop_pci_common
-file	dev/pci/siop_pci.c	siop_pci
+file	dev/pci/siop_pci.c		siop_pci
 
 # NeoMagic 256AV and 256ZX
 device	neo: audio, auconv, mulaw, ac97, firmload
@@ -303,10 +313,9 @@ file	dev/pci/if_em_hw.c		em
 attach	dc at pci with dc_pci
 file	dev/pci/if_dc_pci.c		dc_pci
 
-# SMC EPIC, 83c170
-device	tx: ether, ifnet, mii, ifmedia
-attach	tx at pci
-file	dev/pci/if_tx.c			tx
+# SMC EPIC/100 Fast Ethernet on PCI
+attach	epic at pci with epic_pci
+file	dev/pci/if_epic_pci.c		epic_pci
 
 # Alteon Tigon I & II
 device	ti: ether, ifnet, ifmedia, firmload
@@ -392,7 +401,6 @@ file	dev/pci/ohci_pci.c		ohci
 # EHCI USB controller
 attach	ehci at pci with ehci_pci
 file	dev/pci/ehci_pci.c		ehci
-file	dev/pci/usb_pci.c		ehci | uhci | ohci
 
 # YENTA PCI-CardBus bridge
 #device	cbb: cbbus, pcmciabus
@@ -519,15 +527,32 @@ attach	ral at pci with ral_pci
 file	dev/pci/if_ral_pci.c		ral_pci
 
 # Sangoma PCI card
-device	san: ifnet, ifmedia
+device	san: ifnet, ifmedia, sppp
 attach	san at pci
-file	dev/pci/if_sandrv.c 		san
-file	dev/pci/if_san_common.c 	san
-file	dev/pci/if_san_obsd.c 		san
-file	dev/pci/if_san_te1.c 		san
-file	dev/pci/if_san_xilinx.c 	san
+file	dev/pci/if_sandrv.c		san
+file	dev/pci/if_san_common.c		san
+file	dev/pci/if_san_obsd.c		san
+file	dev/pci/if_san_te1.c		san
+file	dev/pci/if_san_xilinx.c		san
 
 # PIIX4 power management controller
 device	piixpm {}
 attach	piixpm at pci
 file	dev/pci/piixpm.c		piixpm
+
+# Intel 6300ESB ICH watchdog timer
+device	ichwdt {}
+attach	ichwdt at pci
+file	dev/pci/ichwdt.c		ichwdt
+
+# Mindspeed/Conexant MUSYCC HDLC controller
+device	musycc {} : ifnet
+attach	musycc at pci
+file	dev/pci/musycc.c		musycc
+file	dev/pci/musycc_obsd.c		musycc
+
+# Accoom Artery PCI card
+device	art: musycc, ifnet, ifmedia, sppp
+attach	art at musycc
+file	dev/pci/if_art.c		art
+file	dev/pci/bt8370.c		art

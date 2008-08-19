@@ -1,4 +1,4 @@
-/*	$OpenBSD: rgephy.c,v 1.8 2005/02/19 06:00:04 brad Exp $	*/
+/*	$OpenBSD: rgephy.c,v 1.11 2005/07/22 11:48:10 brad Exp $	*/
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
@@ -85,13 +85,14 @@ int	rgephy_mii_phy_auto(struct mii_softc *);
 void	rgephy_reset(struct mii_softc *);
 void	rgephy_loop(struct mii_softc *);
 void	rgephy_load_dspcode(struct mii_softc *);
-int	rgephy_mii_model;
 
 const struct mii_phy_funcs rgephy_funcs = {
 	rgephy_service, rgephy_status, rgephy_reset,
 };
 
 static const struct mii_phydesc rgephys[] = {
+	{ MII_OUI_REALTEK2,		MII_MODEL_xxREALTEK_RTL8169S,
+	  MII_STR_xxREALTEK_RTL8169S },
 	{ MII_OUI_xxREALTEK,		MII_MODEL_xxREALTEK_RTL8169S,
 	  MII_STR_xxREALTEK_RTL8169S },
 
@@ -105,9 +106,9 @@ rgephymatch(struct device *parent, void *match, void *aux)
 	struct mii_attach_args *ma = aux;
 
 	if (mii_phy_match(ma, rgephys) != NULL)
-		return(10);
+		return (10);
 
-	return(0);
+	return (0);
 }
 
 void
@@ -124,12 +125,9 @@ rgephyattach(struct device *parent, struct device *self, void *aux)
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &rgephy_funcs;
-	sc->mii_model = MII_MODEL(ma->mii_id2);
-	sc->mii_rev = MII_REV(ma->mii_id2);
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
-	sc->mii_ticks = 0; /* XXX */
-	sc->mii_anegticks = 5;
+	sc->mii_anegticks = MII_ANEGTICKS;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
@@ -273,9 +271,9 @@ setit:
 			break;
 
 		/*
-		 * Only retry autonegotiation every 5 seconds.
+	 	 * Only retry autonegotiation every mii_anegticks seconds.
 		 */
-		if (++sc->mii_ticks <= sc->mii_anegticks /*10*/)
+		if (++sc->mii_ticks <= sc->mii_anegticks)
 			break;
 		
 		sc->mii_ticks = 0;

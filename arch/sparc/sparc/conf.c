@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.39 2004/02/10 01:31:21 millert Exp $	*/
+/*	$OpenBSD: conf.c,v 1.43 2005/07/31 06:39:07 dlg Exp $	*/
 /*	$NetBSD: conf.c,v 1.40 1996/04/11 19:20:03 thorpej Exp $ */
 
 /*
@@ -59,7 +59,6 @@
 #include "ccd.h"
 #include "raid.h"
 #include "ch.h"
-#include "ses.h"
 #include "ss.h"
 #include "uk.h"
 #include "sd.h"
@@ -80,6 +79,7 @@
 #include "flash.h"
 #include "fga.h"
 #include "daadio.h"
+#include "com.h"
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -125,8 +125,8 @@ struct bdevsw	bdevsw[] =
 int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
 
 #include "pf.h"
-
 #include "systrace.h"
+#include "tctrl.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -160,13 +160,13 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 27: was /dev/bwtwo */
 	cdev_notdef(),			/* 28 */
 	cdev_notdef(),			/* 29: was /dev/kbd */
-	cdev_notdef(),			/* 30 */
+	cdev_apm_init(NTCTRL,apm),	/* 30: tctrl APM interface */
 	cdev_notdef(),			/* 31: was /dev/cgtwo */
 	cdev_notdef(),			/* 32: should be /dev/gpone */
 	cdev_notdef(),			/* 33 */
 	cdev_notdef(),			/* 34 */
 	cdev_notdef(),			/* 35 */
-	cdev_notdef(),			/* 36 */
+	cdev_tty_init(NCOM,com),	/* 36: SPARCbook modem */
 	cdev_notdef(),			/* 37 */
 	cdev_notdef(),			/* 38 */
 	cdev_notdef(),			/* 39: was /dev/cgfour */
@@ -204,7 +204,11 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 67: was /dev/cgsix */
 	cdev_notdef(),			/* 68 */
 	cdev_gen_init(NAUDIO,audio),	/* 69: /dev/audio */
+#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
 	cdev_openprom_init(1,openprom),	/* 70: /dev/openprom */
+#else
+	cdev_notdef(),			/* 70 */
+#endif
 	cdev_notdef(),			/* 71 */
 	cdev_notdef(),			/* 72 */
 	cdev_notdef(),			/* 73 */
@@ -259,7 +263,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ss_init(NSS,ss),           /* 121: SCSI scanner */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 122: Kernel symbols device */
 	cdev_disk_init(NRAID,raid),     /* 123: RAIDframe disk driver */
-	cdev_ses_init(NSES,ses),	/* 124: SCSI SES or SAF-TE device */
+	cdev_notdef(),			/* 124 */
 	cdev_ptm_init(NPTY,ptm),	/* 125: pseudo-tty ptm device */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);

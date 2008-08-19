@@ -1,4 +1,4 @@
-/*	$OpenBSD: npx.c,v 1.35.2.1 2006/05/02 04:08:54 brad Exp $	*/
+/*	$OpenBSD: npx.c,v 1.37.2.1 2006/05/02 04:07:27 brad Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -631,6 +631,7 @@ npxdna_xmm(struct cpu_info *ci)
 	ci->ci_fpcurproc = p;
 	p->p_addr->u_pcb.pcb_fpcpu = ci;
 	splx(s);
+	uvmexp.fpswtch++;
 
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
 		fldcw(&p->p_addr->u_pcb.pcb_savefpu.sv_xmm.sv_env.en_cw);
@@ -706,6 +707,7 @@ npxdna_s87(struct cpu_info *ci)
 	ci->ci_fpcurproc = p;
 	p->p_addr->u_pcb.pcb_fpcpu = ci;
 	splx(s);
+	uvmexp.fpswtch++;
 
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
 		fldcw(&p->p_addr->u_pcb.pcb_savefpu.sv_87.sv_env.en_cw);

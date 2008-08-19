@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.79 2005/01/18 23:26:51 mpf Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.82 2005/05/26 01:49:15 markus Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -80,7 +80,7 @@ struct	pkthdr {
 	struct	ifnet *rcvif;		/* rcv interface */
 	SLIST_HEAD(packet_tags, m_tag) tags; /* list of packet tags */
 	int	len;			/* total packet length */
-	int	csum;			/* Hardware checksum info */
+	int	csum_flags;		/* checksum flags */
 };
 
 /* description of external storage mapped into mbuf, valid if M_EXT set */
@@ -180,11 +180,11 @@ struct mbuf {
  * prevents a section of code from from being interrupted by network
  * drivers.
  */
-#define	MBUFLOCK(code) \
-	{ int ms = splimp(); \
+#define	MBUFLOCK(code) do {\
+	int ms = splimp(); \
 	  { code } \
 	  splx(ms); \
-	}
+} while(/* CONSTCOND */ 0)
 
 /*
  * mbuf allocation/deallocation macros:
@@ -196,20 +196,18 @@ struct mbuf {
  * allocates an mbuf and initializes it to contain a packet header
  * and internal data.
  */
-#define	_MGET(m, how, type) do { \
-	MBUFLOCK( \
-	    	(m) = pool_get(&mbpool, \
-		    (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0); \
-	); \
+#define	_MGET(m, how, type) MBUFLOCK( \
+	(m) = pool_get(&mbpool, \
+	    (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0); \
 	if (m) { \
 		(m)->m_type = (type); \
-		MBUFLOCK(mbstat.m_mtypes[type]++;) \
+		mbstat.m_mtypes[type]++; \
 		(m)->m_next = (struct mbuf *)NULL; \
 		(m)->m_nextpkt = (struct mbuf *)NULL; \
 		(m)->m_data = (m)->m_dat; \
 		(m)->m_flags = 0; \
 	} \
-} while(/* CONSTCOND */ 0)
+)
 
 #ifdef SMALL_KERNEL
 struct mbuf *_sk_mget(int, int);
@@ -218,22 +216,20 @@ struct mbuf *_sk_mget(int, int);
 #define MGET(m, how, type) _MGET(m, how, type)
 #endif
 
-#define	_MGETHDR(m, how, type) do { \
-	MBUFLOCK( \
-		(m) = pool_get(&mbpool, \
-		    (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0); \
-	); \
+#define	_MGETHDR(m, how, type) MBUFLOCK( \
+	(m) = pool_get(&mbpool, \
+	    (how) == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0); \
 	if (m) { \
 		(m)->m_type = (type); \
-		MBUFLOCK(mbstat.m_mtypes[type]++;) \
+		mbstat.m_mtypes[type]++; \
 		(m)->m_next = (struct mbuf *)NULL; \
 		(m)->m_nextpkt = (struct mbuf *)NULL; \
 		(m)->m_data = (m)->m_pktdat; \
 		(m)->m_flags = M_PKTHDR; \
 		SLIST_INIT(&(m)->m_pkthdr.tags); \
-		(m)->m_pkthdr.csum = 0; \
+		(m)->m_pkthdr.csum_flags = 0; \
 	} \
-} while (/* CONSTCOND */ 0)
+)
 
 #ifdef SMALL_KERNEL
 struct mbuf *_sk_mgethdr(int, int);
@@ -497,7 +493,7 @@ void _sk_mclget(struct mbuf *, int);
 
 /* change mbuf to new type */
 #define MCHTYPE(m, t) { \
-	MBUFLOCK(mbstat.m_mtypes[(m)->m_type]--; mbstat.m_mtypes[t]++;) \
+	MBUFLOCK(mbstat.m_mtypes[(m)->m_type]--; mbstat.m_mtypes[t]++;); \
 	(m)->m_type = t;\
 }
 
@@ -595,6 +591,7 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define	PACKET_TAG_PF_QID			14 /* PF queue id */
 #define PACKET_TAG_PF_TAG			15 /* PF tags */
 #define PACKET_TAG_PF_TRANSLATE_LOCALHOST	16 /* translated to localhost */
+#define PACKET_TAG_DLT				17 /* data link layer type */
 
 #ifdef MBTYPES
 int mbtypes[] = {				/* XXX */

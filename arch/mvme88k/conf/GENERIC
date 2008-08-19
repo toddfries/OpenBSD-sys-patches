@@ -1,23 +1,30 @@
-#	$OpenBSD: GENERIC,v 1.44 2004/09/16 09:14:03 mickey Exp $
+#	$OpenBSD: GENERIC,v 1.48 2005/08/03 02:10:44 dlg Exp $
+#
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
+#
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
 machine		mvme88k m88k
-
-include "../../../conf/GENERIC"
+include		"../../../conf/GENERIC"
+maxusers	32			# estimated number of users
 
 # Processor type
 option		M88100
 option		M88110
 
-option		MVME187		# support for 187 (requires M88100)
-option		MVME188		# support for 188 (requires M88100)
-option		MVME197		# support for 197 (requires M88110)
-
-option		"NCPUS=1"	# number of CPUs supported (max 4)
+option		MVME187			# support for 187 (requires M88100)
+option		MVME188			# support for 188 (requires M88100)
+option		MVME197			# support for 197 (requires M88110)
+option		"NCPUS=1"		# number of CPUs supported (max 4)
 
 # Define this if your processor has the xxx.usr bug (mask C82N)
 option		ERRATA__XXX_USR
 
-maxusers	64
 
 config		bsd		swap generic
 
@@ -31,7 +38,7 @@ bugtty0 at mainbus0
 
 # MVME1x7 devices
 pcctwo0 at mainbus0 addr 0xfff00000		# MVME187
-bussw0  at mainbus0 addr 0xfff00000		# MVME197
+bussw0	at mainbus0 addr 0xfff00000		# MVME197
 sram0	at mainbus0 addr 0xffe00000		# MVME187
 pcctwo0 at bussw0 offset 0x00000		# MVME197
 clock0	at pcctwo0 ipl 5
@@ -77,4 +84,6 @@ st*	at scsibus?
 cd*	at scsibus?
 ch*	at scsibus?
 ss*	at scsibus?
+safte*	at scsibus?
+ses*	at scsibus?
 uk*	at scsibus?

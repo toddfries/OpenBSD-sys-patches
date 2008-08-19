@@ -32,10 +32,51 @@ POSSIBILITY OF SUCH DAMAGE.
 ***************************************************************************/
 
 /* $FreeBSD: if_em.h,v 1.26 2004/09/01 23:22:41 pdeuskar Exp $ */
-/* $OpenBSD: if_em.h,v 1.9 2004/12/08 15:41:46 markus Exp $ */
+/* $OpenBSD: if_em.h,v 1.14 2005/07/16 19:05:36 brad Exp $ */
 
 #ifndef _EM_H_DEFINED_
 #define _EM_H_DEFINED_
+
+#include "bpfilter.h"
+#include "vlan.h"
+
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/sockio.h>
+#include <sys/mbuf.h>
+#include <sys/malloc.h>
+#include <sys/kernel.h>
+#include <sys/device.h>
+#include <sys/socket.h>
+
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <net/if_media.h>
+
+#ifdef INET
+#include <netinet/in.h>
+#include <netinet/in_systm.h>
+#include <netinet/in_var.h>
+#include <netinet/ip.h>
+#include <netinet/if_ether.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#endif
+
+#if NVLAN > 0
+#include <net/if_types.h>
+#include <net/if_vlan_var.h>
+#endif
+
+#if NBPFILTER > 0
+#include <net/bpf.h>
+#endif
+
+#include <uvm/uvm_extern.h>
+
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
 
 #include <dev/pci/if_em_hw.h>
 
@@ -126,18 +167,12 @@ POSSIBILITY OF SUCH DAMAGE.
  */
 #define EM_RADV                         64
 
-
 /*
  * This parameter controls the maximum no of times the driver will loop
  * in the isr.
  *           Minimum Value = 1
  */
 #define EM_MAX_INTR                     3
-
-/*
- * Inform the stack about transmit checksum offload capabilities.
- */
-#define EM_CHECKSUM_FEATURES            (CSUM_TCP | CSUM_UDP)
 
 /*
  * This parameter controls the duration of transmit watchdog timer.
@@ -183,7 +218,6 @@ POSSIBILITY OF SUCH DAMAGE.
                                          ADVERTISE_100_HALF | ADVERTISE_100_FULL | \
                                          ADVERTISE_1000_FULL)
 
-#define EM_VENDOR_ID                    0x8086
 #define EM_MMBA                         0x0010 /* Mem base address */
 #define EM_ROUNDUP(size, unit) (((size) + (unit) - 1) & ~((unit) - 1))
 
@@ -192,9 +226,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define EM_SMARTSPEED_DOWNSHIFT         3
 #define EM_SMARTSPEED_MAX               15
 
-
 #define MAX_NUM_MULTICAST_ADDRESSES     128
-#define PCI_ANY_ID                      (~0U)
 
 /* Defines for printing debug information */
 #define DEBUG_INIT  0
@@ -211,7 +243,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #define HW_DEBUGOUT1(S, A)          if (DEBUG_HW) printf(S "\n", A)
 #define HW_DEBUGOUT2(S, A, B)       if (DEBUG_HW) printf(S "\n", A, B)
 
-
 /* Supported RX Buffer Sizes */
 #define EM_RXBUFFER_2048        2048
 #define EM_RXBUFFER_4096        4096
@@ -220,24 +251,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #define EM_MAX_SCATTER            64
 
-/* ******************************************************************************
- * vendor_info_array
- *
- * This array contains the list of Subvendor/Subdevice IDs on which the driver
- * should load.
- *
- * ******************************************************************************/
-#ifdef __FreeBSD__
-typedef struct _em_vendor_info_t {
-        unsigned int vendor_id;
-        unsigned int device_id;
-        unsigned int subvendor_id;
-        unsigned int subdevice_id;
-        unsigned int index;
-} em_vendor_info_t;
-#endif /* __FreeBSD__ */
-
-
 struct em_buffer {
         struct mbuf    *m_head;
 	bus_dmamap_t	map;		/* bus_dma map for packet */
@@ -245,10 +258,6 @@ struct em_buffer {
 
 struct em_q {
 	bus_dmamap_t       map;         /* bus_dma map for packet */
-#ifdef __FreeBSD__
-	int                nsegs;       /* # of segments/descriptors */
-	bus_dma_segment_t  segs[EM_MAX_SCATTER];
-#endif /* __FreeBSD__ */
 };
 
 /*
@@ -271,13 +280,6 @@ typedef enum _XSUM_CONTEXT_T {
 	OFFLOAD_UDP_IP
 } XSUM_CONTEXT_T;
 
-struct em_softc;
-struct em_int_delay_info {
-        struct em_softc *sc;    /* Back-pointer to the sc struct */
-        int offset;                     /* Register offset to read/write */
-        int value;                      /* Current value in usecs */
-};
-
 /* For 82544 PCIX  Workaround */
 typedef struct _ADDRESS_LENGTH_PAIR
 {
@@ -293,41 +295,22 @@ typedef struct _DESCRIPTOR_PAIR
 
 /* Our adapter structure */
 struct em_softc {
-#ifdef __OpenBSD__
 	struct device	sc_dv;
-#endif
 	struct arpcom	interface_data;
 	struct em_softc *next;
 	struct em_softc *prev;
 	struct em_hw    hw;
 
-	/* FreeBSD operating-system-specific structures */
+	/* OpenBSD operating-system-specific structures */
 	struct em_osdep osdep;
-#ifdef __FreeBSD__
-        struct device   *dev;
-        struct resource *res_memory;
-        struct resource *res_ioport;
-        struct resource *res_interrupt;
-        void            *int_handler_tag;
-#endif /* __FreeBSD__ */
 	struct ifmedia  media;
-#ifdef __FreeBSD__
-        struct callout  timer;
-        struct callout  tx_fifo_timer;
-#endif /* __FreeBSD__ */
 	int             io_rid;
-#ifdef __FreeBSD__
-        u_int8_t        unit;
-        struct mtx      mtx;
-#endif /* __FreeBSD__ */
 
-#ifdef __OpenBSD__
 	void           *sc_intrhand;
 	struct timeout	em_intr_enable;
 	struct timeout	timer_handle;
 	struct timeout	tx_fifo_timer_handle;
 	void		*sc_powerhook;
-#endif /* __OpenBSD__ */
 
 #ifdef __STRICT_ALIGNMENT
 	/* Used for carrying forward alignment adjustments */
@@ -341,10 +324,10 @@ struct em_softc {
 	u_int16_t       link_speed;
 	u_int16_t       link_duplex;
 	u_int32_t       smartspeed;
-	struct em_int_delay_info tx_int_delay;
-	struct em_int_delay_info tx_abs_int_delay;
-	struct em_int_delay_info rx_int_delay;
-	struct em_int_delay_info rx_abs_int_delay;
+	u_int32_t       tx_int_delay;
+	u_int32_t       tx_abs_int_delay;
+	u_int32_t	rx_int_delay;
+	u_int32_t	rx_abs_int_delay;
 
 	XSUM_CONTEXT_T  active_checksum_context;
 
@@ -387,11 +370,6 @@ struct em_softc {
 	struct mbuf        *fmp;
 	struct mbuf        *lmp;
 
-#ifdef __FreeBSD__
-        struct sysctl_ctx_list sysctl_ctx;
-        struct sysctl_oid *sysctl_tree;
-#endif /* __FreeBSD__ */
-
 	/* Misc stats maintained by the driver */
 	unsigned long   dropped_pkts;
 	unsigned long   mbuf_alloc_failed;
@@ -420,24 +398,9 @@ struct em_softc {
         boolean_t       pcix_82544;
         boolean_t       in_detach;
 
-#ifdef DBG_STATS
-	unsigned long   no_pkts_avail;
-	unsigned long   clean_tx_interrupts;
-
-#endif
 	struct em_hw_stats stats;
 };
 
-#ifdef __FreeBSD__
-#define EM_LOCK_INIT(_sc, _name) \
-        mtx_init(&(_sc)->mtx, _name, MTX_NETWORK_LOCK, MTX_DEF)
-#define EM_LOCK_DESTROY(_sc)    mtx_destroy(&(_sc)->mtx)
-#define EM_LOCK(_sc)            mtx_lock(&(_sc)->mtx)
-#define EM_UNLOCK(_sc)          mtx_unlock(&(_sc)->mtx)
-#define EM_LOCK_ASSERT(_sc)     mtx_assert(&(_sc)->mtx, MA_OWNED)
-#endif /* __FreeBSD__ */
-
-#ifdef __OpenBSD__
 static inline int spl_use_arg(void *);
 static inline int spl_use_arg(void *v) { return splnet(); }
 #define EM_LOCK_INIT(_sc, _name)
@@ -446,6 +409,5 @@ static inline int spl_use_arg(void *v) { return splnet(); }
 #define EM_LOCK(_sc)		em_hidden_splnet_s = spl_use_arg(_sc)
 #define EM_UNLOCK(_sc)		splx(em_hidden_splnet_s)
 #define EM_LOCK_ASSERT(_sc)	splassert(IPL_NET)
-#endif /* __OpenBSD__ */
 
 #endif                                                  /* _EM_H_DEFINED_ */

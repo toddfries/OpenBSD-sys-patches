@@ -1,4 +1,4 @@
-/*	$OpenBSD: interrupt.c,v 1.11 2005/01/31 21:35:50 grange Exp $ */
+/*	$OpenBSD: interrupt.c,v 1.18 2005/08/14 11:02:30 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -204,9 +204,6 @@ printf("Unhandled interrupt %x:%x\n", cause, pending);
 		clr_ipending(SINT_CLOCKMASK);
 		softclock();
 	}
-#if defined(INET) || defined(INET6) || defined(NETATALK) || defined(IMP) || \
-    defined(IPX) || defined(NS) || defined(CCITT) || NATM > 0 || \
-    NPPP > 0 || NBRIDGE > 0
 	if ((ipending & SINT_NETMASK) & ~xcpl) {
 		extern int netisr;
 		int isr = netisr;
@@ -215,7 +212,6 @@ printf("Unhandled interrupt %x:%x\n", cause, pending);
 #define DONETISR(b,f)   if (isr & (1 << (b)))   f();
 #include <net/netisr_dispatch.h>
 	}
-#endif
 
 #ifdef NOTYET
 	if ((ipending & SINT_TTYMASK) & ~xcpl) {
@@ -282,21 +278,10 @@ softintr()
 		ADDUPROF(p);
 	}
 	if (want_resched) {
-		int s;
-
-		/*
-		 * Since we are curproc, clock will normally just change
-		 * our priority without moving us from one queue to another
-		 * (since the running process is not on a queue.)
-		 * If that happened after we put ourselves on the run queue
-		 * but before we switched, we might not be on the queue
-		 * indicated by our priority.
+		/*	
+		 * We're being preempted.
 		 */
-		s = splstatclock();
-		setrunqueue(p);
-		p->p_stats->p_ru.ru_nivcsw++;
-		mi_switch();
-		splx(s);
+		preempt(NULL);
 		while ((sig = CURSIG(p)) != 0)
 			postsig(sig);
 	}
@@ -343,7 +328,6 @@ generic_intr_establish(icp, irq, type, level, ih_fun, ih_arg, ih_what)
 	struct intrhand **p, *q, *ih;
 	static struct intrhand fakehand = {NULL, fakeintr};
 	int edge;
-extern int cold;
 
 static int initialized = 0;
 
@@ -353,7 +337,7 @@ static int initialized = 0;
 	}
 
 	if (irq > 62 || irq < 1) {
-		panic("intr_establish: illegal irq %d\n", irq);
+		panic("intr_establish: illegal irq %d", irq);
 	}
 	irq += 1;	/* Adjust for softint 1 and 0 */
 
@@ -524,9 +508,6 @@ generic_do_pending_int(int newcpl)
 		clr_ipending(SINT_CLOCKMASK);
 		softclock();
 	}
-#if defined(INET) || defined(INET6) || defined(NETATALK) || defined(IMP) || \
-    defined(IPX) || defined(NS) || defined(CCITT) || NATM > 0 || \
-    NPPP > 0 || NBRIDGE > 0
 	if ((ipending & SINT_NETMASK) & ~newcpl) {
 		int isr = netisr;
 		netisr = 0;
@@ -534,7 +515,6 @@ generic_do_pending_int(int newcpl)
 #define	DONETISR(b,f)	if (isr & (1 << (b)))   f();
 #include <net/netisr_dispatch.h>
 	}
-#endif
 
 #ifdef NOTYET
 	if ((ipending & SINT_TTYMASK) & ~newcpl) {
@@ -582,10 +562,10 @@ intrmask_t
 generic_iointr(intrmask_t pending, struct trap_frame *cf)
 {
 	struct intrhand *ih;
-	intrmask_t catched, vm;
+	intrmask_t caught, vm;
 	int v;
 
-	catched = 0;
+	caught = 0;
 
 	set_ipending((pending >> 8) & cpl);
 	pending &= ~(cpl << 8);
@@ -599,14 +579,14 @@ generic_iointr(intrmask_t pending, struct trap_frame *cf)
 			while (ih) {
 				ih->frame = cf;
 				if ((*ih->ih_fun)(ih->ih_arg)) {
-					catched |= vm;
+					caught |= vm;
 					ih->ih_count.ec_count++;
 				}
 				ih = ih->ih_next;
 			}
 		}
 	}
-	return catched;
+	return caught;
 }
 
 #ifndef INLINE_SPLRAISE

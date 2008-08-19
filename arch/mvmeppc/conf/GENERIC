@@ -1,11 +1,17 @@
-#	$OpenBSD: GENERIC,v 1.6 2004/09/16 09:35:36 deraadt Exp $
+#	$OpenBSD: GENERIC,v 1.10 2005/08/03 16:30:34 martin Exp $
 #
-# MVMEPPC GENERIC config file
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
 #
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
 machine		mvmeppc powerpc
-
-maxusers	32
+include		"../../../conf/GENERIC"
+maxusers	32			# estimated number of users
 
 # default type, instructs system to try to determine what proper type is
 # actual machine type probed via name of openfirmware root node.
@@ -13,7 +19,6 @@ option		SYS_TYPE=APPL
 
 option		PCIVERBOSE
 
-include "../../../conf/GENERIC"
 
 config		bsd	swap generic
 
@@ -39,7 +44,6 @@ pci*		at mpcpcibr0
 pchb*		at pci?			# PCI host bridge
 pcib*		at pci?			# PCI-ISA bridge
 siop*		at pci?
-#ncr*		at pci?
 de*		at pci?
 #vme*		at pci?
 #pciide*	at pci?
@@ -66,7 +70,6 @@ isa*	at	pcib?
 #### SCSI attachment points
 
 scsibus*	at siop?
-#scsibus*	at ncr?
 
 #wdc*	at mainbus? flags 0x0
 #wd*	at wdc? flags 0x0000
@@ -84,3 +87,5 @@ sd0		at scsibus? target 0 lun 0
 #ch*		at scsibus?
 #ss*		at scsibus?
 #uk*		at scsibus?
+#safte*		at scsibus?
+#ses*		at scsibus?

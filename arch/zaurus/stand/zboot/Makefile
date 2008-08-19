@@ -1,14 +1,15 @@
-#MAN=	zboot.8
-NOMAN=
+#	$OpenBSD: Makefile,v 1.6 2005/05/24 20:38:20 uwe Exp $
+
+MAN=	boot.8
+MANSUBDIR=zaurus
+MLINKS=	boot.8 boot.conf.8
 
 .if ${MACHINE} == "zaurus"
 PROG=	zboot
 LDFLAGS+=-nostdlib -Bstatic
 INSTALL_STRIP=
 
-#LDFLAGS+=-Ttext $(LINKADDR) -N -x -noinhibit-exec
-#CLEANFILES+=	crt0.o
-#SRCS=	srt0.S
+SRCS=	crt0.c
 
 S=	${.CURDIR}/../../../..
 
@@ -20,7 +21,7 @@ CLEANFILES+= arm machine
 .endif
 
 # stand/boot
-SRCS+=	boot.c cmd.c vars.c bootarg.c conf.c
+SRCS+=	boot.c vars.c bootarg.c conf.c
 
 # libsa
 SRCS+=	close.c closeall.c cons.c ctime.c disklabel.c dkcksum.c fstat.c \
@@ -31,9 +32,9 @@ SRCS+=	close.c closeall.c cons.c ctime.c disklabel.c dkcksum.c fstat.c \
 SRCS+=	strcmp.c strlcpy.c strlen.c strncmp.c strncpy.c write.c \
 	ashrdi3.c divsi3.S
 
-# local overrides for Linux/zaurus
-SRCS+=	alloc.c devopen.c exec.c exit.c loadfile.c machdep.c \
-	unixdev.c unixsys.S
+# local overrides and additions
+SRCS+=	alloc.c cmd.c devopen.c diskprobe.c exec.c exit.c loadfile.c \
+	machdep.c termios.c unixcons.c unixdev.c unixsys.S
 
 .PATH:	${S}/stand/boot
 .PATH:	${S}/lib/libsa

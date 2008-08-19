@@ -1,4 +1,4 @@
-/*	$OpenBSD: autri.c,v 1.13 2003/04/27 11:22:53 ho Exp $	*/
+/*	$OpenBSD: autri.c,v 1.16 2005/08/09 04:10:10 mickey Exp $	*/
 
 /*
  * Copyright (c) 2001 SOMEYA Yoshihiko and KUROSAWA Takahiro.
@@ -138,7 +138,6 @@ int	autri_mixer_set_port(void *, mixer_ctrl_t *);
 int	autri_mixer_get_port(void *, mixer_ctrl_t *);
 void   *autri_malloc(void *, int, size_t, int, int);
 void	autri_free(void *, void *, int);
-size_t	autri_round_buffersize(void *, int, size_t);
 paddr_t	autri_mappage(void *, void *, off_t, int);
 int	autri_get_props(void *);
 int	autri_query_devinfo(void *addr, mixer_devinfo_t *dip);
@@ -167,7 +166,7 @@ struct audio_hw_if autri_hw_if = {
 	autri_query_devinfo,
 	autri_malloc,
 	autri_free,
-	autri_round_buffersize,
+	NULL,
 	autri_mappage,
 	autri_get_props,
 	autri_trigger_output,
@@ -503,7 +502,6 @@ autri_attach(parent, self, aux)
 	char const *intrstr;
 	mixer_ctrl_t ctl;
 	int i, r;
-	u_int32_t reg;
 
 	sc->sc_devid = pa->pa_id;
 	sc->sc_class = pa->pa_class;
@@ -539,11 +537,6 @@ autri_attach(parent, self, aux)
 	sc->sc_dmatag = pa->pa_dmat;
 	sc->sc_pc = pc;
 	sc->sc_pt = pa->pa_tag;
-
-	/* enable the device */
-	reg = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	reg |= (PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_MASTER_ENABLE);
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, reg);
 
 	/* initialize the device */
 	autri_init(sc);
@@ -632,7 +625,7 @@ autri_init(sc_)
 	void *sc_;
 {
 	struct autri_softc *sc = sc_;
-	u_int32_t reg;
+	pcireg_t reg;
 
 	pci_chipset_tag_t pc = sc->sc_pc;
 	pcitag_t pt = sc->sc_pt;
@@ -1048,7 +1041,7 @@ autri_round_blocksize(addr, block)
 	void *addr;
 	int block;
 {
-	return (block & -4);
+	return ((block + 3) & -4);
 }
 
 int
@@ -1215,15 +1208,6 @@ autri_find_dma(sc, addr)
 		;
 
 	return p;
-}
-
-size_t
-autri_round_buffersize(addr, direction, size)
-	void *addr;
-	int direction;
-	size_t size;
-{
-	return size;
 }
 
 paddr_t

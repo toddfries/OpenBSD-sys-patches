@@ -1,4 +1,4 @@
-/*	$OpenBSD: xmphy.c,v 1.11 2005/02/19 06:00:04 brad Exp $	*/
+/*	$OpenBSD: xmphy.c,v 1.14 2005/06/19 19:30:14 brad Exp $	*/
 
 /*
  * Copyright (c) 2000
@@ -72,7 +72,6 @@ int	xmphy_service(struct mii_softc *, struct mii_data *, int);
 void	xmphy_status(struct mii_softc *);
 
 int	xmphy_mii_phy_auto(struct mii_softc *, int);
-extern void	mii_phy_auto_timeout(void *);
 
 const struct mii_phy_funcs xmphy_funcs = {
 	xmphy_service, xmphy_status, mii_phy_reset,
@@ -81,6 +80,9 @@ const struct mii_phy_funcs xmphy_funcs = {
 static const struct mii_phydesc xmphys[] = {
 	{ MII_OUI_xxXAQTI,	MII_MODEL_XAQTI_XMACII,
 	  MII_STR_XAQTI_XMACII },
+
+	{ MII_OUI_JATO,		MII_MODEL_JATO_BASEX,
+	  MII_STR_JATO_BASEX },
 
 	{ 0,			0,
 	  NULL },
@@ -91,9 +93,9 @@ int xmphy_probe(struct device *parent, void *match, void *aux)
 	struct mii_attach_args *ma = aux;
 
 	if (mii_phy_match(ma, xmphys) != NULL)
-		return(10);
+		return (10);
 
-	return(0);
+	return (0);
 }
 
 void
@@ -112,7 +114,7 @@ xmphy_attach(struct device *parent, struct device *self, void *aux)
 	sc->mii_funcs = &xmphy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = 5;
+	sc->mii_anegticks = MII_ANEGTICKS;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
@@ -168,11 +170,13 @@ xmphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
+#ifdef foo
 			/*
 			 * If we're already in auto mode, just return.
 			 */
 			if (PHY_READ(sc, XMPHY_MII_BMCR) & XMPHY_BMCR_AUTOEN)
 				return (0);
+#endif
 			(void) xmphy_mii_phy_auto(sc, 1);
 			break;
 		case IFM_1000_SX:
@@ -201,38 +205,38 @@ xmphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			return (0);
 
 		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
-			return (0);
-
-		/*
 		 * Is the interface even up?
 		 */
 		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			return (0);
 
 		/*
-		 * Only retry autonegotiation every 5 seconds.
+		 * Only used for autonegotiation.
 		 */
-		if (++sc->mii_ticks != sc->mii_anegticks)
-			return (0);
-
-		sc->mii_ticks = 0;
-
-		/*
-		 * Check to see if we have link.  If we do, we don't
-		 * need to restart the autonegotiation process.  Read
-		 * the BMSR twice in case it's latched.
-		 */
-		reg = PHY_READ(sc, XMPHY_MII_BMSR) |
-		    PHY_READ(sc, XMPHY_MII_BMSR);
-		if (reg & XMPHY_BMSR_LINK)
+		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
 			break;
 
+                /*
+                 * Check to see if we have link.  If we do, we don't
+                 * need to restart the autonegotiation process.  Read
+                 * the BMSR twice in case it's latched.
+                 */
+		reg = PHY_READ(sc, MII_BMSR) | PHY_READ(sc, MII_BMSR);
+		if (reg & BMSR_LINK)
+			break;
+
+		/*
+		 * Only retry autonegotiation every mii_anegticks seconds.
+		 */
+		if (++sc->mii_ticks <= sc->mii_anegticks)
+			break;
+
+		sc->mii_ticks = 0;
 		PHY_RESET(sc);
+
 		if (xmphy_mii_phy_auto(sc, 0) == EJUSTRETURN)
-			return(0);
+			return (0);
+
 		break;
 	}
 
@@ -301,11 +305,13 @@ xmphy_status(struct mii_softc *sc)
 int
 xmphy_mii_phy_auto(struct mii_softc *sc, int waitfor)
 {
-	int bmsr, i;
+	int bmsr, anar = 0, i;
 
 	if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
-		PHY_WRITE(sc, XMPHY_MII_ANAR,
-		    XMPHY_ANAR_FDX|XMPHY_ANAR_HDX);
+		anar = PHY_READ(sc, XMPHY_MII_ANAR);
+		anar |= XMPHY_ANAR_FDX|XMPHY_ANAR_HDX;
+		PHY_WRITE(sc, XMPHY_MII_ANAR, anar);
+		DELAY(1000);
 		PHY_WRITE(sc, XMPHY_MII_BMCR,
 		    XMPHY_BMCR_AUTOEN | XMPHY_BMCR_STARTNEG);
 	}

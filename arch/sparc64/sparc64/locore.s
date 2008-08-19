@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.48 2004/12/24 22:50:31 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.52 2005/08/08 19:48:37 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.137 2001/08/13 06:10:10 jdolecek Exp $	*/
 
 /*
@@ -598,7 +598,38 @@ _C_LABEL(cold):
  * Here are some often repeated traps as macros.
  */
 
-	! spill a 64-bit register window
+	! spill a 64-bit user register window
+	.macro USPILL64 label, as
+\label:
+	wr	%g0, \as, %asi
+	stxa	%l0, [%sp + BIAS + ( 0*8)] %asi
+	stxa	%l1, [%sp + BIAS + ( 1*8)] %asi
+	stxa	%l2, [%sp + BIAS + ( 2*8)] %asi
+	stxa	%l3, [%sp + BIAS + ( 3*8)] %asi
+	stxa	%l4, [%sp + BIAS + ( 4*8)] %asi
+	stxa	%l5, [%sp + BIAS + ( 5*8)] %asi
+	stxa	%l6, [%sp + BIAS + ( 6*8)] %asi
+	stxa	%l7, [%sp + BIAS + ( 7*8)] %asi
+	stxa	%i0, [%sp + BIAS + ( 8*8)] %asi
+	stxa	%i1, [%sp + BIAS + ( 9*8)] %asi
+	stxa	%i2, [%sp + BIAS + (10*8)] %asi
+	stxa	%i3, [%sp + BIAS + (11*8)] %asi
+	stxa	%i4, [%sp + BIAS + (12*8)] %asi
+	stxa	%i5, [%sp + BIAS + (13*8)] %asi
+	stxa	%i6, [%sp + BIAS + (14*8)] %asi
+	sethi	%hi(CPCB), %g5
+	ldx	[%g5 + %lo(CPCB)], %g5
+	ldx	[%g5 + PCB_WCOOKIE], %g5
+	xor	%g5, %i7, %g5		! stackghost
+	stxa	%g5, [%sp + BIAS + (15*8)] %asi
+	saved
+	CLRTT 1
+	retry
+	NOTREACHED
+	TA32
+	.endm
+
+	! spill a 64-bit kernel register window
 	.macro SPILL64 label, as
 \label:
 	wr	%g0, \as, %asi
@@ -634,7 +665,23 @@ _C_LABEL(cold):
 	TA32
 	.endm
 
-	! fill a 64-bit register window
+	! fill a 64-bit user register window
+	.macro UFILL64 label, as
+\label:
+	wr	%g0, \as, %asi
+	FILL	ldxa, %sp+BIAS, 8, %asi
+	sethi	%hi(CPCB), %g5
+	ldx	[%g5 + %lo(CPCB)], %g5
+	ldx	[%g5 + PCB_WCOOKIE], %g5
+	xor	%g5, %i7, %i7		! stackghost
+	restored
+	CLRTT 3
+	retry
+	NOTREACHED
+	TA32
+	.endm
+
+	! fill a 64-bit kernel register window
 	.macro FILL64 label, as
 \label:
 	wr	%g0, \as, %asi
@@ -750,7 +797,7 @@ ufast_DMMU_protection:			! 06c = fast data access MMU protection
 	UTRAP 0x077; UTRAP 0x078; UTRAP 0x079; UTRAP 0x07a; UTRAP 0x07b; UTRAP 0x07c
 	UTRAP 0x07d; UTRAP 0x07e; UTRAP 0x07f
 TABLE/**/uspill:
-	SPILL64 uspill8,ASI_AIUS	! 0x080 spill_0_normal -- used to save user windows in user mode
+	USPILL64 uspill8,ASI_AIUS	! 0x080 spill_0_normal -- used to save user windows in user mode
 	SPILL32 uspill4,ASI_AIUS	! 0x084 spill_1_normal
 	SPILLBOTH uspill8,uspill4,ASI_AIUS		! 0x088 spill_2_normal
 #ifdef DEBUG
@@ -763,7 +810,7 @@ TABLE/**/kspill:
 	SPILLBOTH kspill8,kspill4,ASI_N	! 0x098 spill_6_normal
 	UTRAP 0x09c; TA32	! 0x09c spill_7_normal
 TABLE/**/uspillk:
-	SPILL64 uspillk8,ASI_AIUS	! 0x0a0 spill_0_other -- used to save user windows in supervisor mode
+	USPILL64 uspillk8,ASI_AIUS	! 0x0a0 spill_0_other -- used to save user windows in supervisor mode
 	SPILL32 uspillk4,ASI_AIUS	! 0x0a4 spill_1_other
 	SPILLBOTH uspillk8,uspillk4,ASI_AIUS	! 0x0a8 spill_2_other
 	UTRAP 0x0ac; TA32	! 0x0ac spill_3_other
@@ -772,7 +819,7 @@ TABLE/**/uspillk:
 	UTRAP 0x0b8; TA32	! 0x0b8 spill_6_other
 	UTRAP 0x0bc; TA32	! 0x0bc spill_7_other
 TABLE/**/ufill:
-	FILL64 ufill8,ASI_AIUS ! 0x0c0 fill_0_normal -- used to fill windows when running user mode
+	UFILL64 ufill8,ASI_AIUS ! 0x0c0 fill_0_normal -- used to fill windows when running user mode
 	FILL32 ufill4,ASI_AIUS	! 0x0c4 fill_1_normal
 	FILLBOTH ufill8,ufill4,ASI_AIUS	! 0x0c8 fill_2_normal
 	UTRAP 0x0cc; TA32	! 0x0cc fill_3_normal
@@ -782,7 +829,7 @@ TABLE/**/kfill:
 	FILLBOTH kfill8,kfill4,ASI_N	! 0x0d8 fill_6_normal
 	UTRAP 0x0dc; TA32	! 0x0dc fill_7_normal
 TABLE/**/ufillk:
-	FILL64 ufillk8,ASI_AIUS	! 0x0e0 fill_0_other
+	UFILL64 ufillk8,ASI_AIUS	! 0x0e0 fill_0_other
 	FILL32 ufillk4,ASI_AIUS	! 0x0e4 fill_1_other
 	FILLBOTH ufillk8,ufillk4,ASI_AIUS	! 0x0e8 fill_2_other
 	UTRAP 0x0ec; TA32	! 0x0ec fill_3_other
@@ -912,7 +959,7 @@ kfast_DMMU_protection:			! 06c = fast data access MMU protection
 	UTRAP 0x077; UTRAP 0x078; UTRAP 0x079; UTRAP 0x07a; UTRAP 0x07b; UTRAP 0x07c
 	UTRAP 0x07d; UTRAP 0x07e; UTRAP 0x07f
 TABLE/**/uspill:
-	SPILL64 1,ASI_AIUS	! 0x080 spill_0_normal -- used to save user windows
+	USPILL64 1,ASI_AIUS	! 0x080 spill_0_normal -- used to save user windows
 	SPILL32 2,ASI_AIUS	! 0x084 spill_1_normal
 	SPILLBOTH 1b,2b,ASI_AIUS	! 0x088 spill_2_normal
 	UTRAP 0x08c; TA32	! 0x08c spill_3_normal
@@ -922,7 +969,7 @@ TABLE/**/kspill:
 	SPILLBOTH 1b,2b,ASI_N	! 0x098 spill_6_normal
 	UTRAP 0x09c; TA32	! 0x09c spill_7_normal
 TABLE/**/uspillk:
-	SPILL64 1,ASI_AIUS	! 0x0a0 spill_0_other -- used to save user windows in nucleus mode
+	USPILL64 1,ASI_AIUS	! 0x0a0 spill_0_other -- used to save user windows in nucleus mode
 	SPILL32 2,ASI_AIUS	! 0x0a4 spill_1_other
 	SPILLBOTH 1b,2b,ASI_AIUS	! 0x0a8 spill_2_other
 	UTRAP 0x0ac; TA32	! 0x0ac spill_3_other
@@ -931,7 +978,7 @@ TABLE/**/uspillk:
 	UTRAP 0x0b8; TA32	! 0x0b8 spill_6_other
 	UTRAP 0x0bc; TA32	! 0x0bc spill_7_other
 TABLE/**/ufill:
-	FILL64 1,ASI_AIUS	! 0x0c0 fill_0_normal -- used to fill windows when running nucleus mode from user
+	UFILL64 1,ASI_AIUS	! 0x0c0 fill_0_normal -- used to fill windows when running nucleus mode from user
 	FILL32 2,ASI_AIUS	! 0x0c4 fill_1_normal
 	FILLBOTH 1b,2b,ASI_AIUS	! 0x0c8 fill_2_normal
 	UTRAP 0x0cc; TA32	! 0x0cc fill_3_normal
@@ -941,7 +988,7 @@ TABLE/**/sfill:
 	FILLBOTH 1b,2b,ASI_N	! 0x0d8 fill_6_normal
 	UTRAP 0x0dc; TA32	! 0x0dc fill_7_normal
 TABLE/**/kfill:
-	FILL64 1,ASI_AIUS	! 0x0e0 fill_0_other -- used to fill user windows when running nucleus mode -- will we ever use this?
+	UFILL64 1,ASI_AIUS	! 0x0e0 fill_0_other -- used to fill user windows when running nucleus mode -- will we ever use this?
 	FILL32 2,ASI_AIUS	! 0x0e4 fill_1_other
 	FILLBOTH 1b,2b,ASI_AIUS	! 0x0e8 fill_2_other
 	UTRAP 0x0ec; TA32	! 0x0ec fill_3_other
@@ -4886,6 +4933,7 @@ _C_LABEL(sigcode):
 	stda	%f48, [%l0] ASI_BLK_P
 2:
 	membar	#Sync
+	rd	%fprs, %l0		! reload fprs copy, for checking after
 	rd	%y, %l1			! in any case, save %y
 	lduw	[%fp + BIAS + 128], %o0	! sig
 	ldx	[%fp + BIAS + 128 + 8], %o1	! siginfo
@@ -4897,11 +4945,11 @@ _C_LABEL(sigcode):
 	 * Now that the handler has returned, re-establish all the state
 	 * we just saved above, then do a sigreturn.
 	 */
-	btst	3, %l0			! All clean?
+	btst	FPRS_DL|FPRS_DU, %l0	! All clean?
 	bz,pt	%icc, 2f
-	 btst	1, %l0			! test dl
+	 btst	FPRS_DL, %l0		! test dl
 	bz,pt	%icc, 1f
-	 btst	2, %l0			! test du
+	 btst	FPRS_DU, %l0		! test du
 
 	ldx	[%sp + CC64FSZ + BIAS + 0], %fsr
 	add	%sp, BIAS+CC64FSZ+BLOCK_SIZE, %l0	! Generate a pointer so we can
@@ -6047,13 +6095,9 @@ ENTRY(proc_trampoline)
 	stx	%g1, [%sp + CC64FSZ + BIAS + TF_TSTATE]
 #else	/* 0 */
 	mov	PSTATE_USER, %g1		! XXXX user pstate (no need to load it)
-	ldx	[%sp + CC64FSZ + BIAS + TF_NPC], %g2	! pc = tf->tf_npc from execve/fork
 	sllx	%g1, TSTATE_PSTATE_SHIFT, %g1	! Shift it into place
-	add	%g2, 4, %g3			! npc = pc+4
 	rdpr	%cwp, %g5			! Fixup %cwp in %tstate
-	stx	%g3, [%sp + CC64FSZ + BIAS + TF_NPC]
 	or	%g1, %g5, %g1
-	stx	%g2, [%sp + CC64FSZ + BIAS + TF_PC]
 	stx	%g1, [%sp + CC64FSZ + BIAS + TF_TSTATE]
 #endif	/* 0 */
 	CHKPT %o3,%o4,0x35

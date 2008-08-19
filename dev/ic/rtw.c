@@ -1,5 +1,6 @@
-/*	$OpenBSD: rtw.c,v 1.26 2005/03/18 00:10:36 jsg Exp $	*/
-/* $NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
+/*	$OpenBSD: rtw.c,v 1.35 2005/07/18 02:43:27 fgsch Exp $	*/
+/*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
+
 /*-
  * Copyright (c) 2004, 2005 David Young.  All rights reserved.
  *
@@ -38,8 +39,8 @@
 #include "bpfilter.h"
 
 #include <sys/param.h>
-#include <sys/systm.h> 
-#include <sys/mbuf.h>   
+#include <sys/systm.h>
+#include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/ioctl.h>
@@ -52,13 +53,13 @@
 #include <machine/intr.h>	/* splnet */
 
 #include <uvm/uvm_extern.h>
- 
+
 #include <net/if.h>
 #include <net/if_media.h>
 
-#if NBPFILTER > 0 
+#if NBPFILTER > 0
 #include <net/bpf.h>
-#endif 
+#endif
 
 #ifdef INET
 #include <netinet/in.h>
@@ -71,272 +72,199 @@
 
 #include <dev/ic/rtwreg.h>
 #include <dev/ic/rtwvar.h>
-#include <dev/ic/rtwphyio.h>
-#include <dev/ic/rtwphy.h>
-
+#include <dev/ic/max2820reg.h>
+#include <dev/ic/sa2400reg.h>
+#include <dev/ic/si4136reg.h>
+#include <dev/ic/rtl8225reg.h>
 #include <dev/ic/smc93cx6var.h>
-
-#define	KASSERT2(__cond, __msg)		\
-	do {				\
-		if (!(__cond))		\
-			panic __msg ;	\
-	} while (0)
 
 int rtw_rfprog_fallback = 0;
 int rtw_host_rfio = 0;
+int rtw_dwelltime = 200;	/* milliseconds per channel */
+int rtw_macbangbits_timeout = 100;
 
 #ifdef RTW_DEBUG
 int rtw_debug = 0;
 int rtw_rxbufs_limit = RTW_RXQLEN;
 #endif /* RTW_DEBUG */
 
-#define NEXT_ATTACH_STATE(sc, state) do {			\
-	DPRINTF(sc, RTW_DEBUG_ATTACH,				\
-	    ("%s: attach state %s\n", __func__, #state));	\
-	sc->sc_attach_state = state;				\
-} while (0)
-
-int rtw_dwelltime = 200;	/* milliseconds per channel */
-
-void rtw_start(struct ifnet *);
-void rtw_srom_defaults(struct rtw_srom *, u_int32_t *, u_int8_t *,
-    enum rtw_rfchipid *, u_int32_t *);
-void rtw_txdesc_blk_init_all(struct rtw_txdesc_blk *);
-void rtw_txsoft_blk_init_all(struct rtw_txsoft_blk *);
-void rtw_txdescs_sync(struct rtw_txdesc_blk *, u_int, u_int, int);
-void rtw_txdescs_sync_all(struct rtw_txdesc_blk *);
-void rtw_rxbufs_release(bus_dma_tag_t, struct rtw_rxsoft *);
-void rtw_rxdesc_init(struct rtw_rxdesc_blk *, struct rtw_rxsoft *, int, int);
-void rtw_io_enable(struct rtw_regs *, u_int8_t, int);
-void rtw_intr_rx(struct rtw_softc *, u_int16_t);
-void rtw_intr_beacon(struct rtw_softc *, u_int16_t);
-void rtw_intr_atim(struct rtw_softc *);
-void rtw_transmit_config(struct rtw_regs *);
-void rtw_pktfilt_load(struct rtw_softc *);
-void rtw_start(struct ifnet *);
-void rtw_watchdog(struct ifnet *);
-void rtw_next_scan(void *);
-void rtw_recv_mgmt(struct ieee80211com *, struct mbuf *,
-    struct ieee80211_node *, int, int, u_int32_t);
-struct ieee80211_node * rtw_node_alloc(struct ieee80211com *);
-void rtw_node_free(struct ieee80211com *, struct ieee80211_node *);
-void rtw_media_status(struct ifnet *, struct ifmediareq *);
-void rtw_txsoft_blk_cleanup_all(struct rtw_softc *);
-void rtw_txdesc_blk_setup(struct rtw_txdesc_blk *, struct rtw_txdesc *,
-    u_int, bus_addr_t, bus_addr_t);
-void rtw_txdesc_blk_setup_all(struct rtw_softc *);
-void rtw_intr_tx(struct rtw_softc *, u_int16_t);
-void rtw_intr_ioerror(struct rtw_softc *, u_int16_t);
-void rtw_intr_timeout(struct rtw_softc *);
-void rtw_stop(struct ifnet *, int);
-void rtw_maxim_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
-void rtw_philips_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
-void rtw_pwrstate0(struct rtw_softc *, enum rtw_pwrstate, int, int);
-void rtw_join_bss(struct rtw_softc *, u_int8_t *, u_int16_t);
-void rtw_set_access1(struct rtw_regs *, enum rtw_access);
-int rtw_srom_parse(struct rtw_srom *, u_int32_t *, u_int8_t *,
-    enum rtw_rfchipid *, u_int32_t *, enum rtw_locale *, const char *);
-int rtw_srom_read(struct rtw_regs *, u_int32_t, struct rtw_srom *,
-    const char *);
-void rtw_set_rfprog(struct rtw_regs *, enum rtw_rfchipid,
-    const char *);
+void	 rtw_start(struct ifnet *);
+void	 rtw_txdesc_blk_init_all(struct rtw_txdesc_blk *);
+void	 rtw_txsoft_blk_init_all(struct rtw_txsoft_blk *);
+void	 rtw_txdescs_sync(struct rtw_txdesc_blk *, u_int, u_int, int);
+void	 rtw_rxbufs_release(bus_dma_tag_t, struct rtw_rxsoft *);
+void	 rtw_rxdesc_init(struct rtw_rxdesc_blk *, struct rtw_rxsoft *, int, int);
+void	 rtw_io_enable(struct rtw_regs *, u_int8_t, int);
+void	 rtw_intr_rx(struct rtw_softc *, u_int16_t);
+void	 rtw_intr_beacon(struct rtw_softc *, u_int16_t);
+void	 rtw_intr_atim(struct rtw_softc *);
+void	 rtw_transmit_config(struct rtw_softc *);
+void	 rtw_pktfilt_load(struct rtw_softc *);
+void	 rtw_start(struct ifnet *);
+void	 rtw_watchdog(struct ifnet *);
+void	 rtw_next_scan(void *);
+void	 rtw_recv_mgmt(struct ieee80211com *, struct mbuf *,
+	    struct ieee80211_node *, int, int, u_int32_t);
+struct ieee80211_node *rtw_node_alloc(struct ieee80211com *);
+void	 rtw_node_free(struct ieee80211com *, struct ieee80211_node *);
+void	 rtw_media_status(struct ifnet *, struct ifmediareq *);
+void	 rtw_txsoft_blk_cleanup_all(struct rtw_softc *);
+void	 rtw_txdesc_blk_setup(struct rtw_txdesc_blk *, struct rtw_txdesc *,
+	    u_int, bus_addr_t, bus_addr_t);
+void	 rtw_txdesc_blk_setup_all(struct rtw_softc *);
+void	 rtw_intr_tx(struct rtw_softc *, u_int16_t);
+void	 rtw_intr_ioerror(struct rtw_softc *, u_int16_t);
+void	 rtw_intr_timeout(struct rtw_softc *);
+void	 rtw_stop(struct ifnet *, int);
+void	 rtw_maxim_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
+void	 rtw_philips_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
+void	 rtw_rtl_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
+void	 rtw_pwrstate0(struct rtw_softc *, enum rtw_pwrstate, int, int);
+void	 rtw_join_bss(struct rtw_softc *, u_int8_t *, u_int16_t);
+void	 rtw_set_access1(struct rtw_regs *, enum rtw_access);
+int	 rtw_srom_parse(struct rtw_softc *);
+int	 rtw_srom_read(struct rtw_regs *, u_int32_t, struct rtw_srom *,
+	    const char *);
+void	 rtw_set_rfprog(struct rtw_regs *, enum rtw_rfchipid,
+	    const char *);
 u_int8_t rtw_chan2txpower(struct rtw_srom *, struct ieee80211com *,
-    struct ieee80211_channel *);
-int rtw_txsoft_blk_init(struct rtw_txsoft_blk *);
-int rtw_rxsoft_init_all(bus_dma_tag_t, struct rtw_rxsoft *,
-    int *, const char *);
-void rtw_txsoft_release(bus_dma_tag_t, struct ieee80211com *,
-    struct rtw_txsoft *);
-void rtw_txsofts_release(bus_dma_tag_t, struct ieee80211com *,
-    struct rtw_txsoft_blk *);
-void rtw_hwring_setup(struct rtw_softc *);
-int rtw_swring_setup(struct rtw_softc *);
-void rtw_txdesc_blk_reset(struct rtw_txdesc_blk *);
-void rtw_txdescs_reset(struct rtw_softc *);
-void rtw_rxdescs_reset(struct rtw_softc *);
-void rtw_rfmd_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
-int rtw_pwrstate(struct rtw_softc *, enum rtw_pwrstate);
-int rtw_tune(struct rtw_softc *);
-void rtw_set_nettype(struct rtw_softc *, enum ieee80211_opmode);
-int rtw_init(struct ifnet *);
-int rtw_ioctl(struct ifnet *, u_long, caddr_t);
-int rtw_seg_too_short(bus_dmamap_t);
+	    struct ieee80211_channel *);
+int	 rtw_txsoft_blk_init(struct rtw_txsoft_blk *);
+int	 rtw_rxsoft_init_all(bus_dma_tag_t, struct rtw_rxsoft *,
+	    int *, const char *);
+void	 rtw_txsoft_release(bus_dma_tag_t, struct ieee80211com *,
+	    struct rtw_txsoft *);
+void	 rtw_txsofts_release(bus_dma_tag_t, struct ieee80211com *,
+	    struct rtw_txsoft_blk *);
+void	 rtw_hwring_setup(struct rtw_softc *);
+int	 rtw_swring_setup(struct rtw_softc *);
+void	 rtw_txdesc_blk_reset(struct rtw_txdesc_blk *);
+void	 rtw_txdescs_reset(struct rtw_softc *);
+void	 rtw_rxdescs_reset(struct rtw_softc *);
+void	 rtw_rfmd_pwrstate(struct rtw_regs *, enum rtw_pwrstate, int, int);
+int	 rtw_pwrstate(struct rtw_softc *, enum rtw_pwrstate);
+int	 rtw_tune(struct rtw_softc *);
+void	 rtw_set_nettype(struct rtw_softc *, enum ieee80211_opmode);
+int	 rtw_init(struct ifnet *);
+int	 rtw_ioctl(struct ifnet *, u_long, caddr_t);
+int	 rtw_seg_too_short(bus_dmamap_t);
 struct mbuf *rtw_dmamap_load_txbuf(bus_dma_tag_t, bus_dmamap_t, struct mbuf *,
-    u_int, short *, const char *);
-int rtw_newstate(struct ieee80211com *, enum ieee80211_state, int);
-int rtw_media_change(struct ifnet *);
-int rtw_txsoft_blk_setup_all(struct rtw_softc *);
+	    u_int, short *, const char *);
+int	 rtw_newstate(struct ieee80211com *, enum ieee80211_state, int);
+int	 rtw_media_change(struct ifnet *);
+int	 rtw_txsoft_blk_setup_all(struct rtw_softc *);
 struct rtw_rf * rtw_rf_attach(struct rtw_softc *, enum rtw_rfchipid, int);
 u_int8_t rtw_check_phydelay(struct rtw_regs *, u_int32_t);
-int rtw_chip_reset1(struct rtw_regs *, const char *);
-int rtw_chip_reset(struct rtw_regs *, const char *);
-int rtw_recall_eeprom(struct rtw_regs *, const char *);
-int rtw_reset(struct rtw_softc *);
-int rtw_txdesc_dmamaps_create(bus_dma_tag_t, struct rtw_txsoft *, u_int);
-int rtw_rxdesc_dmamaps_create(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
-void rtw_rxdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
-void rtw_txdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_txsoft *, u_int);
-void rtw_srom_free(struct rtw_srom *);
-void rtw_init_channels(enum rtw_locale, struct ieee80211_channel (*)[],
-    const char*);
-void rtw_identify_country(struct rtw_regs *, enum rtw_locale *, const char *);
-int rtw_identify_sta(struct rtw_regs *, u_int8_t (*)[], const char *);
-void rtw_rxdescs_sync(struct rtw_rxdesc_blk *, int, int, int);
-int rtw_rxsoft_alloc(bus_dma_tag_t, struct rtw_rxsoft *);
-void rtw_collect_txpkt(struct rtw_softc *, struct rtw_txdesc_blk *,
-    struct rtw_txsoft *, int);
-void rtw_collect_txring(struct rtw_softc *, struct rtw_txsoft_blk *,
-    struct rtw_txdesc_blk *);
-void rtw_suspend_ticks(struct rtw_softc *);
-void rtw_resume_ticks(struct rtw_softc *);
-void rtw_enable_interrupts(struct rtw_softc *);
-int rtw_dequeue(struct ifnet *, struct rtw_txsoft_blk **,
-    struct rtw_txdesc_blk **, struct mbuf **,
-    struct ieee80211_node **);
-void rtw_setifprops(struct ifnet *, const char *, void *);
-void rtw_set80211props(struct ieee80211com *);
-void rtw_set80211methods(struct rtw_mtbl *, struct ieee80211com *);
-void rtw_establish_hooks(struct rtw_hooks *, const char *, void *);
-void rtw_disestablish_hooks(struct rtw_hooks *, const char *, void *);
-int rtw_txsoft_blk_setup(struct rtw_txsoft_blk *, u_int);
-void rtw_rxdesc_init_all(struct rtw_rxdesc_blk *, struct rtw_rxsoft *, int);
-int rtw_txring_choose(struct rtw_softc *, struct rtw_txsoft_blk **,
-    struct rtw_txdesc_blk **, int);
+int	 rtw_chip_reset1(struct rtw_regs *, const char *);
+int	 rtw_chip_reset(struct rtw_regs *, const char *);
+int	 rtw_recall_eeprom(struct rtw_regs *, const char *);
+int	 rtw_reset(struct rtw_softc *);
+int	 rtw_txdesc_dmamaps_create(bus_dma_tag_t, struct rtw_txsoft *, u_int);
+int	 rtw_rxdesc_dmamaps_create(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
+void	 rtw_rxdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_rxsoft *, u_int);
+void	 rtw_txdesc_dmamaps_destroy(bus_dma_tag_t, struct rtw_txsoft *, u_int);
+void	 rtw_init_channels(enum rtw_locale, struct ieee80211_channel (*)[],
+	    const char*);
+void	 rtw_identify_country(struct rtw_regs *, enum rtw_locale *, const char *);
+int	 rtw_identify_sta(struct rtw_regs *, u_int8_t (*)[], const char *);
+void	 rtw_rxdescs_sync(struct rtw_rxdesc_blk *, int, int, int);
+int	 rtw_rxsoft_alloc(bus_dma_tag_t, struct rtw_rxsoft *);
+void	 rtw_collect_txpkt(struct rtw_softc *, struct rtw_txdesc_blk *,
+	    struct rtw_txsoft *, int);
+void	 rtw_collect_txring(struct rtw_softc *, struct rtw_txsoft_blk *,
+	    struct rtw_txdesc_blk *);
+void	 rtw_suspend_ticks(struct rtw_softc *);
+void	 rtw_resume_ticks(struct rtw_softc *);
+void	 rtw_enable_interrupts(struct rtw_softc *);
+int	 rtw_dequeue(struct ifnet *, struct rtw_txsoft_blk **,
+	    struct rtw_txdesc_blk **, struct mbuf **,
+	    struct ieee80211_node **);
+void	 rtw_establish_hooks(struct rtw_hooks *, const char *, void *);
+void	 rtw_disestablish_hooks(struct rtw_hooks *, const char *, void *);
+int	 rtw_txsoft_blk_setup(struct rtw_txsoft_blk *, u_int);
+void	 rtw_rxdesc_init_all(struct rtw_rxdesc_blk *, struct rtw_rxsoft *,
+	    int);
+int	 rtw_txring_choose(struct rtw_softc *, struct rtw_txsoft_blk **,
+	    struct rtw_txdesc_blk **, int);
 struct mbuf *rtw_80211_dequeue(struct rtw_softc *, struct ifqueue *, int,
-    struct rtw_txsoft_blk **, struct rtw_txdesc_blk **,
-    struct ieee80211_node **, short *);
+	    struct rtw_txsoft_blk **, struct rtw_txdesc_blk **,
+	    struct ieee80211_node **, short *);
 uint64_t rtw_tsf_extend(struct rtw_regs *, u_int32_t);
-void rtw_ibss_merge(struct rtw_softc *, struct ieee80211_node *, u_int32_t);
-
-void rtw_led_attach(struct rtw_led_state *, void *);
-void rtw_led_init(struct rtw_regs *);
-void rtw_led_slowblink(void *);
-void rtw_led_fastblink(void *);
-void rtw_led_set(struct rtw_led_state *, struct rtw_regs *, int);
-void rtw_led_newstate(struct rtw_softc *, enum ieee80211_state);
+void	 rtw_ibss_merge(struct rtw_softc *, struct ieee80211_node *,
+	    u_int32_t);
+void	 rtw_led_attach(struct rtw_led_state *, void *);
+void	 rtw_led_init(struct rtw_regs *);
+void	 rtw_led_slowblink(void *);
+void	 rtw_led_fastblink(void *);
+void	 rtw_led_set(struct rtw_led_state *, struct rtw_regs *, u_int);
+void	 rtw_led_newstate(struct rtw_softc *, enum ieee80211_state);
+struct rtw_rf *rtw_sa2400_create(struct rtw_regs *, rtw_rf_write_t, int);
+struct rtw_rf *rtw_max2820_create(struct rtw_regs *, rtw_rf_write_t, int);
+struct rtw_rf *rtw_rtl8225_create(struct rtw_regs *, rtw_rf_write_t);
+struct rtw_rf *rtw_rtl8255_create(struct rtw_regs *, rtw_rf_write_t);
+int	 rtw_phy_init(struct rtw_regs *, struct rtw_rf *, u_int8_t, u_int8_t,
+	    u_int, int, int, enum rtw_pwrstate);
+int	 rtw_bbp_preinit(struct rtw_regs *, u_int, int, u_int);
+int	 rtw_bbp_init(struct rtw_regs *, struct rtw_bbpset *, int,
+	    int, u_int8_t, u_int);
+void	 rtw_verify_syna(u_int, u_int32_t);
+int	 rtw_sa2400_pwrstate(struct rtw_rf *, enum rtw_pwrstate);
+int	 rtw_sa2400_txpower(struct rtw_rf *, u_int8_t);
+int	 rtw_sa2400_tune(struct rtw_rf *, u_int);
+int	 rtw_sa2400_manrx_init(struct rtw_sa2400 *);
+int	 rtw_sa2400_vcocal_start(struct rtw_sa2400 *, int);
+int	 rtw_sa2400_vco_calibration(struct rtw_sa2400 *);
+int	 rtw_sa2400_filter_calibration(struct rtw_sa2400 *);
+int	 rtw_sa2400_dc_calibration(struct rtw_sa2400 *);
+int	 rtw_sa2400_agc_init(struct rtw_sa2400 *);
+void	 rtw_sa2400_destroy(struct rtw_rf *);
+int	 rtw_sa2400_calibrate(struct rtw_rf *, u_int);
+int	 rtw_sa2400_init(struct rtw_rf *, u_int, u_int8_t,
+	    enum rtw_pwrstate);
+int	 rtw_max2820_pwrstate(struct rtw_rf *, enum rtw_pwrstate);
+void	 rtw_max2820_destroy(struct rtw_rf *);
+int	 rtw_max2820_init(struct rtw_rf *, u_int, u_int8_t,
+	    enum rtw_pwrstate);
+int	 rtw_max2820_txpower(struct rtw_rf *, u_int8_t);
+int	 rtw_max2820_tune(struct rtw_rf *, u_int);
+int	 rtw_rtl8225_pwrstate(struct rtw_rf *, enum rtw_pwrstate);
+void	 rtw_rtl8225_destroy(struct rtw_rf *);
+int	 rtw_rtl8225_init(struct rtw_rf *, u_int, u_int8_t,
+	    enum rtw_pwrstate);
+int	 rtw_rtl8225_txpower(struct rtw_rf *, u_int8_t);
+int	 rtw_rtl8225_tune(struct rtw_rf *, u_int);
+int	 rtw_rtl8255_pwrstate(struct rtw_rf *, enum rtw_pwrstate);
+void	 rtw_rtl8255_destroy(struct rtw_rf *);
+int	 rtw_rtl8255_init(struct rtw_rf *, u_int, u_int8_t,
+	    enum rtw_pwrstate);
+int	 rtw_rtl8255_txpower(struct rtw_rf *, u_int8_t);
+int	 rtw_rtl8255_tune(struct rtw_rf *, u_int);
+int	 rtw_rf_hostwrite(struct rtw_regs *, enum rtw_rfchipid, u_int,
+	    u_int32_t);
+int	 rtw_rf_macwrite(struct rtw_regs *, enum rtw_rfchipid, u_int,
+	    u_int32_t);
+u_int8_t rtw_bbp_read(struct rtw_regs *, u_int);
+int	 rtw_bbp_write(struct rtw_regs *, u_int, u_int);
+u_int32_t rtw_grf5101_host_crypt(u_int, u_int32_t);
+u_int32_t rtw_maxim_swizzle(u_int, uint32_t);
+u_int32_t rtw_grf5101_mac_crypt(u_int, u_int32_t);
+void	 rtw_rf_hostbangbits(struct rtw_regs *, u_int32_t, int, u_int);
+void	 rtw_rf_rtl8225_hostbangbits(struct rtw_regs *, u_int32_t, int, u_int);
+int	 rtw_rf_macbangbits(struct rtw_regs *, u_int32_t);
+const char *rtw_rfchipid_string(enum rtw_rfchipid);
 
 #ifdef RTW_DEBUG
-void rtw_print_txdesc(struct rtw_softc *, const char *,
-    struct rtw_txsoft *, struct rtw_txdesc_blk *, int);
-const char * rtw_access_string(enum rtw_access);
-void rtw_dump_rings(struct rtw_softc *);
-void rtw_print_txdesc(struct rtw_softc *, const char *,
-    struct rtw_txsoft *, struct rtw_txdesc_blk *, int);
-void rtw_print_regs(struct rtw_regs *, const char *, const char *);
+void	 rtw_print_txdesc(struct rtw_softc *, const char *,
+	    struct rtw_txsoft *, struct rtw_txdesc_blk *, int);
+const char *rtw_access_string(enum rtw_access);
+void	 rtw_dump_rings(struct rtw_softc *);
+void	 rtw_print_txdesc(struct rtw_softc *, const char *,
+	    struct rtw_txsoft *, struct rtw_txdesc_blk *, int);
 #endif
 
 struct cfdriver rtw_cd = {
-    NULL, "rtw", DV_IFNET
+	NULL, "rtw", DV_IFNET
 };
-
-#ifdef RTW_DEBUG
-void
-rtw_print_regs(struct rtw_regs *regs, const char *dvname, const char *where)
-{
-#define PRINTREG32(sc, reg)				\
-	RTW_DPRINTF(RTW_DEBUG_REGDUMP,			\
-	    ("%s: reg[ " #reg " / %03x ] = %08x\n",	\
-	    dvname, reg, RTW_READ(regs, reg)))
-
-#define PRINTREG16(sc, reg)				\
-	RTW_DPRINTF(RTW_DEBUG_REGDUMP,			\
-	    ("%s: reg[ " #reg " / %03x ] = %04x\n",	\
-	    dvname, reg, RTW_READ16(regs, reg)))
-
-#define PRINTREG8(sc, reg)				\
-	RTW_DPRINTF(RTW_DEBUG_REGDUMP,			\
-	    ("%s: reg[ " #reg " / %03x ] = %02x\n",	\
-	    dvname, reg, RTW_READ8(regs, reg)))
-
-	RTW_DPRINTF(RTW_DEBUG_REGDUMP, ("%s: %s\n", dvname, where));
-
-	PRINTREG32(regs, RTW_IDR0);
-	PRINTREG32(regs, RTW_IDR1);
-	PRINTREG32(regs, RTW_MAR0);
-	PRINTREG32(regs, RTW_MAR1);
-	PRINTREG32(regs, RTW_TSFTRL);
-	PRINTREG32(regs, RTW_TSFTRH);
-	PRINTREG32(regs, RTW_TLPDA);
-	PRINTREG32(regs, RTW_TNPDA);
-	PRINTREG32(regs, RTW_THPDA);
-	PRINTREG32(regs, RTW_TCR);
-	PRINTREG32(regs, RTW_RCR);
-	PRINTREG32(regs, RTW_TINT);
-	PRINTREG32(regs, RTW_TBDA);
-	PRINTREG32(regs, RTW_ANAPARM);
-	PRINTREG32(regs, RTW_BB);
-	PRINTREG32(regs, RTW_PHYCFG);
-	PRINTREG32(regs, RTW_WAKEUP0L);
-	PRINTREG32(regs, RTW_WAKEUP0H);
-	PRINTREG32(regs, RTW_WAKEUP1L);
-	PRINTREG32(regs, RTW_WAKEUP1H);
-	PRINTREG32(regs, RTW_WAKEUP2LL);
-	PRINTREG32(regs, RTW_WAKEUP2LH);
-	PRINTREG32(regs, RTW_WAKEUP2HL);
-	PRINTREG32(regs, RTW_WAKEUP2HH);
-	PRINTREG32(regs, RTW_WAKEUP3LL);
-	PRINTREG32(regs, RTW_WAKEUP3LH);
-	PRINTREG32(regs, RTW_WAKEUP3HL);
-	PRINTREG32(regs, RTW_WAKEUP3HH);
-	PRINTREG32(regs, RTW_WAKEUP4LL);
-	PRINTREG32(regs, RTW_WAKEUP4LH);
-	PRINTREG32(regs, RTW_WAKEUP4HL);
-	PRINTREG32(regs, RTW_WAKEUP4HH);
-	PRINTREG32(regs, RTW_DK0);
-	PRINTREG32(regs, RTW_DK1);
-	PRINTREG32(regs, RTW_DK2);
-	PRINTREG32(regs, RTW_DK3);
-	PRINTREG32(regs, RTW_RETRYCTR);
-	PRINTREG32(regs, RTW_RDSAR);
-	PRINTREG32(regs, RTW_FER);
-	PRINTREG32(regs, RTW_FEMR);
-	PRINTREG32(regs, RTW_FPSR);
-	PRINTREG32(regs, RTW_FFER);
-
-	/* 16-bit registers */
-	PRINTREG16(regs, RTW_BRSR);
-	PRINTREG16(regs, RTW_IMR);
-	PRINTREG16(regs, RTW_ISR);
-	PRINTREG16(regs, RTW_BCNITV);
-	PRINTREG16(regs, RTW_ATIMWND);
-	PRINTREG16(regs, RTW_BINTRITV);
-	PRINTREG16(regs, RTW_ATIMTRITV);
-	PRINTREG16(regs, RTW_CRC16ERR);
-	PRINTREG16(regs, RTW_CRC0);
-	PRINTREG16(regs, RTW_CRC1);
-	PRINTREG16(regs, RTW_CRC2);
-	PRINTREG16(regs, RTW_CRC3);
-	PRINTREG16(regs, RTW_CRC4);
-	PRINTREG16(regs, RTW_CWR);
-
-	/* 8-bit registers */
-	PRINTREG8(regs, RTW_CR);
-	PRINTREG8(regs, RTW_9346CR);
-	PRINTREG8(regs, RTW_CONFIG0);
-	PRINTREG8(regs, RTW_CONFIG1);
-	PRINTREG8(regs, RTW_CONFIG2);
-	PRINTREG8(regs, RTW_MSR);
-	PRINTREG8(regs, RTW_CONFIG3);
-	PRINTREG8(regs, RTW_CONFIG4);
-	PRINTREG8(regs, RTW_TESTR);
-	PRINTREG8(regs, RTW_PSR);
-	PRINTREG8(regs, RTW_SCR);
-	PRINTREG8(regs, RTW_PHYDELAY);
-	PRINTREG8(regs, RTW_CRCOUNT);
-	PRINTREG8(regs, RTW_PHYADDR);
-	PRINTREG8(regs, RTW_PHYDATAW);
-	PRINTREG8(regs, RTW_PHYDATAR);
-	PRINTREG8(regs, RTW_CONFIG5);
-	PRINTREG8(regs, RTW_TPPOLL);
-
-	PRINTREG16(regs, RTW_BSSID16);
-	PRINTREG32(regs, RTW_BSSID32);
-#undef PRINTREG32
-#undef PRINTREG16
-#undef PRINTREG8
-}
-#endif /* RTW_DEBUG */
-
 
 void
 rtw_continuous_tx_enable(struct rtw_softc *sc, int enable)
@@ -362,16 +290,16 @@ rtw_continuous_tx_enable(struct rtw_softc *sc, int enable)
 const char *
 rtw_access_string(enum rtw_access access)
 {
-        switch (access) {
-        case RTW_ACCESS_NONE:
-                return "none";
-        case RTW_ACCESS_CONFIG:
-                return "config";
-        case RTW_ACCESS_ANAPARM:
-                return "anaparm";
-        default:
-                return "unknown";
-        }
+	switch (access) {
+	case RTW_ACCESS_NONE:
+		return "none";
+	case RTW_ACCESS_CONFIG:
+		return "config";
+	case RTW_ACCESS_ANAPARM:
+		return "anaparm";
+	default:
+		return "unknown";
+	}
 }
 #endif
 
@@ -430,7 +358,7 @@ rtw_set_access(struct rtw_regs *regs, enum rtw_access access)
 {
 	rtw_set_access1(regs, access);
 	RTW_DPRINTF(RTW_DEBUG_ACCESS,
-	    ("%s: access %s -> %s\n",__func__, 
+	    ("%s: access %s -> %s\n",__func__,
 	    rtw_access_string(regs->r_access),
 	    rtw_access_string(access)));
 	regs->r_access = access;
@@ -518,7 +446,7 @@ rtw_chip_reset(struct rtw_regs *regs, const char *dvname)
 
 	/* from Linux driver */
 	tcr = RTW_TCR_CWMIN | RTW_TCR_MXDMA_2048 |
-	      LSHIFT(7, RTW_TCR_SRL_MASK) | LSHIFT(7, RTW_TCR_LRL_MASK);
+	    LSHIFT(7, RTW_TCR_SRL_MASK) | LSHIFT(7, RTW_TCR_LRL_MASK);
 
 	RTW_WRITE(regs, RTW_TCR, tcr);
 
@@ -625,33 +553,17 @@ rtw_txdesc_dmamaps_destroy(bus_dma_tag_t dmat, struct rtw_txsoft *descs,
 	}
 }
 
-void
-rtw_srom_free(struct rtw_srom *sr)
-{
-	sr->sr_size = 0;
-	if (sr->sr_content == NULL)
-		return;
-	free(sr->sr_content, M_DEVBUF);
-	sr->sr_content = NULL;
-}
-
-void
-rtw_srom_defaults(struct rtw_srom *sr, u_int32_t *flags, u_int8_t *cs_threshold,
-    enum rtw_rfchipid *rfchipid, u_int32_t *rcr)
-{
-	*flags |= (RTW_F_DIGPHY|RTW_F_ANTDIV);
-	*cs_threshold = RTW_SR_ENERGYDETTHR_DEFAULT;
-	*rcr |= RTW_RCR_ENCS1;
-	*rfchipid = RTW_RFCHIPID_PHILIPS;
-}
-
 int
-rtw_srom_parse(struct rtw_srom *sr, u_int32_t *flags, u_int8_t *cs_threshold,
-    enum rtw_rfchipid *rfchipid, u_int32_t *rcr, enum rtw_locale *locale,
-    const char *dvname)
+rtw_srom_parse(struct rtw_softc *sc)
 {
 	int i;
-	const char *rfname, *paname;
+	struct rtw_srom *sr = &sc->sc_srom;
+	u_int32_t *flags = &sc->sc_flags;
+	u_int8_t *cs_threshold = &sc->sc_csthr;
+	enum rtw_rfchipid *rfchipid = &sc->sc_rfchipid;
+	u_int32_t *rcr = &sc->sc_rcr;
+	enum rtw_locale *locale = &sc->sc_locale;
+	const char *rfname, *paname = NULL;
 	char scratch[sizeof("unknown 0xXX")];
 	u_int16_t version;
 	u_int8_t mac[IEEE80211_ADDR_LEN];
@@ -661,11 +573,15 @@ rtw_srom_parse(struct rtw_srom *sr, u_int32_t *flags, u_int8_t *cs_threshold,
 
 	version = RTW_SR_GET16(sr, RTW_SR_VERSION);
 	RTW_DPRINTF(RTW_DEBUG_ATTACH,
-	    ("%s: SROM %d.%d\n", dvname, version >> 8, version & 0xff));
+	    ("%s: SROM %d.%d\n", sc->sc_dev.dv_xname, version >> 8,
+	    version & 0xff));
 
 	if (version <= 0x0101) {
 		printf(" is not understood, limping along with defaults ");
-		rtw_srom_defaults(sr, flags, cs_threshold, rfchipid, rcr);
+		*flags |= (RTW_F_DIGPHY|RTW_F_ANTDIV);
+		*cs_threshold = RTW_SR_ENERGYDETTHR_DEFAULT;
+		*rcr |= RTW_RCR_ENCS1;
+		*rfchipid = RTW_RFCHIPID_PHILIPS;
 		return 0;
 	}
 
@@ -673,11 +589,11 @@ rtw_srom_parse(struct rtw_srom *sr, u_int32_t *flags, u_int8_t *cs_threshold,
 		mac[i] = RTW_SR_GET(sr, RTW_SR_MAC + i);
 
 	RTW_DPRINTF(RTW_DEBUG_ATTACH,
-	    ("%s: EEPROM MAC %s\n", dvname, ether_sprintf(mac)));
+	    ("%s: EEPROM MAC %s\n", sc->sc_dev.dv_xname, ether_sprintf(mac)));
 
 	*cs_threshold = RTW_SR_GET(sr, RTW_SR_ENERGYDETTHR);
 
-	if ((RTW_SR_GET(sr, RTW_SR_CONFIG2) & RTW_CONFIG2_ANT) != 0)
+	if ((RTW_SR_GET(sr, RTW_SR_CONFIG2) & RTW8180_CONFIG2_ANT) != 0)
 		*flags |= RTW_F_ANTDIV;
 
 	/* Note well: the sense of the RTW_SR_RFPARM_DIGPHY bit seems
@@ -693,11 +609,17 @@ rtw_srom_parse(struct rtw_srom *sr, u_int32_t *flags, u_int8_t *cs_threshold,
 
 	*rfchipid = RTW_SR_GET(sr, RTW_SR_RFCHIPID);
 	switch (*rfchipid) {
+	case RTW_RFCHIPID_RTL8225:
+		rfname = "RTL8225";
+		break;
+	case RTW_RFCHIPID_RTL8255:
+		rfname = "RTL8255";
+		break;
 	case RTW_RFCHIPID_GCT:		/* this combo seen in the wild */
 		rfname = "GRF5101";
 		paname = "WS9901";
 		break;
-	case RTW_RFCHIPID_MAXIM:
+	case RTW_RFCHIPID_MAXIM2820:
 		rfname = "MAX2820";	/* guess */
 		paname = "MAX2422";	/* guess */
 		break;
@@ -709,7 +631,7 @@ rtw_srom_parse(struct rtw_srom *sr, u_int32_t *flags, u_int8_t *cs_threshold,
 		rfname = "SA2400A";
 		paname = "SA2411";
 		break;
-	case RTW_RFCHIPID_RFMD:
+	case RTW_RFCHIPID_RFMD2948:
 		/* this is the same front-end as an atw(4)! */
 		rfname = "RFMD RF2948B, "	/* mentioned in Realtek docs */
 			 "LNA: RFMD RF2494, "	/* mentioned in Realtek docs */
@@ -723,18 +645,26 @@ rtw_srom_parse(struct rtw_srom *sr, u_int32_t *flags, u_int8_t *cs_threshold,
 		break;
 	default:
 		snprintf(scratch, sizeof(scratch), "unknown 0x%02x", *rfchipid);
-		rfname = paname = scratch;
+		rfname = scratch;
 	}
-	printf("radio %s, amp %s, ", rfname, paname);
+	printf("radio %s, ", rfname);
+	if (paname != NULL)
+		printf("amp %s, ", paname);
 
-	switch (RTW_SR_GET(sr, RTW_SR_CONFIG0) & RTW_CONFIG0_GL_MASK) {
-	case RTW_CONFIG0_GL_USA:
+	if (sc->sc_flags & RTW_F_RTL8185) {
+		*locale = RTW_LOCALE_UNKNOWN;
+		return (0);
+	}
+
+	switch (RTW_SR_GET(sr, RTW_SR_CONFIG0) & RTW8180_CONFIG0_GL_MASK) {
+	case RTW8180_CONFIG0_GL_USA:
 		*locale = RTW_LOCALE_USA;
 		break;
-	case RTW_CONFIG0_GL_EUROPE:
+	case RTW8180_CONFIG0_GL_EUROPE:
 		*locale = RTW_LOCALE_EUROPE;
 		break;
-	case RTW_CONFIG0_GL_JAPAN:
+	case RTW8180_CONFIG0_GL_JAPAN:
+	case RTW8180_CONFIG0_GL_JAPAN2:
 		*locale = RTW_LOCALE_JAPAN;
 		break;
 	default:
@@ -753,7 +683,7 @@ rtw_srom_read(struct rtw_regs *regs, u_int32_t flags, struct rtw_srom *sr,
 	struct seeprom_descriptor sd;
 	u_int8_t ecr;
 
-	(void)memset(&sd, 0, sizeof(sd));
+	bzero(&sd, sizeof(sd));
 
 	ecr = RTW_READ8(regs, RTW_9346CR);
 
@@ -780,7 +710,7 @@ rtw_srom_read(struct rtw_regs *regs, u_int32_t flags, struct rtw_srom *sr,
 		return ENOMEM;
 	}
 
-	(void)memset(sr->sr_content, 0, sr->sr_size);
+	bzero(sr->sr_content, sr->sr_size);
 
 	/* RTL8180 has a single 8-bit register for controlling the
 	 * 93cx6 SROM.  There is no "ready" bit. The RTL8180
@@ -855,7 +785,7 @@ rtw_set_rfprog(struct rtw_regs *regs, enum rtw_rfchipid rfchipid,
 		cfg4 |= RTW_CONFIG4_RFTYPE_PHILIPS;
 		method = "Philips";
 		break;
-	case RTW_RFCHIPID_RFMD:
+	case RTW_RFCHIPID_RFMD2948:
 		cfg4 |= RTW_CONFIG4_RFTYPE_RFMD;
 		method = "RFMD";
 		break;
@@ -917,14 +847,15 @@ rtw_identify_country(struct rtw_regs *regs, enum rtw_locale *locale,
 {
 	u_int8_t cfg0 = RTW_READ8(regs, RTW_CONFIG0);
 
-	switch (cfg0 & RTW_CONFIG0_GL_MASK) {
-	case RTW_CONFIG0_GL_USA:
+	switch (cfg0 & RTW8180_CONFIG0_GL_MASK) {
+	case RTW8180_CONFIG0_GL_USA:
 		*locale = RTW_LOCALE_USA;
 		break;
-	case RTW_CONFIG0_GL_JAPAN:
+	case RTW8180_CONFIG0_GL_JAPAN:
+	case RTW8180_CONFIG0_GL_JAPAN2:
 		*locale = RTW_LOCALE_JAPAN;
 		break;
-	case RTW_CONFIG0_GL_EUROPE:
+	case RTW8180_CONFIG0_GL_EUROPE:
 		*locale = RTW_LOCALE_EUROPE;
 		break;
 	default:
@@ -941,7 +872,7 @@ rtw_identify_sta(struct rtw_regs *regs, u_int8_t (*addr)[IEEE80211_ADDR_LEN],
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 	u_int32_t idr0 = RTW_READ(regs, RTW_IDR0),
-	          idr1 = RTW_READ(regs, RTW_IDR1);
+	    idr1 = RTW_READ(regs, RTW_IDR1);
 
 	(*addr)[0] = MASK_AND_RSHIFT(idr0, BITS(0,  7));
 	(*addr)[1] = MASK_AND_RSHIFT(idr0, BITS(8,  15));
@@ -1053,16 +984,6 @@ rtw_txdescs_sync(struct rtw_txdesc_blk *tdb, u_int desc0, u_int nsync, int ops)
 }
 
 void
-rtw_txdescs_sync_all(struct rtw_txdesc_blk *tdb)
-{
-	int pri;
-	for (pri = 0; pri < RTW_NTXPRI; pri++) {
-		rtw_txdescs_sync(&tdb[pri], 0, tdb[pri].tdb_ndesc,
-		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-	}
-}
-
-void
 rtw_rxbufs_release(bus_dma_tag_t dmat, struct rtw_rxsoft *desc)
 {
 	int i;
@@ -1086,11 +1007,11 @@ rtw_rxsoft_alloc(bus_dma_tag_t dmat, struct rtw_rxsoft *rs)
 	int rc;
 	struct mbuf *m;
 
-	MGETHDR(m, M_DONTWAIT, MT_DATA); 
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
 		return ENOBUFS;
 
-	MCLGET(m, M_DONTWAIT); 
+	MCLGET(m, M_DONTWAIT);
 	if ((m->m_flags & M_EXT) == 0) {
 		m_freem(m);
 		return ENOBUFS;
@@ -1134,7 +1055,7 @@ rtw_rxsoft_init_all(bus_dma_tag_t dmat, struct rtw_rxsoft *desc,
 #endif /* RTW_DEBUG */
 		if ((rc = rtw_rxsoft_alloc(dmat, rs)) != 0) {
 			printf("%s: rtw_rxsoft_alloc failed, %d buffers, "
-			       "rc %d\n", dvname, i, rc);
+			    "rc %d\n", dvname, i, rc);
 			break;
 		}
 	}
@@ -1162,12 +1083,11 @@ rtw_rxdesc_init(struct rtw_rxdesc_blk *rdb, struct rtw_rxsoft *rs,
 	octl = rd->rd_ctl;
 	rd->rd_ctl = htole32(ctl);
 
-	RTW_DPRINTF(
-	    kick ? (RTW_DEBUG_RECV_DESC | RTW_DEBUG_IO_KICK)
-	         : RTW_DEBUG_RECV_DESC,
+	RTW_DPRINTF(kick ? (RTW_DEBUG_RECV_DESC | RTW_DEBUG_IO_KICK)
+	    : RTW_DEBUG_RECV_DESC,
 	    ("%s: rd %p buf %08x -> %08x ctl %08x -> %08x\n", __func__, rd,
-	     letoh32(obuf), letoh32(rd->rd_buf), letoh32(octl),
-	     letoh32(rd->rd_ctl)));
+	    letoh32(obuf), letoh32(rd->rd_buf), letoh32(octl),
+	    letoh32(rd->rd_ctl)));
 
 	/* sync the mbuf */
 	bus_dmamap_sync(rdb->rdb_dmat, rs->rs_dmamap, 0,
@@ -1364,7 +1284,7 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 			goto next;
 		default:
 			/* XXX shorten rx ring, instead? */
-			panic("%s: could not load DMA map\n",
+			panic("%s: could not load DMA map",
 			    sc->sc_dev.dv_xname);
 		}
 
@@ -1535,7 +1455,7 @@ rtw_collect_txring(struct rtw_softc *sc, struct rtw_txsoft_blk *tsb,
 		    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
 
 		if ((tdb->tdb_desc[ts->ts_last].td_stat &
-		    htole32(RTW_TXSTAT_OWN)) != 0) 
+		    htole32(RTW_TXSTAT_OWN)) != 0)
 			break;
 
 		if (&sc->sc_txdesc_blk[RTW_TXPRIBCN] == tdb) {
@@ -1652,27 +1572,33 @@ rtw_hwring_setup(struct rtw_softc *sc)
 int
 rtw_swring_setup(struct rtw_softc *sc)
 {
-	int rc;
+	int rc, pri;
 	struct rtw_rxdesc_blk *rdb;
+	struct rtw_txdesc_blk *tdb;
 
 	rtw_txdesc_blk_init_all(&sc->sc_txdesc_blk[0]);
 
 	rtw_txsoft_blk_init_all(&sc->sc_txsoft_blk[0]);
 
 	rdb = &sc->sc_rxdesc_blk;
-	if ((rc = rtw_rxsoft_init_all(sc->sc_dmat, sc->sc_rxsoft, &rdb->rdb_ndesc,
-	     sc->sc_dev.dv_xname)) != 0 && rdb->rdb_ndesc == 0) {
+	if ((rc = rtw_rxsoft_init_all(sc->sc_dmat, sc->sc_rxsoft,
+	    &rdb->rdb_ndesc, sc->sc_dev.dv_xname)) != 0 &&
+	    rdb->rdb_ndesc == 0) {
 		printf("%s: could not allocate rx buffers\n",
 		    sc->sc_dev.dv_xname);
 		return rc;
 	}
-	
+
 	rdb = &sc->sc_rxdesc_blk;
 	rtw_rxdescs_sync(rdb, 0, rdb->rdb_ndesc,
 	    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
 	rtw_rxdesc_init_all(rdb, sc->sc_rxsoft, 1);
 
-	rtw_txdescs_sync_all(&sc->sc_txdesc_blk[0]);
+	tdb = &sc->sc_txdesc_blk[0];
+	for (pri = 0; pri < RTW_NTXPRI; pri++) {
+		rtw_txdescs_sync(&tdb[pri], 0, tdb[pri].tdb_ndesc,
+		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
+	}
 	return 0;
 }
 
@@ -1681,8 +1607,7 @@ rtw_txdesc_blk_reset(struct rtw_txdesc_blk *tdb)
 {
 	int i;
 
-	(void)memset(tdb->tdb_desc, 0,
-	    sizeof(tdb->tdb_desc[0]) * tdb->tdb_ndesc);
+	bzero(tdb->tdb_desc, sizeof(tdb->tdb_desc[0]) * tdb->tdb_ndesc);
 	for (i = 0; i < tdb->tdb_ndesc; i++)
 		tdb->tdb_desc[i].td_next = htole32(RTW_NEXT_DESC(tdb, i));
 	tdb->tdb_nfree = tdb->tdb_ndesc;
@@ -2065,6 +1990,13 @@ rtw_philips_pwrstate(struct rtw_regs *regs, enum rtw_pwrstate power,
 }
 
 void
+rtw_rtl_pwrstate(struct rtw_regs *regs, enum rtw_pwrstate power,
+    int before_rf, int digphy)
+{
+	/* empty */
+}
+
+void
 rtw_pwrstate0(struct rtw_softc *sc, enum rtw_pwrstate power, int before_rf,
     int digphy)
 {
@@ -2117,7 +2049,8 @@ int
 rtw_tune(struct rtw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	u_int chan;
+	u_int chan, idx;
+	u_int8_t txpower;
 	int rc;
 	int antdiv = sc->sc_flags & RTW_F_ANTDIV,
 	    dflantb = sc->sc_flags & RTW_F_DFLANTB;
@@ -2126,7 +2059,7 @@ rtw_tune(struct rtw_softc *sc)
 
 	chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
 	if (chan == IEEE80211_CHAN_ANY)
-		panic("%s: chan == IEEE80211_CHAN_ANY\n", __func__);
+		panic("%s: chan == IEEE80211_CHAN_ANY", __func__);
 
 	if (chan == sc->sc_cur_chan) {
 		RTW_DPRINTF(RTW_DEBUG_TUNE,
@@ -2141,6 +2074,13 @@ rtw_tune(struct rtw_softc *sc)
 	/* TBD wait for Tx to complete */
 
 	KASSERT((sc->sc_flags & RTW_F_ENABLED) != 0);
+
+	idx = RTW_SR_TXPOWER1 +
+	    ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan) - 1;
+	KASSERT2(idx >= RTW_SR_TXPOWER1 && idx <= RTW_SR_TXPOWER14,
+	    ("%s: channel %d out of range", __func__,
+	     idx - RTW_SR_TXPOWER1 + 1));
+	txpower =  RTW_SR_GET(&sc->sc_srom, idx);
 
 	if ((rc = rtw_phy_init(&sc->sc_regs, sc->sc_rf,
 	    rtw_chan2txpower(&sc->sc_srom, ic, ic->ic_bss->ni_chan),
@@ -2195,8 +2135,9 @@ rtw_enable(struct rtw_softc *sc)
 }
 
 void
-rtw_transmit_config(struct rtw_regs *regs)
+rtw_transmit_config(struct rtw_softc *sc)
 {
+	struct rtw_regs *regs = &sc->sc_regs;
 	u_int32_t tcr;
 
 	tcr = RTW_READ(regs, RTW_TCR);
@@ -2204,7 +2145,8 @@ rtw_transmit_config(struct rtw_regs *regs)
 	tcr |= RTW_TCR_CWMIN;
 	tcr &= ~RTW_TCR_MXDMA_MASK;
 	tcr |= RTW_TCR_MXDMA_256;
-	tcr |= RTW_TCR_SAT;		/* send ACK as fast as possible */
+	if ((sc->sc_flags & RTW_F_RTL8185) == 0)
+		tcr |= RTW8180_TCR_SAT;		/* send ACK as fast as possible */
 	tcr &= ~RTW_TCR_LBK_MASK;
 	tcr |= RTW_TCR_LBK_NORMAL;	/* normal operating mode */
 
@@ -2267,9 +2209,6 @@ rtw_set_nettype(struct rtw_softc *sc, enum ieee80211_opmode opmode)
 	rtw_set_access(&sc->sc_regs, RTW_ACCESS_NONE);
 }
 
-#define	rtw_calchash(addr) \
-	(ether_crc32_be((addr), IEEE80211_ADDR_LEN) >> 26)
-
 void
 rtw_pktfilt_load(struct rtw_softc *sc)
 {
@@ -2285,13 +2224,13 @@ rtw_pktfilt_load(struct rtw_softc *sc)
 	/* XXX might be necessary to stop Rx/Tx engines while setting filters */
 
 	sc->sc_rcr &= ~RTW_RCR_PKTFILTER_MASK;
-	sc->sc_rcr &= ~(RTW_RCR_MXDMA_MASK | RTW_RCR_RXFTH_MASK);
+	sc->sc_rcr &= ~(RTW_RCR_MXDMA_MASK | RTW8180_RCR_RXFTH_MASK);
 
 	sc->sc_rcr |= RTW_RCR_PKTFILTER_DEFAULT;
 	/* MAC auto-reset PHY (huh?) */
 	sc->sc_rcr |= RTW_RCR_ENMARP;
 	/* DMA whole Rx packets, only.  Set Tx DMA burst size to 1024 bytes. */
-	sc->sc_rcr |= RTW_RCR_MXDMA_1024 | RTW_RCR_RXFTH_WHOLE;
+	sc->sc_rcr |= RTW_RCR_MXDMA_1024 | RTW8180_RCR_RXFTH_WHOLE;
 
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_MONITOR:
@@ -2325,11 +2264,12 @@ allmulti:
 	ETHER_FIRST_MULTI(step, ec, enm);
 	while (enm != NULL) {
 		/* XXX */
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi,
+		if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
 		    ETHER_ADDR_LEN) != 0)
 			goto allmulti;
 
-		hash = rtw_calchash(enm->enm_addrlo);
+		hash = ether_crc32_be((enm->enm_addrlo),
+		    IEEE80211_ADDR_LEN) >> 26;
 		hashes[hash >> 5] |= (1 << (hash & 0x1f));
 		sc->sc_rcr |= RTW_RCR_AM;
 		ETHER_NEXT_MULTI(step, enm);
@@ -2384,7 +2324,7 @@ rtw_init(struct ifnet *ifp)
 	if ((rc = rtw_swring_setup(sc)) != 0)
 		goto out;
 
-	rtw_transmit_config(regs);
+	rtw_transmit_config(sc);
 
 	rtw_set_access(regs, RTW_ACCESS_CONFIG);
 
@@ -2392,7 +2332,10 @@ rtw_init(struct ifnet *ifp)
 	RTW_WBW(regs, RTW_MSR, RTW_BRSR);
 
 	/* long PLCP header, 1Mb/2Mb basic rate */
-	RTW_WRITE16(regs, RTW_BRSR, RTW_BRSR_MBR8180_2MBPS);
+	if (sc->sc_flags & RTW_F_RTL8185)
+		RTW_WRITE16(regs, RTW_BRSR, RTW8185_BRSR_MBR_2MBPS);
+	else
+		RTW_WRITE16(regs, RTW_BRSR, RTW8180_BRSR_MBR_2MBPS);
 	RTW_SYNC(regs, RTW_BRSR, RTW_BRSR);
 
 	rtw_set_access(regs, RTW_ACCESS_ANAPARM);
@@ -2446,7 +2389,7 @@ rtw_led_init(struct rtw_regs *regs)
 	rtw_set_access(regs, RTW_ACCESS_CONFIG);
 
 	cfg0 = RTW_READ8(regs, RTW_CONFIG0);
-	cfg0 |= RTW_CONFIG0_LEDGPOEN;
+	cfg0 |= RTW8180_CONFIG0_LEDGPOEN;
 	RTW_WRITE8(regs, RTW_CONFIG0, cfg0);
 
 	cfg1 = RTW_READ8(regs, RTW_CONFIG1);
@@ -2503,7 +2446,7 @@ rtw_led_newstate(struct rtw_softc *sc, enum ieee80211_state nstate)
 }
 
 void
-rtw_led_set(struct rtw_led_state *ls, struct rtw_regs *regs, int hwverid)
+rtw_led_set(struct rtw_led_state *ls, struct rtw_regs *regs, u_int hwverid)
 {
 	u_int8_t led_condition;
 	bus_size_t ofs;
@@ -2521,7 +2464,7 @@ rtw_led_set(struct rtw_led_state *ls, struct rtw_regs *regs, int hwverid)
 
 	switch (hwverid) {
 	default:
-	case 'F':
+	case RTW_TCR_HWVERID_RTL8180F:
 		ofs = RTW_PSR;
 		newval = mask = RTW_PSR_LEDGPO0 | RTW_PSR_LEDGPO1;
 		if (led_condition & RTW_LED0)
@@ -2529,7 +2472,7 @@ rtw_led_set(struct rtw_led_state *ls, struct rtw_regs *regs, int hwverid)
 		if (led_condition & RTW_LED1)
 			newval &= ~RTW_PSR_LEDGPO1;
 		break;
-	case 'D':
+	case RTW_TCR_HWVERID_RTL8180D:
 		ofs = RTW_9346CR;
 		mask = RTW_9346CR_EEM_MASK | RTW_9346CR_EEDI | RTW_9346CR_EECS;
 		newval = RTW_9346CR_EEM_PROGRAM;
@@ -2632,15 +2575,8 @@ rtw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				rtw_pktfilt_load(sc);
 			} else
 				rc = rtw_init(ifp);
-#ifdef RTW_DEBUG
-			rtw_print_regs(&sc->sc_regs, ifp->if_xname, __func__);
-#endif /* RTW_DEBUG */
-		} else if ((sc->sc_flags & RTW_F_ENABLED) != 0) {
-#ifdef RTW_DEBUG
-			rtw_print_regs(&sc->sc_regs, ifp->if_xname, __func__);
-#endif /* RTW_DEBUG */
+		} else if ((sc->sc_flags & RTW_F_ENABLED) != 0)
 			rtw_stop(ifp, 1);
-		}
 		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
@@ -2732,14 +2668,14 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 
 	if (sc->sc_ic.ic_state == IEEE80211_S_RUN &&
 	    (*mp = rtw_80211_dequeue(sc, &sc->sc_beaconq, RTW_TXPRIBCN, tsbp,
-		                     tdbp, nip, if_flagsp)) != NULL) {
+	    tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue beacon frame\n",
 		    __func__));
 		return 0;
 	}
 
 	if ((*mp = rtw_80211_dequeue(sc, &sc->sc_ic.ic_mgtq, RTW_TXPRIMD, tsbp,
-		                     tdbp, nip, if_flagsp)) != NULL) {
+	    tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue mgt frame\n",
 		    __func__));
 		return 0;
@@ -2751,7 +2687,7 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 	}
 
 	if ((*mp = rtw_80211_dequeue(sc, &sc->sc_ic.ic_pwrsaveq, RTW_TXPRIHI,
-	                             tsbp, tdbp, nip, if_flagsp)) != NULL) {
+	    tsbp, tdbp, nip, if_flagsp)) != NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT, ("%s: dequeue pwrsave frame\n",
 		    __func__));
 		return 0;
@@ -2824,8 +2760,8 @@ rtw_dmamap_load_txbuf(bus_dma_tag_t dmat, bus_dmamap_t dmam, struct mbuf *chain,
 	 */
 	for (first = 1;
 	     ((rc = bus_dmamap_load_mbuf(dmat, dmam, m0,
-			  BUS_DMA_WRITE|BUS_DMA_NOWAIT)) != 0 ||
-	      dmam->dm_nsegs > ndescfree || rtw_seg_too_short(dmam)) && first;
+	     BUS_DMA_WRITE|BUS_DMA_NOWAIT)) != 0 ||
+	     dmam->dm_nsegs > ndescfree || rtw_seg_too_short(dmam)) && first;
 	     first = 0) {
 		if (rc == 0)
 			bus_dmamap_unload(dmat, dmam);
@@ -2949,8 +2885,7 @@ rtw_start(struct ifnet *ifp)
 		    (IFF_DEBUG|IFF_LINK2)) {
 			ieee80211_dump_pkt(mtod(m0, uint8_t *),
 			    (dmamap->dm_nsegs == 1) ? m0->m_pkthdr.len
-			                            : sizeof(wh),
-			    rate, 0);
+			    : sizeof(wh), rate, 0);
 		}
 #endif /* RTW_DEBUG */
 		ctl0 = proto_ctl0 |
@@ -3066,7 +3001,7 @@ rtw_start(struct ifnet *ifp)
 		ts->ts_last = lastdesc;
 		tdb->tdb_desc[ts->ts_last].td_ctl0 |= htole32(RTW_TXCTL0_LS);
 		tdb->tdb_desc[ts->ts_first].td_ctl0 |=
-		   htole32(RTW_TXCTL0_FS);
+		    htole32(RTW_TXCTL0_FS);
 
 #ifdef RTW_DEBUG
 		rtw_print_txdesc(sc, "FS on", ts, tdb, ts->ts_first);
@@ -3201,7 +3136,7 @@ rtw_join_bss(struct rtw_softc *sc, u_int8_t *bssid, u_int16_t intval0)
 	rtw_set_access(regs, RTW_ACCESS_NONE);
 
 	/* TBD WEP */
-	RTW_WRITE8(regs, RTW_SCR, 0);
+	RTW_WRITE8(regs, RTW8180_SCR, 0);
 
 	rtw_io_enable(regs, RTW_CR_RE | RTW_CR_TE, 1);
 }
@@ -3234,12 +3169,11 @@ rtw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 	switch (nstate) {
 	case IEEE80211_S_INIT:
-		panic("%s: unexpected state IEEE80211_S_INIT\n", __func__);
+		panic("%s: unexpected state IEEE80211_S_INIT", __func__);
 		break;
 	case IEEE80211_S_SCAN:
 		if (ostate != IEEE80211_S_SCAN) {
-			(void)memset(ic->ic_bss->ni_bssid, 0,
-			    IEEE80211_ADDR_LEN);
+			bzero(ic->ic_bss->ni_bssid, IEEE80211_ADDR_LEN);
 			rtw_set_nettype(sc, IEEE80211_M_MONITOR);
 		}
 
@@ -3406,7 +3340,7 @@ rtw_power(int why, void *arg)
 		/* XXX do nothing. */
 		break;
 	case PWR_SUSPEND:
-		rtw_stop(ifp, 0);
+		rtw_stop(ifp, 1);
 		if (sc->sc_power != NULL)
 			(*sc->sc_power)(sc, why);
 		break;
@@ -3428,53 +3362,6 @@ rtw_shutdown(void *arg)
 	struct rtw_softc *sc = arg;
 
 	rtw_stop(&sc->sc_ic.ic_if, 1);
-}
-
-void
-rtw_setifprops(struct ifnet *ifp, const char *dvname, void *softc)
-{
-	(void)memcpy(ifp->if_xname, dvname, IFNAMSIZ);
-	ifp->if_softc = softc;
-	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST |
-	    IFF_NOTRAILERS;
-	ifp->if_ioctl = rtw_ioctl;
-	ifp->if_start = rtw_start;
-	ifp->if_watchdog = rtw_watchdog;
-}
-
-void
-rtw_set80211props(struct ieee80211com *ic)
-{
-	int nrate;
-	ic->ic_phytype = IEEE80211_T_DS;
-	ic->ic_opmode = IEEE80211_M_STA;
-	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_IBSS |
-	    IEEE80211_C_HOSTAP | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
-
-	nrate = 0;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] =
-	    IEEE80211_RATE_BASIC | 2;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] =
-	    IEEE80211_RATE_BASIC | 4;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 11;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 22;
-	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_nrates = nrate;
-}
-
-void
-rtw_set80211methods(struct rtw_mtbl *mtbl, struct ieee80211com *ic)
-{
-	mtbl->mt_newstate = ic->ic_newstate;
-	ic->ic_newstate = rtw_newstate;
-
-	mtbl->mt_recv_mgmt = ic->ic_recv_mgmt;
-	ic->ic_recv_mgmt = rtw_recv_mgmt;
-
-	mtbl->mt_node_free = ic->ic_node_free;
-	ic->ic_node_free = rtw_node_free;
-
-	mtbl->mt_node_alloc = ic->ic_node_alloc;
-	ic->ic_node_alloc = rtw_node_alloc;
 }
 
 void
@@ -3567,8 +3454,7 @@ rtw_txdesc_blk_setup(struct rtw_txdesc_blk *tdb, struct rtw_txdesc *desc,
 	tdb->tdb_physbase = physbase;
 	tdb->tdb_ofs = ofs;
 
-	(void)memset(tdb->tdb_desc, 0,
-	    sizeof(tdb->tdb_desc[0]) * tdb->tdb_ndesc);
+	bzero(tdb->tdb_desc, sizeof(tdb->tdb_desc[0]) * tdb->tdb_ndesc);
 
 	rtw_txdesc_blk_reset(tdb);
 }
@@ -3600,20 +3486,30 @@ rtw_rf_attach(struct rtw_softc *sc, enum rtw_rfchipid rfchipid, int digphy)
 	struct rtw_rf *rf;
 
 	switch (rfchipid) {
+	case RTW_RFCHIPID_RTL8225:
+	case RTW_RFCHIPID_RTL8255:
 	default:
 		rf_write = rtw_rf_hostwrite;
 		break;
 	case RTW_RFCHIPID_INTERSIL:
 	case RTW_RFCHIPID_PHILIPS:
 	case RTW_RFCHIPID_GCT: /* XXX a guess */
-	case RTW_RFCHIPID_RFMD:
+	case RTW_RFCHIPID_RFMD2948:
 		rf_write = (rtw_host_rfio) ? rtw_rf_hostwrite : rtw_rf_macwrite;
 		break;
 
 	}
 
 	switch (rfchipid) {
-	case RTW_RFCHIPID_MAXIM:
+	case RTW_RFCHIPID_RTL8225:
+		rf = rtw_rtl8225_create(&sc->sc_regs, rf_write);
+		sc->sc_pwrstate_cb = rtw_rtl_pwrstate;
+		break;
+	case RTW_RFCHIPID_RTL8255:
+		rf = rtw_rtl8255_create(&sc->sc_regs, rf_write);
+		sc->sc_pwrstate_cb = rtw_rtl_pwrstate;
+		break;
+	case RTW_RFCHIPID_MAXIM2820:
 		rf = rtw_max2820_create(&sc->sc_regs, rf_write, 0);
 		sc->sc_pwrstate_cb = rtw_maxim_pwrstate;
 		break;
@@ -3621,7 +3517,7 @@ rtw_rf_attach(struct rtw_softc *sc, enum rtw_rfchipid rfchipid, int digphy)
 		rf = rtw_sa2400_create(&sc->sc_regs, rf_write, digphy);
 		sc->sc_pwrstate_cb = rtw_philips_pwrstate;
 		break;
-	case RTW_RFCHIPID_RFMD:
+	case RTW_RFCHIPID_RFMD2948:
 		/* XXX RFMD has no RF constructor */
 		sc->sc_pwrstate_cb = rtw_rfmd_pwrstate;
 		/*FALLTHROUGH*/
@@ -3641,7 +3537,7 @@ u_int8_t
 rtw_check_phydelay(struct rtw_regs *regs, u_int32_t rcr0)
 {
 #define REVAB (RTW_RCR_MXDMA_UNLIMITED | RTW_RCR_AICV)
-#define REVC (REVAB | RTW_RCR_RXFTH_WHOLE)
+#define REVC (REVAB | RTW8180_RCR_RXFTH_WHOLE)
 
 	u_int8_t phydelay = LSHIFT(0x6, RTW_PHYDELAY_PHYDELAY);
 
@@ -3663,23 +3559,36 @@ rtw_check_phydelay(struct rtw_regs *regs, u_int32_t rcr0)
 void
 rtw_attach(struct rtw_softc *sc)
 {
+	struct ieee80211com *ic = &sc->sc_ic;
 	struct rtw_txsoft_blk *tsb;
-	int pri, rc;
+	struct rtw_mtbl *mtbl;
+	const char *vername;
+	struct ifnet *ifp;
+	char scratch[sizeof("unknown 0xXXXXXXXX")];
+	int pri, rc, nrate;
 
 	NEXT_ATTACH_STATE(sc, DETACHED);
 
-	switch (RTW_READ(&sc->sc_regs, RTW_TCR) & RTW_TCR_HWVERID_MASK) {
-	case RTW_TCR_HWVERID_F:
-		sc->sc_hwverid = 'F';
+	sc->sc_hwverid = RTW_READ(&sc->sc_regs, RTW_TCR) & RTW_TCR_HWVERID_MASK;
+	switch (sc->sc_hwverid) {
+	case RTW_TCR_HWVERID_RTL8185:
+		vername = "RTL8185";
+		sc->sc_flags |= RTW_F_RTL8185;
 		break;
-	case RTW_TCR_HWVERID_D:
-		sc->sc_hwverid = 'D';
+	case RTW_TCR_HWVERID_RTL8180F:
+		vername = "RTL8180F";
+		break;
+	case RTW_TCR_HWVERID_RTL8180D:
+		vername = "RTL8180D";
 		break;
 	default:
-		sc->sc_hwverid = '?';
+		snprintf(scratch, sizeof(scratch), "unknown 0x%08x",
+		    sc->sc_hwverid);
+		vername = scratch;
 		break;
 	}
-	printf("%s: ver %c, ", sc->sc_dev.dv_xname, sc->sc_hwverid);
+
+	printf("%s: ver %s, ", sc->sc_dev.dv_xname, vername);
 
 	rc = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct rtw_descs),
 	    RTW_DESC_ALIGNMENT, 0, &sc->sc_desc_segs, 1, &sc->sc_desc_nsegs,
@@ -3756,7 +3665,7 @@ rtw_attach(struct rtw_softc *sc)
 
 	NEXT_ATTACH_STATE(sc, FINISH_TXMAPS_CREATE);
 	if ((rc = rtw_rxdesc_dmamaps_create(sc->sc_dmat, &sc->sc_rxsoft[0],
-	                                    RTW_RXQLEN)) != 0) {
+	    RTW_RXQLEN)) != 0) {
 		printf("\n%s: could not load DMA map for hw rx descriptors, "
 		    "error %d\n", sc->sc_dev.dv_xname, rc);
 		goto err;
@@ -3779,9 +3688,7 @@ rtw_attach(struct rtw_softc *sc)
 
 	NEXT_ATTACH_STATE(sc, FINISH_READ_SROM);
 
-	if (rtw_srom_parse(&sc->sc_srom, &sc->sc_flags, &sc->sc_csthr,
-	    &sc->sc_rfchipid, &sc->sc_rcr, &sc->sc_locale,
-	    sc->sc_dev.dv_xname) != 0) {
+	if (rtw_srom_parse(sc) != 0) {
 		printf("\n%s: attach failed, malformed serial ROM\n",
 		    sc->sc_dev.dv_xname);
 		goto err;
@@ -3823,11 +3730,30 @@ rtw_attach(struct rtw_softc *sc)
 		goto err;
 	NEXT_ATTACH_STATE(sc, FINISH_ID_STA);
 
-	rtw_setifprops(&sc->sc_if, sc->sc_dev.dv_xname, (void*)sc);
+	ifp = &sc->sc_if;
+	(void)memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
+	ifp->if_softc = sc;
+	ifp->if_flags = IFF_SIMPLEX | IFF_BROADCAST | IFF_MULTICAST |
+	    IFF_NOTRAILERS;
+	ifp->if_ioctl = rtw_ioctl;
+	ifp->if_start = rtw_start;
+	ifp->if_watchdog = rtw_watchdog;
 
 	IFQ_SET_READY(&sc->sc_if.if_snd);
 
-	rtw_set80211props(&sc->sc_ic);
+	ic->ic_phytype = IEEE80211_T_DS;
+	ic->ic_opmode = IEEE80211_M_STA;
+	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_IBSS |
+	    IEEE80211_C_HOSTAP | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
+
+	nrate = 0;
+	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] =
+	    IEEE80211_RATE_BASIC | 2;
+	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] =
+	    IEEE80211_RATE_BASIC | 4;
+	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 11;
+	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[nrate++] = 22;
+	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_nrates = nrate;
 
 	rtw_led_attach(&sc->sc_led_state, (void *)sc);
 
@@ -3837,7 +3763,18 @@ rtw_attach(struct rtw_softc *sc)
 	if_attach(&sc->sc_if);
 	ieee80211_ifattach(&sc->sc_if);
 
-	rtw_set80211methods(&sc->sc_mtbl, &sc->sc_ic);
+	mtbl = &sc->sc_mtbl;
+	mtbl->mt_newstate = ic->ic_newstate;
+	ic->ic_newstate = rtw_newstate;
+
+	mtbl->mt_recv_mgmt = ic->ic_recv_mgmt;
+	ic->ic_recv_mgmt = rtw_recv_mgmt;
+
+	mtbl->mt_node_free = ic->ic_node_free;
+	ic->ic_node_free = rtw_node_free;
+
+	mtbl->mt_node_alloc = ic->ic_node_alloc;
+	ic->ic_node_alloc = rtw_node_alloc;
 
 	/* possibly we should fill in our own sc_send_prresp, since
 	 * the RTL8180 is probably sending probe responses in ad hoc
@@ -3875,6 +3812,7 @@ int
 rtw_detach(struct rtw_softc *sc)
 {
 	int pri;
+	struct rtw_srom *sr;
 
 	sc->sc_flags |= RTW_F_INVALID;
 
@@ -3895,7 +3833,12 @@ rtw_detach(struct rtw_softc *sc)
 		/*FALLTHROUGH*/
 	case FINISH_PARSE_SROM:
 	case FINISH_READ_SROM:
-		rtw_srom_free(&sc->sc_srom);
+		sr = &sc->sc_srom;
+		sr->sr_size = 0;
+		if (sr->sr_content != NULL) {
+			free(sr->sr_content, M_DEVBUF);
+			sr->sr_content = NULL;
+		}
 		/*FALLTHROUGH*/
 	case FINISH_RESET:
 	case FINISH_RXMAPS_CREATE:
@@ -3970,4 +3913,1080 @@ rtw_rfbus_write(struct rtw_rfbus *bus, enum rtw_rfchipid rfchipid, u_int addr,
     u_int32_t val)
 {
 	return (*bus->b_write)(bus->b_regs, rfchipid, addr, val);
+}
+
+/*
+ * PHY specific functions
+ */
+
+int
+rtw_bbp_preinit(struct rtw_regs *regs, u_int antatten0, int dflantb,
+    u_int freq)
+{
+	u_int antatten = antatten0;
+	if (dflantb)
+		antatten |= RTW_BBP_ANTATTEN_DFLANTB;
+	if (freq == 2484) /* channel 14 */
+		antatten |= RTW_BBP_ANTATTEN_CHAN14;
+	return rtw_bbp_write(regs, RTW_BBP_ANTATTEN, antatten);
+}
+
+int
+rtw_bbp_init(struct rtw_regs *regs, struct rtw_bbpset *bb, int antdiv,
+    int dflantb, u_int8_t cs_threshold, u_int freq)
+{
+	int rc;
+	u_int32_t sys2, sys3;
+
+	sys2 = bb->bb_sys2;
+	if (antdiv)
+		sys2 |= RTW_BBP_SYS2_ANTDIV;
+	sys3 = bb->bb_sys3 |
+	    LSHIFT(cs_threshold, RTW_BBP_SYS3_CSTHRESH_MASK);
+
+#define	RTW_BBP_WRITE_OR_RETURN(reg, val) \
+	if ((rc = rtw_bbp_write(regs, reg, val)) != 0) \
+		return rc;
+
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_SYS1,		bb->bb_sys1);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_TXAGC,		bb->bb_txagc);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_LNADET,		bb->bb_lnadet);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_IFAGCINI,	bb->bb_ifagcini);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_IFAGCLIMIT,	bb->bb_ifagclimit);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_IFAGCDET,	bb->bb_ifagcdet);
+
+	if ((rc = rtw_bbp_preinit(regs, bb->bb_antatten, dflantb, freq)) != 0)
+		return rc;
+
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_TRL,		bb->bb_trl);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_SYS2,		sys2);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_SYS3,		sys3);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_CHESTLIM,	bb->bb_chestlim);
+	RTW_BBP_WRITE_OR_RETURN(RTW_BBP_CHSQLIM,	bb->bb_chsqlim);
+	return 0;
+}
+
+int
+rtw_sa2400_txpower(struct rtw_rf *rf, u_int8_t opaque_txpower)
+{
+	struct rtw_sa2400 *sa = (struct rtw_sa2400 *)rf;
+	struct rtw_rfbus *bus = &sa->sa_bus;
+
+	return rtw_rfbus_write(bus, RTW_RFCHIPID_PHILIPS, SA2400_TX,
+	    opaque_txpower);
+}
+
+/* make sure we're using the same settings as the reference driver */
+void
+rtw_verify_syna(u_int freq, u_int32_t val)
+{
+	u_int32_t expected_val = ~val;
+
+	switch (freq) {
+	case 2412:
+		expected_val = 0x0000096c; /* ch 1 */
+		break;
+	case 2417:
+		expected_val = 0x00080970; /* ch 2 */
+		break;
+	case 2422:
+		expected_val = 0x00100974; /* ch 3 */
+		break;
+	case 2427:
+		expected_val = 0x00180978; /* ch 4 */
+		break;
+	case 2432:
+		expected_val = 0x00000980; /* ch 5 */
+		break;
+	case 2437:
+		expected_val = 0x00080984; /* ch 6 */
+		break;
+	case 2442:
+		expected_val = 0x00100988; /* ch 7 */
+		break;
+	case 2447:
+		expected_val = 0x0018098c; /* ch 8 */
+		break;
+	case 2452:
+		expected_val = 0x00000994; /* ch 9 */
+		break;
+	case 2457:
+		expected_val = 0x00080998; /* ch 10 */
+		break;
+	case 2462:
+		expected_val = 0x0010099c; /* ch 11 */
+		break;
+	case 2467:
+		expected_val = 0x001809a0; /* ch 12 */
+		break;
+	case 2472:
+		expected_val = 0x000009a8; /* ch 13 */
+		break;
+	case 2484:
+		expected_val = 0x000009b4; /* ch 14 */
+		break;
+	}
+	KASSERT(val == expected_val);
+}
+
+/* freq is in MHz */
+int
+rtw_sa2400_tune(struct rtw_rf *rf, u_int freq)
+{
+	struct rtw_sa2400 *sa = (struct rtw_sa2400 *)rf;
+	struct rtw_rfbus *bus = &sa->sa_bus;
+	int rc;
+	u_int32_t syna, synb, sync;
+
+	/* XO = 44MHz, R = 11, hence N is in units of XO / R = 4MHz.
+	 *
+	 * The channel spacing (5MHz) is not divisible by 4MHz, so
+	 * we set the fractional part of N to compensate.
+	 */
+	int n = freq / 4, nf = (freq % 4) * 2;
+
+	syna = LSHIFT(nf, SA2400_SYNA_NF_MASK) | LSHIFT(n, SA2400_SYNA_N_MASK);
+	rtw_verify_syna(freq, syna);
+
+	/* Divide the 44MHz crystal down to 4MHz. Set the fractional
+	 * compensation charge pump value to agree with the fractional
+	 * modulus.
+	 */
+	synb = LSHIFT(11, SA2400_SYNB_R_MASK) | SA2400_SYNB_L_NORMAL |
+	    SA2400_SYNB_ON | SA2400_SYNB_ONE |
+	    LSHIFT(80, SA2400_SYNB_FC_MASK); /* agrees w/ SA2400_SYNA_FM = 0 */
+
+	sync = SA2400_SYNC_CP_NORMAL;
+
+	if ((rc = rtw_rfbus_write(bus, RTW_RFCHIPID_PHILIPS, SA2400_SYNA,
+	    syna)) != 0)
+		return rc;
+	if ((rc = rtw_rfbus_write(bus, RTW_RFCHIPID_PHILIPS, SA2400_SYNB,
+	    synb)) != 0)
+		return rc;
+	if ((rc = rtw_rfbus_write(bus, RTW_RFCHIPID_PHILIPS, SA2400_SYNC,
+	    sync)) != 0)
+		return rc;
+	return rtw_rfbus_write(bus, RTW_RFCHIPID_PHILIPS, SA2400_SYND, 0x0);
+}
+
+int
+rtw_sa2400_pwrstate(struct rtw_rf *rf, enum rtw_pwrstate power)
+{
+	struct rtw_sa2400 *sa = (struct rtw_sa2400 *)rf;
+	struct rtw_rfbus *bus = &sa->sa_bus;
+	u_int32_t opmode;
+	opmode = SA2400_OPMODE_DEFAULTS;
+	switch (power) {
+	case RTW_ON:
+		opmode |= SA2400_OPMODE_MODE_TXRX;
+		break;
+	case RTW_SLEEP:
+		opmode |= SA2400_OPMODE_MODE_WAIT;
+		break;
+	case RTW_OFF:
+		opmode |= SA2400_OPMODE_MODE_SLEEP;
+		break;
+	}
+
+	if (sa->sa_digphy)
+		opmode |= SA2400_OPMODE_DIGIN;
+
+	return rtw_rfbus_write(bus, RTW_RFCHIPID_PHILIPS, SA2400_OPMODE,
+	    opmode);
+}
+
+int
+rtw_sa2400_manrx_init(struct rtw_sa2400 *sa)
+{
+	u_int32_t manrx;
+
+	/* XXX we are not supposed to be in RXMGC mode when we do
+	 * this?
+	 */
+	manrx = SA2400_MANRX_AHSN;
+	manrx |= SA2400_MANRX_TEN;
+	manrx |= LSHIFT(1023, SA2400_MANRX_RXGAIN_MASK);
+
+	return rtw_rfbus_write(&sa->sa_bus, RTW_RFCHIPID_PHILIPS, SA2400_MANRX,
+	    manrx);
+}
+
+int
+rtw_sa2400_vcocal_start(struct rtw_sa2400 *sa, int start)
+{
+	u_int32_t opmode;
+
+	opmode = SA2400_OPMODE_DEFAULTS;
+	if (start)
+		opmode |= SA2400_OPMODE_MODE_VCOCALIB;
+	else
+		opmode |= SA2400_OPMODE_MODE_SLEEP;
+
+	if (sa->sa_digphy)
+		opmode |= SA2400_OPMODE_DIGIN;
+
+	return rtw_rfbus_write(&sa->sa_bus, RTW_RFCHIPID_PHILIPS, SA2400_OPMODE,
+	    opmode);
+}
+
+int
+rtw_sa2400_vco_calibration(struct rtw_sa2400 *sa)
+{
+	int rc;
+	/* calibrate VCO */
+	if ((rc = rtw_sa2400_vcocal_start(sa, 1)) != 0)
+		return rc;
+	DELAY(2200);	/* 2.2 milliseconds */
+	/* XXX superfluous: SA2400 automatically entered SLEEP mode. */
+	return rtw_sa2400_vcocal_start(sa, 0);
+}
+
+int
+rtw_sa2400_filter_calibration(struct rtw_sa2400 *sa)
+{
+	u_int32_t opmode;
+
+	opmode = SA2400_OPMODE_DEFAULTS | SA2400_OPMODE_MODE_FCALIB;
+	if (sa->sa_digphy)
+		opmode |= SA2400_OPMODE_DIGIN;
+
+	return rtw_rfbus_write(&sa->sa_bus, RTW_RFCHIPID_PHILIPS, SA2400_OPMODE,
+	    opmode);
+}
+
+int
+rtw_sa2400_dc_calibration(struct rtw_sa2400 *sa)
+{
+	struct rtw_rf *rf = &sa->sa_rf;
+	int rc;
+	u_int32_t dccal;
+
+	(*rf->rf_continuous_tx_cb)(rf->rf_continuous_tx_arg, 1);
+
+	dccal = SA2400_OPMODE_DEFAULTS | SA2400_OPMODE_MODE_TXRX;
+
+	rc = rtw_rfbus_write(&sa->sa_bus, RTW_RFCHIPID_PHILIPS, SA2400_OPMODE,
+	    dccal);
+	if (rc != 0)
+		return rc;
+
+	DELAY(5);	/* DCALIB after being in Tx mode for 5
+			 * microseconds
+			 */
+
+	dccal &= ~SA2400_OPMODE_MODE_MASK;
+	dccal |= SA2400_OPMODE_MODE_DCALIB;
+
+	rc = rtw_rfbus_write(&sa->sa_bus, RTW_RFCHIPID_PHILIPS, SA2400_OPMODE,
+	    dccal);
+	if (rc != 0)
+		return rc;
+
+	DELAY(20);	/* calibration takes at most 20 microseconds */
+
+	(*rf->rf_continuous_tx_cb)(rf->rf_continuous_tx_arg, 0);
+
+	return 0;
+}
+
+int
+rtw_sa2400_agc_init(struct rtw_sa2400 *sa)
+{
+	u_int32_t agc;
+
+	agc = LSHIFT(25, SA2400_AGC_MAXGAIN_MASK);
+	agc |= LSHIFT(7, SA2400_AGC_BBPDELAY_MASK);
+	agc |= LSHIFT(15, SA2400_AGC_LNADELAY_MASK);
+	agc |= LSHIFT(27, SA2400_AGC_RXONDELAY_MASK);
+
+	return rtw_rfbus_write(&sa->sa_bus, RTW_RFCHIPID_PHILIPS, SA2400_AGC,
+	    agc);
+}
+
+void
+rtw_sa2400_destroy(struct rtw_rf *rf)
+{
+	struct rtw_sa2400 *sa = (struct rtw_sa2400 *)rf;
+	bzero(sa, sizeof(*sa));
+	free(sa, M_DEVBUF);
+}
+
+int
+rtw_sa2400_calibrate(struct rtw_rf *rf, u_int freq)
+{
+	struct rtw_sa2400 *sa = (struct rtw_sa2400 *)rf;
+	int i, rc;
+
+	/* XXX reference driver calibrates VCO twice. Is it a bug? */
+	for (i = 0; i < 2; i++) {
+		if ((rc = rtw_sa2400_vco_calibration(sa)) != 0)
+			return rc;
+	}
+	/* VCO calibration erases synthesizer registers, so re-tune */
+	if ((rc = rtw_sa2400_tune(rf, freq)) != 0)
+		return rc;
+	if ((rc = rtw_sa2400_filter_calibration(sa)) != 0)
+		return rc;
+	/* analog PHY needs DC calibration */
+	if (!sa->sa_digphy)
+		return rtw_sa2400_dc_calibration(sa);
+	return 0;
+}
+
+int
+rtw_sa2400_init(struct rtw_rf *rf, u_int freq, u_int8_t opaque_txpower,
+    enum rtw_pwrstate power)
+{
+	struct rtw_sa2400 *sa = (struct rtw_sa2400 *)rf;
+	int rc;
+
+	if ((rc = rtw_sa2400_txpower(rf, opaque_txpower)) != 0)
+		return rc;
+
+	/* skip configuration if it's time to sleep or to power-down. */
+	if (power == RTW_SLEEP || power == RTW_OFF)
+		return rtw_sa2400_pwrstate(rf, power);
+
+	/* go to sleep for configuration */
+	if ((rc = rtw_sa2400_pwrstate(rf, RTW_SLEEP)) != 0)
+		return rc;
+
+	if ((rc = rtw_sa2400_tune(rf, freq)) != 0)
+		return rc;
+	if ((rc = rtw_sa2400_agc_init(sa)) != 0)
+		return rc;
+	if ((rc = rtw_sa2400_manrx_init(sa)) != 0)
+		return rc;
+
+	if ((rc = rtw_sa2400_calibrate(rf, freq)) != 0)
+		return rc;
+
+	/* enter Tx/Rx mode */
+	return rtw_sa2400_pwrstate(rf, power);
+}
+
+struct rtw_rf *
+rtw_sa2400_create(struct rtw_regs *regs, rtw_rf_write_t rf_write, int digphy)
+{
+	struct rtw_sa2400 *sa;
+	struct rtw_rfbus *bus;
+	struct rtw_rf *rf;
+	struct rtw_bbpset *bb;
+
+	sa = malloc(sizeof(*sa), M_DEVBUF, M_NOWAIT);
+	if (sa == NULL)
+		return NULL;
+	bzero(sa, sizeof(struct rtw_sa2400));
+
+	sa->sa_digphy = digphy;
+
+	rf = &sa->sa_rf;
+	bus = &sa->sa_bus;
+
+	rf->rf_init = rtw_sa2400_init;
+	rf->rf_destroy = rtw_sa2400_destroy;
+	rf->rf_txpower = rtw_sa2400_txpower;
+	rf->rf_tune = rtw_sa2400_tune;
+	rf->rf_pwrstate = rtw_sa2400_pwrstate;
+	bb = &rf->rf_bbpset;
+
+	/* XXX magic */
+	bb->bb_antatten = RTW_BBP_ANTATTEN_PHILIPS_MAGIC;
+	bb->bb_chestlim =	0x00;
+	bb->bb_chsqlim =	0xa0;
+	bb->bb_ifagcdet =	0x64;
+	bb->bb_ifagcini =	0x90;
+	bb->bb_ifagclimit =	0x1a;
+	bb->bb_lnadet =		0xe0;
+	bb->bb_sys1 =		0x98;
+	bb->bb_sys2 =		0x47;
+	bb->bb_sys3 =		0x90;
+	bb->bb_trl =		0x88;
+	bb->bb_txagc =		0x38;
+
+	bus->b_regs = regs;
+	bus->b_write = rf_write;
+
+	return &sa->sa_rf;
+}
+
+/* freq is in MHz */
+int
+rtw_max2820_tune(struct rtw_rf *rf, u_int freq)
+{
+	struct rtw_max2820 *mx = (struct rtw_max2820 *)rf;
+	struct rtw_rfbus *bus = &mx->mx_bus;
+
+	if (freq < 2400 || freq > 2499)
+		return -1;
+
+	return rtw_rfbus_write(bus, RTW_RFCHIPID_MAXIM2820, MAX2820_CHANNEL,
+	    LSHIFT(freq - 2400, MAX2820_CHANNEL_CF_MASK));
+}
+
+void
+rtw_max2820_destroy(struct rtw_rf *rf)
+{
+	struct rtw_max2820 *mx = (struct rtw_max2820 *)rf;
+	bzero(mx, sizeof(*mx));
+	free(mx, M_DEVBUF);
+}
+
+int
+rtw_max2820_init(struct rtw_rf *rf, u_int freq, u_int8_t opaque_txpower,
+    enum rtw_pwrstate power)
+{
+	struct rtw_max2820 *mx = (struct rtw_max2820 *)rf;
+	struct rtw_rfbus *bus = &mx->mx_bus;
+	int rc;
+
+	if ((rc = rtw_rfbus_write(bus, RTW_RFCHIPID_MAXIM2820, MAX2820_TEST,
+	    MAX2820_TEST_DEFAULT)) != 0)
+		return rc;
+
+	if ((rc = rtw_rfbus_write(bus, RTW_RFCHIPID_MAXIM2820, MAX2820_ENABLE,
+	    MAX2820_ENABLE_DEFAULT)) != 0)
+		return rc;
+
+	/* skip configuration if it's time to sleep or to power-down. */
+	if ((rc = rtw_max2820_pwrstate(rf, power)) != 0)
+		return rc;
+	else if (power == RTW_OFF || power == RTW_SLEEP)
+		return 0;
+
+	if ((rc = rtw_rfbus_write(bus, RTW_RFCHIPID_MAXIM2820, MAX2820_SYNTH,
+	    MAX2820_SYNTH_R_44MHZ)) != 0)
+		return rc;
+
+	if ((rc = rtw_max2820_tune(rf, freq)) != 0)
+		return rc;
+
+	/* XXX The MAX2820 datasheet indicates that 1C and 2C should not
+	 * be changed from 7, however, the reference driver sets them
+	 * to 4 and 1, respectively.
+	 */
+	if ((rc = rtw_rfbus_write(bus, RTW_RFCHIPID_MAXIM2820, MAX2820_RECEIVE,
+	    MAX2820_RECEIVE_DL_DEFAULT |
+	    LSHIFT(4, MAX2820A_RECEIVE_1C_MASK) |
+	    LSHIFT(1, MAX2820A_RECEIVE_2C_MASK))) != 0)
+		return rc;
+
+	return rtw_rfbus_write(bus, RTW_RFCHIPID_MAXIM2820, MAX2820_TRANSMIT,
+	    MAX2820_TRANSMIT_PA_DEFAULT);
+}
+
+int
+rtw_max2820_txpower(struct rtw_rf *rf, u_int8_t opaque_txpower)
+{
+	/* TBD */
+	return 0;
+}
+
+int
+rtw_max2820_pwrstate(struct rtw_rf *rf, enum rtw_pwrstate power)
+{
+	uint32_t enable;
+	struct rtw_max2820 *mx;
+	struct rtw_rfbus *bus;
+
+	mx = (struct rtw_max2820 *)rf;
+	bus = &mx->mx_bus;
+
+	switch (power) {
+	case RTW_OFF:
+	case RTW_SLEEP:
+	default:
+		enable = 0x0;
+		break;
+	case RTW_ON:
+		enable = MAX2820_ENABLE_DEFAULT;
+		break;
+	}
+	return rtw_rfbus_write(bus, RTW_RFCHIPID_MAXIM2820,
+	    MAX2820_ENABLE, enable);
+}
+
+struct rtw_rf *
+rtw_max2820_create(struct rtw_regs *regs, rtw_rf_write_t rf_write, int is_a)
+{
+	struct rtw_max2820 *mx;
+	struct rtw_rfbus *bus;
+	struct rtw_rf *rf;
+	struct rtw_bbpset *bb;
+
+	mx = malloc(sizeof(*mx), M_DEVBUF, M_NOWAIT);
+	if (mx == NULL)
+		return NULL;
+	bzero(mx, sizeof(struct rtw_max2820));
+
+	mx->mx_is_a = is_a;
+
+	rf = &mx->mx_rf;
+	bus = &mx->mx_bus;
+
+	rf->rf_init = rtw_max2820_init;
+	rf->rf_destroy = rtw_max2820_destroy;
+	rf->rf_txpower = rtw_max2820_txpower;
+	rf->rf_tune = rtw_max2820_tune;
+	rf->rf_pwrstate = rtw_max2820_pwrstate;
+	bb = &rf->rf_bbpset;
+
+	/* XXX magic */
+	bb->bb_antatten = RTW_BBP_ANTATTEN_MAXIM_MAGIC;
+	bb->bb_chestlim =	0;
+	bb->bb_chsqlim =	159;
+	bb->bb_ifagcdet =	100;
+	bb->bb_ifagcini =	144;
+	bb->bb_ifagclimit =	26;
+	bb->bb_lnadet =		248;
+	bb->bb_sys1 =		136;
+	bb->bb_sys2 =		71;
+	bb->bb_sys3 =		155;
+	bb->bb_trl =		136;
+	bb->bb_txagc =		8;
+
+	bus->b_regs = regs;
+	bus->b_write = rf_write;
+
+	return &mx->mx_rf;
+}
+
+int
+rtw_rtl8225_pwrstate(struct rtw_rf *rf, enum rtw_pwrstate power)
+{
+	return (0);
+}
+
+void
+rtw_rtl8225_destroy(struct rtw_rf *rf)
+{
+	struct rtw_rtl8225 *rt = (struct rtw_rtl8225 *)rf;
+	bzero(rt, sizeof(*rt));
+	free(rt, M_DEVBUF);
+}
+
+int
+rtw_rtl8225_init(struct rtw_rf *rf, u_int freq, u_int8_t opaque_txpower,
+    enum rtw_pwrstate power)
+{
+	return (0);
+}
+
+int
+rtw_rtl8225_txpower(struct rtw_rf *rf, u_int8_t opaque_txpower)
+{
+	return (0);
+}
+
+int
+rtw_rtl8225_tune(struct rtw_rf *rf, u_int freq)
+{
+	return (0);
+}
+
+struct rtw_rf *
+rtw_rtl8225_create(struct rtw_regs *regs, rtw_rf_write_t rf_write)
+{
+	struct rtw_rtl8225 *rt;
+	struct rtw_rfbus *bus;
+	struct rtw_rf *rf;
+	struct rtw_bbpset *bb;
+
+	rt = malloc(sizeof(*rt), M_DEVBUF, M_NOWAIT);
+	if (rt == NULL)
+		return NULL;
+	bzero(rt, sizeof(struct rtw_rtl8225));
+
+	rf = &rt->rt_rf;
+	bus = &rt->rt_bus;
+
+	rf->rf_init = rtw_rtl8225_init;
+	rf->rf_destroy = rtw_rtl8225_destroy;
+	rf->rf_txpower = rtw_rtl8225_txpower;
+	rf->rf_tune = rtw_rtl8225_tune;
+	rf->rf_pwrstate = rtw_rtl8225_pwrstate;
+	bb = &rf->rf_bbpset;
+
+	bus->b_regs = regs;
+	bus->b_write = rf_write;
+
+	return (&rt->rt_rf);
+}
+
+int
+rtw_rtl8255_pwrstate(struct rtw_rf *rf, enum rtw_pwrstate power)
+{
+	return (0);
+}
+
+void
+rtw_rtl8255_destroy(struct rtw_rf *rf)
+{
+	struct rtw_rtl8255 *rt = (struct rtw_rtl8255 *)rf;
+	bzero(rt, sizeof(*rt));
+	free(rt, M_DEVBUF);
+}
+
+int
+rtw_rtl8255_init(struct rtw_rf *rf, u_int freq, u_int8_t opaque_txpower,
+    enum rtw_pwrstate power)
+{
+	return (0);
+}
+
+int
+rtw_rtl8255_txpower(struct rtw_rf *rf, u_int8_t opaque_txpower)
+{
+	return (0);
+}
+
+int
+rtw_rtl8255_tune(struct rtw_rf *rf, u_int freq)
+{
+	return (0);
+}
+
+struct rtw_rf *
+rtw_rtl8255_create(struct rtw_regs *regs, rtw_rf_write_t rf_write)
+{
+	struct rtw_rtl8255 *rt;
+	struct rtw_rfbus *bus;
+	struct rtw_rf *rf;
+	struct rtw_bbpset *bb;
+
+	rt = malloc(sizeof(*rt), M_DEVBUF, M_NOWAIT);
+	if (rt == NULL)
+		return NULL;
+	bzero(rt, sizeof(struct rtw_rtl8255));
+
+	rf = &rt->rt_rf;
+	bus = &rt->rt_bus;
+
+	rf->rf_init = rtw_rtl8255_init;
+	rf->rf_destroy = rtw_rtl8255_destroy;
+	rf->rf_txpower = rtw_rtl8255_txpower;
+	rf->rf_tune = rtw_rtl8255_tune;
+	rf->rf_pwrstate = rtw_rtl8255_pwrstate;
+	bb = &rf->rf_bbpset;
+
+	bus->b_regs = regs;
+	bus->b_write = rf_write;
+
+	return (&rt->rt_rf);
+}
+
+/* freq is in MHz */
+int
+rtw_phy_init(struct rtw_regs *regs, struct rtw_rf *rf, u_int8_t opaque_txpower,
+    u_int8_t cs_threshold, u_int freq, int antdiv, int dflantb,
+    enum rtw_pwrstate power)
+{
+	int rc;
+	RTW_DPRINTF(RTW_DEBUG_PHY,
+	    ("%s: txpower %u csthresh %u freq %u antdiv %u dflantb %u "
+	     "pwrstate %s\n", __func__, opaque_txpower, cs_threshold, freq,
+	     antdiv, dflantb, rtw_pwrstate_string(power)));
+
+	/* XXX is this really necessary? */
+	if ((rc = rtw_rf_txpower(rf, opaque_txpower)) != 0)
+		return rc;
+	if ((rc = rtw_bbp_preinit(regs, rf->rf_bbpset.bb_antatten, dflantb,
+	    freq)) != 0)
+		return rc;
+	if ((rc = rtw_rf_tune(rf, freq)) != 0)
+		return rc;
+	/* initialize RF  */
+	if ((rc = rtw_rf_init(rf, freq, opaque_txpower, power)) != 0)
+		return rc;
+#if 0	/* what is this redundant tx power setting here for? */
+	if ((rc = rtw_rf_txpower(rf, opaque_txpower)) != 0)
+		return rc;
+#endif
+	return rtw_bbp_init(regs, &rf->rf_bbpset, antdiv, dflantb,
+	    cs_threshold, freq);
+}
+
+/*
+ * Generic PHY I/O functions
+ */
+
+
+u_int8_t
+rtw_bbp_read(struct rtw_regs *regs, u_int addr)
+{
+	KASSERT((addr & ~PRESHIFT(RTW_BB_ADDR_MASK)) == 0);
+	RTW_WRITE(regs, RTW_BB,
+	    LSHIFT(addr, RTW_BB_ADDR_MASK) | RTW_BB_RD_MASK | RTW_BB_WR_MASK);
+	delay(10);	/* XXX */
+	RTW_WBR(regs, RTW_BB, RTW_BB);
+	return MASK_AND_RSHIFT(RTW_READ(regs, RTW_BB), RTW_BB_RD_MASK);
+}
+
+int
+rtw_bbp_write(struct rtw_regs *regs, u_int addr, u_int val)
+{
+#define	BBP_WRITE_ITERS	50
+#define	BBP_WRITE_DELAY	1
+	int i;
+	u_int32_t wrbbp, rdbbp;
+
+	RTW_DPRINTF(RTW_DEBUG_PHYIO,
+	    ("%s: bbp[%u] <- %u\n", __func__, addr, val));
+
+	KASSERT((addr & ~PRESHIFT(RTW_BB_ADDR_MASK)) == 0);
+	KASSERT((val & ~PRESHIFT(RTW_BB_WR_MASK)) == 0);
+
+	wrbbp = LSHIFT(addr, RTW_BB_ADDR_MASK) | RTW_BB_WREN |
+	    LSHIFT(val, RTW_BB_WR_MASK) | RTW_BB_RD_MASK,
+
+	rdbbp = LSHIFT(addr, RTW_BB_ADDR_MASK) |
+	    RTW_BB_WR_MASK | RTW_BB_RD_MASK;
+
+	RTW_DPRINTF(RTW_DEBUG_PHYIO,
+	    ("%s: rdbbp = %#08x, wrbbp = %#08x\n", __func__, rdbbp, wrbbp));
+
+	for (i = BBP_WRITE_ITERS; --i >= 0; ) {
+		RTW_RBW(regs, RTW_BB, RTW_BB);
+		RTW_WRITE(regs, RTW_BB, wrbbp);
+		RTW_SYNC(regs, RTW_BB, RTW_BB);
+		RTW_WRITE(regs, RTW_BB, rdbbp);
+		RTW_SYNC(regs, RTW_BB, RTW_BB);
+		delay(BBP_WRITE_DELAY);	/* 1 microsecond */
+		if (MASK_AND_RSHIFT(RTW_READ(regs, RTW_BB),
+		    RTW_BB_RD_MASK) == val) {
+			RTW_DPRINTF(RTW_DEBUG_PHYIO,
+			    ("%s: finished in %dus\n", __func__,
+			    BBP_WRITE_DELAY * (BBP_WRITE_ITERS - i)));
+			return 0;
+		}
+		delay(BBP_WRITE_DELAY);	/* again */
+	}
+	printf("%s: timeout\n", __func__);
+	return -1;
+}
+
+/* Help rtw_rf_hostwrite bang bits to RF over 3-wire interface. */
+void
+rtw_rf_hostbangbits(struct rtw_regs *regs, u_int32_t bits, int lo_to_hi,
+    u_int nbits)
+{
+	int i;
+	u_int32_t mask, reg;
+
+	KASSERT(nbits <= 32);
+
+	RTW_DPRINTF(RTW_DEBUG_PHYIO,
+	    ("%s: %u bits, %#08x, %s\n", __func__, nbits, bits,
+	    (lo_to_hi) ? "lo to hi" : "hi to lo"));
+
+	reg = RTW8180_PHYCFG_HST;
+	RTW_WRITE(regs, RTW8180_PHYCFG, reg);
+	RTW_SYNC(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+
+	if (lo_to_hi)
+		mask = 0x1;
+	else
+		mask = 1 << (nbits - 1);
+
+	for (i = 0; i < nbits; i++) {
+		RTW_DPRINTF(RTW_DEBUG_PHYBITIO,
+		    ("%s: bits %#08x mask %#08x -> bit %#08x\n",
+		    __func__, bits, mask, bits & mask));
+
+		if ((bits & mask) != 0)
+			reg |= RTW8180_PHYCFG_HST_DATA;
+		else
+			reg &= ~RTW8180_PHYCFG_HST_DATA;
+
+		reg |= RTW8180_PHYCFG_HST_CLK;
+		RTW_WRITE(regs, RTW8180_PHYCFG, reg);
+		RTW_SYNC(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+
+		DELAY(2);	/* arbitrary delay */
+
+		reg &= ~RTW8180_PHYCFG_HST_CLK;
+		RTW_WRITE(regs, RTW8180_PHYCFG, reg);
+		RTW_SYNC(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+
+		if (lo_to_hi)
+			mask <<= 1;
+		else
+			mask >>= 1;
+	}
+
+	reg |= RTW8180_PHYCFG_HST_EN;
+	KASSERT((reg & RTW8180_PHYCFG_HST_CLK) == 0);
+	RTW_WRITE(regs, RTW8180_PHYCFG, reg);
+	RTW_SYNC(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+}
+
+#if 0
+void
+rtw_rf_rtl8225_hostbangbits(struct rtw_regs *regs, u_int32_t bits, int lo_to_hi,
+    u_int nbits)
+{
+	int i;
+	u_int8_t page;
+	u_int16_t reg0, reg1, reg2;
+	u_int32_t mask;
+
+	/* enable page 0 */
+	page = RTW_READ8(regs, RTW_PSR);
+	RTW_WRITE8(regs, RTW_PSR, page & ~RTW_PSR_PSEN);
+
+	/* enable RF access */
+	reg0 = RTW_READ16(regs, RTW8185_RFPINSOUTPUT) &
+	    RTW8185_RFPINSOUTPUT_MASK;
+	reg1 = RTW_READ16(regs, RTW8185_RFPINSENABLE);
+	RTW_WRITE16(regs, RTW8185_RFPINSENABLE,
+	    RTW8185_RFPINSENABLE_ENABLE | reg0);
+	reg2 = RTW_READ16(regs, RTW8185_RFPINSSELECT);
+	RTW_WRITE16(regs, RTW8185_RFPINSSELECT,
+	    RTW8185_RFPINSSELECT_ENABLE | reg1 /* XXX | SW_GPIO_CTL */);
+	DELAY(10);
+
+	RTW_WRITE16(regs, RTW8185_RFPINSOUTPUT, reg0);
+	DELAY(10);
+
+	if (lo_to_hi)
+		mask = 0x1;
+	else
+		mask = 1 << (nbits - 1);
+
+	for (i = 0; i < nbits; i++) {
+		RTW_DPRINTF(RTW_DEBUG_PHYBITIO,
+		    ("%s: bits %#08x mask %#08x -> bit %#08x\n",
+		    __func__, bits, mask, bits & mask));
+
+		if ((bits & mask) != 0)
+			reg |= RTW8180_PHYCFG_HST_DATA;
+		else
+			reg &= ~RTW8180_PHYCFG_HST_DATA;
+
+		reg |= RTW8180_PHYCFG_HST_CLK;
+		RTW_WRITE(regs, RTW8180_PHYCFG, reg);
+		RTW_SYNC(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+
+		DELAY(2);	/* arbitrary delay */
+
+		reg &= ~RTW8180_PHYCFG_HST_CLK;
+		RTW_WRITE(regs, RTW8180_PHYCFG, reg);
+		RTW_SYNC(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+
+		if (lo_to_hi)
+			mask <<= 1;
+		else
+			mask >>= 1;
+	}
+
+	/* reset the page */
+	RTW_WRITE8(regs, RTW_PSR, page);
+}
+#endif
+
+/* Help rtw_rf_macwrite: tell MAC to bang bits to RF over the 3-wire
+ * interface.
+ */
+int
+rtw_rf_macbangbits(struct rtw_regs *regs, u_int32_t reg)
+{
+	int i;
+
+	RTW_DPRINTF(RTW_DEBUG_PHY, ("%s: %#08x\n", __func__, reg));
+
+	RTW_WRITE(regs, RTW8180_PHYCFG, RTW8180_PHYCFG_MAC_POLL | reg);
+
+	RTW_WBR(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+
+	for (i = rtw_macbangbits_timeout; --i >= 0; delay(1)) {
+		if ((RTW_READ(regs, RTW8180_PHYCFG) &
+		    RTW8180_PHYCFG_MAC_POLL) == 0) {
+			RTW_DPRINTF(RTW_DEBUG_PHY,
+			    ("%s: finished in %dus\n", __func__,
+			    rtw_macbangbits_timeout - i));
+			return 0;
+		}
+		RTW_RBR(regs, RTW8180_PHYCFG, RTW8180_PHYCFG);
+	}
+
+	printf("%s: RTW8180_PHYCFG_MAC_POLL still set.\n", __func__);
+	return -1;
+}
+
+u_int32_t
+rtw_grf5101_host_crypt(u_int addr, u_int32_t val)
+{
+	/* TBD */
+	return 0;
+}
+
+u_int32_t
+rtw_grf5101_mac_crypt(u_int addr, u_int32_t val)
+{
+	u_int32_t data_and_addr;
+#define EXTRACT_NIBBLE(d, which) (((d) >> (4 * (which))) & 0xf)
+	static u_int8_t caesar[16] = {
+		0x0, 0x8, 0x4, 0xc,
+		0x2, 0xa, 0x6, 0xe,
+		0x1, 0x9, 0x5, 0xd,
+		0x3, 0xb, 0x7, 0xf
+	};
+	data_and_addr =
+	    caesar[EXTRACT_NIBBLE(val, 2)] |
+	    (caesar[EXTRACT_NIBBLE(val, 1)] <<  4) |
+	    (caesar[EXTRACT_NIBBLE(val, 0)] <<  8) |
+	    (caesar[(addr >> 1) & 0xf]      << 12) |
+	    ((addr & 0x1)                   << 16) |
+	    (caesar[EXTRACT_NIBBLE(val, 3)] << 24);
+	return LSHIFT(data_and_addr, RTW8180_PHYCFG_MAC_PHILIPS_ADDR_MASK |
+	    RTW8180_PHYCFG_MAC_PHILIPS_DATA_MASK);
+#undef EXTRACT_NIBBLE
+}
+
+const char *
+rtw_rfchipid_string(enum rtw_rfchipid rfchipid)
+{
+	switch (rfchipid) {
+	case RTW_RFCHIPID_MAXIM2820:
+		return "Maxim 2820";
+	case RTW_RFCHIPID_PHILIPS:
+		return "Philips SA2400";
+	case RTW_RFCHIPID_GCT:
+		return "GCT";
+	case RTW_RFCHIPID_RFMD2948:
+		return "RFMD 2948";
+	case RTW_RFCHIPID_INTERSIL:
+		return "Intersil";
+	case RTW_RFCHIPID_RTL8225:
+		return "Realtek RTL8225";
+	case RTW_RFCHIPID_RTL8255:
+		return "Realtek RTL8255";
+	default:
+		return "unknown";
+	}
+}
+
+/* Bang bits over the 3-wire interface. */
+int
+rtw_rf_hostwrite(struct rtw_regs *regs, enum rtw_rfchipid rfchipid,
+    u_int addr, u_int32_t val)
+{
+	u_int nbits;
+	int lo_to_hi;
+	u_int32_t bits;
+	void(*rf_bangbits)(struct rtw_regs *, u_int32_t, int, u_int) =
+	    rtw_rf_hostbangbits;
+
+	RTW_DPRINTF(RTW_DEBUG_PHYIO, ("%s: %s[%u] <- %#08x\n", __func__,
+	    rtw_rfchipid_string(rfchipid), addr, val));
+
+	switch (rfchipid) {
+	case RTW_RFCHIPID_MAXIM2820:
+		nbits = 16;
+		lo_to_hi = 0;
+		bits = LSHIFT(val, MAX2820_TWI_DATA_MASK) |
+		    LSHIFT(addr, MAX2820_TWI_ADDR_MASK);
+		break;
+	case RTW_RFCHIPID_PHILIPS:
+		KASSERT((addr & ~PRESHIFT(SA2400_TWI_ADDR_MASK)) == 0);
+		KASSERT((val & ~PRESHIFT(SA2400_TWI_DATA_MASK)) == 0);
+		bits = LSHIFT(val, SA2400_TWI_DATA_MASK) |
+		    LSHIFT(addr, SA2400_TWI_ADDR_MASK) | SA2400_TWI_WREN;
+		nbits = 32;
+		lo_to_hi = 1;
+		break;
+	case RTW_RFCHIPID_GCT:
+	case RTW_RFCHIPID_RFMD2948:
+		KASSERT((addr & ~PRESHIFT(SI4126_TWI_ADDR_MASK)) == 0);
+		KASSERT((val & ~PRESHIFT(SI4126_TWI_DATA_MASK)) == 0);
+		if (rfchipid == RTW_RFCHIPID_GCT)
+			bits = rtw_grf5101_host_crypt(addr, val);
+		else {
+			bits = LSHIFT(val, SI4126_TWI_DATA_MASK) |
+			    LSHIFT(addr, SI4126_TWI_ADDR_MASK);
+		}
+		nbits = 22;
+		lo_to_hi = 0;
+		break;
+	case RTW_RFCHIPID_RTL8225:
+	case RTW_RFCHIPID_RTL8255:
+		nbits = 16;
+		lo_to_hi = 0;
+		bits = LSHIFT(val, RTL8225_TWI_DATA_MASK) |
+		    LSHIFT(addr, RTL8225_TWI_ADDR_MASK);
+
+		/* the RTL8225 uses a slightly modified RF interface */
+		rf_bangbits = rtw_rf_hostbangbits;
+		break;
+	case RTW_RFCHIPID_INTERSIL:
+	default:
+		printf("%s: unknown rfchipid %d\n", __func__, rfchipid);
+		return -1;
+	}
+
+	(*rf_bangbits)(regs, bits, lo_to_hi, nbits);
+
+	return 0;
+}
+
+u_int32_t
+rtw_maxim_swizzle(u_int addr, u_int32_t val)
+{
+	u_int32_t hidata, lodata;
+
+	KASSERT((val & ~(RTW_MAXIM_LODATA_MASK|RTW_MAXIM_HIDATA_MASK)) == 0);
+	lodata = MASK_AND_RSHIFT(val, RTW_MAXIM_LODATA_MASK);
+	hidata = MASK_AND_RSHIFT(val, RTW_MAXIM_HIDATA_MASK);
+	return LSHIFT(lodata, RTW8180_PHYCFG_MAC_MAXIM_LODATA_MASK) |
+	    LSHIFT(hidata, RTW8180_PHYCFG_MAC_MAXIM_HIDATA_MASK) |
+	    LSHIFT(addr, RTW8180_PHYCFG_MAC_MAXIM_ADDR_MASK);
+}
+
+/* Tell the MAC what to bang over the 3-wire interface. */
+int
+rtw_rf_macwrite(struct rtw_regs *regs, enum rtw_rfchipid rfchipid,
+    u_int addr, u_int32_t val)
+{
+	u_int32_t reg;
+
+	RTW_DPRINTF(RTW_DEBUG_PHYIO, ("%s: %s[%u] <- %#08x\n", __func__,
+	    rtw_rfchipid_string(rfchipid), addr, val));
+
+	switch (rfchipid) {
+	case RTW_RFCHIPID_GCT:
+		reg = rtw_grf5101_mac_crypt(addr, val);
+		break;
+	case RTW_RFCHIPID_MAXIM2820:
+		reg = rtw_maxim_swizzle(addr, val);
+		break;
+	default:		/* XXX */
+	case RTW_RFCHIPID_PHILIPS:
+		KASSERT((addr &
+		    ~PRESHIFT(RTW8180_PHYCFG_MAC_PHILIPS_ADDR_MASK)) == 0);
+		KASSERT((val &
+		    ~PRESHIFT(RTW8180_PHYCFG_MAC_PHILIPS_DATA_MASK)) == 0);
+
+		reg = LSHIFT(addr, RTW8180_PHYCFG_MAC_PHILIPS_ADDR_MASK) |
+		    LSHIFT(val, RTW8180_PHYCFG_MAC_PHILIPS_DATA_MASK);
+	}
+
+	switch (rfchipid) {
+	case RTW_RFCHIPID_GCT:
+	case RTW_RFCHIPID_MAXIM2820:
+	case RTW_RFCHIPID_RFMD2948:
+		reg |= RTW8180_PHYCFG_MAC_RFTYPE_RFMD;
+		break;
+	case RTW_RFCHIPID_INTERSIL:
+		reg |= RTW8180_PHYCFG_MAC_RFTYPE_INTERSIL;
+		break;
+	case RTW_RFCHIPID_PHILIPS:
+		reg |= RTW8180_PHYCFG_MAC_RFTYPE_PHILIPS;
+		break;
+	default:
+		printf("%s: unknown rfchipid %d\n", __func__, rfchipid);
+		return -1;
+	}
+
+	return rtw_rf_macbangbits(regs, reg);
 }

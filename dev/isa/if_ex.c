@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ex.c,v 1.10 2004/12/26 21:22:13 miod Exp $	*/
+/*	$OpenBSD: if_ex.c,v 1.13 2005/06/08 17:03:00 henning Exp $	*/
 /*
  * Copyright (c) 1997, Donald A. Schmidt
  * Copyright (c) 1996, Javier Martín Rueda (jmrueda@diatel.upm.es)
@@ -57,11 +57,6 @@
 #ifdef IPX
 #include <netipx/ipx.h>
 #include <netipx/ipx_if.h>
-#endif
-
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
 #endif
 
 #if NBPFILTER > 0
@@ -686,7 +681,6 @@ ex_rx_intr(sc)
 	register struct ifnet *ifp = &sc->arpcom.ac_if;
 	int rx_status, pkt_len, QQQ;
 	register struct mbuf *m, *ipkt;
-	struct ether_header *eh;
 
 	DODEBUG(Start_End, printf("ex_rx_intr: start\n"););
 	/*
@@ -747,7 +741,6 @@ ex_rx_intr(sc)
 					m->m_len = MLEN;
 				}
 			}
-			eh = mtod(ipkt, struct ether_header *);
 #ifdef EXDEBUG
 			if (debug_mask & Rcvd_Pkts) {
 				if ((eh->ether_dhost[5] != 0xff) || 
@@ -761,8 +754,7 @@ ex_rx_intr(sc)
 			if (ifp->if_bpf != NULL)
 				bpf_mtap(ifp->if_bpf, ipkt);
 #endif
-			m_adj(ipkt, sizeof(struct ether_header));
-			ether_input(ifp, eh, ipkt);
+			ether_input_mbuf(ifp, ipkt);
 			ifp->if_ipackets++;
       		}
     	} else
@@ -828,22 +820,6 @@ ex_ioctl(ifp, cmd, data)
 					break;
      				}
 #endif
-#ifdef NS
-				case AF_NS:
-      				{
-	register struct ns_addr *ina = &(IA_SNS(ifa)->sns_addr);
-
-	if (ns_nullhost(*ina))
-	  ina->x_host = *(union ns_host *) (sc->arpcom.ac_enaddr);
-	else {
-	  ifp->if_flags &= ~IFF_RUNNING;
-	  bcopy((caddr_t) ina->x_host.c_host, (caddr_t) sc->arpcom.ac_enaddr, 
-		sizeof(sc->arpcom.ac_enaddr));
-	}
-	ex_init(sc);
-	break;
-      }
-#endif
     default:
       ex_init(sc);
       break;
@@ -874,15 +850,14 @@ ex_ioctl(ifp, cmd, data)
     bcopy((caddr_t) sc->sc_addr, (caddr_t) &ifr->ifr_data, sizeof(sc->sc_addr));
     break;
 #endif
-#if 0						/* XXX can we do this? */
   case SIOCSIFMTU:
     DODEBUG(Start_End, printf("SIOCSIFMTU"););
-    if (ifr->if_mtu > ETHERMTU)
+    if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
       error = EINVAL;
-    else
+    } else if (ifp->if_mtu != ifr->ifr_mtu) {
       ifp->if_mtu = ifr->ifr_mtu;
+    }
     break;
-#endif 
   case SIOCADDMULTI:
     DODEBUG(Start_End, printf("SIOCADDMULTI"););
   case SIOCDELMULTI:

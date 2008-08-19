@@ -1,15 +1,23 @@
-#	$OpenBSD: GENERIC,v 1.22 2004/09/16 09:14:03 mickey Exp $
+#	$OpenBSD: GENERIC,v 1.26 2005/08/03 02:10:44 dlg Exp $
+#
+# For further information on compiling OpenBSD kernels, see the config(8)
+# man page.
+#
+# For further information on hardware support for this architecture, see
+# the intro(4) man page.  For further information about kernel options
+# for this architecture, see the options(4) man page.  For an explanation
+# of each device driver in this file see the section 4 man page for the
+# device.
 
 machine		mvme68k m68k
-
 include "../../../conf/GENERIC"
+maxusers	32			# estimated number of users
 
 option		M68030		# support for 030
 option		M68040		# support for 040
 option		M68060		# support for 060
 option		FPSP		# MC68040 floating point support
 option		M060SP		# ...and MC68060 support package
-option		FPU_EMULATE	# FPU emulation
 
 option		MVME147		# (requires M68030)
 option		MVME162		# (requires M68040, FPSP)
@@ -20,8 +28,6 @@ option		MVME177		# (requires M68060, 060SP, FPSP)
 option		COMPAT_SUNOS
 option		COMPAT_HPUX
 option		COMPAT_M68K4K
-
-maxusers	32
 
 config		bsd		swap generic
 
@@ -95,6 +101,8 @@ st*	at scsibus?
 cd*	at scsibus?
 ch*	at scsibus?
 ss*	at scsibus?
+safte*	at scsibus?
+ses*	at scsibus?
 uk*	at scsibus?
 
 #si0	at vmes0 addr 0xff200000 ipl 2 vec 0x40

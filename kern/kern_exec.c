@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.91.2.1 2005/12/30 01:28:02 brad Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.95.2.1 2005/12/22 02:41:54 brad Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -82,7 +82,7 @@ int exec_sigcode_map(struct proc *, struct emul *);
  * to it. Must be a n^2. If non-zero, the stack gap will be calculated as:
  * (arc4random() * ALIGNBYTES) & (stackgap_random - 1) + STACKGAPLEN.
  */
-int stackgap_random = 64*1024;
+int stackgap_random = STACKGAP_RANDOM;
 
 /*
  * check exec:
@@ -264,9 +264,9 @@ sys_execve(p, v, retval)
 #if NSYSTRACE > 0
 	int wassugid =
 	    ISSET(p->p_flag, P_SUGID) || ISSET(p->p_flag, P_SUGIDEXEC);
-	char pathbuf[MAXPATHLEN];
 	size_t pathbuflen;
 #endif
+	char *pathbuf = NULL;
 
 	/*
 	 * Cheap solution to complicated problems.
@@ -275,27 +275,29 @@ sys_execve(p, v, retval)
 	p->p_flag |= P_INEXEC;
 
 #if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
+	if (ISSET(p->p_flag, P_SYSTRACE)) {
 		systrace_execve0(p);
-
-	error = copyinstr(SCARG(uap, path), pathbuf, MAXPATHLEN, &pathbuflen);
-	if (error != 0)
-		goto clrflag;
-
-	NDINIT(&nid, LOOKUP, NOFOLLOW, UIO_SYSSPACE, pathbuf, p);
-#else
-	/* init the namei data to point the file user's program name */
-	NDINIT(&nid, LOOKUP, NOFOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+		pathbuf = pool_get(&namei_pool, PR_WAITOK);
+		error = copyinstr(SCARG(uap, path), pathbuf, MAXPATHLEN,
+		    &pathbuflen);
+		if (error != 0)
+			goto clrflag;
+	}
 #endif
+	if (pathbuf != NULL) {
+		NDINIT(&nid, LOOKUP, NOFOLLOW, UIO_SYSSPACE, pathbuf, p);
+	} else {
+		NDINIT(&nid, LOOKUP, NOFOLLOW, UIO_USERSPACE,
+		    SCARG(uap, path), p);
+	}
 
 	/*
 	 * initialize the fields of the exec package.
 	 */
-#if NSYSTRACE > 0
-	pack.ep_name = pathbuf;
-#else
-	pack.ep_name = (char *)SCARG(uap, path);
-#endif
+	if (pathbuf != NULL)
+		pack.ep_name = pathbuf;
+	else
+		pack.ep_name = (char *)SCARG(uap, path);
 	pack.ep_hdr = malloc(exec_maxhdrsz, M_EXEC, M_WAITOK);
 	pack.ep_hdrlen = exec_maxhdrsz;
 	pack.ep_hdrvalid = 0;
@@ -417,6 +419,7 @@ sys_execve(p, v, retval)
 	vm->vm_tsize = btoc(pack.ep_tsize);
 	vm->vm_daddr = (char *)pack.ep_daddr;
 	vm->vm_dsize = btoc(pack.ep_dsize);
+	vm->vm_dused = 0;
 	vm->vm_ssize = btoc(pack.ep_ssize);
 	vm->vm_maxsaddr = (char *)pack.ep_maxsaddr;
 	vm->vm_minsaddr = (char *)pack.ep_minsaddr;
@@ -452,7 +455,7 @@ sys_execve(p, v, retval)
 
 	stopprofclock(p);	/* stop profiling */
 	fdcloseexec(p);		/* handle close on exec */
-	execsigs(p);		/* reset catched signals */
+	execsigs(p);		/* reset caught signals */
 
 	/* set command name & other accounting info */
 	len = min(nid.ni_cnd.cn_namelen, MAXCOMLEN);
@@ -663,6 +666,9 @@ sys_execve(p, v, retval)
 		systrace_execve1(pathbuf, p);
 #endif
 
+	if (pathbuf != NULL)
+		pool_put(&namei_pool, pathbuf);
+
 	return (0);
 
 bad:
@@ -688,6 +694,10 @@ bad:
  clrflag:
 #endif
 	p->p_flag &= ~P_INEXEC;
+
+	if (pathbuf != NULL)
+		pool_put(&namei_pool, pathbuf);
+
 	return (error);
 
 exec_abort:
@@ -712,6 +722,9 @@ free_pack_abort:
 
 	/* NOTREACHED */
 	p->p_flag &= ~P_INEXEC;
+	if (pathbuf != NULL)
+		pool_put(&namei_pool, pathbuf);
+
 	return (0);
 }
 

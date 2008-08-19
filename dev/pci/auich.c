@@ -1,4 +1,4 @@
-/*	$OpenBSD: auich.c,v 1.45 2005/01/17 20:37:04 mickey Exp $	*/
+/*	$OpenBSD: auich.c,v 1.56 2005/08/10 15:28:35 jsg Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Michael Shalayeff
@@ -53,24 +53,15 @@
 
 #include <dev/ic/ac97.h>
 
-/*
- * XXX > 4GB kaboom: define kvtop as a truncated vtophys.  Will not
- * do the right thing on machines with more than 4 gig of ram.
- */
-#if defined(__amd64__)
-#include <uvm/uvm_extern.h>	/* for vtophys */
-#define kvtop(va)		(int)vtophys((vaddr_t)(va))
-#endif
-
 /* 12.1.10 NAMBAR - native audio mixer base address register */
 #define	AUICH_NAMBAR	0x10
 /* 12.1.11 NABMBAR - native audio bus mastering base address register */
 #define	AUICH_NABMBAR	0x14
 #define	AUICH_CFG	0x41
 #define	AUICH_CFG_IOSE	0x01
-/* ICH4/ICH5 native audio mixer BAR */
+/* ICH4/ICH5/ICH6/ICH7 native audio mixer BAR */
 #define	AUICH_MMBAR	0x18
-/* ICH4/ICH5 native bus mastering BAR */
+/* ICH4/ICH5/ICH6/ICH7 native bus mastering BAR */
 #define	AUICH_MBBAR	0x1c
 #define	AUICH_S2CR	0x10000000	/* tertiary codec ready */
 
@@ -138,6 +129,9 @@
 #define	AUICH_SEMATIMO		1000	/* us */
 #define	AUICH_RESETIMO		500000	/* us */
 
+#define	ICH_SIS_NV_CTL	0x4c	/* some SiS/nVidia register.  From Linux */
+#define		ICH_SIS_CTL_UNMUTE	0x01	/* un-mute the output */
+
 /*
  * according to the dev/audiovar.h AU_RING_SIZE is 2^16, what fits
  * in our limits perfectly, i.e. setting it to higher value
@@ -170,6 +164,7 @@ struct auich_softc {
 	audio_device_t sc_audev;
 
 	bus_space_tag_t iot;
+	bus_space_tag_t iot_mix;
 	bus_space_handle_t mix_ioh;
 	bus_space_handle_t aud_ioh;
 	bus_dma_tag_t dmat;
@@ -178,12 +173,17 @@ struct auich_softc {
 	struct ac97_host_if host_if;
 
 	/* dma scatter-gather buffer lists, aligned to 8 bytes */
-	struct auich_dmalist *dmalist_pcmo, *dmap_pcmo,
-	    dmasto_pcmo[AUICH_DMALIST_MAX+1];
-	struct auich_dmalist *dmalist_pcmi, *dmap_pcmi,
-	    dmasto_pcmi[AUICH_DMALIST_MAX+1];
-	struct auich_dmalist *dmalist_mici, *dmap_mici,
-	    dmasto_mici[AUICH_DMALIST_MAX+1];
+	struct auich_dmalist *dmalist_pcmo, *dmap_pcmo;
+	struct auich_dmalist *dmalist_pcmi, *dmap_pcmi;
+	struct auich_dmalist *dmalist_mici, *dmap_mici;
+
+	bus_dmamap_t dmalist_map;
+	bus_dma_segment_t dmalist_seg[2];
+	caddr_t dmalist_kva;
+	bus_addr_t dmalist_pcmo_pa;
+	bus_addr_t dmalist_pcmi_pa;
+	bus_addr_t dmalist_mici_pa;
+
 	/* i/o buffer pointers */
 	u_int32_t pcmo_start, pcmo_p, pcmo_end;
 	int pcmo_blksize, pcmo_fifoe;
@@ -243,13 +243,18 @@ static const struct auich_devtype {
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801CA_ACA,	0, "ICH3" },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801DB_ACA,	0, "ICH4" },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801EB_ACA,	0, "ICH5" },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801FB_ACA,	0, "ICH6" },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801GB_ACA,	0, "ICH7" },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82440MX_ACA,	0, "440MX" },
 	{ PCI_VENDOR_SIS,	PCI_PRODUCT_SIS_7012_ACA,	0, "SiS7012" },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE_ACA,	0, "nForce" },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE2_ACA,	0, "nForce2" },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE3_ACA, 0, "nForce3" },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE2_400_ACA,
+	    0, "nForce2" },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE3_ACA,	0, "nForce3" },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE3_250_ACA,
 	    0, "nForce3" },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE4_AC,	0, "nForce4" },
 	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_PBC768_ACA,	0, "AMD768" },
 	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_8111_ACA,	0, "AMD8111" },
 };
@@ -343,31 +348,24 @@ auich_attach(parent, self, aux)
 	pcireg_t csr;
 	const char *intrstr;
 	u_int32_t status;
-	int i;
-
-	/* SiS 7012 needs special handling */
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_SIS &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SIS_7012_ACA) {
-		sc->sc_sts_reg = AUICH_PICB;
-		sc->sc_sample_size = 1;
-	} else {
-		sc->sc_sts_reg = AUICH_STS;
-		sc->sc_sample_size = 2;
-	}
+	bus_size_t dmasz;
+	int i, segs;
 
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
 	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801DB_ACA ||
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801EB_ACA)) {
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801EB_ACA ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801FB_ACA ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801GB_ACA)) {
 		/*
-		 * Use native mode for ICH4/ICH5
+		 * Use native mode for ICH4/ICH5/ICH6/ICH7
 		 */
 		if (pci_mapreg_map(pa, AUICH_MMBAR, PCI_MAPREG_TYPE_MEM, 0,
-		    &sc->iot, &sc->mix_ioh, NULL, &mix_size, 0)) {
+		    &sc->iot_mix, &sc->mix_ioh, NULL, &mix_size, 0)) {
 			csr = pci_conf_read(pa->pa_pc, pa->pa_tag, AUICH_CFG);
 			pci_conf_write(pa->pa_pc, pa->pa_tag, AUICH_CFG,
 			    csr | AUICH_CFG_IOSE);
 			if (pci_mapreg_map(pa, AUICH_NAMBAR, PCI_MAPREG_TYPE_IO,
-			    0, &sc->iot, &sc->mix_ioh, NULL, &mix_size, 0)) {
+			    0, &sc->iot_mix, &sc->mix_ioh, NULL, &mix_size, 0)) {
 				printf(": can't map codec mem/io space\n");
 				return;
 			}
@@ -382,13 +380,13 @@ auich_attach(parent, self, aux)
 			    PCI_MAPREG_TYPE_IO, 0, &sc->iot,
 			    &sc->aud_ioh, NULL, &aud_size, 0)) {
 				printf(": can't map device mem/io space\n");
-				bus_space_unmap(sc->iot, sc->mix_ioh, mix_size);
+				bus_space_unmap(sc->iot_mix, sc->mix_ioh, mix_size);
 				return;
 			}
 		}
 	} else {
 		if (pci_mapreg_map(pa, AUICH_NAMBAR, PCI_MAPREG_TYPE_IO,
-		    0, &sc->iot, &sc->mix_ioh, NULL, &mix_size, 0)) {
+		    0, &sc->iot_mix, &sc->mix_ioh, NULL, &mix_size, 0)) {
 			printf(": can't map codec i/o space\n");
 			return;
 		}
@@ -396,21 +394,45 @@ auich_attach(parent, self, aux)
 		if (pci_mapreg_map(pa, AUICH_NABMBAR, PCI_MAPREG_TYPE_IO,
 		    0, &sc->iot, &sc->aud_ioh, NULL, &aud_size, 0)) {
 			printf(": can't map device i/o space\n");
-			bus_space_unmap(sc->iot, sc->mix_ioh, mix_size);
+			bus_space_unmap(sc->iot_mix, sc->mix_ioh, mix_size);
 			return;
 		}
 	}
 	sc->dmat = pa->pa_dmat;
 
-	/* enable bus mastering (should not it be mi?) */
-	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
-	    csr | PCI_COMMAND_MASTER_ENABLE);
+	/* allocate dma memory */
+	dmasz = AUICH_DMALIST_MAX * 3 * sizeof(struct auich_dma);
+	segs = 1;
+	if (bus_dmamem_alloc(sc->dmat, dmasz, PAGE_SIZE, 0, sc->dmalist_seg,
+	    segs, &segs, BUS_DMA_NOWAIT)) {
+		printf(": failed to alloc dmalist\n");
+		return;
+	}
+	if (bus_dmamem_map(sc->dmat, sc->dmalist_seg, segs, dmasz,
+	    &sc->dmalist_kva, BUS_DMA_NOWAIT)) {
+		printf(": failed to map dmalist\n");
+		bus_dmamem_free(sc->dmat, sc->dmalist_seg, segs);
+		return;
+	}
+	if (bus_dmamap_create(sc->dmat, dmasz, segs, dmasz, 0, BUS_DMA_NOWAIT,
+	    &sc->dmalist_map)) {
+		printf(": failed to create dmalist map\n");
+		bus_dmamem_unmap(sc->dmat, sc->dmalist_kva, dmasz);
+		bus_dmamem_free(sc->dmat, sc->dmalist_seg, segs);
+		return;
+	}
+	if (bus_dmamap_load_raw(sc->dmat, sc->dmalist_map, sc->dmalist_seg,
+	    segs, dmasz, BUS_DMA_NOWAIT)) {
+		printf(": failed to load dmalist map: %d segs %u size\n", segs, dmasz);
+		bus_dmamap_destroy(sc->dmat, sc->dmalist_map);
+		bus_dmamem_unmap(sc->dmat, sc->dmalist_kva, dmasz);
+		bus_dmamem_free(sc->dmat, sc->dmalist_seg, segs);
+		return;
+	}
 
 	if (pci_intr_map(pa, &ih)) {
-		printf(": can't map interrupt\n");
 		bus_space_unmap(sc->iot, sc->aud_ioh, aud_size);
-		bus_space_unmap(sc->iot, sc->mix_ioh, mix_size);
+		bus_space_unmap(sc->iot_mix, sc->mix_ioh, mix_size);
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, ih);
@@ -422,7 +444,7 @@ auich_attach(parent, self, aux)
 			printf(" at %s", intrstr);
 		printf("\n");
 		bus_space_unmap(sc->iot, sc->aud_ioh, aud_size);
-		bus_space_unmap(sc->iot, sc->mix_ioh, mix_size);
+		bus_space_unmap(sc->iot_mix, sc->mix_ioh, mix_size);
 		return;
 	}
 
@@ -439,12 +461,35 @@ auich_attach(parent, self, aux)
 
 	printf(": %s, %s\n", intrstr, sc->sc_audev.name);
 
-	/* allocate dma lists */
-#define	a(a)	(void *)(((u_long)(a) + sizeof(*(a)) - 1) & ~(sizeof(*(a))-1))
-	sc->dmalist_pcmo = sc->dmap_pcmo = a(sc->dmasto_pcmo);
-	sc->dmalist_pcmi = sc->dmap_pcmi = a(sc->dmasto_pcmi);
-	sc->dmalist_mici = sc->dmap_mici = a(sc->dmasto_mici);
-#undef a
+	/* SiS 7012 needs special handling */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_SIS &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SIS_7012_ACA) {
+		sc->sc_sts_reg = AUICH_PICB;
+		sc->sc_sample_size = 1;
+		/* un-mute output */
+		bus_space_write_4(sc->iot, sc->aud_ioh, ICH_SIS_NV_CTL,
+		    bus_space_read_4(sc->iot, sc->aud_ioh, ICH_SIS_NV_CTL) |
+		    ICH_SIS_CTL_UNMUTE);
+	} else {
+		sc->sc_sts_reg = AUICH_STS;
+		sc->sc_sample_size = 2;
+	}
+
+	sc->dmalist_pcmo = (struct auich_dmalist *)(sc->dmalist_kva +
+	    (0 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX));
+	sc->dmalist_pcmo_pa = sc->dmalist_map->dm_segs[0].ds_addr +
+	    (0 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX);
+
+	sc->dmalist_pcmi = (struct auich_dmalist *)(sc->dmalist_kva +
+	    (1 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX));
+	sc->dmalist_pcmi_pa = sc->dmalist_map->dm_segs[0].ds_addr +
+	    (1 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX);
+
+	sc->dmalist_mici = (struct auich_dmalist *)(sc->dmalist_kva +
+	    (2 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX));
+	sc->dmalist_mici_pa = sc->dmalist_map->dm_segs[0].ds_addr +
+	    (2 * sizeof(struct auich_dmalist) + AUICH_DMALIST_MAX);
+
 	DPRINTF(AUICH_DEBUG_DMA, ("auich_attach: lists %p %p %p\n",
 	    sc->dmalist_pcmo, sc->dmalist_pcmi, sc->dmalist_mici));
 
@@ -454,7 +499,9 @@ auich_attach(parent, self, aux)
 	if (!(status & AUICH_PCR)) {	/* reset failure */
 		if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL &&
 		    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801DB_ACA ||
-		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801EB_ACA)) {
+		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801EB_ACA ||
+		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801FB_ACA ||
+		     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_INTEL_82801GB_ACA)) {
 			/* MSI 845G Max never return AUICH_PCR */
 			sc->sc_ignore_codecready = 1;
 		} else {
@@ -475,7 +522,7 @@ auich_attach(parent, self, aux)
 	if (ac97_attach(&sc->host_if) != 0) {
 		pci_intr_disestablish(pa->pa_pc, sc->sc_ih);
 		bus_space_unmap(sc->iot, sc->aud_ioh, aud_size);
-		bus_space_unmap(sc->iot, sc->mix_ioh, mix_size);
+		bus_space_unmap(sc->iot_mix, sc->mix_ioh, mix_size);
 		return;
 	}
 
@@ -507,7 +554,7 @@ auich_read_codec(v, reg, val)
 		return (-1);
 	}
 
-	*val = bus_space_read_2(sc->iot, sc->mix_ioh, reg);
+	*val = bus_space_read_2(sc->iot_mix, sc->mix_ioh, reg);
 	DPRINTF(AUICH_DEBUG_CODECIO, ("%s: read_codec(%x, %x)\n",
 	    sc->sc_dev.dv_xname, reg, *val));
 	return (0);
@@ -529,7 +576,7 @@ auich_write_codec(v, reg, val)
 	if (sc->sc_ignore_codecready || i >= 0) {
 		DPRINTF(AUICH_DEBUG_CODECIO, ("%s: write_codec(%x, %x)\n",
 		    sc->sc_dev.dv_xname, reg, val));
-		bus_space_write_2(sc->iot, sc->mix_ioh, reg, val);
+		bus_space_write_2(sc->iot_mix, sc->mix_ioh, reg, val);
 		return (0);
 	} else {
 		DPRINTF(AUICH_DEBUG_CODECIO,
@@ -560,7 +607,7 @@ auich_reset_codec(v)
 	control = bus_space_read_4(sc->iot, sc->aud_ioh, AUICH_GCTRL);
 	control &= ~(AUICH_ACLSO | AUICH_PCM246_MASK);
 	control |= (control & AUICH_CRESET) ? AUICH_WRESET : AUICH_CRESET;
-	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_GCTRL, AUICH_CRESET);
+	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_GCTRL, control);
 
 	for (i = AUICH_RESETIMO; i-- &&
 	    !(bus_space_read_4(sc->iot, sc->aud_ioh, AUICH_GSTS) & AUICH_PCR);
@@ -665,6 +712,7 @@ auich_set_params(v, setmode, usemode, play, rec)
 	struct auich_softc *sc = v;
 	int error;
 	u_int orate;
+	u_int adj_rate;
 
 	if (setmode & AUMODE_PLAY) {
 		play->factor = 1;
@@ -831,12 +879,13 @@ auich_set_params(v, setmode, usemode, play, rec)
 			return (EINVAL);
 		}
 
-		orate = play->sample_rate;
+		orate = adj_rate = play->sample_rate;
 		if (sc->sc_ac97rate != 0)
-			play->sample_rate = orate * AUICH_FIXED_RATE /
-			    sc->sc_ac97rate;
+			adj_rate = orate * AUICH_FIXED_RATE / sc->sc_ac97rate;
+		play->sample_rate = adj_rate;
 		error = ac97_set_rate(sc->codec_if, play, AUMODE_PLAY);
-		play->sample_rate = orate;
+		if (play->sample_rate == adj_rate)
+			play->sample_rate = orate;
 		if (error)
 			return (error);
 	}
@@ -891,7 +940,7 @@ auich_round_blocksize(v, blk)
 	void *v;
 	int blk;
 {
-	return blk & ~0x3f;
+	return (blk + 0x3f) & ~0x3f;
 }
 
 int
@@ -1103,11 +1152,12 @@ auich_intr(v)
 		DPRINTF(AUICH_DEBUG_DMA,
 		    ("auich_intr: osts=%b\n", sts, AUICH_ISTS_BITS));
 
+#ifdef AUICH_DEBUG
 		if (sts & AUICH_FIFOE) {
 			printf("%s: fifo underrun # %u\n",
 			    sc->sc_dev.dv_xname, ++sc->pcmo_fifoe);
 		}
-
+#endif
 		i = bus_space_read_1(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_CIV);
 		if (sts & (AUICH_LVBCI | AUICH_CELV)) {
 			struct auich_dmalist *q, *qe;
@@ -1157,11 +1207,12 @@ auich_intr(v)
 		DPRINTF(AUICH_DEBUG_DMA,
 		    ("auich_intr: ists=%b\n", sts, AUICH_ISTS_BITS));
 
+#ifdef AUICH_DEBUG
 		if (sts & AUICH_FIFOE) {
 			printf("%s: in fifo overrun # %u\n",
 			    sc->sc_dev.dv_xname, ++sc->pcmi_fifoe);
 		}
-
+#endif
 		i = bus_space_read_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_CIV);
 		if (sts & (AUICH_LVBCI | AUICH_CELV)) {
 			struct auich_dmalist *q, *qe;
@@ -1210,8 +1261,10 @@ auich_intr(v)
 		    AUICH_MICI + sc->sc_sts_reg);
 		DPRINTF(AUICH_DEBUG_DMA,
 		    ("auich_intr: ists=%b\n", sts, AUICH_ISTS_BITS));
+#ifdef AUICH_DEBUG
 		if (sts & AUICH_FIFOE)
 			printf("%s: mic fifo overrun\n", sc->sc_dev.dv_xname);
+#endif
 
 		/* TODO mic input dma */
 
@@ -1263,7 +1316,7 @@ auich_trigger_output(v, start, end, blksize, intr, arg, param)
 	sc->dmap_pcmo = q;
 
 	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_BDBAR,
-	    kvtop((caddr_t)sc->dmalist_pcmo));
+	    sc->dmalist_pcmo_pa);
 	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_CTRL,
 	    AUICH_IOCE | AUICH_FEIE | AUICH_LVBIE | AUICH_RPBM);
 	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMO + AUICH_LVI,
@@ -1314,7 +1367,7 @@ auich_trigger_input(v, start, end, blksize, intr, arg, param)
 	sc->dmap_pcmi = q;
 
 	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_BDBAR,
-	    kvtop((caddr_t)sc->dmalist_pcmi));
+	    sc->dmalist_pcmi_pa);
 	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_CTRL,
 	    AUICH_IOCE | AUICH_FEIE | AUICH_LVBIE | AUICH_RPBM);
 	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_LVI,
@@ -1410,7 +1463,7 @@ auich_calibrate(struct auich_softc *sc)
 	ociv = bus_space_read_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_CIV);
 	nciv = ociv;
 	bus_space_write_4(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_BDBAR,
-	    kvtop((caddr_t)sc->dmalist_pcmi));
+	    sc->dmalist_pcmi_pa);
 	bus_space_write_1(sc->iot, sc->aud_ioh, AUICH_PCMI + AUICH_LVI,
 			  (0 - 1) & AUICH_LVI_MASK);
 

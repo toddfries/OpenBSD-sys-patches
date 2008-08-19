@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi.c,v 1.116 2005/02/15 19:44:15 reyk Exp $	*/
+/*	$OpenBSD: if_wi.c,v 1.119 2005/07/31 23:08:58 pascoe Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -127,7 +127,7 @@ u_int32_t	widebug = WIDEBUG;
 
 #if !defined(lint) && !defined(__OpenBSD__)
 static const char rcsid[] =
-	"$OpenBSD: if_wi.c,v 1.116 2005/02/15 19:44:15 reyk Exp $";
+	"$OpenBSD: if_wi.c,v 1.119 2005/07/31 23:08:58 pascoe Exp $";
 #endif	/* lint */
 
 #ifdef foo
@@ -764,17 +764,16 @@ wi_rxeof(sc)
 		if (sc->wi_use_wep &&
 		    rx_frame.wi_frame_ctl & htole16(WI_FCTL_WEP)) {
 			int len;
-			u_int8_t rx_buf[1596];
 
 			switch (sc->wi_crypto_algorithm) {
 			case WI_CRYPTO_FIRMWARE_WEP:
 				break;
 			case WI_CRYPTO_SOFTWARE_WEP:
 				m_copydata(m, 0, m->m_pkthdr.len,
-				    (caddr_t)rx_buf);
+				    (caddr_t)sc->wi_rxbuf);
 				len = m->m_pkthdr.len -
 				    sizeof(struct ether_header);
-				if (wi_do_hostdecrypt(sc, rx_buf +
+				if (wi_do_hostdecrypt(sc, sc->wi_rxbuf +
 				    sizeof(struct ether_header), len)) {
 					if (sc->sc_arpcom.ac_if.if_flags & IFF_DEBUG)
 						printf(WI_PRT_FMT ": Error decrypting incoming packet.\n", WI_PRT_ARG(sc));
@@ -793,7 +792,7 @@ wi_rxeof(sc)
 				m_copyback(m, sizeof(struct ether_header) -
 				    WI_ETHERTYPE_LEN, WI_ETHERTYPE_LEN +
 				    (len - WI_SNAPHDR_LEN),
-				    rx_buf + sizeof(struct ether_header) +
+				    sc->wi_rxbuf + sizeof(struct ether_header) +
 				    IEEE80211_WEP_IVLEN +
 				    IEEE80211_WEP_KIDLEN + WI_SNAPHDR_LEN);
 				m_adj(m, -(WI_ETHERTYPE_LEN +
@@ -1592,22 +1591,6 @@ wi_ioctl(ifp, command, data)
 	}
 
 	switch(command) {
-	case SIOCSWAVELAN:
-	case SIOCSPRISM2DEBUG:
-	case SIOCS80211NWID:
-	case SIOCS80211NWKEY:
-	case SIOCS80211POWER:
-	case SIOCS80211TXPOWER:
-		error = suser(p, 0);
-		if (error) {
-			splx(s);
-			return (error);
-		}
-	default:
-		break;
-	}
-
-	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch (ifa->ifa_addr->sa_family) {
@@ -1727,6 +1710,8 @@ wi_ioctl(ifp, command, data)
 		error = copyout(&wreq, ifr->ifr_data, sizeof(wreq));
 		break;
 	case SIOCSWAVELAN:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
 		error = copyin(ifr->ifr_data, &wreq, sizeof(wreq));
 		if (error)
 			break;
@@ -1806,6 +1791,8 @@ wi_ioctl(ifp, command, data)
 			error = copyout(&wreq, ifr->ifr_data, sizeof(wreq));
 		break;
 	case SIOCSPRISM2DEBUG:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
 		error = copyin(ifr->ifr_data, &wreq, sizeof(wreq));
 		if (error)
 			break;
@@ -1831,6 +1818,8 @@ wi_ioctl(ifp, command, data)
 		}
 		break;
 	case SIOCS80211NWID:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
 		error = copyin(ifr->ifr_data, &nwid, sizeof(nwid));
 		if (error)
 			break;
@@ -1848,18 +1837,24 @@ wi_ioctl(ifp, command, data)
 			wi_init(sc);
 		break;
 	case SIOCS80211NWKEY:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
 		error = wi_set_nwkey(sc, (struct ieee80211_nwkey *)data);
 		break;
 	case SIOCG80211NWKEY:
 		error = wi_get_nwkey(sc, (struct ieee80211_nwkey *)data);
 		break;
 	case SIOCS80211POWER:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
 		error = wi_set_pm(sc, (struct ieee80211_power *)data);
 		break;
 	case SIOCG80211POWER:
 		error = wi_get_pm(sc, (struct ieee80211_power *)data);
 		break;
 	case SIOCS80211TXPOWER:
+		if ((error = suser(curproc, 0)) != 0)
+			break;
 		error = wi_set_txpower(sc, (struct ieee80211_txpower *)data);
 		break;
 	case SIOCG80211TXPOWER:
@@ -2570,11 +2565,11 @@ wi_get_id(sc)
 		printf("%s: Firmware %d.%02d variant %d, ", WI_PRT_ARG(sc),
 		    ver.wi_ver[2], ver.wi_ver[3], ver.wi_ver[1]);
 	} else {
-		printf("%s: %s%s, Firmware %d.%d.%d (primary), %d.%d.%d (station), ",
+		printf("%s: %s%s (0x%04x), Firmware %d.%d.%d (primary), %d.%d.%d (station), ",
 		    WI_PRT_ARG(sc),
 		    sc->sc_firmware_type == WI_SYMBOL ? "Symbol " : "",
-		    card_name, pri_fw_ver[0], pri_fw_ver[1], pri_fw_ver[2],
-		    sc->sc_sta_firmware_ver / 10000,
+		    card_name, card_id, pri_fw_ver[0], pri_fw_ver[1],
+		    pri_fw_ver[2], sc->sc_sta_firmware_ver / 10000,
 		    (sc->sc_sta_firmware_ver % 10000) / 100,
 		    sc->sc_sta_firmware_ver % 100);
 	}

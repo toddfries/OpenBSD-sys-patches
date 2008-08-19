@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.26 2004/12/10 14:35:30 naddy Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.36.2.1 2006/09/02 18:08:23 brad Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -99,11 +99,6 @@
 #include <netipx/ipx_if.h>
 #endif
 
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
-
 #include <net/if_sppp.h>
 
 #if defined (__FreeBSD__)
@@ -116,7 +111,10 @@
 # define UNTIMEOUT(fun, arg, handle)	\
 	untimeout(fun, arg)
 #endif
-#define MAXALIVECNT     3               /* max. alive packets */
+
+#define LOOPALIVECNT     		3	/* loopback detection tries */
+#define MAXALIVECNT    			3	/* max. missed alive packets */
+#define	NORECV_TIME			15	/* before we get worried */
 
 /*
  * Interface flags that can be set in an ifconfig command.
@@ -315,7 +313,7 @@ HIDE void sppp_cp_timeout(void *arg);
 HIDE void sppp_cp_change_state(const struct cp *cp, struct sppp *sp,
 				 int newstate);
 HIDE void sppp_auth_send(const struct cp *cp,
-			   struct sppp *sp, u_char type, u_char id,
+			   struct sppp *sp, unsigned int type, u_char id,
 			   ...);
 
 HIDE void sppp_up_event(const struct cp *cp, struct sppp *sp);
@@ -458,13 +456,19 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 {
 	struct ppp_header *h, ht;
 	struct ifqueue *inq = 0;
-	int s;
 	struct sppp *sp = (struct sppp *)ifp;
+	struct timeval tv;
+	void *prej;
 	int debug = ifp->if_flags & IFF_DEBUG;
+	int s;
 
-	if (ifp->if_flags & IFF_UP)
+	if (ifp->if_flags & IFF_UP) {
 		/* Count received bytes, add hardware framing */
 		ifp->if_ibytes += m->m_pkthdr.len + sp->pp_framebytes;
+		/* Note time of last receive */
+		getmicrouptime(&tv);
+		sp->pp_last_receive = tv.tv_sec;
+	}
 
 	if (m->m_pkthdr.len <= PPP_HEADER_LEN) {
 		/* Too small packet, drop it. */
@@ -480,7 +484,8 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	}
 
 	if (sp->pp_flags & PP_NOFRAMING) {
-		memcpy(&ht.protocol, mtod(m, void *), 2);
+		prej = mtod(m, void *);
+		memcpy(&ht.protocol, prej, sizeof(ht.protocol));
 		m_adj(m, 2);
 		ht.control = PPP_UI;
 		ht.address = PPP_ALLSTATIONS;
@@ -488,6 +493,7 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 	} else {
 		/* Get PPP header. */
 		h = mtod (m, struct ppp_header*);
+		prej = &h->protocol;
 		m_adj (m, PPP_HEADER_LEN);
 	}
 
@@ -508,8 +514,7 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 		default:
 			if (sp->state[IDX_LCP] == STATE_OPENED)
 				sppp_cp_send (sp, PPP_LCP, PROTO_REJ,
-					++sp->pp_seq, m->m_pkthdr.len + 2,
-					&h->protocol);
+				    ++sp->pp_seq, m->m_pkthdr.len + 2, prej);
 			if (debug)
 				log(LOG_DEBUG,
 				    SPP_FMT "invalid input protocol "
@@ -542,6 +547,7 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			if (sp->state[IDX_IPCP] == STATE_OPENED) {
 				schednetisr (NETISR_IP);
 				inq = &ipintrq;
+				sp->pp_last_activity = tv.tv_sec;
 			}
 			break;
 #endif
@@ -551,15 +557,6 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 			if (sp->pp_phase == PHASE_NETWORK) {
 				schednetisr (NETISR_IPX);
 				inq = &ipxintrq;
-			}
-			break;
-#endif
-#ifdef NS
-		case PPP_XNS:
-			/* XNS IDPCP not implemented yet */
-			if (sp->pp_phase == PHASE_NETWORK) {
-				schednetisr (NETISR_NS);
-				inq = &nsintrq;
 			}
 			break;
 #endif
@@ -595,12 +592,6 @@ sppp_input(struct ifnet *ifp, struct mbuf *m)
 		case ETHERTYPE_IPX:
 			schednetisr (NETISR_IPX);
 			inq = &ipxintrq;
-			break;
-#endif
-#ifdef NS
-		case ETHERTYPE_NS:
-			schednetisr (NETISR_NS);
-			inq = &nsintrq;
 			break;
 #endif
 		}
@@ -646,10 +637,14 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 	struct sppp *sp = (struct sppp*) ifp;
 	struct ppp_header *h;
 	struct ifqueue *ifq = NULL;
+	struct timeval tv;
 	int s, len, rv = 0;
 	u_int16_t protocol;
 
 	s = splimp();
+
+	getmicrouptime(&tv);
+	sp->pp_last_activity = tv.tv_sec;
 
 	if ((ifp->if_flags & IFF_UP) == 0 ||
 	    (ifp->if_flags & (IFF_RUNNING | IFF_AUTO)) == 0) {
@@ -766,12 +761,6 @@ sppp_output(struct ifnet *ifp, struct mbuf *m,
 		}
 		break;
 #endif
-#ifdef NS
-	case AF_NS:     /* Xerox NS Protocol */
-		protocol = htons ((sp->pp_flags & PP_CISCO) ?
-			ETHERTYPE_NS : PPP_XNS);
-		break;
-#endif
 #ifdef IPX
 	case AF_IPX:     /* Novell IPX Protocol */
 		protocol = htons ((sp->pp_flags & PP_CISCO) ?
@@ -865,6 +854,8 @@ sppp_attach(struct ifnet *ifp)
 	sp->pp_cpq.ifq_maxlen = 50;
 	sp->pp_loopcnt = 0;
 	sp->pp_alivecnt = 0;
+	sp->pp_last_activity = 0;
+	sp->pp_last_receive = 0;
 	sp->pp_seq = 0;
 	sp->pp_rseq = 0;
 	sp->pp_phase = PHASE_DEAD;
@@ -986,7 +977,7 @@ sppp_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 {
 	struct ifreq *ifr = (struct ifreq*) data;
 	struct sppp *sp = (struct sppp*) ifp;
-	int s, rv, going_up, going_down;
+	int s, rv, going_up, going_down, newmode;
 
 	s = splimp();
 	rv = 0;
@@ -1000,28 +991,29 @@ sppp_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 		/* fall through... */
 
 	case SIOCSIFFLAGS:
-			/* sanity */
-		if (ifp->if_flags & IFF_PASSIVE)
-			ifp->if_flags &= ~IFF_AUTO;
-
-		going_up = (ifp->if_flags & IFF_UP) && ! (ifp->if_flags &
-			(IFF_RUNNING | IFF_AUTO | IFF_PASSIVE));
-		going_down = ! (ifp->if_flags & IFF_UP) &&
+		going_up = (ifp->if_flags & IFF_UP) &&
+			(ifp->if_flags & IFF_RUNNING) == 0;
+		going_down = (ifp->if_flags & IFF_UP) == 0 &&
 			(ifp->if_flags & IFF_RUNNING);
-
-		if (going_up || going_down) {
-			if (! (sp->pp_flags & PP_CISCO))
-			lcp.Close(sp);
-			else {
-				sppp_flush(ifp);
-				ifp->if_flags &= ~IFF_RUNNING;
-			}
+		newmode = ifp->if_flags & (IFF_AUTO | IFF_PASSIVE);
+		if (newmode == (IFF_AUTO | IFF_PASSIVE)) {
+			/* sanity */
+			newmode = IFF_PASSIVE;
+			ifp->if_flags &= ~IFF_AUTO;
 		}
-		if (going_up) {
+
+		if (going_up || going_down)
+			if (!(sp->pp_flags & PP_CISCO))
+				lcp.Close(sp);
+
+		if (going_up && newmode == 0) {
 			/* neither auto-dial nor passive */
 			ifp->if_flags |= IFF_RUNNING;
 			if (!(sp->pp_flags & PP_CISCO))
 				lcp.Open(sp);
+		} else if (going_down) {
+			sppp_flush(ifp);
+			ifp->if_flags &= ~IFF_RUNNING;
 		}
 		break;
 
@@ -1114,7 +1106,7 @@ sppp_cisco_input(struct sppp *sp, struct mbuf *m)
 		if (sp->pp_seq == sp->pp_rseq) {
 			/* Local and remote sequence numbers are equal.
 			 * Probably, the line is in loopback mode. */
-			if (sp->pp_loopcnt >= MAXALIVECNT) {
+			if (sp->pp_loopcnt >= LOOPALIVECNT) {
 				printf (SPP_FMT "loopback\n",
 					SPP_ARGS(ifp));
 				sp->pp_loopcnt = 0;
@@ -1127,7 +1119,7 @@ sppp_cisco_input(struct sppp *sp, struct mbuf *m)
 
 			/* Generate new local sequence number */
 #if defined (__FreeBSD__) || defined (__NetBSD__) || defined(__OpenBSD__)
-			sp->pp_seq = random();
+			sp->pp_seq = arc4random();
 #else
 			sp->pp_seq ^= time.tv_sec ^ time.tv_usec;
 #endif
@@ -1279,6 +1271,7 @@ sppp_cp_input(const struct cp *cp, struct sppp *sp, struct mbuf *m)
 	int len = m->m_pkthdr.len;
 	int rv;
 	u_char *p;
+	u_long nmagic;
 
 	if (len < 4) {
 		if (debug)
@@ -1322,6 +1315,9 @@ sppp_cp_input(const struct cp *cp, struct sppp *sp, struct mbuf *m)
 			return;
 		}
 		rv = (cp->RCR)(sp, h, len);
+		/* silently drop illegal packets */
+		if (rv == -1)
+			return;
 		switch (sp->state[cp->protoidx]) {
 		case STATE_OPENED:
 			sppp_cp_change_state(cp, sp, rv?
@@ -1564,14 +1560,23 @@ sppp_cp_input(const struct cp *cp, struct sppp *sp, struct mbuf *m)
 				       SPP_ARGS(ifp), len);
 			break;
 		}
-		if (ntohl (*(long*)(h+1)) == sp->lcp.magic) {
+
+		nmagic = (u_long)p[0] << 24 |
+		    (u_long)p[1] << 16 | p[2] << 8 | p[3];
+
+		if (nmagic == sp->lcp.magic) {
 			/* Line loopback mode detected. */
 			printf(SPP_FMT "loopback\n", SPP_ARGS(ifp));
 			/* Shut down the PPP link. */
  			lcp.Close(sp);
 			break;
 		}
-		*(long*)(h+1) = htonl (sp->lcp.magic);
+
+		p[0] = sp->lcp.magic >> 24;
+		p[1] = sp->lcp.magic >> 16;
+		p[2] = sp->lcp.magic >> 8;
+		p[3] = sp->lcp.magic;
+
 		if (debug)
 			addlog(SPP_FMT "got lcp echo req, sending echo rep\n",
 			       SPP_ARGS(ifp));
@@ -1594,7 +1599,11 @@ sppp_cp_input(const struct cp *cp, struct sppp *sp, struct mbuf *m)
 		if (debug)
 			addlog(SPP_FMT "lcp got echo rep\n",
 			       SPP_ARGS(ifp));
-		if (ntohl (*(long*)(h+1)) != sp->lcp.magic)
+		    
+		nmagic = (u_long)p[0] << 24 |
+		    (u_long)p[1] << 16 | p[2] << 8 | p[3];
+
+		if (nmagic != sp->lcp.magic)
 			sp->pp_alivecnt = 0;
 		break;
 	default:
@@ -1844,20 +1853,21 @@ sppp_cp_change_state(const struct cp *cp, struct sppp *sp, int newstate)
 		    sppp_state_name(newstate));
 	sp->state[cp->protoidx] = newstate;
 
-	UNTIMEOUT(cp->TO, (void *)sp, sp->ch[cp->protoidx]);
 	switch (newstate) {
 	case STATE_INITIAL:
 	case STATE_STARTING:
 	case STATE_CLOSED:
 	case STATE_STOPPED:
 	case STATE_OPENED:
+		UNTIMEOUT(cp->TO, (void *)sp, sp->ch[cp->protoidx]);
 		break;
 	case STATE_CLOSING:
 	case STATE_STOPPING:
 	case STATE_REQ_SENT:
 	case STATE_ACK_RCVD:
 	case STATE_ACK_SENT:
- 		sppp_increasing_timeout (cp, sp);
+		if (!timeout_pending(&sp->ch[cp->protoidx]))
+			sppp_increasing_timeout (cp, sp);
 		break;
 	}
 }
@@ -1898,22 +1908,30 @@ HIDE void
 sppp_lcp_up(struct sppp *sp)
 {
 	STDDCL;
+	struct timeval tv;
+
+	if (sp->pp_flags & PP_CISCO)
+		return;
 
  	sp->pp_alivecnt = 0;
  	sp->lcp.opts = (1 << LCP_OPT_MAGIC);
  	sp->lcp.magic = 0;
  	sp->lcp.protos = 0;
  	sp->lcp.mru = sp->lcp.their_mru = PP_MTU;
+
+	getmicrouptime(&tv);
+	sp->pp_last_receive = sp->pp_last_activity = tv.tv_sec;
+
 	/*
 	 * If this interface is passive or dial-on-demand, and we are
 	 * still in Initial state, it means we've got an incoming
 	 * call.  Activate the interface.
 	 */
-	ifp->if_flags |= IFF_RUNNING;
 	if ((ifp->if_flags & (IFF_AUTO | IFF_PASSIVE)) != 0) {
 		if (debug)
 			log(LOG_DEBUG,
 			    SPP_FMT "Up event", SPP_ARGS(ifp));
+		ifp->if_flags |= IFF_RUNNING;
 		if (sp->state[IDX_LCP] == STATE_INITIAL) {
 			if (debug)
 				addlog("(incoming call)\n");
@@ -1921,6 +1939,10 @@ sppp_lcp_up(struct sppp *sp)
 			lcp.Open(sp);
 		} else if (debug)
 			addlog("\n");
+	} else if ((ifp->if_flags & (IFF_AUTO | IFF_PASSIVE)) == 0 &&
+		   (sp->state[IDX_LCP] == STATE_INITIAL)) {
+			ifp->if_flags |= IFF_RUNNING;
+			lcp.Open(sp);
 	}
 
 	sppp_up_event(&lcp, sp);
@@ -1931,12 +1953,30 @@ sppp_lcp_down(struct sppp *sp)
 {
 	STDDCL;
 
-		if (debug)
-		log(LOG_DEBUG, SPP_FMT "Down event (carrier loss)\n",
-			    SPP_ARGS(ifp));
-  	sppp_down_event(&lcp, sp);
+	if (sp->pp_flags & PP_CISCO)
+		return;
 
- 	if ((ifp->if_flags & (IFF_AUTO | IFF_PASSIVE)) != 0)
+	sppp_down_event(&lcp, sp);
+
+	/*
+	 * If this is neither a dial-on-demand nor a passive
+	 * interface, simulate an ``ifconfig down'' action, so the
+	 * administrator can force a redial by another ``ifconfig
+	 * up''.  XXX For leased line operation, should we immediately
+	 * try to reopen the connection here?
+	 */
+	if ((ifp->if_flags & (IFF_AUTO | IFF_PASSIVE)) == 0) {
+		if (debug)
+			log(LOG_DEBUG, SPP_FMT "Down event (carrier loss), "
+			    "taking interface down.", SPP_ARGS(ifp));
+		if_down(ifp);
+	} else {
+		if (debug)
+			log(LOG_DEBUG, SPP_FMT "Down event (carrier loss)\n",
+			    SPP_ARGS(ifp));
+	}
+
+	if (sp->state[IDX_LCP] != STATE_INITIAL)
 		lcp.Close(sp);
  	sp->pp_flags &= ~PP_CALLIN;
 	ifp->if_flags &= ~IFF_RUNNING;
@@ -1996,17 +2036,17 @@ sppp_lcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 
 	/* pass 1: check for things that need to be rejected */
 	p = (void*) (h+1);
-	for (rlen=0; len>1 && p[1]; len-=p[1], p+=p[1]) {
+	for (rlen = 0; len > 1; len -= p[1], p += p[1]) {
+		if (p[1] < 2 || p[1] > len) {
+			free(buf, M_TEMP);
+			return (-1);
+		}
 		if (debug)
 			addlog("%s ", sppp_lcp_opt_name(*p));
 		switch (*p) {
 		case LCP_OPT_MAGIC:
 			/* Magic number. */
-			if (len >= 6 && p[1] == 6)
-				continue;
-			if (debug)
-				addlog("[invalid] ");
-			break;
+			/* fall through, both are same length */
 		case LCP_OPT_ASYNC_MAP:
 			/* Async control character map. */
 			if (len >= 6 && p[1] == 6)
@@ -2060,8 +2100,8 @@ sppp_lcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	if (rlen) {
 		if (debug)
 			addlog(" send conf-rej\n");
-		sppp_cp_send (sp, PPP_LCP, CONF_REJ, h->ident, rlen, buf);
-		return 0;
+		sppp_cp_send(sp, PPP_LCP, CONF_REJ, h->ident, rlen, buf);
+		goto end;
 	} else if (debug)
 		addlog("\n");
 
@@ -2153,21 +2193,18 @@ sppp_lcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 		rlen += p[1];
 	}
 	if (rlen) {
-		if (++sp->fail_counter[IDX_LCP] < sp->lcp.max_failure) {
+		if (++sp->fail_counter[IDX_LCP] >= sp->lcp.max_failure) {
 			if (debug)
-				addlog("send conf-nak\n");
-			sppp_cp_send (sp, PPP_LCP, CONF_NAK, h->ident, rlen, buf);
-			return 0;
+				addlog(" max_failure (%d) exceeded, "
+				       "send conf-rej\n",
+				       sp->lcp.max_failure);
+			sppp_cp_send(sp, PPP_LCP, CONF_REJ, h->ident, rlen, buf);
+		} else {
+			if (debug)
+				addlog(" send conf-nak\n");
+			sppp_cp_send(sp, PPP_LCP, CONF_NAK, h->ident, rlen, buf);
 		}
-		if (debug)
-			addlog("max_failure (%d) exceeded, closing\n",
-			       sp->lcp.max_failure);
-		if (sp->pp_loopcnt >= MAXALIVECNT)
-			printf (SPP_FMT "loopback\n", SPP_ARGS(ifp));
-		lcp.Close(sp);
-		sp->fail_counter[IDX_LCP] = 0;
-		sp->pp_loopcnt = 0;
-		return 0;
+		goto end;
 	} else {
 		if (debug)
 			addlog("send conf-ack\n");
@@ -2177,7 +2214,8 @@ sppp_lcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 			      h->ident, origlen, h+1);
 	}
 
-	free (buf, M_TEMP);
+ end:
+	free(buf, M_TEMP);
 	return (rlen == 0);
 }
 
@@ -2189,19 +2227,18 @@ HIDE void
 sppp_lcp_RCN_rej(struct sppp *sp, struct lcp_header *h, int len)
 {
 	STDDCL;
-	u_char *buf, *p;
+	u_char *p;
 
 	len -= 4;
-	buf = malloc (len, M_TEMP, M_NOWAIT);
-	if (!buf)
-		return;
 
 	if (debug)
 		log(LOG_DEBUG, SPP_FMT "lcp rej opts: ",
 		    SPP_ARGS(ifp));
 
 	p = (void*) (h+1);
-	for (; len > 1 && p[1]; len -= p[1], p += p[1]) {
+	for (; len > 1; len -= p[1], p += p[1]) {
+		if (p[1] < 2 || p[1] > len)
+			return;
 		if (debug)
 			addlog("%s ", sppp_lcp_opt_name(*p));
 		switch (*p) {
@@ -2240,8 +2277,6 @@ sppp_lcp_RCN_rej(struct sppp *sp, struct lcp_header *h, int len)
 	}
 	if (debug)
 		addlog("\n");
-	free (buf, M_TEMP);
-	return;
 }
 
 /*
@@ -2252,20 +2287,19 @@ HIDE void
 sppp_lcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 {
 	STDDCL;
-	u_char *buf, *p;
+	u_char *p;
 	u_long magic;
 
 	len -= 4;
-	buf = malloc (len, M_TEMP, M_NOWAIT);
-	if (!buf)
-		return;
 
 	if (debug)
 		log(LOG_DEBUG, SPP_FMT "lcp nak opts: ",
 		    SPP_ARGS(ifp));
 
 	p = (void*) (h+1);
-	for (; len > 1 && p[1]; len -= p[1], p += p[1]) {
+	for (; len > 1; len -= p[1], p += p[1]) {
+		if (p[1] < 2 || p[1] > len)
+			return;
 		if (debug)
 			addlog("%s ", sppp_lcp_opt_name(*p));
 		switch (*p) {
@@ -2320,8 +2354,6 @@ sppp_lcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 	}
 	if (debug)
 		addlog("\n");
-	free (buf, M_TEMP);
-	return;
 }
 
 HIDE void
@@ -2374,6 +2406,10 @@ sppp_lcp_tlu(struct sppp *sp)
 	for (i = 0, mask = 1; i < IDX_COUNT; i++, mask <<= 1)
 		if (sp->lcp.protos & mask && ((cps[i])->flags & CP_LCP) == 0)
 			(cps[i])->Up(sp);
+
+	/* notify low-level driver of state change */
+	if (sp->pp_chg)
+		sp->pp_chg(sp, (int)sp->pp_phase);
 
 	if (sp->pp_phase == PHASE_NETWORK)
 		/* if no NCP is starting, close down */
@@ -2444,7 +2480,7 @@ sppp_lcp_scr(struct sppp *sp)
 	if (sp->lcp.opts & (1 << LCP_OPT_MAGIC)) {
 		if (! sp->lcp.magic)
 #if defined (__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-			sp->lcp.magic = random();
+			sp->lcp.magic = arc4random();
 #else
 			sp->lcp.magic = time.tv_sec + time.tv_usec;
 #endif
@@ -2618,7 +2654,11 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 		log(LOG_DEBUG, SPP_FMT "ipcp parse opts: ",
 		    SPP_ARGS(ifp));
 	p = (void*) (h+1);
-	for (rlen=0; len>1 && p[1]; len-=p[1], p+=p[1]) {
+	for (rlen = 0; len > 1; len -= p[1], p += p[1]) {
+		if (p[1] < 2 || p[1] > len) {
+			free(buf, M_TEMP);
+			return (-1);
+		}
 		if (debug)
 			addlog("%s ", sppp_ipcp_opt_name(*p));
 		switch (*p) {
@@ -2654,8 +2694,8 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 	if (rlen) {
 		if (debug)
 			addlog(" send conf-rej\n");
-		sppp_cp_send (sp, PPP_IPCP, CONF_REJ, h->ident, rlen, buf);
-		return 0;
+		sppp_cp_send(sp, PPP_IPCP, CONF_REJ, h->ident, rlen, buf);
+		goto end;
 	} else if (debug)
 		addlog("\n");
 
@@ -2706,12 +2746,12 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 				else
 					addlog("%s [not agreed] ",
 					       sppp_dotted_quad(desiredaddr));
-
-				p[2] = hisaddr >> 24;
-				p[3] = hisaddr >> 16;
-				p[4] = hisaddr >> 8;
-				p[5] = hisaddr;
 			}
+
+			p[2] = hisaddr >> 24;
+			p[3] = hisaddr >> 16;
+			p[4] = hisaddr >> 8;
+			p[5] = hisaddr;
 			break;
 		}
 		/* Add the option to nak'ed list. */
@@ -2753,7 +2793,8 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 			      h->ident, origlen, h+1);
 	}
 
-	free (buf, M_TEMP);
+ end:
+	free(buf, M_TEMP);
 	return (rlen == 0);
 }
 
@@ -2764,21 +2805,20 @@ sppp_ipcp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 HIDE void
 sppp_ipcp_RCN_rej(struct sppp *sp, struct lcp_header *h, int len)
 {
-	u_char *buf, *p;
+	u_char *p;
 	struct ifnet *ifp = &sp->pp_if;
 	int debug = ifp->if_flags & IFF_DEBUG;
 
 	len -= 4;
-	buf = malloc (len, M_TEMP, M_NOWAIT);
-	if (!buf)
-		return;
 
 	if (debug)
 		log(LOG_DEBUG, SPP_FMT "ipcp rej opts: ",
 		    SPP_ARGS(ifp));
 
 	p = (void*) (h+1);
-	for (; len > 1 && p[1]; len -= p[1], p += p[1]) {
+	for (; len > 1; len -= p[1], p += p[1]) {
+		if (p[1] < 2 || p[1] > len)
+			return;
 		if (debug)
 			addlog("%s ", sppp_ipcp_opt_name(*p));
 		switch (*p) {
@@ -2798,8 +2838,6 @@ sppp_ipcp_RCN_rej(struct sppp *sp, struct lcp_header *h, int len)
 	}
 	if (debug)
 		addlog("\n");
-	free (buf, M_TEMP);
-	return;
 }
 
 /*
@@ -2809,22 +2847,21 @@ sppp_ipcp_RCN_rej(struct sppp *sp, struct lcp_header *h, int len)
 HIDE void
 sppp_ipcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 {
-	u_char *buf, *p;
+	u_char *p;
 	struct ifnet *ifp = &sp->pp_if;
 	int debug = ifp->if_flags & IFF_DEBUG;
 	u_long wantaddr;
 
 	len -= 4;
-	buf = malloc (len, M_TEMP, M_NOWAIT);
-	if (!buf)
-		return;
 
 	if (debug)
 		log(LOG_DEBUG, SPP_FMT "ipcp nak opts: ",
 		    SPP_ARGS(ifp));
 
 	p = (void*) (h+1);
-	for (; len > 1 && p[1]; len -= p[1], p += p[1]) {
+	for (; len > 1; len -= p[1], p += p[1]) {
+		if (p[1] < 2 || p[1] > len)
+			return;
 		if (debug)
 			addlog("%s ", sppp_ipcp_opt_name(*p));
 		switch (*p) {
@@ -2865,8 +2902,6 @@ sppp_ipcp_RCN_nak(struct sppp *sp, struct lcp_header *h, int len)
 	}
 	if (debug)
 		addlog("\n");
-	free (buf, M_TEMP);
-	return;
 }
 
 HIDE void
@@ -3329,7 +3364,7 @@ sppp_chap_tlu(struct sppp *sp)
 		 * Compute the re-challenge timeout.  This will yield
 		 * a number between 300 and 810 seconds.
 		 */
-		i = 300 + ((unsigned)(random() & 0xff00) >> 7);
+		i = 300 + (arc4random() & 0x01fe);
 
 #if defined (__FreeBSD__)
 		sp->ch[IDX_CHAP] = timeout(chap.TO, (void *)sp, i * hz);
@@ -3737,8 +3772,8 @@ sppp_pap_scr(struct sppp *sp)
  */
 
 HIDE void
-sppp_auth_send(const struct cp *cp, struct sppp *sp, u_char type, u_char id,
-	       ...)
+sppp_auth_send(const struct cp *cp, struct sppp *sp,
+		unsigned int type, u_char id, ...)
 {
 	STDDCL;
 	struct ppp_header *h;
@@ -3746,7 +3781,8 @@ sppp_auth_send(const struct cp *cp, struct sppp *sp, u_char type, u_char id,
 	struct mbuf *m;
 	u_char *p;
 	int len;
-	size_t mlen, pkthdrlen;
+	size_t pkthdrlen;
+	unsigned int mlen;
 	const char *msg;
 	va_list ap;
 
@@ -3775,7 +3811,7 @@ sppp_auth_send(const struct cp *cp, struct sppp *sp, u_char type, u_char id,
 	va_start(ap, id);
 	len = 0;
 
-	while ((mlen = va_arg(ap, size_t)) != 0) {
+	while ((mlen = (unsigned int)va_arg(ap, size_t)) != 0) {
 		msg = va_arg(ap, const char *);
 		len += mlen;
 		if (len > MHLEN - pkthdrlen - LCP_HEADER_LEN) {
@@ -3841,8 +3877,10 @@ sppp_keepalive(void *dummy)
 {
 	struct sppp *sp;
 	int s;
+	struct timeval tv;
 
 	s = splimp();
+	getmicrouptime(&tv);
 	for (sp=spppq; sp; sp=sp->pp_next) {
 		struct ifnet *ifp = &sp->pp_if;
 
@@ -3856,24 +3894,41 @@ sppp_keepalive(void *dummy)
 		    sp->pp_phase < PHASE_AUTHENTICATE)
 			continue;
 
-		if (sp->pp_alivecnt == MAXALIVECNT) {
+		/* No echo reply, but maybe user data passed through? */
+		if (!(sp->pp_flags & PP_CISCO) &&
+		    (tv.tv_sec - sp->pp_last_receive) < NORECV_TIME) {
+			sp->pp_alivecnt = 0;
+			continue;
+		}
+
+		if (sp->pp_alivecnt >= MAXALIVECNT) {
 			/* No keepalive packets got.  Stop the interface. */
-			printf (SPP_FMT "down\n", SPP_ARGS(ifp));
- 			if (sp->pp_flags & PP_CISCO) {
 			if_down (ifp);
 			sppp_qflush (&sp->pp_cpq);
- 			} else {
-				/* Shut down the PPP link. */
- 				lcp.Close(sp);
+			if (! (sp->pp_flags & PP_CISCO)) {
+				printf (SPP_FMT "LCP keepalive timeout",
+				    SPP_ARGS(ifp));
+				sp->pp_alivecnt = 0;
+
+				/* we are down, close all open protocols */
+				lcp.Close(sp);
+
+				/* And now prepare LCP to reestablish the link, if configured to do so. */
+				sppp_cp_change_state(&lcp, sp, STATE_STOPPED);
+
+				/* Close connection imediatly, completition of this
+				 * will summon the magic needed to reestablish it. */
+				sp->pp_tlf(sp);
+				continue;
 			}
 		}
-		if (sp->pp_alivecnt <= MAXALIVECNT)
+		if (sp->pp_alivecnt < MAXALIVECNT)
 			++sp->pp_alivecnt;
 		if (sp->pp_flags & PP_CISCO)
 			sppp_cisco_send (sp, CISCO_KEEPALIVE_REQ, ++sp->pp_seq,
 				sp->pp_rseq);
 		else if (sp->pp_phase >= PHASE_AUTHENTICATE) {
-			long nmagic = htonl (sp->lcp.magic);
+			unsigned long nmagic = htonl (sp->lcp.magic);
 			sp->lcp.echoid = ++sp->pp_seq;
 			sppp_cp_send (sp, PPP_LCP, ECHO_REQ,
 				sp->lcp.echoid, 4, &nmagic);

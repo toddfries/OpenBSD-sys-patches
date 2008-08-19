@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.41 2004/07/06 00:38:38 aaron Exp $ */
+/*	$OpenBSD: wd.c,v 1.44 2005/09/01 02:16:56 uwe Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -262,6 +262,7 @@ wdattach(struct device *parent, struct device *self, void *aux)
 {
 	struct wd_softc *wd = (void *)self;
 	struct ata_atapi_attach *aa_link= aux;
+	struct wdc_command wdc_c;
 	int i, blank;
 	char buf[41], c, *p, *q;
 	WDCDEBUG_PRINT(("wdattach\n"), DEBUG_FUNCS | DEBUG_PROBE);
@@ -359,6 +360,24 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	WDCDEBUG_PRINT(("%s: atap_dmatiming_mimi=%d, atap_dmatiming_recom=%d\n",
 	    self->dv_xname, wd->sc_params.atap_dmatiming_mimi,
 	    wd->sc_params.atap_dmatiming_recom), DEBUG_PROBE);
+
+	/*
+	 * FREEZE LOCK the drive so malicous users can't lock it on us.
+	 * As there is no harm in issuing this to drives that don't
+	 * support the security feature set we just send it, and don't
+	 * bother checking if the drive sends a command abort to tell us it
+	 * doesn't support it.
+	 */
+	bzero(&wdc_c, sizeof(struct wdc_command));
+
+	wdc_c.r_command = WDCC_SEC_FREEZE_LOCK;
+	wdc_c.timeout = 1000;
+	wdc_c.flags = at_poll;
+	if (wdc_exec_command(wd->drvp, &wdc_c) != WDC_COMPLETE) {
+		printf("%s: freeze lock command didn't complete\n",
+		    wd->sc_dev.dv_xname);
+	}
+
 	/*
 	 * Initialize and attach the disk structure.
 	 */
@@ -1239,10 +1258,24 @@ bad144intern(struct wd_softc *wd)
 int
 wd_get_params(struct wd_softc *wd, u_int8_t flags, struct ataparams *params)
 {
+#ifdef __zaurus__
+	/* XXX fix after 3.8 release */
+	/* We already have the drive parameters; just return them. */
+	if (params == &wd->sc_params && wd->sc_params.atap_cylinders != 0)
+		return 0;
+#endif /* __zaurus__ */
 	switch (ata_get_params(wd->drvp, flags, params)) {
 	case CMD_AGAIN:
 		return 1;
 	case CMD_ERR:
+#ifdef __zaurus__
+		/* XXX fix after 3.8 release */
+		/* We already have the drive parameters; reuse them. */
+		if (wd->sc_params.atap_cylinders != 0) {
+			*params = wd->sc_params;
+			return 0;
+		}
+#endif /* __zaurus__ */
 		/*
 		 * We `know' there's a drive here; just assume it's old.
 		 * This geometry is only used to read the MBR and print a
@@ -1274,7 +1307,8 @@ wd_flushcache(struct wd_softc *wd, int flags)
 	if (wd->drvp->ata_vers < 4) /* WDCC_FLUSHCACHE is here since ATA-4 */
 		return;
 	bzero(&wdc_c, sizeof(struct wdc_command));
-	wdc_c.r_command = WDCC_FLUSHCACHE;
+	wdc_c.r_command = (wd->sc_flags & WDF_LBA48 ? WDCC_FLUSHCACHE_EXT :
+	    WDCC_FLUSHCACHE);
 	wdc_c.r_st_bmask = WDCS_DRDY;
 	wdc_c.r_st_pmask = WDCS_DRDY;
 	if (flags != 0) {

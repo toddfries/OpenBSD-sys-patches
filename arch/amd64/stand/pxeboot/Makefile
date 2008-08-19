@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2004/10/09 21:15:21 mickey Exp $
+#	$OpenBSD: Makefile,v 1.5 2005/07/30 14:37:39 millert Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -20,14 +20,14 @@ INSTALL_STRIP=
 # i386 stuff (so, it will possibly load in the same 64k)
 SRCS+=	machdep.c exec_i386.c cmd_i386.c
 SRCS+=	gidt.S alloca.S biosdev.c bioscons.c gateA20.c \
-	memprobe.c diskprobe.c time.c biosprobe.c
+	memprobe.c diskprobe.c time.c ## biosprobe.c
 SRCS+=	pxe.c pxe_call.S pxe_net.c
 
 .PATH:	${S}/stand/boot
 SRCS+=	boot.c cmd.c vars.c bootarg.c
 
 .PATH:	${S}/lib/libsa
-.PATH:	${S}/lib/libkern	# for strl*
+.PATH:	${S}/lib/libkern	# for strl* and gcc support
 # stand routines
 SRCS+=	alloc.c exit.c getfile.c gets.c globals.c strcmp.c strlen.c \
 	strncmp.c memcmp.c memcpy.c memset.c printf.c snprintf.c \
@@ -41,6 +41,8 @@ SRCS+=	ether.c netif.c rpc.c
 SRCS+=	bootp.c bootparam.c
 # boot filesystems
 SRCS+=	ufs.c nfs.c tftp.c
+# gcc support
+SRCS+=	moddi3.c qdivrem.c
 
 .PATH:	${S}/lib/libz
 SRCS+=	adler32.c crc32.c inflate.c inftrees.c

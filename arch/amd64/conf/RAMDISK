@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.19 2005/01/06 21:32:56 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.28 2005/08/03 22:42:46 brad Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -82,6 +82,7 @@ ukbd*	at uhidev?
 wskbd*	at ukbd? mux 1
 #umass*	at uhub?		# USB Mass Storage devices
 #scsibus* at umass?
+#atapiscsi* at umass?
 #ums*	at uhidev?
 #wsmouse* at ums? mux 0
 #aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
@@ -132,8 +133,10 @@ scsibus* at mpt?
 #scsibus* at aac?
 ami*	at pci?			# AMI MegaRAID controllers
 scsibus* at ami?
-#cac*	at pci?			# Compaq Smart ARRAY RAID controllers
+#cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 #scsibus* at cac?
+#ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
+#scsibus* at ciss?
 #twe*	at pci?			# 3ware Escalade RAID controllers
 #scsibus* at twe?
 #iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
@@ -142,8 +145,6 @@ scsibus* at ami?
 #scsibus* at isp?
 #aic*	at pcmcia?		# PCMCIA Adaptec 152[02] SCSI
 #scsibus* at aic?
-#ncr*	at pci?			# NCR 538XX SCSI controllers(old)
-#scsibus* at ncr?
 #siop*	at pci?			# NCR 538XX SCSI controllers(new)
 #scsibus* at siop?
 #adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
@@ -188,7 +189,6 @@ scsibus* at atapiscsi?
 #de*	at pci?			# DC21X4X-based ethernet
 fxp*	at pci?			# EtherExpress 10/100B ethernet
 #fxp*	at cardbus?		# Intel PRO/100 ethernet
-#ep0	at pci?			# 3C59x ethernet
 #ep*	at pci?			# 3C59x ethernet
 #ne*	at pci?			# NE2000-compat ethernet
 #ne*	at pcmcia?		# PCMCIA based NE2000 ethernet
@@ -200,9 +200,9 @@ fxp*	at pci?			# EtherExpress 10/100B ethernet
 #xl*	at cardbus?		# 3C575 ethernet
 rl*	at pci?			# RealTek 81[23]9 ethernet
 re*	at pci?			# Realtek 8169/8169S/8110S
-#tx*	at pci?			# SMC 83C170 EPIC ethernet
+#epic*	at pci?			# SMC EPIC/100 ethernet
 #tl*	at pci?			# Compaq Thunderlan ethernet
-vr*	at pci?			# VIA Rhine ethernet
+#vr*	at pci?			# VIA Rhine ethernet
 dc*	at pci?			# 21143, "tulip" clone ethernet
 sis*	at pci?			# SiS 900/7016 ethernet
 #wb*	at pci?			# Winbond W89C840F ethernet

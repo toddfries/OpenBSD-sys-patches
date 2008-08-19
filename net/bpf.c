@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.56 2005/01/07 16:28:38 reyk Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.59 2005/07/31 03:52:18 pascoe Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -81,7 +81,7 @@ int	bpf_allocbufs(struct bpf_d *);
 void	bpf_freed(struct bpf_d *);
 void	bpf_ifname(struct ifnet *, struct ifreq *);
 void	bpf_mcopy(const void *, void *, size_t);
-int	bpf_movein(struct uio *, int, struct mbuf **,
+int	bpf_movein(struct uio *, u_int, struct mbuf **,
 	    struct sockaddr *, struct bpf_insn *);
 void	bpf_attachd(struct bpf_d *, struct bpf_if *);
 void	bpf_detachd(struct bpf_d *);
@@ -103,10 +103,11 @@ struct bpf_d *bpfilter_create(int);
 void bpfilter_destroy(struct bpf_d *);
 
 int
-bpf_movein(struct uio *uio, int linktype, struct mbuf **mp,
+bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
     struct sockaddr *sockp, struct bpf_insn *filter)
 {
 	struct mbuf *m;
+	struct m_tag *mtag;
 	int error;
 	u_int hlen;
 	u_int len;
@@ -148,6 +149,12 @@ bpf_movein(struct uio *uio, int linktype, struct mbuf **mp,
 		sockp->sa_family = AF_UNSPEC;
 		/* XXX 4(FORMAC)+6(dst)+6(src)+3(LLC)+5(SNAP) */
 		hlen = 24;
+		break;
+
+	case DLT_IEEE802_11:
+	case DLT_IEEE802_11_RADIO:
+		sockp->sa_family = AF_UNSPEC;
+		hlen = 0;
 		break;
 
 	case DLT_RAW:
@@ -210,6 +217,15 @@ bpf_movein(struct uio *uio, int linktype, struct mbuf **mp,
 		m->m_len -= hlen;
 		m->m_data += hlen; /* XXX */
 	}
+
+	/*
+	 * Prepend the data link type as a mbuf tag
+	 */
+	mtag = m_tag_get(PACKET_TAG_DLT, sizeof(u_int), M_NOWAIT);
+	if (mtag == NULL)
+		return (ENOMEM);
+	*(u_int *)(mtag + 1) = linktype;
+	m_tag_prepend(m, mtag);
 
 	return (0);
  bad:
@@ -528,7 +544,7 @@ bpfwrite(dev_t dev, struct uio *uio, int ioflag)
 	if (uio->uio_resid == 0)
 		return (0);
 
-	error = bpf_movein(uio, (int)d->bd_bif->bif_dlt, &m,
+	error = bpf_movein(uio, d->bd_bif->bif_dlt, &m,
 	    (struct sockaddr *)&dst, d->bd_wfilter);
 	if (error)
 		return (error);
@@ -1170,6 +1186,50 @@ bpf_mtap(caddr_t arg, struct mbuf *m)
 	}
 
 	return (drop);
+}
+
+/*
+ * Incoming linkage from device drivers, where we have a mbuf chain
+ * but need to prepend some arbitrary header from a linear buffer.
+ *
+ * Con up a minimal dummy header to pacify bpf.  Allocate (only) a
+ * struct m_hdr on the stack.  This is safe as bpf only reads from the
+ * fields in this header that we initialize, and will not try to free
+ * it or keep a pointer to it.
+ */
+int
+bpf_mtap_hdr(caddr_t arg, caddr_t data, u_int dlen, struct mbuf *m)
+{
+	struct m_hdr mh;
+
+	mh.mh_flags = 0;
+	mh.mh_next = m;
+	mh.mh_len = dlen;
+	mh.mh_data = data;
+
+	return bpf_mtap(arg, (struct mbuf *) &mh);
+}
+
+/*
+ * Incoming linkage from device drivers, where we have a mbuf chain
+ * but need to prepend the address family.
+ *
+ * Con up a minimal dummy header to pacify bpf.  We allocate (only) a
+ * struct m_hdr on the stack.  This is safe as bpf only reads from the
+ * fields in this header that we initialize, and will not try to free
+ * it or keep a pointer to it.
+ */
+int
+bpf_mtap_af(caddr_t arg, u_int32_t af, struct mbuf *m)
+{
+	struct m_hdr mh;
+
+	mh.mh_flags = 0;
+	mh.mh_next = m;
+	mh.mh_len = 4;
+	mh.mh_data = (caddr_t)&af;
+
+	return bpf_mtap(arg, (struct mbuf *) &mh);
 }
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: netbsd_getcwd.c,v 1.7 2004/08/03 12:10:47 todd Exp $ */
+/* $OpenBSD: netbsd_getcwd.c,v 1.9 2005/06/18 18:09:42 millert Exp $ */
 /* $NetBSD: vfs_getcwd.c,v 1.3.2.3 1999/07/11 10:24:09 sommerfeld Exp $ */
 
 /*-
@@ -244,8 +244,7 @@ unionread:
 				 * but getting the locking games for that
 				 * right would be heinous.
 				 */
-				if ((dp->d_type != DT_WHT) &&
-				    (dp->d_fileno == fileno)) {
+				if (dp->d_fileno == fileno) {
 					char *bp = *bpp;
 					bp -= dp->d_namlen;
 					
@@ -262,27 +261,7 @@ unionread:
 			}
 		}
 	} while (!eofflag);
-#if 0
-	/*
-	 * Deal with mount -o union, which unions only the
-	 * root directory of the mount.
-	 */
-	if ((uvp->v_flag & VROOT) &&
-	    (uvp->v_mount->mnt_flag & MNT_UNION)) {
-		struct vnode *tvp = uvp;
-		uvp = uvp->v_mount->mnt_vnodecovered;
-		vput(tvp);
-		VREF(uvp);
-		*uvpp = uvp;
-		error = vn_lock(uvp, LK_EXCLUSIVE | LK_RETRY);
-		if (error != 0) {
-			vrele(uvp);
-			*uvpp = uvp = NULL;
-			goto out;
-		}
-		goto unionread;
-	}
-#endif	
+
 	error = ENOENT;
 		
 out:

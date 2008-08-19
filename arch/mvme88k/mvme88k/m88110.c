@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88110.c,v 1.18 2004/08/04 15:54:38 miod Exp $	*/
+/*	$OpenBSD: m88110.c,v 1.21 2005/04/30 16:42:37 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * All rights reserved.
@@ -62,6 +62,8 @@
 #include <sys/systm.h>
 #include <sys/simplelock.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/cpu_number.h>
 #include <machine/cmmu.h>
 #include <machine/m88110.h>
@@ -69,12 +71,19 @@
 #include <machine/locore.h>
 #include <machine/trap.h>
 
-#include <uvm/uvm_extern.h>
-
 #ifdef DEBUG
 #define DB_CMMU		0x4000	/* MMU debug */
 unsigned int debuglevel = 0;
-#define dprintf(_L_,_X_) { if (debuglevel & (_L_)) { unsigned int psr = disable_interrupts_return_psr(); printf("%d: ", cpu_number()); printf _X_;  set_psr(psr); } }
+#define dprintf(_L_,_X_) \
+do { \
+	if (debuglevel & (_L_)) { \
+		unsigned int psr; \
+		disable_interrupt(psr); \
+		printf("%d: ", cpu_number()); \
+		printf _X_; \
+		set_psr(psr); \
+	} \
+} while (0)
 #else
 #define dprintf(_L_,_X_)
 #endif
@@ -100,7 +109,7 @@ void m88110_cmmu_flush_tlb(unsigned, unsigned, vaddr_t, vsize_t);
 void m88110_cmmu_flush_cache(int, paddr_t, psize_t);
 void m88110_cmmu_flush_inst_cache(int, paddr_t, psize_t);
 void m88110_cmmu_flush_data_cache(int, paddr_t, psize_t);
-void m88110_dma_cachectl(vaddr_t, vsize_t, int);
+void m88110_dma_cachectl(pmap_t, vaddr_t, vsize_t, int);
 void m88110_dma_cachectl_pa(paddr_t, psize_t, int);
 void m88110_cmmu_dump_config(void);
 void m88110_cmmu_show_translation(unsigned, unsigned, unsigned, int);
@@ -362,7 +371,9 @@ void
 m88110_cmmu_flush_tlb(unsigned cpu, unsigned kernel, vaddr_t vaddr,
     vsize_t size)
 {
-	u_int32_t psr = disable_interrupts_return_psr();
+	u_int32_t psr;
+
+	disable_interrupt(psr);
 
 	CMMU_LOCK;
 	if (kernel) {
@@ -409,7 +420,9 @@ m88110_cmmu_flush_tlb(unsigned cpu, unsigned kernel, vaddr_t vaddr,
 void
 m88110_cmmu_flush_cache(int cpu, paddr_t physaddr, psize_t size)
 {
-	u_int32_t psr = disable_interrupts_return_psr();
+	u_int32_t psr;
+
+	disable_interrupt(psr);
 
 	mc88110_inval_inst();
 	mc88110_flush_data();
@@ -424,7 +437,9 @@ m88110_cmmu_flush_cache(int cpu, paddr_t physaddr, psize_t size)
 void
 m88110_cmmu_flush_inst_cache(int cpu, paddr_t physaddr, psize_t size)
 {
-	u_int32_t psr = disable_interrupts_return_psr();
+	u_int32_t psr;
+
+	disable_interrupt(psr);
 
 	mc88110_inval_inst();
 	set_psr(psr);
@@ -436,7 +451,9 @@ m88110_cmmu_flush_inst_cache(int cpu, paddr_t physaddr, psize_t size)
 void
 m88110_cmmu_flush_data_cache(int cpu, paddr_t physaddr, psize_t size)
 {
-	u_int32_t psr = disable_interrupts_return_psr();
+	u_int32_t psr;
+
+	disable_interrupt(psr);
 
 	mc88110_flush_data();
 	if (mc88410_present())
@@ -450,7 +467,9 @@ m88110_cmmu_flush_data_cache(int cpu, paddr_t physaddr, psize_t size)
 void
 m88110_cmmu_sync_cache(paddr_t physaddr, psize_t size)
 {
-	u_int32_t psr = disable_interrupts_return_psr();
+	u_int32_t psr;
+
+	disable_interrupt(psr);
 
 	mc88110_inval_inst();
 	mc88110_flush_data();
@@ -462,7 +481,9 @@ m88110_cmmu_sync_cache(paddr_t physaddr, psize_t size)
 void
 m88110_cmmu_sync_inval_cache(paddr_t physaddr, psize_t size)
 {
-	u_int32_t psr = disable_interrupts_return_psr();
+	u_int32_t psr;
+
+	disable_interrupt(psr);
 
 	mc88110_sync_data();
 	if (mc88410_present())
@@ -473,7 +494,9 @@ m88110_cmmu_sync_inval_cache(paddr_t physaddr, psize_t size)
 void
 m88110_cmmu_inval_cache(paddr_t physaddr, psize_t size)
 {
-	u_int32_t psr = disable_interrupts_return_psr();
+	u_int32_t psr;
+
+	disable_interrupt(psr);
 
 	mc88110_inval_inst();
 	mc88110_inval_data();
@@ -483,11 +506,11 @@ m88110_cmmu_inval_cache(paddr_t physaddr, psize_t size)
 }
 
 void
-m88110_dma_cachectl(vaddr_t va, vsize_t size, int op)
+m88110_dma_cachectl(pmap_t pmap, vaddr_t va, vsize_t size, int op)
 {
 	paddr_t pa;
 
-	if (pmap_extract(pmap_kernel(), va, &pa) == FALSE)
+	if (pmap_extract(pmap, va, &pa) == FALSE)
 		return;	/* XXX */
 
 	switch (op) {

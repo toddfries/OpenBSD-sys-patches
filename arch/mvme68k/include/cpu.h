@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.19 2004/07/30 22:29:48 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.21 2005/08/14 12:52:39 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -203,7 +203,6 @@ void	m68881_save(struct fpframe *);
 void	m68881_restore(struct fpframe *);
 void	DCIA(void);
 void	DCIS(void);
-void	DCIAS(vaddr_t);
 void	DCIU(void);
 void	ICIA(void);
 void	ICPA(void);
@@ -233,7 +232,6 @@ int badvaddr(vaddr_t, int);
 void nmihand(void *);
 int intr_findvec(int, int);
 
-int cachectl(struct proc *, int, vaddr_t, int);
 void dma_cachectl(caddr_t, int);
 paddr_t kvtop(vaddr_t);
 void physaccess(vaddr_t, paddr_t, size_t, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_common.c,v 1.6 2005/03/01 18:37:06 mcbride Exp $	*/
+/*	$OpenBSD: if_san_common.c,v 1.9 2005/09/01 23:35:42 canacar Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -43,6 +43,7 @@
 # include <sys/errno.h>
 # include <sys/exec.h>
 # include <sys/mbuf.h>
+# include <sys/proc.h>
 # include <sys/socket.h>
 # include <sys/kernel.h>
 # include <sys/time.h>
@@ -104,14 +105,15 @@ static san_detach(void)
 	int			err = 0;
 
 	card = LIST_FIRST(&wan_cardlist);
-	while (card){
-		if (card->disable_comm){
+	while (card) {
+		if (card->disable_comm)
 			card->disable_comm(card);
-		}
-		while ((common = LIST_FIRST(&card->dev_head))){
+
+		while ((common = LIST_FIRST(&card->dev_head))) {
 			LIST_REMOVE(common, next);
-			if (card->del_if){
-				struct ifnet	*ifp = (struct ifnet*)&common->ifp;
+			if (card->del_if) {
+				struct ifnet *ifp =
+				    (struct ifnet*)&common->ifp;
 				log(LOG_INFO, "%s: Deleting interface...\n",
 						ifp->if_xname);
 				card->del_if(card, ifp);
@@ -136,7 +138,7 @@ static san_detach(void)
 
 
 int
-san_dev_attach(void *hw, u_int8_t *devname)
+san_dev_attach(void *hw, u_int8_t *devname, int namelen)
 {
 	sdla_t			*card;
 	wanpipe_common_t	*common = NULL;
@@ -146,32 +148,31 @@ san_dev_attach(void *hw, u_int8_t *devname)
 	if (!card) {
 		log(LOG_INFO, "%s: Failed allocate new card!\n",
 				san_drvname);
-		return (-EINVAL);
+		return (EINVAL);
 	}
-	memset(card, 0, sizeof(sdla_t));
+	bzero(card, sizeof(sdla_t));
 	card->magic = WANPIPE_MAGIC;
-	wanpipe_generic_name(card, card->devname);
-	bcopy(card->devname, devname, strlen(card->devname));
+	wanpipe_generic_name(card, card->devname, sizeof(card->devname));
+	strlcpy(devname, card->devname, namelen);
 	card->hw = hw;
 	LIST_INIT(&card->dev_head);
 
 	sdla_getcfg(card->hw, SDLA_CARDTYPE, &card->type);
-	if (sdla_is_te1(card->hw)) {
+	if (sdla_is_te1(card->hw))
 		sdla_te_defcfg(&card->fe_te.te_cfg);
-	}
 
 	err = sdla_setup(card->hw);
 	if (err) {
 		log(LOG_INFO, "%s: Hardware setup Failed %d\n",
 			card->devname,err);
-		return (-EINVAL);
+		return (EINVAL);
 	}
 	err = sdla_intr_establish(card->hw, sdla_isr, (void*)card);
 	if (err) {
 		log(LOG_INFO, "%s: Failed set interrupt handler!\n",
 					card->devname);
 		sdla_down(card->hw);
-		return (-EINVAL);
+		return (EINVAL);
 	}
 
 	switch (card->type) {
@@ -186,7 +187,7 @@ san_dev_attach(void *hw, u_int8_t *devname)
 	if (common == NULL) {
 		release_hw(card);
 		card->configured = 0;
-		return (-EINVAL);
+		return (EINVAL);
 	}
 	LIST_INSERT_HEAD(&card->dev_head, common, next);
 
@@ -205,7 +206,8 @@ san_dev_attach(void *hw, u_int8_t *devname)
  *
  */
 #if 0
-static int shutdown (sdla_t *card)
+static int
+shutdown (sdla_t *card)
 {
 	int err=0;
 
@@ -261,10 +263,14 @@ wan_ioctl(struct ifnet *ifp, int cmd, struct ifreq *ifr)
 {
 	sdla_t			*card;
 	wanpipe_common_t	*common = WAN_IFP_TO_COMMON(ifp);
-	int			err = 0;
+	int			err;
 
 	SAN_ASSERT(common == NULL);
 	SAN_ASSERT(common->card == NULL);
+
+	if ((err = suser(curproc, 0)) != 0)
+		return err;
+
 	switch (cmd) {
 	case SIOC_WANPIPE_HWPROBE:
 		err = wan_ioctl_hwprobe(ifp, ifr->ifr_data);
@@ -275,7 +281,7 @@ wan_ioctl(struct ifnet *ifp, int cmd, struct ifreq *ifr)
 		break;
 
 	default:
-		err = 1;
+		err = ENOTTY;
 		break;
 	}
 	return err;
@@ -293,32 +299,31 @@ wan_ioctl_hwprobe(struct ifnet *ifp, void *u_def)
 	SAN_ASSERT(common == NULL);
 	SAN_ASSERT(common->card == NULL);
 	card = common->card;
-	memset(&def, 0, sizeof(wanlite_def_t));
+	bzero(&def, sizeof(wanlite_def_t));
 	/* Get protocol type */
 	def.proto = common->protocol;
 
 	/* Get hardware configuration */
 	err = sdla_get_hwprobe(card->hw, (void**)&str);
-	if (err) {
-		return -EINVAL;
-	}
-	str[strlen(str)] = '\0';
-	memcpy(def.hwprobe, str, strlen(str));
+	if (err)
+		return EINVAL;
+
+	strlcpy(def.hwprobe, str, sizeof(def.hwprobe));
 	/* Get interface configuration */
 	if (IS_TE1(&card->fe_te.te_cfg)) {
-		if (IS_T1(&card->fe_te.te_cfg)) {
+		if (IS_T1(&card->fe_te.te_cfg))
 			def.iface = IF_IFACE_T1;
-		}else{
+		else
 			def.iface = IF_IFACE_E1;
-		}
-		memcpy(&def.te_cfg, &card->fe_te.te_cfg, sizeof(sdla_te_cfg_t));
+
+		bcopy(&card->fe_te.te_cfg, &def.te_cfg, sizeof(sdla_te_cfg_t));
 	}
 
 	err = copyout(&def, u_def, sizeof(def));
 	if (err) {
 		log(LOG_INFO, "%s: Failed to copy to user space (%d)\n",
 		    card->devname, __LINE__);
-		return -ENOMEM;
+		return ENOMEM;
 	}
 	return 0;
 }
@@ -332,30 +337,25 @@ wan_ioctl_dump(sdla_t *card, void *u_dump)
 	int		err = 0;
 
 	err = copyin(u_dump, &dump, sizeof(sdla_dump_t));
-	if (err) {
-		return -EFAULT;
-	}
+	if (err)
+		return err;
 
 	sdla_getcfg(card->hw, SDLA_MEMORY, &memory);
-	if (dump.magic != WANPIPE_MAGIC) {
-		return -EINVAL;
-	}
+	if (dump.magic != WANPIPE_MAGIC)
+		return EINVAL;
 
-	if ((dump.offset + dump.length) > memory) {
-		return -EINVAL;
-	}
+	if ((dump.offset + dump.length) > memory)
+		return EINVAL;
 
 	data = malloc(dump.length, M_DEVBUF, M_NOWAIT);
-	if (data == NULL) {
-		return -ENOMEM;
-	}
+	if (data == NULL)
+		return ENOMEM;
 
 	sdla_peek(card->hw, dump.offset, data, dump.length);
 	err = copyout(data, dump.ptr, dump.length);
 	if (err) {
 		log(LOG_INFO, "%s: Failed to copy to user space (%d)\n",
 				card->devname, __LINE__);
-		err = -EFAULT;
 	}
 	free(data, M_DEVBUF);
 	return err;
@@ -371,13 +371,13 @@ sdla_isr(void *pcard)
 {
 	sdla_t *card = (sdla_t*)pcard;
 
-	if (card == NULL || card->magic != WANPIPE_MAGIC) return 0;
+	if (card == NULL || card->magic != WANPIPE_MAGIC)
+		return 0;
 
 	switch (card->type) {
 	case SDLA_AFT:
-		if (card->isr) {
+		if (card->isr)
 			card->isr(card);
-		}
 		break;
 	}
 	return (1);
@@ -388,49 +388,86 @@ wan_mbuf_alloc(int len)
 {
 	struct mbuf	*m;
 
-	if (len) {
-		MGETHDR(m, M_DONTWAIT, MT_DATA);
-	} else {
-		MGET(m, M_DONTWAIT, MT_DATA);
-	}
-	if (m != NULL) {
-		if (m->m_flags & M_PKTHDR) {
-			m->m_pkthdr.len = 0;
-		}
-		m->m_len = 0;
-		MCLGET(m, M_DONTWAIT);
-		if ((m->m_flags & M_EXT) == 0) {
-			m_freem(m);
-			return NULL;
-		}
-		m->m_data += 16;
+	/* XXX handle len > MCLBYTES */
+	if (len <= 0 || len > MCLBYTES)
+		return (NULL);
+
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
+
+	if (m == NULL || len < MHLEN)
 		return (m);
+
+	m->m_pkthdr.len = 0;
+	m->m_len = 0;
+	MCLGET(m, M_DONTWAIT);
+
+	if ((m->m_flags & M_EXT) == 0) {
+		m_freem(m);
+		return (NULL);
 	}
-	return NULL;
+
+	return (m);
 }
 
 int 
 wan_mbuf_to_buffer(struct mbuf **m_org)
 {
-	struct mbuf	*m = *m_org, *new = NULL;
+	struct mbuf	*m, *m0, *tmp;
+	char		*buffer;
+	size_t	 	 len;
 
-	if (m == NULL){
-		return -EINVAL;
-	}
-	new = wan_mbuf_alloc(0);
-	if (new){
-		struct mbuf	*tmp = m;
-		char	*buffer = new->m_data;
+	if (m_org == NULL || *m_org == NULL)
+		return (EINVAL);
 
-		for( ; tmp; tmp = tmp->m_next) {
-			bcopy(mtod(tmp, caddr_t), buffer, tmp->m_len);
-			buffer += tmp->m_len;
-			new->m_len += tmp->m_len;
-		}
+	m0 = *m_org;
+#if 0
+	/* no need to copy if it is a single, properly aligned mbuf */
+	if (m0->m_next == NULL && (mtod(m0, u_int32_t)  & 0x03) == 0)
+		return (0);
+#endif
+	MGET(m, M_DONTWAIT, MT_DATA);
+
+	if (m == NULL)
+		return (ENOMEM);
+
+	MCLGET(m, M_DONTWAIT);
+
+	if ((m->m_flags & M_EXT) == 0) {
 		m_freem(m);
-		*m_org = new;
-		return 0;
+		return (ENOMEM);
 	}
-	return -EINVAL;
-}
 
+	m->m_len = 0;
+
+	/* XXX handle larger packets? */
+	len = MCLBYTES ;
+	buffer = mtod(m, caddr_t);
+
+	len -= 16;
+	buffer += 16;
+
+	/* make sure the buffer is aligned to an 8-byte boundary */
+	if (mtod(m, u_int32_t) & 0x03) {
+		unsigned int inc = 4 - (mtod(m, u_int32_t) & 0x03);
+		buffer += inc;
+		len -= inc;
+	}
+
+	m->m_data = buffer;
+
+	for (tmp = m0; tmp; tmp = tmp->m_next) {
+		if (tmp->m_len > len) {
+			m_freem(m);
+			return (EINVAL);
+		}
+		bcopy(mtod(tmp, caddr_t), buffer, tmp->m_len);
+		buffer += tmp->m_len;
+		m->m_len += tmp->m_len;
+		len -= tmp->m_len;
+	}
+
+	m_freem(m0);
+	*m_org = m;
+
+	return (0);
+}

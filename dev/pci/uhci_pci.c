@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci_pci.c,v 1.18 2004/12/31 04:22:32 dlg Exp $	*/
+/*	$OpenBSD: uhci_pci.c,v 1.20 2005/08/09 04:10:13 mickey Exp $	*/
 /*	$NetBSD: uhci_pci.c,v 1.24 2002/10/02 16:51:58 thorpej Exp $	*/
 
 /*
@@ -48,7 +48,6 @@
 #include <machine/bus.h>
 
 #include <dev/pci/pcivar.h>
-#include <dev/pci/usb_pci.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -64,7 +63,6 @@ int	uhci_pci_detach(device_ptr_t, int);
 
 struct uhci_pci_softc {
 	uhci_softc_t		sc;
-	struct usb_pci		sc_pci;
 	pci_chipset_tag_t	sc_pc;
 	pcitag_t		sc_tag;
 	void 			*sc_ih;		/* interrupt vectoring */
@@ -97,7 +95,6 @@ uhci_pci_attach(struct device *parent, struct device *self, void *aux)
 	pcitag_t tag = pa->pa_tag;
 	char const *intrstr;
 	pci_intr_handle_t ih;
-	pcireg_t csr;
 	const char *vendor;
 	char *devname = sc->sc.sc_bus.bdev.dv_xname;
 	usbd_status r;
@@ -122,11 +119,6 @@ uhci_pci_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pc = pc;
 	sc->sc_tag = tag;
 	sc->sc.sc_bus.dmatag = pa->pa_dmat;
-
-	/* Enable the device. */
-	csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
-		       csr | PCI_COMMAND_MASTER_ENABLE);
 
 	/* Map and establish the interrupt. */
 	if (pci_intr_map(pa, &ih)) {
@@ -187,7 +179,6 @@ uhci_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	usb_pci_add(&sc->sc_pci, pa, &sc->sc.sc_bus);
 	/* Attach usb device. */
 	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
 				       usbctlprint);
@@ -210,7 +201,6 @@ uhci_pci_detach(device_ptr_t self, int flags)
 		bus_space_unmap(sc->sc.iot, sc->sc.ioh, sc->sc.sc_size);
 		sc->sc.sc_size = 0;
 	}
-	usb_pci_rem(&sc->sc_pci);
 
 	return (0);
 }

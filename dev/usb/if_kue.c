@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.35 2005/01/15 03:53:36 jsg Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.38 2005/08/01 05:36:48 brad Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -120,11 +120,6 @@
 #include <netinet/if_ether.h>
 #endif
 #endif /* defined (__OpenBSD__) */
-
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -545,15 +540,16 @@ kue_attachhook(void *xsc)
 USB_ATTACH(kue)
 {
 	USB_ATTACH_START(kue, sc, uaa);
-	char			devinfo[1024];
+	char			*devinfop;
 	usbd_device_handle	dev = uaa->device;
 	usbd_status		err;
 
 	DPRINTFN(5,(" : kue_attach: sc=%p, dev=%p", sc, dev));
 
-	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
+	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->kue_dev), devinfo);
+	printf("%s: %s\n", USBDEVNAME(sc->kue_dev), devinfop);
+	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, KUE_CONFIG_NO, 1);
 	if (err) {
@@ -1125,21 +1121,6 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #endif
 			break;
 #endif /* INET */
-#ifdef NS
-		case AF_NS:
-		    {
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host = *(union ns_host *)
-					LLADDR(ifp->if_sadl);
-			else
-				memcpy(LLADDR(ifp->if_sadl),
-				       ina->x_host.c_host,
-				       ifp->if_addrlen);
-			break;
-		    }
-#endif /* NS */
 		}
 		break;
 
@@ -1240,6 +1221,7 @@ kue_stop(struct kue_softc *sc)
 
 	ifp = GET_IFP(sc);
 	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	/* Stop transfers. */
 	if (sc->kue_ep[KUE_ENDPT_RX] != NULL) {
@@ -1307,6 +1289,4 @@ kue_stop(struct kue_softc *sc)
 			sc->kue_cdata.kue_tx_chain[i].kue_xfer = NULL;
 		}
 	}
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }

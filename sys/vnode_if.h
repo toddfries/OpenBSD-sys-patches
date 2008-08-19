@@ -3,9 +3,9 @@
  * (Modifications made here may easily be lost!)
  *
  * Created from the file:
- *	OpenBSD
+ *	OpenBSD: vnode_if.src,v 1.28 2005/07/03 20:14:00 drahn Exp 
  * by the script:
- *	OpenBSD
+ *	OpenBSD: vnode_if.sh,v 1.14 2005/05/22 21:07:23 pedro Exp 
  */
 
 /*
@@ -379,42 +379,6 @@ struct vop_reallocblks_args {
 };
 extern struct vnodeop_desc vop_reallocblks_desc;
 int VOP_REALLOCBLKS(struct vnode *, struct cluster_save *);
-
-struct vop_whiteout_args {
-	struct vnodeop_desc *a_desc;
-	struct vnode *a_dvp;
-	struct componentname *a_cnp;
-	int a_flags;
-};
-extern struct vnodeop_desc vop_whiteout_desc;
-int VOP_WHITEOUT(struct vnode *, struct componentname *, int);
-
-struct vop_getextattr_args {
-	struct vnodeop_desc *a_desc;
-	struct vnode *a_vp;
-	int a_attrnamespace;
-	const char *a_name;
-	struct uio *a_uio;
-	size_t *a_size;
-	struct ucred *a_cred;
-	struct proc *a_p;
-};
-extern struct vnodeop_desc vop_getextattr_desc;
-int VOP_GETEXTATTR(struct vnode *, int, const char *, struct uio *, 
-    size_t *, struct ucred *, struct proc *);
-
-struct vop_setextattr_args {
-	struct vnodeop_desc *a_desc;
-	struct vnode *a_vp;
-	int a_attrnamespace;
-	const char *a_name;
-	struct uio *a_uio;
-	struct ucred *a_cred;
-	struct proc *a_p;
-};
-extern struct vnodeop_desc vop_setextattr_desc;
-int VOP_SETEXTATTR(struct vnode *, int, const char *, struct uio *, 
-    struct ucred *, struct proc *);
 
 /* Special cases: */
 #include <sys/buf.h>

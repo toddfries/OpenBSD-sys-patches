@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.90 2004/11/02 21:20:56 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.92 2005/06/17 21:54:14 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -412,6 +412,32 @@ nobootinfo:
 	 */
 #endif
 
+#ifndef SMALL_KERNEL
+	/*
+	 * If we run on a BWX-capable processor, override cpu_switch
+	 * with a faster version.
+	 * We do this now because the kernel text might be mapped
+	 * read-only eventually (although this is not the case at the moment).
+	 */
+	if (alpha_implver() >= ALPHA_IMPLVER_EV5) {
+		if (~alpha_amask(ALPHA_AMASK_BWX) != 0) {
+			extern vaddr_t __bwx_switch0, __bwx_switch1,
+			    __bwx_switch2, __bwx_switch3;
+			u_int32_t *dst, *src, *end;
+
+			src = (u_int32_t *)&__bwx_switch2;
+			end = (u_int32_t *)&__bwx_switch3;
+			dst = (u_int32_t *)&__bwx_switch0;
+			while (src != end)
+				*dst++ = *src++;
+			src = (u_int32_t *)&__bwx_switch1;
+			end = (u_int32_t *)&__bwx_switch2;
+			while (src != end)
+				*dst++ = *src++;
+		}
+	}
+#endif
+
 	/*
 	 * find out this system's page size
 	 */
@@ -561,6 +587,7 @@ nobootinfo:
 #endif /* _PMAP_MAY_USE_PROM_CONSOLE */
 	}
 
+#ifdef DEBUG
 	/*
 	 * Dump out the MDDT if it looks odd...
 	 */
@@ -586,6 +613,7 @@ nobootinfo:
 		}
 		printf("\n");
 	}
+#endif
 
 	if (totalphysmem == 0)
 		panic("can't happen: system seems to have no memory!");
@@ -1342,7 +1370,7 @@ dumpsys()
 
 err:
 	switch (error) {
-
+#ifdef DEBUG
 	case ENXIO:
 		printf("device bad\n");
 		break;
@@ -1362,7 +1390,7 @@ err:
 	case EINTR:
 		printf("aborted from console\n");
 		break;
-
+#endif /* DEBUG */
 	case 0:
 		printf("succeeded\n");
 		break;
@@ -1725,7 +1753,7 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_ROOT_DEVICE:
 		return (sysctl_rdstring(oldp, oldlenp, newp,
 		    root_device));
-
+#ifndef SMALL_KERNEL
 	case CPU_UNALIGNED_PRINT:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &alpha_unaligned_print));
@@ -1745,6 +1773,7 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_CHIPSET:
 		return (alpha_sysctl_chipset(name + 1, namelen - 1, oldp,
 		    oldlenp));
+#endif /* SMALL_KERNEL */
 
 #ifndef NO_IEEE
 	case CPU_FP_SYNC_COMPLETE:

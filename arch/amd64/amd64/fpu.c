@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.7.2.1 2006/05/02 04:08:54 brad Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.8.2.1 2006/05/02 04:07:27 brad Exp $	*/
 /*	$NetBSD: fpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -208,9 +208,10 @@ fpudna(struct cpu_info *ci)
 	 * Initialize the FPU state to clear any exceptions.  If someone else
 	 * was using the FPU, save their state.
 	 */
-	if (ci->ci_fpcurproc != NULL && ci->ci_fpcurproc != p) 
+	if (ci->ci_fpcurproc != NULL && ci->ci_fpcurproc != p) {
 		fpusave_cpu(ci, 1);
-	else {
+		uvmexp.fpswtch++;
+	} else {
 		clts();
 		fninit();
 		fwait();

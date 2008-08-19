@@ -1,4 +1,4 @@
-/*	$OpenBSD: sockio.h,v 1.32 2005/01/14 11:49:01 henning Exp $	*/
+/*	$OpenBSD: sockio.h,v 1.35 2005/06/12 00:41:33 henning Exp $	*/
 /*	$NetBSD: sockio.h,v 1.5 1995/08/23 00:40:47 thorpej Exp $	*/
 
 /*-
@@ -46,9 +46,6 @@
 #define	SIOCSPGRP	 _IOW('s',  8, int)		/* set process group */
 #define	SIOCGPGRP	 _IOR('s',  9, int)		/* get process group */
 
-#define	SIOCADDRT	 _IOW('r', 10, struct ortentry)	/* add route */
-#define	SIOCDELRT	 _IOW('r', 11, struct ortentry)	/* delete route */
-
 #define	SIOCSIFADDR	 _IOW('i', 12, struct ifreq)	/* set ifnet address */
 #define	OSIOCGIFADDR	_IOWR('i', 13, struct ifreq)	/* get ifnet address */
 #define	SIOCGIFADDR	_IOWR('i', 33, struct ifreq)	/* get ifnet address */
@@ -70,6 +67,7 @@
 #define	SIOCDIFADDR	 _IOW('i', 25, struct ifreq)	/* delete IF addr */
 #define	SIOCAIFADDR	 _IOW('i', 26, struct ifaliasreq)/* add/chg IF alias */
 #define	SIOCGIFDATA	_IOWR('i', 27, struct ifreq)	/* get if_data */
+#define	SIOCSIFLLADDR	_IOW('i', 31, struct ifreq)	/* set link level addr */
 
 /* KAME IPv6 */
 /* SIOCAIFALIAS? */
@@ -146,6 +144,7 @@
 #define	SIOCAIFGROUP	_IOW('i', 135, struct ifgroupreq) /* add an ifgroup */
 #define	SIOCGIFGROUP   _IOWR('i', 136, struct ifgroupreq) /* get ifgroups */
 #define	SIOCDIFGROUP    _IOW('i', 137, struct ifgroupreq) /* delete ifgroup */
+#define	SIOCGIFGMEMB   _IOWR('i', 138, struct ifgroupreq) /* get members */
 
 #define	SIOCSIFDESCR	 _IOW('i', 128, struct ifreq)	/* set ifnet descr */
 #define	SIOCGIFDESCR	_IOWR('i', 129, struct ifreq)	/* get ifnet descr */

@@ -1,4 +1,4 @@
-/* $OpenBSD: com_cardbus.c,v 1.9 2004/10/07 21:16:59 brad Exp $ */
+/* $OpenBSD: com_cardbus.c,v 1.17 2005/07/25 01:38:15 pascoe Exp $ */
 /* $NetBSD: com_cardbus.c,v 1.4 2000/04/17 09:21:59 joda Exp $ */
 
 /*
@@ -86,6 +86,7 @@ struct com_cardbus_softc {
 	cardbustag_t		cc_tag;
 	cardbusreg_t		cc_reg;
 	int			cc_type;
+	u_char			cc_bug;
 };
 
 #define DEVNAME(CSC) ((CSC)->cc_com.sc_dev.dv_xname)
@@ -100,7 +101,7 @@ void	com_cardbus_disable(struct com_softc *);
 struct csdev *com_cardbus_find_csdev(struct cardbus_attach_args *);
 int	com_cardbus_gofigure(struct cardbus_attach_args *,
     struct com_cardbus_softc *);
-void	com_cardbus_attach2(struct com_softc *);
+void	com_cardbus_attach2(struct com_softc *, u_char);
 
 #if NCOM_CARDBUS
 struct cfattach com_cardbus_ca = {
@@ -114,11 +115,14 @@ struct cfattach pccom_cardbus_ca = {
 };
 #endif
 
+#define BUG_BROADCOM	0x01
+
 static struct csdev {
-	int		vendor;
-	int		product;
+	u_short		vendor;
+	u_short		product;
 	cardbusreg_t	reg;
-	int		type;
+	u_char		type;
+	u_char		bug;
 } csdevs[] = {
 	{ PCI_VENDOR_XIRCOM, PCI_PRODUCT_XIRCOM_MODEM56,
 	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
@@ -129,7 +133,11 @@ static struct csdev {
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_MODEM56,
 	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_GLOBALMODEM56,
-	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO }
+	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SERIAL,
+	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO, BUG_BROADCOM },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4322,
+	  CARDBUS_BASE0_REG, CARDBUS_MAPREG_TYPE_IO, BUG_BROADCOM }
 };
 
 static const int ncsdevs = sizeof(csdevs) / sizeof(csdevs[0]);
@@ -161,7 +169,7 @@ com_cardbus_match(struct device *parent, void *match, void *aux)
 	    (ca->ca_cis.funce.serial.uart_type == 0 ||	/* 8250 */
 	    ca->ca_cis.funce.serial.uart_type == 1 ||	/* 16450 */
 	    ca->ca_cis.funce.serial.uart_type == 2))	/* 16550 */
-	    return (1);
+		return (1);
 
 	return (0);
 }
@@ -179,6 +187,7 @@ com_cardbus_gofigure(struct cardbus_attach_args *ca,
 	if (cp != NULL) {
 		csc->cc_reg = cp->reg;
 		csc->cc_type = cp->type;
+		csc->cc_bug = cp->bug;
 		return (0);
 	}
 
@@ -235,7 +244,7 @@ com_cardbus_gofigure(struct cardbus_attach_args *ca,
 }
 
 void
-com_cardbus_attach (struct device *parent, struct device *self, void *aux)
+com_cardbus_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct com_softc *sc = (struct com_softc*)self;
 	struct com_cardbus_softc *csc = (struct com_cardbus_softc*)self;
@@ -263,11 +272,12 @@ com_cardbus_attach (struct device *parent, struct device *self, void *aux)
 		csc->cc_csr |= CARDBUS_COMMAND_MEM_ENABLE;
 		csc->cc_cben = CARDBUS_MEM_ENABLE;
 	}
-	sc->sc_iobase = csc->cc_addr;
 
-#if 0
+	sc->sc_iobase = csc->cc_addr;
 	sc->sc_frequency = COM_FREQ;
-#endif
+
+	timeout_set(&sc->sc_dtr_tmo, com_raisedtr, sc);
+	timeout_set(&sc->sc_diag_tmo, comdiag, sc);
 
 	sc->enable = com_cardbus_enable;
 	sc->disable = com_cardbus_disable;
@@ -279,20 +289,10 @@ com_cardbus_attach (struct device *parent, struct device *self, void *aux)
 		printf("%s", DEVNAME(csc));
 	}
 
-#ifdef __OpenBSD__
 	if (com_cardbus_enable(sc))
 		printf(": function enable failed\n");
-
 	sc->enabled = 1;
-
-	com_cardbus_attach2(sc);
-#else
-	com_cardbus_setup(csc);
-
-	com_attach_subr(sc);
-
-	Cardbus_function_disable(csc->cc_ct);
-#endif
+	com_cardbus_attach2(sc, csc->cc_bug);
 }
 
 void
@@ -348,7 +348,7 @@ com_cardbus_enable(struct com_softc *sc)
 		return (1);
 	}
 
-	printf(": irq %d", psc->sc_intrline);
+	printf(": irq %d,", psc->sc_intrline);
 
 	return (0);
 }
@@ -390,8 +390,7 @@ com_cardbus_detach(struct device *self, int flags)
  * XXX This should be handled by a generic attach
  */
 void
-com_cardbus_attach2(sc)
-	struct com_softc *sc;
+com_cardbus_attach2(struct com_softc *sc, u_char bug)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -436,6 +435,20 @@ com_cardbus_attach2(sc)
 			if (bus_space_read_1(iot, ioh, com_efr) == 0)
 				sc->sc_uarttype = COM_UART_ST16650V2;
 		}
+	}
+
+	if (sc->sc_uarttype == COM_UART_16550A) { /* Probe for TI16750s */
+		bus_space_write_1(iot, ioh, com_lcr, lcr | LCR_DLAB);
+		bus_space_write_1(iot, ioh, com_fifo,
+		    FIFO_ENABLE | FIFO_ENABLE_64BYTE);
+		if ((bus_space_read_1(iot, ioh, com_iir) >> 5) == 7) {
+#if 0
+			bus_space_write_1(iot, ioh, com_lcr, 0);
+			if ((bus_space_read_1(iot, ioh, com_iir) >> 5) == 6)
+#endif
+				sc->sc_uarttype = COM_UART_TI16750;
+		}
+		bus_space_write_1(iot, ioh, com_fifo, FIFO_ENABLE);
 	}
 
 #if NPCCOM > 0
@@ -484,6 +497,7 @@ com_cardbus_attach2(sc)
 	 * Print UART type and initialize ourself.
 	 */
 	sc->sc_fifolen = 1;	/* default */
+	printf(" ");
 	switch (sc->sc_uarttype) {
 	case COM_UART_UNKNOWN:
 		printf("unknown uart\n");
@@ -498,6 +512,12 @@ com_cardbus_attach2(sc)
 		printf("ns16550, no working fifo\n");
 		break;
 	case COM_UART_16550A:
+		if (bug & BUG_BROADCOM) {
+			printf("Broadcom ns16550a, 15 byte fifo\n");
+			SET(sc->sc_hwflags, COM_HW_FIFO);
+			sc->sc_fifolen = 15;
+			break;
+		}
 		printf("ns16550a, 16 byte fifo\n");
 		SET(sc->sc_hwflags, COM_HW_FIFO);
 		sc->sc_fifolen = 16;
@@ -509,6 +529,11 @@ com_cardbus_attach2(sc)
 		printf("st16650, 32 byte fifo\n");
 		SET(sc->sc_hwflags, COM_HW_FIFO);
 		sc->sc_fifolen = 32;
+		break;
+	case COM_UART_TI16750:
+		printf("ti16750, 64 byte fifo\n");
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 64;
 		break;
 #if NPCCOM > 0
 #ifdef i386

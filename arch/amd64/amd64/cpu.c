@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.7 2004/07/19 15:09:05 art Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.10 2005/07/26 08:38:29 art Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -361,7 +361,7 @@ cpu_attach(parent, self, aux)
 		break;
 
 	default:
-		panic("unknown processor type??\n");
+		panic("unknown processor type??");
 	}
 	cpu_vm_init(ci);
 
@@ -390,7 +390,7 @@ cpu_init(ci)
 		(*ci->cpu_setup)(ci);
 
 	lcr0(rcr0() | CR0_WP);
-	lcr4(rcr4() | CR4_PGE | CR4_PSE | CR4_OSFXSR | CR4_OSXMMEXCPT);
+	lcr4(rcr4() | CR4_DEFAULT);
 
 #ifdef MTRR
 	if ((ci->ci_flags & CPUF_AP) == 0)
@@ -544,7 +544,6 @@ cpu_hatch(void *v)
 	lcr8(0);
 	enable_intr();
 
-	printf("%s: CPU %u running\n",ci->ci_dev->dv_xname, ci->ci_cpuid);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	splx(s);
 }

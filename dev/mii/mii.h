@@ -1,4 +1,4 @@
-/*	$OpenBSD: mii.h,v 1.7 2004/10/07 22:18:48 brad Exp $	*/
+/*	$OpenBSD: mii.h,v 1.9 2005/07/23 01:42:16 brad Exp $	*/
 /*	$NetBSD: mii.h,v 1.8 2001/05/31 03:06:46 thorpej Exp $	*/
 
 /*

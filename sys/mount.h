@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.58 2003/08/14 07:46:40 mickey Exp $	*/
+/*	$OpenBSD: mount.h,v 1.62 2005/07/03 20:14:00 drahn Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -252,6 +252,13 @@ struct ntfs_args {
 #define	NTFS_MFLAG_ALLNAMES     0x00000002
 
 /*
+ * Arguments to mount UDF filesystems.
+ */
+struct udf_args {
+	char	*fspec;			/* block special device to mount */
+};
+
+/*
  * Arguments to mount procfs filesystems
  */
 struct procfs_args {
@@ -341,18 +348,16 @@ struct ostatfs {
 #define	MOUNT_LOFS	"lofs"		/* Loopback filesystem */
 #define	MOUNT_FDESC	"fdesc"		/* File Descriptor Filesystem */
 #define	MOUNT_PORTAL	"portal"	/* Portal Filesystem */
-#define	MOUNT_NULL	"null"		/* Minimal Filesystem Layer */
-#define	MOUNT_UMAP	"umap"	/* User/Group Identifier Remapping Filesystem */
 #define	MOUNT_KERNFS	"kernfs"	/* Kernel Information Filesystem */
 #define	MOUNT_PROCFS	"procfs"	/* /proc Filesystem */
 #define	MOUNT_AFS	"afs"		/* Andrew Filesystem */
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
-#define	MOUNT_UNION	"union"		/* Union (translucent) Filesystem */
 #define	MOUNT_ADOSFS	"adosfs"	/* AmigaDOS Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
 #define	MOUNT_XFS	"xfs"		/* xfs */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
+#define	MOUNT_UDF	"udf"		/* UDF */
 
 /*
  * Structure per mounted file system.  Each mounted file system has an
@@ -385,7 +390,6 @@ struct mount {
 #define	MNT_NOEXEC	0x00000004	/* can't exec from filesystem */
 #define	MNT_NOSUID	0x00000008	/* don't honor setuid bits on fs */
 #define	MNT_NODEV	0x00000010	/* don't interpret special files */
-#define	MNT_UNION	0x00000020	/* union with underlying filesystem */
 #define	MNT_ASYNC	0x00000040	/* file system written asynchronously */
 
 /*
@@ -423,6 +427,8 @@ struct mount {
 #define	MNT_FORCE	0x00080000	/* force unmount or readonly change */
 #define MNT_WANTRDWR	0x02000000	/* want upgrade to read/write */
 #define MNT_SOFTDEP     0x04000000      /* soft dependencies being done */
+#define MNT_DOOMED	0x08000000	/* device behind filesystem is gone */
+
 /*
  * Sysctl CTL_VFS definitions.
  *
@@ -498,10 +504,6 @@ struct vfsops {
 				     size_t, struct proc *);
 	int	(*vfs_checkexp)(struct mount *mp, struct mbuf *nam,
 				    int *extflagsp, struct ucred **credanonp);
-	int     (*vfs_extattrctl)(struct mount *mp, int cmd,
-				    struct vnode *filename_vp,
-				    int attrnamespace, const char *attrname,
-				    struct proc *p);
 };
 
 #define VFS_MOUNT(MP, PATH, DATA, NDP, P) \
@@ -518,18 +520,6 @@ struct vfsops {
 #define	VFS_VPTOFH(VP, FIDP)	  (*(VP)->v_mount->mnt_op->vfs_vptofh)(VP, FIDP)
 #define VFS_CHECKEXP(MP, NAM, EXFLG, CRED) \
 	(*(MP)->mnt_op->vfs_checkexp)(MP, NAM, EXFLG, CRED)
-#define VFS_EXTATTRCTL(MP, C, FN, NS, N, P) \
-	(*(MP)->mnt_op->vfs_extattrctl)(MP, C, FN, NS, N, P)
-
-/*
- * Declarations for these vfs default operations are located in
- * kern/vfs_default.c, they should be used instead of making "dummy"
- * functions or casting entries in the VFS op table to "enopnotsupp()".
- */
-int	vfs_stdextattrctl(struct mount *mp, int cmd,
-	    struct vnode *filename_vp, int attrnamespace, const char *attrname,
-	    struct proc *p);
-
 #endif /* _KERNEL */
 
 /*

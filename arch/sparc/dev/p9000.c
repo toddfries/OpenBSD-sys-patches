@@ -1,4 +1,4 @@
-/*	$OpenBSD: p9000.c,v 1.12 2005/03/07 16:44:50 miod Exp $	*/
+/*	$OpenBSD: p9000.c,v 1.15 2005/07/09 22:22:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2003, Miodrag Vallat.
@@ -49,7 +49,6 @@
 
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
-#include <dev/wscons/wscons_raster.h>
 #include <dev/rasops/rasops.h>
 #include <machine/fbvar.h>
 
@@ -76,20 +75,14 @@ struct p9000_softc {
 	union	bt_cmap sc_cmap;	/* Brooktree color map */
 	volatile u_int8_t *sc_ramdac;	/* BT445 registers */
 	struct	intrhand sc_ih;
-	int	sc_nscreens;
 	u_int32_t	sc_junk;	/* throwaway value */
 };
 
 int	p9000_ioctl(void *, u_long, caddr_t, int, struct proc *);
-int	p9000_alloc_screen(void *, const struct wsscreen_descr *, void **,
-	    int *, int *, long *);
-void	p9000_free_screen(void *, void *);
-int	p9000_show_screen(void *, void *, int, void (*cb)(void *, int, int),
-	    void *);
-paddr_t	p9000_mmap(void *, off_t, int);
-static __inline__ void p9000_loadcmap_deferred(struct p9000_softc *,
-    u_int, u_int);
+static __inline__
+void	p9000_loadcmap_deferred(struct p9000_softc *, u_int, u_int);
 void	p9000_loadcmap_immediate(struct p9000_softc *, u_int, u_int);
+paddr_t	p9000_mmap(void *, off_t, int);
 void	p9000_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 void	p9000_burner(void *, u_int, u_int);
 int	p9000_intr(void *);
@@ -97,21 +90,22 @@ int	p9000_intr(void *);
 struct wsdisplay_accessops p9000_accessops = {
 	p9000_ioctl,
 	p9000_mmap,
-	p9000_alloc_screen,
-	p9000_free_screen,
-	p9000_show_screen,
+	NULL,	/* alloc_screen */
+	NULL,	/* free_screen */
+	NULL,	/* show_screen */
 	NULL,	/* load_font */
 	NULL,	/* scrollback */
 	NULL,	/* getchar */
 	p9000_burner,
+	NULL	/* pollc */
 };
 
-void	p9000_ras_init(struct p9000_softc *);
 void	p9000_ras_copycols(void *, int, int, int, int);
 void	p9000_ras_copyrows(void *, int, int, int);
 void	p9000_ras_do_cursor(struct rasops_info *);
 void	p9000_ras_erasecols(void *, int, int, int, long int);
 void	p9000_ras_eraserows(void *, int, int, long int);
+void	p9000_ras_init(struct p9000_softc *);
 
 int	p9000match(struct device *, void *, void *);
 void	p9000attach(struct device *, struct device *, void *);
@@ -241,14 +235,14 @@ p9000attach(struct device *parent, struct device *self, void *args)
 	printf(": rev %x, %dx%d\n", scr & SCR_ID_MASK,
 	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
 
+	/* Disable frame buffer interrupts */
+	P9000_SELECT_SCR(sc);
+	P9000_WRITE_CTL(sc, P9000_INTERRUPT_ENABLE, IER_MASTER_ENABLE | 0);
+
 	sc->sc_ih.ih_fun = p9000_intr;
 	sc->sc_ih.ih_arg = sc;
 	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB,
 	    self->dv_xname);
-
-	/* Disable frame buffer interrupts */
-	P9000_SELECT_SCR(sc);
-	P9000_WRITE_CTL(sc, P9000_INTERRUPT_ENABLE, IER_MASTER_ENABLE | 0);
 
 	/*
 	 * If the framebuffer width is under 1024x768, we will switch from the
@@ -351,7 +345,7 @@ p9000_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 		case WSDISPLAYIO_PARAM_BACKLIGHT:
 			dp->min = 0;
 			dp->max = 1;
-			dp->curval = tadpole_get_video() & TV_ON;
+			dp->curval = tadpole_get_video() & TV_ON ? 1 : 0;
 			break;
 		default:
 			return (-1);
@@ -390,43 +384,6 @@ p9000_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 	return (0);
 }
 
-int
-p9000_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
-    int *curxp, int *curyp, long *attrp)
-{
-	struct p9000_softc *sc = v;
-
-	if (sc->sc_nscreens > 0)
-		return (ENOMEM);
-
-	*cookiep = &sc->sc_sunfb.sf_ro;
-	*curyp = 0;
-	*curxp = 0;
-	sc->sc_sunfb.sf_ro.ri_ops.alloc_attr(&sc->sc_sunfb.sf_ro,
-	    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, attrp);
-	sc->sc_nscreens++;
-	return (0);
-}
-
-void
-p9000_free_screen(void *v, void *cookie)
-{
-	struct p9000_softc *sc = v;
-
-	sc->sc_nscreens--;
-}
-
-int
-p9000_show_screen(void *v, void *cookie, int waitok,
-    void (*cb)(void *, int, int), void *cbarg)
-{
-	return (0);
-}
-
-/*
- * Return the address that would map the given device at the given
- * offset, allowing for the given protection, or return -1 for error.
- */
 paddr_t
 p9000_mmap(void *v, off_t offset, int prot)
 {
@@ -509,6 +466,10 @@ p9000_intr(void *v)
 		P9000_WRITE_CTL(sc, P9000_INTERRUPT_ENABLE,
 		    IER_MASTER_ENABLE | 0);
 
+		/* Clear interrupt condition */
+		P9000_WRITE_CTL(sc, P9000_INTERRUPT,
+		    IER_VBLANK_ENABLE | 0);
+
 		return (1);
 	}
 
@@ -519,27 +480,35 @@ p9000_intr(void *v)
  * Accelerated text console code
  */
 
-static __inline__ void p9000_drain(struct p9000_softc *);
+static int p9000_drain(struct p9000_softc *);
 
-static __inline__ void
+static int
 p9000_drain(struct p9000_softc *sc)
 {
-	while (P9000_READ_CMD(sc, P9000_PE_STATUS) &
-	    (STATUS_QUAD_BUSY | STATUS_BLIT_BUSY));
+	u_int i;
+
+	for (i = 10000; i != 0; i--) {
+		if ((P9000_READ_CMD(sc, P9000_PE_STATUS) &
+		    (STATUS_QUAD_BUSY | STATUS_BLIT_BUSY)) == 0)
+			break;
+	}
+
+	return (i);
 }
 
 void
 p9000_ras_init(struct p9000_softc *sc)
 {
+
+	if (p9000_drain(sc) == 0)
+		return;
+
 	sc->sc_sunfb.sf_ro.ri_ops.copycols = p9000_ras_copycols;
 	sc->sc_sunfb.sf_ro.ri_ops.copyrows = p9000_ras_copyrows;
-#if NTCTRL > 0
-	if (tadpole_get_video() & TV_ACCEL) {
-		sc->sc_sunfb.sf_ro.ri_ops.erasecols = p9000_ras_erasecols;
-		sc->sc_sunfb.sf_ro.ri_ops.eraserows = p9000_ras_eraserows;
-		sc->sc_sunfb.sf_ro.ri_do_cursor = p9000_ras_do_cursor;
-	}
-#endif
+	sc->sc_sunfb.sf_ro.ri_ops.erasecols = p9000_ras_erasecols;
+	sc->sc_sunfb.sf_ro.ri_ops.eraserows = p9000_ras_eraserows;
+	sc->sc_sunfb.sf_ro.ri_do_cursor = p9000_ras_do_cursor;
+
 	/*
 	 * Setup safe defaults for the parameter and drawing engines, in
 	 * order to minimize the operations to do for ri_ops.

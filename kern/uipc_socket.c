@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.56 2004/11/18 15:09:07 markus Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.59 2005/08/11 18:20:10 millert Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -118,6 +118,7 @@ socreate(dom, aso, type, proto)
 	so->so_euid = p->p_ucred->cr_uid;
 	so->so_rgid = p->p_cred->p_rgid;
 	so->so_egid = p->p_ucred->cr_gid;
+	so->so_cpid = p->p_pid;
 	so->so_proto = prp;
 	error = (*prp->pr_usrreq)(so, PRU_ATTACH, NULL,
 	    (struct mbuf *)(long)proto, NULL);
@@ -954,14 +955,18 @@ soshutdown(so, how)
 {
 	register struct protosw *pr = so->so_proto;
 
-	how++;
-	if (how & ~(FREAD|FWRITE))
-		return (EINVAL);
-	if (how & FREAD)
+	switch (how) {
+	case SHUT_RD:
+	case SHUT_RDWR:
 		sorflush(so);
-	if (how & FWRITE)
+		if (how == SHUT_RD)
+			return (0);
+		/* FALLTHROUGH */
+	case SHUT_WR:
 		return (*pr->pr_usrreq)(so, PRU_SHUTDOWN, NULL, NULL, NULL);
-	return (0);
+	default:
+		return (EINVAL);
+	}
 }
 
 void
@@ -1026,6 +1031,7 @@ sosetopt(so, level, optname, m0)
 		case SO_REUSEADDR:
 		case SO_REUSEPORT:
 		case SO_OOBINLINE:
+		case SO_JUMBO:
 			if (m == NULL || m->m_len < sizeof (int)) {
 				error = EINVAL;
 				goto bad;
@@ -1164,6 +1170,7 @@ sogetopt(so, level, optname, mp)
 		case SO_REUSEPORT:
 		case SO_BROADCAST:
 		case SO_OOBINLINE:
+		case SO_JUMBO:
 			*mtod(m, int *) = so->so_options & optname;
 			break;
 

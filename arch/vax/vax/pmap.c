@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.33 2003/11/10 21:05:06 miod Exp $ */
+/*	$OpenBSD: pmap.c,v 1.36 2005/06/30 21:53:13 deraadt Exp $ */
 /*	$NetBSD: pmap.c,v 1.74 1999/11/13 21:32:25 matt Exp $	   */
 /*
  * Copyright (c) 1994, 1998, 1999 Ludd, University of Lule}, Sweden.
@@ -135,7 +135,6 @@ pmap_bootstrap()
 	 * Remember: sysptsize is in PTEs and nothing else!
 	 */
 
-#define USRPTSIZE ((MAXTSIZ + MAXDSIZ + MAXSSIZ + MMAPSPACE) / VAX_NBPG)
 	/* Kernel alloc area */
 	sysptsize = (((0x100000 * maxproc) >> VAX_PGSHIFT) / 4);
 	/* reverse mapping struct */
@@ -404,7 +403,7 @@ pmap_pinit(pmap)
 	    (u_long *)&pmap->pm_p0br);
 	if (res)
 		panic("pmap_pinit");
-	pmap->pm_p0lr = vax_btoc(MAXTSIZ + MAXDSIZ + MMAPSPACE) | AST_PCB;
+	pmap->pm_p0lr = vax_btoc(MAXTSIZ + 40*1024*1024) | AST_PCB;
 	(vaddr_t)pmap->pm_p1br = (vaddr_t)pmap->pm_p0br + bytesiz - 0x800000;
 	pmap->pm_p1lr = (0x200000 - vax_btoc(MAXSSIZ));
 	pmap->pm_stack = USRSTACK;
@@ -794,23 +793,6 @@ if (startpmapdebug)
 
 	mtpr(0, PR_TBIA); /* Always; safety belt */
 	return (0);
-}
-
-void *
-pmap_bootstrap_alloc(size)
-	int size;
-{
-	void *mem;
-
-#ifdef PMAPDEBUG
-if(startpmapdebug)
-	printf("pmap_bootstrap_alloc: size 0x %x\n",size);
-#endif
-	size = round_page(size);
-	mem = (caddr_t)avail_start + KERNBASE;
-	avail_start += size;
-	memset(mem, 0, size);
-	return (mem);
 }
 
 vaddr_t

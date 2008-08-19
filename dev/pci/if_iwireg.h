@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwireg.h,v 1.12 2005/03/12 13:31:26 damien Exp $	*/
+/*	$OpenBSD: if_iwireg.h,v 1.15 2005/05/22 16:05:47 damien Exp $	*/
 
 /*-
  * Copyright (c) 2004, 2005
@@ -244,6 +244,7 @@ struct iwi_cmd_desc {
 #define IWI_CMD_SET_ESSID			8
 #define IWI_CMD_SET_MAC_ADDRESS			11
 #define IWI_CMD_SET_RTS_THRESHOLD		15
+#define IWI_CMD_SET_FRAG_THRESHOLD		16
 #define IWI_CMD_SET_POWER_MODE			17
 #define IWI_CMD_SET_WEP_KEY			18
 #define IWI_CMD_SCAN				20
@@ -317,6 +318,7 @@ struct iwi_associate {
 /* structure for command IWI_CMD_SCAN */
 struct iwi_scan {
 	u_int8_t	type;
+#define IWI_SCAN_TYPE_PASSIVE	1
 #define IWI_SCAN_TYPE_BROADCAST	3
 	u_int16_t	intval;
 	u_int8_t	channels[54];
@@ -329,7 +331,7 @@ struct iwi_scan {
 struct iwi_configuration {
 	u_int8_t	bluetooth_coexistence;
 	u_int8_t	reserved1;
-	u_int8_t	answer_broadcast_probe_req;
+	u_int8_t	answer_pbreq;
 	u_int8_t	allow_invalid_frames;
 	u_int8_t	multicast_enabled;
 	u_int8_t	exclude_unicast_unencrypted;

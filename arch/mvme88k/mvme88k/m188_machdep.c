@@ -1,4 +1,4 @@
-/*	$OpenBSD: m188_machdep.c,v 1.5 2004/12/24 22:50:30 miod Exp $	*/
+/*	$OpenBSD: m188_machdep.c,v 1.8 2005/05/01 09:55:49 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -49,6 +49,8 @@
 #include <sys/kernel.h>
 #include <sys/errno.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/asm_macro.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
@@ -59,8 +61,6 @@
 
 #include <machine/m88100.h>
 #include <machine/mvme188.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <mvme88k/dev/sysconreg.h>
 
@@ -333,7 +333,7 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 			for (i = 0; i < 8; i++)
 				printf("int_mask[%d] = 0x%08x\n", i, int_mask_val[i]);
 			printf("--CPU %d halted--\n", cpu_number());
-			spl7();
+			setipl(IPL_ABORT);
 			for(;;) ;
 		}
 
@@ -352,7 +352,7 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 		 * to be cleared before interrupts are enabled.
 		 */
 		if ((cur_mask & DTI_BIT) == 0) {
-			enable_interrupt();
+			set_psr(get_psr() & ~PSR_IND);
 		}
 
 		/* generate IACK and get the vector */
@@ -430,7 +430,7 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 	 * process any remaining data access exceptions before
 	 * returning to assembler
 	 */
-	disable_interrupt();
+	set_psr(get_psr() | PSR_IND);
 out:
 	if (eframe->tf_dmt0 & DMT_VALID)
 		m88100_trap(T_DATAFLT, eframe);

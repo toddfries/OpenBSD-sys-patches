@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.17 2004/11/01 06:39:39 marius Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.19 2005/05/29 03:20:41 deraadt Exp $	*/
 
 /* 
  * Copyright (c) 1995

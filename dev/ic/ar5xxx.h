@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5xxx.h,v 1.15 2005/03/20 04:21:55 reyk Exp $	*/
+/*	$OpenBSD: ar5xxx.h,v 1.25 2005/08/17 13:14:17 reyk Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@vantronix.net>
@@ -171,11 +171,11 @@ typedef struct {
 
 typedef enum {
 	HAL_PKT_TYPE_NORMAL = 0,
-	HAL_PKT_TYPE_ATIM,
-	HAL_PKT_TYPE_PSPOLL,
-	HAL_PKT_TYPE_BEACON,
-	HAL_PKT_TYPE_PROBE_RESP,
-	HAL_PKT_TYPE_PIFS,
+	HAL_PKT_TYPE_ATIM = 1,
+	HAL_PKT_TYPE_PSPOLL = 2,
+	HAL_PKT_TYPE_BEACON = 3,
+	HAL_PKT_TYPE_PROBE_RESP = 4,
+	HAL_PKT_TYPE_PIFS = 5,
 } HAL_PKT_TYPE;
 
 /*
@@ -309,11 +309,14 @@ typedef enum {
 	HAL_CIPHER_CKIP,
 } HAL_CIPHER;
 
-#define AR5K_MAX_KEYS	16
+#define AR5K_KEYVAL_LENGTH_40	5
+#define AR5K_KEYVAL_LENGTH_104	13
+#define AR5K_KEYVAL_LENGTH_128	16
+#define AR5K_KEYVAL_LENGTH_MAX	AR5K_KEYVAL_LENGTH_128
 
 typedef struct {
 	int		wk_len;
-	u_int8_t	wk_key[AR5K_MAX_KEYS];
+	u_int8_t	wk_key[AR5K_KEYVAL_LENGTH_MAX];
 } HAL_KEYVAL;
 
 #define AR5K_ASSERT_ENTRY(_e, _s) do {					\
@@ -376,19 +379,19 @@ typedef struct {
 	255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,	\
 	3, 2, 1, 0, 255, 255, 255, 255 }, {				\
 	{ 1, IEEE80211_T_CCK, 1000, 27, 0x00, 130, 0 },			\
-	{ 1, IEEE80211_T_CCK, 2000, 26, 0x00, 132, 1 },			\
-	{ 1, IEEE80211_T_CCK, 5500, 25, 0x00, 139, 1 },			\
-	{ 1, IEEE80211_T_CCK, 11000, 24, 0x00, 150, 1 } }		\
+	{ 1, IEEE80211_T_CCK, 2000, 26, 0x04, 132, 1 },			\
+	{ 1, IEEE80211_T_CCK, 5500, 25, 0x04, 139, 1 },			\
+	{ 1, IEEE80211_T_CCK, 11000, 24, 0x04, 150, 1 } }		\
 }
 
 #define AR5K_RATES_11G { 12, {						\
 	255, 255, 255, 255, 255, 255, 255, 255, 10, 8, 6, 4,		\
 	11, 9, 7, 5, 255, 255, 255, 255, 255, 255, 255, 255,		\
 	3, 2, 1, 0, 255, 255, 255, 255 }, {				\
-	{ 1, IEEE80211_T_CCK, 1000, 27, 0x00, 130, 0 },			\
-	{ 1, IEEE80211_T_CCK, 2000, 26, 0x00, 132, 1 },			\
-	{ 1, IEEE80211_T_CCK, 5500, 25, 0x00, 139, 1 },			\
-	{ 1, IEEE80211_T_CCK, 11000, 24, 0x00, 150, 1 },		\
+	{ 1, IEEE80211_T_CCK, 1000, 27, 0x00, 2, 0 },			\
+	{ 1, IEEE80211_T_CCK, 2000, 26, 0x04, 4, 1 },			\
+	{ 1, IEEE80211_T_CCK, 5500, 25, 0x04, 11, 1 },			\
+	{ 1, IEEE80211_T_CCK, 11000, 24, 0x04, 22, 1 },			\
 	{ 0, IEEE80211_T_OFDM, 6000, 11, 0, 12, 4 },			\
 	{ 0, IEEE80211_T_OFDM, 9000, 15, 0, 18, 4 },			\
 	{ 1, IEEE80211_T_OFDM, 12000, 10, 0, 24, 6 },			\
@@ -446,9 +449,9 @@ typedef struct {
 
 } HAL_CHANNEL;
 
-#define HAL_SLOT_TIME_9		9
-#define HAL_SLOT_TIME_20	20
-#define HAL_SLOT_TIME_MAX	ar5k_clocktoh(0xffff, hal->ah_turbo)
+#define HAL_SLOT_TIME_9		396
+#define HAL_SLOT_TIME_20	880
+#define HAL_SLOT_TIME_MAX	0xffff
 
 #define CHANNEL_A	(IEEE80211_CHAN_5GHZ | IEEE80211_CHAN_OFDM)
 #define CHANNEL_B	(IEEE80211_CHAN_2GHZ | IEEE80211_CHAN_CCK)
@@ -521,6 +524,11 @@ typedef enum ieee80211_state HAL_LED_STATE;
 #define HAL_LED_AUTH	IEEE80211_S_AUTH
 #define HAL_LED_ASSOC	IEEE80211_S_ASSOC
 #define HAL_LED_RUN	IEEE80211_S_RUN
+
+/* GPIO-controlled software LED */
+#define AR5K_SOFTLED_PIN	0
+#define AR5K_SOFTLED_ON		0
+#define AR5K_SOFTLED_OFF	1
 
 /*
  * Gain settings
@@ -924,141 +932,141 @@ struct ath_desc {
 
 #define AR5K_HAL_FUNCTION(_hal, _n, _f)	(_hal)->ah_##_f = ar5k_##_n##_##_f
 #define AR5K_HAL_FUNCTIONS(_t, _n, _a) \
-	_t const HAL_RATE_TABLE *(_a _n##_getRateTable)(struct ath_hal *, \
+	_t const HAL_RATE_TABLE *(_a _n##_get_rate_table)(struct ath_hal *, \
 	    u_int mode); \
 	_t void (_a _n##_detach)(struct ath_hal *); \
 	/* Reset functions */ \
 	_t HAL_BOOL (_a _n##_reset)(struct ath_hal *, HAL_OPMODE, \
 	    HAL_CHANNEL *, HAL_BOOL change_channel, HAL_STATUS *status); \
-	_t void (_a _n##_setPCUConfig)(struct ath_hal *); \
-	_t HAL_BOOL (_a _n##_perCalibration)(struct ath_hal*, \
+	_t void (_a _n##_set_opmode)(struct ath_hal *); \
+	_t HAL_BOOL (_a _n##_calibrate)(struct ath_hal*, \
 	    HAL_CHANNEL *); \
 	/* Transmit functions */ \
-	_t HAL_BOOL (_a _n##_updateTxTrigLevel)(struct ath_hal*, \
+	_t HAL_BOOL (_a _n##_update_tx_triglevel)(struct ath_hal*, \
 	    HAL_BOOL level); \
-	_t int (_a _n##_setupTxQueue)(struct ath_hal *, HAL_TX_QUEUE, \
+	_t int (_a _n##_setup_tx_queue)(struct ath_hal *, HAL_TX_QUEUE, \
 	    const HAL_TXQ_INFO *); \
-	_t HAL_BOOL (_a _n##_setTxQueueProps)(struct ath_hal *, int queue, \
+	_t HAL_BOOL (_a _n##_setup_tx_queueprops)(struct ath_hal *, int queue, \
 	    const HAL_TXQ_INFO *); \
-	_t HAL_BOOL (_a _n##_releaseTxQueue)(struct ath_hal *, u_int queue); \
-	_t HAL_BOOL (_a _n##_resetTxQueue)(struct ath_hal *, u_int queue); \
-	_t u_int32_t (_a _n##_getTxDP)(struct ath_hal *, u_int queue); \
-	_t HAL_BOOL (_a _n##_setTxDP)(struct ath_hal *, u_int, \
+	_t HAL_BOOL (_a _n##_release_tx_queue)(struct ath_hal *, u_int queue); \
+	_t HAL_BOOL (_a _n##_reset_tx_queue)(struct ath_hal *, u_int queue); \
+	_t u_int32_t (_a _n##_get_tx_buf)(struct ath_hal *, u_int queue); \
+	_t HAL_BOOL (_a _n##_put_tx_buf)(struct ath_hal *, u_int, \
 	    u_int32_t phys_addr); \
-	_t HAL_BOOL (_a _n##_startTxDma)(struct ath_hal *, u_int queue); \
-	_t HAL_BOOL (_a _n##_stopTxDma)(struct ath_hal *, u_int queue); \
-	_t HAL_BOOL (_a _n##_setupTxDesc)(struct ath_hal *, \
+	_t HAL_BOOL (_a _n##_tx_start)(struct ath_hal *, u_int queue); \
+	_t HAL_BOOL (_a _n##_stop_tx_dma)(struct ath_hal *, u_int queue); \
+	_t HAL_BOOL (_a _n##_setup_tx_desc)(struct ath_hal *, \
 	    struct ath_desc *, \
 	    u_int packet_length, u_int header_length, HAL_PKT_TYPE type, \
 	    u_int txPower, u_int tx_rate0, u_int tx_tries0, u_int key_index, \
 	    u_int antenna_mode, u_int flags, u_int rtscts_rate, \
 	    u_int rtscts_duration); \
-	_t HAL_BOOL (_a _n##_setupXTxDesc)(struct ath_hal *, \
+	_t HAL_BOOL (_a _n##_setup_xtx_desc)(struct ath_hal *, \
 	    struct ath_desc *, \
 	    u_int tx_rate1, u_int tx_tries1, u_int tx_rate2, u_int tx_tries2, \
 	    u_int tx_rate3, u_int tx_tries3); \
-	_t HAL_BOOL (_a _n##_fillTxDesc)(struct ath_hal *, \
+	_t HAL_BOOL (_a _n##_fill_tx_desc)(struct ath_hal *, \
 	    struct ath_desc *, \
 	    u_int segLen, HAL_BOOL firstSeg, HAL_BOOL lastSeg); \
-	_t HAL_STATUS (_a _n##_procTxDesc)(struct ath_hal *, \
+	_t HAL_STATUS (_a _n##_proc_tx_desc)(struct ath_hal *, \
 	    struct ath_desc *); \
-	_t HAL_BOOL (_a _n##_hasVEOL)(struct ath_hal *); \
+	_t HAL_BOOL (_a _n##_has_veol)(struct ath_hal *); \
 	/* Receive Functions */ \
-	_t u_int32_t (_a _n##_getRxDP)(struct ath_hal*); \
-	_t void (_a _n##_setRxDP)(struct ath_hal*, u_int32_t rxdp); \
-	_t void (_a _n##_enableReceive)(struct ath_hal*); \
-	_t HAL_BOOL (_a _n##_stopDmaReceive)(struct ath_hal*); \
-	_t void (_a _n##_startPcuReceive)(struct ath_hal*); \
-	_t void (_a _n##_stopPcuReceive)(struct ath_hal*); \
-	_t void (_a _n##_setMulticastFilter)(struct ath_hal*, \
+	_t u_int32_t (_a _n##_get_rx_buf)(struct ath_hal*); \
+	_t void (_a _n##_put_rx_buf)(struct ath_hal*, u_int32_t rxdp); \
+	_t void (_a _n##_start_rx)(struct ath_hal*); \
+	_t HAL_BOOL (_a _n##_stop_rx_dma)(struct ath_hal*); \
+	_t void (_a _n##_start_rx_pcu)(struct ath_hal*); \
+	_t void (_a _n##_stop_pcu_recv)(struct ath_hal*); \
+	_t void (_a _n##_set_mcast_filter)(struct ath_hal*, \
 	    u_int32_t filter0, u_int32_t filter1); \
-	_t HAL_BOOL (_a _n##_setMulticastFilterIndex)(struct ath_hal*, \
+	_t HAL_BOOL (_a _n##_set_mcast_filterindex)(struct ath_hal*, \
 	    u_int32_t index); \
-	_t HAL_BOOL (_a _n##_clrMulticastFilterIndex)(struct ath_hal*, \
+	_t HAL_BOOL (_a _n##_clear_mcast_filter_idx)(struct ath_hal*, \
 	    u_int32_t index); \
-	_t u_int32_t (_a _n##_getRxFilter)(struct ath_hal*); \
-	_t void (_a _n##_setRxFilter)(struct ath_hal*, u_int32_t); \
-	_t HAL_BOOL (_a _n##_setupRxDesc)(struct ath_hal *, \
+	_t u_int32_t (_a _n##_get_rx_filter)(struct ath_hal*); \
+	_t void (_a _n##_set_rx_filter)(struct ath_hal*, u_int32_t); \
+	_t HAL_BOOL (_a _n##_setup_rx_desc)(struct ath_hal *, \
 	    struct ath_desc *, u_int32_t size, u_int flags); \
-	_t HAL_STATUS (_a _n##_procRxDesc)(struct ath_hal *, \
+	_t HAL_STATUS (_a _n##_proc_rx_desc)(struct ath_hal *, \
 	    struct ath_desc *, u_int32_t phyAddr, struct ath_desc *next); \
-	_t void (_a _n##_rxMonitor)(struct ath_hal *); \
+	_t void (_a _n##_set_rx_signal)(struct ath_hal *); \
 	/* Misc Functions */ \
-	_t void (_a _n##_dumpState)(struct ath_hal *); \
-	_t HAL_BOOL (_a _n##_getDiagState)(struct ath_hal *, int, void **, \
+	_t void (_a _n##_dump_state)(struct ath_hal *); \
+	_t HAL_BOOL (_a _n##_get_diag_state)(struct ath_hal *, int, void **, \
 	    u_int *); \
-	_t void (_a _n##_getMacAddress)(struct ath_hal *, u_int8_t *); \
-	_t HAL_BOOL (_a _n##_setMacAddress)(struct ath_hal *, \
+	_t void (_a _n##_get_lladdr)(struct ath_hal *, u_int8_t *); \
+	_t HAL_BOOL (_a _n##_set_lladdr)(struct ath_hal *, \
 	    const u_int8_t*); \
-	_t HAL_BOOL (_a _n##_setRegulatoryDomain)(struct ath_hal*, \
+	_t HAL_BOOL (_a _n##_set_regdomain)(struct ath_hal*, \
 	    u_int16_t, HAL_STATUS *); \
-	_t void (_a _n##_setLedState)(struct ath_hal*, HAL_LED_STATE); \
-	_t void (_a _n##_writeAssocid)(struct ath_hal*, \
+	_t void (_a _n##_set_ledstate)(struct ath_hal*, HAL_LED_STATE); \
+	_t void (_a _n##_set_associd)(struct ath_hal*, \
 	    const u_int8_t *bssid, u_int16_t assocId, u_int16_t timOffset); \
-	_t HAL_BOOL (_a _n##_gpioCfgOutput)(struct ath_hal *, \
+	_t HAL_BOOL (_a _n##_set_gpio_output)(struct ath_hal *, \
 	    u_int32_t gpio); \
-	_t HAL_BOOL (_a _n##_gpioCfgInput)(struct ath_hal *, \
+	_t HAL_BOOL (_a _n##_set_gpio_input)(struct ath_hal *, \
 	    u_int32_t gpio); \
-	_t u_int32_t (_a _n##_gpioGet)(struct ath_hal *, u_int32_t gpio); \
-	_t HAL_BOOL (_a _n##_gpioSet)(struct ath_hal *, u_int32_t gpio, \
+	_t u_int32_t (_a _n##_get_gpio)(struct ath_hal *, u_int32_t gpio); \
+	_t HAL_BOOL (_a _n##_set_gpio)(struct ath_hal *, u_int32_t gpio, \
 	    u_int32_t val); \
-	_t void (_a _n##_gpioSetIntr)(struct ath_hal*, u_int, u_int32_t); \
-	_t u_int32_t (_a _n##_getTsf32)(struct ath_hal*); \
-	_t u_int64_t (_a _n##_getTsf64)(struct ath_hal*); \
-	_t void (_a _n##_resetTsf)(struct ath_hal*); \
-	_t u_int16_t (_a _n##_getRegDomain)(struct ath_hal*); \
-	_t HAL_BOOL (_a _n##_detectCardPresent)(struct ath_hal*); \
-	_t void (_a _n##_updateMibCounters)(struct ath_hal*, \
+	_t void (_a _n##_set_gpio_intr)(struct ath_hal*, u_int, u_int32_t); \
+	_t u_int32_t (_a _n##_get_tsf32)(struct ath_hal*); \
+	_t u_int64_t (_a _n##_get_tsf64)(struct ath_hal*); \
+	_t void (_a _n##_reset_tsf)(struct ath_hal*); \
+	_t u_int16_t (_a _n##_get_regdomain)(struct ath_hal*); \
+	_t HAL_BOOL (_a _n##_detect_card_present)(struct ath_hal*); \
+	_t void (_a _n##_update_mib_counters)(struct ath_hal*, \
 	    HAL_MIB_STATS*); \
-	_t HAL_BOOL (_a _n##_isHwCipherSupported)(struct ath_hal*, \
+	_t HAL_BOOL (_a _n##_is_cipher_supported)(struct ath_hal*, \
 	    HAL_CIPHER); \
-	_t HAL_RFGAIN (_a _n##_getRfGain)(struct ath_hal*); \
+	_t HAL_RFGAIN (_a _n##_get_rf_gain)(struct ath_hal*); \
 	/*								\
 	    u_int32_t (_a _n##_getCurRssi)(struct ath_hal*);		\
 	    u_int32_t (_a _n##_getDefAntenna)(struct ath_hal*);	\
 	    void (_a _n##_setDefAntenna)(struct ath_hal*, u_int32_t ant); \
 	*/								\
-	_t HAL_BOOL (_a _n##_setSlotTime)(struct ath_hal*, u_int);	\
-	_t u_int (_a _n##_getSlotTime)(struct ath_hal*);		\
-	_t HAL_BOOL (_a _n##_setAckTimeout)(struct ath_hal *, u_int); \
-	_t u_int (_a _n##_getAckTimeout)(struct ath_hal*);		\
-	_t HAL_BOOL (_a _n##_setCTSTimeout)(struct ath_hal*, u_int);	\
-	_t u_int (_a _n##_getCTSTimeout)(struct ath_hal*);		\
+	_t HAL_BOOL (_a _n##_set_slot_time)(struct ath_hal*, u_int);	\
+	_t u_int (_a _n##_get_slot_time)(struct ath_hal*);		\
+	_t HAL_BOOL (_a _n##_set_ack_timeout)(struct ath_hal *, u_int); \
+	_t u_int (_a _n##_get_ack_timeout)(struct ath_hal*);		\
+	_t HAL_BOOL (_a _n##_set_cts_timeout)(struct ath_hal*, u_int);	\
+	_t u_int (_a _n##_get_cts_timeout)(struct ath_hal*);		\
 	/* Key Cache Functions */ \
-	_t u_int32_t (_a _n##_getKeyCacheSize)(struct ath_hal*); \
-	_t HAL_BOOL (_a _n##_resetKeyCacheEntry)(struct ath_hal*, \
+	_t u_int32_t (_a _n##_get_keycache_size)(struct ath_hal*); \
+	_t HAL_BOOL (_a _n##_reset_key)(struct ath_hal*, \
 	    u_int16_t); \
-	_t HAL_BOOL (_a _n##_isKeyCacheEntryValid)(struct ath_hal *, \
+	_t HAL_BOOL (_a _n##_is_key_valid)(struct ath_hal *, \
 	    u_int16_t); \
-	_t HAL_BOOL (_a _n##_setKeyCacheEntry)(struct ath_hal*, u_int16_t, \
+	_t HAL_BOOL (_a _n##_set_key)(struct ath_hal*, u_int16_t, \
 	    const HAL_KEYVAL *, const u_int8_t *, int);	\
-	_t HAL_BOOL (_a _n##_setKeyCacheEntryMac)(struct ath_hal*, \
+	_t HAL_BOOL (_a _n##_set_key_lladdr)(struct ath_hal*, \
 	    u_int16_t, const u_int8_t *); \
 	/* Power Management Functions */ \
-	_t HAL_BOOL (_a _n##_setPowerMode)(struct ath_hal*, \
+	_t HAL_BOOL (_a _n##_set_power)(struct ath_hal*, \
 	    HAL_POWER_MODE mode, \
 	    HAL_BOOL set_chip, u_int16_t sleep_duration); \
-	_t HAL_POWER_MODE (_a _n##_getPowerMode)(struct ath_hal*); \
-	_t HAL_BOOL (_a _n##_queryPSPollSupport)(struct ath_hal*); \
-	_t HAL_BOOL (_a _n##_initPSPoll)(struct ath_hal*); \
-	_t HAL_BOOL (_a _n##_enablePSPoll)(struct ath_hal *, u_int8_t *, \
+	_t HAL_POWER_MODE (_a _n##_get_power_mode)(struct ath_hal*); \
+	_t HAL_BOOL (_a _n##_query_pspoll_support)(struct ath_hal*); \
+	_t HAL_BOOL (_a _n##_init_pspoll)(struct ath_hal*); \
+	_t HAL_BOOL (_a _n##_enable_pspoll)(struct ath_hal *, u_int8_t *, \
 	    u_int16_t); \
-	_t HAL_BOOL (_a _n##_disablePSPoll)(struct ath_hal *); \
+	_t HAL_BOOL (_a _n##_disable_pspoll)(struct ath_hal *); \
 	/* Beacon Management Functions */ \
-	_t void (_a _n##_beaconInit)(struct ath_hal *, u_int32_t nexttbtt, \
+	_t void (_a _n##_init_beacon)(struct ath_hal *, u_int32_t nexttbtt, \
 	    u_int32_t intval); \
-	_t void (_a _n##_setStationBeaconTimers)(struct ath_hal *, \
+	_t void (_a _n##_set_beacon_timers)(struct ath_hal *, \
 	    const HAL_BEACON_STATE *, u_int32_t tsf, u_int32_t dtimCount, \
 	    u_int32_t cfpCcount); \
-	_t void (_a _n##_resetStationBeaconTimers)(struct ath_hal *); \
-	_t HAL_BOOL (_a _n##_waitForBeaconDone)(struct ath_hal *, \
+	_t void (_a _n##_reset_beacon)(struct ath_hal *); \
+	_t HAL_BOOL (_a _n##_wait_for_beacon)(struct ath_hal *, \
 	    bus_addr_t); \
 	/* Interrupt functions */ \
-	_t HAL_BOOL (_a _n##_isInterruptPending)(struct ath_hal *); \
-	_t HAL_BOOL (_a _n##_getPendingInterrupts)(struct ath_hal *, \
+	_t HAL_BOOL (_a _n##_is_intr_pending)(struct ath_hal *); \
+	_t HAL_BOOL (_a _n##_get_isr)(struct ath_hal *, \
 	    u_int32_t *); \
-	_t u_int32_t (_a _n##_getInterrupts)(struct ath_hal *); \
-	_t HAL_INT (_a _n##_setInterrupts)(struct ath_hal *, HAL_INT); \
+	_t u_int32_t (_a _n##_get_intr)(struct ath_hal *); \
+	_t HAL_INT (_a _n##_set_intr)(struct ath_hal *, HAL_INT); \
 	/* Chipset functions (ar5k-specific, non-HAL) */ \
 	_t HAL_BOOL (_a _n##_get_capabilities)(struct ath_hal *); \
 	_t void (_a _n##_radar_alert)(struct ath_hal *, HAL_BOOL enable); \
@@ -1092,7 +1100,7 @@ struct ath_hal {
 	HAL_BOOL		ah_running;
 	HAL_RFGAIN		ah_rf_gain;
 
-#define ah_countryCode		ah_country_code
+#define ah_getcountrycode		ah_country_code
 
 	HAL_RATE_TABLE		ah_rt_11a;
 	HAL_RATE_TABLE		ah_rt_11b;
@@ -1171,6 +1179,36 @@ struct ath_hal {
 /*
  * Common silicon revision/version values
  */
+enum ar5k_srev_type {
+	AR5K_VERSION_VER,
+	AR5K_VERSION_REV,
+	AR5K_VERSION_RAD
+};
+
+struct ar5k_srev_name {
+	const char		*sr_name;
+	enum ar5k_srev_type	sr_type;
+	u_int			sr_val;
+};
+
+#define AR5K_SREV_NAME	{						\
+	{ "5210",	AR5K_VERSION_VER,	AR5K_SREV_VER_AR5210 },	\
+	{ "5311",	AR5K_VERSION_VER,	AR5K_SREV_VER_AR5311 },	\
+	{ "5311a",	AR5K_VERSION_VER,	AR5K_SREV_VER_AR5311A },\
+	{ "5311b",	AR5K_VERSION_VER,	AR5K_SREV_VER_AR5311B },\
+	{ "5211",	AR5K_VERSION_VER,	AR5K_SREV_VER_AR5211 },	\
+	{ "5212",	AR5K_VERSION_VER,	AR5K_SREV_VER_AR5212 },	\
+	{ "xxxx",	AR5K_VERSION_VER,	AR5K_SREV_UNKNOWN },	\
+	{ "5110",	AR5K_VERSION_RAD,	AR5K_SREV_RAD_5110 },	\
+	{ "5111",	AR5K_VERSION_RAD,	AR5K_SREV_RAD_5111 },	\
+	{ "2111",	AR5K_VERSION_RAD,	AR5K_SREV_RAD_2111 },	\
+	{ "5112",	AR5K_VERSION_RAD,	AR5K_SREV_RAD_5112 },	\
+	{ "2112",	AR5K_VERSION_RAD,	AR5K_SREV_RAD_2112 },	\
+	{ "xxxx",	AR5K_VERSION_RAD,	AR5K_SREV_UNKNOWN }	\
+}
+
+#define AR5K_SREV_UNKNOWN	0xffff
+
 #define AR5K_SREV_REV_FPGA	1
 #define AR5K_SREV_REV_PROTO	2
 #define AR5K_SREV_REV_PROTOA	3
@@ -1186,11 +1224,13 @@ struct ath_hal {
 #define AR5K_SREV_VER_AR5211	4
 #define AR5K_SREV_VER_AR5212	5
 
+#define AR5K_SREV_RAD_5110	0x00
 #define AR5K_SREV_RAD_5111	0x10
 #define AR5K_SREV_RAD_5111A	0x15
 #define AR5K_SREV_RAD_2111	0x20
 #define AR5K_SREV_RAD_5112	0x30
 #define AR5K_SREV_RAD_5112A	0x35
+#define AR5K_SREV_RAD_2112	0x40
 #define AR5K_SREV_RAD_2112A	0x45
 
 /*
@@ -1242,6 +1282,7 @@ typedef HAL_BOOL (ar5k_rfgain_t)
 #define AR5K_TUNE_DEFAULT_TXPOWER		30
 #define AR5K_TUNE_TPC_TXPOWER			AH_TRUE
 #define AR5K_TUNE_ANT_DIVERSITY			AH_TRUE
+#define AR5K_TUNE_HWTXTRIES			4
 
 /* Default regulation domain if stored value EEPROM value is invalid */
 #define AR5K_TUNE_REGDOMAIN	DMN_FCC1_FCCA
@@ -1263,7 +1304,7 @@ typedef HAL_BOOL (ar5k_rfgain_t)
 #define AR5K_INIT_PROG_IFS_TURBO		960
 #define AR5K_INIT_EIFS				3440
 #define AR5K_INIT_EIFS_TURBO			6880
-#define AR5K_INIT_SLOT_TIME			360
+#define AR5K_INIT_SLOT_TIME			396
 #define AR5K_INIT_SLOT_TIME_TURBO		480
 #define AR5K_INIT_ACK_CTS_TIMEOUT		1024
 #define AR5K_INIT_ACK_CTS_TIMEOUT_TURBO		0x08000800
@@ -1310,7 +1351,7 @@ typedef HAL_BOOL (ar5k_rfgain_t)
 #define AR5K_REG_WRITE(_reg, _val)					\
 	bus_space_write_4(hal->ah_st, hal->ah_sh, (_reg), (_val))
 #define AR5K_REG_READ(_reg)						\
-	((u_int32_t)bus_space_read_4(hal->ah_st, hal->ah_sh, (_reg)))
+	bus_space_read_4(hal->ah_st, hal->ah_sh, (_reg))
 
 #define AR5K_REG_SM(_val, _flags)					\
 	(((_val) << _flags##_S) & (_flags))
@@ -1780,6 +1821,7 @@ u_int			 ath_hal_ieee2mhz(u_int, u_int);
 HAL_BOOL		 ath_hal_init_channels(struct ath_hal *, HAL_CHANNEL *,
     u_int, u_int *, HAL_CTRY_CODE, u_int16_t, HAL_BOOL, HAL_BOOL);
 
+const char		*ar5k_printver(enum ar5k_srev_type, u_int);
 void			 ar5k_radar_alert(struct ath_hal *);
 ieee80211_regdomain_t	 ar5k_regdomain_to_ieee(u_int16_t);
 u_int16_t		 ar5k_regdomain_from_ieee(ieee80211_regdomain_t);
@@ -1788,7 +1830,7 @@ u_int16_t		 ar5k_get_regdomain(struct ath_hal *);
 u_int32_t		 ar5k_bitswap(u_int32_t, u_int);
 u_int			 ar5k_clocktoh(u_int, HAL_BOOL);
 u_int			 ar5k_htoclock(u_int, HAL_BOOL);
-void			 ar5k_rt_copy(HAL_RATE_TABLE *, HAL_RATE_TABLE *);
+void			 ar5k_rt_copy(HAL_RATE_TABLE *, const HAL_RATE_TABLE *);
 
 HAL_BOOL		 ar5k_register_timeout(struct ath_hal *, u_int32_t,
     u_int32_t, u_int32_t, HAL_BOOL);

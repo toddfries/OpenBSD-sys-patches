@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsfont.c,v 1.9 2004/05/10 05:35:14 miod Exp $ */
+/*	$OpenBSD: wsfont.c,v 1.13 2005/05/05 23:32:48 miod Exp $ */
 /* 	$NetBSD: wsfont.c,v 1.17 2001/02/07 13:59:24 ad Exp $	*/
 
 /*-
@@ -100,22 +100,25 @@
 #define HAVE_FONT 1
 #endif
 
-/* Make sure we always have at least one font. */
+/*
+ * Make sure we always have at least one font.
+ * Sparc and sparc64 always provide a specific set of fonts.
+ * Other platforms provide a 8x16 font and a larger 12x22 fonts, which is
+ * omitted if option SMALL_KERNEL.
+ */
 #ifndef HAVE_FONT
 #define HAVE_FONT 1
-#if defined(SMALL_KERNEL) && !defined(__sparc__)
-#if defined(__sparc64__)
-#define FONT_GALLANT12x22
+
+#if defined(__sparc__) || defined(__sparc64__)
+#define	FONT_BOLD8x16_ISO1
+#define	FONT_GALLANT12x22
 #else
-#define FONT_BOLD8x16_ISO1 1
+#define	FONT_BOLD8x16_ISO1
+#if !defined(SMALL_KERNEL)
+#define	FONT_GALLANT12x22
 #endif
-#else	/* SMALL_KERNEL */
-#define FONT_BOLD8x16_ISO1 1
-/* Add the gallant 12x22 font for high screen resolutions */
-#if !defined(FONT_GALLANT12x22)
-#define FONT_GALLANT12x22
 #endif
-#endif	/* SMALL_KERNEL */
+
 #endif	/* HAVE_FONT */
 
 #ifdef FONT_BOLD8x16_ISO1
@@ -126,6 +129,9 @@
 #include <dev/wsfont/gallant12x22.h>
 #endif
 
+#ifdef __zaurus__
+void wsfont_rotate(struct wsdisplay_font *, int);
+#endif
 
 /* Placeholder struct used for linked list */
 struct font {
@@ -263,7 +269,7 @@ wsfont_revbyte(font)
 }
 
 /*
- * Enumarate the list of fonts
+ * Enumerate the list of fonts
  */
 void
 wsfont_enum(cb)
@@ -283,6 +289,64 @@ wsfont_enum(cb)
 	splx(s);
 }
 
+#ifdef __zaurus__
+void wsfont_rotate(struct wsdisplay_font *font, int static_orig)
+{
+	int b, n, r, newstride;
+	char *newfont;
+
+	/* Allocate a buffer big enough for the rotated font. */
+	newstride = (font->fontheight + 7) / 8;
+	newfont = malloc(newstride * font->fontwidth * font->numchars,
+	    M_DEVBUF, M_WAITOK);
+	if (newfont == NULL)
+		return;
+	bzero(newfont, newstride * font->fontwidth * font->numchars);
+
+	/* Rotate the font a bit at a time. */
+	for (n = 0; n < font->numchars; n++) {
+		char *ch = font->data + (n * font->stride * font->fontheight);
+
+		for (r = 0; r < font->fontheight; r++) {
+			for (b = 0; b < font->fontwidth; b++) {
+				unsigned char *rb;
+
+				rb = ch + (font->stride * r) + (b / 8);
+				if (*rb & (0x80 >> (b % 8))) {
+					unsigned char *rrb;
+
+					rrb = newfont + newstride - 1 - (r / 8)
+					    + (n * newstride * font->fontwidth)
+					    + (newstride * b);
+					*rrb |= (1 << (r % 8));
+				}
+			}
+		}
+	}
+
+	/*
+	 * If the rotated font will fit into the memory the font originally
+	 * used, copy it into there, otherwise use our new buffer.
+	 */
+	if ((newstride * font->fontwidth * font->numchars) <=
+	    (font->stride * font->fontheight * font->numchars)) {
+		memcpy(font->data, newfont, newstride *
+		    font->fontwidth * font->numchars);
+		free(newfont, M_DEVBUF);
+	} else {
+		if (!static_orig)
+			free(font->data, M_DEVBUF);
+		font->data = newfont;
+	}
+
+	/* Update font sizes. */
+	font->stride = newstride;
+	newstride = font->fontwidth;	 /* temp */
+	font->fontwidth = font->fontheight;
+	font->fontheight = newstride;
+}
+#endif
+
 /*
  * Initialize list with WSFONT_BUILTIN fonts
  */
@@ -296,6 +360,11 @@ wsfont_init(void)
 		return;
 	again = 1;
 		
+#ifdef __zaurus__
+	for (i = 0; builtin_fonts[i].font != NULL; i++)
+		wsfont_rotate(builtin_fonts[i].font, 1);
+#endif
+
 	for (i = 0; builtin_fonts[i].font != NULL; i++) {
 		builtin_fonts[i].next = list;
 		list = &builtin_fonts[i];
@@ -355,7 +424,6 @@ wsfont_find(name, width, height, stride)
 /*
  * Add a font to the list.
  */
-#ifdef notyet
 int
 wsfont_add(font, copy)
 	struct wsdisplay_font *font;
@@ -397,13 +465,16 @@ wsfont_add(font, copy)
 		memcpy(ent->font->data, font->data, size);
 		ent->flg = 0;
 	}
+
+#ifdef __zaurus__
+	wsfont_rotate(ent->font, 0);
+#endif
 	
 	/* Now link into the list and return */
 	list = ent;
 	splx(s);	
 	return (0);
 }
-#endif
 			
 /*
  * Remove a font.

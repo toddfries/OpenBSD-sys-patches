@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.53 2004/09/06 06:25:28 miod Exp $	*/
+/*	$OpenBSD: vs.c,v 1.55 2005/04/27 14:09:45 miod Exp $	*/
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.
@@ -49,18 +49,18 @@
 #include <sys/buf.h>
 #include <sys/malloc.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 
 #include <machine/autoconf.h>
+#include <machine/cmmu.h>
 #include <machine/param.h>
 
 #include <mvme88k/dev/vsreg.h>
 #include <mvme88k/dev/vsvar.h>
 #include <mvme88k/dev/vme.h>
-#include <machine/cmmu.h>
 
 int	vsmatch(struct device *, void *, void *);
 void	vsattach(struct device *, struct device *, void *);
@@ -408,7 +408,7 @@ vs_scsicmd(struct scsi_xfer *xs)
 	 * to flush the cache for a write and flush with inval for
 	 * a read, prior to starting the IO.
 	 */
-	dma_cachectl((vaddr_t)xs->data, xs->datalen,
+	dma_cachectl(pmap_kernel(), (vaddr_t)xs->data, xs->datalen,
 	    flags & SCSI_DATA_IN ? DMA_CACHE_SYNC_INVAL : DMA_CACHE_SYNC);
 	
 	option = 0;

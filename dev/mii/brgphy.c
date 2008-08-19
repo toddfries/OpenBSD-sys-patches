@@ -1,4 +1,4 @@
-/*	$OpenBSD: brgphy.c,v 1.22 2005/02/05 22:30:52 brad Exp $	*/
+/*	$OpenBSD: brgphy.c,v 1.28 2005/08/27 14:15:47 brad Exp $	*/
 
 /*
  * Copyright (c) 2000
@@ -106,8 +106,12 @@ static const struct mii_phydesc brgphys[] = {
 	  MII_STR_xxBROADCOM_BCM5704 },
 	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5705,
 	  MII_STR_xxBROADCOM_BCM5705 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5714,
+	  MII_STR_xxBROADCOM_BCM5714 },
 	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5750,
 	  MII_STR_xxBROADCOM_BCM5750 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5752,
+	  MII_STR_xxBROADCOM_BCM5752 },
 
 	{ 0,				0,
 	  NULL },
@@ -142,8 +146,7 @@ brgphy_attach(struct device *parent, struct device *self, void *aux)
 	sc->mii_rev = MII_REV(ma->mii_id2);
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags | MIIF_NOISOLATE;
-	sc->mii_ticks = 0; /* XXX Should be zero. Should 0 in brgphy_reset?*/
-	sc->mii_anegticks = 5;
+	sc->mii_anegticks = MII_ANEGTICKS;
 
 	PHY_RESET(sc);
 
@@ -274,7 +277,7 @@ setit:
 		/*
 		 * Only retry autonegotiation every mii_anegticks seconds.
 		 */
-		if (++sc->mii_ticks < sc->mii_anegticks)
+		if (++sc->mii_ticks <= sc->mii_anegticks)
 			return (0);
 
 		sc->mii_ticks = 0;
@@ -398,9 +401,6 @@ brgphy_loop(struct mii_softc *sc)
 	for (i = 0; i < 15000; i++) {
 		bmsr = PHY_READ(sc, BRGPHY_MII_BMSR);
 		if (!(bmsr & BRGPHY_BMSR_LINK)) {
-#if 0
-			device_printf(sc->mii_dev, "looped %d\n", i);
-#endif
 			break;
 		}
 		DELAY(10);
@@ -416,10 +416,10 @@ brgphy_reset(struct mii_softc *sc)
 
 	mii_phy_reset(sc);
 
-	brgphy_load_dspcode(sc);
-
 	ifp = sc->mii_pdata->mii_ifp;
 	bge_sc = ifp->if_softc;
+
+	brgphy_load_dspcode(sc);
 
 	/*
 	 * Don't enable Ethernet@WireSpeed for the 5700 or the
@@ -524,7 +524,9 @@ brgphy_load_dspcode(struct mii_softc *sc)
 	case MII_MODEL_xxBROADCOM_BCM5704:
 		dsp = bcm5704_dspcode;
 		break;
+	case MII_MODEL_xxBROADCOM_BCM5714:
 	case MII_MODEL_xxBROADCOM_BCM5750:
+	case MII_MODEL_xxBROADCOM_BCM5752:
 		dsp = bcm5750_dspcode;
 		break;
 	}

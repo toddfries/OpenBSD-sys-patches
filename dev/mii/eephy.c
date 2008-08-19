@@ -1,4 +1,4 @@
-/*	$OpenBSD: eephy.c,v 1.16 2005/02/05 22:30:52 brad Exp $	*/
+/*	$OpenBSD: eephy.c,v 1.21 2005/08/14 01:35:09 jsg Exp $	*/
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -72,17 +72,19 @@ struct cfdriver eephy_cd = {
 int	eephy_mii_phy_auto(struct mii_softc *, int);
 void	eephy_reset(struct mii_softc *);
 
-extern void	mii_phy_auto_timeout(void *);
-
 const struct mii_phy_funcs eephy_funcs = {
 	eephy_service, eephy_status, eephy_reset,
 };
 
 static const struct mii_phydesc eephys[] = {
+	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_2,
+	  MII_STR_xxMARVELL_E1000_2 },
 	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_3,
 	  MII_STR_xxMARVELL_E1000_3 },
 	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_5,
 	  MII_STR_xxMARVELL_E1000_5 },
+	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1111,
+	  MII_STR_xxMARVELL_E1111 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000,
 	  MII_STR_MARVELL_E1000 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1011,
@@ -95,8 +97,8 @@ static const struct mii_phydesc eephys[] = {
 	  MII_STR_MARVELL_E1000_5 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000_6,
 	  MII_STR_MARVELL_E1000_6 },
-	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000_7,
-	  MII_STR_MARVELL_E1000_7 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1111RCJ,
+	  MII_STR_MARVELL_E1111RCJ },
 
 	{ 0,				0,
 	  NULL },
@@ -110,7 +112,7 @@ eephymatch(struct device *parent, void *match, void *aux)
 	if (mii_phy_match(ma, eephys) != NULL)
 		return (10);
 
-	return(0);
+	return (0);
 }
 
 void
@@ -129,7 +131,7 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 	sc->mii_funcs = &eephy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
-	sc->mii_anegticks = 10;
+	sc->mii_anegticks = MII_ANEGTICKS_GIGE;
 
 	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_MARVELL &&
 	    MII_MODEL(ma->mii_id2) == MII_MODEL_MARVELL_E1011 && 
@@ -141,7 +143,6 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 	sc->mii_flags |= MIIF_NOISOLATE;
 
 #define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
-
 
 	if ((sc->mii_flags & MIIF_HAVEFIBER) == 0) {
 		ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_T, IFM_FDX, sc->mii_inst),
@@ -240,9 +241,8 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		/*
 		 * If the interface is not up, don't do anything.
 		 */
-		if ((mii->mii_ifp->if_flags & IFF_UP) == 0) {
+		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			break;
-		}
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
@@ -253,7 +253,7 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 				return (0);
 			}
 			PHY_RESET(sc);
-			(void)eephy_mii_phy_auto(sc, 1);
+			(void) eephy_mii_phy_auto(sc, 1);
 			break;
 
 		case IFM_1000_SX:
@@ -271,7 +271,7 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			PHY_RESET(sc);
 
 			/* TODO - any other way to force 1000BT? */
-			(void)eephy_mii_phy_auto(sc, 1);
+			(void) eephy_mii_phy_auto(sc, 1);
 			break;
 
 		case IFM_100_TX:
@@ -311,31 +311,20 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		/*
 		 * If we're not currently selected, just return.
 		 */
-		if (IFM_INST(ife->ifm_media) != sc->mii_inst) {
+		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
-		}
-
-		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO) {
-			return (0);
-		}
 
 		/*
 		 * Is the interface even up?
 		 */
-		if ((mii->mii_ifp->if_flags & IFF_UP) == 0) {
+		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			return (0);
-		}
 
 		/*
-		 * Only retry autonegotiation every 5 seconds.
+		 * Only used for autonegotiation.
 		 */
-		if (++(sc->mii_ticks) != sc->mii_anegticks) {
-			return (0);
-		}
-		sc->mii_ticks = 0;
+		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
+			break;
 
 		/*
 		 * Check to see if we have link.  If we do, we don't
@@ -343,15 +332,20 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		 * the BMSR twice in case it's latched.
 		 */
 		reg = PHY_READ(sc, E1000_SR) | PHY_READ(sc, E1000_SR);
-
 		if (reg & E1000_SR_LINK_STATUS)
 			break;
 
+		/*
+		 * Only retry autonegotiation every mii_anegticks seconds.
+		 */
+		if (++sc->mii_ticks <= sc->mii_anegticks)
+			break;
+
+		sc->mii_ticks = 0;
 		PHY_RESET(sc);
 
-		if (eephy_mii_phy_auto(sc, 0) == EJUSTRETURN) {
-			return(0);
-		}
+		if (eephy_mii_phy_auto(sc, 0) == EJUSTRETURN)
+			return (0);
 
 		break;
 	}

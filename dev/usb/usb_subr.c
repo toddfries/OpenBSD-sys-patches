@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_subr.c,v 1.33 2005/03/13 02:54:04 pascoe Exp $ */
+/*	$OpenBSD: usb_subr.c,v 1.38 2005/08/01 05:36:49 brad Exp $ */
 /*	$NetBSD: usb_subr.c,v 1.103 2003/01/10 11:19:13 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_subr.c,v 1.18 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -77,6 +77,7 @@ extern int usbdebug;
 #endif
 
 Static usbd_status usbd_set_config(usbd_device_handle, int);
+Static void usbd_devinfo(usbd_device_handle, int, char *, size_t);
 Static void usbd_devinfo_vp(usbd_device_handle, char *, char *, int);
 Static char *usbd_get_string(usbd_device_handle, int, char *);
 Static int usbd_getnewaddr(usbd_bus_handle bus);
@@ -302,10 +303,17 @@ usbd_devinfo_vp(usbd_device_handle dev, char *v, char *p, int usedev)
 int
 usbd_printBCD(char *cp, size_t len, int bcd)
 {
-	return (snprintf(cp, len, "%x.%02x", bcd >> 8, bcd & 0xff));
+	int l;
+
+	l = snprintf(cp, len, "%x.%02x", bcd >> 8, bcd & 0xff);
+	if (l == -1 || len == 0)
+		return (0);
+	if (l >= len)
+		return len - 1;
+	return (l);
 }
 
-void
+Static void
 usbd_devinfo(usbd_device_handle dev, int showclass, char *base, size_t len)
 {
 	usb_device_descriptor_t *udd = &dev->ddesc;
@@ -319,7 +327,7 @@ usbd_devinfo(usbd_device_handle dev, int showclass, char *base, size_t len)
 	cp += strlen(cp);
 	if (showclass) {
 		snprintf(cp, base + len - cp, ", class %d/%d",
-		      udd->bDeviceClass, udd->bDeviceSubClass);
+		    udd->bDeviceClass, udd->bDeviceSubClass);
 		cp += strlen(cp);
 	}
 	bcdUSB = UGETW(udd->bcdUSB);
@@ -328,12 +336,29 @@ usbd_devinfo(usbd_device_handle dev, int showclass, char *base, size_t len)
 	cp += strlen(cp);
 	usbd_printBCD(cp, base + len - cp, bcdUSB);
 	cp += strlen(cp);
-	*cp++ = '/';
+	snprintf(cp, base + len - cp, "/");
+	cp += strlen(cp);
 	usbd_printBCD(cp, base + len - cp, bcdDevice);
 	cp += strlen(cp);
 	snprintf(cp, base + len - cp, ", addr %d", dev->address);
 	cp += strlen(cp);
 	*cp = 0;
+}
+
+char *
+usbd_devinfo_alloc(usbd_device_handle dev, int showclass)
+{
+	char *devinfop;
+
+	devinfop = malloc(DEVINFOSIZE, M_TEMP, M_WAITOK);
+	usbd_devinfo(dev, showclass, devinfop, DEVINFOSIZE);
+	return devinfop;
+}
+
+void
+usbd_devinfo_free(char *devinfop)
+{
+	free(devinfop, M_TEMP);
 }
 
 /* Delay for a certain number of ms */
@@ -1047,7 +1072,7 @@ usbd_new_device(device_ptr_t parent, usbd_bus_handle bus, int depth,
 				goto found;
 			}
 		}
-		panic("usbd_new_device: cannot find HS port\n");
+		panic("usbd_new_device: cannot find HS port");
 	found:
 		DPRINTFN(1,("usbd_new_device: high speed port %d\n", p));
 	} else {
@@ -1124,8 +1149,8 @@ usbd_new_device(device_ptr_t parent, usbd_bus_handle bus, int depth,
 	}
 
 	/* Set the address */
-	err = usbd_set_address(dev, addr);
 	DPRINTFN(5,("usbd_new_device: setting device address=%d\n", addr));
+	err = usbd_set_address(dev, addr);
 	if (err) {
 		DPRINTFN(-1,("usb_new_device: set address %d failed\n", addr));
 		err = USBD_SET_ADDR_FAILED;

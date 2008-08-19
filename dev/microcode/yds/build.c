@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.1 2004/12/20 12:29:40 deraadt Exp $	*/
+/*	$OpenBSD: build.c,v 1.3 2005/07/12 19:28:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>
@@ -19,7 +19,10 @@
 #include <dev/pci/ydsvar.h>
 #include <fcntl.h>
 #include <stdlib.h>
-
+#include <unistd.h>
+#include <err.h>
+#include <string.h>
+#include <stdio.h>
 #include "yds_hwmcode.h"
 
 #define FILENAME "yds"
@@ -28,7 +31,8 @@ int
 main(int argc, char *argv[])
 {
 	struct	yds_firmware yfproto, *yf;
-	int len, fd, i;
+	int len, fd;
+	ssize_t rlen;
 
 	len = sizeof(*yf) - sizeof(yfproto.data) +
 	    sizeof(yds_dsp_mcode) + sizeof(yds_ds1_ctrl_mcode) +
@@ -43,7 +47,7 @@ main(int argc, char *argv[])
 
 	bcopy(yds_dsp_mcode, &yf->data[0], yf->dsplen);
 	bcopy(yds_ds1_ctrl_mcode, &yf->data[yf->dsplen], yf->ds1len);
-	bcopy(yds_ds1_ctrl_mcode, &yf->data[yf->dsplen + yf->ds1len],
+	bcopy(yds_ds1e_ctrl_mcode, &yf->data[yf->dsplen + yf->ds1len],
 	    yf->ds1elen);
 
 	printf("creating %s length %d [%d+%d+%d]\n",
@@ -52,7 +56,11 @@ main(int argc, char *argv[])
 	if (fd == -1)
 		err(1, FILENAME);
 
-	write(fd, yf, len);
+	rlen = write(fd, yf, len);
+	if (rlen == -1)
+		err(1, "%s", FILENAME);
+	if (rlen != len)
+		errx(1, "%s: short write", FILENAME);
 	free(yf);
 	close(fd);
 	return 0;

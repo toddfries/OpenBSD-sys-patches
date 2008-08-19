@@ -1,4 +1,4 @@
-/* $OpenBSD: disksubr.c,v 1.2 2004/06/14 12:57:02 aoyama Exp $ */
+/* $OpenBSD: disksubr.c,v 1.4 2005/03/30 07:52:31 deraadt Exp $ */
 /* $NetBSD: disksubr.c,v 1.12 2002/02/19 17:09:44 wiz Exp $ */
 
 /*
@@ -163,6 +163,15 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	brelse(bp);
 	if (error)
 		return ("disk label read error");
+
+#if defined(CD9660)
+	if (iso_disklabelspoof(dev, strat, lp) == 0)
+		return (NULL);
+#endif
+#if defined(UDF)
+	if (udf_disklabelspoof(dev, strat, lp) == 0)
+		return (NULL);
+#endif
 
 	/* Check for a BSD disk label first. */
 	dlp = (struct disklabel *)(clp->cd_block + LABELOFFSET);

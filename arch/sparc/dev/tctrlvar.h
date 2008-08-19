@@ -1,4 +1,4 @@
-/*	$OpenBSD: tctrlvar.h,v 1.3 2004/05/10 09:05:52 miod Exp $	*/
+/*	$OpenBSD: tctrlvar.h,v 1.6 2005/07/19 09:36:04 miod Exp $	*/
 /*	$NetBSD: tctrlvar.h,v 1.1 1999/08/09 18:39:58 matt Exp $ */
 
 /*-
@@ -39,14 +39,16 @@
 #ifndef _SPARC_DEV_TCTRLVAR_H
 #define	_SPARC_DEV_TCTRLVAR_H
 
-void tadpole_powerdown(void);
-int tadpole_get_brightness(void);
-unsigned int tadpole_get_video(void);
-void tadpole_set_brightness(int);
-void tadpole_set_video(int);
+int	tadpole_bell(u_int, u_int, u_int);
+int	tadpole_get_brightness(void);
+u_int	tadpole_get_video(void);
+void	tadpole_powerdown(void);
+void	tadpole_register_extvideo(void (*)(void *, int), void *);
+void	tadpole_set_brightness(int);
+void	tadpole_set_pcmcia(int, int);
+void	tadpole_set_video(int);
 
 /* Values for get_video */
 #define	TV_ON		0x01
-#define	TV_ACCEL	0x02
 
 #endif /* _SPARC_DEV_TCTRLVAR_H */

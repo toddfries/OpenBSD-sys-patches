@@ -1,4 +1,5 @@
-/*	$OpenBSD: if_vlan.c,v 1.47 2004/10/09 19:55:29 brad Exp $ */
+/*	$OpenBSD: if_vlan.c,v 1.59 2005/07/31 03:52:18 pascoe Exp $	*/
+
 /*
  * Copyright 1998 Massachusetts Institute of Technology
  *
@@ -41,12 +42,10 @@
  * if_start(), rewrite them for use by the real outgoing interface,
  * and ask it to send them.
  *
- * Some devices support 802.1Q tag insertion and extraction in firmware.
- * The vlan interface behavior changes when the IFCAP_VLAN_HWTAGGING
- * capability is set on the parent.  In this case, vlan_start() will not
- * modify the ethernet header.  On input, the parent can call vlan_input_tag()
- * directly in order to supply us with an incoming mbuf and the vlan
- * tag value that goes with it.
+ * Some devices support 802.1Q tag insertion in firmware.  The
+ * vlan interface behavior changes when the IFCAP_VLAN_HWTAGGING
+ * capability is set on the parent.  In this case, vlan_start()
+ * will not modify the ethernet header.
  */
 
 #include "vlan.h"
@@ -88,9 +87,9 @@ LIST_HEAD(, ifvlan)	*vlan_tagh;
 
 void	vlan_start (struct ifnet *ifp);
 int	vlan_ioctl (struct ifnet *ifp, u_long cmd, caddr_t addr);
-int	vlan_setmulti (struct ifnet *ifp);
 int	vlan_unconfig (struct ifnet *ifp);
 int	vlan_config (struct ifvlan *, struct ifnet *, u_int16_t);
+void	vlan_vlandev_state(void *);
 void	vlanattach (int count);
 int	vlan_set_promisc (struct ifnet *ifp);
 int	vlan_ether_addmulti(struct ifvlan *, struct ifreq *);
@@ -139,9 +138,8 @@ vlan_clone_create(struct if_clone *ifc, int unit)
 	IFQ_SET_READY(&ifp->if_snd);
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
 	/* Now undo some of the damage... */
-	ifp->if_type = IFT_8021_VLAN;
+	ifp->if_type = IFT_L2VLAN;
 	ifp->if_hdrlen = EVL_ENCAPLEN;
 
 	return (0);
@@ -168,7 +166,7 @@ vlan_start(struct ifnet *ifp)
 {
 	struct ifvlan *ifv;
 	struct ifnet *p;
-	struct mbuf *m, *m0;
+	struct mbuf *m;
 	int error;
 
 	ifv = ifp->if_softc;
@@ -220,26 +218,17 @@ vlan_start(struct ifnet *ifp)
 
 			m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&evh);
 			evh.evl_proto = evh.evl_encap_proto;
-			evh.evl_encap_proto = htons(ETHERTYPE_8021Q);
+			evh.evl_encap_proto = htons(ETHERTYPE_VLAN);
 			evh.evl_tag = htons(ifv->ifv_tag);
-			m_adj(m, ETHER_HDR_LEN);
 
-			m0 = m_prepend(m, sizeof(struct ether_vlan_header),
-			    M_DONTWAIT);
-			if (m0 == NULL) {
-				ifp->if_ierrors++;
+			m_adj(m, ETHER_HDR_LEN);
+			M_PREPEND(m, sizeof(evh), M_DONTWAIT);
+			if (m == NULL) {
+				ifp->if_oerrors++;
 				continue;
 			}
 
-			/* m_prepend() doesn't adjust m_pkthdr.len */
-			if (m0->m_flags & M_PKTHDR)
-				m0->m_pkthdr.len +=
-				    sizeof(struct ether_vlan_header);
-
-			m_copyback(m0, 0, sizeof(struct ether_vlan_header),
-			    &evh);
-
-			m = m0;
+			m_copyback(m, 0, sizeof(evh), &evh);
 		}
 
 		/*
@@ -257,7 +246,7 @@ vlan_start(struct ifnet *ifp)
 		}
 
 		ifp->if_opackets++;
-		if ((p->if_flags & IFF_OACTIVE) == 0)
+		if ((p->if_flags & (IFF_RUNNING|IFF_OACTIVE)) == IFF_RUNNING)
 			p->if_start(p);
 	}
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -265,69 +254,9 @@ vlan_start(struct ifnet *ifp)
 	return;
 }
 
-int
-vlan_input_tag(struct mbuf *m, u_int16_t t)
-{
-	struct ifvlan *ifv;
-	struct ether_vlan_header vh;
-
-	t = EVL_VLANOFTAG(t);
-	LIST_FOREACH(ifv, &vlan_tagh[TAG_HASH(t)], ifv_list) {
-		if (m->m_pkthdr.rcvif == ifv->ifv_p && t == ifv->ifv_tag)
-			break;
-	}
-
-	if (ifv == NULL) {
-		if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-			m_freem(m);
-			return (-1);
-		}
-		m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&vh);
-		vh.evl_proto = vh.evl_encap_proto;
-		vh.evl_tag = htons(t);
-		vh.evl_encap_proto = htons(ETHERTYPE_8021Q);
-		m_adj(m, ETHER_HDR_LEN);
-		m = m_prepend(m, sizeof(struct ether_vlan_header), M_DONTWAIT);
-		if (m == NULL)
-			return (-1);
-		m->m_pkthdr.len += sizeof(struct ether_vlan_header);
-		if (m->m_len < sizeof(struct ether_vlan_header) &&
-		    (m = m_pullup(m, sizeof(struct ether_vlan_header))) == NULL)
-			return (-1);
-		m_copyback(m, 0, sizeof(struct ether_vlan_header), &vh);
-		ether_input_mbuf(m->m_pkthdr.rcvif, m);
-		return (-1);
-	}
-
-	if ((ifv->ifv_if.if_flags & (IFF_UP|IFF_RUNNING)) !=
-	    (IFF_UP|IFF_RUNNING)) {
-		m_freem(m);
-		return (-1);
-	}
-
-	/*
-	 * Having found a valid vlan interface corresponding to
-	 * the given source interface and vlan tag, run the
-	 * the real packet through ether_input().
-	 */
-	m->m_pkthdr.rcvif = &ifv->ifv_if;
-
-#if NBPFILTER > 0
-	if (ifv->ifv_if.if_bpf) {
-		/*
-		 * Do the usual BPF fakery.  Note that we don't support
-		 * promiscuous mode here, since it would require the
-		 * drivers to know about VLANs and we're not ready for
-		 * that yet.
-		 */
-		bpf_mtap(ifv->ifv_if.if_bpf, m);
-	}
-#endif
-	ifv->ifv_if.if_ipackets++;
-	ether_input_mbuf(&ifv->ifv_if, m);
-	return 0;
-}
-
+/*
+ * vlan_input() returns 0 if it has consumed the packet, 1 otherwise.
+ */
 int
 vlan_input(eh, m)
 	struct ether_header *eh;
@@ -349,11 +278,13 @@ vlan_input(eh, m)
 		if (m->m_pkthdr.rcvif == ifv->ifv_p && tag == ifv->ifv_tag)
 			break;
 	}
+	if (ifv == NULL)
+		return (1);
 
-	if (ifv == NULL || (ifv->ifv_if.if_flags & (IFF_UP|IFF_RUNNING)) !=
+	if ((ifv->ifv_if.if_flags & (IFF_UP|IFF_RUNNING)) !=
 	    (IFF_UP|IFF_RUNNING)) {
 		m_freem(m);
-		return -1;	/* so ether_input can take note */
+		return (0);
 	}
 
 	/*
@@ -370,26 +301,13 @@ vlan_input(eh, m)
 	m->m_pkthdr.len -= EVL_ENCAPLEN;
 
 #if NBPFILTER > 0
-	if (ifv->ifv_if.if_bpf) {
-		/*
-		 * Do the usual BPF fakery.  Note that we don't support
-		 * promiscuous mode here, since it would require the
-		 * drivers to know about VLANs and we're not ready for
-		 * that yet.
-		 */
-		struct mbuf m0;
-
-		m0.m_flags = 0;
-		m0.m_next = m;
-		m0.m_len = ETHER_HDR_LEN;
-		m0.m_data = (char *)eh;
-		bpf_mtap(ifv->ifv_if.if_bpf, &m0);
-	}
+	if (ifv->ifv_if.if_bpf)
+		bpf_mtap_hdr(ifv->ifv_if.if_bpf, (char *)eh, ETHER_HDR_LEN, m);
 #endif
 	ifv->ifv_if.if_ipackets++;
 	ether_input(&ifv->ifv_if, eh, m);
 
-	return 0;
+	return (0);
 }
 
 int
@@ -403,6 +321,7 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 		return EPROTONOSUPPORT;
 	if (ifv->ifv_p)
 		return EBUSY;
+
 	ifv->ifv_p = p;
 
 	if (p->if_capabilities & IFCAP_VLAN_MTU)
@@ -468,6 +387,11 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 	ifv->ifv_tag = tag;
 	s = splnet();
 	LIST_INSERT_HEAD(&vlan_tagh[TAG_HASH(tag)], ifv, ifv_list);
+
+	/* Register callback for physical link state changes */
+	ifv->lh_cookie = hook_establish(p->if_linkstatehooks, 1,
+	    vlan_vlandev_state, ifv);
+	vlan_vlandev_state(ifv);
 	splx(s);
 
 	return 0;
@@ -493,6 +417,7 @@ vlan_unconfig(struct ifnet *ifp)
 
 	s = splnet();
 	LIST_REMOVE(ifv, ifv_list);
+	hook_disestablish(p->if_linkstatehooks, ifv->lh_cookie);
 	splx(s);
 
 	/*
@@ -516,6 +441,18 @@ vlan_unconfig(struct ifnet *ifp)
 	bzero(ifv->ifv_ac.ac_enaddr, ETHER_ADDR_LEN);
 
 	return 0;
+}
+
+void
+vlan_vlandev_state(void *v)
+{
+	struct ifvlan *ifv = v;
+
+	if (ifv->ifv_if.if_link_state == ifv->ifv_p->if_link_state)
+		return;
+
+	ifv->ifv_if.if_link_state = ifv->ifv_p->if_link_state;
+	if_link_state_change(&ifv->ifv_if);
 }
 
 int
@@ -609,18 +546,23 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (vlr.vlr_parent[0] == '\0') {
 			s = splimp();
 			vlan_unconfig(ifp);
-			if_down(ifp);
-			ifp->if_flags &= ~(IFF_UP|IFF_RUNNING);
+			if (ifp->if_flags & IFF_UP)
+				if_down(ifp);
+			ifp->if_flags &= ~IFF_RUNNING;
 			splx(s);
-			break;
-		}
-		if (vlr.vlr_tag != EVL_VLANOFTAG(vlr.vlr_tag)) {
-			error = EINVAL;		 /* check for valid tag */
 			break;
 		}
 		pr = ifunit(vlr.vlr_parent);
 		if (pr == NULL) {
 			error = ENOENT;
+			break;
+		}
+		/*
+		 * Don't let the caller set up a VLAN tag with
+		 * anything except VLID bits.
+		 */
+		if (vlr.vlr_tag & ~EVL_VLID_MASK) {
+			error = EINVAL;
 			break;
 		}
 		error = vlan_config(ifv, pr, vlr.vlr_tag);

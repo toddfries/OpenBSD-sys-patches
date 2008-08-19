@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.125.2.2 2006/03/05 03:04:01 brad Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.131.2.1 2006/03/05 03:08:25 brad Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -320,8 +320,8 @@ ipv4_input(m)
 		}
 	}
 
-	if ((m->m_pkthdr.csum & M_IPV4_CSUM_IN_OK) == 0) {
-		if (m->m_pkthdr.csum & M_IPV4_CSUM_IN_BAD) {
+	if ((m->m_pkthdr.csum_flags & M_IPV4_CSUM_IN_OK) == 0) {
+		if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_IN_BAD) {
 			ipstat.ips_inhwcsum++;
 			ipstat.ips_badsum++;
 			goto bad;
@@ -332,7 +332,7 @@ ipv4_input(m)
 			goto bad;
 		}
 	} else {
-		m->m_pkthdr.csum &= ~M_IPV4_CSUM_IN_OK;
+		m->m_pkthdr.csum_flags &= ~M_IPV4_CSUM_IN_OK;
 		ipstat.ips_inhwcsum++;
 	}
 
@@ -446,7 +446,9 @@ ipv4_input(m)
 		 */
 		IN_LOOKUP_MULTI(ip->ip_dst, m->m_pkthdr.rcvif, inm);
 		if (inm == NULL) {
-			ipstat.ips_cantforward++;
+			ipstat.ips_notmember++;
+			if (!IN_LOCAL_GROUP(ip->ip_dst.s_addr))
+				ipstat.ips_cantforward++;
 			m_freem(m);
 			return;
 		}
@@ -1022,13 +1024,6 @@ ip_dooptions(m)
 		case IPOPT_LSRR:
 		case IPOPT_SSRR:
 			if (!ip_dosourceroute) {
-				char buf[4*sizeof "123"];
-
-				strlcpy(buf, inet_ntoa(ip->ip_dst),
-				    sizeof buf);
-				log(LOG_WARNING,
-				    "attempted source route from %s to %s\n",
-				    inet_ntoa(ip->ip_src), buf);
 				type = ICMP_UNREACH;
 				code = ICMP_UNREACH_SRCFAIL;
 				goto bad;
@@ -1409,13 +1404,9 @@ ip_forward(m, srcrt)
 	struct ip *ip = mtod(m, struct ip *);
 	struct sockaddr_in *sin;
 	struct rtentry *rt;
-	int error, type = 0, code = 0;
+	int error, type = 0, code = 0, destmtu = 0;
 	struct mbuf *mcopy;
 	n_long dest;
-	struct ifnet *destifp;
-#ifdef IPSEC
-	struct ifnet dummyifp;
-#endif
 
 	dest = 0;
 #ifdef DIAGNOSTIC
@@ -1512,7 +1503,6 @@ ip_forward(m, srcrt)
 	}
 	if (mcopy == NULL)
 		return;
-	destifp = NULL;
 
 	switch (error) {
 
@@ -1536,16 +1526,11 @@ ip_forward(m, srcrt)
 #ifdef IPSEC
 		if (ipforward_rt.ro_rt) {
 			struct rtentry *rt = ipforward_rt.ro_rt;
-			destifp = ipforward_rt.ro_rt->rt_ifp;
-			/*
-			 * XXX BUG ALERT
-			 * The "dummyifp" code relies upon the fact
-			 * that icmp_error() touches only ifp->if_mtu.
-			 */
-			if (rt->rt_rmx.rmx_mtu) {
-				dummyifp.if_mtu = rt->rt_rmx.rmx_mtu;
-				destifp = &dummyifp;
-			}
+
+			if (rt->rt_rmx.rmx_mtu)
+				destmtu = rt->rt_rmx.rmx_mtu;
+			else
+				destmtu = ipforward_rt.ro_rt->rt_ifp->if_mtu;
 		}
 #endif /*IPSEC*/
 		ipstat.ips_cantfrag++;
@@ -1569,7 +1554,7 @@ ip_forward(m, srcrt)
 #endif
 	}
 
-	icmp_error(mcopy, type, code, dest, destifp);
+	icmp_error(mcopy, type, code, dest, destmtu);
 }
 
 int
@@ -1583,8 +1568,8 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 {
 	int error;
 
-	/* All sysctl names at this level are terminal. */
-	if (namelen != 1)
+	/* Almost all sysctl names at this level are terminal. */
+	if (namelen != 1 && name[0] != IPCTL_IFQUEUE)
 		return (ENOTDIR);
 
 	switch (name[0]) {
@@ -1630,6 +1615,9 @@ ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	        return (sysctl_tstring(oldp, oldlenp, newp, newlen,
 				       ipsec_def_comp,
 				       sizeof(ipsec_def_comp)));
+	case IPCTL_IFQUEUE:
+	        return (sysctl_ifq(name + 1, namelen - 1,
+		    oldp, oldlenp, newp, newlen, &ipintrq));
 	default:
 		if (name[0] < IPCTL_MAXID)
 			return (sysctl_int_arr(ipctl_vars, name, namelen,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.11 2004/09/14 23:39:32 mickey Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.13 2005/05/26 04:34:51 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff
@@ -93,7 +93,8 @@ process_read_fpregs(p, fpregs)
 		fpu_save((vaddr_t)p->p_addr->u_pcb.pcb_fpregs);
 		mtctl(0, CR_CCR);
 	}
-	bcopy(p->p_addr->u_pcb.pcb_fpregs, fpregs, 32*8);
+	bcopy(p->p_addr->u_pcb.pcb_fpregs, fpregs, 32 * 8);
+	pdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
 
 	return (0);
 }
@@ -158,20 +159,12 @@ process_write_fpregs(p, fpregs)
 	}
 
 	bcopy(fpregs, p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
+	fdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs, 32 * 8);
 
 	return (0);
 }
 
-int
-process_sstep(p, sstep)
-	struct proc *p;
-	int sstep;
-{
-	if (sstep)
-		return (EINVAL);
-
-	return (0);
-}
+/* process_sstep() is in trap.c */
 
 int
 process_set_pc(p, addr)

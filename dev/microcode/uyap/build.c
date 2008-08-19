@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.1 2004/12/19 15:20:13 deraadt Exp $	*/
+/*	$OpenBSD: build.c,v 1.3 2005/05/17 18:48:52 jason Exp $	*/
 
 /*
  * Copyright (c) 2004 Theo de Raadt <deraadt@openbsd.org>
@@ -16,6 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <fcntl.h>
 #include <sys/param.h>
 
@@ -26,7 +27,8 @@
 int
 main(int argc, char *argv[])
 {
-	int i;
+	const struct ezdata *ptr;
+	u_int16_t address;
 	int fd;
 
 	printf("creating %s length %d\n", FILENAME, sizeof uyap_firmware);
@@ -34,7 +36,33 @@ main(int argc, char *argv[])
 	if (fd == -1)
 		err(1, "%s", FILENAME);
 
-	write(fd, uyap_firmware, sizeof uyap_firmware);
-	close(fd);
+	for (ptr = uyap_firmware; ; ptr++) {
+		struct iovec iov[3];
+		u_int8_t length;
+		ssize_t tlen, rlen;
+
+		length = ptr->length;
+		iov[0].iov_base = &length;
+		iov[0].iov_len = 1;
+
+		address = htole16(ptr->address);
+		iov[1].iov_base = &address;
+		iov[1].iov_len = 2;
+
+		iov[2].iov_base = ptr->data;
+		iov[2].iov_len = ptr->length;
+
+		tlen = iov[0].iov_len + iov[1].iov_len + iov[2].iov_len;
+
+		rlen = writev(fd, iov, 3);
+		if (rlen == -1)
+			err(1, "%s", FILENAME);
+		if (rlen != tlen)
+			err(1, "%s: short write", FILENAME);
+
+		if (ptr->length == 0)
+			break;
+	}
+
 	return 0;
 }

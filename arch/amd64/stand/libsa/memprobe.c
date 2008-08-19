@@ -1,4 +1,4 @@
-/*	$OpenBSD: memprobe.c,v 1.1 2004/02/03 12:09:47 mickey Exp $	*/
+/*	$OpenBSD: memprobe.c,v 1.4 2005/05/28 05:47:33 weingart Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -67,9 +67,7 @@ checkA20(void)
 static __inline bios_memmap_t *
 bios_E820(bios_memmap_t *mp)
 {
-	void *info;
 	int rc, off = 0, sig, gotcha = 0;
-	info = getEBDAaddr();
 
 	do {
 		BIOS_regs.biosr_es = ((u_int)(mp) >> 4);
@@ -328,7 +326,8 @@ memprobe(void)
 		/* Count only "good" memory chunks 12K and up in size */
 		if ((im->type == BIOS_MAP_FREE) && (im->size >= 12*1024)) {
 			if (im->size > 1024 * 1024)
-				printf("%uM ", (u_int)im->size / (1024 * 1024));
+				printf("%uM ", (u_int)(im->size /
+				    (1024 * 1024)));
 			else
 				printf("%uK ", (u_int)im->size / 1024);
 
@@ -345,15 +344,50 @@ memprobe(void)
 			if(im->addr < IOM_BEGIN)
 				cnvmem = max(cnvmem,
 				    im->addr + im->size) / 1024;
-			if(im->addr >= IOM_END)
+			if(im->addr >= IOM_END
+			    && (im->addr/1024) == (extmem + 1024)) {
 				extmem += im->size / 1024;
+			}
 		}
 	}
+
+	/* Adjust extmem to be no more than 4G (which it usually is not
+	 * anyways).  In order for an x86 type machine (amd64/etc) to use
+	 * more than 4GB of memory, it will need to grok and use the bios
+	 * memory map we pass it.  Note that above we only count CONTIGUOUS
+	 * memory from the 1MB boundary on for extmem (think I/O holes).
+	 *
+	 * extmem is in KB, and we have 4GB - 1MB (base/io hole) worth of it.
+	 */
+	if(extmem > 4*1024*1024 - 1024)
+		extmem = 4*1024*1024 - 1024;
 
 	/* Check if gate A20 is on */
 	printf("a20=o%s] ", checkA20()? "n" : "ff!");
 }
 #endif
+
+/*
+ * XXX - A hack until libgcc has the appropriate div/mod functions so
+ * that we can use -DLIBSA_LONGLONG_PRINTF and simply print out the
+ * 64-bit vars directly.
+ */
+static const char *
+int64_str(u_int64_t num)
+{
+	static char buf[17], *p;
+	u_int32_t i;
+
+	buf[16] = '\0';
+	for(p = buf + 15, i = 0; i < 16; p--,i++) {
+		*p = "0123456789abcdef"[num & 0xF];
+		num >>= 4;
+		if(num == 0)
+			break;
+	}
+
+	return p;
+}
 
 void
 dump_biosmem(bios_memmap_t *tm)
@@ -370,8 +404,9 @@ dump_biosmem(bios_memmap_t *tm)
 	 * If/when we do, libsa may need to be updated some...
 	 */
 	for(p = tm; p->type != BIOS_MAP_END; p++) {
-		printf("Region %ld: type %u at 0x%x for %uKB\n", 
-		    (long)(p - tm), p->type, (u_int)p->addr,
+		printf("Region %ld: type %u at 0x%s for %uKB\n", 
+		    (long)(p - tm), p->type,
+		    int64_str(p->addr),
 		    (u_int)(p->size / 1024));
 
 		if(p->type == BIOS_MAP_FREE)

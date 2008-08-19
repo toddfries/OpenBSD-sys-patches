@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vrreg.h,v 1.13 2004/09/28 04:37:33 brad Exp $	*/
+/*	$OpenBSD: if_vrreg.h,v 1.15 2005/07/06 02:22:28 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -424,9 +424,8 @@ struct vr_chain_data {
 
 	struct vr_chain_onefrag	*vr_rx_head;
 
-	struct vr_chain		*vr_tx_head;
-	struct vr_chain		*vr_tx_tail;
-	struct vr_chain		*vr_tx_free;
+	struct vr_chain		*vr_tx_cons;
+	struct vr_chain		*vr_tx_prod;
 };
 
 struct vr_type {
@@ -589,9 +588,4 @@ struct vr_softc {
 
 #ifndef ETHER_CRC_LEN
 #define ETHER_CRC_LEN 4
-#endif
-
-#ifdef __alpha__
-#undef vtophys
-#define vtophys(va)		alpha_XXX_dmamap((vm_offset_t)va)
 #endif

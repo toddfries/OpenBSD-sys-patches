@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.75.2.1 2005/10/12 22:01:05 brad Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.77.2.1 2005/11/01 00:57:01 brad Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*-
@@ -504,10 +504,9 @@ brelse(struct buf *bp)
 			CLR(bp->b_flags, B_DELWRI);
 		}
 
-		if (bp->b_vp) {
-			reassignbuf(bp);
+		if (bp->b_vp)
 			brelvp(bp);
-		}
+
 		if (bp->b_bufsize <= 0) {
 			/* no data */
 			bufq = &bufqueues[BQ_EMPTY];
@@ -862,7 +861,7 @@ buf_daemon(struct proc *p)
 #endif
 			if (LIST_FIRST(&bp->b_dep) != NULL &&
 			    !ISSET(bp->b_flags, B_DEFERRED) &&
-			    buf_countdeps(bp, 0, 1)) {
+			    buf_countdeps(bp, 0, 0)) {
 				SET(bp->b_flags, B_DEFERRED);
 				s = splbio();
 				numfreepages += btoc(bp->b_bufsize);

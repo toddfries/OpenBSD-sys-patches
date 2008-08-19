@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udav.c,v 1.9 2005/01/03 22:45:52 brad Exp $ */
+/*	$OpenBSD: if_udav.c,v 1.13 2005/08/01 05:36:48 brad Exp $ */
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
@@ -77,11 +77,6 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#endif
-
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
 #endif
 
 #include <dev/mii/mii.h>
@@ -187,16 +182,17 @@ USB_ATTACH(udav)
 	usbd_status err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	char devinfo[1024];
+	char *devinfop;
 	char *devname = USBDEVNAME(sc->sc_dev);
 	struct ifnet *ifp;
 	struct mii_data *mii;
 	u_char eaddr[ETHER_ADDR_LEN];
 	int i, s;
 
-	usbd_devinfo(dev, 0, devinfo, sizeof(devinfo));
+	devinfop = usbd_devinfo_alloc(dev, 0);
 	USB_ATTACH_SETUP;
-	printf("%s: %s", devname, devinfo);
+	printf("%s: %s", devname, devinfop);
+	usbd_devinfo_free(devinfop);
 
 	/* Move the device into the configured state. */
 	err = usbd_set_config_no(dev, UDAV_CONFIG_NO, 1);
@@ -1236,20 +1232,6 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(&sc->sc_ac, ifa);
 			break;
 #endif /* INET */
-#ifdef NS
-		case AF_NS:
-		{
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host = *(union ns_host *)
-				    LLADDR(ifp->if_sadl);
-			else
-				memcpy(LLADDR(ifp->if_sadl),
-				    ina->x_host.c_host, ifp->if_addrlen);
-			break;
-		}
-#endif /* NS */
 		}
 		break;
 
@@ -1339,6 +1321,7 @@ udav_stop(struct ifnet *ifp, int disable)
 	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
 
 	ifp->if_timer = 0;
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	udav_reset(sc);
 
@@ -1412,7 +1395,6 @@ udav_stop(struct ifnet *ifp, int disable)
 	}
 
 	sc->sc_link = 0;
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 }
 
 /* Set media options */
@@ -1505,16 +1487,13 @@ udav_tick_task(void *xsc)
 	s = splnet();
 
 	mii_tick(mii);
-	if (!sc->sc_link) {
-		mii_pollstat(mii);
-		if (mii->mii_media_status & IFM_ACTIVE &&
-		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
-			DPRINTF(("%s: %s: got link\n",
-				 USBDEVNAME(sc->sc_dev), __func__));
-			sc->sc_link++;
-			if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
-				   udav_start(ifp);
-		}
+	if (!sc->sc_link && mii->mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
+		DPRINTF(("%s: %s: got link\n",
+			 USBDEVNAME(sc->sc_dev), __func__));
+		sc->sc_link++;
+		if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
+			   udav_start(ifp);
 	}
 
 	usb_callout(sc->sc_stat_ch, hz, udav_tick, sc);

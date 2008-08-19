@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.16 2005/01/06 20:15:47 martin Exp $	*/
+/*	$OpenBSD: locore.S,v 1.21 2005/08/20 00:33:59 jsg Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -175,6 +175,7 @@ _C_LABEL(lapic_isr):
 
 	.globl	_C_LABEL(cpu_id),_C_LABEL(cpu_vendor), _C_LABEL(cpu_brand_id)
 	.globl	_C_LABEL(cpuid_level),_C_LABEL(cpu_feature)
+	.globl	_C_LABEL(cpu_ecxfeature)
 	.globl	_C_LABEL(esym),_C_LABEL(boothowto),_C_LABEL(bootdev)
 	.globl	_C_LABEL(bootinfo), _C_LABEL(bootinfo_size), _C_LABEL(atdevbase)
 	.globl	_C_LABEL(proc0paddr),_C_LABEL(PTDpaddr)
@@ -185,6 +186,7 @@ _C_LABEL(cpu):		.long	0	# are we 386, 386sx, or 486,
 _C_LABEL(cpu_id):	.long	0	# saved from `cpuid' instruction
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid'
 					#   instruction
+_C_LABEL(cpu_ecxfeature):.long	0	# extended feature flags from 'cpuid'
 _C_LABEL(cpuid_level):	.long	-1	# max. level accepted by 'cpuid'
 					#   instruction
 _C_LABEL(cpu_vendor):	.space	16	# vendor string returned by `cpuid'
@@ -310,6 +312,7 @@ bi_size_ok:
 	movl	$1,%eax
 	cpuid
 	movl	%eax,RELOC(cpu_id)
+	movl	%ecx,RELOC(cpu_ecxfeature)
 	movl	%edx,RELOC(cpu_feature)
 
 	movl	$0x80000001, %eax
@@ -499,7 +502,7 @@ bi_size_ok:
 	 * 1. Enable PAE (and SSE while here).
 	 */
 	movl	%cr4,%eax
-	orl	$(CR4_PAE|CR4_OSFXSR|CR4_OSXMMEXCPT),%eax
+	orl	$(CR4_DEFAULT),%eax
 	movl	%eax,%cr4
 
 	/*
@@ -1025,8 +1028,7 @@ ENTRY(cpu_switchto)
  * Switch to proc0's saved context and deallocate the address space and kernel
  * stack for p.  Then jump into cpu_switch(), as if we were in proc0 all along.
  */
-	.globl	_C_LABEL(proc0),_C_LABEL(uvmspace_free),_C_LABEL(kernel_map)
-	.globl	_C_LABEL(uvm_km_free),_C_LABEL(tss_free)
+	.globl	_C_LABEL(proc0)
 ENTRY(switch_exit)
 #ifdef MULTIPROCESSOR
 	movq	CPUVAR(IDLE_PCB),%r8
@@ -1274,3 +1276,18 @@ iret_return:
 	jmp	2b
 4:	.asciz	"WARNING: SPL NOT LOWERED ON SYSCALL EXIT\n"
 #endif /* DIAGNOSTIC */
+
+
+ENTRY(pagezero)
+	movq    $-PAGE_SIZE,%rdx
+	subq    %rdx,%rdi
+	xorq    %rax,%rax
+1:
+	movnti  %rax,(%rdi,%rdx)
+	movnti  %rax,8(%rdi,%rdx)
+	movnti  %rax,16(%rdi,%rdx)
+	movnti  %rax,24(%rdi,%rdx)
+	addq    $32,%rdx
+	jne     1b
+	sfence
+	ret

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.146 2005/03/16 13:20:43 mickey Exp $	*/
+/*	$OpenBSD: locore.S,v 1.151 2005/05/26 03:42:43 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -132,8 +132,6 @@ cpu_itmr			/* itmr value at the most recent clk int */
 
 	.export	kernelmapped, data
 	BSS(kernelmapped, 4)	/* set when kernel is mapped */
-	.export fpu_csw, data
-	BSS(fpu_csw, 4)		/* count fpu context switches */
 	.export	fpu_curpcb, data
 	BSS(fpu_curpcb, 4)	/* pcb of the fpu owner */
 	.export fpu_enable, data
@@ -1060,7 +1058,7 @@ ENTRY(TLABEL(emu),0)
 	 * pass through for all coprocessors now and
 	 * do not check the uid here.
 	 * in case that piece does not exist emulate
-	 * or the trap will be generted later.
+	 * or the trap will be generated later.
 	 */
 
 	ldil	L%cpu_fpuena, r1
@@ -1095,7 +1093,7 @@ $fpusw_emu
 	nop
 
 $fpusw_set
-	/* enable coprocessor */
+	/* enable coprocessor XXX */
 	depi	3, 25, 2, r1
 	mtctl	r1, ccr
 
@@ -1120,11 +1118,12 @@ $fpusw_set
 
 $fpusw_nosave
 	/* count switches */
-	ldil	L%fpu_csw, r1
-	ldw	R%fpu_csw(r1), r16
+	.import	uvmexp, data
+	ldil	L%(uvmexp+FPSWTCH), r1
+	ldw	R%(uvmexp+FPSWTCH)(r1), r16
 	ldo	31*8+PCB_FPREGS+U_PCB(r9), r17
 	ldo	1(r16), r16
-	stw	r16, R%fpu_csw(r1)
+	stw	r16, R%(uvmexp+FPSWTCH)(r1)
 
 	fldds,ma -8(r17), fr31
 	fldds,ma -8(r17), fr30
@@ -1806,6 +1805,9 @@ $trapnowvirt
 	dep	r0, 24, 25, arg0
 	copy	t3, arg1
 
+	copy	arg0, r4
+	copy	arg1, r5
+
 	.import	trap, code
 	ldil	L%trap,t1
 	ldo	R%trap(t1),t1
@@ -1814,10 +1816,10 @@ $trapnowvirt
 	bv,n	r0(t1)
 	nop
 
+	copy	r5, t3
+
 	/* see if curproc have changed */
-	ldw	-HPPA_FRAME_SIZE-TRAPFRAME_SIZEOF+TF_FLAGS(sp), arg0
-	ldo	-HPPA_FRAME_SIZE-TRAPFRAME_SIZEOF(sp), t3
-	extru,<> arg0, TFF_LAST_POS, 1, r0
+	extru,<> r4, TFF_LAST_POS, 1, r0
 	b	$syscall_return
 
 	/* see if curproc have really changed */
@@ -1826,7 +1828,7 @@ $trapnowvirt
 	sub,<>	r0, t2, r0
 	ldw	P_MD_REGS(t2), t3
 
-	/* means curproc have actually changed */
+	/* means curproc has actually changed */
 	b	$syscall_return
 	nop
 EXIT(TLABEL(all))
@@ -2020,9 +2022,9 @@ ENTRY(TLABEL(hpmc),0)
 	ldw	R%emrg_stack(arg1), arg1
 
 	/* never returns, but still */
-	ldil	L%GBCAST_ADDR, t1
+	ldil	L%HPPA_GBCAST, t1
 	ldi	CMD_RESET, t2
-	stw	t2, R%GBCAST_ADDR(t1)
+	stw	t2, R%HPPA_GBCAST(t1)
 hpmc_never_dies
 	b	hpmc_never_dies
 	nop
@@ -3105,6 +3107,21 @@ sigcode_call
 ALTENTRY(esigcode)
 EXIT(sigcode)
 
+#ifdef COMPAT_HPUX
+ENTRY(hpux_sigcode,0)
+	bb,>=,n	arg3, 30, hpux_sigcode_call
+	dep	r0, 31, 2, arg3
+	ldw	4(arg3), r19
+	ldw	0(arg3), arg3
+hpux_sigcode_call
+	.call
+	ble	0(sr0, arg3)
+	nop	/* rp has already been set */
+ALTENTRY(hpux_esigcode)
+EXIT(hpux_sigcode)
+#endif /* COMPAT_HPUX */
+
+
 #ifdef COMPAT_LINUX
 ENTRY(linux_sigcode,0)
 
@@ -3112,7 +3129,7 @@ ENTRY(linux_sigcode,0)
 	bv	0(rp)
 	nop
 ALTENTRY(linux_esigcode)
-EXIT(linix_sigcode)
+EXIT(linux_sigcode)
 #endif /* COMPAT_LINUX */
 
 	.end

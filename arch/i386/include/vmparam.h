@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.30 2004/11/28 01:36:38 mickey Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.32 2005/08/01 19:44:53 jmc Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.15 1994/10/27 04:16:34 cgd Exp $	*/
 
 /*-
@@ -50,7 +50,7 @@
  * kernel stack.
  *
  * Immediately after the user structure is the page table map, and then
- * kernal address space.
+ * kernel address space.
  */
 #define	USRTEXT		PAGE_SIZE
 #define	USRSTACK	VM_MAXUSER_ADDRESS
@@ -71,6 +71,8 @@
 #ifndef	MAXSSIZ
 #define	MAXSSIZ		(32*1024*1024)		/* max stack size */
 #endif
+
+#define STACKGAP_RANDOM	256*1024
 
 /* I386 has a line where all code is executable: 0 - I386_MAX_EXE_ADDR */
 #define I386_MAX_EXE_ADDR 0x20000000		/* exec line */

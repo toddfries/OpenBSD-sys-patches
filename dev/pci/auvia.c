@@ -1,4 +1,4 @@
-/*	$OpenBSD: auvia.c,v 1.29 2004/12/07 03:17:42 jsg Exp $ */
+/*	$OpenBSD: auvia.c,v 1.33 2005/05/06 01:45:22 miod Exp $ */
 /*	$NetBSD: auvia.c,v 1.7 2000/11/15 21:06:33 jdolecek Exp $	*/
 
 /*-
@@ -98,7 +98,6 @@ int	auvia_get_port(void *, mixer_ctrl_t *);
 int	auvia_query_devinfo(void *, mixer_devinfo_t *);
 void *	auvia_malloc(void *, int, size_t, int, int);
 void	auvia_free(void *, void *, int);
-size_t	auvia_round_buffersize(void *, int, size_t);
 paddr_t	auvia_mappage(void *, void *, off_t, int);
 int	auvia_get_props(void *);
 int	auvia_build_dma_ops(struct auvia_softc *, struct auvia_softc_chan *,
@@ -189,7 +188,7 @@ struct audio_hw_if auvia_hw_if = {
 	auvia_query_devinfo,
 	auvia_malloc,
 	auvia_free,
-	auvia_round_buffersize,
+	NULL, /* auvia_round_buffersize */
 	auvia_mappage,
 	auvia_get_props,
 	auvia_trigger_output,
@@ -600,6 +599,9 @@ auvia_set_params(void *addr, int setmode, int usemode,
 			} else
 				p->sw_code = ulinear8_to_alaw;
 			break;
+		case AUDIO_ENCODING_SLINEAR:
+		case AUDIO_ENCODING_ULINEAR:
+			break;
 		default:
 			return (EINVAL);
 		}
@@ -623,7 +625,7 @@ auvia_set_params(void *addr, int setmode, int usemode,
 int
 auvia_round_blocksize(void *addr, int blk)
 {
-	return (blk & -32);
+	return ((blk + 31) & -32);
 }
 
 
@@ -775,14 +777,6 @@ auvia_free(void *addr, void *ptr, int pool)
 	panic("auvia_free: trying to free unallocated memory");
 }
 
-
-size_t
-auvia_round_buffersize(void *addr, int direction, size_t size)
-{
-	return size;
-}
-
-
 paddr_t
 auvia_mappage(void *addr, void *mem, off_t off, int prot)
 {
@@ -822,10 +816,10 @@ auvia_build_dma_ops(struct auvia_softc *sc, struct auvia_softc_chan *ch,
 	int segs;
 
 	s = p->map->dm_segs[0].ds_addr;
-	l = ((char *)end - (char *)start);
-	segs = (l + blksize - 1) / blksize;
+	l = (vaddr_t)end - (vaddr_t)start;
+	segs = howmany(l, blksize);
 
-	if (segs > (ch->sc_dma_op_count)) {
+	if (segs > ch->sc_dma_op_count) {
 		/* if old list was too small, free it */
 		if (ch->sc_dma_ops)
 			auvia_free(sc, ch->sc_dma_ops, M_DEVBUF);
@@ -851,7 +845,7 @@ auvia_build_dma_ops(struct auvia_softc *sc, struct auvia_softc_chan *ch,
 
 	while (l) {
 		op->ptr = htole32(s);
-		l = l - blksize;
+		l = l - min(l, blksize);
 		/* if last block */
 		op->flags = htole32((l? AUVIA_DMAOP_FLAG : AUVIA_DMAOP_EOL) | blksize);
 		s += blksize;

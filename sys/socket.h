@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.49 2005/01/14 12:04:02 grange Exp $	*/
+/*	$OpenBSD: socket.h,v 1.52 2005/05/27 04:55:28 mcbride Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -66,6 +66,7 @@
 #define	SO_LINGER	0x0080		/* linger on close if data present */
 #define	SO_OOBINLINE	0x0100		/* leave received OOB data in line */
 #define	SO_REUSEPORT	0x0200		/* allow local address & port reuse */
+#define SO_JUMBO	0x0400		/* try to use jumbograms */
 
 /*
  * Additional options, not kept in so_options.
@@ -204,7 +205,7 @@ struct sockproto {
 #define	PF_CNT		AF_CNT
 #define	PF_IPX		AF_IPX		/* same format as AF_NS */
 #define PF_INET6	AF_INET6
-#define PF_RTIP		pseudo_AF_FTIP	/* same format as AF_INET */
+#define PF_RTIP		pseudo_AF_RTIP	/* same format as AF_INET */
 #define PF_PIP		pseudo_AF_PIP
 #define PF_ISDN		AF_ISDN
 #define PF_NATM		AF_NATM
@@ -309,11 +310,13 @@ struct sockcred {
  * PF_KEY - Key Management
  */
 #define NET_KEY_SADB_DUMP	1	/* return SADB */
-#define NET_KEY_MAXID		2
+#define NET_KEY_SPD_DUMP	2	/* return SPD */
+#define NET_KEY_MAXID		3
 
 #define CTL_NET_KEY_NAMES { \
 	{ 0, 0 }, \
 	{ "sadb_dump", CTLTYPE_STRUCT }, \
+	{ "spd_dump", CTLTYPE_STRUCT }, \
 }
 
 /*

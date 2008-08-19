@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.12 2005/01/05 18:42:28 fgsch Exp $	*/
+/*	$OpenBSD: psl.h,v 1.19 2005/06/29 07:17:22 deraadt Exp $	*/
 /*	$NetBSD: psl.h,v 1.20 2001/04/13 23:30:05 thorpej Exp $ */
 
 /*
@@ -44,36 +44,6 @@
 #ifndef _SPARC64_PSL_
 #define _SPARC64_PSL_
 
-/*
- * SPARC Process Status Register (in psl.h for hysterical raisins).  This
- * doesn't exist on the V9.
- *
- * The picture in the Sun manuals looks like this:
- *					     1 1
- *	 31   28 27   24 23   20 19	  14 3 2 11    8 7 6 5 4       0
- *	+-------+-------+-------+-----------+-+-+-------+-+-+-+---------+
- *	|  impl |  ver	|  icc	|  reserved |E|E|  pil	|S|P|E|	  CWP	|
- *	|	|	|n z v c|	    |C|F|	| |S|T|		|
- *	+-------+-------+-------+-----------+-+-+-------+-+-+-+---------+
- */
-
-#define PSR_IMPL	0xf0000000	/* implementation */
-#define PSR_VER		0x0f000000	/* version */
-#define PSR_ICC		0x00f00000	/* integer condition codes */
-#define PSR_N		0x00800000	/* negative */
-#define PSR_Z		0x00400000	/* zero */
-#define PSR_O		0x00200000	/* overflow */
-#define PSR_C		0x00100000	/* carry */
-#define PSR_EC		0x00002000	/* coprocessor enable */
-#define PSR_EF		0x00001000	/* FP enable */
-#define PSR_PIL		0x00000f00	/* interrupt level */
-#define PSR_S		0x00000080	/* supervisor (kernel) mode */
-#define PSR_PS		0x00000040	/* previous supervisor mode (traps) */
-#define PSR_ET		0x00000020	/* trap enable */
-#define PSR_CWP		0x0000001f	/* current window pointer */
-
-#define PSR_BITS "\20\16EC\15EF\10S\7PS\6ET"
-
 /* Interesting spl()s */
 #define PIL_SCSI	3
 #define PIL_FDSOFT	4
@@ -90,7 +60,7 @@
 #define PIL_SER		12
 #define PIL_STATCLOCK	14
 #define PIL_HIGH	15
-#define PIL_SCHED	PIL_CLOCK
+#define PIL_SCHED	PIL_STATCLOCK
 #define PIL_LOCK	PIL_HIGH
 
 /* 
@@ -172,6 +142,8 @@
 #define TSTATE_CCR		0xff00000000LL
 #define TSTATE_CCR_SHIFT	32
 
+/* Leftover SPARC V8 PSTATE stuff */
+#define PSR_ICC 0x00f00000
 #define PSRCC_TO_TSTATE(x)	(((int64_t)(x)&PSR_ICC)<<(TSTATE_CCR_SHIFT-19))
 #define TSTATECCR_TO_PSR(x)	(((x)&TSTATE_CCR)>>(TSTATE_CCR_SHIFT-19))
 
@@ -195,8 +167,8 @@
 
 #define TSTATE_BITS "\20\14IG\13MG\12CLE\11TLE\10\7MM\6RED\5PEF\4AM\3PRIV\2IE\1AG"
 
-#define TSTATE_KERN	((TSTATE_KERN)<<TSTATE_PSTATE_SHIFT)
-#define TSTATE_USER	((TSTATE_USER)<<TSTATE_PSTATE_SHIFT)
+#define TSTATE_KERN	((PSTATE_KERN)<<TSTATE_PSTATE_SHIFT)
+#define TSTATE_USER	((PSTATE_USER)<<TSTATE_PSTATE_SHIFT)
 /*
  * SPARC V9 VER version register.
  *
@@ -207,15 +179,15 @@
  *
  */
 
-#define VER_MANUF	0xffff000000000000LL
+#define VER_MANUF	0xffff000000000000ULL
 #define VER_MANUF_SHIFT	48
-#define VER_IMPL	0x0000ffff00000000LL
+#define VER_IMPL	0x0000ffff00000000ULL
 #define VER_IMPL_SHIFT	32
-#define VER_MASK	0x00000000ff000000LL
+#define VER_MASK	0x00000000ff000000ULL
 #define VER_MASK_SHIFT	24
-#define VER_MAXTL	0x000000000000ff00LL
+#define VER_MAXTL	0x000000000000ff00ULL
 #define VER_MAXTL_SHIFT	8
-#define VER_MAXWIN	0x000000000000001fLL
+#define VER_MAXWIN	0x000000000000001fULL
 
 /*
  * Here are a few things to help us transition between user and kernel mode:
@@ -405,8 +377,6 @@ extern __inline int name()						\
 
 SPL(spl0, 0)
 
-SPL(spllowersoftclock, 1)
-
 SPLHOLD(splsoftint, 1)
 #define	splsoftclock	splsoftint
 #define	splsoftnet	splsoftint
@@ -459,7 +429,6 @@ SPLHOLD(splhigh, PIL_HIGH)
 #ifdef SPLDEBUG
 
 #define	spl0()		spl0X(__FILE__, __LINE__)
-#define	spllowersoftclock() spllowersoftclockX(__FILE__, __LINE__)
 #define	splsoftint()	splsoftintX(__FILE__, __LINE__)
 #define	splausoft()	splausoftX(__FILE__, __LINE__)
 #define	splfdsoft()	splfdsoftX(__FILE__, __LINE__)

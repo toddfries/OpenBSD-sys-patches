@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.5 2005/03/15 16:11:38 henning Exp $	*/
+/*	$OpenBSD: re.c,v 1.14.2.1 2006/05/23 00:26:03 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -146,8 +146,6 @@
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
-
-/*#define RE_CSUM_OFFLOAD */
 
 #include <dev/ic/rtl81x9reg.h>
 
@@ -876,15 +874,7 @@ re_attach_common(struct rl_softc *sc)
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = re_ioctl;
-#ifdef VLANXXX
-	sc->ethercom.ec_capabilities |=
-	    ETHERCAP_VLAN_MTU | ETHERCAP_VLAN_HWTAGGING;
-#endif
 	ifp->if_start = re_start;
-#ifdef RE_CSUM_OFFLOAD
-	ifp->if_capabilities |=
-	    IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
-#endif
 	ifp->if_watchdog = re_watchdog;
 	ifp->if_init = re_init;
 	if (sc->rl_type == RL_8169)
@@ -893,6 +883,17 @@ re_attach_common(struct rl_softc *sc)
 		ifp->if_baudrate = 100000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#ifdef RE_CSUM_OFFLOAD
+	ifp->if_capabilities |= IFCAP_CSUM_IPv4|IFCAP_CSUM_TCPv4|
+				IFCAP_CSUM_UDPv4;
+#endif
+
+#ifdef RE_VLAN
+        ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 	timeout_set(&sc->timer_handle, re_tick, sc);
 
@@ -1065,7 +1066,7 @@ re_rxeof(sc)
 	struct ifnet		*ifp;
 	int			i, total_len;
 	struct rl_desc		*cur_rx;
-#ifdef VLANXXX
+#ifdef RE_VLAN
 	struct m_tag		*mtag;
 #endif
 	u_int32_t		rxstat, rxvlan;
@@ -1190,34 +1191,21 @@ re_rxeof(sc)
 		ifp->if_ipackets++;
 		m->m_pkthdr.rcvif = ifp;
 
-		/* Do RX checksumming if enabled */
+		/* Do RX checksumming */
 
-#ifdef RE_CSUM_OFFLOAD
-		if (ifp->if_capenable & IFCAP_CSUM_IPv4) {
-
-			/* Check IP header checksum */
-			if (rxstat & RL_RDESC_STAT_PROTOID)
-				m->m_pkthdr.csum_flags |= M_CSUM_IPv4;;
-			if (rxstat & RL_RDESC_STAT_IPSUMBAD)
-                                m->m_pkthdr.csum_flags |= M_CSUM_IPv4_BAD;
-		}
+		/* Check IP header checksum */
+		if ((rxstat & RL_RDESC_STAT_PROTOID) &&
+		    !(rxstat & RL_RDESC_STAT_IPSUMBAD))
+			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
 		/* Check TCP/UDP checksum */
-		if (RL_TCPPKT(rxstat) &&
-		    (ifp->if_capenable & IFCAP_CSUM_TCPv4)) {
-			m->m_pkthdr.csum_flags |= M_CSUM_TCPv4;
-			if (rxstat & RL_RDESC_STAT_TCPSUMBAD)
-				m->m_pkthdr.csum_flags |= M_CSUM_TCP_UDP_BAD;
-		}
-		if (RL_UDPPKT(rxstat) &&
-		    (ifp->if_capenable & IFCAP_CSUM_UDPv4)) {
-			m->m_pkthdr.csum_flags |= M_CSUM_UDPv4;
-			if (rxstat & RL_RDESC_STAT_UDPSUMBAD)
-				m->m_pkthdr.csum_flags |= M_CSUM_TCP_UDP_BAD;
-		}
-#endif
+		if ((RL_TCPPKT(rxstat) &&
+		    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
+		    (RL_UDPPKT(rxstat) &&
+		    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
+			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 
-#ifdef VLANXXX
+#ifdef RE_VLAN
 		if (rxvlan & RL_RDESC_VLANCTL_TAG) {
 			mtag = m_tag_get(PACKET_TAG_VLAN, sizeof(u_int),
 			    M_NOWAIT);
@@ -1327,52 +1315,6 @@ re_tick(xsc)
 	timeout_add(&sc->timer_handle, hz);
 }
 
-#ifdef DEVICE_POLLING
-void
-re_poll (struct ifnet *ifp, enum poll_cmd cmd, int count)
-{
-	struct rl_softc *sc = ifp->if_softc;
-
-	RL_LOCK(sc);
-	if (!(ifp->if_capenable & IFCAP_POLLING)) {
-		ether_poll_deregister(ifp);
-		cmd = POLL_DEREGISTER;
-	}
-	if (cmd == POLL_DEREGISTER) { /* final call, enable interrupts */
-		CSR_WRITE_2(sc, RL_IMR, RL_INTRS_CPLUS);
-		goto done;
-	}
-
-	sc->rxcycles = count;
-	re_rxeof(sc);
-	re_txeof(sc);
-
-	if (!IFQ_IS_EMPTY(&ifp->if_snd))
-		(*ifp->if_start)(ifp);
-
-	if (cmd == POLL_AND_CHECK_STATUS) { /* also check status register */
-		u_int16_t       status;
-
-		status = CSR_READ_2(sc, RL_ISR);
-		if (status == 0xffff)
-			goto done;
-		if (status)
-			CSR_WRITE_2(sc, RL_ISR, status);
-
-		/*
-		 * XXX check behaviour on receiver stalls.
-		 */
-
-		if (status & RL_ISR_SYSTEM_ERR) {
-			re_reset(sc);
-			re_init(ifp);
-		}
-	}
-done:
-	RL_UNLOCK(sc);
-}
-#endif /* DEVICE_POLLING */
-
 int
 re_intr(arg)
 	void			*arg;
@@ -1386,17 +1328,6 @@ re_intr(arg)
 
 	if (!(ifp->if_flags & IFF_UP))
 		return (0);
-
-#ifdef DEVICE_POLLING
-	if  (ifp->if_flags & IFF_POLLING)
-		goto done;
-	if ((ifp->if_capenable & IFCAP_POLLING) &&
-	    ether_poll_register(re_poll, ifp)) { /* ok, disable interrupts */
-		CSR_WRITE_2(sc, RL_IMR, 0x0000);
-		re_poll(ifp, 0, 1);
-		goto done;
-	}
-#endif /* DEVICE_POLLING */
 
 	for (;;) {
 
@@ -1435,10 +1366,6 @@ re_intr(arg)
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
 		(*ifp->if_start)(ifp);
 
-#ifdef DEVICE_POLLING
-done:
-#endif
-
 	return (claimed);
 }
 
@@ -1450,15 +1377,16 @@ re_encap(sc, m_head, idx)
 {
 	bus_dmamap_t		map;
 	int			error, i, curidx;
-#ifdef VLANXXX
+#ifdef RE_VLAN
 	struct m_tag		*mtag;
 #endif
 	struct rl_desc		*d;
-	u_int32_t		cmdstat, rl_flags;
+	u_int32_t		cmdstat, rl_flags = 0;
 
 	if (sc->rl_ldata.rl_tx_free <= 4)
 		return (EFBIG);
 
+#ifdef RE_CSUM_OFFLOAD
 	/*
 	 * Set up checksum offload. Note: checksum offload bits must
 	 * appear in all descriptors of a multi-descriptor transmit
@@ -1466,15 +1394,20 @@ re_encap(sc, m_head, idx)
 	 * chip. I'm not sure if this is a requirement or a bug.)
 	 */
 
-	rl_flags = 0;
+	/*
+	 * Set RL_TDESC_CMD_IPCSUM if any checksum offloading
+	 * is requested.  Otherwise, RL_TDESC_CMD_TCPCSUM/
+	 * RL_TDESC_CMD_UDPCSUM does not take affect.
+	 */
 
-#ifdef RE_CSUM_OFFLOAD
-	if (m_head->m_pkthdr.csum_flags & M_CSUM_IPv4)
+	if ((m_head->m_pkthdr.csum_flags &
+	    (M_IPV4_CSUM_OUT|M_TCPV4_CSUM_OUT|M_UDPV4_CSUM_OUT)) != 0) {
 		rl_flags |= RL_TDESC_CMD_IPCSUM;
-	if (m_head->m_pkthdr.csum_flags & M_CSUM_TCPv4)
-		rl_flags |= RL_TDESC_CMD_TCPCSUM;
-	if (m_head->m_pkthdr.csum_flags & M_CSUM_UDPv4)
-		rl_flags |= RL_TDESC_CMD_UDPCSUM;
+		if (m_head->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			rl_flags |= RL_TDESC_CMD_TCPCSUM;
+		if (m_head->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			rl_flags |= RL_TDESC_CMD_UDPCSUM;
+	}
 #endif
 
 	map = sc->rl_ldata.rl_tx_dmamap[*idx];
@@ -1544,7 +1477,7 @@ re_encap(sc, m_head, idx)
 	 * transmission attempt.
 	 */
 
-#ifdef VLANXXX
+#ifdef RE_VLAN
 	if (sc->ethercom.ec_nvlans &&
 	    (mtag = m_tag_find(m_head, PACKET_TAG_VLAN, NULL)) != NULL)
 		sc->rl_ldata.rl_tx_list[*idx].rl_vlanctl =
@@ -1652,22 +1585,12 @@ re_init(struct ifnet *ifp)
 	re_stop(sc);
 
 	/*
-	 * Enable C+ RX and TX mode, as well as VLAN stripping and
-	 * RX checksum offload. We must configure the C+ register
-	 * before all others.
+	 * Enable C+ RX and TX mode, as well as RX checksum offload.
+	 * We must configure the C+ register before all others.
 	 */
-#ifdef RE_CSUM_OFFLOAD
 	CSR_WRITE_2(sc, RL_CPLUS_CMD, RL_CPLUSCMD_RXENB|
 	    RL_CPLUSCMD_TXENB|RL_CPLUSCMD_PCI_MRW|
-	    RL_CPLUSCMD_VLANSTRIP|
-	    (ifp->if_capenable &
-	    (IFCAP_CSUM_IPv4 |IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4) ?
-	    RL_CPLUSCMD_RXCSUM_ENB : 0));
-#else
-	CSR_WRITE_2(sc, RL_CPLUS_CMD, RL_CPLUSCMD_RXENB|
-	    RL_CPLUSCMD_TXENB|RL_CPLUSCMD_PCI_MRW|
-	    RL_CPLUSCMD_VLANSTRIP);
-#endif
+	    RL_CPLUSCMD_RXCSUM_ENB);
 
 	/*
 	 * Init our MAC address.  Even though the chipset
@@ -1732,14 +1655,6 @@ re_init(struct ifnet *ifp)
 	 */
 	re_setmulti(sc);
 
-#ifdef DEVICE_POLLING
-	/*
-	 * Disable interrupts if we are polling.
-	 */
-	if (ifp->if_flags & IFF_POLLING)
-		CSR_WRITE_2(sc, RL_IMR, 0);
-	else	/* otherwise ... */
-#endif /* DEVICE_POLLING */
 	/*
 	 * Enable interrupts.
 	 */
@@ -1873,9 +1788,10 @@ re_ioctl(ifp, command, data)
 		}
 		break;
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU_JUMBO)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > RL_JUMBO_MTU)
 			error = EINVAL;
-		ifp->if_mtu = ifr->ifr_mtu;
+		else if (ifp->if_mtu != ifr->ifr_mtu)
+			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1951,9 +1867,6 @@ re_stop(sc)
 
 	timeout_del(&sc->timer_handle);
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-#ifdef DEVICE_POLLING
-	ether_poll_deregister(ifp);
-#endif /* DEVICE_POLLING */
 
 	CSR_WRITE_1(sc, RL_COMMAND, 0x00);
 	CSR_WRITE_2(sc, RL_IMR, 0x0000);

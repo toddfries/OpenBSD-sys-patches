@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa2x0_com.c,v 1.3 2005/01/04 02:08:41 drahn Exp $ */
+/*	$OpenBSD: pxa2x0_com.c,v 1.7 2005/07/18 00:50:19 uwe Exp $ */
 /*	$NetBSD: pxa2x0_com.c,v 1.4 2003/07/15 00:24:55 lukem Exp $	*/
 
 /*
@@ -48,34 +48,33 @@ __KERNEL_RCSID(0, "$NetBSD: pxa2x0_com.c,v 1.4 2003/07/15 00:24:55 lukem Exp $")
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/termios.h>
+#include <sys/tty.h>
 
 #include <machine/intr.h>
 #include <machine/bus.h>
 
-#include <arm/xscale/pxacomreg.h>
-#include <arm/xscale/pxacomvar.h>
+#include <dev/ic/comreg.h>
+#include <dev/ic/comvar.h>
+
+#define com_isr 8
+#define ISR_RECV	(ISR_RXPL | ISR_XMODE | ISR_RCVEIR)
 
 #include <arm/xscale/pxa2x0reg.h>
 #include <arm/xscale/pxa2x0var.h>
 
-static int	pxauart_match(struct device *, void *, void *);
-static void	pxauart_attach(struct device *, struct device *, void *);
-
-#ifdef __NetBSD__
-CFATTACH_DECL(pxauart, sizeof(struct com_softc),
-    pxauart_match, pxauart_attach, NULL, NULL);
-#else
-struct cfattach pxauart_ca = {
-        sizeof (struct com_softc), pxauart_match, pxauart_attach
-};
-	 
-struct cfdriver pxauart_cd = {
-	NULL, "pxauart", DV_DULL
-};
+#ifdef __zaurus__
+#include <zaurus/dev/zaurus_scoopvar.h>
 #endif
 
-static int
+int	pxauart_match(struct device *, void *, void *);
+void	pxauart_attach(struct device *, struct device *, void *);
+void	pxauart_power(int why, void *);
+
+struct cfattach com_pxaip_ca = {
+        sizeof (struct com_softc), pxauart_match, pxauart_attach
+};
+
+int
 pxauart_match(struct device *parent, void *cf, void *aux)
 {
 	struct pxaip_attach_args *pxa = aux;
@@ -124,7 +123,7 @@ pxauart_match(struct device *parent, void *cf, void *aux)
 	return (rv);
 }
 
-static void
+void
 pxauart_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct com_softc *sc = (struct com_softc *)self;
@@ -133,6 +132,7 @@ pxauart_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iot = &pxa2x0_a4x_bs_tag;	/* XXX: This sucks */
 	sc->sc_iobase = pxa->pxa_addr;
 	sc->sc_frequency = PXA2X0_COM_FREQ;
+	sc->sc_uarttype = COM_UART_PXA2X0;
 
 #if 0
 	if (com_is_console(sc->sc_iot, sc->sc_iobase, &sc->sc_ioh) == 0 &&
@@ -146,6 +146,38 @@ pxauart_attach(struct device *parent, struct device *self, void *aux)
 
 	com_attach_subr(sc);
 
-	pxa2x0_intr_establish(pxa->pxa_intr, IPL_SERIAL, comintr, sc,
-	    sc->sc_dev.dv_xname);
+	(void)pxa2x0_intr_establish(pxa->pxa_intr, IPL_TTY, comintr,
+	    sc, sc->sc_dev.dv_xname);
+
+	(void)powerhook_establish(&pxauart_power, sc);
+}
+
+void
+pxauart_power(int why, void *arg)
+{
+	struct com_softc *sc = arg;
+	bus_space_tag_t iot = sc->sc_iot;
+	bus_space_handle_t ioh = sc->sc_ioh;
+	struct tty *tp = sc->sc_tty;
+
+	switch (why) {
+	case PWR_SUSPEND:
+	case PWR_STANDBY:
+		if (sc->enabled && ISSET(sc->sc_hwflags, COM_HW_SIR))
+			scoop_set_irled(0);
+		break;
+	case PWR_RESUME:
+		if (sc->enabled) {
+			sc->sc_initialize = 1;
+			comparam(tp, &tp->t_termios);
+			bus_space_write_1(iot, ioh, com_ier, sc->sc_ier);
+
+			if (ISSET(sc->sc_hwflags, COM_HW_SIR)) {
+				scoop_set_irled(1);
+				bus_space_write_1(iot, ioh, com_isr,
+				    ISR_RECV);
+			}
+		}
+		break;
+	}
 }

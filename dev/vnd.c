@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.53 2005/01/05 06:38:15 tedu Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.56 2005/07/20 02:36:13 tedu Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -67,6 +67,7 @@
 #include <sys/errno.h>
 #include <sys/buf.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/ioctl.h>
 #include <sys/disklabel.h>
 #include <sys/device.h>
@@ -111,10 +112,13 @@ struct vndbuf {
 	struct buf	*vb_obp;
 };
 
-#define	getvndbuf()	\
-	((struct vndbuf *)malloc(sizeof(struct vndbuf), M_DEVBUF, M_WAITOK))
-#define	putvndbuf(vbp)	\
-	free((caddr_t)(vbp), M_DEVBUF)
+/*
+ * struct vndbuf allocator
+ */
+struct pool     vndbufpl;
+
+#define	getvndbuf()	pool_get(&vndbufpl, PR_WAITOK)
+#define	putvndbuf(vbp)	pool_put(&vndbufpl, vbp);
 
 struct vnd_softc {
 	struct device	 sc_dev;
@@ -127,7 +131,7 @@ struct vnd_softc {
 	struct ucred	*sc_cred;		/* credentials */
 	int		 sc_maxactive;		/* max # of active requests */
 	struct buf	 sc_tab;		/* transfer queue */
-	void		*sc_keyctx;		/* key context */
+	blf_ctx		*sc_keyctx;		/* key context */
 };
 
 /* sc_flags */
@@ -205,6 +209,10 @@ vndattach(num)
 	bzero(mem, size);
 	vnd_softc = (struct vnd_softc *)mem;
 	numvnd = num;
+
+	pool_init(&vndbufpl, sizeof(struct vndbuf), 0, 0, 0, "vndbufpl", NULL);
+	pool_setlowat(&vndbufpl, 16);
+	pool_sethiwat(&vndbufpl, 1024);
 }
 
 int
@@ -274,8 +282,7 @@ vndopen(dev, flags, mode, p)
 	sc->sc_dk.dk_openmask =
 	    sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
 
-	vndunlock(sc);
-	return (0);
+	error = 0;
 bad:
 	vndunlock(sc);
 	return (error);
@@ -836,7 +843,7 @@ vndioctl(dev, cmd, addr, flag, p)
 				return (error);
 			}
 
-			vnd->sc_keyctx = malloc(sizeof(blf_ctx), M_DEVBUF,
+			vnd->sc_keyctx = malloc(sizeof(*vnd->sc_keyctx), M_DEVBUF,
 			    M_WAITOK);
 			blf_key(vnd->sc_keyctx, key, vio->vnd_keylen);
 			bzero(key, vio->vnd_keylen);

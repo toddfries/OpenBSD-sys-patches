@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.58 2004/12/08 07:04:12 jsg Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.71 2005/07/30 04:25:00 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -594,8 +594,10 @@ int ti_alloc_jumbo_mem(sc)
 {
 	caddr_t ptr, kva;
 	bus_dma_segment_t seg;
-	int i, rseg;
+	int i, rseg, state, error;
 	struct ti_jpool_entry *entry;
+
+	state = error = 0;
 
 	/* Grab a big chunk o' storage. */
 	if (bus_dmamem_alloc(sc->sc_dmatag, TI_JMEM, PAGE_SIZE, 0,
@@ -603,29 +605,33 @@ int ti_alloc_jumbo_mem(sc)
 		printf("%s: can't alloc rx buffers\n", sc->sc_dv.dv_xname);
 		return (ENOBUFS);
 	}
+
+	state = 1;
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg, TI_JMEM, &kva,
 	    BUS_DMA_NOWAIT)) {
 		printf("%s: can't map dma buffers (%d bytes)\n",
 		    sc->sc_dv.dv_xname, TI_JMEM);
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		return (ENOBUFS);
+		error = ENOBUFS;
+		goto out;
 	}
+
+	state = 2;
 	if (bus_dmamap_create(sc->sc_dmatag, TI_JMEM, 1, TI_JMEM, 0,
 	    BUS_DMA_NOWAIT, &sc->ti_cdata.ti_rx_jumbo_map)) {
 		printf("%s: can't create dma map\n", sc->sc_dv.dv_xname);
-		bus_dmamem_unmap(sc->sc_dmatag, kva, TI_JMEM);
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		return (ENOBUFS);
+		error = ENOBUFS;
+		goto out;
 	}
+
+	state = 3;
 	if (bus_dmamap_load(sc->sc_dmatag, sc->ti_cdata.ti_rx_jumbo_map, kva,
 	    TI_JMEM, NULL, BUS_DMA_NOWAIT)) {
 		printf("%s: can't load dma map\n", sc->sc_dv.dv_xname);
-		bus_dmamap_destroy(sc->sc_dmatag,
-				   sc->ti_cdata.ti_rx_jumbo_map);
-		bus_dmamem_unmap(sc->sc_dmatag, kva, TI_JMEM);
-		bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
-		return (ENOBUFS);
+		error = ENOBUFS;
+		goto out;
 	}
+
+	state = 4;
 	sc->ti_cdata.ti_jumbo_buf = (caddr_t)kva;
 
 	SLIST_INIT(&sc->ti_jfree_listhead);
@@ -643,22 +649,35 @@ int ti_alloc_jumbo_mem(sc)
 		entry = malloc(sizeof(struct ti_jpool_entry),
 			       M_DEVBUF, M_NOWAIT);
 		if (entry == NULL) {
-			bus_dmamap_unload(sc->sc_dmatag,
-					  sc->ti_cdata.ti_rx_jumbo_map);
-			bus_dmamap_destroy(sc->sc_dmatag,
-					   sc->ti_cdata.ti_rx_jumbo_map);
-			bus_dmamem_unmap(sc->sc_dmatag, kva, TI_JMEM);
-			bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
 			sc->ti_cdata.ti_jumbo_buf = NULL;
 			printf("%s: no memory for jumbo buffer queue\n",
 			    sc->sc_dv.dv_xname);
-			return(ENOBUFS);
+			error = ENOBUFS;
+			goto out;
 		}
 		entry->slot = i;
 		SLIST_INSERT_HEAD(&sc->ti_jfree_listhead, entry, jpool_entries);
 	}
-
-	return(0);
+out:
+	if (error != 0) {
+		switch (state) {
+		case 4:
+			bus_dmamap_unload(sc->sc_dmatag,
+			    sc->ti_cdata.ti_rx_jumbo_map);
+		case 3:
+			bus_dmamap_destroy(sc->sc_dmatag,
+			    sc->ti_cdata.ti_rx_jumbo_map);
+		case 2:
+			bus_dmamem_unmap(sc->sc_dmatag, kva, TI_JMEM);
+		case 1:
+			bus_dmamem_free(sc->sc_dmatag, &seg, rseg);
+			break;
+		default:
+			break;
+		}
+	}
+ 
+	return (error);
 }
 
 /*
@@ -671,12 +690,8 @@ void *ti_jalloc(sc)
 
 	entry = SLIST_FIRST(&sc->ti_jfree_listhead);
 
-	if (entry == NULL) {
-#ifdef TI_VERBOSE
-		printf("%s: no free jumbo buffers\n", sc->sc_dv.dv_xname);
-#endif
-		return(NULL);
-	}
+	if (entry == NULL)
+		return (NULL);
 
 	SLIST_REMOVE_HEAD(&sc->ti_jfree_listhead, jpool_entries);
 	SLIST_INSERT_HEAD(&sc->ti_jinuse_listhead, entry, jpool_entries);
@@ -858,7 +873,7 @@ int ti_newbuf_jumbo(sc, i, m)
 	struct ti_rx_desc	*r;
 
 	if (m == NULL) {
-		caddr_t			*buf = NULL;
+		caddr_t			buf = NULL;
 
 		/* Allocate the mbuf. */
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
@@ -873,13 +888,8 @@ int ti_newbuf_jumbo(sc, i, m)
 		}
 
 		/* Attach the buffer to the mbuf. */
-		m_new->m_data = m_new->m_ext.ext_buf = (void *)buf;
-		m_new->m_flags |= M_EXT;
-		m_new->m_len = m_new->m_pkthdr.len =
-		    m_new->m_ext.ext_size = ETHER_MAX_LEN_JUMBO;
-		m_new->m_ext.ext_free = ti_jfree;
-		m_new->m_ext.ext_arg = sc;
-		MCLINITREFERENCE(m_new);
+		m_new->m_len = m_new->m_pkthdr.len = ETHER_MAX_LEN_JUMBO;
+		MEXTADD(m_new, buf, ETHER_MAX_LEN_JUMBO, 0, ti_jfree, sc);
 	} else {
 		m_new = m;
 		m_new->m_data = m_new->m_ext.ext_buf;
@@ -1056,7 +1066,7 @@ int ti_init_tx_ring(sc)
 	SLIST_INIT(&sc->ti_tx_map_listhead);
 	for (i = 0; i < TI_TX_RING_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmatag, ETHER_MAX_LEN_JUMBO,
-		    TI_NTXSEG, MCLBYTES, 0, BUS_DMA_NOWAIT, &dmamap))
+		    TI_NTXSEG, ETHER_MAX_LEN_JUMBO, 0, BUS_DMA_NOWAIT, &dmamap))
 			return(ENOBUFS);
 
 		entry = malloc(sizeof(*entry), M_DEVBUF, M_NOWAIT);
@@ -1242,6 +1252,7 @@ int ti_chipinit(sc)
 {
 	u_int32_t		cacheline;
 	u_int32_t		pci_writemax = 0;
+	u_int32_t		chip_rev;
 
 	/* Initialize link to down state. */
 	sc->ti_linkstat = TI_EV_CODE_LINK_DOWN;
@@ -1266,7 +1277,8 @@ int ti_chipinit(sc)
 	TI_SETBIT(sc, TI_CPU_STATE, TI_CPUSTATE_HALT);
 
 	/* Figure out the hardware revision. */
-	switch(CSR_READ_4(sc, TI_MISC_HOST_CTL) & TI_MHC_CHIP_REV_MASK) {
+	chip_rev = CSR_READ_4(sc, TI_MISC_HOST_CTL) & TI_MHC_CHIP_REV_MASK;
+	switch(chip_rev) {
 	case TI_REV_TIGON_I:
 		sc->ti_hwrev = TI_HWREV_TIGON;
 		break;
@@ -1274,14 +1286,16 @@ int ti_chipinit(sc)
 		sc->ti_hwrev = TI_HWREV_TIGON_II;
 		break;
 	default:
-		printf("%s: unsupported chip revision\n", sc->sc_dv.dv_xname);
+		printf("\n");
+		printf("%s: unsupported chip revision: %x\n",
+		    chip_rev, sc->sc_dv.dv_xname);
 		return(ENODEV);
 	}
 
 	/* Do special setup for Tigon 2. */
 	if (sc->ti_hwrev == TI_HWREV_TIGON_II) {
 		TI_SETBIT(sc, TI_CPU_CTL_B, TI_CPUSTATE_HALT);
-		TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_SRAM_BANK_256K);
+		TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_SRAM_BANK_512K);
 		TI_SETBIT(sc, TI_MISC_CONF, TI_MCR_SRAM_SYNCHRONOUS);
 	}
 
@@ -1445,9 +1459,6 @@ int ti_gibinit(sc)
 	rcb->ti_max_len = ETHER_MAX_LEN;
 	rcb->ti_flags = 0;
 	rcb->ti_flags |= TI_RCB_FLAG_IP_CKSUM | TI_RCB_FLAG_NO_PHDR_CKSUM;
-#if NVLAN > 0
-	rcb->ti_flags |= TI_RCB_FLAG_VLAN_ASSIST;
-#endif
 
 	/* Set up the jumbo receive ring. */
 	rcb = &sc->ti_rdata->ti_info.ti_jumbo_rx_rcb;
@@ -1455,9 +1466,6 @@ int ti_gibinit(sc)
 	rcb->ti_max_len = ETHER_MAX_LEN_JUMBO;
 	rcb->ti_flags = 0;
 	rcb->ti_flags |= TI_RCB_FLAG_IP_CKSUM | TI_RCB_FLAG_NO_PHDR_CKSUM;
-#if NVLAN > 0
-	rcb->ti_flags |= TI_RCB_FLAG_VLAN_ASSIST;
-#endif
 
 	/*
 	 * Set up the mini ring. Only activated on the
@@ -1472,9 +1480,6 @@ int ti_gibinit(sc)
 	else
 		rcb->ti_flags = 0;
 	rcb->ti_flags |= TI_RCB_FLAG_IP_CKSUM | TI_RCB_FLAG_NO_PHDR_CKSUM;
-#if NVLAN > 0
-	rcb->ti_flags |= TI_RCB_FLAG_VLAN_ASSIST;
-#endif
 
 	/*
 	 * Set up the receive return ring.
@@ -1519,11 +1524,7 @@ int ti_gibinit(sc)
 	TI_RING_DMASYNC(sc, ti_info, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 
 	/* Set up tuneables */
-	if (ifp->if_mtu > ETHER_MAX_LEN)
-		CSR_WRITE_4(sc, TI_GCR_RX_COAL_TICKS,
-		    (sc->ti_rx_coal_ticks / 10));
-	else
-		CSR_WRITE_4(sc, TI_GCR_RX_COAL_TICKS, sc->ti_rx_coal_ticks);
+	CSR_WRITE_4(sc, TI_GCR_RX_COAL_TICKS, (sc->ti_rx_coal_ticks / 10));
 	CSR_WRITE_4(sc, TI_GCR_TX_COAL_TICKS, sc->ti_tx_coal_ticks);
 	CSR_WRITE_4(sc, TI_GCR_STAT_TICKS, sc->ti_stat_ticks);
 	CSR_WRITE_4(sc, TI_GCR_RX_MAX_COAL_BD, sc->ti_rx_max_coal_bds);
@@ -1575,8 +1576,6 @@ ti_attach(parent, self, aux)
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
-	bus_addr_t iobase;
-	bus_size_t iosize;
 	bus_dma_segment_t seg;
 	int s, rseg;
 	u_int32_t command;
@@ -1589,29 +1588,19 @@ ti_attach(parent, self, aux)
 	 * Map control/status registers.
 	 */
 	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_MASTER_ENABLE;
+	command |= PCI_COMMAND_MEM_ENABLE;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf("%s: failed to enable memory mapping!\n",
-		    sc->sc_dv.dv_xname);
-		free(sc, M_DEVBUF);
-		goto fail;
-	}
-	if (pci_mem_find(pc, pa->pa_tag, TI_PCI_LOMEM, &iobase, &iosize, NULL)) {
-		printf(": can't find mem space\n");
-		goto fail;
-	}
-	if (bus_space_map(pa->pa_memt, iobase, iosize, 0, &sc->ti_bhandle)) {
-		printf(": can't map mem space\n");
-		goto fail;
-	}
-	sc->ti_btag = pa->pa_memt;
+	if (pci_mapreg_map(pa, TI_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->ti_btag, &sc->ti_bhandle, NULL, NULL, 0)) {
+ 		printf(": can't map mem space\n");
+		goto fail_1;
+ 	}
 
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
-		goto fail;
+		goto fail_1;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->ti_intrhand = pci_intr_establish(pc, ih, IPL_NET, ti_intr, sc,
@@ -1621,7 +1610,7 @@ ti_attach(parent, self, aux)
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
-		goto fail;
+		goto fail_1;
 	}
 
 	if (ti_chipinit(sc)) {
@@ -1730,13 +1719,15 @@ ti_attach(parent, self, aux)
 	ifp->if_ioctl = ti_ioctl;
 	ifp->if_start = ti_start;
 	ifp->if_watchdog = ti_watchdog;
-#if NVLAN >0
-	ifp->if_capabilities |= IFCAP_VLAN_MTU | IFCAP_VLAN_HWTAGGING;
-#endif
-
 	IFQ_SET_MAXLEN(&ifp->if_snd, TI_TX_RING_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dv.dv_xname, ifp->if_xname, IFNAMSIZ);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 	/* Set up ifmedia support. */
 	ifmedia_init(&sc->ifmedia, IFM_IMASK, ti_ifmedia_upd, ti_ifmedia_sts);
@@ -1774,11 +1765,13 @@ ti_attach(parent, self, aux)
 	ether_ifattach(ifp);
 
 	shutdownhook_establish(ti_shutdown, sc);
+	return;
 
 fail:
-	splx(s);
+	pci_intr_disestablish(pc, sc->ti_intrhand);
 
-	return;
+fail_1:
+	splx(s);
 }
 
 /*
@@ -1804,10 +1797,6 @@ void ti_rxeof(sc)
 		struct ti_rx_desc	*cur_rx;
 		u_int32_t		rxidx;
 		struct mbuf		*m = NULL;
-#if NVLAN > 0
-		u_int16_t		vlan_tag = 0;
-		int			have_tag = 0;
-#endif
 		int			sumflags = 0;
 #ifdef TI_CSUM_OFFLOAD
 		struct ip		*ip;
@@ -1818,13 +1807,6 @@ void ti_rxeof(sc)
 		    &sc->ti_rdata->ti_rx_return_ring[sc->ti_rx_saved_considx];
 		rxidx = cur_rx->ti_idx;
 		TI_INC(sc->ti_rx_saved_considx, TI_RETURN_RING_CNT);
-
-#if NVLAN > 0
-		if (cur_rx->ti_flags & TI_BDFLAG_VLAN_TAG) {
-			have_tag = 1;
-			vlan_tag = cur_rx->ti_vlan_tag & 0xfff;
-		}
-#endif
 
 		if (cur_rx->ti_flags & TI_BDFLAG_JUMBO_RING) {
 			TI_INC(sc->ti_jumbo, TI_JUMBO_RX_RING_CNT);
@@ -1901,23 +1883,9 @@ void ti_rxeof(sc)
 
 		if ((cur_rx->ti_ip_cksum ^ 0xffff) == 0)
 			sumflags |= M_IPV4_CSUM_IN_OK;
-		else
-			sumflags |= M_IPV4_CSUM_IN_BAD;
-		m->m_pkthdr.csum = sumflags;
+		m->m_pkthdr.csum_flags = sumflags;
 		sumflags = 0;
 
-#if NVLAN > 0
-		/*
-		 * If we received a packet with a vlan tag, pass it
-		 * to vlan_input() instead of ether_input().
-		 */
-		if (have_tag) {
-			if (vlan_input_tag(m, vlan_tag) < 0)
-				ifp->if_data.ifi_noproto++;
-			have_tag = vlan_tag = 0;
-			continue;
-		}
-#endif
 		ether_input_mbuf(ifp, m);
 	}
 
@@ -2139,7 +2107,7 @@ int ti_encap_tigon1(sc, m_head, txidx)
 #if NVLAN > 0
 		if (ifv != NULL) {
 			txdesc.ti_flags |= TI_BDFLAG_VLAN_TAG;
-			txdesc.ti_vlan_tag = ifv->ifv_tag & 0xfff;
+			txdesc.ti_vlan_tag = ifv->ifv_tag;
 		}
 #endif
 
@@ -2227,7 +2195,7 @@ int ti_encap_tigon2(sc, m_head, txidx)
 #if NVLAN > 0
 		if (ifv != NULL) {
 			f->ti_flags |= TI_BDFLAG_VLAN_TAG;
-			f->ti_vlan_tag = ifv->ifv_tag & 0xfff;
+			f->ti_vlan_tag = ifv->ifv_tag;
 		} else {
 			f->ti_vlan_tag = 0;
 		}
@@ -2362,8 +2330,8 @@ void ti_init2(sc)
 
 	/* Specify MTU and interface index. */
 	CSR_WRITE_4(sc, TI_GCR_IFINDEX, sc->sc_dv.dv_unit);
-	CSR_WRITE_4(sc, TI_GCR_IFMTU, ifp->if_mtu +
-	    ETHER_HDR_LEN + ETHER_CRC_LEN);
+	CSR_WRITE_4(sc, TI_GCR_IFMTU,
+		ETHER_MAX_LEN_JUMBO + ETHER_VLAN_ENCAP_LEN);
 	TI_DO_CMD(TI_CMD_UPDATE_GENCOM, 0, 0);
 
 	/* Load our MAC address. */
@@ -2395,8 +2363,7 @@ void ti_init2(sc)
 		panic("not enough mbufs for rx ring");
 
 	/* Init jumbo RX ring. */
-	if (ifp->if_mtu > ETHER_MAX_LEN)
-		ti_init_rx_ring_jumbo(sc);
+	ti_init_rx_ring_jumbo(sc);
 
 	/*
 	 * If this is a Tigon 2, we can also configure the
@@ -2584,12 +2551,10 @@ int ti_ioctl(ifp, command, data)
 		}
 		break;
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU_JUMBO) {
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU_JUMBO)
 			error = EINVAL;
-		} else {
+		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
-			ti_init(sc);
-		}
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -2675,6 +2640,8 @@ void ti_stop(sc)
 
 	ifp = &sc->arpcom.ac_if;
 
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	/* Disable host interrupts. */
 	CSR_WRITE_4(sc, TI_MB_HOSTINTR, 1);
 	/*
@@ -2703,8 +2670,6 @@ void ti_stop(sc)
 	sc->ti_return_prodidx.ti_idx = 0;
 	sc->ti_tx_considx.ti_idx = 0;
 	sc->ti_tx_saved_considx = TI_TXCONS_UNSET;
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	return;
 }

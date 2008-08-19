@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_sn.c,v 1.35 2005/01/04 19:53:37 brad Exp $        */
+/*    $OpenBSD: if_sn.c,v 1.37 2005/07/23 23:28:58 martin Exp $        */
 /*    $NetBSD: if_sn.c,v 1.13 1997/04/25 03:40:10 briggs Exp $        */
 
 /*
@@ -1094,7 +1094,7 @@ sonic_read(sc, pkt, len)
 
 #ifdef SNDEBUG
 	{
-		printf("%s: rcvd 0x%p len=%d type=0x%x from %s",
+		printf("%s: rcvd %p len=%d type=0x%x from %s",
 		    sc->sc_dev.dv_xname, et, len, htons(et->ether_type),
 		    ether_sprintf(et->ether_shost));
 		printf(" (to %s)\n", ether_sprintf(et->ether_dhost));
@@ -1183,7 +1183,7 @@ void
 sn_get_enaddr(t, h, o, dst)
 	bus_space_tag_t	t;
 	bus_space_handle_t h;
-	vm_offset_t o;
+	bus_addr_t o;
 	u_char *dst;
 {
 	int	i, do_bbr;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: an.c,v 1.40 2005/02/04 01:07:39 kurt Exp $	*/
+/*	$OpenBSD: an.c,v 1.42 2005/06/20 22:42:29 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -43,7 +43,7 @@
  */
 
 /*
- * The Aironet 4500/4800 series cards some in PCMCIA, ISA and PCI form.
+ * The Aironet 4500/4800 series cards come in PCMCIA, ISA and PCI form.
  * This driver supports all three device types (PCI devices are supported
  * through an extra PCI shim: /sys/pci/if_an_p.c). ISA devices can be
  * supported either using hard-coded IO port/IRQ settings or via Plug
@@ -55,7 +55,6 @@
  * device and a PCMCIA to ISA or PCMCIA to PCI adapter card. There are
  * a couple of important differences though:
  *
- * - Lucent doesn't currently offer a PCI card, however Aironet does
  * - Lucent ISA card looks to the host like a PCMCIA controller with
  *   a PCMCIA WaveLAN card inserted. This means that even desktop
  *   machines need to be configured with PCMCIA support in order to
@@ -71,9 +70,7 @@
  * programmed for PCMCIA operation), both Vpp1 and Vpp2 have to be
  * set to 5 volts. FreeBSD by default doesn't set the Vpp voltages,
  * which leaves the card in ISA/PCI mode, which prevents it from
- * being activated as an PCMCIA device. Consequently, /sys/pccard/pccard.c
- * has to be patched slightly in order to enable the Vpp voltages in
- * order to make the Aironet PCMCIA cards work.
+ * being activated as an PCMCIA device.
  *
  * Note that some PCMCIA controller software packages for Windows NT
  * fail to set the voltages as well.
@@ -117,6 +114,8 @@
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
+
+#include <net80211/ieee80211_var.h>
 
 #include "bpfilter.h"
 #if NBPFILTER > 0
@@ -175,7 +174,8 @@ int
 an_attach(sc)
 	struct an_softc *sc;
 {
-	struct ifnet	*ifp = &sc->sc_arpcom.ac_if;
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = &ic->ic_if;
 
 	sc->an_gone = 0;
 	sc->an_associated = 0;
@@ -226,9 +226,9 @@ an_attach(sc)
 	}
 
 	bcopy((char *)&sc->an_caps.an_oemaddr,
-	   (char *)&sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
+	   (char *)&sc->sc_ic.ic_ac.ac_enaddr, ETHER_ADDR_LEN);
 
-	printf(": address %6s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
+	printf(": address %6s\n", ether_sprintf(sc->sc_ic.ic_ac.ac_enaddr));
 
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
@@ -288,7 +288,7 @@ an_attach(sc)
 	ether_ifattach(ifp);
 	timeout_set(&sc->an_stat_ch, an_stats_update, sc);
 #if NBPFILTER > 0
-	BPFATTACH(&sc->sc_arpcom.ac_if.if_bpf, ifp, DLT_EN10MB,
+	BPFATTACH(&sc->sc_ic.ic_ac.ac_if.if_bpf, ifp, DLT_EN10MB,
 	    sizeof(struct ether_header));
 #endif
 
@@ -304,7 +304,8 @@ void
 an_rxeof(sc)
 	struct an_softc	 *sc;
 {
-	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
+	struct ieee80211com	*ic = &sc->sc_ic;
+	struct ifnet		*ifp = &ic->ic_if;
 	struct ether_header	*eh;
 #ifdef ANCACHE
 	struct an_rxframe	rx_frame;
@@ -391,10 +392,9 @@ an_txeof(sc, status)
 	struct an_softc	*sc;
 	int		status;
 {
-	struct ifnet	*ifp;
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = &ic->ic_if;
 	int		id;
-
-	ifp = &sc->sc_arpcom.ac_if;
 
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -424,14 +424,12 @@ void
 an_stats_update(xsc)
 	void			*xsc;
 {
-	struct an_softc		*sc;
-	struct ifnet		*ifp;
+	struct an_softc         *sc = xsc;
+	struct ieee80211com	*ic = &sc->sc_ic;
+	struct ifnet		*ifp = &ic->ic_if;
 	int			s;
 
 	s = splimp();
-
-	sc = xsc;
-	ifp = &sc->sc_arpcom.ac_if;
 
 	sc->an_status.an_type = AN_RID_STATUS;
 	sc->an_status.an_len = sizeof(struct an_ltv_status);
@@ -457,16 +455,13 @@ int
 an_intr(xsc)
 	void	*xsc;
 {
-	struct an_softc		*sc;
-	struct ifnet		*ifp;
+	struct an_softc		*sc = (struct an_softc*)xsc;
+	struct ieee80211com	*ic = &sc->sc_ic;
+	struct ifnet		*ifp = &ic->ic_if;
 	u_int16_t		status;
-
-	sc = (struct an_softc*)xsc;
 
 	if (sc->an_gone)
 		return 0;
-
-	ifp = &sc->sc_arpcom.ac_if;
 
 	if (!(ifp->if_flags & IFF_UP)) {
 		CSR_WRITE_2(sc, AN_EVENT_ACK, 0xFFFF);
@@ -876,19 +871,18 @@ an_setdef(sc, areq)
 	struct an_softc		*sc;
 	struct an_req		*areq;
 {
-	struct ifnet		*ifp;
+	struct ieee80211com	*ic = &sc->sc_ic;
+	struct ifnet		*ifp = &ic->ic_if;
 	struct an_ltv_genconfig	*cfg;
 	struct an_ltv_ssidlist	*ssid;
 	struct an_ltv_aplist	*ap;
 	struct an_ltv_gen	*sp;
 
-	ifp = &sc->sc_arpcom.ac_if;
-
 	switch (areq->an_type) {
 	case AN_RID_GENCONFIG:
 		cfg = (struct an_ltv_genconfig *)areq;
 		bcopy((char *)&cfg->an_macaddr,
-		    (char *)&sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
+		    (char *)&sc->sc_ic.ic_ac.ac_enaddr, ETHER_ADDR_LEN);
 		bcopy((char *)&cfg->an_macaddr, LLADDR(ifp->if_sadl),
 		    ETHER_ADDR_LEN);
 
@@ -1003,7 +997,7 @@ an_ioctl(ifp, command, data)
 		return(ENODEV);
 	}
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
+	if ((error = ether_ioctl(ifp, &sc->sc_ic.ic_ac, command, data)) > 0) {
 		splx(s);
 		return error;
 	}
@@ -1015,7 +1009,7 @@ an_ioctl(ifp, command, data)
 #ifdef INET
 		case AF_INET:
 			an_init(sc);
-			arp_ifinit(&sc->sc_arpcom, ifa);
+			arp_ifinit(&sc->sc_ic.ic_ac, ifa);
 			break;
 #endif
 		default:
@@ -1127,7 +1121,8 @@ void
 an_init(sc)
 	struct an_softc *sc;
 {
-	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
+	struct ieee80211com	*ic = &sc->sc_ic;
+	struct ifnet		*ifp = &ic->ic_if;
 	struct an_ltv_ssidlist	ssid;
 	struct an_ltv_aplist	aplist;
 	struct an_ltv_genconfig	genconf;
@@ -1152,7 +1147,7 @@ an_init(sc)
 	}
 
 	/* Set our MAC address. */
-	bcopy((char *)&sc->sc_arpcom.ac_enaddr,
+	bcopy((char *)&sc->sc_ic.ic_ac.ac_enaddr,
 	    (char *)&sc->an_config.an_macaddr, ETHER_ADDR_LEN);
 
 	if (ifp->if_flags & IFF_BROADCAST)
@@ -1314,13 +1309,12 @@ void
 an_stop(sc)
 	struct an_softc		*sc;
 {
-	struct ifnet		*ifp;
+	struct ieee80211com	*ic = &sc->sc_ic;
+	struct ifnet		*ifp = &ic->ic_if;
 	int			i;
 
 	if (sc->an_gone)
 		return;
-
-	ifp = &sc->sc_arpcom.ac_if;
 
 	an_cmd(sc, AN_CMD_FORCE_SYNCLOSS, 0);
 	CSR_WRITE_2(sc, AN_INT_EN, 0);
@@ -1366,7 +1360,7 @@ an_shutdown(self)
  * a small fixed cache.  The cache wraps if > MAX slots
  * used.  The cache may be zeroed out to start over.
  * Two simple filters exist to reduce computation:
- * 1. ip only (literally 0x800) which may be used
+ * 1. ip only (literally 0x800, ETHERTYPE_IP) which may be used
  * to ignore some packets.  It defaults to ip only.
  * it could be used to focus on broadcast, non-IP 802.11 beacons.
  * 2. multicast/broadcast only.  This may be used to
@@ -1431,7 +1425,7 @@ an_cache_store(sc, eh, m, rx_quality)
 {
 	static int cache_slot = 0;	/* use this cache entry */
 	static int wrapindex = 0;       /* next "free" cache entry */
-	int i, saanp = 0;
+	int i, type_ipv4 = 0;
 
 	/* filters:
 	 * 1. ip only
@@ -1439,11 +1433,11 @@ an_cache_store(sc, eh, m, rx_quality)
 	 * keep multicast only.
 	 */
 
-	if ((ntohs(eh->ether_type) == 0x800))
-		saanp = 1;
+	if ((ntohs(eh->ether_type) == ETHERTYPE_IP))
+		type_ipv4 = 1;
 
 	/* filter for ip packets only */
-	if (sc->an_cache_iponly && !saanp)
+	if (sc->an_cache_iponly && !type_ipv4)
 		return;
 
 	/* filter for broadcast/multicast only */
@@ -1512,7 +1506,7 @@ an_cache_store(sc, eh, m, rx_quality)
 	 *  .mac src
 	 *  .signal, etc.
 	 */
-	if (saanp) {
+	if (type_ipv4) {
 		struct ip *ip = (struct ip *)(mtod(m, char *) + ETHER_HDR_LEN);
 		sc->an_sigcache[cache_slot].ipsrc = ntohl(ip->ip_src.s_addr);
 	}

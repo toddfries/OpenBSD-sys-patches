@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.72 2005/03/09 11:14:38 markus Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.77 2005/08/02 11:05:44 markus Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -35,6 +35,10 @@
 #ifndef _NETINET_TCP_VAR_H_
 #define _NETINET_TCP_VAR_H_
 
+/*
+ * Kernel variables for tcp.
+ */
+
 struct sackblk {
 	tcp_seq start;		/* start seq no. of sack block */
 	tcp_seq end; 		/* end seq no. */
@@ -49,14 +53,20 @@ struct sackhole {
 };
 
 /*
- * Kernel variables for tcp.
+ * TCP sequence queue structures.
  */
+TAILQ_HEAD(tcpqehead, tcpqent);
+struct tcpqent {
+	TAILQ_ENTRY(tcpqent) tcpqe_q;
+	struct tcphdr	*tcpqe_tcp;
+	struct mbuf	*tcpqe_m;	/* mbuf contains packet */
+};
 
 /*
  * Tcp control block, one per tcp; fields:
  */
 struct tcpcb {
-	struct ipqehead segq;		/* sequencing queue */
+	struct tcpqehead t_segq;		/* sequencing queue */
 	struct timeout t_timer[TCPT_NTIMERS];	/* tcp timers */
 	short	t_state;		/* state of this connection */
 	short	t_rxtshift;		/* log(2) of rexmt exp. backoff */
@@ -85,6 +95,7 @@ struct tcpcb {
 #define TF_REASSLOCK	0x00080000	/* reassembling or draining */
 #define TF_LASTIDLE	0x00100000	/* no outstanding ACK on last send */
 #define TF_DEAD		0x00200000	/* dead and to-be-released */
+#define TF_PMTUD_PEND	0x00400000	/* Path MTU Discovery pending */
 
 	struct	mbuf *t_template;	/* skeletal packet for transmit */
 	struct	inpcb *t_inpcb;		/* back pointer to internet pcb */
@@ -176,8 +187,13 @@ struct tcpcb {
 /* pointer for syn cache entries*/
 	LIST_HEAD(, syn_cache) t_sc;	/* list of entries by this tcb */
 
-/* TUBA stuff */
-	caddr_t	t_tuba_pcb;		/* next level down pcb for TCP over z */
+/* Path-MTU Discovery Information */
+	u_int	t_pmtud_mss_acked;	/* MSS acked, lower bound for MTU */
+	u_int	t_pmtud_mtu_sent;	/* MTU used, upper bound for MTU */
+	tcp_seq	t_pmtud_th_seq;		/* TCP SEQ from ICMP payload */
+	u_int	t_pmtud_nextmtu;	/* Advertised Next-Hop MTU from ICMP */
+	u_short	t_pmtud_ip_len;		/* IP length from ICMP payload */
+	u_short	t_pmtud_ip_hl;		/* IP header length from ICMP payload */
 
 	int pf;
 
@@ -445,6 +461,12 @@ struct	tcpstat {
 	u_int64_t tcps_sc_retransmitted;/* # of retransmissions */
 
 	u_int64_t tcps_conndrained;	/* # of connections drained */
+
+	u_int64_t tcps_sack_recovery_episode;	/* SACK recovery episodes */
+	u_int64_t tcps_sack_rexmits;		/* SACK rexmit segments */
+	u_int64_t tcps_sack_rexmit_bytes;	/* SACK rexmit bytes */
+	u_int64_t tcps_sack_rcv_opts;		/* SACK options received */
+	u_int64_t tcps_sack_snd_opts;		/* SACK options sent */
 };
 
 /*
@@ -576,6 +598,7 @@ int	 tcp6_input(struct mbuf **, int *, int);
 void	 tcp_input(struct mbuf *, ...);
 int	 tcp_mss(struct tcpcb *, int);
 void	 tcp_mss_update(struct tcpcb *);
+u_int	 tcp_hdrsz(struct tcpcb *);
 void	 tcp_mtudisc(struct inpcb *, int);
 void	 tcp_mtudisc_increase(struct inpcb *, int);
 #ifdef INET6
@@ -587,7 +610,6 @@ struct tcpcb *
 void	 tcp_notify(struct inpcb *, int);
 int	 tcp_output(struct tcpcb *);
 void	 tcp_pulloutofband(struct socket *, u_int, struct mbuf *, int);
-void	 tcp_quench(struct inpcb *, int);
 int	 tcp_reass(struct tcpcb *, struct tcphdr *, struct mbuf *, int *);
 void	 tcp_rscale(struct tcpcb *, u_long);
 void	 tcp_respond(struct tcpcb *, caddr_t, struct mbuf *, tcp_seq,

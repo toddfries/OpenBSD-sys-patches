@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211.c,v 1.4 2005/02/17 18:28:05 reyk Exp $	*/
+/*	$OpenBSD: ieee80211.c,v 1.8 2005/05/28 12:01:53 reyk Exp $	*/
 /*	$NetBSD: ieee80211.c,v 1.19 2004/06/06 05:45:29 dyoung Exp $	*/
 
 /*-
@@ -155,6 +155,9 @@ ieee80211_ifattach(struct ifnet *ifp)
 #else
 	ether_ifattach(ifp, ic->ic_myaddr);
 #endif
+
+	ifp->if_output = ieee80211_output;
+
 #if NBPFILTER > 0
 	BPF_ATTACH(ifp, DLT_IEEE802_11,
 	    sizeof(struct ieee80211_frame_addr4), &ic->ic_rawbpf);
@@ -201,6 +204,10 @@ ieee80211_ifattach(struct ifnet *ifp)
 	if ((ic->ic_modecaps & (1<<ic->ic_curmode)) == 0)
 		ic->ic_curmode = IEEE80211_MODE_AUTO;
 	ic->ic_des_chan = IEEE80211_CHAN_ANYC;	/* any channel is ok */
+	ic->ic_scan_lock = IEEE80211_SCAN_UNLOCKED;
+
+	/* IEEE 802.11 defines a MTU >= 2290 */
+	ifp->if_capabilities |= IFCAP_VLAN_MTU;
 
 	ieee80211_setbasicrates(ic);
 	(void) ieee80211_setmode(ic, ic->ic_curmode);
@@ -797,6 +804,35 @@ ieee80211_setmode(struct ieee80211com *ic, enum ieee80211_phymode mode)
 	ic->ic_curmode = mode;
 	return 0;
 #undef N
+}
+
+enum ieee80211_phymode 
+ieee80211_next_mode(struct ifnet *ifp)
+{
+	struct ieee80211com *ic = (void *)ifp;
+
+	if (IFM_MODE(ic->ic_media.ifm_cur->ifm_media) != IFM_AUTO)
+		return (IEEE80211_MODE_AUTO);	/* Indicate a wrap around */
+
+	/*
+	 * Get the next supported mode
+	 */
+	for (++ic->ic_curmode;
+	    ic->ic_curmode <= IEEE80211_MODE_TURBO;
+	    ic->ic_curmode++) {
+		/* Wrap around and ignore turbo mode */
+		if (ic->ic_curmode >= IEEE80211_MODE_TURBO) {
+			ic->ic_curmode = IEEE80211_MODE_AUTO;
+			break;
+		}
+
+		if (ic->ic_modecaps & (1 << ic->ic_curmode))
+			break;
+	}
+
+	ieee80211_setmode(ic, ic->ic_curmode);
+
+	return (ic->ic_curmode);
 }
 
 /*

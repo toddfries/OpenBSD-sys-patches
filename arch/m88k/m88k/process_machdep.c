@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.1 2004/04/29 14:33:27 miod Exp $ */
+/*	$OpenBSD: process_machdep.c,v 1.3 2005/05/18 16:44:41 miod Exp $ */
 
 /*
  * Copyright (c) 1993 The Regents of the University of California.
@@ -67,9 +67,6 @@
 #include <machine/psl.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
-#if 0
-#include <machine/frame.h>
-#endif
 #include <sys/ptrace.h>
 
 int
@@ -79,23 +76,6 @@ process_read_regs(p, regs)
 {
 	bcopy((caddr_t)USER_REGS(p), (caddr_t)regs, sizeof(struct reg));
 	return (0);
-}
-
-int
-process_read_fpregs(p, regs)
-	struct proc     *p;
-	struct fpreg    *regs;
-{
-#if 0
-	extern struct fpstate   initfpstate;
-	struct fpstate          *statep = &initfpstate;
-
-	/* NOTE: struct fpreg == struct fpstate */
-	if (p->p_md.md_fpstate)
-		statep = p->p_md.md_fpstate;
-	bcopy(statep, regs, sizeof(struct fpreg));
-#endif
-	return 0;
 }
 
 #ifdef PTRACE
@@ -109,15 +89,7 @@ process_write_regs(p, regs)
 	return (0);
 }
 
-int
-process_sstep(p, sstep)
-	struct proc *p;
-	int sstep;
-{
-	if (sstep)
-		cpu_singlestep(p);
-	return (0);
-}
+/* process_sstep() is in trap.c */
 
 int
 process_set_pc(p, addr)
@@ -130,20 +102,6 @@ process_set_pc(p, addr)
 	regs->sxip = (u_int)addr;
 	regs->snip = (u_int)addr + 4;
 	return (0);
-}
-
-int
-process_write_fpregs(p, regs)
-	struct proc     *p;
-	struct fpreg    *regs;
-{
-#if 0
-	if (p->p_md.md_fpstate == NULL)
-		return EINVAL;
-
-	bcopy(regs, p->p_md.md_fpstate, sizeof(struct fpreg));
-#endif
-	return 0;
 }
 
 #endif	/* PTRACE */

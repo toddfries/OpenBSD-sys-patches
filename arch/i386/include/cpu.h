@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.67.4.1 2006/01/13 00:49:21 brad Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.68.2.1 2006/01/13 01:56:55 brad Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -126,7 +126,7 @@ struct cpu_info {
 	u_int32_t	cpu_class;		/* CPU class */
 
 	struct cpu_functions *ci_func;	/* start/stop functions */
-	void (*cpu_setup)(const char *, int, int);	/* proc-dependant init */
+	void (*cpu_setup)(struct cpu_info *);	/* proc-dependant init */
 
 	int		ci_want_resched;
 	int		ci_astpending;
@@ -279,7 +279,7 @@ struct cpu_nocpuid_nameclass {
 	const char *cpu_vendorname;
 	const char *cpu_name;
 	int cpu_class;
-	void (*cpu_setup)(const char *, int, int);
+	void (*cpu_setup)(struct cpu_info *);
 };
 
 struct cpu_cpuid_nameclass {
@@ -289,7 +289,7 @@ struct cpu_cpuid_nameclass {
 	struct cpu_cpuid_family {
 		int cpu_class;
 		const char *cpu_models[CPU_MAXMODEL+2];
-		void (*cpu_setup)(const char *, int, int);
+		void (*cpu_setup)(struct cpu_info *);
 	} cpu_family[CPU_MAXFAMILY - CPU_MINFAMILY + 1];
 };
 

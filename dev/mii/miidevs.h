@@ -1,10 +1,10 @@
-/*	$OpenBSD: miidevs.h,v 1.55 2005/02/19 04:03:17 brad Exp $	*/
+/*	$OpenBSD: miidevs.h,v 1.66 2005/08/27 14:15:57 brad Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: miidevs,v 1.52 2005/02/19 04:02:55 brad Exp 
+ *	OpenBSD: miidevs,v 1.63 2005/08/27 14:15:47 brad Exp 
  */
 /* $NetBSD: miidevs,v 1.3 1998/11/05 03:43:43 thorpej Exp $ */
 
@@ -50,7 +50,7 @@
  */
 
 #define	MII_OUI_3COM	0x00105a	/* 3com */
-#define	MII_OUI_AGERE	0x00601d	/* Agere Systems */
+#define	MII_OUI_LUCENT	0x00601d	/* Lucent Technologies */
 #define	MII_OUI_ALTIMA	0x0010a9	/* Altima Communications */
 #define	MII_OUI_AMD	0x00001a	/* Advanced Micro Devices */
 #define	MII_OUI_BROADCOM	0x001018	/* Broadcom Corporation */
@@ -60,12 +60,14 @@
 #define	MII_OUI_MARVELL	0x005043	/* Marvell Semiconductor */
 #define	MII_OUI_ICS	0x00a0be	/* Integrated Circuit Systems */
 #define	MII_OUI_INTEL	0x00aa00	/* Intel */
+#define	MII_OUI_JATO	0x00e083	/* Jato Technologies */
 #define	MII_OUI_LEVEL1	0x00207b	/* Level 1 */
 #define	MII_OUI_MYSON	0x00c0b4	/* Myson Technology */
 #define	MII_OUI_NATSEMI	0x080017	/* National Semiconductor */
 #define	MII_OUI_PLESSEY	0x046b40	/* Plessey Semiconductor */
 #define	MII_OUI_QUALSEMI	0x006051	/* Quality Semiconductor */
 #define	MII_OUI_REALTEK	0x000020	/* Realtek Semiconductor */
+#define	MII_OUI_REALTEK2	0x00e04c	/* Realtek Semiconductor */
 #define	MII_OUI_SEEQ	0x00a07d	/* Seeq */
 #define	MII_OUI_SIS	0x00e006	/* Silicon Integrated Systems */
 #define	MII_OUI_TI	0x080028	/* Texas Instruments */
@@ -75,8 +77,8 @@
 /* in the 79c873, AMD uses another OUI (which matches Davicom!) */
 #define	MII_OUI_xxALTIMA	0x000895	/* Altima Communications */
 #define	MII_OUI_xxAMD	0x00606e	/* Advanced Micro Devices */
-
 #define	MII_OUI_xxINTEL	0x00f800	/* Intel (alt) */
+#define	MII_OUI_xxCICADA	0x00c08f	/* Cicada Semiconductor (alt) */
 
 /* some vendors have the bits swapped within bytes
 	(ie, ordered as on the wire) */
@@ -115,10 +117,6 @@
 #define	MII_MODEL_AMD_79C875phy	0x0014
 #define	MII_STR_AMD_79C875phy	"Am79C875 quad PHY"
 
-/* Agere Systems PHYs */
-#define	MII_MODEL_AGERE_UNKNOWN	0x000c
-#define	MII_STR_AGERE_UNKNOWN	"Unknown 10/100 PHY"
-
 /* Altima Communications PHYs */
 #define	MII_MODEL_xxALTIMA_AC_UNKNOWN	0x0001
 #define	MII_STR_xxALTIMA_AC_UNKNOWN	"AC_UNKNOWN 10/100 PHY"
@@ -136,6 +134,8 @@
 #define	MII_STR_xxBROADCOM_BCM5411	"BCM5411 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5421S	0x000e
 #define	MII_STR_xxBROADCOM_BCM5421S	"BCM5421S 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM_BCM5752	0x0010
+#define	MII_STR_xxBROADCOM_BCM5752	"BCM5752 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5701	0x0011
 #define	MII_STR_xxBROADCOM_BCM5701	"BCM5701 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5703	0x0016
@@ -146,6 +146,8 @@
 #define	MII_STR_xxBROADCOM_BCM5705	"BCM5705 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5750	0x0018
 #define	MII_STR_xxBROADCOM_BCM5750	"BCM5750 10/100/1000baseT PHY"
+#define	MII_MODEL_xxBROADCOM_BCM5714	0x0034
+#define	MII_STR_xxBROADCOM_BCM5714	"BCM5714 10/100/1000baseT PHY"
 #define	MII_MODEL_BROADCOM_BCM5400	0x0004
 #define	MII_STR_BROADCOM_BCM5400	"BCM5400 1000baseT PHY"
 #define	MII_MODEL_BROADCOM_BCM5401	0x0005
@@ -164,6 +166,8 @@
 #define	MII_STR_BROADCOM_BCM5214	"BCM5214 Quad 10/100 PHY"
 #define	MII_MODEL_BROADCOM_BCM5222	0x0032
 #define	MII_STR_BROADCOM_BCM5222	"BCM5222 Dual 10/100 PHY"
+#define	MII_MODEL_BROADCOM_BCM5220	0x0033
+#define	MII_STR_BROADCOM_BCM5220	"BCM5220 10/100 PHY"
 #define	MII_MODEL_BROADCOM_BCM4401	0x0036
 #define	MII_STR_BROADCOM_BCM4401	"BCM4401 10/100baseTX PHY"
 
@@ -174,6 +178,8 @@
 #define	MII_STR_CICADA_CS8201A	"Cicada CS8201 10/100/1000TX PHY"
 #define	MII_MODEL_CICADA_CS8201B	0x0021
 #define	MII_STR_CICADA_CS8201B	"Cicada CS8201 10/100/1000TX PHY"
+#define	MII_MODEL_xxCICADA_CS8201B	0x0021
+#define	MII_STR_xxCICADA_CS8201B	"Cicada CS8201 10/100/1000TX PHY"
 
 /* Davicom Semiconductor PHYs */
 #define	MII_MODEL_xxDAVICOM_DM9101	0x0000
@@ -183,11 +189,13 @@
 #define	MII_MODEL_DAVICOM_DM9601	0x000c
 #define	MII_STR_DAVICOM_DM9601	"DM9601 10/100 PHY"
 
-/* Enable Semiconductor PHYs */
-#define	MII_MODEL_ENABLESEMI_88E1000	0x0005
-#define	MII_STR_ENABLESEMI_88E1000	"Enable 88E1000"
+/* Enable Semiconductor PHYs (Agere) */
+#define	MII_MODEL_ENABLESEMI_LU3X31FT	0x0001
+#define	MII_STR_ENABLESEMI_LU3X31FT	"Enable LU3X31FT"
 #define	MII_MODEL_ENABLESEMI_88E1000S	0x0004
 #define	MII_STR_ENABLESEMI_88E1000S	"Enable 88E1000S"
+#define	MII_MODEL_ENABLESEMI_88E1000	0x0005
+#define	MII_STR_ENABLESEMI_88E1000	"Enable 88E1000"
 
 /* Marvell Semiconductor PHYs */
 #define	MII_MODEL_MARVELL_E1000	0x0000
@@ -202,12 +210,16 @@
 #define	MII_STR_MARVELL_E1000_5	"Marvell 88E1000 Gigabit PHY"
 #define	MII_MODEL_MARVELL_E1000_6	0x0006
 #define	MII_STR_MARVELL_E1000_6	"Marvell 88E1000 Gigabit PHY"
-#define	MII_MODEL_MARVELL_E1000_7	0x000c
-#define	MII_STR_MARVELL_E1000_7	"Marvell 88E1000 Gigabit PHY"
+#define	MII_MODEL_MARVELL_E1111RCJ	0x000c
+#define	MII_STR_MARVELL_E1111RCJ	"Marvell 88E1111-RCJ Gigabit PHY"
+#define	MII_MODEL_xxMARVELL_E1000_2	0x0002
+#define	MII_STR_xxMARVELL_E1000_2	"Marvell 88E1000 Gigabit PHY"
 #define	MII_MODEL_xxMARVELL_E1000_3	0x0003
 #define	MII_STR_xxMARVELL_E1000_3	"Marvell 88E1000 Gigabit PHY"
 #define	MII_MODEL_xxMARVELL_E1000_5	0x0005
 #define	MII_STR_xxMARVELL_E1000_5	"Marvell 88E1000 Gigabit PHY"
+#define	MII_MODEL_xxMARVELL_E1111	0x000c
+#define	MII_STR_xxMARVELL_E1111	"Marvell 88E1111 Gigabit PHY"
 
 /* Contrived vendor/model for dcphy */
 #define	MII_MODEL_xxDEC_xxDC	0x0001
@@ -233,11 +245,23 @@
 #define	MII_MODEL_INTEL_I82553	0x0035
 #define	MII_STR_INTEL_I82553	"i82553 10/100 PHY"
 
+/* Jato Technologies PHYs */
+#define	MII_MODEL_JATO_BASEX	0x0000
+#define	MII_STR_JATO_BASEX	"Jato 1000baseX PHY"
+
 /* Level 1 PHYs */
 #define	MII_MODEL_xxLEVEL1_LXT970	0x0000
 #define	MII_STR_xxLEVEL1_LXT970	"LXT970 10/100 PHY"
 #define	MII_MODEL_xxLEVEL1a_LXT971	0x000e
 #define	MII_STR_xxLEVEL1a_LXT971	"LXT971 10/100 PHY"
+
+/* Lucent Technologies PHYs */
+#define	MII_MODEL_LUCENT_LU6612	0x000c
+#define	MII_STR_LUCENT_LU6612	"LU6612 10/100 PHY"
+#define	MII_MODEL_LUCENT_LU3X51FT	0x0033
+#define	MII_STR_LUCENT_LU3X51FT	"LU3X51FT 10/100 PHY"
+#define	MII_MODEL_LUCENT_LU3X54FT	0x0036
+#define	MII_STR_LUCENT_LU3X54FT	"LU3X54FT 10/100 PHY"
 
 /* Myson Technology PHYs */
 #define	MII_MODEL_MYSON_MTD972	0x0000

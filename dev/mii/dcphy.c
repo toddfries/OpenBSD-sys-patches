@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcphy.c,v 1.13 2005/01/28 18:27:55 brad Exp $	*/
+/*	$OpenBSD: dcphy.c,v 1.16 2005/08/04 21:52:37 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -99,7 +99,7 @@ struct cfdriver dcphy_cd = {
 
 int	dcphy_service(struct mii_softc *, struct mii_data *, int);
 void	dcphy_status(struct mii_softc *);
-int	dcphy_auto(struct mii_softc *, int);
+int	dcphy_mii_phy_auto(struct mii_softc *, int);
 void	dcphy_reset(struct mii_softc *);
 
 const struct mii_phy_funcs dcphy_funcs = {
@@ -136,10 +136,9 @@ dcphy_attach(struct device *parent, struct device *self, void *aux)
 	sc->mii_funcs = &dcphy_funcs;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
+	sc->mii_anegticks = 50;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
-
-	mii->mii_instance++;
 
 	dc_sc = mii->mii_ifp->if_softc;
 	CSR_WRITE_4(dc_sc, DC_10BTSTAT, 0);
@@ -194,9 +193,8 @@ dcphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		/*
 		 * If we're not polling our PHY instance, just return.
 		 */
-		if (IFM_INST(ife->ifm_media) != sc->mii_inst) {
+		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
-		}
 		break;
 
 	case MII_MEDIACHG:
@@ -204,9 +202,8 @@ dcphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		 * If the media indicates a different PHY instance,
 		 * isolate ourselves.
 		 */
-		if (IFM_INST(ife->ifm_media) != sc->mii_inst) {
+		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
-		}
 
 		/*
 		 * If the interface is not up, don't do anything.
@@ -224,13 +221,8 @@ dcphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		case IFM_AUTO:
 			/*PHY_RESET(sc);*/
 			sc->mii_flags &= ~MIIF_DOINGAUTO;
-			(void) dcphy_auto(sc, 0);
+			(void) dcphy_mii_phy_auto(sc, 0);
 			break;
-		case IFM_100_T4:
-			/*
-			 * XXX Not supported as a manual setting right now.
-			 */
-			return (EINVAL);
 		case IFM_100_TX:
 			PHY_RESET(sc);
 			DC_CLRBIT(dc_sc, DC_10BTCTRL, DC_TCTL_AUTONEGENBL);
@@ -260,7 +252,7 @@ dcphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			CSR_WRITE_4(dc_sc, DC_NETCFG, mode);
 			break;
 		default:
-			return(EINVAL);
+			return (EINVAL);
 		}
 		break;
 
@@ -288,7 +280,7 @@ dcphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			break;
 
 		/*
-		 * Only retry autonegotiation every 5 seconds.
+		 * Only retry autonegotiation every mii_anegticks seconds.
 		 *
 		 * Otherwise, fall through to calling dcphy_status()
 		 * since real Intel 21143 chips don't show valid link
@@ -297,12 +289,12 @@ dcphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		 * successful autonegotation is never recognised on
 		 * these chips.
 		 */
-		if (++sc->mii_ticks != 50)
+		if (++sc->mii_ticks <= sc->mii_anegticks)
 			break;
 
 		sc->mii_ticks = 0;
 		sc->mii_flags &= ~MIIF_DOINGAUTO;
-		dcphy_auto(sc, 0);
+		dcphy_mii_phy_auto(sc, 0);
 
 		break;
 	}
@@ -326,9 +318,6 @@ dcphy_status(struct mii_softc *sc)
 
 	mii->mii_media_status = IFM_AVALID;
 	mii->mii_media_active = IFM_ETHER;
-
-	if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
-		return;
 
 	reg = CSR_READ_4(dc_sc, DC_10BTSTAT);
 	if (!(reg & DC_TSTAT_LS10) || !(reg & DC_TSTAT_LS100))
@@ -399,7 +388,7 @@ skip:
 }
 
 int
-dcphy_auto(struct mii_softc *mii, int waitfor)
+dcphy_mii_phy_auto(struct mii_softc *mii, int waitfor)
 {
 	int			i;
 	struct dc_softc		*sc;
@@ -424,7 +413,7 @@ dcphy_auto(struct mii_softc *mii, int waitfor)
 		for (i = 0; i < 500; i++) {
 			if ((CSR_READ_4(sc, DC_10BTSTAT) & DC_TSTAT_ANEGSTAT)
 			    == DC_ASTAT_AUTONEGCMP)
-				return(0);
+				return (0);
 			DELAY(1000);
 		}
 		/*
@@ -432,7 +421,7 @@ dcphy_auto(struct mii_softc *mii, int waitfor)
 		 * If that's set, a timeout is pending, and it will
 		 * clear the flag.
 		 */
-		return(EIO);
+		return (EIO);
 	}
 
 	/*
@@ -443,7 +432,7 @@ dcphy_auto(struct mii_softc *mii, int waitfor)
 	if ((mii->mii_flags & MIIF_DOINGAUTO) == 0)
 		mii->mii_flags |= MIIF_DOINGAUTO;
 
-	return(EJUSTRETURN);
+	return (EJUSTRETURN);
 }
 
 void

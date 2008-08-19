@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.33 2004/07/16 15:01:09 henning Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.37 2005/08/02 13:42:05 markus Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -138,11 +138,6 @@
 #include <netinet/ip6.h>
 #endif
 
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
-
 #ifdef IPX
 #include <netipx/ipx.h>
 #include <netipx/ipx_if.h>
@@ -211,6 +206,7 @@ loop_clone_create(ifc, unit)
 	if (unit == 0) {
 		lo0ifp = ifp;
 		if_attachhead(ifp);
+		if_addgroup(lo0ifp, ifc->ifc_name);
 	} else
 		if_attach(ifp);
 	if_alloc_sadl(ifp);
@@ -254,24 +250,8 @@ looutput(ifp, m, dst, rt)
 	 * looutput() is also called for SIMPLEX interfaces to duplicate
 	 * packets for local use. But don't dup them to bpf.
 	 */
-	if (ifp->if_bpf && (ifp->if_flags&IFF_LOOPBACK)) {
-		/*
-		 * We need to prepend the address family as
-		 * a four byte field.  Cons up a dummy header
-		 * to pacify bpf.  This is safe because bpf
-		 * will only read from the mbuf (i.e., it won't
-		 * try to free it or keep a pointer to it).
-		 */
-		struct mbuf m0;
-		u_int32_t af = htonl(dst->sa_family);
-
-		m0.m_flags = 0;
-		m0.m_next = m;
-		m0.m_len = sizeof(af);
-		m0.m_data = (char *)&af;
-
-		bpf_mtap(ifp->if_bpf, &m0);
-	}
+	if (ifp->if_bpf && (ifp->if_flags & IFF_LOOPBACK))
+		bpf_mtap_af(ifp->if_bpf, htonl(dst->sa_family), m);
 #endif
 	m->m_pkthdr.rcvif = ifp;
 
@@ -321,12 +301,6 @@ looutput(ifp, m, dst, rt)
 		isr = NETISR_IPV6;
 		break;
 #endif /* INET6 */
-#ifdef NS
-	case AF_NS:
-		ifq = &nsintrq;
-		isr = NETISR_NS;
-		break;
-#endif
 #ifdef IPX
 	case AF_IPX:
 		ifq = &ipxintrq;
@@ -399,12 +373,6 @@ lo_altqstart(ifp)
 		case AF_IPX:
 			ifq = &ipxintrq;
 			isr = NETISR_IPX;
-			break;
-#endif
-#ifdef NS
-		case AF_NS:
-			ifq = &nsintrq;
-			isr = NETISR_NS;
 			break;
 #endif
 #ifdef NETATALK

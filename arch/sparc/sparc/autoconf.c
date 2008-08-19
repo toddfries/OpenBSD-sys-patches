@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.62 2005/03/15 18:47:44 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.67 2005/05/01 18:15:46 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.73 1997/07/29 09:41:53 fair Exp $ */
 
 /*
@@ -107,7 +107,6 @@ char	*findblkname(int);
 static	struct device *getdisk(char *, int, int, dev_t *);
 static	int mbprint(void *, const char *);
 static	void crazymap(char *, int *);
-int	st_crazymap(int);
 void	swapconf(void);
 void	sync_crash(void);
 int	mainbus_match(struct device *, void *, void *);
@@ -120,18 +119,6 @@ static	void bootpath_fake(struct bootpath *, char *);
 static	void bootpath_print(struct bootpath *);
 int	search_prom(int, char *);
 char	mainbus_model[30];
-
-/*
- * The mountroot_hook is provided as a mechanism for devices to perform
- * a special function if they're the root device, such as the floppy
- * drive ejecting the current disk and prompting for a filesystem floppy.
- */
-struct mountroot_hook {
-	LIST_ENTRY(mountroot_hook) mr_link;
-	struct	device *mr_device;
-	void	(*mr_func)(struct device *);
-};
-LIST_HEAD(, mountroot_hook) mrh_list;
 
 #ifdef RAMDISK_HOOKS
 static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
@@ -406,9 +393,20 @@ bootpath_build()
 				cp = str2hex(++cp, &bp->val[0]);
 				if (*cp == ',')
 					cp = str2hex(++cp, &bp->val[1]);
-				if (*cp == ':')
-					/* XXX - we handle just one char */
-					bp->val[2] = *++cp - 'a', ++cp;
+				if (*cp == ':') {
+					/*
+					 * We only store one character here,
+					 * as we will only use this field
+					 * to compute a partition index
+					 * for block devices.  However, it
+					 * might be an ethernet media
+					 * specification, so be sure to
+					 * skip all letters.
+					 */
+					bp->val[2] = *++cp - 'a';
+					while (*cp != '\0' && *cp != '/')
+						cp++;
+				}
 			} else {
 				bp->val[0] = -1; /* no #'s: assume unit 0, no
 							sbus offset/adddress */
@@ -467,7 +465,7 @@ bootpath_build()
 
 /*
  * Fake a ROM generated bootpath.
- * The argument `cp' points to a string such as "xd(0,0,0)netbsd"
+ * The argument `cp' points to a string such as "xd(0,0,0)bsd"
  */
 
 static void
@@ -622,7 +620,7 @@ bootpath_fake(bp, cp)
 		BP_APPEND(bp, "sbus", -1, 0, 0);
 		BP_APPEND(bp, "esp", -1, v0val[0], 0);
 		if (cp[1] == 'r')
-			snprintf(tmpname, sizeof tmpname, "cd"); /* netbsd uses 'cd', not 'sr'*/
+			snprintf(tmpname, sizeof tmpname, "cd"); /* OpenBSD uses 'cd', not 'sr'*/
 		else
 			snprintf(tmpname, sizeof tmpname, "%c%c", cp[0], cp[1]);
 		/* XXX - is TARGET/LUN encoded in v0val[1]? */
@@ -750,20 +748,6 @@ sd_crazymap(n)
 	return prom_sd_crazymap[n];
 }
 
-int
-st_crazymap(n)
-	int	n;
-{
-	static int prom_st_crazymap[8]; /* static: compute only once! */
-	static int init = 0;
-
-	if (init == 0) {
-		crazymap("st-targets", prom_st_crazymap);
-		init = 1;
-	}
-	return prom_st_crazymap[n];
-}
-
 /*
  * Determine mass storage and memory configuration for a machine.
  * We get the PROM's root device and make sure we understand it, then
@@ -778,9 +762,6 @@ cpu_configure()
 	register char *cp;
 	int s;
 	extern struct user *proc0paddr;
-
-	/* Initialize the mountroot_hook list. */
-	LIST_INIT(&mrh_list);
 
 	/* build the bootpath */
 	bootpath_build();
@@ -1627,8 +1608,6 @@ nextsibling(node)
 	return (promvec->pv_nodeops->no_nextnode(node));
 }
 
-u_int      hexatoi(const char *);
-
 /* The following recursively searches a PROM tree for a given node */
 int
 search_prom(rootnode, name)
@@ -1902,24 +1881,6 @@ gotdisk:
 	return (dv);
 }
 
-void
-mountroot_hook_establish(func, dev)
-	void (*func)(struct device *);
-	struct device *dev;
-{
-	struct mountroot_hook *mrhp;
-
-	mrhp = (struct mountroot_hook *)malloc(sizeof(struct mountroot_hook),
-	    M_DEVBUF, M_NOWAIT);
-	if (mrhp == NULL)
-		panic("no memory for mountroot_hook");
-
-	bzero(mrhp, sizeof(struct mountroot_hook));
-	mrhp->mr_device = dev;
-	mrhp->mr_func = func;
-	LIST_INSERT_HEAD(&mrh_list, mrhp, mr_link);
-}
-
 /*
  * Attempt to find the device from which we were booted.
  * If we can do so, and not instructed not to do so,
@@ -1938,7 +1899,6 @@ setroot()
 	dev_t nrootdev, nswapdev = NODEV;
 	char buf[128];
 	dev_t temp;
-	struct mountroot_hook *mrhp;
 	struct device *bootdv;
 	struct bootpath *bp;
 #if defined(NFSCLIENT)
@@ -1963,7 +1923,7 @@ setroot()
 
 		len = snprintf(buf, sizeof buf, "%s%d", findblkname(majdev),
 			unit);
-		if (len >= sizeof(buf))
+		if (len == -1 || len >= sizeof(buf))
 			panic("setroot: device name too long");
 
 		bootdv = getdisk(buf, len, part, &rootdev);
@@ -2089,7 +2049,7 @@ gotswap:
 		majdev = major(rootdev);
 		unit = DISKUNIT(rootdev);
 		part = DISKPART(rootdev);
-		goto gotroot;
+		return;
 	}
 
 	switch (bootdv->dv_class) {
@@ -2133,20 +2093,6 @@ gotswap:
 		if (temp == dumpdev)
 			dumpdev = swdevt[0].sw_dev;
 	}
-
-gotroot:
-	/*
-	 * Find mountroot hook and execute.
-	 */
-	LIST_FOREACH(mrhp, &mrh_list, mr_link)
-		if (mrhp->mr_device == bootdv) {
-			if (findblkmajor(mrhp->mr_device) == major(rootdev)) 
-				(*mrhp->mr_func)(bootdv);
-			else
-				(*mrhp->mr_func)(NULL);
-			break;
-		}
-
 }
 
 static int
@@ -2222,13 +2168,4 @@ getdevunit(name, unit)
 			return NULL;
 	}
 	return dev;
-}
-
-u_int
-hexatoi(nptr)			/* atoi assuming hex, no 0x */
-	const char *nptr;
-{
-	u_int retval;
-	str2hex((char *)nptr, &retval);
-	return retval;
 }

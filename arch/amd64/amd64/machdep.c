@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.30 2004/08/03 00:56:22 art Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.35 2005/08/06 14:26:50 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -131,19 +131,24 @@
 #include <dev/isa/isareg.h>
 #include <machine/isa_machdep.h>
 #include <dev/ic/i8042reg.h>
+#include <dev/acpi/acpivar.h>
 
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
 #endif
 
+#include "acpi.h"
 #include "isa.h"
 #include "isadma.h"
 #include "ksyms.h"
 
+#if NACPI > 0
+extern struct acpi_softc *acpi_softc;
+#endif
+
 /* the following is used externally (sysctl_hw) */
-char machine[] = "amd64";		/* cpu "architecture" */
-char machine_arch[] = "amd64";		/* machine == machine_arch */
+char machine[] = MACHINE;
 
 #ifdef CPURESET_DELAY
 int	cpureset_delay = CPURESET_DELAY;
@@ -266,27 +271,20 @@ cpu_startup(void)
 {
 	vaddr_t v;
 	vsize_t sz;
-	int x;
 	vaddr_t minaddr, maxaddr;
 
-	/*
-	 * Initialize error message buffer (et end of core).
-	 */
-	msgbuf_vaddr = uvm_km_valloc(kernel_map, x86_round_page(MSGBUFSIZE));
-	if (msgbuf_vaddr == 0)
-		panic("failed to valloc msgbuf_vaddr");
-
-	/* msgbuf_paddr was init'd in pmap */
-	for (x = 0; x < btoc(MSGBUFSIZE); x++)
-		pmap_kenter_pa((vaddr_t)msgbuf_vaddr + x * PAGE_SIZE,
-		    msgbuf_paddr + x * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE);
-	pmap_update(pmap_kenel());
-
+	msgbuf_vaddr = PMAP_DIRECT_MAP(msgbuf_paddr);
 	initmsgbuf((caddr_t)msgbuf_vaddr, round_page(MSGBUFSIZE));
 
 	printf("%s", version);
 
 	printf("real mem = %u (%uK)\n", ctob(physmem), ctob(physmem)/1024);
+
+	if (physmem >= btoc(1ULL << 32)) {
+		extern int amdgart_enable;
+
+		amdgart_enable = 1;
+	}
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -380,11 +378,8 @@ allocsys(vaddr_t v)
 	 * i/o buffers.
 	 */
 	if (bufpages == 0) {
-		if (physmem < btoc(2 * 1024 * 1024))
-			bufpages = physmem / 10;
-		else
-			bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-			    bufcachepercent / 100;
+		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
+		    bufcachepercent / 100;
 	}
 	if (nbuf == 0) {
 		nbuf = bufpages;
@@ -893,9 +888,11 @@ haltsys:
 	if (howto & RB_HALT) {
 	        if (howto & RB_POWERDOWN) {
 #if NACPI > 0
-			delay(500000);
-			acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
-			printf("WARNING: powerdown failed!\n");
+			if (acpi_softc) {
+				delay(500000);
+				acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
+				printf("WARNING: powerdown failed!\n");
+			}
 #endif
 		}
 

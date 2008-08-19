@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_devar.h,v 1.15 2004/11/08 21:16:47 deraadt Exp $	*/
+/*	$OpenBSD: if_devar.h,v 1.18 2005/07/16 17:20:47 brad Exp $	*/
 /*	$NetBSD: if_devar.h,v 1.13 1997/06/08 18:46:36 thorpej Exp $	*/
 
 /*-
@@ -29,10 +29,6 @@
 
 #if !defined(_DEVAR_H)
 #define _DEVAR_H
-
-#if defined(__OpenBSD__)
-#define __BROKEN_INDIRECT_CONFIG
-#endif
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 
@@ -550,7 +546,7 @@ struct _tulip_softc_t {
 #define	TULIP_INRESET		0x00000200
 #define	TULIP_NEEDRESET		0x00000400
 #define	TULIP_SQETEST		0x00000800
-#define	TULIP_xxxxxx0		0x00001000
+#define	TULIP_FULLDUPLEX	0x00001000
 #define	TULIP_xxxxxx1		0x00002000
 #define	TULIP_WANTTXSTART	0x00004000
 #define	TULIP_NEWTXTHRESH	0x00008000
@@ -697,10 +693,10 @@ struct _tulip_softc_t {
     u_int32_t tulip_setupdata[192/sizeof(u_int32_t)];
     char tulip_boardid[16];		/* buffer for board ID */
     u_int8_t tulip_rombuf[128];
-#if defined(__NetBSD__)
-    struct device *tulip_pci_busno;	/* needed for multiport boards */
-#else
+#ifndef __OpenBSD__
     u_int8_t tulip_pci_busno;		/* needed for multiport boards */
+#else
+    struct device *tulip_pci_busno;	/* needed for multiport boards */
 #endif
     u_int8_t tulip_pci_devno;		/* needed for multiport boards */
     u_int8_t tulip_connidx;
@@ -720,6 +716,8 @@ struct _tulip_softc_t {
 
 
 #if defined(TULIP_HDR_DATA)
+
+#ifdef TULIP_DEBUG
 static const char * const tulip_chipdescs[] = { 
     "21040 [10Mb/s]",
 #if defined(TULIP_EISA)
@@ -734,6 +732,7 @@ static const char * const tulip_chipdescs[] = {
     "21143 [10-100Mb/s]",
     "82C168 [10-100Mb/s]",
 };
+#endif
 
 #ifdef TULIP_DEBUG
 static const char * const tulip_mediums[] = {
@@ -769,6 +768,7 @@ static const int tulip_media_to_ifmedia[] = {
 };
 #endif /* defined(IFM_ETHER) */
 
+#ifdef TULIP_DEBUG
 static const char * const tulip_system_errors[] = {
     "parity error",
     "master abort",
@@ -800,6 +800,7 @@ static const char * const tulip_status_bits[] = {
     NULL,
     NULL,
 };
+#endif
 
 static const struct {
     tulip_srom_connection_t sc_type;

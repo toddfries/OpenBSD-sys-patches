@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2002/07/15 21:29:16 mickey Exp $
+#	$OpenBSD: Makefile,v 1.7 2005/05/24 20:12:02 uwe Exp $
 #	$NetBSD: Makefile,v 1.3 1995/02/27 16:36:07 cgd Exp $
 
 # Makefile for alpha tags file and boot blocks
@@ -25,13 +25,13 @@ DALPHA=	alpha eisa isa dev pci tc include
 tags:
 	-ctags -wdtf ${TALPHA} ${COMM} ${SALPHA}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AALPHA} | \
-	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3	\1	/^\2(\3\4$$/;" \
 		>> ${TALPHA}
 	sort -o ${TALPHA} ${TALPHA}
 
 links:
 	-for i in ${DALPHA}; do \
-	    (cd $$i && rm -f tags; ln -s ${TALPHA} tags); done
+	    (cd $$i && { rm -f tags; ln -s ${TALPHA} tags; }) done
 
 obj: _SUBDIRUSE
 

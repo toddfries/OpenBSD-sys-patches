@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.40 2004/12/07 02:11:24 brad Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.42 2005/06/29 03:53:28 brad Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -54,38 +54,18 @@ struct pcibus_attach_args;
 /*
  * Machine-dependent definitions.
  */
-#if (__alpha__ + __atari__ + __i386__ + __cats__ + __powerpc__ + __sparc64__ + __hppa__ +__amd64__ + __sgi__ != 1)
-#error COMPILING FOR UNSUPPORTED MACHINE, OR MORE THAN ONE.
-#endif
-#if __alpha__
+#if defined(__alpha__)
 #include <alpha/pci/pci_machdep.h>
-#endif
-#if __atari__
-#include <atari/pci/pci_machdep.h>
-#endif
-#if __i386__
+#elif defined(__i386__)
 #include <i386/pci/pci_machdep.h>
-#endif
-#if __cats__
+#elif defined(__cats__)
 #include <cats/pci/pci_machdep.h>
-#endif
-#if __powerpc__
+#elif defined(__powerpc__)
 #include <powerpc/pci/pci_machdep.h>
-#endif
-#if __sparc64__
-#include <sparc64/include/pci_machdep.h>
-#endif
-#if __hppa64__
-#include <hppa64/include/pci_machdep.h>
-#endif
-#if __hppa__
-#include <hppa/include/pci_machdep.h>
-#endif
-#if __amd64__
-#include <amd64/include/pci_machdep.h>
-#endif
-#if __sgi__
+#elif defined(__sgi__)
 #include <sgi/pci/pci_machdep.h>
+#else
+#include <machine/pci_machdep.h>
 #endif
 
 /*
@@ -211,5 +191,13 @@ void	pci_devinfo(pcireg_t, pcireg_t, int, char *, size_t);
 const struct pci_quirkdata *
 	pci_lookup_quirkdata(pci_vendor_id_t, pci_product_id_t);
 void	pciagp_set_pchb(struct pci_attach_args *);
+
+/*
+ * Power Management (PCI 2.2)
+ */
+#define PCI_PWR_D0	0
+#define PCI_PWR_D1	1
+#define PCI_PWR_D2	2
+#define PCI_PWR_D3	3
 
 #endif /* _DEV_PCI_PCIVAR_H_ */

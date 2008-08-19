@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.17 2004/10/13 22:49:24 miod Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.20 2005/08/03 16:27:39 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -148,6 +148,7 @@
 
 #define RL_HWREV_8169		0x00000000
 #define RL_HWREV_8169S		0x04000000
+#define RL_HWREV_8169SB		0x10000000
 #define RL_HWREV_8110S		0x00800000
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
@@ -576,6 +577,10 @@ struct rl_stats {
 #define RL_ADDR_LO(y)	((u_int64_t) (y) & 0xFFFFFFFF)
 #define RL_ADDR_HI(y)	((u_int64_t) (y) >> 32)
 
+/* see comment in dev/ic/re.c */
+#define RL_JUMBO_FRAMELEN	7440
+#define RL_JUMBO_MTU		(RL_JUMBO_FRAMELEN-ETHER_HDR_LEN-ETHER_CRC_LEN)
+
 #define	MAX_NUM_MULTICAST_ADDRESSES	128
 
 #define RL_INC(x)		(x = (x + 1) % RL_TX_LIST_CNT)
@@ -670,6 +675,8 @@ struct rl_softc {
 /*
  * register space access macros
  */
+#define CSR_WRITE_RAW_4(sc, csr, val) \
+	bus_space_write_raw_region_4(sc->rl_btag, sc->rl_bhandle, csr, val, 4)
 #define CSR_WRITE_4(sc, csr, val) \
 	bus_space_write_4(sc->rl_btag, sc->rl_bhandle, csr, val)
 #define CSR_WRITE_2(sc, csr, val) \
@@ -774,11 +781,6 @@ struct rl_softc {
 #define RL_PSTATE_D3		0x0003
 #define RL_PME_EN		0x0010
 #define RL_PME_STATUS		0x8000
-
-#ifdef __alpha__
-#undef vtophys
-#define vtophys(va)	alpha_XXX_dmamap((vm_offset_t)va)
-#endif
 
 extern int rl_attach(struct rl_softc *);
 extern int rl_detach(struct rl_softc *);

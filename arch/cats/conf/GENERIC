@@ -1,13 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.20 2005/02/15 11:03:46 jsg Exp $
-#
-# GENERIC machine description file
-#
-# This machine description file is used to generate the default OpenBSD
-# kernel.  The generic kernel does not include all options, subsystems
-# and device drivers, but should be useful for most applications.
-#
-# The machine description file can be customised for your specific
-# machine to reduce the kernel size and improve its performance.
+#	$OpenBSD: GENERIC,v 1.29 2005/08/28 05:30:43 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -18,24 +9,18 @@
 # of each device driver in this file see the section 4 man page for the
 # device.
 
-machine	cats	arm
-
-include "../../../conf/GENERIC"
+machine		cats arm
+include		"../../../conf/GENERIC"
+maxusers	32			# estimated number of users
 
 options		ARM32
 options		FOOTBRIDGE_INTR
 
-# estimated number of users
+#options	UCONSOLE	# users can use TIOCCONS (for xconsole)
+#options	INSECURE	# disable kernel securelevel
 
-maxusers	32
-
-# Standard system options
-
-#options 	UCONSOLE	# users can use TIOCCONS (for xconsole)
-#options 	INSECURE	# disable kernel securelevel
-
-#options 	RTC_OFFSET=0	# hardware clock is this many mins. west of GMT
-#options 	NTP		# NTP phase/frequency locked loop
+#options	RTC_OFFSET=0	# hardware clock is this many mins. west of GMT
+#options	NTP		# NTP phase/frequency locked loop
 
 option		APERTURE	# in-kernel aperture driver for XFree86
 option		USER_PCICONF	# user-space PCI configuration
@@ -43,11 +28,11 @@ option		USER_PCICONF	# user-space PCI configuration
 # CPU options
 
 # For StrongARM systems
-options 	CPU_SA110	# Support the SA110 core
+options		CPU_SA110	# Support the SA110 core
 
 # FPA options
 
-#options 	ARMFPE		# ARM Ltd FPE
+#options	ARMFPE		# ARM Ltd FPE
 
 option WSDISPLAY_COMPAT_USL		# VT handling
 option WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
@@ -68,8 +53,8 @@ todclock0	at todservice?	# time-of-day device
 pci0		at footbridge?	# PCI bus
 pci*		at ppb?
 
-option          PCIVERBOSE
-option          USBVERBOSE
+option		PCIVERBOSE
+option		USBVERBOSE
 
 # PCI bridges
 ppb*	at pci?			# PCI-PCI bridges
@@ -105,9 +90,11 @@ scsibus* at siop?
 sd*	at scsibus?		# SCSI disk drives
 st*	at scsibus?		# SCSI tape drives
 cd*	at scsibus?		# SCSI CD-ROM drives
-#ch*	at scsibus?		# SCSI auto-changers
-#uk*	at scsibus?		# SCSI unknown device
-#ss*	at scsibus?		# SCSI scanner
+ch*	at scsibus?		# SCSI auto-changers
+uk*	at scsibus?		# SCSI unknown device
+ss*	at scsibus?		# SCSI scanner
+safte*	at scsibus?		# SCSI accessed fault-tolerant enclosures
+ses*	at scsibus?		# SCSI enclosure services
 
 # PCI IDE Controllers and Devices
 # PCI IDE controllers - see pciide(4) for supported hardware.
@@ -141,7 +128,6 @@ fxp*	at pci?			# Intel EtherExpress PRO 10+/100B
 ne*	at pci?			# NE2000 compat ethernet
 #ntwoc*	at pci?			# Riscom/N2 PCI Sync Serial
 dc*	at pci?			# DECchip 21x4x and clones
-de*	at pci?			# DECchip 21x4x and clones
 vr*	at pci?			# VIA Rhine Fast Ethernet
 xl*	at pci?			# 3C9xx ethernet
 #lmc*	at pci?			# Lan Media Corp SSI/HSSI/DS3
@@ -158,6 +144,7 @@ lxtphy*	at mii?			# Level One LXT-970 PHYs
 nsphy*	at mii?			# NS83840 PHYs
 nsphyter* at mii?		# NS83843 PHYs
 qsphy*	at mii?			# Quality Semiconductor QS6612 PHYs
+eephy*	at mii?			# Marvell 88E1000 series PHY
 rlphy* at mii?			# RealTek 8139 internal PHYs
 sqphy*	at mii?			# Seeq 80220/80221/80223 PHYs
 tlphy*	at mii?			# ThunderLAN PHYs
@@ -190,6 +177,8 @@ uplcom* at uhub?		# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?		# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uipaq*	at uhub?		# iPAQ serial adapter
+ucom*	at uipaq?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -197,6 +186,7 @@ midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
+atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -283,7 +273,6 @@ ep*	at isa?
 lc0 at isa? port 0x200 irq ?
 lc1 at isa? port 0x280 irq ?
 
-# The spkr driver provides a simple tone interface to the built in speaker.
 spkr0	at pcppi?			# PC speaker
 
 ds1687rtc0 at isa? port 0x72		# Dallas RTC

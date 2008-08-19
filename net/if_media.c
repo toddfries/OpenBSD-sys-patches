@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_media.c,v 1.12 2005/02/20 01:19:17 brad Exp $	*/
+/*	$OpenBSD: if_media.c,v 1.16 2005/07/28 02:15:15 brad Exp $	*/
 /*	$NetBSD: if_media.c,v 1.10 2000/03/13 23:52:39 soren Exp $	*/
 
 /*-
@@ -110,13 +110,9 @@ static	void ifmedia_printword(int);
  * Initialize if_media struct for a specific interface instance.
  */
 void
-ifmedia_init(ifm, dontcare_mask, change_callback, status_callback)
-	struct ifmedia *ifm;
-	int dontcare_mask;
-	ifm_change_cb_t change_callback;
-	ifm_stat_cb_t status_callback;
+ifmedia_init(struct ifmedia *ifm, int dontcare_mask,
+    ifm_change_cb_t change_callback, ifm_stat_cb_t status_callback)
 {
-
 	TAILQ_INIT(&ifm->ifm_list);
 	ifm->ifm_cur = NULL;
 	ifm->ifm_media = 0;
@@ -130,11 +126,7 @@ ifmedia_init(ifm, dontcare_mask, change_callback, status_callback)
  * for a specific interface instance.
  */
 void
-ifmedia_add(ifm, mword, data, aux)
-	struct ifmedia *ifm;
-	int mword;
-	int data;
-	void *aux;
+ifmedia_add(struct ifmedia *ifm, int mword, int data, void *aux)
 {
 	struct ifmedia_entry *entry;
 
@@ -165,10 +157,7 @@ ifmedia_add(ifm, mword, data, aux)
  * supported media for a specific interface instance.
  */
 void
-ifmedia_list_add(ifm, lp, count)
-	struct ifmedia *ifm;
-	struct ifmedia_entry *lp;
-	int count;
+ifmedia_list_add(struct ifmedia *ifm, struct ifmedia_entry *lp, int count)
 {
 	int i;
 
@@ -185,9 +174,7 @@ ifmedia_list_add(ifm, lp, count)
  * media-change callback.
  */
 void
-ifmedia_set(ifm, target)
-	struct ifmedia *ifm; 
-	int target;
+ifmedia_set(struct ifmedia *ifm, int target)
 {
 	struct ifmedia_entry *match;
 
@@ -236,11 +223,8 @@ ifmedia_set(ifm, target)
  * Device-independent media ioctl support function.
  */
 int
-ifmedia_ioctl(ifp, ifr, ifm, cmd)
-	struct ifnet *ifp;
-	struct ifreq *ifr;
-	struct ifmedia *ifm;
-	u_long cmd;
+ifmedia_ioctl(struct ifnet *ifp, struct ifreq *ifr, struct ifmedia *ifm,
+    u_long cmd)
 {
 	struct ifmedia_entry *match;
 	struct ifmediareq *ifmr = (struct ifmediareq *) ifr;
@@ -257,8 +241,8 @@ ifmedia_ioctl(ifp, ifr, ifm, cmd)
 	case  SIOCSIFMEDIA:
 	{
 		struct ifmedia_entry *oldentry;
-		int oldmedia;
-		int newmedia = ifr->ifr_media;
+		u_int oldmedia;
+		u_int newmedia = ifr->ifr_media;
 
 		match = ifmedia_match(ifm, newmedia, ifm->ifm_mask);
 		if (match == NULL) {
@@ -269,7 +253,7 @@ ifmedia_ioctl(ifp, ifr, ifm, cmd)
 				    newmedia);
 			}
 #endif
-			return (ENXIO);
+			return (EINVAL);
 		}
 
 		/*
@@ -368,10 +352,7 @@ ifmedia_ioctl(ifp, ifr, ifm, cmd)
  * Find media entry matching a given ifm word.
  */
 struct ifmedia_entry *
-ifmedia_match(ifm, target, mask)
-	struct ifmedia *ifm; 
-	int target;
-	int mask;
+ifmedia_match(struct ifmedia *ifm, u_int target, u_int mask)
 {
 	struct ifmedia_entry *match, *next;
 
@@ -381,12 +362,14 @@ ifmedia_match(ifm, target, mask)
 	for (next = TAILQ_FIRST(&ifm->ifm_list); next != NULL;
 	     next = TAILQ_NEXT(next, ifm_list)) {
 		if ((next->ifm_media & mask) == (target & mask)) {
-#if defined(IFMEDIA_DEBUG) || defined(DIAGNOSTIC)
 			if (match) {
+#if defined(IFMEDIA_DEBUG) || defined(DIAGNOSTIC)
 				printf("ifmedia_match: multiple match for "
-				    "0x%x/0x%x\n", target, mask);
-			}
+				    "0x%x/0x%x, selected instance %d\n",
+				    target, mask, IFM_INST(match->ifm_media));
 #endif
+				break;
+			}
 			match = next;
 		}
 	}
@@ -398,9 +381,7 @@ ifmedia_match(ifm, target, mask)
  * Delete all media for a given instance.
  */
 void
-ifmedia_delete_instance(ifm, inst)
-	struct ifmedia *ifm;
-	int inst;
+ifmedia_delete_instance(struct ifmedia *ifm, u_int inst)
 {
 	struct ifmedia_entry *ife, *nife;
 
@@ -423,8 +404,7 @@ struct ifmedia_baudrate ifmedia_baudrate_descriptions[] =
     IFM_BAUDRATE_DESCRIPTIONS;
 
 int
-ifmedia_baudrate(mword)
-	int mword;
+ifmedia_baudrate(int mword)
 {
 	int i;
 
@@ -453,8 +433,7 @@ struct ifmedia_description ifm_option_descriptions[] =
  * print a media word.
  */
 static void
-ifmedia_printword(ifmw)
-	int ifmw;
+ifmedia_printword(int ifmw)
 {
 	struct ifmedia_description *desc;
 	int seen_option = 0;

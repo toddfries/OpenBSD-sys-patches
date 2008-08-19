@@ -1,8 +1,8 @@
-/*	$OpenBSD: if_gem_pci.c,v 1.14 2004/06/20 20:50:41 pvalchev Exp $	*/
+/*	$OpenBSD: if_gem_pci.c,v 1.16 2005/08/01 05:45:03 brad Exp $	*/
 /*	$NetBSD: if_gem_pci.c,v 1.1 2001/09/16 00:11:42 eeh Exp $ */
 
 /*
- * 
+ *
  * Copyright (C) 2001 Eduardo Horvath.
  * All rights reserved.
  *
@@ -15,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- *  
+ *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR  ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -35,7 +35,7 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h> 
+#include <sys/systm.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -53,9 +53,9 @@
 #include <netinet/if_ether.h>
 #endif
 
-#if NBPFILTER > 0 
+#if NBPFILTER > 0
 #include <net/bpf.h>
-#endif 
+#endif
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -120,7 +120,7 @@ gem_attach_pci(parent, self, aux)
 	struct gem_pci_softc *gsc = (void *)self;
 	struct gem_softc *sc = &gsc->gsc_gem;
 	pci_intr_handle_t intrhandle;
-#ifdef __sparc__
+#ifdef __sparc64__
 	/* XXX the following declarations should be elsewhere */
 	extern void myetheraddr(u_char *);
 #endif
@@ -150,7 +150,7 @@ gem_attach_pci(parent, self, aux)
 	sc->sc_bustag = gsc->gsc_memt;
 	sc->sc_h = gsc->gsc_memh;
 
-#ifdef __sparc__
+#ifdef __sparc64__
 	if (OF_getprop(PCITAG_NODE(pa->pa_tag), "local-mac-address",
 	    sc->sc_enaddr, ETHER_ADDR_LEN) <= 0)
 		myetheraddr(sc->sc_enaddr);
@@ -164,7 +164,7 @@ gem_attach_pci(parent, self, aux)
 	if (pci_intr_map(pa, &intrhandle) != 0) {
 		printf(": couldn't map interrupt\n");
 		return;	/* bus_unmap ? */
-	}	
+	}
 	intrstr = pci_intr_string(pa->pa_pc, intrhandle);
 	gsc->gsc_ih = pci_intr_establish(pa->pa_pc,
 	    intrhandle, IPL_NET, gem_intr, sc, self->dv_xname);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc91cxx.c,v 1.19 2005/01/15 05:24:11 brad Exp $	*/
+/*	$OpenBSD: smc91cxx.c,v 1.21 2005/06/08 17:03:00 henning Exp $	*/
 /*	$NetBSD: smc91cxx.c,v 1.11 1998/08/08 23:51:41 mycroft Exp $	*/
 
 /*-
@@ -106,19 +106,6 @@
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
-#endif
-
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
-
-#if defined(CCITT) && defined(LLC)
-#include <sys/socketvar.h>
-#include <netccitt/x25.h>
-#include <netccitt/pk.h>
-#include <netccitt/pk_var.h>
-#include <netccitt/pk_extern.h>
 #endif
 
 #if NBPFILTER > 0
@@ -976,45 +963,11 @@ smc91cxx_ioctl(ifp, cmd, data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 			break;
 #endif
-#ifdef NS
-		case AF_NS:
-		    {
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host =
-				    *(union ns_host *)LLADDR(ifp->if_sadl);
-			else {
-				bcopy(ina->x_host.c_host, LLADDR(ifp->if_sadl), 
-				    ETHER_ADDR_LEN);
-			}
-
-			/*
-			 * Set new address.  Reset, because the receiver
-			 * has to be stopped before we can set the new
-			 * MAC address.
-			 */
-			smc91cxx_reset(sc);
-			break;
-		    }
-#endif
 		default:
 			smc91cxx_init(sc);
 			break;
 		}
 		break;
-
-#if defined(CCITT) && defined(LLC)
-	case SIOCSIFCONF_X25:
-		if ((error = smc91cxx_enable(sc)) != 0)
-			break;
-		ifp->if_flags |= IFF_UP;
-		ifa->ifa_rtrequest = cons_rtrequest;	/* XXX */
-		error = x25_llcglue(PRC_IFUP, ifa->ifa_addr);
-		if (error == 0)
-			smc91cxx_init(sc);
-		break;
-#endif
 
 	case SIOCSIFFLAGS:
 		if ((ifp->if_flags & IFF_UP) == 0 &&

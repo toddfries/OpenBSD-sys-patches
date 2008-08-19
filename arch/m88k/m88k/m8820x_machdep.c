@@ -1,4 +1,4 @@
-/*	$OpenBSD: m8820x_machdep.c,v 1.3 2004/08/08 21:19:18 miod Exp $	*/
+/*	$OpenBSD: m8820x_machdep.c,v 1.6 2005/07/01 14:09:26 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  *
@@ -85,14 +85,13 @@
 #include <sys/systm.h>
 #include <sys/simplelock.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <machine/asm_macro.h>
+#include <machine/cmmu.h>
 #include <machine/cpu_number.h>
 #include <machine/locore.h>
-
-#include <machine/cmmu.h>
 #include <machine/m8820x.h>
-
-#include <uvm/uvm_extern.h>
 
 #ifdef DDB
 #include <ddb/db_output.h>		/* db_printf()		*/
@@ -116,7 +115,7 @@ void m8820x_cmmu_flush_tlb(unsigned, unsigned, vaddr_t, vsize_t);
 void m8820x_cmmu_flush_cache(int, paddr_t, psize_t);
 void m8820x_cmmu_flush_inst_cache(int, paddr_t, psize_t);
 void m8820x_cmmu_flush_data_cache(int, paddr_t, psize_t);
-void m8820x_dma_cachectl(vaddr_t, vsize_t, int);
+void m8820x_dma_cachectl(pmap_t, vaddr_t, vsize_t, int);
 void m8820x_dma_cachectl_pa(paddr_t, psize_t, int);
 void m8820x_cmmu_dump_config(void);
 void m8820x_cmmu_show_translation(unsigned, unsigned, unsigned, int);
@@ -345,7 +344,7 @@ m8820x_cpu_configuration_print(int master)
 	{
 		static int errata_warn = 0;
 
-		if (proctype != 0 && procvers < 2) {
+		if (proctype == 0 && procvers < 2) {
 			if (!errata_warn++)
 				printf("WARNING: M88100 bug workaround code "
 				    "not enabled.\nPlease recompile the kernel "
@@ -812,7 +811,7 @@ m8820x_cmmu_inval_cache(paddr_t physaddr, psize_t size)
 }
 
 void
-m8820x_dma_cachectl(vaddr_t va, vsize_t size, int op)
+m8820x_dma_cachectl(pmap_t pmap, vaddr_t va, vsize_t size, int op)
 {
 	paddr_t pa;
 #if !defined(BROKEN_MMU_MASK)
@@ -826,7 +825,7 @@ m8820x_dma_cachectl(vaddr_t va, vsize_t size, int op)
 	while (size != 0) {
 		count = min(size, PAGE_SIZE);
 
-		if (pmap_extract(pmap_kernel(), va, &pa) != FALSE) {
+		if (pmap_extract(pmap, va, &pa) != FALSE) {
 			switch (op) {
 			case DMA_CACHE_SYNC:
 				m8820x_cmmu_sync_cache(pa, count);
@@ -844,8 +843,12 @@ m8820x_dma_cachectl(vaddr_t va, vsize_t size, int op)
 		size -= count;
 	}
 #else
-	/* XXX This assumes the space is also physically contiguous */
-	if (pmap_extract(pmap_kernel(), va, &pa) != FALSE) {
+	/*
+	 * This assumes the space is also physically contiguous... but this
+	 * really doesn't matter as we flush/sync/invalidate the whole cache
+	 * anyway...
+	 */
+	if (pmap_extract(pmap, va, &pa) != FALSE) {
 		switch (op) {
 		case DMA_CACHE_SYNC:
 			m8820x_cmmu_sync_cache(pa, size);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci_pci.c,v 1.22 2004/12/31 04:22:32 dlg Exp $	*/
+/*	$OpenBSD: ohci_pci.c,v 1.26 2005/08/09 04:10:13 mickey Exp $	*/
 /*	$NetBSD: ohci_pci.c,v 1.23 2002/10/02 16:51:47 thorpej Exp $	*/
 
 /*
@@ -55,7 +55,6 @@
 #include <machine/bus.h>
 
 #include <dev/pci/pcivar.h>
-#include <dev/pci/usb_pci.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -71,7 +70,6 @@ int	ohci_pci_detach(device_ptr_t, int);
 
 struct ohci_pci_softc {
 	ohci_softc_t		sc;
-	struct usb_pci		sc_pci;
 	pci_chipset_tag_t	sc_pc;
 	void 			*sc_ih;		/* interrupt vectoring */
 };
@@ -100,10 +98,8 @@ ohci_pci_attach(struct device *parent, struct device *self, void *aux)
 	struct ohci_pci_softc *sc = (struct ohci_pci_softc *)self;
 	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
-	pcitag_t tag = pa->pa_tag;
 	char const *intrstr;
 	pci_intr_handle_t ih;
-	pcireg_t csr;
 	usbd_status r;
 	int s;
 	const char *vendor;
@@ -122,17 +118,16 @@ ohci_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	/* Record what interrupts were enabled by SMM/BIOS. */
+	sc->sc.sc_intre = bus_space_read_4(sc->sc.iot, sc->sc.ioh,
+	    OHCI_INTERRUPT_ENABLE);
+
 	/* Disable interrupts, so we don't get any spurious ones. */
 	bus_space_write_4(sc->sc.iot, sc->sc.ioh, OHCI_INTERRUPT_DISABLE,
 			  OHCI_MIE);
 
 	sc->sc_pc = pc;
 	sc->sc.sc_bus.dmatag = pa->pa_dmat;
-
-	/* Enable the device. */
-	csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
-		       csr | PCI_COMMAND_MASTER_ENABLE);
 
 	bus_space_barrier(sc->sc.iot, sc->sc.ioh, 0, sc->sc.sc_size,
 	    BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE);
@@ -178,9 +173,10 @@ ohci_pci_attach(struct device *parent, struct device *self, void *aux)
 		splx(s);
 		return;
 	}
-	splx(s);
 
-	usb_pci_add(&sc->sc_pci, pa, &sc->sc.sc_bus);
+	sc->sc.sc_powerhook = powerhook_establish(ohci_power, &sc->sc);
+
+	splx(s);
 
 	/* Attach usb device. */
 	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
@@ -196,6 +192,9 @@ ohci_pci_detach(device_ptr_t self, int flags)
 	rv = ohci_detach(&sc->sc, flags);
 	if (rv)
 		return (rv);
+
+	powerhook_disestablish(sc->sc.sc_powerhook);
+
 	if (sc->sc_ih != NULL) {
 		pci_intr_disestablish(sc->sc_pc, sc->sc_ih);
 		sc->sc_ih = NULL;
@@ -204,6 +203,5 @@ ohci_pci_detach(device_ptr_t self, int flags)
 		bus_space_unmap(sc->sc.iot, sc->sc.ioh, sc->sc.sc_size);
 		sc->sc.sc_size = 0;
 	}
-	usb_pci_rem(&sc->sc_pci);
 	return (0);
 }

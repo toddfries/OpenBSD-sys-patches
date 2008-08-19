@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.37 2004/12/07 20:38:47 mcbride Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.39 2005/05/23 20:10:14 mpf Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -577,14 +577,7 @@ in6_ifattach(ifp, altifp)
 	case IFT_ENC:
 	case IFT_PFLOG:
 	case IFT_PFSYNC:
-	case IFT_CARP:
 		return;
-	case IFT_PROPVIRTUAL:
-		if (strncmp("bridge", ifp->if_xname, sizeof("bridge")) == 0 &&
-		    '0' <= ifp->if_xname[sizeof("bridge")] &&
-		    ifp->if_xname[sizeof("bridge")] <= '9')
-			return;
-		break;
 	}
 
 	/*
@@ -606,6 +599,8 @@ in6_ifattach(ifp, altifp)
 	 * quirks based on interface type
 	 */
 	switch (ifp->if_type) {
+	case IFT_CARP:
+		return;
 	default:
 		break;
 	}

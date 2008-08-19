@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 2004/10/05 17:56:43 mickey Exp $
+#	$OpenBSD: Makefile,v 1.6 2005/05/06 11:16:47 pedro Exp $
 
 # Makefile for hppa tags file and boot blocks
 
@@ -23,13 +23,13 @@ DHPPA=	conf dev gsc hppa spmath include
 tags:
 	-ctags -wdtf ${THPPA} ${COMM} ${SHPPA}
 	egrep "^ENTRY(.*)|^ALTENTRY(.*)" ${AHPPA} | \
-	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3 \1 /^\2(\3\4$$/;" \
+	    sed "s;\([^:]*\):\([^(]*\)(\([^, )]*\)\(.*\);\3	\1	/^\2(\3\4$$/;" \
 		>> ${THPPA}
 	sort -o ${THPPA} ${THPPA}
 
 links:
 	-for i in ${DHPPA}; do \
-	    cd $$i && rm -f tags; ln -s ${THPPA} tags; done
+	    (cd $$i && rm -f tags; ln -s ${THPPA} tags); done
 
 obj: _SUBDIRUSE
 

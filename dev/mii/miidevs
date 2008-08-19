@@ -1,4 +1,4 @@
-$OpenBSD: miidevs,v 1.52 2005/02/19 04:02:55 brad Exp $
+$OpenBSD: miidevs,v 1.63 2005/08/27 14:15:47 brad Exp $
 /* $NetBSD: miidevs,v 1.3 1998/11/05 03:43:43 thorpej Exp $ */
 
 /*-
@@ -43,7 +43,7 @@ $OpenBSD: miidevs,v 1.52 2005/02/19 04:02:55 brad Exp $
  */
 
 oui 3COM			0x00105a	3com
-oui AGERE			0x00601d	Agere Systems
+oui LUCENT			0x00601d	Lucent Technologies
 oui ALTIMA			0x0010a9	Altima Communications
 oui AMD				0x00001a	Advanced Micro Devices
 oui BROADCOM			0x001018	Broadcom Corporation
@@ -53,12 +53,14 @@ oui DAVICOM			0x00606e	Davicom Semiconductor
 oui MARVELL			0x005043	Marvell Semiconductor
 oui ICS				0x00a0be	Integrated Circuit Systems
 oui INTEL			0x00aa00	Intel
+oui JATO			0x00e083	Jato Technologies
 oui LEVEL1			0x00207b	Level 1
 oui MYSON			0x00c0b4	Myson Technology
 oui NATSEMI			0x080017	National Semiconductor
 oui PLESSEY			0x046b40	Plessey Semiconductor
 oui QUALSEMI			0x006051	Quality Semiconductor
 oui REALTEK			0x000020	Realtek Semiconductor
+oui REALTEK2			0x00e04c	Realtek Semiconductor
 oui SEEQ			0x00a07d	Seeq
 oui SIS				0x00e006	Silicon Integrated Systems
 oui TI				0x080028	Texas Instruments
@@ -68,8 +70,8 @@ oui XAQTI			0x00e0ae	XaQti Corp.
 /* in the 79c873, AMD uses another OUI (which matches Davicom!) */
 oui xxALTIMA			0x000895	Altima Communications
 oui xxAMD			0x00606e	Advanced Micro Devices
-
 oui xxINTEL			0x00f800	Intel (alt)
+oui xxCICADA			0x00c08f	Cicada Semiconductor (alt)
 
 /* some vendors have the bits swapped within bytes
 	(ie, ordered as on the wire) */
@@ -105,9 +107,6 @@ model xxAMD 79C873		0x0000 Am79C873 10/100 PHY
 model AMD 79C873phy		0x0036 Am79C873 internal PHY
 model AMD 79C875phy		0x0014 Am79C875 quad PHY
 
-/* Agere Systems PHYs */
-model AGERE UNKNOWN		0x000c Unknown 10/100 PHY
-
 /* Altima Communications PHYs */
 model xxALTIMA AC_UNKNOWN	0x0001 AC_UNKNOWN 10/100 PHY
 model xxALTIMA AC101		0x0021 AC101 10/100 PHY
@@ -118,11 +117,13 @@ model xxBROADCOM BCM5400	0x0004 BCM5400 1000baseT PHY
 model xxBROADCOM BCM5401	0x0005 BCM5401 10/100/1000baseT PHY
 model xxBROADCOM BCM5411	0x0007 BCM5411 10/100/1000baseT PHY
 model xxBROADCOM BCM5421S	0x000e BCM5421S 10/100/1000baseT PHY
+model xxBROADCOM BCM5752	0x0010 BCM5752 10/100/1000baseT PHY
 model xxBROADCOM BCM5701	0x0011 BCM5701 10/100/1000baseT PHY
 model xxBROADCOM BCM5703	0x0016 BCM5703 10/100/1000baseT PHY
 model xxBROADCOM BCM5704	0x0019 BCM5704 10/100/1000baseT PHY
 model xxBROADCOM BCM5705	0x001a BCM5705 10/100/1000baseT PHY
 model xxBROADCOM BCM5750	0x0018 BCM5750 10/100/1000baseT PHY
+model xxBROADCOM BCM5714	0x0034 BCM5714 10/100/1000baseT PHY
 model BROADCOM BCM5400		0x0004 BCM5400 1000baseT PHY
 model BROADCOM BCM5401		0x0005 BCM5401 1000baseT PHY
 model BROADCOM BCM5411		0x0007 BCM5411 1000baseT PHY
@@ -132,21 +133,24 @@ model BROADCOM BCM5221		0x001e BCM5221 100baseTX PHY
 model BROADCOM BCM5201		0x0021 BCM5201 10/100 PHY
 model BROADCOM BCM5214		0x0028 BCM5214 Quad 10/100 PHY
 model BROADCOM BCM5222		0x0032 BCM5222 Dual 10/100 PHY
+model BROADCOM BCM5220		0x0033 BCM5220 10/100 PHY
 model BROADCOM BCM4401		0x0036 BCM4401 10/100baseTX PHY
 
 /* Cicada Semiconductor PHYs (now owned by Vitesse?) */
 model CICADA CS8201		0x0001 Cicada CS8201 10/100/1000TX PHY
 model CICADA CS8201A		0x0020 Cicada CS8201 10/100/1000TX PHY
 model CICADA CS8201B		0x0021 Cicada CS8201 10/100/1000TX PHY
+model xxCICADA CS8201B		0x0021 Cicada CS8201 10/100/1000TX PHY
 
 /* Davicom Semiconductor PHYs */
 model xxDAVICOM DM9101		0x0000 DM9101 10/100 PHY
 model DAVICOM DM9102		0x0004 DM9102 10/100 PHY
 model DAVICOM DM9601		0x000c DM9601 10/100 PHY
 
-/* Enable Semiconductor PHYs */
-model ENABLESEMI 88E1000	0x0005 Enable 88E1000
+/* Enable Semiconductor PHYs (Agere) */
+model ENABLESEMI LU3X31FT	0x0001 Enable LU3X31FT
 model ENABLESEMI 88E1000S	0x0004 Enable 88E1000S
+model ENABLESEMI 88E1000	0x0005 Enable 88E1000
 
 /* Marvell Semiconductor PHYs */
 model MARVELL E1000		0x0000 Marvell 88E1000* Gigabit PHY
@@ -155,9 +159,11 @@ model MARVELL E1000_3		0x0003 Marvell 88E1000 Gigabit PHY
 model MARVELL E1000_4		0x0004 Marvell 88E1000S Gigabit PHY
 model MARVELL E1000_5		0x0005 Marvell 88E1000 Gigabit PHY
 model MARVELL E1000_6		0x0006 Marvell 88E1000 Gigabit PHY
-model MARVELL E1000_7		0x000c Marvell 88E1000 Gigabit PHY
+model MARVELL E1111RCJ		0x000c Marvell 88E1111-RCJ Gigabit PHY
+model xxMARVELL E1000_2		0x0002 Marvell 88E1000 Gigabit PHY
 model xxMARVELL E1000_3		0x0003 Marvell 88E1000 Gigabit PHY
 model xxMARVELL E1000_5		0x0005 Marvell 88E1000 Gigabit PHY
+model xxMARVELL E1111		0x000c Marvell 88E1111 Gigabit PHY
 
 /* Contrived vendor/model for dcphy */
 model xxDEC xxDC		0x0001 DC
@@ -174,9 +180,17 @@ model INTEL I82562EM		0x0032 i82562EM 10/100 PHY
 model INTEL I82562ET		0x0033 i82562ET 10/100 PHY
 model INTEL I82553		0x0035 i82553 10/100 PHY
 
+/* Jato Technologies PHYs */
+model JATO BASEX		0x0000 Jato 1000baseX PHY
+
 /* Level 1 PHYs */
 model xxLEVEL1 LXT970		0x0000 LXT970 10/100 PHY
 model xxLEVEL1a LXT971		0x000e LXT971 10/100 PHY
+
+/* Lucent Technologies PHYs */
+model LUCENT LU6612		0x000c LU6612 10/100 PHY
+model LUCENT LU3X51FT		0x0033 LU3X51FT 10/100 PHY
+model LUCENT LU3X54FT		0x0036 LU3X54FT 10/100 PHY
 
 /* Myson Technology PHYs */
 model MYSON MTD972		0x0000 MTD972 10/100 PHY

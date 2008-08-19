@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.68 2004/06/28 02:49:10 aaron Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.72 2005/07/04 01:02:10 mickey Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -174,9 +174,6 @@ void bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 static long devio_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof (long)];
 struct extent *devio_ex;
 static int devio_malloc_safe = 0;
-
-/* HACK - XXX */
-int segment8_a_mapped = 0;
 
 extern int OF_stdout;
 
@@ -1034,12 +1031,6 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
 	    (ppc_malloc_ok ? EX_MALLOCOK : 0))))
 		return error;
 
-	if ((bpa >= 0x80000000) && ((bpa+size) < 0xb0000000)) {
-		if (segment8_a_mapped) {
-			*bshp = bpa;
-			return 0;
-		}
-	}
 	if ((error  = bus_mem_add_mapping(bpa, size, cacheable, bshp))) {
 		if (extent_free(devio_ex, bpa, size, EX_NOWAIT |
 			(ppc_malloc_ok ? EX_MALLOCOK : 0)))
@@ -1124,7 +1115,8 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 			panic("ppc_kvm_stolen, out of space");
 		}
 	} else {
-		vaddr = uvm_km_valloc_wait(phys_map, len);
+		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
+		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 		if (vaddr == 0)
 			panic("bus_mem_add_mapping: kvm alloc of 0x%x failed",
 			    len);
@@ -1137,7 +1129,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 	for (; len > 0; len -= PAGE_SIZE) {
 		pmap_kenter_cache(vaddr, spa,
 			VM_PROT_READ | VM_PROT_WRITE,
-			cacheable ? PMAP_CACHE_WT : PMAP_CACHE_DEFAULT);
+			cacheable ? PMAP_CACHE_WT : PMAP_CACHE_CI);
 		spa += PAGE_SIZE;
 		vaddr += PAGE_SIZE;
 	}
@@ -1171,11 +1163,6 @@ mapiodev(paddr_t pa, psize_t len)
 	spa = trunc_page(pa);
 	off = pa - spa;
 	size = round_page(off+len);
-	if ((pa >= 0x80000000) && ((pa+len) < 0xb0000000)) {
-		if (segment8_a_mapped) {
-			return (void *)pa;
-		}
-	}
 	if (ppc_malloc_ok == 0) {
 		/* need to steal vm space before kernel vm is initialized */
 		va = VM_MIN_KERNEL_ADDRESS + ppc_kvm_stolen;
@@ -1184,7 +1171,8 @@ mapiodev(paddr_t pa, psize_t len)
 			panic("ppc_kvm_stolen, out of space");
 		}
 	} else {
-		va = uvm_km_valloc_wait(phys_map, size);
+		va = uvm_km_kmemalloc(phys_map, NULL, size,
+		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 	}
 
 	if (va == 0)
@@ -1274,8 +1262,7 @@ bus_space_set_region_2(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
 	int i;
 
 	dst = (u_int16_t *) (h+o);
-	if (t->bus_reverse)
-		val = swap16(val);
+	val = swap16(val);
 
 	for (i = 0; i < c; i++)
 		dst[i] = val;
@@ -1288,8 +1275,7 @@ bus_space_set_region_4(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o,
 	int i;
 
 	dst = (u_int32_t *) (h+o);
-	if (t->bus_reverse)
-		val = swap32(val);
+	val = swap32(val);
 
 	for (i = 0; i < c; i++)
 		dst[i] = val;

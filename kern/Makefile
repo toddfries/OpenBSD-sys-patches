@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.11 2004/11/22 17:08:38 pat Exp $
+#	$OpenBSD: Makefile,v 1.13 2005/07/14 02:09:46 uwe Exp $
 
 # Makefile for kernel tags files, init_sysent, etc.
 
@@ -40,10 +40,9 @@ DGEN=	adosfs \
 	kern \
 	lib libkern \
 	miscfs miscfs/deadfs miscfs/fdesc miscfs/fifofs miscfs/kernfs \
-	miscfs/nullfs miscfs/portal miscfs/procfs \
-	miscfs/specfs miscfs/umapfs miscfs/union \
+	miscfs/portal miscfs/procfs miscfs/specfs \
 	msdosfs \
-	net netccitt netinet netns \
+	net netinet \
 	nfs \
 	scsi \
 	sys \

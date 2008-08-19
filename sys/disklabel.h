@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.24 2004/01/23 19:36:25 millert Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.26 2005/03/29 16:30:21 deraadt Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.41 1996/05/10 23:07:37 mark Exp $	*/
 
 /*
@@ -244,6 +244,7 @@ static char *dktypenames[] = {
 #define FS_CCD		18		/* ccd component */
 #define FS_RAID		19		/* RAIDframe */
 #define FS_NTFS		20		/* Windows/NT file system */
+#define FS_UDF		21		/* UDF (DVD) filesystem */
 
 #ifdef DKTYPENAMES
 static char *fstypenames[] = {
@@ -268,6 +269,7 @@ static char *fstypenames[] = {
 	"ccd",
 	"RAID",
 	"NTFS",
+	"UDF",
 	NULL
 };
 
@@ -294,6 +296,7 @@ static char *fstypesnames[] = {
 	"",		/* 18 */
 	"",		/* 19 */
 	"ntfs",		/* 20 */
+	"udf",		/* 21 */
 	NULL
 };
 
@@ -365,6 +368,10 @@ int	 bounds_check_with_label(struct buf *, struct disklabel *,
 	    struct cpu_disklabel *, int);
 #ifdef CD9660
 int iso_disklabelspoof(dev_t dev, void (*strat)(struct buf *),
+	struct disklabel *lp);
+#endif
+#ifdef UDF
+int udf_disklabelspoof(dev_t dev, void (*strat)(struct buf *),
 	struct disklabel *lp);
 #endif
 #endif

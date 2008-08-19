@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pxa2x0,v 1.10 2005/03/08 20:00:23 tdeval Exp $
+#	$OpenBSD: files.pxa2x0,v 1.16 2005/07/01 23:51:55 uwe Exp $
 #	$NetBSD: files.pxa2x0,v 1.6 2004/05/01 19:09:14 thorpej Exp $
 #
 # Configuration info for Intel PXA2[51]0 CPU support
@@ -15,7 +15,6 @@ file	arch/arm/arm/irq_dispatch.S
 file	arch/arm/xscale/pxa2x0_space.c
 #file	arch/arm/xscale/pxa2x0_freqchg.S
 file	arch/arm/xscale/pxa2x0_dma.c
-#file	arch/arm/xscale/pxa2x0_i2c.c
 
 # Cotulla integrated peripherals.
 
@@ -30,6 +29,11 @@ device	pxagpio
 attach	pxagpio at pxaip
 file	arch/arm/xscale/pxa2x0_gpio.c		pxagpio needs-flag
 
+# DMA controller
+device	pxadmac
+attach	pxadmac at pxaip
+file	arch/arm/xscale/pxa2x0_dmac.c		pxadmac needs-flag
+
 # clock device
 # PXA2x0's built-in timer is compatible to SA-1110.
 device	saost
@@ -37,11 +41,10 @@ attach	saost at pxaip
 file	arch/arm/sa11x0/sa11x0_ost.c		saost needs-flag
 
 # NS16550 compatible serial ports
-attach	com at pxaip with pxauart
-file	arch/arm/xscale/pxa2x0_com.c		pxauart
-file	arch/arm/xscale/pxa2x0_a4x_space.c	pxauart | obio
-file	arch/arm/xscale/pxa2x0_a4x_io.S		pxauart | obio
-#defflag	opt_com.h	FFUARTCONSOLE STUARTCONSOLE BTUARTCONSOLE
+attach	com at pxaip with com_pxaip
+file	arch/arm/xscale/pxa2x0_com.c		com_pxaip
+file	arch/arm/xscale/pxa2x0_a4x_space.c	com_pxaip
+file	arch/arm/xscale/pxa2x0_a4x_io.S		com_pxaip
 
 # PXA27x USB Device Controller
 device	pxaudc
@@ -56,6 +59,14 @@ file	arch/arm/xscale/pxa2x0_ohci.c		pxaohci
 device	lcd: wsemuldisplaydev, rasops16, rasops8, rasops4
 file	arch/arm/xscale/pxa2x0_lcd.c		lcd needs-flag
 
+# Inter-Integrated Circuit controller
+device	i2c {}
+file	arch/arm/xscale/pxa2x0_i2c.c		i2c
+
+# Inter-IC Sound controller
+device	i2s {}
+file	arch/arm/xscale/pxa2x0_i2s.c		i2s
+
 # Power manager and APM emulation
 device	apm
 file	arch/arm/xscale/pxa2x0_apm.c		apm needs-flag
@@ -65,10 +76,7 @@ include	"dev/pcmcia/files.pcmcia"
 
 # PCMCIA controller
 device	pxapcic: pcmciabus
-attach	pxapcic at pxaip
 file	arch/arm/xscale/pxa2x0_pcic.c		pxapcic
 
 # XXX this is a hack to use dev/pcmcia without fdc.c
 device	fdc
-
-file	arch/arm/xscale/pxacom.c		com & pxauart needs-flag

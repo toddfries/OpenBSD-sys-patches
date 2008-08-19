@@ -1,4 +1,4 @@
-/*	$OpenBSD: exit.c,v 1.1 2005/01/10 00:25:03 deraadt Exp $	*/
+/*	$OpenBSD: exit.c,v 1.4 2005/05/24 20:38:20 uwe Exp $	*/
 /*	$NetBSD: exit.c,v 1.11 1996/12/01 20:22:19 pk Exp $	*/
 
 /*-
@@ -31,7 +31,11 @@
 
 #include <sys/stdarg.h>
 
-#include <lib/libsa/stand.h>
+#include "libsa.h"
+
+/* unixcons.c */
+extern struct termios tioc;
+extern int            tioc_valid;
 
 __dead void
 panic(const char *fmt, ...)
@@ -61,5 +65,7 @@ panic(const char *fmt, ...)
 void
 exit(void)
 {
-	panic("exit");
+	if (tioc_valid)
+		(void)tcsetattr(0, TCSADRAIN, &tioc);
+	uexit(0);
 }

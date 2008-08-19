@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensors.h,v 1.4 2004/02/10 19:53:34 grange Exp $	*/
+/*	$OpenBSD: sensors.h,v 1.7 2005/08/05 03:07:41 dlg Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexander Yurchenko <grange@openbsd.org>
@@ -40,7 +40,17 @@ enum sensor_type {
 	SENSOR_WATTHOUR,		/* power capacity */
 	SENSOR_AMPHOUR,			/* power capacity */
 	SENSOR_INDICATOR,		/* boolean indicator */
-	SENSOR_INTEGER			/* generic interger value */
+	SENSOR_INTEGER,			/* generic integer value */
+	SENSOR_PERCENT			/* percent */
+};
+
+/* Sensor states */
+enum sensor_status {
+	SENSOR_S_UNSPEC,		/* status is unspecified */
+	SENSOR_S_OK,			/* status is ok */
+	SENSOR_S_WARN,			/* status is warning */
+	SENSOR_S_CRIT,			/* status is critical */
+	SENSOR_S_UNKNOWN		/* status is unknown */
 };
 
 /* Sensor data */
@@ -52,8 +62,10 @@ struct sensor {
 	char desc[32];			/* sensor description */
 	int64_t value;			/* current value */
 	u_int rfact;			/* resistor factor */
+	enum sensor_status status;	/* sensor status */
 	int flags;			/* sensor flags */
 #define SENSOR_FINVALID		0x0001	/* sensor is invalid */
+#define SENSOR_FUNKNOWN		0x0002	/* sensor value is unknown */
 };
 
 SLIST_HEAD(sensors_head, sensor);

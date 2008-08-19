@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.6 2004/10/01 18:58:09 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.9 2005/05/22 19:40:51 art Exp $	*/
 /*
  * Copyright (c) 2001-2004, Miodrag Vallat
  * Copyright (c) 1998-2001 Steve Murphree, Jr.
@@ -170,7 +170,7 @@ vaddr_t kmapva = 0;
  * Internal routines
  */
 static void flush_atc_entry(long, vaddr_t, boolean_t);
-pt_entry_t *pmap_expand_kmap(vaddr_t, vm_prot_t);
+pt_entry_t *pmap_expand_kmap(vaddr_t, vm_prot_t, int);
 void pmap_remove_pte(pmap_t, vaddr_t, pt_entry_t *);
 void pmap_remove_range(pmap_t, vaddr_t, vaddr_t);
 void pmap_expand(pmap_t, vaddr_t);
@@ -303,7 +303,7 @@ pmap_pte(pmap_t pmap, vaddr_t virt)
  *
  */
 pt_entry_t *
-pmap_expand_kmap(vaddr_t virt, vm_prot_t prot)
+pmap_expand_kmap(vaddr_t virt, vm_prot_t prot, int canfail)
 {
 	sdt_entry_t template, *sdt;
 	kpdt_entry_t kpdt_ent;
@@ -323,8 +323,12 @@ pmap_expand_kmap(vaddr_t virt, vm_prot_t prot)
 #endif
 
 	kpdt_ent = kpdt_free;
-	if (kpdt_ent == KPDT_ENTRY_NULL)
-		panic("pmap_expand_kmap: Ran out of kernel pte tables");
+	if (kpdt_ent == KPDT_ENTRY_NULL) {
+		if (canfail)
+			return (NULL);
+		else
+			panic("pmap_expand_kmap: Ran out of kernel pte tables");
+	}
 
 	kpdt_free = kpdt_free->next;
 	/* physical table */
@@ -408,12 +412,12 @@ pmap_map(vaddr_t virt, paddr_t start, paddr_t end, vm_prot_t prot, u_int cmode)
 	for (num_phys_pages = npages; num_phys_pages != 0; num_phys_pages--) {
 		if ((pte = pmap_pte(kernel_pmap, virt)) == PT_ENTRY_NULL)
 			pte = pmap_expand_kmap(virt,
-			    VM_PROT_READ | VM_PROT_WRITE);
+			    VM_PROT_READ | VM_PROT_WRITE, 0);
 
 #ifdef DEBUG
 		if ((pmap_con_dbg & (CD_MAP | CD_FULL)) == (CD_MAP | CD_FULL))
 			if (PDT_VALID(pte))
-				printf("(pmap_map: %x) pte @ 0x%p already valid\n", curproc, pte);
+				printf("(pmap_map: %x) pte @ %p already valid\n", curproc, pte);
 #endif
 
 		*pte = template | page;
@@ -481,7 +485,7 @@ pmap_cache_ctrl(pmap_t pmap, vaddr_t s, vaddr_t e, u_int mode)
 			continue;
 #ifdef DEBUG
 		if (pmap_con_dbg & CD_CACHE) {
-			printf("(cache_ctrl) pte@0x%p\n", pte);
+			printf("(cache_ctrl) pte@%p\n", pte);
 		}
 #endif /* DEBUG */
 		/*
@@ -711,7 +715,7 @@ pmap_bootstrap(vaddr_t load_start)
 ({ \
 	v = (c)virt; \
 	if ((p = pmap_pte(kernel_pmap, virt)) == PT_ENTRY_NULL) \
-		pmap_expand_kmap(virt, VM_PROT_READ | VM_PROT_WRITE); \
+		pmap_expand_kmap(virt, VM_PROT_READ | VM_PROT_WRITE, 0); \
 	virt += ((n) * PAGE_SIZE); \
 })
 
@@ -734,7 +738,7 @@ pmap_bootstrap(vaddr_t load_start)
 
 	for (i = 0, virt = UADDR; i < UPAGES; i++, virt += PAGE_SIZE) {
 		if ((pte = pmap_pte(kernel_pmap, virt)) == PT_ENTRY_NULL)
-			pmap_expand_kmap(virt, VM_PROT_READ | VM_PROT_WRITE);
+			pmap_expand_kmap(virt, VM_PROT_READ | VM_PROT_WRITE, 0);
 	}
 
 	/*
@@ -889,7 +893,7 @@ pmap_create(void)
 		    (int)stpa);
 
 	if (pmap_con_dbg & CD_CREAT) {
-		printf("(pmap_create: %x) pmap=0x%p, pm_stab=0x%x (pa 0x%x)\n",
+		printf("(pmap_create: %x) pmap=%p, pm_stab=0x%x (pa 0x%x)\n",
 		    curproc, pmap, pmap->pm_stab, stpa);
 	}
 #endif
@@ -1141,7 +1145,7 @@ pmap_remove_pte(pmap_t pmap, vaddr_t va, pt_entry_t *pte)
 	}
 	if (cur == PV_ENTRY_NULL) {
 		panic("pmap_remove_pte: mapping for va "
-		    "0x%lx (pa 0x%lx) not in pv list at 0x%p",
+		    "0x%lx (pa 0x%lx) not in pv list at %p",
 		    va, pa, pvl);
 	}
 
@@ -1635,12 +1639,6 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		else
 			printf("(pmap_enter: %x) pmap %x va %x pa %x\n", curproc, pmap, va, pa);
 	}
-
-	/* copying/zeroing pages are magic */
-	if (pmap == kernel_pmap &&
-	    va >= phys_map_vaddr && va < phys_map_vaddr_end) {
-		return 0;
-	}
 #endif
 
 	template = m88k_protection(prot);
@@ -1654,7 +1652,10 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	 */
 	while ((pte = pmap_pte(pmap, va)) == PT_ENTRY_NULL) {
 		if (pmap == kernel_pmap) {
-			pmap_expand_kmap(va, VM_PROT_READ | VM_PROT_WRITE);
+			/* will only return NULL if PMAP_CANFAIL is set */
+			if (pmap_expand_kmap(va, VM_PROT_READ | VM_PROT_WRITE,
+			    flags & PMAP_CANFAIL) == NULL)
+				return (ENOMEM);
 		} else {
 			/*
 			 * Must unlock to expand the pmap.
@@ -1672,26 +1673,28 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	if (pmap_con_dbg & CD_ENT)
 		printf("(pmap_enter) old_pa %x pte %x\n", old_pa, *pte);
 #endif
+
+	pg = PHYS_TO_VM_PAGE(pa);
+	if (pg != NULL)
+		pvl = pg_to_pvh(pg);
+	else
+		pvl = NULL;
+
 	if (old_pa == pa) {
 		/* May be changing its wired attributes or protection */
 		if (wired && !(pmap_pte_w(pte)))
 			pmap->pm_stats.wired_count++;
 		else if (!wired && pmap_pte_w(pte))
 			pmap->pm_stats.wired_count--;
-
-		pvl = NULL;
-	} else { /* if (pa == old_pa) */
+	} else {
 		/* Remove old mapping from the PV list if necessary. */
 		pmap_remove_pte(pmap, va, pte);
 
-		pg = PHYS_TO_VM_PAGE(pa);
-		if (pg != NULL) {
+		if (pvl != NULL) {
 			/*
-			 *	Enter the mapping in the PV list for this
-			 *	physical page.
+			 * Enter the mapping in the PV list for this
+			 * managed page.
 			 */
-			pvl = pg_to_pvh(pg);
-
 			if (pvl->pv_pmap == PMAP_NULL) {
 				/*
 				 *	No mappings yet
@@ -1702,15 +1705,6 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 				pvl->pv_flags = 0;
 
 			} else {
-#ifdef DEBUG
-				/*
-				 * Check that this mapping is not already there
-				 */
-				for (pv_e = pvl; pv_e; pv_e = pv_e->pv_next)
-					if (pv_e->pv_pmap == pmap &&
-					    pv_e->pv_va == va)
-						panic("pmap_enter: already in pv_list");
-#endif
 				/*
 				 * Add new pv_entry after header.
 				 */
@@ -1743,6 +1737,9 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	if (wired)
 		template |= PG_W;
 
+	/*
+	 * If outside physical memory, disable cache on this (I/O) page.
+	 */
 	if ((unsigned long)pa >= last_addr)
 		template |= CACHE_INH;
 	else
@@ -1989,7 +1986,7 @@ pmap_activate(struct proc *p)
 
 #ifdef DEBUG
 	if (pmap_con_dbg & CD_ACTIVATE)
-		printf("(pmap_activate: %x) pmap 0x%p\n", p, pmap);
+		printf("(pmap_activate: %x) pmap %p\n", p, pmap);
 #endif
 
 	if (pmap != kernel_pmap) {
@@ -2279,7 +2276,7 @@ testbit_Retry:
 			pvl->pv_flags |= bit;
 #ifdef DEBUG
 			if ((pmap_con_dbg & (CD_TBIT | CD_FULL)) == (CD_TBIT | CD_FULL))
-				printf("(pmap_testbit: %x) true on page pte@0x%p\n", curproc, pte);
+				printf("(pmap_testbit: %x) true on page pte@%p\n", curproc, pte);
 #endif
 			SPLX(spl);
 			return (TRUE);
@@ -2460,7 +2457,7 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 	 * Expand pmap to include this pte.
 	 */
 	while ((pte = pmap_pte(kernel_pmap, va)) == PT_ENTRY_NULL)
-		pmap_expand_kmap(va, VM_PROT_READ | VM_PROT_WRITE);
+		pmap_expand_kmap(va, VM_PROT_READ | VM_PROT_WRITE, 0);
 
 	/*
 	 * And count the mapping.
@@ -2469,6 +2466,10 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 	kernel_pmap->pm_stats.wired_count++;
 
 	invalidate_pte(pte);
+
+	/*
+	 * If outside physical memory, disable cache on this (I/O) page.
+	 */
 	if ((unsigned long)pa >= last_addr)
 		template |= CACHE_INH | PG_V | PG_W;
 	else

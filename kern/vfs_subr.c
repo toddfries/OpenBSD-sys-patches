@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.109.2.1 2005/11/21 23:22:12 brad Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.114.2.1 2005/11/21 23:12:25 brad Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -409,8 +409,6 @@ getnewvnode(tag, mp, vops, vpp)
 		for (vp = TAILQ_FIRST(listhd); vp != NULLVP;
 		    vp = TAILQ_NEXT(vp, v_freelist)) {
 			if (simple_lock_try(&vp->v_interlock)) {
-				if ((vp->v_flag & VLAYER) == 0)
-					break;
 				if (VOP_ISLOCKED(vp) == 0)
 					break;
 				else
@@ -459,7 +457,6 @@ getnewvnode(tag, mp, vops, vpp)
 	vp->v_type = VNON;
 	cache_purge(vp);
 	vp->v_vnlock = NULL;
-	lockinit(&vp->v_lock, PVFS, "v_lock", 0, 0);
 	vp->v_tag = tag;
 	vp->v_op = vops;
 	insmntque(vp, mp);
@@ -638,7 +635,6 @@ loop:
 	simple_lock(&vp->v_interlock);
 	vclean(vp, 0, p);
 	vp->v_vnlock = NULL;
-	lockinit(&vp->v_lock, PVFS, "v_lock", 0, 0);
 	vp->v_op = nvp->v_op;
 	vp->v_tag = nvp->v_tag;
 	nvp->v_type = VNON;
@@ -1098,7 +1094,7 @@ vclean(vp, flags, p)
 	simple_unlock(&vp->v_selectinfo.vsi_lock);
 	vp->v_tag = VT_NON;
 	vp->v_flag &= ~VXLOCK;
-#ifdef DIAGNOSTIC
+#ifdef VFSDEBUG
 	vp->v_flag &= ~VLOCKSWORK;
 #endif
 	if (vp->v_flag & VXWANT) {
@@ -1154,6 +1150,8 @@ vgonel(vp, p)
 {
 	register struct vnode *vq;
 	struct vnode *vx;
+	struct mount *mp;
+	int flags;
 
 	/*
 	 * If a vgone (or vclean) is already in progress,
@@ -1209,6 +1207,20 @@ vgonel(vp, p)
 			vp->v_flag &= ~VALIASED;
 		}
 		simple_unlock(&spechash_slock);
+
+		/*
+		 * If we have a mount point associated with the vnode, we must
+		 * flush it out now, as to not leave a dangling zombie mount
+		 * point laying around in VFS.
+		 */
+		mp = vp->v_specmountpoint;
+		if (mp != NULL) {
+			if (!vfs_busy(mp, LK_EXCLUSIVE, NULL, p)) {
+				flags = MNT_FORCE | MNT_DOOMED;
+				dounmount(mp, flags, p, NULL);
+			}
+		}
+
 		FREE(vp->v_specinfo, M_VNODE);
 		vp->v_specinfo = NULL;
 	}
@@ -1344,7 +1356,11 @@ vprint(label, vp)
 	if (vp->v_flag & VXWANT)
 		strlcat(buf, "|VXWANT", sizeof buf);
 	if (vp->v_bioflag & VBIOWAIT)
-		strlcat(buf, "| VBIOWAIT", sizeof buf);
+		strlcat(buf, "|VBIOWAIT", sizeof buf);
+	if (vp->v_bioflag & VBIOONFREELIST)
+		strlcat(buf, "|VBIOONFREELIST", sizeof buf);
+	if (vp->v_bioflag & VBIOONSYNCLIST)
+		strlcat(buf, "|VBIOONSYNCLIST", sizeof buf);
 	if (vp->v_flag & VALIASED)
 		strlcat(buf, "|VALIASED", sizeof buf);
 	if (buf[0] != '\0')
@@ -1571,7 +1587,8 @@ vfs_hang_addrlist(mp, nep, argp)
 		mp->mnt_flag |= MNT_DEFEXPORTED;
 		return (0);
 	}
-	if (argp->ex_addrlen > MLEN)
+	if (argp->ex_addrlen > MLEN || argp->ex_masklen > MLEN ||
+	    argp->ex_addrlen < 0 || argp->ex_masklen < 0)
 		return (EINVAL);
 	i = sizeof(struct netcred) + argp->ex_addrlen + argp->ex_masklen;
 	np = (struct netcred *)malloc(i, M_NETADDR, M_WAITOK);

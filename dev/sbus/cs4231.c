@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4231.c,v 1.24 2005/03/08 21:35:03 miod Exp $	*/
+/*	$OpenBSD: cs4231.c,v 1.27 2005/07/09 22:23:15 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -35,9 +35,6 @@
  * Driver for CS4231 based audio found in some sun4m systems (cs4231)
  * based on ideas from the S/Linux project and the NetBSD project.
  */
-
-#include "audio.h"
-#if NAUDIO > 0
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -151,7 +148,6 @@ int	cs4231_get_port(void *, mixer_ctrl_t *);
 int	cs4231_query_devinfo(void *, mixer_devinfo_t *);
 void *	cs4231_alloc(void *, int, size_t, int, int);
 void	cs4231_free(void *, void *, int);
-size_t	cs4231_round_buffersize(void *, int, size_t);
 int	cs4231_get_props(void *);
 int	cs4231_trigger_output(void *, void *, void *, int,
     void (*)(void *), void *, struct audio_params *);
@@ -180,7 +176,7 @@ struct audio_hw_if cs4231_sa_hw_if = {
 	cs4231_query_devinfo,
 	cs4231_alloc,
 	cs4231_free,
-	cs4231_round_buffersize,
+	0,
 	0,
 	cs4231_get_props,
 	cs4231_trigger_output,
@@ -651,7 +647,7 @@ cs4231_set_params(void *vsc, int setmode, int usemode,
 int
 cs4231_round_blocksize(void *vsc, int blk)
 {
-	return (blk & (-4));
+	return ((blk + 3) & (-4));
 }
 
 int
@@ -1307,12 +1303,6 @@ cs4231_query_devinfo(void *vsc, mixer_devinfo_t *dip)
 	return (err);
 }
 
-size_t
-cs4231_round_buffersize(void *vsc, int direction, size_t size)
-{
-	return (size);
-}
-
 int
 cs4231_get_props(void *vsc)
 {
@@ -1631,5 +1621,3 @@ cs4231_trigger_input(void *vsc, void *start, void *end, int blksize,
 
 	return (0);
 }
-
-#endif /* NAUDIO > 0 */

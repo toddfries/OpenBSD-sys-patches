@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.5 2004/08/06 22:39:12 deraadt Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.8 2005/07/12 21:18:11 hshoexer Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -111,7 +111,7 @@
  *  |         Kernel Space            |
  *  |                                 |
  *  |                                 |
- *  +---------------------------------+ 0xffff800000000000 = 0x0000008000000000
+ *  +---------------------------------+ 0xffff800000000000 = 0x0000800000000000
  *  |                                 |
  *  |    alt.L1 table (PTE pages)     |
  *  |                                 |
@@ -123,7 +123,7 @@
  *  |                                 |
  *  +---------------------------------+ 0x0000000000000000
  *
- * In other words, there is a 'VA hole' at 0x0000008000000000 -
+ * In other words, there is a 'VA hole' at 0x0000800000000000 -
  * 0xffff800000000000 which will trap, just as on, for example,
  * sparcv9.
  *
@@ -350,36 +350,6 @@ struct pv_entry {			/* locked by its list's pvh_lock */
 };
 
 /*
- * pv_entrys are dynamically allocated in chunks from a single page.
- * we keep track of how many pv_entrys are in use for each page and
- * we can free pv_entry pages if needed.  there is one lock for the
- * entire allocation system.
- */
-
-struct pv_page_info {
-	TAILQ_ENTRY(pv_page) pvpi_list;
-	struct pv_entry *pvpi_pvfree;
-	int pvpi_nfree;
-};
-
-/*
- * number of pv_entry's in a pv_page
- * (note: won't work on systems where NPBG isn't a constant)
- */
-
-#define PVE_PER_PVPAGE ((PAGE_SIZE - sizeof(struct pv_page_info)) / \
-			sizeof(struct pv_entry))
-
-/*
- * a pv_page: where pv_entrys are allocated from
- */
-
-struct pv_page {
-	struct pv_page_info pvinfo;
-	struct pv_entry pvents[PVE_PER_PVPAGE];
-};
-
-/*
  * pmap_remove_record: a record of VAs that have been unmapped, used to
  * flush TLB.  if we have more than PMAP_RR_MAX then we stop recording.
  */
@@ -451,6 +421,8 @@ void	pmap_tlb_shootdown(pmap_t, vaddr_t, pt_entry_t, int32_t *);
 void	pmap_tlb_shootnow(int32_t);
 void	pmap_do_tlb_shootdown(struct cpu_info *);
 void	pmap_prealloc_lowmem_ptps(void);
+
+void	pagezero(vaddr_t);
 
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
 
@@ -583,7 +555,6 @@ kvtopte(vaddr_t va)
 #define pmap_cpu_has_pg_n()		(1)
 #define pmap_cpu_has_invlpg		(1)
 
-paddr_t vtophys(vaddr_t);
 vaddr_t	pmap_map(vaddr_t, paddr_t, paddr_t, vm_prot_t);
 
 #if 0   /* XXXfvdl was USER_LDT, need to check if that can be supported */
@@ -591,15 +562,11 @@ void	pmap_ldt_cleanup(struct proc *);
 #define	PMAP_FORK
 #endif /* USER_LDT */
 
-/* 
- * Hooks for the pool allocator.
- */
-/* #define	POOL_VTOPHYS(va)	vtophys((vaddr_t) (va)) */
+#define PMAP_DIRECT_MAP(pa)	((vaddr_t)PMAP_DIRECT_BASE + pa)
+#define PMAP_DIRECT_UNMAP(va)	((paddr_t)va - PMAP_DIRECT_BASE)
 
-#define pmap_map_direct(pg)	\
-	((vaddr_t)PMAP_DIRECT_BASE + VM_PAGE_TO_PHYS(pg))
-#define pmap_unmap_direct(va)	\
-	PHYS_TO_VM_PAGE(va - PMAP_DIRECT_BASE)
+#define pmap_map_direct(pg)	PMAP_DIRECT_MAP(VM_PAGE_TO_PHYS(pg))
+#define pmap_unmap_direct(va)	PHYS_TO_VM_PAGE(PMAP_DIRECT_UNMAP(va))
 
 #define __HAVE_PMAP_DIRECT
 

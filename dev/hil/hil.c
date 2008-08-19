@@ -1,4 +1,4 @@
-/*	$OpenBSD: hil.c,v 1.17 2005/01/15 19:48:15 miod Exp $	*/
+/*	$OpenBSD: hil.c,v 1.20 2005/05/13 15:22:37 miod Exp $	*/
 /*
  * Copyright (c) 2003, 2004, Miodrag Vallat.
  * All rights reserved.
@@ -92,10 +92,11 @@ struct cfdriver hil_cd = {
 	NULL, "hil", DV_DULL
 };
 
-void	hilconfig(struct hil_softc *);
+void	hilconfig(struct hil_softc *, u_int);
 void	hilempty(struct hil_softc *);
 int	hilsubmatch(struct device *, void *, void *);
 void	hil_process_int(struct hil_softc *, u_int8_t, u_int8_t);
+void	hil_process_pending(struct hil_softc *);
 int	hil_process_poll(struct hil_softc *, u_int8_t, u_int8_t);
 int	send_device_cmd(struct hil_softc *sc, u_int device, u_int cmd);
 void	polloff(struct hil_softc *);
@@ -251,11 +252,7 @@ hil_attach_deferred(void *v)
 	 * Reconfigure if necessary
 	 */
 	sc->sc_status = HIL_STATUS_READY;
-	if (sc->sc_pending == HIL_PENDING_RECONFIG) {
-		sc->sc_pending = 0;
-		hilconfig(sc);
-	} else
-		sc->sc_pending = 0;
+	hil_process_pending(sc);
 }
 
 /*
@@ -277,6 +274,9 @@ hil_intr(void *v)
 	DELAY(1);
 	hil_process_int(sc, stat, c);
 
+	if (sc->sc_status != HIL_STATUS_BUSY)
+		hil_process_pending(sc);
+
 	return (1);
 }
 
@@ -291,16 +291,10 @@ hil_process_int(struct hil_softc *sc, u_int8_t stat, u_int8_t c)
 		  	sc->sc_cmddone = 1;
 			switch (c) {
 			case HIL_RECONFIG:
-				if (sc->sc_status == HIL_STATUS_BUSY)
-					sc->sc_pending = HIL_PENDING_RECONFIG;
-				else
-					hilconfig(sc);
+				sc->sc_pending = HIL_PENDING_RECONFIG;
 				break;
 			case HIL_UNPLUGGED:
-				if (sc->sc_status == HIL_STATUS_BUSY)
-					sc->sc_pending = HIL_PENDING_UNPLUGGED;
-				else
-					hilempty(sc);
+				sc->sc_pending = HIL_PENDING_UNPLUGGED;
 				break;
 			}
 			break;
@@ -342,7 +336,6 @@ hil_process_int(struct hil_softc *sc, u_int8_t stat, u_int8_t c)
 		}
 		break;
 	}
-
 }
 
 /*
@@ -424,6 +417,21 @@ hil_process_poll(struct hil_softc *sc, u_int8_t stat, u_int8_t c)
 	return 0;
 }
 
+void
+hil_process_pending(struct hil_softc *sc)
+{
+	switch (sc->sc_pending) {
+	case HIL_PENDING_RECONFIG:
+		sc->sc_pending = 0;
+		hilconfig(sc, sc->sc_maxdev);
+		break;
+	case HIL_PENDING_UNPLUGGED:
+		sc->sc_pending = 0;
+		hilempty(sc);
+		break;
+	}
+}
+
 /*
  * Called after the loop has reconfigured.  Here we need to:
  *	- determine how many devices are on the loop
@@ -441,7 +449,7 @@ hil_process_poll(struct hil_softc *sc, u_int8_t stat, u_int8_t c)
  * NMI interrupt...
  */
 void
-hilconfig(struct hil_softc *sc)
+hilconfig(struct hil_softc *sc, u_int knowndevs)
 {
 	struct hil_attach_args ha;
 	u_int8_t db;
@@ -466,9 +474,9 @@ hilconfig(struct hil_softc *sc)
 	send_hil_cmd(sc, HIL_WRITEKBDSADR, &db, 1, NULL);
 
 	/*
-	 * Now attach hil devices as they are found.
+	 * If the loop grew, attach new devices.
 	 */
-	for (id = 1; id <= sc->sc_maxdev; id++) {
+	for (id = knowndevs + 1; id <= sc->sc_maxdev; id++) {
 		int len;
 		const struct hildevice *hd;
 		
@@ -485,25 +493,6 @@ hilconfig(struct hil_softc *sc)
 			    sc->sc_dev.dv_xname, id);
 #endif
 			continue;
-		}
-
-		/*
-		 * If we already have a device configured at this position,
-		 * then either it is still the same, or there has been some
-		 * removal or insertion in the chain that made it change
-		 * its position on the loop.
-		 *
-		 * Rather than trying to play smart and find where the
-		 * device has gone, detach it, it will get reattached at
-		 * its new address...
-		 */
-		if (sc->sc_devices[id] != NULL) {
-			if (len == sc->sc_devices[id]->sc_infolen &&
-			    bcmp(sc->sc_cmdbuf, sc->sc_devices[id]->sc_info,
-			      len) == 0)
-				continue;
-
-			config_detach((struct device *)sc->sc_devices[id], 0);
 		}
 
 		/* Identify and attach device */
@@ -525,7 +514,7 @@ hilconfig(struct hil_softc *sc)
 	}
 
 	/*
-	 * Detach remaining devices, if they have been removed
+	 * Detach remaining devices, if the loop has shrunk.
 	 */
 	for (id = sc->sc_maxdev + 1; id < NHILD; id++) {
 		if (sc->sc_devices[id] != NULL)
@@ -548,21 +537,39 @@ hilempty(struct hil_softc *sc)
 {
 	u_int8_t db;
 	int id, s;
+	u_int oldmaxdev;
 
 	s = splhil();
 
 	/*
-	 * Check that the loop is really empty.
+	 * Wait for the loop to be stable.
 	 */
-	db = 0;
-	send_hil_cmd(sc, HIL_READLPSTAT, NULL, 0, &db);
-	sc->sc_maxdev = db & LPS_DEVMASK;
+	for (;;) {
+		if (send_hil_cmd(sc, HIL_READLPSTAT, NULL, 0, &db) == 0) {
+			if (db & (LPS_CONFFAIL | LPS_CONFGOOD))
+				break;
+		} else {
+			db = LPS_CONFFAIL;
+			break;
+		}
+	}
 
-	if (sc->sc_maxdev != 0) {
-		printf("%s: unplugged loop finds %d devices???\n",
-		    sc->sc_dev.dv_xname, sc->sc_maxdev);
-		hilconfig(sc);
-		return;
+	if (db & LPS_CONFFAIL) {
+		sc->sc_maxdev = 0;
+	} else {
+		db = 0;
+		send_hil_cmd(sc, HIL_READLPSTAT, NULL, 0, &db);
+		oldmaxdev = sc->sc_maxdev;
+		sc->sc_maxdev = db & LPS_DEVMASK;
+
+		if (sc->sc_maxdev != 0) {
+			/*
+			 * The loop was not unplugged after all, but its
+			 * configuration has changed.
+			 */
+			hilconfig(sc, oldmaxdev);
+			return;
+		}
 	}
 
 	/*
@@ -802,16 +809,7 @@ hil_set_poll(struct hil_softc *sc, int on)
 	if (on) {
 		pollon(sc);
 	} else {
-		switch (sc->sc_pending) {
-		case HIL_PENDING_RECONFIG:
-			sc->sc_pending = 0;
-			hilconfig(sc);
-			break;
-		case HIL_PENDING_UNPLUGGED:
-			sc->sc_pending = 0;
-			hilempty(sc);
-			break;
-		}
+		hil_process_pending(sc);
 		send_hil_cmd(sc, HIL_INTON, NULL, 0, NULL);
 	}
 }

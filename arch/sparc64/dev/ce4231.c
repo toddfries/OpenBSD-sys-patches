@@ -1,4 +1,4 @@
-/*	$OpenBSD: ce4231.c,v 1.17 2004/11/09 14:30:34 miod Exp $	*/
+/*	$OpenBSD: ce4231.c,v 1.20 2005/07/09 22:23:15 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -35,9 +35,6 @@
  * Materiel Command, USAF, under agreement number F30602-01-2-0537.
  *
  */
-
-#include "audio.h"
-#if NAUDIO > 0
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -155,7 +152,6 @@ int	ce4231_get_port(void *, mixer_ctrl_t *);
 int	ce4231_query_devinfo(void *addr, mixer_devinfo_t *);
 void *	ce4231_alloc(void *, int, size_t, int, int);
 void	ce4231_free(void *, void *, int);
-size_t	ce4231_round_buffersize(void *, int, size_t);
 int	ce4231_get_props(void *);
 int	ce4231_trigger_output(void *, void *, void *, int,
     void (*intr)(void *), void *arg, struct audio_params *);
@@ -184,7 +180,7 @@ struct audio_hw_if ce4231_sa_hw_if = {
 	ce4231_query_devinfo,
 	ce4231_alloc,
 	ce4231_free,
-	ce4231_round_buffersize,
+	0,
 	0,
 	ce4231_get_props,
 	ce4231_trigger_output,
@@ -668,7 +664,7 @@ ce4231_round_blocksize(addr, blk)
 	void *addr;
 	int blk;
 {
-	return (blk & (-4));
+	return ((blk + 3) & (-4));
 }
 
 int
@@ -1311,15 +1307,6 @@ ce4231_query_devinfo(addr, dip)
 	return (err);
 }
 
-size_t
-ce4231_round_buffersize(addr, direction, size)
-	void *addr;
-	int direction;
-	size_t size;
-{
-	return (size);
-}
-
 int
 ce4231_get_props(addr)
 	void *addr;
@@ -1546,5 +1533,3 @@ ce4231_trigger_input(addr, start, end, blksize, intr, arg, param)
 {
 	return (ENXIO);
 }
-
-#endif /* NAUDIO > 0 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4231.c,v 1.21 2004/09/29 07:35:11 miod Exp $	*/
+/*	$OpenBSD: cs4231.c,v 1.25 2005/07/17 10:40:50 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -30,9 +30,6 @@
  * Driver for CS4231 based audio found in some sun4m systems (cs4231)
  * based on ideas from the S/Linux project and the NetBSD project.
  */
-
-#include "audio.h"
-#if NAUDIO > 0
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -137,7 +134,6 @@ int	cs4231_get_port(void *, mixer_ctrl_t *);
 int	cs4231_query_devinfo(void *addr, mixer_devinfo_t *);
 void *	cs4231_alloc(void *, int, size_t, int, int);
 void	cs4231_free(void *, void *, int);
-size_t	cs4231_round_buffersize(void *, int, size_t);
 int	cs4231_get_props(void *);
 int	cs4231_trigger_output(void *, void *, void *, int,
     void (*intr)(void *), void *arg, struct audio_params *);
@@ -168,7 +164,7 @@ struct audio_hw_if cs4231_sa_hw_if = {
 	cs4231_query_devinfo,
 	cs4231_alloc,
 	cs4231_free,
-	cs4231_round_buffersize,
+	0,
 	0,
 	cs4231_get_props,
 	cs4231_trigger_output,
@@ -244,7 +240,7 @@ cs4231_attach(parent, self, aux)
 	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_AUHARD,
 	    self->dv_xname);
 
-	printf(" pri %d, softpri %d\n", pri, IPL_AUSOFT);
+	printf(" pri %d\n", pri);
 
 	audio_attach_mi(&cs4231_sa_hw_if, sc, &sc->sc_dev);
 
@@ -753,7 +749,7 @@ cs4231_round_blocksize(addr, blk)
 	void *addr;
 	int blk;
 {
-	return (blk & (-4));
+	return ((blk + 3) & (-4));
 }
 
 int
@@ -1491,15 +1487,6 @@ cs4231_free(addr, ptr, pool)
 	printf("%s: attempt to free rogue pointer\n", sc->sc_dev.dv_xname);
 }
 
-size_t
-cs4231_round_buffersize(addr, direction, size)
-	void *addr;
-	int direction;
-	size_t size;
-{
-	return (size);
-}
-
 int
 cs4231_get_props(addr)
 	void *addr;
@@ -1656,5 +1643,3 @@ cs4231_trigger_input(addr, start, end, blksize, intr, arg, param)
 
 	return (0);
 }
-
-#endif /* NAUDIO > 0 */

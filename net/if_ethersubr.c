@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.88 2005/01/18 23:26:52 mpf Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.96 2005/06/08 06:55:33 henning Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -94,6 +94,7 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/route.h>
 #include <net/if_llc.h>
 #include <net/if_dl.h>
+#include <net/if_media.h>
 #include <net/if_types.h>
 
 #include <netinet/in.h>
@@ -127,6 +128,11 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/if_pppoe.h>
 #endif
 
+#include "trunk.h"
+#if NTRUNK > 0
+#include <net/if_trunk.h>
+#endif
+
 #ifdef INET6
 #ifndef INET
 #include <netinet/in.h>
@@ -135,21 +141,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <netinet6/nd6.h>
 #endif
 
-#ifdef NS
-#include <netns/ns.h>
-#include <netns/ns_if.h>
-#endif
-
 #ifdef IPX
 #include <netipx/ipx.h>
 #include <netipx/ipx_if.h>
 #endif
-
-#include <netccitt/x25.h>
-#include <netccitt/pk.h>
-#include <netccitt/pk_extern.h>
-#include <netccitt/dll.h>
-#include <netccitt/llc_var.h>
 
 #ifdef NETATALK
 #include <netatalk/at.h>
@@ -159,10 +154,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 extern u_char	at_org_code[ 3 ];
 extern u_char	aarp_org_code[ 3 ];
 #endif /* NETATALK */
-
-#if defined(CCITT)
-#include <sys/socketvar.h>
-#endif
 
 u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
     { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
@@ -181,13 +172,6 @@ ether_ioctl(ifp, arp, cmd, data)
 
 	switch (cmd) {
 
-#if defined(CCITT)
-	case SIOCSIFCONF_X25:
-		ifp->if_flags |= IFF_UP;
-		ifa->ifa_rtrequest = cons_rtrequest;
-		error = x25_llcglue(PRC_IFUP, ifa->ifa_addr);
-		break;
-#endif /* CCITT */
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef IPX
@@ -209,21 +193,6 @@ ether_ioctl(ifp, arp, cmd, data)
 			/* Nothing to do. */
 			break;
 #endif /* NETATALK */
-#ifdef NS
-		/* XXX - This code is probably wrong. */
-		case AF_NS:
-		    {
-			struct ns_addr *ina = &IA_SNS(ifa)->sns_addr;
-
-			if (ns_nullhost(*ina))
-				ina->x_host =
-				    *(union ns_host *)(arp->ac_enaddr);
-			else
-				bcopy(ina->x_host.c_host,
-				    arp->ac_enaddr, sizeof(arp->ac_enaddr));
-			break;
-		    }
-#endif /* NS */
 		}
 		break;
 	default:
@@ -255,6 +224,11 @@ ether_output(ifp0, m0, dst, rt0)
 	struct arpcom *ac = (struct arpcom *)ifp0;
 	short mflags;
 	struct ifnet *ifp = ifp0;
+
+#if NTRUNK > 0
+	if (ifp->if_type == IFT_IEEE8023ADLAG)
+		senderr(EBUSY);
+#endif
 
 #if NCARP > 0
 	if (ifp->if_type == IFT_CARP) {
@@ -318,18 +292,6 @@ ether_output(ifp0, m0, dst, rt0)
 		if (!nd6_storelladdr(ifp, rt, m, dst, (u_char *)edst))
 			return (0); /* it must be impossible, but... */
 		etype = htons(ETHERTYPE_IPV6);
-		break;
-#endif
-#ifdef NS
-	case AF_NS:
-		etype = htons(ETHERTYPE_NS);
-		bcopy((caddr_t)&(((struct sockaddr_ns *)dst)->sns_addr.x_host),
-		    (caddr_t)edst, sizeof(edst));
-		if (!bcmp((caddr_t)edst, (caddr_t)&ns_thishost, sizeof(edst)))
-			return (looutput(ifp, m, dst, rt));
-		/* If broadcasting on a simplex interface, loopback a copy */
-		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX))
-			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		break;
 #endif
 #ifdef IPX
@@ -415,43 +377,6 @@ ether_output(ifp0, m0, dst, rt0)
 		}
 		} break;
 #endif /* NETATALK */
-/*	case AF_NSAP: */
-	case AF_CCITT: {
-		struct sockaddr_dl *sdl =
-			(struct sockaddr_dl *) rt -> rt_gateway;
-
-		if (sdl && sdl->sdl_family == AF_LINK
-		    && sdl->sdl_alen > 0) {
-			bcopy(LLADDR(sdl), (char *)edst,
-				sizeof(edst));
-		} else goto bad; /* Not a link interface ? Funny ... */
-		if ((ifp->if_flags & IFF_SIMPLEX) && (*edst & 1) &&
-		    (mcopy = m_copy(m, 0, (int)M_COPYALL))) {
-			M_PREPEND(mcopy, sizeof(*eh), M_DONTWAIT);
-			if (mcopy) {
-				eh = mtod(mcopy, struct ether_header *);
-				bcopy(edst, eh->ether_dhost, sizeof(edst));
-				bcopy(ac->ac_enaddr, eh->ether_shost,
-				    sizeof(edst));
-			}
-		}
-		etype = htons(m->m_pkthdr.len);
-#ifdef LLC_DEBUG
-		{
-			int i;
-			struct llc *l = mtod(m, struct llc *);
-
-			printf("ether_output: sending LLC2 pkt to: ");
-			for (i=0; i < ETHER_ADDR_LEN; i++)
-				printf("%x ", edst[i] & 0xff);
-			printf(" len 0x%x dsap 0x%x ssap 0x%x control 0x%x\n",
-			    m->m_pkthdr.len, l->llc_dsap & 0xff,
-			    l->llc_ssap &0xff, l->llc_control & 0xff);
-
-		}
-#endif /* LLC_DEBUG */
-		} break;
-
 	case pseudo_AF_HDRCMPLT:
 		hdrcmplt = 1;
 		eh = (struct ether_header *)dst->sa_data;
@@ -604,8 +529,26 @@ ether_input(ifp, eh, m)
 	int s, llcfound = 0;
 	struct llc *l;
 	struct arpcom *ac;
+#if NTRUNK > 0
+	int i = 0;
+#endif
 #if NPPPOE > 0
 	struct ether_header *eh_tmp;
+#endif
+
+#if NTRUNK > 0
+	/* Handle input from a trunk port */
+	while (ifp->if_type == IFT_IEEE8023ADLAG) {
+		if (++i > TRUNK_MAX_STACKING ||
+		    trunk_input(ifp, eh, m) != 0) {
+			if (m)
+				m_freem(m);
+			return;
+		}
+
+		/* Has been set to the trunk interface */
+		ifp = m->m_pkthdr.rcvif;
+	}
 #endif
 
 	if ((ifp->if_flags & IFF_UP) == 0) {
@@ -646,6 +589,11 @@ ether_input(ifp, eh, m)
 
 	etype = ntohs(eh->ether_type);
 
+#if NVLAN > 0
+	if (etype == ETHERTYPE_VLAN && (vlan_input(eh, m) == 0))
+		return;
+#endif
+
 #if NBRIDGE > 0
 	/*
 	 * Tap the packet off here for a bridge, if configured and
@@ -667,9 +615,10 @@ ether_input(ifp, eh, m)
 #endif
 
 #if NVLAN > 0
-	if (etype == ETHERTYPE_8021Q) {
-		if (vlan_input(eh, m) < 0)
-			ifp->if_noproto++;
+	if (etype == ETHERTYPE_VLAN) {
+		/* The bridge did not want the vlan frame either, drop it. */
+		ifp->if_noproto++;
+		m_freem(m);
 		return;
 	}
 #endif /* NVLAN > 0 */
@@ -732,12 +681,6 @@ decapsulate:
 	case ETHERTYPE_IPX:
 		schednetisr(NETISR_IPX);
 		inq = &ipxintrq;
-		break;
-#endif
-#ifdef NS
-	case ETHERTYPE_NS:
-		schednetisr(NETISR_NS);
-		inq = &nsintrq;
 		break;
 #endif
 #ifdef NETATALK
@@ -835,25 +778,6 @@ decapsulate:
 				goto decapsulate;
 			}
 			goto dropanyway;
-#ifdef CCITT
-		case LLC_X25_LSAP:
-			if (m->m_pkthdr.len > etype)
-				m_adj(m, etype - m->m_pkthdr.len);
-			M_PREPEND(m, sizeof(struct sdl_hdr) , M_DONTWAIT);
-			if (m == 0)
-				return;
-			if (!sdl_sethdrif(ifp, eh->ether_shost, LLC_X25_LSAP,
-			    eh->ether_dhost, LLC_X25_LSAP, ETHER_ADDR_LEN,
-			    mtod(m, struct sdl_hdr *)))
-				panic("ETHER cons addr failure");
-			mtod(m, struct sdl_hdr *)->sdlhdr_len = etype;
-#ifdef LLC_DEBUG
-			printf("llc packet\n");
-#endif /* LLC_DEBUG */
-			schednetisr(NETISR_CCITT);
-			inq = &llcintrq;
-			break;
-#endif /* CCITT */
 		dropanyway:
 		default:
 			m_freem(m);

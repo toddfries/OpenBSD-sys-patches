@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.27 2005/01/15 05:24:11 brad Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.29 2005/08/09 04:10:12 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -718,7 +718,7 @@ wb_attach(parent, self, aux)
 	bus_addr_t iobase;
 	bus_size_t iosize;
 	int s, rseg;
-	u_int32_t command;
+	pcireg_t command;
 	bus_dma_segment_t seg;
 	bus_dmamap_t dmamap;
 	caddr_t kva;
@@ -759,10 +759,6 @@ wb_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	command |= PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE |
-	    PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, command);
 	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef WB_USEIOSPACE
@@ -1735,6 +1731,8 @@ void wb_stop(sc)
 
 	timeout_del(&sc->wb_tick_tmo);
 
+	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
 	WB_CLRBIT(sc, WB_NETCFG, (WB_NETCFG_RX_ON|WB_NETCFG_TX_ON));
 	CSR_WRITE_4(sc, WB_IMR, 0x00000000);
 	CSR_WRITE_4(sc, WB_TXADDR, 0x00000000);
@@ -1764,10 +1762,6 @@ void wb_stop(sc)
 
 	bzero((char *)&sc->wb_ldata->wb_tx_list,
 		sizeof(sc->wb_ldata->wb_tx_list));
-
-	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
-
-	return;
 }
 
 /*

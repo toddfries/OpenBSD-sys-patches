@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpt_debug.c,v 1.2 2004/06/22 18:57:18 marco Exp $	*/
+/*	$OpenBSD: mpt_debug.c,v 1.4 2005/04/21 16:02:27 deraadt Exp $	*/
 /*	$NetBSD: mpt_debug.c,v 1.2 2003/07/14 15:47:11 lukem Exp $	*/
 
 /*
@@ -167,9 +167,9 @@ static const struct Error_Map IOC_SCSIStatus[] = {
 { SCSI_STATUS_COND_MET,			"Check Condition Met" },
 #endif
 { SCSI_BUSY,				"Busy" },
-{ SCSI_INTERM,				"Intermidiate Condition" },
+{ SCSI_INTERM,				"Intermediate Condition" },
 #if 0
-{ SCSI_STATUS_INTERMED_COND_MET,	"Intermidiate Condition Met" },
+{ SCSI_STATUS_INTERMED_COND_MET,	"Intermediate Condition Met" },
 #endif
 { SCSI_RESV_CONFLICT,			"Reservation Conflict" },
 #if 0
@@ -213,12 +213,21 @@ mpt_ioc_diag(u_int32_t code)
 	static char buf[128];
 	char *ptr = buf;
 	char *end = &buf[128];
+	int len;
+
 	buf[0] = '\0';
-	ptr += snprintf(buf, sizeof buf, "(0x%08x)", code);
+	len = snprintf(buf, sizeof buf, "(0x%08x)", code);
+	if (len == -1 || len > sizeof buf)
+		return buf;
+	ptr += len;
 	while (status->Error_Code >= 0) {
-		if ((status->Error_Code & code) != 0)
-			ptr += snprintf(ptr, (size_t)(end-ptr), "%s ",
-				status->Error_String);
+		if ((status->Error_Code & code) != 0) {
+			len = snprintf(ptr, (size_t)(end-ptr), "%s ",
+			    status->Error_String);
+			if (len == -1 || len > end - ptr)
+				return buf;
+			ptr += len;
+		}
 		status++;
 	}
 	return buf;
@@ -257,12 +266,21 @@ mpt_scsi_state(int code)
 	static char buf[128];
 	char *ptr = buf;
 	char *end = &buf[128];
+	int len;
+
 	buf[0] = '\0';
-	ptr += snprintf(buf, sizeof buf, "(0x%08x)", code);
+	len = snprintf(buf, sizeof buf, "(0x%08x)", code);
+	if (len == -1 || len > sizeof buf)
+		return buf;
+	ptr += len;
 	while (status->Error_Code >= 0) {
-		if ((status->Error_Code & code) != 0)
-			ptr += snprintf(ptr, (size_t)(end-ptr), "%s ",
-				status->Error_String);
+		if ((status->Error_Code & code) != 0) {
+			len = snprintf(ptr, (size_t)(end-ptr), "%s ",
+			    status->Error_String);
+			if (len == -1 || len > end - ptr)
+				return buf;
+			ptr += len;
+		}
 		status++;
 	}
 	return buf;

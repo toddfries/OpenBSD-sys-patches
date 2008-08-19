@@ -1,4 +1,4 @@
-#	$OpenBSD: files.cardbus,v 1.16 2005/03/08 20:00:24 tdeval Exp $
+#	$OpenBSD: files.cardbus,v 1.18 2005/05/26 18:57:37 nate Exp $
 #	$NetBSD: files.cardbus,v 1.8 2000/01/26 06:37:24 thorpej Exp $
 #
 # files.cardbus
@@ -76,7 +76,7 @@ file	dev/cardbus/if_ral_cardbus.c		ral_cardbus
 # EHCI USB controller
 #
 attach	ehci at cardbus with ehci_cardbus
-file	dev/cardbus/ehci_cardbus.c		ehci_cardbus needs-flag
+file	dev/cardbus/ehci_cardbus.c		ehci_cardbus
 
 #
 # OHCI USB controller
@@ -89,3 +89,9 @@ file	dev/cardbus/ohci_cardbus.c		ohci_cardbus
 #
 #attach	ahc at cardbus with ahc_cardbus: ahc_seeprom, smc93cx6
 #file	dev/cardbus/ahc_cardbus.c		ahc_cardbus
+
+#
+# UHCI USB controller
+#
+attach	uhci at cardbus with uhci_cardbus
+file	dev/cardbus/uhci_cardbus.c		uhci_cardbus
