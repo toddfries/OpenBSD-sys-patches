@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_fpregs.c,v 1.6.2.1 2004/05/13 03:08:31 brad Exp $	*/
+/*	$OpenBSD: procfs_fpregs.c,v 1.6.4.1 2004/05/13 03:18:21 brad Exp $	*/
 /*	$NetBSD: procfs_fpregs.c,v 1.4 1995/08/13 09:06:05 mycroft Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: process_machdep.c,v 1.6.2.1 2004/03/03 00:18:09 brad Exp $	*/
+/*	$OpenBSD: process_machdep.c,v 1.8 2004/03/02 23:45:27 miod Exp $	*/
 /*	$NetBSD: process_machdep.c,v 1.6 1996/03/14 21:09:26 christos Exp $ */
 
 /*
@@ -145,6 +145,13 @@ process_write_fpregs(p, regs)
 
 	bcopy(regs, p->p_md.md_fpstate, sizeof(struct fpreg));
 	return 0;
+}
+
+register_t
+process_get_wcookie(p)
+	struct proc *p;
+{
+	return p->p_addr->u_pcb.pcb_wcookie;
 }
 
 #endif	/* PTRACE */

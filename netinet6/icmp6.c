@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.74 2003/08/07 09:11:24 itojun Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.82 2004/03/25 14:01:20 dhartmei Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -443,7 +443,6 @@ icmp6_input(mp, offp, proto)
 	IP6_EXTHDR_GET(icmp6, struct icmp6_hdr *, m, off, sizeof(*icmp6));
 	if (icmp6 == NULL) {
 		icmp6stat.icp6s_tooshort++;
-		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_error);
 		return IPPROTO_DONE;
 	}
 	code = icmp6->icmp6_code;
@@ -461,7 +460,7 @@ icmp6_input(mp, offp, proto)
 	if (m->m_pkthdr.rcvif && m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
 		/*
 		 * Deliver very specific ICMP6 type only.
-		 * This is important to deilver TOOBIG.  Otherwise PMTUD
+		 * This is important to deliver TOOBIG.  Otherwise PMTUD
 		 * will not work.
 		 */
 		switch (icmp6->icmp6_type) {
@@ -885,7 +884,7 @@ icmp6_input(mp, offp, proto)
 static int
 icmp6_notify_error(m, off, icmp6len, code)
 	struct mbuf *m;
-	int off, icmp6len;
+	int off, icmp6len, code;
 {
 	struct icmp6_hdr *icmp6;
 	struct ip6_hdr *eip6;
@@ -1060,7 +1059,7 @@ icmp6_notify_error(m, off, icmp6len, code)
 		}
 #endif
 		icmp6src.sin6_flowinfo =
-			(eip6->ip6_flow & IPV6_FLOWLABEL_MASK);
+		    (eip6->ip6_flow & IPV6_FLOWLABEL_MASK);
 
 		if (finaldst == NULL)
 			finaldst = &eip6->ip6_dst;
@@ -1907,10 +1906,7 @@ icmp6_rip6_input(mp, off)
 	/* KAME hack: recover scopeid */
 	(void)in6_recoverscope(&rip6src, &ip6->ip6_src, m->m_pkthdr.rcvif);
 
-	for (in6p = rawin6pcbtable.inpt_queue.cqh_first;
-	     in6p != (struct inpcb *)&rawin6pcbtable.inpt_queue;
-	     in6p = in6p->inp_queue.cqe_next)
-	{
+	CIRCLEQ_FOREACH(in6p, &rawin6pcbtable.inpt_queue, inp_queue) {
 		if (!(in6p->in6p_flags & INP_IPV6))
 			continue;
 		if (in6p->in6p_ip6_nxt != IPPROTO_ICMPV6)
@@ -2841,6 +2837,9 @@ icmp6_redirect_timeout(rt, r)
 
 #include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
+
+int *icmpv6ctl_vars[ICMPV6CTL_MAXID] = ICMPV6CTL_VARS;
+
 int
 icmp6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	int *name;
@@ -2857,45 +2856,16 @@ icmp6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 
 	switch (name[0]) {
 
-	case ICMPV6CTL_REDIRACCEPT:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&icmp6_rediraccept);
-	case ICMPV6CTL_REDIRTIMEOUT:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&icmp6_redirtimeout);
 	case ICMPV6CTL_STATS:
 		return sysctl_rdstruct(oldp, oldlenp, newp,
 				&icmp6stat, sizeof(icmp6stat));
-	case ICMPV6CTL_ND6_PRUNE:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &nd6_prune);
-	case ICMPV6CTL_ND6_DELAY:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &nd6_delay);
-	case ICMPV6CTL_ND6_UMAXTRIES:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &nd6_umaxtries);
-	case ICMPV6CTL_ND6_MMAXTRIES:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &nd6_mmaxtries);
-	case ICMPV6CTL_ND6_USELOOPBACK:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&nd6_useloopback);
-	case ICMPV6CTL_NODEINFO:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &icmp6_nodeinfo);
-	case ICMPV6CTL_ERRPPSLIMIT:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &icmp6errppslim);
-	case ICMPV6CTL_ND6_MAXNUDHINT:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&nd6_maxnudhint);
-	case ICMPV6CTL_MTUDISC_HIWAT:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&icmp6_mtudisc_hiwat);
-	case ICMPV6CTL_MTUDISC_LOWAT:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&icmp6_mtudisc_lowat);
-	case ICMPV6CTL_ND6_DEBUG:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &nd6_debug);
 	case ICMPV6CTL_ND6_DRLIST:
 	case ICMPV6CTL_ND6_PRLIST:
 		return nd6_sysctl(name[0], oldp, oldlenp, newp, newlen);
 	default:
+		if (name[0] < ICMPV6CTL_MAXID)
+			return (sysctl_int_arr(icmpv6ctl_vars, name, namelen,
+			    oldp, oldlenp, newp, newlen));
 		return ENOPROTOOPT;
 	}
 	/* NOTREACHED */

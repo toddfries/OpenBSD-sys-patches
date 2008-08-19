@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.63.2.1 2004/07/17 03:02:25 brad Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.67.2.2 2005/02/27 00:51:33 brad Exp $	*/
 
 /*
  * rnd.c -- A strong random number generator
@@ -246,6 +246,7 @@
 #include <sys/md5k.h>
 #include <sys/sysctl.h>
 #include <sys/timeout.h>
+#include <sys/poll.h>
 
 #include <dev/rndvar.h>
 #include <dev/rndioctl.h>
@@ -343,7 +344,7 @@ int	rnd_debug = 0x0000;
  * decrease the uncertainty).
  *
  * The chosen system lets the state of the pool be (essentially) the input
- * modulo the generator polymnomial.  Now, for random primitive polynomials,
+ * modulo the generator polynomial.  Now, for random primitive polynomials,
  * this is a universal class of hash functions, meaning that the chance
  * of a collision is limited by the attacker's knowledge of the generator
  * polynomial, so if it is chosen at random, an attacker can never force
@@ -560,6 +561,10 @@ arc4maybeinit(void)
 	extern int hz;
 
 	if (!arc4random_initialized) {
+#ifdef DIAGNOSTIC
+		if (!rnd_attached)
+			panic("arc4maybeinit: premature");
+#endif
 		arc4random_initialized++;
 		arc4_stir();
 		/* 10 minutes, per dm@'s suggestion */
@@ -593,6 +598,17 @@ arc4random(void)
 	arc4maybeinit();
 	return ((arc4_getbyte() << 24) | (arc4_getbyte() << 16)
 		| (arc4_getbyte() << 8) | arc4_getbyte());
+}
+
+void
+arc4random_bytes(void *buf, size_t n)
+{
+	u_int8_t *cp = buf;
+	u_int8_t *end = cp + n;
+
+	arc4maybeinit();
+	while (cp < end)
+		*cp++ = arc4_getbyte();
 }
 
 void
@@ -1026,22 +1042,22 @@ randomread(dev, uio, ioflag)
 }
 
 int
-randomselect(dev, rw, p)
+randompoll(dev, events, p)
 	dev_t	dev;
-	int	rw;
+	int	events;
 	struct proc *p;
 {
-	switch (rw) {
-	case FREAD:
-		if (random_state.entropy_count > 0)
-			return (1);
-		else
+	int revents;
+
+	revents = events & (POLLOUT | POLLWRNORM);	/* always writable */
+	if (events & (POLLIN | POLLRDNORM)) {
+		if (minor(dev) == RND_SRND && random_state.entropy_count <= 0)
 			selrecord(p, &rnd_rsel);
-		break;
-	case FWRITE:
-		return 1;
+		else
+			revents |= events & (POLLIN | POLLRDNORM);
 	}
-	return 0;
+
+	return (revents);
 }
 
 int

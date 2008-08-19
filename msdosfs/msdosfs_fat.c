@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_fat.c,v 1.11.8.1 2003/10/31 06:05:28 brad Exp $	*/
+/*	$OpenBSD: msdosfs_fat.c,v 1.14 2003/12/10 07:46:33 itojun Exp $	*/
 /*	$NetBSD: msdosfs_fat.c,v 1.26 1997/10/17 11:24:02 ws Exp $	*/
 
 /*-
@@ -145,7 +145,7 @@ pcbmap(dep, findcn, bnp, cnp, sp)
 	int error;
 	u_long i;
 	u_long cn;
-	u_long prevcn = 0; /* XXX: prevcn could be used unititialized */
+	u_long prevcn = 0; /* XXX: prevcn could be used uninitialized */
 	u_long byteoffset;
 	u_long bn;
 	u_long bo;
@@ -708,7 +708,7 @@ chainlength(pmp, start, count)
 	while (++idx <= max_idx) {
 		if (len >= count)
 			break;
-		if ((map = pmp->pm_inusemap[idx]) != NULL) {
+		if ((map = pmp->pm_inusemap[idx]) != 0) {
 			len +=  ffs(map) - 1;
 			break;
 		}
@@ -777,7 +777,7 @@ clusteralloc(pmp, start, count, fillwith, retcluster, got)
 {
 	u_long idx;
 	u_long len, newst, foundl, cn, l;
-	u_long foundcn = 0; /* XXX: foundcn could be used unititialized */
+	u_long foundcn = 0; /* XXX: foundcn could be used uninitialized */
 	u_int map;
 	
 #ifdef MSDOSFS_DEBUG

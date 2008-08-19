@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.20 2003/08/14 19:00:13 jason Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.23 2004/01/03 14:08:54 espie Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -90,7 +90,7 @@
 #endif
 #include <netinet6/raw_ip6.h>
 
-#include <machine/stdarg.h>
+#include <sys/stdarg.h>
 
 #include "faith.h"
 
@@ -173,16 +173,10 @@ rip6_input(mp, offp, proto)
 	bzero(&rip6src, sizeof(rip6src));
 	rip6src.sin6_len = sizeof(struct sockaddr_in6);
 	rip6src.sin6_family = AF_INET6;
-#if 0 /* XXX inbound flowlabel */
-	rip6src.sin6_flowinfo = ip6->ip6_flow & IPV6_FLOWINFO_MASK;
-#endif
 	/* KAME hack: recover scopeid */
 	(void)in6_recoverscope(&rip6src, &ip6->ip6_src, m->m_pkthdr.rcvif);
 
-	for (in6p = rawin6pcbtable.inpt_queue.cqh_first;
-	     in6p != (struct inpcb *)&rawin6pcbtable.inpt_queue;
-	     in6p = in6p->inp_queue.cqe_next)
-	{
+	CIRCLEQ_FOREACH(in6p, &rawin6pcbtable.inpt_queue, inp_queue) {
 		if (!(in6p->in6p_flags & INP_IPV6))
 			continue;
 		if (in6p->in6p_ip6.ip6_nxt &&

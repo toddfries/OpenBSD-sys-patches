@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.28 2003/06/24 07:55:12 itojun Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.30 2003/12/10 03:30:21 itojun Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -413,7 +413,7 @@ nd6_ra_input(m, off, icmp6len)
 }
 
 /*
- * default router list proccessing sub routines
+ * default router list processing sub routines
  */
 
 /* tell the change to user processes watching the routing socket. */
@@ -1979,7 +1979,7 @@ nd6_setdefaultiface(ifindex)
 {
 	int error = 0;
 
-	if (ifindex < 0 || if_index < ifindex)
+	if (ifindex < 0 || if_indexlim <= ifindex || !ifindex2ifnet[ifindex])
 		return (EINVAL);
 
 	if (nd6_defifindex != ifindex) {

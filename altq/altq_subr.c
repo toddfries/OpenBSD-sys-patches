@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_subr.c,v 1.14 2002/12/16 17:27:20 henning Exp $	*/
+/*	$OpenBSD: altq_subr.c,v 1.16 2004/01/14 08:42:23 kjc Exp $	*/
 /*	$KAME: altq_subr.c,v 1.11 2002/01/11 08:11:49 kjc Exp $	*/
 
 /*
@@ -37,7 +37,6 @@
 #include <sys/kernel.h>
 #include <sys/errno.h>
 #include <sys/syslog.h>
-#include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
 #include <sys/queue.h>
 
@@ -77,7 +76,7 @@ int pfaltq_running;	/* keep track of running state */
  * alternate queueing support routines
  */
 
-/* look up the queue state by the interface name and the queuing type. */
+/* look up the queue state by the interface name and the queueing type. */
 void *
 altq_lookup(name, type)
 	char *name;

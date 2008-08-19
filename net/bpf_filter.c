@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf_filter.c,v 1.11.2.1 2004/05/10 07:21:35 brad Exp $	*/
+/*	$OpenBSD: bpf_filter.c,v 1.13.2.1 2004/05/10 04:16:03 brad Exp $	*/
 /*	$NetBSD: bpf_filter.c,v 1.12 1996/02/13 22:00:00 christos Exp $	*/
 
 /*
@@ -80,15 +80,16 @@
 
 int	bpf_m_xword(struct mbuf *, int, int *);
 int	bpf_m_xhalf(struct mbuf *, int, int *);
+extern int bpf_maxbufsize;
 
 int
 bpf_m_xword(m, k, err)
-	register struct mbuf *m;
-	register int k, *err;
+	struct mbuf *m;
+	int k, *err;
 {
-	register int len;
-	register u_char *cp, *np;
-	register struct mbuf *m0;
+	int len;
+	u_char *cp, *np;
+	struct mbuf *m0;
 
 	MINDEX(len, m, k);
 	cp = mtod(m, u_char *) + k;
@@ -119,12 +120,12 @@ bpf_m_xword(m, k, err)
 
 int
 bpf_m_xhalf(m, k, err)
-	register struct mbuf *m;
-	register int k, *err;
+	struct mbuf *m;
+	int k, *err;
 {
-	register int len;
-	register u_char *cp;
-	register struct mbuf *m0;
+	int len;
+	u_char *cp;
+	struct mbuf *m0;
 
 	MINDEX(len, m, k);
 	cp = mtod(m, u_char *) + k;
@@ -152,13 +153,13 @@ bpf_m_xhalf(m, k, err)
  */
 u_int
 bpf_filter(pc, p, wirelen, buflen)
-	register struct bpf_insn *pc;
-	register u_char *p;
+	struct bpf_insn *pc;
+	u_char *p;
 	u_int wirelen;
-	register u_int buflen;
+	u_int buflen;
 {
-	register u_int32_t A = 0, X = 0;
-	register int k;
+	u_int32_t A = 0, X = 0;
+	int k;
 	int32_t mem[BPF_MEMWORDS];
 
 	if (pc == 0)
@@ -223,8 +224,8 @@ bpf_filter(pc, p, wirelen, buflen)
 			k = pc->k;
 			if (k >= buflen) {
 #ifdef _KERNEL
-				register struct mbuf *m;
-				register int len;
+				struct mbuf *m;
+				int len;
 
 				if (buflen != 0)
 					return 0;
@@ -289,8 +290,8 @@ bpf_filter(pc, p, wirelen, buflen)
 			k = X + pc->k;
 			if (k >= buflen) {
 #ifdef _KERNEL
-				register struct mbuf *m;
-				register int len;
+				struct mbuf *m;
+				int len;
 
 				if (buflen != 0)
 					return 0;
@@ -309,8 +310,8 @@ bpf_filter(pc, p, wirelen, buflen)
 			k = pc->k;
 			if (k >= buflen) {
 #ifdef _KERNEL
-				register struct mbuf *m;
-				register int len;
+				struct mbuf *m;
+				int len;
 
 				if (buflen != 0)
 					return 0;
@@ -506,7 +507,7 @@ bpf_validate(f, len)
 				 * More strict check with actual packet length
 				 * is done runtime.
 				 */
-				if (p->k < 0 || p->k >= BPF_MAXBUFSIZE)
+				if (p->k < 0 || p->k >= bpf_maxbufsize)
 					return 0;
 				break;
 			case BPF_MEM:

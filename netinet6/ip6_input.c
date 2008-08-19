@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.53 2003/06/30 10:30:23 itojun Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.57.2.1 2005/03/21 02:07:50 brad Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -245,20 +245,6 @@ ip6_input(m)
 		goto bad;
 	}
 
-#if NPF > 0 
-        /*
-         * Packet filter
-         */
-	odst = ip6->ip6_dst;
-	if (pf_test6(PF_IN, m->m_pkthdr.rcvif, &m) != PF_PASS)
-		goto bad;
-	if (m == NULL)
-		return;
-
-	ip6 = mtod(m, struct ip6_hdr *);
-	srcrt = !IN6_ARE_ADDR_EQUAL(&odst, &ip6->ip6_dst);
-#endif
-
 	ip6stat.ip6s_nxthist[ip6->ip6_nxt]++;
 
 	/*
@@ -305,6 +291,20 @@ ip6_input(m)
 		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_addrerr);
 		goto bad;
 	}
+#endif
+
+#if NPF > 0 
+	/*
+	 * Packet filter
+	 */
+	odst = ip6->ip6_dst;
+	if (pf_test6(PF_IN, m->m_pkthdr.rcvif, &m) != PF_PASS)
+		goto bad;
+	if (m == NULL)
+		return;
+
+	ip6 = mtod(m, struct ip6_hdr *);
+	srcrt = !IN6_ARE_ADDR_EQUAL(&odst, &ip6->ip6_dst);
 #endif
 
 	if (IN6_IS_ADDR_LOOPBACK(&ip6->ip6_src) ||
@@ -1251,7 +1251,7 @@ ip6_nexthdr(m, off, proto, nxtp)
 		if (m->m_pkthdr.len < off + sizeof(fh))
 			return -1;
 		m_copydata(m, off, sizeof(fh), (caddr_t)&fh);
-		if ((ntohs(fh.ip6f_offlg) & IP6F_OFF_MASK) != 0)
+		if ((fh.ip6f_offlg & IP6F_OFF_MASK) != 0)
 			return -1;
 		if (nxtp)
 			*nxtp = fh.ip6f_nxt;
@@ -1342,6 +1342,8 @@ u_char	inet6ctlerrmap[PRC_NCMDS] = {
 #include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
 
+int *ipv6ctl_vars[IPV6CTL_MAXID] = IPV6CTL_VARS;
+
 int
 ip6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	int *name;
@@ -1356,50 +1358,15 @@ ip6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 		return ENOTDIR;
 
 	switch (name[0]) {
-
-	case IPV6CTL_FORWARDING:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				  &ip6_forwarding);
-	case IPV6CTL_SENDREDIRECTS:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_sendredirects);
-	case IPV6CTL_DEFHLIM:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &ip6_defhlim);
-	case IPV6CTL_MAXFRAGPACKETS:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_maxfragpackets);
-	case IPV6CTL_ACCEPT_RTADV:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_accept_rtadv);
-	case IPV6CTL_KEEPFAITH:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &ip6_keepfaith);
-	case IPV6CTL_LOG_INTERVAL:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_log_interval);
-	case IPV6CTL_HDRNESTLIMIT:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_hdrnestlimit);
-	case IPV6CTL_DAD_COUNT:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &ip6_dad_count);
-	case IPV6CTL_AUTO_FLOWLABEL:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_auto_flowlabel);
-	case IPV6CTL_DEFMCASTHLIM:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_defmcasthlim);
 	case IPV6CTL_KAME_VERSION:
 		return sysctl_rdstring(oldp, oldlenp, newp, __KAME_VERSION);
-	case IPV6CTL_USE_DEPRECATED:
-		return sysctl_int(oldp, oldlenp, newp, newlen,
-				&ip6_use_deprecated);
-	case IPV6CTL_RR_PRUNE:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &ip6_rr_prune);
 	case IPV6CTL_V6ONLY:
 		return sysctl_rdint(oldp, oldlenp, newp, ip6_v6only);
-	case IPV6CTL_MAXFRAGS:
-		return sysctl_int(oldp, oldlenp, newp, newlen, &ip6_maxfrags);
 	default:
-		return EOPNOTSUPP;
+		if (name[0] < IPV6CTL_MAXID)
+			return (sysctl_int_arr(ipv6ctl_vars, name, namelen,
+			    oldp, oldlenp, newp, newlen));
+		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_extern.h,v 1.18.2.1 2004/03/03 08:32:11 brad Exp $	*/
+/*	$OpenBSD: ext2fs_extern.h,v 1.19 2004/03/02 05:52:24 tedu Exp $	*/
 /*	$NetBSD: ext2fs_extern.h,v 1.1 1997/06/11 09:33:55 bouyer Exp $	*/
 
 /*-

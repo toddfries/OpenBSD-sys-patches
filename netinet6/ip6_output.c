@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.76.2.1 2004/02/07 22:08:00 brad Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.82 2004/02/04 08:47:41 itojun Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -93,6 +93,7 @@
 #endif
 
 #ifdef IPSEC
+#include <netinet/ip_ipsp.h>
 #include <netinet/ip_ah.h>
 #include <netinet/ip_esp.h>
 #include <netinet/udp.h>
@@ -553,10 +554,10 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		 * (this may happen when we are sending a packet to one of
 		 *  our own addresses.)
 		 */
-		if (opt && opt->ip6po_pktinfo
-		 && opt->ip6po_pktinfo->ipi6_ifindex) {
-			if (!(ifp->if_flags & IFF_LOOPBACK)
-			 && ifp->if_index != opt->ip6po_pktinfo->ipi6_ifindex) {
+		if (opt && opt->ip6po_pktinfo &&
+		    opt->ip6po_pktinfo->ipi6_ifindex) {
+			if (!(ifp->if_flags & IFF_LOOPBACK) &&
+			    ifp->if_index != opt->ip6po_pktinfo->ipi6_ifindex) {
 				ip6stat.ip6s_noroute++;
 				in6_ifstat_inc(ifp, ifs6_out_discard);
 				error = EHOSTUNREACH;
@@ -833,6 +834,17 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		 * well as returning an error code (the latter is not described
 		 * in the API spec.)
 		 */
+#if 0
+		u_int32_t mtu32;
+		struct ip6ctlparam ip6cp;
+
+		mtu32 = (u_int32_t)mtu;
+		bzero(&ip6cp, sizeof(ip6cp));
+		ip6cp.ip6c_cmdarg = (void *)&mtu32;
+		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		    (void *)&ip6cp);
+#endif
+
 		error = EMSGSIZE;
 		goto bad;
 	}
@@ -861,8 +873,12 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	} else {
 		struct mbuf **mnext, *m_frgpart;
 		struct ip6_frag *ip6f;
-		u_int32_t id = htonl(ip6_id++);
+		u_int32_t id = htonl(ip6_randomid());
 		u_char nextproto;
+#if 0
+		struct ip6ctlparam ip6cp;
+		u_int32_t mtu32;
+#endif
 
 		/*
 		 * Too large for the destination or interface;
@@ -872,6 +888,16 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		hlen = unfragpartlen;
 		if (mtu > IPV6_MAXPACKET)
 			mtu = IPV6_MAXPACKET;
+
+#if 0
+		/* Notify a proper path MTU to applications. */
+		mtu32 = (u_int32_t)mtu;
+		bzero(&ip6cp, sizeof(ip6cp));
+		ip6cp.ip6c_cmdarg = (void *)&mtu32;
+		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		    (void *)&ip6cp);
+#endif
+
 		len = (mtu - hlen - sizeof(struct ip6_frag)) & ~7;
 		if (len < 8) {
 			error = EMSGSIZE;
@@ -906,6 +932,8 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		 */
 		m0 = m;
 		for (off = hlen; off < tlen; off += len) {
+			struct mbuf *mlast;
+
 			MGETHDR(m, M_DONTWAIT, MT_HEADER);
 			if (!m) {
 				error = ENOBUFS;
@@ -937,7 +965,9 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 				ip6stat.ip6s_odropped++;
 				goto sendorfree;
 			}
-			m_cat(m, m_frgpart);
+			for (mlast = m; mlast->m_next; mlast = mlast->m_next)
+				;
+			mlast->m_next = m_frgpart;
 			m->m_pkthdr.len = len + hlen + sizeof(*ip6f);
 			m->m_pkthdr.rcvif = (struct ifnet *)0;
 			ip6f->ip6f_reserved = 0;
@@ -1823,7 +1853,8 @@ ip6_setmoptions(optname, im6op, m)
 			break;
 		}
 		bcopy(mtod(m, u_int *), &ifindex, sizeof(ifindex));
-		if (ifindex < 0 || if_index < ifindex) {
+		if (ifindex < 0 || if_indexlim <= ifindex ||
+		    !ifindex2ifnet[ifindex]) {
 			error = ENXIO;	/* XXX EINVAL? */
 			break;
 		}
@@ -1901,8 +1932,9 @@ ip6_setmoptions(optname, im6op, m)
 		/*
 		 * If the interface is specified, validate it.
 		 */
-		if (mreq->ipv6mr_interface < 0
-		 || if_index < mreq->ipv6mr_interface) {
+		if (mreq->ipv6mr_interface < 0 ||
+		    if_indexlim <= mreq->ipv6mr_interface ||
+		    !ifindex2ifnet[mreq->ipv6mr_interface]) {
 			error = ENXIO;	/* XXX EINVAL? */
 			break;
 		}
@@ -1952,7 +1984,7 @@ ip6_setmoptions(optname, im6op, m)
 		 */
 		if (IN6_IS_ADDR_MC_LINKLOCAL(&mreq->ipv6mr_multiaddr)) {
 			mreq->ipv6mr_multiaddr.s6_addr16[1] =
-			    htons(mreq->ipv6mr_interface);
+			    htons(ifp->if_index);
 		}
 		/*
 		 * See if the membership already exists.
@@ -2001,8 +2033,9 @@ ip6_setmoptions(optname, im6op, m)
 		 * If an interface address was specified, get a pointer
 		 * to its ifnet structure.
 		 */
-		if (mreq->ipv6mr_interface < 0
-		 || if_index < mreq->ipv6mr_interface) {
+		if (mreq->ipv6mr_interface < 0 ||
+		    if_indexlim <= mreq->ipv6mr_interface ||
+		    !ifindex2ifnet[mreq->ipv6mr_interface]) {
 			error = ENXIO;	/* XXX EINVAL? */
 			break;
 		}
@@ -2167,8 +2200,12 @@ ip6_setpktoptions(control, opt, priv)
 				opt->ip6po_pktinfo->ipi6_addr.s6_addr16[1] =
 					htons(opt->ip6po_pktinfo->ipi6_ifindex);
 
-			if (opt->ip6po_pktinfo->ipi6_ifindex > if_index ||
+			if (opt->ip6po_pktinfo->ipi6_ifindex >= if_indexlim ||
 			    opt->ip6po_pktinfo->ipi6_ifindex < 0) {
+				return (ENXIO);
+			}
+			if (opt->ip6po_pktinfo->ipi6_ifindex > 0 &&
+			    !ifindex2ifnet[opt->ip6po_pktinfo->ipi6_ifindex]) {
 				return (ENXIO);
 			}
 
