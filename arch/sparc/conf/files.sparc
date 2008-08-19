@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.37.2.1 2000/11/17 20:20:09 jason Exp $
+#	$OpenBSD: files.sparc,v 1.38 2000/11/16 15:47:56 jason Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93

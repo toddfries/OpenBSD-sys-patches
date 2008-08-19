@@ -1,4 +1,4 @@
-/*	$OpenBSD: umap_vfsops.c,v 1.15.6.1 2001/09/16 15:22:03 miod Exp $	*/
+/*	$OpenBSD: umap_vfsops.c,v 1.16.2.1 2001/10/14 20:44:49 jason Exp $	*/
 /*	$NetBSD: umap_vfsops.c,v 1.9 1996/02/09 22:41:05 christos Exp $	*/
 
 /*
@@ -56,7 +56,7 @@
 #include <sys/malloc.h>
 #include <miscfs/umapfs/umap.h>
 
-int	umapfs_mount __P((struct mount *, const char *, caddr_t,
+int	umapfs_mount __P((struct mount *, const char *, void *,
 			  struct nameidata *, struct proc *));
 int	umapfs_start __P((struct mount *, int, struct proc *));
 int	umapfs_unmount __P((struct mount *, int, struct proc *));
@@ -76,7 +76,7 @@ int
 umapfs_mount(mp, path, data, ndp, p)
 	struct mount *mp;
 	const char *path;
-	caddr_t data;
+	void *data;
 	struct nameidata *ndp;
 	struct proc *p;
 {
@@ -109,7 +109,7 @@ umapfs_mount(mp, path, data, ndp, p)
 	/*
 	 * Get argument
 	 */
-	error = copyin(data, (caddr_t)&args, sizeof(struct umap_args));
+	error = copyin(data, &args, sizeof(struct umap_args));
 	if (error)
 		return (error);
 

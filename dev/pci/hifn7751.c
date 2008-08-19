@@ -1,4 +1,4 @@
-/*	$OpenBSD: hifn7751.c,v 1.51 2000/10/26 00:41:25 jason Exp $	*/
+/*	$OpenBSD: hifn7751.c,v 1.57.2.1 2001/12/01 00:31:55 miod Exp $	*/
 
 /*
  * Invertex AEON / Hi/fn 7751 driver
@@ -145,6 +145,9 @@ hifn_attach(parent, self, aux)
 	int rseg;
 	caddr_t kva;
 
+	sc->sc_pci_pc = pa->pa_pc;
+	sc->sc_pci_tag = pa->pa_tag;
+
 	cmd = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	cmd |= PCI_COMMAND_MEM_ENABLE | PCI_COMMAND_MASTER_ENABLE;
 	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, cmd);
@@ -171,6 +174,10 @@ hifn_attach(parent, self, aux)
 		printf(": can't find mem space %d\n", 1);
 		goto fail_io0;
 	}
+
+	cmd = pci_conf_read(sc->sc_pci_pc, sc->sc_pci_tag, HIFN_RETRY_TIMEOUT);
+	cmd &= 0xffff0000;
+	pci_conf_write(sc->sc_pci_pc, sc->sc_pci_tag, HIFN_RETRY_TIMEOUT, cmd);
 
 	sc->sc_dmat = pa->pa_dmat;
 	if (bus_dmamem_alloc(sc->sc_dmat, sizeof(*sc->sc_dma), PAGE_SIZE, 0,
@@ -247,7 +254,7 @@ hifn_attach(parent, self, aux)
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, hifn_intr, sc,
 	    self->dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf(": couldn't establish interrupt\n");
+		printf(": couldn't establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -279,9 +286,9 @@ hifn_attach(parent, self, aux)
 		    hifn_newsession, hifn_freesession, hifn_process);
 		/*FALLTHROUGH*/
 	case HIFN_PUSTAT_ENA_1:
-		crypto_register(sc->sc_cid, CRYPTO_MD5_HMAC96,
+		crypto_register(sc->sc_cid, CRYPTO_MD5_HMAC,
 		    hifn_newsession, hifn_freesession, hifn_process);
-		crypto_register(sc->sc_cid, CRYPTO_SHA1_HMAC96,
+		crypto_register(sc->sc_cid, CRYPTO_SHA1_HMAC,
 		    NULL, NULL, NULL);
 		crypto_register(sc->sc_cid, CRYPTO_DES_CBC,
 		    NULL, NULL, NULL);
@@ -310,6 +317,8 @@ void
 hifn_reset_board(sc)
 	struct hifn_softc *sc;
 {
+	u_int32_t reg;
+
 	/*
 	 * Set polling in the DMA configuration register to zero.  0x7 avoids
 	 * resetting the board and zeros out the other fields.
@@ -344,6 +353,10 @@ hifn_reset_board(sc)
 	 * Wait another millisecond for the board to un-reset.
 	 */
 	DELAY(1000);
+
+	reg = pci_conf_read(sc->sc_pci_pc, sc->sc_pci_tag, HIFN_RETRY_TIMEOUT);
+	reg &= 0xffff0000;
+	pci_conf_write(sc->sc_pci_pc, sc->sc_pci_tag, HIFN_RETRY_TIMEOUT, reg);
 }
 
 u_int32_t
@@ -491,10 +504,10 @@ hifn_enable_crypto(sc, pciid)
 		printf(": no encr/auth");
 		break;
 	case HIFN_PUSTAT_ENA_1:
-		printf(": DES enabled");
+		printf(": DES");
 		break;
 	case HIFN_PUSTAT_ENA_2:
-		printf(": fully enabled");
+		printf(": 3DES");
 		break;
 	default:
 		printf(": disabled");
@@ -709,7 +722,7 @@ hifn_writeramaddr(sc, addr, data, slot)
 	dma->dstr[slot].l = 8 | masks;
 	dma->resr[slot].l = HIFN_MAX_RESULT | masks;
 
-	DELAY(1000);	/* let write command execute */
+	DELAY(3000);	/* let write command execute */
 	if (dma->resr[slot].l & HIFN_D_VALID) {
 		printf("%s: SRAM/DRAM detection error -- "
 		    "result[%d] valid still set\n", sc->sc_dv.dv_xname, slot);
@@ -761,7 +774,12 @@ hifn_init_dma(sc)
 	struct hifn_softc *sc;
 {
 	struct hifn_dma *dma = sc->sc_dma;
+	u_int32_t reg;
 	int i;
+
+	reg = pci_conf_read(sc->sc_pci_pc, sc->sc_pci_tag, HIFN_RETRY_TIMEOUT);
+	reg &= 0xffff0000;
+	pci_conf_write(sc->sc_pci_pc, sc->sc_pci_tag, HIFN_RETRY_TIMEOUT, reg);
 
 	/* initialize static pointer values */
 	for (i = 0; i < HIFN_D_CMD_RSIZE; i++)
@@ -867,15 +885,16 @@ hifn_crypto(sc, cmd)
 
 		totlen = cmd->dst_l = cmd->src_l;
 		if (cmd->src_m->m_flags & M_PKTHDR) {
-			MGETHDR(m, M_DONTWAIT, MT_DATA);
-			M_COPY_PKTHDR(m, cmd->src_m);
 			len = MHLEN;
+			MGETHDR(m, M_DONTWAIT, MT_DATA);
 		} else {
-			MGET(m, M_DONTWAIT, MT_DATA);
 			len = MLEN;
+			MGET(m, M_DONTWAIT, MT_DATA);
 		}
 		if (m == NULL)
 			return (-1);
+		if (len == MHLEN)
+			M_DUP_PKTHDR(m, cmd->src_m);
 		if (totlen >= MINCLSIZE) {
 			MCLGET(m, M_DONTWAIT);
 			if (m->m_flags & M_EXT)
@@ -1150,8 +1169,8 @@ hifn_newsession(sidp, cri)
 		return (ENOMEM);
 
 	for (c = cri; c != NULL; c = c->cri_next) {
-		if (c->cri_alg == CRYPTO_MD5_HMAC96 ||
-		    c->cri_alg == CRYPTO_SHA1_HMAC96) {
+		if (c->cri_alg == CRYPTO_MD5_HMAC ||
+		    c->cri_alg == CRYPTO_SHA1_HMAC) {
 			if (mac)
 				return (EINVAL);
 			mac = 1;
@@ -1251,8 +1270,8 @@ hifn_process(crp)
 	crd2 = crd1->crd_next;
 
 	if (crd2 == NULL) {
-		if (crd1->crd_alg == CRYPTO_MD5_HMAC96 ||
-		    crd1->crd_alg == CRYPTO_SHA1_HMAC96) {
+		if (crd1->crd_alg == CRYPTO_MD5_HMAC ||
+		    crd1->crd_alg == CRYPTO_SHA1_HMAC) {
 			maccrd = crd1;
 			enccrd = NULL;
 		} else if (crd1->crd_alg == CRYPTO_DES_CBC ||
@@ -1266,8 +1285,8 @@ hifn_process(crp)
 			goto errout;
 		}
 	} else {
-		if ((crd1->crd_alg == CRYPTO_MD5_HMAC96 ||
-		    crd1->crd_alg == CRYPTO_SHA1_HMAC96) &&
+		if ((crd1->crd_alg == CRYPTO_MD5_HMAC ||
+		    crd1->crd_alg == CRYPTO_SHA1_HMAC) &&
 		    (crd2->crd_alg == CRYPTO_DES_CBC ||
 			crd2->crd_alg == CRYPTO_3DES_CBC) &&
 		    ((crd2->crd_flags & CRD_F_ENCRYPT) == 0)) {
@@ -1276,8 +1295,8 @@ hifn_process(crp)
 			enccrd = crd2;
 		} else if ((crd1->crd_alg == CRYPTO_DES_CBC ||
 		    crd1->crd_alg == CRYPTO_3DES_CBC) &&
-		    (crd2->crd_alg == CRYPTO_MD5_HMAC96 ||
-			crd2->crd_alg == CRYPTO_SHA1_HMAC96) &&
+		    (crd2->crd_alg == CRYPTO_MD5_HMAC ||
+			crd2->crd_alg == CRYPTO_SHA1_HMAC) &&
 		    (crd1->crd_flags & CRD_F_ENCRYPT)) {
 			enccrd = crd1;
 			maccrd = crd2;
@@ -1331,7 +1350,7 @@ hifn_process(crp)
 		    HIFN_MAC_CMD_MODE_HMAC | HIFN_MAC_CMD_RESULT |
 		    HIFN_MAC_CMD_POS_IPSEC | HIFN_MAC_CMD_TRUNC;
 
-		if (maccrd->crd_alg == CRYPTO_MD5_HMAC96)
+		if (maccrd->crd_alg == CRYPTO_MD5_HMAC)
 			cmd->mac_masks |= HIFN_MAC_CMD_ALG_MD5;
 		else
 			cmd->mac_masks |= HIFN_MAC_CMD_ALG_SHA1;
@@ -1425,8 +1444,8 @@ hifn_callback(sc, cmd, macbuf)
 
 	if (macbuf != NULL) {
 		for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
-			if (crd->crd_alg != CRYPTO_MD5_HMAC96 &&
-			    crd->crd_alg != CRYPTO_SHA1_HMAC96)
+			if (crd->crd_alg != CRYPTO_MD5_HMAC &&
+			    crd->crd_alg != CRYPTO_SHA1_HMAC)
 				continue;
 			m_copyback((struct mbuf *)crp->crp_buf,
 			    crd->crd_inject, 12, macbuf);

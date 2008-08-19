@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.28.2.1 2000/11/14 05:45:50 jason Exp $
+#	$OpenBSD: newvers.sh,v 1.31.2.1 2001/05/09 23:05:25 jason Exp $
 #	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
@@ -52,7 +52,7 @@ id=`basename ${d}`
 #	src/share/tmac/mdoc/doc-common
 #		change	.       ds oS OpenBSD X.X
 #		add	.	if "\\$2"X.X"  .as oS \0X.X
-#	src/share/tmac/mdocs/doc-syms
+#	src/share/tmac/mdoc/doc-syms
 #		ensure new release is listed
 #	src/share/mk/sys.mk
 #		OSMAJOR
@@ -62,7 +62,7 @@ id=`basename ${d}`
 #
 
 ost="OpenBSD"
-osr="2.8"
+osr="2.9"
 
 cat >vers.c <<eof
 char ostype[] = "${ost}";

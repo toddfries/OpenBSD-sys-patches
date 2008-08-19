@@ -1,5 +1,5 @@
-/*	$OpenBSD: nd6.h,v 1.8 2000/07/06 10:11:26 itojun Exp $	*/
-/*	$KAME: nd6.h,v 1.23 2000/06/04 12:54:57 itojun Exp $	*/
+/*	$OpenBSD: nd6.h,v 1.14 2001/02/23 08:01:15 itojun Exp $	*/
+/*	$KAME: nd6.h,v 1.52 2001/02/19 04:40:37 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -39,6 +39,7 @@
 #endif
 
 #include <sys/queue.h>
+#include <sys/timeout.h>
 
 struct	llinfo_nd6 {
 	struct	llinfo_nd6 *ln_next;
@@ -53,7 +54,14 @@ struct	llinfo_nd6 {
 };
 
 #define ND6_LLINFO_NOSTATE	-2
-#define ND6_LLINFO_WAITDELETE	-1
+/*
+ * We don't need the WAITDELETE state any more, but we keep the definition
+ * in a comment line instead of removing it. This is necessary to avoid
+ * unintentionally reusing the value for another purpose, which might
+ * affect backward compatibility with old applications.
+ * (20000711 jinmei@kame.net)
+ */
+/* #define ND6_LLINFO_WAITDELETE	-1 */
 #define ND6_LLINFO_INCOMPLETE	0
 #define ND6_LLINFO_REACHABLE	1
 #define ND6_LLINFO_STALE	2
@@ -232,10 +240,16 @@ extern int nd6_umaxtries;
 extern int nd6_mmaxtries;
 extern int nd6_useloopback;
 extern int nd6_maxnudhint;
+extern int nd6_gctimer;
 extern struct llinfo_nd6 llinfo_nd6;
 extern struct nd_ifinfo *nd_ifinfo;
 extern struct nd_drhead nd_defrouter;
 extern struct nd_prhead nd_prefix;
+extern int nd6_debug;
+
+#define nd6log(x)	do { if (nd6_debug) log x; } while (0)
+
+extern struct timeout nd6_timer_ch;
 
 /* nd6_rtr.c */
 extern struct ifnet *nd6_defifp;  /* XXXYYY */
@@ -278,17 +292,12 @@ struct	rtentry *nd6_lookup __P((struct in6_addr *, int, struct ifnet *));
 void nd6_setmtu __P((struct ifnet *));
 void nd6_timer __P((void *));
 void nd6_purge __P((struct ifnet *));
-void nd6_free __P((struct rtentry *));
+struct llinfo_nd6 *nd6_free __P((struct rtentry *));
 void nd6_nud_hint __P((struct rtentry *, struct in6_addr *, int));
 int nd6_resolve __P((struct ifnet *, struct rtentry *,
 		     struct mbuf *, struct sockaddr *, u_char *));
-#if defined(__bsdi__) && _BSDI_VERSION >= 199802
 void nd6_rtrequest __P((int, struct rtentry *, struct rt_addrinfo *));
 void nd6_p2p_rtrequest __P((int, struct rtentry *, struct rt_addrinfo *));
-#else
-void nd6_rtrequest __P((int, struct rtentry *, struct sockaddr *));
-void nd6_p2p_rtrequest __P((int, struct rtentry *, struct sockaddr *));
-#endif
 int nd6_ioctl __P((u_long, caddr_t, struct ifnet *));
 struct rtentry *nd6_cache_lladdr __P((struct ifnet *, struct in6_addr *,
 	char *, int, int, int));
@@ -307,6 +316,7 @@ void nd6_ns_output __P((struct ifnet *, struct in6_addr *,
 			struct in6_addr *, struct llinfo_nd6 *, int));
 caddr_t nd6_ifptomac __P((struct ifnet *));
 void nd6_dad_start __P((struct ifaddr *, int *));
+void nd6_dad_stop __P((struct ifaddr *));
 void nd6_dad_duplicated __P((struct ifaddr *));
 
 /* nd6_rtr.c */

@@ -1,5 +1,5 @@
-/*	$OpenBSD: in6.h,v 1.18 2000/10/17 21:46:19 itojun Exp $	*/
-/*	$KAME: in6.h,v 1.52 2000/07/15 15:28:02 itojun Exp $	*/
+/*	$OpenBSD: in6.h,v 1.22 2001/03/30 02:43:52 itojun Exp $	*/
+/*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -66,7 +66,7 @@
  */
 
 #ifndef __KAME_NETINET_IN_H_INCLUDED_
-#error "do not include netinet6/in6.h directly, include netinet/in.h"
+#error "do not include netinet6/in6.h directly, include netinet/in.h.  see RFC2553"
 #endif
 
 #ifndef _NETINET6_IN6_H_
@@ -74,9 +74,11 @@
 
 /*
  * Identification of the network protocol stack
+ * for *BSD-current/release: http://www.kame.net/dev/cvsweb.cgi/kame/COVERAGE
+ * has the table of implementation/integration differences.
  */
 #define __KAME__
-#define __KAME_VERSION		"19991208/OpenBSD-current"
+#define __KAME_VERSION		"OpenBSD-current"
 
 /*
  * Local port number conventions:
@@ -163,6 +165,8 @@ struct sockaddr_in6 {
 #endif
 
 #ifdef _KERNEL
+extern const struct sockaddr_in6 sa6_any;
+
 extern const struct in6_addr in6mask0;
 extern const struct in6_addr in6mask32;
 extern const struct in6_addr in6mask64;
@@ -238,37 +242,37 @@ extern const struct in6_addr in6addr_linklocal_allrouters;
  * Unspecified
  */
 #define IN6_IS_ADDR_UNSPECIFIED(a)	\
-	((*(u_int32_t *)(void *)(&(a)->s6_addr[0]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[4]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[8]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[12]) == 0))
+	((*(const u_int32_t *)(const void *)(&(a)->s6_addr[0]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[4]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) == 0))
 
 /*
  * Loopback
  */
 #define IN6_IS_ADDR_LOOPBACK(a)		\
-	((*(u_int32_t *)(void *)(&(a)->s6_addr[0]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[4]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[8]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[12]) == ntohl(1)))
+	((*(const u_int32_t *)(const void *)(&(a)->s6_addr[0]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[4]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) == ntohl(1)))
 
 /*
  * IPv4 compatible
  */
 #define IN6_IS_ADDR_V4COMPAT(a)		\
-	((*(u_int32_t *)(void *)(&(a)->s6_addr[0]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[4]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[8]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[12]) != 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[12]) != ntohl(1)))
+	((*(const u_int32_t *)(const void *)(&(a)->s6_addr[0]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[4]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) != 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) != ntohl(1)))
 
 /*
  * Mapped
  */
 #define IN6_IS_ADDR_V4MAPPED(a)		      \
-	((*(u_int32_t *)(void *)(&(a)->s6_addr[0]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[4]) == 0) &&	\
-	 (*(u_int32_t *)(void *)(&(a)->s6_addr[8]) == ntohl(0x0000ffff)))
+	((*(const u_int32_t *)(const void *)(&(a)->s6_addr[0]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[4]) == 0) &&	\
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == ntohl(0x0000ffff)))
 
 /*
  * KAME Scope Values
@@ -405,14 +409,7 @@ struct route_in6 {
 #endif
 #define IPV6_FAITH		29 /* bool; accept FAITH'ed connections */
 
-#if 1 /*IPV6FIREWALL*/
-#define IPV6_FW_ADD		30 /* add a firewall rule to chain */
-#define IPV6_FW_DEL		31 /* delete a firewall rule from chain */
-#define IPV6_FW_FLUSH		32 /* flush firewall rule chain */
-#define IPV6_FW_ZERO		33 /* clear single/all firewall counter(s) */
-#define IPV6_FW_GET		34 /* get entire firewall rule chain */
-#endif
-/* 35-52: reserved */
+/* 30-52: reserved */
 #define IPV6_AUTH_LEVEL		53   /* int; authentication used */
 #define IPV6_ESP_TRANS_LEVEL	54   /* int; transport encryption */
 #define IPV6_ESP_NETWORK_LEVEL	55   /* int; full-packet encryption */

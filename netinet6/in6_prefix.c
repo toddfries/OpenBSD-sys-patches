@@ -1,5 +1,5 @@
-/*	$OpenBSD: in6_prefix.c,v 1.6 2000/06/07 06:56:30 itojun Exp $	*/
-/*	$KAME: in6_prefix.c,v 1.29 2000/06/07 05:59:38 itojun Exp $	*/
+/*	$OpenBSD: in6_prefix.c,v 1.10 2001/03/25 09:24:26 itojun Exp $	*/
+/*	$KAME: in6_prefix.c,v 1.47 2001/03/25 08:41:39 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -85,6 +85,8 @@
 #include <netinet6/ip6_var.h>
 
 struct rr_prhead rr_prefix;
+
+struct timeout in6_rr_timer_ch;
 
 #include <net/net_osdep.h>
 
@@ -379,7 +381,7 @@ search_ifidwithprefix(struct rr_prefix *rpp, struct in6_addr *ifid)
 }
 
 static int
-assigne_ra_entry(struct rr_prefix *rpp, int iilen, struct in6_ifaddr *ia)
+assign_ra_entry(struct rr_prefix *rpp, int iilen, struct in6_ifaddr *ia)
 {
 	int error = 0;
 	struct rp_addr *rap;
@@ -514,7 +516,7 @@ in6_prefix_add_ifid(int iilen, struct in6_ifaddr *ia)
 		} else if (rap->ra_addr != ia) {
 			/* There may be some inconsistencies between addrs. */
 			log(LOG_ERR, "ip6_prefix.c: addr %s/%d matched prefix"
-			    "has already another ia %p(%s) on its ifid list\n",
+			    " already has another ia %p(%s) on its ifid list\n",
 			    ip6_sprintf(IA6_IN6(ia)), plen,
 			    rap->ra_addr,
 			    ip6_sprintf(IA6_IN6(rap->ra_addr)));
@@ -523,7 +525,7 @@ in6_prefix_add_ifid(int iilen, struct in6_ifaddr *ia)
 		ia->ia6_ifpr = ifpr;
 		return 0;
 	}
-	error = assigne_ra_entry(ifpr2rp(ifpr), iilen, ia);
+	error = assign_ra_entry(ifpr2rp(ifpr), iilen, ia);
 	if (error == 0)
 		ia->ia6_ifpr = ifpr;
 	return (error);
@@ -597,14 +599,16 @@ add_each_addr(struct socket *so, struct rr_prefix *rpp, struct rp_addr *rap)
 	if (ia6 != NULL) {
 		if (ia6->ia6_ifpr == NULL) {
 			/* link this addr and the prefix each other */
-			IFAFREE(&rap->ra_addr->ia_ifa);
+			if (rap->ra_addr)
+				IFAFREE(&rap->ra_addr->ia_ifa);
 			rap->ra_addr = ia6;
 			rap->ra_addr->ia_ifa.ifa_refcnt++;
 			ia6->ia6_ifpr = rp2ifpr(rpp);
 			return;
 		}
 		if (ia6->ia6_ifpr == rp2ifpr(rpp)) {
-			IFAFREE(&rap->ra_addr->ia_ifa);
+			if (rap->ra_addr)
+				IFAFREE(&rap->ra_addr->ia_ifa);
 			rap->ra_addr = ia6;
 			rap->ra_addr->ia_ifa.ifa_refcnt++;
 			return;
@@ -631,12 +635,13 @@ add_each_addr(struct socket *so, struct rr_prefix *rpp, struct rp_addr *rap)
 		ifra.ifra_flags |= IN6_IFF_ANYCAST;
 	error = in6_control(so, SIOCAIFADDR_IN6, (caddr_t)&ifra, rpp->rp_ifp
 			    , curproc);
-	if (error != 0)
+	if (error != 0) {
 		log(LOG_ERR, "in6_prefix.c: add_each_addr: addition of an addr"
 		    "%s/%d failed because in6_control failed for error %d\n",
 		    ip6_sprintf(&ifra.ifra_addr.sin6_addr), rpp->rp_plen,
 		    error);
 		return;
+	}
 
 	/*
 	 * link beween this addr and the prefix will be done
@@ -947,8 +952,10 @@ delete_each_prefix(struct rr_prefix *rpp, u_char origin)
 
 		s = splnet();
 		rap = LIST_FIRST(&rpp->rp_addrhead);
-		if (rap == NULL)
+		if (rap == NULL) {
+			splx(s);
 			break;
+		}
 		LIST_REMOVE(rap, ra_entry);
 		splx(s);
 		if (rap->ra_addr == NULL) {
@@ -1012,7 +1019,7 @@ link_stray_ia6s(struct rr_prefix *rpp)
 				    rpp->rp_plen);
 			continue;
 		}
-		if ((error = assigne_ra_entry(rpp,
+		if ((error = assign_ra_entry(rpp,
 					      (sizeof(rap->ra_ifid) << 3) -
 					      rpp->rp_plen,
 					      (struct in6_ifaddr *)ifa)) != 0)
@@ -1157,7 +1164,8 @@ in6_rr_timer(void *ignored_arg)
 	struct rr_prefix *rpp;
 	long time_second = time.tv_sec;
 
-	timeout(in6_rr_timer, (caddr_t)0, ip6_rr_prune * hz);
+	timeout_set(&in6_rr_timer_ch, in6_rr_timer, NULL);
+	timeout_add(&in6_rr_timer_ch, ip6_rr_prune * hz);
 
 	s = splnet();
 	/* expire */

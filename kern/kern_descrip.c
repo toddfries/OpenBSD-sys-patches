@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.22 2000/09/27 16:13:46 mickey Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.23.2.1 2001/05/31 05:08:29 jason Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -61,6 +61,7 @@
 #include <sys/conf.h>
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
+#include <sys/event.h>
 
 #include <vm/vm.h>
 
@@ -463,6 +464,8 @@ fdrelease(p, fd)
 	*fpp = NULL;
 	*pf = 0;
 	fd_unused(fdp, fd);
+	if (fd < fdp->fd_knlistsize)
+		knote_fdclose(p, fd);
 	return (closef(fp, p));
 }
 
@@ -527,8 +530,7 @@ sys_fstat(p, v, retval)
 #endif
 
 	default:
-		panic("fstat");
-		/*NOTREACHED*/
+		return (EOPNOTSUPP);
 	}
 	if (error == 0) {
 		/* Don't let non-root see generation numbers
@@ -579,7 +581,7 @@ sys_fpathconf(p, v, retval)
 		return (VOP_PATHCONF(vp, SCARG(uap, name), retval));
 
 	default:
-		panic("fpathconf");
+		return (EOPNOTSUPP);
 	}
 	/*NOTREACHED*/
 }
@@ -805,6 +807,7 @@ fdinit(p)
 	newfdp->fd_fd.fd_nfiles = NDFILE;
 	newfdp->fd_fd.fd_himap = newfdp->fd_dhimap;
 	newfdp->fd_fd.fd_lomap = newfdp->fd_dlomap;
+	newfdp->fd_fd.fd_knlistsize = -1;
 
 	newfdp->fd_fd.fd_freefile = 0;
 	newfdp->fd_fd.fd_lastfile = 0;
@@ -881,8 +884,23 @@ fdcopy(p)
 	bcopy(fdp->fd_ofileflags, newfdp->fd_ofileflags, i * sizeof(char));
 	bcopy(fdp->fd_himap, newfdp->fd_himap, NDHISLOTS(i) * sizeof(u_int));
 	bcopy(fdp->fd_lomap, newfdp->fd_lomap, NDLOSLOTS(i) * sizeof(u_int));
+
+	/*
+	 * kq descriptors cannot be copied.
+	 */
+	if (newfdp->fd_knlistsize != -1) {
+		fpp = newfdp->fd_ofiles;
+		for (i = 0; i <= newfdp->fd_lastfile; i++, fpp++)
+			if (*fpp != NULL && (*fpp)->f_type == DTYPE_KQUEUE)
+				fdremove(newfdp, i);
+		newfdp->fd_knlist = NULL;
+		newfdp->fd_knlistsize = -1;
+		newfdp->fd_knhash = NULL;
+		newfdp->fd_knhashmask = 0;
+	}
+
 	fpp = newfdp->fd_ofiles;
-	for (i = newfdp->fd_lastfile; i >= 0; i--, fpp++)
+	for (i = 0; i <= newfdp->fd_lastfile; i++, fpp++)
 		if (*fpp != NULL) {
 			/*
 			 * XXX Gruesome hack. If count gets too high, fail
@@ -890,7 +908,7 @@ fdcopy(p)
 			 * permit it to indicate failure yet.
 			 */
 			if ((*fpp)->f_count == LONG_MAX-2)
-				*fpp = NULL;
+				fdremove(newfdp, i);
 			else
 				(*fpp)->f_count++;
 		}
@@ -928,6 +946,10 @@ fdfree(p)
 	vrele(fdp->fd_cdir);
 	if (fdp->fd_rdir)
 		vrele(fdp->fd_rdir);
+	if (fdp->fd_knlist)
+		FREE(fdp->fd_knlist, M_TEMP);
+	if (fdp->fd_knhash)
+		FREE(fdp->fd_knhash, M_TEMP);
 	FREE(fdp, M_FILEDESC);
 }
 

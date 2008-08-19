@@ -1,4 +1,4 @@
-/*	$OpenBSD: qevar.h,v 1.3.10.1 2000/11/17 20:20:09 jason Exp $	*/
+/*	$OpenBSD: qevar.h,v 1.4 2000/11/16 15:47:57 jason Exp $	*/
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.

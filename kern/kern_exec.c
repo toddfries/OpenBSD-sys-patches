@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.44.2.1 2001/06/15 20:41:28 miod Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.48.2.3 2002/05/08 23:00:22 millert Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -256,6 +256,12 @@ sys_execve(p, v, retval)
 	int saved_sugid;
 
 	/*
+	 * Cheap solution to complicated problems.
+	 * Mark this process as "leave me alone, I'm execing".
+	 */
+	p->p_flag |= P_INEXEC;
+
+	/*
 	 * figure out the maximum size of an exec header, if necessary.
 	 * XXX should be able to keep LKM code from modifying exec switch
 	 * when we're still using it, but...
@@ -279,8 +285,7 @@ sys_execve(p, v, retval)
 	pack.ep_hdrvalid = 0;
 	pack.ep_ndp = &nid;
 	pack.ep_emul_arg = NULL;
-	pack.ep_vmcmds.evs_cnt = 0;
-	pack.ep_vmcmds.evs_used = 0;
+	VMCMDSET_INIT(&pack.ep_vmcmds);
 	pack.ep_vap = &attr;
 	pack.ep_emul = &emul_native;
 	pack.ep_flags = 0;
@@ -547,9 +552,6 @@ sys_execve(p, v, retval)
 			 * allocated.  We do not want userland to accidentally
 			 * allocate descriptors in this range which has implied
 			 * meaning to libc.
-			 *
-			 * XXX - Shouldn't the exec fail if we can't allocate
-			 *       resources here?
 			 */
 			if (fp == NULL) {
 				short flags = FREAD | (i == 0 ? 0 : FWRITE);
@@ -557,7 +559,7 @@ sys_execve(p, v, retval)
 				int indx;
 
 				if ((error = falloc(p, &fp, &indx)) != 0)
-					break;
+					goto exec_abort;
 #ifdef DIAGNOSTIC
 				if (indx != i)
 					panic("sys_execve: falloc indx != i");
@@ -565,13 +567,13 @@ sys_execve(p, v, retval)
 				if ((error = cdevvp(getnulldev(), &vp)) != 0) {
 					ffree(fp);
 					fdremove(p->p_fd, indx);
-					break;
+					goto exec_abort;
 				}
 				if ((error = VOP_OPEN(vp, flags, p->p_ucred, p)) != 0) {
 					ffree(fp);
 					fdremove(p->p_fd, indx);
 					vrele(vp);
-					break;
+					goto exec_abort;
 				}
 				if (flags & FWRITE)
 					vp->v_writecount++;
@@ -610,6 +612,11 @@ sys_execve(p, v, retval)
 	VOP_CLOSE(pack.ep_vp, FREAD, cred, p);
 	vput(pack.ep_vp);
 
+	/*
+	 * notify others that we exec'd
+	 */
+	KNOTE(&p->p_klist, NOTE_EXEC);
+
 	/* setup new registers and do misc. setup. */
 	if(pack.ep_emul->e_fixup != NULL) {
 		if((*pack.ep_emul->e_fixup)(p, &pack) != 0)
@@ -629,8 +636,9 @@ sys_execve(p, v, retval)
 
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_EMUL))
-		ktremul(p->p_tracep, p->p_emul->e_name);
+		ktremul(p, p->p_emul->e_name);
 #endif
+	p->p_flag &= ~P_INEXEC;
 	return (0);
 
 bad:
@@ -653,7 +661,7 @@ bad:
 
 freehdr:
 	free(pack.ep_hdr, M_EXEC);
-	p->p_flag = (p->p_flag & ~(P_SUGID|P_SUGIDEXEC)) | saved_sugid;
+	p->p_flag = (p->p_flag & ~(P_SUGID|P_SUGIDEXEC|P_INEXEC)) | saved_sugid;
 	return (error);
 
 exec_abort:
@@ -686,6 +694,7 @@ free_pack_abort:
 	exit1(p, -1);
 
 	/* NOTREACHED */
+	p->p_flag &= ~P_INEXEC;
 	return (0);
 }
 

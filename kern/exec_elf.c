@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.29 2000/01/01 21:11:18 mickey Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.31.2.1 2001/08/17 23:39:28 jason Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -189,6 +189,10 @@ elf_check_header(ehdr, type)
 	if (ehdr->e_type != type)
 		return (ENOEXEC);
 
+	/* Don't allow an insane amount of sections. */
+	if (ehdr->e_phnum > 128)
+		return (ENOEXEC);
+
 	return (0);
 }
 
@@ -230,6 +234,10 @@ os_ok:
 
         /* Check the type */
 	if (ehdr->e_type != type)
+		return (ENOEXEC);
+
+	/* Don't allow an insane amount of sections. */
+	if (ehdr->e_phnum > 128)
 		return (ENOEXEC);
 
 	*os = ehdr->e_ident[OI_OS];
@@ -536,10 +544,10 @@ exec_elf_makecmds(p, epp)
 			    0;
 	if (!error)
 		p->p_os = os;
-#ifndef NATIVE_ELF
+#ifndef NATIVE_EXEC_ELF
 	else
 		goto bad;
-#endif /* NATIVE_ELF */
+#endif /* NATIVE_EXEC_ELF */
 
 	/*
 	 * Load all the necessary sections
@@ -700,7 +708,7 @@ exec_elf_fixup(p, epp)
 	 * Push extra arguments on the stack needed by dynamically
 	 * linked binaries
 	 */
-	if(error == 0) {
+	if (error == 0) {
 		a = ai;
 
 		a->au_id = AUX_phdr;

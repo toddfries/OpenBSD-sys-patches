@@ -1,5 +1,5 @@
-/*	$OpenBSD: ip6_output.c,v 1.17 2000/10/11 09:14:15 itojun Exp $	*/
-/*	$KAME: ip6_output.c,v 1.122 2000/08/19 02:12:02 jinmei Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.32 2001/04/14 00:30:59 angelos Exp $	*/
+/*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -103,13 +103,7 @@ extern int ipsec_esp_trans_default_level;
 extern int ipsec_esp_network_default_level;
 #endif /* IPSEC */
 
-#include "loop.h"
-
 #include <net/net_osdep.h>
-
-#ifdef IPV6FIREWALL
-#include <netinet6/ip6_fw.h>
-#endif
 
 struct ip6_exthdrs {
 	struct mbuf *ip6e_ip6;
@@ -128,8 +122,6 @@ static int ip6_insertfraghdr __P((struct mbuf *, struct mbuf *, int,
 				  struct ip6_frag **));
 static int ip6_insert_jumboopt __P((struct ip6_exthdrs *, u_int32_t));
 static int ip6_splithdr __P((struct mbuf *, struct ip6_exthdrs *));
-extern struct ifnet *loifp;
-extern struct ifnet loif[NLOOP];
 
 /*
  * IP6 output. The packet in mbuf chain m contains a skeletal IP6
@@ -137,6 +129,10 @@ extern struct ifnet loif[NLOOP];
  * This function may modify ver and hlim only.
  * The mbuf chain containing the packet will be freed.
  * The mbuf opt, if present, will not be freed.
+ *
+ * type of "mtu": rt_rmx.rmx_mtu is u_long, ifnet.ifr_mtu is int, and
+ * nd_ifinfo.linkmtu is u_int32_t.  so we use u_long to hold largest one,
+ * which is rt_rmx.rmx_mtu.
  */
 int
 ip6_output(m0, opt, ro, flags, im6o, ifpp)
@@ -215,11 +211,11 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	 * from a transport protocol.
 	 */
 	ip6 = mtod(m, struct ip6_hdr *);
-	if (inp && inp->inp_tdb &&
-	    inp->inp_tdb->tdb_dst.sa.sa_family == AF_INET6 &&
-	    IN6_ARE_ADDR_EQUAL(&inp->inp_tdb->tdb_dst.sin6.sin6_addr,
+	if (inp && inp->inp_tdb_out &&
+	    inp->inp_tdb_out->tdb_dst.sa.sa_family == AF_INET6 &&
+	    IN6_ARE_ADDR_EQUAL(&inp->inp_tdb_out->tdb_dst.sin6.sin6_addr,
 		  &ip6->ip6_dst)) {
-	        tdb = inp->inp_tdb;
+	        tdb = inp->inp_tdb_out;
 	} else {
 	        tdb = ipsp_spd_lookup(m, AF_INET6, sizeof(struct ip6_hdr),
 	            &error, IPSP_DIRECTION_OUT, NULL, NULL);
@@ -252,6 +248,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	        bcopy(&tdb->tdb_dst, &sdst, sizeof(sdst));
 		sspi = tdb->tdb_spi;
 		sproto = tdb->tdb_sproto;
+	        splx(s);
 
 		/*
 		 * If the socket has set the bypass flags and SA destination
@@ -264,7 +261,6 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		    inp->inp_seclevel[SL_ESP_NETWORK] == IPSEC_LEVEL_BYPASS &&
 		    sdst.sa.sa_family == AF_INET6 &&
 		    IN6_ARE_ADDR_EQUAL(&sdst.sin6.sin6_addr, &ip6->ip6_dst)) {
-		        splx(s);
 		        sproto = 0; /* mark as no-IPsec-needed */
 			goto done_spd;
 		}
@@ -585,15 +581,21 @@ skip_ipsec2:;
 
 		tdb = gettdb(sspi, &sdst, sproto);
 		if (tdb == NULL) {
+			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto done;
 		}
 
+		/* Latch to PCB */
+		if (inp)
+		        tdb_add_inp(tdb, inp, 0);
+
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
 		/* Callee frees mbuf */
-		error = ipsp_process_packet(m, tdb, AF_INET6, 0);
+		/* XXX Should use last argument */
+		error = ipsp_process_packet(m, tdb, AF_INET6, 0, NULL);
 		splx(s);
 		return error;  /* Nothing more to be done */
 	}
@@ -693,7 +695,7 @@ skip_ipsec2:;
 				goto bad;
 			}
 			else {
-				ifp = &loif[0];
+				ifp = lo0ifp;
 			}
 		}
 
@@ -812,7 +814,7 @@ skip_ipsec2:;
 		u_int32_t ifmtu = nd_ifinfo[ifp->if_index].linkmtu;
 
 		mtu = ro_pmtu->ro_rt->rt_rmx.rmx_mtu;
-		if (mtu > ifmtu) {
+		if (mtu > ifmtu || mtu == 0) {
 			/*
 			 * The MTU on the route is larger than the MTU on
 			 * the interface!  This shouldn't happen, unless the
@@ -820,6 +822,9 @@ skip_ipsec2:;
 			 * interface was brought up.  Change the MTU in the
 			 * route to match the interface MTU (as long as the
 			 * field isn't locked).
+			 *
+			 * if MTU on the route is 0, we need to fix the MTU.
+			 * this case happens with path MTU discovery timeouts.
 			 */
 			 mtu = ifmtu;
 			 if ((ro_pmtu->ro_rt->rt_rmx.rmx_locks & RTV_MTU) == 0)
@@ -846,45 +851,32 @@ skip_ipsec2:;
 		 * Larger scopes than link will be supported in the near
 		 * future.
 		 */
+		origifp = NULL;
 		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
 			origifp = ifindex2ifnet[ntohs(ip6->ip6_src.s6_addr16[1])];
 		else if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
 			origifp = ifindex2ifnet[ntohs(ip6->ip6_dst.s6_addr16[1])];
-		else
+		/*
+		 * XXX: origifp can be NULL even in those two cases above.
+		 * For example, if we remove the (only) link-local address
+		 * from the loopback interface, and try to send a link-local
+		 * address without link-id information.  Then the source
+		 * address is ::1, and the destination address is the
+		 * link-local address with its s6_addr16[1] being zero.
+		 * What is worse, if the packet goes to the loopback interface
+		 * by a default rejected route, the null pointer would be
+		 * passed to looutput, and the kernel would hang.
+		 * The following last resort would prevent such disaster.
+		 */
+		if (origifp == NULL)
 			origifp = ifp;
 	}
 	else
 		origifp = ifp;
-#ifndef FAKE_LOOPBACK_IF
-	if ((ifp->if_flags & IFF_LOOPBACK) == 0)
-#else
-	if (1)
-#endif
-	{
-		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
-			ip6->ip6_src.s6_addr16[1] = 0;
-		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
-			ip6->ip6_dst.s6_addr16[1] = 0;
-	}
-
-#ifdef IPV6FIREWALL
-	/*
-	 * Check with the firewall...
-	 */
-	if (ip6_fw_chk_ptr) {
-		u_short port = 0;
-		m->m_pkthdr.rcvif = NULL;	/*XXX*/
-		/* If ipfw says divert, we have to just drop packet */
-		if ((*ip6_fw_chk_ptr)(&ip6, ifp, &port, &m)) {
-			m_freem(m);
-			goto done;
-		}
-		if (!m) {
-			error = EACCES;
-			goto done;
-		}
-	}
-#endif
+	if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
+		ip6->ip6_src.s6_addr16[1] = 0;
+	if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
+		ip6->ip6_dst.s6_addr16[1] = 0;
 
 	/*
 	 * If the outgoing packet contains a hop-by-hop options header,
@@ -1192,7 +1184,7 @@ ip6_insert_jumboopt(exthdrs, plen)
 			      oldoptlen);
 			optbuf = mtod(n, caddr_t) + oldoptlen;
 			m_freem(mopt);
-			exthdrs->ip6e_hbh = n;
+			mopt = exthdrs->ip6e_hbh = n;
 		} else {
 			optbuf = mtod(mopt, u_char *) + mopt->m_len;
 			mopt->m_len += JUMBOOPTLEN;
@@ -1278,8 +1270,8 @@ ip6_ctloutput(op, so, level, optname, mp)
 	struct mbuf **mp;
 {
 	int privileged;
-	register struct inpcb *inp = sotoinpcb(so);
-	register struct mbuf *m = *mp;
+	struct inpcb *inp = sotoinpcb(so);
+	struct mbuf *m = *mp;
 	int error, optval;
 	int optlen;
 #ifdef IPSEC
@@ -1370,7 +1362,7 @@ ip6_ctloutput(op, so, level, optname, mp)
 						break;
 
 					case IPV6_CHECKSUM:
-						inp->inp_csumoffset = optval;
+						inp->in6p_cksum = optval;
 						break;
 
 					case IPV6_FAITH:
@@ -1431,21 +1423,6 @@ ip6_ctloutput(op, so, level, optname, mp)
 				break;
 #endif /* IPSEC */
 
-#ifdef IPV6FIREWALL
-			case IPV6_FW_ADD:
-			case IPV6_FW_DEL:
-			case IPV6_FW_FLUSH:
-			case IPV6_FW_ZERO:
-			    {
-				if (ip6_fw_ctl_ptr == NULL) {
-					if (m) (void)m_free(m);
-					return EINVAL;
-				}
-				error = (*ip6_fw_ctl_ptr)(optname, mp);
-				m = *mp;
-			    }
-				break;
-#endif
 			case IPSEC6_OUTSA:
 #ifndef IPSEC
 				error = EINVAL;
@@ -1456,11 +1433,11 @@ ip6_ctloutput(op, so, level, optname, mp)
 				} else {
 					tdbip = mtod(m, struct tdb_ident *);
 					tdb = gettdb(tdbip->spi, &tdbip->dst,
-					    tdbip->proto);
+						     tdbip->proto);
 					if (tdb == NULL)
 						error = ESRCH;
 					else
-						tdb_add_inp(tdb, inp);
+						tdb_add_inp(tdb, inp, 0);
 				}
 				splx(s);
 #endif /* IPSEC */
@@ -1614,7 +1591,7 @@ ip6_ctloutput(op, so, level, optname, mp)
 					break;
 
 				case IPV6_CHECKSUM:
-					optval = inp->inp_csumoffset;
+					optval = inp->in6p_cksum;
 					break;
 
 				case IPV6_FAITH:
@@ -1663,31 +1640,17 @@ ip6_ctloutput(op, so, level, optname, mp)
 			  }
 #endif /* IPSEC */
 
-#ifdef IPV6FIREWALL
-			case IPV6_FW_GET:
-			  {
-				if (ip6_fw_ctl_ptr == NULL)
-			        {
-					if (m)
-						(void)m_free(m);
-					return EINVAL;
-				}
-				error = (*ip6_fw_ctl_ptr)(optname, mp);
-			  }
-				break;
-#endif
-
 			case IPSEC6_OUTSA:
 #ifndef IPSEC
 				error = EINVAL;
 #else
 				s = spltdb();
-				if (inp->inp_tdb == NULL) {
+				if (inp->inp_tdb_out == NULL) {
 					error = ENOENT;
 				} else {
-					tdbi.spi = inp->inp_tdb->tdb_spi;
-					tdbi.dst = inp->inp_tdb->tdb_dst;
-					tdbi.proto = inp->inp_tdb->tdb_sproto;
+					tdbi.spi = inp->inp_tdb_out->tdb_spi;
+					tdbi.dst = inp->inp_tdb_out->tdb_dst;
+					tdbi.proto = inp->inp_tdb_out->tdb_sproto;
 					*mp = m = m_get(M_WAIT, MT_SOOPTS);
 					m->m_len = sizeof(tdbi);
 					bcopy((caddr_t)&tdbi, mtod(m, caddr_t),
@@ -1746,10 +1709,10 @@ ip6_ctloutput(op, so, level, optname, mp)
 static int
 ip6_pcbopts(pktopt, m, so)
 	struct ip6_pktopts **pktopt;
-	register struct mbuf *m;
+	struct mbuf *m;
 	struct socket *so;
 {
-	register struct ip6_pktopts *opt = *pktopt;
+	struct ip6_pktopts *opt = *pktopt;
 	int error = 0;
 	struct proc *p = curproc;	/* XXX */
 	int priv = 0;
@@ -1923,7 +1886,7 @@ ip6_setmoptions(optname, im6op, m)
 			 *   XXX: is it a good approach?
 			 */
 			if (IN6_IS_ADDR_MC_NODELOCAL(&mreq->ipv6mr_multiaddr)) {
-				ifp = &loif[0];
+				ifp = lo0ifp;
 			}
 			else {
 				ro.ro_rt = NULL;
@@ -2076,8 +2039,8 @@ ip6_setmoptions(optname, im6op, m)
 static int
 ip6_getmoptions(optname, im6o, mp)
 	int optname;
-	register struct ip6_moptions *im6o;
-	register struct mbuf **mp;
+	struct ip6_moptions *im6o;
+	struct mbuf **mp;
 {
 	u_int *hlim, *loop, *ifindex;
 
@@ -2122,7 +2085,7 @@ ip6_getmoptions(optname, im6o, mp)
  */
 void
 ip6_freemoptions(im6o)
-	register struct ip6_moptions *im6o;
+	struct ip6_moptions *im6o;
 {
 	struct in6_multi_mship *imm;
 
@@ -2147,7 +2110,7 @@ ip6_setpktoptions(control, opt, priv)
 	struct ip6_pktopts *opt;
 	int priv;
 {
-	register struct cmsghdr *cm = 0;
+	struct cmsghdr *cm = 0;
 
 	if (control == 0 || opt == 0)
 		return(EINVAL);
@@ -2189,10 +2152,12 @@ ip6_setpktoptions(control, opt, priv)
 
 			/*
 			 * Check if the requested source address is indeed a
-			 * unicast address assigned to the node.
+			 * unicast address assigned to the node, and can be
+			 * used as the packet's source address.
 			 */
 			if (!IN6_IS_ADDR_UNSPECIFIED(&opt->ip6po_pktinfo->ipi6_addr)) {
 				struct ifaddr *ia;
+				struct in6_ifaddr *ia6;
 				struct sockaddr_in6 sin6;
 
 				bzero(&sin6, sizeof(sin6));
@@ -2207,6 +2172,11 @@ ip6_setpktoptions(control, opt, priv)
 				      opt->ip6po_pktinfo->ipi6_ifindex))) {
 					return(EADDRNOTAVAIL);
 				}
+				ia6 = (struct in6_ifaddr *)ia;
+				if ((ia6->ia6_flags & (IN6_IFF_ANYCAST|IN6_IFF_NOTREADY)) != 0) {
+					return(EADDRNOTAVAIL);
+				}
+
 				/*
 				 * Check if the requested source address is
 				 * indeed a unicast address assigned to the
@@ -2305,13 +2275,13 @@ ip6_setpktoptions(control, opt, priv)
  * Routine called from ip6_output() to loop back a copy of an IP6 multicast
  * packet to the input queue of a specified interface.  Note that this
  * calls the output routine of the loopback "driver", but with an interface
- * pointer that might NOT be &loif -- easier than replicating that code here.
+ * pointer that might NOT be lo0ifp -- easier than replicating that code here.
  */
 void
 ip6_mloopback(ifp, m, dst)
 	struct ifnet *ifp;
-	register struct mbuf *m;
-	register struct sockaddr_in6 *dst;
+	struct mbuf *m;
+	struct sockaddr_in6 *dst;
 {
 	struct mbuf *copym;
 	struct ip6_hdr *ip6;
@@ -2339,18 +2309,11 @@ ip6_mloopback(ifp, m, dst)
 	}
 #endif
 
-#ifndef FAKE_LOOPBACK_IF
-	if ((ifp->if_flags & IFF_LOOPBACK) == 0)
-#else
-	if (1)
-#endif
-	{
-		ip6 = mtod(copym, struct ip6_hdr *);
-		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
-			ip6->ip6_src.s6_addr16[1] = 0;
-		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
-			ip6->ip6_dst.s6_addr16[1] = 0;
-	}
+	ip6 = mtod(copym, struct ip6_hdr *);
+	if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
+		ip6->ip6_src.s6_addr16[1] = 0;
+	if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
+		ip6->ip6_dst.s6_addr16[1] = 0;
 
 	(void)looutput(ifp, copym, (struct sockaddr *)dst, NULL);
 }
@@ -2376,6 +2339,7 @@ ip6_splithdr(m, exthdrs)
 		M_COPY_PKTHDR(mh, m);
 		MH_ALIGN(mh, sizeof(*ip6));
 		m->m_flags &= ~M_PKTHDR;
+		m->m_pkthdr.tdbi = NULL;
 		m->m_len -= sizeof(*ip6);
 		m->m_data += sizeof(*ip6);
 		mh->m_next = m;
@@ -2392,7 +2356,6 @@ ip6_splithdr(m, exthdrs)
  */
 # define in6pcb	inpcb
 # define in6p_outputopts	inp_outputopts6
-
 int
 ip6_optlen(in6p)
 	struct in6pcb *in6p;

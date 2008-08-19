@@ -1,5 +1,5 @@
-/*	$OpenBSD: icmp6.h,v 1.11 2000/10/10 15:53:07 itojun Exp $	*/
-/*	$KAME: icmp6.h,v 1.23 2000/10/10 15:35:45 itojun Exp $	*/
+/*	$OpenBSD: icmp6.h,v 1.15 2001/02/07 11:43:52 itojun Exp $	*/
+/*	$KAME: icmp6.h,v 1.39 2001/02/06 03:48:06 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -385,12 +385,12 @@ struct icmp6_router_renum {	/* router renumbering header */
 	u_int16_t	rr_maxdelay;
 	u_int32_t	rr_reserved;
 };
-#define ICMP6_RR_FLAGS_SEGNUM		0x80
-#define ICMP6_RR_FLAGS_TEST		0x40
-#define ICMP6_RR_FLAGS_REQRESULT	0x20
-#define ICMP6_RR_FLAGS_FORCEAPPLY	0x10
-#define ICMP6_RR_FLAGS_SPECSITE		0x08
-#define ICMP6_RR_FLAGS_PREVDONE		0x04
+
+#define ICMP6_RR_FLAGS_TEST		0x80
+#define ICMP6_RR_FLAGS_REQRESULT	0x40
+#define ICMP6_RR_FLAGS_FORCEAPPLY	0x20
+#define ICMP6_RR_FLAGS_SPECSITE		0x10
+#define ICMP6_RR_FLAGS_PREVDONE		0x08
 
 #define rr_type		rr_hdr.icmp6_type
 #define rr_code		rr_hdr.icmp6_code
@@ -445,8 +445,8 @@ struct rr_result {		/* router renumbering result message */
 #define ICMP6_RR_RESULT_FLAGS_OOB		0x0002
 #define ICMP6_RR_RESULT_FLAGS_FORBIDDEN		0x0001
 #elif BYTE_ORDER == LITTLE_ENDIAN
-#define ICMP6_RR_RESULT_FLAGS_OOB		0x02
-#define ICMP6_RR_RESULT_FLAGS_FORBIDDEN		0x01
+#define ICMP6_RR_RESULT_FLAGS_OOB		0x0200
+#define ICMP6_RR_RESULT_FLAGS_FORBIDDEN		0x0100
 #endif
 
 /*
@@ -536,6 +536,13 @@ struct icmp6stat {
 #define icp6s_oparamprob_option icp6s_outerrhist.icp6errs_paramprob_option
 #define icp6s_oredirect icp6s_outerrhist.icp6errs_redirect
 #define icp6s_ounknown icp6s_outerrhist.icp6errs_unknown
+	u_quad_t icp6s_pmtuchg;		/* path MTU changes */
+	u_quad_t icp6s_nd_badopt;	/* bad ND options */
+	u_quad_t icp6s_badns;		/* bad neighbor solicitation */
+	u_quad_t icp6s_badna;		/* bad neighbor advertisement */
+	u_quad_t icp6s_badrs;		/* bad router advertisement */
+	u_quad_t icp6s_badra;		/* bad router advertisement */
+	u_quad_t icp6s_badredirect;	/* bad redirect message */
 };
 
 /*
@@ -556,7 +563,10 @@ struct icmp6stat {
 #define ICMPV6CTL_NODEINFO	13
 #define ICMPV6CTL_ERRPPSLIMIT	14	/* ICMPv6 error pps limitation */
 #define ICMPV6CTL_ND6_MAXNUDHINT	15
-#define ICMPV6CTL_MAXID		16
+#define ICMPV6CTL_MTUDISC_HIWAT	16
+#define ICMPV6CTL_MTUDISC_LOWAT	17
+#define ICMPV6CTL_ND6_DEBUG	18
+#define ICMPV6CTL_MAXID		19
 
 #define ICMPV6CTL_NAMES { \
 	{ 0, 0 }, \
@@ -575,6 +585,9 @@ struct icmp6stat {
 	{ "nodeinfo", CTLTYPE_INT }, \
 	{ "errppslimit", CTLTYPE_INT }, \
 	{ "nd6_maxnudhint", CTLTYPE_INT }, \
+	{ "mtudisc_hiwat", CTLTYPE_INT }, \
+	{ "mtudisc_lowat", CTLTYPE_INT }, \
+	{ "nd6_debug", CTLTYPE_INT }, \
 }
 
 #define RTF_PROBEMTU	RTF_PROTO1
@@ -595,6 +608,10 @@ void	icmp6_prepare __P((struct mbuf *));
 void	icmp6_redirect_input __P((struct mbuf *, int));
 void	icmp6_redirect_output __P((struct mbuf *, struct rtentry *));
 int	icmp6_sysctl __P((int *, u_int, void *, size_t *, void *, size_t));
+
+struct	ip6ctlparam;
+void	icmp6_mtudisc_update __P((struct ip6ctlparam *, int));
+void	icmp6_mtudisc_callback_register __P((void (*)(struct in6_addr *)));
 
 /* XXX: is this the right place for these macros? */
 #define icmp6_ifstat_inc(ifp, tag) \

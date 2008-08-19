@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_process.c,v 1.8 2000/06/08 22:25:24 niklas Exp $	*/
+/*	$OpenBSD: sys_process.c,v 1.10.2.1 2002/02/20 08:52:33 miod Exp $	*/
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -109,6 +109,9 @@ sys_ptrace(p, v, retval)
 			return (ESRCH);
 	}
 
+	if ((t->p_flag & P_INEXEC) != 0)
+		return (EAGAIN);
+
 	/* Make sure we can operate on it. */
 	switch (SCARG(uap, req)) {
 	case  PT_TRACE_ME:
@@ -215,10 +218,10 @@ sys_ptrace(p, v, retval)
 		t->p_oppid = t->p_pptr->p_pid;
 		return (0);
 
-	case  PT_WRITE_I:		/* XXX no seperate I and D spaces */
+	case  PT_WRITE_I:		/* XXX no separate I and D spaces */
 	case  PT_WRITE_D:
 		write = 1;
-	case  PT_READ_I:		/* XXX no seperate I and D spaces */
+	case  PT_READ_I:		/* XXX no separate I and D spaces */
 	case  PT_READ_D:
 		/* write = 0 done above. */
 		iov.iov_base =
@@ -338,7 +341,7 @@ sys_ptrace(p, v, retval)
 		/* write = 0 done above. */
 #endif
 #if defined(PT_SETREGS) || defined(PT_GETREGS)
-		if (!procfs_validregs(t))
+		if (!procfs_validregs(t, NULL))
 			return (EINVAL);
 		else {
 			iov.iov_base = SCARG(uap, addr);
@@ -363,7 +366,7 @@ sys_ptrace(p, v, retval)
 		/* write = 0 done above. */
 #endif
 #if defined(PT_SETFPREGS) || defined(PT_GETFPREGS)
-		if (!procfs_validfpregs(t))
+		if (!procfs_validfpregs(t, NULL))
 			return (EINVAL);
 		else {
 			iov.iov_base = SCARG(uap, addr);

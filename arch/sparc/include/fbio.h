@@ -1,4 +1,4 @@
-/*	$OpenBSD: fbio.h,v 1.3.16.1 2001/09/16 15:22:02 miod Exp $	*/
+/*	$OpenBSD: fbio.h,v 1.3.18.1 2001/10/14 20:44:48 jason Exp $	*/
 /*	$NetBSD: fbio.h,v 1.5 1996/09/30 23:45:11 abrown Exp $ */
 
 /*

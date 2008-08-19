@@ -1,4 +1,4 @@
-/* $OpenBSD: cryptosoft.c,v 1.15 2000/10/15 01:12:24 angelos Exp $ */
+/*	$OpenBSD: cryptosoft.c,v 1.17.2.1 2001/06/06 22:29:57 jason Exp $	*/
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -338,9 +338,9 @@ swcr_authcompute(struct cryptodesc *crd, struct swcr_data *sw,
 
     switch (sw->sw_alg)
     {
-	case CRYPTO_MD5_HMAC96:
-	case CRYPTO_SHA1_HMAC96:
-	case CRYPTO_RIPEMD160_HMAC96:
+	case CRYPTO_MD5_HMAC:
+	case CRYPTO_SHA1_HMAC:
+	case CRYPTO_RIPEMD160_HMAC:
 	    if (sw->sw_octx == NULL)
 	      return EINVAL;
 
@@ -462,7 +462,7 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 		txf = &enc_xform_skipjack;
                 goto enccommon;
 
-            case CRYPTO_RIJNDAEL128_CBC:
+	    case CRYPTO_RIJNDAEL128_CBC:
                 txf = &enc_xform_rijndael128;
                 goto enccommon;
 
@@ -481,15 +481,15 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 		get_random_bytes((*swd)->sw_iv, txf->blocksize);
 		break;
 
-	    case CRYPTO_MD5_HMAC96:
+	    case CRYPTO_MD5_HMAC:
 		axf = &auth_hash_hmac_md5_96;
 		goto authcommon;
 
-	    case CRYPTO_SHA1_HMAC96:
+	    case CRYPTO_SHA1_HMAC:
 		axf = &auth_hash_hmac_sha1_96;
 		goto authcommon;
 		
-	    case CRYPTO_RIPEMD160_HMAC96:
+	    case CRYPTO_RIPEMD160_HMAC:
 		axf = &auth_hash_hmac_ripemd_160_96;
 
 	authcommon:
@@ -608,7 +608,7 @@ swcr_freesession(u_int64_t tid)
 	    case CRYPTO_BLF_CBC:
 	    case CRYPTO_CAST_CBC:
 	    case CRYPTO_SKIPJACK_CBC:
-            case CRYPTO_RIJNDAEL128_CBC:
+	    case CRYPTO_RIJNDAEL128_CBC:
 		txf = swd->sw_exf;
 
 		if (swd->sw_kschedule)
@@ -618,9 +618,9 @@ swcr_freesession(u_int64_t tid)
 		  free(swd->sw_iv, M_XDATA);
 		break;
 
-	    case CRYPTO_MD5_HMAC96:
-	    case CRYPTO_SHA1_HMAC96:
-	    case CRYPTO_RIPEMD160_HMAC96:
+	    case CRYPTO_MD5_HMAC:
+	    case CRYPTO_SHA1_HMAC:
+	    case CRYPTO_RIPEMD160_HMAC:
 		axf = swd->sw_axf;
 
 		if (swd->sw_ictx)
@@ -669,7 +669,6 @@ swcr_process(struct cryptop *crp)
     struct cryptodesc *crd;
     struct swcr_data *sw;
     u_int32_t lid;
-    u_int64_t nid;
     int type;
 
     /* Sanity check */
@@ -732,9 +731,9 @@ swcr_process(struct cryptop *crp)
 		  goto done;
 		break;
 
-	    case CRYPTO_MD5_HMAC96:
-	    case CRYPTO_SHA1_HMAC96:
-	    case CRYPTO_RIPEMD160_HMAC96:
+	    case CRYPTO_MD5_HMAC:
+	    case CRYPTO_SHA1_HMAC:
+	    case CRYPTO_RIPEMD160_HMAC:
 	    case CRYPTO_MD5_KPDK:
 	    case CRYPTO_SHA1_KPDK:
 		if ((crp->crp_etype = swcr_authcompute(crd, sw, crp->crp_buf,
@@ -749,18 +748,6 @@ swcr_process(struct cryptop *crp)
     }
 
  done:
-    if (crp->crp_etype == ENOENT)
-    {
-	crypto_freesession(crp->crp_sid); /* Just in case */
-
-	/* Migrate session */
-	for (crd = crp->crp_desc; crd->crd_next; crd = crd->crd_next)
-	  crd->CRD_INI.cri_next = &(crd->crd_next->CRD_INI);
-
-	if (crypto_newsession(&nid, &(crp->crp_desc->CRD_INI)) == 0)
-	  crp->crp_sid = nid;
-    }
-
     crypto_done(crp);
     return 0;
 }
@@ -780,9 +767,9 @@ swcr_init(void)
         crypto_register(swcr_id, CRYPTO_BLF_CBC, NULL, NULL, NULL);
         crypto_register(swcr_id, CRYPTO_CAST_CBC, NULL, NULL, NULL);
         crypto_register(swcr_id, CRYPTO_SKIPJACK_CBC, NULL, NULL, NULL);
-        crypto_register(swcr_id, CRYPTO_MD5_HMAC96, NULL, NULL, NULL);
-        crypto_register(swcr_id, CRYPTO_SHA1_HMAC96, NULL, NULL, NULL);
-        crypto_register(swcr_id, CRYPTO_RIPEMD160_HMAC96, NULL, NULL, NULL);
+        crypto_register(swcr_id, CRYPTO_MD5_HMAC, NULL, NULL, NULL);
+        crypto_register(swcr_id, CRYPTO_SHA1_HMAC, NULL, NULL, NULL);
+        crypto_register(swcr_id, CRYPTO_RIPEMD160_HMAC, NULL, NULL, NULL);
         crypto_register(swcr_id, CRYPTO_MD5_KPDK, NULL, NULL, NULL);
         crypto_register(swcr_id, CRYPTO_SHA1_KPDK, NULL, NULL, NULL);
         crypto_register(swcr_id, CRYPTO_RIJNDAEL128_CBC, NULL, NULL, NULL);

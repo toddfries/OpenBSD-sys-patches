@@ -1,5 +1,5 @@
-/*	$OpenBSD: ip6_forward.c,v 1.9 2000/07/27 16:05:07 itojun Exp $	*/
-/*	$KAME: ip6_forward.c,v 1.44 2000/07/27 13:43:21 itojun Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.13 2001/03/30 11:09:00 itojun Exp $	*/
+/*	$KAME: ip6_forward.c,v 1.67 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -82,8 +82,8 @@ ip6_forward(m, srcrt)
 	int srcrt;
 {
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
-	register struct sockaddr_in6 *dst;
-	register struct rtentry *rt;
+	struct sockaddr_in6 *dst;
+	struct rtentry *rt;
 	int error, type = 0, code = 0;
 	struct mbuf *mcopy = NULL;
 	long time_second = time.tv_sec;
@@ -417,29 +417,13 @@ ip6_forward(m, srcrt)
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0)
 		type = ND_REDIRECT;
 
-#ifdef IPV6FIREWALL
-	/*
-	 * Check with the firewall...
-	 */
-	if (ip6_fw_chk_ptr) {
-		u_short port = 0;
-		/* If ipfw says divert, we have to just drop packet */
-		if ((*ip6_fw_chk_ptr)(&ip6, rt->rt_ifp, &port, &m)) {
-			m_freem(m);
-			goto freecopy;
-		}
-		if (!m)
-			goto freecopy;
-	}
-#endif
-
 	/*
 	 * Fake scoped addresses. Note that even link-local source or
 	 * destinaion can appear, if the originating node just sends the
 	 * packet to us (without address resolution for the destination).
 	 * Since both icmp6_error and icmp6_redirect_output fill the embedded
-	 * link identifiers, we can do this stuff after make a copy for
-	 * returning error.
+	 * link identifiers, we can do this stuff after making a copy for
+	 * returning an error.
 	 */
 	if ((rt->rt_ifp->if_flags & IFF_LOOPBACK) != 0) {
 		/*
@@ -465,26 +449,15 @@ ip6_forward(m, srcrt)
 			       if_name(rt->rt_ifp));
 		}
 
-		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
-			origifp = ifindex2ifnet[ntohs(ip6->ip6_src.s6_addr16[1])];
-		else if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
-			origifp = ifindex2ifnet[ntohs(ip6->ip6_dst.s6_addr16[1])];
-		else
-			origifp = rt->rt_ifp;
+		/* we can just use rcvif in forwarding. */
+		origifp = m->m_pkthdr.rcvif;
 	}
 	else
 		origifp = rt->rt_ifp;
-#ifndef FAKE_LOOPBACK_IF
-	if ((rt->rt_ifp->if_flags & IFF_LOOPBACK) == 0)
-#else
-	if (1)
-#endif
-	{
-		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
-			ip6->ip6_src.s6_addr16[1] = 0;
-		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
-			ip6->ip6_dst.s6_addr16[1] = 0;
-	}
+	if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
+		ip6->ip6_src.s6_addr16[1] = 0;
+	if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_dst))
+		ip6->ip6_dst.s6_addr16[1] = 0;
 
 #ifdef OLDIP6OUTPUT
 	error = (*rt->rt_ifp->if_output)(rt->rt_ifp, m,

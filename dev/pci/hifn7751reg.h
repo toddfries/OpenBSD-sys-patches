@@ -1,4 +1,4 @@
-/*	$OpenBSD: hifn7751reg.h,v 1.16 2000/10/26 00:41:26 jason Exp $	*/
+/*	$OpenBSD: hifn7751reg.h,v 1.17.2.1 2001/12/01 00:31:55 miod Exp $	*/
 
 /*
  * Invertex AEON / Hi/fn 7751 driver
@@ -35,7 +35,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #ifndef __HIFN_H__
-#define __HIFN_H__
+#define	__HIFN_H__
 
 #include <machine/endian.h>
 
@@ -43,8 +43,10 @@
  * Some PCI configuration space offset defines.  The names were made
  * identical to the names used by the Linux kernel.
  */
-#define HIFN_BAR0		(PCI_MAPREG_START + 0)	/* PUC register map */
-#define HIFN_BAR1		(PCI_MAPREG_START + 4)	/* DMA register map */
+#define	HIFN_BAR0		(PCI_MAPREG_START + 0)	/* PUC register map */
+#define	HIFN_BAR1		(PCI_MAPREG_START + 4)	/* DMA register map */
+#define	HIFN_RETRY_TIMEOUT	0x40
+#define	HIFN_TRDY_TIMEOUT	0x41
 
 /*
  *  Some configurable values for the driver
@@ -87,13 +89,6 @@ typedef struct hifn_desc {
 #define	HIFN_D_LAST		0x20000000	/* last descriptor in chain */
 #define	HIFN_D_JUMP		0x40000000	/* jump descriptor */
 #define	HIFN_D_VALID		0x80000000	/* valid bit */
-
-/*
- * hifn_callback_t 
- *
- * Type for callback function when dest data is ready.
- */
-typedef void (*hifn_callback_t)(hifn_command_t *);
 
 /*
  * Data structure to hold all 4 rings and any other ring related data.
@@ -145,6 +140,8 @@ struct hifn_softc {
 	int sc_maxses;
 	int sc_ramsize;
 	struct hifn_session sc_sessions[2048];
+	pci_chipset_tag_t sc_pci_pc;
+	pcitag_t sc_pci_tag;
 };
 
 /*
@@ -247,7 +244,7 @@ struct hifn_softc {
  */
 #define	HIFN_1_DMA_CRAR		0x0c	/* DMA Command Ring Address */
 #define	HIFN_1_DMA_SRAR		0x1c	/* DMA Source Ring Address */
-#define	HIFN_1_DMA_RRAR		0x2c	/* DMA Resultt Ring Address */
+#define	HIFN_1_DMA_RRAR		0x2c	/* DMA Result Ring Address */
 #define	HIFN_1_DMA_DRAR		0x3c	/* DMA Destination Ring Address */
 #define	HIFN_1_DMA_CSR		0x40	/* DMA Status and Control */
 #define	HIFN_1_DMA_IER		0x44	/* DMA Interrupt Enable */

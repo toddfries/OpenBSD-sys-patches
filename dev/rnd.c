@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.45.2.1 2001/01/23 03:45:04 jason Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.46 2001/01/17 01:59:50 mickey Exp $	*/
 
 /*
  * random.c -- A strong random number generator

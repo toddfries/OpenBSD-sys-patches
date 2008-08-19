@@ -1,5 +1,5 @@
-/*	$OpenBSD: in6.c,v 1.21 2000/10/06 05:52:01 itojun Exp $	*/
-/*	$KAME: in6.c,v 1.107 2000/10/06 04:58:30 itojun Exp $	*/
+/*	$OpenBSD: in6.c,v 1.26 2001/02/16 15:58:50 itojun Exp $	*/
+/*	$KAME: in6.c,v 1.176 2001/02/16 12:49:45 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -119,6 +119,9 @@ const struct in6_addr in6mask128 = IN6MASK128;
 
 static int in6_lifaddr_ioctl __P((struct socket *, u_long, caddr_t,
 	struct ifnet *, struct proc *));
+
+const struct sockaddr_in6 sa6_any = {sizeof(sa6_any), AF_INET6,
+				     0, 0, IN6ADDR_ANY_INIT, 0};
 
 /*
  * This structure is used to keep track of in6_multi chains which belong to
@@ -383,7 +386,7 @@ in6_control(so, cmd, data, ifp, p)
 					htons(ifp->if_index);
 			} else if (sa6->sin6_addr.s6_addr16[1] !=
 				    htons(ifp->if_index)) {
-				return(EINVAL);	/* ifid is contradict */
+				return(EINVAL);	/* ifid contradicts */
 			}
 			if (sa6->sin6_scope_id) {
 				if (sa6->sin6_scope_id !=
@@ -399,11 +402,11 @@ in6_control(so, cmd, data, ifp, p)
 
 	case SIOCDIFADDR_IN6:
 		/*
-		 * for IPv4, we look for existing in6_ifaddr here to allow
+		 * for IPv4, we look for existing in_ifaddr here to allow
 		 * "ifconfig if0 delete" to remove first IPv4 address on the
 		 * interface.  For IPv6, as the spec allow multiple interface
 		 * address from the day one, we consider "remove the first one"
-		 * semantics to be not preferrable.
+		 * semantics to be not preferable.
 		 */
 		if (ia == NULL)
 			return(EADDRNOTAVAIL);
@@ -571,7 +574,7 @@ in6_control(so, cmd, data, ifp, p)
 			} else if (ia->ia_dstaddr.sin6_addr.s6_addr16[1] !=
 				    htons(ifp->if_index)) {
 				ia->ia_dstaddr = oldaddr;
-				return(EINVAL);	/* ifid is contradict */
+				return(EINVAL);	/* ifid contradicts */
 			}
 		}
 
@@ -715,7 +718,7 @@ in6_control(so, cmd, data, ifp, p)
 				} else if (ia->ia_dstaddr.sin6_addr.s6_addr16[1] !=
 					    htons(ifp->if_index)) {
 					ia->ia_dstaddr = oldaddr;
-					return(EINVAL);	/* ifid is contradict */
+					return(EINVAL);	/* ifid contradicts */
 				}
 			}
 			prefixIsNew = 1; /* We lie; but effect's the same */
@@ -762,6 +765,14 @@ in6_control(so, cmd, data, ifp, p)
 				time_second + ia->ia6_lifetime.ia6t_pltime;
 		} else
 			ia->ia6_lifetime.ia6t_preferred = 0;
+
+		/*
+		 * make sure to initialize ND6 information.  this is to
+		 * workaround issues with interfaces with IPv6 addresses,
+		 * which have never brought # up.  we are assuming that it is
+		 * safe to nd6_ifattach multiple times.
+		 */
+		nd6_ifattach(ifp);
 
 		/*
 		 * Perform DAD, if needed.
@@ -819,6 +830,9 @@ in6_purgeaddr(ifa, ifp)
 	struct ifnet *ifp;
 {
 	struct in6_ifaddr *oia, *ia = (void *) ifa;
+
+	/* stop DAD processing */
+	nd6_dad_stop(ifa);
 
 	in6_ifscrub(ifp, ia);
 
@@ -1121,12 +1135,19 @@ in6_lifaddr_ioctl(so, cmd, data, ifp, p)
  */
 void
 in6_ifscrub(ifp, ia)
-	register struct ifnet *ifp;
-	register struct in6_ifaddr *ia;
+	struct ifnet *ifp;
+	struct in6_ifaddr *ia;
 {
 	if ((ia->ia_flags & IFA_ROUTE) == 0)
 		return;
-	if (ifp->if_flags & (IFF_LOOPBACK | IFF_POINTOPOINT))
+	/*
+	 * We should check the existence of dstaddr, because link-local
+	 * addresses can be configured without particular destinations
+	 * even on point-to-point or loopback interfaces.
+	 * In this case, kernel would panic in rtinit()...
+	 */
+	if (ifp->if_flags & (IFF_LOOPBACK | IFF_POINTOPOINT) &&
+	    (ia->ia_ifa.ifa_dstaddr != NULL))
 		rtinit(&(ia->ia_ifa), (int)RTM_DELETE, RTF_HOST);
 	else
 		rtinit(&(ia->ia_ifa), (int)RTM_DELETE, 0);
@@ -1272,7 +1293,7 @@ in6_restoremkludge(ia, ifp)
 		if (mk->mk_ifp == ifp) {
 			struct in6_multi *in6m, *next;
 
-			for (in6m = mk->mk_head.lh_first; in6m; in6m = next){
+			for (in6m = mk->mk_head.lh_first; in6m; in6m = next) {
 				next = in6m->in6m_entry.le_next;
 				in6m->in6m_ia = ia;
 				ia->ia_ifa.ifa_refcnt++;
@@ -1312,8 +1333,8 @@ in6_purgemkludge(ifp)
  */
 struct	in6_multi *
 in6_addmulti(maddr6, ifp, errorp)
-	register struct in6_addr *maddr6;
-	register struct ifnet *ifp;
+	struct in6_addr *maddr6;
+	struct ifnet *ifp;
 	int *errorp;
 {
 	struct	in6_ifaddr *ia;
@@ -1373,6 +1394,7 @@ in6_addmulti(maddr6, ifp, errorp)
 		if (*errorp) {
 			LIST_REMOVE(in6m, in6m_entry);
 			free(in6m, M_IPMADDR);
+			IFAFREE(&ia->ia_ifa);
 			splx(s);
 			return(NULL);
 		}
@@ -1407,8 +1429,9 @@ in6_delmulti(in6m)
 		 * Unlink from list.
 		 */
 		LIST_REMOVE(in6m, in6m_entry);
-		if (in6m->in6m_ia)
+		if (in6m->in6m_ia) {
 			IFAFREE(&in6m->in6m_ia->ia_ifa); /* release reference */
+		}
 
 		/*
 		 * Notify the network driver to update its multicast
@@ -1433,7 +1456,7 @@ in6ifa_ifpforlinklocal(ifp, ignoreflags)
 	struct ifnet *ifp;
 	int ignoreflags;
 {
-	register struct ifaddr *ifa;
+	struct ifaddr *ifa;
 
 	for (ifa = ifp->if_addrlist.tqh_first;
 	     ifa;
@@ -1463,7 +1486,7 @@ in6ifa_ifpwithaddr(ifp, addr)
 	struct ifnet *ifp;
 	struct in6_addr *addr;
 {
-	register struct ifaddr *ifa;
+	struct ifaddr *ifa;
 
 	for (ifa = ifp->if_addrlist.tqh_first;
 	     ifa;
@@ -1487,13 +1510,13 @@ static char digits[] = "0123456789abcdef";
 static int ip6round = 0;
 char *
 ip6_sprintf(addr)
-register struct in6_addr *addr;
+	struct in6_addr *addr;
 {
 	static char ip6buf[8][48];
-	register int i;
-	register char *cp;
-	register u_short *a = (u_short *)addr;
-	register u_char *d;
+	int i;
+	char *cp;
+	u_short *a = (u_short *)addr;
+	u_char *d;
 	int dcolon = 0;
 
 	ip6round = (ip6round + 1) & 7;
@@ -1713,8 +1736,8 @@ in6_prefixlen2mask(maskp, len)
  */
 struct in6_ifaddr *
 in6_ifawithscope(oifp, dst)
-	register struct ifnet *oifp;
-	register struct in6_addr *dst;
+	struct ifnet *oifp;
+	struct in6_addr *dst;
 {
 	int dst_scope =	in6_addrscope(dst), src_scope, best_scope = 0;
 	int blen = -1;
@@ -1964,8 +1987,8 @@ in6_ifawithscope(oifp, dst)
 
 struct in6_ifaddr *
 in6_ifawithifp(ifp, dst)
-	register struct ifnet *ifp;
-	register struct in6_addr *dst;
+	struct ifnet *ifp;
+	struct in6_addr *dst;
 {
 	int dst_scope =	in6_addrscope(dst), blen = -1, tlen;
 	struct ifaddr *ifa;

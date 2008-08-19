@@ -1,4 +1,4 @@
-/*	$OpenBSD: ne2000.c,v 1.8.2.1 2001/03/14 02:30:09 jason Exp $	*/
+/*	$OpenBSD: ne2000.c,v 1.11 2001/03/29 01:39:32 aaron Exp $	*/
 /*	$NetBSD: ne2000.c,v 1.12 1998/06/10 01:15:50 thorpej Exp $	*/
 
 /*-
@@ -103,10 +103,9 @@ struct cfdriver ne_cd = {
 };
 
 int
-ne2000_attach(nsc, myea, media, nmedia, defmedia)
+ne2000_attach(nsc, myea)
 	struct ne2000_softc *nsc;
 	u_int8_t *myea;
-	int *media, nmedia, defmedia;
 {
 	struct dp8390_softc *dsc = &nsc->sc_dp8390;
 	bus_space_tag_t nict = dsc->sc_regt;
@@ -167,6 +166,7 @@ ne2000_attach(nsc, myea, media, nmedia, defmedia)
 	case NE2000_TYPE_NE2000:
 	case NE2000_TYPE_AX88190:		/* XXX really? */
 	case NE2000_TYPE_DL10019:
+	case NE2000_TYPE_DL10022:
 		memsize = 8192 * 2;
 		break;
 	}
@@ -277,7 +277,10 @@ ne2000_attach(nsc, myea, media, nmedia, defmedia)
 	/* Clear any pending interrupts that might have occurred above. */
 	bus_space_write_1(nict, nich, ED_P0_ISR, 0xff);
 
-	if (dp8390_config(dsc, media, nmedia, defmedia)) {
+	if (dsc->sc_media_init == NULL)
+		dsc->sc_media_init = dp8390_media_init;
+
+	if (dp8390_config(dsc)) {
 		printf("%s: setup failed\n", dsc->sc_dev.dv_xname);
 		return (1);
 	}
@@ -787,4 +790,12 @@ ne2000_writemem(nict, nich, asict, asich, src, dst, len, useword)
 	 */
 	while (((bus_space_read_1(nict, nich, ED_P0_ISR) & ED_ISR_RDC) !=
 	    ED_ISR_RDC) && --maxwait);
+}
+
+int
+ne2000_detach(sc, flags)
+	struct ne2000_softc *sc;
+	int flags;
+{
+	return (dp8390_detach(&sc->sc_dp8390, flags));
 }

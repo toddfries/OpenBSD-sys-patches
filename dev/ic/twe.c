@@ -1,7 +1,7 @@
-/*	$OpenBSD: twe.c,v 1.3 2000/09/25 23:50:20 mickey Exp $	*/
+/*	$OpenBSD: twe.c,v 1.9.2.2 2001/05/22 23:00:23 jason Exp $	*/
 
 /*
- * Copyright (c) 2000 Michael Shalayeff.  All rights reserved.
+ * Copyright (c) 2000, 2001 Michael Shalayeff.  All rights reserved.
  *
  * The SCSI emulation layer is derived from gdt(4) driver,
  * Copyright (c) 1999, 2000 Niklas Hallqvist. All rights reserved.
@@ -33,7 +33,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#undef	TWE_DEBUG
+/* #define	TWE_DEBUG */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -43,10 +43,6 @@
 #include <sys/malloc.h>
 
 #include <machine/bus.h>
-
-#include <vm/vm.h>
-#include <vm/vm_kern.h>
-#include <uvm/uvm_extern.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
@@ -86,7 +82,6 @@ static __inline void twe_put_ccb __P((struct twe_ccb *ccb));
 void twe_dispose __P((struct twe_softc *sc));
 int  twe_cmd __P((struct twe_ccb *ccb, int flags, int wait));
 int  twe_start __P((struct twe_ccb *ccb, int wait));
-void twe_exec_cmd __P((void *v));
 int  twe_complete __P((struct twe_ccb *ccb));
 int  twe_done __P((struct twe_softc *sc, int idx));
 void twe_copy_internal_data __P((struct scsi_xfer *xs, void *v, size_t size));
@@ -119,14 +114,16 @@ twe_dispose(sc)
 	struct twe_softc *sc;
 {
 	register struct twe_ccb *ccb;
-	if (sc->sc_cmdmap != NULL)
+	if (sc->sc_cmdmap != NULL) {
 		bus_dmamap_destroy(sc->dmat, sc->sc_cmdmap);
-	/* TODO: traverse the ccbs and destroy the maps */
-	for (ccb = &sc->sc_ccbs[TWE_MAXCMDS - 1]; ccb >= sc->sc_ccbs; ccb--)
-		if (ccb->ccb_dmamap)
-			bus_dmamap_destroy(sc->dmat, ccb->ccb_dmamap);
-	uvm_km_free(kmem_map, (vaddr_t)sc->sc_cmds,
+		/* traverse the ccbs and destroy the maps */
+		for (ccb = &sc->sc_ccbs[TWE_MAXCMDS - 1]; ccb >= sc->sc_ccbs; ccb--)
+			if (ccb->ccb_dmamap)
+				bus_dmamap_destroy(sc->dmat, ccb->ccb_dmamap);
+	}
+	bus_dmamem_unmap(sc->dmat, sc->sc_cmds, 
 	    sizeof(struct twe_cmd) * TWE_MAXCMDS);
+	bus_dmamem_free(sc->dmat, sc->sc_cmdseg, 1);
 }
 
 int
@@ -141,18 +138,26 @@ twe_attach(sc)
 	struct twe_ccb	*ccb;
 	struct twe_cmd	*cmd;
 	u_int32_t	status;
-	int		error, i, retry;
+	int		error, i, retry, nunits, nseg;
 	const char	*errstr;
+	twe_lock_t	lock;
 
-	TAILQ_INIT(&sc->sc_ccb2q);
-	TAILQ_INIT(&sc->sc_ccbq);
-	TAILQ_INIT(&sc->sc_free_ccb);
-	sc->sc_cmds = (void *)uvm_km_kmemalloc(kmem_map, uvmexp.kmem_object,
-	    sizeof(struct twe_cmd) * TWE_MAXCMDS, UVM_KMF_NOWAIT);
-	if (sc->sc_cmds == NULL) {
-		printf(": cannot allocate commands\n");
+	error = bus_dmamem_alloc(sc->dmat, sizeof(struct twe_cmd) * TWE_MAXCMDS,
+	    PAGE_SIZE, 0, sc->sc_cmdseg, 1, &nseg, BUS_DMA_NOWAIT);
+	if (error) {
+		printf(": cannot allocate commands (%d)\n", error);
 		return (1);
 	}
+
+	error = bus_dmamem_map(sc->dmat, sc->sc_cmdseg, nseg,
+	    sizeof(struct twe_cmd) * TWE_MAXCMDS,
+	    (caddr_t *)&sc->sc_cmds, BUS_DMA_NOWAIT);
+	if (error) {
+		printf(": cannot map commands (%d)\n", error);
+		bus_dmamem_free(sc->dmat, sc->sc_cmdseg, 1);
+		return (1);
+	}
+
 	error = bus_dmamap_create(sc->dmat,
 	    sizeof(struct twe_cmd) * TWE_MAXCMDS, TWE_MAXCMDS,
 	    sizeof(struct twe_cmd) * TWE_MAXCMDS, 0,
@@ -169,6 +174,11 @@ twe_attach(sc)
 		twe_dispose(sc);
 		return (1);
 	}
+
+	TAILQ_INIT(&sc->sc_ccb2q);
+	TAILQ_INIT(&sc->sc_ccbq);
+	TAILQ_INIT(&sc->sc_free_ccb);
+
 	for (cmd = sc->sc_cmds + sizeof(struct twe_cmd) * (TWE_MAXCMDS - 1);
 	     cmd >= (struct twe_cmd *)sc->sc_cmds; cmd--) {
 
@@ -189,13 +199,6 @@ twe_attach(sc)
 		TAILQ_INSERT_TAIL(&sc->sc_free_ccb, ccb, ccb_link);
 	}
 
-	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.adapter = &twe_switch;
-	sc->sc_link.adapter_target = TWE_MAX_UNITS;
-	sc->sc_link.device = &twe_dev;
-	sc->sc_link.openings = TWE_MAXCMDS;	/* XXX or less? */
-	sc->sc_link.adapter_buswidth = TWE_MAX_UNITS;
-
 	for (errstr = NULL, retry = 3; retry--; ) {
 		int		veseen_srst;
 		u_int16_t	aen;
@@ -203,7 +206,7 @@ twe_attach(sc)
 		if (errstr)
 			TWE_DPRINTF(TWE_D_MISC, ("%s ", errstr));
 
-		for (i = 60000; i--; DELAY(100)) {
+		for (i = 350000; i--; DELAY(100)) {
 			status = bus_space_read_4(sc->iot, sc->ioh, TWE_STATUS);
 			if (status & TWE_STAT_CPURDY)
 				break;
@@ -221,7 +224,7 @@ twe_attach(sc)
 		    TWE_CTRL_MCMDI | TWE_CTRL_MRDYI |
 		    TWE_CTRL_MINT);
 
-		for (i = 45000; i--; DELAY(100)) {
+		for (i = 350000; i--; DELAY(100)) {
 			status = bus_space_read_4(sc->iot, sc->ioh, TWE_STATUS);
 			if (status & TWE_STAT_ATTNI)
 				break;
@@ -247,7 +250,7 @@ twe_attach(sc)
 			cmd = ccb->ccb_cmd;
 			cmd->cmd_unit_host = TWE_UNITHOST(0, 0);
 			cmd->cmd_op = TWE_CMD_GPARAM;
-			cmd->cmd_count = 1;
+			cmd->cmd_param.count = 1;
 
 			pb->table_id = TWE_PARAM_AEN;
 			pb->param_id = 2;
@@ -315,7 +318,7 @@ twe_attach(sc)
 	cmd = ccb->ccb_cmd;
 	cmd->cmd_unit_host = TWE_UNITHOST(0, 0);
 	cmd->cmd_op = TWE_CMD_GPARAM;
-	cmd->cmd_count = 1;
+	cmd->cmd_param.count = 1;
 
 	pb->table_id = TWE_PARAM_UC;
 	pb->param_id = TWE_PARAM_UC;
@@ -329,7 +332,7 @@ twe_attach(sc)
 	/* we are assuming last read status was good */
 	printf(": Escalade V%d.%d\n", TWE_MAJV(status), TWE_MINV(status));
 
-	for (i = 0; i < TWE_MAX_UNITS; i++) {
+	for (nunits = i = 0; i < TWE_MAX_UNITS; i++) {
 		if (pb->data[i] == 0)
 			continue;
 
@@ -346,17 +349,21 @@ twe_attach(sc)
 		cmd = ccb->ccb_cmd;
 		cmd->cmd_unit_host = TWE_UNITHOST(0, 0);
 		cmd->cmd_op = TWE_CMD_GPARAM;
-		cmd->cmd_count = 1;
+		cmd->cmd_param.count = 1;
 
 		cap->table_id = TWE_PARAM_UI + i;
 		cap->param_id = 4;
 		cap->param_size = 4;	/* 4 bytes */
+		lock = TWE_LOCK_TWE(sc);
 		if (twe_cmd(ccb, BUS_DMA_NOWAIT, 1)) {
+			TWE_UNLOCK_TWE(sc, lock);
 			printf("%s: error fetching capacity for unit %d\n",
 			    sc->sc_dev.dv_xname, i);
 			continue;
 		}
+		TWE_UNLOCK_TWE(sc, lock);
 
+		nunits++;
 		sc->sc_hdr[i].hd_present = 1;
 		sc->sc_hdr[i].hd_devtype = 0;
 		sc->sc_hdr[i].hd_size = letoh32(*(u_int32_t *)cap->data);
@@ -373,7 +380,17 @@ twe_attach(sc)
 		    sc->sc_hdr[i].hd_heads));
 	}
 
+	if (!nunits)
+		nunits++;
+
 	/* TODO: fetch & print cache params? */
+
+	sc->sc_link.adapter_softc = sc;
+	sc->sc_link.adapter = &twe_switch;
+	sc->sc_link.adapter_target = TWE_MAX_UNITS;
+	sc->sc_link.device = &twe_dev;
+	sc->sc_link.openings = TWE_MAXCMDS / nunits;
+	sc->sc_link.adapter_buswidth = TWE_MAX_UNITS;
 
 	config_found(&sc->sc_dev, &sc->sc_link, scsiprint);
 
@@ -398,10 +415,21 @@ twe_cmd(ccb, flags, wait)
 	if (ccb->ccb_data && ((u_long)ccb->ccb_data & (TWE_ALIGN - 1))) {
 		TWE_DPRINTF(TWE_D_DMA, ("data=%p is unaligned ",ccb->ccb_data));
 		ccb->ccb_realdata = ccb->ccb_data;
-		ccb->ccb_data = (void *)uvm_km_kmemalloc(kmem_map,
-		    uvmexp.kmem_object, ccb->ccb_length, UVM_KMF_NOWAIT);
-		if (!ccb->ccb_data) {
-			TWE_DPRINTF(TWE_D_DMA, ("2buf alloc failed "));
+
+		error = bus_dmamem_alloc(sc->dmat, ccb->ccb_length, PAGE_SIZE,
+		    0, ccb->ccb_2bseg, TWE_MAXOFFSETS, &ccb->ccb_2nseg,
+		    BUS_DMA_NOWAIT);
+		if (error) {
+			TWE_DPRINTF(TWE_D_DMA, ("2buf alloc failed(%d) ", error));
+			twe_put_ccb(ccb);
+			return (ENOMEM);
+		}
+
+		error = bus_dmamem_map(sc->dmat, ccb->ccb_2bseg, ccb->ccb_2nseg,
+		    ccb->ccb_length, (caddr_t *)&ccb->ccb_data, BUS_DMA_NOWAIT);
+		if (error) {
+			TWE_DPRINTF(TWE_D_DMA, ("2buf map failed(%d) ", error));
+			bus_dmamem_free(sc->dmat, ccb->ccb_2bseg, ccb->ccb_2nseg);
 			twe_put_ccb(ccb);
 			return (ENOMEM);
 		}
@@ -422,6 +450,12 @@ twe_cmd(ccb, flags, wait)
 			else
 				printf("error %d loading dma map\n", error);
 
+			if (ccb->ccb_realdata) {
+				bus_dmamem_unmap(sc->dmat, ccb->ccb_data,
+				    ccb->ccb_length);
+				bus_dmamem_free(sc->dmat, ccb->ccb_2bseg,
+				    ccb->ccb_2nseg);
+			}
 			twe_put_ccb(ccb);
 			return error;
 		}
@@ -465,8 +499,14 @@ twe_cmd(ccb, flags, wait)
 
 	if ((error = twe_start(ccb, wait))) {
 		bus_dmamap_unload(sc->dmat, dmap);
+		if (ccb->ccb_realdata) {
+			bus_dmamem_unmap(sc->dmat, ccb->ccb_data,
+			    ccb->ccb_length);
+			bus_dmamem_free(sc->dmat, ccb->ccb_2bseg,
+			    ccb->ccb_2nseg);
+		}
 		twe_put_ccb(ccb);
-		return error;
+		return (error);
 	}
 
 	return wait? twe_complete(ccb) : 0;
@@ -483,7 +523,6 @@ twe_start(ccb, wait)
 	int i;
 
 	cmd->cmd_op = htole16(cmd->cmd_op);
-	cmd->cmd_count = htole16(cmd->cmd_count);
 
 	if (!wait) {
 
@@ -527,10 +566,11 @@ twe_complete(ccb)
 	struct twe_ccb *ccb;
 {
 	struct twe_softc *sc = ccb->ccb_sc;
+	struct scsi_xfer *xs = ccb->ccb_xs;
 	u_int32_t	status;
 	int i;
 
-	for (i = 100000; i--; DELAY(10)) {
+	for (i = 100 * (xs? xs->timeout : 35000); i--; DELAY(10)) {
 		status = bus_space_read_4(sc->iot, sc->ioh, TWE_STATUS);
 		/* TWE_DPRINTF(TWE_D_CMD,  ("twe_intr stat=%b ",
 		    status & TWE_STAT_FLAGS, TWE_STAT_BITS)); */
@@ -563,13 +603,13 @@ twe_done(sc, idx)
 	struct twe_softc *sc;
 	int	idx;
 {
-	struct scsi_xfer *xs;
 	struct twe_ccb *ccb = &sc->sc_ccbs[idx];
 	struct twe_cmd *cmd = ccb->ccb_cmd;
+	struct scsi_xfer *xs = ccb->ccb_xs;
+	bus_dmamap_t	dmap;
+	twe_lock_t	lock;
 
 	TWE_DPRINTF(TWE_D_CMD, ("done(%d) ", idx));
-
-	xs = ccb->ccb_xs;
 
 	if (ccb->ccb_state != TWE_CCB_QUEUED) {
 		printf("%s: unqueued ccb %d ready\n",
@@ -577,28 +617,26 @@ twe_done(sc, idx)
 		return 1;
 	}
 
+	dmap = ccb->ccb_dmamap;
 	if (xs) {
 		if (xs->cmd->opcode != PREVENT_ALLOW &&
 		    xs->cmd->opcode != SYNCHRONIZE_CACHE) {
-			bus_dmamap_sync(sc->dmat, ccb->ccb_dmamap,
+			bus_dmamap_sync(sc->dmat, dmap,
 			    (xs->flags & SCSI_DATA_IN) ?
-			    BUS_DMASYNC_POSTREAD :
-			    BUS_DMASYNC_POSTWRITE);
-			bus_dmamap_unload(sc->dmat, ccb->ccb_dmamap);
+			    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
+			bus_dmamap_unload(sc->dmat, dmap);
 		}
 	} else {
-		switch (cmd->cmd_op) {
+		switch (letoh16(cmd->cmd_op)) {
 		case TWE_CMD_GPARAM:
 		case TWE_CMD_READ:
-			bus_dmamap_sync(sc->dmat, ccb->ccb_dmamap,
-			    BUS_DMASYNC_POSTREAD);
-			bus_dmamap_unload(sc->dmat, ccb->ccb_dmamap);
+			bus_dmamap_sync(sc->dmat, dmap, BUS_DMASYNC_POSTREAD);
+			bus_dmamap_unload(sc->dmat, dmap);
 			break;
 		case TWE_CMD_SPARAM:
 		case TWE_CMD_WRITE:
-			bus_dmamap_sync(sc->dmat, ccb->ccb_dmamap,
-			    BUS_DMASYNC_POSTWRITE);
-			bus_dmamap_unload(sc->dmat, ccb->ccb_dmamap);
+			bus_dmamap_sync(sc->dmat, dmap, BUS_DMASYNC_POSTWRITE);
+			bus_dmamap_unload(sc->dmat, dmap);
 			break;
 		default:
 			/* no data */
@@ -607,13 +645,14 @@ twe_done(sc, idx)
 
 	if (ccb->ccb_realdata) {
 		bcopy(ccb->ccb_data, ccb->ccb_realdata, ccb->ccb_length);
-		uvm_km_free(kmem_map, (vaddr_t)ccb->ccb_data, ccb->ccb_length);
-		ccb->ccb_data = ccb->ccb_realdata;
-		ccb->ccb_realdata = NULL;
+		bus_dmamem_unmap(sc->dmat, ccb->ccb_data, ccb->ccb_length);
+		bus_dmamem_free(sc->dmat, ccb->ccb_2bseg, ccb->ccb_2nseg);
 	}
 
+	lock = TWE_LOCK_TWE(sc);
 	TAILQ_REMOVE(&sc->sc_ccbq, ccb, ccb_link);
 	twe_put_ccb(ccb);
+	TWE_UNLOCK_TWE(sc, lock);
 
 	if (xs) {
 		xs->resid = 0;
@@ -643,7 +682,7 @@ twe_copy_internal_data(xs, v, size)
 	TWE_DPRINTF(TWE_D_MISC, ("twe_copy_internal_data "));
 
 	if (!xs->datalen)
-		printf("uio move not yet supported\n");
+		printf("uio move is not yet supported\n");
 	else {
 		copy_cnt = MIN(size, xs->datalen);
 		bcopy(v, xs->data, copy_cnt);
@@ -670,7 +709,7 @@ twe_scsi_cmd(xs)
 	u_int32_t blockno, blockcnt;
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
-	int error, op;
+	int error, op, flags;
 	twe_lock_t lock;
 
 
@@ -777,6 +816,7 @@ twe_scsi_cmd(xs)
 	case SYNCHRONIZE_CACHE:
 		lock = TWE_LOCK_TWE(sc);
 
+		flags = 0;
 		if (xs->cmd->opcode != SYNCHRONIZE_CACHE) {
 			/* A read or write operation. */
 			if (xs->cmdlen == 6) {
@@ -788,6 +828,10 @@ twe_scsi_cmd(xs)
 				rwb = (struct scsi_rw_big *)xs->cmd;
 				blockno = _4btol(rwb->addr);
 				blockcnt = _2btol(rwb->length);
+				/* reflect DPO & FUA flags */
+				if (xs->cmd->opcode == WRITE_BIG &&
+				    rwb->byte2 & 0x18)
+					flags = TWE_FLAGS_CACHEDISABLE;
 			}
 			if (blockno >= sc->sc_hdr[target].hd_size ||
 			    blockno + blockcnt > sc->sc_hdr[target].hd_size) {
@@ -795,8 +839,8 @@ twe_scsi_cmd(xs)
 				printf("%s: out of bounds %u-%u >= %u\n",
 				    sc->sc_dev.dv_xname, blockno, blockcnt,
 				    sc->sc_hdr[target].hd_size);
-				scsi_done(xs);
 				xs->error = XS_DRIVER_STUFFUP;
+				scsi_done(xs);
 				return (COMPLETE);
 			}
 		}
@@ -810,8 +854,9 @@ twe_scsi_cmd(xs)
 		}
 
 		if ((ccb = twe_get_ccb(sc)) == NULL) {
-			scsi_done(xs);
+			TWE_UNLOCK_TWE(sc, lock);
 			xs->error = XS_DRIVER_STUFFUP;
+			scsi_done(xs);
 			return (COMPLETE);
 		}
 
@@ -822,8 +867,9 @@ twe_scsi_cmd(xs)
 		cmd = ccb->ccb_cmd;
 		cmd->cmd_unit_host = TWE_UNITHOST(target, 0); /* XXX why 0? */
 		cmd->cmd_op = op;
-		cmd->cmd_count = blockcnt;
-		cmd->cmd_io.lba = blockno;
+		cmd->cmd_flags = flags;
+		cmd->cmd_io.count = htole16(blockcnt);
+		cmd->cmd_io.lba = htole32(blockno);
 
 		if ((error = twe_cmd(ccb, ((xs->flags & SCSI_NOSLEEP)?
 		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK), xs->flags & SCSI_POLL))) {
@@ -834,19 +880,18 @@ twe_scsi_cmd(xs)
 				xs->error = XS_TIMEOUT;
 				return (TRY_AGAIN_LATER);
 			} else {
-				scsi_done(xs);
 				xs->error = XS_DRIVER_STUFFUP;
+				scsi_done(xs);
 				return (COMPLETE);
 			}
 		}
 
 		TWE_UNLOCK_TWE(sc, lock);
 
-		if (xs->flags & SCSI_POLL) {
-			scsi_done(xs);
+		if (xs->flags & SCSI_POLL)
 			return (COMPLETE);
-		}
-		return (SUCCESSFULLY_QUEUED);
+		else
+			return (SUCCESSFULLY_QUEUED);
 
 	default:
 		TWE_DPRINTF(TWE_D_CMD, ("unknown opc %d ", xs->cmd->opcode));
@@ -908,7 +953,6 @@ twe_intr(v)
 
 	if (status & TWE_STAT_RDYI) {
 
-		lock = TWE_LOCK_TWE(sc);
 		while (!(status & TWE_STAT_RQE)) {
 
 			u_int32_t ready;
@@ -929,16 +973,16 @@ twe_intr(v)
 			TWE_DPRINTF(TWE_D_INTR, ("twe_intr stat=%b ",
 			    status & TWE_STAT_FLAGS, TWE_STAT_BITS));
 		}
-		TWE_UNLOCK_TWE(sc, lock);
 	}
 
 	if (status & TWE_STAT_ATTNI) {
 		u_int16_t aen;
 
 		/*
-		 * we no attentions of interest right now.
+		 * we know no attentions of interest right now.
 		 * one of those would be mirror degradation i think.
-		 * or, what else exist in there? maybe 3ware can answer that.
+		 * or, what else exists in there?
+		 * maybe 3ware can answer that?
 		 */
 		bus_space_write_4(sc->iot, sc->ioh, TWE_CONTROL,
 		    TWE_CTRL_CATTNI);
@@ -959,7 +1003,8 @@ twe_intr(v)
 			cmd = ccb->ccb_cmd;
 			cmd->cmd_unit_host = TWE_UNITHOST(0, 0);
 			cmd->cmd_op = TWE_CMD_GPARAM;
-			cmd->cmd_count = 1;
+			cmd->cmd_flags = 0;
+			cmd->cmd_param.count = 1;
 
 			pb->table_id = TWE_PARAM_AEN;
 			pb->param_id = 2;

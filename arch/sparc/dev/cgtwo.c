@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgtwo.c,v 1.13.8.1 2001/09/16 15:22:02 miod Exp $	*/
+/*	$OpenBSD: cgtwo.c,v 1.14.2.1 2001/10/14 20:44:48 jason Exp $	*/
 /*	$NetBSD: cgtwo.c,v 1.22 1997/05/24 20:16:12 pk Exp $ */
 
 /*
@@ -222,9 +222,6 @@ cgtwoattach(parent, self, args)
 		sc->sc_fb.fb_pixels = mapiodev(&sc->sc_phys, CG2_PIXMAP_OFF,
 					       CG2_PIXMAP_SIZE);
 	}
-#ifndef offsetof
-#define	offsetof(type, member)  ((size_t)(&((type *)0)->member))
-#endif
 
 	sc->sc_reg = (volatile struct cg2statusreg *)
 	    mapiodev(ca->ca_ra.ra_reg,
