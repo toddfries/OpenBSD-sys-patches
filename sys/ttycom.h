@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttycom.h,v 1.6 2003/06/02 23:28:22 millert Exp $	*/
+/*	$OpenBSD: ttycom.h,v 1.8 2006/06/01 20:10:28 mbalmer Exp $	*/
 /*	$NetBSD: ttycom.h,v 1.4 1996/05/19 17:17:53 jonathan Exp $	*/
 
 /*-
@@ -56,6 +56,11 @@ struct winsize {
 	unsigned short	ws_col;		/* columns, in characters */
 	unsigned short	ws_xpixel;	/* horizontal size, pixels */
 	unsigned short	ws_ypixel;	/* vertical size, pixels */
+};
+
+struct tstamps {
+	int	ts_set;		/* TIOCM_CAR and/or TIOCM_CTS */
+	int	ts_clr;
 };
 
 #define		TIOCM_LE	0001		/* line enable */
@@ -125,6 +130,8 @@ struct winsize {
 #define		TIOCFLAG_CRTSCTS	0x04	/* set crtscts on open */
 #define		TIOCFLAG_MDMBUF		0x08	/* set mdmbuf on open */
 #define		TIOCFLAG_PPS		0x10	/* call hardpps on carrier up */
+#define	TIOCGTSTAMP	_IOR('t', 91, struct timeval)	/* get timestamp */
+#define	TIOCSTSTAMP	_IOW('t', 90, struct tstamps)	/* timestamp reasons */
 
 /* Backwards compatibility */
 #define	TIOCMODG	TIOCMGET
@@ -135,5 +142,6 @@ struct winsize {
 #define	SLIPDISC	4		/* serial IP discipline */
 #define	PPPDISC		5		/* ppp discipline */
 #define	STRIPDISC	6		/* metricom wireless IP discipline */
+#define	NMEADISC	7		/* NMEA0183 discipline */
 
 #endif /* !_SYS_TTYCOM_H_ */

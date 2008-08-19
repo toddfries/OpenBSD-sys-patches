@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.12 2005/09/13 12:11:03 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.16 2006/06/27 20:55:51 reyk Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -155,6 +155,7 @@ struct ieee80211com {
 				    enum ieee80211_state, int);
 	void			(*ic_newassoc)(struct ieee80211com *,
 				    struct ieee80211_node *, int);
+	void			(*ic_updateslot)(struct ieee80211com *);
 	int			(*ic_set_tim)(struct ieee80211com *, int, int);
 	u_int8_t		ic_myaddr[IEEE80211_ADDR_LEN];
 	struct ieee80211_rateset ic_sup_rates[IEEE80211_MODE_MAX];
@@ -193,6 +194,7 @@ struct ieee80211com {
 					const struct ieee80211_node *);
 	u_int8_t		(*ic_node_getrssi)(struct ieee80211com *,
 					struct ieee80211_node *);
+	u_int8_t		ic_max_rssi;
 	struct ieee80211_tree	ic_tree;
 	int			ic_nnodes;	/* length of ic_nnodes */
 	int			ic_max_nnodes;	/* max length of ic_nnodes */
@@ -203,6 +205,8 @@ struct ieee80211com {
 	u_int16_t		ic_txlifetime;	/* tx lifetime */
 	int16_t			ic_txpower;	/* tx power setting (dBm) */
 	u_int16_t		ic_bmisstimeout;/* beacon miss threshold (ms) */
+	u_int16_t		ic_nonerpsta;	/* # non-ERP stations */
+	u_int16_t		ic_longslotsta;	/* # long slot time stations */
 	int			ic_mgt_timer;	/* mgmt timeout */
 	int			ic_inact_timer;	/* inactivity timer wait */
 	int			ic_des_esslen;
@@ -241,10 +245,10 @@ extern struct ieee80211com_head ieee80211com_head;
 #define IEEE80211_F_TXPOW_OFF	0x00000000	/* TX Power: radio disabled */
 #define IEEE80211_F_TXPOW_FIXED	0x00008000	/* TX Power: fixed rate */
 #define IEEE80211_F_TXPOW_AUTO	0x00010000	/* TX Power: undefined */
-#define	IEEE80211_F_SHSLOT	0x00020000	/* CONF: short slot time */
-#define	IEEE80211_F_SHPREAMBLE	0x00040000	/* CONF: short preamble */
+#define	IEEE80211_F_SHSLOT	0x00020000	/* STATUS: short slot time */
+#define	IEEE80211_F_SHPREAMBLE	0x00040000	/* STATUS: short preamble */
 #define	IEEE80211_F_USEPROT	0x00100000	/* STATUS: protection enabled */
-#define	IEEE80211_F_USEBARKER	0x00200000	/* STATUS: use barker preamble*/
+#define IEEE80211_F_USERMASK	0xf0000000	/* CONF: ioctl flag mask */
 
 /* ic_caps */
 #define	IEEE80211_C_WEP		0x00000001	/* CAPABILITY: WEP available */
@@ -272,8 +276,6 @@ int	ieee80211_media_change(struct ifnet *);
 void	ieee80211_media_status(struct ifnet *, struct ifmediareq *);
 int	ieee80211_ioctl(struct ifnet *, u_long, caddr_t);
 int	ieee80211_get_rate(struct ieee80211com *);
-int	ieee80211_cfgget(struct ifnet *, u_long, caddr_t);
-int	ieee80211_cfgset(struct ifnet *, u_long, caddr_t);
 void	ieee80211_watchdog(struct ifnet *);
 int	ieee80211_fix_rate(struct ieee80211com *, struct ieee80211_node *, int);
 int	ieee80211_rate2media(struct ieee80211com *, int,

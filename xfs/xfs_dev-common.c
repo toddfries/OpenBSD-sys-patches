@@ -113,7 +113,10 @@ xfs_devopen_common(dev_t dev)
     return 0;
 }
 
-#if defined(HAVE_THREE_ARGUMENT_VFS_BUSY)
+#if defined(HAVE_TWO_ARGUMENT_VFS_BUSY)
+#define xfs_vfs_busy(mp, flags, lock, proc) vfs_busy((mp), (flags))
+#define xfs_vfs_unbusy(mp, proc) vfs_unbusy((mp))
+#elif defined(HAVE_THREE_ARGUMENT_VFS_BUSY)
 #define xfs_vfs_busy(mp, flags, lock, proc) vfs_busy((mp), (flags), (lock))
 #define xfs_vfs_unbusy(mp, proc) vfs_unbusy((mp))
 #elif defined(HAVE_FOUR_ARGUMENT_VFS_BUSY)
@@ -177,7 +180,7 @@ xfs_devclose_common(dev_t dev, d_thread_t *proc)
      */
 
     if (xfs[minor(dev)].mp != NULL) {
-	if (xfs_vfs_busy(xfs[minor(dev)].mp, 0, NULL, proc)) {
+	if (xfs_vfs_busy(xfs[minor(dev)].mp, VB_READ|VB_WAIT, NULL, proc)) {
 	    NNPFSDEB(XDEBNODE, ("xfs_dev_close: vfs_busy() --> BUSY\n"));
 	    return EBUSY;
 	}

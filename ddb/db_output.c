@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_output.c,v 1.22 2004/01/03 14:08:53 espie Exp $	*/
+/*	$OpenBSD: db_output.c,v 1.25 2006/07/06 18:14:14 miod Exp $	*/
 /*	$NetBSD: db_output.c,v 1.13 1996/04/01 17:27:14 christos Exp $	*/
 
 /* 
@@ -32,8 +32,8 @@
  */
 #include <sys/param.h>
 #include <sys/proc.h>
-
 #include <sys/stdarg.h>
+#include <sys/systm.h>
 
 #include <dev/cons.h>
 
@@ -47,8 +47,6 @@
 #include <ddb/db_sym.h>
 #include <ddb/db_var.h>
 #include <ddb/db_extern.h>
-
-#include <lib/libkern/libkern.h>
 
 /*
  *	Character output - tracks position in line.
@@ -82,17 +80,15 @@ int	db_max_line = DB_MAX_LINE;	/* output max lines */
 int	db_max_width = DB_MAX_WIDTH;	/* output line width */
 int	db_radix = 16;			/* output numbers radix */
 
-#ifdef DDB
 static void db_more(void);
-#endif
 
 /*
  * Force pending whitespace.
  */
 void
-db_force_whitespace()
+db_force_whitespace(void)
 {
-	register int last_print, next_tab;
+	int last_print, next_tab;
 
 	last_print = db_last_non_space;
 	while (last_print < db_output_position) {
@@ -111,11 +107,10 @@ db_force_whitespace()
 	db_last_non_space = db_output_position;
 }
 
-#ifdef DDB
 static void
-db_more()
+db_more(void)
 {
-	register  char *p;
+	char *p;
 	int quit_output = 0;
 
 	for (p = "--db_more--"; *p; p++)
@@ -141,19 +136,16 @@ db_more()
 	    /* NOTREACHED */
 	}
 }
-#endif
 
 /*
  * Output character.  Buffer whitespace.
  */
 void
-db_putchar(c)
-	int	c;		/* character to output */
+db_putchar(int c)
 {
-#ifdef DDB
 	if (db_max_line >= DB_MIN_MAX_LINE && db_output_line >= db_max_line-1)
 	    db_more();
-#endif
+
 	if (c > ' ' && c <= '~') {
 	    /*
 	     * Printing character.
@@ -179,9 +171,6 @@ db_putchar(c)
 	    db_output_position = 0;
 	    db_last_non_space = 0;
 	    db_output_line++;
-#ifdef DDB
-	    db_check_interrupt();
-#endif
 	}
 	else if (c == '\t') {
 	    /* assume tabs every 8 positions */
@@ -202,7 +191,7 @@ db_putchar(c)
  * Return output position
  */
 int
-db_print_position()
+db_print_position(void)
 {
 	return (db_output_position);
 }
@@ -211,8 +200,7 @@ db_print_position()
  * End line if too long.
  */
 void
-db_end_line(space)
-	int space;
+db_end_line(int space)
 {
 	if (db_output_position >= db_max_width - space)
 	    db_printf("\n");

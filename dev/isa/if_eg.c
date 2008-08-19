@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_eg.c,v 1.27 2005/11/21 18:16:40 millert Exp $	*/
+/*	$OpenBSD: if_eg.c,v 1.29 2006/04/16 16:30:56 miod Exp $	*/
 /*	$NetBSD: if_eg.c,v 1.26 1996/05/12 23:52:27 mycroft Exp $	*/
 
 /*
@@ -370,7 +370,6 @@ egprobe(parent, match, aux)
 	return (1);
 
 lose:
-	sc->sc_bst = sc->sc_bsh = 0;
 	bus_space_unmap(bst, bsh, EG_IO_PORTS);
 	return (0);
 }
@@ -555,7 +554,7 @@ loop:
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m0);
+		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
 	sc->eg_pcb[0] = EG_CMD_SENDPACKET;
@@ -706,7 +705,7 @@ egread(sc, buf, len)
 	 * If so, hand off the raw packet to BPF.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	ether_input_mbuf(ifp, m);

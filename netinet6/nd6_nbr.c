@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.38 2006/02/06 17:37:28 jmc Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.41 2006/06/16 16:49:40 henning Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -211,7 +211,7 @@ nd6_ns_input(m, off, icmp6len)
 		tsin6.sin6_family = AF_INET6;
 		tsin6.sin6_addr = taddr6;
 
-		rt = rtalloc1((struct sockaddr *)&tsin6, 0);
+		rt = rtalloc1((struct sockaddr *)&tsin6, 0, 0);
 		if (rt && (rt->rt_flags & RTF_ANNOUNCE) != 0 &&
 		    rt->rt_gateway->sa_family == AF_LINK) {
 			/*
@@ -272,7 +272,7 @@ nd6_ns_input(m, off, icmp6len)
 		 * If source address is unspecified address, it is for
 		 * duplicated address detection.
 		 *
-		 * If not, the packet is for addess resolution;
+		 * If not, the packet is for address resolution;
 		 * silently ignore it.
 		 */
 		if (IN6_IS_ADDR_UNSPECIFIED(&saddr6))
@@ -1028,7 +1028,7 @@ nd6_dad_find(ifa)
 {
 	struct dadq *dp;
 
-	for (dp = dadq.tqh_first; dp; dp = dp->dad_list.tqe_next) {
+	TAILQ_FOREACH(dp, &dadq, dad_list) {
 		if (dp->dad_ifa == ifa)
 			return dp;
 	}

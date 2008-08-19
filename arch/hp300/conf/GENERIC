@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.44 2006/02/14 18:11:03 miod Exp $
+#	$OpenBSD: GENERIC,v 1.46 2006/07/09 19:45:01 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -14,11 +14,8 @@ include		"../../../conf/GENERIC"
 maxusers	32			# estimated number of users
 
 # Support for various CPU types
-option		HP320
-option		HP330		# includes 318, 319
 option		HP340
 option		HP345
-option		HP350
 option		HP360
 option		HP362
 option		HP370
@@ -94,6 +91,10 @@ wsdisplay*	at rbox?
 topcat*		at intio?
 topcat*		at dio?
 wsdisplay*	at topcat?
+
+# TurboVRX framebuffer
+tvrx*		at dio?
+wsdisplay*	at tvrx?
 
 # SGC framebuffers
 sti*		at sgc?

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wskbdmap_mfii.c,v 1.30 2005/05/09 05:08:57 miod Exp $ */
+/*	$OpenBSD: wskbdmap_mfii.c,v 1.33 2006/07/20 16:45:05 mickey Exp $ */
 /*	$NetBSD: wskbdmap_mfii.c,v 1.15 2000/05/19 16:40:04 drochner Exp $	*/
 
 /*
@@ -141,7 +141,10 @@ static const keysym_t pckbd_keydesc_us[] = {
     KC(127),			KS_Pause, /* Break */
     KC(156),			KS_KP_Enter,
     KC(157), KS_Cmd1,		KS_Control_R,
+    KC(160),			KS_AudioMute,
     KC(170),			KS_Print_Screen,
+    KC(174),			KS_AudioLower,
+    KC(176),			KS_AudioRaise,
     KC(181),			KS_KP_Divide,
     KC(183),			KS_Print_Screen,
     KC(184), KS_Cmd2,		KS_Alt_R,	KS_Multi_key,
@@ -917,6 +920,23 @@ static const keysym_t pckbd_keydesc_cf_nodead[] = {
 	KC(53),  KS_eacute,	KS_Eacute,	KS_acute,
 };
 
+static const keysym_t pckbd_keydesc_lv[] = {
+/*  pos      normal		shifted		altgr		shift-altgr */
+    KC(18),  KS_e,		KS_E,		KS_L7_emacron,	KS_L7_Emacron,
+    KC(22),  KS_u,		KS_U,		KS_L7_umacron,	KS_L7_Umacron,
+    KC(23),  KS_i,		KS_I,		KS_L7_imacron,	KS_L7_Imacron,
+    KC(24),  KS_o,		KS_O,		KS_L7_omacron,	KS_L7_Omacron,
+    KC(30),  KS_a,		KS_A,		KS_L7_amacron,	KS_L7_Amacron,
+    KC(31),  KS_s,		KS_S,		KS_L7_scaron,	KS_L7_Scaron,
+    KC(34),  KS_g,		KS_G,		KS_L7_gcedilla,	KS_L7_Gcedilla,
+    KC(37),  KS_k,		KS_K,		KS_L7_kcedilla,	KS_L7_Kcedilla,
+    KC(38),  KS_l,		KS_L,		KS_L7_lcedilla,	KS_L7_Lcedilla,
+    KC(44),  KS_z,		KS_Z,		KS_L7_zcaron,	KS_L7_Zcaron,
+    KC(46),  KS_c,		KS_C,		KS_L7_ccaron,	KS_L7_Ccaron,
+    KC(49),  KS_n,		KS_N,		KS_L7_ncedilla,	KS_L7_Ncedilla,
+    KC(184), KS_Mode_switch,	KS_Multi_key,
+};
+
 #endif	/* SMALL_KERNEL */
 
 #define KBD_MAP(name, base, map) \
@@ -967,6 +987,7 @@ const struct wscons_keydesc pckbd_keydesctab[] = {
 	KBD_MAP(KB_SI,			KB_US,	pckbd_keydesc_si),
 	KBD_MAP(KB_CF,			KB_US, 	pckbd_keydesc_cf),
 	KBD_MAP(KB_CF | KB_NODEAD,	KB_CF,	pckbd_keydesc_cf_nodead),
+	KBD_MAP(KB_LV,			KB_US,	pckbd_keydesc_lv),
 #endif	/* SMALL_KERNEL */
 	{0, 0, 0, 0}
 };

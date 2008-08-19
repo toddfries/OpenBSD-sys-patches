@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.33 2005/11/17 15:03:51 drahn Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.35 2006/06/19 22:42:33 miod Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -117,13 +117,18 @@ openpic_match(struct device *parent, void *cf, void *aux)
 	    == sizeof(pirq))
 		return 0; /* XXX */
 
-	if (strcmp(ca->ca_name, "interrupt-controller") == 0 ||
-	    strcmp(ca->ca_name, "mpic") == 0) {
-		OF_getprop(ca->ca_node, "device_type", type, sizeof(type));
-		if (strcmp(type, "open-pic") == 0)
-			return 1;
-	}
-	return 0;
+	if (strcmp(ca->ca_name, "interrupt-controller") != 0 &&
+	    strcmp(ca->ca_name, "mpic") != 0)
+		return 0;
+
+	OF_getprop(ca->ca_node, "device_type", type, sizeof(type));
+	if (strcmp(type, "open-pic") != 0)
+		return 0;
+
+	if (ca->ca_nreg < 8)
+		return 0;
+
+	return 1;
 }
 
 typedef void  (void_f) (void);
@@ -361,15 +366,15 @@ intr_calculatemasks()
 
 	/*
 	 * There are tty, network and disk drivers that use free() at interrupt
-	 * time, so imp > (tty | net | bio).
+	 * time, so vm > (tty | net | bio).
 	 *
 	 * Enforce a hierarchy that gives slow devices a better chance at not
 	 * dropping data.
 	 */
 	imask[IPL_NET] |= imask[IPL_BIO];
 	imask[IPL_TTY] |= imask[IPL_NET];
-	imask[IPL_IMP] |= imask[IPL_TTY];
-	imask[IPL_CLOCK] |= imask[IPL_IMP] | SPL_CLOCK;
+	imask[IPL_VM] |= imask[IPL_TTY];
+	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCK;
 
 	/*
 	 * These are pseudo-levels.

@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_ath_pci.c,v 1.11 2005/09/22 10:17:04 reyk Exp $   */
+/*      $OpenBSD: if_ath_pci.c,v 1.13 2006/08/03 02:29:33 brad Exp $   */
 /*	$NetBSD: if_ath_pci.c,v 1.7 2004/06/30 05:58:17 mycroft Exp $	*/
 
 /*-
@@ -126,34 +126,29 @@ ath_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ath_pci_softc *psc = (struct ath_pci_softc *)self;
 	struct ath_softc *sc = &psc->sc_sc;
-	pcireg_t res;
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pcitag_t pt = pa->pa_tag;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	pci_intr_handle_t ih;
+	pcireg_t mem_type;
 	void *hook;
 	const char *intrstr = NULL;
 
 	psc->sc_pc = pc;
 	psc->sc_pcitag = pt;
 
-	res = pci_conf_read(pc, pt, PCI_COMMAND_STATUS_REG);
-	if ((res & PCI_COMMAND_MEM_ENABLE) == 0) {
-		printf(": couldn't enable memory mapping\n");
-		goto bad;
-	}
-
-	if ((res & PCI_COMMAND_MASTER_ENABLE) == 0) {
-		printf(": couldn't enable bus mastering\n");
-		goto bad;
-	}
-
 	/* 
 	 * Setup memory-mapping of PCI registers.
 	 */
-	if (pci_mapreg_map(pa, ATH_BAR0, PCI_MAPREG_TYPE_MEM, 0, &iot, &ioh,
+	mem_type = pci_mapreg_type(pc, pa->pa_tag, ATH_BAR0);
+	if (mem_type != PCI_MAPREG_TYPE_MEM &&
+	    mem_type != PCI_MAPREG_MEM_TYPE_64BIT) {
+		printf(": bad PCI register type %d\n", (int)mem_type);
+		goto bad;
+	}
+	if (pci_mapreg_map(pa, ATH_BAR0, mem_type, 0, &iot, &ioh,
 	    NULL, NULL, 0)) {
 		printf(": cannot map register space\n");
 		goto bad;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.26.2.1 2007/03/30 22:33:57 ckuethe Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.26.4.1 2007/03/30 22:34:43 ckuethe Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>

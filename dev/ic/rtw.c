@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtw.c,v 1.53 2006/02/05 23:47:47 jsg Exp $	*/
+/*	$OpenBSD: rtw.c,v 1.55 2006/08/30 11:20:20 jsg Exp $	*/
 /*	$NetBSD: rtw.c,v 1.29 2004/12/27 19:49:16 dyoung Exp $ */
 
 /*-
@@ -1334,7 +1334,7 @@ rtw_intr_rx(struct rtw_softc *sc, u_int16_t isr)
 			mb.m_len = sizeof(sc->sc_rxtapu);
 			mb.m_next = m;
 			mb.m_pkthdr.len += mb.m_len;
-			bpf_mtap(sc->sc_radiobpf, &mb);
+			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
 		}
 #endif /* NPBFILTER > 0 */
 
@@ -2158,8 +2158,8 @@ rtw_tune(struct rtw_softc *sc)
 	KASSERT(ic->ic_bss->ni_chan != NULL);
 
 	chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
-	if (chan == IEEE80211_CHAN_ANY)
-		panic("%s: chan == IEEE80211_CHAN_ANY", __func__);
+	if (chan == 0 || chan == IEEE80211_CHAN_ANY)
+		return 0;
 
 	if (chan == sc->sc_cur_chan) {
 		RTW_DPRINTF(RTW_DEBUG_TUNE,
@@ -2826,7 +2826,7 @@ rtw_dequeue(struct ifnet *ifp, struct rtw_txsoft_blk **tsbp,
 	ifp->if_opackets++;
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m0);
+		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 	if ((m0 = ieee80211_encap(ifp, m0, nip)) == NULL) {
 		DPRINTF(sc, RTW_DEBUG_XMIT,
@@ -3065,7 +3065,8 @@ rtw_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ic->ic_rawbpf != NULL)
-			bpf_mtap((caddr_t)ic->ic_rawbpf, m0);
+			bpf_mtap((caddr_t)ic->ic_rawbpf, m0,
+			    BPF_DIRECTION_OUT);
 
 		if (sc->sc_radiobpf != NULL) {
 			struct mbuf mb;
@@ -3083,7 +3084,7 @@ rtw_start(struct ifnet *ifp)
 			mb.m_len = sizeof(sc->sc_txtapu);
 			mb.m_next = m0;
 			mb.m_pkthdr.len += mb.m_len;
-			bpf_mtap(sc->sc_radiobpf, &mb);
+			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_OUT);
 
 		}
 #endif /* NPBFILTER > 0 */

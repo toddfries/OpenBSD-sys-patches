@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.h,v 1.5 2002/05/18 09:49:17 art Exp $	*/
+/*	$OpenBSD: db_interface.h,v 1.9 2006/07/12 05:55:22 deraadt Exp $	*/
 /*	$NetBSD: db_interface.h,v 1.1 1996/02/05 01:57:03 christos Exp $	*/
 
 /*
@@ -39,11 +39,27 @@ void db_stack_trace_print(db_expr_t, int, db_expr_t, char *,
 /* arch/<arch>/<arch>/db_disasm.c */
 db_addr_t db_disasm(db_addr_t, boolean_t);
 
-/* kern/kern_synch.c */
+/* kern/kern_proc.c */
 void db_show_all_procs(db_expr_t, int, db_expr_t, char *);
 
-/* kern/kern_clock.c */
+/* kern/kern_timeout.c */
 void db_show_callout(db_expr_t, int, db_expr_t, char *);
+
+struct mount;
+struct vnode;
+
+/* kern/vfs_subr.c */
+void vfs_buf_print(struct buf *, int, int (*)(const char *, ...));
+void vfs_vnode_print(struct vnode *, int, int (*)(const char *, ...));
+void vfs_mount_print(struct mount *, int, int (*)(const char *, ...));
+
+/* kern/subr_pool.c */
+void db_show_all_pools(db_expr_t, int, db_expr_t, char *);
+
+/* ufs/ffs/ffs_softdep.c */
+struct worklist;
+void worklist_print(struct worklist *, int, int (*)(const char *, ...));
+void softdep_print(struct buf *, int, int (*)(const char *, ...));
 
 /* arch/<arch>/<arch>/db_interface.c */
 void db_machine_init(void);

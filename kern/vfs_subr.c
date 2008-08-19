@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.122 2006/01/09 12:43:16 pedro Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.133 2006/07/11 21:17:58 mickey Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -92,7 +92,6 @@ struct freelst vnode_hold_list;	/* list of vnodes referencing buffers */
 struct freelst vnode_free_list;	/* vnode free list */
 
 struct mntlist mountlist;	/* mounted filesystem list */
-struct simplelock mountlist_slock;
 static struct simplelock mntid_slock;
 struct simplelock mntvnode_slock;
 struct simplelock vnode_free_list_slock;
@@ -136,7 +135,6 @@ vntblinit(void)
 	TAILQ_INIT(&vnode_free_list);
 	simple_lock_init(&vnode_free_list_slock);
 	CIRCLEQ_INIT(&mountlist);
-	simple_lock_init(&mountlist_slock);
 	/*
 	 * Initialize the filesystem syncer.
 	 */
@@ -145,40 +143,33 @@ vntblinit(void)
 
 /*
  * Mark a mount point as busy. Used to synchronize access and to delay
- * unmounting. Interlock is not released on failure.
+ * unmounting.
  *
- * historical behavior:
- *  - LK_NOWAIT means that we should just ignore the mount point if it's
- *     being unmounted.
- *  - no flags means that we should sleep on the mountpoint and then
- *     fail.
+ * Default behaviour is to attempt getting a READ lock and in case of an
+ * ongoing unmount, to wait for it to finish and then return failure.
  */
 int
-vfs_busy(struct mount *mp, int flags, struct simplelock *interlkp)
+vfs_busy(struct mount *mp, int flags)
 {
-	int lkflags;
+	int rwflags = 0;
 
-	switch (flags) {
-	case LK_NOWAIT:
-		lkflags = LK_SHARED|LK_NOWAIT;
-		break;
-	case 0:
-		lkflags = LK_SHARED;
-		break;
-	default:
-		lkflags = flags;
-	}
+	/* new mountpoints need their lock initialised */
+	if (mp->mnt_lock.rwl_name == NULL)
+		rw_init(&mp->mnt_lock, "vfslock");
 
-	/*
-	 * Always sleepfail. We will only sleep for an exclusive lock
-	 * and the exclusive lock will only be acquired when unmounting.
-	 */
-	lkflags |= LK_SLEEPFAIL;
+	if (flags & VB_WRITE)
+		rwflags |= RW_WRITE;
+	else
+		rwflags |= RW_READ;
 
-	if (interlkp)
-		lkflags |= LK_INTERLOCK;
-	if (lockmgr(&mp->mnt_lock, lkflags, interlkp))
-		return (ENOENT);
+	if (flags & VB_WAIT)
+		rwflags |= RW_SLEEPFAIL;
+	else
+		rwflags |= RW_NOSLEEP;
+
+	if (rw_enter(&mp->mnt_lock, rwflags))
+		return (EBUSY);
+
 	return (0);
 }
 
@@ -188,13 +179,16 @@ vfs_busy(struct mount *mp, int flags, struct simplelock *interlkp)
 void
 vfs_unbusy(struct mount *mp)
 {
-	lockmgr(&mp->mnt_lock, LK_RELEASE, NULL);
+	rw_exit(&mp->mnt_lock);
 }
 
 int
 vfs_isbusy(struct mount *mp) 
 {
-	return (lockstatus(&mp->mnt_lock));
+	if (RWLOCK_OWNER(&mp->mnt_lock) > 0)
+		return (1);
+	else
+		return (0);
 }
 
 /*
@@ -216,8 +210,7 @@ vfs_rootmountalloc(char *fstypename, char *devname, struct mount **mpp)
 		return (ENODEV);
 	mp = malloc((u_long)sizeof(struct mount), M_MOUNT, M_WAITOK);
 	bzero((char *)mp, (u_long)sizeof(struct mount));
-	lockinit(&mp->mnt_lock, PVFS, "vfslock", 0, 0);
-	(void)vfs_busy(mp, LK_NOWAIT, NULL);
+	(void) vfs_busy(mp, VB_READ|VB_NOWAIT);
 	LIST_INIT(&mp->mnt_vnodelist);
 	mp->mnt_vfc = vfsp;
 	mp->mnt_op = vfsp->vfc_vfsops;
@@ -264,15 +257,13 @@ vfs_getvfs(fsid_t *fsid)
 {
 	struct mount *mp;
 
-	simple_lock(&mountlist_slock);
 	CIRCLEQ_FOREACH(mp, &mountlist, mnt_list) {
 		if (mp->mnt_stat.f_fsid.val[0] == fsid->val[0] &&
 		    mp->mnt_stat.f_fsid.val[1] == fsid->val[1]) {
-			simple_unlock(&mountlist_slock);
 			return (mp);
 		}
 	}
-	simple_unlock(&mountlist_slock);
+
 	return ((struct mount *)0);
 }
 
@@ -584,6 +575,7 @@ loop:
 		nvp->v_specnext = *vpp;
 		nvp->v_specmountpoint = NULL;
 		nvp->v_speclockf = NULL;
+		bzero(nvp->v_specbitmap, sizeof(nvp->v_specbitmap));
 		simple_unlock(&spechash_slock);
 		*vpp = nvp;
 		if (vp != NULLVP) {
@@ -1170,7 +1162,7 @@ vgonel(struct vnode *vp, struct proc *p)
 		 */
 		mp = vp->v_specmountpoint;
 		if (mp != NULL) {
-			if (!vfs_busy(mp, LK_EXCLUSIVE, NULL)) {
+			if (!vfs_busy(mp, VB_WRITE|VB_WAIT)) {
 				flags = MNT_FORCE | MNT_DOOMED;
 				dounmount(mp, flags, p, NULL);
 			}
@@ -1289,8 +1281,8 @@ vprint(char *label, struct vnode *vp)
 
 	if (label != NULL)
 		printf("%s: ", label);
-	printf("type %s, usecount %u, writecount %u, holdcount %u,",
-		typename[vp->v_type], vp->v_usecount, vp->v_writecount,
+	printf("%p, type %s, use %u, write %u, hold %u,",
+		vp, typename[vp->v_type], vp->v_usecount, vp->v_writecount,
 		vp->v_holdcnt);
 	buf[0] = '\0';
 	if (vp->v_flag & VROOT)
@@ -1334,10 +1326,10 @@ printlockedvnodes(void)
 	struct vnode *vp;
 
 	printf("Locked vnodes\n");
-	simple_lock(&mountlist_slock);
+
 	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
 	    mp = nmp) {
-		if (vfs_busy(mp, LK_NOWAIT, &mountlist_slock)) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
 			nmp = CIRCLEQ_NEXT(mp, mnt_list);
 			continue;
 		}
@@ -1345,11 +1337,9 @@ printlockedvnodes(void)
 			if (VOP_ISLOCKED(vp))
 				vprint((char *)0, vp);
 		}
-		simple_lock(&mountlist_slock);
 		nmp = CIRCLEQ_NEXT(mp, mnt_list);
 		vfs_unbusy(mp);
  	}
-	simple_unlock(&mountlist_slock);
 
 }
 #endif
@@ -1366,29 +1356,38 @@ vfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	/* all sysctl names at this level are at least name and field */
 	if (namelen < 2)
 		return (ENOTDIR);		/* overloaded */
+
 	if (name[0] != VFS_GENERIC) {
 		for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next)
 			if (vfsp->vfc_typenum == name[0])
 				break;
+
 		if (vfsp == NULL)
 			return (EOPNOTSUPP);
+
 		return ((*vfsp->vfc_vfsops->vfs_sysctl)(&name[1], namelen - 1,
 		    oldp, oldlenp, newp, newlen, p));
 	}
+
 	switch (name[1]) {
 	case VFS_MAXTYPENUM:
 		return (sysctl_rdint(oldp, oldlenp, newp, maxvfsconf));
+
 	case VFS_CONF:
 		if (namelen < 3)
 			return (ENOTDIR);	/* overloaded */
+
 		for (vfsp = vfsconf; vfsp; vfsp = vfsp->vfc_next)
 			if (vfsp->vfc_typenum == name[2])
 				break;
+
 		if (vfsp == NULL)
 			return (EOPNOTSUPP);
+
 		return (sysctl_rdstruct(oldp, oldlenp, newp, vfsp,
 		    sizeof(struct vfsconf)));
 	}
+
 	return (EOPNOTSUPP);
 }
 
@@ -1415,10 +1414,9 @@ sysctl_vnode(char *where, size_t *sizep, struct proc *p)
 	}
 	ewhere = where + *sizep;
 
-	simple_lock(&mountlist_slock);
 	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
 	    mp = nmp) {
-		if (vfs_busy(mp, LK_NOWAIT, &mountlist_slock)) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
 			nmp = CIRCLEQ_NEXT(mp, mnt_list);
 			continue;
 		}
@@ -1459,14 +1457,12 @@ again:
 		}
 
 		simple_unlock(&mntvnode_slock);
-		simple_lock(&mountlist_slock);
 		nmp = CIRCLEQ_NEXT(mp, mnt_list);
 		vfs_unbusy(mp);
 	}
 
-	simple_unlock(&mountlist_slock);
-
 	*sizep = bp - where;
+
 	return (0);
 }
 
@@ -1721,7 +1717,7 @@ vfs_unmountall(void)
 	for (mp = CIRCLEQ_LAST(&mountlist); mp != CIRCLEQ_END(&mountlist);
 	    mp = nmp) {
 		nmp = CIRCLEQ_PREV(mp, mnt_list);
-		if ((vfs_busy(mp, LK_EXCLUSIVE|LK_NOWAIT, NULL)) != 0)
+		if ((vfs_busy(mp, VB_WRITE|VB_NOWAIT)) != 0)
 			continue;
 		if ((error = dounmount(mp, MNT_FORCE, curproc, NULL)) != 0) {
 			printf("unmount of %s failed with error %d\n",
@@ -1922,6 +1918,11 @@ vinvalbuf(struct vnode *vp, int flags, struct ucred *cred, struct proc *p,
 	struct buf *bp;
 	struct buf *nbp, *blist;
 	int s, error;
+
+#ifdef VFSDEBUG
+	if ((vp->v_flag & VLOCKSWORK) && !VOP_ISLOCKED(vp))
+		panic("vinvalbuf(): vp isn't locked");
+#endif
 
 	if (flags & V_SAVE) {
 		s = splbio();
@@ -2264,3 +2265,128 @@ vn_isdisk(struct vnode *vp, int *errp)
 
 	return (1);
 }
+
+#ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
+#include <ddb/db_output.h>
+
+void
+vfs_buf_print(struct buf *bp, int full, int (*pr)(const char *, ...))
+{
+
+	(*pr)("  vp %p lblkno 0x%x blkno 0x%x dev 0x%x\n"
+	      "  proc %p error %d flags %b\n",
+	    bp->b_vp, bp->b_lblkno, bp->b_blkno, bp->b_dev,
+	    bp->b_proc, bp->b_error, bp->b_flags, B_BITS);
+
+	(*pr)("  bufsize 0x%lx bcount 0x%lx resid 0x%zx sync 0x%x\n"
+	      "  data %p saveaddr %p dep %p iodone %p\n",
+	    bp->b_bufsize, bp->b_bcount, bp->b_resid, bp->b_synctime,
+	    bp->b_data, bp->b_saveaddr, LIST_FIRST(&bp->b_dep), bp->b_iodone);
+
+	(*pr)("  dirty {off 0x%x end 0x%x} valid {off 0x%x end 0x%x}\n",
+	    bp->b_dirtyoff, bp->b_dirtyend, bp->b_validoff, bp->b_validend);
+
+#ifdef FFS_SOFTUPDATES
+	if (full)
+		softdep_print(bp, full, pr);
+#endif
+}
+
+const char *vtypes[] = { VTYPE_NAMES };
+const char *vtags[] = { VTAG_NAMES };
+
+void
+vfs_vnode_print(struct vnode *vp, int full, int (*pr)(const char *, ...))
+{
+
+#define	NENTS(n)	(sizeof n / sizeof(n[0]))
+	(*pr)("tag %s(%d) type %s(%d) mount %p typedata %p\n",
+	      vp->v_tag > NENTS(vtags)? "<unk>":vtags[vp->v_tag], vp->v_tag,
+	      vp->v_type > NENTS(vtypes)? "<unk>":vtypes[vp->v_tag],vp->v_type,
+	      vp->v_mount, vp->v_mountedhere);
+
+	(*pr)("data %p usecount %d writecount %ld holdcnt %ld numoutput %d\n",
+	      vp->v_data, vp->v_usecount, vp->v_writecount,
+	      vp->v_holdcnt, vp->v_numoutput);
+
+	/* uvm_object_printit(&vp->v_uobj, full, pr); */
+
+	if (full) {
+		struct buf *bp;
+
+		(*pr)("clean bufs:\n");
+		LIST_FOREACH(bp, &vp->v_cleanblkhd, b_vnbufs) {
+			(*pr)(" bp %p\n", bp);
+			vfs_buf_print(bp, full, pr);
+		}
+
+		(*pr)("dirty bufs:\n");
+		LIST_FOREACH(bp, &vp->v_dirtyblkhd, b_vnbufs) {
+			(*pr)(" bp %p\n", bp);
+			vfs_buf_print(bp, full, pr);
+		}
+	}
+}
+
+void
+vfs_mount_print(struct mount *mp, int full, int (*pr)(const char *, ...))
+{
+	struct vfsconf *vfc = mp->mnt_vfc;
+	struct vnode *vp;
+	int cnt = 0;
+
+	(*pr)("flags %b\nvnodecovered %p syncer %p data %p\n",
+	    mp->mnt_flag, MNT_BITS,
+	    mp->mnt_vnodecovered, mp->mnt_syncer, mp->mnt_data);
+
+	(*pr)("vfsconf: ops %p name \"%s\" num %d ref %d flags 0x%x\n",
+            vfc->vfc_vfsops, vfc->vfc_name, vfc->vfc_typenum,
+	    vfc->vfc_refcount, vfc->vfc_flags);
+
+	(*pr)("statvfs cache: bsize %x iosize %x\nblocks %u free %u avail %u\n",
+	    mp->mnt_stat.f_bsize, mp->mnt_stat.f_iosize, mp->mnt_stat.f_blocks,
+	    mp->mnt_stat.f_bfree, mp->mnt_stat.f_bavail);
+
+	(*pr)("  files %u ffiles %u\n", mp->mnt_stat.f_files,
+	    mp->mnt_stat.f_ffree);
+
+	(*pr)("  f_fsidx {0x%x, 0x%x} owner %u ctime 0x%x\n",
+	    mp->mnt_stat.f_fsid.val[0], mp->mnt_stat.f_fsid.val[1],
+	    mp->mnt_stat.f_owner, mp->mnt_stat.f_ctime);
+
+ 	(*pr)("  syncwrites %lu asyncwrites = %lu\n",
+	    mp->mnt_stat.f_syncwrites, mp->mnt_stat.f_asyncwrites);
+
+	(*pr)("  fstype \"%s\" mnton \"%s\" mntfrom \"%s\"\n",
+	    mp->mnt_stat.f_fstypename, mp->mnt_stat.f_mntonname,
+	    mp->mnt_stat.f_mntfromname);
+
+	(*pr)("locked vnodes:");
+	/* XXX would take mountlist lock, except ddb has no context */
+	LIST_FOREACH(vp, &mp->mnt_vnodelist, v_mntvnodes)
+		if (VOP_ISLOCKED(vp)) {
+			if (!LIST_NEXT(vp, v_mntvnodes))
+				(*pr)(" %p", vp);
+			else if (!(cnt++ % (72 / (sizeof(void *) * 2 + 4))))
+				(*pr)("\n\t%p", vp);
+			else
+				(*pr)(", %p", vp);
+		}
+	(*pr)("\n");
+
+	if (full) {
+		(*pr)("all vnodes:\n\t");
+		/* XXX would take mountlist lock, except ddb has no context */
+		LIST_FOREACH(vp, &mp->mnt_vnodelist, v_mntvnodes)
+			if (!LIST_NEXT(vp, v_mntvnodes))
+				(*pr)(" %p", vp);
+			else if (!(cnt++ % (72 / (sizeof(void *) * 2 + 4))))
+				(*pr)(" %p,\n\t", vp);
+			else
+				(*pr)(" %p,", vp);
+		(*pr)("\n", vp);
+	}
+}
+#endif /* DDB */

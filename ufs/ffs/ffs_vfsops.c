@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.80 2006/02/14 12:42:11 mickey Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.96 2006/08/07 15:50:42 pedro Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -67,6 +67,7 @@
 int ffs_sbupdate(struct ufsmount *, int);
 int ffs_reload_vnode(struct vnode *, void *);
 int ffs_sync_vnode(struct vnode *, void *);
+int ffs_validate(struct fs *);
 
 const struct vfsops ffs_vfsops = {
 	ffs_mount,
@@ -101,6 +102,9 @@ extern u_long nextgennumber;
 
 struct pool ffs_ino_pool;
 struct pool ffs_dinode1_pool;
+#ifdef FFS2
+struct pool ffs_dinode2_pool;
+#endif
 
 int
 ffs_mountroot(void)
@@ -137,15 +141,15 @@ ffs_mountroot(void)
 		vrele(rootvp);
 		return (error);
 	}
-	simple_lock(&mountlist_slock);
+
 	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
-	simple_unlock(&mountlist_slock);
 	ump = VFSTOUFS(mp);
 	fs = ump->um_fs;
 	(void) copystr(mp->mnt_stat.f_mntonname, fs->fs_fsmnt, MNAMELEN - 1, 0);
 	(void)ffs_statfs(mp, &mp->mnt_stat, p);
 	vfs_unbusy(mp);
 	inittodr(fs->fs_time);
+
 	return (0);
 }
 
@@ -199,10 +203,11 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 		ronly = fs->fs_ronly;
 
 		if (ronly == 0 && (mp->mnt_flag & MNT_RDONLY)) {
-			/*
-			 * Flush any dirty data.
-			 */
+			/* Flush any dirty data */
+			mp->mnt_flag &= ~MNT_RDONLY;
 			VFS_SYNC(mp, MNT_WAIT, p->p_ucred, p);
+			mp->mnt_flag |= MNT_RDONLY;
+
 			/*
 			 * Get rid of files open for writing.
 			 */
@@ -606,6 +611,35 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 }
 
 /*
+ * Checks if a super block is sane enough to be mounted.
+ */
+int
+ffs_validate(struct fs *fsp)
+{
+#ifdef FFS2
+	if (fsp->fs_magic != FS_UFS2_MAGIC && fsp->fs_magic != FS_UFS1_MAGIC)
+		return (0); /* Invalid magic */
+#else
+	if (fsp->fs_magic != FS_UFS1_MAGIC)
+		return (0); /* Invalid magic */
+#endif /* FFS2 */
+
+	if ((u_int)fsp->fs_bsize > MAXBSIZE)
+		return (0); /* Invalid block size */
+
+	if ((u_int)fsp->fs_bsize < sizeof(struct fs))
+		return (0); /* Invalid block size */
+
+	if ((u_int)fsp->fs_sbsize > SBSIZE)
+		return (0); /* Invalid super block size */
+
+	if ((u_int)fsp->fs_frag > MAXFRAG || fragtbl[fsp->fs_frag] == NULL)
+		return (0); /* Invalid number of fragments */
+
+	return (1); /* Super block is okay */
+}
+
+/*
  * Possible locations for the super-block.
  */
 const int sbtry[] = SBLOCKSEARCH;
@@ -690,11 +724,8 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 		if (fs->fs_magic == FS_UFS1_MAGIC && sbloc == SBLOCK_UFS2)
 			continue;
 
-		if ((fs->fs_magic == FS_UFS1_MAGIC) &&
-		    ((u_int)fs->fs_bsize <= MAXBSIZE) &&
-		    ((u_int)fs->fs_bsize >= sizeof(struct fs)) &&
-		    ((u_int)fs->fs_sbsize <= SBSIZE))
-			break; /* Validate super-block */
+		if (ffs_validate(fs))
+			break; /* Super block validated */
 	}
 
 	if (sbtry[i] == -1) {
@@ -731,24 +762,35 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 			goto out;
 		}
 	}
-	/* XXX updating 4.2 FFS superblocks trashes rotational layout tables */
+
 	if (fs->fs_postblformat == FS_42POSTBLFMT && !ronly) {
-		error = EROFS;		/* XXX what should be returned? */
+#ifndef SMALL_KERNEL
+		printf("ffs_mountfs(): obsolete rotational table format, "
+		    "please use fsck_ffs(8) -c 1\n");
+#endif
+		error = EFTYPE;
 		goto out;
 	}
+
 	ump = malloc(sizeof *ump, M_UFSMNT, M_WAITOK);
 	bzero(ump, sizeof *ump);
 	ump->um_fs = malloc((u_long)fs->fs_sbsize, M_UFSMNT,
 	    M_WAITOK);
-	if (fs->fs_magic == FS_UFS1_MAGIC) {
+
+	if (fs->fs_magic == FS_UFS1_MAGIC)
 		ump->um_fstype = UM_UFS1;
-	}
+#ifdef FFS2
+	else
+		ump->um_fstype = UM_UFS2;
+#endif
+
 	bcopy(bp->b_data, ump->um_fs, (u_int)fs->fs_sbsize);
 	if (fs->fs_sbsize < SBSIZE)
 		bp->b_flags |= B_INVAL;
 	brelse(bp);
 	bp = NULL;
 	fs = ump->um_fs;
+
 	fs->fs_ronly = ronly;
 	size = fs->fs_cssize;
 	blks = howmany(size, fs->fs_fsize);
@@ -992,8 +1034,15 @@ ffs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 
 	ump = VFSTOUFS(mp);
 	fs = ump->um_fs;
+
+#ifdef FFS2
+	if (fs->fs_magic != FS_MAGIC && fs->fs_magic != FS_UFS2_MAGIC)
+		panic("ffs_statfs");
+#else
 	if (fs->fs_magic != FS_MAGIC)
 		panic("ffs_statfs");
+#endif /* FFS2 */
+
 	sbp->f_bsize = fs->fs_fsize;
 	sbp->f_iosize = fs->fs_bsize;
 	sbp->f_blocks = fs->fs_dsize;
@@ -1008,7 +1057,14 @@ ffs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 		bcopy(&mp->mnt_stat.mount_info.ufs_args,
 		    &sbp->mount_info.ufs_args, sizeof(struct ufs_args));
 	}
-	strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
+
+#ifdef FFS2
+	if (fs->fs_magic == FS_UFS2_MAGIC)
+		strncpy(sbp->f_fstypename, MOUNT_FFS2, MFSNAMELEN);
+	else
+#endif
+		strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
+
 	return (0);
 }
 
@@ -1128,6 +1184,9 @@ ffs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	register struct fs *fs;
 	register struct inode *ip;
 	struct ufs1_dinode *dp1;
+#ifdef FFS2
+	struct ufs2_dinode *dp2;
+#endif
 	struct ufsmount *ump;
 	struct buf *bp;
 	struct vnode *vp;
@@ -1199,9 +1258,18 @@ retry:
 		return (error);
 	}
 
-	ip->i_din1 = pool_get(&ffs_dinode1_pool, PR_WAITOK);
-	dp1 = (struct ufs1_dinode *) bp->b_data + ino_to_fsbo(fs, ino);
-	*ip->i_din1 = *dp1;
+#ifdef FFS2
+	if (ip->i_ump->um_fstype == UM_UFS2) {
+		ip->i_din2 = pool_get(&ffs_dinode2_pool, PR_WAITOK);
+		dp2 = (struct ufs2_dinode *) bp->b_data + ino_to_fsbo(fs, ino);
+		*ip->i_din2 = *dp2;
+	} else
+#endif
+	{
+		ip->i_din1 = pool_get(&ffs_dinode1_pool, PR_WAITOK);
+		dp1 = (struct ufs1_dinode *) bp->b_data + ino_to_fsbo(fs, ino);
+		*ip->i_din1 = *dp1;
+	}
 
 	brelse(bp);
 
@@ -1345,6 +1413,7 @@ ffs_sbupdate(struct ufsmount *mp, int waitfor)
 		lp[0] = tmp;					/* XXX */
 	}							/* XXX */
 	dfs->fs_maxfilesize = mp->um_savedmaxfilesize;		/* XXX */
+
 	if (waitfor != MNT_WAIT)
 		bawrite(bp);
 	else if ((error = bwrite(bp)))
@@ -1366,6 +1435,10 @@ ffs_init(struct vfsconf *vfsp)
 	    &pool_allocator_nointr);
 	pool_init(&ffs_dinode1_pool, sizeof(struct ufs1_dinode), 0, 0, 0,
 	    "dino1pl", &pool_allocator_nointr);
+#ifdef FFS2
+	pool_init(&ffs_dinode2_pool, sizeof(struct ufs2_dinode), 0, 0, 0,
+	    "dino2pl", &pool_allocator_nointr);
+#endif
 
 	softdep_initialize();
 

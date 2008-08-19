@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_cardbus.c,v 1.2 2005/05/16 01:36:25 brad Exp $	*/
+/*	$OpenBSD: if_re_cardbus.c,v 1.7 2006/07/01 21:48:08 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -28,6 +28,7 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -69,13 +70,13 @@ struct re_cardbus_softc {
 	bus_size_t sc_mapsize;
 };
 
-int re_cardbus_probe(struct device *, void *, void *);
-void re_cardbus_attach(struct device *, struct device *, void *);
-int re_cardbus_detach(struct device *, int);
-void re_cardbus_setup(struct rl_softc *);
+int	re_cardbus_probe(struct device *, void *, void *);
+void	re_cardbus_attach(struct device *, struct device *, void *);
+int	re_cardbus_detach(struct device *, int);
+void	re_cardbus_setup(struct rl_softc *);
 
-void re_cardbus_shutdown(void *);
-void re_cardbus_powerhook(int, void *);
+void	re_cardbus_shutdown(void *);
+void	re_cardbus_powerhook(int, void *);
 
 /*
  * Cardbus autoconfig definitions
@@ -131,10 +132,6 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (Cardbus_mapreg_map(ct, RL_PCI_LOMEM, CARDBUS_MAPREG_TYPE_MEM, 0,
 	    &sc->rl_btag, &sc->rl_bhandle, &adr, &csc->sc_mapsize) == 0) {
-#if rbus
-#else
-		(*ct->ct_cf->cardbus_mem_open)(cc, 0, adr, adr+csc->sc_mapsize);
-#endif
 		csc->sc_cben = CARDBUS_MEM_ENABLE;
 		csc->sc_csr |= CARDBUS_COMMAND_MEM_ENABLE;
 		csc->sc_bar_reg = RL_PCI_LOMEM;
@@ -169,7 +166,7 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pwrhook = powerhook_establish(re_cardbus_powerhook, sc);
 
 	/* Call bus-independent (common) attach routine */
-	re_attach_common(sc);
+	re_attach(sc);
 }
 
 /*
@@ -260,8 +257,10 @@ re_cardbus_detach(struct device *self, int flags)
 	if_detach(ifp);
 
 	/* No more hooks */
-	shutdownhook_disestablish(sc->sc_sdhook);
-	powerhook_disestablish(sc->sc_pwrhook);
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_pwrhook != NULL)
+		powerhook_disestablish(sc->sc_pwrhook);
 
 	/* Disable interrupts */
 	if (csc->sc_ih != NULL)

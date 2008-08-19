@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lge.c,v 1.36 2005/12/24 19:16:31 brad Exp $	*/
+/*	$OpenBSD: if_lge.c,v 1.44 2006/05/28 00:20:21 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -134,7 +134,6 @@ int lge_newbuf(struct lge_softc *, struct lge_rx_desc *,
 			     struct mbuf *);
 int lge_encap(struct lge_softc *, struct mbuf *, u_int32_t *);
 void lge_rxeof(struct lge_softc *, int);
-void lge_rxeoc(struct lge_softc *);
 void lge_txeof(struct lge_softc *);
 int lge_intr(void *);
 void lge_tick(void *);
@@ -159,14 +158,6 @@ void lge_reset(struct lge_softc *);
 int lge_list_rx_init(struct lge_softc *);
 int lge_list_tx_init(struct lge_softc *);
 
-#ifdef LGE_USEIOSPACE
-#define LGE_RES			SYS_RES_IOPORT
-#define LGE_RID			LGE_PCI_LOIO
-#else
-#define LGE_RES			SYS_RES_MEMORY
-#define LGE_RID			LGE_PCI_LOMEM
-#endif
-
 #ifdef LGE_DEBUG
 #define DPRINTF(x)	if (lgedebug) printf x
 #define DPRINTFN(n,x)	if (lgedebug >= (n)) printf x
@@ -177,7 +168,7 @@ int	lgedebug = 0;
 #endif
 
 const struct pci_matchid lge_devices[] = {
-	{ PCI_VENDOR_LEVEL1, PCI_PRODUCT_LEVEL1_LXT1001 },
+	{ PCI_VENDOR_LEVEL1, PCI_PRODUCT_LEVEL1_LXT1001 }
 };
 
 #define LGE_SETBIT(sc, reg, x)				\
@@ -200,7 +191,7 @@ const struct pci_matchid lge_devices[] = {
 void
 lge_eeprom_getword(struct lge_softc *sc, int addr, u_int16_t *dest)
 {
-	register int		i;
+	int			i;
 	u_int32_t		val;
 
 	CSR_WRITE_4(sc, LGE_EECTL, LGE_EECTL_CMD_READ|
@@ -370,7 +361,7 @@ allmulti:
 void
 lge_reset(struct lge_softc *sc)
 {
-	register int		i;
+	int			i;
 
 	LGE_SETBIT(sc, LGE_MODE1, LGE_MODE1_SETRST_CTL0|LGE_MODE1_SOFTRST);
 
@@ -565,6 +556,7 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_start = lge_start;
 	ifp->if_watchdog = lge_watchdog;
 	ifp->if_baudrate = 1000000000;
+	ifp->if_hardmtu = LGE_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, LGE_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	DPRINTFN(5, ("bcopy\n"));
@@ -716,7 +708,7 @@ lge_newbuf(struct lge_softc *sc, struct lge_rx_desc *c, struct mbuf *m)
 		 * default values.
 		 */
 		m_new = m;
-		m_new->m_len = m_new->m_pkthdr.len = ETHER_MAX_LEN_JUMBO;
+		m_new->m_len = m_new->m_pkthdr.len = LGE_JLEN;
 		m_new->m_data = m_new->m_ext.ext_buf;
 	}
 
@@ -956,7 +948,7 @@ lge_rxeof(struct lge_softc *sc, int cnt)
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		/* Do IP checksum checking. */
@@ -977,16 +969,6 @@ lge_rxeof(struct lge_softc *sc, int cnt)
 	}
 
 	sc->lge_cdata.lge_rx_cons = i;
-}
-
-void
-lge_rxeoc(struct lge_softc *sc)
-{
-	struct ifnet		*ifp;
-
-	ifp = &sc->arpcom.ac_if;
-	ifp->if_flags &= ~IFF_RUNNING;
-	lge_init(sc);
 }
 
 /*
@@ -1101,7 +1083,7 @@ lge_intr(void *arg)
 			lge_rxeof(sc, LGE_RX_DMACNT(status));
 
 		if (status & LGE_ISR_RXCMDFIFO_EMPTY)
-			lge_rxeoc(sc);
+			lge_init(sc);
 
 		if (status & LGE_ISR_PHY_INTR) {
 			sc->lge_link = 0;
@@ -1212,7 +1194,7 @@ lge_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head);
+			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (pkts == 0)
@@ -1234,9 +1216,6 @@ lge_init(void *xsc)
 	int			s;
 
 	s = splnet();
-
-	if (ifp->if_flags & IFF_RUNNING)
-		return;
 
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
@@ -1404,20 +1383,15 @@ lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			lge_init(sc);
 #ifdef INET
-		case AF_INET:
-			lge_init(sc);
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-			break;
 #endif /* INET */
-		default:
-			lge_init(sc);
-			break;
-                }
 		break;
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU_JUMBO)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
 		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
@@ -1430,14 +1404,19 @@ lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				CSR_WRITE_4(sc, LGE_MODE1,
 				    LGE_MODE1_SETRST_CTL1|
 				    LGE_MODE1_RX_PROMISC);
+				lge_setmulti(sc);
 			} else if (ifp->if_flags & IFF_RUNNING &&
 			    !(ifp->if_flags & IFF_PROMISC) &&
 			    sc->lge_if_flags & IFF_PROMISC) {
 				CSR_WRITE_4(sc, LGE_MODE1,
 				    LGE_MODE1_RX_PROMISC);
+				lge_setmulti(sc);
+			} else if (ifp->if_flags & IFF_RUNNING &&
+			    (ifp->if_flags ^ sc->lge_if_flags) & IFF_ALLMULTI) {
+				lge_setmulti(sc);
 			} else {
-				ifp->if_flags &= ~IFF_RUNNING;
-				lge_init(sc);
+				if (!(ifp->if_flags & IFF_RUNNING))
+					lge_init(sc);
 			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -1463,7 +1442,7 @@ lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -1484,7 +1463,6 @@ lge_watchdog(struct ifnet *ifp)
 
 	lge_stop(sc);
 	lge_reset(sc);
-	ifp->if_flags &= ~IFF_RUNNING;
 	lge_init(sc);
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1498,7 +1476,7 @@ lge_watchdog(struct ifnet *ifp)
 void
 lge_stop(struct lge_softc *sc)
 {
-	register int		i;
+	int			i;
 	struct ifnet		*ifp;
 
 	ifp = &sc->arpcom.ac_if;

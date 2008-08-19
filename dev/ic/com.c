@@ -1,4 +1,4 @@
-/*	$OpenBSD: com.c,v 1.109 2006/01/01 11:59:40 miod Exp $	*/
+/*	$OpenBSD: com.c,v 1.112 2006/06/23 06:27:11 miod Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -207,6 +207,8 @@ com_detach(self, flags)
 	struct com_softc *sc = (struct com_softc *)self;
 	int maj, mn;
 
+	sc->sc_swflags |= COM_SW_DEAD;
+
 	/* locate the major number */
 	for (maj = 0; maj < nchrdev; maj++)
 		if (cdevsw[maj].d_open == comopen)
@@ -247,7 +249,6 @@ com_activate(self, act)
 	s = spltty();
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -500,6 +501,9 @@ comclose(dev, flag, mode, p)
 	if (!ISSET(tp->t_state, TS_ISOPEN))
 		return 0;
 #endif
+
+	if(sc->sc_swflags & COM_SW_DEAD)
+		return 0;
 
 	(*linesw[tp->t_line].l_close)(tp, flag);
 	s = spltty();
@@ -1212,6 +1216,10 @@ comintr(arg)
 
 		if (msr != sc->sc_msr) {
 			delta = msr ^ sc->sc_msr;
+
+			ttytstamp(tp, sc->sc_msr & MSR_CTS, msr & MSR_CTS,
+			    sc->sc_msr & MSR_DCD, msr & MSR_DCD);
+
 			sc->sc_msr = msr;
 			if (ISSET(delta, MSR_DCD)) {
 				if (!ISSET(sc->sc_swflags, COM_SW_SOFTCAR) &&

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbusvar.h,v 1.9 2005/03/08 21:35:04 miod Exp $	*/
+/*	$OpenBSD: sbusvar.h,v 1.11 2006/06/21 18:29:22 jason Exp $	*/
 /*	$NetBSD: sbusvar.h,v 1.11 2000/11/01 06:18:45 eeh Exp $ */
 
 /*-
@@ -45,12 +45,6 @@ struct sbus_softc;
 /*
  * S-bus variables.
  */
-struct sbusdev {
-	struct	device *sd_dev;		/* backpointer to generic */
-	struct	sbusdev *sd_bchain;	/* forward link in bus chain */
-	void	(*sd_reset)(struct device *);
-};
-
 
 /* Device register space description */
 struct sbus_reg {
@@ -101,8 +95,6 @@ struct sbus_attach_args {
 
 int	sbus_print(void *, const char *);
 
-void	sbus_establish(struct sbusdev *, struct device *);
-
 int	sbus_setup_attach_args(
 		struct sbus_softc *,
 		bus_space_tag_t,
@@ -122,7 +114,6 @@ struct sbus_softc {
 	bus_space_tag_t	sc_bustag;
 	bus_dma_tag_t	sc_dmatag;
 	int	sc_clockfreq;		/* clock frequency (in Hz) */
-	struct	sbusdev *sc_sbdev;	/* list of all children */
 	struct	sbus_range *sc_range;
 	int	sc_nrange;
 	int	sc_burst;		/* burst transfer sizes supported */
@@ -145,10 +136,10 @@ struct sbus_softc {
 #define SBUS_BURST_64	0x40
 
 /* We use #defined(SUN4*) here while the ports are in flux */
-#if defined(SUN4) || defined(SUN4C) || defined(SUN4M)
+#if defined(__sparc__) && !defined(__sparc64__)
 #include <sparc/dev/sbusvar.h>
 #define	INTLEV(x)	(x)
-#elif defined(SUN4U)
+#elif defined(__sparc64__)
 #include <sparc64/dev/sbusvar.h>
 #include <sparc64/dev/iommureg.h>
 #endif

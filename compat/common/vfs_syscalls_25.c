@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls_25.c,v 1.7 2005/11/30 10:35:07 pedro Exp $	*/
+/*	$OpenBSD: vfs_syscalls_25.c,v 1.12 2006/06/25 15:01:53 sturm Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -178,10 +178,10 @@ compat_25_sys_getfsstat(p, v, retval)
 	maxcount = SCARG(uap, bufsize) / sizeof(struct ostatfs);
 	sfsp = (caddr_t)SCARG(uap, buf);
 	count = 0;
-	simple_lock(&mountlist_slock);
+
 	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
 	    mp = nmp) {
-		if (vfs_busy(mp, LK_NOWAIT, &mountlist_slock)) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
 			nmp = CIRCLEQ_NEXT(mp, mnt_list);
 			continue;
 		}
@@ -194,8 +194,7 @@ compat_25_sys_getfsstat(p, v, retval)
 			    (flags == MNT_WAIT ||
 			     flags == 0) &&
 			    (error = VFS_STATFS(mp, sp, p))) {
-				simple_lock(&mountlist_slock);
-				nmp = mp->mnt_list.cqe_next;
+				nmp = CIRCLEQ_NEXT(mp, mnt_list);
 				vfs_unbusy(mp);
  				continue;
 			}
@@ -209,14 +208,14 @@ compat_25_sys_getfsstat(p, v, retval)
 			sfsp += sizeof(osb);
 		}
 		count++;
-		simple_lock(&mountlist_slock);
 		nmp = CIRCLEQ_NEXT(mp, mnt_list);
 		vfs_unbusy(mp);
 	}
-	simple_unlock(&mountlist_slock);
+
 	if (sfsp && count > maxcount)
 		*retval = maxcount;
 	else
 		*retval = count;
+
 	return (0);
 }

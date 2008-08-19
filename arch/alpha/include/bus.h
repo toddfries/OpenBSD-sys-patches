@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.20 2005/05/25 18:29:58 jason Exp $	*/
+/*	$OpenBSD: bus.h,v 1.24 2006/05/12 20:48:19 brad Exp $	*/
 /*	$NetBSD: bus.h,v 1.10 1996/12/02 22:19:32 cgd Exp $	*/
 
 /*
@@ -432,7 +432,7 @@ struct alpha_bus_space {
 #define	BUS_DMA_BUS1		0x010	/* placeholders for bus functions... */
 #define	BUS_DMA_BUS2		0x020
 #define	BUS_DMA_BUS3		0x040
-#define	BUS_DMA_BUS4		0x080
+#define	BUS_DMA_24BIT		0x080	/* isadma map */
 #define	BUS_DMA_STREAMING	0x100	/* hint: sequential, unidirectional */
 #define	BUS_DMA_READ		0x200	/* mapping is device -> memory only */
 #define	BUS_DMA_WRITE		0x400	/* mapping is memory -> device only */
@@ -442,7 +442,6 @@ struct alpha_bus_space {
  */
 #define	DMAMAP_NO_COALESCE	0x40000000	/* don't coalesce adjacent
 						   segments */
-#define	DMAMAP_HAS_SGMAP	0x80000000	/* sgva/len are valid */
 
 /* Forwards needed by prototypes below. */
 struct mbuf;
@@ -532,6 +531,16 @@ struct alpha_bus_dma_tag {
 	struct alpha_sgmap *_sgmap;
 
 	/*
+	 * The SGMAP MMU implements a prefetch FIFO to keep data
+	 * moving down the pipe, when doing host->bus DMA writes.
+	 * The threshold (distance until the next page) used to
+	 * trigger the prefetch is differnet on different chipsets,
+	 * and we need to know what it is in order to know whether
+	 * or not to allocate a spill page.
+	 */
+	bus_size_t _pfthresh;
+
+	/*
 	 * Internal-use only utility methods.  NOT TO BE USED BY
 	 * MACHINE-INDEPENDENT CODE!
 	 */
@@ -585,9 +594,11 @@ struct alpha_bus_dma_tag {
 #define	bus_dmamap_load_raw(t, m, sg, n, s, f)			\
 	(*(t)->_dmamap_load_raw)((t), (m), (sg), (n), (s), (f))
 #define	bus_dmamap_unload(t, p)					\
-	(*(t)->_dmamap_unload)((t), (p))
+	(void)(t),						\
+	(*(p)->_dm_window->_dmamap_unload)((p)->_dm_window, (p))
 #define	bus_dmamap_sync(t, p, a, s, op)				\
-	(*(t)->_dmamap_sync)((t), (p), (a), (s), (op))
+	(void)(t), 						\
+	(*(p)->_dm_window->_dmamap_sync)((p)->_dm_window, (p), (a), (s), (op))
 #define	bus_dmamem_alloc(t, s, a, b, sg, n, r, f)		\
 	(*(t)->_dmamem_alloc)((t), (s), (a), (b), (sg), (n), (r), (f))
 #define	bus_dmamem_free(t, sg, n)				\
@@ -615,18 +626,14 @@ struct alpha_bus_dmamap {
 	int		_dm_flags;	/* misc. flags */
 
 	/*
-	 * This is used only for SGMAP-mapped DMA, but we keep it
-	 * here to avoid pointless indirection.
-	 */
-	int		_dm_pteidx;	/* PTE index */
-	int		_dm_ptecnt;	/* PTE count */
-	u_long		_dm_sgva;	/* allocated sgva */
-	bus_size_t	_dm_sgvalen;	/* svga length */
-
-	/*
 	 * Private cookie to be used by the DMA back-end.
 	 */
 	void		*_dm_cookie;
+
+	/*
+	 * The DMA window that we ended up being mapped in.
+	 */
+	bus_dma_tag_t	_dm_window;
 
 	/*
 	 * PUBLIC MEMBERS: these are used by machine-independent code.

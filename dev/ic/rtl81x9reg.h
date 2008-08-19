@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.21 2005/09/17 00:45:44 brad Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.28 2006/08/16 19:38:34 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -146,13 +146,20 @@
 #define RL_LOOPTEST_ON		0x00020000
 #define RL_LOOPTEST_ON_CPLUS	0x00060000
 
+/* Known revision codes. */
+
 #define RL_HWREV_8169		0x00000000
-#define RL_HWREV_8169S		0x04000000
-#define RL_HWREV_8169SB		0x10000000
 #define RL_HWREV_8110S		0x00800000
+#define RL_HWREV_8169S		0x04000000
+#define RL_HWREV_8169_8110SB	0x10000000
+#define RL_HWREV_8169_8110SC	0x18000000
+#define RL_HWREV_8168_SPIN1	0x30000000
+#define RL_HWREV_8100E		0x30800000
+#define RL_HWREV_8101E		0x34000000
+#define RL_HWREV_8168_SPIN2	0x38000000
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
-#define RL_HWREV_8139AG	0x70800000
+#define RL_HWREV_8139AG		0x70800000
 #define RL_HWREV_8139B		0x78000000
 #define RL_HWREV_8130		0x7C000000
 #define RL_HWREV_8139C		0x74000000
@@ -300,6 +307,15 @@
 #define RL_EEMODE_WRITECFG	(0x80|0x40)
 
 /* 9346/9356 EEPROM commands */
+
+#define RL_9346_WRITE		0x5
+#define RL_9346_READ		0x6
+#define RL_9346_ERASE		0x7
+#define RL_9346_EWEN		0x4
+#define RL_9346_EWEN_ADDR	0x30
+#define RL_9456_EWDS		0x4
+#define RL_9346_EWDS_ADDR	0x00
+
 #define RL_EECMD_WRITE		0x5	/* 0101b */
 #define RL_EECMD_READ		0x6	/* 0110b */
 #define RL_EECMD_ERASE		0x7	/* 0111b */
@@ -527,6 +543,8 @@ struct rl_desc {
 #define RL_RDESC_STAT_TCPSUMBAD	0x00002000	/* TCP checksum bad */
 #define RL_RDESC_STAT_FRAGLEN	0x00001FFF	/* RX'ed frame/frag len */
 #define RL_RDESC_STAT_GFRAGLEN	0x00003FFF	/* RX'ed frame/frag len */
+#define RL_RDESC_STAT_ERRS	(RL_RDESC_STAT_GIANT|RL_RDESC_STAT_RUNT| \
+				 RL_RDESC_STAT_CRCERR)
 
 #define RL_RDESC_VLANCTL_TAG	0x00010000	/* VLAN tag available
 						   (rl_vlandata valid)*/
@@ -564,15 +582,32 @@ struct rl_stats {
 };
 
 #define RL_RX_DESC_CNT		64
-#define RL_TX_DESC_CNT		64
+#define RL_TX_DESC_CNT_8139	64
+#define RL_TX_DESC_CNT_8169	1024
+
+#define RL_TX_QLEN		64
+
 #define RL_RX_LIST_SZ		(RL_RX_DESC_CNT * sizeof(struct rl_desc))
-#define RL_TX_LIST_SZ		(RL_TX_DESC_CNT * sizeof(struct rl_desc))
 #define RL_RING_ALIGN		256
-#define RL_IFQ_MAXLEN		512
-#define RL_DESC_INC(x)		(x = (x + 1) % RL_TX_DESC_CNT)
 #define RL_OWN(x)		(letoh32((x)->rl_cmdstat) & RL_RDESC_STAT_OWN)
 #define RL_RXBYTES(x)		(letoh32((x)->rl_cmdstat) & sc->rl_rxlenmask)
 #define RL_PKTSZ(x)		((x)/* >> 3*/)
+#ifdef __STRICT_ALIGNMENT
+#define RE_ETHER_ALIGN	sizeof(uint64_t)
+#define RE_RX_DESC_BUFLEN	(MCLBYTES - RE_ETHER_ALIGN)
+#else
+#define RE_ETHER_ALIGN	0
+#define RE_RX_DESC_BUFLEN	MCLBYTES
+#endif
+
+#define RL_TX_DESC_CNT(sc)	\
+	((sc)->rl_ldata.rl_tx_desc_cnt)
+#define RL_TX_LIST_SZ(sc)	\
+	(RL_TX_DESC_CNT(sc) * sizeof(struct rl_desc))
+#define RL_TX_DESC_INC(sc, x)	\
+	((x) = ((x) + 1) % RL_TX_DESC_CNT(sc))
+#define RL_RX_DESC_INC(sc, x)	\
+	((x) = ((x) + 1) % RL_RX_DESC_CNT)
 
 #define RL_ADDR_LO(y)	((u_int64_t) (y) & 0xFFFFFFFF)
 #define RL_ADDR_HI(y)	((u_int64_t) (y) >> 32)
@@ -581,7 +616,7 @@ struct rl_stats {
 #define RL_JUMBO_FRAMELEN	7440
 #define RL_JUMBO_MTU		(RL_JUMBO_FRAMELEN-ETHER_HDR_LEN-ETHER_CRC_LEN)
 
-#define	MAX_NUM_MULTICAST_ADDRESSES	128
+#define MAX_NUM_MULTICAST_ADDRESSES	128
 
 #define RL_INC(x)		(x = (x + 1) % RL_TX_LIST_CNT)
 #define RL_CUR_TXADDR(x)	((x->rl_cdata.cur_tx * 4) + RL_TXADDR0)
@@ -625,20 +660,28 @@ struct rl_mii_frame {
 			 (x)->rl_type == RL_8169)
 
 struct rl_list_data {
-	struct mbuf		*rl_tx_mbuf[RL_TX_DESC_CNT];
+	struct rl_txq {
+		struct mbuf *txq_mbuf;
+		bus_dmamap_t txq_dmamap;
+		int txq_descidx;
+	} rl_txq[RL_TX_QLEN];
+	int			rl_txq_considx;
+	int			rl_txq_prodidx;
+	bus_dmamap_t		rl_tx_list_map;
+	struct rl_desc		*rl_tx_list;
+	bus_dma_segment_t 	rl_tx_listseg;
+	int			rl_tx_free;	/* # of free descriptors */
+	int			rl_tx_nextfree; /* next descriptor to use */
+	int			rl_tx_desc_cnt; /* # of descriptors */
+	int			rl_tx_listnseg;
+
 	struct mbuf		*rl_rx_mbuf[RL_RX_DESC_CNT];
-	int			rl_tx_prodidx;
-	int			rl_rx_prodidx;
-	int			rl_tx_considx;
-	int			rl_tx_free;
-	bus_dmamap_t		rl_tx_dmamap[RL_TX_DESC_CNT];
 	bus_dmamap_t		rl_rx_dmamap[RL_RX_DESC_CNT];
 	bus_dmamap_t		rl_rx_list_map;
 	struct rl_desc		*rl_rx_list;
 	bus_dma_segment_t	rl_rx_listseg;
-	bus_dmamap_t		rl_tx_list_map;
-	struct rl_desc		*rl_tx_list;
-	bus_dma_segment_t	rl_tx_listseg;
+	int			rl_rx_prodidx;
+	int			rl_rx_listnseg;
 };
 
 struct rl_softc {
@@ -653,12 +696,14 @@ struct rl_softc {
 	struct mii_data		sc_mii;		/* MII information */
 	u_int8_t		rl_type;
 	int			rl_eecmd_read;
+	int			rl_eewidth;
 	void			*sc_sdhook;	/* shutdownhook */
 	void			*sc_pwrhook;
 	int			rl_txthresh;
 	int			sc_flags;	/* misc flags */
 	struct rl_chain_data	rl_cdata;
 	struct timeout		sc_tick_tmo;
+	int			if_flags;
 
 	struct rl_list_data	rl_ldata;
 	struct mbuf		*rl_head;
@@ -666,6 +711,9 @@ struct rl_softc {
 	u_int32_t		rl_rxlenmask;
 	int			rl_testmode;
 	struct timeout		timer_handle;
+
+	int			rl_txstart;
+	int			rl_link;
 };
 
 #define RL_ATTACHED	0x00000001	/* attach has succeeded */
@@ -691,6 +739,24 @@ struct rl_softc {
 #define CSR_READ_1(sc, csr) \
 	bus_space_read_1(sc->rl_btag, sc->rl_bhandle, csr)
 
+#define CSR_SETBIT_1(sc, offset, val)		\
+	CSR_WRITE_1(sc, offset, CSR_READ_1(sc, offset) | (val))
+
+#define CSR_CLRBIT_1(sc, offset, val)		\
+	CSR_WRITE_1(sc, offset, CSR_READ_1(sc, offset) & ~(val))
+
+#define CSR_SETBIT_2(sc, offset, val)		\
+	CSR_WRITE_2(sc, offset, CSR_READ_2(sc, offset) | (val))
+
+#define CSR_CLRBIT_2(sc, offset, val)		\
+	CSR_WRITE_2(sc, offset, CSR_READ_2(sc, offset) & ~(val))
+
+#define CSR_SETBIT_4(sc, offset, val)		\
+	CSR_WRITE_4(sc, offset, CSR_READ_4(sc, offset) | (val))
+
+#define CSR_CLRBIT_4(sc, offset, val)		\
+	CSR_WRITE_4(sc, offset, CSR_READ_4(sc, offset) & ~(val))
+
 #define RL_TIMEOUT		1000
 
 /*
@@ -703,11 +769,14 @@ struct rl_softc {
 /*
  * RealTek chip device IDs.
  */
-#define	RT_DEVICEID_8129			0x8129
-#define	RT_DEVICEID_8138			0x8138
-#define	RT_DEVICEID_8139			0x8139
-#define	RT_DEVICEID_8169			0x8169
-#define	RT_DEVICEID_8100			0x8100
+#define RT_DEVICEID_8129			0x8129
+#define RT_DEVICEID_8101E			0x8136
+#define RT_DEVICEID_8138			0x8138
+#define RT_DEVICEID_8139			0x8139
+#define RT_DEVICEID_8169SC			0x8167
+#define RT_DEVICEID_8168			0x8168
+#define RT_DEVICEID_8169			0x8169
+#define RT_DEVICEID_8100			0x8100
 
 /*
  * Accton PCI vendor ID

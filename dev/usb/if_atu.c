@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.68 2006/02/20 20:12:14 damien Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.76 2006/07/17 11:43:12 mk Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -210,25 +210,29 @@ struct atu_radfirm {
 	enum	atu_radio_type atur_type;
 	char	*atur_internal;
 	char	*atur_external;
+	u_int8_t max_rssi;
 } atu_radfirm[] = {
-	{ RadioRFMD,		"atu-rfmd-int",		"atu-rfmd-ext" },
-	{ RadioRFMD2958,	"atu-rfmd2958-int",	"atu-rfmd2958-ext" },
-	{ RadioRFMD2958_SMC,	"atu-rfmd2958smc-int",	"atu-rfmd2958smc-ext" },
-	{ RadioIntersil,	"atu-intersil-int",	"atu-intersil-ext" },
+	{ RadioRFMD,		"atu-rfmd-int",		"atu-rfmd-ext",	0 },
+	{ RadioRFMD2958,	"atu-rfmd2958-int",	"atu-rfmd2958-ext", 81 },
+	{ RadioRFMD2958_SMC,	"atu-rfmd2958smc-int",	"atu-rfmd2958smc-ext", 0 },
+	{ RadioIntersil,	"atu-intersil-int",	"atu-intersil-ext", 0 },
 	{
 		AT76C503_i3863,
 		"atu-at76c503-i3863-int",
-		"atu-at76c503-i3863-ext"
+		"atu-at76c503-i3863-ext",
+		0
 	},
 	{
 		AT76C503_rfmd_acc,
 		"atu-at76c503-rfmd-acc-int",
-		"atu-at76c503-rfmd-acc-ext"
+		"atu-at76c503-rfmd-acc-ext",
+		0
 	},
 	{
 		AT76C505_rfmd,
 		"atu-at76c505-rfmd-int",
-		"atu-at76c505-rfmd-ext"
+		"atu-at76c505-rfmd-ext",
+		0
 	}
 };
 
@@ -270,10 +274,6 @@ int	atu_tx_list_init(struct atu_softc *);
 int	atu_rx_list_init(struct atu_softc *);
 void	atu_xfer_list_free(struct atu_softc *sc, struct atu_chain *ch,
 	    int listlen);
-
-#ifdef ATU_DEBUG
-void	atu_print_a_bunch_of_debug_things(struct atu_softc *sc);
-#endif
 
 void atu_task(void *);
 int atu_newstate(struct ieee80211com *, enum ieee80211_state, int);
@@ -539,7 +539,6 @@ atu_start_scan(struct atu_softc *sc)
 	for (Cnt=0; Cnt<6; Cnt++)
 		Scan.BSSID[Cnt] = 0xff;
 
-	memset(Scan.SSID, 0x00, sizeof(Scan.SSID));
 	memcpy(Scan.SSID, ic->ic_des_essid, ic->ic_des_esslen);
 	Scan.SSID_Len = ic->ic_des_esslen;
 
@@ -556,7 +555,7 @@ atu_start_scan(struct atu_softc *sc)
 	/* the time we stay on one channel */
 	USETW(Scan.MinChannelTime, 100);
 	USETW(Scan.MaxChannelTime, 200);
-	/* wether or not we scan all channels */
+	/* whether or not we scan all channels */
 	Scan.InternationalScan = 0xc1;
 
 #ifdef ATU_DEBUG
@@ -694,7 +693,6 @@ atu_initial_config(struct atu_softc *sc)
 	}
 
 	/* Setting the SSID here doesn't seem to do anything */
-	memset(cmd.SSID, 0x00, sizeof(cmd.SSID));
 	memcpy(cmd.SSID, ic->ic_des_essid, ic->ic_des_esslen);
 	cmd.SSID_Len = ic->ic_des_esslen;
 
@@ -789,7 +787,6 @@ atu_join(struct atu_softc *sc, struct ieee80211_node *node)
 	DPRINTFN(15, ("%s: mode=%d\n", USBDEVNAME(sc->atu_dev),
 	    sc->atu_mode));
 	memcpy(join.bssid, node->ni_bssid, IEEE80211_ADDR_LEN);
-	memset(join.essid, 0x00, 32);
 	memcpy(join.essid, node->ni_essid, node->ni_esslen);
 	join.essid_size = node->ni_esslen;
 	if (node->ni_capinfo & IEEE80211_CAPINFO_IBSS)
@@ -939,9 +936,9 @@ atu_internal_firmware(void *arg)
 			break;
 
 		default:
-			usbd_delay_ms(sc->atu_udev, 100);
 			DPRINTFN(20, ("%s: sleeping for a while\n",
 			    USBDEVNAME(sc->atu_dev)));
+			usbd_delay_ms(sc->atu_udev, 100);
 			break;
 		}
 
@@ -963,7 +960,7 @@ atu_internal_firmware(void *arg)
 
 	DPRINTFN(15, ("%s: sending remap\n", USBDEVNAME(sc->atu_dev)));
 	err = atu_usb_request(sc, DFU_REMAP, 0, 0, 0, NULL);
-	if ((err) && (! sc->atu_quirk & ATU_QUIRK_NO_REMAP)) {
+	if ((err) && (!ISSET(sc->atu_quirk, ATU_QUIRK_NO_REMAP))) {
 		DPRINTF(("%s: remap failed!\n", USBDEVNAME(sc->atu_dev)));
 		return;
 	}
@@ -1430,6 +1427,7 @@ atu_complete_attach(struct atu_softc *sc)
 	ic->ic_opmode = IEEE80211_M_STA;
 	ic->ic_state = IEEE80211_S_INIT;
 	ic->ic_caps = IEEE80211_C_IBSS | IEEE80211_C_WEP | IEEE80211_C_SCANALL;
+	ic->ic_max_rssi = atu_radfirm[sc->atu_radio].max_rssi;
 
 	i = 0;
 	ic->ic_sup_rates[IEEE80211_MODE_11B].rs_rates[i++] = 2;
@@ -1515,7 +1513,6 @@ atu_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 	case DVACT_DEACTIVATE:
 		if (sc->sc_state != ATU_S_UNCONFIG) {
@@ -1741,14 +1738,15 @@ atu_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		    htole16(ic->ic_bss->ni_chan->ic_freq);
 		rr->rr_chan_flags =
 		    htole16(ic->ic_bss->ni_chan->ic_flags);
-		rr->rr_antsignal = h->rssi;
+		rr->rr_rssi = h->rssi;
+		rr->rr_max_rssi = ic->ic_max_rssi;
 
 		M_DUP_PKTHDR(&mb, m);
 		mb.m_data = (caddr_t)rr;
 		mb.m_len = sizeof(sc->sc_txtapu);
 		mb.m_next = m;
 		mb.m_pkthdr.len += mb.m_len;
-		bpf_mtap(sc->sc_radiobpf, &mb);
+		bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif /* NPBFILTER > 0 */
 
@@ -1871,7 +1869,7 @@ atu_tx_start(struct atu_softc *sc, struct ieee80211_node *ni,
 		mb.m_len = sizeof(sc->sc_txtapu);
 		mb.m_next = m;
 		mb.m_pkthdr.len += mb.m_len;
-		bpf_mtap(sc->sc_radiobpf, &mb);
+		bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_OUT);
 	}
 #endif
 
@@ -1992,7 +1990,7 @@ atu_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m);
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 			m = ieee80211_encap(ifp, m, &ni);
@@ -2002,7 +2000,7 @@ atu_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
-				bpf_mtap(ic->ic_rawbpf, m);
+				bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_OUT);
 #endif
 		} else {
 			DPRINTFN(25, ("%s: atu_start: mgmt packet\n",
@@ -2134,90 +2132,6 @@ atu_init(struct ifnet *ifp)
 
 	return 0;
 }
-
-#ifdef ATU_DEBUG
-void
-atu_print_a_bunch_of_debug_things(struct atu_softc *sc)
-{
-	usbd_status		err;
-	u_int8_t		tmp[32];
-
-	/* DEBUG */
-	if ((err = atu_get_mib(sc, MIB_MAC_MGMT__CURRENT_BSSID, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: current BSSID=%s\n", USBDEVNAME(sc->atu_dev),
-	    ether_sprintf(tmp)));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_MGMT__BEACON_PERIOD, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: beacon period=%d\n", USBDEVNAME(sc->atu_dev),
-	    tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_WEP__PRIVACY_INVOKED, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: privacy invoked=%d\n", USBDEVNAME(sc->atu_dev),
-	    tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_WEP__ENCR_LEVEL, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: encr_level=%d\n", USBDEVNAME(sc->atu_dev),
-	    tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_WEP__ICV_ERROR_COUNT, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: icv error count=%d\n", USBDEVNAME(sc->atu_dev),
-	    *(short *)tmp));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_WEP__EXCLUDED_COUNT, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: wep excluded count=%d\n",
-	    USBDEVNAME(sc->atu_dev), *(short *)tmp));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_MGMT__POWER_MODE, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: power mode=%d\n", USBDEVNAME(sc->atu_dev),
-	    tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_PHY__CHANNEL, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: channel=%d\n", USBDEVNAME(sc->atu_dev), tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_PHY__REG_DOMAIN, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: reg domain=%d\n", USBDEVNAME(sc->atu_dev),
-	    tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_LOCAL__SSID_SIZE, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: ssid size=%d\n", USBDEVNAME(sc->atu_dev),
-	    tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_LOCAL__BEACON_ENABLE, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: beacon enable=%d\n", USBDEVNAME(sc->atu_dev),
-	    tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_LOCAL__AUTO_RATE_FALLBACK, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: auto rate fallback=%d\n",
-	    USBDEVNAME(sc->atu_dev), tmp[0]));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_ADDR__ADDR, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: mac addr=%s\n", USBDEVNAME(sc->atu_dev),
-	    ether_sprintf(tmp)));
-
-	if ((err = atu_get_mib(sc, MIB_MAC__DESIRED_SSID, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: desired ssid=%s\n", USBDEVNAME(sc->atu_dev),
-	    tmp));
-
-	if ((err = atu_get_mib(sc, MIB_MAC_MGMT__CURRENT_ESSID, tmp)))
-		return;
-	DPRINTF(("%s: DEBUG: current ESSID=%s\n", USBDEVNAME(sc->atu_dev),
-	    tmp));
-}
-#endif /* ATU_DEBUG */
 
 int
 atu_ioctl(struct ifnet *ifp, u_long command, caddr_t data)

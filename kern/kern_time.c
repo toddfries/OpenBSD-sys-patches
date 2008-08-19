@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_time.c,v 1.54 2006/01/20 07:53:48 tedu Exp $	*/
+/*	$OpenBSD: kern_time.c,v 1.59 2006/06/29 19:52:47 kettenis Exp $	*/
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -354,7 +354,49 @@ struct timeval adjtimedelta;		/* unapplied time correction */
 int	tickdelta;			/* current clock skew, us. per tick */
 long	timedelta;			/* unapplied time correction, us. */
 long	bigadj = 1000000;		/* use 10x skew above bigadj us. */
+int64_t	ntp_tick_permanent;
+int64_t	ntp_tick_acc;
 #endif
+
+/* ARGSUSED */
+int
+sys_adjfreq(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_adjfreq_args /* {
+		syscallarg(const int64_t *) freq;
+		syscallarg(int64_t *) oldfreq;
+	} */ *uap = v;
+	int error;
+	int64_t f;
+#ifndef __HAVE_TIMECOUNTER
+	int s;
+
+	if (SCARG(uap, oldfreq)) {
+		f = ntp_tick_permanent * hz;
+		if ((error = copyout((void *)&f, (void *)SCARG(uap, oldfreq),
+		    sizeof(int64_t))))
+			return (error);
+	}
+	if (SCARG(uap, freq)) {
+		if ((error = suser(p, 0)))
+			return (error);
+		if ((error = copyin((void *)SCARG(uap, freq), (void *)&f,
+		    sizeof(int64_t))))
+			return (error);
+		s = splclock();
+		ntp_tick_permanent = f / hz;
+		splx(s);
+	}
+#else
+	if (SCARG(uap, oldfreq)) {
+		f = 0;
+		if ((error = copyout((void *)&f, (void *)SCARG(uap, oldfreq),
+		    sizeof(int64_t))))
+			return (error);
+	}
+#endif
+	return (0);
+}
 
 /* ARGSUSED */
 int
@@ -367,24 +409,41 @@ sys_adjtime(struct proc *p, void *v, register_t *retval)
 #ifdef __HAVE_TIMECOUNTER
 	int error;
 
-	if ((error = suser(p, 0)))
-		return (error);
-
 	if (SCARG(uap, olddelta))
 		if ((error = copyout((void *)&adjtimedelta,
 		    (void *)SCARG(uap, olddelta), sizeof(struct timeval))))
 			return (error);
 
-	if ((error = copyin((void *)SCARG(uap, delta), (void *)&adjtimedelta,
-	    sizeof(struct timeval))))
-		return (error);
+	if (SCARG(uap, delta)) {
+		if ((error = suser(p, 0)))
+			return (error);
 
+		if ((error = copyin((void *)SCARG(uap, delta),
+		    (void *)&adjtimedelta, sizeof(struct timeval))))
+			return (error);
+	}
+
+	/* Normalize the correction. */
+	while (adjtimedelta.tv_usec >= 1000000) {
+		adjtimedelta.tv_usec -= 1000000;
+		adjtimedelta.tv_sec += 1;
+	}
+	while (adjtimedelta.tv_usec < 0) {
+		adjtimedelta.tv_usec += 1000000;
+		adjtimedelta.tv_sec -= 1;
+	}
 	return (0);
 #else
 	struct timeval atv;
 	long ndelta, ntickdelta, odelta;
 	int s, error;
 
+	if (!SCARG(uap, delta)) {
+		s = splclock();
+		odelta = timedelta;
+		splx(s);
+		goto out;
+	}
 	if ((error = suser(p, 0)))
 		return (error);
 	if ((error = copyin((void *)SCARG(uap, delta), (void *)&atv,
@@ -432,6 +491,7 @@ sys_adjtime(struct proc *p, void *v, register_t *retval)
 	tickdelta = ntickdelta;
 	splx(s);
 
+out:
 	if (SCARG(uap, olddelta)) {
 		atv.tv_sec = odelta / 1000000;
 		atv.tv_usec = odelta % 1000000;
@@ -442,6 +502,7 @@ sys_adjtime(struct proc *p, void *v, register_t *retval)
 	return (0);
 #endif
 }
+
 
 /*
  * Get value of an interval timer.  The process virtual and

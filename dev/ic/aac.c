@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.28 2006/02/06 22:11:32 jmc Exp $	*/
+/*	$OpenBSD: aac.c,v 1.32 2006/07/21 19:11:11 mickey Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -81,7 +81,6 @@ struct scsi_xfer;
 void	aac_copy_internal_data(struct scsi_xfer *, u_int8_t *, size_t);
 char   *aac_describe_code(struct aac_code_lookup *, u_int32_t);
 void	aac_describe_controller(struct aac_softc *);
-void	aac_enqueue(struct aac_softc *, struct scsi_xfer *, int);
 int	aac_enqueue_fib(struct aac_softc *, int, struct aac_command *);
 int	aac_dequeue_fib(struct aac_softc *, int, u_int32_t *,
 			struct aac_fib **);
@@ -90,8 +89,6 @@ int	aac_enqueue_response(struct aac_softc *sc, int queue,
 
 void	aac_eval_mapping(u_int32_t, int *, int *, int *);
 void	aac_print_printf(struct aac_softc *);
-void	aac_host_command(struct aac_softc *);
-void	aac_host_response(struct aac_softc *);
 int	aac_init(struct aac_softc *);
 int	aac_check_firmware(struct aac_softc *);
 void	aac_internal_cache_cmd(struct scsi_xfer *);
@@ -121,7 +118,6 @@ void	aac_add_container(struct aac_softc *, struct aac_mntinforesp *, int);
 void	aac_shutdown(void *);
 int	aac_sync_command(struct aac_softc *, u_int32_t, u_int32_t,
     u_int32_t, u_int32_t, u_int32_t, u_int32_t *);
-void	aac_watchdog(void *);
 
 struct cfdriver aac_cd = {
 	NULL, "aac", DV_DULL
@@ -197,6 +193,27 @@ struct aac_interface aac_rx_interface = {
 	aac_rx_set_mailbox,
 	aac_rx_get_mailbox,
 	aac_rx_set_interrupts
+};
+
+/* Rocket/MIPS interface */	
+int	aac_rkt_get_fwstatus(struct aac_softc *);
+void	aac_rkt_qnotify(struct aac_softc *, int);
+int	aac_rkt_get_istatus(struct aac_softc *);
+void	aac_rkt_clear_istatus(struct aac_softc *, int);
+void	aac_rkt_set_mailbox(struct aac_softc *, u_int32_t,
+				    u_int32_t, u_int32_t,
+				    u_int32_t, u_int32_t);
+int	aac_rkt_get_mailbox(struct aac_softc *, int);
+void	aac_rkt_set_interrupts(struct aac_softc *, int);
+
+struct aac_interface aac_rkt_interface = {
+	aac_rkt_get_fwstatus,
+	aac_rkt_qnotify,
+	aac_rkt_get_istatus,
+	aac_rkt_clear_istatus,
+	aac_rkt_set_mailbox,
+	aac_rkt_get_mailbox,
+	aac_rkt_set_interrupts
 };
 
 #ifdef AAC_DEBUG
@@ -1061,20 +1078,14 @@ aac_bio_complete(struct aac_command *cm)
 	struct aac_blockread_response *brr;
 	struct aac_blockwrite_response *bwr;
 	struct scsi_xfer *xs = (struct scsi_xfer *)cm->cm_private;
-	struct buf *bp = xs->bp;
 	AAC_FSAStatus status;
 	int s;
 
 	AAC_DPRINTF(AAC_D_CMD,
 		    ("%s: bio complete\n", cm->cm_sc->aac_dev.dv_xname));
 
-	s = splbio();
-	aac_release_command(cm);
-	if (bp == NULL)
-		goto exit;
-
 	/* fetch relevant status and then release the command */
-	if (bp->b_flags & B_READ) {
+	if (xs->flags & SCSI_DATA_IN) {
 		brr = (struct aac_blockread_response *)&cm->cm_fib->data[0];
 		status = brr->Status;
 	} else {
@@ -1082,19 +1093,10 @@ aac_bio_complete(struct aac_command *cm)
 		status = bwr->Status;
 	}
 
-	/* fix up the bio based on status */
-	if (status == ST_OK) {
-		bp->b_resid = 0;
-	} else {
-		bp->b_error = EIO;
-		bp->b_flags |= B_ERROR;
+	s = splbio();
+	aac_release_command(cm);
 
-		/* pass an error string out to the disk layer */
-		aac_describe_code(aac_command_status_table, status);
-	}
-
- exit:
-	xs->error = XS_NOERROR;
+	xs->error = status == ST_OK? XS_NOERROR : XS_DRIVER_STUFFUP;
 	xs->resid = 0;
 	xs->flags |= ITSDONE;
 	scsi_done(xs);
@@ -1670,6 +1672,11 @@ aac_init(struct aac_softc *sc)
 	case AAC_HWIF_I960RX:
 		AAC_SETREG4(sc, AAC_RX_ODBR, ~0);
 		break;
+	case AAC_HWIF_RKT:
+		AAC_SETREG4(sc, AAC_RKT_ODBR, ~0);
+		break;
+	default:
+		break;
 	}
 
 	/*
@@ -1806,7 +1813,7 @@ aac_sync_fib(struct aac_softc *sc, u_int32_t command, u_int32_t xferstate,
 {
 
 	if (datasize > AAC_FIB_DATASIZE) {
-		printf("aac_sync_fib 1: datasize=%d AAC_FIB_DATASIZE\n",
+		printf("aac_sync_fib 1: datasize=%d AAC_FIB_DATASIZE %lu\n",
 		    datasize, AAC_FIB_DATASIZE);
 		return(EINVAL);
 	}
@@ -2132,6 +2139,12 @@ aac_fa_get_fwstatus(struct aac_softc *sc)
  	return (AAC_GETREG4(sc, AAC_FA_FWSTATUS));
 }
 
+int
+aac_rkt_get_fwstatus(struct aac_softc *sc)
+{
+	return(AAC_GETREG4(sc, AAC_RKT_FWSTATUS));
+}
+
 /*
  * Notify the controller of a change in a given queue
  */
@@ -2155,6 +2168,12 @@ aac_fa_qnotify(struct aac_softc *sc, int qbit)
 	AAC_FA_HACK(sc);
 }
 
+void
+aac_rkt_qnotify(struct aac_softc *sc, int qbit)
+{
+	AAC_SETREG4(sc, AAC_RKT_IDBR, qbit);
+}
+
 /*
  * Get the interrupt reason bits
  */
@@ -2174,6 +2193,12 @@ int
 aac_fa_get_istatus(struct aac_softc *sc)
 {
 	return (AAC_GETREG2(sc, AAC_FA_DOORBELL0));
+}
+
+int
+aac_rkt_get_istatus(struct aac_softc *sc)
+{
+	return(AAC_GETREG4(sc, AAC_RKT_ODBR));
 }
 
 /*
@@ -2196,6 +2221,12 @@ aac_fa_clear_istatus(struct aac_softc *sc, int mask)
 {
 	AAC_SETREG2(sc, AAC_FA_DOORBELL0_CLEAR, mask);
 	AAC_FA_HACK(sc);
+}
+
+void
+aac_rkt_clear_istatus(struct aac_softc *sc, int mask)
+{
+	AAC_SETREG4(sc, AAC_RKT_ODBR, mask);
 }
 
 /*
@@ -2239,6 +2270,17 @@ aac_fa_set_mailbox(struct aac_softc *sc, u_int32_t command, u_int32_t arg0,
 	AAC_FA_HACK(sc);
 }
 
+void
+aac_rkt_set_mailbox(struct aac_softc *sc, u_int32_t command, u_int32_t arg0,
+		    u_int32_t arg1, u_int32_t arg2, u_int32_t arg3)
+{
+	AAC_SETREG4(sc, AAC_RKT_MAILBOX, command);
+	AAC_SETREG4(sc, AAC_RKT_MAILBOX + 4, arg0);
+	AAC_SETREG4(sc, AAC_RKT_MAILBOX + 8, arg1);
+	AAC_SETREG4(sc, AAC_RKT_MAILBOX + 12, arg2);
+	AAC_SETREG4(sc, AAC_RKT_MAILBOX + 16, arg3);
+}
+
 /*
  * Fetch the immediate command status word
  */
@@ -2258,6 +2300,12 @@ int
 aac_fa_get_mailbox(struct aac_softc *sc, int mb)
 {
 	return (AAC_GETREG4(sc, AAC_FA_MAILBOX + (mb * 4)));
+}
+
+int
+aac_rkt_get_mailbox(struct aac_softc *sc, int mb)
+{
+	return(AAC_GETREG4(sc, AAC_RKT_MAILBOX + (mb * 4)));
 }
 
 /*
@@ -2300,6 +2348,18 @@ aac_fa_set_interrupts(struct aac_softc *sc, int enable)
 		AAC_SETREG2((sc), AAC_FA_MASK0, ~0);
 		AAC_FA_HACK(sc);
 	}
+}
+
+void
+aac_rkt_set_interrupts(struct aac_softc *sc, int enable)
+{
+	AAC_DPRINTF(AAC_D_INTR, ("%s: %sable interrupts",
+				 sc->aac_dev.dv_xname, enable ? "en" : "dis"));
+
+	if (enable)
+		AAC_SETREG4(sc, AAC_RKT_OIMR, ~AAC_DB_INTERRUPTS);
+	else
+		AAC_SETREG4(sc, AAC_RKT_OIMR, ~0);
 }
 
 void

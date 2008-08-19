@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.19 2005/06/29 07:17:22 deraadt Exp $	*/
+/*	$OpenBSD: psl.h,v 1.21 2006/05/20 14:18:35 miod Exp $	*/
 /*	$NetBSD: psl.h,v 1.20 2001/04/13 23:30:05 thorpej Exp $ */
 
 /*
@@ -342,6 +342,7 @@ extern __inline int name()						\
 	    : "=&r" (oldpil)						\
 	    : "n" (newpil)						\
 	    : "%g0");							\
+	__asm __volatile("" : : : "memory");				\
 	return (oldpil);						\
 }
 /* A non-priority-decreasing version of SPL */
@@ -371,6 +372,7 @@ extern __inline int name()						\
 	    : "I" (newpil)						\
 	    : "cc");							\
 	}								\
+	__asm __volatile("" : : : "memory");				\
 	return (oldpil);						\
 }
 #endif
@@ -403,7 +405,6 @@ SPLHOLD(spllpt, PIL_LPT)
  * Memory allocation (must be as high as highest network, tty, or disk device)
  */
 SPLHOLD(splvm, PIL_VM)
-#define	splimp splvm
 
 SPLHOLD(splclock, PIL_CLOCK)
 

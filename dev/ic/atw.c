@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.43 2006/02/28 06:52:35 jsg Exp $	*/
+/*	$OpenBSD: atw.c,v 1.48 2006/08/30 11:20:20 jsg Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -324,7 +324,6 @@ atw_activate(struct device *self, enum devact act)
 	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -671,11 +670,11 @@ atw_attach(struct atw_softc *sc)
 	sc->sc_bbptype = MASK_AND_RSHIFT(sc->sc_srom[ATW_SR_CSR20],
 	    ATW_SR_BBPTYPE_MASK);
 
-	if (sc->sc_rftype > sizeof(type_strings)/sizeof(type_strings[0])) {
+	if (sc->sc_rftype >= sizeof(type_strings)/sizeof(type_strings[0])) {
 		printf("%s: unknown RF\n", sc->sc_dev.dv_xname);
 		return;
 	}
-	if (sc->sc_bbptype > sizeof(type_strings)/sizeof(type_strings[0])) {
+	if (sc->sc_bbptype >= sizeof(type_strings)/sizeof(type_strings[0])) {
 		printf("%s: unknown BBP\n", sc->sc_dev.dv_xname);
 		return;
 	}
@@ -1528,8 +1527,8 @@ atw_tune(struct atw_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 
 	chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
-	if (chan == IEEE80211_CHAN_ANY)
-		panic("%s: chan == IEEE80211_CHAN_ANY", __func__);
+	if (chan == 0 || chan == IEEE80211_CHAN_ANY)
+		return 0;
 
 	if (chan == sc->sc_cur_chan)
 		return 0;
@@ -2775,8 +2774,10 @@ atw_detach(struct atw_softc *sc)
 	    sizeof(struct atw_control_data));
 	bus_dmamem_free(sc->sc_dmat, &sc->sc_cdseg, sc->sc_cdnseg);
 
-	shutdownhook_disestablish(sc->sc_sdhook);
-	powerhook_disestablish(sc->sc_powerhook);
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc_powerhook);
 
 	if (sc->sc_srom)
 		free(sc->sc_srom, M_DEVBUF);
@@ -3219,7 +3220,7 @@ atw_rxintr(struct atw_softc *sc)
 			mb.m_len = tap->ar_ihdr.it_len;
 			mb.m_next = m;
 			mb.m_pkthdr.len += mb.m_len;
-			bpf_mtap(sc->sc_radiobpf, &mb);
+			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_IN);
  		}
 #endif /* NPBFILTER > 0 */
 
@@ -3498,7 +3499,7 @@ atw_start(struct ifnet *ifp)
 				break;
 #if NBPFILTER > 0
 			if (ifp->if_bpf != NULL)
-				bpf_mtap(ifp->if_bpf, m0);
+				bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif /* NBPFILTER > 0 */
 			if ((m0 = ieee80211_encap(ifp, m0, &ni)) == NULL) {
 				ifp->if_oerrors++;
@@ -3543,7 +3544,7 @@ atw_start(struct ifnet *ifp)
 		 * Pass the packet to any BPF listeners.
 		 */
 		if (ic->ic_rawbpf != NULL)
-			bpf_mtap(ic->ic_rawbpf, m0);
+			bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
 
 		if (sc->sc_radiobpf != NULL) {
 			struct mbuf mb;
@@ -3560,7 +3561,7 @@ atw_start(struct ifnet *ifp)
 			mb.m_len = tap->at_ihdr.it_len;
 			mb.m_next = m0;
 			mb.m_pkthdr.len += mb.m_len;
-			bpf_mtap(sc->sc_radiobpf, &mb);
+			bpf_mtap(sc->sc_radiobpf, &mb, BPF_DIRECTION_OUT);
 		}
 #endif /* NBPFILTER > 0 */
 

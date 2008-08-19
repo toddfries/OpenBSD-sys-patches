@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_fault.c,v 1.36 2005/11/29 05:37:14 tedu Exp $	*/
+/*	$OpenBSD: uvm_fault.c,v 1.41 2006/07/31 11:51:29 mickey Exp $	*/
 /*	$NetBSD: uvm_fault.c,v 1.51 2000/08/06 00:22:53 thorpej Exp $	*/
 
 /*
@@ -577,7 +577,7 @@ uvm_fault(orig_map, vaddr, fault_type, access_type)
 	struct vm_page *pages[UVM_MAXRANGE], *pg, *uobjpage;
 	UVMHIST_FUNC("uvm_fault"); UVMHIST_CALLED(maphist);
 
-	UVMHIST_LOG(maphist, "(map=0x%x, vaddr=0x%x, ft=%d, at=%d)",
+	UVMHIST_LOG(maphist, "(map=%p, vaddr=0x%lx, ft=%ld, at=%ld)",
 	      orig_map, vaddr, fault_type, access_type);
 
 	anon = NULL;
@@ -621,7 +621,7 @@ ReFault:
 	 */
 
 	if (uvmfault_lookup(&ufi, FALSE) == FALSE) {
-		UVMHIST_LOG(maphist, "<- no mapping @ 0x%x", vaddr, 0,0,0);
+		UVMHIST_LOG(maphist, "<- no mapping @ 0x%lx", vaddr, 0,0,0);
 		return (KERN_INVALID_ADDRESS);
 	}
 	/* locked: maps(read) */
@@ -632,7 +632,7 @@ ReFault:
 
 	if ((ufi.entry->protection & access_type) != access_type) {
 		UVMHIST_LOG(maphist,
-		    "<- protection failure (prot=0x%x, access=0x%x)",
+		    "<- protection failure (prot=0x%lx, access=0x%lx)",
 		    ufi.entry->protection, access_type, 0, 0);
 		uvmfault_unlockmaps(&ufi, FALSE);
 		return (KERN_PROTECTION_FAILURE);
@@ -746,9 +746,9 @@ ReFault:
 	}
 
 	/* locked: maps(read) */
-	UVMHIST_LOG(maphist, "  narrow=%d, back=%d, forw=%d, startva=0x%x",
+	UVMHIST_LOG(maphist, "  narrow=%ld, back=%ld, forw=%ld, startva=0x%lx",
 		    narrow, nback, nforw, startva);
-	UVMHIST_LOG(maphist, "  entry=0x%x, amap=0x%x, obj=0x%x", ufi.entry,
+	UVMHIST_LOG(maphist, "  entry=%p, amap=%p, obj=%p", ufi.entry,
 		    amap, uobj, 0);
 
 	/*
@@ -844,7 +844,7 @@ ReFault:
 			uvm_pageactivate(anon->u.an_page);	/* reactivate */
 			uvm_unlock_pageq();
 			UVMHIST_LOG(maphist,
-			    "  MAPPING: n anon: pm=0x%x, va=0x%x, pg=0x%x",
+			    "  MAPPING: n anon: pm=%p, va=0x%lx, pg=%p",
 			    ufi.orig_map->pmap, currva, anon->u.an_page, 0);
 			uvmexp.fltnamap++;
 
@@ -867,7 +867,7 @@ ReFault:
 
 	/* locked: maps(read), amap(if there) */
 	/* (shadowed == TRUE) if there is an anon at the faulting address */
-	UVMHIST_LOG(maphist, "  shadowed=%d, will_get=%d", shadowed, 
+	UVMHIST_LOG(maphist, "  shadowed=%ld, will_get=%ld", shadowed, 
 	    (uobj && shadowed == FALSE),0,0);
 
 	/*
@@ -958,7 +958,7 @@ ReFault:
 				if (lcv == centeridx) {
 					uobjpage = pages[lcv];
 					UVMHIST_LOG(maphist, "  got uobjpage "
-					    "(0x%x) with locked get", 
+					    "(%p) with locked get", 
 					    uobjpage, 0,0,0);
 					continue;
 				}
@@ -976,7 +976,7 @@ ReFault:
 				uvm_pageactivate(pages[lcv]);	/* reactivate */
 				uvm_unlock_pageq();
 				UVMHIST_LOG(maphist,
-				  "  MAPPING: n obj: pm=0x%x, va=0x%x, pg=0x%x",
+				  "  MAPPING: n obj: pm=%p, va=0x%lx, pg=%p",
 				  ufi.orig_map->pmap, currva, pages[lcv], 0);
 				uvmexp.fltnomap++;
 
@@ -1042,7 +1042,7 @@ ReFault:
 	 */
 
 	anon = anons[centeridx];
-	UVMHIST_LOG(maphist, "  case 1 fault: anon=0x%x", anon, 0,0,0);
+	UVMHIST_LOG(maphist, "  case 1 fault: anon=%p", anon, 0,0,0);
 	simple_lock(&anon->an_lock);
 
 	/* locked: maps(read), amap, anon */
@@ -1247,7 +1247,7 @@ ReFault:
 	 * under us between the unlock and the pmap_enter.
 	 */
 
-	UVMHIST_LOG(maphist, "  MAPPING: anon: pm=0x%x, va=0x%x, pg=0x%x",
+	UVMHIST_LOG(maphist, "  MAPPING: anon: pm=%p, va=0x%lx, pg=%p",
 	    ufi.orig_map->pmap, ufi.orig_rvaddr, pg, 0);
 	if (pmap_enter(ufi.orig_map->pmap, ufi.orig_rvaddr, VM_PAGE_TO_PHYS(pg),
 	    enter_prot, access_type | PMAP_CANFAIL | (wired ? PMAP_WIRED : 0))
@@ -1331,7 +1331,7 @@ Case2:
 		promote = (access_type & VM_PROT_WRITE) &&
 		     UVM_ET_ISCOPYONWRITE(ufi.entry);
 	}
-	UVMHIST_LOG(maphist, "  case 2 fault: promote=%d, zfill=%d",
+	UVMHIST_LOG(maphist, "  case 2 fault: promote=%ld, zfill=%ld",
 	    promote, (uobj == NULL), 0,0);
 
 	/*
@@ -1377,7 +1377,7 @@ Case2:
 				goto ReFault;
 			}
 
-			UVMHIST_LOG(maphist, "<- pgo_get failed (code %d)",
+			UVMHIST_LOG(maphist, "<- pgo_get failed (code %ld)",
 			    result, 0,0,0);
 			return (KERN_PROTECTION_FAILURE); /* XXX i/o error */
 		}
@@ -1665,7 +1665,7 @@ Case2:
 			uobj = NULL;
 
 			UVMHIST_LOG(maphist,
-			    "  promote uobjpage 0x%x to anon/page 0x%x/0x%x",
+			    "  promote uobjpage %p to anon/page %p/%p",
 			    uobjpage, anon, pg, 0);
 
 		} else {
@@ -1674,7 +1674,7 @@ Case2:
 			 * Page is zero'd and marked dirty by uvm_pagealloc()
 			 * above.
 			 */
-			UVMHIST_LOG(maphist,"  zero fill anon/page 0x%x/0%x",
+			UVMHIST_LOG(maphist,"  zero fill anon/page %p/%p",
 			    anon, pg, 0, 0);
 		}
 
@@ -1695,7 +1695,7 @@ Case2:
 	 */
 
 	UVMHIST_LOG(maphist,
-	    "  MAPPING: case2: pm=0x%x, va=0x%x, pg=0x%x, promote=%d",
+	    "  MAPPING: case2: pm=%p, va=0x%lx, pg=%p, promote=%ld",
 	    ufi.orig_map->pmap, ufi.orig_rvaddr, pg, promote);
 	if (pmap_enter(ufi.orig_map->pmap, ufi.orig_rvaddr, VM_PAGE_TO_PHYS(pg),
 	    enter_prot, access_type | PMAP_CANFAIL | (wired ? PMAP_WIRED : 0))
@@ -1864,16 +1864,13 @@ uvm_fault_unwire_locked(map, start, end)
 
 	for (va = start; va < end ; va += PAGE_SIZE) {
 		if (pmap_extract(pmap, va, &pa) == FALSE)
-			panic("uvm_fault_unwire_locked: unwiring "
-			    "non-wired memory");
+			continue;
 
 		/*
-		 * make sure the current entry is for the address we're
-		 * dealing with.  if not, grab the next entry.
+		 * find the map entry for the current address.
 		 */
-
 		KASSERT(va >= entry->start);
-		if (va >= entry->end) {
+		while (va >= entry->end) {
 			KASSERT(entry->next != &map->header &&
 				entry->next->start <= entry->end);
 			entry = entry->next;

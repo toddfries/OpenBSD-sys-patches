@@ -1,4 +1,4 @@
-/* $OpenBSD: lemac.c,v 1.8 2005/11/14 14:46:41 mickey Exp $ */
+/* $OpenBSD: lemac.c,v 1.10 2006/04/16 16:32:08 miod Exp $ */
 /* $NetBSD: lemac.c,v 1.20 2001/06/13 10:46:02 wiz Exp $ */
 
 /*-
@@ -310,7 +310,7 @@ lemac_input(struct lemac_softc *sc, bus_size_t offset, size_t length)
 #if NBPFILTER > 0
 	if (sc->sc_if.if_bpf != NULL) {
 		m->m_pkthdr.len = m->m_len = length;
-		bpf_mtap(sc->sc_if.if_bpf, m);
+		bpf_mtap(sc->sc_if.if_bpf, m, BPF_DIRECTION_IN);
 	}
 
 	/*
@@ -413,14 +413,22 @@ lemac_read_macaddr(unsigned char *hwaddr, const bus_space_tag_t iot,
 	if (hwaddr[0] & 1)
 		return (-1);
 
+#if BYTE_ORDER == LITTLE_ENDIAN
 	cksum = *(u_short *)&hwaddr[0];
+#else
+	cksum = ((u_short)hwaddr[1] << 8) | (u_short)hwaddr[0];
+#endif
 
 	hwaddr[2] = bus_space_read_1(iot, ioh, ioreg);
 	hwaddr[3] = bus_space_read_1(iot, ioh, ioreg);
 	cksum *= 2;
 	if (cksum > 65535)
 		cksum -= 65535;
+#if BYTE_ORDER == LITTLE_ENDIAN
 	cksum += *(u_short *)&hwaddr[2];
+#else
+	cksum += ((u_short)hwaddr[3] << 8) | (u_short)hwaddr[2];
+#endif
 	if (cksum > 65535)
 		cksum -= 65535;
 
@@ -429,7 +437,11 @@ lemac_read_macaddr(unsigned char *hwaddr, const bus_space_tag_t iot,
 	cksum *= 2;
 	if (cksum > 65535)
 		cksum -= 65535;
+#if BYTE_ORDER == LITTLE_ENDIAN
 	cksum += *(u_short *)&hwaddr[4];
+#else
+	cksum += ((u_short)hwaddr[5] << 8) | (u_short)hwaddr[4];
+#endif
 	if (cksum >= 65535)
 		cksum -= 65535;
 
@@ -769,7 +781,7 @@ lemac_ifstart(struct ifnet *ifp)
 		LEMAC_OUTB(sc, LEMAC_REG_TQ, tx_pg);
 #if NBPFILTER > 0
 		if (sc->sc_if.if_bpf != NULL)
-			bpf_mtap(sc->sc_if.if_bpf, m);
+			bpf_mtap(sc->sc_if.if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 		m_freem(m);			/* free the mbuf */
 	}

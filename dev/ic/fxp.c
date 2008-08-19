@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.75 2006/01/05 21:22:24 brad Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.79 2006/07/01 21:48:08 brad Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
  */
 
 #include "bpfilter.h"
-#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -344,7 +343,7 @@ fxp_power(why, arg)
  * Do generic parts of attach.
  */
 int
-fxp_attach_common(sc, intrstr)
+fxp_attach(sc, intrstr)
 	struct fxp_softc *sc;
 	const char *intrstr;
 {
@@ -579,8 +578,10 @@ fxp_detach(sc)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	shutdownhook_disestablish(sc->sc_sdhook);
-	powerhook_disestablish(sc->sc_powerhook);
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc_powerhook);
 
 	return (0);
 }
@@ -788,7 +789,7 @@ fxp_start(ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0);
+			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
 		FXP_MBUF_SYNC(sc, txs->tx_map, BUS_DMASYNC_PREWRITE);
@@ -974,7 +975,8 @@ rcvloop:
 					    total_len;
 #if NBPFILTER > 0
 					if (ifp->if_bpf)
-						bpf_mtap(ifp->if_bpf, m);
+						bpf_mtap(ifp->if_bpf, m,
+						    BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
 					ether_input_mbuf(ifp, m);
 				}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscon.c,v 1.23 2005/07/18 02:43:25 fgsch Exp $ */
+/*	$OpenBSD: syscon.c,v 1.26 2006/04/19 19:41:24 miod Exp $ */
 /*
  * Copyright (c) 1999 Steve Murphree, Jr.
  * All rights reserved.
@@ -47,7 +47,9 @@ struct sysconsoftc {
 	struct intrhand sc_abih;	/* `abort' switch */
 	struct intrhand sc_acih;	/* `ac fail' */
 	struct intrhand sc_sfih;	/* `sys fail' */
+#if 0
 	struct intrhand sc_m188ih;	/* `m188 interrupt' */
+#endif
 };
 
 void	sysconattach(struct device *, struct device *, void *);
@@ -130,6 +132,11 @@ sysconattach(parent, self, args)
 	printf("\n");
 
 	/*
+	 * Clear SYSFAIL if lit.
+	 */
+	*(volatile u_int32_t *)MVME188_UCSR |= UCSR_DRVSFBIT;
+
+	/*
 	 * pseudo driver, abort interrupt handler
 	 */
 	sc->sc_abih.ih_fn = sysconabort;
@@ -147,15 +154,19 @@ sysconattach(parent, self, args)
 	sc->sc_sfih.ih_wantframe = 1;
 	sc->sc_sfih.ih_ipl = IPL_ABORT;
 
+#if 0
 	sc->sc_m188ih.ih_fn = sysconm188;
 	sc->sc_m188ih.ih_arg = 0;
 	sc->sc_m188ih.ih_wantframe = 1;
 	sc->sc_m188ih.ih_ipl = IPL_ABORT;
+#endif
 
 	sysconintr_establish(SYSCV_ABRT, &sc->sc_abih, "abort");
 	sysconintr_establish(SYSCV_ACF, &sc->sc_acih, "acfail");
 	sysconintr_establish(SYSCV_SYSF, &sc->sc_sfih, "sysfail");
+#if 0
 	intr_establish(M188_IVEC, &sc->sc_m188ih, self->dv_xname);
+#endif
 
 	config_search(syscon_scan, self, args);
 }
@@ -175,8 +186,8 @@ int
 sysconabort(eframe)
 	void *eframe;
 {
-	ISR_RESET_NMI;
-	nmihand((struct frame *)eframe);
+	*(volatile u_int32_t *)MVME188_CLRINT = ISTATE_ABORT;
+	nmihand(eframe);
 	return (1);
 }
 
@@ -184,8 +195,8 @@ int
 sysconsysfail(eframe)
 	void *eframe;
 {
-	ISR_RESET_SYSFAIL;
-	nmihand((struct frame *)eframe);
+	*(volatile u_int32_t *)MVME188_CLRINT = ISTATE_SYSFAIL;
+	printf("WARNING: SYSFAIL* ASSERTED\n");
 	return (1);
 }
 
@@ -193,15 +204,18 @@ int
 sysconacfail(eframe)
 	void *eframe;
 {
-	ISR_RESET_ACFAIL;
-	nmihand((struct frame *)eframe);
+	*(volatile u_int32_t *)MVME188_CLRINT = ISTATE_ACFAIL;
+	printf("WARNING: ACFAIL* ASSERTED\n");
 	return (1);
 }
 
+#if 0
 int
 sysconm188(eframe)
 	void *eframe;
 {
-	printf("MVME188 interrupting?\n");
+	/* shouldn't happen! */
+	printf("MVME188: self-inflicted interrupt\n");
 	return (1);
 }
+#endif

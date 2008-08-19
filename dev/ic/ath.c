@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.46.2.1 2006/05/09 18:41:17 brad Exp $  */
+/*      $OpenBSD: ath.c,v 1.52 2006/06/23 21:53:01 reyk Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -172,7 +172,6 @@ ath_activate(struct device *self, enum devact act)
 	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
 		break;
 	case DVACT_DEACTIVATE:
 		if_deactivate(&sc->sc_ic.ic_if);
@@ -380,6 +379,7 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	ic->ic_newstate = ath_newstate;
 	sc->sc_recv_mgmt = ic->ic_recv_mgmt;
 	ic->ic_recv_mgmt = ath_recv_mgmt;
+	ic->ic_max_rssi = AR5K_MAX_RSSI;
 	bcopy(etherbroadcastaddr, sc->sc_broadcast_addr, IEEE80211_ADDR_LEN);
 
 	/* complete initialization */
@@ -459,8 +459,10 @@ ath_detach(struct ath_softc *sc, int flags)
 	if_detach(ifp);
 
 	splx(s);
-	powerhook_disestablish(sc->sc_powerhook);
-	shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc_powerhook);
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
 #ifdef __FreeBSD__
 	ATH_TXBUF_LOCK_DESTROY(sc);
 	ATH_TXQ_LOCK_DESTROY(sc);
@@ -937,7 +939,7 @@ ath_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m);
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 			/*
@@ -2000,8 +2002,9 @@ ath_rx_proc(void *arg, int npending)
 			sc->sc_rxtap.wr_rate =
 			    sc->sc_hwmap[ds->ds_rxstat.rs_rate] &
 			    IEEE80211_RATE_VAL;
-			sc->sc_rxtap.wr_antsignal = ds->ds_rxstat.rs_rssi;
 			sc->sc_rxtap.wr_antenna = ds->ds_rxstat.rs_antenna;
+			sc->sc_rxtap.wr_rssi = ds->ds_rxstat.rs_rssi;
+			sc->sc_rxtap.wr_max_rssi = ic->ic_max_rssi;
 
 			M_DUP_PKTHDR(&mb, m);
 			mb.m_data = (caddr_t)&sc->sc_rxtap;
@@ -2009,7 +2012,7 @@ ath_rx_proc(void *arg, int npending)
 			mb.m_next = m;
 			mb.m_pkthdr.len += mb.m_len;
 
-			bpf_mtap(sc->sc_drvbpf, &mb);
+			bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 		}
 #endif
 
@@ -2379,7 +2382,7 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 
 #if NBPFILTER > 0
 	if (ic->ic_rawbpf)
-		bpf_mtap(ic->ic_rawbpf, m0);
+		bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
 
 	if (sc->sc_drvbpf) {
 		struct mbuf mb;
@@ -2400,7 +2403,7 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 		mb.m_len = sc->sc_txtap_len;
 		mb.m_next = m0;
 		mb.m_pkthdr.len += mb.m_len;
-		bpf_mtap(sc->sc_drvbpf, &mb);
+		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_OUT);
 	}
 #endif
 
@@ -2731,7 +2734,7 @@ ath_chan_set(struct ath_softc *sc, struct ieee80211_channel *chan)
 		 * Re-enable rx framework.
 		 */
 		if (ath_startrecv(sc) != 0) {
-			printf("%s: ath_chan_set: unable to restart recv ",
+			printf("%s: ath_chan_set: unable to restart recv "
 			    "logic\n", ifp->if_xname);
 			return EIO;
 		}

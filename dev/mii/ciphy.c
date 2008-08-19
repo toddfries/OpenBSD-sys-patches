@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciphy.c,v 1.11 2006/02/28 12:37:15 jsg Exp $	*/
+/*	$OpenBSD: ciphy.c,v 1.13 2006/03/10 09:53:16 jsg Exp $	*/
 /*	$FreeBSD: ciphy.c,v 1.1 2004/09/10 20:57:45 wpaul Exp $	*/
 /*
  * Copyright (c) 2004

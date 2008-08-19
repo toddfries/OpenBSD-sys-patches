@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.226 2006/02/24 20:59:04 kettenis Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.254 2006/09/16 00:46:56 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -167,6 +167,7 @@ void sata_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void sata_setup_channel(struct channel_softc *);
 
 void piix_chip_map(struct pciide_softc *, struct pci_attach_args *);
+void piixsata_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void piix_setup_channel(struct channel_softc *);
 void piix3_4_setup_channel(struct channel_softc *);
 
@@ -239,6 +240,9 @@ int  pdc203xx_pci_intr(void *);
 void pdc203xx_irqack(struct channel_softc *);
 void pdc203xx_dma_start(void *,int ,int);
 int  pdc203xx_dma_finish(void *, int, int, int);
+int  pdc205xx_pci_intr(void *);
+void pdc205xx_do_reset(struct channel_softc *);
+void pdc205xx_drv_probe(struct channel_softc *);
 
 void opti_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void opti_setup_channel(struct channel_softc *);
@@ -389,11 +393,11 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	},
 	{ PCI_PRODUCT_INTEL_82801EB_SATA, /* Intel 82801EB (ICH5) SATA */
 	  0,
-	  piix_chip_map
+	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801ER_SATA, /* Intel 82801ER (ICH5R) SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
-	  piix_chip_map
+	  piixsata_chip_map
 	},
 #ifdef notyet
 	{ PCI_PRODUCT_INTEL_31244,	 /* Intel 31244 SATA */
@@ -407,9 +411,13 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	},
 	{ PCI_PRODUCT_INTEL_6300ESB_SATA, /* Intel 6300ESB SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
-	  piix_chip_map
+	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6300ESB_SATA2, /* Intel 6300ESB SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_6321ESB_IDE, /* Intel 6321ESB IDE */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piix_chip_map
 	},
@@ -419,23 +427,75 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	},
 	{ PCI_PRODUCT_INTEL_82801FBM_SATA,  /* Intel 82801FBM (ICH6M) SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
-	  piix_chip_map
+	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801FB_SATA, /* Intel 82801FB (ICH6) SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
-	  piix_chip_map
+	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801FR_SATA, /* Intel 82801FR (ICH6R) SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
-	  piix_chip_map
+	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_82801GB_IDE,  /* Intel 82801GB (ICH7) IDE */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  piix_chip_map
 	},
-	{ PCI_PRODUCT_INTEL_82801GB_SATA_1, /* Intel 82801GB (ICH7) SATA */
+	{ PCI_PRODUCT_INTEL_82801GB_SATA, /* Intel 82801GB (ICH7) SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
-	  piix_chip_map
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801GR_SATA, /* Intel 82801GR (ICH7R) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801GR_AHCI, /* Intel 82801GR (ICH7R) AHCI */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801GBM_SATA, /* Intel 82801GBM (ICH7M) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801GBM_AHCI, /* Intel 82801GBM (ICH7M) AHCI */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801GHM_RAID, /* Intel 82801GHM (ICH7-M DH) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801H_SATA_1_6P, /* Intel 82801H (ICH8) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801H_AHCI, /* Intel 82801H (ICH8) AHCI */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801H_RAID, /* Intel 82801H (ICH8) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801H_SATA_1_4P, /* Intel 82801H (ICH8) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801H_SATA_2, /* Intel 82801H (ICH8) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801HBM_SATA_1, /* Intel 82801HBM (ICH8M) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_82801HBM_SATA_2, /* Intel 82801HBM (ICH8M) SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_6321ESB_SATA, /* Intel 6321ESB SATA */
+	  0,
+	  piixsata_chip_map
 	}
 };
 
@@ -537,6 +597,10 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  sata_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VT6421_SATA, /* VIA VT6421 SATA */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_VIATECH_VT8237A_SATA, /* VIA VT8237A SATA */
 	  IDE_PCI_CLASS_OVERRIDE,
 	  sata_chip_map
 	},
@@ -689,6 +753,46 @@ const struct pciide_product_desc pciide_promise_products[] =  {
 	{ PCI_PRODUCT_PROMISE_PDC20379,
 	  IDE_PCI_CLASS_OVERRIDE,
 	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC40518,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC40519,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC40718,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC40719,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC40779,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC20571,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC20575,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC20579,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC20771,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
+	},
+	{ PCI_PRODUCT_PROMISE_PDC20775,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  pdcsata_chip_map,
 	}
 };
 
@@ -737,7 +841,7 @@ const struct pciide_product_desc pciide_serverworks_products[] =  {
 	  serverworks_chip_map,
 	},
 	{ PCI_PRODUCT_RCC_K2_SATA,
-	  0,
+	  IDE_PCI_CLASS_OVERRIDE,
 	  svwsata_chip_map,
 	},
 	{ PCI_PRODUCT_RCC_FRODO4_SATA,
@@ -749,6 +853,10 @@ const struct pciide_product_desc pciide_serverworks_products[] =  {
 	  svwsata_chip_map,
 	},
 	{ PCI_PRODUCT_RCC_HT_1000_SATA,
+	  0,
+	  svwsata_chip_map,
+	},
+	{ PCI_PRODUCT_RCC_SATA,
 	  0,
 	  svwsata_chip_map,
 	}
@@ -788,6 +896,14 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	  nforce_chip_map
 	},
 	{ PCI_PRODUCT_NVIDIA_MCP55_IDE,
+	  0,
+	  nforce_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP61_IDE,
+	  0,
+	  nforce_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP65_IDE,
 	  0,
 	  nforce_chip_map
 	},
@@ -834,10 +950,42 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	{ PCI_PRODUCT_NVIDIA_MCP55_SATA2,
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP61_SATA,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP61_SATA2,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP61_SATA3,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA2,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA3,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA4,
+	  0,
+	  sata_chip_map
 	}
 };
 
 const struct pciide_product_desc pciide_ite_products[] = {
+	{ PCI_PRODUCT_ITEXPRESS_IT8211F,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  ite_chip_map
+	},
 	{ PCI_PRODUCT_ITEXPRESS_IT8212F,
 	  IDE_PCI_CLASS_OVERRIDE,
 	  ite_chip_map
@@ -856,6 +1004,14 @@ const struct pciide_product_desc pciide_ati_products[] = {
 	{ PCI_PRODUCT_ATI_IXP_IDE_400,
 	  0,
 	  ixp_chip_map
+	},
+	{ PCI_PRODUCT_ATI_IXP_IDE_600,
+	  0,
+	  ixp_chip_map
+	},
+	{ PCI_PRODUCT_ATI_IXP_SATA_300,
+	  IDE_PCI_CLASS_OVERRIDE,
+	  sii3112_chip_map
 	},
 	{ PCI_PRODUCT_ATI_IXP_SATA_400_1,
 	  IDE_PCI_CLASS_OVERRIDE,
@@ -924,7 +1080,6 @@ struct cfdriver pciide_cd = {
 	NULL, "pciide", DV_DULL
 };
 
-int	pciide_chipen(struct pciide_softc *, struct pci_attach_args *);
 int	pciide_mapregs_compat( struct pci_attach_args *,
 	    struct pciide_channel *, int, bus_size_t *, bus_size_t *);
 int	pciide_mapregs_native(struct pci_attach_args *,
@@ -987,22 +1142,36 @@ pciide_match(struct device *parent, void *match, void *aux)
 		return (0);
 
 	/*
-	 * Check the ID register to see that it's a PCI IDE controller.
-	 * If it is, we assume that we can deal with it; it _should_
-	 * work in a standardized way...
-	 */
-	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_MASS_STORAGE &&
-	    PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_MASS_STORAGE_IDE) {
-		return (1);
-	}
-
-	/*
  	 * Some controllers (e.g. promise Ultra-33) don't claim to be PCI IDE
 	 * controllers. Let see if we can deal with it anyway.
 	 */
 	pp = pciide_lookup_product(pa->pa_id);
-	if (pp  && (pp->ide_flags & IDE_PCI_CLASS_OVERRIDE)) {
+	if (pp  && (pp->ide_flags & IDE_PCI_CLASS_OVERRIDE))
 		return (1);
+
+	/*
+	 * Check the ID register to see that it's a PCI IDE controller.
+	 * If it is, we assume that we can deal with it; it _should_
+	 * work in a standardized way...
+	 */
+	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_MASS_STORAGE) {
+		switch (PCI_SUBCLASS(pa->pa_class)) {
+		case PCI_SUBCLASS_MASS_STORAGE_IDE:
+			return (1);
+
+		/*
+		 * We only match these if we know they have
+		 * a match, as we may not support native interfaces
+		 * on them.
+		 */
+		case PCI_SUBCLASS_MASS_STORAGE_SATA:
+		case PCI_SUBCLASS_MASS_STORAGE_RAID:
+			if (pp)
+				return (1);
+			else
+				return (0);
+			break;
+		}
 	}
 
 	return (0);
@@ -1042,33 +1211,22 @@ pciide_attach(struct device *parent, struct device *self, void *aux)
 	    DEBUG_PROBE);
 }
 
-/* tell whether the chip is enabled or not */
-int
-pciide_chipen(struct pciide_softc *sc, struct pci_attach_args *pa)
-{
-	pcireg_t csr;
-
-	csr = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG);
-	if ((csr & PCI_COMMAND_IO_ENABLE) == 0 ) {
-		printf("\n%s: device disabled\n",
-		    sc->sc_wdcdev.sc_dev.dv_xname);
-		return (0);
-	}
-
-	return (1);
-}
-
 int
 pciide_mapregs_compat(struct pci_attach_args *pa, struct pciide_channel *cp,
     int compatchan, bus_size_t *cmdsizep, bus_size_t *ctlsizep)
 {
 	struct pciide_softc *sc = (struct pciide_softc *)cp->wdc_channel.wdc;
 	struct channel_softc *wdc_cp = &cp->wdc_channel;
+	pcireg_t csr;
 
 	cp->compat = 1;
 	*cmdsizep = PCIIDE_COMPAT_CMD_SIZE;
 	*ctlsizep = PCIIDE_COMPAT_CTL_SIZE;
 
+	csr = pci_conf_read(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(sc->sc_pc, sc->sc_tag, PCI_COMMAND_STATUS_REG,
+	    csr | PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MASTER_ENABLE);
+	
 	wdc_cp->cmd_iot = pa->pa_iot;
 
 	if (bus_space_map(wdc_cp->cmd_iot, PCIIDE_COMPAT_CMD_BASE(compatchan),
@@ -1747,9 +1905,6 @@ default_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	bus_size_t cmdsize, ctlsize;
 	char *failreason;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	if (interface & PCIIDE_INTERFACE_BUS_MASTER_DMA) {
 		printf(": DMA");
 		if (sc->sc_pp == &default_product_desc &&
@@ -1882,9 +2037,6 @@ sata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	int channel;
 	bus_size_t cmdsize, ctlsize;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	if (interface == 0) {
 		WDCDEBUG_PRINT(("sata_chip_map interface == 0\n"),
 		    DEBUG_PROBE);
@@ -1971,9 +2123,6 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 
 	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 	sc->sc_wdcdev.cap |= WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
@@ -1982,6 +2131,8 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		sc->sc_wdcdev.cap |= WDC_CAPABILITY_DMA | WDC_CAPABILITY_IRQACK;
 		sc->sc_wdcdev.irqack = pciide_irqack;
 		switch (sc->sc_pp->ide_product) {
+		case PCI_PRODUCT_INTEL_6300ESB_IDE:
+		case PCI_PRODUCT_INTEL_6321ESB_IDE:
 		case PCI_PRODUCT_INTEL_82371AB_IDE:
 		case PCI_PRODUCT_INTEL_82372FB_IDE:
 		case PCI_PRODUCT_INTEL_82440MX_IDE:
@@ -1996,17 +2147,8 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		case PCI_PRODUCT_INTEL_82801DBL_IDE:
 		case PCI_PRODUCT_INTEL_82801DBM_IDE:
 		case PCI_PRODUCT_INTEL_82801EB_IDE:
-		case PCI_PRODUCT_INTEL_82801EB_SATA:
-		case PCI_PRODUCT_INTEL_82801ER_SATA:
-		case PCI_PRODUCT_INTEL_6300ESB_IDE:
-		case PCI_PRODUCT_INTEL_6300ESB_SATA:
-		case PCI_PRODUCT_INTEL_6300ESB_SATA2:
 		case PCI_PRODUCT_INTEL_82801FB_IDE:
-		case PCI_PRODUCT_INTEL_82801FBM_SATA:
-		case PCI_PRODUCT_INTEL_82801FB_SATA:
-		case PCI_PRODUCT_INTEL_82801FR_SATA:
 		case PCI_PRODUCT_INTEL_82801GB_IDE:
-		case PCI_PRODUCT_INTEL_82801GB_SATA_1:
 			sc->sc_wdcdev.cap |= WDC_CAPABILITY_UDMA;
 			break;
 		}
@@ -2018,6 +2160,8 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	case PCI_PRODUCT_INTEL_82372FB_IDE:
 		sc->sc_wdcdev.UDMA_cap = 4;
 		break;
+	case PCI_PRODUCT_INTEL_6300ESB_IDE:
+	case PCI_PRODUCT_INTEL_6321ESB_IDE:
 	case PCI_PRODUCT_INTEL_82801BAM_IDE:
 	case PCI_PRODUCT_INTEL_82801BA_IDE:
 	case PCI_PRODUCT_INTEL_82801CAM_IDE:
@@ -2026,33 +2170,16 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	case PCI_PRODUCT_INTEL_82801DBL_IDE:
 	case PCI_PRODUCT_INTEL_82801DBM_IDE:
 	case PCI_PRODUCT_INTEL_82801EB_IDE:
-	case PCI_PRODUCT_INTEL_82801EB_SATA:
-	case PCI_PRODUCT_INTEL_82801ER_SATA:
-	case PCI_PRODUCT_INTEL_6300ESB_IDE:
-	case PCI_PRODUCT_INTEL_6300ESB_SATA:
-	case PCI_PRODUCT_INTEL_6300ESB_SATA2:
 	case PCI_PRODUCT_INTEL_82801FB_IDE:
-	case PCI_PRODUCT_INTEL_82801FBM_SATA:
-	case PCI_PRODUCT_INTEL_82801FB_SATA:
-	case PCI_PRODUCT_INTEL_82801FR_SATA:
 	case PCI_PRODUCT_INTEL_82801GB_IDE:
-	case PCI_PRODUCT_INTEL_82801GB_SATA_1:
 		sc->sc_wdcdev.UDMA_cap = 5;
 		break;
 	default:
 		sc->sc_wdcdev.UDMA_cap = 2;
 		break;
 	}
-	if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801ER_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_SATA2 ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FR_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_SATA_1) {
-		sc->sc_wdcdev.cap |= WDC_CAPABILITY_SATA;
-		sc->sc_wdcdev.set_modes = sata_setup_channel;
-	} else if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82371FB_IDE ||
+
+	if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82371FB_IDE ||
 		   sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82371FB_ISA) {
 		sc->sc_wdcdev.set_modes = piix_setup_channel;
 	} else {
@@ -2062,15 +2189,6 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	sc->sc_wdcdev.nchannels = PCIIDE_NUM_CHANNELS;
 
 	pciide_print_channels(sc->sc_wdcdev.nchannels, interface);
-
-	if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801ER_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_SATA2 ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FR_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_SATA_1)
-		goto chansetup;
 
 	WDCDEBUG_PRINT(("piix_setup_chip: old idetim=0x%x",
 	    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_IDETIM)),
@@ -2085,7 +2203,9 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_UDMAREG)),
 			    DEBUG_PROBE);
 		}
-		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
+		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6321ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BA_IDE ||
@@ -2095,9 +2215,7 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBL_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FBM_SATA ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82372FB_IDE) {
 			WDCDEBUG_PRINT((", IDE_CONTROL 0x%x",
@@ -2108,26 +2226,8 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	}
 	WDCDEBUG_PRINT(("\n"), DEBUG_PROBE);
 
-chansetup:
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
-
-		/* SATA setup */
-		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_SATA ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801ER_SATA ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_SATA ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FR_SATA ||
-		    sc->sc_pp->ide_product ==
-		    PCI_PRODUCT_INTEL_82801GB_SATA_1) {
-			if (pciide_chansetup(sc, channel, interface) == 0)
-				continue;
-			pciide_mapchan(pa, cp, interface, &cmdsize, &ctlsize,
-			    pciide_pci_intr);
-			if (cp->hw_ok == 0)
-				continue;
-			sc->sc_wdcdev.set_modes(&cp->wdc_channel);
-			continue;
-		}
 
 		/* PIIX is compat-only */
 		if (pciide_chansetup(sc, channel, 0) == 0)
@@ -2160,15 +2260,6 @@ next:
 			pciide_unmap_compat_intr(pa, cp, channel, 0);
 	}
 
-	if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801ER_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_SATA2 ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FR_SATA ||
-	    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_SATA_1)
-		return;
-
 	WDCDEBUG_PRINT(("piix_setup_chip: idetim=0x%x",
 	    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_IDETIM)),
 	    DEBUG_PROBE);
@@ -2182,7 +2273,9 @@ next:
 			    pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_UDMAREG)),
 			    DEBUG_PROBE);
 		}
-		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
+		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6321ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BA_IDE ||
@@ -2192,9 +2285,7 @@ next:
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBL_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FBM_SATA ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82372FB_IDE) {
 			WDCDEBUG_PRINT((", IDE_CONTROL 0x%x",
@@ -2203,6 +2294,133 @@ next:
 		}
 	}
 	WDCDEBUG_PRINT(("\n"), DEBUG_PROBE);
+}
+
+void
+piixsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
+{
+	struct pciide_channel *cp;
+	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
+	int channel;
+	bus_size_t cmdsize, ctlsize;
+	u_int8_t reg, ich = 0;
+
+	printf(": DMA");
+	pciide_mapreg_dma(sc, pa);
+
+	if (sc->sc_dma_ok) {
+		sc->sc_wdcdev.cap |= WDC_CAPABILITY_UDMA |
+		    WDC_CAPABILITY_DMA | WDC_CAPABILITY_IRQACK;
+		sc->sc_wdcdev.irqack = pciide_irqack;
+		sc->sc_wdcdev.DMA_cap = 2;
+		sc->sc_wdcdev.UDMA_cap = 6;
+	}
+	sc->sc_wdcdev.PIO_cap = 4;
+
+	sc->sc_wdcdev.channels = sc->wdc_chanarray;
+	sc->sc_wdcdev.nchannels = PCIIDE_NUM_CHANNELS;
+	sc->sc_wdcdev.cap |= WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
+	    WDC_CAPABILITY_MODE | WDC_CAPABILITY_SATA;
+	sc->sc_wdcdev.set_modes = sata_setup_channel;
+
+	switch(sc->sc_pp->ide_product) {
+	case PCI_PRODUCT_INTEL_6300ESB_SATA:
+	case PCI_PRODUCT_INTEL_6300ESB_SATA2:
+	case PCI_PRODUCT_INTEL_82801EB_SATA:
+	case PCI_PRODUCT_INTEL_82801ER_SATA:
+		ich = 5;
+		break;
+	case PCI_PRODUCT_INTEL_82801FB_SATA:
+	case PCI_PRODUCT_INTEL_82801FR_SATA:
+	case PCI_PRODUCT_INTEL_82801FBM_SATA:
+		ich = 6;
+		break;
+	case PCI_PRODUCT_INTEL_82801GB_SATA:
+	case PCI_PRODUCT_INTEL_82801GR_SATA:
+	case PCI_PRODUCT_INTEL_82801GR_AHCI:
+	case PCI_PRODUCT_INTEL_82801GBM_SATA:
+	case PCI_PRODUCT_INTEL_82801GBM_AHCI:
+	case PCI_PRODUCT_INTEL_82801GHM_RAID:
+		ich = 7;
+		break;
+	case PCI_PRODUCT_INTEL_82801H_SATA_1_6P:
+	case PCI_PRODUCT_INTEL_82801H_AHCI:
+	case PCI_PRODUCT_INTEL_82801H_RAID:
+	case PCI_PRODUCT_INTEL_82801H_SATA_1_4P:
+	case PCI_PRODUCT_INTEL_82801H_SATA_2:
+	case PCI_PRODUCT_INTEL_82801HBM_SATA_1:
+	case PCI_PRODUCT_INTEL_82801HBM_SATA_2:
+	case PCI_PRODUCT_INTEL_6321ESB_SATA:
+	default:
+		ich = 8;
+		break;
+	}
+
+	/*
+	 * Put the SATA portion of controllers that don't operate in combined
+	 * mode into native PCI modes so the maximum number of devices can be
+	 * used.  Intel calls this "enhanced mode"
+	 */
+	if (ich == 5) {
+		reg = pciide_pci_read(sc->sc_pc, sc->sc_tag, ICH5_SATA_MAP);
+		if ((reg & ICH5_SATA_MAP_COMBINED) == 0) {
+			reg = pciide_pci_read(pa->pa_pc, pa->pa_tag,
+			    ICH5_SATA_PI);
+			reg |= ICH5_SATA_PI_PRI_NATIVE |
+			    ICH5_SATA_PI_SEC_NATIVE;
+			pciide_pci_write(pa->pa_pc, pa->pa_tag,
+			    ICH5_SATA_PI, reg);
+			interface |= PCIIDE_INTERFACE_PCI(0) |
+			    PCIIDE_INTERFACE_PCI(1);
+		}
+	} else {
+		reg = pciide_pci_read(sc->sc_pc, sc->sc_tag, ICH5_SATA_MAP) &
+		    ICH6_SATA_MAP_CMB_MASK;
+		if (reg != ICH6_SATA_MAP_CMB_PRI &&
+		    reg != ICH6_SATA_MAP_CMB_SEC) {
+			reg = pciide_pci_read(pa->pa_pc, pa->pa_tag,
+			    ICH5_SATA_PI);
+			reg |= ICH5_SATA_PI_PRI_NATIVE |
+			    ICH5_SATA_PI_SEC_NATIVE;
+
+			pciide_pci_write(pa->pa_pc, pa->pa_tag,
+			    ICH5_SATA_PI, reg);
+			interface |= PCIIDE_INTERFACE_PCI(0) |
+			    PCIIDE_INTERFACE_PCI(1);
+
+			/*
+			 * Ask for SATA IDE Mode, we don't need to do this
+			 * for the combined mode case as combined mode is
+			 * only allowed in IDE Mode
+			 */
+			if (ich >= 7) {
+				reg = pciide_pci_read(sc->sc_pc, sc->sc_tag,
+				    ICH5_SATA_MAP) & ~ICH7_SATA_MAP_SMS_MASK;
+				pciide_pci_write(pa->pa_pc, pa->pa_tag,
+				    ICH5_SATA_MAP, reg);
+			}
+		}
+	}
+
+	pciide_print_channels(sc->sc_wdcdev.nchannels, interface);
+
+	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
+		cp = &sc->pciide_channels[channel];
+		if (pciide_chansetup(sc, channel, interface) == 0)
+			continue;
+
+		pciide_map_compat_intr(pa, cp, channel, interface);
+		if (cp->hw_ok == 0)
+			continue;
+
+		pciide_mapchan(pa, cp, interface, &cmdsize, &ctlsize,
+		    pciide_pci_intr);
+		if (cp->hw_ok != 0)
+			sc->sc_wdcdev.set_modes(&cp->wdc_channel);
+
+		if (cp->hw_ok == 0)
+			pciide_unmap_compat_intr(pa, cp, channel, interface);
+	}
 }
 
 void
@@ -2352,7 +2570,9 @@ piix3_4_setup_channel(struct channel_softc *chp)
 		    (drvp->drive_flags & DRIVE_UDMA) == 0))
 			goto pio;
 
-		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
+		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6321ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AA_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801AB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BA_IDE ||
@@ -2362,14 +2582,14 @@ piix3_4_setup_channel(struct channel_softc *chp)
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBL_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FBM_SATA ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82372FB_IDE) {
 			ideconf |= PIIX_CONFIG_PINGPONG;
 		}
-		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
+		if (sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6321ESB_IDE ||
+		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BAM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801BA_IDE||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CAM_IDE||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801CA_IDE ||
@@ -2377,9 +2597,7 @@ piix3_4_setup_channel(struct channel_softc *chp)
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBL_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801DBM_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801EB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_6300ESB_IDE ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FB_IDE ||
-		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801FBM_SATA ||
 		    sc->sc_pp->ide_product == PCI_PRODUCT_INTEL_82801GB_IDE) {
 			/* setup Ultra/100 */
 			if (drvp->UDMA_mode > 2 &&
@@ -2550,9 +2768,6 @@ amd756_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	int channel;
 	pcireg_t chanenable;
 	bus_size_t cmdsize, ctlsize;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
@@ -2736,8 +2951,8 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	int channel;
 	u_int32_t ideconf;
 	bus_size_t cmdsize, ctlsize;
-	pcitag_t pcib_tag;
-	pcireg_t pcib_id, pcib_class;
+	pcitag_t tag;
+	pcireg_t id, class;
 
 	/*
 	 * Fake interface since VT6410 is claimed to be a ``RAID'' device.
@@ -2749,29 +2964,32 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		    PCIIDE_INTERFACE_PCI(0) | PCIIDE_INTERFACE_PCI(1);
 	}
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT6410) { 
 		printf(": ATA133");
 		sc->sc_wdcdev.UDMA_cap = 6;
 	} else {
-		/* Determine the DMA capabilities by looking at the ISA bridge. */
-		pcib_tag = pci_make_tag(pa->pa_pc, pa->pa_bus, pa->pa_device, 0);
-		pcib_id = pci_conf_read(sc->sc_pc, pcib_tag, PCI_ID_REG);
-		pcib_class = pci_conf_read(sc->sc_pc, pcib_tag, PCI_CLASS_REG);
+		/* 
+		 * Determine the DMA capabilities by looking at the
+		 * ISA bridge.
+		 */
+		tag = pci_make_tag(pa->pa_pc, pa->pa_bus, pa->pa_device, 0);
+		id = pci_conf_read(sc->sc_pc, tag, PCI_ID_REG);
+		class = pci_conf_read(sc->sc_pc, tag, PCI_CLASS_REG);
 
-		/* XXX On the VT8237, the ISA bridge is on a different device. */
-		if (PCI_CLASS(pcib_class) != PCI_CLASS_BRIDGE && pa->pa_device == 15 &&
-		    PCI_PRODUCT(pcib_id) == PCI_PRODUCT_VIATECH_VT82C571) {
-			pcib_tag = pci_make_tag(pa->pa_pc, pa->pa_bus, 17, 0);
-			pcib_id = pci_conf_read(sc->sc_pc, pcib_tag, PCI_ID_REG);
-			pcib_class = pci_conf_read(sc->sc_pc, pcib_tag, PCI_CLASS_REG);
+		/*
+		 * XXX On the VT8237, the ISA bridge is on a different
+		 * device.
+		 */
+		if (PCI_CLASS(class) != PCI_CLASS_BRIDGE &&
+		    pa->pa_device == 15) {
+			tag = pci_make_tag(pa->pa_pc, pa->pa_bus, 17, 0);
+			id = pci_conf_read(sc->sc_pc, tag, PCI_ID_REG);
+			class = pci_conf_read(sc->sc_pc, tag, PCI_CLASS_REG);
 		}
 
-		switch (PCI_PRODUCT(pcib_id)) {
+		switch (PCI_PRODUCT(id)) {
 		case PCI_PRODUCT_VIATECH_VT82C586_ISA:
-			if (PCI_REVISION(pcib_class) >= 0x02) {
+			if (PCI_REVISION(class) >= 0x02) {
 				printf(": ATA33");
 				sc->sc_wdcdev.UDMA_cap = 2;
 			} else {
@@ -2780,7 +2998,7 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 			}
 			break;
 		case PCI_PRODUCT_VIATECH_VT82C596A:
-			if (PCI_REVISION(pcib_class) >= 0x12) {
+			if (PCI_REVISION(class) >= 0x12) {
 				printf(": ATA66");
 				sc->sc_wdcdev.UDMA_cap = 4;
 			} else {
@@ -2790,7 +3008,7 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 			break;
 
 		case PCI_PRODUCT_VIATECH_VT82C686A_ISA:
-			if (PCI_REVISION(pcib_class) >= 0x40) {
+			if (PCI_REVISION(class) >= 0x40) {
 				printf(": ATA100");
 				sc->sc_wdcdev.UDMA_cap = 5;
 			} else {
@@ -2806,7 +3024,6 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		case PCI_PRODUCT_VIATECH_VT8233A_ISA:
 		case PCI_PRODUCT_VIATECH_VT8235_ISA:
 		case PCI_PRODUCT_VIATECH_VT8237_ISA:
-		case PCI_PRODUCT_VIATECH_VT6410:
 			printf(": ATA133");
 			sc->sc_wdcdev.UDMA_cap = 6;
 			break;
@@ -3113,20 +3330,6 @@ cmd_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 {
 	int channel;
 	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
-	/*
- 	 * For a CMD PCI064x, the use of PCI_COMMAND_IO_ENABLE
-	 * and base address registers can be disabled at
- 	 * hardware level. In this case, the device is wired
-	 * in compat mode and its first channel is always enabled,
-	 * but we can't rely on PCI_COMMAND_IO_ENABLE.
-	 * In fact, it seems that the first channel of the CMD PCI0640
-	 * can't be disabled.
- 	 */
-
-#ifdef PCIIDE_CMD064x_DISABLE
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-#endif
 
 	printf(": no DMA");
 	sc->sc_dma_ok = 0;
@@ -3165,20 +3368,6 @@ cmd0643_9_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		interface = PCI_INTERFACE(pa->pa_class);
 	}
 
-	/*
-	 * For a CMD PCI064x, the use of PCI_COMMAND_IO_ENABLE
-	 * and base address registers can be disabled at
-	 * hardware level. In this case, the device is wired
-	 * in compat mode and its first channel is always enabled,
- 	 * but we can't rely on PCI_COMMAND_IO_ENABLE.
-	 * In fact, it seems that the first channel of the CMD PCI0640
-	 * can't be disabled.
-	*/
-
-#ifdef PCIIDE_CMD064x_DISABLE
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-#endif
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 	sc->sc_wdcdev.cap = WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
@@ -3372,8 +3561,6 @@ cmd680_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	struct pciide_channel *cp;
 	int channel;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 	printf("\n%s: bus-master DMA support present",
 	    sc->sc_wdcdev.sc_dev.dv_xname);
 	pciide_mapreg_dma(sc, pa);
@@ -3581,9 +3768,6 @@ sii3112_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface, scs_cmd, cfgctl;
 	int channel;
 	struct pciide_satalink *sl = sc->sc_cookie;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	/* Allocate memory for private data */
 	sc->sc_cookie = malloc(sizeof(struct pciide_satalink), M_DEVBUF,
@@ -3862,9 +4046,6 @@ sii3114_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	const char *intrstr;
 	int channel;
 	struct pciide_satalink *sl = sc->sc_cookie;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	/* Allocate memory for private data */
 	sc->sc_cookie = malloc(sizeof(struct pciide_satalink), M_DEVBUF,
@@ -4199,9 +4380,6 @@ cy693_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	bus_size_t cmdsize, ctlsize;
 	struct pciide_cy *cy;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	/* Allocate memory for private data */
 	sc->sc_cookie = malloc(sizeof(struct pciide_cy), M_DEVBUF, M_NOWAIT);
 	cy = sc->sc_cookie;
@@ -4458,9 +4636,6 @@ sis_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcitag_t br_tag;
 	struct pci_attach_args br_pa;
 	struct pciide_sis *sis;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	/* Allocate memory for private data */
 	sc->sc_cookie = malloc(sizeof(struct pciide_sis), M_DEVBUF, M_NOWAIT);
@@ -4779,9 +4954,6 @@ natsemi_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface, ctl;
 	bus_size_t cmdsize, ctlsize;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 	sc->sc_wdcdev.cap = WDC_CAPABILITY_DATA16;
@@ -4972,9 +5144,6 @@ ns_scx200_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
 	bus_size_t cmdsize, ctlsize;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 
@@ -5130,9 +5299,6 @@ acer_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t cr, interface;
 	bus_size_t cmdsize, ctlsize;
 	int rev = sc->sc_rev;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
@@ -5354,8 +5520,6 @@ hpt_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface;
 	bus_size_t cmdsize, ctlsize;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 	revision = sc->sc_rev;
 
 	/*
@@ -5698,8 +5862,6 @@ pdc202xx_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		WDCDEBUG_PRINT(("pdc202xx_setup_chip: controller state 0x%x\n",
 		    st), DEBUG_PROBE);
 	}
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	/* turn off  RAID mode */
 	if (!PDC_IS_268(sc))
@@ -6169,9 +6331,38 @@ pdcsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		return;
 	}
 	intrstr = pci_intr_string(pa->pa_pc, intrhandle);
-	sc->sc_pci_ih = pci_intr_establish(pa->pa_pc,
-	    intrhandle, IPL_BIO, pdc203xx_pci_intr, sc,
-	    sc->sc_wdcdev.sc_dev.dv_xname);
+
+	switch (sc->sc_pp->ide_product) {
+	case PCI_PRODUCT_PROMISE_PDC20318:
+	case PCI_PRODUCT_PROMISE_PDC20319:
+	case PCI_PRODUCT_PROMISE_PDC20371:
+	case PCI_PRODUCT_PROMISE_PDC20375:
+	case PCI_PRODUCT_PROMISE_PDC20376:
+	case PCI_PRODUCT_PROMISE_PDC20377:
+	case PCI_PRODUCT_PROMISE_PDC20378:
+	case PCI_PRODUCT_PROMISE_PDC20379:
+	default:
+		sc->sc_pci_ih = pci_intr_establish(pa->pa_pc,
+	    	    intrhandle, IPL_BIO, pdc203xx_pci_intr, sc,
+	    	    sc->sc_wdcdev.sc_dev.dv_xname);
+		break;
+
+	case PCI_PRODUCT_PROMISE_PDC40518:
+	case PCI_PRODUCT_PROMISE_PDC40519:
+	case PCI_PRODUCT_PROMISE_PDC40718:
+	case PCI_PRODUCT_PROMISE_PDC40719:
+	case PCI_PRODUCT_PROMISE_PDC40779:
+	case PCI_PRODUCT_PROMISE_PDC20571:
+	case PCI_PRODUCT_PROMISE_PDC20575:
+	case PCI_PRODUCT_PROMISE_PDC20579:
+	case PCI_PRODUCT_PROMISE_PDC20771:
+	case PCI_PRODUCT_PROMISE_PDC20775:
+		sc->sc_pci_ih = pci_intr_establish(pa->pa_pc,
+	    	    intrhandle, IPL_BIO, pdc205xx_pci_intr, sc,
+	    	    sc->sc_wdcdev.sc_dev.dv_xname);
+		break;
+	}
+		
 	if (sc->sc_pci_ih == NULL) {
 		printf(": couldn't establish native-PCI interrupt");
 		if (intrstr != NULL)
@@ -6211,10 +6402,48 @@ pdcsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	sc->sc_wdcdev.UDMA_cap = 6;
 	sc->sc_wdcdev.set_modes = pdc203xx_setup_channel;
 	sc->sc_wdcdev.channels = sc->wdc_chanarray;
-	bus_space_write_4(ps->ba5_st, ps->ba5_sh, 0x06c, 0x00ff0033);
-	sc->sc_wdcdev.nchannels =
-	    (bus_space_read_4(ps->ba5_st, ps->ba5_sh, 0x48) & 0x02) ?
-	    PDC203xx_NCHANNELS : 3;
+
+	switch (sc->sc_pp->ide_product) {
+	case PCI_PRODUCT_PROMISE_PDC20318:
+	case PCI_PRODUCT_PROMISE_PDC20319:
+	case PCI_PRODUCT_PROMISE_PDC20371:
+	case PCI_PRODUCT_PROMISE_PDC20375:
+	case PCI_PRODUCT_PROMISE_PDC20376:
+	case PCI_PRODUCT_PROMISE_PDC20377:
+	case PCI_PRODUCT_PROMISE_PDC20378:
+	case PCI_PRODUCT_PROMISE_PDC20379:
+	default:
+		bus_space_write_4(ps->ba5_st, ps->ba5_sh, 0x06c, 0x00ff0033);
+		sc->sc_wdcdev.nchannels =
+		    (bus_space_read_4(ps->ba5_st, ps->ba5_sh, 0x48) & 0x02) ?
+		    PDC203xx_NCHANNELS : 3;
+		break;
+
+	case PCI_PRODUCT_PROMISE_PDC40518:
+	case PCI_PRODUCT_PROMISE_PDC40519:
+	case PCI_PRODUCT_PROMISE_PDC40718:
+	case PCI_PRODUCT_PROMISE_PDC40719:
+	case PCI_PRODUCT_PROMISE_PDC40779:
+	case PCI_PRODUCT_PROMISE_PDC20571:
+		bus_space_write_4(ps->ba5_st, ps->ba5_sh, 0x60, 0x00ff00ff);
+		sc->sc_wdcdev.nchannels = PDC40718_NCHANNELS;
+  	 
+		sc->sc_wdcdev.reset = pdc205xx_do_reset;
+		sc->sc_wdcdev.drv_probe = pdc205xx_drv_probe;
+		
+		break;
+	case PCI_PRODUCT_PROMISE_PDC20575:
+	case PCI_PRODUCT_PROMISE_PDC20579:
+	case PCI_PRODUCT_PROMISE_PDC20771:
+	case PCI_PRODUCT_PROMISE_PDC20775:
+		bus_space_write_4(ps->ba5_st, ps->ba5_sh, 0x60, 0x00ff00ff);
+		sc->sc_wdcdev.nchannels = PDC20575_NCHANNELS;
+
+		sc->sc_wdcdev.reset = pdc205xx_do_reset;
+		sc->sc_wdcdev.drv_probe = pdc205xx_drv_probe;
+		
+		break;
+	}
 
 	sc->sc_wdcdev.dma_arg = sc;
 	sc->sc_wdcdev.dma_init = pciide_dma_init;
@@ -6364,6 +6593,39 @@ pdc203xx_pci_intr(void *arg)
 	return (rv);
 }
 
+int
+pdc205xx_pci_intr(void *arg)
+{
+	struct pciide_softc *sc = arg;
+	struct pciide_channel *cp;
+	struct channel_softc *wdc_cp;
+	struct pciide_pdcsata *ps = sc->sc_cookie;
+	int i, rv, crv;
+	u_int32_t scr, status;
+
+	rv = 0;
+	scr = bus_space_read_4(ps->ba5_st, ps->ba5_sh, 0x40);
+	bus_space_write_4(ps->ba5_st, ps->ba5_sh, 0x40, scr & 0x0000ffff);
+
+	status = bus_space_read_4(ps->ba5_st, ps->ba5_sh, 0x60);
+	bus_space_write_4(ps->ba5_st, ps->ba5_sh, 0x60, status & 0x000000ff);
+
+	for (i = 0; i < sc->sc_wdcdev.nchannels; i++) {
+		cp = &sc->pciide_channels[i];
+		wdc_cp = &cp->wdc_channel;
+		if (scr & (1 << (i + 1))) {
+			crv = wdcintr(wdc_cp);
+			if (crv == 0) {
+				printf("%s:%d: bogus intr (reg 0x%x)\n",
+				    sc->sc_wdcdev.sc_dev.dv_xname,
+				    i, scr);
+			} else
+				rv = 1;
+		}
+	}
+	return rv;
+}
+
 void
 pdc203xx_irqack(struct channel_softc *chp)
 {
@@ -6461,6 +6723,117 @@ pdc203xx_write_reg(struct channel_softc *chp, enum wdc_regs reg, u_int8_t val)
 		    0, val);
 }
 
+void
+pdc205xx_do_reset(struct channel_softc *chp)
+{
+	struct pciide_channel *cp = (struct pciide_channel *)chp;
+	struct pciide_softc *sc = (struct pciide_softc *)cp->wdc_channel.wdc;
+	struct pciide_pdcsata *ps = sc->sc_cookie;
+	u_int32_t scontrol;
+
+	wdc_do_reset(chp);
+
+	/* reset SATA */
+	scontrol = SControl_DET_INIT | SControl_SPD_ANY | SControl_IPM_NONE;
+	SCONTROL_WRITE(ps, chp->channel, scontrol);
+	delay(50*1000);
+
+	scontrol &= ~SControl_DET_INIT;
+	SCONTROL_WRITE(ps, chp->channel, scontrol);
+	delay(50*1000);
+}
+
+void
+pdc205xx_drv_probe(struct channel_softc *chp)
+{
+	struct pciide_channel *cp = (struct pciide_channel *)chp;
+	struct pciide_softc *sc = (struct pciide_softc *)cp->wdc_channel.wdc;
+	struct pciide_pdcsata *ps = sc->sc_cookie;
+	bus_space_handle_t *iohs;
+	u_int32_t scontrol, sstatus;
+	u_int16_t scnt, sn, cl, ch;
+	int i, s;
+
+	/* XXX This should be done by other code. */
+	for (i = 0; i < 2; i++) {
+		chp->ch_drive[i].chnl_softc = chp;
+		chp->ch_drive[i].drive = i;
+	}
+
+	SCONTROL_WRITE(ps, chp->channel, 0);
+	delay(50*1000);
+
+	scontrol = SControl_DET_INIT | SControl_SPD_ANY | SControl_IPM_NONE;
+	SCONTROL_WRITE(ps,chp->channel,scontrol);
+	delay(50*1000);
+
+	scontrol &= ~SControl_DET_INIT;
+	SCONTROL_WRITE(ps,chp->channel,scontrol);
+	delay(50*1000);
+
+	sstatus = SSTATUS_READ(ps,chp->channel);
+
+	switch (sstatus & SStatus_DET_mask) {
+	case SStatus_DET_NODEV:
+		/* No Device; be silent.  */
+		break;
+
+	case SStatus_DET_DEV_NE:
+		printf("%s: port %d: device connected, but "
+		    "communication not established\n",
+		    sc->sc_wdcdev.sc_dev.dv_xname, chp->channel);
+		break;
+
+	case SStatus_DET_OFFLINE:
+		printf("%s: port %d: PHY offline\n",
+		    sc->sc_wdcdev.sc_dev.dv_xname, chp->channel);
+		break;
+
+	case SStatus_DET_DEV:
+		iohs = ps->regs[chp->channel].cmd_iohs;
+		bus_space_write_1(chp->cmd_iot, iohs[wdr_sdh], 0,
+		    WDSD_IBM);
+		delay(10);	/* 400ns delay */
+		scnt = bus_space_read_2(chp->cmd_iot, iohs[wdr_seccnt], 0);
+		sn = bus_space_read_2(chp->cmd_iot, iohs[wdr_sector], 0);
+		cl = bus_space_read_2(chp->cmd_iot, iohs[wdr_cyl_lo], 0);
+		ch = bus_space_read_2(chp->cmd_iot, iohs[wdr_cyl_hi], 0);
+#if 0
+		printf("%s: port %d: scnt=0x%x sn=0x%x cl=0x%x ch=0x%x\n",
+		    sc->sc_wdcdev.sc_dev.dv_xname, chp->channel,
+		    scnt, sn, cl, ch);
+#endif
+		/*
+		 * scnt and sn are supposed to be 0x1 for ATAPI, but in some
+		 * cases we get wrong values here, so ignore it.
+		 */
+		s = splbio();
+		if (cl == 0x14 && ch == 0xeb)
+			chp->ch_drive[0].drive_flags |= DRIVE_ATAPI;
+		else
+			chp->ch_drive[0].drive_flags |= DRIVE_ATA;
+		splx(s);
+#if 0
+		printf("%s: port %d: device present",
+		    sc->sc_wdcdev.sc_dev.dv_xname, chp->channel);
+		switch ((sstatus & SStatus_SPD_mask) >> SStatus_SPD_shift) {
+		case 1:
+			printf(", speed: 1.5Gb/s");
+			break;
+		case 2:
+			printf(", speed: 3.0Gb/s");
+			break;
+		}
+		printf("\n");
+#endif
+		break;
+
+	default:
+		printf("%s: port %d: unknown SStatus: 0x%08x\n",
+		    sc->sc_wdcdev.sc_dev.dv_xname, chp->channel, sstatus);
+	}
+}
+
 #ifdef notyet
 /*
  * Inline functions for accessing the timing registers of the
@@ -6525,8 +6898,6 @@ opti_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	u_int8_t init_ctrl;
 	int channel;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 	printf(": DMA");
 	/*
 	 * XXXSCW:
@@ -6696,9 +7067,6 @@ serverworks_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcitag_t pcib_tag;
 	int channel;
 	bus_size_t cmdsize, ctlsize;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
@@ -6874,9 +7242,6 @@ svwsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	const char *intrstr;
 	int channel;
 	struct pciide_svwsata *ss;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	/* Allocate memory for private data */
 	sc->sc_cookie = malloc(sizeof(struct pciide_svwsata), M_DEVBUF,
@@ -7212,9 +7577,6 @@ acard_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface;
 	bus_size_t cmdsize, ctlsize;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	/*
 	 * when the chip is in native mode it identifies itself as a
 	 * 'misc mass storage'. Fake interface in this case.
@@ -7430,9 +7792,6 @@ nforce_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	WDCDEBUG_PRINT(("%s: conf register 0x%x\n",
 	    sc->sc_wdcdev.sc_dev.dv_xname, conf), DEBUG_PROBE);
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 
@@ -7560,6 +7919,7 @@ nforce_setup_channel(struct channel_softc *chp)
 			else
 				mode = drvp->DMA_mode + 2;
 		} else {
+			mode = drvp->PIO_mode;
 			goto pio;
 		}
 		idedma_ctl |= IDEDMA_CTL_DRV_DMA(drive);
@@ -7635,9 +7995,6 @@ artisea_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t interface;
 	int channel;
 
-	if (pciide_chipen(sc, pa) == 0)
-		return;
-
 	printf("%s: DMA",
 	    sc->sc_wdcdev.sc_dev.dv_xname);
 #ifndef PCIIDE_I31244_ENABLEDMA
@@ -7704,9 +8061,6 @@ ite_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	WDCDEBUG_PRINT(("%s: cfg=0x%x, modectl=0x%x\n",
 	    sc->sc_wdcdev.sc_dev.dv_xname, cfg & IT_CFG_MASK,
 	    modectl & IT_MODE_MASK), DEBUG_PROBE);
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
@@ -7865,9 +8219,6 @@ ixp_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	int channel;
 	pcireg_t interface = PCI_INTERFACE(pa->pa_class);
 	bus_size_t cmdsize, ctlsize;
-
-	if (pciide_chipen(sc, pa) == 0)
-		return;
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.10 2003/06/02 23:27:55 millert Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.12 2006/06/21 19:24:38 jason Exp $	*/
 /*	$NetBSD: fpu.c,v 1.11 2000/12/06 01:47:50 mrg Exp $ */
 
 /*
@@ -158,11 +158,11 @@ static u_char fpu_codes[] = {
 };
 
 static int fpu_types[] = {
-	FPE_FLTRES,
-	FPE_FLTDIV,
-	FPE_FLTUND,
-	FPE_FLTOVF,
-	FPE_FLTINV,
+	X1(FPE_FLTRES),
+	X2(FPE_FLTDIV),
+	X4(FPE_FLTUND),
+	X8(FPE_FLTOVF),
+	X16(FPE_FLTINV)
 };
 
 void
@@ -189,11 +189,7 @@ fpu_fcopy(src, dst, type)
 void
 fpu_cleanup(p, fs)
 	register struct proc *p;
-#ifndef SUN4U
-	register struct fpstate *fs;
-#else /* SUN4U */
 	register struct fpstate64 *fs;
-#endif /* SUN4U */
 {
 	register int i, fsr = fs->fs_fsr, error;
 	union instr instr;
@@ -218,18 +214,16 @@ fpu_cleanup(p, fs)
 	case FSR_TT_IEEE:
 		if ((i = fsr & FSR_CX) == 0)
 			panic("fpu ieee trap, but no exception");
-		trapsignal(p, SIGFPE, fpu_codes[i - 1], fpu_types[i - i], sv);
+		trapsignal(p, SIGFPE, fpu_codes[i - 1], fpu_types[i - 1], sv);
 		break;		/* XXX should return, but queue remains */
 
 	case FSR_TT_UNFIN:
-#ifdef SUN4U
 		if (fs->fs_qsize == 0) {
 			printf("fpu_cleanup: unfinished fpop");
 			/* The book says reexecute or emulate. */
 			return;
 		}
 		break;
-#endif /* SUN4U */
 	case FSR_TT_UNIMP:
 		if (fs->fs_qsize == 0)
 			panic("fpu_cleanup: unimplemented fpop");

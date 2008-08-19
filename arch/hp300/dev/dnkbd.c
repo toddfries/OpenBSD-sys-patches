@@ -1,4 +1,4 @@
-/*	$OpenBSD: dnkbd.c,v 1.10 2005/12/21 19:40:42 miod Exp $	*/
+/*	$OpenBSD: dnkbd.c,v 1.12 2006/08/10 23:47:34 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -67,6 +67,7 @@
  * Keyboard key codes
  */
 
+#define	DNKEY_CAPSLOCK	0x7e
 #define	DNKEY_REPEAT	0x7f
 #define	DNKEY_RELEASE	0x80
 #define	DNKEY_CHANNEL	0xff
@@ -130,6 +131,7 @@ struct dnkbd_softc {
 	u_int		sc_identlen;
 #define	MAX_IDENTLEN	32
 	char		sc_ident[MAX_IDENTLEN];
+	kbd_t		sc_layout;
 
 	enum { STATE_KEYBOARD, STATE_MOUSE, STATE_CHANNEL, STATE_ECHO }
 			sc_state, sc_prevstate;
@@ -200,12 +202,17 @@ const struct wskbd_consops dnkbd_consops = {
 
 struct wskbd_mapdata dnkbd_keymapdata = {
 	dnkbd_keydesctab,
+#ifdef DNKBD_LAYOUT
+	DNKBD_LAYOUT
+#else
 	KB_US
+#endif
 };
 
 typedef enum { EVENT_NONE, EVENT_KEYBOARD, EVENT_MOUSE } dnevent;
 
 void	dnevent_kbd(struct dnkbd_softc *, int);
+void	dnevent_kbd_internal(struct dnkbd_softc *, int);
 void	dnevent_mouse(struct dnkbd_softc *, u_int8_t *);
 void	dnkbd_attach_subdevices(struct dnkbd_softc *);
 void	dnkbd_bellstop(void *);
@@ -301,6 +308,9 @@ dnkbd_attach_subdevices(struct dnkbd_softc *sc)
 	ka.keymap = &dnkbd_keymapdata;
 	ka.accessops = &dnkbd_accessops;
 	ka.accesscookie = sc;
+#ifndef DKKBD_LAYOUT
+	dnkbd_keymapdata.layout = sc->sc_layout;
+#endif
 
 	if (ka.console) {
 		sc->sc_flags = SF_PLUGGED | SF_CONSOLE | SF_ENABLED;
@@ -409,6 +419,7 @@ dnkbd_probe(struct dnkbd_softc *sc)
 	 * Now display the identification strings, if it changed.
 	 */
 	if (i != sc->sc_identlen || bcmp(rspbuf, sc->sc_ident, i) != 0) {
+		sc->sc_layout = KB_US;
 		sc->sc_identlen = i;
 		bcopy(rspbuf, sc->sc_ident, i);
 
@@ -422,6 +433,39 @@ dnkbd_probe(struct dnkbd_softc *sc)
 				break;
 			*end++ = '\0';
 			printf("<%s> ", word);
+			/*
+			 * Parse the layout code if applicable
+			 */
+			if (i == 1 && *word == '3')
+				switch (*++word) {
+#if 0
+				default:
+				case ' ':
+					sc->sc_layout = KB_US;
+					break;
+#endif
+				case 'a':
+					sc->sc_layout = KB_DE;
+					break;
+				case 'b':
+					sc->sc_layout = KB_FR;
+					break;
+				case 'c':
+					sc->sc_layout = KB_DK;
+					break;
+				case 'd':
+					sc->sc_layout = KB_SV;
+					break;
+				case 'e':
+					sc->sc_layout = KB_UK;
+					break;
+				case 'f':
+					sc->sc_layout = KB_JP;
+					break;
+				case 'g':
+					sc->sc_layout = KB_SG;
+					break;
+				}
 			word = end;
 		}
 		printf("\n");
@@ -574,10 +618,6 @@ dnkbd_decode(int keycode, u_int *type, int *key)
 void
 dnevent_kbd(struct dnkbd_softc *sc, int dat)
 {
-	u_int type;
-	int key;
-	int s;
-
 	if (!ISSET(sc->sc_flags, SF_PLUGGED))
 		return;
 
@@ -586,6 +626,29 @@ dnevent_kbd(struct dnkbd_softc *sc, int dat)
 
 	if (!ISSET(sc->sc_flags, SF_ENABLED))
 		return;
+
+	/*
+	 * Even in raw mode, the caps lock key is treated specially:
+	 * first key press causes event 0x7e, release causes no event;
+	 * then a new key press causes nothing, and release causes
+	 * event 0xfe. Moreover, while kept down, it does not produce
+	 * repeat events.
+	 *
+	 * So the best we can do is fake the missed events, but this
+	 * will not allow the capslock key to be remapped as a control
+	 * key since it will not be possible to chord it with anything.
+	 */
+	dnevent_kbd_internal(sc, dat);
+	if ((dat & ~DNKEY_RELEASE) == DNKEY_CAPSLOCK)
+		dnevent_kbd_internal(sc, dat ^ DNKEY_RELEASE);
+}
+
+void
+dnevent_kbd_internal(struct dnkbd_softc *sc, int dat)
+{
+	u_int type;
+	int key;
+	int s;
 
 	dnkbd_decode(dat, &type, &key);
 
@@ -943,20 +1006,28 @@ dnmouse_disable(void *v)
 void
 dnkbd_cngetc(void *v, u_int *type, int *data)
 {
+	static int lastdat = 0;
 	struct dnkbd_softc *sc = v;
 	int s;
 	int dat;
 
-	for (;;) {
-		s = splhigh();
-		dat = dnkbd_pollin(sc->sc_regs, 10000);
-		if (dat != -1) {
-			if (dnkbd_input(sc, dat) == EVENT_KEYBOARD) {
-				splx(s);
-				break;
+	/* Take care of caps lock */
+	if ((lastdat & ~DNKEY_RELEASE) == DNKEY_CAPSLOCK) {
+		dat = lastdat ^ DNKEY_RELEASE;
+		lastdat = 0;
+	} else {
+		for (;;) {
+			s = splhigh();
+			dat = dnkbd_pollin(sc->sc_regs, 10000);
+			if (dat != -1) {
+				if (dnkbd_input(sc, dat) == EVENT_KEYBOARD) {
+					splx(s);
+					break;
+				}
 			}
+			splx(s);
 		}
-		splx(s);
+		lastdat = dat;
 	}
 
 	dnkbd_decode(dat, type, data);

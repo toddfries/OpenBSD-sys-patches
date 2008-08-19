@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.149 2005/10/26 18:35:44 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.151 2006/05/28 23:08:07 martin Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -495,7 +495,7 @@ cpuid()
 	}
 
 	/* BTLB params */
-	if (cpu_type < HPPA_FPU_PCXU &&
+	if (cpu_type < HPPA_CPU_PCXU &&
 	    (error = pdc_call((iodcio_t)pdc, 0, PDC_BLOCK_TLB,
 	     PDC_BTLB_DEFAULT, &pdc_btlb)) < 0) {
 #ifdef DEBUG
@@ -531,7 +531,9 @@ cpuid()
 		else if (pmap_hptsize && pmap_hptsize < pdc_hwtlb.min_size)
 			pmap_hptsize = pdc_hwtlb.min_size;
 	} else {
+#ifdef DEBUG
 		printf("WARNING: no HPT support, fine!\n");
+#endif
 		pmap_hptsize = 0;
 	}
 

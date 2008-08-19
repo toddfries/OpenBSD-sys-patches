@@ -1,4 +1,4 @@
-/*	$OpenBSD: aacvar.h,v 1.5 2005/11/18 05:39:10 nate Exp $	*/
+/*	$OpenBSD: aacvar.h,v 1.7 2006/05/07 20:12:41 tedu Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -182,6 +182,7 @@ struct aac_interface {
 extern struct aac_interface aac_fa_interface;
 extern struct aac_interface aac_sa_interface;
 extern struct aac_interface aac_rx_interface;
+extern struct aac_interface aac_rkt_interface;
 
 #define AAC_GET_FWSTATUS(sc)		((sc)->aac_if.aif_get_fwstatus(sc))
 #define AAC_QNOTIFY(sc, qbit) \
@@ -217,7 +218,7 @@ extern struct aac_interface aac_rx_interface;
 /* Define the OS version specific locks */
 typedef struct rwlock aac_lock_t;
 #define AAC_LOCK_INIT(l, s)	do { \
-    rw_init((l)); \
+    rw_init((l), "aaclock"); \
     AAC_DPRINTF(AAC_D_LOCK, ("%s: init lock @%s: %d\n", \
 	        sc->aac_dev.dv_xname, __FUNCTION__, __LINE__)); \
 } while (0)
@@ -334,7 +335,8 @@ struct aac_softc
 	int	aac_hwif;	/* controller hardware interface */
 #define AAC_HWIF_I960RX		0
 #define AAC_HWIF_STRONGARM	1
-#define	AAC_HWIF_FALCON		2
+#define AAC_HWIF_FALCON		2
+#define AAC_HWIF_RKT		3
 #define AAC_HWIF_UNKNOWN	-1
 
 	struct aac_common *aac_common;

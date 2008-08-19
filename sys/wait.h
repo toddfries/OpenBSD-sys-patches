@@ -1,4 +1,4 @@
-/*	$OpenBSD: wait.h,v 1.12 2005/12/13 00:35:24 millert Exp $	*/
+/*	$OpenBSD: wait.h,v 1.14 2006/04/27 02:17:21 tedu Exp $	*/
 /*	$NetBSD: wait.h,v 1.11 1996/04/09 20:55:51 cgd Exp $	*/
 
 /*
@@ -56,11 +56,11 @@
 #define	_WSTOPPED	0177		/* _WSTATUS if process is stopped */
 #define	_WCONTINUED	0177777		/* process has continued */
 #define WIFSTOPPED(x)	((_W_INT(x) & 0xff) == _WSTOPPED)
-#define WSTOPSIG(x)	((_W_INT(x) >> 8) & 0xff)
+#define WSTOPSIG(x)	(int)(((unsigned)_W_INT(x) >> 8) & 0xff)
 #define WIFSIGNALED(x)	(_WSTATUS(x) != _WSTOPPED && _WSTATUS(x) != 0)
 #define WTERMSIG(x)	(_WSTATUS(x))
 #define WIFEXITED(x)	(_WSTATUS(x) == 0)
-#define WEXITSTATUS(x)	((_W_INT(x) >> 8) & 0xff)
+#define WEXITSTATUS(x)	(int)(((unsigned)_W_INT(x) >> 8) & 0xff)
 #define WIFCONTINUED(x)	((_W_INT(x) & _WCONTINUED) == _WCONTINUED)
 #if __XPG_VISIBLE
 #define	WCOREFLAG	0200
@@ -107,13 +107,13 @@ union wait {
 	 * Terminated process status.
 	 */
 	struct {
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if _BYTE_ORDER == _LITTLE_ENDIAN
 		unsigned int	w_Termsig:7,	/* termination signal */
 				w_Coredump:1,	/* core dump indicator */
 				w_Retcode:8,	/* exit code if w_termsig==0 */
 				w_Filler:16;	/* upper bits filler */
 #endif
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 		unsigned int	w_Filler:16,	/* upper bits filler */
 				w_Retcode:8,	/* exit code if w_termsig==0 */
 				w_Coredump:1,	/* core dump indicator */
@@ -126,12 +126,12 @@ union wait {
 	 * with the WUNTRACED option bit.
 	 */
 	struct {
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if _BYTE_ORDER == _LITTLE_ENDIAN
 		unsigned int	w_Stopval:8,	/* == W_STOPPED if stopped */
 				w_Stopsig:8,	/* signal that stopped us */
 				w_Filler:16;	/* upper bits filler */
 #endif
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 		unsigned int	w_Filler:16,	/* upper bits filler */
 				w_Stopsig:8,	/* signal that stopped us */
 				w_Stopval:8;	/* == W_STOPPED if stopped */

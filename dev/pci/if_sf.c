@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sf.c,v 1.34 2005/11/07 02:57:45 brad Exp $ */
+/*	$OpenBSD: if_sf.c,v 1.40 2006/08/22 19:11:46 martin Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -71,7 +71,7 @@
  * PHYs is done through a special register map rather than with the
  * usual bitbang MDIO method.
  *
- * Acesssing the registers on the Starfire is a little tricky. The
+ * Accessing the registers on the Starfire is a little tricky. The
  * Starfire has a 512K internal register space. When programmed for
  * PCI memory mapped mode, the entire register space can be accessed
  * directly. However in I/O space mode, only 256 bytes are directly
@@ -420,8 +420,7 @@ int sf_ifmedia_upd(ifp)
 	sc->sf_link = 0;
 	if (mii->mii_instance) {
 		struct mii_softc	*miisc;
-		for (miisc = LIST_FIRST(&mii->mii_phys); miisc != NULL;
-		    miisc = LIST_NEXT(miisc, mii_list))
+		LIST_FOREACH(miisc, &mii->mii_phys, mii_list)
 			mii_phy_reset(miisc);
 	}
 	mii_mediachg(mii);
@@ -521,7 +520,7 @@ int sf_ioctl(ifp, command, data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -533,7 +532,7 @@ int sf_ioctl(ifp, command, data)
 void sf_reset(sc)
 	struct sf_softc		*sc;
 {
-	register int		i;
+	int			i;
 
 	csr_write_4(sc, SF_GEN_ETH_CTL, 0);
 	SF_SETBIT(sc, SF_MACCFG_1, SF_MACCFG1_SOFTRESET);
@@ -867,7 +866,7 @@ void sf_rxeof(sc)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		/* pass it on. */
@@ -948,7 +947,7 @@ sf_txthresh_adjust(sc)
 		txthresh++;
 		txfctl &= ~SF_TXFRMCTL_TXTHRESH;
 		txfctl |= txthresh;
-#ifdef DIAGNOSTIC
+#ifdef SF_DEBUG
 		printf("%s: tx underrun, increasing tx threshold to %d bytes\n",
 		    sc->sc_dev.dv_xname, txthresh * 4);
 #endif
@@ -1240,7 +1239,8 @@ void sf_start(ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, cur_tx->sf_mbuf);
+			bpf_mtap(ifp->if_bpf, cur_tx->sf_mbuf,
+			    BPF_DIRECTION_OUT);
 #endif
 
 		SF_INC(i, SF_TX_DLIST_CNT);

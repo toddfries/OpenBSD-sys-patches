@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.85.2.2 2007/01/16 19:32:38 miod Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.87.2.2 2007/01/16 19:31:41 miod Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -1673,12 +1673,9 @@ ni6_addrs(ni6, m, ifpp, subj)
 		}
 	}
 
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list))
-	{
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		addrsofif = 0;
-		for (ifa = ifp->if_addrlist.tqh_first; ifa;
-		     ifa = ifa->ifa_list.tqe_next)
-		{
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
 			ifa6 = (struct in6_ifaddr *)ifa;
@@ -1757,11 +1754,8 @@ ni6_store_addrs(ni6, nni6, ifp0, resid)
 
   again:
 
-	for (; ifp; ifp = TAILQ_NEXT(ifp, if_list))
-	{
-		for (ifa = ifp->if_addrlist.tqh_first; ifa;
-		     ifa = ifa->ifa_list.tqe_next)
-		{
+	for (; ifp != TAILQ_END(&ifnet); ifp = TAILQ_NEXT(ifp, if_list)) {
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
 			ifa6 = (struct in6_ifaddr *)ifa;
@@ -2229,7 +2223,7 @@ icmp6_redirect_input(m, off)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_len = sizeof(struct sockaddr_in6);
 	bcopy(&reddst6, &sin6.sin6_addr, sizeof(reddst6));
-	rt = rtalloc1((struct sockaddr *)&sin6, 0);
+	rt = rtalloc1((struct sockaddr *)&sin6, 0, 0);
 	if (rt) {
 		if (rt->rt_gateway == NULL ||
 		    rt->rt_gateway->sa_family != AF_INET6) {
@@ -2774,7 +2768,7 @@ icmp6_mtudisc_clone(dst)
 	struct rtentry *rt;
 	int    error;
 
-	rt = rtalloc1(dst, 1);
+	rt = rtalloc1(dst, 1, 0);
 	if (rt == 0)
 		return NULL;
 
@@ -2785,7 +2779,7 @@ icmp6_mtudisc_clone(dst)
 		error = rtrequest((int) RTM_ADD, dst,
 		    (struct sockaddr *) rt->rt_gateway,
 		    (struct sockaddr *) 0,
-		    RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC, &nrt);
+		    RTF_GATEWAY | RTF_HOST | RTF_DYNAMIC, &nrt, 0);
 		if (error) {
 			rtfree(rt);
 			return NULL;
@@ -2814,7 +2808,7 @@ icmp6_mtudisc_timeout(rt, r)
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
 		rtrequest((int) RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0);
+		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
 	} else {
 		if (!(rt->rt_rmx.rmx_locks & RTV_MTU))
 			rt->rt_rmx.rmx_mtu = 0;
@@ -2831,7 +2825,7 @@ icmp6_redirect_timeout(rt, r)
 	if ((rt->rt_flags & (RTF_GATEWAY | RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_GATEWAY | RTF_DYNAMIC | RTF_HOST)) {
 		rtrequest((int) RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0);
+		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sm_pcmcia.c,v 1.25 2006/01/23 14:42:55 martin Exp $	*/
+/*	$OpenBSD: if_sm_pcmcia.c,v 1.27 2006/06/17 18:01:52 brad Exp $	*/
 /*	$NetBSD: if_sm_pcmcia.c,v 1.11 1998/08/15 20:47:32 thorpej Exp $  */
 
 /*-
@@ -48,6 +48,7 @@
 #include <sys/errno.h>
 #include <sys/syslog.h>
 #include <sys/selinfo.h>
+#include <sys/timeout.h>
 #include <sys/device.h>
 
 #include <net/if.h>
@@ -189,7 +190,8 @@ sm_pcmcia_attach(parent, self, aux)
 		return;
 	}
 
-	printf(" port 0x%lx/%d", psc->sc_pcioh.addr, psc->sc_pcioh.size);
+	printf(" port 0x%lx/%lu", psc->sc_pcioh.addr,
+	    (u_long)psc->sc_pcioh.size);
 
 	/*
 	 * First try to get the Ethernet address from FUNCE/LANNID tuple.

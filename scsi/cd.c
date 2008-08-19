@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.104 2006/01/21 12:18:49 miod Exp $	*/
+/*	$OpenBSD: cd.c,v 1.110 2006/07/29 02:40:45 krw Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -133,6 +133,8 @@ int    dvd_read_bca(struct cd_softc *, union dvd_struct *);
 int    dvd_read_manufact(struct cd_softc *, union dvd_struct *);
 int    dvd_read_struct(struct cd_softc *, union dvd_struct *);
 
+void	cd_powerhook(int why, void *arg);
+
 struct cfattach cd_ca = {
 	sizeof(struct cd_softc), cdmatch, cdattach,
 	cddetach, cdactivate
@@ -213,16 +215,18 @@ cdattach(parent, self, aux)
 	cd->sc_dk.dk_name = cd->sc_dev.dv_xname;
 	disk_attach(&cd->sc_dk);
 
-	dk_establish(&cd->sc_dk, &cd->sc_dev);
-  
 	/*
 	 * Note if this device is ancient.  This is used in cdminphys().
 	 */
 	if (!(sc_link->flags & SDEV_ATAPI) &&
-	    (sa->sa_inqbuf->version & SID_ANSII) == 0)
+	    SCSISPC(sa->sa_inqbuf->version) == 0)
 		cd->flags |= CDF_ANCIENT;
 
 	printf("\n");
+
+	if ((cd->sc_cdpwrhook = powerhook_establish(cd_powerhook, cd)) == NULL)
+		printf("%s: WARNING: unable to establish power hook\n",
+		    cd->sc_dev.dv_xname);
 }
 
 
@@ -277,6 +281,10 @@ cddetach(self, flags)
 		if (cdevsw[cmaj].d_open == cdopen)
 			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
 
+	/* Get rid of the power hook. */
+	if (sc->sc_cdpwrhook != NULL)
+		powerhook_disestablish(sc->sc_cdpwrhook);
+
 	/* Detach disk. */
 	disk_detach(&sc->sc_dk);
 
@@ -286,7 +294,7 @@ cddetach(self, flags)
 /*
  * Open the device. Make sure the partition info is as up-to-date as can be.
  */
-int 
+int
 cdopen(dev, flag, fmt, p)
 	dev_t dev;
 	int flag, fmt;
@@ -335,7 +343,7 @@ cdopen(dev, flag, fmt, p)
 		error = scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_CD,
 		    (rawopen ? SCSI_SILENT : 0) | SCSI_IGNORE_ILLEGAL_REQUEST |
 		    SCSI_IGNORE_MEDIA_CHANGE);
-			
+
 		/* Start the cd spinning if necessary. */
 		if (error == EIO)
 			error = scsi_start(sc_link, SSS_START,
@@ -391,7 +399,7 @@ out:	/* Insure only one open at a time. */
 	sc_link->flags |= SDEV_OPEN;
 	SC_DEBUG(sc_link, SDEV_DB3, ("open complete\n"));
 
-	/* It's OK to fall through because dk_openmask is now non-zero. */	
+	/* It's OK to fall through because dk_openmask is now non-zero. */
 bad:
 	if (cd->sc_dk.dk_openmask == 0) {
 		scsi_prevent(sc_link, PR_ALLOW,
@@ -408,7 +416,7 @@ bad:
  * Close the device. Only called if we are the last occurrence of an open
  * device.
  */
-int 
+int
 cdclose(dev, flag, fmt, p)
 	dev_t dev;
 	int flag, fmt;
@@ -519,7 +527,7 @@ cdstrategy(bp)
 	 * not doing anything, otherwise just wait for completion
 	 */
 	cdstart(cd);
-	
+
 	device_unref(&cd->sc_dev);
 	splx(s);
 	return;
@@ -554,7 +562,7 @@ done:
  * must be called at the correct (highish) spl level
  * cdstart() is called at splbio from cdstrategy and scsi_done
  */
-void 
+void
 cdstart(v)
 	void *v;
 {
@@ -697,7 +705,7 @@ cdminphys(bp)
 	 *
 	 * XXX Note that the SCSI-I spec says that 256-block transfers
 	 * are allowed in a 6-byte read/write, and are specified
-	 * by settng the "length" to 0.  However, we're conservative
+	 * by setting the "length" to 0.  However, we're conservative
 	 * here, allowing only 255-block transfers in case an
 	 * ancient device gets confused by length == 0.  A length of 0
 	 * in a 10-byte read/write actually means 0 blocks.
@@ -742,7 +750,7 @@ void
 lba2msf (lba, m, s, f)
 	u_long lba;
 	u_char *m, *s, *f;
-{   
+{
 	u_long tmp;
 
 	tmp = lba + CD_BLOCK_OFFSET;	/* offset of first logical frame */
@@ -793,7 +801,6 @@ cdioctl(dev, cmd, addr, flag, p)
 		case DIOCLOCK:
 		case DIOCEJECT:
 		case SCIOCIDENTIFY:
-		case OSCIOCIDENTIFY:
 		case SCIOCCOMMAND:
 		case SCIOCDEBUG:
 		case CDIOCLOADUNLOAD:
@@ -813,7 +820,7 @@ cdioctl(dev, cmd, addr, flag, p)
 		case CDIOCCLRDEBUG:
 		case CDIOCRESET:
 		case DVD_AUTH:
-		case DVD_READ_STRUCT:	
+		case DVD_READ_STRUCT:
 		case MTIOCTOP:
 			if (part == RAW_PART)
 				break;
@@ -864,7 +871,7 @@ cdioctl(dev, cmd, addr, flag, p)
 		cd->flags &= ~CDF_LABELLING;
 		cdunlock(cd);
 		break;
-		
+
 	case DIOCWLABEL:
 		error = EBADF;
 		break;
@@ -920,7 +927,7 @@ cdioctl(dev, cmd, addr, flag, p)
 
 		if ((error = cd_read_toc(cd, 0, 0, &th, sizeof(th), 0)) != 0)
 			break;
-		if (cd->sc_link->quirks & ADEV_LITTLETOC) 
+		if (cd->sc_link->quirks & ADEV_LITTLETOC)
 			th.len = letoh16(th.len);
 		else
 			th.len = betoh16(th.len);
@@ -1082,7 +1089,7 @@ cdioctl(dev, cmd, addr, flag, p)
 
 	close_tray:
 	case CDIOCCLOSE:
-		error = scsi_start(cd->sc_link, SSS_START|SSS_LOEJ, 
+		error = scsi_start(cd->sc_link, SSS_START|SSS_LOEJ,
 		    SCSI_IGNORE_NOT_READY | SCSI_IGNORE_MEDIA_CHANGE);
 		break;
 
@@ -1240,7 +1247,7 @@ cd_size(cd, flags)
 	struct scsi_read_cd_capacity scsi_cmd;
 	int blksize;
 	u_long size;
-	
+
 	/* Reasonable defaults for drives that don't support
 	   READ_CD_CAPACITY */
 	cd->params.blksize = 2048;
@@ -1310,7 +1317,7 @@ cd_setchan(cd, p0, p1, p2, p3, flags)
 		else
 			error = scsi_mode_select(cd->sc_link, SMS_PF,
 			    &data->hdr, flags, 20000);
-	}	
+	}
 
 	free(data, M_TEMP);
 	return (error);
@@ -1340,7 +1347,7 @@ cd_getvol(cd, arg, flags)
 		arg->vol[1] = audio->port[1].volume;
 		arg->vol[2] = audio->port[2].volume;
 		arg->vol[3] = audio->port[3].volume;
-	}		
+	}
 
 	free(data, M_TEMP);
 	return (0);
@@ -1369,7 +1376,7 @@ cd_setvol(cd, arg, flags)
 	if (error != 0) {
 		free(data, M_TEMP);
 		return (error);
-	}	
+	}
 
 	mask_volume[0] = audio->port[0].volume;
 	mask_volume[1] = audio->port[1].volume;
@@ -1383,7 +1390,7 @@ cd_setvol(cd, arg, flags)
 	if (error != 0) {
 		free(data, M_TEMP);
 		return (error);
-	}	
+	}
 
 	audio->port[0].volume = arg->vol[0] & mask_volume[0];
 	audio->port[1].volume = arg->vol[1] & mask_volume[1];
@@ -1412,7 +1419,7 @@ cd_load_unload(cd, options, slot)
 	cmd.opcode = LOAD_UNLOAD;
 	cmd.options = options;    /* ioctl uses ATAPI values */
 	cmd.slot = slot;
-	
+
 	return (scsi_scsi_cmd(cd->sc_link, (struct scsi_generic *)&cmd,
 	    sizeof(cmd), 0, 0, CDRETRIES, 200000, NULL, 0));
 }
@@ -1894,7 +1901,7 @@ dvd_read_disckey(cd, s)
 	struct scsi_read_dvd_structure cmd;
 	struct scsi_read_dvd_structure_data *buf;
 	int error;
-	
+
 	buf = malloc(sizeof(*buf), M_TEMP, M_WAITOK);
 	if (buf == NULL)
 		return (ENOMEM);
@@ -1950,7 +1957,7 @@ dvd_read_manufact(cd, s)
 	struct scsi_read_dvd_structure cmd;
 	struct scsi_read_dvd_structure_data *buf;
 	int error;
-	
+
 	buf = malloc(sizeof(*buf), M_TEMP, M_WAITOK);
 	if (buf == NULL)
 		return (ENOMEM);
@@ -1970,7 +1977,7 @@ dvd_read_manufact(cd, s)
 			bcopy(buf->data, s->manufact.value, s->manufact.len);
 		else
 			error = EIO;
-	}	
+	}
 
 	free(buf, M_TEMP);
 	return (error);
@@ -1996,4 +2003,18 @@ dvd_read_struct(cd, s)
 	default:
 		return (EINVAL);
 	}
+}
+
+void
+cd_powerhook(int why, void *arg)
+{
+	struct cd_softc *cd = arg;
+
+	/*
+	 * When resuming, hardware may have forgotten we locked it. So if
+	 * there are any open partitions, lock the CD.
+	 */
+	if (why == PWR_RESUME && cd->sc_dk.dk_openmask != 0)
+		scsi_prevent(cd->sc_link, PR_PREVENT,
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
 }

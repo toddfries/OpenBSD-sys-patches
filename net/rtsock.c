@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.53 2006/02/23 14:15:53 claudio Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.62 2006/06/16 17:45:37 henning Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -175,6 +175,7 @@ route_output(struct mbuf *m, ...)
 	struct sockaddr_rtlabel	 sa_rt;
 	const char		*label;
 	va_list			 ap;
+	u_int			 tableid;
 
 	va_start(ap, m);
 	so = va_arg(ap, struct socket *);
@@ -205,6 +206,19 @@ route_output(struct mbuf *m, ...)
 		goto flush;
 	}
 	rtm->rtm_pid = curproc->p_pid;
+
+	tableid = rtm->rtm_tableid;
+	if (!rtable_exists(tableid)) {
+		if (rtm->rtm_type == RTM_ADD) {
+			if (rtable_add(tableid)) {
+				error = EINVAL;
+				goto flush;
+			}
+		} else {
+			error = EINVAL;
+			goto flush;
+		}
+	}
 
 	bzero(&info, sizeof(info));
 	info.rti_addrs = rtm->rtm_addrs;
@@ -244,7 +258,7 @@ route_output(struct mbuf *m, ...)
 			error = EINVAL;
 			goto flush;
 		}
-		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt);
+		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt, tableid);
 		if (error == 0 && saved_nrt) {
 			rt_setmetrics(rtm->rtm_inits, &rtm->rtm_rmx,
 			    &saved_nrt->rt_rmx);
@@ -254,7 +268,7 @@ route_output(struct mbuf *m, ...)
 		}
 		break;
 	case RTM_DELETE:
-		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt);
+		error = rtrequest1(rtm->rtm_type, &info, &saved_nrt, tableid);
 		if (error == 0) {
 			(rt = saved_nrt)->rt_refcnt++;
 			goto report;
@@ -263,11 +277,11 @@ route_output(struct mbuf *m, ...)
 	case RTM_GET:
 	case RTM_CHANGE:
 	case RTM_LOCK:
-		if ((rnh = rt_tables[dst->sa_family]) == 0) {
+		if ((rnh = rt_gettable(dst->sa_family, tableid)) == NULL) {
 			error = EAFNOSUPPORT;
 			goto flush;
 		}
-		rn = rnh->rnh_lookup(dst, netmask, rnh);
+		rn = rt_lookup(dst, netmask, tableid);
 		if (rn == NULL || (rn->rn_flags & RNF_ROOT) != 0) {
 			error = ESRCH;
 			goto flush;
@@ -300,7 +314,7 @@ route_output(struct mbuf *m, ...)
 		 * For host routes only a longest prefix match is returned
 		 * so it is necessary to compare the existence of the netmaks.
 		 * If both have a netmask rn_lookup() did a perfect match and
-		 * if non of them have a netmask both are host routes which is
+		 * if none of them have a netmask both are host routes which is
 		 * also a perfect match.
 		 */
 		if (rtm->rtm_type != RTM_GET && !rt_mask(rt) != !netmask) {
@@ -366,7 +380,7 @@ report:
 			 */
 			if ((error = rt_getifa(&info)) != 0)
 				goto flush;
-			if (gate && rt_setgate(rt, rt_key(rt), gate)) {
+			if (gate && rt_setgate(rt, rt_key(rt), gate, tableid)) {
 				error = EDQUOT;
 				goto flush;
 			}
@@ -639,7 +653,8 @@ again:
  * destination.
  */
 void
-rt_missmsg(int type, struct rt_addrinfo *rtinfo, int flags, int error)
+rt_missmsg(int type, struct rt_addrinfo *rtinfo, int flags,
+    struct ifnet *ifp, int error, u_int tableid)
 {
 	struct rt_msghdr	*rtm;
 	struct mbuf		*m;
@@ -653,7 +668,10 @@ rt_missmsg(int type, struct rt_addrinfo *rtinfo, int flags, int error)
 	rtm = mtod(m, struct rt_msghdr *);
 	rtm->rtm_flags = RTF_DONE | flags;
 	rtm->rtm_errno = error;
+	rtm->rtm_tableid = tableid;
 	rtm->rtm_addrs = rtinfo->rti_addrs;
+	if (ifp != NULL)
+		rtm->rtm_index = ifp->if_index;
 	if (sa == NULL)
 		route_proto.sp_protocol = 0;
 	else
@@ -790,6 +808,8 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 	struct rtentry		*rt = (struct rtentry *)rn;
 	int			 error = 0, size;
 	struct rt_addrinfo	 info;
+	struct sockaddr_rtlabel	 sa_rt;
+	const char		*label;
 
 	if (w->w_op == NET_RT_FLAGS && !(rt->rt_flags & w->w_arg))
 		return 0;
@@ -804,6 +824,18 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 		if (rt->rt_ifp->if_flags & IFF_POINTOPOINT)
 			brdaddr = rt->rt_ifa->ifa_dstaddr;
 	}
+	if (rt->rt_labelid) {
+		bzero(&sa_rt, sizeof(sa_rt));
+		sa_rt.sr_len = sizeof(sa_rt);
+		label = rtlabel_id2name(rt->rt_labelid);
+		if (label != NULL) {
+			strlcpy(sa_rt.sr_label, label,
+			    sizeof(sa_rt.sr_label));
+			info.rti_info[RTAX_LABEL] =
+			    (struct sockaddr *)&sa_rt;
+		}
+	}
+
 	size = rt_msg2(RTM_GET, &info, NULL, w);
 	if (w->w_where && w->w_tmem && w->w_needed <= 0) {
 		struct rt_msghdr *rtm = (struct rt_msghdr *)w->w_tmem;
@@ -811,6 +843,7 @@ sysctl_dumpentry(struct radix_node *rn, void *v)
 		rtm->rtm_flags = rt->rt_flags;
 		rtm->rtm_use = 0;
 		rt_getmetrics(&rt->rt_rmx, &rtm->rtm_rmx);
+		rtm->rtm_rmx.rmx_refcnt = (u_long)rt->rt_refcnt;
 		rtm->rtm_index = rt->rt_ifp->if_index;
 		rtm->rtm_errno = rtm->rtm_pid = rtm->rtm_seq = 0;
 		rtm->rtm_addrs = info.rti_addrs;
@@ -888,10 +921,11 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 	int			 i, s, error = EINVAL;
 	u_char  		 af;
 	struct walkarg		 w;
+	u_int			 tableid = 0;
 
 	if (new)
 		return (EPERM);
-	if (namelen != 3)
+	if (namelen < 3 || namelen > 4)
 		return (EINVAL);
 	af = name[0];
 	bzero(&w, sizeof(w));
@@ -901,13 +935,20 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 	w.w_op = name[1];
 	w.w_arg = name[2];
 
+	if (namelen == 4) {
+		tableid = name[3];
+		if (!rtable_exists(tableid))
+			return (EINVAL);
+	}
+
 	s = splsoftnet();
 	switch (w.w_op) {
 
 	case NET_RT_DUMP:
 	case NET_RT_FLAGS:
 		for (i = 1; i <= AF_MAX; i++)
-			if ((rnh = rt_tables[i]) && (af == 0 || af == i) &&
+			if ((rnh = rt_gettable(i, tableid)) != NULL &&
+			    (af == 0 || af == i) &&
 			    (error = (*rnh->rnh_walktree)(rnh,
 			    sysctl_dumpentry, &w)))
 				break;
@@ -915,6 +956,13 @@ sysctl_rtable(int *name, u_int namelen, void *where, size_t *given, void *new,
 
 	case NET_RT_IFLIST:
 		error = sysctl_iflist(af, &w);
+		break;
+
+	case NET_RT_STATS:
+		error = sysctl_rdstruct(where, given, new,
+		    &rtstat, sizeof(rtstat));
+		splx(s);
+		return (error);
 	}
 	splx(s);
 	if (w.w_tmem)

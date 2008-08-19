@@ -1,4 +1,4 @@
-/*	$OpenBSD: busdma.c,v 1.8 2005/11/06 10:26:56 martin Exp $ */
+/*	$OpenBSD: busdma.c,v 1.11 2006/09/01 20:07:56 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -253,7 +253,7 @@ _dmamap_load_mbuf(t, map, m, flags)
 		m = m->m_next;
 		if (m && i >= map->_dm_segcnt) {
 			/* Exceeded the size of our dmamap */
-			return E2BIG;
+			return EFBIG;
 		}
 	}
 	map->dm_nsegs = i;
@@ -340,7 +340,7 @@ _dmamap_sync(t, map, addr, size, op)
 	bus_dmamap_t map;
 	bus_addr_t addr;
 	bus_size_t size;
-	bus_dmasync_op_t op;
+	int op;
 {
 #define SYNC_R 0
 #define SYNC_W 1
@@ -483,7 +483,7 @@ _dmamem_map(t, segs, nsegs, size, kvap, flags)
 	int curseg;
 
 	size = round_page(size);
-	va = uvm_km_valloc(kmem_map, size);
+	va = uvm_km_valloc(kernel_map, size);
 	if (va == 0)
 		return (ENOMEM);
 
@@ -526,7 +526,7 @@ _dmamem_unmap(t, kva, size)
 #endif
 
 	size = round_page(size);
-	uvm_km_free(kmem_map, (vaddr_t)kva, size);
+	uvm_km_free(kernel_map, (vaddr_t)kva, size);
 }
 
 /*

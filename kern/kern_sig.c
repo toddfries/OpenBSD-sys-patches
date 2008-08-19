@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.81 2006/02/20 19:39:11 miod Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.84 2006/06/15 20:08:01 miod Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -56,7 +56,6 @@
 #include <sys/kernel.h>
 #include <sys/wait.h>
 #include <sys/ktrace.h>
-#include <sys/syslog.h>
 #include <sys/stat.h>
 #include <sys/core.h>
 #include <sys/malloc.h>
@@ -80,7 +79,6 @@ struct filterops sig_filtops =
 	{ 0, filt_sigattach, filt_sigdetach, filt_signal };
 
 void proc_stop(struct proc *p);
-void killproc(struct proc *, char *);
 int cansignal(struct proc *, struct pcred *, struct proc *, int);
 
 struct pool sigacts_pool;	/* memory pool for sigacts structures */
@@ -1042,21 +1040,9 @@ issignal(struct proc *p)
 			p->p_xstat = signum;
 
 			SCHED_LOCK(s);	/* protect mi_switch */
-			if (p->p_flag & P_FSTRACE) {
-#ifdef	PROCFS
-				/* procfs debugging */
-				p->p_stat = SSTOP;
-				wakeup(p);
-				mi_switch();
-#else
-				panic("procfs debugging");
-#endif
-			} else {
-				/* ptrace debugging */
-				psignal(p->p_pptr, SIGCHLD);
-				proc_stop(p);
-				mi_switch();
-			}
+			psignal(p->p_pptr, SIGCHLD);
+			proc_stop(p);
+			mi_switch();
 			SCHED_UNLOCK(s);
 
 			/*
@@ -1279,18 +1265,6 @@ postsig(int signum)
 }
 
 /*
- * Kill the current process for stated reason.
- */
-void
-killproc(struct proc *p, char *why)
-{
-
-	log(LOG_ERR, "pid %d was killed: %s\n", p->p_pid, why);
-	uprintf("sorry, pid %d was killed: %s\n", p->p_pid, why);
-	psignal(p, SIGKILL);
-}
-
-/*
  * Force the current process to exit with the specified signal, dumping core
  * if appropriate.  We bypass the normal tests for masked and caught signals,
  * allowing unrecoverable failures to terminate the process without changing
@@ -1397,42 +1371,16 @@ coredump(struct proc *p)
 	error = cpu_coredump(p, vp, cred, &core);
 	if (error)
 		goto out;
-	if (core.c_midmag == 0) {
-		/* XXX
-		 * cpu_coredump() didn't bother to set the magic; assume
-		 * this is a request to do a traditional dump. cpu_coredump()
-		 * is still responsible for setting sensible values in
-		 * the core header.
-		 */
-		if (core.c_cpusize == 0)
-			core.c_cpusize = USPACE; /* Just in case */
-		error = vn_rdwr(UIO_WRITE, vp, vm->vm_daddr,
-		    (int)core.c_dsize,
-		    (off_t)core.c_cpusize, UIO_USERSPACE,
-		    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
-		if (error)
-			goto out;
-		error = vn_rdwr(UIO_WRITE, vp,
-#ifdef MACHINE_STACK_GROWS_UP
-		    (caddr_t) USRSTACK,
-#else
-		    (caddr_t) trunc_page(USRSTACK - ctob(vm->vm_ssize)),
-#endif
-		    core.c_ssize,
-		    (off_t)(core.c_cpusize + core.c_dsize), UIO_USERSPACE,
-		    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
-	} else {
-		/*
-		 * vm_coredump() spits out all appropriate segments.
-		 * All that's left to do is to write the core header.
-		 */
-		error = uvm_coredump(p, vp, cred, &core);
-		if (error)
-			goto out;
-		error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&core,
-		    (int)core.c_hdrsize, (off_t)0,
-		    UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, cred, NULL, p);
-	}
+	/*
+	 * uvm_coredump() spits out all appropriate segments.
+	 * All that's left to do is to write the core header.
+	 */
+	error = uvm_coredump(p, vp, cred, &core);
+	if (error)
+		goto out;
+	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&core,
+	    (int)core.c_hdrsize, (off_t)0,
+	    UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, cred, NULL, p);
 out:
 	VOP_UNLOCK(vp, 0, p);
 	error1 = vn_close(vp, FWRITE, cred, p);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.23 2006/01/01 11:59:39 miod Exp $ */
+/*	$OpenBSD: zs.c,v 1.25 2006/06/11 20:46:50 miod Exp $ */
 
 /*
  * Copyright (c) 2000 Steve Murphree, Jr.
@@ -129,7 +129,7 @@ int   zsirq(void *);
 int   zsregs(vaddr_t, int, volatile u_char **, volatile u_char **);
 int   zspclk(void);
 
-u_long   sir_zs;
+u_int8_t sir_zs;
 void  zs_softint(void *);
 
 #define zsunit(dev)	(minor(dev) >> 1)
@@ -387,7 +387,7 @@ zsclose(dev, flag, mode, p)
 	struct zssoftc *sc;
 	int s;
 
-	if (zsunit(dev) > zs_cd.cd_ndevs ||
+	if (zsunit(dev) >= zs_cd.cd_ndevs ||
 		 (sc = (struct zssoftc *) zs_cd.cd_devs[zsunit(dev)]) == NULL)
 		return (ENODEV);
 	zp = &sc->sc_zs[zsside(dev)];

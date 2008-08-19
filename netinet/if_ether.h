@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.h,v 1.35 2005/03/28 06:19:58 tedu Exp $	*/
+/*	$OpenBSD: if_ether.h,v 1.38 2006/06/28 12:13:24 claudio Exp $	*/
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -45,7 +45,6 @@
 #define ETHER_MIN_LEN	64	/* Minimum frame length, CRC included	*/
 #define ETHER_MAX_LEN	1518	/* Maximum frame length, CRC included	*/
 #define ETHER_MAX_DIX_LEN	1536	/* Maximum DIX frame length	*/
-#define ETHER_MAX_LEN_JUMBO	9018	/* max jumbo frame len, including CRC */
 
 /*
  * Some Ethernet extensions.
@@ -82,7 +81,6 @@ struct	ether_header {
 
 #define	ETHERMTU	(ETHER_MAX_LEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
 #define	ETHERMIN	(ETHER_MIN_LEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
-#define	ETHERMTU_JUMBO	(ETHER_MAX_LEN_JUMBO - ETHER_HDR_LEN - ETHER_CRC_LEN)
 
 /*
  * Ethernet CRC32 polynomials (big- and little-endian verions).
@@ -243,11 +241,11 @@ struct ether_multistep {
 	/* struct arpcom *ac; */					\
 	/* struct ether_multi *enm; */					\
 {									\
-	for ((enm) = (ac)->ac_multiaddrs.lh_first;			\
-	    (enm) != NULL &&						\
+	for ((enm) = LIST_FIRST(&(ac)->ac_multiaddrs);			\
+	    (enm) != LIST_END(&(ac)->ac_multiaddrs) &&			\
 	    (bcmp((enm)->enm_addrlo, (addrlo), ETHER_ADDR_LEN) != 0 ||	\
 	     bcmp((enm)->enm_addrhi, (addrhi), ETHER_ADDR_LEN) != 0);	\
-		(enm) = (enm)->enm_list.le_next);			\
+		(enm) = LIST_NEXT((enm), enm_list));			\
 }
 
 /*
@@ -262,7 +260,7 @@ struct ether_multistep {
 	/* struct ether_multi *enm; */  \
 { \
 	if (((enm) = (step).e_enm) != NULL) \
-		(step).e_enm = (enm)->enm_list.le_next; \
+		(step).e_enm = LIST_NEXT((enm), enm_list); \
 }
 
 #define ETHER_FIRST_MULTI(step, ac, enm) \
@@ -270,7 +268,7 @@ struct ether_multistep {
 	/* struct arpcom *ac; */ \
 	/* struct ether_multi *enm; */ \
 { \
-	(step).e_enm = (ac)->ac_multiaddrs.lh_first; \
+	(step).e_enm = LIST_FIRST(&(ac)->ac_multiaddrs); \
 	ETHER_NEXT_MULTI((step), (enm)); \
 }
 
@@ -278,12 +276,7 @@ struct ether_multistep {
 
 extern struct ifnet *myip_ifp;
 
-void arp_rtrequest(int, struct rtentry *, struct rt_addrinfo *);
-int arpresolve(struct arpcom *, struct rtentry *, struct mbuf *,
-		    struct sockaddr *, u_char *);
-void arpintr(void);
 int arpioctl(u_long, caddr_t);
-void arp_ifinit(struct arpcom *, struct ifaddr *);
 void arprequest(struct ifnet *, u_int32_t *, u_int32_t *, u_int8_t *);
 void revarpinput(struct mbuf *);
 void in_revarpinput(struct mbuf *);

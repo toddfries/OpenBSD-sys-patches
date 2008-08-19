@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.176 2005/12/11 21:45:31 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.184 2006/07/07 19:36:56 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -73,9 +73,7 @@
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/kcore.h>
-#include <machine/locore.h>
 #include <machine/reg.h>
-#include <machine/trap.h>
 
 #include <dev/cons.h>
 
@@ -86,40 +84,35 @@
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
 #include <ddb/db_interface.h>
+#include <ddb/db_var.h>
 #endif /* DDB */
-
-typedef struct {
-	unsigned word_one, word_two;
-} m88k_exception_vector_area;
 
 caddr_t	allocsys(caddr_t);
 void	consinit(void);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(struct mvmeprom_brdid *);
+u_int	getipl(void);
 void	identifycpu(void);
 void	mvme_bootstrap(void);
+void	mvme88k_vector_init(u_int32_t *, u_int32_t *);
+void	myetheraddr(u_char *);
 void	savectx(struct pcb *);
 void	secondary_main(void);
 void	secondary_pre_main(void);
-void	setupiackvectors(void);
-void	vector_init(m88k_exception_vector_area *, unsigned *);
 void	_doboot(void);
 
 extern void setlevel(unsigned int);
 
-extern void m187_bootstrap(void);
-extern vaddr_t m187_memsize(void);
-extern void m187_setupiackvectors(void);
-extern void m187_startup(void);
-extern void m188_bootstrap(void);
-extern vaddr_t m188_memsize(void);
-extern void m188_setupiackvectors(void);
-extern void m188_startup(void);
-extern void m197_bootstrap(void);
-extern vaddr_t m197_memsize(void);
-extern void m197_setupiackvectors(void);
-extern void m197_startup(void);
+extern void	m187_bootstrap(void);
+extern vaddr_t	m187_memsize(void);
+extern void	m187_startup(void);
+extern void	m188_bootstrap(void);
+extern vaddr_t	m188_memsize(void);
+extern void	m188_startup(void);
+extern void	m197_bootstrap(void);
+extern vaddr_t	m197_memsize(void);
+extern void	m197_startup(void);
 
 intrhand_t intr_handlers[NVMEINTR];
 
@@ -130,28 +123,10 @@ u_int (*md_getipl)(void);
 u_int (*md_setipl)(u_int);
 u_int (*md_raiseipl)(u_int);
 
-#ifdef MVME188
-volatile u_int8_t *ivec[8 + 1];
-#else
-volatile u_int8_t *ivec[8];
-#endif
-
 int physmem;	  /* available physical memory, in pages */
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
-
-/*
- * iomap stuff is for managing chunks of virtual address space that
- * can be allocated to IO devices.
- * VMEbus drivers use this at this now. Only on-board IO devices' addresses
- * are mapped so that pa == va. XXX smurph.
- */
-
-vaddr_t iomapbase;
-
-struct extent *iomap_extent;
-struct vm_map *iomap_map;
 
 #ifdef MULTIPROCESSOR
 __cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
@@ -204,9 +179,6 @@ extern struct user *proc0paddr;
 
 /*
  * This is to fake out the console routines, while booting.
- * We could use directly the bugtty console, but we want to be able to
- * configure a kernel without bugtty since we do not necessarily need a
- * full-blown console driver.
  */
 cons_decl(boot);
 #define bootcnpollc nullcnpollc
@@ -464,17 +436,6 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	/*
-	 * Allocate map for external I/O.
-	 */
-	iomap_map = uvm_km_suballoc(kernel_map, &iomapbase, &maxaddr,
-	    IOMAP_SIZE, 0, FALSE, NULL);
-
-	iomap_extent = extent_create("iomap", iomapbase,
-	    iomapbase + IOMAP_SIZE, M_DEVBUF, NULL, 0, EX_NOWAIT);
-	if (iomap_extent == NULL)
-		panic("unable to allocate extent for iomap");
-
 	printf("avail mem = %ld (%d pages)\n", ptoa(uvmexp.free), uvmexp.free);
 	printf("using %d buffers containing %d bytes of memory\n", nbuf,
 	    bufpages * PAGE_SIZE);
@@ -489,7 +450,6 @@ cpu_startup()
 	 */
 	for (i = 0; i < NVMEINTR; i++)
 		SLIST_INIT(&intr_handlers[i]);
-	setupiackvectors();
 
 	/*
 	 * Configure the system.
@@ -783,32 +743,6 @@ abort:
 	}
 }
 
-/*
- * fill up ivec array with interrupt response vector addresses.
- */
-void
-setupiackvectors()
-{
-	switch (brdtyp) {
-#ifdef MVME187
-	case BRD_187:
-	case BRD_8120:
-		m187_setupiackvectors();
-		break;
-#endif
-#ifdef MVME188
-	case BRD_188:
-		m188_setupiackvectors();
-		break;
-#endif
-#ifdef MVME197
-	case BRD_197:
-		m197_setupiackvectors();
-		break;
-#endif
-	}
-}
-
 #ifdef MULTIPROCESSOR
 
 /*
@@ -931,6 +865,23 @@ intr_establish(int vec, struct intrhand *ihand, const char *name)
 	return (0);
 }
 
+void
+nmihand(void *frame)
+{
+#ifdef DDB
+	printf("Abort switch pressed\n");
+	if (db_console) {
+		/*
+		 * We can't use Debugger() here, as we are coming from an
+		 * exception handler, and can't assume anything about the
+		 * state we are in. Invoke the post-trap ddb entry directly.
+		 */
+		extern void m88k_db_trap(int, struct trapframe *);
+		m88k_db_trap(T_KDB_ENTRY, (struct trapframe *)frame);
+	}
+#endif
+}
+
 int
 cpu_exec_aout_makecmds(p, epp)
 	struct proc *p;
@@ -1000,6 +951,22 @@ myetheraddr(cp)
 	bcopy(&brdid.etheraddr, cp, 6);
 }
 
+void
+mvme88k_vector_init(u_int32_t *vbr, u_int32_t *vectors)
+{
+	extern void vector_init(u_int32_t *, u_int32_t *);	/* gross */
+
+	/* Save BUG vector */
+	bugvec[0] = vbr[MVMEPROM_VECTOR * 2 + 0];
+	bugvec[1] = vbr[MVMEPROM_VECTOR * 2 + 1];
+
+	vector_init(vbr, vectors);
+
+	/* Save new BUG vector */
+	sysbugvec[0] = vbr[MVMEPROM_VECTOR * 2 + 0];
+	sysbugvec[1] = vbr[MVMEPROM_VECTOR * 2 + 1];
+}
+
 /*
  * Called from locore.S during boot,
  * this is the first C code that's run.
@@ -1017,6 +984,12 @@ mvme_bootstrap()
 	buginit();
 	bugbrdid(&brdid);
 	brdtyp = brdid.model;
+
+	/*
+	 * Use the BUG as console for now. After autoconf, we'll switch to
+	 * real hardware.
+	 */
+	cn_tab = &bootcons;
 
 	/*
 	 * Set up interrupt and fp exception handlers based on the machine.
@@ -1041,12 +1014,6 @@ mvme_bootstrap()
 	default:
 		panic("Sorry, this kernel does not support MVME%x", brdtyp);
 	}
-
-	/*
-	 * Use the BUG as console for now. After autoconf, we'll switch to
-	 * real hardware.
-	 */
-	cn_tab = &bootcons;
 
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();
@@ -1180,87 +1147,13 @@ bootcnputc(dev, c)
 	dev_t dev;
 	int c;
 {
-	if ((char)c == '\n')
-		bugoutchr('\r');
-	bugoutchr((char)c);
+	if (c == '\n')
+		bugpcrlf();
+	else
+		bugoutchr(c);
 }
 
-#define SIGSYS_MAX	501
-#define SIGTRAP_MAX	510
-
-#define EMPTY_BR	0xc0000000	/* empty "br" instruction */
-#define NO_OP 		0xf4005800	/* "or r0, r0, r0" */
-
-#define BRANCH(FROM, TO) \
-	(EMPTY_BR | ((vaddr_t)(TO) - (vaddr_t)(FROM)) >> 2)
-
-#define SET_VECTOR(NUM, VALUE) \
-	do { \
-		vector[NUM].word_one = NO_OP; \
-		vector[NUM].word_two = BRANCH(&vector[NUM].word_two, VALUE); \
-	} while (0)
-
-/*
- * vector_init(vector, vector_init_list)
- *
- * This routine sets up the m88k vector table for the running processor.
- * It is called with a very little stack, and interrupts disabled,
- * so don't call any other functions!
- */
-void
-vector_init(m88k_exception_vector_area *vector, unsigned *vector_init_list)
-{
-	unsigned num;
-	unsigned vec;
-
-	for (num = 0; (vec = vector_init_list[num]) != END_OF_VECTOR_LIST;
-	    num++) {
-		if (vec != UNKNOWN_HANDLER)
-			SET_VECTOR(num, vec);
-	}
-
-	/* Save BUG vector */
-	bugvec[0] = vector[MVMEPROM_VECTOR].word_one;
-	bugvec[1] = vector[MVMEPROM_VECTOR].word_two;
-
-#ifdef M88110
-	if (CPU_IS88110) {
-		for (; num <= SIGSYS_MAX; num++)
-			SET_VECTOR(num, m88110_sigsys);
-
-		for (; num <= SIGTRAP_MAX; num++)
-			SET_VECTOR(num, m88110_sigtrap);
-
-		SET_VECTOR(450, m88110_syscall_handler);
-		SET_VECTOR(451, m88110_cache_flush_handler);
-		SET_VECTOR(504, m88110_stepbpt);
-		SET_VECTOR(511, m88110_userbpt);
-	}
-#endif
-#ifdef M88100
-	if (CPU_IS88100) {
-		for (; num <= SIGSYS_MAX; num++)
-			SET_VECTOR(num, sigsys);
-
-		for (; num <= SIGTRAP_MAX; num++)
-			SET_VECTOR(num, sigtrap);
-
-		SET_VECTOR(450, syscall_handler);
-		SET_VECTOR(451, cache_flush_handler);
-		SET_VECTOR(504, stepbpt);
-		SET_VECTOR(511, userbpt);
-	}
-#endif
-
-	/* GCC will by default produce explicit trap 503 for division by zero */
-	SET_VECTOR(503, vector_init_list[T_ZERODIV]);
-
-	/* Save new BUG vector */
-	sysbugvec[0] = vector[MVMEPROM_VECTOR].word_one;
-	sysbugvec[1] = vector[MVMEPROM_VECTOR].word_two;
-}
-
-unsigned
+u_int
 getipl(void)
 {
 	u_int curspl, psr;

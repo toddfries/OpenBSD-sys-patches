@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcd.c,v 1.35 2006/01/02 05:21:40 brad Exp $ */
+/*	$OpenBSD: mcd.c,v 1.40 2006/08/13 16:24:13 krw Exp $ */
 /*	$NetBSD: mcd.c,v 1.60 1998/01/14 12:14:41 drochner Exp $	*/
 
 /*
@@ -81,8 +81,6 @@
 #include <dev/isa/isavar.h>
 #include <dev/isa/mcdreg.h>
 #include <dev/isa/opti.h>
-
-#include <lib/libkern/libkern.h>
 
 #ifndef MCDDEBUG
 #define MCD_TRACE(fmt,a,b,c,d)
@@ -254,8 +252,6 @@ mcdattach(parent, self, aux)
 	sc->sc_dk.dk_driver = &mcddkdriver;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
 	disk_attach(&sc->sc_dk);
-
-	dk_establish(&sc->sc_dk, &sc->sc_dev);
 
 	printf(": model %s\n", sc->type != 0 ? sc->type : "unknown");
 
@@ -742,8 +738,7 @@ mcdgetdisklabel(dev, sc, lp, clp, spoofonly)
 	lp->d_flags = D_REMOVABLE;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size =
-	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
+	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 
@@ -910,6 +905,7 @@ mcdprobe(parent, match, aux)
 	if (!opti_cd_setup(OPTI_MITSUMI, ia->ia_iobase, ia->ia_irq, ia->ia_drq))
 		/* printf("mcdprobe: could not setup OPTi chipset.\n") */;
 
+	bzero(&sc, sizeof sc);
 	sc.debug = 0;
 	sc.probe = 1;
 
@@ -973,7 +969,7 @@ mcd_getresult(sc, res)
 	if ((x = mcd_getreply(sc)) < 0) {
 		if (sc->debug)
 			printf(" timeout\n");
-		else if (sc->probe)
+		else if (sc->probe == 0)
 			printf("%s: timeout in getresult\n", sc->sc_dev.dv_xname);
 		return EIO;
 	}

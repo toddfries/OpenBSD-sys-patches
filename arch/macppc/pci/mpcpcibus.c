@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibus.c,v 1.30 2006/02/11 05:21:40 brad Exp $ */
+/*	$OpenBSD: mpcpcibus.c,v 1.32 2006/05/10 00:07:40 brad Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -444,6 +444,7 @@ mpcpcibrattach(struct device *parent, struct device *self, void *aux)
 	pba.pba_memt = &sc->sc_membus_space;
 	pba.pba_pc = &lcp->lc_pc;
 	pba.pba_bus = 0;
+	pba.pba_bridgetag = NULL;
 
 	/* we want to check pci irq settings */
 	if (of_node != 0) {
@@ -977,10 +978,4 @@ mpc_cfg_read_4(struct pcibr_config *cp, u_int32_t reg)
 	_v_ = bus_space_read_4(cp->lc_iot, cp->ioh_cfc, 0);
 	splx(s);
 	return(_v_);
-}
-
-int
-pci_intr_line(pci_intr_handle_t ih)
-{
-	return (ih);
 }

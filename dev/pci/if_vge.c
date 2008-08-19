@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.18 2005/11/07 02:57:45 brad Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.27 2006/07/28 15:58:38 kettenis Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -92,6 +92,7 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -188,7 +189,7 @@ const struct pci_matchid vge_devices[] = {
 void
 vge_eeprom_getword(struct vge_softc *sc, int addr, u_int16_t *dest)
 {
-	register int		i;
+	int			i;
 	u_int16_t		word = 0;
 
 	/*
@@ -532,7 +533,7 @@ allmulti:
 void
 vge_reset(struct vge_softc *sc)
 {
-	register int		i;
+	int			i;
 
 	CSR_WRITE_1(sc, VGE_CRS1, VGE_CR1_SOFTRESET);
 
@@ -709,27 +710,15 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet		*ifp;
 	int			error = 0, i;
 	bus_size_t		iosize;
-	pcireg_t		command;
 
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	if ((command & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE)) == 0) {
-		printf(": neither i/o nor mem enabled\n");
-		return;
-	}
-
-	if (command & PCI_COMMAND_MEM_ENABLE) {
-		if (pci_mapreg_map(pa, VGE_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
-		    &sc->vge_btag, &sc->vge_bhandle, NULL, &iosize, 0)) {
-			printf(": can't map mem space\n");
-			return;
-		}
-	} else {
+	if (pci_mapreg_map(pa, VGE_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->vge_btag, &sc->vge_bhandle, NULL, &iosize, 0)) {
 		if (pci_mapreg_map(pa, VGE_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
 		    &sc->vge_btag, &sc->vge_bhandle, NULL, &iosize, 0)) {
-			printf(": can't map i/o space\n");
+			printf(": can't map mem or i/o space\n");
 			return;
 		}
 	}
@@ -782,11 +771,14 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_watchdog = vge_watchdog;
 	ifp->if_init = vge_init;
 	ifp->if_baudrate = 1000000000;
+#ifdef VGE_JUMBO
+	ifp->if_hardmtu = VGE_JUMBO_MTU;
+#endif
 	IFQ_SET_MAXLEN(&ifp->if_snd, VGE_IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU|IFCAP_CSUM_IPv4|
-				IFCAP_CSUM_TCPv4|IFCAP_CSUM_UDPv4;
+	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
+				IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
 #ifdef VGE_VLAN
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -1110,7 +1102,7 @@ vge_rxeof(struct vge_softc *sc)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 
@@ -1435,7 +1427,7 @@ vge_start(struct ifnet *ifp)
 		 */
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head);
+			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		if (vge_encap(sc, m_head, idx)) {
@@ -1752,7 +1744,7 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU_JUMBO)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
 		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
@@ -1796,7 +1788,7 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -1829,7 +1821,7 @@ vge_watchdog(struct ifnet *ifp)
 void
 vge_stop(struct vge_softc *sc)
 {
-	register int		i;
+	int			i;
 	struct ifnet		*ifp;
 
 	ifp = &sc->arpcom.ac_if;

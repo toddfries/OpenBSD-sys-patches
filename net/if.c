@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.143.2.1 2007/03/28 19:47:57 henning Exp $	*/
+/*	$OpenBSD: if.c,v 1.149.2.1 2007/03/28 19:45:48 henning Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -126,7 +126,6 @@
 
 void	if_attachsetup(struct ifnet *);
 void	if_attachdomain1(struct ifnet *);
-int	if_detach_rtdelete(struct radix_node *, void *);
 
 int	ifqmaxlen = IFQ_MAXLEN;
 
@@ -138,6 +137,8 @@ void	if_detached_watchdog(struct ifnet *);
 
 int	if_getgroup(caddr_t, struct ifnet *);
 int	if_getgroupmembers(caddr_t);
+int	if_getgroupattribs(caddr_t);
+int	if_setgroupattribs(caddr_t);
 
 int	if_clone_list(struct if_clonereq *);
 struct if_clone	*if_clone_lookup(const char *, int *);
@@ -214,7 +215,7 @@ if_attachsetup(struct ifnet *ifp)
 	/*
 	 * We have some arrays that should be indexed by if_index.
 	 * since if_index will grow dynamically, they should grow too.
-	 *	struct ifadd **ifnet_addrs
+	 *	struct ifaddr **ifnet_addrs
 	 *	struct ifnet **ifindex2ifnet
 	 */
 	if (ifnet_addrs == 0 || ifindex2ifnet == 0 || if_index >= if_indexlim) {
@@ -459,37 +460,6 @@ if_attach(struct ifnet *ifp)
 }
 
 /*
- * Delete a route if it has a specific interface for output.
- * This function complies to the rn_walktree callback API.
- *
- * Note that deleting a RTF_CLONING route can trigger the
- * deletion of more entries, so we need to cancel the walk
- * and return EAGAIN.  The caller should restart the walk
- * as long as EAGAIN is returned.
- */
-int
-if_detach_rtdelete(struct radix_node *rn, void *vifp)
-{
-	struct ifnet *ifp = vifp;
-	struct rtentry *rt = (struct rtentry *)rn;
-
-	if (rt->rt_ifp == ifp) {
-		int cloning = (rt->rt_flags & RTF_CLONING);
-
-		if (rtrequest(RTM_DELETE, rt_key(rt), rt->rt_gateway,
-		    rt_mask(rt), 0, NULL) == 0 && cloning)
-			return (EAGAIN);
-	}
-
-	/*
-	 * XXX There should be no need to check for rt_ifa belonging to this
-	 * interface, because then rt_ifp is set, right?
-	 */
-
-	return (0);
-}
-
-/*
  * Detach an interface from everything in the kernel.  Also deallocate
  * private resources.
  * XXX So far only the INET protocol family has been looked over
@@ -500,8 +470,7 @@ if_detach(struct ifnet *ifp)
 {
 	struct ifaddr *ifa;
 	struct ifg_list *ifg;
-	int i, s = splimp();
-	struct radix_node_head *rnh;
+	int s = splnet();
 	struct domain *dp;
 
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -539,19 +508,7 @@ if_detach(struct ifnet *ifp)
 	if (ALTQ_IS_ATTACHED(&ifp->if_snd))
 		altq_detach(&ifp->if_snd);
 #endif
-
-	/*
-	 * Find and remove all routes which is using this interface.
-	 * XXX Factor out into a route.c function?
-	 */
-	for (i = 1; i <= AF_MAX; i++) {
-		rnh = rt_tables[i];
-		if (rnh)
-			while ((*rnh->rnh_walktree)(rnh,
-			    if_detach_rtdelete, ifp) == EAGAIN)
-				;
-	}
-
+	rt_if_remove(ifp);
 #ifdef INET
 	rti_delete(ifp);
 #if NETHER > 0
@@ -730,7 +687,7 @@ if_clone_destroy(const char *name)
 		return (EOPNOTSUPP);
 
 	if (ifp->if_flags & IFF_UP) {
-		s = splimp();
+		s = splnet();
 		if_down(ifp);
 		splx(s);
 	}
@@ -1146,7 +1103,7 @@ if_slowtimo(void *arg)
 {
 	struct timeout *to = (struct timeout *)arg;
 	struct ifnet *ifp;
-	int s = splimp();
+	int s = splnet();
 
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp->if_timer == 0 || --ifp->if_timer)
@@ -1210,6 +1167,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		return (if_clone_list((struct if_clonereq *)data));
 	case SIOCGIFGMEMB:
 		return (if_getgroupmembers(data));
+	case SIOCGIFGATTR:
+		return (if_getgroupattribs(data));
+	case SIOCSIFGATTR:
+		if ((error = suser(p, 0)) != 0)
+			return (error);
+		return (if_setgroupattribs(data));
 	}
 
 	ifp = ifunit(ifr->ifr_name);
@@ -1239,12 +1202,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		if ((error = suser(p, 0)) != 0)
 			return (error);
 		if (ifp->if_flags & IFF_UP && (ifr->ifr_flags & IFF_UP) == 0) {
-			int s = splimp();
+			int s = splnet();
 			if_down(ifp);
 			splx(s);
 		}
 		if (ifr->ifr_flags & IFF_UP && (ifp->if_flags & IFF_UP) == 0) {
-			int s = splimp();
+			int s = splnet();
 			if_up(ifp);
 			splx(s);
 		}
@@ -1323,6 +1286,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	case SIOCAIFGROUP:
 		if ((error = suser(p, 0)))
 			return (error);
+		(*ifp->if_ioctl)(ifp, cmd, data); /* XXX error check */
 		ifgr = (struct ifgroupreq *)data;
 		if ((error = if_addgroup(ifp, ifgr->ifgr_group)))
 			return (error);
@@ -1336,6 +1300,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	case SIOCDIFGROUP:
 		if ((error = suser(p, 0)))
 			return (error);
+		(*ifp->if_ioctl)(ifp, cmd, data); /* XXX error check */
 		ifgr = (struct ifgroupreq *)data;
 		if ((error = if_delgroup(ifp, ifgr->ifgr_group)))
 			return (error);
@@ -1372,7 +1337,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	                return (ENODEV);
 		}
 		if (ifp->if_flags & IFF_UP) {
-		        int s = splimp();
+		        int s = splnet();
 			ifp->if_flags &= ~IFF_UP;
 			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifr);
 			ifp->if_flags |= IFF_UP;
@@ -1633,6 +1598,7 @@ if_addgroup(struct ifnet *ifp, const char *groupname)
 		}
 		strlcpy(ifg->ifg_group, groupname, sizeof(ifg->ifg_group));
 		ifg->ifg_refcnt = 0;
+		ifg->ifg_carp_demoted = 0;
 		TAILQ_INIT(&ifg->ifg_members);
 #if NPF > 0
 		pfi_attach_ifgroup(ifg);
@@ -1775,6 +1741,46 @@ if_getgroupmembers(caddr_t data)
 	return (0);
 }
 
+int
+if_getgroupattribs(caddr_t data)
+{
+	struct ifgroupreq	*ifgr = (struct ifgroupreq *)data;
+	struct ifg_group	*ifg;
+
+	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
+		if (!strcmp(ifg->ifg_group, ifgr->ifgr_name))
+			break;
+	if (ifg == NULL)
+		return (ENOENT);
+
+	ifgr->ifgr_attrib.ifg_carp_demoted = ifg->ifg_carp_demoted;
+
+	return (0);
+}
+
+int
+if_setgroupattribs(caddr_t data)
+{
+	struct ifgroupreq	*ifgr = (struct ifgroupreq *)data;
+	struct ifg_group	*ifg;
+	int			 demote;
+
+	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
+		if (!strcmp(ifg->ifg_group, ifgr->ifgr_name))
+			break;
+	if (ifg == NULL)
+		return (ENOENT);
+
+	demote = ifgr->ifgr_attrib.ifg_carp_demoted;
+	if (demote + ifg->ifg_carp_demoted > 0xff ||
+	    demote + ifg->ifg_carp_demoted < 0)
+		return (ERANGE);
+
+	ifg->ifg_carp_demoted += demote;
+
+	return (0);
+}
+
 void
 if_group_routechange(struct sockaddr *dst, struct sockaddr *mask)
 {
@@ -1804,7 +1810,6 @@ if_group_egress_build(void)
 #ifdef INET6
 	struct sockaddr_in6	 sa_in6;
 #endif
-	struct radix_node_head	*rnh;
 	struct radix_node	*rn;
 	struct rtentry		*rt;
 
@@ -1818,42 +1823,34 @@ if_group_egress_build(void)
 			if_delgroup(ifgm->ifgm_ifp, IFG_EGRESS);
 		}
 
-	if ((rnh = rt_tables[AF_INET]) == NULL)
-		return (-1);
-
 	bzero(&sa_in, sizeof(sa_in));
 	sa_in.sin_len = sizeof(sa_in);
 	sa_in.sin_family = AF_INET;
-	if ((rn = rnh->rnh_lookup(&sa_in, &sa_in, rnh))) {
+	if ((rn = rt_lookup(sintosa(&sa_in), sintosa(&sa_in), 0)) != NULL) {
 		do {
 			rt = (struct rtentry *)rn;
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			if (rn_mpath_capable(rnh))
-				rn = rn_mpath_next(rn);
-			else
+			rn = rn_mpath_next(rn);
+#else
+			rn = NULL;
 #endif
-				rn = NULL;
 		} while (rn != NULL);
 	}
 
 #ifdef INET6
-	if ((rnh = rt_tables[AF_INET6]) == NULL)
-		return (-1);
-
 	bcopy(&sa6_any, &sa_in6, sizeof(sa_in6));
-	if ((rn = rnh->rnh_lookup(&sa_in6, &sa_in6, rnh))) {
+	if ((rn = rt_lookup(sin6tosa(&sa_in6), sin6tosa(&sa_in6), 0)) != NULL) {
 		do {
 			rt = (struct rtentry *)rn;
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			if (rn_mpath_capable(rnh))
-				rn = rn_mpath_next(rn);
-			else
+			rn = rn_mpath_next(rn);
+#else
+			rn = NULL;
 #endif
-				rn = NULL;
 		} while (rn != NULL);
 	}
 #endif

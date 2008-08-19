@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.30 2005/12/11 21:36:04 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.33 2006/05/15 21:40:04 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -85,7 +85,6 @@
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/kcore.h>
-#include <machine/locore.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
 #include <machine/m88100.h>
@@ -104,24 +103,19 @@
 #include <ddb/db_output.h>		/* db_printf()		*/
 #endif /* DDB */
 
-typedef struct {
-	unsigned word_one, word_two;
-} m88k_exception_vector_area;
-
 caddr_t	allocsys(caddr_t);
 void	consinit(void);
 void	dumpconf(void);
 void	dumpsys(void);
 int	getcpuspeed(void);
-vaddr_t	get_slave_stack(void);
+u_int	getipl(void);
 void	identifycpu(void);
 void	luna88k_bootstrap(void);
 u_int	safe_level(u_int, u_int);
 void	savectx(struct pcb *);
+void	secondary_main(void);
+void	secondary_pre_main(void);
 void	setlevel(unsigned int);
-void	slave_pre_main(void);
-int	slave_main(void);
-void	vector_init(m88k_exception_vector_area *, unsigned *);
 
 vaddr_t size_memory(void);
 void powerdown(void);
@@ -328,7 +322,7 @@ size_memory()
 		unsigned save;
 
 		/* if can't access, we've reached the end */
-		if (badwordaddr((vaddr_t)look)) {
+		if (badaddr((vaddr_t)look, 4)) {
 #if defined(DEBUG)
 			printf("%x\n", look);
 #endif
@@ -852,43 +846,59 @@ abort:
 	}
 }
 
-/* gets an interrupt stack for slave processors */
-vaddr_t
-get_slave_stack()
+#ifdef MULTIPROCESSOR
+
+/*
+ * Secondary CPU early initialization routine.
+ * Determine CPU number and set it, then allocate the idle pcb (and stack).
+ *
+ * Running on a minimal stack here, with interrupts disabled; do nothing fancy.
+ */
+void
+secondary_pre_main()
 {
-	vaddr_t addr;
+	struct cpu_info *ci;
 
-	addr = (vaddr_t)uvm_km_zalloc(kernel_map, INTSTACK_SIZE);
+	set_cpu_number(cmmu_cpu_number());
+	ci = curcpu();
 
-	if (addr == NULL)
-		panic("Cannot allocate slave stack for cpu %d",
-		    cpu_number());
+	/*
+	 * Setup CMMUs and translation tables (shared with the master cpu).
+	 */
+	pmap_bootstrap_cpu(ci->ci_cpuid);
 
-	return addr;
+	/*
+	 * Allocate UPAGES contiguous pages for the idle PCB and stack.
+	 */
+	ci->ci_idle_pcb = (struct pcb *)uvm_km_zalloc(kernel_map, USPACE);
+	if (ci->ci_idle_pcb == NULL) {
+		printf("cpu%d: unable to allocate idle stack\n", ci->ci_cpuid);
+	}
 }
 
 /*
- * Slave CPU pre-main routine.
- * Determine CPU number and set it.
+ * Further secondary CPU initialization.
  *
- * Running on an interrupt stack here; do nothing fancy.
+ * We are now running on our idle stack, with proper page tables.
+ * There is nothing to do but display some details about the CPU and its CMMUs.
  */
 void
-slave_pre_main()
+secondary_main()
 {
-	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
-	splhigh();
-	set_psr(get_psr() & ~PSR_IND);
+	struct cpu_info *ci = curcpu();
+
+	cpu_configuration_print(0);
+
+	microuptime(&ci->ci_schedstate.spc_runtime);
+
+	/*
+	 * Upon return, the secondary cpu bootstrap code in locore will
+	 * enter the idle loop, waiting for some food to process on this
+	 * processor.
+	 */
 }
 
-/* dummy main routine for slave processors */
-int
-slave_main()
-{
-	printf("slave CPU%d started\n", cpu_number());
-	while (1); /* spin forever */
-	return 0;
-}
+#endif	/* MULTIPROCESSOR */
 
 /*
  *	Device interrupt handler for LUNA88K
@@ -1093,20 +1103,6 @@ luna88k_bootstrap()
 	proc0.p_addr = proc0paddr;
 	curproc = &proc0;
 	curpcb = &proc0paddr->u_pcb;
-
-	/*
-	 * We may have more than one CPU, so mention which one is the master.
-	 * We will also want to spin up slave CPUs on the long run...
-	 */
-	printf("CPU%d is master CPU\n", master_cpu);
-
-#if 0
-	int i;
-	for (i = 0; i < MAX_CPUS; i++) {
-		if (!spin_cpu(i))
-			printf("CPU%d started\n", i);
-	}
-#endif
 
 	avail_start = first_addr;
 	avail_end = last_addr;
@@ -1319,55 +1315,6 @@ nvram_by_symbol(symbol)
 	return value;
 }
 
-#define SIGSYS_MAX	501
-#define SIGTRAP_MAX	510
-
-#define EMPTY_BR	0xc0000000	/* empty "br" instruction */
-#define NO_OP 		0xf4005800	/* "or r0, r0, r0" */
-
-#define BRANCH(FROM, TO) \
-	(EMPTY_BR | ((unsigned)(TO) - (unsigned)(FROM)) >> 2)
-
-#define SET_VECTOR(NUM, VALUE) \
-	do { \
-		vector[NUM].word_one = NO_OP; \
-		vector[NUM].word_two = BRANCH(&vector[NUM].word_two, VALUE); \
-	} while (0)
-
-/*
- * vector_init(vector, vector_init_list)
- *
- * This routine sets up the m88k vector table for the running processor.
- * It is called with a very little stack, and interrupts disabled,
- * so don't call any other functions!
- */
-void
-vector_init(m88k_exception_vector_area *vector, unsigned *vector_init_list)
-{
-	unsigned num;
-	unsigned vec;
-
-	for (num = 0; (vec = vector_init_list[num]) != END_OF_VECTOR_LIST;
-	    num++) {
-		if (vec != UNKNOWN_HANDLER)
-			SET_VECTOR(num, vec);
-	}
-
-	for (; num <= SIGSYS_MAX; num++)
-		SET_VECTOR(num, sigsys);
-
-	for (; num <= SIGTRAP_MAX; num++)
-		SET_VECTOR(num, sigtrap);
-
-	SET_VECTOR(450, syscall_handler);
-	SET_VECTOR(451, cache_flush_handler);
-	SET_VECTOR(504, stepbpt);
-	SET_VECTOR(511, userbpt);
-
-	/* GCC will by default produce explicit trap 503 for division by zero */
-	SET_VECTOR(503, vector_init_list[T_ZERODIV]);
-}
-
 /*
  * return next safe spl to reenable interrupts.
  */
@@ -1402,10 +1349,10 @@ setlevel(unsigned int level)
 	luna88k_curspl[cpu] = level;
 }
 
-unsigned
+u_int
 getipl(void)
 {
-	unsigned int curspl, psr;
+	u_int curspl, psr;
 
 	disable_interrupt(psr);
 	curspl = luna88k_curspl[cpu_number()];

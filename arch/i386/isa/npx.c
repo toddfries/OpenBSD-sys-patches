@@ -1,4 +1,4 @@
-/*	$OpenBSD: npx.c,v 1.37.4.1 2006/05/02 04:05:33 brad Exp $	*/
+/*	$OpenBSD: npx.c,v 1.40.2.1 2006/11/15 03:06:15 brad Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -123,6 +123,7 @@ enum npx_type {
 	NPX_INTERRUPT,
 	NPX_EXCEPTION,
 	NPX_BROKEN,
+	NPX_CPUID,
 };
 
 static	enum npx_type		npx_type;
@@ -196,7 +197,6 @@ static inline int
 npxprobe1(ia)
 	struct isa_attach_args *ia;
 {
-#ifndef ALWAYS_MATH_EMULATE
 	int control;
 	int status;
 
@@ -247,7 +247,7 @@ npxprobe1(ia)
 				npx_type = NPX_INTERRUPT;
 			} else {
 				/*
-				 * Worse, even IRQ13 is broken.  Use emulator.
+				 * Worse, even IRQ13 is broken.
 				 */
 				npx_type = NPX_BROKEN;
 				ia->ia_irq = IRQUNK;
@@ -255,9 +255,6 @@ npxprobe1(ia)
 			return 1;
 		}
 	}
-#else
-	npx_intrs_while_probing = npx_traps_while_probing = 0;
-#endif
 
 	/*
 	 * Probe failed.  There is no usable FPU.
@@ -284,6 +281,15 @@ npxprobe(parent, match, aux)
 	unsigned save_imen;
 	struct	gate_descriptor save_idt_npxintr;
 	struct	gate_descriptor save_idt_npxtrap;
+
+	if (cpu_feature & CPUID_FPU) {
+		npx_type = NPX_CPUID;
+		i386_fpu_exception = 1;
+		ia->ia_irq = IRQUNK;	/* Don't want the interrupt vector */
+		ia->ia_iosize = 16;
+		ia->ia_msize = 0;
+		return 1;
+	}
 
 	/*
 	 * This routine is now just a wrapper for npxprobe1(), to install
@@ -376,6 +382,10 @@ npxattach(parent, self, aux)
 		break;
 	case NPX_EXCEPTION:
 		printf(": using exception 16\n");
+		break;
+	case NPX_CPUID:
+		printf(": reported by CPUID; using exception 16\n");
+		npx_type = NPX_EXCEPTION;
 		break;
 	case NPX_BROKEN:
 		printf(": error reporting broken; not using\n");
@@ -831,22 +841,17 @@ npxsave_proc(struct proc *p, int save)
 #ifdef DIAGNOSTIC
 		spincount = 0;
 #endif
-		while (p->p_addr->u_pcb.pcb_fpcpu != NULL)
+		while (p->p_addr->u_pcb.pcb_fpcpu != NULL) {
+			SPINLOCK_SPIN_HOOK;
 #ifdef DIAGNOSTIC
-		{
-			spincount++;
-			if (spincount > 100000000) {
-				panic("fp_save ipi didn't");
-			}
-		}
-#else
-		__splbarrier();		/* XXX replace by generic barrier */
-		;
+			if (spincount++ > 100000000)
+				panic("%s: fp_save ipi didn't (%s)",
+				    ci->ci_dev.dv_xname, oci->ci_dev.dv_xname);
 #endif
+		}
 	}
 #else
 	KASSERT(ci->ci_fpcurproc == p);
 	npxsave_cpu(ci, save);
 #endif
 }
-

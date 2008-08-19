@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_input.c,v 1.9 2002/03/14 01:26:51 millert Exp $	*/
+/*	$OpenBSD: db_input.c,v 1.11 2006/07/06 18:14:14 miod Exp $	*/
 /*	$NetBSD: db_input.c,v 1.7 1996/02/05 01:57:02 christos Exp $	*/
 
 /* 
@@ -72,21 +72,15 @@ char *  db_history_prev = (char *) 0;	/* start of previous line */
 #define	BLANK		' '
 #define	BACKUP		'\b'
 
-static int cnmaygetc(void);
-
 void
-db_putstring(s, count)
-	char	*s;
-	int	count;
+db_putstring(char *s, int count)
 {
 	while (--count >= 0)
 	    cnputc(*s++);
 }
 
 void
-db_putnchars(c, count)
-	int	c;
-	int	count;
+db_putnchars(int c, int count)
 {
 	while (--count >= 0)
 	    cnputc(c);
@@ -98,11 +92,9 @@ db_putnchars(c, count)
 #define	DEL_FWD		0
 #define	DEL_BWD		1
 void
-db_delete(n, bwd)
-	int	n;
-	int	bwd;
+db_delete(int n, int bwd)
 {
-	register char *p;
+	char *p;
 
 	if (bwd) {
 	    db_lc -= n;
@@ -144,8 +136,7 @@ db_delete_line(void)
 		
 /* returns TRUE at end-of-line */
 int
-db_inputchar(c)
-	int	c;
+db_inputchar(int c)
 {
 	switch (c) {
 	    case CTRL('b'):
@@ -226,7 +217,7 @@ db_inputchar(c)
 			INC_DB_CURR();
 			db_le = db_lc = db_lbuf_start;
 		} else {
-			register char *p;
+			char *p;
 			INC_DB_CURR();
 			for (p = db_history_curr, db_le = db_lbuf_start;*p; ) {
 				*db_le++ = *p++;
@@ -247,7 +238,7 @@ db_inputchar(c)
 			INC_DB_CURR();
 			db_delete_line();
 			if (db_history_curr != db_history_last) {
-				register char *p;
+				char *p;
 				for (p = db_history_curr,
 				     db_le = db_lbuf_start; *p;) {
 					*db_le++ = *p++;
@@ -276,7 +267,7 @@ db_inputchar(c)
 		 * save it.
 		 */
 		if (db_history_curr == db_history_prev) {
-			register char *pp, *pc;
+			char *pp, *pc;
 
 			/*
 			 * Is it the same?
@@ -299,7 +290,7 @@ db_inputchar(c)
 			}
 		}
 		if (db_le != db_lbuf_start) {
-			register char *p;
+			char *p;
 			db_history_prev = db_history_last;
 			for (p = db_lbuf_start; p != db_le; p++) {
 				*db_history_last++ = *p;
@@ -318,7 +309,7 @@ db_inputchar(c)
 		    cnputc('\007');
 		}
 		else if (c >= ' ' && c <= '~') {
-		    register char *p;
+		    char *p;
 
 		    for (p = db_le; p > db_lc; p--)
 			*p = *(p-1);
@@ -334,9 +325,7 @@ db_inputchar(c)
 }
 
 int
-db_readline(lstart, lsize)
-	char *	lstart;
-	int	lsize;
+db_readline(char *lstart, int lsize)
 {
 	db_force_whitespace();	/* synch output position */
 
@@ -352,39 +341,4 @@ db_readline(lstart, lsize)
 
 	*db_le = 0;
 	return (db_le - db_lbuf_start);
-}
-
-void
-db_check_interrupt(void)
-{
-	register int	c;
-
-	c = cnmaygetc();
-	switch (c) {
-	    case -1:		/* no character */
-		return;
-
-	    case CTRL('c'):
-		db_error((char *)0);
-		/*NOTREACHED*/
-
-	    case CTRL('s'):
-		do {
-		    c = cnmaygetc();
-		    if (c == CTRL('c'))
-			db_error(NULL);
-			/*NOTREACHED*/
-		} while (c != CTRL('q'));
-		break;
-
-	    default:
-		/* drop on floor */
-		break;
-	}
-}
-
-static int
-cnmaygetc ()
-{
-	return (-1);
 }

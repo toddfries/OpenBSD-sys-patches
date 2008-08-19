@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.sgi,v 1.11 2004/11/27 18:27:04 matthieu Exp $
+#	$OpenBSD: Makefile.sgi,v 1.13 2006/07/27 05:58:12 miod Exp $
 
 # Makefile for OpenBSD
 #
@@ -48,7 +48,8 @@ MIPS64=	$S/arch/mips64
 INCLUDES=	-I. -I$S/arch -I$S -nostdinc
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -D__sgi__
 CDIAGFLAGS=	-Werror -Wall -Wmissing-prototypes -Wstrict-prototypes \
-		-Wno-uninitialized -Wno-format -Wno-main
+		-Wno-uninitialized -Wno-format -Wno-main \
+		-Wstack-larger-than-2047
 CMACHFLAGS+=	-mno-abicalls ${ABI} -msoft-float \
 		-fno-builtin-printf -fno-builtin-log
 .if ${IDENT:M-DNO_PROPOLICE}
@@ -113,8 +114,9 @@ SYSTEM_LD_TAIL=	chmod 755 $@; \
 DEBUG?=
 .if ${DEBUG} == "-g"
 SYSTEM_LD_TAIL+=; \
-		echo cp $@ $@.gdb; rm -f $@.gdb; cp $@ $@.gdb; \
-		echo ${STRIP} ${STRIPFLAGS} $@; ${STRIP} ${STRIPFLAGS} $@
+		echo mv $@ $@.gdb; rm -f $@.gdb; mv $@ $@.gdb; \
+		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb; \
+		${STRIP} ${STRIPFLAGS} -o $@ $@.gdb
 .endif
 
 %LOAD

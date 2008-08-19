@@ -1,4 +1,4 @@
-/*	$OpenBSD: m187_machdep.c,v 1.7 2005/04/30 16:42:37 miod Exp $	*/
+/*	$OpenBSD: m187_machdep.c,v 1.13 2006/05/08 14:36:10 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -54,13 +54,13 @@
 #include <machine/asm_macro.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/locore.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
 #include <machine/m88100.h>
 #include <machine/mvme187.h>
 
 #include <mvme88k/dev/memcreg.h>
+#include <mvme88k/mvme88k/clockvar.h>
 
 void	m187_bootstrap(void);
 void	m187_ext_int(u_int, struct trapframe *);
@@ -68,12 +68,9 @@ u_int	m187_getipl(void);
 vaddr_t	m187_memsize(void);
 u_int	m187_raiseipl(u_int);
 u_int	m187_setipl(u_int);
-void	m187_setupiackvectors(void);
 void	m187_startup(void);
 
-vaddr_t obiova;
 vaddr_t bugromva;
-vaddr_t sramva;
 
 /*
  * Figure out how much memory is available, by querying the memory controllers.
@@ -98,17 +95,6 @@ void
 m187_startup()
 {
 	/*
-	 * Grab the SRAM space that we hardwired in pmap_bootstrap
-	 */
-	sramva = SRAM_START;
-	uvm_map(kernel_map, (vaddr_t *)&sramva, SRAM_SIZE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
-	if (sramva != SRAM_START)
-		panic("sramva %lx: SRAM not free", sramva);
-
-	/*
 	 * Grab the BUGROM space that we hardwired in pmap_bootstrap
 	 */
 	bugromva = BUG187_START;
@@ -118,32 +104,6 @@ m187_startup()
 	        UVM_ADV_NORMAL, 0));
 	if (bugromva != BUG187_START)
 		panic("bugromva %lx: BUGROM not free", bugromva);
-
-	/*
-	 * Grab the OBIO space that we hardwired in pmap_bootstrap
-	 */
-	obiova = OBIO_START;
-	uvm_map(kernel_map, (vaddr_t *)&obiova, OBIO_SIZE,
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	        UVM_ADV_NORMAL, 0));
-	if (obiova != OBIO_START)
-		panic("obiova %lx: OBIO not free", obiova);
-}
-
-void
-m187_setupiackvectors()
-{
-	u_int8_t *vaddr = (u_int8_t *)M187_IACK;
-
-	ivec[0] = vaddr + 0x03;	/* We dont use level 0 */
-	ivec[1] = vaddr + 0x07;
-	ivec[2] = vaddr + 0x0b;
-	ivec[3] = vaddr + 0x0f;
-	ivec[4] = vaddr + 0x13;
-	ivec[5] = vaddr + 0x17;
-	ivec[6] = vaddr + 0x1b;
-	ivec[7] = vaddr + 0x1f;
 }
 
 /*
@@ -157,12 +117,15 @@ m187_ext_int(u_int v, struct trapframe *eframe)
 	struct intrhand *intr;
 	intrhand_t *list;
 	int ret;
+	vaddr_t ivec;
 	u_int8_t vec;
 
 	mask = *(u_int8_t *)M187_IMASK & 0x07;
 	level = *(u_int8_t *)M187_ILEVEL & 0x07;
+
 	/* generate IACK and get the vector */
-	vec = *ivec[level];
+	ivec = M187_IACK + (level << 2) + 0x03;
+	vec = *(volatile u_int8_t *)ivec;
 
 	uvmexp.intrs++;
 
@@ -258,8 +221,9 @@ m187_bootstrap()
 	extern struct cmmu_p cmmu8820x;
 
 	cmmu = &cmmu8820x;
-	md_interrupt_func_ptr = &m187_ext_int;
-	md_getipl = &m187_getipl;
-	md_setipl = &m187_setipl;
-	md_raiseipl = &m187_raiseipl;
+	md_interrupt_func_ptr = m187_ext_int;
+	md_getipl = m187_getipl;
+	md_setipl = m187_setipl;
+	md_raiseipl = m187_raiseipl;
+	md_init_clocks = m1x7_init_clocks;
 }

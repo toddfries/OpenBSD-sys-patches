@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.79 2005/11/06 13:07:47 pedro Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.84 2006/08/28 16:15:29 tom Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*-
@@ -102,7 +102,7 @@ struct pool bufpool;
 #define	binstailfree(bp, dp)	TAILQ_INSERT_TAIL(dp, bp, b_freelist)
 
 static __inline struct buf *bio_doread(struct vnode *, daddr_t, int, int);
-struct buf *getnewbuf(int slpflag, int slptimeo);
+struct buf *getnewbuf(int, int, int *);
 
 /*
  * We keep a few counters to monitor the utilization of the buffer cache
@@ -216,7 +216,7 @@ bufinit(void)
 	 * but not more than 25% and if possible
 	 * not less than 2 * MAXBSIZE. locleanpages
 	 * value must be not too small, but probably
-	 * there are no reason to set it more than 1-2 MB.
+	 * there is no reason to set it to more than 1-2 MB.
 	 */
 	locleanpages = bufpages / 20;
 	if (locleanpages < btoc(2 * MAXBSIZE))
@@ -239,7 +239,7 @@ bio_doread(struct vnode *vp, daddr_t blkno, int size, int async)
 	bp = getblk(vp, blkno, size, 0, 0);
 
 	/*
-	 * If buffer does not have data valid, start a read.
+	 * If buffer does not have valid data, start a read.
 	 * Note that if buffer is B_INVAL, getblk() won't return it.
 	 * Therefore, it's valid if its I/O has completed or been delayed.
 	 */
@@ -312,6 +312,12 @@ bwrite(struct buf *bp)
 	struct vnode *vp;
 	struct mount *mp;
 
+	vp = bp->b_vp;
+	if (vp != NULL)
+		mp = vp->v_type == VBLK? vp->v_specmountpoint : vp->v_mount;
+	else
+		mp = NULL;
+
 	/*
 	 * Remember buffer type, to switch on it later.  If the write was
 	 * synchronous, but the file system was mounted with MNT_ASYNC,
@@ -320,8 +326,7 @@ bwrite(struct buf *bp)
 	 * to async, not sync writes (which is safe, but ugly).
 	 */
 	async = ISSET(bp->b_flags, B_ASYNC);
-	if (!async && bp->b_vp && bp->b_vp->v_mount &&
-	    ISSET(bp->b_vp->v_mount->mnt_flag, MNT_ASYNC)) {
+	if (!async && mp && ISSET(mp->mnt_flag, MNT_ASYNC)) {
 		bdwrite(bp);
 		return (0);
 	}
@@ -331,17 +336,11 @@ bwrite(struct buf *bp)
 	 * Writes to block devices are charged to their associated
 	 * filesystem (if any).
 	 */
-	if ((vp = bp->b_vp) != NULL) {
-		if (vp->v_type == VBLK)
-			mp = vp->v_specmountpoint;
+	if (mp != NULL) {
+		if (async)
+			mp->mnt_stat.f_asyncwrites++;
 		else
-			mp = vp->v_mount;
-		if (mp != NULL) {
-			if (async)
-				mp->mnt_stat.f_asyncwrites++;
-			else
-				mp->mnt_stat.f_syncwrites++;
-		}
+			mp->mnt_stat.f_syncwrites++;
 	}
 
 	wasdelayed = ISSET(bp->b_flags, B_DELWRI);
@@ -591,7 +590,7 @@ incore(struct vnode *vp, daddr_t blkno)
  * a given vnode and block offset. If it is found in the
  * block cache, mark it as having been found, make it busy
  * and return it. Otherwise, return an empty block of the
- * correct size. It is up to the caller to insure that the
+ * correct size. It is up to the caller to ensure that the
  * cached blocks be of the correct size.
  */
 struct buf *
@@ -599,7 +598,7 @@ getblk(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo)
 {
 	struct bufhashhdr *bh;
 	struct buf *bp;
-	int s, err;
+	int s, error;
 
 	/*
 	 * XXX
@@ -620,10 +619,10 @@ start:
 		s = splbio();
 		if (ISSET(bp->b_flags, B_BUSY)) {
 			SET(bp->b_flags, B_WANTED);
-			err = tsleep(bp, slpflag | (PRIBIO + 1), "getblk",
+			error = tsleep(bp, slpflag | (PRIBIO + 1), "getblk",
 			    slptimeo);
 			splx(s);
-			if (err)
+			if (error)
 				return (NULL);
 			goto start;
 		}
@@ -638,8 +637,13 @@ start:
 	}
 
 	if (bp == NULL) {
-		if ((bp = getnewbuf(slpflag, slptimeo)) == NULL)
+		bp = getnewbuf(slpflag, slptimeo, &error);
+		if (bp == NULL) {
+			if (error == ERESTART || error == EINTR)
+				return (NULL);
 			goto start;
+		}
+
 		binshash(bp, bh);
 		bp->b_blkno = bp->b_lblkno = blkno;
 		s = splbio();
@@ -659,7 +663,7 @@ geteblk(int size)
 {
 	struct buf *bp;
 
-	while ((bp = getnewbuf(0, 0)) == 0)
+	while ((bp = getnewbuf(0, 0, NULL)) == NULL)
 		;
 	SET(bp->b_flags, B_INVAL);
 	binshash(bp, &invalhash);
@@ -673,7 +677,7 @@ geteblk(int size)
  *
  * If the buffer shrinks, data is lost, so it's up to the
  * caller to have written it out *first*; this routine will not
- * start a write.  If the buffer grows, it's the callers
+ * start a write.  If the buffer grows, it's the caller's
  * responsibility to fill out the buffer's additional contents.
  */
 void
@@ -699,7 +703,7 @@ allocbuf(struct buf *bp, int size)
 		int amt;
 
 		/* find a buffer */
-		while ((nbp = getnewbuf(0, 0)) == NULL)
+		while ((nbp = getnewbuf(0, 0, NULL)) == NULL)
 			;
  		SET(nbp->b_flags, B_INVAL);
 		binshash(nbp, &invalhash);
@@ -760,10 +764,10 @@ out:
  * Find a buffer which is available for use.
  */
 struct buf *
-getnewbuf(int slpflag, int slptimeo)
+getnewbuf(int slpflag, int slptimeo, int *ep)
 {
 	struct buf *bp;
-	int s;
+	int s, error;
 
 	s = splbio();
 	/*
@@ -775,16 +779,24 @@ getnewbuf(int slpflag, int slptimeo)
 	if ((numcleanpages <= locleanpages) &&
 	    curproc != syncerproc && curproc != cleanerproc) {
 		needbuffer++;
-		tsleep(&needbuffer, slpflag|(PRIBIO+1), "getnewbuf", slptimeo);
+		error = tsleep(&needbuffer, slpflag | (PRIBIO + 1),
+		    "getnewbuf", slptimeo);
 		splx(s);
-		return (0);
+		if (ep != NULL)
+			*ep = error;
+		return (NULL);
 	}
-	if ((bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN])) == NULL) {
+
+	bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN]);
+	if (bp == NULL) {
 		/* wait for a free buffer of any kind */
 		nobuffers = 1;
-		tsleep(&nobuffers, slpflag|(PRIBIO-3), "getnewbuf", slptimeo);
+		error = tsleep(&nobuffers, slpflag | (PRIBIO - 3),
+		    "getnewbuf", slptimeo);
 		splx(s);
-		return (0);
+		if (ep != NULL)
+			*ep = error;
+		return (NULL);
 	}
 
 	bremfree(bp);
@@ -813,7 +825,7 @@ getnewbuf(int slpflag, int slptimeo)
 	bp->b_flags = B_BUSY;
 	bp->b_dev = NODEV;
 	bp->b_blkno = bp->b_lblkno = 0;
-	bp->b_iodone = 0;
+	bp->b_iodone = NULL;
 	bp->b_error = 0;
 	bp->b_resid = 0;
 	bp->b_bcount = 0;

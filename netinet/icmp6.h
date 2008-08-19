@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.h,v 1.29 2004/02/15 11:16:08 markus Exp $	*/
+/*	$OpenBSD: icmp6.h,v 1.32 2006/07/06 02:56:58 brad Exp $	*/
 /*	$KAME: icmp6.h,v 1.84 2003/04/23 10:26:51 itojun Exp $	*/
 
 /*
@@ -111,9 +111,9 @@ struct icmp6_hdr {
 #endif
 
 #define ND_ROUTER_SOLICIT		133	/* router solicitation */
-#define ND_ROUTER_ADVERT		134	/* router advertisment */
+#define ND_ROUTER_ADVERT		134	/* router advertisement */
 #define ND_NEIGHBOR_SOLICIT		135	/* neighbor solicitation */
-#define ND_NEIGHBOR_ADVERT		136	/* neighbor advertisment */
+#define ND_NEIGHBOR_ADVERT		136	/* neighbor advertisement */
 #define ND_REDIRECT			137	/* redirect */
 
 #define ICMP6_ROUTER_RENUMBERING	138	/* router renumbering */
@@ -246,12 +246,12 @@ struct nd_neighbor_advert {	/* neighbor advertisement */
 #define nd_na_code		nd_na_hdr.icmp6_code
 #define nd_na_cksum		nd_na_hdr.icmp6_cksum
 #define nd_na_flags_reserved	nd_na_hdr.icmp6_data32[0]
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 #define ND_NA_FLAG_ROUTER		0x80000000
 #define ND_NA_FLAG_SOLICITED		0x40000000
 #define ND_NA_FLAG_OVERRIDE		0x20000000
 #else
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if _BYTE_ORDER == _LITTLE_ENDIAN
 #define ND_NA_FLAG_ROUTER		0x80
 #define ND_NA_FLAG_SOLICITED		0x40
 #define ND_NA_FLAG_OVERRIDE		0x20
@@ -348,23 +348,23 @@ struct icmp6_nodeinfo {
 #define NI_QTYPE_NODEADDR	3 /* Node Addresses */
 #define NI_QTYPE_IPV4ADDR	4 /* IPv4 Addresses */
 
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 #define NI_SUPTYPE_FLAG_COMPRESS	0x1
 #define NI_FQDN_FLAG_VALIDTTL		0x1
-#elif BYTE_ORDER == LITTLE_ENDIAN
+#elif _BYTE_ORDER == _LITTLE_ENDIAN
 #define NI_SUPTYPE_FLAG_COMPRESS	0x0100
 #define NI_FQDN_FLAG_VALIDTTL		0x0100
 #endif
 
 #ifdef NAME_LOOKUPS_04
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 #define NI_NODEADDR_FLAG_LINKLOCAL	0x1
 #define NI_NODEADDR_FLAG_SITELOCAL	0x2
 #define NI_NODEADDR_FLAG_GLOBAL		0x4
 #define NI_NODEADDR_FLAG_ALL		0x8
 #define NI_NODEADDR_FLAG_TRUNCATE	0x10
 #define NI_NODEADDR_FLAG_ANYCAST	0x20 /* just experimental. not in spec */
-#elif BYTE_ORDER == LITTLE_ENDIAN
+#elif _BYTE_ORDER == _LITTLE_ENDIAN
 #define NI_NODEADDR_FLAG_LINKLOCAL	0x0100
 #define NI_NODEADDR_FLAG_SITELOCAL	0x0200
 #define NI_NODEADDR_FLAG_GLOBAL		0x0400
@@ -373,7 +373,7 @@ struct icmp6_nodeinfo {
 #define NI_NODEADDR_FLAG_ANYCAST	0x2000 /* just experimental. not in spec */
 #endif
 #else  /* draft-ietf-ipngwg-icmp-name-lookups-05 (and later?) */
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 #define NI_NODEADDR_FLAG_TRUNCATE	0x1
 #define NI_NODEADDR_FLAG_ALL		0x2
 #define NI_NODEADDR_FLAG_COMPAT		0x4
@@ -381,7 +381,7 @@ struct icmp6_nodeinfo {
 #define NI_NODEADDR_FLAG_SITELOCAL	0x10
 #define NI_NODEADDR_FLAG_GLOBAL		0x20
 #define NI_NODEADDR_FLAG_ANYCAST	0x40 /* just experimental. not in spec */
-#elif BYTE_ORDER == LITTLE_ENDIAN
+#elif _BYTE_ORDER == _LITTLE_ENDIAN
 #define NI_NODEADDR_FLAG_TRUNCATE	0x0100
 #define NI_NODEADDR_FLAG_ALL		0x0200
 #define NI_NODEADDR_FLAG_COMPAT		0x0400
@@ -449,10 +449,10 @@ struct rr_pco_use {		/* use prefix part */
 #define ICMP6_RR_PCOUSE_RAFLAGS_ONLINK	0x80
 #define ICMP6_RR_PCOUSE_RAFLAGS_AUTO	0x40
 
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 #define ICMP6_RR_PCOUSE_FLAGS_DECRVLTIME     0x80000000
 #define ICMP6_RR_PCOUSE_FLAGS_DECRPLTIME     0x40000000
-#elif BYTE_ORDER == LITTLE_ENDIAN
+#elif _BYTE_ORDER == _LITTLE_ENDIAN
 #define ICMP6_RR_PCOUSE_FLAGS_DECRVLTIME     0x80
 #define ICMP6_RR_PCOUSE_FLAGS_DECRPLTIME     0x40
 #endif
@@ -464,10 +464,10 @@ struct rr_result {		/* router renumbering result message */
 	u_int32_t	rrr_ifid;
 	struct	in6_addr rrr_prefix;
 } __packed;
-#if BYTE_ORDER == BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 #define ICMP6_RR_RESULT_FLAGS_OOB		0x0002
 #define ICMP6_RR_RESULT_FLAGS_FORBIDDEN		0x0001
-#elif BYTE_ORDER == LITTLE_ENDIAN
+#elif _BYTE_ORDER == _LITTLE_ENDIAN
 #define ICMP6_RR_RESULT_FLAGS_OOB		0x0200
 #define ICMP6_RR_RESULT_FLAGS_FORBIDDEN		0x0100
 #endif
@@ -511,39 +511,39 @@ do {								\
  * of the internet control message protocol version 6.
  */
 struct icmp6errstat {
-	u_quad_t icp6errs_dst_unreach_noroute;
-	u_quad_t icp6errs_dst_unreach_admin;
-	u_quad_t icp6errs_dst_unreach_beyondscope;
-	u_quad_t icp6errs_dst_unreach_addr;
-	u_quad_t icp6errs_dst_unreach_noport;
-	u_quad_t icp6errs_packet_too_big;
-	u_quad_t icp6errs_time_exceed_transit;
-	u_quad_t icp6errs_time_exceed_reassembly;
-	u_quad_t icp6errs_paramprob_header;
-	u_quad_t icp6errs_paramprob_nextheader;
-	u_quad_t icp6errs_paramprob_option;
-	u_quad_t icp6errs_redirect; /* we regard redirect as an error here */
-	u_quad_t icp6errs_unknown;
+	u_int64_t icp6errs_dst_unreach_noroute;
+	u_int64_t icp6errs_dst_unreach_admin;
+	u_int64_t icp6errs_dst_unreach_beyondscope;
+	u_int64_t icp6errs_dst_unreach_addr;
+	u_int64_t icp6errs_dst_unreach_noport;
+	u_int64_t icp6errs_packet_too_big;
+	u_int64_t icp6errs_time_exceed_transit;
+	u_int64_t icp6errs_time_exceed_reassembly;
+	u_int64_t icp6errs_paramprob_header;
+	u_int64_t icp6errs_paramprob_nextheader;
+	u_int64_t icp6errs_paramprob_option;
+	u_int64_t icp6errs_redirect; /* we regard redirect as an error here */
+	u_int64_t icp6errs_unknown;
 };
 
 struct icmp6stat {
 /* statistics related to icmp6 packets generated */
-	u_quad_t icp6s_error;		/* # of calls to icmp6_error */
-	u_quad_t icp6s_canterror;	/* no error because old was icmp */
-	u_quad_t icp6s_toofreq;		/* no error because rate limitation */
-	u_quad_t icp6s_outhist[256];
+	u_int64_t icp6s_error;		/* # of calls to icmp6_error */
+	u_int64_t icp6s_canterror;	/* no error because old was icmp */
+	u_int64_t icp6s_toofreq;	/* no error because rate limitation */
+	u_int64_t icp6s_outhist[256];
 /* statistics related to input message processed */
-	u_quad_t icp6s_badcode;		/* icmp6_code out of range */
-	u_quad_t icp6s_tooshort;	/* packet < sizeof(struct icmp6_hdr) */
-	u_quad_t icp6s_checksum;	/* bad checksum */
-	u_quad_t icp6s_badlen;		/* calculated bound mismatch */
+	u_int64_t icp6s_badcode;	/* icmp6_code out of range */
+	u_int64_t icp6s_tooshort;	/* packet < sizeof(struct icmp6_hdr) */
+	u_int64_t icp6s_checksum;	/* bad checksum */
+	u_int64_t icp6s_badlen;		/* calculated bound mismatch */
 	/*
 	 * number of responses: this member is inherited from netinet code, but
 	 * for netinet6 code, it is already available in icp6s_outhist[].
 	 */
-	u_quad_t icp6s_reflect;
-	u_quad_t icp6s_inhist[256];
-	u_quad_t icp6s_nd_toomanyopt;	/* too many ND options */
+	u_int64_t icp6s_reflect;
+	u_int64_t icp6s_inhist[256];
+	u_int64_t icp6s_nd_toomanyopt;	/* too many ND options */
 	struct icmp6errstat icp6s_outerrhist;
 #define icp6s_odst_unreach_noroute \
 	icp6s_outerrhist.icp6errs_dst_unreach_noroute
@@ -563,13 +563,13 @@ struct icmp6stat {
 #define icp6s_oparamprob_option icp6s_outerrhist.icp6errs_paramprob_option
 #define icp6s_oredirect icp6s_outerrhist.icp6errs_redirect
 #define icp6s_ounknown icp6s_outerrhist.icp6errs_unknown
-	u_quad_t icp6s_pmtuchg;		/* path MTU changes */
-	u_quad_t icp6s_nd_badopt;	/* bad ND options */
-	u_quad_t icp6s_badns;		/* bad neighbor solicitation */
-	u_quad_t icp6s_badna;		/* bad neighbor advertisement */
-	u_quad_t icp6s_badrs;		/* bad router advertisement */
-	u_quad_t icp6s_badra;		/* bad router advertisement */
-	u_quad_t icp6s_badredirect;	/* bad redirect message */
+	u_int64_t icp6s_pmtuchg;	/* path MTU changes */
+	u_int64_t icp6s_nd_badopt;	/* bad ND options */
+	u_int64_t icp6s_badns;		/* bad neighbor solicitation */
+	u_int64_t icp6s_badna;		/* bad neighbor advertisement */
+	u_int64_t icp6s_badrs;		/* bad router advertisement */
+	u_int64_t icp6s_badra;		/* bad router advertisement */
+	u_int64_t icp6s_badredirect;	/* bad redirect message */
 };
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.12 2005/12/11 21:45:28 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.15 2006/05/08 14:36:09 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -85,6 +85,8 @@ struct cpu_info {
 
 	u_int	ci_cpuid;			/* cpu number */
 	u_int	ci_primary;			/* set if master cpu */
+	u_int	ci_pfsr_i0, ci_pfsr_i1;		/* instruction... */
+	u_int	ci_pfsr_d0, ci_pfsr_d1;		/* ... and data CMMU PFSRs */
 
 	struct schedstate_percpu ci_schedstate;	/* scheduling state */
 	int	ci_want_resched;		/* need_resched() invoked */
@@ -130,6 +132,8 @@ void	cpu_boot_secondary_processors(void);
 #define	CPU_IS_PRIMARY(ci)	1
 
 #endif	/* MULTIPROCESSOR */
+
+void	set_cpu_number(cpuid_t);
 
 /*
  * The md code may hardcode this in some very specific situations.
@@ -231,8 +235,7 @@ struct switchframe {
 	void	*sf_proc;		/* proc pointer */
 };
 
-int badvaddr(vaddr_t, int);
-void nmihand(void *);
+int	badaddr(vaddr_t addr, int size);
 
 #endif /* _KERNEL */
 #endif /* __M88K_CPU_H__ */

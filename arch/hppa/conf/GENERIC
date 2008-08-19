@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.82 2006/01/11 21:57:53 martin Exp $
+#	$OpenBSD: GENERIC,v 1.88 2006/08/18 23:14:43 jason Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -120,8 +120,16 @@ uplcom* at uhub?		# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?		# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uslcom*	at uhub?		# Silicon Laboratories CP210x serial
+ucom*	at uslcom?
+uark*	at uhub?		# Arkmicro ARK3116 serial
+ucom*	at uark?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
+umsm*	at uhub?		# Qualcomm MSM EVDO
+ucom*	at umsm?
+ucycom*	at uhidev?		# Cypress serial
+ucom*	at ucycom?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -146,7 +154,8 @@ udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
-ural*	at uhub?		# Ralink RT2500
+ural*	at uhub?		# Ralink RT2500USB
+rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 
 sti0	at mainbus0 irq 11	# [H]CRX-{8,24,48}[Z] graphics
 sti0	at phantomas0 irq 11	# builtin graphics on BC*
@@ -214,6 +223,8 @@ pms*	at gsckbc?		# PS/2 mouse
 #ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
 scsibus* at ahc?
+mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
+scsibus* at mpi?
 #option	BHADEBUG
 #bha*	at eisa?
 #bha*	at pci?
@@ -248,7 +259,7 @@ ne*	at pcmcia?
 #atw*	at pci?			# ADMtek ADM8211 (802.11)
 #atw*	at cardbus?
 #an*	at pci?			# Cisco/Aironet 802.11DS
-#an*	at pcmcia?
+an*	at pcmcia?
 #wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbus.c,v 1.23 2005/09/08 15:25:54 martin Exp $	*/
+/*	$OpenBSD: sbus.c,v 1.26 2006/06/28 20:09:15 deraadt Exp $	*/
 /*	$NetBSD: sbus.c,v 1.46 2001/10/07 20:30:41 eeh Exp $ */
 
 /*-
@@ -129,13 +129,12 @@
 #ifdef DEBUG
 #define SDB_DVMA	0x1
 #define SDB_INTR	0x2
+#define SDB_CHILD	0x4
 int sbus_debug = 0;
 #define DPRINTF(l, s)   do { if (sbus_debug & l) printf s; } while (0)
 #else
 #define DPRINTF(l, s)
 #endif
-
-void sbusreset(int);
 
 bus_space_tag_t sbus_alloc_bustag(struct sbus_softc *, int);
 bus_dma_tag_t sbus_alloc_dmatag(struct sbus_softc *, bus_dma_tag_t);
@@ -353,6 +352,7 @@ sbus_mb_attach(struct device *parent, struct device *self, void *aux)
 		panic("couldn't malloc iommu name");
 	snprintf(name, 32, "%s dvma", sc->sc_dev.dv_xname);
 
+	printf("%s: ", sc->sc_dev.dv_xname);
 	iommu_init(name, &sc->sc_is, 0, -1);
 
 	/* Enable the over temp intr */
@@ -419,11 +419,11 @@ sbus_attach_common(struct sbus_softc *sc, int node, int indirect)
 	 */
 	node0 = firstchild(node);
 	for (node = node0; node; node = nextsibling(node)) {
-		char *name = getpropstring(node, "name");
-
 		if (sbus_setup_attach_args(sc, sbt, sc->sc_dmatag,
 					   node, &sa) != 0) {
-			printf("sbus_attach: %s: incomplete\n", name);
+			DPRINTF(SDB_CHILD,
+			    ("sbus_attach: %s: incomplete\n",
+			    getpropstring(node, "name")));
 			continue;
 		}
 		(void) config_found(&sc->sc_dev, (void *)&sa, sbus_print);
@@ -555,62 +555,6 @@ sbus_bus_addr(bus_space_tag_t t, u_int btype, u_int offset)
 	}
 
 	return (baddr);
-}
-
-
-/*
- * Each attached device calls sbus_establish after it initializes
- * its sbusdev portion.
- */
-void
-sbus_establish(struct sbusdev *sd, struct device *dev)
-{
-	struct sbus_softc *sc;
-	struct device *curdev;
-
-	/*
-	 * We have to look for the sbus by name, since it is not necessarily
-	 * our immediate parent.
-	 * We don't just use the device structure of the above-attached
-	 * sbus, since we support multiple sbus's.
-	 */
-	for (curdev = dev->dv_parent; ; curdev = curdev->dv_parent) {
-		if (!curdev || !curdev->dv_xname)
-			panic("sbus_establish: can't find sbus parent for %s",
-			      sd->sd_dev->dv_xname
-					? sd->sd_dev->dv_xname
-					: "<unknown>" );
-
-		if (strncmp(curdev->dv_xname, "sbus", 4) == 0)
-			break;
-	}
-	sc = (struct sbus_softc *) curdev;
-
-	sd->sd_dev = dev;
-	sd->sd_bchain = sc->sc_sbdev;
-	sc->sc_sbdev = sd;
-}
-
-/*
- * Reset the given sbus.
- */
-void
-sbusreset(int sbus)
-{
-	struct sbusdev *sd;
-	struct sbus_softc *sc = sbus_cd.cd_devs[sbus];
-	struct device *dev;
-
-	printf("reset %s:", sc->sc_dev.dv_xname);
-	for (sd = sc->sc_sbdev; sd != NULL; sd = sd->sd_bchain) {
-		if (sd->sd_reset) {
-			dev = sd->sd_dev;
-			(*sd->sd_reset)(dev);
-			printf(" %s", dev->dv_xname);
-		}
-	}
-	/* Reload iommu regs */
-	iommu_reset(&sc->sc_is);
 }
 
 /*

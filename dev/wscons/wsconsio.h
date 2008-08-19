@@ -1,4 +1,4 @@
-/* $OpenBSD: wsconsio.h,v 1.38 2006/02/14 18:52:17 miod Exp $ */
+/* $OpenBSD: wsconsio.h,v 1.42 2006/08/06 16:00:45 miod Exp $ */
 /* $NetBSD: wsconsio.h,v 1.74 2005/04/28 07:15:44 martin Exp $ */
 
 /*
@@ -288,6 +288,9 @@ struct wsmouse_calibcoords {
 #define		WSDISPLAY_TYPE_PXALCD	48	/* PXALCD (Zaurus) */
 #define		WSDISPLAY_TYPE_MAC68K	49	/* Generic mac68k framebuffer */
 #define		WSDISPLAY_TYPE_SUNLEO	50	/* Sun ZX/Leo */
+#define		WSDISPLAY_TYPE_TVRX	51	/* HP TurboVRX */
+#define		WSDISPLAY_TYPE_CFXGA	52	/* CF VoyagerVGA */
+#define		WSDISPLAY_TYPE_LCSPX	53	/* DEC LCSPX (VS4000) */
 
 /* Basic display information.  Not applicable to all display types. */
 struct wsdisplay_fbinfo {
@@ -364,7 +367,6 @@ struct wsdisplay_font {
 #define WSDISPLAY_FONTENC_IBM 1
 #define WSDISPLAY_FONTENC_PCVT 2
 #define WSDISPLAY_FONTENC_ISO7 3 /* greek */
-#define WSDISPLAY_FONTENC_SONY 4
 	u_int fontwidth, fontheight, stride;
 #define WSDISPLAY_MAXFONTSZ	(512*1024)
 	int bitorder, byteorder;
@@ -406,7 +408,8 @@ struct wsdisplay_addscreendata {
 struct wsdisplay_delscreendata {
 	int idx; /* screen index */
 	int flags;
-#define WSDISPLAY_DELSCR_FORCE 1
+#define	WSDISPLAY_DELSCR_FORCE	0x01
+#define	WSDISPLAY_DELSCR_QUIET	0x02
 };
 #define WSDISPLAYIO_DELSCREEN	_IOW('W', 84, struct wsdisplay_delscreendata)
 

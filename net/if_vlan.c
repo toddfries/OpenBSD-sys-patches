@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.63 2006/02/09 00:05:55 reyk Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.68 2006/05/22 23:25:15 krw Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -201,7 +201,7 @@ vlan_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		/*
@@ -246,7 +246,7 @@ vlan_start(struct ifnet *ifp)
 
 		/*
 		 * Send it, precisely as ether_output() would have.
-		 * We are already running at splimp.
+		 * We are already running at splnet.
 		 */
 		p->if_obytes += m->m_pkthdr.len;
 		if (m->m_flags & M_MCAST)
@@ -315,7 +315,8 @@ vlan_input(eh, m)
 
 #if NBPFILTER > 0
 	if (ifv->ifv_if.if_bpf)
-		bpf_mtap_hdr(ifv->ifv_if.if_bpf, (char *)eh, ETHER_HDR_LEN, m);
+		bpf_mtap_hdr(ifv->ifv_if.if_bpf, (char *)eh, ETHER_HDR_LEN,
+		    m, BPF_DIRECTION_IN);
 #endif
 	ifv->ifv_if.if_ipackets++;
 	ether_input(&ifv->ifv_if, eh, m);
@@ -435,7 +436,8 @@ vlan_unconfig(struct ifnet *ifp)
 
 	s = splnet();
 	LIST_REMOVE(ifv, ifv_list);
-	hook_disestablish(p->if_linkstatehooks, ifv->lh_cookie);
+	if (ifv->lh_cookie != NULL)
+		hook_disestablish(p->if_linkstatehooks, ifv->lh_cookie);
 	/* The cookie is NULL if disestablished externally */
 	if (ifv->dh_cookie != NULL)
 		hook_disestablish(p->if_detachhooks, ifv->dh_cookie);
@@ -473,6 +475,7 @@ vlan_vlandev_state(void *v)
 		return;
 
 	ifv->ifv_if.if_link_state = ifv->ifv_p->if_link_state;
+	ifv->ifv_if.if_baudrate = ifv->ifv_p->if_baudrate;
 	if_link_state_change(&ifv->ifv_if);
 }
 
@@ -565,7 +568,7 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if ((error = copyin(ifr->ifr_data, &vlr, sizeof vlr)))
 			break;
 		if (vlr.vlr_parent[0] == '\0') {
-			s = splimp();
+			s = splnet();
 			vlan_unconfig(ifp);
 			if (ifp->if_flags & IFF_UP)
 				if_down(ifp);
@@ -609,14 +612,6 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		if ((error = copyin(ifr->ifr_data, &vlr, sizeof vlr)))
 			break;
-		if (vlr.vlr_parent[0] == '\0')
-			break;
-
-		pr = ifunit(vlr.vlr_parent);
-		if (pr == NULL) {
-			error = ENOENT;
-			break;
-		}
 		/*
 		 * Don't let the caller set up a VLAN priority
 		 * outside the range 0-7
@@ -625,16 +620,14 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = EINVAL;
 			break;
 		}
-
 		ifv->ifv_prio = vlr.vlr_tag;
 		break;
 	case SIOCGETVLANPRIO:
 		bzero(&vlr, sizeof vlr);
-		if (ifv->ifv_p) {
+		if (ifv->ifv_p)
 			strlcpy(vlr.vlr_parent, ifv->ifv_p->if_xname,
                             sizeof(vlr.vlr_parent));
-			vlr.vlr_tag = ifv->ifv_prio;
-		}
+		vlr.vlr_tag = ifv->ifv_prio;
 		error = copyout(&vlr, ifr->ifr_data, sizeof vlr);
 		break;
 	case SIOCSIFFLAGS:
@@ -645,6 +638,7 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifv->ifv_p != NULL)
 			error = vlan_set_promisc(ifp);
 		break;
+
 	case SIOCADDMULTI:
 		error = (ifv->ifv_p != NULL) ?
 		    vlan_ether_addmulti(ifv, ifr) : EINVAL;

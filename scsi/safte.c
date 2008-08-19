@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.26 2006/01/19 17:08:40 grange Exp $ */
+/*	$OpenBSD: safte.c,v 1.29 2006/07/29 02:40:45 krw Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -24,7 +24,7 @@
 #include <sys/scsiio.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/queue.h>
 #include <sys/sensors.h>
 
@@ -64,7 +64,7 @@ struct safte_sensor {
 struct safte_softc {
 	struct device		sc_dev;
 	struct scsi_link	 *sc_link;
-	struct lock		sc_lock;
+	struct rwlock		sc_lock;
 
 	u_int			sc_encbuflen;
 	u_char			*sc_encbuf;
@@ -118,12 +118,12 @@ safte_match(struct device *parent, void *match, void *aux)
 
 	/* match on dell enclosures */
 	if ((inq->device & SID_TYPE) == T_PROCESSOR &&
-	    (inq->version & SID_ANSII) == SID_ANSII_SCSI3)
+	    SCSISPC(inq->version) == 3)
 		return (2);
 
 	if ((inq->device & SID_TYPE) != T_PROCESSOR ||
-	    (inq->version & SID_ANSII) != SID_ANSII_SCSI2 ||
-	    (inq->response_format & SID_ANSII) != SID_ANSII_SCSI2)
+	    SCSISPC(inq->version) != 2 ||
+	    (inq->response_format & SID_ANSII) != 2)
 		return (0);
 
 	memset(&cmd, 0, sizeof(cmd));
@@ -162,7 +162,7 @@ safte_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_link = sa->sa_sc_link;
 	sa->sa_sc_link->device_softc = sc;
-	lockinit(&sc->sc_lock, PZERO, DEVNAME(sc), 0, 0);
+	rw_init(&sc->sc_lock, DEVNAME(sc));
 
 	printf("\n");
 
@@ -211,7 +211,7 @@ safte_detach(struct device *self, int flags)
 	struct safte_softc		*sc = (struct safte_softc *)self;
 	int				i;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 
 #if NBIO > 0
 	if (sc->sc_nslots > 0)
@@ -232,8 +232,7 @@ safte_detach(struct device *self, int flags)
 	if (sc->sc_encbuf != NULL)
 		free(sc->sc_encbuf, M_DEVBUF);
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
-	lockmgr(&sc->sc_lock, LK_DRAIN, NULL);
+	rw_exit_write(&sc->sc_lock);
 
 	return (0);
 }
@@ -303,7 +302,7 @@ safte_read_config(struct safte_softc *sc)
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + i);
 		s->se_sensor.type = SENSOR_INDICATOR;
 		snprintf(s->se_sensor.desc, sizeof(s->se_sensor.desc),
-		    "fan%d", i);
+		    "Fan%d", i);
 
 		s++;
 	}
@@ -314,7 +313,7 @@ safte_read_config(struct safte_softc *sc)
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j + i);
 		s->se_sensor.type = SENSOR_INDICATOR;
 		snprintf(s->se_sensor.desc, sizeof(s->se_sensor.desc),
-		    "psu%d", i);
+		    "PSU%d", i);
 
 		s++;
 	}
@@ -359,7 +358,7 @@ safte_read_config(struct safte_softc *sc)
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j + i);
 		s->se_sensor.type = SENSOR_TEMP;
 		snprintf(s->se_sensor.desc, sizeof(s->se_sensor.desc),
-		    "temp%d", i);
+		    "Temp%d", i);
 
 		s++;
 	}
@@ -383,7 +382,7 @@ safte_read_encstat(void *arg)
 	struct safte_sensor		*s;
 	u_int16_t			oot;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.opcode = READ_BUFFER;
@@ -401,7 +400,7 @@ safte_read_encstat(void *arg)
 	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
 	    sizeof(cmd), sc->sc_encbuf, sc->sc_encbuflen, 2, 30000, NULL,
 	    flags) != 0) {
-		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+		rw_exit_write(&sc->sc_lock);
 		return;
 	}
 
@@ -504,7 +503,7 @@ safte_read_encstat(void *arg)
 		sc->sc_temps[i].se_sensor.status = 
 		    (oot & (1 << i)) ? SENSOR_S_CRIT : SENSOR_S_OK;
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_write(&sc->sc_lock);
 }
 
 #if NBIO > 0
@@ -547,12 +546,12 @@ safte_bio_blink(struct safte_softc *sc, struct bioc_blink *blink)
 		return (EINVAL);
 	}
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_read(&sc->sc_lock);
 	for (slot = 0; slot < sc->sc_nslots; slot++) {
 		if (sc->sc_slots[slot] == blink->bb_target)
 			break;
 	}
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_read(&sc->sc_lock);
 
 	if (slot >= sc->sc_nslots)
 		return (ENODEV);

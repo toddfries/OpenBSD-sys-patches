@@ -1,4 +1,4 @@
-	$OpenBSD: pcmciadevs,v 1.127 2005/12/17 02:59:25 jsg Exp $
+	$OpenBSD: pcmciadevs,v 1.130 2006/07/28 17:13:43 brad Exp $
 /* $NetBSD: pcmciadevs,v 1.13 1998/08/17 23:10:12 thorpej Exp $ */
 
 /*
@@ -62,7 +62,6 @@ vendor COMPAQ			0x0138	Compaq
 vendor GREYCELL			0x0143	Grey Cell
 vendor LINKSYS			0x0149	Linksys
 vendor NETGEAR			0x0149	Netgear
-vendor SIEMENS			0x02ac	Siemens
 vendor SIERRA			0x0192	Sierra
 vendor SIMPLETECH		0x014d	Simple Technology
 vendor SYMBOL2			0x014d	Symbol
@@ -90,6 +89,7 @@ vendor LINKSYS2			0x0274	The Linksys Group
 vendor AUDIOVOX			0x0279	Audiovox Communications
 vendor IODATA2			0x028a	I-O DATA
 vendor ASUS			0x02aa	ASUS
+vendor SIEMENS			0x02ac	Siemens
 vendor MICROSOFT		0x02d2	Microsoft
 vendor NWN			0x0602	No Wires Needed
 vendor BREEZECOM		0x0a02	BreezeCOM
@@ -169,6 +169,7 @@ product BAY EMOBILITY_11B	0x080a e-Mobility 11Mb
 
 /* Belkin */
 product BELKIN F5D5020		0x2328 F5D5020
+product BELKIN F5D6020		0x3302 F5D6020
 
 /* BreezeCOM */
 product BREEZECOM BREEZENET	0x0102 BreezeCOM BreezeNET
@@ -375,6 +376,7 @@ product SOCKET PAGECARD		0x0003 Socket Communications PageCard
 product SOCKET DUAL_RS232	0x0006 Socket Communications Dual RS232
 product SOCKET LP_ETHER		0x000d Socket Communications LP-E
 product SOCKET LP_ETHER_CF	0x0075 Socket Communications LP CF
+product SOCKET ETHER_CF_10_100	0x0145 Socket Communications CF 10/100
 
 /* Standard Microsystems Corporation */
 product SMC 8020		0x0001 SMC EtherEZ 8020

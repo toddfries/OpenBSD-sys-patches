@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6360.c,v 1.9 2005/12/03 16:53:15 krw Exp $	*/
+/*	$OpenBSD: aic6360.c,v 1.12 2006/06/03 01:51:54 martin Exp $	*/
 /*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
 
 #ifdef DDB
@@ -110,7 +110,9 @@
  * kernel debugger.  If you set AIC_DEBUG to 0 they are not included (the
  * kernel uses less memory) but you lose the debugging facilities.
  */
+#ifndef SMALL_KERNEL
 #define AIC_DEBUG		1
+#endif
 
 #define	AIC_ABORT_TIMEOUT	2000	/* time to wait for abort */
 
@@ -148,7 +150,7 @@
 #define	Debugger() panic("should call debugger here (aic6360.c)")
 #endif /* ! DDB */
 
-#if AIC_DEBUG
+#ifdef AIC_DEBUG
 int aic_debug = 0x00; /* AIC_SHOWSTART|AIC_SHOWMISC|AIC_SHOWTRACE; */
 #endif
 
@@ -174,7 +176,7 @@ void	aic_abort(struct aic_softc *, struct aic_acb *);
 void	aic_msgout(struct aic_softc *);
 int	aic_dataout_pio(struct aic_softc *, u_char *, int);
 int	aic_datain_pio(struct aic_softc *, u_char *, int);
-#if AIC_DEBUG
+#ifdef AIC_DEBUG
 void	aic_print_acb(struct aic_acb *);
 void	aic_dump_driver(struct aic_softc *);
 void	aic_dump6360(struct aic_softc *);
@@ -188,7 +190,11 @@ struct cfdriver aic_cd = {
 
 struct scsi_adapter aic_switch = {
 	aic_scsi_cmd,
+#ifdef notyet
 	aic_minphys,
+#else
+	minphys,
+#endif
 	0,
 	0,
 };
@@ -288,6 +294,17 @@ aicattach(sc)
 	sc->sc_link.openings = 2;
 
 	config_found(&sc->sc_dev, &sc->sc_link, scsiprint);
+}
+
+int
+aic_detach(struct device *self, int flags)
+{
+	struct aic_softc *sc = (struct aic_softc *) self;
+	int rv = 0;
+
+	rv = config_detach_children(&sc->sc_dev, flags);
+
+	return (rv);
 }
 
 /* Initialize AIC6360 chip itself
@@ -549,6 +566,7 @@ aic_scsi_cmd(xs)
 	return COMPLETE;
 }
 
+#ifdef notyet
 /*
  * Adjust transfer size in buffer structure
  */
@@ -562,6 +580,7 @@ aic_minphys(bp)
 		bp->b_bcount = (AIC_NSEG << PGSHIFT);
 	minphys(bp);
 }
+#endif
 
 /*
  * Used when interrupt driven I/O isn't allowed, e.g. during boot.
@@ -846,7 +865,7 @@ aic_done(sc, acb)
 
 	xs->flags |= ITSDONE;
 
-#if AIC_DEBUG
+#ifdef AIC_DEBUG
 	if ((aic_debug & AIC_SHOWMISC) != 0) {
 		if (xs->resid != 0)
 			printf("resid=%d ", xs->resid);
@@ -1007,7 +1026,7 @@ nextbyte:
 
 		switch (sc->sc_imess[0]) {
 		case MSG_CMDCOMPLETE:
-			if (sc->sc_dleft < 0) {
+			if ((long)sc->sc_dleft < 0) {
 				sc_link = acb->xs->sc_link;
 				printf("%s: %d extra bytes from %d:%d\n",
 				    sc->sc_dev.dv_xname, -sc->sc_dleft,
@@ -1943,7 +1962,7 @@ dophase:
 	case PH_CMD:
 		if (sc->sc_state != AIC_CONNECTED)
 			break;
-#if AIC_DEBUG
+#ifdef AIC_DEBUG
 		if ((aic_debug & AIC_SHOWMISC) != 0) {
 			AIC_ASSERT(sc->sc_nexus != NULL);
 			acb = sc->sc_nexus;
@@ -2065,7 +2084,7 @@ aic_timeout(arg)
 	splx(s);
 }
 
-#if AIC_DEBUG
+#ifdef AIC_DEBUG
 /*
  * The following functions are mostly used for debugging purposes, either
  * directly called from the driver or from the kernel debugger.

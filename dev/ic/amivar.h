@@ -1,4 +1,4 @@
-/*	$OpenBSD: amivar.h,v 1.37 2005/12/13 12:13:59 dlg Exp $	*/
+/*	$OpenBSD: amivar.h,v 1.49 2006/06/28 08:26:00 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -54,29 +54,24 @@ struct ami_ccb {
 	struct ami_sgent	*ccb_sglist;
 	paddr_t			ccb_sglistpa;
 	int			ccb_offset;
-
-	struct scsi_xfer	*ccb_xs;
-
-	void			*ccb_data;
-	int			ccb_len;
-	enum {
-		AMI_CCB_IN,
-		AMI_CCB_OUT
-	}			ccb_dir;
 	bus_dmamap_t		ccb_dmamap;
 
-	volatile int		ccb_wakeup;
+	struct scsi_xfer	*ccb_xs;
+	void			(*ccb_done)(struct ami_softc *sc,
+				    struct ami_ccb *ccb);
 
-	enum {
+	volatile enum {
 		AMI_CCB_FREE,
 		AMI_CCB_READY,
 		AMI_CCB_QUEUED,
 		AMI_CCB_PREQUEUED
 	}			ccb_state;
+	int			ccb_flags;
+#define AMI_CCB_F_ERR			(1<<0)
 	TAILQ_ENTRY(ami_ccb)	ccb_link;
 };
 
-typedef TAILQ_HEAD(ami_queue_head, ami_ccb)	ami_queue_head;
+TAILQ_HEAD(ami_ccb_list, ami_ccb);
 
 struct ami_rawsoftc {
 	struct scsi_link	sc_link;
@@ -95,7 +90,6 @@ struct ami_softc {
 	int			sc_flags;
 #define AMI_CHECK_SIGN	0x0001
 #define AMI_BROKEN 	0x0002
-#define	AMI_CMDWAIT	0x0004
 #define AMI_QUARTZ	0x0008
 
 	/* low-level interface */
@@ -116,15 +110,16 @@ struct ami_softc {
 	volatile struct ami_iocmd *sc_mbox;
 	paddr_t			sc_mbox_pa;
 
-	struct ami_ccb		sc_ccbs[AMI_MAXCMDS];
-	ami_queue_head		sc_free_ccb, sc_ccbq, sc_ccbdone;
+	struct ami_ccb		*sc_ccbs;
+	struct ami_ccb_list	sc_ccb_freeq, sc_ccb_preq, sc_ccb_runq;
 
 	struct ami_mem		*sc_ccbmem_am;
 
 	int			sc_timeout;
-	struct timeout		sc_requeue_tmo;
-	struct timeout		sc_poll_tmo;
+	struct timeout		sc_run_tmo;
 	int			sc_dis_poll;
+
+	struct lock		sc_lock;
 
 	char			sc_fwver[16];
 	char			sc_biosver[16];
@@ -143,6 +138,9 @@ struct ami_softc {
 		char			dev[16];
 	}			sc_hdr[AMI_BIG_MAX_LDRIVES];
 	struct ami_rawsoftc	*sc_rawsoftcs;
+
+	struct sensor		*sc_sensors;
+	struct ami_big_diskarray *sc_bd;
 };
 
 int  ami_attach(struct ami_softc *sc);

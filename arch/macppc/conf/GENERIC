@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.127 2006/02/14 18:11:04 miod Exp $g
+#	$OpenBSD: GENERIC,v 1.150 2006/08/18 23:14:43 jason Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -13,7 +13,7 @@ machine		macppc powerpc
 include		"../../../conf/GENERIC"
 maxusers	32			# estimated number of users
 
-# default type, instructs system to try to determin what proper type is
+# default type, instructs system to try to determine what proper type is
 # actual machine type probed via name of openfirmware root node.
 option		SYS_TYPE=APPL
 
@@ -61,6 +61,7 @@ ahc*		at pci?		# Adaptec 294x, aic78x0 SCSI
 #ami*		at pci?
 pcscp*		at pci?		# AMD Am53c974 PCscsi-PCI SCSI
 isp*		at pci?		# Qlogic ISP [12]0x0 SCSI/FibreChannel
+mpi*		at pci?		# LSI Logic MPT-Fusion Message Passing Interface
 option		ISP_COMPILE_FW
 pciide*		at pci?
 kauaiata*	at pci?		# Apple ATA 100
@@ -79,14 +80,19 @@ bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 ti*		at pci?		# Alteon Tigon 1Gb ethernet
 re*		at pci?		# Realtek 8169/8169S/8110S
 stge*		at pci?		# Sundance TC9021 GigE
-#an*		at pci?		# Cisco/Aironet
+skc*		at pci?		# SysKonnect GEnesis 984x
+sk*		at skc?		#  each port of above
+mskc*		at pci?		# Marvell Yukon-2
+msk*		at mskc?	#  each port of above
+an*		at pci?		# Cisco/Aironet
 atw*		at pci?		# ADMtek ADM8211 (802.11)
 wi*		at pci?		# WaveLAN IEEE 802.11DS
 ral*		at pci?		# Ralink RT2500/RT2501/RT2600
-#rtw*		at pci?		# Realtek 8180
+rtw*		at pci?		# Realtek 8180
 vr*		at pci?		# VIA Rhine ethernet
 musycc*		at pci?		# Conexant HDLC controller
 art*		at musycc?	# Accoom Artery E1/T1 cards
+xge*		at pci?		# Neterion Xframe-I/II 10Gb ethernet
 
 iop*		at pci?		# I2O processor
 ioprbs*		at iop?		# I2O arrays
@@ -108,7 +114,7 @@ luphy*		at mii?		# Lucent LU6612 PHY
 sqphy*		at mii?		# Seeq 8022[013] PHYs
 rlphy*		at mii?		# RealTek 8139 internal PHYs
 #tlphy*		at mii?		# ThunderLAN PHYs
-#tqphy*		at mii?		# TDK Semiconductor PHYs
+tqphy*		at mii?		# TDK Semiconductor PHYs
 brgphy*		at mii?		# Broadcom 10/100/1000 PHYs
 bmtphy*		at mii?		# Broadcom 10/100 PHYs
 eephy*		at mii?		# Marvell 88E1000 Gigabit PHYs
@@ -128,7 +134,7 @@ macintr0	at macobio?	# old interrupt controller
 openpic*	at macobio?	# openpic interrupt controller
 bm*		at macobio?	# BMAC ethernet
 #mc*		at macobio?	# MACE ethernet
-#esp*		at macobio? flags 0x00ff # 53c9x SCSI
+#esp*		at macobio? flags 0x0000ffff # 53c9x SCSI
 #mesh*		at macobio? flags 0xffff # MESH SCSI
 #nvram*		at macobio?	# nvram
 adb*		at macobio?	# Apple Desktop Bus
@@ -161,6 +167,10 @@ radio*		at bktr?
 eap*		at pci?		# Ensoniq AudioPCI S5016
 emu*		at pci?		# SB Live!
 
+puc*		at pci?		# PCI "universal" comm device
+#puc*		at cardbus?
+com*		at puc?
+
 #scsibus*	at adv?
 scsibus*	at ahc?
 #scsibus*	at ami?
@@ -171,6 +181,7 @@ scsibus*	at ioprbs?
 scsibus*	at iopsp?
 scsibus*	at pcscp?
 scsibus*	at isp?
+scsibus*	at mpi?
 scsibus*	at siop?
 #scsibus*	at fwscsi?
 
@@ -212,11 +223,18 @@ uplcom* at uhub?		# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?		# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uslcom*	at uhub?		# Silicon Laboratories CP210x serial
+ucom*	at uslcom?
+uark*	at uhub?		# Arkmicro ARK3116 serial
+ucom*	at uark?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
+umsm*	at uhub?		# Qualcomm MSM EVDO
+ucom*	at umsm?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
+midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
 scsibus* at umass?
@@ -228,6 +246,8 @@ ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
+ucycom*	at uhidev?			# Cypress serial
+ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
@@ -237,7 +257,6 @@ kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
-ural*	at uhub?		# Ralink RT2500
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
@@ -249,6 +268,9 @@ udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
+ural*	at uhub?		# Ralink RT2500USB
+rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+udcf*	at uhub?		# Gude Expert mouseCLOCK
 
 # I2C bus support
 iic*		at ki2c?
@@ -262,8 +284,8 @@ maxtmp*		at iic?
 adc*		at iic?
 tsl*		at iic?
 admtmp*		at iic?
-pcagpio*	at iic?
-gpio*		at pcagpio?
+#pcagpio*	at iic?
+#gpio*		at pcagpio?
 maxds*		at iic?
 fcu*		at iic?
 adt*		at iic?
@@ -275,20 +297,21 @@ pcmcia*		at cardslot?
 cbb*		at pci?
 cardslot*	at cbb?
 ep*		at pcmcia?	# PCMCIA based 3C5xx ethernet
-#an*		at pcmcia?	# Cisco/Aironet
+an*		at pcmcia?	# Cisco/Aironet
 wi*		at pcmcia?	# WaveLAN IEEE 802.11DS
 dc*		at cardbus?	# 21143, "tulip" clone ethernet
-#fxp*		at cardbus?	# Intel PRO/100 ethernet
+fxp*		at cardbus?	# Intel PRO/100 ethernet
 xl*		at cardbus?	# 3C575/3C656 ethernet
-#rl*		at cardbus?	# RealTek 81[23]9 ethernet
+rl*		at cardbus?	# RealTek 81[23]9 ethernet
 rtw*		at cardbus?	# Realtek 8180
 wdc*		at pcmcia?
+com*		at pcmcia?
+com*		at cardbus?
 
 wsdisplay*	at vgafb?
 
 # MIDI support
 midi*		at eap?
-midi*		at umidi?
 
 # Audio support
 audio*		at awacs?

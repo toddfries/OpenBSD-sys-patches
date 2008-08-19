@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipx_ip.c,v 1.19 2004/09/20 23:10:47 drahn Exp $	*/
+/*	$OpenBSD: ipx_ip.c,v 1.22 2006/06/15 10:08:34 pascoe Exp $	*/
 
 /*-
  *
@@ -223,7 +223,7 @@ ipxip_input( struct mbuf *m, ...)
 	/*
 	 * Deliver to IPX
 	 */
-	s = splimp();
+	s = splnet();
 	if (IF_QFULL(ifq)) {
 		IF_DROP(ifq);
 		m_freem(m);
@@ -300,7 +300,7 @@ ipxipoutput(ifp, m, dst, rt)
 	/*
 	 * Output final datagram.
 	 */
-	error = ip_output(m, NULL, ro, SO_BROADCAST, NULL, NULL, NULL);
+	error = ip_output(m, NULL, ro, SO_BROADCAST, NULL, NULL);
 	if (error) {
 		ifn->ifen_ifnet.if_oerrors++;
 		ifn->ifen_ifnet.if_ierrors = error;
@@ -331,7 +331,7 @@ ipxip_route(m)
 	/*
 	 * First, make sure we already have an IPX address.
 	 */
-	if (ipx_ifaddr.tqh_first == NULL)
+	if (TAILQ_EMPTY(&ipx_ifaddr))
 		return (EADDRNOTAVAIL);
 	/*
 	 * Now, determine if we can get to the destination
@@ -351,11 +351,11 @@ ipxip_route(m)
 		struct in_ifaddr *ia;
 		struct ifnet *ifp = ro.ro_rt->rt_ifp;
 
-		for (ia = in_ifaddr.tqh_first; ia; ia = ia->ia_list.tqe_next)
+		TAILQ_FOREACH(ia, &in_ifaddr, ia_list)
 			if (ia->ia_ifp == ifp)
 				break;
 		if (ia == NULL)
-			ia = in_ifaddr.tqh_first;
+			ia = TAILQ_FIRST(&in_ifaddr);
 		if (ia == NULL) {
 			RTFREE(ro.ro_rt);
 			return (EADDRNOTAVAIL);
@@ -388,7 +388,7 @@ ipxip_route(m)
 		(caddr_t)&ifr_ipxip, (struct ifnet *)ifn);
 
 	satoipx_addr(ifr_ipxip.ifr_addr).ipx_host =
-	    ipx_ifaddr.tqh_first->ia_addr.sipx_addr.ipx_host;
+	    TAILQ_FIRST(&ipx_ifaddr)->ia_addr.sipx_addr.ipx_host;
 
 	return (ipx_control((struct socket *)0, (int)SIOCSIFADDR,
 			(caddr_t)&ifr_ipxip, (struct ifnet *)ifn));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.29 2005/12/11 21:45:30 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.33 2006/05/08 14:36:09 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -62,7 +62,6 @@
 #include <machine/asm_macro.h>   /* enable/disable interrupts */
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/locore.h>
 #ifdef M88100
 #include <machine/m88100.h>		/* DMT_xxx */
 #include <machine/m8820x.h>		/* CMMU_PFSR_xxx */
@@ -102,6 +101,7 @@ const char *trap_type[] = {
 	"Error Exception",
 	"Non-Maskable Exception",
 };
+
 const int trap_types = sizeof trap_type / sizeof trap_type[0];
 
 #ifdef M88100
@@ -238,16 +238,16 @@ m88100_trap(unsigned type, struct trapframe *frame)
 #if defined(DDB)
 	case T_KDB_BREAK:
 		s = splhigh();
-		db_enable_interrupt(psr);
+		set_psr((psr = get_psr()) & ~PSR_IND);
 		ddb_break_trap(T_KDB_BREAK, (db_regs_t*)frame);
-		db_disable_interrupt(psr);
+		set_psr(psr);
 		splx(s);
 		return;
 	case T_KDB_ENTRY:
 		s = splhigh();
-		db_enable_interrupt(psr);
+		set_psr((psr = get_psr()) & ~PSR_IND);
 		ddb_entry_trap(T_KDB_ENTRY, (db_regs_t*)frame);
-		db_disable_interrupt(psr);
+		set_psr(psr);
 		splx(s);
 		return;
 #endif /* DDB */
@@ -487,15 +487,10 @@ user_fault:
 		fault_type = FPE_INTOVF;
 		break;
 	case T_FPEPFLT+T_USER:
-	case T_FPEIFLT+T_USER:
 		sig = SIGFPE;
 		break;
 	case T_SIGSYS+T_USER:
 		sig = SIGSYS;
-		break;
-	case T_SIGTRAP+T_USER:
-		sig = SIGTRAP;
-		fault_type = TRAP_TRACE;
 		break;
 	case T_STEPBPT+T_USER:
 #ifdef PTRACE
@@ -640,44 +635,51 @@ m88110_trap(unsigned type, struct trapframe *frame)
 		break;
 		/*NOTREACHED*/
 
-	case T_197_READ+T_USER:
-	case T_197_READ:
+	case T_110_DRM+T_USER:
+	case T_110_DRM:
+#ifdef DEBUG
 		printf("DMMU read miss: Hardware Table Searches should be enabled!\n");
+#endif
 		panictrap(frame->tf_vector, frame);
 		break;
 		/*NOTREACHED*/
-	case T_197_WRITE+T_USER:
-	case T_197_WRITE:
+	case T_110_DWM+T_USER:
+	case T_110_DWM:
+#ifdef DEBUG
 		printf("DMMU write miss: Hardware Table Searches should be enabled!\n");
+#endif
 		panictrap(frame->tf_vector, frame);
 		break;
 		/*NOTREACHED*/
-	case T_197_INST+T_USER:
-	case T_197_INST:
+	case T_110_IAM+T_USER:
+	case T_110_IAM:
+#ifdef DEBUG
 		printf("IMMU miss: Hardware Table Searches should be enabled!\n");
+#endif
 		panictrap(frame->tf_vector, frame);
 		break;
 		/*NOTREACHED*/
+
 #ifdef DDB
 	case T_KDB_TRACE:
 		s = splhigh();
-		db_enable_interrupt(psr);
+		set_psr((psr = get_psr()) & ~PSR_IND);
 		ddb_break_trap(T_KDB_TRACE, (db_regs_t*)frame);
-		db_disable_interrupt(psr);
+		set_psr(psr);
 		splx(s);
 		return;
 	case T_KDB_BREAK:
 		s = splhigh();
-		db_enable_interrupt(psr);
+		set_psr((psr = get_psr()) & ~PSR_IND);
 		ddb_break_trap(T_KDB_BREAK, (db_regs_t*)frame);
-		db_disable_interrupt(psr);
+		set_psr(psr);
 		splx(s);
 		return;
 	case T_KDB_ENTRY:
 		s = splhigh();
-		db_enable_interrupt(psr);
+		set_psr((psr = get_psr()) & ~PSR_IND);
 		ddb_entry_trap(T_KDB_ENTRY, (db_regs_t*)frame);
-		db_disable_interrupt(psr);
+		set_psr(psr);
 		/* skip one instruction */
 		if (frame->tf_exip & 1)
 			frame->tf_exip = frame->tf_enip;
@@ -688,10 +690,10 @@ m88110_trap(unsigned type, struct trapframe *frame)
 #if 0
 	case T_ILLFLT:
 		s = splhigh();
-		db_enable_interrupt(psr);
+		set_psr((psr = get_psr()) & ~PSR_IND);
 		ddb_error_trap(type == T_ILLFLT ? "unimplemented opcode" :
 		       "error fault", (db_regs_t*)frame);
-		db_disable_interrupt(psr);
+		set_psr(psr);
 		splx(s);
 		return;
 #endif /* 0 */
@@ -1009,15 +1011,10 @@ m88110_user_fault:
 		fault_type = FPE_INTOVF;
 		break;
 	case T_FPEPFLT+T_USER:
-	case T_FPEIFLT+T_USER:
 		sig = SIGFPE;
 		break;
 	case T_SIGSYS+T_USER:
 		sig = SIGSYS;
-		break;
-	case T_SIGTRAP+T_USER:
-		sig = SIGTRAP;
-		fault_type = TRAP_TRACE;
 		break;
 	case T_STEPBPT+T_USER:
 #ifdef PTRACE
@@ -1696,6 +1693,10 @@ splassert_check(int wantipl, const char *func)
  * This routine attempts to recover these (valid) statements, by simulating
  * the split form of the instruction. If it fails, it returns the appropriate
  * signal number to deliver.
+ *
+ * Note that we do not attempt to do anything for .d.usr instructions - the
+ * kernel never issues such instructions, and they cause a privileged
+ * isntruction exception from userland.
  */
 int
 double_reg_fixup(struct trapframe *frame)
@@ -1718,19 +1719,9 @@ double_reg_fixup(struct trapframe *frame)
 		    + frame->tf_r[(instr & 0x1f)];
 		store = 0;
 		break;
-	case 0xf4001200:	/* ld.d rD, rS1[rS2] */
-		addr = frame->tf_r[(instr >> 16) & 0x1f]
-		    + (frame->tf_r[(instr & 0x1f)] << 3);
-		store = 0;
-		break;
 	case 0xf4002000:	/* st.d rD, rS1, rS2 */
 		addr = frame->tf_r[(instr >> 16) & 0x1f]
 		    + frame->tf_r[(instr & 0x1f)];
-		store = 1;
-		break;
-	case 0xf4002200:	/* st.d rD, rS1[rS2] */
-		addr = frame->tf_r[(instr >> 16) & 0x1f]
-		    + (frame->tf_r[(instr & 0x1f)] << 3);
 		store = 1;
 		break;
 	default:

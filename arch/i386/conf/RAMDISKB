@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKB,v 1.85 2006/02/08 23:56:29 pvalchev Exp $
+#	$OpenBSD: RAMDISKB,v 1.91 2006/07/25 19:16:51 kettenis Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -9,12 +9,9 @@ option		I386_CPU	# CPU classes; at least one is REQUIRED
 option		I486_CPU
 option		I586_CPU
 option		I686_CPU
-#option		GPL_MATH_EMULATE	# floating point emulation
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
-
-#option		DUMMY_NOPS	# speed hack; recommended
 
 maxusers	4		# estimated number of users
 option		TIMEZONE=0	# time zone to adjust RTC time by
@@ -131,8 +128,8 @@ pccom2	at isa? port 0x3e8 irq 5
 #scsibus* at ahc?
 ahd*	at pci?			# Adaptec 79?? SCSI controllers
 scsibus* at ahd?
-mpt*	at pci?			# LSI Fusion-MPT SCSI/Fibre
-scsibus* at mpt?
+mpi*	at pci?			# LSI Logic Fusion-MPT Message Passing Interface
+scsibus* at mpi?
 dpt*	at pci?			# DPT SmartCache/SmartRAID PCI
 dpt*	at eisa?		# DPT SmartCache/SmartRAID EISA
 scsibus* at dpt?
@@ -142,6 +139,8 @@ scsibus* at gdt?
 #scsibus* at aac?
 ami*	at pci?			# AMI MegaRAID controllers
 scsibus* at ami?
+mfi*	at pci?			# LSI MegaRAID SAS controllers
+scsibus* at mfi?
 cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 cac*	at eisa?
 scsibus* at cac?
@@ -201,9 +200,11 @@ wd*	at wdc? flags 0x0000
 wd*	at pciide? flags 0x0000
 
 # I2O
-iop*	at pci?			# I2O
-ioprbs*	at iop?			# Random block storage
+iop*	at pci?			# I2O processor
+ioprbs*	at iop?			# I2O arrays
 scsibus* at ioprbs?
+iopsp*	at iop?			# I2O SCSI pass-through
+scsibus* at iopsp?
 
 # ATAPI<->SCSI
 atapiscsi* at wdc?
@@ -232,7 +233,6 @@ scsibus* at atapiscsi?
 #ep0	at eisa?
 #ep*	at eisa?			# 3C579 ethernet cards
 #fea*	at eisa?			# DEC DEFEA FDDI cards
-#le*	at pci?				# PCnet-PCI based ethernet cards
 #ep*	at isapnp?			# 3C509 PnP ethernet cards
 #le*	at isapnp?
 de*	at pci?				# DC21X4X-based ethernet cards

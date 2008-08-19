@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.74 2006/01/12 22:39:21 weingart Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.80 2006/07/25 19:16:51 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -114,10 +114,11 @@ struct cpu_info {
 	u_int32_t	ci_imask[NIPL];
 	u_int32_t	ci_iunmask[NIPL];
 
-	paddr_t ci_idle_pcb_paddr;	/* PA of idle PCB */
-	u_long ci_flags;		/* flags; see below */
-	u_int32_t ci_ipis; 		/* interprocessor interrupts pending */
-	int sc_apic_version;  		/* local APIC version */
+	paddr_t		ci_idle_pcb_paddr; /* PA of idle PCB */
+	u_long		ci_flags;	/* flags; see below */
+	u_int32_t	ci_ipis; 	/* interprocessor interrupts pending */
+	int		sc_apic_version;/* local APIC version */
+	u_int64_t	ci_tscbase;
 	
 	u_int32_t	ci_level;
 	u_int32_t	ci_vendor[4];
@@ -261,9 +262,9 @@ extern u_quad_t pentium_base_tsc;
 		if (pentium_mhz) {					\
 			__asm __volatile("cli\n"			\
 					 "rdtsc\n"			\
-					 "sti\n"			\
 					 : "=A" (pentium_base_tsc)	\
 					 : );				\
+			__asm __volatile("sti"); 			\
 		}							\
 	} while (0)
 #endif
@@ -311,6 +312,7 @@ extern const struct cpu_cpuid_nameclass i386_cpuid_cpus[];
 
 #if defined(I586_CPU) || defined(I686_CPU)
 extern int pentium_mhz;
+extern int bus_clock;
 #endif
 
 #ifdef I586_CPU
@@ -355,7 +357,7 @@ void	i8254_initclocks(void);
 
 /* est.c */
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
-void	est_init(const char *);
+void	est_init(const char *, int);
 int     est_setperf(int);
 #endif
 
@@ -390,11 +392,6 @@ void	npxdrop(struct proc *);
 void	npxsave_proc(struct proc *, int);
 void	npxsave_cpu(struct cpu_info *, int);
 
-#if defined(GPL_MATH_EMULATE)
-/* math_emulate.c */
-int	math_emulate(struct trapframe *);
-#endif
-
 #ifdef USER_LDT
 /* sys_machdep.h */
 extern int user_ldt_enable;
@@ -417,6 +414,10 @@ int	kvtop(caddr_t);
 /* vm86.c */
 void	vm86_gpfault(struct proc *, int);
 #endif /* VM86 */
+
+#ifndef SMALL_KERNEL
+int	cpu_paenable(void *);
+#endif /* !SMALL_KERNEL */
 
 #ifdef GENERIC
 /* swapgeneric.c */

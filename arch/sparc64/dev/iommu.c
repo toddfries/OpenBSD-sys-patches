@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.38 2005/06/07 20:40:01 kurt Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.43 2006/09/01 20:07:57 miod Exp $	*/
 /*	$NetBSD: iommu.c,v 1.47 2002/02/08 20:03:45 eeh Exp $	*/
 
 /*
@@ -65,7 +65,7 @@
 #define IDB_XXX		0x10
 #define IDB_PRINT_MAP	0x20
 #define IDB_BREAK	0x40
-int iommudebug = 0x0;
+int iommudebug = IDB_INFO;
 #define DPRINTF(l, s)   do { if (iommudebug & l) printf s; } while (0)
 #else
 #define DPRINTF(l, s)
@@ -209,20 +209,21 @@ iommu_init(char *name, struct iommu_state *is, int tsbsize, u_int32_t iovabase)
 #endif
 
 	/*
-	 * now actually start up the IOMMU
-	 */
-	iommu_reset(is);
-
-	/*
 	 * Now all the hardware's working we need to allocate a dvma map.
 	 */
-	printf("DVMA map: %x to %x\n", is->is_dvmabase, is->is_dvmaend);
-	printf("IOTDB: %llx to %llx\n", 
+	printf("dvma map %x-%x, ", is->is_dvmabase, is->is_dvmaend - 1);
+	printf("iotdb %llx-%llx",
 	    (unsigned long long)is->is_ptsb,
 	    (unsigned long long)(is->is_ptsb + size));
 	is->is_dvmamap = extent_create(name,
 	    is->is_dvmabase, is->is_dvmaend - PAGE_SIZE,
 	    M_DEVBUF, 0, 0, EX_NOWAIT);
+
+	/*
+	 * now actually start up the IOMMU
+	 */
+	iommu_reset(is);
+	printf("\n");
 }
 
 /*
@@ -249,12 +250,8 @@ iommu_reset(struct iommu_state *is)
 		sb->sb_iommu = is;
 		strbuf_reset(sb);
 
-
-		if (sb->sb_flush) {
-			char buf[64];
-			bus_space_render_tag(sb->sb_bustag, buf, sizeof buf);
-			printf("STC%d on %s enabled\n", i, buf);
-		}
+		if (sb->sb_flush)
+			printf(", STC%d enabled", i);
 	}
 }
 
@@ -582,7 +579,7 @@ iommu_dvmamap_create(bus_dma_tag_t t, bus_dma_tag_t t0, struct strbuf_ctl *sb,
 	if (ret)
 		return (ret);
 
-	ims = iommu_iomap_create(nsegments);
+	ims = iommu_iomap_create(atop(round_page(size)));
 
 	if (ims == NULL) {
 		bus_dmamap_destroy(t0, map);
@@ -702,7 +699,7 @@ iommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 			if (pmap_extract(pmap, a, &pa) == FALSE) {
 				printf("iomap pmap error addr 0x%llx\n", a);
 				iommu_iomap_clear_pages(ims);
-				return (E2BIG);
+				return (EFBIG);
 			}
 
 			err = iommu_iomap_insert_page(ims, pa);
@@ -713,7 +710,7 @@ iommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 				    err, a, pa, buf, buflen, buflen);
 				iommu_dvmamap_print_map(t, is, map);
 				iommu_iomap_clear_pages(ims);
-				return (E2BIG);
+				return (EFBIG);
 			}
 		}
 	}
@@ -764,7 +761,7 @@ iommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 #endif
 
 	if (iommu_iomap_load_map(is, ims, dvmaddr, flags))
-		return (E2BIG);
+		return (EFBIG);
 
 	{ /* Scope */
 		bus_addr_t a, aend;
@@ -782,7 +779,7 @@ iommu_dvmamap_load(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 			if (pmap_extract(pmap, a, &pa) == FALSE) {
 				printf("iomap pmap error addr 0x%llx\n", a);
 				iommu_iomap_clear_pages(ims);
-				return (E2BIG);
+				return (EFBIG);
 			}
 
 			pgstart = pa | (MAX(a, addr) & PAGE_MASK);
@@ -896,8 +893,9 @@ iommu_dvmamap_load_raw(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 			if(err) {
 				printf("iomap insert error: %d for "
 				    "pa 0x%lx\n", err, VM_PAGE_TO_PHYS(m));
+				iommu_dvmamap_print_map(t, is, map);
 				iommu_iomap_clear_pages(ims);
-				return (E2BIG);
+				return (EFBIG);
 			}
 		}
 	} else {
@@ -918,8 +916,9 @@ iommu_dvmamap_load_raw(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 				if (err) {
 					printf("iomap insert error: %d for "
 					    "pa 0x%llx\n", err, a);
+					iommu_dvmamap_print_map(t, is, map);
 					iommu_iomap_clear_pages(ims);
-					return (E2BIG);
+					return (EFBIG);
 				}
 			}
 
@@ -975,7 +974,7 @@ iommu_dvmamap_load_raw(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 #endif
 
 	if (iommu_iomap_load_map(is, ims, dvmaddr, flags))
-		return (E2BIG);
+		return (EFBIG);
 
 	if (segs[0]._ds_mlist)
 		err = iommu_dvmamap_load_mlist(t, is, map, segs[0]._ds_mlist,
@@ -1136,7 +1135,7 @@ iommu_dvmamap_append_range(bus_dma_tag_t t, bus_dmamap_t map, paddr_t pa,
 				printf("append range, out of segments\n");
 				iommu_dvmamap_print_map(t, NULL, map);
 				map->dm_nsegs = 0;
-				return (E2BIG);
+				return (EFBIG);
 			}
 		}
 	}
@@ -1696,8 +1695,10 @@ iommu_iomap_create(int n)
 	struct strbuf_flush *sbf;
 	vaddr_t va;
 
-	if (n < 64)
-		n = 64;
+	/* Safety for heavily fragmented data, such as mbufs */
+	n += 4;
+	if (n < 16)
+		n = 16;
 
 	ims = malloc(sizeof(*ims) + (n - 1) * sizeof(ims->ims_map.ipm_map[0]),
 		M_DEVBUF, M_NOWAIT);

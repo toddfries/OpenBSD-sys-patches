@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.60 2006/02/20 20:12:14 damien Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.66 2006/06/02 19:53:12 mpf Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -59,7 +59,7 @@
 
 #include "carp.h"
 #if NCARP > 0
-extern int carp_suppress_preempt;
+#include <netinet/ip_carp.h>
 #endif
 
 #include <net/pfvar.h>
@@ -143,6 +143,10 @@ pfsyncattach(int npfsync)
 	if_attach(ifp);
 	if_alloc_sadl(ifp);
 
+#if NCARP > 0
+	if_addgroup(ifp, "carp");
+#endif
+
 #if NBPFILTER > 0
 	bpfattach(&pfsyncif.sc_if.if_bpf, ifp, DLT_PFSYNC, PFSYNC_HDRLEN);
 #endif
@@ -158,7 +162,7 @@ pfsyncstart(struct ifnet *ifp)
 	int s;
 
 	for (;;) {
-		s = splimp();
+		s = splnet();
 		IF_DROP(&ifp->if_snd);
 		IF_DEQUEUE(&ifp->if_snd, m);
 		splx(s);
@@ -757,7 +761,7 @@ pfsync_input(struct mbuf *m, ...)
 				timeout_del(&sc->sc_bulkfail_tmo);
 #if NCARP > 0
 				if (!pfsync_sync_ok)
-					carp_suppress_preempt--;
+					carp_group_demote_adj(&sc->sc_if, -1);
 #endif
 				pfsync_sync_ok = 1;
 				if (pf_status.debug >= PF_DEBUG_MISC)
@@ -922,7 +926,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			sc->sc_ureq_sent = time_uptime;
 #if NCARP > 0
 			if (pfsync_sync_ok)
-				carp_suppress_preempt++;
+				carp_group_demote_adj(&sc->sc_if, 1);
 #endif
 			pfsync_sync_ok = 0;
 			if (pf_status.debug >= PF_DEBUG_MISC)
@@ -1424,7 +1428,7 @@ pfsync_bulkfail(void *v)
 		sc->sc_bulk_tries = 0;
 #if NCARP > 0
 		if (!pfsync_sync_ok)
-			carp_suppress_preempt--;
+			carp_group_demote_adj(&sc->sc_if, -1);
 #endif
 		pfsync_sync_ok = 1;
 		if (pf_status.debug >= PF_DEBUG_MISC)
@@ -1453,7 +1457,7 @@ pfsync_sendout(struct pfsync_softc *sc)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 	if (sc->sc_mbuf_net) {
@@ -1484,7 +1488,7 @@ pfsync_tdb_sendout(struct pfsync_softc *sc)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 	return pfsync_sendout_mbuf(sc, m);
@@ -1540,37 +1544,15 @@ pfsync_update_net_tdb(struct pfsync_tdb *pt)
 	int			 s;
 
 	/* check for invalid values */
-	pt->spi = htonl(pt->spi);
-	if (pt->spi <= SPI_RESERVED_MAX ||
+	if (ntohl(pt->spi) <= SPI_RESERVED_MAX ||
 	    (pt->dst.sa.sa_family != AF_INET &&
 	     pt->dst.sa.sa_family != AF_INET6))
 		goto bad;
 
-	if (pt->dst.sa.sa_family == AF_INET)
-		pt->dst.sin.sin_addr.s_addr =
-		    htonl(pt->dst.sin.sin_addr.s_addr);
-
 	s = spltdb();
 	tdb = gettdb(pt->spi, &pt->dst, pt->sproto);
 	if (tdb) {
-		/*
-		 * When a failover happens, the master's rpl is probably above
-		 * what we see here (we may be up to a second late), so
-		 * increase it a bit to manage most such situations.
-		 *
-		 * For now, just add an offset that is likely to be larger
-		 * than the number of packets we can see in one second. The RFC
-		 * just says the next packet must have a higher seq value.
-		 *
-		 * XXX What is a good algorithm for this? We could use
-		 * a rate-determined increase, but to know it, we would have
-		 * to extend struct tdb.
-		 * XXX pt->rpl can wrap over MAXINT, but if so the real tdb
-		 * will soon be replaced anyway. For now, just don't handle
-		 * this edge case.
-		 */
-#define RPL_INCR 16384
-		pt->rpl = ntohl(pt->rpl) + RPL_INCR;
+		pt->rpl = ntohl(pt->rpl);
 		pt->cur_bytes = betoh64(pt->cur_bytes);
 
 		/* Neither replay nor byte counter should ever decrease. */
@@ -1596,7 +1578,7 @@ pfsync_update_net_tdb(struct pfsync_tdb *pt)
 
 /* One of our local tdbs have been updated, need to sync rpl with others */
 int
-pfsync_update_tdb(struct tdb *tdb)
+pfsync_update_tdb(struct tdb *tdb, int output)
 {
 	struct ifnet *ifp = &pfsyncif.sc_if;
 	struct pfsync_softc *sc = ifp->if_softc;
@@ -1645,22 +1627,15 @@ pfsync_update_tdb(struct tdb *tdb)
 			 */
 			struct pfsync_tdb *u =
 			    (void *)((char *)h + PFSYNC_HDRLEN);
-			int hash = tdb_hash(tdb->tdb_spi, &tdb->tdb_dst,
-			    tdb->tdb_sproto);
 
 			for (i = 0; !pt && i < h->count; i++) {
-				/* XXX Ugly, u is network ordered. */
-				if (u->dst.sa.sa_family == AF_INET)
-					u->dst.sin.sin_addr.s_addr =
-					    ntohl(u->dst.sin.sin_addr.s_addr);
-				if (tdb_hash(ntohl(u->spi), &u->dst,
-				    u->sproto) == hash) {
+				if (tdb->tdb_spi == u->spi &&
+				    tdb->tdb_sproto == u->sproto &&
+			            !bcmp(&tdb->tdb_dst, &u->dst,
+				    SA_LEN(&u->dst.sa))) {
 					pt = u;
 					pt->updates++;
 				}
-				if (u->dst.sa.sa_family == AF_INET)
-					u->dst.sin.sin_addr.s_addr =
-					    htonl(u->dst.sin.sin_addr.s_addr);
 				u++;
 			}
 		}
@@ -1674,15 +1649,30 @@ pfsync_update_tdb(struct tdb *tdb)
 		h->count++;
 		bzero(pt, sizeof(*pt));
 
-		pt->spi = htonl(tdb->tdb_spi);
+		pt->spi = tdb->tdb_spi;
 		memcpy(&pt->dst, &tdb->tdb_dst, sizeof pt->dst);
-		if (pt->dst.sa.sa_family == AF_INET)
-			pt->dst.sin.sin_addr.s_addr =
-			    htonl(pt->dst.sin.sin_addr.s_addr);
 		pt->sproto = tdb->tdb_sproto;
 	}
 
-	pt->rpl = htonl(tdb->tdb_rpl);
+	/*
+	 * When a failover happens, the master's rpl is probably above
+	 * what we see here (we may be up to a second late), so
+	 * increase it a bit for outbound tdbs to manage most such
+	 * situations.
+	 *
+	 * For now, just add an offset that is likely to be larger
+	 * than the number of packets we can see in one second. The RFC
+	 * just says the next packet must have a higher seq value.
+	 *
+	 * XXX What is a good algorithm for this? We could use
+	 * a rate-determined increase, but to know it, we would have
+	 * to extend struct tdb.
+	 * XXX pt->rpl can wrap over MAXINT, but if so the real tdb
+	 * will soon be replaced anyway. For now, just don't handle
+	 * this edge case.
+	 */
+#define RPL_INCR 16384
+	pt->rpl = htonl(tdb->tdb_rpl + (output ? RPL_INCR : 0));
 	pt->cur_bytes = htobe64(tdb->tdb_cur_bytes);
 
 	if (h->count == sc->sc_maxcount ||

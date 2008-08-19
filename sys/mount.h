@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.67 2005/12/13 00:35:23 millert Exp $	*/
+/*	$OpenBSD: mount.h,v 1.75 2006/07/11 21:17:58 mickey Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
 #include <sys/ucred.h>
 #endif
 #include <sys/queue.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 
 typedef struct { int32_t val[2]; } fsid_t;	/* file system id type */
 
@@ -252,11 +252,10 @@ struct ntfs_args {
 #define	NTFS_MFLAG_CASEINS      0x00000001
 #define	NTFS_MFLAG_ALLNAMES     0x00000002
 
-/*
- * Arguments to mount UDF filesystems.
- */
+/* Arguments to mount UDF file systems */
 struct udf_args {
-	char	*fspec;			/* block special device to mount */
+	char *fspec; /* Block special device to mount */
+	u_int32_t lastblock; /* Special device last block */
 };
 
 /*
@@ -341,6 +340,7 @@ struct ostatfs {
  * File system types.
  */
 #define	MOUNT_FFS	"ffs"		/* UNIX "Fast" Filesystem */
+#define	MOUNT_FFS2	"ffs2"		/* UNIX "Fast" Filesystem, version 2 */
 #define	MOUNT_UFS	MOUNT_FFS	/* for compatibility */
 #define	MOUNT_NFS	"nfs"		/* Network Filesystem */
 #define	MOUNT_MFS	"mfs"		/* Memory Filesystem */
@@ -371,7 +371,7 @@ struct mount {
 	struct vnode	*mnt_vnodecovered;	/* vnode we mounted on */
 	struct vnode    *mnt_syncer;            /* syncer vnode */
 	struct vnodelst	mnt_vnodelist;		/* list of vnodes this mount */
-	struct lock     mnt_lock;               /* mount structure lock */
+	struct rwlock   mnt_lock;               /* mount structure lock */
 	int		mnt_flag;		/* flags */
 	int		mnt_maxsymlinklen;	/* max size of short symlink */
 	struct statfs	mnt_stat;		/* cache of filesystem stats */
@@ -416,6 +416,11 @@ struct mount {
  */
 #define	MNT_VISFLAGMASK	0x0400ffff
 
+#define	MNT_BITS \
+    "\010\001RDONLY\002SYNCHRONOUS\003NOEXEC\004NOSUID\005NODEV" \
+    "\007ASYNC\010EXRDONLY\011EXPORTED\012DEFEXPORTED\013EXPORTANON" \
+    "\014EXKERB\015LOCAL\016QUOTA\017ROOTFS"
+
 /*
  * filesystem control flags.
  */
@@ -442,8 +447,6 @@ struct mount {
 #define VFS_MAXTYPENUM	1	/* int: highest defined filesystem type */
 #define VFS_CONF	2	/* struct: vfsconf for filesystem given
 				   as next argument */
-#define	VFSGEN_MAXID	3	/* max number of vfs.generic ids */
-
 #define	CTL_VFSGENCTL_NAMES { \
 	{ 0, 0 }, \
 	{ "maxtypenum", CTLTYPE_INT }, \
@@ -564,7 +567,12 @@ struct netexport {
 /*
  * exported vnode operations
  */
-int	vfs_busy(struct mount *, int, struct simplelock *);
+int	vfs_busy(struct mount *, int);
+#define VB_READ		0x01
+#define VB_WRITE	0x02
+#define VB_NOWAIT	0x04	/* immediately fail on busy lock */
+#define VB_WAIT		0x08	/* sleep fail on busy lock */
+
 int     vfs_isbusy(struct mount *);
 int     vfs_mount_foreach_vnode(struct mount *, int (*func)(struct vnode *,
 				    void *), void *);
@@ -576,7 +584,6 @@ int	vfs_rootmountalloc(char *, char *, struct mount **);
 void	vfs_unbusy(struct mount *);
 void	vfs_unmountall(void);
 extern	CIRCLEQ_HEAD(mntlist, mount) mountlist;
-extern	struct simplelock mountlist_slock;
 
 struct	mount *getvfs(fsid_t *);	    /* return vfs given fsid */
 					    /* process mount export info */

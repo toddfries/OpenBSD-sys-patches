@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.107 2005/12/30 18:14:12 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.110 2006/06/16 20:48:49 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -65,6 +65,7 @@
 #include <sys/vnode.h>
 #include <sys/sysctl.h>
 #include <sys/syscallargs.h>
+#include <sys/syslog.h>
 #ifdef SYSVMSG
 #include <sys/msg.h>
 #endif
@@ -120,8 +121,7 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
-int	maxmem;			/* max memory per process */
-int	physmem;		/* max supported memory, changes to actual */
+int	physmem;		/* size of physical memory, in pages */
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
@@ -747,18 +747,10 @@ haltsys:
 	/* Run any shutdown hooks. */
 	doshutdownhooks();
 
-#if defined(PANICWAIT) && !defined(DDB)
-	if ((howto & RB_HALT) == 0 && panicstr) {
-		printf("hit any key to reboot...\n");
-		(void)cngetc();
-		printf("\n");
-	}
-#endif
-
 	/* Finally, halt/reboot the system. */
 	if (howto & RB_HALT) {
 		printf("System halted.  Hit any key to reboot.\n\n");
-		(void)cngetc();
+		while (cngetc() == 0);
 	}
 
 	printf("rebooting...\n");
@@ -1087,14 +1079,15 @@ parityerror(fp)
 	*PARREG = 1;
 	if (panicstr) {
 		printf("parity error after panic ignored\n");
-		return(1);
+		return (1);
 	}
 	if (!parityerrorfind())
 		printf("WARNING: transient parity error ignored\n");
 	else if (USERMODE(fp->f_sr)) {
-		printf("pid %d: parity error\n", curproc->p_pid);
-		uprintf("sorry, pid %d killed due to memory parity error\n",
-			curproc->p_pid);
+		log(LOG_ERR, "pid %d was killed: memory parity error\n",
+		    curproc->p_pid);
+		uprintf("sorry, pid %d killed: memory parity error\n",
+		    curproc->p_pid);
 		psignal(curproc, SIGKILL);
 #ifdef DEBUG
 	} else if (ignorekperr) {
@@ -1104,11 +1097,11 @@ parityerror(fp)
 		regdump(&(fp->F_t), 128);
 		panic("kernel parity error");
 	}
-	return(1);
+	return (1);
 }
 
 /*
- * Yuk!  There has got to be a better way to do this!
+ * Yuck!  There has got to be a better way to do this!
  * Searching all of memory with interrupts blocked can lead to disaster.
  */
 int
@@ -1151,11 +1144,10 @@ parityerrorfind()
 	looking = 1;
 	ecacheoff();
 	for (pg = btoc(lowram); pg < btoc(lowram)+physmem; pg++) {
-		pmap_enter(pmap_kernel(), (vaddr_t)vmmap, ctob(pg),
-		    VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
+		pmap_kenter_pa((vaddr_t)vmmap, ptoa(pg), VM_PROT_READ);
 		pmap_update(pmap_kernel());
 		ip = (int *)vmmap;
-		for (o = 0; o < NBPG; o += sizeof(int))
+		for (o = 0; o < PAGE_SIZE; o += sizeof(int))
 			i = *ip++;
 	}
 	/*
@@ -1165,9 +1157,9 @@ parityerrorfind()
 	found = 0;
 done:
 	looking = 0;
-	pmap_remove(pmap_kernel(), (vaddr_t)vmmap, (vaddr_t)&vmmap[NBPG]);
+	ecacheon();	/* pmap_kremove() may cause a cache flush */
+	pmap_kremove((vaddr_t)vmmap, PAGE_SIZE);
 	pmap_update(pmap_kernel());
-	ecacheon();
 	splx(s);
 	return(found);
 }

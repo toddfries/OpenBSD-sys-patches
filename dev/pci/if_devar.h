@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_devar.h,v 1.24 2005/11/15 10:43:35 mickey Exp $	*/
+/*	$OpenBSD: if_devar.h,v 1.27 2006/07/08 04:15:36 brad Exp $	*/
 /*	$NetBSD: if_devar.h,v 1.13 1997/06/08 18:46:36 thorpej Exp $	*/
 
 /*-
@@ -38,8 +38,6 @@
     bus_space_write_1((sc)->tulip_bustag, (sc)->tulip_bushandle, (sc)->tulip_csrs.csr, (val))
 
 #ifdef TULIP_IOMAPPED
-#define	TULIP_EISA_CSRSIZE	16
-#define	TULIP_EISA_CSROFFSET	0
 #define	TULIP_PCI_CSRSIZE	8
 #define	TULIP_PCI_CSROFFSET	0
 #else /* TULIP_IOMAPPED */
@@ -502,7 +500,7 @@ struct _tulip_softc_t {
     u_int32_t tulip_cmdmode;	/* our copy of csr_cmdmode */
     u_int32_t tulip_last_system_error : 3;	/* last system error (only value is
 						   TULIP_SYSTEMERROR is also set) */
-    u_int32_t tulip_txtimer : 2;	/* transmission timer */
+    u_int32_t tulip_txtimer;		/* transmission timer */
     u_int32_t tulip_system_errors;	/* number of system errors encountered */
     u_int32_t tulip_statusbits;	/* status bits from CSR5 that may need to be printed */
 
@@ -572,7 +570,6 @@ struct _tulip_softc_t {
     struct tulip_perfstats {
 	u_quad_t perf_intr_cycles;
 	u_quad_t perf_ifstart_cycles;
-	u_quad_t perf_ifstart_one_cycles;
 	u_quad_t perf_ifioctl_cycles;
 	u_quad_t perf_ifwatchdog_cycles;
 	u_quad_t perf_timeout_cycles;
@@ -582,7 +579,6 @@ struct _tulip_softc_t {
 	u_quad_t perf_rxget_cycles;
 	unsigned perf_intr;
 	unsigned perf_ifstart;
-	unsigned perf_ifstart_one;
 	unsigned perf_ifioctl;
 	unsigned perf_ifwatchdog;
 	unsigned perf_timeout;
@@ -618,22 +614,16 @@ struct _tulip_softc_t {
 
 #define	TULIP_DO_AUTOSENSE(sc)	(IFM_SUBTYPE((sc)->tulip_ifmedia.ifm_media) == IFM_AUTO)
 
-#ifdef TULIP_DEBUG
 static const char * const tulip_chipdescs[] = {
-    "21040 [10Mb/s]",
-#if defined(TULIP_EISA)
-    "DE425 [10Mb/s]",
-#else
+    "21040",
     NULL,
-#endif
-    "21041 [10Mb/s]",
-    "21140 [10-100Mb/s]",
-    "21140A [10-100Mb/s]",
-    "21142 [10-100Mb/s]",
-    "21143 [10-100Mb/s]",
-    "82C168 [10-100Mb/s]",
+    "21041",
+    "21140",
+    "21140A",
+    "21142",
+    "21143",
+    "82C168",
 };
-#endif
 
 #ifdef TULIP_DEBUG
 static const char * const tulip_mediums[] = {

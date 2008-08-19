@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.1 2004/02/01 05:09:49 drahn Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.3 2006/05/27 20:36:05 miod Exp $	*/
 /*	$NetBSD: pcb.h,v 1.10 2003/10/13 21:46:39 scw Exp $	*/
 
 /*
@@ -83,7 +83,6 @@ struct pcb_arm26 {
 struct pcb {
 	u_int	pcb_flags;
 #define	PCB_OWNFPU	0x00000001
-#define	PCB_NOALIGNFLT	0x00000002		/* For COMPAT_15/EXEC_AOUT */
 	struct	trapframe *pcb_tf;
 	caddr_t	pcb_onfault;			/* On fault handler */
 	union	{
@@ -102,9 +101,6 @@ struct md_coredump {
 };
 
 #ifdef _KERNEL
-#ifdef _KERNEL_OPT
-#include "opt_multiprocessor.h"
-#endif
 #ifdef MULTIPROCESSOR
 #define curpcb	(curcpu()->ci_curpcb)
 #else

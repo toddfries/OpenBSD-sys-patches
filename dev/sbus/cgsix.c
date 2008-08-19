@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgsix.c,v 1.52 2005/03/15 18:40:16 miod Exp $	*/
+/*	$OpenBSD: cgsix.c,v 1.54 2006/07/25 21:23:32 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -116,7 +116,7 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 {
 	struct cgsix_softc *sc = (struct cgsix_softc *)self;
 	struct sbus_attach_args *sa = aux;
-	int node, console, i;
+	int node, console;
 	u_int32_t fhc, rev;
 	const char *nam;
 
@@ -198,17 +198,7 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 	rev = (fhc & FHC_REV_MASK) >> FHC_REV_SHIFT;
 	cgsix_reset(sc, rev);
 
-	/* grab the current palette */
-	BT_WRITE(sc, BT_ADDR, 0);
-	for (i = 0; i < 256; i++) {
-		sc->sc_cmap.cm_map[i][0] = BT_READ(sc, BT_CMAP) >> 24;
-		sc->sc_cmap.cm_map[i][1] = BT_READ(sc, BT_CMAP) >> 24;
-		sc->sc_cmap.cm_map[i][2] = BT_READ(sc, BT_CMAP) >> 24;
-	}
-
 	cgsix_burner(sc, 1, 0);
-
-	sbus_establish(&sc->sc_sd, self);
 
 	sc->sc_sunfb.sf_ro.ri_bits = (void *)bus_space_vaddr(sc->sc_bustag,
 	    sc->sc_vid_regs);
@@ -259,7 +249,7 @@ fail_fhc:
 	bus_space_unmap(sa->sa_bustag, sc->sc_bt_regs, CGSIX_BT_SIZE);
 fail_bt:
 fail:
-;
+	return;
 }
 
 int

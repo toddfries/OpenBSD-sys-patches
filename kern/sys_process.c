@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_process.c,v 1.34 2005/12/13 10:33:14 jsg Exp $	*/
+/*	$OpenBSD: sys_process.c,v 1.36 2006/07/19 18:38:42 grunk Exp $	*/
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -67,6 +67,7 @@
 
 #include <machine/reg.h>
 
+#ifdef PTRACE
 /*
  * Process debugging system call.
  */
@@ -322,7 +323,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 			return (EINVAL);
 
 		PHOLD(t);
-		/* If the address paramter is not (int *)1, set the pc. */
+		/* If the address parameter is not (int *)1, set the pc. */
 		if ((int *)SCARG(uap, addr) != (int *)1)
 			if ((error = process_set_pc(t, SCARG(uap, addr))) != 0)
 				goto relebad;
@@ -547,6 +548,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 #endif
 	return 0;
 }
+#endif	/* PTRACE */
 
 /*
  * Check if a process is allowed to fiddle with the memory of another.

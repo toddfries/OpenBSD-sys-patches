@@ -1,4 +1,4 @@
-/*	$OpenBSD: tropic.c,v 1.10 2005/11/07 03:20:00 brad Exp $	*/
+/*	$OpenBSD: tropic.c,v 1.12 2006/07/09 22:10:05 mk Exp $	*/
 /*	$NetBSD: tropic.c,v 1.6 1999/12/17 08:26:31 fvdl Exp $	*/
 
 /* 
@@ -219,7 +219,7 @@ tr_config(sc)
 /*
  * XXX Not completely true because Fast Path Transmit has 514 byte buffers
  * XXX and TR_MAX_LINK_HDR is only correct when source-routing is used.
- * XXX depending on wether source routing is used change the calculation
+ * XXX depending on whether source routing is used change the calculation
  * XXX use IFM_TOK_SRCRT (IFF_LINK0)
  * XXX recompute sc_minbuf !!
  */
@@ -737,7 +737,7 @@ next:
 		return;
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m0);
+		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 	first_txbuf = txbuf = TXCA_INW(sc, TXCA_FREE_QUEUE_HEAD) - XMIT_NEXTBUF;
 	framedata = txbuf + XMIT_FP_DATA;
@@ -1280,7 +1280,7 @@ struct tr_softc *sc;
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		token_input(ifp, m);
 	}
@@ -1349,7 +1349,7 @@ struct tr_softc *sc;
 		if (m0 != 0) {
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m0);
+				bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 			/* Pull packet off interface send queue, fill DHB. */
 			trh = mtod(m0, struct token_header *);

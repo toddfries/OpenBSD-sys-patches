@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.5 2004/06/28 02:00:20 deraadt Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.9 2006/05/29 09:54:16 mickey Exp $	*/
 /* $NetBSD: lapic.c,v 1.1.2.8 2000/02/23 06:10:50 sommerfeld Exp $ */
 
 /*-
@@ -60,10 +60,12 @@
 #include <machine/apicvar.h>
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
+#include <machine/pctr.h>
 
 #include <i386/isa/timerreg.h>	/* XXX for TIMER_FREQ */
 
 struct evcount clk_count;
+struct evcount ipi_count;
 
 void	lapic_delay(int);
 void	lapic_microtime(struct timeval *);
@@ -76,9 +78,8 @@ void
 lapic_map(lapic_base)
 	paddr_t lapic_base;
 {
-	int s;
-	pt_entry_t *pte;
 	vaddr_t va = (vaddr_t)&local_apic;
+	int s;
 
 	disable_intr();
 	s = lapic_tpr;
@@ -92,8 +93,7 @@ lapic_map(lapic_base)
 	 * might have changed the value of cpu_number()..
 	 */
 
-	pte = kvtopte(va);
-	*pte = lapic_base | PG_RW | PG_V | PG_N;
+	pmap_pte_set(va, lapic_base, PG_RW | PG_V | PG_N);
 	invlpg(va);
 
 #ifdef MULTIPROCESSOR
@@ -165,6 +165,7 @@ lapic_boot_init(lapic_base)
 	paddr_t lapic_base;
 {
 	static int clk_irq = 0;
+	static int ipi_irq = 0;
 
 	lapic_map(lapic_base);
 
@@ -175,6 +176,7 @@ lapic_boot_init(lapic_base)
 	idt_vec_set(LAPIC_TIMER_VECTOR, Xintrltimer);
 
 	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
+	evcount_attach(&ipi_count, "ipi", (void *)&ipi_irq, &evcount_intr);
 }
 
 static __inline u_int32_t
@@ -195,13 +197,19 @@ u_int32_t lapic_per_second;
 u_int32_t lapic_frac_usec_per_cycle;
 u_int64_t lapic_frac_cycle_per_usec;
 u_int32_t lapic_delaytab[26];
+u_int64_t scaled_pentium_mhz;
 
 void
 lapic_clockintr(arg)
 	void *arg;
 {
+	struct cpu_info *ci = curcpu();
 	struct clockframe *frame = arg;
 
+	if (CPU_IS_PRIMARY(ci)) {
+		ci->ci_tscbase = rdtsc();
+		i386_broadcast_ipi(I386_IPI_MICROSET);
+	}
 	hardclock(frame);
 
 	clk_count.ec_count++;
@@ -351,6 +359,8 @@ lapic_calibrate_timer(ci)
 
 		lapic_frac_cycle_per_usec = tmp;
 
+		scaled_pentium_mhz = (1ULL << 32) / pentium_mhz;
+
 		/*
 		 * Compute delay in cycles for likely short delays in usec.
 		 */
@@ -372,7 +382,8 @@ lapic_calibrate_timer(ci)
  * delay for N usec.
  */
 
-void lapic_delay(usec)
+void
+lapic_delay(usec)
 	int usec;
 {
 	int32_t tick, otick;
@@ -400,26 +411,32 @@ void lapic_delay(usec)
 #define LAPIC_TICK_THRESH 200
 
 /*
+ * An IPI handler to record current timer value
+ */
+void
+i386_ipi_microset(struct cpu_info *ci)
+{
+	ci->ci_tscbase = rdtsc();
+}
+
+/*
  * XXX need to make work correctly on other than cpu 0.
  */
-
-void lapic_microtime(tv)
+void
+lapic_microtime(tv)
 	struct timeval *tv;
 {
+	struct cpu_info *ci = curcpu();
 	struct timeval now;
-	u_int32_t tick;
-	u_int32_t usec;
-	u_int32_t tmp;
+	u_int64_t tmp;
 
 	disable_intr();
-	tick = lapic_gettick();
 	now = time;
+	tmp = rdtsc() - ci->ci_tscbase;
 	enable_intr();
 
-	tmp = lapic_tval - tick;
-	usec = ((u_int64_t)tmp * lapic_frac_usec_per_cycle) >> 32;
+	now.tv_usec += (tmp * scaled_pentium_mhz) >> 32;
 
-	now.tv_usec += usec;
 	while (now.tv_usec >= 1000000) {
 		now.tv_sec += 1;
 		now.tv_usec -= 1000000;
@@ -438,25 +455,28 @@ i386_ipi_init(target)
 {
 	unsigned j;
 
-	if ((target & LAPIC_DEST_MASK) == 0) {
+	if ((target & LAPIC_DEST_MASK) == 0)
 		i82489_writereg(LAPIC_ICRHI, target << LAPIC_ID_SHIFT);
-	}
 
 	i82489_writereg(LAPIC_ICRLO, (target & LAPIC_DEST_MASK) |
 	    LAPIC_DLMODE_INIT | LAPIC_LVL_ASSERT );
 
-	for (j = 100000; j > 0; j--)
+	for (j = 100000; j > 0; j--) {
+		__asm __volatile("pause": : :"memory");
 		if ((i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) == 0)
 			break;
+	}
 
 	delay(10000);
 
 	i82489_writereg(LAPIC_ICRLO, (target & LAPIC_DEST_MASK) |
 	     LAPIC_DLMODE_INIT | LAPIC_LVL_TRIG | LAPIC_LVL_DEASSERT);
 
-	for (j = 100000; j > 0; j--)
+	for (j = 100000; j > 0; j--) {
+		__asm __volatile("pause": : :"memory");
 		if ((i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) == 0)
 			break;
+	}
 
 	return (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY)?EBUSY:0;
 }
@@ -476,7 +496,7 @@ i386_ipi(vec,target,dl)
 	for (j = 100000;
 	     j > 0 && (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY);
 	     j--)
-		;
+		SPINLOCK_SPIN_HOOK;
 
 	return (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) ? EBUSY : 0;
 }

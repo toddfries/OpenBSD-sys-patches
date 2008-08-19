@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.32 2006/02/20 19:44:58 miod Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.35 2006/07/12 19:56:18 thib Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -54,15 +54,6 @@
 #define v_lastr v_specinfo->si_lastr
 
 struct vnode *speclisth[SPECHSZ];
-
-/* symbolic sleep message strings for devices */
-char	devopn[] = "devopn";
-char	devio[] = "devio";
-char	devwait[] = "devwait";
-char	devin[] = "devin";
-char	devout[] = "devout";
-char	devioc[] = "devioc";
-char	devcls[] = "devcls";
 
 int (**spec_vnodeop_p)(void *);
 struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
@@ -191,6 +182,8 @@ spec_open(v)
 		}
 		if (cdevsw[maj].d_type == D_TTY)
 			vp->v_flag |= VISTTY;
+		if (cdevsw[maj].d_flags & D_CLONE)
+			return (spec_open_clone(ap));
 		VOP_UNLOCK(vp, 0, p);
 		error = (*cdevsw[maj].d_open)(dev, ap->a_mode, S_IFCHR, ap->a_p);
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -511,8 +504,9 @@ spec_fsync(v)
 	 */
 loop:
 	s = splbio();
-	for (bp = vp->v_dirtyblkhd.lh_first; bp; bp = nbp) {
-		nbp = bp->b_vnbufs.le_next;
+	for (bp = LIST_FIRST(&vp->v_dirtyblkhd);
+	    bp != LIST_END(&vp->v_dirtyblkhd); bp = nbp) {
+		nbp = LIST_NEXT(bp, b_vnbufs);
 		if ((bp->b_flags & B_BUSY))
 			continue;
 		if ((bp->b_flags & B_DELWRI) == 0)
@@ -527,7 +521,7 @@ loop:
 		vwaitforio (vp, 0, "spec_fsync", 0);
 
 #ifdef DIAGNOSTIC
-		if (vp->v_dirtyblkhd.lh_first) {
+		if (!LIST_EMPTY(&vp->v_dirtyblkhd)) {
 			splx(s);
 			vprint("spec_fsync: dirty", vp);
 			goto loop;
@@ -623,6 +617,8 @@ spec_close(v)
 		 */
 		if (vcount(vp) > 1 && (vp->v_flag & VXLOCK) == 0)
 			return (0);
+		if (cdevsw[major(dev)].d_flags & D_CLONE)
+			return (spec_close_clone(ap));
 		devclose = cdevsw[major(dev)].d_close;
 		mode = S_IFCHR;
 		break;

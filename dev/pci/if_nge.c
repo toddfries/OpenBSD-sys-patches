@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.49 2006/02/16 20:54:35 brad Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.55 2006/05/28 00:20:21 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -833,7 +833,7 @@ nge_attach(parent, self, aux)
 	/*
 	 * A NatSemi chip was detected. Inform the world.
 	 */
-	printf(", address: %s\n", ether_sprintf(eaddr));
+	printf(", address %s\n", ether_sprintf(eaddr));
 
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 
@@ -885,6 +885,7 @@ nge_attach(parent, self, aux)
 	ifp->if_start = nge_start;
 	ifp->if_watchdog = nge_watchdog;
 	ifp->if_baudrate = 1000000000;
+	ifp->if_hardmtu = NGE_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, NGE_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	DPRINTFN(5, ("%s: bcopy\n", sc->sc_dv.dv_xname));
@@ -1340,7 +1341,7 @@ nge_rxeof(sc)
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		/* Do IP checksum checking. */
@@ -1699,7 +1700,7 @@ nge_start(ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head);
+			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (pkts == 0)
@@ -2059,7 +2060,7 @@ nge_ioctl(ifp, command, data)
 
 	switch(command) {
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU_JUMBO)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
 		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
@@ -2129,7 +2130,7 @@ nge_ioctl(ifp, command, data)
 		}
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 

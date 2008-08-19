@@ -1,4 +1,4 @@
-/* 	$OpenBSD: vmparam.h,v 1.1 2004/12/31 00:04:35 drahn Exp $	*/
+/* 	$OpenBSD: vmparam.h,v 1.4 2006/06/04 17:21:24 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.23 2003/05/22 05:47:07 thorpej Exp $	*/
 
 /*
@@ -67,15 +67,8 @@
  * max number of non-contig chunks of physical RAM you can have
  */
 
-#define	VM_PHYSSEG_MAX		32
-
-/*
- * when converting a physical address to a vm_page structure, we
- * want to use a binary search on the chunks of physical memory
- * to find our RAM
- */
-
-#define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
+#define	VM_PHYSSEG_MAX		1
+#define	VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
 
 /*
  * this indicates that we can't add RAM to the VM system after the
@@ -84,17 +77,10 @@
 
 #define	VM_PHYSSEG_NOADD
 
-/*
- * we support 2 free lists:
- *
- *	- DEFAULT for all systems
- *	- ISADMA for the ISA DMA range on Sharks only
- */
 #endif /* _KERNEL */
 
-#define	VM_NFREELIST		2
+#define	VM_NFREELIST		1
 #define	VM_FREELIST_DEFAULT	0
-#define	VM_FREELIST_ISADMA	1
 
 
 #endif	/* _ARM32_VMPARAM_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.57.4.1 2006/05/03 03:57:53 brad Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.63 2006/07/13 22:51:26 deraadt Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -237,8 +237,8 @@ sys_mincore(p, v, retval)
 	vm_map_entry_t entry;
 	vaddr_t start, end, lim;
 	vm_map_t map;
-	vsize_t len;
-	int error = 0, npgs;
+	vsize_t len, npgs;
+	int error = 0;
 
 	map = &p->p_vmspace->vm_map;
 

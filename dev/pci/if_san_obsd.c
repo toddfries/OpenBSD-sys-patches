@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_obsd.c,v 1.10 2005/12/13 05:56:22 canacar Exp $	*/
+/*	$OpenBSD: if_san_obsd.c,v 1.12 2006/05/13 19:04:30 brad Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -126,6 +126,7 @@ wanpipe_generic_register(sdla_t *card, struct ifnet *ifp, char *ifname)
 		bcopy(ifname, ifp->if_xname, strlen(ifname));
 
 	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
+	IFQ_SET_READY(&ifp->if_snd);
 	ifp->if_mtu = PP_MTU;
 	ifp->if_flags = IFF_POINTOPOINT | IFF_MULTICAST;
 	common->protocol = IF_PROTO_CISCO;
@@ -186,7 +187,7 @@ wanpipe_generic_start(struct ifnet *ifp)
 		/* report the packet to BPF if present and attached */
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, opkt);
+			bpf_mtap(ifp->if_bpf, opkt, BPF_DIRECTION_OUT);
 #endif /* NBPFILTER > 0 */
 
 		if (wan_mbuf_to_buffer(&opkt)) {
@@ -379,7 +380,7 @@ wanpipe_generic_input(struct ifnet *ifp, struct mbuf *m)
 	m->m_pkthdr.rcvif = ifp;
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
 	ifp->if_ipackets ++;
 	sppp_input(ifp, m);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ch.c,v 1.23 2005/09/11 17:34:27 krw Exp $	*/
+/*	$OpenBSD: ch.c,v 1.28 2006/06/15 15:02:31 beck Exp $	*/
 /*	$NetBSD: ch.c,v 1.26 1997/02/21 22:06:52 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@
 #include <sys/buf.h>
 #include <sys/proc.h>
 #include <sys/user.h>
-#include <sys/chio.h> 
+#include <sys/chio.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/conf.h>
@@ -110,18 +110,23 @@ const struct scsi_inquiry_pattern ch_patterns[] = {
 	 "",		"",		""},
 };
 
-/* SCSI glue */
-struct scsi_device ch_switch = {
-	NULL, NULL, NULL, NULL
-};
-
 int	ch_move(struct ch_softc *, struct changer_move *);
 int	ch_exchange(struct ch_softc *, struct changer_exchange *);
 int	ch_position(struct ch_softc *, struct changer_position *);
-int	ch_usergetelemstatus(struct ch_softc *, int, u_int8_t *);
-int	ch_getelemstatus(struct ch_softc *, int, int, caddr_t, size_t);
+int	ch_usergetelemstatus(struct ch_softc *,
+    struct changer_element_status_request *);
+int	ch_getelemstatus(struct ch_softc *, int, int, caddr_t, size_t, int);
 int	ch_get_params(struct ch_softc *, int);
+int	ch_interpret_sense(struct scsi_xfer *xs);
 void	ch_get_quirks(struct ch_softc *, struct scsi_inquiry_data *);
+
+/* SCSI glue */
+struct scsi_device ch_switch = {
+	ch_interpret_sense,
+	NULL,
+	NULL,
+	NULL
+};
 
 /*
  * SCSI changer quirks.
@@ -200,13 +205,14 @@ chopen(dev, flags, fmt, p)
 	sc->sc_link->flags |= SDEV_OPEN;
 
 	/*
-	 * Absorb any unit attention errors.  Ignore "not ready"
-	 * since this might occur if e.g. a tape isn't actually
-	 * loaded in the drive.
+	 * Absorb any unit attention errors. We must notice
+	 * "Not ready" errors as a changer will report "In the
+	 * process of getting ready" any time it must rescan
+	 * itself to determine the state of the changer.
 	 */
 	error = scsi_test_unit_ready(sc->sc_link,
-	    TEST_READY_RETRIES_DEFAULT,
-	    SCSI_IGNORE_NOT_READY|SCSI_IGNORE_MEDIA_CHANGE);
+	    TEST_READY_RETRIES_TAPE,
+	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
 	if (error)
 		goto bad;
 
@@ -218,10 +224,8 @@ chopen(dev, flags, fmt, p)
 		oldcounts[i] = sc->sc_counts[i];
 	}
 	error = ch_get_params(sc, scsi_autoconf);
-	if (error) {
-		printf("%s: offline\n", sc->sc_dev.dv_xname);
+	if (error)
 		goto bad;
-	}
 
 	for (i = 0; i < 4; i++) {
 		if (oldcounts[i] != sc->sc_counts[i]) {
@@ -229,6 +233,7 @@ chopen(dev, flags, fmt, p)
 		}
 	}
 	if (i < 4) {
+#ifdef CHANGER_DEBUG
 #define PLURAL(c)	(c) == 1 ? "" : "s"
 		printf("%s: %d slot%s, %d drive%s, %d picker%s, %d portal%s\n",
 		    sc->sc_dev.dv_xname,
@@ -237,7 +242,6 @@ chopen(dev, flags, fmt, p)
 		    sc->sc_counts[CHET_MT], PLURAL(sc->sc_counts[CHET_MT]),
 		    sc->sc_counts[CHET_IE], PLURAL(sc->sc_counts[CHET_IE]));
 #undef PLURAL
-#ifdef CHANGER_DEBUG
 		printf("%s: move mask: 0x%x 0x%x 0x%x 0x%x\n",
 		    sc->sc_dev.dv_xname,
 		    sc->sc_movemask[CHET_MT], sc->sc_movemask[CHET_ST],
@@ -333,10 +337,10 @@ chioctl(dev, cmd, data, flags, p)
 		break;		}
 
 	case CHIOGSTATUS:	{
-		struct changer_element_status *ces =
-		    (struct changer_element_status *)data;
+		struct changer_element_status_request *cesr =
+		    (struct changer_element_status_request *)data;
 
-		error = ch_usergetelemstatus(sc, ces->ces_type, ces->ces_data);
+		error = ch_usergetelemstatus(sc, cesr);
 		break;		}
 
 	/* Implement prevent/allow? */
@@ -492,23 +496,63 @@ ch_position(sc, cp)
 }
 
 /*
+ * Copy a volume tag to a volume_tag struct, converting SCSI byte order
+ * to host native byte order in the volume serial number.  The volume          
+ * label as returned by the changer is transferred to user mode as
+ * nul-terminated string.  Volume labels are truncated at the first
+ * space, as suggested by SCSI-2.
+ */
+static  void
+copy_voltag(struct changer_voltag *uvoltag, struct volume_tag *voltag)
+{
+	int i;
+
+	for (i=0; i<CH_VOLTAG_MAXLEN; i++) {
+		char c = voltag->vif[i];
+		if (c && c != ' ')
+			uvoltag->cv_volid[i] = c;
+		else
+			break;
+	}
+	uvoltag->cv_volid[i] = '\0';
+	uvoltag->cv_serial = _2btol(voltag->vsn);
+}
+
+/*
+ * Copy an an element status descriptor to a user-mode
+ * changer_element_status structure.
+ */
+static void
+copy_element_status(int flags,	struct read_element_status_descriptor *desc,
+    struct changer_element_status *ces)
+{
+	ces->ces_flags = desc->flags1;
+	
+	if (flags & READ_ELEMENT_STATUS_PVOLTAG)
+		copy_voltag(&ces->ces_pvoltag, &desc->pvoltag);
+	if (flags & READ_ELEMENT_STATUS_AVOLTAG)
+		copy_voltag(&ces->ces_avoltag, &desc->avoltag);
+}
+
+/*
  * Perform a READ ELEMENT STATUS on behalf of the user, and return to
  * the user only the data the user is interested in (i.e. an array of
- * flags bytes).
+ * changer_element_status structures)
  */
 int
-ch_usergetelemstatus(sc, chet, uptr)
+ch_usergetelemstatus(sc, cesr)
 	struct ch_softc *sc;
-	int chet;
-	u_int8_t *uptr;
+	struct changer_element_status_request *cesr;
 {
+	struct changer_element_status *user_data = NULL;
 	struct read_element_status_header *st_hdr;
 	struct read_element_status_page_header *pg_hdr;
 	struct read_element_status_descriptor *desc;
 	caddr_t data = NULL;
-	size_t size, desclen;
+	size_t size, desclen, udsize;
+	int chet = cesr->cesr_type;
 	int avail, i, error = 0;
-	u_int8_t *user_data = NULL;
+	int want_voltags = (cesr->cesr_flags & CESR_VOLTAGS) ? 1 : 0;
 
 	/*
 	 * If there are no elements of the requested type in the changer,
@@ -524,7 +568,8 @@ ch_usergetelemstatus(sc, chet, uptr)
 	 * that the first one can fit into 1k.
 	 */
 	data = (caddr_t)malloc(1024, M_DEVBUF, M_WAITOK);
-	error = ch_getelemstatus(sc, sc->sc_firsts[chet], 1, data, 1024);
+	error = ch_getelemstatus(sc, sc->sc_firsts[chet], 1, data, 1024,
+	    want_voltags);
 	if (error)
 		goto done;
 
@@ -544,7 +589,7 @@ ch_usergetelemstatus(sc, chet, uptr)
 	free(data, M_DEVBUF);
 	data = (caddr_t)malloc(size, M_DEVBUF, M_WAITOK);
 	error = ch_getelemstatus(sc, sc->sc_firsts[chet],
-	    sc->sc_counts[chet], data, size);
+	    sc->sc_counts[chet], data, size, want_voltags);
 	if (error)
 		goto done;
 
@@ -552,23 +597,30 @@ ch_usergetelemstatus(sc, chet, uptr)
 	 * Fill in the user status array.
 	 */
 	st_hdr = (struct read_element_status_header *)data;
-	avail = _2btol(st_hdr->count);
-	if (avail != sc->sc_counts[chet])
-		printf("%s: warning, READ ELEMENT STATUS avail != count\n",
-		    sc->sc_dev.dv_xname);
+	pg_hdr = (struct read_element_status_page_header *)((u_long)data +
+	    sizeof(struct read_element_status_header));
 
-	user_data = (u_int8_t *)malloc(avail, M_DEVBUF, M_WAITOK);
+	avail = _2btol(st_hdr->count);
+	if (avail != sc->sc_counts[chet]) {
+		error = EINVAL;
+		goto done;
+	}
+	udsize = avail * sizeof(struct changer_element_status);
+
+	user_data = malloc(udsize, M_DEVBUF, M_WAITOK);
+	bzero(user_data, udsize);
 
 	desc = (struct read_element_status_descriptor *)((u_long)data +
 	    sizeof(struct read_element_status_header) +
 	    sizeof(struct read_element_status_page_header));
 	for (i = 0; i < avail; ++i) {
-		user_data[i] = desc->flags1;
+		struct changer_element_status *ces = &(user_data[i]);
+		copy_element_status(pg_hdr->flags, desc, ces);
 		(u_long)desc += desclen;
 	}
 
-	/* Copy flags array out to userspace. */
-	error = copyout(user_data, uptr, avail);
+	/* Copy array out to userspace. */
+	error = copyout(user_data, cesr->cesr_data, udsize);
 
  done:
 	if (data != NULL)
@@ -579,11 +631,13 @@ ch_usergetelemstatus(sc, chet, uptr)
 }
 
 int
-ch_getelemstatus(sc, first, count, data, datalen)
+ch_getelemstatus(sc, first, count, data, datalen, voltag)
 	struct ch_softc *sc;
-	int first, count;
+	int first;
+	int count;
 	caddr_t data;
 	size_t datalen;
+	int voltag;
 {
 	struct scsi_read_element_status cmd;
 
@@ -595,6 +649,8 @@ ch_getelemstatus(sc, first, count, data, datalen)
 	_lto2b(first, cmd.sea);
 	_lto2b(count, cmd.count);
 	_lto3b(datalen, cmd.len);
+	if (voltag)
+		cmd.byte2 |= READ_ELEMENT_STATUS_VOLTAG;
 
 	/*
 	 * Send command to changer.
@@ -631,8 +687,10 @@ ch_get_params(sc, flags)
 	if (error == 0 && ea == NULL)
 		error = EIO;
 	if (error != 0) {
+#ifdef CHANGER_DEBUG
 		printf("%s: could not sense element address page\n",
 		    sc->sc_dev.dv_xname);
+#endif
 		free(data, M_TEMP);
 		return (error);
 	}
@@ -656,8 +714,10 @@ ch_get_params(sc, flags)
 	if (cap == NULL)
 		error = EIO;
 	if (error != 0) {
+#ifdef CHANGER_DEBUG
 		printf("%s: could not sense capabilities page\n",
 		    sc->sc_dev.dv_xname);
+#endif
 		free(data, M_TEMP);
 		return (error);
 	}
@@ -692,5 +752,62 @@ ch_get_quirks(sc, inqbuf)
 	    sizeof(chquirks[0]), &priority);
 	if (priority != 0) {
 		sc->sc_settledelay = match->cq_settledelay;
+	}
+}
+
+/*
+ * Look at the returned sense and act on the error and detirmine
+ * The unix error number to pass back... (0 = report no error)
+ *                            (-1 = continue processing)
+ */
+int
+ch_interpret_sense(xs)
+	struct scsi_xfer *xs;
+{
+	struct scsi_sense_data *sense = &xs->sense;
+	struct scsi_link *sc_link = xs->sc_link;
+	u_int8_t serr = sense->error_code & SSD_ERRCODE;
+	u_int8_t skey = sense->flags & SSD_KEY;
+
+	if (((sc_link->flags & SDEV_OPEN) == 0) ||
+	    (serr != 0x70 && serr != 0x71))
+		return (EJUSTRETURN); /* let the generic code handle it */
+
+	switch (skey) {
+
+	/*
+	 * We do custom processing in ch for the unit becoming ready case.
+	 * in this case we do not allow xs->retries to be decremented
+	 * only on the "Unit Becoming Ready" case. This is because tape
+	 * changers report "Unit Becoming Ready" when they rescan their
+	 * state (i.e. when the door got opened) and can take a long time
+	 * for large units. Rather than having a massive timeout for
+	 * all operations (which would cause other problems) we allow
+	 * changers to wait (but be interruptable with Ctrl-C) forever
+	 * as long as they are reporting that they are becoming ready.
+	 * all other cases are handled as per the default.
+	 */
+	case SKEY_NOT_READY:
+		if ((xs->flags & SCSI_IGNORE_NOT_READY) != 0)
+			return (0);
+		switch (sense->add_sense_code) {
+		case 0x04:	/* LUN not ready */
+			switch (sense->add_sense_code_qual) {
+				case 0x01: /* Becoming Ready */
+					SC_DEBUG(sc_link, SDEV_DB1,
+		    			    ("not ready: busy (%#x)\n",
+					    sense->add_sense_code_qual));
+					/* don't count this as a retry */
+					xs->retries++;
+					return (scsi_delay(xs, 1));
+				default:
+					return (EJUSTRETURN);
+			}
+			break;
+		default:
+			return (EJUSTRETURN);
+	}
+	default:
+		return (EJUSTRETURN);
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosvar.h,v 1.45 2005/11/22 12:51:01 mickey Exp $	*/
+/*	$OpenBSD: biosvar.h,v 1.48 2006/05/20 22:36:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -39,6 +39,7 @@
 #define	BIOSF_BIOS32	0x0001
 #define	BIOSF_PCIBIOS	0x0002
 #define	BIOSF_PROMSCAN	0x0004
+#define	BIOSF_SMBIOS	0x0008
 
 /* BIOS media ID */
 #define BIOSM_F320K	0xff	/* floppy ds/sd  8 spt */
@@ -107,6 +108,7 @@ struct bios32_entry {
 	((a) | ((b) << 8) | ((c) << 16) | ((d) << 24))
 #define	BIOS32_SIGNATURE	BIOS32_MAKESIG('_', '3', '2', '_')
 #define	PCIBIOS_SIGNATURE	BIOS32_MAKESIG('$', 'P', 'C', 'I')
+#define	SMBIOS_SIGNATURE	BIOS32_MAKESIG('_', 'S', 'M', '_')
 
 /*
  * CTL_BIOS definitions.
@@ -194,6 +196,11 @@ typedef struct _bios_consdev {
 } bios_consdev_t;
 
 #define BOOTARG_SMPINFO 6		/* struct mp_float[] */
+
+#define BOOTARG_BOOTMAC	7
+typedef struct _bios_bootmac {
+	char	mac[6];
+} bios_bootmac_t;
 
 #if defined(_KERNEL) || defined (_STANDALONE)
 

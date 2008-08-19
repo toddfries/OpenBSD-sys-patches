@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofbvar.h,v 1.5 2005/12/31 18:13:41 miod Exp $	*/
+/*	$OpenBSD: diofbvar.h,v 1.10 2006/08/11 18:33:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -91,19 +91,22 @@ struct diofb {
 
 	/* wsdisplay information */
 	struct wsscreen_descr wsd;
+	struct wsscreen_list wsl;
+	struct wsscreen_descr *scrlist[1];
 	int	nscreens;
 	u_int	mapmode;
 
 	/* blockmove routine */
-	void	(*bmv)(struct diofb *, u_int16_t, u_int16_t,
-		    u_int16_t, u_int16_t, u_int16_t, u_int16_t, int);
+	int	(*bmv)(struct diofb *, u_int16_t, u_int16_t, u_int16_t,
+		    u_int16_t, u_int16_t, u_int16_t, int16_t, int16_t);
 };
 
 /* Replacement Rules (rops) */
-#define RR_CLEAR		0x0
-#define RR_COPY			0x3
-#define RR_XOR			0x6
-#define RR_COPYINVERTED  	0xc
+#define	RR_CLEAR		0x0
+#define	RR_COPY			0x3
+#define	RR_XOR			0x6
+#define	RR_INVERT		0xa
+#define	RR_COPYINVERTED  	0xc
 
 void	diofb_cnattach(struct diofb *);
 void	diofb_end_attach(void *, struct wsdisplay_accessops *, struct diofb *,
@@ -121,12 +124,16 @@ paddr_t	diofb_mmap(void *, off_t, int);
 int	diofb_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
 
+int	diofb_mono_windowmove(struct diofb *, u_int16_t, u_int16_t, u_int16_t,
+	    u_int16_t, u_int16_t, u_int16_t, int16_t, int16_t);
+
 /* Console support */
 void	dvboxcninit(void);
 void	gboxcninit(void);
 void	hypercninit(void);
 void	rboxcninit(void);
 void	topcatcninit(void);
+void	tvrxcninit(void);
 extern	struct diofb diofb_cn;		/* struct diofb for console device */
 
 #endif

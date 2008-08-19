@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.48 2006/01/02 05:21:37 brad Exp $	*/
+/*	$OpenBSD: audio.c,v 1.51 2006/06/23 06:27:11 miod Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -86,6 +86,8 @@
 #include <dev/rndvar.h>
 
 #include <machine/endian.h>
+
+#include "wskbd.h"		/* NWSKBD (mixer tuning using keyboard) */
 
 #ifdef AUDIO_DEBUG
 #define DPRINTF(x)	if (audiodebug) printf x
@@ -207,6 +209,12 @@ int filt_audioread(struct knote *kn, long hint);
 
 struct filterops audioread_filtops =
 	{ 1, NULL, filt_audiordetach, filt_audioread};
+
+#if NWSKBD > 0
+/* Mixer manipulation using keyboard */
+int wskbd_get_mixerdev(struct audio_softc *sc, int dir, int *index);
+int wskbd_set_mixervolume(int dir);
+#endif
 
 int
 audioprobe(parent, match, aux)
@@ -335,7 +343,6 @@ audioactivate(self, act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -849,7 +856,9 @@ audio_init_ringbuffer(rp)
 	rp->end = rp->start + nblks * blksize;
 	rp->inp = rp->outp = rp->start;
 	rp->stamp = 0;
+	rp->stamp_last = 0;
 	rp->drops = 0;
+	rp->pdrops = 0;
 	rp->pause = 0;
 	rp->copying = 0;
 	rp->needfill = 0;
@@ -3094,3 +3103,162 @@ filt_audiowrite(struct knote *kn, long hint)
 
 	return AUDIO_FILTWRITE(sc);
 }
+
+#if NAUDIO > 0 && NWSKBD > 0
+int
+wskbd_get_mixerdev(struct audio_softc *sc, int dir, int *index)
+{
+	mixer_devinfo_t mi;
+	int mixer_class;
+	int error;
+
+	/* looking for ``outputs'' */
+	for (mi.index = 0; ; mi.index++) {
+		error = sc->hw_if->query_devinfo(sc->hw_hdl, &mi);
+		if (error != 0)
+			return (-1);
+
+		if (mi.type == AUDIO_MIXER_CLASS &&
+		    strcmp(mi.label.name, AudioCoutputs) == 0) {
+			mixer_class = mi.mixer_class;
+			break;
+		}
+	}
+
+	/*
+	 * looking for ``outputs.master''
+	 * start mi.index from 0 because ''outputs.master'' can precede
+	 * ''outputs''.
+	 */
+	for (mi.index = 0; ; mi.index++) {
+		error = sc->hw_if->query_devinfo(sc->hw_hdl, &mi);
+		if (error != 0)
+			return (-1);
+
+		if (mi.type == AUDIO_MIXER_VALUE &&
+		    mi.mixer_class == mixer_class &&
+		    strcmp(mi.label.name, AudioNmaster) == 0) {
+			if (dir == 0) {
+				/* looking for ``outputs.master.mute'' */
+				if (mi.next < 0)
+					return (-1);
+
+				mi.index = mi.next;
+				error = sc->hw_if->query_devinfo(sc->hw_hdl,
+				    &mi);
+				if (error != 0)
+					return (-1);
+
+				if (mi.type != AUDIO_MIXER_ENUM ||
+				    strcmp(mi.label.name, AudioNmute) != 0)
+					return (-1);
+			}
+
+			*index = mi.index;
+			return (0);
+		}
+	}
+
+	return (-1);
+}
+
+int
+wskbd_set_mixervolume(int dir)
+{
+	struct audio_softc *sc;
+	mixer_devinfo_t mi;
+	mixer_ctrl_t ct;
+	int l, r;
+	int error;
+
+	if (audio_cd.cd_ndevs == 0 || (sc = audio_cd.cd_devs[0]) == NULL) {
+		DPRINTF(("wskbd_set_mixervolume: audio_cd\n"));
+		return (ENXIO);
+	}
+
+	error = wskbd_get_mixerdev(sc, dir, &ct.dev);
+	if (error == -1) {
+		DPRINTF(("wskbd_set_mixervolume: wskbd_get_mixerdev\n"));
+		return (ENXIO);
+	}
+
+	if (dir == 0) {
+		/*
+		 * Mute.
+		 * Use mixer_ioctl() for writing. It does many things for us.
+		 */
+		ct.type = AUDIO_MIXER_ENUM;
+		error = sc->hw_if->get_port(sc->hw_hdl, &ct);
+		if (error != 0) {
+			DPRINTF(("wskbd_set_mixervolume:"
+			    " get_port: %d\n", error));
+			return (error);
+		}
+
+		ct.un.ord = !ct.un.ord;	/* toggle */
+
+		error = mixer_ioctl(MIXER_DEVICE,
+		    AUDIO_MIXER_WRITE, (caddr_t)&ct, FWRITE, curproc);
+		if (error != 0) {
+			DPRINTF(("wskbd_set_mixervolume:"
+			    " mixer_ioctl: %d\n", error));
+			return (error);
+		}
+	} else {
+		mi.index = ct.dev;
+		error = sc->hw_if->query_devinfo(sc->hw_hdl, &mi);
+		if (error != 0) {
+			DPRINTF(("wskbd_set_mixervolume:"
+			    " query_devinfo: %d\n", error));
+			return (error);
+		}
+
+		ct.type = AUDIO_MIXER_VALUE;
+
+		error = au_get_lr_value(sc, &ct, &l, &r);
+		if (error != 0) {
+			DPRINTF(("wskbd_set_mixervolume:"
+			    " au_get_lr_value: %d\n", error));
+			return (error);
+		}
+
+		if (dir > 0) {
+			/*
+			 * Raise volume
+			 */
+			if (l > AUDIO_MAX_GAIN - mi.un.v.delta)
+				l = AUDIO_MAX_GAIN;
+			else
+				l += mi.un.v.delta;
+
+			if (r > AUDIO_MAX_GAIN - mi.un.v.delta)
+				r = AUDIO_MAX_GAIN;
+			else
+				r += mi.un.v.delta;
+
+		} else {
+			/*
+			 * Lower volume
+			 */
+			if (l < AUDIO_MIN_GAIN + mi.un.v.delta)
+				l = AUDIO_MIN_GAIN;
+			else
+				l -= mi.un.v.delta;
+
+			if (r < AUDIO_MIN_GAIN + mi.un.v.delta)
+				r = AUDIO_MIN_GAIN;
+			else
+				r -= mi.un.v.delta;
+		}
+
+		error = au_set_lr_value(sc, &ct, l, r);
+		if (error != 0) {
+			DPRINTF(("wskbd_set_mixervolume:"
+			    " au_set_lr_value: %d\n", error));
+			return (error);
+		}
+	}
+
+	return (0);
+}
+#endif /* NAUDIO > 0 && NWSKBD > 0 */

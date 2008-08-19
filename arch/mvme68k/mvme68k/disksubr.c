@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.33 2006/01/22 00:40:01 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.35 2006/08/17 10:34:14 krw Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1995 Dale Rahn.
@@ -48,14 +48,6 @@ static void printlp(struct disklabel *lp, char *str);
 static void printclp(struct cpu_disklabel *clp, char *str);
 #endif
 
-void
-dk_establish(dk, dev)
-	struct disk *dk;
-	struct device *dev;
-{
-}
-
-
 /*
  * Attempt to read a disk label from a device
  * using the indicated strategy routine.
@@ -81,6 +73,8 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 		lp->d_secsize = DEV_BSIZE;
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
+	if (lp->d_secpercyl == 0)
+		return ("invalid geometry");
 	lp->d_npartitions = RAW_PART + 1;
 	for (i = 0; i < RAW_PART; i++) {
 		lp->d_partitions[i].p_size = 0;

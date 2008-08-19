@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipaq.c,v 1.2 2005/08/01 05:36:48 brad Exp $	*/
+/*	$OpenBSD: uipaq.c,v 1.4 2006/06/23 06:27:11 miod Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -124,7 +124,8 @@ static const struct uipaq_type uipaq_devs[] = {
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_2215 }, 0 },
 	{{ USB_VENDOR_HP, USB_PRODUCT_HP_568J }, 0},
 	{{ USB_VENDOR_COMPAQ, USB_PRODUCT_COMPAQ_IPAQPOCKETPC} , 0},
-	{{ USB_VENDOR_CASIO, USB_PRODUCT_CASIO_BE300} , 0}
+	{{ USB_VENDOR_CASIO, USB_PRODUCT_CASIO_BE300} , 0},
+	{{ USB_VENDOR_ASUS, USB_PRODUCT_ASUS_MYPAL_A730} , 0}
 };
 
 #define uipaq_lookup(v, p) ((struct uipaq_type *)usb_lookup(uipaq_devs, v, p))
@@ -358,7 +359,6 @@ uipaq_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.45 2004/07/29 09:18:17 mickey Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.47 2006/05/20 18:29:23 mickey Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -81,10 +81,7 @@ static struct pool phpool;
 /* # of seconds to retain page after last use */
 int pool_inactive_time = 10;
 
-/* Next candidate for drainage (see pool_drain()) */
-static struct pool	*drainpp;
-
-/* This spin lock protects both pool_head and drainpp. */
+/* This spin lock protects both pool_head */
 struct simplelock pool_head_slock;
 
 struct pool_item_header {
@@ -450,8 +447,6 @@ pool_init(struct pool *pp, size_t size, u_int align, u_int ioff, int flags,
 	pp->pr_hardlimit_ratecap.tv_usec = 0;
 	pp->pr_hardlimit_warning_last.tv_sec = 0;
 	pp->pr_hardlimit_warning_last.tv_usec = 0;
-	pp->pr_drain_hook = NULL;
-	pp->pr_drain_hook_arg = NULL;
 	pp->pr_serial = ++pool_serial;
 	if (pool_serial == 0)
 		panic("pool_init: too much uptime");
@@ -578,27 +573,12 @@ pool_destroy(struct pool *pp)
 	/* Remove from global pool list */
 	simple_lock(&pool_head_slock);
 	TAILQ_REMOVE(&pool_head, pp, pr_poollist);
-	if (drainpp == pp) {
-		drainpp = NULL;
-	}
 	simple_unlock(&pool_head_slock);
 
 #ifdef POOL_DIAGNOSTIC
 	if ((pp->pr_roflags & PR_LOGGING) != 0)
 		free(pp->pr_log, M_TEMP);
 #endif
-}
-
-void
-pool_set_drain_hook(struct pool *pp, void (*fn)(void *, int), void *arg)
-{
-	/* XXX no locking -- must be used just after pool_init() */
-#ifdef DIAGNOSTIC
-	if (pp->pr_drain_hook != NULL)
-		panic("pool_set_drain_hook(%s): already set", pp->pr_wchan);
-#endif
-	pp->pr_drain_hook = fn;
-	pp->pr_drain_hook_arg = arg;
 }
 
 static struct pool_item_header *
@@ -675,21 +655,6 @@ pool_get(struct pool *pp, int flags)
 	}
 #endif
 	if (__predict_false(pp->pr_nout == pp->pr_hardlimit)) {
-		if (pp->pr_drain_hook != NULL) {
-			/*
-			 * Since the drain hook is going to free things
-			 * back to the pool, unlock, call hook, re-lock
-			 * and check hardlimit condition again.
-			 */
-			pr_leave(pp);
-			simple_unlock(&pp->pr_slock);
-			(*pp->pr_drain_hook)(pp->pr_drain_hook_arg, flags);
-			simple_lock(&pp->pr_slock);
-			pr_enter(pp, file, line);
-			if (pp->pr_nout < pp->pr_hardlimit)
-				goto startover;
-		}
-
 		if ((flags & PR_WAITOK) && !(flags & PR_LIMITFAIL)) {
 			/*
 			 * XXX: A warning isn't logged in this case.  Should
@@ -944,7 +909,7 @@ pool_do_put(struct pool *pp, void *v)
 		pp->pr_flags &= ~PR_WANTED;
 		if (ph->ph_nmissing == 0)
 			pp->pr_nidle++;
-		wakeup((caddr_t)pp);
+		wakeup(pp);
 		return;
 	}
 
@@ -1279,13 +1244,6 @@ pool_reclaim(struct pool *pp)
 	struct timeval diff;
 	int s;
 
-	if (pp->pr_drain_hook != NULL) {
-		/*
-		 * The drain hook must be called with the pool unlocked.
-		 */
-		(*pp->pr_drain_hook)(pp->pr_drain_hook_arg, PR_NOWAIT);
-	}
-
 	if (simple_lock_try(&pp->pr_slock) == 0)
 		return (0);
 	pr_enter(pp, file, line);
@@ -1342,34 +1300,11 @@ pool_reclaim(struct pool *pp)
 	return (1);
 }
 
-
-/*
- * Drain pools, one at a time.
- *
- * Note, we must never be called from an interrupt context.
- */
-void
-pool_drain(void *arg)
-{
-	struct pool *pp;
-	int s;
-
-	pp = NULL;
-	s = splvm();
-	simple_lock(&pool_head_slock);
-	if (drainpp == NULL) {
-		drainpp = TAILQ_FIRST(&pool_head);
-	}
-	if (drainpp) {
-		pp = drainpp;
-		drainpp = TAILQ_NEXT(pp, pr_poollist);
-	}
-	simple_unlock(&pool_head_slock);
-	pool_reclaim(pp);
-	splx(s);
-}
-
 #ifdef DDB
+#include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
+#include <ddb/db_output.h>
+
 /*
  * Diagnostic helpers.
  */
@@ -1493,6 +1428,78 @@ skip_log:
 
 skip_cache:
 	pr_enter_check(pp, pr);
+}
+
+void
+db_show_all_pools(db_expr_t expr, int haddr, db_expr_t count, char *modif)
+{
+	struct pool *pp;
+	char maxp[16];
+	int ovflw;
+	char mode;
+
+	mode = modif[0];
+	if (mode != '\0' && mode != 'a') {
+		db_printf("usage: show all pools [/a]\n");
+		return;
+	}
+
+	if (mode == '\0')
+		db_printf("%-10s%4s%9s%5s%9s%6s%6s%6s%6s%6s%6s%5s\n",
+		    "Name",
+		    "Size",
+		    "Requests",
+		    "Fail",
+		    "Releases",
+		    "Pgreq",
+		    "Pgrel",
+		    "Npage",
+		    "Hiwat",
+		    "Minpg",
+		    "Maxpg",
+		    "Idle");
+	else
+		db_printf("%-10s %18s %18s\n",
+		    "Name", "Address", "Allocator");
+
+	TAILQ_FOREACH(pp, &pool_head, pr_poollist) {
+		if (mode == 'a') {
+			db_printf("%-10s %18p %18p\n", pp->pr_wchan, pp,
+			    pp->pr_alloc);
+			continue;
+		}
+
+		if (!pp->pr_nget)
+			continue;
+
+		if (pp->pr_maxpages == UINT_MAX)
+			snprintf(maxp, sizeof maxp, "inf");
+		else
+			snprintf(maxp, sizeof maxp, "%u", pp->pr_maxpages);
+
+#define PRWORD(ovflw, fmt, width, fixed, val) do {	\
+	(ovflw) += db_printf((fmt),			\
+	    (width) - (fixed) - (ovflw) > 0 ?		\
+	    (width) - (fixed) - (ovflw) : 0,		\
+	    (val)) - (width);				\
+	if ((ovflw) < 0)				\
+		(ovflw) = 0;				\
+} while (/* CONSTCOND */0)
+
+		ovflw = 0;
+		PRWORD(ovflw, "%-*s", 10, 0, pp->pr_wchan);
+		PRWORD(ovflw, " %*u", 4, 1, pp->pr_size);
+		PRWORD(ovflw, " %*lu", 9, 1, pp->pr_nget);
+		PRWORD(ovflw, " %*lu", 5, 1, pp->pr_nfail);
+		PRWORD(ovflw, " %*lu", 9, 1, pp->pr_nput);
+		PRWORD(ovflw, " %*lu", 6, 1, pp->pr_npagealloc);
+		PRWORD(ovflw, " %*lu", 6, 1, pp->pr_npagefree);
+		PRWORD(ovflw, " %*d", 6, 1, pp->pr_npages);
+		PRWORD(ovflw, " %*d", 6, 1, pp->pr_hiwat);
+		PRWORD(ovflw, " %*d", 6, 1, pp->pr_minpages);
+		PRWORD(ovflw, " %*s", 6, 1, maxp);
+		PRWORD(ovflw, " %*lu\n", 5, 1, pp->pr_nidle);
+	}
 }
 
 int
@@ -1932,7 +1939,6 @@ sysctl_dopool(int *name, u_int namelen, char *where, size_t *sizep)
  * Pool backend allocators.
  *
  * Each pool has a backend allocator that handles allocation, deallocation
- * and any additional draining that might be needed.
  */
 void	*pool_page_alloc_kmem(struct pool *, int);
 void	pool_page_free_kmem(struct pool *, void *);
@@ -1971,37 +1977,10 @@ struct pool_allocator pool_allocator_nointr = {
  */
 
 void *
-pool_allocator_alloc(struct pool *org, int flags)
+pool_allocator_alloc(struct pool *pp, int flags)
 {
-	struct pool_allocator *pa = org->pr_alloc;
-	int freed;
-	void *res;
-	int s;
 
-	do {
-		if ((res = (*pa->pa_alloc)(org, flags)) != NULL)
-			return (res);
-		if ((flags & PR_WAITOK) == 0) {
-			/*
-			 * We only run the drain hook here if PR_NOWAIT.
-			 * In other cases the hook will be run in
-			 * pool_reclaim.
-			 */
-			if (org->pr_drain_hook != NULL) {
-				(*org->pr_drain_hook)(org->pr_drain_hook_arg,
-				    flags);
-				if ((res = (*pa->pa_alloc)(org, flags)) != NULL)
-					return (res);
-			}
-			break;
-		}
-		s = splvm();
-		simple_lock(&pa->pa_slock);
-		freed = pool_allocator_drain(pa, org, 1);
-		simple_unlock(&pa->pa_slock);
-		splx(s);
-	} while (freed);
-	return (NULL);
+	return (pp->pr_alloc->pa_alloc(pp, flags));
 }
 
 void
@@ -2031,53 +2010,6 @@ pool_allocator_free(struct pool *pp, void *v)
 	pa->pa_flags &= ~PA_WANT;
 	simple_unlock(&pa->pa_slock);
 	splx(s);
-}
-
-/*
- * Drain all pools, except 'org', that use this allocator.
- *
- * Must be called at appropriate spl level and with the allocator locked.
- *
- * We do this to reclaim va space. pa_alloc is responsible
- * for waiting for physical memory.
- * XXX - we risk looping forever if start if someone calls
- *  pool_destroy on 'start'. But there is no other way to
- *  have potentially sleeping pool_reclaim, non-sleeping
- *  locks on pool_allocator and some stirring of drained
- *  pools in the allocator.
- * XXX - maybe we should use pool_head_slock for locking
- *  the allocators?
- */
-int
-pool_allocator_drain(struct pool_allocator *pa, struct pool *org, int need)
-{
-	struct pool *pp, *start;
-	int freed;
-
-	freed = 0;
-
-	pp = start = TAILQ_FIRST(&pa->pa_list);
-	do {
-		TAILQ_REMOVE(&pa->pa_list, pp, pr_alloc_list);
-		TAILQ_INSERT_TAIL(&pa->pa_list, pp, pr_alloc_list);
-		if (pp == org)
-			continue;
-		simple_unlock(&pa->pa_slock);
-		freed = pool_reclaim(pp);
-		simple_lock(&pa->pa_slock);
-	} while ((pp = TAILQ_FIRST(&pa->pa_list)) != start && (freed < need));
-
-	if (!freed) {
-		/*
-		 * We set PA_WANT here, the caller will most likely
-		 * sleep waiting for pages (if not, this won't hurt
-		 * that much) and there is no way to set this in the
-		 * caller without violating locking order.
-		 */
-		pa->pa_flags |= PA_WANT;
-	}
-
-	return (freed);
 }
 
 void *

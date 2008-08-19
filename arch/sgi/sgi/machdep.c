@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.29 2006/01/04 20:25:34 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.33 2006/08/11 08:17:37 jasper Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -96,13 +96,6 @@ void dump_tlb(void);
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* machine "architecture" */
 char	cpu_model[30];
-#ifdef APERTURE
-#if defined(INSECURE) || defined(DEBUG)
-int allowaperture = 1;
-#else
-int allowaperture = 0;
-#endif
-#endif
 
 /*
  * Declare these as initialized data so we can patch them.
@@ -240,7 +233,6 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		switch ((cp0_get_prid() >> 8) & 0xff) {
 		case MIPS_R10000:
 		case MIPS_R12000:
-		case MIPS_R14000:	/* Anyone seen an O2 with R14K? */
 			bootdriveoffs = -1;
 			break;
 		}
@@ -253,7 +245,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		break;
 #endif
 
-#if defined(TGT_ORIGIN200) | defined(TGT_ORIGIN2000)
+#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 	case SGI_O200:
 		bios_printf("Found SGI-IP27, setting up.\n");
 		strlcpy(cpu_model, "SGI- Origin200 (IP27)", sizeof(cpu_model));
@@ -367,7 +359,6 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 
 		case MIPS_R10000:
 		case MIPS_R12000:
-		case MIPS_R14000:
 			sys_config.cpu[0].tlbsize = 64;
 			break;
 
@@ -454,7 +445,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 /* XXX */
 #endif
 
-#if defined(TGT_ORIGIN200) | defined(TGT_ORIGIN2000)
+#if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 	/*
 	 *  If an IP27 system set up Node 0's HUB.
 	 */
@@ -643,11 +634,11 @@ cpu_startup()
 	int base, residual;
 	vaddr_t minaddr, maxaddr;
 	vsize_t size;
-#ifdef DEBUG
-	extern int pmapdebugflag;
-	int opmapdebugflag = pmapdebugflag;
+#ifdef PMAPDEBUG
+	extern int pmapdebug;
+	int opmapdebug = pmapdebug;
 
-	pmapdebugflag = 0;	/* Shut up pmap debug during bootstrap */
+	pmapdebug = 0;	/* Shut up pmap debug during bootstrap */
 #endif
 
 	/*
@@ -706,8 +697,8 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-#ifdef DEBUG
-	pmapdebugflag = opmapdebugflag;
+#ifdef PMAPDEBUG
+	pmapdebug = opmapdebug;
 #endif
 	printf("avail mem = %d\n", ptoa(uvmexp.free));
 	printf("using %d buffers containing %d bytes of memory\n",
@@ -755,15 +746,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return ENOTDIR;		/* overloaded */
 
 	switch (name[0]) {
-	case CPU_ALLOWAPERTURE:
-#ifdef APERTURE
-	if (securelevel > 0)
-		return sysctl_rdint(oldp, oldlenp, newp, allowaperture);
-	else
-		return sysctl_int(oldp, oldlenp, newp, newlen, &allowaperture);
-#else
-		return (sysctl_rdint(oldp, oldlenp, newp, 0));
-#endif
 	default:
 		return EOPNOTSUPP;
 	}

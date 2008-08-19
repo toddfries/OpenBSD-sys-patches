@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atureg.h,v 1.25 2005/07/07 22:47:08 dlg Exp $ */
+/*	$OpenBSD: if_atureg.h,v 1.28 2006/07/18 18:20:17 mk Exp $ */
 /*
  * Copyright (c) 2003
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -35,11 +35,11 @@
 #define ATU_CONFIG_NO		1
 #define ATU_IFACE_IDX		0
 
-/* the number of simultaniuously requested RX transfers */
+/* the number of simultaneously requested RX transfers */
 #define ATU_RX_LIST_CNT	1
 
 /*
- * the number of simultaniously started TX transfers
+ * the number of simultaneously started TX transfers
  * my measurements :
  * 1		430.82 KB/sec
  * 2		534.66 KB/sec
@@ -58,7 +58,7 @@
  */
 #define ATU_RX_BUFSZ		(ATU_RX_HDRLEN + \
 				 sizeof(struct ieee80211_frame_addr4) + 2312 + 4)
-/* BE CAREFULL! should add ATU_TX_PADDING */
+/* BE CAREFUL! should add ATU_TX_PADDING */
 #define ATU_TX_BUFSZ		(ATU_TX_HDRLEN + \
 				 sizeof(struct ieee80211_frame_addr4) + 2312)
 
@@ -124,7 +124,7 @@ struct atu_chain {
 	 (1 << IEEE80211_RADIOTAP_RATE)			|	\
 	 (1 << IEEE80211_RADIOTAP_CHANNEL)		|	\
 	 (1 << IEEE80211_RADIOTAP_LOCK_QUALITY)		|	\
-	 (1 << IEEE80211_RADIOTAP_DB_ANTSIGNAL)		|	\
+	 (1 << IEEE80211_RADIOTAP_RSSI)			|	\
 	 0)
 
 struct atu_rx_radiotap_header {
@@ -135,8 +135,9 @@ struct atu_rx_radiotap_header {
 	u_int16_t				rr_chan_freq;
 	u_int16_t				rr_chan_flags;
 	u_int16_t				rr_barker_lock;
-	u_int8_t				rr_antsignal;
-} __attribute__((__packed__));
+	u_int8_t				rr_rssi;
+	u_int8_t				rr_max_rssi;
+} __packed;
 
 #define ATU_TX_RADIOTAP_PRESENT				\
 	((1 << IEEE80211_RADIOTAP_FLAGS)	|	\
@@ -150,7 +151,7 @@ struct atu_tx_radiotap_header {
 	u_int8_t				rt_rate;
 	u_int16_t				rt_chan_freq;
 	u_int16_t				rt_chan_flags;
-} __attribute__((__packed__));
+} __packed;
 
 struct atu_cdata {
 	struct atu_chain	atu_tx_chain[ATU_TX_LIST_CNT];

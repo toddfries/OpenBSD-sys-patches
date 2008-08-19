@@ -1,4 +1,4 @@
-# $OpenBSD: files.i2c,v 1.31 2006/01/28 11:18:41 kettenis Exp $
+# $OpenBSD: files.i2c,v 1.36 2006/06/17 04:43:01 drahn Exp $
 #	$NetBSD: files.i2c,v 1.3 2003/10/20 16:24:10 briggs Exp $
 
 define	i2c {[addr = -1], [size = -1]}
@@ -107,3 +107,18 @@ file	dev/i2c/w83l784r.c			wbenv
 device	glenv
 attach	glenv at i2c
 file	dev/i2c/gl518sm.c			glenv
+
+# RICOH RS5C372[AB] Real Time Clock
+device	ricohrtc
+attach	ricohrtc at i2c
+file	dev/i2c/rs5c372.c			ricohrtc
+
+# Fintek F75375
+device	fintek
+attach	fintek at i2c
+file	dev/i2c/fintek.c			fintek
+
+# Phillips Semiconductor PCA9532
+device	pcaled: gpiobus
+attach	pcaled at i2c
+file	dev/i2c/pca9532.c			pcaled

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mld6.c,v 1.19 2003/06/11 02:54:02 itojun Exp $	*/
+/*	$OpenBSD: mld6.c,v 1.21 2006/05/27 23:40:27 claudio Exp $	*/
 /*	$KAME: mld6.c,v 1.26 2001/02/16 14:50:35 itojun Exp $	*/
 
 /*
@@ -257,10 +257,7 @@ mld6_input(m, off)
 		mld_all_nodes_linklocal.s6_addr16[1] =
 			htons(ifp->if_index); /* XXX */
 
-		for (in6m = ia->ia6_multiaddrs.lh_first;
-		     in6m;
-		     in6m = in6m->in6m_entry.le_next)
-		{
+		LIST_FOREACH(in6m, &ia->ia6_multiaddrs, in6m_entry) {
 			if (IN6_ARE_ADDR_EQUAL(&in6m->in6m_addr,
 						&mld_all_nodes_linklocal) ||
 			    IPV6_ADDR_MC_SCOPE(&in6m->in6m_addr) <
@@ -448,7 +445,9 @@ mld6_sendpkt(in6m, type, dst)
 	 * Request loopback of the report if we are acting as a multicast
 	 * router, so that the process-level routing daemon can hear it.
 	 */
+#ifdef MROUTING
 	im6o.im6o_multicast_loop = (ip6_mrouter != NULL);
+#endif
 
 	/* increment output statictics */
 	icmp6stat.icp6s_outhist[type]++;

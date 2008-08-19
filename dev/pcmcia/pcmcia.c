@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcmcia.c,v 1.35 2005/08/05 18:21:04 fgsch Exp $	*/
+/*	$OpenBSD: pcmcia.c,v 1.37 2006/04/16 20:43:12 miod Exp $	*/
 /*	$NetBSD: pcmcia.c,v 1.9 1998/08/13 02:10:55 eeh Exp $	*/
 
 /*
@@ -180,14 +180,14 @@ pcmcia_card_attach(dev)
 
 	pcmcia_check_cis_quirks(sc);
 
-#if 1
 	/*
-	 * Bail now if the card has no functions, or if there was an error in
-	 * the CIS.
+	 * Bail now if there was an error in the CIS.
 	 */
 
 	if (sc->card.error)
 		return (1);
+
+#if 0
 	if (SIMPLEQ_EMPTY(&sc->card.pf_head))
 		return (1);
 #endif
@@ -336,11 +336,12 @@ pcmcia_print(arg, pnp)
 	if (pnp) {
 		for (i = 0; i < 4 && card->cis1_info[i]; i++)
 			printf("%s%s", i ? ", " : "\"", card->cis1_info[i]);
-		printf("\"");
+		if (i != 0)
+			printf("\"");
 
 		if (card->manufacturer != PCMCIA_VENDOR_INVALID &&
 		    card->product != PCMCIA_PRODUCT_INVALID) {
-			if (i)
+			if (i != 0)
 				printf(" ");
 			printf("(");
 			if (card->manufacturer != PCMCIA_VENDOR_INVALID)
@@ -353,7 +354,7 @@ pcmcia_print(arg, pnp)
 				    card->product);
 			printf(")");
 		}
-		if (i)
+		if (i != 0)
 			printf(" ");
 		printf("at %s", pnp);
 	}
@@ -362,13 +363,14 @@ pcmcia_print(arg, pnp)
 	if (!pnp) {
 		for (i = 0; i < 3 && card->cis1_info[i]; i++)
 			printf("%s%s", i ? ", " : " \"", card->cis1_info[i]);
-		printf("\"");
+		if (i != 0)
+			printf("\"");
 	}
 
 	return (UNCONF);
 }
 
-int 
+int
 pcmcia_card_gettype(dev)
 	struct device  *dev;
 {
@@ -492,13 +494,14 @@ pcmcia_function_enable(pf)
 	reg = (pf->cfe->number & PCMCIA_CCR_OPTION_CFINDEX);
 	reg |= PCMCIA_CCR_OPTION_LEVIREQ;
 	if (pcmcia_mfc(pf->sc)) {
-		reg |= (PCMCIA_CCR_OPTION_FUNC_ENABLE |
-			PCMCIA_CCR_OPTION_ADDR_DECODE);
+		reg |= PCMCIA_CCR_OPTION_FUNC_ENABLE;
+		if (pf->ccr_mask & (1 << (PCMCIA_CCR_IOBASE0 / 2)))
+			reg |= PCMCIA_CCR_OPTION_ADDR_DECODE;
 		if (pf->ih_fct)
 			reg |= PCMCIA_CCR_OPTION_IREQ_ENABLE;
 
 	}
-	
+
 	pcmcia_ccr_write(pf, PCMCIA_CCR_OPTION, reg);
 
 	reg = 0;
@@ -510,13 +513,13 @@ pcmcia_function_enable(pf)
 	pcmcia_ccr_write(pf, PCMCIA_CCR_STATUS, reg);
 
 	pcmcia_ccr_write(pf, PCMCIA_CCR_SOCKETCOPY, 0);
-	
+
 	if (pcmcia_mfc(pf->sc)) {
 		pcmcia_ccr_write(pf, PCMCIA_CCR_IOBASE0,
 				 (pf->pf_mfc_iobase >>  0) & 0xff);
 		pcmcia_ccr_write(pf, PCMCIA_CCR_IOBASE1,
 				 (pf->pf_mfc_iobase >>  8) & 0xff);
-		pcmcia_ccr_write(pf, PCMCIA_CCR_IOBASE2, 
+		pcmcia_ccr_write(pf, PCMCIA_CCR_IOBASE2,
 				 (pf->pf_mfc_iobase >> 16) & 0xff);
 		pcmcia_ccr_write(pf, PCMCIA_CCR_IOBASE3,
 				 (pf->pf_mfc_iobase >> 24) & 0xff);
@@ -536,7 +539,7 @@ pcmcia_function_enable(pf)
 		       pcmcia_ccr_read(tmp, 0x06),
 
 		       pcmcia_ccr_read(tmp, 0x0A),
-		       pcmcia_ccr_read(tmp, 0x0C), 
+		       pcmcia_ccr_read(tmp, 0x0C),
 		       pcmcia_ccr_read(tmp, 0x0E),
 		       pcmcia_ccr_read(tmp, 0x10),
 
@@ -637,7 +640,8 @@ pcmcia_io_map(pf, width, offset, size, pcihp, windowp)
 	 * don't overlap, and that the ccr's are set correctly.
 	 */
 
-	if (pcmcia_mfc(pf->sc)) {
+	if (pcmcia_mfc(pf->sc) &&
+	    (pf->ccr_mask & (1 << (PCMCIA_CCR_IOBASE0 / 2)))) {
 		bus_addr_t iobase = pcihp->addr;
 		bus_addr_t iomax = pcihp->addr + pcihp->size - 1;
 
@@ -867,7 +871,7 @@ pcmcia_intr_string(pf, ih)
 	return pcmcia_chip_intr_string(pf->sc->pct, pf->sc->pch, ih);
 }
 
-int 
+int
 pcmcia_card_intr(arg)
 	void *arg;
 {

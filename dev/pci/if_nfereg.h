@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfereg.h,v 1.16 2006/02/22 19:23:44 damien Exp $	*/
+/*	$OpenBSD: if_nfereg.h,v 1.19 2006/05/28 00:20:21 brad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Jonathan Gray <jsg@openbsd.org>
@@ -19,9 +19,12 @@
 #define NFE_PCI_BA		0x10
 
 #define NFE_RX_RING_COUNT	128
-#define NFE_TX_RING_COUNT	64
+#define NFE_TX_RING_COUNT	256
 
-#define NFE_JBYTES		(ETHER_MAX_LEN_JUMBO + ETHER_ALIGN)
+#define NFE_JUMBO_FRAMELEN	9018
+#define NFE_JUMBO_MTU		(NFE_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
+
+#define NFE_JBYTES		(NFE_JUMBO_FRAMELEN + ETHER_ALIGN)
 #define NFE_JPOOL_COUNT		(NFE_RX_RING_COUNT + 64)
 #define NFE_JPOOL_SIZE		(NFE_JPOOL_COUNT * NFE_JBYTES)
 
@@ -151,6 +154,10 @@ struct nfe_desc32 {
 #define NFE_TX_LASTFRAG_V1	(1 << 0)
 } __packed;
 
+#define NFE_V1_TXERR	"\020"	\
+	"\14TXERROR\13UNDERFLOW\12LATECOLLISION\11LOSTCARRIER\10DEFERRED" \
+	"\08FORCEDINT\03RETRY\00LASTPACKET"
+
 /* V2 Rx/Tx descriptor */
 struct nfe_desc64 {
 	uint32_t	physaddr[2];
@@ -164,6 +171,9 @@ struct nfe_desc64 {
 #define NFE_TX_ERROR_V2		0x5c04
 #define NFE_TX_LASTFRAG_V2	(1 << 13)
 } __packed;
+
+#define NFE_V2_TXERR	"\020"	\
+	"\14FORCEDINT\13LASTPACKET\12UNDERFLOW\10LOSTCARRIER\09DEFERRED\02RETRY"
 
 /* flags common to V1/V2 descriptors */
 #define NFE_RX_CSUMOK		0x1c00

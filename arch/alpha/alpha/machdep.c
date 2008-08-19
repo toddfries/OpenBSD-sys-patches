@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.96 2006/01/17 20:28:59 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.103 2006/07/12 15:32:57 martin Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -100,8 +100,6 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <uvm/uvm_extern.h>
-
 #include <dev/cons.h>
 
 #include <machine/autoconf.h>
@@ -162,8 +160,6 @@ int allowaperture = 1;
 int allowaperture = 0;
 #endif
 #endif
-
-int	maxmem;			/* max memory per process */
 
 int	totalphysmem;		/* total amount of physical memory in system */
 int	physmem;		/* physical mem used by OpenBSD + some rsvd */
@@ -251,6 +247,9 @@ alpha_init(pfn, ptb, bim, bip, biv)
 	alpha_pal_wrfen(0);
 	ALPHA_TBIA();
 	alpha_pal_imb();
+
+	/* Initialize the SCB. */
+	scb_init();
 
 	cpu_id = cpu_number();
 
@@ -618,10 +617,9 @@ nobootinfo:
 
 	if (totalphysmem == 0)
 		panic("can't happen: system seems to have no memory!");
-	maxmem = physmem;
 #if 0
-	printf("totalphysmem = %d\n", totalphysmem);
-	printf("physmem = %d\n", physmem);
+	printf("totalphysmem = %u\n", totalphysmem);
+	printf("physmem = %u\n", physmem);
 	printf("resvmem = %d\n", resvmem);
 	printf("unusedmem = %d\n", unusedmem);
 	printf("unknownmem = %d\n", unknownmem);
@@ -892,17 +890,17 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("total memory = %ld (%ldK)\n", (long)ptoa(totalphysmem),
-	    (long)ptoa(totalphysmem) / 1024);
-	printf("(%ld reserved for PROM, ", (long)ptoa(resvmem));
-	printf("%ld used by OpenBSD)\n", (long)ptoa(physmem));
+	printf("total memory = %ld (%ldK)\n", ptoa((u_long)totalphysmem),
+	    ptoa((u_long)totalphysmem) / 1024);
+	printf("(%ld reserved for PROM, ", ptoa((u_long)resvmem));
+	printf("%ld used by OpenBSD)\n", ptoa((u_long)physmem));
 	if (unusedmem) {
 		printf("WARNING: unused memory = %ld (%ldK)\n",
-		    (long)ptoa(unusedmem), (long)ptoa(unusedmem) / 1024);
+		    ptoa((u_long)unusedmem), ptoa((u_long)unusedmem) / 1024);
 	}
 	if (unknownmem) {
 		printf("WARNING: %ld (%ldK) of memory with unknown purpose\n",
-		    (long)ptoa(unknownmem), (long)ptoa(unknownmem) / 1024);
+		    ptoa((u_long)unknownmem), ptoa((u_long)unknownmem) / 1024);
 	}
 
 	/*
@@ -930,7 +928,7 @@ cpu_startup()
 		 * "base" pages for the rest.
 		 */
 		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-		curbufsize = NBPG * ((i < residual) ? (base+1) : base);
+		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
 
 		while (curbufsize) {
 			pg = uvm_pagealloc(NULL, 0, NULL, 0);
@@ -971,7 +969,7 @@ cpu_startup()
 	}
 #endif
 	printf("using %ld buffers containing %ld bytes (%ldK) of memory\n",
-	    (long)nbuf, (long)bufpages * NBPG, (long)bufpages * (NBPG / 1024));
+	    (long)nbuf, (long)bufpages * PAGE_SIZE, (long)bufpages * (PAGE_SIZE / 1024));
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -1249,7 +1247,7 @@ cpu_dump()
 
 /*
  * This is called by main to set dumplo and dumpsize.
- * Dumps always skip the first NBPG of disk space
+ * Dumps always skip the first PAGE_SIZE of disk space
  * in case there might be a disk label stored there.
  * If there is extra space, put dump at the end to
  * reduce the chance that swapping trashes it.
@@ -1295,7 +1293,7 @@ bad:
 /*
  * Dump the kernel's image to the swap partition.
  */
-#define	BYTES_PER_DUMP	NBPG
+#define	BYTES_PER_DUMP	PAGE_SIZE
 
 void
 dumpsys()
@@ -1623,13 +1621,8 @@ trash:
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
 		 */
-		SIGACTION(p, SIGILL) = SIG_DFL;
-		sig = sigmask(SIGILL);
-		p->p_sigignore &= ~sig;
-		p->p_sigcatch &= ~sig;
-		p->p_sigmask &= ~sig;
-		psignal(p, SIGILL);
-		return;
+		sigexit(p, SIGILL);
+		/* NOTREACHED */
 	}
 #ifdef DEBUG
 	if (sigdebug & SDB_FOLLOW)
@@ -1790,8 +1783,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_ALLOWAPERTURE:
 #ifdef APERTURE
 		if (securelevel > 0)
-                        return (sysctl_rdint(oldp, oldlenp, newp,
-				 allowaperture));
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &allowaperture));
                 else
                         return (sysctl_int(oldp, oldlenp, newp, newlen,
                             &allowaperture));
@@ -2044,18 +2037,39 @@ void
 delay(n)
 	unsigned long n;
 {
-	long N = cycles_per_usec * (n);
+	unsigned long pcc0, pcc1, curcycle, cycles, usec;
 
-	/*
-	 * XXX Should be written to use RPCC?
-	 */
+	if (n == 0)
+		return;
 
-	__asm __volatile(
-		"# The 2 corresponds to the insn count\n"
-		"1:	subq	%2, %1, %0	\n"
-		"	bgt	%0, 1b"
-		: "=r" (N)
-		: "i" (2), "0" (N));
+	pcc0 = alpha_rpcc() & 0xffffffffUL;
+	cycles = 0;
+	usec = 0;
+
+	while (usec <= n) {
+		/*
+		 * Get the next CPU cycle count - assumes that we can not
+		 * have had more than one 32 bit overflow.
+		 */
+		pcc1 = alpha_rpcc() & 0xffffffffUL;
+		if (pcc1 < pcc0)
+			curcycle = (pcc1 + 0x100000000UL) - pcc0;
+		else
+			curcycle = pcc1 - pcc0;
+
+		/*
+		 * We now have the number of processor cycles since we
+		 * last checked. Add the current cycle count to the
+		 * running total. If it's over cycles_per_usec, increment
+		 * the usec counter.
+		 */
+		cycles += curcycle;
+		while (cycles > cycles_per_usec) {
+			usec++;
+			cycles -= cycles_per_usec;
+		}
+		pcc0 = pcc1;
+	}
 }
 
 #if defined(COMPAT_OSF1)

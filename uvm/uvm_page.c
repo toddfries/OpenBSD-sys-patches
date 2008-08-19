@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.51 2006/01/16 13:11:05 mickey Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.56 2006/07/31 11:51:29 mickey Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /* 
@@ -293,7 +293,7 @@ uvm_page_init(kvm_startp, kvm_endp)
 	 * pages).
 	 */
 	 
-	pagecount = ((freepages + 1) << PAGE_SHIFT) /
+	pagecount = (((paddr_t)freepages + 1) << PAGE_SHIFT) /
 	    (PAGE_SIZE + sizeof(struct vm_page));
 	pagearray = (vm_page_t)uvm_pageboot_alloc(pagecount *
 	    sizeof(struct vm_page));
@@ -968,9 +968,9 @@ uvm_pagealloc_strat(obj, off, anon, flags, strat, free_list)
 		try2 = PGFL_ZEROS;
 	}
 
-	UVMHIST_LOG(pghist, "obj=%p off=%llx anon=%x flags=%x",
-	    obj, off, flags, anon);
-	UVMHIST_LOG(pghist, "strat=%d free_list=%d", strat, free_list, 0, 0);
+	UVMHIST_LOG(pghist, "obj=%p off=%lx anon=%p flags=%lx",
+	    obj, (u_long)off, anon, flags);
+	UVMHIST_LOG(pghist, "strat=%ld free_list=%ld", strat, free_list, 0, 0);
  again:
 	switch (strat) {
 	case UVM_PGA_STRAT_NORMAL:
@@ -1067,8 +1067,8 @@ uvm_pagealloc_strat(obj, off, anon, flags, strat, free_list)
 			pmap_zero_page(pg);
 	}
 
-	UVMHIST_LOG(pghist, "allocated pg %p/%llx", pg,
-	    (long long)VM_PAGE_TO_PHYS(pg), 0, 0);
+	UVMHIST_LOG(pghist, "allocated pg %p/%lx", pg,
+	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);
 	return(pg);
 
  fail:
@@ -1138,8 +1138,8 @@ uvm_pagefree(pg)
 	}
 #endif
 
-	UVMHIST_LOG(pghist, "freeing pg %p/%llx", pg,
-	    (long long)VM_PAGE_TO_PHYS(pg), 0, 0);
+	UVMHIST_LOG(pghist, "freeing pg %p/%lx", pg,
+	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);
 
 	/*
 	 * if the page was an object page (and thus "TABLED"), remove it

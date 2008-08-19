@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.i386,v 1.41 2004/11/19 06:41:13 miod Exp $
+#	$OpenBSD: Makefile.i386,v 1.44 2006/07/27 05:58:11 miod Exp $
 
 # Makefile for OpenBSD
 #
@@ -36,7 +36,8 @@ I386=	$S/arch/i386
 INCLUDES=	-nostdinc -I. -I$S/arch -I$S
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -Di386
 CDIAGFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
-		-Wno-uninitialized -Wno-format -Wno-main
+		-Wno-uninitialized -Wno-format -Wno-main \
+		-Wstack-larger-than-2047
 
 .if !${IDENT:M-DI386_CPU}
 CMACHFLAGS=	-march=i486
@@ -51,7 +52,7 @@ CMACHFLAGS+=	-fno-builtin-printf -fno-builtin-log
 COPTS?=		-O2
 CFLAGS=		${DEBUG} ${CDIAGFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
 AFLAGS=		-x assembler-with-cpp -traditional-cpp -D_LOCORE
-LINKFLAGS=	-Ttext 0xD0100120 -e start -N
+LINKFLAGS=	-Ttext 0xD0200120 -e start -N
 STRIPFLAGS=	-g -X -x
 
 HOSTCC= ${CC}
@@ -113,8 +114,9 @@ DEBUG?=
 .if ${DEBUG} == "-g"
 LINKFLAGS+=	-X
 SYSTEM_LD_TAIL+=; \
-		echo cp $@ $@.gdb; rm -f $@.gdb; cp $@ $@.gdb; \
-		echo ${STRIP} ${STRIPFLAGS} $@; ${STRIP} ${STRIPFLAGS} $@
+		echo mv $@ $@.gdb; rm -f $@.gdb; mv $@ $@.gdb; \
+		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb; \
+		${STRIP} ${STRIPFLAGS} -o $@ $@.gdb
 .else
 LINKFLAGS+=	-S -x
 .endif

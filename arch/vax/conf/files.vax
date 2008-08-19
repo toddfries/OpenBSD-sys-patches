@@ -1,4 +1,4 @@
-#	$OpenBSD: files.vax,v 1.33 2006/01/17 20:26:16 miod Exp $
+#	$OpenBSD: files.vax,v 1.40 2006/08/27 16:55:38 miod Exp $
 #	$NetBSD: files.vax,v 1.60 1999/08/27 20:04:32 ragge Exp $
 #
 # new style config file for vax architecture
@@ -55,11 +55,17 @@ device	ibus {}
 attach	ibus at mainbus
 file	arch/vax/vax/ibus.c			ibus
 
+device	vxtbus {}
+attach	vxtbus at mainbus
+file	arch/vax/vxt/vxtbus.c			vxtbus
+
 device	ze: sgec, ether, ifnet
 attach	ze at ibus with ze_ibus
 file	arch/vax/if/if_ze.c			ze_ibus
 attach	ze at vsbus with ze_vsbus
 file	arch/vax/vsa/if_ze_vsbus.c		ze_vsbus
+attach	ze at vxtbus with ze_vxtbus
+file	arch/vax/vxt/if_ze_vxtbus.c		ze_vxtbus
 
 attach	le at ibus with le_ibus
 file	arch/vax/if/if_le.c			le_ibus
@@ -113,6 +119,11 @@ file	arch/vax/uba/ts.c			ts needs-flag
 attach	dz at vsbus with dz_vsbus
 file	arch/vax/vsa/dz_ibus.c			dz_vsbus
 
+# VXT serial
+device	qsc {line = -1}: tty
+attach	qsc at vxtbus
+file	arch/vax/vxt/qsc.c			qsc		needs-flag
+
 # RD-type disks at VS2000's onboard MFM-controller
 device	hdc {drive = -1}
 attach	hdc at vsbus
@@ -132,7 +143,9 @@ major	{ry = 24}
 include	"arch/vax/dec/files.dec"
 
 # wscons files.
+include "dev/rasops/files.rasops"
 include	"dev/wscons/files.wscons"
+include	"dev/wsfont/files.wsfont"
 
 # RAM Disk for install floppy
 major	{rd = 23}
@@ -155,22 +168,38 @@ file	arch/vax/vsa/ncr.c			ncr needs-flag
 attach	le at vsbus with le_vsbus
 file	arch/vax/vsa/if_le_vsbus.c		le_vsbus
 
-# Monochrome framebuffer on VS3100.
-device	smg: wsemuldisplaydev
+# Monochrome (on-board) framebuffer on VS3100
+device	smg: wsemuldisplaydev, rasops1
 attach	smg at vsbus
 file	arch/vax/vsa/smg.c			smg needs-flag
 
+# GPX framebuffer on VS3100
+device	gpx: wsemuldisplaydev, rasops8
+attach	gpx at vsbus
+file	arch/vax/vsa/gpx.c			gpx needs-flag
+
+# LCG framebuffer on KA46/KA48
+device	lcg: wsemuldisplaydev, rasops8
+attach	lcg at vsbus
+file	arch/vax/vsa/lcg.c			lcg needs-flag
+
+# LCSPX framebuffer on KA49
+device	lcspx: wsemuldisplaydev, rasops8
+attach	lcspx at vsbus with lcspx_vsbus
+attach	lcspx at vxtbus with lcspx_vxtbus
+file	arch/vax/vsa/lcspx.c			lcspx needs-flag
+
 device	lkkbd: wskbddev 
 attach	lkkbd at dz with dzkbd
+attach	lkkbd at qsc with qsckbd
 file	arch/vax/dec/dzkbd.c			dzkbd needs-flag
+file	arch/vax/vxt/qsckbd.c			qsckbd needs-flag
 
 device	lkms: wsmousedev
 attach	lkms at dz with dzms
+attach	lkms at qsc with qscms
 file	arch/vax/dec/dzms.c			dzms needs-flag
-
-#device	lkc: qfont
-#attach	lkc at dz
-#file	arch/vax/vsa/lkc.c			lkc needs-flag
+file	arch/vax/vxt/qscms.c			qscms needs-flag
 
 # These devices aren't tested (or even compiled!)
 # They are just included here to make some files happy ;)
@@ -307,9 +336,13 @@ device	dh # XXX?
 attach	dh at uba
 file	arch/vax/uba/dh.c			dh needs-flag
 
+# Blinkenlichten
+device	led
+attach	led at mainbus
+file	arch/vax/vax/led.c			led needs-flag
+
 # These are general files needed for compilation.
 file	dev/cninit.c
-file	dev/clock_subr.c	vax8200|vax410|vax43|vax630|vax660|vax670|vax680|vax46|vax48|vax49|vax53
 file	arch/vax/vax/locore.c
 file	arch/vax/vax/mem.c
 file	arch/vax/vax/clock.c
@@ -331,6 +364,7 @@ file	arch/vax/vax/ka650.c			vax650
 file	arch/vax/vax/ka660.c			vax660
 file	arch/vax/vax/ka670.c			vax670
 file	arch/vax/vax/ka680.c			vax680
+file	arch/vax/vax/vxt.c			vxt
 file	arch/vax/vax/scb.c
 file	arch/vax/vax/conf.c
 file	arch/vax/vax/urem.s
@@ -351,6 +385,7 @@ file	arch/vax/vax/db_machdep.c		ddb
 file	arch/vax/vax/db_disasm.c		ddb
 file	arch/vax/vax/opcodes.c
 file	arch/vax/uba/uba_dma.c			uba
+file	arch/vax/vax/wscons_machdep.c		wsdisplay | wskbd
 
 # builtin NCR53C95 SCSI Controller on VAXstation 4000 VLC/60/9x
 device	asc: scsi, ncr53c9x

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.17 2006/01/12 22:39:20 weingart Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.20 2006/06/10 17:50:30 gwk Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -114,7 +114,7 @@ int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
 
 #ifdef MULTIPROCESSOR
-int mp_cpu_start(struct cpu_info *); 
+int mp_cpu_start(struct cpu_info *);
 void mp_cpu_start_cleanup(struct cpu_info *);
 struct cpu_functions mp_cpu_funcs =
     { mp_cpu_start, NULL, mp_cpu_start_cleanup };
@@ -171,10 +171,7 @@ struct cfdriver cpu_cd = {
 };
 
 int
-cpu_match(parent, matchv, aux)
-    struct device *parent;
-    void *matchv;
-    void *aux;
+cpu_match(struct device *parent, void *matchv, void *aux)
 {
   	struct cfdata *match = (struct cfdata *)matchv;
 	struct cpu_attach_args *caa = (struct cpu_attach_args *)aux;
@@ -185,9 +182,7 @@ cpu_match(parent, matchv, aux)
 }
 
 void
-cpu_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+cpu_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct cpu_info *ci = (struct cpu_info *)self;
 	struct cpu_attach_args *caa = (struct cpu_attach_args *)aux;
@@ -253,8 +248,7 @@ cpu_attach(parent, self, aux)
 	pcb->pcb_tss.tss_esp = kstack + USPACE - 16 -
 	    sizeof (struct trapframe);
 	pcb->pcb_pmap = pmap_kernel();
-	pcb->pcb_cr3 = vtophys((vaddr_t)pcb->pcb_pmap->pm_pdir);
-	/* pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdir - KERNBASE; XXX ??? */
+	pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdirpa;
 
 	cpu_default_ldt(ci);	/* Use the `global' ldt until one alloc'd */
 #endif
@@ -329,8 +323,7 @@ cpu_attach(parent, self, aux)
  */
 
 void
-cpu_init(ci)
-	struct cpu_info *ci;
+cpu_init(struct cpu_info *ci)
 {
 	/* configure the CPU if needed */
 	if (ci->cpu_setup != NULL)
@@ -405,8 +398,7 @@ cpu_init_idle_pcbs()
 }
 
 void
-cpu_boot_secondary (ci)
-	struct cpu_info *ci;
+cpu_boot_secondary(struct cpu_info *ci)
 {
 	struct pcb *pcb;
 	int i;
@@ -417,7 +409,7 @@ cpu_boot_secondary (ci)
 		printf("%s: starting", ci->ci_dev.dv_xname);
 
 	/* XXX move elsewhere, not per CPU. */
-	mp_pdirpa = vtophys((vaddr_t)kpm->pm_pdir);
+	mp_pdirpa = kpm->pm_pdirpa;
 
 	pcb = ci->ci_idle_pcb;
 

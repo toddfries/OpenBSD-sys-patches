@@ -1,4 +1,4 @@
-/*      $OpenBSD: kern_watchdog.c,v 1.2 2005/11/28 00:14:29 jsg Exp $        */
+/*      $OpenBSD: kern_watchdog.c,v 1.5 2006/07/12 21:31:23 mk Exp $        */
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.
@@ -29,30 +29,24 @@
 #include <sys/sysctl.h>
 #include <sys/time.h>
 
-void	wdog_init(void);
 void	wdog_tickle(void *arg);
 void	wdog_shutdown(void *arg);
 int	(*wdog_ctl_cb)(void *, int) = NULL;
 void	*wdog_ctl_cb_arg = NULL;
 int	wdog_period = 0;
 int	wdog_auto = 1;
-struct timeout	wdog_timeout;
-
-void
-wdog_init(void)
-{
-	timeout_set(&wdog_timeout, wdog_tickle, NULL);
-	shutdownhook_establish(wdog_shutdown, NULL);
-}
+struct	timeout wdog_timeout;
 
 void
 wdog_register(void *cb_arg, int (*cb)(void *, int))
 {
 	if (wdog_ctl_cb != NULL)
 		return;
-	wdog_init();
+
 	wdog_ctl_cb = cb;
 	wdog_ctl_cb_arg = cb_arg;
+	timeout_set(&wdog_timeout, wdog_tickle, NULL);
+	shutdownhook_establish(wdog_shutdown, NULL);
 }
 
 void
@@ -71,6 +65,9 @@ wdog_shutdown(void *arg)
 		return;
 	timeout_del(&wdog_timeout);
 	(void) (*wdog_ctl_cb)(wdog_ctl_cb_arg, 0);
+	wdog_ctl_cb = NULL;
+	wdog_period = 0;
+	wdog_auto = 1;
 }
 
 int

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.165 2006/02/14 18:11:00 miod Exp $
+#	$OpenBSD: GENERIC,v 1.181 2006/08/20 12:29:20 martin Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -32,9 +32,7 @@ option		COMPAT_OSF1	# OSF/1 binary compatibility
 option		COMPAT_NETBSD	# NetBSD compatibility
 
 # Disklabel compatibility options
-option		DISKLABEL_ALL	# All of the ones mentioned below
-#option		DISKLABEL_ALPHA	# Redundant, just here for completeness
-#option		DISKLABEL_I386	# i386/arc style of partitioning
+option		DISKLABEL_I386	# i386/arc style of partitioning
 
 # Misc. options
 option		EISAVERBOSE		# recognize "unknown" EISA devices
@@ -83,6 +81,10 @@ uplcom* at uhub?			# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?			# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uslcom*	at uhub?			# Silicon Laboratories CP210x serial
+ucom*	at uslcom?
+uark*	at uhub?			# Arkmicro ARK3116 serial
+ucom*	at uark?
 uipaq*	at uhub?			# iPAQ serial adapter
 ucom*	at uipaq?
 uaudio* at uhub?			# USB Audio
@@ -98,6 +100,8 @@ ums*	at uhidev?			# USB mouse
 wsmouse* at ums? mux 0
 ukbd*	at uhidev?			# USB keyboard
 wskbd*	at ukbd? mux 1
+ucycom*	at uhidev?			# Cypress serial
+ucom*	at ucycom?
 uhid*	at uhidev?			# USB generic HID support
 aue*	at uhub?			# ADMtek AN986 Pegasus Ethernet
 #atu*	at uhub?			# Atmel AT76c50x based 802.11b
@@ -118,7 +122,8 @@ udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
 #ubt*	at uhub?			# USB Bluetooth
 ugen*	at uhub?			# USB Generic driver
-ural*	at uhub?			# Ralink RT2500
+ural*	at uhub?			# Ralink RT2500USB
+rum*	at uhub?			# Ralink RT2501USB/RT2601USB
 
 # EV6 Tsunami Core Logic
 tsc*	at	mainbus0
@@ -167,7 +172,6 @@ pceb*	at pci?				# Intel PCI-EISA bridge
 cy*	at pci?				# PCI cyclom card
 
 # PCI SCSI devices
-
 ahc*	at pci?				# Adaptec 2940 SCSI controllers
 scsibus* at ahc?
 isp*	at pci?				# Qlogic ISP [12]0x0 SCSI/FibreChannel
@@ -176,18 +180,20 @@ siop*	at pci?				# NCR 53c8xx SCSI
 scsibus* at siop?
 pcscp*	at pci?				# AMD 53c974 PCscsi-PCI SCSI
 scsibus* at pcscp?
+twe*	at pci?				# 3ware Escalade RAID controllers
+scsibus* at twe?
+mpi*	at pci?				# LSI Logic Message Passing Interface
+scsibus* at mpi?
 
-#UNTESTED: the following three drivers are untested.
+#UNTESTED: the following drivers are untested.
 adw*	at pci?				# AdvanSys ULTRA WIDE SCSI
 scsibus* at adw?
+ciss*	at pci?				# Compaq Smart ARRAY [56]* RAID controllers
+scsibus* at ciss?
 dpt*	at pci?				# DPT SmartCache/SmartRAID PCI
 scsibus* at dpt?
 gdt*	at pci?				# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
-twe*	at pci?				# 3ware Escalade RAID controllers
-scsibus* at twe?
-
-#BROKEN: adv and twe have 64-bit problems
 #adv*	at pci?				# AdvanSys 1200A/B and ULTRA SCSI
 #scsibus* at adv?
 #ami*	at pci?				# AMI MegaRAID controllers
@@ -206,28 +212,37 @@ xl*	at pci?				# 3COM 3c9xx
 txp*	at pci?				# 3COM 3CR990
 fpa*	at pci?				# DEC DEFPA FDDI cards
 bge*	at pci?				# Broadcom BCM570x (aka Tigon3)
+vge*	at pci?				# VIA VT612x
 re*	at pci?				# Realtek 8169/8169S/8110S
 stge*	at pci?				# Sundance TC9021 GigE
+lge*	at pci?				# Level1 LXT1001 GigE
+hme*	at pci?				# Sun Happy Meal
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
 vr*	at pci?				# VIA Rhine ethernet
 em*	at pci?				# Intel Pro/1000 ethernet
 #ixgb*	at pci?				# Intel Pro/10Gb ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
+mtd*	at pci?				# Myson MTD800/803/891
 epic*	at pci?				# SMC EPIC/100 ethernet
 skc*	at pci?				# SysKonnect GEnesis 984x
 sk*	at skc?				#  each port of above
+mskc*	at pci?				# Marvell Yukon-2
+msk*	at mskc?			#  each port of above
+tl*	at pci?				# Compaq Thunderlan ethernet
+ste*	at pci?				# Sundance ST201 ethernet
 ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 ath*	at pci?				# Atheros AR5k (802.11)
-
-#UNTESTED:  the following section of drivers is untested on alpha.
-en*	at pci?				# ENI PCI ATM (untested)
-tl*	at pci?				# Compaq Thunderlan ethernet
-le*	at pci?				# PCI LANCE Ethernet (untested)
-wb*	at pci?				# Winbond W89C840F ethernet
+musycc*	at pci?				# Conexant HDLC controller
+art*	at musycc?			# Accoom Artery E1/T1 cards
+xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 sf*	at pci?				# Adaptec AIC-6915 ethernet
-ste*	at pci?				# Sundance ST201 ethernet
+
+#UNTESTED:  the following drivers are untested.
+en*	at pci?				# ENI PCI ATM (untested)
+wb*	at pci?				# Winbond W89C840F ethernet
 an*	at pci?				# Cisco/Aironet 802.11DS
+##
 
 vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics
@@ -242,6 +257,7 @@ lxtphy*	at mii?				# Level1 LXT970 PHYs
 nsphy*	at mii?				# NS and compatible PHYs
 nsphyter* at mii?			# NS and compatible PHYs
 qsphy*	at mii?				# Quality Semi QS6612 PHYs
+luphy*	at mii?				# Lucent LU6612 PHY
 sqphy*	at mii?				# Seeq 8x220 PHYs
 rlphy*	at mii?				# RealTek 8139 internal PHYs
 mtdphy*	at mii?				# Myson MTD972 PHYs
@@ -254,6 +270,7 @@ brgphy*	at mii?				# Broadcom Gigabit PHYs
 xmphy*	at mii?				# XaQti XMAC-II PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
+ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
 ukphy*	at mii?				# "unknown" PHYs
 
 # sensors
@@ -356,9 +373,11 @@ sv*	at pci?				# S3 SonicVibes (S3 617)
 cmpci*	at pci?				# C-Media CMI8338/8738
 fms*	at pci?				# Forte Media FM801
 auvia*	at pci?				# VIA VT82C686A
+##
 
 # OPL[23] FM synthesizers
 opl*	at eso?
+opl*	at cmpci?
 
 # MIDI support
 midi*	at opl?				# OPL FM synth
@@ -390,7 +409,10 @@ wsmouse*	at	pmsi? mux 0
 
 # crypto support
 hifn*	at pci?				# Hi/fn 7751 crypto card
-#ubsec*	at pci?				# Bluesteel Networks 5xxx crypto card
+lofn*	at pci?				# Hi/fn 6500 crypto card
+nofn*	at pci?				# Hi/fn 7814/7851/7854 crypto card
+ubsec*	at pci?				# Bluesteel Networks 5xxx crypto card
+safe*	at pci?				# SafeNet SafeXcel 1141/1741
 #ises*	at pci?				# Pijnenburg PCC-ISES
 
 #pseudo-device	raid		4	# RAIDframe disk driver

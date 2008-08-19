@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.233 2005/11/04 08:24:15 mcbride Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.236 2006/07/06 13:25:40 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -110,7 +110,7 @@ enum	{ PF_LIMIT_STATES, PF_LIMIT_SRC_NODES, PF_LIMIT_FRAGS,
 enum	{ PF_POOL_NONE, PF_POOL_BITMASK, PF_POOL_RANDOM,
 	  PF_POOL_SRCHASH, PF_POOL_ROUNDROBIN };
 enum	{ PF_ADDR_ADDRMASK, PF_ADDR_NOROUTE, PF_ADDR_DYNIFTL,
-	  PF_ADDR_TABLE, PF_ADDR_RTLABEL };
+	  PF_ADDR_TABLE, PF_ADDR_RTLABEL, PF_ADDR_URPFFAILED };
 #define PF_POOL_TYPEMASK	0x0f
 #define PF_POOL_STICKYADDR	0x20
 #define	PF_WSCALE_FLAG		0x80
@@ -315,22 +315,25 @@ struct pfi_dynaddr {
 #endif /* PF_INET6_ONLY */
 #endif /* PF_INET_INET6 */
 
-#define	PF_MISMATCHAW(aw, x, af, neg)				\
-	(							\
-		(((aw)->type == PF_ADDR_NOROUTE &&		\
-		    pf_routable((x), (af))) ||			\
-		((aw)->type == PF_ADDR_RTLABEL &&		\
-		    !pf_rtlabel_match((x), (af), (aw))) ||	\
-		((aw)->type == PF_ADDR_TABLE &&			\
-		    !pfr_match_addr((aw)->p.tbl, (x), (af))) ||	\
-		((aw)->type == PF_ADDR_DYNIFTL &&		\
-		    !pfi_match_addr((aw)->p.dyn, (x), (af))) || \
-		((aw)->type == PF_ADDR_ADDRMASK &&		\
-		    !PF_AZERO(&(aw)->v.a.mask, (af)) &&		\
-		    !PF_MATCHA(0, &(aw)->v.a.addr,		\
-		    &(aw)->v.a.mask, (x), (af)))) !=		\
-		(neg)						\
+#define	PF_MISMATCHAW(aw, x, af, neg, ifp)				\
+	(								\
+		(((aw)->type == PF_ADDR_NOROUTE &&			\
+		    pf_routable((x), (af), NULL)) ||			\
+		(((aw)->type == PF_ADDR_URPFFAILED && (ifp) != NULL &&	\
+		    pf_routable((x), (af), (ifp))) ||			\
+		((aw)->type == PF_ADDR_RTLABEL &&			\
+		    !pf_rtlabel_match((x), (af), (aw))) ||		\
+		((aw)->type == PF_ADDR_TABLE &&				\
+		    !pfr_match_addr((aw)->p.tbl, (x), (af))) ||		\
+		((aw)->type == PF_ADDR_DYNIFTL &&			\
+		    !pfi_match_addr((aw)->p.dyn, (x), (af))) || 	\
+		((aw)->type == PF_ADDR_ADDRMASK &&			\
+		    !PF_AZERO(&(aw)->v.a.mask, (af)) &&			\
+		    !PF_MATCHA(0, &(aw)->v.a.addr,			\
+		    &(aw)->v.a.mask, (x), (af))))) !=			\
+		(neg)							\
 	)
+
 
 struct pf_rule_uid {
 	uid_t		 uid[2];
@@ -527,6 +530,7 @@ struct pf_rule {
 
 	pf_osfp_t		 os_fingerprint;
 
+	int			 rtableid;
 	u_int32_t		 timeout[PFTM_MAX];
 	u_int32_t		 states;
 	u_int32_t		 max_states;
@@ -608,6 +612,8 @@ struct pf_rule {
 #define PFRULE_IFBOUND		0x00010000	/* if-bound */
 
 #define PFSTATE_HIWAT		10000	/* default state table size */
+#define PFSTATE_ADAPT_START	6000	/* default adaptive timeout start */
+#define PFSTATE_ADAPT_END	12000	/* default adaptive timeout end */
 
 
 struct pf_threshold {
@@ -1148,6 +1154,7 @@ struct pf_altq {
 
 struct pf_mtag {
 	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
+	u_int		 rtableid;	/* alternate routing table id */
 	u_int32_t	 qid;		/* queue id */
 	u_int16_t	 tag;		/* tag id */
 	u_int8_t	 flags;
@@ -1513,7 +1520,7 @@ int	pf_normalize_tcp_stateful(struct mbuf *, int, struct pf_pdesc *,
 u_int32_t
 	pf_state_expires(const struct pf_state *);
 void	pf_purge_expired_fragments(void);
-int	pf_routable(struct pf_addr *addr, sa_family_t af);
+int	pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *);
 int	pf_rtlabel_match(struct pf_addr *, sa_family_t, struct pf_addr_wrap *);
 int	pf_socket_lookup(int, struct pf_pdesc *);
 void	pfr_initialize(void);
@@ -1581,7 +1588,7 @@ u_int16_t	 pf_tagname2tag(char *);
 void		 pf_tag2tagname(u_int16_t, char *);
 void		 pf_tag_ref(u_int16_t);
 void		 pf_tag_unref(u_int16_t);
-int		 pf_tag_packet(struct mbuf *, struct pf_mtag *, int);
+int		 pf_tag_packet(struct mbuf *, struct pf_mtag *, int, int);
 u_int32_t	 pf_qname2qid(char *);
 void		 pf_qid2qname(u_int32_t, char *);
 void		 pf_qid_unref(u_int32_t);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_dc_pci.c,v 1.52 2005/11/06 19:25:21 brad Exp $	*/
+/*	$OpenBSD: if_dc_pci.c,v 1.55 2006/07/20 02:49:18 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -43,6 +43,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
+#include <sys/timeout.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
@@ -91,6 +92,8 @@ struct dc_type dc_devs[] = {
 	{ PCI_VENDOR_DAVICOM, PCI_PRODUCT_DAVICOM_DM9009 },
 	{ PCI_VENDOR_DAVICOM, PCI_PRODUCT_DAVICOM_DM9100 },
 	{ PCI_VENDOR_DAVICOM, PCI_PRODUCT_DAVICOM_DM9102 },
+	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_ADM9511 },
+	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_ADM9513 },
 	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_AL981 },
 	{ PCI_VENDOR_ADMTEK, PCI_PRODUCT_ADMTEK_AN983 },
 	{ PCI_VENDOR_ASIX, PCI_PRODUCT_ASIX_AX88140A },
@@ -320,7 +323,9 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_pmode = DC_PMODE_MII;
 			dc_read_srom(sc, sc->dc_romwidth);
 		}
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADMTEK_AN983 ||
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADMTEK_ADM9511 ||
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADMTEK_ADM9513 ||
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADMTEK_AN983 ||
 		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_3COM_3CSHO100BTX ||
 		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MICROSOFT_MN130) {
 			found = 1;

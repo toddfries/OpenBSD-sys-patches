@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upl.c,v 1.22 2006/01/29 03:22:52 brad Exp $ */
+/*	$OpenBSD: if_upl.c,v 1.25 2006/06/23 06:27:11 miod Exp $ */
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -63,16 +63,11 @@
 #include <sys/socket.h>
 
 #include <sys/device.h>
-#if NRND > 0
-#include <sys/rnd.h>
-#endif
 
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/if_dl.h>
 #include <net/netisr.h>
-
-#define BPF_MTAP(ifp, m) bpf_mtap((ifp)->if_bpf, (m))
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -159,10 +154,6 @@ struct upl_softc {
 	USBBASEDEVICE		sc_dev;
 
 	struct ifnet		sc_if;
-#if NRND > 0
-	rndsource_element_t	sc_rnd_source;
-#endif
-
 	usb_callout_t		sc_stat_ch;
 
 	usbd_device_handle	sc_udev;
@@ -335,11 +326,6 @@ USB_ATTACH(upl)
 #if defined(__NetBSD__) && NBPFILTER > 0
 	bpfattach(ifp, DLT_RAW, 0);
 #endif
-#if NRND > 0
-	rnd_attach_source(&sc->sc_rnd_source, USBDEVNAME(sc->sc_dev),
-	    RND_TYPE_NET, 0);
-#endif
-
 	sc->sc_attached = 1;
 	splx(s);
 
@@ -367,10 +353,6 @@ USB_DETACH(upl)
 
 	if (ifp->if_flags & IFF_RUNNING)
 		upl_stop(sc);
-
-#if NRND > 0
-	rnd_detach_source(&sc->sc_rnd_source);
-#endif
 
 	if_detach(ifp);
 
@@ -400,7 +382,6 @@ upl_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -574,7 +555,7 @@ upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	 * address or the interface is in promiscuous mode.
 	 */
 	if (ifp->if_bpf) {
-		BPF_MTAP(ifp, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 	}
 #endif
 
@@ -721,7 +702,7 @@ upl_start(struct ifnet *ifp)
 	 * to him.
 	 */
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m_head);
+		bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 	ifp->if_flags |= IFF_OACTIVE;

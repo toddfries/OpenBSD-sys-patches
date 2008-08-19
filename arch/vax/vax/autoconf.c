@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.20 2005/12/27 18:31:11 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.23 2006/07/23 19:23:09 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.45 1999/10/23 14:56:05 ragge Exp $	*/
 
 /*
@@ -52,8 +52,7 @@
 #include <machine/clock.h>
 #include <machine/rpb.h>
 
-#include "sd.h"
-#include "cd.h"
+#include "led.h"
 
 #include <vax/vax/gencons.h>
 
@@ -67,9 +66,6 @@ struct cpu_dep *dep_call;
 extern struct device *bootdv;
 
 int	mastercpu;	/* chief of the system */
-
-
-#define MAINBUS	0
 
 void
 cpu_configure()
@@ -99,8 +95,14 @@ mainbus_print(aux, hej)
 	void *aux;
 	const char *hej;
 {
-	if (hej)
+	struct mainbus_attach_args *maa = aux;
+
+	if (maa->maa_bustype == VAX_LEDS)
+		return (QUIET);
+
+	if (hej) {
 		printf("nothing at %s", hej);
+	}
 	return (UNCONF);
 }
 
@@ -122,22 +124,28 @@ mainbus_attach(parent, self, hej)
 	struct	device	*parent, *self;
 	void	*hej;
 {
+	struct mainbus_attach_args maa;
+
 	printf("\n");
 
-	/*
-	 * Hopefully there a master bus?
-	 * Maybe should have this as master instead of mainbus.
-	 */
-	config_found(self, NULL, mainbus_print);
+	maa.maa_bustype = vax_bustype;
+	config_found(self, &maa, mainbus_print);
 
 #if VAX53
-	/* Kludge: To have two master buses */
-	if (vax_boardtype == VAX_BTYP_1303)
-		config_found(self, (void *)1, mainbus_print);
+	/* These models have both vsbus and ibus */
+	if (vax_boardtype == VAX_BTYP_1303) {
+		maa.maa_bustype = VAX_VSBUS;
+		config_found(self, &maa, mainbus_print);
+	}
 #endif
 
 	if (dep_call->cpu_subconf)
 		(*dep_call->cpu_subconf)(self);
+
+#if NLED > 0
+	maa.maa_bustype = VAX_LEDS;
+	config_found(self, &maa, mainbus_print);
+#endif
 
 #if 1 /* boot blocks too old */
         if (rpb.rpb_base == (void *)-1)

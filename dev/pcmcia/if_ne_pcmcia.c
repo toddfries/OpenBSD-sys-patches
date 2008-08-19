@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_pcmcia.c,v 1.86 2005/12/09 06:23:49 uwe Exp $	*/
+/*	$OpenBSD: if_ne_pcmcia.c,v 1.88 2006/07/09 19:37:00 miod Exp $	*/
 /*	$NetBSD: if_ne_pcmcia.c,v 1.17 1998/08/15 19:00:04 thorpej Exp $	*/
 
 /*
@@ -323,7 +323,7 @@ const struct ne2000dev {
      *
      * While the 1st and the 2nd types should use the "D-Link DE-650" entry,
      * the 3rd and the 4th types should use the "Linksys EtherCard" entry.
-     * Therefore, this enty must be below the LINKSYS_ECARD_1.  --itohy
+     * Therefore, this entry must be below the LINKSYS_ECARD_1.  --itohy
      */
     { PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
       PCMCIA_CIS_DLINK_DE650,
@@ -413,6 +413,10 @@ const struct ne2000dev {
     { PCMCIA_VENDOR_SOCKET, PCMCIA_PRODUCT_SOCKET_LP_ETHER,
       PCMCIA_CIS_SOCKET_LP_ETHER,
       0, -1, { 0x00, 0xc0, 0x1b } },
+
+    { PCMCIA_VENDOR_SOCKET, PCMCIA_PRODUCT_SOCKET_ETHER_CF_10_100,
+      PCMCIA_CIS_SOCKET_ETHER_CF_10_100,
+      0, -1, { 0x00, 0x12, 0x0e } },
 
     { PCMCIA_VENDOR_XIRCOM, PCMCIA_PRODUCT_XIRCOM_CFE_10,
       PCMCIA_CIS_XIRCOM_CFE_10,

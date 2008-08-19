@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_boot.c,v 1.16 2004/11/04 13:14:29 pedro Exp $ */
+/*	$OpenBSD: nfs_boot.c,v 1.18 2006/06/17 14:14:12 henning Exp $ */
 /*	$NetBSD: nfs_boot.c,v 1.26 1996/05/07 02:51:25 thorpej Exp $	*/
 
 /*
@@ -152,7 +152,8 @@ nfs_boot_init(nd, procp)
 	if (ifp == NULL)
 		panic("nfs_boot: no suitable interface");
 	bcopy(ifp->if_xname, ireq.ifr_name, IFNAMSIZ);
-	printf("nfs_boot: using network interface '%s'\n", ireq.ifr_name);
+	printf("nfs_boot: using interface %s, with revarp & bootparams\n",
+	    ireq.ifr_name);
 
 	/*
 	 * Bring up the interface.
@@ -245,7 +246,7 @@ nfs_boot_init(nd, procp)
 		printf("nfs_boot: gateway=%s\n", inet_ntoa(gw_ip));
 		/* add, dest, gw, mask, flags, 0 */
 		error = rtrequest(RTM_ADD, &dst, (struct sockaddr *)&gw,
-		    &mask, (RTF_UP | RTF_GATEWAY | RTF_STATIC), NULL);
+		    &mask, (RTF_UP | RTF_GATEWAY | RTF_STATIC), NULL, 0);
 		if (error)
 			printf("nfs_boot: add route, error=%d\n", error);
 	}

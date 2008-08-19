@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_usrreq.c,v 1.9 2004/02/06 22:19:21 tedu Exp $	*/
+/*	$OpenBSD: db_usrreq.c,v 1.12 2006/03/15 21:49:40 miod Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff.  All rights reserved.
@@ -36,14 +36,8 @@
 int	db_log = 1;
 
 int
-ddb_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int	*name;
-	u_int	namelen;
-	void	*oldp;
-	size_t	*oldlenp;
-	void	*newp;
-	size_t	newlen;
-	struct proc *p;
+ddb_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
 {
 	int error, ctlval;
 
@@ -62,27 +56,35 @@ ddb_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case DBCTL_MAXLINE:
 		return sysctl_int(oldp, oldlenp, newp, newlen, &db_max_line);
 	case DBCTL_PANIC:
-		ctlval = db_panic;
-		if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &ctlval)) ||
-		    newp == NULL)
-			return (error);
-		if (ctlval != 1 && ctlval != 0)
-			return (EINVAL);
-		if (ctlval > db_panic && securelevel > 1)
-			return (EPERM);
-		db_panic = ctlval;
-		return (0);
+		if (securelevel > 0)
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &db_panic));
+		else {
+			ctlval = db_panic;
+			if ((error = sysctl_int(oldp, oldlenp, newp, newlen,
+			    &ctlval)) || newp == NULL)
+				return (error);
+			if (ctlval != 1 && ctlval != 0)
+				return (EINVAL);
+			db_panic = ctlval;
+			return (0);
+		}
+		break;
 	case DBCTL_CONSOLE:
-		ctlval = db_console;
-		if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &ctlval)) ||
-		    newp == NULL)
-			return (error);
-		if (ctlval != 1 && ctlval != 0)
-			return (EINVAL);
-		if (ctlval > db_console && securelevel > 1)
-			return (EPERM);
-		db_console = ctlval;
-		return (0);
+		if (securelevel > 0)
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &db_console));
+		else {
+			ctlval = db_console;
+			if ((error = sysctl_int(oldp, oldlenp, newp, newlen,
+			    &ctlval)) || newp == NULL)
+				return (error);
+			if (ctlval != 1 && ctlval != 0)
+				return (EINVAL);
+			db_console = ctlval;
+			return (0);
+		}
+		break;
 	case DBCTL_LOG:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &db_log));
 	default:

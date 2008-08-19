@@ -1,4 +1,4 @@
-/* $OpenBSD: if_bce.c,v 1.11 2006/02/24 00:57:49 brad Exp $ */
+/* $OpenBSD: if_bce.c,v 1.13 2006/05/28 00:04:24 jason Exp $ */
 /* $NetBSD: if_bce.c,v 1.3 2003/09/29 01:53:02 mrg Exp $	 */
 
 /*
@@ -522,7 +522,7 @@ bce_ioctl(ifp, cmd, data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->bce_mii.mii_media, cmd);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -654,7 +654,7 @@ bce_start(ifp)
 #if NBPFILTER > 0
 		/* Pass the packet to any BPF listeners. */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0);
+			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif				/* NBPFILTER > 0 */
 	}
 	if (txsfree == 0) {
@@ -853,7 +853,7 @@ bce_rxintr(sc)
 		 * pass it up the stack if it's for us.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif				/* NBPFILTER > 0 */
 
 		/* Pass it on. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.61 2005/11/29 02:59:42 jolan Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.65 2006/08/21 21:36:53 mpf Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -198,7 +198,7 @@ arp_rtrequest(req, rt, info)
 			 * Case 1: This route should come from a route to iface.
 			 */
 			rt_setgate(rt, rt_key(rt),
-					(struct sockaddr *)&null_sdl);
+			    (struct sockaddr *)&null_sdl, 0);
 			gate = rt->rt_gateway;
 			SDL(gate)->sdl_type = rt->rt_ifp->if_type;
 			SDL(gate)->sdl_index = rt->rt_ifp->if_index;
@@ -464,7 +464,7 @@ arpintr()
 	int s, len;
 
 	while (arpintrq.ifq_head) {
-		s = splimp();
+		s = splnet();
 		IF_DEQUEUE(&arpintrq, m);
 		splx(s);
 		if (m == 0 || (m->m_flags & M_PKTHDR) == 0)
@@ -570,9 +570,19 @@ in_arpinput(m)
 		 * layer.  Note we still prefer a perfect match,
 		 * but allow this weaker match if necessary.
 		 */
-		if (m->m_pkthdr.rcvif->if_bridge != NULL &&
-		    m->m_pkthdr.rcvif->if_bridge == ia->ia_ifp->if_bridge)
-			bridge_ia = ia;
+		if (m->m_pkthdr.rcvif->if_bridge != NULL) {
+			if (m->m_pkthdr.rcvif->if_bridge ==
+			    ia->ia_ifp->if_bridge)
+				bridge_ia = ia;
+#if NCARP > 0
+			else if (ia->ia_ifp->if_carpdev != NULL &&
+			    m->m_pkthdr.rcvif->if_bridge ==
+			    ia->ia_ifp->if_carpdev->if_bridge &&
+			    carp_iamatch(ia, ea->arp_sha,
+			    &count, index))
+				bridge_ia = ia;
+#endif
+		}
 #endif
 	}
 
@@ -738,7 +748,7 @@ arptfree(la)
 		return;
 	}
 	rtrequest(RTM_DELETE, rt_key(rt), (struct sockaddr *)0, rt_mask(rt),
-	    0, (struct rtentry **)0);
+	    0, (struct rtentry **)0, 0);
 }
 
 /*
@@ -756,7 +766,7 @@ arplookup(addr, create, proxy)
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = addr;
 	sin.sin_other = proxy ? SIN_PROXY : 0;
-	rt = rtalloc1(sintosa(&sin), create);
+	rt = rtalloc1(sintosa(&sin), create, 0);
 	if (rt == 0)
 		return (0);
 	rt->rt_refcnt--;
@@ -771,7 +781,7 @@ arplookup(addr, create, proxy)
 				rtrequest(RTM_DELETE,
 				    (struct sockaddr *)rt_key(rt),
 				    rt->rt_gateway, rt_mask(rt), rt->rt_flags,
-				    0);
+				    0, 0);
 			}
 		}
 		return (0);
@@ -1077,7 +1087,7 @@ int
 db_show_arptab()
 {
 	struct radix_node_head *rnh;
-	rnh = rt_tables[AF_INET];
+	rnh = rt_gettable(AF_INET, 0);
 	db_printf("Route tree for AF_INET\n");
 	if (rnh == NULL) {
 		db_printf(" (not initialized)\n");

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsbus.c,v 1.15 2004/07/07 23:10:46 deraadt Exp $ */
+/*	$OpenBSD: vsbus.c,v 1.17 2006/07/20 19:08:15 miod Exp $ */
 /*	$NetBSD: vsbus.c,v 1.29 2000/06/29 07:14:37 mrg Exp $ */
 /*
  * Copyright (c) 1996, 1999 Ludd, University of Lule}, Sweden.
@@ -106,6 +106,8 @@ struct  cfdriver vsbus_cd = {
 	    NULL, "vsbus", DV_DULL
 };
 
+int	oldvsbus;
+
 int
 vsbus_print(aux, name)
 	void *aux;
@@ -124,12 +126,9 @@ vsbus_match(parent, cf, aux)
 	struct	cfdata	*cf;
 	void	*aux;
 {
-#if VAX53
-	/* Kludge: VAX53 is... special */
-	if (vax_boardtype == VAX_BTYP_1303 && (int)aux == 1)
-		return 1; /* Hack */
-#endif
-	if (vax_bustype == VAX_VSBUS)
+	struct mainbus_attach_args *maa = aux;
+
+	if (maa->maa_bustype == VAX_VSBUS)
 		return 1;
 	return 0;
 }
@@ -260,6 +259,14 @@ vsbus_search(parent, cfd, aux)
 		goto fail;
 	if (vec == 0)
 		goto fail;
+
+	/*
+	 * For proper splassert operation, we need to know if we are on
+	 * a vsbus system where its devices interrupt at level 0x14 instead
+	 * of 0x15.
+	 */
+	if (br == 0x14)
+		oldvsbus = 1;
 
 	va.va_br = br;
 	va.va_cvec = vec;

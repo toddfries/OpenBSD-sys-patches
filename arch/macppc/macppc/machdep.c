@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.83 2005/12/17 07:31:26 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.85 2006/06/30 16:14:30 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -169,7 +169,7 @@ void bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 
 /*
  * Extent maps to manage I/O. Allocate storage for 8 regions in each,
- * initially. Later devio_malloc_safe will indicate that it's save to
+ * initially. Later devio_malloc_safe will indicate that it's safe to
  * use malloc() to dynamically allocate region descriptors.
  */
 static long devio_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof (long)];
@@ -764,8 +764,8 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case CPU_ALLOWAPERTURE:
 #ifdef APERTURE
 		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp,
-			    allowaperture));
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &allowaperture));
 		else
 			return (sysctl_int(oldp, oldlenp, newp, newlen,
 			    &allowaperture));

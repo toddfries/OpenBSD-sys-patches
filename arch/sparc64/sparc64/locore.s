@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.54 2006/02/22 22:17:07 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.61 2006/08/27 21:19:02 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.137 2001/08/13 06:10:10 jdolecek Exp $	*/
 
 /*
@@ -56,13 +56,10 @@
  *	@(#)locore.s	8.4 (Berkeley) 12/10/93
  */
 
-#undef HORRID_III_HACK	/* define this to make a locore.s for usIII */
-#ifdef HORRID_III_HACK
-#define	NO_VCACHE		/* Map w/D$ disabled */
-#else	/* HORRID_III_HACK */
-#undef	NO_VCACHE		/* Map w/D$ disabled */
-#endif	/* HORRID_III_HACK */
+#define HORRID_III_HACK
+
 #undef	TRAPS_USE_IG		/* Use Interrupt Globals for all traps */
+#undef	NO_VCACHE		/* Map w/D$ disabled */
 #undef	DCACHE_BUG		/* Flush D$ around ASI_PHYS accesses */
 #undef	NO_TSB			/* Don't use TSB */
 
@@ -1622,8 +1619,8 @@ dmmu_write_fault:
 	stx	%g4, [%g6+0x48]	! debug -- what we tried to enter in TLB
 	stb	%g5, [%g6+0x8]	! debug
 #endif	/* DEBUG */
-	mov	0x010, %g1				! Secondary flush
-	mov	0x020, %g5				! Nucleus flush
+	mov	DEMAP_PAGE_SECONDARY, %g1		! Secondary flush
+	mov	DEMAP_PAGE_NUCLEUS, %g5			! Nucleus flush
 	stxa	%g0, [%g7] ASI_DMMU			! clear out the fault
 	membar	#Sync
 	sllx	%g3, (64-13), %g7			! Need to demap old entry first
@@ -1732,8 +1729,8 @@ data_miss:
 #if 0
 	/* This was a miss -- should be nothing to demap. */
 	sllx	%g3, (64-13), %g6			! Need to demap old entry first
-	mov	0x010, %g1				! Secondary flush
-	mov	0x020, %g5				! Nucleus flush
+	mov	DEMAP_PAGE_SECONDARY, %g1		! Secondary flush
+	mov	DEMAP_PAGE_NUCLEUS, %g5			! Nucleus flush
 	movrz	%g6, %g5, %g1				! Pick one
 	andn	%g3, 0xfff, %g6
 	or	%g6, %g1, %g6
@@ -2470,8 +2467,8 @@ instr_miss:
 #if 1
 	/* This was a miss -- should be nothing to demap. */
 	sllx	%g3, (64-13), %g6			! Need to demap old entry first
-	mov	0x010, %g1				! Secondary flush
-	mov	0x020, %g5				! Nucleus flush
+	mov	DEMAP_PAGE_SECONDARY, %g1		! Secondary flush
+	mov	DEMAP_PAGE_NUCLEUS, %g5			! Nucleus flush
 	movrz	%g6, %g5, %g1				! Pick one
 	andn	%g3, 0xfff, %g6
 	or	%g6, %g1, %g6
@@ -4097,15 +4094,22 @@ dostart:
 	sethi	%hi(_C_LABEL(nwindows)), %o1	! may as well tell everyone
 	st	%o0, [%o1 + %lo(_C_LABEL(nwindows))]
 
-#if 0 || defined(HORRID_III_HACK)
+#if defined(HORRID_III_HACK)
+	/*
+	 * Check for UltraSPARC III
+	 */
+	rdpr	%ver, %g1
+	srlx	%g1, 32, %g1
+	sll	%g1, 16, %g1
+	srl	%g1, 16, %g1
+	cmp	%g1, 0x0014
+	bl,pt	%icc, 1f
+	 nop
 	/*
 	 * Disable the DCACHE entirely for debug.
 	 */
 	ldxa	[%g0] ASI_MCCR, %o1
 	andn	%o1, MCCR_DCACHE_EN, %o1
-#ifdef HORRID_III_HACK
-	andn	%o1, MCCR_ICACHE_EN, %o1	! and Icache...
-#endif	/* HORRID_III_HACK */
 	stxa	%o1, [%g0] ASI_MCCR
 	membar	#Sync
 #endif	/* 0 */
@@ -4113,6 +4117,7 @@ dostart:
 	/*
 	 * Ready to run C code; finish bootstrap.
 	 */
+1:	
 	set	CTX_SECONDARY, %o1		! Store -1 in the context register
 	set	0x2000,%o0			! fixed: 8192 contexts
 	stxa	%g0, [%o1] ASI_DMMU
@@ -4160,9 +4165,6 @@ _C_LABEL(cpu_initialize):
 	!! Turn off D$ in LSU
 	ldxa	[%g0] ASI_LSU_CONTROL_REGISTER, %g1
 	bclr	MCCR_DCACHE_EN, %g1
-#ifdef HORRID_III_HACK
-	andn	%o1, MCCR_ICACHE_EN, %o1	! and Icache...
-#endif	/* HORRID_III_HACK */
 	stxa	%g1, [%g0] ASI_LSU_CONTROL_REGISTER
 	membar	#Sync
 #endif	/* NO_VCACHE */
@@ -4356,7 +4358,7 @@ _C_LABEL(cpu_initialize):
 	!!
 	!! Demap entire context 0 kernel
 	!!
-	or	%l0, 0x020, %o0			! Context = Nucleus
+	or	%l0, DEMAP_PAGE_NUCLEUS, %o0	! Context = Nucleus
 	add	%l1, %l7, %o1			! Demap all of kernel text seg
 	andn	%o1, %l7, %o1			! rounded up to 4MB.
 	set	0x2000, %o2			! 8K page size
@@ -4368,7 +4370,7 @@ _C_LABEL(cpu_initialize):
 	bleu,pt	%xcc, 0b			! Next page
 	 add	%o0, %o2, %o0
 
-	or	%l3, 0x020, %o0			! Context = Nucleus
+	or	%l3, DEMAP_PAGE_NUCLEUS, %o0	! Context = Nucleus
 	add	%l4, %l7, %o1			! Demap all of kernel data seg
 	andn	%o1, %l7, %o1			! rounded up to 4MB.
 0:
@@ -4418,7 +4420,7 @@ _C_LABEL(cpu_initialize):
 	stxa	%o1, [%o0] ASI_DMMU
 	membar	#Sync				! This probably should be a flush, but it works
 	flush	%l0
-	mov	0x050, %o4
+	mov	DEMAP_CTX_SECONDARY, %o4
 	stxa	%o4, [%o4] ASI_DMMU_DEMAP
 	membar	#Sync
 	stxa	%o4, [%o4] ASI_IMMU_DEMAP
@@ -4680,6 +4682,25 @@ _C_LABEL(tlb_flush_pte):
 	.text
 2:
 #endif	/* DEBUG */
+#ifdef HORRID_III_HACK
+	rdpr	%pstate, %o5
+	andn	%o5, PSTATE_IE, %o4
+	wrpr	%o4, %pstate				! disable interrupts
+
+	rdpr	%tl, %o3
+	brnz	%o3, 1f
+	 add	%o3, 1, %g2
+	wrpr	%g0, %g2, %tl				! Switch to traplevel > 0
+1:	
+	mov	CTX_PRIMARY, %o2
+	andn	%o0, 0xfff, %g2				! drop unused va bits
+	ldxa	[%o2] ASI_DMMU, %g1			! Save primary context
+	sethi	%hi(KERNBASE), %o4
+	membar	#LoadStore
+	stxa	%o1, [%o2] ASI_DMMU			! Insert context to demap
+	membar	#Sync
+	or	%g2, DEMAP_PAGE_PRIMARY, %g2		! Demap page from primary context only
+#else
 	mov	CTX_SECONDARY, %o2
 	andn	%o0, 0xfff, %g2				! drop unused va bits
 	ldxa	[%o2] ASI_DMMU, %g1			! Save secondary context
@@ -4687,7 +4708,8 @@ _C_LABEL(tlb_flush_pte):
 	membar	#LoadStore
 	stxa	%o1, [%o2] ASI_DMMU			! Insert context to demap
 	membar	#Sync
-	or	%g2, 0x010, %g2				! Demap page from secondary context only
+	or	%g2, DEMAP_PAGE_SECONDARY, %g2		! Demap page from secondary context only
+#endif
 	stxa	%g2, [%g2] ASI_DMMU_DEMAP		! Do the demap
 	membar	#Sync
 	stxa	%g2, [%g2] ASI_IMMU_DEMAP		! to both TLBs
@@ -4699,9 +4721,13 @@ _C_LABEL(tlb_flush_pte):
 	stxa	%g2, [%g2] ASI_IMMU_DEMAP		! Do the demap
 	membar	#Sync					! No real reason for this XXXX
 	flush	%o4
-	stxa	%g1, [%o2] ASI_DMMU			! Restore secondary asi
+	stxa	%g1, [%o2] ASI_DMMU			! Restore asi
 	membar	#Sync					! No real reason for this XXXX
 	flush	%o4
+#ifdef HORRID_III_HACK
+	wrpr	%g0, %o3, %tl				! Restore traplevel
+	wrpr	%o5, %pstate				! Restore interrupts
+#endif
 	retl
 	 nop
 
@@ -4739,7 +4765,7 @@ _C_LABEL(tlb_flush_ctx):
 	membar	#LoadStore
 	stxa	%o0, [%o2] ASI_DMMU		! Insert context to demap
 	membar	#Sync
-	set	0x030, %g2				! Demap context from secondary context only
+	set	DEMAP_CTX_SECONDARY, %g2	! Demap context from secondary context only
 	stxa	%g2, [%g2] ASI_DMMU_DEMAP		! Do the demap
 	membar	#Sync					! No real reason for this XXXX
 	stxa	%g2, [%g2] ASI_IMMU_DEMAP		! Do the demap
@@ -5358,7 +5384,7 @@ Lcopyin_doubles:
 	btst	7, %o2		! if ((len & 7) == 0)
 	be	Lcopyin_done	!	goto copyin_done;
 
-	 btst	4, %o2		! if ((len & 4)) == 0)
+	 btst	4, %o2		! if ((len & 4) == 0)
 	be,a	Lcopyin_mopw	!	goto mop_up_word_and_byte;
 	 btst	2, %o2		! [delay slot: if (len & 2)]
 	lduwa	[%o0] %asi, %o4	!	*(int *)dst = *(int *)src;
@@ -5554,7 +5580,7 @@ Lcopyout_doubles:
 	btst	7, %o2		! if ((len & 7) == 0)
 	be	Lcopyout_done	!	goto copyout_done;
 
-	 btst	4, %o2		! if ((len & 4)) == 0)
+	 btst	4, %o2		! if ((len & 4) == 0)
 	be,a	Lcopyout_mopw	!	goto mop_up_word_and_byte;
 	 btst	2, %o2		! [delay slot: if (len & 2)]
 	lduw	[%o0], %o4	!	*(int *)dst = *(int *)src;
@@ -5746,7 +5772,7 @@ ENTRY(switchexit)
 	ldx	[%l6 + %lo(CPCB)], %l5
 	clr	%l4				! lastproc = NULL;
 	brz,pn	%l1, 1f
-	 set	0x030, %l1			! Demap secondary context
+	 set	DEMAP_CTX_SECONDARY, %l1	! Demap secondary context
 	stxa	%g1, [%l1] ASI_DMMU_DEMAP
 	stxa	%g1, [%l1] ASI_IMMU_DEMAP
 	membar	#Sync
@@ -6081,7 +6107,7 @@ Lsw_load:
 	call	_C_LABEL(ctx_alloc)		! ctx_alloc(&vm->vm_pmap);
 	 mov	%o2, %o0
 
-	set	0x030, %o1			! This context has been recycled
+	set	DEMAP_CTX_SECONDARY, %o1	! This context has been recycled
 	stxa	%o0, [%l5] ASI_DMMU		! so we need to invalidate
 	membar	#Sync
 	stxa	%o1, [%o1] ASI_DMMU_DEMAP	! whatever bits of it may
@@ -6171,25 +6197,8 @@ ENTRY(proc_trampoline)
 	ba,a,pt	%icc, return_from_trap
 	 nop
 
-Lfserr:
-	stx	%g0, [%o2 + PCB_ONFAULT]! error in r/w, clear pcb_onfault
-	membar	#StoreStore|#StoreLoad
-	retl				! and return error indicator
-	 mov	-1, %o0
+#ifdef DDB
 
-	/*
-	 * This is just like Lfserr, but it's a global label that allows
-	 * mem_access_fault() to check to see that we don't want to try to
-	 * page in the fault.  It's used by fuswintr() etc.
-	 */
-	.globl	_C_LABEL(Lfsbail)
-_C_LABEL(Lfsbail):
-	stx	%g0, [%o2 + PCB_ONFAULT]! error in r/w, clear pcb_onfault
-	membar	#StoreStore|#StoreLoad
-	retl				! and return error indicator
-	 mov	-1, %o0
-
-/* probeget is meant to be used during autoconfiguration */
 /*
  * The following probably need to be changed, but to what I don't know.
  */
@@ -6211,8 +6220,8 @@ ENTRY(probeget)
 	mov	%o2, %o4
 	! %o0 = addr, %o1 = asi, %o4 = (1,2,4)
 	sethi	%hi(CPCB), %o2
-	ldx	[%o2 + %lo(CPCB)], %o2	! cpcb->pcb_onfault = Lfserr;
-	set	_C_LABEL(Lfsbail), %o5
+	ldx	[%o2 + %lo(CPCB)], %o2	! cpcb->pcb_onfault = Lfsprobe;
+	set	_C_LABEL(Lfsprobe), %o5
 	stx	%o5, [%o2 + PCB_ONFAULT]
 	or	%o0, 0x9, %o3		! if (PHYS_ASI(asi)) {
 	sub	%o3, 0x1d, %o3
@@ -6254,6 +6263,7 @@ ENTRY(probeget)
 	/*
 	 * Fault handler for probeget
 	 */
+	.globl	_C_LABEL(Lfsprobe)
 _C_LABEL(Lfsprobe):
 	stx	%g0, [%o2 + PCB_ONFAULT]! error in r/w, clear pcb_onfault
 	mov	-1, %o1
@@ -6261,6 +6271,8 @@ _C_LABEL(Lfsprobe):
 	membar	#StoreStore|#StoreLoad
 	retl				! and return error indicator
 	 mov	-1, %o0
+
+#endif	/* DDB */
 
 /*
  * pmap_zero_page(pa)
@@ -8686,7 +8698,7 @@ Lkcopy_doubles:
 	btst	7, %o2		! if ((len & 7) == 0)
 	be	Lkcopy_done	!	goto kcopy_done;
 
-	 btst	4, %o2		! if ((len & 4)) == 0)
+	 btst	4, %o2		! if ((len & 4) == 0)
 	be,a	Lkcopy_mopw	!	goto mop_up_word_and_byte;
 	 btst	2, %o2		! [delay slot: if (len & 2)]
 	ld	[%o0], %o4	!	*(int *)dst = *(int *)src;
@@ -9551,7 +9563,7 @@ ENTRY(longjmp)
 	 * Switch to context in %o0
 	 */
 	ENTRY(switchtoctx)
-	set	0x030, %o3
+	set	DEMAP_CTX_SECONDARY, %o3
 	stxa	%o3, [%o3] ASI_DMMU_DEMAP
 	membar	#Sync
 	mov	CTX_SECONDARY, %o4

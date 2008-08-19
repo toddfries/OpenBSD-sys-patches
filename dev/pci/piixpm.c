@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixpm.c,v 1.20 2006/02/27 08:25:02 grange Exp $	*/
+/*	$OpenBSD: piixpm.c,v 1.23 2006/07/07 03:23:42 brad Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -91,6 +91,7 @@ const struct pci_matchid piixpm_ids[] = {
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_OSB4 },
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_CSB5 },
 	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_CSB6 },
+	{ PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1000 },
 	{ PCI_VENDOR_SMSC, PCI_PRODUCT_SMSC_VICTORY66_PM },
 	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB200_SMB },
 	{ PCI_VENDOR_ATI, PCI_PRODUCT_ATI_IXP_SMB_300 },
@@ -136,15 +137,18 @@ piixpm_attach(struct device *parent, struct device *self, void *aux)
 	if ((conf & PIIX_SMB_HOSTC_INTMASK) == PIIX_SMB_HOSTC_SMI) {
 		/* No PCI IRQ */
 		printf(": SMI");
-	} else if ((conf & PIIX_SMB_HOSTC_INTMASK) == PIIX_SMB_HOSTC_IRQ) {
-		/* Install interrupt handler */
-		if (pci_intr_map(pa, &ih) == 0) {
-			intrstr = pci_intr_string(pa->pa_pc, ih);
-			sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
-			    piixpm_intr, sc, sc->sc_dev.dv_xname);
-			if (sc->sc_ih != NULL) {
-				printf(": %s", intrstr);
-				sc->sc_poll = 0;
+	} else {
+		if ((conf & PIIX_SMB_HOSTC_INTMASK) == PIIX_SMB_HOSTC_IRQ) {
+			/* Install interrupt handler */
+			if (pci_intr_map(pa, &ih) == 0) {
+				intrstr = pci_intr_string(pa->pa_pc, ih);
+				sc->sc_ih = pci_intr_establish(pa->pa_pc,
+				    ih, IPL_BIO, piixpm_intr, sc,
+				    sc->sc_dev.dv_xname);
+				if (sc->sc_ih != NULL) {
+					printf(": %s", intrstr);
+					sc->sc_poll = 0;
+				}
 			}
 		}
 		if (sc->sc_poll)

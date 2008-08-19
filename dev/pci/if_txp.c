@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.79 2006/02/16 21:02:34 brad Exp $	*/
+/*	$OpenBSD: if_txp.c,v 1.83 2006/06/29 21:36:40 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001
@@ -261,21 +261,9 @@ txp_attach(parent, self, aux)
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	bus_size_t iosize;
-	u_int32_t command;
 
 	sc->sc_cold = 1;
 
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-
-	if (!(command & PCI_COMMAND_MASTER_ENABLE)) {
-		printf(": failed to enable bus mastering\n");
-		return;
-	}
-
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf(": failed to enable memory mapping\n");
-		return;
-	}
 	if (pci_mapreg_map(pa, TXP_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->sc_bt, &sc->sc_bh, NULL, &iosize, 0)) {
 		printf(": can't map mem space %d\n", 0);
@@ -734,7 +722,7 @@ txp_rx_reclaim(sc, r, dma)
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		if (rxd->rx_stat & htole32(RX_STAT_IPCKSUMBAD))
@@ -1077,6 +1065,10 @@ txp_alloc_rings(sc)
 	for (i = 0; i < RXBUF_ENTRIES; i++) {
 		sd = (struct txp_swdesc *)malloc(sizeof(struct txp_swdesc),
 		    M_DEVBUF, M_NOWAIT);
+
+		/* stash away pointer */
+		bcopy(&sd, (u_long *)&sc->sc_rxbufs[i].rb_vaddrlo, sizeof(sd));
+
 		if (sd == NULL)
 			break;
 
@@ -1102,9 +1094,6 @@ txp_alloc_rings(sc)
 		}
 		bus_dmamap_sync(sc->sc_dmat, sd->sd_map, 0,
 		    sd->sd_map->dm_mapsize, BUS_DMASYNC_PREREAD);
-
-		/* stash away pointer */
-		bcopy(&sd, (u_long *)&sc->sc_rxbufs[i].rb_vaddrlo, sizeof(sd));
 
 		sc->sc_rxbufs[i].rb_paddrlo =
 		    ((u_int64_t)sd->sd_map->dm_segs[0].ds_addr) & 0xffffffff;
@@ -1165,6 +1154,11 @@ txp_alloc_rings(sc)
 bail:
 	txp_dma_free(sc, &sc->sc_zero_dma);
 bail_rxbufring:
+	for (i = 0; i < RXBUF_ENTRIES; i++) {
+		bcopy((u_long *)&sc->sc_rxbufs[i].rb_vaddrlo, &sd, sizeof(sd));
+		if (sd)
+			free(sd, M_DEVBUF);
+	}
 	txp_dma_free(sc, &sc->sc_rxbufring_dma);
 bail_rspring:
 	txp_dma_free(sc, &sc->sc_rspring_dma);
@@ -1296,7 +1290,7 @@ txp_ioctl(ifp, command, data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_ifmedia, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -1521,7 +1515,7 @@ txp_start(ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		txd->tx_flags |= TX_FLAGS_VALID;

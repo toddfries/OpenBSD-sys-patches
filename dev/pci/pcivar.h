@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.42 2005/06/29 03:53:28 brad Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.48 2006/04/07 01:04:49 brad Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
  * provided by pci_machdep.h.
  */
 
+#include <sys/device.h>
 #include <machine/bus.h>
 #include <dev/pci/pcireg.h>
 
@@ -50,6 +51,7 @@
  */
 typedef u_int32_t pcireg_t;		/* configuration space register XXX */
 struct pcibus_attach_args;
+struct pci_softc;
 
 /*
  * Machine-dependent definitions.
@@ -79,6 +81,12 @@ struct pcibus_attach_args {
 	pci_chipset_tag_t pba_pc;
 
 	int		pba_bus;	/* PCI bus number */
+
+	/*
+	 * Pointer to the pcitag of our parent bridge.  If there is no
+	 * parent bridge, then we assume we are a root bus.
+	 */
+	pcitag_t	*pba_bridgetag;
 
 	/*
 	 * Interrupt swizzling information.  These fields
@@ -139,7 +147,21 @@ struct pci_quirkdata {
 	pci_product_id_t	product;	/* Product ID */
 	int			quirks;		/* quirks; see below */
 };
-#define	PCI_QUIRK_MULTIFUNCTION		0x00000001
+#define	PCI_QUIRK_MULTIFUNCTION		1
+#define	PCI_QUIRK_MONOFUNCTION		2
+
+struct pci_softc {
+	struct device sc_dev;
+	bus_space_tag_t sc_iot, sc_memt;
+	bus_dma_tag_t sc_dmat;
+	pci_chipset_tag_t sc_pc;
+	void *sc_powerhook;
+	LIST_HEAD(, pci_dev) sc_devs;
+	int sc_bus, sc_maxndevs;
+	pcitag_t *sc_bridgetag;
+	u_int sc_intrswiz;
+	pcitag_t sc_intrtag;
+};
 
 /*
  * Locators devices that attach to 'pcibus', as specified to config.
@@ -160,6 +182,7 @@ struct pci_quirkdata {
  * Configuration space access and utility functions.  (Note that most,
  * e.g. make_tag, conf_read, conf_write are declared by pci_machdep.h.)
  */
+int	pci_mapreg_probe(pci_chipset_tag_t, pcitag_t, int, pcireg_t *);
 pcireg_t pci_mapreg_type(pci_chipset_tag_t, pcitag_t, int);
 int	pci_mapreg_info(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
 	    bus_addr_t *, bus_size_t *, int *);
@@ -187,6 +210,10 @@ int pci_matchbyid(struct pci_attach_args *, const struct pci_matchid *, int);
  * Helper functions for autoconfiguration.
  */
 const char *pci_findvendor(pcireg_t);
+int	pci_find_device(struct pci_attach_args *pa,
+			int (*match)(struct pci_attach_args *));
+int	pci_probe_device(struct pci_softc *, pcitag_t tag,
+	    int (*)(struct pci_attach_args *), struct pci_attach_args *);
 void	pci_devinfo(pcireg_t, pcireg_t, int, char *, size_t);
 const struct pci_quirkdata *
 	pci_lookup_quirkdata(pci_vendor_id_t, pci_product_id_t);

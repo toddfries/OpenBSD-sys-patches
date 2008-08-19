@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.4 2005/12/29 00:50:43 kettenis Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.8 2006/05/08 22:51:17 gwk Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.1 2003/04/26 18:39:29 fvdl Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 #include "isa.h"
 #include "acpi.h"
 #include "ipmi.h"
+#include "bios.h"
 
 #include <machine/cpuvar.h>
 #include <machine/i82093var.h>
@@ -58,6 +59,10 @@
 
 #if NIPMI > 0
 #include <dev/ipmivar.h>
+#endif
+
+#if NBIOS > 0
+#include <machine/biosvar.h>
 #endif
 
 int	mainbus_match(struct device *, void *, void *);
@@ -84,6 +89,9 @@ union mainbus_attach_args {
 #endif	
 #if NIPMI > 0
 	struct ipmi_attach_args mba_iaa;
+#endif
+#if NBIOS > 0
+	struct bios_attach_args mba_bios;
 #endif
 };
 
@@ -127,28 +135,41 @@ int mp_verbose = 0;
 int
 mainbus_match(struct device *parent, void *match, void *aux)
 {
-
-	return 1;
+	return (1);
 }
 
 /*
  * Attach the mainbus.
  */
 void
-mainbus_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+mainbus_attach(struct device *parent, struct device *self, void *aux)
 {
 #if NPCI > 0
-	union mainbus_attach_args mba;
+	union mainbus_attach_args	mba;
 #endif
 #ifdef MPBIOS
-	int mpbios_present = 0;
+	int				mpbios_present = 0;
 #endif
 
 	printf("\n");
 
+#if NPCI > 0
+	pci_mode = pci_mode_detect();
+#endif
+
+#if NBIOS > 0
+	{
+		mba.mba_bios.bios_dev = "bios";
+		mba.mba_bios.bios_iot = X86_BUS_SPACE_IO;
+		mba.mba_bios.bios_memt = X86_BUS_SPACE_MEM;
+		config_found(self, &mba.mba_bios, mainbus_print);
+	}
+#endif
+
 #if NACPI > 0
+#if NPCI > 0
+	if (pci_mode != 0)
+#endif
 	{
 		memset(&mba.mba_aaa, 0, sizeof(mba.mba_aaa));
 		mba.mba_aaa.aaa_name = "acpi";
@@ -172,10 +193,6 @@ mainbus_attach(parent, self, aux)
 
 #ifdef MPBIOS
 	mpbios_present = mpbios_probe(self);
-#endif
-
-#if NPCI > 0
-	pci_mode = pci_mode_detect();
 #endif
 
 #ifdef MPBIOS
@@ -202,6 +219,7 @@ mainbus_attach(parent, self, aux)
 		mba.mba_pba.pba_memt = X86_BUS_SPACE_MEM;
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
 		mba.mba_pba.pba_bus = 0;
+		mba.mba_pba.pba_bridgetag = NULL;
 		mba.mba_pba.pba_pc = NULL;
 		config_found(self, &mba.mba_pba, mainbus_print);
 	}
@@ -215,15 +233,14 @@ mainbus_attach(parent, self, aux)
 }
 
 int
-mainbus_print(aux, pnp)
-	void *aux;
-	const char *pnp;
+mainbus_print(void *aux, const char *pnp)
 {
-	union mainbus_attach_args *mba = aux;
+	union mainbus_attach_args	*mba = aux;
 
 	if (pnp)
 		printf("%s at %s", mba->mba_busname, pnp);
 	if (strcmp(mba->mba_busname, "pci") == 0)
 		printf(" bus %d", mba->mba_pba.pba_bus);
+
 	return (UNCONF);
 }

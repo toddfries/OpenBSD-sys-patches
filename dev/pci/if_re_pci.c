@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.4 2005/08/09 04:10:12 mickey Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.16 2006/08/06 01:01:21 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -28,6 +28,7 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -63,16 +64,20 @@ struct re_pci_softc {
 };
 
 const struct pci_matchid re_pci_devices[] = {
+	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8101E },
+	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8168 },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8169 },
+	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8169SC },
 	{ PCI_VENDOR_COREGA, PCI_PRODUCT_COREGA_CGLAPCIGT },
 	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE528T },
 	{ PCI_VENDOR_USR2, PCI_PRODUCT_USR2_USR997902 },
+	{ PCI_VENDOR_TTTECH, PCI_PRODUCT_TTTECH_MC322 }
 };
 
 #define RE_LINKSYS_EG1032_SUBID 0x00241737
 
-int re_pci_probe(struct device *, void *, void *);
-void re_pci_attach(struct device *, struct device *, void *);
+int	re_pci_probe(struct device *, void *, void *);
+void	re_pci_attach(struct device *, struct device *, void *);
 
 /*
  * PCI autoconfig definitions
@@ -95,6 +100,12 @@ re_pci_probe(struct device *parent, void *match, void *aux)
 	pcireg_t subid;
 
 	subid = pci_conf_read(pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
+
+	/* C+ mode 8139's */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_REALTEK &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RT8139 &&
+	    PCI_REVISION(pa->pa_class) == 0x20)
+		return (1);
 
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_LINKSYS &&
 	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_LINKSYS_EG1032 &&
@@ -120,7 +131,6 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t		iosize;
 	pcireg_t		command;
 
-#ifndef BURN_BRIDGES
 	/*
 	 * Handle power management nonsense.
 	 */
@@ -136,9 +146,8 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 		irq = pci_conf_read(pc, pa->pa_tag, RL_PCI_INTLINE);
 
 		/* Reset the power state. */
-		printf("%s: chip is is in D%d power mode "
-		    "-- setting to D0\n", sc->sc_dev.dv_xname,
-		    command & RL_PSTATE_MASK);
+		printf(": chip is is in D%d power mode "
+		    "-- setting to D0", command & RL_PSTATE_MASK);
 		command &= 0xFFFFFFFC;
 
 		/* Restore PCI config data. */
@@ -146,28 +155,15 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 		pci_conf_write(pc, pa->pa_tag, RL_PCI_LOMEM, membase);
 		pci_conf_write(pc, pa->pa_tag, RL_PCI_INTLINE, irq);
 	}
-#endif
 
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-
-	if ((command & (PCI_COMMAND_IO_ENABLE | PCI_COMMAND_MEM_ENABLE)) == 0) {
-		printf(": neither i/o nor mem enabled\n");
-		return;
-	}
-
-	if (command & PCI_COMMAND_MEM_ENABLE) {
-		if (pci_mapreg_map(pa, RL_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
-		    &sc->rl_btag, &sc->rl_bhandle, NULL, &iosize, 0)) {
-			printf(": can't map mem space\n");
-			return;
-		}
-	} else {
+	if (pci_mapreg_map(pa, RL_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
+	    &sc->rl_btag, &sc->rl_bhandle, NULL, &iosize, 0)) {
 		if (pci_mapreg_map(pa, RL_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
 		    &sc->rl_btag, &sc->rl_bhandle, NULL, &iosize, 0)) {
-			printf(": can't map i/o space\n");
+			printf(": can't map mem or i/o space\n");
 			return;
 		}
 	}
@@ -190,8 +186,18 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_dmat = pa->pa_dmat;
 	sc->sc_flags |= RL_ENABLED;
-	sc->rl_type = RL_8169;
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_REALTEK) {
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RT8139)
+			sc->rl_type = RL_8139CPLUS;
+		else
+			sc->rl_type = RL_8169;
+	} else if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_TTTECH &&
+		   PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_TTTECH_MC322)
+		sc->rl_type = RL_8139CPLUS;
+	else
+		sc->rl_type = RL_8169;
 
 	/* Call bus-independent attach routine */
-	re_attach_common(sc);
+	re_attach(sc);
 }

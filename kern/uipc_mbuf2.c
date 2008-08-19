@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf2.c,v 1.23.2.2 2007/03/17 20:52:10 henning Exp $	*/
+/*	$OpenBSD: uipc_mbuf2.c,v 1.24.2.2 2007/03/17 20:50:50 henning Exp $	*/
 /*	$KAME: uipc_mbuf2.c,v 1.29 2001/02/14 13:42:10 itojun Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.40 1999/04/01 00:23:25 thorpej Exp $	*/
 
@@ -176,7 +176,7 @@ m_pulldown(struct mbuf *m, int off, int len, int *offp)
 		goto ok;
 	}
 	if ((off == 0 || offp) && M_LEADINGSPACE(n->m_next) >= hlen &&
-	    !sharedcluster) {
+	    !sharedcluster && n->m_next->m_len >= tlen) {
 		n->m_next->m_data -= hlen;
 		n->m_next->m_len += hlen;
 		bcopy(mtod(n, caddr_t) + off, mtod(n->m_next, caddr_t), hlen);

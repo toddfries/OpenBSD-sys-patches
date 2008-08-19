@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le_ledma.c,v 1.10 2003/07/07 15:37:07 jason Exp $	*/
+/*	$OpenBSD: if_le_ledma.c,v 1.12 2006/06/02 20:00:56 miod Exp $	*/
 /*	$NetBSD: if_le_ledma.c,v 1.14 2001/05/30 11:46:35 mrg Exp $	*/
 
 /*-
@@ -76,7 +76,6 @@
 
 struct	le_softc {
 	struct	am7990_softc	sc_am7990;	/* glue to MI code */
-	struct	sbusdev		sc_sd;		/* sbus device */
 	bus_space_tag_t		sc_bustag;
 	bus_dmamap_t		sc_dmamap;
 	bus_space_handle_t	sc_reg;		/* LANCE registers */
@@ -116,7 +115,11 @@ le_ledma_wrcsr(struct am7990_softc *sc, u_int16_t port, u_int16_t val)
 	struct le_softc *lesc = (struct le_softc *)sc;
 
 	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, port);
+	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, 2,
+	    BUS_SPACE_BARRIER_WRITE);
 	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP, val);
+	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP, 2,
+	    BUS_SPACE_BARRIER_WRITE);
 
 #if defined(SUN4M)
 	/*
@@ -138,6 +141,8 @@ le_ledma_rdcsr(struct am7990_softc *sc, u_int16_t port)
 	struct le_softc *lesc = (struct le_softc *)sc;
 
 	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, port);
+	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, 2,
+	    BUS_SPACE_BARRIER_WRITE);
 	return (bus_space_read_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP));
 }
 
@@ -375,11 +380,6 @@ leattach_ledma(struct device *parent, struct device *self, void *aux)
 	lesc->sc_laddr = lesc->sc_dmamap->dm_segs[0].ds_addr;
 	sc->sc_addr = lesc->sc_laddr & 0xffffff;
 	sc->sc_conf3 = LE_C3_BSWP | LE_C3_ACON | LE_C3_BCON;
-
-
-	/* Assume SBus is grandparent */
-	lesc->sc_sd.sd_reset = (void *)am7990_reset;
-	sbus_establish(&lesc->sc_sd, parent);
 
 	ifmedia_init(&sc->sc_ifmedia, 0, lemediachange, lemediastatus);
 	ifmedia_add(&sc->sc_ifmedia, IFM_ETHER | IFM_10_T, 0, NULL);

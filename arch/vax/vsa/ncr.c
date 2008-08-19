@@ -1,4 +1,4 @@
-/* $OpenBSD: ncr.c,v 1.16 2005/11/12 03:44:24 pedro Exp $ */
+/* $OpenBSD: ncr.c,v 1.18 2006/07/19 20:22:38 miod Exp $ */
 /*	$NetBSD: ncr.c,v 1.32 2000/06/25 16:00:43 ragge Exp $	*/
 
 /*-
@@ -149,8 +149,6 @@ struct cfdriver ncr_cd = {
 	NULL, "ncr", DV_DULL
 };
 
-extern struct cfdriver sd_cd;
-
 static int
 si_match(parent, cf, aux)
 	struct device *parent;
@@ -251,7 +249,7 @@ si_attach(parent, self, aux)
 	else
 		target = (clk_page[0xbc/2] >> tweak) & 7;
 
-	printf("\n%s: NCR5380, SCSI ID %d\n", ncr_sc->sc_dev.dv_xname, target);
+	printf(": SCSI ID %d\n", target);
 
 	ncr_sc->sc_link.adapter_softc =	sc;
 	ncr_sc->sc_link.adapter_target = target;

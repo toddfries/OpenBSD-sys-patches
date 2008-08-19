@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami_pci.c,v 1.35 2005/12/13 12:13:59 dlg Exp $	*/
+/*	$OpenBSD: ami_pci.c,v 1.41 2006/08/06 04:40:08 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -44,11 +44,8 @@
 #include <dev/ic/amireg.h>
 #include <dev/ic/amivar.h>
 
-#define	AMI_BAR		0x10
+#define	AMI_BAR		PCI_MAPREG_START
 #define	AMI_PCI_MEMSIZE	0x1000
-#define	AMI_SUBSYSID	0x2c
-#define	PCI_EBCR	0x40
-#define	AMI_WAKEUP	0x64
 
 /* "Quartz" i960 Config space */
 #define	AMI_PCI_INIT	0x9c
@@ -87,7 +84,7 @@ struct	ami_pci_device {
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID,		0 },
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_320,	0 },
 	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_3202E,	0 },
-	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_SATA8,		0 },
+	{ PCI_VENDOR_SYMBIOS,	PCI_PRODUCT_SYMBIOS_MEGARAID_SATA,	0 },
 	{ 0 }
 };
 
@@ -98,18 +95,29 @@ struct	ami_pci_subsys {
 	int		flags;
 } ami_pci_subsys[] = {
 	/* only those of a special name or quirk are listed here */
+	{ 0x004d1025,	"ACER MegaRAID ROMB-2E", 0},
 	{ 0x0511101e,	"AMI MegaRAID i4", AMI_BROKEN },
 	{ 0x04931028,	"Dell PERC3/DC", 0 },
-	{ 0x09A0101E,	"Dell 466v1", 0 },
+	{ 0x05181028,	"Dell PERC4/DC", 0 },
+	{ 0x09a0101e,	"Dell 466v1", 0 },
 	{ 0x11111111,	"Dell 466v2", 0 },
 	{ 0x11121111,	"Dell 438", 0 },
 	{ 0x11111028,	"Dell 466v3", 0 },
+	{ 0x10651734,	"FSC MegaRAID PCI Express ROMB", 0 },
 	{ 0x10c6103c,	"HP 438", 0 },
 	{ 0x10c7103c,	"HP T5/T6", 0 },
 	{ 0x10cc103c,	"HP T7", 0 },
 	{ 0x10cd103c,	"HP 466", 0 },
 	{ 0x45231000,	"LSI 523", 0 },
-	{ 0x05328086,	"Intel SRCU42X", 0 },
+	{ 0x05328086,	"Intel RAID SRCU42X", 0 },
+	{ 0x05238086,	"Intel RAID SRCS16", 0 },
+	{ 0x00028086,	"Intel RAID SRCU42E", 0 },
+	{ 0x05308086,	"Intel RAID SRCZCRX", 0 },
+	{ 0x30088086,	"Intel RAID SRCS28X", 0 },
+	{ 0x34318086,	"Intel RAID SROMBU42E", 0 },
+	{ 0x34998086,	"Intel RAID SROMBU42E", 0 },
+	{ 0x05208086,	"Intel RAID SRCU51L", 0 },
+	{ 0x82871033,	"NEC MegaRAID PCI Express ROMB", 0 },
 	{ 0, NULL, 0 }
 };
 
@@ -127,9 +135,10 @@ struct ami_pci_vendor {
 };
 
 int
-ami_pci_find_device(void *aux) {
-	int i;
+ami_pci_find_device(void *aux)
+{
 	struct pci_attach_args *pa = aux;
+	int i;
 
 	for (i = 0; ami_pci_devices[i].vendor; i++) {
 		if (ami_pci_devices[i].vendor == PCI_VENDOR(pa->pa_id) &&
@@ -148,8 +157,8 @@ int
 ami_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	int i;
 	pcireg_t sig;
+	int i;
 
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_I2O)
 		return (0);
@@ -185,21 +194,15 @@ ami_pci_attach(struct device *parent, struct device *self, void *aux)
 	bus_size_t size;
 	pcireg_t csr;
 	int i;
-#if 0
-	/* reset */
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_EBCR,
-	    pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_EBCR) | 0x20);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, AMI_WAKEUP, 0);
-#endif
+
 	csr = pci_mapreg_type(pa->pa_pc, pa->pa_tag, AMI_BAR);
-	csr |= PCI_MAPREG_MEM_TYPE_32BIT;
 	if (pci_mapreg_map(pa, AMI_BAR, csr, 0,
 	    &sc->sc_iot, &sc->sc_ioh, NULL, &size, AMI_PCI_MEMSIZE)) {
 		printf(": can't map controller pci space\n");
 		return;
 	}
 
-	if (csr == PCI_MAPREG_TYPE_IO) {
+	if (PCI_MAPREG_TYPE(csr) == PCI_MAPREG_TYPE_IO) {
 		sc->sc_init = ami_schwartz_init;
 		sc->sc_exec = ami_schwartz_exec;
 		sc->sc_done = ami_schwartz_done;
@@ -230,7 +233,7 @@ ami_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	printf(": %s", intrstr);
+	printf(": %s\n", intrstr);
 
 	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 	for (ssp = ami_pci_subsys; ssp->id; ssp++) {
@@ -285,7 +288,7 @@ ami_pci_attach(struct device *parent, struct device *self, void *aux)
 		panic("ami device dissapeared between match() and attach()");
 	}
 
-	printf(" %s %s\n%s", model, lhc, sc->sc_dev.dv_xname);
+	printf("%s: %s, %s", sc->sc_dev.dv_xname, model, lhc);
 
 	if (ami_attach(sc)) {
 		pci_intr_disestablish(pa->pa_pc, sc->sc_ih);

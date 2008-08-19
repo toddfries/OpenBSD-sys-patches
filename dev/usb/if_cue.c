@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.28 2006/01/29 03:22:52 brad Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.31 2006/06/23 06:27:11 miod Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -77,17 +77,12 @@
 #include <sys/socket.h>
 
 #include <sys/device.h>
-#if NRND > 0
-#include <sys/rnd.h>
-#endif
 
 #include <net/if.h>
 #if defined(__NetBSD__)
 #include <net/if_arp.h>
 #endif
 #include <net/if_dl.h>
-
-#define BPF_MTAP(ifp, m) bpf_mtap((ifp)->if_bpf, (m))
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -559,10 +554,6 @@ USB_ATTACH(cue)
 	/* Attach the interface. */
 	if_attach(ifp);
 	Ether_ifattach(ifp, eaddr);
-#if NRND > 0
-	rnd_attach_source(&sc->rnd_source, USBDEVNAME(sc->cue_dev),
-	    RND_TYPE_NET, 0);
-#endif
 
 	usb_callout_init(sc->cue_stat_ch);
 
@@ -601,11 +592,6 @@ USB_DETACH(cue)
 	if (ifp->if_flags & IFF_RUNNING)
 		cue_stop(sc);
 
-#if defined(__NetBSD__)
-#if NRND > 0
-	rnd_detach_source(&sc->rnd_source);
-#endif
-#endif /* __NetBSD__ */
 	ether_ifdetach(ifp);
 
 	if_detach(ifp);
@@ -636,7 +622,6 @@ cue_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -817,7 +802,7 @@ cue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	 * address or the interface is in promiscuous mode.
 	 */
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	DPRINTFN(10,("%s: %s: deliver %d\n", USBDEVNAME(sc->cue_dev),
@@ -998,7 +983,7 @@ cue_start(struct ifnet *ifp)
 	 * to him.
 	 */
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m_head);
+		bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 	ifp->if_flags |= IFF_OACTIVE;

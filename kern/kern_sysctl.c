@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.138 2006/01/28 09:53:37 dlg Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.142 2006/05/28 19:41:42 dlg Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -557,6 +557,8 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 /*
  * hardware related system variables.
  */
+char *hw_vendor, *hw_prod, *hw_uuid, *hw_serial, *hw_ver;
+
 int
 hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen, struct proc *p)
@@ -628,6 +630,33 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			return (cpu_setperf(perflevel));
 		else
 			return (0);
+	case HW_VENDOR:
+		if (hw_vendor)
+			return (sysctl_rdstring(oldp, oldlenp, newp,
+			    hw_vendor));
+		else
+			return (EOPNOTSUPP);
+	case HW_PRODUCT:
+		if (hw_prod)
+			return (sysctl_rdstring(oldp, oldlenp, newp, hw_prod));
+		else
+			return (EOPNOTSUPP);
+	case HW_VERSION:
+		if (hw_ver)
+			return (sysctl_rdstring(oldp, oldlenp, newp, hw_ver));
+		else
+			return (EOPNOTSUPP);
+	case HW_SERIALNO:
+		if (hw_serial)
+			return (sysctl_rdstring(oldp, oldlenp, newp,
+			    hw_serial));
+		else
+			return (EOPNOTSUPP);
+	case HW_UUID:
+		if (hw_uuid)
+			return (sysctl_rdstring(oldp, oldlenp, newp, hw_uuid));
+		else
+			return (EOPNOTSUPP);
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -672,6 +701,26 @@ debug_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	/* NOTREACHED */
 }
 #endif /* DEBUG */
+
+/*
+ * Reads, or writes that lower the value
+ */
+int
+sysctl_int_lower(void *oldp, size_t *oldlenp, void *newp, size_t newlen, int *valp)
+{
+	unsigned int oval = *valp, val = *valp;
+	int error;
+
+	if (newp == NULL)
+		return (sysctl_rdint(oldp, oldlenp, newp, *valp));
+
+	if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &val)))
+		return (error);
+	if (val > oval)
+		return (EPERM);		/* do not allow raising */
+	*(unsigned int *)valp = val;
+	return (0);
+}
 
 /*
  * Validate parameters and get old / set new parameters

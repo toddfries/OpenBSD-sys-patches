@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.80 2006/01/02 18:19:41 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.83 2006/06/21 21:53:32 jason Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -194,6 +194,7 @@ u_long	_randseed;
 extern	caddr_t msgbufaddr;
 
 int sparc_led_blink;
+int kbd_reset;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -530,8 +531,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_ALLOWAPERTURE:
 #ifdef APERTURE
 		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp,
-			    allowaperture));
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &allowaperture));
 		else
 			return (sysctl_int(oldp, oldlenp, newp, newlen,
 			    &allowaperture));
@@ -544,6 +545,10 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_rdint(oldp, oldlenp, newp, ceccerrs));
 	case CPU_CECCLAST:
 		return (sysctl_rdquad(oldp, oldlenp, newp, cecclast));
+	case CPU_KBDRESET:
+		if (securelevel > 0)
+			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1858,27 +1863,6 @@ sparc_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
 
 	/* Devices are un-cached... although the driver should do that */
 	return ((paddr + off) | PMAP_NC);
-}
-
-/*
- * Establish a temporary bus mapping for device probing.  */
-int
-bus_space_probe(bus_space_tag_t tag, bus_addr_t paddr, bus_size_t size,
-    size_t offset, int flags, int (*callback)(void *, void *), void *arg)
-{
-	bus_space_handle_t bh;
-	paddr_t tmp;
-	int result;
-
-	if (bus_space_map(tag, paddr, size, flags, &bh) != 0)
-		return (0);
-
-	tmp = bh.bh_ptr;
-	result = (probeget(tmp + offset, tag->asi, size) != -1);
-	if (result && callback != NULL)
-		result = (*callback)((char *)(u_long)tmp, arg);
-	bus_space_unmap(tag, bh, size);
-	return (result);
 }
 
 void *

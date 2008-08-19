@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_lookup.c,v 1.31 2005/11/30 10:35:07 pedro Exp $	*/
+/*	$OpenBSD: vfs_lookup.c,v 1.35 2006/06/25 15:01:53 sturm Exp $	*/
 /*	$NetBSD: vfs_lookup.c,v 1.17 1996/02/09 19:00:59 christos Exp $	*/
 
 /*
@@ -59,12 +59,14 @@
 #include "systrace.h"
 
 /*
- * Convert a pathname into a pointer to a locked inode.
+ * Convert a pathname into a pointer to a vnode.
  *
  * The FOLLOW flag is set when symbolic links are to be followed
  * when they occur at the end of the name translation process.
  * Symbolic links are always followed for all other pathname
  * components other than the last.
+ *
+ * If the LOCKLEAF flag is set, a locked vnode is returned.
  *
  * The segflg defines whether the name is to be copied from user
  * space or kernel space.
@@ -513,7 +515,7 @@ dirloop:
 	 */
 	while (dp->v_type == VDIR && (mp = dp->v_mountedhere) &&
 	    (cnp->cn_flags & NOCROSSMOUNT) == 0) {
-		if (vfs_busy(mp, 0, NULL))
+		if (vfs_busy(mp, VB_READ|VB_WAIT))
 			continue;
 		VOP_UNLOCK(dp, 0, p);
 		error = VFS_ROOT(mp, &tdp);

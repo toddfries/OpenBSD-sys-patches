@@ -1,4 +1,4 @@
-/*	$OpenBSD: p4tcc.c,v 1.5 2004/06/06 17:34:37 grange Exp $ */
+/*	$OpenBSD: p4tcc.c,v 1.11 2006/08/20 01:42:51 gwk Exp $ */
 /*
  * Copyright (c) 2003 Ted Unangst
  * All rights reserved.
@@ -60,43 +60,58 @@ static struct {
 #define TCC_LEVELS sizeof(tcc) / sizeof(tcc[0])
 
 extern int setperf_prio;
+int p4tcc_level;
+
+int p4tcc_cpuspeed(int *);
 
 void
-p4tcc_init(int model, int step)
+p4tcc_init(int family, int step)
 {
 	if (setperf_prio > 1)
 		return;
 
-	switch (step) {
-	case 0x22:	/* errata O50 P44 and Z21 */
-	case 0x24:
-	case 0x25:
-	case 0x27:
-	case 0x29:
-		/* hang with 12.5 */
-		tcc[TCC_LEVELS - 1].reg = 2;
-		break;
-	case 0x07:	/* errata N44 and P18 */
-	case 0x0a:
-	case 0x12:
-	case 0x13:
-		/* hang at 12.5 and 25 */
-		tcc[TCC_LEVELS - 1].reg = 3;
-		tcc[TCC_LEVELS - 2].reg = 3;
-		break;
-	default:
+	switch (family) {
+	case 0xf:	/* Pentium 4 */
+		switch (step) {
+		case 0x22:	/* errata O50 P44 and Z21 */
+		case 0x24:
+		case 0x25:
+		case 0x27:
+		case 0x29:
+			/* hang with 12.5 */
+			tcc[TCC_LEVELS - 1].reg = 2;
+			break;
+		case 0x07:	/* errata N44 and P18 */
+		case 0x0a:
+		case 0x12:
+		case 0x13:
+			/* hang at 12.5 and 25 */
+			tcc[TCC_LEVELS - 1].reg = 3;
+			tcc[TCC_LEVELS - 2].reg = 3;
+			break;
+		}
 		break;
 	}
 
+	p4tcc_level = tcc[0].level;
 	cpu_setperf = p4tcc_setperf;
+	cpu_cpuspeed = p4tcc_cpuspeed;
 	setperf_prio = 1;
+}
+
+int
+p4tcc_cpuspeed(int *speed)
+{
+	*speed = pentium_mhz / 100 * (p4tcc_level + 12);
+
+	return 0;
 }
 
 int
 p4tcc_setperf(int level)
 {
 	int i;
-	uint64_t msreg;
+	uint64_t msreg, vet;
 
 	for (i = 0; i < TCC_LEVELS; i++) {
 		if (level >= tcc[i].level)
@@ -108,9 +123,12 @@ p4tcc_setperf(int level)
 	if (tcc[i].reg != 0) /* enable it */
 		msreg |= tcc[i].reg << 1 | 1 << 4;
 	wrmsr(MSR_THERM_CONTROL, msreg);
+	vet = rdmsr(MSR_THERM_CONTROL);
 
-	if (update_cpuspeed != NULL)
-		update_cpuspeed();
+	if ((vet & 0x1e) != (msreg & 0x1e))
+		printf("p4_tcc: cpu did not honor request\n");
+	else
+		p4tcc_level = tcc[i].level;
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.13 2006/02/27 02:05:19 drahn Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.16 2006/07/04 18:26:30 kettenis Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -31,15 +31,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
- * XXX NOTE:
- * XXX PROPER OPERATION OF DEVICES BEHIND PPB'S WHICH USE INTERRUPTS
- * XXX ON SYSTEMS OTHER THAN THE i386 IS NOT POSSIBLE AT THIS TIME.
- * XXX There needs to be some support for 'swizzling' the interrupt
- * XXX pin.  In general, pci_intr_map() has to have a different
- * XXX interface.
- */
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -50,11 +41,17 @@
 #include <dev/pci/pcidevs.h>
 #include <dev/pci/ppbreg.h>
 
+struct ppb_softc {
+	struct device sc_dev;		/* generic device glue */
+	pci_chipset_tag_t sc_pc;	/* our PCI chipset... */
+	pcitag_t sc_tag;		/* ...and tag. */
+};
+
 int	ppbmatch(struct device *, void *, void *);
 void	ppbattach(struct device *, struct device *, void *);
 
 struct cfattach ppb_ca = {
-	sizeof(struct device), ppbmatch, ppbattach
+	sizeof(struct ppb_softc), ppbmatch, ppbattach
 };
 
 struct cfdriver ppb_cd = {
@@ -64,20 +61,15 @@ struct cfdriver ppb_cd = {
 int	ppbprint(void *, const char *pnp);
 
 int
-ppbmatch(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+ppbmatch(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
 
 	/*
-	 * These devices are mislabeled.  They are not PCI bridges.
+	 * This device is mislabeled.  It is not a PCI bridge.
 	 */
-	if ((PCI_VENDOR(pa->pa_id) == PCI_VENDOR_VIATECH &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT82C586_PWR) ||
-	    (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ATI && 
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_RS480_PCIE_2 ||
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ATI_RS480_PCIE_3)))
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_VIATECH &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT82C586_PWR)
 		return (0);
 	/*
 	 * Check the ID register to see that it's a PCI bridge.
@@ -92,16 +84,18 @@ ppbmatch(parent, match, aux)
 }
 
 void
-ppbattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+ppbattach(struct device *parent, struct device *self, void *aux)
 {
+	struct ppb_softc *sc = (void *) self;
 	struct pci_attach_args *pa = aux;
 	pci_chipset_tag_t pc = pa->pa_pc;
 	struct pcibus_attach_args pba;
 	pcireg_t busdata;
 
 	printf("\n");
+
+	sc->sc_pc = pc;
+	sc->sc_tag = pa->pa_tag;
 
 	busdata = pci_conf_read(pc, pa->pa_tag, PPB_REG_BUSINFO);
 
@@ -125,13 +119,20 @@ ppbattach(parent, self, aux)
 
 	/*
 	 * Attach the PCI bus than hangs off of it.
+	 *
+	 * XXX Don't pass-through Memory Read Multiple.  Should we?
+	 * XXX Consult the spec...
 	 */
 	pba.pba_busname = "pci";
 	pba.pba_iot = pa->pa_iot;
 	pba.pba_memt = pa->pa_memt;
 	pba.pba_dmat = pa->pa_dmat;
 	pba.pba_pc = pc;
+#if 0
+	pba.pba_flags = pa->pa_flags & ~PCI_FLAGS_MRM_OKAY;
+#endif
 	pba.pba_bus = PPB_BUSINFO_SECONDARY(busdata);
+	pba.pba_bridgetag = &sc->sc_tag;
 	pba.pba_intrswiz = pa->pa_intrswiz;
 	pba.pba_intrtag = pa->pa_intrtag;
 
@@ -139,9 +140,7 @@ ppbattach(parent, self, aux)
 }
 
 int
-ppbprint(aux, pnp)
-	void *aux;
-	const char *pnp;
+ppbprint(void *aux, const char *pnp)
 {
 	struct pcibus_attach_args *pba = aux;
 

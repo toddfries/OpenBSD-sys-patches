@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.62 2005/08/11 12:55:31 mpf Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.68 2006/06/18 11:47:46 pascoe Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -175,7 +175,7 @@ ip6intr()
 	struct mbuf *m;
 
 	for (;;) {
-		s = splimp();
+		s = splnet();
 		IF_DEQUEUE(&ip6intrq, m);
 		splx(s);
 		if (m == 0)
@@ -377,7 +377,11 @@ ip6_input(m)
 		IN6_LOOKUP_MULTI(ip6->ip6_dst, m->m_pkthdr.rcvif, in6m);
 		if (in6m)
 			ours = 1;
-		else if (!ip6_mrouter) {
+#ifdef MROUTING
+		else if (!ip6_mforwarding || !ip6_mrouter) {
+#else
+		else {
+#endif
 			ip6stat.ip6s_notmember++;
 			if (!IN6_IS_ADDR_MC_LINKLOCAL(&ip6->ip6_dst))
 				ip6stat.ip6s_cantforward++;
@@ -409,7 +413,8 @@ ip6_input(m)
 		ip6_forward_rt.ro_dst.sin6_family = AF_INET6;
 		ip6_forward_rt.ro_dst.sin6_addr = ip6->ip6_dst;
 
-		rtalloc((struct route *)&ip6_forward_rt);
+		rtalloc_mpath((struct route *)&ip6_forward_rt,
+		    &ip6->ip6_src.s6_addr32[0], 0);
 	}
 
 #define rt6_key(r) ((struct sockaddr_in6 *)((r)->rt_nodes->rn_key))
@@ -483,9 +488,7 @@ ip6_input(m)
 	 * working right.
 	 */
 	struct ifaddr *ifa;
-	for (ifa = m->m_pkthdr.rcvif->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next) {
+	TAILQ_FOREACH(ifa, &m->m_pkthdr.rcvif->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr == NULL)
 			continue;	/* just for safety */
 		if (ifa->ifa_addr->sa_family != AF_INET6)
@@ -596,11 +599,14 @@ ip6_input(m)
 		 * ip6_mforward() returns a non-zero value, the packet
 		 * must be discarded, else it may be accepted below.
 		 */
-		if (ip6_mrouter && ip6_mforward(ip6, m->m_pkthdr.rcvif, m)) {
+#ifdef MROUTING
+		if (ip6_mforwarding && ip6_mrouter &&
+		    ip6_mforward(ip6, m->m_pkthdr.rcvif, m)) {
 			ip6stat.ip6s_cantforward++;
 			m_freem(m);
 			return;
 		}
+#endif
 		if (!ours) {
 			m_freem(m);
 			return;
@@ -903,7 +909,7 @@ ip6_savecontrol(in6p, mp, ip6, m)
 # define in6p_flags	inp_flags
 
 #ifdef SO_TIMESTAMP
-	if (in6p->in6p_socket->so_options & SO_TIMESTAMP) {
+	if (in6p->inp_socket->so_options & SO_TIMESTAMP) {
 		struct timeval tv;
 
 		microtime(&tv);
@@ -1050,7 +1056,7 @@ ip6_savecontrol(in6p, mp, ip6, m)
 
 			switch (nxt) {
 			case IPPROTO_DSTOPTS:
-				if (!in6p->in6p_flags & IN6P_DSTOPTS)
+				if (!(in6p->in6p_flags & IN6P_DSTOPTS))
 					break;
 
 				*mp = sbcreatecontrol((caddr_t)ip6e, elen,
@@ -1060,7 +1066,7 @@ ip6_savecontrol(in6p, mp, ip6, m)
 				break;
 
 			case IPPROTO_ROUTING:
-				if (!in6p->in6p_flags & IN6P_RTHDR)
+				if (!(in6p->in6p_flags & IN6P_RTHDR))
 					break;
 
 				*mp = sbcreatecontrol((caddr_t)ip6e, elen,

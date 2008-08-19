@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.25 2005/04/19 15:29:47 mickey Exp $	*/
+/*	$OpenBSD: intr.h,v 1.27 2006/05/29 09:54:20 mickey Exp $	*/
 /*	$NetBSD: intr.h,v 1.5 1996/05/13 06:11:28 mycroft Exp $	*/
 
 /*
@@ -124,7 +124,6 @@ void splassert_check(int, const char *);
  * Miscellaneous
  */
 #define	splvm()		splraise(IPL_VM)
-#define splimp()	splvm()
 #define	splhigh()	splraise(IPL_HIGH)
 #define	splsched()	splraise(IPL_SCHED)
 #define spllock() 	splhigh()
@@ -153,6 +152,7 @@ int i386_send_ipi(struct cpu_info *, int);
 void i386_broadcast_ipi(int);
 void i386_multicast_ipi(int, int);
 void i386_ipi_handler(void);
+void i386_ipi_microset(struct cpu_info *);
 void i386_intlock(int);
 void i386_intunlock(int);
 void i386_softintlock(void);

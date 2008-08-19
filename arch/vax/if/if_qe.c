@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_qe.c,v 1.18 2004/07/07 23:10:45 deraadt Exp $	*/
+/*	$OpenBSD: if_qe.c,v 1.20 2006/04/16 00:46:32 pascoe Exp $	*/
 /*      $NetBSD: if_qe.c,v 1.51 2002/06/08 12:28:37 ragge Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -464,7 +464,7 @@ qestart(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 		/*
 		 * m now points to a mbuf chain that can be loaded.
@@ -560,7 +560,7 @@ qeintr(void *arg)
 			eh = mtod(m, struct ether_header *);
 #if NBPFILTER > 0
 			if (ifp->if_bpf) {
-				bpf_mtap(ifp->if_bpf, m);
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 				if ((ifp->if_flags & IFF_PROMISC) != 0 &&
 				    bcmp(sc->sc_ac.ac_enaddr, eh->ether_dhost,
 				    ETHER_ADDR_LEN) != 0 &&
@@ -581,11 +581,9 @@ qeintr(void *arg)
 				continue;
 			}
 
-			if ((status1 & QE_ESETUP) == 0) {
-				/* m_adj() the ethernet header out of the way and pass up */
-				m_adj(m, sizeof(struct ether_header));
-				ether_input(ifp, eh, m);
-			} else
+			if ((status1 & QE_ESETUP) == 0)
+				ether_input_mbuf(ifp, m);
+			else
 				m_freem(m);
 		}
 

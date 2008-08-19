@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.65 2006/02/10 05:28:56 djm Exp $
+#	$OpenBSD: files.sparc64,v 1.72 2006/06/27 20:29:20 deraadt Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -71,14 +71,9 @@ attach	sbus at mainbus with sbus_mb
 attach	sbus at xbox with sbus_xbox
 file	arch/sparc64/dev/sbus.c			sbus
 
-device	creator: wsemuldisplaydev, rasops8, rasops16, rasops24, rasops32, wsemul_sun
+device	creator: wsemuldisplaydev, rasops32, wsemul_sun
+attach	creator at mainbus, upa
 file	arch/sparc64/dev/creator.c		creator
-
-attach	creator at mainbus with creator_mainbus
-file	arch/sparc64/dev/creator_mainbus.c	creator_mainbus
-
-attach	creator at upa with creator_upa
-file	arch/sparc64/dev/creator_upa.c		creator_upa
 
 include	"dev/pci/files.pci"
 major	{wd = 12}
@@ -97,7 +92,7 @@ file	arch/sparc64/dev/pci_machdep.c		psycho | schizo
 attach	hme at pci with hme_pci
 file	dev/pci/if_hme_pci.c			hme_pci
 
-device	vgafb: wsemuldisplaydev, rasops8, rasops16, rasops24, rasops32, wsemul_sun
+device	vgafb: wsemuldisplaydev, rasops8, rasops16, rasops32, wsemul_sun
 attach	vgafb at pci
 file	arch/sparc64/dev/vgafb.c		vgafb
 
@@ -125,7 +120,6 @@ attach	timer at mainbus, sbus
 device	eeprom
 attach	eeprom at sbus, ebus
 file	arch/sparc64/sparc64/clock.c
-file	dev/clock_subr.c
 
 device	cpu
 attach	cpu at mainbus
@@ -139,6 +133,18 @@ file	arch/sparc64/dev/auxio.c		auxio
 device	beeper
 attach	beeper at ebus
 file	arch/sparc64/dev/beeper.c		beeper
+
+device	beep
+attach	beep at ebus
+file	arch/sparc64/dev/beep.c			beep
+
+device	ppm
+attach	ppm at ebus
+file	arch/sparc64/dev/ppm.c			ppm
+
+device	power
+attach	power at ebus
+file	arch/sparc64/dev/power.c		power
 
 device	sab {}
 attach	sab at ebus
@@ -271,4 +277,9 @@ include	"dev/usb/files.usb"
 device	pcfadc
 attach	pcfadc at i2c
 file	arch/sparc64/dev/pcf8591_ofw.c		pcfadc
+
+#
+# Machine-independent GPIO drivers
+#
+include "dev/gpio/files.gpio"
 

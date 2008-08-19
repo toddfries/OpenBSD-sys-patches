@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.h,v 1.18.6.1 2006/10/06 05:51:12 brad Exp $	*/
+/*	$OpenBSD: systrace.h,v 1.19.2.1 2006/11/01 20:03:35 brad Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -33,6 +33,7 @@
 #define _SYSTRACE_H_
 
 #include <sys/ioccom.h>
+#include <sys/rwlock.h>
 
 #define SYSTR_EMULEN	8	/* sync with sys proc */
 
@@ -193,7 +194,7 @@ struct systrace_inject {
 
 struct str_process;
 struct fsystrace {
-	struct lock lock;
+	struct rwlock lock;
 	struct selinfo si;
 
 	TAILQ_HEAD(strprocessq, str_process) processes;

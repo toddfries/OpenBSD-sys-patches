@@ -1,5 +1,5 @@
-#	$OpenBSD: Makefile.cats,v 1.3 2004/11/19 06:41:13 miod Exp $
-#	$OpenBSD: Makefile.cats,v 1.3 2004/11/19 06:41:13 miod Exp $
+#	$OpenBSD: Makefile.cats,v 1.6 2006/07/27 05:58:11 miod Exp $
+#	$OpenBSD: Makefile.cats,v 1.6 2006/07/27 05:58:11 miod Exp $
 #	$NetBSD: Makefile.i386,v 1.67 1996/05/11 16:12:11 mycroft Exp $
 
 # Makefile for OpenBSD
@@ -39,7 +39,8 @@ ARM=	$S/arch/arm
 INCLUDES=	-nostdinc -I. -I$S/arch -I$S
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -D__cats__
 CDIAGFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
-		-Wno-uninitialized -Wno-format -Wno-main
+		-Wno-uninitialized -Wno-format -Wno-main \
+		-Wstack-larger-than-2047
 
 CMACHFLAGS= -ffreestanding
 #CMACHFLAGS=	-march=armv4 -mtune=strongarm -ffreestanding
@@ -116,8 +117,9 @@ DEBUG?=
 .if ${DEBUG} == "-g"
 LINKFLAGS+=	-X
 SYSTEM_LD_TAIL+=; \
-		echo cp $@ $@.gdb; rm -f $@.gdb; cp $@ $@.gdb; \
-		echo ${STRIP} ${STRIPFLAGS} $@; ${STRIP} ${STRIPFLAGS} $@
+		echo mv $@ $@.gdb; rm -f $@.gdb; mv $@ $@.gdb; \
+		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb; \
+		${STRIP} ${STRIPFLAGS} -o $@ $@.gdb
 .else
 LINKFLAGS+=	-S -x
 .endif
@@ -172,7 +174,7 @@ depend:: .depend
 	${MKDEP} ${AFLAGS} ${CPPFLAGS} ${ARM}/arm/locore.S
 	${MKDEP} -a ${CFLAGS} ${CPPFLAGS} param.c ioconf.c ${CFILES}
 	${MKDEP} -a ${AFLAGS} ${CPPFLAGS} ${SFILES}
-	cat ${ARM}/arm/genassym.cf ${ARM}/footbridge/genassym.cf | \
+	cat ${ARM}/arm/genassym.cf | \
 	    sh $S/kern/genassym.sh ${MKDEP} -f assym.dep ${CFLAGS} \
 	    ${CPPFLAGS} 
 	@sed -e 's/.*\.o:.* /assym.h: /' < assym.dep >> .depend

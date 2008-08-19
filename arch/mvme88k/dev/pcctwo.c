@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcctwo.c,v 1.27 2005/07/18 02:43:25 fgsch Exp $ */
+/*	$OpenBSD: pcctwo.c,v 1.29 2006/05/08 14:36:10 miod Exp $ */
 /*
  * Copyright (c) 1995 Theo de Raadt
  * All rights reserved.
@@ -84,10 +84,10 @@ pcctwomatch(parent, vcf, args)
 		return 0;
 	}
 
-	if (bus_space_map(ca->ca_iot, ca->ca_paddr + PCC2_BASE, PCC2_SIZE,
+	if (bus_space_map(ca->ca_iot, PCC2_BASE, PCC2_SIZE,
 	    0, &ioh) != 0)
 		return 0;
-	rc = badvaddr((vaddr_t)bus_space_vaddr(ca->ca_iot, ioh), 4);
+	rc = badaddr((vaddr_t)bus_space_vaddr(ca->ca_iot, ioh), 4);
 	if (rc == 0) {
 		chipid = bus_space_read_1(ca->ca_iot, ioh, PCCTWO_CHIPID);
 		if (chipid != PCC2_ID) {
@@ -112,7 +112,7 @@ pcctwoattach(parent, self, args)
 	bus_space_handle_t ioh;
 	u_int8_t genctl;
 
-	sc->sc_base = ca->ca_paddr + PCC2_BASE;
+	sc->sc_base = PCC2_BASE;
 
 	if (bus_space_map(ca->ca_iot, sc->sc_base, PCC2_SIZE, 0, &ioh) != 0) {
 		printf(": can't map registers!\n");

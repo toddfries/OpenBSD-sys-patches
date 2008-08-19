@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.c,v 1.41 2005/11/04 21:51:35 miod Exp $ */
+/*	$OpenBSD: pmap_motorola.c,v 1.47 2006/08/22 21:03:56 miod Exp $ */
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -285,7 +285,7 @@ TAILQ_HEAD(pv_page_list, pv_page) pv_page_freelist;
 int		pv_nfree;
 
 #if defined(M68K_MMU_HP)
-int		pmap_aliasmask;	/* separation at which VA aliasing is ok */
+extern int	pmap_aliasmask;	/* separation at which VA aliasing is ok */
 #endif
 #if defined(M68040) || defined(M68060)
 int		protostfree;	/* prototype (default) free ST map */
@@ -338,6 +338,37 @@ pg_to_pvh(struct vm_page *pg)
 	return &pg->mdpage.pvent;
 }
 
+#ifdef PMAP_STEAL_MEMORY
+vaddr_t
+pmap_steal_memory(size, vstartp, vendp)
+	vsize_t size;
+	vaddr_t *vstartp, *vendp;
+{
+	vaddr_t va;
+	u_int npg;
+
+	size = round_page(size);
+	npg = atop(size);
+
+	/* m68k systems which define PMAP_STEAL_MEMORY only have one segment. */
+#ifdef DIAGNOSTIC
+	if (vm_physmem[0].avail_end - vm_physmem[0].avail_start < npg)
+		panic("pmap_steal_memory(%x): out of memory", size);
+#endif
+
+	va = ptoa(vm_physmem[0].avail_start);
+	vm_physmem[0].avail_start += npg;
+	vm_physmem[0].start += npg;
+
+	if (vstartp != NULL)
+		*vstartp = virtual_avail;
+	if (vendp != NULL)
+		*vendp = virtual_end;
+	
+	bzero((void *)va, size);
+	return (va);
+}
+#else
 /*
  * pmap_virtual_space:		[ INTERFACE ]
  *
@@ -357,6 +388,7 @@ pmap_virtual_space(vstartp, vendp)
 	*vstartp = virtual_avail;
 	*vendp = virtual_end;
 }
+#endif
 
 /*
  * pmap_init:			[ INTERFACE ]
@@ -975,17 +1007,46 @@ pmap_enter(pmap, va, pa, prot, flags)
 	vm_prot_t prot;
 	int flags;
 {
+	pt_entry_t pte;
+
+	pte = 0;
+#if defined(M68040) || defined(M68060)
+	if (mmutype <= MMU_68040 && (pte_prot(prot) & PG_PROT) == PG_RW)
+#ifdef PMAP_DEBUG
+		if (dowriteback && (dokwriteback || pmap != pmap_kernel()))
+#endif
+		pte |= PG_CCB;
+#endif
+	return (pmap_enter_cache(pmap, va, pa, prot, flags, pte));
+}
+
+/*
+ * Similar to pmap_enter(), but allows the caller to control the
+ * cacheability of the mapping. However if it is found that this mapping
+ * needs to be cache inhibited, the cache bits from the caller are ignored.
+ */
+int
+pmap_enter_cache(pmap, va, pa, prot, flags, template)
+	pmap_t pmap;
+	vaddr_t va;
+	paddr_t pa;
+	vm_prot_t prot;
+	int flags;
+	pt_entry_t template;
+{
 	struct vm_page *pg;
 	pt_entry_t *pte;
 	int npte, error;
 	paddr_t opa;
 	boolean_t cacheable = TRUE;
+#ifdef M68K_MMU_HP
 	boolean_t checkpv = TRUE;
+#endif
 	boolean_t wired = (flags & PMAP_WIRED) != 0;
 
 	PMAP_DPRINTF(PDB_FOLLOW|PDB_ENTER,
-	    ("pmap_enter(%p, %lx, %lx, %x, %x)\n",
-	    pmap, va, pa, prot, wired));
+	    ("pmap_enter_cache(%p, %lx, %lx, %x, %x, %x)\n",
+	    pmap, va, pa, prot, wired, template));
 
 #ifdef DIAGNOSTIC
 	/*
@@ -1043,7 +1104,9 @@ pmap_enter(pmap, va, pa, prot, flags)
 		/*
 		 * Retain cache inhibition status
 		 */
+#ifdef M68K_MMU_HP
 		checkpv = FALSE;
+#endif
 		if (pmap_pte_ci(pte))
 			cacheable = FALSE;
 		goto validate;
@@ -1185,7 +1248,10 @@ pmap_enter(pmap, va, pa, prot, flags)
 	 * then it must be device memory which may be volatile.
 	 */
 	else {
-		checkpv = cacheable = FALSE;
+#ifdef M68K_MMU_HP
+		checkpv =
+#endif
+		cacheable = FALSE;
 	}
 
 	/*
@@ -1216,18 +1282,20 @@ validate:
 	if (mmutype <= MMU_68040 && pmap != pmap_kernel() &&
 	    (curproc->p_md.md_flags & MDP_UNCACHE_WX) &&
 	    (prot & VM_PROT_EXECUTE) && (prot & VM_PROT_WRITE))
-		checkpv = cacheable = FALSE;
+#ifdef M68K_MMU_HP
+		checkpv =
+#endif
+		cacheable = FALSE;
 #endif
 
+#ifdef M68K_MMU_HP
 	if (!checkpv && !cacheable)
+#else
+	if (!cacheable)
+#endif
 		npte |= PG_CI;
-#if defined(M68040) || defined(M68060)
-	if (mmutype <= MMU_68040 && (npte & (PG_PROT|PG_CI)) == PG_RW)
-#ifdef PMAP_DEBUG
-		if (dowriteback && (dokwriteback || pmap != pmap_kernel()))
-#endif
-		npte |= PG_CCB;
-#endif
+	else
+		npte |= template;
 
 	PMAP_DPRINTF(PDB_ENTER, ("enter: new pte value %x\n", npte));
 
@@ -1277,12 +1345,32 @@ pmap_kenter_pa(va, pa, prot)
 	paddr_t pa;
 	vm_prot_t prot;
 {
+	pt_entry_t pte;
+
+	pte = pte_prot(prot);
+#if defined(M68040) || defined(M68060)
+	if (mmutype <= MMU_68040 && (pte & (PG_PROT)) == PG_RW)
+		pte |= PG_CCB;
+#endif
+	pmap_kenter_cache(va, pa, pte);
+}
+
+/*
+ * Similar to pmap_kenter_pa(), but allows the caller to control the
+ * cacheability of the mapping.
+ */
+void
+pmap_kenter_cache(va, pa, template)
+	vaddr_t va;
+	paddr_t pa;
+	pt_entry_t template;
+{
 	struct pmap *pmap = pmap_kernel();
 	pt_entry_t *pte;
 	int s, npte, error;
 
 	PMAP_DPRINTF(PDB_FOLLOW|PDB_ENTER,
-	    ("pmap_kenter_pa(%lx, %lx, %x)\n", va, pa, prot));
+	    ("pmap_kenter_cache(%lx, %lx, %x)\n", va, pa, prot));
 
 	/*
 	 * Segment table entry not valid, we need a new PT page
@@ -1292,14 +1380,14 @@ pmap_kenter_pa(va, pa, prot)
 		s = splvm();
 		error = pmap_enter_ptpage(pmap, va);
 		if (error != 0)
-			panic("pmap_kenter_pa: out of address space");
+			panic("pmap_kenter_cache: out of address space");
 		splx(s);
 	}
 
 	pa = trunc_page(pa);
 	pte = pmap_pte(pmap, va);
 
-	PMAP_DPRINTF(PDB_ENTER, ("enter: pte %p, *pte %x\n", pte, *pte));
+	PMAP_DPRINTF(PDB_ENTER, ("kenter: pte %p, *pte %x\n", pte, *pte));
 	KASSERT(!pmap_pte_v(pte));
 
 	/*
@@ -1313,13 +1401,9 @@ pmap_kenter_pa(va, pa, prot)
 	 * Build the new PTE.
 	 */
 
-	npte = pa | pte_prot(prot) | PG_V | PG_W;
-#if defined(M68040) || defined(M68060)
-	if (mmutype <= MMU_68040 && (npte & (PG_PROT)) == PG_RW)
-		npte |= PG_CCB;
-#endif
+	npte = pa | template | PG_V | PG_W;
 
-	PMAP_DPRINTF(PDB_ENTER, ("enter: new pte value %x\n", npte));
+	PMAP_DPRINTF(PDB_ENTER, ("kenter: new pte value %x\n", npte));
 #if defined(M68040) || defined(M68060)
 	if (mmutype <= MMU_68040) {
 		DCFP(pa);
@@ -1686,11 +1770,11 @@ ok:
 		if (pmapdebug & (PDB_PTPAGE|PDB_COLLECT))
 			pmapdebug = opmapdebug;
 
-		if (!(*ste & SG_V))
+		if (*ste & SG_V)
 			printf("collect: kernel STE at %p still valid (%x)\n",
 			       ste, *ste);
 		ste = &Sysptmap[ste - pmap_ste(pmap_kernel(), 0)];
-		if (!(*ste & SG_V))
+		if (*ste & SG_V)
 			printf("collect: kernel PTmap at %p still valid (%x)\n",
 			       ste, *ste);
 #endif

@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.c,v 1.19 2004/06/13 21:49:11 niklas Exp $ */
+/* $OpenBSD: cpu.c,v 1.21 2006/08/17 22:22:08 mk Exp $ */
 /* $NetBSD: cpu.c,v 1.44 2000/05/23 05:12:53 thorpej Exp $ */
 
 /*-
@@ -137,10 +137,19 @@ static const char *ev4minor[] = {
 }, *ev56minor[] = {
 	"", "pass 1", "pass 2", 0
 }, *ev6minor[] = {
-	"pass 1", "pass 2", "pass 2.2", "pass 2.3", "pass 3", 0
+	"", "pass 1", "pass 2 or 2.1", "pass 2.2", "pass 2.3", "pass 3",
+	"pass 2.4", "pass 2.5", 0
 }, *pca56minor[] = {
 	"", "pass 1", 0
+}, *pca57minor[] = {
+	"", "pass 1", 0
+}, *ev67minor[] = {
+	"", "pass 1", "pass 2.1", "pass 2.2", "pass 2.1.1",
+	"pass 2.2.1", "pass 2.3 or 2.4", "pass 2.1.2", "pass 2.2.2",
+	"pass 2.2.3 or 2.2.5", "pass 2.2.4", "pass 2.5", "pass 2.4.1",
+	"pass 2.5.1", "pass 2.6", 0
 };
+
 
 struct cputable_struct {
 	int	cpu_major_code;
@@ -156,8 +165,8 @@ struct cputable_struct {
 	{ PCS_PROC_EV56,	"21164A",	ev56minor	},
 	{ PCS_PROC_EV6,		"21264",	ev6minor	},
 	{ PCS_PROC_PCA56,	"PCA56",	pca56minor	},
-	{ PCS_PROC_PCA57,	"PCA57",	NULL		},
-	{ PCS_PROC_EV67,	"21264A",	NULL		},
+	{ PCS_PROC_PCA57,	"PCA57",	pca57minor	},
+	{ PCS_PROC_EV67,	"21264A",	ev67minor	},
 	{ PCS_PROC_EV68CB,	"21264C",	NULL		},
 	{ PCS_PROC_EV68AL,	"21264B",	NULL		},
 	{ PCS_PROC_EV68CX,	"21264D",	NULL		},
@@ -174,7 +183,7 @@ struct cputable_struct {
  *
  * Right before calling uvm_scheduler(), main() calls, on proc0's
  * context, cpu_boot_secondary_processors().  This is our key to
- * actually spin up the additional processor's we've found.  We
+ * actually spin up the additional processors we've found.  We
  * run through our cpu_info[] array looking for secondary processors
  * with idle PCBs, and spin them up.
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.76 2006/02/16 20:45:37 brad Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.83 2006/05/28 00:20:21 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -195,7 +195,7 @@ const struct pci_matchid ti_devices[] = {
 	{ PCI_VENDOR_ALTEON, PCI_PRODUCT_ALTEON_ACENICT },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3C985 },
 	{ PCI_VENDOR_SGI, PCI_PRODUCT_SGI_TIGON },
-	{ PCI_VENDOR_DEC, PCI_PRODUCT_DEC_PN9000SX },
+	{ PCI_VENDOR_DEC, PCI_PRODUCT_DEC_PN9000SX }
 };
 
 /*
@@ -215,11 +215,10 @@ ti_eeprom_putbyte(struct ti_softc *sc, int byte)
 	 * Feed in each bit and strobe the clock.
 	 */
 	for (i = 0x80; i; i >>= 1) {
-		if (byte & i) {
+		if (byte & i)
 			TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_DOUT);
-		} else {
+		else
 			TI_CLRBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_DOUT);
-		}
 		DELAY(1);
 		TI_SETBIT(sc, TI_MISC_LOCAL_CTL, TI_MLC_EE_CLK);
 		DELAY(1);
@@ -882,8 +881,8 @@ ti_newbuf_jumbo(struct ti_softc *sc, int i, struct mbuf *m)
 		}
 
 		/* Attach the buffer to the mbuf. */
-		m_new->m_len = m_new->m_pkthdr.len = ETHER_MAX_LEN_JUMBO;
-		MEXTADD(m_new, buf, ETHER_MAX_LEN_JUMBO, 0, ti_jfree, sc);
+		m_new->m_len = m_new->m_pkthdr.len = TI_JUMBO_FRAMELEN;
+		MEXTADD(m_new, buf, TI_JUMBO_FRAMELEN, 0, ti_jfree, sc);
 	} else {
 		/*
 		 * We're re-using a previously allocated mbuf;
@@ -892,7 +891,7 @@ ti_newbuf_jumbo(struct ti_softc *sc, int i, struct mbuf *m)
 		 */
 		m_new = m;
 		m_new->m_data = m_new->m_ext.ext_buf;
-		m_new->m_ext.ext_size = ETHER_MAX_LEN_JUMBO;
+		m_new->m_ext.ext_size = TI_JUMBO_FRAMELEN;
 	}
 
 	m_adj(m_new, ETHER_ALIGN);
@@ -1057,7 +1056,7 @@ ti_init_tx_ring(struct ti_softc *sc)
 
 	SLIST_INIT(&sc->ti_tx_map_listhead);
 	for (i = 0; i < TI_TX_RING_CNT; i++) {
-		if (bus_dmamap_create(sc->sc_dmatag, ETHER_MAX_LEN_JUMBO,
+		if (bus_dmamap_create(sc->sc_dmatag, TI_JUMBO_FRAMELEN,
 		    TI_NTXSEG, MCLBYTES, 0, BUS_DMA_NOWAIT, &dmamap))
 			return (ENOBUFS);
 
@@ -1242,13 +1241,8 @@ ti_chipinit(struct ti_softc *sc)
 	sc->ti_linkstat = TI_EV_CODE_LINK_DOWN;
 
 	/* Set endianness before we access any non-PCI registers. */
-#if 0 && BYTE_ORDER == BIG_ENDIAN
-	CSR_WRITE_4(sc, TI_MISC_HOST_CTL,
-	    TI_MHC_BIGENDIAN_INIT | (TI_MHC_BIGENDIAN_INIT << 24));
-#else
 	CSR_WRITE_4(sc, TI_MISC_HOST_CTL,
 	    TI_MHC_LITTLEENDIAN_INIT | (TI_MHC_LITTLEENDIAN_INIT << 24));
-#endif
 
 	/* Check the ROM failed bit to see if self-tests passed. */
 	if (CSR_READ_4(sc, TI_CPU_STATE) & TI_CPUSTATE_ROMFAIL) {
@@ -1285,9 +1279,8 @@ ti_chipinit(struct ti_softc *sc)
 
 	/* Set up the PCI state register. */
 	CSR_WRITE_4(sc, TI_PCI_STATE, TI_PCI_READ_CMD|TI_PCI_WRITE_CMD);
-	if (sc->ti_hwrev == TI_HWREV_TIGON_II) {
+	if (sc->ti_hwrev == TI_HWREV_TIGON_II)
 		TI_SETBIT(sc, TI_PCI_STATE, TI_PCISTATE_USE_MEM_RD_MULT);
-	}
 
 	/* Clear the read/write max DMA parameters. */
 	TI_CLRBIT(sc, TI_PCI_STATE, (TI_PCISTATE_WRITE_MAXDMA|
@@ -1336,16 +1329,9 @@ ti_chipinit(struct ti_softc *sc)
 	TI_SETBIT(sc, TI_PCI_STATE, TI_PCISTATE_MINDMA);
 
 	/* Configure DMA variables. */
-#if BYTE_ORDER == BIG_ENDIAN
-	CSR_WRITE_4(sc, TI_GCR_OPMODE, TI_OPMODE_BYTESWAP_BD |
-	    TI_OPMODE_BYTESWAP_DATA | TI_OPMODE_WORDSWAP_BD |
+	CSR_WRITE_4(sc, TI_GCR_OPMODE, TI_DMA_SWAP_OPTIONS |
 	    TI_OPMODE_WARN_ENB | TI_OPMODE_FATAL_ENB |
 	    TI_OPMODE_DONT_FRAG_JUMBO);
-#else
-	CSR_WRITE_4(sc, TI_GCR_OPMODE, TI_OPMODE_BYTESWAP_DATA|
-	    TI_OPMODE_WORDSWAP_BD|TI_OPMODE_DONT_FRAG_JUMBO|
-	    TI_OPMODE_WARN_ENB|TI_OPMODE_FATAL_ENB);
-#endif
 
 	/* Recommended settings from Tigon manual. */
 	CSR_WRITE_4(sc, TI_GCR_DMA_WRITECFG, TI_DMA_STATE_THRESH_8W);
@@ -1434,7 +1420,7 @@ ti_gibinit(struct ti_softc *sc)
 	/* Set up the jumbo receive ring. */
 	rcb = &sc->ti_rdata->ti_info.ti_jumbo_rx_rcb;
 	TI_HOSTADDR(rcb->ti_hostaddr) = TI_RING_DMA_ADDR(sc, ti_rx_jumbo_ring);
-	rcb->ti_max_len = ETHER_MAX_LEN_JUMBO;
+	rcb->ti_max_len = TI_JUMBO_FRAMELEN;
 	rcb->ti_flags = 0;
 	rcb->ti_flags |= TI_RCB_FLAG_IP_CKSUM | TI_RCB_FLAG_NO_PHDR_CKSUM;
 
@@ -1662,6 +1648,7 @@ ti_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = ti_ioctl;
 	ifp->if_start = ti_start;
 	ifp->if_watchdog = ti_watchdog;
+	ifp->if_hardmtu = TI_JUMBO_FRAMELEN - ETHER_HDR_LEN;
 	IFQ_SET_MAXLEN(&ifp->if_snd, TI_TX_RING_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dv.dv_xname, ifp->if_xname, IFNAMSIZ);
@@ -1830,7 +1817,7 @@ ti_rxeof(struct ti_softc *sc)
 	 	 * Handle BPF listeners. Let the BPF user see the packet.
 	 	 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		if ((cur_rx->ti_ip_cksum ^ 0xffff) == 0)
@@ -2219,7 +2206,7 @@ ti_start(struct ifnet *ifp)
 		 */
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head);
+			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (pkts == 0)
@@ -2270,7 +2257,7 @@ ti_init2(struct ti_softc *sc)
 	/* Specify MTU and interface index. */
 	CSR_WRITE_4(sc, TI_GCR_IFINDEX, sc->sc_dv.dv_unit);
 	CSR_WRITE_4(sc, TI_GCR_IFMTU,
-		ETHER_MAX_LEN_JUMBO + ETHER_VLAN_ENCAP_LEN);
+		TI_JUMBO_FRAMELEN + ETHER_VLAN_ENCAP_LEN);
 	TI_DO_CMD(TI_CMD_UPDATE_GENCOM, 0, 0);
 
 	/* Load our MAC address. */
@@ -2416,8 +2403,10 @@ ti_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 	ifmr->ifm_status = IFM_AVALID;
 	ifmr->ifm_active = IFM_ETHER;
 
-	if (sc->ti_linkstat == TI_EV_CODE_LINK_DOWN)
+	if (sc->ti_linkstat == TI_EV_CODE_LINK_DOWN) {
+		ifmr->ifm_active |= IFM_NONE;
 		return;
+	}
 
 	ifmr->ifm_status |= IFM_ACTIVE;
 
@@ -2470,20 +2459,15 @@ ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
+		if ((ifp->if_flags & IFF_RUNNING) == 0)
+			ti_init(sc);
 #ifdef INET
-		case AF_INET:
-			ti_init(sc);
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-			break;
 #endif /* INET */
-		default:
-			ti_init(sc);
-			break;
-		}
 		break;
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU_JUMBO)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
 		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
@@ -2508,12 +2492,13 @@ ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			    sc->ti_if_flags & IFF_PROMISC) {
 				TI_DO_CMD(TI_CMD_SET_PROMISC_MODE,
 				    TI_CMD_CODE_PROMISC_DIS, 0);
-			} else
-				ti_init(sc);
-		} else {
-			if (ifp->if_flags & IFF_RUNNING) {
-				ti_stop(sc);
+			} else {
+				if ((ifp->if_flags & IFF_RUNNING) == 0)
+					ti_init(sc);
 			}
+		} else {
+			if (ifp->if_flags & IFF_RUNNING)
+				ti_stop(sc);
 		}
 		sc->ti_if_flags = ifp->if_flags;
 		break;
@@ -2534,7 +2519,7 @@ ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->ifmedia, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 

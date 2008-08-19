@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.62.2.1 2006/11/09 02:31:28 brad Exp $	*/
+/*	$OpenBSD: in6.c,v 1.68.2.1 2006/11/09 02:35:47 brad Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -87,7 +87,9 @@
 #include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
 #include <netinet6/mld6_var.h>
+#ifdef MROUTING
 #include <netinet6/ip6_mroute.h>
+#endif
 #include <netinet6/in6_ifattach.h>
 
 /* backward compatibility for a while... */
@@ -158,9 +160,10 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 	 * would be happy.  Note that we assume the caller of the function
 	 * (probably implicitly) set nd6_rtrequest() to ifa->ifa_rtrequest,
 	 * which changes the outgoing interface to the loopback interface.
+	 * XXX only table 0 for now
 	 */
 	e = rtrequest(cmd, ifa->ifa_addr, ifa->ifa_addr,
-	    (struct sockaddr *)&all1_sa, RTF_UP|RTF_HOST|RTF_LLINFO, &nrt);
+	    (struct sockaddr *)&all1_sa, RTF_UP|RTF_HOST|RTF_LLINFO, &nrt, 0);
 	if (e != 0) {
 		log(LOG_ERR, "in6_ifloop_request: "
 		    "%s operation failed for %s (errno=%d)\n",
@@ -216,7 +219,7 @@ in6_ifaddloop(struct ifaddr *ifa)
 	struct rtentry *rt;
 
 	/* If there is no loopback entry, allocate one. */
-	rt = rtalloc1(ifa->ifa_addr, 0);
+	rt = rtalloc1(ifa->ifa_addr, 0, 0);
 	if (rt == NULL || (rt->rt_flags & RTF_HOST) == 0 ||
 	    (rt->rt_ifp->if_flags & IFF_LOOPBACK) == 0)
 		in6_ifloop_request(RTM_ADD, ifa);
@@ -267,7 +270,7 @@ in6_ifremloop(struct ifaddr *ifa)
 		 * a subnet-router anycast address on an interface attahced
 		 * to a shared medium.
 		 */
-		rt = rtalloc1(ifa->ifa_addr, 0);
+		rt = rtalloc1(ifa->ifa_addr, 0, 0);
 		if (rt != NULL && (rt->rt_flags & RTF_HOST) != 0 &&
 		    (rt->rt_ifp->if_flags & IFF_LOOPBACK) != 0) {
 			rt->rt_refcnt--;
@@ -335,11 +338,13 @@ in6_control(so, cmd, data, ifp, p)
 	if ((so->so_state & SS_PRIV) != 0)
 		privileged++;
 
+#ifdef MROUTING
 	switch (cmd) {
 	case SIOCGETSGCNT_IN6:
 	case SIOCGETMIFCNT_IN6:
 		return (mrt6_ioctl(cmd, data));
 	}
+#endif
 
 	if (ifp == NULL)
 		return (EOPNOTSUPP);
@@ -1079,7 +1084,7 @@ in6_update_ifa(ifp, ifra, ia)
 		 * actually do not need the routes, since they usually specify
 		 * the outgoing interface.
 		 */
-		rt = rtalloc1((struct sockaddr *)&mltaddr, 0);
+		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, 0);
 		if (rt) {
 			/*
 			 * 32bit came from "mltmask"
@@ -1105,7 +1110,7 @@ in6_update_ifa(ifp, ifra, ia)
 			    (struct sockaddr *)&ia->ia_addr;
 			/* XXX: we need RTF_CLONING to fake nd6_rtrequest */
 			info.rti_flags = RTF_UP | RTF_CLONING;
-			error = rtrequest1(RTM_ADD, &info, NULL);
+			error = rtrequest1(RTM_ADD, &info, NULL, 0);
 			if (error)
 				goto cleanup;
 		} else {
@@ -1150,7 +1155,7 @@ in6_update_ifa(ifp, ifra, ia)
 			mltaddr.sin6_addr = in6addr_nodelocal_allnodes;
 
 			/* XXX: again, do we really need the route? */
-			rt = rtalloc1((struct sockaddr *)&mltaddr, 0);
+			rt = rtalloc1((struct sockaddr *)&mltaddr, 0, 0);
 			if (rt) {
 				/* 32bit came from "mltmask" */
 				if (memcmp(&mltaddr.sin6_addr,
@@ -1172,7 +1177,7 @@ in6_update_ifa(ifp, ifra, ia)
 				info.rti_info[RTAX_IFA] =
 				    (struct sockaddr *)&ia->ia_addr;
 				info.rti_flags = RTF_UP | RTF_CLONING;
-				error = rtrequest1(RTM_ADD, &info, NULL);
+				error = rtrequest1(RTM_ADD, &info, NULL, 0);
 				if (error)
 					goto cleanup;
 			} else {
@@ -1253,7 +1258,8 @@ in6_purgeaddr(ifa)
 	/*
 	 * leave from multicast groups we have joined for the interface
 	 */
-	while ((imm = ia->ia6_memberships.lh_first) != NULL) {
+	while (!LIST_EMPTY(&ia->ia6_memberships)) {
+		imm = LIST_FIRST(&ia->ia6_memberships);
 		LIST_REMOVE(imm, i6mm_chain);
 		in6_leavegroup(imm);
 	}
@@ -1285,7 +1291,7 @@ in6_unlink_ifa(ia, ifp)
 		}
 	}
 
-	if (oia->ia6_multiaddrs.lh_first != NULL) {
+	if (!LIST_EMPTY(&oia->ia6_multiaddrs)) {
 		in6_savemkludge(oia);
 	}
 
@@ -1511,10 +1517,7 @@ in6_lifaddr_ioctl(so, cmd, data, ifp, p)
 			}
 		}
 
-		for (ifa = ifp->if_addrlist.tqh_first;
-		     ifa;
-		     ifa = ifa->ifa_list.tqe_next)
-		{
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
 			if (!cmp)
@@ -1589,17 +1592,15 @@ in6_ifinit(ifp, ia, sin6, newhost)
 	int newhost;
 {
 	int	error = 0, plen, ifacount = 0;
-	int	s = splimp();
+	int	s = splnet();
 	struct ifaddr *ifa;
 
 	/*
 	 * Give the interface a chance to initialize
-	 * if this is its first address,
+	 * if this is its first address (or it is a CARP interface)
 	 * and to validate the address if necessary.
 	 */
-	for (ifa = ifp->if_addrlist.tqh_first; ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr == NULL)
 			continue;	/* just for safety */
 		if (ifa->ifa_addr->sa_family != AF_INET6)
@@ -1609,7 +1610,7 @@ in6_ifinit(ifp, ia, sin6, newhost)
 
 	ia->ia_addr = *sin6;
 
-	if (ifacount <= 1 && ifp->if_ioctl &&
+	if ((ifacount <= 1 || ifp->if_type == IFT_CARP) && ifp->if_ioctl &&
 	    (error = (*ifp->if_ioctl)(ifp, SIOCSIFADDR, (caddr_t)ia))) {
 		splx(s);
 		return (error);
@@ -1662,8 +1663,9 @@ in6_savemkludge(oia)
 
 	IFP_TO_IA6(oia->ia_ifp, ia);
 	if (ia) {	/* there is another address */
-		for (in6m = oia->ia6_multiaddrs.lh_first; in6m; in6m = next){
-			next = in6m->in6m_entry.le_next;
+		for (in6m = LIST_FIRST(&oia->ia6_multiaddrs);
+		    in6m != LIST_END(&oia->ia6_multiaddrs); in6m = next) {
+			next = LIST_NEXT(in6m, in6m_entry);
 			IFAFREE(&in6m->in6m_ia->ia_ifa);
 			ia->ia_ifa.ifa_refcnt++;
 			in6m->in6m_ia = ia;
@@ -1672,15 +1674,16 @@ in6_savemkludge(oia)
 	} else {	/* last address on this if deleted, save */
 		struct multi6_kludge *mk;
 
-		for (mk = in6_mk.lh_first; mk; mk = mk->mk_entry.le_next) {
+		LIST_FOREACH(mk, &in6_mk, mk_entry) {
 			if (mk->mk_ifp == oia->ia_ifp)
 				break;
 		}
 		if (mk == NULL) /* this should not happen! */
 			panic("in6_savemkludge: no kludge space");
 
-		for (in6m = oia->ia6_multiaddrs.lh_first; in6m; in6m = next){
-			next = in6m->in6m_entry.le_next;
+		for (in6m = LIST_FIRST(&oia->ia6_multiaddrs);
+		    in6m != LIST_END(&oia->ia6_multiaddrs); in6m = next) {
+			next = LIST_NEXT(in6m, in6m_entry);
 			IFAFREE(&in6m->in6m_ia->ia_ifa); /* release reference */
 			in6m->in6m_ia = NULL;
 			LIST_INSERT_HEAD(&mk->mk_head, in6m, in6m_entry);
@@ -1700,12 +1703,14 @@ in6_restoremkludge(ia, ifp)
 {
 	struct multi6_kludge *mk;
 
-	for (mk = in6_mk.lh_first; mk; mk = mk->mk_entry.le_next) {
+	LIST_FOREACH(mk, &in6_mk, mk_entry) {
 		if (mk->mk_ifp == ifp) {
 			struct in6_multi *in6m, *next;
 
-			for (in6m = mk->mk_head.lh_first; in6m; in6m = next) {
-				next = in6m->in6m_entry.le_next;
+			for (in6m = LIST_FIRST(&mk->mk_head);
+			    in6m != LIST_END(&mk->mk_head);
+			    in6m = next) {
+				next = LIST_NEXT(in6m, in6m_entry);
 				in6m->in6m_ia = ia;
 				ia->ia_ifa.ifa_refcnt++;
 				LIST_INSERT_HEAD(&ia->ia6_multiaddrs,
@@ -1734,7 +1739,7 @@ in6_createmkludge(ifp)
 {
 	struct multi6_kludge *mk;
 
-	for (mk = in6_mk.lh_first; mk; mk = mk->mk_entry.le_next) {
+	LIST_FOREACH(mk, &in6_mk, mk_entry) {
 		/* If we've already had one, do not allocate. */
 		if (mk->mk_ifp == ifp)
 			return;
@@ -1755,7 +1760,7 @@ in6_purgemkludge(ifp)
 	struct multi6_kludge *mk;
 	struct in6_multi *in6m;
 
-	for (mk = in6_mk.lh_first; mk; mk = mk->mk_entry.le_next) {
+	LIST_FOREACH(mk, &in6_mk, mk_entry) {
 		if (mk->mk_ifp != ifp)
 			continue;
 
@@ -1932,10 +1937,7 @@ in6ifa_ifpforlinklocal(ifp, ignoreflags)
 {
 	struct ifaddr *ifa;
 
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr == NULL)
 			continue;	/* just for safety */
 		if (ifa->ifa_addr->sa_family != AF_INET6)
@@ -1962,10 +1964,7 @@ in6ifa_ifpwithaddr(ifp, addr)
 {
 	struct ifaddr *ifa;
 
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr == NULL)
 			continue;	/* just for safety */
 		if (ifa->ifa_addr->sa_family != AF_INET6)
@@ -2244,9 +2243,7 @@ in6_ifawithscope(oifp, dst)
 		if (in6_addr2scopeid(ifp, dst) != in6_addr2scopeid(oifp, dst))
 			continue;
 
-		for (ifa = ifp->if_addrlist.tqh_first; ifa;
-		     ifa = ifa->ifa_list.tqe_next)
-		{
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			int tlen = -1, dscopecmp, bscopecmp, matchcmp;
 
 			if (ifa->ifa_addr->sa_family != AF_INET6)
@@ -2482,10 +2479,7 @@ in6_ifawithifp(ifp, dst)
 	 * If two or more, return one which matches the dst longest.
 	 * If none, return one of global addresses assigned other ifs.
 	 */
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_ANYCAST)
@@ -2519,10 +2513,7 @@ in6_ifawithifp(ifp, dst)
 	if (besta)
 		return (besta);
 
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_ANYCAST)
@@ -2566,10 +2557,7 @@ in6_if_up(ifp)
 	in6_ifattach(ifp, NULL);
 
 	dad_delay = 0;
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		ia = (struct in6_ifaddr *)ifa;

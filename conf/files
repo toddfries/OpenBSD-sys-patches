@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.365 2006/02/01 11:03:33 dlg Exp $
+#	$OpenBSD: files,v 1.385 2006/08/22 18:12:13 mglocker Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -18,6 +18,7 @@ define	midisyn
 define	radiobus {}
 define	i2cbus {}
 define	gpiobus {}
+define	onewirebus {}
 
 # filesystem firmware loading attribute
 define firmload
@@ -49,9 +50,8 @@ define	rasops24
 define	rasops32
 define	rasops_rotation
 
-# net device attributes - we have generic code for arc(net), ether(net),
+# net device attributes - we have generic code for ether(net),
 # and fddi.
-define	arc
 define	atm
 define	crypto
 define	systrace
@@ -78,7 +78,6 @@ define	wsdisplaydev		{[mux = 1]}
 define	wsemuldisplaydev	{[console = -1], [mux = 1]}
 define	wskbddev		{[console = -1], [mux = 1]}
 define	wsmousedev		{[mux = 0]}
-define	wsrasteremulops
 
 # SMC 93Cx6 Serial EEPROM devices
 define	smc93cx6
@@ -109,6 +108,9 @@ define	atapi {[channel = -1]}
 # Common code for ESDI/IDE/etc. controllers
 device	wdc: ata, atapi, wdc_base
 file	dev/ic/wdc.c			wdc_base
+
+# 1-Wire bus bit-banging
+define	onewire_bitbang
 
 # "Chipset" drivers.  These are the bus-independent routines which
 # contain the cfdrivers.  Attachments are provided by files.<bus>
@@ -168,17 +170,18 @@ file	dev/ic/ciss.c			ciss
 device	ami: scsi
 file	dev/ic/ami.c			ami
 
+# LSI MegaRAID SAS controllers
+device	mfi: scsi
+file	dev/ic/mfi.c			mfi
+
 # Qlogic ISP 10x0 SCSI Controllers
 device	isp: scsi
 file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
 
-# LSILogic Fusion-MPT I/O Processor SCSI/FC Controllers
-#
-device	mpt: scsi
-file	dev/ic/mpt.c			mpt
-file	dev/ic/mpt_debug.c		mpt
-file	dev/ic/mpt_openbsd.c		mpt
+# LSI Logic Fusion-MPT Message Passing Interface
+device	mpi: scsi
+file	dev/ic/mpi.c			mpi
 
 # UltraStor SCSI controllers
 device	uha: scsi
@@ -289,7 +292,8 @@ file	dev/ic/tropic.c			tr
 # 8250/16[45]50-based "com" ports
 device	com: tty
 device	pccom: tty			# XXX
-file	dev/ic/com.c			com needs-flag
+file	dev/ic/com.c			com & (com | com_cardbus | com_gsc |
+					       com_isapnp)	needs-flag
 file	dev/ic/com_subr.c		com | pccom
 
 # PC-like keyboard controller
@@ -363,6 +367,16 @@ device	ral: ether, ifnet, ifmedia, firmload, wlan
 file	dev/ic/rt2560.c			ral
 file	dev/ic/rt2661.c			ral
 
+# Texas Instruments ACX 802.11
+device	acx: ether, ifnet, ifmedia, firmload, wlan
+file	dev/ic/acx.c			acx
+file	dev/ic/acx111.c			acx
+file	dev/ic/acx100.c			acx
+
+# Conexant PrismGT
+device	pgt: ether, ifnet, ifmedia, firmload, wlan
+file	dev/ic/pgt.c			pgt
+
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
 # devices which provide these attributes, and we'd like to avoid hairy
@@ -375,6 +389,7 @@ define	usbus {}			# USB attachment
 define	pcmciabus {[controller = -1], [socket = -1]}	# PCMCIA attachment
 define	cbbus {[slot = -1]}		# CardBus attachment
 define	pcmciaslot {[slot = -1]}	# PCMCIA slot itself
+define	sdmmcbus {}			# SD/MMC attachment
 
 # UHCI USB controller
 device	uhci: usbus
@@ -387,6 +402,10 @@ file	dev/usb/ohci.c			ohci	needs-flag
 # EHCI USB controller
 device	ehci: usbus
 file	dev/usb/ehci.c			ehci	needs-flag
+
+# SDHC SD/MMC controller
+device	sdhc: sdmmcbus
+file	dev/sdmmc/sdhc.c		sdhc	needs-flag
 
 # radio devices, attaches to radio hardware driver
 device	radio
@@ -405,7 +424,6 @@ pseudo-device rd: disk
 file	dev/ramdisk.c			rd needs-flag
 
 pseudo-device pty: tty
-pseudo-device tb: tty
 
 pseudo-device loop: ifnet
 pseudo-device sl: ifnet
@@ -578,6 +596,7 @@ file isofs/cd9660/cd9660_vnops.c	cd9660
 file isofs/udf/udf_subr.c		udf
 file isofs/udf/udf_vfsops.c		udf
 file isofs/udf/udf_vnops.c		udf
+file kern/clock_subr.c
 file kern/exec_aout.c
 file kern/exec_conf.c
 file kern/exec_ecoff.c
@@ -630,7 +649,7 @@ file kern/subr_userconf.c		boot_config
 file kern/subr_xxx.c
 file kern/sys_generic.c
 file kern/sys_pipe.c
-file kern/sys_process.c			ptrace
+file kern/sys_process.c			ptrace | procfs | systrace
 file kern/sys_socket.c
 file kern/syscalls.c			syscall_debug
 file kern/sysv_ipc.c			sysvshm | sysvsem | sysvmsg
@@ -641,7 +660,6 @@ file kern/tty.c
 file kern/tty_conf.c
 file kern/tty_pty.c			pty			needs-count
 file kern/tty_subr.c
-file kern/tty_tb.c			tb			needs-count
 file kern/tty_tty.c
 file kern/uipc_domain.c
 file kern/uipc_mbuf.c
@@ -663,6 +681,7 @@ file kern/vfs_subr.c
 file kern/vfs_sync.c
 file kern/vfs_syscalls.c
 file kern/vfs_vnops.c
+file kern/vfs_getcwd.c
 file kern/vnode_if.c
 file miscfs/deadfs/dead_vnops.c
 file miscfs/fifofs/fifo_vnops.c		fifo
@@ -677,6 +696,7 @@ file miscfs/procfs/procfs_subr.c	procfs
 file miscfs/procfs/procfs_vfsops.c	procfs
 file miscfs/procfs/procfs_vnops.c	procfs
 file miscfs/specfs/spec_vnops.c
+file miscfs/specfs/spec_subr.c
 file msdosfs/msdosfs_conv.c		msdosfs
 file msdosfs/msdosfs_denode.c		msdosfs
 file msdosfs/msdosfs_fat.c		msdosfs
@@ -690,9 +710,8 @@ file ntfs/ntfs_subr.c			ntfs
 file ntfs/ntfs_vfsops.c			ntfs
 file ntfs/ntfs_vnops.c			ntfs
 file net/bpf.c				bpfilter		needs-count
-file net/bpf_filter.c			bpfilter | ppp
+file net/bpf_filter.c			bpfilter
 file net/if.c
-file net/if_arcsubr.c			arc			needs-flag
 file net/if_atmsubr.c			atm			needs-flag
 file net/if_ethersubr.c			ether | inet | fddi | token needs-flag
 file net/if_fddisubr.c			fddi
@@ -722,6 +741,7 @@ file net/if_enc.c			enc			needs-count
 file net/if_gre.c			gre			needs-count
 file net/if_trunk.c			trunk			needs-count
 file net80211/ieee80211.c		wlan
+file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan
 file net80211/ieee80211_input.c		wlan
 file net80211/ieee80211_ioctl.c		wlan
@@ -778,6 +798,7 @@ file crypto/cryptosoft.c		(inet & ipsec) | crypto
 file crypto/xform.c			(inet & ipsec) | crypto
 file crypto/deflate.c			(inet & ipsec) | crypto
 file crypto/arc4.c			wi | wlan
+file crypto/michael.c			wlan
 file netatalk/aarp.c			netatalk
 file netatalk/at_control.c		netatalk
 file netatalk/at_proto.c		netatalk
@@ -900,7 +921,7 @@ file netinet6/icmp6.c			inet6
 file netinet6/ip6_id.c			inet6
 file netinet6/ip6_input.c		inet6
 file netinet6/ip6_forward.c		inet6
-file netinet6/ip6_mroute.c		inet6
+file netinet6/ip6_mroute.c		inet6 & mrouting
 file netinet6/ip6_output.c		inet6
 file netinet6/route6.c			inet6
 file netinet6/mld6.c			inet6
@@ -915,3 +936,7 @@ file net/pfkey.c			key | ipsec | tcp_signature
 file net/pfkeyv2.c			key | ipsec | tcp_signature
 file net/pfkeyv2_parsemessage.c		key | ipsec | tcp_signature
 file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
+
+# NMEA0183 support
+pseudo-device nmea: tty
+file	kern/tty_nmea.c			nmea needs-flag

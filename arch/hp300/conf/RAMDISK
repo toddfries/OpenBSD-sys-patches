@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.26 2005/09/27 22:05:36 miod Exp $
+#	$OpenBSD: RAMDISK,v 1.28 2006/07/09 19:45:01 miod Exp $
 #
 # Ram disk kernel.
 #
@@ -6,11 +6,8 @@
 machine hp300 m68k
 
 # Support for various CPU types
-option		HP320
-option		HP330		# includes 318, 319
 option		HP340
 option		HP345
-option		HP350
 option		HP360
 option		HP362
 option		HP370
@@ -104,6 +101,10 @@ wsdisplay*	at rbox?
 topcat*		at intio?
 topcat*		at dio?
 wsdisplay*	at topcat?
+
+# TurboVRX framebuffer
+tvrx*		at dio?
+wsdisplay*	at tvrx?
 
 # SGC framebuffers
 sti*		at sgc?

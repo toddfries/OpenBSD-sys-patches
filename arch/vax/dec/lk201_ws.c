@@ -1,4 +1,4 @@
-/*	$OpenBSD: lk201_ws.c,v 1.2 2006/01/17 20:26:16 miod Exp $	*/
+/*	$OpenBSD: lk201_ws.c,v 1.10 2006/08/27 16:50:43 miod Exp $	*/
 /* $NetBSD: lk201_ws.c,v 1.2 1998/10/22 17:55:20 drochner Exp $ */
 
 /*
@@ -35,6 +35,10 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
+#include <sys/timeout.h>
 
 #include <dev/wscons/wsconsio.h>
 
@@ -42,13 +46,26 @@
 #include <vax/dec/lk201var.h>
 #include <vax/dec/wskbdmap_lk201.h> /* for {MIN,MAX}_LK201_KEY */
 
-#define send(lks, c) ((*((lks)->attmt.sendchar))((lks)->attmt.cookie, c))
+struct	cfdriver lkkbd_cd = {
+	NULL, "lkkbd", DV_DULL
+};
 
-int
-lk201_init(lks)
-	struct lk201_state *lks;
+void	lk201_identify(void *);
+
+static const char *lkkbd_descr[] = {
+	"no keyboard",
+	"LK-201 keyboard",
+	"LK-401 keyboard"
+};
+
+#define	send(lks, c) ((*((lks)->attmt.sendchar))((lks)->attmt.cookie, c))
+
+void
+lk201_init(struct lk201_state *lks)
 {
 	int i;
+
+	lks->waitack = 0;
 
 	send(lks, LK_LED_ENABLE);
 	send(lks, LK_LED_ALL);
@@ -60,8 +77,8 @@ lk201_init(lks)
 	for (i = 1; i <= 14; i++)
 		send(lks, LK_CMD_MODE(LK_UPDOWN, i));
 
-	send(lks, LK_CL_ENABLE);
-	send(lks, LK_PARAM_VOLUME(3));
+	send(lks, LK_CL_DISABLE);
+	lks->kcvol = 0;
 
 	lks->bellvol = -1; /* not yet set */
 
@@ -73,43 +90,131 @@ lk201_init(lks)
 	send(lks, LK_LED_ALL);
 	lks->leds_state = 0;
 
-	return (0);
+	/*
+	 * Note that, when attaching lkkbd initially, this timeout will
+	 * be scheduled but will not run until interrupts are enabled.
+	 * This is not a problem, since lk201_identify() relies upon
+	 * interrupts being enabled.
+	 */
+	timeout_set(&lks->probetmo, lk201_identify, lks);
+	timeout_add(&lks->probetmo, 0);
+}
+
+void
+lk201_identify(void *v)
+{
+	struct lk201_state *lks = v;
+	int i;
+
+	/*
+	 * Swallow all the keyboard acknowledges from lk201_init().
+	 * There should be 14 of them - one per LK_CMD_MODE command.
+	 */
+	for(;;) {
+		lks->waitack = 1;
+		for (i = 100; i != 0; i--) {
+			DELAY(1000);
+			if (lks->waitack == 0)
+				break;
+		}
+		if (i == 0)
+			break;
+	}
+
+	/*
+	 * Try to set the keyboard in LK-401 mode.
+	 * If we receive an error, this is an LK-201 keyboard.
+	 */
+	lks->waitack = 1;
+	send(lks, LK_ENABLE_401);
+	for (i = 100; i != 0; i--) {
+		DELAY(1000);
+		if (lks->waitack == 0)
+			break;
+	}
+	if (lks->waitack != 0)
+		lks->kbdtype = KBD_NONE;
+	else {
+		if (lks->ackdata == LK_INPUT_ERROR)
+			lks->kbdtype = KBD_LK201;
+		else
+			lks->kbdtype = KBD_LK401;
+	}
+	lks->waitack = 0;
+
+	printf("%s: %s\n", lks->device->dv_xname, lkkbd_descr[lks->kbdtype]);
 }
 
 int
-lk201_decode(lks, datain, type, dataout)
-	struct lk201_state *lks;
-	int datain;
-	u_int *type;
-	int *dataout;
+lk201_decode(struct lk201_state *lks, int active, int wantmulti, int datain,
+    u_int *type, int *dataout)
 {
 	int i, freeslot;
 
-	switch (datain) {
-	    case LK_KEY_UP:
-		for (i = 0; i < LK_KLL; i++)
-			lks->down_keys_list[i] = -1;
-		*type = WSCONS_EVENT_ALL_KEYS_UP;
-		return (1);
-	    case LK_POWER_UP:
-		printf("lk201_decode: powerup detected\n");
-		lk201_init(lks);
-		return (0);
-	    case LK_KDOWN_ERROR:
-	    case LK_POWER_ERROR:
-	    case LK_OUTPUT_ERROR:
-	    case LK_INPUT_ERROR:
-		printf("lk201_decode: error %x\n", datain);
-		/* FALLTHRU */
-	    case LK_KEY_REPEAT: /* autorepeat handled by wskbd */
-	    case LK_MODE_CHANGE: /* ignore silently */
-		return (0);
+	if (lks->waitack != 0) {
+		lks->ackdata = datain;
+		lks->waitack = 0;
+		return (LKD_NODATA);
 	}
 
-	if (datain < MIN_LK201_KEY || datain > MAX_LK201_KEY) {
-		printf("lk201_decode: %x\n", datain);
-		return (0);
+	switch (datain) {
+	case LK_POWER_UP:
+#ifdef DEBUG
+		printf("lk201_decode: powerup detected\n");
+#endif
+		lk201_init(lks);
+		return (LKD_NODATA);
+	case LK_KDOWN_ERROR:
+	case LK_POWER_ERROR:
+	case LK_OUTPUT_ERROR:
+	case LK_INPUT_ERROR:
+		printf("lk201_decode: error %x\n", datain);
+		/* FALLTHROUGH */
+	case LK_KEY_REPEAT: /* autorepeat handled by wskbd */
+	case LK_MODE_CHANGE: /* ignore silently */
+		return (LKD_NODATA);
 	}
+
+	if (active == 0)
+		return (LKD_NODATA);	/* no need to decode */
+
+	if (datain == LK_KEY_UP) {
+		if (wantmulti) {
+			for (i = 0; i < LK_KLL; i++)
+				if (lks->down_keys_list[i] != -1) {
+					*type = WSCONS_EVENT_KEY_UP;
+					*dataout = lks->down_keys_list[i] -
+					    MIN_LK201_KEY;
+					lks->down_keys_list[i] = -1;
+					return (LKD_MORE);
+				}
+			return (LKD_NODATA);
+		} else {
+			for (i = 0; i < LK_KLL; i++)
+				lks->down_keys_list[i] = -1;
+			*type = WSCONS_EVENT_ALL_KEYS_UP;
+			return (LKD_COMPLETE);
+		}
+	} else if (datain < MIN_LK201_KEY || datain > MAX_LK201_KEY) {
+#ifdef DEBUG
+		/* this can happen while hotplugging the keyboard */
+		printf("lk201_decode: %x\n", datain);
+#endif
+		return (LKD_NODATA);
+	}
+
+	/*
+	 * The LK-201 keyboard has a compose key (to the left of the spacebar),
+	 * but no alt/meta key at all. The LK-401 keyboard fixes this and has
+	 * two compose keys and two alt keys.
+	 *
+	 * If the keyboard is an LK-201, translate the left compose key
+	 * scancode to a specific key code, which will map as a left alt key,
+	 * and compose key when shifted), so that the user can have both
+	 * an alt and a compose key available.
+	 */
+	if (lks->kbdtype == KBD_LK201 && datain == 177)
+		datain = 252;
 
 	*dataout = datain - MIN_LK201_KEY;
 
@@ -118,7 +223,7 @@ lk201_decode(lks, datain, type, dataout)
 		if (lks->down_keys_list[i] == datain) {
 			*type = WSCONS_EVENT_KEY_UP;
 			lks->down_keys_list[i] = -1;
-			return (1);
+			return (LKD_COMPLETE);
 		}
 		if (lks->down_keys_list[i] == -1 && freeslot == -1)
 			freeslot = i;
@@ -126,18 +231,16 @@ lk201_decode(lks, datain, type, dataout)
 
 	if (freeslot == -1) {
 		printf("lk201_decode: down(%d) no free slot\n", datain);
-		return (0);
+		return (LKD_NODATA);
 	}
 
 	*type = WSCONS_EVENT_KEY_DOWN;
 	lks->down_keys_list[freeslot] = datain;
-	return (1);
+	return (LKD_COMPLETE);
 }
 
 void
-lk201_bell(lks, bell)
-	struct lk201_state *lks;
-	struct wskbd_bell_data *bell;
+lk201_bell(struct lk201_state *lks, struct wskbd_bell_data *bell)
 {
 	unsigned int vol;
 
@@ -156,10 +259,46 @@ lk201_bell(lks, bell)
 	send(lks, LK_RING_BELL);
 }
 
+int
+lk201_get_leds(struct lk201_state *lks)
+{
+	return (lks->leds_state);
+}
+
+int
+lk201_get_type(struct lk201_state *lks)
+{
+	/*
+	 * Note that we report LK201 even if no keyboard is
+	 * plugged to avoid confusing wsconsctl.
+	 */
+	if (lks->kbdtype == KBD_LK401)
+		return (WSKBD_TYPE_LK401);
+	else
+		return (WSKBD_TYPE_LK201);
+}
+
 void
-lk201_set_leds(lks, leds)
-	struct lk201_state *lks;
-	int leds;
+lk201_set_keyclick(struct lk201_state *lks, int vol)
+{
+	unsigned int newvol;
+
+	if (vol == 0)
+		send(lks, LK_CL_DISABLE);
+	else {
+		newvol = 8 - vol * 8 / 100;
+		if (newvol > 7)
+			newvol = 7;
+
+		send(lks, LK_CL_ENABLE);
+		send(lks, LK_PARAM_VOLUME(newvol));
+	}
+
+	lks->kcvol = vol;
+}
+
+void
+lk201_set_leds(struct lk201_state *lks, int leds)
 {
 	int newleds;
 

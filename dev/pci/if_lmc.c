@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmc.c,v 1.20 2005/11/07 00:29:21 brad Exp $ */
+/*	$OpenBSD: if_lmc.c,v 1.23 2006/05/13 19:10:02 brad Exp $ */
 /*	$NetBSD: if_lmc.c,v 1.1 1999/03/25 03:32:43 explorer Exp $	*/
 
 /*-
@@ -616,9 +616,10 @@ lmc_rx_intr(lmc_softc_t * const sc)
 #if NBPFILTER > 0
 			if (sc->lmc_bpf != NULL) {
 				if (me == ms)
-					LMC_BPF_TAP(sc, mtod(ms, caddr_t), total_len);
+					LMC_BPF_TAP(sc, mtod(ms, caddr_t),
+					    total_len, BPF_DIRECTION_IN);
 				else
-					LMC_BPF_MTAP(sc, ms);
+					LMC_BPF_MTAP(sc, ms, BPF_DIRECTION_IN);
 			}
 #endif
 			sc->lmc_flags |= LMC_RXACT;
@@ -772,7 +773,7 @@ lmc_tx_intr(lmc_softc_t * const sc)
 		    sc->lmc_txmaps[sc->lmc_txmaps_free++] = map;
 #if NBPFILTER > 0
 		    if (sc->lmc_bpf != NULL)
-			LMC_BPF_MTAP(sc, m);
+			LMC_BPF_MTAP(sc, m, BPF_DIRECTION_OUT);
 #endif
 		    m_freem(m);
 #if defined(LMC_DEBUG)
@@ -814,6 +815,17 @@ lmc_print_abnormal_interrupt (lmc_softc_t * const sc, u_int32_t csr)
 {
 	printf(LMC_PRINTF_FMT ": Abnormal interrupt\n", LMC_PRINTF_ARGS);
 }
+
+static const char * const lmc_system_errors[] = {
+    "parity error",
+    "master abort",
+    "target abort",
+    "reserved #3",
+    "reserved #4",
+    "reserved #5",
+    "reserved #6",
+    "reserved #7",
+};
 
 static void
 lmc_intr_handler(lmc_softc_t * const sc, int *progress_p)
@@ -1330,6 +1342,7 @@ lmc_attach(lmc_softc_t * const sc)
 	ifp->if_watchdog = lmc_watchdog;
 	ifp->if_timer = 1;
 	ifp->if_mtu = LMC_MTU;
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
   
 	if_attach(ifp);

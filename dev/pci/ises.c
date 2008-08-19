@@ -1,4 +1,4 @@
-/*	$OpenBSD: ises.c,v 1.29 2005/11/26 14:31:26 krw Exp $	*/
+/*	$OpenBSD: ises.c,v 1.31 2006/06/29 21:34:51 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000, 2001 Håkan Olsson (ho@crt.se)
@@ -160,7 +160,6 @@ ises_attach(struct device *parent, struct device *self, void *aux)
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	bus_size_t memsize;
-	u_int32_t cmd;
 
 	bus_dma_segment_t seg;
 	int nsegs, error, state;
@@ -169,18 +168,6 @@ ises_attach(struct device *parent, struct device *self, void *aux)
 	SIMPLEQ_INIT(&sc->sc_qchip);
 	SIMPLEQ_INIT(&sc->sc_cmdq);
 	state = 0;
-
-	/* Verify PCI space */
-	cmd = pci_conf_read(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	if (!(cmd & PCI_COMMAND_MEM_ENABLE)) {
-		printf(": failed to enable memory mapping\n");
-		return;
-	}
-
-	if (!(cmd & PCI_COMMAND_MASTER_ENABLE)) {
-		printf(": failed to enable bus mastering\n");
-		return;
-	}
 
 	/* Map control/status registers. */
 	if (pci_mapreg_map(pa, PCI_MAPREG_START,
@@ -1552,7 +1539,7 @@ ises_hrng_init(struct ises_softc *sc)
 	/* ACK the response */
 	WRITE_REG(sc, ISES_A_OQS, 0);
 	DELAY(1);
-	printf(", rng active", sc->sc_dv.dv_xname);
+	printf(", rng active");
 
 #ifdef ISESDEBUG
 	/* Benchmark the HRNG. */

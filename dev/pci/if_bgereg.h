@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.42 2006/02/21 01:45:48 brad Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.57 2006/08/29 17:44:16 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -250,6 +250,7 @@
 #define BGE_CHIPID_BCM5703_A1		0x10010000
 #define BGE_CHIPID_BCM5703_A2		0x10020000
 #define BGE_CHIPID_BCM5703_A3		0x10030000
+#define BGE_CHIPID_BCM5703_B0		0x11000000
 #define BGE_CHIPID_BCM5704_A0		0x20000000
 #define BGE_CHIPID_BCM5704_A1		0x20010000
 #define BGE_CHIPID_BCM5704_A2		0x20020000
@@ -266,9 +267,11 @@
 #define BGE_CHIPID_BCM5750_B1		0x41010000
 #define BGE_CHIPID_BCM5750_C0		0x42000000
 #define BGE_CHIPID_BCM5750_C1		0x42010000
+#define BGE_CHIPID_BCM5750_C2		0x42020000
 #define BGE_CHIPID_BCM5714_A0		0x50000000
 #define BGE_CHIPID_BCM5752_A0		0x60000000
 #define BGE_CHIPID_BCM5752_A1		0x60010000
+#define BGE_CHIPID_BCM5752_A2		0x60020000
 #define BGE_CHIPID_BCM5714_B0		0x80000000
 #define BGE_CHIPID_BCM5714_B3		0x80030000
 #define BGE_CHIPID_BCM5715_A0		0x90000000
@@ -286,6 +289,8 @@
 #define BGE_ASICREV_BCM5752		0x06
 #define BGE_ASICREV_BCM5780		0x08
 #define BGE_ASICREV_BCM5714		0x09	/* 5714, 5715 */
+#define BGE_ASICREV_BCM5755		0x0a
+#define BGE_ASICREV_BCM5787		0x0b
 
 /* chip revisions */
 #define BGE_CHIPREV(x)			((x) >> 24)
@@ -343,7 +348,7 @@
  * register is set.
  */
 #define BGE_PCISTATE_FORCE_RESET	0x00000001
-#define BGE_PCISTATE_INTR_STATE		0x00000002
+#define BGE_PCISTATE_INTR_NOT_ACTIVE	0x00000002
 #define BGE_PCISTATE_PCI_BUSMODE	0x00000004 /* 1 = PCI, 0 = PCI-X */
 #define BGE_PCISTATE_PCI_BUSSPEED	0x00000008 /* 1 = 33/66, 0 = 66/133 */
 #define BGE_PCISTATE_32BIT_BUS		0x00000010 /* 1 = 32bit, 0 = 64bit */
@@ -1202,7 +1207,7 @@
 #define BGE_HCCMODE_ENABLE		0x00000002
 #define BGE_HCCMODE_ATTN		0x00000004
 #define BGE_HCCMODE_COAL_NOW		0x00000008
-#define BGE_HCCMODE_MSI_BITS		0x0x000070
+#define BGE_HCCMODE_MSI_BITS		0x00000070
 #define BGE_HCCMODE_STATBLK_SIZE	0x00000180
 
 #define BGE_STATBLKSZ_FULL		0x00000000
@@ -2190,8 +2195,9 @@ struct bge_gib {
  * boundary.
  */
 
+#define BGE_JUMBO_FRAMELEN	9018
+#define BGE_JUMBO_MTU		(BGE_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
 #define BGE_PAGE_SIZE		PAGE_SIZE
-#define BGE_MIN_FRAMELEN		60
 
 /*
  * Other utility macros.
@@ -2237,13 +2243,9 @@ struct bge_gib {
 
 #define BGE_SSLOTS	256
 #define BGE_MSLOTS	256
-#ifdef __sparc64__
-#define BGE_JSLOTS	54
-#else
 #define BGE_JSLOTS	384
-#endif
 
-#define BGE_JRAWLEN (ETHER_MAX_LEN_JUMBO + ETHER_ALIGN)
+#define BGE_JRAWLEN (BGE_JUMBO_FRAMELEN + ETHER_ALIGN)
 #define BGE_JLEN (BGE_JRAWLEN + (sizeof(u_int64_t) - \
 	(BGE_JRAWLEN % sizeof(u_int64_t))))
 #define BGE_JPAGESZ PAGE_SIZE
@@ -2346,6 +2348,7 @@ struct bge_softc {
 	struct mii_data		bge_mii;
 	struct ifmedia		bge_ifmedia;	/* media info */
 	u_int8_t		bge_extram;	/* has external SSRAM */
+	u_int8_t		bge_eeprom;
 	u_int8_t		bge_tbi;
 	u_int8_t		bge_rx_alignment_bug;
 	bus_dma_tag_t		bge_dmatag;
@@ -2378,6 +2381,8 @@ struct bge_softc {
 	int			bge_link;	/* link state */
 	int			bge_link_evt;	/* pending link event */
 	struct timeout		bge_timeout;
+	void			*sc_powerhook;
+	void			*sc_shutdownhook;
 	u_long			bge_rx_discards;
 	u_long			bge_tx_discards;
 	u_long			bge_tx_collisions;

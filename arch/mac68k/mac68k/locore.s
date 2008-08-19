@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.51 2006/01/21 12:27:58 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.56 2006/07/06 17:49:45 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.103 1998/07/09 06:02:50 scottr Exp $	*/
 
 /*
@@ -84,6 +84,11 @@
  */
 	.text
 GLOBAL(kernel_text)
+
+/*
+ * Clear and skip the first page of text; it will not be mapped.
+ */
+	.fill	NBPG / 4, 4, 0
 
 /*
  * Initialization
@@ -201,13 +206,21 @@ Lstart1:
 1:
 #endif
 #if defined(M68020) || defined(M68030)
-	cmpl	#CPU_68040,a0@		| 68040?
-	jeq	1f			| yes, skip
+#if defined(M68030)
+	cmpl	#CPU_68030,a0@		| 68030?
+	jeq	1f			| yes, ok
+#endif
+#if defined(M68020)
+	cmpl	#CPU_68020,a0@		| 68020?
+	jeq	1f			| yes, ok
+#endif
+	jra	9f
+1:
 	movl	#_C_LABEL(busaddrerr2030),a2@(8)
 	movl	#_C_LABEL(busaddrerr2030),a2@(12)
 	jra	Lstart2
-1:
 #endif
+9:
 	/* Config botch; no hope. */
 	movl	_C_LABEL(MacOSROMBase),a1 | Load MacOS ROMBase
 	jra	Ldoboot1
@@ -330,7 +343,7 @@ Lloaddone:
 	movl	a1,_C_LABEL(curpcb)	| proc0 is running
 
 /* flush TLB and turn on caches */
-	jbsr	_C_LABEL(TBIA)		| invalidate TLB
+	jbsr	_ASM_LABEL(TBIA)	| invalidate TLB
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
 	jeq	Lnocache0		| yes, cache already on
 	movl	#CACHE_ON,d0
@@ -384,7 +397,7 @@ GLOBAL(proc_trampoline)
 GLOBAL(m68k_fault_addr)
 	.long	0
 
-#if defined(M68040) || defined(M68060)
+#if defined(M68040)
 ENTRY_NOPROFILE(addrerr4060)
 	clrl	sp@-			| stack adjust count
 	moveml	#0xFFFF,sp@-		| save user registers
@@ -396,46 +409,6 @@ ENTRY_NOPROFILE(addrerr4060)
 	jra	_ASM_LABEL(faultstkadj)	| and deal with it
 #endif
 
-#if defined(M68060)
-ENTRY_NOPROFILE(buserr60)
-	clrl	sp@-			| stack adjust count
-	moveml	#0xFFFF,sp@-		| save user registers
-	movl	usp,a0			| save the user SP
-	movl	a0,sp@(FR_SP)		|   in the savearea
-	movel	sp@(FR_HW+12),d0	| FSLW
-	btst	#2,d0			| branch prediction error?
-	jeq	Lnobpe
-	movc	cacr,d2
-	orl	#IC60_CABC,d2		| clear all branch cache entries
-	movc	d2,cacr
-	movl	d0,d1
-	addql	#1,L60bpe
-	andl	#0x7ffd,d1
-	jeq	_ASM_LABEL(faultstkadjnotrap2)
-Lnobpe:
-| we need to adjust for misaligned addresses
-	movl	sp@(FR_HW+8),d1		| grab VA
-	btst	#27,d0			| check for mis-aligned access
-	jeq	Lberr3			| no, skip
-	addl	#28,d1			| yes, get into next page
-					| operand case: 3,
-					| instruction case: 4+12+12
-	andl	#PG_FRAME,d1		| and truncate
-Lberr3:
-	movl	d1,sp@-
-	movl	d0,sp@-			| code is FSLW now.
-	andw	#0x1f80,d0 
-	jeq	Lberr60			| it is a bus error
-	movl	#T_MMUFLT,sp@-		| show that we are an MMU fault
-	jra	_ASM_LABEL(faultstkadj)	| and deal with it
-Lberr60:
-	tstl	_C_LABEL(nofault)	| catch bus error?
-	jeq	Lisberr			| no, handle as usual
-	movl	sp@(FR_HW+8+8),_C_LABEL(m68k_fault_addr) | save fault addr
-	movl	_C_LABEL(nofault),sp@-	| yes,
-	jbsr	_C_LABEL(longjmp)	|  longjmp(nofault)
-	/* NOTREACHED */
-#endif
 #if defined(M68040)
 ENTRY_NOPROFILE(buserr40)
 	clrl	sp@-			| stack adjust count
@@ -871,12 +844,14 @@ ENTRY_NOPROFILE(rtclock_intr)
 	movl	d2,sp@-			| save d2
 	movw	sr,d2			| save SPL
 	movw	_C_LABEL(mac68k_clockipl),sr	| raise SPL to splclock()
-	movl	a6@(8),a1		| get pointer to frame in via1_intr
-	movl	a1@(64),sp@-		| push ps
-	movl	a1@(68),sp@-		| push pc
-	movl	sp,sp@-			| push pointer to ps, pc
+	movl	a6@,a1			| unwind to frame in intr_dispatch
+	lea	a1@(28),a1		| push pointer to interrupt frame
+	movl	a1,sp@-			| 28 = 16 for regs in intrhand,
+					|    + 4 for args to intr_dispatch
+					|    + 4 for return address to intrhand
+					|    + 4 for value of A6
 	jbsr	_C_LABEL(hardclock)	| call generic clock int routine
-	lea	sp@(12),sp		| pop params
+	addql	#4,sp			| pop params
 	movw	d2,sr			| restore SPL
 	movl	sp@+,d2			| restore d2
 	movl	#1,d0			| clock taken care of
@@ -1202,8 +1177,7 @@ Lsldone:
 /*
  * Invalidate entire TLB.
  */
-ENTRY(TBIA)
-__TBIA:
+ASENTRY_NOPROFILE(TBIA)
 #if defined(M68040)
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
 	jne	Lmotommu3		| no, skip
@@ -1225,10 +1199,6 @@ Ltbia851:
  * Invalidate any TLB entry for given VA (TB Invalidate Single)
  */
 ENTRY(TBIS)
-#ifdef DEBUG
-	tstl	_ASM_LABEL(fulltflush)	| being conservative?
-	jne	_C_LABEL(_TBIA)		| yes, flush entire TLB
-#endif
 	movl	sp@(4),a0
 #if defined(M68040)
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
@@ -1260,10 +1230,6 @@ Ltbis851:
  * Invalidate supervisor side of TLB
  */
 ENTRY(TBIAS)
-#ifdef DEBUG
-	tstl	_ASM_LABEL(fulltflush)	| being conservative?
-	jne	_C_LABEL(_TBIA)		| yes, flush everything
-#endif
 #if defined(M68040)
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
 	jne	Lmotommu5		| no, skip
@@ -1283,14 +1249,11 @@ Ltbias851:
 	movc	d0,cacr			| invalidate on-chip d-cache
 	rts
 
+#if defined(COMPAT_HPUX)
 /*
  * Invalidate user side of TLB
  */
 ENTRY(TBIAU)
-#ifdef DEBUG
-	tstl	_ASM_LABEL(fulltflush)	| being conservative?
-	jne	_C_LABEL(_TBIA)		| yes, flush everything
-#endif
 #if defined(M68040)
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
 	jne	Lmotommu6		| no, skip
@@ -1308,13 +1271,13 @@ Ltbiau851:
 	movl	#DC_CLEAR,d0
 	movc	d0,cacr			| invalidate on-chip d-cache
 	rts
+#endif	/* COMPAT_HPUX */
 
 /*
  * Invalidate instruction cache
  */
 ENTRY(ICIA)
 #if defined(M68040)
-ENTRY(ICPA)
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
 	jne	Lmotommu7		| no, skip
 	.word	0xf498			| cinva ic
@@ -1327,42 +1290,33 @@ Lmotommu7:
 
 /*
  * Invalidate data cache.
+ *
  * NOTE: we do not flush 68030 on-chip cache as there are no aliasing
  * problems with DC_WA.  The only cases we have to worry about are context
  * switch and TLB changes, both of which are handled "in-line" in resume
  * and TBI*.
+ * Because of this, since there is no way on 68040 and 68060 to flush
+ * user and supervisor modes specfically, DCIS and DCIU are the same entry
+ * point as DCIA.
  */
 ENTRY(DCIA)
-_C_LABEL(_DCIA):
-#if defined(M68040)
-	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
-	jne	Lmotommu8		| no, skip
-	.word	0xf478			| cpusha dc
-Lmotommu8:
-#endif
-	rts
-
 ENTRY(DCIS)
-_C_LABEL(_DCIS):
-#if defined(M68040)
-	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
-	jne	Lmotommu9		| no, skip
-	.word	0xf478			| cpusha dc
-Lmotommu9:
-#endif
-	rts
-
 ENTRY(DCIU)
-_C_LABEL(_DCIU):
 #if defined(M68040)
-	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
-	jne	LmotommuA		| no, skip
+	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040 or 68060?
+	jgt	1f			| no, skip
 	.word	0xf478			| cpusha dc
-LmotommuA:
+1:
 #endif
 	rts
 
 #ifdef M68040
+ENTRY(ICPA)
+	.word	0xf498			| cinva ic
+	rts
+ENTRY(DCFA)
+	.word	0xf478			| cpusha dc
+	rts
 ENTRY(ICPL)	/* invalidate instruction physical cache line */
 	movl	sp@(4),a0		| address
 	.word	0xf488			| cinvl ic,a0@
@@ -1379,9 +1333,6 @@ ENTRY(DCPP)	/* invalidate data physical cache page */
 	movl	sp@(4),a0		| address
 	.word	0xf450			| cinvp dc,a0@
 	rts
-ENTRY(DCPA)	/* invalidate instruction physical cache line */
-	.word	0xf458			| cinva dc
-	rts
 ENTRY(DCFL)	/* data cache flush line */
 	movl	sp@(4),a0		| address
 	.word	0xf468			| cpushl dc,a0@
@@ -1394,7 +1345,6 @@ ENTRY(DCFP)	/* data cache flush page */
 
 ENTRY(PCIA)
 #if defined(M68040)
-ENTRY(DCFA)
 	cmpl	#MMU_68040,_C_LABEL(mmutype) | 68040?
 	jne	LmotommuB		| no, skip
 	.word	0xf478			| cpusha dc
@@ -1888,11 +1838,3 @@ GLOBAL(mac68k_vrsrc_cnt)
 	.long	0
 GLOBAL(mac68k_vrsrc_vec)
 	.word	0, 0, 0, 0, 0, 0
-
-#ifdef DEBUG
-ASGLOBAL(fulltflush)
-	.long	0
-
-ASGLOBAL(fullcflush)
-	.long	0
-#endif

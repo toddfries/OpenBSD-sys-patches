@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.19 2004/04/08 01:11:21 deraadt Exp $	*/
+/*	$OpenBSD: clock.c,v 1.23 2006/06/26 20:21:02 kettenis Exp $	*/
 /*	$NetBSD: clock.c,v 1.52 1997/05/24 20:16:05 pk Exp $ */
 
 /*
@@ -123,10 +123,8 @@ struct intersil7170 *i7;
 
 long	oclk_get_secs(void);
 void	oclk_get_dt(struct intersil_dt *);
-void	dt_to_gmt(struct intersil_dt *, long *);
 void	oclk_set_dt(struct intersil_dt *);
 void	oclk_set_secs(long);
-void	gmt_to_dt(long *, struct intersil_dt *);
 #endif
 
 int	oclockmatch(struct device *, void *, void *);
@@ -196,11 +194,8 @@ struct cfdriver timer_cd = {
 	NULL, "timer", DV_DULL
 };
 
-struct chiptime;
 void clk_wenable(int);
 void myetheraddr(u_char *);
-int chiptotime(int, int, int, int, int, int);
-void timetochip(struct chiptime *);
 
 int timerblurb = 10; /* Guess a value; used before clock is attached */
 
@@ -383,13 +378,9 @@ clockattach(parent, self, aux)
 	if (CPU_ISSUN4)
 		prop = "mk48t02";
 
-	if (CPU_ISSUN4COR4M)
+	else if (CPU_ISSUN4COR4M)
 		prop = getpropstring(ra->ra_node, "model");
 
-#ifdef DIAGNOSTIC
-	if (prop == NULL)
-		panic("no prop");
-#endif
 	printf(": %s (eeprom)\n", prop);
 
 	/*
@@ -786,110 +777,6 @@ statintr(cap)
 }
 
 /*
- * BCD to decimal and decimal to BCD.
- */
-#define	FROMBCD(x)	(((x) >> 4) * 10 + ((x) & 0xf))
-#define	TOBCD(x)	(((x) / 10 * 16) + ((x) % 10))
-
-#define	SECDAY		(24 * 60 * 60)
-#define	SECYR		(SECDAY * 365)
-/*
- * should use something like
- * #define LEAPYEAR(y) ((((y) % 4) == 0 && ((y) % 100) != 0) || ((y) % 400) == 0)
- * but it's unlikely that we'll still be around in 2100.
- */
-#define	LEAPYEAR(y)	(((y) & 3) == 0)
-
-/*
- * This code is defunct after 2068.
- * Will Unix still be here then??
- */
-const short dayyr[12] =
-    { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-
-int
-chiptotime(sec, min, hour, day, mon, year)
-	int sec, min, hour, day, mon, year;
-{
-	int days, yr;
-
-	sec = FROMBCD(sec);
-	min = FROMBCD(min);
-	hour = FROMBCD(hour);
-	day = FROMBCD(day);
-	mon = FROMBCD(mon);
-	year = FROMBCD(year) + YEAR0;
-
-	/* simple sanity checks */
-	if (year < 70 || mon < 1 || mon > 12 || day < 1 || day > 31)
-		return (0);
-	days = 0;
-	for (yr = 70; yr < year; yr++)
-		days += LEAPYEAR(yr) ? 366 : 365;
-	days += dayyr[mon - 1] + day - 1;
-	if (LEAPYEAR(yr) && mon > 2)
-		days++;
-	/* now have days since Jan 1, 1970; the rest is easy... */
-	return (days * SECDAY + hour * 3600 + min * 60 + sec);
-}
-
-struct chiptime {
-	int	sec;
-	int	min;
-	int	hour;
-	int	wday;
-	int	day;
-	int	mon;
-	int	year;
-};
-
-void
-timetochip(c)
-	struct chiptime *c;
-{
-	int t, t2, t3, now = time.tv_sec;
-
-	/* compute the year */
-	t2 = now / SECDAY;
-	t3 = (t2 + 2) % 7;	/* day of week */
-	c->wday = TOBCD(t3 + 1);
-
-	t = 69;
-	while (t2 >= 0) {	/* whittle off years */
-		t3 = t2;
-		t++;
-		t2 -= LEAPYEAR(t) ? 366 : 365;
-	}
-	c->year = t;
-
-	/* t3 = month + day; separate */
-	t = LEAPYEAR(t);
-	for (t2 = 1; t2 < 12; t2++)
-		if (t3 < dayyr[t2] + (t && t2 > 1))
-			break;
-
-	/* t2 is month */
-	c->mon = t2;
-	c->day = t3 - dayyr[t2 - 1] + 1;
-	if (t && t2 > 2)
-		c->day--;
-
-	/* the rest is easy */
-	t = now % SECDAY;
-	c->hour = t / 3600;
-	t %= 3600;
-	c->min = t / 60;
-	c->sec = t % 60;
-
-	c->sec = TOBCD(c->sec);
-	c->min = TOBCD(c->min);
-	c->hour = TOBCD(c->hour);
-	c->day = TOBCD(c->day);
-	c->mon = TOBCD(c->mon);
-	c->year = TOBCD(c->year - YEAR0);
-}
-
-/*
  * Set up the system's time, given a `reasonable' time value.
  */
 void
@@ -897,7 +784,7 @@ inittodr(base)
 	time_t base;
 {
 	struct clockreg *cl = clockreg;
-	int sec, min, hour, day, mon, year;
+	struct clock_ymdhms dt;
 	int badbase = 0, waszero = base == 0;
 	char *bad = NULL;
 
@@ -920,15 +807,15 @@ inittodr(base)
 #endif
 	clk_wenable(1);
 	cl->cl_csr |= CLK_READ;		/* enable read (stop time) */
-	sec = cl->cl_sec;
-	min = cl->cl_min;
-	hour = cl->cl_hour;
-	day = cl->cl_mday;
-	mon = cl->cl_month;
-	year = cl->cl_year;
+	dt.dt_sec = FROMBCD(cl->cl_sec);
+	dt.dt_min = FROMBCD(cl->cl_min);
+	dt.dt_hour = FROMBCD(cl->cl_hour);
+	dt.dt_day = FROMBCD(cl->cl_mday);
+	dt.dt_mon = FROMBCD(cl->cl_month);
+	dt.dt_year = FROMBCD(cl->cl_year) + CLOCK_BASE_YEAR;
 	cl->cl_csr &= ~CLK_READ;	/* time wears on */
 	clk_wenable(0);
-	time.tv_sec = chiptotime(sec, min, hour, day, mon, year);
+	time.tv_sec = clock_ymdhms_to_secs(&dt);
 
 #if defined(SUN4)
 forward:
@@ -972,7 +859,7 @@ void
 resettodr()
 {
 	struct clockreg *cl;
-	struct chiptime c;
+	struct clock_ymdhms dt;
 
 #if defined(SUN4)
 	if (oldclk) {
@@ -985,16 +872,18 @@ resettodr()
 
 	if (!time.tv_sec || (cl = clockreg) == NULL)
 		return;
-	timetochip(&c);
+
+	clock_secs_to_ymdhms(time.tv_sec, &dt);
+
 	clk_wenable(1);
 	cl->cl_csr |= CLK_WRITE;	/* enable write */
-	cl->cl_sec = c.sec;
-	cl->cl_min = c.min;
-	cl->cl_hour = c.hour;
-	cl->cl_wday = c.wday;
-	cl->cl_mday = c.day;
-	cl->cl_month = c.mon;
-	cl->cl_year = c.year;
+	cl->cl_sec = TOBCD(dt.dt_sec);
+	cl->cl_min = TOBCD(dt.dt_min);
+	cl->cl_hour = TOBCD(dt.dt_hour);
+	cl->cl_wday = TOBCD(dt.dt_wday);
+	cl->cl_mday = TOBCD(dt.dt_day);
+	cl->cl_month = TOBCD(dt.dt_mon);
+	cl->cl_year = TOBCD(dt.dt_year - CLOCK_BASE_YEAR);
 	cl->cl_csr &= ~CLK_WRITE;	/* load them up */
 	clk_wenable(0);
 }
@@ -1006,24 +895,36 @@ resettodr()
 long
 oclk_get_secs()
 {
-        struct intersil_dt dt;
-        long gmt;
+        struct intersil_dt idt;
+	struct clock_ymdhms dt;
 
-        oclk_get_dt(&dt);
-        dt_to_gmt(&dt, &gmt);
-        return (gmt);
+        oclk_get_dt(&idt);
+	dt.dt_sec = idt.dt_sec;
+	dt.dt_min = idt.dt_min;
+	dt.dt_hour = idt.dt_hour;
+	dt.dt_day = idt.dt_day;
+	dt.dt_mon = idt.dt_month;
+	dt.dt_year = idt.dt_year + CLOCK_BASE_YEAR;
+        return clock_ymdhms_to_secs(&dt);
 }
 
 void
 oclk_set_secs(secs)
 	long secs;
 {
-        struct intersil_dt dt;
-        long gmt;
+        struct intersil_dt idt;
+	struct clock_ymdhms dt;
 
-        gmt = secs;
-        gmt_to_dt(&gmt, &dt);
-        oclk_set_dt(&dt);
+	clock_secs_to_ymdhms(secs, &dt);
+	
+	idt.dt_hour = dt.dt_sec;
+	idt.dt_min = dt.dt_min;
+	idt.dt_sec = dt.dt_sec;
+	idt.dt_month = dt.dt_mon;
+	idt.dt_day = dt.dt_day;
+	idt.dt_year = dt.dt_year - CLOCK_BASE_YEAR;
+	idt.dt_dow = dt.dt_wday;
+        oclk_set_dt(&idt);
 }
 
 /*
@@ -1077,116 +978,6 @@ oclk_set_dt(dt)
         i7->clk_cmd_reg =
                 intersil_command(INTERSIL_CMD_RUN, INTERSIL_CMD_IENABLE);
         splx(s);
-}
-
-
-/*
- * Machine dependent base year:
- * Note: must be < 1970
- */
-#define CLOCK_BASE_YEAR 1968
-
-/* Traditional UNIX base year */
-#define POSIX_BASE_YEAR 1970
-#define FEBRUARY        2
-
-#define leapyear(year)          ((year) % 4 == 0)
-#define days_in_year(a)         (leapyear(a) ? 366 : 365)
-#define days_in_month(a)        (month_days[(a) - 1])
-
-static int month_days[12] = {
-        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
-};
-
-void
-gmt_to_dt(tp, dt)
-	long *tp;
-	struct intersil_dt *dt;
-{
-        int i;
-        long days, secs;
-
-        days = *tp / SECDAY;
-        secs = *tp % SECDAY;
-
-        /* Hours, minutes, seconds are easy */
-        dt->dt_hour = secs / 3600;
-        secs = secs % 3600;
-        dt->dt_min  = secs / 60;
-        secs = secs % 60;
-        dt->dt_sec  = secs;
-
-        /* Day of week (Note: 1/1/1970 was a Thursday) */
-        dt->dt_dow = (days + 4) % 7;
-
-        /* Number of years in days */
-        i = POSIX_BASE_YEAR;
-        while (days >= days_in_year(i)) {
-                days -= days_in_year(i);
-                i++;
-        }
-        dt->dt_year = i - CLOCK_BASE_YEAR;
-
-        /* Number of months in days left */
-        if (leapyear(i))
-                days_in_month(FEBRUARY) = 29;
-        for (i = 1; days >= days_in_month(i); i++)
-                days -= days_in_month(i);
-        days_in_month(FEBRUARY) = 28;
-        dt->dt_month = i;
-
-        /* Days are what is left over (+1) from all that. */
-        dt->dt_day = days + 1;
-}
-
-
-void
-dt_to_gmt(dt, tp)
-	struct intersil_dt *dt;
-	long *tp;
-{
-        int i;
-        long tmp;
-        int year;
-
-        /*
-         * Hours are different for some reason. Makes no sense really.
-         */
-
-        tmp = 0;
-
-        if (dt->dt_hour >= 24) goto out;
-        if (dt->dt_day  >  31) goto out;
-        if (dt->dt_month > 12) goto out;
-
-        year = dt->dt_year + CLOCK_BASE_YEAR;
-
-
-        /*
-         * Compute days since start of time
-         * First from years, then from months.
-         */
-        for (i = POSIX_BASE_YEAR; i < year; i++)
-                tmp += days_in_year(i);
-        if (leapyear(year) && dt->dt_month > FEBRUARY)
-                tmp++;
-
-        /* Months */
-        for (i = 1; i < dt->dt_month; i++)
-                tmp += days_in_month(i);
-        tmp += (dt->dt_day - 1);
-
-        /* Now do hours */
-        tmp = tmp * 24 + dt->dt_hour;
-
-        /* Now do minutes */
-        tmp = tmp * 60 + dt->dt_min;
-
-        /* Now do seconds */
-        tmp = tmp * 60 + dt->dt_sec;
-
-out:
-        *tp = tmp;
 }
 #endif /* SUN4 */
 

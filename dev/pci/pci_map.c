@@ -1,4 +1,4 @@
-/*      $OpenBSD: pci_map.c,v 1.12 2005/03/15 20:18:10 miod Exp $     */
+/*      $OpenBSD: pci_map.c,v 1.18 2006/07/31 11:06:33 mickey Exp $     */
 /*	$NetBSD: pci_map.c,v 1.7 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*-
@@ -49,25 +49,27 @@
 #include <dev/pci/pcivar.h>
 
 
-static int nbsd_pci_io_find(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
+int obsd_pci_io_find(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
     bus_addr_t *, bus_size_t *, int *);
-static int nbsd_pci_mem_find(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
+int obsd_pci_mem_find(pci_chipset_tag_t, pcitag_t, int, pcireg_t,
     bus_addr_t *, bus_size_t *, int *);
 
-static int
-nbsd_pci_io_find(pc, tag, reg, type, basep, sizep, flagsp)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int reg;
-	pcireg_t type;
-	bus_addr_t *basep;
-	bus_size_t *sizep;
-	int *flagsp;
+int
+obsd_pci_io_find(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t type,
+    bus_addr_t *basep, bus_size_t *sizep, int *flagsp)
 {
 	pcireg_t address, mask;
 	int s;
 
-	if (reg < PCI_MAPREG_START || reg >= PCI_MAPREG_END || (reg & 3))
+	if (reg < PCI_MAPREG_START ||
+#if 0
+	    /*
+	     * Can't do this check; some devices have mapping registers
+	     * way out in left field.
+	     */
+	    reg >= PCI_MAPREG_END ||
+#endif
+	    (reg & 3))
 		panic("pci_io_find: bad request");
 
 	/*
@@ -111,15 +113,9 @@ nbsd_pci_io_find(pc, tag, reg, type, basep, sizep, flagsp)
 	return (0);
 }
 
-static int
-nbsd_pci_mem_find(pc, tag, reg, type, basep, sizep, flagsp)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int reg;
-	pcireg_t type;
-	bus_addr_t *basep;
-	bus_size_t *sizep;
-	int *flagsp;
+int
+obsd_pci_mem_find(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t type,
+    bus_addr_t *basep, bus_size_t *sizep, int *flagsp)
 {
 	pcireg_t address, mask, address1 = 0, mask1 = 0xffffffff;
 	u_int64_t waddress, wmask;
@@ -127,7 +123,15 @@ nbsd_pci_mem_find(pc, tag, reg, type, basep, sizep, flagsp)
 
 	is64bit = (PCI_MAPREG_MEM_TYPE(type) == PCI_MAPREG_MEM_TYPE_64BIT);
 
-	if (reg < PCI_MAPREG_START || reg >= PCI_MAPREG_END || (reg & 3))
+	if (reg < PCI_MAPREG_START ||
+#if 0
+	    /*
+	     * Can't do this check; some devices have mapping registers
+	     * way out in left field.
+	     */
+	    reg >= PCI_MAPREG_END ||
+#endif
+	    (reg & 3))
 		panic("pci_mem_find: bad request");
 
 	if (is64bit && (reg + 4) >= PCI_MAPREG_END)
@@ -234,93 +238,93 @@ nbsd_pci_mem_find(pc, tag, reg, type, basep, sizep, flagsp)
 }
 
 int
-pci_io_find(pc, pcitag, reg, iobasep, iosizep)
-	pci_chipset_tag_t pc;
-	pcitag_t pcitag;
-	int reg;
-	bus_addr_t *iobasep;
-	bus_size_t *iosizep;
+pci_io_find(pci_chipset_tag_t pc, pcitag_t pcitag, int reg,
+    bus_addr_t *iobasep, bus_size_t *iosizep)
 {
-	return (nbsd_pci_io_find(pc, pcitag, reg, 0, iobasep, iosizep, 0));
+	return (obsd_pci_io_find(pc, pcitag, reg, 0, iobasep, iosizep, 0));
 }
 
 int
-pci_mem_find(pc, pcitag, reg, membasep, memsizep, cacheablep)
-	pci_chipset_tag_t pc;
-	pcitag_t pcitag;
-	int reg;
-	bus_addr_t *membasep;
-	bus_size_t *memsizep;
-	int *cacheablep;
+pci_mem_find(pci_chipset_tag_t pc, pcitag_t pcitag, int reg,
+    bus_addr_t *membasep, bus_size_t *memsizep, int *cacheablep)
 {
-	return (nbsd_pci_mem_find(pc, pcitag, reg, -1, membasep, memsizep,
+	return (obsd_pci_mem_find(pc, pcitag, reg, -1, membasep, memsizep,
 				  cacheablep));
 }
 
 pcireg_t
-pci_mapreg_type(pc, tag, reg)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int reg;
+pci_mapreg_type(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
-	pcireg_t rv;
-
-	rv = pci_conf_read(pc, tag, reg);
-	if (PCI_MAPREG_TYPE(rv) == PCI_MAPREG_TYPE_IO)
-		rv &= PCI_MAPREG_TYPE_MASK;
-	else
-		rv &= PCI_MAPREG_TYPE_MASK|PCI_MAPREG_MEM_TYPE_MASK;
-	return (rv);
+	return (_PCI_MAPREG_TYPEBITS(pci_conf_read(pc, tag, reg)));
 }
 
 int
-pci_mapreg_info(pc, tag, reg, type, basep, sizep, flagsp)
-	pci_chipset_tag_t pc;
-	pcitag_t tag;
-	int reg;
-	pcireg_t type;
-	bus_addr_t *basep;
-	bus_size_t *sizep;
-	int *flagsp;
+pci_mapreg_probe(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t *typep)
+{
+	pcireg_t address, mask;
+	int s;
+	
+	s = splhigh();
+	address = pci_conf_read(pc, tag, reg);
+	pci_conf_write(pc, tag, reg, 0xffffffff);
+	mask = pci_conf_read(pc, tag, reg);
+	pci_conf_write(pc, tag, reg, address);
+	splx(s);
+
+	if (mask == 0) /* unimplemented mapping register */
+		return (0);
+
+	if (typep)
+		*typep = _PCI_MAPREG_TYPEBITS(address);
+	return (1);
+}
+
+int
+pci_mapreg_info(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t type,
+    bus_addr_t *basep, bus_size_t *sizep, int *flagsp)
 {
 
 	if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO)
-		return (nbsd_pci_io_find(pc, tag, reg, type, basep, sizep,
+		return (obsd_pci_io_find(pc, tag, reg, type, basep, sizep,
 		    flagsp));
 	else
-		return (nbsd_pci_mem_find(pc, tag, reg, type, basep, sizep,
+		return (obsd_pci_mem_find(pc, tag, reg, type, basep, sizep,
 		    flagsp));
 }
 
 int
-pci_mapreg_map(pa, reg, type, busflags, tagp, handlep, basep, sizep, maxsize)
-	struct pci_attach_args *pa;
-	int reg, busflags;
-	pcireg_t type;
-	bus_space_tag_t *tagp;
-	bus_space_handle_t *handlep;
-	bus_addr_t *basep;
-	bus_size_t *sizep;
-	bus_size_t maxsize;
+pci_mapreg_map(struct pci_attach_args *pa, int reg, pcireg_t type, int busflags,
+    bus_space_tag_t *tagp, bus_space_handle_t *handlep, bus_addr_t *basep,
+    bus_size_t *sizep, bus_size_t maxsize)
 {
 	bus_space_tag_t tag;
 	bus_space_handle_t handle;
 	bus_addr_t base;
 	bus_size_t size;
+	pcireg_t csr;
 	int flags;
 	int rv;
+
+	csr = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
+	if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO)
+		csr |= PCI_COMMAND_IO_ENABLE;
+	else
+		csr |= PCI_COMMAND_MEM_ENABLE;
+	/* XXX Should this only be done for devices that do DMA?  */
+	csr |= PCI_COMMAND_MASTER_ENABLE;
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, csr);
 
 	if (PCI_MAPREG_TYPE(type) == PCI_MAPREG_TYPE_IO) {
 		if ((pa->pa_flags & PCI_FLAGS_IO_ENABLED) == 0)
 			return (EINVAL);
-		if ((rv = nbsd_pci_io_find(pa->pa_pc, pa->pa_tag, reg, type,
+		if ((rv = obsd_pci_io_find(pa->pa_pc, pa->pa_tag, reg, type,
 		    &base, &size, &flags)) != 0)
 			return (rv);
 		tag = pa->pa_iot;
 	} else {
 		if ((pa->pa_flags & PCI_FLAGS_MEM_ENABLED) == 0)
 			return (EINVAL);
-		if ((rv = nbsd_pci_mem_find(pa->pa_pc, pa->pa_tag, reg, type,
+		if ((rv = obsd_pci_mem_find(pa->pa_pc, pa->pa_tag, reg, type,
 		    &base, &size, &flags)) != 0)
 			return (rv);
 		tag = pa->pa_memt;

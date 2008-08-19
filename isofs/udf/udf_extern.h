@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_extern.h,v 1.3 2006/01/14 19:04:17 miod Exp $	*/
+/*	$OpenBSD: udf_extern.h,v 1.7 2006/07/11 16:24:09 pedro Exp $	*/
 
 /*
  * Written by Pedro Martelletto <pedro@openbsd.org> in February 2005.
@@ -9,13 +9,15 @@
  * udf_subr.c
  */
 int udf_rawnametounicode(u_int len, char *, unicode_t *);
+int udf_vat_get(struct umount *, uint32_t);
+int udf_vat_map(struct umount *, uint32_t *);
 
 /*
  * udf_vfsops.c
  */
 int udf_init(struct vfsconf *);
 int udf_mount(struct mount *, const char *, void *, struct nameidata *,
-		struct proc *);
+    struct proc *);
 int udf_unmount(struct mount *, int, struct proc *);
 int udf_start(struct mount *, int, struct proc *);
 int udf_root(struct mount *, struct vnode **);
@@ -48,13 +50,15 @@ int udf_lock(void *v);
 int udf_unlock(void *v);
 int udf_islocked(void *v);
 int udf_print(void *v);
-int udf_transname(char *, char *, int, struct udf_mnt *);
+int udf_transname(char *, char *, int, struct umount *);
+int udf_readatoffset(struct unode *, int *, off_t, struct buf **,
+    uint8_t **);
 
 /*
  * Memory pools.
  */
 extern struct pool udf_trans_pool;
-extern struct pool udf_node_pool;
+extern struct pool unode_pool;
 extern struct pool udf_ds_pool;
 
 /*

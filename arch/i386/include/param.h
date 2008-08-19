@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.33 2005/12/13 01:56:43 martin Exp $	*/
+/*	$OpenBSD: param.h,v 1.36 2006/04/27 15:37:53 mickey Exp $	*/
 /*	$NetBSD: param.h,v 1.29 1996/03/04 05:04:26 cgd Exp $	*/
 
 /*-
@@ -75,15 +75,13 @@
 #define PAGE_SIZE	(1 << PAGE_SHIFT)
 #define PAGE_MASK	(PAGE_SIZE - 1)
 
-#define	NPTEPG		(NBPG/(sizeof (pt_entry_t)))
-
 /*
  * Start of kernel virtual space.  Remember to alter the memory and
  * page table layout description in pmap.h when changing this.
  */
 #define	KERNBASE	0xd0000000
 
-#define	KERNTEXTOFF	(KERNBASE+0x100000)	/* start of kernel text */
+#define	KERNTEXTOFF	(KERNBASE+0x200000)	/* start of kernel text */
 
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
@@ -131,17 +129,3 @@
 /* bytes to disk blocks */
 #define	dbtob(x)	((x) << DEV_BSHIFT)
 #define	btodb(x)	((x) >> DEV_BSHIFT)
-
-/*
- * Map a ``block device block'' to a file system block.
- * This should be device dependent, and should use the bsize
- * field from the disk label.
- * For now though just use DEV_BSIZE.
- */
-#define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE / DEV_BSIZE))
-
-/*
- * Mach derived conversion macros
- */
-#define	i386_round_pdr(x)	((((unsigned)(x)) + PDOFSET) & ~PDOFSET)
-#define	i386_trunc_pdr(x)	((unsigned)(x) & ~PDOFSET)

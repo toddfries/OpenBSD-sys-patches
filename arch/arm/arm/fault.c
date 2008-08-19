@@ -1,4 +1,4 @@
-/*	$OpenBSD: fault.c,v 1.6 2004/12/30 23:41:07 drahn Exp $	*/
+/*	$OpenBSD: fault.c,v 1.8 2006/05/26 17:06:39 miod Exp $	*/
 /*	$NetBSD: fault.c,v 1.46 2004/01/21 15:39:21 skrll Exp $	*/
 
 /*
@@ -92,7 +92,6 @@
 #include <arm/cpuconf.h>
 
 #include <machine/frame.h>
-#include <arm/katelib.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
 #if defined(DDB) || defined(KGDB)
@@ -310,7 +309,7 @@ data_abort_handler(trapframe_t *tf)
 	if (user == 0 && (va >= VM_MIN_KERNEL_ADDRESS ||
 	    (va < VM_MIN_ADDRESS && vector_page == ARM_VECTORS_LOW)) &&
 	    __predict_true((pcb->pcb_onfault == NULL ||
-	     (ReadWord(tf->tf_pc) & 0x05200000) != 0x04200000))) {
+	     ((*(u_int *)tf->tf_pc) & 0x05200000) != 0x04200000))) {
 		map = kernel_map;
 
 		/* Was the fault due to the FPE/IPKDB ? */
@@ -355,7 +354,7 @@ data_abort_handler(trapframe_t *tf)
 	if (IS_PERMISSION_FAULT(fsr))
 		ftype = VM_PROT_WRITE; 
 	else {
-		u_int insn = ReadWord(tf->tf_pc);
+		u_int insn = *(u_int *)tf->tf_pc;
 
 		if (((insn & 0x0c100000) == 0x04000000) ||	/* STR/STRB */
 		    ((insn & 0x0e1000b0) == 0x000000b0) ||	/* STRH/STRD */
@@ -516,8 +515,6 @@ static int
 dab_align(trapframe_t *tf, u_int fsr, u_int far, struct proc *p,
     struct sigdata *sd)
 {
-	union sigval sv;
-
 	/* Alignment faults are always fatal if they occur in kernel mode */
 	if (!TRAP_USERMODE(tf))
 		dab_fatal(tf, fsr, far, p, NULL);
@@ -535,9 +532,6 @@ dab_align(trapframe_t *tf, u_int fsr, u_int far, struct proc *p,
 	sd->trap = fsr;
 
 	p->p_addr->u_pcb.pcb_tf = tf;
-
-	sv.sival_ptr = (u_int32_t *)far;
-	trapsignal(p, SIGBUS, 0, BUS_ADRALN, sv);
 
 	return (1);
 }
@@ -717,7 +711,7 @@ prefetch_abort_handler(trapframe_t *tf)
 		p = curproc;
 		p->p_addr->u_pcb.pcb_tf = tf;
 
-		goto do_trapsignal;
+		goto out;
 	default:
 		break;
 	}
@@ -736,7 +730,7 @@ prefetch_abort_handler(trapframe_t *tf)
 	    (fault_pc < VM_MIN_ADDRESS && vector_page == ARM_VECTORS_LOW))) {
 		sv.sival_ptr = (u_int32_t *)fault_pc;
 		trapsignal(p, SIGSEGV, 0, SEGV_ACCERR, sv);
-		goto do_trapsignal;
+		goto out;
 	}
 
 	map = &p->p_vmspace->vm_map;
@@ -771,8 +765,6 @@ prefetch_abort_handler(trapframe_t *tf)
 		trapsignal(p, SIGKILL, 0, SEGV_MAPERR, sv);
 	} else
 		trapsignal(p, SIGSEGV, 0, SEGV_MAPERR, sv);
-
-do_trapsignal:
 
 out:
 	userret(p, tf->tf_pc, p->p_sticks);

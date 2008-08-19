@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.94 2005/12/17 07:31:26 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.100 2006/07/03 20:48:27 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -91,7 +91,6 @@
 #include <sys/evcount.h>
 
 #include <machine/autoconf.h>
-#include <machine/bugio.h>
 #include <machine/cpu.h>
 #include <machine/kcore.h>
 #include <machine/prom.h>
@@ -99,7 +98,9 @@
 #include <machine/pte.h>
 #include <machine/reg.h>
 
+#ifdef MVME147
 #include <mvme68k/dev/pccreg.h>
+#endif
  
 #include <dev/cons.h>
 
@@ -108,6 +109,8 @@
 #ifdef DDB
 #include <machine/db_machdep.h>
 #include <ddb/db_extern.h>
+#include <ddb/db_interface.h>
+#include <ddb/db_var.h>
 #endif
 
 #include <uvm/uvm_extern.h>
@@ -140,44 +143,16 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
-int   maxmem;			/* max memory per process */
-int   physmem;			/* max supported memory, changes to actual */
+int   physmem;			/* size of physical memory, in pages */
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
  * during autoconfiguration or after a panic.
  */
 int   safepri = PSL_LOWIPL;
 
-extern   short exframesize[];
-
-#ifdef COMPAT_HPUX
-extern struct emul emul_hpux;
-#endif
 #ifdef COMPAT_SUNOS
 extern struct emul emul_sunos;
 #endif
-
-/* 
- *  XXX this is to fake out the console routines, while 
- *  booting. New and improved! :-) smurph
- */
-void bootcnprobe(struct consdev *);
-void bootcninit(struct consdev *);
-void bootcnputc(dev_t, int);
-int  bootcngetc(dev_t);
-extern void nullcnpollc(dev_t, int);
-
-#define bootcnpollc nullcnpollc
-
-static struct consdev bootcons = {
-	NULL, 
-	NULL, 
-	bootcngetc, 
-	bootcnputc,
-	bootcnpollc, 
-	NULL,
-	makedev(14,0), 
-	1};
 
 void dumpsys(void);
 void initvectors(void);
@@ -207,37 +182,31 @@ mvme68k_init()
 	uvmexp.pagesize = NBPG;
 	uvm_setpagesize();
 	uvm_page_physload(atop(avail_start), atop(avail_end),
-			  atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
+	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
 
 	/* 
 	 * Put machine specific exception vectors in place.
 	 */
 	initvectors();
-
-	/* startup fake console driver.  It will be replaced by consinit() */
-	cn_tab = &bootcons;
 }
 
 /*
  * Console initialization: called early on from main,
- * before vm init or startup.  Do enough configuration
- * to choose and initialize a console.
+ * before vm init or startup, but already running virtual.
+ * Do enough configuration to choose and initialize a console.
  */
 void
 consinit()
 {
-	extern void db_machine_init(void);
-
 	/*
 	 * Initialize the console before we print anything out.
 	 */
-	cn_tab = NULL;	/* Get rid of fake console driver */
 	cninit();
 
 #ifdef DDB
-
 	db_machine_init();
 	ddb_init();
+
 	if (boothowto & RB_KDB)
 		Debugger();
 #endif
@@ -439,9 +408,6 @@ identifycpu()
 	char mc;
 	char speed[6];
 	char suffix[30];
-#ifdef FPSP
-	extern u_long fpvect_tab, fpvect_end, fpsp_tab;
-#endif
 	int len;
 
 	bzero(suffix, sizeof suffix);
@@ -496,13 +462,11 @@ identifycpu()
 	snprintf(cpu_model, sizeof cpu_model,
 	    "Motorola %s: %sMHz MC680%c0 CPU", suffix, speed, mc);
 	switch (mmutype) {
-#if defined(M68060) || defined(M68040)
+#if defined(M68040)
 	case MMU_68040:
-#ifdef FPSP
-		bcopy(&fpsp_tab, &fpvect_tab,
-		    (&fpvect_end - &fpvect_tab) * sizeof (fpvect_tab));
-#endif
 		/* FALLTHROUGH */
+#endif
+#if defined(M68060)
 	case MMU_68060:
 		/* FALLTHROUGH */
 #endif
@@ -516,6 +480,7 @@ identifycpu()
 		printf("%s\n", cpu_model);
 		panic("unknown MMU type %d", mmutype);
 	}
+
 	switch (mmutype) {
 #if defined(M68060)
 	case MMU_68060:
@@ -820,22 +785,16 @@ abort:
 }
 
 #if defined(M68060)
-int m68060_pcr_init = 0x21;	/* make this patchable */
+int m68060_pcr_init = 0x20 | PCR_SUPERSCALAR;	/* make this patchable */
 #endif
 
 void
 initvectors()
 {
 	typedef void trapfun(void);
-
-	/* XXX should init '40 vecs here, too */
-#if defined(M68060)
 	extern trapfun *vectab[256];
-	extern trapfun addrerr4060;
-
-	extern trapfun buserr60;
+#if defined(M68060)
 #if defined(M060SP)
-	/*extern u_int8_t I_CALL_TOP[];*/
 	extern trapfun intemu60, fpiemu60, fpdemu60, fpeaemu60;
 	extern u_int8_t FP_CALL_TOP[];
 #else
@@ -843,9 +802,13 @@ initvectors()
 #endif
 	extern trapfun fpfault;
 #endif
+#if defined(M68040) && defined(FPSP)
+	extern u_long fpvect_tab, fpvect_end, fpsp_tab;
+#endif
 
+	switch (cputype) {
 #ifdef M68060
-	if (cputype == CPU_68060) {
+	case CPU_68060:
 		asm volatile ("movl %0,d0; .word 0x4e7b,0x0808" : : 
 						  "d"(m68060_pcr_init):"d0" );
 
@@ -873,8 +836,17 @@ initvectors()
 		vectab[61] = illinst;
 #endif
 		vectab[48] = fpfault;
-	}
+		break;
 #endif
+#if defined(M68040) && defined(FPSP)
+	case CPU_68040:
+		bcopy(&fpsp_tab, &fpvect_tab,
+		    (&fpvect_end - &fpvect_tab) * sizeof (fpvect_tab));
+		break;
+#endif
+	default:
+		break;
+	}
 }
 
 void
@@ -1066,62 +1038,24 @@ memsize162()
 	struct mcreg *mc = (struct mcreg *)0xfff42000;
 
 	switch (mc->mc_memoptions & MC_MEMOPTIONS_DRAMMASK) {
-		case MC_MEMOPTIONS_DRAM1M:
-			return (1*1024*1024);
-		case MC_MEMOPTIONS_DRAM2M:
-			return (2*1024*1024);
-		case MC_MEMOPTIONS_DRAM4M:
-			return (4*1024*1024);
-		case MC_MEMOPTIONS_DRAM4M2:
-			return (4*1024*1024);
-		case MC_MEMOPTIONS_DRAM8M:
-			return (8*1024*1024);
-		case MC_MEMOPTIONS_DRAM16M:
-			return (16*1024*1024);
-		default:
-			/*
-			 * XXX if the machine has no MC-controlled memory,
-			 * perhaps it has a MCECC or MEMC040 controller?
-			 */
-			return (memsize1x7());
+	case MC_MEMOPTIONS_DRAM1M:
+		return (1*1024*1024);
+	case MC_MEMOPTIONS_DRAM2M:
+		return (2*1024*1024);
+	case MC_MEMOPTIONS_DRAM4M:
+		return (4*1024*1024);
+	case MC_MEMOPTIONS_DRAM4M2:
+		return (4*1024*1024);
+	case MC_MEMOPTIONS_DRAM8M:
+		return (8*1024*1024);
+	case MC_MEMOPTIONS_DRAM16M:
+		return (16*1024*1024);
+	default:
+		/*
+		 * XXX if the machine has no MC-controlled memory,
+		 * perhaps it has a MCECC or MEMC040 controller?
+		 */
+		return (memsize1x7());
 	}
 }
 #endif
-
-/*
- * Boot console routines: 
- * Enables printing of boot messages before consinit().
- */
-
-void
-bootcnprobe(cp)
-	struct consdev *cp;
-{
-	cp->cn_dev = makedev(14, 0);
-	cp->cn_pri = CN_NORMAL;
-}
-
-void
-bootcninit(cp)
-	struct consdev *cp;
-{
-	/* Nothing to do */
-}
-
-int
-bootcngetc(dev)
-	dev_t dev;
-{
-	return (bug_inchr());
-}
-
-void
-bootcnputc(dev, c)
-	dev_t dev;
-	int c;
-{
-	char cc = (char)c;
-	if (cc == '\n')
-		bug_outchr('\r');
-	bug_outchr(cc);
-}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofb.c,v 1.8 2006/02/14 18:46:17 miod Exp $	*/
+/*	$OpenBSD: diofb.c,v 1.14 2006/08/11 18:33:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -86,6 +86,7 @@ void	diofb_copycols(void *, int, int, int, int);
 void	diofb_erasecols(void *, int, int, int, long);
 void	diofb_copyrows(void *, int, int, int);
 void	diofb_eraserows(void *, int, int, long);
+void	diofb_do_cursor(struct rasops_info *);
 
 /*
  * Frame buffer geometry initialization
@@ -199,12 +200,15 @@ diofb_fbsetup(struct diofb *fb)
 	}
 		
 	ri->ri_ops.copycols = diofb_copycols;
-	ri->ri_ops.copyrows = diofb_copyrows;
 	ri->ri_ops.erasecols = diofb_erasecols;
-	ri->ri_ops.eraserows = diofb_eraserows;
+	if (ri->ri_depth != 1) {
+		ri->ri_ops.copyrows = diofb_copyrows;
+		ri->ri_ops.eraserows = diofb_eraserows;
+		ri->ri_do_cursor = diofb_do_cursor;
+	}
 
 	/* Clear entire display, including non visible areas */
-	(*fb->bmv)(fb, 0, 0, 0, 0, fb->fbwidth, fb->fbheight, RR_CLEAR);
+	(*fb->bmv)(fb, 0, 0, 0, 0, fb->fbwidth, fb->fbheight, RR_CLEAR, 0xff);
 
 	strlcpy(fb->wsd.name, "std", sizeof(fb->wsd.name));
 	fb->wsd.ncols = ri->ri_cols;
@@ -287,11 +291,7 @@ diofb_cnattach(struct diofb *fb)
 	struct rasops_info *ri;
 
 	ri = &fb->ri;
-	if (ri->ri_caps & WSSCREEN_WSCOLORS)
-		ri->ri_ops.alloc_attr(ri, WSCOL_WHITE, WSCOL_BLACK,
-		    WSATTR_WSCOLORS, &defattr);
-	else
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
+	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
 	wsdisplay_cnattach(&fb->wsd, ri, 0, 0, defattr);
 }
 
@@ -300,8 +300,6 @@ diofb_end_attach(void *sc, struct wsdisplay_accessops *accessops,
     struct diofb *fb, int console, const char *descr)
 {
 	struct wsemuldisplaydev_attach_args waa;
-	struct wsscreen_descr *scrlist[1];
-	struct wsscreen_list screenlist;
 
 	printf(": %dx%d", fb->dwidth, fb->dheight);
 
@@ -314,12 +312,12 @@ diofb_end_attach(void *sc, struct wsdisplay_accessops *accessops,
 		printf(" %s", descr);
 	printf(" frame buffer\n");
 
-	scrlist[0] = &fb->wsd;
-	screenlist.nscreens = 1;
-	screenlist.screens = (const struct wsscreen_descr **)scrlist;
+	fb->scrlist[0] = &fb->wsd;
+	fb->wsl.nscreens = 1;
+	fb->wsl.screens = (const struct wsscreen_descr **)fb->scrlist;
 
 	waa.console = console;
-	waa.scrdata = &screenlist;
+	waa.scrdata = &fb->wsl;
 	waa.accessops = accessops;
 	waa.accesscookie = fb;
 
@@ -352,7 +350,7 @@ diofb_copycols(void *cookie, int row, int src, int dst, int n)
 
 	(*fb->bmv)(fb, ri->ri_xorigin + src, ri->ri_yorigin + row,
 	    ri->ri_xorigin + dst, ri->ri_yorigin + row,
-	    n, ri->ri_font->fontheight, RR_COPY);
+	    n, ri->ri_font->fontheight, RR_COPY, 0xff);
 }
 
 void
@@ -367,7 +365,7 @@ diofb_copyrows(void *cookie, int src, int dst, int n)
 
 	(*fb->bmv)(fb, ri->ri_xorigin, ri->ri_yorigin + src,
 	    ri->ri_xorigin, ri->ri_yorigin + dst,
-	    ri->ri_emuwidth, n, RR_COPY);
+	    ri->ri_emuwidth, n, RR_COPY, 0xff);
 }
 
 void
@@ -375,26 +373,22 @@ diofb_erasecols(void *cookie, int row, int col, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct diofb *fb = ri->ri_hw;
-	int fg, bg, uline;
+	int fg, bg;
+	int snum, scol, srow;
 
-	rasops_unpack_attr(attr, &fg, &bg, &uline);
+	rasops_unpack_attr(attr, &fg, &bg, NULL);
+
+	snum = num * ri->ri_font->fontwidth;
+	scol = col * ri->ri_font->fontwidth + ri->ri_xorigin;
+	srow = row * ri->ri_font->fontheight + ri->ri_yorigin;
 
 	/*
-	 * If the background color is not black, this is a bit too tricky
-	 * for the simple raster ops engine, so pass the fun to rasops.
+	 * If this is too tricky for the simple raster ops engine,
+	 * pass the fun to rasops.
 	 */
-	if (ri->ri_devcmap[bg] != 0) {
+	if ((*fb->bmv)(fb, scol, srow, scol, srow, snum,
+	    ri->ri_font->fontheight, RR_CLEAR, 0xff ^ bg) != 0)
 		rasops_erasecols(cookie, row, col, num, attr);
-		return;
-	}
-
-	num *= ri->ri_font->fontwidth;
-	col *= ri->ri_font->fontwidth;
-	row *= ri->ri_font->fontheight;
-
-	(*fb->bmv)(fb, ri->ri_xorigin + col, ri->ri_yorigin + row,
-	    ri->ri_xorigin + col, ri->ri_yorigin + row,
-	    num, ri->ri_font->fontheight, RR_CLEAR);
 }
 
 void
@@ -402,30 +396,36 @@ diofb_eraserows(void *cookie, int row, int num, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct diofb *fb = ri->ri_hw;
-	int fg, bg, uline;
+	int fg, bg;
+	int srow, snum;
+	int rc;
 
-	rasops_unpack_attr(attr, &fg, &bg, &uline);
+	rasops_unpack_attr(attr, &fg, &bg, NULL);
+	bg ^= 0xff;
 
-	/*
-	 * If the background color is not black, this is a bit too tricky
-	 * for the simple raster ops engine, so pass the fun to rasops.
-	 */
-	if (ri->ri_devcmap[bg] != 0) {
-		rasops_eraserows(cookie, row, num, attr);
-		return;
-	}
-
-	/* As an exception, hunt the mouse all over the screen if necessary */
 	if (num == ri->ri_rows && (ri->ri_flg & RI_FULLCLEAR)) {
-		(*fb->bmv)(fb, 0, 0, 0, 0,
-		    ri->ri_width, ri->ri_height, RR_CLEAR);
+		rc = (*fb->bmv)(fb, 0, 0, 0, 0, ri->ri_width, ri->ri_height,
+		    RR_CLEAR, bg);
 	} else {
-		row *= ri->ri_font->fontheight;
-		num *= ri->ri_font->fontheight;
-		(*fb->bmv)(fb, ri->ri_xorigin, ri->ri_yorigin + row,
-		    ri->ri_xorigin, ri->ri_yorigin + row,
-		    ri->ri_emuwidth, num, RR_CLEAR);
+		srow = row * ri->ri_font->fontheight + ri->ri_yorigin;
+		snum = num * ri->ri_font->fontheight;
+		rc = (*fb->bmv)(fb, ri->ri_xorigin, srow, ri->ri_xorigin,
+		    srow, ri->ri_emuwidth, snum, RR_CLEAR, bg);
 	}
+	if (rc != 0)
+		rasops_eraserows(cookie, row, num, attr);
+}
+
+void
+diofb_do_cursor(struct rasops_info *ri)
+{
+	struct diofb *fb = ri->ri_hw;
+	int x, y;
+
+	x = ri->ri_ccol * ri->ri_font->fontwidth + ri->ri_xorigin;
+	y = ri->ri_crow * ri->ri_font->fontheight + ri->ri_yorigin;
+	(*fb->bmv)(fb, x, y, x, y, ri->ri_font->fontwidth,
+	    ri->ri_font->fontheight, RR_INVERT, 0xff);
 }
 
 /*
@@ -444,11 +444,7 @@ diofb_alloc_screen(void *v, const struct wsscreen_descr *type,
 
 	*cookiep = ri;
 	*curxp = *curyp = 0;
-	if (ri->ri_caps & WSSCREEN_WSCOLORS)
-		ri->ri_ops.alloc_attr(ri, WSCOL_WHITE, WSCOL_BLACK,
-		    WSATTR_WSCOLORS, attrp);
-	else
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
+	ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
 	fb->nscreens++;
 
 	return (0);

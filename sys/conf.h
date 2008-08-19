@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.78 2005/12/31 21:22:35 miod Exp $	*/
+/*	$OpenBSD: conf.h,v 1.80 2006/07/12 19:56:18 thib Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -63,6 +63,7 @@ struct knote;
  * Flags for d_flags
  */
 #define D_KQFILTER	0x0001		/* has kqfilter entry */
+#define D_CLONE		0x0002		/* clone upon open */
 
 #ifdef _KERNEL
 
@@ -474,10 +475,6 @@ void	randomattach(void);
 	(dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
 	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
 	(dev_type_mmap((*))) enodev }
-
-/* symbolic sleep message strings */
-extern char devopn[], devio[], devwait[], devin[], devout[];
-extern char devioc[], devcls[];
 
 #endif
 

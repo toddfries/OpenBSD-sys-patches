@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.106 2006/01/13 10:11:23 mpf Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.110 2006/07/17 12:16:36 claudio Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -120,7 +120,6 @@ struct	udpstat udpstat;
 
 static	void udp_detach(struct inpcb *);
 static	void udp_notify(struct inpcb *, int);
-static	struct mbuf *udp_saveopt(caddr_t, int, int);
 
 #ifndef UDBHASHSIZE
 #define	UDBHASHSIZE	128
@@ -464,6 +463,9 @@ udp_input(struct mbuf *m, ...)
 					if (ip6 && (inp->inp_flags & IN6P_CONTROLOPTS))
 						ip6_savecontrol(inp, &opts, ip6, n);
 #endif /* INET6 */
+					if (ip && (inp->inp_flags & INP_CONTROLOPTS))
+						ip_savecontrol(inp, &opts, ip, n);
+
 					m_adj(n, iphlen);
 					if (sbappendaddr(&last->so_rcv,
 					    &srcsa.sa, n, opts) == 0) {
@@ -504,6 +506,9 @@ udp_input(struct mbuf *m, ...)
 		if (ip6 && (inp->inp_flags & IN6P_CONTROLOPTS))
 			ip6_savecontrol(inp, &opts, ip6, m);
 #endif /* INET6 */
+		if (ip && (inp->inp_flags & INP_CONTROLOPTS))
+			ip_savecontrol(inp, &opts, ip, m);
+
 		m_adj(m, iphlen);
 		if (sbappendaddr(&last->so_rcv,
 		    &srcsa.sa, m, opts) == 0) {
@@ -624,32 +629,9 @@ udp_input(struct mbuf *m, ...)
 	if (ip6 && (inp->inp_flags & IN6P_CONTROLOPTS))
 		ip6_savecontrol(inp, &opts, ip6, m);
 #endif /* INET6 */
-	if (ip && (inp->inp_flags & INP_CONTROLOPTS)) {
-		struct mbuf **mp = &opts;
+	if (ip && (inp->inp_flags & INP_CONTROLOPTS))
+		ip_savecontrol(inp, &opts, ip, m);
 
-		if (inp->inp_flags & INP_RECVDSTADDR) {
-			*mp = udp_saveopt((caddr_t) &ip->ip_dst,
-			    sizeof(struct in_addr), IP_RECVDSTADDR);
-			if (*mp)
-				mp = &(*mp)->m_next;
-		}
-#ifdef notyet
-		/* options were tossed above */
-		if (inp->inp_flags & INP_RECVOPTS) {
-			*mp = udp_saveopt((caddr_t) opts_deleted_above,
-			    sizeof(struct in_addr), IP_RECVOPTS);
-			if (*mp)
-				mp = &(*mp)->m_next;
-		}
-		/* ip_srcroute doesn't do what we want here, need to fix */
-		if (inp->inp_flags & INP_RECVRETOPTS) {
-			*mp = udp_saveopt((caddr_t) ip_srcroute(),
-			    sizeof(struct in_addr), IP_RECVRETOPTS);
-			if (*mp)
-				mp = &(*mp)->m_next;
-		}
-#endif
-	}
 	iphlen += sizeof(struct udphdr);
 	m_adj(m, iphlen);
 	if (sbappendaddr(&inp->inp_socket->so_rcv, &srcsa.sa, m, opts) == 0) {
@@ -662,31 +644,6 @@ bad:
 	m_freem(m);
 	if (opts)
 		m_freem(opts);
-}
-
-/*
- * Create a "control" mbuf containing the specified data
- * with the specified type for presentation with a datagram.
- */
-struct mbuf *
-udp_saveopt(p, size, type)
-	caddr_t p;
-	int size;
-	int type;
-{
-	struct cmsghdr *cp;
-	struct mbuf *m;
-
-	if ((m = m_get(M_DONTWAIT, MT_CONTROL)) == NULL)
-		return ((struct mbuf *) NULL);
-	cp = (struct cmsghdr *) mtod(m, struct cmsghdr *);
-	bcopy(p, CMSG_DATA(cp), size);
-	size = CMSG_LEN(size);
-	m->m_len = size;
-	cp->cmsg_len = size;
-	cp->cmsg_level = IPPROTO_IP;
-	cp->cmsg_type = type;
-	return (m);
 }
 
 /*
@@ -927,7 +884,6 @@ udp_output(struct mbuf *m, ...)
 	struct in_addr laddr;
 	int s = 0, error = 0;
 	va_list ap;
-	int pcbflags = 0;
 
 	va_start(ap, m);
 	inp = va_arg(ap, struct inpcb *);
@@ -950,12 +906,6 @@ udp_output(struct mbuf *m, ...)
 	}
 
 	if (addr) {
-		/*
-		 * Save current PCB flags because they may change during
-		 * temporary connection.
-		 */
-		pcbflags = inp->inp_flags;
-
 		laddr = inp->inp_laddr;
 		if (inp->inp_faddr.s_addr != INADDR_ANY) {
 			error = EISCONN;
@@ -1019,13 +969,12 @@ udp_output(struct mbuf *m, ...)
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
 	    inp->inp_socket->so_options &
 	    (SO_DONTROUTE | SO_BROADCAST | SO_JUMBO),
-	    inp->inp_moptions, inp, (void *)NULL);
+	    inp->inp_moptions, inp);
 
 bail:
 	if (addr) {
-		in_pcbdisconnect(inp);
-		inp->inp_flags = pcbflags;
 		inp->inp_laddr = laddr;
+		in_pcbdisconnect(inp);
 		splx(s);
 	}
 	if (control)
@@ -1176,13 +1125,13 @@ udp_usrreq(so, req, m, addr, control)
 		}
 
 		s = splsoftnet();
-		in_pcbdisconnect(inp);
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			inp->inp_laddr6 = in6addr_any;
 		else
 #endif /* INET6 */
 			inp->inp_laddr.s_addr = INADDR_ANY;
+		in_pcbdisconnect(inp);
 
 		splx(s);
 		so->so_state &= ~SS_ISCONNECTED;		/* XXX */

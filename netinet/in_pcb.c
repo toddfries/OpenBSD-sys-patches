@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.84 2005/06/24 07:57:24 markus Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.88 2006/06/18 11:47:45 pascoe Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -247,7 +247,7 @@ in_pcbbind(v, nam)
 		return in6_pcbbind(inp, nam);
 #endif /* INET6 */
 
-	if (in_ifaddr.tqh_first == 0)
+	if (TAILQ_EMPTY(&in_ifaddr))
 		return (EADDRNOTAVAIL);
 	if (inp->inp_lport || inp->inp_laddr.s_addr != INADDR_ANY)
 		return (EINVAL);
@@ -399,7 +399,7 @@ in_pcbconnect(v, nam)
 		return (EAFNOSUPPORT);
 	if (sin->sin_port == 0)
 		return (EADDRNOTAVAIL);
-	if (in_ifaddr.tqh_first != 0) {
+	if (!TAILQ_EMPTY(&in_ifaddr)) {
 		/*
 		 * If the destination address is INADDR_ANY,
 		 * use the primary local address.
@@ -408,10 +408,10 @@ in_pcbconnect(v, nam)
 		 * choose the broadcast address for that interface.
 		 */
 		if (sin->sin_addr.s_addr == INADDR_ANY)
-			sin->sin_addr = in_ifaddr.tqh_first->ia_addr.sin_addr;
+			sin->sin_addr = TAILQ_FIRST(&in_ifaddr)->ia_addr.sin_addr;
 		else if (sin->sin_addr.s_addr == INADDR_BROADCAST &&
-		  (in_ifaddr.tqh_first->ia_ifp->if_flags & IFF_BROADCAST))
-			sin->sin_addr = in_ifaddr.tqh_first->ia_broadaddr.sin_addr;
+		  (TAILQ_FIRST(&in_ifaddr)->ia_ifp->if_flags & IFF_BROADCAST))
+			sin->sin_addr = TAILQ_FIRST(&in_ifaddr)->ia_broadaddr.sin_addr;
 	}
 	if (inp->inp_laddr.s_addr == INADDR_ANY) {
 		int error;
@@ -630,11 +630,11 @@ in_losing(inp)
 		info.rti_info[RTAX_DST] = &inp->inp_route.ro_dst;
 		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-		rt_missmsg(RTM_LOSING, &info, rt->rt_flags, 0);
+		rt_missmsg(RTM_LOSING, &info, rt->rt_flags, rt->rt_ifp, 0, 0);
 		if (rt->rt_flags & RTF_DYNAMIC)
 			(void) rtrequest(RTM_DELETE, rt_key(rt),
 				rt->rt_gateway, rt_mask(rt), rt->rt_flags,
-				(struct rtentry **)0);
+				(struct rtentry **)0, 0);
 		/*
 		 * A new route can be allocated
 		 * the next time output is attempted.
@@ -775,7 +775,7 @@ in_pcbrtentry(inp)
 			ro->ro_dst.sa_len = sizeof(struct sockaddr_in6);
 			((struct sockaddr_in6 *) &ro->ro_dst)->sin6_addr =
 			    inp->inp_faddr6;
-			rtalloc(ro);
+			rtalloc_mpath(ro, &inp->inp_laddr6.s6_addr32[0], 0);
 			break;
 #endif /* INET6 */
 		case PF_INET:
@@ -784,7 +784,7 @@ in_pcbrtentry(inp)
 			ro->ro_dst.sa_family = AF_INET;
 			ro->ro_dst.sa_len = sizeof(ro->ro_dst);
 			satosin(&ro->ro_dst)->sin_addr = inp->inp_faddr;
-			rtalloc(ro);
+			rtalloc_mpath(ro, &inp->inp_laddr.s_addr, 0);
 			break;
 		}
 	}
@@ -821,7 +821,7 @@ in_selectsrc(sin, ro, soopts, mopts, errorp)
 		ro->ro_dst.sa_family = AF_INET;
 		ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
 		satosin(&ro->ro_dst)->sin_addr = sin->sin_addr;
-		rtalloc(ro);
+		rtalloc_mpath(ro, NULL, 0);
 
 		/*
 		 * It is important to bzero out the rest of the
@@ -847,7 +847,7 @@ in_selectsrc(sin, ro, soopts, mopts, errorp)
 			ia = ifatoia(ifa_ifwithnet(sintosa(sin)));
 		sin->sin_port = fport;
 		if (ia == 0)
-			ia = in_ifaddr.tqh_first;
+			ia = TAILQ_FIRST(&in_ifaddr);
 		if (ia == 0) {
 			*errorp = EADDRNOTAVAIL;
 			return NULL;
@@ -865,8 +865,7 @@ in_selectsrc(sin, ro, soopts, mopts, errorp)
 		imo = mopts;
 		if (imo->imo_multicast_ifp != NULL) {
 			ifp = imo->imo_multicast_ifp;
-			for (ia = in_ifaddr.tqh_first; ia != 0;
-			    ia = ia->ia_list.tqe_next)
+			TAILQ_FOREACH(ia, &in_ifaddr, ia_list)
 				if (ia->ia_ifp == ifp)
 					break;
 			if (ia == 0) {
@@ -929,7 +928,7 @@ in_pcbhashlookup(table, faddr, fport_arg, laddr, lport_arg)
 	u_int16_t fport = fport_arg, lport = lport_arg;
 
 	head = INPCBHASH(table, &faddr, fport, &laddr, lport);
-	for (inp = head->lh_first; inp != NULL; inp = inp->inp_hash.le_next) {
+	LIST_FOREACH(inp, head, inp_hash) {
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			continue;	/*XXX*/
@@ -943,7 +942,7 @@ in_pcbhashlookup(table, faddr, fport_arg, laddr, lport_arg)
 			 * repeated accesses are quicker.  This is analogous to
 			 * the historic single-entry PCB cache.
 			 */
-			if (inp != head->lh_first) {
+			if (inp != LIST_FIRST(head)) {
 				LIST_REMOVE(inp, inp_hash);
 				LIST_INSERT_HEAD(head, inp, inp_hash);
 			}
@@ -972,7 +971,7 @@ in6_pcbhashlookup(table, faddr, fport_arg, laddr, lport_arg)
 	u_int16_t fport = fport_arg, lport = lport_arg;
 
 	head = IN6PCBHASH(table, faddr, fport, laddr, lport);
-	for (inp = head->lh_first; inp != NULL; inp = inp->inp_hash.le_next) {
+	LIST_FOREACH(inp, head, inp_hash) {
 		if (!(inp->inp_flags & INP_IPV6))
 			continue;
 		if (IN6_ARE_ADDR_EQUAL(&inp->inp_faddr6, faddr) &&
@@ -983,7 +982,7 @@ in6_pcbhashlookup(table, faddr, fport_arg, laddr, lport_arg)
 			 * repeated accesses are quicker.  This is analogous to
 			 * the historic single-entry PCB cache.
 			 */
-			if (inp != head->lh_first) {
+			if (inp != LIST_FIRST(head)) {
 				LIST_REMOVE(inp, inp_hash);
 				LIST_INSERT_HEAD(head, inp, inp_hash);
 			}
@@ -1063,7 +1062,7 @@ in_pcblookup_listen(table, laddr, lport_arg, reverse)
 	 * repeated accesses are quicker.  This is analogous to
 	 * the historic single-entry PCB cache.
 	 */
-	if (inp != NULL && inp != head->lh_first) {
+	if (inp != NULL && inp != LIST_FIRST(head)) {
 		LIST_REMOVE(inp, inp_hash);
 		LIST_INSERT_HEAD(head, inp, inp_hash);
 	}
@@ -1122,7 +1121,7 @@ in6_pcblookup_listen(table, laddr, lport_arg, reverse)
 	 * repeated accesses are quicker.  This is analogous to
 	 * the historic single-entry PCB cache.
 	 */
-	if (inp != NULL && inp != head->lh_first) {
+	if (inp != NULL && inp != LIST_FIRST(head)) {
 		LIST_REMOVE(inp, inp_hash);
 		LIST_INSERT_HEAD(head, inp, inp_hash);
 	}

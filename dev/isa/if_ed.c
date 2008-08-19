@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ed.c,v 1.55 2005/04/03 10:20:47 brad Exp $	*/
+/*	$OpenBSD: if_ed.c,v 1.57 2006/05/22 20:35:12 krw Exp $	*/
 /*	$NetBSD: if_ed.c,v 1.105 1996/10/21 22:40:45 thorpej Exp $	*/
 
 /*
@@ -282,7 +282,8 @@ ed_remove(pc_link,self)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	if_down(ifp);
 	edstop(sc);
-	shutdownhook_disestablish(sc->sc_sh);
+	if (sc->sc_sh != NULL)
+		shutdownhook_disestablish(sc->sc_sh);
 	ifp->if_flags &= ~(IFF_RUNNING|IFF_UP);
 	sc->spec_flags |= ED_NOTPRESENT;
 	isa_intr_disestablish(sc->sc_ic, sc->sc_ih);
@@ -2001,7 +2002,7 @@ outloop:
 #if NBPFILTER > 0
 	/* Tap off here if there is a BPF listener. */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m0);
+		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
 	/* txb_new points to next open buffer slot. */
@@ -2543,7 +2544,7 @@ edread(sc, buf, len)
 	 * If so, hand off the raw packet to BPF.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	ether_input_mbuf(ifp, m);

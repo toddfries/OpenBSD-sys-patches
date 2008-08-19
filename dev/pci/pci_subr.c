@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_subr.c,v 1.17 2004/11/21 17:01:39 grange Exp $	*/
+/*	$OpenBSD: pci_subr.c,v 1.19 2006/06/01 11:17:31 brad Exp $	*/
 /*	$NetBSD: pci_subr.c,v 1.19 1996/10/13 01:38:29 christos Exp $	*/
 
 /*
@@ -71,6 +71,7 @@ const struct pci_class pci_subclass_mass_storage[] = {
 	{ "RAID",		PCI_SUBCLASS_MASS_STORAGE_RAID,		},
 	{ "ATA",		PCI_SUBCLASS_MASS_STORAGE_ATA,		},
 	{ "SATA",		PCI_SUBCLASS_MASS_STORAGE_SATA,		},
+	{ "SAS",		PCI_SUBCLASS_MASS_STORAGE_SAS,		},
 	{ "miscellaneous",	PCI_SUBCLASS_MASS_STORAGE_MISC,		},
 	{ 0 },
 };
@@ -99,6 +100,7 @@ const struct pci_class pci_subclass_multimedia[] = {
 	{ "video",		PCI_SUBCLASS_MULTIMEDIA_VIDEO,		},
 	{ "audio",		PCI_SUBCLASS_MULTIMEDIA_AUDIO,		},
 	{ "telephony",		PCI_SUBCLASS_MULTIMEDIA_TELEPHONY,	},
+	{ "hdaudio",		PCI_SUBCLASS_MULTIMEDIA_HDAUDIO,	},
 	{ "miscellaneous",	PCI_SUBCLASS_MULTIMEDIA_MISC,		},
 	{ 0 },
 };
@@ -143,6 +145,7 @@ const struct pci_class pci_subclass_system[] = {
 	{ "8254 timer",		PCI_SUBCLASS_SYSTEM_TIMER,		},
 	{ "RTC",		PCI_SUBCLASS_SYSTEM_RTC,		},
 	{ "PCI Hot-Plug",	PCI_SUBCLASS_SYSTEM_PCIHOTPLUG,		},
+	{ "SD Host Controller",	PCI_SUBCLASS_SYSTEM_SDHC,		},
 	{ "miscellaneous",	PCI_SUBCLASS_SYSTEM_MISC,		},
 	{ 0 },
 };

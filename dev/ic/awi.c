@@ -1,4 +1,4 @@
-/*	$OpenBSD: awi.c,v 1.20 2006/01/04 06:04:41 canacar Exp $	*/
+/*	$OpenBSD: awi.c,v 1.22 2006/06/23 06:27:11 miod Exp $	*/
 /*	$NetBSD: awi.c,v 1.26 2000/07/21 04:48:55 onoe Exp $	*/
 
 /*-
@@ -223,18 +223,18 @@ int awi_dump_len = 28;
 #define	AWI_BPF_NORM	0
 #define	AWI_BPF_RAW	1
 #ifdef __FreeBSD__
-#define	AWI_BPF_MTAP(sc, m, raw) do {					\
+#define	AWI_BPF_MTAP(sc, m, raw, dir) do {				\
 	if ((sc)->sc_ifp->if_bpf && (sc)->sc_rawbpf == (raw))		\
 		bpf_mtap((sc)->sc_ifp, (m));				\
 } while (0);
 #else
-#define	AWI_BPF_MTAP(sc, m, raw) do {					\
+#define	AWI_BPF_MTAP(sc, m, raw, dir) do {				\
 	if ((sc)->sc_ifp->if_bpf && (sc)->sc_rawbpf == (raw))		\
-		bpf_mtap((sc)->sc_ifp->if_bpf, (m));			\
+		bpf_mtap((sc)->sc_ifp->if_bpf, (m), dir);		\
 } while (0);
 #endif
 #else
-#define	AWI_BPF_MTAP(sc, m, raw)
+#define	AWI_BPF_MTAP(sc, m, raw, dir)
 #endif
 
 #ifndef llc_snap
@@ -414,7 +414,6 @@ awi_activate(self, act)
 	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
-		error = EOPNOTSUPP;
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -994,7 +993,7 @@ awi_start(ifp)
 				break;
 			}
 			IFQ_DEQUEUE(&ifp->if_snd, m0);
-			AWI_BPF_MTAP(sc, m0, AWI_BPF_NORM);
+			AWI_BPF_MTAP(sc, m0, AWI_BPF_NORM, BPF_DIRECTION_OUT);
 			m0 = awi_fix_txhdr(sc, m0);
 			if (sc->sc_wep_algo != NULL && m0 != NULL)
 				m0 = awi_wep_encrypt(sc, m0, 1);
@@ -1008,7 +1007,7 @@ awi_start(ifp)
 		if (awi_dump)
 			awi_dump_pkt(sc, m0, -1);
 #endif
-		AWI_BPF_MTAP(sc, m0, AWI_BPF_RAW);
+		AWI_BPF_MTAP(sc, m0, AWI_BPF_RAW, BPF_DIRECTION_OUT);
 		len = 0;
 		for (m = m0; m != NULL; m = m->m_next) {
 			awi_write_bytes(sc, frame + len, mtod(m, u_int8_t *),
@@ -1222,7 +1221,7 @@ awi_input(sc, m, rxts, rssi)
 
 	/* trim CRC here for WEP can find its own CRC at the end of packet. */
 	m_adj(m, -ETHER_CRC_LEN);
-	AWI_BPF_MTAP(sc, m, AWI_BPF_RAW);
+	AWI_BPF_MTAP(sc, m, AWI_BPF_RAW, BPF_DIRECTION_IN);
 	wh = mtod(m, struct ieee80211_frame *);
 	if ((wh->i_fc[0] & IEEE80211_FC0_VERSION_MASK) !=
 	    IEEE80211_FC0_VERSION_0) {
@@ -1274,7 +1273,7 @@ awi_input(sc, m, rxts, rssi)
 		}
 		ifp->if_ipackets++;
 #if !(defined(__FreeBSD__) && __FreeBSD__ >= 4)
-		AWI_BPF_MTAP(sc, m, AWI_BPF_NORM);
+		AWI_BPF_MTAP(sc, m, AWI_BPF_NORM, BPF_DIRECTION_IN);
 #endif
 #ifdef __NetBSD__
 		(*ifp->if_input)(ifp, m);

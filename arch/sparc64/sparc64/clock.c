@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.23 2005/04/26 18:54:39 miod Exp $	*/
+/*	$OpenBSD: clock.c,v 1.26 2006/07/01 20:05:11 kettenis Exp $	*/
 /*	$NetBSD: clock.c,v 1.41 2001/07/24 19:29:25 eeh Exp $ */
 
 /*
@@ -442,12 +442,12 @@ clockattach(node, bt, bh)
 	h |= idp->id_hostid[1] << 8;
 	h |= idp->id_hostid[2];
 	hostid = h;
-	printf(": hostid %x\n", (u_int)hostid);
-
+	printf("\n");
 }
 
 struct idprom *
-getidprom() {
+getidprom()
+{
 	struct idprom *idp = NULL;
 	int node, n;
 
@@ -573,7 +573,10 @@ timermatch(parent, cf, aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
-	return (strcmp("counter-timer", ma->ma_name) == 0);
+	if (!timerreg_4u.t_timer || !timerreg_4u.t_clrintr)
+		return (strcmp("counter-timer", ma->ma_name) == 0);
+	else
+		return (0);
 }
 
 static void
@@ -607,11 +610,8 @@ timerattach(parent, self, aux)
 	strlcpy(level14.ih_name, "prof", sizeof(level14.ih_name));
 	intr_establish(14, &level14);
 
-	printf(" irq vectors %lx and %lx", 
-	       (u_long)level10.ih_number, 
-	       (u_long)level14.ih_number);
-
-	printf("\n");
+	printf(" ivec 0x%x, 0x%x\n", INTVEC(level10.ih_number),
+	    INTVEC(level14.ih_number));
 }
 
 void
@@ -709,7 +709,6 @@ cpu_initclocks()
 	 */
 
 	if (!timerreg_4u.t_timer || !timerreg_4u.t_clrintr) {
-
 		printf("No counter-timer -- using %%tick at %ldMHz as "
 		    "system clock.\n", (long)(cpu_clockrate/1000000));
 		/* We don't have a counter-timer -- use %tick */

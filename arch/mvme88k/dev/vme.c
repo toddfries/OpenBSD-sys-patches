@@ -1,4 +1,4 @@
-/*	$OpenBSD: vme.c,v 1.40 2005/11/25 22:14:31 miod Exp $ */
+/*	$OpenBSD: vme.c,v 1.44 2006/05/08 14:36:10 miod Exp $ */
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1999 Steve Murphree, Jr.
@@ -38,7 +38,6 @@
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 #include <machine/frame.h>
-#include <machine/locore.h>
 
 #include "pcctwo.h"
 #include "syscon.h"
@@ -96,11 +95,7 @@ vme_map(bus_addr_t addr, bus_size_t size, int flags, bus_space_handle_t *ret)
 {
 	vaddr_t map;
 
-#if 0
-	map = iomap_mapin(addr, size, 0);
-#else
 	map = (vaddr_t)mapiodev((paddr_t)addr, size);
-#endif
 	if (map == NULL)
 		return ENOMEM;
 
@@ -111,11 +106,7 @@ vme_map(bus_addr_t addr, bus_size_t size, int flags, bus_space_handle_t *ret)
 void
 vme_unmap(bus_space_handle_t handle, bus_size_t size)
 {
-#if 0
-	iomap_mapout(handle, size);
-#else
 	unmapiodev((vaddr_t)handle, size);
-#endif
 }
 
 int
@@ -285,8 +276,8 @@ vmeattach(parent, self, args)
 	{
 		u_int8_t sconc;
 
-		vmevecbase = 0x80;  /* Hard coded for MVME188 */
-		sconc = *(volatile u_int8_t *)GLB1;
+		vmevecbase = 0x60;  /* Hard coded for MVME188 */
+		sconc = *(volatile u_int8_t *)MVME188_GLOBAL1;
 		if (ISSET(sconc, M188_SYSCON))
 			printf(": system controller");
 		printf("\n");
@@ -454,16 +445,6 @@ vmerw(sc, uio, flags, bus)
  * interrupt. If you share you will lose.
  */
 
-/*
- * All VME bus devices will use a vector starting with VBR1 + 0x10
- * and determined by intr_findvec(). (in machdep.c) vmeintr_establish()
- * should be called with the 'vec' argument = 0 to 'auto vector' a
- * VME device.
- *
- * The 8 SW interrupters will start with VBR1.  The rest will start
- * with VBR0< 4) & 0xFF.
- */
-
 int
 vmeintr_establish(int vec, struct intrhand *ih, const char *name)
 {
@@ -584,11 +565,16 @@ void
 vmesyscon_init(sc)
 	struct vmesoftc *sc;
 {
+	u_int32_t ucsr;
+
 	/*
-	 * Nothing to do - though we ought to check the settings and
-	 * print them.  Abort button vector has already been setup in
-	 * sysconattach().
+	 * Force a reasonable timeout for VME data transfers.
+	 * We can not disable this, this would cause autoconf to hang
+	 * on the first missing device we'll probe.
 	 */
+	ucsr = *(volatile u_int32_t*)MVME188_UCSR;
+	ucsr = (ucsr & ~VTOSELBITS) | VTO128US;
+	*(volatile u_int32_t *)MVME188_UCSR = ucsr;
 }
 #endif /* NSYSCON */
 

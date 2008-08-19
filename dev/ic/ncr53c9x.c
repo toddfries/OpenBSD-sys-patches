@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.29 2006/01/09 23:11:49 miod Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.32 2006/06/26 22:16:23 miod Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -88,7 +88,9 @@
 #include <dev/ic/ncr53c9xreg.h>
 #include <dev/ic/ncr53c9xvar.h>
 
+#ifdef NCR53C9X_DEBUG
 int ncr53c9x_debug = 0; /*NCR_SHOWPHASE|NCR_SHOWMISC|NCR_SHOWTRAC|NCR_SHOWCMDS;*/
+#endif
 #ifdef DEBUG
 int ncr53c9x_notag = 0;
 #endif
@@ -241,6 +243,16 @@ ncr53c9x_attach(sc, adapter, dev)
 	/* CCF register only has 3 bits; 0 is actually 8 */
 	sc->sc_ccf &= 7;
 
+	/* Find how many targets we need to support */
+	switch (sc->sc_rev) {
+	case NCR_VARIANT_FAS366:
+		sc->sc_ntarg = 16;
+		break;
+	default:
+		sc->sc_ntarg = 8;
+		break;
+	}
+
 	/* Reset state & bus */
 	sc->sc_cfflags = sc->sc_dev.dv_cfdata->cf_flags;
 	sc->sc_state = 0;
@@ -254,6 +266,7 @@ ncr53c9x_attach(sc, adapter, dev)
 	sc->sc_link.adapter = adapter;
 	sc->sc_link.device = dev;
 	sc->sc_link.openings = 2;
+	sc->sc_link.adapter_buswidth = sc->sc_ntarg;
 
 	/*
 	 * Now try to attach all the sub-devices
@@ -381,7 +394,7 @@ ncr53c9x_init(sc, doreset)
 		TAILQ_INIT(&sc->ready_list);
 		sc->sc_nexus = NULL;
 		bzero(sc->sc_tinfo, sizeof(sc->sc_tinfo));
-		for (r = 0; r < NCR_NTARG; r++) {
+		for (r = 0; r < sc->sc_ntarg; r++) {
 			LIST_INIT(&sc->sc_tinfo[r].luns);
 		}
 	} else {
@@ -392,7 +405,7 @@ ncr53c9x_init(sc, doreset)
 			ecb->xs->error = XS_TIMEOUT;
 			ncr53c9x_done(sc, ecb);
 		}
-		for (r = 0; r < 8; r++) {
+		for (r = 0; r < sc->sc_ntarg; r++) {
 			LIST_FOREACH(li, &sc->sc_tinfo[r].luns, link) {
 				if ((ecb = li->untagged)) {
 					li->untagged = NULL;
@@ -405,7 +418,7 @@ ncr53c9x_init(sc, doreset)
 					ecb->xs->error = XS_TIMEOUT;
 					ncr53c9x_done(sc, ecb);
 				}
-				for (i = 0; i<256; i++)
+				for (i = 0; i < 256; i++)
 					if ((ecb = li->queued[i])) {
 						li->queued[i] = NULL;
 						ecb->xs->error = XS_TIMEOUT;
@@ -422,13 +435,13 @@ ncr53c9x_init(sc, doreset)
 	ncr53c9x_reset(sc);
 
 	sc->sc_phase = sc->sc_prevphase = INVALID_PHASE;
-	for (r = 0; r < 8; r++) {
+	for (r = 0; r < sc->sc_ntarg; r++) {
 		struct ncr53c9x_tinfo *ti = &sc->sc_tinfo[r];
 /* XXX - config flags per target: low bits: no reselect; high bits: no synch */
 
-                ti->flags = ((sc->sc_minsync && !(sc->sc_cfflags & (1<<(r+8))))
-		    ? 0 : T_SYNCHOFF) |
-		    ((sc->sc_cfflags & (1<<r)) ? T_RSELECTOFF : 0) |
+                ti->flags = ((!(sc->sc_cfflags & (1 << (r + 16))) &&
+		    sc->sc_minsync) ? 0 : T_SYNCHOFF) |
+		    ((sc->sc_cfflags & (1 << r)) ?  T_RSELECTOFF : 0) |
 		    T_NEED_TO_RESET;
 #ifdef DEBUG
 		 if (ncr53c9x_notag)
@@ -906,7 +919,7 @@ ncr53c9x_sched(sc)
 	 * Find first ecb in ready queue that is for a target/lunit
 	 * combinations that is not busy.
 	 */
-	for (ecb = sc->ready_list.tqh_first; ecb; ecb = ecb->chain.tqe_next) {
+	TAILQ_FOREACH(ecb, &sc->ready_list, chain) {
 		sc_link = ecb->xs->sc_link;
 		ti = &sc->sc_tinfo[sc_link->target];
 		lun = sc_link->lun;
@@ -1636,14 +1649,17 @@ gotit:
 						ti->flags &= ~T_SYNCMODE;
 					}
 				} else {
-					int r = 250/ti->period;
-					int s = (100*250)/ti->period - 100*r;
+#ifdef NCR53C9X_DEBUG
+					int r, s;
+#endif
 					int p;
 
 					p = ncr53c9x_stp2cpb(sc, ti->period);
 					ti->period = ncr53c9x_cpb2stp(sc, p);
 #ifdef NCR53C9X_DEBUG
 					sc_print_addr(ecb->xs->sc_link);
+					r = 250/ti->period;
+					s = (100*250)/ti->period - 100*r;
 					printf("max sync rate %d.%02dMB/s\n",
 						r, s);
 #endif
@@ -2142,18 +2158,18 @@ again:
 			/* Selection timeout -- discard all LUNs if empty */
 			sc_link = ecb->xs->sc_link;
 			ti = &sc->sc_tinfo[sc_link->target];
-			li = ti->luns.lh_first;
-			while (li) {
+			for (li = LIST_FIRST(&ti->luns);
+			    li != LIST_END(&ti->luns); ) {
 				if (!li->untagged && !li->used) {
 					if (li->lun < NCR_NLUN)
 						ti->lun[li->lun] = NULL;
 					LIST_REMOVE(li, link);
 					free(li, M_DEVBUF);
 					/* Restart the search at the beginning */
-					li = ti->luns.lh_first;
+					li = LIST_FIRST(&ti->luns);
 					continue;
 				}
-				li = li->link.le_next;
+				li = LIST_NEXT(li, link);
 			}
 			goto finish;
 		}
@@ -2784,7 +2800,7 @@ ncr53c9x_timeout(arg)
 		    (sc->sc_phase & (MSGI|CDI)) == 0) {
 			sc_print_addr(sc_link);
 			printf("sync negotiation disabled\n");
-			sc->sc_cfflags |= (1<<(sc_link->target+8));
+			sc->sc_cfflags |= (1 << (sc_link->target + 16));
 		}
 	}
 
@@ -2803,20 +2819,19 @@ ncr53c9x_watch(arg)
 	time_t old = time_second - (10*60);
 
 	s = splbio();
-	for (t=0; t<NCR_NTARG; t++) {
+	for (t = 0; t < sc->sc_ntarg; t++) {
 		ti = &sc->sc_tinfo[t];
-		li = ti->luns.lh_first;
-		while (li) {
+		for (li = LIST_FIRST(&ti->luns); li != LIST_END(&ti->luns); ) {
 			if (li->last_used < old && !li->untagged && !li->used) {
 				if (li->lun < NCR_NLUN)
 					ti->lun[li->lun] = NULL;
 				LIST_REMOVE(li, link);
 				free(li, M_DEVBUF);
 				/* Restart the search at the beginning */
-				li = ti->luns.lh_first;
+				li = LIST_FIRST(&ti->luns);
 				continue; 
 			}
-			li = li->link.le_next;
+			li = LIST_NEXT(li, link);
 		}
 	}
 	splx(s);

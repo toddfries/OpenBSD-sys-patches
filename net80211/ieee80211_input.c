@@ -1,6 +1,5 @@
 /*	$NetBSD: ieee80211_input.c,v 1.24 2004/05/31 11:12:24 dyoung Exp $	*/
-/*	$OpenBSD: ieee80211_input.c,v 1.14 2006/01/11 00:18:17 millert Exp $	*/
-
+/*	$OpenBSD: ieee80211_input.c,v 1.21 2006/08/29 18:10:34 damien Exp $	*/
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
@@ -32,8 +31,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
 
 #include "bpfilter.h"
 
@@ -111,12 +108,18 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 
 	/*
 	 * In monitor mode, send everything directly to bpf.
-	 * Also do not process frames w/o i_addr2 any further.
 	 * XXX may want to include the CRC
 	 */
-	if (ic->ic_opmode == IEEE80211_M_MONITOR ||
-	    m->m_pkthdr.len < sizeof(struct ieee80211_frame_min))
+	if (ic->ic_opmode == IEEE80211_M_MONITOR)
 		goto out;
+
+	/* do not process frames w/o i_addr2 any further */
+	if (m->m_pkthdr.len < sizeof(struct ieee80211_frame_min)) {
+		IEEE80211_DPRINTF2(("%s: frame too short (1), len %u\n",
+		    __func__, m->m_pkthdr.len));
+		ic->ic_stats.is_rx_tooshort++;
+		goto out;
+	}
 
 	wh = mtod(m, struct ieee80211_frame *);
 	if ((wh->i_fc[0] & IEEE80211_FC0_VERSION_MASK) !=
@@ -135,8 +138,7 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 	 *     them to go through bpf tapping at the 802.11 layer.
 	 */
 	if (m->m_pkthdr.len < sizeof(struct ieee80211_frame)) {
-		/* XXX statistic */
-		IEEE80211_DPRINTF2(("%s: frame too short, len %u\n",
+		IEEE80211_DPRINTF2(("%s: frame too short (2), len %u\n",
 			__func__, m->m_pkthdr.len));
 		ic->ic_stats.is_rx_tooshort++;
 		goto out;
@@ -259,9 +261,9 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 			}
 			/* check if source STA is associated */
 			if (ni == ic->ic_bss) {
-				IEEE80211_DPRINTF(("%s: data from unknown src "
-					"%s\n", __func__,
-					ether_sprintf(wh->i_addr2)));
+				IEEE80211_DPRINTF(("%s: "
+				    "data from unknown src %s\n", __func__,
+				    ether_sprintf(wh->i_addr2)));
 				/* NB: caller deals with reference */
 				ni = ieee80211_dup_bss(ic, wh->i_addr2);
 				if (ni != NULL) {
@@ -302,7 +304,7 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 #if NBPFILTER > 0
 		/* copy to listener after decrypt */
 		if (ic->ic_rawbpf)
-			bpf_mtap(ic->ic_rawbpf, m);
+			bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_IN);
 #endif
 		m = ieee80211_decap(ifp, m);
 		if (m == NULL) {
@@ -316,7 +318,8 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 
 		/* perform as a bridge within the AP */
 		m1 = NULL;
-		if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
+		if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+		    (ic->ic_flags & IEEE80211_F_NOBRIDGE) == 0) {
 			eh = mtod(m, struct ether_header *);
 			if (ETHER_IS_MULTICAST(eh->ether_dhost)) {
 				m1 = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
@@ -352,7 +355,7 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 			 * we don't need to duplicate for DLT_EN10MB.
 			 */
 			if (ifp->if_bpf && m1 == NULL)
-				bpf_mtap(ifp->if_bpf, m);
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 			ether_input_mbuf(ifp, m);
 		}
@@ -407,7 +410,7 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 		}
 #if NBPFILTER > 0
 		if (ic->ic_rawbpf)
-			bpf_mtap(ic->ic_rawbpf, m);
+			bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_IN);
 		/*
 		 * Drop mbuf if it was filtered by bpf. Normally, this is
 		 * done in ether_input() but IEEE 802.11 management frames
@@ -416,7 +419,7 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 		if (m->m_flags & M_FILDROP) {
 			m_freem(m);
 			return;
-		}			
+		}
 #endif
 		(*ic->ic_recv_mgmt)(ic, m, ni, subtype, rssi, rstamp);
 		m_freem(m);
@@ -449,7 +452,7 @@ ieee80211_input(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node *ni,
 	if (m != NULL) {
 #if NBPFILTER > 0
 		if (ic->ic_rawbpf)
-			bpf_mtap(ic->ic_rawbpf, m);
+			bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_IN);
 #endif
 		m_freem(m);
 	}
@@ -497,7 +500,6 @@ ieee80211_decap(struct ifnet *ifp, struct mbuf *m)
 		m_freem(m);
 		return NULL;
 	}
-#ifdef ALIGNED_POINTER
 	if (!ALIGNED_POINTER(mtod(m, caddr_t) + sizeof(*eh), u_int32_t)) {
 		struct mbuf *n, *n0, **np;
 		caddr_t newdata;
@@ -547,7 +549,6 @@ ieee80211_decap(struct ifnet *ifp, struct mbuf *m)
 		m_freem(m);
 		m = n0;
 	}
-#endif /* ALIGNED_POINTER */
 	if (llc != NULL) {
 		eh = mtod(m, struct ether_header *);
 		eh->ether_type = htons(m->m_pkthdr.len - sizeof(*eh));
@@ -1056,7 +1057,6 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 			ic->ic_stats.is_rx_chanmismatch++;
 			return;
 		}
-
 		/*
 		 * Use mac, channel and rssi so we collect only the
 		 * best potential AP with the equal bssid while scanning.
@@ -1099,6 +1099,45 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		} else
 			is_new = 0;
 
+		/*
+		 * When operating in station mode, check for state updates
+		 * while we're associated. We consider only 11g stuff right
+		 * now.
+		 */
+		if (ic->ic_opmode == IEEE80211_M_STA &&
+		    ic->ic_state == IEEE80211_S_ASSOC &&
+		    ni->ni_state == IEEE80211_STA_BSS) {
+			/*
+			 * Check if protection mode has changed since last
+			 * beacon.
+			 */
+			if (ni->ni_erp != erp) {
+				IEEE80211_DPRINTF((
+				    "[%s] erp change: was 0x%x, now 0x%x\n",
+				    ether_sprintf(wh->i_addr2), ni->ni_erp,
+				    erp));
+				if (ic->ic_curmode == IEEE80211_MODE_11G &&
+				    (erp & IEEE80211_ERP_USE_PROTECTION))
+					ic->ic_flags |= IEEE80211_F_USEPROT;
+				else
+					ic->ic_flags &= ~IEEE80211_F_USEPROT;
+				ic->ic_bss->ni_erp = erp;
+			}
+
+			/*
+			 * Check if AP short slot time setting has changed
+			 * since last beacon and give the driver a chance to
+			 * update the hardware.
+			 */
+			if ((ni->ni_capinfo ^ letoh16(*(u_int16_t *)capinfo)) &
+			    IEEE80211_CAPINFO_SHORT_SLOTTIME) {
+				ieee80211_set_shortslottime(ic,
+				    ic->ic_curmode == IEEE80211_MODE_11A ||
+				    (letoh16(*(u_int16_t *)capinfo) &
+				     IEEE80211_CAPINFO_SHORT_SLOTTIME));
+			}
+		}
+
 		if (ssid[1] != 0 && ni->ni_esslen == 0) {
 			/*
 			 * Update ESSID at probe response to adopt hidden AP by
@@ -1122,6 +1161,7 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		/* NB: must be after ni_chan is setup */
 		ieee80211_setup_rates(ic, ni, rates, xrates,
 		    IEEE80211_F_DOSORT);
+
 		/*
 		 * When scanning we record results (nodes) with a zero
 		 * refcnt.  Otherwise we want to hold the reference for
@@ -1145,9 +1185,8 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 	case IEEE80211_FC0_SUBTYPE_PROBE_REQ: {
 		u_int8_t rate;
 
-		if (ic->ic_opmode == IEEE80211_M_STA)
-			return;
-		if (ic->ic_state != IEEE80211_S_RUN)
+		if (ic->ic_opmode == IEEE80211_M_STA ||
+		    ic->ic_state != IEEE80211_S_RUN)
 			return;
 
 		/*
@@ -1174,6 +1213,12 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		IEEE80211_VERIFY_ELEMENT(rates, IEEE80211_RATE_MAXSIZE);
 		IEEE80211_VERIFY_ELEMENT(ssid, IEEE80211_NWID_LEN);
 		IEEE80211_VERIFY_SSID(ic->ic_bss, ssid, "probe");
+		if ((ic->ic_flags & IEEE80211_F_HIDENWID) && ssid[1] == 0) {
+			IEEE80211_DPRINTF(("%s: no ssid "
+			    "with ssid suppression enabled", __func__));
+			ic->ic_stats.is_rx_ssidmismatch++;
+			return;
+		}
 
 		if (ni == ic->ic_bss) {
 			ni = ieee80211_dup_bss(ic, wh->i_addr2);
@@ -1185,8 +1230,8 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		ni->ni_rssi = rssi;
 		ni->ni_rstamp = rstamp;
 		rate = ieee80211_setup_rates(ic, ni, rates, xrates,
-				IEEE80211_F_DOSORT | IEEE80211_F_DOFRATE
-				| IEEE80211_F_DONEGO | IEEE80211_F_DODEL);
+				IEEE80211_F_DOSORT | IEEE80211_F_DOFRATE |
+				IEEE80211_F_DONEGO | IEEE80211_F_DODEL);
 		if (rate & IEEE80211_RATE_BASIC) {
 			IEEE80211_DPRINTF(("%s: rate negotiation failed: %s\n",
 			    __func__,ether_sprintf(wh->i_addr2)));
@@ -1242,7 +1287,7 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		u_int16_t capinfo, bintval;
 
 		if (ic->ic_opmode != IEEE80211_M_HOSTAP ||
-		    (ic->ic_state != IEEE80211_S_RUN))
+		    ic->ic_state != IEEE80211_S_RUN)
 			return;
 
 		if (subtype == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) {
@@ -1409,9 +1454,32 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		ieee80211_setup_rates(ic, ni, rates, xrates,
 				IEEE80211_F_DOSORT | IEEE80211_F_DOFRATE |
 				IEEE80211_F_DONEGO | IEEE80211_F_DODEL);
-		if (ni->ni_rates.rs_nrates != 0)
-			ieee80211_new_state(ic, IEEE80211_S_RUN,
-				wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK);
+		if (ni->ni_rates.rs_nrates == 0)
+			break;
+
+		/*
+		 * Configure state now that we are associated.
+		 */
+		if (ic->ic_curmode == IEEE80211_MODE_11A ||
+		    (ni->ni_capinfo & IEEE80211_CAPINFO_SHORT_PREAMBLE))
+			ic->ic_flags |= IEEE80211_F_SHPREAMBLE;
+		else
+			ic->ic_flags &= ~IEEE80211_F_SHPREAMBLE;
+
+		ieee80211_set_shortslottime(ic,
+		    ic->ic_curmode == IEEE80211_MODE_11A ||
+		    (ni->ni_capinfo & IEEE80211_CAPINFO_SHORT_SLOTTIME));
+		/*
+		 * Honor ERP protection.
+		 */
+		if (ic->ic_curmode == IEEE80211_MODE_11G &&
+		    (ni->ni_erp & IEEE80211_ERP_USE_PROTECTION))
+			ic->ic_flags |= IEEE80211_F_USEPROT;
+		else
+			ic->ic_flags &= ~IEEE80211_F_USEPROT;
+
+		ieee80211_new_state(ic, IEEE80211_S_RUN,
+			wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK);
 		break;
 	}
 
@@ -1483,6 +1551,9 @@ ieee80211_recv_mgmt(struct ieee80211com *ic, struct mbuf *m0,
 		break;
 	}
 }
+#undef IEEE80211_VERIFY_LENGTH
+#undef IEEE80211_VERIFY_ELEMENT
+#undef IEEE80211_VERIFY_SSID
 
 static void
 ieee80211_recv_pspoll(struct ieee80211com *ic, struct mbuf *m0, int rssi,
@@ -1601,8 +1672,7 @@ ieee80211_ibss_merge(struct ieee80211com *ic, struct ieee80211_node *ni,
 	else
 		sign = 1;
 
-	if (memcmp(ni->ni_bssid, ic->ic_bss->ni_bssid,
-	    IEEE80211_ADDR_LEN) == 0) {
+	if (IEEE80211_ADDR_EQ(ni->ni_bssid, ic->ic_bss->ni_bssid)) {
 		if (!ieee80211_do_slow_print(ic, &did_print))
 			return 0;
 		printf("%s: tsft offset %s%llu\n", ic->ic_if.if_xname,
@@ -1653,6 +1723,3 @@ ieee80211_ibss_merge(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	return ENETRESET;
 }
-#undef IEEE80211_VERIFY_LENGTH
-#undef IEEE80211_VERIFY_ELEMENT
-#undef IEEE80211_VERIFY_SSID

@@ -1,4 +1,4 @@
-/*	$OpenBSD: asc.c,v 1.22 2006/01/22 18:37:56 miod Exp $	*/
+/*	$OpenBSD: asc.c,v 1.25 2006/09/16 10:42:23 miod Exp $	*/
 /*	$NetBSD: asc.c,v 1.20 1997/02/24 05:47:33 scottr Exp $	*/
 
 /*
@@ -196,8 +196,10 @@ ascopen(dev, flag, mode, p)
 	int unit;
 
 	unit = ASCUNIT(dev);
-	sc = asc_cd.cd_devs[unit];
 	if (unit >= asc_cd.cd_ndevs)
+		return (ENXIO);
+	sc = asc_cd.cd_devs[unit];
+	if (sc == NULL)
 		return (ENXIO);
 	if (sc->sc_open)
 		return (EBUSY);
@@ -292,7 +294,7 @@ ascmmap(dev, off, prot)
 	return (-1);
 }
 
-static int 
+static int
 asc_ring_bell(arg, freq, length, volume)
 	void *arg;
 	int freq, length, volume;
@@ -305,8 +307,7 @@ asc_ring_bell(arg, freq, length, volume)
 		return (ENODEV);
 
 	if (sc->sc_ringing == 0) {
-
-		bus_space_write_multi_1(sc->sc_tag, sc->sc_handle,
+		bus_space_set_region_1(sc->sc_tag, sc->sc_handle,
 		    0, 0, 0x800);
 		bus_space_write_region_1(sc->sc_tag, sc->sc_handle,
 		    0, asc_wave_tab, 0x800);
@@ -343,7 +344,7 @@ asc_ring_bell(arg, freq, length, volume)
 	return (0);
 }
 
-static void 
+static void
 asc_stop_bell(arg)
 	void *arg;
 {

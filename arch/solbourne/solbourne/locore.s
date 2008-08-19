@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.5 2006/02/22 22:17:05 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.8 2006/04/15 17:36:47 miod Exp $	*/
 /*	OpenBSD: locore.s,v 1.64 2005/04/17 18:47:50 miod Exp 	*/
 
 /*
@@ -1804,8 +1804,8 @@ sparc_interruptkap:
 nmi:
 	INTR_SETUP(-CCFSZ-80)
 	INCR(_C_LABEL(uvmexp)+V_INTR)		! cnt.v_intr++; (clobbers %o0,%o1)
-	/* XXX MIOD We should check for NMI set in the iGLU BSR, and clear
-	 * it if set.
+	/* XXX
+	 * We should check for NMI set in the iGLU BSR, and clear it if set.
 	 */
 
 	/*
@@ -3719,9 +3719,9 @@ ENTRY(proc_trampoline)
 	 */
 	mov	PSR_S, %l0		! user psr (no need to load it)
 	!?wr	%g0, 2, %wim		! %wim = 2
-	ld	[%sp + CCFSZ + 8], %l1	! pc = tf->tf_npc from execve/fork
+	ld	[%sp + CCFSZ + 4], %l1	! pc
 	b	return_from_syscall
-	 add	%l1, 4, %l2		! npc = pc+4
+	 ld	[%sp + CCFSZ + 8], %l2	! npc
 
 /* probeget is meant to be used during autoconfiguration */
 
@@ -3767,30 +3767,6 @@ Lfsbail:
 	st	%g0, [%o2 + PCB_ONFAULT]! error in r/w, clear pcb_onfault
 	retl				! and return error indicator
 	 mov	-1, %o0
-
-/*
- * probeset(addr, size, val) caddr_t addr; int size, val;
- *
- * As above, but we return 0 on success.
- */
-ENTRY(probeset)
-	! %o0 = addr, %o1 = (1,2,4), %o2 = val
-	sethi	%hi(_C_LABEL(cpcb)), %o3
-	ld	[%o3 + %lo(_C_LABEL(cpcb))], %o3	! cpcb->pcb_onfault = Lfserr;
-	set	Lfserr, %o5
-	st	%o5, [%o3 + PCB_ONFAULT]
-	btst	1, %o1
-	bnz,a	0f			! if (len & 1)
-	 stb	%o2, [%o0]		!	*(char *)addr = value;
-0:	btst	2, %o1
-	bnz,a	0f			! if (len & 2)
-	 sth	%o2, [%o0]		!	*(short *)addr = value;
-0:	btst	4, %o1
-	bnz,a	0f			! if (len & 4)
-	 st	%o2, [%o0]		!	*(int *)addr = value;
-0:	clr	%o0			! made it, clear onfault and return 0
-	retl
-	 st	%g0, [%o3 + PCB_ONFAULT]
 
 /*
  * copywords(src, dst, nbytes)
@@ -3995,7 +3971,7 @@ Lbcopy_doubles:
 	btst	7, %o2		! if ((len & 7) == 0)
 	be	Lbcopy_done	!	goto bcopy_done;
 
-	btst	4, %o2		! if ((len & 4)) == 0)
+	btst	4, %o2		! if ((len & 4) == 0)
 	be,a	Lbcopy_mopw	!	goto mop_up_word_and_byte;
 	btst	2, %o2		! [delay slot: if (len & 2)]
 	ld	[%o0], %o4	!	*(int *)dst = *(int *)src;
@@ -4336,7 +4312,7 @@ Lkcopy_doubles2:
 	btst	7, %o2		! if ((len & 7) == 0)
 	be	Lkcopy_done	!	goto bcopy_done;
 
-	 btst	4, %o2		! if ((len & 4)) == 0)
+	 btst	4, %o2		! if ((len & 4) == 0)
 	be,a	Lkcopy_mopw	!	goto mop_up_word_and_byte;
 	 btst	2, %o2		! [delay slot: if (len & 2)]
 	ld	[%o0], %o4	!	*(int *)dst = *(int *)src;

@@ -1,4 +1,5 @@
-/*	$OpenBSD: powernow-k8.c,v 1.3 2005/11/26 11:22:12 tedu Exp $ */
+/*	$OpenBSD: powernow-k8.c,v 1.15 2006/08/25 20:52:59 gwk Exp $ */
+
 /*
  * Copyright (c) 2004 Martin Végiard.
  * All rights reserved.
@@ -63,14 +64,16 @@
 #include <machine/cpufunc.h>
 #include <machine/bus.h>
 
-#define BIOS_START		0xe0000
-#define	BIOS_LEN		0x20000
+#define BIOS_START			0xe0000
+#define	BIOS_LEN			0x20000
+#define BIOS_STEP			16
 
 /*
  * MSRs and bits used by Powernow technology
  */
 #define MSR_AMDK7_FIDVID_CTL		0xc0010041
 #define MSR_AMDK7_FIDVID_STATUS		0xc0010042
+#define AMD_PN_FID_VID			0x06
 
 /* Bitfields used by K8 */
 
@@ -87,53 +90,31 @@
 #define PN8_STA_MVID(x)			(((x) >> 48) & 0x1f)
 
 /* Reserved1 to powernow k8 configuration */
+#define PN8_PSB_VERSION			0x14
 #define PN8_PSB_TO_RVO(x)		((x) & 0x03)
 #define PN8_PSB_TO_IRT(x)		(((x) >> 2) & 0x03)
 #define PN8_PSB_TO_MVS(x)		(((x) >> 4) & 0x03)
 #define PN8_PSB_TO_BATT(x)		(((x) >> 6) & 0x03)
 
 /* ACPI ctr_val status register to powernow k8 configuration */
-#define ACPI_PN8_CTRL_TO_FID(x)		((x) & 0x3f)
-#define ACPI_PN8_CTRL_TO_VID(x)		(((x) >> 6) & 0x1f)
-#define ACPI_PN8_CTRL_TO_VST(x)		(((x) >> 11) & 0x1f)
-#define ACPI_PN8_CTRL_TO_MVS(x)		(((x) >> 18) & 0x03)
-#define ACPI_PN8_CTRL_TO_PLL(x)		(((x) >> 20) & 0x7f)
-#define ACPI_PN8_CTRL_TO_RVO(x)		(((x) >> 28) & 0x03)
-#define ACPI_PN8_CTRL_TO_IRT(x)		(((x) >> 30) & 0x03)
+#define PN8_ACPI_CTRL_TO_FID(x)		((x) & 0x3f)
+#define PN8_ACPI_CTRL_TO_VID(x)		(((x) >> 6) & 0x1f)
+#define PN8_ACPI_CTRL_TO_VST(x)		(((x) >> 11) & 0x1f)
+#define PN8_ACPI_CTRL_TO_MVS(x)		(((x) >> 18) & 0x03)
+#define PN8_ACPI_CTRL_TO_PLL(x)		(((x) >> 20) & 0x7f)
+#define PN8_ACPI_CTRL_TO_RVO(x)		(((x) >> 28) & 0x03)
+#define PN8_ACPI_CTRL_TO_IRT(x)		(((x) >> 30) & 0x03)
 
+#define PN8_PLL_LOCK(x)			((x) * 1000/5)
 #define WRITE_FIDVID(fid, vid, ctrl)	\
 	wrmsr(MSR_AMDK7_FIDVID_CTL,	\
 	    (((ctrl) << 32) | (1ULL << 16) | ((vid) << 8) | (fid)))
 
+#define COUNT_OFF_IRT(irt)		DELAY(10 * (1 << (irt)))
+#define COUNT_OFF_VST(vst)		DELAY(20 * (vst))
 
-#define COUNT_OFF_IRT(irt)	DELAY(10 * (1 << (irt)))
-#define COUNT_OFF_VST(vst)	DELAY(20 * (vst))
-
-#define FID_TO_VCO_FID(fid)	\
+#define FID_TO_VCO_FID(fid)		\
 	(((fid) < 8) ? (8 + ((fid) << 1)) : (fid))
-
-/*
- * Divide each value by 10 to get the processor multiplier.
- */
-
-static int pn8_fid_to_mult[32] = {
-	40, 50, 60, 70, 80, 90, 100, 110,
-	120, 130, 140, 150, 160, 170, 180, 190,
-	220, 230, 240, 250, 260, 270, 280, 290,
-	300, 310, 320, 330, 340, 350,
-};
-
-/*
- * Units are in mV.
- */
-
-/* Desktop and Mobile VRM (K8) */
-static int pn8_vid_to_volts[] = {
-	1550, 1525, 1500, 1475, 1450, 1425, 1400, 1375,
-	1350, 1325, 1300, 1275, 1250, 1225, 1200, 1175,
-	1150, 1125, 1100, 1075, 1050, 1025, 1000, 975,
-	950, 925, 900, 875, 850, 825, 800, 0,
-};
 
 #define POWERNOW_MAX_STATES		16
 
@@ -146,7 +127,6 @@ struct k8pnow_state {
 struct k8pnow_cpu_state {
 	struct k8pnow_state state_table[POWERNOW_MAX_STATES];
 	unsigned int n_states;
-	unsigned int fsb;
 	unsigned int sgtc;
 	unsigned int vst;
 	unsigned int mvs;
@@ -154,14 +134,13 @@ struct k8pnow_cpu_state {
 	unsigned int rvo;
 	unsigned int irt;
 	int low;
-	int *vid_to_volts;
 };
 
 struct psb_s {
-	char signature[10];     /* AMDK7PNOW! */
+	char signature[10];	/* AMDK7PNOW! */
 	uint8_t version;
 	uint8_t flags;
-	uint16_t ttime;         /* Min Settling time */
+	uint16_t ttime;		/* Min Settling time */
 	uint8_t reserved;
 	uint8_t n_pst;
 };
@@ -174,7 +153,8 @@ struct pst_s {
 	uint8_t n_states;
 };
 
-struct k8pnow_cpu_state *k8pnow_current_state[I386_MAXPROCS];
+struct k8pnow_cpu_state *k8pnow_current_state = NULL;
+extern int setperf_prio;
 
 /*
  * Prototypes
@@ -184,9 +164,12 @@ int k8pnow_decode_pst(struct k8pnow_cpu_state *, uint8_t *);
 int k8pnow_states(struct k8pnow_cpu_state *, uint32_t, unsigned int,
     unsigned int);
 
-int k8pnow_read_pending_wait(uint64_t * status) {
-	unsigned int i = 1000;
-	while(i--) {
+int
+k8pnow_read_pending_wait(uint64_t *status)
+{
+	unsigned int i = 100000;
+
+	while (i--) {
 		*status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
 		if (!PN8_STA_PENDING(*status))
 			return 0;
@@ -201,8 +184,7 @@ k8_powernow_setperf(int level)
 {
 	unsigned int i, low, high, freq;
 	uint64_t status;
-	int cfid, cvid, fid = 0, vid = 0;
-	int rvo;
+	int cfid, cvid, fid = 0, vid = 0, rvo;
 	u_int val;
 	struct k8pnow_cpu_state *cstate;
 
@@ -212,11 +194,11 @@ k8_powernow_setperf(int level)
 	 */
 	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
 	if (PN8_STA_PENDING(status))
-		return 1;
+		return 0;
 	cfid = PN8_STA_CFID(status);
 	cvid = PN8_STA_CVID(status);
 
-	cstate = k8pnow_current_state[cpu_number()];
+	cstate = k8pnow_current_state;
 	low = cstate->state_table[0].freq;
 	high = cstate->state_table[cstate->n_states-1].freq;
 
@@ -241,7 +223,7 @@ k8_powernow_setperf(int level)
 		val = cvid - (1 << cstate->mvs);
 		WRITE_FIDVID(cfid, (val > 0) ? val : 0, 1ULL);
 		if (k8pnow_read_pending_wait(&status))
-			return 1;
+			return 0;
 		cvid = PN8_STA_CVID(status);
 		COUNT_OFF_VST(cstate->vst);
 	}
@@ -253,7 +235,7 @@ k8_powernow_setperf(int level)
 		 * under Linux */
 		WRITE_FIDVID(cfid, cvid - 1, 1ULL);
 		if (k8pnow_read_pending_wait(&status))
-			return 1;
+			return 0;
 		cvid = PN8_STA_CVID(status);
 		COUNT_OFF_VST(cstate->vst);
 	}
@@ -273,20 +255,20 @@ k8_powernow_setperf(int level)
 					val = FID_TO_VCO_FID(cfid) + 2;
 			} else
 				val = cfid - 2;
-			WRITE_FIDVID(val, cvid, cstate->pll *
-			    (uint64_t)cstate->fsb);
+			WRITE_FIDVID(val, cvid, (uint64_t)
+			    PN8_PLL_LOCK(cstate->pll));
 
 			if (k8pnow_read_pending_wait(&status))
-				return 1;
+				return 0;
 			cfid = PN8_STA_CFID(status);
 			COUNT_OFF_IRT(cstate->irt);
 
 			vco_cfid = FID_TO_VCO_FID(cfid);
 		}
 
-		WRITE_FIDVID(fid, cvid, cstate->pll * (uint64_t)cstate->fsb);
+		WRITE_FIDVID(fid, cvid, (uint64_t) PN8_PLL_LOCK(cstate->pll));
 		if (k8pnow_read_pending_wait(&status))
-			return 1;
+			return 0;
 		cfid = PN8_STA_CFID(status);
 		COUNT_OFF_IRT(cstate->irt);
 	}
@@ -295,16 +277,14 @@ k8_powernow_setperf(int level)
 	if (cvid != vid) {
 		WRITE_FIDVID(cfid, vid, 1ULL);
 		if (k8pnow_read_pending_wait(&status))
-			return 1;
+			return 0;
 		cvid = PN8_STA_CVID(status);
 		COUNT_OFF_VST(cstate->vst);
 	}
 
-	/* Check if transition failed. */
-	if (cfid != fid || cvid != vid)
-		return (1);
-
-	pentium_mhz = ((cstate->state_table[i].freq / 100000)+1)*100;
+	if (cfid == fid || cvid == vid)
+		pentium_mhz = cstate->state_table[i].freq;
+	
 	return (0);
 }
 
@@ -317,11 +297,16 @@ k8pnow_decode_pst(struct k8pnow_cpu_state *cstate, uint8_t *p)
 {
 	int i, j, n;
 	struct k8pnow_state state;
+
 	for (n = 0, i = 0; i < cstate->n_states; i++) {
 		state.fid = *p++;
 		state.vid = *p++;
 
-		state.freq = 100 * pn8_fid_to_mult[state.fid >>1] *cstate->fsb;
+		/*
+		 * The minimum supported frequency per the data sheet is 800MHz
+		 * The maximum supported frequency is 5000MHz.
+		 */
+		state.freq = 800 + state.fid * 100;
 		j = n;
 		while (j > 0 && cstate->state_table[j - 1].freq > state.freq) {
 			memcpy(&cstate->state_table[j],
@@ -346,10 +331,11 @@ k8pnow_states(struct k8pnow_cpu_state *cstate, uint32_t cpusig,
 	int i;
 
 	for (p = (u_int8_t *)ISA_HOLE_VADDR(BIOS_START);
-	    p < (u_int8_t *)ISA_HOLE_VADDR(BIOS_START + BIOS_LEN); p += 16) {
+	    p < (u_int8_t *)ISA_HOLE_VADDR(BIOS_START + BIOS_LEN); p +=
+	    BIOS_STEP) {
 		if (memcmp(p, "AMDK7PNOW!", 10) == 0) {
 			psb = (struct psb_s *)p;
-			if (psb->version != 0x14)
+			if (psb->version != PN8_PSB_VERSION)
 				return 0;
 
 			cstate->vst = psb->ttime;
@@ -359,7 +345,7 @@ k8pnow_states(struct k8pnow_cpu_state *cstate, uint32_t cpusig,
 			cstate->low = PN8_PSB_TO_BATT(psb->reserved);
 			p+= sizeof(struct psb_s);
 
-			for(i = 0; i < psb->n_pst; ++i) {
+			for (i = 0; i < psb->n_pst; ++i) {
 				pst = (struct pst_s *) p;
 
 				cstate->pll = pst->pll;
@@ -382,12 +368,28 @@ void
 k8_powernow_init(void)
 {
 	uint64_t status;
-	u_int maxfid, maxvid, currentfid, i;
+	u_int maxfid, maxvid, i;
 	struct k8pnow_cpu_state *cstate;
 	struct k8pnow_state *state;
 	struct cpu_info * ci;
 	char * techname = NULL;
+	u_int32_t regs[4];
+
 	ci = curcpu();
+
+	if (setperf_prio > 1)
+		return;
+
+	if (k8pnow_current_state)
+		return;
+
+	cpuid(0x80000000, regs);
+	if (regs[0] < 0x80000007)
+		return;
+	
+	cpuid(0x80000007, regs);
+	if (!(regs[3] & AMD_PN_FID_VID))
+		return;
 
 	cstate = malloc(sizeof(struct k8pnow_cpu_state), M_DEVBUF, M_NOWAIT);
 	if (!cstate)
@@ -396,12 +398,7 @@ k8_powernow_init(void)
 	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
 	maxfid = PN8_STA_MFID(status);
 	maxvid = PN8_STA_MVID(status);
-	currentfid = PN8_STA_CFID(status);
 
-	CPU_CLOCKUPDATE();
-	cstate->fsb = pentium_base_tsc/ 100000/ pn8_fid_to_mult[currentfid>>1];
-
-	cstate->vid_to_volts = pn8_vid_to_volts;
 	/*
 	* If start FID is different to max FID, then it is a
 	* mobile processor.  If not, it is a low powered desktop
@@ -414,16 +411,18 @@ k8_powernow_init(void)
 
 	if (k8pnow_states(cstate, ci->ci_signature, maxfid, maxvid)) {
 		if (cstate->n_states) {
-			printf("%s: AMD %s available states ",
-			    ci->ci_dev.dv_xname, techname);
-			for(i= 0; i < cstate->n_states; i++) {
-				state = &cstate->state_table[i];
-				printf("%c%d", i==0 ? '(' : ',',
-				    ((state->freq / 100000)+1)*100);
+			printf("%s: %s %d Mhz: speeds:",
+			    ci->ci_dev.dv_xname, techname, pentium_mhz);
+			for (i = cstate->n_states; i > 0; i--) {
+				state = &cstate->state_table[i-1];
+				printf(" %d", state->freq);
 			}
-			printf(")\n");
-			k8pnow_current_state[cpu_number()] = cstate;
+			printf(" Mhz\n");
+			k8pnow_current_state = cstate;
 			cpu_setperf = k8_powernow_setperf;
+			setperf_prio = 1;
+			return;
 		}
 	}
+	free(cstate, M_DEVBUF);
 }

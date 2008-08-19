@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_extern.h,v 1.26 2005/12/17 13:56:01 pedro Exp $	*/
+/*	$OpenBSD: ffs_extern.h,v 1.29 2006/06/21 10:01:10 mickey Exp $	*/
 /*	$NetBSD: ffs_extern.h,v 1.4 1996/02/09 22:22:22 christos Exp $	*/
 
 /*
@@ -106,7 +106,10 @@ int ffs_inode_alloc(struct inode *, mode_t, struct ucred *, struct vnode **);
 int ffs_inode_free(struct inode *, ino_t, mode_t);
 int ffs_freefile(struct inode *, ino_t, mode_t);
 
-daddr_t ffs_blkpref(struct inode *, daddr_t, int, daddr_t *);
+ufs1_daddr_t ffs1_blkpref(struct inode *, daddr_t, int, ufs1_daddr_t *);
+#ifdef FFS2
+ufs2_daddr_t ffs2_blkpref(struct inode *, daddr_t, int, ufs2_daddr_t *);
+#endif
 void ffs_blkfree(struct inode *, daddr_t, long);
 void ffs_clusteracct(struct fs *, struct cg *, daddr_t, int);
 
@@ -180,7 +183,7 @@ void  softdep_setup_allocindir_meta(struct buf *, struct inode *,
             struct buf *, int, daddr_t);
 void  softdep_setup_allocindir_page(struct inode *, ufs_lbn_t,
             struct buf *, int, daddr_t, daddr_t, struct buf *);
-void  softdep_fsync_mountdev(struct vnode *);
+void  softdep_fsync_mountdev(struct vnode *, int);
 int   softdep_sync_metadata(struct vop_fsync_args *);
 int   softdep_fsync(struct vnode *);
 __END_DECLS
@@ -196,3 +199,6 @@ extern int (**ffs_fifoop_p)(void *);
 
 extern struct pool ffs_ino_pool;	/* memory pool for inodes */
 extern struct pool ffs_dinode1_pool;	/* memory pool for UFS1 dinodes */
+#ifdef FFS2
+extern struct pool ffs_dinode2_pool;	/* memory pool for UFS2 dinodes */
+#endif

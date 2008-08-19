@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdsc.c,v 1.11 2004/07/30 22:29:45 miod Exp $ */
+/*	$OpenBSD: wdsc.c,v 1.13 2006/04/22 11:37:06 miod Exp $ */
 
 /*
  * Copyright (c) 1996 Steve Woodford
@@ -169,12 +169,12 @@ wdscattach(parent, self, aux)
 
 	/*
 	 * Attach all scsi units on us, watching for boot device
-	 * (see dk_establish).
+	 * (see device_register).
 	 */
 	tmp = bootpart;
 	if (ca->ca_paddr != bootaddr) 
 		bootpart = -1;
-	config_found(parent, &sc->sc_link, scsiprint);
+	config_found(self, &sc->sc_link, scsiprint);
 	bootpart = tmp;		/* restore old value */
 }
 

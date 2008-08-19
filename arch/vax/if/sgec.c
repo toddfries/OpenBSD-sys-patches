@@ -1,4 +1,4 @@
-/*	$OpenBSD: sgec.c,v 1.9 2005/11/24 04:49:25 brad Exp $	*/
+/*	$OpenBSD: sgec.c,v 1.15 2006/08/31 22:10:57 miod Exp $	*/
 /*      $NetBSD: sgec.c,v 1.5 2000/06/04 02:14:14 matt Exp $ */
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -70,13 +70,20 @@
 #include <vax/if/sgecreg.h>
 #include <vax/if/sgecvar.h>
 
-static	void	zeinit(struct ze_softc *);
-static	void	zestart(struct ifnet *);
-static	int	zeioctl(struct ifnet *, u_long, caddr_t);
-static	int	ze_add_rxbuf(struct ze_softc *, int);
-static	void	ze_setup(struct ze_softc *);
-static	void	zetimeout(struct ifnet *);
-static	int	zereset(struct ze_softc *);
+void	sgec_rxintr(struct ze_softc *);
+void	sgec_txintr(struct ze_softc *);
+void	zeinit(struct ze_softc *);
+int	zeioctl(struct ifnet *, u_long, caddr_t);
+void	zekick(struct ze_softc *);
+int	zereset(struct ze_softc *);
+void	zestart(struct ifnet *);
+void	zetimeout(struct ifnet *);
+int	ze_add_rxbuf(struct ze_softc *, int);
+void	ze_setup(struct ze_softc *);
+
+struct	cfdriver ze_cd = {
+	NULL, "ze", DV_IFNET
+};
 
 #define	ZE_WCSR(csr, val) \
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, csr, val)
@@ -96,7 +103,7 @@ sgec_attach(sc)
 	struct	ze_tdes *tp;
 	struct	ze_rdes *rp;
 	bus_dma_segment_t seg;
-	int i, rseg, error;
+	int i, s, rseg, error;
 
         /*
          * Allocate DMA safe memory for descriptors and setup memory.
@@ -165,6 +172,7 @@ sgec_attach(sc)
 	/*
 	 * Pre-allocate the receive buffers.
 	 */
+	s = splnet();
 	for (i = 0; i < RXDESCS; i++) {
 		if ((error = ze_add_rxbuf(sc, i)) != 0) {
 			printf(": unable to allocate or map rx buffer %d\n,"
@@ -172,11 +180,7 @@ sgec_attach(sc)
 			goto fail_6;
 		}
 	}
-
-	/* For vmstat -i
-	 */
-	evcount_attach(&sc->sc_intrcnt, sc->sc_dev.dv_xname,
-	    (void *)&sc->sc_intvec, &evcount_intr);
+	splx(s);
 
 	/*
 	 * Create ring loops of the buffer chains.
@@ -284,8 +288,8 @@ zeinit(sc)
 		zc->zc_recv[i].ze_framelen = ZE_FRAMELEN_OW;
 	sc->sc_nextrx = 0;
 
-	ZE_WCSR(ZE_CSR6, ZE_NICSR6_IE|ZE_NICSR6_BL_8|ZE_NICSR6_ST|
-	    ZE_NICSR6_SR|ZE_NICSR6_DC);
+	ZE_WCSR(ZE_CSR6, ZE_NICSR6_IE | ZE_NICSR6_BL_8 | ZE_NICSR6_ST |
+	    ZE_NICSR6_SR | ZE_NICSR6_DC);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -296,6 +300,39 @@ zeinit(sc)
 	 */
 	ze_setup(sc);
 
+}
+
+/*
+ * Kick off the transmit logic, if it is stopped.
+ * On the VXT2000 we need to always reprogram CSR4,
+ * so stop it unconditionnaly.
+ */
+void
+zekick(struct ze_softc *sc)
+{
+	u_int csr5;
+
+	csr5 = ZE_RCSR(ZE_CSR5);
+	if (ISSET(sc->sc_flags, SGECF_VXTQUIRKS)) {
+		if ((csr5 & ZE_NICSR5_TS) == ZE_NICSR5_TS_RUN) {
+			ZE_WCSR(ZE_CSR6, ZE_RCSR(ZE_CSR6) & ~ZE_NICSR6_ST);
+			while ((ZE_RCSR(ZE_CSR5) & ZE_NICSR5_TS) !=
+			    ZE_NICSR5_TS_STOP)
+				DELAY(10);
+		}
+		ZE_WCSR(ZE_CSR4,
+		    (vaddr_t)&sc->sc_pzedata->zc_xmit[sc->sc_nexttx]);
+		ZE_WCSR(ZE_CSR1, ZE_NICSR1_TXPD);
+		if ((csr5 & ZE_NICSR5_TS) == ZE_NICSR5_TS_RUN) {
+			ZE_WCSR(ZE_CSR6, ZE_RCSR(ZE_CSR6) | ZE_NICSR6_ST);
+			while ((ZE_RCSR(ZE_CSR5) & ZE_NICSR5_TS) ==
+			    ZE_NICSR5_TS_STOP)
+				DELAY(10);
+		}
+	} else {
+		if ((csr5 & ZE_NICSR5_TS) != ZE_NICSR5_TS_RUN)
+			ZE_WCSR(ZE_CSR1, ZE_NICSR1_TXPD);
+	}
 }
 
 /*
@@ -315,8 +352,7 @@ zestart(ifp)
 
 	s = splnet();
 	while (sc->sc_inq < (TXDESCS - 1)) {
-
-		if (sc->sc_setup) {
+		if (ISSET(sc->sc_flags, SGECF_SETUP)) {
 			ze_setup(sc);
 			continue;
 		}
@@ -343,7 +379,7 @@ zestart(ifp)
 		
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 		/*
 		 * m now points to a mbuf chain that can be loaded.
@@ -386,8 +422,7 @@ zestart(ifp)
 		/*
 		 * Kick off the transmit logic, if it is stopped.
 		 */
-		if ((ZE_RCSR(ZE_CSR5) & ZE_NICSR5_TS) != ZE_NICSR5_TS_RUN)
-			ZE_WCSR(ZE_CSR1, -1);
+		zekick(sc);
 		sc->sc_nexttx = idx;
 	}
 	if (sc->sc_inq == (TXDESCS - 1))
@@ -398,37 +433,43 @@ out:	if (old_inq < sc->sc_inq)
 	splx(s);
 }
 
-int
-sgec_intr(sc)
-	struct ze_softc *sc;
+void
+sgec_rxintr(struct ze_softc *sc)
 {
 	struct ze_cdata *zc = sc->sc_zedata;
 	struct ifnet *ifp = &sc->sc_if;
 	struct ether_header *eh;
 	struct mbuf *m;
-	int csr, len;
+	u_short rdes0;
+	int len;
 
-	csr = ZE_RCSR(ZE_CSR5);
-	if ((csr & ZE_NICSR5_IS) == 0) /* Wasn't we */
-		return 0;
-	ZE_WCSR(ZE_CSR5, csr);
-
-	if (csr & ZE_NICSR5_RI)
-		while ((zc->zc_recv[sc->sc_nextrx].ze_framelen &
-		    ZE_FRAMELEN_OW) == 0) {
-
+	while ((zc->zc_recv[sc->sc_nextrx].ze_framelen &
+	    ZE_FRAMELEN_OW) == 0) {
+		rdes0 = zc->zc_recv[sc->sc_nextrx].ze_rdes0;
+		if (rdes0 & ZE_RDES0_ES) {
+			rdes0 &= ~ZE_RDES0_TL;	/* not really an error */
+			if ((rdes0 & (ZE_RDES0_OF | ZE_RDES0_CE | ZE_RDES0_CS |
+			    ZE_RDES0_LE | ZE_RDES0_RF)) == 0)
+				rdes0 &= ~ZE_RDES0_ES;
+		}
+		if (rdes0 & ZE_RDES0_ES) {
+			ifp->if_ierrors++;
+			if (rdes0 & ZE_RDES0_CS)
+				ifp->if_collisions++;
+			m = NULL;
+		} else {
 			ifp->if_ipackets++;
 			m = sc->sc_rxmbuf[sc->sc_nextrx];
 			len = zc->zc_recv[sc->sc_nextrx].ze_framelen;
-			ze_add_rxbuf(sc, sc->sc_nextrx);
+		}
+		ze_add_rxbuf(sc, sc->sc_nextrx);
+		if (m != NULL) {
 			m->m_pkthdr.rcvif = ifp;
 			m->m_pkthdr.len = m->m_len = len;
-			if (++sc->sc_nextrx == RXDESCS)
-				sc->sc_nextrx = 0;
 			eh = mtod(m, struct ether_header *);
 #if NBPFILTER > 0
 			if (ifp->if_bpf) {
-				bpf_mtap(ifp->if_bpf, m);
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 				if ((ifp->if_flags & IFF_PROMISC) != 0 &&
 				    ((eh->ether_dhost[0] & 1) == 0) &&
 				    bcmp(sc->sc_ac.ac_enaddr, eh->ether_dhost,
@@ -448,26 +489,56 @@ sgec_intr(sc)
 				m_freem(m);
 				continue;
 			}
+			ether_input_mbuf(ifp, m);
+		}
+		if (++sc->sc_nextrx == RXDESCS)
+			sc->sc_nextrx = 0;
+	}
+}
 
-			/* m_adj() the ethernet header out of the way and pass up */
-			m_adj(m, sizeof(struct ether_header));
-			ether_input(ifp, eh, m);
+void
+sgec_txintr(struct ze_softc *sc)
+{
+	struct ze_cdata *zc = sc->sc_zedata;
+	struct ifnet *ifp = &sc->sc_if;
+	u_short tdes0;
+
+	while ((zc->zc_xmit[sc->sc_lastack].ze_tdr & ZE_TDR_OW) == 0) {
+		int idx = sc->sc_lastack;
+
+		if (sc->sc_lastack == sc->sc_nexttx)
+			break;
+		sc->sc_inq--;
+		if (++sc->sc_lastack == TXDESCS)
+			sc->sc_lastack = 0;
+
+		if ((zc->zc_xmit[idx].ze_tdes1 & ZE_TDES1_DT) ==
+		    ZE_TDES1_DT_SETUP) {
+			continue;
 		}
 
-	if (csr & ZE_NICSR5_TI) {
-		while ((zc->zc_xmit[sc->sc_lastack].ze_tdr & ZE_TDR_OW) == 0) {
-			int idx = sc->sc_lastack;
-
-			if (sc->sc_lastack == sc->sc_nexttx)
-				break;
-			sc->sc_inq--;
-			if (++sc->sc_lastack == TXDESCS)
-				sc->sc_lastack = 0;
-
-			if ((zc->zc_xmit[idx].ze_tdes1 & ZE_TDES1_DT) ==
-			    ZE_TDES1_DT_SETUP)
-				continue;
-			/* XXX collect statistics */
+		tdes0 = zc->zc_xmit[idx].ze_tdes0;
+		if (tdes0 & ZE_TDES0_ES) {
+			if (tdes0 & ZE_TDES0_TO)
+				printf("%s: transmit watchdog timeout\n",
+				    sc->sc_dev.dv_xname);
+			if (tdes0 & (ZE_TDES0_LO | ZE_TDES0_NC))
+				printf("%s: no carrier\n",
+				    sc->sc_dev.dv_xname);
+			if (tdes0 & ZE_TDES0_EC) {
+				printf("%s: excessive collisions, tdr %d\n",
+				    sc->sc_dev.dv_xname,
+				    zc->zc_xmit[idx].ze_tdr & ~ZE_TDR_OW);
+				ifp->if_collisions += 16;
+			} else if (tdes0 & ZE_TDES0_LC)
+				ifp->if_collisions +=
+				    (tdes0 & ZE_TDES0_CC) >> 3;
+			if (tdes0 & ZE_TDES0_UF)
+				printf("%s: underflow\n", sc->sc_dev.dv_xname);
+			ifp->if_oerrors++;
+			if (tdes0 & (ZE_TDES0_TO | ZE_TDES0_UF))
+				zeinit(sc);
+		} else {
 			if (zc->zc_xmit[idx].ze_tdes1 & ZE_TDES1_LS)
 				ifp->if_opackets++;
 			bus_dmamap_unload(sc->sc_dmat, sc->sc_xmtmap[idx]);
@@ -476,11 +547,45 @@ sgec_intr(sc)
 				sc->sc_txmbuf[idx] = 0;
 			}
 		}
-		if (sc->sc_inq == 0)
-			ifp->if_timer = 0;
-		ifp->if_flags &= ~IFF_OACTIVE;
-		zestart(ifp); /* Put in more in queue */
 	}
+	if (sc->sc_inq == 0)
+		ifp->if_timer = 0;
+	ifp->if_flags &= ~IFF_OACTIVE;
+	zestart(ifp); /* Put in more in queue */
+}
+
+int
+sgec_intr(sc)
+	struct ze_softc *sc;
+{
+	int s, csr;
+
+	csr = ZE_RCSR(ZE_CSR5);
+	if ((csr & ZE_NICSR5_IS) == 0) /* Wasn't we */
+		return 0;
+
+	/*
+	 * On some systems, interrupts are handled at spl4, this can end up
+	 * in pool corruption.
+	 */
+	s = splnet();
+
+	ZE_WCSR(ZE_CSR5, csr);
+
+	if (csr & ZE_NICSR5_ME) {
+		printf("%s: memory error, resetting\n", sc->sc_dev.dv_xname);
+		zeinit(sc);
+		return (1);
+	}
+
+	if (csr & ZE_NICSR5_RI)
+		sgec_rxintr(sc);
+
+	if (csr & ZE_NICSR5_TI)
+		sgec_txintr(sc);
+
+	splx(s);
+
 	return 1;
 }
 
@@ -578,6 +683,8 @@ ze_add_rxbuf(sc, i)
 	struct ze_rdes *rp;
 	int error;
 
+	splassert(IPL_NET);
+
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
 		return (ENOBUFS);
@@ -630,11 +737,12 @@ ze_setup(sc)
 
 	s = splnet();
 	if (sc->sc_inq == (TXDESCS - 1)) {
-		sc->sc_setup = 1;
+		SET(sc->sc_flags, SGECF_SETUP);
 		splx(s);
 		return;
 	}
-	sc->sc_setup = 0;
+	CLR(sc->sc_flags, SGECF_SETUP);
+
 	/*
 	 * Init the setup packet with valid info.
 	 */
@@ -668,6 +776,8 @@ ze_setup(sc)
 	reg = ZE_RCSR(ZE_CSR6);
 	DELAY(10);
 	ZE_WCSR(ZE_CSR6, reg & ~ZE_NICSR6_SR); /* Stop rx */
+	while ((ZE_RCSR(ZE_CSR5) & ZE_NICSR5_RS) != ZE_NICSR5_RS_STOP)
+		DELAY(10);
 	reg &= ~ZE_NICSR6_AF;
 	if (ifp->if_flags & IFF_PROMISC)
 		reg |= ZE_NICSR6_AF_PROM;
@@ -675,6 +785,8 @@ ze_setup(sc)
 		reg |= ZE_NICSR6_AF_ALLM;
 	DELAY(10);
 	ZE_WCSR(ZE_CSR6, reg);
+	while ((ZE_RCSR(ZE_CSR5) & ZE_NICSR5_RS) == ZE_NICSR5_RS_STOP)
+		DELAY(10);
 	/*
 	 * Only send a setup packet if needed.
 	 */
@@ -685,8 +797,7 @@ ze_setup(sc)
 		zc->zc_xmit[idx].ze_bufaddr = sc->sc_pzedata->zc_setup;
 		zc->zc_xmit[idx].ze_tdr = ZE_TDR_OW;
 
-		if ((ZE_RCSR(ZE_CSR5) & ZE_NICSR5_TS) != ZE_NICSR5_TS_RUN)
-			ZE_WCSR(ZE_CSR1, -1);
+		zekick(sc);
 
 		sc->sc_inq++;
 		if (++sc->sc_nexttx == TXDESCS)
@@ -730,7 +841,7 @@ zereset(sc)
 
 	ZE_WCSR(ZE_CSR6, ZE_NICSR6_RE);
 	DELAY(50000);
-	if (ZE_RCSR(ZE_CSR6) & ZE_NICSR5_SF) {
+	if (ZE_RCSR(ZE_CSR5) & ZE_NICSR5_SF) {
 		printf("%s: selftest failed\n", sc->sc_dev.dv_xname);
 		return 1;
 	}
@@ -740,7 +851,7 @@ zereset(sc)
 	 * WHICH VECTOR TO USE? Take one unused. XXX
 	 * Funny way to set vector described in the programmers manual.
 	 */
-	reg = ZE_NICSR0_IPL14 | sc->sc_intvec | 0x1fff0003; /* SYNC/ASYNC??? */
+	reg = ZE_NICSR0_IPL14 | sc->sc_intvec | ZE_NICSR0_MBO; /* SYNC/ASYNC??? */
 	i = 10;
 	s = splnet();
 	do {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ac97.c,v 1.59 2005/12/28 14:36:25 fgsch Exp $	*/
+/*	$OpenBSD: ac97.c,v 1.61 2006/06/30 14:46:11 mickey Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Constantine Sapuntzakis
@@ -348,10 +348,10 @@ const struct ac97_codecid {
 	{ 0x40, 0xff, 0, 0,	"ALC202" },
 	{ 0x50, 0xff, 0, 0,	"ALC250" },
 	{ 0x52, 0xff, 0, 0,	"ALC250A?" },
-	{ 0x60, 0xff, 0, 0,	"ALC655",	ac97_alc655_init },
-	{ 0x70, 0xff, 0, 0,	"ALC203" },
-	{ 0x80, 0xff, 0, 0,	"ALC658",	ac97_alc655_init },
-	{ 0x90, 0xff, 0, 0,	"ALC850" },
+	{ 0x60, 0xf0, 0xf, 0,	"ALC655",	ac97_alc655_init },
+	{ 0x70, 0xf0, 0xf, 0,	"ALC203" },
+	{ 0x80, 0xf0, 0xf, 0,	"ALC658",	ac97_alc655_init },
+	{ 0x90, 0xf0, 0xf, 0,	"ALC850" },
 }, ac97_rl[] = {
 	{ 0x00, 0xf0, 0xf, 0,	"RL5306" },
 	{ 0x10, 0xf0, 0xf, 0,	"RL5382" },
@@ -1132,7 +1132,11 @@ ac97_alc655_init(struct ac97_softc *as)
 	u_int16_t misc;
 
 	ac97_read(as, AC97_AV_REG_MISC, &misc);
-	misc |= AC97_AV_MISC_SPDIFEN;
+	if (as->host_flags & AC97_HOST_DONT_ENABLE_SPDIF) {
+		misc &= ~AC97_AV_MISC_SPDIFEN;
+	} else	{
+		misc |= AC97_AV_MISC_SPDIFEN;
+	}
 	misc &= ~AC97_AV_MISC_VREFDIS;
 	ac97_write(as, AC97_AV_REG_MISC, misc);
 

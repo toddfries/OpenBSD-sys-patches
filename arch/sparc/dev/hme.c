@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.51 2006/01/12 15:06:12 brad Exp $	*/
+/*	$OpenBSD: hme.c,v 1.55 2006/06/25 21:53:44 brad Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -208,8 +208,6 @@ hmeattach(parent, self, aux)
 
 	hme_meminit(sc);
 
-	sbus_establish(&sc->sc_sd, &sc->sc_dev);
-
 	sc->sc_ih.ih_fun = hmeintr;
 	sc->sc_ih.ih_arg = sc;
 	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_NET,
@@ -299,7 +297,7 @@ hmestart(ifp)
 		 * packet before we commit it to the wire.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		/*
@@ -468,7 +466,7 @@ hmeioctl(ifp, cmd, data)
 		error = ifmedia_ioctl(ifp, ifr,  &sc->sc_mii.mii_media, cmd);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 
 	sc->sc_if_flags = ifp->if_flags;
@@ -977,7 +975,7 @@ hme_read(sc, idx, len, flags)
 	 * If so, hand off the raw packet to BPF.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 	/* Pass the packet up. */
 	ether_input_mbuf(ifp, m);
@@ -1233,6 +1231,8 @@ hme_mii_statchg(self)
 	struct hme_softc *sc = (struct hme_softc *)self;
 	struct hme_cr *cr = sc->sc_cr;
 
+	/* Apparently the hme chip is SIMPLEX if working in full duplex mode,
+	   but not otherwise. */
 	if ((IFM_OPTIONS(sc->sc_mii.mii_media_active) & IFM_FDX) != 0) {
 		cr->tx_cfg |= CR_TXCFG_FULLDPLX;
 		sc->sc_arpcom.ac_if.if_flags |= IFF_SIMPLEX;

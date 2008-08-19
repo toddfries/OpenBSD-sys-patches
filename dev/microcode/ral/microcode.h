@@ -1,4 +1,4 @@
-/*	$OpenBSD: microcode.h,v 1.1 2006/01/09 20:03:40 damien Exp $	*/
+/*	$OpenBSD: microcode.h,v 1.3 2006/08/17 08:32:30 damien Exp $	*/
 
 /*-
  * Copyright (c) 2005-2006, Ralink Technology, Corp.

@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.38 2006/01/04 06:04:42 canacar Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.41 2006/05/28 04:30:16 claudio Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -231,9 +231,11 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	bcopy(&ifp, (caddr_t)(mtag + 1), sizeof(struct ifnet *));
 	m_tag_prepend(m, mtag);
 
+	m->m_flags &= ~(M_BCAST|M_MCAST);
+
 #if NBPFILTER >0
 	if (ifp->if_bpf)
-		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m);
+		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m, BPF_DIRECTION_OUT);
 #endif
 
 	if (sc->g_proto == IPPROTO_MOBILE) {
@@ -432,7 +434,7 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int error = 0;
 	struct proc *prc = curproc;		/* XXX */
 
-	s = splimp();
+	s = splnet();
 	switch(cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;

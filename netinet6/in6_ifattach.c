@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.39 2005/05/23 20:10:14 mpf Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.43 2006/08/31 12:37:31 mcbride Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -54,7 +54,9 @@
 #include <netinet6/in6_ifattach.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
+#ifdef MROUTING
 #include <netinet6/ip6_mroute.h>
+#endif
 
 unsigned long in6_maxmtu = 0;
 
@@ -63,7 +65,6 @@ int ip6_auto_linklocal = 1;	/* enable by default */
 static int get_rand_ifid(struct ifnet *, struct in6_addr *);
 static int get_hw_ifid(struct ifnet *, struct in6_addr *);
 static int get_ifid(struct ifnet *, struct ifnet *, struct in6_addr *);
-static int in6_ifattach_linklocal(struct ifnet *, struct ifnet *);
 static int in6_ifattach_loopback(struct ifnet *);
 
 #define EUI64_GBIT	0x01
@@ -134,10 +135,7 @@ get_hw_ifid(ifp, in6)
 	static u_int8_t allone[8] =
 		{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-	for (ifa = ifp->if_addrlist.tqh_first;
-	     ifa;
-	     ifa = ifa->ifa_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family != AF_LINK)
 			continue;
 		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
@@ -170,6 +168,7 @@ found:
 	switch (ifp->if_type) {
 	/* IEEE802/EUI64 cases - what others? */
 	case IFT_ETHER:
+	case IFT_CARP:
 	case IFT_FDDI:
 	case IFT_ATM:
 	case IFT_IEEE1394:
@@ -279,8 +278,7 @@ get_ifid(ifp0, altifp, in6)
 	}
 
 	/* next, try to get it from some other hardware interface */
-	for (ifp = ifnet.tqh_first; ifp; ifp = ifp->if_list.tqe_next)
-	{
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp == ifp0)
 			continue;
 		if (get_hw_ifid(ifp, in6) != 0)
@@ -317,7 +315,7 @@ success:
 	return 0;
 }
 
-static int
+int
 in6_ifattach_linklocal(ifp, altifp)
 	struct ifnet *ifp;
 	struct ifnet *altifp;	/*secondary EUI64 source*/
@@ -374,11 +372,12 @@ in6_ifattach_linklocal(ifp, altifp)
 
 	/*
 	 * Now call in6_update_ifa() to do a bunch of procedures to configure
-	 * a link-local address. We can set NULL to the 3rd argument, because
-	 * we know there's no other link-local address on the interface
-	 * and therefore we are adding one (instead of updating one).
+	 * a link-local address. In the case of CARP, we may be called after
+	 * one has already been configured, so check if it's already there
+	 * with in6ifa_ifpforlinklocal() and clobber it if it exists.
 	 */
-	if ((error = in6_update_ifa(ifp, &ifra, NULL)) != 0) {
+	if ((error = in6_update_ifa(ifp, &ifra,
+	     in6ifa_ifpforlinklocal(ifp, 0))) != 0) {
 		/*
 		 * XXX: When the interface does not support IPv6, this call
 		 * would fail in the SIOCSIFADDR ioctl.  I believe the
@@ -405,7 +404,8 @@ in6_ifattach_linklocal(ifp, altifp)
 		/* NOTREACHED */
 	}
 #endif
-	if (in6if_do_dad(ifp) && (ifp->if_flags & IFF_POINTOPOINT) == 0) {
+	if (in6if_do_dad(ifp) && ((ifp->if_flags & IFF_POINTOPOINT) ||
+	    (ifp->if_type == IFT_CARP)) == 0) {
 		ia->ia6_flags &= ~IN6_IFF_NODAD;
 		ia->ia6_flags |= IN6_IFF_TENTATIVE;
 	}
@@ -599,6 +599,7 @@ in6_ifattach(ifp, altifp)
 	 * quirks based on interface type
 	 */
 	switch (ifp->if_type) {
+	/* we attach a link-local address when a vhid is assigned */
 	case IFT_CARP:
 		return;
 	default:
@@ -656,25 +657,27 @@ in6_ifdetach(ifp)
 	struct sockaddr_in6 sin6;
 	struct in6_multi_mship *imm;
 
+#ifdef MROUTING
 	/* remove ip6_mrouter stuff */
 	ip6_mrouter_detach(ifp);
+#endif
 
 	/* remove neighbor management table */
 	nd6_purge(ifp);
 
 	/* nuke any of IPv6 addresses we have */
-	for (ifa = ifp->if_addrlist.tqh_first; ifa; ifa = next)
-	{
-		next = ifa->ifa_list.tqe_next;
+	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
+	    ifa != TAILQ_END(&ifp->if_addrlist); ifa = next) {
+		next = TAILQ_NEXT(ifa, ifa_list);
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		in6_purgeaddr(ifa);
 	}
 
 	/* undo everything done by in6_ifattach(), just in case */
-	for (ifa = ifp->if_addrlist.tqh_first; ifa; ifa = next)
-	{
-		next = ifa->ifa_list.tqe_next;
+	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
+	    ifa != TAILQ_END(&ifp->if_addrlist); ifa = next) {
+		next = TAILQ_NEXT(ifa, ifa_list);
 
 		if (ifa->ifa_addr->sa_family != AF_INET6
 		 || !IN6_IS_ADDR_LINKLOCAL(&satosin6(&ifa->ifa_addr)->sin6_addr)) {
@@ -686,20 +689,21 @@ in6_ifdetach(ifp)
 		/*
 		 * leave from multicast groups we have joined for the interface
 		 */
-		while ((imm = ia->ia6_memberships.lh_first) != NULL) {
+		while (!LIST_EMPTY(&ia->ia6_memberships)) {
+			imm = LIST_FIRST(&ia->ia6_memberships);
 			LIST_REMOVE(imm, i6mm_chain);
 			in6_leavegroup(imm);
 		}
 
 		/* remove from the routing table */
 		if ((ia->ia_flags & IFA_ROUTE) &&
-		    (rt = rtalloc1((struct sockaddr *)&ia->ia_addr, 0))) {
+		    (rt = rtalloc1((struct sockaddr *)&ia->ia_addr, 0, 0))) {
 			rtflags = rt->rt_flags;
 			rtfree(rt);
 			rtrequest(RTM_DELETE, (struct sockaddr *)&ia->ia_addr,
 			    (struct sockaddr *)&ia->ia_addr,
 			    (struct sockaddr *)&ia->ia_prefixmask,
-			    rtflags, (struct rtentry **)0);
+			    rtflags, (struct rtentry **)0, 0);
 		}
 
 		/* remove from the linked list */
@@ -744,10 +748,10 @@ in6_ifdetach(ifp)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = in6addr_linklocal_allnodes;
 	sin6.sin6_addr.s6_addr16[1] = htons(ifp->if_index);
-	rt = rtalloc1((struct sockaddr *)&sin6, 0);
+	rt = rtalloc1((struct sockaddr *)&sin6, 0, 0);
 	if (rt && rt->rt_ifp == ifp) {
 		rtrequest(RTM_DELETE, (struct sockaddr *)rt_key(rt),
-		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0);
+		    rt->rt_gateway, rt_mask(rt), rt->rt_flags, 0, 0);
 		rtfree(rt);
 	}
 }

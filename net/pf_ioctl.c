@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.164 2006/01/06 00:41:21 dhartmei Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.169 2006/08/30 11:31:02 djm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -170,6 +170,7 @@ pfattach(int num)
 	pf_default_rule.entries.tqe_prev = &pf_default_rule.entries.tqe_next;
 	pf_default_rule.action = PF_PASS;
 	pf_default_rule.nr = -1;
+	pf_default_rule.rtableid = -1;
 
 	/* initialize default timeouts */
 	timeout[PFTM_TCP_FIRST_PACKET] = PFTM_TCP_FIRST_PACKET_VAL;
@@ -190,6 +191,8 @@ pfattach(int num)
 	timeout[PFTM_INTERVAL] = PFTM_INTERVAL_VAL;
 	timeout[PFTM_SRC_NODE] = PFTM_SRC_NODE_VAL;
 	timeout[PFTM_TS_DIFF] = PFTM_TS_DIFF_VAL;
+	timeout[PFTM_ADAPTIVE_START] = PFSTATE_ADAPT_START;
+	timeout[PFTM_ADAPTIVE_END] = PFSTATE_ADAPT_END;
 
 	pf_normalize_init();
 	bzero(&pf_status, sizeof(pf_status));
@@ -920,7 +923,7 @@ pf_enable_altq(struct pf_altq *altq)
 	if (error == 0 && ifp != NULL && ALTQ_IS_ENABLED(&ifp->if_snd)) {
 		tb.rate = altq->ifbandwidth;
 		tb.depth = altq->tbrsize;
-		s = splimp();
+		s = splnet();
 		error = tbr_set(&ifp->if_snd, &tb);
 		splx(s);
 	}
@@ -950,7 +953,7 @@ pf_disable_altq(struct pf_altq *altq)
 	if (error == 0) {
 		/* clear tokenbucket regulator */
 		tb.rate = 0;
-		s = splimp();
+		s = splnet();
 		error = tbr_set(&ifp->if_snd, &tb);
 		splx(s);
 	}
@@ -1391,6 +1394,9 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			pfi_kif_ref(rule->kif, PFI_KIF_REF_RULE);
 		}
 
+		if (rule->rtableid > 0 && !rtable_exists(rule->rtableid))
+			error = EBUSY;
+
 #ifdef ALTQ
 		/* set queue IDs */
 		if (rule->qname[0] != 0) {
@@ -1617,6 +1623,10 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			} else
 				newrule->kif = NULL;
 
+			if (newrule->rtableid > 0 &&
+			    !rtable_exists(newrule->rtableid))
+				error = EBUSY;
+
 #ifdef ALTQ
 			/* set queue IDs */
 			if (newrule->qname[0] != 0) {
@@ -1673,7 +1683,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			    (newrule->action == PF_RDR) ||
 			    (newrule->action == PF_BINAT) ||
 			    (newrule->rt > PF_FASTROUTE)) &&
-			    !pcr->anchor[0])) &&
+			    !newrule->anchor)) &&
 			    (TAILQ_FIRST(&newrule->rpool.list) == NULL))
 				error = EINVAL;
 
@@ -1990,7 +2000,9 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		if (!pnl->proto ||
 		    PF_AZERO(&pnl->saddr, pnl->af) ||
 		    PF_AZERO(&pnl->daddr, pnl->af) ||
-		    !pnl->dport || !pnl->sport)
+		    ((pnl->proto == IPPROTO_TCP ||
+		    pnl->proto == IPPROTO_UDP) &&
+		    (!pnl->dport || !pnl->sport)))
 			error = EINVAL;
 		else {
 			/*

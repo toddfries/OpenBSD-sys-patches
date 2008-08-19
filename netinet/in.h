@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.68 2005/10/05 17:32:22 norby Exp $	*/
+/*	$OpenBSD: in.h,v 1.71 2006/06/18 11:47:45 pascoe Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -264,6 +264,7 @@ struct ip_opts {
 #define IP_IPSEC_LOCAL_AUTH	27   /* buf; IPsec local auth material */
 #define IP_IPSEC_REMOTE_AUTH	28   /* buf; IPsec remote auth material */
 #define IP_IPCOMP_LEVEL		29   /* int; compression used */
+#define IP_RECVIF		30   /* bool; receive reception if w/dgram */
 
 /*
  * Security levels - IPsec, not IPSO
@@ -309,11 +310,6 @@ struct ip_mreq {
  * Buffer lengths for strings containing printable IP addresses
  */
 #define INET_ADDRSTRLEN		16
-
-/*
- * JUMBO MTU
- */
-#define IP_JUMBO_MTU	9000
 
 /*
  * Definitions for inet sysctl operations.
@@ -477,7 +473,8 @@ struct ip_mreq {
 #define	IPCTL_IPSEC_IPCOMP_ALGORITHM	29
 #define	IPCTL_IFQUEUE		30
 #define	IPCTL_MFORWARDING	31
-#define	IPCTL_MAXID		32
+#define	IPCTL_MULTIPATH		32
+#define	IPCTL_MAXID		33
 
 #define	IPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -512,6 +509,7 @@ struct ip_mreq {
 	{ "ipsec-comp-alg", CTLTYPE_STRING }, \
 	{ "ifq", CTLTYPE_NODE }, \
 	{ "mforwarding", CTLTYPE_INT }, \
+	{ "multipath", CTLTYPE_INT } \
 }
 #define	IPCTL_VARS { \
 	NULL, \
@@ -546,6 +544,7 @@ struct ip_mreq {
 	NULL, \
 	NULL, \
 	&ipmforwarding, \
+	&ipmultipath \
 }
 
 /* INET6 stuff */

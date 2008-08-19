@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.65 2005/09/29 00:45:51 deraadt Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.67 2006/04/26 21:37:37 pedro Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -2013,6 +2013,7 @@ nfs_readdir(v)
 			dp->d_reclen -= NFS_DIRENT_OVERHEAD;
 
 			if (uio->uio_resid < dp->d_reclen) {
+				eof = 0;
 				done = 1;
 				break;
 			}
@@ -3002,11 +3003,6 @@ nfs_writebp(bp, force)
 	vp = bp->b_vp;
 	np = VTONFS(vp);
 
-#ifdef fvdl_debug
-	printf("nfs_writebp(%x): vp %x voff %d vend %d doff %d dend %d\n",
-	    bp, bp->b_vp, bp->b_validoff, bp->b_validend, bp->b_dirtyoff,
-	    bp->b_dirtyend);
-#endif
 	bp->b_flags &= ~(B_READ|B_DONE|B_ERROR);
 
 	s = splbio();

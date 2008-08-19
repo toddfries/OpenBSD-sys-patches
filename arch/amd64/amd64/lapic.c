@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.4 2005/12/13 23:33:25 mickey Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.6 2006/03/10 21:21:08 brad Exp $	*/
 /* $NetBSD: lapic.c,v 1.2 2003/05/08 01:04:35 fvdl Exp $ */
 
 /*-
@@ -64,6 +64,7 @@
 #include <machine/i82489var.h>
 
 struct evcount clk_count;
+struct evcount ipi_count;
 
 void		lapic_delay(int);
 void		lapic_microtime(struct timeval *);
@@ -197,6 +198,7 @@ lapic_boot_init(lapic_base)
 	paddr_t lapic_base;
 {
 	static u_int64_t clk_irq = 0;
+	static u_int64_t ipi_irq = 0;
 
 	lapic_map(lapic_base);
 
@@ -211,6 +213,7 @@ lapic_boot_init(lapic_base)
 	idt_vec_set(LAPIC_TIMER_VECTOR, Xintr_lapic_ltimer);
 
 	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
+	evcount_attach(&ipi_count, "ipi", (void *)&ipi_irq, &evcount_intr);
 }
 
 static inline u_int32_t lapic_gettick()
@@ -402,11 +405,29 @@ lapic_delay(usec)
  * XXX the following belong mostly or partly elsewhere..
  */
 
+static __inline void i82489_icr_wait(void);
+
+static __inline void
+i82489_icr_wait()
+{
+#ifdef DIAGNOSTIC
+	unsigned j = 100000;
+#endif /* DIAGNOSTIC */
+
+	while ((i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) != 0) {
+		x86_pause();
+#ifdef DIAGNOSTIC
+		j--;
+		if (j == 0)
+			panic("i82489_icr_wait: busy");
+#endif /* DIAGNOSTIC */
+	}
+}
+
 int
 x86_ipi_init(target)
 	int target;
 {
-	unsigned j;
 
 	if ((target&LAPIC_DEST_MASK)==0) {
 		i82489_writereg(LAPIC_ICRHI, target<<LAPIC_ID_SHIFT);
@@ -415,18 +436,14 @@ x86_ipi_init(target)
 	i82489_writereg(LAPIC_ICRLO, (target & LAPIC_DEST_MASK) |
 	    LAPIC_DLMODE_INIT | LAPIC_LVL_ASSERT );
 
-	for (j=100000; j > 0; j--)
-		if ((i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) == 0)
-			break;
+	i82489_icr_wait();
 
 	delay(10000);
 
 	i82489_writereg(LAPIC_ICRLO, (target & LAPIC_DEST_MASK) |
 	     LAPIC_DLMODE_INIT | LAPIC_LVL_TRIG | LAPIC_LVL_DEASSERT);
 
-	for (j=100000; j > 0; j--)
-		if ((i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) == 0)
-			break;
+	i82489_icr_wait();
 
 	return (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY)?EBUSY:0;
 }
@@ -435,13 +452,11 @@ int
 x86_ipi(vec,target,dl)
 	int vec,target,dl;
 {
-	unsigned j;
-	int result;
+	int result, s;
 
-	for (j=100000;
-	     j > 0 && (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY);
-	     j--)
-		;
+	s = splclock();
+
+	i82489_icr_wait();
 
 	if ((target & LAPIC_DEST_MASK) == 0)
 		i82489_writereg(LAPIC_ICRHI, target << LAPIC_ID_SHIFT);
@@ -449,12 +464,11 @@ x86_ipi(vec,target,dl)
 	i82489_writereg(LAPIC_ICRLO,
 	    (target & LAPIC_DEST_MASK) | vec | dl | LAPIC_LVL_ASSERT);
 
-	for (j=100000;
-	     j > 0 && (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY);
-	     j--)
-		;
+	i82489_icr_wait();
 
 	result = (i82489_readreg(LAPIC_ICRLO) & LAPIC_DLSTAT_BUSY) ? EBUSY : 0;
+
+	splx(s);
 
 	return result;
 }

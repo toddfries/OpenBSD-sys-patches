@@ -1,4 +1,4 @@
-/*	$OpenBSD: pdq_ifsubr.c,v 1.17 2005/11/09 05:50:25 brad Exp $	*/
+/*	$OpenBSD: pdq_ifsubr.c,v 1.19 2006/05/30 21:33:59 fkr Exp $	*/
 /*	$NetBSD: pdq_ifsubr.c,v 1.5 1996/05/20 00:26:21 thorpej Exp $	*/
 
 /*-
@@ -46,7 +46,7 @@
 #include <sys/malloc.h>
 #if defined(__FreeBSD__)
 #include <sys/devconf.h>
-#elif defined(__bsdi__) || defined(__NetBSD__) || defined(__OpenBSD__)
+#elif defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/device.h>
 #endif
 
@@ -73,29 +73,10 @@
 #include <net/if_fddi.h>
 #endif
 
-#if defined(__bsdi__) && _BSDI_VERSION < 199401
-#include <i386/isa/isavar.h>
-#endif
-
 #include <uvm/uvm_extern.h>
 
 #include "pdqvar.h"
 #include "pdqreg.h"
-
-#if defined(__bsdi__) && _BSDI_VERSION < 199506 /* XXX */
-static void
-arp_ifinit(
-    struct arpcom *ac,
-    struct ifaddr *ifa)
-{
-    sc->sc_arpcom.ac_ipaddr = IA_SIN(ifa)->sin_addr;
-    arpwhohas(&sc->sc_arpcom, &IA_SIN(ifa)->sin_addr);
-#if _BSDI_VERSION >= 199401
-    ifa->ifa_rtrequest = arp_rtrequest;
-    ifa->ifa_flags |= RTF_CLONING;
-#endif
-#endif
-
 
 void
 pdq_ifinit(
@@ -187,7 +168,7 @@ pdq_os_receive_pdu(
     sc->sc_if.if_ipackets++;
 #if NBPFILTER > 0
     if (sc->sc_bpf != NULL)
-	PDQ_BPF_MTAP(sc, m);
+	PDQ_BPF_MTAP(sc, m, BPF_DIRECTION_IN);
     if ((fh->fddi_fc & (FDDIFC_L|FDDIFC_F)) != FDDIFC_LLC_ASYNC) {
 	m_freem(m);
 	return;
@@ -223,7 +204,7 @@ pdq_os_transmit_done(
     pdq_softc_t *sc = (pdq_softc_t *) pdq->pdq_os_ctx;
 #if NBPFILTER > 0
     if (sc->sc_bpf != NULL)
-	PDQ_BPF_MTAP(sc, m);
+	PDQ_BPF_MTAP(sc, m, BPF_DIRECTION_OUT);
 #endif
     m_freem(m);
     sc->sc_if.if_opackets++;

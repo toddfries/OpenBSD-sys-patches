@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.21 2006/01/06 20:30:09 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.26 2006/07/10 21:38:01 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.22 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -37,12 +37,11 @@
 #define SPDB_CONF	0x01
 #define SPDB_INTR	0x04
 #define SPDB_INTMAP	0x08
-#define SPDB_INTFIX	0x10
 #define SPDB_PROBE	0x20
 int sparc_pci_debug = 0x0;
 #define DPRINTF(l, s)	do { if (sparc_pci_debug & l) printf s; } while (0)
 #else
-#define DPRINTF(l, s)
+#define DPRINTF(l, s)	do { } while (0)
 #endif
 
 #include <sys/types.h>
@@ -57,7 +56,6 @@ int sparc_pci_debug = 0x0;
 #include <machine/bus.h>
 #include <machine/autoconf.h>
 #include <machine/openfirm.h>
-
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
 
@@ -67,11 +65,14 @@ int sparc_pci_debug = 0x0;
 #include <sparc64/dev/iommuvar.h>
 #include <sparc64/dev/psychoreg.h>
 #include <sparc64/dev/psychovar.h>
+#include <sparc64/sparc64/cache.h>
 
 /* this is a base to be copied */
 struct sparc_pci_chipset _sparc_pci_chipset = {
 	NULL,
 };
+
+static int pci_bus_frequency(int node);
 
 /*
  * functions provided to the MI code.
@@ -94,124 +95,6 @@ pci_bus_maxdevs(pc, busno)
 
 	return 32;
 }
-
-#ifdef __PCI_BUS_DEVORDER
-int
-pci_bus_devorder(pc, busno, devs)
-	pci_chipset_tag_t pc;
-	int busno;
-	char *devs;
-{
-	struct ofw_pci_register reg;
-	int node, len, device, i = 0;
-	u_int32_t done = 0;
-#ifdef DEBUG
-	char name[80];
-#endif
-
-	node = pc->curnode;
-#ifdef DEBUG
-	if (sparc_pci_debug & SPDB_PROBE) {
-		OF_getprop(node, "name", &name, sizeof(name));
-		printf("pci_bus_devorder: curnode %x %s\n", node, name);
-	}
-#endif
-	/*
-	 * Initially, curnode is the root of the pci tree.  As we
-	 * attach bridges, curnode should be set to that of the bridge.
-	 */
-	for (node = OF_child(node); node; node = OF_peer(node)) {
-		len = OF_getproplen(node, "reg");
-		if (len < sizeof(reg))
-			continue;
-		if (OF_getprop(node, "reg", (void *)&reg, sizeof(reg)) != len)
-			panic("pci_probe_bus: OF_getprop len botch");
-
-		device = OFW_PCI_PHYS_HI_DEVICE(reg.phys_hi);
-
-		if (done & (1 << device))
-			continue;
-
-		devs[i++] = device;
-		done |= 1 << device;
-#ifdef DEBUG
-	if (sparc_pci_debug & SPDB_PROBE) {
-		OF_getprop(node, "name", &name, sizeof(name));
-		printf("pci_bus_devorder: adding %x %s\n", node, name);
-	}
-#endif
-		if (i == 32)
-			break;
-	}
-	if (i < 32)
-		devs[i] = -1;
-
-	return i;
-}
-#endif
-
-#ifdef __PCI_DEV_FUNCORDER
-int
-pci_dev_funcorder(pc, busno, device, funcs)
-	pci_chipset_tag_t pc;
-	int busno;
-	int device;
-	char *funcs;
-{
-	struct ofw_pci_register reg;
-	int node, len, function, i = 0;
-	u_int8_t done = 0;
-#ifdef DEBUG
-	char name[80];
-#endif
-
-	node = pc->curnode;
-#ifdef DEBUG
-	if (sparc_pci_debug & SPDB_PROBE) {
-		OF_getprop(node, "name", &name, sizeof(name));
-		printf("pci_bus_funcorder: curnode %x %s\n", node, name);
-	}
-#endif
-	/*
-	 * Functions are siblings.  Presumably we're only called when the
-	 * first instance of this device is detected, so we should be able to
-	 * get to all the other functions with OF_peer().  But there seems
-	 * some issues with this scheme, so we always go to the first node on
-	 * this bus segment for a scan.  
-	 */
-	for (node = OF_child(OF_parent(node)); node; node = OF_peer(node)) {
-		len = OF_getproplen(node, "reg");
-		if (len < sizeof(reg))
-			continue;
-		if (OF_getprop(node, "reg", (void *)&reg, sizeof(reg)) != len)
-			panic("pci_probe_bus: OF_getprop len botch");
-
-		if (device != OFW_PCI_PHYS_HI_DEVICE(reg.phys_hi))
-			continue;
-
-		
-		function = OFW_PCI_PHYS_HI_FUNCTION(reg.phys_hi);
-
-		if (done & (1 << function))
-			continue;
-
-		funcs[i++] = function;
-		done |= 1 << function;
-#ifdef DEBUG
-	if (sparc_pci_debug & SPDB_PROBE) {
-		OF_getprop(node, "name", &name, sizeof(name));
-		printf("pci_bus_funcorder: adding %x %s\n", node, name);
-	}
-#endif
-		if (i == 8)
-			break;
-	}
-	if (i < 8)
-		funcs[i] = -1;
-
-	return i;
-}
-#endif
 
 pcitag_t
 pci_make_tag(pc, b, d, f)
@@ -325,19 +208,6 @@ pci_make_tag(pc, b, d, f)
 		/* Got a match */
 		tag = PCITAG_CREATE(node, b, d, f);
 
-		/*
-		 * Record the node.  This has two effects:
-		 *
-		 * 1) We don't have to search as far.
-		 * 2) pci_bus_devorder will scan the right bus.
-		 */
-		pc->curnode = node;
-
-		/* Enable all the different spaces for this device */
-		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
-			PCI_COMMAND_MEM_ENABLE|PCI_COMMAND_MASTER_ENABLE|
-			PCI_COMMAND_IO_ENABLE);
-		DPRINTF(SPDB_PROBE, ("found node %x %s\n", node, name));
 		return (tag);
 	}
 	/* No device found -- return a dead tag */
@@ -359,6 +229,134 @@ pci_decompose_tag(pc, tag, bp, dp, fp)
 		*fp = PCITAG_FUN(tag);
 }
 
+static int 
+pci_bus_frequency(int node)
+{
+	int len, bus_frequency;
+
+	len = OF_getproplen(node, "clock-frequency");
+	if (len < sizeof(bus_frequency)) {
+		DPRINTF(SPDB_PROBE,
+		    ("pci_bus_frequency: clock-frequency len %d too small\n",
+		     len));
+		return 33;
+	}
+	if (OF_getprop(node, "clock-frequency", &bus_frequency,
+		       sizeof(bus_frequency)) != len) {
+		DPRINTF(SPDB_PROBE,
+		    ("pci_bus_frequency: could not read clock-frequency\n"));
+		return 33;
+	}
+	return bus_frequency / 1000000;
+}
+
+int
+sparc64_pci_enumerate_bus(struct pci_softc *sc,
+    int (*match)(struct pci_attach_args *), struct pci_attach_args *pap)
+{
+	struct ofw_pci_register reg;
+	pci_chipset_tag_t pc = sc->sc_pc;
+	pcitag_t tag;
+	pcireg_t class, csr, bhlc, ic;
+	int node, b, d, f, ret;
+	int bus_frequency, lt, cl, cacheline;
+	char name[30];
+
+	if (sc->sc_bridgetag)
+		node = PCITAG_NODE(*sc->sc_bridgetag);
+	else
+		node = pc->rootnode;
+
+	bus_frequency = pci_bus_frequency(node);
+
+	/*
+	 * Make sure the cache line size is at least as big as the
+	 * ecache line and the streaming cache (64 byte).
+	 */
+	cacheline = max(cacheinfo.ec_linesize, 64);
+	KASSERT((cacheline/64)*64 == cacheline &&
+	    (cacheline/cacheinfo.ec_linesize)*cacheinfo.ec_linesize == cacheline &&
+	    (cacheline/4)*4 == cacheline);
+
+	/* Turn on parity for the bus. */
+	tag = PCITAG_CREATE(node, sc->sc_bus, 0, 0);
+	csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+	csr |= PCI_COMMAND_PARITY_ENABLE;
+	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
+
+	/*
+	 * Initialize the latency timer register.
+	 * The value 0x40 is from Solaris.
+	 */
+	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
+	bhlc &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
+	bhlc |= 0x40 << PCI_LATTIMER_SHIFT;
+	pci_conf_write(pc, tag, PCI_BHLC_REG, bhlc);
+
+	for (node = OF_child(node); node != 0 && node != -1;
+	     node = OF_peer(node)) {
+		name[0] = name[29] = 0;
+		OF_getprop(node, "name", name, sizeof(name));
+
+		if (OF_getprop(node, "class-code", &class, sizeof(class)) != 
+		    sizeof(class))
+			continue;
+		if (OF_getprop(node, "reg", &reg, sizeof(reg)) < sizeof(reg))
+			panic("pci_enumerate_bus: \"%s\" regs too small", name);
+
+		b = OFW_PCI_PHYS_HI_BUS(reg.phys_hi);
+		d = OFW_PCI_PHYS_HI_DEVICE(reg.phys_hi);
+		f = OFW_PCI_PHYS_HI_FUNCTION(reg.phys_hi);
+
+		if (sc->sc_bus != b) {
+			printf("%s: WARNING: incorrect bus # for \"%s\" "
+			"(%d/%d/%d)\n", sc->sc_dev.dv_xname, name, b, d, f);
+			continue;
+		}
+
+		tag = PCITAG_CREATE(node, b, d, f);
+
+		/*
+		 * Turn on parity and fast-back-to-back for the device.
+		 */
+		csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+		if (csr & PCI_STATUS_BACKTOBACK_SUPPORT)
+			csr |= PCI_COMMAND_BACKTOBACK_ENABLE;
+		csr |= PCI_COMMAND_PARITY_ENABLE;
+		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
+
+		/*
+		 * Initialize the latency timer register for busmaster
+		 * devices to work properly.
+		 *   latency-timer = min-grant * bus-freq / 4  (from FreeBSD)
+		 * Also initialize the cache line size register.
+		 * Solaris anytime sets this register to the value 0x10.
+		 */
+		bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
+		ic = pci_conf_read(pc, tag, PCI_INTERRUPT_REG);
+
+		lt = min(PCI_MIN_GNT(ic) * bus_frequency / 4, 255);
+		if (lt == 0 || lt < PCI_LATTIMER(bhlc))
+			lt = PCI_LATTIMER(bhlc);
+
+		cl = PCI_CACHELINE(bhlc);
+		if (cl == 0)
+			cl = cacheline;
+
+		bhlc &= ~((PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT) |
+			  (PCI_CACHELINE_MASK << PCI_CACHELINE_SHIFT));
+		bhlc |= (lt << PCI_LATTIMER_SHIFT) |
+			(cl << PCI_CACHELINE_SHIFT);
+		pci_conf_write(pc, tag, PCI_BHLC_REG, bhlc);
+
+		ret = pci_probe_device(sc, tag, match, pap);
+		if (match != NULL && ret != 0)
+			return (ret);
+	}
+
+	return (0);
+}
+
 /* assume we are mapped little-endian/side-effect */
 pcireg_t
 pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
@@ -370,11 +368,9 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
         if (PCITAG_NODE(tag) != -1) {
                 val = bus_space_read_4(pc->bustag, pc->bushandle,
                         PCITAG_OFFSET(tag) + reg);
-        }
-#ifdef DEBUG
-        else DPRINTF(SPDB_CONF, ("pci_conf_read: bogus pcitag %x\n",
-            (int)PCITAG_OFFSET(tag)));
-#endif
+        } else
+		DPRINTF(SPDB_CONF, ("pci_conf_read: bogus pcitag %x\n",
+	            (int)PCITAG_OFFSET(tag)));
         DPRINTF(SPDB_CONF, (" returning %08x\n", (u_int)val));
 
         return (val);
@@ -425,7 +421,7 @@ pci_intr_map(pa, ihp)
 
 	if (OF_mapintr(node, &interrupts, sizeof(interrupts), 
 		sizeof(interrupts)) < 0) {
-		printf("OF_mapintr failed\n");
+		interrupts = -1;
 	}
 	/* Try to find an IPL for this type of device. */
 	if (OF_getprop(node, "device_type", &devtype, sizeof(devtype)) > 0) {
@@ -453,7 +449,7 @@ pci_intr_string(pc, ih)
 	static char str[16];
 
 	DPRINTF(SPDB_INTR, ("pci_intr_string: ih %u", ih));
-	snprintf(str, sizeof str, "ivec %x", ih);
+	snprintf(str, sizeof str, "ivec 0x%x", INTVEC(ih));
 	DPRINTF(SPDB_INTR, ("; returning %s\n", str));
 
 	return (str);

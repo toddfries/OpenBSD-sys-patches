@@ -1,4 +1,4 @@
-/*	$OpenBSD: gem.c,v 1.56 2006/02/21 19:46:52 brad Exp $	*/
+/*	$OpenBSD: gem.c,v 1.59 2006/07/11 00:52:38 brad Exp $	*/
 /*	$NetBSD: gem.c,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -691,11 +691,6 @@ gem_init(struct ifnet *ifp)
 
 	s = splnet();
 
-	if (ifp->if_flags & IFF_RUNNING) {
-		splx(s);
-		return (0);
-	}
-
 	DPRINTF(sc, ("%s: gem_init: calling stop\n", sc->sc_dev.dv_xname));
 	/*
 	 * Initialization sequence. The numbered steps below correspond
@@ -929,8 +924,10 @@ gem_rint(sc)
 		}
 
 		if (rxstat & GEM_RD_BAD_CRC) {
+#ifdef GEM_DEBUG
 			printf("%s: receive error: CRC error\n",
 				sc->sc_dev.dv_xname);
+#endif
 			GEM_INIT_RXDESC(sc, i);
 			continue;
 		}
@@ -976,7 +973,7 @@ gem_rint(sc)
 		 * pass it up the stack if its for us.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NPBFILTER > 0 */
 
 		/* Pass it on. */
@@ -1091,10 +1088,8 @@ gem_intr(v)
 			printf("%s: MAC tx fault, status %x\n",
 			    sc->sc_dev.dv_xname, txstat);
 #endif
-		if (txstat & (GEM_MAC_TX_UNDERRUN | GEM_MAC_TX_PKT_TOO_LONG)) {
-			ifp->if_flags &= ~IFF_RUNNING;
+		if (txstat & (GEM_MAC_TX_UNDERRUN | GEM_MAC_TX_PKT_TOO_LONG))
 			gem_init(ifp);
-		}
 	}
 	if (status & GEM_INTR_RX_MAC) {
 		int rxstat = bus_space_read_4(t, seb, GEM_MAC_RX_STATUS);
@@ -1109,7 +1104,6 @@ gem_intr(v)
 		 */
 		if (rxstat & GEM_MAC_RX_OVERFLOW) {
 			ifp->if_ierrors++;
-			ifp->if_flags &= ~IFF_RUNNING;
 			gem_init(ifp);
 		}
 #ifdef GEM_DEBUG
@@ -1138,7 +1132,6 @@ gem_watchdog(ifp)
 	++ifp->if_oerrors;
 
 	/* Try to get more packets going. */
-	ifp->if_flags &= ~IFF_RUNNING;
 	gem_init(ifp);
 }
 
@@ -1369,16 +1362,12 @@ gem_ioctl(ifp, cmd, data)
 
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		gem_init(ifp);
-		switch (ifa->ifa_addr->sa_family) {
+		if ((ifp->if_flags & IFF_RUNNING) == 0)
+			gem_init(ifp);
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
 #endif
-		default:
-			break;
-		}
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1387,8 +1376,10 @@ gem_ioctl(ifp, cmd, data)
 			    ((ifp->if_flags ^ sc->sc_if_flags) &
 			     (IFF_ALLMULTI | IFF_PROMISC)) != 0)
 				gem_setladrf(sc);
-			else
-				gem_init(ifp);
+			else {
+				if ((ifp->if_flags & IFF_RUNNING) == 0)
+					gem_init(ifp);
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				gem_stop(ifp, 1);
@@ -1656,7 +1647,7 @@ gem_start(ifp)
 		 * packet before we commit it to the wire.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		/*

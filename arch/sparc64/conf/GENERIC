@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.142 2006/02/16 20:39:51 martin Exp $
+#	$OpenBSD: GENERIC,v 1.157 2006/08/18 23:14:43 jason Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -12,8 +12,6 @@
 machine		sparc64
 include		"../../../conf/GENERIC"
 maxusers	64			# estimated number of users
-
-option		SUN4U
 
 option		PCIVERBOSE
 option		USER_PCICONF		# user-space PCI configuration
@@ -49,8 +47,10 @@ lmc*	at pci?			# Lan Media Corp SSI/T3/HSSI
 hme*	at pci?
 gem*	at pci?
 ti*	at pci?			# Alteon Tigon 1Gb ethernet
-#skc*	at pci?			# SysKonnect GEnesis 984x
-#sk*	at skc?			#  each port of above
+skc*	at pci?			# SysKonnect GEnesis 984x
+sk*	at skc?			#  each port of above
+mskc*	at pci?			# Marvell Yukon-2
+msk*	at mskc?		#  each port of above
 fxp*	at pci?			# EtherExpress 10/100B ethernet
 xl*	at pci?			# 3C9xx ethernet
 pcn*	at pci?			# AMD PCnet-PCI Ethernet
@@ -64,6 +64,8 @@ stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
 vr*	at pci?			# VIA Rhine ethernet
 re*	at pci?			# RealTek 8169/8169S/8110S
+musycc*	at pci?			# Conexant HDLC controller
+art*	at musycc?		# Accoom Artery E1/T1 cards
 
 # PCI SCSI
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
@@ -74,6 +76,10 @@ isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 option ISP_COMPILE_FW=1
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 scsibus* at pcscp?
+mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
+scsibus* at mpi?
+arc*	at pci?			# Areca RAID Controllers
+scsibus* at arc?
 
 # PCI crypto
 hifn*	at pci?			# Hifn 7751/7811/7951
@@ -132,6 +138,10 @@ uplcom* at uhub?		# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?		# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uslcom*	at uhub?		# Silicon Laboratories CP210x serial
+ucom*	at uslcom?
+uark*	at uhub?		# Arkmicro ARK3116 serial
+ucom*	at uark?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
 uaudio* at uhub?		# USB Audio
@@ -147,6 +157,8 @@ ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
+ucycom*	at uhidev?		# Cypress serial
+ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
@@ -156,7 +168,8 @@ kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
-ural*	at uhub?		# Ralink RT2500
+ural*	at uhub?		# Ralink RT2500USB
+rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
@@ -168,12 +181,14 @@ udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
+udcf*	at uhub?		# Gude Expert mouseCLOCK
 
 #### Standard system devices -- all required for a given architecture
 
 auxio*	at ebus?
 auxio*	at sbus?
 beeper*	at ebus?
+power*	at ebus?
 
 # SAB82532 based serial ports
 sab*	at ebus?
@@ -204,6 +219,8 @@ audioce*	at ebus?		# ebus cs4231
 
 # parallel ports
 lpt*	at ebus?
+
+ppm*	at ebus?
 
 # performance counters
 uperf*	at ebus?
@@ -262,7 +279,7 @@ scsibus* at atapiscsi?
 #	      to operate acceptably.
 #
 dma*	at sbus?				# SBus
-esp*	at dma? flags 0x0000			# SBus
+esp*	at dma?					# SBus
 esp*	at sbus?
 
 isp*	at sbus?
@@ -310,8 +327,8 @@ ukphy*	at mii?				# Unknown PHYs
 # sensors
 pcfiic*	at ebus?
 iic*	at pcfiic?
-alipm*	at pci?
-iic*	at alipm?
+#alipm*	at pci?
+#iic*	at alipm?
 
 adc*	at iic?				# Analog Devices AD7416/AD7417/7418
 admtemp* at iic?			# Analog Devices ADM1021

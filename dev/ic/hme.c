@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.41 2006/01/12 15:06:12 brad Exp $	*/
+/*	$OpenBSD: hme.c,v 1.43 2006/06/25 21:53:44 brad Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-
@@ -656,7 +656,7 @@ hme_start(ifp)
 		 * packet before we commit it to the wire.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		if (hme_encap(sc, m, &bix)) {
@@ -879,7 +879,7 @@ hme_rint(sc)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		ether_input_mbuf(ifp, m);
@@ -1140,7 +1140,7 @@ hme_mii_statchg(dev)
 #endif
 
 	/* Set the MAC Full Duplex bit appropriately */
-	/* Apparently the hme chip is SIMPLE if working in full duplex mode,
+	/* Apparently the hme chip is SIMPLEX if working in full duplex mode,
 	   but not otherwise. */
 	v = bus_space_read_4(t, mac, HME_MACI_TXCFG);
 	if ((IFM_OPTIONS(sc->sc_mii.mii_media_active) & IFM_FDX) != 0) {

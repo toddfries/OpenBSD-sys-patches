@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.57 2005/11/13 14:23:26 martin Exp $	*/
+/*	$OpenBSD: bios.c,v 1.67 2006/08/22 19:15:36 tom Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -52,6 +52,7 @@
 #include <machine/pcb.h>
 #include <machine/biosvar.h>
 #include <machine/apmvar.h>
+#include <machine/smbiosvar.h>
 
 #include <dev/isa/isareg.h>
 #include <i386/isa/isa_machdep.h>
@@ -67,6 +68,7 @@ struct bios_softc {
 int biosprobe(struct device *, void *, void *);
 void biosattach(struct device *, struct device *, void *);
 int bios_print(void *, const char *);
+char *fixstring(char *);
 
 struct cfattach bios_ca = {
 	sizeof(struct bios_softc), biosprobe, biosattach
@@ -88,16 +90,32 @@ bios_diskinfo_t *bios_diskinfo;
 bios_memmap_t  *bios_memmap;
 u_int32_t	bios_cksumlen;
 struct bios32_entry bios32_entry;
+struct smbios_entry smbios_entry;
 #ifdef MULTIPROCESSOR
-void	       *bios_smpinfo;
+void		*bios_smpinfo;
 #endif
+#ifdef NFSCLIENT
+bios_bootmac_t	*bios_bootmac;
+#endif
+
+void		smbios_info(char*);
 
 bios_diskinfo_t *bios_getdiskinfo(dev_t);
 
+/*
+ * used by hw_sysctl
+ */
+extern char *hw_vendor, *hw_prod, *hw_uuid, *hw_serial, *hw_ver;
+const char *smbios_uninfo[] = {
+	"System",
+	"Not ",
+	"To be",
+	"SYS-"
+};
+
+
 int
-biosprobe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+biosprobe(struct device *parent, void *match, void *aux)
 {
 	struct bios_attach_args *bia = aux;
 
@@ -117,11 +135,9 @@ biosprobe(parent, match, aux)
 }
 
 void
-biosattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+biosattach(struct device *parent, struct device *self, void *aux)
 {
-	struct bios_softc *sc = (struct bios_softc *) self;
+	struct bios_softc *sc = (struct bios_softc *)self;
 #if (NPCI > 0 && NPCIBIOS > 0) || NAPM > 0
 	struct bios_attach_args *bia = aux;
 #endif
@@ -150,7 +166,7 @@ biosattach(parent, self, aux)
 	/* see if we have BIOS32 extensions */
 	if (!(flags & BIOSF_BIOS32)) {
 		for (va = ISA_HOLE_VADDR(BIOS32_START);
-		     va < (u_int8_t *)ISA_HOLE_VADDR(BIOS32_END); va += 16) {
+		    va < (u_int8_t *)ISA_HOLE_VADDR(BIOS32_END); va += 16) {
 			bios32_header_t h = (bios32_header_t)va;
 			u_int8_t cksum;
 			int i;
@@ -170,6 +186,56 @@ biosattach(parent, self, aux)
 			bios32_entry.segment = GSEL(GCODE_SEL, SEL_KPL);
 			bios32_entry.offset = (u_int32_t)ISA_HOLE_VADDR(h->entry);
 			printf(", BIOS32 rev. %d @ 0x%lx", h->rev, h->entry);
+			break;
+		}
+	}
+
+	/* see if we have SMBIOS extentions */
+	if (!(flags & BIOSF_SMBIOS)) {
+		for (va = ISA_HOLE_VADDR(SMBIOS_START);
+		    va < (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END); va+= 16) {
+			struct smbhdr * sh = (struct smbhdr *)va;
+			u_int8_t chksum;
+			vaddr_t eva;
+			paddr_t pa, end;
+			int i;
+
+			if (sh->sig != SMBIOS_SIGNATURE)
+				continue;
+			i = sh->len;
+			for (chksum = 0; i--; chksum += va[i])
+				;
+			if (chksum != 0)
+				continue;
+			va += 0x10;
+			if (va[0] != '_' && va[1] != 'D' && va[2] != 'M' &&
+			    va[3] != 'I' && va[4] != '_')
+				continue;
+			for (chksum = 0, i = 0xf; i--; chksum += va[i]);
+				;
+			if (chksum != 0)
+				continue;
+
+			pa = trunc_page(sh->addr);
+			end = round_page(sh->addr + sh->size);
+			eva = uvm_km_valloc(kernel_map, end-pa);
+			if (eva == 0)
+				break;
+
+			smbios_entry.addr = (u_int8_t *)(eva +
+			    (sh->addr & PGOFSET));
+			smbios_entry.len = sh->size;
+			smbios_entry.mjr = sh->majrev;
+			smbios_entry.min = sh->minrev;
+			smbios_entry.count = sh->count;
+
+	    		for (; pa < end; pa+= NBPG, eva+= NBPG)
+				pmap_kenter_pa(eva, pa, VM_PROT_READ);
+
+			printf(", SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
+			    sh->majrev, sh->minrev, sh->addr, sh->count);
+
+			smbios_info(sc->sc_dev.dv_xname);
 			break;
 		}
 	}
@@ -214,8 +280,8 @@ biosattach(parent, self, aux)
 		volatile u_int8_t *eva;
 
 		for (str = NULL, va = ISA_HOLE_VADDR(0xc0000),
-		     eva = ISA_HOLE_VADDR(0xf0000);
-		     va < eva; va += 512) {
+		    eva = ISA_HOLE_VADDR(0xf0000);
+		    va < eva; va += 512) {
 			extern struct extent *iomem_ex;
 			bios_romheader_t romh = (bios_romheader_t)va;
 			u_int32_t off, len;
@@ -334,6 +400,12 @@ bios_getopt()
 			break;
 #endif
 
+#ifdef NFSCLIENT
+		case BOOTARG_BOOTMAC:
+			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
+			break;
+#endif			
+
 		default:
 #ifdef BIOS_DEBUG
 			printf(" unsupported arg (%d) %p", q->ba_type,
@@ -347,9 +419,7 @@ bios_getopt()
 }
 
 int
-bios_print(aux, pnp)
-	void *aux;
-	const char *pnp;
+bios_print(void *aux, const char *pnp)
 {
 	struct bios_attach_args *ba = aux;
 
@@ -360,10 +430,7 @@ bios_print(aux, pnp)
 }
 
 int
-bios32_service(service, e, ei)
-	u_int32_t service;
-	bios32_entry_t e;
-	bios32_entry_info_t ei;
+bios32_service(u_int32_t service, bios32_entry_t e, bios32_entry_info_t ei)
 {
 	u_long pa, endpa;
 	vaddr_t va, sva;
@@ -397,8 +464,8 @@ bios32_service(service, e, ei)
 	setgdt(slot, (caddr_t)va, BIOS32_END, SDT_MEMERA, SEL_KPL, 1, 0);
 
 	for (pa = trunc_page(BIOS32_START),
-	     va += trunc_page(BIOS32_START);
-	     pa < endpa; pa += NBPG, va += NBPG) {
+	    va += trunc_page(BIOS32_START);
+	    pa < endpa; pa += NBPG, va += NBPG) {
 		pmap_enter(pmap_kernel(), va, pa,
 		    VM_PROT_READ | VM_PROT_WRITE,
 		    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
@@ -423,10 +490,7 @@ bios32_service(service, e, ei)
 }
 
 int
-biosopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+biosopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	struct bios_softc *sc = bios_cd.cd_devs[0];
 
@@ -439,10 +503,7 @@ biosopen(dev, flag, mode, p)
 }
 
 int
-biosclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag, mode;
-	struct proc *p;
+biosclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 	struct bios_softc *sc = bios_cd.cd_devs[0];
 
@@ -455,12 +516,7 @@ biosclose(dev, flag, mode, p)
 }
 
 int
-biosioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+biosioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct bios_softc *sc = bios_cd.cd_devs[0];
 
@@ -478,8 +534,7 @@ biosioctl(dev, cmd, data, flag, p)
 }
 
 void
-bioscnprobe(cn)
-	struct consdev *cn;
+bioscnprobe(struct consdev *cn)
 {
 #if 0
 	bios_init(I386_BUS_SPACE_MEM); /* XXX */
@@ -495,43 +550,31 @@ bioscnprobe(cn)
 }
 
 void
-bioscninit(cn)
-	struct consdev *cn;
+bioscninit(struct consdev *cn)
 {
 
 }
 
 void
-bioscnputc(dev, ch)
-	dev_t dev;
-	int ch;
+bioscnputc(dev_t dev, int ch)
 {
 
 }
 
 int
-bioscngetc(dev)
-	dev_t dev;
+bioscngetc(dev_t dev)
 {
 	return -1;
 }
 
 void
-bioscnpollc(dev, on)
-	dev_t dev;
-	int on;
+bioscnpollc(dev_t dev, int on)
 {
 }
 
 int
-bios_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
+bios_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
 {
 	bios_diskinfo_t *pdi;
 	int biosdev;
@@ -564,8 +607,7 @@ bios_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 }
 
 bios_diskinfo_t *
-bios_getdiskinfo(dev)
-	dev_t dev;
+bios_getdiskinfo(dev_t dev)
 {
 	bios_diskinfo_t *pdi;
 
@@ -588,3 +630,238 @@ bios_getdiskinfo(dev)
 		return pdi;
 }
 
+/*
+ * smbios_find_table() takes a caller supplied smbios struct type and
+ * a pointer to a handle (struct smbtable) returning one if the structure
+ * is sucessfully located and zero otherwise. Callers should take care
+ * to initilize the cookie field of the smbtable structure to zero before
+ * the first invocation of this function.
+ * Multiple tables of the same type can be located by repeadtly calling
+ * smbios_find_table with the same arguments.
+ */
+int
+smbios_find_table(u_int8_t type, struct smbtable *st)
+{
+	u_int8_t *va, *end;
+	struct smbtblhdr *hdr;
+	int ret = 0, tcount = 1;
+
+	va = smbios_entry.addr;
+	end = va + smbios_entry.len;
+
+	/*
+	 * The cookie field of the smtable structure is used to locate
+	 * multiple instances of a table of an arbitrary type. Following the
+	 * sucessful location of a table, the type is encoded as bits 0:7 of
+	 * the cookie value, the offset in terms of the number of structures
+	 * preceding that referenced by the handle is encoded in bits 15:31.
+	 */
+	if ((st->cookie & 0xfff) == type && st->cookie >> 16) {
+		if ((u_int8_t *)st->hdr >= va && (u_int8_t *)st->hdr < end) {
+			hdr = st->hdr;
+			if (hdr->type == type) {
+				va = (u_int8_t *)hdr + hdr->size;
+				for (; va + 1 < end; va++)
+					if (*va == NULL && *(va + 1) == NULL)
+						break;
+				va+= 2;
+				tcount = st->cookie >> 16;
+			}
+		}
+	}
+	for (; va + sizeof(struct smbtblhdr) < end && tcount <=
+	    smbios_entry.count; tcount++) {
+		hdr = (struct smbtblhdr *)va;
+		if (hdr->type == type) {
+			ret = 1;
+			st->hdr = hdr;
+			st->tblhdr = va + sizeof(struct smbtblhdr);
+			st->cookie = (tcount + 1) << 16 | type;
+			break;
+		}
+		if (hdr->type == SMBIOS_TYPE_EOT)
+			break;
+		va+= hdr->size;
+		for (; va + 1 < end; va++)
+			if (*va == NULL && *(va + 1) == NULL)
+				break;
+		va+=2;
+	}
+
+	return ret;
+}
+
+char *
+smbios_get_string(struct smbtable *st, u_int8_t indx, char *dest, size_t len)
+{
+	u_int8_t *va, *end;
+	char *ret = NULL;
+	int i;
+
+	va = (u_int8_t *)st->hdr + st->hdr->size;
+	end = smbios_entry.addr + smbios_entry.len;
+	for (i = 1; va < end && i < indx && *va; i++)
+		while (*va++)
+			;
+	if (i == indx) {
+		if (va + len < end) {
+			ret = dest;
+			bcopy(va, ret, len);
+			ret[len - 1] = '\0';
+		}
+	}
+
+	return ret;
+}
+
+char *
+fixstring(char *s)
+{
+	char *p, *e;
+	int i;
+
+	for (i= 0; i < sizeof(smbios_uninfo)/sizeof(smbios_uninfo[0]); i++)
+		if ((strncasecmp(s, smbios_uninfo[i], strlen(smbios_uninfo[i])))==0)
+			return NULL;
+	/*
+	 * Remove leading and trailing whitespace
+	 */
+	for (p = s; *p == ' '; p++)
+		;
+	/*
+	 * Special case entire string is whitespace
+	 */
+	if (p == s + strlen(s))
+		return NULL;
+	for (e = s + strlen(s) - 1; e > s && *e == ' '; e--)
+		;
+	if (p > s || e < s + strlen(s) - 1) {
+		bcopy(p, s, e-p + 1);
+		s[e - p + 1] = '\0';
+	}
+
+	return s;
+}
+
+void
+smbios_info(char * str)
+{
+	char *sminfop, sminfo[64];
+	struct smbtable stbl, btbl;
+	struct smbios_sys *sys;
+	struct smbios_board *board;
+	int i, infolen, uuidf, havebb;
+	char *p;
+
+	if (smbios_entry.mjr < 2)
+		return;
+	/*
+	 * According to the spec the system table among others is required,
+	 * if it is not we do not bother with this smbios implementation.
+	 */
+	stbl.cookie = btbl.cookie = 0;
+	if (!smbios_find_table(SMBIOS_TYPE_SYSTEM, &stbl))
+		return;
+	havebb = smbios_find_table(SMBIOS_TYPE_BASEBOARD, &btbl);
+
+	sys = (struct smbios_sys *)stbl.tblhdr;
+	if (havebb)
+		board = (struct smbios_board *)btbl.tblhdr;
+	/*
+	 * Some smbios implementations have no system vendor or product strings,
+	 * some have very uninformative data which is harder to work around
+	 * and we must rely upon various heuristics to detect this. In both
+	 * cases we attempt to fall back on the base board information in the
+	 * perhaps naieve belief that motherboard vendors will supply this
+	 * information.
+	 */
+	sminfop = NULL;
+	if ((p = smbios_get_string(&stbl, sys->vendor, sminfo,
+	    sizeof(sminfo))) != NULL)
+		sminfop = fixstring(p);
+	if (sminfop == NULL) {
+		if (havebb) {
+			if ((p = smbios_get_string(&btbl, board->vendor,
+			    sminfo, sizeof(sminfo))) != NULL)
+				sminfop = fixstring(p);
+		}
+	}
+	if (sminfop) {
+		infolen = strlen(sminfop) + 1;
+		hw_vendor = malloc(infolen, M_DEVBUF, M_NOWAIT);
+		if (hw_vendor)
+			strlcpy(hw_vendor, sminfop, infolen);
+		sminfop = NULL;
+	}
+	if ((p = smbios_get_string(&stbl, sys->product, sminfo,
+	    sizeof(sminfo))) != NULL)
+		sminfop = fixstring(p);
+	if (sminfop == NULL) {
+		if (havebb) {
+			if ((p = smbios_get_string(&btbl, board->product,
+			    sminfo, sizeof(sminfo))) != NULL)
+				sminfop = fixstring(p);
+		}
+	}
+	if (sminfop) {
+		infolen = strlen(sminfop) + 1;
+		hw_prod = malloc(infolen, M_DEVBUF, M_NOWAIT);
+		if (hw_prod)
+			strlcpy(hw_prod, sminfop, infolen);
+		sminfop = NULL;
+	}
+	if (hw_vendor != NULL && hw_prod != NULL)
+		printf("\n%s: %s %s", str, hw_vendor, hw_prod);
+	if ((p = smbios_get_string(&stbl, sys->version, sminfo,
+	    sizeof(sminfo))) != NULL)
+		sminfop = fixstring(p);
+	if (sminfop) {
+		infolen = strlen(sminfop) + 1;
+		hw_ver = malloc(infolen, M_DEVBUF, M_NOWAIT);
+		if (hw_ver)
+			strlcpy(hw_ver, sminfop, infolen);
+		sminfop = NULL;
+	}
+	if ((p = smbios_get_string(&stbl, sys->serial, sminfo,
+	    sizeof(sminfo))) != NULL)
+		sminfop = fixstring(p);
+	if (sminfop) {
+		infolen = strlen(sminfop) + 1;
+		hw_serial = malloc(infolen, M_DEVBUF, M_NOWAIT);
+		if (hw_serial)
+			strlcpy(hw_serial, sminfop, infolen);
+	}
+	if (smbios_entry.mjr > 2 || (smbios_entry.mjr == 2 &&
+	    smbios_entry.min >= 1)) {
+		/*
+		 * If the uuid value is all 0xff the uuid is present but not
+		 * set, if its all 0 then the uuid isnt present at all.
+		 */
+		uuidf |= SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
+		for (i = 0; i < sizeof(sys->uuid); i++) {
+			if (sys->uuid[i] != 0xff)
+				uuidf &= ~SMBIOS_UUID_NSET;
+			if (sys->uuid[i] != 0)
+				uuidf &= ~SMBIOS_UUID_NPRESENT;
+		}
+
+		if (uuidf & SMBIOS_UUID_NPRESENT)
+			hw_uuid = NULL;
+		else if (uuidf & SMBIOS_UUID_NSET)
+			hw_uuid = "Not Set";
+		else {
+			hw_uuid = malloc(SMBIOS_UUID_REPLEN, M_DEVBUF,
+			    M_NOWAIT);
+			if (hw_uuid) {
+				snprintf(hw_uuid, SMBIOS_UUID_REPLEN,
+				    SMBIOS_UUID_REP,
+				    sys->uuid[0], sys->uuid[1], sys->uuid[2],
+				    sys->uuid[3], sys->uuid[4], sys->uuid[5],
+				    sys->uuid[6], sys->uuid[7], sys->uuid[8],
+				    sys->uuid[9], sys->uuid[10], sys->uuid[11],
+				    sys->uuid[12], sys->uuid[13], sys->uuid[14],
+				    sys->uuid[15]);
+			}
+		}
+	}
+}

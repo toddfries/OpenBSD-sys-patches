@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_cardbus.c,v 1.15 2004/10/07 21:16:59 brad Exp $ */
+/*	$OpenBSD: if_xl_cardbus.c,v 1.17 2006/08/10 20:10:19 brad Exp $ */
 /*	$NetBSD: if_xl_cardbus.c,v 1.13 2000/03/07 00:32:52 mycroft Exp $	*/
 
 /*
@@ -177,8 +177,7 @@ const struct xl_cardbus_product {
 const struct xl_cardbus_product *xl_cardbus_lookup(const struct cardbus_attach_args *);
 
 const struct xl_cardbus_product *
-xl_cardbus_lookup(ca)
-	const struct cardbus_attach_args *ca;
+xl_cardbus_lookup(const struct cardbus_attach_args *ca)
 {
 	const struct xl_cardbus_product *ecp;
 
@@ -192,10 +191,7 @@ xl_cardbus_lookup(ca)
 }
 
 int
-xl_cardbus_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+xl_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	struct cardbus_attach_args *ca = aux;
 
@@ -206,10 +202,7 @@ xl_cardbus_match(parent, match, aux)
 }
 
 void
-xl_cardbus_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+xl_cardbus_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct xl_cardbus_softc *csc = (void *)self;
 	struct xl_softc *sc = &csc->sc_softc;
@@ -242,10 +235,6 @@ xl_cardbus_attach(parent, self, aux)
 	iob = adr;
 	sc->xl_bhandle = ioh;
 
-#if rbus
-#else
-	(ct->ct_cf->cardbus_io_open)(cc, 0, iob, iob + 0x40);
-#endif
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_IO_ENABLE);
 
 	command = cardbus_conf_read(cc, cf, ca->ca_tag,
@@ -315,9 +304,7 @@ xl_cardbus_attach(parent, self, aux)
 }
 
 int
-xl_cardbus_detach(self, arg)
-	struct device *self;
-	int arg;
+xl_cardbus_detach(struct device *self, int arg)
 {
 	struct xl_cardbus_softc *csc = (void *)self;
 	struct xl_softc *sc = &csc->sc_softc;
@@ -350,8 +337,7 @@ xl_cardbus_detach(self, arg)
 }
 
 void
-xl_cardbus_intr_ack(sc)
-	struct xl_softc *sc;
+xl_cardbus_intr_ack(struct xl_softc *sc)
 {
 	struct xl_cardbus_softc *csc = (struct xl_cardbus_softc *)sc;
 

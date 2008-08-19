@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.18 2006/01/22 00:40:01 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.20 2006/08/17 10:34:14 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.9 1997/04/01 03:12:13 scottr Exp $	*/
 
 /*
@@ -44,13 +44,6 @@
 #include <sys/disklabel.h>
 #include <sys/syslog.h>
 
-void
-dk_establish(dk, dev)
-	struct disk *dk;
-	struct device *dev;
-{
-}
-
 /*
  * Attempt to read a disk label from a device using the indicated strategy
  * routine.  The label must be partly set up before this: secpercyl and
@@ -76,7 +69,7 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
 	if (lp->d_secpercyl == 0)
-		lp->d_secpercyl = 1;
+		return ("invalid geometry");
 	lp->d_npartitions = RAW_PART + 1;
 	if (lp->d_partitions[RAW_PART].p_size == 0)
 		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;

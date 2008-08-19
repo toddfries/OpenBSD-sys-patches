@@ -1,4 +1,4 @@
-/*	$OpenBSD: auich.c,v 1.58 2006/02/13 06:15:32 brad Exp $	*/
+/*	$OpenBSD: auich.c,v 1.62 2006/08/19 19:06:51 brad Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Michael Shalayeff
@@ -237,6 +237,8 @@ static const struct auich_devtype {
 	int	options;
 	char	name[8];
 } auich_devices[] = {
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_6300ESB_ACA,	0, "ESB" },
+	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_6321ESB_ACA,	0, "ESB2" },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801AA_ACA,	0, "ICH" },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801AB_ACA,	0, "ICH0" },
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_82801BA_ACA,	0, "ICH2" },
@@ -255,6 +257,8 @@ static const struct auich_devtype {
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE3_250_ACA,
 	    0, "nForce3" },
 	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_NFORCE4_AC,	0, "nForce4" },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP04_AC97,	0, "MCP04" },
+	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP51_ACA,	0, "MCP51" },
 	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_PBC768_ACA,	0, "AMD768" },
 	{ PCI_VENDOR_AMD,	PCI_PRODUCT_AMD_8111_ACA,	0, "AMD8111" },
 };
@@ -423,7 +427,8 @@ auich_attach(parent, self, aux)
 	}
 	if (bus_dmamap_load_raw(sc->dmat, sc->dmalist_map, sc->dmalist_seg,
 	    segs, dmasz, BUS_DMA_NOWAIT)) {
-		printf(": failed to load dmalist map: %d segs %u size\n", segs, dmasz);
+		printf(": failed to load dmalist map: %d segs %lu size\n",
+		    segs, (u_long)dmasz);
 		bus_dmamap_destroy(sc->dmat, sc->dmalist_map);
 		bus_dmamem_unmap(sc->dmat, sc->dmalist_kva, dmasz);
 		bus_dmamem_free(sc->dmat, sc->dmalist_seg, segs);

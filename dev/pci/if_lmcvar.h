@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lmcvar.h,v 1.8 2005/11/07 00:29:21 brad Exp $ */
+/*	$OpenBSD: if_lmcvar.h,v 1.10 2006/03/25 22:41:45 djm Exp $ */
 /*	$NetBSD: if_lmcvar.h,v 1.1 1999/03/25 03:32:43 explorer Exp $	*/
 
 /*-
@@ -424,17 +424,6 @@ struct lmc___softc {
 #define	LMC_HAVE_STOREFWD	0x00008000	/* have CMD_STOREFWD */
 #define	LMC_HAVE_SIA100		0x00010000	/* has LS100 in SIA status */
 
-static const char * const lmc_system_errors[] = {
-    "parity error",
-    "master abort",
-    "target abort",
-    "reserved #3",
-    "reserved #4",
-    "reserved #5",
-    "reserved #6",
-    "reserved #7",
-};
-
 #if 0
 static const char * const lmc_status_bits[] = {
     NULL,
@@ -555,8 +544,8 @@ extern struct cfdriver lmc_cd;
  * it does add yet more conditional code to this driver.  Sigh.
  */
 #if !defined(LMC_BPF_MTAP) && NBPFILTER > 0
-#define	LMC_BPF_MTAP(sc, m)	bpf_mtap((sc)->lmc_bpf, m)
-#define	LMC_BPF_TAP(sc, p, l)	bpf_tap((sc)->lmc_bpf, p, l)
+#define	LMC_BPF_MTAP(sc, m, d)		bpf_mtap((sc)->lmc_bpf, m, d)
+#define	LMC_BPF_TAP(sc, p, l, d)	bpf_tap((sc)->lmc_bpf, p, l, d)
 #define	LMC_BPF_ATTACH(sc)	bpfattach(&(sc)->lmc_bpf, &(sc)->lmc_sppp.pp_if, DLT_PPP, PPP_HEADER_LEN)
 #endif
 

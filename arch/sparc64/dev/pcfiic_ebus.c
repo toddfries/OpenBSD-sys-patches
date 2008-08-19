@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcfiic_ebus.c,v 1.3 2006/02/09 12:16:25 dlg Exp $ */
+/*	$OpenBSD: pcfiic_ebus.c,v 1.6 2006/06/29 00:01:03 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -29,6 +29,7 @@
 
 #include <machine/bus.h>
 #include <machine/openfirm.h>
+#include <machine/autoconf.h>
 
 #include <sparc64/dev/ebusreg.h>
 #include <sparc64/dev/ebusvar.h>
@@ -64,10 +65,11 @@ pcfiic_ebus_match(struct device *parent, void *match, void *aux)
 	if (OF_getprop(ea->ea_node, "compatible", compat, sizeof(compat)) == -1)
 		return (0);
 
-	if (strcmp(compat, "i2cpcf,8584") != 0)
-		return (0);
+	if (strcmp(compat, "i2cpcf,8584") ||
+	    strcmp(compat, "SUNW,bbc-i2c"))
+		return (1);
 
-	return (1);
+	return (0);
 }
 
 void
@@ -75,30 +77,74 @@ pcfiic_ebus_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pcfiic_ebus_softc	*esc = (struct pcfiic_ebus_softc *)self;
 	struct pcfiic_softc		*sc = &esc->esc_sc;
-        struct ebus_attach_args		*ea = aux;
+	struct ebus_attach_args		*ea = aux;
+	char				compat[32];
 	u_int64_t			addr;
+	u_int8_t			clock = PCF_CLOCK_12;
+	int				swapregs = 0;
 
-	sc->sc_iot = ea->ea_memtag;
-
-	if (ea->ea_nregs != 1) {
-		printf(": expected 1 register, got %d\n", ea->ea_nregs);
+	if (ea->ea_nregs < 1 || ea->ea_nregs > 2) {
+		printf(": expected 1 or 2 registers, got %d\n", ea->ea_nregs);
 		return;
+	}
+
+	if (OF_getprop(ea->ea_node, "compatible", compat, sizeof(compat)) == -1)
+		return;
+
+	if (strcmp(compat, "SUNW,bbc-i2c") == 0) {
+		/*
+		 * On BBC-based machines, Sun swapped the order of
+		 * the registers on their clone pcf, plus they feed
+		 * it a non-standard clock.
+		 */
+		int clk = getpropint(findroot(), "clock-frequency", 0);
+
+		if (clk < 105000000)
+			clock = PCF_CLOCK_3;
+		else if (clk < 160000000)
+			clock = PCF_CLOCK_4_43;
+		swapregs = 1;
 	}
 
 	if (OF_getprop(ea->ea_node, "own-address", &addr, sizeof(addr)) == -1) {
-		printf(": unable to get own address\n");
-		return;
-	}
-	if (addr == 0x00 || addr > 0xff) {
-		printf(": invalid address on I2C bus\n");
+		addr = 0xaa;
+	} else if (addr == 0x00 || addr > 0xff) {
+		printf(": invalid address on I2C bus");
 		return;
 	}
 
-	if (ebus_bus_map(sc->sc_iot, 0, EBUS_PADDR_FROM_REG(&ea->ea_regs[0]),
-	    ea->ea_regs[0].size, 0, 0, &sc->sc_ioh) != 0) {
-                printf(": can't map register space\n");
-                return;
-        }
+	/* Prefer prom mapping, then memory mapping, then io mapping */
+	if (ea->ea_nvaddrs) {
+		if (bus_space_map(ea->ea_memtag, ea->ea_vaddrs[0], 0,
+		    BUS_SPACE_MAP_PROMADDRESS, &sc->sc_ioh) != 0)
+			goto fail;
+		sc->sc_iot = ea->ea_memtag;
+	} else if (ebus_bus_map(ea->ea_memtag, 0,
+	    EBUS_PADDR_FROM_REG(&ea->ea_regs[0]),
+	    ea->ea_regs[0].size, 0, 0, &sc->sc_ioh) == 0) {
+		sc->sc_iot = ea->ea_memtag;
+	} else if (ebus_bus_map(ea->ea_iotag, 0,
+	    EBUS_PADDR_FROM_REG(&ea->ea_regs[0]),
+	    ea->ea_regs[0].size, 0, 0, &sc->sc_ioh) == 0) {
+		sc->sc_iot = ea->ea_iotag;
+	} else {
+fail:
+		printf(": can't map register space\n");
+               	return;
+	}
+
+	if (ea->ea_nregs == 2) {
+		/*
+		 * Second register only occurs on BBC-based machines,
+		 * and is likely not prom mapped
+		*/
+		if (ebus_bus_map(sc->sc_iot, 0, EBUS_PADDR_FROM_REG(&ea->ea_regs[1]),
+		    ea->ea_regs[1].size, 0, 0, &sc->sc_ioh2) != 0) {
+			printf(": can't map 2nd register space\n");
+			return;
+		}
+		sc->sc_master = 1;
+	}
 
 	if (ea->ea_nintrs >= 1)
 		esc->esc_ih = bus_intr_establish(sc->sc_iot, ea->ea_intrs[0],
@@ -110,6 +156,6 @@ pcfiic_ebus_attach(struct device *parent, struct device *self, void *aux)
 	if (esc->esc_ih == NULL)
 		sc->sc_poll = 1;
 
-	pcfiic_attach(sc, (i2c_addr_t)(addr >> 1), ofwiic_scan, &ea->ea_node);
-	/* the rest of the attach line is printed by pcfiic_attach() */
+	pcfiic_attach(sc, (i2c_addr_t)(addr >> 1), clock, swapregs,
+	    ofwiic_scan, &ea->ea_node);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: specialreg.h,v 1.26 2005/08/20 00:27:08 jsg Exp $	*/
+/*	$OpenBSD: specialreg.h,v 1.28 2006/06/12 13:18:18 dim Exp $	*/
 /*	$NetBSD: specialreg.h,v 1.7 1994/10/27 04:16:26 cgd Exp $	*/
 
 /*-
@@ -133,9 +133,12 @@
 
 #define CPUIDECX_SSE3	0x00000001	/* has SSE3 instructions */
 #define CPUIDECX_MWAIT	0x00000008	/* Monitor/Mwait */
+#define CPUIDECX_DSCPL	0x00000010	/* CPL Qualified Debug Store */
+#define CPUIDECX_VMX	0x00000020	/* Virtual Machine Extensions */
 #define CPUIDECX_EST	0x00000080	/* enhanced SpeedStep */
 #define CPUIDECX_TM2	0x00000100	/* thermal monitor 2 */
 #define CPUIDECX_CNXTID	0x00000400	/* Context ID */
+#define CPUIDECX_CX16	0x00002000	/* has CMPXCHG16B instruction */
 
 /*
  * Model-specific registers for the i386 family
@@ -157,6 +160,7 @@
 #define MSR_BIOS_SIGN		0x08b
 #define P6MSR_CTR0		0x0c1
 #define P6MSR_CTR1		0x0c2
+#define MSR_FSB_FREQ		0x0cd	/* Core Duo/Solo only */
 #define MSR_MTRRcap		0x0fe
 #define	MSR_BBL_CR_ADDR		0x116	/* PII+ only */
 #define	MSR_BBL_CR_DECC		0x118	/* PII+ only */

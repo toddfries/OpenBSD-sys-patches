@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ae.c,v 1.28 2006/01/09 20:51:48 miod Exp $	*/
+/*	$OpenBSD: if_ae.c,v 1.30 2006/04/14 09:36:49 martin Exp $	*/
 /*	$NetBSD: if_ae.c,v 1.62 1997/04/24 16:52:05 scottr Exp $	*/
 
 /*
@@ -62,11 +62,11 @@ static inline int ae_ring_copy( struct ae_softc *, int, caddr_t, int);
 #define NIC_PUT(sc, reg, val)	(bus_space_write_1((sc)->sc_regt,	\
 				    (sc)->sc_regh,			\
 				    ((sc)->sc_reg_map[reg]), (val)))
-  
+
 struct cfdriver ae_cd = {
 	NULL, "ae", DV_IFNET
 };
-  
+
 int
 ae_size_card_memory(bst, bsh, ofs)
 	bus_space_tag_t bst;
@@ -429,7 +429,7 @@ outloop:
 #if NBPFILTER > 0
 	/* Tap off here if there is a BPF listener. */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m0);
+		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
 	/* txb_new points to next open buffer slot. */
@@ -870,7 +870,7 @@ aeread(sc, buf, len)
 	 * If so, hand off the raw packet to bpf.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	ether_input_mbuf(ifp, m);

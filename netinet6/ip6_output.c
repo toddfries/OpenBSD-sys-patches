@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.87 2005/01/11 08:57:24 djm Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.93 2006/06/18 11:47:46 pascoe Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -490,7 +490,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 
 			/*
 			 * XXX what should we do if ip6_hlim == 0 and the
-			 * packet gets tunnelled?
+			 * packet gets tunneled?
 			 */
 		}
 
@@ -530,7 +530,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 			 * non-bsdi always clone routes, if parent is
 			 * PRF_CLONING.
 			 */
-			rtalloc((struct route *)ro);
+			rtalloc_mpath((struct route *)ro, NULL, 0);
 		}
 		if (ro->ro_rt == 0) {
 			ip6stat.ip6s_noroute++;
@@ -618,14 +618,14 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		/*
 		 * If caller did not provide an interface lookup a
 		 * default in the routing table.  This is either a
-		 * default for the speicfied group (i.e. a host
+		 * default for the specified group (i.e. a host
 		 * route), or a multicast default (a route for the
 		 * ``net'' ff00::/8).
 		 */
 		if (ifp == NULL) {
 			if (ro->ro_rt == 0) {
 				ro->ro_rt = rtalloc1((struct sockaddr *)
-				    &ro->ro_dst, 0);
+				    &ro->ro_dst, 0, 0);
 			}
 			if (ro->ro_rt == 0) {
 				ip6stat.ip6s_noroute++;
@@ -673,12 +673,15 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 			 * above, will be forwarded by the ip6_input() routine,
 			 * if necessary.
 			 */
-			if (ip6_mrouter && (flags & IPV6_FORWARDING) == 0) {
+#ifdef MROUTING
+			if (ip6_mforwarding && ip6_mrouter &&
+			    (flags & IPV6_FORWARDING) == 0) {
 				if (ip6_mforward(ip6, ifp, m) != 0) {
 					m_freem(m);
 					goto done;
 				}
 			}
+#endif
 		}
 		/*
 		 * Multicasts with a hoplimit of zero may be looped back,
@@ -695,7 +698,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	}
 
 	/*
-	 * Fill the outgoing inteface to tell the upper layer
+	 * Fill the outgoing interface to tell the upper layer
 	 * to increment per-interface statistics.
 	 */
 	if (ifpp)
@@ -2005,8 +2008,7 @@ ip6_setmoptions(optname, im6op, m)
 		/*
 		 * See if the membership already exists.
 		 */
-		for (imm = im6o->im6o_memberships.lh_first;
-		     imm != NULL; imm = imm->i6mm_chain.le_next)
+		LIST_FOREACH(imm, &im6o->im6o_memberships, i6mm_chain)
 			if (imm->i6mm_maddr->in6m_ifp == ifp &&
 			    IN6_ARE_ADDR_EQUAL(&imm->i6mm_maddr->in6m_addr,
 			    &mreq->ipv6mr_multiaddr))
@@ -2072,8 +2074,7 @@ ip6_setmoptions(optname, im6op, m)
 		/*
 		 * Find the membership in the membership list.
 		 */
-		for (imm = im6o->im6o_memberships.lh_first;
-		     imm != NULL; imm = imm->i6mm_chain.le_next) {
+		LIST_FOREACH(imm, &im6o->im6o_memberships, i6mm_chain) {
 			if ((ifp == NULL || imm->i6mm_maddr->in6m_ifp == ifp) &&
 			    IN6_ARE_ADDR_EQUAL(&imm->i6mm_maddr->in6m_addr,
 			    &mreq->ipv6mr_multiaddr))
@@ -2103,7 +2104,7 @@ ip6_setmoptions(optname, im6op, m)
 	if (im6o->im6o_multicast_ifp == NULL &&
 	    im6o->im6o_multicast_hlim == ip6_defmcasthlim &&
 	    im6o->im6o_multicast_loop == IPV6_DEFAULT_MULTICAST_LOOP &&
-	    im6o->im6o_memberships.lh_first == NULL) {
+	    LIST_EMPTY(&im6o->im6o_memberships)) {
 		free(*im6op, M_IPMOPTS);
 		*im6op = NULL;
 	}
@@ -2170,7 +2171,8 @@ ip6_freemoptions(im6o)
 	if (im6o == NULL)
 		return;
 
-	while ((imm = im6o->im6o_memberships.lh_first) != NULL) {
+	while (!LIST_EMPTY(&im6o->im6o_memberships)) {
+		imm = LIST_FIRST(&im6o->im6o_memberships);
 		LIST_REMOVE(imm, i6mm_chain);
 		in6_leavegroup(imm);
 	}

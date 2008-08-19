@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlphy.c,v 1.22 2006/02/12 00:12:11 maja Exp $	*/
+/*	$OpenBSD: rlphy.c,v 1.24 2006/07/23 06:40:05 brad Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Jason L. Wright (jason@thought.net)
@@ -37,6 +37,7 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/errno.h>
 
 #include <net/if.h>
@@ -90,7 +91,8 @@ rlphymatch(struct device *parent, void *match, void *aux)
 	    MII_MODEL(ma->mii_id2) != 0)
 		return (0);
 
-	if (strcmp(parent->dv_cfdata->cf_driver->cd_name, "rl") != 0)
+	if ((strcmp(parent->dv_cfdata->cf_driver->cd_name, "re") != 0) &&
+	    (strcmp(parent->dv_cfdata->cf_driver->cd_name, "rl") != 0))
 		return (0);
 
 	/*

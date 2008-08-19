@@ -1,4 +1,4 @@
-/* $OpenBSD: acpicpu.c,v 1.5 2006/02/26 17:28:26 marco Exp $ */
+/* $OpenBSD: acpicpu.c,v 1.9 2006/03/09 05:16:27 jordan Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -70,7 +70,7 @@ acpicpu_match(struct device *parent, void *match, void *aux)
 {
 	struct acpi_attach_args	*aa = aux;
 	struct cfdata		*cf = match;
-
+	
 	/* sanity */
 	if (aa->aaa_name == NULL ||
 	    strcmp(aa->aaa_name, cf->cf_driver->cd_name) != 0 ||
@@ -117,7 +117,8 @@ acpicpu_attach(struct device *parent, struct device *self, void *aux)
 
 	acpicpu_getpct(sc);
 
-	/* aml_register_notify(sc->sc_devnode->parent, aa->aaa_dev, acpicpu_notify, sc); */
+	aml_register_notify(sc->sc_devnode->parent, NULL, 
+	    acpicpu_notify, sc);
 }
 
 int
@@ -158,20 +159,49 @@ acpicpu_getpct(struct acpicpu_softc *sc)
 	dnprintf(10, "_PCT(ctrl)  : %02x %04x %02x %02x %02x %02x %016x\n",
 	    sc->sc_pct.pct_ctrl.grd_descriptor,
 	    sc->sc_pct.pct_ctrl.grd_length,
-	    sc->sc_pct.pct_ctrl.grd_access_type,
-	    sc->sc_pct.pct_ctrl.grd_reg_width,
-	    sc->sc_pct.pct_ctrl.grd_reg_bit_offset,
-	    sc->sc_pct.pct_ctrl.grd_address_size,
-	    sc->sc_pct.pct_ctrl.grd_address);
+	    sc->sc_pct.pct_ctrl.grd_gas.address_space_id,
+	    sc->sc_pct.pct_ctrl.grd_gas.register_bit_width,
+	    sc->sc_pct.pct_ctrl.grd_gas.register_bit_offset,
+	    sc->sc_pct.pct_ctrl.grd_gas.access_size,
+	    sc->sc_pct.pct_ctrl.grd_gas.address);
 
 	dnprintf(10, "_PCT(status): %02x %04x %02x %02x %02x %02x %016x\n",
 	    sc->sc_pct.pct_status.grd_descriptor,
 	    sc->sc_pct.pct_status.grd_length,
-	    sc->sc_pct.pct_status.grd_access_type,
-	    sc->sc_pct.pct_status.grd_reg_width,
-	    sc->sc_pct.pct_status.grd_reg_bit_offset,
-	    sc->sc_pct.pct_status.grd_address_size,
-	    sc->sc_pct.pct_status.grd_address);
+	    sc->sc_pct.pct_status.grd_gas.address_space_id,
+	    sc->sc_pct.pct_status.grd_gas.register_bit_width,
+	    sc->sc_pct.pct_status.grd_gas.register_bit_offset,
+	    sc->sc_pct.pct_status.grd_gas.access_size,
+	    sc->sc_pct.pct_status.grd_gas.address);
+
+#if 0
+	char			pb[8];
+
+	acpi_gasio(sc->sc_acpi, ACPI_IOREAD,
+	   sc->sc_pct.pct_ctrl.grd_gas.address_space_id,
+	   sc->sc_pct.pct_ctrl.grd_gas.address,
+	   1,
+	   4,
+	   //sc->sc_pct.pct_ctrl.grd_gas.register_bit_width >> 3,
+	   pb);
+
+	acpi_gasio(sc->sc_acpi, ACPI_IOWRITE,
+	   sc->sc_pct.pct_ctrl.grd_gas.address_space_id,
+	   sc->sc_pct.pct_ctrl.grd_gas.address,
+	   1,
+	   4,
+	   //sc->sc_pct.pct_ctrl.grd_gas.register_bit_width >> 3,
+	   &sc->sc_pss[3].pss_ctrl);
+
+	acpi_gasio(sc->sc_acpi, ACPI_IOREAD,
+	   sc->sc_pct.pct_ctrl.grd_gas.address_space_id,
+	   sc->sc_pct.pct_ctrl.grd_gas.address,
+	   1,
+	   4,
+	   //sc->sc_pct.pct_ctrl.grd_gas.register_bit_width >> 3,
+	   pb);
+	printf("acpicpu: %02x %02x %02x %02x\n", pb[0], pb[1], pb[2], pb[3]);
+#endif
 
 	return (0);
 }
@@ -192,9 +222,12 @@ acpicpu_getpss(struct acpicpu_softc *sc)
 		return (1);
 	}
 	
-	if (!sc->sc_pss)
-		sc->sc_pss = malloc(res.length * sizeof *sc->sc_pss, M_DEVBUF,
-		    M_WAITOK);
+	if (sc->sc_pss)
+		free(sc->sc_pss, M_DEVBUF);
+
+	sc->sc_pss = malloc(res.length * sizeof *sc->sc_pss, M_DEVBUF,
+	    M_WAITOK);
+
 	memset(sc->sc_pss, 0, res.length * sizeof *sc->sc_pss);
 
 	for (i = 0; i < res.length; i++) {
@@ -225,8 +258,17 @@ acpicpu_notify(struct aml_node *node, int notify_type, void *arg)
 	dnprintf(10, "acpicpu_notify: %.2x %s\n", notify_type,
 	    sc->sc_devnode->parent->name);
 
-	printf("acpicpu_notify: %.2x %s\n", notify_type,
-	    sc->sc_devnode->parent->name);
+	switch (notify_type) {
+	case 0x80:	/* _PPC changed, retrieve new values */
+		acpicpu_getpct(sc);
+		acpicpu_getpss(sc);
+		break;
+	default:
+		printf("%s: unhandled cpu event %x\n", DEVNAME(sc),
+		    notify_type);
+		break;
+	}
+
 
 	return (0);
 }

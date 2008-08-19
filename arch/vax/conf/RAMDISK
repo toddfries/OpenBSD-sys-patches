@@ -1,9 +1,6 @@
-#	$OpenBSD: RAMDISK,v 1.24 2005/05/01 07:54:43 david Exp $
+#	$OpenBSD: RAMDISK,v 1.27 2006/08/30 19:29:20 miod Exp $
 
 machine		vax			# machine type
-
-#makeoptions	COPTS="-Os"		# untested
-makeoptions	COPTS="-O2"
 
 option		RAMDISK_HOOKS
 option		MINIROOTSIZE=3072
@@ -25,6 +22,7 @@ option		VAX46		# VS 4000/60
 option		VAX48		# VS 4000 VLC
 option		VAX49		# VS 4000/90
 option		VAX53		# VAX 4000/10{0,5,6}
+option		VXT		# VXT2000 and VXT2000+
 
 maxusers	8		# estimated number of users
 option		TIMEZONE=0	# time zone to adjust RTC time by
@@ -64,6 +62,7 @@ vsbus0		at mainbus0		# All VAXstations
 ibus0		at mainbus0		# All Microvax
 #nbi0		at mainbus0		# VAX 8800
 #xmi0		at mainbus0		# VAX 6000
+vxtbus0		at mainbus0		# VXT2000
 
 # Vsbus, the virtual VAXstation bus, and possible devices.
 le0		at vsbus0 csr 0x200e0000 # LANCE ethernet
@@ -75,8 +74,10 @@ ncr0		at vsbus0 csr 0x200c0080 # VS2000/3100 SCSI-ctlr
 ncr1		at vsbus0 csr 0x200c0180 # VS2000/3100 SCSI-ctlr
 asc0		at vsbus0 csr 0x200c0080 # VS4000/60 (or VLC) SCSI-ctlr
 asc0		at vsbus0 csr 0x26000080 # VS4000/90 4000/10X MV3100/9X SCSI
-#smg0		at vsbus0 csr 0x200f0000 # Small monochrome display ctlr.
-#clr0		at vsbus0 csr 0x30000000 # 4- or 8-bitplans color graphics
+smg0		at vsbus0 csr 0x200f0000 # VS3100 on-board mono frame buffer
+gpx0		at vsbus0 csr 0x3c000000 # VS3100 GPX display option
+lcg0		at vsbus0 csr 0x20100000 # VS4000/60 (or VLC) frame buffer
+lcspx0		at vsbus0 csr 0x39302000 # VS4000/90 frame buffer
 
 #hd*		at hdc0 drive?		# RD5x disks
 #ry*		at hdc0 drive?		# RX floppies
@@ -86,6 +87,11 @@ uba0		at ibus0		# Qbus adapter
 ze0		at ibus0		# SGEC on-board ethernet
 le0		at ibus0		# LANCE ethernet
 #shac0		at ibus0		# DSSI controller
+
+# VXT2000 devices
+ze0		at vxtbus0		# SGEC on-board ethernet
+qsc0		at vxtbus0		# serial ports
+lcspx0		at vxtbus0		# color frame buffer
 
 # Devices connected at VAXBI
 #cpu*		at bi? node?		# KA820/KA825 cpu
@@ -144,17 +150,24 @@ st*		at scsibus?
 cd*		at scsibus?
 #ch*		at scsibus?
 #ss*		at scsibus?
+#safte*		at scsibus?
+#ses*		at scsibus?
 #uk*		at scsibus?
 
 # Workstation console
-#wsdisplay0	at smg?
-#wsdisplay0	at clr0
-#wsdisplay0	at qd0
-#wsdisplay0	at qv0
+wsdisplay*	at gpx?
+wsdisplay*	at lcg?
+wsdisplay*	at lcspx?
+wsdisplay*	at smg?
 
-#lkkbd0		at dz0 line 0
-#wskbd*		at lkkbd?
+#wsdisplay*	at qd0
+#wsdisplay*	at qv0
+
+lkkbd0		at dz0 line 0
+lkkbd0		at qsc0 line 2
+wskbd*		at lkkbd?
 #lkms0		at dz0 line 1
+#lkms0		at qsc0 line 3
 #wsmouse*	at lkms?
 
 pseudo-device	loop		1	# network loopback

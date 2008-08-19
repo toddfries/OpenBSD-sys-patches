@@ -1,4 +1,4 @@
-/* $OpenBSD: bus_dma.c,v 1.15 2005/10/28 19:10:26 martin Exp $ */
+/* $OpenBSD: bus_dma.c,v 1.21 2006/05/21 02:11:54 brad Exp $ */
 /* $NetBSD: bus_dma.c,v 1.40 2000/07/17 04:47:56 thorpej Exp $ */
 
 /*-
@@ -52,7 +52,7 @@
 #include <machine/bus.h>
 #include <machine/intr.h>
 
-int	_bus_dmamap_load_buffer_direct_common(bus_dma_tag_t,
+int	_bus_dmamap_load_buffer_direct(bus_dma_tag_t,
 	    bus_dmamap_t, void *, bus_size_t, struct proc *, int,
 	    paddr_t *, int *, int);
 
@@ -106,6 +106,7 @@ _bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
 	map->_dm_flags = flags & ~(BUS_DMA_WAITOK|BUS_DMA_NOWAIT);
 	map->dm_mapsize = 0;		/* no valid mappings */
 	map->dm_nsegs = 0;
+	map->_dm_window = NULL;
 
 	*dmamp = map;
 	return (0);
@@ -131,7 +132,7 @@ _bus_dmamap_destroy(t, map)
  * first indicates if this is the first invocation of this function.
  */
 int
-_bus_dmamap_load_buffer_direct_common(t, map, buf, buflen, p, flags,
+_bus_dmamap_load_buffer_direct(t, map, buf, buflen, p, flags,
     lastaddrp, segp, first)
 	bus_dma_tag_t t;
 	bus_dmamap_t map;
@@ -173,7 +174,7 @@ _bus_dmamap_load_buffer_direct_common(t, map, buf, buflen, p, flags,
 		/*
 		 * Compute the segment size, and adjust counts.
 		 */
-		sgsize = NBPG - ((u_long)vaddr & PGOFSET);
+		sgsize = PAGE_SIZE - ((u_long)vaddr & PGOFSET);
 		if (buflen < sgsize)
 			sgsize = buflen;
 		if (map->_dm_maxsegsz < sgsize)
@@ -258,16 +259,18 @@ _bus_dmamap_load_direct(t, map, buf, buflen, p, flags)
 	 */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
+	KASSERT((map->_dm_flags & (BUS_DMA_READ|BUS_DMA_WRITE)) == 0);
 
 	if (buflen > map->_dm_size)
 		return (EINVAL);
 
 	seg = 0;
-	error = _bus_dmamap_load_buffer_direct_common(t, map, buf, buflen,
+	error = _bus_dmamap_load_buffer_direct(t, map, buf, buflen,
 	    p, flags, &lastaddr, &seg, 1);
 	if (error == 0) {
 		map->dm_mapsize = buflen;
 		map->dm_nsegs = seg + 1;
+		map->_dm_window = t;
 	} else if (t->_next_window != NULL) {
 		/*
 		 * Give the next window a chance.
@@ -279,7 +282,7 @@ _bus_dmamap_load_direct(t, map, buf, buflen, p, flags)
 }
 
 /*
- * Like _bus_dmamap_load_direct_common(), but for mbufs.
+ * Like _bus_dmamap_load_direct(), but for mbufs.
  */
 int
 _bus_dmamap_load_mbuf_direct(t, map, m0, flags)
@@ -297,10 +300,11 @@ _bus_dmamap_load_mbuf_direct(t, map, m0, flags)
 	 */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
+	KASSERT((map->_dm_flags & (BUS_DMA_READ|BUS_DMA_WRITE)) == 0);
 
 #ifdef DIAGNOSTIC
 	if ((m0->m_flags & M_PKTHDR) == 0)
-		panic("_bus_dmamap_load_mbuf_direct_common: no packet header");
+		panic("_bus_dmamap_load_mbuf_direct: no packet header");
 #endif
 
 	if (m0->m_pkthdr.len > map->_dm_size)
@@ -312,13 +316,14 @@ _bus_dmamap_load_mbuf_direct(t, map, m0, flags)
 	for (m = m0; m != NULL && error == 0; m = m->m_next) {
 		if (m->m_len == 0)
 			continue;
-		error = _bus_dmamap_load_buffer_direct_common(t, map,
+		error = _bus_dmamap_load_buffer_direct(t, map,
 		    m->m_data, m->m_len, NULL, flags, &lastaddr, &seg, first);
 		first = 0;
 	}
 	if (error == 0) {
 		map->dm_mapsize = m0->m_pkthdr.len;
 		map->dm_nsegs = seg + 1;
+		map->_dm_window = t;
 	} else if (t->_next_window != NULL) {
 		/*
 		 * Give the next window a chance.
@@ -329,7 +334,7 @@ _bus_dmamap_load_mbuf_direct(t, map, m0, flags)
 }
 
 /*
- * Like _bus_dmamap_load_direct_common(), but for uios.
+ * Like _bus_dmamap_load_direct(), but for uios.
  */
 int
 _bus_dmamap_load_uio_direct(t, map, uio, flags)
@@ -350,6 +355,7 @@ _bus_dmamap_load_uio_direct(t, map, uio, flags)
 	 */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
+	KASSERT((map->_dm_flags & (BUS_DMA_READ|BUS_DMA_WRITE)) == 0);
 
 	resid = uio->uio_resid;
 	iov = uio->uio_iov;
@@ -358,7 +364,8 @@ _bus_dmamap_load_uio_direct(t, map, uio, flags)
 		p = uio->uio_procp;
 #ifdef DIAGNOSTIC
 		if (p == NULL)
-			panic("_bus_dmamap_load_direct_common: USERSPACE but no proc");
+			panic("_bus_dmamap_load_uio_direct: "
+			    "USERSPACE but no proc");
 #endif
 	}
 
@@ -373,7 +380,7 @@ _bus_dmamap_load_uio_direct(t, map, uio, flags)
 		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
 		addr = (caddr_t)iov[i].iov_base;
 
-		error = _bus_dmamap_load_buffer_direct_common(t, map,
+		error = _bus_dmamap_load_buffer_direct(t, map,
 		    addr, minlen, p, flags, &lastaddr, &seg, first);
 		first = 0;
 
@@ -382,6 +389,7 @@ _bus_dmamap_load_uio_direct(t, map, uio, flags)
 	if (error == 0) {
 		map->dm_mapsize = uio->uio_resid;
 		map->dm_nsegs = seg + 1;
+		map->_dm_window = t;
 	} else if (t->_next_window != NULL) {
 		/*
 		 * Give the next window a chance.
@@ -392,7 +400,7 @@ _bus_dmamap_load_uio_direct(t, map, uio, flags)
 }
 
 /*
- * Like _bus_dmamap_load_direct_common(), but for raw memory.
+ * Like _bus_dmamap_load_direct(), but for raw memory.
  */
 int
 _bus_dmamap_load_raw_direct(t, map, segs, nsegs, size, flags)
@@ -423,6 +431,8 @@ _bus_dmamap_unload(t, map)
 	 */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
+	map->_dm_window = NULL;
+	map->_dm_flags &= ~(BUS_DMA_READ|BUS_DMA_WRITE);
 }
 
 /*
@@ -486,8 +496,6 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	/* Always round the size. */
 	size = round_page(size);
 
-	high = avail_end - PAGE_SIZE;
-
 	/*
 	 * Allocate pages from the VM system.
 	 */
@@ -511,7 +519,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < avail_start || curaddr >= high) {
-			printf("vm_page_alloc_memory returned non-sensical"
+			printf("uvm_pglistalloc returned non-sensical"
 			    " address 0x%lx\n", curaddr);
 			panic("_bus_dmamem_alloc");
 		}
@@ -600,7 +608,7 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 	for (curseg = 0; curseg < nsegs; curseg++) {
 		for (addr = segs[curseg].ds_addr;
 		    addr < (segs[curseg].ds_addr + segs[curseg].ds_len);
-		    addr += NBPG, va += NBPG, size -= NBPG) {
+		    addr += PAGE_SIZE, va += PAGE_SIZE, size -= PAGE_SIZE) {
 			if (size == 0)
 				panic("_bus_dmamem_map: size botch");
 			pmap_enter(pmap_kernel(), va, addr,

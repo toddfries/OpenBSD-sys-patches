@@ -1,4 +1,4 @@
-/*	$OpenBSD: i8259.h,v 1.2 2004/06/13 21:49:16 niklas Exp $	*/
+/*	$OpenBSD: i8259.h,v 1.4 2006/04/14 22:26:46 weingart Exp $	*/
 /*	$NetBSD: i8259.h,v 1.3 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-
@@ -116,30 +116,24 @@ extern void i8259_reinit(void);
 #define	i8259_asm_ack2(num)
 #endif
 
-#ifndef DUMMY_NOPS
-#define PIC_MASKDELAY
-#endif
-
-#ifdef PIC_MASKDELAY
-#define MASKDELAY	pushl %eax ; inb $0x84,%al ; popl %eax
-#else
-#define MASKDELAY
-#endif
-
 #ifdef ICU_HARDWARE_MASK
 
 #define	i8259_asm_mask(num) \
 	movb	CVAROFF(imen, IRQ_BYTE(num)),%al			;\
 	orb	$IRQ_BIT(num),%al					;\
 	movb	%al,CVAROFF(imen, IRQ_BYTE(num))			;\
-	MASKDELAY							;\
+	pushl	%eax							;\
+	inb	$0x84,%al						;\
+	popl	%eax							;\
 	outb	%al,$(ICUADDR+1)
 #define	i8259_asm_unmask(num) \
 	cli								;\
 	movb	CVAROFF(imen, IRQ_BYTE(num)),%al			;\
 	andb	$~IRQ_BIT(num),%al					;\
 	movb	%al,CVAROFF(imen, IRQ_BYTE(num))			;\
-	MASKDELAY							;\
+	pushl	%eax							;\
+	inb	$0x84,%al						;\
+	popl	%eax							;\
 	outb	%al,$(ICUADDR+1)					;\
 	sti
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: maxim6690.c,v 1.6 2006/01/19 17:08:39 grange Exp $	*/
+/*	$OpenBSD: maxim6690.c,v 1.10 2006/04/30 22:30:17 djm Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -34,6 +34,7 @@
 
 #define MAX6642_TEMP_INVALID	0xff	/* sensor disconnected */
 #define MAX6690_TEMP_INVALID	0x80	/* sensor disconnected */
+#define MAX6690_TEMP_INVALID2	0x7f	/* open-circuit without pull-up */
 #define LM90_TEMP_INVALID	0x7f	/* sensor disconnected */
 
 #define MAX6642_TEMP2_MASK	0xc0	/* significant bits */
@@ -50,7 +51,7 @@ struct maxtmp_softc {
 	i2c_tag_t sc_tag;
 	i2c_addr_t sc_addr;
 
-	u_int8_t sc_temp_invalid;
+	u_int8_t sc_temp_invalid[2];
 	u_int8_t sc_temp2_mask;
 
 	struct sensor sc_sensor[MAXTMP_NUM_SENSORS];
@@ -76,8 +77,12 @@ maxtmp_match(struct device *parent, void *match, void *aux)
 
 	if (strcmp(ia->ia_name, "max6642") == 0 ||
 	    strcmp(ia->ia_name, "max6690") == 0 ||
+	    strcmp(ia->ia_name, "max6657") == 0 ||
+	    strcmp(ia->ia_name, "max6658") == 0 ||
+	    strcmp(ia->ia_name, "max6659") == 0 ||
 	    strcmp(ia->ia_name, "lm86") == 0 ||
 	    strcmp(ia->ia_name, "lm89") == 0 ||
+	    strcmp(ia->ia_name, "lm89-1") == 0 ||
 	    strcmp(ia->ia_name, "lm90") == 0 ||
 	    strcmp(ia->ia_name, "lm99") == 0 ||
 	    strcmp(ia->ia_name, "lm99-1") == 0)
@@ -96,13 +101,19 @@ maxtmp_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_addr = ia->ia_addr;
 
 	if (strcmp(ia->ia_name, "max6642") == 0) {
-		sc->sc_temp_invalid = MAX6642_TEMP_INVALID;
+		sc->sc_temp_invalid[0] = MAX6642_TEMP_INVALID;
+		sc->sc_temp_invalid[1] = MAX6642_TEMP_INVALID;
 		sc->sc_temp2_mask = MAX6642_TEMP2_MASK;
-	} if (strcmp(ia->ia_name, "max6690") == 0) {
-		sc->sc_temp_invalid = MAX6690_TEMP_INVALID;
+	} else if (strcmp(ia->ia_name, "max6690") == 0 ||
+	    strcmp(ia->ia_name, "max6657") == 0 ||
+	    strcmp(ia->ia_name, "max6658") == 0 ||
+	    strcmp(ia->ia_name, "max6659") == 0) {
+		sc->sc_temp_invalid[0] = MAX6690_TEMP_INVALID;
+		sc->sc_temp_invalid[1] = MAX6690_TEMP_INVALID2;
 		sc->sc_temp2_mask = MAX6690_TEMP2_MASK;
 	} else {
-		sc->sc_temp_invalid = LM90_TEMP_INVALID;
+		sc->sc_temp_invalid[0] = LM90_TEMP_INVALID;
+		sc->sc_temp_invalid[1] = LM90_TEMP_INVALID;
 		sc->sc_temp2_mask = LM90_TEMP2_MASK;
 	}
 	printf(": %s", ia->ia_name);
@@ -113,11 +124,11 @@ maxtmp_attach(struct device *parent, struct device *self, void *aux)
 		    sizeof(sc->sc_sensor[i].device));
 
 	sc->sc_sensor[MAXTMP_INT].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[MAXTMP_INT].desc, "Internal",
+	strlcpy(sc->sc_sensor[MAXTMP_INT].desc, "Internal Temp",
 	    sizeof(sc->sc_sensor[MAXTMP_INT].desc));
 
 	sc->sc_sensor[MAXTMP_EXT].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[MAXTMP_EXT].desc, "External",
+	strlcpy(sc->sc_sensor[MAXTMP_EXT].desc, "External Temp",
 	    sizeof(sc->sc_sensor[MAXTMP_EXT].desc));
 
 	if (sensor_task_register(sc, maxtmp_refresh, 5)) {
@@ -142,7 +153,7 @@ maxtmp_readport(struct maxtmp_softc *sc, u_int8_t cmd1, u_int8_t cmd2,
 	if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
 	    sc->sc_addr, &cmd1, sizeof cmd1, &data, sizeof data, 0))
 		goto invalid;
-	if (data == sc->sc_temp_invalid)
+	if (data == sc->sc_temp_invalid[0] || data == sc->sc_temp_invalid[1])
 		goto invalid;
 	if (iic_exec(sc->sc_tag, I2C_OP_READ_WITH_STOP,
 	    sc->sc_addr, &cmd2, sizeof cmd2, &data2, sizeof data2, 0))

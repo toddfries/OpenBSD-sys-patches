@@ -1,4 +1,4 @@
-/*	$OpenBSD: svr4_misc.c,v 1.44 2004/06/22 23:52:18 jfb Exp $	 */
+/*	$OpenBSD: svr4_misc.c,v 1.46 2006/05/23 20:34:22 miod Exp $	 */
 /*	$NetBSD: svr4_misc.c,v 1.42 1996/12/06 03:22:34 christos Exp $	 */
 
 /*
@@ -562,9 +562,11 @@ svr4_sys_sysconfig(p, v, retval)
 	case SVR4_CONFIG_DELAYTIMER_MAX:
 		*retval = 0;	/* No delaytimer support */
 		break;
+#ifdef SYSVMSG
 	case SVR4_CONFIG_MQ_OPEN_MAX:
 		*retval = msginfo.msgmni;
 		break;
+#endif
 	case SVR4_CONFIG_MQ_PRIO_MAX:
 		*retval = 0;	/* XXX: Don't know */
 		break;
@@ -824,7 +826,7 @@ svr4_pfind(pid)
 		return p;
 
 	/* look in the zombies */
-	for (p = zombproc.lh_first; p != 0; p = p->p_list.le_next)
+	LIST_FOREACH(p, &zombproc, p_list)
 		if (p->p_pid == pid)
 			return p;
 
@@ -1063,7 +1065,7 @@ svr4_sys_waitsys(q, v, retval)
 
 loop:
 	nfound = 0;
-	for (p = q->p_children.lh_first; p != 0; p = p->p_sibling.le_next) {
+	LIST_FOREACH(p, &q->p_children, p_sibling) {
 		if (SCARG(uap, id) != WAIT_ANY &&
 		    p->p_pid != SCARG(uap, id) &&
 		    p->p_pgid != -SCARG(uap, id)) {

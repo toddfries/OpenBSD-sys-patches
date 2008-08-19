@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.47 2005/11/07 03:20:00 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.50 2006/05/22 20:35:12 krw Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -718,7 +718,7 @@ rl_rxeof(sc)
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 
@@ -926,7 +926,8 @@ void rl_start(ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, RL_CUR_TXMBUF(sc));
+			bpf_mtap(ifp->if_bpf, RL_CUR_TXMBUF(sc),
+			    BPF_DIRECTION_OUT);
 #endif
 		/*
 		 * Transmit the frame.
@@ -1288,7 +1289,8 @@ rl_attach(sc)
 	for (i = 0; i < RL_TX_LIST_CNT; i++) {
 		if (bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES, 0,
 		    BUS_DMA_NOWAIT, &sc->rl_cdata.rl_tx_dmamap[i]) != 0) {
-			printf("%s: can't create tx maps\n");
+			printf("%s: can't create tx maps\n",
+			    sc->sc_dev.dv_xname);
 			/* XXX free any allocated... */
 			return (1);
 		}
@@ -1358,8 +1360,10 @@ rl_detach(sc)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	shutdownhook_disestablish(sc->sc_sdhook);
-	powerhook_disestablish(sc->sc_pwrhook);
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
+	if (sc->sc_pwrhook != NULL)
+		powerhook_disestablish(sc->sc_pwrhook);
 
 	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_amap.h,v 1.13 2004/12/30 08:28:39 niklas Exp $	*/
+/*	$OpenBSD: uvm_amap.h,v 1.15 2006/07/13 22:51:26 deraadt Exp $	*/
 /*	$NetBSD: uvm_amap.h,v 1.14 2001/02/18 21:19:08 chs Exp $	*/
 
 /*

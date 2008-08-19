@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbiosvar.h,v 1.3 2005/11/23 09:24:52 mickey Exp $	*/
+/*	$OpenBSD: mpbiosvar.h,v 1.5 2006/05/01 17:01:14 kettenis Exp $	*/
 /* $NetBSD: mpbiosvar.h,v 1.1.2.3 2000/02/29 13:17:20 sommerfeld Exp $ */
 
 /*-
@@ -43,7 +43,7 @@
 #ifndef _I386_MPBIOSVAR_H_
 #define _I386_MPBIOSVAR_H_
 
-#define MP_TRAMPOLINE  (2 * PAGE_SIZE)
+#define MP_TRAMPOLINE  (7 * PAGE_SIZE)
 
 #if !defined(_LOCORE)
 
@@ -82,6 +82,8 @@ extern int mp_eisa_bus;
 void mpbios_scan(struct device *);
 int mpbios_probe(struct device *);
 int mpbios_invent(int, int, int);
+
+void mpbios_intr_fixup(void);
 #endif
 
 #endif

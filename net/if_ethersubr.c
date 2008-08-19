@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.99 2005/11/03 20:00:18 reyk Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.103 2006/06/16 16:49:39 henning Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -253,7 +253,7 @@ ether_output(ifp0, m0, dst, rt0)
 		senderr(ENETDOWN);
 	if ((rt = rt0) != NULL) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
-			if ((rt0 = rt = rtalloc1(dst, 1)) != NULL)
+			if ((rt0 = rt = rtalloc1(dst, 1, 0)) != NULL)
 				rt->rt_refcnt--;
 			else
 				senderr(EHOSTUNREACH);
@@ -263,7 +263,7 @@ ether_output(ifp0, m0, dst, rt0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
 				rtfree(rt); rt = rt0;
-			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1);
+			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1, 0);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}
@@ -450,7 +450,7 @@ ether_output(ifp0, m0, dst, rt0)
 
 	mflags = m->m_flags;
 	len = m->m_pkthdr.len;
-	s = splimp();
+	s = splnet();
 	/*
 	 * Queue message on interface, and start output if interface
 	 * not yet active.
@@ -775,7 +775,7 @@ decapsulate:
 		}
 	}
 
-	s = splimp();
+	s = splnet();
 	IF_INPUT_ENQUEUE(inq, m);
 	splx(s);
 }
@@ -832,6 +832,9 @@ ether_ifattach(ifp)
 	ifp->if_hdrlen = ETHER_HDR_LEN;
 	ifp->if_mtu = ETHERMTU;
 	ifp->if_output = ether_output;
+
+	if (ifp->if_hardmtu == 0)
+		ifp->if_hardmtu = ETHERMTU;
 
 	if_alloc_sadl(ifp);
 	bcopy((caddr_t)((struct arpcom *)ifp)->ac_enaddr,
@@ -1059,7 +1062,7 @@ ether_addmulti(ifr, ac)
 	struct ether_multi *enm;
 	u_char addrlo[ETHER_ADDR_LEN];
 	u_char addrhi[ETHER_ADDR_LEN];
-	int s = splimp(), error;
+	int s = splnet(), error;
 
 	error = ether_multiaddr(&ifr->ifr_addr, addrlo, addrhi);
 	if (error != 0) {
@@ -1120,7 +1123,7 @@ ether_delmulti(ifr, ac)
 	struct ether_multi *enm;
 	u_char addrlo[ETHER_ADDR_LEN];
 	u_char addrhi[ETHER_ADDR_LEN];
-	int s = splimp(), error;
+	int s = splnet(), error;
 
 	error = ether_multiaddr(&ifr->ifr_addr, addrlo, addrhi);
 	if (error != 0) {

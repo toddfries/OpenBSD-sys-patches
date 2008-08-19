@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.101 2006/01/21 12:18:49 miod Exp $	*/
+/*	$OpenBSD: sd.c,v 1.110 2006/07/29 02:40:46 krw Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -189,19 +189,17 @@ sdattach(parent, self, aux)
 	sd->sc_dk.dk_name = sd->sc_dev.dv_xname;
 	disk_attach(&sd->sc_dk);
 
-	dk_establish(&sd->sc_dk, &sd->sc_dev);
-
 	if ((sc_link->flags & SDEV_ATAPI) && (sc_link->flags & SDEV_REMOVABLE))
 		sc_link->quirks |= SDEV_NOSYNCCACHE;
 
-	if (!(sc_link->inquiry_flags & SID_RelAdr))
+	if (!(sc_link->inqdata.flags & SID_RelAdr))
 		sc_link->quirks |= SDEV_ONLYBIG;
 
 	/*
 	 * Note if this device is ancient.  This is used in sdminphys().
 	 */
 	if (!(sc_link->flags & SDEV_ATAPI) &&
-	    (sa->sa_inqbuf->version & SID_ANSII) == 0)
+	    SCSISPC(sa->sa_inqbuf->version) == 0)
 		sd->flags |= SDF_ANCIENT;
 
 	/*
@@ -211,13 +209,14 @@ sdattach(parent, self, aux)
 	 */
 	printf("\n");
 
+	/* Spin up the unit ready or not. */
+	scsi_start(sc_link, SSS_START, scsi_autoconf | SCSI_SILENT |
+	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
+
+	/* Check that it is still responding and ok. */
 	error = scsi_test_unit_ready(sd->sc_link, TEST_READY_RETRIES_DEFAULT,
 	    scsi_autoconf | SCSI_IGNORE_ILLEGAL_REQUEST |
 	    SCSI_IGNORE_MEDIA_CHANGE | SCSI_SILENT);
-
-	/* Spin up the unit ready or not. */
-	error = scsi_start(sc_link, SSS_START, scsi_autoconf | SCSI_SILENT |
-	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
 
 	if (error)
 		result = SDGP_RESULT_OFFLINE;
@@ -317,11 +316,6 @@ sddetach(self, flags)
 	/* Detach disk. */
 	disk_detach(&sc->sc_dk);
 
-#if NRND > 0
-	/* Unhook the entropy source. */
-	rnd_detach_source(&sc->rnd_source);
-#endif
-
 	return (0);
 }
 
@@ -369,18 +363,22 @@ sdopen(dev, flag, fmt, p)
 			goto bad;
 		}
 	} else {
-		/* Use sd_interpret_sense() for sense errors. */
+		/* Spin up the unit, ready or not. */
+		scsi_start(sc_link, SSS_START, (rawopen ? SCSI_SILENT : 0) |
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
+
+		/* Use sd_interpret_sense() for sense errors.
+		 *
+		 * But only after spinning the disk up! Just in case a broken
+		 * device returns "Initialization command required." and causes
+		 * a loop of scsi_start() calls.
+		 */
 		sc_link->flags |= SDEV_OPEN;
 
 		/* Check that it is still responding and ok. */
 		error = scsi_test_unit_ready(sc_link,
 		    TEST_READY_RETRIES_DEFAULT, (rawopen ? SCSI_SILENT : 0) |
 		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE);
-
-		/* Spin up the unit, ready or not. */
-		error = scsi_start(sc_link, SSS_START,
-		    (rawopen ? SCSI_SILENT : 0) | SCSI_IGNORE_ILLEGAL_REQUEST |
-		    SCSI_IGNORE_MEDIA_CHANGE);
 
 		if (error) {
 			if (rawopen) {
@@ -678,7 +676,7 @@ sdstart(v)
 		 *  fit in a "small" cdb, use it.
 		 */
 		if (!(sc_link->flags & SDEV_ATAPI) &&
-		    !(sc_link->quirks & SDEV_ONLYBIG) && 
+		    !(sc_link->quirks & SDEV_ONLYBIG) &&
 		    ((blkno & 0x1fffff) == blkno) &&
 		    ((nblks & 0xff) == nblks)) {
 			/*
@@ -764,7 +762,7 @@ sdminphys(bp)
 	 *
 	 * XXX Note that the SCSI-I spec says that 256-block transfers
 	 * are allowed in a 6-byte read/write, and are specified
-	 * by settng the "length" to 0.  However, we're conservative
+	 * by setting the "length" to 0.  However, we're conservative
 	 * here, allowing only 255-block transfers in case an
 	 * ancient device gets confused by length == 0.  A length of 0
 	 * in a 10-byte read/write actually means 0 blocks.
@@ -832,7 +830,6 @@ sdioctl(dev, cmd, addr, flag, p)
 		case DIOCLOCK:
 		case DIOCEJECT:
 		case SCIOCIDENTIFY:
-		case OSCIOCIDENTIFY:
 		case SCIOCCOMMAND:
 		case SCIOCDEBUG:
 			if (part == RAW_PART)
@@ -925,14 +922,6 @@ sdioctl(dev, cmd, addr, flag, p)
 			goto exit;
 		}
 		sd->sc_link->flags |= SDEV_EJECTING;
-		goto exit;
-
-	case SCIOCREASSIGN:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-		error = sd_reassign_blocks(sd, (*(int *)addr));
 		goto exit;
 
 	default:
@@ -1383,12 +1372,12 @@ sd_get_parms(sd, dp, flags)
 					blksize = _2btol(flex->bytes_s);
 				if (dp->disksize == 0)
 					dp->disksize = heads * cyls * sectors;
-			}	
+			}
 		}
 		break;
 	}
 
-validate:	
+validate:
 	if (buf)
 		free(buf, M_TEMP);
 
@@ -1462,7 +1451,7 @@ sd_flush(sd, flags)
 	 *
 	 * XXX What about older devices?
 	 */
-	if ((sc_link->scsi_version & SID_ANSII) >= 2 &&
+	if (SCSISPC(sc_link->inqdata.version) >= 2 &&
 	    (sc_link->quirks & SDEV_NOSYNCCACHE) == 0) {
 		bzero(&sync_cmd, sizeof(sync_cmd));
 		sync_cmd.opcode = SYNCHRONIZE_CACHE;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_ieee.h,v 1.27 2005/12/13 10:30:35 jsg Exp $	*/
+/*	$OpenBSD: if_wi_ieee.h,v 1.29 2006/06/27 20:55:51 reyk Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -226,6 +226,9 @@ struct wi_counters {
 #define	WI_RID_ROAMING_MODE	0xFC2D /* Roaming mode (1:firm,3:disable) */
 #define WI_RID_CUR_BEACON_INT	0xFC33 /* beacon xmit time for BSS creation */
 #define	WI_RID_ENH_SECURITY	0xFC43 /* hide SSID name (prism fw >= 1.6.3) */
+#define WI_HIDESSID		0x01
+#define WI_IGNPROBES		0x02
+#define WI_HIDESSID_IGNPROBES	0x03
 #define	WI_RID_DBM_ADJUST	0xFC46 /* Get DBM adjustment factor */
 #define	WI_RID_SYMBOL_PREAMBLE	0xFC8C /* Enable/disable short preamble */
 #define	WI_RID_P2_SHORT_PREAMBLE	0xFCB0 /* Short preamble support */
@@ -665,14 +668,20 @@ struct wi_scan_res {
 	u_int8_t	wi_rate;
 	u_int8_t	wi_rsvd;
 };
+#define WI_WAVELAN_RES_1M	0x0a
+#define WI_WAVELAN_RES_2M	0x14
+#define WI_WAVELAN_RES_5M	0x37
+#define WI_WAVELAN_RES_11M	0x6e
+
 #define WI_WAVELAN_RES_SIZE	50
+#define WI_WAVELAN_RES_TIMEOUT	((hz / 10) * 2)		/* 200ms */
+#define WI_WAVELAN_RES_TRIES	100
 
 struct wi_scan_p2_hdr {
 	u_int16_t	wi_rsvd;
 	u_int16_t	wi_reason;
 };
 #define WI_PRISM2_RES_SIZE	62
-
 
 /*
  * prism2 debug mode definitions

@@ -1,4 +1,4 @@
-/* 	$OpenBSD: isp.c,v 1.35 2004/07/18 03:36:35 deraadt Exp $ */
+/* 	$OpenBSD: isp.c,v 1.37 2006/05/31 23:25:27 krw Exp $ */
 /*
  * Machine and OS Independent (well, as best as possible)
  * code for the Qlogic ISP SCSI adapters.
@@ -99,7 +99,7 @@ static const char topology[] =
 static const char swrej[] =
     "Fabric Nameserver rejected %s (Reason=0x%x Expl=0x%x) for Port ID 0x%x";
 static const char finmsg[] =
-    "(%d.%d.%d): FIN dl%d resid %d STS 0x%x SKEY %c XS_ERR=0x%x";
+    "(%d.%d.%d): FIN dl%d resid %zu STS 0x%x SKEY %c XS_ERR=0x%x";
 static const char sc0[] =
     "%s CHAN %d FTHRSH %d IID %d RESETD %d RETRYC %d RETRYD %d ASD 0x%x";
 static const char sc1[] =
@@ -3147,6 +3147,9 @@ isp_start(XS_T *xs)
 		 * Now turn target into what the actual Loop ID is.
 		 */
 		target = lp->loopid;
+		xs->sc_link->node_wwn = lp->node_wwn;
+		xs->sc_link->port_wwn = lp->port_wwn;
+
 	}
 
 	/*

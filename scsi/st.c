@@ -1,4 +1,4 @@
-/*	$OpenBSD: st.c,v 1.50 2005/09/11 17:34:27 krw Exp $	*/
+/*	$OpenBSD: st.c,v 1.63 2006/06/11 03:59:59 krw Exp $	*/
 /*	$NetBSD: st.c,v 1.71 1997/02/21 23:03:49 thorpej Exp $	*/
 
 /*
@@ -60,6 +60,7 @@
 #include <sys/fcntl.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
@@ -77,9 +78,7 @@
 #define	ST_RETRIES	4	/* only on non IO commands */
 
 #define STMODE(z)	( minor(z)	 & 0x03)
-#define STDSTY(z)	((minor(z) >> 2) & 0x03)
 #define STUNIT(z)	((minor(z) >> 4)       )
-#define CTLMODE	3
 
 #define	ST_IO_TIME	(3 * 60 * 1000)		/* 3 minutes */
 #define	ST_CTL_TIME	(30 * 1000)		/* 30 seconds */
@@ -107,7 +106,7 @@ struct quirkdata {
 #define	ST_Q_IGNORE_LOADS	0x0004
 #define	ST_Q_BLKSIZE		0x0008	/* variable-block media_blksize > 0 */
 #define	ST_Q_UNIMODAL		0x0010	/* unimode drive rejects mode select */
-	struct modes modes[4];
+	struct modes modes;
 };
 
 struct st_quirk_inquiry_pattern {
@@ -117,135 +116,66 @@ struct st_quirk_inquiry_pattern {
 
 const struct st_quirk_inquiry_pattern st_quirk_patterns[] = {
 	{{T_SEQUENTIAL, T_REMOV,
-	 "        ", "                ", "    "}, {0, {
-		{ST_Q_FORCE_BLKSIZE, 512, 0},		/* minor 0-3 */
-		{ST_Q_FORCE_BLKSIZE, 512, QIC_24},	/* minor 4-7 */
-		{ST_Q_FORCE_BLKSIZE, 0, HALFINCH_1600},	/* minor 8-11 */
-		{ST_Q_FORCE_BLKSIZE, 0, HALFINCH_6250}	/* minor 12-15 */
-	}}},
+	 "        ", "                ", "    "}, {0,
+		{ST_Q_FORCE_BLKSIZE, 512, 0}}},		/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "TANDBERG", " TDC 3600       ", ""},     {0, {
-		{0, 0, 0},				/* minor 0-3 */
-		{ST_Q_FORCE_BLKSIZE, 0, QIC_525},	/* minor 4-7 */
-		{0, 0, QIC_150},			/* minor 8-11 */
-		{0, 0, QIC_120}				/* minor 12-15 */
-	}}},
+	 "TANDBERG", " TDC 3600       ", ""},     {0,
+		{0, 0, 0}}},				/* minor 0-3 */
  	{{T_SEQUENTIAL, T_REMOV,
- 	 "TANDBERG", " TDC 3800       ", ""},     {0, {
-		{ST_Q_FORCE_BLKSIZE, 512, 0},		/* minor 0-3 */
-		{0, 0, QIC_525},			/* minor 4-7 */
-		{0, 0, QIC_150},			/* minor 8-11 */
-		{0, 0, QIC_120}				/* minor 12-15 */
-	}}},
+ 	 "TANDBERG", " TDC 3800       ", ""},     {0,
+		{ST_Q_FORCE_BLKSIZE, 512, 0}}},		/* minor 0-3 */
 	/*
 	 * At least -005 and -007 need this.  I'll assume they all do unless I
 	 * hear otherwise.  - mycroft, 31MAR1994
 	 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "ARCHIVE ", "VIPER 2525 25462", ""},     {0, {
-		{ST_Q_SENSE_HELP, 0, 0},		/* minor 0-3 */
-		{ST_Q_SENSE_HELP, 0, QIC_525},		/* minor 4-7 */
-		{0, 0, QIC_150},			/* minor 8-11 */
-		{0, 0, QIC_120}				/* minor 12-15 */
-	}}},
+	 "ARCHIVE ", "VIPER 2525 25462", ""},     {0,
+		{ST_Q_SENSE_HELP, 0, 0}}},		/* minor 0-3 */
 	/*
 	 * One user reports that this works for his tape drive.  It probably
 	 * needs more work.  - mycroft, 09APR1994
 	 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "SANKYO  ", "CP525           ", ""},    {0, {
-		{ST_Q_FORCE_BLKSIZE, 512, 0},		/* minor 0-3 */
-		{ST_Q_FORCE_BLKSIZE, 512, QIC_525},	/* minor 4-7 */
-		{0, 0, QIC_150},			/* minor 8-11 */
-		{0, 0, QIC_120}				/* minor 12-15 */
-	}}},
+	 "SANKYO  ", "CP525           ", ""},    {0,
+		{ST_Q_FORCE_BLKSIZE, 512, 0}}},		/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "ANRITSU ", "DMT780          ", ""},     {0, {
-		{ST_Q_FORCE_BLKSIZE, 512, 0},		/* minor 0-3 */
-		{ST_Q_FORCE_BLKSIZE, 512, QIC_525},	/* minor 4-7 */
-		{0, 0, QIC_150},			/* minor 8-11 */
-		{0, 0, QIC_120}				/* minor 12-15 */
-	}}},
+	 "ANRITSU ", "DMT780          ", ""},     {0,
+		{ST_Q_FORCE_BLKSIZE, 512, 0}}},		/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "ARCHIVE ", "VIPER 150  21247", ""},     {0, {
-		{0, 0, 0},				/* minor 0-3 */
-		{0, 0, QIC_150},			/* minor 4-7 */
-		{0, 0, QIC_120},			/* minor 8-11 */
-		{0, 0, QIC_24}				/* minor 12-15 */
-	}}},
+	 "ARCHIVE ", "VIPER 150  21247", ""},     {0,
+		{0, 0, 0}}},				/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "ARCHIVE ", "VIPER 150  21531", ""},     {0, {
-		{ST_Q_SENSE_HELP, 0, 0},		/* minor 0-3 */
-		{0, 0, QIC_150},			/* minor 4-7 */
-		{0, 0, QIC_120},			/* minor 8-11 */
-		{0, 0, QIC_24}				/* minor 12-15 */
-	}}},
+	 "ARCHIVE ", "VIPER 150  21531", ""},     {0,
+		{ST_Q_SENSE_HELP, 0, 0}}},		/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "WANGTEK ", "5099ES SCSI", ""},          {0, {
-		{ST_Q_FORCE_BLKSIZE, 512, 0},		/* minor 0-3 */
-		{0, 0, QIC_11},				/* minor 4-7 */
-		{0, 0, QIC_24},				/* minor 8-11 */
-		{0, 0, QIC_24}				/* minor 12-15 */
-	}}},
+	 "WANGTEK ", "5099ES SCSI", ""},          {0,
+		{ST_Q_FORCE_BLKSIZE, 512, 0}}},		/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "WANGTEK ", "5150ES SCSI", ""},          {0, {
-		{ST_Q_FORCE_BLKSIZE, 512, 0},		/* minor 0-3 */
-		{0, 0, QIC_24},				/* minor 4-7 */
-		{0, 0, QIC_120},			/* minor 8-11 */
-		{0, 0, QIC_150}				/* minor 12-15 */
-	}}},
+	 "WANGTEK ", "5150ES SCSI", ""},          {0,
+		{ST_Q_FORCE_BLKSIZE, 512, 0}}},		/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "WANGTEK ", "5525ES SCSI REV7", ""},     {0, {
-		{0, 0, 0},				/* minor 0-3 */
-		{ST_Q_BLKSIZE, 0, QIC_525},		/* minor 4-7 */
-		{0, 0, QIC_150},			/* minor 8-11 */
-		{0, 0, QIC_120}				/* minor 12-15 */
-	}}},
+	 "WANGTEK ", "5525ES SCSI REV7", ""},     {0,
+		{0, 0, 0}}},				/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "WangDAT ", "Model 1300      ", ""},     {0, {
-		{0, 0, 0},				/* minor 0-3 */
-		{ST_Q_FORCE_BLKSIZE, 512, DDS},		/* minor 4-7 */
-		{ST_Q_FORCE_BLKSIZE, 1024, DDS},	/* minor 8-11 */
-		{ST_Q_FORCE_BLKSIZE, 0, DDS}		/* minor 12-15 */
-	}}},
+	 "WangDAT ", "Model 1300      ", ""},     {0,
+		{0, 0, 0}}},				/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "EXABYTE ", "EXB-8200        ", "263H"}, {0, {
-		{0, 0, 0},				/* minor 0-3 */
-		{0, 0, 0},				/* minor 4-7 */
-		{0, 0, 0},				/* minor 8-11 */
-		{0, 0, 0}				/* minor 12-15 */
-	}}},
+	 "EXABYTE ", "EXB-8200        ", "263H"}, {0,
+		{0, 0, 0}}},				/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "HP      ", "T4000s          ", ""},     {ST_Q_UNIMODAL, {
-		{0, 0, QIC_3095},			/* minor 0-3 */
-		{0, 0, QIC_3095},			/* minor 4-7 */
-		{0, 0, QIC_3095},			/* minor 8-11 */
-		{0, 0, QIC_3095},			/* minor 12-15 */
-	}}},
+	 "HP      ", "T4000s          ", ""},     {ST_Q_UNIMODAL,
+		{0, 0, QIC_3095}}},			/* minor 0-3 */
 #if 0
 	{{T_SEQUENTIAL, T_REMOV,
-	 "EXABYTE ", "EXB-8200        ", ""},     {0, {
-		{0, 0, 0},				/* minor 0-3 */
-		{0, 0, 0},				/* minor 4-7 */
-		{0, 0, 0},				/* minor 8-11 */
-		{0, 0, 0}				/* minor 12-15 */
-	}}},
+	 "EXABYTE ", "EXB-8200        ", ""},     {0,
+		{0, 0, 0}}},				/* minor 0-3 */
 #endif
 	{{T_SEQUENTIAL, T_REMOV,
-	 "WANGTEK ", "5150ES SCSI FA15\0""01 A", "????"}, {0, {
-		{0, ST_Q_IGNORE_LOADS, 0},		/* minor 0-3 */
-		{0, 0, 0},				/* minor 4-7 */
-		{0, 0, 0},				/* minor 8-11 */
-		{0, 0, 0}				/* minor 12-15 */
-	}}},
+	 "WANGTEK ", "5150ES SCSI FA15\0""01 A", "????"}, {0,
+		{ST_Q_IGNORE_LOADS, 0, 0}}},		/* minor 0-3 */
 	{{T_SEQUENTIAL, T_REMOV,
-	 "TEAC    ", "MT-2ST/N50      ", ""},     {ST_Q_IGNORE_LOADS, {
-		{0, 0, 0},				/* minor 0-3 */
-		{0, 0, 0},				/* minor 4-7 */
-		{0, 0, 0},				/* minor 8-11 */
-		{0, 0, 0}				/* minor 12-15 */
-	}}},
-
+	 "TEAC    ", "MT-2ST/N50      ", ""},     {ST_Q_IGNORE_LOADS,
+		{0, 0, 0}}},				/* minor 0-3 */
 };
 
 #define NOEJECT 0
@@ -261,7 +191,6 @@ struct st_softc {
 	u_int quirks;		/* quirks for the open mode           */
 	int blksize;		/* blksize we are using               */
 	u_int8_t density;	/* present density                    */
-	u_int last_dsty;	/* last density opened                */
 	short mt_resid;		/* last (short) resid                 */
 	short mt_erreg;		/* last error (sense key) seen        */
 /*--------------------device/scsi parameters----------------------------------*/
@@ -277,8 +206,8 @@ struct st_softc {
 /*--------------------quirks for the whole drive------------------------------*/
 	u_int drive_quirks;	/* quirks of this drive               */
 /*--------------------How we should set up when opening each minor device----*/
-	struct modes modes[4];	/* plus more for each mode            */
-	u_int8_t  modeflags[4];	/* flags for the modes                */
+	struct modes modes;	/* plus more for each mode            */
+	u_int8_t  modeflags;	/* flags for the modes                */
 #define DENSITY_SET_BY_USER	0x01
 #define DENSITY_SET_BY_QUIRK	0x02
 #define BLKSIZE_SET_BY_USER	0x04
@@ -330,7 +259,6 @@ struct scsi_device st_switch = {
 #define	ST_FIXEDBLOCKS	0x0008
 #define	ST_AT_FILEMARK	0x0010
 #define	ST_EIO_PENDING	0x0020	/* we couldn't report it then (had data) */
-#define	ST_NEW_MOUNT	0x0040	/* still need to decide mode              */
 #define	ST_READONLY	0x0080	/* st_mode_sense says write protected */
 #define	ST_FM_WRITTEN	0x0100	/*
 				 * EOF file mark written  -- used with
@@ -393,29 +321,7 @@ stattach(parent, self, aux)
 	 * Any steps needed to bring it into line
 	 */
 	st_identify_drive(st, sa->sa_inqbuf);
-
-	/*
-	 * Use the subdriver to request information regarding
-	 * the drive. We cannot use interrupts yet, so the
-	 * request must specify this.
-	 */
 	printf("\n");
-	printf("%s: %s", st->sc_dev.dv_xname, st->quirkdata ? "rogue, " : "");
-	if (scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_TAPE,
-	    scsi_autoconf | SCSI_SILENT | SCSI_IGNORE_MEDIA_CHANGE) ||
-	    st_mode_sense(st,
-	    scsi_autoconf | SCSI_SILENT | SCSI_IGNORE_MEDIA_CHANGE)) {
-		printf("drive empty or not ready\n");
-	}
-	else {
-		printf("density code 0x%x, ", st->media_density);
-		if (st->media_blksize > 0)
-			printf("%d-byte", st->media_blksize);
-		else
-			printf("variable");
-		printf(" blocks, write-%s\n",
-		    (st->flags & ST_READONLY) ? "protected" : "enabled");
-	}
 
 	/*
 	 * Set up the buf queue for this device
@@ -465,102 +371,87 @@ void
 st_loadquirks(st)
 	struct st_softc *st;
 {
-	int i;
 	const struct	modes *mode;
 	struct	modes *mode2;
 
-	mode = st->quirkdata->modes;
-	mode2 = st->modes;
-	for (i = 0; i < 4; i++) {
-		bzero(mode2, sizeof(struct modes));
-		st->modeflags[i] &= ~(BLKSIZE_SET_BY_QUIRK |
-		    DENSITY_SET_BY_QUIRK | BLKSIZE_SET_BY_USER |
-		    DENSITY_SET_BY_USER);
-		if ((mode->quirks | st->drive_quirks) & ST_Q_FORCE_BLKSIZE) {
-			mode2->blksize = mode->blksize;
-			st->modeflags[i] |= BLKSIZE_SET_BY_QUIRK;
-		}
-		if (mode->density) {
-			mode2->density = mode->density;
-			st->modeflags[i] |= DENSITY_SET_BY_QUIRK;
-		}
-		mode++;
-		mode2++;
+	mode = &st->quirkdata->modes;
+	mode2 = &st->modes;
+	bzero(mode2, sizeof(struct modes));
+	st->modeflags &= ~(BLKSIZE_SET_BY_QUIRK |
+	    DENSITY_SET_BY_QUIRK | BLKSIZE_SET_BY_USER |
+	    DENSITY_SET_BY_USER);
+	if ((mode->quirks | st->drive_quirks) & ST_Q_FORCE_BLKSIZE) {
+		mode2->blksize = mode->blksize;
+		st->modeflags |= BLKSIZE_SET_BY_QUIRK;
+	}
+	if (mode->density) {
+		mode2->density = mode->density;
+		st->modeflags |= DENSITY_SET_BY_QUIRK;
 	}
 }
 
 /*
  * open the device.
  */
-int 
-stopen(dev, flags, mode, p)
+int
+stopen(dev, flags, fmt, p)
 	dev_t dev;
 	int flags;
-	int mode;
+	int fmt;
 	struct proc *p;
 {
-	int unit;
-	u_int stmode, dsty;
-	int error = 0;
-	struct st_softc *st;
 	struct scsi_link *sc_link;
+	struct st_softc *st;
+	int error = 0, unit;
 
 	unit = STUNIT(dev);
 	if (unit >= st_cd.cd_ndevs)
-		return ENXIO;
+		return (ENXIO);
 	st = st_cd.cd_devs[unit];
 	if (!st)
-		return ENXIO;
+		return (ENXIO);
 
-	stmode = STMODE(dev);
-	dsty = STDSTY(dev);
 	sc_link = st->sc_link;
 
 	SC_DEBUG(sc_link, SDEV_DB1, ("open: dev=0x%x (unit %d (of %d))\n", dev,
 	    unit, st_cd.cd_ndevs));
 
 	/*
-	 * Only allow one at a time
+	 * Tape is an exclusive media. Only one open at a time.
 	 */
 	if (sc_link->flags & SDEV_OPEN) {
 		SC_DEBUG(sc_link, SDEV_DB4, ("already open\n"));
-		return EBUSY;
+		return (EBUSY);
 	}
 
-	/*
-	 * Catch any unit attention errors.
-	 */
-	error = scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_DEFAULT,
-	    SCSI_IGNORE_MEDIA_CHANGE |
-	    (stmode == CTLMODE ? SCSI_IGNORE_NOT_READY : 0));
-	if (error)
-		goto bad;
-
-	sc_link->flags |= SDEV_OPEN;	/* unit attn are now errors */
+	/* Use st_interpret_sense() now. */
+	sc_link->flags |= SDEV_OPEN;
 
 	/*
-	 * If the mode is 3 (e.g. minor = 3,7,11,15)
-	 * then the device has been opened to set defaults
-	 * This mode does NOT ALLOW I/O, only ioctls
+	 * Check the unit status. This clears any outstanding errors and
+	 * will ensure that media is present.
 	 */
-	if (stmode == CTLMODE)
-		return 0;
+	error = scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_TAPE,
+	    SCSI_SILENT | SCSI_IGNORE_MEDIA_CHANGE |
+	    SCSI_IGNORE_ILLEGAL_REQUEST);
 
 	/*
-	 * if it's a different mode, or if the media has been
-	 * invalidated, unmount the tape from the previous
-	 * session but continue with open processing
+	 * Terminate any exising mount session if there is no media.
 	 */
-	if (st->last_dsty != dsty || !(sc_link->flags & SDEV_MEDIA_LOADED))
+	if ((sc_link->flags & SDEV_MEDIA_LOADED) == 0)
 		st_unmount(st, NOEJECT, DOREWIND);
 
-	/*
-	 * If we are not mounted, then we should start a new
-	 * mount session.
-	 */
-	if (!(st->flags & ST_MOUNTED)) {
-		st_mount_tape(dev, flags);
-		st->last_dsty = dsty;
+	if (error) {
+		sc_link->flags &= ~SDEV_OPEN;
+		return (error);
+	}
+
+	if ((st->flags & ST_MOUNTED) == 0) {
+		error = st_mount_tape(dev, flags);
+		if (error) {
+			sc_link->flags &= ~SDEV_OPEN;
+			return (error);
+		}
 	}
 
 	/*
@@ -572,19 +463,14 @@ stopen(dev, flags, mode, p)
 		st->flags |= ST_WRITTEN;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("open complete\n"));
-	return 0;
-
-bad:
-	st_unmount(st, NOEJECT, DOREWIND);
-	sc_link->flags &= ~SDEV_OPEN;
-	return error;
+	return (0);
 }
 
 /*
  * close the device.. only called if we are the LAST
  * occurence of an open device
  */
-int 
+int
 stclose(dev, flags, mode, p)
 	dev_t dev;
 	int flags;
@@ -628,14 +514,13 @@ st_mount_tape(dev, flags)
 	int flags;
 {
 	int unit;
-	u_int mode, dsty;
+	u_int mode;
 	struct st_softc *st;
 	struct scsi_link *sc_link;
 	int error = 0;
 
 	unit = STUNIT(dev);
 	mode = STMODE(dev);
-	dsty = STDSTY(dev);
 	st = st_cd.cd_devs[unit];
 	sc_link = st->sc_link;
 
@@ -643,8 +528,7 @@ st_mount_tape(dev, flags)
 		return 0;
 
 	SC_DEBUG(sc_link, SDEV_DB1, ("mounting\n"));
-	st->flags |= ST_NEW_MOUNT;
-	st->quirks = st->drive_quirks | st->modes[dsty].quirks;
+	st->quirks = st->drive_quirks | st->modes.quirks;
 	/*
 	 * If the media is new, then make sure we give it a chance to
 	 * to do a 'load' instruction.  (We assume it is new.)
@@ -658,7 +542,7 @@ st_mount_tape(dev, flags)
 	 * (noteably some DAT drives)
 	 */
 	/* XXX */
-	scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_DEFAULT, SCSI_SILENT);
+	scsi_test_unit_ready(sc_link, TEST_READY_RETRIES_TAPE, SCSI_SILENT);
 
 	/*
 	 * Some devices can't tell you much until they have been
@@ -690,8 +574,8 @@ st_mount_tape(dev, flags)
 	 * then use it in preference to the one supplied by
 	 * default by the driver.
 	 */
-	if (st->modeflags[dsty] & (DENSITY_SET_BY_QUIRK | DENSITY_SET_BY_USER))
-		st->density = st->modes[dsty].density;
+	if (st->modeflags & (DENSITY_SET_BY_QUIRK | DENSITY_SET_BY_USER))
+		st->density = st->modes.density;
 	else
 		st->density = st->media_density;
 	/*
@@ -700,8 +584,8 @@ st_mount_tape(dev, flags)
 	 * default by the driver.
 	 */
 	st->flags &= ~ST_FIXEDBLOCKS;
-	if (st->modeflags[dsty] & (BLKSIZE_SET_BY_QUIRK | BLKSIZE_SET_BY_USER)) {
-		st->blksize = st->modes[dsty].blksize;
+	if (st->modeflags & (BLKSIZE_SET_BY_QUIRK | BLKSIZE_SET_BY_USER)) {
+		st->blksize = st->modes.blksize;
 		if (st->blksize)
 			st->flags |= ST_FIXEDBLOCKS;
 	} else {
@@ -714,7 +598,6 @@ st_mount_tape(dev, flags)
 	}
 	scsi_prevent(sc_link, PR_PREVENT,
 	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_NOT_READY);
-	st->flags &= ~ST_NEW_MOUNT;
 	st->flags |= ST_MOUNTED;
 	sc_link->flags |= SDEV_MEDIA_LOADED;	/* move earlier? */
 
@@ -745,7 +628,7 @@ st_unmount(st, eject, rewind)
 	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_NOT_READY);
 	if (eject)
 		st_load(st, LD_UNLOAD, SCSI_IGNORE_NOT_READY);
-	st->flags &= ~(ST_MOUNTED | ST_NEW_MOUNT);
+	st->flags &= ~ST_MOUNTED;
 	sc_link->flags &= ~SDEV_MEDIA_LOADED;
 }
 
@@ -953,7 +836,7 @@ done:
  * continues to be drained.
  * ststart() is called at splbio
  */
-void 
+void
 ststart(v)
 	void *v;
 {
@@ -1120,7 +1003,7 @@ stioctl(dev, cmd, arg, flag, p)
 {
 	int error = 0;
 	int unit;
-	int nmarks, dsty;
+	int nmarks;
 	int flags;
 	struct st_softc *st;
 	int hold_blksize;
@@ -1133,7 +1016,6 @@ stioctl(dev, cmd, arg, flag, p)
 	 */
 	flags = 0;		/* give error messages, act on errors etc. */
 	unit = STUNIT(dev);
-	dsty = STDSTY(dev);
 	st = st_cd.cd_devs[unit];
 	hold_blksize = st->blksize;
 	hold_density = st->density;
@@ -1155,14 +1037,8 @@ stioctl(dev, cmd, arg, flag, p)
 		g->mt_type = 0x7;	/* Ultrix compat *//*? */
 		g->mt_blksiz = st->blksize;
 		g->mt_density = st->density;
-		g->mt_mblksiz[0] = st->modes[0].blksize;
-		g->mt_mblksiz[1] = st->modes[1].blksize;
-		g->mt_mblksiz[2] = st->modes[2].blksize;
-		g->mt_mblksiz[3] = st->modes[3].blksize;
-		g->mt_mdensity[0] = st->modes[0].density;
-		g->mt_mdensity[1] = st->modes[1].density;
-		g->mt_mdensity[2] = st->modes[2].density;
-		g->mt_mdensity[3] = st->modes[3].density;
+ 		g->mt_mblksiz = st->modes.blksize;
+ 		g->mt_mdensity = st->modes.density;
 		if (st->flags & ST_READONLY)
 			g->mt_dsreg |= MT_DS_RDONLY;
 		if (st->flags & ST_MOUNTED)
@@ -1229,13 +1105,6 @@ stioctl(dev, cmd, arg, flag, p)
 			error = st_erase(st, number, flags);
 			break;
 		case MTSETBSIZ:	/* Set block size for device */
-#ifdef	NOTYET
-			if (!(st->flags & ST_NEW_MOUNT)) {
-				uprintf("re-mount tape before changing blocksize");
-				error = EINVAL;
-				break;
-			}
-#endif
 			if (number == 0) {
 				st->flags &= ~ST_FIXEDBLOCKS;
 			} else {
@@ -1287,11 +1156,7 @@ stioctl(dev, cmd, arg, flag, p)
 #endif
 
 	default:
-		if (STMODE(dev) == CTLMODE)
-			error = scsi_do_ioctl(st->sc_link, dev,
-			    cmd, arg, flag, p);
-		else
-			error = ENOTTY;
+		error = scsi_do_ioctl(st->sc_link, dev, cmd, arg, flag, p);
 		break;
 	}
 	return error;
@@ -1314,23 +1179,18 @@ try_new_value:
 	/*
 	 * As the drive liked it, if we are setting a new default,
 	 * set it into the structures as such.
-	 *
-	 * The means for deciding this are not finalised yet
 	 */
-	if (STMODE(dev) == 0x03) {
-		/* special mode */
-		/* XXX */
-		switch ((short) (mt->mt_op)) {
-		case MTSETBSIZ:
-			st->modes[dsty].blksize = st->blksize;
-			st->modeflags[dsty] |= BLKSIZE_SET_BY_USER;
-			break;
-		case MTSETDNSTY:
-			st->modes[dsty].density = st->density;
-			st->modeflags[dsty] |= DENSITY_SET_BY_USER;
-			break;
-		}
+	switch (mt->mt_op) {
+	case MTSETBSIZ:
+		st->modes.blksize = st->blksize;
+		st->modeflags |= BLKSIZE_SET_BY_USER;
+		break;
+	case MTSETDNSTY:
+		st->modes.density = st->density;
+		st->modeflags |= DENSITY_SET_BY_USER;
+		break;
 	}
+
 	return 0;
 }
 
@@ -1441,10 +1301,10 @@ st_mode_sense(st, flags)
 	if (error != 0) {
 		free(data, M_TEMP);
 		return (error);
-	}	
+	}
 
 	/* It is valid for no page0 to be available. */
-	
+
 	if (big)
 		dev_spec = data->hdr_big.dev_spec;
 	else
@@ -1454,7 +1314,7 @@ st_mode_sense(st, flags)
 		st->flags |= ST_READONLY;
 	else
 		st->flags &= ~ST_READONLY;
-	
+
 	st->numblks = block_count;
 	st->media_blksize = block_size;
 	st->media_density = density;
@@ -1467,7 +1327,7 @@ st_mode_sense(st, flags)
 	    ("%sbuffered\n", dev_spec & SMH_DSP_BUFF_MODE ? "" : "un"));
 
 	sc_link->flags |= SDEV_MEDIA_LOADED;
-	
+
 	free(data, M_TEMP);
 	return (0);
 }
@@ -1494,7 +1354,7 @@ st_mode_select(st, flags)
 	if (outbuf == NULL) {
 		free(inbuf, M_TEMP);
 		return (ENOMEM);
-	}		
+	}
 
 	/*
 	 * This quirk deals with drives that have only one valid mode and think
@@ -1514,7 +1374,7 @@ st_mode_select(st, flags)
 		free(inbuf, M_TEMP);
 		free(outbuf, M_TEMP);
 		return (0);
-	}	
+	}
 
 	bzero(outbuf, sizeof(*outbuf));
 	bzero(&general, sizeof(general));
@@ -1580,7 +1440,7 @@ st_mode_select(st, flags)
 	    sizeof(general));
 
 	error = scsi_mode_select_big(st->sc_link, 0, &outbuf->hdr_big,
-	    flags, ST_CTL_TIME); 
+	    flags, ST_CTL_TIME);
 	free(inbuf, M_TEMP);
 	free(outbuf, M_TEMP);
 	return (error);
@@ -1863,6 +1723,39 @@ st_interpret_sense(xs)
 		return (EJUSTRETURN); /* let the generic code handle it */
 
 	switch (skey) {
+
+	/*
+	 * We do custom processing in st for the unit becoming ready case.
+	 * in this case we do not allow xs->retries to be decremented
+	 * only on the "Unit Becoming Ready" case. This is because tape
+	 * drives report "Unit Becoming Ready" when loading media, etc.
+	 * and can take a long time.  Rather than having a massive timeout 
+	 * for all operations (which would cause other problems) we allow
+	 * operations to wait (but be interruptable with Ctrl-C) forever
+	 * as long as the drive is reporting that it is becoming ready.
+	 * all other cases are handled as per the default.
+	 */
+
+	case SKEY_NOT_READY:
+		if ((xs->flags & SCSI_IGNORE_NOT_READY) != 0)
+			return (0);
+		switch (sense->add_sense_code) {
+		case 0x04:	/* LUN not ready */
+			switch (sense->add_sense_code_qual) {
+				case 0x01: /* Becoming Ready */
+					SC_DEBUG(sc_link, SDEV_DB1,
+		    			    ("not ready: busy (%#x)\n",
+					    sense->add_sense_code_qual));
+					/* don't count this as a retry */
+					xs->retries++;
+					return (scsi_delay(xs, 1));
+				default:
+					return (EJUSTRETURN);
+			}
+			break;
+		default:
+			return (EJUSTRETURN);
+	}
 	case SKEY_NO_SENSE:
 	case SKEY_RECOVERED_ERROR:
 	case SKEY_MEDIUM_ERROR:

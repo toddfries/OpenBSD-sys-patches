@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccom.c,v 1.50 2006/01/01 11:59:39 miod Exp $	*/
+/*	$OpenBSD: pccom.c,v 1.54 2006/07/31 11:06:20 mickey Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -204,7 +204,7 @@ comspeed(freq, speed)
 	x = divrnd((freq / 16), speed);
 	if (x <= 0)
 		return -1;
-	err = divrnd((freq / 16) * 1000, speed * x) - 1000;
+	err = divrnd((quad_t)freq * 1000 / 16, speed * x) - 1000;
 	if (err < 0)
 		err = -err;
 	if (err > COM_TOLERANCE)
@@ -466,7 +466,6 @@ com_activate(self, act)
 	s = spltty();
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -558,6 +557,7 @@ comopen(dev, flag, mode, p)
 		case COM_UART_ST16650:
 		case COM_UART_ST16650V2:
 		case COM_UART_XR16850:
+		case COM_UART_OX16C950:
 			bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
 			bus_space_write_1(iot, ioh, com_efr, EFR_ECB);
 			bus_space_write_1(iot, ioh, com_ier, 0);
@@ -587,6 +587,7 @@ comopen(dev, flag, mode, p)
 					fifo |= FIFO_RCV_TRIGGER_28|FIFO_XMT_TRIGGER_30;
 				break;
 			case COM_UART_XR16850:
+			case COM_UART_OX16C950:
 				pccom_xr16850_fifo_init(iot, ioh);
 				if (tp->t_ispeed <= 1200)
 					fifo |= FIFO_RCV3_TRIGGER_8|FIFO_XMT3_TRIGGER_8; /* XXX */
@@ -767,6 +768,7 @@ compwroff(sc)
 	case COM_UART_ST16650:
 	case COM_UART_ST16650V2:
 	case COM_UART_XR16850:
+	case COM_UART_OX16C950:
 		bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
 		bus_space_write_1(iot, ioh, com_efr, EFR_ECB);
 		bus_space_write_1(iot, ioh, com_ier, IER_SLEEP);
@@ -1052,6 +1054,7 @@ comparam(tp, t)
 					fifo |= FIFO_RCV_TRIGGER_28|FIFO_XMT_TRIGGER_30;
 				break;
 			case COM_UART_XR16850:
+			case COM_UART_OX16C950:
 				if (t->c_ispeed <= 1200)
 					fifo |= FIFO_RCV3_TRIGGER_8|FIFO_XMT3_TRIGGER_8; /* XXX */
 				else
@@ -1447,6 +1450,10 @@ comintr(arg)
 		}
 		msr = bus_space_read_1(iot, ioh, com_msr);
 		delta = msr ^ sc->sc_msr;
+
+		ttytstamp(tp, sc->sc_msr & MSR_CTS, msr & MSR_CTS,
+		    sc->sc_msr & MSR_DCD, msr & MSR_DCD);
+
 		if (!ISSET(delta, MSR_DCD | MSR_CTS | MSR_RI | MSR_DSR))
 			continue;
 		sc->sc_msr = msr;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp_cardbus.c,v 1.12 2006/01/01 19:06:43 brad Exp $ */
+/*	$OpenBSD: if_fxp_cardbus.c,v 1.17 2006/07/01 21:48:08 brad Exp $ */
 /*	$NetBSD: if_fxp_cardbus.c,v 1.12 2000/05/08 18:23:36 thorpej Exp $	*/
 
 /*
@@ -51,6 +51,7 @@
 #include <sys/errno.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
+#include <sys/timeout.h>
 #include <sys/device.h>
 
 #include <net/if.h>
@@ -94,6 +95,7 @@ void fxp_cardbus_setup(struct fxp_softc *);
 struct fxp_cardbus_softc {
 	struct fxp_softc sc;
 	cardbus_devfunc_t ct;
+	cardbustag_t ct_tag;
 	pcireg_t base0_reg;
 	pcireg_t base1_reg;
 	bus_size_t size;
@@ -115,10 +117,7 @@ const struct cardbus_matchid fxp_cardbus_devices[] = {
 #endif
 
 int
-fxp_cardbus_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+fxp_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	return (cardbus_matchbyid((struct cardbus_attach_args *)aux,
 	    fxp_cardbus_devices,
@@ -126,12 +125,8 @@ fxp_cardbus_match(parent, match, aux)
 }
 
 void
-fxp_cardbus_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+fxp_cardbus_attach(struct device *parent, struct device *self, void *aux)
 {
-	static const char thisfunc[] = "fxp_cardbus_attach";
-
 	char intrstr[16];
 	struct fxp_softc *sc = (struct fxp_softc *) self;
 	struct fxp_cardbus_softc *csc = (struct fxp_cardbus_softc *) self;
@@ -149,8 +144,8 @@ fxp_cardbus_attach(parent, self, aux)
 	csc->ct = ca->ca_ct;
 
 	/*
-         * Map control/status registers.
-         */
+	 * Map control/status registers.
+	 */
 	if (Cardbus_mapreg_map(csc->ct, CARDBUS_BASE1_REG,
 	    PCI_MAPREG_TYPE_IO, 0, &iot, &ioh, &adr, &size) == 0) {
 		csc->base1_reg = adr | 1;
@@ -165,7 +160,7 @@ fxp_cardbus_attach(parent, self, aux)
 		sc->sc_sh = memh;
 		csc->size = size;
 	} else
-		panic("%s: failed to allocate mem and io space", thisfunc);
+		panic("%s: failed to allocate mem and io space", __func__);
 
 	if (ca->ca_cis.cis1_info[0] && ca->ca_cis.cis1_info[1])
 		printf(": %s %s", ca->ca_cis.cis1_info[0],
@@ -196,11 +191,11 @@ fxp_cardbus_attach(parent, self, aux)
 	
 	sc->sc_revision = PCI_REVISION(ca->ca_class);
 
-	fxp_attach_common(sc, intrstr);
+	fxp_attach(sc, intrstr);
 }
 
 void
-fxp_cardbus_setup(struct fxp_softc * sc)
+fxp_cardbus_setup(struct fxp_softc *sc)
 {
 	struct fxp_cardbus_softc *csc = (struct fxp_cardbus_softc *) sc;
 	struct cardbus_softc *psc =
@@ -209,19 +204,17 @@ fxp_cardbus_setup(struct fxp_softc * sc)
 	cardbus_function_tag_t cf = psc->sc_cf;
 	pcireg_t command;
 
-	cardbustag_t tag = cardbus_make_tag(cc, cf, csc->ct->ct_bus,
+	csc->ct_tag = cardbus_make_tag(cc, cf, csc->ct->ct_bus,
 	    csc->ct->ct_dev, csc->ct->ct_func);
 
-	command = Cardbus_conf_read(csc->ct, tag, CARDBUS_COMMAND_STATUS_REG);
+	command = cardbus_conf_read(cc, cf, csc->ct_tag, CARDBUS_COMMAND_STATUS_REG);
 	if (csc->base0_reg) {
-		Cardbus_conf_write(csc->ct, tag,
-		    CARDBUS_BASE0_REG, csc->base0_reg);
+		cardbus_conf_write(cc, cf, csc->ct_tag, CARDBUS_BASE0_REG, csc->base0_reg);
 		(cf->cardbus_ctrl) (cc, CARDBUS_MEM_ENABLE);
 		command |= CARDBUS_COMMAND_MEM_ENABLE |
 		    CARDBUS_COMMAND_MASTER_ENABLE;
 	} else if (csc->base1_reg) {
-		Cardbus_conf_write(csc->ct, tag,
-		    CARDBUS_BASE1_REG, csc->base1_reg);
+		cardbus_conf_write(cc, cf, csc->ct_tag, CARDBUS_BASE1_REG, csc->base1_reg);
 		(cf->cardbus_ctrl) (cc, CARDBUS_IO_ENABLE);
 		command |= (CARDBUS_COMMAND_IO_ENABLE |
 		    CARDBUS_COMMAND_MASTER_ENABLE);
@@ -230,13 +223,11 @@ fxp_cardbus_setup(struct fxp_softc * sc)
 	(cf->cardbus_ctrl) (cc, CARDBUS_BM_ENABLE);
 
 	/* enable the card */
-	Cardbus_conf_write(csc->ct, tag, CARDBUS_COMMAND_STATUS_REG, command);
+	cardbus_conf_write(cc, cf, csc->ct_tag, CARDBUS_COMMAND_STATUS_REG, command);
 }
 
 int
-fxp_cardbus_detach(self, flags)
-	struct device *self;
-	int flags;
+fxp_cardbus_detach(struct device *self, int flags)
 {
 	struct fxp_softc *sc = (struct fxp_softc *) self;
 	struct fxp_cardbus_softc *csc = (struct fxp_cardbus_softc *) self;

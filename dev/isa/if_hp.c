@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_hp.c,v 1.15 2005/11/21 18:16:40 millert Exp $       */
+/*    $OpenBSD: if_hp.c,v 1.17 2006/04/16 00:46:32 pascoe Exp $       */
 /*    $NetBSD: if_hp.c,v 1.21 1995/12/24 02:31:31 mycroft Exp $       */
 
 /* XXX THIS DRIVER IS BROKEN.  IT WILL NOT EVEN COMPILE. */
@@ -531,7 +531,7 @@ hpstart(ifp)
 
 #if NBPFILTER > 0
 	if (ns->ns_bpf)
-		bpf_mtap(ns->ns_bpf, m);
+		bpf_mtap(ns->ns_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 	for (m0 = m; m != 0;) {
@@ -796,19 +796,28 @@ hpread(ns, buf, len)
 
 #if NBPFILTER > 0
 	if (ns->ns_bpf)
-		bpf_tap(ns->ns_bpf, buf, len + sizeof(struct ether_header));
+		bpf_tap(ns->ns_bpf, buf, len + sizeof(struct ether_header),
+		    BPF_DIRECTION_IN);
 #endif
 	/*
-	       * Pull packet off interface.  Off is nonzero if packet
-	       * has trailing header; hpget will then force this header
-	       * information to be at the front, but we still have to drop
-	       * the type and length which are at the front of any trailer data.
-	       */
+	 * Pull packet off interface.  Off is nonzero if packet
+	 * has trailing header; hpget will then force this header
+	 * information to be at the front, but we still have to drop
+	 * the type and length which are at the front of any trailer data.
+	 */
 	m = hpget(buf, len, off, &ns->ns_if);
 	if (m == 0)
 		return;
 
-	ether_input(&ns->ns_if, eh, m);
+	/*
+	 * XXX I don't understand the implications of ETHERTYPE_TRAIL.
+	 * Just prepend the "fixed" ethernet header to the mbuf chain.
+	 */
+	M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
+	if (m == 0)
+		return;
+	*mtod(m, struct ether_header *) = *eh;
+	ether_input_mbuf(&ns->ns_if, m);
 }
 /*
  * Supporting routines

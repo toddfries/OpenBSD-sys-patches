@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.20 2006/02/22 19:29:24 jordan Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.26 2006/06/30 04:16:15 jordan Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -31,6 +31,7 @@ extern int acpi_debug;
 #endif
 
 struct klist;
+struct acpiec_softc;
 
 struct acpi_attach_args {
 	char		*aaa_name;
@@ -76,6 +77,8 @@ typedef SIMPLEQ_HEAD(, acpi_q) acpi_qhead_t;
 #define ACPIREG_PM1_STS	    0x0E
 #define ACPIREG_PM1_EN	    0x0F
 #define ACPIREG_PM1_CNT	    0x10
+#define ACPIREG_GPE_STS     0x11
+#define ACPIREG_GPE_EN      0x12
 
 struct acpi_parsestate
 {
@@ -94,6 +97,12 @@ struct acpi_reg_map {
 struct acpi_thread {
 	struct acpi_softc   *sc;
 	volatile int	    running;
+};
+
+struct gpe_block {
+	int  (*handler)(struct acpi_softc *, int, void *);
+	void *arg;
+	int   active;
 };
 
 struct acpi_softc {
@@ -143,12 +152,23 @@ struct acpi_softc {
 		struct aml_node *gpe_handler;
 	}			sc_gpes[256];
 	int			sc_maxgpe;
+        int                     sc_lastgpe;
+
+	struct gpe_block       *gpe_table;
 
 	int			sc_wakeup;
 	u_int32_t		sc_gpe_sts;
 	u_int32_t		sc_gpe_en;
 	struct acpi_thread	*sc_thread;
-
+	
+	struct aml_node		*sc_tts;
+	struct aml_node		*sc_pts;
+	struct aml_node		*sc_bfs;
+	struct aml_node		*sc_gts;
+	struct aml_node		*sc_wak;
+	int 			sc_state;
+	struct acpiec_softc	*sc_ec;		/* XXX assume single EC */
+	u_int32_t		sc_ec_gpemask;
 };
 
 #define GPE_NONE  0x00
@@ -183,6 +203,7 @@ void	 acpi_attach_machdep(struct acpi_softc *);
 int	 acpi_interrupt(void *);
 void	 acpi_enter_sleep_state(struct acpi_softc *, int);
 void	 acpi_powerdown(void);
+void	 acpi_resume(struct acpi_softc *);
 
 #define ACPI_IOREAD 0
 #define ACPI_IOWRITE 1
@@ -190,6 +211,16 @@ void	 acpi_powerdown(void);
 void acpi_delay(struct acpi_softc *, int64_t);
 int acpi_gasio(struct acpi_softc *, int, int, uint64_t, int, int, void *);
 
+int     acpi_set_gpehandler(struct acpi_softc *, int, int (*)(struct acpi_softc *, int, void *), void *, const char *);
+void	acpi_enable_gpe(struct acpi_softc *, u_int32_t);
+
+int	acpiec_intr(struct acpiec_softc *);
+void	acpiec_read(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
+void	acpiec_write(struct acpiec_softc *, u_int8_t, int, u_int8_t *);
+void	acpiec_handle_events(struct acpiec_softc *);
+
+int	acpi_read_pmreg(struct acpi_softc *, int, int);
+void	acpi_write_pmreg(struct acpi_softc *, int, int, int);
 #endif
 
 #endif	/* !_DEV_ACPI_ACPIVAR_H_ */

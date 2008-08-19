@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.38 2006/01/04 06:04:42 canacar Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.40 2006/03/25 22:41:47 djm Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -248,7 +248,8 @@ looutput(ifp, m, dst, rt)
 	 * packets for local use. But don't dup them to bpf.
 	 */
 	if (ifp->if_bpf && (ifp->if_flags & IFF_LOOPBACK))
-		bpf_mtap_af(ifp->if_bpf, htonl(dst->sa_family), m);
+		bpf_mtap_af(ifp->if_bpf, htonl(dst->sa_family), m,
+		    BPF_DIRECTION_OUT);
 #endif
 	m->m_pkthdr.rcvif = ifp;
 
@@ -277,7 +278,7 @@ looutput(ifp, m, dst, rt)
 		afp = mtod(m, int32_t *);
 		*afp = (int32_t)dst->sa_family;
 
-	        s = splimp();
+	        s = splnet();
 		IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
 		(*ifp->if_start)(ifp);
 		splx(s);
@@ -316,7 +317,7 @@ looutput(ifp, m, dst, rt)
 		m_freem(m);
 		return (EAFNOSUPPORT);
 	}
-	s = splimp();
+	s = splnet();
 	if (IF_QFULL(ifq)) {
 		IF_DROP(ifq);
 		m_freem(m);
@@ -342,7 +343,7 @@ lo_altqstart(ifp)
 	int s, isr;
 	
 	while (1) {
-		s = splimp();
+		s = splnet();
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		splx(s);
 		if (m == NULL)
@@ -384,7 +385,7 @@ lo_altqstart(ifp)
 			return;
 		}
 
-		s = splimp();
+		s = splnet();
 		if (IF_QFULL(ifq)) {
 			IF_DROP(ifq);
 			m_freem(m);

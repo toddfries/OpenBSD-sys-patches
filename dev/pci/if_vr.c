@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.59 2006/02/07 18:15:20 brad Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.64 2006/06/17 18:00:43 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -69,6 +69,7 @@
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
+#include <sys/timeout.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -189,7 +190,7 @@ const struct pci_matchid vr_devices[] = {
 void
 vr_mii_sync(struct vr_softc *sc)
 {
-	register int		i;
+	int			i;
 
 	SIO_SET(VR_MIICMD_DIR|VR_MIICMD_DATAIN);
 
@@ -567,7 +568,7 @@ vr_setcfg(struct vr_softc *sc, int media)
 void
 vr_reset(struct vr_softc *sc)
 {
-	register int		i;
+	int			i;
 
 	VR_SETBIT16(sc, VR_COMMAND, VR_CMD_RESET);
 
@@ -1022,7 +1023,7 @@ vr_rxeof(struct vr_softc *sc)
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0);
+			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_IN);
 #endif
 		/* pass it on. */
 		ether_input_mbuf(ifp, m0);
@@ -1209,7 +1210,6 @@ vr_intr(void *arg)
 
 		if ((status & VR_ISR_BUSERR) || (status & VR_ISR_TX_UNDERRUN)) {
 			vr_reset(sc);
-			ifp->if_flags &= ~IFF_RUNNING;
 			vr_init(sc);
 			break;
 		}
@@ -1345,7 +1345,8 @@ vr_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, cur_tx->vr_mbuf);
+			bpf_mtap(ifp->if_bpf, cur_tx->vr_mbuf,
+			BPF_DIRECTION_OUT);
 #endif
 		cur_tx = cur_tx->vr_nextdesc;
 	}
@@ -1376,11 +1377,6 @@ vr_init(void *xsc)
 	int			s, i;
 
 	s = splnet();
-
-	if (ifp->if_flags & IFF_RUNNING) {
-		splx(s);
-		return;
-	}
 
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
@@ -1490,12 +1486,10 @@ vr_ifmedia_upd(struct ifnet *ifp)
 {
 	struct vr_softc		*sc = ifp->if_softc;
 
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_flags &= ~IFF_RUNNING;
+	if (ifp->if_flags & IFF_UP)
 		vr_init(sc);
-	}
 
-	return(0);
+	return (0);
 }
 
 /*
@@ -1530,16 +1524,12 @@ vr_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		vr_init(sc);
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			vr_init(sc);
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-			break;
-#endif	/* INET */
-		default:
-			break;
-		}
+#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1556,10 +1546,12 @@ vr_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				    VR_RXCFG_RX_PROMISC);
 				vr_setmulti(sc);
 			} else if (ifp->if_flags & IFF_RUNNING &&
-			    (ifp->if_flags ^ sc->sc_if_flags) & IFF_ALLMULTI)
+			    (ifp->if_flags ^ sc->sc_if_flags) & IFF_ALLMULTI) {
 				vr_setmulti(sc);
-			else
-				vr_init(sc);
+			} else {
+				if (!(ifp->if_flags & IFF_RUNNING))
+					vr_init(sc);
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				vr_stop(sc);
@@ -1587,7 +1579,7 @@ vr_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 

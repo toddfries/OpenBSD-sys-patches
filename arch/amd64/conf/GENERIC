@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.114 2006/02/26 02:49:28 marco Exp $
+#	$OpenBSD: GENERIC,v 1.155 2006/08/29 20:04:54 jolan Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -16,7 +16,7 @@ maxusers	32			# estimated number of users
 option		USER_PCICONF	# user-space PCI configuration
 
 #option		VM86		# Virtual 8086 emulation
-#option		USER_LDT	# user-settable LDT; see i386_set_ldt(2)
+#option		USER_LDT	# user-settable LDT; see amd64_set_ldt(2)
 option		APERTURE	# in-kernel aperture driver for XFree86
 #option		MTRR		# CPU memory range attributes control
 
@@ -37,6 +37,7 @@ config		bsd	swap generic
 
 mainbus0 at root
 
+bios0	at mainbus?
 cpu0	at mainbus?
 isa0	at mainbus0
 isa0	at pcib?
@@ -45,13 +46,15 @@ pci*	at mainbus0
 #option		ACPIVERBOSE
 #option		ACPI_ENABLE
 
-#acpi0	at mainbus?
-#acpitimer* at acpi?
-#hpet*	at acpi?
-#acpiac* at acpi?
-#acpibat* at acpi?
-#acpibtn* at acpi?
-#acpicpu* at acpi?
+#acpi0		at mainbus?
+#acpitimer*	at acpi?
+#acpihpet*	at acpi?
+#acpiac*	at acpi?
+#acpibat*	at acpi?
+#acpibtn*	at acpi?
+#acpicpu*	at acpi?
+#acpiec*	at acpi?
+#acpitz*	at acpi?
 
 ipmi0	at mainbus?		# IPMI
 
@@ -70,7 +73,9 @@ lm0	at isa? port 0x290
 #lm2	at isa? port 0x310
 
 it0	at isa? port 0x290	# IT8705F, IT8712F and SiS970 hardware
-				# monitors
+it1	at isa? port 0xc00	# monitors
+it2	at isa? port 0xd00
+				
 viaenv*	at pci?			# VIA VT82C686A hardware monitor
 #viasio* at isa? port 0x2e flags 0x0000	# VIA VT1211 LPC Super I/O
 #viasio* at isa? port 0x4e flags 0x0000
@@ -145,8 +150,14 @@ uplcom* at uhub?		# I/O DATA USB-RSAQ2 serial adapter
 ucom*	at uplcom?
 umct*	at uhub?		# MCT USB-RS232 serial adapter
 ucom*	at umct?
+uslcom*	at uhub?		# Silicon Laboratories CP210x serial
+ucom*	at uslcom?
+uark*	at uhub?		# Arkmicro ARK3116 serial
+ucom*	at uark?
 uipaq*	at uhub?		# iPAQ serial adapter
 ucom*	at uipaq?
+umsm*	at uhub?		# Qualcomm MSM EVDO
+ucom*	at umsm?
 uaudio* at uhub?		# USB Audio
 audio*	at uaudio?
 umidi*	at uhub?		# USB MIDI
@@ -160,6 +171,8 @@ ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
+ucycom*	at uhidev?			# Cypress serial
+ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
@@ -180,9 +193,15 @@ udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 #ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
-ural*	at uhub?		# Ralink RT2500
+ural*	at uhub?		# Ralink RT2500USB
+rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 
-puc*	at pci?				# PCI "universal" communication device
+puc*	at pci?			# PCI "universal" communication device
+#puc*	at cardbus?
+
+sdhc*	at pci?			# SD Host Controller
+sdmmc*	at sdhc?		# SD/MMC bus
+scsibus* at sdmmc?		# SCSI emulation
 
 isadma0	at isa?
 
@@ -227,18 +246,22 @@ ahc*	at pci?				# Adaptec 2940 SCSI controllers
 scsibus* at ahc?
 ahd*	at pci?				# Adaptec 79?? SCSI controllers
 scsibus* at ahd?
-mpt*	at pci?				# LSI Fusion-MPT SCSI/Fibre
-scsibus* at mpt?
+arc*	at pci?				# Areca RAID Controller
+scsibus* at arc?
+mpi*	at pci?				# LSI Logic Message Passing Interface
+scsibus* at mpi?
 #dpt*	at pci?				# DPT SmartCache/SmartRAID PCI
 #scsibus* at dpt?
 gdt*	at pci?				# ICP Vortex GDT RAID controllers
 scsibus* at gdt?
-#twe*	at pci?				# 3ware Escalade RAID controllers
-#scsibus* at twe?
+twe*	at pci?				# 3ware Escalade RAID controllers
+scsibus* at twe?
 #aac*	at pci?				# Adaptec FSA RAID controllers
 #scsibus* at aac?
 ami*	at pci?				# AMI MegaRAID controllers
 scsibus* at ami?
+mfi*	at pci?				# LSI MegaRAID SAS controllers
+scsibus* at mfi?
 #cac*	at pci?				# Compaq Smart ARRAY [234]* RAID controllers
 #scsibus* at cac?
 ciss*	at pci?				# Compaq Smart ARRAY [56]* RAID controllers
@@ -292,11 +315,10 @@ scsibus* at atapiscsi?
 # Networking devices
 lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
 san*	at pci?				# Sangoma PCI AFT card
-#le*	at pci?				# PCnet-PCI based ethernet
 de*	at pci?				# DC21X4X-based ethernet
 fxp*	at pci?				# EtherExpress 10/100B ethernet
 fxp*	at cardbus?			# Intel PRO/100 ethernet
-#ne*	at pci?				# NE2000-compat ethernet
+ne*	at pci?				# NE2000-compat ethernet
 ep*	at pci?				# 3C59x ethernet
 ne*	at pcmcia?			# PCMCIA based NE2000 ethernet
 ep*	at pcmcia?			# PCMCIA based 3C5xx ethernet
@@ -321,19 +343,27 @@ dc*	at cardbus?			# 21143, "tulip" clone ethernet
 ti*	at pci?				# Alteon Tigon 1Gb ethernet
 skc*	at pci?				# SysKonnect GEnesis 984x
 sk*	at skc?				#  each port of above
+mskc*	at pci?				# Marvell Yukon-2
+msk*	at mskc?			#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 #nge*	at pci?				# NS DP83820/DP83821 GigE
-bge*	at pci?				# Broadcom BCM570x (aka Tigon3)
+bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
+bnx*	at pci?				# Broadcom BCM5706/5708 GigE
 re*	at pci?				# Realtek 8169/8169S/8110S
 stge*	at pci?				# Sundance TC9021 GigE
 #lge*	at pci?				# Level1 LXT1001 GigE
 hme*	at pci?				# Sun Happy Meal
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
+musycc*	at pci?				# Conexant HDLC controller
+art*	at musycc?			# Accoom Artery E1/T1 cards
+xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 
 # Wireless network cards
+acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
+acx*	at cardbus?			# TI ACX100/ACX111 (802.11b/g)
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)
 ath*	at cardbus?			# Atheros AR5k (802.11a/b/g)
 atw*	at pci?				# ADMtek ADM8211 (802.11)
@@ -341,7 +371,7 @@ atw*	at cardbus?			# ADMtek ADM8211 (802.11)
 wi*	at pci?				# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 #awi*	at pcmcia?			# Bay Networks IEEE 802.11FH
-#an*	at pci?				# Aironet IEEE 802.11DS
+an*	at pci?				# Aironet IEEE 802.11DS
 an*	at pcmcia?			# Aironet IEEE 802.11DS
 cnw*	at pcmcia?			# Xircom Netwave
 ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
@@ -382,28 +412,32 @@ eap*	at pci?				# Ensoniq AudioPCI S5016
 #eso*	at pci?				# ESS Solo-1 PCI AudioDrive
 #sv*	at pci?				# S3 SonicVibes (S3 617)
 #neo*	at pci?				# NeoMagic 256AV/ZX
-#cmpci*	at pci?				# C-Media CMI8338/8738
+cmpci*	at pci?				# C-Media CMI8338/8738
 auich*	at pci? flags 0x0000		# i82801 ICH AC'97 audio
 auixp*	at pci?				# ATI IXP AC'97 Audio
 #autri*	at pci? flags 0x0000		# Trident 4D WAVE
 auvia*	at pci?				# VIA VT82C686A
-#clcs*	at pci?				# CS4280 CrystalClear audio
+azalia*	at pci?				# High Definition Audio
+clcs*	at pci?				# CS4280 CrystalClear audio
 #clct*	at pci?				# CS4281 CrystalClear audio
 #fms*	at pci?				# Forte Media FM801
 #maestro* at pci?			# ESS Maestro PCI
 #esa*	at pci?				# ESS Maestro3 PCI
 yds*	at pci? flags 0x0000		# Yamaha YMF Audio
 emu*	at pci?				# SB Live!
+mpu*	at isa? port 0x330
 
 # OPL[23] FM synthesizers
 #opl*	at eso?
 opl*	at yds?
+#opl*	at cmpci?
 
 # MIDI support
 midi*	at pcppi?		# MIDI interface to the PC speaker
-#midi*	at opl?			# OPL FM synth
+midi*	at opl?			# OPL FM synth
 #midi*	at autri?
 midi*	at eap?
+midi*	at mpu?
 
 spkr0	at pcppi?		# PC speaker
 
@@ -412,13 +446,14 @@ audio*	at eap?
 #audio*	at eso?
 #audio*	at sv?
 #audio*	at neo?
-#audio*	at cmpci?
-#audio*	at clcs?
+audio*	at cmpci?
+audio*	at clcs?
 #audio*	at clct?
 audio*	at auich?
 audio*	at auixp?
 #audio*	at autri?
 audio*	at auvia?
+audio*	at azalia?
 #audio*	at fms?
 audio*	at uaudio?
 #audio*	at maestro?
@@ -446,9 +481,11 @@ safe*	at pci?			# SafeNet SafeXcel 1141/1741
 #ises*	at pci?			# Pijnenburg PCC-ISES
 
 # I2O
-#iop*	at pci?			# I2O
-#ioprbs*	at iop?		# Random block storage
-#scsibus* at ioprbs?
+iop*	at pci?			# I2O processor
+ioprbs*	at iop?			# I2O arrays
+scsibus* at ioprbs?
+iopsp*	at iop?			# I2O SCSI pass-through
+scsibus* at iopsp?
 
 pseudo-device	sequencer	1
 #pseudo-device	raid		4	# RAIDframe disk driver

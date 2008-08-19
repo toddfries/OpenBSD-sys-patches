@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.26 2006/01/20 23:27:26 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.30 2006/08/17 10:34:14 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1999/06/30 18:48:06 ragge Exp $	*/
 
 /*
@@ -132,13 +132,15 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 		lp->d_secsize = DEV_BSIZE;
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
+	if (lp->d_secpercyl == 0)
+		return ("invalid geometry");
 	lp->d_npartitions = RAW_PART + 1;
 	for (i = 0; i < RAW_PART; i++) {
 		lp->d_partitions[i].p_size = 0;
 		lp->d_partitions[i].p_offset = 0;
 	}
 	if (lp->d_partitions[i].p_size == 0)
-		lp->d_partitions[i].p_size = 0x1fffffff;
+		lp->d_partitions[i].p_size = lp->d_secperunit;
 	lp->d_partitions[i].p_offset = 0;
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64 * 1024;
@@ -180,13 +182,6 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	bp->b_flags = B_INVAL | B_AGE | B_READ;
 	brelse(bp);
 	return (msg);
-}
-
-void 
-dk_establish(p, q)
-	struct disk *p;
-	struct device *q;
-{
 }
 
 /*
@@ -305,7 +300,7 @@ disk_reallymapin(bp, map, reg, flag)
 	volatile pt_entry_t *io;
 	pt_entry_t *pte;
 	struct pcb *pcb;
-	int pfnum, npf, o, i;
+	int pfnum, npf, o;
 	caddr_t addr;
 
 	o = (int)bp->b_data & VAX_PGOFSET;
@@ -325,21 +320,6 @@ disk_reallymapin(bp, map, reg, flag)
 		pte = uvtopte(addr, pcb);
 	}
 
-	/*
-	 * When we are doing DMA to user space, be sure that all pages
-	 * we want to transfer to is mapped. WHY DO WE NEED THIS???
-	 * SHOULDN'T THEY ALWAYS BE MAPPED WHEN DOING THIS???
-	 */
-	for (i = 0; i < (npf - 1); i++) {
-		if ((pte[i] & PG_FRAME) == 0) {
-			int rv;
-			rv = uvm_fault(&p->p_vmspace->vm_map,
-			    (unsigned)addr + i * VAX_NBPG, 0,
-			    VM_PROT_READ|VM_PROT_WRITE);
-			if (rv)
-				panic("DMA to nonexistent page, %d", rv);
-		}
-	}
 	if (map) {
 		io = &map[reg];
 		while (--npf > 0) {

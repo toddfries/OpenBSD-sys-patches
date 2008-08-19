@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_conf.c,v 1.9 2005/12/21 12:43:49 jsg Exp $	*/
+/*	$OpenBSD: tty_conf.c,v 1.11 2006/08/03 16:13:24 mbalmer Exp $	*/
 /*	$NetBSD: tty_conf.c,v 1.18 1996/05/19 17:17:55 jonathan Exp $	*/
 
 /*-
@@ -52,16 +52,6 @@
 
 int	nullioctl(struct tty *, u_long, caddr_t, int, struct proc *);
 
-#include "tb.h"
-#if NTB > 0
-int	tbopen(dev_t dev, struct tty *tp);
-int	tbclose(struct tty *tp, int flags);
-int	tbread(struct tty *tp, struct uio *uio, int flags);
-int	tbtioctl(struct tty *tp, u_long cmd, caddr_t data,
-			int flag, struct proc *p);
-int	tbinput(int c, struct tty *tp);
-#endif
-
 #include "sl.h"
 #if NSL > 0
 int	slopen(dev_t dev, struct tty *tp);
@@ -94,6 +84,13 @@ int	stripinput(int c, struct tty *tp);
 int	stripstart(struct tty *tp);
 #endif
 
+#include "nmea.h"
+#if NNMEA > 0
+int	nmeaopen(dev_t, struct tty *);
+int	nmeaclose(struct tty *, int);
+int	nmeainput(int, struct tty *);
+#endif
+
 struct	linesw linesw[] =
 {
 	{ ttyopen, ttylclose, ttread, ttwrite, nullioctl,
@@ -110,13 +107,9 @@ struct	linesw linesw[] =
 	  ttyerrinput, ttyerrstart, nullmodem },	/* 2- defunct */
 #endif
 
-#if NTB > 0
-	{ tbopen, tbclose, tbread, ttyerrio, tbtioctl,
-	  tbinput, ttstart, nullmodem },		/* 3- TABLDISC */
-#else
+	/* 3- TABLDISC (defunct) */
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
 	  ttyerrinput, ttyerrstart, nullmodem },
-#endif
 
 #if NSL > 0
 	{ slopen, slclose, ttyerrio, ttyerrio, sltioctl,
@@ -137,6 +130,14 @@ struct	linesw linesw[] =
 #if NSTRIP > 0
 	{ stripopen, stripclose, ttyerrio, ttyerrio, striptioctl,
 	  stripinput, stripstart, nullmodem },		/* 6- STRIPDISC */
+#else
+	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
+	  ttyerrinput, ttyerrstart, nullmodem },
+#endif
+
+#if NNMEA > 0
+	{ nmeaopen, nmeaclose, ttread, ttwrite, nullioctl,
+	  nmeainput, ttstart, ttymodem },		/* 7- NMEADISC */
 #else
 	{ ttynodisc, ttyerrclose, ttyerrio, ttyerrio, nullioctl,
 	  ttyerrinput, ttyerrstart, nullmodem },

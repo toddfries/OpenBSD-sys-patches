@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.65 2005/12/03 03:40:52 brad Exp $ */
+/*	$OpenBSD: ohci.c,v 1.73 2006/06/23 06:27:11 miod Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -49,19 +49,9 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/selinfo.h>
-#elif defined(__FreeBSD__)
-#include <sys/module.h>
-#include <sys/bus.h>
-#include <machine/bus_pio.h>
-#include <machine/bus_memio.h>
-#if defined(DIAGNOSTIC) && defined(__i386__) && defined(__FreeBSD__)
-#include <machine/cpu.h>
-#endif
-#endif
 #include <sys/proc.h>
 #include <sys/queue.h>
 
@@ -77,25 +67,15 @@
 #include <dev/usb/ohcireg.h>
 #include <dev/usb/ohcivar.h>
 
-#if defined(__FreeBSD__)
-#include <machine/clock.h>
-
-#define delay(d)                DELAY(d)
-#endif
-
-#if defined(__OpenBSD__)
 struct cfdriver ohci_cd = {
 	NULL, "ohci", DV_DULL
 };
-#endif
 
 #ifdef OHCI_DEBUG
 #define DPRINTF(x)	do { if (ohcidebug) logprintf x; } while (0)
 #define DPRINTFN(n,x)	do { if (ohcidebug>(n)) logprintf x; } while (0)
 int ohcidebug = 0;
-#ifndef __NetBSD__
 #define bitmask_snprintf(q,f,b,l) snprintf((b), (l), "%b", (q), (f))
-#endif
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
@@ -105,15 +85,6 @@ int ohcidebug = 0;
  * The OHCI controller is little endian, so on big endian machines
  * the data stored in memory needs to be swapped.
  */
-#if defined(__FreeBSD__)
-#if BYTE_ORDER == BIG_ENDIAN
-#define htole32(x) (bswap32(x))
-#define le32toh(x) (bswap32(x))
-#else
-#define htole32(x) (x)
-#define le32toh(x) (x)
-#endif
-#endif
 
 struct ohci_pipe;
 
@@ -339,7 +310,6 @@ Static struct usbd_pipe_methods ohci_device_isoc_methods = {
 	ohci_device_isoc_done,
 };
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 int
 ohci_activate(device_ptr_t self, enum devact act)
 {
@@ -348,7 +318,7 @@ ohci_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
+		break;
 
 	case DVACT_DEACTIVATE:
 		if (sc->sc_child != NULL)
@@ -372,9 +342,8 @@ ohci_detach(struct ohci_softc *sc, int flags)
 
 	usb_uncallout(sc->sc_tmo_rhsc, ohci_rhsc_enable, sc);
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-	shutdownhook_disestablish(sc->sc_shutdownhook);
-#endif
+	if (sc->sc_shutdownhook != NULL)
+		shutdownhook_disestablish(sc->sc_shutdownhook);
 
 	usb_delay_ms(&sc->sc_bus, 300); /* XXX let stray task complete */
 
@@ -382,7 +351,6 @@ ohci_detach(struct ohci_softc *sc, int flags)
 
 	return (rv);
 }
-#endif
 
 ohci_soft_ed_t *
 ohci_alloc_sed(ohci_softc_t *sc)
@@ -536,7 +504,7 @@ ohci_alloc_std_chain(struct ohci_pipe *opipe, ohci_softc_t *sc,
 		dataphys += curlen;
 		cur = next;
 	}
-	if ((flags & USBD_FORCE_SHORT_XFER) &&
+	if (!rd && (flags & USBD_FORCE_SHORT_XFER) &&
 	    alen % UGETW(opipe->pipe.endpoint->edesc->wMaxPacketSize) == 0) {
 		/* Force a 0 length transfer at the end. */
 
@@ -651,11 +619,7 @@ ohci_init(ohci_softc_t *sc)
 	u_int32_t s, ctl, rwc, ival, hcr, fm, per, rev, desca, descb;
 
 	DPRINTF(("ohci_init: start\n"));
-#if defined(__OpenBSD__)
 	printf(",");
-#else
-	printf("%s:", USBDEVNAME(sc->sc_bus.bdev));
-#endif
 	rev = OREAD4(sc, OHCI_REVISION);
 	printf(" version %d.%d%s\n", OHCI_REV_HI(rev), OHCI_REV_LO(rev),
 	       OHCI_REV_LEGACY(rev) ? ", legacy support" : "");
@@ -874,10 +838,8 @@ ohci_init(ohci_softc_t *sc)
 	sc->sc_bus.methods = &ohci_bus_methods;
 	sc->sc_bus.pipe_size = sizeof(struct ohci_pipe);
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 	sc->sc_control = sc->sc_intre = 0;
 	sc->sc_shutdownhook = shutdownhook_establish(ohci_shutdown, sc);
-#endif
 
 	usb_callout_init(sc->sc_tmo_rhsc);
 
@@ -904,9 +866,7 @@ ohci_init(ohci_softc_t *sc)
 usbd_status
 ohci_allocm(struct usbd_bus *bus, usb_dma_t *dma, u_int32_t size)
 {
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 	struct ohci_softc *sc = (struct ohci_softc *)bus;
-#endif
 
 	return (usb_allocmem(&sc->sc_bus, size, 0, dma));
 }
@@ -914,9 +874,7 @@ ohci_allocm(struct usbd_bus *bus, usb_dma_t *dma, u_int32_t size)
 void
 ohci_freem(struct usbd_bus *bus, usb_dma_t *dma)
 {
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 	struct ohci_softc *sc = (struct ohci_softc *)bus;
-#endif
 
 	usb_freemem(&sc->sc_bus, dma);
 }
@@ -1052,12 +1010,6 @@ ohci_power(int why, void *v)
 		sc->sc_control = sc->sc_intre = sc->sc_ival = 0;
 		sc->sc_bus.use_polling--;
 		break;
-#if defined(__NetBSD__)
-	case PWR_SOFTSUSPEND:
-	case PWR_SOFTSTANDBY:
-	case PWR_SOFTRESUME:
-		break;
-#endif
 	}
 	splx(s);
 }
@@ -1470,10 +1422,12 @@ ohci_softintr(void *v)
 					for (j = 0; j < iframes; i++, j++) {
 						len = le16toh(sitd->
 						    itd.itd_offset[j]);
-						len =
-						    (OHCI_ITD_PSW_GET_CC(len) ==
-						    OHCI_CC_NOT_ACCESSED) ? 0 :
-						    OHCI_ITD_PSW_LENGTH(len);
+						if ((OHCI_ITD_PSW_GET_CC(len) &
+						    OHCI_CC_NOT_ACCESSED_MASK)
+						    == OHCI_CC_NOT_ACCESSED)
+							len = 0;
+						else
+							len = OHCI_ITD_PSW_LENGTH(len);
 						xfer->frlengths[i] = len;
 						actlen += len;
 					}
@@ -2093,7 +2047,9 @@ ohci_open(usbd_pipe_handle pipe)
 			OHCI_ED_SET_EN(UE_GET_ADDR(ed->bEndpointAddress)) |
 			(dev->speed == USB_SPEED_LOW ? OHCI_ED_SPEED : 0) |
 			fmt | OHCI_ED_SET_MAXP(UGETW(ed->wMaxPacketSize)));
-		sed->ed.ed_headp = sed->ed.ed_tailp = htole32(tdphys);
+		sed->ed.ed_headp = htole32(tdphys |
+		    (pipe->endpoint->savedtoggle ? OHCI_TOGGLECARRY : 0));
+		sed->ed.ed_tailp = htole32(tdphys);
 
 		switch (xfertype) {
 		case UE_CONTROL:
@@ -2179,6 +2135,8 @@ ohci_close_pipe(usbd_pipe_handle pipe, ohci_soft_ed_t *head)
 	/* Make sure the host controller is not touching this ED */
 	usb_delay_ms(&sc->sc_bus, 1);
 	splx(s);
+	pipe->endpoint->savedtoggle =
+	    (le32toh(sed->ed.ed_headp) & OHCI_TOGGLECARRY) ? 1 : 0;
 	ohci_free_sed(sc, opipe->sed);
 }
 
@@ -2212,6 +2170,7 @@ ohci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 		usb_uncallout(xfer->timeout_handle, ohci_timeout, xfer);
 		usb_transfer_complete(xfer);
 		splx(s);
+		return;
 	}
 
 	if (xfer->device->bus->intr_context || !curproc)
@@ -3010,8 +2969,7 @@ ohci_device_intr_start(usbd_xfer_handle xfer)
 	ohci_softc_t *sc = (ohci_softc_t *)dev->bus;
 	ohci_soft_ed_t *sed = opipe->sed;
 	ohci_soft_td_t *data, *tail;
-	int len;
-	int s;
+	int s, len, isread, endpt;
 
 	if (sc->sc_dying)
 		return (USBD_IOERROR);
@@ -3026,6 +2984,8 @@ ohci_device_intr_start(usbd_xfer_handle xfer)
 #endif
 
 	len = xfer->length;
+	endpt = xfer->pipe->endpoint->edesc->bEndpointAddress;
+	isread = UE_GET_DIR(endpt) == UE_DIR_IN;
 
 	data = opipe->tail.td;
 	tail = ohci_alloc_std(sc);
@@ -3034,7 +2994,8 @@ ohci_device_intr_start(usbd_xfer_handle xfer)
 	tail->xfer = NULL;
 
 	data->td.td_flags = htole32(
-		OHCI_TD_IN | OHCI_TD_NOCC |
+		isread ? OHCI_TD_IN : OHCI_TD_OUT |
+		OHCI_TD_NOCC |
 		OHCI_TD_SET_DI(1) | OHCI_TD_TOGGLE_CARRY);
 	if (xfer->flags & USBD_SHORT_XFER_OK)
 		data->td.td_flags |= htole32(OHCI_TD_R);

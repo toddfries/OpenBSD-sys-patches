@@ -1,4 +1,4 @@
-/*	$OpenBSD: esm.c,v 1.40 2006/02/20 07:48:30 dlg Exp $ */
+/*	$OpenBSD: esm.c,v 1.42 2006/05/11 13:21:11 mickey Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -86,7 +86,7 @@ enum sensor_type esm_typemap[] = {
 };
 
 struct esm_sensor_map {
-	enum sensor_type	type;
+	enum esm_sensor_type	type;
 	long			arg;
 	const char		*name;
 };
@@ -804,7 +804,7 @@ esm_devmap(struct esm_softc *sc, struct esm_devmap *devmap)
 	}
 
 	printf("%s: %s%s%s %d.%d\n", DEVNAME(sc),
-	    name ? name : "", name ? " " : "", fname, 
+	    name ? name : "", name ? " " : "", fname,
 	    devmap->rev_major, devmap->rev_minor);
 
 	esm_make_sensors(sc, devmap, sensor_map, mapsize);

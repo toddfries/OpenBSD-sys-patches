@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemul_sun.c,v 1.13 2005/03/09 17:48:41 miod Exp $ */
+/* $OpenBSD: wsemul_sun.c,v 1.17 2006/08/17 06:27:04 miod Exp $ */
 /* $NetBSD: wsemul_sun.c,v 1.11 2000/01/05 11:19:36 drochner Exp $ */
 
 /*
@@ -38,7 +38,9 @@
  * Color support from NetBSD's rcons color code, and wsemul_vt100.
  */
 
-#include <sys/cdefs.h>
+#ifndef	SMALL_KERNEL
+#define	JUMP_SCROLL
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -109,7 +111,7 @@ u_int wsemul_sun_output_control(struct wsemul_sun_emuldata *, u_char);
 void wsemul_sun_control(struct wsemul_sun_emuldata *, u_char);
 int wsemul_sun_selectattribute(struct wsemul_sun_emuldata *, int, int, int,
     long *, long *);
-void wsemul_sun_scrollup(struct wsemul_sun_emuldata *);
+void wsemul_sun_scrollup(struct wsemul_sun_emuldata *, u_int);
 
 struct wsemul_sun_emuldata wsemul_sun_console_emuldata;
 
@@ -119,16 +121,6 @@ struct wsemul_sun_emuldata wsemul_sun_console_emuldata;
 #define	NORMALIZE(arg)		((arg) != 0 ? (arg) : 1)
 #define	COLS_LEFT		(edp->ncols - 1 - edp->ccol)
 #define	ROWS_LEFT		(edp->nrows - 1 - edp->crow)
-
-/*
- * wscons color codes
- * To compensate for Sun color choices on older framebuffers, these need to
- * be variables.
- */
-int	wscol_white = 0;	/* 0 */
-int	wscol_black = 7;	/* 255 */
-int	wskernel_bg = 7;	/* 0 */
-int	wskernel_fg = 0;	/* 255 */
 
 void
 wsemul_sun_init(edp, type, cookie, ccol, crow, defattr)
@@ -174,10 +166,10 @@ wsemul_sun_cnattach(type, cookie, ccol, crow, defattr)
 	wsemul_sun_init(edp, type, cookie, ccol, crow, defattr);
 
 #ifndef WS_KERNEL_FG
-#define WS_KERNEL_FG wskernel_bg
+#define WS_KERNEL_FG WSCOL_BLACK
 #endif
 #ifndef WS_KERNEL_BG
-#define WS_KERNEL_BG wskernel_fg
+#define WS_KERNEL_BG WSCOL_WHITE
 #endif
 #ifndef WS_KERNEL_COLATTR
 #define WS_KERNEL_COLATTR 0
@@ -301,7 +293,7 @@ wsemul_sun_output_lowchars(edp, c, kernel)
 		if (ROWS_LEFT > 0)
 			edp->crow++;
 		else
-			wsemul_sun_scrollup(edp);
+			wsemul_sun_scrollup(edp, edp->scrolldist);
 		break;
 	}
 }
@@ -321,7 +313,7 @@ wsemul_sun_output_normal(edp, c, kernel)
 		if (ROWS_LEFT > 0)
 			edp->crow++;
 		else
-			wsemul_sun_scrollup(edp);
+			wsemul_sun_scrollup(edp, edp->scrolldist);
 		edp->ccol = 0;
 	}
 }
@@ -479,14 +471,26 @@ wsemul_sun_control(edp, c)
 				flags |= WSATTR_REVERSE;
 				break;
 			/* ANSI foreground color */
-			case 30: case 31: case 32: case 33:
-			case 34: case 35: case 36: case 37:
+			case 30:
+				fgcol = WSCOL_BLACK;
+				break;
+			case 31: case 32: case 33:
+			case 34: case 35: case 36:
 				fgcol = ARG(n,edp->nargs) - 30;
 				break;
+			case 37:
+				fgcol = WSCOL_WHITE;
+				break;
 			/* ANSI background color */
-			case 40: case 41: case 42: case 43:
-			case 44: case 45: case 46: case 47:
+			case 40:
+				bgcol = WSCOL_BLACK;
+				break;
+			case 41: case 42: case 43:
+			case 44: case 45: case 46:
 				bgcol = ARG(n,edp->nargs) - 40;
+				break;
+			case 47:
+				bgcol = WSCOL_WHITE;
 				break;
 			}
 		}
@@ -575,6 +579,11 @@ wsemul_sun_output(cookie, data, count, kernel)
 {
 	struct wsemul_sun_emuldata *edp = cookie;
 	u_int newstate;
+#ifdef JUMP_SCROLL
+	const u_char *eot;
+	u_char curchar;
+	u_int cnt, pos, lines;
+#endif
 
 #ifdef DIAGNOSTIC
 	if (kernel && !edp->console)
@@ -583,7 +592,57 @@ wsemul_sun_output(cookie, data, count, kernel)
 
 	/* XXX */
 	(*edp->emulops->cursor)(edp->emulcookie, 0, edp->crow, edp->ccol);
+
 	for (; count > 0; data++, count--) {
+#ifdef JUMP_SCROLL
+		/*
+		 * If scrolling is not disabled and we are the bottom of
+		 * the screen, count newlines until an escape sequence
+		 * appears.
+		 */
+		if ((edp->state == SUN_EMUL_STATE_NORMAL || kernel) &&
+		    ROWS_LEFT == 0 && edp->scrolldist != 0) {
+			lines = 0;
+			pos = edp->ccol;
+			for (eot = data, cnt = count; cnt != 0; eot++, cnt--) {
+				curchar = *eot;
+				if (curchar == ASCII_FF ||
+				    curchar == ASCII_VT || curchar == ASCII_ESC)
+					break;
+
+				switch (curchar) {
+				case ASCII_BS:
+					if (pos > 0)
+						pos--;
+					break;
+				case ASCII_CR:
+					pos = 0;
+					break;
+				case ASCII_HT:
+					pos = (pos + 7) & ~7;
+					if (pos >= edp->ncols)
+						pos = edp->ncols - 1;
+					break;
+				default:
+					if (++pos >= edp->ncols) {
+						pos = 0;
+						curchar = ASCII_LF;
+					}
+					break;
+				}
+				if (curchar == ASCII_LF) {
+					if (++lines >= edp->nrows - 1)
+						break;
+				}
+			}
+
+			if (lines > 1) {
+				wsemul_sun_scrollup(edp, lines);
+				edp->crow--;
+			}
+		}
+#endif
+
 		if (*data < ' ') {
 			wsemul_sun_output_lowchars(edp, *data, kernel);
 			continue;
@@ -831,14 +890,15 @@ wsemul_sun_resetop(cookie, op)
 }
 
 void
-wsemul_sun_scrollup(edp)
+wsemul_sun_scrollup(edp, lines)
 	struct wsemul_sun_emuldata *edp;
+	u_int lines;
 {
 	/*
 	 * if we're in wrap-around mode, go to the first
 	 * line and clear it.
 	 */
-	if (edp->scrolldist == 0) {
+	if (lines == 0) {
 		edp->crow = 0;
 		(*edp->emulops->eraserows)(edp->emulcookie, 0, 1,
 		    edp->bkgdattr);
@@ -850,10 +910,10 @@ wsemul_sun_scrollup(edp)
 	 * (usually 34), clear the screen; otherwise, scroll by the
 	 * scrolling distance.
 	 */
-	if (edp->scrolldist < edp->nrows)
-		(*edp->emulops->copyrows)(edp->emulcookie, edp->scrolldist, 0,
-		    edp->nrows - edp->scrolldist);
+	if (lines < edp->nrows)
+		(*edp->emulops->copyrows)(edp->emulcookie, lines, 0,
+		    edp->nrows - lines);
 	(*edp->emulops->eraserows)(edp->emulcookie,
-	    edp->nrows - edp->scrolldist, edp->scrolldist, edp->bkgdattr);
-	edp->crow -= edp->scrolldist - 1;
+	    edp->nrows - lines, lines, edp->bkgdattr);
+	edp->crow -= lines - 1;
 }

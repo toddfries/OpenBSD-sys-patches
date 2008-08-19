@@ -1,4 +1,4 @@
-/*	$OpenBSD: asb100.c,v 1.5 2006/01/31 11:18:28 djm Exp $	*/
+/*	$OpenBSD: asb100.c,v 1.7 2006/04/10 00:57:23 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Damien Miller <djm@openbsd.org>
@@ -269,21 +269,21 @@ asbtm_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof(sc->sc_sensor[ASB100_SENSOR_FAN2].desc));
 
 	sc->sc_sensor[ASB100_SENSOR_TEMP0].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP0].desc, "External",
+	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP0].desc, "External Temp",
 	    sizeof(sc->sc_sensor[ASB100_SENSOR_TEMP0].desc));
 
 	sc->sc_sensor[ASB100_SENSOR_TEMP1].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP1].desc, "Internal",
+	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP1].desc, "Internal Temp",
 	    sizeof(sc->sc_sensor[ASB100_SENSOR_TEMP1].desc));
 
 	sc->sc_sensor[ASB100_SENSOR_TEMP2].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP2].desc, "Internal",
+	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP2].desc, "Internal Temp",
 	    sizeof(sc->sc_sensor[ASB100_SENSOR_TEMP2].desc));
 	if (sc->sc_satellite[1] == -1)
 		sc->sc_sensor[ASB100_SENSOR_TEMP2].flags |= SENSOR_FINVALID;
 
 	sc->sc_sensor[ASB100_SENSOR_TEMP3].type = SENSOR_TEMP;
-	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP3].desc, "External",
+	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP3].desc, "External Temp",
 	    sizeof(sc->sc_sensor[ASB100_SENSOR_TEMP3].desc));
 
 	if (sensor_task_register(sc, asbtm_refresh, 5)) {
@@ -400,8 +400,9 @@ asbtm_refresh(void *arg)
 		    sizeof sdata2, 0) == 0 && sdata2 != 0xffff) {
 			sc->sc_sensor[ASB100_SENSOR_TEMP1].value = 273150000 +
 			    500000 * (swap16(sdata2) / 128);
+			sc->sc_sensor[ASB100_SENSOR_TEMP2].flags &=
+			    ~SENSOR_FINVALID;
 		} else {
-			sc->sc_satellite[0] = -1;
 			sc->sc_sensor[ASB100_SENSOR_TEMP2].flags |=
 			    SENSOR_FINVALID;
 		}
@@ -414,8 +415,9 @@ asbtm_refresh(void *arg)
 		    sizeof sdata2, 0) == 0 && sdata2 != 0xffff) {
 			sc->sc_sensor[ASB100_SENSOR_TEMP2].value = 273150000 +
 			    500000 * (swap16(sdata2) / 128);
+			sc->sc_sensor[ASB100_SENSOR_TEMP2].flags &=
+			    ~SENSOR_FINVALID;
 		} else {
-			sc->sc_satellite[1] = -1;
 			sc->sc_sensor[ASB100_SENSOR_TEMP2].flags |=
 			    SENSOR_FINVALID;
 		}

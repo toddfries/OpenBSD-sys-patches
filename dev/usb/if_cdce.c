@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdce.c,v 1.14 2006/02/20 20:12:13 damien Exp $ */
+/*	$OpenBSD: if_cdce.c,v 1.19 2006/06/23 06:27:11 miod Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
@@ -57,7 +57,6 @@
 
 #include <net/bpf.h>
 #if NBPFILTER > 0
-#define BPF_MTAP(ifp, m) bpf_mtap((ifp)->if_bpf, (m))
 #endif
 
 #include <netinet/in.h>
@@ -90,6 +89,7 @@ Static void	 cdce_stop(struct cdce_softc *);
 static uint32_t	 cdce_crc32(const void *, size_t);
 
 Static const struct cdce_type cdce_devs[] = {
+    {{ USB_VENDOR_ACERLABS, USB_PRODUCT_ACERLABS_M5632 }, CDCE_NO_UNION },
     {{ USB_VENDOR_PROLIFIC, USB_PRODUCT_PROLIFIC_PL2501 }, CDCE_NO_UNION },
     {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_SL5500 }, CDCE_ZAURUS },
     {{ USB_VENDOR_SHARP, USB_PRODUCT_SHARP_A300 }, CDCE_ZAURUS | CDCE_NO_UNION },
@@ -300,7 +300,7 @@ cdce_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m_head);
+		bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 	ifp->if_flags |= IFF_OACTIVE;
@@ -438,6 +438,16 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				cdce_stop(sc);
 		}
 		error = 0;
+		break;
+
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+		error = (command == SIOCADDMULTI) ?
+		    ether_addmulti(ifr, &sc->cdce_arpcom) :
+		    ether_delmulti(ifr, &sc->cdce_arpcom);
+
+		if (error == ENETRESET)
+			error = 0;
 		break;
 
 	default:
@@ -628,7 +638,12 @@ cdce_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		if (status == USBD_STALLED)
 			usbd_clear_endpoint_stall_async(sc->cdce_bulkin_pipe);
 		DELAY(sc->cdce_rxeof_errors * 10000);
-		sc->cdce_rxeof_errors++;
+		if (sc->cdce_rxeof_errors++ > 10) {
+			printf("%s: too many errors, disabling\n",
+			    USBDEVNAME(sc->cdce_dev));
+			sc->cdce_dying = 1;
+			return;
+		}
 		goto done;
 	}
 
@@ -662,7 +677,7 @@ cdce_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	IF_INPUT(ifp, m);
@@ -753,7 +768,6 @@ cdce_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:

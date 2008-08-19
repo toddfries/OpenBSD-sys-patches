@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.32 2004/11/09 12:01:16 miod Exp $ */
+/* $OpenBSD: cpu.h,v 1.35 2006/05/13 16:05:50 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -46,12 +46,12 @@
 #ifdef _KERNEL
 
 /* board dependent pointers */
-extern void (*md_interrupt_func_ptr)(u_int, struct trapframe *);
+extern void	(*md_interrupt_func_ptr)(u_int, struct trapframe *);
 #define	md_interrupt_func	(*md_interrupt_func_ptr)
-extern u_int (*md_getipl)(void);
-extern u_int (*md_setipl)(u_int);
-extern u_int (*md_raiseipl)(u_int);
-extern void (*md_init_clocks)(void);
+extern u_int	(*md_getipl)(void);
+extern u_int	(*md_setipl)(u_int);
+extern u_int	(*md_raiseipl)(u_int);
+extern void	(*md_init_clocks)(void);
 
 struct intrhand {
 	SLIST_ENTRY(intrhand) ih_link;
@@ -63,6 +63,7 @@ struct intrhand {
 };
 
 int	intr_establish(int, struct intrhand *, const char *);
+int	intr_findvec(int, int, int);
 
 /*
  * There are 256 possible vectors on a mvme88k platform (including
@@ -73,6 +74,9 @@ int	intr_establish(int, struct intrhand *, const char *);
 #define	NVMEINTR	256
 typedef SLIST_HEAD(, intrhand) intrhand_t;
 extern intrhand_t intr_handlers[NVMEINTR];
+
+void	doboot(void);
+void	nmihand(void *);
 
 #endif /* _KERNEL */
 

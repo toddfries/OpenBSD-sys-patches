@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.72 2006/01/05 05:05:06 jsg Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.76 2006/07/14 01:58:58 pedro Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -107,16 +107,13 @@ const char *mclpool_warnmsg =
     "WARNING: mclpool limit reached; increase kern.maxclusters";
 
 /*
- * Initialize the mbuf allcator.
+ * Initialize the mbuf allocator.
  */
 void
 mbinit(void)
 {
 	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
 	pool_init(&mclpool, MCLBYTES, 0, 0, 0, "mclpl", NULL);
-
-	pool_set_drain_hook(&mbpool, m_reclaim, NULL);
-	pool_set_drain_hook(&mclpool, m_reclaim, NULL);
 
 	nmbclust_update();
 
@@ -146,7 +143,7 @@ m_reclaim(void *arg, int flags)
 {
 	struct domain *dp;
 	struct protosw *pr;
-	int s = splimp();
+	int s = splvm();
 
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
@@ -433,7 +430,9 @@ out:	if (((m = m0)->m_flags & M_PKTHDR) && (m->m_pkthdr.len < totlen))
 
 /*
  * Concatenate mbuf chain n to m.
- * Both chains must be of the same type (e.g. MT_DATA).
+ * n might be copied into m (when n->m_len is small), therefore data portion of
+ * n could be copied into an mbuf of different mbuf type.
+ * Therefore both chains should be of the same type (e.g. MT_DATA).
  * Any m_pkthdr is not updated.
  */
 void
@@ -442,8 +441,7 @@ m_cat(struct mbuf *m, struct mbuf *n)
 	while (m->m_next)
 		m = m->m_next;
 	while (n) {
-		if (m->m_flags & M_EXT ||
-		    m->m_data + m->m_len + n->m_len >= &m->m_dat[MLEN]) {
+		if (M_READONLY(m) || n->m_len > M_TRAILINGSPACE(m)) {
 			/* just join the two chains */
 			m->m_next = n;
 			return;

@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.8 2005/11/23 11:22:10 mickey Exp $ */
+/*      $OpenBSD: pmap.h,v 1.10 2006/06/20 06:26:57 miod Exp $ */
 
 /*
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -37,6 +37,8 @@
 
 #ifndef	_MIPS_PMAP_H_
 #define	_MIPS_PMAP_H_
+
+#ifdef	_KERNEL
 
 /*
  * The user address space is 2Gb (0x0 - 0x80000000).
@@ -84,7 +86,6 @@ typedef struct pmap {
 	struct segtab		*pm_segtab;	/* pointers to pages of PTEs */
 } *pmap_t;
 
-#ifdef	_KERNEL
 
 /* flags for pv_entry */
 #define	PV_UNCACHED	0x0001		/* Page is mapped unchached */
@@ -104,7 +105,7 @@ extern	struct pmap kernel_pmap_store;
 
 #define PMAP_PREFER(pa, va)		pmap_prefer(pa, va)
 
-#define	pmap_update(x)			/* nothing */
+#define	pmap_update(x)			do { /* nothing */ } while (0)
 
 void	pmap_bootstrap(void);
 int	pmap_is_page_ro( pmap_t, vaddr_t, int);
@@ -113,8 +114,9 @@ void	pmap_prefer(vaddr_t, vaddr_t *);
 void	pmap_set_modify(vm_page_t);
 void	pmap_page_cache(vm_page_t, int);
 
-#define pmap_proc_iflush(p,va,len)	/* nothing yet (handled in trap now) */
-#define pmap_unuse_final(p)		/* nothing yet */
+#define	pmap_collect(x)			do { /* nothing */ } while (0)
+#define pmap_proc_iflush(p,va,len)	do { /* nothing yet (handled in trap now) */ } while (0)
+#define pmap_unuse_final(p)		do { /* nothing yet */ } while (0)
 
 #endif	/* _KERNEL */
 

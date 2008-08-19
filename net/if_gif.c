@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.33 2006/01/04 06:04:42 canacar Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.36 2006/03/25 22:41:47 djm Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -166,7 +166,7 @@ gif_start(ifp)
 #endif /* NBRIDGE */
 
 	for (;;) {
-	        s = splimp();
+	        s = splnet();
 		IF_DEQUEUE(&ifp->if_snd, m);
 		splx(s);
 
@@ -230,7 +230,7 @@ gif_output(ifp, m, dst, rt)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m);
+		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m, BPF_DIRECTION_OUT);
 #endif
 	ifp->if_opackets++;	
 	ifp->if_obytes += m->m_pkthdr.len;
@@ -548,9 +548,12 @@ gif_ioctl(ifp, cmd, data)
 		/* if_ioctl() takes care of it */
 		break;
 
-        case SIOCSIFMTU:
-                ifp->if_mtu = ((struct ifreq *)data)->ifr_mtu;
-                break;
+	case SIOCSIFMTU:
+		if (ifr->ifr_mtu < GIF_MTU_MIN || ifr->ifr_mtu > GIF_MTU_MAX)
+			error = EINVAL;
+		else
+			ifp->if_mtu = ifr->ifr_mtu;
+		break;
 
 	default:
 		error = EINVAL;

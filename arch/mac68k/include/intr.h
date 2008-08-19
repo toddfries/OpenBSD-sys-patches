@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.13 2006/01/13 19:36:44 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.15 2006/06/11 20:46:50 miod Exp $	*/
 /*	$NetBSD: intr.h,v 1.9 1998/08/12 06:58:42 scottr Exp $	*/
 
 /*
@@ -31,49 +31,18 @@
 #ifndef _MAC68K_INTR_H_
 #define _MAC68K_INTR_H_
 
+#include <machine/psl.h>
+
 #ifdef _KERNEL
-/*
- * spl functions; all but spl0 are done in-line
- */
-
-#define _spl(s)								\
-({									\
-        register int _spl_r;						\
-									\
-        __asm __volatile ("clrl %0; movew sr,%0; movew %1,sr" :		\
-                "=&d" (_spl_r) : "di" (s));				\
-        _spl_r;								\
-})
-
-#define _splraise(s)							\
-({									\
-	int _spl_r;							\
-									\
-	__asm __volatile ("						\
-		clrl	d0					;	\
-		movw	sr,d0					;	\
-		movl	d0,%0					;	\
-		andw	#0x700,d0				;	\
-		movw	%1,d1					;	\
-		andw	#0x700,d1				;	\
-		cmpw	d0,d1					;	\
-		jle	1f					;	\
-		movw	%1,sr					;	\
-	    1:"							:	\
-		    "=&d" (_spl_r)				:	\
-		    "di" (s)					:	\
-		    "d0", "d1");					\
-	_spl_r;								\
-})
 
 /*
  * splnet must block hardware network interrupts
- * splimp must be > spltty
+ * splvm must be > spltty
  */
 extern u_short	mac68k_ttyipl;
 extern u_short	mac68k_bioipl;
 extern u_short	mac68k_netipl;
-extern u_short	mac68k_impipl;
+extern u_short	mac68k_vmipl;
 extern u_short	mac68k_audioipl;
 extern u_short	mac68k_clockipl;
 extern u_short	mac68k_statclockipl;
@@ -111,8 +80,7 @@ extern u_short	mac68k_statclockipl;
 #define	spltty()		_splraise(mac68k_ttyipl)
 #define	splbio()		_splraise(mac68k_bioipl)
 #define	splnet()		_splraise(mac68k_netipl)
-#define	splimp()		_splraise(mac68k_impipl)
-#define	splvm()			_splraise(mac68k_impipl)
+#define	splvm()			_splraise(mac68k_vmipl)
 #define	splaudio()		_splraise(mac68k_audioipl)
 #define	splclock()		_splraise(mac68k_clockipl)
 #define	splstatclock()		_splraise(mac68k_statclockipl)
@@ -137,9 +105,9 @@ extern volatile u_int8_t ssir;
 #define SIR_ADB		0x08
 
 #define	siron(mask)	\
-	__asm __volatile ( "orb %0,_ssir" : : "i" (mask))
+	__asm __volatile ( "orb %1,%0" : "=m" (ssir) : "i" (mask))
 #define	siroff(mask)	\
-	__asm __volatile ( "andb %0,_ssir" : : "ir" (~(mask)));
+	__asm __volatile ( "andb %1,%0" : "=m" (ssir) : "ir" (~(mask)))
 
 #define	setsoftnet()	siron(SIR_NET)
 #define	setsoftclock()	siron(SIR_CLOCK)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.15 2004/12/30 21:26:17 miod Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.17 2006/07/09 19:41:23 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.16 1998/08/20 08:33:48 kleink Exp $	*/
 
 /*
@@ -48,11 +48,14 @@
 
 #include <m68k/vmparam.h>
 
+#undef	VM_MAX_KERNEL_ADDRESS
+#define	VM_MAX_KERNEL_ADDRESS	(0xc0000000 - PAGE_SIZE)
+
 /*
  * Constants which control the way the VM system deals with memory segments.
  * The hp300 only has one physical memory segment.
  */
 #define	VM_PHYSSEG_MAX		1
-#define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
+#define	VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
 
 #endif /* _HP300_VMPARAM_H_ */

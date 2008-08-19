@@ -1,4 +1,4 @@
-/*	$OpenBSD: zx.c,v 1.6 2005/03/13 23:05:23 miod Exp $	*/
+/*	$OpenBSD: zx.c,v 1.8 2006/06/02 20:00:56 miod Exp $	*/
 /*	$NetBSD: zx.c,v 1.5 2002/10/02 16:52:46 thorpej Exp $	*/
 
 /*
@@ -113,7 +113,6 @@ struct zx_cmap {
 
 struct zx_softc {
 	struct	sunfb	sc_sunfb;
-	struct	sbusdev	sc_sd;
 
 	bus_space_tag_t	sc_bustag;
 	bus_addr_t	sc_paddr;
@@ -316,8 +315,6 @@ zx_attach(struct device *parent, struct device *self, void *args)
 
 	/* enable video */
 	zx_burner(sc, 1, 0);
-
-	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
 	fbwscons_attach(&sc->sc_sunfb, &zx_accessops, isconsole);
 }
@@ -753,41 +750,55 @@ zx_putchar(void *cookie, int row, int col, u_int uc, long attr)
 	int fs, i, fg, bg, ul;
 
 	ri = (struct rasops_info *)cookie;
-
-	if (uc == ' ') {
-		zx_fillrect(ri, col, row, 1, 1, attr, ZX_STD_ROP);
-		return;
-	}
-
-	sc = ri->ri_hw;
-	zc = sc->sc_zc;
-	zd = sc->sc_zd_ss0;
 	font = ri->ri_font;
+	rasops_unpack_attr(attr, &fg, &bg, &ul);
 
 	dp = (volatile u_int32_t *)ri->ri_bits +
 	    ZX_COORDS(col * font->fontwidth, row * font->fontheight);
-	fb = (u_int8_t *)font->data + (uc - font->firstchar) *
-	    ri->ri_fontscale;
-	fs = font->stride;
-	rasops_unpack_attr(attr, &fg, &bg, &ul);
 
-	while ((zc->zc_csr & ZX_CSR_BLT_BUSY) != 0)
-		;
+	if (uc == ' ') {
+		zx_fillrect(ri, col, row, 1, 1, attr, ZX_STD_ROP);
+		if (ul == 0)
+			return;
 
-	SETREG(zd->zd_rop, ZX_STD_ROP);
-	SETREG(zd->zd_fg, fg << 24);
-	SETREG(zd->zd_bg, bg << 24);
-	SETREG(zc->zc_fontmsk, 0xffffffff << (32 - font->fontwidth));
+		dp += font->fontheight << ZX_WWIDTH;
 
-	if (font->fontwidth <= 8) {
-		for (i = font->fontheight; i != 0; i--, dp += 1 << ZX_WWIDTH) {
-			*dp = *fb << 24;
-			fb += fs;
-		}
+		while ((zc->zc_csr & ZX_CSR_BLT_BUSY) != 0)
+			;
+
+		SETREG(zd->zd_rop, ZX_STD_ROP);
+		SETREG(zd->zd_fg, fg << 24);
+		SETREG(zd->zd_bg, bg << 24);
+		SETREG(zc->zc_fontmsk, 0xffffffff << (32 - font->fontwidth));
 	} else {
-		for (i = font->fontheight; i != 0; i--, dp += 1 << ZX_WWIDTH) {
-			*dp = *((u_int16_t *)fb) << 16;
-			fb += fs;
+		sc = ri->ri_hw;
+		zc = sc->sc_zc;
+		zd = sc->sc_zd_ss0;
+
+		fb = (u_int8_t *)font->data + (uc - font->firstchar) *
+		    ri->ri_fontscale;
+		fs = font->stride;
+
+		while ((zc->zc_csr & ZX_CSR_BLT_BUSY) != 0)
+			;
+
+		SETREG(zd->zd_rop, ZX_STD_ROP);
+		SETREG(zd->zd_fg, fg << 24);
+		SETREG(zd->zd_bg, bg << 24);
+		SETREG(zc->zc_fontmsk, 0xffffffff << (32 - font->fontwidth));
+
+		if (font->fontwidth <= 8) {
+			for (i = font->fontheight; i != 0;
+			    i--, dp += 1 << ZX_WWIDTH) {
+				*dp = *fb << 24;
+				fb += fs;
+			}
+		} else {
+			for (i = font->fontheight; i != 0;
+			    i--, dp += 1 << ZX_WWIDTH) {
+				*dp = *((u_int16_t *)fb) << 16;
+				fb += fs;
+			}
 		}
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.51 2005/12/13 10:33:14 jsg Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.54 2006/04/15 20:02:19 miod Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -138,6 +138,9 @@ dofileread(struct proc *p, int fd, struct file *fp, void *buf, size_t nbyte,
 		    error == EINTR || error == EWOULDBLOCK))
 			error = 0;
 	cnt -= auio.uio_resid;
+
+	fp->f_rxfer++;
+	fp->f_rbytes += cnt;
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_GENIO) && error == 0)
 		ktrgenio(p, fd, UIO_READ, &ktriov, cnt, error);
@@ -243,6 +246,9 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 		    error == EINTR || error == EWOULDBLOCK))
 			error = 0;
 	cnt -= auio.uio_resid;
+
+	fp->f_rxfer++;
+	fp->f_rbytes += cnt;
 #ifdef KTRACE
 	if (ktriov != NULL) {
 		if (error == 0) 
@@ -334,6 +340,9 @@ dofilewrite(struct proc *p, int fd, struct file *fp, const void *buf,
 			psignal(p, SIGPIPE);
 	}
 	cnt -= auio.uio_resid;
+
+	fp->f_wxfer++;
+	fp->f_wbytes += cnt;
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_GENIO) && error == 0)
 		ktrgenio(p, fd, UIO_WRITE, &ktriov, cnt, error);
@@ -442,11 +451,13 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 			psignal(p, SIGPIPE);
 	}
 	cnt -= auio.uio_resid;
+
+	fp->f_wxfer++;
+	fp->f_wbytes += cnt;
 #ifdef KTRACE
 	if (ktriov != NULL) {
 		if (error == 0) 
-			ktrgenio(p, fd, UIO_WRITE, ktriov, cnt,
-			    error);
+			ktrgenio(p, fd, UIO_WRITE, ktriov, cnt, error);
 		free(ktriov, M_TEMP);
 	}
 #endif
@@ -583,14 +594,14 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 
 	default:
 		error = (*fp->f_ops->fo_ioctl)(fp, com, data, p);
-		/*
-		 * Copy any data to user, size was
-		 * already set and checked above.
-		 */
-		if (error == 0 && (com&IOC_OUT) && size)
-			error = copyout(data, SCARG(uap, data), (u_int)size);
 		break;
 	}
+	/*
+	 * Copy any data to user, size was
+	 * already set and checked above.
+	 */
+	if (error == 0 && (com&IOC_OUT) && size)
+		error = copyout(data, SCARG(uap, data), (u_int)size);
 out:
 	FRELE(fp);
 	if (memp)
@@ -928,7 +939,9 @@ done:
 	 */
 	switch (error) {
 	case ERESTART:
-		error = EINTR;
+		error = copyout(pl, SCARG(uap, fds), sz);
+		if (error == 0)
+			error = EINTR;
 		break;
 	case EWOULDBLOCK:
 	case 0:

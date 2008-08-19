@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.14 2005/11/12 23:11:37 miod Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.17 2006/07/09 19:39:53 miod Exp $	*/
 
 /* 
  * Copyright (c) 1995 Theo de Raadt
@@ -74,7 +74,6 @@
  * PMAP_MD_RELOC3()	general purpose kernel virtual addresses relocation
  * PMAP_MD_MAPIOSPACE()	setup machine-specific internal iospace components
  * PMAP_MD_MEMSIZE()	compute avail_end
- * PMAP_MD_RWLOW	number of pages to keep writeable, starting at address 0
  */
 
 extern char *etext;
@@ -87,9 +86,6 @@ extern int physmem;
 extern paddr_t avail_start, avail_end;
 extern vaddr_t virtual_avail, virtual_end;
 extern vsize_t mem_size;
-#ifdef M68K_MMU_HP
-extern int pmap_aliasmask;
-#endif
 
 void  pmap_bootstrap(paddr_t, paddr_t);
 
@@ -197,6 +193,7 @@ pmap_bootstrap(nextpa, firstpa)
 
 	nptpages += (RELOC(physmem, int) * 15 * sizeof(struct vm_anon)) / 16;
 
+#if !defined(__HAVE_PMAP_DIRECT)
 	{
 		extern int uvm_km_pages_lowat;
 
@@ -207,6 +204,7 @@ pmap_bootstrap(nextpa, firstpa)
 		}
 	}
 	nptpages += ptoa(num);
+#endif
 
 	nptpages = (atop(round_page(nptpages)) + NPTEPG - 1) / NPTEPG;
 
@@ -399,15 +397,8 @@ pmap_bootstrap(nextpa, firstpa)
 #else
 	protopte = firstpa | PG_RO | PG_V | PG_U;
 #endif
-#ifdef	PMAP_MD_RWLOW
-	for (num = PMAP_MD_RWLOW; num != 0; num--) {
-		*pte++ = (protopte & ~PG_RO) | PG_RW;
-		protopte += PAGE_SIZE;
-	}
-#else
 	*pte++ = PG_NV;		/* make *NULL fail in the kernel */
 	protopte += PAGE_SIZE;
-#endif
 	while (pte < epte) {
 		*pte++ = protopte;
 		protopte += PAGE_SIZE;
@@ -506,18 +497,6 @@ pmap_bootstrap(nextpa, firstpa)
 	RELOC(virtual_avail, vaddr_t) =
 	    VM_MIN_KERNEL_ADDRESS + (nextpa - firstpa);
 	RELOC(virtual_end, vaddr_t) = VM_MAX_KERNEL_ADDRESS;
-
-#ifdef M68K_MMU_HP
-	/*
-	 * Determine VA aliasing distance if any
-	 */
-	if (RELOC(ectype, int) == EC_VIRT) {
-		if (RELOC(machineid, int) == HP_320)
-			RELOC(pmap_aliasmask, int) = 0x3fff;	/* 16k */
-		else if (RELOC(machineid, int) == HP_350)
-			RELOC(pmap_aliasmask, int) = 0x7fff;	/* 32k */
-	}
-#endif
 
 	/*
 	 * Kernel page/segment table allocated in locore,

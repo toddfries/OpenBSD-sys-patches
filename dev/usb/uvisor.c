@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvisor.c,v 1.22 2005/11/28 20:53:22 deraadt Exp $	*/
+/*	$OpenBSD: uvisor.c,v 1.27 2006/06/23 06:27:12 miod Exp $	*/
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*
@@ -136,6 +136,10 @@ struct uvisor_softc {
 	USBBASEDEVICE		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;	/* device */
 	usbd_interface_handle	sc_iface;	/* interface */
+/* 
+ * added sc_vendor for later interrogation in failed initialisations
+ */
+	int			sc_vendor;	/* USB device vendor */
 
 	device_ptr_t		sc_subdevs[UVISOR_MAX_CONN];
 	int			sc_numcon;
@@ -165,11 +169,14 @@ struct ucom_methods uvisor_methods = {
 
 struct uvisor_type {
 	struct usb_devno	uv_dev;
-	u_int16_t		uv_flags;
+	u_int16_t		uv_flags;	
 #define PALM4	0x0001
 #define VISOR	0x0002
+#define NOFRE	0x0004
+#define CLIE4	(VISOR|NOFRE)
 };
 static const struct uvisor_type uvisor_devs[] = {
+	{{ USB_VENDOR_ACEECA, USB_PRODUCT_ACEECA_MEZ1000 }, PALM4 },
 	{{ USB_VENDOR_HANDSPRING, USB_PRODUCT_HANDSPRING_VISOR }, VISOR },
 	{{ USB_VENDOR_HANDSPRING, USB_PRODUCT_HANDSPRING_TREO }, PALM4 },
 	{{ USB_VENDOR_HANDSPRING, USB_PRODUCT_HANDSPRING_TREO600 }, VISOR },
@@ -248,9 +255,10 @@ USB_ATTACH(uvisor)
 	usbd_devinfo_free(devinfop);
 
 	sc->sc_flags = uvisor_lookup(uaa->vendor, uaa->product)->uv_flags;
-
+	sc->sc_vendor = uaa->vendor;
+	
 	if ((sc->sc_flags & (VISOR | PALM4)) == 0) {
-		printf("%s: init failed, device type is neither visor nor palm\n", 
+		printf("%s: device is neither visor nor palm\n", 
 		    USBDEVNAME(sc->sc_dev));
 		goto bad;
 	}
@@ -375,7 +383,6 @@ uvisor_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -419,6 +426,28 @@ uvisor_init(struct uvisor_softc *sc, struct uvisor_connection_info *ci,
 	int actlen;
 	uWord avail;
 
+	if (sc->sc_flags & PALM4) {
+		DPRINTF(("uvisor_init: getting Palm connection info\n"));
+		req.bmRequestType = UT_READ_VENDOR_ENDPOINT;
+		req.bRequest = UVISOR_GET_PALM_INFORMATION;
+		USETW(req.wValue, 0);
+		USETW(req.wIndex, 0);
+		USETW(req.wLength, UVISOR_GET_PALM_INFORMATION_LEN);
+		err = usbd_do_request_flags(sc->sc_udev, &req, cpi,
+		    USBD_SHORT_XFER_OK, &actlen, USBD_DEFAULT_TIMEOUT);
+		if (err == USBD_STALLED && sc->sc_vendor == USB_VENDOR_SONY) {
+			/* some sony clie devices stall on palm4 requests,
+			 * switch them over to using visor. dont do free space
+			 * checks on them since they dont like them either.
+			 */
+			DPRINTF(("switching role for CLIE probe\n"));
+			sc->sc_flags = CLIE4;
+			err = 0;
+		}
+		if (err)
+			return (err);
+	}
+	
 	if (sc->sc_flags & VISOR) {
 		DPRINTF(("uvisor_init: getting Visor connection info\n"));
 		req.bmRequestType = UT_READ_VENDOR_ENDPOINT;
@@ -431,20 +460,10 @@ uvisor_init(struct uvisor_softc *sc, struct uvisor_connection_info *ci,
 		if (err)
 			return (err);
 	}
-
-	if (sc->sc_flags & PALM4) {
-		DPRINTF(("uvisor_init: getting Palm connection info\n"));
-		req.bmRequestType = UT_READ_VENDOR_ENDPOINT;
-		req.bRequest = UVISOR_GET_PALM_INFORMATION;
-		USETW(req.wValue, 0);
-		USETW(req.wIndex, 0);
-		USETW(req.wLength, UVISOR_GET_PALM_INFORMATION_LEN);
-		err = usbd_do_request_flags(sc->sc_udev, &req, cpi,
-		    USBD_SHORT_XFER_OK, &actlen, USBD_DEFAULT_TIMEOUT);
-		if (err)
-			return (err);
-	}
-
+	
+	if (sc->sc_flags & NOFRE)
+		return (err);
+	
 	DPRINTF(("uvisor_init: getting available bytes\n"));
 	req.bmRequestType = UT_READ_VENDOR_ENDPOINT;
 	req.bRequest = UVISOR_REQUEST_BYTES_AVAILABLE;
@@ -455,7 +474,6 @@ uvisor_init(struct uvisor_softc *sc, struct uvisor_connection_info *ci,
 	if (err)
 		return (err);
 	DPRINTF(("uvisor_init: avail=%d\n", UGETW(avail)));
-
 	DPRINTF(("uvisor_init: done\n"));
 	return (err);
 }

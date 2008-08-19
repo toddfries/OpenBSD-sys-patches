@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.43 2006/01/21 12:20:53 miod Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.49 2006/05/28 16:43:50 mk Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -428,6 +428,7 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 		for (dev->dv_unit = cf->cf_starunit1;
 		    dev->dv_unit < cf->cf_unit; dev->dv_unit++)
 			if (cd->cd_ndevs == 0 ||
+			    dev->dv_unit >= cd->cd_ndevs ||
 			    cd->cd_devs[dev->dv_unit] == NULL)
 				break;
 	} else
@@ -488,13 +489,15 @@ config_detach(struct device *dev, int flags)
 	struct cfdata *cf;
 	struct cfattach *ca;
 	struct cfdriver *cd;
+	int rv = 0, i;
 #ifdef DIAGNOSTIC
 	struct device *d;
 #endif
-	int rv = 0, i;
 #if NHOTPLUG > 0
 	char devname[16];
+#endif
 
+#if NHOTPLUG > 0
 	strlcpy(devname, dev->dv_xname, sizeof(devname));
 #endif
 
@@ -592,6 +595,7 @@ config_detach(struct device *dev, int flags)
 		free(cd->cd_devs, M_DEVBUF);
 		cd->cd_devs = NULL;
 		cd->cd_ndevs = 0;
+		cf->cf_unit = 0;
 	}
 
 #if NHOTPLUG > 0
@@ -731,14 +735,17 @@ config_detach_children(struct device *parent, int flags)
 	 * we are about to detach, so it would disappear.
 	 * Just play it safe and restart from the parent.
 	 */
-	for (prev_dev = NULL, dev = TAILQ_FIRST(&alldevs);
+	for (prev_dev = NULL, dev = TAILQ_LAST(&alldevs, devicelist);
 	    dev != NULL; dev = next_dev) {
 		if (dev->dv_parent == parent) {
 			if ((rv = config_detach(dev, flags)) != 0)
 				return (rv);
-			next_dev = prev_dev ? prev_dev : TAILQ_FIRST(&alldevs);
-		} else
-			next_dev = TAILQ_NEXT(prev_dev = dev, dv_list);
+			next_dev = prev_dev ? prev_dev : TAILQ_LAST(&alldevs,
+			    devicelist);
+		} else {
+			prev_dev = dev;
+			next_dev = TAILQ_PREV(dev, devicelist, dv_list);
+		}
 	}
 
 	return (0);

@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.55 2006/01/09 21:29:38 jsg Exp $
+#	$OpenBSD: RAMDISK,v 1.57 2006/07/11 21:44:01 mickey Exp $
 #
 # Diskless kernel config
 #
@@ -219,6 +219,8 @@ gsckbd*	at gsckbc?		# PS/2 keyboard
 #ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
 scsibus* at ahc?
+mpi*	at pci?			# LSI Logic Fusion MPT Message Passing Interface
+scsibus* at mpi?
 #option	BHADEBUG
 #bha*	at eisa?
 #bha*	at pci?
@@ -253,7 +255,7 @@ ne*	at pcmcia?
 #atw*	at pci?			# ADMtek ADM8211 (802.11)
 #atw*	at cardbus?
 #an*	at pci?			# Cisco/Aironet 802.11DS
-#an*	at pcmcia?
+an*	at pcmcia?
 #wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?
 

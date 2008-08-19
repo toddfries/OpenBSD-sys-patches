@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.45 2006/01/29 03:22:52 brad Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.54 2006/07/09 22:46:38 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003
@@ -73,12 +73,6 @@
  * with bits and pieces from the aue and url drivers.
  */
 
-#if defined(__NetBSD__)
-#include "opt_inet.h"
-#include "opt_ns.h"
-#include "rnd.h"
-#endif
-
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -87,40 +81,21 @@
 #include <sys/lock.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
-#if defined(__OpenBSD__)
 #include <sys/proc.h>
-#endif
 #include <sys/socket.h>
 
 #include <sys/device.h>
-#if NRND > 0
-#include <sys/rnd.h>
-#endif
 
 #include <machine/bus.h>
 
 #include <net/if.h>
-#if defined(__NetBSD__)
-#include <net/if_arp.h>
-#endif
 #include <net/if_dl.h>
 #include <net/if_media.h>
-
-#define BPF_MTAP(ifp, m) bpf_mtap((ifp)->if_bpf, (m))
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
 
-#if defined(__NetBSD__)
-#include <net/if_ether.h>
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_inarp.h>
-#endif
-#endif /* defined(__NetBSD__) */
-
-#if defined(__OpenBSD__)
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -128,7 +103,6 @@
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
-#endif /* defined(__OpenBSD__) */
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -335,7 +309,7 @@ axe_miibus_statchg(device_ptr_t dev)
 		val = AXE_MEDIA_FULL_DUPLEX;
 	else
 		val = 0;
-	
+
 	if (sc->axe_flags & AX178 || sc->axe_flags & AX772) {
 		val |= (AXE_178_MEDIA_RX_EN | AXE_178_MEDIA_MAGIC);
 
@@ -344,7 +318,7 @@ axe_miibus_statchg(device_ptr_t dev)
 			val |= AXE_178_MEDIA_GMII | AXE_178_MEDIA_ENCK;
 			break;
 		case IFM_100_TX:
-			val |=  AXE_178_MEDIA_100TX;
+			val |= AXE_178_MEDIA_100TX;
 			break;
 		case IFM_10_T:
 			/* doesn't need to be handled */
@@ -366,18 +340,18 @@ axe_miibus_statchg(device_ptr_t dev)
 Static int
 axe_ifmedia_upd(struct ifnet *ifp)
 {
-        struct axe_softc        *sc = ifp->if_softc;
-        struct mii_data         *mii = GET_MII(sc);
+	struct axe_softc	*sc = ifp->if_softc;
+	struct mii_data		*mii = GET_MII(sc);
 
-        sc->axe_link = 0;
-        if (mii->mii_instance) {
-                struct mii_softc        *miisc;
-                LIST_FOREACH(miisc, &mii->mii_phys, mii_list)
-                         mii_phy_reset(miisc);
-        }
-        mii_mediachg(mii);
+	sc->axe_link = 0;
+	if (mii->mii_instance) {
+		struct mii_softc	*miisc;
+		LIST_FOREACH(miisc, &mii->mii_phys, mii_list)
+			mii_phy_reset(miisc);
+	}
+	mii_mediachg(mii);
 
-        return (0);
+	return (0);
 }
 
 /*
@@ -386,12 +360,12 @@ axe_ifmedia_upd(struct ifnet *ifp)
 Static void
 axe_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
-        struct axe_softc        *sc = ifp->if_softc;
-        struct mii_data         *mii = GET_MII(sc);
+	struct axe_softc	*sc = ifp->if_softc;
+	struct mii_data		*mii = GET_MII(sc);
 
-        mii_pollstat(mii);
-        ifmr->ifm_active = mii->mii_media_active;
-        ifmr->ifm_status = mii->mii_media_status;
+	mii_pollstat(mii);
+	ifmr->ifm_active = mii->mii_media_active;
+	ifmr->ifm_status = mii->mii_media_status;
 }
 
 Static void
@@ -537,11 +511,10 @@ USB_MATCH(axe)
 {
 	USB_MATCH_START(axe, uaa);
 
-	if (!uaa->iface) {
+	if (!uaa->iface)
 		return(UMATCH_NONE);
-	}
 
-	return (axe_lookup(uaa->vendor, uaa->product) != NULL ? 
+	return (axe_lookup(uaa->vendor, uaa->product) != NULL ?
 		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
@@ -572,6 +545,7 @@ USB_ATTACH(axe)
 	if (err) {
 		printf("axe%d: getting interface handle failed\n",
 		    sc->axe_unit);
+		usbd_devinfo_free(devinfop);
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -584,7 +558,8 @@ USB_ATTACH(axe)
 	err = usbd_device2interface_handle(dev, AXE_IFACE_IDX, &sc->axe_iface);
 	if (err) {
 		printf("axe%d: getting interface handle failed\n",
-			       sc->axe_unit);
+		    sc->axe_unit);
+		usbd_devinfo_free(devinfop);
 		USB_ATTACH_ERROR_RETURN;
 	}
 
@@ -599,8 +574,8 @@ USB_ATTACH(axe)
 
 	/* decide on what our bufsize will be */
 	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
-		sc->axe_bufsz = (sc->axe_udev->speed == USB_SPEED_HIGH) ? 
-		    AXE_178_MAX_BUFSZ : AXE_178_MIN_BUFSZ; 
+		sc->axe_bufsz = (sc->axe_udev->speed == USB_SPEED_HIGH) ?
+		    AXE_178_MAX_BUFSZ : AXE_178_MIN_BUFSZ;
 	else
 		sc->axe_bufsz = AXE_172_BUFSZ;
 
@@ -699,10 +674,6 @@ USB_ATTACH(axe)
 	/* Attach the interface. */
 	if_attach(ifp);
 	Ether_ifattach(ifp, eaddr);
-#if NRND > 0
-	rnd_attach_source(&sc->rnd_source, USBDEVNAME(sc->axe_dev),
-	    RND_TYPE_NET, 0);
-#endif
 
 	usb_callout_init(sc->axe_stat_ch);
 
@@ -757,11 +728,6 @@ USB_DETACH(axe)
 	if (ifp->if_flags & IFF_RUNNING)
 		axe_stop(sc);
 
-#if defined(__NetBSD__)
-#if NRND > 0
-	rnd_detach_source(&sc->rnd_source);
-#endif
-#endif /* __NetBSD__ */
 	mii_detach(&sc->axe_mii, MII_PHY_ANY, MII_OFFSET_ANY);
 	ifmedia_delete_instance(&sc->axe_mii.mii_media, IFM_INST_ANY);
 	ether_ifdetach(ifp);
@@ -772,7 +738,7 @@ USB_DETACH(axe)
 	    sc->axe_ep[AXE_ENDPT_RX] != NULL ||
 	    sc->axe_ep[AXE_ENDPT_INTR] != NULL)
 		printf("%s: detach has active endpoints\n",
-		       USBDEVNAME(sc->axe_dev));
+		    USBDEVNAME(sc->axe_dev));
 #endif
 
 	sc->axe_attached = 0;
@@ -798,7 +764,6 @@ axe_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -1002,7 +967,7 @@ axe_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		s = splnet();
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			BPF_MTAP(ifp, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		IF_INPUT(ifp, m);
@@ -1193,18 +1158,15 @@ axe_start(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (!sc->axe_link) {
+	if (!sc->axe_link)
 		return;
-	}
 
-	if (ifp->if_flags & IFF_OACTIVE) {
+	if (ifp->if_flags & IFF_OACTIVE)
 		return;
-	}
 
 	IF_DEQUEUE(&ifp->if_snd, m_head);
-	if (m_head == NULL) {
+	if (m_head == NULL)
 		return;
-	}
 
 	if (axe_encap(sc, m_head, 0)) {
 		IF_PREPEND(&ifp->if_snd, m_head);
@@ -1217,8 +1179,8 @@ axe_start(struct ifnet *ifp)
 	 * to him.
 	 */
 #if NBPFILTER > 0
-	 if (ifp->if_bpf)
-	 	BPF_MTAP(ifp, m_head);
+	if (ifp->if_bpf)
+		bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 	ifp->if_flags |= IFF_OACTIVE;
@@ -1269,9 +1231,8 @@ axe_init(void *xsc)
 
 	/* Set transmitter IPG values */
 	if (sc->axe_flags & AX178 || sc->axe_flags & AX772)
-		axe_cmd(sc, AXE_178_CMD_WRITE_IPG012, 0,
-		    (sc->axe_ipgs[0]) | (sc->axe_ipgs[1] << 8) |
-		    (sc->axe_ipgs[2] << 16), NULL);
+		axe_cmd(sc, AXE_178_CMD_WRITE_IPG012, sc->axe_ipgs[2],
+		    (sc->axe_ipgs[1] << 8) | (sc->axe_ipgs[0]), NULL);
 	else {
 		axe_cmd(sc, AXE_172_CMD_WRITE_IPG0, 0, sc->axe_ipgs[0], NULL);
 		axe_cmd(sc, AXE_172_CMD_WRITE_IPG1, 0, sc->axe_ipgs[1], NULL);
@@ -1283,7 +1244,7 @@ axe_init(void *xsc)
 	if (sc->axe_flags & AX178 || sc->axe_flags & AX772) {
 		if (sc->axe_udev->speed == USB_SPEED_HIGH) {
 			/* largest possible USB buffer size for AX88178 */
-			rxmode |= AXE_178_RXCMD_MFB;  
+			rxmode |= AXE_178_RXCMD_MFB;
 		}
 	} else
 		rxmode |= AXE_172_RXCMD_UNICAST;
@@ -1334,7 +1295,6 @@ axe_init(void *xsc)
 
 	splx(s);
 
-	usb_callout_init(sc->axe_stat_ch);
 	usb_callout(sc->axe_stat_ch, hz, axe_tick, sc);
 	return;
 }
@@ -1474,12 +1434,12 @@ axe_stop(struct axe_softc *sc)
 		err = usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_RX]);
 		if (err) {
 			printf("axe%d: abort rx pipe failed: %s\n",
-		    	sc->axe_unit, usbd_errstr(err));
+			    sc->axe_unit, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->axe_ep[AXE_ENDPT_RX]);
 		if (err) {
 			printf("axe%d: close rx pipe failed: %s\n",
-		    	sc->axe_unit, usbd_errstr(err));
+			    sc->axe_unit, usbd_errstr(err));
 		}
 		sc->axe_ep[AXE_ENDPT_RX] = NULL;
 	}
@@ -1488,7 +1448,7 @@ axe_stop(struct axe_softc *sc)
 		err = usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_TX]);
 		if (err) {
 			printf("axe%d: abort tx pipe failed: %s\n",
-		    	sc->axe_unit, usbd_errstr(err));
+			    sc->axe_unit, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->axe_ep[AXE_ENDPT_TX]);
 		if (err) {
@@ -1502,7 +1462,7 @@ axe_stop(struct axe_softc *sc)
 		err = usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_INTR]);
 		if (err) {
 			printf("axe%d: abort intr pipe failed: %s\n",
-		    	sc->axe_unit, usbd_errstr(err));
+			    sc->axe_unit, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->axe_ep[AXE_ENDPT_INTR]);
 		if (err) {

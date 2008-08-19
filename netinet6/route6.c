@@ -1,4 +1,4 @@
-/*	$OpenBSD: route6.c,v 1.10.12.1 2007/04/23 07:39:48 mbalmer Exp $	*/
+/*	$OpenBSD: route6.c,v 1.10.14.1 2007/04/22 19:48:14 mbalmer Exp $	*/
 /*	$KAME: route6.c,v 1.22 2000/12/03 00:54:00 itojun Exp $	*/
 
 /*

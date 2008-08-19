@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.25 2005/08/01 05:36:48 brad Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.31 2006/08/10 20:45:26 jason Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -111,6 +111,7 @@ Static void	uftdi_read(void *sc, int portno, u_char **ptr,
 Static void	uftdi_write(void *sc, int portno, u_char *to, u_char *from,
 			    u_int32_t *count);
 Static void	uftdi_break(void *sc, int portno, int onoff);
+Static int	uftdi_8u232am_getrate(speed_t speed, int *rate);
 
 struct ucom_methods uftdi_methods = {
 	uftdi_get_status,
@@ -143,6 +144,15 @@ USB_MATCH(uftdi)
 	    (uaa->product == USB_PRODUCT_FTDI_SERIAL_8U100AX ||
 	     uaa->product == USB_PRODUCT_FTDI_SERIAL_8U232AM ||
 	     uaa->product == USB_PRODUCT_FTDI_SEMC_DSS20 ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_KW ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_YS ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_Y6 ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_Y8 ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_IC ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_DB9 ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_RS232 ||
+	     uaa->product == USB_PRODUCT_FTDI_MHAM_Y9 ||
+	     uaa->product == USB_PRODUCT_FTDI_COASTAL_TNCX ||
 	     uaa->product == USB_PRODUCT_FTDI_LCD_LK202_24 ||
 	     uaa->product == USB_PRODUCT_FTDI_LCD_LK204_24 ||
 	     uaa->product == USB_PRODUCT_FTDI_LCD_MX200 ||
@@ -162,7 +172,8 @@ USB_MATCH(uftdi)
 	    (uaa->product == USB_PRODUCT_BBELECTRONICS_USOTL4))
 		return (UMATCH_VENDOR_PRODUCT);
 	if (uaa->vendor == USB_VENDOR_FALCOM &&
-	    (uaa->product == USB_PRODUCT_FALCOM_TWIST))
+	    (uaa->product == USB_PRODUCT_FALCOM_TWIST ||
+	     uaa->product == USB_PRODUCT_FALCOM_SAMBA))
 		 return (UMATCH_VENDOR_PRODUCT);
 	if (uaa->vendor == USB_VENDOR_SEALEVEL &&
 	    uaa->product == USB_PRODUCT_SEALEVEL_USBSERIAL)
@@ -225,6 +236,7 @@ USB_ATTACH(uftdi)
 		case USB_PRODUCT_FTDI_SEMC_DSS20:
 		case USB_PRODUCT_FTDI_SERIAL_8U232AM:
 		case USB_PRODUCT_FTDI_SERIAL_2232C:
+		case USB_PRODUCT_FTDI_COASTAL_TNCX:
 		case USB_PRODUCT_FTDI_LCD_LK202_24:
 		case USB_PRODUCT_FTDI_LCD_LK204_24:
 		case USB_PRODUCT_FTDI_LCD_MX200:
@@ -232,6 +244,14 @@ USB_ATTACH(uftdi)
 		case USB_PRODUCT_FTDI_LCD_CFA_632:
 		case USB_PRODUCT_FTDI_LCD_CFA_633:
 		case USB_PRODUCT_FTDI_LCD_CFA_634:
+		case USB_PRODUCT_FTDI_MHAM_KW:
+		case USB_PRODUCT_FTDI_MHAM_YS:
+		case USB_PRODUCT_FTDI_MHAM_Y6:
+		case USB_PRODUCT_FTDI_MHAM_Y8:
+		case USB_PRODUCT_FTDI_MHAM_IC:
+		case USB_PRODUCT_FTDI_MHAM_DB9:
+		case USB_PRODUCT_FTDI_MHAM_RS232:
+		case USB_PRODUCT_FTDI_MHAM_Y9:
 		case USB_PRODUCT_SEALEVEL_USBSERIAL:
 			sc->sc_type = UFTDI_TYPE_8U232AM;
 			sc->sc_hdrlen = 0;
@@ -281,6 +301,7 @@ USB_ATTACH(uftdi)
 	case USB_VENDOR_FALCOM:
 		switch( uaa->product ){
 		case USB_PRODUCT_FALCOM_TWIST:
+		case USB_PRODUCT_FALCOM_SAMBA:
 			sc->sc_type = UFTDI_TYPE_8U232AM;
 			sc->sc_hdrlen = 0;
 			break;
@@ -361,7 +382,7 @@ uftdi_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
+		break;
 
 	case DVACT_DEACTIVATE:
 		if (sc->sc_subdev != NULL)
@@ -546,25 +567,8 @@ uftdi_param(void *vsc, int portno, struct termios *t)
 		break;
 
 	case UFTDI_TYPE_8U232AM:
-		switch(t->c_ospeed) {
-		case 300: rate = ftdi_8u232am_b300; break;
-		case 600: rate = ftdi_8u232am_b600; break;
-		case 1200: rate = ftdi_8u232am_b1200; break;
-		case 2400: rate = ftdi_8u232am_b2400; break;
-		case 4800: rate = ftdi_8u232am_b4800; break;
-		case 9600: rate = ftdi_8u232am_b9600; break;
-		case 19200: rate = ftdi_8u232am_b19200; break;
-		case 38400: rate = ftdi_8u232am_b38400; break;
-		case 57600: rate = ftdi_8u232am_b57600; break;
-		case 115200: rate = ftdi_8u232am_b115200; break;
-		case 230400: rate = ftdi_8u232am_b230400; break;
-		case 460800: rate = ftdi_8u232am_b460800; break;
-		case 921600: rate = ftdi_8u232am_b921600; break;
-		case 2000000: rate = ftdi_8u232am_b2000000; break;
-		case 3000000: rate = ftdi_8u232am_b3000000; break;
-		default:
+		if (uftdi_8u232am_getrate(t->c_ospeed, &rate) == -1)
 			return (EINVAL);
-		}
 		break;
 	}
 	req.bmRequestType = UT_WRITE_VENDOR_DEVICE;
@@ -675,4 +679,68 @@ uftdi_break(void *vsc, int portno, int onoff)
 	USETW(req.wIndex, portno);
 	USETW(req.wLength, 0);
 	(void)usbd_do_request(sc->sc_udev, &req, NULL);
+}
+
+Static int
+uftdi_8u232am_getrate(speed_t speed, int *rate)
+{
+	/* Table of the nearest even powers-of-2 for values 0..15. */
+	static const unsigned char roundoff[16] = {
+		0, 2, 2, 4,  4,  4,  8,  8,
+		8, 8, 8, 8, 16, 16, 16, 16,
+	};
+
+	unsigned int d, freq;
+	int result;
+
+	if (speed <= 0)
+		return (-1);
+
+	/* Special cases for 2M and 3M. */
+	if (speed >= 3000000 * 100 / 103 &&
+	    speed <= 3000000 * 100 / 97) {
+		result = 0;
+		goto done;
+	}
+	if (speed >= 2000000 * 100 / 103 &&
+	    speed <= 2000000 * 100 / 97) {
+		result = 1;
+		goto done;
+	}
+
+	d = (FTDI_8U232AM_FREQ << 4) / speed;
+	d = (d & ~15) + roundoff[d & 15];
+
+	if (d < FTDI_8U232AM_MIN_DIV)
+		d = FTDI_8U232AM_MIN_DIV;
+	else if (d > FTDI_8U232AM_MAX_DIV)
+		d = FTDI_8U232AM_MAX_DIV;
+
+	/* 
+	 * Calculate the frequency needed for d to exactly divide down
+	 * to our target speed, and check that the actual frequency is
+	 * within 3% of this.
+	 */
+	freq = speed * d;
+	if (freq < (quad_t)(FTDI_8U232AM_FREQ << 4) * 100 / 103 ||
+	    freq > (quad_t)(FTDI_8U232AM_FREQ << 4) * 100 / 97)
+		return (-1);
+
+	/* 
+	 * Pack the divisor into the resultant value.  The lower
+	 * 14-bits hold the integral part, while the upper 2 bits
+	 * encode the fractional component: either 0, 0.5, 0.25, or
+	 * 0.125.
+	 */
+	result = d >> 4;
+	if (d & 8)
+		result |= 0x4000;
+	else if (d & 4)
+		result |= 0x8000;
+	else if (d & 2)
+		result |= 0xc000;
+
+done:
+	*rate = result;
+	return (0);
 }

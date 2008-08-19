@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.27 2005/11/11 16:38:30 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.32 2006/07/01 16:23:31 miod Exp $	*/
 /*	$NetBSD: pmap.c,v 1.107 2001/08/31 16:47:41 eeh Exp $	*/
 #undef	NO_VCACHE /* Don't forget the locked TLB in dostart */
 /*
@@ -67,8 +67,6 @@
 paddr_t cpu0paddr;/* XXXXXXXXXXXXXXXX */
 
 extern int64_t asmptechk(int64_t *pseg[], int addr); /* DEBUG XXXXX */
-
-#define IS_VM_PHYSADDR(PA) (vm_physseg_find(atop(PA), NULL) != -1)
 
 #if 0
 static int pseg_check(struct pmap*, vaddr_t addr, int64_t tte, paddr_t spare);
@@ -252,6 +250,7 @@ extern void	pmap_page_cache(struct pmap *pm, paddr_t pa, int mode);
 
 void	pmap_pinit(struct pmap *);
 void	pmap_release(struct pmap *);
+pv_entry_t pa_to_pvh(paddr_t);
 
 /*
  * First and last managed physical addresses.  XXX only used for dumping the system.
@@ -259,15 +258,18 @@ void	pmap_release(struct pmap *);
 paddr_t	vm_first_phys, vm_num_phys;
 
 u_int64_t first_phys_addr;
-#define pa_index(pa)		atop((pa) - first_phys_addr)
-#define	pa_to_pvh(pa)							\
-({									\
-	int bank_, pg_;							\
-									\
-	bank_ = vm_physseg_find(atop((pa)), &pg_);			\
-	(pv_entry_t)&vm_physmem[bank_].pmseg.pvent[pg_];		\
-})
 
+pv_entry_t
+pa_to_pvh(paddr_t pa)
+{
+	int bank, pg;
+
+	bank = vm_physseg_find(atop(pa), &pg);
+	if (bank == -1)
+		return (NULL);
+	else
+		return (pv_entry_t)&vm_physmem[bank].pmseg.pvent[pg];
+}
 
 
 /*
@@ -410,7 +412,7 @@ void pv_check(void);
 void
 pv_check()
 {
-	int i, j, s;
+	int i, s;
 	
 	s = splhigh();
 	for (i = 0; i < physmem; i++) {
@@ -466,26 +468,6 @@ struct page_size_map page_size_map[] = {
 	{ (8*1024-1) & ~(8*1024-1), PGSZ_8K  },
 	{ 0, PGSZ_8K&0  }
 };
-
-/*
- * Calculate the largest page size that will map this.
- *
- * You really need to do this both on VA and PA.
- */
-#define	PMAP_PAGE_SIZE(va, pa, len, pgsz, pglen)			\
-do {									\
-	for ((pgsz) = PGSZ_4M; (pgsz); (pgsz)--) {			\
-		(pglen) = PG_SZ(pgsz);					\
-									\
-		if (((len) >= (pgsz)) &&				\
-			((pa) & ((pglen)-1) & ~PG_SZ(PGSZ_8K)) == 0 &&	\
-			((va) & ((pglen)-1) & ~PG_SZ(PGSZ_8K)) == 0)	\
-			break;						\
-	}								\
-	(pgsz) = 0;							\
-	(pglen) = PG_SZ(pgsz);						\
-} while (0)
-
 
 /*
  * Enter a TTE into the kernel pmap only.  Don't do anything else.
@@ -891,9 +873,9 @@ remap_data:
 	/* 
 	 * Calculate approx TSB size.  This probably needs tweaking.
 	 */
-	if (physmem < 64 * 1024 * 1024)
+	if (physmem < atop(64 * 1024 * 1024))
 		tsbsize = 0;
-	else if (physmem < 512 * 1024 * 1024)
+	else if (physmem < atop(512 * 1024 * 1024))
 		tsbsize = 1;
 	else
 		tsbsize = 2;
@@ -1329,12 +1311,8 @@ remap_data:
 	va = (vaddr_t)msgbufp;
 	prom_map_phys(phys_msgbuf, msgbufsiz, (vaddr_t)msgbufp, -1);
 	while (msgbufsiz) {
-		int pgsz;
-		psize_t psize;
-
-		PMAP_PAGE_SIZE(va, phys_msgbuf, msgbufsiz, pgsz, psize);
 		data = TSB_DATA(0 /* global */, 
-			pgsz,
+			PGSZ_8K,
 			phys_msgbuf,
 			1 /* priv */,
 			1 /* Write */,
@@ -1342,12 +1320,10 @@ remap_data:
 			FORCE_ALIAS /* ALIAS -- Disable D$ */,
 			1 /* valid */,
 			0 /* IE */);
-		do {
-			pmap_enter_kpage(va, data);
-			va += NBPG;
-			msgbufsiz -= NBPG;
-			phys_msgbuf += NBPG;
-		} while (psize-=NBPG);
+		pmap_enter_kpage(va, data);
+		va += PAGE_SIZE;
+		msgbufsiz -= PAGE_SIZE;
+		phys_msgbuf += PAGE_SIZE;
 	}
 	BDPRINTF(PDB_BOOT1, ("Done inserting mesgbuf into pmap_kernel()\r\n"));
 	
@@ -1759,19 +1735,23 @@ pmap_release(pm)
 	for(i=0; i<STSZ; i++) {
 		paddr_t psegentp = (paddr_t)(u_long)&pm->pm_segs[i];
 		if((pdir = (paddr_t *)(u_long)ldxa((vaddr_t)psegentp,
-			ASI_PHYS_CACHED))) {
+		    ASI_PHYS_CACHED))) {
 			for (k=0; k<PDSZ; k++) {
 				paddr_t pdirentp = (paddr_t)(u_long)&pdir[k];
 				if ((ptbl = (paddr_t *)(u_long)ldxa(
 					(vaddr_t)pdirentp, ASI_PHYS_CACHED))) {
 					for (j=0; j<PTSZ; j++) {
 						int64_t data;
+						paddr_t pa;
+						pv_entry_t pv;
+
 						data  = ldxa((vaddr_t)&ptbl[j],
 							ASI_PHYS_CACHED);
-						if (data&TLB_V && 
-						    IS_VM_PHYSADDR(data&TLB_PA_MASK)) {
-							paddr_t pa;
-							pv_entry_t pv;
+						if (!(data & TLB_V))
+							continue;
+						pa = data & TLB_PA_MASK;
+						pv = pa_to_pvh(pa);
+						if (pv != NULL) {
 
 #ifdef DEBUG
 							printf("pmap_release: pm=%p page %llx still in use\n", pm, 
@@ -1779,8 +1759,6 @@ pmap_release(pm)
 							Debugger();
 #endif
 							/* Save REF/MOD info */
-							pa = data&TLB_PA_MASK;
-							pv = pa_to_pvh(pa);
 							if (data & TLB_ACCESS)
 								pv->pv_va |=
 									PV_REF;
@@ -2009,7 +1987,7 @@ pmap_kenter_pa(va, pa, prot)
 	ASSERT(va < kdata || va > ekdata);
 
 #ifdef DIAGNOSTIC
-	if (pa & (PMAP_NVC|PMAP_NC))
+	if (pa & (PMAP_NVC|PMAP_NC|PMAP_LITTLE))
 		panic("pmap_kenter_pa: illegal cache flags %ld", pa);
 #endif
 
@@ -2203,8 +2181,8 @@ pmap_enter(pm, va, pa, prot, flags)
 	/*
 	 * Construct the TTE.
 	 */
-	if (IS_VM_PHYSADDR(pa)) {
-		pv = pa_to_pvh(pa);
+	pv = pa_to_pvh(pa);
+	if (pv != NULL) {
 		aliased = (pv->pv_va&(PV_ALIAS|PV_NVC));
 #ifdef DIAGNOSTIC
 		if ((flags & VM_PROT_ALL) & ~prot)
@@ -2336,15 +2314,14 @@ pmap_remove(pm, va, endva)
 		/* We don't really need to do this if the valid bit is not set... */
 		if ((data = pseg_get(pm, va))) {
 			paddr_t entry;
+			pv_entry_t pv;
 			
 			flush |= 1;
 			/* First remove it from the pv_table */
 			entry = (data&TLB_PA_MASK);
-			if (IS_VM_PHYSADDR(entry)) {
-				pv_entry_t pv;
-
+			pv = pa_to_pvh(entry);
+			if (pv != NULL) {
 				/* Save REF/MOD info */
-				pv = pa_to_pvh(entry);
 				if (data & TLB_ACCESS) pv->pv_va |= PV_REF;
 				if (data & (TLB_MODIFY))  pv->pv_va |= PV_MOD;
 
@@ -2398,6 +2375,7 @@ pmap_protect(pm, sva, eva, prot)
 {
 	int s;
 	paddr_t pa;
+	pv_entry_t pv;
 	int64_t data;
 	
 	ASSERT(pm != pmap_kernel() || eva < INTSTACK || sva > EINTSTACK);
@@ -2443,11 +2421,9 @@ pmap_protect(pm, sva, eva, prot)
 				Debugger();
 			}
 #endif
-			if (IS_VM_PHYSADDR(pa)) {
-				pv_entry_t pv;
-
+			pv = pa_to_pvh(pa);
+			if (pv != NULL) {
 				/* Save REF/MOD info */
-				pv = pa_to_pvh(pa);
 				if (data & TLB_ACCESS)
 					pv->pv_va |= PV_REF;
 				if (data & (TLB_MODIFY))  
@@ -3471,7 +3447,7 @@ pmap_enter_pv(pmap, va, pa)
 
 				data = pseg_get(pm, va);
 				if (data >= 0 ||
-				    data&TLB_PA_MASK != pa)
+				    data&TLB_PA_MASK != pa&TLB_PA_MASK)
 					printf(
 		"pmap_enter: found va %lx pa %lx in pv_table but != %lx\n",
 						va, pa, (long)data);
@@ -3633,10 +3609,10 @@ pmap_page_cache(pm, pa, mode)
 	if (pmapdebug & (PDB_ENTER))
 		printf("pmap_page_uncache(%llx)\n", (unsigned long long)pa);
 #endif
-	if (!IS_VM_PHYSADDR(pa))
-		return;
 
 	pv = pa_to_pvh(pa);
+	if (pv == NULL)
+		return;
 	s = splvm();
 
 	while (pv) {

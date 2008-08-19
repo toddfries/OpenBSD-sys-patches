@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioapic.c,v 1.6 2005/11/10 14:35:13 mickey Exp $	*/
+/*	$OpenBSD: ioapic.c,v 1.11 2006/06/12 04:41:30 gwk Exp $	*/
 /* 	$NetBSD: ioapic.c,v 1.7 2003/07/14 22:32:40 lukem Exp $	*/
 
 /*-
@@ -107,6 +107,8 @@ extern int bus_mem_add_mapping(bus_addr_t, bus_size_t, int,
 void	apic_set_redir(struct ioapic_softc *, int);
 void	apic_vectorset(struct ioapic_softc *, int, int, int);
 
+void	apic_stray(int);
+
 int apic_verbose = 0;
 
 int ioapic_bsp_id = 0;
@@ -114,6 +116,7 @@ int ioapic_cold = 1;
 
 struct ioapic_softc *ioapics;	 /* head of linked list */
 int nioapics = 0;	   	 /* number attached */
+static int ioapic_vecbase;
 
 void ioapic_set_id(struct ioapic_softc *);
 
@@ -127,7 +130,7 @@ u_int16_t ioapic_id_map = (1 << IOAPIC_ID_MAX) - 1;
  * When we renumber I/O APICs we provide a mapping vector giving us the new
  * ID out of the old BIOS supplied one.  Each item must be able to hold IDs
  * in [0, IOAPIC_ID_MAX << 1), since we use an extra bit to tell if the ID
- * has actually been remapped.  
+ * has actually been remapped.
  */
 u_int8_t ioapic_id_remap[IOAPIC_ID_MAX];
 
@@ -181,6 +184,24 @@ ioapic_find(int apicid)
 	return (NULL);
 }
 
+/*
+ * For the case the I/O APICs were configured using ACPI, there must
+ * be an option to match global ACPI interrupts with APICs.
+ */
+struct ioapic_softc *
+ioapic_find_bybase(int vec)
+{
+	struct ioapic_softc *sc;
+
+	for (sc = ioapics; sc != NULL; sc = sc->sc_next) {
+		if (vec >= sc->sc_apic_vecbase &&
+		    vec < (sc->sc_apic_vecbase + sc->sc_apic_sz))
+			return sc;
+	}
+
+	return NULL;
+}
+
 static __inline void
 ioapic_add(struct ioapic_softc *sc)
 {
@@ -232,7 +253,7 @@ ioapic_set_id(struct ioapic_softc *sc) {
 	if (apic_id != sc->sc_apicid)
 		printf(", can't remap to apid %d\n", sc->sc_apicid);
 	else
-		printf(", remapped to apic %d\n", sc->sc_apicid);
+		printf(", remapped to apid %d\n", sc->sc_apicid);
 }
 
 /*
@@ -265,6 +286,17 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_apic_vers = (ver_sz & IOAPIC_VER_MASK) >> IOAPIC_VER_SHIFT;
 	sc->sc_apic_sz = (ver_sz & IOAPIC_MAX_MASK) >> IOAPIC_MAX_SHIFT;
 	sc->sc_apic_sz++;
+
+	if (aaa->apic_vecbase != -1)
+		sc->sc_apic_vecbase = aaa->apic_vecbase;
+	else {
+		/*
+		 * XXX this assumes ordering of ioapics in the table.
+		 * Only needed for broken BIOS workaround (see mpbios.c)
+		 */
+		sc->sc_apic_vecbase = ioapic_vecbase;
+		ioapic_vecbase += sc->sc_apic_sz;
+	}
 
 	if (mp_verbose) {
 		printf(", %s mode",
@@ -372,11 +404,7 @@ apic_set_redir(struct ioapic_softc *sc, int pin)
 
 	pp = &sc->sc_pins[pin];
 	map = pp->ip_map;
-	if (map == NULL) {
-		redlo = IOAPIC_REDLO_MASK;
-	} else {
-		redlo = map->redir;
-	}
+	redlo = (map == NULL) ? IOAPIC_REDLO_MASK : map->redir;
 	delmode = (redlo & IOAPIC_REDLO_DEL_MASK) >> IOAPIC_REDLO_DEL_SHIFT;
 
 	/* XXX magic numbers */
@@ -396,8 +424,8 @@ apic_set_redir(struct ioapic_softc *sc, int pin)
 		 * XXX will want to distribute interrupts across cpu's
 		 * eventually.  most likely, we'll want to vector each
 		 * interrupt to a specific CPU and load-balance across
-		 * cpu's.  but there's no point in doing that until after 
-		 * most interrupts run without the kernel lock.  
+		 * cpu's.  but there's no point in doing that until after
+		 * most interrupts run without the kernel lock.
 		 */
 		redhi |= (ioapic_bsp_id << IOAPIC_REDHI_DEST_SHIFT);
 
@@ -484,7 +512,7 @@ apic_vectorset(struct ioapic_softc *sc, int pin, int minlevel, int maxlevel)
 			    sc->sc_dev.dv_xname, pin, maxlevel);
 		}
 		apic_maxlevel[nvector] = maxlevel;
-		/* 
+		/*
 		 * XXX want special handler for the maxlevel != minlevel
 		 * case here!
 		 */
@@ -629,13 +657,13 @@ apic_intr_establish(int irq, int type, int level, int (*ih_fun)(void *),
 		if (type == pin->ip_type)
 			break;
 	case IST_PULSE:
-		if (type != IST_NONE)
-			/* XXX should not panic here! */
-			panic("apic_intr_establish: "
-			      "intr %d can't share %s with %s",
-			      intr,
-			      isa_intr_typename(sc->sc_pins[intr].ip_type),
-			      isa_intr_typename(type));
+		if (type != IST_NONE) {
+			/*printf("%s: intr_establish: can't share %s with %s, irq %d\n",
+			    ih_what, isa_intr_typename(pin->ip_type),
+			    isa_intr_typename(type), intr);*/
+			free(ih, M_DEVBUF);
+			return (NULL);
+		}
 		break;
 	}
 
@@ -753,6 +781,18 @@ apic_intr_disestablish(void *arg)
 
 	evcount_detach(&ih->ih_count);
 	free(ih, M_DEVBUF);
+}
+
+void
+apic_stray(int irqnum) {
+	unsigned int apicid;
+	struct ioapic_softc *sc;
+
+	apicid = APIC_IRQ_APIC(irqnum);
+	sc = ioapic_find(apicid);
+	if (sc == NULL)
+		return;
+	printf("%s: stray interrupt %d\n", sc->sc_dev.dv_xname, irqnum);
 }
 
 #ifdef DDB

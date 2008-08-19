@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.29 2005/11/08 15:05:56 martin Exp $ */
+/*	$OpenBSD: param.h,v 1.32 2006/05/30 21:25:28 miod Exp $ */
 /*      $NetBSD: param.h,v 1.39 1999/10/22 21:14:34 ragge Exp $    */
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -140,65 +140,11 @@
 #define	vax_btoc(x)	(((unsigned)(x) + VAX_PGOFSET) >> VAX_PGSHIFT)
 #define	vax_btop(x)	(((unsigned)(x)) >> VAX_PGSHIFT)
 
-/*
- * Map a ``block device block'' to a file system block.
- * This should be device dependent, and will be if we
- * add an entry to cdevsw/bdevsw for that purpose.
- * For now though just use DEV_BSIZE.
- */
-
-#define	bdbtofsb(bn)	((bn) / (BLKDEV_IOSIZE/DEV_BSIZE))
-
 #define       ovbcopy(x,y,z)  bcopy(x, y, z)
 
 #ifdef _KERNEL
 
-/* SPL asserts */
-#define	splassert(wantipl)	/* nothing */
-
-#ifndef lint
-#define splx(reg)						\
-({								\
-	register int val;					\
-	__asm __volatile ("mfpr $0x12,%0;mtpr %1,$0x12"		\
-				: "=&g" (val)			\
-				: "g" (reg));			\
-	val;							\
-})
-
-#define	_splraise(reg)						\
-({								\
-	register int val;					\
-	__asm __volatile ("mfpr $0x12,%0"			\
-				: "=&g" (val)			\
-				: );				\
-	if ((reg) > val) {					\
-		__asm __volatile ("mtpr %0,$0x12"		\
-				:				\
-				: "g" (reg));			\
-	}							\
-	val;							\
-})
-#endif
-
-#define	spl0()		splx(0)		/* IPL0  */
-#define splsoftclock()	_splraise(8)	/* IPL08 */
-#define splsoftnet()	_splraise(0xc)	/* IPL0C */
-#define	splddb()	_splraise(0xf)	/* IPL0F */
-#define splbio()	_splraise(0x15)	/* IPL15 */
-#define splnet()	_splraise(0x15)	/* IPL15 */
-#define spltty()	_splraise(0x15)	/* IPL15 */
-#define splimp()	_splraise(0x17)	/* IPL17 */
-#define splvm()		_splraise(0x17)	/* IPL17 */
-#define splclock()	_splraise(0x18)	/* IPL18 */
-#define splhigh()	_splraise(0x1f)	/* IPL1F */
-#define	splstatclock()	splclock()
-
-/* These are better to use when playing with VAX buses */
-#define	spl4()		splx(0x14)
-#define	spl5()		splx(0x15)
-#define	spl6()		splx(0x16)
-#define	spl7()		splx(0x17)
+#include <machine/intr.h>
 
 /* Prototype needed for delay() */
 #ifndef	_LOCORE

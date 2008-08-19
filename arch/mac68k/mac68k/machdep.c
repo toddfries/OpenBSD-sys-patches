@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.130 2006/01/24 06:50:13 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.133 2006/06/11 20:49:27 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -190,8 +190,7 @@ int	bufpages = 0;
 #endif
 int	bufcachepercent = BUFCACHEPERCENT;
 
-int	maxmem;			/* max memory per process */
-int	physmem;		/* max supported memory, changes to actual */
+int	physmem;		/* size of physical memory, in pages */
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -555,12 +554,9 @@ allocsys(v)
 void
 initcpu()
 {
-#if defined(M68040) || defined(M68060)
+#if defined(M68040)
 	extern void (*vectab[256])(void);
 	void addrerr4060(void);
-#endif
-#ifdef M68060
-	void buserr60(void);
 #endif
 #ifdef M68040
 	void buserr40(void);
@@ -570,12 +566,6 @@ initcpu()
 #endif
 
 	switch (cputype) {
-#ifdef M68060
-	case CPU_68060:
-		vectab[2] = buserr60;
-		vectab[3] = addrerr4060;
-		break;
-#endif
 #ifdef M68040
 	case CPU_68040:
 		vectab[2] = buserr40;
@@ -1520,7 +1510,7 @@ get_machine_info()
 	mac68k_machine.cpu_model_index = i;
 }
 
-struct cpu_model_info *current_mac_model;
+const struct cpu_model_info *current_mac_model;
 
 /*
  * Sets a bunch of machine-specific variables

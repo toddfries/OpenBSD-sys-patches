@@ -1,4 +1,5 @@
-/*	$OpenBSD: kern_rwlock.c,v 1.5 2006/01/06 07:05:12 tedu Exp $	*/
+/*	$OpenBSD: kern_rwlock.c,v 1.8 2006/06/02 05:02:34 tedu Exp $	*/
+
 /*
  * Copyright (c) 2002, 2003 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -44,10 +45,6 @@
  *		Sets RWLOCK_WAIT|RWLOCK_WRWANT while waiting.
  * RW_READ	RWLOCK_WRLOCK|RWLOCK_WRWANT may not be set. We increment
  *		with RWLOCK_READ_INCR. RWLOCK_WAIT while waiting.
- * RW_UPGRADE	There must be exactly one holder of the read lock.
- *		We increment with what's needed for RW_WRITE - RW_READ.
- *		RWLOCK_WAIT|RWLOCK_WRWANT while waiting.
- * RW_DOWNGRADE	Always doable. Increment with -RW_WRITE + RW_READ.
  */
 static const struct rwlock_op {
 	unsigned long inc;
@@ -70,20 +67,6 @@ static const struct rwlock_op {
 		0,
 		PLOCK
 	},
-	{	/* RW_UPGRADE */
-		RWLOCK_WRLOCK-RWLOCK_READ_INCR,
-		~(RWLOCK_READ_INCR | RWLOCK_WAIT | RWLOCK_WRWANT),
-		RWLOCK_WAIT|RWLOCK_WRLOCK,
-		1,
-		PLOCK - 4
-	},
-	{	/* RW_DOWNGRADE */
-		-RWLOCK_WRLOCK + RWLOCK_READ_INCR,
-		0,
-		0,
-		-1,
-		0
-	}
 };
 
 #ifndef __HAVE_MD_RWLOCK
@@ -93,10 +76,11 @@ static const struct rwlock_op {
 void
 rw_enter_read(struct rwlock *rwl)
 {
-	if (__predict_false(rwl->rwl_owner & RWLOCK_WRLOCK)) 
+	unsigned long owner = rwl->rwl_owner;
+
+	if (__predict_false((owner & RWLOCK_WRLOCK) ||
+	    rw_test_and_set(&rwl->rwl_owner, owner, owner + RWLOCK_READ_INCR)))
 		rw_enter(rwl, RW_READ);
-	else
-		rwl->rwl_owner += RWLOCK_READ_INCR;
 }
 
 void
@@ -104,26 +88,19 @@ rw_enter_write(struct rwlock *rwl)
 {
 	struct proc *p = curproc;
 
-	if (__predict_false(rwl->rwl_owner != 0))
+	if (__predict_false(rw_test_and_set(&rwl->rwl_owner, 0,
+	    RW_PROC(p) | RWLOCK_WRLOCK)))
 		rw_enter(rwl, RW_WRITE);
-	else
-		rwl->rwl_owner = RW_PROC(p) | RWLOCK_WRLOCK;
 }
 
 void
 rw_exit_read(struct rwlock *rwl)
 {
 	unsigned long owner = rwl->rwl_owner;
-	unsigned long decr = (owner & (RWLOCK_WAIT|RWLOCK_WRWANT)) |
-	    RWLOCK_READ_INCR;
 
-	rwl->rwl_owner -= decr;
-	/*
-	 * Potential MP race here. If the owner had WRWANT set we cleared
-	 * it and a reader can sneak in before a writer. Do we care?
-	 */
-	if (__predict_false(owner & RWLOCK_WAIT))
-		rw_exit_waiters(rwl, owner);
+	if (__predict_false((owner & RWLOCK_WAIT) ||
+	    rw_test_and_set(&rwl->rwl_owner, owner, owner - RWLOCK_READ_INCR)))
+		rw_exit(rwl);
 }
 
 void
@@ -131,13 +108,9 @@ rw_exit_write(struct rwlock *rwl)
 {
 	unsigned long owner = rwl->rwl_owner;
 
-	rwl->rwl_owner = 0;
-	/*
-	 * Potential MP race here. If the owner had WRWANT set we cleared
-	 * it and a reader can sneak in before a writer. Do we care?
-	 */
-	if (__predict_false(owner & RWLOCK_WAIT))
-		rw_exit_waiters(rwl, owner);
+	if (__predict_false((owner & RWLOCK_WAIT) ||
+	    rw_test_and_set(&rwl->rwl_owner, owner, 0)))
+		rw_exit(rwl);
 }
 
 int
@@ -165,41 +138,20 @@ rw_enter_diag(struct rwlock *rwl, int flags)
 		if (RW_PROC(curproc) == RW_PROC(rwl->rwl_owner))
 			panic("rw_enter: locking against myself");
 		break;
-	case RW_UPGRADE:
-		/*
-		 * Since we're holding the read lock, it can't possibly
-		 * be write locked.
-		 */
-		if (rwl->rwl_owner & RWLOCK_WRLOCK)
-			panic("rw_enter: upgraded lock write locked");
-		break;
-	case RW_DOWNGRADE:
-		/*
-		 * If we're downgrading, we much hold the write lock.
-		 */
-		if (RW_PROC(curproc) != RW_PROC(rwl->rwl_owner))
-			panic("rw_enter: not holder");
 	default:
 		panic("rw_enter: unknown op 0x%x", flags);
 	}
 }
 
-static void
-rw_exit_diag(struct rwlock *rwl, int owner)
-{
-	if ((owner & RWLOCK_WAIT) == 0)
-		panic("rw_exit: no waiter");
-}
-
 #else
 #define rw_enter_diag(r, f)
-#define rw_exit_diag(r, o)
 #endif
 
 void
-rw_init(struct rwlock *rwl)
+rw_init(struct rwlock *rwl, const char *name)
 {
 	rwl->rwl_owner = 0;
+	rwl->rwl_name = name;
 }
 
 /*
@@ -214,11 +166,7 @@ rw_enter(struct rwlock *rwl, int flags)
 
 	op = &rw_ops[flags & RW_OPMASK];
 
-	inc = op->inc;
-	if (op->proc_mult == -1)
-		inc -= RW_PROC(curproc);
-	else if (op->proc_mult == 1)
-		inc += RW_PROC(curproc);
+	inc = op->inc + RW_PROC(curproc) * op->proc_mult;
 	prio = op->wait_prio;
 	if (flags & RW_INTR)
 		prio |= PCATCH;
@@ -229,7 +177,9 @@ retry:
 
 		rw_enter_diag(rwl, flags);
 
-		if ((error = tsleep(rwl, prio, "rwlock", 0)) != 0)
+		if (flags & RW_NOSLEEP)
+			return (EBUSY);
+		if ((error = tsleep(rwl, prio, rwl->rwl_name, 0)) != 0)
 			return (error);
 		if (flags & RW_SLEEPFAIL)
 			return (EAGAIN);
@@ -242,9 +192,21 @@ retry:
 }
 
 void
-rw_exit_waiters(struct rwlock *rwl, unsigned long owner)
+rw_exit(struct rwlock *rwl)
 {
-	rw_exit_diag(rwl, owner);
-	/* We wake up all waiters because we can't know how many they are. */
-	wakeup(rwl);	
+	unsigned long owner = rwl->rwl_owner;
+	int wrlock = owner & RWLOCK_WRLOCK;
+	unsigned long set;
+
+	do {
+		owner = rwl->rwl_owner;
+		if (wrlock)
+			set = 0;
+		else
+			set = (owner - RWLOCK_READ_INCR) &
+				~(RWLOCK_WAIT|RWLOCK_WRWANT);
+	} while (rw_test_and_set(&rwl->rwl_owner, owner, set));
+
+	if (owner & RWLOCK_WAIT)
+		wakeup(rwl);
 }

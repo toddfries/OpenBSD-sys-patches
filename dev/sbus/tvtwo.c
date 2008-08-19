@@ -1,4 +1,4 @@
-/*	$OpenBSD: tvtwo.c,v 1.8 2006/02/12 13:18:09 miod Exp $	*/
+/*	$OpenBSD: tvtwo.c,v 1.10 2006/08/14 12:24:31 miod Exp $	*/
 /*
  * Copyright (c) 2003, 2006, Miodrag Vallat.
  * All rights reserved.
@@ -121,7 +121,6 @@
 /* per-display variables */
 struct tvtwo_softc {
 	struct	sunfb	sc_sunfb;	/* common base device */
-	struct	sbusdev sc_sd;		/* sbus device */
 
 	bus_space_tag_t	sc_bustag;
 	bus_addr_t	sc_paddr;
@@ -259,7 +258,7 @@ tvtwoattach(struct device *parent, struct device *self, void *args)
 	sc->sc_sunfb.sf_depth = 8;
 	sc->sc_sunfb.sf_width = width;
 	sc->sc_sunfb.sf_height = height;
-	sc->sc_sunfb.sf_linebytes = width;
+	sc->sc_sunfb.sf_linebytes = width >= 1024 ? width : 1024;
 	sc->sc_sunfb.sf_fbsize = sc->sc_sunfb.sf_linebytes * height;
 
 	/* Map the frame buffer memory area we're interested in. */
@@ -284,13 +283,19 @@ tvtwoattach(struct device *parent, struct device *self, void *args)
 
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
 	sc->sc_sunfb.sf_ro.ri_bits = (u_char *)sc->sc_m8;
-	fbwscons_init(&sc->sc_sunfb, isconsole ? RI_CLEARMARGINS : RI_CLEAR);
+
+	/*
+	 * If the framebuffer width is under 1024, we will switch from
+	 * the PROM font to the more adequate 8x16 font here.
+	 */
+	fbwscons_init(&sc->sc_sunfb,
+	    isconsole && (width >= 1024) ? RI_CLEARMARGINS : RI_CLEAR);
+	fbwscons_setcolormap(&sc->sc_sunfb, tvtwo_setcolor);
 
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, -1);
+		fbwscons_console_init(&sc->sc_sunfb,
+		    width >= 1024 ? -1 : 0);
 	}
-
-	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
 	printf("%s: %dx%d\n", self->dv_xname,
 	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);

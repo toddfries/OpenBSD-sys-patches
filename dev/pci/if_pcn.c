@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pcn.c,v 1.6 2006/02/22 18:12:24 brad Exp $	*/
+/*	$OpenBSD: if_pcn.c,v 1.14 2006/06/14 19:30:44 brad Exp $	*/
 /*	$NetBSD: if_pcn.c,v 1.26 2005/05/07 09:15:44 is Exp $	*/
 
 /*
@@ -432,6 +432,14 @@ static const struct pcn_variant {
 	  pcn_79c971_mediainit,
 	  PARTID_Am79c975 },
 
+	{ "Am79c976",
+	  pcn_79c971_mediainit,
+	  PARTID_Am79c976 },
+
+	{ "Am79c978",
+	  pcn_79c971_mediainit,
+	  PARTID_Am79c978 },
+
 	{ "Unknown",
 	  pcn_79c971_mediainit,
 	  0 },
@@ -444,6 +452,11 @@ void	pcn_attach(struct device *, struct device *, void *);
 
 struct cfattach pcn_ca = {
 	sizeof(struct pcn_softc), pcn_match, pcn_attach,
+};
+
+const struct pci_matchid pcn_devices[] = {
+	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_PCNET_PCI },
+	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_PCHOME_PCI }
 };
 
 struct cfdriver pcn_cd = {
@@ -519,16 +532,8 @@ pcn_match(struct device *parent, void *match, void *aux)
 	    PCI_CLASS(pa->pa_class) == PCI_CLASS_NETWORK)
 		return(1);
 
-	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_AMD)
-		return (0);
-
-	switch (PCI_PRODUCT(pa->pa_id)) {
-	case PCI_PRODUCT_AMD_PCNET_PCI:
-		/* Beat if_le_pci.c */
-		return (10);
-	}
-
-	return (0);
+	return (pci_matchbyid((struct pci_attach_args *)aux, pcn_devices,
+	    sizeof(pcn_devices)/sizeof(pcn_devices[0])));
 }
 
 void
@@ -635,15 +640,14 @@ pcn_attach(struct device *parent, struct device *self, void *aux)
 	 * Map and establish our interrupt.
 	 */
 	if (pci_intr_map(pa, &ih)) {
-		printf(": unable to map interrupt\n", sc->sc_dev.dv_xname);
+		printf(": unable to map interrupt\n");
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_ih = pci_intr_establish(pc, ih, IPL_NET, pcn_intr, sc,
 	    self->dv_xname);
 	if (sc->sc_ih == NULL) {
-		printf("%s: unable to establish interrupt",
-		    sc->sc_dev.dv_xname);
+		printf(": unable to establish interrupt");
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
@@ -815,6 +819,7 @@ pcn_shutdown(void *arg)
 	struct pcn_softc *sc = arg;
 
 	pcn_stop(&sc->sc_arpcom.ac_if, 1);
+	pcn_reset(sc);
 }
 
 /*
@@ -1004,7 +1009,7 @@ pcn_start(struct ifnet *ifp)
 #if NBPFILTER > 0
 		/* Pass the packet to any BPF listeners. */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0);
+			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif /* NBPFILTER > 0 */
 	}
 
@@ -1132,7 +1137,7 @@ pcn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 
 	/* Try to get more packets going. */
@@ -1467,7 +1472,7 @@ pcn_rxintr(struct pcn_softc *sc)
 #if NBPFILTER > 0
 		/* Pass this up to any BPF listeners. */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
 
 		/* Pass it on. */

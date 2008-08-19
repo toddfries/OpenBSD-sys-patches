@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_vnode.c,v 1.40 2005/11/19 02:18:02 pedro Exp $	*/
+/*	$OpenBSD: uvm_vnode.c,v 1.43 2006/07/31 11:51:29 mickey Exp $	*/
 /*	$NetBSD: uvm_vnode.c,v 1.36 2000/11/24 20:34:01 chs Exp $	*/
 
 /*
@@ -59,6 +59,7 @@
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
 #include <sys/conf.h>
+#include <sys/rwlock.h>
 
 #include <miscfs/specfs/specdev.h>
 
@@ -78,7 +79,7 @@ static simple_lock_data_t uvn_wl_lock;		/* locks uvn_wlist */
 
 SIMPLEQ_HEAD(uvn_sq_struct, uvm_vnode);
 static struct uvn_sq_struct uvn_sync_q;		/* sync'ing uvns */
-lock_data_t uvn_sync_lock;			/* locks sync operation */
+struct rwlock uvn_sync_lock;			/* locks sync operation */
 
 /*
  * functions
@@ -135,7 +136,7 @@ uvn_init()
 	LIST_INIT(&uvn_wlist);
 	simple_lock_init(&uvn_wl_lock);
 	/* note: uvn_sync_q init'd in uvm_vnp_sync() */
-	lockinit(&uvn_sync_lock, PVM, "uvnsync", 0, 0);
+	rw_init(&uvn_sync_lock, "uvnsync");
 }
 
 /*
@@ -166,7 +167,7 @@ uvn_attach(arg, accessprot)
 	u_quad_t used_vnode_size;
 	UVMHIST_FUNC("uvn_attach"); UVMHIST_CALLED(maphist);
 
-	UVMHIST_LOG(maphist, "(vn=0x%x)", arg,0,0,0);
+	UVMHIST_LOG(maphist, "(vn=%p)", arg,0,0,0);
 
 	used_vnode_size = (u_quad_t)0;	/* XXX gcc -Wuninitialized */
 
@@ -222,7 +223,7 @@ uvn_attach(arg, accessprot)
 
 		/* unlock and return */
 		simple_unlock(&uvn->u_obj.vmobjlock);
-		UVMHIST_LOG(maphist,"<- done, refcnt=%d", uvn->u_obj.uo_refs,
+		UVMHIST_LOG(maphist,"<- done, refcnt=%ld", uvn->u_obj.uo_refs,
 		    0, 0, 0);
 		return (&uvn->u_obj);
 	}
@@ -312,7 +313,7 @@ uvn_attach(arg, accessprot)
 	if (oldflags & UVM_VNODE_WANTED)
 		wakeup(uvn);
 
-	UVMHIST_LOG(maphist,"<- done/VREF, ret 0x%x", &uvn->u_obj,0,0,0);
+	UVMHIST_LOG(maphist,"<- done/VREF, ret %p", &uvn->u_obj,0,0,0);
 	return(&uvn->u_obj);
 }
 
@@ -347,8 +348,8 @@ uvn_reference(uobj)
 	}
 #endif
 	uobj->uo_refs++;
-	UVMHIST_LOG(maphist, "<- done (uobj=0x%x, ref = %d)",
-	uobj, uobj->uo_refs,0,0);
+	UVMHIST_LOG(maphist, "<- done (uobj=%p, ref = %ld)",
+	    uobj, uobj->uo_refs,0,0);
 	simple_unlock(&uobj->vmobjlock);
 }
 
@@ -372,7 +373,7 @@ uvn_detach(uobj)
 
 	simple_lock(&uobj->vmobjlock);
 
-	UVMHIST_LOG(maphist,"  (uobj=0x%x)  ref=%d", uobj,uobj->uo_refs,0,0);
+	UVMHIST_LOG(maphist,"  (uobj=%p)  ref=%ld", uobj,uobj->uo_refs,0,0);
 	uobj->uo_refs--;			/* drop ref! */
 	if (uobj->uo_refs) {			/* still more refs */
 		simple_unlock(&uobj->vmobjlock);
@@ -528,7 +529,7 @@ uvm_vnp_terminate(vp)
 	 * lock object and check if it is valid
 	 */
 	simple_lock(&uvn->u_obj.vmobjlock);
-	UVMHIST_LOG(maphist, "  vp=0x%x, ref=%d, flag=0x%x", vp,
+	UVMHIST_LOG(maphist, "  vp=%p, ref=%ld, flag=0x%lx", vp,
 	    uvn->u_obj.uo_refs, uvn->u_flags, 0);
 	if ((uvn->u_flags & UVM_VNODE_VALID) == 0) {
 		simple_unlock(&uvn->u_obj.vmobjlock);
@@ -852,8 +853,8 @@ uvn_flush(uobj, start, stop, flags)
 	}
 
 	UVMHIST_LOG(maphist,
-	    " flush start=0x%x, stop=0x%x, by_list=%d, flags=0x%x",
-	    start, stop, by_list, flags);
+	    " flush start=0x%lx, stop=0x%lx, by_list=%ld, flags=0x%lx",
+	    (u_long)start, (u_long)stop, by_list, flags);
 
 	/*
 	 * PG_CLEANCHK: this bit is used by the pgo_mk_pcluster function as
@@ -1226,7 +1227,7 @@ ReTry:
 	}
 
 	/* return, with object locked! */
-	UVMHIST_LOG(maphist,"<- done (retval=0x%x)",retval,0,0,0);
+	UVMHIST_LOG(maphist,"<- done (retval=0x%lx)",retval,0,0,0);
 	return(retval);
 }
 
@@ -1314,7 +1315,7 @@ uvn_get(uobj, offset, pps, npagesp, centeridx, access_type, advice, flags)
 	int lcv, result, gotpages;
 	boolean_t done;
 	UVMHIST_FUNC("uvn_get"); UVMHIST_CALLED(maphist);
-	UVMHIST_LOG(maphist, "flags=%d", flags,0,0,0);
+	UVMHIST_LOG(maphist, "flags=%ld", flags,0,0,0);
 
 	/*
 	 * step 1: handled the case where fault data structures are locked.
@@ -1564,7 +1565,7 @@ uvn_io(uvn, pps, npages, flags, rw)
 	size_t got, wanted;
 	UVMHIST_FUNC("uvn_io"); UVMHIST_CALLED(maphist);
 
-	UVMHIST_LOG(maphist, "rw=%d", rw,0,0,0);
+	UVMHIST_LOG(maphist, "rw=%ld", rw,0,0,0);
 
 	/*
 	 * init values
@@ -1725,7 +1726,7 @@ uvn_io(uvn, pps, npages, flags, rw)
 	 * done!
 	 */
 
-	UVMHIST_LOG(maphist, "<- done (result %d)", result,0,0,0);
+	UVMHIST_LOG(maphist, "<- done (result %ld)", result,0,0,0);
 	if (result == 0)
 		return(VM_PAGER_OK);
 	else
@@ -1930,7 +1931,7 @@ uvm_vnp_sync(mp)
 	 * step 1: ensure we are only ones using the uvn_sync_q by locking
 	 * our lock...
 	 */
-	lockmgr(&uvn_sync_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&uvn_sync_lock);
 
 	/*
 	 * step 2: build up a simpleq of uvns of interest based on the
@@ -2025,5 +2026,5 @@ uvm_vnp_sync(mp)
 	/*
 	 * done!  release sync lock
 	 */
-	lockmgr(&uvn_sync_lock, LK_RELEASE, NULL);
+	rw_exit_write(&uvn_sync_lock);
 }

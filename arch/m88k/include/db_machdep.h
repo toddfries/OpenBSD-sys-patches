@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.7 2005/11/20 22:07:07 miod Exp $ */
+/*	$OpenBSD: db_machdep.h,v 1.10 2006/05/08 14:03:34 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -75,7 +75,7 @@ int	inst_load(u_int);
 int	inst_store(u_int);
 int	ddb_break_trap(int, db_regs_t *);
 int	ddb_entry_trap(int, db_regs_t *);
-int	m88k_print_instruction(u_int, long);	/* db_disasm.c */
+void	m88k_print_instruction(int, u_int, u_int32_t);	/* db_disasm.c */
 
 /*
  * inst_call(ins) - is the instruction a function call.
@@ -98,19 +98,12 @@ int	m88k_print_instruction(u_int, long);	/* db_disasm.c */
 
 /* breakpoint/watchpoint foo */
 #define IS_BREAKPOINT_TRAP(type,code) ((type)==T_KDB_BREAK)
-#if 0
-#define IS_WATCHPOINT_TRAP(type,code) ((type)==T_KDB_WATCH)
-#else
 #define IS_WATCHPOINT_TRAP(type,code) 0
-#endif /* T_WATCHPOINT */
 
 /* machine specific commands have been added to ddb */
 #define DB_MACHINE_COMMANDS
 
 #define	DB_AOUT_SYMBOLS
-
-#define	db_enable_interrupt(psr)	set_psr(((psr) = get_psr()) & ~PSR_IND)
-#define	db_disable_interrupt(psr)	set_psr(psr)
 
 #endif	/* DDB */
 #endif	/* _LOCORE */

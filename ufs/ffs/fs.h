@@ -1,4 +1,4 @@
-/*	$OpenBSD: fs.h,v 1.18 2005/12/28 20:48:18 pedro Exp $	*/
+/*	$OpenBSD: fs.h,v 1.24 2006/04/12 03:46:52 tedu Exp $	*/
 /*	$NetBSD: fs.h,v 1.6 1995/04/12 21:21:02 mycroft Exp $	*/
 
 /*
@@ -138,9 +138,8 @@
  * however throughput drops by fifty percent if the file system
  * is run at between 95% and 100% full; thus the minimum default
  * value of fs_minfree is 5%. However, to get good clustering
- * performance, 10% is a better choice. hence we use 10% as our
- * default value. With 10% free space, fragmentation is not a
- * problem, so we choose to optimize for time.
+ * performance, 10% is a better choice. With 5% free space,
+ * fragmentation is not a problem, so we choose to optimize for time.
  */
 #define MINFREE		5
 #define DEFAULTOPT	FS_OPTTIME
@@ -206,7 +205,7 @@ struct fs {
 	int32_t	 fs_csmask;		/* csum block offset (now unused) */
 	int32_t	 fs_csshift;		/* csum block number (now unused) */
 	int32_t	 fs_nindir;		/* value of NINDIR */
-	int32_t	 fs_inopb;		/* value of INOPB */
+	int32_t	 fs_inopb;		/* inodes per file system block */
 	int32_t	 fs_nspf;		/* value of NSPF */
 /* yet another configuration parameter */
 	int32_t	 fs_optim;		/* optimization preference, see below */
@@ -267,6 +266,8 @@ struct fs {
 /* actually longer */
 };
 
+#define	fs_opostbl_start	fs_opostbl[0][0]
+
 /*
  * Filesystem identification
  */
@@ -294,6 +295,7 @@ struct fs {
  */
 #define FS_UNCLEAN    0x01   /* filesystem not clean at mount */
 #define FS_DOSOFTDEP  0x02   /* filesystem using soft dependencies */
+#define FS_FLAGS_UPDATED 0x80	/* XXX using ffs2 style superblock */
 
 /*
  * Rotational layout table format types
@@ -303,11 +305,6 @@ struct fs {
 /*
  * Macros for access to superblock array structures
  */
-#define fs_postbl(fs, cylno) \
-    (((fs)->fs_postblformat == FS_42POSTBLFMT) \
-    ? ((fs)->fs_opostbl[cylno]) \
-    : ((int16_t *)((u_int8_t *)(fs) + \
-	(fs)->fs_postbloff) + (cylno) * (fs)->fs_nrpos))
 #define fs_rotbl(fs) \
     (((fs)->fs_postblformat == FS_42POSTBLFMT) \
     ? ((fs)->fs_space) \
@@ -359,7 +356,11 @@ struct cg {
 	int32_t	 cg_clustersumoff;	/* (u_int32) counts of avail clusters */
 	int32_t	 cg_clusteroff;		/* (u_int8) free cluster map */
 	int32_t	 cg_nclusterblks;	/* number of clusters this cg */
-	int32_t	 cg_sparecon[13];	/* reserved for future use */
+	int32_t	 cg_ffs2_niblk;		/* number of inode blocks this cg */
+	int32_t	 cg_initediblk;		/* last initialized inode */
+	int32_t	 cg_sparecon32[3];	/* reserved for future use */
+	int64_t	 cg_ffs2_time;		/* time last written */
+	int64_t	 cg_sparecon64[3];	/* reserved for future use */
 	u_int8_t cg_space[1];		/* space for cylinder group maps */
 /* actually longer */
 };
@@ -528,10 +529,9 @@ struct ocg {
 #define	NSPB(fs)	((fs)->fs_nspf << (fs)->fs_fragshift)
 #define	NSPF(fs)	((fs)->fs_nspf)
 
-/*
- * Number of inodes in a secondary storage block/fragment.
- */
+/* Number of inodes per file system block (fs->fs_bsize) */
 #define	INOPB(fs)	((fs)->fs_inopb)
+/* Number of inodes per file system fragment (fs->fs_fsize) */
 #define	INOPF(fs)	((fs)->fs_inopb >> (fs)->fs_fragshift)
 
 /*

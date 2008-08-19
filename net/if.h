@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.77 2006/02/09 00:05:55 reyk Exp $	*/
+/*	$OpenBSD: if.h,v 1.82 2006/06/02 19:53:12 mpf Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -194,6 +194,7 @@ struct ifnet {				/* and the entries */
 	short	if_timer;		/* time 'til if_watchdog called */
 	short	if_flags;		/* up/down, broadcast, etc. */
 	struct	if_data if_data;	/* stats and other data about if */
+	u_int32_t if_hardmtu;		/* maximum MTU device supports */
 	int	if_capabilities;	/* interface capabilities */
 	char	if_description[IFDESCRSIZE]; /* interface description */
 
@@ -273,17 +274,16 @@ struct ifnet {				/* and the entries */
 #define	IFCAP_VLAN_MTU		0x00000010	/* VLAN-compatible MTU */
 #define	IFCAP_VLAN_HWTAGGING	0x00000020	/* hardware VLAN tag support */
 #define	IFCAP_IPCOMP		0x00000040	/* can do IPcomp */
-#define	IFCAP_JUMBO_MTU		0x00000080	/* 9000 byte MTU supported */
-#define	IFCAP_CSUM_TCPv6	0x00000100	/* can do IPv6/TCP checksums */
-#define	IFCAP_CSUM_UDPv6	0x00000200	/* can do IPv6/UDP checksums */
-#define	IFCAP_CSUM_TCPv4_Rx	0x00000400	/* can do IPv4/TCP (Rx only) */
-#define	IFCAP_CSUM_UDPv4_Rx	0x00000800	/* can do IPv4/UDP (Rx only) */
+#define	IFCAP_CSUM_TCPv6	0x00000080	/* can do IPv6/TCP checksums */
+#define	IFCAP_CSUM_UDPv6	0x00000100	/* can do IPv6/UDP checksums */
+#define	IFCAP_CSUM_TCPv4_Rx	0x00000200	/* can do IPv4/TCP (Rx only) */
+#define	IFCAP_CSUM_UDPv4_Rx	0x00000400	/* can do IPv4/UDP (Rx only) */
 
 /*
  * Output queues (ifp->if_snd) and internetwork datagram level (pup level 1)
  * input routines have queues of messages stored on ifqueue structures
  * (defined above).  Entries are added to and deleted from these structures
- * by these macros, which should be called with ipl raised to splimp().
+ * by these macros, which should be called with ipl raised to splnet().
  */
 #define	IF_QFULL(ifq)		((ifq)->ifq_len >= (ifq)->ifq_maxlen)
 #define	IF_DROP(ifq)		((ifq)->ifq_drops++)
@@ -433,6 +433,7 @@ struct ifg_group {
 	char				 ifg_group[IFNAMSIZ];
 	u_int				 ifg_refcnt;
 	caddr_t				 ifg_pf_kif;
+	int				 ifg_carp_demoted;
 	TAILQ_HEAD(, ifg_member)	 ifg_members;
 	TAILQ_ENTRY(ifg_group)		 ifg_next;
 };
@@ -456,6 +457,10 @@ struct ifg_req {
 #define	ifgrq_member	ifgrq_ifgrqu.ifgrqu_member
 };
 
+struct ifg_attrib {
+	int	ifg_carp_demoted;
+};
+
 /*
  * Used to lookup groups for an interface
  */
@@ -463,11 +468,13 @@ struct ifgroupreq {
 	char	ifgr_name[IFNAMSIZ];
 	u_int	ifgr_len;
 	union {
-		char	ifgru_group[IFNAMSIZ];
-		struct	ifg_req *ifgru_groups;
+		char			 ifgru_group[IFNAMSIZ];
+		struct	ifg_req		*ifgru_groups;
+		struct	ifg_attrib	 ifgru_attrib;
 	} ifgr_ifgru;
 #define ifgr_group	ifgr_ifgru.ifgru_group
 #define ifgr_groups	ifgr_ifgru.ifgru_groups
+#define ifgr_attrib	ifgr_ifgru.ifgru_attrib
 };
 
 /*

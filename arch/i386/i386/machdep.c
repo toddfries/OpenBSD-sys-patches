@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.340 2006/02/22 22:16:05 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.364 2006/08/20 01:42:51 gwk Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -218,6 +218,9 @@ int	bufcachepercent = BUFCACHEPERCENT;
 
 extern int	boothowto;
 int	physmem;
+#ifndef	SMALL_KERNEL
+int pae_copy;
+#endif
 
 struct dumpmem {
 	paddr_t	start;
@@ -243,14 +246,15 @@ int	i386_has_sse2;
 int	i386_has_xcrypt;
 
 bootarg_t *bootargp;
-paddr_t avail_end;
+paddr_t avail_end, avail_end2;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 int kbd_reset;
 int p4_model;
-int p3_step;
+int p3_early;
+int bus_clock;
 int setperf_prio = 0;		/* for concurrent handlers */
 
 void (*delay_func)(int) = i8254_delay;
@@ -323,6 +327,12 @@ int allowaperture = 0;
 #endif
 #endif
 
+#ifdef	I686_PAE
+int cpu_pae = 1;
+#else
+int cpu_pae = 0;
+#endif
+
 void	winchip_cpu_setup(struct cpu_info *);
 void	amd_family5_setup(struct cpu_info *);
 void	amd_family6_setup(struct cpu_info *);
@@ -337,6 +347,9 @@ void	tm86_cpu_setup(struct cpu_info *);
 char *	intel686_cpu_name(int);
 char *	cyrix3_cpu_name(int, int);
 char *	tm86_cpu_name(int);
+void	cyrix3_get_bus_clock(struct cpu_info *);
+void	p4_get_bus_clock(struct cpu_info *);
+void	p3_get_bus_clock(struct cpu_info *);
 void	p4_update_cpuspeed(void);
 void	p3_update_cpuspeed(void);
 int	pentium_cpuspeed(int *);
@@ -416,7 +429,8 @@ cpu_startup()
 	curcpu()->ci_feature_flags = cpu_feature;
 	identifycpu(curcpu());
 
-	printf("real mem  = %u (%uK)\n", ctob(physmem), ctob(physmem)/1024U);
+	printf("real mem  = %llu (%uK)\n", ctob((paddr_t)physmem),
+	    ctob((paddr_t)physmem)/1024U);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -447,8 +461,8 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %lu (%uK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024U);
+	printf("avail mem = %llu (%uK)\n", ptoa((paddr_t)uvmexp.free),
+	    ptoa((paddr_t)uvmexp.free) / 1024U);
 	printf("using %d buffers containing %u bytes (%uK) of memory\n",
 	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
 
@@ -576,8 +590,7 @@ allocsys(v)
 }
 
 void
-setup_buffers(maxaddr)
-	vaddr_t *maxaddr;
+setup_buffers(vaddr_t *maxaddr)
 {
 	vsize_t size;
 	vaddr_t addr;
@@ -756,8 +769,9 @@ const struct cpu_cpuid_nameclass i386_cpuid_cpus[] = {
 				"Pentium III",
 				"Pentium M",
 				"Pentium III Xeon",
-				"Pentium III", 0, 0,
-				0, 0,
+				"Pentium III", 0,
+				"Pentium M",
+				"Core Duo/Solo", 0,
 				"Pentium Pro, II or III"	/* Default */
 			},
 			intel686_cpu_setup
@@ -1112,6 +1126,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_PSE36,	"PSE36" },
 	{ CPUID_SER,	"SER" },
 	{ CPUID_CFLUSH,	"CFLUSH" },
+	{ CPUID_DS,	"DS" },
 	{ CPUID_ACPI,	"ACPI" },
 	{ CPUID_MMX,	"MMX" },
 	{ CPUID_FXSR,	"FXSR" },
@@ -1127,9 +1142,12 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
+	{ CPUIDECX_DSCPL,	"DS-CPL" },
+	{ CPUIDECX_VMX,		"VMX" },
 	{ CPUIDECX_EST,		"EST" },
 	{ CPUIDECX_TM2,		"TM2" },
 	{ CPUIDECX_CNXTID,	"CNXT-ID" },
+	{ CPUIDECX_CX16,	"CX16" },
 };
 
 void
@@ -1163,6 +1181,16 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	extern void i686_pagezero(void *, size_t);
 
 	pagezero = i686_pagezero;
+
+	cyrix3_get_bus_clock(ci);
+
+	if (cpu_ecxfeature & CPUIDECX_EST) {
+		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
+			est_init(ci->ci_dev.dv_xname, CPUVENDOR_VIA);
+		else
+			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
+			    ci->ci_dev.dv_xname);
+	}
 #endif
 
 	switch (model) {
@@ -1330,7 +1358,7 @@ natsem6x86_cpureset(void)
 	 * 2) Write 0xf to PCI Configuration Data Register (0xcfc)
 	 *    to reset IDE controller, IDE bus, and PCI bus, and
 	 *    to trigger a system-wide reset.
-	 * 
+	 *
 	 * See AMD Geode SC1100 Processor Data Book, Revision 2.0,
 	 * sections 6.3.1, 6.3.2, and 6.4.1.
 	 */
@@ -1399,11 +1427,6 @@ amd_family5_setup(struct cpu_info *ci)
 	}
 }
 
-struct amd_pn_flag {
-	int mask;
-	const char *name;
-};
-
 void
 amd_family6_setup(struct cpu_info *ci)
 {
@@ -1411,42 +1434,25 @@ amd_family6_setup(struct cpu_info *ci)
 	extern void (*pagezero)(void *, size_t);
 	extern void sse2_pagezero(void *, size_t);
 	extern void i686_pagezero(void *, size_t);
-	static struct amd_pn_flag amd_pn_flags[] = {
-	    {0x01, "TS"},
-	    {0x02, "FID"},
-	    {0x04, "VID"},
-	    {0x08, "TTP"},
-	    {0x10, "TM"},
-	    {0x20, "STC"}
-	};
-	u_int regs[4];
-	int i;
+#if !defined(MULTIPROCESSOR)
+	int family = (ci->ci_signature >> 8) & 15;
+#endif
 
 	if (cpu_feature & CPUID_SSE2)
 		pagezero = sse2_pagezero;
 	else
 		pagezero = i686_pagezero;
-	cpuid(0x80000000, regs);
-	if (regs[0] > 0x80000007) {
-		cpuid(0x80000007, regs);
-		printf("%s: AMD Powernow:", ci->ci_dev.dv_xname);
-		for (i = 0; i < 6; i++) {
-			if (regs[3] & amd_pn_flags[i].mask)
-				printf(" %s", amd_pn_flags[i].name);
-		}
-		printf("\n");
 
-		if (regs[3] & 0x06) {
-			switch(ci->ci_signature & 0xF00) {
-			case 0x600:
-				k7_powernow_init();
-			break;
-			case 0xf00:
-				k8_powernow_init();
-			break;
-			}
-		}
+#if !defined(MULTIPROCESSOR)
+	switch (family) {
+	case 6:
+		k7_powernow_init();
+		break;
+	case 15:
+		k8_powernow_init();
+		break;
 	}
+#endif
 #endif
 }
 
@@ -1455,19 +1461,20 @@ intel686_common_cpu_setup(struct cpu_info *ci)
 {
 
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
-	int model = (ci->ci_signature >> 4) & 15;
+#if !defined(MULTIPROCESSOR)
+	int family = (ci->ci_signature >> 8) & 15;
 	int step = ci->ci_signature & 15;
 
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(ci->ci_dev.dv_xname);
+			est_init(ci->ci_dev.dv_xname, CPUVENDOR_INTEL);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
 			    ci->ci_dev.dv_xname);
 	} else if ((cpu_feature & (CPUID_ACPI | CPUID_TM)) ==
 	    (CPUID_ACPI | CPUID_TM))
-		p4tcc_init(model, step);
-
+		p4tcc_init(family, step);
+#endif
 	{
 	extern void (*pagezero)(void *, size_t);
 	extern void sse2_pagezero(void *, size_t);
@@ -1493,6 +1500,10 @@ intel686_cpu_setup(struct cpu_info *ci)
 	int step = ci->ci_signature & 15;
 	u_quad_t msr119;
 
+#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+	p3_get_bus_clock(ci);
+#endif
+
 	intel686_common_cpu_setup(ci);
 
 	/*
@@ -1517,7 +1528,7 @@ intel686_cpu_setup(struct cpu_info *ci)
 	}
 
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
-	p3_step = step;
+	p3_early = (model == 8 && step == 1) ? 1 : 0;
 	update_cpuspeed = p3_update_cpuspeed;
 #endif
 }
@@ -1525,6 +1536,10 @@ intel686_cpu_setup(struct cpu_info *ci)
 void
 intel686_p4_cpu_setup(struct cpu_info *ci)
 {
+#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+	p4_get_bus_clock(ci);
+#endif
+
 	intel686_common_cpu_setup(ci);
 
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
@@ -1542,8 +1557,7 @@ tm86_cpu_setup(struct cpu_info *ci)
 }
 
 char *
-intel686_cpu_name(model)
-	int model;
+intel686_cpu_name(int model)
 {
 	extern int cpu_cache_edx;
 	char *ret = NULL;
@@ -1583,8 +1597,7 @@ intel686_cpu_name(model)
 }
 
 char *
-cyrix3_cpu_name(model, step)
-	int model, step;
+cyrix3_cpu_name(int model, int step)
 {
 	char	*name = NULL;
 
@@ -1651,8 +1664,6 @@ identifycpu(struct cpu_info *ci)
 		max = sizeof (i386_cpuid_cpus) / sizeof (i386_cpuid_cpus[0]);
 		modif = (ci->ci_signature >> 12) & 3;
 		family = (ci->ci_signature >> 8) & 15;
-		if (family < CPU_MINFAMILY)
-			panic("identifycpu: strange family value");
 		model = (ci->ci_signature >> 4) & 15;
 		step = ci->ci_signature & 15;
 #ifdef CPUDEBUG
@@ -1662,6 +1673,8 @@ identifycpu(struct cpu_info *ci)
 		    cpu_device, cpuid_level, cpu_cache_eax, cpu_cache_ebx,
 		    cpu_cache_ecx, cpu_cache_edx);
 #endif
+		if (family < CPU_MINFAMILY)
+			panic("identifycpu: strange family value");
 
 		for (i = 0; i < max; i++) {
 			if (!strncmp(cpu_vendor,
@@ -1847,7 +1860,7 @@ identifycpu(struct cpu_info *ci)
 
 #ifndef SMALL_KERNEL
 #if defined(I586_CPU) || defined(I686_CPU)
-	if (pentium_mhz != 0)
+	if (pentium_mhz != 0 && cpu_cpuspeed == NULL)
 		cpu_cpuspeed = pentium_cpuspeed;
 #endif
 #endif
@@ -1945,15 +1958,14 @@ identifycpu(struct cpu_info *ci)
 }
 
 char *
-tm86_cpu_name(model)
-	int model;
+tm86_cpu_name(int model)
 {
 	u_int32_t regs[4];
 	char *name = NULL;
 
 	cpuid(0x80860001, regs);
 
-	switch(model) {
+	switch (model) {
 	case 4:
 		if (((regs[1] >> 16) & 0xff) >= 0x3)
 			name = "TMS5800";
@@ -1967,43 +1979,199 @@ tm86_cpu_name(model)
 #ifndef SMALL_KERNEL
 #ifdef I686_CPU
 void
-p4_update_cpuspeed(void)
+cyrix3_get_bus_clock(struct cpu_info *ci)
 {
 	u_int64_t msr;
-	int bus, mult, freq;
+	int bus;
 
+	msr = rdmsr(MSR_EBL_CR_POWERON);
+	bus = (msr >> 18) & 0x3;
+	switch (bus) {
+	case 0:
+		bus_clock = 10000;
+		break;
+	case 1:
+		bus_clock = 13333;
+		break;
+	case 2:
+		bus_clock = 20000;
+		break;
+	case 3:
+		bus_clock = 16666;
+		break;
+	}
+}
+
+void
+p4_get_bus_clock(struct cpu_info *ci)
+{
+	u_int64_t msr;
+	int model, bus;
+
+	model = (ci->ci_signature >> 4) & 15;
 	msr = rdmsr(MSR_EBC_FREQUENCY_ID);
-	if (p4_model < 2) {
+	if (model < 2) {
 		bus = (msr >> 21) & 0x7;
 		switch (bus) {
 		case 0:
-			bus = 100;
+			bus_clock = 10000;
 			break;
 		case 1:
-			bus = 133;
+			bus_clock = 13333;
+			break;
+		default:
+			printf("%s: unknown Pentium 4 (model %d) "
+			    "EBC_FREQUENCY_ID value %d\n",
+			    ci->ci_dev.dv_xname, model, bus);
 			break;
 		}
 	} else {
 		bus = (msr >> 16) & 0x7;
 		switch (bus) {
 		case 0:
-			bus = 100;
+			bus_clock = (model == 2) ? 10000 : 26666;
 			break;
 		case 1:
-			bus = 133;
+			bus_clock = 13333;
 			break;
 		case 2:
-			bus = 200;
+			bus_clock = 20000;
+			break;
+		case 3:
+			bus_clock = 16666;
+			break;
+		default:
+			printf("%s: unknown Pentium 4 (model %d) "
+			    "EBC_FREQUENCY_ID value %d\n",
+			    ci->ci_dev.dv_xname, model, bus);
+			break;
+		}
+	}
+}
+
+void
+p3_get_bus_clock(struct cpu_info *ci)
+{
+	u_int64_t msr;
+	int model, bus;
+
+	model = (ci->ci_signature >> 4) & 15;
+	switch (model) {
+	case 0x9: /* Pentium M (130 nm, Banias) */
+		bus_clock = 10000;
+		break;
+	case 0xd: /* Pentium M (90 nm, Dothan) */
+		msr = rdmsr(MSR_FSB_FREQ);
+		bus = (msr >> 0) & 0x7;
+		switch (bus) {
+		case 0:
+			bus_clock = 10000;
+			break;
+		case 1:
+			bus_clock = 13333;
+			break;
+		default:
+			printf("%s: unknown Pentium M FSB_FREQ value %d",
+			    ci->ci_dev.dv_xname, bus);
+			goto print_msr;
+		}
+		break;
+	case 0xe: /* Core Duo/Solo */
+	case 0xf: /* Core Xeon */
+		msr = rdmsr(MSR_FSB_FREQ);
+		bus = (msr >> 0) & 0x7;
+		switch (bus) {
+		case 5:
+			bus_clock = 10000;
+			break;
+		case 1:
+			bus_clock = 13333;
+			break;
+		case 3:
+			bus_clock = 16666;
+			break;
+		case 4:
+			bus_clock = 33333;
+			break;
+		default:
+			printf("%s: unknown Core FSB_FREQ value %d",
+			    ci->ci_dev.dv_xname, bus);
+			goto print_msr;
+		}
+		break;
+	case 0x1: /* Pentium Pro, model 1 */
+	case 0x3: /* Pentium II, model 3 */
+	case 0x5: /* Pentium II, II Xeon, Celeron, model 5 */
+	case 0x6: /* Celeron, model 6 */
+	case 0x7: /* Pentium III, III Xeon, model 7 */
+	case 0x8: /* Pentium III, III Xeon, Celeron, model 8 */
+	case 0xa: /* Pentium III Xeon, model A */
+	case 0xb: /* Pentium III, model B */
+		msr = rdmsr(MSR_EBL_CR_POWERON);
+		bus = (msr >> 18) & 0x3;
+		switch (bus) {
+		case 0:
+			bus_clock = 6666;
+			break;
+		case 1:
+			bus_clock = 13333;
+			break;
+		case 2:
+			bus_clock = 10000;
+			break;
+		default:
+			printf("%s: unknown i686 EBL_CR_POWERON value %d",
+			    ci->ci_dev.dv_xname, bus);
+			goto print_msr;
+		}
+		break;
+	default: 
+		printf("%s: unknown i686 model %d, can't get bus clock",
+		    ci->ci_dev.dv_xname, model);
+print_msr:
+		/*
+		 * Show the EBL_CR_POWERON MSR, so we'll at least have
+		 * some extra information, such as clock ratio, etc.
+		 */
+		printf(" (0x%llx)\n", rdmsr(MSR_EBL_CR_POWERON));
+		break;
+	}
+}
+
+void
+p4_update_cpuspeed(void)
+{
+	u_int64_t msr;
+	int bus, mult;
+
+	msr = rdmsr(MSR_EBC_FREQUENCY_ID);
+	if (p4_model < 2) {
+		bus = (msr >> 21) & 0x7;
+		switch (bus) {
+		case 0:
+			bus = 10000;
+			break;
+		case 1:
+			bus = 13333;
+			break;
+		}
+	} else {
+		bus = (msr >> 16) & 0x7;
+		switch (bus) {
+		case 0:
+			bus = 10000;
+			break;
+		case 1:
+			bus = 13333;
+			break;
+		case 2:
+			bus = 20000;
 			break;
 		}
 	}
 	mult = ((msr >> 24) & 0xff);
-	freq = bus * mult;
-	/* 133MHz actually means 133.(3)MHz */
-	if (bus == 133)
-		freq += mult / 3;
 
-	pentium_mhz = freq;
+	pentium_mhz = bus * mult / 100;
 }
 
 void
@@ -2018,22 +2186,22 @@ p3_update_cpuspeed(void)
 	bus = (msr >> 18) & 0x3;
 	switch (bus) {
 	case 0:
-		bus = 66;
+		bus = 6666;
 		break;
 	case 1:
-		bus = 133;
+		bus = 13333;
 		break;
 	case 2:
-		bus = 100;
+		bus = 10000;
 		break;
 	}
 
 	mult = (msr >> 22) & 0xf;
 	mult = mult_code[mult];
-	if (p3_step > 1)
+	if (!p3_early)
 		mult += ((msr >> 27) & 0x1) * 40;
 
-	pentium_mhz = (bus * mult) / 10;
+	pentium_mhz = (bus * mult) / 1000;
 }
 #endif	/* I686_CPU */
 
@@ -2051,12 +2219,8 @@ pentium_cpuspeed(int *freq)
 void ibcs2_sendsig(sig_t, int, int, u_long, int, union sigval);
 
 void
-ibcs2_sendsig(catcher, sig, mask, code, type, val)
-	sig_t catcher;
-	int sig, mask;
-	u_long code;
-	int type;
-	union sigval val;
+ibcs2_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
+    union sigval val)
 {
 	extern int bsd_to_ibcs2_sig[];
 
@@ -2075,12 +2239,8 @@ ibcs2_sendsig(catcher, sig, mask, code, type, val)
  * specified pc, psl.
  */
 void
-sendsig(catcher, sig, mask, code, type, val)
-	sig_t catcher;
-	int sig, mask;
-	u_long code;
-	int type;
-	union sigval val;
+sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
+    union sigval val)
 {
 #ifdef I686_CPU
 	extern char sigcode, sigcode_xmm;
@@ -2202,10 +2362,7 @@ sendsig(catcher, sig, mask, code, type, val)
  * a machine fault.
  */
 int
-sys_sigreturn(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
+sys_sigreturn(struct proc *p, void *v, register_t *retval)
 {
 	struct sys_sigreturn_args /* {
 		syscallarg(struct sigcontext *) sigcntxp;
@@ -2278,8 +2435,7 @@ int	waittime = -1;
 struct pcb dumppcb;
 
 void
-boot(howto)
-	int howto;
+boot(int howto)
 {
 	if (cold) {
 		/*
@@ -2324,11 +2480,13 @@ haltsys:
 
 	if (howto & RB_HALT) {
 #if NACPI > 0
-		extern int acpi_s5;
+		extern int acpi_s5, acpi_enabled;
 
-		delay(500000);
-		if (howto & RB_POWERDOWN || acpi_s5)
-			acpi_powerdown();
+		if (acpi_enabled) {
+			delay(500000);
+			if (howto & RB_POWERDOWN || acpi_s5)
+				acpi_powerdown();
+		}
 #endif
 
 #if NAPM > 0
@@ -2552,8 +2710,7 @@ dumpsys()
  * for HZ=100.
  */
 void
-i8254_microtime(tvp)
-	register struct timeval *tvp;
+i8254_microtime(struct timeval *tvp)
 {
 	int s = splhigh();
 
@@ -2571,11 +2728,8 @@ i8254_microtime(tvp)
  * Clear registers on exec
  */
 void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
+setregs(struct proc *p, struct exec_package *pack, u_long stack,
+    register_t *retval)
 {
 	struct pcb *pcb = &p->p_addr->u_pcb;
 	struct pmap *pmap = vm_map_pmap(&p->p_vmspace->vm_map);
@@ -2648,10 +2802,8 @@ struct gate_descriptor *idt = idt_region;
 extern  struct user *proc0paddr;
 
 void
-setgate(gd, func, args, type, dpl, seg)
-	struct gate_descriptor *gd;
-	void *func;
-	int args, type, dpl, seg;
+setgate(struct gate_descriptor *gd, void *func, int args, int type, int dpl,
+    int seg)
 {
 
 	gd->gd_looffset = (int)func;
@@ -2665,8 +2817,7 @@ setgate(gd, func, args, type, dpl, seg)
 }
 
 void
-unsetgate(gd)
-	struct gate_descriptor *gd;
+unsetgate(struct gate_descriptor *gd)
 {
 	gd->gd_p = 0;
 	gd->gd_hioffset = 0;
@@ -2679,10 +2830,7 @@ unsetgate(gd)
 }
 
 void
-setregion(rd, base, limit)
-	struct region_descriptor *rd;
-	void *base;
-	size_t limit;
+setregion(struct region_descriptor *rd, void *base, size_t limit)
 {
 
 	rd->rd_limit = (int)limit;
@@ -2690,11 +2838,8 @@ setregion(rd, base, limit)
 }
 
 void
-setsegment(sd, base, limit, type, dpl, def32, gran)
-	struct segment_descriptor *sd;
-	void *base;
-	size_t limit;
-	int type, dpl, def32, gran;
+setsegment(struct segment_descriptor *sd, void *base, size_t limit, int type,
+    int dpl, int def32, int gran)
 {
 
 	sd->sd_lolimit = (int)limit;
@@ -2726,7 +2871,6 @@ fix_f00f(void)
 {
 	struct region_descriptor region;
 	vaddr_t va;
-	pt_entry_t *pte;
 	void *p;
 
 	/* Allocate two new pages */
@@ -2742,8 +2886,7 @@ fix_f00f(void)
 	    GCODE_SEL);
 
 	/* Map first page RO */
-	pte = PTE_BASE + atop(va);
-	*pte &= ~PG_RW;
+	pmap_pte_setbits(va, 0, PG_RW);
 
 	/* Reload idtr */
 	setregion(&region, idt, sizeof(idt_region) - 1);
@@ -2793,7 +2936,7 @@ cpu_init_ldt(struct cpu_info *ci)
 void
 init386(paddr_t first_avail)
 {
-	int i;
+	int i, kb;
 	struct region_descriptor region;
 	bios_memmap_t *im;
 
@@ -2898,11 +3041,11 @@ init386(paddr_t first_avail)
 		if (bootargc > NBPG)
 			panic("too many boot args");
 
-		if (extent_alloc_region(iomem_ex, (paddr_t)bootargv, bootargc,
+		if (extent_alloc_region(iomem_ex, (u_long)bootargv, bootargc,
 		    EX_NOWAIT))
 			panic("cannot reserve /boot args memory");
 
-		pmap_enter(pmap_kernel(), (vaddr_t)bootargp, (paddr_t)bootargv,
+		pmap_enter(pmap_kernel(), (vaddr_t)bootargp, (u_long)bootargv,
 		    VM_PROT_READ|VM_PROT_WRITE,
 		    VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
 
@@ -2914,15 +3057,6 @@ init386(paddr_t first_avail)
 #ifdef DIAGNOSTIC
 	if (bios_memmap == NULL)
 		panic("no BIOS memory map supplied");
-#endif
-
-#if defined(MULTIPROCESSOR)
-	/* install the page after boot args as PT page for first 4M */
-	pmap_enter(pmap_kernel(), (u_long)vtopte(0),
-	   round_page((vaddr_t)(bootargv + bootargc)),
-		VM_PROT_READ|VM_PROT_WRITE,
-		VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
-	memset(vtopte(0), 0, NBPG);  /* make sure it is clean before using */
 #endif
 
 	/*
@@ -2937,30 +3071,15 @@ init386(paddr_t first_avail)
 	for(i = 0, im = bios_memmap; im->type != BIOS_MAP_END; im++)
 		if (im->type == BIOS_MAP_FREE) {
 			register paddr_t a, e;
-#ifdef DEBUG
-			printf(" %llx-%llx", im->addr, im->addr + im->size);
-#endif
-
-			if (im->addr >= 0x100000000ULL) {
-#ifdef DEBUG
-				printf("-H");
-#endif
-				continue;
-			}
 
 			a = round_page(im->addr);
-			if (im->addr + im->size <= 0xfffff000ULL)
-				e = trunc_page(im->addr + im->size);
-			else {
+			e = trunc_page(im->addr + im->size);
 #ifdef DEBUG
-				printf("-T");
+			printf(" %llx-%llx", a, e);
 #endif
-				e = 0xfffff000;
-			}
-
-			/* skip first four pages */
-			if (a < 5 * NBPG)
-				a = 5 * NBPG;
+			/* skip first eight pages */
+			if (a < 8 * NBPG)
+				a = 8 * NBPG;
 
 			/* skip shorter than page regions */
 			if (a >= e || (e - a) < NBPG) {
@@ -2977,7 +3096,16 @@ init386(paddr_t first_avail)
 				continue;
 			}
 
-			if (extent_alloc_region(iomem_ex, a, e - a, EX_NOWAIT))
+			if (a >= 0x100000000ULL) {
+#ifdef DEBUG
+				printf("-H");
+#endif
+				if (!cpu_pae)
+					continue;
+			}
+
+			if (e <= 0x100000000ULL &&
+			    extent_alloc_region(iomem_ex, a, e - a, EX_NOWAIT))
 				/* XXX What should we do? */
 				printf("\nWARNING: CAN'T ALLOCATE RAM (%x-%x)"
 				    " FROM IOMEM EXTENT MAP!\n", a, e);
@@ -2986,11 +3114,15 @@ init386(paddr_t first_avail)
 			dumpmem[i].start = atop(a);
 			dumpmem[i].end = atop(e);
 			i++;
-			avail_end = max(avail_end, e);
+			avail_end2 = MAX(avail_end2, e);
+			if (avail_end2 < 0x100000000ULL)
+				avail_end = avail_end2;
 		}
 
 	ndumpmem = i;
 	avail_end -= round_page(MSGBUFSIZE);
+	if (avail_end2 < 0x100000000ULL)
+		avail_end2 = avail_end;
 
 #ifdef DEBUG
 	printf(": %lx\n", avail_end);
@@ -3004,6 +3136,15 @@ init386(paddr_t first_avail)
 #ifdef DEBUG
 	printf("physload: ");
 #endif
+	kb = atop(KERNTEXTOFF - KERNBASE);
+	if (kb > atop(0x100000)) {
+		paddr_t lim = atop(0x100000);
+#ifdef DEBUG
+		printf(" %x-%x (<16M)", lim, kb);
+#endif
+		uvm_page_physload(lim, kb, lim, kb, VM_FREELIST_FIRST16);
+	}
+
 	for (i = 0; i < ndumpmem; i++) {
 		paddr_t a, e;
 		paddr_t lim;
@@ -3012,30 +3153,34 @@ init386(paddr_t first_avail)
 		e = dumpmem[i].end;
 		if (a < atop(first_avail) && e > atop(first_avail))
 			a = atop(first_avail);
-		if (e > atop(avail_end))
+		if (a < atop(avail_end) && e > atop(avail_end))
 			e = atop(avail_end);
 
 		if (a < e) {
 			if (a < atop(16 * 1024 * 1024)) {
 				lim = MIN(atop(16 * 1024 * 1024), e);
 #ifdef DEBUG
-				printf(" %x-%x (<16M)", a, lim);
+				printf(" %llx-%llx (<16M)", a, lim);
 #endif
 				uvm_page_physload(a, lim, a, lim,
 				    VM_FREELIST_FIRST16);
 				if (e > lim) {
 #ifdef DEBUG
-					printf(" %x-%x", lim, e);
+					printf(" %llx-%llx", lim, e);
 #endif
 					uvm_page_physload(lim, e, lim, e,
 					    VM_FREELIST_DEFAULT);
 				}
 			} else {
 #ifdef DEBUG
-				printf(" %x-%x", a, e);
+				printf(" %llx-%llx", a, e);
 #endif
-				uvm_page_physload(a, e, a, e,
-				    VM_FREELIST_DEFAULT);
+				if (a >= atop(0x100000000ULL))
+					uvm_page_physload(a, e, a, a - 1,
+					    VM_FREELIST_ABOVE4G);
+				else
+					uvm_page_physload(a, e, a, e,
+					    VM_FREELIST_DEFAULT);
 			}
 		}
 	}
@@ -3087,9 +3232,7 @@ init386(paddr_t first_avail)
  * understand and, if so, set up the vmcmds for it.
  */
 int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
+cpu_exec_aout_makecmds(struct proc *p, struct exec_package *epp)
 {
 	return ENOEXEC;
 }
@@ -3213,14 +3356,8 @@ idt_vec_free(int vec)
  * machine dependent system variables.
  */
 int
-cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
-	struct proc *p;
+cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen, struct proc *p)
 {
 	extern char cpu_vendor[];
 	extern int cpu_id;
@@ -3257,8 +3394,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_ALLOWAPERTURE:
 #ifdef APERTURE
 		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp,
-			    allowaperture));
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &allowaperture));
 		else
 			return (sysctl_int(oldp, oldlenp, newp, newlen,
 			    &allowaperture));
@@ -3304,12 +3441,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 }
 
 int
-bus_space_map(t, bpa, size, cacheable, bshp)
-	bus_space_tag_t t;
-	bus_addr_t bpa;
-	bus_size_t size;
-	int cacheable;
-	bus_space_handle_t *bshp;
+bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size, int cacheable,
+    bus_space_handle_t *bshp)
 {
 	int error;
 	struct extent *ex;
@@ -3370,12 +3503,8 @@ bus_space_map(t, bpa, size, cacheable, bshp)
 }
 
 int
-_bus_space_map(t, bpa, size, cacheable, bshp)
-	bus_space_tag_t t;
-	bus_addr_t bpa;
-	bus_size_t size;
-	int cacheable;
-	bus_space_handle_t *bshp;
+_bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
+    int cacheable, bus_space_handle_t *bshp)
 {
 	/*
 	 * For I/O space, that's all she wrote.
@@ -3393,14 +3522,9 @@ _bus_space_map(t, bpa, size, cacheable, bshp)
 }
 
 int
-bus_space_alloc(t, rstart, rend, size, alignment, boundary, cacheable,
-    bpap, bshp)
-	bus_space_tag_t t;
-	bus_addr_t rstart, rend;
-	bus_size_t size, alignment, boundary;
-	int cacheable;
-	bus_addr_t *bpap;
-	bus_space_handle_t *bshp;
+bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart, bus_addr_t rend,
+    bus_size_t size, bus_size_t alignment, bus_size_t boundary,
+    int cacheable, bus_addr_t *bpap, bus_space_handle_t *bshp)
 {
 	struct extent *ex;
 	u_long bpa;
@@ -3466,15 +3590,12 @@ bus_space_alloc(t, rstart, rend, size, alignment, boundary, cacheable,
 }
 
 int
-bus_mem_add_mapping(bpa, size, cacheable, bshp)
-	bus_addr_t bpa;
-	bus_size_t size;
-	int cacheable;
-	bus_space_handle_t *bshp;
+bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
+    bus_space_handle_t *bshp)
 {
 	u_long pa, endpa;
+	u_int32_t bits;
 	vaddr_t va;
-	pt_entry_t *pte;
 	bus_size_t map_size;
 #ifdef MULTIPROCESSOR
 	u_int32_t cpumask = 0;
@@ -3506,13 +3627,12 @@ bus_mem_add_mapping(bpa, size, cacheable, bshp)
 		 * on those machines.
 		 */
 		if (cpu_class != CPUCLASS_386) {
-			pte = kvtopte(va);
 			if (cacheable)
-				*pte &= ~PG_N;
+				bits = pmap_pte_setbits(va, 0, PG_N);
 			else
-				*pte |= PG_N;
+				bits = pmap_pte_setbits(va, PG_N, 0);
 #ifdef MULTIPROCESSOR
-			pmap_tlb_shootdown(pmap_kernel(), va, *pte,
+			pmap_tlb_shootdown(pmap_kernel(), va, bits,
 			    &cpumask);
 #else
 			pmap_update_pg(va);
@@ -3528,14 +3648,11 @@ bus_mem_add_mapping(bpa, size, cacheable, bshp)
 }
 
 void
-bus_space_unmap(t, bsh, size)
-	bus_space_tag_t t;
-	bus_space_handle_t bsh;
-	bus_size_t size;
+bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
 	struct extent *ex;
 	u_long va, endva;
-	bus_addr_t bpa;
+	paddr_t bpa;
 
 	/*
 	 * Find the correct extent and bus physical address.
@@ -3545,7 +3662,7 @@ bus_space_unmap(t, bsh, size)
 		bpa = bsh;
 	} else if (t == I386_BUS_SPACE_MEM) {
 		ex = iomem_ex;
-		bpa = (bus_addr_t)ISA_PHYSADDR(bsh);
+		bpa = (u_long)ISA_PHYSADDR(bsh);
 		if (IOM_BEGIN <= bpa && bpa <= IOM_END)
 			goto ok;
 
@@ -3581,7 +3698,7 @@ _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
     bus_addr_t *adrp)
 {
 	u_long va, endva;
-	bus_addr_t bpa;
+	paddr_t bpa;
 
 	/*
 	 * Find the correct bus physical address.
@@ -3589,7 +3706,7 @@ _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
 	if (t == I386_BUS_SPACE_IO) {
 		bpa = bsh;
 	} else if (t == I386_BUS_SPACE_MEM) {
-		bpa = (bus_addr_t)ISA_PHYSADDR(bsh);
+		bpa = (u_long)ISA_PHYSADDR(bsh);
 		if (IOM_BEGIN <= bpa && bpa <= IOM_END)
 			goto ok;
 
@@ -3612,16 +3729,12 @@ _bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size,
 		panic("bus_space_unmap: bad bus space tag");
 
 ok:
-	if (adrp != NULL) {
+	if (adrp != NULL)
 		*adrp = bpa;
-	}
 }
 
 void
-bus_space_free(t, bsh, size)
-	bus_space_tag_t t;
-	bus_space_handle_t bsh;
-	bus_size_t size;
+bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 {
 
 	/* bus_space_unmap() does all that we need to do. */
@@ -3629,11 +3742,8 @@ bus_space_free(t, bsh, size)
 }
 
 int
-bus_space_subregion(t, bsh, offset, size, nbshp)
-	bus_space_tag_t t;
-	bus_space_handle_t bsh;
-	bus_size_t offset, size;
-	bus_space_handle_t *nbshp;
+bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
+    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp)
 {
 	*nbshp = bsh + offset;
 	return (0);
@@ -3644,18 +3754,13 @@ bus_space_subregion(t, bsh, offset, size, nbshp)
  * DMA map creation functions.
  */
 int
-_bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
-	bus_dma_tag_t t;
-	bus_size_t size;
-	int nsegments;
-	bus_size_t maxsegsz;
-	bus_size_t boundary;
-	int flags;
-	bus_dmamap_t *dmamp;
+_bus_dmamap_create(bus_dma_tag_t t, bus_size_t size, int nsegments,
+    bus_size_t maxsegsz, bus_size_t boundary, int flags, bus_dmamap_t *dmamp)
 {
 	struct i386_bus_dmamap *map;
 	void *mapstore;
 	size_t mapsize;
+	int npages;
 
 	/*
 	 * Allocate and initialize the DMA map.  The end of the map
@@ -3671,6 +3776,17 @@ _bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
 	 */
 	mapsize = sizeof(struct i386_bus_dmamap) +
 	    (sizeof(bus_dma_segment_t) * (nsegments - 1));
+	npages = 0;
+#ifndef SMALL_KERNEL
+	if (avail_end2 > avail_end &&
+	    (flags & (BUS_DMA_64BIT|BUS_DMA_24BIT)) == 0) {
+		/* this many pages plus one in case we get split */
+		npages = round_page(size) / PAGE_SIZE + 1;
+		if (npages < nsegments)  /* looks stupid, but possible */
+			npages = nsegments;
+		mapsize += sizeof(struct vm_page *) * npages;
+	}
+#endif /* !SMALL_KERNEL */
 	if ((mapstore = malloc(mapsize, M_DEVBUF,
 	    (flags & BUS_DMA_NOWAIT) ? M_NOWAIT : M_WAITOK)) == NULL)
 		return (ENOMEM);
@@ -3681,9 +3797,54 @@ _bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
 	map->_dm_segcnt = nsegments;
 	map->_dm_maxsegsz = maxsegsz;
 	map->_dm_boundary = boundary;
+	map->_dm_pages = npages? (void *)&map->dm_segs[nsegments] : NULL;
+	map->_dm_npages = npages;
 	map->_dm_flags = flags & ~(BUS_DMA_WAITOK|BUS_DMA_NOWAIT);
 	map->dm_mapsize = 0;		/* no valid mappings */
 	map->dm_nsegs = 0;
+
+#ifndef SMALL_KERNEL
+	if (npages) {
+		struct pglist mlist;
+		vaddr_t va;
+		int error;
+
+		size = npages << PGSHIFT;
+		va = uvm_km_valloc(kernel_map, size);
+		if (va == 0) {
+			map->_dm_npages = 0;
+			free(map, M_DEVBUF);
+			return (ENOMEM);
+		}
+
+		TAILQ_INIT(&mlist);
+		/* if not a 64bit map -- allocate some bouncy-bouncy */
+		error = uvm_pglistalloc(size,
+		    round_page(ISA_DMA_BOUNCE_THRESHOLD), 0xfffff000,
+		    PAGE_SIZE, boundary, &mlist, nsegments,
+		    (flags & BUS_DMA_NOWAIT) == 0);
+		if (error) {
+			map->_dm_npages = 0;
+			uvm_km_free(kernel_map, (vaddr_t)va, size);
+			free(map, M_DEVBUF);
+			return (ENOMEM);
+		} else {
+			struct vm_page **pg = map->_dm_pages;
+
+			npages--;
+			*pg = TAILQ_FIRST(&mlist);
+			pmap_kenter_pa(va, VM_PAGE_TO_PHYS(*pg),
+			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			for (pg++, va += PAGE_SIZE; npages--;
+			    pg++, va += PAGE_SIZE) {
+				*pg = TAILQ_NEXT(pg[-1], pageq);
+				pmap_kenter_pa(va, VM_PAGE_TO_PHYS(*pg),
+				    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
+			}
+		}
+		map->_dm_pgva = va;
+	}
+#endif /* !SMALL_KERNEL */
 
 	*dmamp = map;
 	return (0);
@@ -3694,9 +3855,7 @@ _bus_dmamap_create(t, size, nsegments, maxsegsz, boundary, flags, dmamp)
  * DMA map destruction functions.
  */
 void
-_bus_dmamap_destroy(t, map)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
+_bus_dmamap_destroy(bus_dma_tag_t t, bus_dmamap_t map)
 {
 
 	free(map, M_DEVBUF);
@@ -3707,15 +3866,10 @@ _bus_dmamap_destroy(t, map)
  * be called by bus-specific DMA map load functions.
  */
 int
-_bus_dmamap_load(t, map, buf, buflen, p, flags)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
-	void *buf;
-	bus_size_t buflen;
-	struct proc *p;
-	int flags;
+_bus_dmamap_load(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
+    bus_size_t buflen, struct proc *p, int flags)
 {
-	bus_addr_t lastaddr;
+	paddr_t lastaddr;
 	int seg, error;
 
 	/*
@@ -3741,11 +3895,8 @@ _bus_dmamap_load(t, map, buf, buflen, p, flags)
  * Like _bus_dmamap_load(), but for mbufs.
  */
 int
-_bus_dmamap_load_mbuf(t, map, m0, flags)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
-	struct mbuf *m0;
-	int flags;
+_bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m0,
+    int flags)
 {
 	paddr_t lastaddr;
 	int seg, error, first;
@@ -3786,11 +3937,8 @@ _bus_dmamap_load_mbuf(t, map, m0, flags)
  * Like _bus_dmamap_load(), but for uios.
  */
 int
-_bus_dmamap_load_uio(t, map, uio, flags)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
-	struct uio *uio;
-	int flags;
+_bus_dmamap_load_uio(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
+    int flags)
 {
 	paddr_t lastaddr;
 	int seg, i, error, first;
@@ -3848,13 +3996,8 @@ _bus_dmamap_load_uio(t, map, uio, flags)
  * bus_dmamem_alloc().
  */
 int
-_bus_dmamap_load_raw(t, map, segs, nsegs, size, flags)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
-	bus_dma_segment_t *segs;
-	int nsegs;
-	bus_size_t size;
-	int flags;
+_bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map, bus_dma_segment_t *segs,
+    int nsegs, bus_size_t size, int flags)
 {
 	if (nsegs > map->_dm_segcnt || size > map->_dm_size)
 		return (EINVAL);
@@ -3885,9 +4028,7 @@ _bus_dmamap_load_raw(t, map, segs, nsegs, size, flags)
  * bus-specific DMA map unload functions.
  */
 void
-_bus_dmamap_unload(t, map)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
+_bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 {
 
 	/*
@@ -3896,6 +4037,7 @@ _bus_dmamap_unload(t, map)
 	 */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
+	map->_dm_nused = 0;
 }
 
 /*
@@ -3903,15 +4045,43 @@ _bus_dmamap_unload(t, map)
  * by bus-specific DMA map synchronization functions.
  */
 void
-_bus_dmamap_sync(t, map, addr, size, op)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
-	bus_addr_t addr;
-	bus_size_t size;
-	int op;
+_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t offset,
+    bus_size_t size, int op)
 {
+#ifndef SMALL_KERNEL
+	bus_dma_segment_t *sg;
+	int i, off = offset;
+	bus_size_t l;
 
-	/* Nothing to do here. */
+	/* scan the segment list performing necessary copies */
+	if (!(map->_dm_flags & BUS_DMA_64BIT) && map->_dm_nused) {
+		for (i = map->_dm_segcnt, sg = map->dm_segs;
+		    size && i--; sg++) {
+			if (off >= sg->ds_len) {
+				off -= sg->ds_len;
+				continue;
+			}
+
+			l = sg->ds_len - off;
+			if (l > size)
+				l = size;
+			size -= l;
+			if (sg->ds_addr2) {
+				if (op & BUS_DMASYNC_POSTREAD) {
+					bcopy((void *)(sg->ds_va2 + off),
+					    (void *)(sg->ds_va + off), l);
+					pae_copy++;
+				}
+				if (op & BUS_DMASYNC_PREWRITE) {
+					bcopy((void *)(sg->ds_va + off),
+					    (void *)(sg->ds_va2 + off), l);
+					pae_copy++;
+				}
+			}
+			off = 0;
+		}
+	}
+#endif /* !SMALL_KERNEL */
 }
 
 /*
@@ -3919,13 +4089,9 @@ _bus_dmamap_sync(t, map, addr, size, op)
  * by bus-specific DMA memory allocation functions.
  */
 int
-_bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
-	bus_dma_tag_t t;
-	bus_size_t size, alignment, boundary;
-	bus_dma_segment_t *segs;
-	int nsegs;
-	int *rsegs;
-	int flags;
+_bus_dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
+    bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
+    int flags)
 {
 
 	return (_bus_dmamem_alloc_range(t, size, alignment, boundary,
@@ -3937,10 +4103,7 @@ _bus_dmamem_alloc(t, size, alignment, boundary, segs, nsegs, rsegs, flags)
  * bus-specific DMA memory free functions.
  */
 void
-_bus_dmamem_free(t, segs, nsegs)
-	bus_dma_tag_t t;
-	bus_dma_segment_t *segs;
-	int nsegs;
+_bus_dmamem_free(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs)
 {
 	struct vm_page *m;
 	bus_addr_t addr;
@@ -3968,13 +4131,8 @@ _bus_dmamem_free(t, segs, nsegs)
  * bus-specific DMA memory map functions.
  */
 int
-_bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
-	bus_dma_tag_t t;
-	bus_dma_segment_t *segs;
-	int nsegs;
-	size_t size;
-	caddr_t *kvap;
-	int flags;
+_bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
+    size_t size, caddr_t *kvap, int flags)
 {
 	vaddr_t va;
 	bus_addr_t addr;
@@ -4008,10 +4166,7 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
  * bus-specific DMA memory unmapping functions.
  */
 void
-_bus_dmamem_unmap(t, kva, size)
-	bus_dma_tag_t t;
-	caddr_t kva;
-	size_t size;
+_bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 {
 
 #ifdef DIAGNOSTIC
@@ -4028,12 +4183,8 @@ _bus_dmamem_unmap(t, kva, size)
  * bus-specific DMA mmap(2)'ing functions.
  */
 paddr_t
-_bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
-	bus_dma_tag_t t;
-	bus_dma_segment_t *segs;
-	int nsegs;
-	off_t off;
-	int prot, flags;
+_bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
+    int prot, int flags)
 {
 	int i;
 
@@ -4069,20 +4220,13 @@ _bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
  * first indicates if this is the first invocation of this function.
  */
 int
-_bus_dmamap_load_buffer(t, map, buf, buflen, p, flags, lastaddrp, segp, first)
-	bus_dma_tag_t t;
-	bus_dmamap_t map;
-	void *buf;
-	bus_size_t buflen;
-	struct proc *p;
-	int flags;
-	paddr_t *lastaddrp;
-	int *segp;
-	int first;
+_bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
+    bus_size_t buflen, struct proc *p, int flags, paddr_t *lastaddrp, int *segp,
+    int first)
 {
 	bus_size_t sgsize;
-	bus_addr_t curaddr, lastaddr, baddr, bmask;
-	vaddr_t vaddr = (vaddr_t)buf;
+	paddr_t curaddr, lastaddr, oaddr, baddr, bmask;
+	vaddr_t pgva, vaddr = (vaddr_t)buf;
 	int seg;
 	pmap_t pmap;
 
@@ -4098,7 +4242,24 @@ _bus_dmamap_load_buffer(t, map, buf, buflen, p, flags, lastaddrp, segp, first)
 		/*
 		 * Get the physical address for this segment.
 		 */
-		pmap_extract(pmap, vaddr, (paddr_t *)&curaddr);
+		pmap_extract(pmap, vaddr, &curaddr);
+		oaddr = 0;
+		pgva  = 0;
+#ifndef SMALL_KERNEL
+		if (!(map->_dm_flags & BUS_DMA_64BIT) &&
+		    curaddr >= 0x100000000ULL) {
+			struct vm_page *pg;
+			int page, off;
+			
+			if (map->_dm_nused + 1 >= map->_dm_npages)
+				return (ENOMEM);
+			off = vaddr & PAGE_MASK;
+			pg = map->_dm_pages[page = map->_dm_nused++];
+			oaddr = curaddr;
+			curaddr = VM_PAGE_TO_PHYS(pg) + off;
+			pgva = map->_dm_pgva + (page << PGSHIFT) + off;
+		}
+#endif /* !SMALL_KERNEL */
 
 		/*
 		 * Compute the segment size, and adjust counts.
@@ -4122,7 +4283,10 @@ _bus_dmamap_load_buffer(t, map, buf, buflen, p, flags, lastaddrp, segp, first)
 		 */
 		if (first) {
 			map->dm_segs[seg].ds_addr = curaddr;
+			map->dm_segs[seg].ds_addr2 = oaddr;
 			map->dm_segs[seg].ds_len = sgsize;
+			map->dm_segs[seg].ds_va = vaddr;
+			map->dm_segs[seg].ds_va2 = pgva;
 			first = 0;
 		} else {
 			if (curaddr == lastaddr &&
@@ -4136,7 +4300,10 @@ _bus_dmamap_load_buffer(t, map, buf, buflen, p, flags, lastaddrp, segp, first)
 				if (++seg >= map->_dm_segcnt)
 					break;
 				map->dm_segs[seg].ds_addr = curaddr;
+				map->dm_segs[seg].ds_addr2 = oaddr;
 				map->dm_segs[seg].ds_len = sgsize;
+				map->dm_segs[seg].ds_va = vaddr;
+				map->dm_segs[seg].ds_va2 = pgva;
 			}
 		}
 
@@ -4161,16 +4328,9 @@ _bus_dmamap_load_buffer(t, map, buf, buflen, p, flags, lastaddrp, segp, first)
  * Called by DMA-safe memory allocation methods.
  */
 int
-_bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
-    flags, low, high)
-	bus_dma_tag_t t;
-	bus_size_t size, alignment, boundary;
-	bus_dma_segment_t *segs;
-	int nsegs;
-	int *rsegs;
-	int flags;
-	paddr_t low;
-	paddr_t high;
+_bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
+    bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
+    int flags, paddr_t low, paddr_t high)
 {
 	paddr_t curaddr, lastaddr;
 	struct vm_page *m;
@@ -4179,6 +4339,19 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 
 	/* Always round the size. */
 	size = round_page(size);
+	if (flags & BUS_DMA_64BIT) {
+		if (high > 0x100000000ULL && low < 0x100000000ULL)
+			low = 0x100000000ULL;
+	} else if (high > 0x100000000ULL) {
+		if (low >= 0x100000000ULL) {
+#ifdef DIAGNOSTIC
+			printf("_bus_dmamem_alloc_range: "
+			    "32bit request in above 4GB space\n");
+#endif
+			return (EINVAL);
+		} else
+			high = 0x100000000ULL;
+	}
 
 	TAILQ_INIT(&mlist);
 	/*
@@ -4224,7 +4397,6 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 		}
 		lastaddr = curaddr;
 	}
-
 	*rsegs = curseg + 1;
 
 	return (0);
@@ -4289,9 +4461,7 @@ i386_softintunlock(void)
  * We hand-code this to ensure that it's atomic.
  */
 void
-softintr(sir, vec)
-	int sir;
-	int vec;
+softintr(int sir, int vec)
 {
 	__asm __volatile("orl %1, %0" : "=m" (ipending) : "ir" (sir));
 #ifdef MULTIPROCESSOR
@@ -4304,8 +4474,7 @@ softintr(sir, vec)
  * Raise current interrupt priority level, and return the old one.
  */
 int
-splraise(ncpl)
-	int ncpl;
+splraise(int ncpl)
 {
 	int ocpl;
 
@@ -4318,8 +4487,7 @@ splraise(ncpl)
  * interrupts are pending, call Xspllower() to process them.
  */
 void
-splx(ncpl)
-	int ncpl;
+splx(int ncpl)
 {
 	_SPLX(ncpl);
 }
@@ -4329,12 +4497,10 @@ splx(ncpl)
  * benefit of some splsoftclock() callers.
  */
 int
-spllower(ncpl)
-	int ncpl;
+spllower(int ncpl)
 {
 	int ocpl = lapic_tpr;
 
 	splx(ncpl);
 	return (ocpl);
 }
-

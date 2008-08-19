@@ -1,4 +1,4 @@
-/*	$OpenBSD: rgephy.c,v 1.11 2005/07/22 11:48:10 brad Exp $	*/
+/*	$OpenBSD: rgephy.c,v 1.15 2006/08/28 01:54:24 brad Exp $	*/
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
@@ -42,6 +42,7 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/errno.h>
 
 #include <net/if.h>
@@ -131,8 +132,6 @@ rgephyattach(struct device *parent, struct device *self, void *aux)
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
-	PHY_RESET(sc);
-
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
@@ -140,13 +139,15 @@ rgephyattach(struct device *parent, struct device *self, void *aux)
 	if ((sc->mii_capabilities & BMSR_MEDIAMASK) ||
 	    (sc->mii_extcapabilities & EXTSR_MEDIAMASK))
 		mii_phy_add_media(sc);
+
+	PHY_RESET(sc);
 }
 
 int
 rgephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
-	int reg, speed, gig;
+	int anar, reg, speed, gig = 0;
 
 	switch (cmd) {
 	case MII_POLLSTAT:
@@ -176,6 +177,10 @@ rgephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 
 		PHY_RESET(sc);	/* XXX hardware bug work-around */
 
+		anar = PHY_READ(sc, RGEPHY_MII_ANAR);
+		anar &= ~(RGEPHY_ANAR_TX_FD | RGEPHY_ANAR_TX |
+		    RGEPHY_ANAR_10_FD | RGEPHY_ANAR_10);
+
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
 #ifdef foo
@@ -189,47 +194,48 @@ rgephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			break;
 		case IFM_1000_T:
 			speed = RGEPHY_S1000;
+			anar |= RGEPHY_ANAR_TX_FD | RGEPHY_ANAR_TX |
+				RGEPHY_ANAR_10_FD | RGEPHY_ANAR_10;
 			goto setit;
 		case IFM_100_TX:
 			speed = RGEPHY_S100;
+			anar |= RGEPHY_ANAR_TX_FD | RGEPHY_ANAR_TX;
 			goto setit;
 		case IFM_10_T:
 			speed = RGEPHY_S10;
+			anar |= RGEPHY_ANAR_10_FD | RGEPHY_ANAR_10;
 setit:
 			rgephy_loop(sc);
 			if ((ife->ifm_media & IFM_GMASK) == IFM_FDX) {
 				speed |= RGEPHY_BMCR_FDX;
-				gig = RGEPHY_1000CTL_AFD;
+				if (IFM_SUBTYPE(ife->ifm_media) == IFM_1000_T)
+					gig = RGEPHY_1000CTL_AFD;
+				anar &= ~(RGEPHY_ANAR_TX | RGEPHY_ANAR_10);
 			} else {
-				gig = RGEPHY_1000CTL_AHD;
+				if (IFM_SUBTYPE(ife->ifm_media) == IFM_1000_T)
+					gig = RGEPHY_1000CTL_AHD;
+				anar &=
+				    ~(RGEPHY_ANAR_TX_FD | RGEPHY_ANAR_10_FD);
 			}
 
-			PHY_WRITE(sc, RGEPHY_MII_1000CTL, 0);
-			PHY_WRITE(sc, RGEPHY_MII_BMCR, speed);
-			PHY_WRITE(sc, RGEPHY_MII_ANAR, RGEPHY_SEL_TYPE);
-
-			if (IFM_SUBTYPE(ife->ifm_media) != IFM_1000_T) 
-				break;
-
-			PHY_WRITE(sc, RGEPHY_MII_1000CTL, gig);
-			PHY_WRITE(sc, RGEPHY_MII_BMCR,
-			    speed|RGEPHY_BMCR_AUTOEN|RGEPHY_BMCR_STARTNEG);
-
 			/*
-			 * When settning the link manually, one side must
+			 * When setting the link manually, one side must
 			 * be the master and the other the slave. However
 			 * ifmedia doesn't give us a good way to specify
 			 * this, so we fake it by using one of the LINK
 			 * flags. If LINK0 is set, we program the PHY to
 			 * be a master, otherwise it's a slave.
 			 */
-			if ((mii->mii_ifp->if_flags & IFF_LINK0)) {
-				PHY_WRITE(sc, RGEPHY_MII_1000CTL,
-				    gig|RGEPHY_1000CTL_MSE|RGEPHY_1000CTL_MSC);
-			} else {
-				PHY_WRITE(sc, RGEPHY_MII_1000CTL,
-				    gig|RGEPHY_1000CTL_MSE);
+			if (IFM_SUBTYPE(ife->ifm_media) == IFM_1000_T) {
+				gig |= RGEPHY_1000CTL_MSE;
+				if (mii->mii_ifp->if_flags & IFF_LINK0)
+					gig |= RGEPHY_1000CTL_MSC;
 			}
+
+			PHY_WRITE(sc, RGEPHY_MII_1000CTL, gig);
+			PHY_WRITE(sc, RGEPHY_MII_BMCR, speed |
+			    RGEPHY_BMCR_AUTOEN | RGEPHY_BMCR_STARTNEG);
+			PHY_WRITE(sc, RGEPHY_MII_ANAR, anar);
 			break;
 #ifdef foo
 		case IFM_NONE:
@@ -291,10 +297,12 @@ setit:
 	 */
 	if (sc->mii_media_active != mii->mii_media_active || 
 	    sc->mii_media_status != mii->mii_media_status ||
-	    cmd == MII_MEDIACHG) {
+	    cmd == MII_MEDIACHG)
 		rgephy_load_dspcode(sc);
-	}
+
+	/* Callback if something changed. */
 	mii_phy_update(sc, cmd);
+
 	return (0);
 }
 
@@ -327,12 +335,12 @@ rgephy_status(struct mii_softc *sc)
 	}
 
 	bmsr = PHY_READ(sc, RL_GMEDIASTAT);
-	if (bmsr & RL_GMEDIASTAT_10MBPS)
-		mii->mii_media_active |= IFM_10_T;
-	if (bmsr & RL_GMEDIASTAT_100MBPS)
-		mii->mii_media_active |= IFM_100_TX;
 	if (bmsr & RL_GMEDIASTAT_1000MBPS)
 		mii->mii_media_active |= IFM_1000_T;
+	else if (bmsr & RL_GMEDIASTAT_100MBPS)
+		mii->mii_media_active |= IFM_100_TX;
+	else if (bmsr & RL_GMEDIASTAT_10MBPS)
+		mii->mii_media_active |= IFM_10_T;
 	if (bmsr & RL_GMEDIASTAT_FDX)
 		mii->mii_media_active |= IFM_FDX;
 }
@@ -347,7 +355,8 @@ rgephy_mii_phy_auto(struct mii_softc *sc)
 	PHY_WRITE(sc, RGEPHY_MII_ANAR,
 	    BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) | ANAR_CSMA);
 	DELAY(1000);
-	PHY_WRITE(sc, RGEPHY_MII_1000CTL, RGEPHY_1000CTL_AFD);
+	PHY_WRITE(sc, RGEPHY_MII_1000CTL,
+	    RGEPHY_1000CTL_AHD | RGEPHY_1000CTL_AFD);
 	DELAY(1000);
 	PHY_WRITE(sc, RGEPHY_MII_BMCR,
 	    RGEPHY_BMCR_AUTOEN | RGEPHY_BMCR_STARTNEG);
@@ -367,12 +376,8 @@ rgephy_loop(struct mii_softc *sc)
 
 	for (i = 0; i < 15000; i++) {
 		bmsr = PHY_READ(sc, RGEPHY_MII_BMSR);
-		if (!(bmsr & RGEPHY_BMSR_LINK)) {
-#if 0
-			device_printf(sc->mii_dev, "looped %d\n", i);
-#endif
+		if (!(bmsr & RGEPHY_BMSR_LINK))
 			break;
-		}
 		DELAY(10);
 	}
 }
@@ -385,13 +390,19 @@ rgephy_loop(struct mii_softc *sc)
 /*
  * Initialize RealTek PHY per the datasheet. The DSP in the PHYs of
  * existing revisions of the 8169S/8110S chips need to be tuned in
- * order to reliably negotiate a 1000Mbps link. Later revs of the
- * chips may not require this software tuning.
+ * order to reliably negotiate a 1000Mbps link. This is only needed
+ * for rev 0 and rev 1 of the PHY. Later versions work without
+ * any fixups.
  */
 void
 rgephy_load_dspcode(struct mii_softc *sc)
 {
 	int val;
+	u_int16_t id2;
+
+	id2 = PHY_READ(sc, MII_PHYIDR2);
+	if (MII_REV(id2) > 1)
+		return;
 
 	PHY_WRITE(sc, 31, 0x0001);
 	PHY_WRITE(sc, 21, 0x1000);

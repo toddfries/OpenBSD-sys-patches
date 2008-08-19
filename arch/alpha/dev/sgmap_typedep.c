@@ -1,4 +1,4 @@
-/* $OpenBSD: sgmap_typedep.c,v 1.4 2004/11/09 19:17:01 claudio Exp $ */
+/* $OpenBSD: sgmap_typedep.c,v 1.10 2006/05/21 01:42:43 brad Exp $ */
 /* $NetBSD: sgmap_typedep.c,v 1.17 2001/07/19 04:27:37 thorpej Exp $ */
 
 /*-
@@ -46,8 +46,7 @@ SGMAP_PTE_TYPE		__C(SGMAP_TYPE,_prefetch_spill_page_pte);
 
 int			__C(SGMAP_TYPE,_load_buffer)(bus_dma_tag_t,
 			    bus_dmamap_t, void *buf, size_t buflen,
-			    struct proc *, int, int *,
-			    struct alpha_sgmap *);
+			    struct proc *, int, int, struct alpha_sgmap *);
 
 void
 __C(SGMAP_TYPE,_init_spill_page_pte)(void)
@@ -60,7 +59,7 @@ __C(SGMAP_TYPE,_init_spill_page_pte)(void)
 
 int
 __C(SGMAP_TYPE,_load_buffer)(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
-    size_t buflen, struct proc *p, int flags, int *segp,
+    size_t buflen, struct proc *p, int flags, int seg,
     struct alpha_sgmap *sgmap)
 {
 	vaddr_t endva, va = (vaddr_t)buf;
@@ -68,7 +67,7 @@ __C(SGMAP_TYPE,_load_buffer)(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	bus_addr_t dmaoffset, sgva;
 	bus_size_t sgvalen, boundary, alignment;
 	SGMAP_PTE_TYPE *pte, *page_table = sgmap->aps_pt;
-	int pteidx, error, spill;
+	int s, pteidx, error, spill;
 
 	/* Initialize the spill page PTE if it hasn't been already. */
 	if (__C(SGMAP_TYPE,_prefetch_spill_page_pte) == 0)
@@ -93,18 +92,25 @@ __C(SGMAP_TYPE,_load_buffer)(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	 * mapping.  Round the size, since we deal with whole pages.
 	 */
 
-	/* XXX Always allocate a spill page for now. */
-	spill = 1;
+	/*
+	 * XXX Always allocate a spill page for now.  Note
+	 * the spill page is not needed for an in-bound-only
+	 * transfer.
+	 */
+	if ((flags & BUS_DMA_READ) == 0)
+		spill = 1;
+	else
+		spill = 0;
 
 	endva = round_page(va + buflen);
 	va = trunc_page(va);
 
 	boundary = map->_dm_boundary;
-	alignment = NBPG;
+	alignment = PAGE_SIZE;
 
 	sgvalen = (endva - va);
 	if (spill) {
-		sgvalen += NBPG;
+		sgvalen += PAGE_SIZE;
 
 		/*
 		 * ARGH!  If the addition of the spill page bumped us
@@ -123,8 +129,10 @@ __C(SGMAP_TYPE,_load_buffer)(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	    (endva - va), sgvalen, map->_dm_boundary, boundary);
 #endif
 
+	s = splvm();
 	error = extent_alloc(sgmap->aps_ex, sgvalen, alignment, 0, boundary,
 	    (flags & BUS_DMA_NOWAIT) ? EX_NOWAIT : EX_WAITOK, &sgva);
+	splx(s);
 	if (error)
 		return (error);
 
@@ -143,22 +151,21 @@ __C(SGMAP_TYPE,_load_buffer)(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 #endif
 
 	/* Generate the DMA address. */
-	map->dm_segs[*segp].ds_addr = sgmap->aps_wbase | sgva | dmaoffset;
-	map->dm_segs[*segp].ds_len = buflen;
+	map->dm_segs[seg].ds_addr = sgmap->aps_wbase | sgva | dmaoffset;
+	map->dm_segs[seg].ds_len = buflen;
 
 #ifdef SGMAP_DEBUG
 	if (__C(SGMAP_TYPE,_debug))
 		printf("sgmap_load: wbase = 0x%lx, vpage = 0x%x, "
 		    "dma addr = 0x%lx\n", sgmap->aps_wbase, sgva,
-		    map->dm_segs[0].ds_addr);
+		    map->dm_segs[seg].ds_addr);
 #endif
 
-	for (; va < endva; va += NBPG, pteidx++,
-	    pte = &page_table[pteidx * SGMAP_PTE_SPACING]) {
+	for (; va < endva; va += PAGE_SIZE, pteidx++,
+	     pte = &page_table[pteidx * SGMAP_PTE_SPACING]) {
 		/* Get the physical address for this segment. */
 		if (p != NULL)
-			(void) pmap_extract(p->p_vmspace->vm_map.pmap, va,
-			    &pa);
+			(void) pmap_extract(p->p_vmspace->vm_map.pmap, va, &pa);
 		else
 			pa = vtophys(va);
 
@@ -202,9 +209,15 @@ __C(SGMAP_TYPE,_load)(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	if (buflen > map->_dm_size)
 		return (EINVAL);
 
+	KASSERT((map->_dm_flags & (BUS_DMA_READ|BUS_DMA_WRITE)) == 0);
+	KASSERT((flags & (BUS_DMA_READ|BUS_DMA_WRITE)) !=
+	    (BUS_DMA_READ|BUS_DMA_WRITE));
+
+	map->_dm_flags |= flags & (BUS_DMA_READ|BUS_DMA_WRITE);
+
 	seg = 0;
 	error = __C(SGMAP_TYPE,_load_buffer)(t, map, buf, buflen, p,
-	    flags, &seg, sgmap);
+	    flags, seg, sgmap);
 
 	alpha_mb();
 
@@ -216,10 +229,14 @@ __C(SGMAP_TYPE,_load)(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 	if (error == 0) {
 		map->dm_mapsize = buflen;
 		map->dm_nsegs = 1;
-	} else if (t->_next_window != NULL) {
-		/* Give the next window a chance. */
-		error = bus_dmamap_load(t->_next_window, map, buf, buflen,
-		    p, flags);
+		map->_dm_window = t;
+	} else {
+		map->_dm_flags &= ~(BUS_DMA_READ|BUS_DMA_WRITE);
+		if (t->_next_window != NULL) {
+			/* Give the next window a chance. */
+			error = bus_dmamap_load(t->_next_window, map, buf,
+			    buflen, p, flags);
+		}
 	}
 	return (error);
 }
@@ -245,13 +262,20 @@ __C(SGMAP_TYPE,_load_mbuf)(bus_dma_tag_t t, bus_dmamap_t map,
 	if (m0->m_pkthdr.len > map->_dm_size)
 		return (EINVAL);
 
+	KASSERT((map->_dm_flags & (BUS_DMA_READ|BUS_DMA_WRITE)) == 0);
+	KASSERT((flags & (BUS_DMA_READ|BUS_DMA_WRITE)) !=
+	    (BUS_DMA_READ|BUS_DMA_WRITE));
+
+	map->_dm_flags |= flags & (BUS_DMA_READ|BUS_DMA_WRITE);
+
 	seg = 0;
 	error = 0;
-	for (m = m0; m != NULL && error == 0; m = m->m_next, seg++) {
+	for (m = m0; m != NULL && error == 0; m = m->m_next) {
 		if (m->m_len == 0)
 			continue;
 		error = __C(SGMAP_TYPE,_load_buffer)(t, map,
-		    m->m_data, m->m_len, NULL, flags, &seg, sgmap);
+		    m->m_data, m->m_len, NULL, flags, seg, sgmap);
+		seg++;
 	}
 
 	alpha_mb();
@@ -264,10 +288,12 @@ __C(SGMAP_TYPE,_load_mbuf)(bus_dma_tag_t t, bus_dmamap_t map,
 	if (error == 0) {
 		map->dm_mapsize = m0->m_pkthdr.len;
 		map->dm_nsegs = seg;
+		map->_dm_window = t;
 	} else {
 		/* Need to back out what we've done so far. */
 		map->dm_nsegs = seg - 1;
 		__C(SGMAP_TYPE,_unload)(t, map, sgmap);
+		map->_dm_flags &= ~(BUS_DMA_READ|BUS_DMA_WRITE);
 		if (t->_next_window != NULL) {
 			/* Give the next window a chance. */
 			error = bus_dmamap_load_mbuf(t->_next_window, map,
@@ -282,8 +308,76 @@ int
 __C(SGMAP_TYPE,_load_uio)(bus_dma_tag_t t, bus_dmamap_t map, struct uio *uio,
     int flags, struct alpha_sgmap *sgmap)
 {
+	bus_size_t minlen, resid;
+	struct proc *p = NULL;
+	struct iovec *iov;
+	caddr_t addr;
+	int i, seg, error;
 
-	panic(__S(__C(SGMAP_TYPE,_load_uio)) ": not implemented");
+	/*
+	 * Make sure that on error condition we return "no valid mappings".
+	 */
+	map->dm_mapsize = 0;
+	map->dm_nsegs = 0;
+
+	KASSERT((map->_dm_flags & (BUS_DMA_READ|BUS_DMA_WRITE)) == 0);
+	KASSERT((flags & (BUS_DMA_READ|BUS_DMA_WRITE)) !=
+ 	    (BUS_DMA_READ|BUS_DMA_WRITE));
+
+	map->_dm_flags |= flags & (BUS_DMA_READ|BUS_DMA_WRITE);
+
+	resid = uio->uio_resid;
+	iov = uio->uio_iov;
+
+	if (uio->uio_segflg == UIO_USERSPACE) {
+		p = uio->uio_procp;
+#ifdef DIAGNOSTIC
+		if (p == NULL)
+			panic(__S(__C(SGMAP_TYPE,_load_uio))
+			    ": USERSPACE but no proc");
+#endif
+	}
+
+	seg = 0;
+	error = 0;
+	for (i = 0; i < uio->uio_iovcnt && resid != 0 && error == 0;
+	     i++, seg++) {
+		/*
+		 * Now at the first iovec to load.  Load each iovec
+		 * until we have exhausted the residual count.
+		 */
+		minlen = resid < iov[i].iov_len ? resid : iov[i].iov_len;
+		addr = (caddr_t)iov[i].iov_base;
+
+		error = __C(SGMAP_TYPE,_load_buffer)(t, map,
+		    addr, minlen, p, flags, seg, sgmap);
+
+		resid -= minlen;
+	}
+
+	alpha_mb();
+
+#if defined(SGMAP_DEBUG) && defined(DDB)
+	if (__C(SGMAP_TYPE,_debug) > 1)
+		Debugger();
+#endif
+
+	if (error == 0) {
+		map->dm_mapsize = uio->uio_resid;
+		map->dm_nsegs = seg;
+	} else {
+		/* Need to back out what we've done so far. */
+		map->dm_nsegs = seg - 1;
+		__C(SGMAP_TYPE,_unload)(t, map, sgmap);
+		map->_dm_flags &= ~(BUS_DMA_READ|BUS_DMA_WRITE);
+		if (t->_next_window != NULL) {
+			/* Give the next window a chance. */
+			error = bus_dmamap_load_uio(t->_next_window, map,
+			    uio, flags);
+		}
+	}
+
+	return (error);
 }
 
 int
@@ -291,6 +385,9 @@ __C(SGMAP_TYPE,_load_raw)(bus_dma_tag_t t, bus_dmamap_t map,
     bus_dma_segment_t *segs, int nsegs, bus_size_t size, int flags,
     struct alpha_sgmap *sgmap)
 {
+	KASSERT((map->_dm_flags & (BUS_DMA_READ|BUS_DMA_WRITE)) == 0);
+	KASSERT((flags & (BUS_DMA_READ|BUS_DMA_WRITE)) !=
+	    (BUS_DMA_READ|BUS_DMA_WRITE));
 
 	panic(__S(__C(SGMAP_TYPE,_load_raw)) ": not implemented");
 }
@@ -301,11 +398,18 @@ __C(SGMAP_TYPE,_unload)(bus_dma_tag_t t, bus_dmamap_t map,
 {
 	SGMAP_PTE_TYPE *pte, *page_table = sgmap->aps_pt;
 	bus_addr_t osgva, sgva, esgva;
-	int spill, seg, pteidx;
+	int s, error, spill, seg, pteidx;
 
 	for (seg = 0; seg < map->dm_nsegs; seg++) {
-		/* XXX Always have a spill page for now... */
-		spill = 1;
+		/*
+		 * XXX Always allocate a spill page for now.  Note
+		 * the spill page is not needed for an in-bound-only
+		 * transfer.
+		 */
+		if ((map->_dm_flags & BUS_DMA_READ) == 0)
+			spill = 1;
+		else
+			spill = 0;
 
 		sgva = map->dm_segs[seg].ds_addr & ~sgmap->aps_wbase;
 
@@ -313,11 +417,11 @@ __C(SGMAP_TYPE,_unload)(bus_dma_tag_t t, bus_dmamap_t map,
 		osgva = sgva = trunc_page(sgva);
 
 		if (spill)
-			esgva += NBPG;
+			esgva += PAGE_SIZE;
 
 		/* Invalidate the PTEs for the mapping. */
 		for (pteidx = sgva >> SGMAP_ADDR_PTEIDX_SHIFT;
-		     sgva < esgva; sgva += NBPG, pteidx++) {
+		     sgva < esgva; sgva += PAGE_SIZE, pteidx++) {
 			pte = &page_table[pteidx * SGMAP_PTE_SPACING];
 #ifdef SGMAP_DEBUG
 			if (__C(SGMAP_TYPE,_debug))
@@ -330,12 +434,18 @@ __C(SGMAP_TYPE,_unload)(bus_dma_tag_t t, bus_dmamap_t map,
 		alpha_mb();
 
 		/* Free the virtual address space used by the mapping. */
-		if (extent_free(sgmap->aps_ex, osgva, (esgva - osgva),
-		    EX_NOWAIT) != 0)
+		s = splvm();
+		error = extent_free(sgmap->aps_ex, osgva, (esgva - osgva),
+		    EX_NOWAIT);
+		splx(s);
+		if (error != 0)
 			panic(__S(__C(SGMAP_TYPE,_unload)));
 	}
+
+	map->_dm_flags &= ~(BUS_DMA_READ|BUS_DMA_WRITE);
 
 	/* Mark the mapping invalid. */
 	map->dm_mapsize = 0;
 	map->dm_nsegs = 0;
+	map->_dm_window = NULL;
 }

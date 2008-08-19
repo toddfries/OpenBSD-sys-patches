@@ -1,4 +1,4 @@
-/*	$OpenBSD: ts102.c,v 1.16 2005/11/23 11:39:36 mickey Exp $	*/
+/*	$OpenBSD: ts102.c,v 1.18 2006/08/11 18:57:35 miod Exp $	*/
 /*
  * Copyright (c) 2003, 2004, Miodrag Vallat.
  *
@@ -41,7 +41,7 @@
  *   is much more that what the iospace can offer.
  *
  *   A best-effort solution would be to map the windows on demand. However,
- *   due to the wap mapdev() works, the va used for the mappings would be
+ *   due to the way mapdev() works, the va used for the mappings would be
  *   lost after unmapping (although using an extent to register iospace memory
  *   usage would fix this). So, instead, we will do a fixed mapping of a subset
  *   of each window upon attach - this is similar to what the stp4020 driver
@@ -121,7 +121,6 @@ struct	tslot_data {
 
 struct	tslot_softc {
 	struct device	sc_dev;
-	struct sbusdev	sc_sd;
 
 	struct intrhand	sc_ih;
 	
@@ -246,8 +245,6 @@ tslot_attach(struct device *parent, struct device *self, void *args)
 	sc->sc_ih.ih_arg = sc;
 	intr_establish(ra->ra_intr[0].int_pri, &sc->sc_ih, -1, self->dv_xname);
 	printf(" pri %d", ra->ra_intr[0].int_pri);
-
-	sbus_establish(&sc->sc_sd, self);
 
 	printf(": %d slots\n", TS102_NUM_SLOTS);
 

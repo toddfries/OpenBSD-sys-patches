@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6360var.h,v 1.3 2003/05/14 09:04:59 jason Exp $	*/
+/*	$OpenBSD: aic6360var.h,v 1.6 2006/06/03 01:51:54 martin Exp $	*/
 /*	$NetBSD: aic6360.c,v 1.52 1996/12/10 21:27:51 thorpej Exp $	*/
 
 /*
@@ -56,12 +56,14 @@
 typedef u_long physaddr;
 typedef u_long physlen;
 
+#ifdef notyet
 struct aic_dma_seg {
 	physaddr seg_addr;
 	physlen seg_len;
 };
 
 #define AIC_NSEG	16
+#endif
 
 /*
  * ACB. Holds additional information for each SCSI command Comments: We
@@ -116,7 +118,6 @@ struct aic_tinfo {
 
 struct aic_softc {
 	struct device sc_dev;
-	struct isadev sc_id;
 	void *sc_ih;
 
 	bus_space_tag_t sc_iot;
@@ -213,5 +214,6 @@ struct aic_softc {
 #define AIC_START(s)	AIC_PRINT(AIC_SHOWSTART, s)
 
 void	aicattach(struct aic_softc *);
+int	aic_detach(struct device *, int);
 int	aicintr(void *);
 int 	aic_find(bus_space_tag_t, bus_space_handle_t);

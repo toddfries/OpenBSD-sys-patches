@@ -1,10 +1,10 @@
-/*	$OpenBSD: pcmciadevs.h,v 1.130 2005/12/17 03:00:20 jsg Exp $	*/
+/*	$OpenBSD: pcmciadevs.h,v 1.133 2006/07/28 17:14:00 brad Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *		OpenBSD: pcmciadevs,v 1.127 2005/12/17 02:59:25 jsg Exp 
+ *		OpenBSD: pcmciadevs,v 1.130 2006/07/28 17:13:43 brad Exp 
  */
 /* $NetBSD: pcmciadevs,v 1.13 1998/08/17 23:10:12 thorpej Exp $ */
 
@@ -69,7 +69,6 @@
 #define	PCMCIA_VENDOR_GREYCELL	0x0143	/* Grey Cell */
 #define	PCMCIA_VENDOR_LINKSYS	0x0149	/* Linksys */
 #define	PCMCIA_VENDOR_NETGEAR	0x0149	/* Netgear */
-#define	PCMCIA_VENDOR_SIEMENS	0x02ac	/* Siemens */
 #define	PCMCIA_VENDOR_SIERRA	0x0192	/* Sierra */
 #define	PCMCIA_VENDOR_SIMPLETECH	0x014d	/* Simple Technology */
 #define	PCMCIA_VENDOR_SYMBOL2	0x014d	/* Symbol */
@@ -97,6 +96,7 @@
 #define	PCMCIA_VENDOR_AUDIOVOX	0x0279	/* Audiovox Communications */
 #define	PCMCIA_VENDOR_IODATA2	0x028a	/* I-O DATA */
 #define	PCMCIA_VENDOR_ASUS	0x02aa	/* ASUS */
+#define	PCMCIA_VENDOR_SIEMENS	0x02ac	/* Siemens */
 #define	PCMCIA_VENDOR_MICROSOFT	0x02d2	/* Microsoft */
 #define	PCMCIA_VENDOR_NWN	0x0602	/* No Wires Needed */
 #define	PCMCIA_VENDOR_BREEZECOM	0x0a02	/* BreezeCOM */
@@ -206,6 +206,8 @@
 /* Belkin */
 #define	PCMCIA_CIS_BELKIN_F5D5020	{ NULL, NULL, NULL, NULL }
 #define	PCMCIA_PRODUCT_BELKIN_F5D5020	0x2328
+#define	PCMCIA_CIS_BELKIN_F5D6020	{ NULL, NULL, NULL, NULL }
+#define	PCMCIA_PRODUCT_BELKIN_F5D6020	0x3302
 
 /* BreezeCOM */
 #define	PCMCIA_CIS_BREEZECOM_BREEZENET	{ NULL, NULL, NULL, NULL }
@@ -524,6 +526,8 @@
 #define	PCMCIA_PRODUCT_SOCKET_LP_ETHER	0x000d
 #define	PCMCIA_CIS_SOCKET_LP_ETHER_CF	{ NULL, NULL, NULL, NULL }
 #define	PCMCIA_PRODUCT_SOCKET_LP_ETHER_CF	0x0075
+#define	PCMCIA_CIS_SOCKET_ETHER_CF_10_100	{ NULL, NULL, NULL, NULL }
+#define	PCMCIA_PRODUCT_SOCKET_ETHER_CF_10_100	0x0145
 
 /* Standard Microsystems Corporation */
 #define	PCMCIA_CIS_SMC_8020	{ NULL, NULL, NULL, NULL }

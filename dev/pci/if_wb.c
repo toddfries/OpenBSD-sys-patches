@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.32 2005/11/23 11:30:14 mickey Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.35 2006/05/28 00:04:24 jason Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -198,7 +198,7 @@ void wb_eeprom_putbyte(sc, addr)
 	struct wb_softc		*sc;
 	int			addr;
 {
-	register int		d, i;
+	int			d, i;
 
 	d = addr | WB_EECMD_READ;
 
@@ -229,7 +229,7 @@ void wb_eeprom_getword(sc, addr, dest)
 	int			addr;
 	u_int16_t		*dest;
 {
-	register int		i;
+	int			i;
 	u_int16_t		word = 0;
 
 	/* Enter EEPROM access mode. */
@@ -293,7 +293,7 @@ void wb_read_eeprom(sc, dest, off, cnt, swap)
 void wb_mii_sync(sc)
 	struct wb_softc		*sc;
 {
-	register int		i;
+	int			i;
 
 	SIO_SET(WB_SIO_MII_DIR|WB_SIO_MII_DATAIN);
 
@@ -630,7 +630,7 @@ void
 wb_reset(sc)
 	struct wb_softc *sc;
 {
-	register int i;
+	int i;
 	struct mii_data *mii = &sc->sc_mii;
 
 	CSR_WRITE_4(sc, WB_NETCFG, 0);
@@ -1068,7 +1068,7 @@ void wb_rxeof(sc)
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		/* pass it on. */
 		ether_input_mbuf(ifp, m);
@@ -1411,7 +1411,8 @@ void wb_start(ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, cur_tx->wb_mbuf);
+			bpf_mtap(ifp->if_bpf, cur_tx->wb_mbuf,
+			    BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -1668,7 +1669,7 @@ int wb_ioctl(ifp, command, data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -1709,7 +1710,7 @@ void wb_watchdog(ifp)
 void wb_stop(sc)
 	struct wb_softc		*sc;
 {
-	register int		i;
+	int			i;
 	struct ifnet		*ifp;
 
 	ifp = &sc->arpcom.ac_if;

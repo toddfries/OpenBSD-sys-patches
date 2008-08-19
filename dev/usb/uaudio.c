@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.34 2006/01/06 11:34:08 fgsch Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.37 2006/06/23 06:27:11 miod Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -483,9 +483,7 @@ uaudio_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
-
 	case DVACT_DEACTIVATE:
 		if (sc->sc_audiodev != NULL)
 			rv = config_deactivate(sc->sc_audiodev);
@@ -1069,7 +1067,6 @@ uaudio_feature_name(const struct io_terminal *iot, struct mixerctl *mix)
 		DPRINTF(("%s: 'master' for 0x%.4x\n", __func__, terminal_type));
 		return AudioNmaster;
 	}
-	return AudioNmaster;
 }
 
 Static void
@@ -2099,6 +2096,12 @@ uaudio_open(void *addr, int flags)
 Static void
 uaudio_close(void *addr)
 {
+	struct uaudio_softc *sc = addr;
+
+	if (sc->sc_playchan.altidx != -1)
+		uaudio_chan_close(sc, &sc->sc_playchan);
+	if (sc->sc_recchan.altidx != -1)
+		uaudio_chan_close(sc, &sc->sc_recchan);
 }
 
 Static int

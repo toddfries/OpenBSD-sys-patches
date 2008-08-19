@@ -1,4 +1,4 @@
-/*	$OpenBSD: presto.c,v 1.2 2003/05/26 18:16:27 tedu Exp $	*/
+/*	$OpenBSD: presto.c,v 1.5 2006/08/14 01:04:58 krw Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.
@@ -45,7 +45,6 @@
 
 struct presto_softc {
 	struct	device	sc_dev;
-	struct	sbusdev sc_sd;
 	struct	disk	sc_dk;
 
 	vsize_t		sc_memsize;	/* total NVRAM size */
@@ -164,8 +163,6 @@ presto_attach(struct device *parent, struct device *self, void *args)
 	    *(u_int8_t *)(sc->sc_mem + 0x03), *(u_int8_t *)(sc->sc_mem + 0x07),
 	    *(u_int8_t *)(sc->sc_mem + 0x0b), *(u_int8_t *)(sc->sc_mem + 0x0f));
 #endif
-
-	sbus_establish(&sc->sc_sd, &sc->sc_dev);
 
 	sc->sc_dk.dk_driver = &presto_dk;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
@@ -378,7 +375,7 @@ presto_getdisklabel(struct presto_softc *sc)
 	bzero(sc->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
 	bzero(sc->sc_dk.dk_label, sizeof(struct disklabel));
 
-	lp->d_secsize = 1 << DEV_BSHIFT;
+	lp->d_secsize = DEV_BSIZE;
 	lp->d_ntracks = 1;
 	lp->d_nsectors = 32;
 	lp->d_secperunit = (sc->sc_memsize - PSERVE_OFFSET) >> DEV_BSHIFT;
@@ -393,8 +390,7 @@ presto_getdisklabel(struct presto_softc *sc)
 	lp->d_flags = D_RAMDISK;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size =
-	    lp->d_secperunit * (lp->d_secsize / DEV_BSIZE);
+	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcireg.h,v 1.28 2005/12/31 04:11:40 dlg Exp $	*/
+/*	$OpenBSD: pcireg.h,v 1.32 2006/07/31 11:06:33 mickey Exp $	*/
 /*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*
@@ -162,6 +162,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_SUBCLASS_MASS_STORAGE_RAID		0x04
 #define	PCI_SUBCLASS_MASS_STORAGE_ATA		0x05
 #define	PCI_SUBCLASS_MASS_STORAGE_SATA		0x06
+#define	PCI_SUBCLASS_MASS_STORAGE_SAS		0x07
 #define	PCI_SUBCLASS_MASS_STORAGE_MISC		0x80
 
 /* 0x02 network subclasses */
@@ -184,6 +185,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_SUBCLASS_MULTIMEDIA_VIDEO		0x00
 #define	PCI_SUBCLASS_MULTIMEDIA_AUDIO		0x01
 #define	PCI_SUBCLASS_MULTIMEDIA_TELEPHONY	0x02
+#define	PCI_SUBCLASS_MULTIMEDIA_HDAUDIO		0x03
 #define	PCI_SUBCLASS_MULTIMEDIA_MISC		0x80
 
 /* 0x05 memory subclasses */
@@ -220,6 +222,7 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_SUBCLASS_SYSTEM_TIMER		0x02
 #define	PCI_SUBCLASS_SYSTEM_RTC			0x03
 #define	PCI_SUBCLASS_SYSTEM_PCIHOTPLUG		0x04
+#define	PCI_SUBCLASS_SYSTEM_SDHC		0x05
 #define	PCI_SUBCLASS_SYSTEM_MISC		0x80
 
 /* 0x09 input subclasses */
@@ -402,6 +405,11 @@ typedef u_int8_t pci_revision_t;
 #define	PCI_MAPREG_MEM_TYPE_32BIT		0x00000000
 #define	PCI_MAPREG_MEM_TYPE_32BIT_1M		0x00000002
 #define	PCI_MAPREG_MEM_TYPE_64BIT		0x00000004
+
+#define _PCI_MAPREG_TYPEBITS(reg) \
+	(PCI_MAPREG_TYPE(reg) == PCI_MAPREG_TYPE_IO ? \
+	reg & PCI_MAPREG_TYPE_MASK : \
+	reg & (PCI_MAPREG_TYPE_MASK|PCI_MAPREG_MEM_TYPE_MASK))
 
 #define	PCI_MAPREG_MEM_PREFETCHABLE(mr)					\
 	    (((mr) & PCI_MAPREG_MEM_PREFETCHABLE_MASK) != 0)

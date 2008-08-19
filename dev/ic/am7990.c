@@ -1,4 +1,4 @@
-/*	$OpenBSD: am7990.c,v 1.39 2005/11/07 03:20:00 brad Exp $	*/
+/*	$OpenBSD: am7990.c,v 1.41 2006/04/20 20:31:12 miod Exp $	*/
 /*	$NetBSD: am7990.c,v 1.22 1996/10/13 01:37:19 christos Exp $	*/
 
 /*-
@@ -181,7 +181,7 @@ am7990_config(sc)
 		sc->sc_ntbuf = 32;
 		break;
 	default:
-		panic("am7990_config: weird memory size %d", sc->sc_memsize);
+		panic("am7990_config: weird memory size %lu", sc->sc_memsize);
 	}
 
 	printf(": address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
@@ -474,7 +474,7 @@ am7990_read(sc, boff, len)
 	 * If so, hand off the raw packet to BPF.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 #ifdef LANCE_REVC_BUG
@@ -780,7 +780,7 @@ am7990_start(ifp)
 		 * before we commit it to the wire.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
 		/*

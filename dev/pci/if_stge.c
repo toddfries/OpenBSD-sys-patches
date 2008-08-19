@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.22 2005/09/11 18:17:08 mickey Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.32 2006/08/04 15:00:18 brad Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -91,155 +91,6 @@
 #include <dev/pci/pcidevs.h>
 
 #include <dev/pci/if_stgereg.h>
-
-/*
- * Transmit descriptor list size.
- */
-#define	STGE_NTXDESC		256
-#define	STGE_NTXDESC_MASK	(STGE_NTXDESC - 1)
-#define	STGE_NEXTTX(x)		(((x) + 1) & STGE_NTXDESC_MASK)
-
-/*
- * Receive descriptor list size.
- */
-#define	STGE_NRXDESC		256
-#define	STGE_NRXDESC_MASK	(STGE_NRXDESC - 1)
-#define	STGE_NEXTRX(x)		(((x) + 1) & STGE_NRXDESC_MASK)
-
-/*
- * Only interrupt every N frames.  Must be a power-of-two.
- */
-#define	STGE_TXINTR_SPACING	16
-#define	STGE_TXINTR_SPACING_MASK (STGE_TXINTR_SPACING - 1)
-
-/*
- * Control structures are DMA'd to the TC9021 chip.  We allocate them in
- * a single clump that maps to a single DMA segment to make several things
- * easier.
- */
-struct stge_control_data {
-	/*
-	 * The transmit descriptors.
-	 */
-	struct stge_tfd scd_txdescs[STGE_NTXDESC];
-
-	/*
-	 * The receive descriptors.
-	 */
-	struct stge_rfd scd_rxdescs[STGE_NRXDESC];
-};
-
-#define	STGE_CDOFF(x)	offsetof(struct stge_control_data, x)
-#define	STGE_CDTXOFF(x)	STGE_CDOFF(scd_txdescs[(x)])
-#define	STGE_CDRXOFF(x)	STGE_CDOFF(scd_rxdescs[(x)])
-
-/*
- * Software state for transmit and receive jobs.
- */
-struct stge_descsoft {
-	struct mbuf *ds_mbuf;		/* head of our mbuf chain */
-	bus_dmamap_t ds_dmamap;		/* our DMA map */
-};
-
-/*
- * Software state per device.
- */
-struct stge_softc {
-	struct device sc_dev;		/* generic device information */
-	bus_space_tag_t sc_st;		/* bus space tag */
-	bus_space_handle_t sc_sh;	/* bus space handle */
-	bus_dma_tag_t sc_dmat;		/* bus DMA tag */
-	struct arpcom sc_arpcom;	/* ethernet common data */
-	void *sc_sdhook;		/* shutdown hook */
-	int sc_rev;			/* silicon revision */
-	int stge_if_flags;
-	void *sc_ih;			/* interrupt cookie */
-
-	struct mii_data sc_mii;		/* MII/media information */
-
-	struct timeout sc_timeout;	/* tick timeout */
-
-	bus_dmamap_t sc_cddmamap;	/* control data DMA map */
-#define	sc_cddma	sc_cddmamap->dm_segs[0].ds_addr
-
-	/*
-	 * Software state for transmit and receive descriptors.
-	 */
-	struct stge_descsoft sc_txsoft[STGE_NTXDESC];
-	struct stge_descsoft sc_rxsoft[STGE_NRXDESC];
-
-	/*
-	 * Control data structures.
-	 */
-	struct stge_control_data *sc_control_data;
-#define	sc_txdescs	sc_control_data->scd_txdescs
-#define	sc_rxdescs	sc_control_data->scd_rxdescs
-
-	int	sc_txpending;		/* number of Tx requests pending */
-	int	sc_txdirty;		/* first dirty Tx descriptor */
-	int	sc_txlast;		/* last used Tx descriptor */
-
-	int	sc_rxptr;		/* next ready Rx descriptor/descsoft */
-	int	sc_rxdiscard;
-	int	sc_rxlen;
-	struct mbuf *sc_rxhead;
-	struct mbuf *sc_rxtail;
-	struct mbuf **sc_rxtailp;
-
-	int	sc_txthresh;		/* Tx threshold */
-	uint32_t sc_usefiber:1;		/* if we're fiber */
-	uint32_t sc_stge1023:1;		/* are we a 1023 */
-	uint32_t sc_DMACtrl;		/* prototype DMACtrl register */
-	uint32_t sc_MACCtrl;		/* prototype MacCtrl register */
-	uint16_t sc_IntEnable;		/* prototype IntEnable register */
-	uint16_t sc_ReceiveMode;	/* prototype ReceiveMode register */
-	uint8_t sc_PhyCtrl;		/* prototype PhyCtrl register */
-};
-
-#define	STGE_RXCHAIN_RESET(sc)						\
-do {									\
-	(sc)->sc_rxtailp = &(sc)->sc_rxhead;				\
-	*(sc)->sc_rxtailp = NULL;					\
-	(sc)->sc_rxlen = 0;						\
-} while (/*CONSTCOND*/0)
-
-#define	STGE_RXCHAIN_LINK(sc, m)					\
-do {									\
-	*(sc)->sc_rxtailp = (sc)->sc_rxtail = (m);			\
-	(sc)->sc_rxtailp = &(m)->m_next;				\
-} while (/*CONSTCOND*/0)
-
-#define	STGE_CDTXADDR(sc, x)	((sc)->sc_cddma + STGE_CDTXOFF((x)))
-#define	STGE_CDRXADDR(sc, x)	((sc)->sc_cddma + STGE_CDRXOFF((x)))
-
-#define	STGE_CDTXSYNC(sc, x, ops)					\
-	bus_dmamap_sync((sc)->sc_dmat, (sc)->sc_cddmamap,		\
-	    STGE_CDTXOFF((x)), sizeof(struct stge_tfd), (ops))
-
-#define	STGE_CDRXSYNC(sc, x, ops)					\
-	bus_dmamap_sync((sc)->sc_dmat, (sc)->sc_cddmamap,		\
-	    STGE_CDRXOFF((x)), sizeof(struct stge_rfd), (ops))
-
-#define	STGE_INIT_RXDESC(sc, x)						\
-do {									\
-	struct stge_descsoft *__ds = &(sc)->sc_rxsoft[(x)];		\
-	struct stge_rfd *__rfd = &(sc)->sc_rxdescs[(x)];		\
-									\
-	/*								\
-	 * Note: We scoot the packet forward 2 bytes in the buffer	\
-	 * so that the payload after the Ethernet header is aligned	\
-	 * to a 4-byte boundary.					\
-	 */								\
-	__rfd->rfd_frag.frag_word0 =					\
-	    htole64(FRAG_ADDR(__ds->ds_dmamap->dm_segs[0].ds_addr + 2) |\
-	    FRAG_LEN(MCLBYTES - 2));					\
-	__rfd->rfd_next =						\
-	    htole64((uint64_t)STGE_CDRXADDR((sc), STGE_NEXTRX((x))));	\
-	__rfd->rfd_status = 0;						\
-	STGE_CDRXSYNC((sc), (x), BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE); \
-} while (/*CONSTCOND*/0)
-
-#define STGE_TIMEOUT 1000
 
 void	stge_start(struct ifnet *);
 void	stge_watchdog(struct ifnet *);
@@ -450,7 +301,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	for (i = 0; i < STGE_NTXDESC; i++) {
 		if ((error = bus_dmamap_create(sc->sc_dmat,
-		    ETHER_MAX_LEN_JUMBO, STGE_NTXFRAGS, MCLBYTES, 0, 0,
+		    STGE_JUMBO_FRAMELEN, STGE_NTXFRAGS, MCLBYTES, 0, 0,
 		    &sc->sc_txsoft[i].ds_dmamap)) != 0) {
 			printf("%s: unable to create tx DMA map %d, "
 			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
@@ -475,8 +326,7 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 * Determine if we're copper or fiber.  It affects how we
 	 * reset the card.
 	 */
-	if (bus_space_read_4(sc->sc_st, sc->sc_sh, STGE_AsicCtrl) &
-	    AC_PhyMedia)
+	if (CSR_READ_4(sc, STGE_AsicCtrl) & AC_PhyMedia)
 		sc->sc_usefiber = 1;
 	else
 		sc->sc_usefiber = 0;
@@ -494,18 +344,18 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	 * from EEPROM.
 	 */
 	if (PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_SUNDANCE_ST1023) {
-		sc->sc_arpcom.ac_enaddr[0] = bus_space_read_2(sc->sc_st,
-		    sc->sc_sh, STGE_StationAddress0) & 0xff;
-		sc->sc_arpcom.ac_enaddr[1] = bus_space_read_2(sc->sc_st,
-		    sc->sc_sh, STGE_StationAddress0) >> 8;
-		sc->sc_arpcom.ac_enaddr[2] = bus_space_read_2(sc->sc_st,
-		    sc->sc_sh, STGE_StationAddress1) & 0xff;
-		sc->sc_arpcom.ac_enaddr[3] = bus_space_read_2(sc->sc_st,
-		    sc->sc_sh, STGE_StationAddress1) >> 8;
-		sc->sc_arpcom.ac_enaddr[4] = bus_space_read_2(sc->sc_st,
-		    sc->sc_sh, STGE_StationAddress2) & 0xff;
-		sc->sc_arpcom.ac_enaddr[5] = bus_space_read_2(sc->sc_st,
-		    sc->sc_sh, STGE_StationAddress2) >> 8;
+		sc->sc_arpcom.ac_enaddr[0] = CSR_READ_2(sc,
+		    STGE_StationAddress0) & 0xff;
+		sc->sc_arpcom.ac_enaddr[1] = CSR_READ_2(sc,
+		    STGE_StationAddress0) >> 8;
+		sc->sc_arpcom.ac_enaddr[2] = CSR_READ_2(sc,
+		    STGE_StationAddress1) & 0xff;
+		sc->sc_arpcom.ac_enaddr[3] = CSR_READ_2(sc,
+		    STGE_StationAddress1) >> 8;
+		sc->sc_arpcom.ac_enaddr[4] = CSR_READ_2(sc,
+		    STGE_StationAddress2) & 0xff;
+		sc->sc_arpcom.ac_enaddr[5] = CSR_READ_2(sc,
+		    STGE_StationAddress2) >> 8;
 		sc->sc_stge1023 = 0;
 	} else {
 		uint16_t myaddr[ETHER_ADDR_LEN / 2];
@@ -524,8 +374,8 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Read some important bits from the PhyCtrl register.
 	 */
-	sc->sc_PhyCtrl = bus_space_read_1(sc->sc_st, sc->sc_sh,
-	    STGE_PhyCtrl) & (PC_PhyDuplexPolarity | PC_PhyLnkPolarity);
+	sc->sc_PhyCtrl = CSR_READ_1(sc, STGE_PhyCtrl) &
+	    (PC_PhyDuplexPolarity | PC_PhyLnkPolarity);
 
 	/*
 	 * Initialize our media structures and probe the MII.
@@ -551,6 +401,9 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = stge_ioctl;
 	ifp->if_start = stge_start;
 	ifp->if_watchdog = stge_watchdog;
+#ifdef STGE_JUMBO
+	ifp->if_hardmtu = STGE_JUMBO_MTU;
+#endif
 	IFQ_SET_MAXLEN(&ifp->if_snd, STGE_NTXDESC - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -645,8 +498,7 @@ stge_dma_wait(struct stge_softc *sc)
 
 	for (i = 0; i < STGE_TIMEOUT; i++) {
 		delay(2);
-		if ((bus_space_read_4(sc->sc_st, sc->sc_sh, STGE_DMACtrl) &
-		     DMAC_TxDMAInProg) == 0)
+		if ((CSR_READ_4(sc, STGE_DMACtrl) & DMAC_TxDMAInProg) == 0)
 			break;
 	}
 
@@ -722,8 +574,8 @@ stge_start(struct ifnet *ifp)
 		if (error) {
 			if (error == EFBIG) {
 				printf("%s: Tx packet consumes too many "
-				    "DMA segments, dropping...\n",
-				    sc->sc_dev.dv_xname);
+				    "DMA segments (%u), dropping...\n",
+				    sc->sc_dev.dv_xname, dmamap->dm_nsegs);
 				IFQ_DEQUEUE(&ifp->if_snd, m0);
 				m_freem(m0);
 				continue;
@@ -782,7 +634,7 @@ stge_start(struct ifnet *ifp)
 		/*
 		 * Kick the transmit DMA logic.
 		 */
-		bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_DMACtrl,
+		CSR_WRITE_4(sc, STGE_DMACtrl,
 		    sc->sc_DMACtrl | DMAC_TxDMAPollNow);
 
 		/*
@@ -799,7 +651,7 @@ stge_start(struct ifnet *ifp)
 		 * Pass the packet to any BPF listeners.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0);
+			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif /* NBPFILTER > 0 */
 	}
 
@@ -872,22 +724,17 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
+		if (!(ifp->if_flags & IFF_RUNNING))
+			stge_init(ifp);
 
-		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
-		case AF_INET:
-			stge_init(ifp);
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
 #endif
-		default:
-			stge_init(ifp);
-			break;
-		}
 		break;
 
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
 		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
@@ -896,15 +743,13 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
-			    ifp->if_flags & IFF_PROMISC &&
-			    !(sc->stge_if_flags & IFF_PROMISC))
+			    ((ifp->if_flags ^ sc->stge_if_flags) &
+			     IFF_PROMISC)) {
 				stge_set_filter(sc);
-			else if (ifp->if_flags & IFF_RUNNING &&
-			    !(ifp->if_flags & IFF_PROMISC) &&
-			    sc->stge_if_flags & IFF_PROMISC)
-				stge_set_filter(sc);
-			else
-				stge_init(ifp);
+			} else {
+				if (!(ifp->if_flags & IFF_RUNNING))
+					stge_init(ifp);
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				stge_stop(ifp, 1);
@@ -935,7 +780,7 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 
 	/* Try to get more packets going. */
@@ -959,12 +804,11 @@ stge_intr(void *arg)
 	int wantinit;
 	uint16_t isr;
 
-	if ((bus_space_read_2(sc->sc_st, sc->sc_sh, STGE_IntStatus) &
-	     IS_InterruptStatus) == 0)
+	if ((CSR_READ_2(sc, STGE_IntStatus) & IS_InterruptStatus) == 0)
 		return (0);
 
 	for (wantinit = 0; wantinit == 0;) {
-		isr = bus_space_read_2(sc->sc_st, sc->sc_sh, STGE_IntStatusAck);
+		isr = CSR_READ_2(sc, STGE_IntStatusAck);
 		if ((isr & sc->sc_IntEnable) == 0)
 			break;
 
@@ -1001,8 +845,7 @@ stge_intr(void *arg)
 		/* Transmission errors. */
 		if (isr & IS_TxComplete) {
 			for (;;) {
-				txstat = bus_space_read_4(sc->sc_st, sc->sc_sh,
-				    STGE_TxStatus);
+				txstat = CSR_READ_4(sc, STGE_TxStatus);
 				if ((txstat & TS_TxComplete) == 0)
 					break;
 				if (txstat & TS_TxUnderrun) {
@@ -1026,8 +869,7 @@ stge_intr(void *arg)
 	if (wantinit)
 		stge_init(ifp);
 
-	bus_space_write_2(sc->sc_st, sc->sc_sh, STGE_IntEnable,
-	    sc->sc_IntEnable);
+	CSR_WRITE_2(sc, STGE_IntEnable, sc->sc_IntEnable);
 
 	/* Try to get more packets going. */
 	stge_start(ifp);
@@ -1234,7 +1076,7 @@ stge_rxintr(struct stge_softc *sc)
 		 * pass if up the stack if it's for us.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
 
 		/* Pass it on. */
@@ -1273,30 +1115,28 @@ void
 stge_stats_update(struct stge_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	bus_space_tag_t st = sc->sc_st;
-	bus_space_handle_t sh = sc->sc_sh;
 
-	(void) bus_space_read_4(st, sh, STGE_OctetRcvOk);
+	(void) CSR_READ_4(sc, STGE_OctetRcvOk);
 
 	ifp->if_ipackets +=
-	    bus_space_read_4(st, sh, STGE_FramesRcvdOk);
+	    CSR_READ_4(sc, STGE_FramesRcvdOk);
 
 	ifp->if_ierrors +=
-	    (u_int) bus_space_read_2(st, sh, STGE_FramesLostRxErrors);
+	    (u_int) CSR_READ_2(sc, STGE_FramesLostRxErrors);
 
-	(void) bus_space_read_4(st, sh, STGE_OctetXmtdOk);
+	(void) CSR_READ_4(sc, STGE_OctetXmtdOk);
 
 	ifp->if_opackets +=
-	    bus_space_read_4(st, sh, STGE_FramesXmtdOk);
+	    CSR_READ_4(sc, STGE_FramesXmtdOk);
 
 	ifp->if_collisions +=
-	    bus_space_read_4(st, sh, STGE_LateCollisions) +
-	    bus_space_read_4(st, sh, STGE_MultiColFrames) +
-	    bus_space_read_4(st, sh, STGE_SingleColFrames);
+	    CSR_READ_4(sc, STGE_LateCollisions) +
+	    CSR_READ_4(sc, STGE_MultiColFrames) +
+	    CSR_READ_4(sc, STGE_SingleColFrames);
 
 	ifp->if_oerrors +=
-	    (u_int) bus_space_read_2(st, sh, STGE_FramesAbortXSColls) +
-	    (u_int) bus_space_read_2(st, sh, STGE_FramesWEXDeferal);
+	    (u_int) CSR_READ_2(sc, STGE_FramesAbortXSColls) +
+	    (u_int) CSR_READ_2(sc, STGE_FramesWEXDeferal);
 }
 
 /*
@@ -1310,14 +1150,14 @@ stge_reset(struct stge_softc *sc)
 	uint32_t ac;
 	int i;
 
-	ac = bus_space_read_4(sc->sc_st, sc->sc_sh, STGE_AsicCtrl);
+	ac = CSR_READ_4(sc, STGE_AsicCtrl);
 
 	/*
 	 * Only assert RstOut if we're fiber.  We need GMII clocks
 	 * to be present in order for the reset to complete on fiber
 	 * cards.
 	 */
-	bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_AsicCtrl,
+	CSR_WRITE_4(sc, STGE_AsicCtrl,
 	    ac | AC_GlobalReset | AC_RxReset | AC_TxReset |
 	    AC_DMA | AC_FIFO | AC_Network | AC_Host | AC_AutoInit |
 	    (sc->sc_usefiber ? AC_RstOut : 0));
@@ -1326,8 +1166,7 @@ stge_reset(struct stge_softc *sc)
 
 	for (i = 0; i < STGE_TIMEOUT; i++) {
 		delay(5000);
-		if ((bus_space_read_4(sc->sc_st, sc->sc_sh, STGE_AsicCtrl) &
-		     AC_ResetBusy) == 0)
+		if ((CSR_READ_4(sc, STGE_AsicCtrl) & AC_ResetBusy) == 0)
 			break;
 	}
 
@@ -1346,8 +1185,6 @@ int
 stge_init(struct ifnet *ifp)
 {
 	struct stge_softc *sc = ifp->if_softc;
-	bus_space_tag_t st = sc->sc_st;
-	bus_space_handle_t sh = sc->sc_sh;
 	struct stge_descsoft *ds;
 	int i, error = 0;
 
@@ -1401,15 +1238,15 @@ stge_init(struct ifnet *ifp)
 
 	/* Set the station address. */
 	for (i = 0; i < 6; i++)
-		bus_space_write_1(st, sh, STGE_StationAddress0 + i,
+		CSR_WRITE_1(sc, STGE_StationAddress0 + i,
 		    sc->sc_arpcom.ac_enaddr[i]);
 
 	/*
 	 * Set the statistics masks.  Disable all the RMON stats,
 	 * and disable selected stats in the non-RMON stats registers.
 	 */
-	bus_space_write_4(st, sh, STGE_RMONStatisticsMask, 0xffffffff);
-	bus_space_write_4(st, sh, STGE_StatisticsMask,
+	CSR_WRITE_4(sc, STGE_RMONStatisticsMask, 0xffffffff);
+	CSR_WRITE_4(sc, STGE_StatisticsMask,
 	    (1U << 1) | (1U << 2) | (1U << 3) | (1U << 4) | (1U << 5) |
 	    (1U << 6) | (1U << 7) | (1U << 8) | (1U << 9) | (1U << 10) |
 	    (1U << 13) | (1U << 14) | (1U << 15) | (1U << 19) | (1U << 20) |
@@ -1421,12 +1258,12 @@ stge_init(struct ifnet *ifp)
 	/*
 	 * Give the transmit and receive ring to the chip.
 	 */
-	bus_space_write_4(st, sh, STGE_TFDListPtrHi, 0); /* NOTE: 32-bit DMA */
-	bus_space_write_4(st, sh, STGE_TFDListPtrLo,
+	CSR_WRITE_4(sc, STGE_TFDListPtrHi, 0); /* NOTE: 32-bit DMA */
+	CSR_WRITE_4(sc, STGE_TFDListPtrLo,
 	    STGE_CDTXADDR(sc, sc->sc_txdirty));
 
-	bus_space_write_4(st, sh, STGE_RFDListPtrHi, 0); /* NOTE: 32-bit DMA */
-	bus_space_write_4(st, sh, STGE_RFDListPtrLo,
+	CSR_WRITE_4(sc, STGE_RFDListPtrHi, 0); /* NOTE: 32-bit DMA */
+	CSR_WRITE_4(sc, STGE_RFDListPtrLo,
 	    STGE_CDRXADDR(sc, sc->sc_rxptr));
 
 	/*
@@ -1434,17 +1271,17 @@ stge_init(struct ifnet *ifp)
 	 * large (255 is the max, but we use 127) -- we explicitly kick the
 	 * transmit engine when there's actually a packet.
 	 */
-	bus_space_write_1(st, sh, STGE_TxDMAPollPeriod, 127);
+	CSR_WRITE_1(sc, STGE_TxDMAPollPeriod, 127);
 
 	/* ..and the Rx auto-poll period. */
-	bus_space_write_1(st, sh, STGE_RxDMAPollPeriod, 64);
+	CSR_WRITE_1(sc, STGE_RxDMAPollPeriod, 64);
 
 	/* Initialize the Tx start threshold. */
-	bus_space_write_2(st, sh, STGE_TxStartThresh, sc->sc_txthresh);
+	CSR_WRITE_2(sc, STGE_TxStartThresh, sc->sc_txthresh);
 
 	/* RX DMA thresholds, from linux */
-	bus_space_write_1(st, sh, STGE_RxDMABurstThresh, 0x30);
-	bus_space_write_1(st, sh, STGE_RxDMAUrgentThresh, 0x30);
+	CSR_WRITE_1(sc, STGE_RxDMABurstThresh, 0x30);
+	CSR_WRITE_1(sc, STGE_RxDMAUrgentThresh, 0x30);
 
 	/*
 	 * Initialize the Rx DMA interrupt control register.  We
@@ -1453,7 +1290,7 @@ stge_init(struct ifnet *ifp)
 	 * interrupts pending reaches 8, we stop deferring the
 	 * interrupt, and signal it immediately.
 	 */
-	bus_space_write_4(st, sh, STGE_RxDMAIntCtrl,
+	CSR_WRITE_4(sc, STGE_RxDMAIntCtrl,
 	    RDIC_RxFrameCount(8) | RDIC_RxDMAWaitTime(512));
 
 	/*
@@ -1461,14 +1298,14 @@ stge_init(struct ifnet *ifp)
 	 */
 	sc->sc_IntEnable = IS_HostError | IS_TxComplete | IS_UpdateStats |
 	    IS_TxDMAComplete | IS_RxDMAComplete | IS_RFDListEnd;
-	bus_space_write_2(st, sh, STGE_IntStatus, 0xffff);
-	bus_space_write_2(st, sh, STGE_IntEnable, sc->sc_IntEnable);
+	CSR_WRITE_2(sc, STGE_IntStatus, 0xffff);
+	CSR_WRITE_2(sc, STGE_IntEnable, sc->sc_IntEnable);
 
 	/*
 	 * Configure the DMA engine.
 	 * XXX Should auto-tune TxBurstLimit.
 	 */
-	bus_space_write_4(st, sh, STGE_DMACtrl, sc->sc_DMACtrl |
+	CSR_WRITE_4(sc, STGE_DMACtrl, sc->sc_DMACtrl |
 	    DMAC_TxBurstLimit(3));
 
 	/*
@@ -1476,15 +1313,17 @@ stge_init(struct ifnet *ifp)
 	 * FIFO, and send an un-PAUSE frame when the FIFO is totally
 	 * empty again.
 	 */
-	bus_space_write_2(st, sh, STGE_FlowOnTresh, 29696 / 16);
-	bus_space_write_2(st, sh, STGE_FlowOffThresh, 0);
+	CSR_WRITE_2(sc, STGE_FlowOnTresh, 29696 / 16);
+	CSR_WRITE_2(sc, STGE_FlowOffThresh, 0);
 
 	/*
 	 * Set the maximum frame size.
 	 */
-	bus_space_write_2(st, sh, STGE_MaxFrameSize,
-	    ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN +
-	    ETHER_VLAN_ENCAP_LEN);
+#ifdef STGE_JUMBO
+	CSR_WRITE_2(sc, STGE_MaxFrameSize, STGE_JUMBO_FRAMELEN);
+#else
+	CSR_WRITE_2(sc, STGE_MaxFrameSize, ETHER_MAX_LEN);
+#endif
 
 	/*
 	 * Initialize MacCtrl -- do it before setting the media,
@@ -1494,20 +1333,20 @@ stge_init(struct ifnet *ifp)
 	 * anything else.
 	 */
 	sc->sc_MACCtrl = MC_IFSSelect(0);
-	bus_space_write_4(st, sh, STGE_MACCtrl, sc->sc_MACCtrl);
+	CSR_WRITE_4(sc, STGE_MACCtrl, sc->sc_MACCtrl);
 	sc->sc_MACCtrl |= MC_StatisticsEnable | MC_TxEnable | MC_RxEnable;
 
 	if (sc->sc_rev >= 6) {		/* >= B.2 */
 		/* Multi-frag frame bug work-around. */
-		bus_space_write_2(st, sh, STGE_DebugCtrl,
-		    bus_space_read_2(st, sh, STGE_DebugCtrl) | 0x0200);
+		CSR_WRITE_2(sc, STGE_DebugCtrl,
+		    CSR_READ_2(sc, STGE_DebugCtrl) | 0x0200);
 
 		/* Tx Poll Now bug work-around. */
-		bus_space_write_2(st, sh, STGE_DebugCtrl,
-		    bus_space_read_2(st, sh, STGE_DebugCtrl) | 0x0010);
+		CSR_WRITE_2(sc, STGE_DebugCtrl,
+		    CSR_READ_2(sc, STGE_DebugCtrl) | 0x0010);
 		/* XXX ? from linux */
-		bus_space_write_2(st, sh, STGE_DebugCtrl,
-		    bus_space_read_2(st, sh, STGE_DebugCtrl) | 0x0020);
+		CSR_WRITE_2(sc, STGE_DebugCtrl,
+		    CSR_READ_2(sc, STGE_DebugCtrl) | 0x0020);
 	}
 
 	/*
@@ -1583,22 +1422,22 @@ stge_stop(struct ifnet *ifp, int disable)
 	/*
 	 * Disable interrupts.
 	 */
-	bus_space_write_2(sc->sc_st, sc->sc_sh, STGE_IntEnable, 0);
+	CSR_WRITE_2(sc, STGE_IntEnable, 0);
 
 	/*
 	 * Stop receiver, transmitter, and stats update.
 	 */
-	bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_MACCtrl,
+	CSR_WRITE_4(sc, STGE_MACCtrl,
 	    MC_StatisticsDisable | MC_TxDisable | MC_RxDisable);
 
 	/*
 	 * Stop the transmit and receive DMA.
 	 */
 	stge_dma_wait(sc);
-	bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_TFDListPtrHi, 0);
-	bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_TFDListPtrLo, 0);
-	bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_RFDListPtrHi, 0);
-	bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_RFDListPtrLo, 0);
+	CSR_WRITE_4(sc, STGE_TFDListPtrHi, 0);
+	CSR_WRITE_4(sc, STGE_TFDListPtrLo, 0);
+	CSR_WRITE_4(sc, STGE_RFDListPtrHi, 0);
+	CSR_WRITE_4(sc, STGE_RFDListPtrLo, 0);
 
 	/*
 	 * Release any queued transmit buffers.
@@ -1623,8 +1462,7 @@ stge_eeprom_wait(struct stge_softc *sc)
 
 	for (i = 0; i < STGE_TIMEOUT; i++) {
 		delay(1000);
-		if ((bus_space_read_2(sc->sc_st, sc->sc_sh, STGE_EepromCtrl) &
-		     EC_EepromBusy) == 0)
+		if ((CSR_READ_2(sc, STGE_EepromCtrl) & EC_EepromBusy) == 0)
 			return (0);
 	}
 	return (1);
@@ -1643,12 +1481,12 @@ stge_read_eeprom(struct stge_softc *sc, int offset, uint16_t *data)
 		printf("%s: EEPROM failed to come ready\n",
 		    sc->sc_dev.dv_xname);
 
-	bus_space_write_2(sc->sc_st, sc->sc_sh, STGE_EepromCtrl,
+	CSR_WRITE_2(sc, STGE_EepromCtrl,
 	    EC_EepromAddress(offset) | EC_EepromOpcode(EC_OP_RR));
 	if (stge_eeprom_wait(sc))
 		printf("%s: EEPROM read timed out\n",
 		    sc->sc_dev.dv_xname);
-	*data = bus_space_read_2(sc->sc_st, sc->sc_sh, STGE_EepromData);
+	*data = CSR_READ_2(sc, STGE_EepromData);
 }
 
 /*
@@ -1777,14 +1615,11 @@ stge_set_filter(struct stge_softc *sc)
 		/*
 		 * Program the multicast hash table.
 		 */
-		bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_HashTable0,
-		    mchash[0]);
-		bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_HashTable1,
-		    mchash[1]);
+		CSR_WRITE_4(sc, STGE_HashTable0, mchash[0]);
+		CSR_WRITE_4(sc, STGE_HashTable1, mchash[1]);
 	}
 
-	bus_space_write_2(sc->sc_st, sc->sc_sh, STGE_ReceiveMode,
-	    sc->sc_ReceiveMode);
+	CSR_WRITE_2(sc, STGE_ReceiveMode, sc->sc_ReceiveMode);
 }
 
 /*
@@ -1828,7 +1663,7 @@ stge_mii_statchg(struct device *self)
 
 	/* XXX 802.1x flow-control? */
 
-	bus_space_write_4(sc->sc_st, sc->sc_sh, STGE_MACCtrl, sc->sc_MACCtrl);
+	CSR_WRITE_4(sc, STGE_MACCtrl, sc->sc_MACCtrl);
 }
 
 /*
@@ -1841,7 +1676,7 @@ stge_mii_bitbang_read(struct device *self)
 {
 	struct stge_softc *sc = (void *) self;
 
-	return (bus_space_read_1(sc->sc_st, sc->sc_sh, STGE_PhyCtrl));
+	return (CSR_READ_1(sc, STGE_PhyCtrl));
 }
 
 /*
@@ -1854,8 +1689,7 @@ stge_mii_bitbang_write(struct device *self, uint32_t val)
 {
 	struct stge_softc *sc = (void *) self;
 
-	bus_space_write_1(sc->sc_st, sc->sc_sh, STGE_PhyCtrl,
-	    val | sc->sc_PhyCtrl);
+	CSR_WRITE_1(sc, STGE_PhyCtrl, val | sc->sc_PhyCtrl);
 }
 
 /*

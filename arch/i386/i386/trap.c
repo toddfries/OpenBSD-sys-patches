@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.72 2005/10/26 20:32:59 marco Exp $	*/
+/*	$OpenBSD: trap.c,v 1.77 2006/08/22 20:09:25 mickey Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -90,6 +90,10 @@ extern struct emul emul_bsdos;
 #ifdef COMPAT_AOUT
 extern struct emul emul_aout;
 #endif
+#ifdef KVM86
+#include <machine/kvm86.h>
+#define KVM86MODE (kvm86_incall)
+#endif
 
 #include "npx.h"
 
@@ -126,11 +130,11 @@ userret(p, pc, oticks)
 	/*
 	 * If profiling, charge recent system time to the trapped pc.
 	 */
-	if (p->p_flag & P_PROFIL) { 
+	if (p->p_flag & P_PROFIL) {
 		extern int psratio;
 
 		addupc_task(p, pc, (int)(p->p_sticks - oticks) * psratio);
-	}                   
+	}
 
 	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority;
 }
@@ -259,7 +263,8 @@ trap(frame)
 			return;
 #endif
 		if (frame.tf_trapno < trap_types)
-			printf("fatal %s", trap_type[frame.tf_trapno]);
+			printf("fatal %s (%d)", trap_type[frame.tf_trapno],
+				frame.tf_trapno);
 		else
 			printf("unknown trap %d", frame.tf_trapno);
 		printf(" in %s mode\n", (type & T_USER) ? "user" : "supervisor");
@@ -271,6 +276,12 @@ trap(frame)
 		/*NOTREACHED*/
 
 	case T_PROTFLT:
+#ifdef KVM86
+		if (KVM86MODE) {
+			kvm86_gpfault(&frame);
+			return;
+		}
+#endif
 	case T_SEGNPFLT:
 	case T_ALIGNFLT:
 		/* Check for copyin/copyout fault. */
@@ -317,7 +328,7 @@ trap(frame)
 		case 0x0f:	/* 0x0f prefix */
 			switch (*(u_char *)(frame.tf_eip+1)) {
 			case 0xa1:		/* popl %fs */
-				vframe = (void *)((int)&frame.tf_esp - 
+				vframe = (void *)((int)&frame.tf_esp -
 				    offsetof(struct trapframe, tf_fs));
 				resume = (int)resume_pop_fs;
 				break;
@@ -338,19 +349,24 @@ trap(frame)
 		return;
 
 	case T_PROTFLT|T_USER:		/* protection fault */
+		KERNEL_PROC_LOCK(p);
 #ifdef VM86
 		if (frame.tf_eflags & PSL_VM) {
 			vm86_gpfault(p, type & ~T_USER);
+			KERNEL_PROC_UNLOCK(p);
 			goto out;
 		}
 #endif
 		/* If pmap_exec_fixup does something, let's retry the trap. */
 		if (pmap_exec_fixup(&p->p_vmspace->vm_map, &frame,
-		    &p->p_addr->u_pcb))
+		    &p->p_addr->u_pcb)) {
+			KERNEL_PROC_UNLOCK(p);
 			goto out;
+		}
 
 		sv.sival_int = frame.tf_eip;
 		trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, sv);
+		KERNEL_PROC_UNLOCK(p);
 		goto out;
 
 	case T_TSSFLT|T_USER:
@@ -400,19 +416,6 @@ trap(frame)
 		goto out;
 
 	case T_DNA|T_USER: {
-#if defined(GPL_MATH_EMULATE)
-		int rv;
-		if ((rv = math_emulate(&frame)) == 0) {
-			if (frame.tf_eflags & PSL_T)
-				goto trace;
-			return;
-		}
-		sv.sival_int = frame.tf_eip;
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, rv, type &~ T_USER, FPE_FLTINV, sv);
-		KERNEL_PROC_UNLOCK(p);
-		goto out;
-#else
 		printf("pid %d killed due to lack of floating point\n",
 		    p->p_pid);
 		sv.sival_int = frame.tf_eip;
@@ -420,7 +423,6 @@ trap(frame)
 		trapsignal(p, SIGKILL, type &~ T_USER, FPE_FLTINV, sv);
 		KERNEL_PROC_UNLOCK(p);
 		goto out;
-#endif
 	}
 
 	case T_BOUND|T_USER:
@@ -553,9 +555,6 @@ trap(frame)
 		KERNEL_PROC_UNLOCK(p);
 		break;
 	case T_TRCTRAP|T_USER:		/* trace trap */
-#if defined(GPL_MATH_EMULATE)
-	trace:
-#endif
 		sv.sival_int = rcr2();
 		KERNEL_PROC_LOCK(p);
 		trapsignal(p, SIGTRAP, type &~ T_USER, TRAP_TRACE, sv);

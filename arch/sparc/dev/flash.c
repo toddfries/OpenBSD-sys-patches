@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.3 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: flash.c,v 1.5 2006/03/15 20:03:06 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -75,7 +75,7 @@ struct cfattach flash_ca = {
 };
 
 struct cfdriver flash_cd = {
-	NULL, "flash", DV_IFNET
+	NULL, "flash", DV_DULL
 };
 
 int
@@ -125,6 +125,8 @@ flashopen(dev, flags, mode, p)
 	if (card >= flash_cd.cd_ndevs)
 		return (ENXIO);
 	sc = flash_cd.cd_devs[card];
+	if (sc == NULL)
+		return (ENXIO);
 	if (sc->sc_open)
 		return (EBUSY);
 	sc->sc_open = 1;

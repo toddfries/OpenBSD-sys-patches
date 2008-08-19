@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.56 2005/12/27 18:31:09 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.64 2006/06/14 19:46:54 gwk Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
 
 /*-
@@ -38,19 +38,27 @@
 /*
  * Setup the system to run on the current machine.
  *
- * cpu_configure() is called at boot time and initializes the vba 
+ * cpu_configure() is called at boot time and initializes the vba
  * device tables and the memory controller monitoring.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
  */
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/dkstat.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
 #include <sys/reboot.h>
 #include <sys/device.h>
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+
+#include <net/if.h>
+#include <net/if_types.h>
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -58,6 +66,7 @@
 #include <machine/cpu.h>
 #include <machine/gdt.h>
 #include <machine/biosvar.h>
+#include <machine/kvm86.h>
 
 #include <dev/cons.h>
 
@@ -108,6 +117,16 @@ cpu_configure()
 
 	gdt_init();		/* XXX - pcibios uses gdt stuff */
 
+	/* Set up proc0's TSS and LDT */
+	i386_proc0_tss_ldt_init();
+
+#ifdef KVM86
+	kvm86_init();
+#endif
+
+#ifndef SMALL_KERNEL
+	pmap_bootstrap_pae();
+#endif
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("cpu_configure: mainbus not configured");
 
@@ -117,6 +136,8 @@ cpu_configure()
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
+
+	proc0.p_addr->u_pcb.pcb_cr0 = rcr0();
 
 #ifdef MULTIPROCESSOR
 	/* propagate TSS and LDT configuration to the idle pcb's. */
@@ -130,9 +151,6 @@ cpu_configure()
 	 */
 	md_diskconf = diskconf;
 	cold = 0;
-
-	/* Set up proc0's TSS and LDT (after the FPU is configured). */
-	i386_proc0_tss_ldt_init();
 
 #ifdef I686_CPU
 	/*
@@ -230,15 +248,47 @@ void
 setroot()
 {
 	int  majdev, mindev, unit, part, adaptor;
+	struct swdevt *swp;
 	dev_t orootdev;
+#if defined(NFSCLIENT)
+	extern bios_bootmac_t *bios_bootmac;
+#endif
 #ifdef DOSWAP
 	dev_t temp = 0;
 #endif
-	struct swdevt *swp;
+
+#if defined(NFSCLIENT)
+	if (bios_bootmac) {
+		extern char *nfsbootdevname;
+		struct ifnet *ifp;
+		
+		mountroot = nfs_mountroot;
+
+		printf("PXE boot MAC address %s, ",
+		    ether_sprintf(bios_bootmac->mac));
+
+		for (ifp = TAILQ_FIRST(&ifnet); ifp != NULL;
+		    ifp = TAILQ_NEXT(ifp, if_list)) {
+			if ((ifp->if_type == IFT_ETHER ||
+			    ifp->if_type == IFT_FDDI) &&
+			    bcmp(bios_bootmac->mac,
+			    ((struct arpcom *)ifp)->ac_enaddr,
+			    ETHER_ADDR_LEN) == 0)
+				break;
+		}
+		if (ifp) {
+			nfsbootdevname = ifp->if_xname;
+			printf("interface %s\n", nfsbootdevname);
+		} else
+			printf("no interface selected\n");
+		return;
+	}
+#endif
 
 	if (boothowto & RB_DFLTROOT ||
 	    (bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
 		return;
+
 	majdev = B_TYPE(bootdev);
 	if (findblkname(majdev) == NULL)
 		return;
@@ -248,6 +298,8 @@ setroot()
 	mindev = (unit * MAXPARTITIONS) + part;
 	orootdev = rootdev;
 	rootdev = makedev(majdev, mindev);
+	mountroot = dk_mountroot;
+
 	/*
 	 * If the original rootdev is the same as the one
 	 * just calculated, don't need to adjust the swap configuration.
@@ -341,79 +393,96 @@ rootconf()
 {
 	register struct genericconf *gc;
 	int unit, part = 0;
+#if defined(NFSCLIENT)
+	struct ifnet *ifp;
+#endif
+	char name[128];
 	char *num;
 
-#ifdef INSTALL
-	if (B_TYPE(bootdev) == 2) {
-		printf("\n\nInsert file system floppy...\n");
-		if (!(boothowto & RB_ASKNAME))
-			cngetc();
-	}
-#endif
-
 	if (boothowto & RB_ASKNAME) {
-		char name[128];
-retry:
-		printf("root device? ");
-		cnpollc(TRUE);
-		getsn(name, sizeof name);
-		cnpollc(FALSE);
-		if (*name == '\0')
-			goto noask;
-		for (gc = genericconf; gc->gc_driver; gc++)
-			if (gc->gc_driver->cd_ndevs &&
-			    strncmp(gc->gc_name, name,
-			    strlen(gc->gc_name)) == 0)
+		while (1) {
+			printf("root device? ");
+			cnpollc(TRUE);
+			getsn(name, sizeof name);
+			cnpollc(FALSE);
+			if (*name == '\0')
 				break;
-		if (gc->gc_driver) {
-			num = &name[strlen(gc->gc_name)];
+			for (gc = genericconf; gc->gc_driver; gc++)
+				if (gc->gc_driver->cd_ndevs &&
+				    strncmp(gc->gc_name, name,
+				    strlen(gc->gc_name)) == 0)
+					break;
+			if (gc->gc_driver) {
+				num = &name[strlen(gc->gc_name)];
 
-			unit = -2;
-			do {
-				if (unit != -2 && *num >= 'a' &&
-				    *num <= 'a'+MAXPARTITIONS-1 &&
-				    num[1] == '\0') {
-					part = *num++ - 'a';
+				unit = -2;
+				do {
+					if (unit != -2 && *num >= 'a' &&
+					    *num <= 'a'+MAXPARTITIONS-1 &&
+					    num[1] == '\0') {
+						part = *num++ - 'a';
+						break;
+					}
+					if (unit == -2)
+						unit = 0;
+					unit = (unit * 10) + *num - '0';
+					if (*num < '0' || *num > '9')
+						unit = -1;
+				} while (unit != -1 && *++num);
+	
+				if (unit < 0) {
+					printf("%s: not a unit number\n",
+					    &name[strlen(gc->gc_name)]);
+				} else if (unit >= gc->gc_driver->cd_ndevs ||
+				    gc->gc_driver->cd_devs[unit] == NULL) {
+					printf("%d: no such unit\n", unit);
+				} else {
+					rootdev = makedev(gc->gc_major,
+					    unit * MAXPARTITIONS + part);
+					mountroot = dk_mountroot;
 					break;
 				}
-				if (unit == -2)
-					unit = 0;
-				unit = (unit * 10) + *num - '0';
-				if (*num < '0' || *num > '9')
-					unit = -1;
-			} while (unit != -1 && *++num);
-
-			if (unit < 0) {
-				printf("%s: not a unit number\n",
-				    &name[strlen(gc->gc_name)]);
-			} else if (unit > gc->gc_driver->cd_ndevs ||
-			    gc->gc_driver->cd_devs[unit] == NULL) {
-				printf("%d: no such unit\n", unit);
+#if defined(NFSCLIENT)
 			} else {
-				printf("root on %s%d%c\n", gc->gc_name, unit,
-				    'a' + part);
-				rootdev = makedev(gc->gc_major,
-				    unit * MAXPARTITIONS + part);
-				goto doswap;
+				ifp = ifunit(name);
+				if (ifp && (ifp->if_flags & IFF_BROADCAST)) {
+					extern char *nfsbootdevname;
+			
+					mountroot = nfs_mountroot;
+					nfsbootdevname = ifp->if_xname;
+					return;
+				}
+#endif
 			}
-		}
-		printf("use one of: ");
-		for (gc = genericconf; gc->gc_driver; gc++) {
-			for (unit=0; unit < gc->gc_driver->cd_ndevs; unit++) {
-				if (gc->gc_driver->cd_devs[unit])
-					printf("%s%d[a-%c] ", gc->gc_name,
-					    unit, 'a'+MAXPARTITIONS-1);
+
+			printf("use one of: ");
+			for (gc = genericconf; gc->gc_driver; gc++) {
+				for (unit=0; unit < gc->gc_driver->cd_ndevs; unit++) {
+					if (gc->gc_driver->cd_devs[unit])
+						printf("%s%d[a-%c] ", gc->gc_name,
+						    unit, 'a'+MAXPARTITIONS-1);
+				}
 			}
+#if defined(NFSCLIENT)
+			for (ifp = TAILQ_FIRST(&ifnet); ifp != NULL;
+			    ifp = TAILQ_NEXT(ifp, if_list)) {
+				if ((ifp->if_flags & IFF_BROADCAST))
+					printf("%s ", ifp->if_xname);
+			}
+#endif
+			printf("\n");
 		}
-		printf("\n");
-		goto retry;
 	}
-noask:
+
 	if (mountroot == NULL) {
 		/* `swap generic' */
 		setroot();
+#if defined(NFSCLIENT)
+	} else if (mountroot == nfs_mountroot) {
+		;
+#endif
 	} else {
-		/* preconfigured */
+		/* preconfigured for disk */
 		int  majdev, unit, part;
 
 		majdev = major(rootdev);
@@ -422,14 +491,8 @@ noask:
 		part = minor(rootdev) % MAXPARTITIONS;
 		unit = minor(rootdev) / MAXPARTITIONS;
 		printf("root on %s%d%c\n", findblkname(majdev), unit, part + 'a');
-		return;
 	}
-
-doswap:
-#ifndef DISKLESS
-	mountroot = dk_mountroot;
-#endif
-	swdevt[0].sw_dev = argdev = dumpdev =
-	    makedev(major(rootdev), minor(rootdev) + 1);
-	/* swap size and dumplo set during autoconfigure */
+	if (mountroot == dk_mountroot)
+		swdevt[0].sw_dev = argdev = dumpdev =
+		    makedev(major(rootdev), minor(rootdev) + 1);
 }

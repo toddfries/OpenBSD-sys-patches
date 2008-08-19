@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.34 2005/11/07 02:57:45 brad Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.38 2006/07/08 19:56:38 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -607,7 +607,7 @@ int ste_intr(xsc)
 	/* Re-enable interrupts */
 	CSR_WRITE_2(sc, STE_IMR, STE_INTRS);
 
-	if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
+	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
 		ste_start(ifp);
 
 	return claimed;
@@ -705,7 +705,7 @@ void ste_rxeof(sc)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 		/* pass it on. */
@@ -814,10 +814,8 @@ void ste_stats_update(xsc)
 			 * we don't get a call-back on re-init so do it
 			 * otherwise we get stuck in the wrong link state
 			 */
-#if 0
-			ste_miibus_statchg(&mii->mii_dev.dv_parent);
-#endif
-			if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
+			ste_miibus_statchg((struct device *)sc);
+			if (!IFQ_IS_EMPTY(&ifp->if_snd))
 				ste_start(ifp);
 		}
 	}
@@ -829,8 +827,9 @@ void ste_stats_update(xsc)
 }
 
 const struct pci_matchid ste_devices[] = {
-	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201 },
-	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_550TX },
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_1 },
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_2 },
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_550TX }
 };
 
 /*
@@ -1361,7 +1360,7 @@ int ste_ioctl(ifp, command, data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -1499,7 +1498,8 @@ void ste_start(ifp)
 		 * to him.
 	 	 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, cur_tx->ste_mbuf);
+			bpf_mtap(ifp->if_bpf, cur_tx->ste_mbuf,
+			    BPF_DIRECTION_OUT);
 #endif
 
 		STE_INC(idx, STE_TX_LIST_CNT);
@@ -1527,7 +1527,7 @@ void ste_watchdog(ifp)
 	ste_reset(sc);
 	ste_init(sc);
 
-	if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
+	if (!IFQ_IS_EMPTY(&ifp->if_snd))
 		ste_start(ifp);
 
 	return;

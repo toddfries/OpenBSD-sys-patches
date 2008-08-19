@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.68 2006/02/22 22:17:07 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.70 2006/06/09 06:41:44 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.73 1997/09/13 20:36:48 pk Exp $	*/
 
 /*
@@ -4867,6 +4867,8 @@ Lfserr:
 	retl				! and return error indicator
 	 mov	-1, %o0
 
+#ifdef SUN4
+
 	/*
 	 * This is just like Lfserr, but it's a global label that allows
 	 * mem_access_fault() to check to see that we don't want to try to
@@ -4893,6 +4895,9 @@ ENTRY(xldcontrolb)
 	lduba	[%o0] ASI_CONTROL, %o0	! read
 0:	retl
 	 st	%g0, [%o2 + PCB_ONFAULT]
+
+
+#endif	/* SUN4 */
 
 /*
  * copywords(src, dst, nbytes)
@@ -5097,7 +5102,7 @@ Lbcopy_doubles:
 	btst	7, %o2		! if ((len & 7) == 0)
 	be	Lbcopy_done	!	goto bcopy_done;
 
-	btst	4, %o2		! if ((len & 4)) == 0)
+	btst	4, %o2		! if ((len & 4) == 0)
 	be,a	Lbcopy_mopw	!	goto mop_up_word_and_byte;
 	btst	2, %o2		! [delay slot: if (len & 2)]
 	ld	[%o0], %o4	!	*(int *)dst = *(int *)src;
@@ -5438,7 +5443,7 @@ Lkcopy_doubles2:
 	btst	7, %o2		! if ((len & 7) == 0)
 	be	Lkcopy_done	!	goto bcopy_done;
 
-	 btst	4, %o2		! if ((len & 4)) == 0)
+	 btst	4, %o2		! if ((len & 4) == 0)
 	be,a	Lkcopy_mopw	!	goto mop_up_word_and_byte;
 	 btst	2, %o2		! [delay slot: if (len & 2)]
 	ld	[%o0], %o4	!	*(int *)dst = *(int *)src;

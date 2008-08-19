@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.65 2006/02/19 08:44:17 damien Exp $  */
+/*	$OpenBSD: if_ral.c,v 1.79 2006/08/24 19:32:21 damien Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -56,7 +56,7 @@
 #include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_rssadapt.h>
+#include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/usb/usb.h>
@@ -99,6 +99,7 @@ static const struct usb_devno ural_devs[] = {
 	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2570 },
 	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2570_2 },
 	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2570_3 },
+	{ USB_VENDOR_NOVATECH,		USB_PRODUCT_NOVATECH_NV902W },
 	{ USB_VENDOR_RALINK,		USB_PRODUCT_RALINK_RT2570 },
 	{ USB_VENDOR_RALINK,		USB_PRODUCT_RALINK_RT2570_2 },
 	{ USB_VENDOR_RALINK,		USB_PRODUCT_RALINK_RT2570_3 },
@@ -130,8 +131,6 @@ Static uint8_t		ural_plcp_signal(int);
 Static void		ural_setup_tx_desc(struct ural_softc *,
 			    struct ural_tx_desc *, uint32_t, int, int);
 Static int		ural_tx_bcn(struct ural_softc *, struct mbuf *,
-			    struct ieee80211_node *);
-Static int		ural_tx_mgt(struct ural_softc *, struct mbuf *,
 			    struct ieee80211_node *);
 Static int		ural_tx_data(struct ural_softc *, struct mbuf *,
 			    struct ieee80211_node *);
@@ -171,8 +170,6 @@ Static void		ural_amrr_start(struct ural_softc *,
 Static void		ural_amrr_timeout(void *);
 Static void		ural_amrr_update(usbd_xfer_handle, usbd_private_handle,
 			    usbd_status status);
-Static void		ural_ratectl(struct ural_amrr *,
-			    struct ieee80211_node *);
 
 /*
  * Supported rates for 802.11a/b/g modes (in 500Kbps unit).
@@ -186,166 +183,34 @@ static const struct ieee80211_rateset ural_rateset_11b =
 static const struct ieee80211_rateset ural_rateset_11g =
 	{ 12, { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 } };
 
-/*
- * Default values for MAC registers; values taken from the reference driver.
- */
 static const struct {
 	uint16_t	reg;
 	uint16_t	val;
 } ural_def_mac[] = {
-	{ RAL_TXRX_CSR5,  0x8c8d },
-	{ RAL_TXRX_CSR6,  0x8b8a },
-	{ RAL_TXRX_CSR7,  0x8687 },
-	{ RAL_TXRX_CSR8,  0x0085 },
-	{ RAL_MAC_CSR13,  0x1111 },
-	{ RAL_MAC_CSR14,  0x1e11 },
-	{ RAL_TXRX_CSR21, 0xe78f },
-	{ RAL_MAC_CSR9,   0xff1d },
-	{ RAL_MAC_CSR11,  0x0002 },
-	{ RAL_MAC_CSR22,  0x0053 },
-	{ RAL_MAC_CSR15,  0x0000 },
-	{ RAL_MAC_CSR8,   0x0780 },
-	{ RAL_TXRX_CSR19, 0x0000 },
-	{ RAL_TXRX_CSR18, 0x005a },
-	{ RAL_PHY_CSR2,   0x0000 },
-	{ RAL_TXRX_CSR0,  0x1ec0 },
-	{ RAL_PHY_CSR4,   0x000f }
+	RAL_DEF_MAC
 };
 
-/*
- * Default values for BBP registers; values taken from the reference driver.
- */
 static const struct {
 	uint8_t	reg;
 	uint8_t	val;
 } ural_def_bbp[] = {
-	{  3, 0x02 },
-	{  4, 0x19 },
-	{ 14, 0x1c },
-	{ 15, 0x30 },
-	{ 16, 0xac },
-	{ 17, 0x48 },
-	{ 18, 0x18 },
-	{ 19, 0xff },
-	{ 20, 0x1e },
-	{ 21, 0x08 },
-	{ 22, 0x08 },
-	{ 23, 0x08 },
-	{ 24, 0x80 },
-	{ 25, 0x50 },
-	{ 26, 0x08 },
-	{ 27, 0x23 },
-	{ 30, 0x10 },
-	{ 31, 0x2b },
-	{ 32, 0xb9 },
-	{ 34, 0x12 },
-	{ 35, 0x50 },
-	{ 39, 0xc4 },
-	{ 40, 0x02 },
-	{ 41, 0x60 },
-	{ 53, 0x10 },
-	{ 54, 0x18 },
-	{ 56, 0x08 },
-	{ 57, 0x10 },
-	{ 58, 0x08 },
-	{ 61, 0x60 },
-	{ 62, 0x10 },
-	{ 75, 0xff }
+	RAL_DEF_BBP
 };
 
-/*
- * Default values for RF register R2 indexed by channel numbers.
- */
-static const uint32_t ural_rf2522_r2[] = {
-	0x307f6, 0x307fb, 0x30800, 0x30805, 0x3080a, 0x3080f, 0x30814,
-	0x30819, 0x3081e, 0x30823, 0x30828, 0x3082d, 0x30832, 0x3083e
-};
+static const uint32_t ural_rf2522_r2[] =    RAL_RF2522_R2;
+static const uint32_t ural_rf2523_r2[] =    RAL_RF2523_R2;
+static const uint32_t ural_rf2524_r2[] =    RAL_RF2524_R2;
+static const uint32_t ural_rf2525_r2[] =    RAL_RF2525_R2;
+static const uint32_t ural_rf2525_hi_r2[] = RAL_RF2525_HI_R2;
+static const uint32_t ural_rf2525e_r2[] =   RAL_RF2525E_R2;
+static const uint32_t ural_rf2526_hi_r2[] = RAL_RF2526_HI_R2;
+static const uint32_t ural_rf2526_r2[] =    RAL_RF2526_R2;
 
-static const uint32_t ural_rf2523_r2[] = {
-	0x00327, 0x00328, 0x00329, 0x0032a, 0x0032b, 0x0032c, 0x0032d,
-	0x0032e, 0x0032f, 0x00340, 0x00341, 0x00342, 0x00343, 0x00346
-};
-
-static const uint32_t ural_rf2524_r2[] = {
-	0x00327, 0x00328, 0x00329, 0x0032a, 0x0032b, 0x0032c, 0x0032d,
-	0x0032e, 0x0032f, 0x00340, 0x00341, 0x00342, 0x00343, 0x00346
-};
-
-static const uint32_t ural_rf2525_r2[] = {
-	0x20327, 0x20328, 0x20329, 0x2032a, 0x2032b, 0x2032c, 0x2032d,
-	0x2032e, 0x2032f, 0x20340, 0x20341, 0x20342, 0x20343, 0x20346
-};
-
-static const uint32_t ural_rf2525_hi_r2[] = {
-	0x2032f, 0x20340, 0x20341, 0x20342, 0x20343, 0x20344, 0x20345,
-	0x20346, 0x20347, 0x20348, 0x20349, 0x2034a, 0x2034b, 0x2034e
-};
-
-static const uint32_t ural_rf2525e_r2[] = {
-	0x2044d, 0x2044e, 0x2044f, 0x20460, 0x20461, 0x20462, 0x20463,
-	0x20464, 0x20465, 0x20466, 0x20467, 0x20468, 0x20469, 0x2046b
-};
-
-static const uint32_t ural_rf2526_hi_r2[] = {
-	0x0022a, 0x0022b, 0x0022b, 0x0022c, 0x0022c, 0x0022d, 0x0022d,
-	0x0022e, 0x0022e, 0x0022f, 0x0022d, 0x00240, 0x00240, 0x00241
-};
-
-static const uint32_t ural_rf2526_r2[] = {
-	0x00226, 0x00227, 0x00227, 0x00228, 0x00228, 0x00229, 0x00229,
-	0x0022a, 0x0022a, 0x0022b, 0x0022b, 0x0022c, 0x0022c, 0x0022d
-};
-
-/*
- * For dual-band RF, RF registers R1 and R4 also depend on channel number;
- * values taken from the reference driver.
- */
 static const struct {
 	uint8_t		chan;
-	uint32_t	r1;
-	uint32_t	r2;
-	uint32_t	r4;
+	uint32_t	r1, r2, r4;
 } ural_rf5222[] = {
-	{   1, 0x08808, 0x0044d, 0x00282 },
-	{   2, 0x08808, 0x0044e, 0x00282 },
-	{   3, 0x08808, 0x0044f, 0x00282 },
-	{   4, 0x08808, 0x00460, 0x00282 },
-	{   5, 0x08808, 0x00461, 0x00282 },
-	{   6, 0x08808, 0x00462, 0x00282 },
-	{   7, 0x08808, 0x00463, 0x00282 },
-	{   8, 0x08808, 0x00464, 0x00282 },
-	{   9, 0x08808, 0x00465, 0x00282 },
-	{  10, 0x08808, 0x00466, 0x00282 },
-	{  11, 0x08808, 0x00467, 0x00282 },
-	{  12, 0x08808, 0x00468, 0x00282 },
-	{  13, 0x08808, 0x00469, 0x00282 },
-	{  14, 0x08808, 0x0046b, 0x00286 },
-
-	{  36, 0x08804, 0x06225, 0x00287 },
-	{  40, 0x08804, 0x06226, 0x00287 },
-	{  44, 0x08804, 0x06227, 0x00287 },
-	{  48, 0x08804, 0x06228, 0x00287 },
-	{  52, 0x08804, 0x06229, 0x00287 },
-	{  56, 0x08804, 0x0622a, 0x00287 },
-	{  60, 0x08804, 0x0622b, 0x00287 },
-	{  64, 0x08804, 0x0622c, 0x00287 },
-
-	{ 100, 0x08804, 0x02200, 0x00283 },
-	{ 104, 0x08804, 0x02201, 0x00283 },
-	{ 108, 0x08804, 0x02202, 0x00283 },
-	{ 112, 0x08804, 0x02203, 0x00283 },
-	{ 116, 0x08804, 0x02204, 0x00283 },
-	{ 120, 0x08804, 0x02205, 0x00283 },
-	{ 124, 0x08804, 0x02206, 0x00283 },
-	{ 128, 0x08804, 0x02207, 0x00283 },
-	{ 132, 0x08804, 0x02208, 0x00283 },
-	{ 136, 0x08804, 0x02209, 0x00283 },
-	{ 140, 0x08804, 0x0220a, 0x00283 },
-
-	{ 149, 0x08808, 0x02429, 0x00281 },
-	{ 153, 0x08808, 0x0242b, 0x00281 },
-	{ 157, 0x08808, 0x0242d, 0x00281 },
-	{ 161, 0x08808, 0x0242f, 0x00281 }
+	RAL_RF5222
 };
 
 USB_DECLARE_DRIVER_CLASS(ural, DV_IFNET);
@@ -422,6 +287,9 @@ USB_ATTACH(ural)
 
 	usb_init_task(&sc->sc_task, ural_task, sc);
 	timeout_set(&sc->scan_ch, ural_next_scan, sc);
+
+	sc->amrr.amrr_min_success_threshold =  1;
+	sc->amrr.amrr_max_success_threshold = 10;
 	timeout_set(&sc->amrr_ch, ural_amrr_timeout, sc);
 
 	/* retrieve RT2570 rev. no */
@@ -430,12 +298,12 @@ USB_ATTACH(ural)
 	/* retrieve MAC address and various other things from EEPROM */
 	ural_read_eeprom(sc);
 
-	printf("%s: MAC/BBP RT2570 (rev 0x%02x), RF %s, address %s\n",
-	    USBDEVNAME(sc->sc_dev), sc->asic_rev, ural_get_rf(sc->rf_rev),
-	    ether_sprintf(ic->ic_myaddr));
+	printf("%s: MAC/BBP RT%04x (rev 0x%02x), RF %s, address %s\n",
+	    USBDEVNAME(sc->sc_dev), sc->macbbp_rev, sc->asic_rev,
+	    ural_get_rf(sc->rf_rev), ether_sprintf(ic->ic_myaddr));
 
-	ic->ic_phytype = IEEE80211_T_OFDM; /* not only, but not used */
-	ic->ic_opmode = IEEE80211_M_STA; /* default to BSS mode */
+	ic->ic_phytype = IEEE80211_T_OFDM;	/* not only, but not used */
+	ic->ic_opmode = IEEE80211_M_STA;	/* default to BSS mode */
 	ic->ic_state = IEEE80211_S_INIT;
 
 	/* set device capabilities */
@@ -582,7 +450,7 @@ ural_alloc_tx_list(struct ural_softc *sc)
 		}
 
 		data->buf = usbd_alloc_buffer(data->xfer,
-		    RAL_TX_DESC_SIZE + MCLBYTES);
+		    RAL_TX_DESC_SIZE + IEEE80211_MAX_LEN);
 		if (data->buf == NULL) {
 			printf("%s: could not allocate tx buffer\n",
 			    USBDEVNAME(sc->sc_dev));
@@ -802,7 +670,7 @@ ural_task(void *arg)
 		break;
 	}
 
-	sc->sc_newstate(ic, sc->sc_state, -1);
+	sc->sc_newstate(ic, sc->sc_state, sc->sc_arg);
 }
 
 Static int
@@ -816,6 +684,7 @@ ural_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 	/* do it in a process context */
 	sc->sc_state = nstate;
+	sc->sc_arg = arg;
 	usb_add_task(sc->sc_udev, &sc->sc_task);
 
 	return 0;
@@ -952,8 +821,8 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 		tap->wr_flags = 0;
 		tap->wr_rate = ural_rxrate(desc);
-		tap->wr_chan_freq = htole16(ic->ic_ibss_chan->ic_freq);
-		tap->wr_chan_flags = htole16(ic->ic_ibss_chan->ic_flags);
+		tap->wr_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
+		tap->wr_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
 		tap->wr_antenna = sc->rx_ant;
 		tap->wr_antsignal = desc->rssi;
 
@@ -962,7 +831,7 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		mb.m_len = sc->sc_rxtap_len;
 		mb.m_next = m;
 		mb.m_pkthdr.len += mb.m_len;
-		bpf_mtap(sc->sc_drvbpf, &mb);
+		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif
 
@@ -1071,7 +940,7 @@ ural_txtime(int len, int rate, uint32_t flags)
 	uint16_t txtime;
 
 	if (RAL_RATE_IS_OFDM(rate)) {
-		/* IEEE Std 802.11a-1999, pp. 37 */
+		/* IEEE Std 802.11g-2003, pp. 44 */
 		txtime = (8 + 4 * len + 3 + rate - 1) / rate;
 		txtime = 16 + 4 + 4 * txtime + 6;
 	} else {
@@ -1122,7 +991,10 @@ ural_setup_tx_desc(struct ural_softc *sc, struct ural_tx_desc *desc,
 	desc->flags |= htole32(RAL_TX_NEWSEQ);
 	desc->flags |= htole32(len << 16);
 
-	desc->wme = htole16(RAL_AIFSN(2) | RAL_LOGCWMIN(3) | RAL_LOGCWMAX(5));
+	desc->wme = htole16(
+	    RAL_AIFSN(2) |
+	    RAL_LOGCWMIN(3) |
+	    RAL_LOGCWMAX(5));
 
 	/* setup PLCP fields */
 	desc->plcp_signal  = ural_plcp_signal(rate);
@@ -1208,9 +1080,10 @@ ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 }
 
 Static int
-ural_tx_mgt(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
+ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = &ic->ic_if;
 	struct ural_tx_desc *desc;
 	struct ural_tx_data *data;
 	struct ieee80211_frame *wh;
@@ -1219,23 +1092,48 @@ ural_tx_mgt(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	usbd_status error;
 	int xferlen, rate;
 
+	wh = mtod(m0, struct ieee80211_frame *);
+
+	if (wh->i_fc[1] & IEEE80211_FC1_WEP) {
+		m0 = ieee80211_wep_crypt(ifp, m0, 1);
+		if (m0 == NULL)
+			return ENOBUFS;
+
+		/* packet header may have moved, reset our local pointer */
+		wh = mtod(m0, struct ieee80211_frame *);
+	}
+
+	/* pickup a rate */
+	if ((wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+	    IEEE80211_FC0_TYPE_MGT) {
+		/* mgmt frames are sent at the lowest available bit-rate */
+		rate = ni->ni_rates.rs_rates[0];
+	} else {
+		if (ic->ic_fixed_rate != -1) {
+			rate = ic->ic_sup_rates[ic->ic_curmode].
+			    rs_rates[ic->ic_fixed_rate];
+		} else
+			rate = ni->ni_rates.rs_rates[ni->ni_txrate];
+	}
+	rate &= IEEE80211_RATE_VAL;
+	if (rate == 0)
+		rate = 2;	/* fallback to 1Mbps; should not happen  */
+
 	data = &sc->tx_data[0];
 	desc = (struct ural_tx_desc *)data->buf;
-
-	rate = IEEE80211_IS_CHAN_5GHZ(ni->ni_chan) ? 12 : 2;
 
 	data->m = m0;
 	data->ni = ni;
 
-	wh = mtod(m0, struct ieee80211_frame *);
-
 	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		flags |= RAL_TX_ACK;
+		flags |= RAL_TX_RETRY(7);
 
-		dur = ural_txtime(RAL_ACK_SIZE, rate, ic->ic_flags) + RAL_SIFS;
+		dur = ural_txtime(RAL_ACK_SIZE, ural_ack_rate(ic, rate),
+		    ic->ic_flags) + RAL_SIFS;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 
-		/* tell hardware to add timestamp for probe responses */
+		/* tell hardware to set timestamp in probe responses */
 		if ((wh->i_fc[0] &
 		    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_MASK)) ==
 		    (IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_RESP))
@@ -1249,8 +1147,8 @@ ural_tx_mgt(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 
 		tap->wt_flags = 0;
 		tap->wt_rate = rate;
-		tap->wt_chan_freq = htole16(ic->ic_ibss_chan->ic_freq);
-		tap->wt_chan_flags = htole16(ic->ic_ibss_chan->ic_flags);
+		tap->wt_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
+		tap->wt_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
 		tap->wt_antenna = sc->tx_ant;
 
 		M_DUP_PKTHDR(&mb, m0);
@@ -1258,7 +1156,7 @@ ural_tx_mgt(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		mb.m_len = sc->sc_txtap_len;
 		mb.m_next = m0;
 		mb.m_pkthdr.len += mb.m_len;
-		bpf_mtap(sc->sc_drvbpf, &mb);
+		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_OUT);
 	}
 #endif
 
@@ -1275,107 +1173,7 @@ ural_tx_mgt(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	if ((xferlen % 64) == 0)
 		xferlen += 2;
 
-	DPRINTFN(10, ("sending mgt frame len=%u rate=%u xfer len=%u\n",
-	    m0->m_pkthdr.len, rate, xferlen));
-
-	usbd_setup_xfer(data->xfer, sc->sc_tx_pipeh, data, data->buf, xferlen,
-	    USBD_FORCE_SHORT_XFER | USBD_NO_COPY, RAL_TX_TIMEOUT, ural_txeof);
-
-	error = usbd_transfer(data->xfer);
-	if (error != USBD_NORMAL_COMPLETION && error != USBD_IN_PROGRESS) {
-		m_freem(m0);
-		return error;
-	}
-
-	sc->tx_queued++;
-
-	return 0;
-}
-
-Static int
-ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
-{
-	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &ic->ic_if;
-	struct ieee80211_rateset *rs;
-	struct ural_tx_desc *desc;
-	struct ural_tx_data *data;
-	struct ieee80211_frame *wh;
-	uint32_t flags = 0;
-	uint16_t dur;
-	usbd_status error;
-	int xferlen, rate;
-
-	if (ic->ic_fixed_rate != -1) {
-		if (ic->ic_curmode != IEEE80211_MODE_AUTO)
-			rs = &ic->ic_sup_rates[ic->ic_curmode];
-		else
-			rs = &ic->ic_sup_rates[IEEE80211_MODE_11G];
-
-		rate = rs->rs_rates[ic->ic_fixed_rate];
-	} else {
-		rs = &ni->ni_rates;
-		rate = rs->rs_rates[ni->ni_txrate];
-	}
-	rate &= IEEE80211_RATE_VAL;
-
-	if (ic->ic_flags & IEEE80211_F_WEPON) {
-		m0 = ieee80211_wep_crypt(ifp, m0, 1);
-		if (m0 == NULL)
-			return ENOBUFS;
-	}
-
-	data = &sc->tx_data[0];
-	desc = (struct ural_tx_desc *)data->buf;
-
-	data->m = m0;
-	data->ni = ni;
-
-	wh = mtod(m0, struct ieee80211_frame *);
-
-	if (!IEEE80211_IS_MULTICAST(wh->i_addr1)) {
-		flags |= RAL_TX_ACK;
-		flags |= RAL_TX_RETRY(7);
-
-		dur = ural_txtime(RAL_ACK_SIZE, ural_ack_rate(ic, rate),
-		    ic->ic_flags) + RAL_SIFS;
-		*(uint16_t *)wh->i_dur = htole16(dur);
-	}
-
-#if NBPFILTER > 0
-	if (sc->sc_drvbpf != NULL) {
-		struct mbuf mb;
-		struct ural_tx_radiotap_header *tap = &sc->sc_txtap;
-
-		tap->wt_flags = 0;
-		tap->wt_rate = rate;
-		tap->wt_chan_freq = htole16(ic->ic_ibss_chan->ic_freq);
-		tap->wt_chan_flags = htole16(ic->ic_ibss_chan->ic_flags);
-		tap->wt_antenna = sc->tx_ant;
-
-		M_DUP_PKTHDR(&mb, m0);
-		mb.m_data = (caddr_t)tap;
-		mb.m_len = sc->sc_txtap_len;
-		mb.m_next = m0;
-		mb.m_pkthdr.len += mb.m_len;
-		bpf_mtap(sc->sc_drvbpf, &mb);
-	}
-#endif
-
-	m_copydata(m0, 0, m0->m_pkthdr.len, data->buf + RAL_TX_DESC_SIZE);
-	ural_setup_tx_desc(sc, desc, flags, m0->m_pkthdr.len, rate);
-
-	/* align end on a 2-bytes boundary */
-	xferlen = (RAL_TX_DESC_SIZE + m0->m_pkthdr.len + 1) & ~1;
-
-	/*
-	 * No space left in the last URB to store the extra 2 bytes, force
-	 * sending of another URB.
-	 */
-	if ((xferlen % 64) == 0)
-		xferlen += 2;
-
-	DPRINTFN(10, ("sending data frame len=%u rate=%u xfer len=%u\n",
+	DPRINTFN(10, ("sending frame len=%u rate=%u xfer len=%u\n",
 	    m0->m_pkthdr.len, rate, xferlen));
 
 	usbd_setup_xfer(data->xfer, sc->sc_tx_pipeh, data, data->buf, xferlen,
@@ -1420,9 +1218,9 @@ ural_start(struct ifnet *ifp)
 			m0->m_pkthdr.rcvif = NULL;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
-				bpf_mtap(ic->ic_rawbpf, m0);
+				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
 #endif
-			if (ural_tx_mgt(sc, m0, ni) != 0)
+			if (ural_tx_data(sc, m0, ni) != 0)
 				break;
 
 		} else {
@@ -1439,14 +1237,14 @@ ural_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 			if (ifp->if_bpf != NULL)
-				bpf_mtap(ifp->if_bpf, m0);
+				bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 			m0 = ieee80211_encap(ifp, m0, &ni);
 			if (m0 == NULL)
 				continue;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
-				bpf_mtap(ic->ic_rawbpf, m0);
+				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);
 #endif
 			if (ural_tx_data(sc, m0, ni) != 0) {
 				if (ni != NULL)
@@ -1997,6 +1795,10 @@ ural_read_eeprom(struct ural_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	uint16_t val;
 
+	/* retrieve MAC/BBP type */
+	ural_eeprom_read(sc, RAL_EEPROM_MACBBP, &val, 2);
+	sc->macbbp_rev = letoh16(val);
+
 	ural_eeprom_read(sc, RAL_EEPROM_CONFIG0, &val, 2);
 	val = letoh16(val);
 	sc->rf_rev =   (val >> 11) & 0x7;
@@ -2290,28 +2092,20 @@ ural_stop(struct ifnet *ifp, int disable)
 	ural_free_tx_list(sc);
 }
 
-#define URAL_AMRR_MIN_SUCCESS_THRESHOLD	 1
-#define URAL_AMRR_MAX_SUCCESS_THRESHOLD	10
-
 Static void
 ural_amrr_start(struct ural_softc *sc, struct ieee80211_node *ni)
 {
-	struct ural_amrr *amrr = &sc->amrr;
 	int i;
 
 	/* clear statistic registers (STA_CSR0 to STA_CSR10) */
 	ural_read_multi(sc, RAL_STA_CSR0, sc->sta, sizeof sc->sta);
 
-	amrr->success = 0;
-	amrr->recovery = 0;
-	amrr->txcnt = amrr->retrycnt = 0;
-	amrr->success_threshold = URAL_AMRR_MIN_SUCCESS_THRESHOLD;
+	ieee80211_amrr_node_init(&sc->amrr, &sc->amn);
 
 	/* set rate to some reasonable initial value */
 	for (i = ni->ni_rates.rs_nrates - 1;
 	     i > 0 && (ni->ni_rates.rs_rates[i] & IEEE80211_RATE_VAL) > 72;
 	     i--);
-
 	ni->ni_txrate = i;
 
 	timeout_add(&sc->amrr_ch, hz);
@@ -2320,7 +2114,7 @@ ural_amrr_start(struct ural_softc *sc, struct ieee80211_node *ni)
 Static void
 ural_amrr_timeout(void *arg)
 {
-	struct ural_softc *sc = (struct ural_softc *)arg;
+	struct ural_softc *sc = arg;
 	usb_device_request_t req;
 	int s;
 
@@ -2348,7 +2142,6 @@ ural_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
     usbd_status status)
 {
 	struct ural_softc *sc = (struct ural_softc *)priv;
-	struct ural_amrr *amrr = &sc->amrr;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -2358,87 +2151,20 @@ ural_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 	}
 
 	/* count TX retry-fail as Tx errors */
-	ifp->if_oerrors += sc->sta[9];
+	ifp->if_oerrors += letoh16(sc->sta[9]);
 
-	amrr->retrycnt =
-	    sc->sta[7] +	/* TX one-retry ok count */
-	    sc->sta[8] +	/* TX more-retry ok count */
-	    sc->sta[9];		/* TX retry-fail count */
+	sc->amn.amn_retrycnt =
+	    letoh16(sc->sta[7]) +	/* TX one-retry ok count */
+	    letoh16(sc->sta[8]) +	/* TX more-retry ok count */
+	    letoh16(sc->sta[9]);	/* TX retry-fail count */
 
-	amrr->txcnt =
-	    amrr->retrycnt +
-	    sc->sta[6];		/* TX no-retry ok count */
+	sc->amn.amn_txcnt =
+	    sc->amn.amn_retrycnt +
+	    letoh16(sc->sta[6]);	/* TX no-retry ok count */
 
-	ural_ratectl(amrr, sc->sc_ic.ic_bss);
+	ieee80211_amrr_choose(&sc->amrr, sc->sc_ic.ic_bss, &sc->amn);
 
 	timeout_add(&sc->amrr_ch, hz);
-}
-
-/*-
- * Naive implementation of the Adaptive Multi Rate Retry algorithm:
- *     "IEEE 802.11 Rate Adaptation: A Practical Approach"
- *     Mathieu Lacage, Hossein Manshaei, Thierry Turletti
- *     INRIA Sophia - Projet Planete
- *     http://www-sop.inria.fr/rapports/sophia/RR-5208.html
- *
- * This algorithm is particularly well suited for ural since it does not
- * require per-frame retry statistics.  Note however that since h/w does
- * not provide per-frame stats, we can't do per-node rate adaptation and
- * thus automatic rate adaptation is only enabled in STA operating mode.
- */
-#define is_success(amrr)	\
-	((amrr)->retrycnt < (amrr)->txcnt / 10)
-#define is_failure(amrr)	\
-	((amrr)->retrycnt > (amrr)->txcnt / 3)
-#define is_enough(amrr)		\
-	((amrr)->txcnt > 10)
-#define is_min_rate(ni)		\
-	((ni)->ni_txrate == 0)
-#define is_max_rate(ni)		\
-	((ni)->ni_txrate == (ni)->ni_rates.rs_nrates - 1)
-#define increase_rate(ni)	\
-	((ni)->ni_txrate++)
-#define decrease_rate(ni)	\
-	((ni)->ni_txrate--)
-#define reset_cnt(amrr)		\
-	do { (amrr)->txcnt = (amrr)->retrycnt = 0; } while (0)
-Static void
-ural_ratectl(struct ural_amrr *amrr, struct ieee80211_node *ni)
-{
-	int need_change = 0;
-
-	if (is_success(amrr) && is_enough(amrr)) {
-		amrr->success++;
-		if (amrr->success >= amrr->success_threshold &&
-		    !is_max_rate(ni)) {
-			amrr->recovery = 1;
-			amrr->success = 0;
-			increase_rate(ni);
-			need_change = 1;
-		} else {
-			amrr->recovery = 0;
-		}
-	} else if (is_failure(amrr)) {
-		amrr->success = 0;
-		if (!is_min_rate(ni)) {
-			if (amrr->recovery) {
-				amrr->success_threshold *= 2;
-				if (amrr->success_threshold >
-				    URAL_AMRR_MAX_SUCCESS_THRESHOLD)
-					amrr->success_threshold =
-					    URAL_AMRR_MAX_SUCCESS_THRESHOLD;
-			} else {
-				amrr->success_threshold =
-				    URAL_AMRR_MIN_SUCCESS_THRESHOLD;
-			}
-			decrease_rate(ni);
-			need_change = 1;
-		}
-		amrr->recovery = 0;	/* original paper was incorrect */
-	}
-
-	if (is_enough(amrr) || need_change)
-		reset_cnt(amrr);
 }
 
 Static int
@@ -2446,7 +2172,7 @@ ural_activate(device_ptr_t self, enum devact act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return EOPNOTSUPP;
+		break;
 
 	case DVACT_DEACTIVATE:
 		/*if_deactivate(&sc->sc_ic.ic_if);*/

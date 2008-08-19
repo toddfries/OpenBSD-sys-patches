@@ -1,4 +1,4 @@
-/*	$OpenBSD: hotplug.c,v 1.6 2004/10/08 18:57:38 drahn Exp $	*/
+/*	$OpenBSD: hotplug.c,v 1.8 2006/05/28 16:43:49 mk Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *

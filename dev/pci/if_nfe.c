@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfe.c,v 1.52.2.2 2006/11/14 00:01:53 brad Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.64.2.1 2006/11/13 23:41:38 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006 Damien Bergamini <damien.bergamini@free.fr>
@@ -32,6 +32,7 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 #include <sys/socket.h>
 
 #include <machine/bus.h>
@@ -113,8 +114,6 @@ struct cfdriver nfe_cd = {
 	NULL, "nfe", DV_IFNET
 };
 
-/*#define NFE_NO_JUMBO*/
-
 #ifdef NFE_DEBUG
 int nfedebug = 0;
 #define DPRINTF(x)	do { if (nfedebug) printf x; } while (0)
@@ -139,7 +138,15 @@ const struct pci_matchid nfe_devices[] = {
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP51_LAN1 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP51_LAN2 },
 	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP55_LAN1 },
-	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP55_LAN2 }
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP55_LAN2 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_LAN1 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_LAN2 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_LAN3 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_LAN4 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN1 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN2 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN3 },
+	{ PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP65_LAN4 }
 };
 
 int
@@ -207,12 +214,20 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	case PCI_PRODUCT_NVIDIA_MCP51_LAN1:
 	case PCI_PRODUCT_NVIDIA_MCP51_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP61_LAN1:
+	case PCI_PRODUCT_NVIDIA_MCP61_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP61_LAN3:
+	case PCI_PRODUCT_NVIDIA_MCP61_LAN4:
 		sc->sc_flags |= NFE_40BIT_ADDR;
 		break;
 	case PCI_PRODUCT_NVIDIA_CK804_LAN1:
 	case PCI_PRODUCT_NVIDIA_CK804_LAN2:
 	case PCI_PRODUCT_NVIDIA_MCP04_LAN1:
 	case PCI_PRODUCT_NVIDIA_MCP04_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP65_LAN1:
+	case PCI_PRODUCT_NVIDIA_MCP65_LAN2:
+	case PCI_PRODUCT_NVIDIA_MCP65_LAN3:
+	case PCI_PRODUCT_NVIDIA_MCP65_LAN4:
 		sc->sc_flags |= NFE_JUMBO_SUP | NFE_40BIT_ADDR | NFE_HW_CSUM;
 		break;
 	case PCI_PRODUCT_NVIDIA_MCP55_LAN1:
@@ -222,11 +237,9 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	}
 
-#ifndef NFE_NO_JUMBO
 	/* enable jumbo frames for adapters that support it */
 	if (sc->sc_flags & NFE_JUMBO_SUP)
 		sc->sc_flags |= NFE_USE_JUMBO;
-#endif
 
 	/*
 	 * Allocate Tx and Rx rings.
@@ -257,6 +270,10 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+	if (sc->sc_flags & NFE_USE_JUMBO)
+		ifp->if_hardmtu = NFE_JUMBO_MTU;
+
 #if NVLAN > 0
 	if (sc->sc_flags & NFE_HW_VLAN)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -302,7 +319,6 @@ nfe_power(int why, void *arg)
 	if (why == PWR_RESUME) {
 		ifp = &sc->sc_arpcom.ac_if;
 		if (ifp->if_flags & IFF_UP) {
-			ifp->if_flags &= ~IFF_RUNNING;
 			nfe_init(ifp);
 			if (ifp->if_flags & IFF_RUNNING)
 				nfe_start(ifp);
@@ -472,23 +488,15 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		nfe_init(ifp);
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			nfe_init(ifp);
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
 #endif
-		default:
-			break;
-		}
 		break;
 	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN ||
-		    ((sc->sc_flags & NFE_USE_JUMBO) &&
-		    ifr->ifr_mtu > ETHERMTU_JUMBO) ||
-		    (!(sc->sc_flags & NFE_USE_JUMBO) &&
-		    ifr->ifr_mtu > ETHERMTU))
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
 		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
@@ -502,10 +510,12 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			 */
 			if ((ifp->if_flags & IFF_RUNNING) &&
 			    ((ifp->if_flags ^ sc->sc_if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0)
+			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 				nfe_setmulti(sc);
-			else
-				nfe_init(ifp);
+			} else {
+				if (!(ifp->if_flags & IFF_RUNNING))
+					nfe_init(ifp);
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				nfe_stop(ifp, 1);
@@ -529,7 +539,7 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 	}
 
 	splx(s);
@@ -753,7 +763,7 @@ nfe_rxeof(struct nfe_softc *sc)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ifp->if_ipackets++;
 		ether_input_mbuf(ifp, m);
@@ -816,8 +826,8 @@ nfe_txeof(struct nfe_softc *sc)
 				goto skip;
 
 			if ((flags & NFE_TX_ERROR_V1) != 0) {
-				printf("%s: tx v1 error 0x%04x\n",
-				    sc->sc_dev.dv_xname, flags);
+				printf("%s: tx v1 error 0x%04b\n",
+				    sc->sc_dev.dv_xname, flags, NFE_V1_TXERR);
 				ifp->if_oerrors++;
 			} else
 				ifp->if_opackets++;
@@ -826,8 +836,8 @@ nfe_txeof(struct nfe_softc *sc)
 				goto skip;
 
 			if ((flags & NFE_TX_ERROR_V2) != 0) {
-				printf("%s: tx v2 error 0x%04x\n",
-				    sc->sc_dev.dv_xname, flags);
+				printf("%s: tx v2 error 0x%04b\n",
+				    sc->sc_dev.dv_xname, flags, NFE_V2_TXERR);
 				ifp->if_oerrors++;
 			} else
 				ifp->if_opackets++;
@@ -995,7 +1005,7 @@ nfe_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m0);
+			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (sc->txq.cur == old)	/* nothing sent */
@@ -1022,7 +1032,6 @@ nfe_watchdog(struct ifnet *ifp)
 
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 
-	ifp->if_flags &= ~IFF_RUNNING;
 	nfe_init(ifp);
 
 	ifp->if_oerrors++;
@@ -1033,9 +1042,6 @@ nfe_init(struct ifnet *ifp)
 {
 	struct nfe_softc *sc = ifp->if_softc;
 	uint32_t tmp;
-
-	if (ifp->if_flags & IFF_RUNNING)
-		return 0;
 
 	nfe_stop(ifp, 0);
 

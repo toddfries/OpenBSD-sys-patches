@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.c,v 1.9 2006/02/26 01:27:16 brad Exp $ */
+/* $OpenBSD: if_ixgb.c,v 1.29 2006/08/18 06:02:45 brad Exp $ */
 
 #include <dev/pci/if_ixgb.h>
 
@@ -44,7 +44,7 @@ int             ixgb_display_debug_stats = 0;
  *  Driver version
  *********************************************************************/
 
-char ixgb_driver_version[] = "1.0.26";
+char ixgb_driver_version[] = "6.1.0";
 
 /*********************************************************************
  *  PCI Device ID Table
@@ -87,10 +87,10 @@ void ixgb_disable_intr(struct ixgb_softc *);
 void ixgb_free_transmit_structures(struct ixgb_softc *);
 void ixgb_free_receive_structures(struct ixgb_softc *);
 void ixgb_update_stats_counters(struct ixgb_softc *);
-void ixgb_clean_transmit_interrupts(struct ixgb_softc *);
+void ixgb_txeof(struct ixgb_softc *);
 int  ixgb_allocate_receive_structures(struct ixgb_softc *);
 int  ixgb_allocate_transmit_structures(struct ixgb_softc *);
-void ixgb_process_receive_interrupts(struct ixgb_softc *, int);
+void ixgb_rxeof(struct ixgb_softc *, int);
 void
 ixgb_receive_checksum(struct ixgb_softc *,
 		      struct ixgb_rx_desc * rx_desc,
@@ -100,7 +100,6 @@ ixgb_transmit_checksum_setup(struct ixgb_softc *,
 			     struct mbuf *,
 			     u_int8_t *);
 void ixgb_set_promisc(struct ixgb_softc *);
-void ixgb_disable_promisc(struct ixgb_softc *);
 void ixgb_set_multi(struct ixgb_softc *);
 void ixgb_print_hw_stats(struct ixgb_softc *);
 void ixgb_update_link_status(struct ixgb_softc *);
@@ -126,8 +125,8 @@ struct cfdriver ixgb_cd = {
 };
 
 /* some defines for controlling descriptor fetches in h/w */
-#define RXDCTL_PTHRESH_DEFAULT 128	/* chip considers prefech below this */
-#define RXDCTL_HTHRESH_DEFAULT 16	/* chip will only prefetch if tail is
+#define RXDCTL_PTHRESH_DEFAULT 0	/* chip considers prefech below this */
+#define RXDCTL_HTHRESH_DEFAULT 0	/* chip will only prefetch if tail is
 					 * pushed this many descriptors from
 					 * head */
 #define RXDCTL_WTHRESH_DEFAULT 0	/* chip writes back at this many or RXT0 */
@@ -323,7 +322,7 @@ ixgb_start(struct ifnet *ifp)
 #if NBPFILTER > 0
 		/* Send a copy of the frame to the BPF listener */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head);
+			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		/* Set timeout in case hardware has problems transmitting */
@@ -360,38 +359,41 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFADDR (Set Interface "
 			       "Addr)");
 		ifp->if_flags |= IFF_UP;
-		ixgb_init(sc);
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			ixgb_init(sc);
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->interface_data, ifa);
-			break;
 #endif /* INET */
-		default:
-			break;
-		}
 		break;
 	case SIOCSIFMTU:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFMTU (Set Interface MTU)");
-		if (ifr->ifr_mtu < ETHERMIN ||
-		    ifr->ifr_mtu > IXGB_MAX_JUMBO_FRAME_SIZE - ETHER_HDR_LEN - ETHER_CRC_LEN) {
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
+		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
-		}
 		break;
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
-			if (!(ifp->if_flags & IFF_RUNNING))
-				ixgb_init(sc);
-
-			ixgb_disable_promisc(sc);
-			ixgb_set_promisc(sc);
+			/*
+			 * If only the PROMISC or ALLMULTI flag changes, then
+			 * don't do a full re-init of the chip, just update
+			 * the Rx filter.
+			 */
+			if ((ifp->if_flags & IFF_RUNNING) &&
+			    ((ifp->if_flags ^ sc->if_flags) &
+			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
+				ixgb_set_promisc(sc);
+			} else {
+				if (!(ifp->if_flags & IFF_RUNNING))
+					ixgb_init(sc);
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				ixgb_stop(sc);
 		}
+		sc->if_flags = ifp->if_flags;
 		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
@@ -416,7 +418,7 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	default:
 		IOCTL_DEBUGOUT1("ioctl received: UNKNOWN (0x%X)\n", (int)command);
-		error = EINVAL;
+		error = ENOTTY;
 	}
 
 	splx(s);
@@ -511,7 +513,7 @@ ixgb_init(void *arg)
 	}
 	ixgb_initialize_receive_unit(sc);
 
-	/* Don't loose promiscuous settings */
+	/* Don't lose promiscuous settings */
 	ixgb_set_promisc(sc);
 
 	ifp->if_flags |= IFF_RUNNING;
@@ -544,13 +546,11 @@ ixgb_intr(void *arg)
 	struct ifnet	*ifp;
 	u_int32_t	reg_icr;
 	boolean_t	rxdmt0 = FALSE;
-	int s, claimed = 0;
-
-	s = splnet();
+	int claimed = 0;
 
 	ifp = &sc->interface_data.ac_if;
 
-	 for (;;) {
+	for (;;) {
 		reg_icr = IXGB_READ_REG(&sc->hw, ICR);
 		if (reg_icr == 0)
 			break;
@@ -561,8 +561,8 @@ ixgb_intr(void *arg)
 			rxdmt0 = TRUE;
 
 		if (ifp->if_flags & IFF_RUNNING) {
-			ixgb_process_receive_interrupts(sc, -1);
-			ixgb_clean_transmit_interrupts(sc);
+			ixgb_rxeof(sc, -1);
+			ixgb_txeof(sc);
 		}
 
 		/* Link status change */
@@ -583,7 +583,6 @@ ixgb_intr(void *arg)
 	    IFQ_IS_EMPTY(&ifp->if_snd) == 0)
 		ixgb_start(ifp);
 
-	splx(s);
 	return (claimed);
 }
 
@@ -615,7 +614,11 @@ ixgb_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 	}
 
 	ifmr->ifm_status |= IFM_ACTIVE;
-	ifmr->ifm_active |= IFM_1000_SX | IFM_FDX;
+	if ((sc->hw.phy_type == ixgb_phy_type_g6104) ||
+	    (sc->hw.phy_type == ixgb_phy_type_txn17401))
+		ifmr->ifm_active |= IFM_10G_LR | IFM_FDX;
+	else
+		ifmr->ifm_active |= IFM_10G_SR | IFM_FDX;
 
 	return;
 }
@@ -663,17 +666,19 @@ ixgb_encap(struct ixgb_softc *sc, struct mbuf *m_head)
 	 * Force a cleanup if number of TX descriptors available hits the
 	 * threshold
 	 */
-	if (sc->num_tx_desc_avail <= IXGB_TX_CLEANUP_THRESHOLD)
-		ixgb_clean_transmit_interrupts(sc);
 	if (sc->num_tx_desc_avail <= IXGB_TX_CLEANUP_THRESHOLD) {
-		sc->no_tx_desc_avail1++;
-		return (ENOBUFS);
+		ixgb_txeof(sc);
+		if (sc->num_tx_desc_avail <= IXGB_TX_CLEANUP_THRESHOLD) {
+			sc->no_tx_desc_avail1++;
+			return (ENOBUFS);
+		}
 	}
 	/*
 	 * Map the packet for DMA.
 	 */
-	if (bus_dmamap_create(sc->txtag, IXGB_MAX_JUMBO_FRAME_SIZE, 32,
-	    IXGB_MAX_JUMBO_FRAME_SIZE, 0, BUS_DMA_NOWAIT, &q.map)) {
+	if (bus_dmamap_create(sc->txtag, IXGB_MAX_JUMBO_FRAME_SIZE,
+	    IXGB_MAX_SCATTER, IXGB_MAX_JUMBO_FRAME_SIZE, 0,
+	    BUS_DMA_NOWAIT, &q.map)) {
 		sc->no_tx_map_avail++;
 		return (ENOMEM);
 	}
@@ -729,7 +734,8 @@ ixgb_encap(struct ixgb_softc *sc, struct mbuf *m_head)
 	 * that this frame is available to transmit.
 	 */
 	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
-	    sc->txdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	    sc->txdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 	IXGB_WRITE_REG(&sc->hw, TDT, i);
 
 	return (0);
@@ -746,26 +752,14 @@ ixgb_set_promisc(struct ixgb_softc *sc)
 
 	if (ifp->if_flags & IFF_PROMISC) {
 		reg_rctl |= (IXGB_RCTL_UPE | IXGB_RCTL_MPE);
-		IXGB_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 	} else if (ifp->if_flags & IFF_ALLMULTI) {
 		reg_rctl |= IXGB_RCTL_MPE;
 		reg_rctl &= ~IXGB_RCTL_UPE;
-		IXGB_WRITE_REG(&sc->hw, RCTL, reg_rctl);
+	} else {
+		reg_rctl &= ~(IXGB_RCTL_UPE | IXGB_RCTL_MPE);
 	}
-}
-
-void
-ixgb_disable_promisc(struct ixgb_softc *sc)
-{
-	u_int32_t       reg_rctl;
-
-	reg_rctl = IXGB_READ_REG(&sc->hw, RCTL);
-
-	reg_rctl &= (~IXGB_RCTL_UPE);
-	reg_rctl &= (~IXGB_RCTL_MPE);
 	IXGB_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 }
-
 
 /*********************************************************************
  *  Multicast Update
@@ -925,7 +919,8 @@ ixgb_identify_hardware(struct ixgb_softc *sc)
 		break;
 	default:
 		INIT_DEBUGOUT1("Unknown device if 0x%x", sc->hw.device_id);
-		printf("%s: unsupported device id 0x%x\n", sc->sc_dv.dv_xname, sc->hw.device_id);
+		printf("%s: unsupported device id 0x%x\n",
+		    sc->sc_dv.dv_xname, sc->hw.device_id);
 	}
 }
 
@@ -941,13 +936,13 @@ ixgb_allocate_pci_resources(struct ixgb_softc *sc)
 
 	val = pci_conf_read(pa->pa_pc, pa->pa_tag, IXGB_MMBA);
 	if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
-		printf(": mmba isn't memory");
+		printf(": mmba is not mem space\n");
 		return (ENXIO);
 	}
 	if (pci_mapreg_map(pa, IXGB_MMBA, PCI_MAPREG_MEM_TYPE(val), 0,
 	    &sc->osdep.mem_bus_space_tag, &sc->osdep.mem_bus_space_handle,
 	    &sc->osdep.ixgb_membase, &sc->osdep.ixgb_memsize, 0)) {
-		printf(": can't find mem space\n");
+		printf(": cannot find mem space\n");
 		return (ENXIO);
 	}
 
@@ -955,6 +950,8 @@ ixgb_allocate_pci_resources(struct ixgb_softc *sc)
 		printf(": couldn't map interrupt\n");
 		return (ENXIO);
 	}
+
+	sc->hw.back = &sc->osdep;
 
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_intrhand = pci_intr_establish(pc, ih, IPL_NET, ixgb_intr, sc,
@@ -968,9 +965,7 @@ ixgb_allocate_pci_resources(struct ixgb_softc *sc)
 	}
 	printf(": %s", intrstr);
 
-	sc->hw.back = &sc->osdep;
-
-	return(0);
+	return (0);
 }
 
 void
@@ -979,11 +974,11 @@ ixgb_free_pci_resources(struct ixgb_softc *sc)
 	struct pci_attach_args *pa = &sc->osdep.ixgb_pa;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 
-	if(sc->sc_intrhand)
+	if (sc->sc_intrhand)
 		pci_intr_disestablish(pc, sc->sc_intrhand);
 	sc->sc_intrhand = 0;
 
-	if(sc->osdep.ixgb_membase)
+	if (sc->osdep.ixgb_membase)
 		bus_space_unmap(sc->osdep.mem_bus_space_tag, sc->osdep.mem_bus_space_handle,
 				sc->osdep.ixgb_memsize);
 	sc->osdep.ixgb_membase = 0;
@@ -1040,6 +1035,8 @@ ixgb_setup_interface(struct ixgb_softc *sc)
 	ifp->if_ioctl = ixgb_ioctl;
 	ifp->if_start = ixgb_start;
 	ifp->if_watchdog = ixgb_watchdog;
+	ifp->if_hardmtu =
+		IXGB_MAX_JUMBO_FRAME_SIZE - ETHER_HDR_LEN - ETHER_CRC_LEN;
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->num_tx_desc - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1051,10 +1048,14 @@ ixgb_setup_interface(struct ixgb_softc *sc)
 	 */
 	ifmedia_init(&sc->media, IFM_IMASK, ixgb_media_change,
 		     ixgb_media_status);
-	ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_SX | IFM_FDX,
-		    0, NULL);
-	ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_SX,
-		    0, NULL);
+	if ((sc->hw.phy_type == ixgb_phy_type_g6104) ||
+	    (sc->hw.phy_type == ixgb_phy_type_txn17401)) {
+		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_LR |
+		    IFM_FDX, 0, NULL);
+	} else {
+		ifmedia_add(&sc->media, IFM_ETHER | IFM_10G_SR |
+		    IFM_FDX, 0, NULL);
+	}
 	ifmedia_add(&sc->media, IFM_ETHER | IFM_AUTO, 0, NULL);
 	ifmedia_set(&sc->media, IFM_ETHER | IFM_AUTO);
 
@@ -1322,7 +1323,8 @@ ixgb_transmit_checksum_setup(struct ixgb_softc *sc,
 			ENET_HEADER_SIZE + sizeof(struct ip) +
 			offsetof(struct udphdr, uh_sum);
 	}
-	TXD->cmd_type_len = htole32(IXGB_CONTEXT_DESC_CMD_TCP | IXGB_TX_DESC_CMD_RS | IXGB_CONTEXT_DESC_CMD_IDE);
+	TXD->cmd_type_len = htole32(IXGB_CONTEXT_DESC_CMD_TCP |
+	    IXGB_TX_DESC_CMD_RS | IXGB_CONTEXT_DESC_CMD_IDE);
 
 	tx_buffer->m_head = NULL;
 
@@ -1341,7 +1343,7 @@ ixgb_transmit_checksum_setup(struct ixgb_softc *sc,
  *
  **********************************************************************/
 void
-ixgb_clean_transmit_interrupts(struct ixgb_softc *sc)
+ixgb_txeof(struct ixgb_softc *sc)
 {
 	int             i, num_avail;
 	struct ixgb_buffer *tx_buffer;
@@ -1358,7 +1360,7 @@ ixgb_clean_transmit_interrupts(struct ixgb_softc *sc)
 	tx_desc = &sc->tx_desc_base[i];
 
 	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
-	    sc->txdma.dma_size, BUS_DMASYNC_POSTREAD);
+	    sc->txdma.dma_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
 	while (tx_desc->status & IXGB_TX_DESC_STATUS_DD) {
 
 		tx_desc->status = 0;
@@ -1379,7 +1381,8 @@ ixgb_clean_transmit_interrupts(struct ixgb_softc *sc)
 		tx_desc = &sc->tx_desc_base[i];
 	}
 	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
-	    sc->txdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	    sc->txdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 	sc->oldest_used_tx_desc = i;
 
@@ -1435,9 +1438,9 @@ ixgb_get_buf(int i, struct ixgb_softc *sc,
 		mp->m_next = NULL;
 	}
 
-	if (ifp->if_mtu <= ETHERMTU) {
+	if (sc->hw.max_frame_size <= (MCLBYTES - ETHER_ALIGN))
 		m_adj(mp, ETHER_ALIGN);
-	}
+
 	rx_buffer = &sc->rx_buffer_area[i];
 
 	/*
@@ -1508,7 +1511,8 @@ ixgb_allocate_receive_structures(struct ixgb_softc *sc)
 		}
 	}
 	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map, 0,
-	    sc->rxdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	    sc->rxdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 	return (0);
 
@@ -1677,7 +1681,7 @@ ixgb_free_receive_structures(struct ixgb_softc *sc)
  *
  *********************************************************************/
 void
-ixgb_process_receive_interrupts(struct ixgb_softc *sc, int count)
+ixgb_rxeof(struct ixgb_softc *sc, int count)
 {
 	struct ifnet   *ifp;
 	struct mbuf    *mp;
@@ -1697,7 +1701,7 @@ ixgb_process_receive_interrupts(struct ixgb_softc *sc, int count)
 	eop_desc = sc->next_rx_desc_to_check;
 	current_desc = &sc->rx_desc_base[i];
 	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map, 0,
-	    sc->rxdma.dma_size, BUS_DMASYNC_POSTREAD);
+	    sc->rxdma.dma_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
 	if (!((current_desc->status) & IXGB_RX_DESC_STATUS_DD))
 		return;
@@ -1753,7 +1757,8 @@ ixgb_process_receive_interrupts(struct ixgb_softc *sc, int count)
 				 * user see the packet.
 				 */
 				if (ifp->if_bpf)
-					bpf_mtap(ifp->if_bpf, sc->fmp);
+					bpf_mtap(ifp->if_bpf, sc->fmp,
+					    BPF_DIRECTION_IN);
 #endif
 
 				ixgb_receive_checksum(sc, current_desc,
@@ -1774,7 +1779,8 @@ ixgb_process_receive_interrupts(struct ixgb_softc *sc, int count)
 		/* Zero out the receive descriptors status  */
 		current_desc->status = 0;
 		bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map, 0,
-		    sc->rxdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+		    sc->rxdma.dma_map->dm_mapsize,
+		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 		/* Advance our pointers to the next descriptor */
 		if (++i == sc->num_rx_desc) {
@@ -2001,7 +2007,7 @@ ixgb_print_hw_stats(struct ixgb_softc *sc)
 		bus_speed == ixgb_bus_speed_100 ? "100MHz" :
 		bus_speed == ixgb_bus_speed_133 ? "133MHz" :
 		"UNKNOWN");
-	printf("ixgb%d: PCI_Bus_Speed = %s\n", unit,
+	printf("%s: PCI_Bus_Speed = %s\n", unit,
 		buf_speed);
 
 	snprintf(buf_type, sizeof(buf_type),

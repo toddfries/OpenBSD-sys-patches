@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.96 2006/01/12 15:59:03 mickey Exp $	*/
+/*	$OpenBSD: locore.s,v 1.103 2006/05/11 13:21:11 mickey Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -65,7 +65,7 @@
 
 #include <dev/isa/isareg.h>
 
-#if NLAPIC > 0 
+#if NLAPIC > 0
 #include <machine/i82489reg.h>
 #endif
 
@@ -78,16 +78,6 @@
 #define	SUPERALIGN_TEXT	.align  16,0x90	/* 16-byte boundaries better for 486 */
 #define _ALIGN_TEXT	ALIGN_TEXT
 #include <machine/asm.h>
-
-/* NB: NOP now preserves registers so NOPs can be inserted anywhere */
-/* XXX: NOP and FASTER_NOP are misleadingly named */
-#ifdef DUMMY_NOPS	/* this will break some older machines */
-#define	FASTER_NOP
-#define	NOP
-#else
-#define	FASTER_NOP	pushl %eax ; inb $0x84,%al ; popl %eax
-#define	NOP	pushl %eax ; inb $0x84,%al ; inb $0x84,%al ; popl %eax
-#endif
 
 #define CPL _C_LABEL(lapic_tpr)
 
@@ -110,16 +100,16 @@
 #define	PUSH_CURPROC(treg)				\
 	GET_CPUINFO(treg)			;	\
 	pushl	CPU_INFO_CURPROC(treg)
-       
+
 #define	CLEAR_CURPROC(treg)				\
 	GET_CPUINFO(treg)			;	\
 	movl	$0,CPU_INFO_CURPROC(treg)
-       
+
 #define	SET_CURPROC(proc,cpu)				\
 	GET_CPUINFO(cpu)			;	\
 	movl	proc,CPU_INFO_CURPROC(cpu)	;	\
 	movl	cpu,P_CPU(proc)
-       
+
 #define	GET_CURPCB(reg)					\
 	GET_CPUINFO(reg)			;	\
 	movl	CPU_INFO_CURPCB(reg),reg
@@ -136,7 +126,7 @@
 #define	CHECK_ASTPENDING(treg)				\
 	GET_CPUINFO(treg)			;	\
 	cmpl	$0,CPU_INFO_ASTPENDING(treg)
-               
+
 #define	CLEAR_ASTPENDING(cireg)				\
 	movl	$0,CPU_INFO_ASTPENDING(cireg)
 
@@ -173,6 +163,7 @@
 	popl	%edx		; \
 	popl	%ecx		; \
 	popl	%eax		; \
+	sti			; \
 	addl	$8,%esp		; \
 	iret
 
@@ -209,13 +200,11 @@
 	.globl	_C_LABEL(cpu_cache_ecx), _C_LABEL(cpu_cache_edx)
 	.globl	_C_LABEL(cold), _C_LABEL(cnvmem), _C_LABEL(extmem)
 	.globl	_C_LABEL(esym)
+	.globl	_C_LABEL(nkptp_max)
 	.globl	_C_LABEL(boothowto), _C_LABEL(bootdev), _C_LABEL(atdevbase)
-	.globl	_C_LABEL(proc0paddr), _C_LABEL(PTDpaddr)
+	.globl	_C_LABEL(proc0paddr), _C_LABEL(PTDpaddr), _C_LABEL(PTDsize)
 	.globl	_C_LABEL(gdt)
 	.globl	_C_LABEL(bootapiver), _C_LABEL(bootargc), _C_LABEL(bootargv)
-#ifndef MULTIPROCESSOR
-	.globl	_C_LABEL(curpcb)
-#endif
 	.globl	_C_LABEL(lapic_tpr)
 
 #if NLAPIC > 0
@@ -264,6 +253,7 @@ _C_LABEL(bootargv):	.long	0	# /boot argv
 _C_LABEL(bootdev):	.long	0	# device we booted from
 _C_LABEL(proc0paddr):	.long	0
 _C_LABEL(PTDpaddr):	.long	0	# paddr of PTD, for libkvm
+_C_LABEL(PTDsize):	.long	NBPG	# size of PTD, for libkvm
 
 	.space 512
 tmpstk:
@@ -543,9 +533,9 @@ try586:	/* Use the `cpuid' instruction. */
  *			      0          1       2      3
  */
 #define	PROC0PDIR	((0)		* NBPG)
-#define	PROC0STACK	((1)		* NBPG)
-#define	SYSMAP		((1+UPAGES)	* NBPG)
-#define	TABLESIZE	((1+UPAGES) * NBPG) /* + _C_LABEL(nkpde) * NBPG */
+#define	PROC0STACK	((4)		* NBPG)
+#define	SYSMAP		((4+UPAGES)	* NBPG)
+#define	TABLESIZE	((4+UPAGES) * NBPG) /* + _C_LABEL(nkpde) * NBPG */
 
 	/* Clear the BSS. */
 	movl	$RELOC(_C_LABEL(edata)),%edi
@@ -584,9 +574,9 @@ try586:	/* Use the `cpuid' instruction. */
 	jge	1f
 	movl	$NKPTP_MIN,%ecx			# set at min
 	jmp	2f
-1:	cmpl	$NKPTP_MAX,%ecx			# larger than max?
+1:	cmpl	RELOC(_C_LABEL(nkptp_max)),%ecx	# larger than max?
 	jle	2f
-	movl	$NKPTP_MAX,%ecx
+	movl	RELOC(_C_LABEL(nkptp_max)),%ecx
 2:	movl	%ecx,RELOC(_C_LABEL(nkpde))	# and store it back
 
 	/* Clear memory for bootstrap tables. */
@@ -671,6 +661,8 @@ try586:	/* Use the `cpuid' instruction. */
 	/* Install a PDE recursively mapping page directory as a page table! */
 	leal	(PROC0PDIR+PG_V|PG_KW)(%esi),%eax	# pte for ptd
 	movl	%eax,(PROC0PDIR+PDSLOT_PTE*4)(%esi)	# recursive PD slot
+	addl	$NBPG, %eax				# pte for ptd[1]
+	movl	%eax,(PROC0PDIR+(PDSLOT_PTE+1)*4)(%esi)	# recursive PD slot
 
 	/* Save phys. addr of PTD, for libkvm. */
 	movl	%esi,RELOC(_C_LABEL(PTDpaddr))
@@ -1819,7 +1811,7 @@ switch_restored:
 	/* Restore cr0 (including FPU state). */
 	movl	PCB_CR0(%esi),%ecx
 #ifdef MULTIPROCESSOR
-	/* 
+	/*
 	 * If our floating point registers are on a different CPU,
 	 * clear CR0_TS so we'll trap rather than reuse bogus state.
 	 */
@@ -1847,7 +1839,7 @@ switch_return:
 	call	_C_LABEL(printf)
 	addl	$0xc,%esp
 #endif
-#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)     
+#if defined(MULTIPROCESSOR) || defined(LOCKDEBUG)
 	call    _C_LABEL(sched_unlock_idle)
 #endif
 	/*
@@ -2052,8 +2044,8 @@ IDTVEC(intrspurious)
 	 * The Pentium Pro local APIC may erroneously call this vector for a
 	 * default IR7.  Just ignore it.
 	 *
-	 * (The local APIC does this when CPL is raised while it's on the 
-	 * way to delivering an interrupt.. presumably enough has been set 
+	 * (The local APIC does this when CPL is raised while it's on the
+	 * way to delivering an interrupt.. presumably enough has been set
 	 * up that it's inconvenient to abort delivery completely..)
 	 */
 	iret
@@ -2097,7 +2089,7 @@ NENTRY(resume_pop_es)
 	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax
 	movw	%ax,%gs
 NENTRY(resume_pop_gs)
-	pushl	%fs     
+	pushl	%fs
 	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax
 	movw	%ax,%fs
 NENTRY(resume_pop_fs)
@@ -2128,7 +2120,7 @@ calltrap:
 	jmp	2b
 #ifndef DIAGNOSTIC
 1:	INTRFASTEXIT
-#else 
+#else
 1:	cmpl	CPL,%ebx
 	jne	3f
 	INTRFASTEXIT
@@ -2322,7 +2314,43 @@ ENTRY(i686_pagezero)
 	ret
 #endif
 
-#if NLAPIC > 0 
+#ifndef SMALL_KERNEL
+/*
+ * int cpu_paenable(void *);
+ */
+ENTRY(cpu_paenable)
+	movl	$-1, %eax
+	testl	$CPUID_PAE, _C_LABEL(cpu_feature)
+	jz	1f
+
+	pushl	%esi
+	pushl	%edi
+	movl	12(%esp), %esi
+	movl	%cr3, %edi
+	orl	$0xfe0, %edi	/* PDPT will be in the last four slots! */
+	movl	%edi, %cr3
+	addl	$KERNBASE, %edi	/* and make it back virtual again */
+	movl	$8, %ecx
+	cld
+	rep
+	movsl
+	movl	%cr4, %eax
+	orl	$CR4_PAE, %eax
+	movl	%eax, %cr4	/* BANG!!! */
+	movl	12(%esp), %eax
+	subl	$KERNBASE, %eax
+	movl	%eax, %cr3	/* reload real PDPT */
+	movl	$4*NBPG, %eax
+	movl	%eax, _C_LABEL(PTDsize)
+
+	xorl	%eax, %eax
+	popl	%edi
+	popl	%esi
+1:
+	ret
+#endif /* !SMALL_KERNEL */
+
+#if NLAPIC > 0
 #include <i386/i386/apicvec.s>
 #endif
 

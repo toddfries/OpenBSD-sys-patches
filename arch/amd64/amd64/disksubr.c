@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.6 2005/12/22 03:02:48 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.14 2006/09/16 14:56:11 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -41,13 +41,6 @@
 #include <sys/syslog.h>
 #include <sys/disk.h>
 
-void
-dk_establish(dk, dev)
-	struct disk *dk;
-	struct device *dev;
-{
-}
-
 /*
  * Attempt to read a disk label from a device
  * using the indicated strategy routine.
@@ -82,22 +75,20 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	char *msg = NULL, *cp;
 	int dospartoff, cyl, i, ourpart = -1;
 
-	/* minimal requirements for archtypal disk label */
+	/* minimal requirements for archetypal disk label */
 	if (lp->d_secsize < DEV_BSIZE)
 		lp->d_secsize = DEV_BSIZE;
-	if (lp->d_secpercyl == 0) {
-		msg = "invalid geometry";
-		goto done;
-	}
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
+	if (lp->d_secpercyl == 0)
+		return ("invalid geometry");
 	lp->d_npartitions = RAW_PART + 1;
 	for (i = 0; i < RAW_PART; i++) {
 		lp->d_partitions[i].p_size = 0;
 		lp->d_partitions[i].p_offset = 0;
 	}
 	if (lp->d_partitions[i].p_size == 0)
-		lp->d_partitions[i].p_size = 0x1fffffff;
+		lp->d_partitions[i].p_size = lp->d_secperunit;
 	lp->d_partitions[i].p_offset = 0;
 
 	/* get a buffer and initialize it */
@@ -140,17 +131,17 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 				/* Search for our MBR partition */
 				for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
 				    i++, dp2++)
-					if (get_le(&dp2->dp_size) &&
+					if (letoh32(dp2->dp_size) &&
 					    dp2->dp_typ == DOSPTYP_OPENBSD)
 						ourpart = i;
 				for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
 				    i++, dp2++)
-					if (get_le(&dp2->dp_size) &&
+					if (letoh32(dp2->dp_size) &&
 					    dp2->dp_typ == DOSPTYP_FREEBSD)
 						ourpart = i;
 				for (dp2=dp, i=0; i < NDOSPART && ourpart == -1;
 				    i++, dp2++)
-					if (get_le(&dp2->dp_size) &&
+					if (letoh32(dp2->dp_size) &&
 					    dp2->dp_typ == DOSPTYP_NETBSD)
 						ourpart = i;
 				if (ourpart == -1)
@@ -160,13 +151,13 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 				 * for SCSI/IDE, cylinder for ESDI/ST506/RLL
 				 */
 				dp2 = &dp[ourpart];
-				dospartoff = get_le(&dp2->dp_start) + part_blkno;
+				dospartoff = letoh32(dp2->dp_start) + part_blkno;
 				cyl = DPCYL(dp2->dp_scyl, dp2->dp_ssect);
 
 				/* XXX build a temporary disklabel */
-				lp->d_partitions[0].p_size = get_le(&dp2->dp_size);
+				lp->d_partitions[0].p_size = letoh32(dp2->dp_size);
 				lp->d_partitions[0].p_offset =
-					get_le(&dp2->dp_start) + part_blkno;
+					letoh32(dp2->dp_start) + part_blkno;
 				if (lp->d_ntracks == 0)
 					lp->d_ntracks = dp2->dp_ehd + 1;
 				if (lp->d_nsectors == 0)
@@ -185,13 +176,13 @@ donot:
 
 				if (dp2->dp_typ == DOSPTYP_OPENBSD)
 					continue;
-				if (get_le(&dp2->dp_size) > lp->d_secperunit)
+				if (letoh32(dp2->dp_size) > lp->d_secperunit)
 					continue;
-				if (get_le(&dp2->dp_size))
-					pp->p_size = get_le(&dp2->dp_size);
-				if (get_le(&dp2->dp_start))
+				if (letoh32(dp2->dp_size))
+					pp->p_size = letoh32(dp2->dp_size);
+				if (letoh32(dp2->dp_start))
 					pp->p_offset =
-					    get_le(&dp2->dp_start) + part_blkno;
+					    letoh32(dp2->dp_start) + part_blkno;
 
 				switch (dp2->dp_typ) {
 				case DOSPTYP_UNUSED:
@@ -226,9 +217,9 @@ donot:
 					break;
 				case DOSPTYP_EXTEND:
 				case DOSPTYP_EXTENDL:
-					part_blkno = get_le(&dp2->dp_start) + extoff;
+					part_blkno = letoh32(dp2->dp_start) + extoff;
 					if (!extoff) {
-						extoff = get_le(&dp2->dp_start);
+						extoff = letoh32(dp2->dp_start);
 						part_blkno = 0;
 					}
 					wander = 1;
@@ -430,13 +421,13 @@ writedisklabel(dev, strat, lp, osdep)
 		    NDOSPART * sizeof(*dp));
 
 		for (dp2=dp, i=0; i < NDOSPART && ourpart == -1; i++, dp2++)
-			if (get_le(&dp2->dp_size) && dp2->dp_typ == DOSPTYP_OPENBSD)
+			if (letoh32(dp2->dp_size) && dp2->dp_typ == DOSPTYP_OPENBSD)
 				ourpart = i;
 		for (dp2=dp, i=0; i < NDOSPART && ourpart == -1; i++, dp2++)
-			if (get_le(&dp2->dp_size) && dp2->dp_typ == DOSPTYP_FREEBSD)
+			if (letoh32(dp2->dp_size) && dp2->dp_typ == DOSPTYP_FREEBSD)
 				ourpart = i;
 		for (dp2=dp, i=0; i < NDOSPART && ourpart == -1; i++, dp2++)
-			if (get_le(&dp2->dp_size) && dp2->dp_typ == DOSPTYP_NETBSD)
+			if (letoh32(dp2->dp_size) && dp2->dp_typ == DOSPTYP_NETBSD)
 				ourpart = i;
 
 		if (ourpart != -1) {
@@ -446,7 +437,7 @@ writedisklabel(dev, strat, lp, osdep)
 			 * need sector address for SCSI/IDE,
 			 * cylinder for ESDI/ST506/RLL
 			 */
-			dospartoff = get_le(&dp2->dp_start);
+			dospartoff = letoh32(dp2->dp_start);
 			cyl = DPCYL(dp2->dp_scyl, dp2->dp_ssect);
 		}
 	}

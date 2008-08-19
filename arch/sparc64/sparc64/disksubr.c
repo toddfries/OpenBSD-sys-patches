@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.15 2005/12/22 02:51:25 krw Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.19 2006/08/17 10:34:14 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.13 2000/12/17 22:39:18 pk Exp $ */
 
 /*
@@ -55,12 +55,6 @@ static __inline u_int sun_extended_sum(struct sun_disklabel *);
 
 extern struct device *bootdv;
 
-void
-dk_establish(struct disk *dk, struct device *dev)
-{
-	/* fix later */
-}
-
 #if NCD > 0
 extern void cdstrategy(struct buf *);
 #endif
@@ -90,18 +84,20 @@ readdisklabel(dev, strat, lp, clp, spoofonly)
 	struct sun_disklabel *slp;
 	int error, i;
 
-	/* minimal requirements for archtypal disk label */
+	/* minimal requirements for archetypal disk label */
 	if (lp->d_secsize < DEV_BSIZE)
 		lp->d_secsize = DEV_BSIZE;
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
+	if (lp->d_secpercyl == 0)
+		return ("invalid geometry");
 	lp->d_npartitions = RAW_PART+1;
 	for (i = 0; i < RAW_PART; i++) {
 		lp->d_partitions[i].p_size = 0;
 		lp->d_partitions[i].p_offset = 0;
 	}
 	if (lp->d_partitions[i].p_size == 0)
-		lp->d_partitions[i].p_size = 0x1fffffff;
+		lp->d_partitions[i].p_size = lp->d_secperunit;
 	lp->d_partitions[i].p_offset = 0;
 	lp->d_bbsize = 8192;
 	lp->d_sbsize = 64*1024;		/* XXX ? */

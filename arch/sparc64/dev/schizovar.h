@@ -1,4 +1,4 @@
-/*	$OpenBSD: schizovar.h,v 1.5 2003/06/02 20:02:49 jason Exp $	*/
+/*	$OpenBSD: schizovar.h,v 1.9 2006/08/27 18:55:57 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -54,8 +54,20 @@ struct schizo_pbm {
 struct schizo_softc {
 	struct device sc_dv;
 	int sc_node;
+	int sc_ign;
 	bus_dma_tag_t sc_dmat;
 	bus_space_tag_t sc_bust;
 	bus_addr_t sc_ctrl;
 	bus_space_handle_t sc_ctrlh;
+
+	int sc_tomatillo;
 };
+
+#define	schizo_read(sc,r) \
+    bus_space_read_8((sc)->sc_bust, (sc)->sc_ctrlh, (r))
+#define	schizo_write(sc,r,v) \
+    bus_space_write_8((sc)->sc_bust, (sc)->sc_ctrlh, (r), (v))
+#define	schizo_pbm_read(pbm,r) \
+    bus_space_read_8((pbm)->sp_regt, (pbm)->sp_regh, (r))
+#define	schizo_pbm_write(pbm,r,v) \
+    bus_space_write_8((pbm)->sp_regt, (pbm)->sp_regh, (r), (v))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.63 2005/12/02 16:24:08 marco Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.72 2006/07/29 02:40:45 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -91,24 +91,9 @@ struct scsi_xfer;
 struct scsi_link;
 
 /*
- * Temporary hack 
+ * Temporary hack
  */
 extern int scsi_autoconf;
-
-/*
- * Specify which buses and targets must scan all LUNs, even when IDENTIFY does
- * not seem to be working. Some devices (e.g. some external RAID devices) may
- * seem to have non-functional IDENTIFY because they return identical INQUIRY
- * data for all LUNs.
- */
-#ifndef SCSIFORCELUN_BUSES
-#define SCSIFORCELUN_BUSES	0
-#endif
-#ifndef SCSIFORCELUN_TARGETS
-#define	SCSIFORCELUN_TARGETS	0
-#endif
-
-extern int scsiforcelun_buses, scsiforcelun_targets;
 
 /*
  * These entrypoints are called by the high-end drivers to get services from
@@ -159,13 +144,15 @@ struct scsi_device {
  * as well.
  */
 struct scsi_link {
-	u_int8_t scsi_version;		/* SCSI-I, SCSI-II, etc. */
 	u_int8_t scsibus;		/* the Nth scsibus */
+	u_int8_t luns;
 	u_int16_t target;		/* targ of this dev */
 	u_int16_t lun;			/* lun of this dev */
+	u_int16_t openings;		/* available operations */
+	u_int64_t port_wwn;		/* world wide name of port */
+	u_int64_t node_wwn;		/* world wide name of node */
 	u_int16_t adapter_target;	/* what are we on the scsi bus */
 	u_int16_t adapter_buswidth;	/* 8 (regular) or 16 (wide). (0 becomes 8) */
-	u_int16_t openings;		/* available operations */
 	u_int16_t active;		/* operations in progress */
 	u_int16_t flags;		/* flags that all devices have */
 #define	SDEV_REMOVABLE	 	0x0001	/* media is removable */
@@ -177,6 +164,7 @@ struct scsi_link {
 #define	SDEV_ATAPI		0x0200	/* device is ATAPI */
 #define	SDEV_2NDBUS		0x0400	/* device is a 'second' bus device */
 #define SDEV_UMASS		0x0800	/* device is UMASS SCSI */
+#define SDEV_VIRTUAL		0x1000	/* device is virtualised on the hba */
 	u_int16_t quirks;		/* per-device oddities */
 #define	SDEV_AUTOSAVE		0x0001	/* do implicit SAVEDATAPOINTER on disconnect */
 #define	SDEV_NOSYNC		0x0002	/* does not grok SDTR */
@@ -189,12 +177,10 @@ struct scsi_link {
 #define	ADEV_NOTUR		0x1000	/* No TEST UNIT READY */
 #define	ADEV_NODOORLOCK		0x2000	/* can't lock door */
 #define SDEV_ONLYBIG		0x4000  /* always use READ_BIG and WRITE_BIG */
-	u_int8_t inquiry_flags;		/* copy of flags from probe INQUIRY */
 	struct	scsi_device *device;	/* device entry points etc. */
 	void	*device_softc;		/* needed for call to foo_start */
 	struct	scsi_adapter *adapter;	/* adapter entry points etc. */
 	void	*adapter_softc;		/* needed for call to foo_scsi_cmd */
-	u_char	luns;
 	struct	scsi_inquiry_data inqdata; /* copy of INQUIRY data from probe */
 };
 
@@ -352,6 +338,8 @@ int	scsi_scsi_cmd(struct scsi_link *, struct scsi_generic *,
 int	scsi_do_ioctl(struct scsi_link *, dev_t, u_long, caddr_t,
 	    int, struct proc *);
 void	sc_print_addr(struct scsi_link *);
+int	scsi_report_luns(struct scsi_link *, int,
+	    struct scsi_report_luns_data *, u_int32_t, int, int);
 
 void	show_scsi_xs(struct scsi_xfer *);
 void	scsi_print_sense(struct scsi_xfer *);
@@ -552,5 +540,8 @@ _4ltol(bytes)
 	    (bytes[2] << 16) | (bytes[3] << 24);
 	return (rv);
 }
+
+extern const u_int8_t version_to_spc [];
+#define SCSISPC(x)(version_to_spc[(x) & SID_ANSII])
 
 #endif /* SCSI_SCSICONF_H */

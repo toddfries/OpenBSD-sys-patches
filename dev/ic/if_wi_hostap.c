@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_hostap.c,v 1.33 2005/12/03 21:11:48 brad Exp $	*/
+/*	$OpenBSD: if_wi_hostap.c,v 1.36 2006/07/01 20:22:22 reyk Exp $	*/
 
 /*
  * Copyright (c) 2002
@@ -192,7 +192,7 @@ wihap_init(struct wi_softc *sc)
 	struct wihap_info *whi = &sc->wi_hostap_info;
 
 	if (sc->sc_ic.ic_if.if_flags & IFF_DEBUG)
-		printf("wihap_init: sc=0x%x whi=0x%x\n", sc, whi);
+		printf("wihap_init: sc=%p whi=%p\n", sc, whi);
 
 	bzero(whi, sizeof(struct wihap_info));
 
@@ -279,7 +279,7 @@ wihap_shutdown(struct wi_softc *sc)
 	int i, s;
 
 	if (sc->sc_ic.ic_if.if_flags & IFF_DEBUG)
-		printf("wihap_shutdown: sc=0x%x whi=0x%x\n", sc, whi);
+		printf("wihap_shutdown: sc=%p whi=%p\n", sc, whi);
 
 	if (!(whi->apflags & WIHAPFL_ACTIVE))
 		return;
@@ -295,7 +295,7 @@ wihap_shutdown(struct wi_softc *sc)
 	    sta != TAILQ_END(&whi->sta_list); sta = next) {
 		timeout_del(&sta->tmo);
 		if (sc->sc_ic.ic_if.if_flags & IFF_DEBUG)
-			printf("wihap_shutdown: FREE(sta=0x%x)\n", sta);
+			printf("wihap_shutdown: FREE(sta=%p)\n", sta);
 		next = TAILQ_NEXT(sta, list);
 		if (sta->challenge)
 			FREE(sta->challenge, M_TEMP);
@@ -1209,6 +1209,9 @@ wihap_ioctl(struct wi_softc *sc, u_long command, caddr_t data)
 	struct hostap_sta	stabuf;
 	int			s, error = 0, n, flag;
 
+	struct ieee80211_nodereq nr;
+	struct ieee80211_nodereq_all *na;
+
 	if (!(sc->sc_ic.ic_if.if_flags & IFF_RUNNING))
 		return ENODEV;
 
@@ -1326,6 +1329,45 @@ wihap_ioctl(struct wi_softc *sc, u_long command, caddr_t data)
 			error = copyout(&reqall, ifr->ifr_data,
 			    sizeof(reqall));
 		break;
+
+	case SIOCG80211ALLNODES:
+		na = (struct ieee80211_nodereq_all *)data;
+		na->na_nodes = n = 0;
+		s = splnet();
+		sta = TAILQ_FIRST(&whi->sta_list);
+		while (sta && na->na_size >=
+		    n + sizeof(struct ieee80211_nodereq)) {
+			bzero(&nr, sizeof(nr));
+			IEEE80211_ADDR_COPY(nr.nr_macaddr, sta->addr);
+			IEEE80211_ADDR_COPY(nr.nr_bssid,
+			    &sc->sc_ic.ic_myaddr);
+			nr.nr_channel = sc->wi_channel;
+			nr.nr_chan_flags = IEEE80211_CHAN_B;
+			nr.nr_associd = sta->asid;
+			nr.nr_rssi = sta->sig_info >> 8;
+			nr.nr_max_rssi = 0;
+			nr.nr_capinfo = sta->capinfo;
+			nr.nr_nrates = 0;
+			if (sta->rates & WI_SUPPRATES_1M)
+				nr.nr_rates[nr.nr_nrates++] = 2;
+			if (sta->rates & WI_SUPPRATES_2M)
+				nr.nr_rates[nr.nr_nrates++] = 4;
+			if (sta->rates & WI_SUPPRATES_5M)
+				nr.nr_rates[nr.nr_nrates++] = 11;
+			if (sta->rates & WI_SUPPRATES_11M)
+				nr.nr_rates[nr.nr_nrates++] = 22;
+
+			error = copyout(&nr, (caddr_t)na->na_node + n,
+			    sizeof(struct ieee80211_nodereq));
+			if (error)
+				break;
+			n += sizeof(struct ieee80211_nodereq);
+			na->na_nodes++;
+			sta = TAILQ_NEXT(sta, list);
+		}
+		splx(s);
+		break;
+
 	default:
 		printf("wihap_ioctl: i shouldn't get other ioctls!\n");
 		error = EINVAL;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.70 2006/02/21 10:23:25 markus Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.72 2006/06/16 16:49:40 henning Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -536,7 +536,7 @@ nd6_timer(ignored_arg)
 	/*
 	 * expire interface addresses.
 	 * in the past the loop was inside prefix expiry processing.
-	 * However, from a stricter speci-confrmance standpoint, we should
+	 * However, from a stricter spec-conformance standpoint, we should
 	 * rather separate address lifetimes and prefix lifetimes.
 	 */
 	for (ia6 = in6_ifaddr; ia6; ia6 = nia6) {
@@ -686,7 +686,7 @@ nd6_lookup(addr6, create, ifp)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = *addr6;
 
-	rt = rtalloc1((struct sockaddr *)&sin6, create);
+	rt = rtalloc1((struct sockaddr *)&sin6, create, 0);
 	if (rt && (rt->rt_flags & RTF_LLINFO) == 0) {
 		/*
 		 * This is the case for the default route.
@@ -724,7 +724,7 @@ nd6_lookup(addr6, create, ifp)
 			if ((e = rtrequest(RTM_ADD, (struct sockaddr *)&sin6,
 			    ifa->ifa_addr, (struct sockaddr *)&all1_sa,
 			    (ifa->ifa_flags | RTF_HOST | RTF_LLINFO) &
-			    ~RTF_CLONING, &rt)) != 0) {
+			    ~RTF_CLONING, &rt, 0)) != 0) {
 #if 0
 				log(LOG_ERR,
 				    "nd6_lookup: failed to add route for a "
@@ -889,7 +889,7 @@ nd6_free(rt, gc)
 
 		if (dr) {
 			/*
-			 * Unreachablity of a router might affect the default
+			 * Unreachability of a router might affect the default
 			 * router selection and on-link detection of advertised
 			 * prefixes.
 			 */
@@ -933,7 +933,7 @@ nd6_free(rt, gc)
 	 * cached routes.
 	 */
 	rtrequest(RTM_DELETE, rt_key(rt), (struct sockaddr *)0,
-	    rt_mask(rt), 0, (struct rtentry **)0);
+	    rt_mask(rt), 0, (struct rtentry **)0, 0);
 
 	return (next);
 }
@@ -941,7 +941,7 @@ nd6_free(rt, gc)
 /*
  * Upper-layer reachability hint for Neighbor Unreachability Detection.
  *
- * XXX cost-effective metods?
+ * XXX cost-effective methods?
  */
 void
 nd6_nud_hint(rt, dst6, force)
@@ -1057,7 +1057,7 @@ nd6_rtrequest(req, rt, info)
 			 * (RTF_LLINFO && !ln case).
 			 */
 			rt_setgate(rt, rt_key(rt),
-				   (struct sockaddr *)&null_sdl);
+				   (struct sockaddr *)&null_sdl, 0);
 			gate = rt->rt_gateway;
 			SDL(gate)->sdl_type = ifp->if_type;
 			SDL(gate)->sdl_index = ifp->if_index;
@@ -1067,7 +1067,7 @@ nd6_rtrequest(req, rt, info)
 				break;
 		}
 		/*
-		 * In IPv4 code, we try to annonuce new RTF_ANNOUNCE entry here.
+		 * In IPv4 code, we try to announce new RTF_ANNOUNCE entry here.
 		 * We don't do that here since llinfo is not ready yet.
 		 *
 		 * There are also couple of other things to be discussed:
@@ -1295,8 +1295,8 @@ nd6_ioctl(cmd, data, ifp)
 		 * in6_prlist is used for nd6_sysctl() - fill_prlist().
 		 */
 		/*
-		 * XXX meaning of fields, especialy "raflags", is very
-		 * differnet between RA prefix list and RR/static prefix list.
+		 * XXX meaning of fields, especially "raflags", is very
+		 * different between RA prefix list and RR/static prefix list.
 		 * how about separating ioctls into two?
 		 */
 		bzero(oprl, sizeof(*oprl));
@@ -1488,7 +1488,7 @@ nd6_cache_lladdr(ifp, from, lladdr, lladdrlen, type, code)
 	 * Validation about ifp->if_addrlen and lladdrlen must be done in
 	 * the caller.
 	 *
-	 * XXX If the link does not have link-layer adderss, what should
+	 * XXX If the link does not have link-layer address, what should
 	 * we do? (ifp->if_addrlen == 0)
 	 * Spec says nothing in sections for RA, RS and NA.  There's small
 	 * description on it in NS section (RFC 2461 7.2.3).
@@ -1580,7 +1580,7 @@ fail:
 		if (ln->ln_state == ND6_LLINFO_STALE) {
 			/*
 			 * XXX: since nd6_output() below will cause
-			 * state tansition to DELAY and reset the timer,
+			 * state transition to DELAY and reset the timer,
 			 * we must set the timer now, although it is actually
 			 * meaningless.
 			 */
@@ -1614,7 +1614,7 @@ fail:
 	 * - If lladdr exist, set IsRouter.  This means (1-5).
 	 * - If it is old entry (!newentry), set IsRouter.  This means (7).
 	 * So, based on the spec, in (1-5) and (7) cases we must set IsRouter.
-	 * A quetion arises for (1) case.  (1) case has no lladdr in the
+	 * A question arises for (1) case.  (1) case has no lladdr in the
 	 * neighbor cache, this is similar to (6).
 	 * This case is rare but we figured that we MUST NOT set IsRouter.
 	 *
@@ -1740,12 +1740,12 @@ nd6_output(ifp, origifp, m0, dst, rt0)
 		goto sendpkt;
 
 	/*
-	 * next hop determination.  This routine is derived from ether_outpout.
+	 * next hop determination.  This routine is derived from ether_output.
 	 */
 	if (rt) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
 			if ((rt0 = rt = rtalloc1((struct sockaddr *)dst,
-			    1)) != NULL)
+			    1, 0)) != NULL)
 			{
 				rt->rt_refcnt--;
 				if (rt->rt_ifp != ifp)
@@ -1783,7 +1783,7 @@ nd6_output(ifp, origifp, m0, dst, rt0)
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
 				rtfree(rt); rt = rt0;
 			lookup:
-				rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1);
+				rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1, 0);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}

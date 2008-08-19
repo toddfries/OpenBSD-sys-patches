@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_subr.c,v 1.5 2005/11/02 22:35:06 fgsch Exp $	*/
+/*	$OpenBSD: com_subr.c,v 1.7 2006/07/31 11:06:30 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
@@ -92,7 +92,6 @@
 #include <dev/ic/comvar.h>
 #endif
 #if NPCCOM > 0
-#include <dev/isa/isavar.h>
 #include <i386/isa/pccomvar.h>
 #endif
 
@@ -173,6 +172,10 @@ com_attach_subr(sc)
 #ifdef COM_PXA2X0
 	/* Attachment driver presets COM_UART_PXA2X0. */
 	if (sc->sc_uarttype != COM_UART_PXA2X0)
+#endif
+#ifdef COM_UART_OX16C950
+	/* Attachment driver presets COM_UART_OX16C950. */
+	if (sc->sc_uarttype != COM_UART_OX16C950)
 #endif
 	switch(bus_space_read_1(iot, ioh, com_iir) >> 6) {
 	case 0:
@@ -308,6 +311,13 @@ com_attach_subr(sc)
 		SET(sc->sc_hwflags, COM_HW_FIFO);
 		sc->sc_fifolen = 128;
 		break;
+#ifdef COM_UART_OX16C950
+	case COM_UART_OX16C950:
+		printf(": ox16c950 (rev %d), 128 byte fifo\n", sc->sc_uartrev);
+		SET(sc->sc_hwflags, COM_HW_FIFO);
+		sc->sc_fifolen = 128;
+		break;
+#endif
 #endif
 	default:
 		panic("comattach: bad fifo type");

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci.c,v 1.42 2005/12/03 03:40:52 brad Exp $	*/
+/*	$OpenBSD: uhci.c,v 1.48 2006/06/23 06:27:11 miod Exp $	*/
 /*	$NetBSD: uhci.c,v 1.172 2003/02/23 04:19:26 simonb Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhci.c,v 1.33 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -141,6 +141,7 @@ struct uhci_pipe {
 		/* Interrupt pipe */
 		struct {
 			int npoll;
+			int isread;
 			uhci_soft_qh_t **qhs;
 		} intr;
 		/* Bulk pipe */
@@ -539,7 +540,7 @@ uhci_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
+		break;
 
 	case DVACT_DEACTIVATE:
 		if (sc->sc_child != NULL)
@@ -562,8 +563,10 @@ uhci_detach(struct uhci_softc *sc, int flags)
 		return (rv);
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
-	powerhook_disestablish(sc->sc_powerhook);
-	shutdownhook_disestablish(sc->sc_shutdownhook);
+	if (sc->sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc_powerhook);
+	if (sc->sc_shutdownhook != NULL)
+		shutdownhook_disestablish(sc->sc_shutdownhook);
 #endif
 
 	/* Free all xfers associated with this HC. */
@@ -1322,7 +1325,7 @@ uhci_check_intr(uhci_softc_t *sc, uhci_intr_info_t *ii)
 #endif
 	/*
 	 * If the last TD is still active we need to check whether there
-	 * is a an error somewhere in the middle, or whether there was a
+	 * is an error somewhere in the middle, or whether there was a
 	 * short packet (SPD and not ACTIVE).
 	 */
 	if (le32toh(lstd->td.td_status) & UHCI_TD_ACTIVE) {
@@ -1927,6 +1930,7 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 		usb_uncallout(xfer->timeout_handle, uhci_timeout, xfer);
 		usb_transfer_complete(xfer);
 		splx(s);
+		return;
 	}
 
 	if (xfer->device->bus->intr_context || !curproc)
@@ -1981,6 +1985,7 @@ uhci_device_bulk_close(usbd_pipe_handle pipe)
 	uhci_softc_t *sc = (uhci_softc_t *)dev->bus;
 
 	uhci_free_sqh(sc, upipe->u.bulk.sqh);
+	pipe->endpoint->savedtoggle = upipe->nexttoggle;
 }
 
 usbd_status
@@ -2050,6 +2055,7 @@ uhci_device_intr_start(usbd_xfer_handle xfer)
 	uhci_soft_td_t *data, *dataend;
 	uhci_soft_qh_t *sqh;
 	usbd_status err;
+	int isread, endpt;
 	int i, s;
 
 	if (sc->sc_dying)
@@ -2063,8 +2069,15 @@ uhci_device_intr_start(usbd_xfer_handle xfer)
 		panic("uhci_device_intr_transfer: a request");
 #endif
 
-	err = uhci_alloc_std_chain(upipe, sc, xfer->length, 1, xfer->flags,
-				   &xfer->dmabuf, &data, &dataend);
+	endpt = upipe->pipe.endpoint->edesc->bEndpointAddress;
+	isread = UE_GET_DIR(endpt) == UE_DIR_IN;
+
+	upipe->u.intr.isread = isread;
+
+	err = uhci_alloc_std_chain(upipe, sc, xfer->length, isread,
+				   xfer->flags, &xfer->dmabuf, &data,
+				   &dataend);
+
 	if (err)
 		return (err);
 	dataend->td.td_status |= htole32(UHCI_TD_IOC);
@@ -2647,7 +2660,8 @@ uhci_device_intr_done(usbd_xfer_handle xfer)
 		DPRINTFN(5,("uhci_device_intr_done: requeing\n"));
 
 		/* This alloc cannot fail since we freed the chain above. */
-		uhci_alloc_std_chain(upipe, sc, xfer->length, 1, xfer->flags,
+		uhci_alloc_std_chain(upipe, sc, xfer->length,
+				     upipe->u.intr.isread, xfer->flags,
 				     &xfer->dmabuf, &data, &dataend);
 		dataend->td.td_status |= htole32(UHCI_TD_IOC);
 
@@ -2845,7 +2859,7 @@ uhci_open(usbd_pipe_handle pipe)
 		     ed->bEndpointAddress, sc->sc_addr));
 
 	upipe->aborting = 0;
-	upipe->nexttoggle = 0;
+	upipe->nexttoggle = pipe->endpoint->savedtoggle;
 
 	if (pipe->device->address == sc->sc_addr) {
 		switch (ed->bEndpointAddress) {

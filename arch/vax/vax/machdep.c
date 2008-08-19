@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.76 2006/01/04 15:41:29 martin Exp $ */
+/* $OpenBSD: machdep.c,v 1.84 2006/07/20 19:15:35 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -69,6 +69,8 @@
 #include <sys/syscallargs.h>
 #include <sys/ptrace.h>
 #include <sys/sysctl.h>
+#include <sys/core.h>
+#include <sys/kcore.h>
 
 #include <dev/cons.h>
 
@@ -104,6 +106,7 @@
 #include <machine/trap.h>
 #include <machine/reg.h>
 #include <machine/db_machdep.h>
+#include <machine/kcore.h>
 #include <vax/vax/gencons.h>
 
 #ifdef DDB
@@ -112,7 +115,7 @@
 #endif
 #include <vax/vax/db_disasm.h>
 
-#include "smg.h"
+#include "led.h"
 
 caddr_t allocsys(caddr_t);
 
@@ -140,7 +143,6 @@ extern int virtual_avail, virtual_end;
 int		want_resched;
 char		machine[] = MACHINE;		/* from <machine/param.h> */
 int		physmem;
-int		dumpsize = 0;
 int		cold = 1; /* coldstart */
 struct cpmbx	*cpmbx;
 
@@ -159,6 +161,11 @@ struct vm_map *phys_map = NULL;
 
 #ifdef DEBUG
 int iospace_inited = 0;
+#endif
+
+/* sysctl settable */
+#if NLED > 0
+int	vax_led_blink = 0;
 #endif
 
 void cpu_dumpconf(void);
@@ -191,8 +198,6 @@ cpu_startup()
 	panicstr = NULL;
 	mtpr(AST_NO, PR_ASTLVL);
 	spl0();
-
-	dumpsize = physmem + 1;
 
 	/*
 	 * Find out how much space we need, allocate it, and then give
@@ -244,9 +249,8 @@ cpu_startup()
 			if (pg == NULL)
 				panic("cpu_startup: "
 				    "not enough RAM for buffer cache");
-			pmap_enter(kernel_map->pmap, curbuf,
-			    VM_PAGE_TO_PHYS(pg), VM_PROT_READ|VM_PROT_WRITE,
-			    VM_PROT_READ|VM_PROT_WRITE|PMAP_WIRED);
+			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
+			    VM_PROT_READ | VM_PROT_WRITE);
 			curbuf += PAGE_SIZE;
 			curbufsize -= PAGE_SIZE;
 		}
@@ -292,13 +296,15 @@ cpu_startup()
 	}
 }
 
-long	dumplo = 0;
 long	dumpmag = 0x8fca0101;
+int	dumpsize = 0;
+long	dumplo = 0;
+cpu_kcore_hdr_t cpu_kcore_hdr;
 
 void
 cpu_dumpconf()
 {
-	int		nblks;
+	int nblks;
 
 	/*
 	 * XXX include the final RAM page which is not included in physmem.
@@ -311,12 +317,24 @@ cpu_dumpconf()
 		else if (dumplo == 0)
 			dumplo = nblks - btodb(ctob(dumpsize));
 	}
+
 	/*
 	 * Don't dump on the first block in case the dump
 	 * device includes a disk label.
 	 */
 	if (dumplo < btodb(PAGE_SIZE))
 		dumplo = btodb(PAGE_SIZE);
+
+	/* Put dump at the end of partition, and make it fit. */
+	if (dumpsize + 1 > dtoc(nblks - dumplo))
+		dumpsize = dtoc(nblks - dumplo) - 1;
+	if (dumplo < nblks - ctod(dumpsize) - 1)
+		dumplo = nblks - ctod(dumpsize) - 1;
+
+	/* memory is contiguous on vax */
+	cpu_kcore_hdr.ram_segs[0].start = 0;
+	cpu_kcore_hdr.ram_segs[0].size = ptoa(physmem);
+	cpu_kcore_hdr.sysmap = (vaddr_t)Sysmap;
 }
 
 int
@@ -329,6 +347,9 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	size_t newlen;
 	struct proc *p;
 {
+#if NLED > 0
+	int oldval, ret;
+#endif
 	dev_t consdev;
 
 	/* all sysctl names at this level are terminal */
@@ -343,6 +364,18 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			consdev = NODEV;
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
 		    sizeof consdev));
+	case CPU_LED_BLINK:
+#if NLED > 0
+		oldval = vax_led_blink;
+		ret =  sysctl_int(oldp, oldlenp, newp, newlen, &vax_led_blink);
+		if (oldval != vax_led_blink) {
+			extern void led_blink(void *);
+			led_blink(NULL);
+		}
+		return (ret);
+#else
+		return (EOPNOTSUPP);
+#endif
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -460,13 +493,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	/* Set up positions for structs on stack */
 	sigf = (struct sigframe *) (cursp - sizeof(struct sigframe));
 
-	/*
-	 * Place sp at the beginning of sigf; this ensures that possible
-	 * further calls to sendsig won't overwrite this struct
-	 * sigframe/struct sigcontext pair with their own.
-	 */
-	cursp = (unsigned) sigf;
-
 	bzero(&gsigf, sizeof gsigf);
 	gsigf.sf_arg = (register_t)&sigf->sf_sc;
 	gsigf.sf_pc = (register_t)catcher;
@@ -486,7 +512,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	gsigf.sf_sc.sc_onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
 	gsigf.sf_sc.sc_mask = mask;
 
-#if defined(COMPAT_13) || defined(COMPAT_ULTRIX)
+#if defined(COMPAT_ULTRIX)
 	native_sigset_to_sigset13(mask, &gsigf.sf_sc.__sc_mask13);
 #endif
 
@@ -495,8 +521,13 @@ sendsig(catcher, sig, mask, code, type, val)
 
 	syscf->pc = p->p_sigcode;
 	syscf->psl = PSL_U | PSL_PREVU;
-	syscf->ap = (unsigned) sigf + offsetof(struct sigframe, sf_pc);
-	syscf->sp = cursp;
+	/*
+	 * Place sp at the beginning of sigf; this ensures that possible
+	 * further calls to sendsig won't overwrite this struct
+	 * sigframe/struct sigcontext pair with their own.
+	 */
+	syscf->sp = syscf->ap =
+	    (unsigned) sigf + offsetof(struct sigframe, sf_pc);
 
 	if (onstack)
 		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
@@ -596,6 +627,14 @@ haltsys:
 void
 dumpsys()
 {
+	int maj, psize, pg;
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	paddr_t maddr;
+	int error;
+	kcore_seg_t *kseg_p;
+	cpu_kcore_hdr_t *chdr_p;
+	char dump_hdr[dbtob(1)];	/* XXX assume hdr fits in 1 block */
 	extern int msgbufmapped;
 
 	msgbufmapped = 0;
@@ -605,17 +644,64 @@ dumpsys()
 	 * For dumps during autoconfiguration, if dump device has already
 	 * configured...
 	 */
-	if (dumpsize == 0)
+	if (dumpsize == 0) {
 		cpu_dumpconf();
+		if (dumpsize == 0)
+			return;
+	}
+	maj = major(dumpdev);
 	if (dumplo <= 0) {
-		printf("\ndump to dev %u,%u not possible\n", major(dumpdev),
+		printf("\ndump to dev %u,%u not possible\n", maj,
 		    minor(dumpdev));
 		return;
 	}
+	dump = bdevsw[maj].d_dump;
+	blkno = dumplo;
+
 	printf("\ndumping to dev %u,%u offset %ld\n", major(dumpdev),
 	    minor(dumpdev), dumplo);
+
+	/* Setup the dump header */
+	kseg_p = (kcore_seg_t *)dump_hdr;
+	chdr_p = (cpu_kcore_hdr_t *)&dump_hdr[ALIGN(sizeof(*kseg_p))];
+	bzero(dump_hdr, sizeof(dump_hdr));
+
+	CORE_SETMAGIC(*kseg_p, KCORE_MAGIC, MID_MACHINE, CORE_CPU);
+	kseg_p->c_size = dbtob(1) - ALIGN(sizeof(*kseg_p));
+	*chdr_p = cpu_kcore_hdr;
+
 	printf("dump ");
-	switch ((*bdevsw[major(dumpdev)].d_dump) (dumpdev, 0, 0, 0)) {
+	psize = (*bdevsw[maj].d_psize)(dumpdev);
+	if (psize == -1) {
+		printf("area unavailable\n");
+		return;
+	}
+
+	/* Dump the header. */
+	error = (*dump)(dumpdev, blkno++, (caddr_t)dump_hdr, dbtob(1));
+	if (error != 0)
+		goto abort;
+
+	maddr = (paddr_t)0;
+	for (pg = 0; pg < dumpsize; pg++) {
+#define	NPGMB	(1024 * 1024 / PAGE_SIZE)
+		/* print out how many MBs we have dumped */
+		if (pg != 0 && (pg % NPGMB) == 0)
+			printf("%d ", pg / NPGMB);
+#undef NPGMB
+		error = (*dump)(dumpdev, blkno, (caddr_t)maddr + KERNBASE,
+		    PAGE_SIZE);
+		if (error == 0) {
+			maddr += PAGE_SIZE;
+			blkno += btodb(PAGE_SIZE);
+		} else
+			break;
+	}
+abort:
+	switch (error) {
+	case 0:
+		printf("succeeded\n");
+		break;
 
 	case ENXIO:
 		printf("device bad\n");
@@ -633,8 +719,12 @@ dumpsys()
 		printf("i/o error\n");
 		break;
 
+	case EINTR:
+		printf("aborted from console\n");
+		break;
+
 	default:
-		printf("succeeded\n");
+		printf("error %d\n", error);
 		break;
 	}
 }
@@ -986,3 +1076,31 @@ generic_reboot(int arg)
 
 	asm("halt");
 }
+
+#ifdef DIAGNOSTIC
+void
+splassert_check(int wantipl, const char *func)
+{
+	extern int oldvsbus;
+	int oldipl = mfpr(PR_IPL);
+
+	/*
+	 * Do not complain for older vsbus systems where vsbus interrupts
+	 * at 0x14, instead of the expected 0x15. Since these systems are
+	 * not expandable and all their devices interrupt at the same
+	 * level, there is no risk of them interrupting each other while
+	 * they are servicing an interrupt, even at level 0x14.
+	 */
+	if (oldvsbus != 0 && oldipl == 0x14)
+		oldipl = 0x15;
+		
+	if (oldipl < wantipl) {
+		splassert_fail(wantipl, oldipl, func);
+		/*
+		 * If the splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		mtpr(wantipl, PR_IPL);
+	}
+}
+#endif

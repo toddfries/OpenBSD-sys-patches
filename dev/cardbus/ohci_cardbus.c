@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci_cardbus.c,v 1.4 2005/12/30 04:01:18 dlg Exp $ */
+/*	$OpenBSD: ohci_cardbus.c,v 1.7 2006/07/12 06:26:34 jolan Exp $ */
 /*	$NetBSD: ohci_cardbus.c,v 1.19 2004/08/02 19:14:28 mycroft Exp $	*/
 
 /*
@@ -109,9 +109,13 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	cardbus_chipset_tag_t cc = ct->ct_cc;
 	cardbus_function_tag_t cf = ct->ct_cf;
 	cardbusreg_t csr;
+	char devinfo[256];
 	usbd_status r;
 	const char *vendor;
 	const char *devname = sc->sc.sc_bus.bdev.dv_xname;
+
+	cardbus_devinfo(ca->ca_id, ca->ca_class, 0, devinfo, sizeof(devinfo));
+	printf(" %s", devinfo);
 
 	/* Map I/O registers */
 	if (Cardbus_mapreg_map(ct, CARDBUS_CBMEM, CARDBUS_MAPREG_TYPE_MEM, 0,
@@ -129,10 +133,6 @@ ohci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ct = ct;
 	sc->sc.sc_bus.dmatag = ca->ca_dmat;
 
-#if rbus
-#else
-XXX	(ct->ct_cf->cardbus_mem_open)(cc, 0, iob, iob + 0x40);
-#endif
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_MEM_ENABLE);
 	(ct->ct_cf->cardbus_ctrl)(cc, CARDBUS_BM_ENABLE);
 
@@ -188,7 +188,9 @@ ohci_cardbus_detach(struct device *self, int flags)
 	rv = ohci_detach(&sc->sc, flags);
 	if (rv)
 		return (rv);
-	powerhook_disestablish(sc->sc.sc_powerhook);
+
+	if (sc->sc.sc_powerhook != NULL)
+		powerhook_disestablish(sc->sc.sc_powerhook);
 
 	if (sc->sc_ih != NULL) {
 		cardbus_intr_disestablish(sc->sc_cc, sc->sc_cf, sc->sc_ih);

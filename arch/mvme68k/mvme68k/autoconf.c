@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.33 2006/01/11 07:22:00 miod Exp $ */
+/*	$OpenBSD: autoconf.c,v 1.35 2006/07/10 19:23:25 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -85,6 +85,8 @@
 #include <machine/disklabel.h>
 #include <machine/cpu.h>
 #include <machine/pte.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -213,24 +215,31 @@ mapiodev(pa, size)
 	int size;
 {
 	int error;
-	vaddr_t kva;
+	paddr_t base;
+	vaddr_t va, iova;
 
 	if (size <= 0)
 		return NULL;
 
-#ifdef DEBUG
-	if ((pa & PGOFSET) || (size & PGOFSET))
-		panic("mapiodev: unaligned");
-#endif
+	base = pa & PAGE_MASK;
+	pa = trunc_page(pa);
+	size = round_page(base + size);
 
 	error = extent_alloc(extio, size, EX_NOALIGN, 0, EX_NOBOUNDARY,
-	    EX_NOWAIT | EX_MALLOCOK, (u_long *)&kva);
+	    EX_NOWAIT | EX_MALLOCOK, &iova);
 
 	if (error != 0)
 	        return NULL;
 
-	physaccess(kva, pa, size, PG_RW | PG_CI);
-	return (kva);
+	va = iova;
+	while (size != 0) {
+		pmap_kenter_cache(va, pa, PG_RW | PG_CI);
+		size -= PAGE_SIZE;
+		va += PAGE_SIZE;
+		pa += PAGE_SIZE;
+	}
+	pmap_update(pmap_kernel());
+	return (iova + base);
 }
 
 void
@@ -239,19 +248,23 @@ unmapiodev(kva, size)
 	int size;
 {
 	int error;
+	vaddr_t va;
 
 #ifdef DEBUG
-	if ((kva & PGOFSET) || (size & PGOFSET))
-	        panic("unmapiodev: unaligned");
-	if (kva < extiobase || kva >= extiobase + ctob(EIOMAPSIZE))
+	if (kva < extiobase || kva + size >= extiobase + ctob(EIOMAPSIZE))
 	        panic("unmapiodev: bad address");
 #endif
-	physunaccess(kva, size);
 
-	error = extent_free(extio, (u_long)kva, size, EX_NOWAIT);
+	va = trunc_page(kva);
+	size = round_page(kva + size) - va;
+	pmap_kremove(va, size);
+	pmap_update(pmap_kernel());
 
+	error = extent_free(extio, va, size, EX_NOWAIT);
+#ifdef DIAGNOSTIC
 	if (error != 0)
 		printf("unmapiodev: extent_free failed\n");
+#endif
 }
 
 /*

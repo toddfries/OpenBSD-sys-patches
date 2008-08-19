@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.34 2006/02/12 19:55:39 miod Exp $	*/
+/*	$OpenBSD: clock.c,v 1.36 2006/06/19 15:13:35 deraadt Exp $	*/
 /*	$NetBSD: clock.c,v 1.39 1996/05/12 23:11:54 mycroft Exp $	*/
 
 /*-
@@ -98,7 +98,6 @@ WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <machine/pio.h>
 #include <machine/cpufunc.h>
 
-#include <dev/clock_subr.h>
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 #include <dev/ic/mc146818reg.h>
@@ -392,7 +391,7 @@ calibrate_cyclecounter()
 	__asm __volatile("rdtsc" : "=A" (last_count));
 	delay(1000000);
 	__asm __volatile("rdtsc" : "=A" (count));
-	pentium_mhz = ((count - last_count) + 500000) / 1000000;
+	pentium_mhz = ((count - last_count) + 999999) / 1000000;
 }
 #endif
 

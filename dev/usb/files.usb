@@ -1,4 +1,4 @@
-#	$OpenBSD: files.usb,v 1.50 2005/09/29 01:18:32 deraadt Exp $
+#	$OpenBSD: files.usb,v 1.63 2006/09/16 13:21:23 damien Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
@@ -82,7 +82,7 @@ attach	ums at uhidbus
 file	dev/usb/ums.c			ums
 
 # Cypress microcontroller based serial adpaters
-device	ucycom: hid
+device	ucycom: hid, ucombus
 attach	ucycom at uhidbus
 file	dev/usb/ucycom.c		ucycom			needs-flag
 
@@ -101,6 +101,11 @@ file	dev/usb/umass_scsi.c		umass & (scsibus | atapiscsi)
 
 
 # Misc
+# Gude Expert mouseCLOCK DCF77 time signal station receiver
+device	udcf
+attach	udcf at uhub
+file	dev/usb/udcf.c			udcf
+
 # Diamond Multimedia Rio 500
 device	urio
 attach	urio at uhub
@@ -196,11 +201,26 @@ device	ubsa: ucombus
 attach	ubsa at uhub
 file	dev/usb/ubsa.c			ubsa
 
+# Silicon Laboratories CP210x serial
+device	uslcom: ucombus
+attach	uslcom at uhub
+file	dev/usb/uslcom.c		uslcom
+
+# Arkmicro ARK3116 serial
+device	uark: ucombus
+attach	uark at uhub
+file	dev/usb/uark.c			uark
+
 # iPAQ PDAs
 # Generic ipaq support
 device	uipaq: ucombus
 attach	uipaq at uhub
 file	dev/usb/uipaq.c			uipaq
+
+# Qualcomm MSM EVDO
+device	umsm: ucombus
+attach	umsm at uhub
+file	dev/usb/umsm.c			umsm
 
 # Scanners
 # Generic scanner support
@@ -232,7 +252,23 @@ device	ural: ether, ifnet, ifmedia, wlan
 attach	ural at uhub
 file	dev/usb/if_ral.c		ural
 
+# Ralink Technology RT2501USB
+device	rum: ether, ifnet, ifmedia, wlan, firmload
+attach	rum at uhub
+file	dev/usb/if_rum.c		rum
+
+# Zydas ZD1211
+device	zyd: ether, ifnet, ifmedia, wlan, firmload
+attach	zyd at uhub
+file	dev/usb/if_zyd.c		zyd
+
 # Analog Devices Eagle driver
 device	ueagle: atm, ifnet, ezload, firmload
 attach	ueagle at uhub
 file	dev/usb/ueagle.c		ueagle
+
+# Atheros AR5005UG/AR5005UX
+device	uath: ether, ifnet, ifmedia, wlan, firmload
+attach	uath at uhub
+file	dev/usb/if_uath.c		uath
+

@@ -1,4 +1,4 @@
-/* $OpenBSD: sgmap_common.c,v 1.6 2003/10/18 20:14:41 jmc Exp $ */
+/* $OpenBSD: sgmap_common.c,v 1.9 2006/04/13 14:41:08 brad Exp $ */
 /* $NetBSD: sgmap_common.c,v 1.13 2000/06/29 09:02:57 mrg Exp $ */
 
 /*-
@@ -37,6 +37,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#define _ALPHA_BUS_DMA_PRIVATE
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -97,7 +99,7 @@ alpha_sgmap_init(t, sgmap, name, wbase, sgvabase, sgvasize, ptesize, ptva,
 		 * this must be aligned to the page table size.  However,
 		 * some platforms have more strict alignment requirements.
 		 */
-		ptsize = (sgvasize / NBPG) * ptesize;
+		ptsize = (sgvasize / PAGE_SIZE) * ptesize;
 		if (minptalign != 0) {
 			if (minptalign < ptsize)
 				minptalign = ptsize;
@@ -129,7 +131,7 @@ alpha_sgmap_init(t, sgmap, name, wbase, sgvabase, sgvasize, ptesize, ptva,
 	 * Allocate a spill page if that hasn't already been done.
 	 */
 	if (alpha_sgmap_prefetch_spill_page_va == 0) {
-		if (bus_dmamem_alloc(t, NBPG, 0, 0, &seg, 1, &rseg,
+		if (bus_dmamem_alloc(t, PAGE_SIZE, 0, 0, &seg, 1, &rseg,
 		    BUS_DMA_NOWAIT)) {
 			printf("unable to allocate spill page for sgmap `%s'\n",
 			    name);
@@ -138,7 +140,7 @@ alpha_sgmap_init(t, sgmap, name, wbase, sgvabase, sgvasize, ptesize, ptva,
 		alpha_sgmap_prefetch_spill_page_pa = seg.ds_addr;
 		alpha_sgmap_prefetch_spill_page_va =
 		    ALPHA_PHYS_TO_K0SEG(alpha_sgmap_prefetch_spill_page_pa);
-		bzero((caddr_t)alpha_sgmap_prefetch_spill_page_va, NBPG);
+		bzero((caddr_t)alpha_sgmap_prefetch_spill_page_va, PAGE_SIZE);
 	}
 	
 	return;
@@ -147,84 +149,37 @@ alpha_sgmap_init(t, sgmap, name, wbase, sgvabase, sgvasize, ptesize, ptva,
 }
 
 int
-alpha_sgmap_alloc(map, origlen, sgmap, flags)
-	bus_dmamap_t map;
-	bus_size_t origlen;
-	struct alpha_sgmap *sgmap;
+alpha_sgmap_dmamap_create(t, size, nsegments, maxsegsz, boundary,
+    flags, dmamp)
+	bus_dma_tag_t t;
+	bus_size_t size;
+	int nsegments;
+	bus_size_t maxsegsz;
+	bus_size_t boundary;
 	int flags;
+	bus_dmamap_t *dmamp;
 {
+	bus_dmamap_t map;
 	int error;
-	bus_size_t len = origlen, boundary, alignment;
-	int s;
 
-#ifdef DIAGNOSTIC
-	if (map->_dm_flags & DMAMAP_HAS_SGMAP)
-		panic("alpha_sgmap_alloc: already have sgva space");
-#endif
-	/*
-	 * Add a range for spill page.
-	 */
-	len += NBPG;
+	error = _bus_dmamap_create(t, size, nsegments, maxsegsz,
+	    boundary, flags, dmamp);
+	if (error)
+		return (error);
 
-	/*
-	 * And add an additional amount in case of ALLOCNOW.
-	 */
-	if (flags & BUS_DMA_ALLOCNOW)
-		len += NBPG;
+	map = *dmamp;
 
-	map->_dm_sgvalen = round_page(len);
+	/* XXX BUS_DMA_ALLOCNOW */
 
-	/*
-	 * ARGH! If the addition of spill pages bumped us over our
-	 * boundary, we have to 2x the boundary limit.
-	 */
-	boundary = map->_dm_boundary;
-	if (boundary && boundary < map->_dm_sgvalen) {
-		alignment = boundary;
-		do {
-			boundary <<= 1;
-		} while (boundary < map->_dm_sgvalen);
-	} else
-		alignment = NBPG;
-#if 0
-	printf("len %x -> %x, _dm_sgvalen %x _dm_boundary %x boundary %x -> ",
-	    origlen, len, map->_dm_sgvalen, map->_dm_boundary, boundary);
-#endif
-
-	s = splvm();
-	error = extent_alloc(sgmap->aps_ex, map->_dm_sgvalen, alignment, 0,
-	    boundary, (flags & BUS_DMA_NOWAIT) ? EX_NOWAIT : EX_WAITOK,
-	    &map->_dm_sgva);
-	splx(s);
-#if 0
-	printf("error %d _dm_sgva %x\n", error, map->_dm_sgva);
-#endif
-
-	if (error == 0)
-		map->_dm_flags |= DMAMAP_HAS_SGMAP;
-	else
-		map->_dm_flags &= ~DMAMAP_HAS_SGMAP;
-	
 	return (error);
 }
 
 void
-alpha_sgmap_free(map, sgmap)
+alpha_sgmap_dmamap_destroy(t, map)
+	bus_dma_tag_t t;
 	bus_dmamap_t map;
-	struct alpha_sgmap *sgmap;
 {
-	int s;
+	KASSERT(map->dm_mapsize == 0);
 
-#ifdef DIAGNOSTIC
-	if ((map->_dm_flags & DMAMAP_HAS_SGMAP) == 0)
-		panic("alpha_sgmap_free: no sgva space to free");
-#endif
-
-	s = splvm();
-	if (extent_free(sgmap->aps_ex, map->_dm_sgva, map->_dm_sgvalen,
-	    EX_NOWAIT))
-		panic("alpha_sgmap_free");
-	splx(s);
-
-	map->_dm_flags &= ~DMAMAP_HAS_SGMAP;
+	_bus_dmamap_destroy(t, map);
 }

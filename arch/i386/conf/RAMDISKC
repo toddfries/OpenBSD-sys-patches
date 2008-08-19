@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKC,v 1.64 2006/02/08 23:56:29 pvalchev Exp $
+#	$OpenBSD: RAMDISKC,v 1.69 2006/07/25 19:16:51 kettenis Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -9,12 +9,9 @@ option		I386_CPU	# CPU classes; at least one is REQUIRED
 option		I486_CPU
 option		I586_CPU
 option		I686_CPU
-#option		GPL_MATH_EMULATE	# floating point emulation
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
-
-#option		DUMMY_NOPS	# speed hack; recommended
 
 maxusers	4		# estimated number of users
 option		TIMEZONE=0	# time zone to adjust RTC time by
@@ -23,7 +20,7 @@ option		DST=0		# daylight saving time used by RTC
 #makeoptions	DEBUG="-g"	# compile full symbol table
 
 option		FFS		# UFS
-option		EXT2FS		# Linux ext2fs
+#option		EXT2FS		# Linux ext2fs
 
 #option		NFSCLIENT	# Network File System client
 
@@ -244,7 +241,6 @@ scsibus* at atapiscsi?
 #ep0	at eisa?
 #ep*	at eisa?			# 3C579 ethernet
 #fea*	at eisa?			# DEC DEFEA FDDI
-#le*	at pci?				# PCnet-PCI based ethernet
 #ep*	at isapnp?			# 3C509 PnP ethernet
 #le*	at isapnp?
 #de*	at pci?				# DC21X4X-based ethernet
@@ -283,6 +279,7 @@ re*	at cardbus?			# Realtek 8169/8169S/8110S
 #bce*	at pci?				# Broadcom BCM4401
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
+#pcn*	at pci?				# AMD PCnet-PCI Ethernet
 
 # Wireless network cards
 ath*	at pci?				# Atheros AR5k (802.11a/b/g)

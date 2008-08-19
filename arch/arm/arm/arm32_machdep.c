@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.19 2006/01/17 20:30:10 miod Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.22 2006/07/12 17:29:53 miod Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -59,7 +59,6 @@
 
 #include <dev/cons.h>
 
-#include <arm/katelib.h>
 #include <arm/machdep.h>
 #include <machine/bootconfig.h>
 #include <machine/conf.h>
@@ -225,7 +224,7 @@ bootsync(int howto)
 	bootsyncdone = 1;
 
 	/* Make sure we can still manage to do things */
-	if (GetCPSR() & I32_bit) {
+	if (__get_cpsr() & I32_bit) {
 		/*
 		 * If we get here then boot has been called without RB_NOSYNC
 		 * and interrupts were disabled. This means the boot() call
@@ -452,8 +451,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case CPU_ALLOWAPERTURE:
 #ifdef APERTURE
 		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp,
-			    allowaperture));
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &allowaperture));
 		else
 			return (sysctl_int(oldp, oldlenp, newp, newlen,
 			    &allowaperture));

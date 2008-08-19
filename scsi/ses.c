@@ -1,4 +1,4 @@
-/*	$OpenBSD: ses.c,v 1.34 2006/01/19 17:08:40 grange Exp $ */
+/*	$OpenBSD: ses.c,v 1.39 2006/07/29 02:40:46 krw Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -75,7 +75,7 @@ struct ses_softc {
 		SES_ENC_STD,
 		SES_ENC_DELL
 	}			sc_enctype;
-	
+
 	u_char			*sc_buf;
 	ssize_t			sc_buflen;
 
@@ -127,12 +127,12 @@ ses_match(struct device *parent, void *match, void *aux)
 		return (0);
 
 	if ((inq->device & SID_TYPE) == T_ENCLOSURE &&
-	    (inq->version & SID_ANSII) >= SID_ANSII_SCSI2)
+	    SCSISPC(inq->version) >= 2)
 		return (2);
 
 	/* match on dell enclosures */
 	if ((inq->device & SID_TYPE) == T_PROCESSOR &&
-	    (inq->version & SID_ANSII) == SID_ANSII_SCSI3)
+	    SCSISPC(inq->version) == 3)
 		return (3);
 
 	return (0);
@@ -278,8 +278,8 @@ ses_read_config(struct ses_softc *sc)
 #endif
 
 	if (cold)
- 		flags |= SCSI_AUTOCONF;
- 
+		flags |= SCSI_AUTOCONF;
+
 	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
 	    sizeof(cmd), buf, SES_BUFLEN, 2, 3000, NULL, flags) != 0) {
 		free(buf, M_DEVBUF);
@@ -384,13 +384,17 @@ ses_make_sensors(struct ses_softc *sc, struct ses_type_desc *types, int ntypes)
 #endif
 	enum sensor_type		stype;
 	char				*fmt;
-	int				typecnt[SES_NUM_TYPES];
+	int				*typecnt;
 	int				i, j;
 
 	if (ses_read_status(sc) != 0)
 		return (1);
 
-	memset(typecnt, 0, sizeof(typecnt));
+	typecnt = malloc(sizeof(int) * SES_NUM_TYPES, M_TEMP, M_NOWAIT);
+	if (typecnt == NULL)
+		return (1);
+	memset(typecnt, 0, sizeof(int) * SES_NUM_TYPES);
+
 	TAILQ_INIT(&sc->sc_sensors);
 #if NBIO > 0
 	TAILQ_INIT(&sc->sc_slots);
@@ -433,17 +437,17 @@ ses_make_sensors(struct ses_softc *sc, struct ses_type_desc *types, int ntypes)
 
 			case SES_T_POWERSUPPLY:
 				stype = SENSOR_INDICATOR;
-				fmt = "psu%d";
+				fmt = "PSU%d";
 				break;
 
 			case SES_T_COOLING:
 				stype = SENSOR_PERCENT;
-				fmt = "fan%d";
+				fmt = "Fan%d";
 				break;
 
 			case SES_T_TEMP:
 				stype = SENSOR_TEMP;
-				fmt = "temp%d";
+				fmt = "Temp%d";
 				break;
 
 			default:
@@ -472,6 +476,7 @@ ses_make_sensors(struct ses_softc *sc, struct ses_type_desc *types, int ntypes)
 		status++;
 	}
 
+	free(typecnt, M_TEMP);
 	return (0);
 error:
 #if NBIO > 0
@@ -486,6 +491,7 @@ error:
 		TAILQ_REMOVE(&sc->sc_sensors, sensor, se_entry);
 		free(sensor, M_DEVBUF);
 	}
+	free(typecnt, M_TEMP);
 	return (1);
 }
 
@@ -552,7 +558,7 @@ ses_refresh_sensors(void *arg)
 	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
 
 	if (ret)
-		printf("%s: error in sensor data\n");
+		printf("%s: error in sensor data\n", DEVNAME(sc));
 }
 
 #if NBIO > 0
@@ -592,7 +598,7 @@ ses_write_config(struct ses_softc *sc)
 
 	if (cold)
 		flags |= SCSI_AUTOCONF;
- 
+
 	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
 	    sizeof(cmd), sc->sc_buf, sc->sc_buflen, 2, 3000, NULL, flags) != 0)
 		return (1);

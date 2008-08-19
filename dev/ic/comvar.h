@@ -1,4 +1,4 @@
-/*	$OpenBSD: comvar.h,v 1.37 2005/10/24 14:22:34 fgsch Exp $	*/
+/*	$OpenBSD: comvar.h,v 1.39 2006/07/31 11:06:30 mickey Exp $	*/
 /*	$NetBSD: comvar.h,v 1.5 1996/05/05 19:50:47 christos Exp $	*/
 
 /*
@@ -104,6 +104,7 @@ struct com_softc {
 #define COM_UART_TI16750	0x07		/* 64 byte fifo */
 #define	COM_UART_XR16850	0x10		/* 128 byte fifo */
 #define COM_UART_PXA2X0		0x11		/* 16 byte fifo */
+#define	COM_UART_OX16C950	0x12		/* 128 byte fifo */
 
 	u_char sc_hwflags;
 #define	COM_HW_NOIEN	0x01
@@ -117,6 +118,7 @@ struct com_softc {
 #define	COM_SW_CRTSCTS	0x04
 #define	COM_SW_MDMBUF	0x08
 #define	COM_SW_PPS	0x10
+#define	COM_SW_DEAD	0x20
 	int	sc_fifolen;
 	u_char sc_msr, sc_mcr, sc_lcr, sc_ier;
 	u_char sc_dtr;

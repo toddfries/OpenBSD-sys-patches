@@ -1,7 +1,7 @@
-/*	$OpenBSD: cissvar.h,v 1.2 2005/09/07 04:00:16 mickey Exp $	*/
+/*	$OpenBSD: cissvar.h,v 1.5 2006/08/31 23:19:35 krw Exp $	*/
 
 /*
- * Copyright (c) 2005 Michael Shalayeff
+ * Copyright (c) 2005,2006 Michael Shalayeff
  * All rights reserved.
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -17,6 +17,15 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+struct sensor;
+
+struct ciss_ld {
+	struct ciss_blink bling;	/* a copy of blink state */
+	char	xname[16];		/* copy of the sdN name */
+	int	ndrives;
+	u_int8_t tgts[1];
+};
+
 struct ciss_softc {
 	struct device	sc_dev;
 	struct scsi_link sc_link;
@@ -26,8 +35,10 @@ struct ciss_softc {
 	void		*sc_sh;
 	struct proc	*sc_thread;
 	int		sc_flush;
+	struct sensor	*sensors;
 
 	u_int	sc_flags;
+#define	CISS_BIO	0x0001
 	int ccblen, maxcmd, maxsg, nbus, ndrives, maxunits;
 	ciss_queue_head	sc_free_ccb, sc_ccbq, sc_ccbdone;
 
@@ -43,6 +54,7 @@ struct ciss_softc {
 	int cfgoff;
 	u_int32_t iem;
 	u_int32_t heartbeat;
+	struct ciss_ld **sc_lds;
 };
 
 struct ciss_rawsoftc {

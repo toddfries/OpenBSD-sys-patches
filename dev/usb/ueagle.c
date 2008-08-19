@@ -1,7 +1,7 @@
-/*	$OpenBSD: ueagle.c,v 1.9 2006/01/29 03:22:52 brad Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.12 2006/09/16 13:31:04 damien Exp $	*/
 
 /*-
- * Copyright (c) 2003-2005
+ * Copyright (c) 2003-2006
  *	Damien Bergamini <damien.bergamini@free.fr>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -18,7 +18,7 @@
  */
 
 /*-
- * Analog Devices Eagle chipset driver
+ * Driver for Analog Devices Eagle chipset.
  * http://www.analog.com/
  */
 
@@ -875,7 +875,7 @@ ueagle_push_cell(struct ueagle_softc *sc, uint8_t *cell)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf != NULL)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	/* send the AAL5 CPCS-PDU to the ATM layer */
@@ -915,8 +915,8 @@ ueagle_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 		}
 #ifdef DIAGNOSTIC
 		if (count > 0) {
-			printf("%s: truncated cell (%u bytes)\n", count,
-			    USBDEVNAME(sc->sc_dev));
+			printf("%s: truncated cell (%u bytes)\n",
+			    USBDEVNAME(sc->sc_dev), count);
 		}
 #endif
 		req->frlengths[i] = sc->isize;
@@ -1078,17 +1078,16 @@ ueagle_start(struct ifnet *ifp)
 	IFQ_POLL(&ifp->if_snd, m0);
 	if (m0 == NULL)
 		return;
+	IFQ_DEQUEUE(&ifp->if_snd, m0);
 
 	if (ueagle_encap(sc, m0) != 0) {
 		m_freem(m0);
 		return;
 	}
 
-	IFQ_DEQUEUE(&ifp->if_snd, m0);
-
 #if NBPFILTER > 0
 	if (ifp->if_bpf != NULL)
-		bpf_mtap(ifp->if_bpf, m0);
+		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
 	m_freem(m0);
@@ -1457,7 +1456,7 @@ ueagle_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return EOPNOTSUPP;
+		break;
 
 	case DVACT_DEACTIVATE:
 		if_deactivate(&sc->sc_if);

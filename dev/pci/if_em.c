@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.109.2.2 2006/09/17 19:50:00 brad Exp $ */
+/* $OpenBSD: if_em.c,v 1.146.2.1 2006/11/02 01:56:59 brad Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -45,12 +45,16 @@ int             em_display_debug_stats = 0;
  *  Driver version
  *********************************************************************/
 
-char em_driver_version[] = "3.2.18";
+char em_driver_version[] = "6.1.4";
 
 /*********************************************************************
  *  PCI Device ID Table
  *********************************************************************/
 const struct pci_matchid em_devices[] = {
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80003ES2LAN_CPR_DPT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80003ES2LAN_SDS_DPT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80003ES2LAN_CPR_SPT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80003ES2LAN_SDS_SPT },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82540EM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82540EM_LOM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82540EP },
@@ -77,24 +81,40 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82545GM_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546EB_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546EB_FIBER },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546EB_QUAD_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546EB_QUAD_CPR },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_PCIE },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_QUAD_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_QUAD_CPR },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_QUAD_CPR_K },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82546GB_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82547EI },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82547EI_MOBILE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82547GI },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_AF },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_AT },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_QUAD_CPR },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573E },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573E_IAMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573E_KCS },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573E_PM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573L_PL_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82573V_PM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_AMT },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_C },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IGP_M }
 };
 
 /*********************************************************************
@@ -127,16 +147,15 @@ void em_disable_intr(struct em_softc *);
 void em_free_transmit_structures(struct em_softc *);
 void em_free_receive_structures(struct em_softc *);
 void em_update_stats_counters(struct em_softc *);
-void em_clean_transmit_interrupts(struct em_softc *);
+void em_txeof(struct em_softc *);
 int  em_allocate_receive_structures(struct em_softc *);
 int  em_allocate_transmit_structures(struct em_softc *);
-void em_process_receive_interrupts(struct em_softc *, int);
+void em_rxeof(struct em_softc *, int);
 void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 			 struct mbuf *);
 void em_transmit_checksum_setup(struct em_softc *, struct mbuf *,
 				u_int32_t *, u_int32_t *);
 void em_set_promisc(struct em_softc *);
-void em_disable_promisc(struct em_softc *);
 void em_set_multi(struct em_softc *);
 void em_print_hw_stats(struct em_softc *);
 void em_update_link_status(struct em_softc *);
@@ -166,6 +185,8 @@ struct cfattach em_ca = {
 struct cfdriver em_cd = {
 	0, "em", DV_IFNET
 };
+
+static int em_smart_pwr_down = FALSE;
 
 /*********************************************************************
  *  Device identification routine
@@ -233,17 +254,50 @@ em_attach(struct device *parent, struct device *self, void *aux)
 #else
 	sc->hw.master_slave = EM_MASTER_SLAVE;
 #endif
+
+	/*
+	 * This controls when hardware reports transmit completion
+	 * status.   
+	 */
+	sc->hw.report_tx_early = 1;
+
+	if (em_allocate_pci_resources(sc)) {
+		printf("%s: Allocation of PCI resources failed\n",
+		    sc->sc_dv.dv_xname);
+		goto err_pci;
+	}
+
+	/* Initialize eeprom parameters */
+	em_init_eeprom_params(&sc->hw);
+
 	/*
 	 * Set the max frame size assuming standard Ethernet
 	 * sized frames.
 	 */
 	switch (sc->hw.mac_type) {
+		case em_82573:
+		{
+			uint16_t	eeprom_data = 0;
+
+			/*
+			 * 82573 only supports Jumbo frames
+			 * if ASPM is disabled.
+			 */
+			em_read_eeprom(&sc->hw, EEPROM_INIT_3GIO_3,
+			    1, &eeprom_data);
+			if (eeprom_data & EEPROM_WORD1A_ASPM_MASK) {
+				sc->hw.max_frame_size = ETHER_MAX_LEN;
+				break;
+			}
+			/* Allow Jumbo frames - FALLTHROUGH */
+		}
 		case em_82571:
 		case em_82572:
-			sc->hw.max_frame_size = 10500;
+		case em_80003es2lan:	/* Limit Jumbo Frame size */
+			sc->hw.max_frame_size = 9234;
 			break;
-		case em_82573:
-			/* 82573 does not support Jumbo frames */
+		case em_ich8lan:
+			/* ICH8 does not support jumbo frames */
 			sc->hw.max_frame_size = ETHER_MAX_LEN;
 			break;
 		default:
@@ -254,27 +308,12 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	sc->hw.min_frame_size = 
 	    ETHER_MIN_LEN + ETHER_CRC_LEN;
 
-	/*
-	 * This controls when hardware reports transmit completion
-	 * status.
-	 */
-	sc->hw.report_tx_early = 1;
-
-	if (em_allocate_pci_resources(sc)) {
-		printf("%s: Allocation of PCI resources failed\n",
-		       sc->sc_dv.dv_xname);
-		goto err_pci;
-	}
-
-	/* Initialize eeprom parameters */
-	em_init_eeprom_params(&sc->hw);
-
 	if (sc->hw.mac_type >= em_82544)
 	    tsize = EM_ROUNDUP(sc->num_tx_desc * sizeof(struct em_tx_desc),
-		EM_MAX_TXD_82544 * sizeof(struct em_tx_desc));
+		EM_MAX_TXD * sizeof(struct em_tx_desc));
 	else
 	    tsize = EM_ROUNDUP(sc->num_tx_desc * sizeof(struct em_tx_desc),
-		EM_MAX_TXD * sizeof(struct em_tx_desc));
+		EM_MAX_TXD_82543 * sizeof(struct em_tx_desc));
 	tsize = EM_ROUNDUP(tsize, PAGE_SIZE);
 
 	/* Allocate Transmit Descriptor ring */
@@ -329,6 +368,11 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	em_update_link_status(sc);
 
 	printf(", address %s\n", ether_sprintf(sc->interface_data.ac_enaddr));
+
+	/* Indicate SOL/IDER usage */
+	if (em_check_phy_reset_block(&sc->hw))
+		printf("%s: PHY reset is blocked due to SOL/IDER session.\n",
+		    sc->sc_dv.dv_xname);
 
 	/* Identify 82544 on PCI-X */
 	em_get_bus_info(&sc->hw);
@@ -417,7 +461,7 @@ em_start(struct ifnet *ifp)
 #if NBPFILTER > 0
 		/* Send a copy of the frame to the BPF listener */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head);
+			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		/* Set timeout in case hardware has problems transmitting */
@@ -437,7 +481,7 @@ em_start(struct ifnet *ifp)
 int
 em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
-	int		max_frame_size, error = 0;
+	int		error = 0;
 	struct ifreq   *ifr = (struct ifreq *) data;
 	struct ifaddr  *ifa = (struct ifaddr *)data;
 	struct em_softc *sc = ifp->if_softc;
@@ -455,33 +499,16 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFADDR (Set Interface "
 			       "Addr)");
 		ifp->if_flags |= IFF_UP;
-		em_init(sc);
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			em_init(sc);
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->interface_data, ifa);
-			break;
 #endif /* INET */
-		default:
-			break;
-		}
 		break;
 	case SIOCSIFMTU:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFMTU (Set Interface MTU)");
-		switch (sc->hw.mac_type) {
-			case em_82571:
-			case em_82572:
-				max_frame_size = 10500;
-				break;
-			case em_82573:
-				/* 82573 does not support Jumbo frames */
-				max_frame_size = ETHER_MAX_LEN;
-				break;
-			default:
-				max_frame_size = MAX_JUMBO_FRAME_SIZE;
-		}
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu >
-		    max_frame_size - ETHER_HDR_LEN - ETHER_CRC_LEN)
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
 			error = EINVAL;
 		else if (ifp->if_mtu != ifr->ifr_mtu)
 			ifp->if_mtu = ifr->ifr_mtu;
@@ -489,15 +516,24 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
-			if (!(ifp->if_flags & IFF_RUNNING))
-				em_init(sc);
-
-			em_disable_promisc(sc);
-			em_set_promisc(sc);
+			/*
+			 * If only the PROMISC or ALLMULTI flag changes, then
+			 * don't do a full re-init of the chip, just update
+			 * the Rx filter.
+			 */
+			if ((ifp->if_flags & IFF_RUNNING) &&
+			    ((ifp->if_flags ^ sc->if_flags) &
+			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
+				em_set_promisc(sc);
+			} else {
+				if (!(ifp->if_flags & IFF_RUNNING))
+					em_init(sc);
+			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				em_stop(sc);
 		}
+		sc->if_flags = ifp->if_flags;
 		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
@@ -524,7 +560,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	default:
 		IOCTL_DEBUGOUT1("ioctl received: UNKNOWN (0x%x)", (int)command);
-		error = EINVAL;
+		error = ENOTTY;
 	}
 
 	splx(s);
@@ -554,7 +590,6 @@ em_watchdog(struct ifnet *ifp)
 
 	printf("%s: watchdog timeout -- resetting\n", sc->sc_dv.dv_xname);
 
-	ifp->if_flags &= ~IFF_RUNNING;
 	em_init(sc);
 
 	sc->watchdog_events++;
@@ -586,9 +621,9 @@ em_init(void *arg)
 
 	if (ifp->if_flags & IFF_UP) {
 		if (sc->hw.mac_type >= em_82544)
-		    sc->num_tx_desc = EM_MAX_TXD_82544;
-		else
 		    sc->num_tx_desc = EM_MAX_TXD;
+		else
+		    sc->num_tx_desc = EM_MAX_TXD_82543;
 		sc->num_rx_desc = EM_MAX_RXD;
 	} else {
 		sc->num_tx_desc = EM_MIN_TXD;
@@ -599,32 +634,42 @@ em_init(void *arg)
 	/* Packet Buffer Allocation (PBA)
 	 * Writing PBA sets the receive portion of the buffer
 	 * the remainder is used for the transmit buffer.
+	 *
+	 * Devices before the 82547 had a Packet Buffer of 64K.
+	 *   Default allocation: PBA=48K for Rx, leaving 16K for Tx.
+	 * After the 82547 the buffer was reduced to 40K.
+	 *   Default allocation: PBA=30K for Rx, leaving 10K for Tx.
+	 *   Note: default does not leave enough room for Jumbo Frame >10k.
 	 */
 	switch (sc->hw.mac_type) {
 	case em_82547:
 	case em_82547_rev_2: /* 82547: Total Packet Buffer is 40K */
-	    if (sc->hw.max_frame_size > EM_RXBUFFER_8192)
-		    pba = E1000_PBA_22K; /* 22K for Rx, 18K for Tx */
-	    else
-		    pba = E1000_PBA_30K; /* 30K for Rx, 10K for Tx */
-	    sc->tx_fifo_head = 0;
-	    sc->tx_head_addr = pba << EM_TX_HEAD_ADDR_SHIFT;
-	    sc->tx_fifo_size = (E1000_PBA_40K - pba) << EM_PBA_BYTES_SHIFT;
-	    break;
+		if (sc->hw.max_frame_size > EM_RXBUFFER_8192)
+			pba = E1000_PBA_22K; /* 22K for Rx, 18K for Tx */
+		else
+			pba = E1000_PBA_30K; /* 30K for Rx, 10K for Tx */
+		sc->tx_fifo_head = 0;
+		sc->tx_head_addr = pba << EM_TX_HEAD_ADDR_SHIFT;
+		sc->tx_fifo_size = (E1000_PBA_40K - pba) << EM_PBA_BYTES_SHIFT;
+		break;
+	case em_80003es2lan: /* 80003es2lan: Total Packet Buffer is 48K */
 	case em_82571: /* 82571: Total Packet Buffer is 48K */
 	case em_82572: /* 82572: Total Packet Buffer is 48K */
-	    pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
-	    break;
+		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
+		break;
 	case em_82573: /* 82573: Total Packet Buffer is 32K */
-	    /* Jumbo frames not supported */
-	    pba = E1000_PBA_12K; /* 12K for Rx, 20K for Tx */
-	    break;
+		/* Jumbo frames not supported */
+		pba = E1000_PBA_12K; /* 12K for Rx, 20K for Tx */
+		break;
+	case em_ich8lan:
+		pba = E1000_PBA_8K;
+		break;
 	default:
-	    /* Devices before 82547 had a Packet Buffer of 64K.   */
-	    if (sc->hw.max_frame_size > EM_RXBUFFER_8192)
-		pba = E1000_PBA_40K; /* 40K for Rx, 24K for Tx */
-	    else
-		pba = E1000_PBA_48K; /* 48K for Rx, 16K for Tx */
+		/* Devices before 82547 had a Packet Buffer of 64K.   */
+		if (sc->hw.max_frame_size > EM_RXBUFFER_8192)
+			pba = E1000_PBA_40K; /* 40K for Rx, 24K for Tx */
+		else
+			pba = E1000_PBA_48K; /* 48K for Rx, 16K for Tx */
 	}
 	INIT_DEBUGOUT1("em_init: pba=%dK",pba);
 	E1000_WRITE_REG(&sc->hw, PBA, pba);
@@ -691,26 +736,23 @@ em_intr(void *arg)
 {
 	struct em_softc  *sc = arg;
 	struct ifnet	*ifp;
-	u_int32_t	reg_icr;
-	int s, claimed = 0;
-
-	s = splnet();
+	u_int32_t	reg_icr, test_icr;
+	int claimed = 0;
 
 	ifp = &sc->interface_data.ac_if;
 
 	for (;;) {
-		reg_icr = E1000_READ_REG(&sc->hw, ICR);
-		if (sc->hw.mac_type >= em_82571 &&
-		    (reg_icr & E1000_ICR_INT_ASSERTED) == 0)
-			break;
-		else if (reg_icr == 0)
+		test_icr = reg_icr = E1000_READ_REG(&sc->hw, ICR);
+		if (sc->hw.mac_type >= em_82571)
+			test_icr = (reg_icr & E1000_ICR_INT_ASSERTED);
+		if (!test_icr)
 			break;
 
 		claimed = 1;
 
 		if (ifp->if_flags & IFF_RUNNING) {
-			em_process_receive_interrupts(sc, -1);
-			em_clean_transmit_interrupts(sc);
+			em_rxeof(sc, -1);
+			em_txeof(sc);
 		}
 
 		/* Link status change */
@@ -730,7 +772,6 @@ em_intr(void *arg)
 	    IFQ_IS_EMPTY(&ifp->if_snd) == 0)
 		em_start(ifp);
 
-	splx(s);
 	return (claimed);
 }
 
@@ -746,6 +787,7 @@ void
 em_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
 	struct em_softc *sc= ifp->if_softc;
+	u_char fiber_type = IFM_1000_SX;
 
 	INIT_DEBUGOUT("em_media_status: begin");
 
@@ -762,8 +804,11 @@ em_media_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 
 	ifmr->ifm_status |= IFM_ACTIVE;
 
-	if (sc->hw.media_type == em_media_type_fiber) {
-		ifmr->ifm_active |= IFM_1000_SX | IFM_FDX;
+	if (sc->hw.media_type == em_media_type_fiber ||
+	    sc->hw.media_type == em_media_type_internal_serdes) {
+		if (sc->hw.mac_type == em_82545)
+			fiber_type = IFM_1000_LX;
+		ifmr->ifm_active |= fiber_type | IFM_FDX;
 	} else {
 		switch (sc->link_speed) {
 		case 10:
@@ -807,8 +852,9 @@ em_media_change(struct ifnet *ifp)
 		sc->hw.autoneg = DO_AUTO_NEG;
 		sc->hw.autoneg_advertised = AUTONEG_ADV_DEFAULT;
 		break;
+	case IFM_1000_LX:
 	case IFM_1000_SX:
-        case IFM_1000_T:
+	case IFM_1000_T:
 		sc->hw.autoneg = DO_AUTO_NEG;
 		sc->hw.autoneg_advertised = ADVERTISE_1000_FULL;
 		break;
@@ -871,7 +917,7 @@ em_encap(struct em_softc *sc, struct mbuf *m_head)
 	 * available hits the threshold
 	 */
 	if (sc->num_tx_desc_avail <= EM_TX_CLEANUP_THRESHOLD) {
-		em_clean_transmit_interrupts(sc);
+		em_txeof(sc);
 		if (sc->num_tx_desc_avail <= EM_TX_CLEANUP_THRESHOLD) {
 			sc->no_tx_desc_avail1++;
 			return (ENOBUFS);
@@ -881,8 +927,9 @@ em_encap(struct em_softc *sc, struct mbuf *m_head)
 	/*
 	 * Map the packet for DMA.
 	 */
-	if (bus_dmamap_create(sc->txtag, MAX_JUMBO_FRAME_SIZE, 32,
-	    MAX_JUMBO_FRAME_SIZE, 0, BUS_DMA_NOWAIT, &q.map)) {
+	if (bus_dmamap_create(sc->txtag, MAX_JUMBO_FRAME_SIZE,
+	    EM_MAX_SCATTER, MAX_JUMBO_FRAME_SIZE, 0,
+	    BUS_DMA_NOWAIT, &q.map)) {
 		sc->no_tx_map_avail++;
 		return (ENOMEM);
 	}
@@ -979,15 +1026,15 @@ em_encap(struct em_softc *sc, struct mbuf *m_head)
 	 * that this frame is available to transmit.
 	 */
 	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
-	    sc->txdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	    sc->txdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 	if (sc->hw.mac_type == em_82547 &&
 	    sc->link_duplex == HALF_DUPLEX) {
 		em_82547_move_tail_locked(sc);
 	} else {
 		E1000_WRITE_REG(&sc->hw, TDT, i);
-		if (sc->hw.mac_type == em_82547) {
+		if (sc->hw.mac_type == em_82547)
 			em_82547_update_fifo_head(sc, m_head->m_pkthdr.len);
-		}
 	}
 
 	return (0);
@@ -1017,7 +1064,7 @@ em_82547_move_tail_locked(struct em_softc *sc)
 		tx_desc = &sc->tx_desc_base[hw_tdt];
 		length += tx_desc->lower.flags.length;
 		eop = tx_desc->lower.data & E1000_TXD_CMD_EOP;
-		if(++hw_tdt == sc->num_tx_desc)
+		if (++hw_tdt == sc->num_tx_desc)
 			hw_tdt = 0;
 
 		if (eop) {
@@ -1107,43 +1154,28 @@ em_82547_tx_fifo_reset(struct em_softc *sc)
 		sc->tx_fifo_reset_cnt++;
 
 		return (TRUE);
-	} else {
+	} else
 		return (FALSE);
-	}
 }
 
 void
 em_set_promisc(struct em_softc *sc)
 {
 	u_int32_t	reg_rctl;
-	u_int32_t	ctrl;
 	struct ifnet   *ifp = &sc->interface_data.ac_if;
 
 	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-	ctrl = E1000_READ_REG(&sc->hw, CTRL);
 
 	if (ifp->if_flags & IFF_PROMISC) {
 		reg_rctl |= (E1000_RCTL_UPE | E1000_RCTL_MPE);
-		E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 	} else if (ifp->if_flags & IFF_ALLMULTI) {
 		reg_rctl |= E1000_RCTL_MPE;
 		reg_rctl &= ~E1000_RCTL_UPE;
-		E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
+	} else {
+		reg_rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE);
 	}
-}
-
-void
-em_disable_promisc(struct em_softc *sc)
-{
-	u_int32_t	reg_rctl;
-
-	reg_rctl = E1000_READ_REG(&sc->hw, RCTL);
-
-	reg_rctl &=  (~E1000_RCTL_UPE);
-	reg_rctl &=  (~E1000_RCTL_MPE);
 	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 }
-
 
 /*********************************************************************
  *  Multicast Update
@@ -1225,15 +1257,16 @@ em_local_timer(void *arg)
 	em_check_for_link(&sc->hw);
 	em_update_link_status(sc);
 	em_update_stats_counters(sc);	
-	if (em_display_debug_stats && ifp->if_flags & IFF_RUNNING) {
+	if (em_display_debug_stats && ifp->if_flags & IFF_RUNNING)
 		em_print_hw_stats(sc);
-	}
 	em_smartspeed(sc);
 
 	timeout_add(&sc->timer_handle, hz);
 
 	splx(s);
 }
+
+#define SPEED_MODE_BIT	(1<<21)		/* On PCI-E MACs only */
 
 void
 em_update_link_status(struct em_softc *sc)
@@ -1245,6 +1278,15 @@ em_update_link_status(struct em_softc *sc)
 			em_get_speed_and_duplex(&sc->hw,
 						&sc->link_speed,
 						&sc->link_duplex);
+			/* Check if we may set SPEED_MODE bit on PCI-E */
+			if ((sc->link_speed == SPEED_1000) &&
+			    ((sc->hw.mac_type == em_82571) ||
+			    (sc->hw.mac_type == em_82572))) {
+				int tarc0;
+				tarc0 = E1000_READ_REG(&sc->hw, TARC0);
+				tarc0 |= SPEED_MODE_BIT;
+				E1000_WRITE_REG(&sc->hw, TARC0, tarc0);
+			}
 			sc->link_active = 1;
 			sc->smartspeed = 0;
 			ifp->if_baudrate = sc->link_speed * 1000000;
@@ -1264,7 +1306,7 @@ em_update_link_status(struct em_softc *sc)
 
 /*********************************************************************
  *
- *  This routine disables all traffic on the sc by issuing a
+ *  This routine disables all traffic on the adapter by issuing a
  *  global reset on the MAC and deallocates TX/RX buffers. 
  *
  **********************************************************************/
@@ -1337,18 +1379,18 @@ em_allocate_pci_resources(struct em_softc *sc)
 
 	val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_MMBA);
 	if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
-		printf(": mmba isn't memory");
+		printf(": mmba is not mem space\n");
 		return (ENXIO);
 	}
 	if (pci_mapreg_map(pa, EM_MMBA, PCI_MAPREG_MEM_TYPE(val), 0,
 	    &sc->osdep.mem_bus_space_tag, &sc->osdep.mem_bus_space_handle,
 	    &sc->osdep.em_membase, &sc->osdep.em_memsize, 0)) {
-		printf(": can't find mem space\n");
+		printf(": cannot find mem space\n");
 		return (ENXIO);
 	}
 
 	if (sc->hw.mac_type > em_82543) {
-		/* Figure our where our IO BAR is ? */
+		/* Figure out where our I/O BAR is ? */
 		for (rid = PCI_MAPREG_START; rid < PCI_MAPREG_END;) {
 			val = pci_conf_read(pa->pa_pc, pa->pa_tag, rid);
 			if (PCI_MAPREG_TYPE(val) == PCI_MAPREG_TYPE_IO) {
@@ -1360,22 +1402,39 @@ em_allocate_pci_resources(struct em_softc *sc)
 			    PCI_MAPREG_MEM_TYPE_64BIT)
 				rid += 4;	/* skip high bits, too */
 		}
+
 		if (pci_mapreg_map(pa, rid, PCI_MAPREG_TYPE_IO, 0,
-				   &sc->osdep.em_iobtag,
-				   &sc->osdep.em_iobhandle,
-				   &sc->osdep.em_iobase,
-				   &sc->osdep.em_iosize, 0)) {
-			printf(": can't find io space\n");
+		    &sc->osdep.io_bus_space_tag, &sc->osdep.io_bus_space_handle,
+		    &sc->osdep.em_iobase, &sc->osdep.em_iosize, 0)) {
+			printf(": cannot find i/o space\n");
 			return (ENXIO);
 		}
 
 		sc->hw.io_base = 0;
 	}
 
+	/* for ICH8 we need to find the flash memory */
+	if (sc->hw.mac_type == em_ich8lan) {
+		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
+		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
+			printf(": flash is not mem space\n");
+			return (ENXIO);
+		}
+
+		if (pci_mapreg_map(pa, EM_FLASH, PCI_MAPREG_MEM_TYPE(val), 0,
+		    &sc->osdep.flash_bus_space_tag, &sc->osdep.flash_bus_space_handle,
+		    &sc->osdep.em_flashbase, &sc->osdep.em_flashsize, 0)) {
+			printf(": cannot find mem space\n");
+			return (ENXIO);
+		}
+        }
+
 	if (pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
 		return (ENXIO);
 	}
+
+	sc->hw.back = &sc->osdep;
 
 	intrstr = pci_intr_string(pc, ih);
 	sc->sc_intrhand = pci_intr_establish(pc, ih, IPL_NET, em_intr, sc,
@@ -1388,8 +1447,6 @@ em_allocate_pci_resources(struct em_softc *sc)
 		return (ENXIO);
 	}
 	printf(": %s", intrstr);
-		
-	sc->hw.back = &sc->osdep;
 
 	return (0);
 }
@@ -1400,16 +1457,21 @@ em_free_pci_resources(struct em_softc *sc)
 	struct pci_attach_args *pa = &sc->osdep.em_pa;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 
-	if(sc->sc_intrhand)
+	if (sc->sc_intrhand)
 		pci_intr_disestablish(pc, sc->sc_intrhand);
 	sc->sc_intrhand = 0;
 
-	if(sc->osdep.em_iobase)
-		bus_space_unmap(sc->osdep.em_iobtag, sc->osdep.em_iobhandle,
+	if (sc->osdep.em_flashbase)
+		bus_space_unmap(sc->osdep.flash_bus_space_tag, sc->osdep.flash_bus_space_handle,
+				sc->osdep.em_flashsize);
+	sc->osdep.em_flashbase = 0;
+
+	if (sc->osdep.em_iobase)
+		bus_space_unmap(sc->osdep.io_bus_space_tag, sc->osdep.io_bus_space_handle,
 				sc->osdep.em_iosize);
 	sc->osdep.em_iobase = 0;
 
-	if(sc->osdep.em_membase)
+	if (sc->osdep.em_membase)
 		bus_space_unmap(sc->osdep.mem_bus_space_tag, sc->osdep.mem_bus_space_handle,
 				sc->osdep.em_memsize);
 	sc->osdep.em_membase = 0;
@@ -1448,6 +1510,17 @@ em_hardware_init(struct em_softc *sc)
 		return (EIO);
 	}
 
+	/* Set up smart power down as default off on newer adapters */
+	if (!em_smart_pwr_down &&
+	     (sc->hw.mac_type == em_82571 ||
+	      sc->hw.mac_type == em_82572)) {
+		uint16_t phy_tmp = 0;
+		/* speed up time to link by disabling smart power down */
+		em_read_phy_reg(&sc->hw, IGP02E1000_PHY_POWER_MGMT, &phy_tmp);
+		phy_tmp &= ~IGP02E1000_PM_SPD;
+		em_write_phy_reg(&sc->hw, IGP02E1000_PHY_POWER_MGMT, phy_tmp);
+	}
+
 	/*
 	 * These parameters control the automatic generation (Tx) and 
 	 * response (Rx) to Ethernet PAUSE frames.
@@ -1466,7 +1539,10 @@ em_hardware_init(struct em_softc *sc)
 	sc->hw.fc_high_water = rx_buffer_size -
 	    EM_ROUNDUP(sc->hw.max_frame_size, 1024);
 	sc->hw.fc_low_water = sc->hw.fc_high_water - 1500;
-	sc->hw.fc_pause_time = 0x1000;
+	if (sc->hw.mac_type == em_80003es2lan)
+		sc->hw.fc_pause_time = 0xFFFF;
+	else
+		sc->hw.fc_pause_time = 0x1000;
 	sc->hw.fc_send_xon = TRUE;
 	sc->hw.fc = em_fc_full;
 
@@ -1490,16 +1566,18 @@ void
 em_setup_interface(struct em_softc *sc)
 {
 	struct ifnet   *ifp;
+	u_char fiber_type = IFM_1000_SX;
 	INIT_DEBUGOUT("em_setup_interface: begin");
 
 	ifp = &sc->interface_data.ac_if;
 	strlcpy(ifp->if_xname, sc->sc_dv.dv_xname, IFNAMSIZ);
-
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = em_ioctl;
 	ifp->if_start = em_start;
 	ifp->if_watchdog = em_watchdog;
+	ifp->if_hardmtu =
+		sc->hw.max_frame_size - ETHER_HDR_LEN - ETHER_CRC_LEN;
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->num_tx_desc - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1511,10 +1589,13 @@ em_setup_interface(struct em_softc *sc)
 	 */
 	ifmedia_init(&sc->media, IFM_IMASK, em_media_change,
 		     em_media_status);
-	if (sc->hw.media_type == em_media_type_fiber) {
-		ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_SX | IFM_FDX, 
+	if (sc->hw.media_type == em_media_type_fiber ||
+	    sc->hw.media_type == em_media_type_internal_serdes) {
+		if (sc->hw.mac_type == em_82545)
+			fiber_type = IFM_1000_LX;
+		ifmedia_add(&sc->media, IFM_ETHER | fiber_type | IFM_FDX, 
 			    0, NULL);
-		ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_SX, 
+		ifmedia_add(&sc->media, IFM_ETHER | fiber_type, 
 			    0, NULL);
 	} else {
 		ifmedia_add(&sc->media, IFM_ETHER | IFM_10_T, 0, NULL);
@@ -1524,9 +1605,11 @@ em_setup_interface(struct em_softc *sc)
 			    0, NULL);
 		ifmedia_add(&sc->media, IFM_ETHER | IFM_100_TX | IFM_FDX, 
 			    0, NULL);
-		ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_T | IFM_FDX, 
-			    0, NULL);
-		ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_T, 0, NULL);
+		if (sc->hw.phy_type != em_phy_ife) {
+			ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_T | IFM_FDX, 
+				    0, NULL);
+			ifmedia_add(&sc->media, IFM_ETHER | IFM_1000_T, 0, NULL);
+		}
 	}
 	ifmedia_add(&sc->media, IFM_ETHER | IFM_AUTO, 0, NULL);
 	ifmedia_set(&sc->media, IFM_ETHER | IFM_AUTO);
@@ -1546,27 +1629,28 @@ em_smartspeed(struct em_softc *sc)
 {
 	uint16_t phy_tmp;
  
-	if(sc->link_active || (sc->hw.phy_type != em_phy_igp) || 
-	   !sc->hw.autoneg || !(sc->hw.autoneg_advertised & ADVERTISE_1000_FULL))
+	if (sc->link_active || (sc->hw.phy_type != em_phy_igp) || 
+	    !sc->hw.autoneg || !(sc->hw.autoneg_advertised & ADVERTISE_1000_FULL))
 		return;
 
-	if(sc->smartspeed == 0) {
+	if (sc->smartspeed == 0) {
 		/* If Master/Slave config fault is asserted twice,
 		 * we assume back-to-back */
 		em_read_phy_reg(&sc->hw, PHY_1000T_STATUS, &phy_tmp);
-		if(!(phy_tmp & SR_1000T_MS_CONFIG_FAULT)) return;
+		if (!(phy_tmp & SR_1000T_MS_CONFIG_FAULT))
+			return;
 		em_read_phy_reg(&sc->hw, PHY_1000T_STATUS, &phy_tmp);
-		if(phy_tmp & SR_1000T_MS_CONFIG_FAULT) {
+		if (phy_tmp & SR_1000T_MS_CONFIG_FAULT) {
 			em_read_phy_reg(&sc->hw, PHY_1000T_CTRL,
 					&phy_tmp);
-			if(phy_tmp & CR_1000T_MS_ENABLE) {
+			if (phy_tmp & CR_1000T_MS_ENABLE) {
 				phy_tmp &= ~CR_1000T_MS_ENABLE;
 				em_write_phy_reg(&sc->hw,
 						    PHY_1000T_CTRL, phy_tmp);
 				sc->smartspeed++;
-				if(sc->hw.autoneg &&
-				   !em_phy_setup_autoneg(&sc->hw) &&
-				   !em_read_phy_reg(&sc->hw, PHY_CTRL,
+				if (sc->hw.autoneg &&
+				    !em_phy_setup_autoneg(&sc->hw) &&
+				    !em_read_phy_reg(&sc->hw, PHY_CTRL,
 						       &phy_tmp)) {
 					phy_tmp |= (MII_CR_AUTO_NEG_EN |  
 						    MII_CR_RESTART_AUTO_NEG);
@@ -1576,21 +1660,21 @@ em_smartspeed(struct em_softc *sc)
 			}
 		}
 		return;
-	} else if(sc->smartspeed == EM_SMARTSPEED_DOWNSHIFT) {
+	} else if (sc->smartspeed == EM_SMARTSPEED_DOWNSHIFT) {
 		/* If still no link, perhaps using 2/3 pair cable */
 		em_read_phy_reg(&sc->hw, PHY_1000T_CTRL, &phy_tmp);
 		phy_tmp |= CR_1000T_MS_ENABLE;
 		em_write_phy_reg(&sc->hw, PHY_1000T_CTRL, phy_tmp);
-		if(sc->hw.autoneg &&
-		   !em_phy_setup_autoneg(&sc->hw) &&
-		   !em_read_phy_reg(&sc->hw, PHY_CTRL, &phy_tmp)) {
+		if (sc->hw.autoneg &&
+		    !em_phy_setup_autoneg(&sc->hw) &&
+		    !em_read_phy_reg(&sc->hw, PHY_CTRL, &phy_tmp)) {
 			phy_tmp |= (MII_CR_AUTO_NEG_EN |
 				    MII_CR_RESTART_AUTO_NEG);
 			em_write_phy_reg(&sc->hw, PHY_CTRL, phy_tmp);
 		}
 	}
 	/* Restart process after EM_SMARTSPEED_MAX iterations */
-	if(sc->smartspeed++ == EM_SMARTSPEED_MAX)
+	if (sc->smartspeed++ == EM_SMARTSPEED_MAX)
 		sc->smartspeed = 0;
 }
 
@@ -1644,8 +1728,6 @@ em_dma_malloc(struct em_softc *sc, bus_size_t size,
 	dma->dma_size = size;
 	return (0);
 
-/* fail_4: */
-	bus_dmamap_unload(dma->dma_tag, dma->dma_map);
 fail_3:
 	bus_dmamem_unmap(dma->dma_tag, dma->dma_vaddr, size);
 fail_2:
@@ -1654,17 +1736,27 @@ fail_1:
 	bus_dmamap_destroy(dma->dma_tag, dma->dma_map);
 fail_0:
 	dma->dma_map = NULL;
-	/* dma->dma_tag = NULL; */
+	dma->dma_tag = NULL;
+
 	return (r);
 }
 
 void
 em_dma_free(struct em_softc *sc, struct em_dma_alloc *dma)
 {
-	bus_dmamap_unload(dma->dma_tag, dma->dma_map);
-	bus_dmamem_unmap(dma->dma_tag, dma->dma_vaddr, dma->dma_size);
-	bus_dmamem_free(dma->dma_tag, &dma->dma_seg, dma->dma_nseg);
-	bus_dmamap_destroy(dma->dma_tag, dma->dma_map);
+	if (dma->dma_tag == NULL)
+		return;
+
+	if (dma->dma_map != NULL) {
+		bus_dmamap_sync(dma->dma_tag, dma->dma_map, 0,
+		    dma->dma_map->dm_mapsize,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+		bus_dmamap_unload(dma->dma_tag, dma->dma_map);
+		bus_dmamem_unmap(dma->dma_tag, dma->dma_vaddr, dma->dma_size);
+		bus_dmamem_free(dma->dma_tag, &dma->dma_seg, dma->dma_nseg);
+		bus_dmamap_destroy(dma->dma_tag, dma->dma_map);
+	}
+	dma->dma_tag = NULL;
 }
 
 /*********************************************************************
@@ -1727,22 +1819,22 @@ em_setup_transmit_structures(struct em_softc *sc)
 void
 em_initialize_transmit_unit(struct em_softc *sc)
 {
-	u_int32_t	reg_tctl;
+	u_int32_t	reg_tctl, reg_tarc;
 	u_int32_t	reg_tipg = 0;
 	u_int64_t	bus_addr;
 
 	INIT_DEBUGOUT("em_initialize_transmit_unit: begin");
 	/* Setup the Base and Length of the Tx Descriptor Ring */
 	bus_addr = sc->txdma.dma_map->dm_segs[0].ds_addr;
-	E1000_WRITE_REG(&sc->hw, TDBAL, (u_int32_t)bus_addr);
-	E1000_WRITE_REG(&sc->hw, TDBAH, (u_int32_t)(bus_addr >> 32));
 	E1000_WRITE_REG(&sc->hw, TDLEN, 
 			sc->num_tx_desc *
 			sizeof(struct em_tx_desc));
+	E1000_WRITE_REG(&sc->hw, TDBAH, (u_int32_t)(bus_addr >> 32));
+	E1000_WRITE_REG(&sc->hw, TDBAL, (u_int32_t)bus_addr);
 
 	/* Setup the HW Tx Head and Tail descriptor pointers */
-	E1000_WRITE_REG(&sc->hw, TDH, 0);
 	E1000_WRITE_REG(&sc->hw, TDT, 0);
+	E1000_WRITE_REG(&sc->hw, TDH, 0);
 
 	HW_DEBUGOUT2("Base = %x, Length = %x\n", 
 		     E1000_READ_REG(&sc->hw, TDBAL),
@@ -1756,8 +1848,13 @@ em_initialize_transmit_unit(struct em_softc *sc)
 		reg_tipg |= DEFAULT_82542_TIPG_IPGR1 << E1000_TIPG_IPGR1_SHIFT;
 		reg_tipg |= DEFAULT_82542_TIPG_IPGR2 << E1000_TIPG_IPGR2_SHIFT;
 		break;
+	case em_80003es2lan:
+		reg_tipg = DEFAULT_82543_TIPG_IPGR1;
+		reg_tipg |= DEFAULT_80003ES2LAN_TIPG_IPGR2 << E1000_TIPG_IPGR2_SHIFT;
+		break;
 	default:
-		if (sc->hw.media_type == em_media_type_fiber)
+		if (sc->hw.media_type == em_media_type_fiber ||
+		    sc->hw.media_type == em_media_type_internal_serdes)
 			reg_tipg = DEFAULT_82543_TIPG_IPGT_FIBER;
 		else
 			reg_tipg = DEFAULT_82543_TIPG_IPGT_COPPER;
@@ -1767,19 +1864,37 @@ em_initialize_transmit_unit(struct em_softc *sc)
 
 	E1000_WRITE_REG(&sc->hw, TIPG, reg_tipg);
 	E1000_WRITE_REG(&sc->hw, TIDV, sc->tx_int_delay);
-	if(sc->hw.mac_type >= em_82540)
+	if (sc->hw.mac_type >= em_82540)
 		E1000_WRITE_REG(&sc->hw, TADV, sc->tx_abs_int_delay);
+
+	/* Do adapter specific tweaks before we enable the transmitter */
+	if (sc->hw.mac_type == em_82571 || sc->hw.mac_type == em_82572) {
+		reg_tarc = E1000_READ_REG(&sc->hw, TARC0);
+		reg_tarc |= (1 << 25);
+		E1000_WRITE_REG(&sc->hw, TARC0, reg_tarc);
+		reg_tarc = E1000_READ_REG(&sc->hw, TARC1);
+		reg_tarc |= (1 << 25);
+		reg_tarc &= ~(1 << 28);
+		E1000_WRITE_REG(&sc->hw, TARC1, reg_tarc);
+	} else if (sc->hw.mac_type == em_80003es2lan) {
+		reg_tarc = E1000_READ_REG(&sc->hw, TARC0);
+		reg_tarc |= 1;
+		E1000_WRITE_REG(&sc->hw, TARC0, reg_tarc);
+		reg_tarc = E1000_READ_REG(&sc->hw, TARC1);
+		reg_tarc |= 1;
+		E1000_WRITE_REG(&sc->hw, TARC1, reg_tarc);
+	}
 
 	/* Program the Transmit Control Register */
 	reg_tctl = E1000_TCTL_PSP | E1000_TCTL_EN |
 		   (E1000_COLLISION_THRESHOLD << E1000_CT_SHIFT);
 	if (sc->hw.mac_type >= em_82571)
 		reg_tctl |= E1000_TCTL_MULR;
-	if (sc->link_duplex == 1) {
+	if (sc->link_duplex == FULL_DUPLEX)
 		reg_tctl |= E1000_FDX_COLLISION_DISTANCE << E1000_COLD_SHIFT;
-	} else {
+	else
 		reg_tctl |= E1000_HDX_COLLISION_DISTANCE << E1000_COLD_SHIFT;
-	}
+	/* This write will effectively turn on the transmit unit */
 	E1000_WRITE_REG(&sc->hw, TCTL, reg_tctl);
 
 	/* Setup Transmit Descriptor Settings for this adapter */   
@@ -1837,7 +1952,6 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
 	int curr_txd;
 
 	if (mp->m_pkthdr.csum_flags) {
-
 		if (mp->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT) {
 			*txd_upper = E1000_TXD_POPTS_TXSM << 8;
 			*txd_lower = E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D;
@@ -1845,7 +1959,6 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
 				return;
 			else
 				sc->active_checksum_context = OFFLOAD_TCP_IP;
-
 		} else if (mp->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT) {
 			*txd_upper = E1000_TXD_POPTS_TXSM << 8;
 			*txd_lower = E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D;
@@ -1873,22 +1986,22 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
 
 	TXD->lower_setup.ip_fields.ipcss = ETHER_HDR_LEN;
 	TXD->lower_setup.ip_fields.ipcso = 
-	ETHER_HDR_LEN + offsetof(struct ip, ip_sum);
+	    ETHER_HDR_LEN + offsetof(struct ip, ip_sum);
 	TXD->lower_setup.ip_fields.ipcse = 
 	    htole16(ETHER_HDR_LEN + sizeof(struct ip) - 1);
 
 	TXD->upper_setup.tcp_fields.tucss = 
-	ETHER_HDR_LEN + sizeof(struct ip);
+	    ETHER_HDR_LEN + sizeof(struct ip);
 	TXD->upper_setup.tcp_fields.tucse = htole16(0);
 
 	if (sc->active_checksum_context == OFFLOAD_TCP_IP) {
 		TXD->upper_setup.tcp_fields.tucso = 
-		ETHER_HDR_LEN + sizeof(struct ip) + 
-		offsetof(struct tcphdr, th_sum);
+		    ETHER_HDR_LEN + sizeof(struct ip) + 
+		    offsetof(struct tcphdr, th_sum);
 	} else if (sc->active_checksum_context == OFFLOAD_UDP_IP) {
 		TXD->upper_setup.tcp_fields.tucso = 
-		ETHER_HDR_LEN + sizeof(struct ip) + 
-		offsetof(struct udphdr, uh_sum);
+		    ETHER_HDR_LEN + sizeof(struct ip) + 
+		    offsetof(struct udphdr, uh_sum);
 	}
 
 	TXD->tcp_seg_setup.data = htole32(0);
@@ -1911,7 +2024,7 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
  *
  **********************************************************************/
 void
-em_clean_transmit_interrupts(struct em_softc *sc)
+em_txeof(struct em_softc *sc)
 {
 	int i, num_avail;
 	struct em_buffer *tx_buffer;
@@ -1928,8 +2041,8 @@ em_clean_transmit_interrupts(struct em_softc *sc)
 	tx_desc = &sc->tx_desc_base[i];
 
 	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
-	    sc->txdma.dma_size, BUS_DMASYNC_POSTREAD);
-	while(tx_desc->upper.fields.status & E1000_TXD_STAT_DD) {
+	    sc->txdma.dma_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
+	while (tx_desc->upper.fields.status & E1000_TXD_STAT_DD) {
 
 		tx_desc->upper.data = 0;
 		num_avail++;
@@ -1950,7 +2063,8 @@ em_clean_transmit_interrupts(struct em_softc *sc)
 		tx_desc = &sc->tx_desc_base[i];
 	}
 	bus_dmamap_sync(sc->txdma.dma_tag, sc->txdma.dma_map, 0,
-	    sc->txdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	    sc->txdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 	sc->oldest_used_tx_desc = i;
 
@@ -2078,7 +2192,8 @@ em_allocate_receive_structures(struct em_softc *sc)
                 }
         }
 	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map, 0,
-	    sc->rxdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	    sc->rxdma.dma_map->dm_mapsize,
+	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
         return (0);
 
@@ -2131,7 +2246,7 @@ em_initialize_receive_unit(struct em_softc *sc)
 	E1000_WRITE_REG(&sc->hw, RDTR, 
 			sc->rx_int_delay | E1000_RDT_FPDB);
 
-	if(sc->hw.mac_type >= em_82540) {
+	if (sc->hw.mac_type >= em_82540) {
 		E1000_WRITE_REG(&sc->hw, RADV, sc->rx_abs_int_delay);
 
 		/* Set the interrupt throttling rate.  Value is calculated
@@ -2143,23 +2258,22 @@ em_initialize_receive_unit(struct em_softc *sc)
 
 	/* Setup the Base and Length of the Rx Descriptor Ring */
 	bus_addr = sc->rxdma.dma_map->dm_segs[0].ds_addr;
-	E1000_WRITE_REG(&sc->hw, RDBAL, (u_int32_t)bus_addr);
-	E1000_WRITE_REG(&sc->hw, RDBAH, (u_int32_t)(bus_addr >> 32));
 	E1000_WRITE_REG(&sc->hw, RDLEN, sc->num_rx_desc *
 			sizeof(struct em_rx_desc));
+	E1000_WRITE_REG(&sc->hw, RDBAH, (u_int32_t)(bus_addr >> 32));
+	E1000_WRITE_REG(&sc->hw, RDBAL, (u_int32_t)bus_addr);
 
 	/* Setup the HW Rx Head and Tail Descriptor Pointers */
-	E1000_WRITE_REG(&sc->hw, RDH, 0);
 	E1000_WRITE_REG(&sc->hw, RDT, sc->num_rx_desc - 1);
+	E1000_WRITE_REG(&sc->hw, RDH, 0);
 
 	/* Setup the Receive Control Register */
 	reg_rctl = E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_LBM_NO |
-		   E1000_RCTL_RDMTS_HALF |
-		   (sc->hw.mc_filter_type << E1000_RCTL_MO_SHIFT);
+	    E1000_RCTL_RDMTS_HALF |
+	    (sc->hw.mc_filter_type << E1000_RCTL_MO_SHIFT);
 
 	if (sc->hw.tbi_compatibility_on == TRUE)
 		reg_rctl |= E1000_RCTL_SBP;
-
 
 	switch (sc->rx_buffer_len) {
 	default:
@@ -2177,7 +2291,7 @@ em_initialize_receive_unit(struct em_softc *sc)
 		break;
 	}
 
-	if (sc->hw.mac_type != em_82573)
+	if (sc->hw.max_frame_size != ETHER_MAX_LEN)
 		reg_rctl |= E1000_RCTL_LPE;
 
 	/* Enable 82543 Receive Checksum Offload for TCP and UDP */
@@ -2235,7 +2349,7 @@ em_free_receive_structures(struct em_softc *sc)
  *
  *********************************************************************/
 void
-em_process_receive_interrupts(struct em_softc *sc, int count)
+em_rxeof(struct em_softc *sc, int count)
 {
 	struct ifnet	    *ifp;
 	struct mbuf	    *mp;
@@ -2251,7 +2365,7 @@ em_process_receive_interrupts(struct em_softc *sc, int count)
 	i = sc->next_rx_desc_to_check;
 	current_desc = &sc->rx_desc_base[i];
 	bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map, 0,
-	    sc->rxdma.dma_size, BUS_DMASYNC_POSTREAD);
+	    sc->rxdma.dma_map->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
 	if (!((current_desc->status) & E1000_RXD_STAT_DD))
 		return;
@@ -2276,10 +2390,8 @@ em_process_receive_interrupts(struct em_softc *sc, int count)
 			if (desc_len < ETHER_CRC_LEN) {
 				len = 0;
 				prev_len_adj = ETHER_CRC_LEN - desc_len;
-			}
-			else {
+			} else
 				len = desc_len - ETHER_CRC_LEN;
-			}
 		} else {
 			eop = 0;
 			len = desc_len;
@@ -2410,7 +2522,8 @@ em_process_receive_interrupts(struct em_softc *sc, int count)
 		/* Zero out the receive descriptors status. */
 		current_desc->status = 0;
 		bus_dmamap_sync(sc->rxdma.dma_tag, sc->rxdma.dma_map, 0,
-		    sc->rxdma.dma_size, BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+		    sc->rxdma.dma_map->dm_mapsize,
+		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 		/* Advance our pointers to the next descriptor. */
 		if (++i == sc->num_rx_desc)
@@ -2424,7 +2537,7 @@ em_process_receive_interrupts(struct em_softc *sc, int count)
 			 * user see the packet.
 			 */
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m);
+				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 			ether_input_mbuf(ifp, m);
@@ -2466,17 +2579,15 @@ em_receive_checksum(struct em_softc *sc, struct em_rx_desc *rx_desc,
 			/* IP Checksum Good */
 			mp->m_pkthdr.csum_flags = M_IPV4_CSUM_IN_OK;
 
-		} else {
+		} else
 			mp->m_pkthdr.csum_flags = 0;
-		}
 	}
 
 	if (rx_desc->status & E1000_RXD_STAT_TCPCS) {
 		/* Did it pass? */        
-		if (!(rx_desc->errors & E1000_RXD_ERR_TCPE)) {
+		if (!(rx_desc->errors & E1000_RXD_ERR_TCPE))
 			mp->m_pkthdr.csum_flags |=
 				M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
-		}
 	}
 }
 
@@ -2499,11 +2610,9 @@ em_disable_intr(struct em_softc *sc)
 	 */
 
 	if (sc->hw.mac_type == em_82542_rev2_0)
-	    E1000_WRITE_REG(&sc->hw, IMC,
-	        (0xffffffff & ~E1000_IMC_RXSEQ));
+		E1000_WRITE_REG(&sc->hw, IMC, (0xffffffff & ~E1000_IMC_RXSEQ));
 	else
-	    E1000_WRITE_REG(&sc->hw, IMC,
-	        0xffffffff);
+		E1000_WRITE_REG(&sc->hw, IMC, 0xffffffff);
 }
 
 int
@@ -2616,10 +2725,10 @@ em_update_stats_counters(struct em_softc *sc)
 {
 	struct ifnet   *ifp;
 
-	if(sc->hw.media_type == em_media_type_copper ||
+	if (sc->hw.media_type == em_media_type_copper ||
 	    (E1000_READ_REG(&sc->hw, STATUS) & E1000_STATUS_LU)) {
 		sc->stats.symerrs += E1000_READ_REG(&sc->hw, SYMERRS);
- 		sc->stats.sec += E1000_READ_REG(&sc->hw, SEC);
+		sc->stats.sec += E1000_READ_REG(&sc->hw, SEC);
 	}
 	sc->stats.crcerrs += E1000_READ_REG(&sc->hw, CRCERRS);
 	sc->stats.mpc += E1000_READ_REG(&sc->hw, MPC);
@@ -2698,13 +2807,13 @@ em_update_stats_counters(struct em_softc *sc)
 
 	/* Rx Errors */
 	ifp->if_ierrors =
-	sc->dropped_pkts +
-	sc->stats.rxerrc +
-	sc->stats.crcerrs +
-	sc->stats.algnerrc +
-	sc->stats.rlec + sc->stats.rnbc +
-	sc->stats.mpc + sc->stats.cexterr +
-	sc->rx_overruns;
+	    sc->dropped_pkts +
+	    sc->stats.rxerrc +
+	    sc->stats.crcerrs +
+	    sc->stats.algnerrc +
+	    sc->stats.ruc + sc->stats.roc +
+	    sc->stats.mpc + sc->stats.cexterr +
+	    sc->rx_overruns;
 
 	/* Tx Errors */
 	ifp->if_oerrors = sc->stats.ecol + sc->stats.latecol +
@@ -2736,8 +2845,10 @@ em_print_hw_stats(struct em_softc *sc)
 		(long long)sc->stats.mpc);
 	printf("%s: Receive No Buffers = %lld\n", unit,
 		(long long)sc->stats.rnbc);
-	printf("%s: Receive length errors = %lld\n", unit,
-		(long long)sc->stats.rlec);
+	/* RLEC is inaccurate on some hardware, calculate our own */
+	printf("%s: Receive Length Errors = %lld\n", unit,
+		((long long)sc->stats.roc +
+		(long long)sc->stats.ruc));
 	printf("%s: Receive errors = %lld\n", unit,
 		(long long)sc->stats.rxerrc);
 	printf("%s: Crc errors = %lld\n", unit,

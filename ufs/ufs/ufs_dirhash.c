@@ -1,4 +1,4 @@
-/* $OpenBSD: ufs_dirhash.c,v 1.11 2005/12/28 20:48:18 pedro Exp $	*/
+/* $OpenBSD: ufs_dirhash.c,v 1.14 2006/06/21 09:50:52 mickey Exp $	*/
 /*
  * Copyright (c) 2001, 2002 Ian Dowse.  All rights reserved.
  *
@@ -74,12 +74,12 @@ int ufsdirhash_recycle(int wanted);
 
 struct pool		ufsdirhash_pool;
 
-#define	DIRHASHLIST_LOCK()	rw_enter_write(&ufsdirhash_mtx)
-#define	DIRHASHLIST_UNLOCK()	rw_exit_write(&ufsdirhash_mtx)
-#define	DIRHASH_LOCK(dh)	rw_enter_write(&(dh)->dh_mtx)
-#define	DIRHASH_UNLOCK(dh)	rw_exit_write(&(dh)->dh_mtx)
-#define	DIRHASH_BLKALLOC_WAITOK()	pool_get(&ufsdirhash_pool, PR_WAITOK)
-#define	DIRHASH_BLKFREE(v)		pool_put(&ufsdirhash_pool, v)
+#define	DIRHASHLIST_LOCK()
+#define	DIRHASHLIST_UNLOCK()
+#define	DIRHASH_LOCK(dh)
+#define	DIRHASH_UNLOCK(dh)
+#define	DIRHASH_BLKALLOC()	pool_get(&ufsdirhash_pool, PR_NOWAIT)
+#define	DIRHASH_BLKFREE(v)	pool_put(&ufsdirhash_pool, v)
 
 #define	mtx_assert(l, f)	/* nothing */
 #define DIRHASH_ASSERT(e, m)	KASSERT((e))
@@ -88,7 +88,6 @@ struct pool		ufsdirhash_pool;
 TAILQ_HEAD(, dirhash) ufsdirhash_list;
 
 /* Protects: ufsdirhash_list, `dh_list' field, ufs_dirhashmem. */
-struct rwlock		ufsdirhash_mtx;
 
 /*
  * Locking order:
@@ -177,20 +176,19 @@ ufsdirhash_build(struct inode *ip)
 	memset(dh, 0, sizeof *dh);
 	dh->dh_hash = malloc(narrays * sizeof(dh->dh_hash[0]),
 	    M_DIRHASH, M_NOWAIT);
-	memset(dh->dh_hash, 0, narrays * sizeof(dh->dh_hash[0]));
 	dh->dh_blkfree = malloc(nblocks * sizeof(dh->dh_blkfree[0]),
 	    M_DIRHASH, M_NOWAIT);
 	if (dh->dh_hash == NULL || dh->dh_blkfree == NULL)
 		goto fail;
+	memset(dh->dh_hash, 0, narrays * sizeof(dh->dh_hash[0]));
 	for (i = 0; i < narrays; i++) {
-		if ((dh->dh_hash[i] = DIRHASH_BLKALLOC_WAITOK()) == NULL)
+		if ((dh->dh_hash[i] = DIRHASH_BLKALLOC()) == NULL)
 			goto fail;
 		for (j = 0; j < DH_NBLKOFF; j++)
 			dh->dh_hash[i][j] = DIRHASH_EMPTY;
 	}
 
 	/* Initialise the hash table and block statistics. */
-	rw_init(&dh->dh_mtx);
 	dh->dh_narrays = narrays;
 	dh->dh_hlen = nslots;
 	dh->dh_nblk = nblocks;
@@ -1063,7 +1061,6 @@ ufsdirhash_init()
 	pool_init(&ufsdirhash_pool, DH_NBLKOFF * sizeof(doff_t), 0, 0, 0,
 	    "dirhash", &pool_allocator_nointr);
 	pool_sethiwat(&ufsdirhash_pool, 512);
-	rw_init(&ufsdirhash_mtx);
 	TAILQ_INIT(&ufsdirhash_list);
 #if defined (__sparc__)
 	if (!CPU_ISSUN4OR4C)

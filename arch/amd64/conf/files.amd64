@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.19 2006/02/12 19:55:36 miod Exp $
+#	$OpenBSD: files.amd64,v 1.24 2006/06/19 15:13:34 deraadt Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -34,6 +34,7 @@ file	arch/amd64/amd64/ipi.c			multiprocessor
 file	arch/amd64/amd64/apic.c			ioapic | lapic
 
 file	arch/amd64/amd64/mpbios.c		mpbios
+file	arch/amd64/amd64/mpbios_intr_fixup.c	mpbios & pci
 
 
 file	arch/amd64/amd64/consinit.c
@@ -54,8 +55,8 @@ file	arch/amd64/amd64/kgdb_machdep.c		kgdb
 
 # Basic clock - required
 file	arch/amd64/isa/clock.c
-file	dev/clock_subr.c
 
+file	arch/amd64/amd64/powernow-k8.c
 
 include	"dev/mii/files.mii"
 
@@ -70,6 +71,10 @@ define	mainbus {[apid = -1]}
 device	mainbus: isabus, pcibus, mainbus
 attach	mainbus at root
 file	arch/amd64/amd64/mainbus.c		mainbus
+
+device	bios {}
+attach	bios at mainbus
+file	arch/amd64/amd64/bios.c			bios needs-flag
 
 define	cpu {[apid = -1]}
 device	cpu
@@ -171,6 +176,11 @@ include "dev/i2c/files.i2c"
 #
 include "../../../dev/acpi/files.acpi"
 file	arch/amd64/amd64/acpi_machdep.c		acpi
+
+#
+# Machine-independent SD/MMC drivers
+#
+include "dev/sdmmc/files.sdmmc"
 
 #
 # IPMI

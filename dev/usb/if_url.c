@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.29 2006/02/06 17:29:11 jmc Exp $ */
+/*	$OpenBSD: if_url.c,v 1.33 2006/07/14 23:07:26 brad Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -62,9 +62,6 @@
 #include <sys/socket.h>
 
 #include <sys/device.h>
-#if NRND > 0
-#include <sys/rnd.h>
-#endif
 
 #include <net/if.h>
 #include <net/if_arp.h>
@@ -74,7 +71,6 @@
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-#define	BPF_MTAP(ifp, m)	bpf_mtap((ifp)->if_bpf, (m))
 
 #if defined(__NetBSD__)
 #include <net/if_ether.h>
@@ -168,20 +164,14 @@ static const struct url_type {
 	u_int16_t url_flags;
 #define URL_EXT_PHY	0x0001
 } url_devs [] = {
-	/* MELCO LUA-KTX */
-	{{ USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAKTX }, 0},
-	/* GREEN HOUSE USBKR100 */
-	{{ USB_VENDOR_REALTEK, USB_PRODUCT_REALTEK_RTL8150}, 0},
-	/* GREEN HOUSE USBKR100PNA */
-	{{ USB_VENDOR_REALTEK, USB_PRODUCT_REALTEK_RTL8151}, 0},
-	/* Longshine LCS-8138TX */
 	{{ USB_VENDOR_ABOCOM, USB_PRODUCT_ABOCOM_LCS8138TX}, 0},
-	/* Micronet SP128AR */
-	{{ USB_VENDOR_MICRONET, USB_PRODUCT_MICRONET_SP128AR}, 0},
-	/* Abocom RTL8151 and TRENDnet TU-ET100C */
 	{{ USB_VENDOR_ABOCOM, USB_PRODUCT_ABOCOM_RTL8151}, 0},
-	/* OQO model 01 */
-	{{ USB_VENDOR_OQO, USB_PRODUCT_OQO_ETHER01}, 0}
+	{{ USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAKTX }, 0},
+	{{ USB_VENDOR_MICRONET, USB_PRODUCT_MICRONET_SP128AR}, 0},
+	{{ USB_VENDOR_OQO, USB_PRODUCT_OQO_ETHER01}, 0},
+	{{ USB_VENDOR_REALTEK, USB_PRODUCT_REALTEK_RTL8150}, 0},
+	{{ USB_VENDOR_REALTEK, USB_PRODUCT_REALTEK_RTL8151}, 0},
+	{{ USB_VENDOR_ZYXEL, USB_PRODUCT_ZYXEL_PRESTIGE}, 0}
 };
 #define url_lookup(v, p) ((struct url_type *)usb_lookup(url_devs, v, p))
 
@@ -332,10 +322,6 @@ USB_ATTACH(url)
 	if_attach(ifp);
 	Ether_ifattach(ifp, eaddr);
 
-#if NRND > 0
-	rnd_attach_source(&sc->rnd_source, devname, RND_TYPE_NET, 0);
-#endif
-
 	usb_callout_init(sc->sc_stat_ch);
 	sc->sc_attached = 1;
 	splx(s);
@@ -378,9 +364,6 @@ USB_DETACH(url)
 	if (ifp->if_flags & IFF_RUNNING)
 		url_stop(GET_IFP(sc), 1);
 
-#if NRND > 0
-	rnd_detach_source(&sc->rnd_source);
-#endif
 	mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
 	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
 	ether_ifdetach(ifp);
@@ -643,7 +626,6 @@ url_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -914,7 +896,7 @@ url_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m_head);
+		bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 	ifp->if_flags |= IFF_OACTIVE;
@@ -1090,7 +1072,7 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	DPRINTF(("%s: %s: deliver %d\n", USBDEVNAME(sc->sc_dev),

@@ -1,4 +1,4 @@
-/* $OpenBSD: nsclpcsio_isa.c,v 1.7 2006/01/19 17:08:40 grange Exp $ */
+/* $OpenBSD: nsclpcsio_isa.c,v 1.9 2006/06/26 17:47:34 kettenis Exp $ */
 /* $NetBSD: nsclpcsio_isa.c,v 1.5 2002/10/22 16:18:26 drochner Exp $ */
 
 /*
@@ -384,9 +384,9 @@ nsclpcsio_tms_init(struct nsclpcsio_softc *sc)
 		sc->sensors[i].type = SENSOR_TEMP;
 	}
 
-	strlcpy(sc->sensors[0].desc, "TSENS1", sizeof(sc->sensors[0].desc));
-	strlcpy(sc->sensors[1].desc, "TSENS2", sizeof(sc->sensors[0].desc));
-	strlcpy(sc->sensors[2].desc, "TNSC", sizeof(sc->sensors[0].desc));
+	strlcpy(sc->sensors[0].desc, "Remote Temp 1", sizeof(sc->sensors[0].desc));
+	strlcpy(sc->sensors[1].desc, "Remote Temp 2", sizeof(sc->sensors[0].desc));
+	strlcpy(sc->sensors[2].desc, "Local Temp", sizeof(sc->sensors[0].desc));
 
 	nsclpcsio_tms_update(sc);
 }
@@ -417,7 +417,7 @@ nsclpcsio_tms_update(struct nsclpcsio_softc *sc)
 void
 nsclpcsio_vlm_init(struct nsclpcsio_softc *sc)
 {
-	int scale, i;
+	int i;
 	char *desc = NULL;
 
 	VLM_WRITE(sc, SIO_VLMCFG, 0x00);
@@ -428,22 +428,18 @@ nsclpcsio_vlm_init(struct nsclpcsio_softc *sc)
 		VLM_WRITE(sc, SIO_VCHCFST, 0x01);
 
 		desc = NULL;
-		scale = 1;
 		switch (i) {
 		case 7:
 			desc = "VSB";
-			scale = 2;
 			break;
 		case 8:
 			desc = "VDD";
-			scale = 2;
 			break;
 		case 9:
 			desc = "VBAT";
 			break;
 		case 10:
 			desc = "AVDD";
-			scale = 2;
 			break;
 		case 11:
 			desc = "TS1";
@@ -463,9 +459,6 @@ nsclpcsio_vlm_init(struct nsclpcsio_softc *sc)
 			    sizeof(sc->sensors[SIO_VLM_OFF].desc), "VSENS%d", i);
 		sc->sensors[SIO_VLM_OFF + i].type = SENSOR_VOLTS_DC;
 
-		/* Vi = (2.45±0.05)*VREF *RDCHVi / 256 */
-		sc->sensors[SIO_VLM_OFF + i].rfact = 
-		    10 * scale * ((245 * SIO_VREF) >> 8);
 	}
 	nsclpcsio_vlm_update(sc);
 }
@@ -475,7 +468,7 @@ nsclpcsio_vlm_update(struct nsclpcsio_softc *sc)
 {
 	u_int8_t status;
 	u_int8_t data;
-	int i;
+	int scale, rfact, i;
 
 	for (i = 0; i < 14; i++) {
 		VLM_WRITE(sc, SIO_VLMBS, i);
@@ -489,8 +482,18 @@ nsclpcsio_vlm_update(struct nsclpcsio_softc *sc)
 		data = VLM_READ(sc, SIO_RDCHV);
 		DPRINTF(("%s: status %d V %d\n",
 		    sc->sensors[SIO_VLM_OFF + i].desc, status, data));
-		sc->sensors[SIO_VLM_OFF + i].value = 
-		    data * sc->sensors[SIO_VLM_OFF + i].rfact;
+
+		scale = 1;
+		switch (i) {
+		case 7:
+		case 8:
+		case 10:
+			scale = 2;
+		}
+
+		/* Vi = (2.45±0.05)*VREF *RDCHVi / 256 */
+		rfact = 10 * scale * ((245 * SIO_VREF) >> 8);
+		sc->sensors[SIO_VLM_OFF + i].value = data * rfact;
 	}
 }
 

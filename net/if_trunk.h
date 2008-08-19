@@ -1,7 +1,7 @@
-/*	$OpenBSD: if_trunk.h,v 1.7 2006/02/09 13:33:38 reyk Exp $	*/
+/*	$OpenBSD: if_trunk.h,v 1.10 2006/05/28 01:14:15 reyk Exp $	*/
 
 /*
- * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2005, 2006 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -40,7 +40,8 @@ enum trunk_proto {
 	TRUNK_PROTO_NONE	= 0,		/* no trunk protocol defined */
 	TRUNK_PROTO_ROUNDROBIN	= 1,		/* simple round robin */
 	TRUNK_PROTO_FAILOVER	= 2,		/* active failover */
-	TRUNK_PROTO_MAX		= 3
+	TRUNK_PROTO_LOADBALANCE	= 3,		/* loadbalance */
+	TRUNK_PROTO_MAX		= 4
 };
 
 struct trunk_protos {
@@ -50,10 +51,11 @@ struct trunk_protos {
 
 #define	TRUNK_PROTO_DEFAULT	TRUNK_PROTO_ROUNDROBIN
 #define TRUNK_PROTOS	{						\
-	{ "roundrobin",	TRUNK_PROTO_ROUNDROBIN },			\
-	{ "failover",	TRUNK_PROTO_FAILOVER },				\
-	{ "none",	TRUNK_PROTO_NONE },				\
-	{ "default",	TRUNK_PROTO_DEFAULT }				\
+	{ "roundrobin",		TRUNK_PROTO_ROUNDROBIN },		\
+	{ "failover",		TRUNK_PROTO_FAILOVER },			\
+	{ "loadbalance",	TRUNK_PROTO_LOADBALANCE },		\
+	{ "none",		TRUNK_PROTO_NONE },			\
+	{ "default",		TRUNK_PROTO_DEFAULT }			\
 }
 
 /*
@@ -108,8 +110,14 @@ struct trunk_port {
 };
 
 #define tp_ifname		tp_if->if_xname		/* interface name */
+#define tp_ifflags		tp_if->if_flags		/* interface flags */
 #define tp_link_state		tp_if->if_link_state	/* link state */
 #define tp_capabilities		tp_if->if_capabilities	/* capabilities */
+
+#define TRUNK_PORTACTIVE(_tp)	(					\
+	((_tp)->tp_link_state != LINK_STATE_DOWN) &&			\
+	((_tp)->tp_ifflags & IFF_UP)					\
+)
 
 struct trunk_mc {
 	union {
@@ -159,6 +167,13 @@ struct trunk_softc {
 #define tr_ifflags		tr_ac.ac_if.if_flags		/* flags */
 #define tr_ifname		tr_ac.ac_if.if_xname		/* name */
 #define tr_capabilities		tr_ac.ac_if.if_capabilities	/* capabilities */
+
+/* Private data used by the loadbalancing protocol */
+#define TRUNK_LB_MAXKEYS	8
+struct trunk_lb {
+	u_int32_t		lb_key;
+	struct trunk_port	*lb_ports[TRUNK_MAX_PORTS];
+};
 
 void	 trunk_port_ifdetach(struct ifnet *);
 int	 trunk_input(struct ifnet *, struct ether_header *, struct mbuf *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xbox.c,v 1.1 2005/03/05 01:44:52 miod Exp $	*/
+/*	$OpenBSD: xbox.c,v 1.3 2006/06/02 20:00:56 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -57,7 +57,7 @@ struct cfattach xbox_ca = {
 };
 
 struct cfdriver xbox_cd = {
-	NULL, "xbox", DV_IFNET
+	NULL, "xbox", DV_DULL
 };
 
 int
@@ -113,8 +113,6 @@ xboxattach(struct device *parent, struct device *self, void *aux)
 	DELAY(100);
 
 	bus_space_unmap(sa->sa_bustag, write0, sa->sa_reg[0].sbr_size);
-
-	sbus_establish(&sc->sc_sd, &sc->sc_dev);
 
 	printf("\n");
 

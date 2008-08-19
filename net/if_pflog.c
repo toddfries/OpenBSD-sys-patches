@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.15 2005/07/31 03:52:18 pascoe Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.18 2006/06/28 12:04:31 claudio Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -79,7 +79,6 @@ void	pflogattach(int);
 int	pflogoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
 	    	       struct rtentry *);
 int	pflogioctl(struct ifnet *, u_long, caddr_t);
-void	pflogrtrequest(int, struct rtentry *, struct sockaddr *);
 void	pflogstart(struct ifnet *);
 
 extern int ifqmaxlen;
@@ -123,7 +122,7 @@ pflogstart(struct ifnet *ifp)
 	int s;
 
 	for (;;) {
-		s = splimp();
+		s = splnet();
 		IF_DROP(&ifp->if_snd);
 		IF_DEQUEUE(&ifp->if_snd, m);
 		splx(s);
@@ -141,14 +140,6 @@ pflogoutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 {
 	m_freem(m);
 	return (0);
-}
-
-/* ARGSUSED */
-void
-pflogrtrequest(int cmd, struct rtentry *rt, struct sockaddr *sa)
-{
-	if (rt)
-		rt->rt_rmx.rmx_mtu = PFLOGMTU;
 }
 
 /* ARGSUSED */
@@ -228,7 +219,8 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
 	}
 #endif /* INET */
 
-	bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, PFLOG_HDRLEN, m);
+	bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, PFLOG_HDRLEN, m,
+	    BPF_DIRECTION_OUT);
 #endif
 
 	return (0);

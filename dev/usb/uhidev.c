@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.12 2006/01/06 03:36:32 brad Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.18 2006/08/22 21:53:16 marco Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -96,8 +96,23 @@ USB_MATCH(uhidev)
 	id = usbd_get_interface_descriptor(uaa->iface);
 	if (id == NULL || id->bInterfaceClass != UICLASS_HID)
 		return (UMATCH_NONE);
+	if (usbd_get_quirks(uaa->device)->uq_flags & UQ_BAD_HID)
+		return (UMATCH_NONE);
 	if (uaa->matchlvl)
 		return (uaa->matchlvl);
+
+#ifdef __macppc__
+	/*
+	 * Some Apple laptops have USB phantom devices which match
+	 * the ADB devices.  We want to ignore them to avoid
+	 * confusing users, as the real hardware underneath is adb
+	 * and has already attached.
+	 */
+	if (uaa->vendor == USB_VENDOR_APPLE &&
+	    uaa->product == USB_PRODUCT_APPLE_ADB)
+		return (UMATCH_NONE);
+#endif
+
 	return (UMATCH_IFACECLASS_GENERIC);
 }
 
@@ -111,6 +126,7 @@ USB_ATTACH(uhidev)
 	struct uhidev *dev;
 	int size, nrepid, repid, repsz;
 	int repsizes[256];
+	int i;
 	void *desc;
 	const void *descptr;
 	usbd_status err;
@@ -135,31 +151,47 @@ USB_ATTACH(uhidev)
 		(void)usbd_set_protocol(iface, 1);
 #endif
 
-	ed = usbd_interface2endpoint_descriptor(iface, 0);
-	if (ed == NULL) {
-		printf("%s: could not read endpoint descriptor\n",
-		       USBDEVNAME(sc->sc_dev));
+	sc->sc_iep_addr = sc->sc_oep_addr = -1;
+	for (i = 0; i < id->bNumEndpoints; i++) {
+		ed = usbd_interface2endpoint_descriptor(iface, i);
+		if (ed == NULL) {
+			printf("%s: could not read endpoint descriptor\n",
+			    USBDEVNAME(sc->sc_dev));
+			sc->sc_dying = 1;
+			USB_ATTACH_ERROR_RETURN;
+		}
+
+		DPRINTFN(10,("uhidev_attach: bLength=%d bDescriptorType=%d "
+		    "bEndpointAddress=%d-%s bmAttributes=%d wMaxPacketSize=%d"
+		    " bInterval=%d\n",
+		    ed->bLength, ed->bDescriptorType,
+		    ed->bEndpointAddress & UE_ADDR,
+		    UE_GET_DIR(ed->bEndpointAddress)==UE_DIR_IN? "in" : "out",
+		    ed->bmAttributes & UE_XFERTYPE,
+		    UGETW(ed->wMaxPacketSize), ed->bInterval));
+
+		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
+		    (ed->bmAttributes & UE_XFERTYPE) == UE_INTERRUPT) {
+			sc->sc_iep_addr = ed->bEndpointAddress;
+		} else if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_OUT &&
+		    (ed->bmAttributes & UE_XFERTYPE) == UE_INTERRUPT) {
+			sc->sc_oep_addr = ed->bEndpointAddress;
+		} else {
+			printf("%s: unexpected endpoint\n", USBDEVNAME(sc->sc_dev));
+			sc->sc_dying = 1;
+			USB_ATTACH_ERROR_RETURN;
+		}
+	}
+
+	/*
+	 * Check that we found an input interrupt endpoint. The output interrupt
+	 * endpoint is optional
+	 */
+	if (sc->sc_iep_addr == -1) {
+		printf("%s: no input interrupt endpoint\n", USBDEVNAME(sc->sc_dev));
 		sc->sc_dying = 1;
 		USB_ATTACH_ERROR_RETURN;
 	}
-
-	DPRINTFN(10,("uhidev_attach: bLength=%d bDescriptorType=%d "
-		     "bEndpointAddress=%d-%s bmAttributes=%d wMaxPacketSize=%d"
-		     " bInterval=%d\n",
-		     ed->bLength, ed->bDescriptorType,
-		     ed->bEndpointAddress & UE_ADDR,
-		     UE_GET_DIR(ed->bEndpointAddress)==UE_DIR_IN? "in" : "out",
-		     ed->bmAttributes & UE_XFERTYPE,
-		     UGETW(ed->wMaxPacketSize), ed->bInterval));
-
-	if (UE_GET_DIR(ed->bEndpointAddress) != UE_DIR_IN ||
-	    (ed->bmAttributes & UE_XFERTYPE) != UE_INTERRUPT) {
-		printf("%s: unexpected endpoint\n", USBDEVNAME(sc->sc_dev));
-		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
-	}
-
-	sc->sc_ep_addr = ed->bEndpointAddress;
 
 	/* XXX need to extend this */
 	descptr = NULL;
@@ -214,12 +246,12 @@ USB_ATTACH(uhidev)
 		printf("%s: %d report ids\n", USBDEVNAME(sc->sc_dev), nrepid);
 	nrepid++;
 	sc->sc_subdevs = malloc(nrepid * sizeof(device_ptr_t),
-				M_USBDEV, M_NOWAIT);
-	bzero(sc->sc_subdevs, nrepid * sizeof(device_ptr_t));
+	    M_USBDEV, M_NOWAIT);
 	if (sc->sc_subdevs == NULL) {
 		printf("%s: no memory\n", USBDEVNAME(sc->sc_dev));
 		USB_ATTACH_ERROR_RETURN;
 	}
+	bzero(sc->sc_subdevs, nrepid * sizeof(device_ptr_t));
 	sc->sc_nrepid = nrepid;
 	sc->sc_isize = 0;
 
@@ -260,11 +292,6 @@ USB_ATTACH(uhidev)
 					       USBDEVNAME(sc->sc_dev));
 					USB_ATTACH_ERROR_RETURN;
 				}
-#endif
-#if defined(__NetBSD__) && NRND > 0
-				rnd_attach_source(&dev->rnd_source, 
-						  USBDEVNAME(dev->sc_dev), 
-						  RND_TYPE_TTY, 0);
 #endif
 			}
 		}
@@ -326,14 +353,13 @@ int
 uhidev_activate(device_ptr_t self, enum devact act)
 {
 	struct uhidev_softc *sc = (struct uhidev_softc *)self;
-	int i, rv;
+	int i, rv = 0;
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
+		break;
 
 	case DVACT_DEACTIVATE:
-		rv = 0;
 		for (i = 0; i < sc->sc_nrepid; i++)
 			if (sc->sc_subdevs[i] != NULL)
 				rv |= config_deactivate(
@@ -352,8 +378,8 @@ USB_DETACH(uhidev)
 	DPRINTF(("uhidev_detach: sc=%p flags=%d\n", sc, flags));
 
 	sc->sc_dying = 1;
-	if (sc->sc_intrpipe != NULL)
-		usbd_abort_pipe(sc->sc_intrpipe);
+	if (sc->sc_ipipe != NULL)
+		usbd_abort_pipe(sc->sc_ipipe);
 
 	if (sc->sc_repdesc != NULL)
 		free(sc->sc_repdesc, M_USBDEV);
@@ -361,9 +387,6 @@ USB_DETACH(uhidev)
 	rv = 0;
 	for (i = 0; i < sc->sc_nrepid; i++) {
 		if (sc->sc_subdevs[i] != NULL) {
-#if defined(__NetBSD__) && NRND > 0
-			rnd_detach_source(&sc->sc_subdevs[i]->rnd_source);
-#endif
 			rv |= config_detach(&sc->sc_subdevs[i]->sc_dev, flags);
 			sc->sc_subdevs[i] = NULL;
 		}
@@ -404,7 +427,7 @@ uhidev_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 	if (status != USBD_NORMAL_COMPLETION) {
 		DPRINTF(("%s: interrupt status=%d\n", USBDEVNAME(sc->sc_dev),
 			 status));
-		usbd_clear_endpoint_stall_async(sc->sc_intrpipe);
+		usbd_clear_endpoint_stall_async(sc->sc_ipipe);
 		return;
 	}
 
@@ -427,9 +450,6 @@ uhidev_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 		printf("%s: bad input length %d != %d\n",USBDEVNAME(sc->sc_dev),
 		       scd->sc_in_rep_size, cc);
 #endif
-#if defined(__NetBSD__) && NRND > 0
-	rnd_add_uint32(&scd->rnd_source, (uintptr_t)(sc->sc_ibuf));
-#endif
 	scd->sc_intr(scd, p, cc);
 }
 
@@ -445,6 +465,7 @@ uhidev_open(struct uhidev *scd)
 {
 	struct uhidev_softc *sc = scd->sc_parent;
 	usbd_status err;
+	int error;
 
 	DPRINTF(("uhidev_open: open pipe, state=%d refcnt=%d\n",
 		 scd->sc_state, sc->sc_refcnt));
@@ -460,22 +481,86 @@ uhidev_open(struct uhidev *scd)
 
 	sc->sc_ibuf = malloc(sc->sc_isize, M_USBDEV, M_WAITOK);
 
-	/* Set up interrupt pipe. */
+	/* Set up input interrupt pipe. */
 	DPRINTF(("uhidev_open: isize=%d, ep=0x%02x\n", sc->sc_isize,
-		 sc->sc_ep_addr));
-	err = usbd_open_pipe_intr(sc->sc_iface, sc->sc_ep_addr,
-		  USBD_SHORT_XFER_OK, &sc->sc_intrpipe, sc, sc->sc_ibuf,
+	    sc->sc_iep_addr));
+		
+	err = usbd_open_pipe_intr(sc->sc_iface, sc->sc_iep_addr,
+		  USBD_SHORT_XFER_OK, &sc->sc_ipipe, sc, sc->sc_ibuf,
 		  sc->sc_isize, uhidev_intr, USBD_DEFAULT_INTERVAL);
-	if (err) {
+	if (err != USBD_NORMAL_COMPLETION) {
 		DPRINTF(("uhidopen: usbd_open_pipe_intr failed, "
-			 "error=%d\n",err));
-		free(sc->sc_ibuf, M_USBDEV);
-		scd->sc_state &= ~UHIDEV_OPEN;
-		sc->sc_refcnt = 0;
-		sc->sc_intrpipe = NULL;
-		return (EIO);
+		    "error=%d\n", err));
+		error = EIO;
+		goto out1;
 	}
+
+	DPRINTF(("uhidev_open: sc->sc_ipipe=%p\n", sc->sc_ipipe));
+
+	sc->sc_ixfer = usbd_alloc_xfer(sc->sc_udev);
+	if (sc->sc_ixfer == NULL) {
+		DPRINTF(("uhidev_open: couldn't allocate an xfer\n"));
+		error = ENOMEM;
+		goto out1; // xxxx
+	}
+
+	/*
+	 * Set up output interrupt pipe if an output interrupt endpoint
+	 * exists.
+	 */
+	if (sc->sc_oep_addr != -1) {
+		DPRINTF(("uhidev_open: oep=0x%02x\n", sc->sc_oep_addr));
+
+		err = usbd_open_pipe(sc->sc_iface, sc->sc_oep_addr,
+		    0, &sc->sc_opipe);
+
+		if (err != USBD_NORMAL_COMPLETION) {
+			DPRINTF(("uhidev_open: usbd_open_pipe failed, "
+			    "error=%d\n", err));
+			error = EIO;
+			goto out2;
+		}
+		DPRINTF(("uhidev_open: sc->sc_opipe=%p\n", sc->sc_opipe));
+
+		sc->sc_oxfer = usbd_alloc_xfer(sc->sc_udev);
+		if (sc->sc_oxfer == NULL) {
+			DPRINTF(("uhidev_open: couldn't allocate an xfer\n"));
+			error = ENOMEM;
+			goto out3;
+		}
+
+		sc->sc_owxfer = usbd_alloc_xfer(sc->sc_udev);
+		if (sc->sc_owxfer == NULL) {
+			DPRINTF(("uhidev_open: couldn't allocate owxfer\n"));
+			error = ENOMEM;
+			goto out3;
+		}
+	}
+	
 	return (0);
+
+out3:
+	/* Abort output pipe */
+	usbd_close_pipe(sc->sc_opipe);
+out2:
+	/* Abort input pipe */
+	usbd_close_pipe(sc->sc_ipipe);
+out1:
+	DPRINTF(("uhidev_open: failed in someway"));
+	free(sc->sc_ibuf, M_USBDEV);
+	scd->sc_state &= ~UHIDEV_OPEN;
+	sc->sc_refcnt = 0;
+	sc->sc_ipipe = NULL;
+	sc->sc_opipe = NULL;
+	if (sc->sc_oxfer != NULL) {
+		usbd_free_xfer(sc->sc_oxfer);
+		sc->sc_oxfer = NULL;
+	}
+	if (sc->sc_owxfer != NULL) {
+		usbd_free_xfer(sc->sc_owxfer);
+		sc->sc_owxfer = NULL;
+	}
+	return (error);
 }
 
 void
@@ -490,11 +575,23 @@ uhidev_close(struct uhidev *scd)
 		return;
 	DPRINTF(("uhidev_close: close pipe\n"));
 
+	if (sc->sc_oxfer != NULL)
+		usbd_free_xfer(sc->sc_oxfer);
+
+	if (sc->sc_owxfer != NULL)
+		usbd_free_xfer(sc->sc_owxfer);
+
 	/* Disable interrupts. */
-	if (sc->sc_intrpipe != NULL) {
-		usbd_abort_pipe(sc->sc_intrpipe);
-		usbd_close_pipe(sc->sc_intrpipe);
-		sc->sc_intrpipe = NULL;
+	if (sc->sc_opipe != NULL) {
+		usbd_abort_pipe(sc->sc_opipe);
+		usbd_close_pipe(sc->sc_opipe);
+		sc->sc_opipe = NULL;
+	}
+
+	if (sc->sc_ipipe != NULL) {
+		usbd_abort_pipe(sc->sc_ipipe);
+		usbd_close_pipe(sc->sc_ipipe);
+		sc->sc_ipipe = NULL;
 	}
 
 	if (sc->sc_ibuf != NULL) {
@@ -546,4 +643,29 @@ uhidev_get_report(struct uhidev *scd, int type, void *data, int len)
 {
 	return usbd_get_report(scd->sc_parent->sc_iface, type,
 			       scd->sc_report_id, data, len);
+}
+
+usbd_status
+uhidev_write(struct uhidev_softc *sc, void *data, int len)
+{
+
+	DPRINTF(("uhidev_write: data=%p, len=%d\n", data, len));
+
+	if (sc->sc_opipe == NULL)
+		return USBD_INVAL;
+
+#ifdef UHIDEV_DEBUG
+	if (uhidevdebug > 50) {
+
+		u_int32_t i;
+		u_int8_t *d = data;
+
+		DPRINTF(("uhidev_write: data ="));
+		for (i = 0; i < len; i++)
+			DPRINTF((" %02x", d[i]));
+		DPRINTF(("\n"));
+	}
+#endif
+	return usbd_intr_transfer(sc->sc_owxfer, sc->sc_opipe, 0,
+	    USBD_NO_TIMEOUT, data, &len, "uhidevwi");
 }

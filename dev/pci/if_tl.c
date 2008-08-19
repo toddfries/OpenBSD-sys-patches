@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tl.c,v 1.37 2005/11/23 11:30:14 mickey Exp $	*/
+/*	$OpenBSD: if_tl.c,v 1.42 2006/06/29 21:35:39 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -422,7 +422,7 @@ u_int8_t tl_eeprom_putbyte(sc, byte)
 	struct tl_softc		*sc;
 	int			byte;
 {
-	register int		i, ack = 0;
+	int			i, ack = 0;
 
 	/*
 	 * Make sure we're in TX mode.
@@ -467,7 +467,7 @@ u_int8_t tl_eeprom_getbyte(sc, addr, dest)
 	int			addr;
 	u_int8_t		*dest;
 {
-	register int		i;
+	int			i;
 	u_int8_t		byte = 0;
 
 	tl_dio_write8(sc, TL_NETSIO, 0);
@@ -552,7 +552,7 @@ int tl_read_eeprom(sc, dest, off, cnt)
 void tl_mii_sync(sc)
 	struct tl_softc		*sc;
 {
-	register int		i;
+	int			i;
 
 	tl_dio_clrbit(sc, TL_NETSIO, TL_SIO_MTXEN);
 
@@ -1166,7 +1166,7 @@ int tl_intvec_rxeof(xsc, type)
 	 	 * since it can be used again later.
 	 	 */
 		if (ifp->if_bpf) {
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 		}
 #endif
 		/* pass it on. */
@@ -1595,7 +1595,8 @@ void tl_start(ifp)
 		 */
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, cur_tx->tl_mbuf);
+			bpf_mtap(ifp->if_bpf, cur_tx->tl_mbuf,
+			    BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -1645,8 +1646,6 @@ void tl_init(xsc)
         int			s;
 
 	s = splnet();
-
-	ifp = &sc->arpcom.ac_if;
 
 	/*
 	 * Cancel pending I/O.
@@ -1851,7 +1850,7 @@ int tl_ioctl(ifp, command, data)
 			    &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
+		error = ENOTTY;
 		break;
 	}
 
@@ -1884,7 +1883,7 @@ void tl_watchdog(ifp)
 void tl_stop(sc)
 	struct tl_softc		*sc;
 {
-	register int		i;
+	int			i;
 	struct ifnet		*ifp;
 
 	ifp = &sc->arpcom.ac_if;
@@ -2007,13 +2006,8 @@ tl_attach(parent, self, aux)
 	/*
 	 * Map control/status registers.
 	 */
-	command = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 
 #ifdef TL_USEIOSPACE
-	if (!(command & PCI_COMMAND_IO_ENABLE)) {
-		printf(": failed to enable I/O ports\n");
-		return;
-	}
 	if (pci_mapreg_map(pa, TL_PCI_LOIO, PCI_MAPREG_TYPE_IO, 0,
 	    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)) {
 		if (pci_mapreg_map(pa, TL_PCI_LOMEM, PCI_MAPREG_TYPE_IO, 0,
@@ -2023,10 +2017,6 @@ tl_attach(parent, self, aux)
 		}
 	}
 #else
-	if (!(command & PCI_COMMAND_MEM_ENABLE)) {
-		printf(": failed to enable memory mapping\n");
-		return;
-	}
 	if (pci_mapreg_map(pa, TL_PCI_LOMEM, PCI_MAPREG_TYPE_MEM, 0,
 	    &sc->tl_btag, &sc->tl_bhandle, NULL, &iosize, 0)){
 		if (pci_mapreg_map(pa, TL_PCI_LOIO, PCI_MAPREG_TYPE_MEM, 0,

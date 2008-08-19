@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.44 2006/02/06 17:19:31 jmc Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.57 2006/08/10 01:11:13 gwk Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -104,7 +104,10 @@ extern	int kgdb_debug_panic;
 static	int rootnode;
 char platform_type[64];
 
-static	char *str2hex(char *, int *);
+/* for hw.product/vendor see sys/kern/kern_sysctl.c */
+extern char *hw_prod, *hw_vendor;
+
+static	char *str2hex(char *, long *);
 static	int mbprint(void *, const char *);
 void	sync_crash(void);
 int	mainbus_match(struct device *, void *, void *);
@@ -163,11 +166,26 @@ int autoconf_debug = 0x0;
  * Depends on ASCII order (this *is* machine-dependent code, you know).
  */
 static char *
-str2hex(str, vp)
-	register char *str;
-	register int *vp;
+str2hex(char *str, long *vp)
 {
-	register int v, c;
+	long v;
+	int c;
+
+	if (*str == 'w') {
+		for (v = 1;; v++) {
+			if (str[v] >= '0' && str[v] <= '9')
+				continue;
+			if (str[v] >= 'a' && str[v] <= 'f')
+				continue;
+			if (str[v] >= 'A' && str[v] <= 'F')
+				continue;
+			if (str[v] == '\0' || str[v] == ',')
+				break;
+			*vp = 0;
+			return (str + v);
+		}
+		str++;
+	}
 
 	for (v = 0;; v = v * 16 + c, str++) {
 		c = *(u_char *)str;
@@ -412,7 +430,7 @@ bootpath_print(bp)
 		if (bp->val[0] == -1)
 			printf("/%s%x", bp->name, bp->val[1]);
 		else
-			printf("/%s@%x,%x", bp->name, bp->val[0], bp->val[1]);
+			printf("/%s@%lx,%lx", bp->name, bp->val[0], bp->val[1]);
 		if (bp->val[2] != 0)
 			printf(":%c", bp->val[2] + 'a');
 		bp++;
@@ -426,7 +444,7 @@ bootpath_print(bp)
  *
  * XXX. required because of SCSI... we don't have control over the "sd"
  * device, so we can't set boot device there.   we patch in with
- * dk_establish(), and use this to recover the bootpath.
+ * device_register(), and use this to recover the bootpath.
  */
 struct bootpath *
 bootpath_store(storep, bp)
@@ -553,9 +571,9 @@ setroot()
 
 	if (boothowto & RB_ASKNAME) {
 		for (;;) {
-			printf("root device ");
+			printf("root device");
 			if (bootdv != NULL)
-				printf("(default %s%c)",
+				printf(" (default %s%c)",
 					bootdv->dv_xname,
 					bootdv->dv_class == DV_DISK
 						? bp->val[2]+'a' : ' ');
@@ -574,8 +592,10 @@ setroot()
 					goto gotswap;
 				}
 			}
-			if (len == 4 && strncmp(buf, "exit", 4) == 0)
+			if (len == 4 && strncmp(buf, "exit", 4) == 0) {
+				doshutdownhooks();
 				OF_exit();
+			}
 			dv = getdisk(buf, len, bp?bp->val[2]:0, &nrootdev);
 			if (dv != NULL) {
 				bootdv = dv;
@@ -979,9 +999,9 @@ extern struct sparc_bus_dma_tag mainbus_dma_tag;
 extern bus_space_tag_t mainbus_space_tag;
 
 	struct mainbus_attach_args ma;
-	char buf[32];
+	char buf[32], *p;
 	const char *const *ssp, *sp = NULL;
-	int node0, node, rv;
+	int node0, node, rv, len;
 
 	static const char *const openboot_special[] = {
 		/* ignore these (end with NULL) */
@@ -999,12 +1019,20 @@ extern bus_space_tag_t mainbus_space_tag;
 		NULL
 	};
 
-	if (OF_getprop(findroot(), "banner-name", platform_type,
-	    sizeof(platform_type)) <= 0)
+	if ((len = OF_getprop(findroot(), "banner-name", platform_type,
+	    sizeof(platform_type))) <= 0)
 		OF_getprop(findroot(), "name", platform_type,
 		    sizeof(platform_type));
 	printf(": %s\n", platform_type);
-
+	if (len > 0) {
+		hw_vendor = platform_type;
+		if ((p = memchr(hw_vendor, ' ', len)) != NULL) {
+			*p = '\0';
+			hw_prod = ++p;
+			if ((p = memchr(p, '(', len - (p - hw_vendor))) != NULL)
+				*p = '\0'; 
+		}
+	}
 
 	/*
 	 * Locate and configure the ``early'' devices.  These must be
@@ -1079,8 +1107,11 @@ extern bus_space_tag_t mainbus_space_tag;
 		ma.ma_name = buf;
 		ma.ma_node = node;
 		if (OF_getprop(node, "upa-portid", &portid, sizeof(portid)) !=
-			sizeof(portid)) 
-			portid = -1;
+		    sizeof(portid)) {
+			if (OF_getprop(node, "portid", &portid,
+			    sizeof(portid)) != sizeof(portid))
+				portid = -1;
+		}
 		ma.ma_upaid = portid;
 
 		if (getprop(node, "reg", sizeof(*ma.ma_reg), 
@@ -1342,6 +1373,7 @@ getdevunit(name, unit)
 #define BUSCLASS_XDC		7
 #define BUSCLASS_XYC		8
 #define BUSCLASS_FDC		9
+#define BUSCLASS_SCHIZO		10
 
 static struct {
 	char	*name;
@@ -1350,6 +1382,7 @@ static struct {
 	{ "mainbus",	BUSCLASS_MAINBUS },
 	{ "upa",	BUSCLASS_MAINBUS },
 	{ "psycho",	BUSCLASS_MAINBUS },
+	{ "schizo",	BUSCLASS_SCHIZO },
 	{ "obio",	BUSCLASS_OBIO },
 	{ "iommu",	BUSCLASS_IOMMU },
 	{ "sbus",	BUSCLASS_SBUS },
@@ -1365,24 +1398,28 @@ static struct {
 	{ "pciide",	BUSCLASS_PCI },
 	{ "siop",	BUSCLASS_PCI },
 	{ "pci",	BUSCLASS_PCI },
+	{ "mpi",	BUSCLASS_PCI },
 	{ "fdc",	BUSCLASS_FDC },
+	{ "fp",		BUSCLASS_NONE},
 };
 
 /*
- * A list of PROM device names that differ from our NetBSD
+ * A list of PROM device names that differ from our OpenBSD
  * device names.
  */
-static struct {
+static const struct dev_compat_tab {
 	char	*bpname;
 	int	class;
 	char	*cfname;
 } dev_compat_tab[] = {
 	{ "espdma",	BUSCLASS_NONE,		"dma" },
 	{ "QLGC,isp",	BUSCLASS_NONE,		"isp" },
+	{ "SUNW,qlc",	BUSCLASS_NONE,		"isp" },
 	{ "PTI,isp",	BUSCLASS_NONE,		"isp" },
 	{ "ptisp",	BUSCLASS_NONE,		"isp" },
 	{ "SUNW,isptwo", BUSCLASS_NONE,		"isp" },
 	{ "SUNW,fdtwo",	BUSCLASS_NONE,		"fdc" },
+	{ "pci108e,8001", BUSCLASS_SCHIZO,	"schizo" },
 	{ "pci",	BUSCLASS_MAINBUS,	"psycho" },
 	{ "pci",	BUSCLASS_PCI,		"ppb" },
 	{ "ide",	BUSCLASS_PCI,		"pciide" },
@@ -1390,6 +1427,8 @@ static struct {
 	{ "cmdk",	BUSCLASS_NONE,		"wd" },
 	{ "pci108e,1101.1", BUSCLASS_NONE,	"gem" },
 	{ "dc",		BUSCLASS_NONE,		"dc" },
+	/* ``network'' might be either gem or hme */
+	{ "network",	BUSCLASS_NONE,		"gem" },
 	{ "network",	BUSCLASS_NONE,		"hme" },
 	{ "ethernet",	BUSCLASS_NONE,		"dc" },
 	{ "SUNW,fas",	BUSCLASS_NONE,		"esp" },
@@ -1399,6 +1438,10 @@ static struct {
 	{ "SUNW,glm",	BUSCLASS_PCI,		"siop" },
 	{ "sd",		BUSCLASS_NONE,		"sd" },
 	{ "ide-disk",	BUSCLASS_NONE,		"wd" },
+	{ "LSILogic,sas", BUSCLASS_NONE,	"mpi" },
+	{ "fp",		BUSCLASS_NONE,		"scsibus" },
+	{ "ssd",	BUSCLASS_NONE,		"sd" },
+	{ NULL }
 };
 
 char *
@@ -1406,19 +1449,41 @@ bus_compatible(bp, dev)
 	struct bootpath *bp;
 	struct device *dev;
 {
-	int i, class = bus_class(dev);
+	const struct dev_compat_tab *lore, *sub;
+	int class = bus_class(dev);
+	const char *dvname = dev->dv_cfdata->cf_driver->cd_name;
 
-	for (i = sizeof(dev_compat_tab)/sizeof(dev_compat_tab[0]); i-- > 0;) {
-		if (strcmp(bp->compatible, dev_compat_tab[i].bpname) == 0 &&
-		    (dev_compat_tab[i].class == BUSCLASS_NONE ||
-		     dev_compat_tab[i].class == class))
-			return (dev_compat_tab[i].cfname);
+	/*
+	 * First try matching the ``compatible'' property.
+	 * However, since more than one device can share the same
+	 * ``compatible'' property, we have to take this into account
+	 * and favor the entry matching our current device name, if
+	 * there is one.
+	 */
+	for (lore = dev_compat_tab; lore->bpname != NULL; lore++) {
+		if (strcmp(bp->compatible, lore->bpname) != 0)
+			continue;
+		if (lore->class != BUSCLASS_NONE &&
+		    lore->class != class)
+			continue;
+		for (sub = lore + 1; sub->bpname != NULL; sub++) {
+			if (strcmp(lore->bpname, sub->bpname) != 0)
+				break;
+			if (strcmp(sub->cfname, dvname) == 0)
+				return (sub->cfname);
+		}
+		return (lore->cfname);
 	}
-	for (i = sizeof(dev_compat_tab)/sizeof(dev_compat_tab[0]); i-- > 0;) {
-		if (strcmp(bp->name, dev_compat_tab[i].bpname) == 0 &&
-		    (dev_compat_tab[i].class == BUSCLASS_NONE ||
-		     dev_compat_tab[i].class == class))
-			return (dev_compat_tab[i].cfname);
+
+	/*
+	 * If it has not been found, match on the ``name'' property;
+	 * there can only be one instance in the table.
+	 */
+	for (lore = dev_compat_tab; lore->bpname != NULL; lore++) {
+		if (strcmp(bp->name, lore->bpname) == 0 &&
+		    (lore->class == BUSCLASS_NONE ||
+		     lore->class == class))
+			return (lore->cfname);
 	}
 
 	return (bp->name);
@@ -1478,7 +1543,21 @@ instance_match(dev, aux, bp)
 		DPRINTF(ACDB_BOOTDEV,
 		    ("instance_match: mainbus device, want %#x have %#x\n",
 		    ma->ma_upaid, bp->val[0]));
-		if (bp->val[0] == ma->ma_upaid)
+		if (bp->val[0] != ma->ma_upaid)
+			break;
+		if (bus_class(dev) != BUSCLASS_SCHIZO)
+			return (1);
+		if (ma->ma_nreg < 1) {
+			DPRINTF(ACDB_BOOTDEV,
+			    ("instance match: schizo not enough regs %d\n",
+			    ma->ma_nreg));
+			break;
+		}
+		DPRINTF(ACDB_BOOTDEV,
+		    ("instance_match: schizo device, want %llx have %llx\n",
+		    (unsigned long long)ma->ma_reg[0].ur_paddr & 0x00700000,
+		    (unsigned long long)bp->val[1]));
+		if ((ma->ma_reg[0].ur_paddr & 0x00700000) == bp->val[1])
 			return (1);
 		break;
 	case BUSCLASS_SBUS:
@@ -1496,6 +1575,22 @@ instance_match(dev, aux, bp)
 		     bp->val[0], bp->val[1], pa->pa_device, pa->pa_function));
 		if (bp->val[0] == pa->pa_device &&
 		    bp->val[1] == pa->pa_function)
+			return (1);
+		break;
+	case BUSCLASS_SCHIZO:
+		ma = aux;
+		if (ma->ma_nreg < 1) {
+			DPRINTF(ACDB_BOOTDEV, ("schizo: not enough regs %d\n",
+			    ma->ma_nreg));
+			break;
+		}
+		DPRINTF(ACDB_BOOTDEV,
+		    ("instance_match: mainbus device, want %#x/%llx have %#x/%llx\n",
+		    ma->ma_upaid,
+		    (unsigned long long)ma->ma_reg[0].ur_paddr & 0x00700000,
+		    bp->val[0], (unsigned long long)bp->val[1]));
+		if (bp->val[0] == ma->ma_upaid &&
+		    bp->val[1] == (ma->ma_reg[0].ur_paddr & 0x00700000))
 			return (1);
 		break;
 	default:
@@ -1534,7 +1629,8 @@ device_register(dev, aux)
 	    dev->dv_xname, dvname, dev->dv_xname, bpname, bp->name));
 
 	/* First, match by name */
-	if (strcmp(dvname, bpname) != 0)
+	if (strcmp(dvname, bpname) != 0 &&
+	    (strcmp(dvname, "schizo") != 0 || strcmp(bpname, "pci") != 0))
 		return;
 
 	if (bus_class(dev) != BUSCLASS_NONE) {
@@ -1572,6 +1668,15 @@ device_register(dev, aux)
 			    dev->dv_xname));
 			return;
 		}
+	} else if (strcmp(bp->name, "fp") == 0) {
+		struct scsi_link *sl = aux;
+
+		if (bp->val[0] == sl->scsibus) {
+			DPRINTF(ACDB_BOOTDEV, ("\t-- found fp scsibus %s\n",
+			    dev->dv_xname));
+			bootpath_store(1, bp + 1);
+			return;
+		}
 	} else if (strcmp(dvname, "sd") == 0 || strcmp(dvname, "cd") == 0) {
 		/*
 		 * A SCSI disk or cd; retrieve target/lun information
@@ -1583,9 +1688,21 @@ device_register(dev, aux)
 		struct scsibus_attach_args *sa = aux;
 		struct scsi_link *sl = sa->sa_sc_link;
 		struct scsibus_softc *sbsc =
-			(struct scsibus_softc *)dev->dv_parent;
+		    (struct scsibus_softc *)dev->dv_parent;
 		u_int target = bp->val[0];
 		u_int lun = bp->val[1];
+
+		if (bp->val[0] & 0xffffffff00000000 && bp->val[0] != -1) {
+			/* fibre channel? */
+			if (sl->port_wwn != 0 && sl->port_wwn == bp->val[0] &&
+			    sl->lun == sl->lun) {
+				nail_bootdev(dev, bp);
+				DPRINTF(ACDB_BOOTDEV,
+				    ("\t-- found fc/ssd disk %s\n",
+				    dev->dv_xname));
+			}
+			return;
+		}
 
 		/* Check the controller that this scsibus is on */
 		if ((bp-1)->dev != sbsc->sc_dev.dv_parent)

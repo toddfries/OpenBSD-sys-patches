@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le_lebuffer.c,v 1.5 2003/07/25 03:50:56 jason Exp $	*/
+/*	$OpenBSD: if_le_lebuffer.c,v 1.7 2006/06/02 20:00:56 miod Exp $	*/
 /*	$NetBSD: if_le_lebuffer.c,v 1.10 2002/03/11 16:00:56 pk Exp $	*/
 
 /*-
@@ -75,7 +75,6 @@
 
 struct	le_softc {
 	struct	am7990_softc	sc_am7990;	/* glue to MI code */
-	struct	sbusdev		sc_sd;		/* sbus device */
 	bus_space_tag_t		sc_bustag;
 	bus_dma_tag_t		sc_dmatag;
 	bus_space_handle_t	sc_reg;		/* LANCE registers */
@@ -104,7 +103,11 @@ le_lebuffer_wrcsr(struct am7990_softc *sc, u_int16_t port, u_int16_t val)
 	struct le_softc *lesc = (struct le_softc *)sc;
 
 	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, port);
+	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, 2,
+	    BUS_SPACE_BARRIER_WRITE);
 	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP, val);
+	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP, 2,
+	    BUS_SPACE_BARRIER_WRITE);
 
 #if defined(SUN4M)
 	/*
@@ -126,6 +129,8 @@ le_lebuffer_rdcsr(struct am7990_softc *sc, u_int16_t port)
 	struct le_softc *lesc = (struct le_softc *)sc;
 
 	bus_space_write_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, port);
+	bus_space_barrier(lesc->sc_bustag, lesc->sc_reg, LEREG1_RAP, 2,
+	    BUS_SPACE_BARRIER_WRITE);
 	return (bus_space_read_2(lesc->sc_bustag, lesc->sc_reg, LEREG1_RDP));
 }
 
@@ -167,10 +172,6 @@ leattach_lebuffer(struct device *parent, struct device *self, void *aux)
 	/* That old black magic... */
 	sc->sc_conf3 = getpropint(sa->sa_node, "busmaster-regval",
 	    LE_C3_BSWP | LE_C3_ACON | LE_C3_BCON);
-
-	/* Assume SBus is grandparent */
-	lesc->sc_sd.sd_reset = (void *)am7990_reset;
-	sbus_establish(&lesc->sc_sd, parent);
 
 	myetheraddr(sc->sc_arpcom.ac_enaddr);
 

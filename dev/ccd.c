@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.64 2006/01/09 12:43:16 pedro Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.67 2006/08/12 18:08:11 krw Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -1151,6 +1151,10 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		if (cs->sc_flags & CCDF_INITED)
 			return (EBUSY);
 
+		if (ccio->ccio_ndisks == 0 || ccio->ccio_ndisks > INT_MAX ||
+		    ccio->ccio_ileave <= 0)
+			return (EINVAL);
+
 		if ((error = ccdlock(cs)) != 0)
 			return (error);
 
@@ -1501,7 +1505,7 @@ ccdgetdisklabel(dev_t dev, struct ccd_softc *cs, struct disklabel *lp,
 	lp->d_flags = 0;
 
 	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = cs->sc_size;
+	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 

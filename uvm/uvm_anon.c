@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_anon.c,v 1.21 2002/03/14 01:27:18 millert Exp $	*/
+/*	$OpenBSD: uvm_anon.c,v 1.25 2006/07/31 11:51:29 mickey Exp $	*/
 /*	$NetBSD: uvm_anon.c,v 1.10 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -184,7 +184,7 @@ uvm_anfree(anon)
 {
 	struct vm_page *pg;
 	UVMHIST_FUNC("uvm_anfree"); UVMHIST_CALLED(maphist);
-	UVMHIST_LOG(maphist,"(anon=0x%x)", anon, 0,0,0);
+	UVMHIST_LOG(maphist,"(anon=%p)", anon, 0,0,0);
 
 	/*
 	 * get page
@@ -235,7 +235,7 @@ uvm_anfree(anon)
 				/* tell them to dump it when done */
 				pg->flags |= PG_RELEASED;
 				UVMHIST_LOG(maphist,
-				    "  anon 0x%x, page 0x%x: BUSY (released!)", 
+				    "  anon %p, page %p: BUSY (released!)", 
 				    anon, pg, 0, 0);
 				return;
 			} 
@@ -243,7 +243,7 @@ uvm_anfree(anon)
 			uvm_lock_pageq();	/* lock out pagedaemon */
 			uvm_pagefree(pg);	/* bye bye */
 			uvm_unlock_pageq();	/* free the daemon */
-			UVMHIST_LOG(maphist,"anon 0x%x, page 0x%x: freed now!",
+			UVMHIST_LOG(maphist,"anon %p, page %p: freed now!",
 			    anon, pg, 0, 0);
 		}
 	}
@@ -279,7 +279,7 @@ uvm_anon_dropswap(anon)
 	if (anon->an_swslot == 0)
 		return;
 
-	UVMHIST_LOG(maphist,"freeing swap for anon %p, paged to swslot 0x%x",
+	UVMHIST_LOG(maphist,"freeing swap for anon %p, paged to swslot 0x%lx",
 		    anon, anon->an_swslot, 0, 0);
 	uvm_swap_free(anon->an_swslot, 1);
 	anon->an_swslot = 0;

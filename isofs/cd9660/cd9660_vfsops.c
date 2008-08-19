@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.38 2006/01/22 00:40:02 miod Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.42 2006/08/07 15:50:42 pedro Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -112,12 +112,12 @@ cd9660_mountroot()
                 free(mp, M_MOUNT);
                 return (error);
         }
-	simple_lock(&mountlist_slock);
+
         CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
-	simple_unlock(&mountlist_slock);
         (void)cd9660_statfs(mp, &mp->mnt_stat, p);
 	vfs_unbusy(mp);
 	inittodr(0);
+
         return (0);
 }
 
@@ -367,9 +367,7 @@ iso_mountfs(devvp, mp, p, argp)
 	isomp->im_dev = dev;
 	isomp->im_devvp = devvp;
 
-	devvp->v_specmountpoint = mp;
-
-	/* Check the Rock Ridge Extention support */
+	/* Check the Rock Ridge Extension support */
 	if (!(argp->flags & ISOFSMNT_NORRIP)) {
 		if ((error = bread(isomp->im_devvp, (isomp->root_extent +
 		    isonum_711(rootp->ext_attr_length)) <<
@@ -424,6 +422,8 @@ iso_mountfs(devvp, mp, p, argp)
 		supbp = NULL;
 	}
   
+	devvp->v_specmountpoint = mp;
+
 	return (0);
 out:
 	if (bp)

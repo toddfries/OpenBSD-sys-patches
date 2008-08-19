@@ -1,4 +1,4 @@
-/*	$OpenBSD: mscp_disk.c,v 1.15 2004/09/24 19:29:11 kettenis Exp $	*/
+/*	$OpenBSD: mscp_disk.c,v 1.17 2006/07/12 19:56:18 thib Exp $	*/
 /*	$NetBSD: mscp_disk.c,v 1.30 2001/11/13 07:38:28 lukem Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -219,7 +219,7 @@ raopen(dev, flag, fmt, p)
 #if notyet
 	while (ra->ra_state != DK_OPEN)
 		if ((error = tsleep((caddr_t)ra, (PZERO + 1) | PCATCH,
-		    devopn, 0))) {
+		    "devopen", 0))) {
 			splx(s);
 			return (error);
 		}
@@ -294,7 +294,7 @@ rastrategy(bp)
 	 * Make sure this is a reasonable drive to use.
 	 */
 	unit = DISKUNIT(bp->b_dev);
-	if (unit > ra_cd.cd_ndevs || (ra = ra_cd.cd_devs[unit]) == NULL) {
+	if (unit >= ra_cd.cd_ndevs || (ra = ra_cd.cd_devs[unit]) == NULL) {
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
 		goto done;
@@ -685,7 +685,7 @@ rxstrategy(bp)
 	 * Make sure this is a reasonable drive to use.
 	 */
 	unit = DISKUNIT(bp->b_dev);
-	if (unit > rx_cd.cd_ndevs || (rx = rx_cd.cd_devs[unit]) == NULL) {
+	if (unit >= rx_cd.cd_ndevs || (rx = rx_cd.cd_devs[unit]) == NULL) {
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
 		goto done;

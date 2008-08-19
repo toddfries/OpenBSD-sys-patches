@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.173 2005/10/05 17:32:22 norby Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.180 2006/06/18 11:47:45 pascoe Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -78,8 +78,11 @@ extern int ipsec_esp_trans_default_level;
 extern int ipsec_esp_network_default_level;
 extern int ipsec_ipcomp_default_level;
 extern int ipforwarding;
-extern int ipmforwarding;
 #endif /* IPSEC */
+
+#ifdef MROUTING
+extern int ipmforwarding;
+#endif
 
 static struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 static void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
@@ -216,7 +219,7 @@ ip_output(struct mbuf *m0, ...)
 			IFP_TO_IA(ifp, ia);
 		} else {
 			if (ro->ro_rt == 0)
-				rtalloc(ro);
+				rtalloc_mpath(ro, NULL, 0);
 
 			if (ro->ro_rt == 0) {
 				ipstat.ips_noroute++;
@@ -383,7 +386,7 @@ ip_output(struct mbuf *m0, ...)
 			IFP_TO_IA(ifp, ia);
 		} else {
 			if (ro->ro_rt == 0)
-				rtalloc(ro);
+				rtalloc_mpath(ro, &ip->ip_src.s_addr, 0);
 
 			if (ro->ro_rt == 0) {
 				ipstat.ips_noroute++;
@@ -459,9 +462,7 @@ ip_output(struct mbuf *m0, ...)
 		if (ip->ip_src.s_addr == INADDR_ANY) {
 			struct in_ifaddr *ia;
 
-			for (ia = in_ifaddr.tqh_first;
-			     ia;
-			     ia = ia->ia_list.tqe_next)
+			TAILQ_FOREACH(ia, &in_ifaddr, ia_list)
 				if (ia->ia_ifp == ifp) {
 					ip->ip_src = ia->ia_addr.sin_addr;
 					break;
@@ -695,9 +696,13 @@ sendit:
 	}
 #endif
 
-	/* Try to use jumbograms? */
-	if (flags & IP_JUMBO && ro->ro_rt && ro->ro_rt->rt_flags & RTF_JUMBO)
-		mtu = IP_JUMBO_MTU;
+	/* XXX
+	 * Try to use jumbograms based on socket option, or the route
+	 * or... for other reasons later on. 
+	 */
+	if ((flags & IP_JUMBO) && ro->ro_rt && (ro->ro_rt->rt_flags & RTF_JUMBO) &&
+	    ro->ro_rt->rt_ifp)
+		mtu = ro->ro_rt->rt_ifp->if_hardmtu;
 
 	/*
 	 * If small enough for interface, can just send directly.
@@ -1042,6 +1047,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVOPTS:
 		case IP_RECVRETOPTS:
 		case IP_RECVDSTADDR:
+		case IP_RECVIF:
 			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
@@ -1071,6 +1077,9 @@ ip_ctloutput(op, so, level, optname, mp)
 
 				case IP_RECVDSTADDR:
 					OPTSET(INP_RECVDSTADDR);
+					break;
+				case IP_RECVIF:
+					OPTSET(INP_RECVIF);
 					break;
 				}
 			}
@@ -1373,6 +1382,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVOPTS:
 		case IP_RECVRETOPTS:
 		case IP_RECVDSTADDR:
+		case IP_RECVIF:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
 			switch (optname) {
@@ -1397,6 +1407,9 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			case IP_RECVDSTADDR:
 				optval = OPTBIT(INP_RECVDSTADDR);
+				break;
+			case IP_RECVIF:
+				optval = OPTBIT(INP_RECVIF);
 				break;
 			}
 			*mtod(m, int *) = optval;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm_pcb.c,v 1.5 2002/03/14 01:27:12 millert Exp $	*/
+/*	$OpenBSD: natm_pcb.c,v 1.7 2006/03/05 21:48:57 miod Exp $	*/
 
 /*
  *
@@ -85,7 +85,7 @@ struct natmpcb *npcb;
 int op;
 
 {
-  int s = splimp();
+  int s = splnet();
 
   if ((npcb->npcb_flags & NPCB_FREE) == 0) {
     LIST_REMOVE(npcb, pcblist);
@@ -117,15 +117,14 @@ u_int8_t vpi;
 
 {
   struct natmpcb *cpcb = NULL;		/* current pcb */
-  int s = splimp();
+  int s = splnet();
 
 
   /*
    * lookup required
    */
 
-  for (cpcb = natm_pcbs.lh_first ; cpcb != NULL ; 
-					cpcb = cpcb->pcblist.le_next) {
+  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
     if (ifp == cpcb->npcb_ifp && vci == cpcb->npcb_vci && vpi == cpcb->npcb_vpi)
       break;
   }
@@ -176,8 +175,7 @@ int npcb_dump()
   struct natmpcb *cpcb;
 
   printf("npcb dump:\n");
-  for (cpcb = natm_pcbs.lh_first ; cpcb != NULL ; 
-					cpcb = cpcb->pcblist.le_next) {
+  LIST_FOREACH(cpcb, &natm_pcbs, pcblist) {
     printf("if=%s, vci=%d, vpi=%d, IP=0x%x, sock=%p, flags=0x%x, inq=%d\n",
 	cpcb->npcb_ifp->if_xname, cpcb->npcb_vci, cpcb->npcb_vpi,
 	cpcb->ipaddr.s_addr, cpcb->npcb_socket, 

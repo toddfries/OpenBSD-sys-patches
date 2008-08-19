@@ -1,4 +1,4 @@
-/*	$OpenBSD: m197_machdep.c,v 1.7 2005/04/30 16:42:37 miod Exp $	*/
+/*	$OpenBSD: m197_machdep.c,v 1.12 2006/05/08 14:36:10 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -54,12 +54,12 @@
 #include <machine/asm_macro.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/locore.h>
 #include <machine/reg.h>
 #include <machine/trap.h>
 #include <machine/mvme197.h>
 
 #include <mvme88k/dev/busswreg.h>
+#include <mvme88k/mvme88k/clockvar.h>
 
 void	m197_bootstrap(void);
 void	m197_ext_int(u_int, struct trapframe *);
@@ -67,7 +67,6 @@ u_int	m197_getipl(void);
 vaddr_t	m197_memsize(void);
 u_int	m197_raiseipl(u_int);
 u_int	m197_setipl(u_int);
-void	m197_setupiackvectors(void);
 void	m197_startup(void);
 
 vaddr_t obiova;
@@ -97,7 +96,7 @@ m197_memsize()
 		unsigned save;
 
 		/* if can't access, we've reached the end */
-		if (badwordaddr((vaddr_t)look)) {
+		if (badaddr((vaddr_t)look, 4)) {
 #if defined(DEBUG)
 			printf("%x\n", look);
 #endif
@@ -138,28 +137,13 @@ m197_startup()
 	/*
 	 * Grab the OBIO space that we hardwired in pmap_bootstrap
 	 */
-	obiova = OBIO_START;
-	uvm_map(kernel_map, (vaddr_t *)&obiova, OBIO_SIZE,
+	obiova = OBIO197_START;
+	uvm_map(kernel_map, (vaddr_t *)&obiova, OBIO197_SIZE,
 	    NULL, UVM_UNKNOWN_OFFSET, 0,
 	      UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
 	        UVM_ADV_NORMAL, 0));
-	if (obiova != OBIO_START)
+	if (obiova != OBIO197_START)
 		panic("obiova %lx: OBIO not free", obiova);
-}
-
-void
-m197_setupiackvectors()
-{
-	u_int8_t *vaddr = (u_int8_t *)M197_IACK;
-
-	ivec[0] = vaddr + 0x03;	/* We dont use level 0 */
-	ivec[1] = vaddr + 0x07;
-	ivec[2] = vaddr + 0x0b;
-	ivec[3] = vaddr + 0x0f;
-	ivec[4] = vaddr + 0x13;
-	ivec[5] = vaddr + 0x17;
-	ivec[6] = vaddr + 0x1b;
-	ivec[7] = vaddr + 0x1f;
 }
 
 /*
@@ -173,6 +157,7 @@ m197_ext_int(u_int v, struct trapframe *eframe)
 	struct intrhand *intr;
 	intrhand_t *list;
 	int ret;
+	vaddr_t ivec;
 	u_int8_t vec;
 
 	mask = *(u_int8_t *)M197_IMASK & 0x07;
@@ -183,7 +168,8 @@ m197_ext_int(u_int v, struct trapframe *eframe)
 	} else {
 		level = *(u_int8_t *)M197_ILEVEL & 0x07;
 		/* generate IACK and get the vector */
-		vec = *ivec[level];
+		ivec = M197_IACK + (level << 2) + 0x03;
+		vec = *(volatile u_int8_t *)ivec;
 	}
 
 	uvmexp.intrs++;
@@ -278,10 +264,11 @@ m197_bootstrap()
 	extern void set_tcfp(void);
 
 	cmmu = &cmmu88110;
-	md_interrupt_func_ptr = &m197_ext_int;
-	md_getipl = &m197_getipl;
-	md_setipl = &m197_setipl;
-	md_raiseipl = &m197_raiseipl;
+	md_interrupt_func_ptr = m197_ext_int;
+	md_getipl = m197_getipl;
+	md_setipl = m197_setipl;
+	md_raiseipl = m197_raiseipl;
+	md_init_clocks = m1x7_init_clocks;
 
 	set_tcfp(); /* Set Time Critical Floating Point Mode */
 }

@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_sn_obio.c,v 1.21 2006/01/01 13:15:59 miod Exp $    */
+/*    $OpenBSD: if_sn_obio.c,v 1.23 2006/03/23 04:17:23 brad Exp $    */
 /*    $NetBSD: if_sn_obio.c,v 1.9 1997/04/22 20:56:15 scottr Exp $    */
 
 /*
@@ -39,6 +39,8 @@
 #include <sys/syslog.h>
 #include <sys/systm.h>
 
+#include <uvm/uvm_extern.h>
+
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
@@ -64,10 +66,7 @@ struct cfattach sn_obio_ca = {
 };
 
 static int
-sn_obio_match(parent, cf, aux)
-	struct device *parent;
-	void *cf;
-	void *aux;
+sn_obio_match(struct device *parent, void *cf, void *aux)
 {
 	struct obio_attach_args *oa = (struct obio_attach_args *)aux;
 	bus_space_handle_t bsh;
@@ -92,9 +91,7 @@ sn_obio_match(parent, cf, aux)
  * Install interface into kernel networking data structures
  */
 static void
-sn_obio_attach(parent, self, aux)
-	struct device *parent, *self;
-	void   *aux;
+sn_obio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct obio_attach_args *oa = (struct obio_attach_args *)aux;
 	struct sn_softc	*sc = (void *)self;
@@ -188,28 +185,26 @@ sn_obio_attach(parent, self, aux)
 }
 
 static int
-sn_obio_getaddr(sc, lladdr)
-	struct sn_softc	*sc;
-	u_int8_t *lladdr;
+sn_obio_getaddr(struct sn_softc *sc, u_int8_t *lladdr)
 {
 	bus_space_handle_t bsh;
 
-	if (bus_space_map(sc->sc_regt, SONIC_PROM_BASE, NBPG, 0, &bsh)) {
+	if (bus_space_map(sc->sc_regt, SONIC_PROM_BASE, PAGE_SIZE, 0, &bsh)) {
 		printf(": failed to map space to read SONIC address.\n%s",
 		    sc->sc_dev.dv_xname);
 		return (-1);
 	}
 
 	if (!mac68k_bus_space_probe(sc->sc_regt, bsh, 0, 1)) {
-		bus_space_unmap(sc->sc_regt, bsh, NBPG);
+		bus_space_unmap(sc->sc_regt, bsh, PAGE_SIZE);
 		return (-1);
 	}
 
 	sn_get_enaddr(sc->sc_regt, bsh, 0, lladdr);
 
-	bus_space_unmap(sc->sc_regt, bsh, NBPG);
+	bus_space_unmap(sc->sc_regt, bsh, PAGE_SIZE);
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -217,9 +212,7 @@ sn_obio_getaddr(sc, lladdr)
  * when we can properly get the MAC address on the PBs.
  */
 static int
-sn_obio_getaddr_kludge(sc, lladdr)
-	struct sn_softc	*sc;
-	u_int8_t *lladdr;
+sn_obio_getaddr_kludge(struct sn_softc *sc, u_int8_t *lladdr)
 {
 	int i, ors = 0;
 
@@ -254,7 +247,7 @@ sn_obio_getaddr_kludge(sc, lladdr)
 	wbflush();
 
 	if (ors == 0)
-		return -1;
+		return (-1);
 
-	return 0;
+	return (0);
 }

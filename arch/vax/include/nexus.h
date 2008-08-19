@@ -1,4 +1,4 @@
-/*	$OpenBSD: nexus.h,v 1.10 2003/06/02 23:27:57 millert Exp $	*/
+/*	$OpenBSD: nexus.h,v 1.13 2006/08/27 16:55:41 miod Exp $	*/
 /*	$NetBSD: nexus.h,v 1.17 2000/06/04 17:58:19 ragge Exp $	*/
 
 /*-
@@ -37,20 +37,26 @@
 
 #include <machine/bus.h>
 
-/*
- * Different definitions for nicer autoconf probing.
- */
-enum bustypes {
-	VAX_SBIBUS,		/* SBI parent (780) */
-	VAX_CMIBUS,		/* CMI backplane (750) */
-	VAX_UNIBUS,		/* Direct backplane (730) */
-	VAX_ABUS,		/* SBI placeholder (8600) */
-	VAX_BIBUS,		/* BI bus (8200) */
-	VAX_NBIBUS,		/* NBI backplane (8800) */
-	VAX_VSBUS,		/* Virtual vaxstation bus */
-	VAX_IBUS,		/* Internal Microvax bus */
-	VAX_XMIBUS,		/* XMI master bus (6000) */
+struct	mainbus_attach_args {
+	int	maa_bustype;
 };
+
+/*
+ * Values for bus (or pseudo-bus) types
+ */
+#define	VAX_SBIBUS	1	/* SBI parent (780) */
+#define	VAX_CMIBUS	2	/* CMI backplane (750) */
+#define	VAX_UNIBUS	3	/* Direct backplane (730) */
+#define	VAX_ABUS	4	/* SBI placeholder (8600) */
+#define	VAX_BIBUS	5	/* BI bus (8200) */
+#define	VAX_NBIBUS	6	/* NBI backplane (8800) */
+#define	VAX_VSBUS	7	/* Virtual vaxstation bus */
+#define	VAX_IBUS	8	/* Internal Microvax bus */
+#define	VAX_XMIBUS	9	/* XMI master bus (6000) */
+#define	VAX_VXTBUS	10	/* Pseudo VXT2000 bus */
+
+#define	VAX_LEDS	0x42	/* pseudo value to attach led0 */
+
 /*
  * Information about nexus's.
  *

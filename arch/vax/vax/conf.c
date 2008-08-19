@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.43 2004/02/10 01:31:21 millert Exp $ */
+/*	$OpenBSD: conf.c,v 1.49 2006/08/27 16:55:41 miod Exp $ */
 /*	$NetBSD: conf.c,v 1.44 1999/10/27 16:38:54 ragge Exp $	*/
 
 /*-
@@ -142,29 +142,18 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
  */
 #include <dev/cons.h>
 
-#include "wskbd.h"
-#include "smg.h"
-#if NSMG > 0
-#if NWSKBD > 0
-#define smgcngetc wskbd_cngetc
-#else
-static int
-smgcngetc(dev_t dev)
-{
-	return 0;
-}
-#endif	/* NWSKBD > 0 */
-#endif	/* NSMG > 0 */
-
-#define smgcnputc wsdisplay_cnputc
-#define	smgcnpollc nullcnpollc
-
-cons_decl(gen);
 cons_decl(dz);
+cons_decl(gen);
 cons_decl(qd);
-cons_decl(smg);
-#include "qv.h"
+cons_decl(qsc);
+cons_decl(ws);
+
+#include "dz.h"
 #include "qd.h"
+#include "qsc.h"
+#include "qv.h"
+#include "wsdisplay.h"
+#include "wskbd.h"
 
 struct	consdev constab[]={
 #if VAX8600 || VAX8200 || VAX780 || VAX750 || VAX650 || VAX630 || VAX660 || \
@@ -175,7 +164,14 @@ struct	consdev constab[]={
 #define NGEN	0
 #endif
 #if VAX410 || VAX43 || VAX46 || VAX48 || VAX49 || VAX53
+#if NDZ > 0
 	cons_init(dz),	/* DZ11-like serial console on VAXstations */
+#endif
+#endif
+#ifdef VXT
+#if NQSC > 0
+	cons_init(qsc),	/* SC26C94 serial console on VXT2000 */
+#endif
 #endif
 #if VAX650 || VAX630
 #if NQV
@@ -185,8 +181,8 @@ struct	consdev constab[]={
 	cons_init(qd),
 #endif
 #endif
-#if NSMG
-	cons_init(smg),
+#if NWSDISPLAY > 0 || NWSKBD > 0
+	cons_init(ws),	/* any other frame buffer console */
 #endif
 
 #ifdef notyet
@@ -291,7 +287,8 @@ cdev_decl(crx);
 #define cflwrite cflrw
 cdev_decl(cfl);
 
-#include "dz.h"
+cdev_decl(qsc);
+
 cdev_decl(dz);
 
 #include "vp.h"
@@ -407,9 +404,9 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 45  was Datakit */
 	cdev_notdef(),			/* 46  was Datakit */
 	cdev_notdef(),			/* 47 */
-	cdev_notdef(),			/* 48 */
+	cdev_tty_init(NQSC,qsc),	/* 48: SC26C94 on VXT2000 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 49: system call tracing */
-	cdev_ksyms_init(NKSYMS,ksyms),  /* 50: Kernel symbols device */
+	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
 	cdev_cnstore_init(NCRX,crx),	/* 51: Console RX50 at 8200 */
 	cdev_notdef(),			/* 52: was: KDB50/RA?? */
 	cdev_fd_init(1,filedesc),	/* 53: file descriptor pseudo-device */
@@ -426,15 +423,15 @@ struct cdevsw	cdevsw[] =
 	cdev_scanner_init(NSS,ss),	/* 64: SCSI scanner */
 	cdev_uk_init(NUK,uk),		/* 65: SCSI unknown */
 	cdev_tty_init(NDL,dl),		/* 66: DL11 */
-    cdev_random_init(1,random), /* 67: random data source */
-	cdev_wsdisplay_init(NWSDISPLAY, wsdisplay),	/* 68: workstation console */
-	cdev_notdef(),			/* 69 */
-	cdev_notdef(),			/* 70 */
+	cdev_random_init(1,random),	/* 67: random data source */
+	cdev_wsdisplay_init(NWSDISPLAY, wsdisplay), /* 68: frame buffers */
+	cdev_mouse_init(NWSKBD, wskbd),	/* 69: keyboards */
+	cdev_mouse_init(NWSMOUSE, wsmouse), /* 70: mice */
 	cdev_disk_init(NRY,ry),		/* 71: VS floppy */
-	cdev_notdef(),		/* 72: was: SCSI bus */
+	cdev_notdef(),			/* 72: was: SCSI bus */
 	cdev_disk_init(NRAID,raid),	/* 73: RAIDframe disk driver */
 #ifdef XFS
-	cdev_xfs_init(NXFS,xfs_dev),    /* 74: xfs communication device */
+	cdev_xfs_init(NXFS,xfs_dev),	/* 74: xfs communication device */
 #else
 	cdev_notdef(),			/* 74 */
 #endif
@@ -556,7 +553,7 @@ iszerodev(dev)
 	return (major(dev) == 3 && minor(dev) == 12);
 }
 
-int getmajor(void *);	/* XXX used by dz_ibus and smg, die die die */
+int getmajor(void *);	/* XXX used by dz_ibus and wscons, die die die */
 
 int
 getmajor(void *ptr)
@@ -566,7 +563,8 @@ getmajor(void *ptr)
 	for (i = 0; i < nchrdev; i++)
 		if (cdevsw[i].d_open == ptr)
 			return i;
-	panic("getmajor");
+	
+	return (-1);
 }
 
 dev_t

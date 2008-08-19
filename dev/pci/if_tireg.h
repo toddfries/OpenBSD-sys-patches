@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tireg.h,v 1.21 2006/01/16 01:47:39 brad Exp $	*/
+/*	$OpenBSD: if_tireg.h,v 1.25 2006/08/16 02:37:00 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -313,6 +313,15 @@
 #define TI_OPMODE_NO_TX_INTRS		0x00002000
 #define TI_OPMODE_NO_RX_INTRS		0x00004000
 #define TI_OPMODE_FATAL_ENB		0x40000000 /* not yet implemented */
+
+#if BYTE_ORDER == BIG_ENDIAN
+#define TI_DMA_SWAP_OPTIONS \
+	TI_OPMODE_BYTESWAP_DATA| \
+	TI_OPMODE_BYTESWAP_BD|TI_OPMODE_WORDSWAP_BD
+#else
+#define TI_DMA_SWAP_OPTIONS \
+	TI_OPMODE_BYTESWAP_DATA
+#endif
 
 /*
  * DMA configuration thresholds.
@@ -773,8 +782,9 @@ struct ti_tx_desc {
  * boundary.
  */
 
+#define TI_JUMBO_FRAMELEN	9018
+#define TI_JUMBO_MTU		(TI_JUMBO_FRAMELEN - ETHER_HDR_LEN - ETHER_CRC_LEN)
 #define TI_PAGE_SIZE		PAGE_SIZE
-#define TI_MIN_FRAMELEN		60
 
 /*
  * Buffer descriptor error flags.
@@ -981,13 +991,9 @@ struct ti_event_desc {
 
 #define TI_SSLOTS	256
 #define TI_MSLOTS	256
-#ifdef __sparc64__
-#define TI_JSLOTS	54
-#else
 #define TI_JSLOTS	384
-#endif
 
-#define TI_JRAWLEN	(ETHER_MAX_LEN_JUMBO + ETHER_ALIGN)
+#define TI_JRAWLEN	(TI_JUMBO_FRAMELEN + ETHER_ALIGN)
 #define TI_JLEN		(TI_JRAWLEN + (sizeof(u_int64_t) - \
        (TI_JRAWLEN % sizeof(u_int64_t))))
 #define TI_JPAGESZ	PAGE_SIZE

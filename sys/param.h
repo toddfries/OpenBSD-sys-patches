@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.66 2006/01/19 03:30:05 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.68 2006/07/26 20:34:11 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200605		/* OpenBSD version (year & month). */
-#define OpenBSD3_9 1		/* OpenBSD 3.9 */
+#define OpenBSD	200611		/* OpenBSD version (year & month). */
+#define OpenBSD4_0 1		/* OpenBSD 4.0 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -143,7 +143,7 @@
 #define MAXFRAG 	8
 
 /*
- * MAXPATHLEN defines the longest permissable path length after expanding
+ * MAXPATHLEN defines the longest permissible path length after expanding
  * symbolic links. It is used to allocate a temporary buffer from the buffer
  * pool in which to do the name expansion, hence should be a power of two,
  * and must be less than or equal to MAXBSIZE.  MAXSYMLINKS defines the

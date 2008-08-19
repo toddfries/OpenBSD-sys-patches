@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc91cxx.c,v 1.23 2006/02/24 01:48:27 brad Exp $	*/
+/*	$OpenBSD: smc91cxx.c,v 1.26 2006/06/23 06:27:11 miod Exp $	*/
 /*	$NetBSD: smc91cxx.c,v 1.11 1998/08/08 23:51:41 mycroft Exp $	*/
 
 /*-
@@ -86,6 +86,7 @@
 #include <sys/syslog.h>
 #include <sys/socket.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/ioctl.h> 
@@ -707,7 +708,7 @@ smc91cxx_start(ifp)
 #if NBPFILTER > 0
 	/* Hand off a copy to the bpf. */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, top);
+		bpf_mtap(ifp->if_bpf, top, BPF_DIRECTION_OUT);
 #endif
 
 	ifp->if_opackets++;
@@ -1010,7 +1011,7 @@ smc91cxx_read(sc)
 	 * we need to check if the packet is ours.
 	 */
 	if (ifp->if_bpf)
-		bpf_mtap(ifp->if_bpf, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	m->m_pkthdr.len = m->m_len = packetlen;
@@ -1234,7 +1235,6 @@ smc91cxx_activate(self, act)
 	s = splnet();
 	switch (act) {
 	case DVACT_ACTIVATE:
-		rv = EOPNOTSUPP;
 		break;
 
 	case DVACT_DEACTIVATE:

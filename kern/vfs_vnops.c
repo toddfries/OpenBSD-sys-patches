@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.48 2005/12/04 19:04:13 pedro Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.53 2006/06/02 20:25:09 pedro Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/buf.h>
@@ -53,6 +54,7 @@
 #include <sys/poll.h>
 
 #include <uvm/uvm_extern.h>
+#include <miscfs/specfs/specdev.h>
 
 int vn_read(struct file *, off_t *, struct uio *, struct ucred *);
 int vn_write(struct file *, off_t *, struct uio *, struct ucred *);
@@ -157,6 +159,19 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 	}
 	if ((error = VOP_OPEN(vp, fmode, cred, p)) != 0)
 		goto bad;
+
+	if (vp->v_flag & VCLONED) {
+		struct cloneinfo *cip = (struct cloneinfo *) vp->v_data;
+
+		vp->v_flag &= ~VCLONED;
+		ndp->ni_vp = cip->ci_vp; /* return cloned vnode */
+		vp->v_data = cip->ci_data; /* restore v_data */
+		VOP_UNLOCK(vp, 0, p); /* keep a reference */
+		vp = ndp->ni_vp; /* for the increment below */
+
+		free(cip, M_TEMP);
+	}
+
 	if (fmode & FWRITE)
 		vp->v_writecount++;
 	return (0);
@@ -179,10 +194,16 @@ vn_writechk(struct vnode *vp)
 	 */
 	if (vp->v_mount->mnt_flag & MNT_RDONLY) {
 		switch (vp->v_type) {
-		case VREG: case VDIR: case VLNK:
+		case VREG:
+		case VDIR:
+		case VLNK:
 			return (EROFS);
-		case VNON: case VCHR: case VSOCK:
-		case VFIFO: case VBAD: case VBLK:
+		case VNON:
+		case VCHR:
+		case VSOCK:
+		case VFIFO:
+		case VBAD:
+		case VBLK:
 			break;
 		}
 	}
@@ -410,8 +431,7 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 					 p->p_ucred, p);
 		if (com == FIONBIO || com == FIOASYNC)  /* XXX */
 			return (0);			/* XXX */
-		/* fall into... */
-
+		/* FALLTHROUGH */
 	default:
 		return (ENOTTY);
 		
@@ -478,7 +498,6 @@ vn_closefile(struct file *fp, struct proc *p)
 		fp->f_cred, p));
 }
 
-/*ARGSUSED*/
 int
 vn_kqfilter(struct file *fp, struct knote *kn)
 {
@@ -501,4 +520,18 @@ vn_access(struct vnode *vp, int mode)
 	VOP_UNLOCK(vp, 0, p);
 
 	return (error);
+}
+
+/* Check if a directory can be found inside another in the hierarchy */
+int
+vn_isunder(struct vnode *lvp, struct vnode *rvp, struct proc *p)
+{
+	int error;
+
+	error = vfs_getcwd_common(lvp, rvp, NULL, NULL, MAXPATHLEN/2, 0, p);
+
+	if (!error)
+		return (1);
+
+	return (0);
 }

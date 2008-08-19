@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.35 2006/02/23 14:15:53 claudio Exp $	*/
+/*	$OpenBSD: route.h,v 1.46 2006/06/18 11:47:45 pascoe Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -75,11 +75,14 @@ struct rt_metrics {
 	u_long	rmx_expire;	/* lifetime for route, e.g. redirect */
 	u_long	rmx_recvpipe;	/* inbound delay-bandwidth product */
 	u_long	rmx_sendpipe;	/* outbound delay-bandwidth product */
-	u_long	rmx_ssthresh;	/* outbound gateway buffer limit */
-	u_long	rmx_rtt;	/* estimated round trip time */
-	u_long	rmx_rttvar;	/* estimated rtt variance */
+	u_long	rmx_ssthresh;	/* outbound gateway buffer limit (deprecated) */
+	u_long	rmx_rtt;	/* estimated round trip time (deprecated) */
+	u_long	rmx_rttvar;	/* estimated rtt variance (deprecated) */
 	u_long	rmx_pksent;	/* packets sent using this route */
 };
+/* XXX overloading some values that are no longer used. */
+#define rmx_refcnt rmx_rttvar	/* # held references only used by sysctl */
+#define	rmx_rt_tableid rmx_rtt	/* routing table ID */
 
 /*
  * rmx_rtt and rmx_rttvar are stored as microseconds;
@@ -157,7 +160,7 @@ struct rtentry {
 struct	rtstat {
 	u_int32_t rts_badredirect;	/* bogus redirect calls */
 	u_int32_t rts_dynamic;		/* routes created by redirects */
-	u_int32_t rts_newgateway;		/* routes modified by redirects */
+	u_int32_t rts_newgateway;	/* routes modified by redirects */
 	u_int32_t rts_unreach;		/* lookups which failed */
 	u_int32_t rts_wildcard;		/* lookups satisfied by a wildcard */
 };
@@ -180,6 +183,8 @@ struct rt_msghdr {
 	u_long	rtm_inits;	/* which metrics we are initializing */
 	struct	rt_metrics rtm_rmx; /* metrics themselves */
 };
+/* overload no longer used field */
+#define rtm_tableid	rtm_rmx.rmx_rt_tableid
 
 #define RTM_VERSION	3	/* Up the ante and ignore older versions */
 
@@ -283,6 +288,8 @@ struct sockaddr_rtlabel {
 	char		sr_label[RTLABEL_LEN];
 };
 
+#define	RT_TABLEID_MAX	255
+
 #ifdef _KERNEL
 const char	*rtlabel_id2name(u_int16_t);
 u_int16_t	 rtlabel_name2id(char *);
@@ -304,11 +311,12 @@ void		 rtlabel_unref(u_int16_t);
 
 extern struct route_cb route_cb;
 extern struct rtstat rtstat;
-extern struct radix_node_head *rt_tables[];
 extern const struct sockaddr_rtin rt_defmask4;
 
 struct	socket;
 void	 route_init(void);
+int	 rtable_add(u_int);
+int	 rtable_exists(u_int);
 int	 route_output(struct mbuf *, ...);
 int	 route_usrreq(struct socket *, int, struct mbuf *,
 			   struct mbuf *, struct mbuf *);
@@ -316,10 +324,11 @@ void	 rt_ifmsg(struct ifnet *);
 void	 rt_ifannouncemsg(struct ifnet *, int);
 void	 rt_maskedcopy(struct sockaddr *,
 	    struct sockaddr *, struct sockaddr *);
-void	 rt_missmsg(int, struct rt_addrinfo *, int, int);
+void	 rt_missmsg(int, struct rt_addrinfo *, int, struct ifnet *, int,
+	    u_int);
 void	 rt_newaddrmsg(int, struct ifaddr *, int, struct rtentry *);
 int	 rt_setgate(struct rtentry *, struct sockaddr *,
-			 struct sockaddr *);
+	    struct sockaddr *, u_int);
 void	 rt_setmetrics(u_long, struct rt_metrics *, struct rt_kmetrics *);
 void	 rt_getmetrics(struct rt_kmetrics *, struct rt_metrics *);
 int      rt_timer_add(struct rtentry *,
@@ -333,10 +342,12 @@ void	 rt_timer_queue_destroy(struct rttimer_queue *, int);
 void	 rt_timer_remove_all(struct rtentry *);
 unsigned long	rt_timer_count(struct rttimer_queue *);
 void	 rt_timer_timer(void *);
-void	 rtable_init(void **);
 void	 rtalloc(struct route *);
+#ifdef SMALL_KERNEL
+#define	rtalloc_mpath(r, s, t)	rtalloc(r)
+#endif
 struct rtentry *
-	 rtalloc1(struct sockaddr *, int);
+	 rtalloc1(struct sockaddr *, int, u_int);
 void	 rtalloc_noclone(struct route *, int);
 struct rtentry *
 	 rtalloc2(struct sockaddr *, int, int);
@@ -349,8 +360,11 @@ void	 rtredirect(struct sockaddr *, struct sockaddr *,
 			 struct rtentry **);
 int	 rtrequest(int, struct sockaddr *,
 			struct sockaddr *, struct sockaddr *, int,
-			struct rtentry **);
-int	 rtrequest1(int, struct rt_addrinfo *, struct rtentry **);
+			struct rtentry **, u_int);
+int	 rtrequest1(int, struct rt_addrinfo *, struct rtentry **, u_int);
+void	 rt_if_remove(struct ifnet *);
 
+struct radix_node_head	*rt_gettable(sa_family_t, u_int);
+struct radix_node	*rt_lookup(struct sockaddr *, struct sockaddr *, int);
 #endif /* _KERNEL */
 #endif /* _NET_ROUTE_H_ */

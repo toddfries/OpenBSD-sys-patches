@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.141 2006/02/08 23:56:29 pvalchev Exp $
+#	$OpenBSD: RAMDISK,v 1.144 2006/07/25 19:16:51 kettenis Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -9,12 +9,9 @@ option		I386_CPU	# CPU classes; at least one is REQUIRED
 option		I486_CPU
 option		I586_CPU
 option		I686_CPU
-#option		GPL_MATH_EMULATE	# floating point emulation
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
-
-#option		DUMMY_NOPS	# speed hack; recommended
 
 maxusers	4		# estimated number of users
 option		TIMEZONE=0	# time zone to adjust RTC time by
@@ -207,7 +204,6 @@ le0	at isa? port 0x360 irq 15 drq 6	# IsoLan, NE2100, and DEPCA
 ep0	at eisa?
 ep*	at eisa?			# 3C579 ethernet cards
 #fea*	at eisa?			# DEC DEFEA FDDI cards
-le*	at pci?				# PCnet-PCI based ethernet cards
 ep*	at isapnp?			# 3C509 PnP ethernet cards
 le*	at isapnp?
 de*	at pci?				# DC21X4X-based ethernet cards
@@ -243,6 +239,7 @@ em*	at pci?				# Intel Pro/1000 ethernet
 re*	at pci?				# Realtek 8169/8169S/8110S
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
+pcn*	at pci?				# AMD PCnet-PCI Ethernet
 
 # Wireless network cards
 wi*	at pci?				# WaveLAN IEEE 802.11DS

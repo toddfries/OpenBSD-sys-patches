@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.28 2006/01/22 00:40:01 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.30 2006/08/17 10:34:14 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.22 1997/11/26 04:18:20 briggs Exp $	*/
 
 /*
@@ -375,7 +375,7 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 	if (lp->d_secperunit == 0)
 		lp->d_secperunit = 0x1fffffff;
 	if (lp->d_secpercyl == 0)
-		lp->d_secpercyl = 1;
+		return ("invalid geometry");
 	lp->d_npartitions = RAW_PART + 1;
 	for (i = 0; i < MAXPARTITIONS; i++) {
 		lp->d_partitions[i].p_size = 0;
@@ -606,11 +606,4 @@ bad:
 	bp->b_flags |= B_ERROR;
 done:
 	return (0);
-}
-
-void
-dk_establish(dk, dev)
-	struct disk *dk;
-	struct device *dev;
-{
 }

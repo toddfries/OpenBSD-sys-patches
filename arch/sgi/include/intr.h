@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.13 2005/04/19 15:29:48 mickey Exp $ */
+/*	$OpenBSD: intr.h,v 1.15 2006/07/09 22:10:05 mk Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -38,7 +38,7 @@
  *  to the interrupts "priority level". In this case the generic
  *  interrupt handler can be used.
  *
- *  The IMASK_EXTERNAL define is used to select wether the CPU
+ *  The IMASK_EXTERNAL define is used to select whether the CPU
  *  interrupt mask should be controlled by the cpl mask value
  *  or not. If the mask is external, the CPU mask is never changed
  *  from the value it gets when interrupt dispatchers are registred.
@@ -47,7 +47,7 @@
  */
 #define	IMASK_EXTERNAL		/* XXX move this to config */
 
-/* This define controls wether splraise is inlined or not */
+/* This define controls whether splraise is inlined or not */
 /* #define INLINE_SPLRAISE */
 
 
@@ -87,7 +87,6 @@
 #define spltty()		splraise(imask[IPL_TTY])
 #define splaudio()		splraise(imask[IPL_AUDIO])
 #define splclock()		splraise(SPL_CLOCKMASK|SINT_ALLMASK)
-#define splimp()		splraise(imask[IPL_VM])
 #define splvm()			splraise(imask[IPL_VM])
 #define splsoftclock()		splraise(SINT_CLOCKMASK)
 #define splsoftnet()		splraise(SINT_NETMASK|SINT_CLOCKMASK)
@@ -97,7 +96,6 @@
 #define splnet()		splhigh()
 #define spltty()		splhigh()
 #define splclock()		splhigh()
-#define splimp()		splhigh()
 #define splvm()			splhigh()
 #define splsoftclock()		splhigh()
 #define splsoftnet()		splhigh()

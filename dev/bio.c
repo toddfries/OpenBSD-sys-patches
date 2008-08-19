@@ -1,4 +1,4 @@
-/*	$OpenBSD: bio.c,v 1.6 2005/08/17 02:32:23 dlg Exp $	*/
+/*	$OpenBSD: bio.c,v 1.8 2006/05/29 09:34:38 mk Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -43,61 +43,44 @@ struct bio_mapping {
 
 LIST_HEAD(, bio_mapping) bios = LIST_HEAD_INITIALIZER(bios);
 
-struct bio_softc {
-	struct device	 sc_dev;
-};
-
 void	bioattach(int);
 int	bioclose(dev_t, int, int, struct proc *);
 int	bioioctl(dev_t, u_long, caddr_t, int, struct proc *);
 int	bioopen(dev_t, int, int, struct proc *);
 
 int	bio_delegate_ioctl(struct bio_mapping *, u_long, caddr_t);
-struct bio_mapping *bio_lookup(char *);
+struct	bio_mapping *bio_lookup(char *);
 int	bio_validate(void *);
 
 void
-bioattach(nunits)
-	int nunits;
+bioattach(int nunits)
 {
 }
 
 int
-bioopen(dev, flags, mode, p)
-	dev_t dev;
-	int flags, mode;
-	struct proc *p;
+bioopen(dev_t dev, int flags, int mode, struct proc *p)
 {
 	return (0);
 }
 
 int
-bioclose(dev, flags, mode, p)
-	dev_t dev;
-	int flags, mode;
-	struct proc *p;
+bioclose(dev_t dev, int flags, int mode, struct proc *p)
 {
 	return (0);
 }
 
 int
-bioioctl(dev, cmd, addr, flag, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t addr;
-	int flag;
-	struct proc *p;
+bioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 {
-	char name[16];
-	size_t len;
-	int error;
 	struct bio_locate *locate;
 	struct bio_common *common;
+	char name[16];
+	int error;
 
 	switch (cmd) {
 	case BIOCLOCATE:
 		locate = (struct bio_locate *)addr;
-		error = copyinstr(locate->bl_name, name, 16, &len);
+		error = copyinstr(locate->bl_name, name, 16, NULL);
 		if (error != 0)
 			return (error);
 		locate->bl_cookie = bio_lookup(name);
@@ -116,9 +99,7 @@ bioioctl(dev, cmd, addr, flag, p)
 }
 
 int
-bio_register(dev, ioctl)
-	struct device *dev;
-	int (*ioctl)(struct device *, u_long, caddr_t);
+bio_register(struct device *dev, int (*ioctl)(struct device *, u_long, caddr_t))
 {
 	struct bio_mapping *bm;
 
@@ -132,8 +113,7 @@ bio_register(dev, ioctl)
 }
 
 void
-bio_unregister(dev)
-	struct device *dev;
+bio_unregister(struct device *dev)
 {
 	struct bio_mapping *bm, *next;
 
@@ -148,8 +128,7 @@ bio_unregister(dev)
 }
 
 struct bio_mapping *
-bio_lookup(name)
-	char *name;
+bio_lookup(char *name)
 {
 	struct bio_mapping *bm;
 
@@ -160,8 +139,7 @@ bio_lookup(name)
 }
 
 int
-bio_validate(cookie)
-	void *cookie;
+bio_validate(void *cookie)
 {
 	struct bio_mapping *bm;
 
@@ -172,10 +150,7 @@ bio_validate(cookie)
 }
 
 int
-bio_delegate_ioctl(bm, cmd, addr)
-	struct bio_mapping *bm;
-	u_long cmd;
-	caddr_t addr;
+bio_delegate_ioctl(struct bio_mapping *bm, u_long cmd, caddr_t addr)
 {
 	return (bm->bm_ioctl(bm->bm_dev, cmd, addr));
 }

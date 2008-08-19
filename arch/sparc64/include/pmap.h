@@ -141,7 +141,7 @@ struct prom_map {
 #define PMAP_4M		0x018
 #define PMAP_SZ_TO_TTE(x)	(((x)&0x018)<<58)
 /* If these bits are different in va's to the same PA then there is an aliasing in the d$ */
-#define VA_ALIAS_MASK   (1<<14)	
+#define VA_ALIAS_MASK   (1<<13)	
 
 typedef	struct pmap *pmap_t;
 
@@ -166,7 +166,7 @@ int pmap_count_res(pmap_t pmap);
 
 void pmap_bootstrap(u_long kernelstart, u_long kernelend, u_int numctx);
 /* make sure all page mappings are modulo 16K to prevent d$ aliasing */
-#define PMAP_PREFER(pa, va)	(*(va)+=(((*(va))^(pa))&(1<<(PGSHIFT+1))))
+#define PMAP_PREFER(pa, va)	(*(va) += (((*(va)) ^ (pa)) & VA_ALIAS_MASK))
 
 #define PMAP_GROWKERNEL         /* turn on pmap_growkernel interface */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88k_machdep.c,v 1.13 2005/12/11 21:36:06 miod Exp $	*/
+/*	$OpenBSD: m88k_machdep.c,v 1.16 2006/05/08 14:36:09 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -54,10 +54,10 @@
 #include <sys/errno.h>
 #include <sys/lock.h>
 
+#include <machine/asm.h>
 #include <machine/asm_macro.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
-#include <machine/locore.h>
 #include <machine/reg.h>
 #ifdef M88100
 #include <machine/m88100.h>
@@ -73,10 +73,15 @@
 #include <ddb/db_interface.h>
 #endif /* DDB */
 
+typedef struct {
+	u_int32_t word_one, word_two;
+} m88k_exception_vector_area;
+
 void	dosoftint(void);
 void	dumpconf(void);
 void	dumpsys(void);
 void	regdump(struct trapframe *f);
+void	vector_init(m88k_exception_vector_area *, u_int32_t *);
 
 /*
  * CMMU and CPU variables
@@ -91,8 +96,6 @@ struct cpu_info m88k_cpus[MAX_CPUS];
 u_int	max_cpus;
 
 struct cmmu_p *cmmu;
-
-int longformat = 1;  /* for regdump() */
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -238,20 +241,8 @@ remrunqueue(vp)
 		whichqs &= ~(1 << which);
 }
 
-void
-nmihand(void *framep)
-{
 #ifdef DDB
-	printf("Abort Pressed\n");
-	Debugger();
-#else
-	struct trapframe *frame = framep;
-
-	printf("Spurious NMI?\n");
-	regdump(frame);
-#endif /* DDB */
-}
-
+int longformat = 1;
 void
 regdump(struct trapframe *f)
 {
@@ -315,6 +306,7 @@ regdump(struct trapframe *f)
 	}
 #endif
 }
+#endif	/* DDB */
 
 /*
  * Set up the cpu_info pointer and the cpu number for the current processor.
@@ -414,4 +406,86 @@ spl0()
 
 	setipl(0);
 	return (s);
+}
+
+#define EMPTY_BR	0xc0000000	/* empty "br" instruction */
+#define NO_OP 		0xf4005800	/* "or r0, r0, r0" */
+
+#define BRANCH(FROM, TO) \
+	(EMPTY_BR | ((vaddr_t)(TO) - (vaddr_t)(FROM)) >> 2)
+
+#define SET_VECTOR(NUM, VALUE) \
+	do { \
+		vbr[NUM].word_one = NO_OP; \
+		vbr[NUM].word_two = BRANCH(&vbr[NUM].word_two, VALUE); \
+	} while (0)
+
+/*
+ * vector_init(vector, vector_init_list)
+ *
+ * This routine sets up the m88k vector table for the running processor.
+ * This is the first C code to run, before anything is initialized.
+ *
+ * It fills the exception vectors page. I would add an extra four bytes
+ * to the page pointed to by the vbr, since the 88100 may execute the
+ * first instruction of the next trap handler, as documented in its
+ * Errata. Processing trap #511 would then fall into the next page,
+ * unless the address computation wraps, or software traps can not trigger
+ * the issue - the Errata does not provide more detail. And since the
+ * MVME BUG does not add an extra NOP after their VBR page, I'll assume this
+ * is safe for now -- miod
+ */
+void
+vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list)
+{
+	u_int num;
+	u_int32_t vec;
+
+	for (num = 0; (vec = vector_init_list[num]) != 0; num++)
+		SET_VECTOR(num, vec);
+
+	switch (cputyp) {
+	default:
+#ifdef M88110
+	case CPU_88110:
+	    {
+		extern void m88110_sigsys(void);
+		extern void m88110_syscall_handler(void);
+		extern void m88110_cache_flush_handler(void);
+		extern void m88110_stepbpt(void);
+		extern void m88110_userbpt(void);
+
+		for (; num < 512; num++)
+			SET_VECTOR(num, m88110_sigsys);
+
+		SET_VECTOR(450, m88110_syscall_handler);
+		SET_VECTOR(451, m88110_cache_flush_handler);
+		SET_VECTOR(504, m88110_stepbpt);
+		SET_VECTOR(511, m88110_userbpt);
+	    }
+		break;
+#endif
+#ifdef M88100
+	case CPU_88100:
+	    {
+		extern void sigsys(void);
+		extern void syscall_handler(void);
+		extern void cache_flush_handler(void);
+		extern void stepbpt(void);
+		extern void userbpt(void);
+
+		for (; num < 512; num++)
+			SET_VECTOR(num, sigsys);
+
+		SET_VECTOR(450, syscall_handler);
+		SET_VECTOR(451, cache_flush_handler);
+		SET_VECTOR(504, stepbpt);
+		SET_VECTOR(511, userbpt);
+	    }
+		break;
+#endif
+	}
+
+	/* GCC will by default produce explicit trap 503 for division by zero */
+	SET_VECTOR(503, vector_init_list[8]);
 }

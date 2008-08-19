@@ -1,4 +1,4 @@
-/*	$OpenBSD: schizoreg.h,v 1.8 2005/05/19 18:28:59 mickey Exp $	*/
+/*	$OpenBSD: schizoreg.h,v 1.15 2006/06/02 04:47:05 jason Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -26,9 +26,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 struct schizo_pbm_regs {
-	volatile u_int64_t	_unused1[64];
-	struct iommureg		iommu;
-	volatile u_int64_t	iommu_ctxflush;
+	volatile u_int64_t	_unused1[64];		/* 0x0000 - 0x01ff */
+	struct iommureg		iommu;			/* 0x0200 - 0x0217 */
+	volatile u_int64_t	iommu_ctxflush;		/* 0x0218 - 0x021f */
 	volatile u_int64_t	_unused2[444];
 	volatile u_int64_t	imap[64];
 	volatile u_int64_t	_unused3[64];
@@ -62,7 +62,9 @@ struct schizo_regs {
 	volatile u_int64_t	pcib_io_mask;
 	volatile u_int64_t	_unused1[8176];
 
-	volatile u_int64_t	_unused2[3];
+	volatile u_int64_t	control_status;
+	volatile u_int64_t	error_control;
+	volatile u_int64_t	interrupt_control;
 	volatile u_int64_t	safari_errlog;
 	volatile u_int64_t	eccctrl;
 	volatile u_int64_t	_unused3[1];
@@ -84,6 +86,8 @@ struct schizo_regs {
 #define	SCZ_PCIB_MEM_MASK		0x00068
 #define	SCZ_PCIB_IO_MATCH		0x00070
 #define	SCZ_PCIB_IO_MASK		0x00078
+#define	SCZ_CONTROL_STATUS		0x10000
+#define	SCZ_SAFARI_INTCTRL		0x10010
 #define	SCZ_SAFARI_ERRLOG		0x10018
 #define	SCZ_ECCCTRL			0x10020
 #define	SCZ_UE_AFSR			0x10030
@@ -98,9 +102,13 @@ struct schizo_regs {
 #define	SCZ_PCI_IOMMU_CTXFLUSH		0x00218
 #define	SCZ_PCI_IMAP_BASE		0x01000
 #define	SCZ_PCI_ICLR_BASE		0x01400
+#define	SCZ_PCI_INTR_RETRY		0x01a00	/* interrupt retry */
+#define	SCZ_PCI_DMA_FLUSH		0x01a08	/* pci consistent dma flush */
 #define	SCZ_PCI_CTRL			0x02000
 #define	SCZ_PCI_AFSR			0x02010
 #define	SCZ_PCI_AFAR			0x02018
+#define	SCZ_PCI_DIAG			0x02020
+#define	SCZ_PCI_ESTAR			0x02028
 #define	SCZ_PCI_STRBUF_CTRL		0x02800
 #define	SCZ_PCI_STRBUF_FLUSH		0x02808
 #define	SCZ_PCI_STRBUF_FSYNC		0x02810
@@ -109,9 +117,9 @@ struct schizo_regs {
 #define	SCZ_PCI_IOMMU_DATA		0x0a600
 #define	SCZ_PCI_STRBUF_CTXMATCH		0x10000
 
-#define	SCZ_ECCCTRL_EE			0x8000000000000000UL
-#define	SCZ_ECCCTRL_UE			0x4000000000000000UL
-#define	SCZ_ECCCTRL_CE			0x2000000000000000UL
+#define	SCZ_ECCCTRL_EE_INTEN		0x8000000000000000UL
+#define	SCZ_ECCCTRL_UE_INTEN		0x4000000000000000UL
+#define	SCZ_ECCCTRL_CE_INTEN		0x2000000000000000UL
 
 #define	SCZ_UEAFSR_PPIO			0x8000000000000000UL
 #define	SCZ_UEAFSR_PDRD			0x4000000000000000UL
@@ -128,6 +136,21 @@ struct schizo_regs {
 #define	SCZ_UEAFSR_MTAG			0x000000000000e000UL
 #define	SCZ_UEAFSR_ECCSYND		0x00000000000001ffUL
 
+#define	SCZ_UEAFAR_PIO			0x0000080000000000UL	/* 0=pio, 1=memory */
+#define	SCZ_UEAFAR_PIO_TYPE		0x0000078000000000UL	/* pio type: */
+#define	SCZ_UEAFAR_PIO_UPA		0x0000078000000000UL	/*  upa */
+#define	SZC_UEAFAR_PIO_SAFARI		0x0000060000000000UL	/*  safari/upa64s */
+#define	SCZ_UEAFAR_PIO_NLAS		0x0000058000000000UL	/*  newlink alt space */
+#define	SCZ_UEAFAR_PIO_NLS		0x0000050000000000UL	/*  newlink space */
+#define	SCZ_UEAFAR_PIO_NLI		0x0000040000000000UL	/*  newlink interface */
+#define	SCZ_UEAFAR_PIO_PCIAM		0x0000030000000000UL	/*  pcia: memory */
+#define	SCZ_UEAFAR_PIO_PCIAI		0x0000020000000000UL	/*  pcia: interface */
+#define	SZC_UEAFAR_PIO_PCIBC		0x0000018000000000UL	/*  pcia: config / i/o */
+#define	SZC_UEAFAR_PIO_PCIBM		0x0000010000000000UL	/*  pcib: memory */
+#define	SZC_UEAFAR_PIO_PCIBI		0x0000000000000000UL	/*  pcib: interface */
+#define	SCZ_UEAFAR_PIO_PCIAC		0x0000038000000000UL	/*  pcib: config / i/o */
+#define	SCZ_UEAFAR_MEMADDR		0x000007fffffffff0UL	/* memory address */
+
 #define	SCZ_CEAFSR_PPIO			0x8000000000000000UL
 #define	SCZ_CEAFSR_PDRD			0x4000000000000000UL
 #define	SCZ_CEAFSR_PDWR			0x2000000000000000UL
@@ -143,22 +166,38 @@ struct schizo_regs {
 #define	SCZ_CEAFSR_MTAG			0x000000000000e000UL
 #define	SCZ_CEAFSR_ECCSYND		0x00000000000001ffUL
 
-#define	SCZ_PCICTRL_BUS_UNUS		(1UL << 63UL)
-#define	SCZ_PCICTRL_ESLCK		(1UL << 51UL)
-#define	SCZ_PCICTRL_ERRSLOT		(7UL << 48UL)
-#define	SCZ_PCICTRL_TTO_ERR		(1UL << 38UL)
-#define	SCZ_PCICTRL_RTRY_ERR		(1UL << 37UL)
-#define	SCZ_PCICTRL_DTO_ERR		(1UL << 36UL)
-#define	SCZ_PCICTRL_SBH_ERR		(1UL << 35UL)
-#define	SCZ_PCICTRL_SERR		(1UL << 34UL)
-#define	SCZ_PCICTRL_PCISPD		(1UL << 33UL)
-#define	SCZ_PCICTRL_PTO			(3UL << 24UL)
-#define	SCZ_PCICTRL_DTO_INT		(1UL << 19UL)
-#define	SCZ_PCICTRL_SBH_INT		(1UL << 18UL)
-#define	SCZ_PCICTRL_EEN			(1UL << 17UL)
-#define	SCZ_PCICTRL_PARK		(1UL << 16UL)
-#define	SCZ_PCICTRL_PCIRST		(1UL <<  8UL)
-#define	SCZ_PCICTRL_ARB			(0x3fUL << 0UL)
+#define	SCZ_CEAFAR_PIO			0x0000080000000000UL	/* 0=pio, 1=memory */
+#define	SCZ_CEAFAR_PIO_TYPE		0x0000078000000000UL	/* pio type: */
+#define	SCZ_CEAFAR_PIO_UPA		0x0000078000000000UL	/*  upa */
+#define	SZC_CEAFAR_PIO_SAFARI		0x0000060000000000UL	/*  safari/upa64s */
+#define	SCZ_CEAFAR_PIO_NLAS		0x0000058000000000UL	/*  newlink alt space */
+#define	SCZ_CEAFAR_PIO_NLS		0x0000050000000000UL	/*  newlink space */
+#define	SCZ_CEAFAR_PIO_NLI		0x0000040000000000UL	/*  newlink interface */
+#define	SCZ_CEAFAR_PIO_PCIAM		0x0000030000000000UL	/*  pcia: memory */
+#define	SCZ_CEAFAR_PIO_PCIAI		0x0000020000000000UL	/*  pcia: interface */
+#define	SZC_CEAFAR_PIO_PCIBC		0x0000018000000000UL	/*  pcia: config / i/o */
+#define	SZC_CEAFAR_PIO_PCIBM		0x0000010000000000UL	/*  pcib: memory */
+#define	SZC_CEAFAR_PIO_PCIBI		0x0000000000000000UL	/*  pcib: interface */
+#define	SCZ_CEAFAR_PIO_PCIAC		0x0000038000000000UL	/*  pcib: config / i/o */
+#define	SCZ_CEAFAR_MEMADDR		0x000007fffffffff0UL	/* memory address */
+
+#define	SCZ_PCICTRL_BUS_UNUS		(1UL << 63UL)		/* bus unusable */
+#define	SCZ_PCICTRL_ESLCK		(1UL << 51UL)		/* error slot locked */
+#define	SCZ_PCICTRL_ERRSLOT		(7UL << 48UL)		/* error slot */
+#define	SCZ_PCICTRL_TTO_ERR		(1UL << 38UL)		/* pci trdy# timeout */
+#define	SCZ_PCICTRL_RTRY_ERR		(1UL << 37UL)		/* pci rtry# timeout */
+#define	SCZ_PCICTRL_DTO_ERR		(1UL << 36UL)		/* pci discard timeout */
+#define	SCZ_PCICTRL_SBH_ERR		(1UL << 35UL)		/* pci strm hole */
+#define	SCZ_PCICTRL_SERR		(1UL << 34UL)		/* pci serr# sampled */
+#define	SCZ_PCICTRL_PCISPD		(1UL << 33UL)		/* speed (0=clk/2,1=clk) */
+#define	SCZ_PCICTRL_PTO			(3UL << 24UL)		/* pci timeout interval */
+#define	SCZ_PCICTRL_DTO_INT		(1UL << 19UL)		/* discard intr en */
+#define	SCZ_PCICTRL_SBH_INT		(1UL << 18UL)		/* strm byte hole intr en */
+#define	SCZ_PCICTRL_EEN			(1UL << 17UL)		/* error intr en */
+#define	SCZ_PCICTRL_PARK		(1UL << 16UL)		/* bus parked */
+#define	SCZ_PCICTRL_PCIRST		(1UL <<  8UL)		/* pci reset */
+#define	SCZ_PCICTRL_ARB			(0x3fUL << 0UL)		/* dma arb enables */
+#define SCZ_PCICTRL_BITS "\20\277UNUS\263ESLCK\246TTO\245RTRY\244DTO\243SBH\242SERR\241SPD\223DTO_INT\222SBH_INT\221EEN\220PARK\210PCIRST"
 
 #define	SCZ_PCIAFSR_PMA			0x8000000000000000UL
 #define	SCZ_PCIAFSR_PTA			0x4000000000000000UL
@@ -177,6 +216,18 @@ struct schizo_regs {
 #define	SCZ_PCIAFSR_CFG			0x0000000040000000UL
 #define	SCZ_PCIAFSR_MEM			0x0000000020000000UL
 #define	SCZ_PCIAFSR_IO			0x0000000010000000UL
+
+#define SCZ_PCIAFSR_BITS "\20\277PMA\276PTA\275PRTRY\274PPERR\273PTTO\272PUNUS\271SMA\270STA\267SRTRY\266SPERR\265STTO\264SUNUS\237BLK\236CFG\235MEM\234IO"
+
+#define	SCZ_PCIDIAG_D_BADECC		(1UL << 10UL)	/* disable bad ecc */
+#define	SCZ_PCIDIAG_D_BYPASS		(1UL <<  9UL)	/* disable mmu bypass */
+#define	SCZ_PCIDIAG_D_TTO		(1UL <<  8UL)	/* disable trdy# timeout */
+#define	SCZ_PCIDIAG_D_RTRYARB		(1UL <<  7UL)	/* disable retry arb */
+#define	SCZ_PCIDIAG_D_RETRY		(1UL <<  6UL)	/* disable retry lim */
+#define	SCZ_PCIDIAG_D_INTSYNC		(1UL <<  5UL)	/* disable write sync */
+#define	SCZ_PCIDIAG_I_DMADPAR		(1UL <<  3UL)	/* invert dma parity */
+#define	SCZ_PCIDIAG_I_PIODPAR		(1UL <<  2UL)	/* invert pio data parity */
+#define	SCZ_PCIDIAG_I_PIOAPAR		(1UL <<  1UL)	/* invert pio addr parity */
 
 #define	SCZ_PBM_A_REGS			(0x600000UL - 0x400000UL)
 #define	SCZ_PBM_B_REGS			(0x700000UL - 0x400000UL)

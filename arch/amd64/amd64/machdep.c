@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.45 2006/01/19 18:21:03 grange Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.50 2006/05/31 10:34:54 todd Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -146,6 +146,9 @@
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
 
+/* the following is used externally for concurrent handlers */
+int setperf_prio = 0;
+
 #ifdef CPURESET_DELAY
 int	cpureset_delay = CPURESET_DELAY;
 #else
@@ -176,7 +179,7 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 #ifdef NBUF
-int	nbuf = NUF;
+int	nbuf = NBUF;
 #else
 int	nbuf = 0;
 #endif
@@ -217,6 +220,10 @@ typedef struct _boot_args32 {
 } bootarg32_t;
 
 #define BOOTARGC_MAX	NBPG	/* one page */
+
+#ifdef NFSCLIENT
+bios_bootmac_t *bios_bootmac;
+#endif
 
 /* locore copies the arguments from /boot to here for us */
 char bootinfo[BOOTARGC_MAX];
@@ -692,8 +699,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			return (ENOTDIR);		/* overloaded */
 #ifdef APERTURE
 		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp,
-			    allowaperture));
+			return (sysctl_int_lower(oldp, oldlenp, newp, newlen,
+			    &allowaperture));
 		else
 			return (sysctl_int(oldp, oldlenp, newp, newlen,
 			    &allowaperture));
@@ -903,11 +910,13 @@ haltsys:
 
 	if (howto & RB_HALT) {
 #if NACPI > 0
-		extern int acpi_s5;
+		extern int acpi_s5, acpi_enabled;
 
-		delay(500000);
-		if (howto & RB_POWERDOWN || acpi_s5)
-			acpi_powerdown();
+		if (acpi_enabled) {
+			delay(500000);
+			if (howto & RB_POWERDOWN || acpi_s5)
+				acpi_powerdown();
+		}
 #endif
 		printf("\n");
 		printf("The operating system has halted.\n");
@@ -1953,6 +1962,11 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				cnset(cdp->consdev);
 			}
 			break;
+#ifdef NFSCLIENT
+		case BOOTARG_BOOTMAC:
+			bios_bootmac = (bios_bootmac_t *)q->ba_arg;
+			break;
+#endif                 
 
 		default:
 #ifdef BOOTINFO_DEBUG

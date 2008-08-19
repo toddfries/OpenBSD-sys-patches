@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipip.c,v 1.33 2005/07/31 03:52:19 pascoe Exp $ */
+/*	$OpenBSD: ip_ipip.c,v 1.37 2006/04/25 15:49:35 claudio Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -185,15 +185,6 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 
 	ipo = mtod(m, struct ip *);
 
-#ifdef MROUTING
-	if (ipo->ip_v == IPVERSION && ipo->ip_p == IPPROTO_IPV4) {
-		if (IN_MULTICAST(((struct ip *)((char *) ipo + iphlen))->ip_dst.s_addr)) {
-			ipip_mroute_input (m, iphlen);
-			return;
-		}
-	}
-#endif /* MROUTING */
-
 	/* Keep outer ecn field. */
 	switch (v >> 4) {
 #ifdef INET
@@ -290,10 +281,8 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 	if ((m->m_pkthdr.rcvif == NULL ||
 	    !(m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK)) &&
 	    ipip_allow != 2) {
-		for (ifp = ifnet.tqh_first; ifp != 0;
-		     ifp = ifp->if_list.tqe_next) {
-			for (ifa = ifp->if_addrlist.tqh_first; ifa != 0;
-			     ifa = ifa->ifa_list.tqe_next) {
+		TAILQ_FOREACH(ifp, &ifnet, if_list) {
+			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 #ifdef INET
 				if (ipo) {
 					if (ifa->ifa_addr->sa_family !=
@@ -362,10 +351,10 @@ ipip_input(struct mbuf *m, int iphlen, struct ifnet *gifp)
 #if NBPFILTER > 0
 	if (gifp && gifp->if_bpf)
 		bpf_mtap_af(gifp->if_bpf, ifq == &ipintrq ? AF_INET : AF_INET6,
-		    m);
+		    m, BPF_DIRECTION_IN);
 #endif
 
-	s = splimp();			/* isn't it already? */
+	s = splnet();			/* isn't it already? */
 	if (IF_QFULL(ifq)) {
 		IF_DROP(ifq);
 		m_freem(m);

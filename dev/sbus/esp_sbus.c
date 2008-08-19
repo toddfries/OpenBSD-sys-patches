@@ -1,4 +1,4 @@
-/*	$OpenBSD: esp_sbus.c,v 1.16 2004/09/29 19:17:43 miod Exp $	*/
+/*	$OpenBSD: esp_sbus.c,v 1.19 2006/06/21 22:25:17 miod Exp $	*/
 /*	$NetBSD: esp_sbus.c,v 1.14 2001/04/25 17:53:37 bouyer Exp $	*/
 
 /*-
@@ -81,7 +81,6 @@ static int esp_unit_offset;
 
 struct esp_softc {
 	struct ncr53c9x_softc sc_ncr53c9x;	/* glue to MI code */
-	struct sbusdev	sc_sd;			/* sbus device */
 
 	bus_space_tag_t	sc_bustag;
 	bus_dma_tag_t	sc_dmatag;
@@ -179,8 +178,7 @@ espattach_sbus(struct device *parent, struct device *self, void *aux)
 	sc->sc_id = getpropint(sa->sa_node, "initiator-id", 7);
 	sc->sc_freq = getpropint(sa->sa_node, "clock-frequency", -1);
 	if (sc->sc_freq < 0)
-		sc->sc_freq = ((struct sbus_softc *)
-		    sc->sc_dev.dv_parent)->sc_clockfreq;
+		sc->sc_freq = sa->sa_frequency;
 
 #ifdef ESP_SBUS_DEBUG
 	printf("%s: espattach_sbus: sc_id %d, freq %d\n",
@@ -278,10 +276,6 @@ espattach_sbus(struct device *parent, struct device *self, void *aux)
 
 		esc->sc_pri = sa->sa_pri;
 
-		/* add me to the sbus structures */
-		esc->sc_sd.sd_reset = (void *) ncr53c9x_reset;
-		sbus_establish(&esc->sc_sd, &sc->sc_dev);
-
 		printf("%s", self->dv_xname);
 		espattach(esc, &esp_sbus_glue);
 
@@ -349,10 +343,6 @@ espattach_sbus(struct device *parent, struct device *self, void *aux)
 
 	esc->sc_pri = sa->sa_pri;
 
-	/* add me to the sbus structures */
-	esc->sc_sd.sd_reset = (void *) ncr53c9x_reset;
-	sbus_establish(&esc->sc_sd, &sc->sc_dev);
-
 	if (strcmp("ptscII", sa->sa_name) == 0) {
 		espattach(esc, &esp_sbus_glue1);
 	} else {
@@ -411,10 +401,6 @@ espattach_dma(struct device *parent, struct device *self, void *aux)
 	}
 
 	esc->sc_pri = sa->sa_pri;
-
-	/* Assume SBus is grandparent */
-	esc->sc_sd.sd_reset = (void *) ncr53c9x_reset;
-	sbus_establish(&esc->sc_sd, parent);
 
 	espattach(esc, &esp_sbus_glue);
 }
@@ -721,9 +707,9 @@ db_esp(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 			  sc->sc_imess[1], sc->sc_imess[2], sc->sc_imess[3],
 			  sc->sc_imess[0]);
 		db_printf("ready: ");
-		for (ecb = sc->ready_list.tqh_first; ecb; ecb = ecb->chain.tqe_next) {
+		TAILQ_FOREACH(ecb, &sc->ready_list, chain) {
 			db_printf("ecb %p ", ecb);
-			if (ecb == ecb->chain.tqe_next) {
+			if (ecb == TAILQ_NEXT(ecb, chain)) {
 				db_printf("\nWARNING: tailq loop on ecb %p", ecb);
 				break;
 			}

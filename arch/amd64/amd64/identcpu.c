@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.6 2005/08/20 00:33:59 jsg Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.9 2006/03/16 02:55:52 dlg Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -81,7 +81,6 @@ const struct {
 	{ CPUID_SS,	"SS" },
 	{ CPUID_HTT,	"HTT" },
 	{ CPUID_TM,	"TM" },
-	{ CPUID_IA64,	"IA64" },
 	{ CPUID_SBF,	"SBF" }
 }, cpu_ecpuid_features[] = {
 	{ CPUID_MPC,	"MPC" },
@@ -106,13 +105,14 @@ void
 identifycpu(struct cpu_info *ci)
 {
 	u_int64_t last_tsc;
-	u_int32_t dummy, val;
+	u_int32_t dummy, val, pnfeatset;
 	u_int32_t brand[12];
 	int i, max;
 	char *brandstr_from, *brandstr_to;
 	int skipspace;
 
 	CPUID(1, ci->ci_signature, val, dummy, ci->ci_feature_flags);
+	CPUID(0x80000000, pnfeatset, dummy, dummy, dummy);
 	CPUID(0x80000001, dummy, dummy, dummy, ci->ci_feature_eflags);
 
 	CPUID(0x80000002, brand[0], brand[1], brand[2], brand[3]);
@@ -169,6 +169,17 @@ identifycpu(struct cpu_info *ci)
 	printf("\n");
 
 	x86_print_cacheinfo(ci);
+
+#ifndef MULTIPROCESSOR
+	if (pnfeatset > 0x80000007) {
+		CPUID(0x80000007, dummy, dummy, dummy, pnfeatset);	
+		
+		if (pnfeatset & 0x06) {
+			if ((ci->ci_signature & 0xF00) == 0xf00)
+				k8_powernow_init();
+		}
+	}
+#endif
 }
 
 void

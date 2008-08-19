@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.43 2006/01/29 03:22:52 brad Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.48 2006/06/23 06:27:11 miod Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -98,9 +98,6 @@
 #include <sys/socket.h>
 
 #include <sys/device.h>
-#if NRND > 0
-#include <sys/rnd.h>
-#endif
 
 #include <net/if.h>
 #if defined(__NetBSD__)
@@ -108,8 +105,6 @@
 #endif
 #include <net/if_dl.h>
 #include <net/if_media.h>
-
-#define BPF_MTAP(ifp, m) bpf_mtap((ifp)->if_bpf, (m))
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -250,6 +245,7 @@ Static void aue_tick_task(void *);
 Static void aue_start(struct ifnet *);
 Static int aue_ioctl(struct ifnet *, u_long, caddr_t);
 Static void aue_init(void *);
+Static void aue_shutdown(void *);
 Static void aue_stop(struct aue_softc *);
 Static void aue_watchdog(struct ifnet *);
 Static int aue_openpipes(struct aue_softc *);
@@ -847,14 +843,11 @@ USB_ATTACH(aue)
 	/* Attach the interface. */
 	if_attach(ifp);
 	Ether_ifattach(ifp, eaddr);
-#if NRND > 0
-	rnd_attach_source(&sc->rnd_source, USBDEVNAME(sc->aue_dev),
-	    RND_TYPE_NET, 0);
-#endif
 
 	usb_callout_init(sc->aue_stat_ch);
 
 	sc->aue_attached = 1;
+	sc->sc_sdhook = shutdownhook_establish(aue_shutdown, sc);
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->aue_udev,
@@ -889,11 +882,6 @@ USB_DETACH(aue)
 	if (ifp->if_flags & IFF_RUNNING)
 		aue_stop(sc);
 
-#if defined(__NetBSD__)
-#if NRND > 0
-	rnd_detach_source(&sc->rnd_source);
-#endif
-#endif /* __NetBSD__ */
 	mii_detach(&sc->aue_mii, MII_PHY_ANY, MII_OFFSET_ANY);
 	ifmedia_delete_instance(&sc->aue_mii.mii_media, IFM_INST_ANY);
 	ether_ifdetach(ifp);
@@ -908,6 +896,8 @@ USB_DETACH(aue)
 #endif
 
 	sc->aue_attached = 0;
+	if (sc->sc_sdhook != NULL)
+		shutdownhook_disestablish(sc->sc_sdhook);
 
 	if (--sc->aue_refcnt >= 0) {
 		/* Wait for processes to go away. */
@@ -930,7 +920,6 @@ aue_activate(device_ptr_t self, enum devact act)
 
 	switch (act) {
 	case DVACT_ACTIVATE:
-		return (EOPNOTSUPP);
 		break;
 
 	case DVACT_DEACTIVATE:
@@ -1154,7 +1143,7 @@ aue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	 * address or the interface is in promiscuous mode.
 	 */
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m);
+		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 	DPRINTFN(10,("%s: %s: deliver %d\n", USBDEVNAME(sc->aue_dev),
@@ -1361,7 +1350,7 @@ aue_start(struct ifnet *ifp)
 	 * to him.
 	 */
 	if (ifp->if_bpf)
-		BPF_MTAP(ifp, m_head);
+		bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 	ifp->if_flags |= IFF_OACTIVE;
@@ -1644,6 +1633,19 @@ aue_watchdog(struct ifnet *ifp)
 	if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
 		aue_start(ifp);
 	splx(s);
+}
+
+/*
+ * Stop all chip I/O so that the kernel's probe routines don't
+ * get confused by errant DMAs when rebooting.
+ */
+Static void
+aue_shutdown(void *arg)
+{
+	struct aue_softc *sc = (struct aue_softc *)arg;
+
+	aue_reset(sc);
+	aue_stop(sc);
 }
 
 /*

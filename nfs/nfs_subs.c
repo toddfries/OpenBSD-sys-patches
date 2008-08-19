@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.55 2005/10/19 16:50:46 pedro Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.57 2006/05/29 16:49:42 avsm Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*

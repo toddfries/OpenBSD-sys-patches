@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.91 2006/01/28 10:08:38 brad Exp $	*/
+/*	$OpenBSD: dc.c,v 1.96 2006/08/10 20:52:54 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1023,8 +1023,9 @@ dc_setfilt_admtek(sc)
 	ifp = &sc->sc_arpcom.ac_if;
 
 	/* Init our MAC address */
-	CSR_WRITE_4(sc, DC_AL_PAR0, *(u_int32_t *)(&sc->sc_arpcom.ac_enaddr[0]));
-	CSR_WRITE_4(sc, DC_AL_PAR1, *(u_int32_t *)(&sc->sc_arpcom.ac_enaddr[4]));
+	CSR_WRITE_4(sc, DC_AL_PAR0, ac->ac_enaddr[3] << 24 |
+	    ac->ac_enaddr[2] << 16 | ac->ac_enaddr[1] << 8 | ac->ac_enaddr[0]);
+	CSR_WRITE_4(sc, DC_AL_PAR1, ac->ac_enaddr[5] << 8 | ac->ac_enaddr[4]);
 
 	/* If we want promiscuous mode, set the allframes bit. */
 	if (ifp->if_flags & IFF_PROMISC)
@@ -1652,6 +1653,7 @@ dc_attach(sc)
 {
 	struct ifnet *ifp;
 	int mac_offset, tmp, i;
+	u_int32_t reg;
 
 	/*
 	 * Get station address from the EEPROM.
@@ -1681,10 +1683,14 @@ dc_attach(sc)
 		break;
 	case DC_TYPE_AL981:
 	case DC_TYPE_AN983:
-		*(u_int32_t *)(&sc->sc_arpcom.ac_enaddr[0]) =
-			CSR_READ_4(sc, DC_AL_PAR0);
-		*(u_int16_t *)(&sc->sc_arpcom.ac_enaddr[4]) =
-			CSR_READ_4(sc, DC_AL_PAR1);
+		reg = CSR_READ_4(sc, DC_AL_PAR0);
+		sc->sc_arpcom.ac_enaddr[0] = (reg & 0xff);
+		sc->sc_arpcom.ac_enaddr[1] = (reg >> 8) & 0xff;
+		sc->sc_arpcom.ac_enaddr[2] = (reg >> 16) & 0xff;
+		sc->sc_arpcom.ac_enaddr[3] = (reg >> 24) & 0xff;
+		reg = CSR_READ_4(sc, DC_AL_PAR1);
+		sc->sc_arpcom.ac_enaddr[4] = (reg & 0xff);
+		sc->sc_arpcom.ac_enaddr[5] = (reg >> 8) & 0xff;
 		break;
 	case DC_TYPE_CONEXANT:
 		bcopy(&sc->dc_srom + DC_CONEXANT_EE_NODEADDR,
@@ -1870,8 +1876,10 @@ dc_detach(sc)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	shutdownhook_disestablish(sc->sc_dhook);
-	powerhook_disestablish(sc->sc_pwrhook);
+	if (sc->sc_dhook != NULL)
+		shutdownhook_disestablish(sc->sc_dhook);
+	if (sc->sc_pwrhook != NULL)
+		powerhook_disestablish(sc->sc_pwrhook);
 
 	return (0);
 }
@@ -2269,7 +2277,7 @@ dc_rxeof(sc)
 		ifp->if_ipackets++;
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m);
+			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 	}
@@ -2536,6 +2544,9 @@ dc_intr(arg)
 
 	ifp = &sc->sc_arpcom.ac_if;
 
+	if ((CSR_READ_4(sc, DC_ISR) & DC_INTRS) == 0)
+		return (claimed);
+
 	/* Suppress unwanted interrupts */
 	if (!(ifp->if_flags & IFF_UP)) {
 		if (CSR_READ_4(sc, DC_ISR) & DC_INTRS)
@@ -2546,8 +2557,9 @@ dc_intr(arg)
 	/* Disable interrupts. */
 	CSR_WRITE_4(sc, DC_IMR, 0x00000000);
 
-	while(((status = CSR_READ_4(sc, DC_ISR)) & DC_INTRS) &&
-	    status != 0xFFFFFFFF) {
+	while (((status = CSR_READ_4(sc, DC_ISR)) & DC_INTRS) &&
+	    status != 0xFFFFFFFF &&
+	    (ifp->if_flags & IFF_RUNNING)) {
 
 		claimed = 1;
 		CSR_WRITE_4(sc, DC_ISR, status);
@@ -2780,7 +2792,7 @@ dc_start(ifp)
 		 */
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head);
+			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 		if (sc->dc_flags & DC_TX_ONE) {
 			ifp->if_flags |= IFF_OACTIVE;
@@ -3063,36 +3075,30 @@ dc_ioctl(ifp, command, data)
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
-		case AF_INET:
+		if (!(ifp->if_flags & IFF_RUNNING))
 			dc_init(sc);
+#ifdef INET
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
-		default:
-			dc_init(sc);
-			break;
-		}
+#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
-			    ifp->if_flags & IFF_PROMISC &&
-			    !(sc->dc_if_flags & IFF_PROMISC)) {
+			    (ifp->if_flags ^ sc->dc_if_flags) &
+			     IFF_PROMISC) {
 				dc_setfilt(sc);
-			} else if (ifp->if_flags & IFF_RUNNING &&
-			    !(ifp->if_flags & IFF_PROMISC) &&
-			    sc->dc_if_flags & IFF_PROMISC) {
-				dc_setfilt(sc);
-			} else if (!(ifp->if_flags & IFF_RUNNING)) {
-				sc->dc_txthresh = 0;
-				dc_init(sc);
+			} else {
+				if (!(ifp->if_flags & IFF_RUNNING)) {
+					sc->dc_txthresh = 0;
+					dc_init(sc);
+				}
 			}
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				dc_stop(sc);
 		}
 		sc->dc_if_flags = ifp->if_flags;
-		error = 0;
 		break;
 	case SIOCSIFMTU:
 		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
