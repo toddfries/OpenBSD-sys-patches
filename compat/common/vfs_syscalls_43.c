@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls_43.c,v 1.14.2.1 2002/10/13 20:56:34 miod Exp $	*/
+/*	$OpenBSD: vfs_syscalls_43.c,v 1.19.2.1 2002/10/13 20:54:52 miod Exp $	*/
 /*	$NetBSD: vfs_syscalls_43.c,v 1.4 1996/03/14 19:31:52 christos Exp $	*/
 
 /*
@@ -63,11 +63,11 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 
 #include <sys/pipe.h>
 
-static void cvtstat __P((struct stat *, struct ostat *));
+static void cvtstat(struct stat *, struct ostat *);
 
 /*
  * Redirection info so we don't have to include the union fs routines in 
@@ -77,8 +77,8 @@ static void cvtstat __P((struct stat *, struct ostat *));
  * value is compiled in from kern/vfs_syscalls.c
  */
 
-extern int (*union_check_p)  __P((struct proc *, struct vnode **, 
-				   struct file *, struct uio, int *));
+extern int (*union_check_p)(struct proc *, struct vnode **, 
+				   struct file *, struct uio, int *);
 
 /*
  * Convert from an old to a new stat structure.
@@ -185,21 +185,22 @@ compat_43_sys_fstat(p, v, retval)
 	void *v;
 	register_t *retval;
 {
-	register struct compat_43_sys_fstat_args /* {
+	struct compat_43_sys_fstat_args /* {
 		syscallarg(int) fd;
 		syscallarg(struct ostat *) sb;
 	} */ *uap = v;
 	int fd = SCARG(uap, fd);
-	register struct filedesc *fdp = p->p_fd;
-	register struct file *fp;
+	struct filedesc *fdp = p->p_fd;
+	struct file *fp;
 	struct stat ub;
 	struct ostat oub;
 	int error;
 
-	if ((u_int)fd >= fdp->fd_nfiles ||
-	    (fp = fdp->fd_ofiles[fd]) == NULL)
+	if ((fp = fd_getfile(fdp, fd)) == NULL)
 		return (EBADF);
+	FREF(fp);
 	error = (*fp->f_ops->fo_stat)(fp, &ub, p);
+	FRELE(fp);
 	cvtstat(&ub, &oub);
 	if (error == 0)
 		error = copyout((caddr_t)&oub, (caddr_t)SCARG(uap, sb),
@@ -358,10 +359,13 @@ compat_43_sys_getdirentries(p, v, retval)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0)
 		return (EBADF);
+	FREF(fp);
 	vp = (struct vnode *)fp->f_data;
 unionread:
-	if (vp->v_type != VDIR)
-		return (EINVAL);
+	if (vp->v_type != VDIR) {
+		error = EINVAL;
+		goto bad;
+	}
 	aiov.iov_base = SCARG(uap, buf);
 	aiov.iov_len = SCARG(uap, count);
 	auio.uio_iov = &aiov;
@@ -431,13 +435,13 @@ unionread:
 	}
 	VOP_UNLOCK(vp, 0, p);
 	if (error)
-		return (error);
+		goto bad;
 	if ((SCARG(uap, count) == auio.uio_resid) &&
 	    union_check_p &&
 	    (union_check_p(p, &vp, fp, auio, &error) != 0))
 		goto unionread;
 	if (error)
-		return (error);
+		goto bad;
 
 	if ((SCARG(uap, count) == auio.uio_resid) &&
 	    (vp->v_flag & VROOT) &&
@@ -453,5 +457,7 @@ unionread:
 	error = copyout((caddr_t)&loff, (caddr_t)SCARG(uap, basep),
 	    sizeof(long));
 	*retval = SCARG(uap, count) - auio.uio_resid;
+bad:
+	FRELE(fp);
 	return (error);
 }

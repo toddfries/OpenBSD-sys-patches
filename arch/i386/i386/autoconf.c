@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.36.2.1 2002/02/21 04:34:00 jason Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.44 2002/04/13 03:08:44 deraadt Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
 
 /*-
@@ -53,11 +53,9 @@
 #include <sys/dkstat.h>
 #include <sys/disklabel.h>
 #include <sys/conf.h>
-#include <sys/dmap.h>
 #include <sys/reboot.h>
 #include <sys/device.h>
 
-#include <vm/vm.h>
 #include <uvm/uvm_extern.h>
 
 #include <machine/pte.h>
@@ -67,10 +65,13 @@
 
 #include <dev/cons.h>
 
-void rootconf __P((void));
-void swapconf __P((void));
-void setroot __P((void));
-void diskconf __P((void));
+int findblkmajor(struct device *dv);
+char *findblkname(int);
+
+void rootconf(void);
+void swapconf(void);
+void setroot(void);
+void diskconf(void);
 
 /*
  * The following several variables are related to
@@ -93,9 +94,8 @@ cpu_configure()
 	if (config_rootfound("mainbus", NULL) == NULL)
 		panic("cpu_configure: mainbus not configured");
 
-	printf("biomask %x netmask %x ttymask %x\n",
-	    (u_short)imask[IPL_BIO], (u_short)imask[IPL_NET],
-	    (u_short)imask[IPL_TTY]);
+	printf("biomask %x netmask %x ttymask %x\n", (u_short)IMASK(IPL_BIO),
+	    (u_short)IMASK(IPL_NET), (u_short)IMASK(IPL_TTY));
 
 	spl0();
 
@@ -158,34 +158,50 @@ swapconf()
 
 #define	DOSWAP			/* change swdevt and dumpdev */
 
-static const char *devname[] = {
-	"wd",		/* 0 = wd */
-	"sw",		/* 1 = sw */
-	"fd",		/* 2 = fd */
-	"wt",		/* 3 = wt */
-	"sd",		/* 4 = sd */
-	"",		/* 5 */
-	"",		/* 6 */
-	"mcd",		/* 7 = mcd */
-	"",		/* 8 */
-	"",		/* 9 */
-	"",		/* 10 */
-	"",		/* 11 */
-	"",		/* 12 */
-	"",		/* 13 */
-	"",		/* 14 */
-	"",		/* 15 */
-	"",		/* 16 */
-	"rd",		/* 17 = rd */
-	"",		/* 18 */
-	"",		/* 19 */
-	""		/* 20 */
+static struct {
+	char *name;
+	int maj;
+} nam2blk[] = {
+	{ "wd", 0 },
+	{ "sw", 1 },
+	{ "fd", 2 },
+	{ "wt", 3 },
+	{ "sd", 4 },
+	{ "cd", 6 },
+	{ "mcd", 7 },
+	{ "rd", 17 },
+	{ "raid", 19 }
 };
+
+int
+findblkmajor(dv)
+	struct device *dv;
+{
+	char *name = dv->dv_xname;
+	int i;
+
+	for (i = 0; i < sizeof(nam2blk)/sizeof(nam2blk[0]); ++i)
+		if (strncmp(name, nam2blk[i].name, strlen(nam2blk[i].name))
+		    == 0)
+			return (nam2blk[i].maj);
+	return (-1);
+}
+
+char *
+findblkname(maj)
+	int maj;
+{
+	int i;
+
+	for (i = 0; i < sizeof(nam2blk)/sizeof(nam2blk[0]); ++i)
+		if (maj == nam2blk[i].maj)
+			return (nam2blk[i].name);
+	return (NULL);
+}
 
 dev_t	argdev = NODEV;
 int	nswap;
 long	dumplo;
-int	dmmin, dmmax, dmtext;
 
 /*
  * Attempt to find the device from which we were booted.
@@ -206,8 +222,7 @@ setroot()
 	    (bootdev & B_MAGICMASK) != (u_long)B_DEVMAGIC)
 		return;
 	majdev = B_TYPE(bootdev);
-	if (majdev > sizeof(devname)/sizeof(devname[0]) ||
-	    *devname[majdev] == '\0')
+	if (findblkname(majdev) == NULL)
 		return;
 	adaptor = B_ADAPTOR(bootdev);
 	part = B_PARTITION(bootdev);
@@ -219,9 +234,9 @@ setroot()
 	 * If the original rootdev is the same as the one
 	 * just calculated, don't need to adjust the swap configuration.
 	 */
+	printf("root on %s%d%c\n", findblkname(majdev), unit, part + 'a');
 	if (rootdev == orootdev)
 		return;
-	printf("root on %s%d%c\n", devname[majdev], unit, part + 'a');
 
 #ifdef DOSWAP
 	for (swp = swdevt; swp->sw_dev != NODEV; swp++) {
@@ -269,6 +284,10 @@ extern	struct cfdriver fd_cd;
 #if NRD > 0
 extern	struct cfdriver rd_cd;
 #endif
+#include "raid.h"
+#if NRAID > 0
+extern	struct cfdriver raid_cd;
+#endif
 
 struct	genericconf {
 	struct cfdriver *gc_driver;
@@ -292,6 +311,9 @@ struct	genericconf {
 #endif
 #if NRD > 0
 	{ &rd_cd,  "rd",  17 },
+#endif
+#if NRAID > 0
+	{ &raid_cd,  "raid",  19 },
 #endif
 	{ 0 }
 };
@@ -372,6 +394,14 @@ noask:
 		setroot();
 	} else {
 		/* preconfigured */
+		int  majdev, unit, part;
+
+		majdev = major(rootdev);
+		if (findblkname(majdev) == NULL)
+			return;
+		part = minor(rootdev) % MAXPARTITIONS;
+		unit = minor(rootdev) / MAXPARTITIONS;
+		printf("root on %s%d%c\n", findblkname(majdev), unit, part + 'a');
 		return;
 	}
 
