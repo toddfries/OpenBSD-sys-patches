@@ -1,4 +1,4 @@
-/*	$OpenBSD: comvar.h,v 1.11 1998/05/14 05:59:43 downsj Exp $	*/
+/*	$OpenBSD: comvar.h,v 1.16 2000/02/04 06:11:58 angelos Exp $	*/
 /*	$NetBSD: comvar.h,v 1.5 1996/05/05 19:50:47 christos Exp $	*/
 
 /*
@@ -93,7 +93,6 @@ struct com_softc {
 
 	bus_space_handle_t sc_ioh;
 	bus_space_handle_t sc_hayespioh;
-	isa_chipset_tag_t sc_ic;
 
 	u_char sc_uarttype;
 #define COM_UART_UNKNOWN	0x00		/* unknown */
@@ -110,9 +109,6 @@ struct com_softc {
 #define	COM_HW_NOIEN	0x01
 #define	COM_HW_FIFO	0x02
 #define	COM_HW_HAYESP	0x04
-#define	COM_HW_ABSENT_PENDING	0x08	/* reattached, awaiting close/reopen */
-#define	COM_HW_ABSENT	0x10		/* configure actually failed, or removed */
-#define	COM_HW_REATTACH	0x20		/* reattaching */
 #define	COM_HW_CONSOLE	0x40
 	u_char sc_swflags;
 #define	COM_SW_SOFTCAR	0x01
@@ -130,12 +126,19 @@ struct com_softc {
 
 	u_char *sc_ibuf, *sc_ibufp, *sc_ibufhigh, *sc_ibufend;
 	u_char sc_ibufs[2][COM_IBUFSIZE];
+
+	/* power management hooks */
+	int (*enable) __P((struct com_softc *));
+	void (*disable) __P((struct com_softc *));
+	int enabled;
 };
 
 int	comprobe1 __P((bus_space_tag_t, bus_space_handle_t));
 void	cominit __P((bus_space_tag_t, bus_space_handle_t, int));
+int	comstop __P((struct tty *, int));
 int	comintr __P((void *));
-void	com_absent_notify __P((struct com_softc *sc));
+int	com_detach __P((struct device *, int));
+int	com_activate __P((struct device *, enum devact));
 
 #ifdef COM_HAYESP
 int comprobeHAYESP __P((bus_space_handle_t hayespioh, struct com_softc *sc));

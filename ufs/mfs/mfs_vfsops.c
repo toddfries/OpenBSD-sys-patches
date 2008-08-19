@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vfsops.c,v 1.7 1999/03/09 00:17:05 art Exp $	*/
+/*	$OpenBSD: mfs_vfsops.c,v 1.12 2000/02/07 04:57:18 assar Exp $	*/
 /*	$NetBSD: mfs_vfsops.c,v 1.10 1996/02/09 22:31:28 christos Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 #include <sys/signalvar.h>
 #include <sys/vnode.h>
 #include <sys/malloc.h>
+#include <sys/kthread.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -80,7 +81,8 @@ struct vfsops mfs_vfsops = {
 	ffs_fhtovp,
 	ffs_vptofh,
 	mfs_init,
-	ffs_sysctl
+	ffs_sysctl,
+	mfs_checkexp
 };
 
 /*
@@ -230,6 +232,7 @@ mfs_mount(mp, path, data, ndp, p)
 	(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
 	    &size);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
+	bcopy(&args, &mp->mnt_stat.mount_info.mfs_args, sizeof(args));
 	return (0);
 }
 
@@ -271,15 +274,8 @@ mfs_start(mp, flags, p)
 		 * EINTR/ERESTART.
 		 */
 		if (tsleep((caddr_t)vp, mfs_pri, "mfsidl", 0)) {
-			/*
-			 * Don't attempt to unmount when MNT_UNMOUNT is set,
-			 * that means that someone is waiting for us to
-			 * finish our operations and it also means that
-			 * we will sleep until he is finished. deadlock.
-			 * XXX - there is a multiprocessor race here.
-			 */
-			if ((mp->mnt_flag & MNT_UNMOUNT) ||
-			    dounmount(mp, 0, p) != 0)
+			if (vfs_busy(mp, LK_NOWAIT, NULL, p) ||
+			    dounmount(mp, 0, p))
 				CLRSIG(p, CURSIG(p));
 		}
 	}
@@ -298,11 +294,23 @@ mfs_statfs(mp, sbp, p)
 	int error;
 
 	error = ffs_statfs(mp, sbp, p);
-#ifdef COMPAT_09
-	sbp->f_type = mp->mnt_vfc->vfc_typenum;
-#else
-	sbp->f_type = 0;
-#endif
 	strncpy(&sbp->f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
+	if (sbp != &mp->mnt_stat)
+		bcopy(&mp->mnt_stat.mount_info.mfs_args,
+		    &sbp->mount_info.mfs_args, sizeof(struct mfs_args));
 	return (error);
+}
+
+/*
+ * check export permission, not supported
+ */
+/* ARGUSED */
+int
+mfs_checkexp(mp, nam, exflagsp, credanonp)
+	register struct mount *mp;
+	struct mbuf *nam;
+	int *exflagsp;
+	struct ucred **credanonp;
+{
+	return (EOPNOTSUPP);
 }

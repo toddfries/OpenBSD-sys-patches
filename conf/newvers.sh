@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.14 1999/03/30 22:12:44 deraadt Exp $
+#	$OpenBSD: newvers.sh,v 1.24.2.1 2000/07/19 00:24:25 jason Exp $
 #	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
@@ -45,8 +45,24 @@ touch version
 v=`cat version` u=${USER-root} d=`pwd` h=`hostname` t=`date`
 id=`basename ${d}`
 
+# additional things which need version number upgrades:
+#	src/sys/sys/param.h:
+#		OpenBSD symbol
+#		OpenBSD_X_X symbol
+#	src/share/tmac/mdoc/doc-common
+#		change	.       ds oS OpenBSD X.X
+#		add	.	if "\\$2"X.X"  .as oS \0X.X
+#	src/share/tmac/mdocs/doc-syms
+#		ensure new release is listed
+#	src/share/mk/sys.mk
+#		OSMAJOR
+#		OSMINOR
+#	src/distrib/miniroot/install.sub
+#		VERSION
+#
+
 ost="OpenBSD"
-osr="2.5"
+osr="2.7"
 
 echo "char ostype[] = \"${ost}\";" > vers.c
 echo "char osrelease[] = \"${osr}\";" >> vers.c
@@ -54,7 +70,7 @@ echo "char osversion[] = \"${id}#${v}\";" >> vers.c
 echo "char sccs[8] = { ' ', ' ', ' ', ' ', '@', '(', '#', ')' };" >> vers.c
 echo \
   "char version[] = \
-    \"${ost} ${osr} (${id}) #${v}: ${t}\\n    ${u}@${h}:${d}\\n\";" \
+    \"${ost} ${osr}-stable (${id}) #${v}: ${t}\\n    ${u}@${h}:${d}\\n\";" \
   >> vers.c
 
 echo `expr ${v} + 1` > version

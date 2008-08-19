@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.19 1999/02/15 21:28:23 millert Exp $	*/
+/*	$OpenBSD: uipc_syscalls.c,v 1.30 2000/01/17 18:16:48 deraadt Exp $	*/
 /*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
 
 /*
@@ -85,7 +85,7 @@ sys_socket(p, v, retval)
 	error = socreate(SCARG(uap, domain), &so, SCARG(uap, type),
 			 SCARG(uap, protocol));
 	if (error) {
-		fdp->fd_ofiles[fd] = 0;
+		fdremove(fdp, fd);
 		ffree(fp);
 	} else {
 		fp->f_data = (caddr_t)so;
@@ -324,13 +324,14 @@ sys_socketpair(p, v, retval)
 	}
 	error = copyout((caddr_t)sv, (caddr_t)SCARG(uap, rsv),
 	    2 * sizeof (int));
-	return (error);
+	if (error == 0)
+		return (error);
 free4:
 	ffree(fp2);
-	fdp->fd_ofiles[sv[1]] = 0;
+	fdremove(fdp, sv[1]);
 free3:
 	ffree(fp1);
-	fdp->fd_ofiles[sv[0]] = 0;
+	fdremove(fdp, sv[0]);
 free2:
 	(void)soclose(so2);
 free1:
@@ -717,12 +718,25 @@ recvit(p, s, mp, namelenp, retsize)
 		if (len <= 0 || control == 0)
 			len = 0;
 		else {
-			if (len >= control->m_len)
-				len = control->m_len;
-			else
-				mp->msg_flags |= MSG_CTRUNC;
-			error = copyout((caddr_t)mtod(control, caddr_t),
-			    (caddr_t)mp->msg_control, (unsigned)len);
+			struct mbuf *m = control;
+			caddr_t p = (caddr_t)mp->msg_control;
+
+			do {
+				i = m->m_len;
+				if (len < i) {
+					mp->msg_flags |= MSG_CTRUNC;
+					i = len;
+				}
+				error = copyout(mtod(m, caddr_t), p,
+				    (unsigned)i);
+				if (m->m_next)
+					i = ALIGN(i);
+				p += i;
+				len -= i;
+				if (error != 0 || len <= 0)
+					break;
+			} while ((m = m->m_next) != NULL);
+			len = p - (caddr_t)mp->msg_control;
 		}
 		mp->msg_controllen = len;
 	}
@@ -773,10 +787,17 @@ sys_setsockopt(p, v, retval)
 
 	if ((error = getsock(p->p_fd, SCARG(uap, s), &fp)) != 0)
 		return (error);
-	if (SCARG(uap, valsize) > MLEN)
+	if (SCARG(uap, valsize) > MCLBYTES)
 		return (EINVAL);
 	if (SCARG(uap, val)) {
 		m = m_get(M_WAIT, MT_SOOPTS);
+		if (SCARG(uap, valsize) > MLEN) {
+			MCLGET(m, M_DONTWAIT);
+			if ((m->m_flags & M_EXT) == 0) {
+				m_freem(m);
+				return (ENOBUFS);
+			}
+		}
 		if (m == NULL)
 			return (ENOBUFS);
 		error = copyin(SCARG(uap, val), mtod(m, caddr_t),
@@ -834,10 +855,37 @@ sys_getsockopt(p, v, retval)
 	return (error);
 }
 
-#ifdef OLD_PIPE
-/* ARGSUSED */
 int
 sys_pipe(p, v, retval)
+	struct proc *p;
+	void *v;
+	register_t *retval;
+{
+	register struct sys_pipe_args /* {
+		syscallarg(int *) fdp;
+	} */ *uap = v;
+	int error, fds[2];
+	register_t rval[2];
+
+	if ((error = sys_opipe(p, v, rval)) != 0)
+		return (error);
+	
+	fds[0] = rval[0];
+	fds[1] = rval[1];
+	error = copyout((caddr_t)fds, (caddr_t)SCARG(uap, fdp),
+	    2 * sizeof (int));
+	if (error) {
+		fdrelease(p, retval[0]);
+		fdrelease(p, retval[1]);
+	}
+	return (error);
+}
+
+#ifdef OLD_PIPE
+
+/* ARGSUSED */
+int
+sys_opipe(p, v, retval)
 	struct proc *p;
 	void *v;
 	register_t *retval;
@@ -870,10 +918,10 @@ sys_pipe(p, v, retval)
 	return (0);
 free4:
 	ffree(wf);
-	fdp->fd_ofiles[retval[1]] = 0;
+	fdremove(fdp, retval[1]);
 free3:
 	ffree(rf);
-	fdp->fd_ofiles[retval[0]] = 0;
+	fdremove(fdp, retval[0]);
 free2:
 	(void)soclose(wso);
 free1:

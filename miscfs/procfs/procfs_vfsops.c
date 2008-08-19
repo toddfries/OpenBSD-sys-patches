@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vfsops.c,v 1.9 1999/02/26 03:47:46 art Exp $	*/
+/*	$OpenBSD: procfs_vfsops.c,v 1.11 2000/02/07 04:57:16 assar Exp $	*/
 /*	$NetBSD: procfs_vfsops.c,v 1.25 1996/02/09 22:40:53 christos Exp $	*/
 
 /*
@@ -163,11 +163,6 @@ procfs_statfs(mp, sbp, p)
 #else
 	vmtotal(&vmtotals);
 #endif
-#ifdef COMPAT_09
-	sbp->f_type = 10;
-#else
-	sbp->f_type = 0;
-#endif
 	sbp->f_bsize = PAGE_SIZE;
 	sbp->f_iosize = PAGE_SIZE;
 	sbp->f_blocks = vmtotals.t_vm;
@@ -189,7 +184,7 @@ procfs_statfs(mp, sbp, p)
 				  struct proc *)))nullop)
 
 #define procfs_fhtovp ((int (*) __P((struct mount *, struct fid *, \
-	    struct mbuf *, struct vnode **, int *, struct ucred **)))eopnotsupp)
+	    struct vnode **)))eopnotsupp)
 #define procfs_quotactl ((int (*) __P((struct mount *, int, uid_t, caddr_t, \
 	    struct proc *)))eopnotsupp)
 #define procfs_sysctl ((int (*) __P((int *, u_int, void *, size_t *, void *, \
@@ -197,6 +192,8 @@ procfs_statfs(mp, sbp, p)
 #define procfs_vget ((int (*) __P((struct mount *, ino_t, struct vnode **))) \
 	    eopnotsupp)
 #define procfs_vptofh ((int (*) __P((struct vnode *, struct fid *)))eopnotsupp)
+#define procfs_checkexp ((int (*) __P((struct mount *, struct mbuf *,	\
+	int *, struct ucred **)))eopnotsupp)
 
 struct vfsops procfs_vfsops = {
 	procfs_mount,
@@ -210,5 +207,6 @@ struct vfsops procfs_vfsops = {
 	procfs_fhtovp,
 	procfs_vptofh,
 	procfs_init,
-	procfs_sysctl
+	procfs_sysctl,
+	procfs_checkexp
 };

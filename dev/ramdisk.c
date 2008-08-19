@@ -1,4 +1,4 @@
-/*	$OpenBSD: ramdisk.c,v 1.9 1999/02/26 01:44:33 art Exp $	*/
+/*	$OpenBSD: ramdisk.c,v 1.11 1999/11/16 09:24:59 art Exp $	*/
 /*	$NetBSD: ramdisk.c,v 1.8 1996/04/12 08:30:09 leo Exp $	*/
 
 /*
@@ -64,9 +64,6 @@
 
 #if defined(UVM)
 #include <uvm/uvm_extern.h>
-#else
-/* Don't want all those other VM headers... */
-extern vm_offset_t	 kmem_alloc __P((vm_map_t, vm_size_t));
 #endif
 
 #include <dev/ramdisk.h>
@@ -544,8 +541,8 @@ rd_ioctl_kalloc(sc, urd, proc)
 	struct rd_conf *urd;
 	struct proc	*proc;
 {
-	vm_offset_t addr;
-	vm_size_t  size;
+	vaddr_t addr;
+	vsize_t size;
 
 	/* Sanity check the size. */
 	size = urd->rd_size;
@@ -576,14 +573,13 @@ rd_ioctl_server(sc, urd, proc)
 	struct rd_conf *urd;
 	struct proc	*proc;
 {
-	vm_offset_t end;
+	vaddr_t end;
 	int error;
 
 	/* Sanity check addr, size. */
-	end = (vm_offset_t) (urd->rd_addr + urd->rd_size);
+	end = (vaddr_t) (urd->rd_addr + urd->rd_size);
 
-	if ((end >= VM_MAXUSER_ADDRESS) ||
-		(end < ((vm_offset_t) urd->rd_addr)) )
+	if ((end >= VM_MAXUSER_ADDRESS) || (end < ((vaddr_t) urd->rd_addr)) )
 		return EINVAL;
 
 	/* This unit is now configured. */

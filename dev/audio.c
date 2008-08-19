@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.16 1999/01/02 00:02:39 niklas Exp $	*/
+/*	$OpenBSD: audio.c,v 1.21 2000/04/10 19:49:14 mickey Exp $	*/
 /*	$NetBSD: audio.c,v 1.105 1998/09/27 16:43:56 christos Exp $	*/
 
 /*
@@ -83,6 +83,8 @@
 #include <dev/audio_if.h>
 #include <dev/audiovar.h>
 
+#include <dev/rndvar.h>
+
 #include <vm/vm.h>
 #include <vm/vm_prot.h>
 
@@ -108,13 +110,13 @@ int	audio_open __P((dev_t, int, int, struct proc *));
 int	audio_close __P((dev_t, int, int, struct proc *));
 int	audio_read __P((dev_t, struct uio *, int));
 int	audio_write __P((dev_t, struct uio *, int));
-int	audio_ioctl __P((dev_t, int, caddr_t, int, struct proc *));
+int	audio_ioctl __P((dev_t, u_long, caddr_t, int, struct proc *));
 int	audio_select __P((dev_t, int, struct proc *));
 int	audio_mmap __P((dev_t, int, int));
 
 int	mixer_open __P((dev_t, int, int, struct proc *));
 int	mixer_close __P((dev_t, int, int, struct proc *));
-int	mixer_ioctl __P((dev_t, int, caddr_t, int, struct proc *));
+int	mixer_ioctl __P((dev_t, u_long, caddr_t, int, struct proc *));
 static	void mixer_remove __P((struct audio_softc *, struct proc *p));
 static	void mixer_signal __P((struct audio_softc *));
     
@@ -405,17 +407,7 @@ audio_attach_mi(ahwp, hdlp, dev)
 	}
 }
 
-#include "midi.h"
-
-#if NAUDIO == 0 && (NMIDI > 0 || NMIDIBUS > 0)
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/device.h>
-#include <sys/audioio.h>
-#include <dev/audio_if.h>
-#endif
-
-#if NAUDIO > 0 || (NMIDI > 0 || NMIDIBUS > 0)
+#if NAUDIO > 0
 int
 audioprint(aux, pnp)
 	void *aux;
@@ -428,9 +420,6 @@ audioprint(aux, pnp)
 		switch (arg->type) {
 		case AUDIODEV_TYPE_AUDIO:
 			type = "audio";
-			break;
-		case AUDIODEV_TYPE_MIDI:
-			type = "midi";
 			break;
 		case AUDIODEV_TYPE_OPL:
 			type = "opl";
@@ -446,7 +435,7 @@ audioprint(aux, pnp)
 	return (UNCONF);
 }
 
-#endif /* NAUDIO > 0 || (NMIDI > 0 || NMIDIBUS > 0) */
+#endif /* NAUDIO > 0 */
 
 #ifdef AUDIO_DEBUG
 void	audio_printsc __P((struct audio_softc *));
@@ -1288,7 +1277,7 @@ audio_write(dev, uio, ioflag)
 	struct audio_softc *sc = audio_cd.cd_devs[unit];
 	struct audio_ringbuffer *cb = &sc->sc_pr;
 	u_char *inp, *einp;
-	int error, s, n, cc, used;
+	int saveerror, error, s, n, cc, used;
 
 	DPRINTFN(2, ("audio_write: sc=%p(unit=%d) count=%d used=%d(hi=%d)\n", sc, unit,
 		 uio->uio_resid, sc->sc_pr.used, sc->sc_pr.usedhigh));
@@ -1420,8 +1409,14 @@ audio_write(dev, uio, ioflag)
 			cc = 0;
 		cb->needfill = 0;
 		cb->copying = 0;
-		if (!sc->sc_pbus && !cb->pause)
-			error = audiostartp(sc); /* XXX should not clobber error */
+		if (!sc->sc_pbus && !cb->pause) {
+			saveerror = error;
+			error = audiostartp(sc);
+			if (saveerror != 0) {
+				/* Report the first error that occured. */
+				error = saveerror;
+			}
+		}
 		splx(s);
 		if (cc) {
 			DPRINTFN(1, ("audio_write: fill %d\n", cc));
@@ -1434,7 +1429,7 @@ audio_write(dev, uio, ioflag)
 int
 audio_ioctl(dev, cmd, addr, flag, p)
 	dev_t dev;
-	int cmd;
+	u_long cmd;
 	caddr_t addr;
 	int flag;
 	struct proc *p;
@@ -1554,6 +1549,8 @@ audio_ioctl(dev, cmd, addr, flag, p)
 		
 	case AUDIO_GETENC:
 		DPRINTF(("AUDIO_GETENC\n"));
+		/* Pass read/write info down to query_encoding */
+		((struct audio_encoding *)addr)->flags = sc->sc_open;
 		error = hw->query_encoding(sc->hw_hdl, (struct audio_encoding *)addr);
 		break;
 
@@ -1819,6 +1816,8 @@ audio_pint(v)
 
 	blksize = cb->blksize;
 
+	add_audio_randomness(cb);
+
 	cb->outp += blksize;
 	if (cb->outp >= cb->end)
 		cb->outp = cb->start;
@@ -1939,6 +1938,8 @@ audio_rint(v)
 
         if (!sc->sc_open)
         	return;         /* ignore interrupt if not open */
+
+	add_audio_randomness(cb);
 
 	blksize = cb->blksize;
 
@@ -2785,7 +2786,7 @@ mixer_close(dev, flags, ifmt, p)
 int
 mixer_ioctl(dev, cmd, addr, flag, p)
 	dev_t dev;
-	int cmd;
+	u_long cmd;
 	caddr_t addr;
 	int flag;
 	struct proc *p;

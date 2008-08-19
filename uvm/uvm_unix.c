@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_unix.c,v 1.2 1999/02/26 05:32:08 art Exp $	*/
-/*	$NetBSD: uvm_unix.c,v 1.7 1998/10/11 23:18:21 chuck Exp $	*/
+/*	$NetBSD: uvm_unix.c,v 1.8 1999/03/25 18:48:56 mrg Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!   
- *         >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * Copyright (c) 1991, 1993 The Regents of the University of California.  
@@ -81,48 +76,46 @@ sys_obreak(p, v, retval)
 	struct sys_obreak_args /* {
 		syscallarg(char *) nsize;
 	} */ *uap = v;
-	register struct vmspace *vm = p->p_vmspace;
+	struct vmspace *vm = p->p_vmspace;
 	vaddr_t new, old;
 	int rv;
-	register int diff;
+	long diff;
 
 	old = (vaddr_t)vm->vm_daddr;
 	new = round_page(SCARG(uap, nsize));
-	if ((int)(new - old) > p->p_rlimit[RLIMIT_DATA].rlim_cur)
+	if ((new - old) > p->p_rlimit[RLIMIT_DATA].rlim_cur)
 		return(ENOMEM);
 
-	old = round_page(old + ctob(vm->vm_dsize));
+	old = round_page(old + ptoa(vm->vm_dsize));
 	diff = new - old;
+
+	if (diff == 0)
+		return (0);
 
 	/*
 	 * grow or shrink?
 	 */
-
 	if (diff > 0) {
-
 		rv = uvm_map(&vm->vm_map, &old, diff, NULL, UVM_UNKNOWN_OFFSET,
 		    UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL, UVM_INH_COPY,
 		    UVM_ADV_NORMAL, UVM_FLAG_AMAPPAD|UVM_FLAG_FIXED|
-		    UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW)); 
-
-		if (rv != KERN_SUCCESS) {
-			uprintf("sbrk: grow failed, return = %d\n", rv);
-			return(ENOMEM);
+		    UVM_FLAG_OVERLAY|UVM_FLAG_COPYONW));
+		if (rv == KERN_SUCCESS) {
+			vm->vm_dsize += atop(diff);
+			return (0);
 		}
-		vm->vm_dsize += btoc(diff);
-
-	} else if (diff < 0) {
-
-		diff = -diff;
-		rv = uvm_deallocate(&vm->vm_map, new, diff);
-		if (rv != KERN_SUCCESS) {
-			uprintf("sbrk: shrink failed, return = %d\n", rv);
-			return(ENOMEM);
+	} else {
+		rv = uvm_deallocate(&vm->vm_map, new, -diff);
+		if (rv == KERN_SUCCESS) {
+			vm->vm_dsize -= atop(-diff);
+			return (0);
 		}
-		vm->vm_dsize -= btoc(diff);
-
 	}
-	return(0);
+
+	uprintf("sbrk: %s %ld failed, return = %d\n",
+		diff > 0 ? "grow" : "shrink",
+		(long)(diff > 0 ? diff : -diff), rv);
+	return(ENOMEM);
 }
 
 /*
@@ -140,19 +133,31 @@ uvm_grow(p, sp)
 	/*
 	 * For user defined stacks (from sendsig).
 	 */
+#ifdef MACHINE_STACK_GROWS_UP
+	if (sp > (vaddr_t)vm->vm_maxsaddr)
+#else
 	if (sp < (vaddr_t)vm->vm_maxsaddr)
+#endif
 		return (0);
 
 	/*
 	 * For common case of already allocated (from trap).
 	 */
+#ifdef MACHINE_STACK_GROWS_UP
+	if (sp < USRSTACK + ctob(vm->vm_ssize))
+#else
 	if (sp >= USRSTACK - ctob(vm->vm_ssize))
+#endif
 		return (1);
 
 	/*
 	 * Really need to check vs limit and increment stack size if ok.
 	 */
+#ifdef MACHINE_STACK_GROWS_UP
+	si = clrnd(btoc(sp - USRSTACK) - vm->vm_ssize);
+#else
 	si = clrnd(btoc(USRSTACK-sp) - vm->vm_ssize);
+#endif
 	if (vm->vm_ssize + si > btoc(p->p_rlimit[RLIMIT_STACK].rlim_cur))
 		return (0);
 	vm->vm_ssize += si;
@@ -220,9 +225,14 @@ uvm_coredump(p, vp, cred, chdr)
 		if (end > VM_MAXUSER_ADDRESS)
 			end = VM_MAXUSER_ADDRESS;
 
+#ifdef MACHINE_STACK_GROWS_UP
+		if (start >= USRSTACK) {
+			start = USRSTACK;
+#else
 		if (start >= (vaddr_t)vm->vm_maxsaddr) {
-			flag = CORE_STACK;
 			start = trunc_page(USRSTACK - ctob(vm->vm_ssize));
+#endif
+			flag = CORE_STACK;
 			if (start >= end)
 				continue;
 		} else

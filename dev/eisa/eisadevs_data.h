@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: eisadevs,v 1.12 1999/03/04 15:37:58 mickey Exp 
+ *	OpenBSD: eisadevs,v 1.14 2000/03/13 20:32:15 maja Exp 
  */
 
 /*
@@ -99,6 +99,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	},
 	{
 	    0,
+	    "CPQ6101",
+	    EISA_PRODUCT_CPQ6101,
+	},
+	{
+	    0,
 	    "DEC4250",
 	    EISA_PRODUCT_DEC4250,
 	},
@@ -159,6 +164,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	},
 	{
 	    0,
+	    "MDG0002",
+	    EISA_PRODUCT_MDG0002,
+	},
+	{
+	    0,
 	    "HWP0C70",
 	    EISA_PRODUCT_HWP0C70,
 	},
@@ -171,6 +181,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	    0,
 	    "HWP1850",
 	    EISA_PRODUCT_HWP1850,
+	},
+	{
+	    0,
+	    "HWP1980",
+	    EISA_PRODUCT_HWP1980,
 	},
 	{
 	    0,
@@ -209,6 +224,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	},
 	{
 	    0,
+	    "TCM5090",
+	    EISA_PRODUCT_TCM5090,
+	},
+	{
+	    0,
 	    "TCM5091",
 	    EISA_PRODUCT_TCM5091,
 	},
@@ -221,6 +241,16 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	    0,
 	    "TCM5093",
 	    EISA_PRODUCT_TCM5093,
+	},
+	{
+	    0,
+	    "TCM5094",
+	    EISA_PRODUCT_TCM5094,
+	},
+	{
+	    0,
+	    "TCM5095",
+	    EISA_PRODUCT_TCM5095,
 	},
 	{
 	    0,
@@ -274,6 +304,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	},
 	{
 	    EISA_KNOWNDEV_NOPROD,
+	    "CPQ",
+	    "Compaq",
+	},
+	{
+	    EISA_KNOWNDEV_NOPROD,
 	    "DEC",
 	    "Digital Equipment",
 	},
@@ -311,6 +346,11 @@ struct eisa_knowndev eisa_knowndevs[] = {
 	    EISA_KNOWNDEV_NOPROD,
 	    "MLX",
 	    "Mylex",
+	},
+	{
+	    EISA_KNOWNDEV_NOPROD,
+	    "MDG",
+	    "Madge Networks",
 	},
 	{
 	    EISA_KNOWNDEV_NOPROD,

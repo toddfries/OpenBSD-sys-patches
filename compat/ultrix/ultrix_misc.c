@@ -1,4 +1,4 @@
-/*	$OpenBSD: ultrix_misc.c,v 1.13 1998/01/05 03:15:22 deraadt Exp $	*/
+/*	$OpenBSD: ultrix_misc.c,v 1.15 1999/11/10 15:55:24 mickey Exp $	*/
 /*	$NetBSD: ultrix_misc.c,v 1.23 1996/04/07 17:23:04 jonathan Exp $	*/
 
 /*
@@ -129,14 +129,16 @@
 #include <sys/socketvar.h>				/* sosetopt() */
 
 extern struct sysent ultrix_sysent[];
+#ifdef SYSCALL_DEBUG
 extern char *ultrix_syscallnames[];
+#endif
 
 /*
  * Select the appropriate setregs callback for the target architecture.
  */
-#ifdef mips
+#ifdef __mips__
 #define ULTRIX_EXEC_SETREGS cpu_exec_ecoff_setregs
-#endif /* mips */
+#endif /* __mips__ */
 
 #ifdef vax
 #define ULTRIX_EXEC_SETREGS setregs
@@ -154,7 +156,11 @@ struct emul emul_ultrix = {
 	ULTRIX_SYS_syscall,
 	ULTRIX_SYS_MAXSYSCALL,
 	ultrix_sysent,
+#ifdef SYSCALL_DEBUG
 	ultrix_syscallnames,
+#else
+	NULL
+#endif
 	0,
 	copyargs,
 	ULTRIX_EXEC_SETREGS,

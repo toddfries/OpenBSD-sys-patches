@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_map.c,v 1.2 1999/02/26 05:32:07 art Exp $	*/
-/*	$NetBSD: uvm_map.c,v 1.34 1999/01/24 23:53:15 chuck Exp $	*/
+/*	$NetBSD: uvm_map.c,v 1.53 1999/06/07 16:31:42 thorpej Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!
- *         >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /* 
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * Copyright (c) 1991, 1993, The Regents of the University of California.  
@@ -82,9 +77,6 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 
-#include <sys/user.h>
-#include <machine/pcb.h>
-
 #ifdef SYSVSHM
 #include <sys/shm.h>
 #endif
@@ -115,6 +107,17 @@ struct pool uvm_vmspace_pool;
  */
 
 struct pool uvm_map_entry_pool;
+
+#ifdef PMAP_GROWKERNEL
+/*
+ * This global represents the end of the kernel virtual address
+ * space.  If we want to exceed this, we must grow the kernel
+ * virtual address space dynamically.
+ *
+ * Note, this variable is locked by kernel_map's lock.
+ */
+vaddr_t uvm_maxkaddr;
+#endif
 
 /*
  * macros
@@ -183,13 +186,22 @@ static void		uvm_map_entry_unwire __P((vm_map_t, vm_map_entry_t));
  * local inlines
  */
 
-#undef UVM_MAP_INLINES
+/* XXX Should not exist! */
+#define	vm_map_downgrade(map)						\
+	(void) lockmgr(&(map)->lock, LK_DOWNGRADE, NULL, curproc)
 
-#ifdef UVM_MAP_INLINES
-#define UVM_INLINE __inline
+/* XXX Should not exist! */
+#ifdef DIAGNOSTIC
+#define	vm_map_upgrade(map)						\
+do {									\
+	if (lockmgr(&(map)->lock, LK_UPGRADE, NULL, curproc) != 0)	\
+		panic("vm_map_upgrade: failed to upgrade lock");	\
+} while (0)
 #else
-#define UVM_INLINE
-#endif
+#define	vm_map_upgrade(map)						\
+	(void) lockmgr(&(map)->lock, LK_UPGRADE, NULL, curproc)
+#endif /* DIAGNOSTIC */
+
 
 /*
  * uvm_mapent_alloc: allocate a map entry
@@ -197,7 +209,7 @@ static void		uvm_map_entry_unwire __P((vm_map_t, vm_map_entry_t));
  * => XXX: static pool for kernel map?
  */
 
-static UVM_INLINE vm_map_entry_t
+static __inline vm_map_entry_t
 uvm_mapent_alloc(map)
 	vm_map_t map;
 {
@@ -206,11 +218,11 @@ uvm_mapent_alloc(map)
 	UVMHIST_FUNC("uvm_mapent_alloc");
 	UVMHIST_CALLED(maphist);
 
-	if (map->entries_pageable) {
+	if ((map->flags & VM_MAP_INTRSAFE) == 0 &&
+	    map != kernel_map && kernel_map != NULL /* XXX */) {
 		me = pool_get(&uvm_map_entry_pool, PR_WAITOK);
 		me->flags = 0;
 		/* me can't be null, wait ok */
-
 	} else {
 		s = splimp();	/* protect kentry_free list with splimp */
 		simple_lock(&uvm.kentry_lock);
@@ -219,14 +231,14 @@ uvm_mapent_alloc(map)
 		simple_unlock(&uvm.kentry_lock);
 		splx(s);
 		if (!me)
-	panic("mapent_alloc: out of kernel map entries, check MAX_KMAPENT");
+	panic("mapent_alloc: out of static map entries, check MAX_KMAPENT");
 		me->flags = UVM_MAP_STATIC;
 	}
 
-	UVMHIST_LOG(maphist, "<- new entry=0x%x [pageable=%d]", 
-		me, map->entries_pageable, 0, 0);
+	UVMHIST_LOG(maphist, "<- new entry=0x%x [kentry=%d]", 
+		me, ((map->flags & VM_MAP_INTRSAFE) != 0 || map == kernel_map)
+		? TRUE : FALSE, 0, 0);
 	return(me);
-
 }
 
 /*
@@ -235,7 +247,7 @@ uvm_mapent_alloc(map)
  * => XXX: static pool for kernel map?
  */
 
-static UVM_INLINE void
+static __inline void
 uvm_mapent_free(me)
 	vm_map_entry_t me;
 {
@@ -260,7 +272,7 @@ uvm_mapent_free(me)
  * uvm_mapent_copy: copy a map entry, preserving flags
  */
 
-static UVM_INLINE void
+static __inline void
 uvm_mapent_copy(src, dst)
 	vm_map_entry_t src;
 	vm_map_entry_t dst;
@@ -275,13 +287,13 @@ uvm_mapent_copy(src, dst)
  * => map should be locked by caller
  */
 
-static UVM_INLINE void
+static __inline void
 uvm_map_entry_unwire(map, entry)
 	vm_map_t map;
 	vm_map_entry_t entry;
 {
 
-	uvm_fault_unwire(map->pmap, entry->start, entry->end);
+	uvm_fault_unwire(map, entry->start, entry->end);
 	entry->wired_count = 0;
 }
 
@@ -514,18 +526,14 @@ uvm_map(map, startp, size, uobj, uoffset, flags)
 		return (KERN_NO_SPACE);
 	}
 
-#if defined(PMAP_GROWKERNEL)	/* hack */
+#ifdef PMAP_GROWKERNEL
 	{
-		/* locked by kernel_map lock */
-		static vaddr_t maxkaddr = 0;
-		
 		/*
-		 * hack: grow kernel PTPs in advance.
+		 * If the kernel pmap can't map the requested space,
+		 * then allocate more resources for it.
 		 */
-		if (map == kernel_map && maxkaddr < (*startp + size)) {
-			pmap_growkernel(*startp + size);
-			maxkaddr = *startp + size;
-		}
+		if (map == kernel_map && uvm_maxkaddr < (*startp + size))
+			uvm_maxkaddr = pmap_growkernel(*startp + size);
 	}
 #endif
 
@@ -552,8 +560,9 @@ uvm_map(map, startp, size, uobj, uoffset, flags)
 	} else {
 		if (uoffset == UVM_UNKNOWN_OFFSET) {
 #ifdef DIAGNOSTIC
-			if (uobj->uo_refs != UVM_OBJ_KERN)
-	panic("uvm_map: unknown offset with non-kernel object");
+			if (UVM_OBJ_IS_KERN_OBJECT(uobj) == 0)
+				panic("uvm_map: unknown offset with "
+				    "non-kernel object");
 #endif
 			uoffset = *startp - vm_map_min(kernel_map);
 		}
@@ -985,11 +994,11 @@ uvm_unmap_remove(map, start, end, entry_list)
 		 * we want to free these pages right away...
 		 */
 		if (UVM_ET_ISOBJ(entry) &&
-		    entry->object.uvm_obj->uo_refs == UVM_OBJ_KERN) {
-
+		    UVM_OBJ_IS_KERN_OBJECT(entry->object.uvm_obj)) {
 #ifdef DIAGNOSTIC
 			if (vm_map_pmap(map) != pmap_kernel())
-	panic("uvm_unmap_remove: kernel object mapped by non-kernel map");
+				panic("uvm_unmap_remove: kernel object "
+				    "mapped by non-kernel map");
 #endif
 
 			/*
@@ -1015,40 +1024,35 @@ uvm_unmap_remove(map, start, end, entry_list)
 			 *
 			 * uvm_km_pgremove currently does the following: 
 			 *   for pages in the kernel object in range: 
-			 *     - pmap_page_protect them out of all pmaps
+			 *     - drops the swap slot
 			 *     - uvm_pagefree the page
 			 *
-			 * note that in case [1] the pmap_page_protect call
-			 * in uvm_km_pgremove may very well be redundant
-			 * because we have already removed the mappings
-			 * beforehand with pmap_remove (or pmap_kremove).
-			 * in the PMAP_NEW case, the pmap_page_protect call
-			 * may not do anything, since PMAP_NEW allows the
-			 * kernel to enter/remove kernel mappings without
-			 * bothing to keep track of the mappings (e.g. via
-			 * pv_entry lists).    XXX: because of this, in the
-			 * future we should consider removing the
-			 * pmap_page_protect from uvm_km_pgremove some time
-			 * in the future.
+			 * note there is version of uvm_km_pgremove() that
+			 * is used for "intrsafe" objects.
 			 */
 
 			/*
-			 * remove mappings from pmap
+			 * remove mappings from pmap and drop the pages
+			 * from the object.  offsets are always relative
+			 * to vm_map_min(kernel_map).
 			 */
+			if (UVM_OBJ_IS_INTRSAFE_OBJECT(entry->object.uvm_obj)) {
 #if defined(PMAP_NEW)
-			pmap_kremove(entry->start, len);
+				pmap_kremove(entry->start, len);
 #else
-			pmap_remove(pmap_kernel(), entry->start,
-			    entry->start+len);
+				pmap_remove(pmap_kernel(), entry->start,
+				    entry->start + len);
 #endif
-
-			/*
-			 * remove pages from a kernel object (offsets are
-			 * always relative to vm_map_min(kernel_map)).
-			 */
-			uvm_km_pgremove(entry->object.uvm_obj, 
-			entry->start - vm_map_min(kernel_map),
-			entry->end - vm_map_min(kernel_map));
+				uvm_km_pgremove_intrsafe(entry->object.uvm_obj,
+				    entry->start - vm_map_min(kernel_map),
+				    entry->end - vm_map_min(kernel_map));
+			} else {
+				pmap_remove(pmap_kernel(), entry->start,
+				    entry->start + len);
+				uvm_km_pgremove(entry->object.uvm_obj,
+				    entry->start - vm_map_min(kernel_map),
+				    entry->end - vm_map_min(kernel_map));
+			}
 
 			/*
 			 * null out kernel_object reference, we've just
@@ -1466,7 +1470,7 @@ uvm_map_extract(srcmap, start, len, dstmap, dstaddrp, flags)
 		newentry->start = dstaddr + oldoffset;
 		newentry->end =
 		    newentry->start + (entry->end - (entry->start + fudge));
-		if (newentry->end > newend)
+		if (newentry->end > newend || newentry->end < newentry->start)
 			newentry->end = newend;
 		newentry->object.uvm_obj = entry->object.uvm_obj;
 		if (newentry->object.uvm_obj) {
@@ -1715,11 +1719,10 @@ uvm_map_submap(map, start, end, submap)
  *
  * => set_max means set max_protection.
  * => map must be unlocked.
- * => XXXCDC: does not work properly with share maps.  rethink.
  */
 
-#define MASK(entry)     ( UVM_ET_ISCOPYONWRITE(entry) ? \
-	~VM_PROT_WRITE : VM_PROT_ALL)
+#define MASK(entry)     (UVM_ET_ISCOPYONWRITE(entry) ? \
+			 ~VM_PROT_WRITE : VM_PROT_ALL)
 #define max(a,b)        ((a) > (b) ? (a) : (b))
 
 int
@@ -1751,10 +1754,10 @@ uvm_map_protect(map, start, end, new_prot, set_max)
 	current = entry;
 	while ((current != &map->header) && (current->start < end)) {
 		if (UVM_ET_ISSUBMAP(current))
-			return(KERN_INVALID_ARGUMENT);
+			return (KERN_INVALID_ARGUMENT);
 		if ((new_prot & current->max_protection) != new_prot) {
 			vm_map_unlock(map);
-			return(KERN_PROTECTION_FAILURE);
+			return (KERN_PROTECTION_FAILURE);
 		}
 			current = current->next;
 	}
@@ -1804,7 +1807,6 @@ uvm_map_protect(map, start, end, new_prot, set_max)
  * => map must be unlocked
  * => note that the inherit code is used during a "fork".  see fork
  *	code for details.
- * => XXXCDC: currently only works in main map.  what about share map?
  */
 
 int
@@ -1826,7 +1828,7 @@ uvm_map_inherit(map, start, end, new_inheritance)
 		break;
 	default:
 		UVMHIST_LOG(maphist,"<- done (INVALID ARG)",0,0,0,0);
-		return(KERN_INVALID_ARGUMENT);
+		return (KERN_INVALID_ARGUMENT);
 	}
 
 	vm_map_lock(map);
@@ -1853,6 +1855,121 @@ uvm_map_inherit(map, start, end, new_inheritance)
 	return(KERN_SUCCESS);
 }
 
+/* 
+ * uvm_map_advice: set advice code for range of addrs in map.
+ *
+ * => map must be unlocked
+ */
+
+int
+uvm_map_advice(map, start, end, new_advice)
+	vm_map_t map;
+	vaddr_t start;
+	vaddr_t end;
+	int new_advice;
+{
+	vm_map_entry_t entry, temp_entry;
+	UVMHIST_FUNC("uvm_map_advice"); UVMHIST_CALLED(maphist);
+	UVMHIST_LOG(maphist,"(map=0x%x,start=0x%x,end=0x%x,new_adv=0x%x)",
+	    map, start, end, new_advice);
+
+	vm_map_lock(map);
+	
+	VM_MAP_RANGE_CHECK(map, start, end);
+	
+	if (uvm_map_lookup_entry(map, start, &temp_entry)) {
+		entry = temp_entry;
+		UVM_MAP_CLIP_START(map, entry, start);
+	} else {
+		entry = temp_entry->next;
+	}
+	
+	while ((entry != &map->header) && (entry->start < end)) {
+		UVM_MAP_CLIP_END(map, entry, end);
+
+		switch (new_advice) {
+		case MADV_NORMAL:
+		case MADV_RANDOM:
+		case MADV_SEQUENTIAL:
+			/* nothing special here */
+			break;
+
+#if 0
+		case MADV_WILLNEED:
+			/* activate all these pages */
+			/* XXX */
+			/*
+			 * should invent a "weak" mode for uvm_fault()
+			 * which would only do the PGO_LOCKED pgo_get().
+			 */
+			break;
+
+		case MADV_DONTNEED:
+			/* deactivate this page */
+			/* XXX */
+			/*
+			 * vm_page_t p;
+			 * uvm_lock_pageq();
+			 * for (p in each page)
+			 *	if (not_wired)
+			 *		uvm_pagedeactivate(p);
+			 * uvm_unlock_pageq();
+			 */
+			break;
+
+		case MADV_SPACEAVAIL:
+			/* 
+			 * XXXMRG
+			 * what is this?  i think:  "ensure that we have
+			 * allocated backing-store for these pages".  this
+			 * is going to require changes in the page daemon,
+			 * as it will free swap space allocated to pages in
+			 * core.  there's also what to do for
+			 * device/file/anonymous memory..
+			 */
+			break;
+
+		case MADV_GARBAGE:
+			/* pages are `empty' and can be garbage collected */
+			/* XXX */
+			/*
+			 * (perhaps MADV_FREE? check freebsd's MADV_FREE).
+			 * 
+			 * need to do this:
+			 *	- clear all the referenced and modified bits on
+			 *	  the pages,
+			 *	- delete any backing store,
+			 *	- mark the page as `recycable'.
+			 *
+			 * So, if you start paging, the pages would be thrown out
+			 * and then zero-filled the next time they're used.
+			 * Otherwise you'd just reuse them directly.  Once the
+			 * page has been modified again, it would no longer be
+			 * recyclable.  That way, malloc() can just tell the
+			 * system when pages are `empty'; if memory is needed,
+			 * they'll be tossed; if memory is not needed, there
+			 * will be no additional overhead.
+			 */
+			break;
+#endif
+
+		default:
+			vm_map_unlock(map);
+			UVMHIST_LOG(maphist,"<- done (INVALID ARG)",0,0,0,0);
+			return (KERN_INVALID_ARGUMENT);
+		}
+
+
+		entry->advice = new_advice;
+		
+		entry = entry->next;
+	}
+
+	vm_map_unlock(map);
+	UVMHIST_LOG(maphist,"<- done (OK)",0,0,0,0);
+	return (KERN_SUCCESS);
+}
+
 /*
  * uvm_map_pageable: sets the pageability of a range in a map.
  *
@@ -1874,6 +1991,11 @@ uvm_map_pageable(map, start, end, new_pageable)
 	UVMHIST_FUNC("uvm_map_pageable"); UVMHIST_CALLED(maphist);
 	UVMHIST_LOG(maphist,"(map=0x%x,start=0x%x,end=0x%x,new_pageable=0x%x)",
 	map, start, end, new_pageable);
+
+#ifdef DIAGNOSTIC
+	if ((map->flags & VM_MAP_PAGEABLE) == 0)
+		panic("uvm_map_pageable: map %p not pageable", map);
+#endif
 
 	vm_map_lock(map);
 	VM_MAP_RANGE_CHECK(map, start, end);
@@ -1924,10 +2046,11 @@ uvm_map_pageable(map, start, end, new_pageable)
 		 * now decrement the wiring count for each region.  if a region
 		 * becomes completely unwired, unwire its physical pages and
 		 * mappings.
+		 *
+		 * Note, uvm_fault_unwire() (called via uvm_map_entry_unwire())
+		 * does not lock the map, so we don't have to do anything
+		 * special regarding locking here.
 		 */
-#if 0		/* not necessary: uvm_fault_unwire does not lock */
-		lock_set_recursive(&map->lock);
-#endif  /* XXXCDC */
 
 		entry = start_entry;
 		while ((entry != &map->header) && (entry->start < end)) {
@@ -1939,9 +2062,6 @@ uvm_map_pageable(map, start, end, new_pageable)
 			
 			entry = entry->next;
 		}
-#if 0 /* XXXCDC: not necessary, see above */
-		lock_clear_recursive(&map->lock);
-#endif
 		vm_map_unlock(map);
 		UVMHIST_LOG(maphist,"<- done (OK UNWIRE)",0,0,0,0);
 		return(KERN_SUCCESS);
@@ -2018,7 +2138,7 @@ uvm_map_pageable(map, start, end, new_pageable)
 			}
 			vm_map_unlock(map);
 			UVMHIST_LOG(maphist,"<- done (INVALID WIRE)",0,0,0,0);
-			return(KERN_INVALID_ARGUMENT);
+			return (KERN_INVALID_ARGUMENT);
 		}
 		entry = entry->next;
 	}
@@ -2026,62 +2146,53 @@ uvm_map_pageable(map, start, end, new_pageable)
 	/*
 	 * Pass 2.
 	 */
-	/*
-	 * HACK HACK HACK HACK
-	 *
-	 * if we are wiring in the kernel map or a submap of it, unlock the
-	 * map to avoid deadlocks.  we trust that the kernel threads are
-	 * well-behaved, and therefore will not do anything destructive to
-	 * this region of the map while we have it unlocked.  we cannot
-	 * trust user threads to do the same.
-	 *
-	 * HACK HACK HACK HACK 
-	 */
-	if (vm_map_pmap(map) == pmap_kernel()) {
-		vm_map_unlock(map);         /* trust me ... */
-	} else {
-		vm_map_set_recursive(&map->lock);
-		lockmgr(&map->lock, LK_DOWNGRADE, (void *)0, curproc /*XXX*/);
-	}
+
+	vm_map_downgrade(map);
 
 	rv = 0;
 	entry = start_entry;
 	while (entry != &map->header && entry->start < end) {
-		/*
-		 * if uvm_fault_wire fails for any page we need to undo what has
-		 * been done.  we decrement the wiring count for those pages
-		 * which have not yet been wired (now) and unwire those that
-		 * have * (later).
-		 *
-		 * XXX this violates the locking protocol on the map, needs to
-		 * be fixed.  [because we only have a read lock on map we 
-		 * shouldn't be changing wired_count?]
-		 */
-		if (rv) {
-			entry->wired_count--;
-		} else if (entry->wired_count == 1) {
-			rv = uvm_fault_wire(map, entry->start, entry->end);
+		if (entry->wired_count == 1) {
+			rv = uvm_fault_wire(map, entry->start, entry->end,
+			    entry->protection);
 			if (rv) {
-				failed = entry->start;
-				entry->wired_count--;
+				/*
+				 * wiring failed.  break out of the loop.
+				 * we'll clean up the map below, once we
+				 * have a write lock again.
+				 */
+				break;
 			}
 		}
 		entry = entry->next;
 	}
 
-	if (vm_map_pmap(map) == pmap_kernel()) {
-		vm_map_lock(map);     /* relock */
-	} else {
-		vm_map_clear_recursive(&map->lock);
-	} 
-
 	if (rv) {        /* failed? */
+		/*
+		 * Get back to an exclusive (write) lock.
+		 */
+		vm_map_upgrade(map);
+
+		/*
+		 * first drop the wiring count on all the entries
+		 * which haven't actually been wired yet.
+		 */
+		failed = entry->start;
+		while (entry != &map->header && entry->start < end)
+			entry->wired_count--;
+
+		/*
+		 * now, unlock the map, and unwire all the pages that
+		 * were successfully wired above.
+		 */
 		vm_map_unlock(map);
 		(void) uvm_map_pageable(map, start, failed, TRUE);
 		UVMHIST_LOG(maphist, "<- done (RV=%d)", rv,0,0,0);
 		return(rv);
 	}
-	vm_map_unlock(map);
+
+	/* We are holding a read lock here. */
+	vm_map_unlock_read(map);
 	
 	UVMHIST_LOG(maphist,"<- done (OK WIRE)",0,0,0,0);
 	return(KERN_SUCCESS);
@@ -2100,7 +2211,6 @@ uvm_map_pageable(map, start, end, new_pageable)
  * => called from sys_msync()
  * => caller must not write-lock map (read OK).
  * => we may sleep while cleaning if SYNCIO [with map read-locked]
- * => XXX: does this handle share maps properly?
  */
 
 int
@@ -2131,12 +2241,12 @@ uvm_map_clean(map, start, end, flags)
 	for (current = entry; current->start < end; current = current->next) {
 		if (UVM_ET_ISSUBMAP(current)) {
 			vm_map_unlock_read(map);
-			return(KERN_INVALID_ARGUMENT);
+			return (KERN_INVALID_ARGUMENT);
 		}
 		if (end > current->end && (current->next == &map->header ||
 		    current->end != current->next->start)) {
 			vm_map_unlock_read(map);
-			return(KERN_INVALID_ADDRESS);
+			return (KERN_INVALID_ADDRESS);
 		}
 	}
 
@@ -2267,7 +2377,7 @@ uvmspace_init(vm, pmap, min, max, pageable)
 
 	bzero(vm, sizeof(*vm));
 
-	uvm_map_setup(&vm->vm_map, min, max, pageable);
+	uvm_map_setup(&vm->vm_map, min, max, pageable ? VM_MAP_PAGEABLE : 0);
 
 	if (pmap)
 		pmap_reference(pmap);
@@ -2319,11 +2429,9 @@ uvmspace_unshare(p)
 	nvm = uvmspace_fork(ovm);
 
 	s = splhigh();			/* make this `atomic' */
-	pmap_deactivate(p);
-					/* unbind old vmspace */
+	pmap_deactivate(p);		/* unbind old vmspace */
 	p->p_vmspace = nvm; 
-	pmap_activate(p);
-					/* switch to new vmspace */
+	pmap_activate(p);		/* switch to new vmspace */
 	splx(s);			/* end of critical section */
 
 	uvmspace_free(ovm);		/* drop reference to old vmspace */
@@ -2380,7 +2488,7 @@ uvmspace_exec(p)
 		 * for p
 		 */
 		nvm = uvmspace_alloc(map->min_offset, map->max_offset, 
-			 map->entries_pageable);
+			 (map->flags & VM_MAP_PAGEABLE) ? TRUE : FALSE);
 
 #if (defined(i386) || defined(pc532)) && !defined(PMAP_NEW)
 		/* 
@@ -2486,7 +2594,7 @@ uvmspace_fork(vm1)
 	vm_map_lock(old_map);
 
 	vm2 = uvmspace_alloc(old_map->min_offset, old_map->max_offset,
-		      old_map->entries_pageable);
+		      (old_map->flags & VM_MAP_PAGEABLE) ? TRUE : FALSE);
 	bcopy(&vm1->vm_startcopy, &vm2->vm_startcopy,
 	(caddr_t) (vm1 + 1) - (caddr_t) &vm1->vm_startcopy);
 	new_map = &vm2->vm_map;		  /* XXX */
@@ -2774,6 +2882,10 @@ uvmspace_fork(vm1)
 		shmfork(vm1, vm2);
 #endif
 
+#ifdef PMAP_FORK
+	pmap_fork(vm1->vm_map.pmap, vm2->vm_map.pmap);
+#endif
+
 	UVMHIST_LOG(maphist,"<- done",0,0,0,0);
 	return(vm2);    
 }
@@ -2811,8 +2923,9 @@ uvm_map_printit(map, full, pr)
 	vm_map_entry_t entry;
 
 	(*pr)("MAP %p: [0x%lx->0x%lx]\n", map, map->min_offset,map->max_offset);
-	(*pr)("\t#ent=%d, sz=%d, ref=%d, version=%d\n",
-	    map->nentries, map->size, map->ref_count, map->timestamp);
+	(*pr)("\t#ent=%d, sz=%d, ref=%d, version=%d, flags=0x%x\n",
+	    map->nentries, map->size, map->ref_count, map->timestamp,
+	    map->flags);
 #ifdef pmap_resident_count
 	(*pr)("\tpmap=%p(resident=%d)\n", map->pmap, 
 	    pmap_resident_count(map->pmap));
@@ -2865,7 +2978,7 @@ uvm_object_printit(uobj, full, pr)
 
 	(*pr)("OBJECT %p: pgops=%p, npages=%d, ", uobj, uobj->pgops,
 	    uobj->uo_npages);
-	if (uobj->uo_refs == UVM_OBJ_KERN)
+	if (UVM_OBJ_IS_KERN_OBJECT(uobj))
 		(*pr)("refs=<SYSTEM>\n");
 	else
 		(*pr)("refs=%d\n", uobj->uo_refs);

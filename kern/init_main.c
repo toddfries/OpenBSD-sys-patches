@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.37 1999/03/01 04:41:38 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.52 2000/03/23 16:54:44 art Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -96,6 +96,11 @@
 #include <net/if.h>
 #include <net/raw_cb.h>
 
+#if defined(CRYPTO)
+#include <crypto/crypto.h>
+#include <crypto/cryptosoft.h>
+#endif
+
 #if defined(NFSSERVER) || defined(NFSCLIENT)
 extern void nfs_init __P((void));
 #endif
@@ -107,7 +112,7 @@ extern void nfs_init __P((void));
 char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-1999 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2000 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -123,6 +128,7 @@ struct	proc *initproc;
 int	cmask = CMASK;
 extern	struct user *proc0paddr;
 
+void	(*md_diskconf) __P((void)) = NULL;
 struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
 struct	timeval boottime;
@@ -182,9 +188,10 @@ main(framep)
 	int s;
 	register_t rval[2];
 	extern struct pdevinit pdevinit[];
-	extern void roundrobin __P((void *));
-	extern void schedcpu __P((void *));
+	extern void scheduler_start __P((void));
 	extern void disk_init __P((void));
+	extern void endtsleep __P((void *));
+	extern void realitexpire __P((void *));
 
 	/*
 	 * Initialize the current process pointer (curproc) before
@@ -239,6 +246,10 @@ main(framep)
 	p->p_emul = &emul_native;
 	bcopy("swapper", p->p_comm, sizeof ("swapper"));
 
+	/* Init timeouts. */
+	timeout_set(&p->p_sleep_to, endtsleep, p);
+	timeout_set(&p->p_realit_to, realitexpire, p);
+
 	/* Create credentials. */
 	cred0.p_refcnt = 1;
 	p->p_cred = &cred0;
@@ -252,6 +263,8 @@ main(framep)
 	filedesc0.fd_fd.fd_ofiles = filedesc0.fd_dfiles;
 	filedesc0.fd_fd.fd_ofileflags = filedesc0.fd_dfileflags;
 	filedesc0.fd_fd.fd_nfiles = NDFILE;
+	filedesc0.fd_fd.fd_himap = filedesc0.fd_dhimap;
+	filedesc0.fd_fd.fd_lomap = filedesc0.fd_dlomap;
 
 	/* Create the limits structures. */
 	p->p_limit = &limit0;
@@ -346,6 +359,10 @@ main(framep)
 	for (pdev = pdevinit; pdev->pdev_attach != NULL; pdev++)
 		(*pdev->pdev_attach)(pdev->pdev_count);
 
+#ifdef CRYPTO
+	swcr_init();
+#endif /* CRYPTO */
+	
 	/*
 	 * Initialize protocols.  Block reception of incoming packets
 	 * until everything is ready.
@@ -360,20 +377,12 @@ main(framep)
 	kmstartup();
 #endif
 
-	/* Kick off timeout driven events by calling first time. */
-	roundrobin(NULL);
-	schedcpu(NULL);
+	/* Start the scheduler */
+	scheduler_start();
 
-#ifdef i386
-#include "bios.h"
-#if NBIOS
-	/* XXX This is only a transient solution */
-	{
-		extern void dkcsumattach __P((void));
-		dkcsumattach();
-	}
-#endif
-#endif
+	/* Configure root/swap devices */
+	if (md_diskconf)
+		(*md_diskconf)();
 
 	/* Mount the root file system. */
 	if (vfs_mountroot())
@@ -405,7 +414,7 @@ main(framep)
 	siginit(p);
 
 	/* Create process 1 (init(8)). */
-	if (fork1(p, ISFORK, 0, rval))
+	if (fork1(p, FORK_FORK, NULL, 0, rval))
 		panic("fork init");
 #ifdef cpu_set_init_frame			/* XXX should go away */
 	if (rval[1]) {
@@ -422,7 +431,7 @@ main(framep)
 
 	/* Create process 2, the pageout daemon kernel thread. */
 	if (kthread_create(start_pagedaemon, NULL, NULL, "pagedaemon"))
-		panic("fork pager");
+		panic("fork pagedaemon");
 
 	/* Create process 3, the update daemon kernel thread. */
 	if (kthread_create(start_update, NULL, NULL, "update")) {
@@ -484,7 +493,7 @@ start_init(arg)
 	void *arg;
 {
 	struct proc *p = arg;
-	vm_offset_t addr;
+	vaddr_t addr;
 	struct sys_execve_args /* {
 		syscallarg(char *) path;
 		syscallarg(char **) argp;
@@ -516,7 +525,11 @@ start_init(arg)
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.
 	 */
+#ifdef MACHINE_STACK_GROWS_UP
+	addr = USRSTACK;
+#else
 	addr = USRSTACK - PAGE_SIZE;
+#endif
 #if defined(UVM)
 	if (uvm_map(&p->p_vmspace->vm_map, &addr, PAGE_SIZE, 
                     NULL, UVM_UNKNOWN_OFFSET, 
@@ -526,15 +539,22 @@ start_init(arg)
 		!= KERN_SUCCESS)
 		panic("init: couldn't allocate argument space");
 #else
-	if (vm_allocate(&p->p_vmspace->vm_map, &addr, (vm_size_t)PAGE_SIZE,
+	if (vm_allocate(&p->p_vmspace->vm_map, &addr, (vsize_t)PAGE_SIZE,
 	    FALSE) != 0)
 		panic("init: couldn't allocate argument space");
 #endif
+#ifdef MACHINE_STACK_GROWS_UP
+	p->p_vmspace->vm_maxsaddr = (caddr_t)addr + PAGE_SIZE;
+#else
 	p->p_vmspace->vm_maxsaddr = (caddr_t)addr;
+#endif
 
 	for (pathp = &initpaths[0]; (path = *pathp) != NULL; pathp++) {
+#ifdef MACHINE_STACK_GROWS_UP
+		ucp = (char *)addr;
+#else
 		ucp = (char *)(addr + PAGE_SIZE);
-
+#endif
 		/*
 		 * Construct the boot flag argument.
 		 */
@@ -562,8 +582,14 @@ start_init(arg)
 #ifdef DEBUG
 			printf("init: copying out flags `%s' %d\n", flags, i);
 #endif
+#ifdef MACHINE_STACK_GROWS_UP
+			arg1 = ucp;
+			(void)copyout((caddr_t)flags, (caddr_t)ucp, i);
+			ucp += i;
+#else
 			(void)copyout((caddr_t)flags, (caddr_t)(ucp -= i), i);
 			arg1 = ucp;
+#endif
 		}
 
 		/*
@@ -573,13 +599,20 @@ start_init(arg)
 #ifdef DEBUG
 		printf("init: copying out path `%s' %d\n", path, i);
 #endif
+#ifdef MACHINE_STACK_GROWS_UP
+		arg0 = ucp;
+		(void)copyout((caddr_t)path, (caddr_t)ucp, i);
+		ucp += i;
+		ucp = (caddr_t)ALIGN((u_long)ucp);
+		uap = (char **)ucp + 3;
+#else
 		(void)copyout((caddr_t)path, (caddr_t)(ucp -= i), i);
 		arg0 = ucp;
-
+		uap = (char **)((u_long)ucp & ~ALIGNBYTES);
+#endif
 		/*
 		 * Move out the arg pointers.
 		 */
-		uap = (char **)((long)ucp & ~ALIGNBYTES);
 		(void)suword((caddr_t)--uap, 0);	/* terminator */
 		if (options != 0)
 			(void)suword((caddr_t)--uap, (long)arg1);

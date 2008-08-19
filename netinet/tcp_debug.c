@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_debug.c,v 1.4 1999/01/11 02:01:35 deraadt Exp $	*/
+/*	$OpenBSD: tcp_debug.c,v 1.8 2000/04/14 04:41:39 itojun Exp $	*/
 /*	$NetBSD: tcp_debug.c,v 1.10 1996/02/13 23:43:36 christos Exp $	*/
 
 /*
@@ -81,8 +81,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <netinet/tcp_debug.h>
 
 #ifdef INET6
-#include <netinet6/ipv6.h>
-#include <netinet6/in6.h>
+#ifndef INET
+#include <netinet/in.h>
+#endif
+#include <netinet/ip6.h>
 #endif /* INET6 */
 
 #ifdef TCPDEBUG
@@ -92,10 +94,10 @@ int	tcpconsdebug = 0;
  * Tcp debug routines
  */
 void
-tcp_trace(act, ostate, tp, ti, req, len)
+tcp_trace(act, ostate, tp, headers, req, len)
 	short act, ostate;
 	struct tcpcb *tp;
-	struct tcpiphdr *ti;
+	caddr_t headers;
 	int req;
 	int len;
 {
@@ -104,8 +106,9 @@ tcp_trace(act, ostate, tp, ti, req, len)
 	int flags;
 #endif
 	struct tcp_debug *td = &tcp_debug[tcp_debx++];
-#ifdef INET6
+	struct tcpiphdr *ti = (struct tcpiphdr *)headers;
 	struct tcphdr *th;
+#ifdef INET6
 	struct tcpipv6hdr *ti6 = (struct tcpipv6hdr *)ti;
 #endif
 
@@ -127,7 +130,9 @@ tcp_trace(act, ostate, tp, ti, req, len)
 		} else {
 			bzero(&td->td_ti6, sizeof(struct tcpipv6hdr));
 		}
-	} else {
+	} else
+#endif /* INET6 */
+	{
 		if (ti) {
 			th = &ti->ti_t;
 			td->td_ti = *ti;
@@ -135,12 +140,6 @@ tcp_trace(act, ostate, tp, ti, req, len)
 			bzero(&td->td_ti, sizeof(struct tcpiphdr));
 		}
 	}
-#else /* INET6 */
-	if (ti)
-		td->td_ti = *ti;
-	else
-		bzero((caddr_t)&td->td_ti, sizeof (*ti));
-#endif /* INET6 */
 
 	td->td_req = req;
 #ifdef TCPDEBUG
@@ -173,7 +172,7 @@ tcp_trace(act, ostate, tp, ti, req, len)
 		if (flags) {
 #ifndef lint
 			char *cp = "<";
-#define pf(f) { if (th->th_flags&TH_/**/f) { printf("%s%s", cp, "f"); cp = ","; } }
+#define pf(f) { if (th->th_flags&TH_##f) { printf("%s%s", cp, "f"); cp = ","; } }
 			pf(SYN); pf(ACK); pf(FIN); pf(RST); pf(PUSH); pf(URG);
 #endif
 			printf(">");

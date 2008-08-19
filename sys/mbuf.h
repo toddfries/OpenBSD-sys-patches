@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.10 1999/03/27 21:04:21 provos Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.16 2000/04/26 18:40:50 chris Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -51,7 +51,7 @@
 #define	MLEN		(MSIZE - sizeof(struct m_hdr))	/* normal data len */
 #define	MHLEN		(MLEN - sizeof(struct pkthdr))	/* data len w/pkthdr */
 
-#define	MINCLSIZE	(MHLEN+MLEN+1)	/* smallest amount to put in cluster */
+#define	MINCLSIZE	(MHLEN + 1)	/* smallest amount to put in cluster */
 #define	M_MAXCOMPRESS	(MHLEN / 2)	/* max amount to copy for compression */
 
 /*
@@ -88,8 +88,11 @@ struct	pkthdr {
 struct m_ext {
 	caddr_t	ext_buf;		/* start of buffer */
 	void	(*ext_free)		/* free routine if not the usual */
-		    __P((caddr_t, u_int));
+		    __P((struct mbuf *));
 	u_int	ext_size;		/* size of buffer, for ext_free */
+	void	(*ext_ref)		/* add a reference to the ext object */
+		    __P((struct mbuf *));
+	void	*ext_handle;		/* handle for storage manager */
 };
 
 struct mbuf {
@@ -121,19 +124,32 @@ struct mbuf {
 #define	M_EXT		0x0001	/* has associated external storage */
 #define	M_PKTHDR	0x0002	/* start of record */
 #define	M_EOR		0x0004	/* end of record */
+#define	M_PROTO1	0x0008	/* protocol-specific */
 
 /* mbuf pkthdr flags, also in m_flags */
 #define	M_BCAST		0x0100	/* send/received as link-level broadcast */
 #define	M_MCAST		0x0200	/* send/received as link-level multicast */
 #define M_CONF		0x0400  /* packet was encrypted (ESP-transport) */
 #define M_AUTH		0x0800  /* packet was authenticated (AH) */
+#if 0 /* NRL IPv6 */
 #define M_TUNNEL       	0x1000  /* packet was tunneled */
-
 #define M_DAD		0x2000	/* Used on outbound packets to indicate that
 				 * this is for duplicate address detection */
+#endif
+
+/* KAME IPv6 */
+#define M_ANYCAST6	0x4000	/* received as IPv6 anycast */
+#if 0 /*KAME IPSEC*/
+#define M_AUTHIPHDR	0x0010	/* data origin authentication for IP header */
+#define M_DECRYPTED	0x0020	/* confidentiality */
+#endif
+#define M_LOOP		0x0040	/* for Mbuf statistics */
+#if 0 /*KAME IPSEC*/
+#define M_AUTHIPDGM     0x0080  /* data origin authentication */
+#endif
 
 /* flags copied when copying m_pkthdr */
-#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_BCAST|M_MCAST|M_CONF|M_AUTH|M_TUNNEL|M_DAD)
+#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_PROTO1|M_BCAST|M_MCAST|M_CONF|M_AUTH|M_ANYCAST6|M_LOOP)
 
 /* mbuf types */
 #define	MT_FREE		0	/* should be on free list */
@@ -239,7 +255,9 @@ union mcluster {
 		(m)->m_data = (m)->m_ext.ext_buf; \
 		(m)->m_flags |= M_EXT; \
 		(m)->m_ext.ext_size = MCLBYTES;  \
-		(m)->m_ext.ext_free = 0; \
+		(m)->m_ext.ext_free = NULL; \
+		(m)->m_ext.ext_ref = NULL; \
+		(m)->m_ext.ext_handle = NULL; \
 	  } \
 	}
 
@@ -263,29 +281,17 @@ union mcluster {
  * Free a single mbuf and associated external storage.
  * Place the successor, if any, in n.
  */
-#ifdef notyet
 #define	MFREE(m, n) \
 	{ MBUFLOCK(mbstat.m_mtypes[(m)->m_type]--;) \
 	  if ((m)->m_flags & M_EXT) { \
 		if ((m)->m_ext.ext_free) \
-			(*((m)->m_ext.ext_free))((m)->m_ext.ext_buf, \
-			    (m)->m_ext.ext_size); \
+			(*((m)->m_ext.ext_free))(m); \
 		else \
 			MCLFREE((m)->m_ext.ext_buf); \
 	  } \
 	  (n) = (m)->m_next; \
 	  FREE((m), mbtypes[(m)->m_type]); \
 	}
-#else /* notyet */
-#define	MFREE(m, nn) \
-	{ MBUFLOCK(mbstat.m_mtypes[(m)->m_type]--;) \
-	  if ((m)->m_flags & M_EXT) { \
-		MCLFREE((m)->m_ext.ext_buf); \
-	  } \
-	  (nn) = (m)->m_next; \
-	  FREE((m), mbtypes[(m)->m_type]); \
-	}
-#endif
 
 /*
  * Copy mbuf pkthdr from from to to.
@@ -397,6 +403,8 @@ struct	mbuf *m_pullup2 __P((struct mbuf *, int));
 struct	mbuf *m_retry __P((int, int));
 struct	mbuf *m_retryhdr __P((int, int));
 struct	mbuf *m_split __P((struct mbuf *, int, int));
+struct  mbuf *m_inject __P((struct mbuf *, int, int, int));
+struct  mbuf *m_getptr __P((struct mbuf *, int, int *));
 void	m_adj __P((struct mbuf *, int));
 int	m_clalloc __P((int, int));
 void	m_copyback __P((struct mbuf *, int, int, caddr_t));
@@ -407,6 +415,8 @@ void	m_cat __P((struct mbuf *, struct mbuf *));
 struct mbuf *m_devget __P((char *, int, int, struct ifnet *,
 			   void (*) __P((const void *, void *, size_t))));
 void	m_zero __P((struct mbuf *));
+int	m_apply __P((struct mbuf *, int, int,
+			int (*)(caddr_t, caddr_t, unsigned int), caddr_t));
 
 #ifdef MBTYPES
 int mbtypes[] = {				/* XXX */

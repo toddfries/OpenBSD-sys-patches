@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.26 1999/02/26 03:16:25 art Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.28 2000/02/07 04:57:17 assar Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -1133,7 +1133,7 @@ nfs_init()
 			+ nqsrv_clockskew + nqsrv_writeslack;
 		NQLOADNOVRAM(nqnfsstarttime);
 		CIRCLEQ_INIT(&nqtimerhead);
-		nqfhhashtbl = hashinit(NQLCHSZ, M_NQLEASE, &nqfhhash);
+		nqfhhashtbl = hashinit(NQLCHSZ, M_NQLEASE, M_WAITOK, &nqfhhash);
 	}
 
 	/*
@@ -1690,7 +1690,7 @@ nfsm_srvfattr(nfsd, vap, fp)
 /*
  * nfsrv_fhtovp() - convert a fh to a vnode ptr (optionally locked)
  * 	- look up fsid in mount list (if not found ret error)
- *	- get vp and export rights by calling VFS_FHTOVP()
+ *	- get vp and export rights by calling VFS_FHTOVP() and VFS_CHECKEXP()
  *	- if cred->cr_uid == 0 or MNT_EXPORTANON set it to credanon
  *	- if not lockflag unlock it with VOP_UNLOCK()
  */
@@ -1717,7 +1717,10 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp, kerbflag)
 
 	if (!mp)
 		return (ESTALE);
-	error = VFS_FHTOVP(mp, &fhp->fh_fid, nam, vpp, &exflags, &credanon);
+	error = VFS_CHECKEXP(mp, nam, &exflags, &credanon);
+	if (error)
+		return (error);
+	error = VFS_FHTOVP(mp, &fhp->fh_fid, vpp);
 	if (error)
 		return (error);
 

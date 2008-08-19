@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.38 1999/02/26 01:38:23 art Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.41 1999/11/26 16:46:17 art Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -777,7 +777,7 @@ ccdstart(cs, bp)
 	    M_WAITOK);
 	bzero(cbpp, 2 * cs->sc_nccdisks * sizeof(struct ccdbuf *));
 	addr = bp->b_data;
-	old_io = old_io || ((vm_offset_t)addr & CLOFSET); /* XXX !claligned */
+	old_io = old_io || ((vaddr_t)addr & CLOFSET); /* XXX !claligned */
 	for (bcount = bp->b_bcount; bcount > 0; bcount -= rcount) {
 		rcount = ccdbuffer(cs, bp, bn, addr, bcount, cbpp, old_io);
 		
@@ -990,8 +990,8 @@ ccdbuffer(cs, bp, bn, addr, bcount, cbpp, old_io)
 			    cbp->cb_sgcnt, addr, bcount, old_bcount);
 #endif
 		pagemove(addr, nbp->b_data + old_bcount,
-		    roundup(bcount, CLBYTES));
-		nbp->b_bufsize += roundup(bcount, CLBYTES);
+		    clrnd(round_page(bcount)));
+		nbp->b_bufsize += clrnd(round_page(bcount));
 		cbp->cb_sg[cbp->cb_sgcnt].cs_sgaddr = addr;
 		cbp->cb_sg[cbp->cb_sgcnt].cs_sglen = bcount;
 		cbp->cb_sgcnt++;
@@ -1087,14 +1087,14 @@ ccdiodone(vbp)
 				    cbp->cb_sg[i].cs_sglen, off);
 #endif
 			pagemove(vbp->b_data + off, cbp->cb_sg[i].cs_sgaddr,
-			    roundup(cbp->cb_sg[i].cs_sglen, CLBYTES));
+			    clrnd(round_page(cbp->cb_sg[i].cs_sglen)));
 			off += cbp->cb_sg[i].cs_sglen;
 		}
 
 #if defined(UVM)
 		uvm_km_free(ccdmap, (vaddr_t)vbp->b_data, count);
 #else
-		kmem_free(ccdmap, (vm_offset_t)vbp->b_data, count);
+		kmem_free(ccdmap, (vaddr_t)vbp->b_data, count);
 #endif
 		if (ccd_need_kvm) {
 			ccd_need_kvm = 0;
@@ -1194,7 +1194,7 @@ ccdioctl(dev, cmd, data, flag, p)
 	struct ccddevice ccd;
 	char **cpp;
 	struct vnode **vpp;
-	vm_offset_t min, max;
+	vaddr_t min, max;
 
 	if (unit >= numccd)
 		return (ENXIO);

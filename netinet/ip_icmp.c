@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.16 1999/01/08 11:35:09 deraadt Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.20.4.1 2000/05/29 18:24:03 jason Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -86,11 +86,19 @@ int	icmpbmcastecho = 0;
 int	icmpprintfs = 0;
 #endif
 
+#if 0
+static int	ip_next_mtu __P((int, int));
+#else
+/*static*/ int	ip_next_mtu __P((int, int));
+#endif
+
 extern	struct protosw inetsw[];
 
 /*
  * Generate an error packet of type error
  * in response to bad packet ip.
+ *
+ * The ip packet inside has ip_off and ip_len in host byte order.
  */
 void
 icmp_error(n, type, code, dest, destifp)
@@ -116,7 +124,7 @@ icmp_error(n, type, code, dest, destifp)
 	 * Don't error if the old packet protocol was ICMP
 	 * error message, only known informational types.
 	 */
-	if (ntohs(oip->ip_off) &~ (IP_MF|IP_DF))
+	if (oip->ip_off &~ (IP_MF|IP_DF))
 		goto freeit;
 	if (oip->ip_p == IPPROTO_ICMP && type != ICMP_REDIRECT &&
 	  n->m_len >= oiplen + ICMP_MINLEN &&
@@ -133,7 +141,7 @@ icmp_error(n, type, code, dest, destifp)
 	m = m_gethdr(M_DONTWAIT, MT_HEADER);
 	if (m == NULL)
 		goto freeit;
-	icmplen = oiplen + min(8, ntohs(oip->ip_len));
+	icmplen = oiplen + min(8, oip->ip_len);
 	m->m_len = icmplen + ICMP_MINLEN;
 	MH_ALIGN(m, m->m_len);
 	icp = mtod(m, struct icmp *);
@@ -160,7 +168,8 @@ icmp_error(n, type, code, dest, destifp)
 	icp->icmp_code = code;
 	bcopy((caddr_t)oip, (caddr_t)&icp->icmp_ip, icmplen);
 	nip = &icp->icmp_ip;
-	nip->ip_len = htons((u_int16_t)(ntohs(nip->ip_len) + oiplen));
+	nip->ip_off = htons(nip->ip_off);
+	nip->ip_len = htons(nip->ip_len);
 
 	m0.m_next = NULL;			/* correct nip->ip_sum */
 	m0.m_data = (char *)nip;
@@ -180,6 +189,7 @@ icmp_error(n, type, code, dest, destifp)
 	m->m_pkthdr.rcvif = n->m_pkthdr.rcvif;
 	nip = mtod(m, struct ip *);
 	bcopy((caddr_t)oip, (caddr_t)nip, sizeof(struct ip));
+	nip->ip_off = htons(nip->ip_off);
 	nip->ip_len = m->m_len;
 	nip->ip_hl = sizeof(struct ip) >> 2;
 	nip->ip_p = IPPROTO_ICMP;
@@ -280,7 +290,7 @@ icmp_input(m, va_alist)
 			break;
 
 		case ICMP_UNREACH_NEEDFRAG:
-#ifdef INET6
+#if 0 /*NRL INET6*/
 			if (icp->icmp_nextmtu) {
 				extern int ipv6_trans_mtu
 				    __P((struct mbuf **, int, int));
@@ -381,6 +391,10 @@ icmp_input(m, va_alist)
 			printf("deliver to protocol %d\n", icp->icmp_ip.ip_p);
 #endif
 		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
+		/*
+		 * XXX if the packet contains [IPv4 AH TCP], we can't make a
+		 * notification to TCP layer.
+		 */
 		ctlfunc = inetsw[ip_protox[icp->icmp_ip.ip_p]].pr_ctlinput;
 		if (ctlfunc)
 			(*ctlfunc)(code, sintosa(&icmpsrc), &icp->icmp_ip);
@@ -497,7 +511,7 @@ reflect:
 	}
 
 raw:
-	rip_input(m, 0);
+	rip_input(m);
 	return;
 
 freeit:
@@ -580,8 +594,11 @@ icmp_reflect(m)
 			    if (opt == IPOPT_NOP)
 				    len = 1;
 			    else {
+				    if (cnt < IPOPT_OLEN + sizeof(*cp))
+					    break;
 				    len = cp[IPOPT_OLEN];
-				    if (len <= 0 || len > cnt)
+				    if (len < IPOPT_OLEN + sizeof(*cp) ||
+				        len > cnt)
 					    break;
 			    }
 			    /*

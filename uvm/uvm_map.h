@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_map.h,v 1.2 1999/02/26 05:32:07 art Exp $	*/
-/*	$NetBSD: uvm_map.h,v 1.10 1998/10/11 23:14:48 chuck Exp $	*/
+/*	$NetBSD: uvm_map.h,v 1.14 1999/05/26 19:16:36 thorpej Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!
- *         >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /* 
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * Copyright (c) 1991, 1993, The Regents of the University of California.  
@@ -122,6 +117,14 @@
 #endif /* UVM_MAP_INLINE */
 
 /*
+ * globals:
+ */
+
+#ifdef PMAP_GROWKERNEL
+extern vaddr_t	uvm_maxkaddr;
+#endif
+
+/*
  * protos: the following prototypes define the interface to vm_map
  */
 
@@ -135,7 +138,7 @@ void		uvm_map_clip_end __P((vm_map_t, vm_map_entry_t,
 				vaddr_t));
 MAP_INLINE
 vm_map_t	uvm_map_create __P((pmap_t, vaddr_t, 
-			vaddr_t, boolean_t));
+			vaddr_t, int));
 int		uvm_map_extract __P((vm_map_t, vaddr_t, vsize_t, 
 			vm_map_t, vaddr_t *, int));
 vm_map_entry_t	uvm_map_findspace __P((vm_map_t, vaddr_t, vsize_t,
@@ -143,6 +146,7 @@ vm_map_entry_t	uvm_map_findspace __P((vm_map_t, vaddr_t, vsize_t,
 			boolean_t));
 int		uvm_map_inherit __P((vm_map_t, vaddr_t, vaddr_t,
 			vm_inherit_t));
+int		uvm_map_advice __P((vm_map_t, vaddr_t, vaddr_t, int));
 void		uvm_map_init __P((void));
 boolean_t	uvm_map_lookup_entry __P((vm_map_t, vaddr_t, 
 			vm_map_entry_t *));
@@ -153,7 +157,7 @@ int		uvm_map_replace __P((vm_map_t, vaddr_t, vaddr_t,
 int		uvm_map_reserve __P((vm_map_t, vsize_t, vaddr_t, 
 			vaddr_t *));
 void		uvm_map_setup __P((vm_map_t, vaddr_t, 
-			vaddr_t, boolean_t));
+			vaddr_t, int));
 int		uvm_map_submap __P((vm_map_t, vaddr_t, 
 			vaddr_t, vm_map_t));
 MAP_INLINE

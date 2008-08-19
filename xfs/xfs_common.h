@@ -1,6 +1,6 @@
-/*	$OpenBSD: xfs_common.h,v 1.2 1998/08/31 05:13:21 art Exp $	*/
+/* $OpenBSD: xfs_common.h,v 1.4 2000/03/03 00:54:58 todd Exp $ */
 /*
- * Copyright (c) 1995, 1996, 1997, 1998 Kungliga Tekniska Högskolan
+ * Copyright (c) 1995, 1996, 1997 Kungliga Tekniska Högskolan
  * (Royal Institute of Technology, Stockholm, Sweden).
  * All rights reserved.
  *
@@ -37,20 +37,20 @@
  * SUCH DAMAGE.
  */
 
-/* $KTH: xfs_common.h,v 1.5 1998/07/13 20:36:36 art Exp $ */
 
-#ifndef _XFS_XFS_COMMON_H_
-#define _XFS_XFS_COMMON_H_
+#ifndef _xfs_common_h
+#define _xfs_common_h
 
-#include <sys/malloc.h>
-
-#ifdef DEBUG
-void *xfs_alloc __P((u_int size));
-void xfs_free __P((void *, u_int size));
+#ifdef XFS_DEBUG
+void *xfs_alloc(u_int size);
+void xfs_free(void *, u_int size);
 #else
-#define xfs_alloc(s) malloc((s), M_TEMP, M_WAITOK) /* XXX - what kind? */
-#define xfs_free(p, s) free((p), M_TEMP)
+#ifdef __osf__
+#define xfs_alloc(a) malloc((a), BUCKETINDEX(a), M_TEMP, M_WAITOK)
+#else
+#define xfs_alloc(a) malloc((a), M_TEMP, M_WAITOK)
 #endif
+#define xfs_free(a, size) free(a, M_TEMP)
+#endif /* XFS_DEBUG */
 
-#define RCSID(x)
-#endif
+#endif /* _xfs_common_h */

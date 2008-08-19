@@ -1,4 +1,4 @@
-/*	$OpenBSD: lfs_vfsops.c,v 1.10 1999/01/11 05:12:39 millert Exp $	*/
+/*	$OpenBSD: lfs_vfsops.c,v 1.12 2000/02/07 04:57:18 assar Exp $	*/
 /*	$NetBSD: lfs_vfsops.c,v 1.11 1996/03/25 12:53:35 pk Exp $	*/
 
 /*
@@ -76,6 +76,8 @@ struct vfsops lfs_vfsops = {
 	lfs_fhtovp,
 	lfs_vptofh,
 	lfs_init,
+	lfs_sysctl,
+	ufs_check_export
 };
 
 int
@@ -202,6 +204,7 @@ lfs_mount(mp, path, data, ndp, p)
 	(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
 	    &size);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
+	bcopy(&args, &mp->mnt_stat.mount_info.ufs_args, sizeof(args));
 	return (0);
 }
 
@@ -431,6 +434,8 @@ lfs_statfs(mp, sbp, p)
 	if (sbp != &mp->mnt_stat) {
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+		bcopy(&mp->mnt_stat.mount_info.ufs_args,
+		    &sbp->mount_info.ufs_args, sizeof(struct ufs_args));
 	}
 	strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
 	return (0);
@@ -564,8 +569,6 @@ lfs_vget(mp, ino, vpp)
  * - check that the inode number is valid
  * - call lfs_vget() to get the locked inode
  * - check for an unallocated inode (i_mode == 0)
- * - check that the given client host has export rights and return
- *   those rights via. exflagsp and credanonp
  *
  * XXX
  * use ifile to see if inode is allocated instead of reading off disk
@@ -573,20 +576,17 @@ lfs_vget(mp, ino, vpp)
  * generational number.
  */
 int
-lfs_fhtovp(mp, fhp, nam, vpp, exflagsp, credanonp)
+lfs_fhtovp(mp, fhp, vpp)
 	register struct mount *mp;
 	struct fid *fhp;
-	struct mbuf *nam;
 	struct vnode **vpp;
-	int *exflagsp;
-	struct ucred **credanonp;
 {
 	register struct ufid *ufhp;
 
 	ufhp = (struct ufid *)fhp;
 	if (ufhp->ufid_ino < ROOTINO)
 		return (ESTALE);
-	return (ufs_check_export(mp, ufhp, nam, vpp, exflagsp, credanonp));
+	return (ufs_fhtovp(mp, ufhp, nam, vpp, exflagsp, credanonp));
 }
 
 /*
@@ -616,4 +616,21 @@ void
 lfs_init()
 {
 	ufs_init();
+}
+
+/*
+ * no sysctl for lfs
+ */
+
+int
+lfs_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	struct proc *p;
+{
+	return (EOPNOTSUPP);
 }

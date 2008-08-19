@@ -1,5 +1,5 @@
-/*	$OpenBSD: rf_raid.h,v 1.2 1999/02/16 00:03:13 niklas Exp $	*/
-/*	$NetBSD: rf_raid.h,v 1.3 1999/02/05 00:06:15 oster Exp $	*/
+/*	$OpenBSD: rf_raid.h,v 1.5 2000/01/07 14:50:22 peter Exp $	*/
+/*	$NetBSD: rf_raid.h,v 1.8 2000/01/05 02:57:29 oster Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -64,6 +64,10 @@
 #define RF_MAX_DISKS 128	/* max disks per array */
 #define RF_DEV2RAIDID(_dev)  (DISKUNIT(_dev))
 
+#define RF_COMPONENT_LABEL_VERSION 1
+#define RF_RAID_DIRTY 0
+#define RF_RAID_CLEAN 1
+
 /*
  * Each row in the array is a distinct parity group, so
  * each has it's own status, which is one of the following.
@@ -98,7 +102,9 @@ struct RF_ThroughputStats_s {
 struct RF_Raid_s {
 	/* This portion never changes, and can be accessed without locking */
 	/* an exception is Disks[][].status, which requires locking when it is
-	 * changed */
+	 * changed.  XXX this is no longer true.  numSpare and friends can 
+	 * change now. 
+         */
 	u_int   numRow;		/* number of rows of disks, typically == # of
 				 * ranks */
 	u_int   numCol;		/* number of columns of disks, typically == #
@@ -129,6 +135,15 @@ struct RF_Raid_s {
 	RF_LockTableEntry_t *lockTable;	/* stripe-lock table */
 	RF_LockTableEntry_t *quiesceLock;	/* quiesnce table */
 	int     numFailures;	/* total number of failures in the array */
+
+	int     parity_good;    /* !0 if parity is known to be correct */
+	int     serial_number;  /* a "serial number" for this set */
+	int     mod_counter;    /* modification counter for component labels */
+	int     clean;          /* the clean bit for this array. */
+
+	int     openings;       /* Number of IO's which can be scheduled
+				   simultaneously (high-level - not a 
+				   per-component limit)*/
 
 	/*
          * Cleanup stuff
@@ -164,16 +179,26 @@ struct RF_Raid_s {
          */
 #if !defined(_KERNEL) && !defined(SIMULATE)
 	RF_ThroughputStats_t throughputstats;
-#endif				/* !KERNEL && !SIMULATE */
+#endif				/* !_KERNEL && !SIMULATE */
 	RF_CumulativeStats_t userstats;
+	int     parity_rewrite_stripes_done;
+	int     recon_stripes_done;
+	int     copyback_stripes_done;
+
+	int     recon_in_progress;
+	int     parity_rewrite_in_progress;
+	int     copyback_in_progress;
 
 	/*
          * Engine thread control
          */
-	        RF_DECLARE_MUTEX(node_queue_mutex)
-	        RF_DECLARE_COND(node_queue_cond)
+	RF_DECLARE_MUTEX(node_queue_mutex)
+	RF_DECLARE_COND(node_queue_cond)
 	RF_DagNode_t *node_queue;
+	RF_Thread_t parity_rewrite_thread;
+	RF_Thread_t copyback_thread;
 	RF_Thread_t engine_thread;
+	RF_Thread_t recon_thread;
 	RF_ThreadGroup_t engine_tg;
 	int     shutdown_engine;
 	int     dags_in_flight;	/* debug */
@@ -211,7 +236,6 @@ struct RF_Raid_s {
 	int     keep_acc_totals;
 
 	struct raidcinfo **raid_cinfo;	/* array of component info */
-	struct proc *proc;	/* XXX shouldn't be needed here.. :-p */
 
 	int     terminate_disk_queues;
 

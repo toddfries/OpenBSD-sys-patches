@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_all.h,v 1.5 1997/04/14 04:09:06 downsj Exp $	*/
+/*	$OpenBSD: scsi_all.h,v 1.7 2000/02/21 08:18:31 mjacob Exp $	*/
 /*	$NetBSD: scsi_all.h,v 1.10 1996/09/12 01:57:17 thorpej Exp $	*/
 
 /*
@@ -203,6 +203,7 @@ struct scsi_changedef {
 
 #define T_CHANGER	8
 #define T_COMM		9
+#define	T_ENCLOSURE	13
 
 #define T_REMOV		1
 #define	T_FIXED		0
@@ -236,7 +237,7 @@ struct scsi_inquiry_data {
 	char	vendor[8];
 	char	product[16];
 	char	revision[4];
-	u_int8_t extra[8];
+	u_int8_t extra[14];
 };
 
 struct scsi_sense_data_unextended {
@@ -266,6 +267,23 @@ struct scsi_sense_data {
 /*18*/	u_int8_t sense_key_spec_3;
 /*32*/	u_int8_t extra_bytes[14];
 };
+
+#define SKEY_NO_SENSE           0x00
+#define SKEY_RECOVERED_ERROR    0x01
+#define SKEY_NOT_READY          0x02
+#define SKEY_MEDIUM_ERROR       0x03
+#define SKEY_HARDWARE_ERROR     0x04
+#define SKEY_ILLEGAL_REQUEST    0x05
+#define SKEY_UNIT_ATTENTION     0x06
+#define SKEY_WRITE_PROTECT      0x07
+#define SKEY_BLANK_CHECK        0x08
+#define SKEY_VENDOR_UNIQUE      0x09
+#define SKEY_COPY_ABORTED       0x0A
+#define SKEY_ABORTED_COMMAND    0x0B
+#define SKEY_EQUAL              0x0C
+#define SKEY_VOLUME_OVERFLOW    0x0D
+#define SKEY_MISCOMPARE         0x0E
+#define SKEY_RESERVED           0x0F
 
 struct scsi_blk_desc {
 	u_int8_t density;

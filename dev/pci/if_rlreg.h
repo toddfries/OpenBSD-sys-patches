@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rlreg.h,v 1.7 1999/02/26 21:25:43 jason Exp $	*/
+/*	$OpenBSD: if_rlreg.h,v 1.10 1999/12/14 22:34:45 jason Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -31,7 +31,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- *	$FreeBSD: if_rlreg.h,v 1.5 1999/02/23 15:38:25 wpaul Exp $
+ * $FreeBSD: src/sys/pci/if_rlreg.h,v 1.14 1999/10/21 19:42:03 wpaul Exp $
  */
 
 /*
@@ -106,14 +106,19 @@
  * TX config register bits
  */
 #define RL_TXCFG_CLRABRT	0x00000001	/* retransmit aborted pkt */
-#define RL_TXCFG_MXDMA0		0x00000100	/* max DMA burst size */
-#define RL_TXCFG_MXDMA1		0x00000200
-#define RL_TXCFG_MXDMA2		0x00000400
+#define RL_TXCFG_MAXDMA		0x00000700	/* max DMA burst size */
 #define RL_TXCFG_CRCAPPEND	0x00010000	/* CRC append (0 = yes) */
-#define RL_TXCFG_LOOPBKTST0	0x00020000	/* loopback test */
-#define RL_TXCFG_LOOPBKTST1	0x00040000	/* loopback test */
-#define RL_TXCFG_IFG0		0x01000000	/* interframe gap */
-#define RL_TXCFG_IFG1		0x02000000	/* interframe gap */
+#define RL_TXCFG_LOOPBKTST	0x00060000	/* loopback test */
+#define RL_TXCFG_IFG		0x03000000	/* interframe gap */
+
+#define RL_TXDMA_16BYTES	0x00000000
+#define RL_TXDMA_32BYTES	0x00000100
+#define RL_TXDMA_64BYTES	0x00000200
+#define RL_TXDMA_128BYTES	0x00000300
+#define RL_TXDMA_256BYTES	0x00000400
+#define RL_TXDMA_512BYTES	0x00000500
+#define RL_TXDMA_1024BYTES	0x00000600
+#define RL_TXDMA_2048BYTES	0x00000700
 
 /*
  * Transmit descriptor status register bits.
@@ -167,15 +172,33 @@
 #define RL_RXCFG_RX_RUNT	0x00000010
 #define RL_RXCFG_RX_ERRPKT	0x00000020
 #define RL_RXCFG_WRAP		0x00000080
-#define RL_RXCFG_MAXDMA		(0x00000100|0x00000200|0x00000400)
-#define RL_RXCFG_BUFSZ		(0x00000800|0x00001000)
-#define RL_RXCFG_FIFOTHRESH	(0x00002000|0x00004000|0x00008000)
-#define RL_RXCFG_EARLYTHRESH	(0x01000000|0x02000000|0x04000000)
+#define RL_RXCFG_MAXDMA		0x00000700
+#define RL_RXCFG_BURSZ		0x00001800
+#define	RL_RXCFG_FIFOTHRESH	0x0000E000
+#define RL_RXCFG_EARLYTHRESH	0x07000000
+
+#define RL_RXDMA_16BYTES	0x00000000
+#define RL_RXDMA_32BYTES	0x00000100
+#define RL_RXDMA_64BYTES	0x00000200
+#define RL_RXDMA_128BYTES	0x00000300
+#define RL_RXDMA_256BYTES	0x00000400
+#define RL_RXDMA_512BYTES	0x00000500
+#define RL_RXDMA_1024BYTES	0x00000600
+#define RL_RXDMA_UNLIMITED	0x00000700
 
 #define RL_RXBUF_8		0x00000000
 #define RL_RXBUF_16		0x00000800
 #define RL_RXBUF_32		0x00001000
-#define RL_RXBUF_64		(0x00001000|0x00000800)
+#define RL_RXBUF_64		0x00001800
+
+#define RL_RXFIFO_16BYTES	0x00000000
+#define RL_RXFIFO_32BYTES	0x00002000
+#define RL_RXFIFO_64BYTES	0x00004000
+#define RL_RXFIFO_128BYTES	0x00006000
+#define RL_RXFIFO_256BYTES	0x00008000
+#define RL_RXFIFO_512BYTES	0x0000A000
+#define RL_RXFIFO_1024BYTES	0x0000C000
+#define RL_RXFIFO_NOTHRESH	0x0000E000
 
 /*
  * Bits in RX status header (included with RX'ed packet
@@ -278,27 +301,34 @@
 #define RL_RXBUFLEN		(1 << ((RL_RX_BUF_SZ >> 11) + 13))
 #define RL_TX_LIST_CNT		4
 #define RL_MIN_FRAMELEN		60
-#define RL_TX_EARLYTHRESH	0x80000		/* 256 << 11 */
-#define RL_RX_FIFOTHRESH	0x8000		/* 4 << 13 */
-#define RL_RX_MAXDMA		0x00000400
+#define RL_TXTHRESH(x)		((x) << 11)
+#define RL_TX_THRESH_INIT	96
+#define RL_RX_FIFOTHRESH	RL_RXFIFO_256BYTES
+#define RL_RX_MAXDMA		RL_RXDMA_UNLIMITED
+#define RL_TX_MAXDMA		RL_TXDMA_2048BYTES
 
-#define RL_RXCFG_CONFIG (RL_RX_FIFOTHRESH|RL_RX_BUF_SZ)
+#define RL_RXCFG_CONFIG		(RL_RX_FIFOTHRESH|RL_RX_MAXDMA|RL_RX_BUF_SZ)
+#define RL_TXCFG_CONFIG		(RL_TXCFG_IFG|RL_TX_MAXDMA)
 
-struct rl_chain {
-	char			rl_desc;	/* descriptor register idx */
-	struct mbuf		*rl_mbuf;
-	struct rl_chain		*rl_next;
-};
+#define RL_ETHER_ALIGN		2
 
 struct rl_chain_data {
 	u_int16_t		cur_rx;
 	caddr_t			rl_rx_buf;
-	struct rl_chain		rl_tx_chain[RL_TX_LIST_CNT];
+	caddr_t			rl_rx_buf_ptr;
 
-	int			rl_tx_cnt;
-	struct rl_chain		*rl_tx_cur;
-	struct rl_chain		*rl_tx_free;
+	struct mbuf		*rl_tx_chain[RL_TX_LIST_CNT];
+	u_int8_t		last_tx;
+	u_int8_t		cur_tx;
 };
+
+#define RL_INC(x)		(x = (x + 1) % RL_TX_LIST_CNT)
+#define RL_CUR_TXADDR(x)	((x->rl_cdata.cur_tx * 4) + RL_TXADDR0)
+#define RL_CUR_TXSTAT(x)	((x->rl_cdata.cur_tx * 4) + RL_TXSTAT0)
+#define RL_CUR_TXMBUF(x)	(x->rl_cdata.rl_tx_chain[x->rl_cdata.cur_tx])
+#define RL_LAST_TXADDR(x)	((x->rl_cdata.last_tx * 4) + RL_TXADDR0)
+#define RL_LAST_TXSTAT(x)	((x->rl_cdata.last_tx * 4) + RL_TXSTAT0)
+#define RL_LAST_TXMBUF(x)	(x->rl_cdata.rl_tx_chain[x->rl_cdata.last_tx])
 
 struct rl_type {
 	u_int16_t		rl_vid;
@@ -323,10 +353,6 @@ struct rl_mii_frame {
 #define RL_MII_WRITEOP		0x01
 #define RL_MII_TURNAROUND	0x02
 
-#define RL_FLAG_FORCEDELAY	1
-#define RL_FLAG_SCHEDDELAY	2
-#define RL_FLAG_DELAYTIMEO	3	
-
 #define RL_8129			1
 #define RL_8139			2
 
@@ -336,11 +362,10 @@ struct rl_softc {
 	bus_space_handle_t	rl_bhandle;	/* bus space handle */
 	bus_space_tag_t		rl_btag;	/* bus space tag */
 	bus_dma_tag_t		sc_dmat;
-	bus_dmamap_t		sc_dma_mem;
-	size_t			sc_dma_mapsize;
 	struct arpcom		arpcom;		/* interface info */
 	struct mii_data		sc_mii;		/* MII information */
 	u_int8_t		rl_type;
+	int			rl_txthresh;
 	struct rl_chain_data	rl_cdata;
 };
 
@@ -407,38 +432,6 @@ struct rl_softc {
 #define ADDTRON_DEVICEID_8139			0x1360
 
 /*
- * Texas Instruments PHY identifiers
- */
-#define TI_PHY_VENDORID		0x4000
-#define TI_PHY_10BT		0x501F
-#define TI_PHY_100VGPMI		0x502F
-
-/*
- * These ID values are for the NS DP83840A 10/100 PHY
- */
-#define NS_PHY_VENDORID		0x2000
-#define NS_PHY_83840A		0x5C0F
-
-/*
- * Level 1 10/100 PHY
- */
-#define LEVEL1_PHY_VENDORID	0x7810
-#define LEVEL1_PHY_LXT970	0x000F
-
-/*
- * Intel 82555 10/100 PHY
- */
-#define INTEL_PHY_VENDORID	0x0A28
-#define INTEL_PHY_82555		0x015F
-
-/*
- * SEEQ 80220 10/100 PHY
- */
-#define SEEQ_PHY_VENDORID	0x0016
-#define SEEQ_PHY_80220		0xF83F
-
-
-/*
  * PCI low memory base and low I/O base register, and
  * other PCI registers. Note: some are only available on
  * the 3c905B, in particular those that related to power management.
@@ -461,10 +454,10 @@ struct rl_softc {
 #define RL_PCI_RESETOPT		0x48
 #define RL_PCI_EEPROM_DATA	0x4C
 
-#define RL_PCI_CAPID		0xDC /* 8 bits */
-#define RL_PCI_NEXTPTR		0xDD /* 8 bits */
-#define RL_PCI_PWRMGMTCAP	0xDE /* 16 bits */
-#define RL_PCI_PWRMGMTCTRL	0xE0 /* 16 bits */
+#define RL_PCI_CAPID		0x50 /* 8 bits */
+#define RL_PCI_NEXTPTR		0x51 /* 8 bits */
+#define RL_PCI_PWRMGMTCAP	0x52 /* 16 bits */
+#define RL_PCI_PWRMGMTCTRL	0x54 /* 16 bits */
 
 #define RL_PSTATE_MASK		0x0003
 #define RL_PSTATE_D0		0x0000
@@ -474,105 +467,6 @@ struct rl_softc {
 #define RL_PME_EN		0x0010
 #define RL_PME_STATUS		0x8000
 
-#define PHY_UNKNOWN		6
-
-#define RL_PHYADDR_MIN		0x00
-#define RL_PHYADDR_MAX		0x1F
-
-#define PHY_BMCR		0x00
-#define PHY_BMSR		0x01
-#define PHY_VENID		0x02
-#define PHY_DEVID		0x03
-#define PHY_ANAR		0x04
-#define PHY_LPAR		0x05
-#define PHY_ANEXP		0x06
-
-#define PHY_ANAR_NEXTPAGE	0x8000
-#define PHY_ANAR_RSVD0		0x4000
-#define PHY_ANAR_TLRFLT		0x2000
-#define PHY_ANAR_RSVD1		0x1000
-#define PHY_ANAR_RSVD2		0x0800
-#define PHY_ANAR_RSVD3		0x0400
-#define PHY_ANAR_100BT4		0x0200
-#define PHY_ANAR_100BTXFULL	0x0100
-#define PHY_ANAR_100BTXHALF	0x0080
-#define PHY_ANAR_10BTFULL	0x0040
-#define PHY_ANAR_10BTHALF	0x0020
-#define PHY_ANAR_PROTO4		0x0010
-#define PHY_ANAR_PROTO3		0x0008
-#define PHY_ANAR_PROTO2		0x0004
-#define PHY_ANAR_PROTO1		0x0002
-#define PHY_ANAR_PROTO0		0x0001
-
-/*
- * These are the register definitions for the PHY (physical layer
- * interface chip).
- */
-/*
- * PHY BMCR Basic Mode Control Register
- */
-#define PHY_BMCR_RESET			0x8000
-#define PHY_BMCR_LOOPBK			0x4000
-#define PHY_BMCR_SPEEDSEL		0x2000
-#define PHY_BMCR_AUTONEGENBL		0x1000
-#define PHY_BMCR_RSVD0			0x0800	/* write as zero */
-#define PHY_BMCR_ISOLATE		0x0400
-#define PHY_BMCR_AUTONEGRSTR		0x0200
-#define PHY_BMCR_DUPLEX			0x0100
-#define PHY_BMCR_COLLTEST		0x0080
-#define PHY_BMCR_RSVD1			0x0040	/* write as zero, don't care */
-#define PHY_BMCR_RSVD2			0x0020	/* write as zero, don't care */
-#define PHY_BMCR_RSVD3			0x0010	/* write as zero, don't care */
-#define PHY_BMCR_RSVD4			0x0008	/* write as zero, don't care */
-#define PHY_BMCR_RSVD5			0x0004	/* write as zero, don't care */
-#define PHY_BMCR_RSVD6			0x0002	/* write as zero, don't care */
-#define PHY_BMCR_RSVD7			0x0001	/* write as zero, don't care */
-/*
- * RESET: 1 == software reset, 0 == normal operation
- * Resets status and control registers to default values.
- * Relatches all hardware config values.
- *
- * LOOPBK: 1 == loopback operation enabled, 0 == normal operation
- *
- * SPEEDSEL: 1 == 100Mb/s, 0 == 10Mb/s
- * Link speed is selected byt his bit or if auto-negotiation if bit
- * 12 (AUTONEGENBL) is set (in which case the value of this register
- * is ignored).
- *
- * AUTONEGENBL: 1 == Autonegotiation enabled, 0 == Autonegotiation disabled
- * Bits 8 and 13 are ignored when autoneg is set, otherwise bits 8 and 13
- * determine speed and mode. Should be cleared and then set if PHY configured
- * for no autoneg on startup.
- *
- * ISOLATE: 1 == isolate PHY from MII, 0 == normal operation
- *
- * AUTONEGRSTR: 1 == restart autonegotiation, 0 = normal operation
- *
- * DUPLEX: 1 == full duplex mode, 0 == half duplex mode
- *
- * COLLTEST: 1 == collision test enabled, 0 == normal operation
- */
-
-/* 
- * PHY, BMSR Basic Mode Status Register 
- */   
-#define PHY_BMSR_100BT4			0x8000
-#define PHY_BMSR_100BTXFULL		0x4000
-#define PHY_BMSR_100BTXHALF		0x2000
-#define PHY_BMSR_10BTFULL		0x1000
-#define PHY_BMSR_10BTHALF		0x0800
-#define PHY_BMSR_RSVD1			0x0400	/* write as zero, don't care */
-#define PHY_BMSR_RSVD2			0x0200	/* write as zero, don't care */
-#define PHY_BMSR_RSVD3			0x0100	/* write as zero, don't care */
-#define PHY_BMSR_RSVD4			0x0080	/* write as zero, don't care */
-#define PHY_BMSR_MFPRESUP		0x0040
-#define PHY_BMSR_AUTONEGCOMP		0x0020
-#define PHY_BMSR_REMFAULT		0x0010
-#define PHY_BMSR_CANAUTONEG		0x0008
-#define PHY_BMSR_LINKSTAT		0x0004
-#define PHY_BMSR_JABBER			0x0002
-#define PHY_BMSR_EXTENDED		0x0001
-
 /*
  * FreeBSDism
  */
@@ -580,3 +474,7 @@ struct rl_softc {
 #define	ETHER_CRC_LEN		4
 #endif
 
+#ifdef __alpha__
+#undef vtophys
+#define vtophys(va)	alpha_XXX_dmamap((vm_offset_t)va)
+#endif

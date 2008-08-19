@@ -1,4 +1,4 @@
-/*	$OpenBSD: sequencer.c,v 1.1 1999/01/02 00:02:38 niklas Exp $	*/
+/*	$OpenBSD: sequencer.c,v 1.3 2000/04/11 02:44:33 pjanzen Exp $	*/
 /*	$NetBSD: sequencer.c,v 1.13 1998/11/25 22:17:07 augustss Exp $	*/
 
 /*
@@ -61,12 +61,14 @@
 #include <dev/midivar.h>
 #include <dev/sequencervar.h>
 
+#ifndef splaudio
 #define splaudio() splbio()	/* XXX found in audio_if.h normally */
+#endif
 
 #define ADDTIMEVAL(a, b) ( \
 	(a)->tv_sec += (b)->tv_sec, \
 	(a)->tv_usec += (b)->tv_usec, \
-	(a)->tv_usec > 1000000 ? ((a)->tv_sec++, (a)->tv_usec -= 1000000) : 0\
+	(a)->tv_usec >= 1000000 ? ((a)->tv_sec++, (a)->tv_usec -= 1000000) : 0\
 	)
 
 #define SUBTIMEVAL(a, b) ( \

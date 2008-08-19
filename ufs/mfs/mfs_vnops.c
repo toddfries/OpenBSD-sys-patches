@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vnops.c,v 1.12 1999/03/17 18:34:15 art Exp $	*/
+/*	$OpenBSD: mfs_vnops.c,v 1.14 2000/02/08 16:39:03 niklas Exp $	*/
 /*	$NetBSD: mfs_vnops.c,v 1.8 1996/03/17 02:16:32 christos Exp $	*/
 
 /*
@@ -51,7 +51,6 @@
 #include <machine/vmparam.h>
 
 #include <ufs/mfs/mfsnode.h>
-#include <ufs/mfs/mfsiom.h>
 #include <ufs/mfs/mfs_extern.h>
 
 /*
@@ -185,7 +184,7 @@ mfs_strategy(v)
 		else
 			bcopy(bp->b_data, base, bp->b_bcount);
 		biodone(bp);
-	} else if (mfsp->mfs_pid == p->p_pid) {
+	} else if (p !=  NULL && mfsp->mfs_pid == p->p_pid) {
 		mfs_doio(bp, mfsp->mfs_baseoff);
 	} else {
 		bp->b_actf = mfsp->mfs_buflist;

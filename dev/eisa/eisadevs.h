@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: eisadevs,v 1.12 1999/03/04 15:37:58 mickey Exp 
+ *	OpenBSD: eisadevs,v 1.14 2000/03/13 20:32:15 maja Exp 
  */
 
 /*
@@ -58,6 +58,9 @@
 #define	EISA_PRODUCT_BUS4202	"BusLogic Bt74xC SCSI"
 #define	EISA_PRODUCT_BUS6301	"BusLogic Bt763E Ethernet"
 
+/* Compaq products */
+#define	EISA_PRODUCT_CPQ6101	"Compaq NetFlex-2 ENET-TR"
+
 /* Digital Equipment products */
 #define	EISA_PRODUCT_DEC4250	"Digital Equipment DE425 Ethernet"
 #define	EISA_PRODUCT_DEC3001	"Digital Equipment DEFEA FDDI Controller"
@@ -82,10 +85,14 @@
 /* ETI products */
 #define	EISA_PRODUCT_ETI1001	"Microdyne NE3300 Ethernet Rev. C & D"
 
+/* Madge products */
+#define	EISA_PRODUCT_MDG0002	"Madge Networks Smart 16/4 EISA Ringnode"
+
 /* HP products */
 #define	EISA_PRODUCT_HWP0C70	"Hewlett-Packard HP-IB Host Adapter"
 #define	EISA_PRODUCT_HWP0C80	"Hewlett-Packard SCSI Host Adapter (Cirrus-II) -- 25525A"
 #define	EISA_PRODUCT_HWP1850	"Hewlett-Packard LAN AdapterCard -- 25567A"
+#define	EISA_PRODUCT_HWP1980	"Hewlett-Packard ATM Adapter -- J2802A"
 #define	EISA_PRODUCT_HWP2051	"Hewlett-Packard EISA Test Adapter Card"
 #define	EISA_PRODUCT_HWPC000	"Hewlett-Packard Series 700 EISA System Board"
 #define	EISA_PRODUCT_HWPC010	"Hewlett-Packard Series 700 EISA System Board"
@@ -95,9 +102,12 @@
 #define	EISA_PRODUCT_HWPC0E1	"Hewlett-Packard EISA System Board"
 
 /* 3Com products */
+#define	EISA_PRODUCT_TCM5090	"3Com 3C509-TP Ethernet"
 #define	EISA_PRODUCT_TCM5091	"3Com 3C509 Ethernet"
 #define	EISA_PRODUCT_TCM5092	"3Com 3C579-TP Ethernet"
 #define	EISA_PRODUCT_TCM5093	"3Com 3C579 Ethernet"
+#define	EISA_PRODUCT_TCM5094	"3Com 3C509-Combo Ethernet"
+#define	EISA_PRODUCT_TCM5095	"3Com 3C509-TPO Ethernet"
 #define	EISA_PRODUCT_TCM5920	"3Com 3C592 Etherlink III"
 #define	EISA_PRODUCT_TCM5970	"3Com 3C597 Fast Etherlink TX"
 #define	EISA_PRODUCT_TCM5971	"3Com 3C597 Fast Etherlink T4"

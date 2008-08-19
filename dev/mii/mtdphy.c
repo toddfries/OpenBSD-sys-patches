@@ -1,7 +1,7 @@
-/*	$OpenBSD: mtdphy.c,v 1.1 1998/12/28 03:37:55 jason Exp $	*/
+/*	$OpenBSD: mtdphy.c,v 1.4 1999/12/07 22:01:31 jason Exp $	*/
 
 /*
- * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
+ * Copyright (c) 1998, 1999 Jason L. Wright (jason@thought.net)
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,6 +41,7 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/socket.h>
+#include <sys/errno.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -94,24 +95,12 @@ mtdphyattach(parent, self, aux)
 	sc->mii_service = mtdphy_service;
 	sc->mii_pdata = mii;
 
-	ifmedia_add(&mii->mii_media,
-	    IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->mii_inst),
-	    BMCR_ISO, NULL);
-	ifmedia_add(&mii->mii_media,
-	    IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, IFM_LOOP, sc->mii_inst),
-	    BMCR_LOOP | BMCR_S100, NULL);
-
 	mii_phy_reset(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	printf("%s: ", sc->mii_dev.dv_xname);
-	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
-		printf("no media present");
-	else
-		mii_add_media(mii, sc->mii_capabilities,
-		    sc->mii_inst);
-	printf("\n");
+	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+		mii_add_media(sc);
 }
 
 int
@@ -152,35 +141,11 @@ mtdphy_service(sc, mii, cmd)
 			 */
 			if (PHY_READ(sc, MII_BMCR) & BMCR_AUTOEN)
 				return (0);
-			(void) mii_phy_auto(sc);
+			(void) mii_phy_auto(sc, 1);
 			break;
 
-		case IFM_100_TX:
-			PHY_WRITE(sc, MII_ANAR,
-			    mii_anar(ife->ifm_media));
-
-			reg = BMCR_ISO | BMCR_S100;
-			if ((ife->ifm_media & IFM_GMASK) == IFM_FDX)
-				reg |= BMCR_FDX;
-			PHY_WRITE(sc, MII_BMCR, reg);
-			delay(75000);
-
-			reg &= ~BMCR_ISO;
-			PHY_WRITE(sc, MII_BMCR, reg);
-			break;
-
-		case IFM_100_T4:
-			/*
-			 * Not supported by MTD972.
-			 */
-			return (EINVAL);
 		default:
-			/*
-			 * BMCR data is stored in the ifmedia entry.
-			 */
-			PHY_WRITE(sc, MII_ANAR,
-			    mii_anar(ife->ifm_media));
-			PHY_WRITE(sc, MII_BMCR, ife->ifm_data);
+			mii_phy_setmedia(sc);
 		}
 		break;
 
@@ -208,6 +173,10 @@ mtdphy_service(sc, mii, cmd)
 		 * kicked; it continues in the background.
 		 */
 		break;
+
+	case MII_DOWN:
+		mii_phy_down(sc);
+		return (0);
 	}
 
 	/* Update the media status. */

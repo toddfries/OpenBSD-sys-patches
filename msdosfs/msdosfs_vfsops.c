@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.16 1999/01/10 21:53:02 art Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.20 2000/03/15 03:18:02 aaron Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -77,9 +77,10 @@ int msdosfs_unmount __P((struct mount *, int, struct proc *));
 int msdosfs_root __P((struct mount *, struct vnode **));
 int msdosfs_statfs __P((struct mount *, struct statfs *, struct proc *));
 int msdosfs_sync __P((struct mount *, int, struct ucred *, struct proc *));
-int msdosfs_fhtovp __P((struct mount *, struct fid *, struct mbuf *,
-		        struct vnode **, int *, struct ucred **));
+int msdosfs_fhtovp __P((struct mount *, struct fid *, struct vnode **));
 int msdosfs_vptofh __P((struct vnode *, struct fid *));
+int msdosfs_check_export __P((struct mount *mp, struct mbuf *nam,
+			      int *extflagsp, struct ucred **credanonp));
 
 int msdosfs_mountfs __P((struct vnode *, struct mount *, struct proc *,
 			 struct msdosfs_args *));
@@ -242,6 +243,7 @@ msdosfs_mount(mp, path, data, ndp, p)
 	(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
 	    &size);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
+	bcopy(&args, &mp->mnt_stat.mount_info.msdosfs_args, sizeof(args));
 #ifdef MSDOSFS_DEBUG
 	printf("msdosfs_mount(): mp %x, pmp %x, inusemap %x\n", mp, pmp, pmp->pm_inusemap);
 #endif
@@ -267,6 +269,7 @@ msdosfs_mountfs(devvp, mp, p, argp)
 	u_int8_t SecPerClust;
 	int	ronly, error;
 	int	bsize = 0, dtype = 0, tmp;
+	u_long dirsperblk;
 
 	/*
 	 * Disallow multiple mounts of the same device.
@@ -327,13 +330,6 @@ msdosfs_mountfs(devvp, mp, p, argp)
 	b33 = (struct byte_bpb33 *)bsp->bs33.bsBPB;
 	b50 = (struct byte_bpb50 *)bsp->bs50.bsBPB;
 	b710 = (struct byte_bpb710 *)bsp->bs710.bsPBP;
-	if (!(argp->flags & MSDOSFSMNT_GEMDOSFS)) {
-	        if (bsp->bs50.bsBootSectSig0 != BOOTSIG0
-		    || bsp->bs50.bsBootSectSig1 != BOOTSIG1) {
-		        error = EINVAL;
-			goto error_exit;
-		}
-	}
 
 	pmp = malloc(sizeof *pmp, M_MSDOSFSMNT, M_WAITOK);
 	bzero((caddr_t)pmp, sizeof *pmp);
@@ -371,7 +367,9 @@ msdosfs_mountfs(devvp, mp, p, argp)
 		pmp->pm_HiddenSects = getushort(b33->bpbHiddenSecs);
 		pmp->pm_HugeSectors = pmp->pm_Sectors;
 	}
-	if (pmp->pm_HugeSectors > 0xffffffff / pmp->pm_BytesPerSec + 1) {
+
+	dirsperblk = pmp->pm_BytesPerSec / sizeof(struct direntry);
+	if (pmp->pm_HugeSectors > 0xffffffff / dirsperblk + 1) {
 	        /*
 		 * We cannot deal currently with this size of disk
 		 * due to fileid limitations (see msdosfs_getattr and
@@ -382,11 +380,8 @@ msdosfs_mountfs(devvp, mp, p, argp)
 	}
 
 	if (pmp->pm_RootDirEnts == 0) {
-                if (bsp->bs710.bsBootSectSig2 != BOOTSIG2
-		    || bsp->bs710.bsBootSectSig3 != BOOTSIG3
-		    || pmp->pm_Sectors
-		    || pmp->pm_FATsecs
-		    || getushort(b710->bpbFSVers)) {
+		if (pmp->pm_Sectors || pmp->pm_FATsecs ||
+		    getushort(b710->bpbFSVers)) {
 		        error = EINVAL;
 			goto error_exit;
 		}
@@ -688,11 +683,6 @@ msdosfs_statfs(mp, sbp, p)
 	struct msdosfsmount *pmp;
 
 	pmp = VFSTOMSDOSFS(mp);
-#ifdef COMPAT_09
-	sbp->f_type = 4;
-#else
-	sbp->f_type = 0;
-#endif
 	sbp->f_bsize = pmp->pm_bpcluster;
 	sbp->f_iosize = pmp->pm_bpcluster;
 	sbp->f_blocks = pmp->pm_nmbrofclusters;
@@ -703,6 +693,8 @@ msdosfs_statfs(mp, sbp, p)
 	if (sbp != &mp->mnt_stat) {
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+		bcopy(&mp->mnt_stat.mount_info.msdosfs_args,
+		    &sbp->mount_info.msdosfs_args, sizeof(struct msdosfs_args));
 	}
 	strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
 	return (0);
@@ -788,31 +780,22 @@ loop:
 }
 
 int
-msdosfs_fhtovp(mp, fhp, nam, vpp, exflagsp, credanonp)
+msdosfs_fhtovp(mp, fhp, vpp)
 	struct mount *mp;
 	struct fid *fhp;
-	struct mbuf *nam;
 	struct vnode **vpp;
-	int *exflagsp;
-	struct ucred **credanonp;
 {
 	struct msdosfsmount *pmp = VFSTOMSDOSFS(mp);
 	struct defid *defhp = (struct defid *) fhp;
 	struct denode *dep;
-	struct netcred *np;
 	int error;
 
-	np = vfs_export_lookup(mp, &pmp->pm_export, nam);
-	if (np == NULL)
-		return (EACCES);
 	error = deget(pmp, defhp->defid_dirclust, defhp->defid_dirofs, &dep);
 	if (error) {
 		*vpp = NULLVP;
 		return (error);
 	}
 	*vpp = DETOV(dep);
-	*exflagsp = np->netc_exflags;
-	*credanonp = &np->netc_anon;
 	return (0);
 }
 
@@ -830,6 +813,28 @@ msdosfs_vptofh(vp, fhp)
 	defhp->defid_dirclust = dep->de_dirclust;
 	defhp->defid_dirofs = dep->de_diroffset;
 	/* defhp->defid_gen = dep->de_gen; */
+	return (0);
+}
+
+int
+msdosfs_check_export(mp, nam, exflagsp, credanonp)
+	register struct mount *mp;
+	struct mbuf *nam;
+	int *exflagsp;
+	struct ucred **credanonp;
+{
+	register struct netcred *np;
+	register struct msdosfsmount *pmp = VFSTOMSDOSFS(mp);
+
+	/*
+	 * Get the export permission structure for this <mp, client> tuple.
+	 */
+	np = vfs_export_lookup(mp, &pmp->pm_export, nam);
+	if (np == NULL)
+		return (EACCES);
+
+	*exflagsp = np->netc_exflags;
+	*credanonp = &np->netc_anon;
 	return (0);
 }
 
@@ -854,5 +859,6 @@ struct vfsops msdosfs_vfsops = {
 	msdosfs_fhtovp,
 	msdosfs_vptofh,
 	msdosfs_init,
-	msdosfs_sysctl
+	msdosfs_sysctl,
+	msdosfs_check_export
 };

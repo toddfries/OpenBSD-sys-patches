@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.27 1999/02/26 03:19:57 art Exp $	*/
+/*	$OpenBSD: systm.h,v 1.37 2000/01/02 06:31:28 assar Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -51,7 +51,7 @@
  * It can only be decreased by process 1 (/sbin/init).
  *
  * Security levels are as follows:
- *   -1	permannently insecure mode - always run system in level 0 mode.
+ *   -1	permanently insecure mode - always run system in level 0 mode.
  *    0	insecure mode - immutable and append-only flags make be turned off.
  *	All devices may be read or written subject to permission modes.
  *    1	secure mode - immutable and append-only flags may not be changed;
@@ -102,14 +102,20 @@ extern dev_t swapdev;		/* swapping device */
 extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 
 struct proc;
+
+typedef int	sy_call_t __P((struct proc *, void *, register_t *));
+
 extern struct sysent {		/* system call table */
 	short	sy_narg;	/* number of args */
 	short	sy_argsize;	/* total size of arguments */
-				/* implementing function */
-	int	(*sy_call) __P((struct proc *, void *, register_t *));
+	sy_call_t *sy_call;	/* implementing function */
 } sysent[];
-extern int nsysent;
 #define	SCARG(p,k)	((p)->k.datum)	/* get arg from args pointer */
+
+#if defined(_KERNEL) && defined(SYSCALL_DEBUG)
+void scdebug_call __P((struct proc *p, register_t code, register_t retval[]));
+void scdebug_ret __P((struct proc *p, register_t code, int error, register_t retval[]));
+#endif /* _KERNEL && SYSCALL_DEBUG */
 
 extern int boothowto;		/* reboot flags, from console subsystem */
 
@@ -141,8 +147,7 @@ void vfs_opv_init_default __P((struct vnodeopv_desc *));
 void vfs_op_init __P((void));
 
 int	seltrue __P((dev_t dev, int which, struct proc *));
-void	*hashinit __P((int, int, u_long *));
-void	*newhashinit __P((int, int, int, u_long *));
+void	*hashinit __P((int, int, int, u_long *));
 int	sys_nosys __P((struct proc *, void *, register_t *));
 
 void	panic __P((const char *, ...))
@@ -162,6 +167,10 @@ int	vsprintf __P((char *, const char *, va_list))
     __kprintf_attribute__((__format__(__kprintf__,2,3)));
 int	sprintf __P((char *buf, const char *, ...))
     __kprintf_attribute__((__format__(__kprintf__,2,3)));
+int	vsnprintf __P((char *, size_t, const char *, va_list))
+    __kprintf_attribute__((__format__(__kprintf__,3,4)));
+int	snprintf __P((char *buf, size_t, const char *, ...))
+    __kprintf_attribute__((__format__(__kprintf__,3,4)));
 struct tty;
 void	ttyprintf __P((struct tty *, const char *, ...))
     __kprintf_attribute__((__format__(__kprintf__,2,3)));
@@ -176,6 +185,9 @@ void	bcopy __P((const void *, void *, size_t));
 void	ovbcopy __P((const void *, void *, size_t));
 void	bzero __P((void *, size_t));
 int	bcmp __P((const void *, const void *, size_t));
+void	*memcpy __P((void *, const void *, size_t));
+void	*memmove __P((void *, const void *, size_t));
+void	*memset __P((void *, int, size_t));
 
 int	copystr __P((const void *, void *, size_t, size_t *));
 int	copyinstr __P((const void *, void *, size_t, size_t *));
@@ -230,6 +242,16 @@ void	*shutdownhook_establish __P((void (*)(void *), void *));
 void	shutdownhook_disestablish __P((void *));
 void	doshutdownhooks __P((void));
 
+/*
+ * Power managment hooks.
+ */
+void	*powerhook_establish __P((void (*)(int, void *), void *));
+void	powerhook_disestablish __P((void *));
+void	dopowerhooks __P((int));
+#define PWR_RESUME 0
+#define PWR_SUSPEND 1
+#define PWR_STANDBY 2
+
 struct uio;
 int	uiomove __P((caddr_t, int, struct uio *));
 
@@ -240,6 +262,7 @@ void	consinit __P((void));
 
 void	cpu_startup __P((void));
 void	cpu_set_kpc __P((struct proc *, void (*)(void *), void *));
+extern void (*md_diskconf) __P((void));
 
 
 #ifdef GPROF

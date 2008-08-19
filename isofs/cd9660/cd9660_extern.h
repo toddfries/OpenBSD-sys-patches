@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_extern.h,v 1.2 1998/02/08 22:41:32 tholo Exp $	*/
+/*	$OpenBSD: cd9660_extern.h,v 1.4.4.1 2000/06/09 05:17:51 jason Exp $	*/
 /*	$NetBSD: cd9660_extern.h,v 1.1 1997/01/24 00:24:53 cgd Exp $	*/
 
 /*-
@@ -73,6 +73,8 @@ struct iso_mnt {
 	
 	int rr_skip;
 	int rr_skip0;
+
+	int joliet_level;
 };
 
 #define VFSTOISOFS(mp)	((struct iso_mnt *)((mp)->mnt_data))
@@ -82,8 +84,8 @@ struct iso_mnt {
 #define lblkno(imp, loc)	((loc) >> (imp)->im_bshift)
 #define blksize(imp, ip, lbn)	((imp)->logical_block_size)
 
-int cd9660_mount __P((struct mount *,
-	    const char *, caddr_t, struct nameidata *, struct proc *));
+int cd9660_mount __P((struct mount *, const char *, caddr_t,
+                      struct nameidata *, struct proc *));
 int cd9660_start __P((struct mount *, int, struct proc *));
 int cd9660_unmount __P((struct mount *, int, struct proc *));
 int cd9660_root __P((struct mount *, struct vnode **));
@@ -91,10 +93,11 @@ int cd9660_quotactl __P((struct mount *, int, uid_t, caddr_t, struct proc *));
 int cd9660_statfs __P((struct mount *, struct statfs *, struct proc *));
 int cd9660_sync __P((struct mount *, int, struct ucred *, struct proc *));
 int cd9660_vget __P((struct mount *, ino_t, struct vnode **));
-int cd9660_fhtovp __P((struct mount *, struct fid *, struct mbuf *,
-	    struct vnode **, int *, struct ucred **));
+int cd9660_fhtovp __P((struct mount *, struct fid *, struct vnode **));
 int cd9660_vptofh __P((struct vnode *, struct fid *));
 int cd9660_init __P((struct vfsconf *));
+int cd9660_check_export __P((struct mount *, struct mbuf *, int *,
+                             struct ucred **));
 #define cd9660_sysctl ((int (*) __P((int *, u_int, void *, size_t *, void *, \
                                     size_t, struct proc *)))eopnotsupp)
 
@@ -106,6 +109,7 @@ extern int (**cd9660_specop_p) __P((void *));
 extern int (**cd9660_fifoop_p) __P((void *));
 #endif
 
-int isofncmp __P((const u_char *, int, const u_char *, int));
-void isofntrans __P((u_char *, int, u_char *, u_short *, int, int));
+int isochar __P((const u_char *, const u_char *, int, u_char *));
+int isofncmp __P((const u_char *, int, const u_char *, int, int));
+void isofntrans __P((u_char *, int, u_char *, u_short *, int, int, int));
 ino_t isodirino __P((struct iso_directory_record *, struct iso_mnt *));

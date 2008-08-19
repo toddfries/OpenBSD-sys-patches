@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.14 1998/11/12 16:35:02 deraadt Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.20 2000/03/23 16:36:36 art Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -46,13 +46,13 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/buf.h>
 #include <sys/time.h>
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/ioctl.h>
 #include <sys/map.h>
 #include <sys/conf.h>
+#include <sys/vnode.h>
 
 #include <sys/file.h>
 #if defined(sparc) && BSD < 199103
@@ -169,6 +169,7 @@ bpf_movein(uio, linktype, mp, sockp)
 		hlen = 24;
 		break;
 
+	case DLT_RAW:
 	case DLT_NULL:
 		sockp->sa_family = AF_UNSPEC;
 		hlen = 0;
@@ -377,45 +378,6 @@ bpfclose(dev, flag, mode, p)
 }
 
 /*
- * Support for SunOS, which does not have tsleep.
- */
-#if BSD < 199103
-int
-bpf_timeout(arg)
-	caddr_t arg;
-{
-	struct bpf_d *d = (struct bpf_d *)arg;
-	d->bd_timedout = 1;
-	wakeup(arg);
-}
-
-#define BPF_SLEEP(chan, pri, s, t) bpf_sleep((struct bpf_d *)chan)
-
-int
-bpf_sleep(d)
-	register struct bpf_d *d;
-{
-	register int rto = d->bd_rtout;
-	register int st;
-
-	if (rto != 0) {
-		d->bd_timedout = 0;
-		timeout(bpf_timeout, (caddr_t)d, rto);
-	}
-	st = sleep((caddr_t)d, PRINET|PCATCH);
-	if (rto != 0) {
-		if (d->bd_timedout == 0)
-			untimeout(bpf_timeout, (caddr_t)d);
-		else if (st == 0)
-			return EWOULDBLOCK;
-	}
-	return (st != 0) ? EINTR : 0;
-}
-#else
-#define BPF_SLEEP tsleep
-#endif
-
-/*
  * Rotate the packet buffers in descriptor d.  Move the store buffer
  * into the hold slot, and the free buffer into the store slot.
  * Zero the length of the new store buffer.
@@ -476,7 +438,7 @@ bpfread(dev, uio, ioflag)
 			break;
 		}
 		if ((d->bd_rtout != -1) || (d->bd_rdStart + d->bd_rtout) < ticks) {
-			error = BPF_SLEEP((caddr_t)d, PRINET|PCATCH, "bpf",
+			error = tsleep((caddr_t)d, PRINET|PCATCH, "bpf",
 			    d->bd_rtout);
 		} else {
 			if (d->bd_rtout == -1) {
@@ -1015,7 +977,7 @@ bpfselect(dev, rw)
 	 * if there isn't data waiting, and there's a timeout,
 	 * mark the time we started waiting.
 	 */
-	if (b->db_rtout != -1 && (d->bd_rdStart == 0)
+	if (b->db_rtout != -1 && (d->bd_rdStart == 0))
 		d->bd_rdStart = ticks;
 			    
 	return (bpf_select(dev, rw, u.u_procp));
@@ -1346,6 +1308,50 @@ bpfattach(driverp, ifp, dlt, hdrlen)
 #if 0
 	printf("bpf: %s attached\n", ifp->if_xname);
 #endif
+}
+
+/* Detach an interface from its attached bpf device.  */
+void
+bpfdetach(ifp)
+	struct ifnet *ifp;
+{
+	struct bpf_if *bp, *nbp, **pbp = &bpf_iflist;
+	struct bpf_d *bd;
+	int maj, mn;
+
+	for (bp = bpf_iflist; bp; bp = nbp) {
+		nbp= bp->bif_next;
+		if (bp->bif_ifp == ifp) {
+			*pbp = nbp;
+
+			/* Locate the major number. */
+			for (maj = 0; maj < nchrdev; maj++)
+				if (cdevsw[maj].d_open == bpfopen)
+					break;
+
+			for (bd = bp->bif_dlist; bd; bd = bp->bif_dlist)
+				/*
+				 * Locate the minor number and nuke the vnode
+				 * for any open instance.
+				 */
+				for (mn = 0; mn < NBPFILTER; mn++)
+					if (&bpf_dtab[mn] == bd) {
+						vdevgone(maj, mn, mn, VCHR);
+						break;
+					}
+
+#if BSD < 199103
+			if (bp == &bpf_ifs[bpfifno - 1])
+				bpfifno--;
+			else
+				printf("bpfdetach: leaked one bpf\n");
+#else
+			free(bp, M_DEVBUF);
+#endif
+		}
+		pbp = &bp->bif_next;
+	}
+	ifp->if_bpf = NULL;
 }
 
 #if BSD >= 199103

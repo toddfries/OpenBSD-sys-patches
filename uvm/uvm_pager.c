@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_pager.c,v 1.2 1999/02/26 05:32:08 art Exp $	*/
-/*	$NetBSD: uvm_pager.c,v 1.14 1999/01/22 08:00:35 chs Exp $	*/
+/*	$NetBSD: uvm_pager.c,v 1.20 1999/05/26 19:16:36 thorpej Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!   
- *	   >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /*
  *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -93,7 +88,7 @@ uvm_pager_init()
 	 */
 
 	 pager_map = uvm_km_suballoc(kernel_map, &uvm.pager_sva, &uvm.pager_eva,
-	 			PAGER_MAP_SIZE, FALSE, FALSE, NULL);
+	 			PAGER_MAP_SIZE, 0, FALSE, NULL);
 	 simple_lock_init(&pager_map_wanted_lock);
 	 pager_map_wanted = FALSE;
 
@@ -118,6 +113,9 @@ uvm_pager_init()
  *
  * we basically just map in a blank map entry to reserve the space in the
  * map and then use pmap_enter() to put the mappings in by hand.
+ *
+ * XXX It would be nice to know the direction of the I/O, so that we can
+ * XXX map only what is necessary.
  */
 
 vaddr_t
@@ -130,10 +128,8 @@ uvm_pagermapin(pps, npages, aiop, waitf)
 	vsize_t size;
 	vaddr_t kva;
 	struct uvm_aiodesc *aio;
-#if !defined(PMAP_NEW)
 	vaddr_t cva;
 	struct vm_page *pp;
-#endif
 	UVMHIST_FUNC("uvm_pagermapin"); UVMHIST_CALLED(maphist);
 
 	UVMHIST_LOG(maphist,"(pps=0x%x, npages=%d, aiop=0x%x, waitf=%d)",
@@ -168,16 +164,6 @@ ReStart:
 		goto ReStart;
 	}
 
-#if defined(PMAP_NEW)
-	/*
-	 * XXX: (ab)using the pmap module to store state info for us.
-	 * (pmap stores the PAs... we fetch them back later and convert back
-	 * to pages with PHYS_TO_VM_PAGE).
-	 */
-	pmap_kenter_pgs(kva, pps, npages);
-
-#else /* PMAP_NEW */
-
 	/* got it */
 	for (cva = kva ; size != 0 ; size -= PAGE_SIZE, cva += PAGE_SIZE) {
 		pp = *pps++;
@@ -186,11 +172,15 @@ ReStart:
 			panic("uvm_pagermapin: page not busy");
 #endif
 
+		/*
+		 * XXX VM_PROT_DEFAULT includes VM_PROT_EXEC; is that
+		 * XXX really necessary?  It could lead to unnecessary
+		 * XXX instruction cache flushes.
+		 */
 		pmap_enter(vm_map_pmap(pager_map), cva, VM_PAGE_TO_PHYS(pp),
-		    VM_PROT_DEFAULT, TRUE);
+		    VM_PROT_DEFAULT, TRUE,
+		    VM_PROT_READ | VM_PROT_WRITE);
 	}
-
-#endif /* PMAP_NEW */
 
 	UVMHIST_LOG(maphist, "<- done (KVA=0x%x)", kva,0,0,0);
 	return(kva);
@@ -716,8 +706,6 @@ int swblk;			/* valid if (uobj == NULL && PGO_REALLOCSWAP) */
 		 * had a successful pageout update the page!
 		 */
 		if (flags & PGO_PDFREECLUST) {
-			/* XXX: with PMAP_NEW ref should already be clear,
-			 * but don't trust! */
 			pmap_clear_reference(PMAP_PGARG(ppsp[lcv]));
 			pmap_clear_modify(PMAP_PGARG(ppsp[lcv]));
 			ppsp[lcv]->flags |= PG_CLEAN;

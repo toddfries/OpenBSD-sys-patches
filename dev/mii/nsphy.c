@@ -1,8 +1,8 @@
-/*	$OpenBSD: nsphy.c,v 1.4 1999/01/04 04:44:05 jason Exp $	*/
-/*	$NetBSD: nsphy.c,v 1.16 1998/11/05 04:08:02 thorpej Exp $	*/
+/*	$OpenBSD: nsphy.c,v 1.8 2000/01/18 04:20:49 jason Exp $	*/
+/*	$NetBSD: nsphy.c,v 1.18 1999/07/14 23:57:36 thorpej Exp $	*/
 
 /*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -78,6 +78,7 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/socket.h>
+#include <sys/errno.h>
 
 #include <net/if.h>
 #include <net/if_media.h>
@@ -88,22 +89,16 @@
 
 #include <dev/mii/nsphyreg.h>
 
-#ifdef __NetBSD__
-int	nsphymatch __P((struct device *, struct cfdata *, void *));
-#else
 int	nsphymatch __P((struct device *, void *, void *));
-#endif
 void	nsphyattach __P((struct device *, struct device *, void *));
 
 struct cfattach nsphy_ca = {
 	sizeof(struct mii_softc), nsphymatch, nsphyattach
 };
 
-#ifdef __OpenBSD__
 struct cfdriver nsphy_cd = {
 	NULL, "nsphy", DV_DULL
 };
-#endif
 
 int	nsphy_service __P((struct mii_softc *, struct mii_data *, int));
 void	nsphy_status __P((struct mii_softc *));
@@ -112,11 +107,7 @@ void	nsphy_reset __P((struct mii_softc *));
 int
 nsphymatch(parent, match, aux)
 	struct device *parent;
-#ifdef __NetBSD__
-	struct cfdata *match;
-#else
 	void *match;
-#endif
 	void *aux;
 {
 	struct mii_attach_args *ma = aux;
@@ -153,28 +144,12 @@ nsphyattach(parent, self, aux)
 	    mii->mii_instance == 0)
 		sc->mii_flags |= MIIF_NOISOLATE;
 
-#define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
-
-#if 0
-	/* Can't do this on the i82557! */
-	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->mii_inst),
-	    BMCR_ISO);
-#endif
-	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_100_TX, IFM_LOOP, sc->mii_inst),
-	    BMCR_LOOP|BMCR_S100);
-
 	nsphy_reset(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
-	printf("%s: ", sc->mii_dev.dv_xname);
-	if ((sc->mii_capabilities & BMSR_MEDIAMASK) == 0)
-		printf("no media present");
-	else
-		mii_add_media(mii, sc->mii_capabilities,
-		    sc->mii_inst);
-	printf("\n");
-#undef ADD
+	if (sc->mii_capabilities & BMSR_MEDIAMASK)
+		mii_add_media(sc);
 }
 
 int
@@ -228,63 +203,31 @@ nsphy_service(sc, mii, cmd)
 		reg |= PCR_CIMDIS;
 
 		/*
-		 * Make sure "force link good" is not set.  It's only
-		 * intended for debugging, but sometimes it's set
-		 * after a reset.
+		 * Make sure "force link good" is set to normal mode.
+		 * It's only intended for debugging.
 		 */
-		reg &= ~PCR_FLINK100;
+		reg |= PCR_FLINK100;
 
-#if 0
 		/*
 		 * Mystery bits which are supposedly `reserved',
 		 * but we seem to need to set them when the PHY
 		 * is connected to some interfaces!
 		 */
-		reg |= 0x0100 | 0x0400;
-#endif
+		reg |= PCR_CONGCTRL | PCR_TXREADYSEL;
 
 		PHY_WRITE(sc, MII_NSPHY_PCR, reg);
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
-			nsphy_reset(sc);
 			/*
 			 * If we're already in auto mode, just return.
 			 */
 			if (PHY_READ(sc, MII_BMCR) & BMCR_AUTOEN)
 				return (0);
-			(void) mii_phy_auto(sc);
+			(void) mii_phy_auto(sc, 1);
 			break;
-		case IFM_100_T4:
-			/*
-			 * XXX Not supported as a manual setting right now.
-			 */
-			return (EINVAL);
-		case IFM_100_TX:
-			PHY_WRITE(sc, MII_ANAR,
-			    mii_anar(ife->ifm_media));
-
-			reg = 0;
-			reg |= BMCR_S100;
-			if ((sc->mii_flags & MIIF_NOISOLATE) == 0)
-				reg |= BMCR_ISO;
-
-			if ((ife->ifm_media & IFM_GMASK) == IFM_FDX)
-				reg |= BMCR_FDX;
-			PHY_WRITE(sc, MII_BMCR, reg);
-			delay(1000000);		/* XXX too long, will adjust */
-
-			reg &= ~BMCR_ISO;
-			PHY_WRITE(sc, MII_BMCR, reg);
-			break;
-
 		default:
-			/*
-			 * BMCR data is stored in the ifmedia entry.
-			 */
-			PHY_WRITE(sc, MII_ANAR,
-			    mii_anar(ife->ifm_media));
-			PHY_WRITE(sc, MII_BMCR, ife->ifm_data);
+			mii_phy_setmedia(sc);
 		}
 		break;
 
@@ -325,8 +268,13 @@ nsphy_service(sc, mii, cmd)
 
 		sc->mii_ticks = 0;
 		nsphy_reset(sc);
-		(void) mii_phy_auto(sc);
+		if (mii_phy_auto(sc, 0) == EJUSTRETURN)
+			return (0);
 		break;
+
+	case MII_DOWN:
+		mii_phy_down(sc);
+		return (0);
 	}
 
 	/* Update the media status. */
@@ -345,6 +293,7 @@ nsphy_status(sc)
 	struct mii_softc *sc;
 {
 	struct mii_data *mii = sc->mii_pdata;
+	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int bmsr, bmcr, par, anlpar;
 
 	mii->mii_media_status = IFM_AVALID;
@@ -414,7 +363,7 @@ nsphy_status(sc)
 			mii->mii_media_active |= IFM_FDX;
 #endif
 	} else
-		mii->mii_media_active = mii_media_from_bmcr(bmcr);
+		mii->mii_media_active = ife->ifm_media;
 }
 
 void

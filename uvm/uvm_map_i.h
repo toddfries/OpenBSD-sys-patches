@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_map_i.h,v 1.2 1999/02/26 05:32:07 art Exp $	*/
-/*	$NetBSD: uvm_map_i.h,v 1.10 1998/10/11 23:14:48 chuck Exp $	*/
+/*	$NetBSD: uvm_map_i.h,v 1.14 1999/06/04 23:38:42 thorpej Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!
- *         >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /* 
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * Copyright (c) 1991, 1993, The Regents of the University of California.  
@@ -89,15 +84,18 @@
  */
 
 MAP_INLINE vm_map_t
-uvm_map_create(pmap, min, max, pageable)
+uvm_map_create(pmap, min, max, flags)
 	pmap_t pmap;
 	vaddr_t min, max;
-	boolean_t pageable;
+	int flags;
 {
 	vm_map_t result;
 
-	MALLOC(result, vm_map_t, sizeof(struct vm_map), M_VMMAP, M_WAITOK);
-	uvm_map_setup(result, min, max, pageable);
+	MALLOC(result, vm_map_t,
+	    (flags & VM_MAP_INTRSAFE) ? sizeof(struct vm_map_intrsafe) :
+					sizeof(struct vm_map),
+	    M_VMMAP, M_WAITOK);
+	uvm_map_setup(result, min, max, flags);
 	result->pmap = pmap;
 	return(result);
 }
@@ -109,10 +107,10 @@ uvm_map_create(pmap, min, max, pageable)
  */
 
 MAP_INLINE void
-uvm_map_setup(map, min, max, pageable)
+uvm_map_setup(map, min, max, flags)
 	vm_map_t map;
 	vaddr_t min, max;
-	boolean_t pageable;
+	int flags;
 {
 
 	map->header.next = map->header.prev = &map->header;
@@ -121,13 +119,26 @@ uvm_map_setup(map, min, max, pageable)
 	map->ref_count = 1;
 	map->min_offset = min;
 	map->max_offset = max;
-	map->entries_pageable = pageable;
+	map->flags = flags;
 	map->first_free = &map->header;
 	map->hint = &map->header;
 	map->timestamp = 0;
 	lockinit(&map->lock, PVM, "thrd_sleep", 0, 0);
 	simple_lock_init(&map->ref_lock);
 	simple_lock_init(&map->hint_lock);
+
+	/*
+	 * If the map is interrupt safe, place it on the list
+	 * of interrupt safe maps, for uvm_fault().
+	 */
+	if (flags & VM_MAP_INTRSAFE) {
+		struct vm_map_intrsafe *vmi = (struct vm_map_intrsafe *)map;
+		int s;
+
+		s = vmi_list_lock();
+		LIST_INSERT_HEAD(&vmi_list, vmi, vmi_list);
+		vmi_list_unlock(s);
+	}
 }
 
 
@@ -140,10 +151,6 @@ uvm_map_setup(map, min, max, pageable)
  *
  * => caller must check alignment and size 
  * => map must be unlocked (we will lock it)
- * => if the "start"/"stop" range lie within a mapping of a share map,
- *    then the unmap takes place within the context of that share map
- *    rather than in the main map, unless the "mainonly" flag is set.
- *    (e.g. the "exit" system call would want to set "mainonly").
  */
 
 MAP_INLINE int
@@ -156,7 +163,7 @@ uvm_unmap(map, start, end)
 	UVMHIST_FUNC("uvm_unmap"); UVMHIST_CALLED(maphist);
 
 	UVMHIST_LOG(maphist, "  (map=0x%x, start=0x%x, end=0x%x)",
-	map, start, end, 0);
+	    map, start, end, 0);
 	/*
 	 * work now done by helper functions.   wipe the pmap's and then
 	 * detach from the dead entries...

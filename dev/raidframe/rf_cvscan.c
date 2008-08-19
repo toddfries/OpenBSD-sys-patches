@@ -1,5 +1,5 @@
-/*	$OpenBSD: rf_cvscan.c,v 1.2 1999/02/16 00:02:28 niklas Exp $	*/
-/*	$NetBSD: rf_cvscan.c,v 1.4 1999/02/05 00:06:07 oster Exp $	*/
+/*	$OpenBSD: rf_cvscan.c,v 1.4 2000/01/07 14:50:20 peter Exp $	*/
+/*	$NetBSD: rf_cvscan.c,v 1.5 1999/08/13 03:41:53 oster Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -43,7 +43,6 @@
 #include "rf_cvscan.h"
 #include "rf_debugMem.h"
 #include "rf_general.h"
-#include "rf_sys.h"
 
 #define DO_CHECK_STATE(_hdr_) CheckCvscanState((_hdr_), __FILE__, __LINE__)
 
@@ -354,11 +353,11 @@ rf_CvscanCreate(RF_SectorCount_t sectPerDisk,
 #if (defined(__NetBSD__) || defined(__OpenBSD__)) && defined(_KERNEL)
 /* PrintCvscanQueue is not used, so we ignore it... */
 #else
-+ static void 
-+ PrintCvscanQueue(RF_CvscanHeader_t * hdr)
-  {
-  	RF_DiskQueueData_t *tmp;
-  
+static void 
+PrintCvscanQueue(RF_CvscanHeader_t * hdr)
+{
+	RF_DiskQueueData_t *tmp;
+
 	printf("CVSCAN(%d,%d) at %d going %s\n",
 	    (int) hdr->range_for_avg,
 	    (int) hdr->change_penalty,

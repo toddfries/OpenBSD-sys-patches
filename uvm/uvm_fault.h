@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_fault.h,v 1.2 1999/02/26 05:32:06 art Exp $	*/
-/*	$NetBSD: uvm_fault.h,v 1.7 1998/10/11 23:07:42 chuck Exp $	*/
+/*	$NetBSD: uvm_fault.h,v 1.11 1999/06/04 23:38:41 thorpej Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!   
- *	   >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /*
  *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -77,13 +72,14 @@ struct uvm_faultinfo {
 
 int uvmfault_anonget __P((struct uvm_faultinfo *, struct vm_amap *,
 													struct vm_anon *));
+static boolean_t uvmfault_check_intrsafe __P((struct uvm_faultinfo *));
 static boolean_t uvmfault_lookup __P((struct uvm_faultinfo *, boolean_t));
 static boolean_t uvmfault_relock __P((struct uvm_faultinfo *));
 static void uvmfault_unlockall __P((struct uvm_faultinfo *, struct vm_amap *,
 			            struct uvm_object *, struct vm_anon *));
 static void uvmfault_unlockmaps __P((struct uvm_faultinfo *, boolean_t));
 
-int uvm_fault_wire __P((vm_map_t, vaddr_t, vaddr_t));
-void uvm_fault_unwire __P((struct pmap *, vaddr_t, vaddr_t));
+int uvm_fault_wire __P((vm_map_t, vaddr_t, vaddr_t, vm_prot_t));
+void uvm_fault_unwire __P((vm_map_t, vaddr_t, vaddr_t));
 
 #endif /* _UVM_UVM_FAULT_H_ */

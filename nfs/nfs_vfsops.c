@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.25 1998/08/19 22:26:56 csapuntz Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.30 2000/02/07 04:57:17 assar Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -74,6 +74,9 @@ extern int nfs_ticks;
 
 int nfs_sysctl
     __P((int *, u_int, void *, size_t *, void *, size_t, struct proc *));
+int nfs_checkexp
+    __P((struct mount *mp, struct mbuf *nam,
+	 int *extflagsp, struct ucred **credanonp));
 
 /*
  * nfs vfs operations.
@@ -90,7 +93,8 @@ struct vfsops nfs_vfsops = {
 	nfs_fhtovp,
 	nfs_vptofh,
 	nfs_vfs_init,
-	nfs_sysctl
+	nfs_sysctl,
+	nfs_checkexp
 };
 
 extern u_int32_t nfs_procids[NFS_NPROCS];
@@ -144,21 +148,16 @@ nfs_statfs(mp, sbp, p)
 		goto nfsmout;
 	}
 	nfsm_dissect(sfp, struct nfs_statfs *, NFSX_STATFS(v3));
-#ifdef COMPAT_09
-	sbp->f_type = 2;
-#else
-	sbp->f_type = 0;
-#endif
 	sbp->f_flags = nmp->nm_flag;
 	sbp->f_iosize = min(nmp->nm_rsize, nmp->nm_wsize);
 	if (v3) {
 		sbp->f_bsize = NFS_FABLKSIZE;
 		tquad = fxdr_hyper(&sfp->sf_tbytes);
-		sbp->f_blocks = (long)(tquad / ((u_quad_t)NFS_FABLKSIZE));
+		sbp->f_blocks = (u_int32_t)(tquad / (u_quad_t)NFS_FABLKSIZE);
 		tquad = fxdr_hyper(&sfp->sf_fbytes);
-		sbp->f_bfree = (long)(tquad / ((u_quad_t)NFS_FABLKSIZE));
+		sbp->f_bfree = (u_int32_t)(tquad / (u_quad_t)NFS_FABLKSIZE);
 		tquad = fxdr_hyper(&sfp->sf_abytes);
-		sbp->f_bavail = (long)(tquad / ((u_quad_t)NFS_FABLKSIZE));
+		sbp->f_bavail = (int32_t)((quad_t)tquad / (quad_t)NFS_FABLKSIZE);
 		sbp->f_files = (fxdr_unsigned(int32_t,
 		    sfp->sf_tfiles.nfsuquad[1]) & 0x7fffffff);
 		sbp->f_ffree = (fxdr_unsigned(int32_t,
@@ -174,6 +173,8 @@ nfs_statfs(mp, sbp, p)
 	if (sbp != &mp->mnt_stat) {
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+		bcopy(&mp->mnt_stat.mount_info.nfs_args,
+		    &sbp->mount_info.nfs_args, sizeof(struct nfs_args));
 	}
 	strncpy(&sbp->f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
 	nfsm_reqdone;
@@ -349,6 +350,12 @@ nfs_mountroot()
 	 */
 	vp->v_type = VREG;
 	vp->v_flag = 0;
+	/* 
+	 * Next line is a hack to make swapmount() work on NFS swap files. 
+	 * XXX-smurph 
+	 */ 
+	swdevt[0].sw_dev = NETDEV;
+	/* end hack */
 	swdevt[0].sw_vp = vp;
 
 	/*
@@ -423,9 +430,10 @@ nfs_mount_diskless(ndmntp, mntname, mntflag, vpp)
 }
 
 void
-nfs_decode_args(nmp, argp)
+nfs_decode_args(nmp, argp, nargp)
 	struct nfsmount *nmp;
 	struct nfs_args *argp;
+	struct nfs_args *nargp;
 {
 	int s;
 	int adjsock = 0;
@@ -561,6 +569,21 @@ nfs_decode_args(nmp, argp)
 					      PSOCK, "nfscon", 0);
 			}
 	}
+
+	/* Update nargp based on nmp */
+	nargp->wsize = nmp->nm_wsize;
+	nargp->rsize = nmp->nm_rsize;
+	nargp->readdirsize = nmp->nm_readdirsize;
+	nargp->timeo = nmp->nm_timeo;
+	nargp->retrans = nmp->nm_retry;
+	nargp->maxgrouplist = nmp->nm_numgrps;
+	nargp->readahead = nmp->nm_readahead;
+	nargp->leaseterm = nmp->nm_leaseterm;
+	nargp->deadthresh = nmp->nm_deadthresh;
+	nargp->acregmin = nmp->nm_acregmin;
+	nargp->acregmax = nmp->nm_acregmax;
+	nargp->acdirmin = nmp->nm_acdirmin;
+	nargp->acdirmax = nmp->nm_acdirmax;
 }
 
 /*
@@ -616,7 +639,7 @@ nfs_mount(mp, path, data, ndp, p)
 		 */
 		args.flags = (args.flags & ~(NFSMNT_NFSV3|NFSMNT_NQNFS)) |
 		    (nmp->nm_flag & (NFSMNT_NFSV3|NFSMNT_NQNFS));
-		nfs_decode_args(nmp, &args);
+		nfs_decode_args(nmp, &args, &mp->mnt_stat.mount_info.nfs_args);
 		return (0);
 	}
 	error = copyin((caddr_t)args.fh, (caddr_t)nfh, args.fhsize);
@@ -695,16 +718,12 @@ mountnfs(argp, mp, nam, pth, hst, vpp)
 	nmp->nm_acdirmin = NFS_MINATTRTIMO;
 	nmp->nm_acdirmax = NFS_MAXATTRTIMO;
 	bcopy((caddr_t)argp->fh, (caddr_t)nmp->nm_fh, argp->fhsize);
-#ifdef COMPAT_09
-	mp->mnt_stat.f_type = 2;
-#else
-	mp->mnt_stat.f_type = 0;
-#endif
 	strncpy(&mp->mnt_stat.f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
 	bcopy(hst, mp->mnt_stat.f_mntfromname, MNAMELEN);
 	bcopy(pth, mp->mnt_stat.f_mntonname, MNAMELEN);
+	bcopy(argp, &mp->mnt_stat.mount_info.nfs_args, sizeof(*argp));
 	nmp->nm_nam = nam;
-	nfs_decode_args(nmp, argp);
+	nfs_decode_args(nmp, argp, &mp->mnt_stat.mount_info.nfs_args);
 
 	/* Set up the sockets and per-host congestion */
 	nmp->nm_sotype = argp->sotype;
@@ -715,7 +734,7 @@ mountnfs(argp, mp, nam, pth, hst, vpp)
 	 * the first request, in case the server is not responding.
 	 */
 	if (nmp->nm_sotype == SOCK_DGRAM &&
-		(error = nfs_connect(nmp, (struct nfsreq *)0)))
+	    (error = nfs_connect(nmp, (struct nfsreq *)0)))
 		goto bad;
 
 	/*
@@ -952,13 +971,10 @@ nfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
  */
 /* ARGSUSED */
 int
-nfs_fhtovp(mp, fhp, nam, vpp, exflagsp, credanonp)
+nfs_fhtovp(mp, fhp, vpp)
 	register struct mount *mp;
 	struct fid *fhp;
-	struct mbuf *nam;
 	struct vnode **vpp;
-	int *exflagsp;
-	struct ucred **credanonp;
 {
 
 	return (EINVAL);
@@ -1004,5 +1020,19 @@ nfs_quotactl(mp, cmd, uid, arg, p)
 	struct proc *p;
 {
 
+	return (EOPNOTSUPP);
+}
+
+/*
+ * check export permission, not supported
+ */
+/* ARGUSED */
+int
+nfs_checkexp(mp, nam, exflagsp, credanonp)
+	register struct mount *mp;
+	struct mbuf *nam;
+	int *exflagsp;
+	struct ucred **credanonp;
+{
 	return (EOPNOTSUPP);
 }

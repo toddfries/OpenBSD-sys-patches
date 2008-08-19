@@ -1,4 +1,4 @@
-$OpenBSD: eisadevs,v 1.12 1999/03/04 15:37:58 mickey Exp $
+$OpenBSD: eisadevs,v 1.14 2000/03/13 20:32:15 maja Exp $
 
 /*
  * Copyright (c) 1995, 1996 Christopher G. Demetriou
@@ -38,6 +38,7 @@ $OpenBSD: eisadevs,v 1.12 1999/03/04 15:37:58 mickey Exp $
 vendor ADP		Adaptec
 vendor AMI		AMI
 vendor BUS		BusLogic
+vendor CPQ		Compaq
 vendor DEC		Digital Equipment
 vendor DTI		DeskStation Technology, Inc.
 vendor FSI		FORE Systems
@@ -46,6 +47,7 @@ vendor INP		Interphase
 vendor INT		Intel
 vendor ETI		Microdyne
 vendor MLX		Mylex
+vendor MDG		Madge Networks
 vendor SMC		Standard Microsystems Corp.
 vendor TCM		3Com
 vendor USC		UltraStor
@@ -72,6 +74,9 @@ product BUS 4201	Bt74xB SCSI
 product BUS 4202	Bt74xC SCSI
 product BUS 6301	Bt763E Ethernet
 
+/* Compaq products */
+product CPQ 6101	NetFlex-2 ENET-TR
+
 /* Digital Equipment products */
 product DEC 4250	DE425 Ethernet
 product DEC 3001	DEFEA FDDI Controller
@@ -96,10 +101,14 @@ product INT 1010	EtherExpress 32 Flash Ethernet
 /* ETI products */
 product ETI 1001	NE3300 Ethernet Rev. C & D
 
+/* Madge products */
+product MDG 0002	Smart 16/4 EISA Ringnode
+
 /* HP products */
 product HWP 0C70	HP-IB Host Adapter
 product HWP 0C80	SCSI Host Adapter (Cirrus-II) -- 25525A
 product HWP 1850	LAN AdapterCard -- 25567A
+product HWP 1980	ATM Adapter -- J2802A
 product HWP 2051	EISA Test Adapter Card
 product HWP C000	Series 700 EISA System Board
 product HWP C010	Series 700 EISA System Board
@@ -109,13 +118,16 @@ product HWP C0D1	EISA System Board
 product HWP C0E1	EISA System Board
 
 /* 3Com products */
+product TCM 5090	3C509-TP Ethernet
 product TCM 5091	3C509 Ethernet
 product TCM 5092	3C579-TP Ethernet
 product TCM 5093	3C579 Ethernet
-product	TCM 5920 	3C592 Etherlink III
-product	TCM 5970 	3C597 Fast Etherlink TX
-product	TCM 5971 	3C597 Fast Etherlink T4 
-product	TCM 5972 	3C597 Fast Etherlink MII 
+product TCM 5094	3C509-Combo Ethernet
+product TCM 5095	3C509-TPO Ethernet
+product TCM 5920 	3C592 Etherlink III
+product TCM 5970 	3C597 Fast Etherlink TX
+product TCM 5971	3C597 Fast Etherlink T4
+product TCM 5972	3C597 Fast Etherlink MII
 
 /* Standard Microsystems (SMC) */
 product SMC 8010	Ethercard Elite32C Ultra

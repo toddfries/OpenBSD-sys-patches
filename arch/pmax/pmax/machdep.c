@@ -1,3 +1,4 @@
+/*	$OpenBSD: machdep.c,v 1.23.2.1 2000/07/13 16:05:30 jason Exp $	*/
 /*	$NetBSD: machdep.c,v 1.67 1996/10/23 20:04:40 mhitch Exp $	*/
 
 /*
@@ -54,7 +55,7 @@
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/clist.h>
-#include <sys/callout.h>
+#include <sys/timeout.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/msgbuf.h>
@@ -147,7 +148,6 @@ int	bufpages = BUFPAGES;
 #else
 int	bufpages = 0;
 #endif
-int	msgbufmapped = 0;	/* set when safe to use msgbuf */
 int	maxmem;			/* max memory per process */
 int	physmem;		/* max supported memory, changes to actual */
 int	physmem_boardmax;	/* {model,simm}-specific bound on physmem */
@@ -678,10 +678,10 @@ mach_init(argc, argv, code, cv)
 	/*
 	 * Initialize error message buffer (at end of core).
 	 */
-	maxmem -= btoc(sizeof (struct msgbuf));
+	maxmem -= btoc(MSGBUFSIZE);
 	msgbufp = (struct msgbuf *)(MIPS_PHYS_TO_KSEG0(maxmem << PGSHIFT));
-	msgbufmapped = 1;
-
+	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
+	
 	/*
 	 * Allocate space for system data structures.
 	 * The first available kernel virtual address is in "v".
@@ -700,7 +700,7 @@ mach_init(argc, argv, code, cv)
 #ifdef REAL_CLISTS
 	valloc(cfree, struct cblock, nclist);
 #endif
-	valloc(callout, struct callout, ncallout);
+	valloc(timeouts, struct timeout, ntimeout);
 #ifdef SYSVSHM
 	valloc(shmsegs, struct shmid_ds, shminfo.shmmni);
 #endif
@@ -792,6 +792,11 @@ cpu_startup()
 	pmapdebug = 0;
 #endif
 
+	for (i = 0; i < btoc(MSGBUFSIZE); i++)
+		pmap_enter(pmap_kernel(), (vm_offset_t)msgbufp,
+		    maxmem + i * NBPG, VM_PROT_READ|VM_PROT_WRITE, TRUE,
+		    VM_PROT_READ|VM_PROT_WRITE);
+
 	/*
 	 * Good {morning,afternoon,evening,night}.
 	 */
@@ -856,12 +861,9 @@ cpu_startup()
 	mb_map = kmem_suballoc(kernel_map, (vm_offset_t *)&mbutl, &maxaddr,
 			       VM_MBUF_SIZE, FALSE);
 	/*
-	 * Initialize callouts
+	 * Initialize timeouts
 	 */
-	callfree = callout;
-	for (i = 1; i < ncallout; i++)
-		callout[i-1].c_next = &callout[i];
-	callout[i-1].c_next = NULL;
+	timeout_init();
 
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
@@ -1198,6 +1200,7 @@ void
 dumpsys()
 {
 	int error;
+	extern int msgbufmapped;
 
 	/* Save registers. */
 	savectx((struct user *)&dumppcb, 0);

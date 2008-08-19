@@ -1,4 +1,4 @@
-/*	$OpenBSD: elink3.c,v 1.31 1999/02/28 03:23:36 jason Exp $	*/
+/*	$OpenBSD: elink3.c,v 1.38 2000/02/25 04:26:11 itojun Exp $	*/
 /*	$NetBSD: elink3.c,v 1.32 1997/05/14 00:22:00 thorpej Exp $	*/
 
 /*
@@ -149,12 +149,10 @@ void	ep_vortex_probemedia __P((struct ep_softc *sc));
 void	ep_isa_probemedia __P((struct ep_softc *sc));
 void	eptxstat __P((struct ep_softc *));
 int	epstatus __P((struct ep_softc *));
-void	epinit __P((struct ep_softc *));
 int	epioctl __P((struct ifnet *, u_long, caddr_t));
 void	epstart __P((struct ifnet *));
 void	epwatchdog __P((struct ifnet *));
 void	epreset __P((struct ep_softc *));
-void	epshutdown __P((void *));
 void	epread __P((struct ep_softc *));
 struct mbuf *epget __P((struct ep_softc *, int));
 void	epmbuffill __P((void *));
@@ -290,6 +288,7 @@ epconfig(sc, chipset, enaddr)
 	ifp->if_watchdog = epwatchdog;
 	ifp->if_flags =
 	    IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
+	ifp->if_snd.ifq_maxlen = IFQ_MAXLEN;
 
 	if_attach(ifp);
 	ether_ifattach(ifp);
@@ -346,9 +345,6 @@ epconfig(sc, chipset, enaddr)
 #endif
 
 	sc->tx_start_thresh = 20;	/* probably a good starting point. */
-
-	/*  Establish callback to reset card when we reboot. */
-	shutdownhook_establish(epshutdown, sc);
 
 	ep_complete_cmd(sc, EP_COMMAND, RX_RESET);
 	ep_complete_cmd(sc, EP_COMMAND, TX_RESET);
@@ -939,9 +935,11 @@ readcheck:
 	} else {
 		/* Check if we are stuck and reset [see XXX comment] */
 		if (epstatus(sc)) {
+#ifdef EP_DEBUG
 			if (ifp->if_flags & IFF_DEBUG)
 				printf("%s: adapter reset\n",
 				    sc->sc_dev.dv_xname);
+#endif
 			epreset(sc);
 		}
 	}
@@ -973,27 +971,35 @@ epstatus(sc)
 	GO_WINDOW(1);
 
 	if (fifost & FIFOS_RX_UNDERRUN) {
+#ifdef EP_DEBUG
 		if (sc->sc_arpcom.ac_if.if_flags & IFF_DEBUG)
 			printf("%s: RX underrun\n", sc->sc_dev.dv_xname);
+#endif
 		epreset(sc);
 		return 0;
 	}
 
 	if (fifost & FIFOS_RX_STATUS_OVERRUN) {
+#ifdef EP_DEBUG
 		if (sc->sc_arpcom.ac_if.if_flags & IFF_DEBUG)
 			printf("%s: RX Status overrun\n", sc->sc_dev.dv_xname);
+#endif
 		return 1;
 	}
 
 	if (fifost & FIFOS_RX_OVERRUN) {
+#ifdef EP_DEBUG
 		if (sc->sc_arpcom.ac_if.if_flags & IFF_DEBUG)
 			printf("%s: RX overrun\n", sc->sc_dev.dv_xname);
+#endif
 		return 1;
 	}
 
 	if (fifost & FIFOS_TX_OVERRUN) {
+#ifdef EP_DEBUG
 		if (sc->sc_arpcom.ac_if.if_flags & IFF_DEBUG)
 			printf("%s: TX overrun\n", sc->sc_dev.dv_xname);
+#endif
 		epreset(sc);
 		return 0;
 	}
@@ -1020,16 +1026,20 @@ eptxstat(sc)
 
 		if (i & TXS_JABBER) {
 			++sc->sc_arpcom.ac_if.if_oerrors;
+#ifdef EP_DEBUG
 			if (sc->sc_arpcom.ac_if.if_flags & IFF_DEBUG)
 				printf("%s: jabber (%x)\n",
 				       sc->sc_dev.dv_xname, i);
+#endif
 			epreset(sc);
 		} else if (i & TXS_UNDERRUN) {
 			++sc->sc_arpcom.ac_if.if_oerrors;
+#ifdef EP_DEBUG
 			if (sc->sc_arpcom.ac_if.if_flags & IFF_DEBUG)
 				printf("%s: fifo underrun (%x) @%d\n",
 				       sc->sc_dev.dv_xname, i,
 				       sc->tx_start_thresh);
+#endif
 			if (sc->tx_succ_ok < 100)
 				    sc->tx_start_thresh = min(ETHER_MAX_LEN,
 					    sc->tx_start_thresh + 20);
@@ -1054,9 +1064,6 @@ epintr(arg)
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	u_int16_t status;
 	int ret = 0;
-
-	if (sc->bustype == EP_BUS_PCMCIA && (sc->pcmcia_flags & EP_ABSENT))
-		return (ret);
 
 	for (;;) {
 		bus_space_write_2(iot, ioh, EP_COMMAND, C_INTR_LATCH);
@@ -1113,6 +1120,7 @@ epread(sc)
 	len = bus_space_read_2(iot, ioh, EP_W1_RX_STATUS);
 
 again:
+#ifdef EP_DEBUG
 	if (ifp->if_flags & IFF_DEBUG) {
 		int err = len & ERR_MASK;
 		char *s = NULL;
@@ -1135,6 +1143,7 @@ again:
 		if (s)
 			printf("%s: %s\n", sc->sc_dev.dv_xname, s);
 	}
+#endif
 
 	if (len & ERR_INCOMPLETE)
 		return;
@@ -1191,9 +1200,11 @@ again:
 		len = bus_space_read_2(iot, ioh, EP_W1_RX_STATUS);
 		/* Check if we are stuck and reset [see XXX comment] */
 		if (len & ERR_INCOMPLETE) {
+#ifdef EP_DEBUG
 			if (ifp->if_flags & IFF_DEBUG)
 				printf("%s: adapter reset\n",
 				    sc->sc_dev.dv_xname);
+#endif
 			epreset(sc);
 			return;
 		}
@@ -1234,12 +1245,19 @@ epget(sc, totlen)
 		sc->next_mb = (sc->next_mb + 1) % MAX_MBS;
 		m->m_data = m->m_pktdat;
 		m->m_flags = M_PKTHDR;
+		bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
 	}
 	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = totlen;
 	pad = ALIGN(sizeof(struct ether_header)) - sizeof(struct ether_header);
+	len = MHLEN;
+	if (totlen >= MINCLSIZE) {
+		MCLGET(m, M_DONTWAIT);
+		if (m->m_flags & M_EXT)
+			len = MCLBYTES;
+	}
 	m->m_data += pad;
-	len = MHLEN - pad;
+	len -= pad;
 	top = 0;
 	mp = &top;
 
@@ -1449,19 +1467,6 @@ epstop(sc)
 	bus_space_write_2(iot, ioh, EP_COMMAND, SET_RX_FILTER);
 
 	epmbufempty(sc);
-}
-
-/*
- * Before reboots, reset card completely.
- */
-void
-epshutdown(arg)
-	void *arg;
-{
-	register struct ep_softc *sc = arg;
-
-	epstop(sc);
-	ep_complete_cmd(sc, EP_COMMAND, GLOBAL_RESET);
 }
 
 /*

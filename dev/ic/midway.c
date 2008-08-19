@@ -1,4 +1,4 @@
-/*	$OpenBSD: midway.c,v 1.24 1999/01/11 05:12:17 millert Exp $	*/
+/*	$OpenBSD: midway.c,v 1.26 2000/04/27 00:04:25 chris Exp $	*/
 /*	(sync'd to midway.c 1.68)	*/
 
 /*
@@ -144,7 +144,7 @@
 #endif
 
 
-#if !defined(sparc) && !defined(__FreeBSD__)
+#if !defined(__sparc__) && !defined(__FreeBSD__)
 #include <machine/bus.h>
 #endif
 
@@ -1138,10 +1138,6 @@ caddr_t data;
 		error = EINVAL;
 		break;
 
-#if defined(SIOCSIFMTU)		/* ??? copied from if_de */
-#if !defined(ifr_mtu)
-#define ifr_mtu ifr_metric
-#endif
 	case SIOCSIFMTU:
 	    /*
 	     * Set the interface MTU.
@@ -1157,7 +1153,6 @@ caddr_t data;
 	    en_reset(sc);
 	    en_init(sc);
 	    break;
-#endif /* SIOCSIFMTU */
 
 	default: 
 	    error = EINVAL;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: portal_vfsops.c,v 1.6 1998/02/08 22:41:39 tholo Exp $	*/
+/*	$OpenBSD: portal_vfsops.c,v 1.8 2000/02/07 04:57:16 assar Exp $	*/
 /*	$NetBSD: portal_vfsops.c,v 1.14 1996/02/09 22:40:41 christos Exp $	*/
 
 /*
@@ -226,11 +226,6 @@ portal_statfs(mp, sbp, p)
 	struct proc *p;
 {
 
-#ifdef COMPAT_09
-	sbp->f_type = 12;
-#else
-	sbp->f_type = 0;
-#endif
 	sbp->f_bsize = DEV_BSIZE;
 	sbp->f_iosize = DEV_BSIZE;
 	sbp->f_blocks = 2;		/* 1K to keep df happy */
@@ -239,7 +234,6 @@ portal_statfs(mp, sbp, p)
 	sbp->f_files = 1;		/* Allow for "." */
 	sbp->f_ffree = 0;		/* See comments above */
 	if (sbp != &mp->mnt_stat) {
-		sbp->f_type = mp->mnt_vfc->vfc_typenum;
 		bcopy(&mp->mnt_stat.f_fsid, &sbp->f_fsid, sizeof(sbp->f_fsid));
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
@@ -253,7 +247,7 @@ portal_statfs(mp, sbp, p)
 				  struct proc *)))nullop)
 
 #define portal_fhtovp ((int (*) __P((struct mount *, struct fid *, \
-	    struct mbuf *, struct vnode **, int *, struct ucred **)))eopnotsupp)
+	    struct vnode **)))eopnotsupp)
 #define portal_quotactl ((int (*) __P((struct mount *, int, uid_t, caddr_t, \
 	    struct proc *)))eopnotsupp)
 #define portal_sysctl ((int (*) __P((int *, u_int, void *, size_t *, void *, \
@@ -261,6 +255,8 @@ portal_statfs(mp, sbp, p)
 #define portal_vget ((int (*) __P((struct mount *, ino_t, struct vnode **))) \
 	    eopnotsupp)
 #define portal_vptofh ((int (*) __P((struct vnode *, struct fid *)))eopnotsupp)
+#define portal_checkexp ((int (*) __P((struct mount *, struct mbuf *,	\
+	int *, struct ucred **)))eopnotsupp)
 
 struct vfsops portal_vfsops = {
 	portal_mount,
@@ -274,5 +270,6 @@ struct vfsops portal_vfsops = {
 	portal_fhtovp,
 	portal_vptofh,
 	portal_init,
-	portal_sysctl
+	portal_sysctl,
+	portal_checkexp
 };

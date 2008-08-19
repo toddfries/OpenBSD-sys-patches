@@ -1,5 +1,5 @@
-/*	$OpenBSD: rf_copyback.c,v 1.2 1999/02/16 00:02:27 niklas Exp $	*/
-/*	$NetBSD: rf_copyback.c,v 1.3 1999/02/05 00:06:06 oster Exp $	*/
+/*	$OpenBSD: rf_copyback.c,v 1.5 2000/01/11 18:02:20 peter Exp $	*/
+/*	$NetBSD: rf_copyback.c,v 1.12 2000/01/09 01:29:28 oster Exp $	*/
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -43,7 +43,6 @@
 #include <sys/time.h>
 #include <sys/buf.h>
 #include "rf_raid.h"
-#include "rf_threadid.h"
 #include "rf_mcpair.h"
 #include "rf_acctrace.h"
 #include "rf_etimer.h"
@@ -53,7 +52,7 @@
 #include "rf_decluster.h"
 #include "rf_driver.h"
 #include "rf_shutdown.h"
-#include "rf_sys.h"
+#include "rf_kintf.h"
 
 #define RF_COPYBACK_DATA   0
 #define RF_COPYBACK_PARITY 1
@@ -62,9 +61,9 @@ int     rf_copyback_in_progress;
 
 static int rf_CopybackReadDoneProc(RF_CopybackDesc_t * desc, int status);
 static int rf_CopybackWriteDoneProc(RF_CopybackDesc_t * desc, int status);
-static void 
-rf_CopybackOne(RF_CopybackDesc_t * desc, int typ,
-    RF_RaidAddr_t addr, RF_RowCol_t testRow, RF_RowCol_t testCol,
+static void rf_CopybackOne(RF_CopybackDesc_t * desc, int typ,
+			   RF_RaidAddr_t addr, RF_RowCol_t testRow, 
+			   RF_RowCol_t testCol,
     RF_SectorNum_t testOffs);
 static void rf_CopybackComplete(RF_CopybackDesc_t * desc, int status);
 
@@ -85,13 +84,12 @@ rf_ConfigureCopyback(listp)
 #include <sys/vnode.h>
 #endif
 
-int raidlookup __P((char *, struct proc *, struct vnode **));
-
 /* do a complete copyback */
 void 
 rf_CopybackReconstructedData(raidPtr)
 	RF_Raid_t *raidPtr;
 {
+	RF_ComponentLabel_t c_label;
 	int     done, retcode;
 	RF_CopybackDesc_t *desc;
 	RF_RowCol_t frow, fcol;
@@ -123,7 +121,7 @@ rf_CopybackReconstructedData(raidPtr)
 	}
 	badDisk = &raidPtr->Disks[frow][fcol];
 
-	proc = raidPtr->proc;	/* XXX Yes, this is not nice.. */
+	proc = raidPtr->engine_thread;
 
 	/* This device may have been opened successfully the first time. Close
 	 * it before trying to open it again.. */
@@ -131,8 +129,10 @@ rf_CopybackReconstructedData(raidPtr)
 	if (raidPtr->raid_cinfo[frow][fcol].ci_vp != NULL) {
 		printf("Closed the open device: %s\n",
 		    raidPtr->Disks[frow][fcol].devname);
+		VOP_UNLOCK(raidPtr->raid_cinfo[frow][fcol].ci_vp, 0, proc);
 		(void) vn_close(raidPtr->raid_cinfo[frow][fcol].ci_vp,
 		    FREAD | FWRITE, proc->p_ucred, proc);
+		raidPtr->raid_cinfo[frow][fcol].ci_vp = NULL;
 	}
 	printf("About to (re-)open the device: %s\n",
 	    raidPtr->Disks[frow][fcol].devname);
@@ -228,6 +228,26 @@ rf_CopybackReconstructedData(raidPtr)
 	printf("COPYBACK: Beginning\n");
 	RF_GETTIME(desc->starttime);
 	rf_ContinueCopyback(desc);
+
+	/* Data has been restored.  Fix up the component label. */
+	/* Don't actually need the read here.. */
+	raidread_component_label( raidPtr->raid_cinfo[frow][fcol].ci_dev,
+				  raidPtr->raid_cinfo[frow][fcol].ci_vp,
+				  &c_label);
+		
+	c_label.version = RF_COMPONENT_LABEL_VERSION; 
+	c_label.mod_counter = raidPtr->mod_counter;
+	c_label.serial_number = raidPtr->serial_number;
+	c_label.row = frow;
+	c_label.column = fcol;
+	c_label.num_rows = raidPtr->numRow;
+	c_label.num_columns = raidPtr->numCol;
+	c_label.clean = RF_RAID_DIRTY;
+	c_label.status = rf_ds_optimal;
+	
+	raidwrite_component_label( raidPtr->raid_cinfo[frow][fcol].ci_dev,
+				   raidPtr->raid_cinfo[frow][fcol].ci_vp,
+				   &c_label);
 }
 
 
@@ -249,6 +269,8 @@ rf_ContinueCopyback(desc)
 	old_pctg = (-1);
 	while (1) {
 		stripeAddr = desc->stripeAddr;
+		desc->raidPtr->copyback_stripes_done = stripeAddr
+			/ desc->sectPerStripe;
 		if (rf_prReconSched) {
 			old_pctg = 100 * desc->stripeAddr / raidPtr->totalSectors;
 		}

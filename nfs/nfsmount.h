@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsmount.h,v 1.5 1998/02/08 22:41:46 tholo Exp $	*/
+/*	$OpenBSD: nfsmount.h,v 1.7 2000/02/07 04:57:17 assar Exp $	*/
 /*	$NetBSD: nfsmount.h,v 1.10 1996/02/18 11:54:03 fvdl Exp $	*/
 
 /*
@@ -106,7 +106,7 @@ int	nfs_mount __P((struct mount *mp, const char *path, caddr_t data,
 int	mountnfs __P((struct nfs_args *argp, struct mount *mp,
 		struct mbuf *nam, char *pth, char *hst, struct vnode **vpp));
 int	nfs_mountroot __P((void));
-void	nfs_decode_args __P((struct nfsmount *, struct nfs_args *));
+void	nfs_decode_args __P((struct nfsmount *, struct nfs_args *, struct nfs_args *));
 int	nfs_start __P((struct mount *mp, int flags, struct proc *p));
 int	nfs_unmount __P((struct mount *mp, int mntflags, struct proc *p));
 int	nfs_root __P((struct mount *mp, struct vnode **vpp));
@@ -116,8 +116,7 @@ int	nfs_statfs __P((struct mount *mp, struct statfs *sbp, struct proc *p));
 int	nfs_sync __P((struct mount *mp, int waitfor, struct ucred *cred,
 		struct proc *p));
 int	nfs_vget __P((struct mount *, ino_t, struct vnode **));
-int	nfs_fhtovp __P((struct mount *mp, struct fid *fhp, struct mbuf *nam,
-		struct vnode **vpp, int *exflagsp, struct ucred **credanonp));
+int	nfs_fhtovp __P((struct mount *mp, struct fid *fhp, struct vnode **vpp));
 int	nfs_vptofh __P((struct vnode *vp, struct fid *fhp));
 int	nfs_fsinfo __P((struct nfsmount *, struct vnode *, struct ucred *,
 			struct proc *));

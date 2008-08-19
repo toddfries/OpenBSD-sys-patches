@@ -1,7 +1,7 @@
-/*	$OpenBSD: cmd.c,v 1.43 1998/10/29 17:07:24 mickey Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.46 2000/01/20 19:56:48 mickey Exp $	*/
 
 /*
- * Copyright (c) 1997,1998 Michael Shalayeff
+ * Copyright (c) 1997-1999 Michael Shalayeff
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -73,7 +73,7 @@ const struct cmd_table cmd_table[] = {
 };
 
 static void ls __P((char *, register struct stat *));
-static int readline __P((register char *, int));
+static int readline __P((register char *, size_t, int));
 char *nextword __P((register char *));
 static char *whatcmd
 	__P((register const struct cmd_table **ct, register char *));
@@ -87,7 +87,7 @@ getcmd()
 {
 	cmd.cmd = NULL;
 
-	if (!readline(cmd_buf, cmd.timeout))
+	if (!readline(cmd_buf, sizeof(cmd_buf), cmd.timeout))
 		cmd.cmd = cmd_table;
 
 	return docmd();
@@ -215,25 +215,29 @@ whatcmd(ct, p)
 }
 
 static int
-readline(buf, to)
+readline(buf, n, to)
 	register char *buf;
+	size_t n;
 	int	to;
 {
 #ifdef DEBUG
 	extern int debug;
 #endif
-	register char *p = buf, *pe = buf, ch;
-	register time_t tt;
+	register char *p = buf, ch;
 
 	/* Only do timeout if greater than 0 */
 	if (to > 0) {
-		tt = getsecs() + to;
+		u_long i = 0;
+		time_t tt = getsecs() + to;
 #ifdef DEBUG
 		if (debug > 2)
 			printf ("readline: timeout(%d) at %u\n", to, tt);
 #endif
-		while (getsecs() < tt && !cnischar())
-			;
+		/* check for timeout expiration less often
+		   (for some very constrained archs) */
+		while (!cnischar())
+			if (!(i++ % 1000) && (getsecs() >= tt))
+				break;
 
 		if (!cnischar()) {
 			strncpy(buf, "boot", 5);
@@ -246,31 +250,33 @@ readline(buf, to)
 	while (1) {
 		switch ((ch = getchar())) {
 		case CTRL('u'):
-			while (pe-- > buf)
+			while (p-- > buf)
 				putchar('\177');
-			p = pe = buf;
 			continue;
 		case '\n':
 		case '\r':
-			pe[1] = *pe = '\0';
+			p[1] = *p = '\0';
 			break;
 		case '\b':
 		case '\177':
 			if (p > buf) {
 				putchar('\177');
 				p--;
-				pe--;
 			}
 			continue;
 		default:
-			pe++;
-			*p++ = ch;
+			if (p - buf < n-1)
+				*p++ = ch;
+			else {
+				putchar('\007');
+				putchar('\177');
+			}
 			continue;
 		}
 		break;
 	}
 
-	return pe - buf;
+	return p - buf;
 }
 
 /*
@@ -331,7 +337,7 @@ Xecho()
 {
 	register int i;
 	for (i = 1; i < cmd.argc; i++)
-		printf(cmd.argv[i]), putchar(' ');
+		printf("%s ", cmd.argv[i]);
 	putchar('\n');
 	return 0;
 }

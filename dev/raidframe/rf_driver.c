@@ -1,5 +1,41 @@
-/*	$OpenBSD: rf_driver.c,v 1.2 1999/02/16 00:02:41 niklas Exp $	*/
-/*	$NetBSD: rf_driver.c,v 1.6 1999/02/05 00:06:10 oster Exp $	*/
+/*	$OpenBSD: rf_driver.c,v 1.8 2000/01/11 18:02:21 peter Exp $	*/
+/*	$NetBSD: rf_driver.c,v 1.27 2000/01/09 03:44:33 oster Exp $	*/
+/*-
+ * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Greg Oster
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *        This product includes software developed by the NetBSD
+ *        Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 /*
  * Copyright (c) 1995 Carnegie-Mellon University.
  * All rights reserved.
@@ -58,7 +94,6 @@
 #include "rf_diskqueue.h"
 #include "rf_parityscan.h"
 #include "rf_alloclist.h"
-#include "rf_threadid.h"
 #include "rf_dagutils.h"
 #include "rf_utils.h"
 #include "rf_etimer.h"
@@ -70,7 +105,6 @@
 #include "rf_freelist.h"
 #include "rf_decluster.h"
 #include "rf_map.h"
-#include "rf_diskthreads.h"
 #include "rf_revent.h"
 #include "rf_callback.h"
 #include "rf_engine.h"
@@ -79,24 +113,12 @@
 #include "rf_nwayxor.h"
 #include "rf_debugprint.h"
 #include "rf_copyback.h"
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
-#include "rf_camlayer.h"
-#endif
 #include "rf_driver.h"
 #include "rf_options.h"
 #include "rf_shutdown.h"
-#include "rf_sys.h"
-#include "rf_cpuutil.h"
+#include "rf_kintf.h"
 
 #include <sys/buf.h>
-
-#if DKUSAGE > 0
-#include <sys/dkusage.h>
-#include <io/common/iotypes.h>
-#include <io/cam/dec_cam.h>
-#include <io/cam/cam.h>
-#include <io/cam/pdrv.h>
-#endif				/* DKUSAGE > 0 */
 
 /* rad == RF_RaidAccessDesc_t */
 static RF_FreeList_t *rf_rad_freelist;
@@ -118,59 +140,39 @@ static void clean_rad(RF_RaidAccessDesc_t *);
 static void rf_ShutdownRDFreeList(void *);
 static int rf_ConfigureRDFreeList(RF_ShutdownList_t **);
 
-
+void rf_UnconfigureVnodes( RF_Raid_t * );
+ 
 RF_DECLARE_MUTEX(rf_printf_mutex)	/* debug only:  avoids interleaved
 					 * printfs by different stripes */
-RF_DECLARE_GLOBAL_THREADID	/* declarations for threadid.h */
-
 
 #define SIGNAL_QUIESCENT_COND(_raid_)  wakeup(&((_raid_)->accesses_suspended))
 #define WAIT_FOR_QUIESCENCE(_raid_) \
-	tsleep(&((_raid_)->accesses_suspended),PRIBIO|PCATCH,"raidframe quiesce", 0);
+	tsleep(&((_raid_)->accesses_suspended),PRIBIO,"raidframe quiesce", 0);
 
-#if DKUSAGE > 0
-#define IO_BUF_ERR(bp, err, unit) { \
+#define IO_BUF_ERR(bp, err) { \
 	bp->b_flags |= B_ERROR; \
 	bp->b_resid = bp->b_bcount; \
 	bp->b_error = err; \
-	RF_DKU_END_IO(unit, bp); \
 	biodone(bp); \
 }
-#else
-#define IO_BUF_ERR(bp, err, unit) { \
-	bp->b_flags |= B_ERROR; \
-	bp->b_resid = bp->b_bcount; \
-	bp->b_error = err; \
-	RF_DKU_END_IO(unit); \
-	biodone(bp); \
-}
-#endif				/* DKUSAGE > 0 */
 
-	static int configureCount = 0;	/* number of active configurations */
-	static int isconfigged = 0;	/* is basic raidframe (non per-array)
+static int configureCount = 0;	/* number of active configurations */
+static int isconfigged = 0;	/* is basic raidframe (non per-array)
 					 * stuff configged */
 RF_DECLARE_STATIC_MUTEX(configureMutex)	/* used to lock the configuration
 					 * stuff */
-	static RF_ShutdownList_t *globalShutdown;	/* non array-specific
-							 * stuff */
-
-	static int rf_ConfigureRDFreeList(RF_ShutdownList_t ** listp);
+static RF_ShutdownList_t *globalShutdown;	/* non array-specific stuff */
+static int rf_ConfigureRDFreeList(RF_ShutdownList_t ** listp);
 
 /* called at system boot time */
-	int     rf_BootRaidframe()
+int
+rf_BootRaidframe()
 {
 	int     rc;
 
 	if (raidframe_booted)
 		return (EBUSY);
 	raidframe_booted = 1;
-
-#if RF_DEBUG_ATOMIC > 0
-	rf_atent_init();
-#endif				/* RF_DEBUG_ATOMIC > 0 */
-
-	rf_setup_threadid();
-	rf_assign_threadid();
 
 	rc = rf_mutex_init(&configureMutex);
 	if (rc) {
@@ -207,9 +209,6 @@ rf_UnbootRaidframe()
 		    __LINE__, rc);
 		RF_PANIC();
 	}
-#if RF_DEBUG_ATOMIC > 0
-	rf_atent_shutdown();
-#endif				/* RF_DEBUG_ATOMIC > 0 */
 	return (0);
 }
 /*
@@ -229,7 +228,6 @@ rf_UnconfigureArray()
 		if (rc) {
 			RF_ERRORMSG1("RAIDFRAME: unable to do global shutdown, rc=%d\n", rc);
 		}
-		rf_shutdown_threadid();
 
 		/*
 	         * We must wait until now, because the AllocList module
@@ -247,10 +245,6 @@ int
 rf_Shutdown(raidPtr)
 	RF_Raid_t *raidPtr;
 {
-	int     r, c;
-
-	struct proc *p;
-
 	if (!raidPtr->valid) {
 		RF_ERRORMSG("Attempt to shut down unconfigured RAIDframe driver.  Aborting shutdown\n");
 		return (EINVAL);
@@ -276,17 +270,36 @@ rf_Shutdown(raidPtr)
 
 	raidPtr->valid = 0;
 
+	rf_update_component_labels(raidPtr);
+
+	rf_UnconfigureVnodes(raidPtr);
+
+	rf_ShutdownList(&raidPtr->shutdownList);
+
+	rf_UnconfigureArray();
+
+	return (0);
+}
+
+void
+rf_UnconfigureVnodes( raidPtr )
+	RF_Raid_t *raidPtr;
+{
+	int r,c; 
+	struct proc *p;
 
 	/* We take this opportunity to close the vnodes like we should.. */
 
-	p = raidPtr->proc;	/* XXX */
+	p = raidPtr->engine_thread;
 
 	for (r = 0; r < raidPtr->numRow; r++) {
 		for (c = 0; c < raidPtr->numCol; c++) {
 			printf("Closing vnode for row: %d col: %d\n", r, c);
 			if (raidPtr->raid_cinfo[r][c].ci_vp) {
-				(void) vn_close(raidPtr->raid_cinfo[r][c].ci_vp,
-				    FREAD | FWRITE, p->p_ucred, p);
+				VOP_UNLOCK(raidPtr->raid_cinfo[r][c].ci_vp, 0, p);
+ 				(void) vn_close(raidPtr->raid_cinfo[r][c].ci_vp,
+ 				    FREAD | FWRITE, p->p_ucred, p);
+				raidPtr->raid_cinfo[r][c].ci_vp = NULL;
 			} else {
 				printf("vnode was NULL\n");
 			}
@@ -296,20 +309,14 @@ rf_Shutdown(raidPtr)
 	for (r = 0; r < raidPtr->numSpare; r++) {
 		printf("Closing vnode for spare: %d\n", r);
 		if (raidPtr->raid_cinfo[0][raidPtr->numCol + r].ci_vp) {
+			VOP_UNLOCK(raidPtr->raid_cinfo[0][raidPtr->numCol + r].ci_vp, 0, p);
 			(void) vn_close(raidPtr->raid_cinfo[0][raidPtr->numCol + r].ci_vp,
 			    FREAD | FWRITE, p->p_ucred, p);
+			raidPtr->raid_cinfo[0][raidPtr->numCol + r].ci_vp = NULL;
 		} else {
 			printf("vnode was NULL\n");
 		}
 	}
-
-
-
-	rf_ShutdownList(&raidPtr->shutdownList);
-
-	rf_UnconfigureArray();
-
-	return (0);
 }
 
 #define DO_INIT_CONFIGURE(f) { \
@@ -324,6 +331,7 @@ rf_Shutdown(raidPtr)
 }
 
 #define DO_RAID_FAIL() { \
+	rf_UnconfigureVnodes(raidPtr); \
 	rf_ShutdownList(&raidPtr->shutdownList); \
 	rf_UnconfigureArray(); \
 }
@@ -365,7 +373,6 @@ rf_Configure(raidPtr, cfgPtr)
 	RF_RowCol_t row, col;
 	int     i, rc;
 	int     unit;
-	struct proc *p;
 
 	if (raidPtr->valid) {
 		RF_ERRORMSG("RAIDframe configuration not shut down.  Aborting configure.\n");
@@ -387,7 +394,6 @@ rf_Configure(raidPtr, cfgPtr)
 		rf_clear_debug_print_buffer();
 
 		DO_INIT_CONFIGURE(rf_ConfigureAllocList);
-		DO_INIT_CONFIGURE(rf_ConfigureEtimer);
 		/*
 	         * Yes, this does make debugging general to the whole system instead
 	         * of being array specific. Bummer, drag.
@@ -403,16 +409,12 @@ rf_Configure(raidPtr, cfgPtr)
 		DO_INIT_CONFIGURE(rf_ConfigureNWayXor);
 		DO_INIT_CONFIGURE(rf_ConfigureStripeLockFreeList);
 		DO_INIT_CONFIGURE(rf_ConfigureMCPair);
-#if !defined(__NetBSD__) && !defined(__OpenBSD__)
-		DO_INIT_CONFIGURE(rf_ConfigureCamLayer);
-#endif
 		DO_INIT_CONFIGURE(rf_ConfigureDAGs);
 		DO_INIT_CONFIGURE(rf_ConfigureDAGFuncs);
 		DO_INIT_CONFIGURE(rf_ConfigureDebugPrint);
 		DO_INIT_CONFIGURE(rf_ConfigureReconstruction);
 		DO_INIT_CONFIGURE(rf_ConfigureCopyback);
 		DO_INIT_CONFIGURE(rf_ConfigureDiskQueueSystem);
-		DO_INIT_CONFIGURE(rf_ConfigureCpuMonitor);
 		isconfigged = 1;
 	}
 	RF_UNLOCK_MUTEX(configureMutex);
@@ -424,10 +426,8 @@ rf_Configure(raidPtr, cfgPtr)
 	/* XXX this clearing should be moved UP to outside of here.... that,
 	 * or rf_Configure() needs to take more arguments... XXX */
 	unit = raidPtr->raidid;
-	p = raidPtr->proc;	/* XXX save these... */
 	bzero((char *) raidPtr, sizeof(RF_Raid_t));
 	raidPtr->raidid = unit;
-	raidPtr->proc = p;	/* XXX and then recover them.. */
 	DO_RAID_MUTEX(&raidPtr->mutex);
 	/* set up the cleanup list.  Do this after ConfigureDebug so that
 	 * value of memDebug will be set */
@@ -627,7 +627,6 @@ rf_AllocRaidAccDesc(
 	desc->numPending = 0;
 	desc->cleanupList = NULL;
 	rf_MakeAllocList(desc->cleanupList);
-	rf_get_threadid(desc->tid);
 	return (desc);
 }
 
@@ -673,41 +672,24 @@ async_flag should be RF_TRUE or RF_FALSE
 bp_in is a buf pointer.  void * to facilitate ignoring it outside the kernel
 */
 {
-	int     tid;
 	RF_RaidAccessDesc_t *desc;
 	caddr_t lbufPtr = bufPtr;
 	struct buf *bp = (struct buf *) bp_in;
-#if DFSTRACE > 0
-	struct {
-		RF_uint64 raidAddr;
-		int     numBlocks;
-		char    type;
-	}       dfsrecord;
-#endif				/* DFSTRACE > 0 */
 
 	raidAddress += rf_raidSectorOffset;
 
 	if (!raidPtr->valid) {
 		RF_ERRORMSG("RAIDframe driver not successfully configured.  Rejecting access.\n");
-		IO_BUF_ERR(bp, EINVAL, raidPtr->raidid);
+		IO_BUF_ERR(bp, EINVAL);
 		return (EINVAL);
 	}
-#if defined(KERNEL) && DFSTRACE > 0
-	if (rf_DFSTraceAccesses) {
-		dfsrecord.raidAddr = raidAddress;
-		dfsrecord.numBlocks = numBlocks;
-		dfsrecord.type = type;
-		dfs_log(DFS_NOTE, (char *) &dfsrecord, sizeof(dfsrecord), 0);
-	}
-#endif				/* KERNEL && DFSTRACE > 0 */
 
-	rf_get_threadid(tid);
 	if (rf_accessDebug) {
 
 		printf("logBytes is: %d %d %d\n", raidPtr->raidid,
 		    raidPtr->logBytesPerSector,
 		    (int) rf_RaidAddressToByte(raidPtr, numBlocks));
-		printf("[%d] %s raidAddr %d (stripeid %d-%d) numBlocks %d (%d bytes) buf 0x%lx\n", tid,
+		printf("raid%d: %s raidAddr %d (stripeid %d-%d) numBlocks %d (%d bytes) buf 0x%lx\n", raidPtr->raidid,
 		    (type == RF_IO_TYPE_READ) ? "READ" : "WRITE", (int) raidAddress,
 		    (int) rf_RaidAddressToStripeID(&raidPtr->Layout, raidAddress),
 		    (int) rf_RaidAddressToStripeID(&raidPtr->Layout, raidAddress + numBlocks - 1),
@@ -720,13 +702,8 @@ bp_in is a buf pointer.  void * to facilitate ignoring it outside the kernel
 		printf("DoAccess: raid addr %lu too large to access %lu sectors.  Max legal addr is %lu\n",
 		    (u_long) raidAddress, (u_long) numBlocks, (u_long) raidPtr->totalSectors);
 
-		if (type == RF_IO_TYPE_READ) {
-			IO_BUF_ERR(bp, ENOSPC, raidPtr->raidid);
+			IO_BUF_ERR(bp, ENOSPC);
 			return (ENOSPC);
-		} else {
-			IO_BUF_ERR(bp, ENOSPC, raidPtr->raidid);
-			return (ENOSPC);
-		}
 	}
 	desc = rf_AllocRaidAccDesc(raidPtr, type, raidAddress,
 	    numBlocks, lbufPtr, bp, paramDAG, paramASM,
@@ -776,10 +753,7 @@ rf_FailDisk(
     int fcol,
     int initRecon)
 {
-	int     tid;
-
-	rf_get_threadid(tid);
-	printf("[%d] Failing disk r%d c%d\n", tid, frow, fcol);
+	printf("raid%d: Failing disk r%d c%d\n", raidPtr->raidid, frow, fcol);
 	RF_LOCK_MUTEX(raidPtr->mutex);
 	raidPtr->numFailures++;
 	raidPtr->Disks[frow][fcol].status = rf_ds_failed;
@@ -797,11 +771,9 @@ rf_SignalQuiescenceLock(raidPtr, reconDesc)
 	RF_Raid_t *raidPtr;
 	RF_RaidReconDesc_t *reconDesc;
 {
-	int     tid;
-
 	if (rf_quiesceDebug) {
-		rf_get_threadid(tid);
-		printf("[%d] Signalling quiescence lock\n", tid);
+		printf("raid%d: Signalling quiescence lock\n", 
+		       raidPtr->raidid);
 	}
 	raidPtr->access_suspend_release = 1;
 
@@ -910,8 +882,6 @@ rf_ConfigureDebug(cfgPtr)
 }
 /* performance monitoring stuff */
 
-#define TIMEVAL_TO_US(t) (((long) t.tv_sec) * 1000000L + (long) t.tv_usec)
-
 #if !defined(_KERNEL) && !defined(SIMULATE)
 
 /*
@@ -960,7 +930,7 @@ rf_StopThroughputStats(RF_Raid_t * raidPtr)
 	if (raidPtr->throughputstats.num_out_ios == 0) {
 		RF_GETTIME(raidPtr->throughputstats.stop);
 		RF_TIMEVAL_DIFF(&raidPtr->throughputstats.start, &raidPtr->throughputstats.stop, &diff);
-		raidPtr->throughputstats.sum_io_us += TIMEVAL_TO_US(diff);
+		raidPtr->throughputstats.sum_io_us += RF_TIMEVAL_TO_US(diff);
 	}
 	RF_UNLOCK_MUTEX(raidPtr->throughputstats.mutex);
 }
@@ -974,7 +944,7 @@ rf_PrintThroughputStats(RF_Raid_t * raidPtr)
 		    / (raidPtr->throughputstats.sum_io_us / 1000000.0));
 	}
 }
-#endif				/* !KERNEL && !SIMULATE */
+#endif				/* !_KERNEL && !SIMULATE */
 
 void 
 rf_StartUserStats(RF_Raid_t * raidPtr)
@@ -1009,7 +979,7 @@ rf_PrintUserStats(RF_Raid_t * raidPtr)
 	struct timeval diff;
 
 	RF_TIMEVAL_DIFF(&raidPtr->userstats.start, &raidPtr->userstats.stop, &diff);
-	elapsed_us = TIMEVAL_TO_US(diff);
+	elapsed_us = RF_TIMEVAL_TO_US(diff);
 
 	/* 2000 sectors per megabyte, 10000000 microseconds per second */
 	if (elapsed_us)

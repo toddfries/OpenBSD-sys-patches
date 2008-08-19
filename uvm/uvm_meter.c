@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_meter.c,v 1.2 1999/02/26 05:32:07 art Exp $	*/
-/*	$NetBSD: uvm_meter.c,v 1.7 1998/08/09 22:36:39 perry Exp $	*/
+/*	$NetBSD: uvm_meter.c,v 1.8 1999/03/25 18:48:53 mrg Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!   
- *         >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /*
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -52,6 +47,11 @@
 #include <vm/vm.h>
 #include <sys/sysctl.h>
 #include <sys/exec.h>
+
+#ifdef UVM_SWAP_ENCRYPT
+#include <uvm/uvm_swap.h>
+#include <uvm/uvm_swap_encrypt.h>
+#endif
 
 /*
  * maxslp: ???? XXXCDC
@@ -153,7 +153,25 @@ uvm_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	case VM_PSSTRINGS:
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &_ps,
 		    sizeof(_ps)));
+#ifdef UVM_SWAP_ENCRYPT
+	case VM_SWAPENCRYPT: {
+		int doencrypt = uvm_doswapencrypt;
+		int result;
 
+		result = sysctl_int(oldp, oldlenp, newp, newlen, &doencrypt);
+		if (result)
+			return result;
+
+		/* Swap Encryption has been turned on, we need to
+		 * initalize state for swap devices that have been
+		 * added 
+		 */
+		if (doencrypt)
+			uvm_swap_initcrypt_all();
+		uvm_doswapencrypt = doencrypt;
+		return (0);
+	}
+#endif
 	default:
 		return (EOPNOTSUPP);
 	}

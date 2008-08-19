@@ -1,10 +1,5 @@
-/*	$OpenBSD: uvm_device.h,v 1.2 1999/02/26 05:32:06 art Exp $	*/
-/*	$NetBSD: uvm_device.h,v 1.5 1998/03/09 00:58:56 mrg Exp $	*/
+/*	$NetBSD: uvm_device.h,v 1.7 1999/03/25 18:48:50 mrg Exp $	*/
 
-/*
- * XXXCDC: "ROUGH DRAFT" QUALITY UVM PRE-RELEASE FILE!   
- *	   >>>USE AT YOUR OWN RISK, WORK IS NOT FINISHED<<<
- */
 /*
  *
  * Copyright (c) 1997 Charles D. Cranor and Washington University.
@@ -72,6 +67,6 @@ struct uvm_device {
  * prototypes
  */
 
-struct uvm_object *udv_attach __P((void *, vm_prot_t));
+struct uvm_object *udv_attach __P((void *, vm_prot_t, vaddr_t, vsize_t));
 
 #endif /* _UVM_UVM_DEVICE_H_ */
