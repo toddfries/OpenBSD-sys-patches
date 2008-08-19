@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.56 2002/12/09 02:35:21 art Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.62.2.1 2004/06/01 02:54:56 brad Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -78,6 +78,8 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/kernel.h>
+
+#include <dev/rndvar.h>
 
 #ifdef SYSVSHM
 #include <sys/shm.h>
@@ -319,7 +321,7 @@ _uvm_tree_sanity(vm_map_t map, const char *name)
 			goto error;
 		}
 		if (trtmp != NULL && trtmp->start >= tmp->start) {
-			printf("%s: corrupt: %p >= %p\n",
+			printf("%s: corrupt: 0x%lx >= 0x%lx\n",
 			    name, trtmp->start, tmp->start);
 			goto error;
 		}
@@ -1069,6 +1071,34 @@ uvm_map_spacefits(vm_map_t map, vaddr_t *phint, vsize_t length,
 		return (FALSE);
 	
 	return (TRUE);
+}
+
+/*
+ * uvm_map_hint: return the beginning of the best area suitable for
+ * creating a new mapping with "prot" protection.
+ */
+vaddr_t
+uvm_map_hint(struct proc *p, vm_prot_t prot)
+{
+	vaddr_t addr;
+
+#ifdef __i386__
+	/*
+	 * If executable skip first two pages, otherwise start
+	 * after data + heap region.
+	 */
+	if ((prot & VM_PROT_EXECUTE) &&
+	    ((vaddr_t)p->p_vmspace->vm_daddr >= I386_MAX_EXE_ADDR)) {
+		addr = (PAGE_SIZE*2) +
+		    (arc4random() & (I386_MAX_EXE_ADDR / 2 - 1));
+		return (round_page(addr));
+	}
+#endif
+	addr = (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ;
+#if 0
+	addr += arc4random() & (256 * 1024 * 1024 - 1);
+#endif
+	return (round_page(addr));
 }
 
 /*
@@ -2999,11 +3029,18 @@ uvm_map_clean(map, start, end, flags)
  flush_object:
 		/*
 		 * flush pages if we've got a valid backing object.
+		 *
+		 * Don't PGO_FREE if we don't have write permission
+	 	 * and don't flush if this is a copy-on-write object
+		 * since we can't know our permissions on it.
 		 */
 
 		offset = current->offset + (start - current->start);
 		size = MIN(end, current->end) - start;
-		if (uobj != NULL) {
+		if (uobj != NULL &&
+		    ((flags & PGO_FREE) == 0 ||
+		     ((entry->max_protection & VM_PROT_WRITE) != 0 &&
+		      (entry->etype & UVM_ET_COPYONWRITE) == 0))) {
 			simple_lock(&uobj->vmobjlock);
 			rv = uobj->pgops->pgo_flush(uobj, offset,
 			    offset + size, flags);
@@ -3587,7 +3624,6 @@ uvmspace_fork(vm1)
 	UVMHIST_LOG(maphist,"<- done",0,0,0,0);
 	return(vm2);    
 }
-
 
 #if defined(DDB)
 

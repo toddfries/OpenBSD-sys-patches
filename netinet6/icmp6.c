@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.65 2002/10/12 01:09:45 krw Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.74 2003/08/07 09:11:24 itojun Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -42,11 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -288,15 +284,11 @@ icmp6_error(m, type, code, param)
 	/* count per-type-code statistics */
 	icmp6_errcount(&icmp6stat.icp6s_outerrhist, type, code);
 
-#ifndef PULLDOWN_TEST
-	IP6_EXTHDR_CHECK(m, 0, sizeof(struct ip6_hdr), );
-#else
 	if (m->m_len < sizeof(struct ip6_hdr)) {
 		m = m_pullup(m, sizeof(struct ip6_hdr));
 		if (m == NULL)
 			return;
 	}
-#endif
 	oip6 = mtod(m, struct ip6_hdr *);
 
 	/*
@@ -334,17 +326,12 @@ icmp6_error(m, type, code, param)
 	if (off >= 0 && nxt == IPPROTO_ICMPV6) {
 		struct icmp6_hdr *icp;
 
-#ifndef PULLDOWN_TEST
-		IP6_EXTHDR_CHECK(m, 0, off + sizeof(struct icmp6_hdr), );
-		icp = (struct icmp6_hdr *)(mtod(m, caddr_t) + off);
-#else
 		IP6_EXTHDR_GET(icp, struct icmp6_hdr *, m, off,
 			sizeof(*icp));
 		if (icp == NULL) {
 			icmp6stat.icp6s_tooshort++;
 			return;
 		}
-#endif
 		if (icp->icmp6_type < ICMP6_ECHO_REQUEST ||
 		    icp->icmp6_type == ND_REDIRECT) {
 			/*
@@ -438,11 +425,6 @@ icmp6_input(mp, offp, proto)
 
 	icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_msg);
 
-#ifndef PULLDOWN_TEST
-	IP6_EXTHDR_CHECK(m, off, sizeof(struct icmp6_hdr), IPPROTO_DONE);
-	/* m might change if M_LOOP.  So, call mtod after this */
-#endif
-
 	/*
 	 * Locate icmp6 structure in mbuf, and check
 	 * that not corrupted and of at least minimum length
@@ -458,16 +440,12 @@ icmp6_input(mp, offp, proto)
 	/*
 	 * calculate the checksum
 	 */
-#ifndef PULLDOWN_TEST
-	icmp6 = (struct icmp6_hdr *)((caddr_t)ip6 + off);
-#else
 	IP6_EXTHDR_GET(icmp6, struct icmp6_hdr *, m, off, sizeof(*icmp6));
 	if (icmp6 == NULL) {
 		icmp6stat.icp6s_tooshort++;
 		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_error);
 		return IPPROTO_DONE;
 	}
-#endif
 	code = icmp6->icmp6_code;
 
 	if ((sum = in6_cksum(m, IPPROTO_ICMPV6, off, icmp6len)) != 0) {
@@ -530,7 +508,6 @@ icmp6_input(mp, offp, proto)
 			goto badcode;
 		}
 		goto deliver;
-		break;
 
 	case ICMP6_PACKET_TOO_BIG:
 		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_pkttoobig);
@@ -544,7 +521,6 @@ icmp6_input(mp, offp, proto)
 		 * intermediate extension headers.
 		 */
 		goto deliver;
-		break;
 
 	case ICMP6_TIME_EXCEEDED:
 		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_timeexceed);
@@ -559,7 +535,6 @@ icmp6_input(mp, offp, proto)
 			goto badcode;
 		}
 		goto deliver;
-		break;
 
 	case ICMP6_PARAM_PROB:
 		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_paramprob);
@@ -575,7 +550,6 @@ icmp6_input(mp, offp, proto)
 			goto badcode;
 		}
 		goto deliver;
-		break;
 
 	case ICMP6_ECHO_REQUEST:
 		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_echo);
@@ -668,11 +642,11 @@ icmp6_input(mp, offp, proto)
 			goto badcode;
 		break;
 
-	case MLD6_LISTENER_QUERY:
-	case MLD6_LISTENER_REPORT:
-		if (icmp6len < sizeof(struct mld6_hdr))
+	case MLD_LISTENER_QUERY:
+	case MLD_LISTENER_REPORT:
+		if (icmp6len < sizeof(struct mld_hdr))
 			goto badlen;
-		if (icmp6->icmp6_type == MLD6_LISTENER_QUERY) /* XXX: ugly... */
+		if (icmp6->icmp6_type == MLD_LISTENER_QUERY) /* XXX: ugly... */
 			icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_mldquery);
 		else
 			icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_mldreport);
@@ -686,14 +660,14 @@ icmp6_input(mp, offp, proto)
 		/* m stays. */
 		break;
 
-	case MLD6_LISTENER_DONE:
+	case MLD_LISTENER_DONE:
 		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_mlddone);
-		if (icmp6len < sizeof(struct mld6_hdr))	/* necessary? */
+		if (icmp6len < sizeof(struct mld_hdr))	/* necessary? */
 			goto badlen;
 		break;		/* nothing to be done in kernel */
 
-	case MLD6_MTRACE_RESP:
-	case MLD6_MTRACE:
+	case MLD_MTRACE_RESP:
+	case MLD_MTRACE:
 		/* XXX: these two are experimental.  not officially defined. */
 		/* XXX: per-interface statistics? */
 		break;		/* just pass it to applications */
@@ -713,10 +687,6 @@ icmp6_input(mp, offp, proto)
 			goto badlen;
 
 		if (mode == FQDN) {
-#ifndef PULLDOWN_TEST
-			IP6_EXTHDR_CHECK(m, off, sizeof(struct icmp6_nodeinfo),
-					 IPPROTO_DONE);
-#endif
 			n = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
 			if (n)
 				n = ni6_input(n, off);
@@ -926,19 +896,12 @@ icmp6_notify_error(m, off, icmp6len, code)
 		icmp6stat.icp6s_tooshort++;
 		goto freeit;
 	}
-#ifndef PULLDOWN_TEST
-	IP6_EXTHDR_CHECK(m, off,
-			 sizeof(struct icmp6_hdr) + sizeof(struct ip6_hdr),
-			 -1);
-	icmp6 = (struct icmp6_hdr *)(mtod(m, caddr_t) + off);
-#else
 	IP6_EXTHDR_GET(icmp6, struct icmp6_hdr *, m, off,
 		       sizeof(*icmp6) + sizeof(struct ip6_hdr));
 	if (icmp6 == NULL) {
 		icmp6stat.icp6s_tooshort++;
 		return (-1);
 	}
-#endif
 	eip6 = (struct ip6_hdr *)(icmp6 + 1);
 
 	/* Detect the upper level protocol */
@@ -962,20 +925,12 @@ icmp6_notify_error(m, off, icmp6len, code)
 			case IPPROTO_HOPOPTS:
 			case IPPROTO_DSTOPTS:
 			case IPPROTO_AH:
-#ifndef PULLDOWN_TEST
-				IP6_EXTHDR_CHECK(m, 0, eoff +
-						 sizeof(struct ip6_ext),
-						 -1);
-				eh = (struct ip6_ext *)(mtod(m, caddr_t)
-							+ eoff);
-#else
 				IP6_EXTHDR_GET(eh, struct ip6_ext *, m,
 					       eoff, sizeof(*eh));
 				if (eh == NULL) {
 					icmp6stat.icp6s_tooshort++;
 					return (-1);
 				}
-#endif
 
 				if (nxt == IPPROTO_AH)
 					eoff += (eh->ip6e_len + 2) << 2;
@@ -992,19 +947,12 @@ icmp6_notify_error(m, off, icmp6len, code)
 				 * information that depends on the final
 				 * destination (e.g. path MTU).
 				 */
-#ifndef PULLDOWN_TEST
-				IP6_EXTHDR_CHECK(m, 0, eoff + sizeof(*rth),
-						 -1);
-				rth = (struct ip6_rthdr *)(mtod(m, caddr_t)
-							   + eoff);
-#else
 				IP6_EXTHDR_GET(rth, struct ip6_rthdr *, m,
 					       eoff, sizeof(*rth));
 				if (rth == NULL) {
 					icmp6stat.icp6s_tooshort++;
 					return (-1);
 				}
-#endif
 				rthlen = (rth->ip6r_len + 1) << 3;
 				/*
 				 * XXX: currently there is no
@@ -1018,11 +966,6 @@ icmp6_notify_error(m, off, icmp6len, code)
 				    rth->ip6r_type == IPV6_RTHDR_TYPE_0) {
 					int hops;
 
-#ifndef PULLDOWN_TEST
-					IP6_EXTHDR_CHECK(m, 0, eoff + rthlen,
-							 -1);
-					rth0 = (struct ip6_rthdr0 *)(mtod(m, caddr_t) + eoff);
-#else
 					IP6_EXTHDR_GET(rth0,
 						       struct ip6_rthdr0 *, m,
 						       eoff, rthlen);
@@ -1030,7 +973,6 @@ icmp6_notify_error(m, off, icmp6len, code)
 						icmp6stat.icp6s_tooshort++;
 						return (-1);
 					}
-#endif
 					/* just ignore a bogus header */
 					if ((rth0->ip6r0_len % 2) == 0 &&
 					    (hops = rth0->ip6r0_len/2))
@@ -1040,20 +982,12 @@ icmp6_notify_error(m, off, icmp6len, code)
 				nxt = rth->ip6r_nxt;
 				break;
 			case IPPROTO_FRAGMENT:
-#ifndef PULLDOWN_TEST
-				IP6_EXTHDR_CHECK(m, 0, eoff +
-						 sizeof(struct ip6_frag),
-						 -1);
-				fh = (struct ip6_frag *)(mtod(m, caddr_t)
-							 + eoff);
-#else
 				IP6_EXTHDR_GET(fh, struct ip6_frag *, m,
 					       eoff, sizeof(*fh));
 				if (fh == NULL) {
 					icmp6stat.icp6s_tooshort++;
 					return (-1);
 				}
-#endif
 				/*
 				 * Data after a fragment header is meaningless
 				 * unless it is the first fragment, but
@@ -1079,16 +1013,12 @@ icmp6_notify_error(m, off, icmp6len, code)
 			}
 		}
 	  notify:
-#ifndef PULLDOWN_TEST
-		icmp6 = (struct icmp6_hdr *)(mtod(m, caddr_t) + off);
-#else
 		IP6_EXTHDR_GET(icmp6, struct icmp6_hdr *, m, off,
 			       sizeof(*icmp6) + sizeof(struct ip6_hdr));
 		if (icmp6 == NULL) {
 			icmp6stat.icp6s_tooshort++;
 			return (-1);
 		}
-#endif
 
 		eip6 = (struct ip6_hdr *)(icmp6 + 1);
 		bzero(&icmp6dst, sizeof(icmp6dst));
@@ -1260,15 +1190,11 @@ ni6_input(m, off)
 	char *subj = NULL;
 
 	ip6 = mtod(m, struct ip6_hdr *);
-#ifndef PULLDOWN_TEST
-	ni6 = (struct icmp6_nodeinfo *)(mtod(m, caddr_t) + off);
-#else
 	IP6_EXTHDR_GET(ni6, struct icmp6_nodeinfo *, m, off, sizeof(*ni6));
 	if (ni6 == NULL) {
 		/* m is already reclaimed */
 		return NULL;
 	}
-#endif
 
 	/*
 	 * Validate IPv6 destination address.
@@ -1827,7 +1753,6 @@ ni6_store_addrs(ni6, nni6, ifp0, resid)
 	u_char *cp = (u_char *)(nni6 + 1);
 	int niflags = ni6->ni_flags;
 	u_int32_t ltime;
-	long time_second = time.tv_sec;
 
 	if (ifp0 == NULL && !(niflags & NI_NODEADDR_FLAG_ALL))
 		return (0);	/* needless to copy */
@@ -1919,8 +1844,8 @@ ni6_store_addrs(ni6, nni6, ifp0, resid)
 				ltime = ND6_INFINITE_LIFETIME;
 			else {
 				if (ifa6->ia6_lifetime.ia6t_expire >
-				    time_second)
-					ltime = htonl(ifa6->ia6_lifetime.ia6t_expire - time_second);
+				    time.tv_sec)
+					ltime = htonl(ifa6->ia6_lifetime.ia6t_expire - time.tv_sec);
 				else
 					ltime = 0;
 			}
@@ -1970,16 +1895,11 @@ icmp6_rip6_input(mp, off)
 	struct icmp6_hdr *icmp6;
 	struct mbuf *opts = NULL;
 
-#ifndef PULLDOWN_TEST
-	/* this is assumed to be safe. */
-	icmp6 = (struct icmp6_hdr *)((caddr_t)ip6 + off);
-#else
 	IP6_EXTHDR_GET(icmp6, struct icmp6_hdr *, m, off, sizeof(*icmp6));
 	if (icmp6 == NULL) {
 		/* m is already reclaimed */
 		return IPPROTO_DONE;
 	}
-#endif
 
 	bzero(&rip6src, sizeof(rip6src));
 	rip6src.sin6_len = sizeof(struct sockaddr_in6);
@@ -2278,16 +2198,11 @@ icmp6_redirect_input(m, off)
 	if (!icmp6_rediraccept)
 		goto freeit;
 
-#ifndef PULLDOWN_TEST
-	IP6_EXTHDR_CHECK(m, off, icmp6len,);
-	nd_rd = (struct nd_redirect *)((caddr_t)ip6 + off);
-#else
 	IP6_EXTHDR_GET(nd_rd, struct nd_redirect *, m, off, icmp6len);
 	if (nd_rd == NULL) {
 		icmp6stat.icp6s_tooshort++;
 		return;
 	}
-#endif
 	redtgt6 = nd_rd->nd_rd_target;
 	reddst6 = nd_rd->nd_rd_dst;
 
@@ -2490,7 +2405,7 @@ icmp6_redirect_output(m0, rt)
 	icmp6_errcount(&icmp6stat.icp6s_outerrhist, ND_REDIRECT, 0);
 
 	/* if we are not router, we don't send icmp6 redirect */
-	if (!ip6_forwarding || ip6_accept_rtadv)
+	if (!ip6_forwarding)
 		goto fail;
 
 	/* sanity check */
@@ -2638,76 +2553,65 @@ icmp6_redirect_output(m0, rt)
 	if (p - (u_char *)ip6 > maxlen)
 		goto noredhdropt;
 
-    {
-	/* redirected header option */
-	int len;
-	struct nd_opt_rd_hdr *nd_opt_rh;
+	{
+		/* redirected header option */
+		int len;
+		struct nd_opt_rd_hdr *nd_opt_rh;
 
-	/*
-	 * compute the maximum size for icmp6 redirect header option.
-	 * XXX room for auth header?
-	 */
-	len = maxlen - (p - (u_char *)ip6);
-	len &= ~7;
+		/*
+		 * compute the maximum size for icmp6 redirect header option.
+		 * XXX room for auth header?
+		 */
+		len = maxlen - (p - (u_char *)ip6);
+		len &= ~7;
 
-	/* This is just for simplicity. */
-	if (m0->m_pkthdr.len != m0->m_len) {
-		if (m0->m_next) {
-			m_freem(m0->m_next);
-			m0->m_next = NULL;
-		}
-		m0->m_pkthdr.len = m0->m_len;
-	}
+		/*
+		 * Redirected header option spec (RFC2461 4.6.3) talks nothing
+		 * about padding/truncate rule for the original IP packet.
+		 * From the discussion on IPv6imp in Feb 1999,
+		 * the consensus was:
+		 * - "attach as much as possible" is the goal
+		 * - pad if not aligned (original size can be guessed by
+		 *   original ip6 header)
+		 * Following code adds the padding if it is simple enough,
+		 * and truncates if not.
+		 */
+		if (len - sizeof(*nd_opt_rh) < m0->m_pkthdr.len) {
+			/* not enough room, truncate */
+			m_adj(m0, (len - sizeof(*nd_opt_rh)) -
+			    m0->m_pkthdr.len);
+		} else {
+			/*
+			 * enough room, truncate if not aligned.
+			 * we don't pad here for simplicity.
+			 */
+			size_t extra;
 
-	/*
-	 * Redirected header option spec (RFC2461 4.6.3) talks nothing
-	 * about padding/truncate rule for the original IP packet.
-	 * From the discussion on IPv6imp in Feb 1999, the consensus was:
-	 * - "attach as much as possible" is the goal
-	 * - pad if not aligned (original size can be guessed by original
-	 *   ip6 header)
-	 * Following code adds the padding if it is simple enough,
-	 * and truncates if not.
-	 */
-	if (m0->m_next || m0->m_pkthdr.len != m0->m_len)
-		panic("assumption failed in %s:%d", __FILE__, __LINE__);
-
-	if (len - sizeof(*nd_opt_rh) < m0->m_pkthdr.len) {
-		/* not enough room, truncate */
-		m0->m_pkthdr.len = m0->m_len = len - sizeof(*nd_opt_rh);
-	} else {
-		/* enough room, pad or truncate */
-		size_t extra;
-
-		extra = m0->m_pkthdr.len % 8;
-		if (extra) {
-			/* pad if easy enough, truncate if not */
-			if (8 - extra <= M_TRAILINGSPACE(m0)) {
-				/* pad */
-				m0->m_len += (8 - extra);
-				m0->m_pkthdr.len += (8 - extra);
-			} else {
+			extra = m0->m_pkthdr.len % 8;
+			if (extra) {
 				/* truncate */
-				m0->m_pkthdr.len -= extra;
-				m0->m_len -= extra;
+				m_adj(m0, -extra);
 			}
+			len = m0->m_pkthdr.len + sizeof(*nd_opt_rh);
 		}
-		len = m0->m_pkthdr.len + sizeof(*nd_opt_rh);
-		m0->m_pkthdr.len = m0->m_len = len - sizeof(*nd_opt_rh);
+
+		nd_opt_rh = (struct nd_opt_rd_hdr *)p;
+		bzero(nd_opt_rh, sizeof(*nd_opt_rh));
+		nd_opt_rh->nd_opt_rh_type = ND_OPT_REDIRECTED_HEADER;
+		nd_opt_rh->nd_opt_rh_len = len >> 3;
+		p += sizeof(*nd_opt_rh);
+		m->m_pkthdr.len = m->m_len = p - (u_char *)ip6;
+
+		/* connect m0 to m */
+		m->m_pkthdr.len += m0->m_pkthdr.len;
+		m_cat(m, m0);
+		m0 = NULL;
 	}
-
-	nd_opt_rh = (struct nd_opt_rd_hdr *)p;
-	bzero(nd_opt_rh, sizeof(*nd_opt_rh));
-	nd_opt_rh->nd_opt_rh_type = ND_OPT_REDIRECTED_HEADER;
-	nd_opt_rh->nd_opt_rh_len = len >> 3;
-	p += sizeof(*nd_opt_rh);
-	m->m_pkthdr.len = m->m_len = p - (u_char *)ip6;
-
-	/* connect m0 to m */
-	m->m_next = m0;
-	m->m_pkthdr.len = m->m_len + m0->m_len;
-    }
-noredhdropt:;
+noredhdropt:
+	if (m0) {
+		m_freem(m0);
+		m0 = NULL;
+	}
 
 	if (IN6_IS_ADDR_LINKLOCAL(&sip6->ip6_src))
 		sip6->ip6_src.s6_addr16[1] = 0;

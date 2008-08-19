@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.32 2002/09/12 01:11:54 itojun Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.35 2003/07/08 10:23:32 itojun Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -53,6 +53,7 @@
 #include <netinet6/in6_ifattach.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/nd6.h>
+#include <netinet6/ip6_mroute.h>
 
 unsigned long in6_maxmtu = 0;
 
@@ -218,9 +219,6 @@ found:
 		break;
 
 	case IFT_GIF:
-#ifdef IFT_STF
-	case IFT_STF:
-#endif
 		/*
 		 * RFC2893 says: "SHOULD use IPv4 address as ifid source".
 		 * however, IPv4 address is not very suitable as unique
@@ -577,6 +575,7 @@ in6_ifattach(ifp, altifp)
 	case IFT_BRIDGE:
 	case IFT_ENC:
 	case IFT_PFLOG:
+	case IFT_PFSYNC:
 		return;
 	case IFT_PROPVIRTUAL:
 		if (strncmp("bridge", ifp->if_xname, sizeof("bridge")) == 0 &&
@@ -605,16 +604,6 @@ in6_ifattach(ifp, altifp)
 	 * quirks based on interface type
 	 */
 	switch (ifp->if_type) {
-#ifdef IFT_STF
-	case IFT_STF:
-		/*
-		 * 6to4 interface is a very special kind of beast.
-		 * no multicast, no linklocal.  RFC2529 specifies how to make
-		 * linklocals for 6to4 interface, but there's no use and
-		 * it is rather harmful to have one.
-		 */
-		return;
-#endif
 	default:
 		break;
 	}
@@ -669,6 +658,9 @@ in6_ifdetach(ifp)
 	short rtflags;
 	struct sockaddr_in6 sin6;
 	struct in6_multi_mship *imm;
+
+	/* remove ip6_mrouter stuff */
+	ip6_mrouter_detach(ifp);
 
 	/* remove neighbor management table */
 	nd6_purge(ifp);

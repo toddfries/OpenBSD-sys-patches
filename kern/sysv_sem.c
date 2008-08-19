@@ -1,31 +1,24 @@
-/*	$OpenBSD: sysv_sem.c,v 1.16.2.3 2003/11/20 23:36:49 margarida Exp $	*/
+/*	$OpenBSD: sysv_sem.c,v 1.21.2.1 2003/11/20 23:51:12 brad Exp $	*/
 /*	$NetBSD: sysv_sem.c,v 1.26 1996/02/09 19:00:25 christos Exp $	*/
 
 /*
  * Copyright (c) 2002 Todd C. Miller <Todd.Miller@courtesan.com>
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
- * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 /*
  * Implementation of SVID semaphores
@@ -303,7 +296,7 @@ sys___semctl(struct proc *p, void *v, register_t *retval)
 		pool_put(&sema_pool, semaptr);
 		sema[semid] = NULL;
 		semundo_clear(semid, -1);
-		wakeup((caddr_t)&sema[semid]);
+		wakeup(&sema[semid]);
 		break;
 
 	case IPC_SET:
@@ -311,8 +304,7 @@ sys___semctl(struct proc *p, void *v, register_t *retval)
 			return (error);
 		if ((error = copyin(arg, &real_arg, sizeof(real_arg))) != 0)
 			return (error);
-		if ((error = copyin(real_arg.buf, (caddr_t)&sbuf,
-		    sizeof(sbuf))) != 0)
+		if ((error = copyin(real_arg.buf, &sbuf, sizeof(sbuf))) != 0)
 			return (error);
 		semaptr->sem_perm.uid = sbuf.sem_perm.uid;
 		semaptr->sem_perm.gid = sbuf.sem_perm.gid;
@@ -326,8 +318,7 @@ sys___semctl(struct proc *p, void *v, register_t *retval)
 			return (error);
 		if ((error = copyin(arg, &real_arg, sizeof(real_arg))) != 0)
 			return (error);
-		error = copyout((caddr_t)semaptr, real_arg.buf,
-		    sizeof(struct semid_ds));
+		error = copyout(semaptr, real_arg.buf, sizeof(struct semid_ds));
 		break;
 
 	case GETNCNT:
@@ -360,7 +351,7 @@ sys___semctl(struct proc *p, void *v, register_t *retval)
 		if ((error = copyin(arg, &real_arg, sizeof(real_arg))) != 0)
 			return (error);
 		for (i = 0; i < semaptr->sem_nsems; i++) {
-			error = copyout((caddr_t)&semaptr->sem_base[i].semval,
+			error = copyout(&semaptr->sem_base[i].semval,
 			    &real_arg.array[i], sizeof(real_arg.array[0]));
 			if (error != 0)
 				break;
@@ -384,7 +375,7 @@ sys___semctl(struct proc *p, void *v, register_t *retval)
 			return (error);
 		semaptr->sem_base[semnum].semval = real_arg.val;
 		semundo_clear(semid, semnum);
-		wakeup((caddr_t)&sema[semid]);
+		wakeup(&sema[semid]);
 		break;
 
 	case SETALL:
@@ -394,13 +385,13 @@ sys___semctl(struct proc *p, void *v, register_t *retval)
 			return (error);
 		for (i = 0; i < semaptr->sem_nsems; i++) {
 			error = copyin(&real_arg.array[i],
-			    (caddr_t)&semaptr->sem_base[i].semval,
+			    &semaptr->sem_base[i].semval,
 			    sizeof(real_arg.array[0]));
 			if (error != 0)
 				break;
 		}
 		semundo_clear(semid, -1);
-		wakeup((caddr_t)&sema[semid]);
+		wakeup(&sema[semid]);
 		break;
 
 	default:
@@ -651,7 +642,7 @@ sys_semop(struct proc *p, void *v, register_t *retval)
 			semptr->semncnt++;
 
 		DPRINTF(("semop:  good night!\n"));
-		error = tsleep((caddr_t)&sema[semid], PLOCK | PCATCH,
+		error = tsleep(&sema[semid], PLOCK | PCATCH,
 		    "semwait", 0);
 		DPRINTF(("semop:  good morning (error=%d)!\n", error));
 
@@ -745,7 +736,7 @@ done:
 	/* Do a wakeup if any semaphore was up'd. */
 	if (do_wakeup) {
 		DPRINTF(("semop:  doing wakeup\n"));
-		wakeup((caddr_t)&sema[semid]);
+		wakeup(&sema[semid]);
 		DPRINTF(("semop:  back from wakeup\n"));
 	}
 	DPRINTF(("semop:  done\n"));
@@ -818,7 +809,7 @@ semexit(struct proc *p)
 			else
 				semaptr->sem_base[semnum].semval += adjval;
 
-			wakeup((caddr_t)&sema[semid]);
+			wakeup(&sema[semid]);
 			DPRINTF(("semexit:  back from wakeup\n"));
 		}
 	}

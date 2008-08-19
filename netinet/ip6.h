@@ -1,5 +1,5 @@
-/*	$OpenBSD: ip6.h,v 1.9 2001/12/06 03:28:49 itojun Exp $	*/
-/*	$KAME: ip6.h,v 1.14 2000/10/09 01:04:09 itojun Exp $	*/
+/*	$OpenBSD: ip6.h,v 1.12 2003/06/11 04:42:01 itojun Exp $	*/
+/*	$KAME: ip6.h,v 1.45 2003/06/05 04:46:38 keiichi Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -42,11 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -141,8 +137,11 @@ struct ip6_dest {
 #define IP6OPT_PAD1		0x00	/* 00 0 00000 */
 #define IP6OPT_PADN		0x01	/* 00 0 00001 */
 #define IP6OPT_JUMBO		0xC2	/* 11 0 00010 = 194 */
-#define IP6OPT_JUMBO_LEN	6
-#define IP6OPT_RTALERT		0x05	/* 00 0 00101 */
+#define IP6OPT_NSAP_ADDR	0xC3	/* 11 0 00011 */
+#define IP6OPT_TUNNEL_LIMIT	0x04	/* 00 0 00100 */
+#define IP6OPT_RTALERT		0x05	/* 00 0 00101 (KAME definition) */
+#define IP6OPT_ROUTER_ALERT	0x05	/* (2292bis def, recommended) */
+
 #define IP6OPT_RTALERT_LEN	4
 #define IP6OPT_RTALERT_MLD	0	/* Datagram contains an MLD message */
 #define IP6OPT_RTALERT_RSVP	1	/* Datagram contains an RSVP message */
@@ -156,6 +155,56 @@ struct ip6_dest {
 #define IP6OPT_TYPE_ICMP	0xC0
 
 #define IP6OPT_MUTABLE		0x20
+
+/* IPv6 options: common part */
+struct ip6_opt {
+	u_int8_t ip6o_type;
+	u_int8_t ip6o_len;
+} __attribute__((__packed__));
+
+/* Jumbo Payload Option */
+struct ip6_opt_jumbo {
+	u_int8_t ip6oj_type;
+	u_int8_t ip6oj_len;
+	u_int8_t ip6oj_jumbo_len[4];
+} __attribute__((__packed__));
+#define IP6OPT_JUMBO_LEN 6
+
+/* NSAP Address Option */
+struct ip6_opt_nsap {
+	u_int8_t ip6on_type;
+	u_int8_t ip6on_len;
+	u_int8_t ip6on_src_nsap_len;
+	u_int8_t ip6on_dst_nsap_len;
+	/* followed by source NSAP */
+	/* followed by destination NSAP */
+} __attribute__((__packed__));
+
+/* Tunnel Limit Option */
+struct ip6_opt_tunnel {
+	u_int8_t ip6ot_type;
+	u_int8_t ip6ot_len;
+	u_int8_t ip6ot_encap_limit;
+} __attribute__((__packed__));
+
+/* Router Alert Option */
+struct ip6_opt_router {
+	u_int8_t ip6or_type;
+	u_int8_t ip6or_len;
+	u_int8_t ip6or_value[2];
+} __attribute__((__packed__));
+/* Router alert values (in network byte order) */
+#if BYTE_ORDER == BIG_ENDIAN
+#define IP6_ALERT_MLD	0x0000
+#define IP6_ALERT_RSVP	0x0001
+#define IP6_ALERT_AN	0x0002
+#else
+#if BYTE_ORDER == LITTLE_ENDIAN
+#define IP6_ALERT_MLD	0x0000
+#define IP6_ALERT_RSVP	0x0100
+#define IP6_ALERT_AN	0x0200
+#endif /* LITTLE_ENDIAN */
+#endif
 
 /* Routing header */
 struct ip6_rthdr {
@@ -172,9 +221,7 @@ struct ip6_rthdr0 {
 	u_int8_t  ip6r0_len;		/* length in units of 8 octets */
 	u_int8_t  ip6r0_type;		/* always zero */
 	u_int8_t  ip6r0_segleft;	/* segments left */
-	u_int8_t  ip6r0_reserved;	/* reserved field */
-	u_int8_t  ip6r0_slmap[3];	/* strict/loose bit map */
-	struct in6_addr  ip6r0_addr[1];	/* up to 23 addresses */
+	u_int32_t ip6r0_reserved;	/* reserved field */
 } __attribute__((__packed__));
 
 /* Fragment header */
@@ -207,41 +254,6 @@ struct ip6_frag {
 #define IPV6_MAXPACKET	65535	/* ip6 max packet size without Jumbo payload*/
 
 #ifdef _KERNEL
-/*
- * IP6_EXTHDR_CHECK ensures that region between the IP6 header and the
- * target header (including IPv6 itself, extension headers and
- * TCP/UDP/ICMP6 headers) are continuous. KAME requires drivers
- * to store incoming data into one internal mbuf or one or more external
- * mbufs(never into two or more internal mbufs). Thus, the third case is
- * supposed to never be matched but is prepared just in case.
- */
-
-#define IP6_EXTHDR_CHECK(m, off, hlen, ret)				\
-do {									\
-    if ((m)->m_next != NULL) {						\
-	if ((m)->m_flags & M_EXT) {					\
-		if ((m)->m_len < (off) + (hlen)) {			\
-			ip6stat.ip6s_exthdrtoolong++;			\
-			m_freem(m);					\
-			return ret;					\
-		}							\
-	} else {							\
-		if ((m)->m_len < (off) + (hlen)) {			\
-			ip6stat.ip6s_exthdrtoolong++;			\
-			m_freem(m);					\
-			return ret;					\
-		}							\
-	}								\
-    } else {								\
-	if ((m)->m_len < (off) + (hlen)) {				\
-		ip6stat.ip6s_tooshort++;				\
-		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_truncated);	\
-		m_freem(m);						\
-		return ret;						\
-	}								\
-    }									\
-} while (0)
-
 /*
  * IP6_EXTHDR_GET ensures that intermediate protocol header (from "off" to
  * "len") is located in single mbuf, on contiguous memory region.

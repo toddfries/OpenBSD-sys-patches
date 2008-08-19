@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.125.2.2 2004/03/03 08:40:07 brad Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.132.2.4 2004/05/26 20:00:38 brad Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -119,6 +115,10 @@ extern u_long sb_max;
 int tcp_rst_ppslim = 100;		/* 100pps */
 int tcp_rst_ppslim_count = 0;
 struct timeval tcp_rst_ppslim_last;
+
+int tcp_ackdrop_ppslim = 100;		/* 100pps */
+int tcp_ackdrop_ppslim_count = 0;
+struct timeval tcp_ackdrop_ppslim_last;
 
 #endif /* TUBA_INCLUDE */
 #define TCP_PAWS_IDLE	(24 * 24 * 60 * 60 * PR_SLOWHZ)
@@ -535,11 +535,7 @@ tcp_input(struct mbuf *m, ...)
 		struct tcpiphdr *ti;
 
 		ip = mtod(m, struct ip *);
-#if 1
 		tlen = m->m_pkthdr.len - iphlen;
-#else
-		tlen = ((struct ip *)ti)->ip_len;
-#endif
 		ti = mtod(m, struct tcpiphdr *);
 
 #ifdef TCP_ECN
@@ -1488,7 +1484,7 @@ trimthenstep6:
 				tiflags &= ~TH_URG;
 			todrop--;
 		}
-		if (todrop >= tlen ||
+		if (todrop > tlen ||
 		    (todrop == tlen && (tiflags & TH_FIN) == 0)) {
 			/*
 			 * Any valid FIN must be to the left of the
@@ -1625,12 +1621,10 @@ trimthenstep6:
 
 	/*
 	 * If a SYN is in the window, then this is an
-	 * error and we send an RST and drop the connection.
+	 * error and we ACK and drop the packet.
 	 */
-	if (tiflags & TH_SYN) {
-		tp = tcp_drop(tp, ECONNRESET);
-		goto dropwithreset;
-	}
+	if (tiflags & TH_SYN)
+		goto dropafterack_ratelim;
 
 	/*
 	 * If the ACK bit is off we drop the segment and return.
@@ -1730,8 +1724,16 @@ trimthenstep6:
 			 *	Window shrinks
 			 *	Old ACK
 			 */
-			if (tlen)
+			if (tlen) {
+				/* Drop very old ACKs unless th_seq matches */
+				if (th->th_seq != tp->rcv_nxt &&
+				   SEQ_LT(th->th_ack,
+				   tp->snd_una - tp->max_sndwnd)) {
+					/* XXX stat */
+					goto drop;
+				}
 				break;
+			}
 			/*
 			 * If we get an old ACK, there is probably packet
 			 * reordering going on.  Be conservative and reset
@@ -1934,7 +1936,7 @@ trimthenstep6:
 #endif
 		if (SEQ_GT(th->th_ack, tp->snd_max)) {
 			tcpstat.tcps_rcvacktoomuch++;
-			goto dropafterack;
+			goto dropafterack_ratelim;
 		}
 		acked = th->th_ack - tp->snd_una;
 		tcpstat.tcps_rcvackpack++;
@@ -2262,7 +2264,7 @@ dodata:							/* XXX */
 		}
 	}
 	if (so->so_options & SO_DEBUG) {
-		switch (tp->pf == PF_INET6) {
+		switch (tp->pf) {
 #ifdef INET6
 		case PF_INET6:
 			tcp_trace(TA_INPUT, ostate, tp, (caddr_t) &tcp_saveti6,
@@ -2283,6 +2285,14 @@ dodata:							/* XXX */
 		(void) tcp_output(tp);
 	}
 	return;
+
+dropafterack_ratelim:
+	if (ppsratecheck(&tcp_ackdrop_ppslim_last, &tcp_ackdrop_ppslim_count,
+	    tcp_ackdrop_ppslim) == 0) {
+		/* XXX stat */
+		goto drop;
+	}
+	/* ...fall into dropafterack... */
 
 dropafterack:
 	/*
@@ -3082,7 +3092,16 @@ tcp_mss(tp, offer)
 
 	/* Calculate the value that we offer in TCPOPT_MAXSEG */
 	if (offer != -1) {
+#ifndef INET6
 		mssopt = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
+#else
+		if (tp->pf == AF_INET)
+			mssopt = ifp->if_mtu - iphlen - sizeof(struct tcphdr);
+		else
+			mssopt = IN6_LINKMTU(ifp) - iphlen -
+			    sizeof(struct tcphdr);
+#endif
+
 		mssopt = max(tcp_mssdflt, mssopt);
 	}
 

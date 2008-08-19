@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_fat.c,v 1.11.6.1 2003/10/31 06:29:34 brad Exp $	*/
+/*	$OpenBSD: msdosfs_fat.c,v 1.11.8.1 2003/10/31 06:05:28 brad Exp $	*/
 /*	$NetBSD: msdosfs_fat.c,v 1.26 1997/10/17 11:24:02 ws Exp $	*/
 
 /*-

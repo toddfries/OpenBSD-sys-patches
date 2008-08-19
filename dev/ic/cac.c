@@ -1,8 +1,8 @@
-/*	$OpenBSD: cac.c,v 1.13.2.1 2003/06/09 17:09:47 brad Exp $	*/
+/*	$OpenBSD: cac.c,v 1.16 2003/06/02 19:24:22 mickey Exp $	*/
 /*	$NetBSD: cac.c,v 1.15 2000/11/08 19:20:35 ad Exp $	*/
 
 /*
- * Copyright (c) 2001 Michael Shalayeff
+ * Copyright (c) 2001,2003 Michael Shalayeff
  * All rights reserved.
  *
  * The SCSI emulation layer is derived from gdt(4) driver,
@@ -16,11 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Michael Shalayeff.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -617,7 +612,7 @@ cac_scsi_cmd(xs)
 		inq.version = 2;
 		inq.response_format = 2;
 		inq.additional_length = 32;
-		strcpy(inq.vendor, "Compaq  ");
+		strlcpy(inq.vendor, "Compaq  ", sizeof inq.vendor);
 		switch (CAC_GET1(dinfo->mirror)) {
 		case 0: p = "RAID0";	break;
 		case 1: p = "RAID4";	break;
@@ -625,8 +620,9 @@ cac_scsi_cmd(xs)
 		case 3: p = "RAID5";	break;
 		default:p = "<UNK>";	break;
 		}
-		sprintf(inq.product, "%s volume  #%02d", p, target);
-		strcpy(inq.revision, "   ");
+		snprintf(inq.product, sizeof inq.product, "%s volume  #%02d",
+		    p, target);
+		strlcpy(inq.revision, "   ", sizeof inq.revision);
 		cac_copy_internal_data(xs, &inq, sizeof inq);
 		break;
 

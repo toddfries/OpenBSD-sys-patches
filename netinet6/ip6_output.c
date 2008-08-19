@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.73.2.1 2004/02/07 22:11:34 brad Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.76.2.1 2004/02/07 22:08:00 brad Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -42,11 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -408,6 +404,7 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 	if (exthdrs.ip6e_rthdr) {
 		struct ip6_rthdr *rh;
 		struct ip6_rthdr0 *rh0;
+		struct in6_addr *addr;
 
 		rh = (struct ip6_rthdr *)(mtod(exthdrs.ip6e_rthdr,
 		    struct ip6_rthdr *));
@@ -415,11 +412,11 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 		switch (rh->ip6r_type) {
 		case IPV6_RTHDR_TYPE_0:
 			 rh0 = (struct ip6_rthdr0 *)rh;
-			 ip6->ip6_dst = rh0->ip6r0_addr[0];
-			 bcopy((caddr_t)&rh0->ip6r0_addr[1],
-			     (caddr_t)&rh0->ip6r0_addr[0],
+			 addr = (struct in6_addr *)(rh0 + 1);
+			 ip6->ip6_dst = addr[0];
+			 bcopy(&addr[1], &addr[0],
 			     sizeof(struct in6_addr) * (rh0->ip6r0_segleft - 1));
-			 rh0->ip6r0_addr[rh0->ip6r0_segleft - 1] = finaldst;
+			 addr[rh0->ip6r0_segleft - 1] = finaldst;
 			 break;
 		default:	/* is it possible? */
 			 error = EINVAL;
@@ -1433,7 +1430,7 @@ do { \
 				switch (optname) {
 				case IPV6_AUTH_LEVEL:
 				        if (optval < ipsec_auth_default_level &&
-					    suser(p->p_ucred, &p->p_acflag)) {
+					    suser(p, 0)) {
 						error = EACCES;
 						break;
 					}
@@ -1442,7 +1439,7 @@ do { \
 
 				case IPV6_ESP_TRANS_LEVEL:
 				        if (optval < ipsec_esp_trans_default_level &&
-					    suser(p->p_ucred, &p->p_acflag)) {
+					    suser(p, 0)) {
 						error = EACCES;
 						break;
 					}
@@ -1451,7 +1448,7 @@ do { \
 
 				case IPV6_ESP_NETWORK_LEVEL:
 				        if (optval < ipsec_esp_network_default_level &&
-					    suser(p->p_ucred, &p->p_acflag)) {
+					    suser(p, 0)) {
 						error = EACCES;
 						break;
 					}
@@ -1460,7 +1457,7 @@ do { \
 
 				case IPV6_IPCOMP_LEVEL:
 				        if (optval < ipsec_ipcomp_default_level &&
-					    suser(p->p_ucred, &p->p_acflag)) {
+					    suser(p, 0)) {
 						error = EACCES;
 						break;
 					}
@@ -1768,7 +1765,7 @@ ip6_pcbopts(pktopt, m, so)
 	}
 
 	/*  set options specified by user. */
-	if (p && !suser(p->p_ucred, &p->p_acflag))
+	if (p && !suser(p, 0))
 		priv = 1;
 	if ((error = ip6_setpktoptions(m, opt, priv)) != 0) {
 		(void)m_free(m);
@@ -1891,7 +1888,7 @@ ip6_setmoptions(optname, im6op, m)
 			 * all multicast addresses. Only super user is allowed
 			 * to do this.
 			 */
-			if (suser(p->p_ucred, &p->p_acflag))
+			if (suser(p, 0))
 			{
 				error = EACCES;
 				break;
@@ -1991,7 +1988,7 @@ ip6_setmoptions(optname, im6op, m)
 		}
 		mreq = mtod(m, struct ipv6_mreq *);
 		if (IN6_IS_ADDR_UNSPECIFIED(&mreq->ipv6mr_multiaddr)) {
-			if (suser(p->p_ucred, &p->p_acflag))
+			if (suser(p, 0))
 			{
 				error = EACCES;
 				break;

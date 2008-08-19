@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_mroute.c,v 1.31 2002/11/27 05:10:07 itojun Exp $	*/
+/*	$OpenBSD: ip6_mroute.c,v 1.40 2003/07/08 10:23:32 itojun Exp $	*/
 /*	$KAME: ip6_mroute.c,v 1.45 2001/03/25 08:38:51 itojun Exp $	*/
 
 /*
@@ -48,11 +48,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the University of
- *      California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -318,20 +314,15 @@ mrt6_ioctl(cmd, data)
 	int cmd;
 	caddr_t data;
 {
-	int error = 0;
 
 	switch (cmd) {
 	case SIOCGETSGCNT_IN6:
 		return (get_sg_cnt((struct sioc_sg_req6 *)data));
-		break;		/* for safety */
 	case SIOCGETMIFCNT_IN6:
 		return (get_mif6_cnt((struct sioc_mif_req6 *)data));
-		break;		/* for safety */
 	default:
 		return (EINVAL);
-		break;
 	}
-	return error;
 }
 
 /*
@@ -554,6 +545,38 @@ ip6_mrouter_done()
 	return 0;
 }
 
+void
+ip6_mrouter_detach(ifp)
+	struct ifnet *ifp;
+{
+	struct rtdetq *rte;
+	struct mf6c *mfc;
+	mifi_t mifi;
+	int i;
+
+	/*
+	 * Delete a mif which points to ifp.
+	 */
+	for (mifi = 0; mifi < nummifs; mifi++)
+		if (mif6table[mifi].m6_ifp == ifp)
+			del_m6if(&mifi);
+
+	/*
+	 * Clear rte->ifp of cache entries received on ifp.
+	 */
+	for (i = 0; i < MF6CTBLSIZ; i++) {
+		if (n6expire[i] == 0)
+			continue;
+
+		for (mfc = mf6ctable[i]; mfc != NULL; mfc = mfc->mf6c_next) {
+			for (rte = mfc->mf6c_stall; rte != NULL; rte = rte->next) {
+				if (rte->ifp == ifp)
+					rte->ifp = NULL;
+			}
+		}
+	}
+}
+
 static struct sockaddr_in6 sin6 = { sizeof(sin6), AF_INET6 };
 
 /*
@@ -582,8 +605,9 @@ add_m6if(mifcp)
 
 	if (mifcp->mif6c_flags & MIFF_REGISTER) {
 		if (reg_mif_num == (mifi_t)-1) {
-			strcpy(multicast_register_if.if_xname,
-			       "register_mif"); /* XXX */
+			strlcpy(multicast_register_if.if_xname,
+			    "register_mif",
+			    sizeof multicast_register_if.if_xname); /* XXX */
 			multicast_register_if.if_flags |= IFF_LOOPBACK;
 			multicast_register_if.if_index = mifcp->mif6c_mifi;
 			reg_mif_num = mifcp->mif6c_mifi;
@@ -776,7 +800,9 @@ add_m6fc(mfccp)
 			/* free packets Qed at the end of this entry */
 			for (rte = rt->mf6c_stall; rte != NULL; ) {
 				struct rtdetq *n = rte->next;
-				ip6_mdq(rte->m, rte->ifp, rt);
+				if (rte->ifp) {
+					ip6_mdq(rte->m, rte->ifp, rt);
+				}
 				m_freem(rte->m);
 #ifdef UPCALL_TIMING
 				collate(&(rte->t));
@@ -971,7 +997,6 @@ ip6_mforward(ip6, ifp, m)
 	struct mbuf *mm;
 	int s;
 	mifi_t mifi;
-	long time_second = time.tv_sec;
 
 #ifdef MRT6DEBUG
 	if (mrt6debug & DEBUG_FORWARD)
@@ -998,8 +1023,8 @@ ip6_mforward(ip6, ifp, m)
 	 */
 	if (IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_src)) {
 		ip6stat.ip6s_cantforward++;
-		if (ip6_log_time + ip6_log_interval < time_second) {
-			ip6_log_time = time_second;
+		if (ip6_log_time + ip6_log_interval < time.tv_sec) {
+			ip6_log_time = time.tv_sec;
 			log(LOG_DEBUG,
 			    "cannot forward "
 			    "from %s to %s nxt %d received on %s\n",
@@ -1322,7 +1347,8 @@ ip6_mdq(m, ifp, rt)
 			log(LOG_DEBUG,
 			    "wrong if: ifid %d mifi %d mififid %x\n",
 			    ifp->if_index, mifi,
-			    mif6table[mifi].m6_ifp->if_index);
+			    mif6table[mifi].m6_ifp ?
+			    mif6table[mifi].m6_ifp->if_index : -1); 
 #endif
 		mrt6stat.mrt6s_wrong_if++;
 		rt->mf6c_wrong_if++;
@@ -1429,6 +1455,9 @@ ip6_mdq(m, ifp, rt)
 	 */
 	for (mifp = mif6table, mifi = 0; mifi < nummifs; mifp++, mifi++)
 		if (IF_ISSET(mifi, &rt->mf6c_ifset)) {
+			if (mif6table[mifi].m6_ifp == NULL)
+				continue;
+
 			/*
 			 * check if the outgoing packet is going to break
 			 * a scope boundary.
@@ -1457,9 +1486,9 @@ ip6_mdq(m, ifp, rt)
 
 static void
 phyint_send(ip6, mifp, m)
-    struct ip6_hdr *ip6;
-    struct mif6 *mifp;
-    struct mbuf *m;
+	struct ip6_hdr *ip6;
+	struct mif6 *mifp;
+	struct mbuf *m;
 {
 	struct mbuf *mb_copy;
 	struct ifnet *ifp = mifp->m6_ifp;
@@ -1680,20 +1709,23 @@ pim6_input(mp, offp, proto)
 	 * Make sure that the IP6 and PIM headers in contiguous memory, and
 	 * possibly the PIM REGISTER header
 	 */
-#ifndef PULLDOWN_TEST
-	IP6_EXTHDR_CHECK(m, off, minlen, IPPROTO_DONE);
-	/* adjust pointer */
-	ip6 = mtod(m, struct ip6_hdr *);
-
-	/* adjust mbuf to point to the PIM header */
-	pim = (struct pim *)((caddr_t)ip6 + off);
-#else
 	IP6_EXTHDR_GET(pim, struct pim *, m, off, minlen);
 	if (pim == NULL) {
 		pim6stat.pim6s_rcv_tooshort++;
 		return IPPROTO_DONE;
 	}
+
+	/* PIM version check */
+	if (pim->pim_ver != PIM_VERSION) {
+		++pim6stat.pim6s_rcv_badversion;
+#ifdef MRT6DEBUG
+		log(LOG_ERR,
+		    "pim6_input: incorrect version %d, expecting %d\n",
+		    pim->pim_ver, PIM_VERSION);
 #endif
+		m_freem(m);
+		return (IPPROTO_DONE);
+	}
 
 #define PIM6_CHECKSUM
 #ifdef PIM6_CHECKSUM
@@ -1721,18 +1753,6 @@ pim6_input(mp, offp, proto)
 		}
 	}
 #endif /* PIM_CHECKSUM */
-
-	/* PIM version check */
-	if (pim->pim_ver != PIM_VERSION) {
-		++pim6stat.pim6s_rcv_badversion;
-#ifdef MRT6DEBUG
-		log(LOG_ERR,
-		    "pim6_input: incorrect version %d, expecting %d\n",
-		    pim->pim_ver, PIM_VERSION);
-#endif
-		m_freem(m);
-		return (IPPROTO_DONE);
-	}
 
 	if (pim->pim_type == PIM_REGISTER) {
 		/*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.41 2003/02/19 04:24:39 jason Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.42.2.1 2004/05/14 21:29:59 brad Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -739,8 +739,10 @@ fxp_intr(arg)
 	struct fxp_softc *sc = arg;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	u_int8_t statack;
-	int claimed = 0, rnr;
-
+	bus_dmamap_t rxmap;
+	int claimed = 0;
+	int rnr = 0;
+	
 	/*
 	 * If the interface isn't running, don't try to
 	 * service the interrupt.. just ack it and bail.
@@ -756,8 +758,7 @@ fxp_intr(arg)
 
 	while ((statack = CSR_READ_1(sc, FXP_CSR_SCB_STATACK)) != 0) {
 		claimed = 1;
-		rnr = 0;
-
+		rnr = (statack & FXP_SCB_STATACK_RNR) ? 1 : 0;
 		/*
 		 * First ACK all the interrupts in this pass.
 		 */
@@ -808,7 +809,6 @@ fxp_intr(arg)
 		 */
 		if (statack & (FXP_SCB_STATACK_FR | FXP_SCB_STATACK_RNR)) {
 			struct mbuf *m;
-			bus_dmamap_t rxmap;
 			u_int8_t *rfap;
 rcvloop:
 			m = sc->rfa_headm;
@@ -860,15 +860,16 @@ rcvloop:
 				}
 				goto rcvloop;
 			}
-			if (rnr) {
-				rxmap = *((bus_dmamap_t *)
-				    sc->rfa_headm->m_ext.ext_buf);
-				fxp_scb_wait(sc);
-				CSR_WRITE_4(sc, FXP_CSR_SCB_GENERAL,
+		}
+		if (rnr) {
+			rxmap = *((bus_dmamap_t *)
+				  sc->rfa_headm->m_ext.ext_buf);
+			fxp_scb_wait(sc);
+			CSR_WRITE_4(sc, FXP_CSR_SCB_GENERAL,
 				    rxmap->dm_segs[0].ds_addr +
 				    RFA_ALIGNMENT_FUDGE);
-				fxp_scb_cmd(sc, FXP_SCB_COMMAND_RU_START);
-			}
+			fxp_scb_cmd(sc, FXP_SCB_COMMAND_RU_START);
+			
 		}
 	}
 	return (claimed);
@@ -895,25 +896,25 @@ fxp_stats_update(arg)
 	int s;
 
 	FXP_STATS_SYNC(sc, BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
-	ifp->if_opackets += sp->tx_good;
-	ifp->if_collisions += sp->tx_total_collisions;
+	ifp->if_opackets += letoh32(sp->tx_good);
+	ifp->if_collisions += letoh32(sp->tx_total_collisions);
 	if (sp->rx_good) {
-		ifp->if_ipackets += sp->rx_good;
+		ifp->if_ipackets += letoh32(sp->rx_good);
 		sc->rx_idle_secs = 0;
 	} else {
 		sc->rx_idle_secs++;
 	}
 	ifp->if_ierrors +=
-	    sp->rx_crc_errors +
-	    sp->rx_alignment_errors +
-	    sp->rx_rnr_errors +
-	    sp->rx_overrun_errors;
+	    letoh32(sp->rx_crc_errors) +
+	    letoh32(sp->rx_alignment_errors) +
+	    letoh32(sp->rx_rnr_errors) +
+	    letoh32(sp->rx_overrun_errors);
 	/*
 	 * If any transmit underruns occurred, bump up the transmit
 	 * threshold by another 512 bytes (64 * 8).
 	 */
 	if (sp->tx_underruns) {
-		ifp->if_oerrors += sp->tx_underruns;
+		ifp->if_oerrors += letoh32(sp->tx_underruns);
 		if (tx_threshold < 192)
 			tx_threshold += 64;
 	}
