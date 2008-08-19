@@ -1,4 +1,4 @@
-/* $OpenBSD: rf_openbsdkintf.c,v 1.26.4.1 2004/11/28 18:35:06 brad Exp $	*/
+/* $OpenBSD: rf_openbsdkintf.c,v 1.27 2004/11/28 02:47:14 pedro Exp $	*/
 /* $NetBSD: rf_netbsdkintf.c,v 1.109 2001/07/27 03:30:07 oster Exp $	*/
 
 /*-

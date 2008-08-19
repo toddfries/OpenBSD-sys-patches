@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_port.h,v 1.50 2004/08/30 03:06:48 drahn Exp $ */
+/*	$OpenBSD: usb_port.h,v 1.55 2004/12/26 22:41:40 miod Exp $ */
 /*	$NetBSD: usb_port.h,v 1.62 2003/02/15 18:33:30 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_port.h,v 1.21 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -82,6 +82,7 @@ MALLOC_DECLARE(M_USBHC);
 #define AXE_DEBUG 1
 #define CUE_DEBUG 1
 #define KUE_DEBUG 1
+#define UDAV_DEBUG 1
 #define URL_DEBUG 1
 #define UMASS_DEBUG 1
 #define UVISOR_DEBUG 1
@@ -222,6 +223,7 @@ int __CONCAT(dname,_detach)(struct device *self, int flags)
 #define AUE_DEBUG 1
 #define CUE_DEBUG 1
 #define KUE_DEBUG 1
+#define UDAV_DEBUG 1
 #define UMASS_DEBUG 1
 #define UVISOR_DEBUG 1
 #define UPL_DEBUG 1
@@ -263,7 +265,7 @@ typedef struct proc *usb_proc_ptr;
 
 /*
  * The UHCI/OHCI controllers are little endian, so on big endian machines
- * the data strored in memory needs to be swapped.
+ * the data stored in memory needs to be swapped.
  */
 
 #if defined(letoh32)
@@ -275,9 +277,6 @@ typedef struct proc *usb_proc_ptr;
 
 #define usb_kthread_create1	kthread_create
 #define usb_kthread_create	kthread_create_deferred
-
-#define	config_pending_incr()
-#define	config_pending_decr()
 
 typedef int usb_malloc_type;
 

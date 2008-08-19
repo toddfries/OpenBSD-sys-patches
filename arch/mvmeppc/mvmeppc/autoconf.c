@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.9 2004/01/29 21:30:02 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.12 2004/12/25 23:02:25 miod Exp $	*/
 /*
  * Copyright (c) 1996, 1997 Per Fogelstrom
  * Copyright (c) 1995 Theo de Raadt
@@ -37,13 +37,13 @@
  * from: Utah Hdr: autoconf.c 1.31 91/01/21
  *
  *	from: @(#)autoconf.c	8.1 (Berkeley) 6/10/93
- *      $Id: autoconf.c,v 1.9 2004/01/29 21:30:02 miod Exp $
+ *      $Id: autoconf.c,v 1.12 2004/12/25 23:02:25 miod Exp $
  */
 
 /*
  * Setup the system to run on the current machine.
  *
- * Configure() is called at boot time.  Available
+ * cpu_configure() is called at boot time.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
  */
@@ -65,8 +65,8 @@ void	swapconf(void);
 extern void	dumpconf(void);
 int findblkmajor(struct device *);
 char *findblkname(int);
-struct device * getdisk(char *, int, int, dev_t *);
-struct device * getdevunit(char *, int);
+struct device *getdisk(char *, int, int, dev_t *);
+struct device *getdevunit(char *, int);
 void diskconf(void);
 void calc_delayconst(void);	/* clock.c */
 
@@ -91,41 +91,25 @@ cpu_configure()
 
 	if (config_rootfound("mainbus", "mainbus") == 0)
 		panic("no mainbus found");
-	(void)spl0();
+
+	ppc_intr_enable(1);
+	spl0();
 
 	/*
-	 * We can not know which is our root disk, defer
-	 * until we can checksum blocks to figure it out.
+	 * We can not select the root device yet, because we use bugtty
+	 * as the console for now, and it requires the clock to be ticking
+	 * for proper operation (think boot -a ...)
 	 */
 	md_diskconf = diskconf;
+
 	cold = 0;
 }
-/*
- * Now that we are fully operational, we can checksum the
- * disks, and using some heuristics, hopefully are able to
- * always determine the correct root disk.
- */
+
 void
 diskconf()
 {
-	/*
-	 * Configure root, swap, and dump area.  This is
-	 * currently done by running the same checksum
-	 * algorithm over all known disks, as was done in
-	 * /boot.  Then we basically fixup the *dev vars
-	 * from the info we gleaned from this.
-	dkcsumattach();
-	 * - XXX
-	 */
-
-#if 0
-	rootconf();
-#endif
 	setroot();
 	swapconf();
-#if 0
-	dumpconf();
-#endif
 }
 
 /*
@@ -243,8 +227,7 @@ getdisk(str, len, defpart, devp)
 
 	if ((dv = parsedisk(str, len, defpart, devp)) == NULL) {
 		printf("use one of:");
-		for (dv = alldevs.tqh_first; dv != NULL;
-		    dv = dv->dv_list.tqe_next) {
+		TAILQ_FOREACH(dv, &alldevs, dv_list) {
 			if (dv->dv_class == DV_DISK)
 				printf(" %s[a-p]", dv->dv_xname);
 #ifdef NFSCLIENT
@@ -281,7 +264,7 @@ parsedisk(str, len, defpart, devp)
 	} else
 		part = defpart;
 
-	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (dv->dv_class == DV_DISK &&
 		    strcmp(str, dv->dv_xname) == 0) {
 			majdev = findblkmajor(dv);
@@ -507,7 +490,7 @@ getdevunit(name, unit)
 	char *name;
 	int unit;
 {
-	struct device *dev = alldevs.tqh_first;
+	struct device *dev = TAILQ_FIRST(&alldevs);
 	char num[10], fullname[16];
 	int lunit;
 
@@ -521,7 +504,7 @@ getdevunit(name, unit)
 	strlcat(fullname, num, sizeof fullname);
 
 	while (strcmp(dev->dv_xname, fullname) != 0) {
-		if ((dev = dev->dv_list.tqe_next) == NULL)
+		if ((dev = TAILQ_NEXT(dev, dv_list)) == NULL)
 			return NULL;
 	}
 	return dev;

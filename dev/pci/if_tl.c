@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tl.c,v 1.31 2003/08/19 14:01:35 mpech Exp $	*/
+/*	$OpenBSD: if_tl.c,v 1.33 2004/09/23 17:45:16 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -1702,8 +1702,11 @@ void tl_init(xsc)
 	CMD_SET(sc, TL_CMD_RT);
 	CSR_WRITE_4(sc, TL_CH_PARM, vtophys(&sc->tl_ldata->tl_rx_list[0]));
 
-	if (!sc->tl_bitrate) 
+	if (!sc->tl_bitrate) {
 		mii_mediachg(&sc->sc_mii);
+	} else {
+		tl_ifmedia_upd(ifp);
+	}
 
 	/* Send the RX go command */
 	CMD_SET(sc, TL_CMD_GO|TL_CMD_NES|TL_CMD_RT);
@@ -2143,10 +2146,8 @@ tl_attach(parent, self, aux)
 
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = tl_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = tl_start;
 	ifp->if_watchdog = tl_watchdog;
 	ifp->if_baudrate = 10000000;

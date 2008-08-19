@@ -1,4 +1,4 @@
-/*	$OpenBSD: nsgphy.c,v 1.9 2002/11/26 06:01:28 nate Exp $	*/
+/*	$OpenBSD: nsgphy.c,v 1.14 2005/02/19 06:00:04 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 2001
@@ -31,7 +31,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD$
  */
 
 /*
@@ -52,7 +51,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -82,54 +80,50 @@ void	nsgphy_status(struct mii_softc *);
 static int	nsgphy_mii_phy_auto(struct mii_softc *, int);
 extern void	mii_phy_auto_timeout(void *);
 
-int
+const struct mii_phy_funcs nsgphy_funcs = {
+	nsgphy_service, nsgphy_status, mii_phy_reset,
+};
 
-nsgphymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+static const struct mii_phydesc nsgphys[] = {
+	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83861,
+	  MII_STR_NATSEMI_DP83861 },
+	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83891,
+	  MII_STR_NATSEMI_DP83891 },
+
+	{ 0,			0,
+	  NULL },
+};
+
+int
+nsgphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_NATSEMI &&
-	    (MII_MODEL(ma->mii_id2) == MII_MODEL_NATSEMI_DP83891 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_NATSEMI_DP83861))
+	if (mii_phy_match(ma, nsgphys) != NULL)
 		return (10);
 
 	return (0);
 }
 
 void
-nsgphyattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+nsgphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	switch(MII_MODEL(ma->mii_id2)) {
-	case MII_MODEL_NATSEMI_DP83861:
-	  printf(": %s, rev. %d\n", MII_STR_NATSEMI_DP83861,
-		 MII_REV(ma->mii_id2));
-	  break;
-
-	case MII_MODEL_NATSEMI_DP83891:
-	  printf(": %s, rev. %d\n", MII_STR_NATSEMI_DP83891,
-		 MII_REV(ma->mii_id2));
-	  break;
-	}
+	mpd = mii_phy_match(ma, nsgphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = nsgphy_service;
-	sc->mii_status = nsgphy_status;
+	sc->mii_funcs = &nsgphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 	sc->mii_anegticks = 10;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 		PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
@@ -150,10 +144,7 @@ nsgphyattach(parent, self, aux)
 }
 
 int
-nsgphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+nsgphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
@@ -270,7 +261,7 @@ nsgphy_service(sc, mii, cmd)
 		if (reg & NSGPHY_PHYSUP_LNKSTS)
 			break;
 
-		mii_phy_reset(sc);
+		PHY_RESET(sc);
 		if (nsgphy_mii_phy_auto(sc, 0) == EJUSTRETURN)
 			return(0);
 		break;
@@ -288,8 +279,7 @@ nsgphy_service(sc, mii, cmd)
 }
 
 void
-nsgphy_status(sc)
-	struct mii_softc *sc;
+nsgphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	int bmsr, bmcr, physup, anlpar, gstat;
@@ -358,32 +348,30 @@ nsgphy_status(sc)
 
 
 static int
-nsgphy_mii_phy_auto(mii, waitfor)
-	struct mii_softc *mii;
-	int waitfor;
+nsgphy_mii_phy_auto(struct mii_softc *sc, int waitfor)
 {
 	int bmsr, ktcr = 0, i;
 
-	if ((mii->mii_flags & MIIF_DOINGAUTO) == 0) {
-		mii_phy_reset(mii);
-		PHY_WRITE(mii, NSGPHY_MII_BMCR, 0);
+	if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
+		PHY_RESET(sc);
+		PHY_WRITE(sc, NSGPHY_MII_BMCR, 0);
 		DELAY(1000);
-		ktcr = PHY_READ(mii, NSGPHY_MII_1000CTL);
-		PHY_WRITE(mii, NSGPHY_MII_1000CTL, ktcr |
+		ktcr = PHY_READ(sc, NSGPHY_MII_1000CTL);
+		PHY_WRITE(sc, NSGPHY_MII_1000CTL, ktcr |
 		    (NSGPHY_1000CTL_AFD|NSGPHY_1000CTL_AHD));
-		ktcr = PHY_READ(mii, NSGPHY_MII_1000CTL);
+		ktcr = PHY_READ(sc, NSGPHY_MII_1000CTL);
 		DELAY(1000);
-		PHY_WRITE(mii, NSGPHY_MII_ANAR,
-		    BMSR_MEDIA_TO_ANAR(mii->mii_capabilities) | ANAR_CSMA);
+		PHY_WRITE(sc, NSGPHY_MII_ANAR,
+		    BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) | ANAR_CSMA);
 		DELAY(1000);
-		PHY_WRITE(mii, NSGPHY_MII_BMCR,
+		PHY_WRITE(sc, NSGPHY_MII_BMCR,
 		    NSGPHY_BMCR_AUTOEN | NSGPHY_BMCR_STARTNEG);
 	}
 
 	if (waitfor) {
 		/* Wait 500ms for it to complete. */
 		for (i = 0; i < 500; i++) {
-			if ((bmsr = PHY_READ(mii, NSGPHY_MII_BMSR)) &
+			if ((bmsr = PHY_READ(sc, NSGPHY_MII_BMSR)) &
 			    NSGPHY_BMSR_ACOMP)
 				return (0);
 			DELAY(1000);
@@ -407,10 +395,10 @@ nsgphy_mii_phy_auto(mii, waitfor)
 	 * the tick handler driving autonegotiation.  Don't want 500ms
 	 * delays all the time while the system is running!
 	 */
-	if ((mii->mii_flags & MIIF_DOINGAUTO) == 0) {
-		mii->mii_flags |= MIIF_DOINGAUTO;
-		timeout_set(&mii->mii_phy_timo, mii_phy_auto_timeout, mii);
-		timeout_add(&mii->mii_phy_timo, hz >> 1);
+	if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
+		sc->mii_flags |= MIIF_DOINGAUTO;
+		timeout_set(&sc->mii_phy_timo, mii_phy_auto_timeout, sc);
+		timeout_add(&sc->mii_phy_timo, hz >> 1);
 	}
 	return (EJUSTRETURN);
 }

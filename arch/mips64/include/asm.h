@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.4 2004/09/09 22:21:41 pefo Exp $ */
+/*	$OpenBSD: asm.h,v 1.7 2004/10/20 12:49:15 pefo Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,6 +29,12 @@
 #define _MIPS64_ASM_H
 
 #include <machine/regdef.h>
+
+#ifdef NEED_OLD_RM7KFIX
+#define ITLBNOPFIX      nop;nop;nop;nop;nop;nop;nop;nop;nop;nop;
+#else
+#define ITLBNOPFIX      nop;nop;nop;nop
+#endif
 
 #define	_MIPS_ISA_MIPS1	1	/* R2000/R3000 */
 #define	_MIPS_ISA_MIPS2	2	/* R4000/R6000 */
@@ -179,7 +185,7 @@
  */
 #if defined(XGPROF) || defined(XPROF)
 #define	MCOUNT			\
-	subu	sp, sp, 32;	\
+	PTR_SUBU sp, sp, 32;	\
 	SAVE_GP(16);		\
 	sw	ra, 28(sp);	\
 	sw	gp, 24(sp);	\
@@ -187,9 +193,9 @@
 	.set	noreorder;	\
 	move	AT, ra;		\
 	jal	_mcount;	\
-	subu	sp, sp, 8;	\
+	PTR_SUBU sp, sp, 8;	\
 	lw	ra, 28(sp);	\
-	addu	sp, sp, 32;	\
+	PTR_ADDU sp, sp, 32;	\
 	.set reorder;		\
 	.set	at;
 #else

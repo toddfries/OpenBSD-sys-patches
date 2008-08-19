@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.56 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.61 2004/11/09 19:17:01 claudio Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -43,6 +43,8 @@
 #include <machine/pdc.h>
 #include <machine/iomod.h>
 #include <machine/autoconf.h>
+
+#include <hppa/dev/cpudevs.h>
 
 struct mainbus_softc {
 	struct  device sc_dv;
@@ -772,6 +774,8 @@ mbus_dmamap_load_mbuf(void *v, bus_dmamap_t map, struct mbuf *m0, int flags)
 	error = 0;
 	lastaddr = 0;
 	for (m = m0; m != NULL && error == 0; m = m->m_next) {
+		if (m->m_len == 0)
+			continue;
 		error = _bus_dmamap_load_buffer(NULL, map, m->m_data, m->m_len,
 		    NULL, flags, &lastaddr, &seg, first);
 		first = 0;
@@ -1013,10 +1017,10 @@ mbattach(parent, self, aux)
 		panic("mbattach: cannot map mainbus IO space");
 
 	/*
-	 * Local-Broadcast the HPA to all modules on the bus
+	 * Local-Broadcast the HPA to all modules on this bus
 	 */
-	((struct iomod *)(pdc_hpa.hpa & HPPA_FLEX_MASK))[FPA_IOMOD].io_flex =
-		(void *)((pdc_hpa.hpa & HPPA_FLEX_MASK) | DMA_ENABLE);
+	((struct iomod *)LBCAST_ADDR)->io_flex =
+	    (void *)((pdc_hpa.hpa & HPPA_FLEX_MASK) | DMA_ENABLE);
 
 	sc->sc_hpa = pdc_hpa.hpa;
 
@@ -1042,7 +1046,6 @@ mbattach(parent, self, aux)
 #endif
 
 	bzero (&nca, sizeof(nca));
-	nca.ca_name = "mainbus";
 	nca.ca_hpa = 0;
 	nca.ca_irq = -1;
 	nca.ca_hpamask = HPPA_IOSPACE;
@@ -1051,7 +1054,31 @@ mbattach(parent, self, aux)
 	nca.ca_dp.dp_bc[0] = nca.ca_dp.dp_bc[1] = nca.ca_dp.dp_bc[2] =
 	nca.ca_dp.dp_bc[3] = nca.ca_dp.dp_bc[4] = nca.ca_dp.dp_bc[5] = -1;
 	nca.ca_dp.dp_mod = -1;
-	pdc_scanbus(self, &nca, MAXMODBUS);
+	switch (cpu_hvers) {
+#if 0
+	case HPPA_BOARD_HP809:
+	case HPPA_BOARD_HP819:
+	case HPPA_BOARD_HP839:
+	case HPPA_BOARD_HP859:
+	case HPPA_BOARD_HP770_J200:
+	case HPPA_BOARD_HP770_J210:
+	case HPPA_BOARD_HP770_J210XC:
+	case HPPA_BOARD_HP780_J282:
+	case HPPA_BOARD_HP782_J2240:
+#endif
+	case HPPA_BOARD_HP780_C160:
+	case HPPA_BOARD_HP780_C180P:
+	case HPPA_BOARD_HP780_C180XP:
+	case HPPA_BOARD_HP780_C200:
+	case HPPA_BOARD_HP780_C230:
+	case HPPA_BOARD_HP780_C240:
+	case HPPA_BOARD_HP785_C360:
+		pdc_scanbus(self, &nca, MAXMODBUS, FP_ADDR);
+	break;
+	default:
+		pdc_scanbus(self, &nca, MAXMODBUS, 0);
+	break;
+	}
 }
 
 /*
@@ -1076,9 +1103,10 @@ mbprint(aux, pnp)
 	struct confargs *ca = aux;
 
 	if (pnp)
-		printf("\"%s\" at %s (type %x, sv %x, hv %x)", ca->ca_name, pnp,
+		printf("\"%s\" at %s (type %x sv %x mod %x hv %x)",
+		    ca->ca_name, pnp,
 		    ca->ca_type.iodc_type, ca->ca_type.iodc_sv_model,
-		    ca->ca_type.iodc_revision);
+		    ca->ca_type.iodc_model, ca->ca_type.iodc_revision);
 	if (ca->ca_hpa) {
 		if (~ca->ca_hpamask)
 			printf(" offset %lx", ca->ca_hpa & ~ca->ca_hpamask);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mgx.c,v 1.5 2003/06/28 17:05:33 miod Exp $	*/
+/*	$OpenBSD: mgx.c,v 1.9 2005/03/13 23:05:22 miod Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.
@@ -27,7 +27,7 @@
  */
 
 /*
- * Driver for the Southlan Media Systems (now Quantum 3D) MGX and MGXPlus
+ * Driver for the Southland Media Systems (now Quantum 3D) MGX and MGXPlus
  * frame buffers.
  *
  * Pretty crude, due to the lack of documentation. Works as a dumb frame
@@ -87,19 +87,6 @@ struct mgx_softc {
 	volatile u_int8_t *sc_vidc;	/* ramdac registers */
 
 	int	sc_nscreens;
-};
-
-struct wsscreen_descr mgx_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *mgx_scrlist[] = {
-	&mgx_stdscreen,
-};
-
-struct wsscreen_list mgx_screenlist = {
-	sizeof(mgx_scrlist) / sizeof(struct wsscreen_descr *),
-	    mgx_scrlist
 };
 
 int mgx_ioctl(void *, u_long, caddr_t, int, struct proc *);
@@ -164,7 +151,6 @@ mgxattach(struct device *parent, struct device *self, void *args)
 {
 	struct mgx_softc *sc = (struct mgx_softc *)self;
 	struct confargs *ca = args;
-	struct wsemuldisplaydev_attach_args waa;
 	int node, fbsize;
 	int isconsole;
 
@@ -209,26 +195,16 @@ mgxattach(struct device *parent, struct device *self, void *args)
 	bzero(sc->sc_cmap, sizeof(sc->sc_cmap));
 	fbwscons_setcolormap(&sc->sc_sunfb, mgx_setcolor);
 
-	mgx_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	mgx_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	mgx_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	mgx_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	printf(", %dx%d\n",
 	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
 
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb,
-		    &mgx_stdscreen, -1, mgx_burner);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 	}
 
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
-	waa.console = isconsole;
-	waa.scrdata = &mgx_screenlist;
-	waa.accessops = &mgx_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &mgx_accessops, isconsole);
 }
 
 /*
@@ -270,6 +246,10 @@ mgx_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		if (error != 0)
 			return (error);
 		mgx_loadcmap(sc, cm->index, cm->count);
+		break;
+
+	case WSDISPLAYIO_SVIDEO:
+	case WSDISPLAYIO_GVIDEO:
 		break;
 
 	default:

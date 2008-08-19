@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.56 2004/08/04 19:42:30 mickey Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.68 2005/02/03 14:46:42 hshoexer Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -129,7 +129,7 @@ static u_char fxp_cb_config_template[] = {
 	0x16,	/*  0 Byte count. */
 	0x08,	/*  1 Fifo limit */
 	0x00,	/*  2 Adaptive ifs */
-	0x00,	/*  3 void1 */
+	0x00,	/*  3 ctrl0 */
 	0x00,	/*  4 rx_dma_bytecount */
 	0x80,	/*  5 tx_dma_bytecount */
 	0xb2,	/*  6 ctrl 1*/
@@ -215,7 +215,6 @@ fxp_scb_wait(sc)
 		printf("%s: warning: SCB timed out\n", sc->sc_dev.dv_xname);
 }
 
-
 void
 fxp_eeprom_shiftin(struct fxp_softc *sc, int data, int length)
 {
@@ -238,7 +237,6 @@ fxp_eeprom_shiftin(struct fxp_softc *sc, int data, int length)
 		DELAY(1);
 	}
 }
-
 
 void
 fxp_eeprom_putword(struct fxp_softc *sc, int offset, u_int16_t data)
@@ -292,8 +290,6 @@ fxp_write_eeprom(struct fxp_softc *sc, u_short *data, int offset, int words)
 	for (i = 0; i < words; i++)
 		fxp_eeprom_putword(sc, offset + i, data[i]);
 }
-
-
 
 /*************************************************************
  * Operating system-specific autoconfiguration glue
@@ -460,13 +456,11 @@ fxp_attach_common(sc, intrstr)
 	ifp->if_watchdog = fxp_watchdog;
 	IFQ_SET_READY(&ifp->if_snd);
 
-#if NVLAN > 0
 	/*
 	 * Only 82558 and newer cards have a bit to ignore oversized frames.
 	 */
 	if (sc->not_82557)
-		ifp->if_capabilities |= IFCAP_VLAN_MTU;
-#endif
+		ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	printf(": %s, address %s\n", intrstr,
 	    ether_sprintf(sc->sc_arpcom.ac_enaddr));
@@ -494,6 +488,12 @@ fxp_attach_common(sc, intrstr)
 			printf(", cksum @ 0x%x: 0x%x -> 0x%x\n",
 			    i, data, cksum);
 		}
+	}
+
+	/* Receiver lock-up workaround detection. */
+	fxp_read_eeprom(sc, &data, 3, 1);
+	if ((data & 0x03) != 0x03) {
+		sc->sc_flags |= FXPF_RECV_WORKAROUND;
 	}
 
 	/*
@@ -666,10 +666,6 @@ fxp_autosize_eeprom(sc)
 	DELAY(4);
 	sc->eeprom_size = x;
 }
-
-
-
-
 
 /*
  * Read from the serial EEPROM. Basically, you manually shift in
@@ -883,7 +879,8 @@ fxp_intr(arg)
 
 	while ((statack = CSR_READ_1(sc, FXP_CSR_SCB_STATACK)) != 0) {
 		claimed = 1;
-		rnr = (statack & FXP_SCB_STATACK_RNR) ? 1 : 0;
+		rnr = (statack & (FXP_SCB_STATACK_RNR | 
+		                  FXP_SCB_STATACK_SWI)) ? 1 : 0;
 		/*
 		 * First ACK all the interrupts in this pass.
 		 */
@@ -932,7 +929,8 @@ fxp_intr(arg)
 		 * not ready (RNR) condition exists, get whatever
 		 * packets we can and re-start the receiver.
 		 */
-		if (statack & (FXP_SCB_STATACK_FR | FXP_SCB_STATACK_RNR)) {
+		if (statack & (FXP_SCB_STATACK_FR | FXP_SCB_STATACK_RNR |
+			       FXP_SCB_STATACK_SWI)) {
 			struct mbuf *m;
 			u_int8_t *rfap;
 rcvloop:
@@ -1034,8 +1032,9 @@ fxp_stats_update(arg)
 	if (sp->rx_good) {
 		ifp->if_ipackets += letoh32(sp->rx_good);
 		sc->rx_idle_secs = 0;
-	} else
+	} else if (sc->sc_flags & FXPF_RECV_WORKAROUND) {
 		sc->rx_idle_secs++;
+	}
 	ifp->if_ierrors +=
 	    letoh32(sp->rx_crc_errors) +
 	    letoh32(sp->rx_alignment_errors) +
@@ -1204,11 +1203,6 @@ fxp_scb_cmd(sc, cmd)
 	struct fxp_softc *sc;
 	u_int8_t cmd;
 {
-	if (cmd == FXP_SCB_COMMAND_CU_RESUME &&
-	    (sc->sc_flags & FXPF_FIX_RESUME_BUG) != 0) {
-		CSR_WRITE_1(sc, FXP_CSR_SCB_COMMAND, FXP_CB_COMMAND_NOP);
-		fxp_scb_wait(sc);
-	}
 	CSR_WRITE_1(sc, FXP_CSR_SCB_COMMAND, cmd);
 }
 
@@ -1221,7 +1215,6 @@ fxp_init(xsc)
 	struct fxp_cb_config *cbp;
 	struct fxp_cb_ias *cb_ias;
 	struct fxp_cb_tx *txp;
-	struct mbuf *m;
 	bus_dmamap_t rxmap;
 	int i, prm, allm, s, bufs;
 
@@ -1326,6 +1319,9 @@ fxp_init(xsc)
 		cbp->stripping |= 0x01;		/* truncate rx packets */
 	}
 
+	if (sc->sc_flags & FXPF_MWI_ENABLE)
+		cbp->ctrl0 |= 0x01;		/* enable PCI MWI command */
+
 	if(!sc->phy_10Mbps_only)			/* interface mode */
 		cbp->mediatype |= 0x01;
 	else
@@ -1422,10 +1418,10 @@ fxp_init(xsc)
 		bufs = FXP_NRFABUFS_MIN;
 	if (sc->rx_bufs > bufs) {
 		while (sc->rfa_headm != NULL && sc->rx_bufs-- > bufs) {
-			rxmap = *((bus_dmamap_t *)m->m_ext.ext_buf);
+			rxmap = *((bus_dmamap_t *)sc->rfa_headm->m_ext.ext_buf);
 			bus_dmamap_unload(sc->sc_dmat, rxmap);
 			FXP_RXMAP_PUT(sc, rxmap);
-			sc->rfa_headm = m_free(m);
+			sc->rfa_headm = m_free(sc->rfa_headm);
 		}
 	} else if (sc->rx_bufs < bufs) {
 		int err, tmp_rx_bufs = sc->rx_bufs;
@@ -1443,10 +1439,6 @@ fxp_init(xsc)
 				break;
 	}
 	fxp_scb_wait(sc);
-	rxmap = *((bus_dmamap_t *)sc->rfa_headm->m_ext.ext_buf);
-	CSR_WRITE_4(sc, FXP_CSR_SCB_GENERAL,
-	    rxmap->dm_segs[0].ds_addr + RFA_ALIGNMENT_FUDGE);
-	fxp_scb_cmd(sc, FXP_SCB_COMMAND_RU_START);
 
 	/*
 	 * Set current media.
@@ -1455,6 +1447,16 @@ fxp_init(xsc)
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
+
+	/*
+	 * Request a software generated interrupt that will be used to 
+	 * (re)start the RU processing.  If we direct the chip to start
+	 * receiving from the start of queue now, instead of letting the
+	 * interrupt handler first process all received packets, we run
+	 * the risk of having it overwrite mbuf clusters while they are
+	 * being processed or after they have been returned to the pool.
+	 */
+	CSR_WRITE_1(sc, FXP_CSR_SCB_INTRCNTL, FXP_SCB_INTRCNTL_REQUEST_SWI);
 	splx(s);
 
 	/*
@@ -1601,7 +1603,7 @@ fxp_add_rfabuf(sc, oldm)
 	return (m == oldm);
 }
 
-volatile int
+int
 fxp_mdi_read(self, phy, reg)
 	struct device *self;
 	int phy;
@@ -1628,18 +1630,7 @@ void
 fxp_statchg(self)
 	struct device *self;
 {
-	struct fxp_softc *sc = (struct fxp_softc *)self;
-
-	/*
-	 * Determine whether or not we have to work-around the
-	 * Resume Bug.
-	 */
-	if (sc->sc_flags & FXPF_HAS_RESUME_BUG) {
-		if (IFM_TYPE(sc->sc_mii.mii_media_active) == IFM_10_T)
-			sc->sc_flags |= FXPF_FIX_RESUME_BUG;
-		else
-			sc->sc_flags &= ~FXPF_FIX_RESUME_BUG;
-	}
+	/* Nothing to do. */
 }
 
 void
@@ -1746,7 +1737,8 @@ fxp_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			fxp_init(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				fxp_init(sc);
 			error = 0;
 		}
 		break;
@@ -1845,48 +1837,29 @@ fxp_mc_setup(sc, doit)
 
 #ifndef SMALL_KERNEL
 #include <dev/microcode/fxp/rcvbundl.h>
-
-const u_int32_t fxp_ucode_d101a[] = D101_A_RCVBUNDLE_UCODE;
-const u_int32_t fxp_ucode_d101b0[] = D101_B0_RCVBUNDLE_UCODE;
-const u_int32_t fxp_ucode_d101ma[] = D101M_B_RCVBUNDLE_UCODE;
-const u_int32_t fxp_ucode_d101s[] = D101S_RCVBUNDLE_UCODE;
-const u_int32_t fxp_ucode_d102[] = D102_B_RCVBUNDLE_UCODE;
-const u_int32_t fxp_ucode_d102c[] = D102_C_RCVBUNDLE_UCODE;
-
-#define UCODE(x)	sizeof(x), x
-
 struct ucode {
 	u_int16_t	revision;
 	u_int16_t	int_delay_offset;
 	u_int16_t	bundle_max_offset;
-	u_int16_t	length;
-	const u_int32_t	*ucode;
+	const char	*uname;
 } const ucode_table[] = {
-	{ FXP_REV_82558_A4,
-	  D101_CPUSAVER_DWORD, 0,
-	  UCODE(fxp_ucode_d101a) },
+	{ FXP_REV_82558_A4, D101_CPUSAVER_DWORD, 0, "fxp-d101a" }, 
 
-	{ FXP_REV_82558_B0,
-	  D101_CPUSAVER_DWORD, 0,
-	  UCODE(fxp_ucode_d101b0), },
+	{ FXP_REV_82558_B0, D101_CPUSAVER_DWORD, 0, "fxp-d101b0" },
 
-	{ FXP_REV_82559_A0,
-	  D101M_CPUSAVER_DWORD, D101M_CPUSAVER_BUNDLE_MAX_DWORD,
-	  UCODE(fxp_ucode_d101ma) },
+	{ FXP_REV_82559_A0, D101M_CPUSAVER_DWORD, 
+	    D101M_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d101ma" },
 
-	{ FXP_REV_82559S_A,
-	  D101S_CPUSAVER_DWORD, D101S_CPUSAVER_BUNDLE_MAX_DWORD,
-	  UCODE(fxp_ucode_d101s) },
+	{ FXP_REV_82559S_A, D101S_CPUSAVER_DWORD,
+	    D101S_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d101s" },
 
-	{ FXP_REV_82550,
-	  D102_B_CPUSAVER_DWORD, D102_B_CPUSAVER_BUNDLE_MAX_DWORD,
-	  UCODE(fxp_ucode_d102) },
+	{ FXP_REV_82550, D102_B_CPUSAVER_DWORD,
+	    D102_B_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d102" },
 
-	{ FXP_REV_82550_C,
-	  D102_C_CPUSAVER_DWORD, D102_C_CPUSAVER_BUNDLE_MAX_DWORD,
-	  UCODE(fxp_ucode_d102c) },
+	{ FXP_REV_82550_C, D102_C_CPUSAVER_DWORD,
+	    D102_C_CPUSAVER_BUNDLE_MAX_DWORD, "fxp-d102c" },
 
-	{ 0, 0, 0, 0, NULL }
+	{ 0, 0, 0, NULL }
 };
 
 void
@@ -1894,22 +1867,32 @@ fxp_load_ucode(struct fxp_softc *sc)
 {
 	const struct ucode *uc;
 	struct fxp_cb_ucode *cbp = &sc->sc_ctrl->u.code;
-	int i;
+	int i, error;
+	u_int32_t *ucode_buf;
+	size_t ucode_len;
 
 	if (sc->sc_flags & FXPF_UCODE)
 		return;
 
-	for (uc = ucode_table; uc->ucode != NULL; uc++)
+	for (uc = ucode_table; uc->revision != 0; uc++)
 		if (sc->sc_revision == uc->revision)
 			break;
-	if (uc->ucode == NULL)
+	if (uc->revision == NULL)
 		return;	/* no ucode for this chip is found */
+
+	error = loadfirmware(uc->uname, (u_char **)&ucode_buf, &ucode_len);
+	if (error) {
+		printf("%s: failed loadfirmware of file %s: errno %d\n",
+		    sc->sc_dev.dv_xname, uc->uname, error);
+		sc->sc_flags |= FXPF_UCODE;
+		return;
+	}
 
 	cbp->cb_status = 0;
 	cbp->cb_command = htole16(FXP_CB_COMMAND_UCODE|FXP_CB_COMMAND_EL);
 	cbp->link_addr = 0xffffffff;	/* (no) next command */
-	for (i = 0; i < uc->length; i++)
-		cbp->ucode[i] = htole32(uc->ucode[i]);
+	for (i = 0; i < (ucode_len / sizeof(u_int32_t)); i++)
+		cbp->ucode[i] = ucode_buf[i];
 
 	if (uc->int_delay_offset)
 		*((u_int16_t *)&cbp->ucode[uc->int_delay_offset]) =
@@ -1937,6 +1920,7 @@ fxp_load_ucode(struct fxp_softc *sc)
 	} while (((cbp->cb_status & htole16(FXP_CB_STATUS_C)) == 0) && --i);
 	if (i == 0) {
 		printf("%s: timeout loading microcode\n", sc->sc_dev.dv_xname);
+		free(ucode_buf, M_DEVBUF);
 		return;
 	}
 
@@ -1950,6 +1934,7 @@ fxp_load_ucode(struct fxp_softc *sc)
 		printf("\n");
 #endif
 
+	free(ucode_buf, M_DEVBUF);
 	sc->sc_flags |= FXPF_UCODE;
 }
 #endif /* SMALL_KERNEL */

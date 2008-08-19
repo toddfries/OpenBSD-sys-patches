@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock_md.c,v 1.5 2004/08/11 15:13:35 deraadt Exp $ */
+/*	$OpenBSD: clock_md.c,v 1.8 2005/01/31 21:25:21 grange Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -39,13 +39,21 @@
 
 #include <sgi/localbus/macebus.h>
 
+extern int clockmatch(struct device *, void *, void *);
+extern void clockattach(struct device *, struct device *, void *);
 extern void clock_int5_init(struct clock_softc *);
 extern int clock_started;
 
 #define FROMBCD(x)	(((x) >> 4) * 10 + ((x) & 0xf))
 #define TOBCD(x)	(((x) / 10 * 16) + ((x) % 10))
 
-void	md_clk_attach(struct device *parent, struct device *self, void *aux);
+struct cfattach clock_macebus_ca = {
+        sizeof(struct clock_softc), clockmatch, clockattach
+};
+struct cfattach clock_xbowmux_ca = {
+        sizeof(struct clock_softc), clockmatch, clockattach
+};
+
 
 void	ds1687_get(struct clock_softc *, time_t, struct tod_time *);
 void	ds1687_set(struct clock_softc *, struct tod_time *);
@@ -74,6 +82,14 @@ md_clk_attach(parent, self, aux)
 		    &sc->sc_clk_h))
 			printf("UH!? Can't map clock device!\n");
 		printf(": TOD with DS1687,");
+		break;
+
+	case SGI_O200:
+		sc->sc_clock.clk_init = clock_int5_init;
+		sc->sc_clock.clk_hz = 100;
+		sc->sc_clock.clk_profhz = 100;
+		sc->sc_clock.clk_stathz = 0;	/* XXX no stat clock yet */
+		printf("TODO set up clock.");
 		break;
 
 	default:
@@ -107,7 +123,7 @@ ds1687_get(sc, base, ct)
 	ct->min = FROMBCD(bus_space_read_1(clk_t, clk_h, 2));
 	ct->hour = FROMBCD(bus_space_read_1(clk_t, clk_h, 4));
 	ct->day = FROMBCD(bus_space_read_1(clk_t, clk_h, 7));
-	ct->mon = FROMBCD(bus_space_read_1(clk_t, clk_h, 8)) - 1;
+	ct->mon = FROMBCD(bus_space_read_1(clk_t, clk_h, 8));
 	ct->year = FROMBCD(bus_space_read_1(clk_t, clk_h, 9));
 	century = FROMBCD(bus_space_read_1(clk_t, clk_h, 72));
 
@@ -141,7 +157,7 @@ ds1687_set(sc, ct)
 	bus_space_write_1(clk_t, clk_h, 4, TOBCD(ct->hour));
 	bus_space_write_1(clk_t, clk_h, 6, TOBCD(ct->dow));
 	bus_space_write_1(clk_t, clk_h, 7, TOBCD(ct->day));
-	bus_space_write_1(clk_t, clk_h, 8, TOBCD(ct->mon + 1));
+	bus_space_write_1(clk_t, clk_h, 8, TOBCD(ct->mon));
 	bus_space_write_1(clk_t, clk_h, 9, TOBCD(year));
 	bus_space_write_1(clk_t, clk_h, 72, TOBCD(century));
 

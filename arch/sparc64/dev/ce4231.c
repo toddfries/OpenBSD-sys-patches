@@ -1,4 +1,4 @@
-/*	$OpenBSD: ce4231.c,v 1.15 2003/06/24 21:54:39 henric Exp $	*/
+/*	$OpenBSD: ce4231.c,v 1.17 2004/11/09 14:30:34 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -290,8 +290,6 @@ ce4231_attach(parent, self, aux)
 	}
 
 	printf(": nvaddrs %d\n", ea->ea_nvaddrs);
-
-	evcnt_attach(&sc->sc_dev, "intr", &sc->sc_intrcnt);
 
 	audio_attach_mi(&ce4231_sa_hw_if, sc, &sc->sc_dev);
 
@@ -1406,7 +1404,7 @@ ce4231_alloc(addr, direction, size, pool, flags)
 
 	p = (struct cs_dma *)malloc(sizeof(struct cs_dma), pool, flags);
 	if (p == NULL)
-		goto fail;
+		return (NULL);
 
 	if (bus_dmamap_create(dmat, size, 1, size, 0,
 	    BUS_DMA_NOWAIT, &p->dmamap) != 0)
@@ -1438,6 +1436,7 @@ fail2:
 fail1:
 	bus_dmamap_destroy(dmat, p->dmamap);
 fail:
+	free(p, pool);
 	return (NULL);
 }
 

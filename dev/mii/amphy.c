@@ -1,4 +1,4 @@
-/*	$OpenBSD: amphy.c,v 1.5 2004/08/06 09:57:16 pefo Exp $	*/
+/*	$OpenBSD: amphy.c,v 1.12 2005/02/05 22:30:52 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -44,7 +44,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -71,57 +70,57 @@ struct cfdriver amphy_cd = {
 int	amphy_service(struct mii_softc *, struct mii_data *, int);
 void	amphy_status(struct mii_softc *);
 
+const struct mii_phy_funcs amphy_funcs = {
+	amphy_service, amphy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc amphys[] = {
+	{ MII_OUI_xxAMD,		MII_MODEL_xxAMD_79C873,
+	  MII_STR_xxAMD_79C873 },
+	{ MII_OUI_xxDAVICOM,		MII_MODEL_xxDAVICOM_DM9101,
+	  MII_STR_xxDAVICOM_DM9101 },
+	{ MII_OUI_DAVICOM,		MII_MODEL_DAVICOM_DM9102,
+	  MII_STR_DAVICOM_DM9102 },
+	{ MII_OUI_DAVICOM,		MII_MODEL_DAVICOM_DM9601,
+	  MII_STR_DAVICOM_DM9601 },
+	{ MII_OUI_xxALTIMA,		MII_MODEL_AMD_79C875phy,
+	  MII_STR_AMD_79C875phy },
+
+	{ 0,				0,
+	  NULL },
+};
+
 int
-amphymatch(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+amphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxAMD &&
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxAMD_79C873)
-		return (10);
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxDAVICOM &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxDAVICOM_DM9101)
-		return(10);
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_DAVICOM &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_DAVICOM_DM9102)
-		return(10);
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxALTIMA &&	/*XXX*/
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_AMD_79C875phy)
+	if (mii_phy_match(ma, amphys) != NULL)
 		return(10);
 
 	return(0);
 }
 
 void
-amphyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+amphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	if ((MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxALTIMA &&	/*XXX*/
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_AMD_79C875phy)) {
-		printf(": %s, rev. %d\n", MII_STR_AMD_79C875phy,
-		    MII_REV(ma->mii_id2));
-	} else {
-		printf(": %s, rev. %d\n", MII_STR_xxAMD_79C873,
-		    MII_REV(ma->mii_id2));
-	}
+	mpd = mii_phy_match(ma, amphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = amphy_service;
-	sc->mii_status = amphy_status;
+	sc->mii_funcs = &amphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
@@ -130,10 +129,7 @@ amphyattach(parent, self, aux)
 }
 
 int
-amphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+amphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
@@ -191,8 +187,7 @@ amphy_service(sc, mii, cmd)
 }
 
 void
-amphy_status(sc)
-	struct mii_softc *sc;
+amphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;

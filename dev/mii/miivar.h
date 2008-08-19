@@ -1,4 +1,4 @@
-/*	$OpenBSD: miivar.h,v 1.18 2004/08/02 21:53:31 brad Exp $	*/
+/*	$OpenBSD: miivar.h,v 1.22 2004/12/16 03:41:58 brad Exp $	*/
 /*	$NetBSD: miivar.h,v 1.17 2000/03/06 20:56:57 thorpej Exp $	*/
 
 /*-
@@ -42,12 +42,7 @@
 #define	_DEV_MII_MIIVAR_H_
 
 #include <sys/queue.h>
-
-#if defined(__NetBSD__)
-#include <sys/callout.h>
-#elif defined(__OpenBSD__)
 #include <sys/timeout.h>
-#endif
 
 /*
  * Media Independent Interface autoconfiguration definitions.
@@ -99,16 +94,11 @@ struct mii_data {
 };
 typedef struct mii_data mii_data_t;
 
-/*
- * This call is used by the MII layer to call into the PHY driver
- * to perform a `service request'.
- */
-typedef	int (*mii_downcall_t)(struct mii_softc *, struct mii_data *, int);
-
-/*
- * This is a call back into the PHY driver made by a `status request'.
- */
-typedef void (*mii_statusreq_t)(struct mii_softc *);
+struct mii_phy_funcs {
+	int (*pf_service)(struct mii_softc *, struct mii_data *, int);
+	void (*pf_status)(struct mii_softc *);
+	void (*pf_reset)(struct mii_softc *);
+};
 
 /*
  * Requests that can be made to the downcall.
@@ -134,8 +124,9 @@ struct mii_softc {
 	int mii_offset;			/* first PHY, second PHY, etc. */
 	int mii_inst;			/* instance for ifmedia */
 
-	mii_downcall_t mii_service;	/* our downcall */
-	mii_statusreq_t mii_status;	/* our status request fn */
+	/* Our PHY functions. */
+	const struct mii_phy_funcs *mii_funcs;
+
 	struct mii_data *mii_pdata;	/* pointer to parent's mii_data */
 
 	int mii_flags;			/* misc. flags; see below */
@@ -144,11 +135,7 @@ struct mii_softc {
 	int mii_ticks;			/* MII_TICK counter */
 	int mii_anegticks;		/* ticks before retrying aneg */
 
-#if defined(__NetBSD__)
-	struct callout mii_nway_ch;	/* NWAY callout */
-#elif defined(__OpenBSD__)
 	struct timeout mii_phy_timo;	/* timeout handle */
-#endif
 
 	int mii_media_active;		/* last active media */
 	int mii_media_status;		/* last active status */
@@ -192,6 +179,15 @@ struct mii_attach_args {
 typedef struct mii_attach_args mii_attach_args_t;
 
 /*
+ * Used to match a PHY.
+ */
+struct mii_phydesc {
+	u_int32_t mpd_oui;		/* the PHY's OUI */
+	u_int32_t mpd_model;		/* the PHY's model */
+	const char *mpd_name;		/* the PHY's name */
+};
+
+/*
  * An array of these structures map MII media types to BMCR/ANAR settings.
  */
 struct mii_media {
@@ -222,6 +218,15 @@ struct mii_media {
 	(*(p)->mii_pdata->mii_writereg)((p)->mii_dev.dv_parent, \
 	    (p)->mii_phy, (r), (v))
 
+#define	PHY_SERVICE(p, d, o) \
+	(*(p)->mii_funcs->pf_service)((p), (d), (o))
+
+#define	PHY_STATUS(p) \
+	(*(p)->mii_funcs->pf_status)((p))
+
+#define	PHY_RESET(p) \
+	(*(p)->mii_funcs->pf_reset)((p))
+
 #define mii_phy_probe(x, y, z) \
 	mii_attach((x), (y), (z), MII_PHY_ANY, MII_OFFSET_ANY, 0)
 
@@ -238,6 +243,9 @@ void	mii_down(struct mii_data *);
 int	mii_phy_activate(struct device *, enum devact);
 int	mii_phy_detach(struct device *, int);
 
+const struct mii_phydesc *mii_phy_match(const struct mii_attach_args *,
+	    const struct mii_phydesc *);
+
 void	mii_phy_add_media(struct mii_softc *);
 void	mii_phy_delete_media(struct mii_softc *);
 
@@ -249,7 +257,7 @@ int	mii_phy_tick(struct mii_softc *);
 
 void	mii_phy_status(struct mii_softc *);
 void	mii_phy_update(struct mii_softc *, int);
-void	mii_phy_statusmsg(struct mii_softc *);
+int	mii_phy_statusmsg(struct mii_softc *);
 
 void	ukphy_status(struct mii_softc *);
 

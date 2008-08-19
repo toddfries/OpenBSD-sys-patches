@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.34 2004/04/19 22:38:37 deraadt Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.36 2004/11/17 13:46:33 markus Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -133,6 +133,7 @@ do {									\
 #define	SS_ASYNC		0x200	/* async i/o notify */
 #define	SS_ISCONFIRMING		0x400	/* deciding to accept connection req */
 #define	SS_CONNECTOUT		0x1000	/* connect, not accept, at this end */
+#define	SS_ISSENDING		0x2000	/* hint for lower layer */
 
 /*
  * Macros for sockets and socket buffering.
@@ -148,15 +149,18 @@ do {									\
  * How much space is there in a socket buffer (so->so_snd or so->so_rcv)?
  * This is problematical if the fields are unsigned, as the space might
  * still be negative (cc > hiwat or mbcnt > mbmax).  Should detect
- * overflow and return 0.  Should use "lmin" but it doesn't exist now.
+ * overflow and return 0.
  */
 #define	sbspace(sb) \
-    ((long) imin((int)((sb)->sb_hiwat - (sb)->sb_cc), \
-	 (int)((sb)->sb_mbmax - (sb)->sb_mbcnt)))
+    lmin((sb)->sb_hiwat - (sb)->sb_cc, (sb)->sb_mbmax - (sb)->sb_mbcnt)
 
 /* do we have to send all at once on a socket? */
 #define	sosendallatonce(so) \
     ((so)->so_proto->pr_flags & PR_ATOMIC)
+
+/* are we sending on this socket? */
+#define	soissending(so) \
+    ((so)->so_state & SS_ISSENDING)
 
 /* can we read something from so? */
 #define	soreadable(so) \

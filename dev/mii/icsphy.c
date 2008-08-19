@@ -1,4 +1,4 @@
-/*	$OpenBSD: icsphy.c,v 1.11 2003/07/09 02:09:08 krw Exp $	*/
+/*	$OpenBSD: icsphy.c,v 1.17 2005/02/19 06:00:04 brad Exp $	*/
 /*	$NetBSD: icsphy.c,v 1.17 2000/02/02 23:34:56 thorpej Exp $	*/
 
 /*-
@@ -77,7 +77,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -105,62 +104,52 @@ int	icsphy_service(struct mii_softc *, struct mii_data *, int);
 void	icsphy_reset(struct mii_softc *);
 void	icsphy_status(struct mii_softc *);
 
+const struct mii_phy_funcs icsphy_funcs = {
+	icsphy_service, icsphy_status, icsphy_reset,
+};
+
+static const struct mii_phydesc icsphys[] = {
+	{ MII_OUI_xxICS,		MII_MODEL_xxICS_1890,
+	  MII_STR_xxICS_1890 },
+	{ MII_OUI_xxICS,		MII_MODEL_xxICS_1892,
+	  MII_STR_xxICS_1892 },
+	{ MII_OUI_xxICS,		MII_MODEL_xxICS_1893,
+	  MII_STR_xxICS_1893 },
+
+	{ 0,			0,
+	  NULL },
+
+};
+
 int
-icsphymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+icsphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxICS &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxICS_1890)
-		return (10);
-
-        if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxICS &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxICS_1892)
-		return (10);
-
-        if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxICS &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxICS_1893)
+	if (mii_phy_match(ma, icsphys) != NULL)
 		return (10);
 
 	return (0);
 }
 
 void
-icsphyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+icsphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
-	char *model = "?";
+	const struct mii_phydesc *mpd;
 
-        if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxICS)
-		switch (MII_MODEL(ma->mii_id2)) {
-		case MII_MODEL_xxICS_1890:
-			model = MII_STR_xxICS_1890;
-			break;
-		case MII_MODEL_xxICS_1892:
-			model = MII_STR_xxICS_1892;
-			break;
-		case MII_MODEL_xxICS_1893:
-			model = MII_STR_xxICS_1893;
-			break;
-		}
-
-	printf(": %s, rev. %d\n", model, MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, icsphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = icsphy_service;
-	sc->mii_status = icsphy_status;
+	sc->mii_funcs = &icsphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
-	icsphy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;

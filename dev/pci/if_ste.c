@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.24 2004/08/22 18:16:20 canacar Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.28 2005/01/15 05:24:11 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -723,7 +723,7 @@ void ste_txeoc(sc)
 			ste_init(sc);
 
 			if (txstat & STE_TXSTATUS_UNDERRUN &&
-			    sc->ste_tx_thresh < STE_PACKET_SIZE) {
+			    sc->ste_tx_thresh < ETHER_MAX_DIX_LEN) {
 				sc->ste_tx_thresh += STE_MIN_FRAMELEN;
 				printf("%s: tx underrun, increasing tx"
 				    " start threshold to %d bytes\n",
@@ -731,7 +731,7 @@ void ste_txeoc(sc)
 			}
 			CSR_WRITE_2(sc, STE_TX_STARTTHRESH, sc->ste_tx_thresh);
 			CSR_WRITE_2(sc, STE_TX_RECLAIM_THRESH,
-			    (STE_PACKET_SIZE >> 4));
+			    (ETHER_MAX_DIX_LEN >> 4));
 		}
 		ste_init(sc);
 		CSR_WRITE_2(sc, STE_TX_STATUS, txstat);
@@ -950,16 +950,15 @@ void ste_attach(parent, self, aux)
 
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = ste_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = ste_start;
 	ifp->if_watchdog = ste_watchdog;
 	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, STE_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	sc->ste_tx_thresh = STE_TXSTART_THRESH;
 
@@ -1016,8 +1015,8 @@ int ste_newbuf(sc, c, m)
 
 	c->ste_mbuf = m_new;
 	c->ste_ptr->ste_status = 0;
-	c->ste_ptr->ste_frag.ste_addr = vtophys(mtod(m_new, caddr_t));
-	c->ste_ptr->ste_frag.ste_len = 1536 | STE_FRAG_LAST;
+	c->ste_ptr->ste_frag.ste_addr = vtophys(mtod(m_new, vaddr_t));
+	c->ste_ptr->ste_frag.ste_len = (ETHER_MAX_DIX_LEN + ETHER_VLAN_ENCAP_LEN) | STE_FRAG_LAST;
 
 	return(0);
 }
@@ -1040,12 +1039,12 @@ int ste_init_rx_list(sc)
 			cd->ste_rx_chain[i].ste_next =
 			    &cd->ste_rx_chain[0];
 			ld->ste_rx_list[i].ste_next =
-			    vtophys(&ld->ste_rx_list[0]);
+			    vtophys((vaddr_t)&ld->ste_rx_list[0]);
 		} else {
 			cd->ste_rx_chain[i].ste_next =
 			    &cd->ste_rx_chain[i + 1];
 			ld->ste_rx_list[i].ste_next =
-			    vtophys(&ld->ste_rx_list[i + 1]);
+			    vtophys((vaddr_t)&ld->ste_rx_list[i + 1]);
 		}
 		ld->ste_rx_list[i].ste_status = 0;
 	}
@@ -1066,7 +1065,7 @@ void ste_init_tx_list(sc)
 	ld = sc->ste_ldata;
 	for (i = 0; i < STE_TX_LIST_CNT; i++) {
 		cd->ste_tx_chain[i].ste_ptr = &ld->ste_tx_list[i];
-		cd->ste_tx_chain[i].ste_phys = vtophys(&ld->ste_tx_list[i]);
+		cd->ste_tx_chain[i].ste_phys = vtophys((vaddr_t)&ld->ste_tx_list[i]);
 		if (i == (STE_TX_LIST_CNT - 1))
 			cd->ste_tx_chain[i].ste_next =
 			    &cd->ste_tx_chain[0];
@@ -1119,13 +1118,13 @@ void ste_init(xsc)
 	ste_init_tx_list(sc);
 
 	/* Set the TX freethresh value */
-	CSR_WRITE_1(sc, STE_TX_DMABURST_THRESH, STE_PACKET_SIZE >> 8);
+	CSR_WRITE_1(sc, STE_TX_DMABURST_THRESH, ETHER_MAX_DIX_LEN >> 8);
 
 	/* Set the TX start threshold for best performance. */
 	CSR_WRITE_2(sc, STE_TX_STARTTHRESH, sc->ste_tx_thresh);
 
 	/* Set the TX reclaim threshold. */
-	CSR_WRITE_1(sc, STE_TX_RECLAIM_THRESH, (STE_PACKET_SIZE >> 4));
+	CSR_WRITE_1(sc, STE_TX_RECLAIM_THRESH, (ETHER_MAX_DIX_LEN >> 4));
 
 	/* Set up the RX filter. */
 	CSR_WRITE_1(sc, STE_RX_MODE, STE_RXMODE_UNICAST);
@@ -1150,7 +1149,7 @@ void ste_init(xsc)
 	STE_SETBIT4(sc, STE_DMACTL, STE_DMACTL_RXDMA_STALL);
 	ste_wait(sc);
 	CSR_WRITE_4(sc, STE_RX_DMALIST_PTR,
-	    vtophys(&sc->ste_ldata->ste_rx_list[0]));
+	    vtophys((vaddr_t)&sc->ste_ldata->ste_rx_list[0]));
 	STE_SETBIT4(sc, STE_DMACTL, STE_DMACTL_RXDMA_UNSTALL);
 	STE_SETBIT4(sc, STE_DMACTL, STE_DMACTL_RXDMA_UNSTALL);
 
@@ -1178,6 +1177,10 @@ void ste_init(xsc)
 	/* Enable interrupts. */
 	CSR_WRITE_2(sc, STE_ISR, 0xFFFF);
 	CSR_WRITE_2(sc, STE_IMR, STE_INTRS);
+
+	/* Accept VLAN length packets */
+	CSR_WRITE_2(sc, STE_MAX_FRAMELEN,
+	    ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN);
 
 	ste_ifmedia_upd(ifp);
 
@@ -1332,7 +1335,8 @@ int ste_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			ste_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				ste_setmulti(sc);
 			error = 0;
 		}
 		break;
@@ -1459,7 +1463,7 @@ void ste_start(ifp)
 			ste_wait(sc);
 
 			CSR_WRITE_4(sc, STE_TX_DMALIST_PTR,
-			    vtophys(&sc->ste_ldata->ste_tx_list[0]));
+			    vtophys((vaddr_t)&sc->ste_ldata->ste_tx_list[0]));
 
 			/* Set TX polling interval to start TX engine */
 			CSR_WRITE_1(sc, STE_TX_DMAPOLL_PERIOD, 64);

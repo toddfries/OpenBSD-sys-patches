@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.91 2004/03/10 23:02:53 tom Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.101 2005/02/27 22:08:41 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -89,17 +89,14 @@
 #define	MAXMEM	64*1024	/* XXX - from cmap.h */
 #include <uvm/uvm_extern.h>
 
-#include <arch/hp300/dev/hilreg.h>
-#include <arch/hp300/dev/hilioctl.h>
-#include <arch/hp300/dev/hilvar.h>
 #ifdef USELEDS
-#include <arch/hp300/hp300/leds.h>
+#include <hp300/hp300/leds.h>
 #endif
 
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;	/* from <machine/param.h> */
 
-struct vm_map *exec_map = NULL;  
+struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 extern paddr_t avail_start, avail_end;
@@ -112,11 +109,18 @@ int	nbuf = NBUF;
 #else
 int	nbuf = 0;
 #endif
+
+#ifndef	BUFCACHEPERCENT
+#define	BUFCACHEPERCENT	5
+#endif
+
 #ifdef	BUFPAGES
 int	bufpages = BUFPAGES;
 #else
 int	bufpages = 0;
 #endif
+int	bufcachepercent = BUFCACHEPERCENT;
+
 int	maxmem;			/* max memory per process */
 int	physmem = MAXMEM;	/* max supported memory, changes to actual */
 /*
@@ -136,10 +140,11 @@ extern struct emul emul_sunos;
 #endif
 
 /*
- * XXX some storage space must be allocated statically because of
- * early console init
+ * Some storage space must be allocated statically because of the
+ * early console initialization.
  */
-char	extiospace[EXTENT_FIXED_STORAGE_SIZE(EIOMAPSIZE / 16)];
+char	extiospace[EXTENT_FIXED_STORAGE_SIZE(16)];
+extern int eiomapsize;
 
 /* prototypes for local functions */
 caddr_t	allocsys(caddr_t);
@@ -162,7 +167,6 @@ void	nmihand(struct frame);
  * "internal" framebuffer.
  */
 int	conscode;
-int	consinit_active;	/* flag for driver init routines */
 caddr_t	conaddr;		/* for drivers in cn_init() */
 int	convasize;		/* size of mapped console device */
 int	conforced;		/* console has been forced */
@@ -210,24 +214,21 @@ consinit()
 	/*
 	 * Initialize some variables for sanity.
 	 */
-	consinit_active = 1;
 	convasize = 0;
 	conforced = 0;
 	conscode = 1024;		/* invalid */
 
 	/*
-	 * Initialize the DIO resource map.
+	 * Initialize the bus resource map.
 	 */
 	extio = extent_create("extio",
-	    (u_long)extiobase, (u_long)extiobase + ctob(EIOMAPSIZE),
+	    (u_long)extiobase, (u_long)extiobase + ctob(eiomapsize),
 	    M_DEVBUF, extiospace, sizeof(extiospace), EX_NOWAIT);
-	    
+
 	/*
 	 * Initialize the console before we print anything out.
 	 */
 	hp300_cninit();
-
-	consinit_active = 0;
 
 #ifdef DDB
 	ddb_init();
@@ -255,6 +256,12 @@ cpu_startup()
 
 	pmapdebug = 0;
 #endif
+
+	/*
+	 * Now that VM services are available, give another chance at
+	 * console devices to initialize, if they could not before.
+	 */
+	hp300_cninit();
 
 	/*
 	 * Initialize error message buffer (at end of core).
@@ -313,7 +320,7 @@ cpu_startup()
 
 		while (curbufsize) {
 			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL) 
+			if (pg == NULL)
 				panic("cpu_startup: not enough memory for "
 				    "buffer cache");
 
@@ -415,19 +422,27 @@ allocsys(v)
 #endif
 
 	/*
-	 * Determine how many buffers to allocate.  Since HPs tend
-	 * to be long on memory and short on disk speed, we allocate
-	 * more buffer space than the BSD standard of 10% of memory
-	 * for the first 2 Meg, 5% of the remaining.  We just allocate
-	 * a flag 10%.  Insure a minimum of 16 buffers.
+	 * Determine how many buffers to allocate (enough to
+	 * hold 5% of total physical memory, but at least 16).
+	 * Allocate 1/2 as many swap buffer headers as file i/o buffers.
 	 */
 	if (bufpages == 0)
-		bufpages = physmem / 10;
+		bufpages = physmem * bufcachepercent / 100;
 	if (nbuf == 0) {
 		nbuf = bufpages;
 		if (nbuf < 16)
 			nbuf = 16;
 	}
+	/* Restrict to at most 70% filled kvm */
+	if (nbuf * MAXBSIZE >
+	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 7 / 10)
+		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
+		    MAXBSIZE * 7 / 10;
+
+	/* More buffer pages than fits into the buffers is senseless. */
+	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
+		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
+
 	valloc(buf, struct buf, nbuf);
 	return (v);
 }
@@ -1048,7 +1063,8 @@ badbaddr(addr)
 static int innmihand;	/* simple mutex */
 
 /*
- * Level 7 interrupts can be caused by the keyboard or parity errors.
+ * Level 7 interrupts can be caused by HIL keyboards (in cooked mode only,
+ * but we run them in raw mode) or parity errors.
  */
 void
 nmihand(frame)
@@ -1060,22 +1076,14 @@ nmihand(frame)
 		return;
 	innmihand = 1;
 
-	/* Check for keyboard <CRTL>+<SHIFT>+<RESET>. */
-	if (kbdnmi()) {
-#ifdef DDB
-		if (db_console) {
-			Debugger();
-		}
-#endif /* DDB */
-		goto nmihand_out;	/* no more work to do */
+	if (parityerror(&frame)) {
+		innmihand = 0;
+		return;
 	}
 
-	if (parityerror(&frame))
-		return;
 	/* panic?? */
 	printf("unexpected level 7 interrupt ignored\n");
 
-nmihand_out:
 	innmihand = 0;
 }
 
@@ -1211,7 +1219,7 @@ done:
 /*
  * cpu_exec_aout_makecmds():
  *	cpu-dependent a.out format hook for execve().
- * 
+ *
  * Determine of the given exec package refers to something which we
  * understand and, if so, set up the vmcmds for it.
  */

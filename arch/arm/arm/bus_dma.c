@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.2 2004/02/01 06:10:33 drahn Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.5 2004/12/30 23:24:57 drahn Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.38 2003/10/30 08:44:13 scw Exp $	*/
 
 /*-
@@ -250,6 +250,8 @@ _bus_dmamap_load_mbuf(bus_dma_tag_t t, bus_dmamap_t map, struct mbuf *m0,
 	seg = 0;
 	error = 0;
 	for (m = m0; m != NULL && error == 0; m = m->m_next) {
+		if (m->m_len == 0)
+			continue;
  		error = _bus_dmamap_load_buffer(t, map, m->m_data, m->m_len,
  		    NULL, flags, &lastaddr, &seg, first);
 		first = 0;
@@ -993,16 +995,16 @@ _bus_dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
 	 * Compute the location, size, and number of segments actually
 	 * returned by the VM code.
 	 */
-	m = mlist.tqh_first;
+	m = TAILQ_FIRST(&mlist);
 	curseg = 0;
 	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_len = PAGE_SIZE;
 #ifdef DEBUG_DMA
 		printf("alloc: page %lx\n", lastaddr);
 #endif	/* DEBUG_DMA */
-	m = m->pageq.tqe_next;
+	m = TAILQ_NEXT(m, pageq);
 
-	for (; m != NULL; m = m->pageq.tqe_next) {
+	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {
@@ -1068,3 +1070,44 @@ arm32_dma_range_intersect(struct arm32_dma_range *ranges, int nranges,
 	/* No intersection found. */
 	return (0);
 }
+
+/*
+ * probably should be ppc_space_copy
+ */
+
+#define _CONCAT(A,B) A ## B
+#define __C(A,B)	_CONCAT(A,B)
+
+#define BUS_SPACE_READ_RAW_MULTI_N(BYTES,SHIFT,TYPE)			\
+void									\
+__C(bus_space_read_raw_multi_,BYTES)(bus_space_tag_t bst,		\
+    bus_space_handle_t h, bus_addr_t o, u_int8_t *dst, bus_size_t size)	\
+{									\
+	TYPE *rdst = (TYPE *)dst;					\
+	int i;								\
+	int count = size >> SHIFT;					\
+									\
+	for (i = 0; i < count; i++) {					\
+		rdst[i] = __bs_rs(BYTES, bst, h, o);			\
+	}								\
+}
+BUS_SPACE_READ_RAW_MULTI_N(2,1,u_int16_t)
+BUS_SPACE_READ_RAW_MULTI_N(4,2,u_int32_t)
+
+#define BUS_SPACE_WRITE_RAW_MULTI_N(BYTES,SHIFT,TYPE)			\
+void									\
+__C(bus_space_write_raw_multi_,BYTES)( bus_space_tag_t bst,		\
+    bus_space_handle_t h, bus_addr_t o, const u_int8_t *src,		\
+    bus_size_t size)							\
+{									\
+	int i;								\
+	TYPE *rsrc = (TYPE *)src;					\
+	int count = size >> SHIFT;					\
+									\
+	for (i = 0; i < count; i++) {					\
+		__bs_ws(BYTES, bst, h, o, rsrc[i]);			\
+	}								\
+}
+
+BUS_SPACE_WRITE_RAW_MULTI_N(2,1,u_int16_t)
+BUS_SPACE_WRITE_RAW_MULTI_N(4,2,u_int32_t)

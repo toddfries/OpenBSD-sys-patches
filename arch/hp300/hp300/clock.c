@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.9 2003/06/02 23:27:45 millert Exp $	*/
+/*	$OpenBSD: clock.c,v 1.12 2005/01/14 22:39:27 miod Exp $	*/
 /*	$NetBSD: clock.c,v 1.20 1997/04/27 20:43:38 thorpej Exp $	*/
 
 /*
@@ -51,14 +51,13 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/tty.h>
+#include <sys/evcount.h>
 
 #include <machine/psl.h>
 #include <machine/cpu.h>
 #include <machine/hp300spu.h>
 
-#include <hp300/dev/hilreg.h>
-#include <hp300/dev/hilioctl.h>
-#include <hp300/dev/hilvar.h>
+#include <dev/hil/hilreg.h>	/* for BBC */
 #include <hp300/hp300/clockreg.h>
 
 #ifdef GPROF
@@ -86,8 +85,9 @@ static int month_days[12] = {
 	31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 };
 u_char bbc_registers[13];
-struct hil_dev *bbcaddr = NULL;
+volatile u_int8_t *bbcaddr = NULL;
 
+void	clockintr(struct clockframe *);
 void	statintr(struct clockframe *);
 
 void	hp300_calibrate_delay(void);
@@ -95,7 +95,14 @@ struct bbc_tm *gmt_to_bbc(long);
 int	bbc_to_gmt(u_long *);
 void	read_bbc(void);
 u_char	read_bbc_reg(int);
+void	send_clock_cmd(volatile u_int8_t *, u_int8_t, u_int8_t *,
+    u_int8_t, u_int8_t *);
 u_char	write_bbc_reg(int, u_int);
+
+static int clock_ipl = IPL_CLOCK;
+static int stat_ipl = IPL_STATCLOCK;
+struct evcount clockcnt;
+struct evcount statcnt;
 
 /*
  * Machine-dependent clock routines.
@@ -146,7 +153,7 @@ hp300_calibrate_delay()
 		/* Enable the timer */
 		clk->clk_cr2 = CLK_CR1;
 		clk->clk_cr1 = CLK_IENAB;
-		
+
 		delay(10000);
 
 		/* Timer1 interrupt flag high? */
@@ -246,6 +253,9 @@ cpu_initclocks()
 	timer3min = statmin;
 	statprev = statint;
 
+	evcount_attach(&statcnt, "stat", &stat_ipl, &evcount_intr);
+	evcount_attach(&clockcnt, "clock", &clock_ipl, &evcount_intr);
+
 	/* finally, load hardware */
 	clk->clk_cr2 = CLK_CR1;
 	clk->clk_cr1 = CLK_RESET;
@@ -275,10 +285,19 @@ setstatclockrate(newhz)
 }
 
 /*
+ * Timer clock interrupt.
+ */
+void
+clockintr(fp)
+	struct clockframe *fp;
+{
+	clockcnt.ec_count++;
+	hardclock(fp);
+}
+
+/*
  * Statistics/profiling clock interrupt.  Compute a new interval.
  * Interrupt has already been cleared.
- *
- * DO THIS INLINE IN locore.s?
  */
 void
 statintr(fp)
@@ -306,6 +325,7 @@ statintr(fp)
 
 	asm volatile(" movpw %0,%1@(13)" : : "d" (newint), "a" (clk));
 	statprev = newint;
+	statcnt.ec_count++;
 	statclock(fp);
 }
 
@@ -361,10 +381,14 @@ inittodr(base)
 
 	/* XXX */
 	if (!bbcinited) {
-		if (badbaddr((caddr_t)&BBCADDR->hil_stat))
-			printf("WARNING: no battery clock\n");
-		else
-			bbcaddr = BBCADDR;
+		if (machineid == HP_425 && mmuid == MMUID_425_E)
+			bbcaddr = NULL;
+		else {
+			if (badbaddr((caddr_t)(BBCADDR + HILP_STAT)))
+				printf("WARNING: no battery clock\n");
+			else
+				bbcaddr = BBCADDR;
+		}
 		bbcinited = 1;
 	}
 
@@ -374,16 +398,18 @@ inittodr(base)
 	 * time is more recent than the gmt time in the clock,
 	 * then use the filesystem time and warn the user.
  	 */
-	if (!bbc_to_gmt(&timbuf) || timbuf < base) {
-		printf("WARNING: bad date in battery clock\n");
-		timbuf = base;
+	if (bbcaddr != NULL) {
+		if (!bbc_to_gmt(&timbuf) || timbuf < base) {
+			printf("WARNING: bad date in battery clock\n");
+			timbuf = base;
+		}
 	}
 	if (base < 5*SECYR) {
 		printf("WARNING: preposterous time in file system");
 		timbuf = 6*SECYR + 186*SECDAY + SECDAY/2;
 		printf(" -- CHECK AND RESET THE DATE!\n");
 	}
-	
+
 	/* Battery clock does not store usec's, so forget about it. */
 	time.tv_sec = timbuf;
 }
@@ -396,6 +422,9 @@ resettodr()
 {
 	int i;
 	struct bbc_tm *tmptr;
+
+	if (bbcaddr == NULL)
+		return;
 
 	tmptr = gmt_to_bbc(time.tv_sec);
 
@@ -438,7 +467,7 @@ gmt_to_bbc(tim)
 	for (i = STARTOFTIME - 1900; day >= days_in_year(i); i++)
 	  	day -= days_in_year(i);
 	rt.tm_year = i;
-	
+
 	/* Number of months in days left */
 	if (leapyear(rt.tm_year))
 		days_in_month(FEBRUARY) = 29;
@@ -448,8 +477,8 @@ gmt_to_bbc(tim)
 	rt.tm_mon = i;
 
 	/* Days are what is left over (+1) from all that. */
-	rt.tm_mday = day + 1;  
-	
+	rt.tm_mday = day + 1;
+
 	return(&rt);
 }
 
@@ -488,7 +517,7 @@ bbc_to_gmt(timbuf)
 
 	for (i = 1; i < month; i++)
 	  	tmp += days_in_month(i);
-	
+
 	tmp += (day - 1);
 	tmp = ((tmp * 24 + hour) * 60 + min) * 60 + sec;
 
@@ -518,9 +547,9 @@ read_bbc_reg(reg)
 {
 	u_char data = reg;
 
-	if (bbcaddr) {
-		send_hil_cmd(bbcaddr, BBC_SET_REG, &data, 1, NULL);
-		send_hil_cmd(bbcaddr, BBC_READ_REG, NULL, 0, &data);
+	if (bbcaddr != NULL) {
+		send_clock_cmd(bbcaddr, BBC_SET_REG, &data, 1, NULL);
+		send_clock_cmd(bbcaddr, BBC_READ_REG, NULL, 0, &data);
 	}
 	return(data);
 }
@@ -534,10 +563,47 @@ write_bbc_reg(reg, data)
 
 	tmp = (u_char) ((data << HIL_SSHIFT) | reg);
 
-	if (bbcaddr) {
-		send_hil_cmd(bbcaddr, BBC_SET_REG, &tmp, 1, NULL);
-		send_hil_cmd(bbcaddr, BBC_WRITE_REG, NULL, 0, NULL);
-		send_hil_cmd(bbcaddr, BBC_READ_REG, NULL, 0, &tmp);
+	if (bbcaddr != NULL) {
+		send_clock_cmd(bbcaddr, BBC_SET_REG, &tmp, 1, NULL);
+		send_clock_cmd(bbcaddr, BBC_WRITE_REG, NULL, 0, NULL);
+		send_clock_cmd(bbcaddr, BBC_READ_REG, NULL, 0, &tmp);
 	}
 	return(tmp);
-}	
+}
+
+/*
+ * Battery-backed clock command interface.
+ * The BBC appears to have an HIL-like command interface, but can not attach
+ * as a complete HIL device to an HIL controller driver.
+ * The following routine is a simplified command loop.
+ */
+void
+send_clock_cmd(volatile u_int8_t *address, u_int8_t cmd, u_int8_t *data,
+    u_int8_t dlen, u_int8_t *rdata)
+{
+	u_int8_t status;
+	int s;
+
+	s = splimp();
+
+	while ((address[HILP_STAT] & HIL_BUSY) != 0)
+		DELAY(1);
+	address[HILP_CMD] = cmd;
+	while (dlen--) {
+		while ((address[HILP_STAT] & HIL_BUSY) != 0)
+			DELAY(1);
+		address[HILP_DATA] = *data++;
+		DELAY(1);
+	}
+	if (rdata != NULL) {
+		do {
+			while ((address[HILP_STAT] & HIL_DATA_RDY) == 0)
+				DELAY(1);
+			status = address[HILP_STAT];
+			*rdata = address[HILP_DATA];
+			DELAY(1);
+		} while (((status >> HIL_SSHIFT) & HIL_SMASK) != HIL_68K);
+	}
+
+	splx(s);
+}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.36 2004/08/06 22:39:13 deraadt Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.37.2.1 2006/01/13 00:49:21 brad Exp $	*/
 /*	$NetBSD: pmap.h,v 1.44 2000/04/24 17:18:18 thorpej Exp $	*/
 
 /*
@@ -114,7 +114,7 @@
  * Note that the PDE#831 VA (0xcfc00000) is defined as "PTE_BASE".
  * Note that the PDE#1023 VA (0xffc00000) is defined as "APTE_BASE".
  *
- * Starting at VA 0xdfc00000 the current active PDP (%cr3) acts as a
+ * Starting at VA 0xcfc00000 the current active PDP (%cr3) acts as a
  * PTP:
  *
  * PTP#831 == PDP(%cr3) => maps VA 0xcfc00000 -> 0xd0000000
@@ -275,6 +275,7 @@ struct pmap {
 	vaddr_t pm_hiexec;		/* highest executable mapping */
 	int pm_flags;			/* see below */
 
+	struct	segment_descriptor pm_codeseg;	/* cs descriptor for process */
 	union descriptor *pm_ldt;	/* user-set LDT */
 	int pm_ldt_len;			/* number of LDT entries */
 	int pm_ldt_sel;			/* LDT selector */

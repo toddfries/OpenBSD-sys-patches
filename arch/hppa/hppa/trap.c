@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.80 2004/07/13 19:34:23 mickey Exp $	*/
+/*	$OpenBSD: trap.c,v 1.84 2005/01/17 20:47:40 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -183,15 +183,15 @@ trap(type, frame)
 
 	trapnum = type & ~T_USER;
 	opcode = frame->tf_iir;
-	if (trapnum == T_ITLBMISS ||
-	    trapnum == T_EXCEPTION || trapnum == T_EMULATION) {
+	if (trapnum <= T_EXCEPTION || trapnum == T_HIGHERPL ||
+	    trapnum == T_LOWERPL || trapnum == T_TAKENBR ||
+	    trapnum == T_IDEBUG || trapnum == T_PERFMON) {
 		va = frame->tf_iioq_head;
 		space = frame->tf_iisq_head;
 		vftype = UVM_PROT_EXEC;
 	} else {
 		va = frame->tf_ior;
 		space = frame->tf_isr;
-		/* what is the vftype for the T_ITLBMISSNA ??? XXX */
 		if (va == frame->tf_iioq_head)
 			vftype = UVM_PROT_EXEC;
 		else if (inst_store(opcode))
@@ -305,7 +305,10 @@ trap(type, frame)
 			else if (stat & (HPPA_FPU_U << 1))
 				flt = FPE_FLTUND;
 			/* still left: under/over-flow w/ inexact */
-			*pex = 0;
+
+			/* cleanup exceptions (XXX deliver all ?) */
+			while (i++ < 7)
+				*pex++ = 0;
 		}
 		/* reset the trap flag, as if there was none */
 		fpp[0] &= ~(((u_int64_t)HPPA_FPU_T) << 32);
@@ -359,6 +362,46 @@ trap(type, frame)
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
 		break;
 
+	case T_ITLBMISSNA:
+	case T_ITLBMISSNA | T_USER:
+	case T_DTLBMISSNA:
+	case T_DTLBMISSNA | T_USER:
+		if (space == HPPA_SID_KERNEL)
+			map = kernel_map;
+		else {
+			vm = p->p_vmspace;
+			map = &vm->vm_map;
+		}
+
+		/* dig probe[rw]i? insns */
+		if ((opcode & 0xfc001f80) == 0x04001180) {
+			int pl;
+
+			if (opcode & 0x2000)
+				pl = (opcode >> 16) & 3;
+			else
+				pl = frame_regmap(frame,
+				    (opcode >> 16) & 0x1f) & 3;
+
+			if ((type & T_USER && space == HPPA_SID_KERNEL) ||
+			    (frame->tf_iioq_head & 3) != pl ||
+			    (type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
+			    uvm_fault(map, hppa_trunc_page(va), fault,
+			     opcode & 0x40? UVM_PROT_WRITE : UVM_PROT_READ)) {
+				frame_regmap(frame, opcode & 0x1f) = 0;
+				frame->tf_ipsw |= PSL_N;
+			}
+		} else if (type & T_USER) {
+			sv.sival_int = va;
+			trapsignal(p, SIGILL, type & ~T_USER, ILL_ILLTRP, sv);
+		} else
+			panic("trap: %s @ 0x%x:0x%x for 0x%x:0x%x irr 0x%08x\n",
+			    tts, frame->tf_iisq_head, frame->tf_iioq_head,
+			    space, va, opcode);
+		break;
+
+	case T_TLB_DIRTY:
+	case T_TLB_DIRTY | T_USER:
 	case T_DATACC:
 	case T_DATACC | T_USER:
 		fault = VM_FAULT_PROTECT;
@@ -366,24 +409,6 @@ trap(type, frame)
 	case T_ITLBMISS | T_USER:
 	case T_DTLBMISS:
 	case T_DTLBMISS | T_USER:
-	case T_ITLBMISSNA:
-	case T_ITLBMISSNA | T_USER:
-	case T_DTLBMISSNA:
-	case T_DTLBMISSNA | T_USER:
-	case T_TLB_DIRTY:
-	case T_TLB_DIRTY | T_USER:
-		/*
-		 * user faults out of user addr space are always a fail,
-		 * this happens on va >= VM_MAXUSER_ADDRESS, where
-		 * space id will be zero and therefore cause
-		 * a misbehave lower in the code.
-		 */
-		if (type & T_USER && va >= VM_MAXUSER_ADDRESS) {
-			sv.sival_int = va;
-			trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
-			break;
-		}
-
 		/*
 		 * it could be a kernel map for exec_map faults
 		 */
@@ -394,21 +419,22 @@ trap(type, frame)
 			map = &vm->vm_map;
 		}
 
-		if (type & T_USER && map->pmap->pm_space != space) {
+		/*
+		 * user faults out of user addr space are always a fail,
+		 * this happens on va >= VM_MAXUSER_ADDRESS, where
+		 * space id will be zero and therefore cause
+		 * a misbehave lower in the code.
+		 *
+		 * also check that faulted space id matches the curproc.
+		 */
+		if ((type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
+		   (type & T_USER && map->pmap->pm_space != space)) {
 			sv.sival_int = va;
 			trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, sv);
 			break;
 		}
 
 		ret = uvm_fault(map, hppa_trunc_page(va), fault, vftype);
-
-		/* dig probe insn */
-		if (ret && trapnum == T_DTLBMISSNA &&
-		    (opcode & 0xfc001f80) == 0x04001180) {
-			frame_regmap(frame, opcode & 0x1f) = 0;
-			frame->tf_ipsw |= PSL_N;
-			break;
-		}
 
 		/*
 		 * If this was a stack access we keep track of the maximum
@@ -418,13 +444,10 @@ trap(type, frame)
 		 * error.
 		 */
 		if (space != HPPA_SID_KERNEL &&
-		    va < (vaddr_t)vm->vm_minsaddr &&
-		    va >= (vaddr_t)vm->vm_maxsaddr + ctob(vm->vm_ssize)) {
-			if (ret == 0) {
-				vsize_t nss = btoc(va - USRSTACK + NBPG - 1);
-				if (nss > vm->vm_ssize)
-					vm->vm_ssize = nss;
-			} else if (ret == EACCES)
+		    va < (vaddr_t)vm->vm_minsaddr) {
+			if (ret == 0)
+				uvm_grow(p, va);
+			else if (ret == EACCES)
 				ret = EFAULT;
 		}
 

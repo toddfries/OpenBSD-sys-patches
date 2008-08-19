@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.63 2004/06/20 17:28:26 itojun Exp $	*/
+/*	$OpenBSD: systm.h,v 1.66 2005/01/14 04:31:33 djm Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -167,9 +167,6 @@ int	printf(const char *, ...)
 void	uprintf(const char *, ...)
     __attribute__((__format__(__kprintf__,1,2)));
 int	vprintf(const char *, va_list);
-int	vsprintf(char *, const char *, va_list);
-int	sprintf(char *buf, const char *, ...)
-    __attribute__((__format__(__kprintf__,2,3)));
 int	vsnprintf(char *, size_t, const char *, va_list);
 int	snprintf(char *buf, size_t, const char *, ...)
     __attribute__((__format__(__kprintf__,3,4)));
@@ -204,10 +201,13 @@ void	*memmove(void *, const void *, size_t)
 void	*memset(void *, int, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,3)));
 
-int	copystr(const void *, void *, size_t, size_t *);
-int	copyinstr(const void *, void *, size_t, size_t *);
+int	copystr(const void *, void *, size_t, size_t *)
+		__attribute__ ((__bounded__(__string__,2,3)));
+int	copyinstr(const void *, void *, size_t, size_t *)
+		__attribute__ ((__bounded__(__string__,2,3)));
 int	copyoutstr(const void *, void *, size_t, size_t *);
-int	copyin(const void *, void *, size_t);
+int	copyin(const void *, void *, size_t)
+		__attribute__ ((__bounded__(__buffer__,2,3)));
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
@@ -246,7 +246,8 @@ struct hook_desc {
 };
 TAILQ_HEAD(hook_desc_head, hook_desc);
 
-extern struct hook_desc_head shutdownhook_list, startuphook_list;
+extern struct hook_desc_head shutdownhook_list, startuphook_list,
+    mountroothook_list;
 
 void	*hook_establish(struct hook_desc_head *, int, void (*)(void *), void *);
 void	hook_disestablish(struct hook_desc_head *, void *);
@@ -266,6 +267,12 @@ void	dohooks(struct hook_desc_head *, int);
 #define shutdownhook_disestablish(vhook) \
 	hook_disestablish(&shutdownhook_list, (vhook))
 #define doshutdownhooks() dohooks(&shutdownhook_list, HOOK_REMOVE)
+
+#define mountroothook_establish(fn, arg) \
+	hook_establish(&mountroothook_list, 0, (fn), (arg))
+#define mountroothook_disestablish(vhook) \
+	hook_disestablish(&mountroothook_list, (vhook))
+#define domountroothooks() dohooks(&mountroothook_list, HOOK_REMOVE|HOOK_FREE)
 
 /*
  * Power management hooks.

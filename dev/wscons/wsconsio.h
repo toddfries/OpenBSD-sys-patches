@@ -1,4 +1,4 @@
-/* $OpenBSD: wsconsio.h,v 1.31 2004/04/24 13:37:46 miod Exp $ */
+/* $OpenBSD: wsconsio.h,v 1.34 2005/01/17 04:19:40 drahn Exp $ */
 /* $NetBSD: wsconsio.h,v 1.31.2.1 2000/07/07 09:49:17 hannken Exp $ */
 
 /*
@@ -114,6 +114,7 @@ struct wscons_event {
 #define		WSKBD_TYPE_HIL		13	/* HP HIL */
 #define		WSKBD_TYPE_GSC		14	/* HP PS/2 */
 #define		WSKBD_TYPE_LUNA		15	/* OMRON Luna */
+#define		WSKBD_TYPE_ZAURUS	16	/* Sharp Zaurus */
 
 /* Manipulate the keyboard bell. */
 struct wskbd_bell_data {
@@ -259,7 +260,7 @@ struct wsmouse_calibcoords {
 #define		WSDISPLAY_TYPE_DCPVR	24	/* Dreamcast PowerVR */
 #define		WSDISPLAY_TYPE_SUN24	25	/* Sun 24 bit framebuffers */
 #define		WSDISPLAY_TYPE_SUNBW	26	/* Sun black and white fb */
-#define		WSDISPLAY_TYPE_STI	27	/* HP STI frambuffers */
+#define		WSDISPLAY_TYPE_STI	27	/* HP STI framebuffers */
 #define		WSDISPLAY_TYPE_SUNCG3	28	/* Sun cgthree */
 #define		WSDISPLAY_TYPE_SUNCG6	29	/* Sun cgsix */
 #define		WSDISPLAY_TYPE_SUNFFB	30	/* Sun creator FFB */
@@ -275,6 +276,12 @@ struct wsmouse_calibcoords {
 #define		WSDISPLAY_TYPE_SB_P9000	40	/* Tadpole SPARCbook P9000 */
 #define		WSDISPLAY_TYPE_RFLEX	41	/* RasterFlex series */
 #define		WSDISPLAY_TYPE_LUNA	42	/* OMRON Luna */
+#define		WSDISPLAY_TYPE_DVBOX	43	/* HP DaVinci */
+#define		WSDISPLAY_TYPE_GBOX	44	/* HP Gatorbox */
+#define		WSDISPLAY_TYPE_RBOX	45	/* HP Renaissance */
+#define		WSDISPLAY_TYPE_HYPERION	46	/* HP Hyperion */
+#define		WSDISPLAY_TYPE_TOPCAT	47	/* HP Topcat */
+#define		WSDISPLAY_TYPE_PXALCD	48	/* PXALCD (Zaurus) */
 
 /* Basic display information.  Not applicable to all display types. */
 struct wsdisplay_fbinfo {

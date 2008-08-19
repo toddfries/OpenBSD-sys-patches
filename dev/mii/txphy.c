@@ -1,4 +1,4 @@
-/*	$OpenBSD: txphy.c,v 1.5 2003/06/02 19:08:58 jason Exp $	*/
+/*	$OpenBSD: txphy.c,v 1.10 2005/02/19 06:00:04 brad Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -34,7 +34,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -59,40 +58,47 @@ struct cfdriver txphy_cd = {
 
 int	txphy_service(struct mii_softc *, struct mii_data *, int);
 
+const struct mii_phy_funcs txphy_funcs = {
+	txphy_service, ukphy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc txphys[] = {
+	{ MII_OUI_xxTI,	MII_MODEL_xxTI_TNETE2101,
+	  MII_STR_xxTI_TNETE2101 },
+
+	{ 0,			0,
+	  NULL },
+};
+
 int
-txphymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+txphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxTI &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxTI_TNETE2101)
+	if (mii_phy_match(ma, txphys) != NULL)
 		return (10);
+
 	return (0);
 }
 
 void
-txphyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+txphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	printf(": %s, rev. %d\n", MII_STR_xxTI_TNETE2101,
-	    MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, txphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = txphy_service;
-	sc->mii_status = ukphy_status;
+	sc->mii_funcs = &txphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
@@ -101,10 +107,7 @@ txphyattach(parent, self, aux)
 }
 
 int
-txphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+txphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 

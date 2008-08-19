@@ -1,4 +1,4 @@
-/*	$OpenBSD: mii.c,v 1.12 2002/10/12 01:09:44 krw Exp $	*/
+/*	$OpenBSD: mii.c,v 1.15 2005/01/28 18:27:55 brad Exp $	*/
 /*	$NetBSD: mii.c,v 1.19 2000/02/02 17:09:44 thorpej Exp $	*/
 
 /*-
@@ -66,10 +66,8 @@ int	mii_submatch(struct device *, void *, void *);
  * to the network interface driver parent.
  */
 void
-mii_attach(parent, mii, capmask, phyloc, offloc, flags)
-	struct device *parent;
-	struct mii_data *mii;
-	int capmask, phyloc, offloc, flags;
+mii_attach(struct device *parent, struct mii_data *mii, int capmask,
+    int phyloc, int offloc, int flags)
 {
 	struct mii_attach_args ma;
 	struct mii_softc *child;
@@ -141,16 +139,13 @@ mii_attach(parent, mii, capmask, phyloc, offloc, flags)
 
 		ma.mii_data = mii;
 		ma.mii_capmask = capmask;
-		ma.mii_flags = flags;
+		ma.mii_flags = flags | (mii->mii_flags & MIIF_INHERIT_MASK);
 
 		if ((child = (struct mii_softc *)config_found_sm(parent, &ma,
 		    mii_print, mii_submatch)) != NULL) {
 			/*
 			 * Link it up in the parent's MII data.
 			 */
-#if defined(__NetBSD__)
-			callout_init(&child->mii_nway_ch);
-#endif
 			LIST_INSERT_HEAD(&mii->mii_phys, child, mii_list);
 			child->mii_offset = offset;
 			mii->mii_instance++;
@@ -160,10 +155,7 @@ mii_attach(parent, mii, capmask, phyloc, offloc, flags)
 }
 
 void
-mii_activate(mii, act, phyloc, offloc)
-	struct mii_data *mii;
-	enum devact act;
-	int phyloc, offloc;
+mii_activate(struct mii_data *mii, enum devact act, int phyloc, int offloc)
 {
 	struct mii_softc *child;
 
@@ -197,9 +189,7 @@ mii_activate(mii, act, phyloc, offloc)
 }
 
 void
-mii_detach(mii, phyloc, offloc)
-	struct mii_data *mii;
-	int phyloc, offloc;
+mii_detach(struct mii_data *mii, int phyloc, int offloc)
 {
 	struct mii_softc *child, *nchild;
 
@@ -226,9 +216,7 @@ mii_detach(mii, phyloc, offloc)
 }
 
 int
-mii_print(aux, pnp)
-	void *aux;
-	const char *pnp;
+mii_print(void *aux, const char *pnp)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -242,9 +230,7 @@ mii_print(aux, pnp)
 }
 
 int
-mii_submatch(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+mii_submatch(struct device *parent, void *match, void *aux)
 {
 	struct cfdata *cf = match;
 	struct mii_attach_args *ma = aux;
@@ -260,8 +246,7 @@ mii_submatch(parent, match, aux)
  * Media changed; notify all PHYs.
  */
 int
-mii_mediachg(mii)
-	struct mii_data *mii;
+mii_mediachg(struct mii_data *mii)
 {
 	struct mii_softc *child;
 	int rv;
@@ -271,7 +256,7 @@ mii_mediachg(mii)
 
 	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
 	     child = LIST_NEXT(child, mii_list)) {
-		rv = (*child->mii_service)(child, mii, MII_MEDIACHG);
+		rv = PHY_SERVICE(child, mii, MII_MEDIACHG);
 		if (rv)
 			return (rv);
 	}
@@ -282,22 +267,20 @@ mii_mediachg(mii)
  * Call the PHY tick routines, used during autonegotiation.
  */
 void
-mii_tick(mii)
-	struct mii_data *mii;
+mii_tick(struct mii_data *mii)
 {
 	struct mii_softc *child;
 
 	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
 	     child = LIST_NEXT(child, mii_list))
-		(void) (*child->mii_service)(child, mii, MII_TICK);
+		(void) PHY_SERVICE(child, mii, MII_TICK);
 }
 
 /*
  * Get media status from PHYs.
  */
 void
-mii_pollstat(mii)
-	struct mii_data *mii;
+mii_pollstat(struct mii_data *mii)
 {
 	struct mii_softc *child;
 
@@ -306,19 +289,18 @@ mii_pollstat(mii)
 
 	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
 	     child = LIST_NEXT(child, mii_list))
-		(void) (*child->mii_service)(child, mii, MII_POLLSTAT);
+		(void) PHY_SERVICE(child, mii, MII_POLLSTAT);
 }
 
 /*
  * Inform the PHYs that the interface is down.
  */
 void
-mii_down(mii)
-	struct mii_data *mii;
+mii_down(struct mii_data *mii)
 {
 	struct mii_softc *child;
 
 	for (child = LIST_FIRST(&mii->mii_phys); child != NULL;
 	     child = LIST_NEXT(child, mii_list))
-		(void) (*child->mii_service)(child, mii, MII_DOWN);
+		(void) PHY_SERVICE(child, mii, MII_DOWN);
 }

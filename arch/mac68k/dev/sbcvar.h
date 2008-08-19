@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbcvar.h,v 1.3 2002/03/14 01:26:35 millert Exp $	*/
+/*	$OpenBSD: sbcvar.h,v 1.5 2004/12/08 06:59:43 miod Exp $	*/
 /*	$NetBSD: sbcvar.h,v 1.1 1997/03/01 20:19:00 scottr Exp $	*/
 
 /*
@@ -75,6 +75,7 @@ struct sbc_pdma_handle {
  */
 struct sbc_softc {
 	struct ncr5380_softc ncr_sc;
+	struct via2hand	sc_ih_drq, sc_ih_irq;
 	volatile struct sbc_regs *sc_regs;
 	volatile vm_offset_t	sc_drq_addr;
 	volatile vm_offset_t	sc_nodrq_addr;
@@ -109,8 +110,8 @@ extern struct scsi_device sbc_dev;
 
 int	sbc_pdma_in(struct ncr5380_softc *, int, int, u_char *);
 int	sbc_pdma_out(struct ncr5380_softc *, int, int, u_char *);
-void	sbc_irq_intr(void *);
-void	sbc_drq_intr(void *);
+int	sbc_irq_intr(void *);
+int	sbc_drq_intr(void *);
 void	sbc_dma_alloc(struct ncr5380_softc *);
 void	sbc_dma_free(struct ncr5380_softc *);
 void	sbc_dma_poll(struct ncr5380_softc *);

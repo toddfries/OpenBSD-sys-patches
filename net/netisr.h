@@ -1,4 +1,4 @@
-/*	$OpenBSD: netisr.h,v 1.19 2003/06/02 23:28:12 millert Exp $	*/
+/*	$OpenBSD: netisr.h,v 1.21 2005/01/14 12:04:02 grange Exp $	*/
 /*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
 
 /*
@@ -65,6 +65,8 @@
 #define	NETISR_NATM	27		/* same as AF_ATM */
 #define	NETISR_PPP	28		/* for PPP processing */
 #define	NETISR_BRIDGE	29		/* for bridge processing */
+#define	NETISR_PPPOE	30		/* for pppoe processing */
+#define	NETISR_BT	31		/* same as AF_BLUETOOTH */
 
 #ifndef _LOCORE
 #ifdef _KERNEL
@@ -81,6 +83,8 @@ void	natmintr(void);
 void	pppintr(void);
 void	ccittintr(void);
 void	bridgeintr(void);
+void	pppoeintr(void);
+void	btintr(void);
 
 #include <dev/rndvar.h>
 #define	schednetisr(anisr)	\

@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.3 2004/08/10 20:28:13 deraadt Exp $ */
+/*      $OpenBSD: pmap.h,v 1.6 2004/09/27 17:40:24 pefo Exp $ */
 
 /*
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -88,40 +88,37 @@ typedef struct pmap {
 	struct segtab		*pm_segtab;	/* pointers to pages of PTEs */
 } *pmap_t;
 
-/*
- * Defines for pmap_attributes[phys_mach_page];
- */
-#define PMAP_ATTR_MOD	0x01	/* page has been modified */
-#define PMAP_ATTR_REF	0x02	/* page has been referenced */
-
 #ifdef	_KERNEL
-extern	char *pmap_attributes;		/* reference and modify bits */
+
+/* flags for pv_entry */
+#define	PV_UNCACHED	0x0001		/* Page is mapped unchached */
+#define	PV_CACHED	0x0002		/* Page has been cached */
+#define	PV_ATTR_MOD	0x0004
+#define	PV_ATTR_REF	0x0008
+#define	PV_PRESERVE (PV_UNCACHED|PV_CACHED|PV_ATTR_MOD|PV_ATTR_REF)
+
 extern	struct pmap kernel_pmap_store;
 
 #define pmap_resident_count(pmap)       ((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
-#define pmap_kernel() (&kernel_pmap_store)
+#define pmap_kernel()			(&kernel_pmap_store)
+#define	pmap_phys_address(ppn)		ptoa(ppn)
 
 #define	PMAP_STEAL_MEMORY		/* Enable 'stealing' during boot */
 
-#define PMAP_PREFER(pa, va)	pmap_prefer(pa, va)
+#define PMAP_PREFER(pa, va)		pmap_prefer(pa, va)
 
 #define	pmap_update(x)			/* nothing */
 
-void pmap_prefer(vaddr_t, vaddr_t *);
-
-void pmap_bootstrap(void);
-int pmap_is_page_ro( pmap_t, vaddr_t, int);
-int pmap_alloc_tlbpid(struct proc *);
-void pmap_remove_pv(pmap_t, vaddr_t, vaddr_t);
-int pmap_is_pa_mapped(vaddr_t);
-vaddr_t pmap_pa_to_va(paddr_t);
-void pmap_page_cache(vaddr_t, int);
+void	pmap_bootstrap(void);
+int	pmap_is_page_ro( pmap_t, vaddr_t, int);
+void	pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cache);
+void	pmap_prefer(vaddr_t, vaddr_t *);
+void	pmap_set_modify(vm_page_t);
+void	pmap_page_cache(vm_page_t, int);
 
 #define pmap_proc_iflush(p,va,len)	/* nothing yet (handled in trap now) */
 #define pmap_unuse_final(p)		/* nothing yet */
-
-void pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cache);
 
 paddr_t vtophys(void *);
 

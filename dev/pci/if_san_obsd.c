@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_obsd.c,v 1.4 2004/07/16 15:11:45 alex Exp $	*/
+/*	$OpenBSD: if_san_obsd.c,v 1.8 2005/03/02 15:39:47 claudio Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -32,32 +32,37 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-# include <sys/types.h>
-# include <sys/param.h>
-# include <sys/systm.h>
-# include <sys/syslog.h>
-# include <sys/ioccom.h>
-# include <sys/conf.h>
-# include <sys/malloc.h>
-# include <sys/errno.h>
-# include <sys/exec.h>
-# include <sys/mbuf.h>
-# include <sys/sockio.h>
-# include <sys/socket.h>
-# include <sys/kernel.h>
-# include <sys/device.h>
-# include <sys/time.h>
-# include <sys/timeout.h>
+#include <sys/types.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
+#include <sys/syslog.h>
+#include <sys/ioccom.h>
+#include <sys/conf.h>
+#include <sys/malloc.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/mbuf.h>
+#include <sys/sockio.h>
+#include <sys/socket.h>
+#include <sys/kernel.h>
+#include <sys/device.h>
+#include <sys/time.h>
+#include <sys/timeout.h>
 
-# include <net/if.h>
-# include <net/if_media.h>
-# include <net/netisr.h>
-# include <net/if_sppp.h>
-# include <netinet/in_systm.h>
-# include <netinet/in.h>
+#include "bpfilter.h"
+#if NBPFILTER > 0
+# include <net/bpf.h>
+#endif
+#include <net/if.h>
+#include <net/if_media.h>
+#include <net/netisr.h>
+#include <net/if_sppp.h>
+#include <netinet/in_systm.h>
+#include <netinet/in.h>
 
-# include <netinet/udp.h>
-# include <netinet/ip.h>
+#include <netinet/udp.h>
+#include <netinet/ip.h>
 
 #include <dev/pci/if_san_common.h>
 #include <dev/pci/if_san_obsd.h>
@@ -116,6 +121,8 @@ wanpipe_generic_name(sdla_t *card, char *ifname)
 int
 wanpipe_generic_register(sdla_t *card, struct ifnet *ifp, char *ifname)
 {
+	wanpipe_common_t*	common = WAN_IFP_TO_COMMON(ifp);
+
 	if (ifname == NULL || strlen(ifname) > IFNAMSIZ) {
 		return (-EINVAL);
 	} else {
@@ -124,6 +131,7 @@ wanpipe_generic_register(sdla_t *card, struct ifnet *ifp, char *ifname)
 	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	ifp->if_mtu = PP_MTU;
 	ifp->if_flags = IFF_POINTOPOINT | IFF_MULTICAST;
+	common->protocol = IF_PROTO_CISCO;
 	((struct sppp *)ifp)->pp_flags |= PP_CISCO;
 	((struct sppp *)ifp)->pp_flags |= PP_KEEPALIVE;
 	ifp->if_ioctl = wanpipe_generic_ioctl;	/* Will set from new_if() */
@@ -156,8 +164,10 @@ wanpipe_generic_start(struct ifnet *ifp)
 	struct mbuf	*opkt;
 	int		 err = 0;
 #if NBPFILTER > 0
+#if 0
 	struct mbuf	m0;
 	u_int32_t	af = AF_INET;
+#endif
 #endif /* NBPFILTER > 0 */
 
 	if ((card = wanpipe_generic_getcard(ifp)) == NULL) {
@@ -180,12 +190,20 @@ wanpipe_generic_start(struct ifnet *ifp)
 		/* report the packet to BPF if present and attached */
 #if NBPFILTER > 0
 		if (ifp->if_bpf) {
+#if 0
 			m0.m_next = opkt;
 			m0.m_len = 4;
 			m0.m_data = (char*)&af;
 			bpf_mtap(ifp->if_bpf, &m0);
+#endif
+			bpf_mtap(ifp->if_bpf, opkt);
 		}
 #endif /* NBPFILTER > 0 */
+
+		if (wan_mbuf_to_buffer(&opkt)){
+			m_freem(opkt);
+			break;
+		}
 
 		err = card->iface_send(opkt, ifp);
 		if (err) {
@@ -199,6 +217,7 @@ wanpipe_generic_start(struct ifnet *ifp)
 static int
 wanpipe_generic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
+	struct proc		*p = curproc;
 	struct ifreq		*ifr = (struct ifreq*)data;
 	sdla_t			*card;
 	wanpipe_common_t*	common = WAN_IFP_TO_COMMON(ifp);
@@ -231,6 +250,8 @@ wanpipe_generic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	case SIOCSIFTIMESLOT:
+		if ((err = suser(p, p->p_acflag)) != 0)
+			goto ioctl_out;
 		if (card->state != WAN_DISCONNECTED) {
 			log(LOG_INFO, "%s: Unable to change timeslot map!\n",
 			    ifp->if_xname);
@@ -260,6 +281,9 @@ wanpipe_generic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			/* bring it down */
 			log(LOG_INFO, "%s: Bringing interface down.\n",
 			    ifp->if_xname);
+			if (!(((struct sppp *)ifp)->pp_flags & PP_CISCO)){
+				((struct sppp*)ifp)->pp_down((struct sppp*)ifp);
+			}
 			if (card->iface_down) {
 				card->iface_down(ifp);
 			}
@@ -269,8 +293,12 @@ wanpipe_generic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (card->iface_up) {
 				card->iface_up(ifp);
 			}
+			if (!(((struct sppp *)ifp)->pp_flags & PP_CISCO)){
+				((struct sppp*)ifp)->pp_up((struct sppp*)ifp);
+			}
 			wanpipe_generic_start(ifp);
 		}
+		err = 1;
 		break;
 
 	case SIOC_WANPIPE_DEVICE:
@@ -295,9 +323,17 @@ wanpipe_generic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		case IF_PROTO_CISCO:
 		case IF_PROTO_PPP:
+			if ((err = suser(p, p->p_acflag)) != 0)
+				goto ioctl_out;
 			err = wp_lite_set_proto(ifp, (struct ifreq*)data);
 			break;
 
+		case IF_IFACE_T1:
+		case IF_IFACE_E1:
+			if ((err = suser(p, p->p_acflag)) != 0)
+				goto ioctl_out;
+			err = wp_lite_set_te1_cfg(ifp, (struct ifreq*)data);
+			break;
 		default:
 			if (card->iface_ioctl) {
 				err = card->iface_ioctl(ifp, cmd,
@@ -346,8 +382,10 @@ wanpipe_generic_input(struct ifnet *ifp, struct mbuf *m)
 {
 	sdla_t		*card;
 #if NBPFILTER > 0
+#if 0
 	struct mbuf	m0;
 	u_int32_t	af = AF_INET;
+#endif
 #endif /* NBPFILTER > 0 */
 
 	if ((card = wanpipe_generic_getcard(ifp)) == NULL) {
@@ -356,10 +394,13 @@ wanpipe_generic_input(struct ifnet *ifp, struct mbuf *m)
 	m->m_pkthdr.rcvif = ifp;
 #if NBPFILTER > 0
 	if (ifp->if_bpf) {
+#if 0
 		m0.m_next = m;
 		m0.m_len = 4;
 		m0.m_data = (char*)&af;
 		bpf_mtap(ifp->if_bpf, &m0);
+#endif
+		bpf_mtap(ifp->if_bpf, m);
 	}
 #endif /* NBPFILTER > 0 */
 	ifp->if_ipackets ++;
@@ -368,8 +409,7 @@ wanpipe_generic_input(struct ifnet *ifp, struct mbuf *m)
 	return (0);
 }
 
-int
-wp_lite_set_proto(struct ifnet *ifp, struct ifreq *ifr)
+int wp_lite_set_proto(struct ifnet *ifp, struct ifreq *ifr)
 {
 	wanpipe_common_t	*common;
 	struct if_settings	*ifsettings;
@@ -385,12 +425,43 @@ wp_lite_set_proto(struct ifnet *ifp, struct ifreq *ifr)
 	case IF_PROTO_CISCO:
 		((struct sppp *)ifp)->pp_flags |= PP_CISCO;
 		((struct sppp *)ifp)->pp_flags |= PP_KEEPALIVE;
+		common->protocol = IF_PROTO_CISCO;
 		break;
 	case IF_PROTO_PPP:
 		((struct sppp *)ifp)->pp_flags &= ~PP_CISCO;
 		((struct sppp *)ifp)->pp_flags &= ~PP_KEEPALIVE;
+		common->protocol = IF_PROTO_PPP;
 		break;
 	}
 	err = sppp_ioctl(ifp, SIOCSIFFLAGS, ifr);
 	return (err);
 }
+
+int wp_lite_set_te1_cfg(struct ifnet *ifp, struct ifreq *ifr)
+{
+	sdla_t			*card;
+	struct if_settings	*ifsettings;
+	sdla_te_cfg_t		te_cfg;
+	int			 err = 0;
+
+	if ((card = wanpipe_generic_getcard(ifp)) == NULL) {
+		return (-EINVAL);
+	}
+	ifsettings = (struct if_settings*)ifr->ifr_data;
+	err = copyin(ifsettings->ifs_te1,
+			&te_cfg,
+			sizeof(sdla_te_cfg_t));
+
+	if (ifsettings->flags & SANCFG_CLOCK_FLAG){
+		card->fe_te.te_cfg.te_clock = te_cfg.te_clock;
+	}
+	switch (ifsettings->type) {
+	case IF_IFACE_T1:
+		if (ifsettings->flags & SANCFG_LBO_FLAG){
+			card->fe_te.te_cfg.lbo = te_cfg.lbo;
+		}
+		break;
+	}
+	return (err);
+}
+

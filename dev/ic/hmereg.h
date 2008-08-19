@@ -1,4 +1,4 @@
-/*	$OpenBSD: hmereg.h,v 1.6 2003/10/21 18:58:49 jmc Exp $	*/
+/*	$OpenBSD: hmereg.h,v 1.8 2005/02/04 05:02:38 brad Exp $	*/
 /*	$NetBSD: hmereg.h,v 1.8 2001/04/30 12:22:42 bouyer Exp $	*/
 
 /*-
@@ -164,6 +164,7 @@
 #define HME_ERX_CFG_RINGSIZE128	0x00000400	/* Descriptor ring size: 128 */
 #define HME_ERX_CFG_RINGSIZE256	0x00000600	/* Descriptor ring size: 256 */
 #define HME_ERX_CFG_CSUMSTART	0x007f0000	/* cksum offset */
+#define HME_ERX_CFG_CSUM_SHIFT	16
 
 /*
  * HME MAC-core register offsets
@@ -305,10 +306,3 @@ struct hme_xd {
 	(((sz) << 0) & HME_XD_TXLENMSK)
 #define HME_XD_DECODE_TSIZE(flags)	\
 	(((flags) & HME_XD_TXLENMSK) >> 0)
-
-#ifndef EVL_ENCAPLEN		/* defined if NVLAN > 0 */
-#define	EVL_ENCAPLEN	0
-#endif
-
-#define	HME_MTU		\
-    (ETHERMTU + EVL_ENCAPLEN + sizeof(u_int32_t) + sizeof(struct ether_header))

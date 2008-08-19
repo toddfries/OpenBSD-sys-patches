@@ -1,4 +1,4 @@
-/*	$OpenBSD: auxiovar.h,v 1.5 2003/02/10 10:02:59 jason Exp $	*/
+/*	$OpenBSD: auxiovar.h,v 1.7 2005/03/09 18:41:48 miod Exp $	*/
 /*	$NetBSD: auxiovar.h,v 1.4 2000/04/15 03:08:13 mrg Exp $	*/
 
 /*
@@ -51,12 +51,9 @@ struct auxio_softc {
 #define	AUXIO_LEDONLY		0x1
 #define	AUXIO_EBUS		0x2
 #define	AUXIO_SBUS		0x4
-	struct timeout		sc_to;
+	struct blink_led	sc_blink;
 };
 
-/*
- * XXX: old interfaces.  we set auxio_reg the first auxio we attach.
- */
 #ifndef _LOCORE
-void auxio_led_blink(void *);
+int auxio_fd_control(u_int32_t);
 #endif

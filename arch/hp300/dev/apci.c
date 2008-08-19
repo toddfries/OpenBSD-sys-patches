@@ -1,4 +1,4 @@
-/*	$OpenBSD: apci.c,v 1.15 2003/10/03 16:44:49 miod Exp $	*/
+/*	$OpenBSD: apci.c,v 1.22 2005/02/27 22:08:39 miod Exp $	*/
 /*	$NetBSD: apci.c,v 1.9 2000/11/02 00:35:05 eeh Exp $	*/
 
 /*-
@@ -37,12 +37,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*      
+/*
  * Copyright (c) 1997 Michael Smith.  All rights reserved.
  * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without  
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  * 1. Redistributions of source code must retain the above copyright
@@ -53,7 +53,7 @@
  * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
- *      
+ *
  * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -99,9 +99,9 @@
 #include <sys/uio.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/device.h>       
-#include <sys/timeout.h>       
-    
+#include <sys/device.h>
+#include <sys/timeout.h>
+
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 #include <machine/hp300spu.h>
@@ -123,6 +123,7 @@
 
 struct apci_softc {
 	struct	device sc_dev;		/* generic device glue */
+	struct	isr sc_isr;
 	struct	apciregs *sc_apci;	/* device registers */
 	struct	tty *sc_tty;		/* tty glue */
 	struct	timeout sc_timeout;	/* timeout */
@@ -166,7 +167,7 @@ cdev_decl(apci);
 
 int	apcidefaultrate = TTYDEF_SPEED;
 
-struct speedtab apcispeedtab[] = {
+const struct speedtab apcispeedtab[] = {
 	{ 0,		0		},
 	{ 50,		APCIBRD(50)	},
 	{ 75,		APCIBRD(75)	},
@@ -193,11 +194,7 @@ struct apciregs *apci_cn = NULL;	/* console hardware */
 int	apciconsinit;			/* has been initialized */
 int	apcimajor;			/* our major number */
 
-void	apcicnprobe(struct consdev *);
-void	apcicninit(struct consdev *);
-int	apcicngetc(dev_t);
-void	apcicnputc(dev_t, int);
-
+cons_decl(apci);
 
 int
 apcimatch(parent, match, aux)
@@ -257,8 +254,11 @@ apciattach(parent, self, aux)
 		sc->sc_flags |= APCI_HASFIFO;
 
 	/* Establish our interrupt handler. */
-	frodo_intr_establish(parent, apciintr, sc, fa->fa_line,
-	    (sc->sc_flags & APCI_HASFIFO) ? IPL_TTY : IPL_TTYNOBUF);
+	sc->sc_isr.isr_func = apciintr;
+	sc->sc_isr.isr_arg = sc;
+	sc->sc_isr.isr_priority =
+	    (sc->sc_flags & APCI_HASFIFO) ? IPL_TTY : IPL_TTYNOBUF;
+	frodo_intr_establish(parent, fa->fa_line, &sc->sc_isr, self->dv_xname);
 
 	/* Set soft carrier if requested by operator. */
 	if (self->dv_cfdata->cf_flags)
@@ -364,7 +364,7 @@ apciopen(dev, flag, mode, p)
 		}
 		sc->sc_cua = 1;		/* We go into CUA mode */
 	}
-		
+
 	/* Wait for carrier if necessary. */
 	if (flag & O_NONBLOCK) {
 		if (!APCICUA(dev) && sc->sc_cua) {
@@ -489,7 +489,7 @@ apciintr(arg)
 
 #define	RCVBYTE() \
 	c = apci->ap_data; \
-	if ((tp->t_state & TS_ISOPEN) != 0) \
+	if (tp != NULL && (tp->t_state & TS_ISOPEN) != 0) \
 		(*linesw[tp->t_line].l_rint)(c, tp)
 
 	for (;;) {
@@ -511,7 +511,8 @@ apciintr(arg)
 						apcieint(sc, lsr);
 				}
 			}
-			if (iflowdone == 0 && (tp->t_cflag & CRTS_IFLOW) &&
+			if (iflowdone == 0 && tp != NULL &&
+			    (tp->t_cflag & CRTS_IFLOW) &&
 			    tp->t_rawq.c_cc > (TTYHOG / 2)) {
 				apci->ap_mcr &= ~MCR_RTS;
 				iflowdone = 1;
@@ -519,11 +520,13 @@ apciintr(arg)
 			break;
 
 		case IIR_TXRDY:
-			tp->t_state &=~ (TS_BUSY|TS_FLUSH);
-			if (tp->t_line)
-				(*linesw[tp->t_line].l_start)(tp);
-			else
-				apcistart(tp);
+			if (tp != NULL) {
+				tp->t_state &=~ (TS_BUSY|TS_FLUSH);
+				if (tp->t_line)
+					(*linesw[tp->t_line].l_start)(tp);
+				else
+					apcistart(tp);
+			}
 			break;
 
 		default:
@@ -531,7 +534,7 @@ apciintr(arg)
 				return (claimed);
 			log(LOG_WARNING, "%s: weird interrupt: 0x%x\n",
 			    sc->sc_dev.dv_xname, iir);
-			/* fall through */
+			/* FALLTHROUGH */
 
 		case IIR_MLSC:
 			apcimint(sc, apci->ap_msr);
@@ -552,8 +555,6 @@ apcieint(sc, stat)
 	int c;
 
 	c = apci->ap_data;
-	if ((tp->t_state & TS_ISOPEN) == 0)
-		return;
 
 #ifdef DDB
 	if ((sc->sc_flags & APCI_ISCONSOLE) && db_console && (stat & LSR_BI)) {
@@ -561,6 +562,9 @@ apcieint(sc, stat)
 		return;
 	}
 #endif
+
+	if (tp == NULL || (tp->t_state & TS_ISOPEN) == 0)
+		return;
 
 	if (stat & (LSR_BI | LSR_FE)) {
 		c |= TTY_FE;
@@ -580,6 +584,9 @@ apcimint(sc, stat)
 {
 	struct tty *tp = sc->sc_tty;
 	struct apciregs *apci = sc->sc_apci;
+
+	if (tp == NULL)
+		return;
 
 	if ((stat & MSR_DDCD) &&
 	    (sc->sc_flags & APCI_SOFTCAR) == 0) {
@@ -916,6 +923,7 @@ void
 apcicnprobe(cp)
 	struct consdev *cp;
 {
+	volatile u_int8_t *frodoregs;
 
 	/* locate the major number */
 	for (apcimajor = 0; apcimajor < nchrdev; apcimajor++)
@@ -939,13 +947,21 @@ apcicnprobe(cp)
 	if (machineid != HP_425 || mmuid != MMUID_425_E)
 		return;
 
-#ifdef APCI_FORCE_CONSOLE
-	cp->cn_pri = CN_REMOTE;
-	conforced = 1;
-	conscode = -2;			/* XXX */
-#else
-	cp->cn_pri = CN_NORMAL;
-#endif
+	/*
+	 * Check the service switch. On the 425e, this is a physical
+	 * switch, unlike other frodo-based machines, so we can use it
+	 * as a serial vs internal video selector, since the PROM can not
+	 * be configured for serial console.
+	 */
+	frodoregs = (volatile u_int8_t *)IIOV(FRODO_BASE);
+	if (badaddr((caddr_t)frodoregs) == 0 &&
+	    !ISSET(frodoregs[FRODO_IISR], FRODO_IISR_SERVICE)) {
+		cp->cn_pri = CN_REMOTE;
+		conforced = 1;
+		conscode = -2;			/* XXX */
+	} else {
+		cp->cn_pri = CN_NORMAL;
+	}
 
 	/*
 	 * If our priority is higher than the currently-remembered
@@ -960,6 +976,12 @@ void
 apcicninit(cp)
 	struct consdev *cp;
 {
+
+	/*
+	 * We are not interested by the second console pass.
+	 */
+	if (consolepass != 0)
+		return;
 
 	apci_cn = (struct apciregs *)IIOV(FRODO_BASE + FRODO_APCI_OFFSET(1));
 	apciinit(apci_cn, apcidefaultrate);

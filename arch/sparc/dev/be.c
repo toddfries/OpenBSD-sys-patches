@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.34 2003/06/02 18:40:58 jason Exp $	*/
+/*	$OpenBSD: be.c,v 1.36 2005/01/15 05:24:10 brad Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.
@@ -163,7 +163,7 @@ beattach(parent, self, aux)
 
 	sc->sc_ih.ih_fun = beintr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(pri, &sc->sc_ih, IPL_NET);
+	intr_establish(pri, &sc->sc_ih, IPL_NET, sc->sc_dev.dv_xname);
 
 	myetheraddr(sc->sc_arpcom.ac_enaddr);
 
@@ -644,7 +644,8 @@ beioctl(ifp, cmd, data)
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
 			 */
-			be_mcreset(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				be_mcreset(sc);
 			error = 0;
 		}
 		break;

@@ -1,4 +1,4 @@
-/* $OpenBSD: ieee80211_radiotap.h,v 1.1 2004/06/22 22:53:52 millert Exp $ */
+/* $OpenBSD: ieee80211_radiotap.h,v 1.5 2005/01/07 16:28:38 reyk Exp $ */
 /* $FreeBSD: src/sys/net80211/ieee80211_radiotap.h,v 1.3 2004/04/05 22:13:21 sam Exp $ */
 /* $NetBSD: ieee80211_radiotap.h,v 1.9 2004/06/06 04:13:28 dyoung Exp $ */
 
@@ -47,11 +47,6 @@
  * function of...") that I cannot set false expectations for lawyerly
  * readers.
  */
-#ifdef _KERNEL
-#ifndef DLT_IEEE802_11_RADIO
-#define	DLT_IEEE802_11_RADIO	127	/* 802.11 plus WLAN header */
-#endif
-#endif /* _KERNEL */
 
 /* XXX tcpdump/libpcap do not tolerate variable-length headers,
  * yet, so we pad every radiotap header to 64 bytes. Ugh.
@@ -78,7 +73,7 @@ struct ieee80211_radiotap_header {
 					 * Additional extensions are made
 					 * by setting bit 31.
 					 */
-} __attribute__((__packed__));
+} __packed;
 
 /* Name                                 Data type       Units
  * ----                                 ---------       -----
@@ -180,7 +175,7 @@ enum ieee80211_radiotap_type {
 	IEEE80211_RADIOTAP_DB_ANTSIGNAL = 12,
 	IEEE80211_RADIOTAP_DB_ANTNOISE = 13,
 	IEEE80211_RADIOTAP_FCS = 14,
-	IEEE80211_RADIOTAP_EXT = 31,
+	IEEE80211_RADIOTAP_EXT = 31
 };
 
 #ifndef _KERNEL
@@ -193,6 +188,7 @@ enum ieee80211_radiotap_type {
 #define	IEEE80211_CHAN_PASSIVE	0x0200	/* Only passive scan allowed */
 #define	IEEE80211_CHAN_DYN	0x0400	/* Dynamic CCK-OFDM channel */
 #define	IEEE80211_CHAN_GFSK	0x0800	/* GFSK channel (FHSS PHY) */
+#define	IEEE80211_CHAN_XR	0x1000	/* eXtended Range */
 #endif /* !_KERNEL */
 
 /* For IEEE80211_RADIOTAP_FLAGS */

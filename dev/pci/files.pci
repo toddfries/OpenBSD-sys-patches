@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.157 2004/07/28 17:15:12 tholo Exp $
+#	$OpenBSD: files.pci,v 1.173 2005/03/08 20:00:25 tdeval Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -23,6 +23,9 @@ file	dev/pci/tga_conf.c		tga
 file	dev/ic/bt463.c			tga
 file	dev/ic/bt485.c			tga
 file	dev/ic/ibm561.c			tga
+
+attach	sti at pci with sti_pci
+file	dev/pci/sti_pci.c		sti_pci
 
 # Cypress 82c693 hyperCache(tm) Stand-Alone PCI Peripheral Controller
 # with USB.  This is a combo chip:
@@ -79,12 +82,12 @@ attach	iop at pci with iop_pci
 file	dev/pci/iop_pci.c		iop_pci
 
 # Ensoniq AudioPCI S5016, 1371
-device	eap: audio, auconv, mulaw, ac97
+device	eap: audio, auconv, mulaw, ac97, midibus
 attach	eap at pci
 file	dev/pci/eap.c			eap
 
 # ESS Solo-1 PCI AudioDrive
-device	eso { }: audio, auconv, mulaw, midibus
+device	eso {}: audio, auconv, mulaw, midibus
 attach	eso at pci
 file	dev/pci/eso.c			eso
 
@@ -107,7 +110,7 @@ attach	autri at pci
 file	dev/pci/autri.c			autri
 
 # CS4280 CrystalClear Audio
-device	clcs: audio, auconv, mulaw, ac97
+device	clcs: audio, auconv, mulaw, ac97, firmload
 attach	clcs at pci
 file	dev/pci/cs4280.c		clcs
 
@@ -124,10 +127,10 @@ file	dev/pci/maestro.c		maestro
 # ESS Maestro3
 device	esa: audio, auconv, mulaw, ac97
 attach	esa at pci
-file	dev/pci/esa.c		esa
+file	dev/pci/esa.c			esa
 
 # Yamaha YMF Audio
-device	yds { }: audio, auconv, mulaw, ac97
+device	yds {}: audio, auconv, mulaw, ac97, firmload
 attach	yds at pci
 file	dev/pci/yds.c			yds
 
@@ -201,7 +204,7 @@ attach	ncr at pci
 file	dev/pci/ncr.c			ncr
 
 # common code for siop/esiop pci front end
-define siop_pci_common
+define	siop_pci_common
 file	dev/pci/siop_pci_common.c	siop_pci_common
 
 # Symbios 53c8xx SCSI chips
@@ -210,7 +213,7 @@ attach	siop at pci with siop_pci: siop_pci_common
 file	dev/pci/siop_pci.c	siop_pci
 
 # NeoMagic 256AV and 256ZX
-device	neo: audio, auconv, mulaw, ac97
+device	neo: audio, auconv, mulaw, ac97, firmload
 attach	neo at pci
 file	dev/pci/neo.c			neo
 
@@ -244,6 +247,10 @@ file	dev/pci/if_mtd_pci.c		mtd_pci
 attach	rl at pci with rl_pci
 file	dev/pci/if_rl_pci.c		rl_pci
 
+# Realtek 8169/8169S/8110S
+attach	re at pci with re_pci
+file	dev/pci/if_re_pci.c		re_pci
+
 # Macronix
 device	mx: ether, ifnet, ifmedia
 attach	mx at pci
@@ -260,7 +267,7 @@ attach	tl at pci
 file	dev/pci/if_tl.c			tl
 
 # 3Com 3c990
-device	txp: ether, ifnet, ifmedia
+device	txp: ether, ifnet, ifmedia, firmload
 attach	txp at pci
 file	dev/pci/if_txp.c		txp
 
@@ -302,7 +309,7 @@ attach	tx at pci
 file	dev/pci/if_tx.c			tx
 
 # Alteon Tigon I & II
-device	ti: ether, ifnet, ifmedia
+device	ti: ether, ifnet, ifmedia, firmload
 attach	ti at pci
 file	dev/pci/if_ti.c			ti
 
@@ -402,7 +409,7 @@ file	dev/pci/if_sk.c			skc | sk
 
 # PCI "universal" communication device driver, for PCI com, lpt, etc. ports
 # (see documentation in the driver for what, exactly, should be supported)
-device	puc { port = -1 }
+device	puc {[port = -1]}
 attach	puc at pci
 file	dev/pci/puc.c			puc
 file	dev/pci/pucdata.c		puc
@@ -416,6 +423,16 @@ file	dev/pci/if_wi_pci.c		wi_pci
 # device declaration in sys/conf/files
 attach	an at pci with an_pci
 file	dev/pci/if_an_pci.c		an_pci
+
+# Intel PRO/Wireless 2100
+device	ipw: ifnet, wlan, firmload
+attach	ipw at pci
+file	dev/pci/if_ipw.c		ipw
+
+# Intel PRO/Wireless 2200BG/2915ABG
+device	iwi: ifnet, wlan, firmload
+attach	iwi at pci
+file	dev/pci/if_iwi.c		iwi
 
 # C-Media CMI8x38 Audio Chip
 device	cmpci: audio, auconv, mulaw
@@ -460,10 +477,10 @@ device	bge: ether, ifnet, mii, ifmedia, mii_phy
 attach	bge at pci
 file	dev/pci/if_bge.c		bge
 
-# Realtek 8139C+/8169/8169S/8110S
-device	re: ether, ifnet, mii, ifmedia, mii_phy
-attach	re at pci
-file	dev/pci/if_re.c			re
+# VIA VT6122
+device	vge: ether, ifnet, mii, ifmedia, mii_phy
+attach	vge at pci
+file	dev/pci/if_vge.c		vge
 
 # Sundance Tech./Tamarack TC9021 Gigabit Ethernet
 device	stge: ether, ifnet, mii, ifmedia, mii_phy, mii_bitbang
@@ -480,31 +497,35 @@ device	viaenv
 attach	viaenv at pci
 file	dev/pci/viaenv.c		viaenv
 
-# OHCI IEEE 1394 controller
-attach	fwohci at pci with fwohci_pci
-file	dev/pci/fwohci_pci.c		fwohci_pci
-
-# IEEE 1394 TI "Lynx" controller
-attach	fwlynx at pci with fwlynx_pci
-file	dev/pci/fwlynx_pci.c		fwlynx_pci
-
 # Broadcom BCM4401 gigabit ethernet
 device	bce: ether, ifnet, mii, ifmedia, mii_phy
 attach	bce at pci
 file	dev/pci/if_bce.c		bce
 
+# Atheros AR5k (802.11a/b/g) PCI/Mini-PCI
+attach	ath at pci with ath_pci
+file	dev/pci/if_ath_pci.c		ath_pci
+
 # ADMtek ADM8211 PCI/Mini-PCI
 attach	atw at pci with atw_pci
 file	dev/pci/if_atw_pci.c		atw_pci
 
+# Realtek RTL8180 PCI/Mini-PCI
+attach	rtw at pci with rtw_pci
+file	dev/pci/if_rtw_pci.c		rtw_pci
+
+# Ralink RT2500 PCI/Mini-PCI
+attach	ral at pci with ral_pci
+file	dev/pci/if_ral_pci.c		ral_pci
+
 # Sangoma PCI card
 device	san: ifnet, ifmedia
 attach	san at pci
-file dev/pci/if_sandrv.c 	san
-file dev/pci/if_san_common.c 	san
-file dev/pci/if_san_obsd.c 	san
-file dev/pci/if_san_te1.c 	san
-file dev/pci/if_san_xilinx.c 	san
+file	dev/pci/if_sandrv.c 		san
+file	dev/pci/if_san_common.c 	san
+file	dev/pci/if_san_obsd.c 		san
+file	dev/pci/if_san_te1.c 		san
+file	dev/pci/if_san_xilinx.c 	san
 
 # PIIX4 power management controller
 device	piixpm {}

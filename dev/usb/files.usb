@@ -1,11 +1,11 @@
-#	$OpenBSD: files.usb,v 1.36 2004/07/20 20:30:09 dhartmei Exp $
+#	$OpenBSD: files.usb,v 1.46 2005/03/16 23:28:59 deraadt Exp $
 #	$NetBSD: files.usb,v 1.16 2000/02/14 20:29:54 augustss Exp $
 #
 # Config file and device description for machine-independent USB code.
 # Included by ports that need it.  Ports that use it must provide
 # their own "major" declarations for the appropriate devices.
 
-device	usb { }
+device	usb {}
 attach	usb at usbus
 file	dev/usb/usb.c			usb			needs-flag
 file	dev/usb/usbdi.c			usb
@@ -15,15 +15,15 @@ file	dev/usb/usb_subr.c		usb
 file	dev/usb/usb_quirks.c		usb
 
 # Hub driver
-device	uhub { [port = -1], [configuration = -1], [interface = -1],
-               [vendor = -1], [product = -1], [release = -1] }
+device	uhub {[port = -1], [configuration = -1], [interface = -1],
+	      [vendor = -1], [product = -1], [release = -1]}
 attach	uhub at usb
 file	dev/usb/uhub.c			usb
 
 attach	uhub at uhub with uhub_uhub
 
 # Modem and com serial port "bus"
-define	ucombus {[ portno = -1 ]}
+define	ucombus {[portno = -1]}
 
 # EZ-USB firmware loader
 define	ezload
@@ -54,7 +54,7 @@ file	dev/usb/ugen.c			ugen			needs-flag
 
 # HID
 # HID "bus"
-define	uhidbus {[ reportid = -1 ]}
+define	uhidbus {[reportid = -1]}
 
 # HID processing
 define	hid
@@ -108,7 +108,7 @@ attach	uvisor at uhub
 file	dev/usb/uvisor.c		uvisor
 
 # YAP phone firmware loader
-device	uyap: ezload
+device	uyap: ezload, firmload
 attach	uyap at uhub
 file	dev/usb/uyap.c			uyap
 
@@ -136,7 +136,7 @@ attach	cue at uhub
 file	dev/usb/if_cue.c		cue
 
 # Kawasaki LSI KL5KUSB101B
-device	kue: ether, ifnet, ifmedia
+device	kue: ether, ifnet, ifmedia, firmload
 attach	kue at uhub
 file	dev/usb/if_kue.c		kue
 
@@ -144,6 +144,11 @@ file	dev/usb/if_kue.c		kue
 device	cdce: ether, ifnet, ifmedia
 attach	cdce at uhub
 file	dev/usb/if_cdce.c		cdce
+
+# Davicom DM9601
+device	udav: ether, ifnet, mii, ifmedia
+attach	udav at uhub
+file	dev/usb/if_udav.c		udav
 
 # Prolific PL2302 host-host
 device	upl: ifnet
@@ -200,5 +205,20 @@ attach	usscanner at uhub
 file	dev/usb/usscanner.c		usscanner
 
 # Prism3 WI @ USB
-attach  wi at uhub with wi_usb
-file    dev/usb/if_wi_usb.c 		wi_usb
+attach	wi at uhub with wi_usb
+file	dev/usb/if_wi_usb.c 		wi_usb
+
+# Atmel AT76c503 / AT76c503a / AT76c505 / AT76c505a @ USB
+device	atu: ether, ifnet, ifmedia, wlan, firmload
+attach	atu at uhub
+file	dev/usb/if_atu.c 		atu
+
+# Bluetooth
+device	ubt: ifnet, bluetooth
+attach	ubt at uhub
+file	dev/usb/if_ubt.c		ubt
+
+# Ralink Technology RT2500USB
+device	ural: ether, ifnet, ifmedia, wlan
+attach	ural at uhub
+file	dev/usb/if_ral.c		ural

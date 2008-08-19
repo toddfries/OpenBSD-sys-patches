@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.7 2004/07/22 19:37:39 miod Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.11 2005/01/14 19:57:48 miod Exp $	*/
 
 /* 
  * Copyright (c) 1995 Theo de Raadt
@@ -74,7 +74,7 @@
  * PMAP_MD_RELOC3()	general purpose kernel virtual addresses relocation
  * PMAP_MD_MAPIOSPACE()	setup machine-specific internal iospace components
  * PMAP_MD_MEMSIZE()	compute avail_end
- * PMAP_MD_RWZERO	define to NOT make virtual address 0 read only
+ * PMAP_MD_RWLOW	number of pages to keep writeable, starting at address 0
  */
 
 extern char *etext;
@@ -121,6 +121,7 @@ pmap_bootstrap(nextpa, firstpa)
 	paddr_t firstpa;
 {
 	paddr_t kstpa, kptpa, iiopa, eiopa, kptmpa, lkptpa, p0upa;
+	vaddr_t iiobase, eiobase;
 	u_int nptpages, kstsize;
 	st_entry_t protoste, *ste;
 	pt_entry_t protopte, *pte, *epte;
@@ -162,11 +163,21 @@ pmap_bootstrap(nextpa, firstpa)
 	kstpa = nextpa;
 	nextpa += kstsize * NBPG;
 	kptpa = nextpa;
-	nptpages = RELOC(Sysptsize, int) +
-	    (MACHINE_IIOMAPSIZE + MACHINE_EIOMAPSIZE + NPTEPG - 1) / NPTEPG;
+
+	iiopa = nextpa + RELOC(Sysptsize, int) * NBPG;
+	iiobase = m68k_ptob(RELOC(Sysptsize, int) * NPTEPG);
+	eiopa = iiopa + MACHINE_IIOMAPSIZE * sizeof(pt_entry_t);
+	eiobase = iiobase + m68k_ptob(MACHINE_IIOMAPSIZE);
+
+	/*
+	 * We need to be able to map a whole UPT here as well. Adjust
+	 * nptpages if necessary.
+	 */
+	nptpages = (MACHINE_IIOMAPSIZE + MACHINE_EIOMAPSIZE +
+	    m68k_btop(MACHINE_MAX_PTSIZE) * sizeof(pt_entry_t) + NPTEPG - 1) /
+	    NPTEPG;
 	nextpa += nptpages * NBPG;
-	eiopa = nextpa - MACHINE_EIOMAPSIZE * sizeof(pt_entry_t);
-	iiopa = eiopa - MACHINE_IIOMAPSIZE * sizeof(pt_entry_t);
+
 	kptmpa = nextpa;
 	nextpa += NBPG;
 	lkptpa = nextpa;
@@ -348,23 +359,24 @@ pmap_bootstrap(nextpa, firstpa)
 	 */
 	pte = &(PA2VA(kptpa, u_int *))[m68k_btop(KERNBASE)];
 	epte = &pte[m68k_btop(trunc_page((vaddr_t)&etext))];
-#ifndef	PMAP_MD_RWZERO
-	*pte++ = firstpa | PG_NV;	/* make *NULL fail in the kernel */
-#if defined(KGDB) || defined(DDB)
-	protopte = (firstpa + NBPG) | PG_RW | PG_V | PG_U; /* XXX RW for now */
-#else
-	protopte = (firstpa + NBPG) | PG_RO | PG_V | PG_U;
-#endif
-#else
+
 #if defined(KGDB) || defined(DDB)
 	protopte = firstpa | PG_RW | PG_V | PG_U; /* XXX RW for now */
 #else
 	protopte = firstpa | PG_RO | PG_V | PG_U;
 #endif
+#ifdef	PMAP_MD_RWLOW
+	for (num = PMAP_MD_RWLOW; num != 0; num--) {
+		*pte++ = (protopte & ~PG_RO) | PG_RW;
+		protopte += PAGE_SIZE;
+	}
+#else
+	*pte++ = PG_NV;		/* make *NULL fail in the kernel */
+	protopte += PAGE_SIZE;
 #endif
 	while (pte < epte) {
 		*pte++ = protopte;
-		protopte += NBPG;
+		protopte += PAGE_SIZE;
 	}
 	/*
 	 * Validate PTEs for kernel data/bss, dynamic data allocated

@@ -1,5 +1,5 @@
-/*	$OpenBSD: pm_direct.c,v 1.6 2003/03/14 10:47:36 miod Exp $	*/
-/*  pm_direct.c 1.22 01/09/97 Takashi Hamada */
+/*	$OpenBSD: pm_direct.c,v 1.8 2005/02/11 20:09:30 martin Exp $	*/
+/*	$NetBSD: pm_direct.c,v 1.4 1998/02/23 03:11:26 scottr Exp $	*/
 
 /*
  * Copyright (C) 1997 Takashi Hamada
@@ -70,7 +70,7 @@ extern u_int32_t HwCfgFlags3;
 #define PM_IS_OFF		( 0x00 == (via_reg(VIA2, vBufB) & 0x02) )
 
 /* 
- * Valiables for internal use
+ * Variables for internal use
  */
 int	pmHardware = PM_HW_UNKNOWN;
 u_short	pm_existent_ADB_devices = 0x0;	/* each bit expresses the existent ADB device */
@@ -173,7 +173,6 @@ extern int	adbStarting;	/* doing ADB reinit, so do "polling" differently */
 /*
  * Define the external functions
  */
-extern int zshard(int);			/* from zs.c */
 extern void adb_comp_exec(void);	/* from adb_direct.c */
 
 
@@ -255,7 +254,7 @@ pm_wait_busy(delay)
 {
 	while(PM_IS_ON) {
 #ifdef PM_GRAB_SI
-		zshard(0);		/* grab any serial interrupts */
+		(void)intr_dispatch(0x70);
 #endif
 		if ((--delay) < 0)
 			return( 1 );	/* timeout */
@@ -273,7 +272,7 @@ pm_wait_free(delay)
 {
 	while(PM_IS_OFF) {
 #ifdef PM_GRAB_SI
-		zshard(0);		/* grab any serial interrupts */
+		(void)intr_dispatch(0x70);
 #endif
 		if ((--delay) < 0)
 			return( 0 );	/* timeout */
@@ -980,7 +979,7 @@ pm_adb_op(buffer, compRout, data, command)
 		if ((via_reg(VIA1, vIFR) & 0x10) == 0x10)
 			pm_intr();
 #ifdef PM_GRAB_SI
-			zshard(0);		/* grab any serial interrupts */
+			(void)intr_dispatch(0x70);
 #endif
 		if ((--delay) < 0)
 			return( -1 );

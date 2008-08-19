@@ -1,4 +1,4 @@
-/*	$OpenBSD: sockio.h,v 1.27 2004/06/26 07:00:58 alex Exp $	*/
+/*	$OpenBSD: sockio.h,v 1.32 2005/01/14 11:49:01 henning Exp $	*/
 /*	$NetBSD: sockio.h,v 1.5 1995/08/23 00:40:47 thorpej Exp $	*/
 
 /*-
@@ -88,7 +88,7 @@
 #define	SIOCSIFGENERIC	 _IOW('i', 57, struct ifreq)	/* generic IF set op */
 #define	SIOCGIFGENERIC	_IOWR('i', 58, struct ifreq)	/* generic IF get op */
 
-#define SIOCSIFPHYADDR   _IOW('i', 70, struct ifaliasreq) /* set gif addres */
+#define SIOCSIFPHYADDR   _IOW('i', 70, struct ifaliasreq) /* set gif address */
 #define	SIOCGIFPSRCADDR	_IOWR('i', 71, struct ifreq)	/* get gif psrc addr */
 #define	SIOCGIFPDSTADDR	_IOWR('i', 72, struct ifreq)	/* get gif pdst addr */
 #define	SIOCDIFPHYADDR	 _IOW('i', 73, struct ifreq)	/* delete gif addrs */
@@ -143,14 +143,20 @@
 #define	SIOCIFDESTROY	 _IOW('i', 121, struct ifreq)	/* destroy clone if */
 #define	SIOCIFGCLONERS	_IOWR('i', 120, struct if_clonereq) /* get cloners */
 
-#define	SIOCAIFGROUP	_IOW('i', 130, struct ifgroupreq) /* add an ifgroup */
-#define	SIOCGIFGROUP   _IOWR('i', 131, struct ifgroupreq) /* get ifgroups */
-#define	SIOCDIFGROUP    _IOW('i', 132, struct ifgroupreq) /* delete ifgroup */
+#define	SIOCAIFGROUP	_IOW('i', 135, struct ifgroupreq) /* add an ifgroup */
+#define	SIOCGIFGROUP   _IOWR('i', 136, struct ifgroupreq) /* get ifgroups */
+#define	SIOCDIFGROUP    _IOW('i', 137, struct ifgroupreq) /* delete ifgroup */
 
 #define	SIOCSIFDESCR	 _IOW('i', 128, struct ifreq)	/* set ifnet descr */
 #define	SIOCGIFDESCR	_IOWR('i', 129, struct ifreq)	/* get ifnet descr */
 
 #define	SIOCSIFTIMESLOT	 _IOW('i', 133, struct ifreq)	/* set ifnet timeslot */
 #define	SIOCGIFTIMESLOT	_IOWR('i', 134, struct ifreq)	/* get ifnet timeslot */
+
+#define	SIOCSVH		_IOWR('i', 245, struct ifreq)	/* set carp param */
+#define	SIOCGVH		_IOWR('i', 246, struct ifreq)	/* get carp param */
+
+#define	SIOCSETPFSYNC	_IOW('i', 247, struct ifreq)
+#define	SIOCGETPFSYNC	_IOWR('i', 248, struct ifreq)
 
 #endif /* !_SYS_SOCKIO_H_ */

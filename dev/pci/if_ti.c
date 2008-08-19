@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.53 2004/08/19 18:26:29 mcbride Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.58 2004/12/08 07:04:12 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -121,8 +121,7 @@
 #include <dev/pci/pcidevs.h>
 
 #include <dev/pci/if_tireg.h>
-#include <dev/microcode/tigon/ti_fw.h>
-#include <dev/microcode/tigon/ti_fw2.h>
+#include <dev/pci/if_tivar.h>
 
 #ifdef M_HWCKSUM
 /*#define TI_CSUM_OFFLOAD*/
@@ -425,56 +424,50 @@ void ti_mem_set(sc, addr, len)
 void ti_loadfw(sc)
 	struct ti_softc		*sc;
 {
+	struct tigon_firmware *tf;
+	u_char *buf = NULL;
+	size_t buflen;
+	char *name;
+	int error;
+
 	switch(sc->ti_hwrev) {
 	case TI_HWREV_TIGON:
-		if (tigonFwReleaseMajor != TI_FIRMWARE_MAJOR ||
-		    tigonFwReleaseMinor != TI_FIRMWARE_MINOR ||
-		    tigonFwReleaseFix != TI_FIRMWARE_FIX) {
-			printf("%s: firmware revision mismatch; want "
-			    "%d.%d.%d, got %d.%d.%d\n", sc->sc_dv.dv_xname,
-			    TI_FIRMWARE_MAJOR, TI_FIRMWARE_MINOR,
-			    TI_FIRMWARE_FIX, tigonFwReleaseMajor,
-			    tigonFwReleaseMinor, tigonFwReleaseFix);
-			return;
-		}
-		ti_mem_write(sc, tigonFwTextAddr, tigonFwTextLen,
-		    (caddr_t)tigonFwText);
-		ti_mem_write(sc, tigonFwDataAddr, tigonFwDataLen,
-		    (caddr_t)tigonFwData);
-		ti_mem_write(sc, tigonFwRodataAddr, tigonFwRodataLen,
-		    (caddr_t)tigonFwRodata);
-		ti_mem_set(sc, tigonFwBssAddr, tigonFwBssLen);
-		ti_mem_set(sc, tigonFwSbssAddr, tigonFwSbssLen);
-		CSR_WRITE_4(sc, TI_CPU_PROGRAM_COUNTER, tigonFwStartAddr);
+		name = "tigon1";
 		break;
 	case TI_HWREV_TIGON_II:
-		if (tigon2FwReleaseMajor != TI_FIRMWARE_MAJOR ||
-		    tigon2FwReleaseMinor != TI_FIRMWARE_MINOR ||
-		    tigon2FwReleaseFix != TI_FIRMWARE_FIX) {
-			printf("%s: firmware revision mismatch; want "
-			    "%d.%d.%d, got %d.%d.%d\n", sc->sc_dv.dv_xname,
-			    TI_FIRMWARE_MAJOR, TI_FIRMWARE_MINOR,
-			    TI_FIRMWARE_FIX, tigon2FwReleaseMajor,
-			    tigon2FwReleaseMinor, tigon2FwReleaseFix);
-			return;
-		}
-		ti_mem_write(sc, tigon2FwTextAddr, tigon2FwTextLen,
-		    (caddr_t)tigon2FwText);
-		ti_mem_write(sc, tigon2FwDataAddr, tigon2FwDataLen,
-		    (caddr_t)tigon2FwData);
-		ti_mem_write(sc, tigon2FwRodataAddr, tigon2FwRodataLen,
-		    (caddr_t)tigon2FwRodata);
-		ti_mem_set(sc, tigon2FwBssAddr, tigon2FwBssLen);
-		ti_mem_set(sc, tigon2FwSbssAddr, tigon2FwSbssLen);
-		CSR_WRITE_4(sc, TI_CPU_PROGRAM_COUNTER, tigon2FwStartAddr);
+		name = "tigon2";
 		break;
 	default:
 		printf("%s: can't load firmware: unknown hardware rev\n",
 		    sc->sc_dv.dv_xname);
-		break;
+		return;
 	}
-
-	return;
+	
+	error = loadfirmware(name, &buf, &buflen);
+	if (error)
+		return;
+	tf = (struct tigon_firmware *)buf;
+	if (tf->FwReleaseMajor != TI_FIRMWARE_MAJOR ||
+	    tf->FwReleaseMinor != TI_FIRMWARE_MINOR ||
+	    tf->FwReleaseFix != TI_FIRMWARE_FIX) {
+		printf("%s: firmware revision mismatch; want "
+		    "%d.%d.%d, got %d.%d.%d\n", sc->sc_dv.dv_xname,
+		    TI_FIRMWARE_MAJOR, TI_FIRMWARE_MINOR,
+		    TI_FIRMWARE_FIX, tf->FwReleaseMajor,
+		    tf->FwReleaseMinor, tf->FwReleaseFix);
+		free(buf, M_DEVBUF);
+		return;
+	}
+	ti_mem_write(sc, tf->FwTextAddr, tf->FwTextLen,
+	    (caddr_t)&tf->data[tf->FwTextOffset]);
+	ti_mem_write(sc, tf->FwRodataAddr, tf->FwRodataLen,
+	    (caddr_t)&tf->data[tf->FwRodataOffset]);
+	ti_mem_write(sc, tf->FwDataAddr, tf->FwDataLen,
+	    (caddr_t)&tf->data[tf->FwDataOffset]);
+	ti_mem_set(sc, tf->FwBssAddr, tf->FwBssLen);
+	ti_mem_set(sc, tf->FwSbssAddr, tf->FwSbssLen);
+	CSR_WRITE_4(sc, TI_CPU_PROGRAM_COUNTER, tf->FwStartAddr);
+	free(buf, M_DEVBUF);
 }
 
 /*
@@ -908,7 +901,7 @@ int ti_newbuf_jumbo(sc, i, m)
 
 /*
  * The standard receive ring has 512 entries in it. At 2K per mbuf cluster,
- * that's 1MB or memory, which is a lot. For now, we fill only the first
+ * that's 1MB of memory, which is a lot. For now, we fill only the first
  * 256 ring entries and hope that our CPU is fast enough to keep up with
  * the NIC.
  */
@@ -1526,7 +1519,7 @@ int ti_gibinit(sc)
 	TI_RING_DMASYNC(sc, ti_info, BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
 
 	/* Set up tuneables */
-	if (ifp->if_mtu > (ETHERMTU + ETHER_HDR_LEN + ETHER_CRC_LEN))
+	if (ifp->if_mtu > ETHER_MAX_LEN)
 		CSR_WRITE_4(sc, TI_GCR_RX_COAL_TICKS,
 		    (sc->ti_rx_coal_ticks / 10));
 	else
@@ -1735,10 +1728,8 @@ ti_attach(parent, self, aux)
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = ti_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = ti_start;
 	ifp->if_watchdog = ti_watchdog;
-	ifp->if_mtu = ETHERMTU;
 #if NVLAN >0
 	ifp->if_capabilities |= IFCAP_VLAN_MTU | IFCAP_VLAN_HWTAGGING;
 #endif
@@ -1844,10 +1835,18 @@ void ti_rxeof(sc)
 				ti_newbuf_jumbo(sc, sc->ti_jumbo, m);
 				continue;
 			}
-			if (ti_newbuf_jumbo(sc, sc->ti_jumbo, NULL) == ENOBUFS) {
-				ifp->if_ierrors++;
+			if (ti_newbuf_jumbo(sc, sc->ti_jumbo, NULL)
+			    == ENOBUFS) {
+				struct mbuf             *m0;
+				m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
+				    cur_rx->ti_len + ETHER_ALIGN, 0, ifp, NULL);
 				ti_newbuf_jumbo(sc, sc->ti_jumbo, m);
-				continue;
+				if (m0 == NULL) {
+					ifp->if_ierrors++;
+					continue;
+				}
+				m_adj(m0, ETHER_ALIGN);
+				m = m0;
 			}
 		} else if (cur_rx->ti_flags & TI_BDFLAG_MINI_RING) {
 			TI_INC(sc->ti_mini, TI_MINI_RX_RING_CNT);
@@ -2396,7 +2395,7 @@ void ti_init2(sc)
 		panic("not enough mbufs for rx ring");
 
 	/* Init jumbo RX ring. */
-	if (ifp->if_mtu > (ETHERMTU + ETHER_HDR_LEN + ETHER_CRC_LEN))
+	if (ifp->if_mtu > ETHER_MAX_LEN)
 		ti_init_rx_ring_jumbo(sc);
 
 	/*

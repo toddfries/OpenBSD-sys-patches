@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.26 2004/06/28 02:49:10 aaron Exp $ */
+/*	$OpenBSD: intr.h,v 1.28 2004/12/24 22:50:30 miod Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -57,7 +57,6 @@
 #define PPC_NIRQ	66
 #define PPC_CLK_IRQ	64
 #define PPC_STAT_IRQ	65
-extern int intrcnt[PPC_NIRQ];
 
 void setsoftclock(void);
 void clearsoftclock(void);
@@ -145,8 +144,8 @@ set_sint(int pending)
 #define splstatclock()	splhigh()
 #define	spllowersoftclock()	spllower(SINT_CLOCK)
 #define	splsoftclock()	splraise(SINT_CLOCK)
-#define	splsoftnet()	splraise(SINT_NET)
-#define	splsofttty()	splraise(SINT_TTY)
+#define	splsoftnet()	splraise(SINT_NET|SINT_CLOCK)
+#define	splsofttty()	splraise(SINT_TTY|SINT_NET|SINT_CLOCK)
 
 #define	setsoftclock()	set_sint(SINT_CLOCK);
 #define	setsoftnet()	set_sint(SINT_NET);

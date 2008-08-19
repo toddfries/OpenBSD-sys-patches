@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgsix.c,v 1.44 2003/07/03 21:02:13 jason Exp $	*/
+/*	$OpenBSD: cgsix.c,v 1.52 2005/03/15 18:40:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -53,19 +53,6 @@
 #include <dev/sbus/cgsixreg.h>
 #include <dev/ic/bt458reg.h>
 
-struct wsscreen_descr cgsix_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *cgsix_scrlist[] = {
-	&cgsix_stdscreen,
-	/* XXX other formats? */
-};
-
-struct wsscreen_list cgsix_screenlist = {
-	sizeof(cgsix_scrlist) / sizeof(struct wsscreen_descr *), cgsix_scrlist
-};
-
 int cgsix_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int cgsix_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -89,7 +76,6 @@ void cgsix_ras_copycols(void *, int, int, int, int);
 void cgsix_ras_erasecols(void *, int, int, int, long int);
 void cgsix_ras_eraserows(void *, int, int, long int);
 void cgsix_ras_do_cursor(struct rasops_info *);
-void cgsix_ras_updatecursor(struct rasops_info *);
 int cgsix_setcursor(struct cgsix_softc *, struct wsdisplay_cursor *);
 int cgsix_updatecursor(struct cgsix_softc *, u_int);
 
@@ -130,10 +116,11 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 {
 	struct cgsix_softc *sc = (struct cgsix_softc *)self;
 	struct sbus_attach_args *sa = aux;
-	struct wsemuldisplaydev_attach_args waa;
-	int console, i;
+	int node, console, i;
 	u_int32_t fhc, rev;
+	const char *nam;
 
+	node = sa->sa_node;
 	sc->sc_bustag = sa->sa_bustag;
 	sc->sc_paddr = sbus_bus_addr(sa->sa_bustag, sa->sa_slot, sa->sa_offset);
 
@@ -142,7 +129,7 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 		goto fail;
 	}
 
-	fb_setsize(&sc->sc_sunfb, 8, 1152, 900, sa->sa_node, 0);
+	fb_setsize(&sc->sc_sunfb, 8, 1152, 900, node, 0);
 
 	/*
 	 * Map just BT, FHC, FBC, THC, and video RAM.
@@ -192,15 +179,20 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 
 	if ((sc->sc_ih = bus_intr_establish(sa->sa_bustag, sa->sa_pri,
 	    IPL_TTY, 0, cgsix_intr, sc, self->dv_xname)) == NULL) {
-		printf(": couldn't establish interrupt, pri %d\n", sa->sa_pri);
-		goto fail_intr;
+		printf(": couldn't establish interrupt, pri %d\n%s",
+		    INTLEV(sa->sa_pri), self->dv_xname);
 	}
 
 	/* if prom didn't initialize us, do it the hard way */
-	if (OF_getproplen(sa->sa_node, "width") != sizeof(u_int32_t))
+	if (OF_getproplen(node, "width") != sizeof(u_int32_t))
 		cgsix_hardreset(sc);
 
-	console = cgsix_is_console(sa->sa_node);
+	nam = getpropstring(node, "model");
+	if (*nam == '\0')
+		nam = sa->sa_name;
+	printf(": %s", nam);
+
+	console = cgsix_is_console(node);
 
 	fhc = FHC_READ(sc);
 	rev = (fhc & FHC_REV_MASK) >> FHC_REV_SHIFT;
@@ -242,35 +234,23 @@ cgsixattach(struct device *parent, struct device *self, void *aux)
 		cgsix_ras_init(sc);
 	}
 
-	cgsix_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	cgsix_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	cgsix_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	cgsix_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
-	printf("\n");
+	printf(", %dx%d, rev %d\n", sc->sc_sunfb.sf_width,
+	    sc->sc_sunfb.sf_height, rev);
 
 	fbwscons_setcolormap(&sc->sc_sunfb, cgsix_setcolor);
 
 	if (console) {
-		sc->sc_sunfb.sf_ro.ri_updatecursor = cgsix_ras_updatecursor;
-		fbwscons_console_init(&sc->sc_sunfb, &cgsix_stdscreen, -1,
-		    cgsix_burner);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 	}
 
-	waa.console = console;
-	waa.scrdata = &cgsix_screenlist;
-	waa.accessops = &cgsix_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &cgsix_accessops, console);
 
 	return;
 
-fail_intr:
-	bus_space_unmap(sa->sa_bustag, sc->sc_fbc_regs, CGSIX_FBC_SIZE);
 fail_fbc:
 	bus_space_unmap(sa->sa_bustag, sc->sc_tec_regs, CGSIX_TEC_SIZE);
 fail_tec:
-	bus_space_unmap(sa->sa_bustag, sc->sc_vid_regs, CGSIX_VID_SIZE);
+	bus_space_unmap(sa->sa_bustag, sc->sc_vid_regs, sc->sc_sunfb.sf_fbsize);
 fail_vid:
 	bus_space_unmap(sa->sa_bustag, sc->sc_thc_regs, CGSIX_THC_SIZE);
 fail_thc:
@@ -329,7 +309,11 @@ cgsix_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 		error = cg6_bt_putcmap(&sc->sc_cmap, cm);
 		if (error)
 			return (error);
-		cgsix_loadcmap_deferred(sc, cm->index, cm->count);
+		/* if we can handle interrupts, defer the update */
+		if (sc->sc_ih != NULL)
+			cgsix_loadcmap_deferred(sc, cm->index, cm->count);
+		else
+			cgsix_loadcmap_immediate(sc, cm->index, cm->count);
 		break;
 	case WSDISPLAYIO_SCURSOR:
 		curs = (struct wsdisplay_cursor *)data;
@@ -398,6 +382,7 @@ cgsix_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 		break;
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
 	default:
 		return -1; /* not supported */
         }
@@ -1065,15 +1050,4 @@ cgsix_ras_do_cursor(struct rasops_info *ri)
 	    ri->ri_xorigin + col + ri->ri_font->fontwidth - 1);
 	CG6_DRAW_WAIT(sc);
 	CG6_DRAIN(sc);
-}
-
-void
-cgsix_ras_updatecursor(struct rasops_info *ri)
-{
-	struct cgsix_softc *sc = ri->ri_hw;
-
-	if (sc->sc_sunfb.sf_crowp != NULL)
-		*sc->sc_sunfb.sf_crowp = ri->ri_crow;
-	if (sc->sc_sunfb.sf_ccolp != NULL)
-		*sc->sc_sunfb.sf_ccolp = ri->ri_ccol;
 }

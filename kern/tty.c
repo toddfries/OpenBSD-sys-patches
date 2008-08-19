@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.65 2004/06/13 21:49:26 niklas Exp $	*/
+/*	$OpenBSD: tty.c,v 1.68 2004/12/26 21:22:13 miod Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -2036,7 +2036,7 @@ ttwakeup(tp)
 int
 ttspeedtab(speed, table)
 	int speed;
-	register struct speedtab *table;
+	const struct speedtab *table;
 {
 
 	for ( ; table->sp_speed != -1; table++)
@@ -2089,11 +2089,11 @@ ttyinfo(tp)
 		ttyprintf(tp, "not a controlling terminal\n");
 	else if (tp->t_pgrp == NULL)
 		ttyprintf(tp, "no foreground process group\n");
-	else if ((p = tp->t_pgrp->pg_members.lh_first) == 0)
+	else if ((p = LIST_FIRST(&tp->t_pgrp->pg_members)) == NULL)
 		ttyprintf(tp, "empty foreground process group\n");
 	else {
 		/* Pick interesting process. */
-		for (pick = NULL; p != 0; p = p->p_pglist.le_next)
+		for (pick = NULL; p != 0; p = LIST_NEXT(p, p_pglist))
 			if (proc_compare(pick, p))
 				pick = p;
 
@@ -2146,7 +2146,8 @@ ttyinfo(tp)
  *	   we pick out just "short-term" sleepers (P_SINTR == 0).
  *	4) Further ties are broken by picking the highest pid.
  */
-#define ISRUN(p)	(((p)->p_stat == SRUN) || ((p)->p_stat == SIDL))
+#define ISRUN(p)	(((p)->p_stat == SRUN) || ((p)->p_stat == SIDL) || \
+			 ((p)->p_stat == SONPROC))
 #define TESTAB(a, b)    ((a)<<1 | (b))
 #define ONLYA   2
 #define ONLYB   1

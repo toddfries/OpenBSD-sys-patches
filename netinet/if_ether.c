@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.54 2004/06/21 23:50:37 tholo Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.58 2005/03/01 19:04:56 mcbride Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -350,7 +350,7 @@ arprequest(ifp, sip, tip, enaddr)
 	bcopy((caddr_t)enaddr, (caddr_t)ea->arp_sha, sizeof(ea->arp_sha));
 	bcopy((caddr_t)sip, (caddr_t)ea->arp_spa, sizeof(ea->arp_spa));
 	bcopy((caddr_t)tip, (caddr_t)ea->arp_tpa, sizeof(ea->arp_tpa));
-	sa.sa_family = AF_UNSPEC;
+	sa.sa_family = pseudo_AF_HDRCMPLT;
 	sa.sa_len = sizeof(sa);
 	(*ifp->if_output)(ifp, m, &sa, (struct rtentry *)0);
 }
@@ -436,6 +436,11 @@ arpresolve(ac, rt, m, dst, desten)
 				arprequest(&ac->ac_if,
 				    &(SIN(rt->rt_ifa->ifa_addr)->sin_addr.s_addr),
 				    &(SIN(dst)->sin_addr.s_addr),
+#if NCARP > 0
+				    (rt->rt_ifp->if_type == IFT_CARP) ?
+					((struct arpcom *) rt->rt_ifp->if_softc
+					)->ac_enaddr :
+#endif
 				    ac->ac_enaddr);
 			else {
 				rt->rt_flags |= RTF_REJECT;
@@ -516,6 +521,9 @@ in_arpinput(m)
 #if NBRIDGE > 0
 	struct in_ifaddr *bridge_ia = NULL;
 #endif
+#if NCARP > 0
+	u_int32_t count = 0, index = 0;
+#endif
 	struct sockaddr_dl *sdl;
 	struct sockaddr sa;
 	struct in_addr isaddr, itaddr, myaddr;
@@ -541,8 +549,19 @@ in_arpinput(m)
 		if (itaddr.s_addr != ia->ia_addr.sin_addr.s_addr)
 			continue;
 
-		if (ia->ia_ifp == m->m_pkthdr.rcvif)
-			break;
+#if NCARP > 0
+		if (ia->ia_ifp->if_type == IFT_CARP &&
+		    ((ia->ia_ifp->if_flags & (IFF_UP|IFF_RUNNING)) ==
+		    (IFF_UP|IFF_RUNNING))) {
+			index++;
+			if (ia->ia_ifp == m->m_pkthdr.rcvif &&
+			    carp_iamatch(ia, ea->arp_sha,
+			    &count, index)) 
+				break;
+		} else 
+#endif
+			if (ia->ia_ifp == m->m_pkthdr.rcvif)
+				break;
 #if NBRIDGE > 0
 		/*
 		 * If the interface we received the packet on
@@ -554,14 +573,6 @@ in_arpinput(m)
 		if (m->m_pkthdr.rcvif->if_bridge != NULL &&
 		    m->m_pkthdr.rcvif->if_bridge == ia->ia_ifp->if_bridge)
 			bridge_ia = ia;
-#endif
-
-#if NCARP > 0
-		if (ac->ac_if.if_carp) {
-			if (carp_iamatch(ac->ac_if.if_carp, ia,
-			    &isaddr, &enaddr)) 
-				break;
-		}
 #endif
 	}
 
@@ -581,7 +592,7 @@ in_arpinput(m)
 		}
 	}
 
-	if (ia == NULL) {
+	if (ia == NULL && m->m_pkthdr.rcvif->if_type != IFT_CARP) {
 		struct ifaddr *ifa;
 
 		TAILQ_FOREACH(ifa, &m->m_pkthdr.rcvif->if_addrlist, ifa_list) {
@@ -645,7 +656,11 @@ in_arpinput(m)
 			}
 		    }
 		} else if (rt->rt_ifp != &ac->ac_if && !(ac->ac_if.if_bridge &&
-		    (rt->rt_ifp->if_bridge == ac->ac_if.if_bridge))) {
+		    (rt->rt_ifp->if_bridge == ac->ac_if.if_bridge)) &&
+		    !(rt->rt_ifp->if_type == IFT_CARP &&
+		    rt->rt_ifp->if_carpdev == &ac->ac_if) &&
+		    !(ac->ac_if.if_type == IFT_CARP &&
+		    ac->ac_if.if_carpdev == rt->rt_ifp)) {
 		    log(LOG_WARNING,
 			"arp: attempt to add entry for %s "
 			"on %s by %s on %s\n",
@@ -681,6 +696,9 @@ reply:
 		if (la == 0)
 			goto out;
 		rt = la->la_rt;
+		if (rt->rt_ifp->if_type == IFT_CARP &&
+		    m->m_pkthdr.rcvif->if_type != IFT_CARP)
+			goto out;
 		bcopy(ea->arp_sha, ea->arp_tha, sizeof(ea->arp_sha));
 		sdl = SDL(rt->rt_gateway);
 		bcopy(LLADDR(sdl), ea->arp_sha, sizeof(ea->arp_sha));
@@ -694,7 +712,7 @@ reply:
 	bcopy(ea->arp_tha, eh->ether_dhost, sizeof(eh->ether_dhost));
 	bcopy(enaddr, eh->ether_shost, sizeof(eh->ether_shost));
 	eh->ether_type = htons(ETHERTYPE_ARP);
-	sa.sa_family = AF_UNSPEC;
+	sa.sa_family = pseudo_AF_HDRCMPLT;
 	sa.sa_len = sizeof(sa);
 	(*ac->ac_if.if_output)(&ac->ac_if, m, &sa, (struct rtentry *)0);
 	return;
@@ -906,7 +924,7 @@ revarprequest(ifp)
 	   sizeof(ea->arp_sha));
 	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)ea->arp_tha,
 	   sizeof(ea->arp_tha));
-	sa.sa_family = AF_UNSPEC;
+	sa.sa_family = pseudo_AF_HDRCMPLT;
 	sa.sa_len = sizeof(sa);
 	ifp->if_output(ifp, m, &sa, (struct rtentry *)0);
 }

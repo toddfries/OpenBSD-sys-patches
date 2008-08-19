@@ -1,4 +1,4 @@
-/*	$OpenBSD: urlphy.c,v 1.3 2002/06/26 11:29:55 espie Exp $ */
+/*	$OpenBSD: urlphy.c,v 1.9 2005/02/05 04:56:27 brad Exp $ */
 /*	$NetBSD: urlphy.c,v 1.1 2002/03/28 21:07:53 ichiro Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -12,10 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Shingo WATANABE.
- * 4. Neither the name of the author nor the names of any co-contributors
+ * 3. Neither the name of the author nor the names of any co-contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +38,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -77,6 +73,10 @@ struct cfdriver urlphy_cd = {
 int urlphy_service(struct mii_softc *, struct mii_data *, int);
 void urlphy_status(struct mii_softc *);
 
+const struct mii_phy_funcs urlphy_funcs = {
+	urlphy_service, urlphy_status, mii_phy_reset,
+};
+
 int
 urlphy_match(struct device *parent, void *match, void *aux)
 {
@@ -105,14 +105,15 @@ urlphy_attach(struct device *parent, struct device *self, void *aux)
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
 
+	printf(": RTL internal phy\n");
+
 	DPRINTF(("%s: %s: enter\n", sc->mii_dev.dv_xname, __func__));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = urlphy_service;
-	sc->mii_status = urlphy_status;
+	sc->mii_funcs = &urlphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 	sc->mii_anegticks = 10;
 
 	/* Don't do loopback on this PHY. */
@@ -125,7 +126,7 @@ urlphy_attach(struct device *parent, struct device *self, void *aux)
 		       sc->mii_dev.dv_xname);
 		return;
 	}
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_MEDIAMASK)
@@ -199,7 +200,7 @@ urlphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			return (0);
 
 		sc->mii_ticks = 0;
-		mii_phy_reset(sc);
+		PHY_RESET(sc);
 
 		if (mii_phy_auto(sc, 0) == EJUSTRETURN)
 			return (0);

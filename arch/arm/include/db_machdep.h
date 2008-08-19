@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.2 2004/05/19 03:17:07 drahn Exp $	*/
+/*	$OpenBSD: db_machdep.h,v 1.4 2005/01/05 15:49:30 miod Exp $	*/
 /*	$NetBSD: db_machdep.h,v 1.5 2001/11/22 18:00:00 thorpej Exp $	*/
 
 /*
@@ -56,6 +56,7 @@ extern db_regs_t		ddb_regs;	/* register state */
 #define PC_ADVANCE(regs) ((regs)->tf_r15 += 4)
 #else
 #define	PC_REGS(regs)	((db_addr_t)(regs)->tf_pc)
+#define	SET_PC_REGS(regs, value)	(regs)->tf_pc = (register_t)(value)
 #endif
 
 #define	BKPT_INST	(KERNEL_BREAKPOINT)	/* breakpoint instruction */
@@ -111,7 +112,6 @@ void db_machine_init (void);
 #define DB_ELFSIZE 32
 #define DB_NO_AOUT
 
-void db_show_panic_cmd	(db_expr_t, int, db_expr_t, char *);
 void db_show_frame_cmd	(db_expr_t, int, db_expr_t, char *);
 
 #endif	/* _ARM_DB_MACHDEP_H_ */

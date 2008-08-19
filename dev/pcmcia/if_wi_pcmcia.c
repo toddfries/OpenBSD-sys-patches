@@ -1,4 +1,4 @@
-/* $OpenBSD: if_wi_pcmcia.c,v 1.49 2004/06/04 18:03:35 millert Exp $ */
+/* $OpenBSD: if_wi_pcmcia.c,v 1.62 2005/03/13 04:34:43 dlg Exp $ */
 /* $NetBSD: if_wi_pcmcia.c,v 1.14 2001/11/26 04:34:56 ichiro Exp $ */
 
 /*
@@ -58,7 +58,8 @@
 #include <netinet/if_ether.h>
 #endif
 
-#include <net/if_ieee80211.h>
+#include <net80211/ieee80211.h>
+#include <net80211/ieee80211_ioctl.h>
 
 #include <machine/bus.h>
 
@@ -121,6 +122,10 @@ static const struct wi_pcmcia_product {
 	  PCMCIA_PRODUCT_COREGA_WIRELESS_LAN_PCCL_11,
 	  PCMCIA_CIS_COREGA_WIRELESS_LAN_PCCL_11
 	},
+	{ PCMCIA_VENDOR_COREGA,
+	  PCMCIA_PRODUCT_COREGA_WIRELESS_LAN_WLCFL_11,
+	  PCMCIA_CIS_COREGA_WIRELESS_LAN_WLCFL_11
+	},
 	{ PCMCIA_VENDOR_INTEL,
 	  PCMCIA_PRODUCT_INTEL_PRO_WLAN_2011,
 	  PCMCIA_CIS_INTEL_PRO_WLAN_2011
@@ -141,6 +146,10 @@ static const struct wi_pcmcia_product {
 	  PCMCIA_PRODUCT_LINKSYS2_IWN2,
 	  PCMCIA_CIS_LINKSYS2_IWN2
 	},
+	{ PCMCIA_VENDOR_LINKSYS2,
+	  PCMCIA_PRODUCT_LINKSYS2_WCF11,
+	  PCMCIA_CIS_LINKSYS2_WCF11
+	},
 	{ PCMCIA_VENDOR_LUCENT,
 	  PCMCIA_PRODUCT_LUCENT_WAVELAN_IEEE,
 	  PCMCIA_CIS_SMC_2632W
@@ -156,6 +165,10 @@ static const struct wi_pcmcia_product {
 	{ PCMCIA_VENDOR_ELSA,
 	  PCMCIA_PRODUCT_ELSA_XI325_IEEE,
 	  PCMCIA_CIS_ELSA_XI325_IEEE
+	},
+	{ PCMCIA_VENDOR_ELSA,
+	  PCMCIA_PRODUCT_ELSA_WNB11CFZ,
+	  PCMCIA_CIS_ELSA_WNB11CFZ
 	},
 	{ PCMCIA_VENDOR_COMPAQ,
 	  PCMCIA_PRODUCT_COMPAQ_NC5004,
@@ -184,6 +197,10 @@ static const struct wi_pcmcia_product {
 	{ PCMCIA_VENDOR_LUCENT,
 	  PCMCIA_PRODUCT_LUCENT_WAVELAN_IEEE,
 	  PCMCIA_CIS_CABLETRON_ROAMABOUT
+	},
+	{ PCMCIA_VENDOR_IODATA2,
+	  PCMCIA_PRODUCT_IODATA2_WCF12,
+	  PCMCIA_CIS_IODATA2_WCF12
 	},
 	{ PCMCIA_VENDOR_IODATA2,
 	  PCMCIA_PRODUCT_IODATA2_WNB11PCM,
@@ -237,6 +254,10 @@ static const struct wi_pcmcia_product {
 	  PCMCIA_PRODUCT_NETGEAR2_MA401RA,
 	  PCMCIA_CIS_NETGEAR2_MA401RA
 	},
+	{ PCMCIA_VENDOR_NETGEAR2,
+	  PCMCIA_PRODUCT_NETGEAR2_DWL650,
+	  PCMCIA_CIS_NETGEAR2_DWL650
+	},
 	{ PCMCIA_VENDOR_AIRVAST,
 	  PCMCIA_PRODUCT_AIRVAST_WN_100,
 	  PCMCIA_CIS_AIRVAST_WN_100
@@ -244,6 +265,10 @@ static const struct wi_pcmcia_product {
 	{ PCMCIA_VENDOR_SIEMENS,
 	  PCMCIA_PRODUCT_SIEMENS_SS1021,
 	  PCMCIA_CIS_SIEMENS_SS1021
+	},
+	{ PCMCIA_VENDOR_PROXIM,
+	  PCMCIA_PRODUCT_PROXIM_HARMONY_80211B,
+	  PCMCIA_CIS_PROXIM_HARMONY_80211B
 	},
 	{ PCMCIA_VENDOR_MICROSOFT,
 	  PCMCIA_PRODUCT_MICROSOFT_MN520,
@@ -256,6 +281,46 @@ static const struct wi_pcmcia_product {
 	{ PCMCIA_VENDOR_ASUS,
 	  PCMCIA_PRODUCT_ASUS_WL_100,
 	  PCMCIA_CIS_ASUS_WL_100
+	},
+	{ PCMCIA_VENDOR_SENAO,
+	  PCMCIA_PRODUCT_SENAO_EL2511CD2EM,
+	  PCMCIA_CIS_SENAO_EL2511CD2EM
+	},
+	{ PCMCIA_VENDOR_ARTEM,
+	  PCMCIA_PRODUCT_ARTEM_ONAIR,
+	  PCMCIA_CIS_ARTEM_ONAIR
+	},
+	{ PCMCIA_VENDOR_PLANEX,
+	  PCMCIA_PRODUCT_PLANEX_GWNS11H,
+	  PCMCIA_CIS_PLANEX_GWNS11H
+	},
+	{ PCMCIA_VENDOR_SYMBOL,
+	  PCMCIA_PRODUCT_SYMBOL_LA4100,
+	  PCMCIA_CIS_SYMBOL_LA4100
+	},
+	{ PCMCIA_VENDOR_BAY,
+	  PCMCIA_PRODUCT_BAY_EMOBILITY_11B,
+	  PCMCIA_CIS_BAY_EMOBILITY_11B
+	},
+	{ PCMCIA_VENDOR_GREYCELL,
+	  PCMCIA_PRODUCT_GREYCELL_DWL650H,
+	  PCMCIA_CIS_GREYCELL_DWL650H
+	},
+	{ PCMCIA_VENDOR_FUJITSU,
+	  PCMCIA_PRODUCT_FUJITSU_WL110,
+	  PCMCIA_CIS_FUJITSU_WL110
+	},
+	{ PCMCIA_VENDOR_ALLIEDTELESIS,
+	  PCMCIA_PRODUCT_ALLIEDTELESIS_WR211PCM,
+	  PCMCIA_CIS_ALLIEDTELESIS_WR211PCM
+	},
+	{ PCMCIA_VENDOR_HWN,
+	  PCMCIA_PRODUCT_HWN_AIRWAY80211,
+	  PCMCIA_CIS_HWN_AIRWAY80211
+	},
+	{ PCMCIA_VENDOR_SOCKET,
+	  PCMCIA_PRODUCT_SOCKET_LP_WLAN_CF,
+	  PCMCIA_CIS_SOCKET_LP_WLAN_CF
 	}
 };
 
@@ -317,6 +382,7 @@ wi_pcmcia_attach(parent, self, aux)
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_function	*pf = pa->pf;
 	struct pcmcia_config_entry *cfe = SIMPLEQ_FIRST(&pf->cfe_head);
+	const char		*intrstr;
 	int			state = 0;
 
 	psc->sc_pf = pf;
@@ -354,17 +420,22 @@ wi_pcmcia_attach(parent, self, aux)
 	CSR_WRITE_2(sc, WI_EVENT_ACK, 0xffff);
 
 	/* Establish the interrupt. */
-	sc->sc_ih = pcmcia_intr_establish(pa->pf, IPL_NET, wi_intr, psc, "");
+	sc->sc_ih = pcmcia_intr_establish(pa->pf, IPL_NET, wi_intr, psc,
+	    sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
 		printf("%s: couldn't establish interrupt\n",
 		    sc->sc_dev.dv_xname);
 		goto bad;
 	}
 
+	intrstr = pcmcia_intr_string(psc->sc_pf, sc->sc_ih);
+	printf("%s%s\n", *intrstr ? ", " : "", intrstr);
 	if (wi_attach(sc, &wi_func_io) == 0)
 		return;
 
+	/* wi_attach() failed, do some cleanup */
 	pcmcia_intr_disestablish(psc->sc_pf, sc->sc_ih);
+	sc->sc_ih = NULL;
 
 bad:
 	if (state > 2)
@@ -384,10 +455,8 @@ wi_pcmcia_detach(dev, flags)
 	struct wi_softc *sc = &psc->sc_wi;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 
-	if (!(sc->wi_flags & WI_FLAGS_ATTACHED)) {
-		printf("%s: already detached\n", sc->sc_dev.dv_xname);
+	if (!(sc->wi_flags & WI_FLAGS_ATTACHED))
 		return (0);
-	}
 
 	wi_detach(sc);
 
@@ -427,7 +496,8 @@ wi_pcmcia_activate(dev, act)
 		if (ifp->if_flags & IFF_RUNNING)
 			wi_stop(sc);
 		sc->wi_flags &= ~WI_FLAGS_INITIALIZED;
-		pcmcia_intr_disestablish(psc->sc_pf, sc->sc_ih);
+		if (sc->sc_ih != NULL)
+			pcmcia_intr_disestablish(psc->sc_pf, sc->sc_ih);
 		pcmcia_function_disable(psc->sc_pf);
 		break;
 	}

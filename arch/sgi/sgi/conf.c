@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.3 2004/08/11 15:13:35 deraadt Exp $ */
+/*	$OpenBSD: conf.c,v 1.8 2005/01/02 19:50:30 kettenis Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -45,24 +45,17 @@
 #include <sys/tty.h>
 #include <sys/conf.h>
 
-int	ttselect	__P((dev_t, int, struct proc *));
-
 /*
  *	Block devices.
  */
 
 #include "vnd.h"
-bdev_decl(vnd);
-bdev_decl(sw);
 #include "sd.h"
-bdev_decl(sd);
 #include "cd.h"
-bdev_decl(cd);
 #include "wd.h"
 bdev_decl(wd);
 #include "ccd.h"
 #include "rd.h"
-bdev_decl(rd);
 
 struct bdevsw	bdevsw[] =
 {
@@ -96,53 +89,29 @@ int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
 	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
 	0, seltrue, (dev_type_mmap((*))) enodev }
 
-/* open, close, write, ioctl */
-#define	cdev_spkr_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
-
-cdev_decl(cn);
-cdev_decl(sw);
-cdev_decl(ctty);
-cdev_decl(random);
 #define mmread mmrw
 #define mmwrite mmrw
 dev_type_read(mmrw);
 cdev_decl(mm);
 #include "pty.h"
-#define	ptstty		ptytty
-#define	ptsioctl	ptyioctl
-cdev_decl(pts);
-#define	ptctty		ptytty
-#define	ptcioctl	ptyioctl
-cdev_decl(ptc);
-cdev_decl(log);
 cdev_decl(fd);
 #include "st.h"
-cdev_decl(st);
-cdev_decl(vnd);
-cdev_decl(rd);
 #include "bpfilter.h"
-cdev_decl(bpf);
+#include "tun.h"
 #include "com.h"
 cdev_decl(com);
 #include "lpt.h"
 cdev_decl(lpt);
-cdev_decl(sd);
-cdev_decl(cd);
 #include "ch.h"
 #include "ss.h"
 #include "uk.h"
-cdev_decl(uk);
 cdev_decl(wd);
-cdev_decl(acd);
+#include "audio.h"
 #ifdef XFS
 #include <xfs/nxfs.h>
 cdev_decl(xfs_dev);
 #endif
 #include "ksyms.h"
-cdev_decl(ksyms);
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -151,7 +120,10 @@ cdev_decl(ksyms);
 #include "pci.h"
 cdev_decl(pci);
 
-#include <pf.h>
+#include "inet.h"
+
+#include "pf.h"
+#include "systrace.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -168,15 +140,15 @@ struct cdevsw	cdevsw[] =
 	cdev_tape_init(NST,st),		/* 10: SCSI tape */
 	cdev_disk_init(NVND,vnd),	/* 11: vnode disk */
 	cdev_bpftun_init(NBPFILTER,bpf),/* 12: berkeley packet filter */
-	cdev_notdef(),			/* 13: */
+	cdev_bpftun_init(NTUN,tun),	/* 13: network tunnel */
 	cdev_notdef(),			/* 14: */
 	cdev_notdef(),			/* 15: */
 	cdev_lpt_init(NLPT,lpt),	/* 16: Parallel printer interface */
 	cdev_tty_init(NCOM,com),	/* 17: 16C450 serial interface */
 	cdev_disk_init(NWD,wd),		/* 18: ST506/ESDI/IDE disk */
 	cdev_notdef(),			/* 19: */
-	cdev_tty_init(NPTY,pts),	/* 20: pseudo-tty slave */
-	cdev_ptc_init(NPTY,ptc),	/* 21: pseudo-tty master */
+	cdev_notdef(),			/* 20: */
+	cdev_notdef(),			/* 21: */
 	cdev_disk_init(NRD,rd),		/* 22: ramdisk device */
 	cdev_disk_init(NCCD,ccd),	/* 23: concatenated disk driver */
 	cdev_notdef(),			/* 24: */
@@ -203,18 +175,19 @@ cdev_wsdisplay_init(NWSDISPLAY, wsdisplay),	/* 25: */
 	cdev_notdef(),			/* 41: */
 	cdev_notdef(),			/* 42: */
 	cdev_notdef(),			/* 33: */
-	cdev_notdef(),			/* 44: */
+	cdev_audio_init(NAUDIO,audio),	/* 44: /dev/audio */
 	cdev_notdef(),			/* 45: */
 	cdev_notdef(),			/* 46: */
-	cdev_notdef(),			/* 47: */
+	cdev_crypto_init(NCRYPTO,crypto),	/* 47: /dev/crypto */
 	cdev_notdef(),			/* 48: */
 	cdev_notdef(),			/* 49: */
-	cdev_notdef(),			/* 50: */
+	cdev_systrace_init(NSYSTRACE,systrace),	/* 50: system call tracing */
 #ifdef XFS
 	cdev_xfs_init(NXFS,xfs_dev),	/* 51: xfs communication device */
 #else
 	cdev_notdef(),			/* 51: */
 #endif
+	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
 };
 
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);

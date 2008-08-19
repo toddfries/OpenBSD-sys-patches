@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.c,v 1.6 2004/09/09 22:11:39 pefo Exp $ */
+/*	$OpenBSD: macebus.c,v 1.11 2005/01/31 21:35:50 grange Exp $ */
 
 /*
  * Copyright (c) 2000-2004 Opsycon AB  (www.opsycon.se)
@@ -64,7 +64,7 @@ void *macebus_intr_establish(void *, u_long, int, int,
 			int (*)(void *), void *, char *);
 void macebus_intr_disestablish(void *, void *);
 void macebus_intr_makemasks(void);
-void macebus_do_pending_int(void);
+void macebus_do_pending_int(int);
 intrmask_t macebus_iointr(intrmask_t, struct trap_frame *);
 intrmask_t macebus_aux(intrmask_t, struct trap_frame *);
 
@@ -436,9 +436,8 @@ intrmask_t mace_intem = 0x0;
 static intrmask_t intrtype[INTMASKSIZE];
 static intrmask_t intrmask[INTMASKSIZE];
 static intrmask_t intrlevel[INTMASKSIZE];
-struct intrhand *intrhand[INTMASKSIZE];
 
-static int fakeintr __P((void *));
+static int fakeintr(void *);
 static int fakeintr(void *a) {return 0;}
 
 /*
@@ -515,11 +514,12 @@ macebus_intr_establish(void *icp, u_long irq, int type, int level,
 	 */
 	ih->ih_fun = ih_fun;
 	ih->ih_arg = ih_arg;
-	ih->ih_count = 0;
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
 	ih->ih_what = ih_what;
+	evcount_attach(&ih->ih_count, ih_what, (void *)&ih->ih_irq,
+	    &evcount_intr);
 	*p = ih;
 
 	return (ih);
@@ -595,31 +595,40 @@ macebus_intr_makemasks(void)
 }
 
 void
-macebus_do_pending_int(void)
+macebus_do_pending_int(int newcpl)
 {
+#ifdef _USE_SILLY_OVERWORKED_HW_INT_PENDING_HANDLER_
 	struct intrhand *ih;
 	int vector;
-	intrmask_t pcpl;
 	intrmask_t hwpend;
 	struct trap_frame cf;
 	static volatile int processing;
 
-	/* Don't recurse... */
-	if (processing)
+	/* Don't recurse... but change the mask */
+	if (processing) {
+		cpl = newcpl;
 		return;
+	}
 	processing = 1;
 
-	/* XXX interrupt vulnerable when changing ipending */
-	pcpl = splhigh();		/* Turn off all */
 
 	/* XXX Fake a trapframe for clock pendings... */
 	cf.pc = (int)&macebus_do_pending_int;
 	cf.sr = 0;
-	cf.cpl = pcpl;
+	cf.cpl = cpl;
 
-	hwpend = ipending & ~pcpl;	/* Do now unmasked pendings */
-	hwpend &= ~(SINT_ALLMASK);
-	ipending &= ~hwpend;
+	/* Hard mask current cpl so we don't get any new pendings */
+	hw_setintrmask(cpl);
+
+	/* Get what interrupt we should process */
+	hwpend = ipending & ~newcpl;
+	hwpend &= ~SINT_ALLMASK;
+	clr_ipending(hwpend);
+
+	/* Enable all non pending non masked hardware interrupts */
+	cpl = (cpl & SINT_ALLMASK) | (newcpl & ~SINT_ALLMASK) | hwpend;
+	hw_setintrmask(cpl);
+
 	while (hwpend) {
 		vector = ffs(hwpend) - 1;
 		hwpend &= ~(1L << vector);
@@ -627,35 +636,49 @@ macebus_do_pending_int(void)
 		while (ih) {
 			ih->frame = &cf;
 			if ((*ih->ih_fun)(ih->ih_arg)) {
-				ih->ih_count++;
+				ih->ih_count.ec_count++;
 			}
 			ih = ih->ih_next;
 		}
 	}
-	if ((ipending & SINT_CLOCKMASK) & ~pcpl) {
-		ipending &= ~SINT_CLOCKMASK;
+
+	/* Enable all processed pending hardware interrupts */
+	cpl &= ~hwpend;
+	hw_setintrmask(cpl);
+
+	if ((ipending & SINT_CLOCKMASK) & ~newcpl) {
+		clr_ipending(SINT_CLOCKMASK);
 		softclock();
 	}
-	if ((ipending & SINT_NETMASK) & ~pcpl) {
+	if ((ipending & SINT_NETMASK) & ~newcpl) {
 		extern int netisr;
 		int isr = netisr;
 		netisr = 0;
-		ipending &= ~SINT_NETMASK;
+		clr_ipending(SINT_NETMASK);
 #define	DONETISR(b,f)	if (isr & (1 << (b)))	f();
 #include <net/netisr_dispatch.h>
 	}
 
 #ifdef NOTYET
-	if ((ipending & SINT_TTYMASK) & ~pcpl) {
-		ipending &= ~SINT_TTYMASK;
+	if ((ipending & SINT_TTYMASK) & ~newcpl) {
+		clr_ipending(SINT_TTYMASK);
 		compoll(NULL);
 	}
 #endif
 
-	cpl = pcpl;	/* Don't use splx... we are here already! */
-	hw_setintrmask(pcpl);
+	/* Update masks to new cpl. Order highly important! */
+	cpl = newcpl;
+	hw_setintrmask(newcpl);
 
 	processing = 0;
+#else
+	/* Update masks to new cpl. Order highly important! */
+	cpl = newcpl;
+	hw_setintrmask(newcpl);
+	/* If we still have softints pending trigg processing */
+	if (ipending & SINT_ALLMASK & ~cpl)
+		setsoftintr0();
+#endif
 }
 
 /*
@@ -671,21 +694,23 @@ macebus_iointr(intrmask_t hwpend, struct trap_frame *cf)
 	u_int64_t intstat, isastat, mask;
 
 	intstat = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_STAT);
-	intstat &= 0x0000ffff;
+	intstat &= 0xffff;
+
 	isastat = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_INT_STAT);
 	catched = 0;
 
 	/* Mask off masked interrupts and save them as pending */
 	if (intstat & cf->cpl) {
-		ipending |= intstat & cf->cpl;
+		set_ipending(intstat & cf->cpl);
 		mask = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_MASK);
 		mask &= ~ipending;
 		bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, mask);
 		catched++;
 	}
 
-	/* Scan the first 16 for now */
+	/* Scan all unmasked. Scan the first 16 for now */
 	pending = intstat & ~cf->cpl;
+	clr_ipending(pending);
 
 	for (v = 0, vm = 1; pending != 0 && v < 16 ; v++, vm <<= 1) {
 		if (pending & vm) {
@@ -695,7 +720,7 @@ macebus_iointr(intrmask_t hwpend, struct trap_frame *cf)
 				ih->frame = cf;
 				if ((*ih->ih_fun)(ih->ih_arg)) {
 					catched |= vm;
-					ih->ih_count++;
+					ih->ih_count.ec_count++;
 				}
 				ih = ih->ih_next;
 			}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.56 2004/06/26 17:36:33 markus Exp $	*/
+/*	$OpenBSD: if.h,v 1.64 2005/02/07 15:00:17 mcbride Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -141,7 +141,7 @@ struct	ifqueue {
 	int	ifq_len;
 	int	ifq_maxlen;
 	int	ifq_drops;
-	int	ifq_congestion;
+	struct	timeout *ifq_congestion;
 };
 
 /*
@@ -174,13 +174,18 @@ struct ifnet {				/* and the entries */
 	void	*if_softc;		/* lower-level data for this if */
 	TAILQ_ENTRY(ifnet) if_list;	/* all struct ifnets are chained */
 	TAILQ_HEAD(, ifaddr) if_addrlist; /* linked list of addresses per if */
-	TAILQ_HEAD(, ifgroup) if_groups; /* linked list of groups per if */
+	TAILQ_HEAD(, ifg_list) if_groups; /* linked list of groups per if */
 	struct hook_desc_head *if_addrhooks; /* address change callbacks */
 	char	if_xname[IFNAMSIZ];	/* external name (name + unit) */
 	int	if_pcount;		/* number of promiscuous listeners */
 	caddr_t	if_bpf;			/* packet filter structure */
 	caddr_t	if_bridge;		/* bridge structure */
-	caddr_t	if_carp;		/* carp structure */
+	union {
+		caddr_t	carp_s;		/* carp structure (used by !carp ifs) */
+		struct ifnet *carp_d;	/* ptr to carpdev (used by carp ifs) */
+	} if_carp_ptr;
+#define if_carp		if_carp_ptr.carp_s
+#define if_carpdev	if_carp_ptr.carp_d
 	u_short	if_index;		/* numeric abbreviation for this if */
 	short	if_timer;		/* time 'til if_watchdog called */
 	short	if_flags;		/* up/down, broadcast, etc. */
@@ -308,7 +313,7 @@ struct ifnet {				/* and the entries */
 	if (IF_QFULL(ifq)) {				\
 		IF_DROP(ifq);				\
 		m_freem(m);				\
-		if (!ifq->ifq_congestion)		\
+		if (!(ifq)->ifq_congestion)		\
 			if_congestion(ifq);		\
 	} else						\
 		IF_ENQUEUE(ifq, m);			\
@@ -398,11 +403,21 @@ struct if_announcemsghdr {
 #define IFAN_DEPARTURE	1	/* interface departure */
 
 /*
- * The groups on an interface
+ * interface groups
  */
-struct ifgroup {
-	char ifg_group[IFNAMSIZ];
-	TAILQ_ENTRY(ifgroup) ifg_next;
+struct ifg_group {
+	char			 ifg_group[IFNAMSIZ];
+	u_int			 ifg_refcnt;
+	TAILQ_ENTRY(ifg_group)	 ifg_next;
+};
+
+struct ifg_list {
+	struct ifg_group	*ifgl_group;
+	TAILQ_ENTRY(ifg_list)	 ifgl_next;
+};
+
+struct ifg_req {
+	char			 ifgrq_group[IFNAMSIZ];
 };
 
 /*
@@ -413,7 +428,7 @@ struct ifgroupreq {
 	u_int	ifgr_len;
 	union {
 		char	ifgru_group[IFNAMSIZ];
-		struct	ifgroup *ifgru_groups;
+		struct	ifg_req *ifgru_groups;
 	} ifgr_ifgru;
 #define ifgr_group	ifgr_ifgru.ifgru_group
 #define ifgr_groups	ifgr_ifgru.ifgru_groups
@@ -494,13 +509,13 @@ struct if_laddrreq {
 
 struct if_nameindex {
 	unsigned int	if_index;
-	char 		*if_name;
+	char		*if_name;
 };
 
 #ifndef _KERNEL
 __BEGIN_DECLS
 unsigned int if_nametoindex(const char *);
-char 	*if_indextoname(unsigned int, char *);
+char	*if_indextoname(unsigned int, char *);
 struct	if_nameindex *if_nameindex(void);
 __END_DECLS
 #define if_freenameindex(x)	free(x)
@@ -624,7 +639,7 @@ int	ether_ioctl(struct ifnet *, struct arpcom *, u_long, caddr_t);
 void	ether_input_mbuf(struct ifnet *, struct mbuf *);
 void	ether_input(struct ifnet *, struct ether_header *, struct mbuf *);
 int	ether_output(struct ifnet *,
-	   struct mbuf *, struct sockaddr *, struct rtentry *);
+	    struct mbuf *, struct sockaddr *, struct rtentry *);
 char	*ether_sprintf(u_char *);
 
 void	if_alloc_sadl(struct ifnet *);
@@ -635,6 +650,7 @@ void	if_attachtail(struct ifnet *);
 void	if_attachhead(struct ifnet *);
 void	if_detach(struct ifnet *);
 void	if_down(struct ifnet *);
+void	if_link_state_change(struct ifnet *);
 void	if_qflush(struct ifqueue *);
 void	if_slowtimo(void *);
 void	if_up(struct ifnet *);
@@ -642,8 +658,8 @@ int	ifconf(u_long, caddr_t);
 void	ifinit(void);
 int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
 int	ifpromisc(struct ifnet *, int);
-int	if_addgroup(struct ifgroupreq *, struct ifnet *);
-int	if_delgroup(struct ifgroupreq *, struct ifnet *);
+int	if_addgroup(struct ifnet *, char *);
+int	if_delgroup(struct ifnet *, char *);
 int	if_getgroup(caddr_t, struct ifnet *);
 struct	ifnet *ifunit(const char *);
 
@@ -668,7 +684,7 @@ void	if_congestion(struct ifqueue *);
 int	loioctl(struct ifnet *, u_long, caddr_t);
 void	loopattach(int);
 int	looutput(struct ifnet *,
-	   struct mbuf *, struct sockaddr *, struct rtentry *);
+	    struct mbuf *, struct sockaddr *, struct rtentry *);
 void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
 #endif /* _KERNEL */
 #endif /* _NET_IF_H_ */

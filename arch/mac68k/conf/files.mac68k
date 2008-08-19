@@ -1,4 +1,4 @@
-#	$OpenBSD: files.mac68k,v 1.29 2002/04/18 22:12:37 miod Exp $
+#	$OpenBSD: files.mac68k,v 1.33 2005/03/08 20:00:23 tdeval Exp $
 #	$NetBSD: files.mac68k,v 1.61 1997/03/01 20:22:16 scottr Exp $
 
 # mac68k-specific configuration info
@@ -8,16 +8,16 @@ maxpartitions 16
 
 maxusers 2 8 64
 
-device mainbus { }			# no locators (yet?)
+device mainbus {}			# no locators (yet?)
 attach mainbus at root
 
-define obio_norm { [addr = -1], ["no drq" = -1], ["no hsk" = -1] }
-define obio_scsi5380 { [addr = -1], [drq = -1], [hsk = -1] }
+define obio_norm {[addr = -1], ["no drq" = -1], ["no hsk" = -1]}
+define obio_scsi5380 {[addr = -1], [drq = -1], [hsk = -1]}
 device	obio: obio_norm, obio_scsi5380
 attach	obio at mainbus
 file	arch/mac68k/dev/obio.c		obio
 
-device	nubus { }
+device	nubus {}
 attach	nubus at mainbus
 file	arch/mac68k/dev/nubus.c		nubus
 
@@ -33,7 +33,7 @@ device	asc
 attach	asc at obio_norm
 file	arch/mac68k/dev/asc.c		asc needs-flag
 
-define grfbus { }
+define grfbus {}
 file	arch/mac68k/dev/grf_subr.c	grfbus
 
 device	intvid: grfbus
@@ -44,7 +44,7 @@ device	macvid: grfbus
 attach	macvid at nubus
 file	arch/mac68k/dev/grf_mv.c	macvid
 
-device	grf { }
+device	grf {}
 attach	grf at grfbus
 file	arch/mac68k/dev/grf.c		grf needs-flag
 
@@ -85,7 +85,7 @@ file	arch/mac68k/dev/sbc.c		sbc
 attach	esp at obio_norm
 file	arch/mac68k/dev/esp.c		esp
 
-device	zsc { channel = -1 }
+device	zsc {[channel = -1]}
 attach	zsc at obio_norm
 file	arch/mac68k/dev/zs.c		zsc needs-flag
 file	arch/mac68k/dev/z8530sc.c	zsc
@@ -104,6 +104,7 @@ file	arch/mac68k/mac68k/bus_space.c
 file	arch/mac68k/mac68k/clock.c
 file	arch/mac68k/mac68k/conf.c
 file	arch/mac68k/mac68k/disksubr.c		disk
+file	arch/mac68k/mac68k/intr.c
 file	arch/mac68k/mac68k/machdep.c
 file	arch/mac68k/mac68k/macrom.c
 file	arch/mac68k/mac68k/macromasm.s
@@ -119,7 +120,6 @@ file	arch/mac68k/mac68k/trap.c
 file	arch/mac68k/mac68k/via.c
 file	arch/mac68k/mac68k/vm_machdep.c
 
-file	dev/cons.c
 file	dev/cninit.c
 
 major	{sd = 4}

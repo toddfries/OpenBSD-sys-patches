@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.73 2004/07/21 17:30:56 marius Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.77 2005/03/04 22:41:04 reyk Exp $	*/
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -54,6 +54,7 @@
  */
 #define	M_WAITOK	0x0000
 #define	M_NOWAIT	0x0001
+#define M_CANFAIL	0x0002
 
 /*
  * Types of memory to be allocated
@@ -175,7 +176,10 @@
 
 #define	M_KEVENT	137	/* kqueue related */
 
-#define	M_LAST		138	/* Must be last type + 1 */
+#define	M_BLUETOOTH	138	/* Bluetooth */
+
+#define M_BWMETER	139	/* Multicast upcall bw meters */
+#define	M_LAST		140	/* Must be last type + 1 */
 
 
 #define	INITKMEMNAMES { \
@@ -302,6 +306,8 @@
 	"NTFS decomp",	/* 135 M_NTFSDECOMP */ \
 	"NTFS vrun",	/* 136 M_NTFSRUN */ \
 	"kqueue",	/* 137 M_KEVENT */ \
+	"bluetooth",	/* 138 M_BLUETOOTH */ \
+	"bwmeter",	/* 139 M_BWMETER */ \
 }
 
 struct kmemstats {
@@ -395,10 +401,11 @@ struct kmembuckets {
 
 #else /* do not collect statistics */
 #define	MALLOC(space, cast, size, type, flags) do { \
-	register struct kmembuckets *kbp = &bucket[BUCKETINDX(size)]; \
+	u_long kbp_size = (u_long)(size); \
+	register struct kmembuckets *kbp = &bucket[BUCKETINDX(kbp_size)]; \
 	long __s = splvm(); \
 	if (kbp->kb_next == NULL) { \
-		(space) = (cast)malloc((u_long)(size), type, flags); \
+		(space) = (cast)malloc(kbp_size, type, flags); \
 	} else { \
 		(space) = (cast)kbp->kb_next; \
 		kbp->kb_next = *(caddr_t *)(space); \

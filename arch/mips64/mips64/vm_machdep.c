@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.3 2004/08/10 20:28:13 deraadt Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.7 2005/01/31 21:35:50 grange Exp $	*/
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1992, 1993
@@ -55,8 +55,9 @@
 
 #include <machine/pte.h>
 #include <machine/cpu.h>
+#include <machine/autoconf.h>
 
-extern void proc_trampoline __P((void));
+extern void proc_trampoline(void);
 /*
  * Finish a fork operation, with process p2 nearly set up.
  */
@@ -261,12 +262,13 @@ vmapbuf(bp, len)
 	bp->b_data = (caddr_t) (kva + off);
 
 	while (sz > 0) {
-		pmap_extract(pmap, uva, &pa);
-		if (pa == 0) {
-			panic("vmapbuf: null page frame");
-		}
+		if (pmap_extract(pmap, uva, &pa) == FALSE)
+			panic("vmapbuf: pmap_extract(%x, %x) failed!",
+			    pmap, uva);
+
 		pmap_enter(vm_map_pmap(phys_map), kva, trunc_page(pa),
-			VM_PROT_READ|VM_PROT_WRITE, PMAP_WIRED);
+			VM_PROT_READ | VM_PROT_WRITE,
+			VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
 		uva += PAGE_SIZE;
 		kva += PAGE_SIZE;
 		sz -= PAGE_SIZE;

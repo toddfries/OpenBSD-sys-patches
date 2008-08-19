@@ -1,4 +1,4 @@
-/*	$OpenBSD: hil.c,v 1.14 2004/05/10 05:18:53 jolan Exp $	*/
+/*	$OpenBSD: hil.c,v 1.17 2005/01/15 19:48:15 miod Exp $	*/
 /*
  * Copyright (c) 2003, 2004, Miodrag Vallat.
  * All rights reserved.
@@ -93,10 +93,11 @@ struct cfdriver hil_cd = {
 };
 
 void	hilconfig(struct hil_softc *);
+void	hilempty(struct hil_softc *);
 int	hilsubmatch(struct device *, void *, void *);
 void	hil_process_int(struct hil_softc *, u_int8_t, u_int8_t);
 int	hil_process_poll(struct hil_softc *, u_int8_t, u_int8_t);
-void	send_device_cmd(struct hil_softc *sc, u_int device, u_int cmd);
+int	send_device_cmd(struct hil_softc *sc, u_int device, u_int cmd);
 void	polloff(struct hil_softc *);
 void	pollon(struct hil_softc *);
 
@@ -194,6 +195,8 @@ hil_attach_deferred(void *v)
 	int tries;
 	u_int8_t db;
 
+	sc->sc_status = HIL_STATUS_BUSY;
+
 	/*
 	 * Initialize the loop: reconfigure, don't report errors,
 	 * put keyboard in cooked mode, and enable autopolling.
@@ -219,10 +222,10 @@ hil_attach_deferred(void *v)
 	 * few seconds, give up.
 	 */
 	for (tries = 10; tries != 0; tries--) {
-		send_hil_cmd(sc, HIL_READLPSTAT, NULL, 0, &db);
-		
-		if (db & (LPS_CONFFAIL | LPS_CONFGOOD))
-			break;
+		if (send_hil_cmd(sc, HIL_READLPSTAT, NULL, 0, &db) == 0) {
+			if (db & (LPS_CONFFAIL | LPS_CONFGOOD))
+				break;
+		}
 
 #ifdef HILDEBUG
 		printf("%s: loop not ready, retrying...\n",
@@ -234,14 +237,25 @@ hil_attach_deferred(void *v)
 
 	if (tries == 0 || (db & LPS_CONFFAIL)) {
 		printf("%s: no devices\n", sc->sc_dev.dv_xname);
-		return;
+		sc->sc_pending = 0;
+		if (tries == 0)
+			return;
 	}
 
 	/*
-	 * At this point, the loop should have reconfigured.
-	 * The reconfiguration interrupt has already called hilconfig().
+	 * Enable loop interrupts.
 	 */
 	send_hil_cmd(sc, HIL_INTON, NULL, 0, NULL);
+
+	/*
+	 * Reconfigure if necessary
+	 */
+	sc->sc_status = HIL_STATUS_READY;
+	if (sc->sc_pending == HIL_PENDING_RECONFIG) {
+		sc->sc_pending = 0;
+		hilconfig(sc);
+	} else
+		sc->sc_pending = 0;
 }
 
 /*
@@ -275,8 +289,20 @@ hil_process_int(struct hil_softc *sc, u_int8_t stat, u_int8_t c)
 	case HIL_STATUS:
 		if (c & HIL_ERROR) {
 		  	sc->sc_cmddone = 1;
-			if (c == HIL_RECONFIG)
-				hilconfig(sc);
+			switch (c) {
+			case HIL_RECONFIG:
+				if (sc->sc_status == HIL_STATUS_BUSY)
+					sc->sc_pending = HIL_PENDING_RECONFIG;
+				else
+					hilconfig(sc);
+				break;
+			case HIL_UNPLUGGED:
+				if (sc->sc_status == HIL_STATUS_BUSY)
+					sc->sc_pending = HIL_PENDING_UNPLUGGED;
+				else
+					hilempty(sc);
+				break;
+			}
 			break;
 		}
 		if (c & HIL_COMMAND) {
@@ -332,13 +358,14 @@ hil_process_poll(struct hil_softc *sc, u_int8_t stat, u_int8_t c)
 	case HIL_STATUS:
 		if (c & HIL_ERROR) {
 		  	sc->sc_cmddone = 1;
-			if (c == HIL_RECONFIG) {
+			switch (c) {
+			case HIL_RECONFIG:
 				/*
 				 * Remember that a configuration event
 				 * occurred; it will be processed upon
 				 * leaving polled mode...
 				 */
-				sc->sc_cpending = 1;
+				sc->sc_pending = HIL_PENDING_RECONFIG;
 				/*
 				 * However, the keyboard will come back as
 				 * cooked, and we rely on it being in raw
@@ -348,6 +375,15 @@ hil_process_poll(struct hil_softc *sc, u_int8_t stat, u_int8_t c)
 				db = 0;
 				send_hil_cmd(sc, HIL_WRITEKBDSADR, &db,
 				    1, NULL);
+				break;
+			case HIL_UNPLUGGED:
+				/*
+				 * Remember that an unplugged event
+				 * occured; it will be processed upon
+				 * leaving polled mode...
+				 */
+				sc->sc_pending = HIL_PENDING_UNPLUGGED;
+				break;
 			}
 			break;
 		}
@@ -436,7 +472,11 @@ hilconfig(struct hil_softc *sc)
 		int len;
 		const struct hildevice *hd;
 		
-		send_device_cmd(sc, id, HIL_IDENTIFY);
+		if (send_device_cmd(sc, id, HIL_IDENTIFY) != 0) {
+			printf("%s: no answer from device %d\n",
+			    sc->sc_dev.dv_xname, id);
+			continue;
+		}
 
 		len = sc->sc_cmdbp - sc->sc_cmdbuf;
 		if (len == 0) {
@@ -500,6 +540,47 @@ hilconfig(struct hil_softc *sc)
 }
 
 /*
+ * Called after the loop has been unplugged. We simply force detach of
+ * all our children.
+ */
+void
+hilempty(struct hil_softc *sc)
+{
+	u_int8_t db;
+	int id, s;
+
+	s = splhil();
+
+	/*
+	 * Check that the loop is really empty.
+	 */
+	db = 0;
+	send_hil_cmd(sc, HIL_READLPSTAT, NULL, 0, &db);
+	sc->sc_maxdev = db & LPS_DEVMASK;
+
+	if (sc->sc_maxdev != 0) {
+		printf("%s: unplugged loop finds %d devices???\n",
+		    sc->sc_dev.dv_xname, sc->sc_maxdev);
+		hilconfig(sc);
+		return;
+	}
+
+	/*
+	 * Now detach all hil devices.
+	 */
+	for (id = sc->sc_maxdev + 1; id < NHILD; id++) {
+		if (sc->sc_devices[id] != NULL)
+			config_detach((struct device *)sc->sc_devices[id],
+			    DETACH_FORCE);
+		sc->sc_devices[id] = NULL;
+	}
+
+	sc->sc_cmdbp = sc->sc_cmdbuf;
+
+	splx(s);
+}
+
+/*
  * Low level routines which actually talk to the 8042 chip.
  */
 
@@ -507,7 +588,7 @@ hilconfig(struct hil_softc *sc)
  * Send a command to the 8042 with zero or more bytes of data.
  * If rdata is non-null, wait for and return a byte of data.
  */
-void
+int
 send_hil_cmd(struct hil_softc *sc, u_int cmd, u_int8_t *data, u_int dlen,
     u_int8_t *rdata)
 {
@@ -521,7 +602,7 @@ send_hil_cmd(struct hil_softc *sc, u_int cmd, u_int8_t *data, u_int dlen,
 		printf("%s: no answer from the loop\n", sc->sc_dev.dv_xname);
 #endif
 		splx(s);
-		return;
+		return (EBUSY);
 	}
 
 	bus_space_write_1(sc->sc_bst, sc->sc_bsh, HILP_CMD, cmd);
@@ -547,6 +628,7 @@ send_hil_cmd(struct hil_softc *sc, u_int cmd, u_int8_t *data, u_int dlen,
 		} while (((status >> HIL_SSHIFT) & HIL_SMASK) != HIL_68K);
 	}
 	splx(s);
+	return (0);
 }
 
 /*
@@ -558,10 +640,11 @@ send_hil_cmd(struct hil_softc *sc, u_int cmd, u_int8_t *data, u_int dlen,
  * internally generated poll commands.
  * Needs to be called at splhil().
  */
-void
+int
 send_device_cmd(struct hil_softc *sc, u_int device, u_int cmd)
 {
 	u_int8_t status, c;
+	int rc = 0;
 
 	polloff(sc);
 
@@ -573,6 +656,7 @@ send_device_cmd(struct hil_softc *sc, u_int device, u_int cmd)
 		printf("%s: no answer from device %d\n",
 		    sc->sc_dev.dv_xname, device);
 #endif
+		rc = EBUSY;
 		goto out;
 	}
 
@@ -599,6 +683,7 @@ send_device_cmd(struct hil_softc *sc, u_int device, u_int cmd)
 			printf("%s: no answer from device %d\n",
 			    sc->sc_dev.dv_xname, device);
 #endif
+			rc = EBUSY;
 			break;
 		}
 		status = bus_space_read_1(sc->sc_bst, sc->sc_bsh, HILP_STAT);
@@ -610,28 +695,30 @@ out:
 	sc->sc_cmddev = 0;
 
 	pollon(sc);
+	return (rc);
 }
 
-void
+int
 send_hildev_cmd(struct hildev_softc *dev, u_int cmd,
     u_int8_t *outbuf, u_int *outlen)
 {
 	struct hil_softc *sc = (struct hil_softc *)dev->sc_dev.dv_parent;
-	int s;
+	int s, rc;
        
 	s = splhil();
 
-	send_device_cmd(sc, dev->sc_code, cmd);
-
-	/*
-	 * Return the command response in the buffer if necessary
-	 */
-	if (outbuf != NULL && outlen != NULL) {
-		*outlen = min(*outlen, sc->sc_cmdbp - sc->sc_cmdbuf);
-		bcopy(sc->sc_cmdbuf, outbuf, *outlen);
+	if ((rc = send_device_cmd(sc, dev->sc_code, cmd)) == 0) {
+		/*
+		 * Return the command response in the buffer if necessary
+	 	*/
+		if (outbuf != NULL && outlen != NULL) {
+			*outlen = min(*outlen, sc->sc_cmdbp - sc->sc_cmdbuf);
+			bcopy(sc->sc_cmdbuf, outbuf, *outlen);
+		}
 	}
 
 	splx(s);
+	return (rc);
 }
 
 /*
@@ -715,9 +802,15 @@ hil_set_poll(struct hil_softc *sc, int on)
 	if (on) {
 		pollon(sc);
 	} else {
-		if (sc->sc_cpending) {
-			sc->sc_cpending = 0;
+		switch (sc->sc_pending) {
+		case HIL_PENDING_RECONFIG:
+			sc->sc_pending = 0;
 			hilconfig(sc);
+			break;
+		case HIL_PENDING_UNPLUGGED:
+			sc->sc_pending = 0;
+			hilempty(sc);
+			break;
 		}
 		send_hil_cmd(sc, HIL_INTON, NULL, 0, NULL);
 	}

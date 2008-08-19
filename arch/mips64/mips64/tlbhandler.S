@@ -1,4 +1,4 @@
-/*	$OpenBSD: tlbhandler.S,v 1.7 2004/09/10 10:39:45 miod Exp $ */
+/*	$OpenBSD: tlbhandler.S,v 1.10 2004/10/20 12:49:15 pefo Exp $ */
 
 /*
  * Copyright (c) 1995-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -41,9 +41,6 @@
 #include "assym.h"
 
 	.set	mips3
-
-/* XXX pipeline drainer fix for older RM7000 cpus. */
-#define	ITLBNOPFIX	nop;nop;nop;nop;nop;nop;nop;nop;nop;nop;
 
 	.set	noreorder	/* Default reorder mode */
 
@@ -186,7 +183,8 @@ tlb_miss_nopt:
 	.globl	tlb_miss_tramp
 tlb_miss_tramp:
 	.set	noat
-	j	tlb_miss
+	LA	k0, tlb_miss
+	jr	k0
 	nop
 	.set	at
 	.globl	e_tlb_miss_tramp
@@ -195,7 +193,8 @@ e_tlb_miss_tramp:
 	.globl	xtlb_miss_tramp
 xtlb_miss_tramp:
 	.set	noat
-	j	xtlb_miss
+	LA	k0, xtlb_miss
+	jr	k0
 	nop
 	.set	at
 	.globl	e_xtlb_miss_tramp
@@ -216,8 +215,9 @@ NLEAF(k_tlb_inv, 0)
 	PTR_SRL	k0, k0, PGSHIFT
 	sltu	k1, k0, k1
 	beq	k1, zero, sys_stk_chk		# No. check for valid stack
-	PTR_L	k1, Sysmap
+	nop
 
+	PTR_L	k1, Sysmap
 	PTR_SLL	k0, k0, 2			# compute offset from index
 	tlbp					# Probe the invalid entry
 	PTR_ADDU k1, k1, k0
@@ -294,8 +294,8 @@ NLEAF(k_tlb_miss, 0)
 	PTR_SRL	k0, k0, PGSHIFT
 	sltu	k1, k0, k1
 	beq	k1, zero, sys_stk_chk		# No. check for valid stack
-	PTR_L	k1, Sysmap
 	PTR_SRL	k0, k0, 1
+	PTR_L	k1, Sysmap
 	PTR_SLL	k0, k0, 3			# compute offset from index
 	PTR_ADDU k1, k1, k0
 	lw	k0, 0(k1)			# get PTE entry
@@ -378,16 +378,18 @@ END(k_tlb_miss)
  */
 LEAF(tlb_write_indexed, 0)
 	mfc0	v1, COP_0_STATUS_REG	# Save the status register.
-	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
+	ori	v0, v1, SR_INT_ENAB
+	xori	v0, v0, SR_INT_ENAB
+	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
-	lw	a2, 8(a1)
-	lw	a3, 12(a1)
+	ld	a2, 16(a1)
+	ld	a3, 24(a1)
 	dmfc0	ta0, COP_0_TLB_HI		# Save the current PID.
 
 	dmtc0	a2, COP_0_TLB_LO0		# Set up entry low0.
 	dmtc0	a3, COP_0_TLB_LO1		# Set up entry low1.
-	lw	a2, 0(a1)
-	lw	a3, 4(a1)
+	ld	a2, 0(a1)
+	ld	a3, 8(a1)
 	mtc0	a0, COP_0_TLB_INDEX	# Set the index.
 	dmtc0	a2, COP_0_TLB_PG_MASK	# Set up entry mask.
 	dmtc0	a3, COP_0_TLB_HI		# Set up entry high.
@@ -417,7 +419,9 @@ END(tlb_write_indexed)
  */
 LEAF(tlb_flush, 0)
 	mfc0	v1, COP_0_STATUS_REG	# Save the status register.
-	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
+	ori	v0, v1, SR_INT_ENAB
+	xori	v0, v0, SR_INT_ENAB
+	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
 	mfc0	ta1, COP_0_TLB_WIRED
 	LA	v0, KSEG0_BASE		# invalid address
@@ -454,7 +458,9 @@ END(tlb_flush)
  */
 LEAF(tlb_flush_addr, 0)
 	mfc0	v1, COP_0_STATUS_REG	# Save the status register.
-	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
+	ori	v0, v1, SR_INT_ENAB
+	xori	v0, v0, SR_INT_ENAB
+	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
 	li	v0, (PG_HVPN | PG_ASID)
 	and	a0, a0, v0		# Make shure valid hi value.
@@ -498,7 +504,9 @@ END(tlb_flush_addr)
  */
 LEAF(tlb_update, 0)
 	mfc0	v1, COP_0_STATUS_REG	# Save the status register.
-	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
+	ori	v0, v1, SR_INT_ENAB
+	xori	v0, v0, SR_INT_ENAB
+	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
 	and	ta1, a0, 0x1000		# ta1 = Even/Odd flag
 	li	v0, (PG_HVPN | PG_ASID)
@@ -588,7 +596,9 @@ END(tlb_update)
  */
 LEAF(tlb_read, 0)
 	mfc0	v1, COP_0_STATUS_REG	# Save the status register.
-	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
+	ori	v0, v1, SR_INT_ENAB
+	xori	v0, v0, SR_INT_ENAB
+	mtc0	v0, COP_0_STATUS_REG	# Disable interrupts
 	ITLBNOPFIX
 	dmfc0	v0, COP_0_TLB_HI	# Get current PID
 
@@ -601,7 +611,7 @@ LEAF(tlb_read, 0)
 	nop
 	nop
 	nop
-	mfc0	ta0, COP_0_TLB_PG_MASK	# fetch the hi entry
+	dmfc0	ta0, COP_0_TLB_PG_MASK	# fetch the hi entry
 	dmfc0	ta1, COP_0_TLB_HI	# fetch the hi entry
 	dmfc0	ta2, COP_0_TLB_LO0	# See what we got
 	dmfc0	ta3, COP_0_TLB_LO1	# See what we got
@@ -611,11 +621,11 @@ LEAF(tlb_read, 0)
 	nop				# wait for PID active
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register
 	ITLBNOPFIX
-	sw	ta0, 0(a1)
-	sw	ta1, 4(a1)
-	sw	ta2, 8(a1)
+	sd	ta0, 0(a1)
+	sd	ta1, 8(a1)
+	sd	ta2, 16(a1)
 	j	ra
-	sw	ta3, 12(a1)
+	sd	ta3, 24(a1)
 END(tlb_read)
 
 /*---------------------------------------------------------------- tlb_get_pid

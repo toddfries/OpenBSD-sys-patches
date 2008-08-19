@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.h,v 1.8 2004/07/29 22:12:15 mcbride Exp $	*/
+/*	$OpenBSD: ip_carp.h,v 1.17 2005/03/01 19:04:56 mcbride Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -25,6 +25,9 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef _NETINET_IP_CARP_H_
+#define _NETINET_IP_CARP_H_
 
 /*
  * The CARP header layout is as follows:
@@ -109,6 +112,13 @@ struct carpstats {
 	u_int64_t	carps_preempt;		/* if enabled, preemptions */
 };
 
+#define CARPDEVNAMSIZ	16
+#ifdef IFNAMSIZ
+#if CARPDEVNAMSIZ != IFNAMSIZ
+#error
+#endif
+#endif
+
 /*
  * Configuration structure for SIOCSVH SIOCGVH
  */
@@ -116,13 +126,13 @@ struct carpreq {
 	int		carpr_state;
 #define	CARP_STATES	"INIT", "BACKUP", "MASTER"
 #define	CARP_MAXSTATE	2
+
+	char		carpr_carpdev[CARPDEVNAMSIZ];
 	int		carpr_vhid;
 	int		carpr_advskew;
 	int		carpr_advbase;
 	unsigned char	carpr_key[CARP_KEY_LEN];
 };
-#define	SIOCSVH	_IOWR('i', 245, struct ifreq)
-#define	SIOCGVH	_IOWR('i', 246, struct ifreq)
 
 /*
  * Names for CARP sysctl objects
@@ -143,15 +153,16 @@ struct carpreq {
 
 #ifdef _KERNEL
 void		 carp_ifdetach (struct ifnet *);
-void		 carp_input (struct mbuf *, ...);
-void		 carp_carpdev_state(void *);
-int		 carp6_input (struct mbuf **, int *, int);
-int		 carp_output (struct ifnet *, struct mbuf *, struct sockaddr *,
-		     struct rtentry *);
-int		 carp_iamatch (void *, struct in_ifaddr *, struct in_addr *,
-		     u_int8_t **);
+void		 carp_proto_input (struct mbuf *, ...);
+void		 carp_carpdev_state(struct ifnet *);
+int		 carp6_proto_input(struct mbuf **, int *, int);
+int		 carp_iamatch(struct in_ifaddr *, u_char *,
+		     u_int32_t *, u_int32_t);
 struct ifaddr	*carp_iamatch6(void *, struct in6_addr *);
-void		*carp_macmatch6(void *, struct mbuf *, struct in6_addr *);
-struct	ifnet	*carp_forus (void *, void *);
-int		 carp_sysctl (int *, u_int,  void *, size_t *, void *, size_t);
-#endif
+struct ifnet	*carp_ourether(void *, struct ether_header *, u_char, int);
+int		 carp_input(struct mbuf *, u_int8_t *, u_int8_t *, u_int16_t);
+int		 carp_output(struct ifnet *, struct mbuf *, struct sockaddr *,
+		     struct rtentry *);
+int		 carp_sysctl(int *, u_int,  void *, size_t *, void *, size_t);
+#endif /* _KERNEL */
+#endif /* _NETINET_IP_CARP_H_ */

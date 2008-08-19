@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.40 2004/07/04 22:57:20 deraadt Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.43 2005/01/15 05:24:11 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -1119,10 +1119,8 @@ void sis_attach(parent, self, aux)
 
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = sis_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = sis_start;
 	ifp->if_watchdog = sis_watchdog;
 	ifp->if_baudrate = 10000000;
@@ -1130,9 +1128,7 @@ void sis_attach(parent, self, aux)
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
-#if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_MTU;
-#endif
 
 	sc->sc_mii.mii_ifp = ifp;
 	sc->sc_mii.mii_readreg = sis_miibus_readreg;
@@ -1286,7 +1282,7 @@ int sis_newbuf(sc, c, m)
 
 	c->sis_mbuf = m_new;
 	c->sis_ptr = c->map->dm_segs[0].ds_addr + sizeof(u_int64_t);
-	c->sis_ctl = SIS_RXLEN;
+	c->sis_ctl = ETHER_MAX_DIX_LEN;
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
 	    ((caddr_t)c - sc->sc_listkva), sizeof(struct sis_desc),
@@ -1970,10 +1966,12 @@ int sis_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			if (sc->sis_type == SIS_TYPE_83815)
-				sis_setmulti_ns(sc);
-			else
-				sis_setmulti_sis(sc);
+			if (ifp->if_flags & IFF_RUNNING) {
+				if (sc->sis_type == SIS_TYPE_83815)
+					sis_setmulti_ns(sc);
+				else
+					sis_setmulti_sis(sc);
+			}
 			error = 0;
 		}
 		break;

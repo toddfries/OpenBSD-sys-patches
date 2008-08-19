@@ -1,9 +1,9 @@
-/*	$OpenBSD: trap.c,v 1.44 2004/01/15 17:22:25 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.46 2005/01/15 21:13:08 miod Exp $	*/
 /*	$NetBSD: trap.c,v 1.57 1998/02/16 20:58:31 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1997 Theo de Raadt
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -653,11 +653,7 @@ dopanic:
 		if ((vm != NULL && (caddr_t)va >= vm->vm_maxsaddr)
 		    && map != kernel_map) {
 			if (rv == 0) {
-				unsigned nss;
-
-				nss = btoc(USRSTACK-(unsigned)va);
-				if (nss > vm->vm_ssize)
-					vm->vm_ssize = nss;
+				uvm_grow(p, va);
 			} else if (rv == EACCES)
 				rv = EFAULT;
 		}
@@ -1084,7 +1080,7 @@ syscall(code, frame)
 		if (code != SUNOS_SYS_sigreturn) {
 			frame.f_regs[SP] += sizeof (int);
 			/*
-			 * remember that we adjusted the SP, 
+			 * remember that we adjusted the SP,
 			 * might have to undo this if the system call
 			 * returns ERESTART.
 			 */

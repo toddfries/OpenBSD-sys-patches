@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgtwelve.c,v 1.9 2003/06/28 17:05:33 miod Exp $	*/
+/*	$OpenBSD: cgtwelve.c,v 1.13 2005/03/13 23:05:22 miod Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Miodrag Vallat.  All rights reserved.
@@ -33,7 +33,7 @@
 
 /*
  * The cgtwelve framebuffer is a 3-slot SBUS card, that will fit only in
- * SPARCstation 1, 1+, 2 and 5, or in an xbox SBUS extension (untested).
+ * SPARCstation 1, 1+, 2 and 5, or in an xbox SBUS extension.
  *
  * It is a 24-bit 3D accelerated framebuffer made by Matrox, featuring 4MB
  * (regular model) or 8MB (high-res model) of video memory, a complex
@@ -88,19 +88,6 @@ struct cgtwelve_softc {
 
 	int	sc_highres;
 	int	sc_nscreens;
-};
-
-struct wsscreen_descr cgtwelve_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *cgtwelve_scrlist[] = {
-	&cgtwelve_stdscreen,
-};
-
-struct wsscreen_list cgtwelve_screenlist = {
-	sizeof(cgtwelve_scrlist) / sizeof(struct wsscreen_descr *),
-	    cgtwelve_scrlist
 };
 
 int cgtwelve_ioctl(void *, u_long, caddr_t, int, struct proc *);
@@ -168,7 +155,6 @@ cgtwelveattach(parent, self, args)
 {
 	struct cgtwelve_softc *sc = (struct cgtwelve_softc *)self;
 	struct confargs *ca = args;
-	struct wsemuldisplaydev_attach_args waa;
 	int node;
 	int isconsole = 0;
 	char *ps;
@@ -228,14 +214,8 @@ cgtwelveattach(parent, self, args)
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
 	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
 
-	cgtwelve_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	cgtwelve_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	cgtwelve_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	cgtwelve_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb,
-		    &cgtwelve_stdscreen, -1, NULL);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 		shutdownhook_establish(cgtwelve_prom, sc);
 	}
 
@@ -248,11 +228,7 @@ cgtwelveattach(parent, self, args)
 		printf(", microcode rev. %s", ps);
 	printf("\n");
 
-	waa.console = isconsole;
-	waa.scrdata = &cgtwelve_screenlist;
-	waa.accessops = &cgtwelve_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &cgtwelve_accessops, isconsole);
 }
 
 int
@@ -298,6 +274,10 @@ cgtwelve_ioctl(dev, cmd, data, flags, p)
 			/* Starting X11, switch to 32 bit mode */
 			cgtwelve_reset(sc, 32);
 		}
+		break;
+
+	case WSDISPLAYIO_SVIDEO:
+	case WSDISPLAYIO_GVIDEO:
 		break;
 
 	default:

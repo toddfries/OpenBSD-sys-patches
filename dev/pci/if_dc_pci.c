@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_dc_pci.c,v 1.44 2004/08/04 15:02:29 mickey Exp $	*/
+/*	$OpenBSD: if_dc_pci.c,v 1.49 2005/01/16 20:47:44 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -105,6 +105,7 @@ struct dc_type dc_devs[] = {
 	{ PCI_VENDOR_CONEXANT, PCI_PRODUCT_CONEXANT_RS7112 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_21145 },
 	{ PCI_VENDOR_3COM, PCI_PRODUCT_3COM_3CSHO100BTX },
+	{ PCI_VENDOR_MICROSOFT, PCI_PRODUCT_MICROSOFT_MN130 },
 	{ 0, 0 }
 };
 
@@ -289,6 +290,11 @@ void dc_pci_attach(parent, self, aux)
 	/* Need this info to decide on a chip type. */
 	sc->dc_revision = revision = PCI_REVISION(pa->pa_class);
 
+	/* Get the eeprom width, but PNIC has no eeprom */
+	if (!(PCI_VENDOR(pa->pa_id) == PCI_VENDOR_LITEON &&
+	      PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_LITEON_PNIC))
+		dc_eeprom_width(sc);
+
 	switch (PCI_VENDOR(pa->pa_id)) {
 	case PCI_VENDOR_DEC:
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_DEC_21140 ||
@@ -297,7 +303,6 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_type = DC_TYPE_21143;
 			sc->dc_flags |= DC_TX_POLL|DC_TX_USE_TX_INTR;
 			sc->dc_flags |= DC_REDUCED_MII_POLL;
-			dc_eeprom_width(sc);
 			dc_read_srom(sc, sc->dc_romwidth);
 		}
 		break;
@@ -307,7 +312,6 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_type = DC_TYPE_21145;
 			sc->dc_flags |= DC_TX_POLL|DC_TX_USE_TX_INTR;
 			sc->dc_flags |= DC_REDUCED_MII_POLL;
-			dc_eeprom_width(sc);
 			dc_read_srom(sc, sc->dc_romwidth);
 		}
 	case PCI_VENDOR_DAVICOM:
@@ -318,6 +322,7 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_type = DC_TYPE_DM9102;
 			sc->dc_flags |= DC_TX_COALESCE|DC_TX_INTR_ALWAYS;
 			sc->dc_flags |= DC_REDUCED_MII_POLL|DC_TX_STORENFWD;
+			sc->dc_flags |= DC_TX_ALIGN;
 			sc->dc_pmode = DC_PMODE_MII;
 
 			/* Increase the latency timer value. */
@@ -327,35 +332,28 @@ void dc_pci_attach(parent, self, aux)
 			pci_conf_write(pc, pa->pa_tag, DC_PCI_CFLT, command);
 		}
 		break;
-	case PCI_VENDOR_3COM:
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_3COM_3CSHO100BTX) {
-			found = 1;
-			sc->dc_type = DC_TYPE_AN983;
-			sc->dc_flags |= DC_TX_USE_TX_INTR;
-			sc->dc_flags |= DC_TX_ADMTEK_WAR;
-			sc->dc_pmode = DC_PMODE_MII;
-		}
-		dc_eeprom_width(sc);
-		dc_read_srom(sc, sc->dc_romwidth);
-		break;
 	case PCI_VENDOR_ADMTEK:
+	case PCI_VENDOR_3COM:
+	case PCI_VENDOR_MICROSOFT:
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADMTEK_AL981) {
 			found = 1;
 			sc->dc_type = DC_TYPE_AL981;
 			sc->dc_flags |= DC_TX_USE_TX_INTR;
 			sc->dc_flags |= DC_TX_ADMTEK_WAR;
 			sc->dc_pmode = DC_PMODE_MII;
+			dc_read_srom(sc, sc->dc_romwidth);
 		}
-		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADMTEK_AN983) {
+		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ADMTEK_AN983 ||
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_3COM_3CSHO100BTX ||
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MICROSOFT_MN130) {
 			found = 1;
 			sc->dc_type = DC_TYPE_AN983;
 			sc->dc_flags |= DC_TX_USE_TX_INTR;
 			sc->dc_flags |= DC_TX_ADMTEK_WAR;
 			sc->dc_flags |= DC_64BIT_HASH;
 			sc->dc_pmode = DC_PMODE_MII;
+			/* Don't read SROM for - auto-loaded on reset */
 		}
-		dc_eeprom_width(sc);
-		dc_read_srom(sc, sc->dc_romwidth);
 		break;
 	case PCI_VENDOR_MACRONIX:
 	case PCI_VENDOR_ACCTON:
@@ -364,10 +362,9 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_type = DC_TYPE_AN983;
 			sc->dc_flags |= DC_TX_USE_TX_INTR;
 			sc->dc_flags |= DC_TX_ADMTEK_WAR;
+			sc->dc_flags |= DC_64BIT_HASH;
 			sc->dc_pmode = DC_PMODE_MII;
-
-			dc_eeprom_width(sc);
-			dc_read_srom(sc, sc->dc_romwidth);
+			/* Don't read SROM for - auto-loaded on reset */
 		}
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MACRONIX_MX98713) {
 			found = 1;
@@ -423,7 +420,7 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_type = DC_TYPE_PNIC;
 			sc->dc_flags |= DC_TX_STORENFWD|DC_TX_INTR_ALWAYS;
 			sc->dc_flags |= DC_PNIC_RX_BUG_WAR;
-			sc->dc_pnic_rx_buf = malloc(DC_RXLEN * 5, M_DEVBUF,
+			sc->dc_pnic_rx_buf = malloc(ETHER_MAX_DIX_LEN * 5, M_DEVBUF,
 			    M_NOWAIT);
 			if (sc->dc_pnic_rx_buf == NULL)
 				panic("dc_pci_attach");
@@ -447,7 +444,6 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_flags |= DC_TX_INTR_ALWAYS;
 			sc->dc_flags |= DC_REDUCED_MII_POLL;
 			sc->dc_pmode = DC_PMODE_MII;
-			dc_eeprom_width(sc);
 			dc_read_srom(sc, sc->dc_romwidth);
 		}
 		break;
@@ -550,7 +546,6 @@ void dc_pci_attach(parent, self, aux)
 			sc->dc_srm_media |= IFM_ACTIVE | IFM_ETHER;
 	}
 #endif
-	dc_eeprom_width(sc);
 	dc_attach(sc);
 
 fail:

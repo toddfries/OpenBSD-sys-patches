@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx_openbsd.h,v 1.5 2004/08/23 20:16:01 marco Exp $	*/
+/*	$OpenBSD: aic79xx_openbsd.h,v 1.15 2004/12/30 17:29:55 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -104,8 +104,8 @@
 #define	SCSI_SCSI_ID(ahd, sc_link)	\
 	(ahd->our_id)
 #define BUILD_SCSIID(ahd, sc_link, target_id, our_id) \
-        ((((target_id) << TID_SHIFT) & TID) | (our_id))
-        
+	((((target_id) << TID_SHIFT) & TID) | (our_id))
+
 #ifndef offsetof
 #define offsetof(type, member)  ((size_t)(&((type *)0)->member))
 #endif
@@ -144,23 +144,8 @@ struct ahd_platform_data {
 struct scb_platform_data {
 };
 
-/********************************* Byte Order *********************************/
-#define ahd_htobe16(x) htobe16(x)
-#define ahd_htobe32(x) htobe32(x)
-#define ahd_htobe64(x) htobe64(x)
-#define ahd_htole16(x) htole16(x)
-#define ahd_htole32(x) htole32(x)
-#define ahd_htole64(x) htole64(x)
-
-#define ahd_be16toh(x) be16toh(x)
-#define ahd_be32toh(x) be32toh(x)
-#define ahd_be64toh(x) be64toh(x)
-#define ahd_le16toh(x) letoh16(x)
-#define ahd_le32toh(x) letoh32(x)
-#define ahd_le64toh(x) letoh64(x)
-
 /************************** Timer DataStructures ******************************/
-typedef struct timeout ahd_timer_t;
+typedef struct timeout aic_timer_t;
 
 /***************************** Core Includes **********************************/
 
@@ -173,15 +158,11 @@ typedef struct timeout ahd_timer_t;
 
 /***************************** Timer Facilities *******************************/
 void ahd_timeout(void*);
-void ahd_timer_reset(ahd_timer_t *, u_int, ahd_callback_t *, void *);
-void ahd_scb_timer_reset(struct scb *, u_int);
+void aic_timer_reset(aic_timer_t *, u_int, ahd_callback_t *, void *);
+void aic_scb_timer_reset(struct scb *, u_int);
 
-ahd_callback_t  ahd_reset_poll;
-ahd_callback_t  ahd_stat_timer;
-
-#define ahd_timer_init callout_init
-#define ahd_timer_stop callout_stop
-
+#define aic_timer_stop timeout_del
+#define aic_get_timeout(scb) ((scb)->xs->timeout)
 /*************************** Device Access ************************************/
 #define ahd_inb(ahd, port)					\
 	bus_space_read_1((ahd)->tags[(port) >> 8],		\
@@ -192,13 +173,13 @@ ahd_callback_t  ahd_stat_timer;
 			  (ahd)->bshs[(port) >> 8], (port) & 0xFF, value)
 
 #define ahd_inw_atomic(ahd, port)				\
-	ahd_le16toh(bus_space_read_2((ahd)->tags[(port) >> 8],	\
+	aic_le16toh(bus_space_read_2((ahd)->tags[(port) >> 8],	\
 				     (ahd)->bshs[(port) >> 8], (port) & 0xFF))
 
 #define ahd_outw_atomic(ahd, port, value)			\
 	bus_space_write_2((ahd)->tags[(port) >> 8],		\
 			  (ahd)->bshs[(port) >> 8],		\
-			  (port & 0xFF), ahd_htole16(value))
+			  (port & 0xFF), aic_htole16(value))
 
 #define ahd_outsb(ahd, port, valp, count)			\
 	bus_space_write_multi_1((ahd)->tags[(port) >> 8],	\
@@ -214,52 +195,54 @@ void ahd_flush_device_writes(struct ahd_softc *);
 
 /**************************** Locking Primitives ******************************/
 /* Lock protecting internal data structures */
-void ahd_lockinit(struct ahd_softc *);
-void ahd_lock(struct ahd_softc *, int *flags);
-void ahd_unlock(struct ahd_softc *, int *flags);
+#define ahd_lockinit(ahd)
+#define ahd_lock(ahd, flags) *(flags) = splbio()
+#define ahd_unlock(ahd, flags) splx(*(flags))
 
-/* Lock held during command compeletion to the upper layer */
-void ahd_done_lockinit(struct ahd_softc *);
-void ahd_done_lock(struct ahd_softc *, int *flags);
-void ahd_done_unlock(struct ahd_softc *, int *flags);
+/* Lock held during command completion to the upper layer */
+#define ahd_done_lockinit(ahd)
+#define ahd_done_lock(ahd, flags)
+#define ahd_done_unlock(ahd, flags)
 
 /* Lock held during ahd_list manipulation and ahd softc frees */
-void ahd_list_lockinit(void);
-void ahd_list_lock(int *flags);
-void ahd_list_unlock(int *flags);
+#define ahd_list_lockinit(x)
+#define ahd_list_lock(flags) *(flags) = splbio()
+#define ahd_list_unlock(flags) splx(*(flags))
 
 /****************************** OS Primitives *********************************/
-#define ahd_delay DELAY
+#define scsi_4btoul(b)	(_4btol(b))
 
 /************************** Transaction Operations ****************************/
-void ahd_set_transaction_status(struct scb *, uint32_t);
-void ahd_set_scsi_status(struct scb *, uint32_t);
-uint32_t ahd_get_transaction_status(struct scb *);
-uint32_t ahd_get_scsi_status(struct scb *);
-void ahd_set_transaction_tag(struct scb *, int, u_int);
-u_long ahd_get_transfer_length(struct scb *);
-int ahd_get_transfer_dir(struct scb *);
-void ahd_set_residual(struct scb *, u_long);
-void ahd_set_sense_residual(struct scb *, u_long);
-u_long ahd_get_residual(struct scb *);
-int ahd_perform_autosense(struct scb *);
-uint32_t ahd_get_sense_bufsize(struct ahd_softc*, struct scb*);
-void ahd_freeze_simq(struct ahd_softc *);
-void ahd_release_simq(struct ahd_softc *);
-void ahd_freeze_scb(struct scb *);
-void ahd_platform_freeze_devq(struct ahd_softc *, struct scb *);
-int  ahd_platform_abort_scbs(struct ahd_softc *, int,
-		    char, int, u_int, role_t, uint32_t);
-void ahd_platform_scb_free(struct ahd_softc *, struct scb *);
+#define aic_set_transaction_status(scb, status) (scb)->xs->error = (status)
+#define aic_set_scsi_status(scb, status) (scb)->xs->xs_status = (status)
+#define aic_set_transaction_tag(scb, enabled, type)
+#define aic_set_residual(scb, residual) (scb)->xs->resid = (residual)
+#define aic_set_sense_residual(scb, residual) (scb)->xs->resid = (residual)
+
+#define aic_get_transaction_status(scb) \
+	(((scb)->xs->flags & ITSDONE) ? CAM_REQ_CMP : (scb)->xs->error)
+#define aic_get_scsi_status(scb) ((scb)->xs->status)
+#define aic_get_transfer_length(scb) ((scb)->xs->datalen)
+#define aic_get_transfer_dir(scb) \
+	((scb)->xs->flags & (SCSI_DATA_IN | SCSI_DATA_OUT))
+#define aic_get_residual(scb) ((scb)->xs->resid)
+#define aic_get_sense_bufsize(ahd, scb) (sizeof(struct scsi_sense_data))
+	
+#define aic_perform_autosense(scb) (1)
+
+#define aic_freeze_simq(ahd)
+#define aic_release_simq(ahd)
+#define aic_freeze_scb(scb)
+#define ahd_platform_freeze_devq(ahd, scb)
+#define ahd_platform_abort_scbs(ahd, target, channel, lun, tag, role, status)
+
+void aic_platform_scb_free(struct ahd_softc *, struct scb *);
 
 /********************************** PCI ***************************************/
 /*#if AHD_PCI_CONFIG > 0*/
-uint32_t ahd_pci_read_config(ahd_dev_softc_t, int, int);
-void	ahd_pci_write_config(ahd_dev_softc_t, int,
-		uint32_t, int);
-int	ahd_get_pci_function(ahd_dev_softc_t);
-int	ahd_get_pci_slot(ahd_dev_softc_t);
-int	ahd_get_pci_bus(ahd_dev_softc_t);
+#define aic_get_pci_function(pci) ((pci)->pa_function)
+#define aic_get_pci_slot(pci) ((pci)->pa_device)
+#define aic_get_pci_bus(pci) ((pci)->pa_bus)
 
 int			ahd_pci_map_registers(struct ahd_softc *);
 int			ahd_pci_map_int(struct ahd_softc *);
@@ -274,10 +257,6 @@ typedef enum
 } ahd_power_state;
 
 void ahd_power_state_change(struct ahd_softc *, ahd_power_state);
-
-/******************************** VL/EISA *************************************/
-int aic7770_map_registers(struct ahd_softc *);
-int aic7770_map_int(struct ahd_softc *, int);
 
 /********************************* Debug **************************************/
 void	ahd_print_path(struct ahd_softc *, struct scb *);
@@ -295,7 +274,8 @@ void	  ahd_platform_free(struct ahd_softc *);
 int	  ahd_attach(struct ahd_softc *);
 int	  ahd_softc_comp(struct ahd_softc *lahd, struct ahd_softc *rahd);
 int	  ahd_detach(struct device *, int);
-#define	ahd_platform_init
+
+#define	ahd_platform_init(ahd)
 
 /****************************** Interrupts ************************************/
 int			ahd_platform_intr(void *);
@@ -304,12 +284,4 @@ void	ahd_platform_flushwork(struct ahd_softc *ahd);
 void	  ahd_done(struct ahd_softc *, struct scb *);
 void	  ahd_send_async(struct ahd_softc *, char /*channel*/,
 			 u_int /*target*/, u_int /*lun*/, ac_code, void *arg);
-/************************ SCSI task management **************************/
-#define SIU_TASKMGMT_NONE               0x00
-#define SIU_TASKMGMT_ABORT_TASK         0x01
-#define SIU_TASKMGMT_ABORT_TASK_SET     0x02
-#define SIU_TASKMGMT_CLEAR_TASK_SET     0x04
-#define SIU_TASKMGMT_LUN_RESET          0x08
-#define SIU_TASKMGMT_TARGET_RESET       0x20
-#define SIU_TASKMGMT_CLEAR_ACA          0x40
 #endif  /* _AIC79XX_OPENBSD_H_ */

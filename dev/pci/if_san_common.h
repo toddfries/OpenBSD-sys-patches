@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_common.h,v 1.4 2004/07/16 15:11:45 alex Exp $	*/
+/*	$OpenBSD: if_san_common.h,v 1.6 2005/03/01 18:37:06 mcbride Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -50,37 +50,37 @@
 #define WANROUTER_MINOR_VER	1
 
 /* IOCTL codes for /proc/router/<device> entries (up to 255) */
-# define WANPIPE_DUMP	_IOW(ROUTER_IOCTL, 16, wan_conf_t)
-# define WANPIPE_EXEC	_IOWR(ROUTER_IOCTL, 17, wan_conf_t)
+#define WANPIPE_DUMP	_IOW(ROUTER_IOCTL, 16, wan_conf_t)
+#define WANPIPE_EXEC	_IOWR(ROUTER_IOCTL, 17, wan_conf_t)
 
 /* get monitor statistics */
-# define SIOC_WANPIPE_PIPEMON	_IOWR('i', 150, struct ifreq)
+#define SIOC_WANPIPE_PIPEMON	_IOWR('i', 150, struct ifreq)
 
 /* set generic device */
-# define SIOC_WANPIPE_DEVICE	_IOWR('i', 151, struct ifreq)
+#define SIOC_WANPIPE_DEVICE	_IOWR('i', 151, struct ifreq)
 
 /* get hwprobe string */
-# define SIOC_WANPIPE_HWPROBE	_IOWR('i', 152, struct ifreq)
+#define SIOC_WANPIPE_HWPROBE	_IOWR('i', 152, struct ifreq)
 
 /* get memdump string (GENERIC) */
-# define SIOC_WANPIPE_DUMP	_IOWR('i', 153, struct ifreq)
+#define SIOC_WANPIPE_DUMP	_IOWR('i', 153, struct ifreq)
 
 
 /* clocking options */
-#define	WANOPT_EXTERNAL	0
-#define	WANOPT_INTERNAL	1
+#define	WAN_EXTERNAL	0
+#define	WAN_INTERNAL	1
 
 /* intercace options */
-#define	WANOPT_RS232	0
-#define	WANOPT_V35	1
+#define	WAN_RS232	0
+#define	WAN_V35	1
 
 #define WAN_UDP_FAILED_CMD	0xCF
 #define WAN_UDP_INVALID_CMD	0xCE
 #define WAN_UDP_TIMEOUT_CMD	0xAA
 #define WAN_UDP_INVALID_NET_CMD     0xCD
 
-#define	WANOPT_NO	0
-#define	WANOPT_YES	1
+#define	WAN_NO	0
+#define	WAN_YES	1
 
 /* UDP Packet Management */
 #define UDP_PKT_FRM_STACK	0x00
@@ -299,6 +299,14 @@ typedef struct wan_udp_hdr{
 /* clear bit N of bitstring name */
 #define	bit_clear(name, bit) ((name)[_bit_byte(bit)] &= ~_bit_mask(bit))
 
+/* Sangoma assert macro */
+#define SAN_ASSERT(a)						\
+	if (a){							\
+		log(LOG_INFO, "%s:%d: Critical Error!\n",	\
+				__FUNCTION__,__LINE__);		\
+		return (-EINVAL);				\
+	}
+
 /****** Data Structures *****************************************************/
 
 typedef struct wan_udp_pkt {
@@ -410,7 +418,8 @@ typedef struct sdla {
 /****** Public Functions ****************************************************/
 
 void*		wan_xilinx_init(sdla_t*);	/* Xilinx Hardware Support */
-struct mbuf*	wan_mbuf_alloc(void);
+struct mbuf*	wan_mbuf_alloc(int);
+int 		wan_mbuf_to_buffer(struct mbuf**);
 
 #endif	/* __KERNEL__ */
 #endif	/* __IF_SAN_COMMON_H */

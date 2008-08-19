@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.35 2004/07/02 17:33:43 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.44 2004/12/30 21:28:48 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.103 1998/07/09 06:02:50 scottr Exp $	*/
 
 /*
@@ -85,7 +85,6 @@
 	.text
 GLOBAL(kernel_text)
 
-#include <mac68k/mac68k/vectors.s>
 #include <mac68k/mac68k/macglobals.s>
 
 /*
@@ -119,9 +118,12 @@ GLOBAL(sanity_check)
 	.space	4 * NBPG
 ASLOCAL(tmpstk)
 
+#include <mac68k/mac68k/vectors.s>
+
 BSS(esym,4)
 
 ASENTRY_NOPROFILE(start)
+GLOBAL(kernel_start)
 	movw	#PSL_HIGHIPL,sr		| no interrupts.  ever.
 	lea	_ASM_LABEL(tmpstk),sp	| give ourselves a temporary stack
 
@@ -227,9 +229,11 @@ Lstart2:
 	jra	Lstart3
 
 Lget040TC:
+#if 0
 	movl	_C_LABEL(current_mac_model),a1	 | if an AV Mac, save current
 	cmpl	#MACH_CLASSAV,a1@(CPUINFO_CLASS) | TC so internal video will
 	jne	LnotAV				 | get configured
+#endif
 	.long	0x4e7a0003		| movc tc,d0
 	jra	LsaveTC
 LnotAV:
@@ -250,6 +254,25 @@ Lstart3:
 	movl	#_C_LABEL(vectab),d0	| set Vector Base Register
 	movc	d0,vbr
 
+/*
+ * We might not be running physical, but we don't have read-only mappings
+ * yet either. It's time to override copypage() with the 68040
+ * optimized version, copypage040(), if possible.
+ * This relies upon the fact that copypage() immediately follows
+ * copypage040() in memory.
+ */
+	movl	#_C_LABEL(mmutype),a0
+	cmpl	#MMU_68040,a0@
+	jgt	Lmmu_enable
+	movl	#_C_LABEL(copypage040),a0
+	movl	#_C_LABEL(copypage),a1
+	movl	a1, a2
+1:
+	movw	a0@+, a2@+
+	cmpl	a0, a1
+	jgt	1b
+
+Lmmu_enable:
 	movl	_C_LABEL(Sysseg),a1	| system segment table addr
 	addl	_C_LABEL(load_addr),a1	| Make it physical addr
 	cmpl	#MMU_68040,_C_LABEL(mmutype)
@@ -722,7 +745,7 @@ Lkbrkpt: | Kernel-mode breakpoint or trace trap. (d0=trap_type)
 	lea	sp@(FR_SIZE),a6		| Save stack pointer
 	movl	a6,sp@(FR_SP)		|  from before trap
 
-	| If were are not on tmpstk switch to it.
+	| If we are not on tmpstk switch to it.
 	| (so debugger can change the stack pointer)
 	movl	a6,d1
 	cmpl	#_ASM_LABEL(tmpstk),d1
@@ -823,13 +846,14 @@ Lbrkpt3:
  *	Level 7:	NMIs: parity errors?, RESET button
  */
 
+#define	INTERRUPT_SAVEREG	moveml	#0xC0C0,sp@-
+#define	INTERRUPT_RESTOREREG	moveml	sp@+,#0x0303
+
 ENTRY_NOPROFILE(spurintr)
-	addql	#1,_C_LABEL(intrcnt)+0
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	jra	_ASM_LABEL(rei)
 
 ENTRY_NOPROFILE(lev1intr)
-	addql	#1,_C_LABEL(intrcnt)+4
 	clrl	sp@-
 	moveml	#0xFFFF,sp@-
 	movl	sp, sp@-
@@ -841,7 +865,6 @@ ENTRY_NOPROFILE(lev1intr)
 	jra	_ASM_LABEL(rei)
 
 ENTRY_NOPROFILE(lev2intr)
-	addql	#1,_C_LABEL(intrcnt)+8
 	clrl	sp@-
 	moveml	#0xFFFF,sp@-
 	movl	sp, sp@-
@@ -853,66 +876,16 @@ ENTRY_NOPROFILE(lev2intr)
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	jra	_ASM_LABEL(rei)
 
-ENTRY_NOPROFILE(lev3intr)
-	addql	#1,_C_LABEL(intrcnt)+24
-	clrl	sp@-
-	moveml	#0xFFFF,sp@-
-	movl	sp, sp@-
-	movl	_C_LABEL(lev3_intrvec),a2
-	jbsr	a2@
+ENTRY_NOPROFILE(intrhand)	/* levels 3 through 6 */
+	INTERRUPT_SAVEREG
+	movw	sp@(22),sp@-		| push exception vector info	
+	clrw	sp@-
+	jbsr	_C_LABEL(intr_dispatch) | call dispatch routine
 	addql	#4,sp
-	moveml	sp@+, #0xFFFF
-	addql	#4,sp
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
-	jra	_ASM_LABEL(rei)
-
-ENTRY_NOPROFILE(lev4intr)
-	addql	#1,_C_LABEL(intrcnt)+12
-	clrl	sp@-
-	moveml	#0xFFFF,sp@-
-	movl	sp, sp@-
-	movl	_C_LABEL(lev4_intrvec),a2
-	jbsr	a2@
-	addql	#4,sp
-	tstl	d0
-	beq	normal_rei
-	moveml	sp@+, #0xFFFF
-	addql	#4,sp
-	rte
-normal_rei:
-	moveml	sp@+, #0xFFFF
-	addql	#4,sp
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
-	jra	_ASM_LABEL(rei)
-
-ENTRY_NOPROFILE(lev5intr)
-	addql	#1,_C_LABEL(intrcnt)+28
-	clrl	sp@-
-	moveml	#0xFFFF,sp@-
-	movl	sp, sp@-
-	movl	_C_LABEL(lev5_intrvec),a2
-	jbsr	a2@
-	addql	#4,sp
-	moveml	sp@+, #0xFFFF
-	addql	#4,sp
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
-	jra	_ASM_LABEL(rei)
-
-ENTRY_NOPROFILE(lev6intr)
-	addql	#1,_C_LABEL(intrcnt)+32
-	clrl	sp@-
-	moveml	#0xFFFF,sp@-
-	movl	sp, sp@-
-	movl	_C_LABEL(lev6_intrvec),a2
-	jbsr	a2@
-	addql	#4,sp
-	moveml	sp@+, #0xFFFF
-	addql	#4,sp
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
-	jra	_ASM_LABEL(rei)
+	INTERRUPT_RESTOREREG
+	jra	_ASM_LABEL(rei)		| all done
 
 ENTRY_NOPROFILE(lev7intr)
-	addql	#1,_C_LABEL(intrcnt)+16
 	clrl	sp@-			| pad SR to longword
 	moveml	#0xFFFF,sp@-		| save registers
 	movl	usp,a0			| and save
@@ -941,8 +914,6 @@ ENTRY_NOPROFILE(rtclock_intr)
 	jbsr	_C_LABEL(hardclock)	| call generic clock int routine
 	lea	sp@(12),sp		| pop params
 	jbsr	_C_LABEL(mrg_VBLQueue)	| give programs in the VBLqueue a chance
-	addql	#1,_C_LABEL(intrcnt)+20
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	movw	d2,sr			| restore SPL
 	movl	sp@+,d2			| restore d2
 	movl	#1,d0			| clock taken care of
@@ -1514,7 +1485,6 @@ LmotommuC:
  * as we need to check for our emulated software interrupts.
  */
 
-ALTENTRY(splnone, _spl0)
 ENTRY(spl0)
 	moveq	#0,d0
 	movw	sr,d0			| get old SR for return
@@ -1552,6 +1522,51 @@ ENTRY(m68881_restore)
 	fmovem	a0@(FPF_REGS),fp0-fp7	| restore FP general registers
 Lm68881rdone:
 	frestore a0@			| restore state
+	rts
+
+/*
+ * delay() - delay for a specified number of microseconds
+ * _delay() - calibrator helper for delay()
+ *
+ * Notice that delay_factor is scaled up by a factor of 128 to avoid loss
+ * of precision for small delays.  As a result of this we need to avoid
+ * overflow.
+ *
+ * The branch target for the loops must be aligned on a half-line (8-byte)
+ * boundary to minimize cache effects.  This guarantees both that there
+ * will be no prefetch stalls due to cache line burst operations and that
+ * the loops will run from a single cache half-line.
+ */
+	.align	8			| align to half-line boundary
+
+ALTENTRY(_delay, _delay)
+ENTRY(delay)
+	movl	sp@(4),d0		| get microseconds to delay
+	cmpl	#0x40000,d0		| is it a "large" delay?
+	bls	Ldelayshort		| no, normal calculation
+	movql	#0x7f,d1		| adjust for scaled multipler (to
+	addl	d1,d0			|   avoid overflow)
+	lsrl	#7,d0
+	mulul	_C_LABEL(delay_factor),d0 | calculate number of loop iterations
+	bra	Ldelaysetup		| go do it!
+Ldelayshort:
+	mulul	_C_LABEL(delay_factor),d0 | calculate number of loop iterations
+	lsrl	#7,d0			| adjust for scaled multiplier
+Ldelaysetup:
+	jeq	Ldelayexit		| bail out if nothing to do
+	movql	#0,d1			| put bits 15-0 in d1 for the
+	movw	d0,d1			|   inner loop, and move bits
+	movw	#0,d0			|   31-16 to the low-order word
+	subql	#1,d1			|   of d0 for the outer loop
+	swap	d0
+Ldelay:
+	tstl	_C_LABEL(delay_flag)	| this never changes for delay()!
+	dbeq	d1,Ldelay		|   (used only for timing purposes)
+	dbeq	d0,Ldelay
+	addqw	#1,d1			| adjust end count and
+	swap	d0			|    return the longword result
+	orl	d1,d0
+Ldelayexit:
 	rts
 
 /*
@@ -1929,22 +1944,3 @@ ASGLOBAL(fulltflush)
 ASGLOBAL(fullcflush)
 	.long	0
 #endif
-
-/* interrupt counters */
-
-GLOBAL(intrnames)
-	.asciz	"spur"
-	.asciz	"via1"
-	.asciz	"via2"
-	.asciz	"scc"
-	.asciz	"nmi"
-	.asciz	"clock"
-	.asciz	"unused1"
-	.asciz	"unused2"
-	.asciz	"unused3"
-GLOBAL(eintrnames)
-	.even
-
-GLOBAL(intrcnt)
-	.long	0,0,0,0,0,0,0,0,0
-GLOBAL(eintrcnt)

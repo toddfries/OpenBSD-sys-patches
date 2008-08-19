@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_obio.c,v 1.10 2004/08/17 22:20:55 drahn Exp $	*/
+/*	$OpenBSD: if_wi_obio.c,v 1.13 2004/11/24 07:47:22 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -60,7 +60,8 @@
 #include <netinet/if_ether.h>
 #endif
 
-#include <net/if_ieee80211.h>
+#include <net80211/ieee80211.h>
+#include <net80211/ieee80211_ioctl.h>
 
 #include <machine/bus.h>
 #include <machine/autoconf.h>
@@ -129,6 +130,7 @@ wi_obio_attach(parent, self, aux)
 
 	wi_obio_enable(sc);
 
+	printf("\n");
 	wi_attach(sc, &wi_func_io);
 }
 

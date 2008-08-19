@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgsix.c,v 1.28 2003/06/28 17:05:33 miod Exp $	*/
+/*	$OpenBSD: cgsix.c,v 1.32 2005/03/07 16:44:50 miod Exp $	*/
 /*	$NetBSD: cgsix.c,v 1.33 1997/08/07 19:12:30 pk Exp $ */
 
 /*
@@ -124,18 +124,6 @@ struct cgsix_softc {
 	int	sc_nscreens;
 };
 
-struct wsscreen_descr cgsix_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *cgsix_scrlist[] = {
-	&cgsix_stdscreen,
-};
-
-struct wsscreen_list cgsix_screenlist = {
-	sizeof(cgsix_scrlist) / sizeof(struct wsscreen_descr *), cgsix_scrlist
-};
-
 int cgsix_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int cgsix_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -238,7 +226,6 @@ cgsixattach(parent, self, args)
 {
 	struct cgsix_softc *sc = (struct cgsix_softc *)self;
 	struct confargs *ca = args;
-	struct wsemuldisplaydev_attach_args waa;
 	int node = 0, i;
 	volatile struct bt_regs *bt;
 	int isconsole = 0, sbus = 1;
@@ -319,7 +306,8 @@ cgsixattach(parent, self, args)
 
 	sc->sc_ih.ih_fun = cgsix_intr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB);
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB,
+	    self->dv_xname);
 
 	/* reset cursor & frame buffer controls */
 	cgsix_reset(sc, fhcrev);
@@ -367,17 +355,12 @@ cgsixattach(parent, self, args)
 		cgsix_ras_init(sc);
 	}
 
-	cgsix_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	cgsix_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	cgsix_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	cgsix_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	printf(", %dx%d, rev %d\n", sc->sc_sunfb.sf_width,
 	    sc->sc_sunfb.sf_height, fhcrev);
 
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, &cgsix_stdscreen,
-		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0, cgsix_burner);
+		fbwscons_console_init(&sc->sc_sunfb,
+		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0);
 	}
 
 #if defined(SUN4C) || defined(SUN4M)
@@ -385,11 +368,7 @@ cgsixattach(parent, self, args)
 		sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 #endif
 
-	waa.console = isconsole;
-	waa.scrdata = &cgsix_screenlist;
-	waa.accessops = &cgsix_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &cgsix_accessops, isconsole);
 }
 
 int
@@ -437,6 +416,8 @@ cgsix_ioctl(dev, cmd, data, flags, p)
 
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:

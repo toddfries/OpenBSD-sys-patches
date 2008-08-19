@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.24 2004/03/17 14:16:04 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.26 2004/12/26 22:13:45 miod Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.22 1997/11/26 04:18:20 briggs Exp $	*/
 
 /*
@@ -80,6 +80,7 @@
 #include <sys/buf.h>
 #include <sys/disk.h>
 #include <sys/disklabel.h>
+#include <sys/malloc.h>
 #include <sys/syslog.h>
 
 #include <mac68k/mac68k/dpme.h>	/* MF the structure of a mac partition entry */
@@ -284,9 +285,13 @@ skip:
 char *
 read_mac_label(char *dlbuf, struct disklabel *lp, struct cpu_disklabel *osdep)
 {
-	char *msg = NULL;
 	int i, num_parts, maxslot = RAW_PART;
-	struct partmapentry pmap[NUM_PARTS_PROBED];
+	struct partmapentry *pmap;
+
+	MALLOC(pmap, struct partmapentry *,
+	    NUM_PARTS_PROBED * sizeof(struct partmapentry), M_DEVBUF, M_NOWAIT);
+	if (pmap == NULL)
+		return ("out of memory");
 
 	num_parts = fixPartTable(pmap, lp->d_secsize, dlbuf);
 	if (getNamedType(pmap, num_parts, lp, ROOT_PART, 0, &maxslot))
@@ -336,7 +341,9 @@ read_mac_label(char *dlbuf, struct disklabel *lp, struct cpu_disklabel *osdep)
 		}
 	}
 	lp->d_npartitions = maxslot + 1;
-	return msg;
+
+	FREE(pmap, M_DEVBUF);
+	return NULL;
 }
 
 /*
@@ -377,9 +384,7 @@ readdisklabel(dev, strat, lp, osdep, spoofonly)
 		lp->d_partitions[i].p_offset = 0;
 		lp->d_partitions[i].p_fstype = FS_UNUSED;
 	}
-	if (lp->d_partitions[RAW_PART].p_size == 0)
-		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_offset = 0;
+	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
 	if (spoofonly)
@@ -519,7 +524,11 @@ writedisklabel(dev, strat, lp, osdep)
 	 */
 	sbSigp = (u_int16_t *)bp->b_data;
 	if (*sbSigp == 0x4552) {
-		error = ENODEV;
+		/*
+		 * Read the partition map again, in case it has changed.
+		 */
+		if (readdisklabel(dev, strat, lp, osdep, 0) != NULL)
+			error = EINVAL;
 		goto done;
 	}
 	

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dio.c,v 1.8 2003/05/10 21:11:12 deraadt Exp $	*/
+/*	$OpenBSD: dio.c,v 1.12 2005/01/15 23:37:45 miod Exp $	*/
 /*	$NetBSD: dio.c,v 1.7 1997/05/05 21:00:32 thorpej Exp $	*/
 
 /*-
@@ -40,8 +40,6 @@
 /*
  * Autoconfiguration and mapping support for the DIO bus.
  */
-
-#define	_HP300_INTR_H_PRIVATE
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -150,8 +148,25 @@ dioattach(parent, self, aux)
 		da.da_scode = scode;
 		if (scode == 7 && internalhpib)
 			da.da_id = DIO_DEVICE_ID_IHPIB;
-		else
+		else {
 			da.da_id = DIO_ID(va);
+			/*
+			 * If we probe an unknown device, we do not necessarily
+			 * know how many scodes it will span.
+			 * Extra scodes will usually report an id of zero,
+			 * which would match ihpib!
+			 * Check for this, warn the user, and skip that scode.
+			 */
+			if (da.da_id == 0) {
+				if (didmap)
+					iounmap(va, NBPG);
+				printf("%s: warning: select code %d is likely "
+				    "a span of a previous unsupported device\n",
+				    self->dv_xname, scode);
+				scode++;
+				continue;
+			}
+		}
 
 		if (DIO_ISFRAMEBUFFER(da.da_id))
 			da.da_secid = DIO_SECID(va);
@@ -239,7 +254,7 @@ dio_scodesize(da)
 		return (1);
 
 	/*
-	 * Find the dio_devdata matchind the primary id.
+	 * Find the dio_devdata matching the primary id.
 	 * If we're a framebuffer, we also check the secondary id.
 	 */
 	for (i = 0; i < DIO_NDEVICES; i++) {
@@ -319,35 +334,23 @@ dio_devinfo(da, buf, buflen)
 /*
  * Establish an interrupt handler for a DIO device.
  */
-void *
-dio_intr_establish(func, arg, ipl, priority)
-	int (*func)(void *);
-	void *arg;
-	int ipl;
-	int priority;
+void
+dio_intr_establish(struct isr *isr, const char *name)
 {
-	void *ih;
+	intr_establish(isr, name);
 
-	ih = intr_establish(func, arg, ipl, priority);
-
-	if (priority == IPL_BIO)
+	if (isr->isr_priority == IPL_BIO)
 		dmacomputeipl();
-
-	return (ih);
 }
 
 /*
  * Remove an interrupt handler for a DIO device.
  */
 void
-dio_intr_disestablish(arg)
-	void *arg;
+dio_intr_disestablish(struct isr *isr)
 {
-	struct isr *isr = arg;
-	int priority = isr->isr_priority;
+	intr_disestablish(isr);
 
-	intr_disestablish(arg);
-
-	if (priority == IPL_BIO)
+	if (isr->isr_priority == IPL_BIO)
 		dmacomputeipl();
 }

@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.13 2004/04/01 22:15:55 xsa Exp $
+#	$OpenBSD: RAMDISK,v 1.17 2004/12/08 20:21:31 miod Exp $
 #
 # RAMDISK - bsd.rd configuration file (non-SBC version)
 
@@ -33,12 +33,11 @@ option		M68030
 option		M68020		# Must have 68851 PMMU
 option		FPSP
 option		FPU_EMULATE
-option		DISABLE_EXT_CACHE # Don't use IIci external cache
 option		DISABLE_ADB_WITH_SERIAL_CONSOLE
 #option		MRG_ADB		  # Use ROM-based ADB driver
 
 config		bsd		root on rd0a
-maxusers	16
+maxusers	32
 
 mainbus0 at root
 
@@ -52,7 +51,7 @@ intvid0	at obio?		# Internal video hardware
 mc*	at obio?		# MACE ethernet on Centris/Quadra 660av
 sn*	at obio?		# Internal ethernet
 zsc0	at obio?		# Zilog serial chip
-zstty*	at zsc? channel ?
+zstty*	at zsc?
 
 nubus0		at mainbus?
 
@@ -67,16 +66,16 @@ grf*		at macvid?
 # Attach ite semantics to the appropriate grf device
 ite0		at grf?
 
-# Use only one of ncrscsi or sbc
+# Enable only one of ncrscsi or sbc
 ncrscsi0	at obio?		# SCSI NCR 5380
-#sbc0		at obio? flags 0x1	# MI NCR 5380 SCSI Bus Controller
+sbc0		at obio? disable flags 0x1	# MI NCR 5380 SCSI Bus Controller
 
 scsibus*	at esp?
 scsibus*	at ncrscsi?
-#scsibus*	at sbc?
+scsibus*	at sbc?
 
-sd*	at scsibus? target ? lun ?	# SCSI disk drives
-st*	at scsibus? target ? lun ?	# SCSI tape drives
-cd*	at scsibus? target ? lun ?	# SCSI CD-ROM drives
+sd*	at scsibus?		# SCSI disk drives
+st*	at scsibus?		# SCSI tape drives
+cd*	at scsibus?		# SCSI CD-ROM drives
 
 pseudo-device	rd 1

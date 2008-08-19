@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.32 2004/08/08 19:01:20 brad Exp $	*/
+/*	$OpenBSD: hme.c,v 1.35 2005/02/04 05:02:38 brad Exp $	*/
 /*	$NetBSD: hme.c,v 1.21 2001/07/07 15:59:37 thorpej Exp $	*/
 
 /*-
@@ -67,6 +67,8 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 #endif
 
 #if NBPFILTER > 0
@@ -77,10 +79,6 @@
 #include <dev/mii/miivar.h>
 
 #include <machine/bus.h>
-
-#if NVLAN > 0
-#include <net/if_vlan_var.h>
-#endif
 
 #include <dev/ic/hmereg.h>
 #include <dev/ic/hmevar.h>
@@ -116,6 +114,8 @@ void		hme_mediastatus(struct ifnet *, struct ifmediareq *);
 int		hme_eint(struct hme_softc *, u_int);
 int		hme_rint(struct hme_softc *);
 int		hme_tint(struct hme_softc *);
+/* TCP/UDP checksum offloading support */
+void 		hme_rxcksum(struct mbuf *, u_int32_t);
 
 void
 hme_config(sc)
@@ -241,7 +241,7 @@ hme_config(sc)
 	    IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
 	sc->sc_if_flags = ifp->if_flags;
 	IFQ_SET_READY(&ifp->if_snd);
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	/* Initialize ifmedia structures and MII info */
 	mii->mii_ifp = ifp;
@@ -485,7 +485,7 @@ hme_init(sc)
 	bus_space_handle_t erx = sc->sc_erx;
 	bus_space_handle_t mac = sc->sc_mac;
 	u_int8_t *ea;
-	u_int32_t v;
+	u_int32_t v, n;
 
 	/*
 	 * Initialization sequence. The numbered steps below correspond
@@ -517,7 +517,7 @@ hme_init(sc)
 	bus_space_write_4(t, mac, HME_MACI_FCCNT, 0);
 	bus_space_write_4(t, mac, HME_MACI_EXCNT, 0);
 	bus_space_write_4(t, mac, HME_MACI_LTCNT, 0);
-	bus_space_write_4(t, mac, HME_MACI_TXSIZE, HME_MTU);
+	bus_space_write_4(t, mac, HME_MACI_TXSIZE, ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN);
 
 	/* Load station MAC address */
 	ea = sc->sc_enaddr;
@@ -544,7 +544,7 @@ hme_init(sc)
 	bus_space_write_4(t, etx, HME_ETXI_RSIZE, HME_TX_RING_SIZE);
 
 	bus_space_write_4(t, erx, HME_ERXI_RING, sc->sc_rb.rb_rxddma);
-	bus_space_write_4(t, mac, HME_MACI_RXSIZE, HME_MTU);
+	bus_space_write_4(t, mac, HME_MACI_RXSIZE, ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN);
 
 	/* step 8. Global Configuration & Interrupt Mask */
 	bus_space_write_4(t, seb, HME_SEBI_IMASK,
@@ -594,6 +594,10 @@ hme_init(sc)
 #endif
 	/* Enable DMA */
 	v |= HME_ERX_CFG_DMAENABLE | (HME_RX_OFFSET << 3);
+	/* RX TCP/UDP cksum offset */
+	n = (ETHER_HDR_LEN + sizeof(struct ip)) / 2;
+	n = (n << HME_ERX_CFG_CSUM_SHIFT) & HME_ERX_CFG_CSUMSTART;
+	v |= n;
 	bus_space_write_4(t, erx, HME_ERXI_CFG, v);
 
 	/* step 11. XIF Configuration */
@@ -731,6 +735,105 @@ hme_tint(sc)
 }
 
 /*
+ * XXX layering violation
+ *
+ * If we can have additional csum data member in 'struct pkthdr' for
+ * these incomplete checksum offload capable hardware, things would be
+ * much simpler. That member variable will carry partial checksum
+ * data and it may be evaluated in TCP/UDP input handler after
+ * computing pseudo header checksumming.
+ */
+void
+hme_rxcksum(struct mbuf *m, u_int32_t flags)
+{
+	struct ether_header *eh;
+	struct ip *ip;
+	struct udphdr *uh;
+	int32_t hlen, len, pktlen;
+	u_int16_t cksum, flag_bad, flag_ok, *opts;
+	u_int32_t temp32;
+	union pseudoh {
+		struct hdr {
+			u_int16_t len;
+			u_int8_t ttl;
+			u_int8_t proto;
+			u_int32_t src;
+			u_int32_t dst;
+		} h;
+		u_int16_t w[6];
+	} ph;
+
+	pktlen = m->m_pkthdr.len;
+	if (pktlen < sizeof(struct ether_header))
+		return;
+	eh = mtod(m, struct ether_header *);
+	if (eh->ether_type != htons(ETHERTYPE_IP))
+		return;
+	ip = (struct ip *)(eh + 1);
+	if (ip->ip_v != IPVERSION)
+		return;
+
+	hlen = ip->ip_hl << 2;
+	pktlen -= sizeof(struct ether_header);
+	if (hlen < sizeof(struct ip))
+		return;
+	if (ntohs(ip->ip_len) < hlen)
+		return;
+	if (ntohs(ip->ip_len) != pktlen) 
+		return;
+	if (ip->ip_off & htons(IP_MF | IP_OFFMASK))
+		return;	/* can't handle fragmented packet */
+
+	switch (ip->ip_p) {
+	case IPPROTO_TCP:
+		if (pktlen < (hlen + sizeof(struct tcphdr)))
+			return;
+		flag_ok = M_TCP_CSUM_IN_OK;
+		flag_bad = M_TCP_CSUM_IN_BAD;
+		break;
+	case IPPROTO_UDP:
+		if (pktlen < (hlen + sizeof(struct udphdr)))
+			return;
+		uh = (struct udphdr *)((caddr_t)ip + hlen);
+		if (uh->uh_sum == 0)
+			return; /* no checksum */
+		flag_ok = M_UDP_CSUM_IN_OK;
+		flag_bad = M_UDP_CSUM_IN_BAD;
+		break;
+	default:
+		return;
+	}
+
+	cksum = ~(flags & HME_XD_RXCKSUM);
+	/* cksum fixup for IP options */
+	len = hlen - sizeof(struct ip);
+	if (len > 0) {
+		opts = (u_int16_t *)(ip + 1);
+		for (; len > 0; len -= sizeof(u_int16_t), opts++) {
+			temp32 = cksum - *opts;
+			temp32 = (temp32 >> 16) + (temp32 & 65535);
+			cksum = temp32 & 65535;
+		}
+	}
+	/* cksum fixup for pseudo-header, replace with in_cksum_phdr()? */
+	ph.h.len = htons(ntohs(ip->ip_len) - hlen);
+	ph.h.ttl = 0;
+	ph.h.proto = ip->ip_p;
+	ph.h.src = ip->ip_src.s_addr;
+	ph.h.dst = ip->ip_dst.s_addr;
+	temp32 = cksum;
+	opts = &ph.w[0];
+	temp32 += opts[0] + opts[1] + opts[2] + opts[3] + opts[4] + opts[5];
+	temp32 = (temp32 >> 16) + (temp32 & 65535);
+	temp32 += (temp32 >> 16);
+	cksum = ~temp32;
+	if (cksum != 0)
+		m->m_pkthdr.csum |= flag_bad;
+	else
+		m->m_pkthdr.csum |= flag_ok;
+}
+
+/*
  * Receive interrupt.
  */
 int
@@ -773,6 +876,9 @@ hme_rint(sc)
 			goto again;
 		}
 
+		ifp->if_ipackets++;
+		hme_rxcksum(m, flags);
+
 #if NBPFILTER > 0
 		if (ifp->if_bpf) {
 			m->m_pkthdr.len = m->m_len = len;
@@ -780,7 +886,6 @@ hme_rint(sc)
 		}
 #endif
 
-		ifp->if_ipackets++;
 		ether_input_mbuf(ifp, m);
 
 again:
@@ -1192,7 +1297,8 @@ hme_ioctl(ifp, cmd, data)
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
 			 */
-			hme_setladrf(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				hme_setladrf(sc);
 			error = 0;
 		}
 		break;

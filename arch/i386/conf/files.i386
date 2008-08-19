@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.126 2004/07/14 05:34:14 tedu Exp $
+#	$OpenBSD: files.i386,v 1.132 2005/03/08 20:00:23 tdeval Exp $
 #
 # new style config file for i386 architecture
 #
@@ -43,7 +43,6 @@ file	arch/i386/i386/trap.c
 file	arch/i386/i386/vm_machdep.c
 file	arch/i386/i386/dkcsum.c		bios
 file	lib/libz/adler32.c		!ppp_deflate & !ipsec & !crypto
-file	dev/cons.c
 file	dev/cninit.c
 file	arch/i386/i386/mptramp.s	multiprocessor
 file	arch/i386/i386/lock_machdep.c	multiprocessor
@@ -83,7 +82,7 @@ include "../../../dev/ata/files.ata"
 # System bus types
 #
 
-define mainbus { apid = -1 }
+define mainbus {[apid = -1]}
 device	mainbus: isabus, eisabus, pcibus, mainbus
 attach	mainbus at root
 file	arch/i386/i386/mainbus.c	mainbus
@@ -122,6 +121,11 @@ file	arch/i386/pci/elan520.c		elansc
 device	geodesc
 attach	geodesc at pci
 file	arch/i386/pci/geodesc.c		geodesc
+
+# National Semiconductor Geode SC1100 SMI/ACPI module
+device	gscpm
+attach	gscpm at pci
+file	arch/i386/pci/gscpm.c		gscpm
 
 # PCI-ISA bridge chipsets
 device	pcib: isabus
@@ -168,7 +172,7 @@ include "../../../gnu/arch/i386/fpemul/files.fpemul"
 
 # attribute used to represent the "keyboard controller"
 # XXX should be a real device
-define pckbcport { [irq = -1], [port = -1] }
+define pckbcport {[irq = -1], [port = -1]}
 
 # 8250/16[45]50-based "com" ports, optimized for the i386 interrupt system
 device	pccom: tty
@@ -192,7 +196,7 @@ attach sysbeep at pcppi
 
 # Floppy disk controller
 # XXX temporarily conflicts with arc, will soon move to files.isa
-device	fdc {drive = -1}
+device	fdc {[drive = -1]}
 attach	fdc at isa
 file	dev/isa/fdc.c		fdc needs-flag
 
@@ -212,6 +216,9 @@ file	arch/i386/i386/pctr.c		pctr needs-flag
 
 pseudo-device	mtrr
 file 	arch/i386/i386/mtrr.c		mtrr needs-flag
+
+pseudo-device	nvram
+file	arch/i386/i386/nvram.c	nvram needs-flag
 
 #
 # EISA-only drivers
@@ -282,7 +289,7 @@ define	mpbios
 file	arch/i386/i386/mpbios.c		mpbios needs-flag
 
 # CPUS
-define	cpu { apid = -1 }
+define	cpu {[apid = -1]}
 device	cpu
 attach	cpu at mainbus
 file	arch/i386/i386/cpu.c		cpu
@@ -379,11 +386,6 @@ attach	pccom at cardbus with pccom_cardbus
 # Machine-independent USB drivers
 #
 include "dev/usb/files.usb"
-
-#
-# Machine-independent FireWire drivers
-#
-include "dev/ieee1394/files.ieee1394"
 
 #
 # Machine-independent I2C drivers

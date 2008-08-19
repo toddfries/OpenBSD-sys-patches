@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_subr.c,v 1.28 2004/08/30 03:06:48 drahn Exp $ */
+/*	$OpenBSD: usb_subr.c,v 1.33 2005/03/13 02:54:04 pascoe Exp $ */
 /*	$NetBSD: usb_subr.c,v 1.103 2003/01/10 11:19:13 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_subr.c,v 1.18 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -150,7 +150,7 @@ usbd_errstr(usbd_status err)
 
 usbd_status
 usbd_get_string_desc(usbd_device_handle dev, int sindex, int langid,
-		     usb_string_descriptor_t *sdesc)
+		     usb_string_descriptor_t *sdesc, int *sizep)
 {
 	usb_device_request_t req;
 	usbd_status err;
@@ -170,7 +170,18 @@ usbd_get_string_desc(usbd_device_handle dev, int sindex, int langid,
 		return (USBD_SHORT_XFER);
 
 	USETW(req.wLength, sdesc->bLength);	/* the whole string */
-	return (usbd_do_request(dev, &req, sdesc));
+        err = usbd_do_request_flags(dev, &req, sdesc, USBD_SHORT_XFER_OK,
+  	                 &actlen, USBD_DEFAULT_TIMEOUT);
+	if (err)
+		return (err);
+
+	if (actlen != sdesc->bLength) {
+		DPRINTFN(-1, ("usbd_get_string_desc: expected %d, got %d\n",
+		    sdesc->bLength, actlen));
+	}
+
+	*sizep = actlen;
+	return (USBD_NORMAL_COMPLETION);
 }
 
 char *
@@ -182,6 +193,7 @@ usbd_get_string(usbd_device_handle dev, int si, char *buf)
 	int i, n;
 	u_int16_t c;
 	usbd_status err;
+	int size;
 
 	if (si == 0)
 		return (0);
@@ -189,19 +201,20 @@ usbd_get_string(usbd_device_handle dev, int si, char *buf)
 		return (0);
 	if (dev->langid == USBD_NOLANG) {
 		/* Set up default language */
-		err = usbd_get_string_desc(dev, USB_LANGUAGE_TABLE, 0, &us);
-		if (err || us.bLength < 4) {
+	                 err = usbd_get_string_desc(dev, USB_LANGUAGE_TABLE, 0, &us,
+                           &size);
+  	                 if (err || size < 4) {
 			dev->langid = 0; /* Well, just pick English then */
 		} else {
 			/* Pick the first language as the default. */
 			dev->langid = UGETW(us.bString[0]);
 		}
 	}
-	err = usbd_get_string_desc(dev, si, dev->langid, &us);
+	err = usbd_get_string_desc(dev, si, dev->langid, &us, &size);
 	if (err)
 		return (0);
 	s = buf;
-	n = us.bLength / 2 - 1;
+	n = size / 2 - 1;
 	for (i = 0; i < n; i++) {
 		c = UGETW(us.bString[i]);
 		/* Convert from Unicode, handle buggy strings. */
@@ -905,6 +918,7 @@ usbd_probe_and_attach(device_ptr_t parent, usbd_device_handle dev,
 			uaa.ifaceno = ifaces[i]->idesc->bInterfaceNumber;
 			dv = USB_DO_ATTACH(dev, bdev, parent, &uaa, usbd_print,
 					   usbd_submatch);
+
 			if (dv != NULL) {
 				dev->subdevs[found++] = dv;
 				dev->subdevs[found] = 0;
@@ -977,12 +991,13 @@ usbd_status
 usbd_new_device(device_ptr_t parent, usbd_bus_handle bus, int depth,
 		int speed, int port, struct usbd_port *up)
 {
-	usbd_device_handle dev;
+	usbd_device_handle dev, adev;
 	struct usbd_device *hub;
 	usb_device_descriptor_t *dd;
 	usbd_status err;
 	int addr;
 	int i;
+	int p;
 
 	DPRINTF(("usbd_new_device bus=%p port=%d depth=%d speed=%d\n",
 		 bus, port, depth, speed));
@@ -1017,11 +1032,27 @@ usbd_new_device(device_ptr_t parent, usbd_bus_handle bus, int depth,
 	dev->depth = depth;
 	dev->powersrc = up;
 	dev->myhub = up->parent;
-	for (hub = up->parent;
+
+	up->device = dev;
+	
+	/* Locate port on upstream high speed hub */
+	for (adev = dev, hub = up->parent;
 	     hub != NULL && hub->speed != USB_SPEED_HIGH;
-	     hub = hub->myhub)
+	     adev = hub, hub = hub->myhub)
 		;
-	dev->myhighhub = hub;
+	if (hub) {
+		for (p = 0; p < hub->hub->hubdesc.bNbrPorts; p++) {
+			if (hub->hub->ports[p].device == adev) {
+				dev->myhsport = &hub->hub->ports[p];
+				goto found;
+			}
+		}
+		panic("usbd_new_device: cannot find HS port\n");
+	found:
+		DPRINTFN(1,("usbd_new_device: high speed port %d\n", p));
+	} else {
+		dev->myhsport = NULL;
+	}
 	dev->speed = speed;
 	dev->langid = USBD_NOLANG;
 	dev->cookie.cookie = ++usb_cookie_no;
@@ -1034,7 +1065,6 @@ usbd_new_device(device_ptr_t parent, usbd_bus_handle bus, int depth,
 		return (err);
 	}
 
-	up->device = dev;
 	dd = &dev->ddesc;
 	/* Try a few times in case the device is slow (i.e. outside specs.) */
 	for (i = 0; i < 5; i++) {
@@ -1149,8 +1179,8 @@ usbd_remove_device(usbd_device_handle dev, struct usbd_port *up)
 
 	if (dev->default_pipe != NULL)
 		usbd_kill_pipe(dev->default_pipe);
-	up->device = 0;
-	dev->bus->devices[dev->address] = 0;
+	up->device = NULL;
+	dev->bus->devices[dev->address] = NULL;
 
 	free(dev, M_USB);
 }
@@ -1375,6 +1405,7 @@ usb_disconnect_port(struct usbd_port *up, device_ptr_t parent)
 				printf(" port %d", up->portno);
 			printf(" (addr %d) disconnected\n", dev->address);
 			config_detach(dev->subdevs[i], DETACH_FORCE);
+			dev->subdevs[i] = 0;
 		}
 	}
 

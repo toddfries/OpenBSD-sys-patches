@@ -1,4 +1,4 @@
-/*	$OpenBSD: nsphy.c,v 1.12 2003/10/22 09:39:29 jmc Exp $	*/
+/*	$OpenBSD: nsphy.c,v 1.18 2005/02/19 06:00:04 brad Exp $	*/
 /*	$NetBSD: nsphy.c,v 1.25 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-
@@ -76,7 +76,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -105,43 +104,48 @@ int	nsphy_service(struct mii_softc *, struct mii_data *, int);
 void	nsphy_status(struct mii_softc *);
 void	nsphy_reset(struct mii_softc *);
 
+const struct mii_phy_funcs nsphy_funcs = {
+	nsphy_service, nsphy_status, nsphy_reset,
+};
+
+static const struct mii_phydesc nsphys[] = {
+	{ MII_OUI_NATSEMI,		MII_MODEL_NATSEMI_DP83840,
+	  MII_STR_NATSEMI_DP83840 },
+
+	{ 0,			0,
+	  NULL },
+};
+
 int
-nsphymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+nsphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_NATSEMI &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_NATSEMI_DP83840)
+	if (mii_phy_match(ma, nsphys) != NULL)
 		return (10);
 
 	return (0);
 }
 
 void
-nsphyattach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+nsphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	printf(": %s, rev. %d\n", MII_STR_NATSEMI_DP83840,
-	    MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, nsphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = nsphy_service;
-	sc->mii_status = nsphy_status;
+	sc->mii_funcs = &nsphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 	sc->mii_anegticks = 5;
 
-	nsphy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
@@ -150,10 +154,7 @@ nsphyattach(parent, self, aux)
 }
 
 int
-nsphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+nsphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
@@ -227,37 +228,7 @@ nsphy_service(sc, mii, cmd)
 		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
 			return (0);
 
-		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
-			return (0);
-
-		/*
-		 * Is the interface even up?
-		 */
-		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
-			return (0);
-
-		/*
-		 * Check to see if we have link.  If we do, we don't
-		 * need to restart the autonegotiation process.  Read
-		 * the BMSR twice in case it's latched.
-		 */
-		reg = PHY_READ(sc, MII_BMSR) |
-		    PHY_READ(sc, MII_BMSR);
-		if (reg & BMSR_LINK)
-			return (0);
-
-		/*
-		 * Only retry autonegotiation every 5 seconds.
-		 */
-		if (++sc->mii_ticks != sc->mii_anegticks)
-			return (0);
-
-		sc->mii_ticks = 0;
-		nsphy_reset(sc);
-		if (mii_phy_auto(sc, 0) == EJUSTRETURN)
+		if (mii_phy_tick(sc) == EJUSTRETURN)
 			return (0);
 		break;
 
@@ -275,8 +246,7 @@ nsphy_service(sc, mii, cmd)
 }
 
 void
-nsphy_status(sc)
-	struct mii_softc *sc;
+nsphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -353,8 +323,7 @@ nsphy_status(sc)
 }
 
 void
-nsphy_reset(sc)
-	struct mii_softc *sc;
+nsphy_reset(struct mii_softc *sc)
 {
 	int anar;
 

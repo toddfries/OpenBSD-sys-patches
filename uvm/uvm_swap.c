@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.c,v 1.58 2003/12/10 07:34:03 itojun Exp $	*/
+/*	$OpenBSD: uvm_swap.c,v 1.60 2004/12/26 21:22:14 miod Exp $	*/
 /*	$NetBSD: uvm_swap.c,v 1.40 2000/11/17 11:39:39 mrg Exp $	*/
 
 /*
@@ -327,11 +327,8 @@ uvm_swap_initcrypt_all(void)
 
 	simple_lock(&uvm.swap_data_lock);
 
-	for (spp = swap_priority.lh_first; spp != NULL;
-	     spp = spp->spi_swappri.le_next) {
-		for (sdp = spp->spi_swapdev.cqh_first;
-		     sdp != (void *)&spp->spi_swapdev;
-		     sdp = sdp->swd_next.cqe_next)
+	LIST_FOREACH(spp, &swap_priority, spi_swappri) {
+		CIRCLEQ_FOREACH(sdp, &spp->spi_swapdev, swd_next)
 			if (sdp->swd_decrypt == NULL)
 				uvm_swap_initcrypt(sdp, sdp->swd_npages);
 	}
@@ -762,7 +759,7 @@ sys_swapctl(p, v, retval)
 	case SWAP_DUMPDEV:
 		if (vp->v_type != VBLK) {
 			error = ENOTBLK;
-			goto out;
+			break;
 		}
 		dumpdev = vp->v_rdev;
 		break;
@@ -867,9 +864,7 @@ sys_swapctl(p, v, retval)
 		/*
 		 * do the real work.
 		 */
-		if ((error = swap_off(p, sdp)) != 0)
-			goto out;
-
+		error = swap_off(p, sdp);
 		break;
 
 	default:

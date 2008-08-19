@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.24 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.28 2004/12/28 05:18:25 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -114,6 +114,7 @@ cpuattach(parent, self, aux)
 	printf("MHz");
 
 	if (fpu_enable) {
+		extern u_int fpu_version;
 		u_int32_t ver[2];
 
 		mtctl(fpu_enable, CR_CCR);
@@ -123,9 +124,10 @@ cpuattach(parent, self, aux)
 		    "fstds   %%fr0,0(%0)"
 		    :: "r" (&ver) : "memory");
 		mtctl(0, CR_CCR);
-		ver[0] = HPPA_FPUVER(ver[0]);
+		fpu_version = HPPA_FPUVER(ver[0]);
 		printf(", FPU %s rev %d",
-		    hppa_mod_info(HPPA_TYPE_FPU, ver[0] >> 5), ver[0] & 0x1f);
+		    hppa_mod_info(HPPA_TYPE_FPU, fpu_version >> 5),
+		    fpu_version & 0x1f);
 	}
 
 	printf("\n%s: ", self->dv_xname);
@@ -135,11 +137,10 @@ cpuattach(parent, self, aux)
 		    pdc_cache.ic_size / 1024, pdc_cache.ic_conf.cc_line * 16);
 		p = "D";
 	}
-	/* TODO decode associativity */
-	printf("%uK(%db/l) wr-%s %scoherent %scache, ",
+
+	printf("%uK(%db/l) wr-%s %scache, ",
 	    pdc_cache.dc_size / 1024, pdc_cache.dc_conf.cc_line * 16,
-	    pdc_cache.dc_conf.cc_wt? "thru" : "back",
-	    pdc_cache.dc_conf.cc_cst? "" : "in", p);
+	    pdc_cache.dc_conf.cc_wt? "thru" : "back", p);
 
 	p = "";
 	if (!pdc_cache.dt_conf.tc_sh) {
@@ -150,10 +151,11 @@ cpuattach(parent, self, aux)
 	    pdc_cache.dt_size, pdc_cache.dt_conf.tc_cst? "" : "in", p);
 
 	if (pdc_btlb.finfo.num_c)
-		printf(", %u BTLB\n", pdc_btlb.finfo.num_c);
-	else
-		printf(", %u/%u D/I BTLBs\n",
+		printf(", %u BTLB", pdc_btlb.finfo.num_c);
+	else if (pdc_btlb.finfo.num_i || pdc_btlb.finfo.num_d)
+		printf(", %u/%u D/I BTLBs",
 		    pdc_btlb.finfo.num_i, pdc_btlb.finfo.num_d);
+	printf("\n");
 
 	/* sanity against lusers amongst config editors */
 	if (ca->ca_irq == 31)

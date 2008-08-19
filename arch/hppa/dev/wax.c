@@ -1,4 +1,4 @@
-/*	$OpenBSD: wax.c,v 1.7 2004/04/07 18:24:19 mickey Exp $	*/
+/*	$OpenBSD: wax.c,v 1.10 2004/11/08 20:53:25 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2003 Michael Shalayeff
@@ -41,7 +41,7 @@
 #define	WAX_IOMASK	0xfff00000
 
 struct wax_regs {
-	u_int32_t wax_irr;	/* int requset register */
+	u_int32_t wax_irr;	/* int request register */
 	u_int32_t wax_imr;	/* int mask register */
 	u_int32_t wax_ipr;	/* int pending register */
 	u_int32_t wax_icr;	/* int command? register */
@@ -97,8 +97,7 @@ waxattach(parent, self, aux)
 	bus_space_handle_t ioh;
 	int s, in;
 
-	if (bus_space_map(ca->ca_iot, ca->ca_hpa + 0xc000,
-	    IOMOD_HPASIZE, 0, &ioh)) {
+	if (bus_space_map(ca->ca_iot, ca->ca_hpa, IOMOD_HPASIZE, 0, &ioh)) {
 		printf(": can't map IO space\n");
 		return;
 	}
@@ -121,13 +120,15 @@ waxattach(parent, self, aux)
 	sc->sc_ic.gsc_base = sc->sc_regs;
 
 	ga.ga_ca = *ca;	/* clone from us */
-	ga.ga_dp.dp_bc[0] = ga.ga_dp.dp_bc[1];
-	ga.ga_dp.dp_bc[1] = ga.ga_dp.dp_bc[2];
-	ga.ga_dp.dp_bc[2] = ga.ga_dp.dp_bc[3];
-	ga.ga_dp.dp_bc[3] = ga.ga_dp.dp_bc[4];
-	ga.ga_dp.dp_bc[4] = ga.ga_dp.dp_bc[5];
-	ga.ga_dp.dp_bc[5] = ga.ga_dp.dp_mod;
-	ga.ga_dp.dp_mod = 0;
+	if (!strcmp(parent->dv_xname, "mainbus0")) {
+		ga.ga_dp.dp_bc[0] = ga.ga_dp.dp_bc[1];
+		ga.ga_dp.dp_bc[1] = ga.ga_dp.dp_bc[2];
+		ga.ga_dp.dp_bc[2] = ga.ga_dp.dp_bc[3];
+		ga.ga_dp.dp_bc[3] = ga.ga_dp.dp_bc[4];
+		ga.ga_dp.dp_bc[4] = ga.ga_dp.dp_bc[5];
+		ga.ga_dp.dp_bc[5] = ga.ga_dp.dp_mod;
+		ga.ga_dp.dp_mod = 0;
+	}
 
 	ga.ga_name = "gsc";
 	ga.ga_hpamask = WAX_IOMASK;

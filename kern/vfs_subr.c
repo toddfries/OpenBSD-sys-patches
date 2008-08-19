@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.103 2004/08/04 20:36:27 art Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.109.2.1 2005/11/21 23:22:12 brad Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -84,13 +84,13 @@ int suid_clear = 1;		/* 1 => clear SUID / SGID on owner change */
 #define	bufinsvn(bp, dp)	LIST_INSERT_HEAD(dp, bp, b_vnbufs)
 #define	bufremvn(bp) {							\
 	LIST_REMOVE(bp, b_vnbufs);					\
-	(bp)->b_vnbufs.le_next = NOLIST;				\
+	LIST_NEXT(bp, b_vnbufs) = NOLIST;				\
 }
 
-struct freelst vnode_hold_list;   /* list of vnodes referencing buffers */
-struct freelst vnode_free_list;   /* vnode free list */
+struct freelst vnode_hold_list;	/* list of vnodes referencing buffers */
+struct freelst vnode_free_list;	/* vnode free list */
 
-struct mntlist mountlist;			/* mounted filesystem list */
+struct mntlist mountlist;	/* mounted filesystem list */
 struct simplelock mountlist_slock;
 static struct simplelock mntid_slock;
 struct simplelock mntvnode_slock;
@@ -152,7 +152,6 @@ vntblinit()
  *  - no flags means that we should sleep on the mountpoint and then
  *     fail.
  */
-
 int
 vfs_busy(struct mount *mp, int flags, struct simplelock *interlkp,
     struct proc *p)
@@ -205,7 +204,6 @@ vfs_isbusy(struct mount *mp)
  *
  * Devname is usually updated by mount(8) after booting.
  */
-
 int
 vfs_rootmountalloc(fstypename, devname, mpp)
 	char *fstypename;
@@ -244,7 +242,7 @@ vfs_rootmountalloc(fstypename, devname, mpp)
  * has not been preselected, walk through the list of known filesystems
  * trying those that have mountroot routines, and try them until one
  * works or we have tried them all.
-  */
+ */
 int
 vfs_mountroot()
 {
@@ -481,10 +479,10 @@ insmntque(vp, mp)
 	register struct mount *mp;
 {
 	simple_lock(&mntvnode_slock);
+
 	/*
 	 * Delete from old mount point vnode list, if on one.
 	 */
-
 	if (vp->v_mount != NULL)
 		LIST_REMOVE(vp, v_mntvnodes);
 	/*
@@ -492,6 +490,7 @@ insmntque(vp, mp)
 	 */
 	if ((vp->v_mount = mp) != NULL)
 		LIST_INSERT_HEAD(&mp->mnt_vnodelist, vp, v_mntvnodes);
+
 	simple_unlock(&mntvnode_slock);
 }
 
@@ -662,8 +661,7 @@ vget(vp, flags, p)
 	int flags;
 	struct proc *p;
 {
-	int error;
-	int s;
+	int error, s, onfreelist;
 
 	/*
 	 * If the vnode is in the process of being cleaned out for
@@ -687,8 +685,8 @@ vget(vp, flags, p)
 		return (ENOENT);
  	}
 
-	if (vp->v_usecount == 0 &&
-	    (vp->v_bioflag & VBIOONFREELIST)) {
+	onfreelist = vp->v_bioflag & VBIOONFREELIST;
+	if (vp->v_usecount == 0 && onfreelist) {
 		s = splbio();
 		simple_lock(&vnode_free_list_slock);
 		if (vp->v_holdcnt > 0)
@@ -699,18 +697,21 @@ vget(vp, flags, p)
 		vp->v_bioflag &= ~VBIOONFREELIST;
 		splx(s);
 	}
+
  	vp->v_usecount++;
 	if (flags & LK_TYPE_MASK) {
 		if ((error = vn_lock(vp, flags, p)) != 0) {
 			vp->v_usecount--;
-			if (vp->v_usecount == 0)
+			if (vp->v_usecount == 0 && onfreelist)
 				vputonfreelist(vp);
 
 			simple_unlock(&vp->v_interlock);
 		}
 		return (error);
 	}
+
 	simple_unlock(&vp->v_interlock);
+
 	return (0);
 }
 
@@ -797,11 +798,16 @@ vput(vp)
 		panic("vput: v_writecount != 0");
 	}
 #endif
-	vputonfreelist(vp);
-
 	simple_unlock(&vp->v_interlock);
 
 	VOP_INACTIVE(vp, p);
+
+	simple_lock(&vp->v_interlock);
+
+	if (vp->v_usecount == 0 && !(vp->v_bioflag & VBIOONFREELIST))
+		vputonfreelist(vp);
+
+	simple_unlock(&vp->v_interlock);
 }
 
 /*
@@ -837,10 +843,19 @@ vrele(vp)
 		panic("vrele: v_writecount != 0");
 	}
 #endif
-	vputonfreelist(vp);
+	if (vn_lock(vp, LK_EXCLUSIVE|LK_INTERLOCK, p)) {
+		vprint("vrele: cannot lock", vp);
+		return;
+	}
 
-	if (vn_lock(vp, LK_EXCLUSIVE|LK_INTERLOCK, p) == 0)
-		VOP_INACTIVE(vp, p);
+	VOP_INACTIVE(vp, p);
+
+	simple_lock(&vp->v_interlock);
+
+	if (vp->v_usecount == 0 && !(vp->v_bioflag & VBIOONFREELIST))
+		vputonfreelist(vp);
+
+	simple_unlock(&vp->v_interlock);
 }
 
 void vhold(struct vnode *vp);
@@ -890,10 +905,10 @@ vfs_mount_foreach_vnode(struct mount *mp,
 
 	simple_lock(&mntvnode_slock);
 loop:
-	for (vp = mp->mnt_vnodelist.lh_first; vp; vp = nvp) {
+	for (vp = LIST_FIRST(&mp->mnt_vnodelist); vp != NULL; vp = nvp) {
 		if (vp->v_mount != mp)
 			goto loop;
-		nvp = vp->v_mntvnodes.le_next;
+		nvp = LIST_NEXT(vp, v_mntvnodes);
 		simple_lock(&vp->v_interlock);		
 		simple_unlock(&mntvnode_slock);
 
@@ -1030,7 +1045,7 @@ vclean(vp, flags, p)
 	VOP_LOCK(vp, LK_DRAIN | LK_INTERLOCK, p);
 
 	/*
-	 * clean out any VM data associated with the vnode.
+	 * Clean out any VM data associated with the vnode.
 	 */
 	uvm_vnp_terminate(vp);
 	/*
@@ -1091,8 +1106,6 @@ vclean(vp, flags, p)
 		wakeup(vp);
 	}
 }
-
-
 
 /*
  * Recycle an unused vnode to the front of the free list.
@@ -1364,8 +1377,7 @@ printlockedvnodes()
 			nmp = CIRCLEQ_NEXT(mp, mnt_list);
 			continue;
 		}
-		for (vp = mp->mnt_vnodelist.lh_first; vp;
-		    vp = vp->v_mntvnodes.le_next) {
+		LIST_FOREACH(vp, &mp->mnt_vnodelist, v_mntvnodes) {
 			if (VOP_ISLOCKED(vp))
 				vprint((char *)0, vp);
 		}
@@ -1422,7 +1434,6 @@ vfs_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	return (EOPNOTSUPP);
 }
 
-
 int kinfo_vdebug = 1;
 int kinfo_vgetfailed;
 #define KINFO_VNODESLOP	10
@@ -1458,7 +1469,7 @@ sysctl_vnode(where, sizep, p)
 		}
 		savebp = bp;
 again:
-		for (vp = mp->mnt_vnodelist.lh_first; vp != NULL;
+		for (vp = LIST_FIRST(&mp->mnt_vnodelist); vp != NULL;
 		    vp = nvp) {
 			/*
 			 * Check that the vp is still associated with
@@ -1472,7 +1483,7 @@ again:
 				bp = savebp;
 				goto again;
 			}
-			nvp = vp->v_mntvnodes.le_next;
+			nvp = LIST_NEXT(vp, v_mntvnodes);
 			if (bp + sizeof(struct e_vnode) > ewhere) {
 				simple_unlock(&mntvnode_slock);
 				*sizep = bp - where;
@@ -1997,13 +2008,13 @@ vinvalbuf(vp, flags, cred, p, slpflag, slptimeo)
 	if (flags & V_SAVE) {
 		s = splbio();
 		vwaitforio(vp, 0, "vinvalbuf", 0);
-		if (vp->v_dirtyblkhd.lh_first != NULL) {
+		if (!LIST_EMPTY(&vp->v_dirtyblkhd)) {
 			splx(s);
 			if ((error = VOP_FSYNC(vp, cred, MNT_WAIT, p)) != 0)
 				return (error);
 			s = splbio();
 			if (vp->v_numoutput > 0 ||
-			    vp->v_dirtyblkhd.lh_first != NULL)
+			    !LIST_EMPTY(&vp->v_dirtyblkhd))
 				panic("vinvalbuf: dirty bufs");
 		}
 		splx(s);
@@ -2011,19 +2022,20 @@ vinvalbuf(vp, flags, cred, p, slpflag, slptimeo)
 loop:
 	s = splbio();
 	for (;;) {
-		if ((blist = vp->v_cleanblkhd.lh_first) &&
+		if ((blist = LIST_FIRST(&vp->v_cleanblkhd)) &&
 		    (flags & V_SAVEMETA))
 			while (blist && blist->b_lblkno < 0)
-				blist = blist->b_vnbufs.le_next;
-		if (!blist && (blist = vp->v_dirtyblkhd.lh_first) &&
+				blist = LIST_NEXT(blist, b_vnbufs);
+		if (blist == NULL &&
+		    (blist = LIST_FIRST(&vp->v_dirtyblkhd)) &&
 		    (flags & V_SAVEMETA))
 			while (blist && blist->b_lblkno < 0)
-				blist = blist->b_vnbufs.le_next;
+				blist = LIST_NEXT(blist, b_vnbufs);
 		if (!blist)
 			break;
 
 		for (bp = blist; bp; bp = nbp) {
-			nbp = bp->b_vnbufs.le_next;
+			nbp = LIST_NEXT(bp, b_vnbufs);
 			if (flags & V_SAVEMETA && bp->b_lblkno < 0)
 				continue;
 			if (bp->b_flags & B_BUSY) {
@@ -2053,7 +2065,7 @@ loop:
 		}
 	}
 	if (!(flags & V_SAVEMETA) &&
-	    (vp->v_dirtyblkhd.lh_first || vp->v_cleanblkhd.lh_first))
+	    (!LIST_EMPTY(&vp->v_dirtyblkhd) || !LIST_EMPTY(&vp->v_cleanblkhd)))
 		panic("vinvalbuf: flush failed");
 	splx(s);
 	return (0);
@@ -2069,8 +2081,9 @@ vflushbuf(vp, sync)
 
 loop:
 	s = splbio();
-	for (bp = vp->v_dirtyblkhd.lh_first; bp; bp = nbp) {
-		nbp = bp->b_vnbufs.le_next;
+	for (bp = LIST_FIRST(&vp->v_dirtyblkhd);
+	    bp != LIST_END(&vp->v_dirtyblkhd); bp = nbp) {
+		nbp = LIST_NEXT(bp, b_vnbufs);
 		if ((bp->b_flags & B_BUSY))
 			continue;
 		if ((bp->b_flags & B_DELWRI) == 0)
@@ -2093,7 +2106,7 @@ loop:
 		return;
 	}
 	vwaitforio(vp, 0, "vflushbuf", 0);
-	if (vp->v_dirtyblkhd.lh_first != NULL) {
+	if (!LIST_EMPTY(&vp->v_dirtyblkhd)) {
 		splx(s);
 		vprint("vflushbuf: dirty", vp);
 		goto loop;
@@ -2146,7 +2159,7 @@ brelvp(bp)
 	/*
 	 * Delete from old vnode list, if on one.
 	 */
-	if (bp->b_vnbufs.le_next != NOLIST)
+	if (LIST_NEXT(bp, b_vnbufs) != NOLIST)
 		bufremvn(bp);
 	if ((vp->v_bioflag & VBIOONSYNCLIST) &&
 	    LIST_FIRST(&vp->v_dirtyblkhd) == NULL) {
@@ -2226,8 +2239,9 @@ reassignbuf(bp)
 	/*
 	 * Delete from old vnode list, if on one.
 	 */
-	if (bp->b_vnbufs.le_next != NOLIST)
+	if (LIST_NEXT(bp, b_vnbufs) != NOLIST)
 		bufremvn(bp);
+
 	/*
 	 * If dirty, put on list of dirty buffers;
 	 * otherwise insert onto list of clean buffers.

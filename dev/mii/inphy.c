@@ -1,4 +1,4 @@
-/*	$OpenBSD: inphy.c,v 1.8 2002/03/14 01:26:57 millert Exp $	*/
+/*	$OpenBSD: inphy.c,v 1.13 2005/02/19 06:00:04 brad Exp $	*/
 /*	$NetBSD: inphy.c,v 1.18 2000/02/02 23:34:56 thorpej Exp $	*/
 
 /*-
@@ -76,7 +76,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -104,6 +103,22 @@ struct cfdriver inphy_cd = {
 int	inphy_service(struct mii_softc *, struct mii_data *, int);
 void	inphy_status(struct mii_softc *);
 
+const struct mii_phy_funcs inphy_funcs = {
+	inphy_service, inphy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc inphys[] = {
+	{ MII_OUI_INTEL,		MII_MODEL_INTEL_I82555,
+	  MII_STR_INTEL_I82555 },
+	{ MII_OUI_INTEL,		MII_MODEL_INTEL_I82562EM,
+	  MII_STR_INTEL_I82562EM },
+	{ MII_OUI_INTEL,		MII_MODEL_INTEL_I82562ET,
+	  MII_STR_INTEL_I82562ET },
+
+	{ 0,			0,
+	  NULL },
+};
+
 int
 inphymatch(parent, match, aux)
 	struct device *parent;
@@ -112,14 +127,8 @@ inphymatch(parent, match, aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_INTEL) {
-		switch (MII_MODEL(ma->mii_id2)) {
-		case MII_MODEL_INTEL_I82555:
-		case MII_MODEL_INTEL_I82562EM:
-		case MII_MODEL_INTEL_I82562ET:
-			return (10);
-		}
-	}
+	if (mii_phy_match(ma, inphys) != NULL)
+		return (10);
 
 	return (0);
 }
@@ -132,32 +141,18 @@ inphyattach(parent, self, aux)
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
-	char *mstr;
+	const struct mii_phydesc *mpd;
 
-	switch (MII_MODEL(ma->mii_id2)) {
-	case MII_MODEL_INTEL_I82555:
-		mstr = MII_STR_INTEL_I82555;
-		break;
-	case MII_MODEL_INTEL_I82562EM:
-		mstr = MII_STR_INTEL_I82562EM;
-		break;
-	case MII_MODEL_INTEL_I82562ET:
-		mstr = MII_STR_INTEL_I82562ET;
-		break;
-	default:
-		mstr = "unknown inphy";
-		break;
-	}
-	printf(": %s, rev. %d\n", mstr, MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, inphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = inphy_service;
-	sc->mii_status = inphy_status;
+	sc->mii_funcs = &inphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;

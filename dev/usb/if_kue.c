@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.26 2004/07/08 22:18:44 deraadt Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.35 2005/01/15 03:53:36 jsg Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -132,12 +132,7 @@
 #include <dev/usb/usbdevs.h>
 
 #include <dev/usb/if_kuereg.h>
-
-#if defined(__OpenBSD__)
-#include <dev/microcode/kue/kue_fw.h>
-#else
-#include <dev/usb/kue_fw.h>
-#endif
+#include <dev/usb/if_kuevar.h>
 
 #ifdef KUE_DEBUG
 #define DPRINTF(x)	do { if (kuedebug) logprintf x; } while (0)
@@ -182,6 +177,8 @@ Static const struct usb_devno kue_devs[] = {
 	{ USB_VENDOR_PORTGEAR, USB_PRODUCT_PORTGEAR_EA9 },
 	{ USB_VENDOR_PORTSMITH, USB_PRODUCT_PORTSMITH_EEA },
 	{ USB_VENDOR_SHARK, USB_PRODUCT_SHARK_PA },
+	{ USB_VENDOR_SILICOM, USB_PRODUCT_SILICOM_U2E },
+	{ USB_VENDOR_SILICOM, USB_PRODUCT_SILICOM_GPE },
 	{ USB_VENDOR_SMC, USB_PRODUCT_SMC_2102USB },
 };
 #define kue_lookup(v, p) (usb_lookup(kue_devs, v, p))
@@ -208,6 +205,7 @@ Static usbd_status kue_ctl(struct kue_softc *, int, u_int8_t,
 			   u_int16_t, void *, u_int32_t);
 Static usbd_status kue_setword(struct kue_softc *, u_int8_t, u_int16_t);
 Static int kue_load_fw(struct kue_softc *);
+void kue_attachhook(void *);
 
 Static usbd_status
 kue_setword(struct kue_softc *sc, u_int8_t breq, u_int16_t word)
@@ -252,6 +250,9 @@ kue_load_fw(struct kue_softc *sc)
 {
 	usb_device_descriptor_t dd;
 	usbd_status		err;
+	struct kue_firmware	*fw;
+	u_char			*buf;
+	size_t			buflen;
 
 	DPRINTFN(1,("%s: %s: enter\n", USBDEVNAME(sc->kue_dev), __func__));
 
@@ -271,11 +272,19 @@ kue_load_fw(struct kue_softc *sc)
 	 */
 	if (usbd_get_device_desc(sc->kue_udev, &dd))
 		return (EIO);
-	if (UGETW(dd.bcdDevice) == KUE_WARM_REV) {
+	if (UGETW(dd.bcdDevice) >= KUE_WARM_REV) {
 		printf("%s: warm boot, no firmware download\n",
 		       USBDEVNAME(sc->kue_dev));
 		return (0);
 	}
+
+	err = loadfirmware("kue", &buf, &buflen);
+	if (err) {
+		printf("%s: failed loadfirmware of file %s: errno %d\n",
+		    USBDEVNAME(sc->kue_dev), "kue", err);
+		return (err);
+	}
+	fw = (struct kue_firmware *)buf;
 
 	printf("%s: cold boot, downloading firmware\n",
 	       USBDEVNAME(sc->kue_dev));
@@ -284,34 +293,39 @@ kue_load_fw(struct kue_softc *sc)
 	DPRINTFN(1,("%s: kue_load_fw: download code_seg\n",
 		    USBDEVNAME(sc->kue_dev)));
 	err = kue_ctl(sc, KUE_CTL_WRITE, KUE_CMD_SEND_SCAN,
-	    0, (void *)kue_code_seg, sizeof(kue_code_seg));
+	    0, (void *)&fw->data[0], fw->codeseglen);
 	if (err) {
 		printf("%s: failed to load code segment: %s\n",
 		    USBDEVNAME(sc->kue_dev), usbd_errstr(err));
-			return (EIO);
+		free(buf, M_DEVBUF);
+		return (EIO);
 	}
 
 	/* Load fixup segment */
 	DPRINTFN(1,("%s: kue_load_fw: download fix_seg\n",
 		    USBDEVNAME(sc->kue_dev)));
 	err = kue_ctl(sc, KUE_CTL_WRITE, KUE_CMD_SEND_SCAN,
-	    0, (void *)kue_fix_seg, sizeof(kue_fix_seg));
+	    0, (void *)&fw->data[fw->codeseglen], fw->fixseglen);
 	if (err) {
 		printf("%s: failed to load fixup segment: %s\n",
 		    USBDEVNAME(sc->kue_dev), usbd_errstr(err));
-			return (EIO);
+		free(buf, M_DEVBUF);
+		return (EIO);
 	}
 
 	/* Send trigger command. */
 	DPRINTFN(1,("%s: kue_load_fw: download trig_seg\n",
 		    USBDEVNAME(sc->kue_dev)));
 	err = kue_ctl(sc, KUE_CTL_WRITE, KUE_CMD_SEND_SCAN,
-	    0, (void *)kue_trig_seg, sizeof(kue_trig_seg));
+	    0, (void *)&fw->data[fw->codeseglen + fw->fixseglen],
+	    fw->trigseglen);
 	if (err) {
 		printf("%s: failed to load trigger segment: %s\n",
 		    USBDEVNAME(sc->kue_dev), usbd_errstr(err));
-			return (EIO);
+		free(buf, M_DEVBUF);
+		return (EIO);
 	}
+	free(buf, M_DEVBUF);
 
 	usbd_delay_ms(sc->kue_udev, 10);
 
@@ -415,39 +429,18 @@ USB_MATCH(kue)
 		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
-/*
- * Attach the interface. Allocate softc structures, do
- * setup and ethernet/BPF attach.
- */
-USB_ATTACH(kue)
+void
+kue_attachhook(void *xsc)
 {
-	USB_ATTACH_START(kue, sc, uaa);
-	char			devinfo[1024];
+	struct kue_softc *sc = xsc;
 	int			s;
 	struct ifnet		*ifp;
-	usbd_device_handle	dev = uaa->device;
+	usbd_device_handle	dev = sc->kue_udev;
 	usbd_interface_handle	iface;
 	usbd_status		err;
 	usb_interface_descriptor_t	*id;
 	usb_endpoint_descriptor_t	*ed;
 	int			i;
-
-	DPRINTFN(5,(" : kue_attach: sc=%p, dev=%p", sc, dev));
-
-	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->kue_dev), devinfo);
-
-	err = usbd_set_config_no(dev, KUE_CONFIG_NO, 1);
-	if (err) {
-		printf("%s: setting config no failed\n",
-		    USBDEVNAME(sc->kue_dev));
-		USB_ATTACH_ERROR_RETURN;
-	}
-
-	sc->kue_udev = dev;
-	sc->kue_product = uaa->product;
-	sc->kue_vendor = uaa->vendor;
 
 	/* Load the firmware into the NIC. */
 	if (kue_load_fw(sc)) {
@@ -524,12 +517,11 @@ USB_ATTACH(kue)
 	/* Initialize interface info.*/
 	ifp = GET_IFP(sc);
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = kue_ioctl;
 	ifp->if_start = kue_start;
 	ifp->if_watchdog = kue_watchdog;
-	strncpy(ifp->if_xname, USBDEVNAME(sc->kue_dev), IFNAMSIZ);
+	strlcpy(ifp->if_xname, USBDEVNAME(sc->kue_dev), IFNAMSIZ);
 
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -543,6 +535,41 @@ USB_ATTACH(kue)
 
 	sc->kue_attached = 1;
 	splx(s);
+
+}
+
+/*
+ * Attach the interface. Allocate softc structures, do
+ * setup and ethernet/BPF attach.
+ */
+USB_ATTACH(kue)
+{
+	USB_ATTACH_START(kue, sc, uaa);
+	char			devinfo[1024];
+	usbd_device_handle	dev = uaa->device;
+	usbd_status		err;
+
+	DPRINTFN(5,(" : kue_attach: sc=%p, dev=%p", sc, dev));
+
+	usbd_devinfo(dev, 0, devinfo, sizeof devinfo);
+	USB_ATTACH_SETUP;
+	printf("%s: %s\n", USBDEVNAME(sc->kue_dev), devinfo);
+
+	err = usbd_set_config_no(dev, KUE_CONFIG_NO, 1);
+	if (err) {
+		printf("%s: setting config no failed\n",
+		    USBDEVNAME(sc->kue_dev));
+		USB_ATTACH_ERROR_RETURN;
+	}
+
+	sc->kue_udev = dev;
+	sc->kue_product = uaa->product;
+	sc->kue_vendor = uaa->vendor;
+
+	if (rootvp == NULL)
+		mountroothook_establish(kue_attachhook, sc);
+	else
+		kue_attachhook(sc);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->kue_udev,
 			   USBDEV(sc->kue_dev));
@@ -1151,12 +1178,14 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = (command == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &sc->arpcom) :
 		    ether_delmulti(ifr, &sc->arpcom);
+
 		if (error == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			kue_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				kue_setmulti(sc);
 			error = 0;
 		}
 		break;

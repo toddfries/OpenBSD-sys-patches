@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.4 2004/09/09 22:21:41 pefo Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.8 2004/11/28 01:36:39 mickey Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.5 1994/10/26 21:10:10 cgd Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
 #define	MAXTSIZ		(64*1024*1024)		/* max text size */
 #endif
 #ifndef DFLDSIZ
-#define	DFLDSIZ		(64*1024*1024)		/* initial data size limit */
+#define	DFLDSIZ		(128*1024*1024)		/* initial data size limit */
 #endif
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
@@ -90,17 +90,6 @@
 #define SHMMAXPGS	8192		/* 8mb */
 #endif
 
-/*
- * The time for a process to be blocked before being very swappable.
- * This is a number of seconds which the system takes as being a non-trivial
- * amount of real time.  You probably shouldn't change this;
- * it is used in subtle ways (fractions and multiples of it are, that is, like
- * half of a ``long time'', almost a long time, etc.)
- * It is related to human patience and other factors which don't really
- * change over time.
- */
-#define	MAXSLP		20
-
 #define	VM_PHYSSEG_MAX	8	/* Max number of physical memory segments */
 #define VM_PHYSSEG_STRAT VM_PSTRAT_BSEARCH
 #define VM_PHYSSEG_NOADD
@@ -123,19 +112,38 @@
 #define	VM_FREELIST_DEFAULT	0
 
 /* Kernel page table size is variable. */
-vaddr_t virtual_end;
+extern vaddr_t virtual_end;
 #define VM_MAX_KERNEL_ADDRESS	virtual_end
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
 
+#if defined(_KERNEL) && !defined(_LOCORE)
 /*
- * pmap-specific data stored in the vm_physmem[] array.
+ * pmap-specific data
  */
-#define __HAVE_PMAP_PHYSSEG
-struct pmap_physseg {
-	struct pv_entry *pvent;		/* pv list of this seg */
-	char *attrs;
+
+/* XXX - belongs in pmap.h, but put here because of ordering issues */
+typedef struct pv_entry {
+	struct pv_entry	*pv_next;	/* next pv_entry */
+	struct pmap	*pv_pmap;	/* pmap where mapping lies */
+	vaddr_t		pv_va;		/* virtual address for mapping */
+	int		pv_flags;	/* Some flags for the mapping */
+} *pv_entry_t;
+
+#define __HAVE_VM_PAGE_MD
+struct vm_page_md {
+	struct pv_entry pvent;		/* pv list of this seg */
 };
+
+#define	VM_MDPAGE_INIT(pg) \
+	do { \
+		(pg)->mdpage.pvent.pv_next = NULL; \
+		(pg)->mdpage.pvent.pv_pmap = NULL; \
+		(pg)->mdpage.pvent.pv_va = 0; \
+		(pg)->mdpage.pvent.pv_flags = 0; \
+	} while (0)
+
+#endif	/* _KERNEL && !_LOCORE */
 
 #endif /* !_MIPS_VMPARAM_H_ */

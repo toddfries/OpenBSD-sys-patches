@@ -1,4 +1,4 @@
-/* $OpenBSD: vga.c,v 1.33 2004/08/06 13:25:30 pefo Exp $ */
+/* $OpenBSD: vga.c,v 1.38 2005/01/31 06:41:27 miod Exp $ */
 /* $NetBSD: vga.c,v 1.28.2.1 2000/06/30 16:27:47 simonb Exp $ */
 
 /*
@@ -599,23 +599,26 @@ vga_ioctl(v, cmd, data, flag, p)
 	case WSDISPLAYIO_GTYPE:
 		*(int *)data = vc->vc_type;
 		/* XXX should get detailed hardware information here */
-		return 0;
+		break;
+
+	case WSDISPLAYIO_GVIDEO:
+	case WSDISPLAYIO_SVIDEO:
+		break;
 
 	case WSDISPLAYIO_GINFO:
 	case WSDISPLAYIO_GETCMAP:
 	case WSDISPLAYIO_PUTCMAP:
-	case WSDISPLAYIO_GVIDEO:
-	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:
 	case WSDISPLAYIO_GCURSOR:
 	case WSDISPLAYIO_SCURSOR:
+	default:
 		/* NONE of these operations are by the generic VGA driver. */
 		return ENOTTY;
 	}
 
-	return -1;
+	return (0);
 }
 
 paddr_t
@@ -649,7 +652,7 @@ vga_alloc_screen(v, type, cookiep, curxp, curyp, defattrp)
 		 * for the first one too.
 		 * XXX We could be more clever and use video RAM.
 		 */
-		vc->screens.lh_first->pcs.mem =
+		LIST_FIRST(&vc->screens)->pcs.mem =
 		  malloc(type->ncols * type->nrows * 2, M_DEVBUF, M_WAITOK);
 	}
 
@@ -682,13 +685,25 @@ vga_free_screen(v, cookie)
 	struct vga_config *vc = vs->cfg;
 
 	LIST_REMOVE(vs, next);
-	if (vs != &vga_console_screen)
+	vc->nscreens--;
+	if (vs != &vga_console_screen) {
+		/*
+		 * deallocating the one but last screen
+		 * removes backing store for the last one
+		 */
+		if (vc->nscreens == 1)
+			free(LIST_FIRST(&vc->screens)->pcs.mem, M_DEVBUF);
+
+		/* Last screen has no backing store */
+		if (vc->nscreens != 0)
+			free(vs->pcs.mem, M_DEVBUF);
+
 		free(vs, M_DEVBUF);
-	else
+	} else
 		panic("vga_free_screen: console");
 
 	if (vc->active == vs)
-		vc->active = 0;
+		vc->active = NULL;
 }
 
 void
@@ -856,9 +871,10 @@ vga_load_font(v, cookie, data)
 	if (slot >= 8)
 		return (ENOSPC);
 
-	if (!vc->vc_fonts[slot])
-		f = malloc(sizeof(struct vgafont), M_DEVBUF, M_WAITOK);
-	if (!f)
+	if (vc->vc_fonts[slot] != NULL)
+		return (EEXIST);
+	f = malloc(sizeof(struct vgafont), M_DEVBUF, M_WAITOK);
+	if (f == NULL)
 		return (ENOMEM);
 	strlcpy(f->name, data->name, sizeof(f->name));
 	f->height = data->fontheight;

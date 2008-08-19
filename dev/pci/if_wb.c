@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.23 2004/06/06 17:56:37 mcbride Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.27 2005/01/15 05:24:11 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -379,9 +379,9 @@ int wb_mii_readreg(sc, frame)
 	/* Check for ack */
 	SIO_CLR(WB_SIO_MII_CLK);
 	DELAY(1);
+	ack = CSR_READ_4(sc, WB_SIO) & WB_SIO_MII_DATAOUT;
 	SIO_SET(WB_SIO_MII_CLK);
 	DELAY(1);
-	ack = CSR_READ_4(sc, WB_SIO) & WB_SIO_MII_DATAOUT;
 	SIO_CLR(WB_SIO_MII_CLK);
 	DELAY(1);
 	SIO_SET(WB_SIO_MII_CLK);
@@ -856,10 +856,8 @@ wb_attach(parent, self, aux)
 	bzero(sc->wb_ldata, sizeof(struct wb_list_data));
 
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = wb_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = wb_start;
 	ifp->if_watchdog = wb_watchdog;
 	ifp->if_baudrate = 10000000;
@@ -1008,7 +1006,7 @@ wb_newbuf(sc, c, m)
 
 	c->wb_mbuf = m_new;
 	c->wb_ptr->wb_data = vtophys(mtod(m_new, caddr_t));
-	c->wb_ptr->wb_ctl = WB_RXCTL_RLINK | 1536;
+	c->wb_ptr->wb_ctl = WB_RXCTL_RLINK | ETHER_MAX_DIX_LEN;
 	c->wb_ptr->wb_status = WB_RXSTAT;
 
 	return(0);
@@ -1040,7 +1038,7 @@ void wb_rxeof(sc)
 
 		if ((rxstat & WB_RXSTAT_MIIERR) ||
 		    (WB_RXBYTES(cur_rx->wb_ptr->wb_status) < WB_MIN_FRAMELEN) ||
-		    (WB_RXBYTES(cur_rx->wb_ptr->wb_status) > 1536) ||
+		    (WB_RXBYTES(cur_rx->wb_ptr->wb_status) > ETHER_MAX_DIX_LEN) ||
 		    !(rxstat & WB_RXSTAT_LASTFRAG) ||
 		    !(rxstat & WB_RXSTAT_RXCMP)) {
 			ifp->if_ierrors++;
@@ -1678,7 +1676,8 @@ int wb_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			wb_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				wb_setmulti(sc);
 			error = 0;
 		}
 		break;

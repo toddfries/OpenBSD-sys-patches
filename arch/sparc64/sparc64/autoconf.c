@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.34 2003/12/12 12:33:45 jmc Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.38 2005/03/15 18:46:39 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -157,20 +157,6 @@ int autoconf_debug = 0x0;
 #else
 #define DPRINTF(l, s)
 #endif
-
-/*
- * Most configuration on the SPARC is done by matching OPENPROM Forth
- * device names with our internal names.
- */
-int
-matchbyname(parent, cf, aux)
-	struct device *parent;
-	struct cfdata *cf;
-	void *aux;
-{
-	printf("%s: WARNING: matchbyname\n", cf->cf_driver->cd_name);
-	return (0);
-}
 
 /*
  * Convert hex ASCII string to a value.  Returns updated pointer.
@@ -786,8 +772,7 @@ getdisk(str, len, defpart, devp)
 #ifdef RAMDISK_HOOKS
 		printf(" %s[a-p]", fakerdrootdev.dv_xname);
 #endif
-		for (dv = alldevs.tqh_first; dv != NULL;
-		    dv = dv->dv_list.tqe_next) {        
+		TAILQ_FOREACH(dv, &alldevs, dv_list) {
 			if (dv->dv_class == DV_DISK)
 				printf(" %s[a-p]", dv->dv_xname);
 #ifdef NFSCLIENT
@@ -827,7 +812,7 @@ parsedisk(str, len, defpart, devp)
 	}
 #endif
 
-	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (dv->dv_class == DV_DISK &&
 		    strcmp(str, dv->dv_xname) == 0) {
 #ifdef RAMDISK_HOOKS
@@ -990,7 +975,7 @@ mainbus_match(parent, cf, aux)
 /*
  * Attach the mainbus.
  *
- * Our main job is to attach the CPU (the root node we got in configure())
+ * Our main job is to attach the CPU (the root node we got in cpu_configure())
  * and iterate down the list of `mainbus devices' (children of that node).
  * We also record the `node id' of the default frame buffer, if any.
  */
@@ -1336,7 +1321,7 @@ getdevunit(name, unit)
 	char *name;
 	int unit;
 {
-	struct device *dev = alldevs.tqh_first;
+	struct device *dev = TAILQ_FIRST(&alldevs);
 	char num[10], fullname[16];
 	int lunit;
 
@@ -1350,7 +1335,7 @@ getdevunit(name, unit)
 	strlcat(fullname, num, sizeof fullname);
 
 	while (strcmp(dev->dv_xname, fullname) != 0) {
-		if ((dev = dev->dv_list.tqe_next) == NULL)
+		if ((dev = TAILQ_NEXT(dev, dv_list)) == NULL)
 			return NULL;
 	}
 	return dev;
@@ -1379,6 +1364,7 @@ static struct {
 	{ "sbus",	BUSCLASS_SBUS },
 	{ "xbox",	BUSCLASS_SBUS },
 	{ "esp",	BUSCLASS_SBUS },
+	{ "isp",	BUSCLASS_SBUS },
 	{ "dma",	BUSCLASS_SBUS },
 	{ "espdma",	BUSCLASS_SBUS },
 	{ "ledma",	BUSCLASS_SBUS },

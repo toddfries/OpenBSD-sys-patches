@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.6 2004/02/27 23:45:23 deraadt Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.9 2005/01/01 03:11:02 millert Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 /*
  * Setup the system to run on the current machine.
  *
- * Configure() is called at boot time and initializes the vba 
+ * cpu_configure() is called at boot time and initializes the vba 
  * device tables and the memory controller monitoring.  Available
  * devices are determined (from possibilities mentioned in ioconf.c),
  * and the drivers are initialized.
@@ -95,7 +95,7 @@ struct device * parsedisk(char *, int, int, dev_t *);
 int	cold = 1;	/* if 1, still working on cold-start */
 struct device *booted_device;
 int booted_partition;
-dev_t bootdev = 0;
+extern dev_t bootdev;
 
 #ifdef RAMDISK_HOOKS
 static struct device fakerdrootdev = { DV_DISK, {}, NULL, 0, "rd0", NULL };
@@ -192,7 +192,7 @@ parsedisk(str, len, defpart, devp)
 	}
 #endif
 
-	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (dv->dv_class == DV_DISK &&
 		    strcmp(str, dv->dv_xname) == 0) {
 #ifdef RAMDISK_HOOKS

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rfx.c,v 1.4 2004/03/01 22:27:09 miod Exp $	*/
+/*	$OpenBSD: rfx.c,v 1.9 2005/03/13 23:05:22 miod Exp $	*/
 
 /*
  * Copyright (c) 2004, Miodrag Vallat.
@@ -118,19 +118,6 @@ struct rfx_softc {
 	int			 sc_nscreens;
 };
 
-struct wsscreen_descr rfx_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *rfx_scrlist[] = {
-	&rfx_stdscreen,
-};
-
-struct wsscreen_list rfx_screenlist = {
-	sizeof(rfx_scrlist) / sizeof(struct wsscreen_descr *),
-	    rfx_scrlist
-};
-
 int	rfx_alloc_screen(void *, const struct wsscreen_descr *, void **,
 	    int *, int *, long *);
 void	rfx_burner(void *, u_int, u_int);
@@ -216,7 +203,6 @@ rfxattach(struct device *parent, struct device *self, void *args)
 	struct confargs *ca = args;
 	const char *device = ca->ca_ra.ra_name;
 	struct rfx_config cf;
-	struct wsemuldisplaydev_attach_args waa;
 	int node, cflen, isconsole = 0;
 
 	/* skip vendor name (could be CWARE, VITec, ...) */
@@ -266,7 +252,8 @@ rfxattach(struct device *parent, struct device *self, void *args)
 #if 0	/* not yet */
 	sc->sc_ih.ih_fun = rfx_intr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB);
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB,
+	    self->dv_xname);
 #endif
 
 	/*
@@ -301,14 +288,8 @@ rfxattach(struct device *parent, struct device *self, void *args)
 	bzero(&sc->sc_cmap, sizeof(sc->sc_cmap));
 	fbwscons_setcolormap(&sc->sc_sunfb, rfx_setcolor);
 
-	rfx_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	rfx_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	rfx_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	rfx_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, &rfx_stdscreen, -1,
-		    rfx_burner);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 	}
 
 	/* enable video */
@@ -316,11 +297,7 @@ rfxattach(struct device *parent, struct device *self, void *args)
 
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
-	waa.console = isconsole;
-	waa.scrdata = &rfx_screenlist;
-	waa.accessops = &rfx_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &rfx_accessops, isconsole);
 }
 
 /*
@@ -362,6 +339,10 @@ rfx_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 		if (error != 0)
 			return (error);
 		rfx_loadcmap(sc, cm->index, cm->count);
+		break;
+
+	case WSDISPLAYIO_SVIDEO:
+	case WSDISPLAYIO_GVIDEO:
 		break;
 
 	default:
@@ -535,7 +516,7 @@ rfx_initialize(struct rfx_softc *sc, struct rfx_config *cf)
 	 * Skip copyright notice
 	 */
 	data += RFX_INIT_OFFSET / sizeof(u_int32_t);
-	cnt = RFX_INIT_SIZE - RFX_INIT_OFFSET / sizeof(u_int32_t);
+	cnt = (RFX_INIT_SIZE - RFX_INIT_OFFSET) / sizeof(u_int32_t);
 	cnt >>= 1;
 
 	/*
@@ -568,7 +549,7 @@ rfx_initialize(struct rfx_softc *sc, struct rfx_config *cf)
 	}
 
 #ifdef DEBUG
-	if (cnt == 0)
+	if (cnt != 0)
 		printf("%s: incoherent initialization data!\n");
 #endif
 }

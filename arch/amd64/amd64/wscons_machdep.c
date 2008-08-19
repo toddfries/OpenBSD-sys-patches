@@ -1,4 +1,4 @@
-/*	$OpenBSD: wscons_machdep.c,v 1.1 2004/01/28 01:39:39 mickey Exp $ */
+/*	$OpenBSD: wscons_machdep.c,v 1.3 2004/11/02 21:20:58 miod Exp $ */
 
 /*
  * Copyright (c) 2001 Aaron Campbell
@@ -71,7 +71,7 @@
 #include <dev/ic/i8042reg.h>
 #include <dev/ic/pckbcvar.h>
 #endif
-#include "pckbd.h"     /* for pckbc_machdep_cnattach */
+#include "pckbd.h"
 #include "ukbd.h"
 #if (NPCKBD > 0) || (NUKBD > 0)
 #include <dev/wscons/wskbdvar.h>
@@ -80,11 +80,7 @@
 #include <dev/usb/ukbdvar.h>
 #endif
 
-void wscnprobe(struct consdev *);
-void wscninit(struct consdev *);
-void wscnputc(dev_t, char);
-int wscngetc(dev_t);
-void wscnpollc(dev_t, int);
+cons_decl(ws);
 
 void
 wscnprobe(cp)
@@ -148,9 +144,9 @@ dokbd:
 void
 wscnputc(dev, i)
 	dev_t dev;
-	char i;
+	int i;
 {
-	wsdisplay_cnputc(dev, (int)i);
+	wsdisplay_cnputc(dev, i);
 }
 
 int

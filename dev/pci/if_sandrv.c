@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sandrv.c,v 1.5 2004/08/25 13:09:11 markus Exp $	*/
+/*	$OpenBSD: if_sandrv.c,v 1.9 2005/03/13 10:47:24 brad Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -186,8 +186,8 @@ static sdlahw_t* sdla_aft_hw_select (sdlahw_card_t *, int, int,
 static void sdla_save_hw_probe (sdlahw_t*, int);
 
 /* SDLA PCI device relative entry point */
-int	san_match	__P((struct device *, void *, void *));
-void	san_attach	__P((struct device *, struct device *, void *));
+int	san_match(struct device *, void *, void *);
+void	san_attach(struct device *, struct device *, void *);
 
 
 struct cfdriver san_cd = {
@@ -1225,8 +1225,8 @@ sdla_check_mismatch(void *phw, unsigned char media)
 	SDLA_MAGIC(hw);
 	WAN_ASSERT(hw->hwcard == NULL);
 	hwcard = hw->hwcard;
-	if (media == WANOPT_MEDIA_T1 ||
-	    media == WANOPT_MEDIA_E1) {
+	if (media == WAN_MEDIA_T1 ||
+	    media == WAN_MEDIA_E1) {
 		if (hwcard->atype != S5144_ADPTR_1_CPU_T1E1 &&
 		    hwcard->atype != S5147_ADPTR_2_CPU_T1E1 &&
 		    hwcard->atype != S5148_ADPTR_1_CPU_T1E1) {
@@ -1237,7 +1237,7 @@ sdla_check_mismatch(void *phw, unsigned char media)
 		}
 		hwcard->atype = S5144_ADPTR_1_CPU_T1E1;
 
-	}else if (media == WANOPT_MEDIA_56K) {
+	}else if (media == WAN_MEDIA_56K) {
 		if (hwcard->atype != S5145_ADPTR_1_CPU_56K) {
 			log(LOG_INFO, "%s: Error: Card type mismatch: "
 			    "User=56K Actual=%s\n", hw->devname,

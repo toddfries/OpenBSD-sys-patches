@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.59 2004/06/13 21:49:20 niklas Exp $	*/
+/*	$OpenBSD: locore.s,v 1.62 2004/12/26 22:39:58 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.73 1997/09/13 20:36:48 pk Exp $	*/
 
 /*
@@ -177,14 +177,14 @@ _C_LABEL(kgdb_stack):
 #endif
 
 /*
- * _C_LABEL(cpcb) points to the current pcb (and hence u. area).
+ * cpcb points to the current pcb (and hence u. area).
  * Initially this is the special one.
  */
 	.globl	_C_LABEL(cpcb)
 _C_LABEL(cpcb):	.word	_C_LABEL(u0)
 
 /*
- * _C_LABEL(cputyp) is the current cpu type, used to distinguish between
+ * cputyp is the current cpu type, used to distinguish between
  * the many variations of different sun4* machines. It contains
  * the value CPU_SUN4, CPU_SUN4C, or CPU_SUN4M.
  */
@@ -192,7 +192,7 @@ _C_LABEL(cpcb):	.word	_C_LABEL(u0)
 _C_LABEL(cputyp):
 	.word	1
 /*
- * _C_LABEL(cpumod) is the current cpu model, used to distinguish between variants
+ * cpumod is the current cpu model, used to distinguish between variants
  * in the Sun4 and Sun4M families. See /sys/arch/sparc/include/param.h for
  * possible values.
  */
@@ -200,7 +200,7 @@ _C_LABEL(cputyp):
 _C_LABEL(cpumod):
 	.word	1
 /*
- * _C_LABEL(mmumod) is the current mmu model, used to distinguish between the
+ * mmumod is the current mmu model, used to distinguish between the
  * various implementations of the SRMMU in the sun4m family of machines.
  * See /sys/arch/sparc/include/param.h for possible values.
  */
@@ -2354,11 +2354,7 @@ softintr_common:
 	wr	%l4, PSR_ET, %psr	! song and dance is necessary
 	std	%l0, [%sp + CCFSZ + 0]	! set up intrframe/clockframe
 	sll	%l3, 2, %l5
-	set	_C_LABEL(intrcnt), %l4	! intrcnt[intlev]++;
-	ld	[%l4 + %l5], %o0
 	std	%l2, [%sp + CCFSZ + 8]
-	inc	%o0
-	st	%o0, [%l4 + %l5]
 	set	_C_LABEL(intrhand), %l4	! %l4 = intrhand[intlev];
 	ld	[%l4 + %l5], %l4
 	b	3f
@@ -2374,7 +2370,13 @@ softintr_common:
 	bz,a	2f
 	 add	%sp, CCFSZ, %o0
 2:	jmpl	%o1, %o7		!	(void)(*ih->ih_fun)(...)
-	 ld	[%l4 + IH_NEXT], %l4	!	and ih = ih->ih_next
+	 nop
+	mov	%l4, %l3
+	ldd	[%l3 + IH_COUNT], %l4
+	inccc	%l5
+	addx	%l4, 0, %l4
+	std	%l4, [%l3 + IH_COUNT]
+	ld	[%l3 + IH_NEXT], %l4	!	and ih = ih->ih_next
 3:	tst	%l4			! while ih != NULL
 	bnz	1b
 	 nop
@@ -2428,11 +2430,7 @@ _C_LABEL(sparc_interrupt_common):
 	wr	%l4, PSR_ET, %psr	! song and dance is necessary
 	std	%l0, [%sp + CCFSZ + 0]	! set up intrframe/clockframe
 	sll	%l3, 2, %l5
-	set	_C_LABEL(intrcnt), %l4		! intrcnt[intlev]++;
-	ld	[%l4 + %l5], %o0
 	std	%l2, [%sp + CCFSZ + 8]	! set up intrframe/clockframe
-	inc	%o0
-	st	%o0, [%l4 + %l5]
 	set	_C_LABEL(intrhand), %l4	! %l4 = intrhand[intlev];
 	ld	[%l4 + %l5], %l4
 	clr	%l5			! %l5 = 0
@@ -2449,26 +2447,34 @@ _C_LABEL(sparc_interrupt_common):
 	bz,a	2f
 	 add	%sp, CCFSZ, %o0
 2:	jmpl	%o1, %o7		!	handled = (*ih->ih_fun)(...)
-	 ld	[%l4 + IH_NEXT], %l4	!	and ih = ih->ih_next
+	 nop
 	cmp	%o0, 1
 	bge	4f			!	if (handled >= 1) break
 	 or	%o0, %l5, %l5		! 	and %l5 |= handled
+	ld	[%l4 + IH_NEXT], %l4	!	and ih = ih->ih_next
 3:	tst	%l4
 	bnz	1b			! while (ih)
 	 nop
 	tst	%l5			! if (handled) break
-	bnz	4f
+	bnz	5f
 	 nop
 	call	_C_LABEL(strayintr)	!	strayintr(&intrframe)
 	 add	%sp, CCFSZ, %o0
-	/* all done: restore registers and go return */
-4:	mov	%l7, %g1
+5:	/* all done: restore registers and go return */
+	mov	%l7, %g1
 	wr	%l6, 0, %y
 	ldd	[%sp + CCFSZ + 24], %g2
 	ldd	[%sp + CCFSZ + 32], %g4
 	ldd	[%sp + CCFSZ + 40], %g6
 	b	return_from_trap
 	 wr	%l0, 0, %psr
+4:
+	mov	%l4, %l3
+	ldd	[%l3 + IH_COUNT], %l4
+	inccc	%l5
+	addx	%l4, 0, %l4
+	b	5b
+	 std	%l4, [%l3 + IH_COUNT]
 
 #ifdef notyet
 /*
@@ -6436,33 +6442,6 @@ _C_LABEL(proc0paddr):
 ! StackGhost:  added 2 symbols to ease debugging
 	.globl slowtrap
 	.globl winuf_invalid
-
-/* interrupt counters	XXX THESE BELONG ELSEWHERE (if anywhere) */
-	.globl _C_LABEL(intrcnt) ; OTYPE(_C_LABEL(intrcnt))
-	.globl _C_LABEL(eintrcnt) ; OTYPE(_C_LABEL(eintrcnt))
-	.globl _C_LABEL(intrnames) ; OTYPE(_C_LABEL(intrnames))
-	.globl _C_LABEL(eintrnames) ; OTYPE(_C_LABEL(eintrnames))
-_C_LABEL(intrnames):
-	.asciz	"spur"
-	.asciz	"lev1"
-	.asciz	"lev2"
-	.asciz	"lev3"
-	.asciz	"lev4"
-	.asciz	"lev5"
-	.asciz	"lev6"
-	.asciz	"lev7"
-	.asciz  "lev8"
-	.asciz	"lev9"
-	.asciz	"clock"
-	.asciz	"lev11"
-	.asciz	"lev12"
-	.asciz	"lev13"
-	.asciz	"prof"
-_C_LABEL(eintrnames):
-	_ALIGN
-_C_LABEL(intrcnt):
-	.skip	4*15
-_C_LABEL(eintrcnt):
 
 	.comm	_C_LABEL(nwindows), 4
 	.comm	_C_LABEL(promvec), 4

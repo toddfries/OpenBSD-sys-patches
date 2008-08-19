@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.5 2004/05/19 03:17:06 drahn Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.9 2005/03/07 02:08:45 uwe Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -62,7 +62,13 @@
 #include <arm/katelib.h>
 #include <arm/machdep.h>
 #include <machine/bootconfig.h>
+#include <machine/conf.h>
 
+#ifdef CONF_HAVE_APM
+#include "apm.h"
+#else
+#define NAPM	0
+#endif
 #include "rd.h"
 
 struct vm_map *exec_map = NULL;
@@ -254,6 +260,11 @@ cpu_startup()
 	pmap_postinit();
 
 	/*
+	 * Allow per-board specific initialization
+	 */
+	board_startup();
+
+	/*
 	 * Initialize error message buffer (at end of core).
 	 */
 
@@ -387,6 +398,10 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	size_t newlen;
 	struct proc *p;
 {
+#if NAPM > 0
+	extern int cpu_apmwarn;
+#endif
+
 	/* all sysctl names at this level are terminal */
 	if (namelen != 1)
 		return (ENOTDIR);		/* overloaded */
@@ -430,6 +445,12 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 #else
 		return (sysctl_rdint(oldp, oldlenp, newp, 0));
 #endif
+
+#if NAPM > 0
+	case CPU_APMWARN:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &cpu_apmwarn));
+#endif
+
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -520,7 +541,7 @@ SYSCTL_SETUP(sysctl_machdep_setup, "sysctl machdep subtree setup")
 }
 #endif
 
-#if 0
+#if 1
 void
 parse_mi_bootargs(args)
 	char *args;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: zx.c,v 1.2 2004/07/26 13:26:39 miod Exp $	*/
+/*	$OpenBSD: zx.c,v 1.6 2005/03/13 23:05:23 miod Exp $	*/
 /*	$NetBSD: zx.c,v 1.5 2002/10/02 16:52:46 thorpej Exp $	*/
 
 /*
@@ -129,19 +129,6 @@ struct zx_softc {
 	int	sc_nscreens;
 };
 
-struct wsscreen_descr zx_stdscreen = {
-	"std"
-};
-
-const struct wsscreen_descr *zx_scrlist[] = {
-	&zx_stdscreen
-};
-
-struct wsscreen_list zx_screenlist = {
-	sizeof(zx_scrlist) / sizeof(struct wsscreen_descr *),
-	zx_scrlist
-};
-
 int zx_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int zx_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -218,7 +205,6 @@ zx_attach(struct device *parent, struct device *self, void *args)
 	struct zx_softc *sc = (struct zx_softc *)self;
 	struct sbus_attach_args *sa = args;
 	struct rasops_info *ri;
-	struct wsemuldisplaydev_attach_args waa;
 	bus_space_tag_t bt;
 	bus_space_handle_t bh;
 	int node, isconsole = 0;
@@ -290,7 +276,7 @@ zx_attach(struct device *parent, struct device *self, void *args)
 	sc->sc_sunfb.sf_linebytes = 1 << ZX_BWIDTH;
 	sc->sc_sunfb.sf_fbsize = sc->sc_sunfb.sf_height << ZX_BWIDTH;
 
-	printf(", %d x %d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
+	printf(", %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
 
 	if (sbus_bus_map(bt, sa->sa_slot, sa->sa_offset + ZX_OFF_SS0,
 	    round_page(sc->sc_sunfb.sf_fbsize), BUS_SPACE_MAP_LINEAR,
@@ -320,15 +306,9 @@ zx_attach(struct device *parent, struct device *self, void *args)
 	ri->ri_ops.putchar = zx_putchar;
 	ri->ri_do_cursor = zx_do_cursor;
 
-	zx_stdscreen.capabilities = ri->ri_caps;
-	zx_stdscreen.nrows = ri->ri_rows;
-	zx_stdscreen.ncols = ri->ri_cols;
-	zx_stdscreen.textops = &ri->ri_ops;
-
 	if (isconsole) {
 		/* zx_reset() below will clear screen, so restart at 1st row */
-		fbwscons_console_init(&sc->sc_sunfb, &zx_stdscreen, 0,
-		    zx_burner);
+		fbwscons_console_init(&sc->sc_sunfb, 0);
 	}
 
 	/* reset cursor & frame buffer controls */
@@ -339,11 +319,7 @@ zx_attach(struct device *parent, struct device *self, void *args)
 
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
-	waa.console = isconsole;
-	waa.scrdata = &zx_screenlist;
-	waa.accessops = &zx_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &zx_accessops, isconsole);
 }
 
 int
@@ -378,6 +354,10 @@ zx_ioctl(void *dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 
 	case WSDISPLAYIO_SMODE:
 		zx_reset(sc, *(u_int *)data);
+		break;
+
+	case WSDISPLAYIO_SVIDEO:
+	case WSDISPLAYIO_GVIDEO:
 		break;
 
 	default:

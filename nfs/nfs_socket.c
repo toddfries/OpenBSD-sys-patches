@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.39 2004/07/14 18:32:34 pedro Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.41 2004/12/26 21:22:13 miod Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -238,18 +238,15 @@ nfs_connect(nmp, rep)
 		}
 		splx(s);
 	}
-	if (nmp->nm_flag & (NFSMNT_SOFT | NFSMNT_INT)) {
-		so->so_rcv.sb_timeo = (5 * hz);
+	/*
+	 * Always set receive timeout to detect server crash and reconnect.
+	 * Otherwise, we can get stuck in soreceive forever.
+	 */
+	so->so_rcv.sb_timeo = (5 * hz);
+	if (nmp->nm_flag & (NFSMNT_SOFT | NFSMNT_INT))
 		so->so_snd.sb_timeo = (5 * hz);
-	} else {
-		/*
-		 * enable receive timeout to detect server crash and
-		 * reconnect.  otherwise, we can be stuck in soreceive
-		 * forever.
-		 */
-		so->so_rcv.sb_timeo = (5 * hz);
+	else
 		so->so_snd.sb_timeo = 0;
-	}
 	if (nmp->nm_sotype == SOCK_DGRAM) {
 		sndreserve = nmp->nm_wsize + NFS_MAXPKTHDR;
 		rcvreserve = max(nmp->nm_rsize, nmp->nm_readdirsize) +
@@ -1143,8 +1140,8 @@ nfs_rephead(siz, nd, slp, err, frev, mrq, mbp, bposp)
 		    struct nfsuid *nuidp;
 		    struct timeval ktvin, ktvout;
 
-		    for (nuidp = NUIDHASH(slp, nd->nd_cr.cr_uid)->lh_first;
-		 	nuidp != NULL; nuidp = LIST_NEXT(nuidp, nu_hash)) {
+		    LIST_FOREACH(nuidp, NUIDHASH(slp, nd->nd_cr.cr_uid),
+		     nu_hash) {
 			if (nuidp->nu_cr.cr_uid == nd->nd_cr.cr_uid &&
 			    (!nd->nd_nam2 || netaddr_match(NU_NETFAM(nuidp),
 			     &nuidp->nu_haddr, nd->nd_nam2)))
@@ -1667,8 +1664,8 @@ nfs_getreq(nd, nfsd, has_header)
 			tvin.tv_sec = *tl++;
 			tvin.tv_usec = *tl;
 
-			for (nuidp = NUIDHASH(nfsd->nfsd_slp,nickuid)->lh_first;
-			    nuidp != NULL; nuidp = LIST_NEXT(nuidp, nu_hash)) {
+			LIST_FOREACH(nuidp, NUIDHASH(nfsd->nfsd_slp, nickuid),
+			    nu_hash) {
 				if (nuidp->nu_cr.cr_uid == nickuid &&
 				    (!nd->nd_nam2 ||
 				     netaddr_match(NU_NETFAM(nuidp),

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cs4231.c,v 1.21 2003/07/03 20:36:07 jason Exp $	*/
+/*	$OpenBSD: cs4231.c,v 1.24 2005/03/08 21:35:03 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -236,7 +236,8 @@ cs4231_attach(struct device *parent, struct device *self, void *aux)
 
 	if (bus_intr_establish(sa->sa_bustag, sa->sa_pri, IPL_AUDIO, 0,
 	    cs4231_intr, sc, self->dv_xname) == NULL) {
-		printf(": couldn't establish interrupt, pri %d\n", sa->sa_pri);
+		printf(": couldn't establish interrupt, pri %d\n",
+		    INTLEV(sa->sa_pri));
 		return;
 	}
 
@@ -260,8 +261,6 @@ cs4231_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_burst = burst & sbusburst;
 
 	printf("\n");
-
-	evcnt_attach(&sc->sc_dev, "intr", &sc->sc_intrcnt);
 
 	audio_attach_mi(&cs4231_sa_hw_if, sc, &sc->sc_dev);
 
@@ -1436,7 +1435,7 @@ cs4231_alloc(void *vsc, int direction, size_t size, int pool, int flags)
 
 	p = (struct cs_dma *)malloc(sizeof(struct cs_dma), pool, flags);
 	if (p == NULL)
-		goto fail;
+		return (NULL);
 
 	if (bus_dmamap_create(dmat, size, 1, size, 0,
 	    BUS_DMA_NOWAIT, &p->dmamap) != 0)
@@ -1468,6 +1467,7 @@ fail2:
 fail1:
 	bus_dmamap_destroy(dmat, p->dmamap);
 fail:
+	free(p, pool);
 	return (NULL);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgthree.c,v 1.35 2003/08/01 19:24:47 miod Exp $	*/
+/*	$OpenBSD: cgthree.c,v 1.40 2005/03/15 18:40:17 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -129,19 +129,6 @@ struct cgthree_softc {
 	u_int sc_mode;
 };
 
-struct wsscreen_descr cgthree_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *cgthree_scrlist[] = {
-	&cgthree_stdscreen,
-	/* XXX other formats? */
-};
-
-struct wsscreen_list cgthree_screenlist = {
-	sizeof(cgthree_scrlist) / sizeof(struct wsscreen_descr *), cgthree_scrlist
-};
-
 int cgthree_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int cgthree_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -156,7 +143,6 @@ int cg3_bt_getcmap(union bt_cmap *, struct wsdisplay_cmap *);
 void cgthree_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 void cgthree_burner(void *, u_int, u_int);
 void cgthree_reset(struct cgthree_softc *);
-void cgthree_updatecursor(struct rasops_info *);
 
 struct wsdisplay_accessops cgthree_accessops = {
 	cgthree_ioctl,
@@ -224,13 +210,14 @@ cgthreeattach(struct device *parent, struct device *self, void *aux)
 {
 	struct cgthree_softc *sc = (struct cgthree_softc *)self;
 	struct sbus_attach_args *sa = aux;
-	struct wsemuldisplaydev_attach_args waa;
-	int console, i;
+	int node, console, i;
+	const char *nam;
 
+	node = sa->sa_node;
 	sc->sc_bustag = sa->sa_bustag;
 	sc->sc_paddr = sbus_bus_addr(sa->sa_bustag, sa->sa_slot, sa->sa_offset);
 
-	fb_setsize(&sc->sc_sunfb, 8, 1152, 900, sa->sa_node, 0);
+	fb_setsize(&sc->sc_sunfb, 8, 1152, 900, node, 0);
 
 	if (sa->sa_nreg != 1) {
 		printf(": expected %d registers, got %d\n", 1, sa->sa_nreg);
@@ -255,7 +242,12 @@ cgthreeattach(struct device *parent, struct device *self, void *aux)
 		goto fail_vid;
 	}
 
-	console = cgthree_is_console(sa->sa_node);
+	nam = getpropstring(node, "model");
+	if (*nam == '\0')
+		nam = sa->sa_name;
+	printf(": %s", nam);
+
+	console = cgthree_is_console(node);
 
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
@@ -271,7 +263,7 @@ cgthreeattach(struct device *parent, struct device *self, void *aux)
 	    sc->sc_vid_regs);
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
 
-	printf("\n");
+	printf(", %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
 
 	/*
 	 * If the framebuffer width is under 1024x768, which is the case for
@@ -288,24 +280,14 @@ cgthreeattach(struct device *parent, struct device *self, void *aux)
 	fbwscons_init(&sc->sc_sunfb, console &&
 	    (sc->sc_sunfb.sf_width >= 1024) ? 0 : RI_CLEAR);
 
-	cgthree_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	cgthree_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	cgthree_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	cgthree_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	fbwscons_setcolormap(&sc->sc_sunfb, cgthree_setcolor);
 
 	if (console) {
-		sc->sc_sunfb.sf_ro.ri_updatecursor = cgthree_updatecursor;
-		fbwscons_console_init(&sc->sc_sunfb, &cgthree_stdscreen,
-		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0, cgthree_burner);
+		fbwscons_console_init(&sc->sc_sunfb,
+		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0);
 	}
 
-	waa.console = console;
-	waa.scrdata = &cgthree_screenlist;
-	waa.accessops = &cgthree_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &cgthree_accessops, console);
 
 	return;
 
@@ -359,6 +341,8 @@ cgthree_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:
@@ -592,15 +576,4 @@ cgthree_burner(void *vsc, u_int on, u_int flags)
 	}
 	FBC_WRITE(sc, CG3_FBC_CTRL, fbc);
 	splx(s);
-}
-
-void
-cgthree_updatecursor(struct rasops_info *ri)
-{
-	struct cgthree_softc *sc = ri->ri_hw;
-
-	if (sc->sc_sunfb.sf_crowp != NULL)
-		*sc->sc_sunfb.sf_crowp = ri->ri_crow;
-	if (sc->sc_sunfb.sf_ccolp != NULL)
-		*sc->sc_sunfb.sf_ccolp = ri->ri_ccol;
 }

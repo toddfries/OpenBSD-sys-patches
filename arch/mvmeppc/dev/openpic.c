@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.17 2004/07/14 11:37:07 miod Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.20 2004/12/24 22:50:30 miod Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -103,7 +103,7 @@ void i8259_init(void);
 int i8259_intr(void);
 void i8259_enable_irq(int, int);
 void i8259_disable_irq(int);
-static __inline void i8259_eoi(int);
+void i8259_eoi(int);
 void *i8259_intr_establish(void *, int, int, int, int (*)(void *), void *,
     char *);
 void i8259_set_irq_mask(void);
@@ -713,7 +713,7 @@ openpic_enable_irq(irq, type)
 	int irq;
 	int type;
 {
-	u_int x;
+	u_int x, isrc;
 
 #ifdef DIAGNOSTIC
 	/* skip invalid irqs */
@@ -722,23 +722,26 @@ openpic_enable_irq(irq, type)
 #endif
 	irq -= PIC_OFFSET;
 
-	while ((x = openpic_read(OPENPIC_SRC_VECTOR(irq))) & OPENPIC_ACTIVITY) {
-		x = openpic_iack(0);
+	x = openpic_read(OPENPIC_SRC_VECTOR(irq));
+
+	isrc = x & ~(OPENPIC_IMASK | OPENPIC_SENSE_LEVEL |
+	    OPENPIC_POLARITY_POSITIVE | OPENPIC_ACTIVITY);
+	if (irq == 0)
+		isrc |= OPENPIC_POLARITY_POSITIVE;
+	if (type == IST_LEVEL)
+		isrc |= OPENPIC_SENSE_LEVEL;
+	else
+		isrc |= OPENPIC_SENSE_EDGE;
+
+	/* Ack all pending interrupts if this one is pending. */
+	while (x & OPENPIC_ACTIVITY) {
+		(void)openpic_iack(0);
 		openpic_eoi(0);
+		x = openpic_read(OPENPIC_SRC_VECTOR(irq));
 	}
 
-	x &= ~(OPENPIC_IMASK|OPENPIC_SENSE_LEVEL|OPENPIC_SENSE_EDGE|
-			 OPENPIC_POLARITY_POSITIVE);
-#if 1
-	if (irq == 0) {
-		x |= OPENPIC_POLARITY_POSITIVE;
-	}
-#endif
-	if (type == IST_LEVEL)
-		x |= OPENPIC_SENSE_LEVEL;
-	else
-		x |= OPENPIC_SENSE_EDGE;
-	openpic_write(OPENPIC_SRC_VECTOR(irq), x);
+	if (x != isrc)
+		openpic_write(OPENPIC_SRC_VECTOR(irq), isrc);
 }
 
 void
@@ -818,7 +821,7 @@ i8259_enable_irq(irq, type)
 	}
 }
 
-static __inline void
+void
 i8259_eoi(int irq)
 {
 #ifdef DIAGNOSTIC
@@ -831,7 +834,14 @@ i8259_eoi(int irq)
 		outb(IO_ICU1, 0x60 | irq);
 	else {
 		outb(IO_ICU2, 0x60 | (irq - 8));
-		outb(IO_ICU1, 0x60 | IRQ_SLAVE);
+		/*
+		 * Do not ack on the master unless there are no
+		 * other interrupts pending on the slave
+		 * controller!
+		 */
+		outb(IO_ICU2, 0x0b);
+		if (inb(IO_ICU2) == 0)
+			outb(IO_ICU1, 0x60 | IRQ_SLAVE);
 	}
 }
 
@@ -897,6 +907,15 @@ i8259_intr(void)
 		 */
 		outb(IO_ICU2, 0x0c);
 		irq = (inb(IO_ICU2) & 7) + 8;
+		if (irq == 15) {
+			outb(IO_ICU2, 0x0b);
+			if ((inb(IO_ICU2) & 0x80) == 0) {
+#ifdef DIAGNOSTIC
+				printf("spurious interrupt on ICU2\n");
+#endif
+				return PIC_SPURIOUS;
+			}
+		}
 	} else if (irq == 7) {
 		/*
 		 * This may be a spurious interrupt
@@ -945,7 +964,6 @@ ext_intr_openpic()
 		}
 
 		irq = virq[realirq];
-		intrcnt[realirq]++;
 
 		/* XXX check range */
 

@@ -1,9 +1,9 @@
+#	$OpenBSD: GENERIC.MP,v 1.5 2004/10/22 22:10:32 grange Exp $
+
 include "arch/amd64/conf/GENERIC"
 
 option	MULTIPROCESSOR
 option	MPBIOS
-option	CPU
 
-cpu*		at mainbus? apid ?
-ioapic*		at mainbus? apid ?
-#aapic*		at pci? dev ? function ?
+cpu*		at mainbus?
+ioapic*		at mainbus?

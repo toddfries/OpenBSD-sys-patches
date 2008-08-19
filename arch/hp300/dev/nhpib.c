@@ -1,4 +1,4 @@
-/*	$OpenBSD: nhpib.c,v 1.12 2003/06/02 23:27:45 millert Exp $	*/
+/*	$OpenBSD: nhpib.c,v 1.15 2005/01/15 21:13:08 miod Exp $	*/
 /*	$NetBSD: nhpib.c,v 1.17 1997/05/05 21:06:41 thorpej Exp $	*/
 
 /*
@@ -83,7 +83,7 @@ void	nhpibifc(struct nhpibdevice *);
 void	nhpibreadtimo(void *);
 int	nhpibwait(struct nhpibdevice *, int);
 
-void	nhpibreset(struct hpibbus_softc *); 
+void	nhpibreset(struct hpibbus_softc *);
 int	nhpibsend(struct hpibbus_softc *, int, int, void *, int);
 int	nhpibrecv(struct hpibbus_softc *, int, int, void *, int);
 int	nhpibppoll(struct hpibbus_softc *);
@@ -108,6 +108,7 @@ struct	hpib_controller nhpib_controller = {
 
 struct nhpib_softc {
 	struct device sc_dev;		/* generic device glue */
+	struct isr sc_isr;
 	struct nhpibdevice *sc_regs;	/* device registers */
 	struct hpibbus_softc *sc_hpibbus; /* XXX */
 	struct timeout sc_read_to;	/* nhpibreadtimo timeout */
@@ -152,7 +153,7 @@ nhpibattach(parent, self, aux)
 {
 	struct nhpib_softc *sc = (struct nhpib_softc *)self;
 	struct dio_attach_args *da = aux;
-	struct hpibdev_attach_args ha; 
+	struct hpibdev_attach_args ha;
 	const char *desc;
 	int ipl, type = HPIBA;
 
@@ -176,7 +177,11 @@ nhpibattach(parent, self, aux)
 	printf(" ipl %d: %s\n", ipl, desc);
 
 	/* Establish the interrupt handler. */
-	(void) dio_intr_establish(nhpibintr, sc, ipl, IPL_BIO);
+	sc->sc_isr.isr_func = nhpibintr;
+	sc->sc_isr.isr_arg = sc;
+	sc->sc_isr.isr_ipl = ipl;
+	sc->sc_isr.isr_priority = IPL_BIO;
+	dio_intr_establish(&sc->sc_isr, self->dv_xname);
 
 	/* Initialize timeout structures */
 	timeout_set(&sc->sc_read_to, nhpibreadtimo, &sc->sc_hpibbus);
@@ -406,7 +411,7 @@ nhpibreadtimo(arg)
 		hs->sc_flags &= ~(HPIBF_DONE|HPIBF_IO|HPIBF_READ|HPIBF_TIMO);
 		dmafree(hs->sc_dq);
 
-		hq = hs->sc_queue.tqh_first;
+		hq = TAILQ_FIRST(&hs->sc_queue);
 		(hq->hq_intr)(hq->hq_softc);
 	}
 	splx(s);
@@ -462,7 +467,7 @@ nhpibintr(arg)
 	stat0 = hd->hpib_mis;
 	stat1 = hd->hpib_lis;
 
-	hq = hs->sc_queue.tqh_first;
+	hq = TAILQ_FIRST(&hs->sc_queue);
 
 	if (hs->sc_flags & HPIBF_IO) {
 		hd->hpib_mim = 0;
@@ -540,7 +545,7 @@ nhpibppwatch(arg)
 	if ((hs->sc_flags & HPIBF_PPOLL) == 0)
 		return;
 again:
-	if (nhpibppoll(hs) & (0x80 >> hs->sc_queue.tqh_first->hq_slave))
+	if (nhpibppoll(hs) & (0x80 >> TAILQ_FIRST(&hs->sc_queue)->hq_slave))
        		sc->sc_regs->hpib_mim = MIS_BO;
 	else if (cold)
 		/* timeouts not working yet */

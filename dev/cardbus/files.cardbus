@@ -1,4 +1,4 @@
-#	$OpenBSD: files.cardbus,v 1.7 2004/06/22 23:55:23 millert Exp $
+#	$OpenBSD: files.cardbus,v 1.16 2005/03/08 20:00:24 tdeval Exp $
 #	$NetBSD: files.cardbus,v 1.8 2000/01/26 06:37:24 thorpej Exp $
 #
 # files.cardbus
@@ -6,14 +6,14 @@
 
 device	cardslot: cbbus, pcmciabus
 attach	cardslot at pcmciaslot
-file	dev/cardbus/cardslot.c		cardslot	needs-flag
+file	dev/cardbus/cardslot.c			cardslot	needs-flag
 
 device	cardbus {[dev = -1], [function = -1]}
 attach	cardbus at cbbus
-file	dev/cardbus/cardbus.c		cardbus		needs-flag
-file	dev/cardbus/cardbus_map.c	cardbus
-file	dev/cardbus/cardbus_exrom.c	cardbus
-file	dev/cardbus/rbus.c		cardbus
+file	dev/cardbus/cardbus.c			cardbus		needs-flag
+file	dev/cardbus/cardbus_map.c		cardbus
+file	dev/cardbus/cardbus_exrom.c		cardbus
+file	dev/cardbus/rbus.c			cardbus
 
 # Com ports
 attach	com at cardbus with com_cardbus
@@ -38,21 +38,22 @@ attach	fxp at cardbus with fxp_cardbus
 file	dev/cardbus/if_fxp_cardbus.c		fxp_cardbus
 
 #
-# OHCI IEEE 1394 controller
-#
-attach	fwohci at cardbus with fwohci_cardbus
-file	dev/cardbus/fwohci_cardbus.c		fwohci_cardbus
-
-#
 # RealTek 8139 based CardBus cards
 #
 attach	rl at cardbus with rl_cardbus
 file	dev/cardbus/if_rl_cardbus.c		rl_cardbus
 
 #
+# Realtek 8169/8169S/8110S
 #
-#attach	com at cardbus with com_cardbus
-#file	dev/cardbus/com_cardbus.c		com_cardbus
+attach	re at cardbus with re_cardbus
+file	dev/cardbus/if_re_cardbus.c		re_cardbus
+
+#
+# Atheros AR5k
+#
+attach	ath at cardbus with ath_cardbus
+file	dev/cardbus/if_ath_cardbus.c		ath_cardbus
 
 #
 # ADMtek ADM8211
@@ -60,17 +61,28 @@ file	dev/cardbus/if_rl_cardbus.c		rl_cardbus
 attach	atw at cardbus with atw_cardbus
 file	dev/cardbus/if_atw_cardbus.c		atw_cardbus
 
+# Realtek RTL8180
 #
-# DECchip 21143 and clones.
+attach	rtw at cardbus with rtw_cardbus
+file	dev/cardbus/if_rtw_cardbus.c		rtw_cardbus
+
 #
-#attach	tlp at cardbus with tlp_cardbus
-#file	dev/cardbus/if_tlp_cardbus.c		tlp_cardbus
+# Ralink RT2500
+#
+attach	ral at cardbus with ral_cardbus
+file	dev/cardbus/if_ral_cardbus.c		ral_cardbus
+
+#
+# EHCI USB controller
+#
+attach	ehci at cardbus with ehci_cardbus
+file	dev/cardbus/ehci_cardbus.c		ehci_cardbus needs-flag
 
 #
 # OHCI USB controller
 #
-#attach	ohci at cardbus with ohci_cardbus
-#file	dev/cardbus/ohci_cardbus.c		ohci_cardbus
+attach	ohci at cardbus with ohci_cardbus
+file	dev/cardbus/ohci_cardbus.c		ohci_cardbus
 
 #
 # Adaptec ADP-1480 SCSI controller

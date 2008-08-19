@@ -1,4 +1,4 @@
-/*	$OpenBSD: ac97.c,v 1.43 2004/04/23 09:31:47 mickey Exp $	*/
+/*	$OpenBSD: ac97.c,v 1.52 2005/02/16 22:26:39 todd Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Constantine Sapuntzakis
@@ -273,7 +273,7 @@ const struct ac97_source_info {
 #define SOURCE_INFO_SIZE (sizeof(source_info)/sizeof(source_info[0]))
 
 /*
- * Check out http://www.intel.com/labs/media/audio/index.htm
+ * Check out http://www.intel.com/technology/computing/audio/index.htm
  * for information on AC-97
  */
 
@@ -295,7 +295,9 @@ int ac97_get_portnum_by_name(struct ac97_codec_if *, char *, char *,
 void ac97_restore_shadow(struct ac97_codec_if *self);
 
 void ac97_ad198x_init(struct ac97_softc *);
+void ac97_alc655_init(struct ac97_softc *);
 void ac97_cx20468_init(struct ac97_softc *);
+void ac97_cx_init(struct ac97_softc *);
 
 struct ac97_codec_if_vtbl ac97civ = {
 	ac97_mixer_get_port,
@@ -318,6 +320,8 @@ const struct ac97_codecid {
 	{ 0x48, 0xff, 0, 0,	"AD1881A" },
 	{ 0x60, 0xff, 0, 0,	"AD1885" },
 	{ 0x61, 0xff, 0, 0,	"AD1886" },
+	{ 0x63, 0xff, 0, 0,	"AD1886A" },
+	{ 0x68, 0xff, 0, 0,	"AD1888",	ac97_ad198x_init },
 	{ 0x70, 0xff, 0, 0,	"AD1981" },
 	{ 0x72, 0xff, 0, 0,	"AD1981A" },
 	{ 0x74, 0xff, 0, 0,	"AD1981B" },
@@ -326,11 +330,23 @@ const struct ac97_codecid {
 	{ 0x00,	0xfe, 1, 0,	"AK4540" },
 	{ 0x01,	0xfe, 1, 0,	"AK4540" },
 	{ 0x02,	0xff, 0, 0,	"AK4543" },
+	{ 0x05,	0xff, 0, 0,	"AK4544" },
 	{ 0x06,	0xff, 0, 0,	"AK4544A" },
 	{ 0x07,	0xff, 0, 0,	"AK4545" },
 }, ac97_av[] = {
 	{ 0x10, 0xff, 0, 0,	"ALC200" },
 	{ 0x20, 0xff, 0, 0,	"ALC650" },
+	{ 0x21, 0xff, 0, 0,	"ALC650D" },
+	{ 0x22, 0xff, 0, 0,	"ALC650E" },
+	{ 0x23, 0xff, 0, 0,	"ALC650F" },
+	{ 0x30, 0xff, 0, 0,	"ALC101" },
+	{ 0x40, 0xff, 0, 0,	"ALC202" },
+	{ 0x50, 0xff, 0, 0,	"ALC250" },
+	{ 0x52, 0xff, 0, 0,	"ALC250A?" },
+	{ 0x60, 0xff, 0, 0,	"ALC655",	ac97_alc655_init },
+	{ 0x70, 0xff, 0, 0,	"ALC203" },
+	{ 0x80, 0xff, 0, 0,	"ALC658",	ac97_alc655_init },
+	{ 0x90, 0xff, 0, 0,	"ALC850" },
 }, ac97_rl[] = {
 	{ 0x00, 0xf0, 0xf, 0,	"RL5306" },
 	{ 0x10, 0xf0, 0xf, 0,	"RL5382" },
@@ -338,6 +354,9 @@ const struct ac97_codecid {
 }, ac97_cm[] = {
 	{ 0x41,	0xff, 0, 0,	"CMI9738" },
 	{ 0x61,	0xff, 0, 0,	"CMI9739" },
+	{ 0x78,	0xff, 0, 0,	"CMI9761A" },
+	{ 0x82,	0xff, 0, 0,	"CMI9761B" },
+	{ 0x83,	0xff, 0, 0,	"CMI9761A+" },
 }, ac97_cr[] = {
 	{ 0x84,	0xff, 0, 0,	"EV1938" },
 }, ac97_cs[] = {
@@ -346,12 +365,16 @@ const struct ac97_codecid {
 	{ 0x20,	0xf8, 7, 0,	"CS4298" },
 	{ 0x28,	0xf8, 7, 0,	"CS4294" },
 	{ 0x30,	0xf8, 7, 0,	"CS4299" },
-	{ 0x40,	0xf8, 7, 0,	"CS4201" },
-	{ 0x50,	0xf8, 7, 0,	"CS4205" },
+	{ 0x48,	0xf8, 7, 0,	"CS4201" },
+	{ 0x58,	0xf8, 7, 0,	"CS4205" },
 	{ 0x60,	0xf8, 7, 0,	"CS4291" },
+	{ 0x70,	0xf8, 7, 0,	"CS4202" },
 }, ac97_cx[] = {
 	{ 0x21, 0xff, 0, 0,	"HSD11246" },
 	{ 0x28, 0xf8, 7, 0,	"CX20468",	ac97_cx20468_init },
+	{ 0x30, 0xff, 0, 0,	"CX?????",	ac97_cx_init },
+}, ac97_dt[] = {
+	{ 0x00, 0xff, 0, 0,	"DT0398" },
 }, ac97_em[] = {
 	{ 0x23, 0xff, 0, 0,	"EM28023" },
 	{ 0x28, 0xff, 0, 0,	"EM28028" },
@@ -362,15 +385,26 @@ const struct ac97_codecid {
 }, ac97_ic[] = {
 	{ 0x01, 0xff, 0, 0,	"ICE1230" },
 	{ 0x11, 0xff, 0, 0,	"ICE1232" },
+	{ 0x14, 0xff, 0, 0,	"ICE1232A" },
+	{ 0x51, 0xff, 0, 0,	"VIA VT1616" },
+	{ 0x52, 0xff, 0, 0,	"VIA VT1616i" },
+}, ac97_it[] = {
+	{ 0x20, 0xff, 0, 0,	"ITE2226E" },
+	{ 0x60, 0xff, 0, 0,	"ITE2646E" },
 }, ac97_ns[] = {
 	{ 0x00,	0xff, 0, 0,	"LM454[03568]" },
 	{ 0x31,	0xff, 0, 0,	"LM4549" },
+	{ 0x40, 0xff, 0, 0,	"LM4540" },
+	{ 0x43, 0xff, 0, 0,	"LM4543" },
+	{ 0x46, 0xff, 0, 0,	"LM4546A" },
+	{ 0x48, 0xff, 0, 0,	"LM4548A" },
+	{ 0x49, 0xff, 0, 0,	"LM4549A" },
+	{ 0x50, 0xff, 0, 0,	"LM4550" },
 }, ac97_ps[] = {
 	{ 0x01,	0xff, 0, 0,	"UCB1510" },
 	{ 0x04,	0xff, 0, 0,	"UCB1400" },
 }, ac97_sl[] = {
-	{ 0x22,	0xff, 0, 0,	"Si3036" },
-	{ 0x23,	0xff, 0, 0,	"Si3038" },
+	{ 0x20,	0xe0, 0, 0,	"Si3036/38" },
 }, ac97_st[] = {
 	{ 0x00,	0xff, 0, 0,	"STAC9700" },
 	{ 0x04,	0xff, 0, 0,	"STAC970[135]" },
@@ -378,8 +412,12 @@ const struct ac97_codecid {
 	{ 0x08,	0xff, 0, 0,	"STAC9708/11" },
 	{ 0x09,	0xff, 0, 0,	"STAC9721/23" },
 	{ 0x44,	0xff, 0, 0,	"STAC9744/45" },
+	{ 0x50,	0xff, 0, 0,	"STAC9750/51" },
 	{ 0x52,	0xff, 0, 0,	"STAC9752/53" },
 	{ 0x56,	0xff, 0, 0,	"STAC9756/57" },
+	{ 0x58,	0xff, 0, 0,	"STAC9758/59" },
+	{ 0x60,	0xff, 0, 0,	"STAC9760/61" },
+	{ 0x62,	0xff, 0, 0,	"STAC9762/63" },
 	{ 0x66,	0xff, 0, 0,	"STAC9766/67" },
 	{ 0x84,	0xff, 0, 0,	"STAC9784/85" },
 }, ac97_vi[] = {
@@ -398,8 +436,13 @@ const struct ac97_codecid {
 	{ 0x00,	0xff, 0, 0,	"WM9701A" },
 	{ 0x03,	0xff, 0, 0,	"WM9704M/Q-0" }, /* & WM9703 */
 	{ 0x04,	0xff, 0, 0,	"WM9704M/Q-1" },
+	{ 0x05,	0xff, 0, 0,	"WM9705/10" },
+	{ 0x09,	0xff, 0, 0,	"WM9709" },
+	{ 0x12,	0xff, 0, 0,	"WM9711/12" },
 }, ac97_ym[] = {
-	{ 0x00, 0xff, 0, 0,	"YMF743" },
+	{ 0x00, 0xff, 0, 0,	"YMF743-S" },
+	{ 0x02, 0xff, 0, 0,	"YMF752-S" },
+	{ 0x03, 0xff, 0, 0,	"YMF753-S" },
 };
 
 #define	cl(n)	n, sizeof(n)/sizeof(n[0])
@@ -417,10 +460,12 @@ const struct ac97_vendorid {
 	{ 0x434d4900, "C-Media Electronics",	cl(ac97_cm) },
 	{ 0x43525900, "Cirrus Logic",		cl(ac97_cs) },
 	{ 0x43585400, "Conexant",		cl(ac97_cx) },
+	{ 0x44543000, "Diamond Technology",	cl(ac97_dt) },
 	{ 0x454d4300, "eMicro",			cl(ac97_em) },
 	{ 0x45838300, "ESS Technology",		cl(ac97_es) },
 	{ 0x48525300, "Intersil",		cl(ac97_is) },
 	{ 0x49434500, "ICEnsemble",		cl(ac97_ic) },
+	{ 0x49544500, "ITE, Inc.",		cl(ac97_it) },
 	{ 0x4e534300, "National Semiconductor", cl(ac97_ns) },
 	{ 0x50534300, "Philips Semiconductor",	cl(ac97_ps) },
 	{ 0x53494c00, "Silicon Laboratory",	cl(ac97_sl) },
@@ -1062,7 +1107,7 @@ ac97_set_rate(codec_if, p, mode)
 void
 ac97_ad198x_init(struct ac97_softc *as)
 {
-	unsigned short misc;
+	u_int16_t misc;
 
 	ac97_read(as, AC97_AD_REG_MISC, &misc);
 	ac97_write(as, AC97_AD_REG_MISC,
@@ -1070,11 +1115,40 @@ ac97_ad198x_init(struct ac97_softc *as)
 }
 
 void
+ac97_alc655_init(struct ac97_softc *as)
+{
+	u_int16_t misc;
+
+	ac97_read(as, AC97_AV_REG_MISC, &misc);
+	misc |= AC97_AV_MISC_SPDIFEN;
+	misc &= ~AC97_AV_MISC_VREFDIS;
+	ac97_write(as, AC97_AV_REG_MISC, misc);
+
+	ac97_write(as, AC97_AV_REG_MULTICH, AC97_AV_MULTICH_MAGIC);
+}
+
+void
 ac97_cx20468_init(struct ac97_softc *as)
 {
-	unsigned short misc;
+	u_int16_t misc;
 
 	ac97_read(as, AC97_CX_REG_MISC, &misc);
 	ac97_write(as, AC97_CX_REG_MISC,
 	    AC97_CX_SPDIFEN | AC97_CX_COPYRIGHT | AC97_CX_MASK);
+}
+
+void
+ac97_cx_init(struct ac97_softc *as)
+{
+	u_int16_t misc, new;
+
+	ac97_read(as, AC97_CX_REG_MISC, &misc);
+	ac97_write(as, AC97_CX_REG_MISC,
+	    AC97_CX_SPDIFEN | AC97_CX_COPYRIGHT | AC97_CX_MASK);
+
+	ac97_read(as, AC97_REG_POWER, &misc);
+	new = misc | AC97_POWER_EAMP;
+	if (new != misc) {
+		ac97_write(as, AC97_REG_POWER, new);
+	}
 }

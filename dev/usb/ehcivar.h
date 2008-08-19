@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehcivar.h,v 1.4 2004/05/30 01:25:17 tedu Exp $ */
+/*	$OpenBSD: ehcivar.h,v 1.8 2005/03/07 11:12:04 pascoe Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.12 2001/12/31 12:16:57 augustss Exp $	*/
 
 /*
@@ -53,6 +53,7 @@ typedef struct ehci_soft_qh {
 	struct ehci_soft_qh *next;
 	struct ehci_soft_qtd *sqtd;
 	ehci_physaddr_t physaddr;
+	int islot;
 } ehci_soft_qh_t;
 #define EHCI_SQH_SIZE ((sizeof (struct ehci_soft_qh) + EHCI_QH_ALIGN - 1) / EHCI_QH_ALIGN * EHCI_QH_ALIGN)
 #define EHCI_SQH_CHUNK (EHCI_PAGE_SIZE / EHCI_SQH_SIZE)
@@ -69,6 +70,18 @@ struct ehci_xfer {
 };
 #define EXFER(xfer) ((struct ehci_xfer *)(xfer))
 
+/* Information about an entry in the interrupt list. */
+struct ehci_soft_islot {
+	ehci_soft_qh_t *sqh;	/* Queue Head. */
+};
+
+#define EHCI_FRAMELIST_MAXCOUNT	1024
+#define EHCI_IPOLLRATES		8 /* Poll rates (1ms, 2, 4, 8 .. 128) */
+#define EHCI_INTRQHS		((1 << EHCI_IPOLLRATES) - 1)
+#define EHCI_IQHIDX(lev, pos) \
+	((((pos) & ((1 << (lev)) - 1)) | (1 << (lev))) - 1)
+#define EHCI_ILEV_IVAL(lev)	(1 << (lev))
+
 
 #define EHCI_HASH_SIZE 128
 #define EHCI_COMPANION_MAX 8
@@ -79,10 +92,13 @@ typedef struct ehci_softc {
 	bus_space_handle_t ioh;
 	bus_size_t sc_size;
 	u_int sc_offs;			/* offset to operational regs */
+	int sc_flags;			/* misc flags */
+#define EHCIF_DROPPED_INTR_WORKAROUND	0x01
 
 	char sc_vendor[16];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
 
+	u_int32_t sc_cmd;		/* shadow of cmd reg during suspend */
 	void *sc_powerhook;		/* cookie from power hook */
 	void *sc_shutdownhook;		/* cookie from shutdown hook */
 
@@ -91,7 +107,11 @@ typedef struct ehci_softc {
 	struct usbd_bus *sc_comps[EHCI_COMPANION_MAX];
 
 	usb_dma_t sc_fldma;
+	ehci_link_t *sc_flist;
 	u_int sc_flsize;
+	u_int sc_rand;			/* XXX need proper intr scheduling */
+
+	struct ehci_soft_islot sc_islots[EHCI_INTRQHS];
 
 	LIST_HEAD(, ehci_xfer) sc_intrhead;
 
@@ -113,6 +133,7 @@ typedef struct ehci_softc {
 	struct lock sc_doorbell_lock;
 
 	usb_callout_t sc_tmo_pcd;
+	usb_callout_t sc_tmo_intrlist;
 
 	device_ptr_t sc_child;		/* /dev/usb# device */
 
@@ -136,3 +157,4 @@ usbd_status	ehci_init(ehci_softc_t *);
 int		ehci_intr(void *);
 int		ehci_detach(ehci_softc_t *, int);
 int		ehci_activate(device_ptr_t, enum devact);
+void		ehci_shutdown(void *);

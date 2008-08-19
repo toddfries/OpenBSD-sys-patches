@@ -1,3 +1,5 @@
+/*	$OpenBSD: if_axe.c,v 1.24 2005/03/14 04:08:49 deraadt Exp $	*/
+
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
@@ -154,13 +156,21 @@ int	axedebug = 0;
  * Various supported device vendors/products.
  */
 Static const struct axe_type axe_devs[] = {
-	{{ USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88172 }, 0 },
-	{{ USB_VENDOR_DLINK, USB_PRODUCT_DLINK_DUBE100 }, 0 },
-	{{ USB_VENDOR_LINKSYS2, USB_PRODUCT_LINKSYS2_USB200M }, 0 },
-	{{ USB_VENDOR_NETGEAR, USB_PRODUCT_NETGEAR_FA120 }, 0 },
-	{{ USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2KTX }, 0},
-	{{ USB_VENDOR_SYSTEMTALKS, USB_PRODUCT_SYSTEMTALKS_SGCX2UL}, 0},
-	{{ 0, 0 }, 0 }
+	{ { USB_VENDOR_ABOCOM, USB_PRODUCT_ABOCOM_UF200}, 0 },
+	{ { USB_VENDOR_ACERCM, USB_PRODUCT_ACERCM_EP1427X2}, 0 },
+	{ { USB_VENDOR_ASIX, USB_PRODUCT_ASIX_AX88172}, 0 },
+	{ { USB_VENDOR_ATEN, USB_PRODUCT_ATEN_UC210T}, 0 },
+	{ { USB_VENDOR_BILLIONTON, USB_PRODUCT_BILLIONTON_SNAPPORT}, 0 },
+	{ { USB_VENDOR_BILLIONTON, USB_PRODUCT_BILLIONTON_USB2AR}, 0},
+	{ { USB_VENDOR_COREGA, USB_PRODUCT_COREGA_FETHER_USB2_TX }, 0},
+	{ { USB_VENDOR_DLINK, USB_PRODUCT_DLINK_DUBE100}, 0 },
+	{ { USB_VENDOR_JVC, USB_PRODUCT_JVC_MP_PRX1}, 0 },
+	{ { USB_VENDOR_LINKSYS2, USB_PRODUCT_LINKSYS2_USB200M}, 0 },
+	{ { USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAU2KTX}, 0 },
+	{ { USB_VENDOR_NETGEAR, USB_PRODUCT_NETGEAR_FA120}, 0 },
+	{ { USB_VENDOR_SYSTEMTALKS, USB_PRODUCT_SYSTEMTALKS_SGCX2UL}, 0 },
+	{ { USB_VENDOR_SITECOM, USB_PRODUCT_SITECOM_LN029}, 0 },
+	{ { 0, 0}, 0 }
 };
 
 #define axe_lookup(v, p) ((struct axe_type *)usb_lookup(axe_devs, v, p))
@@ -242,7 +252,7 @@ axe_miibus_readreg(device_ptr_t dev, int phy, int reg)
 {
 	struct axe_softc	*sc = USBGETSOFTC(dev);
 	usbd_status		err;
-	u_int16_t		val;
+	uWord			val;
 
 	if (sc->axe_dying) {
 		DPRINTF(("axe: dying\n"));
@@ -264,20 +274,23 @@ axe_miibus_readreg(device_ptr_t dev, int phy, int reg)
 	if (sc->axe_phyaddrs[0] != 0xFF && sc->axe_phyaddrs[0] != phy)
 		return (0);
 
+	USETW(val, 0);
 
+	axe_lock_mii(sc);
 	axe_cmd(sc, AXE_CMD_MII_OPMODE_SW, 0, 0, NULL);
-	err = axe_cmd(sc, AXE_CMD_MII_READ_REG, reg, phy, (void *)&val);
+	err = axe_cmd(sc, AXE_CMD_MII_READ_REG, reg, phy, val);
 	axe_cmd(sc, AXE_CMD_MII_OPMODE_HW, 0, 0, NULL);
+	axe_unlock_mii(sc);
 
 	if (err) {
 		printf("axe%d: read PHY failed\n", sc->axe_unit);
 		return(-1);
 	}
 
-	if (val)
+	if (UGETW(val))
 		sc->axe_phyaddrs[0] = phy;
 
-	return (val);
+	return (UGETW(val));
 }
 
 Static void
@@ -285,31 +298,42 @@ axe_miibus_writereg(device_ptr_t dev, int phy, int reg, int val)
 {
 	struct axe_softc	*sc = USBGETSOFTC(dev);
 	usbd_status		err;
+	uWord			uval;
 
 	if (sc->axe_dying)
 		return;
 
+	USETW(uval, val);
+
+	axe_lock_mii(sc);
 	axe_cmd(sc, AXE_CMD_MII_OPMODE_SW, 0, 0, NULL);
-	err = axe_cmd(sc, AXE_CMD_MII_WRITE_REG, reg, phy, (void *)&val);
+	err = axe_cmd(sc, AXE_CMD_MII_WRITE_REG, reg, phy, uval);
 	axe_cmd(sc, AXE_CMD_MII_OPMODE_HW, 0, 0, NULL);
+	axe_unlock_mii(sc);
 
 	if (err) {
 		printf("axe%d: write PHY failed\n", sc->axe_unit);
 		return;
 	}
-
-	return;
 }
 
 Static void
 axe_miibus_statchg(device_ptr_t dev)
 {
-#ifdef notdef
 	struct axe_softc	*sc = USBGETSOFTC(dev);
 	struct mii_data		*mii = GET_MII(sc);
-#endif
-	/* doesn't seem to be necessary */
-	return;
+	int			val, err;
+
+	if ((mii->mii_media_active & IFM_GMASK) == IFM_FDX)
+		val = AXE_MEDIA_FULL_DUPLEX;
+	else
+		val = 0;
+	DPRINTF(("axe_miibus_statchg: val=0x%x\n", val));
+	err = axe_cmd(sc, AXE_CMD_WRITE_MEDIA, 0, val, NULL);
+	if (err) {
+		printf("%s: media change failed\n", USBDEVNAME(sc->axe_dev));
+		return;
+	}
 }
 
 /*
@@ -353,6 +377,7 @@ axe_setmulti(struct axe_softc *sc)
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	u_int32_t		h = 0;
+	uWord			urxmode;
 	u_int16_t		rxmode;
 	u_int8_t		hashtbl[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
@@ -361,10 +386,11 @@ axe_setmulti(struct axe_softc *sc)
 
 	ifp = GET_IFP(sc);
 
-	axe_cmd(sc, AXE_CMD_RXCTL_READ, 0, 0, (void *)&rxmode);
+	axe_cmd(sc, AXE_CMD_RXCTL_READ, 0, 0, urxmode);
+	rxmode = UGETW(urxmode);
 
 	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-	allmulti:
+allmulti:
 		rxmode |= AXE_RXCMD_ALLMULTI;
 		axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0, rxmode, NULL);
 		return;
@@ -447,7 +473,7 @@ USB_ATTACH(axe)
 	}
 
 	usb_init_task(&sc->axe_tick_task, axe_tick_task, sc);
-	lockinit(&sc->axe_mii_lock, PZERO, "axemii", 0, 0);
+	lockinit(&sc->axe_mii_lock, PZERO, "axemii", 0, LK_CANRECURSE);
 	usb_init_task(&sc->axe_stop_task, (void (*)(void *))axe_stop, sc);
 
 	err = usbd_device2interface_handle(dev, AXE_IFACE_IDX, &sc->axe_iface);
@@ -463,14 +489,13 @@ USB_ATTACH(axe)
 
 	id = usbd_get_interface_descriptor(sc->axe_iface);
 
-	printf("%s: %s\n", USBDEVNAME(sc->axe_dev), devinfo);
+	printf("%s: %s", USBDEVNAME(sc->axe_dev), devinfo);
 
 	/* Find endpoints. */
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->axe_iface, i);
 		if (!ed) {
-			printf("axe%d: couldn't get ep %d\n",
-			    sc->axe_unit, i);
+			printf(" couldn't get ep %d\n", i);
 			USB_ATTACH_ERROR_RETURN;
 		}
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -507,16 +532,14 @@ USB_ATTACH(axe)
 	/*
 	 * An ASIX chip was detected. Inform the world.
 	 */
-	printf("axe%d: Ethernet address: %s\n", sc->axe_unit,
-	    ether_sprintf(eaddr));
+	printf(", address %s\n", ether_sprintf(eaddr));
 
 	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 
 	/* Initialize interface info.*/
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
-	strncpy(ifp->if_xname, devname, IFNAMSIZ);
+	strlcpy(ifp->if_xname, devname, IFNAMSIZ);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = axe_ioctl;
 	ifp->if_start = axe_start;
@@ -713,7 +736,6 @@ axe_rx_list_init(struct axe_softc *sc)
 		if (axe_newbuf(sc, c, NULL) == ENOBUFS)
 			return (ENOBUFS);
 		if (c->axe_xfer == NULL) {
-assert(sc->axe_udev);
 			c->axe_xfer = usbd_alloc_xfer(sc->axe_udev);
 			if (c->axe_xfer == NULL)
 				return (ENOBUFS);
@@ -776,7 +798,8 @@ axe_rxstart(struct ifnet *ifp)
 
 	/* Setup new transfer. */
 	usbd_setup_xfer(c->axe_xfer, sc->axe_ep[AXE_ENDPT_RX],
-	    c, mtod(c->axe_mbuf, char *), AXE_BUFSZ, USBD_SHORT_XFER_OK,
+	    c, c->axe_buf, AXE_BUFSZ,
+	    USBD_SHORT_XFER_OK | USBD_NO_COPY,
 	    USBD_NO_TIMEOUT, axe_rxeof);
 	usbd_transfer(c->axe_xfer);
 	axe_unlock_mii(sc);
@@ -1140,8 +1163,9 @@ axe_init(void *xsc)
 	for (i = 0; i < AXE_RX_LIST_CNT; i++) {
 		c = &sc->axe_cdata.axe_rx_chain[i];
 		usbd_setup_xfer(c->axe_xfer, sc->axe_ep[AXE_ENDPT_RX],
-		    c, mtod(c->axe_mbuf, char *), AXE_BUFSZ,
-		    USBD_SHORT_XFER_OK, USBD_NO_TIMEOUT, axe_rxeof);
+		    c, c->axe_buf, AXE_BUFSZ,
+		    USBD_SHORT_XFER_OK | USBD_NO_COPY,
+		    USBD_NO_TIMEOUT, axe_rxeof);
 		usbd_transfer(c->axe_xfer);
 	}
 
@@ -1162,7 +1186,7 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifreq		*ifr = (struct ifreq *)data;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
-	u_int16_t		rxmode;
+	uWord			rxmode;
 	int			error = 0;
 
 	switch(cmd) {
@@ -1207,21 +1231,17 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			    ifp->if_flags & IFF_PROMISC &&
 			    !(sc->axe_if_flags & IFF_PROMISC)) {
 
-				axe_cmd(sc, AXE_CMD_RXCTL_READ,
-					0, 0, (void *)&rxmode);
-				rxmode |= AXE_RXCMD_PROMISC;
-				axe_cmd(sc, AXE_CMD_RXCTL_WRITE,
-					0, rxmode, NULL);
+				axe_cmd(sc, AXE_CMD_RXCTL_READ, 0, 0, rxmode);
+				axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0,
+				    UGETW(rxmode) | AXE_RXCMD_PROMISC, NULL);
 
 				axe_setmulti(sc);
 			} else if (ifp->if_flags & IFF_RUNNING &&
 			    !(ifp->if_flags & IFF_PROMISC) &&
 			    sc->axe_if_flags & IFF_PROMISC) {
-				axe_cmd(sc, AXE_CMD_RXCTL_READ,
-					0, 0, (void *)&rxmode);
-				rxmode &= ~AXE_RXCMD_PROMISC;
-				axe_cmd(sc, AXE_CMD_RXCTL_WRITE,
-					0, rxmode, NULL);
+				axe_cmd(sc, AXE_CMD_RXCTL_READ, 0, 0, rxmode);
+				axe_cmd(sc, AXE_CMD_RXCTL_WRITE, 0,
+				    UGETW(rxmode) & ~AXE_RXCMD_PROMISC, NULL);
 				axe_setmulti(sc);
 			} else if (!(ifp->if_flags & IFF_RUNNING))
 				axe_init(sc);
@@ -1237,12 +1257,14 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = (cmd == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &sc->arpcom) :
 		    ether_delmulti(ifr, &sc->arpcom);
+
 		if (error == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			axe_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				axe_setmulti(sc);
 			error = 0;
 		}
 		break;
@@ -1266,23 +1288,21 @@ axe_watchdog(struct ifnet *ifp)
 	struct axe_softc	*sc;
 	struct axe_chain	*c;
 	usbd_status		stat;
+	int			s;
 
 	sc = ifp->if_softc;
-	axe_lock_mii(sc);
 
 	ifp->if_oerrors++;
 	printf("axe%d: watchdog timeout\n", sc->axe_unit);
 
+	s = splusb();
 	c = &sc->axe_cdata.axe_tx_chain[0];
 	usbd_get_xfer_status(c->axe_xfer, NULL, NULL, NULL, &stat);
 	axe_txeof(c->axe_xfer, c, stat);
 
-	axe_unlock_mii(sc);
-
 	if (ifp->if_snd.ifq_head != NULL)
 		axe_start(ifp);
-
-	return;
+	splx(s);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.26 2004/07/25 13:36:08 millert Exp $	*/
+/*	$OpenBSD: atw.c,v 1.29 2005/02/17 18:28:05 reyk Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -284,6 +284,10 @@ void	atw_si4126_write(struct atw_softc *, u_int, u_int);
 
 const struct atw_txthresh_tab atw_txthresh_tab_lo[] = ATW_TXTHRESH_TAB_LO_RATE;
 const struct atw_txthresh_tab atw_txthresh_tab_hi[] = ATW_TXTHRESH_TAB_HI_RATE;
+
+struct cfdriver atw_cd = {
+    NULL, "atw", DV_IFNET
+};
 
 const char *atw_tx_state[] = {
 	"STOPPED",
@@ -3251,12 +3255,9 @@ atw_rxintr(struct atw_softc *sc)
 		/*
 		 * The frame may have caused the node to be marked for
 		 * reclamation (e.g. in response to a DEAUTH message)
-		 * so use free_node here instead of unref_node.
+		 * so use release_node here instead of unref_node.
 		 */
-		if (ni == ic->ic_bss)
-			ieee80211_unref_node(&ni);
-		else
-			ieee80211_free_node(ic, ni);
+		ieee80211_release_node(ic, ni);
 	}
 
 	/* Update the receive pointer. */
@@ -3623,8 +3624,8 @@ atw_start(struct ifnet *ifp)
 
 		M_PREPEND(m0, offsetof(struct atw_frame, atw_ihdr), M_DONTWAIT);
 
-		if (ni != NULL && ni != ic->ic_bss)
-			ieee80211_free_node(ic, ni);
+		if (ni != NULL)
+			ieee80211_release_node(ic, ni);
 
 		if (m0 == NULL) {
 			ifp->if_oerrors++;
@@ -4003,7 +4004,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif
 
 		if (error == ENETRESET) {
-			if (ATW_IS_ENABLED(sc))
+			if (ifp->if_flags & IFF_RUNNING)
 				atw_filter_setup(sc); /* do not rescan */
 			error = 0;
 		}

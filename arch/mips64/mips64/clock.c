@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.6 2004/08/11 17:05:31 pefo Exp $ */
+/*	$OpenBSD: clock.c,v 1.13 2005/02/13 22:04:34 grange Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -30,12 +30,15 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/evcount.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
 #include <mips64/dev/clockvar.h>
 #include <mips64/archtype.h>
 
+static struct evcount clk_count;
+static int clk_irq = 5;
 
 /* Definition of the driver for autoconfig. */
 int	clockmatch(struct device *, void *, void *);
@@ -43,7 +46,6 @@ void	clockattach(struct device *, struct device *, void *);
 intrmask_t clock_int5_dummy(intrmask_t, struct trap_frame *);
 intrmask_t clock_int5(intrmask_t, struct trap_frame *);
 void clock_int5_init(struct clock_softc *);
-void	md_clk_attach(struct device *, struct device *, void *);
 
 struct cfdriver clock_cd = {
 	NULL, "clock", DV_DULL, NULL, 0
@@ -100,6 +102,7 @@ clockattach(struct device *parent, struct device *self, void *aux)
 	case GALILEO_EV64240:
 	case SGI_INDY:
 	case SGI_O2:
+	case SGI_O200:
 		printf(" ticker on int5 using count register.");
 		set_intr(INTPRI_CLOCK, CR_INT_5, clock_int5);
 		ticktime = sys_config.cpu[0].clock / 2000;
@@ -107,7 +110,6 @@ clockattach(struct device *parent, struct device *self, void *aux)
 
 	default:
 		panic("clockattach: it didn't get here.  really.");
-		clock_int5(0,(struct trap_frame *)NULL);
 	}
 
 	printf("\n");
@@ -138,7 +140,7 @@ clock_int5_init(struct clock_softc *sc)
  *  Just resets the compare register and acknowledge the interrupt.
  */
 intrmask_t
-clock_int5_dummy( intrmask_t mask, struct trap_frame *tf)
+clock_int5_dummy(intrmask_t mask, struct trap_frame *tf)
 {
         cp0_set_compare(0);      /* Shut up counter int's for a while */
 	return CR_INT_5;	/* Clock is always on 5 */
@@ -152,7 +154,7 @@ clock_int5_dummy( intrmask_t mask, struct trap_frame *tf)
  *  the clock is unmasked again.
  */
 intrmask_t
-clock_int5( intrmask_t mask, struct trap_frame *tf)
+clock_int5(intrmask_t mask, struct trap_frame *tf)
 {
 	u_int32_t clkdiff;
 
@@ -173,9 +175,17 @@ clock_int5( intrmask_t mask, struct trap_frame *tf)
 	}
 
 	cp0_set_compare(cpu_counter_last);
+	/* Make sure that next clock tick has not passed */
+	clkdiff = cp0_get_count() - cpu_counter_last;
+	if (clkdiff > 0) {
+		cpu_counter_last += cpu_counter_interval;
+		pendingticks++;
+		cp0_set_compare(cpu_counter_last);
+	}
 
 	if ((tf->cpl & SPL_CLOCKMASK) == 0) {
 		while (pendingticks) {
+			clk_count.ec_count++;
 			hardclock(tf);
 			pendingticks--;
 		}
@@ -263,12 +273,13 @@ microtime(struct timeval *tvp)
 void
 cpu_initclocks()
 {
-	extern int tickadj;
 	struct clock_softc *sc = (struct clock_softc *)clock_cd.cd_devs[0];
 
 	hz = sc->sc_clock.clk_hz;
 	stathz = sc->sc_clock.clk_stathz;
 	profhz = sc->sc_clock.clk_profhz;
+
+	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
 
 	/* Start the clock.  */
 	if (sc->sc_clock.clk_init != NULL)
@@ -323,7 +334,7 @@ inittodr(time_t base)
 	if (sc->sc_clock.clk_get) {
 		(*sc->sc_clock.clk_get)(sc, base, &c);
 	} else {
-		printf("WARNING: No TOD clock, beliving file system.\n");
+		printf("WARNING: No TOD clock, believing file system.\n");
 		goto bad;
 	}
 
@@ -379,7 +390,7 @@ resettodr()
 
 	/* compute the day of week. 1 is Sunday*/
 	t2 = time.tv_sec / SECDAY;
-	c.dow = (t2 + 5) % 7;	/* 1/1/1970 was thursday */
+	c.dow = (t2 + 5) % 7 + 1;	/* 1/1/1970 was thursday */
 
 	/* compute the year */
 	t2 = time.tv_sec / SECDAY;

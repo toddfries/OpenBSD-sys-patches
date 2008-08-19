@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fe.c,v 1.20 2004/05/12 06:35:11 tedu Exp $	*/
+/*	$OpenBSD: if_fe.c,v 1.22 2005/02/17 19:05:36 miod Exp $	*/
 
 /*
  * All Rights Reserved, Copyright (C) Fujitsu Limited 1995
@@ -458,7 +458,7 @@ fe_probe_fmv(sc, ia)
 		{ FE_FMV6, 0xFF, 0x0E },
 #else
 	/*
-	 * We can always verify the *first* 2 bits (in Ehternet
+	 * We can always verify the *first* 2 bits (in Ethernet
 	 * bit order) are "no multicast" and "no local" even for
 	 * unknown vendors.
 	 */
@@ -839,7 +839,7 @@ fe_probe_mbh(sc, ia)
 		{ FE_MBH12, 0xFF, 0x0E },
 #else
 	/*
-	 * We can always verify the *first* 2 bits (in Ehternet
+	 * We can always verify the *first* 2 bits (in Ethernet
 	 * bit order) are "global" and "unicast" even for
 	 * unknown vendors.
 	 */
@@ -1979,7 +1979,8 @@ fe_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
 			 */
-			fe_setmode(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				fe_setmode(sc);
 			error = 0;
 		}
 		break;

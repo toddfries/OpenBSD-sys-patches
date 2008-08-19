@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.h,v 1.3 2004/08/10 19:16:18 deraadt Exp $	*/
+/*	$OpenBSD: macebus.h,v 1.6 2005/01/24 20:44:37 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB (www.opsycon.com).
@@ -83,6 +83,8 @@
  */
 #define	MACE_ISA_OFFS		(MACE_IO_OFFS+0x00010000)
 
+#define MACE_ISA_RING_BASE	0x0000
+#define  MACE_ISA_RING_ALIGN	0x00010000
 #define	MACE_ISA_MISC_REG	0x0008	/* Various status and controls */
 #define	MACE_ISA_INT_STAT	0x0010
 #define	MACE_ISA_INT_MASK	0x0018
@@ -93,6 +95,10 @@
 
 /* MACE_ISA_INT_* definitions */
 #define	MACE_ISA_INT_AUDIO	0x000000ff	/* Audio ints */
+#define  MACE_ISA_INT_AUDIO_SC	      0x02
+#define  MACE_ISA_INT_AUDIO_DMA1      0x04
+#define  MACE_ISA_INT_AUDIO_DMA2      0x10
+#define  MACE_ISA_INT_AUDIO_DMA3      0x40      
 #define	MACE_ISA_INT_RTC	0x00000100	/* RTC */
 #define	MACE_ISA_INT_KBD	0x00000200	/* Keyboard */
 #define	MACE_ISA_INT_KBD_POLL	0x00000400	/* Keyboard polled */
@@ -104,7 +110,7 @@
 #define	MACE_ISA_INT_SERIAL_2	0xfc000000	/* Serial port 2 */
 
 
-/* ISA Periferials */
+/* ISA Peripherals */
 #define	MACE_ISA_EPP_OFFS	(MACE_ISAX_OFFS+0x00000000)
 #define	MACE_ISA_ECP_OFFS	(MACE_ISAX_OFFS+0x00008000)
 #define	MACE_ISA_SER1_OFFS	(MACE_ISAX_OFFS+0x00010000)

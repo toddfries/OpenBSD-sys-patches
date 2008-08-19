@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211.h,v 1.1 2004/06/22 22:53:51 millert Exp $	*/
+/*	$OpenBSD: ieee80211.h,v 1.8 2005/02/17 18:28:05 reyk Exp $	*/
 /*	$NetBSD: ieee80211.h,v 1.6 2004/04/30 23:51:53 dyoung Exp $	*/
 
 /*-
@@ -52,10 +52,12 @@ struct ieee80211_plcp_hdr {
 	u_int8_t	i_service;
 	u_int16_t	i_length;
 	u_int16_t	i_crc;
-} __attribute__((__packed__));
+} __packed;
 
 #define IEEE80211_PLCP_SFD      0xF3A0
 #define IEEE80211_PLCP_SERVICE  0x00
+#define IEEE80211_PLCP_SERVICE_PBCC  0x08	/* PBCC encoded */
+#define IEEE80211_PLCP_SERVICE_LENEXT  0x80	/* length extension bit */
 
 /*
  * generic definitions for IEEE 802.11 frames
@@ -69,7 +71,7 @@ struct ieee80211_frame {
 	u_int8_t	i_seq[2];
 	/* possibly followed by addr4[IEEE80211_ADDR_LEN]; */
 	/* see below */
-} __attribute__((__packed__));
+} __packed;
 
 struct ieee80211_qosframe {
 	u_int8_t	i_fc[2];
@@ -81,7 +83,7 @@ struct ieee80211_qosframe {
 	u_int8_t	i_qos[2];
 	/* possibly followed by addr4[IEEE80211_ADDR_LEN]; */
 	/* see below */
-} __attribute__((__packed__));
+} __packed;
 
 struct ieee80211_qoscntl {
 	u_int8_t	i_qos[2];
@@ -95,7 +97,7 @@ struct ieee80211_frame_addr4 {
 	u_int8_t	i_addr3[IEEE80211_ADDR_LEN];
 	u_int8_t	i_seq[2];
 	u_int8_t	i_addr4[IEEE80211_ADDR_LEN];
-} __attribute__((__packed__));
+} __packed;
 
 
 struct ieee80211_qosframe_addr4 {
@@ -107,7 +109,7 @@ struct ieee80211_qosframe_addr4 {
 	u_int8_t	i_seq[2];
 	u_int8_t	i_addr4[IEEE80211_ADDR_LEN];
 	u_int8_t	i_qos[2];
-} __attribute__((__packed__));
+} __packed;
 
 /*
  * Management Notification Frame
@@ -117,10 +119,23 @@ struct ieee80211_mnf {
 	u_int8_t	mnf_action;
 	u_int8_t	mnf_dialog;
 	u_int8_t	mnf_status;
-} __attribute__((__packed__));
+} __packed;
 #define	MNF_SETUP_REQ	0
 #define	MNF_SETUP_RESP	1
 #define	MNF_TEARDOWN	2
+
+ /*
+ * WME/802.11e information element.
+ */
+struct ieee80211_ie_wme {
+	u_int8_t	wme_id;		/* IEEE80211_ELEMID_VENDOR */
+	u_int8_t	wme_len;	/* length in bytes */
+	u_int8_t	wme_oui[3];	/* 0x00, 0x50, 0xf2 */
+	u_int8_t	wme_type;	/* OUI type */
+	u_int8_t	wme_subtype;	/* OUI subtype */
+	u_int8_t	wme_version;	/* spec revision */
+	u_int8_t	wme_info;	/* AC info */
+} __packed;
 
 /*
  * WME/802.11e Tspec Element
@@ -148,7 +163,7 @@ struct ieee80211_wme_tspec {
 	u_int8_t	ts_delay[4];
 	u_int8_t	ts_surplus[2];
 	u_int8_t	ts_medium_time[2];
-} __attribute__((__packed__));
+} __packed;
 
 #define	IEEE80211_FC0_VERSION_MASK		0x03
 #define	IEEE80211_FC0_VERSION_SHIFT		0
@@ -226,7 +241,7 @@ struct ieee80211_frame_min {
 	u_int8_t	i_addr1[IEEE80211_ADDR_LEN];
 	u_int8_t	i_addr2[IEEE80211_ADDR_LEN];
 	/* FCS */
-} __attribute__((__packed__));
+} __packed;
 
 struct ieee80211_frame_rts {
 	u_int8_t	i_fc[2];
@@ -234,21 +249,21 @@ struct ieee80211_frame_rts {
 	u_int8_t	i_ra[IEEE80211_ADDR_LEN];
 	u_int8_t	i_ta[IEEE80211_ADDR_LEN];
 	/* FCS */
-} __attribute__((__packed__));
+} __packed;
 
 struct ieee80211_frame_cts {
 	u_int8_t	i_fc[2];
 	u_int8_t	i_dur[2];
 	u_int8_t	i_ra[IEEE80211_ADDR_LEN];
 	/* FCS */
-} __attribute__((__packed__));
+} __packed;
 
 struct ieee80211_frame_ack {
 	u_int8_t	i_fc[2];
 	u_int8_t	i_dur[2];
 	u_int8_t	i_ra[IEEE80211_ADDR_LEN];
 	/* FCS */
-} __attribute__((__packed__));
+} __packed;
 
 struct ieee80211_frame_pspoll {
 	u_int8_t	i_fc[2];
@@ -256,7 +271,7 @@ struct ieee80211_frame_pspoll {
 	u_int8_t	i_bssid[IEEE80211_ADDR_LEN];
 	u_int8_t	i_ta[IEEE80211_ADDR_LEN];
 	/* FCS */
-} __attribute__((__packed__));
+} __packed;
 
 struct ieee80211_frame_cfend {		/* NB: also CF-End+CF-Ack */
 	u_int8_t	i_fc[2];
@@ -264,7 +279,7 @@ struct ieee80211_frame_cfend {		/* NB: also CF-End+CF-Ack */
 	u_int8_t	i_ra[IEEE80211_ADDR_LEN];
 	u_int8_t	i_bssid[IEEE80211_ADDR_LEN];
 	/* FCS */
-} __attribute__((__packed__));
+} __packed;
 
 /*
  * BEACON management packets
@@ -278,7 +293,7 @@ struct ieee80211_frame_cfend {		/* NB: also CF-End+CF-Ack */
  *		octet information[length]
  */
 
-typedef uint8_t *ieee80211_mgt_beacon_t;
+typedef u_int8_t *ieee80211_mgt_beacon_t;
 
 #define	IEEE80211_BEACON_INTERVAL(beacon) \
 	((beacon)[8] | ((beacon)[9] << 8))
@@ -299,11 +314,16 @@ typedef uint8_t *ieee80211_mgt_beacon_t;
 /* bit 12 is reserved */
 #define	IEEE80211_CAPINFO_DSSSOFDM		0x2000
 /* bits 14-15 are reserved */
+#define IEEE80211_CAPINFO_BITS                  "\20\01ESS\02IBSS\03POLLABLE\04POLLREQ\05PRIVACY\06SHORT_PREAMBLE\07PBCC\10CHNL_AGILITY\13SHORT_SLOTTIME\14RSN\16DSSSOFDM"
+
+
 
 /*
  * 802.11i/WPA information element (maximally sized).
  */
 struct ieee80211_ie_wpa {
+	u_int8_t	wpa_id;		/* IEEE80211_ELEMID_VENDOR */
+	u_int8_t	wpa_len;	/* length in bytes */
 	u_int8_t	wpa_oui[3];	/* 0x00, 0x50, 0xf2 */
 	u_int8_t	wpa_type;	/* OUI type */
 	u_int16_t	wpa_version;	/* spec revision */
@@ -312,12 +332,15 @@ struct ieee80211_ie_wpa {
 	u_int32_t	wpa_uciphers[8];/* ciphers */
 	u_int16_t	wpa_authselcnt;	/* authentication selector cnt*/
 	u_int32_t	wpa_authsels[8];/* selectors */
-} __attribute__((__packed__));
+	u_int16_t	wpa_caps;	/* 802.11i capabilities */
+	u_int16_t	wpa_pmkidcnt;	/* 802.11i pmkid count */
+	u_int16_t	wpa_pmkids[8];	/* 802.11i pmkids */
+} __packed;
 
 /*
- * Management information elements
+ * Management information element payloads
  */
-struct ieee80211_information {
+union ieee80211_information {
 	char	ssid[IEEE80211_NWID_LEN+1];
 	struct rates {
 		u_int8_t	*p;
@@ -364,7 +387,6 @@ struct ieee80211_information {
 	struct ath {
 		u_int8_t	flags;
 	} ath;
-	struct ieee80211_ie_wpa	wpa;
 };
 
 enum {
@@ -379,10 +401,11 @@ enum {
 	IEEE80211_ELEMID_CHALLENGE		= 16,
 	/* 17-31 reserved for challenge text extension */
 	IEEE80211_ELEMID_ERP			= 42,
+	IEEE80211_ELEMID_RSN			= 48,
 	IEEE80211_ELEMID_XRATES			= 50,
 	IEEE80211_ELEMID_TPC			= 150,
 	IEEE80211_ELEMID_CCKM			= 156,
-	IEEE80211_ELEMID_VENDOR			= 221,	/* vendor private */
+	IEEE80211_ELEMID_VENDOR			= 221	/* vendor private */
 };
 
 #define IEEE80211_CHALLENGE_LEN			128
@@ -421,6 +444,30 @@ enum {
 #define	WPA_ASE_8021X_UNSPEC	0x01
 #define	WPA_ASE_8021X_PSK	0x02
 
+#define	RSN_OUI			0xac0f00
+#define	RSN_OUI_VERSION		1		/* current supported version */
+
+#define	RSN_CSE_NULL		0x00
+#define	RSN_CSE_WEP40		0x01
+#define	RSN_CSE_TKIP		0x02
+#define	RSN_CSE_WRAP		0x03
+#define	RSN_CSE_CCMP		0x04
+#define	RSN_CSE_WEP104		0x05
+
+#define	RSN_ASE_NONE		0x00
+#define	RSN_ASE_8021X_UNSPEC	0x01
+#define	RSN_ASE_8021X_PSK	0x02
+
+#define	WME_OUI			0xf25000
+#define	WME_OUI_TYPE		0x02
+#define	WME_OUI_VERSION		1
+
+/* WME stream classes */
+#define	WME_AC_BE	0		/* best effort */
+#define	WME_AC_BK	1		/* background */
+#define	WME_AC_VI	2		/* video */
+#define	WME_AC_VO	3		/* voice */
+
 /*
  * AUTH management packets
  *
@@ -447,14 +494,14 @@ typedef u_int8_t *ieee80211_mgt_auth_t;
 
 enum {
 	IEEE80211_AUTH_OPEN_REQUEST		= 1,
-	IEEE80211_AUTH_OPEN_RESPONSE		= 2,
+	IEEE80211_AUTH_OPEN_RESPONSE		= 2
 };
 
 enum {
 	IEEE80211_AUTH_SHARED_REQUEST		= 1,
 	IEEE80211_AUTH_SHARED_CHALLENGE		= 2,
 	IEEE80211_AUTH_SHARED_RESPONSE		= 3,
-	IEEE80211_AUTH_SHARED_PASS		= 4,
+	IEEE80211_AUTH_SHARED_PASS		= 4
 };
 
 /*
@@ -496,16 +543,31 @@ enum {
 	IEEE80211_STATUS_TOO_MANY_STATIONS	= 22,
 	IEEE80211_STATUS_RATES			= 23,
 	IEEE80211_STATUS_SHORTSLOT_REQUIRED	= 25,
-	IEEE80211_STATUS_DSSSOFDM_REQUIRED	= 26,
+	IEEE80211_STATUS_DSSSOFDM_REQUIRED	= 26
 };
 
 #define	IEEE80211_WEP_KEYLEN			5	/* 40bit */
+#define	IEEE80211_WEP_NKID			4	/* number of key ids */
+
+/* WEP header constants */
 #define	IEEE80211_WEP_IVLEN			3	/* 24bit */
 #define	IEEE80211_WEP_KIDLEN			1	/* 1 octet */
 #define	IEEE80211_WEP_CRCLEN			4	/* CRC-32 */
-#define	IEEE80211_WEP_NKID			4	/* number of key ids */
-
 #define	IEEE80211_CRC_LEN			4
+#define	IEEE80211_WEP_TOTLEN		(IEEE80211_WEP_IVLEN + \
+					 IEEE80211_WEP_KIDLEN + \
+					 IEEE80211_WEP_CRCLEN)
+
+/*
+ * 802.11i defines an extended IV for use with non-WEP ciphers.
+ * When the EXTIV bit is set in the key id byte an additional
+ * 4 bytes immediately follow the IV for TKIP.  For CCMP the
+ * EXTIV bit is likewise set but the 8 bytes represent the
+ * CCMP header rather than IV+extended-IV.
+ */
+#define	IEEE80211_WEP_EXTIV		0x20
+#define	IEEE80211_WEP_EXTIVLEN		4	/* extended IV length */
+#define	IEEE80211_WEP_MICLEN		8	/* trailing MIC */
 
 /*
  * Maximum acceptable MTU is:
@@ -519,17 +581,28 @@ enum {
 
 #define	IEEE80211_MAX_LEN			(2300 + IEEE80211_CRC_LEN + \
     (IEEE80211_WEP_IVLEN + IEEE80211_WEP_KIDLEN + IEEE80211_WEP_CRCLEN))
+#define	IEEE80211_ACK_LEN \
+	(sizeof(struct ieee80211_frame_ack) + IEEE80211_CRC_LEN)
 #define	IEEE80211_MIN_LEN \
 	(sizeof(struct ieee80211_frame_min) + IEEE80211_CRC_LEN)
 
-#define	IEEE80211_MAX_AID			2007
-
+/*
+ * The 802.11 spec says at most 2007 stations may be
+ * associated at once.  For most AP's this is way more
+ * than is feasible so we use a default of 1800. This
+ * number may be overridden by the driver and/or by
+ * user configuration.
+ */
+#define	IEEE80211_AID_MAX		2007
+#define	IEEE80211_AID_DEF		1800
+ 
+#define	IEEE80211_AID(b)		((b) &~ 0xc000)
 #define	IEEE80211_AID_SET(b, w) \
-	((w)[((b) & ~0xc000) / 32] |= (1 << (((b) & ~0xc000) % 32)))
+	((w)[IEEE80211_AID(b) / 32] |= (1 << (IEEE80211_AID(b) % 32)))
 #define	IEEE80211_AID_CLR(b, w) \
-	((w)[((b) & ~0xc000) / 32] &= ~(1 << (((b) & ~0xc000) % 32)))
+	((w)[IEEE80211_AID(b) / 32] &= ~(1 << (IEEE80211_AID(b) % 32)))
 #define	IEEE80211_AID_ISSET(b, w) \
-	((w)[((b) & ~0xc000) / 32] & (1 << (((b) & ~0xc000) % 32)))
+	((w)[IEEE80211_AID(b) / 32] & (1 << (IEEE80211_AID(b) % 32)))
 
 /*
  * RTS frame length parameters.  The default is specified in
@@ -539,10 +612,54 @@ enum {
 #define	IEEE80211_RTS_MIN			1
 #define	IEEE80211_RTS_MAX			IEEE80211_MAX_LEN
 
+/*
+ * 802.11 frame duration definitions.
+ */
+
+struct ieee80211_duration {
+	uint16_t	d_rts_dur;
+	uint16_t	d_data_dur;
+	uint16_t	d_plcp_len;
+	uint8_t		d_residue;	/* unused octets in time slot */
+};
+
+/* One Time Unit (TU) is 1Kus = 1024 microseconds. */
+#define IEEE80211_DUR_TU		1024
+
+/* IEEE 802.11b durations for DSSS PHY in microseconds */
+#define IEEE80211_DUR_DS_LONG_PREAMBLE	144
+#define IEEE80211_DUR_DS_SHORT_PREAMBLE	72
+#define	IEEE80211_DUR_DS_PREAMBLE_DIFFERENCE	\
+    (IEEE80211_DUR_DS_LONG_PREAMBLE - IEEE80211_DUR_DS_SHORT_PREAMBLE)
+#define IEEE80211_DUR_DS_FAST_PLCPHDR	24
+#define IEEE80211_DUR_DS_SLOW_PLCPHDR	48
+#define	IEEE80211_DUR_DS_PLCPHDR_DIFFERENCE	\
+    (IEEE80211_DUR_DS_SLOW_PLCPHDR - IEEE80211_DUR_DS_FAST_PLCPHDR)
+#define IEEE80211_DUR_DS_SLOW_ACK	112
+#define IEEE80211_DUR_DS_FAST_ACK	56
+#define IEEE80211_DUR_DS_SLOW_CTS	112
+#define IEEE80211_DUR_DS_FAST_CTS	56
+#define IEEE80211_DUR_DS_SLOT		20
+#define IEEE80211_DUR_DS_SIFS		10
+#define IEEE80211_DUR_DS_PIFS	(IEEE80211_DUR_DS_SIFS + IEEE80211_DUR_DS_SLOT)
+#define IEEE80211_DUR_DS_DIFS	(IEEE80211_DUR_DS_SIFS + \
+				 2 * IEEE80211_DUR_DS_SLOT)
+#define IEEE80211_DUR_DS_EIFS	(IEEE80211_DUR_DS_SIFS + \
+				 IEEE80211_DUR_DS_SLOW_ACK + \
+				 IEEE80211_DUR_DS_LONG_PREAMBLE + \
+				 IEEE80211_DUR_DS_SLOW_PLCPHDR + \
+				 IEEE80211_DUR_DIFS)
+
 enum {
 	IEEE80211_AUTH_NONE	= 0,
-	IEEE80211_AUTH_OPEN	= 1,
-	IEEE80211_AUTH_SHARED	= 2,
+	IEEE80211_AUTH_OPEN	= 1,		/* open */
+	IEEE80211_AUTH_SHARED	= 2,		/* shared-key */
+	IEEE80211_AUTH_8021X	= 3,		/* 802.1x */
+	IEEE80211_AUTH_AUTO	= 4,		/* auto-select/accept */
+	IEEE80211_AUTH_WPA	= 5,		/* WPA w/ 802.1x */
+	IEEE80211_AUTH_WPA_PSK	= 6,		/* WPA w/ preshared key */
+	IEEE80211_AUTH_WPA2	= 7,		/* WPA2 w/ 802.1x */
+	IEEE80211_AUTH_WPA2_PSK	= 8		/* WPA2 w/ preshared key */
 };
 
 #endif /* _NET80211_IEEE80211_H_ */

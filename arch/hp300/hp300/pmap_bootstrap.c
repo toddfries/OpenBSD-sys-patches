@@ -1,7 +1,7 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.18 2003/06/02 23:27:45 millert Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.22 2005/01/15 21:13:08 miod Exp $	*/
 /*	$NetBSD: pmap_bootstrap.c,v 1.13 1997/06/10 18:56:50 veego Exp $	*/
 
-/* 
+/*
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -54,13 +54,14 @@ caddr_t ledbase;	/* SPU LEDs mapping */
 extern vaddr_t CLKbase, MMUbase;
 extern char *extiobase;
 extern int maxmem;
+extern int eiomapsize;
 
 #define	RELOC(v, t)	*((t*)((u_int)&(v) + firstpa))
 #define	PA2VA(v, t)	*((t*)((u_int)&(v)))
 
 #define	MACHINE_IIOMAPSIZE	IIOMAPSIZE
 #define	MACHINE_INTIOBASE	INTIOBASE
-#define	MACHINE_EIOMAPSIZE	EIOMAPSIZE
+#define	MACHINE_EIOMAPSIZE	RELOC(eiomapsize, int)
 
 #define	PMAP_MD_LOCALS		/* nothing */
 
@@ -79,17 +80,11 @@ extern int maxmem;
 	 */
 #define	PMAP_MD_RELOC2() \
 do { \
-	RELOC(intiobase, char *) = \
-	    (char *)m68k_ptob(nptpages * NPTEPG - \
-	        (MACHINE_IIOMAPSIZE + MACHINE_EIOMAPSIZE)); \
-	RELOC(intiolimit, char *) = \
-	    (char *)m68k_ptob(nptpages * NPTEPG - MACHINE_EIOMAPSIZE); \
-	RELOC(extiobase, char *) = \
-	    (char *)m68k_ptob(nptpages * NPTEPG - MACHINE_EIOMAPSIZE); \
-	RELOC(CLKbase, vaddr_t) = \
-	    (vaddr_t)RELOC(intiobase, char *) + CLKBASE; \
-	RELOC(MMUbase, vaddr_t) = \
-	    (vaddr_t)RELOC(intiobase, char *) + MMUBASE; \
+	RELOC(intiobase, char *) = (char *)iiobase; \
+	RELOC(intiolimit, char *) = (char *)eiobase; \
+	RELOC(extiobase, char *) = (char *)eiobase; \
+	RELOC(CLKbase, vaddr_t) = iiobase + CLKBASE; \
+	RELOC(MMUbase, vaddr_t) = iiobase + MMUBASE; \
 } while (0)
 
 #define	PMAP_MD_MEMSIZE() \
@@ -120,7 +115,7 @@ pmap_init_md()
 	 */
 	addr = (vaddr_t) intiobase;
 	if (uvm_map(kernel_map, &addr,
-		    m68k_ptob(IIOMAPSIZE+EIOMAPSIZE),
+		    m68k_ptob(IIOMAPSIZE + eiomapsize),
 		    NULL, UVM_UNKNOWN_OFFSET, 0,
 		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE,
 				UVM_INH_NONE, UVM_ADV_RANDOM,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcx.c,v 1.19 2003/06/28 17:05:33 miod Exp $	*/
+/*	$OpenBSD: tcx.c,v 1.24 2005/03/13 23:05:22 miod Exp $	*/
 /*	$NetBSD: tcx.c,v 1.8 1997/07/29 09:58:14 fair Exp $ */
 
 /*
@@ -110,18 +110,6 @@ struct tcx_softc {
 	int	sc_nscreens;
 };
 
-struct wsscreen_descr tcx_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *tcx_scrlist[] = {
-	&tcx_stdscreen,
-};
-
-struct wsscreen_list tcx_screenlist = {
-	sizeof(tcx_scrlist) / sizeof(struct wsscreen_descr *), tcx_scrlist
-};
-
 int tcx_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int tcx_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -204,19 +192,16 @@ tcxattach(parent, self, args)
 {
 	struct tcx_softc *sc = (struct tcx_softc *)self;
 	struct confargs *ca = args;
-	struct wsemuldisplaydev_attach_args waa;
 	int node = 0, i;
 	volatile struct bt_regs *bt;
 	int isconsole = 0;
 	char *nam = NULL;
 
 	node = ca->ca_ra.ra_node;
-	nam = getpropstring(node, "model");
-	printf(": %s\n", nam);
 
 	if (ca->ca_ra.ra_nreg < TCX_NREG) {
-		printf("\n%s: expected %d registers, got %d\n",
-		    self->dv_xname, TCX_NREG, ca->ca_ra.ra_nreg);
+		printf(": expected %d registers, got %d\n",
+		    TCX_NREG, ca->ca_ra.ra_nreg);
 		return;
 	}
 
@@ -266,35 +251,29 @@ tcxattach(parent, self, args)
 	fbwscons_init(&sc->sc_sunfb, isconsole ? 0 : RI_CLEAR);
 	fbwscons_setcolormap(&sc->sc_sunfb, tcx_setcolor);
 
-	tcx_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	tcx_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	tcx_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	tcx_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	sc->sc_ih.ih_fun = tcx_intr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB);
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB,
+	    self->dv_xname);
 
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, &tcx_stdscreen, -1,
-		    tcx_burner);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 		shutdownhook_establish(tcx_prom, sc);
 	}
 
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
-	printf("%s: %dx%d, id %d, rev %d, sense %d\n",
-	    self->dv_xname, sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height,
+	nam = getpropstring(node, "model");
+	if (*nam != '\0')
+		printf(": %s\n%s", nam, self->dv_xname);
+	printf(": %dx%d, id %d, rev %d, sense %d\n",
+	    sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height,
 	    (sc->sc_thc->thc_config & THC_CFG_FBID) >> THC_CFG_FBID_SHIFT,
 	    (sc->sc_thc->thc_config & THC_CFG_REV) >> THC_CFG_REV_SHIFT,
 	    (sc->sc_thc->thc_config & THC_CFG_SENSE) >> THC_CFG_SENSE_SHIFT
 	);
 
-	waa.console = isconsole;
-	waa.scrdata = &tcx_screenlist;
-	waa.accessops = &tcx_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &tcx_accessops, isconsole);
 }
 
 int
@@ -363,6 +342,10 @@ tcx_ioctl(dev, cmd, data, flags, p)
 			if (sc->sc_cplane != NULL)
 				tcx_reset(sc, 32);
 		}
+		break;
+
+	case WSDISPLAYIO_SVIDEO:
+	case WSDISPLAYIO_GVIDEO:
 		break;
 
 	default:

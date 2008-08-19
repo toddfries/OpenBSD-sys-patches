@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.55 2004/07/30 22:29:49 miod Exp $ */
+/*	$OpenBSD: trap.c,v 1.57 2004/12/24 22:50:30 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -595,13 +595,9 @@ copyfault:
 			 */
 			if ((vm != NULL && (caddr_t)va >= vm->vm_maxsaddr)
 			    && map != kernel_map) {
-				if (rv == 0) {
-					u_int nss;
-
-					nss = btoc(USRSTACK-(u_int)va);
-					if (nss > vm->vm_ssize)
-						vm->vm_ssize = nss;
-				} else if (rv == EACCES)
+				if (rv == 0)
+					uvm_grow(p, va);
+				else if (rv == EACCES)
 					rv = EFAULT;
 			}
 			if (rv == 0) {
@@ -1183,14 +1179,12 @@ hardintr(pc, evec, frame)
 {
 	extern void straytrap(int, u_short);
 	int vec = (evec & 0xfff) >> 2;	/* XXX should be m68k macro? */
-	/*extern u_long intrcnt[];*/	/* XXX from locore */
 	struct intrhand *ih;
 	intrhand_t *list;
 	int count = 0;
 	int r;
 
 	uvmexp.intrs++;
-/*	intrcnt[level]++; */
 
 	list = &intrs[vec];
 	if (SLIST_EMPTY(list)) {

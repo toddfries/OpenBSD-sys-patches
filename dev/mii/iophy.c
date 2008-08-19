@@ -1,4 +1,4 @@
-/*	$OpenBSD: iophy.c,v 1.7 2002/03/14 01:26:57 millert Exp $	*/
+/*	$OpenBSD: iophy.c,v 1.12 2005/02/19 06:00:04 brad Exp $	*/
 /*	$NetBSD: iophy.c,v 1.8 2000/02/02 23:34:56 thorpej Exp $	*/
 
 /*
@@ -75,7 +75,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -102,6 +101,21 @@ struct cfdriver iophy_cd = {
 int	iophy_service(struct mii_softc *, struct mii_data *, int);
 void	iophy_status(struct mii_softc *);
 
+const struct mii_phy_funcs iophy_funcs = {
+	iophy_service, iophy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc iophys[] = {
+	{ MII_OUI_xxINTEL,		MII_MODEL_xxINTEL_I82553,
+	  MII_STR_xxINTEL_I82553 },
+	{ MII_OUI_INTEL,		MII_MODEL_INTEL_I82553,
+	  MII_STR_INTEL_I82553 },
+
+	{ 0,			0,
+	  NULL },
+
+};
+
 int
 iophymatch(parent, match, aux)
 	struct device *parent;
@@ -110,12 +124,7 @@ iophymatch(parent, match, aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxINTEL &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxINTEL_I82553)
-		return (10);
-
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_INTEL &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_INTEL_I82553)
+	if (mii_phy_match(ma, iophys) != NULL)
 		return (10);
 
 	return (0);
@@ -129,18 +138,18 @@ iophyattach(parent, self, aux)
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	printf(": %s, rev. %d\n", MII_STR_INTEL_I82553,
-	    MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, iophys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = iophy_service;
-	sc->mii_status = iophy_status;
+	sc->mii_funcs = &iophy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vigra.c,v 1.9 2003/06/28 17:05:33 miod Exp $	*/
+/*	$OpenBSD: vigra.c,v 1.14 2005/03/07 16:44:50 miod Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, Miodrag Vallat.
@@ -30,8 +30,8 @@
 /*
  * Driver for the Vigra VS series of SBus framebuffers.
  *
- * The VS10, VS11 and VS12 models are supported. VS10-EK should also work
- * (but it might be driven by the regular cgthree driver?)
+ * The VS10, VS11 and VS12 models are supported. VS10-EK is handled by the
+ * regular cgthree driver.
  *
  * The monochrome VS14, 16 grays VS15, and color VS18 are not supported.
  */
@@ -184,19 +184,6 @@ struct vigra_softc {
 	int	sc_nscreens;
 };
 
-struct wsscreen_descr vigra_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *vigra_scrlist[] = {
-	&vigra_stdscreen,
-};
-
-struct wsscreen_list vigra_screenlist = {
-	sizeof(vigra_scrlist) / sizeof(struct wsscreen_descr *),
-	    vigra_scrlist
-};
-
 int vigra_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int vigra_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -261,7 +248,6 @@ vigraattach(struct device *parent, struct device *self, void *args)
 {
 	struct vigra_softc *sc = (struct vigra_softc *)self;
 	struct confargs *ca = args;
-	struct wsemuldisplaydev_attach_args waa;
 	int node, row, isconsole = 0;
 	char *nam;
 
@@ -293,7 +279,8 @@ vigraattach(struct device *parent, struct device *self, void *args)
 
 	sc->sc_ih.ih_fun = vigra_intr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB);
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB,
+	    self->dv_xname);
 
 	/* enable video */
 	vigra_burner(sc, 1, 0);
@@ -324,15 +311,10 @@ vigraattach(struct device *parent, struct device *self, void *args)
 	    && sc->sc_sunfb.sf_width != 1280) ? 0 : RI_CLEAR);
 	fbwscons_setcolormap(&sc->sc_sunfb, vigra_setcolor);
 
-	vigra_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	vigra_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	vigra_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	vigra_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	if (isconsole) {
 		switch (sc->sc_sunfb.sf_width) {
 		case 640:
-			row = vigra_stdscreen.nrows - 1;
+			row = sc->sc_sunfb.sf_ro.ri_rows - 1;
 			break;
 		case 800:
 		case 1280:
@@ -343,17 +325,12 @@ vigraattach(struct device *parent, struct device *self, void *args)
 			break;
 		}
 
-		fbwscons_console_init(&sc->sc_sunfb, &vigra_stdscreen, row,
-		    vigra_burner);
+		fbwscons_console_init(&sc->sc_sunfb, row);
 	}
 
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
-	waa.console = isconsole;
-	waa.scrdata = &vigra_screenlist;
-	waa.accessops = &vigra_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &vigra_accessops, isconsole);
 }
 
 int
@@ -395,6 +372,8 @@ vigra_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:

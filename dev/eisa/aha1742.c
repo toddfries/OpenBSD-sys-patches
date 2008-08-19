@@ -1,4 +1,4 @@
-/*	$OpenBSD: aha1742.c,v 1.18 2003/10/21 10:27:12 jmc Exp $	*/
+/*	$OpenBSD: aha1742.c,v 1.20 2005/02/17 18:07:36 jfb Exp $	*/
 /*	$NetBSD: aha1742.c,v 1.61 1996/05/12 23:40:01 mycroft Exp $	*/
 
 /*
@@ -707,7 +707,7 @@ ahb_free_ecb(sc, ecb, flags)
 	 * If there were none, wake anybody waiting for one to come free,
 	 * starting with queued entries.
 	 */
-	if (ecb->chain.tqe_next == 0)
+	if (TAILQ_NEXT(ecb, chain) == NULL)
 		wakeup(&sc->free_ecb);
 
 	splx(s);
@@ -764,7 +764,7 @@ ahb_get_ecb(sc, flags)
 	 * but only if we can't allocate a new one.
 	 */
 	for (;;) {
-		ecb = sc->free_ecb.tqh_first;
+		ecb = TAILQ_FIRST(&sc->free_ecb);
 		if (ecb) {
 			TAILQ_REMOVE(&sc->free_ecb, ecb, chain);
 			break;
@@ -1058,7 +1058,7 @@ ahb_scsi_cmd(xs)
 				while (datalen && thisphys == nextphys) {
 					/*
 					 * This page is contiguous (physically)
-					 * with the the last, just extend the
+					 * with the last, just extend the
 					 * length
 					 */
 					/* how far to the end of the page */

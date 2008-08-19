@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.3 2004/08/10 19:16:18 deraadt Exp $ */
+/*	$OpenBSD: intr.h,v 1.12 2005/01/31 21:35:50 grange Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,10 +47,13 @@
  */
 #define	IMASK_EXTERNAL		/* XXX move this to config */
 
+/* This define controls wether splraise is inlined or not */
+/* #define INLINE_SPLRAISE */
 
 
 /* Interrupt priority `levels'; not mutually exclusive. */
 #define	IPL_BIO		0	/* block I/O */
+#define IPL_AUDIO	IPL_BIO
 #define	IPL_NET		1	/* network */
 #define	IPL_TTY		2	/* terminal */
 #define	IPL_VM		3	/* memory allocation */
@@ -82,6 +85,7 @@
 #define splbio()		splraise(imask[IPL_BIO])
 #define splnet()		splraise(imask[IPL_NET])
 #define spltty()		splraise(imask[IPL_TTY])
+#define splaudio()		splraise(imask[IPL_AUDIO])
 #define splclock()		splraise(SPL_CLOCKMASK|SINT_ALLMASK)
 #define splimp()		splraise(imask[IPL_VM])
 #define splvm()			splraise(imask[IPL_VM])
@@ -105,9 +109,9 @@
 #define spllowersoftclock()	spllower(SINT_CLOCKMASK)
 
 
-#define setsoftclock()  set_sint(SINT_CLOCKMASK);
-#define setsoftnet()    set_sint(SINT_NETMASK);
-#define setsofttty()    set_sint(SINT_TTYMASK);
+#define setsoftclock()  set_ipending(SINT_CLOCKMASK);
+#define setsoftnet()    set_ipending(SINT_NETMASK);
+#define setsofttty()    set_ipending(SINT_TTYMASK);
 
 void	splinit(void);
 
@@ -117,7 +121,8 @@ void	splinit(void);
  *  Schedule prioritys for base interrupts (cpu)
  */
 #define	INTPRI_CLOCK	1
-#define	INTPRI_MACEIO	2
+#define	INTPRI_MACEIO	2	/* O2 I/O interrupt */
+#define	INTPRI_XBOWMUX	2	/* Origin 200/2000 I/O interrupt */
 #define	INTPRI_MACEAUX	3
 
 /*
@@ -133,11 +138,11 @@ void clearsoftnet(void);
 void clearsofttty(void);
 #endif
 
+extern volatile intrmask_t cpl;
+extern volatile intrmask_t ipending;
+extern volatile intrmask_t astpending;
 
-volatile intrmask_t cpl;
-volatile intrmask_t ipending, astpending;
-
-intrmask_t imask[NIPLS];
+extern intrmask_t imask[NIPLS];
 
 /*
  *  A note on clock interrupts. Clock interrupts are always
@@ -147,22 +152,23 @@ intrmask_t imask[NIPLS];
  */
 
 /* Inlines */
-static __inline void register_pending_int_handler(void (*)(void));
-static __inline int splraise(int newcpl);
+static __inline void register_pending_int_handler(void (*)(int));
 static __inline void splx(int newcpl);
 static __inline int spllower(int newcpl);
 
-typedef void  (void_f) (void);
-void_f *pending_hand;
+typedef void  (int_f) (int);
+extern int_f *pending_hand;
 
 static __inline void
-register_pending_int_handler(void(*pending)(void))
+register_pending_int_handler(void(*pending)(int))
 {
 	pending_hand = pending;
 }
 
 /*
  */
+#ifdef INLINE_SPLRAISE
+static __inline int splraise(int newcpl);
 static __inline int
 splraise(int newcpl)
 {
@@ -174,14 +180,17 @@ splraise(int newcpl)
 	__asm__ (" sync\n .set reorder\n");
 	return (oldcpl);
 }
+#else
+int splraise(int newcpl);
+#endif
 
 static __inline void
 splx(int newcpl)
 {
-	cpl = newcpl;
-	if ((ipending & ~newcpl) && (pending_hand != NULL)) {
-		(*pending_hand)();
-	}
+	if (ipending & ~newcpl)
+		(*pending_hand)(newcpl);
+	else
+		cpl = newcpl;
 }
 
 static __inline int
@@ -190,33 +199,38 @@ spllower(int newcpl)
 	int oldcpl;
 
 	oldcpl = cpl;
-	cpl = newcpl;
-	if ((ipending & ~newcpl) && (pending_hand != NULL)) {
-		(*pending_hand)();
-	}
+	if (ipending & ~newcpl)
+		(*pending_hand)(newcpl);
+	else
+		cpl = newcpl;
 	return (oldcpl);
 }
 
 /*
  *  Atomically update ipending.
  */
-void set_sint(int pending);
+void set_ipending(int);
+void clr_ipending(int);
 
 /*
  * Interrupt control struct used by interrupt dispatchers
  * to hold interrupt handler info.
  */
 
+#include <sys/evcount.h>
+
 struct intrhand {
 	struct	intrhand *ih_next;
 	int	(*ih_fun)(void *);
 	void	*ih_arg;
-	u_long	ih_count;
 	int	ih_level;
 	int	ih_irq;
 	char	*ih_what;
 	void	*frame;
+	struct evcount  ih_count;
 };
+
+extern struct intrhand *intrhand[INTMASKSIZE];
 
 /*
  * Low level interrupt dispatcher registration data.
@@ -225,13 +239,8 @@ struct intrhand {
 
 struct trap_frame;
 
-struct {
-	intrmask_t int_mask;
-	intrmask_t (*int_hand)(intrmask_t, struct trap_frame *);
-} cpu_int_tab[NLOWINT];
-
-intrmask_t idle_mask;
-int	last_low_int;
+extern intrmask_t idle_mask;
+extern int last_low_int;
 
 void set_intr(int, intrmask_t, intrmask_t(*)(intrmask_t, struct trap_frame *));
 
@@ -247,10 +256,10 @@ extern void *hwmask_addr;
  */
 
 void *generic_intr_establish(void *, u_long, int, int,
-	    int (*) __P((void *)), void *, char *);
+	    int (*)(void *), void *, char *);
 void generic_intr_disestablish(void *, void *);
 void generic_intr_makemasks(void);
-void generic_do_pending_int(void);
+void generic_do_pending_int(int);
 intrmask_t generic_iointr(intrmask_t, struct trap_frame *);
 
 #endif /* _LOCORE */

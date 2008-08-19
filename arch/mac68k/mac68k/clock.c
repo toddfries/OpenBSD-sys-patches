@@ -1,5 +1,5 @@
-/*	$OpenBSD: clock.c,v 1.16 2004/08/03 12:10:47 todd Exp $	*/
-/*	$NetBSD: clock.c,v 1.36 1997/10/07 03:04:55 scottr Exp $	*/
+/*	$OpenBSD: clock.c,v 1.18 2004/11/30 01:44:22 martin Exp $	*/
+/*	$NetBSD: clock.c,v 1.39 1999/11/05 19:14:56 scottr Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -96,7 +96,7 @@
 int	clock_debug = 0;
 #endif
 
-void	rtclock_intr(void);
+int	rtclock_intr(void *);
 
 #define	DIFF19041970	2082844800
 #define	DIFF19701990	630720000
@@ -408,6 +408,8 @@ resettodr()
 		    "to the PRAM on this system.\n");
 #endif
 }
+
+
 /*
  * The Macintosh timers decrement once every 1.2766 microseconds.
  * MGFH2, p. 180
@@ -415,62 +417,19 @@ resettodr()
 #define	CLK_RATE	12766
 
 #define	DELAY_CALIBRATE	(0xffffff << 7)	/* Large value for calibration */
-#define	LARGE_DELAY	0x40000		/* About 335 msec */
 
 u_int		delay_factor = DELAY_CALIBRATE;
 volatile int	delay_flag = 1;
 
-/*
- * delay(usec)
- *	Delay usec microseconds.
- *
- * The delay_factor is scaled up by a factor of 128 to avoid loss
- * of precision for small delays.  As a result of this, note that
- * delays larger that LARGE_DELAY will be up to 128 usec too short,
- * due to adjustments for calculations involving 32 bit values.
- */
-void
-delay(usec)
-	unsigned usec;
-{
-	volatile unsigned int cycles;
+int		_delay(u_int);
+static int	delay_timer1_irq(void *);
 
-	if (usec > LARGE_DELAY)
-		cycles = (usec >> 7) * delay_factor;
-	else
-		cycles = ((usec > 0 ? usec : 1) * delay_factor) >> 7;
-
-	while ((cycles-- > 0) && delay_flag);
-}
-
-static unsigned	dummy_delay(unsigned);
-/*
- * Dummy delay calibration.  Functionally identical to delay(), but
- * returns the number of times through the loop.
- */
-static unsigned
-dummy_delay(usec)
-	unsigned usec;
-{
-	volatile unsigned int cycles;
-
-	if (usec > LARGE_DELAY)
-		cycles = (usec >> 7) * delay_factor;
-	else
-		cycles = ((usec > 0 ? usec : 1) * delay_factor) >> 7;
-
-	while ((cycles-- > 0) && delay_flag);
-
-	return ((delay_factor >> 7) - cycles);
-}
-
-static void	delay_timer1_irq(void *);
-
-static void
+static int
 delay_timer1_irq(dummy)
 	void *dummy;
 {
 	delay_flag = 0;
+	return 1;
 }
 
 /*
@@ -479,12 +438,13 @@ delay_timer1_irq(dummy)
 void
 mac68k_calibrate_delay()
 {
-	int n;
-	unsigned sum;
+	u_int sum, n;
+
+	(void)spl0();
 
 	/* Disable VIA1 timer 1 interrupts and set up service routine */
 	via_reg(VIA1, vIER) = V1IF_T1;
-	via1_register_irq(VIA1_T1, delay_timer1_irq, NULL);
+	via1_register_irq(VIA1_T1, delay_timer1_irq, NULL, NULL);
 
 	/* Set the timer for one-shot mode, then clear and enable interrupts */
 	via_reg(VIA1, vACR) &= ~ACR_T1LATCH;
@@ -500,12 +460,12 @@ mac68k_calibrate_delay()
 		delay_flag = 1;
 		via_reg(VIA1, vT1C) = 0;	/* 1024 clock ticks */
 		via_reg(VIA1, vT1CH) = 4;	/* (approx 1.3 msec) */
-		sum += dummy_delay(1);
+		sum += ((delay_factor >> 7) - _delay(1));
 	}
 
 	/* Disable timer interrupts and reset service routine */
 	via_reg(VIA1, vIER) = V1IF_T1;
-	via1_register_irq(VIA1_T1, (void (*)(void *))rtclock_intr, NULL);
+	via1_register_irq(VIA1_T1, rtclock_intr, NULL, NULL);
 
 	/*
 	 * If this weren't integer math, the following would look
@@ -532,4 +492,6 @@ mac68k_calibrate_delay()
 	if (clock_debug)
 		printf("mac68k_calibrate_delay(): delay_factor calibrated\n");
 #endif
+
+	(void)splhigh();
 }

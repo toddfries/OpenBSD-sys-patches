@@ -1,4 +1,4 @@
-/*	$OpenBSD: mac68k5380.c,v 1.18 2004/08/03 12:10:47 todd Exp $	*/
+/*	$OpenBSD: mac68k5380.c,v 1.20 2004/12/08 06:59:43 miod Exp $	*/
 /*	$NetBSD: mac68k5380.c,v 1.29 1997/02/28 15:50:50 scottr Exp $	*/
 
 /*
@@ -128,8 +128,8 @@ static volatile u_char	*ncr_5380_without_drq	= (volatile u_char *) 0x12000;
 #define GET_5380_REG(rnum)	SCSI_5380->scsi_5380[((rnum)<<4)]
 #define SET_5380_REG(rnum,val)	(SCSI_5380->scsi_5380[((rnum)<<4)] = (val))
 
-static void	ncr5380_irq_intr(void *);
-static void	ncr5380_drq_intr(void *);
+static int	ncr5380_irq_intr(void *);
+static int	ncr5380_drq_intr(void *);
 static void	do_ncr5380_drq_intr(void *);
 
 static __inline__ void	scsi_clr_ipend(void);
@@ -155,6 +155,7 @@ scsi_mach_init(sc)
 	struct ncr_softc	*sc;
 {
 	static int	initted = 0;
+	static struct via2hand ih_irq, ih_drq;
 
 	if (initted++)
 		panic("scsi_mach_init called again.");
@@ -174,8 +175,14 @@ scsi_mach_init(sc)
 		scsi_flag   = Via1Base + VIA2 * 0x2000 + rIFR;
 	}
 
-	via2_register_irq(VIA2_SCSIIRQ, ncr5380_irq_intr, sc);
-	via2_register_irq(VIA2_SCSIDRQ, ncr5380_drq_intr, sc);
+	ih_irq.vh_fn = ncr5380_irq_intr;
+	ih_irq.vh_arg = sc;
+	ih_irq.vh_ipl = VIA2_SCSIIRQ;
+	via2_register_irq(&ih_irq, sc->sc_dev.dv_xname);
+	ih_drq.vh_fn = ncr5380_drq_intr;
+	ih_drq.vh_arg = sc;
+	ih_drq.vh_ipl = VIA2_SCSIDRQ;
+	via2_register_irq(&ih_drq, sc->sc_dev.dv_xname);
 }
 
 static int
@@ -320,7 +327,7 @@ extern	u_char	ncr5380_no_parchk;
 	return 0;
 }
 
-static void
+static int
 ncr5380_irq_intr(p)
 	void	*p;
 {
@@ -328,11 +335,12 @@ ncr5380_irq_intr(p)
 
 #if USE_PDMA
 	if (pdma_ready()) {
-		return;
+		return (1);
 	}
 #endif
 	scsi_idisable();
 	ncr_ctrl_intr(cur_softc);
+	return (1);
 }
 
 /*
@@ -517,20 +525,22 @@ extern	int			*nofault, m68k_fault_addr;
 	nofault = (int *) 0;
 
 	PID("end drq");
-	return;
-#else
-	return;
 #endif	/* if USE_PDMA */
 }
 
-static void
+static int
 ncr5380_drq_intr(p)
 	void	*p;
 {
+	int rv = 0;
+
 	while (GET_5380_REG(NCR5380_DMSTAT) & SC_DMA_REQ) {
 		do_ncr5380_drq_intr(p);
 		scsi_clear_drq();
+		rv = 1;
 	}
+
+	return (rv);
 }
 
 #if USE_PDMA

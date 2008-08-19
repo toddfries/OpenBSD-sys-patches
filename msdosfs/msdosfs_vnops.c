@@ -1,7 +1,8 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.46 2004/06/24 19:35:25 tholo Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.53 2005/03/14 22:31:52 tom Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
+ * Copyright (C) 2005 Thomas Wang.
  * Copyright (C) 1994, 1995, 1997 Wolfgang Solfrank.
  * Copyright (C) 1994, 1995, 1997 TooLs GmbH.
  * All rights reserved.
@@ -74,6 +75,8 @@
 #include <msdosfs/denode.h>
 #include <msdosfs/msdosfsmount.h>
 #include <msdosfs/fat.h>
+
+static uint32_t fileidhash(uint64_t);
 
 /*
  * Some general notes:
@@ -265,27 +268,63 @@ msdosfs_getattr(v)
 	struct msdosfsmount *pmp = dep->de_pmp;
 	struct vattr *vap = ap->a_vap;
 	struct timespec ts;
-	uint32_t dirsperblk = pmp->pm_BytesPerSec / sizeof(struct direntry);
 	uint32_t fileid;
 
 	getnanotime(&ts);
 	DETIMES(dep, &ts, &ts, &ts);
 	vap->va_fsid = dep->de_dev;
+
 	/*
-	 * The following computation of the fileid must be the same as that
-	 * used in msdosfs_readdir() to compute d_fileno. If not, pwd
-	 * doesn't work.
+	 * The following computation of the fileid must be the same as
+	 * that used in msdosfs_readdir() to compute d_fileno. If not,
+	 * pwd doesn't work.
+	 *
+	 * We now use the starting cluster number as the fileid/fileno.
+	 * This works for both files and directories (including the root
+	 * directory, on FAT32).  Even on FAT32, this will at most be a
+	 * 28-bit number, as the high 4 bits of FAT32 cluster numbers
+	 * are reserved.
+	 *
+	 * However, we do need to do something for 0-length files, which
+	 * will not have a starting cluster number.
+	 *
+	 * These files cannot be directories, since (except for /, which
+	 * is special-cased anyway) directories contain entries for . and
+	 * .., so must have non-zero length.
+	 *
+	 * In this case, we just create a non-cryptographic hash of the
+	 * original fileid calculation, and set the top bit.
+	 *
+	 * This algorithm has the benefit that all directories, and all
+	 * non-zero-length files, will have fileids that are persistent
+	 * across mounts and reboots, and that cannot collide (as long
+	 * as the filesystem is not corrupt).  Zero-length files will
+	 * have fileids that are persistent, but that may collide.  We
+	 * will just have to live with that.
 	 */
+	fileid = dep->de_StartCluster;
+
 	if (dep->de_Attributes & ATTR_DIRECTORY) {
-	        fileid = cntobn(pmp, dep->de_StartCluster) * dirsperblk;
+		/* Special-case root */
 		if (dep->de_StartCluster == MSDOSFSROOT)
-		        fileid = 1;
+			fileid = FAT32(pmp) ? pmp->pm_rootdirblk : 1;
 	} else {
-	        fileid = cntobn(pmp, dep->de_dirclust) * dirsperblk;
-		if (dep->de_dirclust == MSDOSFSROOT)
-		        fileid = roottobn(pmp, 0) * dirsperblk;
-		fileid += dep->de_diroffset / sizeof(struct direntry);
+		if (dep->de_FileSize == 0) {
+			uint32_t dirsperblk;
+			uint64_t fileid64;
+
+			dirsperblk = pmp->pm_BytesPerSec /
+			    sizeof(struct direntry);
+
+			fileid64 = (dep->de_dirclust == MSDOSFSROOT) ?
+			    roottobn(pmp, 0) : cntobn(pmp, dep->de_dirclust);
+			fileid64 *= dirsperblk;
+			fileid64 += dep->de_diroffset / sizeof(struct direntry);
+
+			fileid = fileidhash(fileid64);
+		}
 	}
+
 	vap->va_fileid = fileid;
 	vap->va_mode = (S_IXUSR|S_IXGRP|S_IXOTH) | (S_IRUSR|S_IRGRP|S_IROTH) |
 	    ((dep->de_Attributes & ATTR_READONLY) ? 0 : (S_IWUSR|S_IWGRP|S_IWOTH));
@@ -425,13 +464,14 @@ msdosfs_read(v)
 		struct ucred *a_cred;
 	} */ *ap = v;
 	int error = 0;
-	int diff;
+	uint32_t diff;
 	int blsize;
 	int isadir;
-	long n;
+	uint32_t n;
 	long on;
 	daddr_t lbn;
 	daddr_t rablock;
+	daddr_t rablkno;
 	struct buf *bp;
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(vp);
@@ -448,14 +488,22 @@ msdosfs_read(v)
 
 	isadir = dep->de_Attributes & ATTR_DIRECTORY;
 	do {
+		if (uio->uio_offset >= dep->de_FileSize)
+			return (0);
+
 		lbn = de_cluster(pmp, uio->uio_offset);
 		on = uio->uio_offset & pmp->pm_crbomask;
 		n = min((uint32_t) (pmp->pm_bpcluster - on), uio->uio_resid);
-		diff = dep->de_FileSize - uio->uio_offset;
-		if (diff <= 0)
-			return (0);
+
+		/*
+		 * de_FileSize is uint32_t, and we know that uio_offset <
+		 * de_FileSize, so uio->uio_offset < 2^32.  Therefore
+		 * the cast to uint32_t on the next line is safe.
+		 */
+		diff = dep->de_FileSize - (uint32_t)uio->uio_offset;
 		if (diff < n)
 			n = diff;
+
 		/* convert cluster # to block # if a directory */
 		if (isadir) {
 			error = pcbmap(dep, lbn, &lbn, 0, &blsize);
@@ -471,11 +519,12 @@ msdosfs_read(v)
 			error = bread(pmp->pm_devvp, lbn, blsize, NOCRED, &bp);
 		} else {
 			rablock = lbn + 1;
+			rablkno = de_cn2bn(pmp, rablock);
 			if (dep->de_lastr + 1 == lbn &&
 			    de_cn2off(pmp, rablock) < dep->de_FileSize)
-				error = breada(vp, de_cn2bn(pmp, lbn),
-				    pmp->pm_bpcluster, de_cn2bn(pmp, rablock),
-				    pmp->pm_bpcluster, NOCRED, &bp);
+				error = breadn(vp, de_cn2bn(pmp, lbn),
+				    pmp->pm_bpcluster, &rablkno,
+				    &pmp->pm_bpcluster, 1, NOCRED, &bp);
 			else
 				error = bread(vp, de_cn2bn(pmp, lbn),
 				    pmp->pm_bpcluster, NOCRED, &bp);
@@ -548,6 +597,10 @@ msdosfs_write(v)
 
 	if (uio->uio_resid == 0)
 		return (0);
+
+	/* Don't bother to try to write files larger than the f/s limit */
+	if (uio->uio_offset + uio->uio_resid > MSDOSFS_FILESIZE_MAX)
+		return (EFBIG);
 
 	/*
 	 * If they've exceeded their filesize limit, tell them about it.
@@ -717,7 +770,7 @@ msdosfs_poll(v)
 		struct proc *a_p;
 	} */ *ap = v;
 
-	return (seltrue(ap->a_vp->v_rdev, ap->a_events, ap->a_p));
+	return (ap->a_events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
 }
 
 /*
@@ -912,7 +965,7 @@ abortit:
 	 * If source and dest are the same, do nothing.
 	 */
 	if (tvp == fvp) {
-	        error = 0;
+		error = 0;
 		goto abortit;
 	}
 
@@ -960,7 +1013,7 @@ abortit:
 	/*
 	 * If ".." must be changed (ie the directory gets a new
 	 * parent) then the source directory must not be in the
-	 * directory heirarchy above the target, as this would
+	 * directory hierarchy above the target, as this would
 	 * orphan everything below the source directory. Also
 	 * the user must have write permission in the source so
 	 * as to be able to change "..". We must repeat the call
@@ -1257,7 +1310,7 @@ msdosfs_mkdir(v)
 	putushort(denp[0].deMTime, ndirent.de_MTime);
 	pcl = pdep->de_StartCluster;
 	if (FAT32(pmp) && pcl == pmp->pm_rootdirblk)
-	        pcl = 0;
+		pcl = 0;
 	putushort(denp[1].deStartCluster, pcl);
 	putushort(denp[1].deCDate, ndirent.de_CDate);
 	putushort(denp[1].deCTime, ndirent.de_CTime);
@@ -1266,7 +1319,7 @@ msdosfs_mkdir(v)
 	putushort(denp[1].deMDate, ndirent.de_MDate);
 	putushort(denp[1].deMTime, ndirent.de_MTime);
 	if (FAT32(pmp)) {
-	        putushort(denp[0].deHighClust, newcluster >> 16);
+		putushort(denp[0].deHighClust, newcluster >> 16);
 		putushort(denp[1].deHighClust, pdep->de_StartCluster >> 16);
 	}
 
@@ -1488,9 +1541,7 @@ msdosfs_readdir(v)
 			for (n = (int)offset / sizeof(struct direntry);
 			     n < 2; n++) {
 			        if (FAT32(pmp))
-				        dirbuf.d_fileno = cntobn(pmp,
-								 pmp->pm_rootdirblk)
-					                  * dirsperblk;
+				        dirbuf.d_fileno = pmp->pm_rootdirblk;
 				else
 				        dirbuf.d_fileno = 1;
 				dirbuf.d_type = DT_DIR;
@@ -1583,41 +1634,43 @@ msdosfs_readdir(v)
 				chksum = -1;
 				continue;
 			}
+
 			/*
 			 * This computation of d_fileno must match
 			 * the computation of va_fileid in
 			 * msdosfs_getattr.
 			 */
+			fileno = getushort(dentp->deStartCluster);
+			if (FAT32(pmp))
+			    fileno |= getushort(dentp->deHighClust) << 16;
+
 			if (dentp->deAttributes & ATTR_DIRECTORY) {
-				fileno = getushort(dentp->deStartCluster);
-				if (FAT32(pmp))
-				        fileno |=
-					    getushort(dentp->deHighClust) <<
-					    16;
-				/* if this is the root directory */
-				if (fileno == MSDOSFSROOT)
-				        fileno = FAT32(pmp) ?
-					    cntobn(pmp, pmp->pm_rootdirblk) *
-					    dirsperblk :
-					    1;
-				else
-				        fileno = cntobn(pmp, fileno) *
-					    dirsperblk;
+				/* Special-case root */
+				if (fileno == MSDOSFSROOT)  {
+					fileno = FAT32(pmp) ?
+					    pmp->pm_rootdirblk : 1;
+				}
+
 				dirbuf.d_fileno = fileno;
 				dirbuf.d_type = DT_DIR;
 			} else {
-				/*
-				 * If the file's dirent lives in
-				 * root dir.
-				 */
-			        fileno = cntobn(pmp, cn) * dirsperblk;
-				if (cn == MSDOSFSROOT)
-				        fileno = roottobn(pmp, 0) * dirsperblk;
-				fileno +=
-				    dentp - (struct direntry *)bp->b_data;
+				if (getulong(dentp->deFileSize) == 0) {
+					uint64_t fileno64;
+
+					fileno64 = (cn == MSDOSFSROOT) ?
+					    roottobn(pmp, 0) : cntobn(pmp, cn);
+
+					fileno64 *= dirsperblk;
+					fileno64 += dentp -
+					    (struct direntry *)bp->b_data;
+
+					fileno = fileidhash(fileno64);
+				}
+
 				dirbuf.d_fileno = fileno;
 				dirbuf.d_type = DT_REG;
 			}
+
 			if (chksum != winChksum(dentp->deName))
 				dirbuf.d_namlen = dos2unixfn(dentp->deName,
 				    (u_char *)dirbuf.d_name,
@@ -1688,7 +1741,7 @@ msdosfs_lock(v)
 		int a_flags;
 		struct proc *a_p;
 	} */ *ap = v;
-        struct vnode *vp = ap->a_vp;
+	struct vnode *vp = ap->a_vp;
 
 	return (lockmgr(&VTODE(vp)->de_lock, ap->a_flags, &vp->v_interlock,
 	    ap->a_p));
@@ -1884,6 +1937,29 @@ msdosfs_pathconf(v)
 		return (EINVAL);
 	}
 	/* NOTREACHED */
+}
+
+/*
+ * Thomas Wang's hash function, severely hacked to always set the high
+ * bit on the number it returns (so no longer a proper hash function).
+ */
+static uint32_t
+fileidhash(uint64_t fileid)
+{
+	uint64_t c1 = 0x6e5ea73858134343LL;
+	uint64_t c2 = 0xb34e8f99a2ec9ef5LL;
+
+	/*
+	 * We now have the original fileid value, as 64-bit value.
+	 * We need to reduce it to 32-bits, with the top bit set.
+	 */
+	fileid ^= ((c1 ^ fileid) >> 32);
+	fileid *= c1;
+	fileid ^= ((c2 ^ fileid) >> 31);
+	fileid *= c2;
+	fileid ^= ((c1 ^ fileid) >> 32);
+
+	return (uint32_t)(fileid | 0x80000000);
 }
 
 /* Global vfs data structures for msdosfs */

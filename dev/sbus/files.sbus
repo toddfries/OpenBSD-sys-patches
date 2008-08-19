@@ -1,11 +1,11 @@
-#	$OpenBSD: files.sbus,v 1.27 2004/06/21 04:41:10 miod Exp $
+#	$OpenBSD: files.sbus,v 1.31 2005/03/08 20:00:25 tdeval Exp $
 #	$NetBSD: files.sbus,v 1.16 2000/12/08 17:29:12 martin Exp $
 #
 # Config file and device description for machine-independent SBUS code.
 # Included by ports that need it.
 
-device	sbus { [slot = -1], [offset = -1] }
-#notyet:file	dev/sbus/sbus.c			sbus
+device	sbus {[slot = -1], [offset = -1]}
+#notyet:file	dev/sbus/sbus.c		sbus
 
 # Sbus NCR539x SCSI & Lance Ethernet
 device	dma {}: lsi64854
@@ -52,6 +52,10 @@ file	dev/sbus/cs4231.c		audiocs
 attach	isp at sbus with isp_sbus
 file	dev/sbus/isp_sbus.c		isp_sbus
 
+device	agten: wsemuldisplaydev, rasops8, wsemul_sun
+attach	agten at sbus
+file	dev/sbus/agten.c		agten
+
 device	bwtwo: wsemuldisplaydev, rasops1, wsemul_sun
 attach	bwtwo at sbus
 file	dev/sbus/bwtwo.c		bwtwo
@@ -64,21 +68,29 @@ device	cgthree: wsemuldisplaydev, rasops8, wsemul_sun
 attach	cgthree at sbus
 file	dev/sbus/cgthree.c		cgthree
 
-device	zx: wsemuldisplaydev, rasops32, wsemul_sun
-attach	zx at sbus
-file	dev/sbus/zx.c			zx
-
-device	rfx: wsemuldisplaydev, rasops8, wsemul_sun
-attach	rfx at sbus
-file	dev/sbus/rfx.c			rfx
+device	cgtwelve: wsemuldisplaydev, rasops1, wsemul_sun
+attach	cgtwelve at sbus
+file	dev/sbus/cgtwelve.c		cgtwelve
 
 device	mgx: wsemuldisplaydev, rasops8, wsemul_sun
 attach	mgx at sbus
 file	dev/sbus/mgx.c			mgx
 
-device	agten: wsemuldisplaydev, rasops8, wsemul_sun
-attach	agten at sbus
-file	dev/sbus/agten.c		agten
+device	rfx: wsemuldisplaydev, rasops8, wsemul_sun
+attach	rfx at sbus
+file	dev/sbus/rfx.c			rfx
+
+device	tvtwo: wsemuldisplaydev, rasops32, wsemul_sun
+attach	tvtwo at sbus
+file	dev/sbus/tvtwo.c		tvtwo
+
+device	vigra: wsemuldisplaydev, rasops8, wsemul_sun
+attach	vigra at sbus
+file	dev/sbus/vigra.c		vigra
+
+device	zx: wsemuldisplaydev, rasops32, wsemul_sun
+attach	zx at sbus
+file	dev/sbus/zx.c			zx
 
 device	magma {}
 attach	magma at sbus
@@ -114,3 +126,7 @@ device	stp: pcmciabus
 attach	stp at sbus with stp_sbus
 file	dev/sbus/stp4020.c		stp
 
+# ``XBox'' SBus Expansion
+device	xbox {}
+attach	xbox at sbus
+file	dev/sbus/xbox.c			xbox

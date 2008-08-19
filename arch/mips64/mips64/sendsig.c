@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendsig.c,v 1.3 2004/08/10 20:15:47 deraadt Exp $ */
+/*	$OpenBSD: sendsig.c,v 1.6 2004/11/02 21:05:34 pefo Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -72,6 +72,8 @@
 
 #include <machine/regnum.h>
 
+struct proc *machFPCurProcPtr;		/* pointer to last proc to use FP */
+
 /*
  * WARNING: code in locore.s assumes the layout shown for sf_signum
  * thru sf_handler so... don't screw with them!
@@ -131,8 +133,8 @@ sendsig(catcher, sig, mask, code, type, val)
 		psp->ps_sigstk.ss_flags |= SA_ONSTACK;
 	} else
 		fp = (struct sigframe *)(regs->sp - fsize);
-	if ((long)fp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
-		(void)uvm_grow(p, (long)fp);
+	if ((vaddr_t)fp <= USRSTACK - ctob(p->p_vmspace->vm_ssize))
+		(void)uvm_grow(p, (vaddr_t)fp);
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) ||
 	    ((sigdebug & SDB_KSTACK) && (p->p_pid == sigpid)))
@@ -149,7 +151,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	ksc.mulhi = regs->mulhi;
 	ksc.sc_regs[0] = 0xACEDBADE;		/* magic number */
 	bcopy((caddr_t)&regs->ast, (caddr_t)&ksc.sc_regs[1],
-		sizeof(ksc.sc_regs) - sizeof(int));
+		sizeof(ksc.sc_regs) - sizeof(register_t));
 	ksc.sc_fpused = p->p_md.md_flags & MDP_FPUSED;
 	if (ksc.sc_fpused) {
 		extern struct proc *machFPCurProcPtr;
@@ -179,13 +181,8 @@ bail:
 		 * Process has trashed its stack; give it an illegal
 		 * instruction to halt it in its tracks.
 		 */
-		SIGACTION(p, SIGILL) = SIG_DFL;
-		sig = sigmask(SIGILL);
-		p->p_sigignore &= ~sig;
-		p->p_sigcatch &= ~sig;
-		p->p_sigmask &= ~sig;
-		psignal(p, SIGILL);
-		return;
+		sigexit(p, SIGILL);
+		/* NOTREACHED */
 	}
 	/*
 	 * Build the argument list for the signal handler.
@@ -268,6 +265,9 @@ sys_sigreturn(p, v, retval)
 	regs->pc = scp->sc_pc;
 	regs->mullo = scp->mullo;
 	regs->mulhi = scp->mulhi;
+	regs->sr &= ~SR_COP_1_BIT;	/* Zap current FP state */
+	if (p == machFPCurProcPtr) 
+		machFPCurProcPtr = NULL;
 	bcopy((caddr_t)&scp->sc_regs[1], (caddr_t)&regs->ast,
 		sizeof(scp->sc_regs) - sizeof(register_t));
 	if (scp->sc_fpused)

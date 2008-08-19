@@ -1,4 +1,4 @@
-/*	$OpenBSD: busdma.c,v 1.4 2004/08/10 20:15:47 deraadt Exp $ */
+/*	$OpenBSD: busdma.c,v 1.7 2004/12/25 23:02:24 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -35,6 +35,7 @@
 
 #include <uvm/uvm_extern.h>
 
+#include <mips64/archtype.h>
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
 
@@ -140,7 +141,10 @@ _dmamap_load(t, map, buf, buflen, p, flags)
 		/*
 		 * Get the physical address for this segment.
 		 */
-		pmap_extract(pmap, (vaddr_t)vaddr, (paddr_t *)&curaddr);
+		if (pmap_extract(pmap, (vaddr_t)vaddr, (paddr_t *)&curaddr) ==
+		    FALSE)
+			panic("_dmapmap_load: pmap_extract(%x, %x) failed!",
+			    pmap, vaddr);
 
 		/*
 		 * Compute the segment size, and adjust counts.
@@ -229,7 +233,9 @@ _dmamap_load_mbuf(t, map, m, flags)
 
 			incr = min(buflen, NBPG);
 			buflen -= incr;
-			(void) pmap_extract(pmap_kernel(), vaddr, &pa);
+			if (pmap_extract(pmap_kernel(), vaddr, &pa) == FALSE)
+				panic("_dmamap_load_mbuf: pmap_extract(%x, %x) failed!",
+				    pmap_kernel(), vaddr);
 			pa += t->dma_offs;
 
 			if (i > 0 && pa == (map->dm_segs[i-1].ds_addr + map->dm_segs[i-1].ds_len)
@@ -493,12 +499,10 @@ _dmamem_map(t, segs, nsegs, size, kvap, flags)
 			    VM_PROT_READ | VM_PROT_WRITE,
 			    VM_PROT_READ | VM_PROT_WRITE | PMAP_WIRED);
 			segs[curseg].ds_vaddr = va;
-#if 0
-			if (flags & BUS_DMAMEM_NOSYNC)
-				pmap_changebit(addr, PG_N, ~0);
-			else
-				pmap_changebit(addr, 0, ~PG_N);
-#endif
+
+			if (flags & BUS_DMA_COHERENT &&
+			    sys_config.system_type == SGI_O2) 
+				pmap_page_cache(PHYS_TO_VM_PAGE(addr - t->dma_offs), PV_UNCACHED);
 		}
 	}
 
@@ -602,14 +606,14 @@ _dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	 * Compute the location, size, and number of segments actually
 	 * returned by the VM code.
 	 */
-	m = mlist.tqh_first;
+	m = TAILQ_FIRST(&mlist);
 	curseg = 0;
 	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_addr += t->dma_offs;
 	segs[curseg].ds_len = PAGE_SIZE;
-	m = m->pageq.tqe_next;
+	m = TAILQ_NEXT(m, pageq);
 
-	for (; m != NULL; m = m->pageq.tqe_next) {
+	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < low || curaddr >= high) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.58 2004/07/25 23:09:19 tedu Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.60 2005/02/17 18:07:37 jfb Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -999,7 +999,7 @@ abortit:
 	/*
 	 * If ".." must be changed (ie the directory gets a new
 	 * parent) then the source directory must not be in the
-	 * directory heirarchy above the target, as this would
+	 * directory hierarchy above the target, as this would
 	 * orphan everything below the source directory. Also
 	 * the user must have write permission in the source so
 	 * as to be able to change "..". We must repeat the call 
@@ -1697,7 +1697,7 @@ ufs_lock(v)
 	struct vop_lock_args /* {
 		struct vnode *a_vp;
 		int a_flags;
-		sturct proc *a_p;
+		struct proc *a_p;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 

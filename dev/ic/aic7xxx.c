@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx.c,v 1.59 2004/08/13 23:38:54 krw Exp $	*/
+/*	$OpenBSD: aic7xxx.c,v 1.63 2005/02/20 15:35:35 miod Exp $	*/
 /*	$NetBSD: aic7xxx.c,v 1.108 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: aic7xxx.c,v 1.59 2004/08/13 23:38:54 krw Exp $
+ * $Id: aic7xxx.c,v 1.63 2005/02/20 15:35:35 miod Exp $
  */
 /*
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
@@ -565,8 +565,8 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 			sg->len |= AHC_DMA_LAST_SEG;
 
 			/* Fixup byte order */
-			sg->addr = ahc_htole32(sg->addr);
-			sg->len = ahc_htole32(sg->len);
+			sg->addr = aic_htole32(sg->addr);
+			sg->len = aic_htole32(sg->len);
 
 			sc->opcode = REQUEST_SENSE;
 			sc->byte2 = 0;
@@ -610,7 +610,7 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 			hscb->dataptr = sg->addr; 
 			hscb->datacnt = sg->len;
 			hscb->sgptr = scb->sg_list_phys | SG_FULL_RESID;
-			hscb->sgptr = ahc_htole32(hscb->sgptr);
+			hscb->sgptr = aic_htole32(hscb->sgptr);
 #ifdef __OpenBSD__
 			bus_dmamap_sync(ahc->parent_dmat,
 			    ahc->scb_data->sense_dmamap,
@@ -836,7 +836,7 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 					if ((ahc_inb(ahc, SCSISIGI)
 					  & (CDI|MSGI)) != 0)
 						break;
-					ahc_delay(100);
+					aic_delay(100);
 				}
 				ahc_outb(ahc, SXFRCTL1,
 					 ahc_inb(ahc, SXFRCTL1) & ~BITBUCKET);
@@ -894,10 +894,10 @@ ahc_handle_seqint(struct ahc_softc *ahc, u_int intstat)
 
 				printf("sg[%d] - Addr 0x%x%x : Length %d\n",
 				       i,
-				       (ahc_le32toh(scb->sg_list[i].len) >> 24
+				       (aic_le32toh(scb->sg_list[i].len) >> 24
 				        & SG_HIGH_ADDR_BITS),
-				       ahc_le32toh(scb->sg_list[i].addr),
-				       ahc_le32toh(scb->sg_list[i].len)
+				       aic_le32toh(scb->sg_list[i].addr),
+				       aic_le32toh(scb->sg_list[i].len)
 				       & AHC_SG_LEN_MASK);
 			}
 		}
@@ -1498,8 +1498,6 @@ ahc_clear_critical_section(struct ahc_softc *ahc)
 		 * so we are really executing the instruction just
 		 * before it.
 		 */
-		if (seqaddr != 0)
-			seqaddr -= 1;
 		cs = ahc->critical_sections;
 		for (i = 0; i < ahc->num_critical_sections; i++, cs++) {
 			
@@ -1551,7 +1549,7 @@ ahc_clear_critical_section(struct ahc_softc *ahc)
 		}
 		ahc_outb(ahc, HCNTRL, ahc->unpause);
 		while (!ahc_is_paused(ahc))
-			ahc_delay(200);
+			aic_delay(200);
 	}
 	if (stepping) {
 		ahc_outb(ahc, SIMODE0, simode0);
@@ -1599,18 +1597,18 @@ ahc_print_scb(struct scb *scb)
 	for (i = 0; i < sizeof(hscb->shared_data.cdb); i++)
 		printf("%#02x", hscb->shared_data.cdb[i]);
 	printf("        dataptr:%#x datacnt:%#x sgptr:%#x tag:%#x\n",
-		ahc_le32toh(hscb->dataptr),
-		ahc_le32toh(hscb->datacnt),
-		ahc_le32toh(hscb->sgptr),
+		aic_le32toh(hscb->dataptr),
+		aic_le32toh(hscb->datacnt),
+		aic_le32toh(hscb->sgptr),
 		hscb->tag);
 	if (scb->sg_count > 0) {
 		for (i = 0; i < scb->sg_count; i++) {
 			printf("sg[%d] - Addr 0x%x%x : Length %d\n",
 			       i,
-			       (ahc_le32toh(scb->sg_list[i].len) >> 24
+			       (aic_le32toh(scb->sg_list[i].len) >> 24
 			        & SG_HIGH_ADDR_BITS),
-			       ahc_le32toh(scb->sg_list[i].addr),
-			       ahc_le32toh(scb->sg_list[i].len));
+			       aic_le32toh(scb->sg_list[i].addr),
+			       aic_le32toh(scb->sg_list[i].len));
 		}
 	}
 }
@@ -3695,18 +3693,18 @@ ahc_handle_ign_wide_residue(struct ahc_softc *ahc, struct ahc_devinfo *devinfo)
 			 * to load so we must go back one.
 			 */
 			sg--;
-			sglen = ahc_le32toh(sg->len) & AHC_SG_LEN_MASK;
+			sglen = aic_le32toh(sg->len) & AHC_SG_LEN_MASK;
 			if (sg != scb->sg_list
 			 && sglen < (data_cnt & AHC_SG_LEN_MASK)) {
 
 				sg--;
-				sglen = ahc_le32toh(sg->len);
+				sglen = aic_le32toh(sg->len);
 				/*
 				 * Preserve High Address and SG_LIST bits
 				 * while setting the count to 1.
 				 */
 				data_cnt = 1 | (sglen & (~AHC_SG_LEN_MASK));
-				data_addr = ahc_le32toh(sg->addr)
+				data_addr = aic_le32toh(sg->addr)
 					  + (sglen & AHC_SG_LEN_MASK) - 1;
 
 				/*
@@ -3762,8 +3760,8 @@ ahc_reinitialize_dataptrs(struct ahc_softc *ahc)
 	      | (ahc_inb(ahc, SCB_RESIDUAL_DATACNT + 1) << 8)
 	      | ahc_inb(ahc, SCB_RESIDUAL_DATACNT);
 
-	dataptr = ahc_le32toh(sg->addr)
-		+ (ahc_le32toh(sg->len) & AHC_SG_LEN_MASK)
+	dataptr = aic_le32toh(sg->addr)
+		+ (aic_le32toh(sg->len) & AHC_SG_LEN_MASK)
 		- resid;
 	if ((ahc->flags & AHC_39BIT_ADDRESSING) != 0) {
 		u_int dscommand1;
@@ -3771,7 +3769,7 @@ ahc_reinitialize_dataptrs(struct ahc_softc *ahc)
 		dscommand1 = ahc_inb(ahc, DSCOMMAND1);
 		ahc_outb(ahc, DSCOMMAND1, dscommand1 | HADDLDSEL0);
 		ahc_outb(ahc, HADDR,
-			 (ahc_le32toh(sg->len) >> 24) & SG_HIGH_ADDR_BITS);
+			 (aic_le32toh(sg->len) >> 24) & SG_HIGH_ADDR_BITS);
 		ahc_outb(ahc, DSCOMMAND1, dscommand1);
 	}
 	ahc_outb(ahc, HADDR + 3, dataptr >> 24);
@@ -4104,7 +4102,7 @@ ahc_reset(struct ahc_softc *ahc, int reinit)
 	 */
 	wait = 1000;
 	do {
-		ahc_delay(1000);
+		aic_delay(1000);
 	} while (--wait && !(ahc_inb(ahc, HCNTRL) & CHIPRSTACK));
 
 	if (wait == 0) {
@@ -4682,7 +4680,7 @@ ahc_chip_init(struct ahc_softc *ahc)
 		for (wait = 5000;
 		     (ahc_inb(ahc, SBLKCTL) & (ENAB40|ENAB20)) == 0 && wait;
 		     wait--)
-			ahc_delay(100);
+			aic_delay(100);
 	}
 	ahc_restart(ahc);
 	return (0);
@@ -5025,7 +5023,7 @@ ahc_pause_and_flushwork(struct ahc_softc *ahc)
 			 * Give the sequencer some time to service
 			 * any active selections.
 			 */
-			ahc_delay(500);
+			aic_delay(500);
 		}
 		ahc_intr(ahc);
 		ahc_pause(ahc);
@@ -5871,7 +5869,7 @@ ahc_reset_current_bus(struct ahc_softc *ahc)
 	scsiseq = ahc_inb(ahc, SCSISEQ);
 	ahc_outb(ahc, SCSISEQ, scsiseq | SCSIRSTO);
 	ahc_flush_device_writes(ahc);
-	ahc_delay(AHC_BUSRESET_DELAY);
+	aic_delay(AHC_BUSRESET_DELAY);
 	/* Turn off the bus reset */
 	ahc_outb(ahc, SCSISEQ, scsiseq & ~SCSIRSTO);
 
@@ -6078,7 +6076,7 @@ ahc_calc_residual(struct ahc_softc *ahc, struct scb *scb)
 	 */
 
 	hscb = scb->hscb;
-	sgptr = ahc_le32toh(hscb->sgptr);
+	sgptr = aic_le32toh(hscb->sgptr);
 	if ((sgptr & SG_RESID_VALID) == 0)
 		/* Case 1 */
 		return;
@@ -6089,7 +6087,7 @@ ahc_calc_residual(struct ahc_softc *ahc, struct scb *scb)
 		return;
 
 	spkt = &hscb->shared_data.status;
-	resid_sgptr = ahc_le32toh(spkt->residual_sg_ptr);
+	resid_sgptr = aic_le32toh(spkt->residual_sg_ptr);
 	if ((sgptr & SG_FULL_RESID) != 0) {
 		/* Case 3 */
 		resid = ahc_get_transfer_length(scb);
@@ -6105,7 +6103,7 @@ ahc_calc_residual(struct ahc_softc *ahc, struct scb *scb)
 		 * Remainder of the SG where the transfer
 		 * stopped.  
 		 */
-		resid = ahc_le32toh(spkt->residual_datacnt) & AHC_SG_LEN_MASK;
+		resid = aic_le32toh(spkt->residual_datacnt) & AHC_SG_LEN_MASK;
 		sg = ahc_sg_bus_to_virt(scb, resid_sgptr & SG_PTR_MASK);
 
 		/* The residual sg_ptr always points to the next sg */
@@ -6116,9 +6114,9 @@ ahc_calc_residual(struct ahc_softc *ahc, struct scb *scb)
 		 * SG segments that are after the SG where
 		 * the transfer stopped.
 		 */
-		while ((ahc_le32toh(sg->len) & AHC_DMA_LAST_SEG) == 0) {
+		while ((aic_le32toh(sg->len) & AHC_DMA_LAST_SEG) == 0) {
 			sg++;
-			resid += ahc_le32toh(sg->len) & AHC_SG_LEN_MASK;
+			resid += aic_le32toh(sg->len) & AHC_SG_LEN_MASK;
 		}
 	}
 	if ((scb->flags & SCB_SENSE) == 0)
@@ -6404,7 +6402,7 @@ ahc_download_instr(struct ahc_softc *ahc, u_int instrptr, uint8_t *dconsts)
 	/*
 	 * The firmware is always compiled into a little endian format.
 	 */
-	instr.integer = ahc_le32toh(*(uint32_t*)&seqprog[instrptr * 4]);
+	instr.integer = aic_le32toh(*(uint32_t*)&seqprog[instrptr * 4]);
 
 	fmt1_ins = &instr.format1;
 	fmt3_ins = NULL;
@@ -6509,7 +6507,7 @@ ahc_download_instr(struct ahc_softc *ahc, u_int instrptr, uint8_t *dconsts)
 			}
 		}
 		/* The sequencer is a little endian cpu */
-		instr.integer = ahc_htole32(instr.integer);
+		instr.integer = aic_htole32(instr.integer);
 		ahc_outsb(ahc, SEQRAM, instr.bytes, 4);
 		break;
 	default:
@@ -6523,55 +6521,47 @@ ahc_print_register(ahc_reg_parse_entry_t *table, u_int num_entries,
 		   const char *name, u_int address, u_int value,
 		   u_int *cur_column, u_int wrap_point)
 {
-	int	printed;
-	u_int	printed_mask;
-	char    line[1024];
+	u_int printed_mask;
+	char line[1024];
+	int entry, printed;
 
 	line[0] = 0;
+	printed_mask = 0;
 
 	if (cur_column != NULL && *cur_column >= wrap_point) {
 		printf("\n");
 		*cur_column = 0;
 	}
-	printed = snprintf(line, sizeof(line), "%s[0x%x]", name, value);
-	if (table == NULL) {
-		printed += snprintf(&line[printed], (sizeof line) - printed,
-		    " ");
-		printf("%s", line);
-		if (cur_column != NULL)
-			*cur_column += printed;
-		return (printed);
-	}
-	printed_mask = 0;
-	while (printed_mask != 0xFF) {
-		int entry;
+	snprintf(line, sizeof(line), "%s[0x%x]", name, value);
+	if (table == NULL)
+		goto done;
 
+	while (printed_mask != 0xFF) {
 		for (entry = 0; entry < num_entries; entry++) {
-			if (((value & table[entry].mask)
-			  != table[entry].value)
-			 || ((printed_mask & table[entry].mask)
-			  == table[entry].mask))
+			if (((value & table[entry].mask) != table[entry].value)
+			    || ((printed_mask & table[entry].mask) ==
+			    table[entry].mask))
 				continue;
-			printed += snprintf(&line[printed],
-			    (sizeof line) - printed, "%s%s", 
-				printed_mask == 0 ? ":(" : "|",
-				table[entry].name);
+			if (printed_mask == 0)
+				strlcat(line, ":(", sizeof line);
+			else
+				strlcat(line, "|", sizeof line);
+			strlcat(line, table[entry].name, sizeof line);
 			printed_mask |= table[entry].mask;
-			
 			break;
 		}
 		if (entry >= num_entries)
 			break;
 	}
 	if (printed_mask != 0)
-		printed += snprintf(&line[printed],
-		    (sizeof line) - printed, ") ");
-	else
-		printed += snprintf(&line[printed],
-		    (sizeof line) - printed, " ");
+		strlcat(line, ")", sizeof line);
+
+done:
+	printf("%s ", line);
+	printed = strlen(line) + 1;
+
 	if (cur_column != NULL)
 		*cur_column += printed;
-	printf("%s", line);
 
 	return (printed);
 }
@@ -6602,7 +6592,7 @@ ahc_dump_card_state(struct ahc_softc *ahc)
 
 	saved_scbptr = ahc_inb(ahc, SCBPTR);
 	last_phase = ahc_inb(ahc, LASTPHASE);
-	printf(">>>>>>>>>>>>>>>>>> Dump Card State Begins <<<<<<<<<<<<<<<<<\n"
+	printf("================== Dump Card State Begins =================\n"
 	       "%s: Dumping Card State %s, at SEQADDR 0x%x\n",
 	       ahc_name(ahc), ahc_lookup_phase_entry(last_phase)->phasemsg,
 	       ahc_inb(ahc, SEQADDR0) | (ahc_inb(ahc, SEQADDR1) << 8));
@@ -6753,7 +6743,7 @@ ahc_dump_card_state(struct ahc_softc *ahc)
 	}
 
 	ahc_platform_dump_card_state(ahc);
-	printf("\n<<<<<<<<<<<<<<<<< Dump Card State Ends >>>>>>>>>>>>>>>>>>\n");
+	printf("\n================= Dump Card State Ends ==================\n");
 	ahc_outb(ahc, SCBPTR, saved_scbptr);
 	if (paused == 0)
 		ahc_unpause(ahc);

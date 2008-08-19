@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.80 2004/08/10 20:12:15 markus Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.83 2004/12/06 02:46:34 deraadt Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -88,6 +88,9 @@
 #include <netinet/ip_var.h>
 #include <dev/rndvar.h>
 
+#include <sys/mount.h>
+#include <nfs/nfsproto.h>
+
 #ifdef INET6
 #include <netinet6/ip6_var.h>
 #endif /* INET6 */
@@ -106,10 +109,10 @@ extern int ipsec_ipcomp_default_level;
  * These configure the range of local port addresses assigned to
  * "unspecified" outgoing connections/packets/whatever.
  */
-int ipport_firstauto = IPPORT_RESERVED;		/* 1024 */
-int ipport_lastauto = IPPORT_USERRESERVED;	/* 5000 */
-int ipport_hifirstauto = IPPORT_HIFIRSTAUTO;	/* 40000 */
-int ipport_hilastauto = IPPORT_HILASTAUTO;	/* 44999 */
+int ipport_firstauto = IPPORT_RESERVED;
+int ipport_lastauto = IPPORT_USERRESERVED;
+int ipport_hifirstauto = IPPORT_HIFIRSTAUTO;
+int ipport_hilastauto = IPPORT_HILASTAUTO;
 
 struct pool inpcb_pool;
 int inpcb_pool_initalized = 0;
@@ -155,17 +158,23 @@ in_baddynamic(port, proto)
 	u_int16_t proto;
 {
 
-	if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
-		return (0);
 
 	switch (proto) {
 	case IPPROTO_TCP:
+		if (port == NFS_PORT)
+			return (1);
+		if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
+			return (0);
 		return (DP_ISSET(baddynamicports.tcp, port));
 	case IPPROTO_UDP:
 #ifdef IPSEC
 		if (port == udpencap_port)
 			return (1);
 #endif
+		if (port == NFS_PORT)
+			return (1);
+		if (port < IPPORT_RESERVED/2 || port >= IPPORT_RESERVED)
+			return (0);
 		return (DP_ISSET(baddynamicports.udp, port));
 	default:
 		return (0);

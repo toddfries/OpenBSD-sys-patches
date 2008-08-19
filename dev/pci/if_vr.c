@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.43 2004/06/06 17:56:36 mcbride Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.45 2005/01/15 05:24:11 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -810,10 +810,8 @@ vr_attach(parent, self, aux)
 
 	ifp = &sc->arpcom.ac_if;
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = vr_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = vr_start;
 	ifp->if_watchdog = vr_watchdog;
 	ifp->if_baudrate = 10000000;
@@ -1674,7 +1672,8 @@ vr_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			vr_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				vr_setmulti(sc);
 			error = 0;
 		}
 		break;

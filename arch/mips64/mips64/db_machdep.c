@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.5 2004/09/09 22:11:38 pefo Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.8 2004/10/30 14:48:59 pefo Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -54,11 +54,13 @@ u_long MipsEmulateBranch(db_regs_t *, int, int, u_int);
 void  stacktrace_subr(db_regs_t *, int (*)(const char*, ...));
 
 int   kdbpeek(void *);
+int64_t kdbpeekd(void *);
 short kdbpeekw(void *);
 char  kdbpeekb(void *);
-void  kdbpoke(int, int);
-void  kdbpokew(int, short);
-void  kdbpokeb(int, char);
+void  kdbpoke(vaddr_t, int);
+void  kdbpoked(vaddr_t, int64_t);
+void  kdbpokew(vaddr_t, short);
+void  kdbpokeb(vaddr_t, char);
 int   kdb_trap(int, struct trap_frame *);
 
 void db_trap_trace_cmd(db_expr_t, int, db_expr_t, char *);
@@ -75,14 +77,14 @@ struct db_variable db_regs[] = {
     { "a1",  (long *)&ddb_regs.a1,      FCN_NULL },
     { "a2",  (long *)&ddb_regs.a2,      FCN_NULL },
     { "a3",  (long *)&ddb_regs.a3,      FCN_NULL },
-    { "t0",  (long *)&ddb_regs.t0,      FCN_NULL },
-    { "t1",  (long *)&ddb_regs.t1,      FCN_NULL },
-    { "t2",  (long *)&ddb_regs.t2,      FCN_NULL },
-    { "t3",  (long *)&ddb_regs.t3,      FCN_NULL },
-    { "t4",  (long *)&ddb_regs.t4,      FCN_NULL },
-    { "t5",  (long *)&ddb_regs.t5,      FCN_NULL },
-    { "t6",  (long *)&ddb_regs.t6,      FCN_NULL },
-    { "t7",  (long *)&ddb_regs.t7,      FCN_NULL },
+    { "a4",  (long *)&ddb_regs.t0,      FCN_NULL },
+    { "a5",  (long *)&ddb_regs.t1,      FCN_NULL },
+    { "a6",  (long *)&ddb_regs.t2,      FCN_NULL },
+    { "a7",  (long *)&ddb_regs.t3,      FCN_NULL },
+    { "t0",  (long *)&ddb_regs.t4,      FCN_NULL },
+    { "t1",  (long *)&ddb_regs.t5,      FCN_NULL },
+    { "t2",  (long *)&ddb_regs.t6,      FCN_NULL },
+    { "t3",  (long *)&ddb_regs.t7,      FCN_NULL },
     { "s0",  (long *)&ddb_regs.s0,      FCN_NULL },
     { "s1",  (long *)&ddb_regs.s1,      FCN_NULL },
     { "s2",  (long *)&ddb_regs.s2,      FCN_NULL },
@@ -273,8 +275,11 @@ loop:
 
 	/*
 	 * Dig out the function from the symbol table.
+	 * Watch out for function tail optimizations.
 	 */
 	sym = db_search_symbol(pc, DB_STGY_ANY, &diff);
+	if (sym != DB_SYM_NULL && diff == 0)
+		sym = db_search_symbol(pc - 4, DB_STGY_ANY, &diff);
 	db_symbol_values(sym, &symname, 0);
 	if (sym != DB_SYM_NULL) {
 		subr = pc - diff;
@@ -358,23 +363,23 @@ loop:
 			mask |= (1 << i.IType.rt);
 			switch (i.IType.rt) {
 			case 4: /* a0 */
-				a0 = kdbpeek((int *)(sp + (short)i.IType.imm));
+				a0 = kdbpeekd((long *)(sp + (short)i.IType.imm));
 				break;
 
 			case 5: /* a1 */
-				a1 = kdbpeek((int *)(sp + (short)i.IType.imm));
+				a1 = kdbpeekd((long *)(sp + (short)i.IType.imm));
 				break;
 
 			case 6: /* a2 */
-				a2 = kdbpeek((int *)(sp + (short)i.IType.imm));
+				a2 = kdbpeekd((long *)(sp + (short)i.IType.imm));
 				break;
 
 			case 7: /* a3 */
-				a3 = kdbpeek((int *)(sp + (short)i.IType.imm));
+				a3 = kdbpeekd((long *)(sp + (short)i.IType.imm));
 				break;
 
 			case 31: /* ra */
-				ra = kdbpeek((int *)(sp + (short)i.IType.imm));
+				ra = kdbpeekd((long *)(sp + (short)i.IType.imm));
 				break;
 			}
 			break;
@@ -399,7 +404,7 @@ done:
 	} else {
 		(*pr)("%s+%p ", symname, diff);
 	}
-	(*pr)("(%x,%x,%x,%x) sp %x ra %x, sz %d\n", a0, a1, a2, a3, sp, ra, stksize);
+	(*pr)("(%llx,%llx,%llx,%llx) sp %llx ra %llx, sz %d\n", a0, a1, a2, a3, sp, ra, stksize);
 
 	if (subr == (long)k_intr || subr == (long)k_general) {
 		if (subr == (long)k_intr)
@@ -557,9 +562,9 @@ void
 db_dump_tlb_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
 {
 	int tlbno, last, check, pid;
-	struct tlb tlb, tlbp;
+	struct tlb_entry tlb, tlbp;
 char *attr[] = {
-	"CWTNA", "CWTA ", "UCBL ", "CWB  ", "RES  ", "RES  ", "UCNB ", "BPASS"
+	"WTNA", "WTA ", "UCBL", "CWB ", "RES ", "RES ", "UCNB", "BPAS"
 };
 
 	pid = -1;
@@ -604,23 +609,23 @@ if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 			continue;
 
 		if (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V) {
-			printf("%2d v=0x%08x", tlbno, tlb.tlb_hi & ~0xff);
+			printf("%2d v=%16llx", tlbno, tlb.tlb_hi & (long)~0xff);
 			printf("/%02x ", tlb.tlb_hi & 0xff);
 
 			if (tlb.tlb_lo0 & PG_V) {
-				printf("0x%08x ", pfn_to_pad(tlb.tlb_lo0));
+				printf("%16llx ", pfn_to_pad(tlb.tlb_lo0));
 				printf("%c", tlb.tlb_lo0 & PG_M ? 'M' : ' ');
 				printf("%c", tlb.tlb_lo0 & PG_G ? 'G' : ' ');
-				printf(" %s ", attr[(tlb.tlb_lo0 >> 3) & 7]);
+				printf("%s ", attr[(tlb.tlb_lo0 >> 3) & 7]);
 			} else {
 				printf("invalid             ");
 			}
 
 			if (tlb.tlb_lo1 & PG_V) {
-				printf("0x%08x ", pfn_to_pad(tlb.tlb_lo1));
+				printf("%16llx ", pfn_to_pad(tlb.tlb_lo1));
 				printf("%c", tlb.tlb_lo1 & PG_M ? 'M' : ' ');
 				printf("%c", tlb.tlb_lo1 & PG_G ? 'G' : ' ');
-				printf(" %s ", attr[(tlb.tlb_lo1 >> 3) & 7]);
+				printf("%s ", attr[(tlb.tlb_lo1 >> 3) & 7]);
 			} else {
 				printf("invalid             ");
 			}

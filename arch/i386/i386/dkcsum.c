@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkcsum.c,v 1.12 2004/08/11 18:51:03 millert Exp $	*/
+/*	$OpenBSD: dkcsum.c,v 1.15 2005/01/01 03:07:08 millert Exp $	*/
 
 /*-
  * Copyright (c) 1997 Niklas Hallqvist.  All rights reserved.
@@ -67,16 +67,19 @@ dkcsumattach()
 	if (bios_diskinfo == NULL || bios_cksumlen * DEV_BSIZE > MAXBSIZE)
 		return;
 
+#ifdef DEBUG
+	printf("dkcsum: bootdev=0x%x\n", bootdev);
+#endif
 	pribootdev = altbootdev = 0;
 
 	/*
-	 * XXX Whatif DEV_BSIZE is changed to something else than the BIOS
+	 * XXX What if DEV_BSIZE is changed to something else than the BIOS
 	 * blocksize?  Today, /boot doesn't cover that case so neither need
 	 * I care here.
 	 */
 	bp = geteblk(bios_cksumlen * DEV_BSIZE);	/* XXX error check?  */
 
-	for (dv = alldevs.tqh_first; dv; dv = dv->dv_list.tqe_next) {
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (dv->dv_class != DV_DISK)
 			continue;
 		bp->b_dev = dev = dev_rawpart(dv);
@@ -184,6 +187,10 @@ dkcsumattach()
 			part = B_PARTITION(bootdev);
 
 			pribootdev = MAKEBOOTDEV(type, ctrl, adap, unit, part);
+#ifdef DEBUG
+			printf("dkcsum: setting %s as primary boot disk\n",
+			    dv->dv_xname);
+#endif
 		}
 		/* B_TYPE independent hd unit counting bootblocks */
 		if (B_UNIT(bootdev) == (hit->bios_number & 0x7F)) {
@@ -196,6 +203,10 @@ dkcsumattach()
 			part = B_PARTITION(bootdev);
 
 			altbootdev = MAKEBOOTDEV(type, ctrl, adap, unit, part);
+#ifdef DEBUG
+			printf("dkcsum: setting %s as alternate boot disk\n",
+			    dv->dv_xname);
+#endif
 		}
 
 		/* This will overwrite /boot's guess, just so you remember */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.90 2004/06/26 17:36:32 markus Exp $	*/
+/*	$OpenBSD: if.c,v 1.104.2.1 2006/01/26 20:43:21 brad Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -61,6 +61,7 @@
  *	@(#)if.c	8.3 (Berkeley) 1/4/94
  */
 
+#include "bluetooth.h"
 #include "bpfilter.h"
 #include "bridge.h"
 #include "carp.h"
@@ -79,6 +80,7 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_types.h>
 #include <net/route.h>
 
 #ifdef INET
@@ -132,6 +134,7 @@ struct if_clone	*if_clone_lookup(const char *, int *);
 
 void	if_congestion_clear(void *);
 
+TAILQ_HEAD(, ifg_group) ifg_head;
 LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 int if_cloners_count;
 
@@ -166,10 +169,10 @@ void
 if_attachsetup(ifp)
 	struct ifnet *ifp;
 {
-	struct ifgroup *ifg;
 	struct ifaddr *ifa;
 	int n;
 	int wrapped = 0;
+	char ifgroup[IFNAMSIZ];
 
 	if (ifindex2ifnet == 0)
 		if_index = 1;
@@ -209,7 +212,7 @@ if_attachsetup(ifp)
 	if (ifnet_addrs == 0 || ifindex2ifnet == 0 || if_index >= if_indexlim) {
 		size_t m, n, oldlim;
 		caddr_t q;
-		
+
 		oldlim = if_indexlim;
 		if (if_indexlim == 0)
 			if_indexlim = 8;
@@ -239,18 +242,13 @@ if_attachsetup(ifp)
 		ifindex2ifnet = (struct ifnet **)q;
 	}
 
-	/* setup the group list */
 	TAILQ_INIT(&ifp->if_groups);
-	ifg = (struct ifgroup *)malloc(sizeof(struct ifgroup), M_TEMP,
-	    M_NOWAIT);
-	if (ifg != NULL) {
-		for (n = 0;
-		    ifp->if_xname[n] < '0' || ifp->if_xname[n] > '9';
-		    n++)
-			continue;
-		strlcpy(ifg->ifg_group, ifp->if_xname, n + 1);
-		TAILQ_INSERT_HEAD(&ifp->if_groups, ifg, ifg_next);
- 	}
+
+	/* add the interface family group */
+	for (n = 0; ifp->if_xname[n] < '0' || ifp->if_xname[n] > '9'; n++)
+		continue;
+	strlcpy(ifgroup, ifp->if_xname, n + 1);
+	if_addgroup(ifp, ifgroup);
 
 	ifindex2ifnet[if_index] = ifp;
 
@@ -392,10 +390,13 @@ void
 if_attachhead(ifp)
 	struct ifnet *ifp;
 {
-	if (if_index == 0)
+	if (if_index == 0) {
 		TAILQ_INIT(&ifnet);
+		TAILQ_INIT(&ifg_head);
+	}
 	TAILQ_INIT(&ifp->if_addrlist);
-	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks), M_TEMP, M_NOWAIT);
+	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks),
+	    M_TEMP, M_NOWAIT);
 	if (ifp->if_addrhooks == NULL)
 		panic("if_attachhead: malloc");
 	TAILQ_INIT(ifp->if_addrhooks);
@@ -407,14 +408,34 @@ void
 if_attach(ifp)
 	struct ifnet *ifp;
 {
-	if (if_index == 0)
+#if NCARP > 0
+	struct ifnet *before = NULL;
+#endif
+
+	if (if_index == 0) {
 		TAILQ_INIT(&ifnet);
+		TAILQ_INIT(&ifg_head);
+	}
 	TAILQ_INIT(&ifp->if_addrlist);
-	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks), M_TEMP, M_NOWAIT);
+	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks),
+	    M_TEMP, M_NOWAIT);
 	if (ifp->if_addrhooks == NULL)
 		panic("if_attach: malloc");
 	TAILQ_INIT(ifp->if_addrhooks);
+
+#if NCARP > 0
+	if (ifp->if_type != IFT_CARP)
+		TAILQ_FOREACH(before, &ifnet, if_list)
+			if (before->if_type == IFT_CARP)
+				break;
+	if (before == NULL)
+		TAILQ_INSERT_TAIL(&ifnet, ifp, if_list);
+	else
+		TAILQ_INSERT_BEFORE(before, ifp, if_list);
+#else
 	TAILQ_INSERT_TAIL(&ifnet, ifp, if_list);
+#endif
+
 	if_attachsetup(ifp);
 }
 
@@ -462,7 +483,7 @@ if_detach(ifp)
 	struct ifnet *ifp;
 {
 	struct ifaddr *ifa;
-	struct ifgroup *ifg;
+	struct ifg_list *ifg;
 	int i, s = splimp();
 	struct radix_node_head *rnh;
 	struct domain *dp;
@@ -485,7 +506,7 @@ if_detach(ifp)
 
 #if NCARP > 0
 	/* Remove the interface from any carp group it is a part of.  */
-	if (ifp->if_carp)
+	if (ifp->if_carp && ifp->if_type != IFT_CARP)
 		carp_ifdetach(ifp);
 #endif
 
@@ -553,9 +574,6 @@ do { \
 	IF_DETACH_QUEUES(atintrq1);
 	IF_DETACH_QUEUES(atintrq2);
 #endif
-#ifdef ISO
-	IF_DETACH_QUEUES(clnlintrq);
-#endif
 #ifdef CCITT
 	IF_DETACH_QUEUES(llcintrq);
 #endif
@@ -564,6 +582,9 @@ do { \
 #endif
 #ifdef DECNET
 	IF_DETACH_QUEUES(decnetintrq);
+#endif
+#if NBLUETOOTH > 0
+	IF_DETACH_QUEUES(btintrq);
 #endif
 #undef IF_DETACH_QUEUES
 
@@ -595,10 +616,8 @@ do { \
 	}
 
 	for (ifg = TAILQ_FIRST(&ifp->if_groups); ifg;
-	    ifg = TAILQ_FIRST(&ifp->if_groups)) {
-		TAILQ_REMOVE(&ifp->if_groups, ifg, ifg_next);
-		free(ifg, M_TEMP);
-	}
+	    ifg = TAILQ_FIRST(&ifp->if_groups))
+		if_delgroup(ifp, ifg->ifgl_group->ifg_group);
 
 	if_free_sadl(ifp);
 
@@ -652,7 +671,7 @@ if_detach_queues(ifp, q)
 		m_freem(m);
 		IF_DROP(q);
 	}
-} 
+}
 
 /*
  * Create a clone network interface.
@@ -683,6 +702,7 @@ if_clone_destroy(name)
 {
 	struct if_clone *ifc;
 	struct ifnet *ifp;
+	int s;
 
 	ifc = if_clone_lookup(name, NULL);
 	if (ifc == NULL)
@@ -694,6 +714,12 @@ if_clone_destroy(name)
 
 	if (ifc->ifc_destroy == NULL)
 		return (EOPNOTSUPP);
+
+	if (ifp->if_flags & IFF_UP) {
+		s = splimp();
+		if_down(ifp);
+		splx(s);
+	}
 
 	return ((*ifc->ifc_destroy)(ifp));
 }
@@ -797,6 +823,7 @@ if_clone_list(ifcr)
 
 	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
 	     ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
+		bzero(outbuf, sizeof outbuf);
 		strlcpy(outbuf, ifc->ifc_name, IFNAMSIZ);
 		error = copyout(outbuf, dst, IFNAMSIZ);
 		if (error)
@@ -812,21 +839,28 @@ if_clone_list(ifcr)
 void
 if_congestion(struct ifqueue *ifq)
 {
-	static struct timeout	to;
+	/* Not currently needed, all callers check this */
+	if (ifq->ifq_congestion)
+		return;
 
-	ifq->ifq_congestion = 1;
-	bzero(&to, sizeof(to));
-	timeout_set(&to, if_congestion_clear, ifq);
-	timeout_add(&to, hz / 100);
+	ifq->ifq_congestion = malloc(sizeof(struct timeout), M_TEMP, M_NOWAIT);
+	if (ifq->ifq_congestion == NULL)
+		return;
+	timeout_set(ifq->ifq_congestion, if_congestion_clear, ifq);
+	timeout_add(ifq->ifq_congestion, hz / 100);
 }
 
 /*
  * clear the congestion flag
  */
 void
-if_congestion_clear(void *ifq)
+if_congestion_clear(void *arg)
 {
-	((struct ifqueue *)ifq)->ifq_congestion = 0;
+	struct ifqueue *ifq = arg;
+	struct timeout *to = ifq->ifq_congestion;
+
+	ifq->ifq_congestion = NULL;
+	free(to, M_TEMP);
 }
 
 /*
@@ -840,8 +874,9 @@ ifa_ifwithaddr(addr)
 	struct ifnet *ifp;
 	struct ifaddr *ifa;
 
-#define	equal(a1, a2) \
-  (bcmp((caddr_t)(a1), (caddr_t)(a2), ((struct sockaddr *)(a1))->sa_len) == 0)
+#define	equal(a1, a2)	\
+	(bcmp((caddr_t)(a1), (caddr_t)(a2),	\
+	((struct sockaddr *)(a1))->sa_len) == 0)
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 	    TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family != addr->sa_family)
@@ -870,7 +905,7 @@ ifa_ifwithdstaddr(addr)
 
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 	    if (ifp->if_flags & IFF_POINTOPOINT)
-	        TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != addr->sa_family ||
 			    ifa->ifa_dstaddr == NULL)
 				continue;
@@ -957,7 +992,7 @@ ifaof_ifpforaddr(addr, ifp)
 	struct ifaddr *ifa;
 	char *cp, *cp2, *cp3;
 	char *cplim;
-	struct ifaddr *ifa_maybe = 0;
+	struct ifaddr *ifa_maybe = NULL;
 	u_int af = addr->sa_family;
 
 	if (af >= AF_MAX)
@@ -965,8 +1000,9 @@ ifaof_ifpforaddr(addr, ifp)
 	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family != af)
 			continue;
-		ifa_maybe = ifa;
-		if (ifa->ifa_netmask == 0) {
+		if (ifa_maybe == NULL)
+			ifa_maybe = ifa;
+		if (ifa->ifa_netmask == 0 || ifp->if_flags & IFF_POINTOPOINT) {
 			if (equal(addr, ifa->ifa_addr) ||
 			    (ifa->ifa_dstaddr && equal(addr, ifa->ifa_dstaddr)))
 				return (ifa);
@@ -1032,7 +1068,7 @@ if_down(struct ifnet *ifp)
 	IFQ_PURGE(&ifp->if_snd);
 #if NCARP > 0
 	if (ifp->if_carp)
-		carp_carpdev_state(ifp->if_carp);
+		carp_carpdev_state(ifp);
 #endif
 	rt_ifmsg(ifp);
 }
@@ -1061,12 +1097,27 @@ if_up(struct ifnet *ifp)
 #endif
 #if NCARP > 0
 	if (ifp->if_carp)
-		carp_carpdev_state(ifp->if_carp);
+		carp_carpdev_state(ifp);
 #endif
 	rt_ifmsg(ifp);
 #ifdef INET6
 	in6_if_up(ifp);
 #endif
+}
+
+/*
+ * Process a link state change.
+ * NOTE: must be called at splsoftnet or equivalent.
+ * XXX Should be converted to dohooks().
+ */
+void
+if_link_state_change(struct ifnet *ifp)
+{
+	rt_ifmsg(ifp);
+#if NCARP > 0           
+	if (ifp->if_carp)
+		carp_carpdev_state(ifp);
+#endif          
 }
 
 /*
@@ -1140,6 +1191,7 @@ ifioctl(so, cmd, data, p)
 {
 	struct ifnet *ifp;
 	struct ifreq *ifr;
+	struct ifgroupreq *ifgr;
 	char ifdescrbuf[IFDESCRSIZE];
 	int error = 0;
 	size_t bytesdone;
@@ -1274,9 +1326,10 @@ ifioctl(so, cmd, data, p)
 		break;
 
 	case SIOCAIFGROUP:
-		if ((error = suser(p, 0)) != 0)
+		if ((error = suser(p, 0)))
 			return (error);
-		if ((error = if_addgroup((struct ifgroupreq *)data, ifp)))
+		ifgr = (struct ifgroupreq *)data;
+		if ((error = if_addgroup(ifp, ifgr->ifgr_group)))
 			return (error);
 		break;
 
@@ -1286,11 +1339,12 @@ ifioctl(so, cmd, data, p)
 		break;
 
 	case SIOCDIFGROUP:
-                if ((error = suser(p, 0)) != 0)
-                        return (error);
-                if ((error = if_delgroup((struct ifgroupreq *)data, ifp)))
-                        return (error);
-                break;
+		if ((error = suser(p, 0)))
+			return (error);
+		ifgr = (struct ifgroupreq *)data;
+		if ((error = if_delgroup(ifp, ifgr->ifgr_group)))
+			return (error);
+		break;
 
 	default:
 		if (so->so_proto == 0)
@@ -1361,7 +1415,7 @@ ifioctl(so, cmd, data, p)
 			splx(s);
 		}
 #endif
-  	}
+	}
 	return (error);
 }
 
@@ -1390,16 +1444,17 @@ ifconf(cmd, data)
 
 			if (TAILQ_EMPTY(&ifp->if_addrlist))
 				space += sizeof (ifr);
-			else 
-				TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+			else
+				TAILQ_FOREACH(ifa,
+				    &ifp->if_addrlist, ifa_list) {
 					sa = ifa->ifa_addr;
 #if defined(COMPAT_43) || defined(COMPAT_LINUX) || defined(COMPAT_SVR4)
 					if (cmd != OSIOCGIFCONF)
 #endif
 					if (sa->sa_len > sizeof(*sa))
 						space += sa->sa_len -
-						    sizeof (*sa);
-					space += sizeof (ifr);
+						    sizeof(*sa);
+					space += sizeof(ifr);
 				}
 		}
 		ifc->ifc_len = space;
@@ -1417,7 +1472,7 @@ ifconf(cmd, data)
 			if (error)
 				break;
 			space -= sizeof (ifr), ifrp++;
-		} else 
+		} else
 			for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
 			    space >= sizeof (ifr) &&
 			    ifa != TAILQ_END(&ifp->if_addrlist);
@@ -1429,22 +1484,23 @@ ifconf(cmd, data)
 					    (struct osockaddr *)&ifr.ifr_addr;
 					ifr.ifr_addr = *sa;
 					osa->sa_family = sa->sa_family;
-					error = copyout((caddr_t)&ifr, (caddr_t)ifrp,
-					    sizeof (ifr));
+					error = copyout((caddr_t)&ifr,
+					    (caddr_t)ifrp, sizeof (ifr));
 					ifrp++;
 				} else
 #endif
 				if (sa->sa_len <= sizeof(*sa)) {
 					ifr.ifr_addr = *sa;
-					error = copyout((caddr_t)&ifr, (caddr_t)ifrp,
-					    sizeof (ifr));
+					error = copyout((caddr_t)&ifr,
+					    (caddr_t)ifrp, sizeof (ifr));
 					ifrp++;
 				} else {
 					space -= sa->sa_len - sizeof(*sa);
 					if (space < sizeof (ifr))
 						break;
-					error = copyout((caddr_t)&ifr, (caddr_t)ifrp,
-					    sizeof (ifr.ifr_name));
+					error = copyout((caddr_t)&ifr,
+					    (caddr_t)ifrp,
+					    sizeof(ifr.ifr_name));
 					if (error == 0)
 						error = copyout((caddr_t)sa,
 						    (caddr_t)&ifrp->ifr_addr,
@@ -1501,46 +1557,66 @@ if_detached_watchdog(struct ifnet *ifp)
  * Add a group to an interface
  */
 int
-if_addgroup(struct ifgroupreq *ifgr, struct ifnet *ifp)
+if_addgroup(struct ifnet *ifp, char *groupname)
 {
-	struct ifgroup	*ifgnew, *ifgp;
+	struct ifg_list		*ifgl;
+	struct ifg_group	*ifg = NULL;
 
-	TAILQ_FOREACH(ifgp, &ifp->if_groups, ifg_next)
-		if (!strcmp(ifgp->ifg_group, ifgr->ifgr_group))
+	TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next)
+		if (!strcmp(ifgl->ifgl_group->ifg_group, groupname))
 			return (EEXIST);
 
-	ifgnew = (struct ifgroup *)malloc(sizeof(struct ifgroup), M_TEMP, 
-	    M_NOWAIT);
-	if (ifgnew == NULL)
+	if ((ifgl = (struct ifg_list *)malloc(sizeof(struct ifg_list), M_TEMP,
+	    M_NOWAIT)) == NULL)
 		return (ENOMEM);
-	strlcpy(ifgnew->ifg_group, ifgr->ifgr_group, IFNAMSIZ);
-	TAILQ_INSERT_TAIL(&ifp->if_groups, ifgnew, ifg_next);
+
+	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
+		if (!strcmp(ifg->ifg_group, groupname))
+			break;
+
+	if (ifg == NULL) {
+		if ((ifg = (struct ifg_group *)malloc(sizeof(struct ifg_group),
+		    M_TEMP, M_NOWAIT)) == NULL) {
+			free(ifgl, M_TEMP);
+			return (ENOMEM);
+		}
+		strlcpy(ifg->ifg_group, groupname, sizeof(ifg->ifg_group));
+		ifg->ifg_refcnt = 0;
+		TAILQ_INSERT_TAIL(&ifg_head, ifg, ifg_next);
+	}
+
+	ifg->ifg_refcnt++;
+	ifgl->ifgl_group = ifg;
+
+	TAILQ_INSERT_TAIL(&ifp->if_groups, ifgl, ifgl_next);
 
 	return (0);
 }
 
 /*
  * Remove a group from an interface
- * note: the first group is the if-family - do not remove
  */
 int
-if_delgroup(struct ifgroupreq *ifgr, struct ifnet *ifp)
+if_delgroup(struct ifnet *ifp, char *groupname)
 {
-	struct ifgroup	*ifgp;
+	struct ifg_list		*ifgl;
 
-	for (ifgp = TAILQ_FIRST(&ifp->if_groups);
-	    ifgp != TAILQ_END(&ifp->if_groups);
-	    ifgp = TAILQ_NEXT(ifgp, ifg_next)) {
-		if (ifgp == TAILQ_FIRST(&ifp->if_groups) &&
-		    !strcmp(ifgp->ifg_group, ifgr->ifgr_group))
-			return (EPERM);
-		if (!strcmp(ifgp->ifg_group, ifgr->ifgr_group)) {
-			TAILQ_REMOVE(&ifp->if_groups, ifgp, ifg_next);
-			free(ifgp, M_TEMP);
-			return (0);
-		}
+	TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next)
+		if (!strcmp(ifgl->ifgl_group->ifg_group, groupname))
+			break;
+	if (ifgl == NULL)
+		return (ENOENT);
+
+	TAILQ_REMOVE(&ifp->if_groups, ifgl, ifgl_next);
+
+	if (--ifgl->ifgl_group->ifg_refcnt == 0) {
+		TAILQ_REMOVE(&ifg_head, ifgl->ifgl_group, ifg_next);
+		free(ifgl->ifgl_group, M_TEMP);
 	}
-	return (ENOENT);
+
+	free(ifgl, M_TEMP);
+
+	return (0);
 }
 
 /*
@@ -1550,36 +1626,36 @@ if_delgroup(struct ifgroupreq *ifgr, struct ifnet *ifp)
 int
 if_getgroup(caddr_t data, struct ifnet *ifp)
 {
-	int len;
-	int error;
-	struct ifgroup *ifgp, *ifgp2, ifg;
-	struct ifgroupreq *ifgr = (struct ifgroupreq *)data;
+	int			 len, error;
+	struct ifg_list		*ifgl;
+	struct ifg_req		 ifgrq, *ifgp;
+	struct ifgroupreq	*ifgr = (struct ifgroupreq *)data;
 
 	if (ifgr->ifgr_len == 0) {
-		TAILQ_FOREACH(ifgp, &ifp->if_groups, ifg_next)
-			ifgr->ifgr_len += sizeof(struct ifgroup);
+		TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next)
+			ifgr->ifgr_len += sizeof(struct ifg_req);
 		return (0);
 	}
 
 	len = ifgr->ifgr_len;
 	ifgp = ifgr->ifgr_groups;
-	for (ifgp2 = TAILQ_FIRST(&ifp->if_groups); ifgp2 && 
-	    len >= sizeof(struct ifgroup);
-	    ifgp2 = TAILQ_NEXT(ifgp2, ifg_next)) {
-		memset(&ifg, 0, sizeof(struct ifgroup));
-		strlcpy(ifg.ifg_group, ifgp2->ifg_group, IFNAMSIZ);
-		error = copyout((caddr_t)&ifg, (caddr_t)ifgp, 
-		    sizeof(struct ifgroup));
-		if (error)
+	TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next) {
+		if (len < sizeof(ifgrq))
+			return (EINVAL);
+		bzero(&ifgrq, sizeof ifgrq);
+		strlcpy(ifgrq.ifgrq_group, ifgl->ifgl_group->ifg_group,
+		    sizeof(ifgrq.ifgrq_group));
+		if ((error = copyout((caddr_t)&ifgrq, (caddr_t)ifgp,
+		    sizeof(struct ifg_req))))
 			return (error);
+		len -= sizeof(ifgrq);
 		ifgp++;
-		len -= sizeof(struct ifgroup);
 	}
 
 	return (0);
 }
 
-		
+
 /*
  * Set/clear promiscuous mode on interface ifp based on the truth value
  * of pswitch.  The calls are reference counted so that only the first

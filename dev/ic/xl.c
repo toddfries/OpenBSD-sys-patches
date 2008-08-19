@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.54.2.1 2004/11/21 18:57:42 brad Exp $	*/
+/*	$OpenBSD: xl.c,v 1.62 2005/01/15 05:24:11 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -2202,7 +2202,6 @@ xl_init(xsc)
 	else
 		CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_COAX_STOP);
 
-#if NVLAN > 0
 	/*
 	 * increase packet size to allow reception of 802.1q or ISL packets.
 	 * For the 3c90x chip, set the 'allow large packets' bit in the MAC
@@ -2218,7 +2217,6 @@ xl_init(xsc)
 		macctl |= XL_MACCTRL_ALLOW_LARGE_PACK;
 		CSR_WRITE_1(sc, XL_W3_MAC_CTRL, macctl);
 	}
-#endif
 
 	/* Clear out the stats counters. */
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_STATS_DISABLE);
@@ -2466,10 +2464,12 @@ xl_ioctl(ifp, command, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			if (sc->xl_type == XL_TYPE_905B)
-				xl_setmulti_hash(sc);
-			else
-				xl_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING) {
+				if (sc->xl_type == XL_TYPE_905B)
+					xl_setmulti_hash(sc);
+				else
+					xl_setmulti(sc);
+			}
 			error = 0;
 		}
 		break;
@@ -2728,13 +2728,9 @@ xl_attach(sc)
 	timeout_set(&sc->xl_stsup_tmo, xl_stats_update, sc);
 
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = xl_ioctl;
-	ifp->if_output = ether_output;
-#if NVLAN > 0
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
-#endif
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 	if (sc->xl_type == XL_TYPE_905B) {
 		ifp->if_start = xl_start_90xB;
 #ifndef XL905B_TXCSUM_BROKEN

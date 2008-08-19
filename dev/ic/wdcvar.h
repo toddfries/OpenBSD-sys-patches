@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdcvar.h,v 1.33 2004/06/02 18:55:08 grange Exp $     */
+/*      $OpenBSD: wdcvar.h,v 1.37 2004/10/17 17:50:48 grange Exp $     */
 /*	$NetBSD: wdcvar.h,v 1.17 1999/04/11 20:50:29 bouyer Exp $	*/
 
 /*-
@@ -36,6 +36,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef _DEV_IC_WDCVAR_H_
+#define _DEV_IC_WDCVAR_H_
 
 #include <sys/timeout.h>
 
@@ -110,6 +113,9 @@ enum wdc_regs {
 	wdr_altsts = _WDC_RDONLY | _WDC_AUX,
 	wdr_ctlr = _WDC_WRONLY | _WDC_AUX
 };
+
+#define WDC_NREG	8 /* number of command registers */
+#define WDC_NSHADOWREG	2 /* number of command "shadow" registers */
 
 struct channel_softc_vtbl {
 	u_int8_t (*read_reg)(struct channel_softc *, enum wdc_regs reg);
@@ -197,6 +203,9 @@ struct wdc_softc { /* Per controller state */
 
 	/* if WDC_CAPABILITY_IRQACK set in 'cap' */
 	void            (*irqack)(struct channel_softc *);
+
+	/* Driver callback to probe for drives */
+	void (*drv_probe)(struct channel_softc *);
 };
 
  /*
@@ -302,3 +311,18 @@ void wdc_input_bytes(struct ata_drive_datas *drvp, void *, unsigned int);
 void wdc_print_current_modes(struct channel_softc *);
 
 int wdc_ioctl(struct ata_drive_datas *, u_long, caddr_t, int, struct proc *);
+
+u_int8_t wdc_default_read_reg(struct channel_softc *,
+		enum wdc_regs);
+void     wdc_default_write_reg(struct channel_softc *,
+		enum wdc_regs, u_int8_t);
+void     wdc_default_read_raw_multi_2(struct channel_softc *,
+		void *, unsigned int);
+void     wdc_default_write_raw_multi_2(struct channel_softc *,
+		void *, unsigned int);
+void     wdc_default_read_raw_multi_4(struct channel_softc *,
+		void *, unsigned int);
+void     wdc_default_write_raw_multi_4(struct channel_softc *,
+		void *, unsigned int);
+
+#endif	/* !_DEV_IC_WDCVAR_H_ */

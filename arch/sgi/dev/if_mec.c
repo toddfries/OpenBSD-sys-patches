@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mec.c,v 1.4 2004/08/26 13:03:59 pefo Exp $ */
+/*	$OpenBSD: if_mec.c,v 1.8 2005/02/17 19:05:35 miod Exp $ */
 /*	$NetBSD: if_mec_mace.c,v 1.5 2004/08/01 06:36:36 tsutsui Exp $ */
 
 /*
@@ -433,7 +433,7 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 
 	timeout_set(&sc->sc_tick_ch, mec_tick, sc);
 
-	/* get ehternet address from ARCBIOS */
+	/* get ethernet address from ARCBIOS */
 	if ((macaddr = Bios_GetEnvironmentVariable("eaddr")) == NULL) {
 		printf(": unable to get MAC address!\n");
 		goto fail_4;
@@ -479,7 +479,6 @@ mec_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = mec_ioctl;
 	ifp->if_start = mec_start;
 	ifp->if_watchdog = mec_watchdog;
-	ifp->if_mtu = ETHERMTU;
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if_attach(ifp);
@@ -709,6 +708,7 @@ mec_reset(struct mec_softc *sc)
 
 	/* reset chip */
 	bus_space_write_8(st, sh, MEC_MAC_CONTROL, MEC_MAC_CORE_RESET);
+	delay(1000);
 	bus_space_write_8(st, sh, MEC_MAC_CONTROL, 0);
 	delay(1000);
 
@@ -1095,12 +1095,14 @@ mec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = (cmd == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &sc->sc_ac) :
 		    ether_delmulti(ifr, &sc->sc_ac);
+
 		if (error == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			mec_init(ifp);
+			if (ifp->if_flags & IFF_RUNNING)
+				mec_init(ifp);
 			error = 0;
 		}
 		break;

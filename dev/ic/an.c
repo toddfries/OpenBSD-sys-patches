@@ -1,4 +1,4 @@
-/*	$OpenBSD: an.c,v 1.38 2004/08/05 20:06:58 brad Exp $	*/
+/*	$OpenBSD: an.c,v 1.40 2005/02/04 01:07:39 kurt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -232,7 +232,6 @@ an_attach(sc)
 
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = an_ioctl;
 	ifp->if_start = an_start;
@@ -681,7 +680,7 @@ an_read_record(sc, ltv)
 	case AN_RID_WEP_VOLATILE:
 	case AN_RID_WEP_PERMANENT:
 		an_swap16(&ltv->an_val[1], 3);	/* an_mac_addr */
-		an_swap16(&ltv->an_val[5], 6);
+		an_swap16(&ltv->an_val[5], 7);
 		break;
 	case AN_RID_32BITS_CUM:
 		for (i = 0x60; i--;) {
@@ -743,7 +742,7 @@ an_write_record(sc, ltv)
 	case AN_RID_WEP_VOLATILE:
 	case AN_RID_WEP_PERMANENT:
 		an_swap16(&ltv->an_val[1], 3);	/* an_mac_addr */
-		an_swap16(&ltv->an_val[5], 6);
+		an_swap16(&ltv->an_val[5], 7);
 		break;
 	}
 #endif

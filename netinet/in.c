@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.c,v 1.37 2004/08/24 20:31:16 brad Exp $	*/
+/*	$OpenBSD: in.c,v 1.40.2.1 2005/06/11 03:09:49 brad Exp $	*/
 /*	$NetBSD: in.c,v 1.26 1996/02/13 23:41:39 christos Exp $	*/
 
 /*
@@ -427,7 +427,6 @@ in_control(so, cmd, data, ifp)
 		return (error);
 
 	case SIOCDIFADDR: {
-		struct in_multi *inm;
 
 		error = 0;
 cleanup:
@@ -441,8 +440,10 @@ cleanup:
 		in_ifscrub(ifp, ia);
 		TAILQ_REMOVE(&ifp->if_addrlist, (struct ifaddr *)ia, ifa_list);
 		TAILQ_REMOVE(&in_ifaddr, ia, ia_list);
-		while ((inm = LIST_FIRST(&ia->ia_multiaddrs)) != NULL)
-			in_delmulti(inm);
+		if (ia->ia_allhosts != NULL) {
+			in_delmulti(ia->ia_allhosts);
+			ia->ia_allhosts = NULL;
+		}
 		IFAFREE((&ia->ia_ifa));
 		dohooks(ifp->if_addrhooks, 0);
 		splx(s);
@@ -731,7 +732,7 @@ in_ifinit(ifp, ia, sin, scrub)
 		ia->ia_netbroadcast.s_addr =
 			ia->ia_net | ~ia->ia_netmask;
 	} else if (ifp->if_flags & IFF_LOOPBACK) {
-		ia->ia_ifa.ifa_dstaddr = ia->ia_ifa.ifa_addr;
+		ia->ia_dstaddr = ia->ia_addr;
 		flags |= RTF_HOST;
 	} else if (ifp->if_flags & IFF_POINTOPOINT) {
 		if (ia->ia_dstaddr.sin_family != AF_INET)
@@ -743,11 +744,11 @@ in_ifinit(ifp, ia, sin, scrub)
 	 * If the interface supports multicast, join the "all hosts"
 	 * multicast group on that interface.
 	 */
-	if (ifp->if_flags & IFF_MULTICAST) {
+	if ((ifp->if_flags & IFF_MULTICAST) && ia->ia_allhosts == NULL) {
 		struct in_addr addr;
 
 		addr.s_addr = INADDR_ALLHOSTS_GROUP;
-		in_addmulti(&addr, ifp);
+		ia->ia_allhosts = in_addmulti(&addr, ifp);
 	}
 	return (error);
 }
@@ -777,16 +778,18 @@ in_addprefix(target, flags)
 		prefix.s_addr &= mask.s_addr;
 	}
 
-	for (ia = in_ifaddr.tqh_first; ia; ia = ia->ia_list.tqe_next) {
-		if (rtinitflags(ia))
+	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
+		if (rtinitflags(ia)) {
 			p = ia->ia_dstaddr.sin_addr;
-		else {
+			if (prefix.s_addr != p.s_addr)
+				continue;
+		} else {
 			p = ia->ia_addr.sin_addr;
 			p.s_addr &= ia->ia_sockmask.sin_addr.s_addr;
+			if (prefix.s_addr != p.s_addr ||
+			    mask.s_addr != ia->ia_sockmask.sin_addr.s_addr)
+				continue;
 		}
-
-		if (prefix.s_addr != p.s_addr)
-			continue;
 
 		/*
 		 * if we got a matching prefix route inserted by other
@@ -959,6 +962,7 @@ in_addmulti(ap, ifp)
 			return (NULL);
 		}
 		inm->inm_ia = ia;
+		ia->ia_ifa.ifa_refcnt++;
 		LIST_INSERT_HEAD(&ia->ia_multiaddrs, inm, inm_list);
 		/*
 		 * Ask the network driver to update its multicast reception
@@ -970,6 +974,7 @@ in_addmulti(ap, ifp)
 		if ((ifp->if_ioctl == NULL) ||
 		    (*ifp->if_ioctl)(ifp, SIOCADDMULTI,(caddr_t)&ifr) != 0) {
 			LIST_REMOVE(inm, inm_list);
+			IFAFREE(&inm->inm_ia->ia_ifa);
 			free(inm, M_IPMADDR);
 			splx(s);
 			return (NULL);
@@ -1003,6 +1008,7 @@ in_delmulti(inm)
 		 * Unlink from list.
 		 */
 		LIST_REMOVE(inm, inm_list);
+		IFAFREE(&inm->inm_ia->ia_ifa);
 		/*
 		 * Notify the network driver to update its multicast reception
 		 * filter.

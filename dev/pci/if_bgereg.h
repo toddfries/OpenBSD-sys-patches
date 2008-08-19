@@ -1,4 +1,4 @@
-/* $OpenBSD: if_bgereg.h,v 1.10 2004/08/05 19:57:17 brad Exp $ */
+/* $OpenBSD: if_bgereg.h,v 1.20 2005/03/07 13:31:40 krw Exp $ */
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2001
@@ -170,6 +170,10 @@
 #define BGE_PCI_MSI_ADDR_LO		0x60
 #define BGE_PCI_MSI_DATA		0x64
 
+/* PCI MSI. ??? */
+#define BGE_PCIE_CAPID_REG		0xD0
+#define BGE_PCIE_CAPID			0x10
+
 /*
  * PCI registers specific to the BCM570x family.
  */
@@ -204,17 +208,25 @@
 #define BGE_PCIMISCCTL_INDIRECT_ACCESS	0x00000080
 #define BGE_PCIMISCCTL_ASICREV		0xFFFF0000
 
-#define BGE_BIGENDIAN_INIT						\
-	(BGE_PCIMISCCTL_ENDIAN_BYTESWAP|				\
-	BGE_PCIMISCCTL_ENDIAN_WORDSWAP|BGE_PCIMISCCTL_CLEAR_INTA|	\
-	BGE_PCIMISCCTL_INDIRECT_ACCESS|BGE_PCIMISCCTL_MASK_PCI_INTR)
+#define BGE_HIF_SWAP_OPTIONS	(BGE_PCIMISCCTL_ENDIAN_WORDSWAP)
+#if BYTE_ORDER == LITTLE_ENDIAN
+#define BGE_DMA_SWAP_OPTIONS \
+	BGE_MODECTL_WORDSWAP_NONFRAME| \
+	BGE_MODECTL_BYTESWAP_DATA|BGE_MODECTL_WORDSWAP_DATA
+#else
+#define BGE_DMA_SWAP_OPTIONS \
+	BGE_MODECTL_WORDSWAP_NONFRAME|BGE_MODECTL_BYTESWAP_NONFRAME| \
+	BGE_MODECTL_BYTESWAP_DATA|BGE_MODECTL_WORDSWAP_DATA
+#endif
 
-#define BGE_LITTLEENDIAN_INIT						\
-	(BGE_PCIMISCCTL_CLEAR_INTA|BGE_PCIMISCCTL_MASK_PCI_INTR|	\
-	BGE_PCIMISCCTL_ENDIAN_WORDSWAP|BGE_PCIMISCCTL_INDIRECT_ACCESS)
+#define BGE_INIT \
+	(BGE_HIF_SWAP_OPTIONS|BGE_PCIMISCCTL_CLEAR_INTA| \
+	 BGE_PCIMISCCTL_MASK_PCI_INTR|BGE_PCIMISCCTL_INDIRECT_ACCESS)
 
 #define BGE_CHIPID_TIGON_I		0x40000000
 #define BGE_CHIPID_TIGON_II		0x60000000
+#define BGE_CHIPID_BCM5700_A0		0x70000000
+#define BGE_CHIPID_BCM5700_A1		0x70010000
 #define BGE_CHIPID_BCM5700_B0		0x71000000
 #define BGE_CHIPID_BCM5700_B1		0x71020000
 #define BGE_CHIPID_BCM5700_B2		0x71030000
@@ -227,6 +239,7 @@
 #define BGE_CHIPID_BCM5703_A0		0x10000000
 #define BGE_CHIPID_BCM5703_A1		0x10010000
 #define BGE_CHIPID_BCM5703_A2		0x10020000
+#define BGE_CHIPID_BCM5703_A3		0x11000000
 #define BGE_CHIPID_BCM5704_A0		0x20000000
 #define BGE_CHIPID_BCM5704_A1		0x20010000
 #define BGE_CHIPID_BCM5704_A2		0x20020000
@@ -235,6 +248,8 @@
 #define BGE_CHIPID_BCM5705_A1		0x30010000
 #define BGE_CHIPID_BCM5705_A2		0x30020000
 #define BGE_CHIPID_BCM5705_A3		0x30030000
+#define BGE_CHIPID_BCM5750_A0		0x40000000
+#define BGE_CHIPID_BCM5750_A1		0x40010000
 
 /* shorthand one */
 #define BGE_ASICREV(x)			((x) >> 28)
@@ -243,6 +258,7 @@
 #define BGE_ASICREV_BCM5703		0x01
 #define BGE_ASICREV_BCM5704		0x02
 #define BGE_ASICREV_BCM5705		0x03
+#define BGE_ASICREV_BCM5750		0x04
 
 /* chip revisions */
 #define BGE_CHIPREV(x)			((x) >> 24)
@@ -299,6 +315,15 @@
 #define BGE_PCISTATE_EXPROM_RETRY	0x00000040
 #define BGE_PCISTATE_FLATVIEW_MODE	0x00000100
 #define BGE_PCISTATE_PCI_TGT_RETRY_MAX	0x00000E00
+
+/*
+ * The following bits in PCI state register are reserved.
+ * If we check that the register values reverts on reset,
+ * do not check these bits. On some 5704C (rev A3) and some
+ * Altima chips, these bits do not revert until much later
+ * in the bge driver's bge_reset() chip-reset state machine.
+ */
+#define BGE_PCISTATE_RESERVED	((1 << 12) + (1 <<7))
 
 /*
  * PCI Clock Control register -- note, this register is read only
@@ -522,6 +547,11 @@
 #define BGE_RX_BD_RULES_CTL15		0x04F8
 #define BGE_RX_BD_RULES_MASKVAL15	0x04FC
 #define BGE_RX_RULES_CFG		0x0500
+#define BGE_MAX_RX_FRAME_LOWAT		0x0504
+#define BGE_SERDES_CFG			0x0590
+#define BGE_SERDES_STS			0x0594
+#define BGE_SGDIG_CFG			0x05B0
+#define BGE_SGDIG_STS			0x05B4
 #define BGE_RX_STATS			0x0800
 #define BGE_TX_STATS			0x0880
 
@@ -651,6 +681,39 @@
 /* Receive Rules Mask register */
 #define BGE_RXRULEMASK_VALUE		0x0000FFFF
 #define BGE_RXRULEMASK_MASKVAL		0xFFFF0000
+
+/* SERDES configuration register */
+#define BGE_SERDESCFG_RXR		0x00000007 /* phase interpolator */
+#define BGE_SERDESCFG_RXG		0x00000018 /* rx gain setting */
+#define BGE_SERDESCFG_RXEDGESEL		0x00000040 /* rising/falling egde */
+#define BGE_SERDESCFG_TX_BIAS		0x00000380 /* TXDAC bias setting */
+#define BGE_SERDESCFG_IBMAX		0x00000400 /* bias current +25% */
+#define BGE_SERDESCFG_IBMIN		0x00000800 /* bias current -25% */
+#define BGE_SERDESCFG_TXMODE		0x00001000
+#define BGE_SERDESCFG_TXEDGESEL		0x00002000 /* rising/falling edge */
+#define BGE_SERDESCFG_MODE		0x00004000 /* TXCP/TXCN disabled */
+#define BGE_SERDESCFG_PLLTEST		0x00008000 /* PLL test mode */
+#define BGE_SERDESCFG_CDET		0x00010000 /* comma detect enable */
+#define BGE_SERDESCFG_TBILOOP		0x00020000 /* local loopback */
+#define BGE_SERDESCFG_REMLOOP		0x00040000 /* remote loopback */
+#define BGE_SERDESCFG_INVPHASE		0x00080000 /* Reverse 125Mhz clock */
+#define BGE_SERDESCFG_12REGCTL		0x00300000 /* 1.2v regulator ctl */
+#define BGE_SERDESCFG_REGCTL		0x00C00000 /* regulator ctl (2.5v) */
+
+/* SERDES status register */
+#define BGE_SERDESSTS_RXSTAT		0x0000000F /* receive status bits */
+#define BGE_SERDESSTS_CDET		0x00000010 /* comma code detected */
+
+/* SGDIG config (not documented) */
+#define BGE_SGDIGCFG_PAUSE_CAP		0x00000800
+#define BGE_SGDIGCFG_ASYM_PAUSE		0x00001000
+#define BGE_SGDIGCFG_SEND		0x40000000
+#define BGE_SGDIGCFG_AUTO		0x80000000
+
+/* SGDIG status (not documented) */
+#define BGE_SGDIGSTS_PAUSE_CAP		0x00080000
+#define BGE_SGDIGSTS_ASYM_PAUSE		0x00100000
+#define BGE_SGDIGSTS_DONE		0x00000002
 
 /* MI communication register */
 #define BGE_MICOMM_DATA			0x0000FFFF
@@ -1701,7 +1764,10 @@ typedef struct {
 #define BGE_HOSTADDR(x,y)						\
 	do {								\
 		(x).bge_addr_lo = ((u_int64_t) (y) & 0xffffffff);	\
-		(x).bge_addr_hi = ((u_int64_t) (y) >> 32);		\
+		if (sizeof(bus_addr_t) == 8)				\
+			(x).bge_addr_hi = ((u_int64_t) (y) >> 32);	\
+		else							\
+			(x).bge_addr_hi = 0;				\
 	} while(0)
 
 /* Ring control block structure */
@@ -1726,10 +1792,17 @@ struct bge_rcb {
 
 struct bge_tx_bd {
 	bge_hostaddr		bge_addr;
+#if BYTE_ORDER == LITTLE_ENDIAN
 	u_int16_t		bge_flags;
 	u_int16_t		bge_len;
 	u_int16_t		bge_vlan_tag;
 	u_int16_t		bge_rsvd;
+#else
+	u_int16_t		bge_len;
+	u_int16_t		bge_flags;
+	u_int16_t		bge_rsvd;
+	u_int16_t		bge_vlan_tag;
+#endif
 };
 
 #define BGE_TXBDFLAG_TCP_UDP_CSUM	0x0001
@@ -1751,6 +1824,7 @@ struct bge_tx_bd {
 
 struct bge_rx_bd {
 	bge_hostaddr		bge_addr;
+#if BYTE_ORDER == LITTLE_ENDIAN
 	u_int16_t		bge_len;
 	u_int16_t		bge_idx;
 	u_int16_t		bge_flags;
@@ -1759,6 +1833,16 @@ struct bge_rx_bd {
 	u_int16_t		bge_ip_csum;
 	u_int16_t		bge_vlan_tag;
 	u_int16_t		bge_error_flag;
+#else
+	u_int16_t		bge_idx;
+	u_int16_t		bge_len;
+	u_int16_t		bge_type;
+	u_int16_t		bge_flags;
+	u_int16_t		bge_ip_csum;
+	u_int16_t		bge_tcp_udp_csum;
+	u_int16_t		bge_error_flag;
+	u_int16_t		bge_vlan_tag;
+#endif
 	u_int32_t		bge_rsvd;
 	u_int32_t		bge_opaque;
 };
@@ -1782,17 +1866,29 @@ struct bge_rx_bd {
 #define BGE_RXERRFLAG_GIANT		0x0080
 
 struct bge_sts_idx {
+#if BYTE_ORDER == LITTLE_ENDIAN
 	u_int16_t		bge_rx_prod_idx;
 	u_int16_t		bge_tx_cons_idx;
+#else
+	u_int16_t		bge_tx_cons_idx;
+	u_int16_t		bge_rx_prod_idx;
+#endif
 };
 
 struct bge_status_block {
 	u_int32_t		bge_status;
 	u_int32_t		bge_rsvd0;
+#if BYTE_ORDER == LITTLE_ENDIAN
 	u_int16_t		bge_rx_jumbo_cons_idx;
 	u_int16_t		bge_rx_std_cons_idx;
 	u_int16_t		bge_rx_mini_cons_idx;
 	u_int16_t		bge_rsvd1;
+#else
+	u_int16_t		bge_rx_std_cons_idx;
+	u_int16_t		bge_rx_jumbo_cons_idx;
+	u_int16_t		bge_rsvd1;
+	u_int16_t		bge_rx_mini_cons_idx;
+#endif
 	struct bge_sts_idx	bge_idx[16];
 };
 
@@ -2036,7 +2132,6 @@ struct bge_gib {
  * boundary.
  */
 
-#define BGE_MAX_FRAMELEN	1536
 #define BGE_PAGE_SIZE		PAGE_SIZE
 #define BGE_MIN_FRAMELEN		60
 
@@ -2130,7 +2225,7 @@ struct bge_ring_data {
 /*
  * Number of DMA segments in a TxCB. Note that this is carefully
  * chosen to make the total struct size an even power of two. It's
- * critical that no TxCB be split across a page boundry since
+ * critical that no TxCB be split across a page boundary since
  * no attempt is made to allocate physically contiguous memory.
  * 
  */
@@ -2178,11 +2273,6 @@ struct bge_jpool_entry {
 	LIST_ENTRY(bge_jpool_entry)	jpool_entries;
 };
 
-struct bge_bcom_hack {
-	int			reg;
-	int			val;
-};
-
 struct bge_softc {
 	struct device		bge_dev;
 	struct arpcom		arpcom;		/* interface info */
@@ -2197,9 +2287,9 @@ struct bge_softc {
 	u_int8_t		bge_rx_alignment_bug;
 	bus_dma_tag_t		bge_dmatag;
 	u_int32_t		bge_chipid;
-	u_int8_t		bge_asicrev;
-	u_int8_t		bge_chiprev;
+	u_int32_t		bge_quirks;
 	u_int8_t		bge_no_3_led;
+	u_int8_t		bge_pcie;
 	struct bge_ring_data	*bge_rdata;	/* rings */
 	struct bge_chain_data	bge_cdata;	/* mbufs */
 	bus_dmamap_t		bge_ring_map;

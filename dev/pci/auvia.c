@@ -1,4 +1,4 @@
-/*	$OpenBSD: auvia.c,v 1.27 2004/01/09 21:32:24 brad Exp $ */
+/*	$OpenBSD: auvia.c,v 1.29 2004/12/07 03:17:42 jsg Exp $ */
 /*	$NetBSD: auvia.c,v 1.7 2000/11/15 21:06:33 jdolecek Exp $	*/
 
 /*-
@@ -43,8 +43,6 @@
  * Documentation links:
  *
  * ftp://ftp.alsa-project.org/pub/manuals/via/686a.pdf
- * ftp://ftp.alsa-project.org/pub/manuals/general/ac97r21.pdf
- * ftp://ftp.alsa-project.org/pub/manuals/ad/AD1881_0.pdf (example AC'97 codec)
  */
 
 #include <sys/param.h>
@@ -819,13 +817,12 @@ auvia_build_dma_ops(struct auvia_softc *sc, struct auvia_softc_chan *ch,
 {
 	struct auvia_dma_op *op;
 	struct auvia_dma *dp;
-	bus_addr_t s, e;
+	bus_addr_t s;
 	size_t l;
 	int segs;
 
 	s = p->map->dm_segs[0].ds_addr;
 	l = ((char *)end - (char *)start);
-	e = s + l;
 	segs = (l + blksize - 1) / blksize;
 
 	if (segs > (ch->sc_dma_op_count)) {

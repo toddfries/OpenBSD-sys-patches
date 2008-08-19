@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.17 2004/08/13 22:13:55 deraadt Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.19 2004/12/08 02:47:30 jsg Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -154,6 +154,12 @@ USB_MATCH(uftdi)
 	    (uaa->product == USB_PRODUCT_INTREPIDCS_VALUECAN ||
 	     uaa->product == USB_PRODUCT_INTREPIDCS_NEOVI))
 		return (UMATCH_VENDOR_PRODUCT);
+	if (uaa->vendor == USB_VENDOR_BBELECTRONICS &&
+	    (uaa->product == USB_PRODUCT_BBELECTRONICS_USOTL4))
+		return (UMATCH_VENDOR_PRODUCT);
+	if (uaa->vendor == USB_VENDOR_FALCOM &&
+	    (uaa->product == USB_PRODUCT_FALCOM_TWIST))
+		 return (UMATCH_VENDOR_PRODUCT);
 
 	return (UMATCH_NONE);
 }
@@ -242,11 +248,35 @@ USB_ATTACH(uftdi)
 			sc->sc_type = UFTDI_TYPE_8U232AM;
 			sc->sc_hdrlen = 0;
 			break;
+
+		default:		/* Can't happen */
+			goto bad;
+		}
+		break;
+
+	case USB_VENDOR_BBELECTRONICS:
+		switch( uaa->product ){
+		case USB_PRODUCT_BBELECTRONICS_USOTL4:
+			sc->sc_type = UFTDI_TYPE_8U232AM;
+			sc->sc_hdrlen = 0;
+			break;
+		default:		/* Can't happen */
+			goto bad;
+		}
+		break;
+
+	case USB_VENDOR_FALCOM:
+		switch( uaa->product ){
+		case USB_PRODUCT_FALCOM_TWIST:
+			sc->sc_type = UFTDI_TYPE_8U232AM;
+			sc->sc_hdrlen = 0;
+			break;
 		default:		/* Can't happen */
 			goto bad;
 		}
 		break;
 	}		
+
 
 	uca.bulkin = uca.bulkout = -1;
 	for (i = 0; i < id->bNumEndpoints; i++) {

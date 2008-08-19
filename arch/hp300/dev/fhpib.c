@@ -1,4 +1,4 @@
-/*	$OpenBSD: fhpib.c,v 1.12 2003/11/03 05:34:43 david Exp $	*/
+/*	$OpenBSD: fhpib.c,v 1.14 2004/12/25 23:02:23 miod Exp $	*/
 /*	$NetBSD: fhpib.c,v 1.18 1997/05/05 21:04:16 thorpej Exp $	*/
 
 /*
@@ -105,6 +105,7 @@ struct	hpib_controller fhpib_controller = {
 
 struct fhpib_softc {
 	struct device sc_dev;		/* generic device glue */
+	struct isr sc_isr;
 	struct fhpibdevice *sc_regs;	/* device registers */
 	struct timeout sc_dma_to;	/* DMA done timeout */
 #ifdef DEBUG
@@ -165,7 +166,11 @@ fhpibattach(parent, self, aux)
 #endif
 
 	/* Establish the interrupt handler. */
-	(void) dio_intr_establish(fhpibintr, sc, ipl, IPL_BIO);
+	sc->sc_isr.isr_func = fhpibintr;
+	sc->sc_isr.isr_arg = sc;
+	sc->sc_isr.isr_ipl = ipl;
+	sc->sc_isr.isr_priority = IPL_BIO;
+	dio_intr_establish(&sc->sc_isr, self->dv_xname);
 
 	ha.ha_ops = &fhpib_controller;
 	ha.ha_type = HPIBC;			/* XXX */
@@ -191,7 +196,7 @@ fhpibreset(hs)
 	DELAY(100000);
 	/*
 	 * See if we can do word dma.
-	 * If so, we should be able to write and read back the appropos bit.
+	 * If so, we should be able to write and read back the apropos bit.
 	 */
 	hd->hpib_ie |= IDS_WDMA;
 	if (hd->hpib_ie & IDS_WDMA) {
@@ -461,7 +466,7 @@ fhpibdmadone(arg)
 		hs->sc_flags &= ~(HPIBF_DONE|HPIBF_IO|HPIBF_READ|HPIBF_TIMO);
 		dmafree(hs->sc_dq);
 
-		hq = hs->sc_queue.tqh_first;
+		hq = TAILQ_FIRST(&hs->sc_queue);
 		(hq->hq_intr)(hq->hq_softc);
 	}
 	splx(s);
@@ -536,11 +541,12 @@ fhpibintr(arg)
 #endif
 		return(0);
 	}
+
 #ifdef DEBUG
 	if ((fhpibdebug & FDB_DMA) && fhpibdebugunit == sc->sc_dev.dv_unit)
 		printf("fhpibintr: flags %x\n", hs->sc_flags);
 #endif
-	hq = hs->sc_queue.tqh_first;
+	hq = TAILQ_FIRST(&hs->sc_queue);
 	if (hs->sc_flags & HPIBF_IO) {
 		if (hs->sc_flags & HPIBF_TIMO)
 			timeout_del(&sc->sc_dma_to);
@@ -645,7 +651,7 @@ fhpibppwatch(arg)
 
 	if ((hs->sc_flags & HPIBF_PPOLL) == 0)
 		return;
-	slave = (0x80 >> hs->sc_queue.tqh_first->hq_slave);
+	slave = (0x80 >> TAILQ_FIRST(&hs->sc_queue)->hq_slave);
 #ifdef DEBUG
 	if (!doppollint) {
 		if (fhpibppoll(hs) & slave) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx_openbsd.c,v 1.23 2004/08/13 23:38:54 krw Exp $	*/
+/*	$OpenBSD: aic7xxx_openbsd.c,v 1.29 2005/02/12 15:32:12 krw Exp $	*/
 /*	$NetBSD: aic7xxx_osm.c,v 1.14 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -123,24 +123,12 @@ ahc_attach(struct ahc_softc *ahc)
 		ahc_reset_channel(ahc, 'B', TRUE);
 
 	if ((ahc->flags & AHC_PRIMARY_CHANNEL) == 0) {
-		/*
-		 * Ensure SCSI_IS_SCSIBUS_B() returns false for sc_channel
-		 * until sc_channel_b has been properly initialized by scsi
-		 * layer.
-		 */
-		ahc->sc_channel_b.scsibus = 0xff;
 		ahc->sc_child = config_found((void *)&ahc->sc_dev,
 		    &ahc->sc_channel, scsiprint);
 		if (ahc->features & AHC_TWIN)
 			ahc->sc_child_b = config_found((void *)&ahc->sc_dev,
 			    &ahc->sc_channel_b, scsiprint);
 	} else {
-		/*
-		 * Ensure SCSI_IS_SCSIBUS_B() returns false for sc_channel_b
-		 * until sc_channel has been properly initialized by scsi
-		 * layer.
-		 */
-		ahc->sc_channel.scsibus = 0xff;
 		if (ahc->features & AHC_TWIN)
 			ahc->sc_child = config_found((void *)&ahc->sc_dev,
 			    &ahc->sc_channel_b, scsiprint);
@@ -274,6 +262,7 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 	case CAM_BDR_SENT:
 	case CAM_SCSI_BUS_RESET:
 		xs->error = XS_RESET;
+		break;
 	case CAM_REQUEUE_REQ:
 		xs->error = XS_TIMEOUT;
 		xs->retries++;
@@ -302,7 +291,7 @@ ahc_done(struct ahc_softc *ahc, struct scb *scb)
 		 */
 		memset(&xs->sense, 0, sizeof(struct scsi_sense_data));
 		memcpy(&xs->sense, ahc_get_sense_buf(ahc, scb),
-		    ahc_le32toh(scb->sg_list->len) & AHC_SG_LEN_MASK);
+		    aic_le32toh(scb->sg_list->len) & AHC_SG_LEN_MASK);
 		xs->error = XS_SENSE;
 	}
 
@@ -378,10 +367,10 @@ ahc_action(struct scsi_xfer *xs)
 		hscb->cdb_len = 0;
 		scb->flags |= SCB_DEVICE_RESET;
 		hscb->control |= MK_MESSAGE;
-		ahc_execute_scb(scb, NULL, 0);
+		return (ahc_execute_scb(scb, NULL, 0));
 	}
 
-	return ahc_setup_data(ahc, xs, scb);
+	return (ahc_setup_data(ahc, xs, scb));
 }
 
 int
@@ -414,10 +403,10 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 		while (dm_segs < end_seg) {
 			uint32_t len;
 
-			sg->addr = ahc_htole32(dm_segs->ds_addr);
+			sg->addr = aic_htole32(dm_segs->ds_addr);
 			len = dm_segs->ds_len
 			    | ((dm_segs->ds_addr >> 8) & 0x7F000000);
-			sg->len = ahc_htole32(len);
+			sg->len = aic_htole32(len);
 			sg++;
 			dm_segs++;
 		}
@@ -428,7 +417,7 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 		 * sequencer will clear as soon as a data transfer
 		 * occurs.
 		 */
-		scb->hscb->sgptr = ahc_htole32(scb->sg_list_phys|SG_FULL_RESID);
+		scb->hscb->sgptr = aic_htole32(scb->sg_list_phys|SG_FULL_RESID);
 
 		if ((xs->flags & SCSI_DATA_IN) != 0)
 			op = BUS_DMASYNC_PREREAD;
@@ -439,7 +428,7 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 				scb->dmamap->dm_mapsize, op);
 
 		sg--;
-		sg->len |= ahc_htole32(AHC_DMA_LAST_SEG);
+		sg->len |= aic_htole32(AHC_DMA_LAST_SEG);
 
 		bus_dmamap_sync(ahc->parent_dmat, scb->sg_map->sg_dmamap,
 		    0, scb->sg_map->sg_dmamap->dm_mapsize,
@@ -449,7 +438,7 @@ ahc_execute_scb(void *arg, bus_dma_segment_t *dm_segs, int nsegments)
 		scb->hscb->dataptr = scb->sg_list->addr;
 		scb->hscb->datacnt = scb->sg_list->len;
 	} else {
-		scb->hscb->sgptr = ahc_htole32(SG_LIST_NULL);
+		scb->hscb->sgptr = aic_htole32(SG_LIST_NULL);
 		scb->hscb->dataptr = 0;
 		scb->hscb->datacnt = 0;
 	}
@@ -697,7 +686,7 @@ ahc_timeout(void *arg)
 
 	if ((scb->flags & SCB_ACTIVE) == 0) {
 		/* Previous timeout took care of me already */
-		printf("%s: Timedout SCB already complete. "
+		printf("%s: Timed out SCB already complete. "
 		       "Interrupts may not be functioning.\n", ahc_name(ahc));
 		ahc_unpause(ahc);
 		ahc_unlock(ahc, &s);
@@ -984,7 +973,7 @@ ahc_softc_comp(struct ahc_softc *lahc, struct ahc_softc *rahc)
 
 void
 ahc_send_async(struct ahc_softc *ahc, char channel, u_int target, u_int lun,
-		u_int code, void *opt_arg)
+		ac_code code, void *opt_arg)
 {
 	/* Nothing to do here for OpenBSD */
 }

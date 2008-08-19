@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.115 2004/08/05 09:06:24 mickey Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.123 2005/03/15 05:09:23 mickey Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -43,6 +43,7 @@
 #include <uvm/uvm.h>
 
 #include <machine/cpufunc.h>
+#include <machine/iomod.h>
 
 #include <dev/rndvar.h>
 
@@ -311,7 +312,7 @@ pmap_dump_table(pa_space_t space, vaddr_t sva)
 			continue;
 
 		for (pdemask = 1, va = sva ? sva : 0;
-		    va < VM_MAX_KERNEL_ADDRESS; va += PAGE_SIZE) {
+		    va < 0xfffff000; va += PAGE_SIZE) {
 			if (pdemask != (va & PDE_MASK)) {
 				pdemask = va & PDE_MASK;
 				if (!(pde = pmap_pde_get(pd, va))) {
@@ -434,8 +435,8 @@ void
 pmap_bootstrap(vstart)
 	vaddr_t vstart;
 {
-	extern int etext, __rodata_end, __data_start;
-	extern u_int totalphysmem, *ie_mem;
+	extern int resvphysmem, etext, __rodata_end, __data_start;
+	extern u_int *ie_mem;
 	extern paddr_t hppa_vtop;
 	vaddr_t va, addr = hppa_round_page(vstart), t;
 	vsize_t size;
@@ -460,7 +461,7 @@ pmap_bootstrap(vstart)
 	 */
 	kpm = &kernel_pmap_store;
 	bzero(kpm, sizeof(*kpm));
-	simple_lock_init(&kpm->pm_obj.vmobjlock);
+	simple_lock_init(&kpm->pm_lock);
 	kpm->pm_obj.pgops = NULL;
 	TAILQ_INIT(&kpm->pm_obj.memq);
 	kpm->pm_obj.uo_npages = 0;
@@ -525,8 +526,7 @@ pmap_bootstrap(vstart)
 	if (btlb_insert(HPPA_SID_KERNEL, 0, 0, &t,
 	    pmap_sid2pid(HPPA_SID_KERNEL) |
 	    pmap_prot(pmap_kernel(), UVM_PROT_RX)) < 0)
-		panic("pmap_bootstrap: cannot block map kernel text");
-	kpm->pm_stats.wired_count = kpm->pm_stats.resident_count = atop(t);
+		printf("WARNING: cannot block map kernel text\n");
 
 	if (&__rodata_end < &__data_start) {
 		physical_steal = (vaddr_t)&__rodata_end;
@@ -535,25 +535,21 @@ pmap_bootstrap(vstart)
 		    physical_end - physical_steal, physical_steal));
 	}
 
-	/*
-	 * NOTE: we no longer trash the BTLB w/ unused entries,
-	 * lazy map only needed pieces (see bus_mem_add_mapping() for refs).
-	 */
-
-	/* takes about 16 per gig of initial kmem ... */
-	nkpdes = totalphysmem >> 14;
+	/* kernel virtual is the last gig of the moohicans */
+	nkpdes = physmem >> 14;	/* at least 16/gig for kmem */
 	if (nkpdes < 4)
-		nkpdes = 4;	/* ... but no less than four */
-	npdes = nkpdes + (totalphysmem + btoc(PDE_SIZE) - 1) / btoc(PDE_SIZE);
-	uvm_page_physload(0, totalphysmem,
-	    atop(addr) + npdes, totalphysmem, VM_FREELIST_DEFAULT);
+		nkpdes = 4;		/* ... but no less than four */
+	nkpdes += HPPA_IOLEN / PDE_SIZE; /* ... and io space too */
+	npdes = nkpdes + (physmem + btoc(PDE_SIZE) - 1) / btoc(PDE_SIZE);
 
 	/* map the pdes */
 	for (va = 0; npdes--; va += PDE_SIZE, addr += PAGE_SIZE) {
 
-		/* last four pdes are for the kernel virtual */
+		/* last nkpdes are for the kernel virtual */
 		if (npdes == nkpdes - 1)
 			va = SYSCALLGATE;
+		if (npdes == HPPA_IOLEN / PDE_SIZE - 1)
+			va = HPPA_IOBEGIN;
 		/* now map the pde for the physmem */
 		bzero((void *)addr, PAGE_SIZE);
 		DPRINTF(PDB_INIT|PDB_VP, ("pde premap 0x%x 0x%x\n", va, addr));
@@ -561,15 +557,20 @@ pmap_bootstrap(vstart)
 		kpm->pm_stats.resident_count++; /* count PTP as resident */
 	}
 
-	physmem = atop(addr);
+	resvphysmem = atop(addr);
+	DPRINTF(PDB_INIT, ("physmem: 0x%x - 0x%x\n", resvphysmem, physmem));
+	uvm_page_physload(0, physmem,
+	    resvphysmem, physmem, VM_FREELIST_DEFAULT);
 
 	/* TODO optimize/inline the kenter */
-	for (va = 0; va < ptoa(totalphysmem); va += PAGE_SIZE) {
+	for (va = 0; va < ptoa(physmem); va += PAGE_SIZE) {
 		extern struct user *proc0paddr;
 		vm_prot_t prot = UVM_PROT_RW;
 
 		if (va < (vaddr_t)&etext)
 			prot = UVM_PROT_RX;
+		else if (va < (vaddr_t)&__rodata_end)
+			prot = UVM_PROT_READ;
 		else if (va == (vaddr_t)proc0paddr + USPACE)
 			prot = UVM_PROT_NONE;
 
@@ -610,6 +611,8 @@ pmap_init()
 		pmap_pte_set(pde, SYSCALLGATE, (paddr_t)&gateway_page |
 		    PTE_PROT(TLB_GATE_PROT));
 	}
+
+	DPRINTF(PDB_FOLLOW|PDB_INIT, ("pmap_init(): done\n"));
 }
 
 void
@@ -629,7 +632,7 @@ pmap_create()
 
 	pmap = pool_get(&pmap_pmap_pool, PR_WAITOK);
 
-	simple_lock_init(&pmap->pm_obj.vmobjlock);
+	simple_lock_init(&pmap->pm_lock);
 	pmap->pm_obj.pgops = NULL;	/* currently not a mappable object */
 	TAILQ_INIT(&pmap->pm_obj.memq);
 	pmap->pm_obj.uo_npages = 0;
@@ -664,9 +667,9 @@ pmap_destroy(pmap)
 
 	DPRINTF(PDB_FOLLOW|PDB_PMAP, ("pmap_destroy(%p)\n", pmap));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 	refs = --pmap->pm_obj.uo_refs;
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 
 	if (refs > 0)
 		return;
@@ -726,9 +729,9 @@ pmap_reference(pmap)
 {
 	DPRINTF(PDB_FOLLOW|PDB_PMAP, ("pmap_reference(%p)\n", pmap));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 	pmap->pm_obj.uo_refs++;
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 }
 
 void
@@ -756,12 +759,12 @@ pmap_enter(pmap, va, pa, prot, flags)
 	    ("pmap_enter(%p, 0x%x, 0x%x, 0x%x, 0x%x)\n",
 	    pmap, va, pa, prot, flags));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 
 	if (!(pde = pmap_pde_get(pmap->pm_pdir, va)) &&
 	    !(pde = pmap_pde_alloc(pmap, va, &ptp))) {
 		if (flags & PMAP_CANFAIL) {
-			simple_unlock(&pmap->pm_obj.vmobjlock);
+			simple_unlock(&pmap->pm_lock);
 			return (KERN_RESOURCE_SHORTAGE);
 		}
 
@@ -809,7 +812,7 @@ pmap_enter(pmap, va, pa, prot, flags)
 		if (!pve && !(pve = pmap_pv_alloc())) {
 			if (flags & PMAP_CANFAIL) {
 				simple_unlock(&pg->mdpage.pvh_lock);
-				simple_unlock(&pmap->pm_obj.vmobjlock);
+				simple_unlock(&pmap->pm_lock);
 				return (KERN_RESOURCE_SHORTAGE);
 			}
 			panic("pmap_enter: no pv entries available");
@@ -827,7 +830,7 @@ enter:
 		pte |= PTE_PROT(TLB_WIRED);
 	pmap_pte_set(pde, va, pte);
 
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 
 	DPRINTF(PDB_FOLLOW|PDB_ENTER, ("pmap_enter: leaving\n"));
 
@@ -850,7 +853,7 @@ pmap_remove(pmap, sva, eva)
 	DPRINTF(PDB_FOLLOW|PDB_REMOVE,
 	    ("pmap_remove(%p, 0x%x, 0x%x)\n", pmap, sva, eva));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 
 	for (batch = 0, pdemask = 1; sva < eva; sva += PAGE_SIZE) {
 		if (pdemask != (sva & PDE_MASK)) {
@@ -889,7 +892,7 @@ pmap_remove(pmap, sva, eva)
 		}
 	}
 
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 
 	DPRINTF(PDB_FOLLOW|PDB_REMOVE, ("pmap_remove: leaving\n"));
 }
@@ -912,7 +915,7 @@ pmap_write_protect(pmap, sva, eva, prot)
 	sva = hppa_trunc_page(sva);
 	tlbprot = PTE_PROT(pmap_prot(pmap, prot));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 
 	for (pdemask = 1; sva < eva; sva += PAGE_SIZE) {
 		if (pdemask != (sva & PDE_MASK)) {
@@ -946,7 +949,7 @@ pmap_write_protect(pmap, sva, eva, prot)
 		}
 	}
 
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 }
 
 void
@@ -968,7 +971,7 @@ pmap_page_remove(pg)
 		volatile pt_entry_t *pde;
 		pt_entry_t pte;
 
-		simple_lock(&pmap->pm_obj.vmobjlock);
+		simple_lock(&pmap->pm_lock);
 
 		pde = pmap_pde_get(pmap->pm_pdir, va);
 		pte = pmap_pte_get(pde, va);
@@ -980,7 +983,7 @@ pmap_page_remove(pg)
 		pmap->pm_stats.resident_count--;
 
 		pmap_pte_set(pde, va, 0);
-		simple_unlock(&pmap->pm_obj.vmobjlock);
+		simple_unlock(&pmap->pm_lock);
 	}
 	pg->mdpage.pvh_list = NULL;
 	simple_unlock(&pg->mdpage.pvh_lock);
@@ -999,7 +1002,7 @@ pmap_unwire(pmap, va)
 
 	DPRINTF(PDB_FOLLOW|PDB_PMAP, ("pmap_unwire(%p, 0x%x)\n", pmap, va));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 	if ((pde = pmap_pde_get(pmap->pm_pdir, va))) {
 		pte = pmap_pte_get(pde, va);
 
@@ -1009,7 +1012,7 @@ pmap_unwire(pmap, va)
 			pmap_pte_set(pde, va, pte);
 		}
 	}
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 
 	DPRINTF(PDB_FOLLOW|PDB_PMAP, ("pmap_unwire: leaving\n"));
 
@@ -1036,7 +1039,7 @@ pmap_changebit(struct vm_page *pg, u_int set, u_int clear)
 		volatile pt_entry_t *pde;
 		pt_entry_t opte, pte;
 
-		simple_lock(&pmap->pm_obj.vmobjlock);
+		simple_lock(&pmap->pm_lock);
 		if ((pde = pmap_pde_get(pmap->pm_pdir, va))) {
 			opte = pte = pmap_pte_get(pde, va);
 #ifdef PMAPDEBUG
@@ -1056,7 +1059,7 @@ pmap_changebit(struct vm_page *pg, u_int set, u_int clear)
 				pmap_pte_set(pde, va, pte);
 			}
 		}
-		simple_unlock(&pmap->pm_obj.vmobjlock);
+		simple_unlock(&pmap->pm_lock);
 	}
 	simple_unlock(&pg->mdpage.pvh_lock);
 
@@ -1074,9 +1077,9 @@ pmap_testbit(struct vm_page *pg, u_int bit)
 	simple_lock(&pg->mdpage.pvh_lock);
 	for(pve = pg->mdpage.pvh_list; !(pg->mdpage.pvh_attrs & bit) && pve;
 	    pve = pve->pv_next) {
-		simple_lock(&pve->pv_pmap->pm_obj.vmobjlock);
+		simple_lock(&pve->pv_pmap->pm_lock);
 		pte = pmap_vp_find(pve->pv_pmap, pve->pv_va);
-		simple_unlock(&pve->pv_pmap->pm_obj.vmobjlock);
+		simple_unlock(&pve->pv_pmap->pm_lock);
 		pg->mdpage.pvh_attrs |= pmap_pvh_attrs(pte);
 	}
 	simple_unlock(&pg->mdpage.pvh_lock);
@@ -1094,9 +1097,9 @@ pmap_extract(pmap, va, pap)
 
 	DPRINTF(PDB_FOLLOW|PDB_EXTRACT, ("pmap_extract(%p, %x)\n", pmap, va));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 	pte = pmap_vp_find(pmap, va);
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 
 	if (pte) {
 		if (pap)
@@ -1115,6 +1118,7 @@ pmap_activate(struct proc *p)
 
 	pcb->pcb_space = pmap->pm_space;
 	pcb->pcb_uva = (vaddr_t)p->p_addr;
+	fdcache(HPPA_SID_KERNEL, (vaddr_t)pcb, PAGE_SIZE);
 }
 
 void
@@ -1171,27 +1175,26 @@ pmap_kenter_pa(va, pa, prot)
 	vm_prot_t prot;
 {
 	volatile pt_entry_t *pde;
-	pt_entry_t pte;
+	pt_entry_t pte, opte;
 
 	DPRINTF(PDB_FOLLOW|PDB_ENTER,
 	    ("pmap_kenter_pa(%x, %x, %x)\n", va, pa, prot));
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 
 	if (!(pde = pmap_pde_get(pmap_kernel()->pm_pdir, va)) &&
 	    !(pde = pmap_pde_alloc(pmap_kernel(), va, NULL)))
 		panic("pmap_kenter_pa: cannot allocate pde for va=0x%lx", va);
-#ifdef DIAGNOSTIC
-	if ((pte = pmap_pte_get(pde, va)))
-		panic("pmap_kenter_pa: 0x%lx is already mapped %p:0x%x",
-		    va, pde, pte);
-#endif
-
+	opte = pmap_pte_get(pde, va);
 	pte = pa | PTE_PROT(TLB_WIRED | TLB_REFTRAP |
 	    pmap_prot(pmap_kernel(), prot));
 	if (pa >= HPPA_IOSPACE)
 		pte |= PTE_PROT(TLB_UNCACHABLE);
 	pmap_pte_set(pde, va, pte);
+	pmap_kernel()->pm_stats.wired_count++;
+	pmap_kernel()->pm_stats.resident_count++;
+	if (opte)
+		pmap_pte_flush(pmap_kernel(), va, opte);
 
 #ifdef PMAPDEBUG
 	{
@@ -1206,7 +1209,7 @@ pmap_kenter_pa(va, pa, prot)
 		}
 	}
 #endif
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 
 	DPRINTF(PDB_FOLLOW|PDB_ENTER, ("pmap_kenter_pa: leaving\n"));
 }
@@ -1216,9 +1219,6 @@ pmap_kremove(va, size)
 	vaddr_t va;
 	vsize_t size;
 {
-#ifdef PMAPDEBUG
-	extern u_int totalphysmem;
-#endif
 	struct pv_entry *pve;
 	vaddr_t eva, pdemask;
 	volatile pt_entry_t *pde;
@@ -1228,13 +1228,13 @@ pmap_kremove(va, size)
 	DPRINTF(PDB_FOLLOW|PDB_REMOVE,
 	    ("pmap_kremove(%x, %x)\n", va, size));
 #ifdef PMAPDEBUG
-	if (va < ptoa(totalphysmem)) {
+	if (va < ptoa(physmem)) {
 		printf("pmap_kremove(%x, %x): unmapping physmem\n", va, size);
 		return;
 	}
 #endif
 
-	simple_lock(&pmap->pm_obj.vmobjlock);
+	simple_lock(&pmap->pm_lock);
 
 	for (pdemask = 1, eva = va + size; va < eva; va += PAGE_SIZE) {
 		if (pdemask != (va & PDE_MASK)) {
@@ -1264,7 +1264,7 @@ pmap_kremove(va, size)
 		}
 	}
 
-	simple_unlock(&pmap->pm_obj.vmobjlock);
+	simple_unlock(&pmap->pm_lock);
 
 	DPRINTF(PDB_FOLLOW|PDB_REMOVE, ("pmap_kremove: leaving\n"));
 }

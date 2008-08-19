@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.38 2004/08/25 08:00:08 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.41 2004/12/24 22:50:30 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -59,6 +59,8 @@
 
 #include "assym.h"
 #include "ksyms.h"
+
+#include <sys/errno.h>
 
 #include <machine/asm.h>
 #include <machine/trap.h>
@@ -406,6 +408,10 @@ GLOBAL(spin_cpu)
 	tb0	0,    r0,  0x200-16		/* call 188Bug */
 	jmp	r1
 
+/*
+ * MVME188 specific support routines
+ */
+
 #ifdef MVME188
 /* 
  * void m188_delay(int us)
@@ -534,23 +540,3 @@ GLOBAL(sigcode)			/* r31 points to sigframe */
 	NOP
 	NOP
 GLOBAL(esigcode)
-
-/* interrupt counters */
-GLOBAL(intrnames)
-	string	"spur\0"
-	string	"lev1\0"
-	string	"lev2\0"
-	string	"lev3\0"
-	string	"lev4\0"
-	string	"lev5\0"
-	string	"lev6\0"
-	string	"lev7\0"
-	string	"clk\0"
-	string	"sclk\0"
-	string	"pclk\0"
-	string	"nmi\0"
-GLOBAL(eintrnames)
-	.align	8
-GLOBAL(intrcnt)
-	word	0,0,0,0,0,0,0,0,0,0,0,0
-GLOBAL(eintrcnt)

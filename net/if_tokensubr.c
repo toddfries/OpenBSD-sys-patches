@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tokensubr.c,v 1.16 2004/07/16 15:01:09 henning Exp $	*/
+/*	$OpenBSD: if_tokensubr.c,v 1.18 2005/01/18 23:26:52 mpf Exp $	*/
 /*	$NetBSD: if_tokensubr.c,v 1.7 1999/05/30 00:39:07 bad Exp $	*/
 
 /*
@@ -75,6 +75,11 @@
 
 #include "bpfilter.h"
 
+#include "carp.h"
+#if NCARP > 0
+#include <netinet/ip_carp.h>
+#endif
+
 #ifdef LLC
 #include <netccitt/dll.h>
 #include <netccitt/llc_var.h>
@@ -122,8 +127,8 @@ int	token_output(struct ifnet *, struct mbuf *, struct sockaddr *,
  * XXX route info has to go into the same mbuf as the header
  */
 int
-token_output(ifp, m0, dst, rt0)
-	struct ifnet *ifp;
+token_output(ifp0, m0, dst, rt0)
+	struct ifnet *ifp0;
 	struct mbuf *m0;
 	struct sockaddr *dst;
 	struct rtentry *rt0;
@@ -136,12 +141,32 @@ token_output(ifp, m0, dst, rt0)
 	struct mbuf *mcopy = (struct mbuf *)0;
 	struct token_header *trh;
 #ifdef INET
-	struct arpcom *ac = (struct arpcom *)ifp;
+	struct arpcom *ac = (struct arpcom *)ifp0;
 #endif /* INET */
 	struct token_rif *rif = (struct  token_rif *)0;
 	struct token_rif bcastrif;
 	size_t riflen = 0;
 	short mflags;
+	struct ifnet *ifp = ifp0;
+
+#if NCARP > 0
+	if (ifp->if_type == IFT_CARP) {
+		struct ifaddr *ifa;
+
+		/* loop back if this is going to the carp interface */
+		if (dst != NULL && ifp0->if_link_state == LINK_STATE_UP &&
+		    (ifa = ifa_ifwithaddr(dst)) != NULL &&
+		    ifa->ifa_ifp == ifp0)
+			return (looutput(ifp0, m, dst, rt0));
+
+		ifp = ifp->if_carpdev;
+		ac = (struct arpcom *)ifp;
+
+		if ((ifp0->if_flags & (IFF_UP|IFF_RUNNING)) !=
+		    (IFF_UP|IFF_RUNNING))
+			senderr(ENETDOWN);
+	}
+#endif /* NCARP > 0 */
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		senderr(ENETDOWN);
@@ -385,6 +410,13 @@ token_output(ifp, m0, dst, rt0)
 send:
 #endif /* 0 */
 
+#if NCARP > 0
+	if (ifp0 != ifp && ifp0->if_type == IFT_CARP) {
+		bcopy((caddr_t)((struct arpcom *)ifp0)->ac_enaddr,
+		    (caddr_t)trh->token_shost, sizeof(trh->token_shost));
+	}
+#endif
+
 	mflags = m->m_flags;
 	len = m->m_pkthdr.len;
 	s = splimp();
@@ -399,6 +431,10 @@ send:
 		return (error);
 	}
 	ifp->if_obytes += len;
+#if NCARP > 0
+	if (ifp != ifp0)
+		ifp0->if_obytes += len;
+#endif /* NCARP > 0 */
 	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
 	if ((ifp->if_flags & IFF_OACTIVE) == 0)
@@ -467,6 +503,14 @@ token_input(ifp, m)
 			goto dropanyway;
 		etype = ntohs(l->llc_snap.ether_type);
 		m_adj(m, LLC_SNAPFRAMELEN);
+
+#if NCARP > 0
+		if (ifp->if_carp && ifp->if_type != IFT_CARP &&
+		    (carp_input(m, (u_int8_t *)&th->token_shost,
+		    (u_int8_t *)&th->token_dhost, l->llc_snap.ether_type) == 0))
+			return;
+#endif
+
 		switch (etype) {
 #ifdef INET
 		case ETHERTYPE_IP:

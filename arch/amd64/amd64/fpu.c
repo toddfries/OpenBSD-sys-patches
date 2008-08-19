@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.6 2004/07/11 11:31:57 kettenis Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.7.2.1 2006/05/02 04:08:54 brad Exp $	*/
 /*	$NetBSD: fpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -87,6 +87,7 @@
 
 #define	fninit()		__asm("fninit")
 #define fwait()			__asm("fwait")
+#define fnclex()		__asm("fnclex")
 #define	fxsave(addr)		__asm("fxsave %0" : "=m" (*addr))
 #define	fxrstor(addr)		__asm("fxrstor %0" : : "m" (*addr))
 #define	ldmxcsr(addr)		__asm("ldmxcsr %0" : : "m" (*addr))
@@ -95,6 +96,7 @@
 #define	stts()			lcr0(rcr0() | CR0_TS)
 
 void fpudna(struct cpu_info *);
+static int x86fpflags_to_siginfo(u_int32_t);
 
 /*
  * Init the FPU.
@@ -120,7 +122,9 @@ fputrap(struct trapframe *frame)
 {
 	struct proc *p = curcpu()->ci_fpcurproc;
 	struct savefpu *sfp = &p->p_addr->u_pcb.pcb_savefpu;
+	u_int32_t statbits;
 	u_int16_t cw;
+	int code;
 	union sigval sv;
 
 #ifdef DIAGNOSTIC
@@ -134,19 +138,44 @@ fputrap(struct trapframe *frame)
 
 	fxsave(sfp);
 	if (frame->tf_trapno == T_XMM) {
+	  	statbits = sfp->fp_fxsave.fx_mxcsr;
 	} else {
 		fninit();
 		fwait();
 		cw = sfp->fp_fxsave.fx_fcw;
 		fldcw(&cw);
 		fwait();
+		statbits = sfp->fp_fxsave.fx_fsw;
 	}
 	sfp->fp_ex_tw = sfp->fp_fxsave.fx_ftw;
 	sfp->fp_ex_sw = sfp->fp_fxsave.fx_fsw;
+	code = x86fpflags_to_siginfo (statbits);
 	sv.sival_ptr = (void *)frame->tf_rip;	/* XXX - ? */
 	KERNEL_PROC_LOCK(p);
-	trapsignal(p, SIGFPE, frame->tf_err, 0 /* XXX */, sv);
+	trapsignal(p, SIGFPE, frame->tf_err, code, sv);
 	KERNEL_PROC_UNLOCK(p);
+}
+
+static int
+x86fpflags_to_siginfo(u_int32_t flags)
+{
+        int i;
+        static int x86fp_siginfo_table[] = {
+                FPE_FLTINV, /* bit 0 - invalid operation */
+                FPE_FLTRES, /* bit 1 - denormal operand */
+                FPE_FLTDIV, /* bit 2 - divide by zero   */
+                FPE_FLTOVF, /* bit 3 - fp overflow      */
+                FPE_FLTUND, /* bit 4 - fp underflow     */
+                FPE_FLTRES, /* bit 5 - fp precision     */
+                FPE_FLTINV, /* bit 6 - stack fault      */
+        };
+
+        for (i=0;i < sizeof(x86fp_siginfo_table)/sizeof(int); i++) {
+                if (flags & (1 << i))
+                        return (x86fp_siginfo_table[i]);
+        }
+        /* punt if flags not set */
+        return (FPE_FLTINV);
 }
 
 /*
@@ -214,8 +243,17 @@ fpudna(struct cpu_info *ci)
 		fldcw(&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave.fx_fcw);
 		ldmxcsr(&p->p_addr->u_pcb.pcb_savefpu.fp_fxsave.fx_mxcsr);
 		p->p_md.md_flags |= MDP_USEDFPU;
-	} else
+	} else {
+		static double	zero = 0.0;
+
+		/*
+		 * amd fpu does not restore fip, fdp, fop on fxrstor
+		 * thus leaking other process's execution history.
+		 */
+		fnclex();
+		__asm __volatile("ffree %%st(7)\n\tfld %0" : : "m" (zero));
 		fxrstor(&p->p_addr->u_pcb.pcb_savefpu);
+	}
 }
 
 

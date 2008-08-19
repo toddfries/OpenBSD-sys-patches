@@ -1,9 +1,9 @@
-/*	$OpenBSD: locore.s,v 1.41 2004/07/22 19:36:38 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.48 2005/01/18 13:32:56 miod Exp $	*/
 /*	$NetBSD: locore.s,v 1.91 1998/11/11 06:41:25 thorpej Exp $	*/
 
 /*
  * Copyright (c) 1997 Theo de Raadt
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -71,6 +71,15 @@
 #ifdef USELEDS
 #include <hp300/hp300/leds.h>
 #endif
+#include <hp300/dev/dioreg.h>
+#include <hp300/dev/diofbreg.h>
+
+#include "sgc.h"
+#if NSGC > 0
+#include <hp300/dev/sgcreg.h>
+#endif
+
+#define	SYSFLAG		0xfffffed2
 
 #define MMUADDR(ar)	movl	_C_LABEL(MMUbase),ar
 #define CLKADDR(ar)	movl	_C_LABEL(CLKbase),ar
@@ -148,8 +157,8 @@ ASENTRY_NOPROFILE(start)
 	movl	#CACHE_OFF,d0
 	movc	d0,cacr			| clear and disable on-chip cache(s)
 
-/* check for internal HP-IB in SYSFLAG */
-	btst	#5,0xfffffed2		| internal HP-IB?
+	/* check for internal HP-IB in SYSFLAG */
+	btst	#5,SYSFLAG			| internal HP-IB?
 	jeq	Lhaveihpib		| yes, have HP-IB just continue
 	RELOC(internalhpib, a0)
 	movl	#0,a0@			| no, clear associated address
@@ -318,6 +327,93 @@ Lis320:
 
 Lstart1:
 	/*
+	 * Now we need to know how much space the external I/O map has to be.
+	 * This has to be done before pmap_bootstrap() is invoked, but since
+	 * we are not running in virtual mode and will cause several bus
+	 * errors while probing, it is easier to do this before setting up
+	 * our own vectors table.
+	 * Be careful, a1 is reserved at this point.
+	 */
+	clrl	d3
+
+	/*
+	 * Don't probe the DIO-I space, simply assume the whole 0-31
+	 * select code range is taken, i.e. 32 boards.
+	 */
+	addl	#(DIO_DEVSIZE * 32), d3
+
+	/*
+	 * Check the ``internal'' frame buffer address. If there is one,
+	 * assume an extra 2MB of frame buffer memory at 0x200000.
+	 */
+	movl	#GRFIADDR, a0
+	ASRELOC(phys_badaddr, a3)
+	jbsr	a3@
+	tstl	d0			| success?
+	jne	dioiicheck		| no, skip
+	movl	#0x200000, d1		| yes, add the 200000-400000 range
+	addl	d1, d3
+
+	/*
+	 * Probe for DIO-II devices, select codes 132 to 255.
+	 */
+dioiicheck:
+	RELOC(machineid,a0)
+	cmpl	#HP_320,a0@
+	jeq	eiodone			| HP 320 has nothing more
+
+	movl	#DIOII_SCBASE, d2	| our select code...
+	movl	#DIOII_BASE, a0		| and first address
+dioloop:
+	ASRELOC(phys_badaddr, a3)
+	jbsr	a3@			| probe address (read ID)
+	movl	#DIOII_DEVSIZE, d1
+	tstl	d0			| success?
+	jne	1f			| no, skip
+	addl	d1, d3			| yes, count it
+1:
+	addl	d1, a0			| next slot address...
+	addql	#1, d2			| and slot number
+	cmpl	#256, d2
+	jne	dioloop
+
+#if NSGC > 0
+	/*
+	 * Probe for SGC devices, slots 0 to 3.
+	 * Only do the probe on machines which might have an SGC bus.
+	 */
+	RELOC(machineid,a0)
+	cmpl	#HP_400,a0@
+	jeq	sgcprobe
+	cmpl	#HP_425,a0@
+	jeq	sgcprobe
+	cmpl	#HP_433,a0@
+	jne	eiodone
+sgcprobe:
+	clrl	d2			| first slot...
+	movl	#SGC_BASE, a0		| and first address
+sgcloop:
+	ASRELOC(phys_badaddr, a3)
+	jbsr	a3@			| probe address
+	movl	#SGC_DEVSIZE, d1
+	tstl	d0			| success?
+	jne	2f			| no, skip
+	addl	d1, d3			| yes, count it
+2:
+	addl	d1, a0			| next slot address...
+	addql	#1, d2			| and slot number
+	cmpl	#SGC_NSLOTS, d2
+	jne	sgcloop
+#endif
+
+eiodone:
+	moveq	#PGSHIFT, d2
+	lsrl	d2, d3			| convert from bytes to pages
+	RELOC(eiomapsize,a2)
+	addql	#1, d3			| add an extra page for device probes
+	movl	d3,a2@
+
+	/*
 	 * Now that we know what CPU we have, initialize the address error
 	 * and bus error handlers in the vector table:
 	 *
@@ -388,6 +484,23 @@ Lstart3:
 	addql	#8,sp
 
 /*
+ * While still running physical, override copypage() with the 68040
+ * optimized version, copypage040(), if possible.
+ * This relies upon the fact that copypage() immediately follows
+ * copypage040() in memory.
+ */
+	RELOC(mmutype, a0)
+	cmpl	#MMU_68040,a0@
+	jgt	Lmmu_enable
+	RELOC(copypage040, a0)
+	RELOC(copypage, a1)
+	movl	a1, a2
+1:
+	movw	a0@+, a2@+
+	cmpl	a0, a1
+	jgt	1b
+
+/*
  * Prepare to enable MMU.
  * Since the kernel is not mapped logical == physical we must insure
  * that when the MMU is turned on, all prefetched addresses (including
@@ -397,6 +510,7 @@ Lstart3:
  *
  * Is this all really necessary, or am I paranoid??
  */
+Lmmu_enable:
 	RELOC(Sysseg, a0)		| system segment table addr
 	movl	a0@,d1			| read value (a KVA)
 	addl	a5,d1			| convert to PA
@@ -550,7 +664,7 @@ GLOBAL(proc_trampoline)
 
 /*
  * Trap/interrupt vector routines
- */ 
+ */
 #include <m68k/m68k/trap_subr.s>
 
 	.data
@@ -577,7 +691,7 @@ ENTRY_NOPROFILE(buserr60)
 	movl	a0,sp@(FR_SP)		|   in the savearea
 	movel	sp@(FR_HW+12),d0	| FSLW
 	btst	#2,d0			| branch prediction error?
-	jeq	Lnobpe			
+	jeq	Lnobpe
 	movc	cacr,d2
 	orl	#IC60_CABC,d2		| clear all branch cache entries
 	movc	d2,cacr
@@ -597,7 +711,7 @@ Lnobpe:
 Lberr3:
 	movl	d1,sp@-
 	movl	d0,sp@-			| code is FSLW now.
-	andw	#0x1f80,d0 
+	andw	#0x1f80,d0
 	jeq	Lberr60			| it is a bus error
 	movl	#T_MMUFLT,sp@-		| show that we are an MMU fault
 	jra	_ASM_LABEL(faultstkadj)	| and deal with it
@@ -851,7 +965,7 @@ ENTRY_NOPROFILE(trap0)
 	movw	#SPL1,sr
 	tstb	_C_LABEL(ssir)
 	jne	Lsir1
-Ltrap1:	
+Ltrap1:
 	movl	sp@(FR_SP),a0		| grab and restore
 	movl	a0,usp			|   user SP
 	moveml	sp@+,#0x7FFF		| restore most registers
@@ -1002,15 +1116,6 @@ Lbrkpt3:
 #define INTERRUPT_RESTOREREG	moveml	sp@+,#0x0303
 
 ENTRY_NOPROFILE(spurintr)	/* level 0 */
-	addql	#1,_C_LABEL(intrcnt)+0
-	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
-	jra	_ASM_LABEL(rei)
-
-ENTRY_NOPROFILE(lev1intr)	/* level 1: HIL XXX this needs to go away */
-	INTERRUPT_SAVEREG
-	jbsr	_C_LABEL(hilint)
-	INTERRUPT_RESTOREREG
-	addql	#1,_C_LABEL(intrcnt)+4
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS
 	jra	_ASM_LABEL(rei)
 
@@ -1035,7 +1140,6 @@ Lnotim1:
 	btst	#2,d0			| timer3 interrupt?
 	jeq	Lnotim3			| no, skip statclock
 	movpw	a0@(CLKMSB3),d1		| clear timer3 interrupt
-	addql	#1,_C_LABEL(intrcnt)+28	| count clock interrupts
 	lea	sp@(16),a1		| a1 = &clockframe
 	movl	d0,sp@-			| save status
 	movl	a1,sp@-
@@ -1046,7 +1150,6 @@ Lnotim1:
 Lnotim3:
 	btst	#0,d0			| timer1 interrupt?
 	jeq	Lrecheck		| no, skip hardclock
-	addql	#1,_C_LABEL(intrcnt)+24	| count hardclock interrupts
 	lea	sp@(16),a1		| a1 = &clockframe
 	movl	a1,sp@-
 #ifdef USELEDS
@@ -1078,18 +1181,17 @@ Lnoleds1:
 	movl	d0,_ASM_LABEL(heartbeat)
 Lnoleds0:
 #endif /* USELEDS */
-	jbsr	_C_LABEL(hardclock)	| hardclock(&frame)
+	jbsr	_C_LABEL(clockintr)	| clockintr(&frame)
 	addql	#4,sp
 	CLKADDR(a0)
 Lrecheck:
 	addql	#1,_C_LABEL(uvmexp)+UVMEXP_INTRS | chalk up another interrupt
 	movb	a0@(CLKSR),d0		| see if anything happened
-	jmi	Lclkagain		|  while we were in hardclock/statintr
+	jmi	Lclkagain		|  while we were in clockintr/statintr
 	INTERRUPT_RESTOREREG
 	jra	_ASM_LABEL(rei)		| all done
 
 ENTRY_NOPROFILE(lev7intr)	/* level 7: parity errors, reset key */
-	addql	#1,_C_LABEL(intrcnt)+32
 	clrl	sp@-
 	moveml	#0xFFFF,sp@-		| save registers
 	movl	usp,a0			| and save
@@ -1168,7 +1270,7 @@ Lgotsir:
 	moveml	#0xFFFF,sp@-		| save all registers
 	movl	usp,a1			| including
 	movl	a1,sp@(FR_SP)		|    the users SP
-Lsir1:	
+Lsir1:
 	clrl	sp@-			| VA == none
 	clrl	sp@-			| code == none
 	movl	#T_SSIR,sp@-		| type == software interrupt
@@ -1191,7 +1293,7 @@ Ldorte:
 
 /*
  * Primitives
- */ 
+ */
 
 /*
  * Use common m68k support routines.
@@ -1872,6 +1974,42 @@ Lm68881rdone:
 	rts
 
 /*
+ * Probe a memory address, and see if it causes a bus error.
+ * This function is only to be used in physical mode, and before our
+ * trap vectors are initialized.
+ * Invoke with address to probe in a0.
+ * Alters: a3 d0 d1
+ */
+#define	BUSERR	0xfffffffc
+ASLOCAL(phys_badaddr)
+	ASRELOC(_bsave,a3)
+	movl	BUSERR,a3@		| save ROM bus errror handler
+	ASRELOC(_ssave,a3)
+	movl	sp,a3@			| and current stack pointer
+	ASRELOC(catchbad,a3)
+	movl	a3,BUSERR		| plug in our handler
+	movw	a0@,d1			| access address
+	ASRELOC(_bsave,a3)		| no fault!
+	movl	a3@,BUSERR
+	clrl	d0			| return success
+	rts
+ASLOCAL(catchbad)
+	ASRELOC(_bsave,a3)		| got a bus error, so restore handler
+	movl	a3@,BUSERR
+	ASRELOC(_ssave,a3)
+	movl	a3@,sp			| and stack
+	moveq	#1,d0			| return fault
+	rts
+#undef	BUSERR
+
+	.data
+ASLOCAL(_bsave)
+	.long	0
+ASLOCAL(_ssave)
+	.long	0
+	.text
+
+/*
  * Handle the nitty-gritty of rebooting the machine.
  * Basically we just turn off the MMU and jump to the appropriate ROM routine.
  * Note that we must be running in an address range that is mapped one-to-one
@@ -1985,6 +2123,9 @@ GLOBAL(intiolimit)
 GLOBAL(extiobase)
 	.long	0		| KVA of base of external IO space
 
+GLOBAL(eiomapsize)
+	.long	0		| size of external IO space in pages
+
 GLOBAL(CLKbase)
 	.long	0		| KVA of base of clock registers
 
@@ -2006,21 +2147,3 @@ ASGLOBAL(fulltflush)
 ASGLOBAL(fullcflush)
 	.long	0
 #endif
-
-/* interrupt counters */
-GLOBAL(intrnames)
-	.asciz	"spur"
-	.asciz	"hil"
-	.asciz	"lev2"
-	.asciz	"lev3"
-	.asciz	"lev4"
-	.asciz	"lev5"
-	.asciz	"clock"
-	.asciz  "statclock"
-	.asciz	"nmi"
-GLOBAL(eintrnames)
-	.even
-
-GLOBAL(intrcnt)
-	.long	0,0,0,0,0,0,0,0,0
-GLOBAL(eintrcnt)

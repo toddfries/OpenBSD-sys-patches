@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdc.c,v 1.83 2004/02/19 21:16:21 grange Exp $     */
+/*      $OpenBSD: wdc.c,v 1.86 2004/10/17 17:50:48 grange Exp $     */
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $ */
 
 
@@ -132,17 +132,6 @@ int wdc_nxfer = 0;
 #endif /* WDCDEBUG */
 
 int at_poll = AT_POLL;
-
-u_int8_t wdc_default_read_reg(struct channel_softc *, enum wdc_regs);
-void wdc_default_write_reg(struct channel_softc *, enum wdc_regs, u_int8_t);
-void wdc_default_read_raw_multi_2(struct channel_softc *,
-    void *, unsigned int);
-void wdc_default_write_raw_multi_2(struct channel_softc *,
-    void *, unsigned int);
-void wdc_default_read_raw_multi_4(struct channel_softc *,
-    void *, unsigned int);
-void wdc_default_write_raw_multi_4(struct channel_softc *,
-    void *, unsigned int);
 
 int wdc_floating_bus(struct channel_softc *, int);
 int wdc_preata_drive(struct channel_softc *, int);
@@ -803,12 +792,16 @@ wdcattach(chp)
 	if (!chp->_vtbl)
 		chp->_vtbl = &wdc_default_vtbl;
 
-	if (wdcprobe(chp) == 0) {
-		/* If no drives, abort attach here. */
+	if (chp->wdc->drv_probe != NULL) {
+		chp->wdc->drv_probe(chp);
+	} else {
+		if (wdcprobe(chp) == 0) {
+			/* If no drives, abort attach here. */
 #ifndef __OpenBSD__
-		wdc_delref(chp);
+			wdc_delref(chp);
 #endif
-		return;
+			return;
+		}
 	}
 
 	/* ATAPI drives need settling time. Give them 250ms */
@@ -1744,7 +1737,7 @@ wdc_exec_command(drvp, wdc_c)
 		ret = WDC_COMPLETE;
 	} else {
 		if (wdc_c->flags & AT_WAIT) {
-			WDCDEBUG_PRINT(("wdc_exec_command sleeping"),
+			WDCDEBUG_PRINT(("wdc_exec_command sleeping\n"),
 				       DEBUG_FUNCS);
 
 			while ((wdc_c->flags & AT_DONE) == 0) {
@@ -2014,8 +2007,8 @@ wdc_exec_xfer(chp, xfer)
 	struct channel_softc *chp;
 	struct wdc_xfer *xfer;
 {
-	WDCDEBUG_PRINT(("wdc_exec_xfer %p channel %d drive %d\n", xfer,
-	    chp->channel, xfer->drive), DEBUG_XFERS);
+	WDCDEBUG_PRINT(("wdc_exec_xfer %p flags 0x%x channel %d drive %d\n",
+	    xfer, xfer->c_flags, chp->channel, xfer->drive), DEBUG_XFERS);
 
 	/* complete xfer setup */
 	xfer->chp = chp;

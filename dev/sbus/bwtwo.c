@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwtwo.c,v 1.10 2003/06/27 01:36:53 jason Exp $	*/
+/*	$OpenBSD: bwtwo.c,v 1.15 2005/03/15 18:40:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -105,19 +105,6 @@ struct bwtwo_softc {
 	int sc_nscreens;
 };
 
-struct wsscreen_descr bwtwo_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *bwtwo_scrlist[] = {
-	&bwtwo_stdscreen,
-	/* XXX other formats? */
-};
-
-struct wsscreen_list bwtwo_screenlist = {
-	sizeof(bwtwo_scrlist) / sizeof(struct wsscreen_descr *), bwtwo_scrlist
-};
-
 int bwtwo_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int bwtwo_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -127,7 +114,6 @@ int bwtwo_show_screen(void *, void *, int, void (*cb)(void *, int, int),
 paddr_t bwtwo_mmap(void *, off_t, int);
 int bwtwo_is_console(int);
 void bwtwo_burner(void *, u_int, u_int);
-void bwtwo_updatecursor(struct rasops_info *);
 
 struct wsdisplay_accessops bwtwo_accessops = {
 	bwtwo_ioctl,
@@ -170,13 +156,14 @@ bwtwoattach(parent, self, aux)
 {
 	struct bwtwo_softc *sc = (struct bwtwo_softc *)self;
 	struct sbus_attach_args *sa = aux;
-	struct wsemuldisplaydev_attach_args waa;
-	int console;
+	int node, console;
+	const char *nam;
 
+	node = sa->sa_node;
 	sc->sc_bustag = sa->sa_bustag;
 	sc->sc_paddr = sbus_bus_addr(sa->sa_bustag, sa->sa_slot, sa->sa_offset);
 
-	fb_setsize(&sc->sc_sunfb, 1, 1152, 900, sa->sa_node, 0);
+	fb_setsize(&sc->sc_sunfb, 1, 1152, 900, node, 0);
 
 	if (sa->sa_nreg != 1) {
 		printf(": expected %d registers, got %d\n", 1, sa->sa_nreg);
@@ -201,35 +188,29 @@ bwtwoattach(parent, self, aux)
 		goto fail_vid;
 	}
 
-	console = bwtwo_is_console(sa->sa_node);
+	nam = getpropstring(node, "model");
+	if (*nam == '\0')
+		nam = sa->sa_name;
+	printf(": %s", nam);
+
+	console = bwtwo_is_console(node);
 
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
 	bwtwo_burner(sc, 1, 0);
 
-	printf("\n");
+	printf(", %dx%d\n", sc->sc_sunfb.sf_width, sc->sc_sunfb.sf_height);
 
 	sc->sc_sunfb.sf_ro.ri_bits = (void *)bus_space_vaddr(sc->sc_bustag,
 	    sc->sc_vid_regs);
 	sc->sc_sunfb.sf_ro.ri_hw = sc;
 	fbwscons_init(&sc->sc_sunfb, console ? 0 : RI_CLEAR);
 	
-	bwtwo_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	bwtwo_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	bwtwo_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	bwtwo_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	if (console) {
-		sc->sc_sunfb.sf_ro.ri_updatecursor = bwtwo_updatecursor;
-		fbwscons_console_init(&sc->sc_sunfb, &bwtwo_stdscreen, -1,
-		    bwtwo_burner);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 	}
 
-	waa.console = console;
-	waa.scrdata = &bwtwo_screenlist;
-	waa.accessops = &bwtwo_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &bwtwo_accessops, console);
 
 	return;
 
@@ -272,6 +253,8 @@ bwtwo_ioctl(v, cmd, data, flags, p)
 
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:
@@ -377,16 +360,4 @@ bwtwo_burner(vsc, on, flags)
 	}
 	FBC_WRITE(sc, FBC_CTRL, fbc);
 	splx(s);
-}
-
-void
-bwtwo_updatecursor(ri)
-	struct rasops_info *ri;
-{
-	struct bwtwo_softc *sc = ri->ri_hw;
-
-	if (sc->sc_sunfb.sf_crowp != NULL)
-		*sc->sc_sunfb.sf_crowp = ri->ri_crow;
-	if (sc->sc_sunfb.sf_ccolp != NULL)
-		*sc->sc_sunfb.sf_ccolp = ri->ri_ccol;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sqphy.c,v 1.8 2002/05/04 11:30:06 fgsch Exp $	*/
+/*	$OpenBSD: sqphy.c,v 1.14 2005/02/05 04:28:23 brad Exp $	*/
 /*	$NetBSD: sqphy.c,v 1.17 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-
@@ -76,7 +76,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -104,54 +103,51 @@ struct cfdriver sqphy_cd = {
 int	sqphy_service(struct mii_softc *, struct mii_data *, int);
 void	sqphy_status(struct mii_softc *);
 
+const struct mii_phy_funcs sqphy_funcs = {
+	sqphy_service, sqphy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc sqphys[] = {
+	{ MII_OUI_xxSEEQ,		MII_MODEL_xxSEEQ_80220,
+	  MII_STR_xxSEEQ_80220 },
+	{ MII_OUI_xxSEEQ,		MII_MODEL_xxSEEQ_80225,
+	  MII_STR_xxSEEQ_80225 },
+	{ MII_OUI_xxSEEQ,		MII_MODEL_xxSEEQ_84220,
+	  MII_STR_xxSEEQ_84220 },
+
+	{ 0,				0,
+	  NULL },
+};
+
 int
-sqphymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+sqphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxSEEQ &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxSEEQ_80220)
-		return (10);
-
-   	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxSEEQ &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxSEEQ_84220)
+	if (mii_phy_match(ma, sqphys) != NULL)
 		return (10);
 
 	return (0);
 }
 
 void
-sqphyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+sqphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxSEEQ &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxSEEQ_80220)
-           printf(": %s, rev. %d\n", MII_STR_xxSEEQ_80220,
-	            MII_REV(ma->mii_id2));
-
-
-   	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxSEEQ &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxSEEQ_84220)
-           printf(": %s, rev. %d\n", MII_STR_xxSEEQ_84220,
-	            MII_REV(ma->mii_id2));
-
+	mpd = mii_phy_match(ma, sqphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = sqphy_service;
-	sc->mii_status = sqphy_status;
+	sc->mii_funcs = &sqphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
@@ -160,10 +156,7 @@ sqphyattach(parent, self, aux)
 }
 
 int
-sqphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+sqphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
@@ -225,8 +218,7 @@ sqphy_service(sc, mii, cmd)
 }
 
 void
-sqphy_status(sc)
-	struct mii_softc *sc;
+sqphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -256,6 +248,11 @@ sqphy_status(sc)
 			mii->mii_media_active |= IFM_NONE;
 			return;
 		}
+		/*
+		 * Note: don't get fancy here -- the 80225 only
+		 * supports the SPD_DET and DPLX_DET bits in
+		 * the STATUS register.
+		 */
 		status = PHY_READ(sc, MII_SQPHY_STATUS);
 		if (status & STATUS_SPD_DET)
 			mii->mii_media_active |= IFM_100_TX;

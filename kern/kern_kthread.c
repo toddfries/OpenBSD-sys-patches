@@ -1,8 +1,8 @@
-/*	$OpenBSD: kern_kthread.c,v 1.22 2004/05/04 16:59:32 grange Exp $	*/
+/*	$OpenBSD: kern_kthread.c,v 1.24 2004/12/08 06:56:14 miod Exp $	*/
 /*	$NetBSD: kern_kthread.c,v 1.3 1998/12/22 21:21:36 kleink Exp $	*/
 
 /*-
- * Copyright (c) 1998 The NetBSD Foundation, Inc.
+ * Copyright (c) 1998, 1999 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
@@ -56,6 +56,8 @@
  */
 #include <sys/stdarg.h>
 
+int	kthread_create_now;
+
 /*
  * Fork a kernel thread.  Any process can request this to be done.
  * The VM space and limits, etc. will be shared with proc0.
@@ -65,7 +67,6 @@ kthread_create(void (*func)(void *), void *arg,
     struct proc **newpp, const char *fmt, ...)
 {
 	struct proc *p2;
-	register_t rv[2];
 	int error;
 	va_list ap;
 
@@ -74,12 +75,10 @@ kthread_create(void (*func)(void *), void *arg,
 	 * descriptors and don't leave the exit status around for the
 	 * parent to wait for.
 	 */
-	error = fork1(&proc0, 0,
-	    FORK_SHAREVM|FORK_NOZOMBIE|FORK_SIGHAND, NULL, 0, func, arg, rv);
+	error = fork1(&proc0, 0, FORK_SHAREVM |FORK_NOZOMBIE |FORK_SIGHAND,
+	    NULL, 0, func, arg, NULL, &p2);
 	if (error)
 		return (error);
-
-	p2 = pfind(rv[0]);
 
 	/*
 	 * Mark it as a system process and not a candidate for
@@ -142,6 +141,11 @@ kthread_create_deferred(void (*func)(void *), void *arg)
 {
 	struct kthread_q *kq;
 
+	if (kthread_create_now) {
+		(*func)(arg);
+		return;
+	}
+
 	kq = malloc(sizeof *kq, M_TEMP, M_NOWAIT);
 	if (kq == NULL)
 		panic("unable to allocate kthread_q");
@@ -157,6 +161,9 @@ void
 kthread_run_deferred_queue(void)
 {
 	struct kthread_q *kq;
+
+	/* No longer need to defer kthread creation. */
+	kthread_create_now = 1;
 
 	while ((kq = SIMPLEQ_FIRST(&kthread_q)) != NULL) {
 		SIMPLEQ_REMOVE_HEAD(&kthread_q, kq_q);

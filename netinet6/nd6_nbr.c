@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.33 2003/10/31 09:00:32 mcbride Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.37 2005/02/10 03:40:16 itojun Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -193,7 +193,7 @@ nd6_ns_input(m, off, icmp6len)
 	 */
 	/* (1) and (3) check. */
 #if NCARP > 0
-	if (ifp->if_carp) 
+	if (ifp->if_carp && ifp->if_type != IFT_CARP) 
 		ifa = carp_iamatch6(ifp->if_carp, &taddr6);
 	if (!ifa) 
 		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
@@ -938,15 +938,7 @@ nd6_na_output(ifp, daddr6, taddr6, flags, tlladdr, sdl0)
 		 * my address) use lladdr configured for the interface.
 		 */
 		if (sdl0 == NULL) {
-#if NCARP > 0
-			if (ifp->if_carp) 
-				mac = carp_macmatch6(ifp->if_carp, m, taddr6);
-			if (mac == NULL)
-				mac = nd6_ifptomac(ifp);
-#else
-
 			mac = nd6_ifptomac(ifp);
-#endif
 		} else if (sdl0->sa_family == AF_LINK) {
 			struct sockaddr_dl *sdl;
 			sdl = (struct sockaddr_dl *)sdl0;
@@ -1006,6 +998,7 @@ nd6_ifptomac(ifp)
 	case IFT_FDDI:
 	case IFT_IEEE1394:
 	case IFT_PROPVIRTUAL:
+	case IFT_CARP:
 	case IFT_L2VLAN:
 	case IFT_IEEE80211:
 		return ((caddr_t)(ifp + 1));
@@ -1248,33 +1241,8 @@ nd6_dad_timer(ifa)
 		}
 
 		if (dp->dad_ns_icount) {
-#if 0 /* heuristics */
-			/*
-			 * if
-			 * - we have sent many(?) DAD NS, and
-			 * - the number of NS we sent equals to the
-			 *   number of NS we've got, and
-			 * - we've got no NA
-			 * we may have a faulty network card/driver which
-			 * loops back multicasts to myself.
-			 */
-			if (3 < dp->dad_count
-			 && dp->dad_ns_icount == dp->dad_count
-			 && dp->dad_na_icount == 0) {
-				log(LOG_INFO, "DAD questionable for %s(%s): "
-				    "network card loops back multicast?\n",
-				    ip6_sprintf(&ia->ia_addr.sin6_addr),
-				    ifa->ifa_ifp->if_xname);
-				/* XXX consider it a duplicate or not? */
-				/* duplicate++; */
-			} else {
-				/* We've seen NS, means DAD has failed. */
-				duplicate++;
-			}
-#else
 			/* We've seen NS, means DAD has failed. */
 			duplicate++;
-#endif
 		}
 
 		if (duplicate) {

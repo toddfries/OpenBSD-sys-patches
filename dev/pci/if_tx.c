@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tx.c,v 1.27 2003/08/19 14:01:35 mpech Exp $	*/
+/*	$OpenBSD: if_tx.c,v 1.29 2005/01/15 05:24:11 brad Exp $	*/
 /* $FreeBSD: src/sys/pci/if_tx.c,v 1.45 2001/02/07 20:11:02 semenu Exp $ */
 
 /*-
@@ -438,7 +438,6 @@ epic_freebsd_attach(dev)
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST|IFF_SIMPLEX|IFF_MULTICAST;
 	ifp->if_ioctl = epic_ifioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = epic_ifstart;
 	ifp->if_watchdog = epic_ifwatchdog;
 	ifp->if_init = (if_init_f_t*)epic_init;
@@ -717,7 +716,8 @@ epic_ifioctl(ifp, command, data)
 		    ether_delmulti((struct ifreq *)data, &sc->arpcom);
 
 		if (error == ENETRESET) {
-			epic_set_mc_table(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				epic_set_mc_table(sc);
 			error = 0;
 		}
 #endif

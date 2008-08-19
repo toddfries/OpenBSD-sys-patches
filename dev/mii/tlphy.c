@@ -1,3 +1,4 @@
+/*	$OpenBSD: tlphy.c,v 1.16 2005/02/19 06:00:04 brad Exp $	*/
 /*	$NetBSD: tlphy.c,v 1.26 2000/07/04 03:29:00 thorpej Exp $	*/
 
 /*-
@@ -118,42 +119,49 @@ int	tlphy_auto(struct tlphy_softc *, int);
 void	tlphy_acomp(struct tlphy_softc *);
 void	tlphy_status(struct mii_softc *);
 
+const struct mii_phy_funcs tlphy_funcs = {
+	tlphy_service, tlphy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc tlphys[] = {
+	{ MII_OUI_xxTI,			MII_MODEL_xxTI_TLAN10T,
+	  MII_STR_xxTI_TLAN10T },
+
+	{ 0,			0,
+	  NULL },
+};
+
 int
-tlphymatch(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+tlphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxTI &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxTI_TLAN10T)
+	if (mii_phy_match(ma, tlphys) != NULL)
 		return (10);
 
 	return (0);
 }
 
 void
-tlphyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+tlphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct tlphy_softc *sc = (struct tlphy_softc *)self;
 	struct tl_softc *tlsc = (struct tl_softc *)self->dv_parent;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	printf(": %s, rev. %d\n", MII_STR_xxTI_TLAN10T,
-	    MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, tlphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->sc_mii.mii_inst = mii->mii_instance;
 	sc->sc_mii.mii_phy = ma->mii_phyno;
-	sc->sc_mii.mii_service = tlphy_service;
-	sc->sc_mii.mii_status = tlphy_status;
+	sc->sc_mii.mii_funcs = &tlphy_funcs;
 	sc->sc_mii.mii_pdata = mii;
-	sc->sc_mii.mii_flags = mii->mii_flags;
+	sc->sc_mii.mii_flags = ma->mii_flags;
 
 	sc->sc_mii.mii_flags &= ~MIIF_NOISOLATE;
-	mii_phy_reset(&sc->sc_mii);
+	PHY_RESET(&sc->sc_mii);
 	sc->sc_mii.mii_flags |= MIIF_NOISOLATE;
 
 	/*
@@ -182,10 +190,7 @@ tlphyattach(parent, self, aux)
 }
 
 int
-tlphy_service(self, mii, cmd)
-	struct mii_softc *self;
-	struct mii_data *mii;
-	int cmd;
+tlphy_service(struct mii_softc *self, struct mii_data *mii, int cmd)
 {
 	struct tlphy_softc *sc = (struct tlphy_softc *)self;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -247,26 +252,14 @@ tlphy_service(self, mii, cmd)
 
 	case MII_TICK:
 		/*
+		 * XXX WHAT ABOUT CHECKING LINK ON THE BNC/AUI?!
+		 */
+
+		/*
 		 * If we're not currently selected, just return.
 		 */
 		if (IFM_INST(ife->ifm_media) != sc->sc_mii.mii_inst)
 			return (0);
-
-		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
-			return (0);
-
-		/*
-		 * Is the interface even up?
-		 */
-		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
-			return (0);
-
-		/*
-		 * XXX WHAT ABOUT CHECKING LINK ON THE BNC/AUI?!
-		 */
 
 		if (mii_phy_tick(&sc->sc_mii) == EJUSTRETURN)
 			return (0);
@@ -286,8 +279,7 @@ tlphy_service(self, mii, cmd)
 }
 
 void
-tlphy_status(physc)
-	struct mii_softc *physc;
+tlphy_status(struct mii_softc *physc)
 {
 	struct tlphy_softc *sc = (void *) physc;
 	struct mii_data *mii = sc->sc_mii.mii_pdata;
@@ -330,9 +322,7 @@ tlphy_status(physc)
 }
 
 int
-tlphy_auto(sc, waitfor)
-	struct tlphy_softc *sc;
-	int waitfor;
+tlphy_auto(struct tlphy_softc *sc, int waitfor)
 {
 	int error;
 
@@ -358,8 +348,7 @@ tlphy_auto(sc, waitfor)
 }
 
 void
-tlphy_acomp(sc)
-	struct tlphy_softc *sc;
+tlphy_acomp(struct tlphy_softc *sc)
 {
 	int aner, anlpar;
 

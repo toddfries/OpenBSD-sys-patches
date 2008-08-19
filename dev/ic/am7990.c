@@ -1,4 +1,4 @@
-/*	$OpenBSD: am7990.c,v 1.35 2004/06/01 12:58:51 mcbride Exp $	*/
+/*	$OpenBSD: am7990.c,v 1.38 2005/01/15 05:24:10 brad Exp $	*/
 /*	$NetBSD: am7990.c,v 1.22 1996/10/13 01:37:19 christos Exp $	*/
 
 /*-
@@ -146,6 +146,8 @@ am7990_config(sc)
 	ifp->if_baudrate = IF_Mbps(10);
 	IFQ_SET_READY(&ifp->if_snd);
 
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	/* Attach the interface. */
 	if_attach(ifp);
 	ether_ifattach(ifp);
@@ -198,9 +200,9 @@ am7990_config(sc)
 	sc->sc_tmdaddr = mem;
 	mem += sizeof(struct letmd) * sc->sc_ntbuf;
 	sc->sc_rbufaddr = mem;
-	mem += LEBLEN * sc->sc_nrbuf;
+	mem += ETHER_MAX_DIX_LEN * sc->sc_nrbuf;
 	sc->sc_tbufaddr = mem;
-	mem += LEBLEN * sc->sc_ntbuf;
+	mem += ETHER_MAX_DIX_LEN * sc->sc_ntbuf;
 #ifdef notyet
 	if (mem > ...)
 		panic(...);
@@ -266,7 +268,7 @@ am7990_meminit(sc)
 		rmd.rmd0 = a;
 		rmd.rmd1_hadr = a >> 16;
 		rmd.rmd1_bits = LE_R1_OWN;
-		rmd.rmd2 = -LEBLEN | LE_XMD2_ONES;
+		rmd.rmd2 = -ETHER_MAX_DIX_LEN | LE_XMD2_ONES;
 		rmd.rmd3 = 0;
 		(*sc->sc_copytodesc)(sc, &rmd, LE_RMDADDR(sc, bix),
 		    sizeof(rmd));
@@ -448,7 +450,7 @@ am7990_read(sc, boff, len)
 #endif
 
 	if (len <= sizeof(struct ether_header) ||
-	    len > ETHERMTU + sizeof(struct ether_header)) {
+	    len > ETHERMTU + ETHER_VLAN_ENCAP_LEN + sizeof(struct ether_header)) {
 #ifdef LEDEBUG
 		printf("%s: invalid packet size %d; dropping\n",
 		    sc->sc_dev.dv_xname, len);
@@ -549,7 +551,7 @@ am7990_rint(sc)
 		}
 
 		rmd.rmd1_bits = LE_R1_OWN;
-		rmd.rmd2 = -LEBLEN | LE_XMD2_ONES;
+		rmd.rmd2 = -ETHER_MAX_DIX_LEN | LE_XMD2_ONES;
 		rmd.rmd3 = 0;
 		(*sc->sc_copytodesc)(sc, &rmd, rp, sizeof(rmd));
 
@@ -907,7 +909,8 @@ am7990_ioctl(ifp, cmd, data)
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
 			 */
-			am7990_reset(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				am7990_reset(sc);
 			error = 0;
 		}
 		break;

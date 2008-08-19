@@ -1,4 +1,4 @@
-/* $OpenBSD: bus_dma.c,v 1.12 2003/10/18 20:14:40 jmc Exp $ */
+/* $OpenBSD: bus_dma.c,v 1.14 2004/12/25 23:02:23 miod Exp $ */
 /* $NetBSD: bus_dma.c,v 1.40 2000/07/17 04:47:56 thorpej Exp $ */
 
 /*-
@@ -310,6 +310,8 @@ _bus_dmamap_load_mbuf_direct(t, map, m0, flags)
 	seg = 0;
 	error = 0;
 	for (m = m0; m != NULL && error == 0; m = m->m_next) {
+		if (m->m_len == 0)
+			continue;
 		error = _bus_dmamap_load_buffer_direct_common(t, map,
 		    m->m_data, m->m_len, NULL, flags, &lastaddr, &seg, first);
 		first = 0;
@@ -499,13 +501,13 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	 * Compute the location, size, and number of segments actually
 	 * returned by the VM code.
 	 */
-	m = mlist.tqh_first;
+	m = TAILQ_FIRST(&mlist);
 	curseg = 0;
 	lastaddr = segs[curseg].ds_addr = VM_PAGE_TO_PHYS(m);
 	segs[curseg].ds_len = PAGE_SIZE;
-	m = m->pageq.tqe_next;
+	m = TAILQ_NEXT(m, pageq);
 
-	for (; m != NULL; m = m->pageq.tqe_next) {
+	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
 		if (curaddr < avail_start || curaddr >= high) {

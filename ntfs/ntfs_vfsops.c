@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_vfsops.c,v 1.5 2003/08/14 07:46:40 mickey Exp $	*/
+/*	$OpenBSD: ntfs_vfsops.c,v 1.8 2005/03/08 15:45:20 pat Exp $	*/
 /*	$NetBSD: ntfs_vfsops.c,v 1.7 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -283,7 +283,7 @@ ntfs_init (
 #endif /* NetBSD */
 
 static int
-ntfs_mount ( 
+ntfs_mount( 
 	struct mount *mp,
 #if defined(__FreeBSD__)
 	char *path,
@@ -299,6 +299,7 @@ ntfs_mount (
 	struct vnode	*devvp;
 	struct ntfs_args args;
 	size_t size;
+	mode_t amode;
 
 #ifdef __FreeBSD__
 	/*
@@ -397,6 +398,7 @@ ntfs_mount (
 		err = ENOTBLK;
 		goto error_2;
 	}
+
 #ifdef __FreeBSD__
 	if (bdevsw(devvp->v_rdev) == NULL) {
 #elif defined(__NetBSD__)
@@ -407,6 +409,20 @@ ntfs_mount (
 		err = ENXIO;
 		goto error_2;
 	}
+
+	/*
+	 * If we are not root, make sure we have permission to access the
+	 * requested device.
+	 */
+	if (p->p_ucred->cr_uid) {
+		amode = (mp->mnt_flag & MNT_RDONLY) ? VREAD : (VREAD | VWRITE);
+		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
+		err = VOP_ACCESS(devvp, amode, p->p_ucred, p);
+		VOP_UNLOCK(devvp, 0, p);
+		if (err)
+			goto error_2;
+	}
+
 	if (mp->mnt_flag & MNT_UPDATE) {
 #if 0
 		/*
@@ -497,7 +513,7 @@ ntfs_mountfs(devvp, mp, argsp, p)
 	struct proc *p;
 {
 	struct buf *bp;
-	struct ntfsmount *ntmp;
+	struct ntfsmount *ntmp = NULL;
 	dev_t dev = devvp->v_rdev;
 	int error, ronly, ncount, i;
 	struct vnode *vp;
@@ -528,10 +544,10 @@ ntfs_mountfs(devvp, mp, argsp, p)
 	error = bread(devvp, BBLOCK, BBSIZE, NOCRED, &bp);
 	if (error)
 		goto out;
-	ntmp = malloc( sizeof *ntmp, M_NTFSMNT, M_WAITOK );
-	bzero( ntmp, sizeof *ntmp );
-	bcopy( bp->b_data, &ntmp->ntm_bootfile, sizeof(struct bootfile) );
-	brelse( bp );
+	ntmp = malloc(sizeof *ntmp, M_NTFSMNT, M_WAITOK);
+	bzero(ntmp, sizeof *ntmp);
+	bcopy(bp->b_data, &ntmp->ntm_bootfile, sizeof(struct bootfile));
+	brelse(bp);
 	bp = NULL;
 
 	if (strncmp(ntmp->ntm_bootfile.bf_sysid, NTFS_BBID, NTFS_BBIDLEN)) {
@@ -672,8 +688,9 @@ ntfs_mountfs(devvp, mp, argsp, p)
 	return (0);
 
 out1:
-	for(i=0;i<NTFS_SYSNODESNUM;i++)
-		if(ntmp->ntm_sysvn[i]) vrele(ntmp->ntm_sysvn[i]);
+	for (i = 0; i < NTFS_SYSNODESNUM; i++)
+		if (ntmp->ntm_sysvn[i])
+			vrele(ntmp->ntm_sysvn[i]);
 
 	if (vflush(mp,NULLVP,0))
 		dprintf(("ntfs_mountfs: vflush failed\n"));
@@ -682,6 +699,13 @@ out:
 	devvp->v_specmountpoint = NULL;
 	if (bp)
 		brelse(bp);
+
+	if (ntmp != NULL) {
+		if (ntmp->ntm_ad != NULL)
+			free(ntmp->ntm_ad, M_NTFSMNT);
+		free(ntmp, M_NTFSMNT);
+		mp->mnt_data = NULL;
+	}
 
 	/* lock the device vnode before calling VOP_CLOSE() */
 	VN_LOCK(devvp, LK_EXCLUSIVE | LK_RETRY, p);
@@ -1098,7 +1122,6 @@ ntfs_vgetex(
 #if defined(__FreeBSD__) || defined(__NetBSD__)
 	genfs_node_init(vp, &ntfs_genfsops);
 #endif
-	VREF(ip->i_devvp);
 	*vpp = vp;
 	return (0);
 }

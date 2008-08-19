@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ne_pcmcia.c,v 1.75 2004/05/11 04:38:17 deraadt Exp $	*/
+/*	$OpenBSD: if_ne_pcmcia.c,v 1.78 2005/02/07 20:11:43 matthieu Exp $	*/
 /*	$NetBSD: if_ne_pcmcia.c,v 1.17 1998/08/15 19:00:04 thorpej Exp $	*/
 
 /*
@@ -212,6 +212,10 @@ const struct ne2000dev {
       PCMCIA_CIS_RELIA_RE2408T,
       0, -1, { 0x00, 0xc0, 0x0c } },
 
+    { PCMCIA_VENDOR_INVALID, PCMCIA_PRODUCT_INVALID,
+      PCMCIA_CIS_BILLIONTON_CFLT2,
+      0, -1, { 0x00, 0x10, 0x60 } },
+
     /*
      * You have to add new entries which contains
      * PCMCIA_VENDOR_INVALID and/or PCMCIA_PRODUCT_INVALID
@@ -414,6 +418,18 @@ const struct ne2000dev {
       PCMCIA_CIS_MELCO_LPC3_TX,
       0, -1, { 0x00, 0x40, 0x26 }, NE2000DVF_AX88190 },
 
+    { PCMCIA_VENDOR_BUFFALO, PCMCIA_PRODUCT_BUFFALO_LPC_CF_CLT,
+      PCMCIA_CIS_INVALID,
+      0, -1, { 0x00, 0x07, 0x40 } },
+
+    { PCMCIA_VENDOR_BUFFALO, PCMCIA_PRODUCT_BUFFALO_LPC3_CLT,
+      PCMCIA_CIS_INVALID,
+      0, -1, { 0x00, 0x07, 0x40 } },
+
+    { PCMCIA_VENDOR_BUFFALO, PCMCIA_PRODUCT_BUFFALO_LPC4_CLX,
+      PCMCIA_CIS_INVALID,
+      0, -1, { 0x00, 0x40, 0xfa }, NE2000DVF_AX88190 },
+
     { PCMCIA_VENDOR_DUAL, PCMCIA_PRODUCT_DUAL_NE2000,
       PCMCIA_CIS_DUAL_NE2000,
       0, 0x0ff0, { 0x00, 0xa0, 0x0c } },
@@ -566,6 +582,7 @@ ne_pcmcia_attach(parent, self, aux)
 	struct pcmcia_attach_args *pa = aux;
 	struct pcmcia_config_entry *cfe;
 	const struct ne2000dev *ne_dev;
+	const char *intrstr;
 	int i;
 	u_int8_t myea[6], *enaddr;
 
@@ -750,9 +767,10 @@ again:
 
 	/* set up the interrupt */
 	psc->sc_ih = pcmcia_intr_establish(psc->sc_pf, IPL_NET, dp8390_intr,
-	    dsc, "");
-	if (psc->sc_ih == NULL)
-		printf("no irq");
+	    dsc, dsc->sc_dev.dv_xname);
+	intrstr = pcmcia_intr_string(psc->sc_pf, psc->sc_ih);
+	if (*intrstr)
+		printf(", %s", intrstr);
 
 	printf("\n");
 

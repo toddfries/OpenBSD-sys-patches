@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_output.c,v 1.31.2.1 2005/02/19 21:32:50 brad Exp $ */
+/*	$OpenBSD: ipsec_output.c,v 1.32 2004/09/24 16:09:37 markus Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *

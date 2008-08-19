@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_timer.c,v 1.34 2003/12/10 07:22:43 itojun Exp $	*/
+/*	$OpenBSD: tcp_timer.c,v 1.36 2004/12/13 12:01:49 espie Exp $	*/
 /*	$NetBSD: tcp_timer.c,v 1.14 1996/02/13 23:44:09 christos Exp $	*/
 
 /*
@@ -112,6 +112,10 @@ tcp_delack(void *arg)
 	 */
 
 	s = splsoftnet();
+	if (tp->t_flags & TF_DEAD) {
+		splx(s);
+		return;
+	}
 	tp->t_flags |= TF_ACKNOW;
 	(void) tcp_output(tp);
 	splx(s);
@@ -193,6 +197,10 @@ tcp_timer_rexmt(void *arg)
 	int s;
 
 	s = splsoftnet();
+	if (tp->t_flags & TF_DEAD) {
+		splx(s);
+		return;
+	}
 
 #ifdef TCP_SACK
 	tcp_timer_freesack(tp);
@@ -208,7 +216,7 @@ tcp_timer_rexmt(void *arg)
 	rto = TCP_REXMTVAL(tp);
 	if (rto < tp->t_rttmin)
 		rto = tp->t_rttmin;
-	TCPT_RANGESET((long) tp->t_rxtcur,
+	TCPT_RANGESET(tp->t_rxtcur,
 	    rto * tcp_backoff[tp->t_rxtshift],
 	    tp->t_rttmin, TCPTV_REXMTMAX);
 	TCP_TIMER_ARM(tp, TCPT_REXMT, tp->t_rxtcur);
@@ -357,6 +365,11 @@ tcp_timer_persist(void *arg)
 	int s;
 
 	s = splsoftnet();
+	if ((tp->t_flags & TF_DEAD) ||
+            TCP_TIMER_ISARMED(tp, TCPT_REXMT)) {
+		splx(s);
+		return;
+	}
 	tcpstat.tcps_persisttimeo++;
 	/*
 	 * Hack: if the peer is dead/unreachable, we do not
@@ -390,6 +403,10 @@ tcp_timer_keep(void *arg)
 	int s;
 
 	s = splsoftnet();
+	if (tp->t_flags & TF_DEAD) {
+		splx(s);
+		return;
+	}
 
 	tcpstat.tcps_keeptimeo++;
 	if (TCPS_HAVEESTABLISHED(tp->t_state) == 0)
@@ -444,6 +461,10 @@ tcp_timer_2msl(void *arg)
 	int s;
 
 	s = splsoftnet();
+	if (tp->t_flags & TF_DEAD) {
+		splx(s);
+		return;
+	}
 
 #ifdef TCP_SACK
 	tcp_timer_freesack(tp);

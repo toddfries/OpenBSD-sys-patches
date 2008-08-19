@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.83.2.1 2005/03/20 23:36:10 brad Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.88 2005/03/04 13:21:42 markus Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -133,7 +133,7 @@ int	tcp_ack_on_push = 0;	/* set to enable immediate ACK-on-PUSH */
 int	tcp_do_ecn = 0;		/* RFC3168 ECN enabled/disabled? */
 int	tcp_do_rfc3390 = 0;	/* RFC3390 Increasing TCP's Initial Window */
 
-u_int32_t	tcp_now;
+u_int32_t	tcp_now = 1;
 
 #ifndef TCBHASHSIZE
 #define	TCBHASHSIZE	128
@@ -186,7 +186,6 @@ tcp_init()
 	pool_sethardlimit(&sackhl_pool, tcp_sackhole_limit, NULL, 0);
 #endif /* TCP_SACK */
 	in_pcbinit(&tcbtable, tcbhashsize);
-	tcp_now = arc4random() / 2;
 
 #ifdef INET6
 	/*
@@ -500,6 +499,7 @@ tcp_newtcpcb(struct inpcb *inp)
 	TCP_INIT_DELACK(tp);
 	for (i = 0; i < TCPT_NTIMERS; i++)
 		TCP_TIMER_INIT(tp, i);
+	timeout_set(&tp->t_reap_to, tcp_reaper, tp);
 
 #ifdef TCP_SACK
 	tp->sack_enable = tcp_do_sack;
@@ -512,7 +512,8 @@ tcp_newtcpcb(struct inpcb *inp)
 	 * reasonable initial retransmit time.
 	 */
 	tp->t_srtt = TCPTV_SRTTBASE;
-	tp->t_rttvar = tcp_rttdflt * PR_SLOWHZ << (TCP_RTTVAR_SHIFT + 2 - 1);
+	tp->t_rttvar = tcp_rttdflt * PR_SLOWHZ <<
+	    (TCP_RTTVAR_SHIFT + TCP_RTT_BASE_SHIFT - 1);
 	tp->t_rttmin = TCPTV_MIN;
 	TCPT_RANGESET(tp->t_rxtcur, TCP_REXMTVAL(tp),
 	    TCPTV_MIN, TCPTV_REXMTMAX);
@@ -598,12 +599,26 @@ tcp_close(struct tcpcb *tp)
 #endif
 	if (tp->t_template)
 		(void) m_free(tp->t_template);
-	pool_put(&tcpcb_pool, tp);
+
+	tp->t_flags |= TF_DEAD;
+	timeout_add(&tp->t_reap_to, 0);
+
 	inp->inp_ppcb = 0;
 	soisdisconnected(so);
 	in_pcbdetach(inp);
-	tcpstat.tcps_closed++;
 	return ((struct tcpcb *)0);
+}
+
+void
+tcp_reaper(void *arg)
+{
+	struct tcpcb *tp = arg;
+	int s;
+
+	s = splsoftnet();
+	pool_put(&tcpcb_pool, tp);
+	splx(s);
+	tcpstat.tcps_closed++;
 }
 
 int

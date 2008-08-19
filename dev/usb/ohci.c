@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.50 2004/09/11 03:33:40 dlg Exp $ */
+/*	$OpenBSD: ohci.c,v 1.55 2005/03/06 06:51:53 pascoe Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -103,7 +103,7 @@ int ohcidebug = 0;
 
 /*
  * The OHCI controller is little endian, so on big endian machines
- * the data strored in memory needs to be swapped.
+ * the data stored in memory needs to be swapped.
  */
 #if defined(__FreeBSD__)
 #if BYTE_ORDER == BIG_ENDIAN
@@ -970,7 +970,7 @@ ohci_shutdown(void *v)
  * Handle suspend/resume.
  *
  * We need to switch to polling mode here, because this routine is
- * called from an intterupt context.  This is all right since we
+ * called from an interrupt context.  This is all right since we
  * are almost suspended anyway.
  */
 void
@@ -1222,11 +1222,11 @@ ohci_rhsc_enable(void *v_sc)
 	ohci_softc_t *sc = v_sc;
 	int s;
 
+	s = splhardusb();
 	ohci_rhsc(sc, sc->sc_intrxfer);
 	DPRINTFN(2, ("%s: rhsc interrupt enabled\n",
 		     USBDEVNAME(sc->sc_bus.bdev)));
 
-	s = splhardusb();
 	ohci_rhsc_able(sc, 1);
 	splx(s);
 }
@@ -1592,12 +1592,11 @@ ohci_root_ctrl_done(usbd_xfer_handle xfer)
 void
 ohci_waitintr(ohci_softc_t *sc, usbd_xfer_handle xfer)
 {
-	int timo = xfer->timeout;
-	int usecs;
+	int timo;
 	u_int32_t intrs;
 
 	xfer->status = USBD_IN_PROGRESS;
-	for (usecs = timo * 1000000 / hz; usecs > 0; usecs -= 1000) {
+	for (timo = xfer->timeout; timo >= 0; timo--) {
 		usb_delay_ms(&sc->sc_bus, 1);
 		if (sc->sc_dying)
 			break;
@@ -2782,6 +2781,7 @@ ohci_device_ctrl_start(usbd_xfer_handle xfer)
 
 	if (sc->sc_bus.use_polling)
 		ohci_waitintr(sc, xfer);
+
 	return (USBD_IN_PROGRESS);
 }
 
@@ -2929,6 +2929,9 @@ ohci_device_bulk_start(usbd_xfer_handle xfer)
 #endif
 
 	splx(s);
+
+	if (sc->sc_bus.use_polling)
+		ohci_waitintr(sc, xfer);
 
 	return (USBD_IN_PROGRESS);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rgephy.c,v 1.1 2004/06/05 05:49:29 pvalchev Exp $	*/
+/*	$OpenBSD: rgephy.c,v 1.8 2005/02/19 06:00:04 brad Exp $	*/
 /*
  * Copyright (c) 2003
  *	Bill Paul <wpaul@windriver.com>.  All rights reserved.
@@ -29,6 +29,8 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * $FreeBSD: rgephy.c,v 1.5 2004/05/30 17:57:40 phk Exp $
  */
 
 /*
@@ -39,7 +41,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -86,46 +87,53 @@ void	rgephy_loop(struct mii_softc *);
 void	rgephy_load_dspcode(struct mii_softc *);
 int	rgephy_mii_model;
 
+const struct mii_phy_funcs rgephy_funcs = {
+	rgephy_service, rgephy_status, rgephy_reset,
+};
+
+static const struct mii_phydesc rgephys[] = {
+	{ MII_OUI_xxREALTEK,		MII_MODEL_xxREALTEK_RTL8169S,
+	  MII_STR_xxREALTEK_RTL8169S },
+
+	{ 0,			0,
+	  NULL },
+};
+
 int
-rgephymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+rgephymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxREALTEK &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_xxREALTEK_RTL8169S) {
+	if (mii_phy_match(ma, rgephys) != NULL)
 		return(10);
-	}
 
 	return(0);
 }
 
 void
-rgephyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+rgephyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	printf(": %s, rev. %d PHY\n", MII_STR_xxREALTEK_RTL8169S,
-	    MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, rgephys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
+	sc->mii_funcs = &rgephy_funcs;
 	sc->mii_model = MII_MODEL(ma->mii_id2);
 	sc->mii_rev = MII_REV(ma->mii_id2);
-	sc->mii_service = rgephy_service;
-	sc->mii_status = rgephy_status;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags | MIIF_NOISOLATE;
+	sc->mii_flags = ma->mii_flags;
 	sc->mii_ticks = 0; /* XXX */
 	sc->mii_anegticks = 5;
 
-	rgephy_reset(sc);
+	sc->mii_flags |= MIIF_NOISOLATE;
+
+	PHY_RESET(sc);
 
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 
@@ -137,10 +145,7 @@ rgephyattach(parent, self, aux)
 }
 
 int
-rgephy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+rgephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg, speed, gig;
@@ -171,7 +176,7 @@ rgephy_service(sc, mii, cmd)
 		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			break;
 
-		rgephy_reset(sc);	/* XXX hardware bug work-around */
+		PHY_RESET(sc);	/* XXX hardware bug work-around */
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
@@ -296,8 +301,7 @@ setit:
 }
 
 void
-rgephy_status(sc)
-	struct mii_softc *sc;
+rgephy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	int bmsr, bmcr;
@@ -337,18 +341,17 @@ rgephy_status(sc)
 
 
 int
-rgephy_mii_phy_auto(mii)
-	struct mii_softc *mii;
+rgephy_mii_phy_auto(struct mii_softc *sc)
 {
-	rgephy_loop(mii);
-	rgephy_reset(mii);
+	rgephy_loop(sc);
+	PHY_RESET(sc);
 
-	PHY_WRITE(mii, RGEPHY_MII_ANAR,
-	    BMSR_MEDIA_TO_ANAR(mii->mii_capabilities) | ANAR_CSMA);
+	PHY_WRITE(sc, RGEPHY_MII_ANAR,
+	    BMSR_MEDIA_TO_ANAR(sc->mii_capabilities) | ANAR_CSMA);
 	DELAY(1000);
-	PHY_WRITE(mii, RGEPHY_MII_1000CTL, RGEPHY_1000CTL_AFD);
+	PHY_WRITE(sc, RGEPHY_MII_1000CTL, RGEPHY_1000CTL_AFD);
 	DELAY(1000);
-	PHY_WRITE(mii, RGEPHY_MII_BMCR,
+	PHY_WRITE(sc, RGEPHY_MII_BMCR,
 	    RGEPHY_BMCR_AUTOEN | RGEPHY_BMCR_STARTNEG);
 	DELAY(100);
 

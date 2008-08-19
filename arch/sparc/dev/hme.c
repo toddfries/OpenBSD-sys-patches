@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.43 2004/08/08 19:01:20 brad Exp $	*/
+/*	$OpenBSD: hme.c,v 1.47 2005/02/22 20:44:26 brad Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -62,15 +62,13 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 #endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #include <net/bpfdesc.h>
-#endif
-
-#if NVLAN > 0
-#include <net/if_vlan_var.h>
 #endif
 
 #include <machine/autoconf.h>
@@ -104,11 +102,14 @@ int	hme_tint(struct hme_softc *);
 int	hme_mint(struct hme_softc *, u_int32_t);
 int	hme_eint(struct hme_softc *, u_int32_t);
 
+/* TCP/UDP checksum offloading support */
+void	hme_rxcksum(struct mbuf *, u_int32_t);
+
 void	hme_reset_rx(struct hme_softc *);
 void	hme_reset_tx(struct hme_softc *);
 
-void		hme_read(struct hme_softc *, int, int);
-int		hme_put(struct hme_softc *, int, struct mbuf *);
+void	hme_read(struct hme_softc *, int, int, u_int32_t);
+int	hme_put(struct hme_softc *, int, struct mbuf *);
 
 /*
  * ifmedia glue
@@ -211,7 +212,8 @@ hmeattach(parent, self, aux)
 
 	sc->sc_ih.ih_fun = hmeintr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_NET);
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_NET,
+	    self->dv_xname);
 
 	/*
 	 * Get MAC address from card if 'local-mac-address' property exists.
@@ -249,7 +251,7 @@ hmeattach(parent, self, aux)
 	ifp->if_flags =
 		IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS | IFF_MULTICAST;
 	sc->sc_if_flags = ifp->if_flags;
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, HME_TX_RING_SIZE);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -474,7 +476,8 @@ hmeioctl(ifp, cmd, data)
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
 			 */
-			hme_mcreset(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				hme_mcreset(sc);
 			error = 0;
 		}
 		break;
@@ -533,7 +536,7 @@ void
 hmeinit(sc)
 	struct hme_softc *sc;
 {
-	u_int32_t c;
+	u_int32_t c, n;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct hme_tcvr *tcvr = sc->sc_tcvr;
 	struct hme_cr *cr = sc->sc_cr;
@@ -565,7 +568,7 @@ hmeinit(sc)
 			   sc->sc_arpcom.ac_enaddr[3];
 	cr->mac_addr2 = (sc->sc_arpcom.ac_enaddr[4] << 8) |
 			   sc->sc_arpcom.ac_enaddr[5];
-	cr->tx_pkt_max = cr->rx_pkt_max = HME_MTU;
+	cr->tx_pkt_max = cr->rx_pkt_max = ETHER_MAX_LEN + ETHER_VLAN_ENCAP_LEN;
 
 	cr->jsize = HME_DEFAULT_JSIZE;
 	cr->ipkt_gap1 = HME_DEFAULT_IPKT_GAP1;
@@ -591,7 +594,11 @@ hmeinit(sc)
 	txr->tx_rsize = (HME_TX_RING_SIZE >> TXR_RSIZE_SHIFT) - 1;
 	txr->cfg |= TXR_CFG_DMAENABLE;
 
-	c = RXR_CFG_DMAENABLE | (HME_RX_OFFSET << 3) | (HME_RX_CSUMLOC << 16);
+	c = RXR_CFG_DMAENABLE | (HME_RX_OFFSET << 3);
+	/* RX TCP/UDP cksum offset */
+	n = (ETHER_HDR_LEN + sizeof(struct ip)) / 2;
+	n = (n << RXR_CFG_CSUM_SHIFT) & RXR_CFG_CSUMSTART;
+	c |= n;
 #if HME_RX_RING_SIZE == 32
 	c |= RXR_CFG_RINGSIZE32;
 #elif HME_RX_RING_SIZE == 64
@@ -744,6 +751,105 @@ hme_tint(sc)
 	return (1);
 }
 
+/*
+ * XXX layering violation
+ *
+ * If we can have additional csum data member in 'struct pkthdr' for
+ * these incomplete checksum offload capable hardware, things would be
+ * much simpler. That member variable will carry partial checksum
+ * data and it may be evaluated in TCP/UDP input handler after
+ * computing pseudo header checksumming.
+ */
+void
+hme_rxcksum(struct mbuf *m, u_int32_t flags)
+{
+	struct ether_header *eh;
+	struct ip *ip;
+	struct udphdr *uh;
+	int32_t hlen, len, pktlen;
+	u_int16_t cksum, flag_bad, flag_ok, *opts;
+	u_int32_t temp32;
+	union pseudoh {
+		struct hdr {
+			u_int16_t len;
+			u_int8_t ttl;
+			u_int8_t proto;
+			u_int32_t src;
+			u_int32_t dst;
+		} h;
+		u_int16_t w[6];
+	} ph;
+
+	pktlen = m->m_pkthdr.len;
+	if (pktlen < sizeof(struct ether_header))
+		return;
+	eh = mtod(m, struct ether_header *);
+	if (eh->ether_type != htons(ETHERTYPE_IP))
+		return;
+	ip = (struct ip *)(eh + 1);
+	if (ip->ip_v != IPVERSION)
+		return;
+
+	hlen = ip->ip_hl << 2;
+	pktlen -= sizeof(struct ether_header);
+	if (hlen < sizeof(struct ip))
+		return;
+	if (ntohs(ip->ip_len) < hlen)
+		return;
+	if (ntohs(ip->ip_len) != pktlen) 
+		return;
+	if (ip->ip_off & htons(IP_MF | IP_OFFMASK))
+		return;	/* can't handle fragmented packet */
+
+	switch (ip->ip_p) {
+	case IPPROTO_TCP:
+		if (pktlen < (hlen + sizeof(struct tcphdr)))
+			return;
+		flag_ok = M_TCP_CSUM_IN_OK;
+		flag_bad = M_TCP_CSUM_IN_BAD;
+		break;
+	case IPPROTO_UDP:
+		if (pktlen < (hlen + sizeof(struct udphdr)))
+			return;
+		uh = (struct udphdr *)((caddr_t)ip + hlen);
+		if (uh->uh_sum == 0)
+			return; /* no checksum */
+		flag_ok = M_UDP_CSUM_IN_OK;
+		flag_bad = M_UDP_CSUM_IN_BAD;
+		break;
+	default:
+		return;
+	}
+
+	cksum = ~(flags & HME_RXD_CSUM);
+	/* cksum fixup for IP options */
+	len = hlen - sizeof(struct ip);
+	if (len > 0) {
+		opts = (u_int16_t *)(ip + 1);
+		for (; len > 0; len -= sizeof(u_int16_t), opts++) {
+			temp32 = cksum - *opts;
+			temp32 = (temp32 >> 16) + (temp32 & 65535);
+			cksum = temp32 & 65535;
+		}
+	}
+	/* cksum fixup for pseudo-header, replace with in_cksum_phdr()? */
+	ph.h.len = htons(ntohs(ip->ip_len) - hlen);
+	ph.h.ttl = 0;
+	ph.h.proto = ip->ip_p;
+	ph.h.src = ip->ip_src.s_addr;
+	ph.h.dst = ip->ip_dst.s_addr;
+	temp32 = cksum;
+	opts = &ph.w[0];
+	temp32 += opts[0] + opts[1] + opts[2] + opts[3] + opts[4] + opts[5];
+	temp32 = (temp32 >> 16) + (temp32 & 65535);
+	temp32 += (temp32 >> 16);
+	cksum = ~temp32;
+	if (cksum != 0)
+		m->m_pkthdr.csum |= flag_bad;
+	else
+		m->m_pkthdr.csum |= flag_ok;
+}
+
 int
 hme_rint(sc)
 	struct hme_softc *sc;
@@ -764,7 +870,7 @@ hme_rint(sc)
 		if (rxd.rx_flags & HME_RXD_OVERFLOW)
 			ifp->if_ierrors++;
 		else
-			hme_read(sc, bix, len);
+			hme_read(sc, bix, len, rxd.rx_flags);
 
 		rxd.rx_flags = HME_RXD_OWN |
 		    ((HME_RX_PKT_BUF_SZ - HME_RX_OFFSET) << 16);
@@ -859,9 +965,10 @@ hme_put(sc, idx, m)
 }
 
 void
-hme_read(sc, idx, len)
+hme_read(sc, idx, len, flags)
 	struct hme_softc *sc;
 	int idx, len;
+	u_int32_t flags;
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct mbuf *m;
@@ -884,6 +991,7 @@ hme_read(sc, idx, len)
 	m_adj(m, HME_RX_OFFSET);
 
 	ifp->if_ipackets++;
+	hme_rxcksum(m, flags);
 
 #if NBPFILTER > 0
 	/*
@@ -962,7 +1070,7 @@ hme_mcreset(sc)
 			for (j = 0; j < 8; j++) {
 				if ((crc & 1) ^ (octet & 1)) {
 					crc >>= 1;
-					crc ^= MC_POLY_LE;
+					crc ^= ETHER_CRC_POLY_LE;
 				}
 				else
 					crc >>= 1;

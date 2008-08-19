@@ -1,4 +1,4 @@
-/*	$OpenBSD: mb89352.c,v 1.7 2004/08/30 17:01:43 miod Exp $	*/
+/*	$OpenBSD: mb89352.c,v 1.13 2005/01/04 19:00:02 miod Exp $	*/
 /*	$NetBSD: mb89352.c,v 1.5 2000/03/23 07:01:31 thorpej Exp $	*/
 /*	NecBSD: mb89352.c,v 1.4 1998/03/14 07:31:20 kmatsuda Exp	*/
 
@@ -84,7 +84,7 @@
  * byte or to get a new one from the SCSI bus pretty soon.  In order to avoid
  * returning from the interrupt just to get yanked back for the next byte we
  * may spin in the interrupt routine waiting for this byte to come.  How long?
- * This is really (SCSI) device and processor dependent.  Tuneable, I guess.
+ * This is really (SCSI) device and processor dependent.  Tunable, I guess.
  */
 #define SPC_MSGIN_SPIN	1 	/* Will spinwait upto ?ms for a new msg byte */
 #define SPC_MSGOUT_SPIN	1
@@ -96,7 +96,9 @@
  * kernel debugger.  If you set SPC_DEBUG to 0 they are not included (the
  * kernel uses less memory) but you lose the debugging facilities.
  */
-/* #define SPC_DEBUG */
+#if 0
+#define SPC_DEBUG
+#endif
 
 #define	SPC_ABORT_TIMEOUT	2000	/* time to wait for abort */
 
@@ -220,8 +222,7 @@ spc_attach(struct spc_softc *sc)
 }
 
 /*
- * Initialize MB89352 chip itself
- * The following conditions should hold:
+ * Initialize the MB89352 chip itself.
  */
 void
 spc_reset(struct spc_softc *sc)
@@ -292,12 +293,10 @@ spc_init(struct spc_softc *sc)
 		sc->sc_state = SPC_CLEANING;
 		if ((acb = sc->sc_nexus) != NULL) {
 			acb->xs->error = XS_DRIVER_STUFFUP;
-			timeout_del(&acb->xs->stimeout);
 			spc_done(sc, acb);
 		}
 		while ((acb = TAILQ_FIRST(&sc->nexus_list)) != NULL) {
 			acb->xs->error = XS_DRIVER_STUFFUP;
-			timeout_del(&acb->xs->stimeout);
 			spc_done(sc, acb);
 		}
 	}
@@ -341,7 +340,7 @@ spc_free_acb(struct spc_softc *sc, struct spc_acb *acb, int flags)
 	 * If there were none, wake anybody waiting for one to come free,
 	 * starting with queued entries.
 	 */
-	if (acb->chain.tqe_next == 0)
+	if (TAILQ_NEXT(acb, chain) == NULL)
 		wakeup(&sc->free_list);
 
 	splx(s);
@@ -630,7 +629,7 @@ abort:
  * Schedule a SCSI operation.  This has now been pulled out of the interrupt
  * handler so that we may call it from spc_scsi_cmd and spc_done.  This may
  * save us an unnecessary interrupt just to get things going.  Should only be
- * called when state == SPC_IDLE and at bio pl.
+ * called when state == SPC_IDLE and at bio ipl.
  */
 void
 spc_sched(struct spc_softc *sc)
@@ -638,6 +637,8 @@ spc_sched(struct spc_softc *sc)
 	struct spc_acb *acb;
 	struct scsi_link *sc_link;
 	struct spc_tinfo *ti;
+
+	splassert(IPL_BIO);
 
 	/* missing the hw, just return and wait for our hw */
 	if (sc->sc_flags & SPC_INACTIVE)
@@ -707,6 +708,8 @@ spc_done(struct spc_softc *sc, struct spc_acb *acb)
 	struct spc_tinfo *ti = &sc->sc_tinfo[sc_link->target];
 
 	SPC_TRACE(("spc_done  "));
+
+	timeout_del(&acb->xs->stimeout);
 
 	/*
 	 * Now, if we've come here with no error code, i.e. we've kept the
@@ -835,10 +838,12 @@ nextbyte:
 
 		if ((spc_read(PSNS) & PSNS_ATN) != 0)
 			spc_write(SCMD, SCMD_RST_ATN);
+		spc_write(PCTL, PCTL_BFINT_ENAB | PH_MSGIN);
 
 		while ((spc_read(PSNS) & PSNS_REQ) == 0) {
-			if ((spc_read(PSNS) & PH_MASK) != PH_MSGIN &&
-			    (spc_read(SSTS) & SSTS_INITIATOR) == 0)
+			if (((spc_read(PSNS) & PH_MASK) != PH_MSGIN &&
+			     (spc_read(SSTS) & SSTS_INITIATOR) == 0) ||
+			    spc_read(INTS) != 0)
 				/*
 				 * Target left MESSAGE IN, probably because it
 				 * a) noticed our ATN signal, or
@@ -848,7 +853,6 @@ nextbyte:
 			DELAY(1);
 		}
 
-		spc_write(PCTL, PH_MSGIN);
 		msg = spc_read(TEMP);
 
 		/* Gather incoming message bytes if needed. */
@@ -1013,8 +1017,9 @@ nextbyte:
 #endif
 
 			default:
-				printf("%s: unrecognized MESSAGE EXTENDED; "
-				    "sending REJECT\n", sc->sc_dev.dv_xname);
+				printf("%s: unrecognized MESSAGE EXTENDED 0x%x;"
+				    " sending REJECT\n",
+				     sc->sc_imess[2], sc->sc_dev.dv_xname);
 				SPC_BREAK();
 				goto reject;
 			}
@@ -1317,6 +1322,7 @@ spc_dataout_pio(struct spc_softc *sc, u_char *p, int n)
 			/* Break on interrupt. */
 			if (intstat != 0)
 				goto phasechange;
+			DELAY(1);
 		}
 
 		xfer = min(DOUTAMOUNT, n);
@@ -1334,6 +1340,7 @@ spc_dataout_pio(struct spc_softc *sc, u_char *p, int n)
 		for (;;) {
 			if (spc_read(INTS) != 0)
 				break;
+			DELAY(1);
 		}
 		SPC_MISC(("extra data  "));
 	} else {
@@ -1346,6 +1353,7 @@ spc_dataout_pio(struct spc_softc *sc, u_char *p, int n)
 			/* Break on interrupt. */
 			if (intstat != 0)
 				goto phasechange;
+			DELAY(1);
 		}
 	}
 
@@ -1435,6 +1443,7 @@ spc_datain_pio(struct spc_softc *sc, u_char *p, int n)
 					goto phasechange;
 				intstat = spc_read(INTS);
 			}
+			DELAY(1);
 		}
 		SPC_MISC(("extra data  "));
 	}
@@ -1447,11 +1456,6 @@ phasechange:
 
 /*
  * Catch an interrupt from the adaptor
- */
-/*
- * This is the workhorse routine of the driver.
- * Deficiencies (for now):
- * 1) always uses programmed I/O
  */
 int
 spc_intr(void *arg)
@@ -1498,10 +1502,7 @@ start:
 	/*
 	 * Check for the end of a DMA operation before doing anything else...
 	 */
-	if (sc->sc_dma_done != NULL &&
-	    sc->sc_state == SPC_CONNECTED &&
-	    (sc->sc_flags & SPC_DOINGDMA) != 0 &&
-	    (sc->sc_phase == PH_DATAOUT || sc->sc_phase == PH_DATAIN)) {
+	if ((sc->sc_flags & SPC_DOINGDMA) != 0) {
 		(*sc->sc_dma_done)(sc);
 	}
 
@@ -1740,10 +1741,7 @@ start:
 	/*
 	 * Do not change phase (yet) if we have a pending DMA operation.
 	 */
-	if (sc->sc_dma_done != NULL &&
-	    sc->sc_state == SPC_CONNECTED &&
-	    (sc->sc_flags & SPC_DOINGDMA) != 0 &&
-	    (sc->sc_phase == PH_DATAOUT || sc->sc_phase == PH_DATAIN)) {
+	if ((sc->sc_flags & SPC_DOINGDMA) != 0) {
 		goto out;
 	}
 
@@ -1756,7 +1754,7 @@ dophase:
 #else
 	spc_write(INTS, ints);
 	while ((spc_read(PSNS) & PSNS_REQ) == 0)
-		delay(1);	/* need timeout XXX */
+		DELAY(1);	/* need timeout XXX */
 #endif
 
 	/*
@@ -1808,9 +1806,11 @@ dophase:
 		SPC_MISC(("dataout dleft=%d  ", sc->sc_dleft));
 		if (sc->sc_dma_start != NULL &&
 		    sc->sc_dleft > SPC_MIN_DMA_LEN) {
-			(*sc->sc_dma_start)(sc, sc->sc_dp, sc->sc_dleft, 0);
-			sc->sc_prevphase = PH_DATAOUT;
-			goto out;
+			if ((*sc->sc_dma_start)
+			    (sc, sc->sc_dp, sc->sc_dleft, 0) == 0) {
+				sc->sc_prevphase = PH_DATAOUT;
+				goto out;
+			}
 		}
 		n = spc_dataout_pio(sc, sc->sc_dp, sc->sc_dleft);
 		sc->sc_dp += n;
@@ -1824,9 +1824,11 @@ dophase:
 		SPC_MISC(("datain  "));
 		if (sc->sc_dma_start != NULL &&
 		    sc->sc_dleft > SPC_MIN_DMA_LEN) {
-			(*sc->sc_dma_start)(sc, sc->sc_dp, sc->sc_dleft, 1);
-			sc->sc_prevphase = PH_DATAIN;
-			goto out;
+			if ((*sc->sc_dma_start)
+			    (sc, sc->sc_dp, sc->sc_dleft, 1) == 0) {
+				sc->sc_prevphase = PH_DATAIN;
+				goto out;
+			}
 		}
 		n = spc_datain_pio(sc, sc->sc_dp, sc->sc_dleft);
 		sc->sc_dp += n;
@@ -1841,9 +1843,9 @@ dophase:
 		acb = sc->sc_nexus;
 		if ((spc_read(PSNS) & PSNS_ATN) != 0)
 			spc_write(SCMD, SCMD_RST_ATN);
+		spc_write(PCTL, PCTL_BFINT_ENAB | PH_STAT);
 		while ((spc_read(PSNS) & PSNS_REQ) == 0)
 			DELAY(1);	/* XXX needs timeout */
-		spc_write(PCTL, PH_STAT);
 		acb->target_stat = spc_read(TEMP);
 		spc_write(SCMD, SCMD_SET_ACK);
 		while ((spc_read(PSNS) & PSNS_REQ) != 0)
@@ -1862,7 +1864,6 @@ reset:
 	return;
 
 finish:
-	timeout_del(&acb->xs->stimeout);
 	spc_write(INTS, ints);
 	ints = 0;
 	spc_done(sc, acb);
@@ -1910,10 +1911,24 @@ spc_timeout(void *arg)
 	int s;
 
 	sc_print_addr(sc_link);
-	printf("timed out");
 
 	s = splbio();
 
+	/*
+	 * We might have missed a DMA completion.
+	 * If so, fake an interrupt (even if the INTS register is zero - what
+	 * we want here is to change phase).
+	 */
+	if ((sc->sc_flags & SPC_DOINGDMA) != 0) {
+		if ((*sc->sc_dma_done)(sc)) {
+			printf("missed DMA completion\n");
+			spc_process_intr(sc, spc_read(INTS));
+			splx(s);
+			return;
+		}
+	}
+
+	printf("timed out");
 	if (acb->flags & ACB_ABORT) {
 		/* abort timed out */
 		printf(" AGAIN\n");
@@ -2004,7 +2019,8 @@ spc_dump_driver(struct spc_softc *sc)
 	struct spc_tinfo *ti;
 	int i;
 
-	printf("nexus=%p prevphase=%x\n", sc->sc_nexus, sc->sc_prevphase);
+	printf("nexus=%p phase=%x prevphase=%x\n",
+	    sc->sc_nexus, sc->sc_phase, sc->sc_prevphase);
 	printf("state=%x msgin=%x msgpriq=%x msgoutq=%x lastmsg=%x "
 	    "currmsg=%x\n", sc->sc_state, sc->sc_imess[0],
 	    sc->sc_msgpriq, sc->sc_msgoutq, sc->sc_lastmsg, sc->sc_currmsg);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ef_isapnp.c,v 1.16 2004/05/12 06:35:11 tedu Exp $	*/
+/*	$OpenBSD: if_ef_isapnp.c,v 1.18 2005/01/15 05:24:11 brad Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -387,8 +387,10 @@ efioctl(ifp, cmd, data)
 		error = (cmd == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &sc->sc_arpcom) :
 		    ether_delmulti(ifr, &sc->sc_arpcom);
+
 		if (error == ENETRESET) {
-			efreset(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				efreset(sc);
 			error = 0;
 		}
 		efsetmulti(sc);
@@ -429,7 +431,7 @@ efinit(sc)
 	efcompletecmd(sc, EP_COMMAND, TX_RESET);
 
 	bus_space_write_2(iot, ioh, EP_COMMAND,
-	    SET_TX_AVAIL_THRESH | (1536 >> 2));
+	    SET_TX_AVAIL_THRESH | (ETHER_MAX_DIX_LEN >> 2));
 
 	efsetmulti(sc);
 

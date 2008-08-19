@@ -1,4 +1,4 @@
-/* $OpenBSD: spc.c,v 1.8 2004/08/30 17:01:43 miod Exp $ */
+/* $OpenBSD: spc.c,v 1.11 2004/12/22 21:11:12 miod Exp $ */
 /* $NetBSD: spc.c,v 1.2 2003/11/17 14:37:59 tsutsui Exp $ */
 
 /*
@@ -54,8 +54,8 @@
 
 int  spc_dio_match(struct device *, void *, void *);
 void spc_dio_attach(struct device *, struct device *, void *);
-void spc_dio_dmastart(struct spc_softc *, void *, size_t, int);
-void spc_dio_dmadone(struct spc_softc *);
+int  spc_dio_dmastart(struct spc_softc *, void *, size_t, int);
+int  spc_dio_dmadone(struct spc_softc *);
 void spc_dio_dmago(void *);
 void spc_dio_dmastop(void *);
 int  spc_dio_intr(void *);
@@ -67,6 +67,7 @@ void spc_dio_reset(struct spc_softc *);
 
 struct spc_dio_softc {
 	struct spc_softc sc_spc;	/* MI spc softc */
+	struct isr sc_isr;
 	volatile u_int8_t *sc_dregs;	/* Complete registers */
 
 	struct dmaqueue sc_dq;		/* DMA job queue */
@@ -156,7 +157,11 @@ spc_dio_attach(struct device *parent, struct device *self, void *aux)
 	hpspc_write(HPSCSI_CSR, 0x00);
 	hpspc_write(HPSCSI_HCONF, 0x00);
 
-	dio_intr_establish(spc_dio_intr, (void *)dsc, ipl, IPL_BIO);
+	dsc->sc_isr.isr_func = spc_dio_intr;
+	dsc->sc_isr.isr_arg = dsc;
+	dsc->sc_isr.isr_ipl = ipl;
+	dsc->sc_isr.isr_priority = IPL_BIO;
+	dio_intr_establish(&dsc->sc_isr, self->dv_xname);
 
 	spc_attach(sc);
 
@@ -164,10 +169,17 @@ spc_dio_attach(struct device *parent, struct device *self, void *aux)
 	hpspc_write(HPSCSI_CSR, CSR_IE);
 }
 
-void
+int
 spc_dio_dmastart(struct spc_softc *sc, void *addr, size_t size, int datain)
 {
 	struct spc_dio_softc *dsc = (struct spc_dio_softc *)sc;
+
+	/*
+	 * The HP98658 hardware cannot do odd length transfers, the
+	 * last byte of data will always be 0x00.
+	 */
+	if ((size & 1) != 0)
+		return (EINVAL);
 
 	dsc->sc_dq.dq_chan = DMA0 | DMA1;
 	dsc->sc_dflags |= SCSI_HAVEDMA;
@@ -180,6 +192,8 @@ spc_dio_dmastart(struct spc_softc *sc, void *addr, size_t size, int datain)
 		/* DMA channel is available, so start DMA immediately */
 		spc_dio_dmago((void *)dsc);
 	/* else dma start function will be called later from dmafree(). */
+
+	return (0);
 }
 
 void
@@ -204,8 +218,9 @@ spc_dio_dmago(void *arg)
 	    (sc->sc_dleft & 3) == 0) {
 		cmd |= CSR_DMA32;
 		dmaflags |= DMAGO_LWORD;
-	} else
+	} else {
 		dmaflags |= DMAGO_WORD;
+	}
 
 	sc->sc_flags |= SPC_DOINGDMA;
 	dmago(chan, sc->sc_dp, sc->sc_dleft, dmaflags);
@@ -239,7 +254,7 @@ spc_dio_dmago(void *arg)
 	spc_write(SCMD, cmd);
 }
 
-void
+int
 spc_dio_dmadone(struct spc_softc *sc)
 {
 	struct spc_dio_softc *dsc = (struct spc_dio_softc *)sc;
@@ -248,7 +263,7 @@ spc_dio_dmadone(struct spc_softc *sc)
 
 	/* Check if the DMA operation is finished. */
 	if ((spc_read(SSTS) & SSTS_BUSY) != 0)
-		return;
+		return (0);
 
 	sc->sc_flags &= ~SPC_DOINGDMA;
 	if ((dsc->sc_dflags & SCSI_HAVEDMA) != 0) {
@@ -266,6 +281,8 @@ spc_dio_dmadone(struct spc_softc *sc)
 	trans = sc->sc_dleft - resid;
 	sc->sc_dp += trans;
 	sc->sc_dleft -= trans;
+
+	return (1);
 }
 
 void

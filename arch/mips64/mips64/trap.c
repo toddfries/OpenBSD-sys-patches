@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.5 2004/09/09 22:11:38 pefo Exp $	*/
+/*	$OpenBSD: trap.c,v 1.22 2005/01/31 21:35:50 grange Exp $	*/
 /* tracked to 1.23 */
 
 /*
@@ -47,9 +47,6 @@
  *		THIS CODE SHOULD BE REWRITTEN!
  */
 
-#include "ppp.h"
-#include "bridge.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/exec.h>
@@ -78,7 +75,7 @@
 #include <machine/frame.h>
 #include <machine/regnum.h>
 
-#include <machine/rm7000.h>
+#include <mips64/rm7000.h>
 
 #include <mips64/archtype.h>
 
@@ -90,6 +87,10 @@
 #include <sys/cdefs.h>
 #include <sys/syslog.h>
 
+#include "systrace.h"
+#include <dev/systrace.h>
+
+int	want_resched;	/* resched() was called */
 struct	proc *machFPCurProcPtr;		/* pointer to last proc to use FP */
 
 char	*trap_type[] = {
@@ -107,7 +108,7 @@ char	*trap_type[] = {
 	"coprocessor unusable",
 	"arithmetic overflow",
 	"trap",
-	"viritual coherency instruction",
+	"virtual coherency instruction",
 	"floating point",
 	"reserved 16",
 	"reserved 17",
@@ -124,7 +125,7 @@ char	*trap_type[] = {
 	"reserved 28",
 	"reserved 29",
 	"reserved 30",
-	"viritual coherency data",
+	"virtual coherency data",
 };
 
 #if defined(DDB) || defined(DEBUG)
@@ -135,28 +136,27 @@ void stacktrace(struct trap_frame *);
 void logstacktrace(struct trap_frame *);
 int  kdbpeek(void *);
 /* extern functions printed by name in stack backtraces */
-extern void idle __P((void));
+extern void idle(void);
 #endif	/* DDB || DEBUG */
 
 #if defined(DDB)
 int  kdb_trap(int, db_regs_t *);
 #endif
 
-extern u_long intrcnt[];
 extern void MipsSwitchFPState(struct proc *, struct trap_frame *);
 extern void MipsSwitchFPState16(struct proc *, struct trap_frame *);
-extern void MipsFPTrap(u_int, u_int, u_int);
+extern void MipsFPTrap(u_int, u_int, u_int, union sigval);
 
-u_int trap(struct trap_frame *);
+register_t trap(struct trap_frame *);
 int cpu_singlestep(struct proc *);
-u_long MipsEmulateBranch(struct trap_frame *, long, int, long);
+u_long MipsEmulateBranch(struct trap_frame *, long, int, u_int);
 
 /*
  * Handle an exception.
  * In the case of a kernel trap, we return the pc where to resume if
  * pcb_onfault is set, otherwise, return old pc.
  */
-unsigned
+register_t
 trap(trapframe)
 	struct trap_frame *trapframe;
 {
@@ -195,10 +195,11 @@ trap(trapframe)
 	switch (type) {
 	case T_TLB_MOD:
 		/* check for kernel address */
-		if ((int)trapframe->badvaddr < 0) {
+		if (trapframe->badvaddr < 0) {
 			pt_entry_t *pte;
 			unsigned int entry;
-			vaddr_t pa;
+			paddr_t pa;
+			vm_page_t pg;
 
 			pte = kvtopte(trapframe->badvaddr);
 			entry = pte->pt_entry;
@@ -206,19 +207,20 @@ trap(trapframe)
 			if (!(entry & PG_V) || (entry & PG_M))
 				panic("trap: ktlbmod: invalid pte");
 #endif
-			if (pmap_is_page_ro(pmap_kernel(), mips_trunc_page(trapframe->badvaddr), entry)) {
+			if (pmap_is_page_ro(pmap_kernel(),
+			    mips_trunc_page(trapframe->badvaddr), entry)) {
 				/* write to read only page in the kernel */
 				ftype = VM_PROT_WRITE;
 				goto kernel_fault;
 			}
 			entry |= PG_M;
 			pte->pt_entry = entry;
-			trapframe->badvaddr &= ~PGOFSET;
-			tlb_update(trapframe->badvaddr, entry);
+			tlb_update(trapframe->badvaddr & ~PGOFSET, entry);
 			pa = pfn_to_pad(entry);
-			if (!IS_VM_PHYSADDR(pa))
+			pg = PHYS_TO_VM_PAGE(pa);
+			if (pg == NULL)
 				panic("trap: ktlbmod: unmanaged page");
-			PHYS_TO_VM_PAGE(pa)->flags &= ~PG_CLEAN;
+			pmap_set_modify(pg);
 			return (trapframe->pc);
 		}
 		/* FALLTHROUGH */
@@ -228,31 +230,32 @@ trap(trapframe)
 		pt_entry_t *pte;
 		unsigned int entry;
 		paddr_t pa;
+		vm_page_t pg;
 		pmap_t pmap = p->p_vmspace->vm_map.pmap;
 
 		if (!(pte = pmap_segmap(pmap, trapframe->badvaddr)))
 			panic("trap: utlbmod: invalid segmap");
-		pte += (trapframe->badvaddr >> PGSHIFT) & (NPTEPG - 1);
+		pte += uvtopte(trapframe->badvaddr);
 		entry = pte->pt_entry;
 #ifdef DIAGNOSTIC
-		if (!(entry & PG_V) || (entry & PG_M)) {
+		if (!(entry & PG_V) || (entry & PG_M))
 			panic("trap: utlbmod: invalid pte");
-		}
 #endif
-		if (pmap_is_page_ro(pmap, (vaddr_t)mips_trunc_page(trapframe->badvaddr), entry)) {
+		if (pmap_is_page_ro(pmap,
+		    mips_trunc_page(trapframe->badvaddr), entry)) {
 			/* write to read only page */
 			ftype = VM_PROT_WRITE;
 			goto dofault;
 		}
 		entry |= PG_M;
 		pte->pt_entry = entry;
-		trapframe->badvaddr = (trapframe->badvaddr & ~PGOFSET) | (pmap->pm_tlbpid << VMTLB_PID_SHIFT);
-		tlb_update(trapframe->badvaddr, entry);
+		tlb_update((trapframe->badvaddr & ~PGOFSET) |
+		    (pmap->pm_tlbpid << VMTLB_PID_SHIFT), entry);
 		pa = pfn_to_pad(entry);
-		if (!IS_VM_PHYSADDR(pa)) {
+		pg = PHYS_TO_VM_PAGE(pa);
+		if (pg == NULL)
 			panic("trap: utlbmod: unmanaged page");
-		}
-		PHYS_TO_VM_PAGE(pa)->flags &= ~PG_CLEAN;
+		pmap_set_modify(pg);
 		if (!USERMODE(trapframe->sr))
 			return (trapframe->pc);
 		goto out;
@@ -269,7 +272,7 @@ trap(trapframe)
 		kernel_fault:
 			va = trunc_page((vaddr_t)trapframe->badvaddr);
 			rv = uvm_fault(kernel_map, trunc_page(va), 0, ftype);
-			if (rv == KERN_SUCCESS)
+			if (rv == 0)
 				return (trapframe->pc);
 			if ((i = p->p_addr->u_pcb.pcb_onfault) != 0) {
 				p->p_addr->u_pcb.pcb_onfault = 0;
@@ -323,16 +326,12 @@ printf("sp %p\n", trapframe->sp);
 		 * error.
 		 */
 		if ((caddr_t)va >= vm->vm_maxsaddr) {
-			if (rv == KERN_SUCCESS) {
-				unsigned nss;
-
-				nss = btoc(USRSTACK-(unsigned)va);
-				if (nss > vm->vm_ssize)
-					vm->vm_ssize = nss;
-			} else if (rv == KERN_PROTECTION_FAILURE)
-				rv = KERN_INVALID_ADDRESS;
+			if (rv == 0)
+				uvm_grow(p, va);
+			else if (rv == EACCES)
+				rv = EFAULT;
 		}
-		if (rv == KERN_SUCCESS) {
+		if (rv == 0) {
 			if (!USERMODE(trapframe->sr))
 				return (trapframe->pc);
 			goto out;
@@ -524,7 +523,12 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		else
 			trp[-1].code = code;
 #endif
-		i = (*callp->sy_call)(p, &args, rval);
+#if NSYSTRACE > 0
+		if (ISSET(p->p_flag, P_SYSTRACE))
+			i = systrace_redirect(code, p, args.i, rval);
+		else
+#endif
+			i = (*callp->sy_call)(p, &args, rval);
 		/*
 		 * Reinitialize proc pointer `p' as it may be different
 		 * if this is a child returning from fork syscall.
@@ -576,6 +580,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		u_int32_t instr;
 		struct uio uio;
 		struct iovec iov;
+		struct trap_frame *locr0 = p->p_md.md_regs;
+		int error;
 
 		/* compute address of break instruction */
 		va = (caddr_t)trapframe->pc;
@@ -583,40 +589,70 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			va += 4;
 
 		/* read break instruction */
-		copyin(&instr, va, sizeof(int32_t));
+		copyin(va, &instr, sizeof(int32_t));
+
 #if 0
 		printf("trap: %s (%d) breakpoint %x at %x: (adr %x ins %x)\n",
 			p->p_comm, p->p_pid, instr, trapframe->pc,
 			p->p_md.md_ss_addr, p->p_md.md_ss_instr); /* XXX */
 #endif
-		if (p->p_md.md_ss_addr != (long)va || instr != BREAK_SSTEP) {
+
+		switch ((instr & BREAK_VAL_MASK) >> BREAK_VAL_SHIFT) {
+		case 6:	/* gcc range error */
+			i = SIGFPE;
+			typ = FPE_FLTSUB;
+			/* skip instruction */
+			if ((int)trapframe->cause & CR_BR_DELAY)
+				locr0->pc = MipsEmulateBranch(locr0,
+				    trapframe->pc, 0, 0);
+			else
+				locr0->pc += 4;
+			break;
+		case 7:	/* gcc divide by zero */
+			i = SIGFPE;
+			typ = FPE_FLTDIV;	/* XXX FPE_INTDIV ? */
+			/* skip instruction */
+			if ((int)trapframe->cause & CR_BR_DELAY)
+				locr0->pc = MipsEmulateBranch(locr0,
+				    trapframe->pc, 0, 0);
+			else
+				locr0->pc += 4;
+			break;
+		case BREAK_SSTEP_VAL:
+			if (p->p_md.md_ss_addr == (long)va) {
+				/*
+				 * Restore original instruction and clear BP
+				 */
+				iov.iov_base = (caddr_t)&p->p_md.md_ss_instr;
+				iov.iov_len = sizeof(int);
+				uio.uio_iov = &iov;
+				uio.uio_iovcnt = 1;
+				uio.uio_offset = (off_t)(long)va;
+				uio.uio_resid = sizeof(int);
+				uio.uio_segflg = UIO_SYSSPACE;
+				uio.uio_rw = UIO_WRITE;
+				uio.uio_procp = curproc;
+				error = procfs_domem(p, p, NULL, &uio);
+				Mips_SyncCache();
+
+				if (error)
+					printf("Warning: can't restore instruction at %x: %x\n",
+					    p->p_md.md_ss_addr,
+					    p->p_md.md_ss_instr);
+
+				p->p_md.md_ss_addr = 0;
+				typ = TRAP_BRKPT;
+			} else {
+				typ = TRAP_TRACE;
+			}
 			i = SIGTRAP;
+			break;
+		default:
 			typ = TRAP_TRACE;
+			i = SIGTRAP;
 			break;
 		}
 
-		/*
-		 * Restore original instruction and clear BP
-		 */
-		iov.iov_base = (caddr_t)&p->p_md.md_ss_instr;
-		iov.iov_len = sizeof(int);
-		uio.uio_iov = &iov;
-		uio.uio_iovcnt = 1;
-		uio.uio_offset = (off_t)(long)va;
-		uio.uio_resid = sizeof(int);
-		uio.uio_segflg = UIO_SYSSPACE;
-		uio.uio_rw = UIO_WRITE;
-		uio.uio_procp = curproc;
-		i = procfs_domem(p, p, NULL, &uio);
-		Mips_SyncCache();
-
-		if (i < 0)
-			printf("Warning: can't restore instruction at %x: %x\n",
-				p->p_md.md_ss_addr, p->p_md.md_ss_instr);
-
-		p->p_md.md_ss_addr = 0;
-		i = SIGTRAP;
-		typ = TRAP_BRKPT;
 		break;
 	    }
 
@@ -649,12 +685,11 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		if ((int)trapframe->cause & CR_BR_DELAY)
 			va += 4;
 		/* read break instruction */
-		copyin(&instr, va, sizeof(int32_t));
+		copyin(va, &instr, sizeof(int32_t));
 
 		if ((int)trapframe->cause & CR_BR_DELAY) {
 			locr0->pc = MipsEmulateBranch(locr0, trapframe->pc, 0, 0);
-		}
-		else {
+		} else {
 			locr0->pc += 4;
 		}
 		if (instr == 0x040c0000) { /* Performance cntr trap */
@@ -701,7 +736,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		goto err;
 
 	case T_FPE+T_USER:
-		MipsFPTrap(trapframe->sr, trapframe->cause, trapframe->pc);
+		sv.sival_ptr = (void *)trapframe->pc;
+		MipsFPTrap(trapframe->sr, trapframe->cause, trapframe->pc, sv);
 		goto out;
 
 	case T_OVFLOW+T_USER:
@@ -721,13 +757,13 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 	default:
 	err:
 		disableintr();
-#ifndef DDB
+#if !defined(DDB) && defined(DEBUG)
 		trapDump("trap");
 #endif
 		printf("\nTrap cause = %d Frame %p\n", type, trapframe);
 		printf("Trap PC %p RA %p\n", trapframe->pc, trapframe->ra);
-		stacktrace(!USERMODE(trapframe->sr) ? trapframe : p->p_md.md_regs);
 #ifdef DDB
+		stacktrace(!USERMODE(trapframe->sr) ? trapframe : p->p_md.md_regs);
 		kdb_trap(type, trapframe);
 #endif
 		panic("trap");
@@ -735,7 +771,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 	p->p_md.md_regs->pc = trapframe->pc;
 	p->p_md.md_regs->cause = trapframe->cause;
 	p->p_md.md_regs->badvaddr = trapframe->badvaddr;
-	sv.sival_int = trapframe->badvaddr;
+	sv.sival_ptr = (void *)trapframe->badvaddr;
 	trapsignal(p, i, ucode, typ, sv);
 out:
 	/*
@@ -747,21 +783,7 @@ out:
 	p->p_priority = p->p_usrpri;
 	astpending = 0;
 	if (want_resched) {
-		int s;
-
-		/*
-		 * Since we are curproc, clock will normally just change
-		 * our priority without moving us from one queue to another
-		 * (since the running process is not on a queue.)
-		 * If that happened after we put ourselves on the run queue
-		 * but before we switched, we might not be on the queue
-		 * indicated by our priority.
-		 */
-		s = splstatclock();
-		setrunqueue(p);
-		p->p_stats->p_ru.ru_nivcsw++;
-		mi_switch();
-		splx(s);
+		preempt(NULL);
 		while ((i = CURSIG(p)) != 0)
 			postsig(i);
 	}
@@ -798,21 +820,7 @@ child_return(arg)
 	p->p_priority = p->p_usrpri;
 	astpending = 0;
 	if (want_resched) {
-		int s;
-
-		/*
-		 * Since we are curproc, clock will normally just change
-		 * our priority without moving us from one queue to another
-		 * (since the running process is not on a queue.)
-		 * If that happened after we put ourselves on the run queue
-		 * but before we switched, we might not be on the queue
-		 * indicated by our priority.
-		 */
-		s = splstatclock();
-		setrunqueue(p);
-		p->p_stats->p_ru.ru_nivcsw++;
-		mi_switch();
-		splx(s);
+		preempt(NULL);
 		while ((i = CURSIG(p)) != 0)
 			postsig(i);
 	}
@@ -838,27 +846,29 @@ void
 trapDump(msg)
 	char *msg;
 {
+	struct trapdebug *ptrp;
 	int i;
 	int s;
 
 	s = splhigh();
+	ptrp = trp;
 	printf("trapDump(%s)\n", msg);
 	for (i = 0; i < TRAPSIZE; i++) {
-		if (trp == trapdebug) {
-			trp = &trapdebug[TRAPSIZE - 1];
+		if (ptrp == trapdebug) {
+			ptrp = &trapdebug[TRAPSIZE - 1];
 		}
 		else {
-			trp--;
+			ptrp--;
 		}
 
-		if (trp->cause == 0)
+		if (ptrp->cause == 0)
 			break;
 
 		printf("%s: PC %p CR 0x%x SR 0x%x\n",
-		    trap_type[(trp->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT],
-		    trp->pc, trp->cause, trp->status);
+		    trap_type[(ptrp->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT],
+		    ptrp->pc, ptrp->cause, ptrp->status);
 
-		printf("  RA %p SP %p ADR %p\n", trp->ra, trp->sp, trp->vadr);
+		printf(" RA %p SP %p ADR %p\n", ptrp->ra, ptrp->sp, ptrp->vadr);
 	}
 
 #ifdef TLBTRACE
@@ -887,11 +897,11 @@ trapDump(msg)
  * Return the resulting PC as if the branch was executed.
  */
 unsigned long
-MipsEmulateBranch(framePtr, instPC, fpcCSR, instptr)
+MipsEmulateBranch(framePtr, instPC, fpcCSR, curinst)
 	struct trap_frame *framePtr;
 	long instPC;
 	int fpcCSR;
-	long instptr;
+	u_int curinst;
 {
 	InstFmt inst;
 	unsigned long retAddr;
@@ -902,8 +912,8 @@ MipsEmulateBranch(framePtr, instPC, fpcCSR, instptr)
 	((unsigned long)InstPtr + 4 + ((short)inst.IType.imm << 2))
 
 
-	if (instptr) {
-		inst = *(InstFmt *)&instptr;
+	if (curinst) {
+		inst = *(InstFmt *)&curinst;
 	}
 	else {
 		inst = *(InstFmt *)instPC;
@@ -1035,9 +1045,9 @@ int
 cpu_singlestep(p)
 	struct proc *p;
 {
-	unsigned va;
+	vaddr_t va;
 	struct trap_frame *locr0 = p->p_md.md_regs;
-	int i;
+	int error;
 	int bpinstr = BREAK_SSTEP;
 	int curinstr;
 	struct uio uio;
@@ -1069,7 +1079,7 @@ cpu_singlestep(p)
 			p->p_comm, p->p_pid, p->p_md.md_ss_addr, va); /* XXX */
 		return (EFAULT);
 	}
-	p->p_md.md_ss_addr = va;
+
 	/*
 	 * Fetch what's at the current location.
 	 */
@@ -1096,11 +1106,12 @@ cpu_singlestep(p)
 	uio.uio_segflg = UIO_SYSSPACE;
 	uio.uio_rw = UIO_WRITE;
 	uio.uio_procp = curproc;
-	i = procfs_domem(curproc, p, NULL, &uio);
+	error = procfs_domem(curproc, p, NULL, &uio);
 	Mips_SyncCache();
-
-	if (i < 0)
+	if (error)
 		return (EFAULT);
+
+	p->p_md.md_ss_addr = va;
 #if 0
 	printf("SS %s (%d): breakpoint set at %x: %x (pc %x) br %x\n",
 		p->p_comm, p->p_pid, p->p_md.md_ss_addr,
@@ -1114,7 +1125,7 @@ cpu_singlestep(p)
 
 /* forward */
 char *fn_name(long addr);
-void stacktrace_subr __P((struct trap_frame *, int (*)(const char*, ...)));
+void stacktrace_subr(struct trap_frame *, int (*)(const char*, ...));
 
 /*
  * Print a stack backtrace.
@@ -1136,7 +1147,7 @@ logstacktrace(regs)
 void
 stacktrace_subr(regs, printfn)
 	struct trap_frame *regs;
-	int (*printfn) __P((const char*, ...));
+	int (*printfn)(const char*, ...);
 {
 	long pc, sp, fp, ra, va, subr;
 	long a0, a1, a2, a3;
@@ -1177,9 +1188,9 @@ loop:
 
 #if 0
 	/* Backtraces should contine through interrupts from kernel mode */
-	if (pc >= (unsigned)MipsKernIntr && pc < (unsigned)MipsUserIntr) {
+	if (pc >= (vaddr_t)MipsKernIntr && pc < (vaddr_t)MipsUserIntr) {
 		(*printfn)("MipsKernIntr+%x: (%x, %x ,%x) -------\n",
-		       pc-(unsigned)MipsKernIntr, a0, a1, a2);
+		       pc-(vaddr_t)MipsKernIntr, a0, a1, a2);
 		regs = (struct trap_frame *)(sp + STAND_ARG_SIZE);
 		a0 = kdbpeek(&regs->a0);
 		a1 = kdbpeek(&regs->a1);
@@ -1197,7 +1208,7 @@ loop:
 # define Between(x, y, z) \
 		( ((x) <= (y)) && ((y) < (z)) )
 # define pcBetween(a,b) \
-		Between((unsigned)a, pc, (unsigned)b)
+		Between((vaddr_t)a, pc, (vaddr_t)b)
 
 	/* check for bad PC */
 	if (pc & 3 || pc < KSEG0_BASE || pc >= (unsigned)edata) {

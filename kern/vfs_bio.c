@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.69.2.1 2005/10/13 15:52:11 brad Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.75.2.1 2005/10/12 22:01:05 brad Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*-
@@ -143,9 +143,9 @@ bremfree(struct buf *bp)
 	 *
 	 * NB: This makes an assumption about how tailq's are implemented.
 	 */
-	if (bp->b_freelist.tqe_next == NULL) {
+	if (TAILQ_NEXT(bp, b_freelist) == NULL) {
 		for (dp = bufqueues; dp < &bufqueues[BQUEUES]; dp++)
-			if (dp->tqh_last == &bp->b_freelist.tqe_next)
+			if (dp->tqh_last == &TAILQ_NEXT(bp, b_freelist))
 				break;
 		if (dp == &bufqueues[BQUEUES])
 			panic("bremfree: lost tail");
@@ -214,7 +214,7 @@ bufinit(void)
 	/*
 	 * Reserve 5% of bufpages for syncer's needs,
 	 * but not more than 25% and if possible
-	 * not less then 2 * MAXBSIZE. locleanpages
+	 * not less than 2 * MAXBSIZE. locleanpages
 	 * value must be not too small, but probably
 	 * there are no reason to set it more than 1-2 MB.
 	 */
@@ -241,7 +241,7 @@ bio_doread(struct vnode *vp, daddr_t blkno, int size, int async)
 	/*
 	 * If buffer does not have data valid, start a read.
 	 * Note that if buffer is B_INVAL, getblk() won't return it.
-	 * Therefore, it's valid if it's I/O has completed or been delayed.
+	 * Therefore, it's valid if its I/O has completed or been delayed.
 	 */
 	if (!ISSET(bp->b_flags, (B_DONE | B_DELWRI))) {
 		SET(bp->b_flags, B_READ | async);
@@ -300,19 +300,6 @@ breadn(struct vnode *vp, daddr_t blkno, int size, daddr_t rablks[],
 
 	/* Otherwise, we had to start a read for it; wait until it's valid. */
 	return (biowait(bp));
-}
-
-/*
- * Read with single-block read-ahead.  Defined in Bach (p.55), but
- * implemented as a call to breadn().
- * XXX for compatibility with old file systems.
- */
-int
-breada(struct vnode *vp, daddr_t blkno, int size, daddr_t rablkno, int rabsize,
-    struct ucred *cred, struct buf **bpp)
-{
-
-	return (breadn(vp, blkno, size, &rablkno, &rabsize, 1, cred, bpp));	
 }
 
 /*
@@ -572,21 +559,18 @@ brelse(struct buf *bp)
 		wakeup_one(&needbuffer);
 	}
 
-	splx(s);
-
 	/* Wake up any processes waiting for _this_ buffer to become free. */
 	if (ISSET(bp->b_flags, B_WANTED)) {
 		CLR(bp->b_flags, B_WANTED);
 		wakeup(bp);
 	}
+
+	splx(s);
 }
 
 /*
- * Determine if a block is in the cache.
- * Just look on what would be its hash chain.  If it's there, return
- * a pointer to it, unless it's marked invalid.  If it's marked invalid,
- * we normally don't return the buffer, unless the caller explicitly
- * wants us to.
+ * Determine if a block is in the cache. Just look on what would be its hash
+ * chain. If it's there, return a pointer to it, unless it's marked invalid.
  */
 struct buf *
 incore(struct vnode *vp, daddr_t blkno)
@@ -600,7 +584,7 @@ incore(struct vnode *vp, daddr_t blkno)
 			return (bp);
 	}
 
-	return (0);
+	return (NULL);
 }
 
 /*
@@ -748,7 +732,7 @@ allocbuf(struct buf *bp, int size)
 	 */
 	if (bp->b_bufsize > desired_size) {
 		s = splbio();
-		if ((nbp = bufqueues[BQ_EMPTY].tqh_first) == NULL) {
+		if ((nbp = TAILQ_FIRST(&bufqueues[BQ_EMPTY])) == NULL) {
 			/* No free buffer head */
 			splx(s);
 			goto out;
@@ -1001,7 +985,7 @@ vfs_bufstats()
 		pages = 0;
 		for (j = 0; j <= MAXBSIZE/PAGE_SIZE; j++)
 			counts[j] = 0;
-		for (bp = dp->tqh_first; bp; bp = bp->b_freelist.tqe_next) {
+		TAILQ_FOREACH(bp, dp, b_freelist) {
 			counts[bp->b_bufsize/PAGE_SIZE]++;
 			count++;
 			pages += btoc(bp->b_bufsize);

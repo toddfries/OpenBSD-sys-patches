@@ -1,4 +1,4 @@
-/*	$OpenBSD: xmphy.c,v 1.6 2002/05/04 11:30:06 fgsch Exp $	*/
+/*	$OpenBSD: xmphy.c,v 1.11 2005/02/19 06:00:04 brad Exp $	*/
 
 /*
  * Copyright (c) 2000
@@ -44,7 +44,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -75,44 +74,54 @@ void	xmphy_status(struct mii_softc *);
 int	xmphy_mii_phy_auto(struct mii_softc *, int);
 extern void	mii_phy_auto_timeout(void *);
 
-int xmphy_probe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+const struct mii_phy_funcs xmphy_funcs = {
+	xmphy_service, xmphy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc xmphys[] = {
+	{ MII_OUI_xxXAQTI,	MII_MODEL_XAQTI_XMACII,
+	  MII_STR_XAQTI_XMACII },
+
+	{ 0,			0,
+	  NULL },
+};
+
+int xmphy_probe(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxXAQTI &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_XAQTI_XMACII)
+	if (mii_phy_match(ma, xmphys) != NULL)
 		return(10);
 
 	return(0);
 }
 
 void
-xmphy_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+xmphy_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	printf(": %s, rev. %d\n", MII_STR_XAQTI_XMACII, MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, xmphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = xmphy_service;
-	sc->mii_status = xmphy_status;
+	sc->mii_funcs = &xmphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags |= MIIF_NOISOLATE | mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 	sc->mii_anegticks = 5;
+
+	sc->mii_flags |= MIIF_NOISOLATE;
 
 #define	ADD(m, c)	ifmedia_add(&mii->mii_media, (m), (c), NULL)
 
 	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_NONE, 0, sc->mii_inst),
 	    BMCR_ISO);
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	ADD(IFM_MAKEWORD(IFM_ETHER, IFM_1000_SX, 0, sc->mii_inst),
 	    XMPHY_BMCR_FDX);
@@ -123,10 +132,7 @@ xmphy_attach(parent, self, aux)
 }
 
 int
-xmphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+xmphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
@@ -170,7 +176,7 @@ xmphy_service(sc, mii, cmd)
 			(void) xmphy_mii_phy_auto(sc, 1);
 			break;
 		case IFM_1000_SX:
-			mii_phy_reset(sc);
+			PHY_RESET(sc);
 			if ((ife->ifm_media & IFM_GMASK) == IFM_FDX) {
 				PHY_WRITE(sc, XMPHY_MII_ANAR, XMPHY_ANAR_FDX);
 				PHY_WRITE(sc, XMPHY_MII_BMCR, XMPHY_BMCR_FDX);
@@ -224,7 +230,7 @@ xmphy_service(sc, mii, cmd)
 		if (reg & XMPHY_BMSR_LINK)
 			break;
 
-		mii_phy_reset(sc);
+		PHY_RESET(sc);
 		if (xmphy_mii_phy_auto(sc, 0) == EJUSTRETURN)
 			return(0);
 		break;
@@ -239,8 +245,7 @@ xmphy_service(sc, mii, cmd)
 }
 
 void
-xmphy_status(sc)
-	struct mii_softc *sc;
+xmphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	int bmsr, bmcr, anlpar;
@@ -294,23 +299,21 @@ xmphy_status(sc)
 
 
 int
-xmphy_mii_phy_auto(mii, waitfor)
-	struct mii_softc *mii;
-	int waitfor;
+xmphy_mii_phy_auto(struct mii_softc *sc, int waitfor)
 {
 	int bmsr, i;
 
-	if ((mii->mii_flags & MIIF_DOINGAUTO) == 0) {
-		PHY_WRITE(mii, XMPHY_MII_ANAR,
+	if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
+		PHY_WRITE(sc, XMPHY_MII_ANAR,
 		    XMPHY_ANAR_FDX|XMPHY_ANAR_HDX);
-		PHY_WRITE(mii, XMPHY_MII_BMCR,
+		PHY_WRITE(sc, XMPHY_MII_BMCR,
 		    XMPHY_BMCR_AUTOEN | XMPHY_BMCR_STARTNEG);
 	}
 
 	if (waitfor) {
 		/* Wait 500ms for it to complete. */
 		for (i = 0; i < 500; i++) {
-			if ((bmsr = PHY_READ(mii, XMPHY_MII_BMSR)) &
+			if ((bmsr = PHY_READ(sc, XMPHY_MII_BMSR)) &
 			    XMPHY_BMSR_ACOMP)
 				return (0);
 			DELAY(1000);
@@ -334,10 +337,10 @@ xmphy_mii_phy_auto(mii, waitfor)
 	 * the tick handler driving autonegotiation.  Don't want 500ms
 	 * delays all the time while the system is running!
 	 */
-	if ((mii->mii_flags & MIIF_DOINGAUTO) == 0) {
-		mii->mii_flags |= MIIF_DOINGAUTO;
-		timeout_set(&mii->mii_phy_timo, mii_phy_auto_timeout, mii);
-		timeout_add(&mii->mii_phy_timo, hz >> 1);
+	if ((sc->mii_flags & MIIF_DOINGAUTO) == 0) {
+		sc->mii_flags |= MIIF_DOINGAUTO;
+		timeout_set(&sc->mii_phy_timo, mii_phy_auto_timeout, sc);
+		timeout_add(&sc->mii_phy_timo, hz >> 1);
 	}
 	return (EJUSTRETURN);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.62 2004/06/06 16:49:09 cedric Exp $	*/
+/*	$OpenBSD: in.h,v 1.64 2005/01/14 14:51:27 mcbride Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -431,7 +431,7 @@ struct ip_mreq {
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ 0, 0 }, \
-	{ 0, 0 }, \
+	{ "pim", CTLTYPE_NODE }, \
 	{ 0, 0 }, \
 	{ 0, 0 }, \
 	{ 0, 0 }, \
@@ -608,6 +608,8 @@ in_cksum_addword(u_int16_t a, u_int16_t b)
 
 	return (sum);
 }
+
+extern	   struct in_addr zeroin_addr;
 
 int	   in_broadcast(struct in_addr, struct ifnet *);
 int	   in_canforward(struct in_addr);

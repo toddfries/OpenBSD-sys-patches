@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.14 2004/07/07 23:10:45 deraadt Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.16 2004/12/25 23:02:25 miod Exp $	*/
 /*	$NetBSD: if_de.c,v 1.27 1997/04/19 15:02:29 ragge Exp $	*/
 
 /*
@@ -70,12 +70,6 @@
 #ifdef NS
 #include <netns/ns.h>
 #include <netns/ns_if.h>
-#endif
-
-#ifdef ISO
-#include <netiso/iso.h>
-#include <netiso/iso_var.h>
-extern char all_es_snpa[], all_is_snpa[];
 #endif
 
 #include <machine/cpu.h>
@@ -262,7 +256,7 @@ deinit(ds)
 	int s,incaddr;
 
 	/* not yet, if address still unknown */
-	if (ifp->if_addrlist.tqh_first == (struct ifaddr *)0)
+	if (TAILQ_EMPTY(&ifp->if_addrlist))
 		return;
 
 	if (ds->ds_flags & DSF_RUNNING)

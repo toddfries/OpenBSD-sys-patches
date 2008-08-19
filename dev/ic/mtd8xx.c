@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtd8xx.c,v 1.5 2004/06/05 20:25:15 mcbride Exp $	*/
+/*	$OpenBSD: mtd8xx.c,v 1.8 2005/01/15 05:24:11 brad Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>
@@ -160,10 +160,8 @@ mtd_attach(struct mtd_softc *sc)
 
 	/* Initialize interface */
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = mtd_ioctl;
-	ifp->if_output = ether_output;
 	ifp->if_start = mtd_start;
 	ifp->if_watchdog = mtd_watchdog;
 	ifp->if_baudrate = 10000000;
@@ -540,7 +538,7 @@ mtd_newbuf(struct mtd_softc *sc, int i, struct mbuf *m)
 	c->rd_buf = htole32(
 	    sc->mtd_cdata.mtd_rx_chain[i].sd_map->dm_segs[0].ds_addr +
 	    sizeof(u_int64_t));
-	c->rd_rcw = htole32(MTD_RXLEN);
+	c->rd_rcw = htole32(ETHER_MAX_DIX_LEN);
 	c->rd_rsr = htole32(RSR_OWN);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
@@ -633,7 +631,8 @@ mtd_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			mtd_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				mtd_setmulti(sc);
 			error = 0;
 		}
 		break;

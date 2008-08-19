@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.13 2003/06/24 21:54:39 henric Exp $	*/
+/*	$OpenBSD: zs.c,v 1.17 2004/09/29 19:17:43 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.29 2001/05/30 15:24:24 lukem Exp $	*/
 
 /*-
@@ -68,6 +68,7 @@
 
 #include <dev/cons.h>
 #include <sparc64/dev/z8530reg.h>
+#include <sparc64/dev/fhcvar.h>
 #include <ddb/db_output.h>
 
 #include <sparc64/dev/cons.h>
@@ -157,22 +158,23 @@ struct consdev zs_consdev = {
  ****************************************************************/
 
 /* Definition of the driver for autoconfig. */
-static int  zs_match_mainbus(struct device *, void *, void *);
-static void zs_attach_mainbus(struct device *, struct device *, void *);
+static int  zs_match_sbus(struct device *, void *, void *);
+static void zs_attach_sbus(struct device *, struct device *, void *);
+
+static int  zs_match_fhc(struct device *, void *, void *);
+static void zs_attach_fhc(struct device *, struct device *, void *);
 
 static void zs_attach(struct zsc_softc *, struct zsdevice *, int);
 static int  zs_print(void *, const char *name);
 
-/* Do we really need this ? */
-struct cfattach zs_ca = {
-	sizeof(struct zsc_softc), zs_match_mainbus, zs_attach_mainbus
+struct cfattach zs_sbus_ca = {
+	sizeof(struct zsc_softc), zs_match_sbus, zs_attach_sbus
 };
 
-struct cfattach zs_mainbus_ca = {
-	sizeof(struct zsc_softc), zs_match_mainbus, zs_attach_mainbus
+struct cfattach zs_fhc_ca = {
+	sizeof(struct zsc_softc), zs_match_fhc, zs_attach_fhc
 };
 
-extern struct cfdriver zs_cd;
 extern int stdinnode;
 extern int fbnode;
 
@@ -194,7 +196,7 @@ void zs_disable(struct zs_chanstate *);
  * Is the zs chip present?
  */
 static int
-zs_match_mainbus(parent, vcf, aux)
+zs_match_sbus(parent, vcf, aux)
 	struct device *parent;
 	void *vcf;
 	void *aux;
@@ -208,8 +210,22 @@ zs_match_mainbus(parent, vcf, aux)
 	return (1);
 }
 
+static int
+zs_match_fhc(parent, vcf, aux)
+	struct device *parent;
+	void *vcf;
+	void *aux;
+{
+	struct cfdata *cf = vcf;
+	struct fhc_attach_args *fa = aux;
+
+	if (strcmp(cf->cf_driver->cd_name, fa->fa_name) != 0)
+		return (0);
+	return (1);
+}
+
 static void
-zs_attach_mainbus(parent, self, aux)
+zs_attach_sbus(parent, self, aux)
 	struct device *parent;
 	struct device *self;
 	void *aux;
@@ -261,6 +277,62 @@ zs_attach_mainbus(parent, self, aux)
 	zsc->zsc_promunit = getpropint(sa->sa_node, "slave", -2);
 	zsc->zsc_node = sa->sa_node;
 	zs_attach(zsc, zsaddr[zs_unit], sa->sa_pri);
+}
+
+static void
+zs_attach_fhc(parent, self, aux)
+	struct device *parent;
+	struct device *self;
+	void *aux;
+{
+	struct zsc_softc *zsc = (void *) self;
+	struct fhc_attach_args *fa = aux;
+	int zs_unit = zsc->zsc_dev.dv_unit;
+	bus_space_handle_t kvaddr;
+
+	if (fa->fa_nreg < 1 && fa->fa_npromvaddrs < 1) {
+		printf(": no registers\n");
+		return;
+	}
+
+	if (fa->fa_nintr < 1) {
+		printf(": no interrupts\n");
+		return;
+	}
+
+	if (zsaddr[zs_unit] == NULL) {
+		if (fa->fa_npromvaddrs) {
+			/*
+			 * We're converting from a 32-bit pointer to a 64-bit
+			 * pointer.  Since the 32-bit entity is negative, but
+			 * the kernel is still mapped into the lower 4GB
+			 * range, this needs to be zero-extended.
+			 *
+			 * XXXXX If we map the kernel and devices into the
+			 * high 4GB range, this needs to be changed to
+			 * sign-extend the address.
+			 */
+			zsaddr[zs_unit] = (struct zsdevice *)
+			    (unsigned long int)fa->fa_promvaddrs[0];
+		} else {
+			if (fhc_bus_map(fa->fa_bustag, fa->fa_reg[0].fbr_slot,
+			    fa->fa_reg[0].fbr_offset, fa->fa_reg[0].fbr_size,
+			    BUS_SPACE_MAP_LINEAR, &kvaddr) != 0) {
+				printf("%s @ fhc: cannot map registers\n",
+				    self->dv_xname);
+				return;
+			}
+			zsaddr[zs_unit] = (struct zsdevice *)
+			    bus_space_vaddr(fa->fa_bustag, kvaddr);
+		}
+	}
+
+	zsc->zsc_bustag = fa->fa_bustag;
+	zsc->zsc_dmatag = NULL;
+	zsc->zsc_promunit = getpropint(fa->fa_node, "slave", -2);
+	zsc->zsc_node = fa->fa_node;
+
+	zs_attach(zsc, zsaddr[zs_unit], fa->fa_intr[0]);
 }
 
 /*
@@ -381,9 +453,6 @@ zs_attach(zsc, zsd, pri)
 	if (!(zsc->zsc_softintr = softintr_establish(softpri, zssoft, zsc)))
 		panic("zsattach: could not establish soft interrupt");
 
-	evcnt_attach(&zsc->zsc_dev, "intr", &zsc->zsc_intrcnt);
-
-
 	/*
 	 * Set the master interrupt enable and interrupt vector.
 	 * (common to both channels, do it on A)
@@ -428,7 +497,6 @@ zshard(arg)
 	while ((rr3 = zsc_intr_hard(zsc))) {
 		/* Count up the interrupts. */
 		rval |= rr3;
-		zsc->zsc_intrcnt.ev_count++;
 	}
 	if (((zsc->zsc_cs[0] && zsc->zsc_cs[0]->cs_softreq) ||
 	     (zsc->zsc_cs[1] && zsc->zsc_cs[1]->cs_softreq)) &&

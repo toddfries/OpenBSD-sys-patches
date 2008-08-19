@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_alloc.c,v 1.49 2004/07/13 21:04:29 millert Exp $	*/
+/*	$OpenBSD: ffs_alloc.c,v 1.53 2004/11/29 06:20:02 jsg Exp $	*/
 /*	$NetBSD: ffs_alloc.c,v 1.11 1996/05/11 18:27:09 mycroft Exp $	*/
 
 /*
@@ -83,7 +83,7 @@ static int      ffs_checkblk(struct inode *, daddr_t, long);
  *   3) allocate a block in the same cylinder group.
  *   4) quadradically rehash into other cylinder groups, until an
  *      available block is located.
- * If no block preference is given the following heirarchy is used
+ * If no block preference is given the following hierarchy is used
  * to allocate a block:
  *   1) allocate a block in the cylinder group that contains the
  *      inode for the file.
@@ -325,10 +325,10 @@ error:
  * Reallocate a sequence of blocks into a contiguous sequence of blocks.
  *
  * The vnode and an array of buffer pointers for a range of sequential
- * logical blocks to be made contiguous is given. The allocator attempts
+ * logical blocks to be made contiguous are given. The allocator attempts
  * to find a range of sequential blocks starting as close as possible to
  * an fs_rotdelay offset from the end of the allocation for the logical
- * block immediately preceeding the current range. If successful, the
+ * block immediately preceding the current range. If successful, the
  * physical block numbers in the buffer pointers and in the inode are
  * changed to reflect the new allocation. If unsuccessful, the allocation
  * is left unchanged. The success in doing the reallocation is returned.
@@ -558,7 +558,7 @@ fail:
  *   2) allocate an inode in the same cylinder group.
  *   3) quadradically rehash into other cylinder groups, until an
  *      available inode is located.
- * If no inode preference is given the following heirarchy is used
+ * If no inode preference is given the following hierarchy is used
  * to allocate an inode:
  *   1) allocate an inode in cylinder group 0.
  *   2) quadradically rehash into other cylinder groups, until an
@@ -1588,16 +1588,16 @@ ffs_checkblk(ip, bno, size)
 	error = bread(ip->i_devvp, fsbtodb(fs, cgtod(fs, dtog(fs, bno))),
 		(int)fs->fs_cgsize, NOCRED, &bp);
 	if (error) {
-		/* XXX - probably should panic here */
 		brelse(bp);
-		return (-1);
+		return (0);
 	}
+
 	cgp = (struct cg *)bp->b_data;
 	if (!cg_chkmagic(cgp)) {
-		/* XXX - probably should panic here */
 		brelse(bp);
-		return (-1);
+		return (0);
 	}
+
 	bno = dtogd(fs, bno);
 	if (size == fs->fs_bsize) {
 		free = ffs_isblock(fs, cg_blksfree(cgp), fragstoblks(fs, bno));

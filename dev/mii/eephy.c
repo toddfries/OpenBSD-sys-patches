@@ -1,4 +1,4 @@
-/*	$OpenBSD: eephy.c,v 1.11 2003/09/02 22:44:27 krw Exp $	*/
+/*	$OpenBSD: eephy.c,v 1.16 2005/02/05 22:30:52 brad Exp $	*/
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -55,7 +55,6 @@
 
 #include <dev/mii/eephyreg.h>
 
-
 int	eephy_service(struct mii_softc *, struct mii_data *, int);
 void	eephy_status(struct mii_softc *);
 int	eephymatch(struct device *, void *, void *);
@@ -75,24 +74,40 @@ void	eephy_reset(struct mii_softc *);
 
 extern void	mii_phy_auto_timeout(void *);
 
+const struct mii_phy_funcs eephy_funcs = {
+	eephy_service, eephy_status, eephy_reset,
+};
+
+static const struct mii_phydesc eephys[] = {
+	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_3,
+	  MII_STR_xxMARVELL_E1000_3 },
+	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_5,
+	  MII_STR_xxMARVELL_E1000_5 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000,
+	  MII_STR_MARVELL_E1000 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1011,
+	  MII_STR_MARVELL_E1011 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000_3,
+	  MII_STR_MARVELL_E1000_3 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000_4,
+	  MII_STR_MARVELL_E1000_4 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000_5,
+	  MII_STR_MARVELL_E1000_5 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000_6,
+	  MII_STR_MARVELL_E1000_6 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1000_7,
+	  MII_STR_MARVELL_E1000_7 },
+
+	{ 0,				0,
+	  NULL },
+};
 
 int
 eephymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxMARVELL &&
-	    (MII_MODEL(ma->mii_id2) == MII_MODEL_xxMARVELL_E1000_3 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxMARVELL_E1000_5 ))
-		return (10);
-
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_MARVELL &&
-	    (MII_MODEL(ma->mii_id2) == MII_MODEL_MARVELL_E1000 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_MARVELL_E1011 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_MARVELL_E1000_3 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_MARVELL_E1000_4 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_MARVELL_E1000_5 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_MARVELL_E1000_6))
+	if (mii_phy_match(ma, eephys) != NULL)
 		return (10);
 
 	return(0);
@@ -104,17 +119,16 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
-	char *sep;
+	const struct mii_phydesc *mpd;
 
-	sep = "";
-	printf(": %s\n", MII_STR_MARVELL_E1000);
+	mpd = mii_phy_match(ma, eephys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = eephy_service;
-	sc->mii_status = eephy_status;
+	sc->mii_funcs = &eephy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 	sc->mii_anegticks = 10;
 
 	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_MARVELL &&
@@ -122,7 +136,7 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 	    (PHY_READ(sc, E1000_ESSR) & E1000_ESSR_FIBER_LINK))
 		sc->mii_flags |= MIIF_HAVEFIBER;
 
-	eephy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_flags |= MIIF_NOISOLATE;
 
@@ -238,12 +252,12 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			if (sc->mii_flags & MIIF_DOINGAUTO) {
 				return (0);
 			}
-			eephy_reset(sc);
+			PHY_RESET(sc);
 			(void)eephy_mii_phy_auto(sc, 1);
 			break;
 
 		case IFM_1000_SX:
-			eephy_reset(sc);
+			PHY_RESET(sc);
 
 			PHY_WRITE(sc, E1000_CR,
 			    E1000_CR_FULL_DUPLEX | E1000_CR_SPEED_1000);
@@ -254,14 +268,14 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			if (sc->mii_flags & MIIF_DOINGAUTO)
 				return (0);
 
-			eephy_reset(sc);
+			PHY_RESET(sc);
 
 			/* TODO - any other way to force 1000BT? */
 			(void)eephy_mii_phy_auto(sc, 1);
 			break;
 
 		case IFM_100_TX:
-			eephy_reset(sc);
+			PHY_RESET(sc);
 
 			if ((ife->ifm_media & IFM_GMASK) == IFM_FDX) {
 				PHY_WRITE(sc, E1000_CR,
@@ -274,7 +288,7 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 			break;
 
 		case IFM_10_T:
-			eephy_reset(sc);
+			PHY_RESET(sc);
 
 			if ((ife->ifm_media & IFM_GMASK) == IFM_FDX) {
 				PHY_WRITE(sc, E1000_CR,
@@ -333,7 +347,7 @@ eephy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 		if (reg & E1000_SR_LINK_STATUS)
 			break;
 
-		eephy_reset(sc);
+		PHY_RESET(sc);
 
 		if (eephy_mii_phy_auto(sc, 0) == EJUSTRETURN) {
 			return(0);

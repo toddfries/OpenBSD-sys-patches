@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciidereg.h,v 1.5 2003/09/28 21:01:43 grange Exp $	*/
+/*	$OpenBSD: pciidereg.h,v 1.7 2004/10/17 08:44:41 grange Exp $	*/
 /*	$NetBSD: pciidereg.h,v 1.6 2000/11/14 18:42:58 thorpej Exp $	*/
 
 /*
@@ -30,6 +30,9 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef _DEV_PCI_PCIIDEREG_H_
+#define _DEV_PCI_PCIIDEREG_H_
 
 /*
  * PCI IDE controller register definitions.
@@ -84,6 +87,7 @@
 
 /* secondary channel registers offset */
 #define IDEDMA_SCH_OFFSET 0x08
+#define IDEDMA_NREGS 8
 
 /* Bus master command register (per channel) */
 #define IDEDMA_CMD(chan) (0x00 + IDEDMA_SCH_OFFSET * (chan))
@@ -115,3 +119,5 @@ struct idedma_table {
 
 /* Number of idedma table needed */
 #define NIDEDMA_TABLES (MAXPHYS/PAGE_SIZE + 1)
+
+#endif	/* !_DEV_PCI_PCIIDEREG_H_ */

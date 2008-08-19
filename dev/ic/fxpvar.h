@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxpvar.h,v 1.18 2004/08/04 19:42:30 mickey Exp $	*/
+/*	$OpenBSD: fxpvar.h,v 1.22 2005/01/15 18:48:12 brad Exp $	*/
 /*	$NetBSD: if_fxpvar.h,v 1.1 1997/06/05 02:01:58 thorpej Exp $	*/
 
 /*                  
@@ -104,11 +104,10 @@ struct fxp_softc {
 	struct mbuf *rfa_headm;		/* first mbuf in receive frame area */
 	struct mbuf *rfa_tailm;		/* last mbuf in receive frame area */
 	int sc_flags;			/* misc. flags */
-#define	FXPF_HAS_RESUME_BUG	0x08	/* has the resume bug */
-#define	FXPF_FIX_RESUME_BUG	0x10	/* currently need to work-around 
-					   the resume bug */
+#define	FXPF_MWI_ENABLE		0x10	/* enable use of PCI MWI command */
 #define	FXPF_DISABLE_STANDBY	0x20	/* currently need to work-around */
-#define	FXPF_UCODE		0x40	/* ucode is loaded */
+#define	FXPF_UCODE		0x40	/* ucode load already attempted */
+#define	FXPF_RECV_WORKAROUND	0x80	/* receiver lock-up workaround */
 	struct timeout stats_update_to; /* Pointer to timeout structure */
 	int rx_idle_secs;		/* # of seconds RX has been idle */
 	struct fxp_cb_tx *cbl_base;	/* base of TxCB list */

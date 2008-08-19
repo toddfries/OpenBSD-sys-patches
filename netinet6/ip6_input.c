@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.59.2.1 2005/03/21 02:06:36 brad Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.61 2005/03/06 16:27:01 dhartmei Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -151,7 +151,6 @@ ip6_init()
 	ip6intrq.ifq_maxlen = ip6qmaxlen;
 	nd6_init();
 	frag6_init();
-	ip6_flow_seq = arc4random();
 	ip6_init2((void *)0);
 }
 
@@ -294,9 +293,9 @@ ip6_input(m)
 #endif
 
 #if NPF > 0 
-	/*
-	 * Packet filter
-	 */
+        /*
+         * Packet filter
+         */
 	odst = ip6->ip6_dst;
 	if (pf_test6(PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
 		goto bad;

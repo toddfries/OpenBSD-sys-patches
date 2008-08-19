@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.32 2003/12/21 14:57:19 markus Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.36 2005/01/14 14:51:28 mcbride Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -202,13 +202,13 @@ rip_output(struct mbuf *m, ...)
 		if (!m)
 			return (ENOBUFS);
 		ip = mtod(m, struct ip *);
-		ip->ip_tos = 0;
+		ip->ip_tos = inp->inp_ip.ip_tos;
 		ip->ip_off = htons(0);
 		ip->ip_p = inp->inp_ip.ip_p;
 		ip->ip_len = htons(m->m_pkthdr.len);
 		ip->ip_src = inp->inp_laddr;
 		ip->ip_dst.s_addr = dst;
-		ip->ip_ttl = MAXTTL;
+		ip->ip_ttl = inp->inp_ip.ip_ttl ? inp->inp_ip.ip_ttl : MAXTTL;
 	} else {
 		if (m->m_pkthdr.len > IP_MAXPACKET) {
 			m_freem(m);
@@ -294,13 +294,17 @@ rip_ctloutput(op, so, level, optname, m)
 	case MRT_DEL_MFC:
 	case MRT_VERSION:
 	case MRT_ASSERT:
+	case MRT_API_SUPPORT:
+	case MRT_API_CONFIG:
+	case MRT_ADD_BW_UPCALL:
+	case MRT_DEL_BW_UPCALL:
 #ifdef MROUTING
 		switch (op) {
 		case PRCO_SETOPT:
-			error = ip_mrouter_set(optname, so, m);
+			error = ip_mrouter_set(so, optname, m);
 			break;
 		case PRCO_GETOPT:
-			error = ip_mrouter_get(optname, so, m);
+			error = ip_mrouter_get(so, optname, m);
 			break;
 		default:
 			error = EINVAL;

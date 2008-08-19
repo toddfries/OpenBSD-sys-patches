@@ -1,4 +1,4 @@
-/*	$OpenBSD: p9000.c,v 1.8 2004/05/12 16:26:11 deraadt Exp $	*/
+/*	$OpenBSD: p9000.c,v 1.12 2005/03/07 16:44:50 miod Exp $	*/
 
 /*
  * Copyright (c) 2003, Miodrag Vallat.
@@ -78,19 +78,6 @@ struct p9000_softc {
 	struct	intrhand sc_ih;
 	int	sc_nscreens;
 	u_int32_t	sc_junk;	/* throwaway value */
-};
-
-struct wsscreen_descr p9000_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *p9000_scrlist[] = {
-	&p9000_stdscreen,
-};
-
-struct wsscreen_list p9000_screenlist = {
-	sizeof(p9000_scrlist) / sizeof(struct wsscreen_descr *),
-	    p9000_scrlist
 };
 
 int	p9000_ioctl(void *, u_long, caddr_t, int, struct proc *);
@@ -204,7 +191,6 @@ p9000attach(struct device *parent, struct device *self, void *args)
 {
 	struct p9000_softc *sc = (struct p9000_softc *)self;
 	struct confargs *ca = args;
-	struct wsemuldisplaydev_attach_args waa;
 	int node, row, isconsole, scr;
 	struct device *btdev;
 	extern struct cfdriver btcham_cd;
@@ -257,7 +243,8 @@ p9000attach(struct device *parent, struct device *self, void *args)
 
 	sc->sc_ih.ih_fun = p9000_intr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB);
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB,
+	    self->dv_xname);
 
 	/* Disable frame buffer interrupts */
 	P9000_SELECT_SCR(sc);
@@ -283,11 +270,6 @@ p9000attach(struct device *parent, struct device *self, void *args)
 	 */
 	p9000_ras_init(sc);
 
-	p9000_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	p9000_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	p9000_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	p9000_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 
 	/* enable video */
@@ -299,15 +281,10 @@ p9000attach(struct device *parent, struct device *self, void *args)
 		else
 			row = -1;
 
-		fbwscons_console_init(&sc->sc_sunfb, &p9000_stdscreen, row,
-		    p9000_burner);
+		fbwscons_console_init(&sc->sc_sunfb, row);
 	}
 
-	waa.console = isconsole;
-	waa.scrdata = &p9000_screenlist;
-	waa.accessops = &p9000_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &p9000_accessops, isconsole);
 }
 
 int
@@ -399,6 +376,8 @@ p9000_ioctl(void *v, u_long cmd, caddr_t data, int flags, struct proc *p)
 
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:

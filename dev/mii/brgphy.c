@@ -1,4 +1,4 @@
-/*	$OpenBSD: brgphy.c,v 1.15 2003/10/13 16:18:56 krw Exp $	*/
+/*	$OpenBSD: brgphy.c,v 1.22 2005/02/05 22:30:52 brad Exp $	*/
 
 /*
  * Copyright (c) 2000
@@ -85,69 +85,67 @@ void	brgphy_loop(struct mii_softc *);
 void	brgphy_reset(struct mii_softc *);
 void	brgphy_load_dspcode(struct mii_softc *);
 
+const struct mii_phy_funcs brgphy_funcs = {            
+	brgphy_service, brgphy_status, brgphy_reset,          
+};
+
+static const struct mii_phydesc brgphys[] = {
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5400,
+	  MII_STR_xxBROADCOM_BCM5400 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5401,
+	  MII_STR_xxBROADCOM_BCM5401 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5411,
+	  MII_STR_xxBROADCOM_BCM5411 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5421S,
+	  MII_STR_xxBROADCOM_BCM5421S },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5701,
+	  MII_STR_xxBROADCOM_BCM5701 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5703,
+	  MII_STR_xxBROADCOM_BCM5703 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5704,
+	  MII_STR_xxBROADCOM_BCM5704 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5705,
+	  MII_STR_xxBROADCOM_BCM5705 },
+	{ MII_OUI_xxBROADCOM,		MII_MODEL_xxBROADCOM_BCM5750,
+	  MII_STR_xxBROADCOM_BCM5750 },
+
+	{ 0,				0,
+	  NULL },
+};
+
 int
-brgphy_probe(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+brgphy_probe(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_xxBROADCOM &&
-	    (MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5400 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5401 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5411 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5421S ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5701 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5703 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5704 ||
-	     MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5705))
+	if (mii_phy_match(ma, brgphys) != NULL)
 		return(10);
 
 	return(0);
 }
 
 void
-brgphy_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+brgphy_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
-	char *model;
+	const struct mii_phydesc *mpd;
 
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5400 ||
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_BROADCOM_BCM5400)
-		model = MII_STR_BROADCOM_BCM5400;
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_BROADCOM_BCM5401)
-		model = MII_STR_BROADCOM_BCM5401;
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_BROADCOM_BCM5411)
-		model = MII_STR_BROADCOM_BCM5411;
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5421S)
-		model = MII_STR_xxBROADCOM_BCM5421S;
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5701)
-		model = MII_STR_xxBROADCOM_BCM5701;
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5703)
-		model = MII_STR_xxBROADCOM_BCM5703;
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5704)
-		model = MII_STR_xxBROADCOM_BCM5704;
-	if (MII_MODEL(ma->mii_id2) == MII_MODEL_xxBROADCOM_BCM5705)
-		model = MII_STR_xxBROADCOM_BCM5705;
-
-	printf(": %s, rev. %d\n", model, MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, brgphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
+	sc->mii_funcs = &brgphy_funcs;
 	sc->mii_model = MII_MODEL(ma->mii_id2);
 	sc->mii_rev = MII_REV(ma->mii_id2);
-	sc->mii_service = brgphy_service;
-	sc->mii_status = brgphy_status;
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags | MIIF_NOISOLATE;
 	sc->mii_ticks = 0; /* XXX Should be zero. Should 0 in brgphy_reset?*/
 	sc->mii_anegticks = 5;
 
-	brgphy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities = PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
 	if (sc->mii_capabilities & BMSR_EXTSTAT)
@@ -158,10 +156,7 @@ brgphy_attach(parent, self, aux)
 }
 
 int
-brgphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+brgphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg, speed, gig;
@@ -196,7 +191,7 @@ brgphy_service(sc, mii, cmd)
 			break;
 
 		if (sc->mii_model != MII_MODEL_xxBROADCOM_BCM5701)
-			brgphy_reset(sc); /* XXX hardware bug work-around */
+			PHY_RESET(sc); /* XXX hardware bug work-around */
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
@@ -242,23 +237,6 @@ setit:
 
 			if (sc->mii_model != MII_MODEL_xxBROADCOM_BCM5701)
  				break;
-
-			/*
-			 * On IFM_1000_X only,
-			 * when setting the link manually, one side must
-			 * be the master and the other the slave. However
-			 * ifmedia doesn't give us a good way to specify
-			 * this, so we fake it by using one of the LINK
-			 * flags. If LINK0 is set, we program the PHY to
-			 * be a master, otherwise it's a slave.
-			 */
-			if ((mii->mii_ifp->if_flags & IFF_LINK0)) {
-				PHY_WRITE(sc, BRGPHY_MII_1000CTL,
-				    gig|BRGPHY_1000CTL_MSE|BRGPHY_1000CTL_MSC);
-			} else {
-				PHY_WRITE(sc, BRGPHY_MII_1000CTL,
-				    gig|BRGPHY_1000CTL_MSE);
-			}
 			break;
 		default:
 			return (EINVAL);
@@ -328,8 +306,7 @@ setit:
 }
 
 void
-brgphy_status(sc)
-	struct mii_softc *sc;
+brgphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -389,13 +366,12 @@ brgphy_status(sc)
 
 
 int
-brgphy_mii_phy_auto(sc)
-	struct mii_softc *sc;
+brgphy_mii_phy_auto(struct mii_softc *sc)
 {
 	int ktcr = 0;
 
 	brgphy_loop(sc);
-	/* XXX need 'brgphy_reset(sc);'? Was done before getting here ... */
+	/* XXX need 'PHY_RESET(sc);'? Was done before getting here ... */
 	ktcr = BRGPHY_1000CTL_AFD|BRGPHY_1000CTL_AHD;
 	if (sc->mii_model == MII_MODEL_xxBROADCOM_BCM5701)
 		ktcr |= BRGPHY_1000CTL_MSE|BRGPHY_1000CTL_MSC;
@@ -432,8 +408,7 @@ brgphy_loop(struct mii_softc *sc)
 }
 
 void
-brgphy_reset(sc)
-	struct mii_softc *sc;
+brgphy_reset(struct mii_softc *sc)
 {
 	struct bge_softc *bge_sc;
 	struct ifnet *ifp;
@@ -453,7 +428,7 @@ brgphy_reset(sc)
 	 * PHY subdriver.
 	 */
 	if (strncmp(ifp->if_xname, "bge", 3) == 0 &&
-	    (bge_sc->bge_asicrev == BGE_ASICREV_BCM5700 ||
+	    (BGE_ASICREV(bge_sc->bge_chipid) == BGE_ASICREV_BCM5700 ||
 	    bge_sc->bge_chipid == BGE_CHIPID_BCM5705_A1 ||
 	    bge_sc->bge_chipid == BGE_CHIPID_BCM5705_A2))
 		return;
@@ -511,9 +486,20 @@ static const struct bcm_dspcode bcm5704_dspcode[] = {
 	{ 0,				0 },
 };
 
+static const struct bcm_dspcode bcm5750_dspcode[] = {
+	{ BRGPHY_MII_AUXCTL,		0x0c00 },
+	{ BRGPHY_MII_DSP_ADDR_REG,	0x000a },
+	{ BRGPHY_MII_DSP_RW_PORT,	0x310b },
+	{ BRGPHY_MII_DSP_ADDR_REG,	0x201f },
+	{ BRGPHY_MII_DSP_RW_PORT,	0x9506 },
+	{ BRGPHY_MII_DSP_ADDR_REG,	0x401f },
+	{ BRGPHY_MII_DSP_RW_PORT,	0x14e2 },
+	{ BRGPHY_MII_AUXCTL,		0x0400 },
+	{ 0,				0 },
+};
+
 void
-brgphy_load_dspcode(sc)
-	struct mii_softc *sc;
+brgphy_load_dspcode(struct mii_softc *sc)
 {
 	const struct bcm_dspcode *dsp = NULL;
 	int wait=0, i;
@@ -537,6 +523,9 @@ brgphy_load_dspcode(sc)
 		break;
 	case MII_MODEL_xxBROADCOM_BCM5704:
 		dsp = bcm5704_dspcode;
+		break;
+	case MII_MODEL_xxBROADCOM_BCM5750:
+		dsp = bcm5750_dspcode;
 		break;
 	}
 

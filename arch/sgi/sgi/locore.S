@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.4 2004/09/09 22:11:39 pefo Exp $ */
+/*	$OpenBSD: locore.S,v 1.6 2004/12/24 22:50:31 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,7 +47,11 @@ idle_stack:
 	.globl	kernel_text
 kernel_text = start
 start:
-	mtc0	zero, COP_0_STATUS_REG	# Disable interrupts
+	mfc0    v0, COP_0_STATUS_REG
+	li	v1, ~SR_INT_ENAB
+	and	v0, v1
+	mtc0    v0, COP_0_STATUS_REG    # disable all interrupts
+
 	mtc0	zero, COP_0_CAUSE_REG	# Clear soft interrupts
 
 /*
@@ -62,27 +66,3 @@ start:
 	jal	main				# main(regs)
 	move	a0, zero
 	PANIC("Startup failed!")
-
-
-/*
- * Interrupt counters for vmstat.
- */
-	.data
-	.globl intrcnt
-	.globl eintrcnt
-	.globl intrnames
-	.globl eintrnames
-intrnames:
-	.asciiz	"softclock"
-	.asciiz	"softnet"
-	.asciiz	"local_dma"
-	.asciiz	"local_dev"
-	.asciiz	"isa_dev"
-	.asciiz	"isa_nmi"
-	.asciiz	"clock"
-	.asciiz	"statclock"
-eintrnames:
-	.align	3
-intrcnt:
-	.word	0,0,0,0,0,0,0,0
-eintrcnt:

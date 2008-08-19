@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_evcount.c,v 1.2 2004/06/28 01:59:57 deraadt Exp $ */
+/*	$OpenBSD: subr_evcount.c,v 1.6 2004/12/24 17:28:13 miod Exp $ */
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
  * Copyright (c) 2004 Aaron Campbell <aaron@openbsd.org>
@@ -32,8 +32,6 @@
 #include <sys/systm.h>
 #include <sys/sysctl.h>
 
-#ifdef __HAVE_EVCOUNT
-
 static TAILQ_HEAD(,evcount) evcount_list;
 static struct evcount *evcount_next_sync;
 
@@ -44,17 +42,10 @@ struct evcount evcount_intr;
 
 void evcount_timeout(void *);
 void evcount_init(void);
-void evcount_sync(struct evcount *);
 
 void
 evcount_init(void)
 {
-#ifndef __LP64__
-	static struct timeout ec_to;
-
-	timeout_set(&ec_to, evcount_timeout, &ec_to);
-	timeout_add(&ec_to, hz);
-#endif
 	TAILQ_INIT(&evcount_list);
 
 	evcount_attach(&evcount_intr, "intr", NULL, NULL);
@@ -92,6 +83,8 @@ evcount_detach(ec)
 
 	TAILQ_REMOVE(&evcount_list, ec, next);
 }
+
+#ifndef	SMALL_KERNEL
 
 int
 evcount_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
@@ -133,11 +126,10 @@ evcount_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	case KERN_INTRCNT_CNT:
 		if (ec == NULL)
 			return (ENOENT);
-		/* XXX - bogus cast to int, but we can't do better. */
 		s = splhigh();
 		count = ec->ec_count;
 		splx(s);
-		error = sysctl_rdint(oldp, oldlenp, NULL, (int)count);
+		error = sysctl_rdquad(oldp, oldlenp, NULL, count);
 		break;
 	case KERN_INTRCNT_NAME:
 		if (ec == NULL)
@@ -157,39 +149,4 @@ evcount_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 
 	return (error);
 }
-
-#ifndef __LP64__
-/*
- * This timeout has to run once in a while for every event counter to
- * sync the real 64 bit counter with the 32 bit temporary counter, because
- * we cannot atomically increment the 64 bit counter on 32 bit systems.
- */
-void
-evcount_timeout(void *v)
-{
-	struct timeout *to = v;
-	int s;
-
-	s = splhigh();
-	if (evcount_next_sync == NULL)
-		evcount_next_sync = TAILQ_FIRST(&evcount_list);
-
-	evcount_sync(evcount_next_sync);
-	evcount_next_sync = TAILQ_NEXT(evcount_next_sync, next);
-	splx(s);
-
-	timeout_add(to, hz);
-}
-#endif
-
-void
-evcount_sync(struct evcount *ec)
-{
-#ifndef __LP64__
-	/* XXX race */
-	ec->ec_count += ec->ec_count32;
-	ec->ec_count32 = 0;
-#endif
-}
-
-#endif /* __HAVE_EVCOUNT */
+#endif	/* SMALL_KERNEL */

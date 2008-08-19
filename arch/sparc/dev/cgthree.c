@@ -1,4 +1,4 @@
-/*	$OpenBSD: cgthree.c,v 1.24 2003/08/01 19:24:49 miod Exp $	*/
+/*	$OpenBSD: cgthree.c,v 1.28 2005/03/07 16:44:50 miod Exp $	*/
 /*	$NetBSD: cgthree.c,v 1.33 1997/05/24 20:16:11 pk Exp $ */
 
 /*
@@ -116,19 +116,6 @@ struct cgthree_softc {
 	int	sc_nscreens;
 };
 
-struct wsscreen_descr cgthree_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *cgthree_scrlist[] = {
-	&cgthree_stdscreen,
-};
-
-struct wsscreen_list cgthree_screenlist = {
-	sizeof(cgthree_scrlist) / sizeof(struct wsscreen_descr *),
-	    cgthree_scrlist
-};
-
 int cgthree_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int cgthree_alloc_screen(void *, const struct wsscreen_descr *, void **,
     int *, int *, long *);
@@ -220,7 +207,6 @@ cgthreeattach(parent, self, args)
 {
 	struct cgthree_softc *sc = (struct cgthree_softc *)self;
 	struct confargs *ca = args;
-	struct wsemuldisplaydev_attach_args waa;
 	int node = 0, isrdi = 0, i;
 	volatile struct bt_regs *bt;
 	int isconsole = 0, sbus = 1;
@@ -287,7 +273,8 @@ cgthreeattach(parent, self, args)
 
 	sc->sc_ih.ih_fun = cgthree_intr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB);
+	intr_establish(ca->ca_ra.ra_intr[0].int_pri, &sc->sc_ih, IPL_FB,
+	    self->dv_xname);
 
 	/* grab initial (current) color map */
 	bt = &sc->sc_fbc->fbc_dac;
@@ -322,14 +309,9 @@ cgthreeattach(parent, self, args)
 	    (sc->sc_sunfb.sf_width >= 1024) ? 0 : RI_CLEAR);
 	fbwscons_setcolormap(&sc->sc_sunfb, cgthree_setcolor);
 
-	cgthree_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	cgthree_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	cgthree_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	cgthree_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	if (isconsole) {
-		fbwscons_console_init(&sc->sc_sunfb, &cgthree_stdscreen,
-		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0, cgthree_burner);
+		fbwscons_console_init(&sc->sc_sunfb,
+		    sc->sc_sunfb.sf_width >= 1024 ? -1 : 0);
 	}
 
 #if defined(SUN4C) || defined(SUN4M)
@@ -337,11 +319,7 @@ cgthreeattach(parent, self, args)
 		sbus_establish(&sc->sc_sd, &sc->sc_sunfb.sf_dev);
 #endif
 
-	waa.console = isconsole;
-	waa.scrdata = &cgthree_screenlist;
-	waa.accessops = &cgthree_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &cgthree_accessops, isconsole);
 }
 
 int
@@ -389,6 +367,8 @@ cgthree_ioctl(v, cmd, data, flags, p)
 
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:

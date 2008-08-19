@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.118 2004/07/28 17:15:12 tholo Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.124 2005/03/10 17:26:10 tedu Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -65,9 +65,7 @@
 #ifdef __HAVE_TIMECOUNTER
 #include <sys/timetc.h>
 #endif
-#ifdef __HAVE_EVCOUNT
 #include <sys/evcount.h>
-#endif
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -268,6 +266,7 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	extern int userasymcrypto;
 	extern int cryptodevallowsoft;
 #endif
+	extern int maxlocksperuid;
 
 	/* all sysctl names at this level are terminal except a ton of them */
 	if (namelen != 1) {
@@ -285,9 +284,7 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		case KERN_INTRCNT:
 		case KERN_WATCHDOG:
 		case KERN_EMUL:
-#ifdef __HAVE_EVCOUNT
 		case KERN_EVCOUNT:
-#endif
 #ifdef __HAVE_TIMECOUNTER
 		case KERN_TIMECOUNTER:
 #endif
@@ -358,12 +355,14 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		    sizeof(struct timeval)));
 	case KERN_VNODE:
 		return (sysctl_vnode(oldp, oldlenp, p));
+#ifndef SMALL_KERNEL
 	case KERN_PROC:
 	case KERN_PROC2:
 		return (sysctl_doproc(name, namelen, oldp, oldlenp));
 	case KERN_PROC_ARGS:
 		return (sysctl_proc_args(name + 1, namelen - 1, oldp, oldlenp,
 		     p));
+#endif
 	case KERN_FILE:
 		return (sysctl_file(oldp, oldlenp));
 	case KERN_MBSTAT:
@@ -483,7 +482,7 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		 * Safety harness.
 		 */
 		if ((stackgap < ALIGNBYTES && stackgap != 0) ||
-		    !powerof2(stackgap) || stackgap >= 256 * 1024 * 1024)
+		    !powerof2(stackgap) || stackgap >= MAXSSIZ)
 			return (EINVAL);
 		stackgap_random = stackgap;
 		return (0);
@@ -514,22 +513,22 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_sysvshm(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
 #endif
+#ifndef SMALL_KERNEL
 	case KERN_INTRCNT:
 		return (sysctl_intrcnt(name + 1, namelen - 1, oldp, oldlenp));
-#ifndef SMALL_KERNEL
 	case KERN_WATCHDOG:
 		return (sysctl_wdog(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
-#endif
 	case KERN_EMUL:
 		return (sysctl_emul(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
+#endif
 	case KERN_MAXCLUSTERS:
 		error = sysctl_int(oldp, oldlenp, newp, newlen, &nmbclust);
 		if (!error)
 			nmbclust_update();
 		return (error);
-#ifdef __HAVE_EVCOUNT
+#ifndef SMALL_KERNEL
 	case KERN_EVCOUNT:
 		return (evcount_sysctl(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
@@ -539,6 +538,8 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_tc(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
 #endif
+	case KERN_MAXLOCKSPERUID:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxlocksperuid));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -599,9 +600,11 @@ hw_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		    disk_count * sizeof(struct diskstats)));
 	case HW_DISKCOUNT:
 		return (sysctl_rdint(oldp, oldlenp, newp, disk_count));
+#ifndef	SMALL_KERNEL
 	case HW_SENSORS:
 		return (sysctl_sensors(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
+#endif
 	case HW_CPUSPEED:
 		if (!cpu_cpuspeed)
 			return (EOPNOTSUPP);
@@ -984,6 +987,8 @@ sysctl_file(where, sizep)
 	return (0);
 }
 
+#ifndef SMALL_KERNEL
+
 /*
  * try over estimating by 5 procs
  */
@@ -1133,6 +1138,8 @@ again:
 	return (0);
 }
 
+#endif	/* SMALL_KERNEL */
+
 /*
  * Fill in an eproc structure for the specified process.
  */
@@ -1190,6 +1197,8 @@ fill_eproc(struct proc *p, struct eproc *ep)
 	ep->e_emul[EMULNAMELEN] = '\0';
 	ep->e_maxrss = p->p_rlimit ? p->p_rlimit[RLIMIT_RSS].rlim_cur : 0;
 }
+
+#ifndef	SMALL_KERNEL
 
 /*
  * Fill in a kproc2 structure for the specified process.
@@ -1564,6 +1573,8 @@ out:
 	return (error);
 }
 
+#endif
+
 /*
  * Initialize disknames/diskstats for export by sysctl. If update is set,
  * then we simply update the disk statistics information.
@@ -1781,46 +1792,12 @@ sysctl_sysvipc(name, namelen, where, sizep)
 }
 #endif /* SYSVMSG || SYSVSEM || SYSVSHM */
 
+#ifndef	SMALL_KERNEL
+
 int
 sysctl_intrcnt(int *name, u_int namelen, void *oldp, size_t *oldlenp)
 {
-#ifdef __HAVE_EVCOUNT
 	return (evcount_sysctl(name, namelen, oldp, oldlenp, NULL, 0));
-#else
-	extern int intrcnt[], eintrcnt[];
-	extern char intrnames[], eintrnames[];
-	char *intrname;
-	int nintr, i;
-
-	nintr = (off_t)(eintrcnt - intrcnt);
-
-	if (name[0] != KERN_INTRCNT_NUM) {
-		if (namelen != 2)
-			return (ENOTDIR);
-		if (name[1] < 0 || name[1] >= nintr)
-			return (EINVAL);
-		i = name[1];
-	}
-
-	switch (name[0]) {
-	case KERN_INTRCNT_NUM:
-		return (sysctl_rdint(oldp, oldlenp, NULL, nintr));
-		break;
-	case KERN_INTRCNT_CNT:
-		return (sysctl_rdint(oldp, oldlenp, NULL, intrcnt[i]));
-	case KERN_INTRCNT_NAME:
-		intrname = intrnames;
-		while (i > 0) {
-			intrname += strlen(intrname) + 1;
-			i--;
-			if (intrname > eintrnames)
-				return (EINVAL);
-		}
-		return (sysctl_rdstring(oldp, oldlenp, NULL, intrname));
-	default:
-		return (EOPNOTSUPP);
-	}
-#endif
 }
 
 int nsensors = 0;
@@ -1837,7 +1814,7 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (ENOTDIR);
 
 	num = name[0];
-	if (num >= nsensors)
+	if (num < 0 || num >= nsensors)
 		return (ENXIO);
 
 	SLIST_FOREACH(s, &sensors, list)
@@ -1881,3 +1858,5 @@ sysctl_emul(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (EINVAL);
 	}
 }
+
+#endif	/* SMALL_KERNEL */

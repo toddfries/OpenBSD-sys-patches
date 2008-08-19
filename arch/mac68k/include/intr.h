@@ -1,5 +1,5 @@
-/*	$OpenBSD: intr.h,v 1.8 2003/01/05 01:51:27 miod Exp $	*/
-/*	$NetBSD: intr.h,v 1.8 1997/11/07 07:33:18 scottr Exp $	*/
+/*	$OpenBSD: intr.h,v 1.11 2004/12/02 22:00:31 martin Exp $	*/
+/*	$NetBSD: intr.h,v 1.9 1998/08/12 06:58:42 scottr Exp $	*/
 
 /*
  * Copyright (C) 1997 Scott Reynolds
@@ -84,12 +84,13 @@
  * splnet must block hardware network interrupts
  * splimp must be > spltty
  */
-extern unsigned short	mac68k_ttyipl;
-extern unsigned short	mac68k_bioipl;
-extern unsigned short	mac68k_netipl;
-extern unsigned short	mac68k_impipl;
-extern unsigned short	mac68k_clockipl;
-extern unsigned short	mac68k_statclockipl;
+extern u_short	mac68k_ttyipl;
+extern u_short	mac68k_bioipl;
+extern u_short	mac68k_netipl;
+extern u_short	mac68k_impipl;
+extern u_short	mac68k_audioipl;
+extern u_short	mac68k_clockipl;
+extern u_short	mac68k_statclockipl;
 
 /*
  * Interrupt "levels".  These are a more abstract representation
@@ -118,7 +119,6 @@ extern unsigned short	mac68k_statclockipl;
  * everything at spl2, and everything but the panic switch and
  * power at spl4.
  */
-#define	spllowersoftclock()	splsoft()
 #define	splsoftclock()		splsoft()
 #define	splsoftnet()		splsoft()
 #define	spltty()		_splraise(mac68k_ttyipl)
@@ -126,6 +126,7 @@ extern unsigned short	mac68k_statclockipl;
 #define	splnet()		_splraise(mac68k_netipl)
 #define	splimp()		_splraise(mac68k_impipl)
 #define	splvm()			_splraise(mac68k_impipl)
+#define	splaudio()		_splraise(mac68k_audioipl)
 #define	splclock()		_splraise(mac68k_clockipl)
 #define	splstatclock()		_splraise(mac68k_statclockipl)
 #define	splserial()		spl4()
@@ -156,8 +157,26 @@ extern volatile u_int8_t ssir;
 #define	setsoftdtmgr()	siron(SIR_DTMGR)
 #define	setsoftadb()	siron(SIR_ADB)
 
+/* intr.c */
+void	intr_init(void);
+void	intr_establish(int (*)(void *), void *, int, const char *);
+void	intr_disestablish(int);
+void	intr_dispatch(int);
+
 /* locore.s */
 int	spl0(void);
+
+/*
+ * Interrupt handler.
+ * There is no support for shared interrupts at the moment.
+ */
+#include <sys/evcount.h>
+struct intrhand {
+	int		(*ih_fn)(void *);
+	void		*ih_arg;
+	int		ih_ipl;
+	struct evcount	ih_count;
+};
 #endif /* _KERNEL */
 
 #endif /* _MAC68K_INTR_H_ */

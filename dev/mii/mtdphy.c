@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtdphy.c,v 1.7 2003/06/02 19:08:58 jason Exp $	*/
+/*	$OpenBSD: mtdphy.c,v 1.12 2005/02/19 06:00:04 brad Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Jason L. Wright (jason@thought.net)
@@ -34,7 +34,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -60,40 +59,47 @@ struct cfdriver mtdphy_cd = {
 
 int	mtdphy_service(struct mii_softc *, struct mii_data *, int);
 
+const struct mii_phy_funcs mtdphy_funcs = {
+	mtdphy_service, ukphy_status, mii_phy_reset,
+};
+
+static const struct mii_phydesc mtdphys[] = {
+	{ MII_OUI_MYSON,		MII_MODEL_MYSON_MTD972,
+	  MII_STR_MYSON_MTD972 },
+
+	{ 0,			0,
+	  NULL },
+};
+
 int
-mtdphymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+mtdphymatch(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (MII_OUI(ma->mii_id1, ma->mii_id2) == MII_OUI_MYSON &&
-	    MII_MODEL(ma->mii_id2) == MII_MODEL_MYSON_MTD972)
+	if (mii_phy_match(ma, mtdphys) != NULL)
 		return (10);
 
 	return (0);
 }
 
 void
-mtdphyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+mtdphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
 	struct mii_data *mii = ma->mii_data;
+	const struct mii_phydesc *mpd;
 
-	printf(": %s, rev. %d\n", MII_STR_MYSON_MTD972, MII_REV(ma->mii_id2));
+	mpd = mii_phy_match(ma, mtdphys);
+	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = mtdphy_service;
-	sc->mii_status = ukphy_status;
+	sc->mii_funcs = &mtdphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
@@ -102,10 +108,7 @@ mtdphyattach(parent, self, aux)
 }
 
 int
-mtdphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+mtdphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;

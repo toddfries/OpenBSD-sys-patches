@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.11 2003/12/22 15:05:05 millert Exp $	*/
+/*	$OpenBSD: intr.h,v 1.14 2005/01/14 22:39:29 miod Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 1997/07/24 05:43:08 scottr Exp $	*/
 
 /*-
@@ -41,27 +41,19 @@
 #define	_HP300_INTR_H_
 
 #include <machine/psl.h>
-
-#ifdef _HP300_INTR_H_PRIVATE
+#include <sys/evcount.h>
 #include <sys/queue.h>
 
-/*
- * The location and size of the autovectored interrupt portion
- * of the vector table.
- */
-#define ISRLOC		0x18
-#define NISR		8
-
+#ifdef _KERNEL
 struct isr {
 	LIST_ENTRY(isr) isr_link;
 	int		(*isr_func)(void *);
 	void		*isr_arg;
 	int		isr_ipl;
 	int		isr_priority;
+	struct evcount	isr_count;
 };
-#endif /* _HP300_INTR_H_PRIVATE */
 
-#ifdef _KERNEL
 /*
  * spl functions; all but spl0 are done in-line
  */
@@ -133,15 +125,10 @@ extern	unsigned short hp300_impipl;
 #define	IPL_STATCLOCK	6
 #define	IPL_HIGH	7
 
-/* These spl calls are _not_ to be used by machine-independent code. */
-#define	splhil()	_splraise(PSL_S|PSL_IPL1)
-#define	splkbd()	splhil()
-#define	splsoft()	spl1()
-
 /* These spl calls are used by machine-independent code. */
-#define	spllowersoftclock()	splsoft()
-#define	splsoftclock()		splsoft()
-#define	splsoftnet()		splsoft()
+#define	spllowersoftclock()	spl1()
+#define	splsoftclock()		spl1()
+#define	splsoftnet()		spl1()
 #define	splbio()		_splraise(hp300_bioipl)
 #define	splnet()		_splraise(hp300_netipl)
 #define	spltty()		_splraise(hp300_ttyipl)
@@ -175,8 +162,8 @@ int	spl0(void);
 
 /* intr.c */
 void	intr_init(void);
-void	*intr_establish(int (*)(void *), void *, int, int);
-void	intr_disestablish(void *);
+void	intr_establish(struct isr *, const char *);
+void	intr_disestablish(struct isr *);
 void	intr_dispatch(int);
 void	intr_printlevels(void);
 #endif /* _KERNEL */

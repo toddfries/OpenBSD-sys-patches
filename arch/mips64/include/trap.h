@@ -1,4 +1,4 @@
-/*      $OpenBSD: trap.h,v 1.3 2004/08/10 20:28:13 deraadt Exp $	*/
+/*      $OpenBSD: trap.h,v 1.5 2005/01/31 21:35:49 grange Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -113,11 +113,11 @@ struct trapdebug {              /* trap history buffer for debugging */
 #define TRAPSIZE 10		/* Trap log buffer length */
 extern struct trapdebug trapdebug[TRAPSIZE], *trp;
 
-void trapDump __P((char *msg));
+void trapDump(char *msg);
 
 #else
 
-#define	trapdebug_enter(x)
+#define	trapdebug_enter(x, y)
 
 #endif
 #endif /* _LOCORE */

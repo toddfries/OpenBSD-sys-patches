@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.1 2004/06/22 22:53:52 millert Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.8 2005/03/11 23:20:26 jsg Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -198,7 +198,7 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 	ni = ieee80211_find_txnode(ic, eh.ether_dhost);
 	if (ni == NULL) {
 		IEEE80211_DPRINTF(("%s: no node for dst %s, discard frame\n",
-			__func__, ether_sprintf(eh.ether_dhost)));
+		    __func__, ether_sprintf(eh.ether_dhost)));
 		ic->ic_stats.is_tx_nonode++;
 		goto bad;
 	}
@@ -235,7 +235,7 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
 		IEEE80211_ADDR_COPY(wh->i_addr1, eh.ether_dhost);
 		IEEE80211_ADDR_COPY(wh->i_addr2, eh.ether_shost);
-		IEEE80211_ADDR_COPY(wh->i_addr3, ni->ni_bssid);
+		IEEE80211_ADDR_COPY(wh->i_addr3, ic->ic_bss->ni_bssid);
 		break;
 	case IEEE80211_M_HOSTAP:
 		wh->i_fc[1] = IEEE80211_FC1_DIR_FROMDS;
@@ -253,10 +253,175 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 bad:
 	if (m != NULL)
 		m_freem(m);
-	if (ni && ni != ic->ic_bss)
-		ieee80211_free_node(ic, ni);
+	if (ni != NULL)
+		ieee80211_release_node(ic, ni);
 	*pni = NULL;
 	return NULL;
+}
+
+/*
+ * Arguments in:
+ *
+ * paylen:  payload length (no FCS, no WEP header)
+ *
+ * hdrlen:  header length
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * flags:   IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d:       802.11 Duration field for RTS,
+ *          802.11 Duration field for data frame,
+ *          PLCP Length for data frame,
+ *          residual octets at end of data slot
+ */
+static int
+ieee80211_compute_duration1(int len, int use_ack, uint32_t flags, int rate,
+    struct ieee80211_duration *d)
+{
+	int pre, ctsrate;
+	int ack, bitlen, data_dur, remainder;
+
+	/* RTS reserves medium for SIFS | CTS | SIFS | (DATA) | SIFS | ACK
+	 * DATA reserves medium for SIFS | ACK
+	 *
+	 * XXXMYC: no ACK on multicast/broadcast or control packets
+	 */
+
+	bitlen = len * 8;
+
+	pre = IEEE80211_DUR_DS_SIFS;
+	if ((flags & IEEE80211_F_SHPREAMBLE) != 0)
+		pre += IEEE80211_DUR_DS_SHORT_PREAMBLE + IEEE80211_DUR_DS_FAST_PLCPHDR;
+	else
+		pre += IEEE80211_DUR_DS_LONG_PREAMBLE + IEEE80211_DUR_DS_SLOW_PLCPHDR;
+
+	d->d_residue = 0;
+	data_dur = (bitlen * 2) / rate;
+	remainder = (bitlen * 2) % rate;
+	if (remainder != 0) {
+		d->d_residue = (rate - remainder) / 16;
+		data_dur++;
+	}
+
+	switch (rate) {
+	case 2:		/* 1 Mb/s */
+	case 4:		/* 2 Mb/s */
+		/* 1 - 2 Mb/s WLAN: send ACK/CTS at 1 Mb/s */
+		ctsrate = 2;
+		break;
+	case 11:	/* 5.5 Mb/s */
+	case 22:	/* 11  Mb/s */
+	case 44:	/* 22  Mb/s */
+		/* 5.5 - 11 Mb/s WLAN: send ACK/CTS at 2 Mb/s */
+		ctsrate = 4;
+		break;
+	default:
+		/* TBD */
+		return -1;
+	}
+
+	d->d_plcp_len = data_dur;
+
+	ack = (use_ack) ? pre + (IEEE80211_DUR_DS_SLOW_ACK * 2) / ctsrate : 0;
+
+	d->d_rts_dur =
+	    pre + (IEEE80211_DUR_DS_SLOW_CTS * 2) / ctsrate +
+	    pre + data_dur +
+	    ack;
+
+	d->d_data_dur = ack;
+
+	return 0;
+}
+
+/*
+ * Arguments in:
+ *
+ * wh:      802.11 header
+ *
+ * len: packet length 
+ *
+ * rate:    MSDU speed, units 500kb/s
+ *
+ * fraglen: fragment length, set to maximum (or higher) for no
+ *          fragmentation
+ *
+ * flags:   IEEE80211_F_WEPON (hardware adds WEP),
+ *          IEEE80211_F_SHPREAMBLE (use short preamble),
+ *          IEEE80211_F_SHSLOT (use short slot length)
+ *
+ * Arguments out:
+ *
+ * d0: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of first/only fragment
+ *
+ * dn: 802.11 Duration fields (RTS/Data), PLCP Length, Service fields
+ *     of first/only fragment
+ */
+int
+ieee80211_compute_duration(struct ieee80211_frame *wh, int len,
+    uint32_t flags, int fraglen, int rate, struct ieee80211_duration *d0,
+    struct ieee80211_duration *dn, int *npktp, int debug)
+{
+	int ack, rc;
+	int firstlen, hdrlen, lastlen, lastlen0, npkt, overlen, paylen;
+
+	if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) == IEEE80211_FC1_DIR_DSTODS)
+		hdrlen = sizeof(struct ieee80211_frame_addr4);
+	else
+		hdrlen = sizeof(struct ieee80211_frame);
+
+	paylen = len - hdrlen;
+
+	if ((flags & IEEE80211_F_WEPON) != 0)
+		overlen = IEEE80211_WEP_TOTLEN + IEEE80211_CRC_LEN;
+	else
+		overlen = IEEE80211_CRC_LEN;
+
+	npkt = paylen / fraglen;
+	lastlen0 = paylen % fraglen;
+
+	if (npkt == 0)			/* no fragments */
+		lastlen = paylen + overlen;
+	else if (lastlen0 != 0) {	/* a short "tail" fragment */
+		lastlen = lastlen0 + overlen;
+		npkt++;
+	} else				/* full-length "tail" fragment */
+		lastlen = fraglen + overlen;
+
+	if (npktp != NULL)
+		*npktp = npkt;
+
+	if (npkt > 1)
+		firstlen = fraglen + overlen;
+	else
+		firstlen = paylen + overlen;
+
+	if (debug) {
+		printf("%s: npkt %d firstlen %d lastlen0 %d lastlen %d "
+		    "fraglen %d overlen %d len %d rate %d flags %08x\n",
+		    __func__, npkt, firstlen, lastlen0, lastlen, fraglen,
+		    overlen, len, rate, flags);
+	}
+
+	ack = !IEEE80211_IS_MULTICAST(wh->i_addr1) &&
+	    (wh->i_fc[1] & IEEE80211_FC0_TYPE_MASK) != IEEE80211_FC0_TYPE_CTL;
+
+	rc = ieee80211_compute_duration1(firstlen + hdrlen,
+	    ack, flags, rate, d0);
+	if (rc == -1)
+		return rc;
+
+	if (npkt <= 1) {
+		*dn = *d0;
+		return 0;
+	}
+	return ieee80211_compute_duration1(lastlen + hdrlen, ack, flags, rate,
+	    dn);
 }
 
 /*
@@ -350,8 +515,7 @@ ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
 	 * the xmit is complete all the way in the driver.  On error we
 	 * will remove our reference.
 	 */
-	if (ni != ic->ic_bss)
-		ieee80211_ref_node(ni);
+	ieee80211_ref_node(ni);
 	timer = 0;
 	switch (type) {
 	case IEEE80211_FC0_SUBTYPE_PROBE_REQ:
@@ -624,7 +788,7 @@ ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	default:
 		IEEE80211_DPRINTF(("%s: invalid mgmt frame type %u\n",
-			__func__, type));
+		    __func__, type));
 		senderr(EINVAL, is_tx_unknownmgt);
 		/* NOTREACHED */
 	}
@@ -635,11 +799,101 @@ ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
 			ic->ic_mgt_timer = timer;
 	} else {
 bad:
-		if (ni != ic->ic_bss)		/* remove ref we added */
-			ieee80211_free_node(ic, ni);
+		ieee80211_release_node(ic, ni);
 	}
 	return ret;
 #undef senderr
+}
+
+struct mbuf *
+ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
+{
+	struct ieee80211_frame *wh;
+	struct mbuf *m;
+	int pktlen;
+	u_int8_t *frm;
+	u_int16_t capinfo;
+	struct ieee80211_rateset *rs;
+
+	rs = &ni->ni_rates;
+	pktlen = sizeof (struct ieee80211_frame)
+	    + 8 + 2 + 2 + 2+ni->ni_esslen + 2+rs->rs_nrates + 3 + 6;
+	if (rs->rs_nrates > IEEE80211_RATE_SIZE)
+		pktlen += 2;
+	m = ieee80211_getmbuf(M_DONTWAIT, MT_DATA,
+		 2 + ic->ic_des_esslen
+	       + 2 + IEEE80211_RATE_SIZE
+	       + 2 + (IEEE80211_RATE_MAXSIZE - IEEE80211_RATE_SIZE));
+	if (m == NULL)
+		return NULL;
+
+	wh = mtod(m, struct ieee80211_frame *);
+	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
+	    IEEE80211_FC0_SUBTYPE_BEACON;
+	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+	*(u_int16_t *)wh->i_dur = 0;
+	IEEE80211_ADDR_COPY(wh->i_addr1, etherbroadcastaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr3, ni->ni_bssid);
+	*(u_int16_t *)wh->i_seq = 0;
+
+	/*
+	 * beacon frame format
+	 *	[8] time stamp
+	 *	[2] beacon interval
+	 *	[2] cabability information
+	 *	[tlv] ssid
+	 *	[tlv] supported rates
+	 *	[tlv] parameter set (IBSS)
+	 *	[tlv] extended supported rates
+	 */
+	frm = (u_int8_t *)&wh[1];
+	bzero(frm, 8);	/* timestamp is set by hardware */
+	frm += 8;
+	*(u_int16_t *)frm = htole16(ni->ni_intval);
+	frm += 2;
+	if (ic->ic_opmode == IEEE80211_M_IBSS) {
+		capinfo = IEEE80211_CAPINFO_IBSS;
+	} else {
+		capinfo = IEEE80211_CAPINFO_ESS;
+	}
+	if (ic->ic_flags & IEEE80211_F_WEPON)
+		capinfo |= IEEE80211_CAPINFO_PRIVACY;
+	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
+	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
+		capinfo |= IEEE80211_CAPINFO_SHORT_PREAMBLE;
+	if (ic->ic_flags & IEEE80211_F_SHSLOT)
+		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
+	*(u_int16_t *)frm = htole16(capinfo);
+	frm += 2;
+	*frm++ = IEEE80211_ELEMID_SSID;
+	*frm++ = ni->ni_esslen;
+	memcpy(frm, ni->ni_essid, ni->ni_esslen);
+	frm += ni->ni_esslen;
+	frm = ieee80211_add_rates(frm, rs);
+	*frm++ = IEEE80211_ELEMID_DSPARMS;
+	*frm++ = 1;
+	*frm++ = ieee80211_chan2ieee(ic, ni->ni_chan);
+	if (ic->ic_opmode == IEEE80211_M_IBSS) {
+		*frm++ = IEEE80211_ELEMID_IBSSPARMS;
+		*frm++ = 2;
+		*frm++ = 0; *frm++ = 0;		/* TODO: ATIM window */
+	} else {
+		/* TODO: TIM */
+		*frm++ = IEEE80211_ELEMID_TIM;
+		*frm++ = 4;	/* length */
+		*frm++ = 0;	/* DTIM count */ 
+		*frm++ = 1;	/* DTIM period */
+		*frm++ = 0;	/* bitmap control */
+		*frm++ = 0;	/* Partial Virtual Bitmap (variable length) */
+	}
+	frm = ieee80211_add_xrates(frm, rs);
+	m->m_pkthdr.len = m->m_len = frm - mtod(m, u_int8_t *);
+	m->m_pkthdr.rcvif = (void *)ni;
+	IASSERT(m->m_pkthdr.len <= pktlen,
+		("beacon bigger than expected, len %u calculated %u",
+		m->m_pkthdr.len, pktlen));
+	return m;
 }
 
 void

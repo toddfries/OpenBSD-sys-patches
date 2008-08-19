@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.34 2004/05/14 04:05:05 tedu Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.36 2005/03/02 00:46:10 tom Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -372,15 +372,6 @@ msdosfs_mountfs(devvp, mp, p, argp)
 	}
 
 	dirsperblk = pmp->pm_BytesPerSec / sizeof(struct direntry);
-	if (pmp->pm_HugeSectors > 0xffffffff / dirsperblk + 1) {
-	        /*
-		 * We cannot deal currently with this size of disk
-		 * due to fileid limitations (see msdosfs_getattr and
-		 * msdosfs_readdir)
-		 */
-	        error = EINVAL;
-		goto error_exit;
-	}
 
 	if (pmp->pm_RootDirEnts == 0) {
 		if (pmp->pm_Sectors || pmp->pm_FATsecs ||
@@ -723,7 +714,7 @@ msdosfs_sync_vnode(struct vnode *vp, void *arg)
 	dep = VTODE(vp);
 	if (vp->v_type == VNON || 
 	    ((dep->de_flag & (DE_ACCESS | DE_CREATE | DE_UPDATE | DE_MODIFIED)) == 0
-		&& vp->v_dirtyblkhd.lh_first == NULL) ||
+	      && LIST_EMPTY(&vp->v_dirtyblkhd)) ||
 	    msa->waitfor == MNT_LAZY) {
 		simple_unlock(&vp->v_interlock);
 		return (0);

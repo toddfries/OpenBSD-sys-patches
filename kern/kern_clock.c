@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.50 2004/08/05 13:45:30 art Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.52.2.1 2005/10/20 02:11:31 brad Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -228,7 +228,7 @@ hardclock(struct clockframe *frame)
 #endif
 
 	p = curproc;
-	if (p) {
+	if (p && ((p->p_flag & P_WEXIT) == 0)) {
 		register struct pstats *pstats;
 
 		/*
@@ -271,7 +271,6 @@ hardclock(struct clockframe *frame)
 	 * if we are still adjusting the time (see adjtime()),
 	 * ``tickdelta'' may also be added in.
 	 */
-	ticks++;
 
 	delta = tick;
 
@@ -666,4 +665,4 @@ getmicrouptime(struct timeval *tvp)
 	*tvp = mono_time;
 	splx(s);
 }
-#endif /* __HAVE_TIMECOUNTERS */
+#endif /* __HAVE_TIMECOUNTER */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.2 2004/08/25 18:19:35 pefo Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.4 2004/10/20 12:49:15 pefo Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -33,8 +33,6 @@
 #include <stand.h>
 
 #define	USE_SGI_PARTITIONS	1
-
-arc_param_blk_t *bios_base = ArcBiosBase;
 
 void bios_configure_memory(void);
 int bios_get_system_type(void);
@@ -175,8 +173,8 @@ bios_get_system_type()
 	arc_sid_t	*sid;
 	int		i;
 
-	if ((bios_base->magic != ARC_PARAM_BLK_MAGIC) &&
-	    (bios_base->magic != ARC_PARAM_BLK_MAGIC_BUG)) {
+	if ((ArcBiosBase32->magic != ARC_PARAM_BLK_MAGIC) &&
+	    (ArcBiosBase32->magic != ARC_PARAM_BLK_MAGIC_BUG)) {
 		return(-1);	/* This is not an ARC system */
 	}
 
@@ -184,7 +182,7 @@ bios_get_system_type()
 	cf = (arc_config_t *)Bios_GetChild(NULL);
 	if (cf) {
 		for (i = 0; i < KNOWNSYSTEMS; i++) {
-			if (strcmp(sys_types[i].sys_name, cf->id) != 0)
+			if (strcmp(sys_types[i].sys_name, (char *)cf->id) != 0)
 				continue;
 			if (sys_types[i].sys_vend &&
 			    strncmp(sys_types[i].sys_vend, sid->vendor, 8) != 0)
@@ -195,7 +193,7 @@ bios_get_system_type()
 
 	bios_putstring("UNIDENTIFIED SYSTEM `");
 	if (cf)
-		bios_putstring(cf->id);
+		bios_putstring((char *)cf->id);
 	else
 		bios_putstring("????????");
 	bios_putstring("' VENDOR `");
@@ -245,7 +243,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 	/*
 	 *  Scan the component list and find device and partition.
 	 */
-	while (ncp = bios_get_path_component(cp, namebuf, &i)) {
+	while ((ncp = bios_get_path_component(cp, namebuf, &i)) != NULL) {
 		if ((strcmp(namebuf, "partition") == 0) ||
 		    (strcmp(namebuf, "partition") == 0)) {
 			partition = i;

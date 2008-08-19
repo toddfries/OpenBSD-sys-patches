@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.14 2004/07/08 22:18:44 deraadt Exp $ */
+/*	$OpenBSD: if_url.c,v 1.21 2005/03/03 07:16:53 itojun Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -12,10 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Shingo WATANABE.
- * 4. Neither the name of the author nor the names of any co-contributors
+ * 3. Neither the name of the author nor the names of any co-contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -179,7 +176,17 @@ static const struct url_type {
 	/* MELCO LUA-KTX */
 	{{ USB_VENDOR_MELCO, USB_PRODUCT_MELCO_LUAKTX }, 0},
 	/* GREEN HOUSE USBKR100 */
-	{{ USB_VENDOR_GREENHOUSE2, USB_PRODUCT_GREENHOUSE2_USBKR100}, 0}
+	{{ USB_VENDOR_GREENHOUSE2, USB_PRODUCT_GREENHOUSE2_USBKR100}, 0},
+	/* GREEN HOUSE USBKR100PNA */
+	{{ USB_VENDOR_GREENHOUSE2, USB_PRODUCT_GREENHOUSE2_USBKR100PNA}, 0},
+	/* Longshine LCS-8138TX */
+	{{ USB_VENDOR_ABOCOM, USB_PRODUCT_ABOCOM_LCS8138TX}, 0},
+	/* Micronet SP128AR */
+	{{ USB_VENDOR_MICRONET, USB_PRODUCT_MICRONET_SP128AR}, 0},
+	/* Abocom RTL8151 and TrendNet TU-ET100C */
+	{{ USB_VENDOR_ABOCOM, USB_PRODUCT_ABOCOM_RTL8151}, 0},
+	/* OQO model 01 */
+	{{ USB_VENDOR_OQO, USB_PRODUCT_OQO_ETHER01}, 0}
 };
 #define url_lookup(v, p) ((struct url_type *)usb_lookup(url_devs, v, p))
 
@@ -289,8 +296,7 @@ USB_ATTACH(url)
 	/* initialize interface infomation */
 	ifp = GET_IFP(sc);
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
-	strncpy(ifp->if_xname, devname, IFNAMSIZ);
+	strlcpy(ifp->if_xname, devname, IFNAMSIZ);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_start = url_start;
 	ifp->if_ioctl = url_ioctl;
@@ -1192,11 +1198,12 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = (cmd == SIOCADDMULTI) ?
 			ether_addmulti(ifr, &sc->sc_ac) :
 			ether_delmulti(ifr, &sc->sc_ac);
+
 		if (error == ENETRESET) {
-			url_init(ifp);
+			if (ifp->if_flags & IFF_RUNNING)
+				url_setmulti(sc);
+			error = 0;
 		}
-		url_setmulti(sc);
-		error = 0;
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:

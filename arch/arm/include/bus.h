@@ -985,7 +985,6 @@ int	_bus_dmamem_alloc_range (bus_dma_tag_t tag, bus_size_t size,
 	    vaddr_t low, vaddr_t high);
 #endif /* _ARM32_BUS_DMA_PRIVATE */
 /* These are OpenBSD extensions to the general NetBSD bus interface.  */
-#if 0
 void
 bus_space_read_raw_multi_2(bus_space_tag_t bst, bus_space_handle_t bsh,
 	bus_addr_t ba, u_int8_t *dst, bus_size_t size);
@@ -1004,68 +1003,48 @@ bus_space_write_raw_multi_4(bus_space_tag_t bst, bus_space_handle_t bsh,
 #define	bus_space_write_raw_multi_8 \
     !!! bus_space_write_raw_multi_8 not implemented !!!
 
-#else
-/* BLECH XXXDSR */
-static inline void
-bus_space_read_raw_multi_2(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, u_int8_t *dst, bus_size_t size);
-static inline void
-bus_space_read_raw_multi_2(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, u_int8_t *dst, bus_size_t size)
-{
-	u_int16_t *datap = (u_int16_t *)dst;
-	while (size > 0) {
-		*datap =bus_space_read_2(bst, bsh, ba);
-		datap++;
-		size -= 2;
-	}
-}
-static inline void
-bus_space_read_raw_multi_4(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, u_int8_t *dst, bus_size_t size);
-static inline void
-bus_space_read_raw_multi_4(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, u_int8_t *dst, bus_size_t size)
-{
-	u_int32_t *datap = (u_int32_t *)dst;
-	while (size > 0) {
-		*datap =bus_space_read_4(bst, bsh, ba);
-		datap++;
-		size -= 4;
-	}
-}
+/*
+ *	void bus_space_read_raw_region_N(bus_space_tag_t tag,
+ *	    bus_space_handle_t bsh, bus_size_t offset,
+ *	    u_int8_t *addr, size_t count);
+ *
+ * Read `count' bytes in 2, 4 or 8 byte wide quantities from bus space
+ * described by tag/handle and starting at `offset' and copy into
+ * buffer provided.  The buffer must have proper alignment for the N byte
+ * wide entities.  Furthermore possible byte-swapping should be done by
+ * these functions.
+ */
 
-static inline void
-bus_space_write_raw_multi_2(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, const u_int8_t *src, bus_size_t size);
-static inline void
-bus_space_write_raw_multi_2(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, const u_int8_t *src, bus_size_t size)
-{
-	u_int16_t *datap = (u_int16_t *)src;
-	while (size > 0) {
-		bus_space_write_2(bst, bsh, ba, *datap);
-		datap++;
-		size -= 2;
-	}
-}
-static inline void
-bus_space_write_raw_multi_4(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, const u_int8_t *src, bus_size_t size);
-static inline void
-bus_space_write_raw_multi_4(bus_space_tag_t bst, bus_space_handle_t bsh,
-    bus_addr_t ba, const u_int8_t *src, bus_size_t size)
-{
-	u_int32_t *datap = (u_int32_t *)src;
-	while (size > 0) {
-		bus_space_write_4(bst, bsh, ba, *datap);
-		datap++;
-		size -= 4;
-	}
-}
-#define	bus_space_write_raw_multi_8 \
-    !!! bus_space_write_raw_multi_8 not implemented !!!
+#define	bus_space_read_raw_region_2(t, h, o, a, c) \
+    bus_space_read_region_2((t), (h), (o), (u_int16_t *)(a), (c) >> 1)
+#define	bus_space_read_raw_region_4(t, h, o, a, c) \
+    bus_space_read_region_4((t), (h), (o), (u_int32_t *)(a), (c) >> 2)
 
+#if 0	/* Cause a link error for bus_space_read_raw_region_8 */
+#define	bus_space_read_raw_region_8 \
+    !!! bus_space_read_raw_region_8 unimplemented !!!
+#endif
+
+/*
+ *	void bus_space_write_raw_region_N(bus_space_tag_t tag,
+ *	    bus_space_handle_t bsh, bus_size_t offset,
+ *	    const u_int8_t *addr, size_t count);
+ *
+ * Write `count' bytes in 2, 4 or 8 byte wide quantities to bus space
+ * described by tag/handle and starting at `offset' from the
+ * buffer provided.  The buffer must have proper alignment for the N byte
+ * wide entities.  Furthermore possible byte-swapping should be done by
+ * these functions.
+ */
+
+#define	bus_space_write_raw_region_2(t, h, o, a, c) \
+    bus_space_write_region_2((t), (h), (o), (const u_int16_t *)(a), (c) >> 1)
+#define	bus_space_write_raw_region_4(t, h, o, a, c) \
+    bus_space_write_region_4((t), (h), (o), (const u_int32_t *)(a), (c) >> 2)
+
+#if 0	/* Cause a link error for bus_space_write_raw_region_8 */
+#define	bus_space_write_raw_region_8 \
+    !!! bus_space_write_raw_region_8 unimplemented !!!
 #endif
 
 #endif /* _ARM32_BUS_H_ */

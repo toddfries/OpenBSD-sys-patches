@@ -1,8 +1,8 @@
-/*	$OpenBSD: if_mc.c,v 1.7 2002/04/20 00:17:05 miod Exp $	*/
-/*	$NetBSD: if_mc.c,v 1.4 1998/01/12 19:22:09 thorpej Exp $	*/
+/*	$OpenBSD: if_mc.c,v 1.11 2005/01/04 18:42:04 martin Exp $	*/
+/*	$NetBSD: if_mc.c,v 1.24 2004/10/30 18:08:34 thorpej Exp $	*/
 
 /*-
- * Copyright (c) 1997 David Huang <khym@bga.com>
+ * Copyright (c) 1997 David Huang <khym@azeotrope.org>
  * All rights reserved.
  *
  * Portions of this code are based on code by Denton Gentry <denny1@home.com>,
@@ -164,6 +164,7 @@ mcsetup(sc, lladdr)
 	NIC_PUT(sc, MACE_IMR, ~0);
 
 	bcopy(lladdr, sc->sc_enaddr, ETHER_ADDR_LEN);
+	bcopy(sc->sc_enaddr, sc->sc_ethercom.ac_enaddr, ETHER_ADDR_LEN);
 	printf(": address %s\n", ether_sprintf(lladdr));
 
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
@@ -190,7 +191,6 @@ mcioctl(ifp, cmd, data)
 	struct ifreq *ifr;
 
 	int	s = splnet(), err = 0;
-	int	temp;
 
 	switch (cmd) {
 
@@ -249,9 +249,7 @@ mcioctl(ifp, cmd, data)
 			 * reset the interface to pick up any other changes
 			 * in flags
 			 */
-			temp = ifp->if_flags & IFF_UP;
 			mcreset(sc);
-			ifp->if_flags |= temp;
 			mcstart(ifp);
 		}
 		break;
@@ -268,9 +266,8 @@ mcioctl(ifp, cmd, data)
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly. But remember UP flag!
 			 */
-			temp = ifp->if_flags & IFF_UP;
-			mcreset(sc);
-			ifp->if_flags |= temp;
+			if (ifp->if_flags & IFF_RUNNING)
+				mcreset(sc);
 			err = 0;
 		}
 		break;
@@ -417,7 +414,7 @@ mcstop(sc)
 	DELAY(100);
 
 	sc->sc_if.if_timer = 0;
-	sc->sc_if.if_flags &= ~(IFF_RUNNING | IFF_UP);
+	sc->sc_if.if_flags &= ~IFF_RUNNING;
 
 	splx(s);
 	return (0);
@@ -433,12 +430,9 @@ mcwatchdog(ifp)
 	struct ifnet *ifp;
 {
 	struct mc_softc *sc = ifp->if_softc;
-	int temp;
 
 	printf("mcwatchdog: resetting chip\n");
-	temp = ifp->if_flags & IFF_UP;
 	mcreset(sc);
-	ifp->if_flags |= temp;
 }
 
 /*
@@ -464,7 +458,7 @@ maceput(sc, m)
 		MFREE(m, n);
 	}
 
-	if (totlen > NBPG)
+	if (totlen > PAGE_SIZE)
 		panic("%s: maceput: packet overflow", sc->sc_dev.dv_xname);
 
 #if 0
@@ -504,7 +498,9 @@ struct mc_softc *sc = arg;
 	}
 
 	if (ir & CERR) {
+#ifdef MCDEBUG
 		printf("%s: collision error\n", sc->sc_dev.dv_xname);
+#endif
 		sc->sc_if.if_collisions++;
 	}
 
@@ -551,6 +547,7 @@ mc_tint(sc)
 	else if (xmtfs & ONE)
 		sc->sc_if.if_collisions++;
 	else if (xmtfs & RTRY) {
+		printf("%s: excessive collisions\n", sc->sc_dev.dv_xname);
 		sc->sc_if.if_collisions += 16;
 		sc->sc_if.if_oerrors++;
 	}
@@ -583,7 +580,9 @@ mc_rint(sc)
 #endif
 
 	if (rxf.rx_rcvsts & OFLO) {
+#ifdef MCDEBUG
 		printf("%s: receive FIFO overflow\n", sc->sc_dev.dv_xname);
+#endif
 		sc->sc_if.if_ierrors++;
 		return;
 	}
@@ -630,14 +629,6 @@ mace_read(sc, pkt, len)
 		return;
 	}
 
-#if NBPFILTER > 0
-	/*
-	 * Check if there's a bpf filter listening on this interface.
-	 * If so, hand off the raw packet to enet.
-	 */
-	if (ifp->if_bpf)
-		bpf_tap(ifp->if_bpf, pkt, len);
-#endif
 	m = mace_get(sc, pkt, len);
 	if (m == NULL) {
 		ifp->if_ierrors++;
@@ -645,6 +636,12 @@ mace_read(sc, pkt, len)
 	}
 
 	ifp->if_ipackets++;
+
+#if NBPFILTER > 0
+	/* Pass the packet to any BPF listeners. */
+	if (ifp->if_bpf)
+		bpf_mtap(ifp->if_bpf, m);
+#endif
 
 	/* Pass the packet up. */
 	ether_input_mbuf(ifp, m);
@@ -715,9 +712,7 @@ mace_calcladrf(ac, af)
 {
 	struct ifnet *ifp = &ac->ac_if;
 	struct ether_multi *enm;
-	register u_char *cp, c;
 	register u_int32_t crc;
-	register int i, len;
 	struct ether_multistep step;
 
 	/*
@@ -729,7 +724,6 @@ mace_calcladrf(ac, af)
 	 */
 
 	*((u_int32_t *)af) = *((u_int32_t *)af + 1) = 0;
-
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
 		if (ETHER_CMP(enm->enm_addrlo, enm->enm_addrhi)) {
@@ -744,19 +738,8 @@ mace_calcladrf(ac, af)
 			goto allmulti;
 		}
 
-		cp = enm->enm_addrlo;
-		crc = 0xffffffff;
-		for (len = sizeof(enm->enm_addrlo); --len >= 0;) {
-			c = *cp++;
-			for (i = 8; --i >= 0;) {
-				if ((crc & 0x01) ^ (c & 0x01)) {
-					crc >>= 1;
-					crc ^= 0xedb88320;
-				} else
-					crc >>= 1;
-				c >>= 1;
-			}
-		}
+		crc = ether_crc32_le(enm->enm_addrlo, sizeof(enm->enm_addrlo));
+
 		/* Just want the 6 most significant bits. */
 		crc >>= 26;
 
@@ -780,7 +763,7 @@ u_char
 mc_get_enaddr(t, h, o, dst)
 	bus_space_tag_t t;
 	bus_space_handle_t h;
-	vm_offset_t o;
+	bus_size_t o;
 	u_char *dst;
 {
 	int	i;

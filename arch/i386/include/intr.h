@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.22 2004/06/16 18:27:26 grange Exp $	*/
+/*	$OpenBSD: intr.h,v 1.24 2005/01/07 02:03:17 pascoe Exp $	*/
 /*	$NetBSD: intr.h,v 1.5 1996/05/13 06:11:28 mycroft Exp $	*/
 
 /*
@@ -88,6 +88,21 @@ void splassert_check(int, const char *);
 #endif
 
 /*
+ * Define the splraise and splx code in macros, so that the code can be
+ * reused in a profiling build in a way that does not cause recursion.
+ */
+#define _SPLRAISE(ocpl, ncpl) 		\
+	ocpl = lapic_tpr;		\
+	if (ncpl > ocpl)		\
+		lapic_tpr = ncpl
+
+
+#define _SPLX(ncpl) 			\
+	lapic_tpr = ncpl;		\
+	if (ipending & IUNMASK(ncpl))	\
+		Xspllower()
+
+/*
  * Hardware interrupt masks
  */
 #define	splbio()	splraise(IPL_BIO)
@@ -142,8 +157,8 @@ int i386_send_ipi(struct cpu_info *, int);
 void i386_broadcast_ipi(int);
 void i386_multicast_ipi(int, int);
 void i386_ipi_handler(void);
-void i386_intlock(struct intrframe);
-void i386_intunlock(struct intrframe);
+void i386_intlock(int);
+void i386_intunlock(int);
 void i386_softintlock(void);
 void i386_softintunlock(void);
 

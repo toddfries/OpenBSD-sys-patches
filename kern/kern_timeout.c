@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_timeout.c,v 1.19 2004/07/20 20:20:52 art Exp $	*/
+/*	$OpenBSD: kern_timeout.c,v 1.22 2004/12/28 22:48:30 deraadt Exp $	*/
 /*
  * Copyright (c) 2001 Thomas Nordin <nordin@openbsd.org>
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
@@ -57,13 +57,14 @@ struct circq timeout_todo;		/* Worklist */
 #define MASKWHEEL(wheel, time) (((time) >> ((wheel)*WHEELBITS)) & WHEELMASK)
 
 #define BUCKET(rel, abs)						\
-    (((rel) <= (1 << (2*WHEELBITS)))					\
-    	? ((rel) <= (1 << WHEELBITS))					\
-            ? timeout_wheel[MASKWHEEL(0, (abs))]			\
-            : timeout_wheel[MASKWHEEL(1, (abs)) + WHEELSIZE]		\
-        : ((rel) <= (1 << (3*WHEELBITS)))				\
-            ? timeout_wheel[MASKWHEEL(2, (abs)) + 2*WHEELSIZE]		\
-            : timeout_wheel[MASKWHEEL(3, (abs)) + 3*WHEELSIZE])
+    (timeout_wheel[							\
+	((rel) <= (1 << (2*WHEELBITS)))				\
+	    ? ((rel) <= (1 << WHEELBITS))				\
+		? MASKWHEEL(0, (abs))					\
+		: MASKWHEEL(1, (abs)) + WHEELSIZE			\
+	    : ((rel) <= (1 << (3*WHEELBITS)))				\
+		? MASKWHEEL(2, (abs)) + 2*WHEELSIZE			\
+		: MASKWHEEL(3, (abs)) + 3*WHEELSIZE])
 
 #define MOVEBUCKET(wheel, time)						\
     CIRCQ_APPEND(&timeout_todo,						\
@@ -155,7 +156,7 @@ timeout_add(struct timeout *new, int to_ticks)
 	if (!(new->to_flags & TIMEOUT_INITIALIZED))
 		panic("timeout_add: not initialized");
 	if (to_ticks < 0)
-		panic("timeout_add: to_ticks < 0");
+		panic("timeout_add: to_ticks (%d) < 0", to_ticks);
 #endif
 
 	mtx_enter(&timeout_mutex);
@@ -200,7 +201,12 @@ timeout_del(struct timeout *to)
 int
 timeout_hardclock_update(void)
 {
+	int ret;
+
 	mtx_enter(&timeout_mutex);
+
+	ticks++;
+
 	MOVEBUCKET(0, ticks);
 	if (MASKWHEEL(0, ticks) == 0) {
 		MOVEBUCKET(1, ticks);
@@ -210,8 +216,10 @@ timeout_hardclock_update(void)
 				MOVEBUCKET(3, ticks);
 		}
 	}
+	ret = !CIRCQ_EMPTY(&timeout_todo);
 	mtx_leave(&timeout_mutex);
-	return (!CIRCQ_EMPTY(&timeout_todo));
+
+	return (ret);
 }
 
 void

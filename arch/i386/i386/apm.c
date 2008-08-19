@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.63.2.1 2005/06/11 02:58:49 brad Exp $	*/
+/*	$OpenBSD: apm.c,v 1.63.4.1 2005/06/12 16:07:34 brad Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.

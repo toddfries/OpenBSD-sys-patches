@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.24 2004/06/28 02:49:43 deraadt Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.27 2005/03/11 13:35:47 miod Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -62,8 +62,6 @@ struct intrhand *m_intrhand[ICU_LEN];
 int m_hwirq[ICU_LEN], m_virq[64];
 unsigned int imen_m = 0xffffffff;
 int m_virq_max = 0;
-
-struct evcnt m_evirq[ICU_LEN*2];
 
 static int fakeintr(void *);
 static char *intr_typename(int type);
@@ -174,6 +172,7 @@ macintr_collect_preconf_intr()
 {
 	int i;
 	for (i = 0; i < ppc_configed_intr_cnt; i++) {
+#ifdef DEBUG
 		printf("\n\t%s irq %d level %d fun %p arg %p",
 			ppc_configed_intr[i].ih_what,
 			ppc_configed_intr[i].ih_irq,
@@ -181,6 +180,7 @@ macintr_collect_preconf_intr()
 			ppc_configed_intr[i].ih_fun,
 			ppc_configed_intr[i].ih_arg
 			);
+#endif
 		macintr_establish(NULL,
 			ppc_configed_intr[i].ih_irq,
 			IST_LEVEL,
@@ -529,7 +529,6 @@ start:
 		}
 
 		uvmexp.intrs++;
-		m_evirq[m_hwirq[irq]].ev_count++;
 	}
 	int_state &= ~r_imen;
 	if (int_state)
@@ -565,11 +564,10 @@ mac_intr_do_pending_int()
 		hwpend &= ~(1L << irq);
 		ih = m_intrhand[irq];
 		while(ih) {
-			(*ih->ih_fun)(ih->ih_arg);
+			if ((*ih->ih_fun)(ih->ih_arg))
+				ih->ih_count.ec_count++;
 			ih = ih->ih_next;
 		}
-
-		m_evirq[m_hwirq[irq]].ev_count++;
 	}
 
 	/*out32rb(INT_ENABLE_REG, ~imen_m);*/
@@ -607,7 +605,7 @@ read_irq()
 	state0 = in32rb(INT_STATE_REG0);
 	if (state0)
 		out32rb(INT_CLEAR_REG0, state0);
-		state0save = state0;
+	state0save = state0;
 	while (state0) {
 		p = 31 - cntlzw(state0);
 		rv |= 1 << m_virq[p];

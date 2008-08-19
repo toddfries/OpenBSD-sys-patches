@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.21 2004/07/08 22:18:44 deraadt Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.24 2005/01/03 22:45:52 brad Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -552,12 +552,11 @@ USB_ATTACH(cue)
 	/* Initialize interface info.*/
 	ifp = GET_IFP(sc);
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = cue_ioctl;
 	ifp->if_start = cue_start;
 	ifp->if_watchdog = cue_watchdog;
-	strncpy(ifp->if_xname, USBDEVNAME(sc->cue_dev), IFNAMSIZ);
+	strlcpy(ifp->if_xname, USBDEVNAME(sc->cue_dev), IFNAMSIZ);
 
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1219,12 +1218,14 @@ cue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = (command == SIOCADDMULTI) ?
 		    ether_addmulti(ifr, &sc->arpcom) :
 		    ether_delmulti(ifr, &sc->arpcom);
+
 		if (error == ENETRESET) {
 			/*
 			 * Multicast list has changed; set the hardware
 			 * filter accordingly.
 			 */
-			cue_setmulti(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				cue_setmulti(sc);
 			error = 0;
 		}
 		break;

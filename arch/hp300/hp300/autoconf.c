@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.26 2004/08/03 21:46:58 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.33 2005/02/27 22:08:41 miod Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.45 1999/04/10 17:31:02 kleink Exp $	*/
 
 /*
@@ -76,6 +76,7 @@
 #include <dev/cons.h>
 
 #include <machine/autoconf.h>
+#include <machine/bus.h>
 #include <machine/vmparam.h>
 #include <machine/cpu.h>
 #include <machine/hp300spu.h>
@@ -87,14 +88,17 @@
 #include <hp300/dev/diodevs.h>
 
 #include <hp300/dev/dmavar.h>
-#include <hp300/dev/grfreg.h>
-#include <hp300/dev/hilreg.h>
-#include <hp300/dev/hilioctl.h>
-#include <hp300/dev/hilvar.h>
 
 #include <hp300/dev/hpibvar.h>
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
+
+#include "sgc.h"
+
+#if NSGC > 0
+#include <hp300/dev/sgcreg.h>
+#include <hp300/dev/sgcvar.h>
+#endif
 
 /*
  * The following several variables are related to
@@ -161,6 +165,7 @@ ddlist_t	dev_data_list;	  	/* all dev_datas */
 ddlist_t	dev_data_list_hpib;	/* hpib controller dev_datas */
 ddlist_t	dev_data_list_scsi;	/* scsi controller dev_datas */
 
+void	diskconf(void);
 void	setroot(void);
 void	swapconf(void);
 void	findbootdev(void);
@@ -176,7 +181,8 @@ static	struct device *getdisk(char *str, int len, int defpart,
 	    dev_t *devp);
 static	int findblkmajor(struct device *dv);
 static	char *findblkname(int);
-static	int getstr(char *cp, int size);  
+static	int getstr(char *cp, int size);
+static	int device_match(const char *, const char *);
 
 int	mainbusmatch(struct device *, void *, void *);
 void	mainbusattach(struct device *, struct device *, void *);
@@ -242,19 +248,6 @@ cpu_configure()
 	LIST_INIT(&dev_data_list_hpib);
 	LIST_INIT(&dev_data_list_scsi);
 
-	/*
-	 * XXX In order for the HIL to configure, interrupts need to be
-	 * XXX enabled.  However, we need to initialize the HIL driver's
-	 * XXX software state prior to that, since a pending interrupt
-	 * XXX might cause the HIL's interrupt handler to be run in an
-	 * XXX uninitialized environment otherwise.
-	 *
-	 * XXX These should be consolidated into some kind of table.
-	 */
-	hilsoftinit(0, HILADDR);
-	(void)spl0();
-	hilinit(0, HILADDR);
-
 	(void)splhigh();
 	if (config_rootfound("mainbus", "mainbus") == NULL)
 		panic("no mainbus found");
@@ -283,21 +276,45 @@ cpu_configure()
 		}
 	}
 
+	md_diskconf = diskconf;
+
+	cold = 0;
+}
+
+void
+diskconf()
+{
+
 	setroot();
 	swapconf();
 
 	/*
-	 * Set bootdev based on how we mounted root.
+	 * Set bootdev based on the device we booted from.
 	 * This is given to the boot program when we reboot.
 	 */
 	setbootdev();
-
-	cold = 0;
 }
 
 /**********************************************************************
  * Code to find and set the boot device
  **********************************************************************/
+
+static int
+device_match(const char *dvname, const char *template)
+{
+	size_t len = strlen(template);
+	char unit;
+
+	if (strncmp(dvname, template, len) != 0)
+		return (1);
+
+	/* Check that we are immediately followed by an unit number. */
+	unit = dvname[len];
+	if (unit < '0' || unit > '9')
+		return (1);
+
+	return (0);
+}
 
 /*
  * Register a device.  We're passed the device and the arguments
@@ -340,16 +357,16 @@ device_register(dev, aux)
 		goto linkup;
 	}
 
-	if (strncmp(dev->dv_xname, "fhpib", 5) == 0 ||
-	    strncmp(dev->dv_xname, "nhpib", 5) == 0 ||
-	    strncmp(dev->dv_xname, "spc", 3) == 0) {
+	if (device_match(dev->dv_xname, "fhpib") == 0 ||
+	    device_match(dev->dv_xname, "nhpib") == 0 ||
+	    device_match(dev->dv_xname, "spc") == 0) {
 		struct dio_attach_args *da = aux;
 
 		dd->dd_scode = da->da_scode;
 		goto linkup;
 	}
 
-	if (strncmp(dev->dv_xname, "hd", 2) == 0) {
+	if (device_match(dev->dv_xname, "hd") == 0) {
 		struct hpibbus_attach_args *ha = aux;
 
 		dd->dd_slave = ha->ha_slave;
@@ -357,9 +374,9 @@ device_register(dev, aux)
 		goto linkup;
 	}
 
-	if (strncmp(dev->dv_xname, "cd", 2) == 0 ||
-	    strncmp(dev->dv_xname, "sd", 2) == 0 ||
-	    strncmp(dev->dv_xname, "st", 2) == 0) {
+	if (device_match(dev->dv_xname, "cd") == 0 ||
+	    device_match(dev->dv_xname, "sd") == 0 ||
+	    device_match(dev->dv_xname, "st") == 0) {
 		struct scsibus_attach_args *sa = aux;
 
 		dd->dd_slave = sa->sa_sc_link->target;
@@ -376,13 +393,13 @@ device_register(dev, aux)
  linkup:
 	LIST_INSERT_HEAD(&dev_data_list, dd, dd_list);
 
-	if (strncmp(dev->dv_xname, "fhpib", 5) == 0 ||
-	    strncmp(dev->dv_xname, "nhpib", 5) == 0) {
+	if (device_match(dev->dv_xname, "fhpib") == 0 ||
+	    device_match(dev->dv_xname, "nhpib") == 0) {
 		dev_data_insert(dd, &dev_data_list_hpib);
 		return;
 	}
 
-	if (strncmp(dev->dv_xname, "spc", 3) == 0) {
+	if (device_match(dev->dv_xname, "spc") == 0) {
 		dev_data_insert(dd, &dev_data_list_scsi);
 		return;
 	}
@@ -460,8 +477,7 @@ getdisk(str, len, defpart, devp)
 
 	if ((dv = parsedisk(str, len, defpart, devp)) == NULL) {
 		printf("use one of:");
-		for (dv = alldevs.tqh_first; dv != NULL;
-		    dv = dv->dv_list.tqe_next) {
+		TAILQ_FOREACH(dv, &alldevs, dv_list) {
 			if (dv->dv_class == DV_DISK)
 				printf(" %s[a-p]", dv->dv_xname);
 #ifdef NFSCLIENT
@@ -498,7 +514,7 @@ parsedisk(str, len, defpart, devp)
 	} else
 		part = defpart;
 
-	for (dv = alldevs.tqh_first; dv != NULL; dv = dv->dv_list.tqe_next) {
+	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (dv->dv_class == DV_DISK &&
 		    strcmp(str, dv->dv_xname) == 0) {
 			majdev = findblkmajor(dv);
@@ -683,8 +699,7 @@ setroot()
 			 * `root on nfs'.  Find the first network
 			 * interface.
 			 */
-			for (dd = dev_data_list.lh_first;
-			    dd != NULL; dd = dd->dd_list.le_next) {
+			LIST_FOREACH(dd, &dev_data_list, dd_list) {
 				if (dd->dd_dev->dv_class == DV_IFNET) {
 					/* Got it! */
 					break;
@@ -706,9 +721,8 @@ setroot()
 		bzero(buf, sizeof(buf));
 		snprintf(buf, sizeof buf, "%s%d", rootdevname,
 		    DISKUNIT(rootdev));
-		
-		for (dv = alldevs.tqh_first; dv != NULL;
-		    dv = dv->dv_list.tqe_next) {
+
+		TAILQ_FOREACH(dv, &alldevs, dv_list) {
 			if (strcmp(buf, dv->dv_xname) == 0) {
 				root_device = dv;
 				break;
@@ -766,15 +780,15 @@ setroot()
 }
 
 static int
-getstr(cp, size) 
+getstr(cp, size)
 	register char *cp;
 	register int size;
 {
 	register char *lp;
-	register int c; 
+	register int c;
 	register int len;
 
-	lp = cp;         
+	lp = cp;
 	len = 0;
 	for (;;) {
 		c = cngetc();
@@ -842,8 +856,7 @@ findbootdev()
 	 * always starts at scode 0 and works its way up.
 	 */
 	if (netboot) {
-		for (dd = dev_data_list.lh_first; dd != NULL;
-		    dd = dd->dd_list.le_next) {
+		LIST_FOREACH(dd, &dev_data_list, dd_list) {
 			if (dd->dd_dev->dv_class == DV_IFNET) {
 				/*
 				 * Found it!
@@ -868,8 +881,10 @@ findbootdev()
 		/*
 		 * Sanity check.
 		 */
-		if ((type == 0 && strncmp(booted_device->dv_xname, "ct", 2)) ||
-		    (type == 2 && strncmp(booted_device->dv_xname, "hd", 2))) {
+		if ((type == 0 &&
+		     device_match(booted_device->dv_xname, "ct")) ||
+		    (type == 2 &&
+		     device_match(booted_device->dv_xname, "hd"))) {
 			printf("WARNING: boot device/type mismatch!\n");
 			printf("device = %s, type = %d\n",
 			    booted_device->dv_xname, type);
@@ -885,20 +900,20 @@ findbootdev()
 	if (scsiboot) {
 		findbootdev_slave(&dev_data_list_scsi, ctlr,
 		     slave, punit);
-		if (booted_device == NULL)  
-			return; 
+		if (booted_device == NULL)
+			return;
 
 #ifdef DIAGNOSTIC
 		/*
 		 * Sanity check.
 		 */
-		if (strncmp(booted_device->dv_xname, "cd", 2) != 0 &&
-		    strncmp(booted_device->dv_xname, "sd", 2) != 0 &&
-		    strncmp(booted_device->dv_xname, "st", 2) != 0) {
+		if (device_match(booted_device->dv_xname, "cd") != 0 &&
+		    device_match(booted_device->dv_xname, "sd") != 0 &&
+		    device_match(booted_device->dv_xname, "st") != 0) {
 			printf("WARNING: boot device/type mismatch!\n");
 			printf("device = %s, type = %d\n",
 			    booted_device->dv_xname, type);
-			booted_device = NULL; 
+			booted_device = NULL;
 		}
 #endif
 		return;
@@ -918,8 +933,8 @@ findbootdev_slave(ddlist, ctlr, slave, punit)
 	/*
 	 * Find the booted controller.
 	 */
-	for (cdd = ddlist->lh_first; ctlr != 0 && cdd != NULL;
-	    cdd = cdd->dd_clist.le_next)
+	for (cdd = LIST_FIRST(ddlist); ctlr != 0 && cdd != LIST_END(ddlist);
+	    cdd = LIST_NEXT(cdd, dd_clist))
 		ctlr--;
 	if (cdd == NULL) {
 		/*
@@ -932,8 +947,7 @@ findbootdev_slave(ddlist, ctlr, slave, punit)
 	 * Now find the device with the right slave/punit
 	 * that's a child of the controller.
 	 */
-	for (dd = dev_data_list.lh_first; dd != NULL;
-	    dd = dd->dd_list.le_next) {
+	LIST_FOREACH(dd, &dev_data_list, dd_list) {
 		/*
 		 * "sd" / "st" / "cd" -> "scsibus" -> "spc"
 		 * "hd" -> "hpibbus" -> "fhpib"
@@ -997,11 +1011,11 @@ setbootdev()
 	/*
 	 * Determine device type.
 	 */
-	if (strncmp(root_device->dv_xname, "hd", 2) == 0)
+	if (device_match(root_device->dv_xname, "hd") == 0)
 		type = 2;
-	else if (strncmp(root_device->dv_xname, "cd", 2) == 0 ||
-	    strncmp(root_device->dv_xname, "sd", 2) == 0 ||
-	    strncmp(root_device->dv_xname, "st", 2) == 0)
+	else if (device_match(root_device->dv_xname, "cd") == 0 ||
+	    device_match(root_device->dv_xname, "sd") == 0 ||
+	    device_match(root_device->dv_xname, "st") == 0)
 		/* force scsi disk regardless of the actual device */
 		type = 4;
 	else {
@@ -1015,8 +1029,9 @@ setbootdev()
 	 * "hd" -> "hpibbus" -> "fhpib"
 	 * "sd" / "cd" / "st" -> "scsibus" -> "spc"
 	 */
-	for (cdd = dev_data_list_hpib.lh_first, ctlr = 0;
-	    cdd != NULL; cdd = cdd->dd_clist.le_next, ctlr++) {
+	for (cdd = LIST_FIRST(&dev_data_list_hpib), ctlr = 0;
+	    cdd != LIST_END(&dev_data_list_hpib);
+	    cdd = LIST_NEXT(cdd, dd_clist), ctlr++) {
 		if (cdd->dd_dev == root_device->dv_parent->dv_parent) {
 			/*
 			 * Found it!
@@ -1029,9 +1044,10 @@ setbootdev()
 
  out:
 	/* Don't need this anymore. */
-	for (dd = dev_data_list.lh_first; dd != NULL; ) {
+	for (dd = LIST_FIRST(&dev_data_list);
+	    dd != LIST_END(&dev_data_list); ) {
 		cdd = dd;
-		dd = dd->dd_list.le_next;
+		dd = LIST_NEXT(dd, dd_list);
 		free(cdd, M_DEVBUF);
 	}
 }
@@ -1045,7 +1061,7 @@ dev_data_lookup(dev)
 {
 	struct dev_data *dd;
 
-	for (dd = dev_data_list.lh_first; dd != NULL; dd = dd->dd_list.le_next)
+	LIST_FOREACH(dd, &dev_data_list, dd_list)
 		if (dd->dd_dev == dev)
 			return (dd);
 
@@ -1068,12 +1084,10 @@ dev_data_insert(dd, ddlist)
 	}
 #endif
 
-	de = ddlist->lh_first;
-
 	/*
 	 * Just insert at head if list is empty.
 	 */
-	if (de == NULL) {
+	if (LIST_EMPTY(ddlist)) {
 		LIST_INSERT_HEAD(ddlist, dd, dd_clist);
 		return;
 	}
@@ -1083,7 +1097,9 @@ dev_data_insert(dd, ddlist)
 	 * is greater than ours.  When we find it, insert ourselves
 	 * into the list before it.
 	 */
-	for (; de->dd_clist.le_next != NULL; de = de->dd_clist.le_next) {
+	for (de = LIST_FIRST(ddlist);
+	    LIST_NEXT(de, dd_clist) != LIST_END(ddlist);
+	    de = LIST_NEXT(de, dd_clist)) {
 		if (de->dd_scode > dd->dd_scode) {
 			LIST_INSERT_BEFORE(de, dd, dd_clist);
 			return;
@@ -1107,88 +1123,142 @@ dev_data_insert(dd, ddlist)
  * hardware.
  */
 void
-console_scan(func, arg)
+console_scan(func, arg, bus)
 	int (*func)(int, caddr_t, void *);
 	void *arg;
+	int bus;
 {
 	int size, scode, sctop;
 	caddr_t pa, va;
 
-	/*
-	 * Scan all select codes.  Check each location for some
-	 * hardware.  If there's something there, call (*func)().
-	 */
-	sctop = DIO_SCMAX(machineid);
-	for (scode = 0; scode < sctop; ++scode) {
+	switch (bus) {
+	case HP300_BUS_DIO:
 		/*
-		 * Abort mission if console has been forced.
+		 * Scan all select codes.  Check each location for some
+		 * hardware.  If there's something there, call (*func)().
 		 */
-		if (conforced)
-			return;
+		sctop = DIO_SCMAX(machineid);
+		for (scode = 0; scode < sctop; ++scode) {
+			/*
+			 * Abort mission if console has been forced.
+			 */
+			if (conforced)
+				return;
 
-		/*
-		 * Skip over the select code hole and
-		 * the internal HP-IB controller.
-		 */
-		if (((scode >= 32) && (scode < 132)) ||
-		    ((scode == 7) && internalhpib))
-			continue;
-
-		/* Map current PA. */
-		pa = dio_scodetopa(scode);
-		va = iomap(pa, NBPG);
-		if (va == 0)
-			continue;
-
-		/* Check to see if hardware exists. */
-		if (badaddr(va)) {
-			iounmap(va, NBPG);
-			continue;
-		}
-
-		/*
-		 * Hardware present, call callback.  Driver returns
-		 * size of region to map if console probe successful
-		 * and worthwhile.
-		 */
-		size = (*func)(scode, va, arg);
-		iounmap(va, NBPG);
-		if (size) {
-			/* Free last mapping. */
-			if (convasize)
-				iounmap(conaddr, convasize);
-			convasize = 0;
-
-			/* Remap to correct size. */
-			va = iomap(pa, size);
-			if (va == 0)
+			/*
+			 * Skip over the select code hole and
+			 * the internal HP-IB controller.
+			 */
+			if (DIO_INHOLE(scode) ||
+			    ((scode == 7) && internalhpib))
 				continue;
 
-			/* Save this state for next time. */
-			conscode = scode;
-			conaddr = va;
-			convasize = size;
+			/* Map current PA. */
+			pa = dio_scodetopa(scode);
+			va = iomap(pa, PAGE_SIZE);
+			if (va == NULL)
+				continue;
+
+			/* Check to see if hardware exists. */
+			if (badaddr(va)) {
+				iounmap(va, PAGE_SIZE);
+				continue;
+			}
+
+			/*
+			 * Hardware present, call callback.  Driver returns
+			 * size of region to map if console probe successful
+			 * and worthwhile.
+			 */
+			size = (*func)(scode, va, arg);
+			iounmap(va, PAGE_SIZE);
+			if (size != 0) {
+				/* Free last mapping. */
+				if (convasize)
+					iounmap(conaddr, convasize);
+				convasize = 0;
+
+				/* Remap to correct size. */
+				va = iomap(pa, size);
+				if (va == NULL)
+					continue;
+
+				/* Save this state for next time. */
+				conscode = scode;
+				conaddr = va;
+				convasize = size;
+			}
 		}
+		break;
+#if NSGC > 0
+	case HP300_BUS_SGC:
+		/*
+		 * Scan all slots.  Check each location for some
+		 * hardware.  If there's something there, call (*func)().
+		 */
+		for (scode = 0; scode < SGC_NSLOTS; ++scode) {
+			int rv;
+
+			/*
+			 * Abort mission if console has been forced.
+			 */
+			if (conforced)
+				return;
+
+			/* Map current PA. */
+			pa = sgc_slottopa(scode);
+			va = iomap(pa, PAGE_SIZE);
+			if (va == NULL)
+				continue;
+
+			/* Check for hardware. */
+			rv = badaddr(va);
+			iounmap(va, PAGE_SIZE);
+			if (rv != 0)
+				continue;
+
+			/*
+			 * Invoke the callback. Driver will return
+			 * non-zero if console probe successfull
+			 * and worthwhile.
+			 */
+			if ((*func)(scode, NULL, arg) != 0) {
+				/* Free last mapping. */
+				if (convasize)
+					iounmap(conaddr, convasize);
+
+				/* Save this state for next time. */
+				conscode = SGC_SLOT_TO_CONSCODE(scode);
+				conaddr = NULL;
+				convasize = 0;
+			}
+		}
+		break;
+#endif
 	}
 }
+
+int consolepass = -1;
 
 /*
  * Special version of cninit().  Actually, crippled somewhat.
  * This version lets the drivers assign cn_tab.
  */
 void
-hp300_cninit()
+hp300_cninit(void)
 {
 	struct consdev *cp;
 	extern struct consdev constab[];
 
-	cn_tab = NULL;
+	if (++consolepass == 0) {
+		cn_tab = NULL;
 
-	/*
-	 * Call all of the console probe functions.
-	 */
-	for (cp = constab; cp->cn_probe; cp++)
-		(*cp->cn_probe)(cp);
+		/*
+		 * Call all of the console probe functions.
+		 */
+		for (cp = constab; cp->cn_probe; cp++)
+			(*cp->cn_probe)(cp);
+	}
 
 	/*
 	 * No console, we can handle it.
@@ -1198,8 +1268,14 @@ hp300_cninit()
 
 	/*
 	 * Turn on the console.
+	 *
+	 * Note that we need to check for cn_init because DIO frame buffers
+	 * will cause cn_tab to switch to wsdisplaycons, which does not
+	 * have an cn_init function.
 	 */
-	(*cn_tab->cn_init)(cn_tab);
+	if (cn_tab->cn_init != NULL) {
+		(*cn_tab->cn_init)(cn_tab);
+	}
 }
 
 /**********************************************************************
@@ -1231,8 +1307,8 @@ iomap(pa, size)
 	if (error != 0)
 		return NULL;
 
-	physaccess(kva, pa, size, PG_RW|PG_CI);
-	return(kva);
+	physaccess(kva, pa, size, PG_RW | PG_CI);
+	return (kva);
 }
 
 /*
@@ -1246,9 +1322,11 @@ iounmap(kva, size)
 	int error;
 
 #ifdef DEBUG
+	extern int eiomapsize;
+
 	if (((int)kva & PGOFSET) || (size & PGOFSET))
 		panic("iounmap: unaligned");
-	if (kva < extiobase || kva >= extiobase + ctob(EIOMAPSIZE))
+	if (kva < extiobase || kva >= extiobase + ctob(eiomapsize))
 		panic("iounmap: bad address");
 #endif
 

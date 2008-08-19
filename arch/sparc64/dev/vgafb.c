@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.35 2004/08/10 21:57:51 millert Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.41 2005/03/15 20:19:24 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -75,19 +75,6 @@ struct vgafb_softc {
 	int *sc_crowp, *sc_ccolp;
 };
 
-struct wsscreen_descr vgafb_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *vgafb_scrlist[] = {
-	&vgafb_stdscreen,
-	/* XXX other formats? */
-};
-
-struct wsscreen_list vgafb_screenlist = {
-	sizeof(vgafb_scrlist) / sizeof(struct wsscreen_descr *), vgafb_scrlist
-};
-
 int vgafb_mapregs(struct vgafb_softc *, struct pci_attach_args *);
 int vgafb_rommap(struct vgafb_softc *, struct pci_attach_args *);
 int vgafb_ioctl(void *, u_long, caddr_t, int, struct proc *);
@@ -101,7 +88,6 @@ int vgafb_is_console(int);
 int vgafb_getcmap(struct vgafb_softc *, struct wsdisplay_cmap *);
 int vgafb_putcmap(struct vgafb_softc *, struct wsdisplay_cmap *);
 void vgafb_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
-void vgafb_updatecursor(struct rasops_info *ri);
 
 struct wsdisplay_accessops vgafb_accessops = {
 	vgafb_ioctl,
@@ -152,17 +138,16 @@ vgafbattach(parent, self, aux)
 {
 	struct vgafb_softc *sc = (struct vgafb_softc *)self;
 	struct pci_attach_args *pa = aux;
-	struct wsemuldisplaydev_attach_args waa;
 
 	sc->sc_mem_t = pa->pa_memt;
 	sc->sc_io_t = pa->pa_iot;
 	sc->sc_node = PCITAG_NODE(pa->pa_tag);
 	sc->sc_pcitag = pa->pa_tag;
 
+	printf("\n");
+
 	if (vgafb_mapregs(sc, pa))
 		return;
-
-	printf("\n");
 
 	sc->sc_console = vgafb_is_console(sc->sc_node);
 
@@ -182,26 +167,15 @@ vgafbattach(parent, self, aux)
 	fbwscons_init(&sc->sc_sunfb,
 	    RI_BSWAP | (sc->sc_console ? 0 : RI_CLEAR));
 
-	vgafb_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	vgafb_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	vgafb_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	vgafb_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	if (sc->sc_console) {
 		sc->sc_ofhandle = OF_stdout();
 		fbwscons_setcolormap(&sc->sc_sunfb, vgafb_setcolor);
-		sc->sc_sunfb.sf_ro.ri_updatecursor = vgafb_updatecursor;
-		fbwscons_console_init(&sc->sc_sunfb, &vgafb_stdscreen, -1,
-		    NULL);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 	} else {
 		/* sc->sc_ofhandle = XXX */
 	}
 
-	waa.console = sc->sc_console;
-	waa.scrdata = &vgafb_screenlist;
-	waa.accessops = &vgafb_accessops;
-	waa.accesscookie = sc;
-	config_found(self, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &vgafb_accessops, sc->sc_console);
 }
 
 int
@@ -249,11 +223,13 @@ vgafb_ioctl(v, cmd, data, flags, p)
 		sel = (struct pcisel *)data;
 		sel->pc_bus = PCITAG_BUS(sc->sc_pcitag);
 		sel->pc_dev = PCITAG_DEV(sc->sc_pcitag);
-		sel->pc_func = PCITAG_FUNC(sc->sc_pcitag);
+		sel->pc_func = PCITAG_FUN(sc->sc_pcitag);
 		break;
 
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GCURPOS:
 	case WSDISPLAYIO_SCURPOS:
 	case WSDISPLAYIO_GCURMAX:
@@ -434,23 +410,30 @@ vgafb_mapregs(sc, pa)
 	bus_size_t bs;
 	int hasio = 0, hasmem = 0, hasmmio = 0; 
 	u_int32_t i, cf;
+	int rv;
 
 	for (i = PCI_MAPREG_START; i < PCI_MAPREG_END; i += 4) {
 		cf = pci_conf_read(pa->pa_pc, pa->pa_tag, i);
 		if (PCI_MAPREG_TYPE(cf) == PCI_MAPREG_TYPE_IO) {
 			if (hasio)
 				continue;
-			if (pci_io_find(pa->pa_pc, pa->pa_tag, i,
-			    &sc->sc_io_addr, &sc->sc_io_size)) {
-				printf(": failed to find io at 0x%x\n", i);
+			rv = pci_io_find(pa->pa_pc, pa->pa_tag, i,
+			    &sc->sc_io_addr, &sc->sc_io_size);
+			if (rv != 0) {
+				if (rv != ENOENT)
+					printf("%s: failed to find io at 0x%x\n",
+					    sc->sc_sunfb.sf_dev.dv_xname, i);
 				continue;
 			}
 			hasio = 1;
 		} else {
 			/* Memory mapping... frame memory or mmio? */
-			if (pci_mem_find(pa->pa_pc, pa->pa_tag, i,
-			    &ba, &bs, NULL)) {
-				printf(": failed to find mem at 0x%x\n", i);
+			rv = pci_mem_find(pa->pa_pc, pa->pa_tag, i,
+			    &ba, &bs, NULL);
+			if (rv != 0) {
+				if (rv != ENOENT)
+					printf("%s: failed to find mem at 0x%x\n",
+					    sc->sc_sunfb.sf_dev.dv_xname, i);
 				continue;
 			}
 
@@ -465,7 +448,8 @@ vgafb_mapregs(sc, pa)
 					continue;
 				if (bus_space_map(pa->pa_memt, ba, bs,
 				    0, &sc->sc_mem_h)) {
-					printf(": can't map mem space\n");
+					printf("%s: can't map mem space\n",
+					    sc->sc_sunfb.sf_dev.dv_xname);
 					continue;
 				}
 				sc->sc_mem_addr = ba;
@@ -476,7 +460,8 @@ vgafb_mapregs(sc, pa)
 	}
 
 	if (hasmmio == 0 || hasmem == 0 || hasio == 0) {
-		printf(": failed to find all ports\n");
+		printf("%s: failed to find all ports\n",
+		    sc->sc_sunfb.sf_dev.dv_xname);
 		goto fail;
 	}
 
@@ -486,16 +471,4 @@ fail:
 	if (hasmem)
 		bus_space_unmap(pa->pa_memt, sc->sc_mem_h, sc->sc_mem_size);
 	return (1);
-}
-
-void
-vgafb_updatecursor(ri)
-	struct rasops_info *ri;
-{
-	struct vgafb_softc *sc = ri->ri_hw;
-
-	if (sc->sc_crowp != NULL)
-		*sc->sc_crowp = ri->ri_crow;
-	if (sc->sc_ccolp != NULL)
-		*sc->sc_ccolp = ri->ri_ccol;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.10 2004/07/26 10:42:56 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.15 2004/12/06 20:12:24 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -154,9 +154,8 @@ panictrap(int type, struct trapframe *frame)
 	static int panicing = 0;
 
 	if (panicing++ == 0) {
-		switch (cputyp) {
 #ifdef M88100
-		case CPU_88100:
+		if (CPU_IS88100) {
 			if (type == 2) {
 				/* instruction exception */
 				printf("\nInstr access fault (%s) v = %x, "
@@ -174,15 +173,14 @@ panictrap(int type, struct trapframe *frame)
 			} else
 				printf("\nTrap type %d, v = %x, frame %p\n",
 				    type, frame->tf_sxip & XIP_ADDR, frame);
-			break;
+		}
 #endif
 #ifdef M88110
-		case CPU_88110:
+		if (CPU_IS88110) {
 			printf("\nTrap type %d, v = %x, frame %p\n",
 			    type, frame->tf_exip, frame);
-			break;
-#endif
 		}
+#endif
 #ifdef DDB
 		regdump(frame);
 #endif
@@ -205,7 +203,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 	vm_prot_t ftype;
 	int fault_type, pbus_type;
 	u_long fault_code;
-	unsigned nss, fault_addr;
+	unsigned fault_addr;
 	struct vmspace *vm;
 	union sigval sv;
 	int result;
@@ -215,9 +213,6 @@ m88100_trap(unsigned type, struct trapframe *frame)
 	int sig = 0;
 
 	extern struct vm_map *kernel_map;
-	extern caddr_t guarded_access_start;
-	extern caddr_t guarded_access_end;
-	extern caddr_t guarded_access_bad;
 
 	uvmexp.traps++;
 	if ((p = curproc) == NULL)
@@ -263,7 +258,7 @@ m88100_trap(unsigned type, struct trapframe *frame)
 		/* This function pointer is set in machdep.c
 		   It calls m188_ext_int or sbc_ext_int depending
 		   on the value of brdtyp - smurph */
-		(*md.interrupt_func)(T_INT, frame);
+		md_interrupt_func(T_INT, frame);
 		return;
 
 	case T_MISALGNFLT:
@@ -319,33 +314,6 @@ m88100_trap(unsigned type, struct trapframe *frame)
 #endif
 
 		switch (pbus_type) {
-		case CMMU_PFSR_BERROR:
-			/*
-		 	 * If it is a guarded access, bus error is OK.
-		 	 */
-			if ((frame->tf_sxip & XIP_ADDR) >=
-			      (unsigned)&guarded_access_start &&
-			    (frame->tf_sxip & XIP_ADDR) <=
-			      (unsigned)&guarded_access_end) {
-				frame->tf_snip =
-				  ((unsigned)&guarded_access_bad    ) | NIP_V;
-				frame->tf_sfip =
-				  ((unsigned)&guarded_access_bad + 4) | FIP_V;
-				frame->tf_sxip = 0;
-				/* We sort of resolved the fault ourselves
-				 * because we know where it came from
-				 * [guarded_access()]. But we must still think
-				 * about the other possible transactions in
-				 * dmt1 & dmt2.  Mark dmt0 so that
-				 * data_access_emulation skips it.  XXX smurph
-				 */
-				frame->tf_dmt0 |= DMT_SKIP;
-				data_access_emulation((unsigned *)frame);
-				frame->tf_dpfsr = 0;
-				frame->tf_dmt0 = 0;
-				return;
-			}
-			break;
 		case CMMU_PFSR_SUCCESS:
 			/*
 			 * The fault was resolved. Call data_access_emulation
@@ -429,19 +397,16 @@ user_fault:
 			break;
 		default:
 			result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
-			if (result == EACCES)
-				result = EFAULT;
 			break;
 		}
 
 		p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 
 		if ((caddr_t)va >= vm->vm_maxsaddr) {
-			if (result == 0) {
-				nss = btoc(USRSTACK - va);/* XXX check this */
-				if (nss > vm->vm_ssize)
-					vm->vm_ssize = nss;
-			}
+			if (result == 0)
+				uvm_grow(p, va);
+			else if (result == EACCES)
+				result = EFAULT;
 		}
 
 		/*
@@ -642,7 +607,7 @@ m88110_trap(unsigned type, struct trapframe *frame)
 	vm_prot_t ftype;
 	int fault_type;
 	u_long fault_code;
-	unsigned nss, fault_addr;
+	unsigned fault_addr;
 	struct vmspace *vm;
 	union sigval sv;
 	int result;
@@ -653,9 +618,6 @@ m88110_trap(unsigned type, struct trapframe *frame)
 	pt_entry_t *pte;
 
 	extern struct vm_map *kernel_map;
-	extern unsigned guarded_access_start;
-	extern unsigned guarded_access_end;
-	extern unsigned guarded_access_bad;
 	extern pt_entry_t *pmap_pte(pmap_t, vaddr_t);
 
 	uvmexp.traps++;
@@ -739,11 +701,11 @@ m88110_trap(unsigned type, struct trapframe *frame)
 		break;
 	case T_NON_MASK:
 	case T_NON_MASK+T_USER:
-		(*md.interrupt_func)(T_NON_MASK, frame);
+		md_interrupt_func(T_NON_MASK, frame);
 		return;
 	case T_INT:
 	case T_INT+T_USER:
-		(*md.interrupt_func)(T_INT, frame);
+		md_interrupt_func(T_INT, frame);
 		return;
 	case T_MISALGNFLT:
 		printf("kernel mode misaligned access exception @ 0x%08x\n",
@@ -795,18 +757,6 @@ m88110_trap(unsigned type, struct trapframe *frame)
 		vm = p->p_vmspace;
 		map = kernel_map;
 
-		if (frame->tf_dsr & CMMU_DSR_BE) {
-			/*
-			 * If it is a guarded access, bus error is OK.
-			 */
-			if ((frame->tf_exip & XIP_ADDR) >=
-			      (unsigned)&guarded_access_start &&
-			    (frame->tf_exip & XIP_ADDR) <=
-			      (unsigned)&guarded_access_end) {
-				frame->tf_exip = (unsigned)&guarded_access_bad;
-				return;
-			}
-		}
 		if (frame->tf_dsr & (CMMU_DSR_SI | CMMU_DSR_PI)) {
 			frame->tf_dsr &= ~CMMU_DSR_WE;	/* undefined */
 			/*
@@ -910,8 +860,6 @@ m88110_user_fault:
 				/* segment or page fault */
 				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-				if (result == EACCES)
-					result = EFAULT;
 			} else
 			if (frame->tf_dsr & (CMMU_DSR_CP | CMMU_DSR_WA)) {
 				/* copyback or write allocate error */
@@ -958,8 +906,6 @@ m88110_user_fault:
 #endif
 					result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 					p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-					if (result == EACCES)
-						result = EFAULT;
 				}
 			} else {
 #ifdef TRAPDEBUG
@@ -979,8 +925,6 @@ m88110_user_fault:
 				/* segment or page fault */
 				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-				if (result == EACCES)
-					result = EFAULT;
 			} else {
 #ifdef TRAPDEBUG
 				printf("Unexpected Instruction fault isr %x\n",
@@ -991,11 +935,10 @@ m88110_user_fault:
 		}
 
 		if ((caddr_t)va >= vm->vm_maxsaddr) {
-			if (result == 0) {
-				nss = btoc(USRSTACK - va);/* XXX check this */
-				if (nss > vm->vm_ssize)
-					vm->vm_ssize = nss;
-			}
+			if (result == 0)
+				uvm_grow(p, va);
+			else if (result == EACCES)
+				result = EFAULT;
 		}
 
 		/*
@@ -1509,16 +1452,21 @@ child_return(arg)
 	tf->tf_r[2] = 0;
 	tf->tf_r[3] = 0;
 	tf->tf_epsr &= ~PSR_C;
-	if (cputyp != CPU_88110) {
+#ifdef M88100
+	if (CPU_IS88100) {
 		tf->tf_snip = tf->tf_sfip & XIP_ADDR;
 		tf->tf_sfip = tf->tf_snip + 4;
-	} else {
+	}
+#endif
+#ifdef M88110
+	if (CPU_IS88110) {
 		/* skip two instructions */
 		if (tf->tf_exip & 1)
 			tf->tf_exip = tf->tf_enip + 4;
 		else
 			tf->tf_exip += 4 + 4;
 	}
+#endif
 
 	userret(p, tf, p->p_sticks);
 #ifdef KTRACE

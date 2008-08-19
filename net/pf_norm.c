@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.96 2004/07/17 00:17:27 frantzen Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.97.2.1 2006/01/19 21:51:36 brad Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -704,7 +704,7 @@ pf_fragcache(struct mbuf **m0, struct ip *h, struct pf_fragment **frag, int mff,
 			} else {
 				hosed++;
 			}
-		} else {
+		} else if (frp == NULL) {
 			/* There is a gap between fragments */
 			DPFPRINTF(("fragcache[%d]: gap %d %d-%d (%d-%d)\n",
 			    h->ip_id, -aftercut, off, max, fra->fr_off,
@@ -1244,7 +1244,7 @@ pf_normalize_tcp(int dir, struct pfi_kif *kif, struct mbuf *m, int ipoff,
 		}
 	}
 
-	if (rm == NULL)
+	if (rm == NULL || rm->action == PF_NOSCRUB)
 		return (PF_PASS);
 	else
 		r->packets++;

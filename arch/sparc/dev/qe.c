@@ -1,4 +1,4 @@
-/*	$OpenBSD: qe.c,v 1.24 2003/06/02 18:40:59 jason Exp $	*/
+/*	$OpenBSD: qe.c,v 1.26 2005/01/15 05:24:10 brad Exp $	*/
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.
@@ -150,7 +150,7 @@ qeattach(parent, self, aux)
 
 	sc->sc_ih.ih_fun = qeintr;
 	sc->sc_ih.ih_arg = sc;
-	intr_establish(pri, &sc->sc_ih, IPL_NET);
+	intr_establish(pri, &sc->sc_ih, IPL_NET, self->dv_xname);
 
 	myetheraddr(sc->sc_arpcom.ac_enaddr);
 
@@ -663,7 +663,7 @@ qeioctl(ifp, cmd, data)
 			 * Multicast list has changed; set the hardware filter
 			 * accordingly.
 			 */
-			if (ifp->if_flags & IFF_UP)
+			if (ifp->if_flags & IFF_RUNNING)
 				qeinit(sc);
 			error = 0;
 		}

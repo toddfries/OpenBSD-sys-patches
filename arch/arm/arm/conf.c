@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.4 2004/04/07 03:20:47 drahn Exp $	*/
+/*	$OpenBSD: conf.c,v 1.10 2005/01/19 02:02:33 uwe Exp $	*/
 /*	$NetBSD: conf.c,v 1.10 2002/04/19 01:04:38 wiz Exp $	*/
 
 /*
@@ -73,6 +73,16 @@
 #include "pf.h"
 #include "pty.h"
 #include "tun.h"
+#include "ksyms.h"
+
+/*
+ * APM interface
+ */
+#ifdef CONF_HAVE_APM
+#include "apm.h"
+#else
+#define NAPM	0
+#endif
 
 /*
  * Disk/Filesystem pseudo-devices
@@ -141,6 +151,11 @@ cdev_decl(wskbd);
 cdev_decl(wsmouse);
 
 #include "lpt.h"
+#ifdef CONF_HAVE_FCOM
+#include "fcom.h"
+#else
+#define NFCOM	0
+#endif
 
 #include "radio.h"
 cdev_decl(radio);
@@ -261,6 +276,8 @@ cdev_decl(xfs_dev);
 #endif
 #include "systrace.h"
 
+#include "hotplug.h"
+
 struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),			/*  0: virtual console */
 	cdev_ctty_init(1,ctty),			/*  1: controlling terminal */
@@ -270,7 +287,7 @@ struct cdevsw cdevsw[] = {
 	cdev_ptc_init(NPTY,ptc),		/*  5: pseudo-tty master */
 	cdev_log_init(1,log),			/*  6: /dev/klog */
 	cdev_fd_init(1,filedesc),		/*  7: file descriptor pseudo-device */
-	cdev_lkm_dummy(),			/*  8: */
+	cdev_ksyms_init(NKSYMS,ksyms),		/*  8: Kernel symbols device */
 	cdev_lpt_init(NLPT,lpt),		/*  9: parallel printer */
 	cdev_lkm_dummy(),			/* 10: */
 	cdev_lkm_dummy(),			/* 11: */
@@ -296,13 +313,13 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 31: */
 	cdev_lkm_dummy(),			/* 32: */
 	cdev_bpftun_init(NTUN,tun),		/* 33: network tunnel */
-	cdev_lkm_dummy(),			/* 34: */
+	cdev_apm_init(NAPM,apm),		/* 34: APM interface */
 	cdev_lkm_init(NLKM,lkm),		/* 35: loadable module driver */
 	cdev_audio_init(NAUDIO,audio),		/* 36: generic audio I/O */
-	cdev_notdef(),				/* 37: removed cpu device */
+	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 37: devices hot plugging*/
 	cdev_notdef(),				/* 38: removed cpu device */
 	cdev_lkm_dummy(),			/* 39: reserved */
-	cdev_lkm_dummy(),			/* 40: reserved */
+	cdev_random_init(1,random),		/* 40: random generator */
 	cdev_lkm_dummy(),			/* 41: reserved */
 	cdev_lkm_dummy(),			/* 42: reserved */
 	cdev_lkm_dummy(),			/* 43: reserved */

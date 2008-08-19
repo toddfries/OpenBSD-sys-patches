@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.53 2004/06/21 23:50:38 tholo Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.55 2005/02/01 15:00:04 pvalchev Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*

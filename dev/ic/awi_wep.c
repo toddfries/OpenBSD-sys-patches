@@ -1,4 +1,4 @@
-/*	$OpenBSD: awi_wep.c,v 1.10 2003/09/02 16:58:11 tedu Exp $	*/
+/*	$OpenBSD: awi_wep.c,v 1.13 2005/02/21 11:16:00 dlg Exp $	*/
 /*	$NetBSD: awi_wep.c,v 1.2 2000/07/04 14:47:58 onoe Exp $	*/
 
 /*
@@ -77,7 +77,8 @@
 #include <net/if_ether.h>
 #endif
 #include <net/if_media.h>
-#include <net/if_ieee80211.h>
+#include <net80211/ieee80211.h>
+#include <net80211/ieee80211_ioctl.h>
 
 #include <machine/cpu.h>
 #include <machine/bus.h>
@@ -256,7 +257,7 @@ awi_wep_setalgo(sc, algo)
 	int ctxlen;
 
 	awi_crc_init();	/* XXX: not belongs here */
-	if (algo < 0 || algo > sizeof(awi_wep_algo)/sizeof(awi_wep_algo[0]))
+	if (algo < 0 || algo >= sizeof(awi_wep_algo)/sizeof(awi_wep_algo[0]))
 		return EINVAL;
 	awa = &awi_wep_algo[algo];
 	if (awa->awa_name == NULL)

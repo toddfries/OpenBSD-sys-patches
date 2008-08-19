@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukphy.c,v 1.10 2002/03/14 01:26:58 millert Exp $	*/
+/*	$OpenBSD: ukphy.c,v 1.15 2005/01/28 18:27:55 brad Exp $	*/
 /*	$NetBSD: ukphy.c,v 1.9 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*-
@@ -75,7 +75,6 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
 
@@ -99,11 +98,12 @@ struct cfdriver ukphy_cd = {
 
 int	ukphy_service(struct mii_softc *, struct mii_data *, int);
 
+const struct mii_phy_funcs ukphy_funcs = {
+	ukphy_service, ukphy_status, mii_phy_reset,
+};
+
 int
-ukphymatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+ukphymatch(struct device *parent, void *match, void *aux)
 {
 
 	/*
@@ -113,9 +113,7 @@ ukphymatch(parent, match, aux)
 }
 
 void
-ukphyattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+ukphyattach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
@@ -128,17 +126,16 @@ ukphyattach(parent, self, aux)
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = ukphy_service;
-	sc->mii_status = ukphy_status;
+	sc->mii_funcs = &ukphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
 	/*
 	 * Don't do loopback on unknown PHYs.  It might confuse some of them.
 	 */
 	sc->mii_flags |= MIIF_NOLOOP;
 
-	mii_phy_reset(sc);
+	PHY_RESET(sc);
 
 	sc->mii_capabilities =
 	    PHY_READ(sc, MII_BMSR) & ma->mii_capmask;
@@ -152,10 +149,7 @@ ukphyattach(parent, self, aux)
 }
 
 int
-ukphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+ukphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
 	int reg;
@@ -197,12 +191,6 @@ ukphy_service(sc, mii, cmd)
 		 * If we're not currently selected, just return.
 		 */
 		if (IFM_INST(ife->ifm_media) != sc->mii_inst)
-			return (0);
-
-		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
 			return (0);
 
 		if (mii_phy_tick(sc) == EJUSTRETURN)

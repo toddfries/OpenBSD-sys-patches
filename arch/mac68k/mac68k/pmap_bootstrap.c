@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_bootstrap.c,v 1.25 2003/06/02 23:27:49 millert Exp $	*/
+/*	$OpenBSD: pmap_bootstrap.c,v 1.28 2004/12/30 21:22:20 miod Exp $	*/
 /*	$NetBSD: pmap_bootstrap.c,v 1.50 1999/04/07 06:14:33 scottr Exp $	*/
 
 /* 
@@ -56,6 +56,8 @@
 #include <mac68k/mac68k/clockreg.h>
 #include <mac68k/mac68k/macrom.h>
 
+extern int	zsinited;
+
 /*
  * These are used to map the RAM:
  */
@@ -91,7 +93,8 @@ void	bootstrap_mac68k(int);
 #define	RELOC(v, t)	*((t*)((u_int)&(v)))
 #define PA2VA(v, t)	*((t*)((u_int)&(v) - firstpa))
 
-#define	PMAP_MD_RWZERO
+extern caddr_t kernel_start;
+#define	PMAP_MD_RWLOW	m68k_btop(m68k_round_page((vaddr_t)&kernel_start))
 
 /*
  * Present a totally tricky view of the world here...
@@ -160,12 +163,10 @@ do { \
 
 #define	PMAP_MD_RELOC2() \
 do { \
-	IOBase = (u_long)m68k_ptob(nptpages * NPTEPG - MACHINE_IIOMAPSIZE); \
-	ROMBase = (char *)m68k_ptob(nptpages * NPTEPG - \
-	    (ROMMAPSIZE + VIDMAPSIZE)); \
+	IOBase = iiobase; \
+	ROMBase = (char *)(iiobase + m68k_ptob(IIOMAPSIZE)); \
 	if (vidlen != 0) { \
-		newvideoaddr = (u_int32_t) \
-				m68k_ptob(nptpages * NPTEPG - VIDMAPSIZE) \
+		newvideoaddr = iiobase + m68k_ptob(IIOMAPSIZE + ROMMAPSIZE) \
 				+ (mac68k_vidphys & PGOFSET); \
 		if (mac68k_vidlog) \
 			mac68k_vidlog = newvideoaddr; \
@@ -269,8 +270,7 @@ bootstrap_mac68k(tc)
 	 * of this function (where we start using the MMU, so the new
 	 * address is correct.
 	 */
-	if (   (mac68k_machine.serial_boot_echo)
-	    || (mac68k_machine.serial_console))
+	if (zsinited != 0)
 		zs_init();
 
 	videoaddr = newvideoaddr;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcphy.c,v 1.8 2002/10/20 16:46:28 henning Exp $	*/
+/*	$OpenBSD: dcphy.c,v 1.13 2005/01/28 18:27:55 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -102,10 +102,12 @@ void	dcphy_status(struct mii_softc *);
 int	dcphy_auto(struct mii_softc *, int);
 void	dcphy_reset(struct mii_softc *);
 
+const struct mii_phy_funcs dcphy_funcs = {
+	dcphy_service, dcphy_status, dcphy_reset,
+};
+
 int
-dcphy_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+dcphy_match(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
@@ -121,10 +123,7 @@ dcphy_match(parent, match, aux)
 }
 
 void
-dcphy_attach(parent, self, aux)
-	struct device *parent;
-	struct device *self;
-	void *aux;
+dcphy_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct mii_softc *sc = (struct mii_softc *)self;
 	struct mii_attach_args *ma = aux;
@@ -134,12 +133,12 @@ dcphy_attach(parent, self, aux)
 	printf(": internal PHY\n");
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
-	sc->mii_service = dcphy_service;
-	sc->mii_status = dcphy_status;
+	sc->mii_funcs = &dcphy_funcs;
 	sc->mii_pdata = mii;
-	sc->mii_flags = mii->mii_flags;
+	sc->mii_flags = ma->mii_flags;
 
 	sc->mii_flags |= MIIF_NOISOLATE;
+
 	mii->mii_instance++;
 
 	dc_sc = mii->mii_ifp->if_softc;
@@ -178,10 +177,7 @@ dcphy_attach(parent, self, aux)
 }
 
 int
-dcphy_service(sc, mii, cmd)
-	struct mii_softc *sc;
-	struct mii_data *mii;
-	int cmd;
+dcphy_service(struct mii_softc *sc, struct mii_data *mii, int cmd)
 {
 	struct dc_softc *dc_sc;
 	struct ifmedia_entry *ife = mii->mii_media.ifm_cur;
@@ -226,7 +222,7 @@ dcphy_service(sc, mii, cmd)
 
 		switch (IFM_SUBTYPE(ife->ifm_media)) {
 		case IFM_AUTO:
-			/*dcphy_reset(sc);*/
+			/*PHY_RESET(sc);*/
 			sc->mii_flags &= ~MIIF_DOINGAUTO;
 			(void) dcphy_auto(sc, 0);
 			break;
@@ -236,7 +232,7 @@ dcphy_service(sc, mii, cmd)
 			 */
 			return (EINVAL);
 		case IFM_100_TX:
-			dcphy_reset(sc);
+			PHY_RESET(sc);
 			DC_CLRBIT(dc_sc, DC_10BTCTRL, DC_TCTL_AUTONEGENBL);
 			mode |= DC_NETCFG_PORTSEL|DC_NETCFG_PCS|
 			    DC_NETCFG_SCRAMBLER;
@@ -265,7 +261,6 @@ dcphy_service(sc, mii, cmd)
 			break;
 		default:
 			return(EINVAL);
-			break;
 		}
 		break;
 
@@ -277,32 +272,36 @@ dcphy_service(sc, mii, cmd)
 			return (0);
 
 		/*
-		 * Only used for autonegotiation.
-		 */
-		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
-			return (0);
-
-		/*
 		 * Is the interface even up?
 		 */
 		if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 			return (0);
 
-		reg = CSR_READ_4(dc_sc, DC_10BTSTAT) &
-		    (DC_TSTAT_LS10|DC_TSTAT_LS100);
+		/*
+		 * Only used for autonegotiation.
+		 */
+		if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO)
+			break;
 
+		reg = CSR_READ_4(dc_sc, DC_10BTSTAT);
 		if (!(reg & DC_TSTAT_LS10) || !(reg & DC_TSTAT_LS100))
-			return (0);
+			break;
 
 		/*
 		 * Only retry autonegotiation every 5 seconds.
+		 *
+		 * Otherwise, fall through to calling dcphy_status()
+		 * since real Intel 21143 chips don't show valid link
+		 * status until autonegotiation is switched off, and
+		 * that only happens in dcphy_status().  Without this,
+		 * successful autonegotation is never recognised on
+		 * these chips.
 		 */
 		if (++sc->mii_ticks != 50)
-			return (0);
+			break;
 
 		sc->mii_ticks = 0;
-		/*if (DC_IS_INTEL(dc_sc))*/
-			sc->mii_flags &= ~MIIF_DOINGAUTO;
+		sc->mii_flags &= ~MIIF_DOINGAUTO;
 		dcphy_auto(sc, 0);
 
 		break;
@@ -317,8 +316,7 @@ dcphy_service(sc, mii, cmd)
 }
 
 void
-dcphy_status(sc)
-	struct mii_softc *sc;
+dcphy_status(struct mii_softc *sc)
 {
 	struct mii_data *mii = sc->mii_pdata;
 	int reg, anlpar, tstat = 0;
@@ -332,9 +330,7 @@ dcphy_status(sc)
 	if ((mii->mii_ifp->if_flags & IFF_UP) == 0)
 		return;
 
-	reg = CSR_READ_4(dc_sc, DC_10BTSTAT) &
-	    (DC_TSTAT_LS10|DC_TSTAT_LS100);
-
+	reg = CSR_READ_4(dc_sc, DC_10BTSTAT);
 	if (!(reg & DC_TSTAT_LS10) || !(reg & DC_TSTAT_LS100))
 		mii->mii_media_status |= IFM_ACTIVE;
 
@@ -403,9 +399,7 @@ skip:
 }
 
 int
-dcphy_auto(mii, waitfor)
-	struct mii_softc	*mii;
-	int			waitfor;
+dcphy_auto(struct mii_softc *mii, int waitfor)
 {
 	int			i;
 	struct dc_softc		*sc;
@@ -453,8 +447,7 @@ dcphy_auto(mii, waitfor)
 }
 
 void
-dcphy_reset(mii)
-	struct mii_softc	*mii;
+dcphy_reset(struct mii_softc *mii)
 {
 	struct dc_softc		*sc;
 

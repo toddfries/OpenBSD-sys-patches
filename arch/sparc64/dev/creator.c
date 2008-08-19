@@ -1,4 +1,4 @@
-/*	$OpenBSD: creator.c,v 1.29 2003/06/24 19:41:33 miod Exp $	*/
+/*	$OpenBSD: creator.c,v 1.33 2005/03/15 18:40:15 miod Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -47,20 +47,6 @@
 #include <sparc64/dev/creatorreg.h>
 #include <sparc64/dev/creatorvar.h>
 
-struct wsscreen_descr creator_stdscreen = {
-	"std",
-};
-
-const struct wsscreen_descr *creator_scrlist[] = {
-	&creator_stdscreen,
-	/* XXX other formats? */
-};
-
-struct wsscreen_list creator_screenlist = {
-	sizeof(creator_scrlist) / sizeof(struct wsscreen_descr *),
-	    creator_scrlist
-};
-
 int	creator_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int	creator_alloc_screen(void *, const struct wsscreen_descr *, void **,
 	    int *, int *, long *);
@@ -74,7 +60,6 @@ void	creator_ras_init(struct creator_softc *);
 void	creator_ras_copyrows(void *, int, int, int);
 void	creator_ras_erasecols(void *, int, int, int, long int);
 void	creator_ras_eraserows(void *, int, int, long int);
-void	creator_ras_updatecursor(struct rasops_info *);
 void	creator_ras_fill(struct creator_softc *);
 void	creator_ras_setfg(struct creator_softc *, int32_t);
 int	creator_setcursor(struct creator_softc *, struct wsdisplay_cursor *);
@@ -100,7 +85,6 @@ struct cfdriver creator_cd = {
 void
 creator_attach(struct creator_softc *sc)
 {
-	struct wsemuldisplaydev_attach_args waa;
 	char *model;
 	int btype;
 
@@ -151,22 +135,11 @@ creator_attach(struct creator_softc *sc)
 		creator_ras_init(sc);
 	}
 
-	creator_stdscreen.capabilities = sc->sc_sunfb.sf_ro.ri_caps;
-	creator_stdscreen.nrows = sc->sc_sunfb.sf_ro.ri_rows;
-	creator_stdscreen.ncols = sc->sc_sunfb.sf_ro.ri_cols;
-	creator_stdscreen.textops = &sc->sc_sunfb.sf_ro.ri_ops;
-
 	if (sc->sc_console) {
-		sc->sc_sunfb.sf_ro.ri_updatecursor = creator_ras_updatecursor;
-		fbwscons_console_init(&sc->sc_sunfb, &creator_stdscreen, -1,
-		    NULL);
+		fbwscons_console_init(&sc->sc_sunfb, -1);
 	}
 
-	waa.console = sc->sc_console;
-	waa.scrdata = &creator_screenlist;
-	waa.accessops = &creator_accessops;
-	waa.accesscookie = sc;
-	config_found(&sc->sc_sunfb.sf_dev, &waa, wsemuldisplaydevprint);
+	fbwscons_attach(&sc->sc_sunfb, &creator_accessops, sc->sc_console);
 }
 
 int
@@ -267,6 +240,8 @@ creator_ioctl(v, cmd, data, flags, p)
 		break;
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
+		break;
+
 	case WSDISPLAYIO_GETCMAP:
 	case WSDISPLAYIO_PUTCMAP:
 	default:
@@ -696,16 +671,4 @@ creator_ras_setfg(sc, fg)
 	sc->sc_fg_cache = fg;
 	FBC_WRITE(sc, FFB_FBC_FG, fg);
 	creator_ras_wait(sc);
-}
-
-void
-creator_ras_updatecursor(ri)
-	struct rasops_info *ri;
-{
-	struct creator_softc *sc = ri->ri_hw;
-
-	if (sc->sc_sunfb.sf_crowp != NULL)
-		*sc->sc_sunfb.sf_crowp = ri->ri_crow;
-	if (sc->sc_sunfb.sf_ccolp != NULL)
-		*sc->sc_sunfb.sf_ccolp = ri->ri_ccol;
 }

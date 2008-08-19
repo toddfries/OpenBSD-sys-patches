@@ -1,4 +1,4 @@
-/*	$OpenBSD: dcm.c,v 1.17 2003/12/22 20:38:07 jmc Exp $	*/
+/*	$OpenBSD: dcm.c,v 1.24 2005/02/27 22:08:39 miod Exp $	*/
 /*	$NetBSD: dcm.c,v 1.41 1997/05/05 20:59:16 thorpej Exp $	*/
 
 /*
@@ -63,6 +63,7 @@
 #include <sys/device.h>
 
 #include <machine/autoconf.h>
+#include <machine/bus.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
 
@@ -77,7 +78,7 @@
 #define DEFAULT_BAUD_RATE 9600
 #endif
 
-struct speedtab dcmspeedtab[] = {
+const struct speedtab dcmspeedtab[] = {
 	{	0,	BR_0		},
 	{	50,	BR_50		},
 	{	75,	BR_75		},
@@ -217,6 +218,7 @@ static char iconv[16] = {
 
 struct	dcm_softc {
 	struct	device sc_dev;		/* generic device glue */
+	struct	isr sc_isr;
 	struct	dcmdevice *sc_dcm;	/* pointer to hardware */
 	struct	tty *sc_tty[NDCMPORT];	/* our tty instances */
 	struct	modemreg *sc_modem[NDCMPORT]; /* modem control */
@@ -264,10 +266,7 @@ void	dcminit(struct dcmdevice *, int, int);
 int	dcmselftest(struct dcm_softc *);
 
 int	dcm_console_scan(int, caddr_t, void *);
-void	dcmcnprobe(struct consdev *);
-void	dcmcninit(struct consdev *);
-int	dcmcngetc(dev_t);
-void	dcmcnputc(dev_t, int);
+cons_decl(dcm);
 
 int	dcmmatch(struct device *, void *, void *);
 void	dcmattach(struct device *, struct device *, void *);
@@ -352,7 +351,11 @@ dcmattach(parent, self, aux)
 	sc->sc_flags |= DCM_ACTIVE;
 
 	/* Establish the interrupt handler. */
-	(void) dio_intr_establish(dcmintr, sc, ipl, IPL_TTY);
+	sc->sc_isr.isr_func = dcmintr;
+	sc->sc_isr.isr_arg = sc;
+	sc->sc_isr.isr_ipl = ipl;
+	sc->sc_isr.isr_priority = IPL_TTY;
+	dio_intr_establish(&sc->sc_isr, self->dv_xname);
 
 	if (dcmistype == DIS_TIMER)
 		dcmsetischeme(brd, DIS_RESET|DIS_TIMER);
@@ -551,7 +554,7 @@ dcmopen(dev, flag, mode, p)
 
 	return (error);
 }
- 
+
 /*ARGSUSED*/
 int
 dcmclose(dev, flag, mode, p)
@@ -562,7 +565,7 @@ dcmclose(dev, flag, mode, p)
 	int s, unit, board, port;
 	struct dcm_softc *sc;
 	struct tty *tp;
- 
+
 	unit = DCMUNIT(dev);
 	board = DCMBOARD(unit);
 	port = DCMPORT(unit);
@@ -591,7 +594,7 @@ dcmclose(dev, flag, mode, p)
 #endif
 	return (0);
 }
- 
+
 int
 dcmread(dev, uio, flag)
 	dev_t dev;
@@ -611,7 +614,7 @@ dcmread(dev, uio, flag)
 
 	return ((*linesw[tp->t_line].l_read)(tp, uio, flag));
 }
- 
+
 int
 dcmwrite(dev, uio, flag)
 	dev_t dev;
@@ -647,7 +650,7 @@ dcmtty(dev)
 
 	return (sc->sc_tty[port]);
 }
- 
+
 int
 dcmintr(arg)
 	void *arg;
@@ -668,6 +671,7 @@ dcmintr(arg)
 		SEM_UNLOCK(dcm);
 		return (0);
 	}
+
 	for (i = 0; i < 4; i++) {
 		pcnd[i] = dcm->dcm_icrtab[i].dcm_data;
 		dcm->dcm_icrtab[i].dcm_data = 0;
@@ -686,7 +690,7 @@ dcmintr(arg)
 	if (dcmdebug & DDB_INTR) {
 		printf("%s: dcmintr: iir %x pc %x/%x/%x/%x ",
 		       sc->sc_dev.dv_xname, code, pcnd[0], pcnd[1],
-		       pcnd[2], pcnd[3]); 
+		       pcnd[2], pcnd[3]);
 		printf("miir %x mc %x/%x/%x/%x\n",
 		       mcode, mcnd[0], mcnd[1], mcnd[2], mcnd[3]);
 	}
@@ -954,7 +958,7 @@ dcmioctl(dev, cmd, data, flag, p)
 	sc = dcm_cd.cd_devs[board];
 	dcm = sc->sc_dcm;
 	tp = sc->sc_tty[port];
- 
+
 #ifdef DEBUG
 	if (dcmdebug & DDB_IOCTL)
 		printf("%s port %d: dcmioctl: cmd %lx data %x flag %x\n",
@@ -1130,7 +1134,7 @@ dcmparam(tp, t)
 	DELAY(16 * DCM_USPERCH(tp->t_ospeed));
 	return (0);
 }
- 
+
 void
 dcmstart(tp)
 	struct tty *tp;
@@ -1257,7 +1261,7 @@ out:
 #endif
 	splx(s);
 }
- 
+
 /*
  * Stop output on a line.
  */
@@ -1277,7 +1281,7 @@ dcmstop(tp, flag)
 	splx(s);
 	return (0);
 }
- 
+
 /*
  * Modem control
  */
@@ -1457,7 +1461,7 @@ dcmselftest(sc)
 	s = splhigh();
 	dcm->dcm_rsid = DCMRS;
 	DELAY(50000);	/* 5000 is not long enough */
-	dcm->dcm_rsid = 0; 
+	dcm->dcm_rsid = 0;
 	dcm->dcm_ic = IC_IE;
 	dcm->dcm_cr = CR_SELFT;
 	while ((dcm->dcm_ic & IC_IR) == 0) {
@@ -1500,7 +1504,6 @@ dcm_console_scan(scode, va, arg)
 {
 	struct dcmdevice *dcm = (struct dcmdevice *)va;
 	struct consdev *cp = arg;
-	u_char *dioiidev;
 	int force = 0, pri;
 
 	switch (dcm->dcm_rsid) {
@@ -1536,11 +1539,7 @@ dcm_console_scan(scode, va, arg)
 	 */
 	if (((cn_tab == NULL) || (cp->cn_pri > cn_tab->cn_pri)) || force) {
 		cn_tab = cp;
-		if (scode >= 132) {
-			dioiidev = (u_char *)va;
-			return ((dioiidev[0x101] + 1) * 0x100000);
-		}
-		return (DIOCSIZE);
+		return (DIO_SIZE(scode, va));
 	}
 	return (0);
 }
@@ -1563,7 +1562,7 @@ dcmcnprobe(cp)
 	if (conforced)
 		return;
 
-	console_scan(dcm_console_scan, cp);
+	console_scan(dcm_console_scan, cp, HP300_BUS_DIO);
 
 #ifdef KGDB_CHEAT
 	/* XXX this needs to be fixed. */
@@ -1593,6 +1592,12 @@ void
 dcmcninit(cp)
 	struct consdev *cp;
 {
+
+	/*
+	 * We are not interested by the second console pass.
+	 */
+	if (consolepass != 0)
+		return;
 
 	dcm_cn = (struct dcmdevice *)conaddr;
 	dcminit(dcm_cn, DCMCONSPORT, dcmdefaultrate);

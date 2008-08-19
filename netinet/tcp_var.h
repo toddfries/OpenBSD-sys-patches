@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.65.2.2 2005/03/20 23:36:11 brad Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.72 2005/03/09 11:14:38 markus Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -83,6 +83,8 @@ struct tcpcb {
 #define TF_DISABLE_ECN	0x00040000	/* disable ECN for this connection */
 #endif
 #define TF_REASSLOCK	0x00080000	/* reassembling or draining */
+#define TF_LASTIDLE	0x00100000	/* no outstanding ACK on last send */
+#define TF_DEAD		0x00200000	/* dead and to-be-released */
 
 	struct	mbuf *t_template;	/* skeletal packet for transmit */
 	struct	inpcb *t_inpcb;		/* back pointer to internet pcb */
@@ -119,8 +121,6 @@ struct tcpcb {
 	tcp_seq	rcv_up;			/* receive urgent pointer */
 	tcp_seq	irs;			/* initial receive sequence number */
 #if 1 /*def TCP_SACK*/
-	tcp_seq rcv_laststart;		/* start of last segment recd. */
-	tcp_seq rcv_lastend;		/* end of ... */
 	tcp_seq rcv_lastsack;		/* last seq number(+1) sack'd by rcv'r*/
 	int	rcv_numsacks;		/* # distinct sack blks present */
 	struct sackblk sackblks[MAX_SACK_BLKS]; /* seq nos. of sack blocks */
@@ -169,6 +169,7 @@ struct tcpcb {
 	u_char	request_r_scale;	/* pending window scaling */
 	u_char	requested_s_scale;
 	u_int32_t ts_recent;		/* timestamp echo data */
+	u_int32_t ts_modulate;		/* modulation on timestamp */
 	u_int32_t ts_recent_age;		/* when last updated */
 	tcp_seq	last_ack_sent;
 
@@ -179,6 +180,8 @@ struct tcpcb {
 	caddr_t	t_tuba_pcb;		/* next level down pcb for TCP over z */
 
 	int pf;
+
+	struct	timeout t_reap_to;	/* delayed cleanup timeout */
 };
 
 #define	intotcpcb(ip)	((struct tcpcb *)(ip)->inp_ppcb)
@@ -248,6 +251,7 @@ struct syn_cache {
 	int sc_bucketidx;			/* our bucket index */
 	u_int32_t sc_hash;
 	u_int32_t sc_timestamp;			/* timestamp from SYN */
+	u_int32_t sc_modulate;			/* our timestamp modulator */
 #if 0
 	u_int32_t sc_timebase;			/* our local timebase */
 #endif
@@ -317,15 +321,14 @@ tcp_reass_unlock(struct tcpcb *tp)
  * are stored as fixed point numbers scaled by the values below.
  * For convenience, these scales are also used in smoothing the average
  * (smoothed = (1/scale)sample + ((scale-1)/scale)smoothed).
- * With these scales, srtt has 3 bits to the right of the binary point,
- * and thus an "ALPHA" of 0.875.  rttvar has 2 bits to the right of the
+ * With these scales, srtt has 5 bits to the right of the binary point,
+ * and thus an "ALPHA" of 0.875.  rttvar has 4 bits to the right of the
  * binary point, and is smoothed with an ALPHA of 0.75.
  */
-#define	TCP_RTT_SCALE		8	/* multiplier for srtt; 3 bits frac. */
-#define	TCP_RTT_SHIFT		3	/* shift for srtt; 3 bits frac. */
-#define	TCP_RTTVAR_SCALE	4	/* multiplier for rttvar; 2 bits */
-#define	TCP_RTTVAR_SHIFT	2	/* multiplier for rttvar; 2 bits */
-#define TCP_RTT_MAX		(1<<9)	/* maximum rtt */
+#define	TCP_RTT_SHIFT		3	/* shift for srtt; 5 bits frac. */
+#define	TCP_RTTVAR_SHIFT	2	/* shift for rttvar; 4 bits */
+#define	TCP_RTT_BASE_SHIFT	2	/* remaining 2 bit shift */
+#define	TCP_RTT_MAX		(1<<9)	/* maximum rtt */
 
 /*
  * The initial retransmission should happen at rtt + 4 * rttvar.
@@ -337,11 +340,11 @@ tcp_reass_unlock(struct tcpcb *tp)
  * 1.5 tick we need.  But, because the bias is
  * statistical, we have to test that we don't drop below
  * the minimum feasible timer (which is 2 ticks).
- * This macro assumes that the value of TCP_RTTVAR_SCALE
+ * This macro assumes that the value of (1 << TCP_RTTVAR_SHIFT)
  * is the same as the multiplier for rttvar.
  */
 #define	TCP_REXMTVAL(tp) \
-	((((tp)->t_srtt >> TCP_RTT_SHIFT) + (tp)->t_rttvar) >> 2)
+	((((tp)->t_srtt >> TCP_RTT_SHIFT) + (tp)->t_rttvar) >> TCP_RTT_BASE_SHIFT)
 
 /*
  * TCP statistics.
@@ -552,6 +555,7 @@ int	 tcp_attach(struct socket *);
 void	 tcp_canceltimers(struct tcpcb *);
 struct tcpcb *
 	 tcp_close(struct tcpcb *);
+void	 tcp_reaper(void *);
 int	 tcp_freeq(struct tcpcb *);
 #if defined(INET6) && !defined(TCP6)
 void	 tcp6_ctlinput(int, struct sockaddr *, void *);
@@ -606,7 +610,7 @@ void	 tcp_xmit_timer(struct tcpcb *, int);
 void	 tcpdropoldhalfopen(struct tcpcb *, u_int16_t);
 #ifdef TCP_SACK
 void	 tcp_sack_option(struct tcpcb *,struct tcphdr *,u_char *,int);
-void	 tcp_update_sack_list(struct tcpcb *tp);
+void	 tcp_update_sack_list(struct tcpcb *tp, tcp_seq, tcp_seq);
 void	 tcp_del_sackholes(struct tcpcb *, struct tcphdr *);
 void	 tcp_clean_sackreport(struct tcpcb *tp);
 void	 tcp_sack_adjust(struct tcpcb *tp);
@@ -648,6 +652,7 @@ void	 syn_cache_reset(struct sockaddr *, struct sockaddr *,
 int	 syn_cache_respond(struct syn_cache *, struct mbuf *);
 void	 syn_cache_timer(void *);
 void	 syn_cache_cleanup(struct tcpcb *);
+void	 syn_cache_reaper(void *);
 
 #endif /* _KERNEL */
 #endif /* _NETINET_TCP_VAR_H_ */

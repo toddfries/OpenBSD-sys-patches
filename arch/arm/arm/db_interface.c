@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.2 2004/02/01 06:10:33 drahn Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.4 2005/01/03 16:58:50 miod Exp $	*/
 /*	$NetBSD: db_interface.c,v 1.34 2003/10/26 23:11:15 chris Exp $	*/
 
 /* 
@@ -345,9 +345,8 @@ Debugger(void)
 	asm(".word	0xe7ffffff");
 }
 
-const struct db_command db_machine_command_table[] = {
+struct db_command db_machine_command_table[] = {
 	{ "frame",	db_show_frame_cmd,	0, NULL },
-	{ "panic",	db_show_panic_cmd,	0, NULL },
 #ifdef ARM32_DB_COMMANDS
 	ARM32_DB_COMMANDS,
 #endif
@@ -383,6 +382,8 @@ db_machine_init(void)
 	 */
 	db_uh.uh_handler = db_trapper;
 	install_coproc_handler_static(0, &db_uh);
+
+	db_machine_commands_install(db_machine_command_table);
 }
 
 u_int

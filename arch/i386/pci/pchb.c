@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.41 2003/11/07 16:43:08 mickey Exp $	*/
+/*	$OpenBSD: pchb.c,v 1.45 2005/03/09 21:53:49 hshoexer Exp $	*/
 /*	$NetBSD: pchb.c,v 1.6 1997/06/06 23:29:16 thorpej Exp $	*/
 
 /*
@@ -86,8 +86,8 @@
 #define PCISET_INTEL_BRIDGE_NUMBER(reg)	(((reg) >> 8) & 0xff)
 #define PCISET_INTEL_PCI_BUS_NUMBER(reg)	(((reg) >> 16) & 0xff)
 
-#define PCISET_INTEL_SDRAMC_REG	0x76
-#define PCISET_INTEL_SDRAMC_IPDLT	(1 << 8)
+#define PCISET_INTEL_SDRAMC_REG	0x74
+#define PCISET_INTEL_SDRAMC_IPDLT	(1 << 24)
 
 /* XXX should be in dev/ic/i82424{reg.var}.h */
 #define I82424_CPU_BCTL_REG		0x53
@@ -125,6 +125,13 @@ struct cfdriver pchb_cd = {
 
 void pchb_rnd(void *v);
 
+const struct pci_matchid via_devices[] = {
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C586_PWR },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C596 },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C596B_PM },
+	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT82C686A_SMB }
+};
+
 int
 pchbmatch(parent, match, aux)
 	struct device *parent;
@@ -133,8 +140,8 @@ pchbmatch(parent, match, aux)
 	struct pci_attach_args *pa = aux;
 
 	/* XXX work around broken via82x866 chipsets */
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_VIATECH &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT82C686A_SMB)
+	if (pci_matchbyid(pa, via_devices,
+	    sizeof(via_devices) / sizeof(via_devices[0])))
 		return (0);
 
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_BRIDGE &&
@@ -223,11 +230,13 @@ pchbattach(parent, self, aux)
 			 * fetched from the wrong location.  This is
 			 * the workaround.
 			 */
-			bcreg = pci_conf_read(pa->pa_pc, pa->pa_tag,
-			    PCISET_INTEL_SDRAMC_REG);
-			bcreg |= PCISET_INTEL_SDRAMC_IPDLT;
-			pci_conf_write(pa->pa_pc, pa->pa_tag,
-			    PCISET_INTEL_SDRAMC_REG, bcreg);
+			if (PCI_REVISION(pa->pa_class) < 0x3) {
+				bcreg = pci_conf_read(pa->pa_pc, pa->pa_tag,
+				    PCISET_INTEL_SDRAMC_REG);
+				bcreg |= PCISET_INTEL_SDRAMC_IPDLT;
+				pci_conf_write(pa->pa_pc, pa->pa_tag,
+				    PCISET_INTEL_SDRAMC_REG, bcreg);
+			}
 			break;
 		case PCI_PRODUCT_INTEL_PCI450_PB:
 			bcreg = pci_conf_read(pa->pa_pc, pa->pa_tag,
@@ -389,7 +398,7 @@ pchb_print(aux, pnp)
 
 /*
  * Should do FIPS testing as per:
- *	http://csrc.nist.gov/publications/fips/fips140-1/fips1401.htm
+ *	http://csrc.nist.gov/publications/fips/fips140-1/fips1401.pdf
  */
 void
 pchb_rnd(v)

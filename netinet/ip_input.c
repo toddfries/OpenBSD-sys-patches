@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.122.2.1 2005/06/14 01:49:24 brad Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.125.2.2 2006/03/05 03:04:01 brad Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -64,16 +64,7 @@
 #include <netinet/ip_ipsp.h>
 #endif /* IPSEC */
 
-#ifndef	IPSENDREDIRECTS
-#define	IPSENDREDIRECTS	1
-#endif
-
-#ifndef IPMTUDISC
-#define IPMTUDISC	1
-#endif
-#ifndef IPMTUDISCTIMEOUT
 #define IPMTUDISCTIMEOUT (10 * 60)	/* as per RFC 1191 */
-#endif
 
 struct ipqhead ipq;
 
@@ -93,24 +84,14 @@ char ipsec_def_enc[20];
 char ipsec_def_auth[20];
 char ipsec_def_comp[20];
 
-/*
- * Note: DIRECTED_BROADCAST is handled this way so that previous
- * configuration using this option will Just Work.
- */
-#ifndef IPDIRECTEDBCAST
-#ifdef DIRECTED_BROADCAST
-#define IPDIRECTEDBCAST	1
-#else
-#define	IPDIRECTEDBCAST	0
-#endif /* DIRECTED_BROADCAST */
-#endif /* IPDIRECTEDBCAST */
-int	ipforwarding = 0;	/* no forwarding unless sysctl'd to enable */
-int	ipsendredirects = IPSENDREDIRECTS;
-int	ip_dosourceroute = 0;	/* no src-routing unless sysctl'd to enable */
+/* values controllable via sysctl */
+int	ipforwarding = 0;
+int	ipsendredirects = 1;
+int	ip_dosourceroute = 0;
 int	ip_defttl = IPDEFTTL;
-int	ip_mtudisc = IPMTUDISC;
+int	ip_mtudisc = 1;
 u_int	ip_mtudisc_timeout = IPMTUDISCTIMEOUT;
-int	ip_directedbcast = IPDIRECTEDBCAST;
+int	ip_directedbcast = 0;
 #ifdef DIAGNOSTIC
 int	ipprintfs = 0;
 #endif
@@ -927,8 +908,8 @@ ip_freef(fp)
 
 /*
  * IP timer processing;
- * if a timer expires on a reassembly
- * queue, discard it.
+ * if a timer expires on a reassembly queue, discard it.
+ * clear the forwarding cache, there might be a better route.
  */
 void
 ip_slowtimo()
@@ -945,6 +926,10 @@ ip_slowtimo()
 		}
 	}
 	ipq_unlock();
+	if (ipforward_rt.ro_rt) {
+		RTFREE(ipforward_rt.ro_rt);
+		ipforward_rt.ro_rt = 0;
+	}
 	splx(s);
 }
 
@@ -1447,7 +1432,6 @@ ip_forward(m, srcrt)
 		icmp_error(m, ICMP_TIMXCEED, ICMP_TIMXCEED_INTRANS, dest, 0);
 		return;
 	}
-	ip->ip_ttl -= IPTTLDEC;
 
 	sin = satosin(&ipforward_rt.ro_dst);
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
@@ -1473,9 +1457,11 @@ ip_forward(m, srcrt)
 	 * we need to generate an ICMP message to the src.
 	 * Pullup to avoid sharing mbuf cluster between m and mcopy.
 	 */
-	mcopy = m_copym(m, 0, imin(ntohs(ip->ip_len), 68), M_DONTWAIT);
+	mcopy = m_copym(m, 0, min(ntohs(ip->ip_len), 68), M_DONTWAIT);
 	if (mcopy)
-		mcopy = m_pullup(mcopy, ip->ip_hl << 2);
+		mcopy = m_pullup(mcopy, min(ntohs(ip->ip_len), 68));
+
+	ip->ip_ttl -= IPTTLDEC;
 
 	/*
 	 * If forwarding packet using same interface that it came in on,

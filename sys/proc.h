@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.75 2004/07/22 15:42:11 art Exp $	*/
+/*	$OpenBSD: proc.h,v 1.77.2.1 2005/12/30 01:28:02 brad Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -144,7 +144,8 @@ struct	proc {
 	int	p_flag;			/* P_* flags. */
 	u_char	p_os;			/* OS tag */
 	char	p_stat;			/* S* process status. */
-	char	p_pad1[2];
+	char	p_pad1[1];
+	u_char	p_descfd;		/* if not 255, fdesc permits this fd */
 
 	pid_t	p_pid;			/* Process identifier. */
 	LIST_ENTRY(proc) p_hash;	/* Hash chain. */
@@ -314,6 +315,16 @@ struct	pcred {
 };
 
 #ifdef _KERNEL
+
+struct uidinfo {
+	LIST_ENTRY(uidinfo) ui_hash;
+	uid_t   ui_uid;
+	long    ui_proccnt;	/* proc structs */
+	long	ui_lockcnt;	/* lockf structs */
+};
+
+struct uidinfo *uid_find(uid_t);
+
 /*
  * We use process IDs <= PID_MAX; PID_MAX + 1 must also fit in a pid_t,
  * as it is used to represent "no process group".
@@ -421,7 +432,7 @@ void	reaper(void);
 void	exit1(struct proc *, int);
 void	exit2(struct proc *);
 int	fork1(struct proc *, int, int, void *, size_t, void (*)(void *),
-	    void *, register_t *);
+	    void *, register_t *, struct proc **);
 void	rqinit(void);
 int	groupmember(gid_t, struct ucred *);
 #if !defined(cpu_switch)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r5k.S,v 1.7 2004/09/10 09:32:13 pefo Exp $ */
+/*	$OpenBSD: cache_r5k.S,v 1.15 2004/09/29 12:52:44 pefo Exp $ */
 
 /*
  * Copyright (c) 1998-2004 Opsycon AB (www.opsycon.se)
@@ -30,7 +30,7 @@
  *  NOTE!
  *
  *  This code does not support caches with other linesize than 32.
- *  Neither will it support R4000 or R4400 Secondary cahes. These
+ *  Neither will it support R4000 or R4400 Secondary caches. These
  *  configurations will need another set of cache functions.
  *
  *  Processors supported:
@@ -96,8 +96,8 @@
 /*
  *  R5000 config register bits.
  */
-#define	CF_5_SC		(1 << 17)	/* Secondary cache not present */
 #define	CF_5_SE		(1 << 12)	/* Secondary cache enable */
+#define	CF_5_SC		(1 << 17)	/* Secondary cache not present */
 #define	CF_5_SS		(3 << 20)	/* Secondary cache size */
 #define	CF_5_SS_AL	20		/* Shift to align */
 
@@ -168,6 +168,12 @@
  */
 LEAF(Mips5k_ConfigCache, 0)
 	.set	noreorder
+	LA	v0, 1f
+	LA	v1, KSEG1_BASE
+	or	v0, v1
+	jr	v0				# Switch to uncached.
+	nop
+1:
 	mfc0	v1, COP_0_PRID			# read processor ID register
 	mfc0	v0, COP_0_CONFIG		# Get configuration register
 
@@ -201,7 +207,7 @@ LEAF(Mips5k_ConfigCache, 0)
 	beq	v1, t1, ConfResult		# R4K 2 way, No L2 control
 	li	t1, (MIPS_R5000 << 8)
 	beq	v1, t1, Conf5K			# R5K 2 way, check L2
-	li	t1, (MIPS_RM52XX << 8)
+	li	t1, (MIPS_RM52X0 << 8)
 	beq	v1, t1, Conf52K			# R52K 2 way, check L2
 	li	t1, (MIPS_RM7000 << 8)
 	beq	v1, t1, Conf7K
@@ -214,7 +220,7 @@ LEAF(Mips5k_ConfigCache, 0)
 	nop
 
 #---- R5K ------------------------------
-Conf5K:					# R5000 type, check for L2 cache
+Conf5K:						# R5xxx type, check for L2 cache
 	and	t1, v0, CF_5_SC
 	bnez	t1, ConfResult			# not enabled
 	li	ta2, 0				# set size to 0.
@@ -224,18 +230,18 @@ Conf5K:					# R5000 type, check for L2 cache
 	beq	t1, t3, ConfResult		# No L2 cache
 	srl	t1, CF_5_SS_AL
 
-	or	t2, CTYPE_HAS_XL2		# External L2 present.
 	li	t3, CF_5_SE			# Set SE in conf
 	or	v0, t3				# Update config register
 	li	ta2, 512*1024			# 512k per 'click'.
 	sll	ta2, t1
 
 	mtc0	v0, COP_0_CONFIG		# Enable L2 cache
+	or	t2, CTYPE_HAS_XL2		# External L2 present.
 	LA	t0, KSEG0_BASE
 	PTR_ADDU t1, t0, ta2
 1:
 	cache	InvalidateSecondaryPage, 0(t0)
-	PTR_ADDU t0, 128*32
+	PTR_ADDU t0, 4096
 	bne	t0, t1, 1b
 	nop
 
@@ -254,19 +260,23 @@ Conf52K:					# R5200 type, check for L2 cache
 	beq	t1, t3, ConfResult		# No L2 cache
 	srl	t1, CF_52_SS_AL
 
-	or	t2, CTYPE_HAS_XL2		# External L2 present.
-	li	t3, CF_5_SE			# Set SE in conf
+	li	t3, CF_52_SE			# Set SE in conf
 	or	v0, t3				# Update config register
 	li	ta2, 512*1024			# 512k per 'click'.
-	lw	t3, CpuExternalCacheOn		# Check if disabled
-	bnez	t3, ConfResult			# No use it.
 	sll	ta2, t1
 
-	and	t2, ~CTYPE_HAS_XL2
-	li	t1, ~CF_52_SE			# Clear SE in conf
-	and	v0, t1				# Update config register
+	mtc0	v0, COP_0_CONFIG		# Enable L2 cache
+	or	t2, CTYPE_HAS_XL2		# External L2 present.
+	LA	t0, KSEG0_BASE
+	PTR_ADDU t1, t0, ta2
+1:
+	cache	InvalidateSecondaryPage, 0(t0)
+	PTR_ADDU t0, 4096
+	bne	t0, t1, 1b
+	nop
+
 	b	ConfResult
-	li	ta2, 0				# L2 cache disabled
+	nop
 
 
 #---- RM7K -----------------------------
@@ -276,48 +286,75 @@ Conf7K:					# RM7000, check for L2 and L3 cache
 	bnez	t1, Conf7KL2			# No L3 cache if set
 	li	ta3, 0				# Set size = 0
 
+#ifndef L3SZEXT
+	li	t3, CF_7_TS
+	and	t1, t3, v0
+	beq	t1, t3, Conf7KL2		# No L3 cache
+	srl	t1, CF_7_TS_AL
+
+	or	t2, CTYPE_HAS_XL3		# External L2 present.
+	li	t3, CF_7_TE			# Set SE in conf
+	or	v0, t3				# Update config register
+	li	ta3, 512*1024			# 512k per 'click'.
+	sll	ta3, t1
+#else
 	lw	ta3, CpuTertiaryCacheSize
 	and	t2, ~CTYPE_HAS_XL3
 	beqz	ta3, Conf7KL2			# No L3 cache present
 	nop
 
+	li	t3, CF_7_TE			# Set SE in conf
+	or	v0, t3				# Update config register
+	mtc0	v0, COP_0_CONFIG		# Enable L3 cache
 	or	t2, CTYPE_HAS_XL3
-	lw	t3, CpuExternalCacheOn		# Check if disabled
-	bnez	t3, Conf7KL2			# No, use it
+#endif
+	LA	t0, KSEG0_BASE
+	PTR_ADDU t1, t0, ta3
+1:
+	cache	InvalidatePage_T, 0(t0)
+	PTR_ADDU t0, 4096
+	bne	t0, t1, 1b
 	nop
 
-	and	v0, ~CF_7_TE			# Clear TE in conf
-	mtc0	v0, COP_0_CONFIG		# establish any new config
-	NOP10
-	li	ta3, 0				# L3 cache disabled
 
 Conf7KL2:
 	and	t1, v0, CF_7_SC			# check for L2 cache
 	bnez	t1, ConfResult
 	li	ta2, 0				# No L2?
 
+	and	t1, v0, CF_7_SE
+	bnez	t1, 3f
+	ori	v0, CF_7_SE
+
+	mtc0	v0, COP_0_CONFIG		# Enable and init L2 cache
+	LA	t0, KSEG0_BASE
+	PTR_ADDU t1, t0, ta3
+1:
+	PTR_ADDU t0, 32
+	bne	t0, t1, 1b
+	cache	IndexStoreTag_S, -4(t0)
+	sync
+
+	LA	t0, KSEG0_BASE
+	PTR_ADDU t1, t0, ta3
+1:
+	PTR_ADDU t0, 32
+	bne	t0, t1, 1b
+	lw	zero, -4(t0)
+	sync
+
+	LA	t0, KSEG0_BASE
+	PTR_ADDU t1, t0, ta3
+1:
+	PTR_ADDU t0, 32
+	bne	t0, t1, 1b
+	cache	IndexStoreTag_S, -4(t0)
+	sync
+
+3:
 	or	t2, CTYPE_HAS_IL2		# L2 is on chip
-	lw	t3, CpuOnboardCacheOn		# Check if disabled
-	bnez	t3, ConfResult			# No, use it
-	li	ta2, 256*1024			# size = 256k
-
-/* Sync on chip L2 */
-
-	LA	a0, KSEG0_BASE
-	LA	a1, KSEG0_BASE+0x00040000
-10:
-	cache	IndexWBInvalidate_S, 0(a0)
-	PTR_ADDU a0, 32
-	bne	a0, a1, 10b
-	nop
-
-	and	t2, ~CTYPE_HAS_IL2
-	li	t1, ~CF_7_SE			# Clear SE in conf
-	and	v0, t1
-	mtc0	v0, COP_0_CONFIG		# establish any new config
-	NOP10
 	b	ConfResult
-	li	ta2, 0				# L2 cache disabled
+	li	ta2, 256*1024			# L2 size = 256k
 
 /*
  * Get here with t2 = Cache type, ta0 = L1 I size, ta1 = L1 D size.
@@ -427,7 +464,7 @@ LEAF(Mips5k_SyncCache, 0)
 	lw	ta0, CpuSecondaryCacheSize
 10:
 	cache	IndexWBInvalidate_S, 0(t3)
-	PTR_SUBU ta0, 32				# Fixed cache line size.
+	PTR_SUBU ta0, 32			# Fixed cache line size.
 	bgtz	ta0, 10b
 	PTR_ADDU t3, 32
 
@@ -514,7 +551,7 @@ LEAF(Mips5k_InvalidateICachePage, 0)
 	NOP10
 #endif
 	j	ra
-	move	v0, zero		# suiword depends on this!!
+	move	v0, zero
 END(Mips5k_InvalidateICachePage)
 
 /*----------------------------------------------------------------------------
@@ -579,7 +616,7 @@ LEAF(Mips5k_InvalidateICache, 0)
 	NOP10
 #endif
 	j	ra
-	move	v0, zero		# suiword depends on this!!
+	move	v0, zero
 END(Mips5k_InvalidateICache)
 
 /*----------------------------------------------------------------------------
@@ -661,7 +698,7 @@ END(Mips5k_SyncDCachePage)
  *		vaddr_t addr, len;
  *
  *	Sync data cache for range of addr to addr + len - 1.
- *	The address can be any valid viritual address as long
+ *	The address can be any valid virtual address as long
  *	as no TLB invalid traps occur. Only lines with matching
  *	addr are flushed.
  *
@@ -719,7 +756,7 @@ END(Mips5k_HitSyncDCache)
  *		vaddr_t addr, len;
  *
  *	Sync secondary cache for range of addr to addr + len - 1.
- *	The address can be any valid viritual address as long
+ *	The address can be any valid virtual address as long
  *	as no TLB invalid traps occur. Only lines with matching
  *	addr are flushed.
  *

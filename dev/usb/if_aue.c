@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.34 2004/07/11 09:47:22 deraadt Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.38 2005/01/03 22:45:52 brad Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -186,6 +186,11 @@ Static const struct aue_type aue_devs[] = {
  {{ USB_VENDOR_ADMTEK,		USB_PRODUCT_ADMTEK_PEGASUS},	  PNA },
  {{ USB_VENDOR_ADMTEK,		USB_PRODUCT_ADMTEK_PEGASUSII},	  PII },
  {{ USB_VENDOR_ADMTEK,		USB_PRODUCT_ADMTEK_PEGASUSII_2},  PII },
+ {{ USB_VENDOR_ADMTEK,		USB_PRODUCT_ADMTEK_PEGASUSII_3},  PII },
+ {{ USB_VENDOR_ADMTEK,		USB_PRODUCT_ADMTEK_PEGASUSII_4},  PII },
+ {{ USB_VENDOR_AEI,		USB_PRODUCT_AEI_FASTETHERNET},	  PII },
+ {{ USB_VENDOR_ALLIEDTELESYN,   USB_PRODUCT_ALLIEDTELESYN_ATUSB100}, PII },
+ {{ USB_VENDOR_ATEN,		USB_PRODUCT_ATEN_UC110T},	  PII },
  {{ USB_VENDOR_BELKIN,		USB_PRODUCT_BELKIN_USB2LAN},	  PII },
  {{ USB_VENDOR_BILLIONTON,	USB_PRODUCT_BILLIONTON_USB100},	  0 },
  {{ USB_VENDOR_BILLIONTON,	USB_PRODUCT_BILLIONTON_USBLP100}, PNA },
@@ -200,12 +205,14 @@ Static const struct aue_type aue_devs[] = {
  {{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_DSB650TX3},	  LSYS|PII },
  {{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_DSB650TX2},	  LSYS|PII },
  {{ USB_VENDOR_DLINK,		USB_PRODUCT_DLINK_DSB650},	  0 },
+ {{ USB_VENDOR_ELCON,		USB_PRODUCT_ELCON_PLAN},	  PNA|PII },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX0},	  0 },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX1},	  LSYS },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX2},	  0 },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBTX3},	  LSYS },
  {{ USB_VENDOR_ELECOM,		USB_PRODUCT_ELECOM_LDUSBLTX},	  PII },
  {{ USB_VENDOR_ELSA,		USB_PRODUCT_ELSA_USB2ETHERNET},	  0 },
+ {{ USB_VENDOR_GIGABYTE,	USB_PRODUCT_GIGABYTE_GNBR402W},	  0 },
  {{ USB_VENDOR_HAWKING,		USB_PRODUCT_HAWKING_UF100},       PII },
  {{ USB_VENDOR_HP,		USB_PRODUCT_HP_HN210E},           PII },
  {{ USB_VENDOR_IODATA,		USB_PRODUCT_IODATA_USBETTX},	  0 },
@@ -221,12 +228,15 @@ Static const struct aue_type aue_devs[] = {
  {{ USB_VENDOR_MELCO, 		USB_PRODUCT_MELCO_LUATX1}, 	  0 },
  {{ USB_VENDOR_MELCO, 		USB_PRODUCT_MELCO_LUATX5}, 	  0 },
  {{ USB_VENDOR_MELCO, 		USB_PRODUCT_MELCO_LUA2TX5}, 	  PII },
+ {{ USB_VENDOR_MOBILITY,	USB_PRODUCT_MOBILITY_EASIDOCK},	  0 },
  {{ USB_VENDOR_NETGEAR,		USB_PRODUCT_NETGEAR_FA101},	  PII },
  {{ USB_VENDOR_SIEMENS,		USB_PRODUCT_SIEMENS_SPEEDSTREAM}, PII },
+ {{ USB_VENDOR_SIIG2,		USB_PRODUCT_SIIG2_USBTOETHER},	  PII },
  {{ USB_VENDOR_SMARTBRIDGES,	USB_PRODUCT_SMARTBRIDGES_SMARTNIC},PII },
  {{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_2202USB},	  0 },
  {{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_2206USB},	  PII },
  {{ USB_VENDOR_SOHOWARE,	USB_PRODUCT_SOHOWARE_NUB100},	  0 },
+ {{ USB_VENDOR_SOHOWARE,	USB_PRODUCT_SOHOWARE_NUB110},	  PII },
 };
 #define aue_lookup(v, p) ((struct aue_type *)usb_lookup(aue_devs, v, p))
 
@@ -815,12 +825,11 @@ USB_ATTACH(aue)
 
 	/* Initialize interface info.*/
 	ifp->if_softc = sc;
-	ifp->if_mtu = ETHERMTU;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = aue_ioctl;
 	ifp->if_start = aue_start;
 	ifp->if_watchdog = aue_watchdog;
-	strncpy(ifp->if_xname, USBDEVNAME(sc->aue_dev), IFNAMSIZ);
+	strlcpy(ifp->if_xname, USBDEVNAME(sc->aue_dev), IFNAMSIZ);
 
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1612,18 +1621,14 @@ aue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		error = (command == SIOCADDMULTI) ?
-#if defined(__NetBSD__)
-			ether_addmulti(ifr, &sc->aue_ec) :
-			ether_delmulti(ifr, &sc->aue_ec);
-#else
 			ether_addmulti(ifr, &sc->arpcom) :
 			ether_delmulti(ifr, &sc->arpcom);
-#endif
+
 		if (error == ENETRESET) {
-			aue_init(sc);
+			if (ifp->if_flags & IFF_RUNNING)
+				aue_setmulti(sc);
+			error = 0;
 		}
-		aue_setmulti(sc);
-		error = 0;
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti_sgc.c,v 1.23 2004/08/30 18:37:45 mickey Exp $	*/
+/*	$OpenBSD: sti_sgc.c,v 1.29 2005/03/17 22:31:53 mickey Exp $	*/
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff
@@ -58,6 +58,8 @@
 #define	STI_GOPT1_REV	0x17
 #define	STI_GOPT2_REV	0x70
 #define	STI_GOPT3_REV	0xd0
+#define	STI_GOPT4_REV	0x20
+#define	STI_GOPT5_REV	0x40
 
 /* internal EG */
 #define	STI_INEG_REV	0x60
@@ -68,11 +70,7 @@ extern struct cfdriver sti_cd;
 int sti_sgc_probe(struct device *, void *, void *);
 void sti_sgc_attach(struct device *, struct device *, void *);
 
-struct cfattach sti_sgc_ca = {
-	sizeof(struct sti_softc), sti_sgc_probe, sti_sgc_attach
-};
-
-struct cfattach sti_phantom_ca = {
+struct cfattach sti_gedoens_ca = {
 	sizeof(struct sti_softc), sti_sgc_probe, sti_sgc_attach
 };
 
@@ -89,8 +87,10 @@ sti_sgc_getrom(int unit, struct confargs *ca)
 		if (ca->ca_type.iodc_sv_model == HPPA_FIO_GSGC &&
 		    (ca->ca_type.iodc_revision == STI_GOPT1_REV ||
 		     ca->ca_type.iodc_revision == STI_GOPT2_REV ||
-		     ca->ca_type.iodc_revision == STI_GOPT3_REV))
-			/* these three share the onboard's prom */ ;
+		     ca->ca_type.iodc_revision == STI_GOPT3_REV ||
+		     ca->ca_type.iodc_revision == STI_GOPT4_REV ||
+		     ca->ca_type.iodc_revision == STI_GOPT5_REV))
+			/* these share the onboard's prom */ ;
 		else
 			rom = 0;
 	}
@@ -178,6 +178,7 @@ sti_sgc_probe(parent, match, aux)
 		printf("sti: unknown type (%x)\n", devtype);
 #endif
 		rv = 0;
+		romend = 0;
 	}
 
 	if (rv &&
@@ -228,12 +229,14 @@ sti_sgc_attach(parent, self, aux)
 		}
 	}
 
-	/* PCXL2: enale accel i/o for this space */
+#ifdef	HP7300LC_CPU
+	/* PCXL2: enable accel i/o for this space */
 	if (cpu_type == hpcxl2)
 		eaio_l2(0x8 >> (((ca->ca_hpa >> 25) & 3) - 2));
+#endif
 
-	sc->sc_devtype = bus_space_read_1(sc->iot, sc->romh, 3);
 	if (ca->ca_hpa == (hppa_hpa_t)PAGE0->mem_cons.pz_hpa)
 		sc->sc_flags |= STI_CONSOLE;
-	sti_attach_common(sc);
+	sti_attach_common(sc, STI_CODEBASE_PA);
+	startuphook_establish(sti_end_attach, sc);
 }

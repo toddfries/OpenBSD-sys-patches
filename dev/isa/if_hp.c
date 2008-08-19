@@ -1,4 +1,4 @@
-/*    $OpenBSD: if_hp.c,v 1.12 2004/06/13 21:49:24 niklas Exp $       */
+/*    $OpenBSD: if_hp.c,v 1.14 2004/09/28 01:02:14 brad Exp $       */
 /*    $NetBSD: if_hp.c,v 1.21 1995/12/24 02:31:31 mycroft Exp $       */
 
 /* XXX THIS DRIVER IS BROKEN.  IT WILL NOT EVEN COMPILE. */
@@ -87,7 +87,7 @@
 #include <dev/isa/if_nereg.h>
 
 int     hpprobe(), hpattach(), hpintr();
-int     hpstart(), hpinit(), ether_output(), hpioctl();
+int     hpstart(), hpinit(), hpioctl();
 
 struct isa_driver hpdriver =
 {
@@ -95,8 +95,6 @@ struct isa_driver hpdriver =
 };
 
 struct mbuf *hpget();
-
-#define ETHER_MAX_LEN 1536
 
 /*
  * Ethernet software status per interface.
@@ -394,12 +392,10 @@ hpattach(dvp)
 
 	ifp->if_unit = unit;
 	ifp->if_name = hpdriver.name;
-	ifp->if_mtu = ETHERMTU;
 	printf("hp%d: %s %d-bit ethernet address %s\n", unit,
 	    hp_id(ns->hp_type), ns->ns_mode & DSDC_WTS ? 32 : 16,
 	    ether_sprintf(ns->ns_addrp));
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_NOTRAILERS;
-	ifp->if_output = ether_output;
 	ifp->if_start = hpstart;
 	ifp->if_ioctl = hpioctl;
 	ifp->if_reset = hpreset;
@@ -682,7 +678,7 @@ loop:
 
 			ns->ns_if.if_ipackets++;
 			len = ns->ns_ph.pr_sz0 + (ns->ns_ph.pr_sz1 << 8);
-			if (len < ETHER_MIN_LEN || len > ETHER_MAX_LEN) {
+			if (len < ETHER_MIN_LEN || len > ETHER_MAX_DIX_LEN) {
 				printf("hpintr: bnry %x curr %x\n", bnry, curr);
 				printf("hpintr: packet hdr: %x %x %x %x\n",
 				    ns->ns_ph.pr_status,
