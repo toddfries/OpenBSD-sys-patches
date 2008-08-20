@@ -1,4 +1,4 @@
-/*	$OpenBSD: macepcibridge.c,v 1.15 2008/02/20 18:46:20 miod Exp $ */
+/*	$OpenBSD: macepcibridge.c,v 1.17 2008/07/30 17:37:46 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB (www.opsycon.se)
@@ -100,6 +100,9 @@ bus_space_t mace_pcibbus_mem_tag = {
 	mace_pcib_read_2, mace_pcib_write_2,
 	mace_pcib_read_4, mace_pcib_write_4,
 	mace_pcib_read_8, mace_pcib_write_8,
+	mace_pcib_read_raw_2, mace_pcib_write_raw_2,
+	mace_pcib_read_raw_4, mace_pcib_write_raw_4,
+	mace_pcib_read_raw_8, mace_pcib_write_raw_8,
 	mace_pcib_space_map, mace_pcib_space_unmap, mace_pcib_space_region,
 };
 
@@ -112,6 +115,9 @@ bus_space_t mace_pcibbus_io_tag = {
 	mace_pcib_read_2, mace_pcib_write_2,
 	mace_pcib_read_4, mace_pcib_write_4,
 	mace_pcib_read_8, mace_pcib_write_8,
+	mace_pcib_read_raw_2, mace_pcib_write_raw_2,
+	mace_pcib_read_raw_4, mace_pcib_write_raw_4,
+	mace_pcib_read_raw_8, mace_pcib_write_raw_8,
 	mace_pcib_space_map, mace_pcib_space_unmap, mace_pcib_space_region,
 };
 
@@ -332,7 +338,7 @@ mace_pcibr_bus_maxdevs(cpv, busno)
 	void *cpv;
 	int busno;
 {
-	return(16);
+	return 5;
 }
 
 pcireg_t
@@ -392,6 +398,14 @@ int
 mace_pcibr_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 {
 	int bus, device, pirq;
+	static const signed char intrmap[][PCI_INTERRUPT_PIN_MAX] = {
+		{ -1, -1, -1, -1 },
+		{ 9, -1, -1, -1 },	/* ahc0 */
+		{ 10, -1, -1, -1 },	/* ahc1 */
+		{ 11, 14, 15, 16 },	/* slot */
+		{ 12, 16, 14, 15 },	/* no slots... */
+		{ 13, 15, 16, 14 }	/* ... unless you solder them */
+	};
 
 	*ihp = -1;
 
@@ -399,30 +413,21 @@ mace_pcibr_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 		/* No IRQ used. */
 		return 1;
 	}
+#ifdef DIAGNOSTIC
 	if (pa->pa_intrpin > 4) {
 		printf("mace_pcibr_intr_map: bad interrupt pin %d\n", pa->pa_intrpin);
 		return 1;
 	}
+#endif
 
-	mace_pcibr_decompose_tag((void *)NULL, pa->pa_tag, &bus, &device, NULL);
+	pci_decompose_tag(pa->pa_pc, pa->pa_intrtag, &bus, &device, NULL);
 
-	if (sys_config.system_type == SGI_O2) {
-		pirq = -1;
-		switch (device) {
-		case 1:
-			pirq = 9;
-			break;
-		case 2:
-			pirq = 10;
-			break;
-		case 3:
-			pirq = 11;
-			break;
-		}
-	}
+	pirq = -1;
+	if ((unsigned int)device < sizeof(intrmap) / PCI_INTERRUPT_PIN_MAX)
+		pirq = intrmap[device][pa->pa_intrpin - PCI_INTERRUPT_PIN_A];
 
 	*ihp = pirq;
-	return 0;
+	return pirq >= 0 ? 0 : 1;
 }
 
 const char *
@@ -506,6 +511,78 @@ void
 mace_pcib_write_8(bus_space_tag_t t, bus_space_handle_t h, bus_size_t o, u_int64_t v)
 {
 	*(volatile u_int64_t *)(h + o) = v;
+}
+
+void
+mace_pcib_read_raw_2(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
+    u_int8_t *buf, bus_size_t len)
+{
+	volatile u_int16_t *addr = (volatile u_int16_t *)(h + (o | 2) - (o & 3));
+	len >>= 1;
+	while (len-- != 0) {
+		*(u_int16_t *)buf = letoh16(*addr);
+		buf += 2;
+	}
+}
+
+void
+mace_pcib_write_raw_2(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
+    const u_int8_t *buf, bus_size_t len)
+{
+	volatile u_int16_t *addr = (volatile u_int16_t *)(h + (o | 2) - (o & 3));
+	len >>= 1;
+	while (len-- != 0) {
+		*addr = htole16(*(u_int16_t *)buf);
+		buf += 2;
+	}
+}
+
+void
+mace_pcib_read_raw_4(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
+    u_int8_t *buf, bus_size_t len)
+{
+	volatile u_int32_t *addr = (volatile u_int32_t *)(h + o);
+	len >>= 2;
+	while (len-- != 0) {
+		*(u_int32_t *)buf = letoh32(*addr);
+		buf += 4;
+	}
+}
+
+void
+mace_pcib_write_raw_4(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
+    const u_int8_t *buf, bus_size_t len)
+{
+	volatile u_int32_t *addr = (volatile u_int32_t *)(h + o);
+	len >>= 2;
+	while (len-- != 0) {
+		*addr = htole32(*(u_int32_t *)buf);
+		buf += 4;
+	}
+}
+
+void
+mace_pcib_read_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
+    u_int8_t *buf, bus_size_t len)
+{
+	volatile u_int64_t *addr = (volatile u_int64_t *)(h + o);
+	len >>= 3;
+	while (len-- != 0) {
+		*(u_int64_t *)buf = letoh64(*addr);
+		buf += 8;
+	}
+}
+
+void
+mace_pcib_write_raw_8(bus_space_tag_t t, bus_space_handle_t h, bus_addr_t o,
+    const u_int8_t *buf, bus_size_t len)
+{
+	volatile u_int64_t *addr = (volatile u_int64_t *)(h + o);
+	len >>= 3;
+	while (len-- != 0) {
+		*addr = htole64(*(u_int64_t *)buf);
+		buf += 8;
+	}
 }
 
 extern int extent_malloc_flags;

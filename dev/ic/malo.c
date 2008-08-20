@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.82 2008/04/16 18:32:15 damien Exp $ */
+/*	$OpenBSD: malo.c,v 1.85 2008/08/14 16:02:24 damien Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -1360,7 +1360,7 @@ malo_tx_intr(struct malo_softc *sc)
 		/* save last used TX rate */
 		sc->sc_last_txrate = malo_chip2rate(desc->datarate);
 
-		/* cleanup TX data and TX descritpor */
+		/* cleanup TX data and TX descriptor */
 		bus_dmamap_sync(sc->sc_dmat, data->map, 0,
 		    data->map->dm_mapsize, BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->sc_dmat, data->map);
@@ -1626,6 +1626,7 @@ malo_rx_intr(struct malo_softc *sc)
 	struct malo_rx_desc *desc;
 	struct malo_rx_data *data;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *mnew, *m;
 	uint32_t rxRdPtr, rxWrPtr;
@@ -1736,7 +1737,10 @@ malo_rx_intr(struct malo_softc *sc)
 		ni = ieee80211_find_rxnode(ic, wh);
 
 		/* send the frame to the 802.11 layer */
-		ieee80211_input(ifp, m, ni, desc->rssi, 0);
+		rxi.rxi_flags = 0;
+		rxi.rxi_rssi = desc->rssi;
+		rxi.rxi_tstamp = 0;	/* unused */
+		ieee80211_input(ifp, m, ni, &rxi);
 
 		/* node is no longer needed */
 		ieee80211_release_node(ic, ni);
@@ -1754,13 +1758,6 @@ skip:
 	}
 
 	malo_mem_write4(sc, sc->sc_RxPdRdPtr, rxRdPtr);
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
-		(*ifp->if_start)(ifp);
 }
 
 int

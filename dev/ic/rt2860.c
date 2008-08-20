@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.15 2008/06/08 19:34:14 jsg Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.18 2008/08/14 16:02:24 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007,2008
@@ -60,8 +60,8 @@
 #include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
-#include <dev/ic/rt2860reg.h>
 #include <dev/ic/rt2860var.h>
+#include <dev/ic/rt2860reg.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
@@ -191,6 +191,11 @@ rt2860_attach(void *xsc, int id)
 		    sc->sc_dev.dv_xname);
 		return ETIMEDOUT;
 	}
+	if ((sc->mac_rev >> 16) != 0x2860 &&
+	    (id == PCI_PRODUCT_RALINK_RT2890 ||
+	     id == PCI_PRODUCT_RALINK_RT2790 ||
+	     id == PCI_PRODUCT_AWT_RT2890))
+		sc->sc_flags |= RT2860_ADVANCED_PS;
 
 	/* retrieve RF rev. no and various other things from EEPROM */
 	rt2860_read_eeprom(sc);
@@ -1014,6 +1019,7 @@ rt2860_rx_intr(struct rt2860_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m, *mnew;
 	uint8_t ant, rssi;
@@ -1101,8 +1107,12 @@ rt2860_rx_intr(struct rt2860_softc *sc)
 		m->m_pkthdr.len = m->m_len = letoh16(rxwi->len) & 0xfff;
 
 		wh = mtod(m, struct ieee80211_frame *);
-		/* frame is decrypted by hardware */
-		wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
+		rxi.rxi_flags = 0;
+		if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
+			/* frame is decrypted by hardware */
+			wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
+			rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
+		}
 
 		/* HW may insert 2 padding bytes after 802.11 header */
 		if (rxd->flags & htole32(RT2860_RX_L2PAD)) {
@@ -1164,7 +1174,9 @@ skipbpf:
 		ni = ieee80211_find_rxnode(ic, wh);
 
 		/* send the frame to the 802.11 layer */
-		ieee80211_input(ifp, m, ni, rssi, 0);
+		rxi.rxi_rssi = rssi;
+		rxi.rxi_tstamp = 0;	/* unused */
+		ieee80211_input(ifp, m, ni, &rxi);
 
 		/* node is no longer needed */
 		ieee80211_release_node(ic, ni);
@@ -1181,13 +1193,6 @@ skip:		rxd->sdl0 &= ~htole16(RT2860_RX_DDONE);
 	/* tell HW what we have processed */
 	RAL_WRITE(sc, RT2860_RX_CALC_IDX,
 	    (sc->rxq.cur - 1) % RT2860_RX_RING_COUNT);
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
-		rt2860_start(ifp);
 }
 
 int
@@ -1351,9 +1356,6 @@ rt2860_tx_data(struct rt2860_softc *sc, struct mbuf *m0,
 	struct rt2860_txd *txd;
 	struct rt2860_txwi *txwi;
 	struct ieee80211_frame *wh;
-#if 0
-	struct ieee80211_key *k;
-#endif
 	bus_dma_segment_t *seg;
 	u_int hdrlen;
 	uint16_t dur;
@@ -1380,18 +1382,6 @@ rt2860_tx_data(struct rt2860_softc *sc, struct mbuf *m0,
 
 	/* get MCS code from rate */
 	mcs = rt2860_rate2mcs(rate);
-
-#if 0
-	if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
-		k = ieee80211_get_txkey(ic, wh, ni);
-
-		if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
-			return ENOBUFS;
-
-		/* packet header may have moved, reset our local pointer */
-		wh = mtod(m0, struct ieee80211_frame *);
-	}
-#endif
 
 	/* setup TX Wireless Information */
 	txwi = data->txwi;
@@ -1905,7 +1895,7 @@ rt2860_set_basicrates(struct rt2860_softc *sc)
 		RAL_WRITE(sc, RT2860_LEGACY_BASIC_RATE, 0x003);
 	else if (ic->ic_curmode == IEEE80211_MODE_11A)
 		RAL_WRITE(sc, RT2860_LEGACY_BASIC_RATE, 0x150);
-	else	/* 11a */
+	else	/* 11g */
 		RAL_WRITE(sc, RT2860_LEGACY_BASIC_RATE, 0x15f);
 }
 
@@ -1913,12 +1903,10 @@ void
 rt2860_select_chan_group(struct rt2860_softc *sc, int group)
 {
 	uint32_t tmp;
-	uint8_t bbp66;
 
 	rt2860_mcu_bbp_write(sc, 62, 0x37 - sc->lna[group]);
 	rt2860_mcu_bbp_write(sc, 63, 0x37 - sc->lna[group]);
 	rt2860_mcu_bbp_write(sc, 64, 0x37 - sc->lna[group]);
-	rt2860_mcu_bbp_write(sc, 86, 0x37 - sc->lna[group]);
 	rt2860_mcu_bbp_write(sc, 82, (group == 0) ? 0x62 : 0xf2);
 
 	tmp = RAL_READ(sc, RT2860_TX_BAND_CFG);
@@ -1943,8 +1931,7 @@ rt2860_select_chan_group(struct rt2860_softc *sc, int group)
 	}
 	RAL_WRITE(sc, RT2860_TX_PIN_CFG, tmp);
 
-	bbp66 = (group == 0) ? 0x2e + sc->lna[0] : 0x4c;
-	rt2860_mcu_bbp_write(sc, 66, bbp66);
+	rt2860_mcu_bbp_write(sc, 66, 0x2e + sc->lna[group]);
 }
 
 void
@@ -1971,14 +1958,9 @@ rt2860_set_chan(struct rt2860_softc *sc, struct ieee80211_channel *c)
 	else if (sc->nrxchains == 2)
 		r2 |= 1 << 4;		/* 2R: disable Rx chain 3 */
 
-#ifdef notyet
 	/* use Tx power values from EEPROM */
 	txpow1 = sc->txpow1[i];
 	txpow2 = sc->txpow2[i];
-#else
-	/* use default Tx power values */
-	txpow1 = 0; txpow2 = 5;
-#endif
 	if (IEEE80211_IS_CHAN_5GHZ(c)) {
 		txpow1 = txpow1 << 1 | 1;
 		txpow2 = txpow2 << 1 | 1;
@@ -2394,6 +2376,17 @@ rt2860_read_eeprom(struct rt2860_softc *sc)
 	if ((val & 0xff) != 0xff)
 		sc->calib_2ghz = sc->calib_5ghz = 0; /* XXX (val >> 1) & 1 */;
 
+	if (sc->sc_flags & RT2860_ADVANCED_PS) {
+		/* read PCIe power save level */
+		val = rt2860_eeprom_read(sc, RT2860_EEPROM_PCIE_PSLEVEL);
+		if ((val & 0xff) != 0xff) {
+			sc->pslevel = val & 0x3;
+			val = rt2860_eeprom_read(sc, RT2860_EEPROM_REV);
+			if (val >> 8 != 0x92 || !(val & 0x80))
+				sc->pslevel = MIN(sc->pslevel, 1);
+			DPRINTF(("EEPROM PCIe PS Level=%d\n", sc->pslevel));
+		}
+	}
 	/* read power settings for 2GHz channels */
 	for (i = 0; i < 14; i += 2) {
 		val = rt2860_eeprom_read(sc,
@@ -2406,33 +2399,36 @@ rt2860_read_eeprom(struct rt2860_softc *sc)
 		sc->txpow2[i + 0] = (int8_t)(val & 0xff);
 		sc->txpow2[i + 1] = (int8_t)(val >> 8);
 	}
+	/* fix broken Tx power entries */
+	for (i = 0; i < 14; i++) {
+		if (sc->txpow1[i] < 0 || sc->txpow1[i] > 31)
+			sc->txpow1[i] = 5;
+		if (sc->txpow2[i] < 0 || sc->txpow2[i] > 31)
+			sc->txpow2[i] = 5;
+		DPRINTF(("chan %d: power1=%d, power2=%d\n",
+		    rt2860_rf2850[i].chan, sc->txpow1[i], sc->txpow2[i]));
+	}
 	/* read power settings for 5GHz channels */
-	for (; i < 50; i += 2) {
+	for (i = 0; i < 36; i += 2) {
 		val = rt2860_eeprom_read(sc,
 		    RT2860_EEPROM_PWR5GHZ_BASE1 + i / 2);
-		sc->txpow1[i + 0] = (int8_t)(val & 0xff);
-		sc->txpow1[i + 1] = (int8_t)(val >> 8);
+		sc->txpow1[i + 14] = (int8_t)(val & 0xff);
+		sc->txpow1[i + 15] = (int8_t)(val >> 8);
 
 		val = rt2860_eeprom_read(sc,
 		    RT2860_EEPROM_PWR5GHZ_BASE2 + i / 2);
-		sc->txpow2[i + 0] = (int8_t)(val & 0xff);
-		sc->txpow2[i + 1] = (int8_t)(val >> 8);
+		sc->txpow2[i + 14] = (int8_t)(val & 0xff);
+		sc->txpow2[i + 15] = (int8_t)(val >> 8);
 	}
-
 	/* fix broken Tx power entries */
-	for (i = 0; i < N(rt2860_rf2850); i++) {
+	for (i = 0; i < 36; i++) {
+		if (sc->txpow1[14 + i] < -7 || sc->txpow1[14 + i] > 15)
+			sc->txpow1[14 + i] = 5;
+		if (sc->txpow2[14 + i] < -7 || sc->txpow2[14 + i] > 15)
+			sc->txpow2[14 + i] = 5;
 		DPRINTF(("chan %d: power1=%d, power2=%d\n",
-		    rt2860_rf2850[i].chan, sc->txpow1[i], sc->txpow2[i]));
-		if (sc->txpow1[i] < -6 || sc->txpow1[i] > 36) {
-			DPRINTF(("out-of-range Tx power1 for chan %d: %d\n",
-			    rt2860_rf2850[i].chan, sc->txpow1[i]));
-			sc->txpow1[i] = 5;
-		}
-		if (sc->txpow2[i] < -6 || sc->txpow2[i] > 36) {
-			DPRINTF(("out-of-range Tx power2 for chan %d: %d\n",
-			    rt2860_rf2850[i].chan, sc->txpow2[i]));
-			sc->txpow2[i] = 5;
-		}
+		    rt2860_rf2850[14 + i].chan, sc->txpow1[14 + i],
+		    sc->txpow2[14 + i]));
 	}
 
 	/* read Tx power compensation for each Tx rate */
@@ -2606,7 +2602,7 @@ rt2860_init(struct ifnet *ifp)
 	struct rt2860_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	uint32_t tmp;
-	uint8_t bbp3;
+	uint8_t bbp1, bbp3;
 	int i, qid, ridx, ntries, error;
 
 	/* for CardBus, power on the socket */
@@ -2756,6 +2752,12 @@ rt2860_init(struct ifnet *ifp)
 		bbp3 |= 1 << 4;
 	rt2860_mcu_bbp_write(sc, 3, bbp3);
 
+	/* disable non-existing Tx chains */
+	bbp1 = rt2860_mcu_bbp_read(sc, 1);
+	if (sc->ntxchains == 1)
+		bbp1 &= ~(1 << 3 | 1 << 4);
+	rt2860_mcu_bbp_write(sc, 1, bbp1);
+
 	/* select default channel */
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 	rt2860_set_chan(sc, ic->ic_ibss_chan);
@@ -2821,6 +2823,9 @@ rt2860_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RT2860_INT_STATUS, 0xffffffff);
 	/* enable interrupts */
 	RAL_WRITE(sc, RT2860_INT_MASK, 0x3fffc);
+
+	if (sc->sc_flags & RT2860_ADVANCED_PS)
+		(void)rt2860_mcu_cmd(sc, RT2860_MCU_CMD_PSLEVEL, sc->pslevel);
 
 	ifp->if_flags &= ~IFF_OACTIVE;
 	ifp->if_flags |= IFF_RUNNING;

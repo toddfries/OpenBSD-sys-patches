@@ -70,15 +70,15 @@ static drm_ioctl_desc_t		  drm_ioctls[256] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_ADD_MAP, drm_addmap_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_RM_MAP, drm_rmmap_ioctl, DRM_AUTH),
 
-	DRM_IOCTL_DEF(DRM_IOCTL_SET_SAREA_CTX, drm_setsareactx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_IOCTL_GET_SAREA_CTX, drm_getsareactx, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_IOCTL_SET_SAREA_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_GET_SAREA_CTX, drm_noop, DRM_AUTH),
 
 	DRM_IOCTL_DEF(DRM_IOCTL_ADD_CTX, drm_addctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_RM_CTX, drm_rmctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_IOCTL_MOD_CTX, drm_modctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_MOD_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_CTX, drm_getctx, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_IOCTL_SWITCH_CTX, drm_switchctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_IOCTL_NEW_CTX, drm_newctx, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_SWITCH_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+	DRM_IOCTL_DEF(DRM_IOCTL_NEW_CTX, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_RES_CTX, drm_resctx, DRM_AUTH),
 
 	DRM_IOCTL_DEF(DRM_IOCTL_ADD_DRAW, drm_adddraw, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
@@ -177,8 +177,7 @@ drm_attach(struct device *parent, struct device *kdev,
 	dev->id_entry = id_entry;
 	dev->driver.id_entry = id_entry;
 
-	printf("\n");
-	DRM_INFO("%s (unit %d)\n", id_entry->name, dev->unit);
+	printf(": %s(%d)", id_entry->name, dev->unit);
 	drm_load(dev);
 }
 
@@ -254,12 +253,11 @@ drm_firstopen(struct drm_device *dev)
 	for ( i = 0 ; i < DRM_ARRAY_SIZE(dev->counts) ; i++ )
 		atomic_set( &dev->counts[i], 0 );
 
+	dev->magicid = 1;
 	SPLAY_INIT(&dev->magiclist);
 
 	dev->lock.lock_queue = 0;
 	dev->irq_enabled = 0;
-	dev->context_flag = 0;
-	dev->last_context = 0;
 	dev->if_version = 0;
 
 	dev->buf_pgid = 0;
@@ -286,7 +284,7 @@ drm_lastclose(struct drm_device *dev)
 		drm_irq_uninstall(dev);
 
 	if ( dev->unique ) {
-		free(dev->unique, M_DRM);
+		drm_free(dev->unique, dev->unique_len + 1,  DRM_MEM_DRIVER);
 		dev->unique = NULL;
 		dev->unique_len = 0;
 	}
@@ -295,7 +293,7 @@ drm_lastclose(struct drm_device *dev)
 				/* Clear pid list */
 	while ((pt = SPLAY_ROOT(&dev->magiclist)) != NULL) {
 		SPLAY_REMOVE(drm_magic_tree, &dev->magiclist, pt);
-		free(pt, M_DRM);
+		drm_free(pt, sizeof(*pt), DRM_MEM_MAGIC);
 	}
 
 				/* Clear AGP information */
@@ -310,7 +308,7 @@ drm_lastclose(struct drm_device *dev)
 				drm_agp_unbind_memory(entry->handle);
 			drm_agp_free_memory(entry->handle);
 			TAILQ_REMOVE(&dev->agp->memory, entry, link);
-			free(entry, M_DRM);
+			drm_free(entry, sizeof(*entry), DRM_MEM_AGPLISTS);
 		}
 
 		if (dev->agp->acquired)
@@ -405,8 +403,7 @@ drm_load(struct drm_device *dev)
 		DRM_ERROR("Cannot allocate memory for context bitmap.\n");
 		goto error;
 	}
-	DRM_INFO("Initialized %s %d.%d.%d %s\n",
-	    dev->driver.name,
+	printf(", %d.%d.%d %s\n",
 	    dev->driver.major,
 	    dev->driver.minor,
 	    dev->driver.patchlevel,
@@ -447,7 +444,7 @@ drm_unload(struct drm_device *dev)
 	DRM_UNLOCK();
 
 	if ( dev->agp ) {
-		free(dev->agp, M_DRM);
+		drm_free(dev->agp, sizeof(*dev->agp), DRM_MEM_AGPLISTS);
 		dev->agp = NULL;
 	}
 
@@ -495,8 +492,6 @@ drmopen(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 	if (dev == NULL)
 		return (ENXIO);
 
-	dev->kdev = kdev; /* hack for now */
-
 	DRM_DEBUG( "open_count = %d\n", dev->open_count );
 
 	retcode = drm_open_helper(kdev, flags, fmt, p, dev);
@@ -531,9 +526,6 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 		goto done;
 	}
 
-	if (--file_priv->refs != 0)
-		goto done;
-
 	if (dev->driver.preclose != NULL)
 		dev->driver.preclose(dev, file_priv);
 
@@ -552,7 +544,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 		if (dev->driver.reclaim_buffers_locked != NULL)
 			dev->driver.reclaim_buffers_locked(dev, file_priv);
 
-		drm_lock_free(dev, &dev->lock.hw_lock->lock,
+		drm_lock_free(&dev->lock,
 		    _DRM_LOCKING_CONTEXT(dev->lock.hw_lock->lock));
 		
 				/* FIXME: may require heavy-handed reset of
@@ -568,8 +560,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 				retcode = EINTR;
 				break;
 			}
-			if (drm_lock_take(&dev->lock.hw_lock->lock,
-			    DRM_KERNEL_CONTEXT)) {
+			if (drm_lock_take(&dev->lock, DRM_KERNEL_CONTEXT)) {
 				dev->lock.file_priv = file_priv;
 				dev->lock.lock_time = jiffies;
                                 atomic_inc( &dev->counts[_DRM_STAT_LOCKS] );
@@ -583,8 +574,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 		}
 		if (retcode == 0) {
 			dev->driver.reclaim_buffers_locked(dev, file_priv);
-			drm_lock_free(dev, &dev->lock.hw_lock->lock,
-			    DRM_KERNEL_CONTEXT);
+			drm_lock_free(&dev->lock, DRM_KERNEL_CONTEXT);
 		}
 	}
 
@@ -596,7 +586,7 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 	if (dev->driver.postclose != NULL)
 		dev->driver.postclose(dev, file_priv);
 	TAILQ_REMOVE(&dev->files, file_priv, link);
-	free(file_priv, M_DRM);
+	drm_free(file_priv, sizeof(*file_priv), DRM_MEM_FILES);
 
 	/* ========================================================
 	 * End inline drm_release

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211.c,v 1.31 2008/04/26 20:03:34 damien Exp $	*/
+/*	$OpenBSD: ieee80211.c,v 1.33 2008/07/27 14:21:15 damien Exp $	*/
 /*	$NetBSD: ieee80211.c,v 1.19 2004/06/06 05:45:29 dyoung Exp $	*/
 
 /*-
@@ -62,6 +62,7 @@
 #endif
 
 #include <net80211/ieee80211_var.h>
+#include <net80211/ieee80211_priv.h>
 
 #ifdef IEEE80211_DEBUG
 int	ieee80211_debug = 0;
@@ -665,8 +666,8 @@ ieee80211_setmode(struct ieee80211com *ic, enum ieee80211_phymode mode)
 
 	/* validate new mode */
 	if ((ic->ic_modecaps & (1<<mode)) == 0) {
-		IEEE80211_DPRINTF(("%s: mode %u not supported (caps 0x%x)\n",
-			__func__, mode, ic->ic_modecaps));
+		DPRINTF(("mode %u not supported (caps 0x%x)\n",
+		    mode, ic->ic_modecaps));
 		return EINVAL;
 	}
 
@@ -689,8 +690,7 @@ ieee80211_setmode(struct ieee80211com *ic, enum ieee80211_phymode mode)
 		}
 	}
 	if (i > IEEE80211_CHAN_MAX) {
-		IEEE80211_DPRINTF(("%s: no channels found for mode %u\n",
-			__func__, mode));
+		DPRINTF(("no channels found for mode %u\n", mode));
 		return EINVAL;
 	}
 
@@ -956,7 +956,7 @@ ieee80211_rate2plcp(u_int8_t rate, enum ieee80211_phymode mode)
         } else
 		panic("Unexpected mode %u", mode);
 
-	IEEE80211_DPRINTF(("%s: unsupported rate %u\n", __func__, rate));
+	DPRINTF(("unsupported rate %u\n", rate));
 
 	return 0;
 }
@@ -987,9 +987,9 @@ ieee80211_plcp2rate(u_int8_t plcp, enum ieee80211_phymode mode)
 		case 0x0c:	return 108;
 		}
 	} else
-		panic("Unexpected mode %u", mode);
+		panic("unexpected mode %u", mode);
 
-	IEEE80211_DPRINTF(("%s: unsupported plcp %u\n", __func__, plcp));
+	DPRINTF(("unsupported plcp %u\n", plcp));
 
 	return 0;
 }

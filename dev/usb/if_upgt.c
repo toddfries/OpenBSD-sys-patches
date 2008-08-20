@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.35 2008/04/16 18:32:15 damien Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.37 2008/08/08 12:20:24 thib Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -1771,6 +1771,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	struct ifnet *ifp = &ic->ic_if;
 	struct upgt_lmac_rx_desc *rxdesc;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m;
 	int s;
@@ -1782,7 +1783,8 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	m = m_devget(rxdesc->data - ETHER_ALIGN, pkglen + ETHER_ALIGN, 0, ifp,
 	    NULL);
 	if (m == NULL) {
-		printf("%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
+		DPRINTF(1, "%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
+		ifp->if_ierrors++;
 		return;
 	}
 	m_adj(m, ETHER_ALIGN);
@@ -1817,7 +1819,10 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* push the frame up to the 802.11 stack */
-	ieee80211_input(ifp, m, ni, rxdesc->rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = rxdesc->rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);

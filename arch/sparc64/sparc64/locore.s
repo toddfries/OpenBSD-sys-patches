@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.145 2008/07/10 09:29:33 kettenis Exp $	*/
+/*	$OpenBSD: locore.s,v 1.152 2008/08/10 14:13:05 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.137 2001/08/13 06:10:10 jdolecek Exp $	*/
 
 /*
@@ -346,6 +346,13 @@ _C_LABEL(data_start):					! Start of data segment
 	.globl	_C_LABEL(u0)
 _C_LABEL(u0):	.xword	0
 estack0:	.xword	0
+
+/*
+ * This stack is used for bootstrapping and spinning up CPUs.
+ */
+	.space	4096
+	.align	16
+tmpstack:
 
 #ifdef DEBUG
 /*
@@ -4275,12 +4282,13 @@ _C_LABEL(sparc_interrupt):
 	 * If this is a %tick softint, clear it then call interrupt_vector.
 	 */
 	rd	SOFTINT, %g1
-	btst	1, %g1
+	set	(TICK_INT|STICK_INT), %g2
+	andcc	%g2, %g1, %g2
 	bz,pt	%icc, 0f
-	 set	_C_LABEL(intrlev), %g3
-	wr	%g0, 1, CLEAR_SOFTINT
+	 GET_CPUINFO_VA(%g7)
+	wr	%g2, 0, CLEAR_SOFTINT
 	ba,pt	%icc, setup_sparcintr
-	 ldx	[%g3 + 8], %g5	! intrlev[1] is reserved for %tick intr.
+	 add	%g7, CI_TICKINTR, %g5
 0:
 	INTR_SETUP -CC64FSZ-TF_SIZE-8
 
@@ -4857,6 +4865,11 @@ dostart:
 #endif	/* 0 */
 
 	/*
+	 * Switch to temporary stack.
+	 */
+	set	tmpstack-CC64FSZ-BIAS, %sp
+
+	/*
 	 * Ready to run C code; finish bootstrap.
 	 */
 1:
@@ -4964,12 +4977,6 @@ ENTRY(sun4u_set_tsbs)
 
 
 #ifdef MULTIPROCESSOR
-	.data
-	.space 2048
-	_ALIGN
-tmpstack:
-	.text
-
 ENTRY(cpu_mp_startup)
 	mov	%o0, %g2
 
@@ -6036,18 +6043,15 @@ ENTRY(cpu_switchto)
 	rdpr	%pstate, %o1		! oldpstate = %pstate;
 	wrpr	%g0, PSTATE_INTR, %pstate ! make sure we're on normal globals
 
-	mov	%i0, %l4		! oldproc
-	mov	%i1, %l3		! newproc
-
 	ldx	[%g7 + CI_CPCB], %l5
 
 	/*
 	 * Register usage:
 	 *
+	 *	%i0 = oldproc
+	 *	%i1 = newproc
 	 *	%l1 = newpcb
 	 *	%l2 = newpstate
-	 *	%l3 = p
-	 *	%l4 = lastproc
 	 *	%l5 = cpcb
 	 *	%o0 = tmp 1
 	 *	%o1 = oldpstate
@@ -6058,10 +6062,10 @@ ENTRY(cpu_switchto)
 	 */
 
 	/* firewalls */
-	ldx	[%l3 + P_WCHAN], %o0	! if (p->p_wchan)
+	ldx	[%i1 + P_WCHAN], %o0	! if (newproc->p_wchan)
 	brnz,pn	%o0, Lsw_panic_wchan	!	panic("switch wchan");
 !	 XXX check no delay slot
-	ldsb	[%l3 + P_STAT], %o0	! if (p->p_stat != SRUN)
+	ldsb	[%i1 + P_STAT], %o0	! if (newproc->p_stat != SRUN)
 	cmp	%o0, SRUN
 	bne	Lsw_panic_srun		!	panic("switch SRUN");
 !	 XXX check no delay slot
@@ -6074,13 +6078,11 @@ ENTRY(cpu_switchto)
 	 * p->p_cpu = curcpu();
 	 */
 	ldx	[%g7 + CI_SELF], %o0
-	stx	%o0, [%l3 + P_CPU]
+	stx	%o0, [%i1 + P_CPU]
 #endif	/* defined(MULTIPROCESSOR) */
-	mov	SONPROC, %o0			! p->p_stat = SONPROC
-	stb	%o0, [%l3 + P_STAT]
-	st	%g0, [%g7 + CI_WANT_RESCHED]	! want_resched = 0;
-	ldx	[%l3 + P_ADDR], %l1		! newpcb = p->p_addr;
-	stx	%l4, [%g7 + CI_CURPROC]		! restore old proc so we can save it
+	mov	SONPROC, %o0			! newproc->p_stat = SONPROC
+	stb	%o0, [%i1 + P_STAT]
+	ldx	[%i1 + P_ADDR], %l1		! newpcb = newpeoc->p_addr;
 
 	flushw				! save all register windows except this one
 
@@ -6088,7 +6090,7 @@ ENTRY(cpu_switchto)
 	 * Not the old process.  Save the old process, if any;
 	 * then load p.
 	 */
-	brz,pn	%l4, Lsw_load		! if no old process, go load
+	brz,pn	%i0, Lsw_load		! if no old process, go load
 	 wrpr	%g0, PSTATE_KERN, %pstate
 
 	stx	%i6, [%l5 + PCB_SP]	! cpcb->pcb_sp = sp;
@@ -6106,7 +6108,7 @@ ENTRY(cpu_switchto)
 	 */
 Lsw_load:
 	/* set new cpcb */
-	stx	%l3, [%g7 + CI_CURPROC]	! curproc = p;
+	stx	%i1, [%g7 + CI_CURPROC]	! curproc = newproc;
 	stx	%l1, [%g7 + CI_CPCB]	! cpcb = newpcb;
 
 	ldx	[%l1 + PCB_SP], %i6
@@ -6120,7 +6122,7 @@ Lsw_load:
 	 * can talk about user space stuff.  (Its pcb_uw is currently
 	 * zero so it is safe to have interrupts going here.)
 	 */
-	ldx	[%l3 + P_VMSPACE], %o3	! vm = p->p_vmspace;
+	ldx	[%i1 + P_VMSPACE], %o3		! vm = newproc->p_vmspace;
 	sethi	%hi(_C_LABEL(kernel_pmap_)), %o1
 	mov	CTX_SECONDARY, %l5		! Recycle %l5
 	ldx	[%o3 + VM_PMAP], %o2		! if (vm->vm_pmap != kernel_pmap_)
@@ -6157,18 +6159,6 @@ Lsw_havectx:
 	wrpr	%g0, PSTATE_INTR, %pstate
 	ret
 	 restore
-
-ENTRY(cpu_idle_enter)
-	retl
-	 nop
-
-ENTRY(cpu_idle_cycle)
-	retl
-	 nop
-
-ENTRY(cpu_idle_leave)
-	retl
-	 nop
 
 /*
  * Snapshot the current process so that stack frames are up to date.
@@ -8922,6 +8912,78 @@ ENTRY(tickcmpr_set)
 
 	cmp	%o0, %o1		! Make sure the value we wrote to
 	bg,pt	%xcc, 2f		!   %tick_cmpr was in the future.
+	 add	%o0, %o2, %o0		! If not, add the step size, double
+	ba,pt	%xcc, 1b		!   the step size and try again.
+	 sllx	%o2, 1, %o2
+2:
+	retl
+	 nop
+
+ENTRY(sys_tickcmpr_set)
+	ba	1f
+	 mov	8, %o2			! Initial step size
+	.align	64
+1:	wr	%o0, 0, %sys_tick_cmpr
+	rd	%sys_tick_cmpr, %g0
+
+	rd	%sys_tick, %o1		! Read current %sys_tick
+	sllx	%o1, 1, %o1
+	srlx	%o1, 1, %o1
+
+	cmp	%o0, %o1		! Make sure the value we wrote to
+	bg,pt	%xcc, 2f		!   %sys_tick_cmpr was in the future.
+	 add	%o0, %o2, %o0		! If not, add the step size, double
+	ba,pt	%xcc, 1b		!   the step size and try again.
+	 sllx	%o2, 1, %o2
+2:
+	retl
+	 nop
+
+/*
+ * Support for the STICK logic found on the integrated PCI host bridge
+ * of Hummingbird (UltraSPARC-IIe).  The chip designers made the
+ * brilliant decision to split the 64-bit counters into two 64-bit
+ * aligned 32-bit registers, making atomic access impossible.  This
+ * means we have to check for wraparound in various places.  Sigh.
+ */
+
+#define STICK_CMP_LOW	0x1fe0000f060
+#define STICK_CMP_HIGH	0x1fe0000f068
+#define STICK_REG_LOW	0x1fe0000f070
+#define STICK_REG_HIGH	0x1fe0000f078
+
+ENTRY(stick)
+	setx	STICK_REG_LOW, %o1, %o3
+0:
+	ldxa	[%o3] ASI_PHYS_NON_CACHED, %o0
+	add	%o3, (STICK_REG_HIGH - STICK_REG_LOW), %o4
+	ldxa	[%o4] ASI_PHYS_NON_CACHED, %o1
+	ldxa	[%o3] ASI_PHYS_NON_CACHED, %o2
+	cmp	%o2, %o0		! Check for wraparound
+	blu,pn	%icc, 0b
+	 sllx	%o1, 33, %o1		! Clear the MSB
+	srlx	%o1, 1, %o1
+	retl
+	 or	%o2, %o1, %o0
+
+ENTRY(stickcmpr_set)
+	setx	STICK_CMP_HIGH, %o1, %o3
+	mov	8, %o2			! Initial step size
+1:
+	srlx	%o0, 32, %o1
+	stxa	%o1, [%o3] ASI_PHYS_NON_CACHED
+	add	%o3, (STICK_CMP_LOW - STICK_CMP_HIGH), %o4
+	stxa	%o0, [%o4] ASI_PHYS_NON_CACHED
+
+	add	%o3, (STICK_REG_LOW - STICK_CMP_HIGH), %o4
+	ldxa	[%o4] ASI_PHYS_NON_CACHED, %o1
+	add	%o3, (STICK_REG_HIGH - STICK_CMP_HIGH), %o4
+	ldxa	[%o4] ASI_PHYS_NON_CACHED, %o5
+	sllx	%o5, 32, %o5
+	or	%o1, %o5, %o1
+
+	cmp	%o0, %o1		! Make sure the value we wrote
+	bg,pt	%xcc, 2f		!   was in the future
 	 add	%o0, %o2, %o0		! If not, add the step size, double
 	ba,pt	%xcc, 1b		!   the step size and try again.
 	 sllx	%o2, 1, %o2

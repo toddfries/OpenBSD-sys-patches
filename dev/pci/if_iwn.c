@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.20 2008/06/16 18:43:06 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.22 2008/07/31 20:14:17 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007,2008
@@ -1196,6 +1196,7 @@ iwn_rx_intr(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	struct iwn_rx_ring *ring = &sc->rxq;
 	struct iwn_rbuf *rbuf;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m, *mnew;
 	struct iwn_rx_stat *stat;
@@ -1330,7 +1331,10 @@ iwn_rx_intr(struct iwn_softc *sc, struct iwn_rx_desc *desc,
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* send the frame to the 802.11 layer */
-	ieee80211_input(ifp, m, ni, rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
@@ -3443,12 +3447,12 @@ iwn_reset(struct iwn_softc *sc)
 	IWN_WRITE(sc, IWN_GPIO_CTL, tmp | IWN_GPIO_INIT);
 
 	/* wait for clock stabilization */
-	for (ntries = 0; ntries < 1000; ntries++) {
+	for (ntries = 0; ntries < 25000; ntries++) {
 		if (IWN_READ(sc, IWN_GPIO_CTL) & IWN_GPIO_CLOCK)
 			break;
-		DELAY(10);
+		DELAY(100);
 	}
-	if (ntries == 1000) {
+	if (ntries == 25000) {
 		printf("%s: timeout waiting for clock stabilization\n",
 		    sc->sc_dev.dv_xname);
 		return ETIMEDOUT;

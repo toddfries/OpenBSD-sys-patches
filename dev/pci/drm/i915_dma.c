@@ -554,8 +554,8 @@ static int i915_dispatch_cmdbuffer(struct drm_device * dev,
 	int nbox = cmd->num_cliprects;
 	int i = 0, count, ret;
 
-	if (cmd->sz & 0x3) {
-		DRM_ERROR("alignment\n");
+	if (cmd->sz <= 0 || (cmd->sz & 0x3) != 0) {
+		DRM_ERROR("negative value or incorrect alignment\n");
 		return -EINVAL;
 	}
 
@@ -746,6 +746,9 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 	DRM_DEBUG("i915 batchbuffer, start %x used %d cliprects %d\n",
 		  batch->start, batch->used, batch->num_cliprects);
 
+	if (batch->num_cliprects < 0)
+		return -EINVAL;
+
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
 	if (batch->num_cliprects && DRM_VERIFYAREA_READ(batch->cliprects,
@@ -770,6 +773,9 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 
 	DRM_DEBUG("i915 cmdbuffer, buf %p sz %d cliprects %d\n",
 		  cmdbuf->buf, cmdbuf->sz, cmdbuf->num_cliprects);
+
+	if (cmdbuf->num_cliprects < 0)
+		return -EINVAL;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
@@ -1019,11 +1025,9 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	dev->types[8] = _DRM_STAT_SECONDARY;
 	dev->types[9] = _DRM_STAT_DMA;
 
-	dev_priv = drm_alloc(sizeof(drm_i915_private_t), DRM_MEM_DRIVER);
+	dev_priv = drm_calloc(1, sizeof(drm_i915_private_t), DRM_MEM_DRIVER);
 	if (dev_priv == NULL)
 		return -ENOMEM;
-
-	memset(dev_priv, 0, sizeof(drm_i915_private_t));
 
 	dev->dev_private = (void *)dev_priv;
 
@@ -1038,6 +1042,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
 	intel_init_chipset_flush_compat(dev);
 #endif
+	intel_opregion_init(dev);
 #endif
 
 	return ret;
@@ -1049,6 +1054,10 @@ int i915_driver_unload(struct drm_device *dev)
 
 	if (dev_priv->mmio_map)
 		drm_rmmap(dev, dev_priv->mmio_map);
+
+#ifdef __linux__
+	intel_opregion_free(dev);
+#endif
 
 	drm_free(dev->dev_private, sizeof(drm_i915_private_t),
 		 DRM_MEM_DRIVER);

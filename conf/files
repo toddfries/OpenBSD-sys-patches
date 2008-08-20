@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.437 2008/07/08 05:22:00 dlg Exp $
+#	$OpenBSD: files,v 1.440 2008/08/12 16:51:39 damien Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -786,6 +786,7 @@ file net/if_mpe.c			mpe			needs-count
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan
+file net80211/ieee80211_crypto_bip.c	wlan
 file net80211/ieee80211_crypto_ccmp.c	wlan
 file net80211/ieee80211_crypto_tkip.c	wlan
 file net80211/ieee80211_crypto_wep.c	wlan
@@ -793,6 +794,8 @@ file net80211/ieee80211_input.c		wlan
 file net80211/ieee80211_ioctl.c		wlan
 file net80211/ieee80211_node.c		wlan
 file net80211/ieee80211_output.c	wlan
+file net80211/ieee80211_pae_input.c	wlan
+file net80211/ieee80211_pae_output.c	wlan
 file net80211/ieee80211_proto.c		wlan
 file net80211/ieee80211_rssadapt.c	wlan
 file net80211/ieee80211_regdomain.c	wlan
@@ -830,7 +833,7 @@ file crypto/rijndael.c			(inet & ipsec) | crypto | uvm_swap_encrypt | wlan
 file crypto/md5.c
 file crypto/rmd160.c			(inet & ipsec) | crypto
 file crypto/sha1.c			(inet & ipsec) | crypto | carp | wlan
-file crypto/sha2.c			(inet & ipsec) | crypto
+file crypto/sha2.c			(inet & ipsec) | crypto | wlan
 file crypto/blf.c			(inet & ipsec) | crypto | vnd
 file crypto/cast.c			(inet & ipsec) | crypto
 file crypto/skipjack.c			(inet & ipsec) | crypto
@@ -845,6 +848,9 @@ file crypto/xform.c			(inet & ipsec) | crypto
 file crypto/deflate.c			(inet & ipsec) | crypto
 file crypto/arc4.c			
 file crypto/michael.c			wlan
+file crypto/cmac.c			wlan
+file crypto/hmac.c			wlan
+file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
 file netatalk/aarp.c			netatalk
 file netatalk/at_control.c		netatalk

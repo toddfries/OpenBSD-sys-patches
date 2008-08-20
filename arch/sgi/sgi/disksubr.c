@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.6 2008/06/12 06:58:36 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.9 2008/08/08 23:49:53 krw Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -40,34 +40,8 @@
 #include <sys/syslog.h>
 #include <sys/disk.h>
 
-char   *readbsdlabel(struct buf *, void (*)(struct buf *), int, int,
-    int, struct disklabel *, int);
 char   *readsgilabel(struct buf *, void (*)(struct buf *),
     struct disklabel *, int *, int);
-
-/*
- * Try to read a standard BSD disklabel at a certain sector.
- */
-char *
-readbsdlabel(struct buf *bp, void (*strat)(struct buf *),
-    int cyl, int sec, int off, struct disklabel *lp,
-    int spoofonly)
-{
-	/* don't read the on-disk label if we are in spoofed-only mode */
-	if (spoofonly)
-		return (NULL);
-
-	bp->b_blkno = sec;
-	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
-	(*strat)(bp);
-
-	/* if successful, locate disk label within block and validate */
-	if (biowait(bp))
-		return ("disk label I/O error");
-
-	return checkdisklabel(bp->b_data + LABELOFFSET, lp);
-}
 
 /*
  * Attempt to read a disk label from a device
@@ -93,11 +67,11 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	msg = readsgilabel(bp, strat, lp, 0, spoofonly);
+	msg = readsgilabel(bp, strat, lp, NULL, spoofonly);
 	if (msg == NULL)
 		goto done;
 
-	msg = readdoslabel(bp, strat, lp, 0, spoofonly);
+	msg = readdoslabel(bp, strat, lp, NULL, spoofonly);
 	if (msg == NULL)
 		goto done;
 
@@ -142,6 +116,7 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	char *msg = NULL;
 	int i, *p, cs = 0;
 	int fsoffs = 0;
+	int offset;
 
 	bp->b_blkno = 0;
 	bp->b_bcount = lp->d_secsize;
@@ -164,7 +139,7 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 		msg = "no BSD partition";
 		goto done;
 	}
-	fsoffs = dlp->partitions[0].first;
+	fsoffs = dlp->partitions[0].first * (dlp->dp.dp_secbytes / DEV_BSIZE);
 
 	if (spoofonly)
 		goto finished;
@@ -179,6 +154,7 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 	}
 
 	/* Set up partitions i-l if there is no BSD label. */
+	DL_SETDSIZE(lp, (DL_GETDSIZE(lp)*lp->d_secsize) / dlp->dp.dp_secbytes);
 	lp->d_secsize = dlp->dp.dp_secbytes;
 	lp->d_nsectors = dlp->dp.dp_secs;
 	lp->d_ntracks = dlp->dp.dp_trks0;
@@ -213,7 +189,8 @@ finished:
 	if (spoofonly)
 		goto done;
 
-	bp->b_blkno = fsoffs + LABELSECTOR;
+	bp->b_blkno = DL_BLKTOSEC(lp, fsoffs + LABELSECTOR) * DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, fsoffs + LABELSECTOR) + LABELOFFSET;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
@@ -222,7 +199,7 @@ finished:
 		goto done;
 	}
 
-	return checkdisklabel(bp->b_data + LABELOFFSET, lp);
+	return checkdisklabel(bp->b_data + offset, lp);
 
 done:
 	return (msg);
@@ -235,6 +212,7 @@ int
 writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
 	int error = EIO, partoff = -1;
+	int offset;
 	struct buf *bp = NULL;
 	struct disklabel *dlp;
 
@@ -247,14 +225,15 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 		goto done;
 
 	/* Read it in, slap the new label in, and write it back out */
-	bp->b_blkno = partoff + LABELSECTOR;
+	bp->b_blkno = DL_BLKTOSEC(lp, partoff+LABELSECTOR) * DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, partoff + LABELSECTOR) + LABELOFFSET;
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
-	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)(bp->b_data + offset);
 	*dlp = *lp;
 	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
 	(*strat)(bp);
