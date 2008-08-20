@@ -1,4 +1,4 @@
-/* $OpenBSD: vmparam.h,v 1.15 2008/06/24 21:24:01 deraadt Exp $ */
+/* $OpenBSD: vmparam.h,v 1.17 2008/07/25 21:24:49 miod Exp $ */
 /* $NetBSD: vmparam.h,v 1.18 2000/05/22 17:13:54 thorpej Exp $ */
 
 /*
@@ -82,7 +82,7 @@
 #define STACKGAP_RANDOM	256*1024
 
 /*
- * PTEs for mapping user space into the kernel for phyio operations.
+ * PTEs for mapping user space into the kernel for physio operations.
  * 64 pte's are enough to cover 8 disks * MAXBSIZE.
  */
 #ifndef USRIOSIZE
@@ -107,6 +107,10 @@
 #define VM_MAX_ADDRESS		VM_MAXUSER_ADDRESS
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)ALPHA_K1SEG_BASE)
 #define VM_MAX_KERNEL_ADDRESS	((vaddr_t)ALPHA_K1SEG_END)
+
+/* map PIE into the first quarter of the address space before stack */
+#define VM_PIE_MIN_ADDR		PAGE_SIZE
+#define VM_PIE_MAX_ADDR		0x80000000
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*NBPG)

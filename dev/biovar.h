@@ -1,4 +1,4 @@
-/*	$OpenBSD: biovar.h,v 1.31 2008/06/14 18:40:50 hshoexer Exp $	*/
+/*	$OpenBSD: biovar.h,v 1.33 2008/08/11 17:28:24 marco Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.

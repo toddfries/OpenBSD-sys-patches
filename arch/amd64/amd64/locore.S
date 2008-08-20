@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.26 2008/06/27 06:03:07 ray Exp $	*/
+/*	$OpenBSD: locore.S,v 1.28 2008/08/13 16:01:08 weingart Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -222,7 +222,7 @@ gdt64_end:
 farjmp64:
 	.long	longmode-KERNBASE
 	.word	GSEL(GCODE_SEL, SEL_KPL)
-	
+
 	.space 512
 tmpstk:
 
@@ -752,11 +752,9 @@ ENTRY(cpu_switchto)
 	movq	%rdi, %r13
 	movq	%rsi, %r12
 
-	xorq	%rax,%rax
-	movl	%eax,CPUVAR(RESCHED)
-
 switch_resume:
 #ifdef DIAGNOSTIC
+	xorq	%rax,%rax
 	cmpq	%rax,P_WCHAN(%r12)
 	jne	_C_LABEL(switch_error2)
 	cmpb	$SRUN,P_STAT(%r12)

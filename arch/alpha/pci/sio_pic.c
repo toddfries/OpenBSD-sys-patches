@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio_pic.c,v 1.27 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: sio_pic.c,v 1.29 2008/08/09 16:41:21 miod Exp $	*/
 /* $NetBSD: sio_pic.c,v 1.28 2000/06/06 03:10:13 thorpej Exp $ */
 
 /*-
@@ -451,7 +451,7 @@ sio_intr_establish(v, irq, type, level, fn, arg, name)
 {
 	void *cookie;
 
-	if (irq > ICU_LEN || type == IST_NONE)
+	if (irq >= ICU_LEN || type == IST_NONE)
 		panic("sio_intr_establish: bogus irq or type");
 
 	cookie = alpha_shared_intr_establish(sio_intr, irq, type, level, fn,
@@ -625,8 +625,10 @@ static void
 specific_eoi(irq)
 	int irq;
 {
-	if (irq > 7)
+	if (irq > 7) {
 		bus_space_write_1(sio_iot,
-		    sio_ioh_icu2, 0, 0x20 | (irq & 0x07));	/* XXX */
-	bus_space_write_1(sio_iot, sio_ioh_icu1, 0, 0x20 | (irq > 7 ? 2 : irq));
+		    sio_ioh_icu2, 0, 0x60 | (irq & 0x07));	/* XXX */
+		irq = 2;
+	}
+	bus_space_write_1(sio_iot, sio_ioh_icu1, 0, 0x60 | irq);
 }

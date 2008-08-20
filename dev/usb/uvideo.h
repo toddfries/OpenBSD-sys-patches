@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.h,v 1.18 2008/07/03 09:50:04 mglocker Exp $ */
+/*	$OpenBSD: uvideo.h,v 1.27 2008/08/02 21:52:37 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -160,7 +160,7 @@ struct usb_video_header_desc {
 	uByte	bDescriptorSubtype;
 	uWord	bcdUVC;
 	uWord	wTotalLength;
-	uDWord	dwClockFrequency; /* XXX deprecated */
+	uDWord	dwClockFrequency;
 	uByte	bInCollection;
 };
 
@@ -205,7 +205,7 @@ struct usb_video_camera_terminal_desc {
 	uWord	wObjectiveFocalLengthMax;
 	uWord	wOcularFocalLength;
 	uByte	bControlSize;
-	uByte	*bmControls; /* XXX */	
+	uByte	*bmControls;
 };
 
 /* Table 3-9: VC Extension Unit Descriptor */
@@ -390,8 +390,8 @@ struct uvideo_vs_iface {
 	int			 iface;
 };
 
-struct uvideo_sample_buffer {
-	int		 fragment;
+struct uvideo_frame_buffer {
+	int		 sample;
 	uint8_t		 fid;
 	int		 offset;
 	int		 buf_size;
@@ -401,15 +401,57 @@ struct uvideo_sample_buffer {
 #define UVIDEO_MAX_BUFFERS	32
 struct uvideo_mmap {
 	SIMPLEQ_ENTRY(uvideo_mmap)	q_frames;
-	/*
-	 * TODO
-	 * Complete buffer so we can queue/dequeue video frames.
-	 * Maybe we should use some queue macros for this?
-	 */
 	uint8_t				*buf;
 	struct v4l2_buffer		 v4l2_buf;
 };
 typedef SIMPLEQ_HEAD(, uvideo_mmap) q_mmap;
+
+struct uvideo_format_desc {
+	uByte	bLength;
+	uByte	bDescriptorType;
+	uByte	bDescriptorSubtype;
+	uByte	bFormatIndex;
+	uByte	bNumFrameDescriptors;
+	union {
+		/* mjpeg */
+		struct {
+			uByte	bmFlags;
+			uByte	bDefaultFrameIndex;
+			uByte	bAspectRatioX;
+			uByte	bAspectRatioY;
+			uByte	bmInterlaceFlags;
+			uByte	bCopyProtect;
+		} mjpeg;
+
+		/* uncompressed */
+		struct {
+			uByte	guidFormat[16];
+			uByte	bBitsPerPixel;
+			uByte	bDefaultFrameIndex;
+			uByte	bAspectRatioX;
+			uByte	bAspectRatioY;
+			uByte	bmInterlaceFlags;
+			uByte	bCopyProtect;
+		} uc;
+	} u;
+} __packed;
+
+struct uvideo_format_group {
+	uint32_t				 pixelformat;
+	struct uvideo_format_desc		*format;
+	uint8_t					 format_dfidx;
+	/* frame descriptors for mjpeg and uncompressed are identical */
+#define UVIDEO_MAX_FRAME			 16
+	int					 frame_num;
+	struct usb_video_frame_mjpeg_desc	*frame_cur;
+	struct usb_video_frame_mjpeg_desc	*frame[UVIDEO_MAX_FRAME];
+} __packed;
+
+struct uvideo_res {
+	int width;
+	int height;
+	int fidx;
+} __packed;
 
 struct uvideo_softc {
 	struct device				 sc_dev;
@@ -434,13 +476,14 @@ struct uvideo_softc {
 	int					 sc_enabled;
 	int					 sc_dying;
 	int					 sc_mode;
-	int					 sc_video_buf_size;
+	int					 sc_max_fbuf_size;
+	int					 sc_negotiated_flag;
 
 	u_int16_t				 uvc_version;
 	u_int32_t				 clock_frequency;
 	u_int32_t				 quirks;
 
-	struct uvideo_sample_buffer		 sc_sample_buffer;
+	struct uvideo_frame_buffer		 sc_frame_buffer;
 
 	struct uvideo_mmap			 sc_mmap[UVIDEO_MAX_BUFFERS];
 	uint8_t					*sc_mmap_buffer;
@@ -456,8 +499,12 @@ struct uvideo_softc {
 	struct usb_video_probe_commit		 sc_desc_probe;
 	struct usb_video_header_desc_all	 sc_desc_vc_header;
 	struct usb_video_input_header_desc_all	 sc_desc_vs_input_header;
-	struct usb_video_format_mjpeg_desc	*sc_desc_format_mjpeg;
-	struct usb_video_frame_mjpeg_desc	*sc_desc_frame_mjpeg;
+
+#define UVIDEO_MAX_FORMAT			 8
+	int					 sc_fmtgrp_idx;
+	int					 sc_fmtgrp_num;
+	struct uvideo_format_group		*sc_fmtgrp_cur;
+	struct uvideo_format_group		 sc_fmtgrp[UVIDEO_MAX_FORMAT];
 
 #define	UVIDEO_MAX_VS_NUM			 8
 	struct uvideo_vs_iface			*sc_vs_curr;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioasicvar.h,v 1.7 2004/06/28 02:28:43 aaron Exp $	*/
+/*	$OpenBSD: ioasicvar.h,v 1.9 2008/08/09 16:42:30 miod Exp $	*/
 /*	$NetBSD: ioasicvar.h,v 1.14 2000/10/17 09:45:49 nisimura Exp $	*/
 
 /*
@@ -39,7 +39,7 @@ struct ioasic_dev {
 };
 
 struct ioasicdev_attach_args {
-	char	iada_modname[TC_ROM_LLEN];
+	char	iada_modname[TC_ROM_LLEN + 1];
 	tc_offset_t iada_offset;
 	tc_addr_t iada_addr;
 	void	*iada_cookie;
@@ -67,7 +67,7 @@ extern struct cfdriver ioasic_cd;
 extern tc_addr_t ioasic_base;
 
 void    ioasic_intr_establish(struct device *, void *,
-	    int, int (*)(void *), void *);
+	    int, int (*)(void *), void *, const char *);
 void    ioasic_intr_disestablish(struct device *, void *);
 int	ioasic_submatch(void *, struct ioasicdev_attach_args *);
 void	ioasic_attach_devs(struct ioasic_softc *,

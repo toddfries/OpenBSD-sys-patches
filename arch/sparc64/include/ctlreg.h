@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctlreg.h,v 1.18 2008/07/05 23:06:06 kettenis Exp $	*/
+/*	$OpenBSD: ctlreg.h,v 1.21 2008/08/10 14:13:05 kettenis Exp $	*/
 /*	$NetBSD: ctlreg.h,v 1.28 2001/08/06 23:55:34 eeh Exp $ */
 
 /*
@@ -246,10 +246,17 @@
  * The following are 4u control registers
  */
 
+/* Get the CPU's UPA port ID */
+#define	UPA_CR_MID(x)		(((x) >> 17) & 0x1f)
+#define	CPU_UPAID		UPA_CR_MID(ldxa(0, ASI_MID_REG))
 
-/* Get the CPU's UPAID */
-#define	UPA_CR_MID(x)	(((x)>>17)&0x1f)	
-#define	CPU_UPAID	UPA_CR_MID(ldxa(0, ASI_MID_REG))
+/* Get the CPU's Fireplane agent ID */
+#define FIREPLANE_CR_AID(x)	(((x) >> 17) & 0x3ff)
+#define CPU_FIREPLANEID		FIREPLANE_CR_AID(ldxa(0, ASI_MID_REG))
+
+/* Get the CPU's Jupiter Bus interrupt target ID */
+#define JUPITER_CR_ITID(x)	((x) & 0x3ff)
+#define CPU_JUPITERID		JUPITER_CR_ITID(ldxa(0, ASI_MID_REG))
 
 /*
  * [4u] MMU and Cache Control Register (MCCR)
@@ -577,6 +584,8 @@ sparc_rdpr_ ## name()							\
 
 GEN_RD(asi);
 GEN_RD(asr22);
+GEN_RD(sys_tick);
+GEN_RD(sys_tick_cmpr);
 GEN_RDPR(cwp);
 GEN_RDPR(tick);
 GEN_RDPR(pstate);
@@ -716,10 +725,14 @@ void flush(void *p)
 	    : "memory");
 }
 
-/* read 64-bit %tick register */
+/* Read 64-bit %tick and %sys_tick registers. */
 #define tick() (sparc_rdpr(tick) & TICK_TICKS)
+#define sys_tick() (sparc_rd(sys_tick) & TICK_TICKS)
+extern u_int64_t stick(void);
 
 extern void tickcmpr_set(u_int64_t);
+extern void sys_tickcmpr_set(u_int64_t);
+extern void stickcmpr_set(u_int64_t);
 
 #endif /* _LOCORE */
 #endif /* _SPARC64_CTLREG_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: psychoreg.h,v 1.11 2006/02/06 17:19:31 jmc Exp $	*/
+/*	$OpenBSD: psychoreg.h,v 1.13 2008/07/20 10:37:43 kettenis Exp $	*/
 /*	$NetBSD: psychoreg.h,v 1.6.4.2 2001/09/13 01:14:40 thorpej Exp $ */
 
 /*
@@ -85,7 +85,7 @@ struct psychoreg {
 
 	struct iommureg psy_iommu;							/* 1fe.0000.0200,0210 */
 
-	u_int64_t	pad3[317];
+	u_int64_t	pad3[256];
 
 	u_int64_t	pcia_slot0_int;		/* PCI bus a slot 0 irq map reg */	/* 1fe.0000.0c00 */
 	u_int64_t	pcia_slot1_int;		/* PCI bus a slot 1 irq map reg */	/* 1fe.0000.0c08 */
@@ -218,6 +218,13 @@ struct psychoreg {
 		u_int64_t	strbuf_ln_tag_diag[16];	/* streaming buffer line tag diag */	/* 1fe.0000.b900-b978 */
 		u_int64_t	pad19[208];
 	} psy_strbufdiag[2];					/* For PCI a and b */
+
+	u_int64_t	pad18[1036];
+
+	u_int64_t	stick_cmp_low;		/* STICK comparison low reg */			/* 1fe.0000.f060 */
+	u_int64_t	stick_cmp_high;		/* STICK comparison high reg */			/* 1fe.0000.f068 */
+	u_int64_t	stick_reg_low;		/* STICK counter low reg */			/* 1fe.0000.f070 */
+	u_int64_t	stick_reg_high;		/* STICK counter high reg */			/* 1fe.0000.f078 */
 
 	/* 
 	 * Here is the rest of the map, which we're not specifying:

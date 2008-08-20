@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.73 2008/06/13 21:49:57 claudio Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.76 2008/08/07 21:32:08 claudio Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -713,6 +713,8 @@ again:
 		}
 		len += dlen;
 	}
+	/* align message length to the next natural boundary */
+	len = ALIGN(len);
 	if (cp == 0 && w != NULL && !second_time) {
 		struct walkarg *rw = w;
 

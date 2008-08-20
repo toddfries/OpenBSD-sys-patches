@@ -1,4 +1,4 @@
-/*	$OpenBSD: video_if.h,v 1.13 2008/06/13 05:00:32 mglocker Exp $	*/
+/*	$OpenBSD: video_if.h,v 1.15 2008/08/13 20:29:34 mglocker Exp $	*/
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
  * Copyright (c) 2008 Marcus Glocker <mglocker@openbsd.org>
@@ -36,6 +36,8 @@ struct video_hw_if {
 	/* ioctl's */
 	int	(*querycap)(void *, struct v4l2_capability *);
 	int	(*enum_fmt)(void *, struct v4l2_fmtdesc *);
+	int	(*enum_fsizes)(void *, struct v4l2_frmsizeenum *);
+	int	(*enum_fivals)(void *, struct v4l2_frmivalenum *);
 	int	(*s_fmt)(void *, struct v4l2_format *);
 	int	(*g_fmt)(void *, struct v4l2_format *);
 	int	(*enum_input)(void *, struct v4l2_input *);
@@ -52,7 +54,7 @@ struct video_hw_if {
 
 	/* other functions */
 	int	(*get_bufsize)(void *);
-	void	(*start_read)(void *);
+	int	(*start_read)(void *);
 };
 
 struct video_attach_args {
