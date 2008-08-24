@@ -1,4 +1,4 @@
-#	$OpenBSD: files.vax,v 1.45 2008/04/25 14:51:35 jmc Exp $
+#	$OpenBSD: files.vax,v 1.48 2008/08/18 23:19:21 miod Exp $
 #	$NetBSD: files.vax,v 1.60 1999/08/27 20:04:32 ragge Exp $
 #
 # new style config file for vax architecture
@@ -16,6 +16,8 @@ attach	mainbus at root
 device	cpu
 device	mem
 device	mba {drive = -1}
+
+define	dzcons
 
 # SBI and related devices
 device	sbi {tr = -1}
@@ -116,7 +118,7 @@ device	ts: tape
 attach	ts at uba
 file	arch/vax/uba/ts.c			ts needs-flag
 
-attach	dz at vsbus with dz_vsbus
+attach	dz at vsbus with dz_vsbus: dzcons
 file	arch/vax/vsa/dz_ibus.c			dz_vsbus
 
 # VXT serial
@@ -200,6 +202,8 @@ attach	lkms at dz with dzms
 attach	lkms at qsc with qscms
 file	arch/vax/dec/dzms.c			dzms needs-flag
 file	arch/vax/vxt/qscms.c			qscms needs-flag
+
+file	arch/vax/dec/dzinput.c			dzkbd | dzms
 
 # These devices aren't tested (or even compiled!)
 # They are just included here to make some files happy ;)
@@ -336,6 +340,9 @@ device	dh # XXX?
 attach	dh at uba
 file	arch/vax/uba/dh.c			dh needs-flag
 
+# M-bus on VS 3[58][24]0
+include "arch/vax/mbus/files.mbus"
+
 # Blinkenlichten
 device	led
 attach	led at mainbus
@@ -358,6 +365,7 @@ file	arch/vax/vax/ka46.c			vax46
 file	arch/vax/vax/ka48.c			vax48
 file	arch/vax/vax/ka49.c			vax49
 file	arch/vax/vax/ka53.c			vax53
+file	arch/vax/vax/ka60.c			vax60
 file	arch/vax/vax/emulate.s			insn_emulate
 file	arch/vax/vax/unimpl_emul.s		insn_emulate
 file	arch/vax/vax/ka650.c			vax650
@@ -365,6 +373,7 @@ file	arch/vax/vax/ka660.c			vax660
 file	arch/vax/vax/ka670.c			vax670
 file	arch/vax/vax/ka680.c			vax680
 file	arch/vax/vax/vxt.c			vxt
+file	arch/vax/vax/cvax.c			vax60 | vax650
 file	arch/vax/vax/scb.c
 file	arch/vax/vax/conf.c
 file	arch/vax/vax/urem.s
