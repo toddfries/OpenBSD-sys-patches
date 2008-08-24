@@ -193,15 +193,6 @@ extern int ticks;		/* really should be in a header */
 
 extern struct cfdriver drm_cd;
 
-/* Capabilities taken from src/sys/dev/pci/pcireg.h. */
-#ifndef PCIY_AGP
-#define PCIY_AGP	0x02
-#endif
-
-#ifndef PCIY_EXPRESS
-#define PCIY_EXPRESS	0x10
-#endif
-
 typedef unsigned long dma_addr_t;
 typedef u_int64_t u64;
 typedef u_int32_t u32;
@@ -270,7 +261,7 @@ do {									\
 
 /* Returns -errno to shared code */
 #define DRM_WAIT_ON( ret, queue, timeout, condition )		\
-ret = 0;								\
+ret = 0;							\
 while ( ret == 0 ) {						\
 	DRM_UNLOCK();						\
 	DRM_SPINLOCK(&dev->irq_lock);				\
@@ -336,7 +327,6 @@ typedef struct drm_buf {
 	unsigned long	  offset;      /* Byte offset (used internally)	     */
 	void		  *address;    /* Address of buffer		     */
 	unsigned long	  bus_address; /* Bus address of buffer		     */
-	struct drm_buf	  *next;       /* Kernel-only: used for free list    */
 	__volatile__ int  pending;     /* On hardware DMA queue		     */
 	struct drm_file   *file_priv;  /* Unique identifier of holding process */
 	int		  context;     /* Kernel queue for this buffer	     */
@@ -352,15 +342,6 @@ typedef struct drm_buf {
 	int		  dev_priv_size; /* Size of buffer private stoarge   */
 	void		  *dev_private;  /* Per-buffer private storage       */
 } drm_buf_t;
-
-typedef struct drm_freelist {
-	int		  initialized; /* Freelist in use		   */
-	atomic_t	  count;       /* Number of free buffers	   */
-	drm_buf_t	  *next;       /* End pointer			   */
-
-	int		  low_mark;    /* Low water mark		   */
-	int		  high_mark;   /* High water mark		   */
-} drm_freelist_t;
 
 typedef struct drm_dma_handle {
 	void *vaddr;
@@ -378,8 +359,6 @@ typedef struct drm_buf_entry {
 	int		  seg_count;
 	drm_dma_handle_t  **seglist;
 	int		  page_order;
-
-	drm_freelist_t	  freelist;
 } drm_buf_entry_t;
 
 typedef TAILQ_HEAD(drm_file_list, drm_file) drm_file_list_t;
@@ -488,30 +467,28 @@ struct drm_memrange {
 typedef TAILQ_HEAD(drm_map_list, drm_local_map) drm_map_list_t;
 
 typedef struct drm_local_map {
-	unsigned long	offset;	 /* Physical address (0 for SAREA)*/
-	unsigned long	size;	 /* Physical size (bytes)	    */
-	drm_map_type_t	type;	 /* Type of memory mapped		    */
-	drm_map_flags_t flags;	 /* Flags				    */
-	void		*handle; /* User-space: "Handle" to pass to mmap    */
-				 /* Kernel-space: kernel-virtual address    */
-	int		mtrr;	 /* Boolean: MTRR used */
-				 /* Private data			    */
-	int		rid;	 /* PCI resource ID for bus_space */
-	struct vga_pci_bar	*bsr;
-	bus_space_tag_t bst;
-	bus_space_handle_t bsh;
-	drm_dma_handle_t *dmah;
-	TAILQ_ENTRY(drm_local_map) link;
-	struct drm_memrange_node *mm;
+	TAILQ_ENTRY(drm_local_map)	 link;	/* Link for map list */
+	struct vga_pci_bar		*bsr;	/* Vga BAR, if applicable */
+	drm_dma_handle_t		*dmah;	/* Handle to DMA mem */
+	void				*handle;/* KVA, if mapped */
+	struct drm_memrange_node 	*mm;	/* mmap offset */
+	bus_space_tag_t			 bst;	/* Tag for mapped pci mem */
+	bus_space_handle_t		 bsh;	/* Handle to mapped pci mem */
+	drm_map_flags_t			 flags;	/* Flags */
+	int				 mtrr;	/* Boolean: MTRR used */
+	unsigned long			 offset;/* Physical address */
+	unsigned long			 size;	/* Physical size (bytes) */
+	drm_map_type_t			 type;	/* Type of memory mapped */
 } drm_local_map_t;
 
-TAILQ_HEAD(drm_vbl_sig_list, drm_vbl_sig);
-typedef struct drm_vbl_sig {
-	TAILQ_ENTRY(drm_vbl_sig) link;
-	unsigned int	sequence;
-	int		signo;
-	int		pid;
-} drm_vbl_sig_t;
+struct drm_vblank {
+	u_int32_t	last_vblank;	/* Last vblank we recieved */
+	atomic_t	vbl_count;	/* Number of interrupts */
+	int		vbl_queue;	/* sleep on this when waiting */
+	atomic_t	vbl_refcount;	/* Number of users */
+	int		vbl_enabled;	/* Enabled? */
+	int		vbl_inmodeset;	/* is the DDX currently modesetting */
+};
 
 /* location of GART table */
 #define DRM_ATI_GART_MAIN 1
@@ -662,22 +639,12 @@ struct drm_device {
 	int		  pci_func;
 
 	/* VBLANK support */
-	int		 vblank_disable_allowed;
-	int		*vbl_queue;	/* vbl wait channel */
-	atomic_t	*_vblank_count;	/* no vblank interrupts */
-	DRM_SPINTYPE	vbl_lock;	/* locking for vblank operations */
-#if 0 /* unneeded for now */
-	TAILQ_HEAD(vbl_sigs);
-#endif
-	atomic_t	vbl_signal_pending; /* sigs pending on all crtcs */
-	atomic_t	*vblank_refcount; /* no. users for vlank interrupts */
-	u_int32_t	*last_vblank;	/* locked, used for overflow handling*/
-	int		*vblank_enabled; /* make sure we only disable once */
-	int		*vblank_inmodeset; /* X DDX is currently setting mode */
-	struct timeout	vblank_disable_timer;
-	int		num_crtcs;	/* number of crtcs on device */
-
-	u_int32_t	max_vblank_count; /* size of counter reg */
+	int			 num_crtcs;		/* number of crtcs */
+	u_int32_t		 max_vblank_count;	/* size of counter reg*/
+	DRM_SPINTYPE		 vbl_lock;		/* VBLANK data lock */
+	int			 vblank_disable_allowed;
+	struct timeout		 vblank_disable_timer;	/* timer for disable */
+	struct drm_vblank	*vblank;		/* One per ctrc */
 
 	pid_t		  buf_pgid;
 
@@ -771,7 +738,6 @@ irqreturn_t drm_irq_handler(DRM_IRQ_ARGS);
 void	drm_driver_irq_preinstall(struct drm_device *);
 void	drm_driver_irq_postinstall(struct drm_device *);
 void	drm_driver_irq_uninstall(struct drm_device *);
-void	drm_vbl_send_signals(struct drm_device *, int);
 void	drm_vblank_cleanup(struct drm_device *);
 int	drm_vblank_init(struct drm_device *, int);
 u_int32_t drm_vblank_count(struct drm_device *, int);
@@ -846,8 +812,6 @@ SPLAY_PROTOTYPE(drm_magic_tree, drm_magic_entry, node, drm_magic_cmp);
 int	drm_addmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_rmmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_addbufs_ioctl(struct drm_device *, void *, struct drm_file *);
-int	drm_infobufs(struct drm_device *, void *, struct drm_file *);
-int	drm_markbufs(struct drm_device *, void *, struct drm_file *);
 int	drm_freebufs(struct drm_device *, void *, struct drm_file *);
 int	drm_mapbufs(struct drm_device *, void *, struct drm_file *);
 
@@ -918,10 +882,6 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 			return map;
 	}
 	return NULL;
-}
-
-static __inline__ void drm_core_dropmap(struct drm_map *map)
-{
 }
 
 #endif /* __KERNEL__ */
