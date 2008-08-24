@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.238 2008/07/17 19:59:44 brad Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.240 2008/08/24 20:24:43 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -107,6 +107,7 @@
 #endif
 
 #ifdef __sparc64__
+#include <sparc64/autoconf.h>
 #include <dev/ofw/openfirm.h>
 #endif
 
@@ -1792,6 +1793,7 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet		*ifp;
 	caddr_t			kva;
 #ifdef __sparc64__
+	char			namebuf[32];
 	int			subvendor;
 #endif
 
@@ -1870,8 +1872,11 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	if (OF_getprop(PCITAG_NODE(pa->pa_tag), "subsystem-vendor-id",
 	    &subvendor, sizeof(subvendor)) == sizeof(subvendor)) {
 		if (subvendor == PCI_VENDOR_SUN)
-		sc->bge_flags |= BGE_NO_EEPROM;
+			sc->bge_flags |= BGE_NO_EEPROM;
 	}
+	if (OF_getprop(findroot(), "name", namebuf, sizeof(namebuf)) > 0 &&
+	    strcmp(namebuf, "TAD,Viper") == 0)
+		sc->bge_flags |= BGE_NO_EEPROM;
 #endif
 
 	/*

@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1398 2008/08/13 03:45:55 brad Exp 
+ *	OpenBSD: pcidevs,v 1.1400 2008/08/22 01:09:07 deraadt Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -1154,6 +1154,7 @@
 /* AVlab products */
 #define	PCI_PRODUCT_AVLAB_PCI2S	0x2130		/* Dual Serial */
 #define	PCI_PRODUCT_AVLAB_LPPCI4S	0x2150		/* Quad Serial */
+#define	PCI_PRODUCT_AVLAB_LPPCI4S_2	0x2152		/* Quad Serial */
 
 /* AVM products */
 #define	PCI_PRODUCT_AVM_B1	0x0700		/* BRI ISDN */
@@ -1183,6 +1184,7 @@
 #define	PCI_PRODUCT_BROADCOM_BCM5752M	0x1601		/* BCM5752M */
 #define	PCI_PRODUCT_BROADCOM_BCM5709	0x1639		/* BCM5709 */
 #define	PCI_PRODUCT_BROADCOM_BCM5709S	0x163a		/* BCM5709S */
+#define	PCI_PRODUCT_BROADCOM_BCM5716	0x163b		/* BCM5716 */
 #define	PCI_PRODUCT_BROADCOM_BCM5700	0x1644		/* BCM5700 */
 #define	PCI_PRODUCT_BROADCOM_BCM5701	0x1645		/* BCM5701 */
 #define	PCI_PRODUCT_BROADCOM_BCM5702	0x1646		/* BCM5702 */
