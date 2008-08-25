@@ -31,6 +31,7 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 
@@ -38,6 +39,8 @@
 #include <macppc/macppc/ofw_machdep.h>
 
 #include <dev/adb/adb.h>
+
+#include "audio.h"		/* NAUDIO (mixer tuning) */
 
 #define ABTN_HANDLER_ID 31
 
@@ -59,6 +62,10 @@ struct cfattach abtn_ca = {
 struct cfdriver abtn_cd = {
 	NULL, "abtn", DV_DULL
 };
+
+#if NAUDIO > 0
+extern int wskbd_set_mixervolume(long dir);
+#endif
 
 int
 abtn_match(struct device *parent, void *cf, void *aux)
@@ -112,16 +119,25 @@ abtn_adbcomplete(caddr_t buffer, caddr_t data, int adb_command)
 		of_setbrightness(brightness);
 		break;
 
-#ifdef DEBUG
+#if NAUDIO > 0
 	case 0x08:	/* mute */
 	case 0x01:	/* mute, AV hardware */
+		workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
+			(void *)(long)0, NULL);
+		break;
 	case 0x07:	/* decrease volume */
 	case 0x02:	/* decrease volume, AV hardware */
+		workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
+			(void *)(long)-1, NULL);
+		break;
 	case 0x06:	/* increase volume */
 	case 0x03:	/* increase volume, AV hardware */
-		/* Need callback to do something with these */
+		workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
+			(void *)(long)1, NULL);
 		break;
+#endif
 
+#ifdef DEBUG
 	case 0x0c:	/* mirror display key */
 		/* Need callback to do something with this */
 		break;
@@ -136,7 +152,10 @@ abtn_adbcomplete(caddr_t buffer, caddr_t data, int adb_command)
 
 	default:
 		if ((cmd & ~0x7f) == 0)
-			printf("unknown ADB button 0x%x\n", cmd);
+			printf("unhandled ADB button 0x%x\n", cmd);
+		break;
+#else
+	default:
 		break;
 #endif
 	}
