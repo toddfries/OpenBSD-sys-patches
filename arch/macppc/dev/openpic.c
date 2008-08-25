@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.46 2008/08/24 23:44:44 todd Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.47 2008/08/25 03:16:22 todd Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
