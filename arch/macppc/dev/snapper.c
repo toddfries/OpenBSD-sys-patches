@@ -1,4 +1,4 @@
-/*	$OpenBSD: snapper.c,v 1.29 2008/04/21 00:32:42 jakemsr Exp $	*/
+/*	$OpenBSD: snapper.c,v 1.31 2008/08/25 03:16:22 todd Exp $	*/
 /*	$NetBSD: snapper.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
@@ -514,7 +514,7 @@ snapper_set_volume(struct snapper_softc *sc, int left, int right)
 	l = nentries - (left * nentries / 256);
 	r = nentries - (right * nentries / 256);
 
-	printf(" left %d vol %d %d, right %d vol %d %d\n",
+	DPRINTF(" left %d vol %d %d, right %d vol %d %d\n",
 		left, l, nentries,
 		right, r, nentries);
 	if (l >= nentries)
