@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pppoe.c,v 1.23 2008/08/09 11:25:05 thib Exp $ */
+/* $OpenBSD: if_pppoe.c,v 1.26 2008/08/28 13:19:38 brad Exp $ */
 /* $NetBSD: if_pppoe.c,v 1.51 2003/11/28 08:56:48 keihan Exp $ */
 
 /*
@@ -75,7 +75,7 @@ struct pppoetag {
 	u_int16_t len;
 } __packed;
 
-#define PPPOE_HEADERLEN		sizeof(struct pppoehdr)
+#define	PPPOE_HEADERLEN		sizeof(struct pppoehdr)
 #define	PPPOE_OVERHEAD		(PPPOE_HEADERLEN + 2)
 #define	PPPOE_VERTYPE		0x11		/* VER=1, TYPE = 1 */
 
@@ -90,7 +90,7 @@ struct pppoetag {
 #define	PPPOE_TAG_ACSYS_ERR	0x0202		/* AC system error */
 #define	PPPOE_TAG_GENERIC_ERR	0x0203		/* gerneric error */
 
-#define PPPOE_CODE_PADI		0x09		/* Active Discovery Initiation */
+#define	PPPOE_CODE_PADI		0x09		/* Active Discovery Initiation */
 #define	PPPOE_CODE_PADO		0x07		/* Active Discovery Offer */
 #define	PPPOE_CODE_PADR		0x19		/* Active Discovery Request */
 #define	PPPOE_CODE_PADS		0x65		/* Active Discovery Session confirmation */
@@ -105,7 +105,7 @@ struct pppoetag {
 		*(PTR)++ = (VAL) % 256
 
 /* Add a complete PPPoE header to the buffer pointed to by PTR */
-#define PPPOE_ADD_HEADER(PTR, CODE, SESS, LEN)	\
+#define	PPPOE_ADD_HEADER(PTR, CODE, SESS, LEN)	\
 		*(PTR)++ = PPPOE_VERTYPE;	\
 		*(PTR)++ = (CODE);		\
 		PPPOE_ADD_16(PTR, SESS);	\
@@ -113,11 +113,11 @@ struct pppoetag {
 
 #define	PPPOE_DISC_TIMEOUT	(hz*5)	/* base for quick timeout calculation */
 #define	PPPOE_SLOW_RETRY	(hz*60)	/* persistent retry interval */
-#define PPPOE_DISC_MAXPADI	4	/* retry PADI four times (quickly) */
+#define	PPPOE_DISC_MAXPADI	4	/* retry PADI four times (quickly) */
 #define	PPPOE_DISC_MAXPADR	2	/* retry PADR twice */
 
 #ifdef PPPOE_SERVER
-#define IFF_PASSIVE	IFF_LINK0	/* wait passively for connection */
+#define	IFF_PASSIVE	IFF_LINK0	/* wait passively for connection */
 #endif
 
 struct pppoe_softc {
@@ -148,8 +148,8 @@ struct pppoe_softc {
 };
 
 /* incoming traffic will be queued here */
-struct ifqueue ppoediscinq = { NULL };
-struct ifqueue ppoeinq = { NULL };
+struct ifqueue pppoediscinq = { NULL };
+struct ifqueue pppoeinq = { NULL };
 
 extern int sppp_ioctl(struct ifnet *, unsigned long, void *);
 
@@ -205,8 +205,8 @@ pppoeattach(int count)
 	LIST_INIT(&pppoe_softc_list);
 	if_clone_attach(&pppoe_cloner);
 
-	ppoediscinq.ifq_maxlen = IFQ_MAXLEN;
-	ppoeinq.ifq_maxlen = IFQ_MAXLEN;
+	pppoediscinq.ifq_maxlen = IFQ_MAXLEN;
+	pppoeinq.ifq_maxlen = IFQ_MAXLEN;
 }
 
 /* Create a new interface. */
@@ -366,7 +366,7 @@ pppoeintr(void)
 	
 	for (;;) {
 		s = splnet();
-		IF_DEQUEUE(&ppoediscinq, m);
+		IF_DEQUEUE(&pppoediscinq, m);
 		splx(s);
 		if (m == NULL)
 			break;
@@ -375,7 +375,7 @@ pppoeintr(void)
 
 	for (;;) {
 		s = splnet();
-		IF_DEQUEUE(&ppoeinq, m);
+		IF_DEQUEUE(&pppoeinq, m);
 		splx(s);
 		if (m == NULL)
 			break;
@@ -471,6 +471,7 @@ static void pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 		pt = (struct pppoetag *)(mtod(n, caddr_t) + noff);
 		tag = ntohs(pt->tag);
 		len = ntohs(pt->len);
+		off += sizeof(*pt);
 		if (off + len > m->m_pkthdr.len) {
 			printf("%s: tag 0x%x len 0x%x is too long\n",
 			    devname, tag, len);
@@ -486,7 +487,7 @@ static void pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 		case PPPOE_TAG_HUNIQUE:
 			if (sc != NULL)
 				break;
-			n = m_pulldown(m, off + sizeof(*pt), len, &noff);
+			n = m_pulldown(m, off, len, &noff);
 			if (n == NULL) {
 				m = NULL;
 				err_msg = "TAG HUNIQUE ERROR";
@@ -503,7 +504,7 @@ static void pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 			break;
 		case PPPOE_TAG_ACCOOKIE:
 			if (ac_cookie == NULL) {
-				n = m_pulldown(m, off + sizeof(*pt), len,
+				n = m_pulldown(m, off, len,
 				    &noff);
 				if (n == NULL) {
 					err_msg = "TAG ACCOOKIE ERROR";
@@ -516,7 +517,7 @@ static void pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 			break;
 		case PPPOE_TAG_RELAYSID:
 			if (relay_sid == NULL) {
-				n = m_pulldown(m, off + sizeof(*pt), len,
+				n = m_pulldown(m, off, len,
 				    &noff);
 				if (n == NULL) {
 					err_msg = "TAG RELAYSID ERROR";
@@ -543,7 +544,7 @@ static void pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 		if (err_msg) {
 			log(LOG_INFO, "%s: %s: ", devname, err_msg);
 			if (errortag && len) {
-				n = m_pulldown(m, off + sizeof(*pt), len,
+				n = m_pulldown(m, off, len,
 				    &noff);
 				if (n) {
 					u_int8_t *et = mtod(n, caddr_t) + noff;
@@ -554,7 +555,7 @@ static void pppoe_dispatch_disc_pkt(struct mbuf *m, int off)
 			addlog("\n");
 			goto done;
 		}
-		off += sizeof(*pt) + len;
+		off += len;
 	}
 breakbreak:
 	switch (code) {
