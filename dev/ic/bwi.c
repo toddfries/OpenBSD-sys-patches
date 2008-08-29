@@ -74,6 +74,7 @@
 #include <dev/ic/bwireg.h>
 #include <dev/ic/bwivar.h>
 
+#define BWI_DEBUG
 #ifdef BWI_DEBUG
 int bwi_debug = 1;
 #define DPRINTF(l, x...)	do { if ((l) <= bwi_debug) printf(x); } while (0)
@@ -8281,9 +8282,12 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 		m->m_len = m->m_pkthdr.len = buflen + sizeof(*hdr);
 		m_adj(m, sizeof(*hdr) + wh_ofs);
 
-		if (htole16(hdr->rxh_flags1) & BWI_RXH_F1_OFDM)
-			rate = bwi_ofdm_plcp2rate(plcp);
-		else
+		if (htole16(hdr->rxh_flags1) & BWI_RXH_F1_OFDM) {
+			u_int32_t rv;
+			u_int8_t *p = plcp;
+			rv = (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+			rate = bwi_ofdm_plcp2rate(&rv);
+		} else
 			rate = bwi_ds_plcp2rate(plcp);
 
 #if NBPFILTER > 0
@@ -8998,7 +9002,7 @@ _bwi_txeof(struct bwi_softc *sc, uint16_t tx_id)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	struct bwi_txbuf_data *tbd;
 	struct bwi_txbuf *tb;
-	int ring_idx, buf_idx;
+	uint16_t ring_idx, buf_idx;
 
 	if (tx_id == 0) {
 		printf("%s: zero tx id\n", sc->sc_dev.dv_xname);
