@@ -893,17 +893,6 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	 */
 	dev_priv->vblank_crtc = DRM_RADEON_VBLANK_CRTC1;
 
-	switch(init->func) {
-	case RADEON_INIT_R200_CP:
-		dev_priv->microcode_version = UCODE_R200;
-		break;
-	case RADEON_INIT_R300_CP:
-		dev_priv->microcode_version = UCODE_R300;
-		break;
-	default:
-		dev_priv->microcode_version = UCODE_R100;
-	}
-
 	dev_priv->do_boxes = 0;
 	dev_priv->cp_mode = init->cp_mode;
 
@@ -951,8 +940,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 	 */
 	dev_priv->depth_clear.rb3d_cntl = (RADEON_PLANE_MASK_ENABLE |
 					   (dev_priv->color_fmt << 10) |
-					   (dev_priv->microcode_version ==
-					    UCODE_R100 ? RADEON_ZBLOCK16 : 0));
+					   (dev_priv->chip_family < CHIP_R200 ? RADEON_ZBLOCK16 : 0));
 
 	dev_priv->depth_clear.rb3d_zstencilcntl =
 	    (dev_priv->depth_fmt |
@@ -1158,7 +1146,7 @@ static int radeon_do_init_cp(struct drm_device * dev, drm_radeon_init_t * init)
 			dev_priv->gart_info.mapping.size =
 			    dev_priv->gart_info.table_size;
 
-			drm_core_ioremap(&dev_priv->gart_info.mapping, dev);
+			drm_core_ioremap_wc(&dev_priv->gart_info.mapping, dev);
 			dev_priv->gart_info.addr =
 			    dev_priv->gart_info.mapping.handle;
 
@@ -1704,11 +1692,10 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	drm_radeon_private_t *dev_priv;
 	int ret = 0;
 
-	dev_priv = drm_alloc(sizeof(drm_radeon_private_t), DRM_MEM_DRIVER);
+	dev_priv = drm_calloc(1, sizeof(drm_radeon_private_t), DRM_MEM_DRIVER);
 	if (dev_priv == NULL)
 		return -ENOMEM;
 
-	memset(dev_priv, 0, sizeof(drm_radeon_private_t));
 	dev->dev_private = (void *)dev_priv;
 	dev_priv->flags = flags;
 
@@ -1731,6 +1718,7 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 		break;
 	}
 
+	dev_priv->chip_family = flags & RADEON_FAMILY_MASK;
 	if (drm_device_is_agp(dev))
 		dev_priv->flags |= RADEON_IS_AGP;
 	else if (drm_device_is_pcie(dev))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.102 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.104 2008/08/08 17:49:21 bluhm Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -508,10 +508,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			m_freem(m);
 			goto done;
 		}
-
-		/* Latch to PCB */
-		if (inp)
-			tdb_add_inp(tdb, inp, 0);
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -2253,13 +2249,7 @@ copypktopts(struct ip6_pktopts *dst, struct ip6_pktopts *src, int canwait)
 	return (0);
 
   bad:
-	if (dst->ip6po_pktinfo) free(dst->ip6po_pktinfo, M_IP6OPT);
-	if (dst->ip6po_nexthop) free(dst->ip6po_nexthop, M_IP6OPT);
-	if (dst->ip6po_hbh) free(dst->ip6po_hbh, M_IP6OPT);
-	if (dst->ip6po_dest1) free(dst->ip6po_dest1, M_IP6OPT);
-	if (dst->ip6po_dest2) free(dst->ip6po_dest2, M_IP6OPT);
-	if (dst->ip6po_rthdr) free(dst->ip6po_rthdr, M_IP6OPT);
-
+	ip6_clearpktopts(dst, -1);
 	return (ENOBUFS);
 }
 #undef PKTOPT_EXTHDRCPY

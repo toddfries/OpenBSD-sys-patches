@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.h,v 1.27 2008/04/21 19:37:18 damien Exp $	*/
+/*	$OpenBSD: ieee80211_node.h,v 1.31 2008/08/12 18:22:41 damien Exp $	*/
 /*	$NetBSD: ieee80211_node.h,v 1.9 2004/04/30 22:57:32 dyoung Exp $	*/
 
 /*-
@@ -64,6 +64,13 @@ enum ieee80211_node_state {
 	do {					\
 		(__ni)->ni_state = (__state);	\
 	} while (0)
+
+enum ieee80211_node_psstate {
+	IEEE80211_PS_AWAKE,
+	IEEE80211_PS_DOZE
+};
+
+#define	IEEE80211_PS_MAX_QUEUE	50	/* maximum saved packets */
 
 /* Authenticator state machine: 4-Way Handshake (see 8.5.6.1.1) */
 enum {
@@ -147,6 +154,7 @@ struct ieee80211_node {
 	u_int			ni_rsnakms;
 	u_int			ni_rsnciphers;
 	enum ieee80211_cipher	ni_rsngroupcipher;
+	enum ieee80211_cipher	ni_rsngroupmgmtcipher;
 	u_int16_t		ni_rsncaps;
 	enum ieee80211_cipher	ni_rsncipher;
 	u_int8_t		ni_nonce[EAPOL_KEY_NONCE_LEN];
@@ -172,9 +180,16 @@ struct ieee80211_node {
 	int			ni_state;
 
 	u_int8_t		ni_flags;	/* special-purpose state */
-#define IEEE80211_NODE_ERP	0x01
-#define IEEE80211_NODE_QOS	0x02
-#define IEEE80211_NODE_REKEY	0x04
+#define IEEE80211_NODE_ERP		0x01
+#define IEEE80211_NODE_QOS		0x02
+#define IEEE80211_NODE_REKEY		0x04	/* GTK rekeying in progress */
+#define IEEE80211_NODE_RXPROT		0x08	/* RX protection ON */
+#define IEEE80211_NODE_TXPROT		0x10	/* TX protection ON */
+#define IEEE80211_NODE_TXRXPROT	\
+	(IEEE80211_NODE_TXPROT | IEEE80211_NODE_RXPROT)
+#define IEEE80211_NODE_RXMGMTPROT	0x20	/* RX MMPDU protection ON */
+#define IEEE80211_NODE_TXMGMTPROT	0x40	/* TX MMPDU protection ON */
+#define IEEE80211_NODE_MFP		0x80	/* MFP negotiated */
 };
 
 RB_HEAD(ieee80211_tree, ieee80211_node);

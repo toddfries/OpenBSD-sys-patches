@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.44 2008/06/14 10:55:20 mk Exp $ */
+/*	$OpenBSD: pmap.c,v 1.47 2008/08/18 23:19:29 miod Exp $ */
 /*	$NetBSD: pmap.c,v 1.74 1999/11/13 21:32:25 matt Exp $	   */
 /*
  * Copyright (c) 1994, 1998, 1999 Ludd, University of Lule}, Sweden.
@@ -185,7 +185,7 @@ pmap_bootstrap()
 	avail_start = scratch + 4 * VAX_NBPG - KERNBASE;
 
 	/* Kernel message buffer */
-	avail_end -= MSGBUFSIZE;
+	avail_end -= round_page(MSGBUFSIZE);
 	msgbufp = (void *)(avail_end + KERNBASE);
 	msgbufp->msg_magic = MSG_MAGIC-1; 	/* ensure that it will be zeroed */
 
@@ -211,8 +211,8 @@ pmap_bootstrap()
 	avail_start = scb_init(avail_start);
 	bcopy((caddr_t)proc0paddr + REDZONEADDR, 0, sizeof(struct rpb));
 
-	if (dep_call->cpu_steal_pages)
-		(*dep_call->cpu_steal_pages)();
+	if (dep_call->cpu_init)
+		(*dep_call->cpu_init)();
 
 	avail_start = ROUND_PAGE(avail_start);
 	virtual_avail = ROUND_PAGE(virtual_avail);
@@ -257,9 +257,8 @@ pmap_bootstrap()
 	/*
 	 * Now everything should be complete, start virtual memory.
 	 */
-	uvm_page_physload(avail_start >> PGSHIFT, avail_end >> PGSHIFT,
-	    avail_start >> PGSHIFT, avail_end >> PGSHIFT,
-	    VM_FREELIST_DEFAULT);
+	uvm_page_physload(atop(avail_start), atop(avail_end),
+	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
 	mtpr(sysptsize, PR_SLR);
 	rpb.sbr = mfpr(PR_SBR);
 	rpb.slr = mfpr(PR_SLR);
@@ -291,7 +290,7 @@ pmap_steal_memory(size, vstartp, vendp)
 		    size, vstartp, vendp);
 #endif
 	size = round_page(size);
-	npgs = btoc(size);
+	npgs = atop(size);
 
 #ifdef DIAGNOSTIC
 	if (uvm.page_init_done == TRUE)
@@ -299,7 +298,7 @@ pmap_steal_memory(size, vstartp, vendp)
 #endif
 
 	/*
-	 * A vax only have one segment of memory.
+	 * A vax only has one segment of memory.
 	 */
 
 	v = (vm_physmem[0].avail_start << PGSHIFT) | KERNBASE;
@@ -390,9 +389,9 @@ pmap_create()
 	    (u_long *)&pmap->pm_p0br);
 	if (res)
 		panic("pmap_create");
-	pmap->pm_p0lr = vax_btoc(MAXTSIZ + MAXDSIZ + BRKSIZ) | AST_PCB;
+	pmap->pm_p0lr = vax_atop(MAXTSIZ + MAXDSIZ + BRKSIZ) | AST_PCB;
 	(vaddr_t)pmap->pm_p1br = (vaddr_t)pmap->pm_p0br + bytesiz - 0x800000;
-	pmap->pm_p1lr = vax_btoc(0x40000000 - MAXSSIZ);
+	pmap->pm_p1lr = vax_atop(0x40000000 - MAXSSIZ);
 	pmap->pm_stack = USRSTACK;
 
 #ifdef PMAPDEBUG

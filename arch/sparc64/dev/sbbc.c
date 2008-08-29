@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbbc.c,v 1.2 2008/07/07 14:46:18 kettenis Exp $	*/
+/*	$OpenBSD: sbbc.c,v 1.4 2008/07/12 23:12:52 kettenis Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *
@@ -51,6 +51,10 @@ extern todr_chip_handle_t todr_handle;
 #define SBBC_EPLD_SIZE		0x20
 #define SBBC_SRAM_OFFSET	0x900000
 #define SBBC_SRAM_SIZE		0x20000	/* 128KB SRAM */
+
+#define SBBC_PCI_INT_STATUS	0x2320
+#define SBBC_PCI_INT_ENABLE	0x2330
+#define SBBC_PCI_ENABLE_INT_A	0x11
 
 #define SBBC_EPLD_INTERRUPT	0x13
 #define SBBC_EPLD_INTERRUPT_ON	0x01
@@ -120,14 +124,17 @@ struct sbbc_softc {
 	bus_space_handle_t	sc_sram_ioh;
 	caddr_t			sc_sram;
 	uint32_t		sc_sram_toc;
+	void *			sc_ih;
 
 	struct sparc_bus_space_tag sc_bbt;
 
 	struct tty		*sc_tty;
-	struct timeout		sc_to;
 	caddr_t			sc_sram_cons;
-	uint32_t		*sc_sram_intr_enabled;
-	uint32_t		*sc_sram_intr_reason;
+	uint32_t		*sc_sram_solscie;
+	uint32_t		*sc_sram_solscir;
+	uint32_t		*sc_sram_scsolie;
+	uint32_t		*sc_sram_scsolir;
+	void			*sc_cons_si;
 };
 
 struct sbbc_softc *sbbc_cons_input;
@@ -144,6 +151,7 @@ struct cfdriver sbbc_cd = {
 	NULL, "sbbc", DV_DULL
 };
 
+int	sbbc_intr(void *);
 void	sbbc_send_intr(struct sbbc_softc *sc);
 
 void	sbbc_attach_tod(struct sbbc_softc *, uint32_t);
@@ -151,12 +159,13 @@ int	sbbc_tod_gettime(todr_chip_handle_t, struct timeval *);
 int	sbbc_tod_settime(todr_chip_handle_t, struct timeval *);
 
 void	sbbc_attach_cons(struct sbbc_softc *, uint32_t);
+void	sbbc_intr_cons(struct sbbc_softc *, uint32_t);
+void	sbbc_softintr_cons(void *);
 int	sbbc_cnlookc(dev_t, int *);
 int	sbbc_cngetc(dev_t);
 void	sbbc_cnputc(dev_t, int);
 void	sbbcstart(struct tty *);
 int	sbbcparam(struct tty *, struct termios *);
-void	sbbctimeout(void *);
 
 int
 sbbc_match(struct device *parent, void *match, void *aux)
@@ -178,6 +187,7 @@ sbbc_attach(struct device *parent, struct device *self, void *aux)
 	struct sbbc_sram_toc *toc;
 	bus_addr_t base;
 	bus_size_t size;
+	pci_intr_handle_t ih;
 	int chosen, iosram;
 	int i;
 
@@ -192,25 +202,45 @@ sbbc_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	if (bus_space_map(sc->sc_iot, base + SBBC_REGS_OFFSET,
+	    SBBC_REGS_SIZE, 0, &sc->sc_regs_ioh)) {
+		printf(": can't map register space\n");
+		return;
+	}
+
 	if (bus_space_map(sc->sc_iot, base + SBBC_EPLD_OFFSET,
 	    SBBC_EPLD_SIZE, 0, &sc->sc_epld_ioh)) {
 		printf(": can't map EPLD registers\n");
-		return;
+		goto unmap_regs;
 	}
 
 	if (bus_space_map(sc->sc_iot, base + SBBC_SRAM_OFFSET,
 	    SBBC_SRAM_SIZE, 0, &sc->sc_sram_ioh)) {
 		printf(": can't map SRAM\n");
-		return;
+		goto unmap_epld;
 	}
+
+	if (pci_intr_map(pa, &ih)) {
+		printf(": unable to map interrupt\n");
+		goto unmap_sram;
+	}
+	printf(": %s\n", pci_intr_string(pa->pa_pc, ih));
+
+	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_TTY,
+	    sbbc_intr, sc, sc->sc_dv.dv_xname);
+	if (sc->sc_ih == NULL) {
+		printf("%s: unable to establish interrupt\n");
+		goto unmap_sram;
+	}
+
+	bus_space_write_4(sc->sc_iot, sc->sc_regs_ioh,
+	    SBBC_PCI_INT_ENABLE, SBBC_PCI_ENABLE_INT_A);
 
 	/* Check if we are the chosen one. */
 	chosen = OF_finddevice("/chosen");
 	if (OF_getprop(chosen, "iosram", &iosram, sizeof(iosram)) <= 0 ||
-	    PCITAG_NODE(pa->pa_tag) != iosram) {
-		printf("\n");
+	    PCITAG_NODE(pa->pa_tag) != iosram)
 		return;
-	}
 
 	/* SRAM TOC offset defaults to 0. */
 	if (OF_getprop(chosen, "iosram-toc", &sc->sc_sram_toc,
@@ -222,14 +252,18 @@ sbbc_attach(struct device *parent, struct device *self, void *aux)
 
 	for (i = 0; i < toc->toc_ntags; i++) {
 		if (strcmp(toc->toc_tag[i].tag_key, "SOLSCIE") == 0)
-			sc->sc_sram_intr_enabled = (uint32_t *)
+			sc->sc_sram_solscie = (uint32_t *)
 			    (sc->sc_sram + toc->toc_tag[i].tag_offset);
 		if (strcmp(toc->toc_tag[i].tag_key, "SOLSCIR") == 0)
-			sc->sc_sram_intr_reason = (uint32_t *)
+			sc->sc_sram_solscir = (uint32_t *)
+			    (sc->sc_sram + toc->toc_tag[i].tag_offset);
+		if (strcmp(toc->toc_tag[i].tag_key, "SCSOLIE") == 0)
+			sc->sc_sram_scsolie = (uint32_t *)
+			    (sc->sc_sram + toc->toc_tag[i].tag_offset);
+		if (strcmp(toc->toc_tag[i].tag_key, "SCSOLIR") == 0)
+			sc->sc_sram_scsolir = (uint32_t *)
 			    (sc->sc_sram + toc->toc_tag[i].tag_offset);
 	}
-
-	*sc->sc_sram_intr_enabled |= SBBC_SRAM_CONS_OUT;
 
 	for (i = 0; i < toc->toc_ntags; i++) {
 		if (strcmp(toc->toc_tag[i].tag_key, "TODDATA") == 0)
@@ -238,7 +272,37 @@ sbbc_attach(struct device *parent, struct device *self, void *aux)
 			sbbc_attach_cons(sc, toc->toc_tag[i].tag_offset);
 	}
 
-	printf("\n");
+	return;
+
+ unmap_sram:
+	bus_space_unmap(sc->sc_iot, sc->sc_sram_ioh, SBBC_SRAM_SIZE);
+ unmap_epld:
+	bus_space_unmap(sc->sc_iot, sc->sc_sram_ioh, SBBC_EPLD_SIZE);
+ unmap_regs:
+	bus_space_unmap(sc->sc_iot, sc->sc_sram_ioh, SBBC_REGS_SIZE);
+}
+
+int
+sbbc_intr(void *arg)
+{
+	struct sbbc_softc *sc = arg;
+	uint32_t status, reason;
+
+	status = bus_space_read_4(sc->sc_iot, sc->sc_regs_ioh,
+	    SBBC_PCI_INT_STATUS);
+	if (status == 0)
+		return (0);
+
+	/* Sigh, we cannot use compare and swap for non-cachable memory. */
+	reason = *sc->sc_sram_scsolir;
+	*sc->sc_sram_scsolir = 0;
+
+	sbbc_intr_cons(sc, reason);
+
+	/* Ack interrupt. */
+	bus_space_write_4(sc->sc_iot, sc->sc_regs_ioh,
+	    SBBC_PCI_INT_STATUS, status);
+	return (1);
 }
 
 void
@@ -298,6 +362,10 @@ sbbc_attach_cons(struct sbbc_softc *sc, uint32_t offset)
 	int sgcn_is_input, sgcn_is_output, node, maj;
 	char buf[32];
 
+	if (sc->sc_sram_solscie == NULL || sc->sc_sram_solscir == NULL ||
+	    sc->sc_sram_scsolie == NULL || sc->sc_sram_scsolir == NULL)
+		return;
+
 	cons = (struct sbbc_sram_cons *)(sc->sc_sram + offset);
 	if (cons->cons_magic != SBBC_CONS_MAGIC ||
 	    cons->cons_version < SBBC_CONS_VERSION)
@@ -307,7 +375,13 @@ sbbc_attach_cons(struct sbbc_softc *sc, uint32_t offset)
 	sbbc_cons_input = sbbc_cons_output = sc;
 	sgcn_is_input = sgcn_is_output = 0;
 
-	timeout_set(&sc->sc_to, sbbctimeout, sc);
+	sc->sc_cons_si = softintr_establish(IPL_TTY, sbbc_softintr_cons, sc);
+	if (sc->sc_cons_si == NULL)
+		panic("%s: can't establish soft interrupt",
+		    sc->sc_dv.dv_xname);
+
+	*sc->sc_sram_solscie |= SBBC_SRAM_CONS_OUT;
+	*sc->sc_sram_scsolie |= SBBC_SRAM_CONS_IN | SBBC_SRAM_CONS_BRK;
 
 	/* Take over console input. */
 	prom_serengeti_set_console_input("CON_CLNT");
@@ -340,8 +414,44 @@ sbbc_attach_cons(struct sbbc_softc *sc, uint32_t offset)
 		/* Let current output drain. */
 		DELAY(2000000);
 
-		printf(": console");
+		printf("%s: console\n", sc->sc_dv.dv_xname);
 	}
+}
+
+void
+sbbc_intr_cons(struct sbbc_softc *sc, uint32_t reason)
+{
+#ifdef DDB
+	if ((reason & SBBC_SRAM_CONS_BRK) && sc == sbbc_cons_input) {
+		if (db_console)
+			Debugger();
+	}
+#endif
+
+	if ((reason & SBBC_SRAM_CONS_IN) && sc->sc_tty)
+		softintr_schedule(sc->sc_cons_si);
+}
+
+void
+sbbc_softintr_cons(void *arg)
+{
+	struct sbbc_softc *sc = arg;
+	struct sbbc_sram_cons *cons = (void *)sc->sc_sram_cons;
+	uint32_t rdptr = cons->cons_in_rdptr;
+	struct tty *tp = sc->sc_tty;
+	int c;
+
+	while (rdptr != cons->cons_in_wrptr) {
+		if (tp->t_state & TS_ISOPEN) {
+			c = *(sc->sc_sram_cons + rdptr);
+			(*linesw[tp->t_line].l_rint)(c, tp);
+		}
+
+		if (++rdptr == cons->cons_in_end)
+			rdptr = cons->cons_in_begin;
+	}
+
+	cons->cons_in_rdptr = rdptr;
 }
 
 int
@@ -385,7 +495,7 @@ sbbc_cnputc(dev_t dev, int c)
 		wrptr = cons->cons_out_begin;
 	cons->cons_out_wrptr = wrptr;
 
-	*sc->sc_sram_intr_reason |= SBBC_SRAM_CONS_OUT;
+	*sc->sc_sram_solscir |= SBBC_SRAM_CONS_OUT;
 	sbbc_send_intr(sc);
 }
 
@@ -395,7 +505,6 @@ sbbcopen(dev_t dev, int flag, int mode, struct proc *p)
 	struct sbbc_softc *sc;
 	struct tty *tp;
 	int unit = minor(dev);
-	int error, setuptimeout;
 
 	if (unit > sbbc_cd.cd_ndevs)
 		return (ENXIO);
@@ -419,17 +528,11 @@ sbbcopen(dev_t dev, int flag, int mode, struct proc *p)
 		tp->t_lflag = TTYDEF_LFLAG;
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 		ttsetwater(tp);
-
-		setuptimeout = 1;
 	} else if ((tp->t_state & TS_XCLUDE) && suser(p, 0))
 		return (EBUSY);
 	tp->t_state |= TS_CARR_ON;
 
-	error = (*linesw[tp->t_line].l_open)(dev, tp);
-	if (error == 0 && setuptimeout)
-		sbbctimeout(sc);
-
-	return (error);
+	return ((*linesw[tp->t_line].l_open)(dev, tp));
 }
 
 int
@@ -446,7 +549,6 @@ sbbcclose(dev_t dev, int flag, int mode, struct proc *p)
 		return (ENXIO);
 
 	tp = sc->sc_tty;
-	timeout_del(&sc->sc_to);
 	(*linesw[tp->t_line].l_close)(tp, flag);
 	ttyclose(tp);
 	return (0);
@@ -570,18 +672,4 @@ sbbcparam(struct tty *tp, struct termios *t)
 	tp->t_ospeed = t->c_ospeed;
 	tp->t_cflag = t->c_cflag;
 	return (0);
-}
-
-void
-sbbctimeout(void *v)
-{
-	struct sbbc_softc *sc = v;
-	struct tty *tp = sc->sc_tty;
-	int c;
-
-	while (sbbc_cnlookc(tp->t_dev, &c)) {
-		if (tp->t_state & TS_ISOPEN)
-			(*linesw[tp->t_line].l_rint)(c, tp);
-	}
-	timeout_add(&sc->sc_to, 1);
 }

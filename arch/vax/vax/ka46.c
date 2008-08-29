@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka46.c,v 1.7 2002/07/21 19:28:50 hugh Exp $	*/
+/*	$OpenBSD: ka46.c,v 1.9 2008/08/18 23:05:38 miod Exp $	*/
 /*	$NetBSD: ka46.c,v 1.12 2000/03/04 07:27:49 matt Exp $ */
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
@@ -55,12 +55,13 @@
 #include <machine/vsbus.h>
 
 static	void	ka46_conf(void);
-static	void	ka46_steal_pages(void);
+static	void	ka46_init(void);
 static	void	ka46_memerr(void);
 static	int	ka46_mchk(caddr_t);
 static	void	ka46_halt(void);
 static	void	ka46_reboot(int);
 static	void	ka46_cache_enable(void);
+static	void	ka46_hardclock(struct clockframe *);
 
 struct	vs_cpu *ka46_cpu;
 
@@ -68,7 +69,7 @@ struct	vs_cpu *ka46_cpu;
  * Declaration of 46-specific calls.
  */
 struct	cpu_dep ka46_calls = {
-	ka46_steal_pages,
+	ka46_init,
 	ka46_mchk,
 	ka46_memerr, 
 	ka46_conf,
@@ -78,6 +79,9 @@ struct	cpu_dep ka46_calls = {
 	2,	/* SCB pages */
 	ka46_halt,
 	ka46_reboot,
+	NULL,
+	NULL,
+	ka46_hardclock
 };
 
 
@@ -153,7 +157,7 @@ ka46_mchk(addr)
 }
 
 void
-ka46_steal_pages()
+ka46_init()
 {
 
 	/* Turn on caches (to speed up execution a bit) */
@@ -179,4 +183,11 @@ ka46_reboot(arg)
 	if (((u_int8_t *) clk_page)[KA46_CPMBX] != KA46_HLT_BOOT)
 		((u_int8_t *) clk_page)[KA46_CPMBX] = KA46_HLT_BOOT;
 	asm("halt");
+}
+
+static void
+ka46_hardclock(struct clockframe *cf)
+{
+	ka46_cpu->vc_diagtimu = 0;
+	hardclock(cf);
 }

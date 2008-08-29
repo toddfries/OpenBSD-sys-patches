@@ -1,10 +1,10 @@
-/*	$OpenBSD: miidevs.h,v 1.99 2008/06/26 05:42:16 ray Exp $	*/
+/*	$OpenBSD: miidevs.h,v 1.102 2008/08/24 08:23:28 brad Exp $	*/
 
 /*
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: miidevs,v 1.95 2008/06/11 00:25:27 brad Exp 
+ *	OpenBSD: miidevs,v 1.99 2008/08/24 08:23:15 brad Exp 
  */
 /* $NetBSD: miidevs,v 1.3 1998/11/05 03:43:43 thorpej Exp $ */
 
@@ -47,6 +47,7 @@
 #define	MII_OUI_LUCENT	0x00601d	/* Lucent Technologies */
 #define	MII_OUI_ALTIMA	0x0010a9	/* Altima Communications */
 #define	MII_OUI_AMD	0x00001a	/* Advanced Micro Devices */
+#define	MII_OUI_ATHEROS	0x001374	/* Atheros Communications */
 #define	MII_OUI_ASIX	0x000ec6	/* ASIX Electronics */
 #define	MII_OUI_BROADCOM	0x001018	/* Broadcom Corporation */
 #define	MII_OUI_BROADCOM2	0x000af7	/* Broadcom Corporation */
@@ -60,6 +61,7 @@
 #define	MII_OUI_ICS	0x00a0be	/* Integrated Circuit Systems */
 #define	MII_OUI_INTEL	0x00aa00	/* Intel */
 #define	MII_OUI_JATO	0x00e083	/* Jato Technologies */
+#define	MII_OUI_JMICRON	0x001b8c	/* JMicron Technologies */
 #define	MII_OUI_LEVEL1	0x00207b	/* Level 1 */
 #define	MII_OUI_MYSON	0x00c0b4	/* Myson Technology */
 #define	MII_OUI_NATSEMI	0x080017	/* National Semiconductor */
@@ -125,6 +127,10 @@
 #define	MII_MODEL_AGERE_ET1011	0x0004
 #define	MII_STR_AGERE_ET1011	"ET1011 10/100/1000baseT PHY"
 
+/* Atheros PHYs */
+#define	MII_MODEL_ATHEROS_F1	0x0001
+#define	MII_STR_ATHEROS_F1	"F1 10/100/1000baseT PHY"
+
 /* Altima Communications PHYs */
 #define	MII_MODEL_xxALTIMA_AC_UNKNOWN	0x0001
 #define	MII_STR_xxALTIMA_AC_UNKNOWN	"AC_UNKNOWN 10/100 PHY"
@@ -161,7 +167,7 @@
 #define	MII_MODEL_xxBROADCOM_BCM54K2	0x002e
 #define	MII_STR_xxBROADCOM_BCM54K2	"BCM54K2 10/100/1000baseT PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5714	0x0034
-#define	MII_STR_xxBROADCOM_BCM5714	"BCM5714 10/100/1000baseT PHY"
+#define	MII_STR_xxBROADCOM_BCM5714	"BCM5714 10/100/1000baseT/SX PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5780	0x0035
 #define	MII_STR_xxBROADCOM_BCM5780	"BCM5780 10/100/1000baseT/SX PHY"
 #define	MII_MODEL_xxBROADCOM_BCM5708C	0x0036
@@ -308,6 +314,12 @@
 /* Jato Technologies PHYs */
 #define	MII_MODEL_JATO_BASEX	0x0000
 #define	MII_STR_JATO_BASEX	"Jato 1000baseX PHY"
+
+/* JMicron Technologies PHYs */
+#define	MII_MODEL_JMICRON_JMP211	0x0021
+#define	MII_STR_JMICRON_JMP211	"JMP211 10/100/1000 PHY"
+#define	MII_MODEL_JMICRON_JMP202	0x0022
+#define	MII_STR_JMICRON_JMP202	"JMP202 10/100 PHY"
 
 /* Level 1 PHYs */
 #define	MII_MODEL_xxLEVEL1_LXT970	0x0000

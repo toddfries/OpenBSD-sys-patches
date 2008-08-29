@@ -57,8 +57,10 @@ drm_alloc(size_t size, int area)
 void *
 drm_calloc(size_t nmemb, size_t size, int area)
 {
-	/* XXX overflow checking */
-	return malloc(size * nmemb, M_DRM, M_NOWAIT | M_ZERO);
+	if (nmemb == 0 || SIZE_MAX / nmemb < size)
+		return (NULL);
+	else
+		return malloc(size * nmemb, M_DRM, M_NOWAIT | M_ZERO);
 }
 
 void *
@@ -79,7 +81,8 @@ drm_realloc(void *oldpt, size_t oldsize, size_t size, int area)
 void
 drm_free(void *pt, size_t size, int area)
 {
-	free(pt, M_DRM);
+	if (pt != NULL)
+		free(pt, M_DRM);
 }
 
 void *
@@ -106,7 +109,7 @@ drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
 		}
 		goto done;
 	} else {
-		for (i = 0 ; i < DRM_MAX_PCI_RESOURCE; ++i) {
+		for (i = 0; i < DRM_MAX_PCI_RESOURCE; ++i) {
 			bar = vga_pci_bar_info(dev->vga_softc, i);
 			if (bar == NULL)
 				continue;
@@ -173,4 +176,87 @@ drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
 #else
 	return 0;
 #endif
+}
+
+u_int8_t
+drm_read8(drm_local_map_t *map, unsigned long offset)
+{
+	u_int8_t *ptr;
+
+	switch (map->type) {
+	case _DRM_SCATTER_GATHER:
+		ptr = map->handle + offset;
+		return  (*ptr);
+		
+	default:
+		return (bus_space_read_1(map->bst, map->bsh, offset));
+	}
+}
+
+u_int16_t
+drm_read16(drm_local_map_t *map, unsigned long offset)
+{
+	u_int16_t *ptr;
+	switch (map->type) {
+	case _DRM_SCATTER_GATHER:
+		ptr = map->handle + offset;
+		return  (*ptr);
+	default:
+		return (bus_space_read_2(map->bst, map->bsh, offset));
+	}
+}
+
+u_int32_t
+drm_read32(drm_local_map_t *map, unsigned long offset)
+{
+	u_int32_t *ptr;
+	switch (map->type) {
+	case _DRM_SCATTER_GATHER:
+		ptr = map->handle + offset;
+		return  (*ptr);
+	default:
+		return (bus_space_read_4(map->bst, map->bsh, offset));
+	}
+}
+
+void
+drm_write8(drm_local_map_t *map, unsigned long offset, u_int8_t val)
+{
+	u_int8_t *ptr;
+	switch (map->type) {
+	case _DRM_SCATTER_GATHER:
+		ptr = map->handle + offset;
+		*ptr = val;
+		break;
+	default:
+		bus_space_write_1(map->bst, map->bsh, offset, val);
+	}
+}
+
+void
+drm_write16(drm_local_map_t *map, unsigned long offset, u_int16_t val)
+{
+	u_int16_t *ptr;
+	switch (map->type) {
+	case _DRM_SCATTER_GATHER:
+		ptr = map->handle + offset;
+		*ptr = val;
+		break;
+	default:
+		bus_space_write_2(map->bst, map->bsh, offset, val);
+	}
+}
+
+void
+drm_write32(drm_local_map_t *map, unsigned long offset, u_int32_t val)
+{
+	u_int32_t *ptr;
+	switch (map->type) {
+	case _DRM_SCATTER_GATHER:
+		ptr = map->handle + offset;
+		*ptr = val;
+		break;
+	default:
+		bus_space_write_4(map->bst, map->bsh, offset, val);
+	}
 }

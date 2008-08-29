@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.215 2008/07/06 08:53:38 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.220 2008/08/28 10:21:22 mikeb Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -35,6 +35,8 @@ cpu0	at ssm?
 cmp*	at mainbus0
 cmp*	at ssm?
 cpu0	at cmp?
+core*	at cmp?
+cpu0	at core?
 
 # Bus types found on SPARC systems.
 sbus*	at mainbus0
@@ -89,10 +91,15 @@ art*	at musycc?		# Accoom Artery E1/T1 cards
 thtc*	at pci?			# Tehuti Networks 10Gb ethernet
 tht*	at thtc?
 
+ath*	at pci?			# Atheros AR5k (802.11a/b/g)
+ath*	at cardbus?		# Atheros AR5k (802.11a/b/g)
 pgt*	at pci?			# Prism54 (only full-mac varients)
 acx*	at pci?			# TI ACX100/ACX111 (802.11b/g)
+acx*	at cardbus?		# TI ACX100/ACX111 (802.11b/g)
 ral*	at pci?			# Ralink RT2500/RT2501/RT2600
 ral*	at cardbus?		# Ralink RT2500/RT2501/RT2600
+malo*	at pci?			# Marvell Libertas
+malo*	at cardbus?		# Marvell Libertas
 malo*	at pcmcia?		# Marvell 88W8385
 
 # PCI SCSI
@@ -124,6 +131,7 @@ lofn*	at pci?			# Hifn 6500
 ubsec*	at pci?			# Broadcom 580[125]/582[012]
 
 # PCI sound
+auacer*	at pci?			# Acer Labs M5455
 autri*	at pci? flags 0x0000	# Trident 4D WAVE
 cmpci*  at pci?			# C-Media CMI8338/8738
 eap*	at pci?			# Ensoniq AudioPCI S5016
@@ -135,6 +143,7 @@ com*	at puc?
 #lpt*	at puc?
 
 # Sound support
+audio*	at auacer?
 audio*	at audioce?
 audio*	at audiocs?
 audio*	at autri?
@@ -152,10 +161,12 @@ midi*	at autri?
 midi*	at opl?
 midi*	at eap?
 
-# PCI USB Controllers
+# USB Controllers
 ohci*	at pci?			# Open Host Controller
+ohci*	at cardbus?
 uhci*	at pci?			# Universal Host Controller (Intel)
 ehci*	at pci?			# Enhanced Host Controller
+ehci*	at cardbus?
 
 # USB bus support
 usb*	at ohci?

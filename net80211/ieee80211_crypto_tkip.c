@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.3 2008/04/26 19:59:24 damien Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.8 2008/08/27 09:05:04 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -16,17 +16,18 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/*
+ * This code implements the Temporal Key Integrity Protocol (TKIP) defined
+ * in IEEE Std 802.11-2007 section 8.3.2.
+ */
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
-#include <sys/sockio.h>
 #include <sys/endian.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/sysctl.h>
 #include <sys/syslog.h>
 
 #include <net/if.h>
@@ -60,6 +61,7 @@ struct ieee80211_tkip_ctx {
 	const u_int8_t	*rxmic;
 	u_int16_t	TTAK1[5];
 	u_int16_t	TTAK2[5];
+	u_int8_t	TTAK2ok;
 };
 
 /*
@@ -78,10 +80,13 @@ ieee80211_tkip_set_key(struct ieee80211com *ic, struct ieee80211_key *k)
 	 * Use bits 128-191 as the Michael key for AA->SPA and bits
 	 * 192-255 as the Michael key for SPA->AA.
 	 */
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 		ctx->txmic = &k->k_key[16];
 		ctx->rxmic = &k->k_key[24];
-	} else {
+	} else
+#endif
+	{
 		ctx->rxmic = &k->k_key[16];
 		ctx->txmic = &k->k_key[24];
 	}
@@ -140,16 +145,25 @@ ieee80211_tkip_mic(struct mbuf *m0, int off, const u_int8_t *key,
 		IEEE80211_ADDR_COPY(wht.i_sa, wh->i_addr3);
 		break;
 	case IEEE80211_FC1_DIR_DSTODS:
-		/* not yet supported */
+		IEEE80211_ADDR_COPY(wht.i_da, wh->i_addr3);
+		IEEE80211_ADDR_COPY(wht.i_sa,
+		    ((const struct ieee80211_frame_addr4 *)wh)->i_addr4);
 		break;
 	}
 	if ((wh->i_fc[0] &
 	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
 	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS)) {
-		const struct ieee80211_qosframe *qwh =
-		    (const struct ieee80211_qosframe *)wh;
-		wht.i_pri = qwh->i_qos[0] & 0xf;
-	}  else
+		if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) ==
+		    IEEE80211_FC1_DIR_DSTODS) {
+			const struct ieee80211_qosframe_addr4 *qwh4 =
+			    (const struct ieee80211_qosframe_addr4 *)wh;
+			wht.i_pri = qwh4->i_qos[0] & 0xf;
+		} else {
+			const struct ieee80211_qosframe *qwh =
+			    (const struct ieee80211_qosframe *)wh;
+			wht.i_pri = qwh->i_qos[0] & 0xf;
+		}
+	} else
 		wht.i_pri = 0;
 	wht.i_pad[0] = wht.i_pad[1] = wht.i_pad[2] = 0;
 
@@ -223,9 +237,7 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 	ivp[7] = k->k_tsc >> 40;	/* TSC5 */
 
 	/* compute WEP seed */
-#ifdef notyet
 	if ((k->k_tsc & 0xffff) == 0)
-#endif
 		Phase1(ctx->TTAK1, k->k_key, wh->i_addr2, k->k_tsc >> 16);
 	Phase2((u_int8_t *)wepseed, k->k_key, ctx->TTAK1, k->k_tsc & 0xffff);
 	rc4_keysetup(&ctx->rc4, (u_int8_t *)wepseed, 16);
@@ -250,7 +262,7 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN - IEEE80211_TKIP_TAILLEN) {
+			if (left >= MINCLSIZE - IEEE80211_TKIP_TAILLEN) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -319,7 +331,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	u_int16_t wepseed[8];	/* needs to be 16-bit aligned for Phase2 */
 	u_int8_t buf[IEEE80211_TKIP_MICLEN + IEEE80211_WEP_CRCLEN];
 	u_int8_t mic[IEEE80211_TKIP_MICLEN];
-	u_int64_t tsc;
+	u_int64_t tsc, *prsc;
 	u_int32_t crc, crc0;
 	u_int8_t *ivp, *mic0;
 	struct mbuf *n0, *m, *n;
@@ -339,6 +351,26 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 		m_freem(m0);
 		return NULL;
 	}
+
+	/* retrieve last seen packet number for this frame TID */
+	if ((wh->i_fc[0] &
+	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
+	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS)) {
+		u_int8_t tid;
+		if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) ==
+		    IEEE80211_FC1_DIR_DSTODS) {
+			struct ieee80211_qosframe_addr4 *qwh4 =
+			    (struct ieee80211_qosframe_addr4 *)wh;
+			tid = qwh4->i_qos[0] & 0x0f;
+		} else {
+			struct ieee80211_qosframe *qwh =
+			    (struct ieee80211_qosframe *)wh;
+			tid = qwh->i_qos[0] & 0x0f;
+		}
+		prsc = &k->k_rsc[tid];
+	} else
+		prsc = &k->k_rsc[0];
+
 	/* extract the 48-bit TSC from the TKIP header */
 	tsc = (u_int64_t)ivp[2]       |
 	      (u_int64_t)ivp[0] <<  8 |
@@ -346,9 +378,9 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	      (u_int64_t)ivp[5] << 24 |
 	      (u_int64_t)ivp[6] << 32 |
 	      (u_int64_t)ivp[7] << 40;
-	/* NB: the keys are refreshed, we'll never overflow the 48 bits */
-	if (tsc <= k->k_rsc[0]) {
+	if (tsc <= *prsc) {
 		/* replayed frame, discard */
+		ic->ic_stats.is_tkip_replays++;
 		m_freem(m0);
 		return NULL;
 	}
@@ -373,10 +405,10 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
 
 	/* compute WEP seed */
-#ifdef notyet
-	if (k->k_rsc[0] == 0 || ((tsc >> 16) != (k->k_rsc[0] >> 16)))
-#endif
+	if (!ctx->TTAK2ok || ((tsc >> 16) != (*prsc >> 16))) {
 		Phase1(ctx->TTAK2, k->k_key, wh->i_addr2, tsc >> 16);
+		ctx->TTAK2ok = 1;
+	}
 	Phase2((u_int8_t *)wepseed, k->k_key, ctx->TTAK2, tsc & 0xffff);
 	rc4_keysetup(&ctx->rc4, (u_int8_t *)wepseed, 16);
 
@@ -400,7 +432,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN) {
+			if (left >= MINCLSIZE) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -432,7 +464,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	/* decrypt ICV and compare it with calculated ICV */
 	crc0 = *(u_int32_t *)(buf + IEEE80211_TKIP_MICLEN);
 	if (crc != letoh32(crc0)) {
-		ic->ic_stats.is_rx_decryptcrc++;
+		ic->ic_stats.is_tkip_icv_errs++;
 		m_freem(m0);
 		m_freem(n0);
 		return NULL;
@@ -449,11 +481,8 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 		return NULL;
 	}
 
-	/*
-	 * Update last seen packet number (note that it must be done
-	 * after MIC is validated.)
-	 */
-	k->k_rsc[0] = tsc;
+	/* update last seen packet number (MIC is validated) */
+	*prsc = tsc;
 
 	m_freem(m0);
 	return n0;
@@ -465,6 +494,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	return NULL;
 }
 
+#ifndef IEEE80211_STA_ONLY
 /*
  * This function is called in HostAP mode to deauthenticate all STAs using
  * TKIP as their pairwise or group cipher (as part of TKIP countermeasures).
@@ -483,6 +513,7 @@ ieee80211_tkip_deauth(void *arg, struct ieee80211_node *ni)
 		ieee80211_node_leave(ic, ni);
 	}
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 /*
  * This function can be called by the software TKIP crypto code or by the
@@ -515,20 +546,26 @@ ieee80211_michael_mic_failure(struct ieee80211com *ic, u_int64_t tsc)
 	}
 	ic->ic_tkip_micfail = ticks;
 
-	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
+	switch (ic->ic_opmode) {
+#ifndef IEEE80211_STA_ONLY
+	case IEEE80211_M_HOSTAP:
 		/* refuse new TKIP associations for the next 60 seconds */
 		ic->ic_flags |= IEEE80211_F_COUNTERM;
 
 		/* deauthenticate all currently associated STAs using TKIP */
 		ieee80211_iterate_nodes(ic, ieee80211_tkip_deauth, ic);
-
-	} else if (ic->ic_opmode == IEEE80211_M_STA) {
+		break;
+#endif
+	case IEEE80211_M_STA:
 		/* deauthenticate from the AP.. */
 		IEEE80211_SEND_MGMT(ic, ic->ic_bss,
 		    IEEE80211_FC0_SUBTYPE_DEAUTH,
 		    IEEE80211_REASON_MIC_FAILURE);
 		/* ..and find another one */
 		(void)ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+		break;
+	default:
+		break;
 	}
 }
 

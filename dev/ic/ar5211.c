@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5211.c,v 1.36 2007/11/01 20:32:16 reyk Exp $	*/
+/*	$OpenBSD: ar5211.c,v 1.38 2008/08/27 09:05:03 damien Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -507,7 +507,7 @@ ar5k_ar5211_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 	/*
 	 * Write initial RF gain settings
 	 */
-	if (ar5k_rfgain(hal, AR5K_INI_PHY_5111, freq) == AH_FALSE)
+	if (ar5k_rfgain(hal, freq) == AH_FALSE)
 		return (AH_FALSE);
 
 	AR5K_DELAY(1000);
@@ -686,6 +686,7 @@ ar5k_ar5211_set_opmode(struct ath_hal *hal)
 	pcu_reg = 0;
 
 	switch (hal->ah_op_mode) {
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 		pcu_reg |= AR5K_AR5211_STA_ID1_ADHOC |
 		    AR5K_AR5211_STA_ID1_DESC_ANTENNA;
@@ -695,6 +696,7 @@ ar5k_ar5211_set_opmode(struct ath_hal *hal)
 		pcu_reg |= AR5K_AR5211_STA_ID1_AP |
 		    AR5K_AR5211_STA_ID1_RTS_DEFAULT_ANTENNA;
 		break;
+#endif
 
 	case IEEE80211_M_STA:
 	case IEEE80211_M_MONITOR:

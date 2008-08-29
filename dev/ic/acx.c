@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.84 2008/06/22 21:40:36 brad Exp $ */
+/*	$OpenBSD: acx.c,v 1.87 2008/08/27 09:05:03 damien Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -174,9 +174,11 @@ int	 acx_reset(struct acx_softc *);
 
 int	 acx_set_null_tmplt(struct acx_softc *);
 int	 acx_set_probe_req_tmplt(struct acx_softc *, const char *, int);
+#ifndef IEEE80211_STA_ONLY
 int	 acx_set_probe_resp_tmplt(struct acx_softc *, struct ieee80211_node *);
 int	 acx_beacon_locate(struct mbuf *, u_int8_t);
 int	 acx_set_beacon_tmplt(struct acx_softc *, struct ieee80211_node *);
+#endif
 
 int	 acx_read_eeprom(struct acx_softc *, uint32_t, uint8_t *);
 int	 acx_read_phyreg(struct acx_softc *, uint32_t, uint8_t *);
@@ -306,9 +308,11 @@ acx_attach(struct acx_softc *sc)
 	 */
 	ic->ic_caps =
 	    IEEE80211_C_WEP |			/* WEP */
-	    IEEE80211_C_IBSS |			/* IBSS mode */
 	    IEEE80211_C_MONITOR |		/* Monitor mode */
+#ifndef IEEE80211_STA_ONLY
+	    IEEE80211_C_IBSS |			/* IBSS mode */
 	    IEEE80211_C_HOSTAP |		/* Access Point */
+#endif
 	    IEEE80211_C_SHPREAMBLE;		/* Short preamble */
 
 	/* Get station id */
@@ -1315,6 +1319,7 @@ acx_rxeof(struct acx_softc *sc)
 		struct acx_rxbuf_hdr *head;
 		struct acx_rxbuf *buf;
 		struct mbuf *m;
+		struct ieee80211_rxinfo rxi;
 		uint32_t desc_status;
 		uint16_t desc_ctrl;
 		int len, error;
@@ -1350,6 +1355,7 @@ acx_rxeof(struct acx_softc *sc)
 			    sc->chip_rxbuf_exhdr);
 			wh = mtod(m, struct ieee80211_frame *);
 
+			rxi.rxi_flags = 0;
 			if ((wh->i_fc[1] & IEEE80211_FC1_WEP) &&
 			    sc->chip_hw_crypt) {
 				/* Short circuit software WEP */
@@ -1360,6 +1366,7 @@ acx_rxeof(struct acx_softc *sc)
 					sc->chip_proc_wep_rxbuf(sc, m, &len);
 					wh = mtod(m, struct ieee80211_frame *);
 				}
+				rxi.rxi_flags |= IEEE80211_RXI_HWDEC;
 			}
 
 			m->m_len = m->m_pkthdr.len = len;
@@ -1390,8 +1397,9 @@ acx_rxeof(struct acx_softc *sc)
 
 			ni = ieee80211_find_rxnode(ic, wh);
 
-			ieee80211_input(ifp, m, ni, head->rbh_level,
-			    letoh32(head->rbh_time));
+			rxi.rxi_rssi = head->rbh_level;
+			rxi.rxi_tstamp = letoh32(head->rbh_time);
+			ieee80211_input(ifp, m, ni, &rxi);
 
 			ieee80211_release_node(ic, ni);
 		} else {
@@ -1413,13 +1421,6 @@ next:
 	 * time we can start from it.
 	 */
 	bd->rx_scan_start = idx;
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
-		(*ifp->if_start)(ifp);
 }
 
 int
@@ -1769,6 +1770,7 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		}
 		break;
 	case IEEE80211_S_RUN:
+#ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode == IEEE80211_M_IBSS ||
 		    ic->ic_opmode == IEEE80211_M_HOSTAP) {
 			struct ieee80211_node *ni;
@@ -1811,7 +1813,7 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			DPRINTF(("%s: join IBSS\n", sc->sc_dev.dv_xname));
 			error = 0;
 		}
-
+#endif
 		/* fake a join to init the tx rate */
 		if (ic->ic_opmode == IEEE80211_M_STA)
 			acx_newassoc(ic, ic->ic_bss, 1);
@@ -2370,6 +2372,7 @@ acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 	    ACX_TMPLT_PROBE_REQ_SIZ(len)));
 }
 
+#ifndef IEEE80211_STA_ONLY
 struct mbuf *ieee80211_get_probe_resp(struct ieee80211com *,
     struct ieee80211_node *);
 
@@ -2472,6 +2475,7 @@ acx_set_beacon_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 
 	return (acx_set_tmplt(sc, ACXCMD_TMPLT_TIM, &tim, len));
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 void
 acx_init_cmd_reg(struct acx_softc *sc)
@@ -2499,7 +2503,12 @@ acx_join_bss(struct acx_softc *sc, uint8_t mode, struct ieee80211_node *node)
 	bj->beacon_intvl = htole16(acx_beacon_intvl);
 
 	/* TODO tunable */
-	dtim_intvl = sc->sc_ic.ic_opmode == IEEE80211_M_IBSS ? 1 : 10;
+#ifndef IEEE80211_STA_ONLY
+	if (sc->sc_ic.ic_opmode == IEEE80211_M_IBSS)
+		dtim_intvl = 1;
+	else
+#endif
+		dtim_intvl = 10;
 	sc->chip_set_bss_join_param(sc, bj->chip_spec, dtim_intvl);
 
 	bj->ndata_txrate = ACX_NDATA_TXRATE_1;

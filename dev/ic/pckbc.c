@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbc.c,v 1.15 2007/11/26 22:45:27 miod Exp $ */
+/* $OpenBSD: pckbc.c,v 1.17 2008/07/29 04:20:37 miod Exp $ */
 /* $NetBSD: pckbc.c,v 1.5 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -359,25 +359,28 @@ pckbc_attach(sc)
 	}
 	bus_space_write_1(iot, ioh_d, 0, 0x5a);	/* a random value */
 	res = pckbc_poll_data1(iot, ioh_d, ioh_c, PCKBC_AUX_SLOT, 1);
-#if 0
-	/*
-	 * The following code is necessary to find the aux port on the
-	 * oqo-1 machine.  However if confuses old (non-ps/2) keyboard
-	 * controllers.
-	 */
-	if (res == -1) {
-		/* Read of aux echo timed out, try again */
-		if (!pckbc_send_cmd(iot, ioh_c, KBC_AUXWRITE))
-			goto nomouse;
-		if (!pckbc_wait_output(iot, ioh_c))
-			goto nomouse;
-		bus_space_write_1(iot, ioh_d, 0, 0x5a);
-		res = pckbc_poll_data1(iot, ioh_d, ioh_c, PCKBC_AUX_SLOT, 1);
+
+	if (ISSET(t->t_flags, PCKBC_NEED_AUXWRITE)) {
+		/*
+		 * The following code is necessary to find the aux port on the
+		 * oqo-1 machine, among others.  However if confuses old
+		 * (non-ps/2) keyboard controllers (at least UMC880x again).
+		 */
+		if (res == -1) {
+			/* Read of aux echo timed out, try again */
+			if (!pckbc_send_cmd(iot, ioh_c, KBC_AUXWRITE))
+				goto nomouse;
+			if (!pckbc_wait_output(iot, ioh_c))
+				goto nomouse;
+			bus_space_write_1(iot, ioh_d, 0, 0x5a);
+			res = pckbc_poll_data1(iot, ioh_d, ioh_c,
+			    PCKBC_AUX_SLOT, 1);
 #ifdef PCKBCDEBUG
-		printf("kbc: aux echo: %x\n", res);
+			printf("kbc: aux echo: %x\n", res);
 #endif
+		}
 	}
-#endif
+
 	if (res != -1) {
 		/*
 		 * In most cases, the 0x5a gets echoed.
@@ -475,7 +478,8 @@ pckbc_xt_translation(self, slot, on)
 	struct pckbc_internal *t = self;
 	int ison;
 
-	if (slot != PCKBC_KBD_SLOT) {
+	if (ISSET(t->t_flags, PCKBC_CANT_TRANSLATE) ||
+	    slot != PCKBC_KBD_SLOT) {
 		/* translation only for kbd slot */
 		if (on)
 			return (0);
@@ -998,11 +1002,12 @@ pckbcintr_internal(t, sc)
 }
 
 int
-pckbc_cnattach(iot, addr, cmd_offset, slot)
+pckbc_cnattach(iot, addr, cmd_offset, slot, flags)
 	bus_space_tag_t iot;
 	bus_addr_t addr;
 	bus_size_t cmd_offset;
 	pckbc_slot_t slot;
+	int flags;
 {
 	bus_space_handle_t ioh_d, ioh_c;
 	int res = 0;
@@ -1018,6 +1023,7 @@ pckbc_cnattach(iot, addr, cmd_offset, slot)
 	pckbc_consdata.t_ioh_d = ioh_d;
 	pckbc_consdata.t_ioh_c = ioh_c;
 	pckbc_consdata.t_addr = addr;
+	pckbc_consdata.t_flags = flags;
 	timeout_set(&pckbc_consdata.t_cleanup, pckbc_cleanup, &pckbc_consdata);
 	timeout_set(&pckbc_consdata.t_poll, pckbc_poll, &pckbc_consdata);
 

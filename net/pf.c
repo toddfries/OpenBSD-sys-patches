@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.607 2008/07/05 16:57:50 david Exp $ */
+/*	$OpenBSD: pf.c,v 1.616 2008/08/26 12:17:10 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -207,7 +207,7 @@ int			 pf_test_state_icmp(struct pf_state **, int,
 int			 pf_test_state_other(struct pf_state **, int,
 			    struct pfi_kif *, struct mbuf *, struct pf_pdesc *);
 void			 pf_step_into_anchor(int *, struct pf_ruleset **, int,
-			    struct pf_rule **, struct pf_rule **,  int *);
+			    struct pf_rule **, struct pf_rule **, int *);
 int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
 			     int, struct pf_rule **, struct pf_rule **,
 			     int *);
@@ -674,7 +674,7 @@ pf_state_key_attach(struct pf_state_key *sk, struct pf_state *s, int idx)
 					    "pf: %s key attach failed on %s: ",
 					    (idx == PF_SK_WIRE) ?
 					    "wire" : "stack",
-		     			    s->kif->pfik_name);
+					    s->kif->pfik_name);
 					pf_print_state_parts(s,
 					    (idx == PF_SK_WIRE) ? sk : NULL,
 					    (idx == PF_SK_STACK) ? sk : NULL);
@@ -802,12 +802,15 @@ pf_state_insert(struct pfi_kif *kif, struct pf_state_key *skw,
 {
 	s->kif = kif;
 
-	if (pf_state_key_attach(skw, s, PF_SK_WIRE))
-		return (-1);
-
-	if (skw == sks)
+	if (skw == sks) {
+		if (pf_state_key_attach(skw, s, PF_SK_WIRE))
+			return (-1);
 		s->key[PF_SK_STACK] = s->key[PF_SK_WIRE];
-	else {
+	} else {
+		if (pf_state_key_attach(skw, s, PF_SK_WIRE)) {
+			pool_put(&pf_state_key_pl, sks);
+			return (-1);
+		}
 		if (pf_state_key_attach(sks, s, PF_SK_STACK)) {
 			pf_state_key_detach(s, PF_SK_WIRE);
 			return (-1);
@@ -1186,34 +1189,33 @@ pf_print_host(struct pf_addr *addr, u_int16_t p, sa_family_t af)
 #ifdef INET6
 	case AF_INET6: {
 		u_int16_t b;
-		u_int8_t i, curstart = 255, curend = 0,
-		    maxstart = 0, maxend = 0;
+		u_int8_t i, curstart, curend, maxstart, maxend;
+		curstart = curend = maxstart = maxend = 255;
 		for (i = 0; i < 8; i++) {
 			if (!addr->addr16[i]) {
 				if (curstart == 255)
 					curstart = i;
-				else
-					curend = i;
+				curend = i;
 			} else {
-				if (curstart) {
-					if ((curend - curstart) >
-					    (maxend - maxstart)) {
-						maxstart = curstart;
-						maxend = curend;
-						curstart = 255;
-					}
+				if ((curend - curstart) >
+				    (maxend - maxstart)) {
+					maxstart = curstart;
+					maxend = curend;
 				}
+				curstart = curend = 255;
 			}
+		}
+		if ((curend - curstart) >
+		    (maxend - maxstart)) {
+			maxstart = curstart;
+			maxend = curend;
 		}
 		for (i = 0; i < 8; i++) {
 			if (i >= maxstart && i <= maxend) {
-				if (maxend != 7) {
-					if (i == maxstart)
-						printf(":");
-				} else {
-					if (i == maxend)
-						printf(":");
-				}
+				if (i == 0)
+					printf(":");
+				if (i == maxend)
+					printf(":");
 			} else {
 				b = ntohs(addr->addr16[i]);
 				printf("%x", b);
@@ -1816,7 +1818,9 @@ pf_send_icmp(struct mbuf *m, u_int8_t type, u_int8_t code, sa_family_t af,
 {
 	struct mbuf	*m0;
 
-	m0 = m_copy(m, 0, M_COPYALL);
+	if ((m0 = m_copy(m, 0, M_COPYALL)) == NULL)
+		return;
+
 	m0->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
 
 	if (r->rtableid >= 0)
@@ -2005,7 +2009,7 @@ pf_tag_packet(struct mbuf *m, int tag, int rtableid)
 
 void
 pf_step_into_anchor(int *depth, struct pf_ruleset **rs, int n,
-    struct pf_rule **r, struct pf_rule **a,  int *match)
+    struct pf_rule **r, struct pf_rule **a, int *match)
 {
 	struct pf_anchor_stackframe	*f;
 
@@ -2069,7 +2073,7 @@ pf_step_out_of_anchor(int *depth, struct pf_ruleset **rs, int n,
 		if (*depth == 0 && a != NULL)
 			*a = NULL;
 		*rs = f->rs;
-		if (f->r->anchor->match || (match  != NULL && *match))
+		if (f->r->anchor->match || (match != NULL && *match))
 			quick = f->r->quick;
 		*r = TAILQ_NEXT(f->r, entries);
 	} while (*r == NULL);
@@ -2426,12 +2430,12 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 				high = tmp;
 			}
 			/* low < high */
-			cut = htonl(arc4random()) % (1 + high - low) + low;
+			cut = arc4random_uniform(1 + high - low) + low;
 			/* low <= cut <= high */
 			for (tmp = cut; tmp <= high; ++(tmp)) {
 				key.port[0] = htons(tmp);
 				if (pf_find_state_all(&key, PF_IN, NULL) ==
-				    NULL) {
+				    NULL && !in_baddynamic(tmp, proto)) {
 					*nport = htons(tmp);
 					return (0);
 				}
@@ -2439,7 +2443,7 @@ pf_get_sport(sa_family_t af, u_int8_t proto, struct pf_rule *r,
 			for (tmp = cut - 1; tmp >= low; --(tmp)) {
 				key.port[0] = htons(tmp);
 				if (pf_find_state_all(&key, PF_IN, NULL) ==
-				    NULL) {
+				    NULL && !in_baddynamic(tmp, proto)) {
 					*nport = htons(tmp);
 					return (0);
 				}
@@ -3053,7 +3057,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_FILTER].active.ptr);
 
 	bport = nport = sport;
-	/* check  packet for BINAT/NAT/RDR */
+	/* check packet for BINAT/NAT/RDR */
 	if ((nr = pf_get_translation(pd, m, off, direction, kif, &nsn,
 	    &skw, &sks, &sk, &nk, saddr, daddr, sport, dport)) != NULL) {
 		if (nk == NULL || sk == NULL) {
@@ -3155,7 +3159,7 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 				    &nk->addr[pd->sidx], AF_INET))
 					pf_change_a(&saddr->v4.s_addr,
 					    pd->ip_sum,
-					    nk->addr[pd->didx].v4.s_addr, 0);
+					    nk->addr[pd->sidx].v4.s_addr, 0);
 
 				if (PF_ANEQ(daddr,
 				    &nk->addr[pd->didx], AF_INET))
@@ -3232,8 +3236,8 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 		    !pf_match_gid(r->gid.op, r->gid.gid[0], r->gid.gid[1],
 		    pd->lookup.gid))
 			r = TAILQ_NEXT(r, entries);
-		else if (r->prob && r->prob <=
-		    (arc4random() % (UINT_MAX - 1) + 1))
+		else if (r->prob &&
+		    r->prob <= arc4random_uniform(UINT_MAX - 1) + 1)
 			r = TAILQ_NEXT(r, entries);
 		else if (r->match_tag && !pf_match_tag(m, r, &tag))
 			r = TAILQ_NEXT(r, entries);
@@ -3532,12 +3536,15 @@ pf_create_state(struct pf_rule *r, struct pf_rule *nr, struct pf_rule *a,
 		s->src.state = PF_TCPS_PROXY_SRC;
 		/* undo NAT changes, if they have taken place */
 		if (nr != NULL) {
-			PF_ACPY(pd->src, &sk->addr[pd->sidx], pd->af);
-			PF_ACPY(pd->dst, &sk->addr[pd->didx], pd->af);
+			struct pf_state_key *skt = s->key[PF_SK_WIRE];
+			if (pd->dir == PF_OUT)
+				skt = s->key[PF_SK_STACK];
+			PF_ACPY(pd->src, &skt->addr[pd->sidx], pd->af);
+			PF_ACPY(pd->dst, &skt->addr[pd->didx], pd->af);
 			if (pd->sport)
-				*pd->sport = sk->port[pd->sidx];
+				*pd->sport = skt->port[pd->sidx];
 			if (pd->dport)
-				*pd->dport = sk->port[pd->didx];
+				*pd->dport = skt->port[pd->didx];
 			if (pd->proto_sum)
 				*pd->proto_sum = bproto_sum;
 			if (pd->ip_sum)
@@ -5775,8 +5782,10 @@ done:
 	if ((s && s->tag) || r->rtableid)
 		pf_tag_packet(m, s ? s->tag : 0, r->rtableid);
 
+#if 0
 	if (dir == PF_IN && s && s->key[PF_SK_STACK])
 		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
+#endif
 
 #ifdef ALTQ
 	if (action == PF_PASS && r->qid) {
@@ -6154,8 +6163,10 @@ done:
 	if ((s && s->tag) || r->rtableid)
 		pf_tag_packet(m, s ? s->tag : 0, r->rtableid);
 
+#if 0
 	if (dir == PF_IN && s && s->key[PF_SK_STACK])
 		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
+#endif
 
 #ifdef ALTQ
 	if (action == PF_PASS && r->qid) {
@@ -6263,4 +6274,14 @@ pf_check_congestion(struct ifqueue *ifq)
 		return (1);
 	else
 		return (0);
+}
+
+/*
+ * must be called whenever any addressing information such as
+ * address, port, protocol has changed
+ */
+void
+pf_pkt_addr_changed(struct mbuf *m)
+{
+	m->m_pkthdr.pf.statekey = NULL;
 }

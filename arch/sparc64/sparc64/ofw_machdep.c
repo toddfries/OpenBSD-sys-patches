@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.27 2008/07/07 14:46:18 kettenis Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.29 2008/08/09 21:06:05 kettenis Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.16 2001/07/20 00:07:14 eeh Exp $	*/
 
 /*
@@ -760,6 +760,57 @@ prom_serengeti_set_console_input(const char *new)
 		return NULL;
 
 	return (const char *)args.old;
+}
+
+time_t
+prom_opl_get_tod(void)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  stick;
+		cell_t  time;
+	} args;
+
+	args.name = ADR2CELL("FJSV,get-tod");
+	args.nargs = 0;
+	args.nreturns = 2;
+
+	if (openfirmware(&args) == -1)
+		return (time_t)-1;
+
+	return (time_t)args.time;
+}
+
+uint64_t
+prom_set_sun4v_api_version(uint64_t api_group, uint64_t major,
+    uint64_t minor, uint64_t *supported_minor)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  api_group;
+		cell_t  major;
+		cell_t  minor;
+		cell_t	status;
+		cell_t	supported_minor;
+	} args;
+
+	args.name = ADR2CELL("SUNW,set-sun4v-api-version");
+	args.nargs = 3;
+	args.nreturns = 2;
+	args.api_group = api_group;
+	args.major = major;
+	args.minor = minor;
+	args.status = -1;
+	args.supported_minor = -1;
+
+	openfirmware(&args);
+
+	*supported_minor = args.supported_minor;
+	return (uint64_t)args.status;
 }
 
 #ifdef DEBUG

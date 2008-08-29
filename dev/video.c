@@ -1,4 +1,4 @@
-/*	$OpenBSD: video.c,v 1.16 2008/06/13 18:04:56 mglocker Exp $	*/
+/*	$OpenBSD: video.c,v 1.22 2008/08/24 11:05:02 mglocker Exp $	*/
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
  * Copyright (c) 2008 Marcus Glocker <mglocker@openbsd.org>
@@ -77,6 +77,10 @@ videoattach(struct device *parent, struct device *self, void *aux)
 
 	if (sc->hw_if->get_bufsize)
 		video_buf_size = (sc->hw_if->get_bufsize)(sc->hw_hdl);
+	if (video_buf_size == EINVAL) {
+		printf("video: could not request frame buffer size\n");
+		return;
+	}
 
 	sc->sc_fbuffer = malloc(video_buf_size, M_DEVBUF, M_NOWAIT);
 	if (sc->sc_fbuffer == NULL) {
@@ -97,6 +101,10 @@ videoopen(dev_t dev, int flags, int fmt, struct proc *p)
 	     sc->hw_if == NULL)
 		return (ENXIO);
 
+	if (sc->sc_open & VIDEO_OPEN)
+		return (EBUSY);
+	sc->sc_open |= VIDEO_OPEN;
+
 	sc->sc_start_read = 0;
 
 	if (sc->hw_if->open != NULL)
@@ -110,13 +118,16 @@ int
 videoclose(dev_t dev, int flags, int fmt, struct proc *p)
 {
 	struct video_softc *sc;
+	int r = 0;
 
 	sc = video_cd.cd_devs[VIDEOUNIT(dev)];
 
 	if (sc->hw_if->close != NULL)
-		return (sc->hw_if->close(sc->hw_hdl));
-	else
-		return (0);
+		r = sc->hw_if->close(sc->hw_hdl);
+
+	sc->sc_open &= ~VIDEO_OPEN;
+
+	return (r);
 }
 
 int
@@ -135,8 +146,10 @@ videoread(dev_t dev, struct uio *uio, int ioflag)
 
 	/* start the stream */
 	if (sc->hw_if->start_read && !sc->sc_start_read) {
+		error = sc->hw_if->start_read(sc->hw_hdl);
+		if (error)
+			return (error);
 		sc->sc_start_read = 1;
-		sc->hw_if->start_read(sc->hw_hdl);
 	}
 
 	DPRINTF(("resid=%d\n", uio->uio_resid));
@@ -185,6 +198,16 @@ videoioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		if (sc->hw_if->enum_fmt)
 			error = (sc->hw_if->enum_fmt)(sc->hw_hdl,
 			    (struct v4l2_fmtdesc *)data);
+		break;
+	case VIDIOC_ENUM_FRAMESIZES:
+		if (sc->hw_if->enum_fsizes)
+			error = (sc->hw_if->enum_fsizes)(sc->hw_hdl,
+			    (struct v4l2_frmsizeenum *)data);
+		break;
+	case VIDIOC_ENUM_FRAMEINTERVALS:
+		if (sc->hw_if->enum_fivals)
+			error = (sc->hw_if->enum_fivals)(sc->hw_hdl,
+			    (struct v4l2_frmivalenum *)data);
 		break;
 	case VIDIOC_S_FMT:
 		if (!(flags & FWRITE))
@@ -248,6 +271,16 @@ videoioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 			error = (sc->hw_if->queryctrl)(sc->hw_hdl,
 			    (struct v4l2_queryctrl *)data);
 		break;
+	case VIDIOC_G_CTRL:
+		if (sc->hw_if->g_ctrl)
+			error = (sc->hw_if->g_ctrl)(sc->hw_hdl,
+			    (struct v4l2_control *)data);
+		break;
+	case VIDIOC_S_CTRL:
+		if (sc->hw_if->s_ctrl)
+			error = (sc->hw_if->s_ctrl)(sc->hw_hdl,
+			    (struct v4l2_control *)data);
+		break;
 	default:
 		error = (ENOTTY);
 	}
@@ -308,7 +341,7 @@ video_intr(void *addr)
 {
 	struct video_softc *sc = (struct video_softc *)addr;
 
-	printf("video_intr sc=%p\n", sc);
+	DPRINTF(("video_intr sc=%p\n", sc));
 	wakeup(sc);
 }
 

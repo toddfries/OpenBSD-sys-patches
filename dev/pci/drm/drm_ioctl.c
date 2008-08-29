@@ -74,12 +74,12 @@ drm_setunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	if (!u->unique_len || u->unique_len > 1024)
 		return EINVAL;
 
-	busid = malloc(u->unique_len + 1, M_DRM, M_WAITOK);
+	busid = drm_alloc(u->unique_len + 1, DRM_MEM_DRIVER);
 	if (busid == NULL)
 		return ENOMEM;
 
 	if (DRM_COPY_FROM_USER(busid, u->unique, u->unique_len)) {
-		free(busid, M_DRM);
+		drm_free(busid, u->unique_len + 1, DRM_MEM_DRIVER);
 		return EFAULT;
 	}
 	busid[u->unique_len] = '\0';
@@ -92,17 +92,15 @@ drm_setunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #endif /* Net and Openbsd don't have sscanf in the kernel this is deprecated anyway. */
 
 	if (ret != 3) {
-		free(busid, M_DRM);
+		drm_free(busid, u->unique_len + 1, DRM_MEM_DRIVER);
 		return EINVAL;
 	}
 	domain = bus >> 8;
 	bus &= 0xff;
 	
-	if ((domain != dev->pci_domain) ||
-	    (bus != dev->pci_bus) ||
-	    (slot != dev->pci_slot) ||
-	    (func != dev->pci_func)) {
-		free(busid, M_DRM);
+	if ((domain != dev->pci_domain) || (bus != dev->pci_bus) ||
+	    (slot != dev->pci_slot) || (func != dev->pci_func)) {
+		drm_free(busid, u->unique_len + 1, DRM_MEM_DRIVER);
 		return EINVAL;
 	}
 
@@ -133,7 +131,7 @@ drm_set_busid(struct drm_device *dev)
 	}
 
 	dev->unique_len = 20;
-	dev->unique = malloc(dev->unique_len + 1, M_DRM, M_NOWAIT);
+	dev->unique = drm_alloc(dev->unique_len + 1, DRM_MEM_DRIVER);
 	if (dev->unique == NULL) {
 		DRM_UNLOCK();
 		return ENOMEM;
@@ -164,7 +162,7 @@ drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	}
 
 	TAILQ_FOREACH(mapinlist, &dev->maplist, link) {
-		if (i==idx) {
+		if (i == idx) {
 			map->offset = mapinlist->offset;
 			map->size = mapinlist->size;
 			map->type = mapinlist->type;
@@ -195,8 +193,7 @@ drm_getclient(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	idx = client->idx;
 	DRM_LOCK();
 	TAILQ_FOREACH(pt, &dev->files, link) {
-		if (i==idx)
-		{
+		if (i==idx) {
 			client->auth = pt->authenticated;
 			client->pid = pt->pid;
 			client->uid = pt->uid;
@@ -224,8 +221,7 @@ drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	for (i = 0; i < dev->counters; i++) {
 		if (dev->types[i] == _DRM_STAT_LOCK)
-			stats->data[i].value
-			    = (dev->lock.hw_lock
+			stats->data[i].value = (dev->lock.hw_lock
 			    ? dev->lock.hw_lock->lock : 0);
 		else 
 			stats->data[i].value = atomic_read(&dev->counts[i]);
@@ -259,12 +255,11 @@ drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	sv->drm_dd_minor = dev->driver.minor;
 
 	if (ver.drm_di_major != -1) {
-		if (ver.drm_di_major != DRM_IF_MAJOR ||
-		    ver.drm_di_minor < 0 || ver.drm_di_minor > DRM_IF_MINOR) {
+		if (ver.drm_di_major != DRM_IF_MAJOR || ver.drm_di_minor < 0 ||
+		    ver.drm_di_minor > DRM_IF_MINOR) {
 			return EINVAL;
 		}
-		if_version = DRM_IF_VERSION(ver.drm_di_major,
-		    ver.drm_dd_minor);
+		if_version = DRM_IF_VERSION(ver.drm_di_major, ver.drm_dd_minor);
 		dev->if_version = DRM_MAX(if_version, dev->if_version);
 		if (ver.drm_di_minor >= 1) {
 			/*

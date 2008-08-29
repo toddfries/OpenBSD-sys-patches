@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.62 2008/07/04 22:03:30 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.66 2008/08/10 14:13:05 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -125,6 +125,7 @@ struct cpu_info {
 	int			ci_handled_intr_level;
 	void			*ci_intrpending[16][8];
 	u_int64_t		ci_tick;
+	struct intrhand		ci_tickintr;
 
 	/* DEBUG/DIAGNOSTIC stuff */
 	u_long			ci_spin_locks;	/* # of spin locks held */
@@ -214,6 +215,8 @@ struct clockframe {
 #define	CLKF_PC(framep)		((framep)->t.tf_pc)
 #define	CLKF_INTR(framep)	((framep)->saved_intr_level != 0)
 
+extern void (*cpu_start_clock)(void);
+
 void setsoftnet(void);
 
 #define aston(p)	((p)->p_md.md_astpending = 1)
@@ -223,6 +226,7 @@ void setsoftnet(void);
  * or after the current trap/syscall if in system mode.
  */
 extern void need_resched(struct cpu_info *);
+#define clear_resched(ci) (ci)->ci_want_resched = 0
 
 /*
  * This is used during profiling to integrate system time.
@@ -246,10 +250,8 @@ void	dumpconf(void);
 caddr_t	reserve_dumppages(caddr_t);
 /* clock.c */
 struct timeval;
-int	tickintr(void *); /* level 10 (tick) interrupt code */
 int	clockintr(void *);/* level 10 (clock) interrupt code */
 int	statintr(void *);	/* level 14 (statclock) interrupt code */
-void	tick_start(void);
 /* locore.s */
 struct fpstate64;
 void	savefpstate(struct fpstate64 *);

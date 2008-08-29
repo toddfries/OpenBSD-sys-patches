@@ -1,4 +1,4 @@
-/*	$OpenBSD: pyro.c,v 1.12 2008/05/24 14:54:03 kettenis Exp $	*/
+/*	$OpenBSD: pyro.c,v 1.14 2008/07/12 13:08:04 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2002 Jason L. Wright (jason@thought.net)
@@ -55,6 +55,17 @@ int pyro_debug = ~0;
 #else
 #define DPRINTF(l, s)
 #endif
+
+#define FIRE_INTRMAP_INT_CNTRL_NUM_MASK	0x000003c0
+#define FIRE_INTRMAP_INT_CNTRL_NUM0	0x00000040
+#define FIRE_INTRMAP_INT_CNTRL_NUM1	0x00000080
+#define FIRE_INTRMAP_INT_CNTRL_NUM2	0x00000100
+#define FIRE_INTRMAP_INT_CNTRL_NUM3	0x00000200
+#define FIRE_INTRMAP_T_JPID_SHIFT	26
+#define FIRE_INTRMAP_T_JPID_MASK	0x7c000000
+
+#define OBERON_INTRMAP_T_DESTID_SHIFT	21
+#define OBERON_INTRMAP_T_DESTID_MASK	0x7fe00000
 
 extern struct sparc_pci_chipset _sparc_pci_chipset;
 
@@ -228,6 +239,10 @@ pyro_init_iommu(struct pyro_softc *sc, struct pyro_pbm *pbm)
 	if (name == NULL)
 		panic("couldn't malloc iommu name");
 	snprintf(name, 32, "%s dvma", sc->sc_dv.dv_xname);
+
+	/* On Oberon, we need to flush the cache. */
+	if (sc->sc_oberon)
+		is->is_flags |= IOMMU_FLUSH_CACHE;
 
 	iommu_init(name, is, tsbsize, iobase);
 }
@@ -505,7 +520,16 @@ _pyro_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int ihandle,
 		u_int64_t intrmap;
 
 		intrmap = *intrmapptr;
-		intrmap |= (1LL << 6);
+		intrmap &= ~FIRE_INTRMAP_INT_CNTRL_NUM_MASK;
+		intrmap |= FIRE_INTRMAP_INT_CNTRL_NUM0;
+		if (sc->sc_oberon) {
+			intrmap &= ~OBERON_INTRMAP_T_DESTID_MASK;
+			intrmap |= CPU_JUPITERID <<
+			    OBERON_INTRMAP_T_DESTID_SHIFT;
+		} else {
+			intrmap &= ~FIRE_INTRMAP_T_JPID_MASK;
+			intrmap |= CPU_UPAID << FIRE_INTRMAP_T_JPID_SHIFT;
+		}
 		intrmap |= INTMAP_V;
 		*intrmapptr = intrmap;
 		intrmap = *intrmapptr;

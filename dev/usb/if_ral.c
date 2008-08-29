@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.103 2008/04/16 18:32:15 damien Exp $	*/
+/*	$OpenBSD: if_ral.c,v 1.108 2008/08/27 10:34:24 damien Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006
@@ -127,8 +127,10 @@ uint16_t	ural_txtime(int, int, uint32_t);
 uint8_t		ural_plcp_signal(int);
 void		ural_setup_tx_desc(struct ural_softc *, struct ural_tx_desc *,
 		    uint32_t, int, int);
+#ifndef IEEE80211_STA_ONLY
 int		ural_tx_bcn(struct ural_softc *, struct mbuf *,
 		    struct ieee80211_node *);
+#endif
 int		ural_tx_data(struct ural_softc *, struct mbuf *,
 		    struct ieee80211_node *);
 void		ural_start(struct ifnet *);
@@ -295,9 +297,11 @@ ural_attach(struct device *parent, struct device *self, void *aux)
 
 	/* set device capabilities */
 	ic->ic_caps =
-	    IEEE80211_C_IBSS |		/* IBSS mode supported */
 	    IEEE80211_C_MONITOR |	/* monitor mode supported */
+#ifndef IEEE80211_STA_ONLY
+	    IEEE80211_C_IBSS |		/* IBSS mode supported */
 	    IEEE80211_C_HOSTAP |	/* HostAp mode supported */
+#endif
 	    IEEE80211_C_TXPMGT |	/* tx power management */
 	    IEEE80211_C_SHPREAMBLE |	/* short preamble supported */
 	    IEEE80211_C_SHSLOT |	/* short slot time supported */
@@ -492,7 +496,7 @@ ural_alloc_rx_list(struct ural_softc *sc)
 
 	return 0;
 
-fail:	ural_free_tx_list(sc);
+fail:	ural_free_rx_list(sc);
 	return error;
 }
 
@@ -552,7 +556,6 @@ ural_task(void *arg)
 	struct ieee80211com *ic = &sc->sc_ic;
 	enum ieee80211_state ostate;
 	struct ieee80211_node *ni;
-	struct mbuf *m;
 
 	ostate = ic->ic_state;
 
@@ -592,9 +595,10 @@ ural_task(void *arg)
 			ural_set_bssid(sc, ni->ni_bssid);
 		}
 
+#ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP ||
 		    ic->ic_opmode == IEEE80211_M_IBSS) {
-			m = ieee80211_beacon_alloc(ic, ni);
+			struct mbuf *m = ieee80211_beacon_alloc(ic, ni);
 			if (m == NULL) {
 				printf("%s: could not allocate beacon\n",
 				    sc->sc_dev.dv_xname);
@@ -611,6 +615,7 @@ ural_task(void *arg)
 			/* beacon is no longer needed */
 			m_freem(m);
 		}
+#endif
 
 		/* make tx led blink on tx (controlled by ASIC) */
 		ural_write(sc, RAL_MAC_CSR20, 1);
@@ -708,6 +713,7 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	struct ifnet *ifp = &ic->ic_if;
 	const struct ural_rx_desc *desc;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *mnew, *m;
 	int s, len;
@@ -765,7 +771,6 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	/* finalize mbuf */
 	m->m_pkthdr.rcvif = ifp;
 	m->m_pkthdr.len = m->m_len = (letoh32(desc->flags) >> 16) & 0xfff;
-	m_adj(m, -IEEE80211_CRC_LEN);	/* trim FCS */
 
 	s = splnet();
 
@@ -774,7 +779,7 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		struct mbuf mb;
 		struct ural_rx_radiotap_header *tap = &sc->sc_rxtap;
 
-		tap->wr_flags = 0;
+		tap->wr_flags = IEEE80211_RADIOTAP_F_FCS;
 		tap->wr_rate = ural_rxrate(desc);
 		tap->wr_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
 		tap->wr_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
@@ -790,22 +795,19 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif
+	m_adj(m, -IEEE80211_CRC_LEN);	/* trim FCS */
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* send the frame to the 802.11 layer */
-	ieee80211_input(ifp, m, ni, desc->rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = desc->rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
-		ural_start(ifp);
 
 	splx(s);
 
@@ -981,6 +983,7 @@ ural_setup_tx_desc(struct ural_softc *sc, struct ural_tx_desc *desc,
 
 #define RAL_TX_TIMEOUT	5000
 
+#ifndef IEEE80211_STA_ONLY
 int
 ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 {
@@ -1030,6 +1033,7 @@ ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 
 	return error;
 }
+#endif
 
 int
 ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
@@ -1160,11 +1164,13 @@ ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		    ic->ic_flags) + RAL_SIFS;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 
+#ifndef IEEE80211_STA_ONLY
 		/* tell hardware to set timestamp in probe responses */
 		if ((wh->i_fc[0] &
 		    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_MASK)) ==
 		    (IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_RESP))
 			flags |= RAL_TX_TIMESTAMP;
+#endif
 	}
 
 #if NBPFILTER > 0
@@ -1664,8 +1670,16 @@ ural_enable_tsf_sync(struct ural_softc *sc)
 	tmp = (16 * ic->ic_bss->ni_intval) << 4;
 	ural_write(sc, RAL_TXRX_CSR18, tmp);
 
-	logcwmin = (ic->ic_opmode == IEEE80211_M_IBSS) ? 2 : 0;
-	preload = (ic->ic_opmode == IEEE80211_M_IBSS) ? 320 : 6;
+#ifndef IEEE80211_STA_ONLY
+	if (ic->ic_opmode == IEEE80211_M_IBSS) {
+		logcwmin = 2;
+		preload = 320;
+	} else
+#endif
+	{
+		logcwmin = 0;
+		preload = 6;
+	}
 	tmp = logcwmin << 12 | preload;
 	ural_write(sc, RAL_TXRX_CSR20, tmp);
 
@@ -1673,8 +1687,10 @@ ural_enable_tsf_sync(struct ural_softc *sc)
 	tmp = RAL_ENABLE_TSF | RAL_ENABLE_TBCN;
 	if (ic->ic_opmode == IEEE80211_M_STA)
 		tmp |= RAL_ENABLE_TSF_SYNC(1);
+#ifndef IEEE80211_STA_ONLY
 	else
 		tmp |= RAL_ENABLE_TSF_SYNC(2) | RAL_ENABLE_BEACON_GENERATOR;
+#endif
 	ural_write(sc, RAL_TXRX_CSR19, tmp);
 
 	DPRINTF(("enabling TSF synchronization\n"));
@@ -2044,7 +2060,9 @@ ural_init(struct ifnet *ifp)
 	tmp = RAL_DROP_PHY_ERROR | RAL_DROP_CRC_ERROR;
 	if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 		tmp |= RAL_DROP_CTL | RAL_DROP_VERSION_ERROR;
+#ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode != IEEE80211_M_HOSTAP)
+#endif
 			tmp |= RAL_DROP_TODS;
 		if (!(ifp->if_flags & IFF_PROMISC))
 			tmp |= RAL_DROP_NOT_TO_ME;
