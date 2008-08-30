@@ -232,11 +232,22 @@
 /* MAC address of pairwise keys */
 #define BWI_PKEY_ADDR_MOBJ		0x4
 
-#define BWI_TXSTATUS_0			0x00000170
 #define BWI_TXSTATUS_0_MORE		(1 << 0)
 #define BWI_TXSTATUS_0_TXID_MASK	0xffff0000
 #define BWI_TXSTATUS_0_INFO(st)		(((st) & 0xfff0) | (((st) & 0xf) >> 1))
 #define BWI_TXSTATUS_1			0x00000174
+
+#define BWI_TXSTATUS0			0x170
+#define BWI_TXSTATUS0_VALID		(1 << 0)
+#define BWI_TXSTATUS0_ACKED		(1 << 1)
+#define BWI_TXSTATUS0_FREASON_MASK	0x00000018	/* Failure reason */
+#define BWI_TXSTATUS0_AMPDU		(1 << 5)
+#define BWI_TXSTATUS0_PENDING		(1 << 6)
+#define BWI_TXSTATUS0_PM		(1 << 7)
+#define BWI_TXSTATUS0_RTS_TXCNT_MASK	0x00000ff0
+#define BWI_TXSTATUS0_DATA_TXCNT_MASK	0x0000fff0
+#define BWI_TXSTATUS0_TXID_MASK		0xffff0000	
+#define BWI_TXSTATUS1			0x174
 
 #define BWI_TXRX_CTRL_BASE		0x200
 #define BWI_TX32_CTRL			0x0

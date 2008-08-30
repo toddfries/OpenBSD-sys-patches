@@ -342,12 +342,12 @@ void		 bwi_ds_plcp_header(struct ieee80211_ds_plcp_hdr *, int,
 		     uint8_t);
 void		 bwi_plcp_header(void *, int, uint8_t);
 int		 bwi_encap(struct bwi_softc *, int, struct mbuf *,
-		     struct ieee80211_node *);
+		     struct ieee80211_node **, int);
 void		 bwi_start_tx32(struct bwi_softc *, uint32_t, int);
 void		 bwi_start_tx64(struct bwi_softc *, uint32_t, int);
 void		 bwi_txeof_status32(struct bwi_softc *);
 void		 bwi_txeof_status64(struct bwi_softc *);
-void		 _bwi_txeof(struct bwi_softc *, uint16_t);
+void		 _bwi_txeof(struct bwi_softc *, uint16_t, int, int);
 void		 bwi_txeof_status(struct bwi_softc *, int);
 void		 bwi_txeof(struct bwi_softc *);
 int		 bwi_bbp_power_on(struct bwi_softc *, enum bwi_clock_mode);
@@ -7080,10 +7080,10 @@ bwi_init_statechg(struct bwi_softc *sc, int statechg)
 		 * Drain any possible pending TX status
 		 */
 		for (i = 0; i < NRETRY; ++i) {
-			if ((CSR_READ_4(sc, BWI_TXSTATUS_0) &
-			     BWI_TXSTATUS_0_MORE) == 0)
+			if ((CSR_READ_4(sc, BWI_TXSTATUS0) &
+			     BWI_TXSTATUS0_VALID) == 0)
 				break;
-			CSR_READ_4(sc, BWI_TXSTATUS_1);
+			CSR_READ_4(sc, BWI_TXSTATUS1);
 		}
 		if (i == NRETRY)
 			printf("%s: can't drain TX status\n",
@@ -7272,12 +7272,7 @@ bwi_start(struct ifnet *ifp)
 		}
 		wh = NULL;	/* Catch any invalid use */
 
-		if (mgt_pkt) {
-			ieee80211_release_node(ic, ni);
-			ni = NULL;
-		}
-
-		if (bwi_encap(sc, idx, m, ni) != 0) {
+		if (bwi_encap(sc, idx, m, &ni, mgt_pkt) != 0) {
 			/* 'm' is freed in bwi_encap() if we reach here */
 			if (ni != NULL)
 				ieee80211_release_node(ic, ni);
@@ -8731,11 +8726,12 @@ bwi_txtime(struct ieee80211com *ic, struct ieee80211_node *ni, uint len,
 
 int
 bwi_encap(struct bwi_softc *sc, int idx, struct mbuf *m,
-    struct ieee80211_node *ni)
+    struct ieee80211_node **ni0, int mgt_pkt)
 {
 	DPRINTF(2, "%s: %s\n", sc->sc_dev.dv_xname, __func__);
 
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211_node *ni = *ni0;
 	struct bwi_ring_data *rd = &sc->sc_tx_rdata[BWI_TX_DATA_RING];
 	struct bwi_txbuf_data *tbd = &sc->sc_tx_bdata[BWI_TX_DATA_RING];
 	struct bwi_txbuf *tb = &tbd->tbd_buf[idx];
@@ -8746,12 +8742,13 @@ bwi_encap(struct bwi_softc *sc, int idx, struct mbuf *m,
 	uint32_t mac_ctrl;
 	uint16_t phy_ctrl;
 	bus_addr_t paddr;
-	int pkt_len, error;
+	int pkt_len, error, mcast_pkt = 0;
 #if 0
 	const uint8_t *p;
 	int i;
 #endif
 
+	KASSERT(ni != NULL);
 	KASSERT(sc->sc_cur_regwin->rw_type == BWI_REGWIN_T_MAC);
 	mac = (struct bwi_mac *)sc->sc_cur_regwin;
 
@@ -8764,7 +8761,7 @@ bwi_encap(struct bwi_softc *sc, int idx, struct mbuf *m,
 	 * Find TX rate
 	 */
 	bzero(tb->tb_rate_idx, sizeof(tb->tb_rate_idx));
-	if (ni != NULL) {
+	if (!mgt_pkt) {
 		if (ic->ic_fixed_rate != -1) {
 			rate = ic->ic_sup_rates[ic->ic_curmode].
 			    rs_rates[ic->ic_fixed_rate];
@@ -8779,8 +8776,10 @@ bwi_encap(struct bwi_softc *sc, int idx, struct mbuf *m,
 
 	rate &= IEEE80211_RATE_VAL;
 
-	if (IEEE80211_IS_MULTICAST(wh->i_addr1))
+	if (IEEE80211_IS_MULTICAST(wh->i_addr1)) {
 		rate = (1 * 2);
+		mcast_pkt = 1;
+	}
 
 	if (rate == 0) {
 		printf("%s: invalid rate %u or fallback rate",
@@ -8827,7 +8826,7 @@ bwi_encap(struct bwi_softc *sc, int idx, struct mbuf *m,
 	bcopy(wh->i_fc, hdr->txh_fc, sizeof(hdr->txh_fc));
 	bcopy(wh->i_addr1, hdr->txh_addr1, sizeof(hdr->txh_addr1));
 
-	if (ni != NULL && !IEEE80211_IS_MULTICAST(wh->i_addr1)) {
+	if (!mcast_pkt) {
 		uint16_t dur;
 		uint8_t ack_rate;
 
@@ -8922,6 +8921,11 @@ bwi_encap(struct bwi_softc *sc, int idx, struct mbuf *m,
 	bus_dmamap_sync(sc->sc_dmat, tb->tb_dmap, 0,
 	    tb->tb_dmap->dm_mapsize, BUS_DMASYNC_PREWRITE);
 
+	if (mgt_pkt || mcast_pkt) {
+		/* Don't involve mcast/mgt packets into TX rate control */
+		ieee80211_release_node(ic, ni);
+		*ni0 = ni = NULL;
+	}
 	tb->tb_mbuf = m;
 	tb->tb_ni = ni;
 
@@ -8996,7 +9000,8 @@ bwi_txeof_status64(struct bwi_softc *sc)
 }
 
 void
-_bwi_txeof(struct bwi_softc *sc, uint16_t tx_id)
+_bwi_txeof(struct bwi_softc *sc, uint16_t tx_id, int acked,
+    int data_txcnt)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
@@ -9004,10 +9009,9 @@ _bwi_txeof(struct bwi_softc *sc, uint16_t tx_id)
 	struct bwi_txbuf *tb;
 	uint16_t ring_idx, buf_idx;
 
-	if (tx_id == 0) {
-		printf("%s: zero tx id\n", sc->sc_dev.dv_xname);
-		return;
-	}
+#if 0
+	if_printf(ifp, "acked %d, data_txcnt %d\n", acked, data_txcnt);
+#endif
 
 	ring_idx = __SHIFTOUT(tx_id, BWI_TXH_ID_RING_MASK);
 	buf_idx = __SHIFTOUT(tx_id, BWI_TXH_ID_IDX_MASK);
@@ -9028,6 +9032,7 @@ _bwi_txeof(struct bwi_softc *sc, uint16_t tx_id)
 	tb->tb_mbuf = NULL;
 
 	if (tb->tb_ni != NULL) {
+		/* Feed back 'acked and data_txcnt' */
 		ieee80211_release_node(ic, tb->tb_ni);
 		tb->tb_ni = NULL;
 	}
@@ -9049,7 +9054,14 @@ bwi_txeof_status(struct bwi_softc *sc, int end_idx)
 
 	idx = st->stats_idx;
 	while (idx != end_idx) {
-		_bwi_txeof(sc, letoh16(st->stats[idx].txs_id));
+		const struct bwi_txstats *stats = &st->stats[idx];
+		if ((stats->txs_flags & BWI_TXS_F_PENDING) == 0) {
+			int data_txcnt;
+			data_txcnt = __SHIFTOUT(stats->txs_txcnt,
+			    BWI_TXS_TXCNT_DATA);
+			_bwi_txeof(sc, letoh16(stats->txs_id),
+				stats->txs_flags & BWI_TXS_F_ACKED, data_txcnt);
+		}
 		idx = (idx + 1) % BWI_TXSTATS_NDESC;
 	}
 	st->stats_idx = idx;
@@ -9062,20 +9074,23 @@ bwi_txeof(struct bwi_softc *sc)
 
 	for (;;) {
 		uint32_t tx_status0, tx_status1;
-		uint16_t tx_id, tx_info;
+		uint16_t tx_id;
+		int data_txcnt;
 
-		tx_status0 = CSR_READ_4(sc, BWI_TXSTATUS_0);
-		if (tx_status0 == 0)
+		tx_status0 = CSR_READ_4(sc, BWI_TXSTATUS0);
+		if ((tx_status0 & BWI_TXSTATUS0_VALID) == 0)
 			break;
-		tx_status1 = CSR_READ_4(sc, BWI_TXSTATUS_1);
+		tx_status1 = CSR_READ_4(sc, BWI_TXSTATUS1);
 
-		tx_id = __SHIFTOUT(tx_status0, BWI_TXSTATUS_0_TXID_MASK);
-		tx_info = BWI_TXSTATUS_0_INFO(tx_status0);
+		tx_id = __SHIFTOUT(tx_status0, BWI_TXSTATUS0_TXID_MASK);
+		data_txcnt = __SHIFTOUT(tx_status0,
+		    BWI_TXSTATUS0_DATA_TXCNT_MASK);
 
-		if (tx_info & 0x30) /* XXX */
+		if (tx_status0 & (BWI_TXSTATUS0_AMPDU | BWI_TXSTATUS0_PENDING))
 			continue;
 
-		_bwi_txeof(sc, letoh16(tx_id));
+		_bwi_txeof(sc, letoh16(tx_id), tx_status0 & BWI_TXSTATUS0_ACKED,
+		    data_txcnt);
 
 		ifp->if_opackets++;
 	}
