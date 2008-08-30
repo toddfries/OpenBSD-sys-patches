@@ -186,12 +186,16 @@ struct bwi_txstats {
 	uint8_t		txs_pad1[4];
 	uint16_t	txs_id;
 	uint8_t		txs_flags;
-	uint8_t		txs_retry_cnt;
+	uint8_t		txs_txcnt;
 	uint8_t		txs_pad2[2];
 	uint16_t	txs_seq;
 	uint16_t	txs_unknown;
 	uint8_t		txs_pad3[2];	/* Padded to 16bytes */
 } __packed;
+
+#define BWI_TXS_TXCNT_DATA      0x000000f0
+#define BWI_TXS_F_ACKED         (1 << 0)
+#define BWI_TXS_F_PENDING       (1 << 5)
 
 struct bwi_ring_data {
 	uint32_t		 rdata_txrx_ctrl;
