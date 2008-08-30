@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.71 2008/08/15 08:15:27 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.73 2008/08/29 12:14:53 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -75,16 +75,20 @@ u_int8_t *ieee80211_add_rsn_body(u_int8_t *, struct ieee80211com *,
 struct	mbuf *ieee80211_getmgmt(int, int, u_int);
 struct	mbuf *ieee80211_get_probe_req(struct ieee80211com *,
 	    struct ieee80211_node *);
+#ifndef IEEE80211_STA_ONLY
 struct	mbuf *ieee80211_get_probe_resp(struct ieee80211com *,
 	    struct ieee80211_node *);
+#endif
 struct	mbuf *ieee80211_get_auth(struct ieee80211com *,
 	    struct ieee80211_node *, u_int16_t, u_int16_t);
 struct	mbuf *ieee80211_get_deauth(struct ieee80211com *,
 	    struct ieee80211_node *, u_int16_t);
 struct	mbuf *ieee80211_get_assoc_req(struct ieee80211com *,
 	    struct ieee80211_node *, int);
+#ifndef IEEE80211_STA_ONLY
 struct	mbuf *ieee80211_get_assoc_resp(struct ieee80211com *,
 	    struct ieee80211_node *, u_int16_t);
+#endif
 struct	mbuf *ieee80211_get_disassoc(struct ieee80211com *,
 	    struct ieee80211_node *, u_int16_t);
 
@@ -214,7 +218,10 @@ ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
 
 	if (ifp->if_flags & IFF_DEBUG) {
 		/* avoid to print too many frames */
-		if (ic->ic_opmode == IEEE80211_M_IBSS ||
+		if (
+#ifndef IEEE80211_STA_ONLY
+		    ic->ic_opmode == IEEE80211_M_IBSS ||
+#endif
 #ifdef IEEE80211_DEBUG
 		    ieee80211_debug > 1 ||
 #endif
@@ -265,17 +272,10 @@ ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
  * 11A		15	1023
  * 11B  	31	1023
  * 11G		15*	1023	(*) aCWmin(1)
- * FH		15	1023
  * Turbo A/G	7	1023	(Atheros proprietary mode)
  */
 static const struct ieee80211_edca_ac_params
     ieee80211_edca_table[IEEE80211_MODE_MAX][EDCA_NUM_AC] = {
-	[IEEE80211_MODE_FH] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4, 10, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 2,   0 },
-		[EDCA_AC_VO] = { 2,  3, 2,   0 }
-	},
 	[IEEE80211_MODE_11B] = {
 		[EDCA_AC_BK] = { 5, 10, 7,   0 },
 		[EDCA_AC_BE] = { 5, 10, 3,   0 },
@@ -302,14 +302,9 @@ static const struct ieee80211_edca_ac_params
 	}
 };
 
+#ifndef IEEE80211_STA_ONLY
 static const struct ieee80211_edca_ac_params
     ieee80211_qap_edca_table[IEEE80211_MODE_MAX][EDCA_NUM_AC] = {
-	[IEEE80211_MODE_FH] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4,  6, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 1,   0 },
-		[EDCA_AC_VO] = { 2,  3, 1,   0 }
-	},
 	[IEEE80211_MODE_11B] = {
 		[EDCA_AC_BK] = { 5, 10, 7,   0 },
 		[EDCA_AC_BE] = { 5,  7, 3,   0 },
@@ -335,6 +330,7 @@ static const struct ieee80211_edca_ac_params
 		[EDCA_AC_VO] = { 2,  2, 1,  47 }
 	}
 };
+#endif	/* IEEE80211_STA_ONLY */
 
 /*
  * Return the EDCA Access Category to be used for transmitting a frame with
@@ -358,9 +354,10 @@ ieee80211_up_to_ac(struct ieee80211com *ic, int up)
 
 	ac = (up <= 7) ? up_to_ac[up] : EDCA_AC_BE;
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 		return ac;
-
+#endif
 	/*
 	 * We do not support the admission control procedure defined in
 	 * IEEE Std 802.11e-2005 section 9.9.3.1.2.  The spec says that
@@ -584,6 +581,7 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		IEEE80211_ADDR_COPY(wh->i_addr2, eh.ether_shost);
 		IEEE80211_ADDR_COPY(wh->i_addr3, eh.ether_dhost);
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 	case IEEE80211_M_AHDEMO:
 		wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
@@ -597,7 +595,9 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		IEEE80211_ADDR_COPY(wh->i_addr2, ni->ni_bssid);
 		IEEE80211_ADDR_COPY(wh->i_addr3, eh.ether_shost);
 		break;
-	case IEEE80211_M_MONITOR:
+#endif
+	default:
+		/* should not get there */
 		goto bad;
 	}
 
@@ -626,15 +626,19 @@ ieee80211_add_capinfo(u_int8_t *frm, struct ieee80211com *ic,
 {
 	u_int16_t capinfo;
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_IBSS)
 		capinfo = IEEE80211_CAPINFO_IBSS;
 	else if (ic->ic_opmode == IEEE80211_M_HOSTAP)
 		capinfo = IEEE80211_CAPINFO_ESS;
 	else
+#endif
 		capinfo = 0;
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
 	    (ic->ic_flags & (IEEE80211_F_WEPON | IEEE80211_F_RSNON)))
 		capinfo |= IEEE80211_CAPINFO_PRIVACY;
+#endif
 	/* NB: some 11a AP's reject the request when short preamble is set */
 	if ((ic->ic_flags & IEEE80211_F_SHPREAMBLE) &&
 	    IEEE80211_IS_CHAN_2GHZ(ni->ni_chan))
@@ -672,24 +676,7 @@ ieee80211_add_rates(u_int8_t *frm, const struct ieee80211_rateset *rs)
 	return frm + nrates;
 }
 
-/*
- * Add a FH Parameter Set element to a frame (see 7.3.2.3).
- */
-u_int8_t *
-ieee80211_add_fh_params(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni)
-{
-	u_int chan = ieee80211_chan2ieee(ic, ni->ni_chan);
-
-	*frm++ = IEEE80211_ELEMID_FHPARMS;
-	*frm++ = 5;
-	LE_WRITE_2(frm, ni->ni_fhdwell); frm += 2;
-	*frm++ = IEEE80211_FH_CHANSET(chan);
-	*frm++ = IEEE80211_FH_CHANPAT(chan);
-	*frm++ = ni->ni_fhindex;
-	return frm;
-}
-
+#ifndef IEEE80211_STA_ONLY
 /*
  * Add a DS Parameter Set element to a frame (see 7.3.2.4).
  */
@@ -814,6 +801,7 @@ ieee80211_add_erp(u_int8_t *frm, struct ieee80211com *ic)
 	*frm++ = erp;
 	return frm;
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 /*
  * Add a QoS Capability element to a frame (see 7.3.2.35).
@@ -1041,6 +1029,7 @@ ieee80211_get_probe_req(struct ieee80211com *ic, struct ieee80211_node *ni)
 	return m;
 }
 
+#ifndef IEEE80211_STA_ONLY
 /*-
  * Probe response frame format:
  * [8]    Timestamp
@@ -1048,7 +1037,6 @@ ieee80211_get_probe_req(struct ieee80211com *ic, struct ieee80211_node *ni)
  * [2]    Capability
  * [tlv]  Service Set Identifier (SSID)
  * [tlv]  Supported rates
- * [tlv*] Frequency-Hopping (FH) Parameter Set
  * [tlv*] DS Parameter Set (802.11g)
  * [tlv]  ERP Information (802.11g)
  * [tlv]  Extended Supported Rates (802.11g)
@@ -1066,7 +1054,7 @@ ieee80211_get_probe_resp(struct ieee80211com *ic, struct ieee80211_node *ni)
 	    8 + 2 + 2 +
 	    2 + ni->ni_esslen +
 	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    2 + ((ic->ic_phytype == IEEE80211_T_FH) ? 5 : 1) +
+	    2 + 1 +
 	    ((ic->ic_opmode == IEEE80211_M_IBSS) ? 2 + 2 : 0) +
 	    ((ic->ic_curmode == IEEE80211_MODE_11G) ? 2 + 1 : 0) +
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
@@ -1088,10 +1076,7 @@ ieee80211_get_probe_resp(struct ieee80211com *ic, struct ieee80211_node *ni)
 	frm = ieee80211_add_ssid(frm, ic->ic_bss->ni_essid,
 	    ic->ic_bss->ni_esslen);
 	frm = ieee80211_add_rates(frm, rs);
-	if (ic->ic_phytype == IEEE80211_T_FH)
-		frm = ieee80211_add_fh_params(frm, ic, ni);
-	else
-		frm = ieee80211_add_ds_params(frm, ic, ni);
+	frm = ieee80211_add_ds_params(frm, ic, ni);
 	if (ic->ic_opmode == IEEE80211_M_IBSS)
 		frm = ieee80211_add_ibss_params(frm, ni);
 	if (ic->ic_curmode == IEEE80211_MODE_11G)
@@ -1111,6 +1096,7 @@ ieee80211_get_probe_resp(struct ieee80211com *ic, struct ieee80211_node *ni)
 
 	return m;
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 /*-
  * Authentication frame format:
@@ -1233,6 +1219,7 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 	return m;
 }
 
+#ifndef IEEE80211_STA_ONLY
 /*-
  * (Re)Association response frame format:
  * [2]   Capability information
@@ -1278,6 +1265,7 @@ ieee80211_get_assoc_resp(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	return m;
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 /*-
  * Disassociation frame format:
@@ -1331,12 +1319,12 @@ ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 		timer = IEEE80211_TRANS_WAIT;
 		break;
-
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_FC0_SUBTYPE_PROBE_RESP:
 		if ((m = ieee80211_get_probe_resp(ic, ni)) == NULL)
 			senderr(ENOMEM, is_tx_nombuf);
 		break;
-
+#endif
 	case IEEE80211_FC0_SUBTYPE_AUTH:
 		m = ieee80211_get_auth(ic, ni, arg >> 16, arg & 0xffff);
 		if (m == NULL)
@@ -1363,13 +1351,13 @@ ieee80211_send_mgmt(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 		timer = IEEE80211_TRANS_WAIT;
 		break;
-
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_FC0_SUBTYPE_ASSOC_RESP:
 	case IEEE80211_FC0_SUBTYPE_REASSOC_RESP:
 		if ((m = ieee80211_get_assoc_resp(ic, ni, arg)) == NULL)
 			senderr(ENOMEM, is_tx_nombuf);
 		break;
-
+#endif
 	case IEEE80211_FC0_SUBTYPE_DISASSOC:
 		if ((m = ieee80211_get_disassoc(ic, ni, arg)) == NULL)
 			senderr(ENOMEM, is_tx_nombuf);
@@ -1450,6 +1438,7 @@ ieee80211_get_cts_to_self(struct ieee80211com *ic, u_int16_t dur)
 	return m;
 }
 
+#ifndef IEEE80211_STA_ONLY
 /*-
  * Beacon frame format:
  * [8]    Timestamp
@@ -1457,7 +1446,6 @@ ieee80211_get_cts_to_self(struct ieee80211com *ic, u_int16_t dur)
  * [2]    Capability
  * [tlv]  Service Set Identifier (SSID)
  * [tlv]  Supported rates
- * [tlv*] Frequency-Hopping (FH) Parameter Set
  * [tlv*] DS Parameter Set (802.11g)
  * [tlv*] IBSS Parameter Set
  * [tlv]  Traffic Indication Map (TIM)
@@ -1478,7 +1466,7 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	    8 + 2 + 2 +
 	    2 + ((ic->ic_flags & IEEE80211_F_HIDENWID) ? 0 : ni->ni_esslen) +
 	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    2 + ((ic->ic_phytype == IEEE80211_T_FH) ? 5 : 1) +
+	    2 + 1 +
 	    2 + ((ic->ic_opmode == IEEE80211_M_IBSS) ? 2 : 254) +
 	    ((ic->ic_curmode == IEEE80211_MODE_11G) ? 2 + 1 : 0) +
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
@@ -1515,10 +1503,7 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	else
 		frm = ieee80211_add_ssid(frm, ni->ni_essid, ni->ni_esslen);
 	frm = ieee80211_add_rates(frm, rs);
-	if (ic->ic_phytype == IEEE80211_T_FH)
-		frm = ieee80211_add_fh_params(frm, ic, ni);
-	else
-		frm = ieee80211_add_ds_params(frm, ic, ni);
+	frm = ieee80211_add_ds_params(frm, ic, ni);
 	if (ic->ic_opmode == IEEE80211_M_IBSS)
 		frm = ieee80211_add_ibss_params(frm, ni);
 	else
@@ -1569,3 +1554,4 @@ ieee80211_pwrsave(struct ieee80211com *ic, struct ieee80211_node *ni,
 		m->m_pkthdr.rcvif = (void *)ni;
 	}
 }
+#endif	/* IEEE80211_STA_ONLY */

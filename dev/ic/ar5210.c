@@ -1,4 +1,4 @@
-/*     $OpenBSD: ar5210.c,v 1.41 2007/11/01 20:32:16 reyk Exp $        */
+/*     $OpenBSD: ar5210.c,v 1.43 2008/08/29 10:05:00 reyk Exp $        */
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -132,6 +132,7 @@ ar5k_ar5210_fill(struct ath_hal *hal)
 	AR5K_HAL_FUNCTION(hal, ar5210, is_key_valid);
 	AR5K_HAL_FUNCTION(hal, ar5210, set_key);
 	AR5K_HAL_FUNCTION(hal, ar5210, set_key_lladdr);
+	AR5K_HAL_FUNCTION(hal, ar5210, softcrypto);
 
 	/*
 	 * Power management functions
@@ -484,6 +485,7 @@ ar5k_ar5210_set_opmode(struct ath_hal *hal)
 		    AR5K_AR5210_STA_ID1_PWR_SV;
 		break;
 
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 		pcu_reg |= AR5K_AR5210_STA_ID1_ADHOC |
 		    AR5K_AR5210_STA_ID1_NO_PSPOLL |
@@ -497,6 +499,7 @@ ar5k_ar5210_set_opmode(struct ath_hal *hal)
 		    AR5K_AR5210_STA_ID1_DESC_ANTENNA;
 		beacon_reg |= AR5K_AR5210_BCR_AP;
 		break;
+#endif
 
 	case IEEE80211_M_MONITOR:
 		pcu_reg |= AR5K_AR5210_STA_ID1_NO_PSPOLL;
@@ -1909,6 +1912,28 @@ ar5k_ar5210_set_key_lladdr(struct ath_hal *hal, u_int16_t entry,
 
 	AR5K_REG_WRITE(AR5K_AR5210_KEYTABLE_MAC0(entry), low_id);
 	AR5K_REG_WRITE(AR5K_AR5210_KEYTABLE_MAC1(entry), high_id);
+
+	return (AH_TRUE);
+}
+
+HAL_BOOL
+ar5k_ar5210_softcrypto(struct ath_hal *hal, HAL_BOOL enable)
+{
+	u_int32_t bits;
+	int i;
+
+	bits = AR5K_AR5210_DIAG_SW_DIS_ENC | AR5K_AR5210_DIAG_SW_DIS_DEC;
+	if (enable == AH_TRUE) {
+		/* Disable the hardware crypto engine */
+		AR5K_REG_ENABLE_BITS(AR5K_AR5210_DIAG_SW, bits);
+	} else {
+		/* Enable the hardware crypto engine */
+		AR5K_REG_DISABLE_BITS(AR5K_AR5210_DIAG_SW, bits);
+	}
+
+	/* Reset the key cache */
+	for (i = 0; i < AR5K_AR5210_KEYTABLE_SIZE; i++)
+		ar5k_ar5210_reset_key(hal, i);
 
 	return (AH_TRUE);
 }
