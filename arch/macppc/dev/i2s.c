@@ -447,6 +447,12 @@ i2s_set_params(h, setmode, usemode, play, rec)
 	return 0;
 }
 
+void
+i2s_get_default_params(struct audio_params *params)
+{
+	*params = i2s_audio_default;
+}
+
 int
 i2s_round_blocksize(h, size)
 	void *h;
