@@ -33,6 +33,15 @@
 #define I2S_DMALIST_MAX		32
 #define I2S_DMASEG_MAX		NBPG
 
+struct i2s_audio_default {
+	44100,		/* sample_rate */
+	AUDIO_ENCODING_SLINEAR_BE, /* encoding */
+	16,		/* precision */
+	2,		/* channels */
+	NULL,		/* sw_code */
+	1		/* factor */
+};
+
 struct i2s_dma {
 	bus_dmamap_t map;
 	caddr_t addr;
@@ -88,6 +97,7 @@ int i2s_open(void *, int);
 void i2s_close(void *);
 int i2s_query_encoding(void *, struct audio_encoding *);
 int i2s_set_params(void *, int, int, struct audio_params *, struct audio_params *);
+void i2s_get_default_params(struct audio_params *);
 int i2s_round_blocksize(void *, int);
 int i2s_halt_output(void *);
 int i2s_halt_input(void *);
