@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1401 2008/08/26 05:41:07 brad Exp 
+ *	OpenBSD: pcidevs,v 1.1403 2008/08/30 07:24:32 brad Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -234,6 +234,7 @@
 #define	PCI_VENDOR_HIFN	0x13a3		/* Hifn */
 #define	PCI_VENDOR_EXAR	0x13a8		/* Exar */
 #define	PCI_VENDOR_3WARE	0x13c1		/* 3ware */
+#define	PCI_VENDOR_TECHSAN	0x13d0		/* Techsan Electronics */
 #define	PCI_VENDOR_ABOCOM	0x13d1		/* Abocom */
 #define	PCI_VENDOR_SUNDANCE	0x13f0		/* Sundance */
 #define	PCI_VENDOR_CMI	0x13f6		/* C-Media Electronics */
@@ -2028,6 +2029,7 @@
 #define	PCI_PRODUCT_INTEL_82598AF_DUAL	0x10c6		/* 10GbE SR Dual (82598AF) */
 #define	PCI_PRODUCT_INTEL_82598AF	0x10c7		/* 10GbE SR (82598AF) */
 #define	PCI_PRODUCT_INTEL_82598AT	0x10c8		/* 10GbE (82598AT) */
+#define	PCI_PRODUCT_INTEL_82576	0x10c9		/* PRO/1000 */
 #define	PCI_PRODUCT_INTEL_ICH9_IGP_M_V	0x10cb		/* ICH9 IGP M V */
 #define	PCI_PRODUCT_INTEL_ICH10_R_BM_LM	0x10cc		/* ICH10 R BM LM */
 #define	PCI_PRODUCT_INTEL_ICH10_R_BM_LF	0x10cd		/* ICH10 R BM LF */
@@ -2043,6 +2045,9 @@
 #define	PCI_PRODUCT_INTEL_ICH10_D_BM_LF	0x10df		/* ICH10 D BM LF */
 #define	PCI_PRODUCT_INTEL_82598_SR_DUAL_EM	0x10e1		/* 10GbE SR Dual (82598) */
 #define	PCI_PRODUCT_INTEL_ICH9_BM	0x10e5		/* ICH9 BM */
+#define	PCI_PRODUCT_INTEL_82576_FIBER	0x10e6		/* PRO/1000 FP (82576) */
+#define	PCI_PRODUCT_INTEL_82576_SERDES	0x10e7		/* PRO/1000 FP (82576) */
+#define	PCI_PRODUCT_INTEL_82576_QUAD_COPPER	0x10e8		/* PRO/1000 QP (82576) */
 #define	PCI_PRODUCT_INTEL_82598EB_CX4_DUAL	0x10ec		/* 10GbE CX4 Dual (82598EB) */
 #define	PCI_PRODUCT_INTEL_82598_DA_DUAL	0x10f1		/* 10GbE DA Dual (82598) */
 #define	PCI_PRODUCT_INTEL_82598EB_XF_LR	0x10f4		/* 10GbE LR (82598EB) */
@@ -4176,6 +4181,10 @@
 /* Tamarack Microelectronics */
 #define	PCI_PRODUCT_TAMARACK_TC9021	0x1021		/* TC9021 GigE */
 #define	PCI_PRODUCT_TAMARACK_TC9021_ALT	0x9021		/* TC9021 GigE (alt ID) */
+
+/* Techsan Electronics */
+#define	PCI_PRODUCT_TECHSAN_B2C2_SKY2PC	0x2104		/* B2C2 Sky2PC */
+#define	PCI_PRODUCT_TECHSAN_B2C2_SKY2PC_2	0x2200		/* B2C2 Sky2PC */
 
 /* Tehuti Networks Ltd */
 #define	PCI_PRODUCT_TEHUTI_TN3009	0x3009		/* TN3009 */

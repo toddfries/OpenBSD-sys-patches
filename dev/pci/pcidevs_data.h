@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1401 2008/08/26 05:41:07 brad Exp 
+ *	OpenBSD: pcidevs,v 1.1403 2008/08/30 07:24:32 brad Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -5848,6 +5848,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "10GbE (82598AT)",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576,
+	    "PRO/1000",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_V,
 	    "ICH9 IGP M V",
 	},
@@ -5906,6 +5910,18 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_BM,
 	    "ICH9 BM",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_FIBER,
+	    "PRO/1000 FP (82576)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES,
+	    "PRO/1000 FP (82576)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_COPPER,
+	    "PRO/1000 QP (82576)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4_DUAL,
@@ -13504,6 +13520,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "TC9021 GigE (alt ID)",
 	},
 	{
+	    PCI_VENDOR_TECHSAN, PCI_PRODUCT_TECHSAN_B2C2_SKY2PC,
+	    "B2C2 Sky2PC",
+	},
+	{
+	    PCI_VENDOR_TECHSAN, PCI_PRODUCT_TECHSAN_B2C2_SKY2PC_2,
+	    "B2C2 Sky2PC",
+	},
+	{
 	    PCI_VENDOR_TEHUTI, PCI_PRODUCT_TEHUTI_TN3009,
 	    "TN3009",
 	},
@@ -16354,6 +16378,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_3WARE,
 	    "3ware",
+	},
+	{
+	    PCI_VENDOR_TECHSAN,
+	    "Techsan Electronics",
 	},
 	{
 	    PCI_VENDOR_ABOCOM,
