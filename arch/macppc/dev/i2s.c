@@ -53,6 +53,15 @@
 # define DPRINTF(x)
 #endif
 
+struct audio_params i2s_audio_default = {
+	44100,		/* sample_rate */
+	AUDIO_ENCODING_SLINEAR_BE, /* encoding */
+	16,		/* precision */
+	2,		/* channels */
+	NULL,		/* sw_code */
+	1		/* factor */
+};
+
 struct i2s_mode *i2s_find_mode(u_int, u_int, u_int);
 
 static int gpio_read(char *);
@@ -1286,3 +1295,4 @@ deq_reset(struct i2s_softc *sc)
 
 	return (0);
 }
+
