@@ -33,15 +33,6 @@
 #define I2S_DMALIST_MAX		32
 #define I2S_DMASEG_MAX		NBPG
 
-struct i2s_audio_default {
-	44100,		/* sample_rate */
-	AUDIO_ENCODING_SLINEAR_BE, /* encoding */
-	16,		/* precision */
-	2,		/* channels */
-	NULL,		/* sw_code */
-	1		/* factor */
-};
-
 struct i2s_dma {
 	bus_dmamap_t map;
 	caddr_t addr;
