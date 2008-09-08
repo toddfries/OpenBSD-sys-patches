@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1401 2008/08/26 05:41:07 brad Exp 
+ *	OpenBSD: pcidevs,v 1.1405 2008/09/08 08:33:12 brad Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -2641,19 +2641,35 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1600_PRO,
-	    "Radeon X1600 PRO",
+	    "Radeon X1600 Pro",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1600_M,
 	    "Radeon Mobility X1600",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1650_PRO,
+	    "Radeon X1650 Pro",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1650_PRO2,
+	    "Radeon X1650 Pro",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RV530_M56,
 	    "Mobility FireGL V5250",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1600_PRO2,
-	    "Radeon X1600 PRO (Secondary)",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1600_PRO_S,
+	    "Radeon X1600 Pro Sec",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1650_PRO_S,
+	    "Radeon X1650 Pro Sec",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1650_PRO2_S,
+	    "Radeon X1650 Pro Sec",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1950_PRO,
@@ -2668,8 +2684,8 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon X1950 Pro Sec",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RX1650_XT2,
-	    "Radeon RX1650 XT (Secondary)",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_RX1650_XT_2,
+	    "Radeon RX1650 XT Sec",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS690_HB,
@@ -2728,8 +2744,12 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 3870",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600,
-	    "Radeon HD 2600",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_M76,
+	    "Mobility Radeon HD 2600",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_PRO,
+	    "Radeon HD 2600 Pro",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450,
@@ -5848,6 +5868,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "10GbE (82598AT)",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576,
+	    "PRO/1000",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_IGP_M_V,
 	    "ICH9 IGP M V",
 	},
@@ -5906,6 +5930,18 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH9_BM,
 	    "ICH9 BM",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_FIBER,
+	    "PRO/1000 FP (82576)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_SERDES,
+	    "PRO/1000 FP (82576)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_COPPER,
+	    "PRO/1000 QP (82576)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4_DUAL,
@@ -13504,6 +13540,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "TC9021 GigE (alt ID)",
 	},
 	{
+	    PCI_VENDOR_TECHSAN, PCI_PRODUCT_TECHSAN_B2C2_SKY2PC,
+	    "B2C2 Sky2PC",
+	},
+	{
+	    PCI_VENDOR_TECHSAN, PCI_PRODUCT_TECHSAN_B2C2_SKY2PC_2,
+	    "B2C2 Sky2PC",
+	},
+	{
 	    PCI_VENDOR_TEHUTI, PCI_PRODUCT_TEHUTI_TN3009,
 	    "TN3009",
 	},
@@ -16354,6 +16398,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_3WARE,
 	    "3ware",
+	},
+	{
+	    PCI_VENDOR_TECHSAN,
+	    "Techsan Electronics",
 	},
 	{
 	    PCI_VENDOR_ABOCOM,
