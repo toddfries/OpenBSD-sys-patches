@@ -356,17 +356,6 @@ drm_firstopen(struct drm_device *dev)
 			return i;
 	}
 
-	dev->counters = 6;
-	dev->types[0] = _DRM_STAT_LOCK;
-	dev->types[1] = _DRM_STAT_OPENS;
-	dev->types[2] = _DRM_STAT_CLOSES;
-	dev->types[3] = _DRM_STAT_IOCTLS;
-	dev->types[4] = _DRM_STAT_LOCKS;
-	dev->types[5] = _DRM_STAT_UNLOCKS;
-
-	for (i = 0; i < DRM_ARRAY_SIZE(dev->counts); i++)
-		atomic_set(&dev->counts[i], 0);
-
 	dev->magicid = 1;
 	SPLAY_INIT(&dev->magiclist);
 
@@ -481,7 +470,7 @@ drm_version(struct drm_device *dev, void *data, struct drm_file *file_priv)
 }
 
 int
-drmopen(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
+drmopen(dev_t kdev, int flags, int fmt, struct proc *p)
 {
 	struct drm_device *dev = NULL;
 	int retcode = 0;
@@ -495,7 +484,6 @@ drmopen(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 	retcode = drm_open_helper(kdev, flags, fmt, p, dev);
 
 	if (retcode == 0) {
-		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
 		DRM_LOCK();
 		if (dev->open_count++ == 0)
 			retcode = drm_firstopen(dev);
@@ -506,7 +494,7 @@ drmopen(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 }
 
 int
-drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
+drmclose(dev_t kdev, int flags, int fmt, struct proc *p)
 {
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv;
@@ -556,11 +544,10 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 			if (drm_lock_take(&dev->lock, DRM_KERNEL_CONTEXT)) {
 				dev->lock.file_priv = file_priv;
 				dev->lock.lock_time = jiffies;
-                                atomic_inc(&dev->counts[_DRM_STAT_LOCKS]);
 				break;	/* Got lock */
 			}
 				/* Contention */
-			retcode = DRM_SLEEPLOCK((void *)&dev->lock.lock_queue,
+			retcode = msleep((void *)&dev->lock.lock_queue,
 			    &dev->dev_lock, PZERO | PCATCH, "drmlk2", 0);
 			if (retcode)
 				break;
@@ -586,7 +573,6 @@ drmclose(DRM_CDEV kdev, int flags, int fmt, DRM_STRUCTPROC *p)
 	 */
 
 done:
-	atomic_inc(&dev->counts[_DRM_STAT_CLOSES]);
 	if (--dev->open_count == 0) {
 		retcode = drm_lastclose(dev);
 	}
@@ -599,8 +585,8 @@ done:
 /* drmioctl is called whenever a process performs an ioctl on /dev/drm.
  */
 int
-drmioctl(DRM_CDEV kdev, u_long cmd, caddr_t data, int flags, 
-    DRM_STRUCTPROC *p)
+drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags, 
+    struct proc *p)
 {
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	int retcode = 0;
@@ -621,7 +607,6 @@ drmioctl(DRM_CDEV kdev, u_long cmd, caddr_t data, int flags,
 		return EINVAL;
 	}
 
-	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
 	++file_priv->ioctl_count;
 
 	DRM_DEBUG("pid=%d, cmd=0x%02lx, nr=0x%02x, dev 0x%lx, auth=%d\n",

@@ -184,54 +184,13 @@ drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_getclient(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	struct drm_client	*client = data;
-	struct drm_file		*pt;
-	int		 idx;
-	int		 i = 0;
-
-	idx = client->idx;
-	DRM_LOCK();
-	TAILQ_FOREACH(pt, &dev->files, link) {
-		if (i==idx) {
-			client->auth = pt->authenticated;
-			client->pid = pt->pid;
-			client->uid = pt->uid;
-			client->magic = pt->magic;
-			client->iocs = pt->ioctl_count;
-			DRM_UNLOCK();
-			return 0;
-		}
-		i++;
-	}
-	DRM_UNLOCK();
-
-	return EINVAL;
+	return (EINVAL);
 }
 
 int
 drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	struct drm_stats	*stats = data;
-	int			 i;
-
-	memset(stats, 0, sizeof(struct drm_stats));
-	
-	DRM_LOCK();
-
-	for (i = 0; i < dev->counters; i++) {
-		if (dev->types[i] == _DRM_STAT_LOCK)
-			stats->data[i].value = (dev->lock.hw_lock
-			    ? dev->lock.hw_lock->lock : 0);
-		else 
-			stats->data[i].value = atomic_read(&dev->counts[i]);
-		stats->data[i].type  = dev->types[i];
-	}
-	
-	stats->count = dev->counters;
-
-	DRM_UNLOCK();
-
-	return 0;
+	return (EINVAL);
 }
 
 #define DRM_IF_MAJOR	1
