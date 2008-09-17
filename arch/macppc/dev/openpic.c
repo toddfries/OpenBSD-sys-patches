@@ -80,12 +80,14 @@ static struct evcount ipi_nop[PPC_MAXPROCS];
 static int ipi_nopirq = IPI_VECTOR_NOP;
 static int ipi_ddbirq = IPI_VECTOR_DDB;
 #endif
+struct evcount openpic_spurious;
+int openpic_spurious_irq = 255;
 
-<<<<<<< HEAD:arch/macppc/dev/openpic.c
 void	openpic_enable_irq(int, int);
 void	openpic_disable_irq(int);
 void	openpic_init(void);
 void	openpic_set_priority(int);
+void openpic_ipi_ddb(void);
 
 typedef void  (void_f) (void);
 extern void_f *pending_int_f;
@@ -96,18 +98,9 @@ void *	openpic_intr_establish( void * lcv, int irq, int type, int level,
 void	openpic_intr_disestablish( void *lcp, void *arg);
 void	openpic_collect_preconf_intr(void);
 int	openpic_big_endian;
-=======
-static __inline u_int openpic_read(int);
-static __inline void openpic_write(int, u_int);
-void openpic_set_enable_irq(int, int);
-void openpic_enable_irq(int);
-void openpic_disable_irq(int);
-void openpic_init(void);
-void openpic_set_priority(int, int);
-void openpic_ipi_ddb(void);
-static __inline int openpic_read_irq(int);
-static __inline void openpic_eoi(int);
->>>>>>> master:arch/macppc/dev/openpic.c
+#ifdef MULTIPROCESSOR
+intr_send_ipi_t openpic_send_ipi;
+#endif
 
 struct openpic_softc {
 	struct device sc_dev;
@@ -191,22 +184,6 @@ openpic_match(struct device *parent, void *cf, void *aux)
 	return 1;
 }
 
-<<<<<<< HEAD:arch/macppc/dev/openpic.c
-=======
-typedef void  (void_f) (void);
-extern void_f *pending_int_f;
-
-vaddr_t openpic_base;
-void * openpic_intr_establish( void * lcv, int irq, int type, int level,
-	int (*ih_fun)(void *), void *ih_arg, char *name);
-void openpic_intr_disestablish( void *lcp, void *arg);
-#ifdef MULTIPROCESSOR
-intr_send_ipi_t openpic_send_ipi;
-#endif
-void openpic_collect_preconf_intr(void);
-int openpic_big_endian;
-
->>>>>>> master:arch/macppc/dev/openpic.c
 void
 openpic_attach(struct device *parent, struct device  *self, void *aux)
 {
@@ -224,10 +201,10 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	/* openpic may support more than 128 interupts but driver doesn't */
 	openpic_numirq = ((openpic_read(OPENPIC_FEATURE) >> 16) & 0x7f)+1;
 
-	printf(": version 0x%x feature %x %s endian",
+	printf(": version 0x%x feature %x %s",
 	    openpic_read(OPENPIC_VENDOR_ID),
 	    openpic_read(OPENPIC_FEATURE),
-		openpic_big_endian ? "big" : "little" );
+		openpic_big_endian ? "BE" : "LE" );
 
 	openpic_init();
 
@@ -235,30 +212,27 @@ openpic_attach(struct device *parent, struct device  *self, void *aux)
 	intr_disestablish_func  = openpic_intr_disestablish;
 	mac_intr_establish_func  = openpic_intr_establish;
 	mac_intr_disestablish_func  = openpic_intr_disestablish;
-<<<<<<< HEAD:arch/macppc/dev/openpic.c
-=======
 #ifdef MULTIPROCESSOR
 	intr_send_ipi_func = openpic_send_ipi;
 #endif
-	install_extint(ext_intr_openpic);
->>>>>>> master:arch/macppc/dev/openpic.c
 
 	ppc_smask_init();
 
 	openpic_collect_preconf_intr();
 
+	evcount_attach(&openpic_spurious, "spurious",
+	    (void *)&openpic_spurious_irq, &evcount_intr);
+
 #if 1
 	mac_intr_establish(parent, 0x37, IST_LEVEL,
 		IPL_HIGH, openpic_prog_button, (void *)0x37, "progbutton");
 #endif
-<<<<<<< HEAD:arch/macppc/dev/openpic.c
+
 	ppc_intr_func.raise = openpic_splraise;
 	ppc_intr_func.lower = openpic_spllower;
 	ppc_intr_func.x = openpic_splx;
 
 	openpic_set_priority(ci->ci_cpl);
-=======
->>>>>>> master:arch/macppc/dev/openpic.c
 
 	ppc_intr_enable(1);
 
@@ -471,6 +445,7 @@ openpic_do_pending_int(int pcpl)
 {
 	struct cpu_info *ci = curcpu();
 	int s;
+	int loopcount = 0;
 
 	s = ppc_intr_disable();
 	if (ci->ci_iactive & CI_IACTIVE_PROCESSING_SOFT) {
@@ -481,7 +456,12 @@ openpic_do_pending_int(int pcpl)
 	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
 
 	do {
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) && (pcpl < IPL_SOFTTTY)) {
+		loopcount ++;
+		if (loopcount > 5)
+			printf("do_pending looping %d pcpl %x %x\n", loopcount,
+			    pcpl, ci->ci_cpl);
+		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
+		    (pcpl < IPL_SOFTTTY)) {
 			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTTTY);
 
 			openpic_setipl(IPL_SOFTTTY);
@@ -492,7 +472,8 @@ openpic_do_pending_int(int pcpl)
 			ppc_intr_disable();
 			continue;
 		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) && (pcpl < IPL_SOFTNET)) {
+		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) &&
+		    (pcpl < IPL_SOFTNET)) {
 			extern int netisr;
 			int pisr;
 
@@ -508,7 +489,8 @@ openpic_do_pending_int(int pcpl)
 			ppc_intr_disable();
 			continue;
 		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) && (pcpl < IPL_SOFTCLOCK)) {
+		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) &&
+		    (pcpl < IPL_SOFTCLOCK)) {
 			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTCLOCK);
 			openpic_setipl(IPL_SOFTCLOCK);
 			ppc_intr_enable(s);
@@ -560,7 +542,6 @@ openpic_set_priority(int pri)
 }
 
 #ifdef MULTIPROCESSOR
-
 void
 openpic_send_ipi(struct cpu_info *ci, int id)
 {
@@ -575,7 +556,6 @@ openpic_send_ipi(struct cpu_info *ci, int id)
 		panic("invalid ipi send to cpu %d %d\n", ci->ci_cpuid, id);
 	}
 		
-		
 	openpic_write(OPENPIC_IPI(curcpu()->ci_cpuid, id), 1 << ci->ci_cpuid);
 }
 
@@ -589,28 +569,32 @@ openpic_ext_intr()
 	int pcpl;
 	struct intrhand *ih;
 	struct intrq *iq;
+	int irqloop = 0;
+	static int irqnest = 0;
+	int spurious;
 
 	pcpl = ci->ci_cpl;
 
 	irq = openpic_read_irq(ci->ci_cpuid);
+	irqnest++;
 
 	while (irq != 255) {
+		irqloop++;
+		if (irqloop > 20 || irqnest > 3) {
+			printf("irqloop %d irqnest %d\n", irqloop, irqnest);
+		}
 #ifdef MULTIPROCESSOR
-<<<<<<< HEAD:arch/macppc/dev/openpic.c
-		if (irq == IPI_VECTOR) {
-=======
-		if (realirq == IPI_VECTOR_NOP) {
+		if (irq == IPI_VECTOR_NOP) {
 			ipi_nop[ci->ci_cpuid].ec_count++;
->>>>>>> master:arch/macppc/dev/openpic.c
 			openpic_eoi(ci->ci_cpuid);
 			irq = openpic_read_irq(ci->ci_cpuid);
 			continue;
 		}
-		if (realirq == IPI_VECTOR_DDB) {
+		if (irq == IPI_VECTOR_DDB) {
 			ipi_ddb[ci->ci_cpuid].ec_count++;
 			openpic_eoi(ci->ci_cpuid);
 			openpic_ipi_ddb();
-			realirq = openpic_read_irq(ci->ci_cpuid);
+			irq = openpic_read_irq(ci->ci_cpuid);
 			continue;
 		}
 #endif
@@ -623,23 +607,29 @@ openpic_ext_intr()
 		splraise(iq->iq_ipl);
 		openpic_eoi(ci->ci_cpuid);
 
+		spurious = 1;
 		TAILQ_FOREACH(ih, &iq->iq_list, ih_list) {
 			ppc_intr_enable(1);
-
 			KERNEL_LOCK();
-			if ((*ih->ih_fun)(ih->ih_arg))
+			if ((*ih->ih_fun)(ih->ih_arg)) {
 				ih->ih_count.ec_count++;
+				spurious = 0;
+ 			}
 			KERNEL_UNLOCK();
 
 			(void)ppc_intr_disable();
+ 		}
+		if (spurious) {
+			openpic_spurious.ec_count++;
+			printf("spurious intr %d\n", irq);
 		}
 
 		uvmexp.intrs++;
-
 		openpic_setipl(pcpl);
 
 		irq = openpic_read_irq(ci->ci_cpuid);
 	}
+	irqnest--;
 	ppc_intr_enable(1);
 
 	splx(pcpl);	/* Process pendings. */
@@ -670,12 +660,6 @@ openpic_init()
 	x |= OPENPIC_CONFIG_8259_PASSTHRU_DISABLE;
 	openpic_write(OPENPIC_CONFIG, x);
 
-	/* clear all pending interrunts */
-	for (irq = 0; irq < ICU_LEN; irq++) {
-		openpic_read_irq(ci->ci_cpuid);
-		openpic_eoi(ci->ci_cpuid);
-	}
-
 	/* initialize all vectors to something sane */
 	for (irq = 0; irq < ICU_LEN; irq++) {
 		x = irq;
@@ -690,6 +674,13 @@ openpic_init()
 	for (irq = 0; irq < openpic_numirq; irq++)
 		openpic_write(OPENPIC_IDEST(irq), 1 << 0);
 
+	/* clear all pending interrunts */
+	for (irq = 0; irq < ICU_LEN; irq++) {
+		openpic_read_irq(ci->ci_cpuid);
+		openpic_eoi(ci->ci_cpuid);
+	}
+
+
 #ifdef MULTIPROCESSOR
 	/* Set up inter-processor interrupts. */
 	/* IPI0 - NOP */
@@ -703,6 +694,7 @@ openpic_init()
 	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR_DDB;
 	openpic_write(OPENPIC_IPI_VECTOR(1), x);
 
+	/* XXX - ncpus */
 	evcount_attach(&ipi_nop[0], "ipi_nop0", (void *)&ipi_nopirq,
 	    &evcount_intr);
 	evcount_attach(&ipi_nop[1], "ipi_nop1", (void *)&ipi_nopirq,
@@ -712,6 +704,12 @@ openpic_init()
 	evcount_attach(&ipi_ddb[1], "ipi_ddb1", (void *)&ipi_ddbirq,
 	    &evcount_intr);
 #endif
+
+	/* clear all pending interrunts */
+	for (irq = 0; irq < ICU_LEN; irq++) {
+		openpic_read_irq(0);
+		openpic_eoi(0);
+	}
 
 #if 0
 	openpic_write(OPENPIC_SPURIOUS_VECTOR, 255);
@@ -738,10 +736,9 @@ openpic_prog_button (void *arg)
 	return 1;
 }
 
-
 void
-openpic_ipi_ddb(void)
+openpic_ipi_ddb()
 {
+	printf("ipi_ddb() called\n");
 	Debugger();
 }
-

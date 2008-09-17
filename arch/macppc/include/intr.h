@@ -5,10 +5,5 @@
 #ifndef _LOCORE
 void softtty(void);
 
-<<<<<<< HEAD:arch/macppc/include/intr.h
-void openpic_send_ipi(int);
 void openpic_set_priority(int);
-=======
-void openpic_set_priority(int, int);
->>>>>>> master:arch/macppc/include/intr.h
 #endif
