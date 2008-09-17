@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.19 2008/05/31 22:49:03 kettenis Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.21 2008/09/10 14:01:22 blambert Exp $	*/
 
 /*
  *
@@ -661,7 +661,7 @@ cas_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }
 
 int
@@ -1074,7 +1074,7 @@ cas_init(struct ifnet *ifp)
 		bus_space_write_4(t, h, CAS_RX_KICK2, 4);
 
 	/* Start the one second timer. */
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1937,9 +1937,9 @@ cas_tint(struct cas_softc *sc, u_int32_t status)
 			bus_dmamap_unload(sc->sc_dmatag, sd->sd_map);
 			m_freem(sd->sd_mbuf);
 			sd->sd_mbuf = NULL;
+			ifp->if_opackets++;
 		}
 		sc->sc_tx_cnt--;
-		ifp->if_opackets++;
 		if (++cons == CAS_NTXDESC)
 			cons = 0;
 	}

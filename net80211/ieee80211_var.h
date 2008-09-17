@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.50 2008/08/29 12:14:53 damien Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.53 2008/09/08 13:13:01 jsg Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -36,6 +36,10 @@
 /*
  * Definitions for IEEE 802.11 drivers.
  */
+
+#ifdef	SMALL_KERNEL
+#define IEEE80211_STA_ONLY 1
+#endif
 
 #include <sys/timeout.h>
 
@@ -276,6 +280,7 @@ struct ieee80211com {
 							 */
 	struct ieee80211_edca_ac_params ic_edca_ac[EDCA_NUM_AC];
 	u_int			ic_edca_updtcount;
+	u_int16_t		ic_tid_noack;
 	u_int8_t		ic_globalcnt[EAPOL_KEY_NONCE_LEN];
 	u_int8_t		ic_nonce[EAPOL_KEY_NONCE_LEN];
 	u_int8_t		ic_psk[IEEE80211_PMK_LEN];
@@ -291,7 +296,7 @@ struct ieee80211com {
 
 	u_int8_t		*ic_tim_bitmap;
 	u_int			ic_tim_len;
-	u_int			ic_tim_mcast;
+	u_int			ic_tim_mcast_pending;
 	u_int			ic_dtim_period;
 	u_int			ic_dtim_count;
 };

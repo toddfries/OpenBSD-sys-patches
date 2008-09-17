@@ -31,6 +31,9 @@
 #include "i915_drm.h"
 #include "i915_drv.h"
 
+int	i915_init_phys_hws(struct drm_device *);
+void	i915_free_hws(struct drm_device *);
+
 /* Really want an OS-independent resettable timer.  Would like to have
  * this loop run for (eg) 3 sec, but have the timer reset every time
  * the head pointer changes, so that EBUSY only happens if the ring
@@ -40,11 +43,15 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	drm_i915_ring_buffer_t *ring = &(dev_priv->ring);
-	u32 last_head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
+	u_int32_t acthd_reg = IS_I965G(dev) ? ACTHD_I965 : ACTHD;
+	u_int32_t last_acthd = I915_READ(acthd_reg);
+	u_int32_t acthd;
+	u_int32_t last_head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
 	int i;
 
-	for (i = 0; i < 10000; i++) {
+	for (i = 0; i < 100000; i++) {
 		ring->head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
+		acthd = I915_READ(acthd_reg);
 		ring->space = ring->head - (ring->tail + 8);
 		if (ring->space < 0)
 			ring->space += ring->Size;
@@ -53,12 +60,62 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 
 		if (ring->head != last_head)
 			i = 0;
+		if (acthd != last_acthd)
+			i = 0;
 
 		last_head = ring->head;
-		DRM_UDELAY(1);
+		last_acthd = acthd;
+		msleep(dev_priv, &dev->dev_lock, PZERO | PCATCH, "i915wt",
+		    hz / 100);
 	}
 
 	return -EBUSY;
+}
+
+/**
+ * Sets up the hardware status page for devices that need a physical address
+ * in the register.
+ */
+int i915_init_phys_hws(struct drm_device *dev)
+{
+	drm_i915_private_t *dev_priv = dev->dev_private;
+	/* Program Hardware Status Page */
+	dev_priv->status_page_dmah =
+	    drm_pci_alloc(dev, PAGE_SIZE, PAGE_SIZE, 0xffffffff);
+
+	if (!dev_priv->status_page_dmah) {
+		DRM_ERROR("Can not allocate hardware status page\n");
+		return -ENOMEM;
+	}
+	dev_priv->hw_status_page = dev_priv->status_page_dmah->vaddr;
+	dev_priv->dma_status_page = dev_priv->status_page_dmah->busaddr;
+
+	memset(dev_priv->hw_status_page, 0, PAGE_SIZE);
+
+	I915_WRITE(HWS_PGA, dev_priv->dma_status_page);
+	DRM_DEBUG("Enabled hardware status page\n");
+	return 0;
+}
+
+/**
+ * Frees the hardware status page, whether it's a physical address of a virtual
+ * address set up by the X Server.
+ */
+void i915_free_hws(struct drm_device *dev)
+{
+	drm_i915_private_t *dev_priv = dev->dev_private;
+	if (dev_priv->status_page_dmah) {
+		drm_pci_free(dev, dev_priv->status_page_dmah);
+		dev_priv->status_page_dmah = NULL;
+	}
+
+	if (dev_priv->status_gfx_addr) {
+		dev_priv->status_gfx_addr = 0;
+		drm_core_ioremapfree(&dev_priv->hws_map, dev);
+	}
+
+	/* Need to rewrite hardware status page */
+	I915_WRITE(HWS_PGA, 0x1ffff000);
 }
 
 void i915_kernel_lost_context(struct drm_device * dev)
@@ -80,7 +137,7 @@ static int i915_dma_cleanup(struct drm_device * dev)
 	 * may not have been called from userspace and after dev_private
 	 * is freed, it's too late.
 	 */
-	if (dev->irq)
+	if (dev->irq_enabled)
 		drm_irq_uninstall(dev);
 
 	if (dev_priv->ring.virtual_start) {
@@ -90,18 +147,9 @@ static int i915_dma_cleanup(struct drm_device * dev)
 		dev_priv->ring.map.size = 0;
 	}
 
-	if (dev_priv->status_page_dmah) {
-		drm_pci_free(dev, dev_priv->status_page_dmah);
-		dev_priv->status_page_dmah = NULL;
-		/* Need to rewrite hardware status page */
-		I915_WRITE(0x02080, 0x1ffff000);
-	}
-
-	if (dev_priv->status_gfx_addr) {
-		dev_priv->status_gfx_addr = 0;
-		drm_core_ioremapfree(&dev_priv->hws_map, dev);
-		I915_WRITE(0x02080, 0x1ffff000);
-	}
+	/* Clear the HWS virtual address as teardown */
+	if (I915_NEED_GFX_HWS(dev))
+		i915_free_hws(dev);
 
 	return 0;
 }
@@ -162,25 +210,6 @@ static int i915_initialize(struct drm_device * dev,
 	/* Enable vblank on pipe A for older X servers
 	 */
 	dev_priv->vblank_pipe = DRM_I915_VBLANK_PIPE_A;
-
-	/* Program Hardware Status Page */
-	if (!I915_NEED_GFX_HWS(dev)) {
-		dev_priv->status_page_dmah =
-			drm_pci_alloc(dev, PAGE_SIZE, PAGE_SIZE, 0xffffffff);
-
-		if (!dev_priv->status_page_dmah) {
-			i915_dma_cleanup(dev);
-			DRM_ERROR("Can not allocate hardware status page\n");
-			return -ENOMEM;
-		}
-		dev_priv->hw_status_page = dev_priv->status_page_dmah->vaddr;
-		dev_priv->dma_status_page = dev_priv->status_page_dmah->busaddr;
-
-		memset(dev_priv->hw_status_page, 0, PAGE_SIZE);
-
-		I915_WRITE(0x02080, dev_priv->dma_status_page);
-	}
-	DRM_DEBUG("Enabled hardware status page\n");
 
 	return 0;
 }
@@ -745,7 +774,7 @@ static int i915_getparam(struct drm_device *dev, void *data,
 
 	switch (param->param) {
 	case I915_PARAM_IRQ_ACTIVE:
-		value = dev->irq ? 1 : 0;
+		value = dev->irq_enabled;
 		break;
 	case I915_PARAM_ALLOW_BATCHBUFFER:
 		value = dev_priv->allow_batchbuffer ? 1 : 0;
@@ -901,13 +930,6 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	unsigned long base, size;
 	int ret = 0, mmio_bar = IS_I9XX(dev) ? 0 : 1;
 
-	/* i915 has 4 more counters */
-	dev->counters += 4;
-	dev->types[6] = _DRM_STAT_IRQ;
-	dev->types[7] = _DRM_STAT_PRIMARY;
-	dev->types[8] = _DRM_STAT_SECONDARY;
-	dev->types[9] = _DRM_STAT_DMA;
-
 	dev_priv = drm_calloc(1, sizeof(drm_i915_private_t), DRM_MEM_DRIVER);
 	if (dev_priv == NULL)
 		return -ENOMEM;
@@ -920,6 +942,16 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
 		_DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
+
+	/* Init HWS */
+	if (!I915_NEED_GFX_HWS(dev)) {
+		ret = i915_init_phys_hws(dev);
+		if (ret != 0)
+			return ret;
+	}
+
+	mtx_init(&dev_priv->swaps_lock, IPL_BIO);
+	DRM_SPININIT(&dev_priv->user_irq_lock, "I915 irq lock");
 
 #ifdef __linux__
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
@@ -935,8 +967,13 @@ int i915_driver_unload(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
+	i915_free_hws(dev);
+
 	if (dev_priv->mmio_map)
 		drm_rmmap(dev, dev_priv->mmio_map);
+
+	DRM_SPINUNINIT(&dev_priv->swaps_lock);
+	DRM_SPINUNINIT(&dev_priv->user_irq_lock);
 
 #ifdef __linux__
 	intel_opregion_free(dev);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.99 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.101 2008/09/17 05:43:14 chl Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -63,6 +63,7 @@
 
 #include "faith.h"
 #include "carp.h"
+#include "pf.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -96,6 +97,10 @@
 
 #if NCARP > 0
 #include <netinet/ip_carp.h>
+#endif
+
+#if NPF > 0
+#include <net/pfvar.h>
 #endif
 
 /* inpcb members */
@@ -1067,6 +1072,9 @@ icmp6_notify_error(struct mbuf *m, int off, int icmp6len, int code)
 		ip6cp.ip6c_finaldst = finaldst;
 		ip6cp.ip6c_src = &icmp6src;
 		ip6cp.ip6c_nxt = nxt;
+#if NPF > 0
+		pf_pkt_addr_changed(m);
+#endif
 
 		if (icmp6type == ICMP6_PACKET_TOO_BIG) {
 			notifymtu = ntohl(icmp6->icmp6_mtu);
@@ -2145,8 +2153,6 @@ icmp6_redirect_input(struct mbuf *m, int off)
 	int icmp6len = ntohs(ip6->ip6_plen);
 	char *lladdr = NULL;
 	int lladdrlen = 0;
-	u_char *redirhdr = NULL;
-	int redirhdrlen = 0;
 	struct rtentry *rt = NULL;
 	int is_router;
 	int is_onlink;
@@ -2268,11 +2274,6 @@ icmp6_redirect_input(struct mbuf *m, int off)
 	if (ndopts.nd_opts_tgt_lladdr) {
 		lladdr = (char *)(ndopts.nd_opts_tgt_lladdr + 1);
 		lladdrlen = ndopts.nd_opts_tgt_lladdr->nd_opt_len << 3;
-	}
-
-	if (ndopts.nd_opts_rh) {
-		redirhdrlen = ndopts.nd_opts_rh->nd_opt_rh_len;
-		redirhdr = (u_char *)(ndopts.nd_opts_rh + 1); /* xxx */
 	}
 
 	if (lladdr && ((ifp->if_addrlen + 2 + 7) & ~7) != lladdrlen) {

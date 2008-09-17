@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.91 2008/05/31 02:08:14 brad Exp $	*/
+/*	$OpenBSD: if_txp.c,v 1.93 2008/09/10 14:01:23 blambert Exp $	*/
 
 /*
  * Copyright (c) 2001
@@ -1296,7 +1296,7 @@ txp_init(struct txp_softc *sc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 
 	if (!timeout_pending(&sc->sc_tick))
-		timeout_add(&sc->sc_tick, hz);
+		timeout_add_sec(&sc->sc_tick, 1);
 
 	splx(s);
 }
@@ -1337,7 +1337,7 @@ out:
 		free(rsp, M_DEVBUF);
 
 	splx(s);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 void
@@ -1826,10 +1826,10 @@ txp_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 		}
 
 		anlpar &= anar;
-		if (anlpar & ANLPAR_T4)
-			ifmr->ifm_active |= IFM_100_T4|IFM_HDX;
-		else if (anlpar & ANLPAR_TX_FD)
+		if (anlpar & ANLPAR_TX_FD)
 			ifmr->ifm_active |= IFM_100_TX|IFM_FDX;
+		else if (anlpar & ANLPAR_T4)
+			ifmr->ifm_active |= IFM_100_T4|IFM_HDX;
 		else if (anlpar & ANLPAR_TX)
 			ifmr->ifm_active |= IFM_100_TX|IFM_HDX;
 		else if (anlpar & ANLPAR_10_FD)

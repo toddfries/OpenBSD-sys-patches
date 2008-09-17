@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.c,v 1.50 2008/01/02 03:33:18 brad Exp $	*/
+/*	$OpenBSD: ip_mroute.c,v 1.52 2008/09/16 21:33:37 chl Exp $	*/
 /*	$NetBSD: ip_mroute.c,v 1.85 2004/04/26 01:31:57 matt Exp $	*/
 
 /*
@@ -836,7 +836,6 @@ add_vif(struct mbuf *m)
 		 * local interface (e.g. it could be 127.0.0.2), we don't
 		 * check its address.
 		 */
-	    ifp = NULL;
 	} else
 #endif
 	{
@@ -844,7 +843,6 @@ add_vif(struct mbuf *m)
 		ifa = ifa_ifwithaddr(sintosa(&sin));
 		if (ifa == NULL)
 			return (EADDRNOTAVAIL);
-		ifp = ifa->ifa_ifp;
 	}
 
 	if (vifcp->vifc_flags & VIFF_TUNNEL) {

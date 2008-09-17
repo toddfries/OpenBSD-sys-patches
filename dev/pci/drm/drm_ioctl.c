@@ -46,7 +46,7 @@ int	drm_set_busid(struct drm_device *);
 int
 drm_getunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_unique_t	 *u = data;
+	struct drm_unique	 *u = data;
 
 	if (u->unique_len >= dev->unique_len) {
 		if (DRM_COPY_TO_USER(u->unique, dev->unique, dev->unique_len))
@@ -63,9 +63,9 @@ drm_getunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_setunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_unique_t *u = data;
-	int domain, bus, slot, func, ret;
-	char *busid;
+	struct drm_unique	*u = data;
+	char			*busid;
+	int			 domain, bus, slot, func, ret;
 #if defined (__NetBSD__) 
 	return EOPNOTSUPP;
 #endif
@@ -148,10 +148,9 @@ drm_set_busid(struct drm_device *dev)
 int
 drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_map_t    *map = data;
-	drm_local_map_t    *mapinlist;
-	int          idx;
-	int	     i = 0;
+	struct drm_map	*map = data;
+	drm_local_map_t	*mapinlist;
+	int		 idx, i = 0;
 
 	idx = map->offset;
 
@@ -185,54 +184,13 @@ drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_getclient(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_client_t	*client = data;
-	struct drm_file	*pt;
-	int		 idx;
-	int		 i = 0;
-
-	idx = client->idx;
-	DRM_LOCK();
-	TAILQ_FOREACH(pt, &dev->files, link) {
-		if (i==idx) {
-			client->auth = pt->authenticated;
-			client->pid = pt->pid;
-			client->uid = pt->uid;
-			client->magic = pt->magic;
-			client->iocs = pt->ioctl_count;
-			DRM_UNLOCK();
-			return 0;
-		}
-		i++;
-	}
-	DRM_UNLOCK();
-
-	return EINVAL;
+	return (EINVAL);
 }
 
 int
 drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_stats_t *stats = data;
-	int i;
-
-	memset(stats, 0, sizeof(drm_stats_t));
-	
-	DRM_LOCK();
-
-	for (i = 0; i < dev->counters; i++) {
-		if (dev->types[i] == _DRM_STAT_LOCK)
-			stats->data[i].value = (dev->lock.hw_lock
-			    ? dev->lock.hw_lock->lock : 0);
-		else 
-			stats->data[i].value = atomic_read(&dev->counts[i]);
-		stats->data[i].type  = dev->types[i];
-	}
-	
-	stats->count = dev->counters;
-
-	DRM_UNLOCK();
-
-	return 0;
+	return (EINVAL);
 }
 
 #define DRM_IF_MAJOR	1
@@ -241,9 +199,8 @@ drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_set_version_t *sv = data;
-	drm_set_version_t ver;
-	int if_version;
+	struct drm_set_version	ver, *sv = data;
+	int			if_version;
 
 	/* Save the incoming data, and set the response before continuing
 	 * any further.

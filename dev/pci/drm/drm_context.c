@@ -71,8 +71,6 @@ drm_ctxbitmap_next(struct drm_device *dev)
 
 	set_bit(bit, dev->ctx_bitmap);
 	DRM_DEBUG("drm_ctxbitmap_next bit : %d\n", bit);
-	if ((bit+1) > dev->max_context)
-		dev->max_context = (bit+1);
 	DRM_UNLOCK();
 	return bit;
 }
@@ -89,7 +87,6 @@ drm_ctxbitmap_init(struct drm_device *dev)
 		return (ENOMEM);
 	DRM_LOCK();
 	dev->ctx_bitmap = bitmap;
-	dev->max_context = -1;
 	DRM_UNLOCK();
 
 	for (i = 0; i < DRM_RESERVED_CONTEXTS; i++) {
@@ -115,9 +112,9 @@ drm_ctxbitmap_cleanup(struct drm_device *dev)
 int
 drm_resctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_ctx_res_t *res = data;
-	drm_ctx_t ctx;
-	int i;
+	struct drm_ctx_res	*res = data;
+	struct drm_ctx		 ctx;
+	int			 i;
 
 	if (res->count >= DRM_RESERVED_CONTEXTS) {
 		bzero(&ctx, sizeof(ctx));
@@ -136,7 +133,7 @@ drm_resctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_addctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_ctx_t *ctx = data;
+	struct drm_ctx	*ctx = data;
 
 	ctx->handle = drm_ctxbitmap_next(dev);
 	if (ctx->handle == DRM_KERNEL_CONTEXT) {
@@ -162,7 +159,7 @@ drm_addctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_getctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_ctx_t *ctx = data;
+	struct drm_ctx	*ctx = data;
 
 	/* This is 0, because we don't handle any context flags */
 	ctx->flags = 0;
@@ -173,7 +170,7 @@ drm_getctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_rmctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_ctx_t *ctx = data;
+	struct drm_ctx	*ctx = data;
 
 	DRM_DEBUG("%d\n", ctx->handle);
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {
