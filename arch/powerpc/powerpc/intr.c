@@ -55,17 +55,17 @@ ppc_smask_init()
 
         for (i = IPL_NONE; i <= IPL_HIGH; i++)  {
                 ppc_smask[i] = 0;
+#if 0
+	/* NOT YET */
                 if (i < IPL_SOFT)
                         ppc_smask[i] |= SI_TO_IRQBIT(SI_SOFT);
+#endif
                 if (i < IPL_SOFTCLOCK)
                         ppc_smask[i] |= SI_TO_IRQBIT(SI_SOFTCLOCK);
                 if (i < IPL_SOFTNET)
                         ppc_smask[i] |= SI_TO_IRQBIT(SI_SOFTNET);
                 if (i < IPL_SOFTTTY)
                         ppc_smask[i] |= SI_TO_IRQBIT(SI_SOFTTTY);
-#if 0
-                printf("smask[%d]: %x\n", i, ppc_smask[i])
-#endif
         }
 }
 
