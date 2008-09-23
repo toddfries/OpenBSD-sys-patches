@@ -214,7 +214,7 @@ scsibus*	at sdmmc?		# SCSI emulation
 ubt*	at uhub?			# USB Bluetooth
 
 # Bluetooth bus support
-bthub*	at sbt?
+#bthub*	at sbt?
 bthub*	at ubt?
 
 # Bluetooth HID support
