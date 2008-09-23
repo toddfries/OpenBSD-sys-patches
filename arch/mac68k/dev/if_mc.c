@@ -182,7 +182,6 @@ mcioctl(ifp, cmd, data)
 	int	s = splnet(), err = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
@@ -243,8 +242,9 @@ mcioctl(ifp, cmd, data)
 		}
 		break;
 	default:
-		err = EINVAL;
+		err = ether_ioctl(ifp, &sc->sc_ethercom, cmd, data);
 	}
+
 	splx(s);
 	return (err);
 }

@@ -700,7 +700,6 @@ niioctl(ifp, cmd, data)
 	int s = splnet(), error = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -759,9 +758,9 @@ niioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ec, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }

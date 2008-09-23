@@ -337,10 +337,6 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	u_int32_t flags;
 
 	switch (cmd) {
-	case SIOCSIFADDR:
-	case SIOCGIFADDR:
-		error = ether_ioctl(ifp, &ic->ic_ac, cmd, data);
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &ic->ic_media, cmd);
@@ -717,8 +713,8 @@ ieee80211_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ENETRESET;
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &ic->ic_ac, cmd, data);
 	}
+
 	return error;
 }

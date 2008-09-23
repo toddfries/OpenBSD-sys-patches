@@ -257,7 +257,6 @@ snioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int	s = splnet(), err = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
 		ifp->if_flags |= IFF_UP;
@@ -319,8 +318,9 @@ snioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 	default:
-		err = EINVAL;
+		err = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
 	splx(s);
 	return (err);
 }

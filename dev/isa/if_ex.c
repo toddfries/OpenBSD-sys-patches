@@ -744,11 +744,6 @@ ex_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(cmd) {
 	case SIOCSIFADDR:
 		DODEBUG(Start_End, printf("SIOCSIFADDR"););
@@ -792,13 +787,10 @@ ex_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->ifmedia, cmd);
 		break;
 	default:
-		DODEBUG(Start_End, printf("unknown"););
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
 	}
 
 	splx(s);
-
 	DODEBUG(Start_End, printf("\nex_ioctl: finish\n"););
 	return(error);
 }

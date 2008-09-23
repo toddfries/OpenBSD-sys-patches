@@ -579,12 +579,11 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->cdce_arpcom, command, data);
 		break;
 	}
 
 	splx(s);
-
 	return (error);
 }
 

@@ -456,13 +456,9 @@ tsec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	struct tsec_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)addr;
 	struct ifreq *ifr = (struct ifreq *)addr;
-	int error, s;
+	int error = 0, s;
 
 	s = splnet();
-
-	error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
-	if (error)
-		goto err;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -510,11 +506,10 @@ tsec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
 		break;
 	}
 
-err:
 	splx(s);
 	return (error);
 }

@@ -2046,11 +2046,6 @@ nge_ioctl(ifp, command, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFMTU:
 		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
@@ -2123,12 +2118,10 @@ nge_ioctl(ifp, command, data)
 		}
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return(error);
 }
 

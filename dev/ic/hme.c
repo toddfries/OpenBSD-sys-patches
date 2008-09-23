@@ -1212,13 +1212,7 @@ hme_ioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
@@ -1298,8 +1292,7 @@ hme_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	sc->sc_if_flags = ifp->if_flags;

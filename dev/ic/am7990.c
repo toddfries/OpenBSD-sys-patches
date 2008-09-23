@@ -843,13 +843,7 @@ am7990_ioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -924,8 +918,7 @@ am7990_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);

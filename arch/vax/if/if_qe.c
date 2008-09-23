@@ -636,7 +636,6 @@ qeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s = splnet(), error = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -695,9 +694,9 @@ qeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }

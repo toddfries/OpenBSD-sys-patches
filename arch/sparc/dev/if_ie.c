@@ -1954,7 +1954,6 @@ ieioctl(ifp, cmd, data)
 	s = splnet();
 
 	switch(cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -2022,8 +2021,9 @@ ieioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
 	splx(s);
 	return error;
 }

@@ -1408,8 +1408,7 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
 	}
 
 	splx(s);

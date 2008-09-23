@@ -2271,11 +2271,6 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2344,12 +2339,10 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			    &mii->mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

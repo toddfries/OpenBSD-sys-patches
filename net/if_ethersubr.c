@@ -172,7 +172,6 @@ ether_ioctl(ifp, arp, cmd, data)
 	int	error = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef NETATALK
@@ -183,7 +182,7 @@ ether_ioctl(ifp, arp, cmd, data)
 		}
 		break;
 	default:
-		break;
+		error = ENOTTY;
 	}
 
 	return error;
