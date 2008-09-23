@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.616 2008/08/26 12:17:10 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.621 2008/09/17 20:10:37 chl Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -38,6 +38,7 @@
 #include "bpfilter.h"
 #include "pflog.h"
 #include "pfsync.h"
+#include "pflow.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -78,6 +79,7 @@
 #include <dev/rndvar.h>
 #include <net/pfvar.h>
 #include <net/if_pflog.h>
+#include <net/if_pflow.h>
 
 #if NPFSYNC > 0
 #include <net/if_pfsync.h>
@@ -242,6 +244,8 @@ void			 pf_print_state_parts(struct pf_state *,
 			    struct pf_state_key *, struct pf_state_key *);
 int			 pf_addr_wrap_neq(struct pf_addr_wrap *,
 			    struct pf_addr_wrap *);
+int			 pf_compare_state_keys(struct pf_state_key *,
+			    struct pf_state_key *, struct pfi_kif *, u_int);
 struct pf_state		*pf_find_state(struct pfi_kif *,
 			    struct pf_state_key_cmp *, u_int, struct mbuf *);
 int			 pf_src_connlimit(struct pf_state **);
@@ -851,6 +855,37 @@ pf_find_state_byid(struct pf_state_cmp *key)
 	return (RB_FIND(pf_state_tree_id, &tree_id, (struct pf_state *)key));
 }
 
+/* XXX debug function, intended to be removed one day */
+int
+pf_compare_state_keys(struct pf_state_key *a, struct pf_state_key *b,
+    struct pfi_kif *kif, u_int dir)
+{
+	/* a (from hdr) and b (new) must be exact opposites of each other */
+	if (a->af == b->af && a->proto == b->proto &&
+	    PF_AEQ(&a->addr[0], &b->addr[1], a->af) &&
+	    PF_AEQ(&a->addr[1], &b->addr[0], a->af) &&
+	    a->port[0] == b->port[1] &&
+	    a->port[1] == b->port[0])
+		return (0);
+	else {
+		/* mismatch. must not happen. */
+		printf("pf: state key linking mismatch! dir=%s, "
+		    "if=%s, stored af=%u, a0: ",
+		    dir == PF_OUT ? "OUT" : "IN", kif->pfik_name, a->af);
+		pf_print_host(&a->addr[0], a->port[0], a->af);
+		printf(", a1: ");
+		pf_print_host(&a->addr[1], a->port[1], a->af);
+		printf(", proto=%u", a->proto);
+		printf(", found af=%u, a0: ", b->af);
+		pf_print_host(&b->addr[0], b->port[0], b->af);
+		printf(", a1: ");
+		pf_print_host(&b->addr[1], b->port[1], b->af);
+		printf(", proto=%u", b->proto);
+		printf(".\n");
+		return (-1);
+	}
+}
+
 struct pf_state *
 pf_find_state(struct pfi_kif *kif, struct pf_state_key_cmp *key, u_int dir,
     struct mbuf *m)
@@ -867,7 +902,9 @@ pf_find_state(struct pfi_kif *kif, struct pf_state_key_cmp *key, u_int dir,
 		if ((sk = RB_FIND(pf_state_tree, &pf_statetbl,
 		    (struct pf_state_key *)key)) == NULL)
 			return (NULL);
-		if (dir == PF_OUT && m->m_pkthdr.pf.statekey) {
+		if (dir == PF_OUT && m->m_pkthdr.pf.statekey &&
+		    pf_compare_state_keys(m->m_pkthdr.pf.statekey, sk,
+		    kif, dir) == 0) {
 			((struct pf_state_key *)
 			    m->m_pkthdr.pf.statekey)->reverse = sk;
 			sk->reverse = m->m_pkthdr.pf.statekey;
@@ -1055,6 +1092,10 @@ pf_unlink_state(struct pf_state *cur)
 		    TH_RST|TH_ACK, 0, 0, 0, 1, cur->tag, NULL, NULL);
 	}
 	RB_REMOVE(pf_state_tree_id, &tree_id, cur);
+#if NPFLOW
+	if (cur->state_flags & PFSTATE_PFLOW)
+		export_pflow(cur);
+#endif
 #if NPFSYNC
 	if (cur->creatorid == pf_status.hostid)
 		pfsync_delete_state(cur);
@@ -2995,7 +3036,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 	int			 match = 0;
 	int			 state_icmp = 0;
 	u_int16_t		 sport, dport;
-	u_int16_t		 nport = 0, bport = 0;
 	u_int16_t		 bproto_sum = 0, bip_sum;
 	u_int8_t		 icmptype = 0, icmpcode = 0;
 
@@ -3056,7 +3096,6 @@ pf_test_rule(struct pf_rule **rm, struct pf_state **sm, int direction,
 
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_FILTER].active.ptr);
 
-	bport = nport = sport;
 	/* check packet for BINAT/NAT/RDR */
 	if ((nr = pf_get_translation(pd, m, off, direction, kif, &nsn,
 	    &skw, &sks, &sk, &nk, saddr, daddr, sport, dport)) != NULL) {
@@ -3418,6 +3457,8 @@ pf_create_state(struct pf_rule *r, struct pf_rule *nr, struct pf_rule *a,
 		s->state_flags |= PFSTATE_ALLOWOPTS;
 	if (r->rule_flag & PFRULE_STATESLOPPY)
 		s->state_flags |= PFSTATE_SLOPPY;
+	if (r->rule_flag & PFRULE_PFLOW)
+		s->state_flags |= PFSTATE_PFLOW;
 	s->log = r->log & PF_LOG_ALL;
 	if (nr != NULL)
 		s->log |= nr->log & PF_LOG_ALL;
@@ -5361,7 +5402,6 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	struct ifnet		*ifp = NULL;
 	struct pf_addr		 naddr;
 	struct pf_src_node	*sn = NULL;
-	int			 error = 0;
 
 	if (m == NULL || *m == NULL || r == NULL ||
 	    (dir != PF_IN && dir != PF_OUT) || oifp == NULL)
@@ -5444,7 +5484,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	if (IN6_IS_SCOPE_EMBED(&dst->sin6_addr))
 		dst->sin6_addr.s6_addr16[1] = htons(ifp->if_index);
 	if ((u_long)m0->m_pkthdr.len <= ifp->if_mtu) {
-		error = nd6_output(ifp, ifp, m0, dst, NULL);
+		nd6_output(ifp, ifp, m0, dst, NULL);
 	} else {
 		in6_ifstat_inc(ifp, ifs6_in_toobig);
 		if (r->rt != PF_DUPTO)
@@ -5782,10 +5822,8 @@ done:
 	if ((s && s->tag) || r->rtableid)
 		pf_tag_packet(m, s ? s->tag : 0, r->rtableid);
 
-#if 0
 	if (dir == PF_IN && s && s->key[PF_SK_STACK])
 		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
-#endif
 
 #ifdef ALTQ
 	if (action == PF_PASS && r->qid) {
@@ -6163,10 +6201,8 @@ done:
 	if ((s && s->tag) || r->rtableid)
 		pf_tag_packet(m, s ? s->tag : 0, r->rtableid);
 
-#if 0
 	if (dir == PF_IN && s && s->key[PF_SK_STACK])
 		m->m_pkthdr.pf.statekey = s->key[PF_SK_STACK];
-#endif
 
 #ifdef ALTQ
 	if (action == PF_PASS && r->qid) {

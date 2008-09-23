@@ -126,17 +126,19 @@ typedef struct drm_i915_private {
 	wait_queue_head_t irq_queue;
 	atomic_t irq_received;
 	atomic_t irq_emitted;
+	/* Protects user_irq_refcount and irq_mask reg */
+	DRM_SPINTYPE user_irq_lock;
+	/* Refcount for user irq, only enabled when needed */
+	int user_irq_refcount;
+	/* Cached value of IMR to avoid reads in updating the bitfield */
+	u_int32_t irq_mask_reg;
+	int irq_enabled;
 
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
 	struct mem_block *agp_heap;
 	unsigned int sr01, adpa, ppcr, dvob, dvoc, lvds;
 	int vblank_pipe;
-	DRM_SPINTYPE user_irq_lock;
-	int user_irq_refcount;
-	int fence_irq_on;
-	uint32_t irq_enable_reg;
-	int irq_enabled;
 
 	DRM_SPINTYPE swaps_lock;
 	drm_i915_vbl_swap_t vbl_swaps;
@@ -560,6 +562,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define PRB1_HEAD	0x02044 /* 915+ only */
 #define PRB1_START	0x02048 /* 915+ only */
 #define PRB1_CTL	0x0204c /* 915+ only */
+#define ACTHD_I965	0x02074
 #define HWS_PGA		0x02080
 #define IPEIR		0x02088
 #define NOPID		0x02094
@@ -590,6 +593,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define EMR		0x020b4
 #define ESR		0x020b8
 #define INSTPM	        0x020c0
+#define ACTHD		0x020c8
 #define FW_BLC		0x020d8
 #define FW_BLC_SELF	0x020e0 /* 915+ only */
 #define MI_ARB_STATE	0x020e4 /* 915+ only */

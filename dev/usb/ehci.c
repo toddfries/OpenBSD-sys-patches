@@ -1,13 +1,13 @@
-/*	$OpenBSD: ehci.c,v 1.88 2008/08/18 04:28:18 kevlo Exp $ */
+/*	$OpenBSD: ehci.c,v 1.92 2008/09/15 13:44:09 mglocker Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
- * Copyright (c) 2004,2005 The NetBSD Foundation, Inc.
- * Copyright (c) 2008 Jeremy Morse <jeremy.morse@gmail.com>
+ * Copyright (c) 2004-2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Lennart Augustsson (lennart@augustsson.net) and by Charles M. Hannum.
+ * by Lennart Augustsson (lennart@augustsson.net), Charles M. Hannum and
+ * Jeremy Morse (jeremy.morse@gmail.com).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,16 +42,12 @@
 
 /*
  * TODO:
- * 1) The meaty part to implement is isochronous transactions. They are
- *    needed for USB 1 devices below USB 2.0 hubs. They are quite complicated
- *    since they need to be able to do "transaction translation", ie,
- *    converting to/from USB 2 and USB 1.
- *    So the hub driver needs to handle and schedule these things, to
- *    assign place in frame where different devices get to go. See chapter
+ * 1) The hub driver needs to handle and schedule the transaction translator,
+ *    to assign place in frame where different devices get to go. See chapter
  *    on hubs in USB 2.0 for details.
  *
  * 2) Command failures are not recovered correctly.
-*/
+ */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -388,10 +384,17 @@ ehci_init(ehci_softc_t *sc)
 
 	/* frame list size at default, read back what we got and use that */
 	switch (EHCI_CMD_FLS(EOREAD4(sc, EHCI_USBCMD))) {
-	case 0: sc->sc_flsize = 1024; break;
-	case 1: sc->sc_flsize = 512; break;
-	case 2: sc->sc_flsize = 256; break;
-	case 3: return (USBD_IOERROR);
+	case 0:
+		sc->sc_flsize = 1024;
+		break;
+	case 1:
+		sc->sc_flsize = 512;
+		break;
+	case 2:
+		sc->sc_flsize = 256;
+		break;
+	case 3:
+		return (USBD_IOERROR);
 	}
 	err = usb_allocmem(&sc->sc_bus, sc->sc_flsize * sizeof(ehci_link_t),
 	    EHCI_FLALIGN_ALIGN, &sc->sc_fldma);
@@ -400,9 +403,8 @@ ehci_init(ehci_softc_t *sc)
 	DPRINTF(("%s: flsize=%d\n", sc->sc_bus.bdev.dv_xname,sc->sc_flsize));
 	sc->sc_flist = KERNADDR(&sc->sc_fldma, 0);
 
-	for (i = 0; i < sc->sc_flsize; i++) {
+	for (i = 0; i < sc->sc_flsize; i++)
 		sc->sc_flist[i] = EHCI_NULL;
-	}
 
 	EOWRITE4(sc, EHCI_PERIODICLISTBASE, DMAADDR(&sc->sc_fldma, 0));
 
@@ -665,7 +667,7 @@ ehci_softintr(void *v)
 	/* Schedule a callout to catch any dropped transactions. */
 	if ((sc->sc_flags & EHCIF_DROPPED_INTR_WORKAROUND) &&
 	    !LIST_EMPTY(&sc->sc_intrhead)) {
-		timeout_add(&sc->sc_tmo_intrlist, hz);
+		timeout_add_sec(&sc->sc_tmo_intrlist, 1);
 	}
 
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
@@ -856,10 +858,18 @@ ehci_idone(struct ehci_xfer *ex)
 		case 0:
 			panic("ehci: isoc xfer suddenly has 0 bInterval, "
 			    "invalid");
-		case 1: uframes = 1; break;
-		case 2: uframes = 2; break;
-		case 3: uframes = 4; break;
-		default: uframes = 8; break;
+		case 1:
+			uframes = 1;
+			break;
+		case 2:
+			uframes = 2;
+			break;
+		case 3:
+			uframes = 4;
+			break;
+		default:
+			uframes = 8;
+			break;
 		}
 
 		for (itd = ex->itdstart; itd != NULL; itd = itd->xfer_next) {
@@ -1321,10 +1331,18 @@ ehci_dump_link(ehci_link_t link, int type)
 		printf("<");
 		if (type) {
 			switch (EHCI_LINK_TYPE(link)) {
-			case EHCI_LINK_ITD: printf("ITD"); break;
-			case EHCI_LINK_QH: printf("QH"); break;
-			case EHCI_LINK_SITD: printf("SITD"); break;
-			case EHCI_LINK_FSTN: printf("FSTN"); break;
+			case EHCI_LINK_ITD:
+				printf("ITD");
+				break;
+			case EHCI_LINK_QH:
+				printf("QH");
+				break;
+			case EHCI_LINK_SITD:
+				printf("SITD");
+				break;
+			case EHCI_LINK_FSTN:
+				printf("FSTN");
+				break;
 			}
 		}
 		printf(">");
@@ -1498,14 +1516,23 @@ ehci_open(usbd_pipe_handle pipe)
 
 	/* XXX All this stuff is only valid for async. */
 	switch (dev->speed) {
-	case USB_SPEED_LOW:  speed = EHCI_QH_SPEED_LOW;  break;
-	case USB_SPEED_FULL: speed = EHCI_QH_SPEED_FULL; break;
-	case USB_SPEED_HIGH: speed = EHCI_QH_SPEED_HIGH; break;
-	default: panic("ehci_open: bad device speed %d", dev->speed);
+	case USB_SPEED_LOW:
+		speed = EHCI_QH_SPEED_LOW;
+		break;
+	case USB_SPEED_FULL:
+		speed = EHCI_QH_SPEED_FULL;
+		break;
+	case USB_SPEED_HIGH:
+		speed = EHCI_QH_SPEED_HIGH;
+		break;
+	default:
+		panic("ehci_open: bad device speed %d", dev->speed);
 	}
 	if (speed != EHCI_QH_SPEED_HIGH && xfertype == UE_ISOCHRONOUS) {
-		printf("%s: *** Error: opening low/full speed isoc device on"
-		    "ehci, this does not work yet. Feel free to implement\n",
+		printf("%s: Error opening low/full speed isoc endpoint.\n"
+		    "A low/full speed device is attached to a USB2 hub, and "
+		    "transaction translations are not yet supported.\n"
+		    "Reattach the device to the root hub instead.\n",
 		    sc->sc_bus.bdev.dv_xname);
 		DPRINTFN(1,("ehci_open: hshubaddr=%d hshubport=%d\n",
 		    hshubaddr, hshubport));
@@ -3767,6 +3794,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 
 			if (trans_count >= xfer->nframes) { /*Set IOC*/
 				itd->itd.itd_ctl[j] |= htole32(EHCI_ITD_IOC);
+				break;
 			}
 		}       
 

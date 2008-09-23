@@ -72,7 +72,7 @@ drm_realloc(void *oldpt, size_t oldsize, size_t size, int area)
 	if (pt == NULL)
 		return NULL;
 	if (oldpt && oldsize) {
-		memcpy(pt, oldpt, oldsize);
+		memcpy(pt, oldpt, min(oldsize, size));
 		free(oldpt, M_DRM);
 	}
 	return pt;
@@ -136,7 +136,10 @@ done:
 void
 drm_ioremapfree(drm_local_map_t *map)
 {
-	if (map != NULL && map->bsr != NULL)
+	if (map == NULL)
+		return;
+
+	if (map->bsr != NULL)
 		vga_pci_bar_unmap(map->bsr);
 	else
 		bus_space_unmap(map->bst, map->bsh, map->size);

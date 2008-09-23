@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.72 2008/08/27 09:05:04 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.77 2008/09/03 19:53:37 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -56,6 +56,9 @@
 #include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#ifdef INET6
+#include <netinet/ip6.h>
+#endif
 #endif
 
 #if NVLAN > 0
@@ -238,6 +241,11 @@ ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
 			    ieee80211_chan2mode(ic, ni->ni_chan)]);
 	}
 
+#ifndef IEEE80211_STA_ONLY
+	if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+	    ieee80211_pwrsave(ic, m, ni) != 0)
+		return 0;
+#endif
 	IF_ENQUEUE(&ic->ic_mgtq, m);
 	ifp->if_timer = 1;
 	(*ifp->if_start)(ifp);
@@ -272,17 +280,10 @@ ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
  * 11A		15	1023
  * 11B  	31	1023
  * 11G		15*	1023	(*) aCWmin(1)
- * FH		15	1023
  * Turbo A/G	7	1023	(Atheros proprietary mode)
  */
 static const struct ieee80211_edca_ac_params
     ieee80211_edca_table[IEEE80211_MODE_MAX][EDCA_NUM_AC] = {
-	[IEEE80211_MODE_FH] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4, 10, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 2,   0 },
-		[EDCA_AC_VO] = { 2,  3, 2,   0 }
-	},
 	[IEEE80211_MODE_11B] = {
 		[EDCA_AC_BK] = { 5, 10, 7,   0 },
 		[EDCA_AC_BE] = { 5, 10, 3,   0 },
@@ -312,12 +313,6 @@ static const struct ieee80211_edca_ac_params
 #ifndef IEEE80211_STA_ONLY
 static const struct ieee80211_edca_ac_params
     ieee80211_qap_edca_table[IEEE80211_MODE_MAX][EDCA_NUM_AC] = {
-	[IEEE80211_MODE_FH] = {
-		[EDCA_AC_BK] = { 4, 10, 7,   0 },
-		[EDCA_AC_BE] = { 4,  6, 3,   0 },
-		[EDCA_AC_VI] = { 3,  4, 1,   0 },
-		[EDCA_AC_VO] = { 2,  3, 1,   0 }
-	},
 	[IEEE80211_MODE_11B] = {
 		[EDCA_AC_BK] = { 5, 10, 7,   0 },
 		[EDCA_AC_BE] = { 5,  7, 3,   0 },
@@ -352,7 +347,7 @@ static const struct ieee80211_edca_ac_params
 enum ieee80211_edca_ac
 ieee80211_up_to_ac(struct ieee80211com *ic, int up)
 {
-	/* IEEE Std 802.11e-2005, table 20i */
+	/* see Table 9-1 */
 	static const enum ieee80211_edca_ac up_to_ac[] = {
 		EDCA_AC_BE,	/* BE */
 		EDCA_AC_BK,	/* BK */
@@ -373,7 +368,7 @@ ieee80211_up_to_ac(struct ieee80211com *ic, int up)
 #endif
 	/*
 	 * We do not support the admission control procedure defined in
-	 * IEEE Std 802.11e-2005 section 9.9.3.1.2.  The spec says that
+	 * IEEE Std 802.11-2007 section 9.9.3.1.2.  The spec says that
 	 * non-AP QSTAs that don't support this procedure shall use EDCA
 	 * parameters of a lower priority AC that does not require
 	 * admission control.
@@ -406,11 +401,12 @@ int
 ieee80211_classify(struct ieee80211com *ic, struct mbuf *m)
 {
 #ifdef INET
-	const struct ether_header *eh;
+	struct ether_header *eh;
+	u_int8_t ds_field;
 #endif
 #if NVLAN > 0
 	if ((m->m_flags & M_PROTO1) == M_PROTO1 && m->m_pkthdr.rcvif != NULL) {
-		const struct ifvlan *ifv = m->m_pkthdr.rcvif->if_softc;
+		struct ifvlan *ifv = m->m_pkthdr.rcvif->if_softc;
 
 		/* use VLAN 802.1D user-priority */
 		if (ifv->ifv_prio <= 7)
@@ -420,29 +416,46 @@ ieee80211_classify(struct ieee80211com *ic, struct mbuf *m)
 #ifdef INET
 	eh = mtod(m, struct ether_header *);
 	if (eh->ether_type == htons(ETHERTYPE_IP)) {
-		const struct ip *ip = (const struct ip *)(eh + 1);
-		/*
-		 * Map Differentiated Services Codepoint field (see RFC2474).
-		 * Preserves backward compatibility with IP Precedence field.
-		 */
-		switch (ip->ip_tos & 0xfc) {
-		case IPTOS_PREC_PRIORITY:
-			return 2;
-		case IPTOS_PREC_IMMEDIATE:
-			return 1;
-		case IPTOS_PREC_FLASH:
-			return 3;
-		case IPTOS_PREC_FLASHOVERRIDE:
-			return 4;
-		case IPTOS_PREC_CRITIC_ECP:
-			return 5;
-		case IPTOS_PREC_INTERNETCONTROL:
-			return 6;
-		case IPTOS_PREC_NETCONTROL:
-			return 7;
-		}
+		struct ip *ip = (struct ip *)&eh[1];
+		if (ip->ip_v != 4)
+			return 0;
+		ds_field = ip->ip_tos;
 	}
-#endif
+#ifdef INET6
+	else if (eh->ether_type == htons(ETHERTYPE_IPV6)) {
+		struct ip6_hdr *ip6 = (struct ip6_hdr *)&eh[1];
+		u_int32_t flowlabel;
+
+		flowlabel = ntohl(ip6->ip6_flow);
+		if ((flowlabel >> 28) != 6)
+			return 0;
+		ds_field = (flowlabel >> 20) & 0xff;
+	}
+#endif	/* INET6 */
+	else	/* neither IPv4 nor IPv6 */
+		return 0;
+
+	/*
+	 * Map Differentiated Services Codepoint field (see RFC2474).
+	 * Preserves backward compatibility with IP Precedence field.
+	 */
+	switch (ds_field & 0xfc) {
+	case IPTOS_PREC_PRIORITY:
+		return 2;
+	case IPTOS_PREC_IMMEDIATE:
+		return 1;
+	case IPTOS_PREC_FLASH:
+		return 3;
+	case IPTOS_PREC_FLASHOVERRIDE:
+		return 4;
+	case IPTOS_PREC_CRITIC_ECP:
+		return 5;
+	case IPTOS_PREC_INTERNETCONTROL:
+		return 6;
+	case IPTOS_PREC_NETCONTROL:
+		return 7;
+	}
+#endif	/* INET */
 	return 0;	/* default to Best-Effort */
 }
 
@@ -577,8 +590,12 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		struct ieee80211_qosframe *qwh =
 		    (struct ieee80211_qosframe *)wh;
 		qwh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS;
-		qwh->i_qos[0] = tid & 0xf;
-		qwh->i_qos[1] = 0;	/* no TXOP requested */
+		qwh->i_qos[0] = tid;
+		if (ic->ic_tid_noack & (1 << tid)) {
+			qwh->i_qos[0] |= IEEE80211_QOS_ACK_POLICY_NOACK <<
+			    IEEE80211_QOS_ACK_POLICY_SHIFT;
+		}
+		qwh->i_qos[1] = 0;	/* unused/set by hardware */
 		*(u_int16_t *)&qwh->i_seq[0] =
 		    htole16(ni->ni_qos_txseqs[tid] << IEEE80211_SEQ_SEQ_SHIFT);
 		ni->ni_qos_txseqs[tid]++;
@@ -619,6 +636,13 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 	     (ni->ni_flags & IEEE80211_NODE_TXPROT)))
 		wh->i_fc[1] |= IEEE80211_FC1_PROTECTED;
 
+#ifndef IEEE80211_STA_ONLY
+	if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+	    ieee80211_pwrsave(ic, m, ni) != 0) {
+		*pni = NULL;
+		return NULL;
+	}
+#endif
 	*pni = ni;
 	return m;
 bad:
@@ -691,24 +715,6 @@ ieee80211_add_rates(u_int8_t *frm, const struct ieee80211_rateset *rs)
 
 #ifndef IEEE80211_STA_ONLY
 /*
- * Add a FH Parameter Set element to a frame (see 7.3.2.3).
- */
-u_int8_t *
-ieee80211_add_fh_params(u_int8_t *frm, struct ieee80211com *ic,
-    const struct ieee80211_node *ni)
-{
-	u_int chan = ieee80211_chan2ieee(ic, ni->ni_chan);
-
-	*frm++ = IEEE80211_ELEMID_FHPARMS;
-	*frm++ = 5;
-	LE_WRITE_2(frm, ni->ni_fhdwell); frm += 2;
-	*frm++ = IEEE80211_FH_CHANSET(chan);
-	*frm++ = IEEE80211_FH_CHANPAT(chan);
-	*frm++ = ni->ni_fhindex;
-	return frm;
-}
-
-/*
  * Add a DS Parameter Set element to a frame (see 7.3.2.4).
  */
 u_int8_t *
@@ -749,7 +755,7 @@ ieee80211_add_tim(u_int8_t *frm, struct ieee80211com *ic)
 	/* Bitmap Control */
 	*frm = offset;
 	/* set broadcast/multicast indication bit if necessary */
-	if (ic->ic_dtim_count == 0 && ic->ic_tim_mcast)
+	if (ic->ic_dtim_count == 0 && ic->ic_tim_mcast_pending)
 		*frm |= 0x01;
 	frm++;
 
@@ -1068,7 +1074,6 @@ ieee80211_get_probe_req(struct ieee80211com *ic, struct ieee80211_node *ni)
  * [2]    Capability
  * [tlv]  Service Set Identifier (SSID)
  * [tlv]  Supported rates
- * [tlv*] Frequency-Hopping (FH) Parameter Set
  * [tlv*] DS Parameter Set (802.11g)
  * [tlv]  ERP Information (802.11g)
  * [tlv]  Extended Supported Rates (802.11g)
@@ -1086,7 +1091,7 @@ ieee80211_get_probe_resp(struct ieee80211com *ic, struct ieee80211_node *ni)
 	    8 + 2 + 2 +
 	    2 + ni->ni_esslen +
 	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    2 + ((ic->ic_phytype == IEEE80211_T_FH) ? 5 : 1) +
+	    2 + 1 +
 	    ((ic->ic_opmode == IEEE80211_M_IBSS) ? 2 + 2 : 0) +
 	    ((ic->ic_curmode == IEEE80211_MODE_11G) ? 2 + 1 : 0) +
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
@@ -1108,10 +1113,7 @@ ieee80211_get_probe_resp(struct ieee80211com *ic, struct ieee80211_node *ni)
 	frm = ieee80211_add_ssid(frm, ic->ic_bss->ni_essid,
 	    ic->ic_bss->ni_esslen);
 	frm = ieee80211_add_rates(frm, rs);
-	if (ic->ic_phytype == IEEE80211_T_FH)
-		frm = ieee80211_add_fh_params(frm, ic, ni);
-	else
-		frm = ieee80211_add_ds_params(frm, ic, ni);
+	frm = ieee80211_add_ds_params(frm, ic, ni);
 	if (ic->ic_opmode == IEEE80211_M_IBSS)
 		frm = ieee80211_add_ibss_params(frm, ni);
 	if (ic->ic_curmode == IEEE80211_MODE_11G)
@@ -1194,7 +1196,7 @@ ieee80211_get_deauth(struct ieee80211com *ic, struct ieee80211_node *ni,
  */
 struct mbuf *
 ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
-    int reassoc)
+    int type)
 {
 	const struct ieee80211_rateset *rs = &ni->ni_rates;
 	struct mbuf *m;
@@ -1203,7 +1205,7 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
 	    2 + 2 +
-	    ((reassoc == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) ?
+	    ((type == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) ?
 		IEEE80211_ADDR_LEN : 0) +
 	    2 + ni->ni_esslen +
 	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
@@ -1231,7 +1233,7 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
 	LE_WRITE_2(frm, capinfo); frm += 2;
 	LE_WRITE_2(frm, ic->ic_lintval); frm += 2;
-	if (reassoc) {
+	if (type == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) {
 		IEEE80211_ADDR_COPY(frm, ic->ic_bss->ni_bssid);
 		frm += IEEE80211_ADDR_LEN;
 	}
@@ -1481,7 +1483,6 @@ ieee80211_get_cts_to_self(struct ieee80211com *ic, u_int16_t dur)
  * [2]    Capability
  * [tlv]  Service Set Identifier (SSID)
  * [tlv]  Supported rates
- * [tlv*] Frequency-Hopping (FH) Parameter Set
  * [tlv*] DS Parameter Set (802.11g)
  * [tlv*] IBSS Parameter Set
  * [tlv]  Traffic Indication Map (TIM)
@@ -1502,13 +1503,13 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	    8 + 2 + 2 +
 	    2 + ((ic->ic_flags & IEEE80211_F_HIDENWID) ? 0 : ni->ni_esslen) +
 	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
-	    2 + ((ic->ic_phytype == IEEE80211_T_FH) ? 5 : 1) +
+	    2 + 1 +
 	    2 + ((ic->ic_opmode == IEEE80211_M_IBSS) ? 2 : 254) +
 	    ((ic->ic_curmode == IEEE80211_MODE_11G) ? 2 + 1 : 0) +
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
 		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	     (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ?
+	      (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ?
 		2 + IEEE80211_RSNIE_MAXLEN : 0) +
 	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 18 : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
@@ -1539,10 +1540,7 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	else
 		frm = ieee80211_add_ssid(frm, ni->ni_essid, ni->ni_esslen);
 	frm = ieee80211_add_rates(frm, rs);
-	if (ic->ic_phytype == IEEE80211_T_FH)
-		frm = ieee80211_add_fh_params(frm, ic, ni);
-	else
-		frm = ieee80211_add_ds_params(frm, ic, ni);
+	frm = ieee80211_add_ds_params(frm, ic, ni);
 	if (ic->ic_opmode == IEEE80211_M_IBSS)
 		frm = ieee80211_add_ibss_params(frm, ni);
 	else
@@ -1566,31 +1564,56 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	return m;
 }
 
-void
-ieee80211_pwrsave(struct ieee80211com *ic, struct ieee80211_node *ni,
-    struct mbuf *m)
+/*
+ * Check if an outgoing MSDU or management frame should be buffered into
+ * the AP for power management.  Return 1 if the frame was buffered into
+ * the AP, or 0 if the frame shall be transmitted immediately.
+ */
+int
+ieee80211_pwrsave(struct ieee80211com *ic, struct mbuf *m,
+    struct ieee80211_node *ni)
 {
-	/* store the new packet on our queue, changing the TIM if necessary */
-	if (IF_IS_EMPTY(&ni->ni_savedq))
-		(*ic->ic_set_tim)(ic, ni->ni_associd, 1);
+	const struct ieee80211_frame *wh;
 
-	if (ni->ni_savedq.ifq_len >= IEEE80211_PS_MAX_QUEUE) {
-		IF_DROP(&ni->ni_savedq);
-		m_freem(m);
-		if (ic->ic_if.if_flags & IFF_DEBUG)
-			printf("%s: station %s power save queue overflow"
-			    " of size %d drops %d\n",
-			    ic->ic_if.if_xname,
-			    ether_sprintf(ni->ni_macaddr),
-			    IEEE80211_PS_MAX_QUEUE,
-			    ni->ni_savedq.ifq_drops);
+	KASSERT(ic->ic_opmode == IEEE80211_M_HOSTAP);
+	if (!(ic->ic_caps & IEEE80211_C_APPMGT))
+		return 0;
+
+	wh = mtod(m, struct ieee80211_frame *);
+	if (IEEE80211_IS_MULTICAST(wh->i_addr1)) {
+		/*
+		 * Buffer group addressed MSDUs with the Order bit clear
+		 * if any associated STAs are in PS mode.
+		 */
+		if ((wh->i_fc[1] & IEEE80211_FC1_ORDER) ||
+		    ic->ic_pssta == 0)
+			return 0;
+		ic->ic_tim_mcast_pending = 1;
 	} else {
 		/*
-		 * Similar to ieee80211_mgmt_output, store the node in
-		 * the rcvif field.
+		 * Buffer MSDUs, A-MSDUs or management frames destined for
+		 * PS STAs.
 		 */
+		if (ni->ni_pwrsave == IEEE80211_PS_AWAKE ||
+		    (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+		    IEEE80211_FC0_TYPE_CTL)
+			return 0;
+		if (IF_IS_EMPTY(&ni->ni_savedq))
+			(*ic->ic_set_tim)(ic, ni->ni_associd, 1);
+	}
+	/* NB: ni == ic->ic_bss for broadcast/multicast */
+	if (IF_QFULL(&ni->ni_savedq)) {
+		/* XXX should we drop the oldest instead? */
+		IF_DROP(&ni->ni_savedq);
+		m_freem(m);
+	} else {
 		IF_ENQUEUE(&ni->ni_savedq, m);
+		/*
+		 * Similar to ieee80211_mgmt_output, store the node in the
+		 * rcvif field.
+		 */
 		m->m_pkthdr.rcvif = (void *)ni;
 	}
+	return 1;
 }
 #endif	/* IEEE80211_STA_ONLY */
