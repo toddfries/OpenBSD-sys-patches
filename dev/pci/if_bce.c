@@ -440,11 +440,6 @@ bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->bce_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -498,8 +493,7 @@ bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->bce_mii.mii_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->bce_ac, cmd, data);
 	}
 
 	if (error == 0) {

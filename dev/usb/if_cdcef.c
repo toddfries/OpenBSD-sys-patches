@@ -518,12 +518,10 @@ cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

@@ -1181,11 +1181,6 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
@@ -1234,8 +1229,7 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -1246,7 +1240,6 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	splx(s);
-
 	return (error);
 }
 

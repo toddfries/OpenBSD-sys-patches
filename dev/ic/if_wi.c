@@ -1574,11 +1574,6 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	DPRINTF (WID_IOCTL, ("wi_ioctl: command %lu data %p\n",
 	    command, data));
 
-	if ((error = ether_ioctl(ifp, &sc->sc_ic.ic_ac, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2053,14 +2048,14 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = wihap_ioctl(sc, command, data);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ic.ic_ac, command, data);
 	}
 
 	if (wreq)
 		free(wreq, M_DEVBUF);
 	if (nwidp)
 		free(nwidp, M_DEVBUF);
+
 	splx(s);
 	return(error);
 }

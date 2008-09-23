@@ -438,11 +438,7 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int			 error = 0, s;
 
 	s = splnet();
-	if (tp->tun_flags & TUN_LAYER2)
-		if ((error = ether_ioctl(ifp, &tp->arpcom, cmd, data)) > 0) {
-			splx(s);
-			return (error);
-		}
+
 	switch (cmd) {
 	case SIOCSIFADDR:
 		tuninit(tp);
@@ -515,8 +511,9 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
 		break;
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &tp->arpcom, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }

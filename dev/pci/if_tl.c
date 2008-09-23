@@ -1788,11 +1788,6 @@ int tl_ioctl(ifp, command, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1854,12 +1849,10 @@ int tl_ioctl(ifp, command, data)
 			    &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return(error);
 }
 

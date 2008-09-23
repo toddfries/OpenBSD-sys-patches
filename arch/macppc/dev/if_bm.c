@@ -753,7 +753,6 @@ bmac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -827,7 +826,7 @@ bmac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
 	}
 
 	splx(s);

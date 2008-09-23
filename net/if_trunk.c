@@ -632,9 +632,6 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &tr->tr_ac, cmd, data)) > 0)
-		goto out;
-
 	bzero(&rpbuf, sizeof(rpbuf));
 
 	switch (cmd) {
@@ -767,8 +764,7 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ENETRESET;
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &tr->tr_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {

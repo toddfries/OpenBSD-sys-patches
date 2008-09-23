@@ -1273,12 +1273,10 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

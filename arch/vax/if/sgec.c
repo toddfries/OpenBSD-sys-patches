@@ -630,7 +630,6 @@ zeioctl(ifp, cmd, data)
 	int s = splnet(), error = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -696,9 +695,9 @@ zeioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }
