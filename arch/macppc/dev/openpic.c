@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.48 2008/09/16 04:20:42 drahn Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.50 2008/09/19 01:49:54 drahn Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -102,6 +102,9 @@ int	openpic_big_endian;
 intr_send_ipi_t openpic_send_ipi;
 #endif
 
+u_int openpic_read(int reg);
+void openpic_write(int reg, u_int val);
+
 struct openpic_softc {
 	struct device sc_dev;
 };
@@ -122,18 +125,19 @@ struct cfdriver openpic_cd = {
 	NULL, "openpic", DV_DULL
 };
 
-static inline u_int
+u_int
 openpic_read(int reg)
 {
 	char *addr = (void *)(openpic_base + reg);
 
+	asm volatile("eieio");
 	if (openpic_big_endian)
 		return in32(addr);
 	else
 		return in32rb(addr);
 }
 
-static inline void
+void
 openpic_write(int reg, u_int val)
 {
 	char *addr = (void *)(openpic_base + reg);
@@ -142,6 +146,7 @@ openpic_write(int reg, u_int val)
 		out32(addr, val);
 	else
 		out32rb(addr, val);
+	asm volatile("eieio");
 }
 
 static inline int
@@ -154,7 +159,6 @@ static inline void
 openpic_eoi(int cpu)
 {
 	openpic_write(OPENPIC_EOI(cpu), 0);
-	openpic_read(OPENPIC_EOI(cpu));
 }
 
 int
@@ -457,7 +461,7 @@ openpic_do_pending_int(int pcpl)
 
 	do {
 		loopcount ++;
-		if (loopcount > 5)
+		if (loopcount > 50)
 			printf("do_pending looping %d pcpl %x %x\n", loopcount,
 			    pcpl, ci->ci_cpl);
 		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
@@ -621,7 +625,9 @@ openpic_ext_intr()
  		}
 		if (spurious) {
 			openpic_spurious.ec_count++;
+#ifdef OPENPIC_NOISY
 			printf("spurious intr %d\n", irq);
+#endif
 		}
 
 		uvmexp.intrs++;
@@ -739,6 +745,8 @@ openpic_prog_button (void *arg)
 void
 openpic_ipi_ddb()
 {
+#ifdef OPENPIC_NOISY
 	printf("ipi_ddb() called\n");
+#endif
 	Debugger();
 }

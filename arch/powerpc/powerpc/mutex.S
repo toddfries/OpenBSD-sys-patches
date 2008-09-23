@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.S,v 1.3 2007/05/31 23:50:25 drahn Exp $	*/
+/*	$OpenBSD: mutex.S,v 1.4 2008/09/18 03:56:25 drahn Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn

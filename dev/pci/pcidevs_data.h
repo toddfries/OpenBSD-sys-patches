@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1413 2008/09/17 05:54:48 brad Exp 
+ *	OpenBSD: pcidevs,v 1.1417 2008/09/22 20:56:39 brad Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -7296,6 +7296,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "82801IR LPC",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801IEM_LPC,
+	    "82801IEM LPC",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801IB_LPC,
 	    "82801IB LPC",
 	},
@@ -7322,6 +7326,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801I_SATA_4,
 	    "82801I SATA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801I_AHCI_3,
+	    "82801I AHCI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801I_RAID,
+	    "82801I RAID",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801I_SATA_5,
@@ -7704,6 +7716,62 @@ static const struct pci_known_product pci_known_products[] = {
 	    "GME965 KT",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_HB,
+	    "GM45 Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,
+	    "GM45 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_2,
+	    "GM45 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_HECI_1,
+	    "GM45 HECI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_HECI_2,
+	    "GM45 HECI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_HB,
+	    "Q45 Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_1,
+	    "Q45 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_2,
+	    "Q45 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_HB,
+	    "G45 Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,
+	    "G45 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_2,
+	    "G45 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_HB,
+	    "G41 Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,
+	    "G41 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_2,
+	    "G41 Video",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_RCU32,
 	    "RCU32 I2O RAID",
 	},
@@ -7854,6 +7922,94 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_IOAT_CNB,
 	    "I/OAT CNB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JIR_LPC,
+	    "82801JIR LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JIB_LPC,
+	    "82801JIB LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_SATA_1,
+	    "82801JI SATA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_AHCI,
+	    "82801JI AHCI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_RAID,
+	    "82801JI RAID",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_SATA_2,
+	    "82801JI SATA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_SMB,
+	    "82801JI SMBus",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_UHCI_1,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_UHCI_2,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_UHCI_3,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_UHCI_4,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_UHCI_5,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_UHCI_6,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_EHCI_1,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_EHCI_2,
+	    "82801JI USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_HDA,
+	    "82801JI HD Audio",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_PCIE_1,
+	    "82801JI PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_PCIE_2,
+	    "82801JI PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_PCIE_3,
+	    "82801JI PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_PCIE_4,
+	    "82801JI PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_PCIE_5,
+	    "82801JI PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_PCIE_6,
+	    "82801JI PCIE",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_HB,
@@ -15564,6 +15720,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Linksys EtherPCI",
 	},
 	{
+	    PCI_VENDOR_XENSOURCE, PCI_PRODUCT_XENSOURCE_PLATFORMDEV,
+	    "Platform Device",
+	},
+	{
 	    PCI_VENDOR_XGI, PCI_PRODUCT_XGI_VOLARI_Z7,
 	    "Volari Z7",
 	},
@@ -16762,6 +16922,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_S3,
 	    "S3",
+	},
+	{
+	    PCI_VENDOR_XENSOURCE,
+	    "XenSource",
 	},
 	{
 	    PCI_VENDOR_C4T,
