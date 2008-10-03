@@ -86,18 +86,17 @@ drm_get_drawable_info(struct drm_device *dev, unsigned int handle)
 int
 drm_adddraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_draw_t *draw = data;
-	struct bsd_drm_drawable_info *info;
+	struct drm_draw			*draw = data;
+	struct bsd_drm_drawable_info	*info;
 
 	info = drm_calloc(1, sizeof(struct bsd_drm_drawable_info),
 	    DRM_MEM_DRAWABLE);
 	if (info == NULL)
 		return (ENOMEM);
 
-	info->handle = ++dev->drw_no;
 	DRM_SPINLOCK(&dev->drw_lock);
+	draw->handle = info->handle = ++dev->drw_no;
 	RB_INSERT(drawable_tree, &dev->drw_head, info);
-	draw->handle = info->handle;
 	DRM_SPINUNLOCK(&dev->drw_lock);
 
 	DRM_DEBUG("%d\n", draw->handle);
@@ -108,8 +107,8 @@ drm_adddraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_rmdraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_draw_t *draw = (drm_draw_t *)data;
-	struct bsd_drm_drawable_info *info;
+	struct drm_draw			*draw = (drm_draw_t *)data;
+	struct bsd_drm_drawable_info	*info;
 
 	DRM_SPINLOCK(&dev->drw_lock);
 	info = drm_get_drawable(dev, draw->handle);
@@ -171,7 +170,7 @@ drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		/* For some reason the pointer arg is unsigned long long. */
 		ret = copyin((void *)(intptr_t)update->data, info->rects,
 		    sizeof(*info->rects) * info->num_rects);
-		DRM_SPINUNLOCK(&dev->drw_lock);
+		break;
 	default:
 		ret =  EINVAL;
 	}
@@ -197,13 +196,10 @@ drm_drawable_free(struct drm_device *dev, struct bsd_drm_drawable_info *draw)
 void
 drm_drawable_free_all(struct drm_device *dev)
 {
-	struct bsd_drm_drawable_info *draw, *nxt;
+	struct bsd_drm_drawable_info *draw;
 
 	DRM_SPINLOCK(&dev->drw_lock);
-	for (draw = RB_MIN(drawable_tree, &dev->drw_head); draw != NULL;
-	    draw = nxt) {
-		nxt = RB_NEXT(drawable_tree, &dev->drw_head, draw);
+	while ((draw = RB_ROOT(&dev->drw_head)) != NULL)
 		drm_drawable_free(dev, draw);
-	}
 	DRM_SPINUNLOCK(&dev->drw_lock);
 }

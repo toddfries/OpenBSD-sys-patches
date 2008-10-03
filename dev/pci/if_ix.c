@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.7 2008/06/19 08:43:55 reyk Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.9 2008/10/02 20:21:14 brad Exp $	*/
 
 /******************************************************************************
 
@@ -434,11 +434,6 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		IOCTL_DEBUGOUT("ioctl: SIOCxIFADDR (Get/Set Interface Addr)");
@@ -499,9 +494,7 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
 	default:
-		IOCTL_DEBUGOUT1("ioctl: UNKNOWN (0x%X)\n", (int)command);
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
@@ -685,7 +678,7 @@ ixgbe_init(void *arg)
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_RXDCTL(i), rxdctl);
 	}
 
-	timeout_add(&sc->timer, hz);
+	timeout_add_sec(&sc->timer, 1);
 
 	/* Set up MSI/X routing */
 	ixgbe_configure_ivars(sc);
@@ -741,7 +734,7 @@ ixgbe_legacy_irq(void *arg)
 		if (reg_eicr & IXGBE_EICR_LSC) {
 			timeout_del(&sc->timer);
 		        ixgbe_update_link_status(sc);
-			timeout_add(&sc->timer, hz);
+			timeout_add_sec(&sc->timer, 1);
 		}
 	}
 
@@ -1100,7 +1093,7 @@ ixgbe_local_timer(void *arg)
 		ixgbe_print_hw_stats(sc);
 #endif
 
-	timeout_add(&sc->timer, hz);
+	timeout_add_sec(&sc->timer, 1);
 
 	splx(s);
 }

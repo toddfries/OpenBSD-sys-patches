@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_et.c,v 1.12 2008/07/11 09:29:02 kevlo Exp $	*/
+/*	$OpenBSD: if_et.c,v 1.14 2008/10/02 20:21:14 brad Exp $	*/
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
  * 
@@ -1013,7 +1013,7 @@ et_init(struct ifnet *ifp)
 
 	et_enable_intrs(sc, ET_INTRS);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 
 	CSR_WRITE_4(sc, ET_TIMER, sc->sc_timer);
 
@@ -1037,11 +1037,6 @@ et_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1097,11 +1092,10 @@ et_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_miibus.mii_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);
-
 	return error;
 }
 
@@ -1142,7 +1136,7 @@ et_start(struct ifnet *ifp)
 	}
 
 	if (trans) {
-		timeout_add(&sc->sc_txtick, hz);
+		timeout_add_sec(&sc->sc_txtick, 1);
 		ifp->if_timer = 5;
 	}
 }
@@ -2035,7 +2029,7 @@ et_tick(void *xsc)
 
 	s = splnet();
 	mii_tick(&sc->sc_miibus);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 	splx(s);
 }
 

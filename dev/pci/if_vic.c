@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.53 2008/07/07 00:42:34 dlg Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.55 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -1181,11 +1181,6 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifa = (struct ifaddr *)data;
@@ -1234,8 +1229,7 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -1246,7 +1240,6 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1286,7 +1279,7 @@ vic_init(struct ifnet *ifp)
 
 	splx(s);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 void
@@ -1356,7 +1349,7 @@ vic_tick(void *arg)
 
 	vic_link_state(sc);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 u_int32_t

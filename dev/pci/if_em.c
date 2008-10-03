@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.187 2008/08/29 23:28:34 brad Exp $ */
+/* $OpenBSD: if_em.c,v 1.190 2008/10/02 20:21:14 brad Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -535,11 +535,6 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->interface_data, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFADDR (Set Interface "
@@ -612,8 +607,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
 	default:
-		IOCTL_DEBUGOUT1("ioctl received: UNKNOWN (0x%x)", (int)command);
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->interface_data, command, data);
 	}
 
 	splx(s);
@@ -1857,9 +1851,7 @@ em_dma_malloc(struct em_softc *sc, bus_size_t size,
 	}
 
 	r = bus_dmamap_load(sc->osdep.em_pa.pa_dmat, dma->dma_map,
-			    dma->dma_vaddr,
-			    size,
-			    NULL,
+			    dma->dma_vaddr, size, NULL,
 			    mapflags | BUS_DMA_NOWAIT);
 	if (r != 0) {
 		printf("%s: em_dma_malloc: bus_dmamap_load failed; "
@@ -2420,11 +2412,9 @@ em_initialize_receive_unit(struct em_softc *sc)
 {
 	u_int32_t	reg_rctl;
 	u_int32_t	reg_rxcsum;
-	struct ifnet	*ifp;
 	u_int64_t	bus_addr;
 
 	INIT_DEBUGOUT("em_initialize_receive_unit: begin");
-	ifp = &sc->interface_data.ac_if;
 
 	/* Make sure receives are disabled while setting up the descriptor ring */
 	E1000_WRITE_REG(&sc->hw, RCTL, 0);

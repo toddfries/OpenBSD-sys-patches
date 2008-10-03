@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.20 2008/06/26 05:42:18 ray Exp $	*/
+/*	$OpenBSD: be.c,v 1.22 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: be.c,v 1.26 2001/03/20 15:39:20 pk Exp $	*/
 
 /*-
@@ -933,11 +933,6 @@ beioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1007,9 +1002,9 @@ beioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }
@@ -1105,7 +1100,7 @@ beinit(struct be_softc *sc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 
 	be_ifmedia_upd(ifp);
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 	splx(s);
 }
 
@@ -1369,7 +1364,7 @@ be_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	(void)be_intphy_service(sc, &sc->sc_mii, MII_TICK);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 	splx(s);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.32 2008/06/15 07:37:05 todd Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.34 2008/09/30 22:42:55 kettenis Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.1 1996/09/30 16:34:50 ws Exp $	*/
 
 /*
@@ -93,16 +93,35 @@ void
 ofw_mem_regions(struct mem_region **memp, struct mem_region **availp)
 {
 	int phandle;
+	int nreg, navail;
+	int i, j;
 
 	/*
 	 * Get memory.
 	 */
-	if ((phandle = OF_finddevice("/memory")) == -1
-	    || OF_getprop(phandle, "reg",
-	    OFmem, sizeof OFmem[0] * OFMEM_REGIONS) <= 0
-	    || OF_getprop(phandle, "available",
-	    OFavail, sizeof OFavail[0] * OFMEM_REGIONS) <= 0)
+	phandle = OF_finddevice("/memory");
+	if (phandle == -1)
 		panic("no memory?");
+
+	nreg = OF_getprop(phandle, "reg", OFmem,
+	    sizeof(OFmem[0]) * OFMEM_REGIONS) / sizeof(OFmem[0]);
+	navail = OF_getprop(phandle, "available", OFavail,
+	    sizeof(OFavail[0]) * OFMEM_REGIONS) / sizeof(OFavail[0]);
+	if (nreg <= 0 || navail <= 0)
+		panic("no memory?");
+
+	/* Eliminate empty regions. */
+	for (i = 0, j = 0; i < nreg; i++) {
+		if (OFmem[i].size == 0)
+			continue;
+		if (i != j) {
+			OFmem[j].start = OFmem[i].start;
+			OFmem[j].size = OFmem[i].size;
+			OFmem[i].start = 0;
+			OFmem[i].size = 0;
+		}
+		j++;
+	}
 
 	*memp = OFmem;
 
@@ -301,7 +320,7 @@ ofw_find_keyboard()
 {
 	int stdin_node;
 	char iname[32];
-	int len, attach;
+	int len, attach = 0;
 
 	stdin_node = OF_instance_to_package(OF_stdin);
 	len = OF_getprop(stdin_node, "name", iname, 20);
@@ -335,13 +354,13 @@ ofw_find_keyboard()
 #if NUKBD > 0
 		printf(", using USB\n");
 		ukbd_cnattach();
-		attach=1;
+		attach = 1;
 #endif
 	} else if (ofw_have_kbd == OFW_HAVE_ADBKBD) {
 #if NAKBD >0
 		printf(", using ADB\n");
 		akbd_cnattach();
-		attach=1;
+		attach = 1;
 #endif
 	} 
 	if (attach == 0) {

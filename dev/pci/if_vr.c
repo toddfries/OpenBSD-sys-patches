@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.75 2008/07/24 19:01:28 thib Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.78 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -808,7 +808,8 @@ vr_rxeof(struct vr_softc *sc)
 		{
 			m0 = m_devget(mtod(m, caddr_t) - ETHER_ALIGN,
 			    total_len + ETHER_ALIGN, 0, ifp, NULL);
-			if (m0 == NULL || vr_alloc_mbuf(sc, cur_rx, m)) {
+			vr_alloc_mbuf(sc, cur_rx, m);
+			if (m0 == NULL) {
 				ifp->if_ierrors++;
 				continue;
 			}
@@ -951,7 +952,7 @@ vr_tick(void *xsc)
 	}           
 
 	mii_tick(&sc->sc_mii);
-	timeout_add(&sc->sc_to, hz);
+	timeout_add_sec(&sc->sc_to, 1);
 	splx(s);
 }
 
@@ -1289,7 +1290,7 @@ vr_init(void *xsc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 
 	if (!timeout_pending(&sc->sc_to))
-		timeout_add(&sc->sc_to, hz);
+		timeout_add_sec(&sc->sc_to, 1);
 
 	splx(s);
 }
@@ -1331,11 +1332,6 @@ vr_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct ifaddr *ifa = (struct ifaddr *)data;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1401,12 +1397,10 @@ vr_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return(error);
 }
 

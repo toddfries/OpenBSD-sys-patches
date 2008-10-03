@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.64 2008/06/21 21:15:20 brad Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.66 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -734,11 +734,6 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc_if->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -794,12 +789,10 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc_if->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1802,7 +1795,7 @@ msk_tick(void *xsc_if)
 	s = splnet();
 	mii_tick(mii);
 	splx(s);
-	timeout_add(&sc_if->sk_tick_ch, hz);
+	timeout_add_sec(&sc_if->sk_tick_ch, 1);
 }
 
 void
@@ -2133,7 +2126,7 @@ msk_init(void *xsc_if)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	timeout_add(&sc_if->sk_tick_ch, hz);
+	timeout_add_sec(&sc_if->sk_tick_ch, 1);
 
 	splx(s);
 }

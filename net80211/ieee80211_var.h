@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.50 2008/08/29 12:14:53 damien Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.54 2008/09/27 15:16:09 damien Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -36,6 +36,10 @@
 /*
  * Definitions for IEEE 802.11 drivers.
  */
+
+#ifdef	SMALL_KERNEL
+#define IEEE80211_STA_ONLY 1
+#endif
 
 #include <sys/timeout.h>
 
@@ -167,16 +171,6 @@ struct ieee80211_edca_ac_params {
 #define IEEE80211_PROTO_RSN	(1 << 0)
 #define IEEE80211_PROTO_WPA	(1 << 1)
 
-struct ieee80211_rsnparams {
-	u_int16_t		rsn_nakms;
-	u_int32_t		rsn_akms;
-	u_int16_t		rsn_nciphers;
-	u_int32_t		rsn_ciphers;
-	enum ieee80211_cipher	rsn_groupcipher;
-	enum ieee80211_cipher	rsn_groupmgmtcipher;
-	u_int16_t		rsn_caps;
-};
-
 struct ieee80211_rxinfo {
 	u_int32_t		rxi_flags;
 	u_int32_t		rxi_tstamp;
@@ -276,6 +270,7 @@ struct ieee80211com {
 							 */
 	struct ieee80211_edca_ac_params ic_edca_ac[EDCA_NUM_AC];
 	u_int			ic_edca_updtcount;
+	u_int16_t		ic_tid_noack;
 	u_int8_t		ic_globalcnt[EAPOL_KEY_NONCE_LEN];
 	u_int8_t		ic_nonce[EAPOL_KEY_NONCE_LEN];
 	u_int8_t		ic_psk[IEEE80211_PMK_LEN];
@@ -283,6 +278,7 @@ struct ieee80211com {
 	u_int16_t		ic_rsn_keydonesta;
 	int			ic_tkip_micfail;
 
+	TAILQ_HEAD(, ieee80211_pmk) ic_pmksa;	/* PMKSA cache */
 	u_int			ic_rsnprotos;
 	u_int			ic_rsnakms;
 	u_int			ic_rsnciphers;
@@ -291,7 +287,7 @@ struct ieee80211com {
 
 	u_int8_t		*ic_tim_bitmap;
 	u_int			ic_tim_len;
-	u_int			ic_tim_mcast;
+	u_int			ic_tim_mcast_pending;
 	u_int			ic_dtim_period;
 	u_int			ic_dtim_count;
 };

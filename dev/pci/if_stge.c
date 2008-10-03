@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.39 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.41 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -690,17 +690,9 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct stge_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s, error;
+	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		/* Try to get more packets going. */
-		stge_start(ifp);
-
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -761,7 +753,7 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	/* Try to get more packets going. */
@@ -1084,7 +1076,7 @@ stge_tick(void *arg)
 	stge_stats_update(sc);
 	splx(s);
 
-	timeout_add(&sc->sc_timeout, hz);
+	timeout_add_sec(&sc->sc_timeout, 1);
 }
 
 /*
@@ -1345,7 +1337,7 @@ stge_init(struct ifnet *ifp)
 	/*
 	 * Start the one second MII clock.
 	 */
-	timeout_add(&sc->sc_timeout, hz);
+	timeout_add_sec(&sc->sc_timeout, 1);
 
 	/*
 	 * ...all done!

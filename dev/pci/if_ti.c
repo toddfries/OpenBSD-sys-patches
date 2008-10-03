@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.85 2008/06/07 19:03:13 brad Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.88 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1767,7 +1767,7 @@ ti_rxeof(struct ti_softc *sc)
 		struct ti_rx_desc	*cur_rx;
 		u_int32_t		rxidx;
 		struct mbuf		*m = NULL;
-		int			sumflags = 0;
+		u_int16_t		sumflags = 0;
 		bus_dmamap_t		dmamap;
 
 		cur_rx =
@@ -1851,7 +1851,6 @@ ti_rxeof(struct ti_softc *sc)
 		if ((cur_rx->ti_ip_cksum ^ 0xffff) == 0)
 			sumflags |= M_IPV4_CSUM_IN_OK;
 		m->m_pkthdr.csum_flags = sumflags;
-		sumflags = 0;
 
 		ether_input_mbuf(ifp, m);
 	}
@@ -2479,11 +2478,6 @@ ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2547,8 +2541,7 @@ ti_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->ifmedia, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
