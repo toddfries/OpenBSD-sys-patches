@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.93 2008/05/25 23:45:53 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.97 2008/09/30 23:58:40 dlg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006 David Gwynne <dlg@openbsd.org>
@@ -50,21 +50,31 @@ uint32_t	mpi_debug = 0
 #endif
 
 struct cfdriver mpi_cd = {
-	NULL, "mpi", DV_DULL
+	NULL,
+	"mpi",
+	DV_DULL
 };
 
 int			mpi_scsi_cmd(struct scsi_xfer *);
 void			mpi_scsi_cmd_done(struct mpi_ccb *);
 void			mpi_minphys(struct buf *bp);
+int			mpi_scsi_probe(struct scsi_link *);
 int			mpi_scsi_ioctl(struct scsi_link *, u_long, caddr_t,
 			    int, struct proc *);
 
 struct scsi_adapter mpi_switch = {
-	mpi_scsi_cmd, mpi_minphys, NULL, NULL, mpi_scsi_ioctl
+	mpi_scsi_cmd,
+	mpi_minphys,
+	mpi_scsi_probe,
+	NULL,
+	mpi_scsi_ioctl
 };
 
 struct scsi_device mpi_dev = {
-	NULL, NULL, NULL, NULL
+	NULL,
+	NULL,
+	NULL,
+	NULL
 };
 
 struct mpi_dmamem	*mpi_dmamem_alloc(struct mpi_softc *, size_t);
@@ -123,10 +133,10 @@ void			mpi_eventack(struct mpi_softc *,
 void			mpi_eventack_done(struct mpi_ccb *);
 void			mpi_evt_sas(void *, void *);
 
-int			mpi_cfg_header(struct mpi_softc *, u_int8_t, u_int8_t,
-			    u_int32_t, struct mpi_cfg_hdr *);
-int			mpi_cfg_page(struct mpi_softc *, u_int32_t,
-			    struct mpi_cfg_hdr *, int, void *, size_t);
+int			mpi_req_cfg_header(struct mpi_softc *, u_int8_t,
+			    u_int8_t, u_int32_t, int, void *);
+int			mpi_req_cfg_page(struct mpi_softc *, u_int32_t, int,
+			    void *, int, void *, size_t);
 
 #define DEVNAME(s)		((s)->sc_dev.dv_xname)
 
@@ -144,6 +154,16 @@ int			mpi_cfg_page(struct mpi_softc *, u_int32_t,
 				    MPI_INTR_STATUS_DOORBELL, 0)
 #define mpi_wait_db_ack(s)	mpi_wait_eq((s), MPI_INTR_STATUS, \
 				    MPI_INTR_STATUS_IOCDOORBELL, 0)
+
+#define mpi_cfg_header(_s, _t, _n, _a, _h) \
+	mpi_req_cfg_header((_s), (_t), (_n), (_a), 0, (_h))
+#define mpi_ecfg_header(_s, _t, _n, _a, _h) \
+	mpi_req_cfg_header((_s), (_t), (_n), (_a), 1, (_h))
+
+#define mpi_cfg_page(_s, _a, _h, _r, _p, _l) \
+	mpi_req_cfg_page((_s), (_a), 0, (_h), (_r), (_p), (_l))
+#define mpi_ecfg_page(_s, _a, _h, _r, _p, _l) \
+	mpi_req_cfg_page((_s), (_a), 1, (_h), (_r), (_p), (_l))
 
 int
 mpi_attach(struct mpi_softc *sc)
@@ -1369,6 +1389,56 @@ mpi_minphys(struct buf *bp)
 }
 
 int
+mpi_scsi_probe(struct scsi_link *link)
+{
+	struct mpi_softc		*sc = link->adapter_softc;
+	struct mpi_ecfg_hdr		ehdr;
+	struct mpi_cfg_sas_dev_pg0	pg0;
+	u_int32_t			address;
+
+	if (sc->sc_porttype != MPI_PORTFACTS_PORTTYPE_SAS)
+		return (0);
+
+	address = MPI_CFG_SAS_DEV_ADDR_BUS | link->target;
+
+	if (mpi_ecfg_header(sc, MPI_CONFIG_REQ_EXTPAGE_TYPE_SAS_DEVICE, 0,
+	    address, &ehdr) != 0)
+		return (EIO);
+
+	if (mpi_ecfg_page(sc, address, &ehdr, 1, &pg0, sizeof(pg0)) != 0) {
+		/* the device probably doesnt exist if the page fetch fails */
+		return (ENXIO);
+	}
+
+	DPRINTF(MPI_D_MISC, "%s: mpi_scsi_probe sas dev pg 0 for target %d:\n",
+	    DEVNAME(sc), link->target);
+	DPRINTF(MPI_D_MISC, "%s:  slot: 0x%04x enc_handle: 0x%04x\n",
+	    DEVNAME(sc), letoh16(pg0.slot), letoh16(pg0.enc_handle));
+	DPRINTF(MPI_D_MISC, "%s:  sas_addr: 0x%016llx\n", DEVNAME(sc),
+	    letoh64(pg0.sas_addr));
+	DPRINTF(MPI_D_MISC, "%s:  parent_dev_handle: 0x%04x phy_num: 0x%02x "
+	    "access_status: 0x%02x\n", DEVNAME(sc),
+	    letoh16(pg0.parent_dev_handle), pg0.phy_num, pg0.access_status);
+	DPRINTF(MPI_D_MISC, "%s:  dev_handle: 0x%04x "
+	    "bus: 0x%02x target: 0x%02x\n", DEVNAME(sc),
+	    letoh16(pg0.dev_handle), pg0.bus, pg0.target);
+	DPRINTF(MPI_D_MISC, "%s:  device_info: 0x%08x\n", DEVNAME(sc),
+	    letoh32(pg0.device_info));
+	DPRINTF(MPI_D_MISC, "%s:  flags: 0x%04x physical_port: 0x%02x\n",
+	    DEVNAME(sc), letoh16(pg0.flags), pg0.physical_port);
+
+	if (ISSET(letoh32(pg0.device_info),
+	    MPI_CFG_SAS_DEV_0_DEVINFO_ATAPI_DEVICE)) {
+		DPRINTF(MPI_D_MISC, "%s: target %d is an ATAPI device\n",
+		    DEVNAME(sc), link->target);
+		link->flags |= SDEV_ATAPI;
+		link->quirks |= SDEV_ONLYBIG;
+	}
+
+	return (0);
+}
+
+int
 mpi_scsi_ioctl(struct scsi_link *a, u_long b, caddr_t c, int d, struct proc *e)
 {
 	return (ENOTTY);
@@ -2255,17 +2325,21 @@ out:
 }
 
 int
-mpi_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
-    u_int32_t address, struct mpi_cfg_hdr *hdr)
+mpi_req_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
+    u_int32_t address, int extended, void *p)
 {
 	struct mpi_ccb				*ccb;
 	struct mpi_msg_config_request		*cq;
 	struct mpi_msg_config_reply		*cp;
+	struct mpi_cfg_hdr			*hdr = p;
+	struct mpi_ecfg_hdr			*ehdr = p;
+	int					etype = 0;
 	int					rv = 0;
 	int					s;
 
-	DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_header type: %#x number: %x "
-	    "address: %d\n", DEVNAME(sc), type, number, address);
+	DNPRINTF(MPI_D_MISC, "%s: mpi_req_cfg_header type: %#x number: %x "
+	    "address: 0x%08x extended: %d\n", DEVNAME(sc), type, number,
+	    address, extended);
 
 	s = splbio();
 	ccb = mpi_get_ccb(sc);
@@ -2274,6 +2348,11 @@ mpi_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 		DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_header ccb_get\n",
 		    DEVNAME(sc));
 		return (1);
+	}
+
+	if (extended) {
+		etype = type;
+		type = MPI_CONFIG_REQ_PAGE_TYPE_EXTENDED;
 	}
 
 	ccb->ccb_done = mpi_empty_done;
@@ -2286,6 +2365,7 @@ mpi_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 
 	cq->config_header.page_number = number;
 	cq->config_header.page_type = type;
+	cq->ext_page_type = etype;
 	cq->page_address = htole32(address);
 	cq->page_buffer.sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE |
 	    MPI_SGE_FL_LAST | MPI_SGE_FL_EOB | MPI_SGE_FL_EOL);
@@ -2320,7 +2400,14 @@ mpi_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 
 	if (letoh16(cp->ioc_status) != MPI_IOCSTATUS_SUCCESS)
 		rv = 1;
-	else
+	else if (extended) {
+		bzero(ehdr, sizeof(*ehdr));
+		ehdr->page_version = cp->config_header.page_version;
+		ehdr->page_number = cp->config_header.page_number;
+		ehdr->page_type = cp->config_header.page_type;
+		ehdr->ext_page_length = cp->ext_page_length;
+		ehdr->ext_page_type = cp->ext_page_type;
+	} else
 		*hdr = cp->config_header;
 
 	mpi_push_reply(sc, ccb->ccb_rcb->rcb_reply_dva);
@@ -2330,22 +2417,28 @@ mpi_cfg_header(struct mpi_softc *sc, u_int8_t type, u_int8_t number,
 }
 
 int
-mpi_cfg_page(struct mpi_softc *sc, u_int32_t address, struct mpi_cfg_hdr *hdr,
-    int read, void *page, size_t len)
+mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int extended,
+    void *p, int read, void *page, size_t len)
 {
 	struct mpi_ccb				*ccb;
 	struct mpi_msg_config_request		*cq;
 	struct mpi_msg_config_reply		*cp;
+	struct mpi_cfg_hdr			*hdr = p;
+	struct mpi_ecfg_hdr			*ehdr = p;
 	u_int64_t				dva;
 	char					*kva;
+	int					page_length;
 	int					rv = 0;
 	int					s;
 
 	DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_page address: %d read: %d type: %x\n",
 	    DEVNAME(sc), address, read, hdr->page_type);
 
+	page_length = extended ?
+	    letoh16(ehdr->ext_page_length) : hdr->page_length;
+
 	if (len > MPI_REQUEST_SIZE - sizeof(struct mpi_msg_config_request) ||
-	    len < hdr->page_length * 4)
+	    len < page_length * 4)
 		return (1);
 
 	s = splbio();
@@ -2365,12 +2458,19 @@ mpi_cfg_page(struct mpi_softc *sc, u_int32_t address, struct mpi_cfg_hdr *hdr,
 	cq->action = (read ? MPI_CONFIG_REQ_ACTION_PAGE_READ_CURRENT :
 	    MPI_CONFIG_REQ_ACTION_PAGE_WRITE_CURRENT);
 
-	cq->config_header = *hdr;
+	if (extended) {
+		cq->config_header.page_version = ehdr->page_version;
+		cq->config_header.page_number = ehdr->page_number;
+		cq->config_header.page_type = ehdr->page_type;
+		cq->ext_page_len = ehdr->ext_page_length;
+		cq->ext_page_type = ehdr->ext_page_type;
+	} else
+		cq->config_header = *hdr;
 	cq->config_header.page_type &= MPI_CONFIG_REQ_PAGE_TYPE_MASK;
 	cq->page_address = htole32(address);
 	cq->page_buffer.sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE |
 	    MPI_SGE_FL_LAST | MPI_SGE_FL_EOB | MPI_SGE_FL_EOL |
-	    (hdr->page_length * 4) |
+	    (page_length * 4) |
 	    (read ? MPI_SGE_FL_DIR_IN : MPI_SGE_FL_DIR_OUT));
 
 	/* bounce the page via the request space to avoid more bus_dma games */
