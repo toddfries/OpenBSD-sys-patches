@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tht.c,v 1.118 2008/09/10 14:01:22 blambert Exp $ */
+/*	$OpenBSD: if_tht.c,v 1.119 2008/10/02 20:21:14 brad Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

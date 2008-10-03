@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ni.c,v 1.10 2007/05/11 10:06:55 pedro Exp $ */
+/*	$OpenBSD: if_ni.c,v 1.11 2008/10/02 20:21:13 brad Exp $ */
 /*	$NetBSD: if_ni.c,v 1.15 2002/05/22 16:03:14 wiz Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.

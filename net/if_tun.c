@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.94 2008/08/04 18:55:08 damien Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.95 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -511,7 +511,10 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
 		break;
 	default:
-		error = ether_ioctl(ifp, &tp->arpcom, cmd, data);
+		if (tp->tun_flags & TUN_LAYER2)
+			error = ether_ioctl(ifp, &tp->arpcom, cmd, data);
+		else
+			error = ENOTTY;
 	}
 
 	splx(s);

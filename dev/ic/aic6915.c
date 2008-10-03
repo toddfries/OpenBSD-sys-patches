@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6915.c,v 1.6 2008/09/10 14:01:22 blambert Exp $	*/
+/*	$OpenBSD: aic6915.c,v 1.7 2008/10/02 20:21:13 brad Exp $	*/
 /*	$NetBSD: aic6915.c,v 1.15 2005/12/24 20:27:29 perry Exp $	*/
 
 /*-

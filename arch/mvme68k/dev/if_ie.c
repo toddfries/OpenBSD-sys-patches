@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.35 2006/04/16 00:46:32 pascoe Exp $ */
+/*	$OpenBSD: if_ie.c,v 1.36 2008/10/02 20:21:13 brad Exp $ */
 
 /*-
  * Copyright (c) 1999 Steve Murphree, Jr. 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_ioctl.c,v 1.25 2008/09/27 15:16:09 damien Exp $	*/
+/*	$OpenBSD: ieee80211_ioctl.c,v 1.26 2008/10/02 20:21:15 brad Exp $	*/
 /*	$NetBSD: ieee80211_ioctl.c,v 1.15 2004/05/06 02:58:16 dyoung Exp $	*/
 
 /*-

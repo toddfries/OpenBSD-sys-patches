@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ex.c,v 1.32 2007/10/21 03:02:09 brad Exp $	*/
+/*	$OpenBSD: if_ex.c,v 1.33 2008/10/02 20:21:13 brad Exp $	*/
 /*
  * Copyright (c) 1997, Donald A. Schmidt
  * Copyright (c) 1996, Javier Martín Rueda (jmrueda@diatel.upm.es)

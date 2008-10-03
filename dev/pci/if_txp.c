@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.94 2008/09/18 15:16:30 naddy Exp $	*/
+/*	$OpenBSD: if_txp.c,v 1.95 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 2001

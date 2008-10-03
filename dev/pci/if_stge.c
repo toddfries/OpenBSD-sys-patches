@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.40 2008/09/10 14:01:22 blambert Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.41 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-

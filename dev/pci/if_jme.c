@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.2 2008/09/27 13:03:30 jsg Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.4 2008/10/02 20:21:14 brad Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -58,10 +58,8 @@
 #include <netinet/if_ether.h>
 #endif
 
-#if NVLAN > 0
 #include <net/if_types.h>
 #include <net/if_vlan_var.h>
-#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -1322,11 +1320,6 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1403,8 +1396,7 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);

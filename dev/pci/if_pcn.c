@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pcn.c,v 1.19 2008/09/10 14:01:22 blambert Exp $	*/
+/*	$OpenBSD: if_pcn.c,v 1.20 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: if_pcn.c,v 1.26 2005/05/07 09:15:44 is Exp $	*/
 
 /*

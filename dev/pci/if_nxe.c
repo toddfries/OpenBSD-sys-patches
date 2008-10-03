@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nxe.c,v 1.55 2008/09/10 14:01:22 blambert Exp $ */
+/*	$OpenBSD: if_nxe.c,v 1.56 2008/10/02 20:21:14 brad Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

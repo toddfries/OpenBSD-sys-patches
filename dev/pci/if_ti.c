@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.87 2008/09/24 19:12:59 chl Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.88 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999

@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.40 2006/05/27 23:59:07 jason Exp $	*/
+/*	$OpenBSD: be.c,v 1.41 2008/10/02 20:21:13 brad Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt and Jason L. Wright.

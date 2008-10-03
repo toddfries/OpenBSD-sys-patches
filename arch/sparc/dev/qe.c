@@ -1,4 +1,4 @@
-/*	$OpenBSD: qe.c,v 1.30 2006/05/27 23:59:07 jason Exp $	*/
+/*	$OpenBSD: qe.c,v 1.31 2008/10/02 20:21:13 brad Exp $	*/
 
 /*
  * Copyright (c) 1998, 2000 Jason L. Wright.

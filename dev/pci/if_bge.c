@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.245 2008/09/23 00:27:18 brad Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.246 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems

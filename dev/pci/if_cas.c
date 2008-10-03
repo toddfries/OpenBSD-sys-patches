@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.21 2008/09/10 14:01:22 blambert Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.22 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  *

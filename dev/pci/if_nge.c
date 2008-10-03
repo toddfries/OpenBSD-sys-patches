@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.58 2008/05/23 08:49:27 brad Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.59 2008/10/02 20:21:14 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001

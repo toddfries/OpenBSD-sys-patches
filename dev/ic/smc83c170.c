@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc83c170.c,v 1.11 2008/09/10 14:01:22 blambert Exp $	*/
+/*	$OpenBSD: smc83c170.c,v 1.12 2008/10/02 20:21:13 brad Exp $	*/
 /*	$NetBSD: smc83c170.c,v 1.59 2005/02/27 00:27:02 perry Exp $	*/
 
 /*-
