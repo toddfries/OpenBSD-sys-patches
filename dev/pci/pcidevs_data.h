@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1418 2008/10/02 15:16:43 mbalmer Exp 
+ *	OpenBSD: pcidevs,v 1.1420 2008/10/06 15:14:28 deraadt Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -1350,6 +1350,30 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_8111_ACA,
 	    "8111 AC97",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_HB,
+	    "RS780 Host",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_PCIE_1,
+	    "RS780 PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_PCIE_2,
+	    "RS780 PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_PCIE_3,
+	    "RS780 PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_PCIE_4,
+	    "RS780 PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_PCIE_5,
+	    "RS780 PCIE",
 	},
 	{
 	    PCI_VENDOR_AMI, PCI_PRODUCT_AMI_MEGARAID,
@@ -11310,6 +11334,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE8400_GS,
 	    "GeForce 8400 GS",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE8400M_GS,
+	    "GeForce 8400M GS",
 	},
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE8400M_G,
