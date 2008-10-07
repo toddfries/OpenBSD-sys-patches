@@ -399,9 +399,6 @@ icmp6_error(struct mbuf *m, int type, int code, int param)
 	 * information in ip header (nip6).
 	 */
 	m->m_pkthdr.rcvif = NULL;
-#if NPF > 0
-	pf_pkt_addr_changed(m);
-#endif
 
 	icmp6stat.icp6s_outhist[type]++;
 	icmp6_reflect(m, sizeof(struct ip6_hdr)); /* header order: IPv6 - ICMPv6 */
@@ -749,9 +746,6 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 				sizeof(struct icmp6_hdr) + 4 + maxhlen;
 			nicmp6->icmp6_type = ICMP6_WRUREPLY;
 			nicmp6->icmp6_code = 0;
-#if NPF > 0
-			pf_pkt_addr_changed(n);
-#endif
 		}
 #undef hostnamelen
 		if (n) {
@@ -2421,9 +2415,6 @@ icmp6_redirect_output(struct mbuf *m0, struct rtentry *rt)
 		MCLGET(m, M_DONTWAIT);
 	if (!m)
 		goto fail;
-#if NPF > 0
-	pf_pkt_addr_changed(m);
-#endif
 	m->m_pkthdr.rcvif = NULL;
 	m->m_len = 0;
 	maxlen = M_TRAILINGSPACE(m);
