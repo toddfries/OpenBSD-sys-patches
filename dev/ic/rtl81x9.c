@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.58 2008/04/20 00:23:28 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.60 2008/10/02 20:21:13 brad Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -1052,7 +1052,7 @@ void rl_init(xsc)
 	splx(s);
 
 	timeout_set(&sc->sc_tick_tmo, rl_tick, sc);
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }
 
 /*
@@ -1092,11 +1092,6 @@ int rl_ioctl(ifp, command, data)
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1150,12 +1145,10 @@ int rl_ioctl(ifp, command, data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -1473,7 +1466,7 @@ rl_tick(v)
 	s = splnet();
 	mii_tick(&sc->sc_mii);
 	splx(s);
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }
 
 struct cfdriver rl_cd = {

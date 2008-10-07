@@ -1,4 +1,4 @@
-/* $OpenBSD: dsdt.c,v 1.130 2008/06/14 21:40:16 jordan Exp $ */
+/* $OpenBSD: dsdt.c,v 1.135 2008/10/04 18:48:04 kettenis Exp $ */
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
  *
@@ -371,16 +371,6 @@ aml_mnem(int opcode, uint8_t *pos)
 }
 #endif /* SMALL_KERNEL */
 
-const char *
-aml_args(int opcode)
-{
-	struct aml_opcode *tab;
-
-	if ((tab = aml_findopcode(opcode)) != NULL)
-		return tab->args;
-	return ("");
-}
-
 struct aml_notify_data {
 	struct aml_node		*node;
 	char			pnpid[20];
@@ -500,7 +490,7 @@ acpi_poll(void *arg)
 	dsdt_softc->sc_wakeup = 0;
 	wakeup(dsdt_softc);
 
-	timeout_add(&dsdt_softc->sc_dev_timeout, 10 * hz);
+	timeout_add_sec(&dsdt_softc->sc_dev_timeout, 10);
 }
 
 void
@@ -525,7 +515,7 @@ aml_register_notify(struct aml_node *node, const char *pnpid,
 	SLIST_INSERT_HEAD(&aml_notify_list, pdata, link);
 
 	if (poll && !acpi_poll_enabled)
-		timeout_add(&dsdt_softc->sc_dev_timeout, 10 * hz);
+		timeout_add_sec(&dsdt_softc->sc_dev_timeout, 10);
 }
 
 void
@@ -680,60 +670,6 @@ aml_delchildren(struct aml_node *node)
 /*
  * @@@: Value functions
  */
-
-struct aml_scope	*aml_pushscope(struct aml_scope *, uint8_t *,
-			    uint8_t *, struct aml_node *);
-struct aml_scope	*aml_popscope(struct aml_scope *);
-
-#define AML_LHS		0
-#define AML_RHS		1
-#define AML_DST		2
-#define AML_DST2	3
-
-/* Allocate+push parser scope */
-struct aml_scope *
-aml_pushscope(struct aml_scope *parent, uint8_t *start, uint8_t  *end,
-    struct aml_node *node)
-{
-	struct aml_scope *scope;
-
-	scope = acpi_os_malloc(sizeof(struct aml_scope));
-	scope->pos = start;
-	scope->end = end;
-	scope->node = node;
-	scope->parent = parent;
-	scope->sc = dsdt_softc;
-
-	aml_lastscope = scope;
-
-	return scope;
-}
-
-struct aml_scope *
-aml_popscope(struct aml_scope *scope)
-{
-	struct aml_scope *nscope;
-	struct aml_vallist *ol;
-	int idx;
-
-	if (scope == NULL)
-		return NULL;
-	nscope = scope->parent;
-
-	/* Free temporary values */
-	while ((ol = scope->tmpvals) != NULL) {
-		scope->tmpvals = ol->next;
-		for (idx = 0; idx < ol->nobj; idx++) {
-			aml_freevalue(&ol->obj[idx]);
-		}
-		acpi_os_free(ol);
-	}
-	acpi_os_free(scope);
-
-	aml_lastscope = nscope;
-
-	return nscope;
-}
 
 /*
  * Field I/O code
@@ -3920,7 +3856,10 @@ aml_xparse(struct aml_scope *scope, int ret_type, const char *stype)
 		break;
 	case AMLOP_SIZEOF:
 		/* Sizeof: S => i */
-		ival = opargs[0]->length;
+		if (opargs[0]->type == AML_OBJTYPE_OBJREF)
+			ival = opargs[0]->v_objref.ref->length;
+		else
+			ival = opargs[0]->length;
 		break;
 	case AMLOP_OBJECTTYPE:
 		/* ObjectType: S => i */

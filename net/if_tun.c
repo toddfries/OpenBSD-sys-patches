@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.93 2008/05/07 05:51:12 mpf Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.95 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -438,11 +438,7 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int			 error = 0, s;
 
 	s = splnet();
-	if (tp->tun_flags & TUN_LAYER2)
-		if ((error = ether_ioctl(ifp, &tp->arpcom, cmd, data)) > 0) {
-			splx(s);
-			return (error);
-		}
+
 	switch (cmd) {
 	case SIOCSIFADDR:
 		tuninit(tp);
@@ -515,8 +511,12 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
 		break;
 	default:
-		error = ENOTTY;
+		if (tp->tun_flags & TUN_LAYER2)
+			error = ether_ioctl(ifp, &tp->arpcom, cmd, data);
+		else
+			error = ENOTTY;
 	}
+
 	splx(s);
 	return (error);
 }
@@ -561,7 +561,7 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
-	len = m0->m_pkthdr.len + sizeof(*af);
+	len = m0->m_pkthdr.len;
 	s = splnet();
 	IFQ_ENQUEUE(&ifp->if_snd, m0, NULL, error);
 	if (error) {

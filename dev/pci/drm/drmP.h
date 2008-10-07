@@ -58,6 +58,7 @@
 #include <sys/stdint.h>
 #include <sys/agpio.h>
 #include <sys/memrange.h>
+#include <sys/extent.h>
 #include <sys/vnode.h>
 #include <uvm/uvm.h>
 #include <dev/pci/pcidevs.h>
@@ -72,35 +73,32 @@
 #include "drm_atomic.h"
 #include "drm_internal.h"
 
-#ifdef __amd64__
-#define DRM_NO_MTRR
-#endif /* Until the mtrr apis are merged. */
-
 #define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
 #define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
 
-#define DRM_MEM_DMA	   0
-#define DRM_MEM_SAREA	   1
-#define DRM_MEM_DRIVER	   2
-#define DRM_MEM_MAGIC	   3
-#define DRM_MEM_IOCTLS	   4
-#define DRM_MEM_MAPS	   5
-#define DRM_MEM_BUFS	   6
-#define DRM_MEM_SEGS	   7
-#define DRM_MEM_PAGES	   8
-#define DRM_MEM_FILES	  9
-#define DRM_MEM_QUEUES	  10
-#define DRM_MEM_CMDS	  11
-#define DRM_MEM_MAPPINGS  12
-#define DRM_MEM_BUFLISTS  13
-#define DRM_MEM_AGPLISTS  14
-#define DRM_MEM_TOTALAGP  15
-#define DRM_MEM_BOUNDAGP  16
-#define DRM_MEM_CTXBITMAP 17
-#define DRM_MEM_STUB	  18
-#define DRM_MEM_SGLISTS	  19
-#define DRM_MEM_DRAWABLE  20
-#define DRM_MEM_MM	21
+#define DRM_MEM_DMA		0
+#define DRM_MEM_SAREA		1
+#define DRM_MEM_DRIVER		2
+#define DRM_MEM_MAGIC		3
+#define DRM_MEM_IOCTLS		4
+#define DRM_MEM_MAPS		5
+#define DRM_MEM_BUFS		6
+#define DRM_MEM_SEGS		7
+#define DRM_MEM_PAGES		8
+#define DRM_MEM_FILES		9
+#define DRM_MEM_QUEUES		10
+#define DRM_MEM_CMDS		11
+#define DRM_MEM_MAPPINGS	12
+#define DRM_MEM_BUFLISTS	13
+#define DRM_MEM_AGPLISTS	14
+#define DRM_MEM_TOTALAGP	15
+#define DRM_MEM_BOUNDAGP	16
+#define DRM_MEM_CTXBITMAP	17
+#define DRM_MEM_CTXLIST		18
+#define DRM_MEM_STUB		19
+#define DRM_MEM_SGLISTS		20
+#define DRM_MEM_DRAWABLE	21
+#define DRM_MEM_MM		22
 
 #define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
 
@@ -113,20 +111,12 @@
 
 #define __OS_HAS_AGP	1
 
-#define DRM_DEV_MODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
-#define DRM_DEV_UID	0
-#define DRM_DEV_GID	0
-
 #define wait_queue_head_t	atomic_t
 #define DRM_WAKEUP(w)		wakeup((void *)w)
-#define DRM_WAKEUP_INT(w)	wakeup(w)
 #define DRM_INIT_WAITQUEUE(queue) do {(void)(queue);} while (0)
 
-#define DRM_CDEV		dev_t
 #define DRM_CURPROC		curproc
-#define DRM_STRUCTPROC		struct proc
-#define DRM_STRUCTCDEVPROC	struct proc
-#define DRM_PROC(p)		(p)
+#define DRM_CURRENTPID		curproc->p_pid
 #define DRM_NOOP		do {} while(0)
 #define DRM_SPINTYPE		struct mutex
 #define DRM_SPININIT(l,name)	mtx_init(l,IPL_NONE)
@@ -139,12 +129,8 @@
 } while (0)
 #define DRM_SPINUNLOCK_IRQRESTORE(u, irqflags) DRM_SPINUNLOCK(u)
 #define DRM_SPINLOCK_ASSERT(l)	DRM_NOOP
-#define DRM_LOCK()		DRM_SPINLOCK(&dev->dev_lock)
-#define DRM_UNLOCK()		DRM_SPINUNLOCK(&dev->dev_lock)
-#define DRM_SLEEPLOCK(v,l,f,s,i)	msleep(v,l,f,s,i);
-#define DRM_PID(p)		(p)->p_pid
-#define DRM_CURRENTPID		DRM_PID(curproc)
-#define DRM_UID(p)		(p)->p_pid
+#define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
+#define DRM_UNLOCK()		rw_exit_write(&dev->dev_lock)
 #define DRM_MAXUNITS	8
 extern struct drm_device *drm_units[];
 
@@ -184,22 +170,7 @@ extern int ticks;		/* really should be in a header */
 
 #define PAGE_ALIGN(addr)	(((addr) + PAGE_SIZE - 1) & PAGE_MASK)
 
-#ifdef DRM_NO_AGP
-#define DRM_AGP_FIND_DEVICE()	0
-#else
-#define DRM_AGP_FIND_DEVICE()	agp_find_device(0)
-#endif
-
 extern struct cfdriver drm_cd;
-
-/* Capabilities taken from src/sys/dev/pci/pcireg.h. */
-#ifndef PCIY_AGP
-#define PCIY_AGP	0x02
-#endif
-
-#ifndef PCIY_EXPRESS
-#define PCIY_EXPRESS	0x10
-#endif
 
 typedef unsigned long dma_addr_t;
 typedef u_int64_t u64;
@@ -255,11 +226,6 @@ typedef u_int8_t u8;
 
 #define DRM_HZ			hz
 #define DRM_UDELAY(udelay)	DELAY(udelay)
-#define DRM_TIME_SLICE		(hz/20)  /* Time slice for GLXContexts	  */
-
-#define DRM_GET_PRIV_SAREA(_dev, _ctx, _map) do {	\
-	(_map) = (_dev)->context_sareas[_ctx];		\
-} while(0)
 
 #define LOCK_TEST_WITH_RETURN(dev, file_priv)				\
 do {									\
@@ -272,20 +238,15 @@ do {									\
 } while (0)
 
 /* Returns -errno to shared code */
-#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
-ret = 0;								\
-while ( ret == 0 ) {						\
-	DRM_UNLOCK();						\
-	DRM_SPINLOCK(&dev->irq_lock);				\
-	if (condition) {					\
-		DRM_SPINUNLOCK(&dev->irq_lock);			\
-		break;						\
-	}							\
-	ret = -msleep(&(queue), &dev->irq_lock,		 	\
-	     PZERO | PCATCH, "drmwtq", (timeout));		\
-	DRM_SPINUNLOCK(&dev->irq_lock);				\
-	DRM_LOCK();						\
-}
+#define DRM_WAIT_ON( ret, queue, timeout, condition )	\
+DRM_SPINLOCK(&dev->irq_lock);				\
+while ( ret == 0 ) {					\
+	if (condition)					\
+		break;					\
+	ret = -msleep(&(queue), &dev->irq_lock,	 	\
+	     PZERO | PCATCH, "drmwtq", (timeout));	\
+}							\
+DRM_SPINUNLOCK(&dev->irq_lock)
 
 #define DRM_ERROR(fmt, arg...) \
 	printf("error: [" DRM_NAME ":pid%d:%s] *ERROR* " fmt,		\
@@ -334,36 +295,14 @@ struct drm_magic_entry {
 typedef struct drm_buf {
 	int		  idx;	       /* Index into master buflist	     */
 	int		  total;       /* Buffer size			     */
-	int		  order;       /* log-base-2(total)		     */
 	int		  used;	       /* Amount of buffer in use (for DMA)  */
 	unsigned long	  offset;      /* Byte offset (used internally)	     */
-	void		  *address;    /* Address of buffer		     */
+	void 		  *address;      /* Byte offset (used internally)	     */
 	unsigned long	  bus_address; /* Bus address of buffer		     */
-	struct drm_buf	  *next;       /* Kernel-only: used for free list    */
 	__volatile__ int  pending;     /* On hardware DMA queue		     */
 	struct drm_file   *file_priv;  /* Unique identifier of holding process */
-	int		  context;     /* Kernel queue for this buffer	     */
-	enum {
-		DRM_LIST_NONE	 = 0,
-		DRM_LIST_FREE	 = 1,
-		DRM_LIST_WAIT	 = 2,
-		DRM_LIST_PEND	 = 3,
-		DRM_LIST_PRIO	 = 4,
-		DRM_LIST_RECLAIM = 5
-	}		  list;	       /* Which list we're on		     */
-
-	int		  dev_priv_size; /* Size of buffer private stoarge   */
 	void		  *dev_private;  /* Per-buffer private storage       */
 } drm_buf_t;
-
-typedef struct drm_freelist {
-	int		  initialized; /* Freelist in use		   */
-	atomic_t	  count;       /* Number of free buffers	   */
-	drm_buf_t	  *next;       /* End pointer			   */
-
-	int		  low_mark;    /* Low water mark		   */
-	int		  high_mark;   /* High water mark		   */
-} drm_freelist_t;
 
 typedef struct drm_dma_handle {
 	void *vaddr;
@@ -371,7 +310,6 @@ typedef struct drm_dma_handle {
 	bus_dmamap_t	dmamap;
 	bus_dma_segment_t seg;
 	void *addr;
-	bus_addr_t dmaaddr;
 	size_t size;
 } drm_dma_handle_t;
 
@@ -382,30 +320,28 @@ typedef struct drm_buf_entry {
 	int		  seg_count;
 	drm_dma_handle_t  **seglist;
 	int		  page_order;
-
-	drm_freelist_t	  freelist;
 } drm_buf_entry_t;
 
 typedef TAILQ_HEAD(drm_file_list, drm_file) drm_file_list_t;
 struct drm_file {
-	TAILQ_ENTRY(drm_file) link;
-	int		  authenticated;
-	int		  master;
-	int		  minor;
-	pid_t		  pid;
-	uid_t		  uid;
-	int		  refs;
-	drm_magic_t	  magic;
-	unsigned long	  ioctl_count;
-	void		 *driver_priv;
+	TAILQ_ENTRY(drm_file)	 link;
+	void			*driver_priv;
+	int			 authenticated;
+	unsigned long		 ioctl_count;
+	dev_t			 kdev;
+	drm_magic_t		 magic;
+	int			 flags;
+	int			 master;
+	int			 minor;
 };
 
-typedef struct drm_lock_data {
-	drm_hw_lock_t	  *hw_lock;	/* Hardware lock		   */
-	struct drm_file   *file_priv;   /* Unique identifier of holding process (NULL is kernel)*/
-	int		  lock_queue;	/* Queue of blocked processes	   */
-	unsigned long	  lock_time;	/* Time of last lock in jiffies	   */
-} drm_lock_data_t;
+struct drm_lock_data {
+	struct drm_hw_lock	*hw_lock;	/* Hardware lock */
+	/* Unique identifier of holding process (NULL is kernel) */
+	struct drm_file		*file_priv;
+	unsigned long	 	 lock_time;	/* Time of last lock */
+	struct mutex		 spinlock;
+};
 
 /* This structure, in the struct drm_device, is always initialized while
  * the device is open.  dev->dma_lock protects the incrementing of
@@ -435,7 +371,7 @@ struct drm_agp_mem {
 	TAILQ_ENTRY(drm_agp_mem) link;
 };
 
-typedef struct drm_agp_head {
+struct drm_agp_head {
 	struct device				*agpdev;
 	const char				*chipset;
 	TAILQ_HEAD(agp_memlist, drm_agp_mem)	 memory;
@@ -447,7 +383,7 @@ typedef struct drm_agp_head {
 	int					 cant_use_aperture;
 	int					 enabled;
    	int					 mtrr;
-} drm_agp_head_t;
+};
 
 struct drm_sg_dmamem {
 	bus_dma_tag_t		sg_tag;
@@ -467,53 +403,30 @@ typedef struct drm_sg_mem {
 	struct drm_sg_dmamem *mem;
 } drm_sg_mem_t;
 
-/*
- * Generic memory range manager structs
- */ 
-
-struct drm_memrange_node {
-	TAILQ_ENTRY(drm_memrange_node)	 ml_entry;
-	TAILQ_ENTRY(drm_memrange_node)	 fl_entry;
-	struct drm_memrange		*mm;
-	void				*private;
-	int				 free;
-	unsigned long			 start;
-	unsigned long			 size;
-};
-
-TAILQ_HEAD(drm_mmq, drm_memrange_node);
-struct drm_memrange {
-	struct drm_mmq	ml;
-	struct drm_mmq	fl;
-};
-
 typedef TAILQ_HEAD(drm_map_list, drm_local_map) drm_map_list_t;
 
 typedef struct drm_local_map {
-	unsigned long	offset;	 /* Physical address (0 for SAREA)*/
-	unsigned long	size;	 /* Physical size (bytes)	    */
-	drm_map_type_t	type;	 /* Type of memory mapped		    */
-	drm_map_flags_t flags;	 /* Flags				    */
-	void		*handle; /* User-space: "Handle" to pass to mmap    */
-				 /* Kernel-space: kernel-virtual address    */
-	int		mtrr;	 /* Boolean: MTRR used */
-				 /* Private data			    */
-	int		rid;	 /* PCI resource ID for bus_space */
-	struct vga_pci_bar	*bsr;
-	bus_space_tag_t bst;
-	bus_space_handle_t bsh;
-	drm_dma_handle_t *dmah;
-	TAILQ_ENTRY(drm_local_map) link;
-	struct drm_memrange_node *mm;
+	TAILQ_ENTRY(drm_local_map)	 link;	/* Link for map list */
+	struct vga_pci_bar		*bsr;	/* Vga BAR, if applicable */
+	drm_dma_handle_t		*dmah;	/* Handle to DMA mem */
+	void				*handle;/* KVA, if mapped */
+	bus_space_tag_t			 bst;	/* Tag for mapped pci mem */
+	bus_space_handle_t		 bsh;	/* Handle to mapped pci mem */
+	u_long				 ext;	/* extent for mmap */
+	enum drm_map_flags		 flags;	/* Flags */
+	int				 mtrr;	/* Boolean: MTRR used */
+	unsigned long			 offset;/* Physical address */
+	unsigned long			 size;	/* Physical size (bytes) */
+	enum drm_map_type		 type;	/* Type of memory mapped */
 } drm_local_map_t;
 
-TAILQ_HEAD(drm_vbl_sig_list, drm_vbl_sig);
-typedef struct drm_vbl_sig {
-	TAILQ_ENTRY(drm_vbl_sig) link;
-	unsigned int	sequence;
-	int		signo;
-	int		pid;
-} drm_vbl_sig_t;
+struct drm_vblank {
+	u_int32_t	last_vblank;	/* Last vblank we recieved */
+	atomic_t	vbl_count;	/* Number of interrupts */
+	atomic_t	vbl_refcount;	/* Number of users */
+	int		vbl_enabled;	/* Enabled? */
+	int		vbl_inmodeset;	/* is the DDX currently modesetting */
+};
 
 /* location of GART table */
 #define DRM_ATI_GART_MAIN 1
@@ -524,7 +437,7 @@ typedef struct drm_vbl_sig {
 #define DRM_ATI_GART_IGP  3
 
 #define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) -1)
-#define upper_32_bits(_val) (((u64)(_val)) >> 32)
+#define upper_32_bits(_val) ((u_int32_t)(((_val) >> 16) >> 16))
 
 struct drm_ati_pcigart_info {
 	int gart_table_location;
@@ -547,16 +460,9 @@ struct drm_driver_info {
 	void	(*reclaim_buffers_locked)(struct drm_device *,
 		    struct drm_file *);
 	int	(*dma_ioctl)(struct drm_device *, void *, struct drm_file *);
-	void	(*dma_ready)(struct drm_device *);
 	int	(*dma_quiescent)(struct drm_device *);
-	int	(*dma_flush_block_and_flush)(struct drm_device *, int,
-		    drm_lock_flags_t);
-	int	(*dma_flush_unblock)(struct drm_device *, int,
-		    drm_lock_flags_t);
 	int	(*context_ctor)(struct drm_device *, int);
 	int	(*context_dtor)(struct drm_device *, int);
-	int	(*kernel_context_switch)(struct drm_device *, int, int);
-	int	(*kernel_context_switch_unlock)(struct drm_device *);
 	void	(*irq_preinstall)(struct drm_device *);
 	int	(*irq_postinstall)(struct drm_device *);
 	void	(*irq_uninstall)(struct drm_device *);
@@ -620,17 +526,13 @@ struct drm_device {
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
 	int		  unique_len;	/* Length of unique field	   */
-	dev_t		kdev; 		/* used by uvm_mmap, this is just a placeholder */
 	struct vga_pci_softc *vga_softc;
 	
 	int		  if_version;	/* Highest interface version set */
-
-	int		  flags;	/* Flags to open(2)		   */
-
 				/* Locks */
 	DRM_SPINTYPE	  dma_lock;	/* protects dev->dma */
 	DRM_SPINTYPE	  irq_lock;	/* protects irq condition checks */
-	DRM_SPINTYPE	  dev_lock;	/* protects everything else */
+	struct rwlock	  dev_lock;	/* protects everything else */
 	DRM_SPINTYPE	  drw_lock;
 	DRM_SPINTYPE	  tsk_lock;
 
@@ -638,23 +540,16 @@ struct drm_device {
 	int		  open_count;	/* Outstanding files open	   */
 	int		  buf_use;	/* Buffers in use -- cannot alloc  */
 
-				/* Performance counters */
-	unsigned long     counters;
-	drm_stat_type_t   types[15];
-	atomic_t          counts[15];
-
 				/* Authentication */
 	drm_file_list_t   files;
+	drm_magic_t	  magicid;
 	SPLAY_HEAD(drm_magic_tree, drm_magic_entry)	magiclist;
 
 	/* Linked list of mappable regions. Protected by dev_lock */
-	struct drm_memrange handle_mm;
+	struct extent	*handle_ext;
 	drm_map_list_t	  maplist;
 
-	drm_local_map_t	  **context_sareas;
-	int		  max_context;
-
-	drm_lock_data_t	  lock;		/* Information on hardware lock	   */
+	struct drm_lock_data  lock;	/* Information on hardware lock	*/
 
 				/* DMA queues (contexts) */
 	drm_device_dma_t  *dma;		/* Optional pointer for DMA support */
@@ -674,35 +569,22 @@ struct drm_device {
 	int		  pci_slot;
 	int		  pci_func;
 
-	atomic_t	  context_flag;	/* Context swapping flag	   */
-	int		  last_context;	/* Last current context		   */
-
 	/* VBLANK support */
-	int		*vbl_queue;	/* vbl wait channel */
-	atomic_t	*_vblank_count;	/* no vblank interrupts */
-	DRM_SPINTYPE	vbl_lock;	/* locking for vblank operations */
-#if 0 /* unneeded for now */
-	TAILQ_HEAD(vbl_sigs);
-#endif
-	atomic_t	vbl_signal_pending; /* sigs pending on all crtcs */
-	atomic_t	*vblank_refcount; /* no. users for vlank interrupts */
-	u_int32_t	*last_vblank;	/* locked, used for overflow handling*/
-	int		*vblank_enabled; /* make sure we only disable once */
-	u_int32_t	*vblank_premodeset; /* compensation for wraparounds */
-	int		*vblank_suspend; /* Don't wait while crtc is disabled */
-	struct timeout	vblank_disable_timer;
-	int		num_crtcs;	/* number of crtcs on device */
-
-	u_int32_t	max_vblank_count; /* size of counter reg */
+	int			 num_crtcs;		/* number of crtcs */
+	u_int32_t		 max_vblank_count;	/* size of counter reg*/
+	DRM_SPINTYPE		 vbl_lock;		/* VBLANK data lock */
+	int			 vblank_disable_allowed;
+	struct timeout		 vblank_disable_timer;	/* timer for disable */
+	struct drm_vblank	*vblank;		/* One per ctrc */
 
 	pid_t		  buf_pgid;
 
-	drm_agp_head_t    *agp;
-	drm_sg_mem_t      *sg;  /* Scatter gather memory */
-	atomic_t          *ctx_bitmap;
-	void		  *dev_private;
-	unsigned int	  agp_buffer_token;
-	drm_local_map_t   *agp_buffer_map;
+	struct drm_agp_head	*agp;
+	drm_sg_mem_t		*sg;  /* Scatter gather memory */
+	atomic_t		*ctx_bitmap;
+	void			*dev_private;
+	unsigned int		 agp_buffer_token;
+	drm_local_map_t		*agp_buffer_map;
 
 	u_int		  drw_no;
 	/* RB tree of drawable infos */
@@ -728,8 +610,6 @@ dev_type_mmap(drmmmap);
 extern drm_local_map_t	*drm_getsarea(struct drm_device *);
 
 /* File operations helpers (drm_fops.c) */
-int		drm_open_helper(DRM_CDEV, int, int, 
-		    DRM_STRUCTPROC *, struct drm_device *);
 struct drm_file	*drm_find_file_by_minor(struct drm_device *, int);
 
 /* Memory management support (drm_memory.c) */
@@ -744,9 +624,6 @@ void	drm_ioremapfree(drm_local_map_t *);
 int	drm_mtrr_add(unsigned long, size_t, int);
 int	drm_mtrr_del(int, unsigned long, size_t, int);
 
-int	drm_context_switch(struct drm_device *, int, int);
-int	drm_context_switch_complete(struct drm_device *, int);
-
 int	drm_ctxbitmap_init(struct drm_device *);
 void	drm_ctxbitmap_cleanup(struct drm_device *);
 void	drm_ctxbitmap_free(struct drm_device *, int);
@@ -759,28 +636,27 @@ void	drm_write16(drm_local_map_t *, unsigned long, u_int16_t);
 void	drm_write32(drm_local_map_t *, unsigned long, u_int32_t);
 
 /* Locking IOCTL support (drm_lock.c) */
-int	drm_lock_take(__volatile__ unsigned int *, unsigned int);
-int	drm_lock_transfer(struct drm_device *, __volatile__ unsigned int *,
-	    unsigned int);
-int	drm_lock_free(struct drm_device *, __volatile__ unsigned int *,
-	    unsigned int);
+int	drm_lock_take(struct drm_lock_data *, unsigned int);
+int	drm_lock_free(struct drm_lock_data *, unsigned int);
 
 /* Buffer management support (drm_bufs.c) */
 unsigned long drm_get_resource_start(struct drm_device *, unsigned int);
 unsigned long drm_get_resource_len(struct drm_device *, unsigned int);
 void	drm_rmmap(struct drm_device *, drm_local_map_t *);
+void	drm_rmmap_locked(struct drm_device *, drm_local_map_t *);
 int	drm_order(unsigned long);
 drm_local_map_t
 	*drm_find_matching_map(struct drm_device *, drm_local_map_t *);
 int	drm_addmap(struct drm_device *, unsigned long, unsigned long,
-	    drm_map_type_t, drm_map_flags_t, drm_local_map_t **);
-int	drm_addbufs_pci(struct drm_device *, drm_buf_desc_t *);
-int	drm_addbufs_sg(struct drm_device *, drm_buf_desc_t *);
-int	drm_addbufs_agp(struct drm_device *, drm_buf_desc_t *);
+	    enum drm_map_type, enum drm_lock_flags, drm_local_map_t **);
+int	drm_addbufs_pci(struct drm_device *, struct drm_buf_desc *);
+int	drm_addbufs_sg(struct drm_device *, struct drm_buf_desc *);
+int	drm_addbufs_agp(struct drm_device *, struct drm_buf_desc *);
 
 /* DMA support (drm_dma.c) */
 int	drm_dma_setup(struct drm_device *);
 void	drm_dma_takedown(struct drm_device *);
+void	drm_cleanup_buf(struct drm_device *, drm_buf_entry_t *);
 void	drm_free_buffer(struct drm_device *, drm_buf_t *);
 void	drm_reclaim_buffers(struct drm_device *, struct drm_file *);
 #define drm_core_reclaim_buffers drm_reclaim_buffers
@@ -792,11 +668,9 @@ irqreturn_t drm_irq_handler(DRM_IRQ_ARGS);
 void	drm_driver_irq_preinstall(struct drm_device *);
 void	drm_driver_irq_postinstall(struct drm_device *);
 void	drm_driver_irq_uninstall(struct drm_device *);
-void	drm_vbl_send_signals(struct drm_device *, int);
 void	drm_vblank_cleanup(struct drm_device *);
 int	drm_vblank_init(struct drm_device *, int);
 u_int32_t drm_vblank_count(struct drm_device *, int);
-void	drm_update_vblank_count(struct drm_device *, int);
 int	drm_vblank_get(struct drm_device *, int);
 void	drm_vblank_put(struct drm_device *, int);
 int	drm_modeset_ctl(struct drm_device *, void *, struct drm_file *);
@@ -805,23 +679,24 @@ void	drm_handle_vblank(struct drm_device *, int);
 /* AGP/PCI Express/GART support (drm_agpsupport.c) */
 int	drm_device_is_agp(struct drm_device *);
 int	drm_device_is_pcie(struct drm_device *);
-drm_agp_head_t *drm_agp_init(void);
+struct drm_agp_head *drm_agp_init(void);
+void	drm_agp_takedown(struct drm_device *);
 int	drm_agp_acquire(struct drm_device *);
 int	drm_agp_release(struct drm_device *);
-int	drm_agp_info(struct drm_device *, drm_agp_info_t *);
-int	drm_agp_enable(struct drm_device *, drm_agp_mode_t);
+int	drm_agp_info(struct drm_device *, struct drm_agp_info *);
+int	drm_agp_enable(struct drm_device *, struct drm_agp_mode);
 void	*drm_agp_allocate_memory(size_t, u32);
 int	drm_agp_free_memory(void *);
 int	drm_agp_bind_memory(void *, off_t);
 int	drm_agp_unbind_memory(void *);
-int	drm_agp_alloc(struct drm_device *, drm_agp_buffer_t *);
-int	drm_agp_free(struct drm_device *, drm_agp_buffer_t *);
-int	drm_agp_bind(struct drm_device *, drm_agp_binding_t *);
-int	drm_agp_unbind(struct drm_device *, drm_agp_binding_t *);
+int	drm_agp_alloc(struct drm_device *, struct drm_agp_buffer *);
+int	drm_agp_free(struct drm_device *, struct drm_agp_buffer *);
+int	drm_agp_bind(struct drm_device *, struct drm_agp_binding *);
+int	drm_agp_unbind(struct drm_device *, struct drm_agp_binding *);
 
 /* Scatter Gather Support (drm_scatter.c) */
 void	drm_sg_cleanup(drm_sg_mem_t *);
-int	drm_sg_alloc(struct drm_device *, drm_scatter_gather_t *);
+int	drm_sg_alloc(struct drm_device *, struct drm_scatter_gather *);
 
 /* ATI PCIGART support (ati_pcigart.c) */
 int	drm_ati_pcigart_init(struct drm_device *,
@@ -847,13 +722,8 @@ int	drm_noop(struct drm_device *, void *, struct drm_file *);
 /* Context IOCTL support (drm_context.c) */
 int	drm_resctx(struct drm_device *, void *, struct drm_file *);
 int	drm_addctx(struct drm_device *, void *, struct drm_file *);
-int	drm_modctx(struct drm_device *, void *, struct drm_file *);
 int	drm_getctx(struct drm_device *, void *, struct drm_file *);
-int	drm_switchctx(struct drm_device *, void *, struct drm_file *);
-int	drm_newctx(struct drm_device *, void *, struct drm_file *);
 int	drm_rmctx(struct drm_device *, void *, struct drm_file *);
-int	drm_setsareactx(struct drm_device *, void *, struct drm_file *);
-int	drm_getsareactx(struct drm_device *, void *, struct drm_file *);
 
 /* Drawable IOCTL support (drm_drawable.c) */
 int	drm_adddraw(struct drm_device *, void *, struct drm_file *);
@@ -873,8 +743,6 @@ SPLAY_PROTOTYPE(drm_magic_tree, drm_magic_entry, node, drm_magic_cmp);
 int	drm_addmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_rmmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_addbufs_ioctl(struct drm_device *, void *, struct drm_file *);
-int	drm_infobufs(struct drm_device *, void *, struct drm_file *);
-int	drm_markbufs(struct drm_device *, void *, struct drm_file *);
 int	drm_freebufs(struct drm_device *, void *, struct drm_file *);
 int	drm_mapbufs(struct drm_device *, void *, struct drm_file *);
 
@@ -905,25 +773,8 @@ drm_dma_handle_t *drm_pci_alloc(struct drm_device *, size_t, size_t,
 		      dma_addr_t);
 void	drm_pci_free(struct drm_device *, drm_dma_handle_t *);
 
-/* Memrange functions for managing aperture space */
-struct drm_memrange_node
-		*drm_memrange_get_block(struct drm_memrange_node *,
-		     unsigned long, unsigned);
-void		 drm_memrange_put_block(struct drm_memrange_node *);
-struct drm_memrange_node
-		*drm_memrange_search_free(const struct drm_memrange *,
-		     unsigned long, unsigned, int);
-int		 drm_memrange_init(struct drm_memrange *, unsigned long,
-		     unsigned long);
-void		 drm_memrange_takedown(struct drm_memrange *);
-int		 drm_memrange_clean(struct drm_memrange *);
-unsigned long	 drm_memrange_tail_space(struct drm_memrange *);
-int		 drm_memrange_remove_space_from_tail(struct drm_memrange *,
-		     unsigned long);
-int		 drm_memrange_add_space_to_tail(struct drm_memrange *,
-		     unsigned long );
-
 /* Inline replacements for DRM_IOREMAP macros */
+#define drm_core_ioremap_wc drm_core_ioremap
 static __inline__ void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
 {
 	map->handle = drm_ioremap(dev, map);
@@ -938,16 +789,13 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 {
 	drm_local_map_t *map;
 
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+	DRM_LOCK();
 	TAILQ_FOREACH(map, &dev->maplist, link) {
-		if (offset == map->mm->start)
-			return map;
+		if (offset == map->ext)
+			break;
 	}
-	return NULL;
-}
-
-static __inline__ void drm_core_dropmap(struct drm_map *map)
-{
+	DRM_UNLOCK();
+	return (map);
 }
 
 #endif /* __KERNEL__ */

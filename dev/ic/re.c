@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.82 2008/04/20 01:18:02 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.92 2008/10/06 00:34:09 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -185,8 +185,7 @@ int	re_miibus_readreg(struct device *, int, int);
 void	re_miibus_writereg(struct device *, int, int, int);
 void	re_miibus_statchg(struct device *);
 
-void	re_setmulti(struct rl_softc *);
-void	re_setpromisc(struct rl_softc *);
+void	re_iff(struct rl_softc *);
 void	re_reset(struct rl_softc *);
 
 #ifdef RE_DIAG
@@ -209,22 +208,27 @@ static const struct re_revision {
 	u_int32_t		re_chipid;
 	const char		*re_name;
 } re_revisions[] = {
-	{ RL_HWREV_8169,	"RTL8169" },
-	{ RL_HWREV_8110S,	"RTL8110S" },
-	{ RL_HWREV_8169S,	"RTL8169S" },
-	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
-	{ RL_HWREV_8169_8110SCd, "RTL8169/8110SCd" },
-	{ RL_HWREV_8168_SPIN1,	"RTL8168 1" },
+	{ RL_HWREV_8100,	"RTL8100" },
 	{ RL_HWREV_8100E_SPIN1,	"RTL8100E 1" },
+	{ RL_HWREV_8100E_SPIN2, "RTL8100E 2" },
+	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
+	{ RL_HWREV_8102E,	"RTL8102E" },
+	{ RL_HWREV_8102EL,	"RTL8102EL" },
+	{ RL_HWREV_8110S,	"RTL8110S" },
+	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
+	{ RL_HWREV_8168_SPIN1,	"RTL8168 1" },
 	{ RL_HWREV_8168_SPIN2,	"RTL8168 2" },
 	{ RL_HWREV_8168_SPIN3,	"RTL8168 3" },
-	{ RL_HWREV_8100E_SPIN2, "RTL8100E 2" },
-	{ RL_HWREV_8168C,	"RTL8168C" },
-	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
-	{ RL_HWREV_8101,	"RTL8101" },
-	{ RL_HWREV_8100,	"RTL8100" },
+	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
+	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
+	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8169,	"RTL8169" },
+	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
+	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
+	{ RL_HWREV_8169_8110SCd, "RTL8169/8110SCd" },
 	{ RL_HWREV_8169_8110SCe, "RTL8169/8110SCe" },
+	{ RL_HWREV_8169S,	"RTL8169S" },
 
 	{ 0, NULL }
 };
@@ -499,13 +503,10 @@ re_miibus_statchg(struct device *dev)
 {
 }
 
-/*
- * Program the 64-bit multicast hash filter.
- */
 void
-re_setmulti(struct rl_softc *sc)
+re_iff(struct rl_softc *sc)
 {
-	struct ifnet		*ifp;
+	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			h = 0;
 	u_int32_t		hashes[2] = { 0, 0 };
 	u_int32_t		rxfilt;
@@ -513,49 +514,39 @@ re_setmulti(struct rl_softc *sc)
 	struct arpcom		*ac = &sc->sc_arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
-	
-	ifp = &sc->sc_arpcom.ac_if;
 
 	rxfilt = CSR_READ_4(sc, RL_RXCFG);
+	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_MULTI);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
+	if (ifp->if_flags & IFF_PROMISC ||
+	    ac->ac_multirangecnt > 0) {
+		ifp ->if_flags |= IFF_ALLMULTI;
 		rxfilt |= RL_RXCFG_RX_MULTI;
-		CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
-		CSR_WRITE_4(sc, RL_MAR0, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, RL_MAR4, 0xFFFFFFFF);
-		return;
-	}
+		if (ifp->if_flags & IFF_PROMISC)
+			rxfilt |= RL_RXCFG_RX_ALLPHYS;
+		hashes[0] = hashes[1] = 0xFFFFFFFF;
+	} else {
+		/* first, zot all the existing hash bits */
+		CSR_WRITE_4(sc, RL_MAR0, 0);
+		CSR_WRITE_4(sc, RL_MAR4, 0);
 
-	/* first, zot all the existing hash bits */
-	CSR_WRITE_4(sc, RL_MAR0, 0);
-	CSR_WRITE_4(sc, RL_MAR4, 0);
-
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			mcnt = MAX_NUM_MULTICAST_ADDRESSES;
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) >> 26;
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+			mcnt++;
+			ETHER_NEXT_MULTI(step, enm);
 		}
-		if (mcnt == MAX_NUM_MULTICAST_ADDRESSES)
-			break;
 
-		h = (ether_crc32_be(enm->enm_addrlo,
-		    ETHER_ADDR_LEN) >> 26) & 0x0000003F;
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		mcnt++;
-		ETHER_NEXT_MULTI(step, enm);
+		if (mcnt)
+			rxfilt |= RL_RXCFG_RX_MULTI;
 	}
-
-	if (mcnt)
-		rxfilt |= RL_RXCFG_RX_MULTI;
-	else
-		rxfilt &= ~RL_RXCFG_RX_MULTI;
-
-	CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
 
 	/*
 	 * For some unfathomable reason, RealTek decided to reverse
@@ -563,35 +554,15 @@ re_setmulti(struct rl_softc *sc)
 	 * parts. This means we have to write the hash pattern in reverse
 	 * order for those devices.
 	 */
-	switch (sc->sc_hwrev) {
-	case RL_HWREV_8100E_SPIN1:
-	case RL_HWREV_8100E_SPIN2:
-	case RL_HWREV_8101E:
-	case RL_HWREV_8168_SPIN1:
-	case RL_HWREV_8168_SPIN2:
+	if (sc->rl_flags & RL_FLAG_INVMAR) {
 		CSR_WRITE_4(sc, RL_MAR0, swap32(hashes[1]));
 		CSR_WRITE_4(sc, RL_MAR4, swap32(hashes[0]));
-		break;
-	default:
+	} else {
 		CSR_WRITE_4(sc, RL_MAR0, hashes[0]);
 		CSR_WRITE_4(sc, RL_MAR4, hashes[1]);
 	}
-}
 
-void
-re_setpromisc(struct rl_softc *sc)
-{
-	struct ifnet	*ifp;
-	u_int32_t	rxcfg = 0;
-
-	ifp = &sc->sc_arpcom.ac_if;
-
-	rxcfg = CSR_READ_4(sc, RL_RXCFG);
-	if (ifp->if_flags & IFF_PROMISC) 
-		rxcfg |= RL_RXCFG_RX_ALLPHYS;
-        else
-		rxcfg &= ~RL_RXCFG_RX_ALLPHYS;
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
+	CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
 }
 
 void
@@ -669,7 +640,7 @@ re_diag(struct rl_softc *sc)
 	sc->rl_testmode = 1;
 	re_reset(sc);
 	re_init(ifp);
-	sc->rl_link = 1;
+	sc->rl_flags |= RL_FLAG_LINK;
 	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
 		phyaddr = 0;
 	else
@@ -783,9 +754,8 @@ re_diag(struct rl_softc *sc)
 
 done:
 	/* Turn interface off, release resources */
-
 	sc->rl_testmode = 0;
-	sc->rl_link = 0;
+	sc->rl_flags &= ~RL_FLAG_LINK;
 	ifp->if_flags &= ~IFF_PROMISC;
 	re_stop(ifp, 1);
 	if (m0 != NULL)
@@ -827,40 +797,102 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	/* Reset the adapter. */
 	re_reset(sc);
 
-	sc->rl_eewidth = RL_9356_ADDR_LEN;
-	re_read_eeprom(sc, (caddr_t)&re_did, 0, 1);
-	if (re_did != 0x8129)
-		sc->rl_eewidth = RL_9346_ADDR_LEN;
-
-	/*
-	 * Get station address from the EEPROM.
-	 */
-	re_read_eeprom(sc, (caddr_t)as, RL_EE_EADDR, 3);
-	for (i = 0; i < ETHER_ADDR_LEN / 2; i++)
-		as[i] = letoh16(as[i]);
-	bcopy(as, eaddr, sizeof(eaddr));
-#ifdef __armish__
-	/*
-	 * On the Thecus N2100, the MAC address in the EEPROM is
-	 * always 00:14:fd:10:00:00.  The proper MAC address is stored
-	 * in flash.  Fortunately RedBoot configures the proper MAC
-	 * address (for the first onboard interface) which we can read
-	 * from the IDR.
-	 */
-	if (eaddr[0] == 0x00 && eaddr[1] == 0x14 && eaddr[2] == 0xfd &&
-	    eaddr[3] == 0x10 && eaddr[4] == 0x00 && eaddr[5] == 0x00) {
-		if (boot_eaddr_valid == 0) {
-			boot_eaddr.eaddr_word[1] = letoh32(CSR_READ_4(sc, RL_IDR4));
-			boot_eaddr.eaddr_word[0] = letoh32(CSR_READ_4(sc, RL_IDR0));
-			boot_eaddr_valid = 1;
-		}
-
-		bcopy(boot_eaddr.eaddr, eaddr, sizeof(eaddr));
-		eaddr[5] += sc->sc_dev.dv_unit;
-	}
-#endif
-
 	sc->sc_hwrev = CSR_READ_4(sc, RL_TXCFG) & RL_TXCFG_HWREV;
+
+	switch (sc->sc_hwrev) {
+	case RL_HWREV_8139CPLUS:
+		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8100E_SPIN1:
+	case RL_HWREV_8100E_SPIN2:
+	case RL_HWREV_8101E:
+		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
+		    RL_FLAG_PHYWAKE;
+		break;
+	case RL_HWREV_8102E:
+	case RL_HWREV_8102EL:
+		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
+		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
+		    RL_FLAG_MACSTAT;
+		break;
+	case RL_HWREV_8168_SPIN1:
+	case RL_HWREV_8168_SPIN2:
+	case RL_HWREV_8168_SPIN3:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_MACSTAT;
+		break;
+	case RL_HWREV_8168C:
+	case RL_HWREV_8168C_SPIN2:
+	case RL_HWREV_8168CP:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT;
+		/*
+		 * These controllers support jumbo frame but it seems
+		 * that enabling it requires touching additional magic
+		 * registers. Depending on MAC revisions some
+		 * controllers need to disable checksum offload. So
+		 * disable jumbo frame until I have better idea what
+		 * it really requires to make it support.
+		 * RTL8168C/CP : supports up to 6KB jumbo frame.
+		 * RTL8111C/CP : supports up to 9KB jumbo frame.
+		 */
+		sc->rl_flags |= RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8169_8110SB:
+	case RL_HWREV_8169_8110SBL:
+	case RL_HWREV_8169_8110SCd:
+	case RL_HWREV_8169_8110SCe:
+		sc->rl_flags |= RL_FLAG_PHYWAKE;
+		break;
+	default:
+		break;
+	}
+
+	if (sc->rl_flags & RL_FLAG_PAR) {
+		/*
+		 * XXX Should have a better way to extract station
+		 * address from EEPROM.
+		 */
+		for (i = 0; i < ETHER_ADDR_LEN; i++)
+			eaddr[i] = CSR_READ_1(sc, RL_IDR0 + i);
+	} else {
+		sc->rl_eewidth = RL_9356_ADDR_LEN;
+		re_read_eeprom(sc, (caddr_t)&re_did, 0, 1);
+		if (re_did != 0x8129)
+			sc->rl_eewidth = RL_9346_ADDR_LEN;
+
+		/*
+		 * Get station address from the EEPROM.
+		 */
+		re_read_eeprom(sc, (caddr_t)as, RL_EE_EADDR, 3);
+		for (i = 0; i < ETHER_ADDR_LEN / 2; i++)
+			as[i] = letoh16(as[i]);
+		bcopy(as, eaddr, sizeof(eaddr));
+
+#ifdef __armish__
+		/*
+		 * On the Thecus N2100, the MAC address in the EEPROM is
+		 * always 00:14:fd:10:00:00.  The proper MAC address is
+		 * stored in flash.  Fortunately RedBoot configures the
+		 * proper MAC address (for the first onboard interface)
+		 * which we can read from the IDR.
+		 */
+		if (eaddr[0] == 0x00 && eaddr[1] == 0x14 &&
+		    eaddr[2] == 0xfd && eaddr[3] == 0x10 &&
+		    eaddr[4] == 0x00 && eaddr[5] == 0x00) {
+			if (boot_eaddr_valid == 0) {
+				boot_eaddr.eaddr_word[1] =
+				    letoh32(CSR_READ_4(sc, RL_IDR4));
+				boot_eaddr.eaddr_word[0] =
+				    letoh32(CSR_READ_4(sc, RL_IDR0));
+				boot_eaddr_valid = 1;
+			}
+
+			bcopy(boot_eaddr.eaddr, eaddr, sizeof(eaddr));
+			eaddr[5] += sc->sc_dev.dv_unit;
+		}
+#endif
+	}
 
 	/*
 	 * Set RX length mask, TX poll request register
@@ -890,6 +922,32 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 
 	printf(", %s, address %s\n", intrstr,
 	    ether_sprintf(sc->sc_arpcom.ac_enaddr));
+
+	if (sc->sc_hwrev == RL_HWREV_8139CPLUS) {
+		sc->rl_bus_speed = 33; /* XXX */
+	} else if (sc->rl_flags & RL_FLAG_PCIE) {
+		sc->rl_bus_speed = 125;
+	} else {
+		u_int8_t cfg2;
+
+		cfg2 = CSR_READ_1(sc, RL_CFG2);
+		switch (cfg2 & RL_CFG2_PCI_MASK) {
+		case RL_CFG2_PCI_33MHZ:
+			sc->rl_bus_speed = 33;
+			break;
+		case RL_CFG2_PCI_66MHZ:
+			sc->rl_bus_speed = 66;
+			break;
+		default:
+			printf("%s: unknown bus speed, assume 33MHz\n",
+			    sc->sc_dev.dv_xname);
+			sc->rl_bus_speed = 33;
+			break;
+		}
+
+		if (cfg2 & RL_CFG2_PCI_64BIT)
+			sc->rl_flags |= RL_FLAG_PCI64;
+	}
 
 	if (sc->rl_ldata.rl_tx_desc_cnt >
 	    PAGE_SIZE / sizeof(struct rl_desc)) {
@@ -1002,7 +1060,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_start = re_start;
 	ifp->if_watchdog = re_watchdog;
 	ifp->if_init = re_init;
-	if (sc->sc_hwrev != RL_HWREV_8139CPLUS)
+	if ((sc->rl_flags & RL_FLAG_NOJUMBO) == 0)
 		ifp->if_hardmtu = RL_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
 	IFQ_SET_READY(&ifp->if_snd);
@@ -1015,6 +1073,12 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 #endif
 
 	timeout_set(&sc->timer_handle, re_tick, sc);
+
+	/* Take PHY out of power down mode. */
+	if (sc->rl_flags & RL_FLAG_PHYWAKE) {
+		re_gmii_writereg((struct device *)sc, 1, 0x1f, 0);
+		re_gmii_writereg((struct device *)sc, 1, 0x0e, 0);
+	}
 
 	/* Do MII setup */
 	sc->sc_mii.mii_ifp = ifp;
@@ -1229,7 +1293,7 @@ re_rxeof(struct rl_softc *sc)
 	int		i, total_len;
 	struct rl_desc	*cur_rx;
 	struct rl_rxsoft *rxs;
-	u_int32_t	rxstat;
+	u_int32_t	rxstat, rxvlan;
 
 	ifp = &sc->sc_arpcom.ac_if;
 
@@ -1238,6 +1302,7 @@ re_rxeof(struct rl_softc *sc)
 		RL_RXDESCSYNC(sc, i,
 		    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
 		rxstat = letoh32(cur_rx->rl_cmdstat);
+		rxvlan = letoh32(cur_rx->rl_vlanctl);
 		RL_RXDESCSYNC(sc, i, BUS_DMASYNC_PREREAD);
 		if ((rxstat & RL_RDESC_STAT_OWN) != 0)
 			break;
@@ -1349,17 +1414,34 @@ re_rxeof(struct rl_softc *sc)
 
 		/* Do RX checksumming */
 
-		/* Check IP header checksum */
-		if ((rxstat & RL_RDESC_STAT_PROTOID) &&
-		    !(rxstat & RL_RDESC_STAT_IPSUMBAD))
-			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+		if (sc->rl_flags & RL_FLAG_DESCV2) {
+			/* Check IP header checksum */
+			if ((rxstat & RL_RDESC_STAT_PROTOID) &&
+			    !(rxstat & RL_RDESC_STAT_IPSUMBAD) &&
+			    (rxvlan & RL_RDESC_IPV4))
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
-		/* Check TCP/UDP checksum */
-		if ((RL_TCPPKT(rxstat) &&
-		    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
-		    (RL_UDPPKT(rxstat) &&
-		    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
-			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
+			/* Check TCP/UDP checksum */
+			if (((rxstat & RL_RDESC_STAT_TCP) &&
+			    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
+			    ((rxstat & RL_RDESC_STAT_UDP) &&
+			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
+				    M_UDP_CSUM_IN_OK;
+		} else {
+			/* Check IP header checksum */
+			if ((rxstat & RL_RDESC_STAT_PROTOID) &&
+			    !(rxstat & RL_RDESC_STAT_IPSUMBAD))
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+
+			/* Check TCP/UDP checksum */
+			if ((RL_TCPPKT(rxstat) &&
+			    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
+			    (RL_UDPPKT(rxstat) &&
+			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
+				    M_UDP_CSUM_IN_OK;
+		}
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -1455,20 +1537,20 @@ re_tick(void *xsc)
 	s = splnet();
 
 	mii_tick(mii);
-	if (sc->rl_link) {
+	if (sc->rl_flags & RL_FLAG_LINK) {
 		if (!(mii->mii_media_status & IFM_ACTIVE))
-			sc->rl_link = 0;
+			sc->rl_flags &= ~RL_FLAG_LINK;
 	} else {
 		if (mii->mii_media_status & IFM_ACTIVE &&
 		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
-			sc->rl_link = 1;
+			sc->rl_flags |= RL_FLAG_LINK;
 			if (!IFQ_IS_EMPTY(&ifp->if_snd))
 				re_start(ifp);
 		}
 	}
 	splx(s);
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 }
 
 int
@@ -1532,7 +1614,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	bus_dmamap_t	map;
 	int		error, seg, nsegs, uidx, startidx, curidx, lastidx, pad;
 	struct rl_desc	*d;
-	u_int32_t	cmdstat, vlanctl, rl_flags = 0;
+	u_int32_t	cmdstat, vlanctl = 0, csum_flags = 0;
 	struct rl_txq	*txq;
 #if NVLAN > 0
 	struct ifvlan	*ifv = NULL;
@@ -1560,11 +1642,19 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 
 	if ((m->m_pkthdr.csum_flags &
 	    (M_IPV4_CSUM_OUT|M_TCPV4_CSUM_OUT|M_UDPV4_CSUM_OUT)) != 0) {
-		rl_flags |= RL_TDESC_CMD_IPCSUM;
-		if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
-			rl_flags |= RL_TDESC_CMD_TCPCSUM;
-		if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
-			rl_flags |= RL_TDESC_CMD_UDPCSUM;
+		if (sc->rl_flags & RL_FLAG_DESCV2) {
+			vlanctl |= RL_TDESC_CMD_IPCSUMV2;
+			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+				vlanctl |= RL_TDESC_CMD_TCPCSUMV2;
+			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+				vlanctl |= RL_TDESC_CMD_UDPCSUMV2;
+		} else {
+			csum_flags |= RL_TDESC_CMD_IPCSUM;
+			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+				csum_flags |= RL_TDESC_CMD_TCPCSUM;
+			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+				csum_flags |= RL_TDESC_CMD_UDPCSUM;
+		}
 	}
 
 	txq = &sc->rl_ldata.rl_txq[*idx];
@@ -1580,8 +1670,9 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 
 	nsegs = map->dm_nsegs;
 	pad = 0;
-	if (m->m_pkthdr.len <= RL_IP4CSUMTX_PADLEN &&
-	    (rl_flags & RL_TDESC_CMD_IPCSUM) != 0) {
+	if ((sc->rl_flags & RL_FLAG_DESCV2) == 0 &&
+	    m->m_pkthdr.len <= RL_IP4CSUMTX_PADLEN &&
+	    (csum_flags & RL_TDESC_CMD_IPCSUM) != 0) {
 		pad = 1;
 		nsegs++;
 	}
@@ -1603,10 +1694,9 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	 * appear in all descriptors of a multi-descriptor
 	 * transmission attempt.
 	 */
-	vlanctl = 0;
 #if NVLAN > 0
 	if (ifv != NULL)
-		vlanctl = swap16(ifv->ifv_tag) | RL_TDESC_VLANCTL_TAG;
+		vlanctl |= swap16(ifv->ifv_tag) | RL_TDESC_VLANCTL_TAG;
 #endif
 
 	/*
@@ -1645,7 +1735,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 
 		d->rl_vlanctl = htole32(vlanctl);
 		re_set_bufaddr(d, map->dm_segs[seg].ds_addr);
-		cmdstat = rl_flags | map->dm_segs[seg].ds_len;
+		cmdstat = csum_flags | map->dm_segs[seg].ds_len;
 		if (seg == 0)
 			cmdstat |= RL_TDESC_CMD_SOF;
 		else
@@ -1667,7 +1757,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 		d->rl_vlanctl = htole32(vlanctl);
 		paddaddr = RL_TXPADDADDR(sc);
 		re_set_bufaddr(d, paddaddr);
-		cmdstat = rl_flags |
+		cmdstat = csum_flags |
 		    RL_TDESC_CMD_OWN | RL_TDESC_CMD_EOF |
 		    (RL_IP4CSUMTX_PADLEN + 1 - m->m_pkthdr.len);
 		if (curidx == (RL_TX_DESC_CNT(sc) - 1))
@@ -1716,7 +1806,9 @@ re_start(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (!sc->rl_link || ifp->if_flags & IFF_OACTIVE)
+	if (ifp->if_flags & IFF_OACTIVE)
+		return;
+	if ((sc->rl_flags & RL_FLAG_LINK) == 0)
 		return;
 
 	idx = sc->rl_ldata.rl_txq_prodidx;
@@ -1791,6 +1883,7 @@ re_init(struct ifnet *ifp)
 {
 	struct rl_softc *sc = ifp->if_softc;
 	u_int32_t	rxcfg = 0;
+	u_int16_t	cfg;
 	int		s;
 	union {
 		u_int32_t align_dummy;
@@ -1808,9 +1901,17 @@ re_init(struct ifnet *ifp)
 	 * Enable C+ RX and TX mode, as well as RX checksum offload.
 	 * We must configure the C+ register before all others.
 	 */
-	CSR_WRITE_2(sc, RL_CPLUS_CMD, RL_CPLUSCMD_RXENB|
-	    RL_CPLUSCMD_TXENB|RL_CPLUSCMD_PCI_MRW|
-	    RL_CPLUSCMD_RXCSUM_ENB);
+	cfg = RL_CPLUSCMD_PCI_MRW;
+	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
+		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+	if (sc->rl_flags & RL_FLAG_MACSTAT) {
+		cfg |= RL_CPLUSCMD_MACSTAT_DIS;
+		/* XXX magic. */
+		cfg |= 0x0001;
+	} else {
+		cfg |= RL_CPLUSCMD_RXENB | RL_CPLUSCMD_TXENB;
+	}
+	CSR_WRITE_2(sc, RL_CPLUS_CMD, cfg);
 
 	/*
 	 * Init our MAC address.  Even though the chipset
@@ -1880,13 +1981,8 @@ re_init(struct ifnet *ifp)
 
 	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
-	/* Set promiscuous mode. */
-	re_setpromisc(sc);
-
-	/*
-	 * Program the multicast filter, if necessary.
-	 */
-	re_setmulti(sc);
+	/* Program promiscuous mode and multicast filters. */
+	re_iff(sc);
 
 	/*
 	 * Enable interrupts.
@@ -1935,9 +2031,9 @@ re_init(struct ifnet *ifp)
 
 	splx(s);
 
-	sc->rl_link = 0;
+	sc->rl_flags &= ~RL_FLAG_LINK;
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 
 	return (0);
 }
@@ -1980,12 +2076,6 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command,
-	    data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2004,14 +2094,10 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    ((ifp->if_flags ^ sc->if_flags) &
-			     IFF_PROMISC)) {
-				re_setpromisc(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					re_init(ifp);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				re_iff(sc);
+			else
+				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				re_stop(ifp, 1);
@@ -2029,7 +2115,7 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			 * filter accordingly.
 			 */
 			if (ifp->if_flags & IFF_RUNNING)
-				re_setmulti(sc);
+				re_iff(sc);
 			error = 0;
 		}
 		break;
@@ -2038,12 +2124,10 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -2079,7 +2163,7 @@ re_stop(struct ifnet *ifp, int disable)
 	sc = ifp->if_softc;
 
 	ifp->if_timer = 0;
-	sc->rl_link = 0;
+	sc->rl_flags &= ~RL_FLAG_LINK;
 
 	timeout_del(&sc->timer_handle);
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5211.c,v 1.36 2007/11/01 20:32:16 reyk Exp $	*/
+/*	$OpenBSD: ar5211.c,v 1.40 2008/09/13 13:35:06 reyk Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -136,6 +136,7 @@ ar5k_ar5211_fill(struct ath_hal *hal)
 	AR5K_HAL_FUNCTION(hal, ar5211, is_key_valid);
 	AR5K_HAL_FUNCTION(hal, ar5211, set_key);
 	AR5K_HAL_FUNCTION(hal, ar5211, set_key_lladdr);
+	AR5K_HAL_FUNCTION(hal, ar5211, softcrypto);
 
 	/*
 	 * Power management functions
@@ -507,7 +508,7 @@ ar5k_ar5211_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 	/*
 	 * Write initial RF gain settings
 	 */
-	if (ar5k_rfgain(hal, AR5K_INI_PHY_5111, freq) == AH_FALSE)
+	if (ar5k_rfgain(hal, freq) == AH_FALSE)
 		return (AH_FALSE);
 
 	AR5K_DELAY(1000);
@@ -686,6 +687,7 @@ ar5k_ar5211_set_opmode(struct ath_hal *hal)
 	pcu_reg = 0;
 
 	switch (hal->ah_op_mode) {
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 		pcu_reg |= AR5K_AR5211_STA_ID1_ADHOC |
 		    AR5K_AR5211_STA_ID1_DESC_ANTENNA;
@@ -695,6 +697,7 @@ ar5k_ar5211_set_opmode(struct ath_hal *hal)
 		pcu_reg |= AR5K_AR5211_STA_ID1_AP |
 		    AR5K_AR5211_STA_ID1_RTS_DEFAULT_ANTENNA;
 		break;
+#endif
 
 	case IEEE80211_M_STA:
 	case IEEE80211_M_MONITOR:
@@ -2018,6 +2021,28 @@ ar5k_ar5211_set_key_lladdr(struct ath_hal *hal, u_int16_t entry,
 	return (AH_TRUE);
 }
 
+HAL_BOOL
+ar5k_ar5211_softcrypto(struct ath_hal *hal, HAL_BOOL enable)
+{
+	u_int32_t bits;
+	int i;
+
+	bits = AR5K_AR5211_DIAG_SW_DIS_ENC | AR5K_AR5211_DIAG_SW_DIS_DEC;
+	if (enable == AH_TRUE) {
+		/* Disable the hardware crypto engine */
+		AR5K_REG_ENABLE_BITS(AR5K_AR5211_DIAG_SW, bits);
+	} else {
+		/* Enable the hardware crypto engine */
+		AR5K_REG_DISABLE_BITS(AR5K_AR5211_DIAG_SW, bits);
+	}
+
+	/* Reset the key cache */
+	for (i = 0; i < AR5K_AR5211_KEYTABLE_SIZE; i++)
+		ar5k_ar5211_reset_key(hal, i);
+
+	return (AH_TRUE);
+}
+
 /*
  * Power management functions
  */
@@ -2377,9 +2402,21 @@ HAL_BOOL
 ar5k_ar5211_get_capabilities(struct ath_hal *hal)
 {
 	u_int16_t ee_header;
+	u_int a, b, g;
 
 	/* Capabilities stored in the EEPROM */
 	ee_header = hal->ah_capabilities.cap_eeprom.ee_header;
+
+	a = AR5K_EEPROM_HDR_11A(ee_header);
+	b = AR5K_EEPROM_HDR_11B(ee_header);
+	g = AR5K_EEPROM_HDR_11G(ee_header);
+
+	/*
+	 * If the EEPROM is not reporting any mode, we try 11b.
+	 * This might fix a few broken devices with invalid EEPROM.
+	 */
+	if (a == b == g == 0)
+		b = 1;
 
 	/*
 	 * XXX The AR5211 tranceiver supports frequencies from 4920 to 6100GHz
@@ -2395,7 +2432,7 @@ ar5k_ar5211_get_capabilities(struct ath_hal *hal)
 	 * Set radio capabilities
 	 */
 
-	if (AR5K_EEPROM_HDR_11A(ee_header)) {
+	if (a) {
 		hal->ah_capabilities.cap_range.range_5ghz_min = 5005; /* 4920 */
 		hal->ah_capabilities.cap_range.range_5ghz_max = 6100;
 
@@ -2404,14 +2441,14 @@ ar5k_ar5211_get_capabilities(struct ath_hal *hal)
 	}
 
 	/* This chip will support 802.11b if the 2GHz radio is connected */
-	if (AR5K_EEPROM_HDR_11B(ee_header) || AR5K_EEPROM_HDR_11G(ee_header)) {
+	if (b || g) {
 		hal->ah_capabilities.cap_range.range_2ghz_min = 2412; /* 2312 */
 		hal->ah_capabilities.cap_range.range_2ghz_max = 2732;
 
-		if (AR5K_EEPROM_HDR_11B(ee_header))
+		if (b)
 			hal->ah_capabilities.cap_mode |= HAL_MODE_11B;
 #if 0
-		if (AR5K_EEPROM_HDR_11G(ee_header))
+		if (g)
 			hal->ah_capabilities.cap_mode |= HAL_MODE_11G;
 #endif
 	}

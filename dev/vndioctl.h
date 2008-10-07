@@ -1,4 +1,4 @@
-/*	$OpenBSD: vndioctl.h,v 1.6 2004/06/20 18:03:03 pedro Exp $	*/
+/*	$OpenBSD: vndioctl.h,v 1.8 2008/09/03 23:24:25 krw Exp $	*/
 /*	$NetBSD: vndioctl.h,v 1.5 1995/01/25 04:46:30 cgd Exp $	*/
 
 /*
@@ -49,6 +49,9 @@
  */
 struct vnd_ioctl {
 	char	*vnd_file;	/* pathname of file to mount */
+	size_t	vnd_secsize;	/* sector size in bytes */
+	size_t	vnd_nsectors;	/* number of sectors in a track */
+	size_t	vnd_ntracks;	/* number of tracks per cylinder (i.e. heads) */
 	off_t	vnd_size;	/* (returned) size of disk */
 	u_char	*vnd_key;
 	int	vnd_keylen;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.77 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: in6.c,v 1.79 2008/10/01 21:17:06 claudio Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -166,7 +166,8 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 	bzero(&info, sizeof(info));
 	info.rti_flags = RTF_UP | RTF_HOST | RTF_LLINFO;
 	info.rti_info[RTAX_DST] = ifa->ifa_addr;
-	info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
+	if (cmd != RTM_DELETE)
+		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&all1_sa;
 	e = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt, 0);
 	if (e != 0) {
@@ -1940,6 +1941,31 @@ in6ifa_ifpwithaddr(struct ifnet *ifp, struct in6_addr *addr)
 	}
 
 	return ((struct in6_ifaddr *)ifa);
+}
+
+/*
+ * find the internet address on a given interface corresponding to a neighbor's
+ * address.
+ */
+struct in6_ifaddr *
+in6ifa_ifplocaladdr(const struct ifnet *ifp, const struct in6_addr *addr)
+{
+	struct ifaddr *ifa;
+	struct in6_ifaddr *ia;
+
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr == NULL)
+			continue;	/* just for safety */
+		if (ifa->ifa_addr->sa_family != AF_INET6)
+			continue;
+		ia = (struct in6_ifaddr *)ifa;
+		if (IN6_ARE_MASKED_ADDR_EQUAL(addr,
+				&ia->ia_addr.sin6_addr,
+				&ia->ia_prefixmask.sin6_addr))
+			return ia;
+	}
+
+	return NULL;
 }
 
 /*

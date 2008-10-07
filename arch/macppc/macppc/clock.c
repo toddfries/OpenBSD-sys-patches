@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.22 2008/04/30 17:59:33 kettenis Exp $	*/
+/*	$OpenBSD: clock.c,v 1.24 2008/09/23 20:45:26 miod Exp $	*/
 /*	$NetBSD: clock.c,v 1.1 1996/09/30 16:34:40 ws Exp $	*/
 
 /*
@@ -225,7 +225,7 @@ decr_intr(struct clockframe *frame)
 	 */
 	ppc_mtdec(nextevent - tb);
 
-	if (curcpu()->ci_cpl & SPL_CLOCK) {
+	if (ci->ci_cpl >= IPL_CLOCK) {
 		ci->ci_statspending += nstats;
 	} else {
 		KERNEL_LOCK();
@@ -349,7 +349,7 @@ cpu_startclock()
 void
 calc_delayconst(void)
 {
-	int qhandle, phandle;
+	int qhandle, phandle = 0;
 	char name[32];
 	int s;
 

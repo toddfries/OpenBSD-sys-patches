@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xge.c,v 1.43 2007/09/19 03:50:25 brad Exp $	*/
+/*	$OpenBSD: if_xge.c,v 1.45 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $	*/
 
 /*
@@ -964,11 +964,6 @@ xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1018,11 +1013,10 @@ xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->xena_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1221,7 +1215,7 @@ xge_alloc_txmem(struct xge_softc *sc)
 	/* setup transmit array pointers */
 	txp = (struct txd *)kva;
 	txdp = seg.ds_addr;
-	for (txp = (struct txd *)kva, i = 0; i < NTXDESCS; i++) {
+	for (i = 0; i < NTXDESCS; i++) {
 		sc->sc_txd[i] = txp;
 		sc->sc_txdp[i] = txdp;
 		txp += NTXFRAGS;

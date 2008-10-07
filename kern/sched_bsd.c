@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.16 2008/05/22 14:07:14 thib Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.18 2008/09/10 14:01:23 blambert Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -269,7 +269,7 @@ schedcpu(void *arg)
 	}
 	uvm_meter();
 	wakeup(&lbolt);
-	timeout_add(to, hz);
+	timeout_add_sec(to, 1);
 }
 
 /*
@@ -414,6 +414,8 @@ mi_switch(void)
 	} else {
 		p->p_stat = SONPROC;
 	}
+
+	clear_resched(curcpu());
 
 	SCHED_ASSERT_LOCKED();
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.37 2008/05/22 19:23:04 mk Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.39 2008/10/02 20:21:14 brad Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -1200,7 +1200,7 @@ vge_tick(void *xsc)
 				vge_start(ifp);
 		}
 	}
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 	splx(s);
 }
 
@@ -1622,7 +1622,7 @@ vge_init(struct ifnet *ifp)
 	sc->vge_link = 0;
 
 	if (!timeout_pending(&sc->timer_handle))
-		timeout_add(&sc->timer_handle, hz);
+		timeout_add_sec(&sc->timer_handle, 1);
 
 	return (0);
 }
@@ -1707,11 +1707,6 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1772,8 +1767,7 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.28 2008/06/25 17:43:09 thib Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.31 2008/09/22 19:44:00 miod Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -16,25 +16,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-/*-
- * sr_crypto_hmac_sha1
- *
- * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
- *
- * Permission to use, copy, modify, and distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
-
 
 #include "bio.h"
 
@@ -61,7 +42,10 @@
 #include <crypto/cryptodev.h>
 #include <crypto/cryptosoft.h>
 #include <crypto/rijndael.h>
+#include <crypto/md5.h>
 #include <crypto/sha1.h>
+#include <crypto/sha2.h>
+#include <crypto/hmac.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
@@ -84,8 +68,6 @@ int		 sr_crypto_rw2(struct sr_workunit *, struct cryptop *);
 void		 sr_crypto_intr(struct buf *);
 int		 sr_crypto_read(struct cryptop *);
 void		 sr_crypto_finish_io(struct sr_workunit *);
-void		 sr_crypto_hmac_sha1(const u_int8_t *, size_t, const u_int8_t *,
-		    size_t, u_int8_t[SHA1_DIGEST_LENGTH]);
 void		 sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *,
 		    u_char[SHA1_DIGEST_LENGTH]);
 
@@ -98,18 +80,25 @@ sr_crypto_getcryptop(struct sr_workunit *wu, int encrypt)
 {
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_discipline	*sd = wu->swu_dis;
-	struct cryptop		*crp;
+	struct cryptop		*crp = NULL;
 	struct cryptodesc	*crd;
-	struct uio		*uio;
-	int			 flags, i, n;
-	daddr64_t		 blk = 0;
-	u_int			 keyndx;
+	struct uio		*uio = NULL;
+	int			flags, i, n, s;
+	daddr64_t		blk = 0;
+	u_int			keyndx;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_getcryptop wu: %p encrypt: %d\n",
 	    DEVNAME(sd->sd_sc), wu, encrypt);
 
-	uio = pool_get(&sr_uiopl, PR_WAITOK|PR_ZERO);
-	uio->uio_iov = pool_get(&sr_iovpl, PR_WAITOK);
+	s = splbio();
+	uio = pool_get(&sd->mds.mdd_crypto.sr_uiopl, PR_ZERO);
+	if (uio == NULL)
+		goto unwind;
+	uio->uio_iov = pool_get(&sd->mds.mdd_crypto.sr_iovpl, 0);
+	if (uio->uio_iov == NULL)
+		goto unwind;
+	splx(s);
+
 	uio->uio_iovcnt = 1;
 	uio->uio_iov->iov_len = xs->datalen;
 	if (xs->flags & SCSI_DATA_OUT) {
@@ -172,8 +161,14 @@ unwind:
 		crypto_freereq(crp);
 	if (wu->swu_xs->flags & SCSI_DATA_OUT)
 		free(uio->uio_iov->iov_base, M_DEVBUF);
-	pool_put(&sr_iovpl, uio->uio_iov);
-	pool_put(&sr_uiopl, uio);
+
+	s = splbio();
+	if (uio && uio->uio_iov)
+		pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
+	if (uio)
+		pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
+	splx(s);
+
 	return (NULL);
 }
 
@@ -182,14 +177,18 @@ sr_crypto_putcryptop(struct cryptop *crp)
 {
 	struct uio		*uio = crp->crp_buf;
 	struct sr_workunit	*wu = crp->crp_opaque;
+	struct sr_discipline	*sd = wu->swu_dis;
+	int			s;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_putcryptop crp: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), crp);
 
 	if (wu->swu_xs->flags & SCSI_DATA_OUT)
 		free(uio->uio_iov->iov_base, M_DEVBUF);
-	pool_put(&sr_iovpl, uio->uio_iov);
-	pool_put(&sr_uiopl, uio);
+	s = splbio();
+	pool_put(&sd->mds.mdd_crypto.sr_iovpl, uio->uio_iov);
+	pool_put(&sd->mds.mdd_crypto.sr_uiopl, uio);
+	splx(s);
 	crypto_freereq(crp);
 
 	return (wu);
@@ -243,71 +242,33 @@ out:
 	return (rv);
 }
 
-/*
- * HMAC-SHA-1 (from RFC 2202).
- * XXX this really belongs in sys/crypto, but it needs to be done
- *      generically and so far, nothing else needs it.
- */
-void
-sr_crypto_hmac_sha1(const u_int8_t *text, size_t text_len, const u_int8_t *key,
-    size_t key_len, u_int8_t digest[SHA1_DIGEST_LENGTH])
-{
-	SHA1_CTX ctx;
-	u_int8_t k_pad[SHA1_BLOCK_LENGTH];
-	u_int8_t tk[SHA1_DIGEST_LENGTH];
-	int i;
-
-	if (key_len > SHA1_BLOCK_LENGTH) {
-		SHA1Init(&ctx);
-		SHA1Update(&ctx, key, key_len);
-		SHA1Final(tk, &ctx);
-
-		key = tk;
-		key_len = SHA1_DIGEST_LENGTH;
-	}
-
-	bzero(k_pad, sizeof k_pad);
-	bcopy(key, k_pad, key_len);
-	for (i = 0; i < SHA1_BLOCK_LENGTH; i++)
-		k_pad[i] ^= 0x36;
-
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, k_pad, SHA1_BLOCK_LENGTH);
-	SHA1Update(&ctx, text, text_len);
-	SHA1Final(digest, &ctx);
-
-	bzero(k_pad, sizeof k_pad);
-	bcopy(key, k_pad, key_len);
-	for (i = 0; i < SHA1_BLOCK_LENGTH; i++)
-		k_pad[i] ^= 0x5c;
-
-	SHA1Init(&ctx);
-	SHA1Update(&ctx, k_pad, SHA1_BLOCK_LENGTH);
-	SHA1Update(&ctx, digest, SHA1_DIGEST_LENGTH);
-	SHA1Final(digest, &ctx);
-}
-
 void
 sr_crypto_calculate_check_hmac_sha1(struct sr_discipline *sd,
     u_char check_digest[SHA1_DIGEST_LENGTH])
 {
 	u_char		check_key[SHA1_DIGEST_LENGTH];
+	HMAC_SHA1_CTX	hmacctx;
 	SHA1_CTX	shactx;
 
 	bzero(check_key, sizeof(check_key));
+	bzero(&hmacctx, sizeof(hmacctx));
+	bzero(&shactx, sizeof(shactx));
+
 	/* k = SHA1(mask_key) */
 	SHA1Init(&shactx);
 	SHA1Update(&shactx, sd->mds.mdd_crypto.scr_maskkey,
 	    sizeof(sd->mds.mdd_crypto.scr_maskkey));
 	SHA1Final(check_key, &shactx);
 
-	bzero(&shactx, sizeof(shactx));
 	/* sch_mac = HMAC_SHA1_k(unencrypted scm_key) */
-	sr_crypto_hmac_sha1((u_char *)sd->mds.mdd_crypto.scr_key,
-	    sizeof(sd->mds.mdd_crypto.scr_key),
-	    check_key, sizeof(check_key),
-	    check_digest);
+	HMAC_SHA1_Init(&hmacctx, check_key, sizeof(check_key));
+	HMAC_SHA1_Update(&hmacctx, (u_int8_t *)sd->mds.mdd_crypto.scr_key,
+	    sizeof(sd->mds.mdd_crypto.scr_key));
+	HMAC_SHA1_Final(check_digest, &hmacctx);
+
 	bzero(check_key, sizeof(check_key));
+	bzero(&hmacctx, sizeof(hmacctx));
+	bzero(&shactx, sizeof(shactx));
 }
 
 int
@@ -434,12 +395,17 @@ sr_crypto_alloc_resources(struct sr_discipline *sd)
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
 
+	pool_init(&sd->mds.mdd_crypto.sr_uiopl, sizeof(struct uio), 0, 0, 0,
+	    "sr_uiopl", NULL);
+	pool_init(&sd->mds.mdd_crypto.sr_iovpl, sizeof(struct iovec), 0, 0, 0,
+	    "sr_iovpl", NULL);
+
 	for (i = 0; i < SR_CRYPTO_MAXKEYS; i++)
 		sd->mds.mdd_crypto.scr_sid[i] = (u_int64_t)-1;
 
-	if (sr_alloc_wu(sd))
+	if (sr_wu_alloc(sd))
 		return (ENOMEM);
-	if (sr_alloc_ccb(sd))
+	if (sr_ccb_alloc(sd))
 		return (ENOMEM);
 	if (sr_crypto_decrypt_key(sd))
 		return (EPERM);	
@@ -458,7 +424,7 @@ sr_crypto_alloc_resources(struct sr_discipline *sd)
 	}
 
 	/* Allocate a session for every 2^SR_CRYPTO_KEY_BLKSHIFT blocks */
-	num_keys = sd->sd_vol.sv_meta.svm_size >> SR_CRYPTO_KEY_BLKSHIFT;
+	num_keys = sd->sd_meta->ssdi.ssd_size >> SR_CRYPTO_KEY_BLKSHIFT;
 	if (num_keys >= SR_CRYPTO_MAXKEYS)
 		return (EFBIG);
 	for (i = 0; i <= num_keys; i++) {
@@ -497,11 +463,11 @@ sr_crypto_free_resources(struct sr_discipline *sd)
 		sd->mds.mdd_crypto.scr_sid[i] = (u_int64_t)-1;
 	}
 
-	sr_free_wu(sd);
-	sr_free_ccb(sd);
+	sr_wu_free(sd);
+	sr_ccb_free(sd);
 
-	if (sd->sd_meta)
-		free(sd->sd_meta, M_DEVBUF);
+	pool_destroy(&sd->mds.mdd_crypto.sr_uiopl);
+	pool_destroy(&sd->mds.mdd_crypto.sr_iovpl);
 
 	rv = 0;
 	return (rv);
@@ -570,11 +536,11 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 
 	wu->swu_io_count = 1;
 
-	ccb = sr_get_ccb(sd);
+	ccb = sr_ccb_get(sd);
 	if (!ccb) {
 		/* should never happen but handle more gracefully */
 		printf("%s: %s: too many ccbs queued\n",
-		    DEVNAME(sd->sd_sc), sd->sd_vol.sv_meta.svm_devname);
+		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname);
 		goto bad;
 	}
 
@@ -608,7 +574,7 @@ sr_crypto_rw2(struct sr_workunit *wu, struct cryptop *crp)
 
         DNPRINTF(SR_D_DIS, "%s: %s: sr_crypto_rw2: b_bcount: %d "
             "b_blkno: %x b_flags 0x%0x b_data %p\n",
-            DEVNAME(sd->sd_sc), sd->sd_vol.sv_meta.svm_devname,
+            DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
             ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
             ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
 
@@ -623,7 +589,7 @@ queued:
 	splx(s);
 	return (0);
 bad:
-	/* wu is unwound by sr_put_wu */
+	/* wu is unwound by sr_wu_put */
 	if (crp)
 		crp->crp_etype = EINVAL;
 	return (1);
@@ -740,7 +706,7 @@ sr_crypto_finish_io(struct sr_workunit *wu)
 	}
 
 	/* do not change the order of these 2 functions */
-	sr_put_wu(wu);
+	sr_wu_put(wu);
 	scsi_done(xs);
 
 	if (sd->sd_sync && sd->sd_wu_pending == 0)

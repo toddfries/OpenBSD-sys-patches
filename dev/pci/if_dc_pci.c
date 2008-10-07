@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_dc_pci.c,v 1.59 2007/11/26 17:45:14 brad Exp $	*/
+/*	$OpenBSD: if_dc_pci.c,v 1.61 2008/09/11 06:49:14 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -121,9 +121,7 @@ void dc_pci_acpi(struct device *, void *);
  * IDs against our list and return a device name if we find a match.
  */
 int
-dc_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+dc_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = (struct pci_attach_args *)aux;
 	struct dc_type *t;
@@ -155,9 +153,8 @@ dc_pci_match(parent, match, aux)
 	return (0);
 }
 
-void dc_pci_acpi(self, aux)
-	struct device *self;
-	void *aux;
+void
+dc_pci_acpi(struct device *self, void *aux)
 {
 	struct dc_softc		*sc = (struct dc_softc *)self;
 	struct pci_attach_args	*pa = (struct pci_attach_args *)aux;
@@ -199,9 +196,8 @@ void dc_pci_acpi(self, aux)
  * Attach the interface. Allocate softc structures, do ifmedia
  * setup and ethernet/BPF attach.
  */
-void dc_pci_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+void
+dc_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	const char		*intrstr = NULL;
 	pcireg_t		command;
@@ -210,7 +206,6 @@ void dc_pci_attach(parent, self, aux)
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	bus_size_t		size;
-	u_int32_t		revision;
 	int			found = 0;
 
 	sc->sc_dmat = pa->pa_dmat;
@@ -259,7 +254,7 @@ void dc_pci_attach(parent, self, aux)
 	printf(": %s", intrstr);
 
 	/* Need this info to decide on a chip type. */
-	sc->dc_revision = revision = PCI_REVISION(pa->pa_class);
+	sc->dc_revision = PCI_REVISION(pa->pa_class);
 
 	/* Get the eeprom width, but PNIC has no eeprom */
 	if (!(PCI_VENDOR(pa->pa_id) == PCI_VENDOR_LITEON &&
@@ -342,10 +337,9 @@ void dc_pci_attach(parent, self, aux)
 		}
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MACRONIX_MX98713) {
 			found = 1;
-			if (revision < DC_REVISION_98713A) {
+			if (sc->dc_revision < DC_REVISION_98713A)
 				sc->dc_type = DC_TYPE_98713;
-			}
-			if (revision >= DC_REVISION_98713A) {
+			if (sc->dc_revision >= DC_REVISION_98713A) {
 				sc->dc_type = DC_TYPE_98713A;
 				sc->dc_flags |= DC_21143_NWAY;
 			}
@@ -355,8 +349,8 @@ void dc_pci_attach(parent, self, aux)
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_MACRONIX_MX98715 ||
 		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ACCTON_EN1217) {
 			found = 1;
-			if (revision >= DC_REVISION_98715AEC_C &&
-			    revision < DC_REVISION_98725)
+			if (sc->dc_revision >= DC_REVISION_98715AEC_C &&
+			    sc->dc_revision < DC_REVISION_98725)
 				sc->dc_flags |= DC_128BIT_HASH;
 			sc->dc_type = DC_TYPE_987x5;
 			sc->dc_flags |= DC_TX_POLL|DC_TX_USE_TX_INTR;
@@ -372,11 +366,11 @@ void dc_pci_attach(parent, self, aux)
 	case PCI_VENDOR_COMPEX:
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_COMPEX_98713) {
 			found = 1;
-			if (revision < DC_REVISION_98713A) {
+			if (sc->dc_revision < DC_REVISION_98713A) {
 				sc->dc_type = DC_TYPE_98713;
 				sc->dc_flags |= DC_REDUCED_MII_POLL;
 			}
-			if (revision >= DC_REVISION_98713A)
+			if (sc->dc_revision >= DC_REVISION_98713A)
 				sc->dc_type = DC_TYPE_98713A;
 			sc->dc_flags |= DC_TX_POLL|DC_TX_USE_TX_INTR;
 		}
@@ -398,7 +392,7 @@ void dc_pci_attach(parent, self, aux)
 			    M_NOWAIT);
 			if (sc->dc_pnic_rx_buf == NULL)
 				panic("dc_pci_attach");
-			if (revision < DC_REVISION_82C169)
+			if (sc->dc_revision < DC_REVISION_82C169)
 				sc->dc_pmode = DC_PMODE_SYM;
 		}
 		break;

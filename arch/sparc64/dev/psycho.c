@@ -1,4 +1,4 @@
-/*	$OpenBSD: psycho.c,v 1.59 2008/06/02 19:39:08 kettenis Exp $	*/
+/*	$OpenBSD: psycho.c,v 1.62 2008/07/23 12:18:40 kettenis Exp $	*/
 /*	$NetBSD: psycho.c,v 1.39 2001/10/07 20:30:41 eeh Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <sys/time.h>
+#include <sys/timetc.h>
 #include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
@@ -122,6 +123,12 @@ void psycho_conf_write(pci_chipset_tag_t, pcitag_t, int, pcireg_t);
 
 /* base pci_chipset */
 extern struct sparc_pci_chipset _sparc_pci_chipset;
+
+u_int stick_get_timecount(struct timecounter *);
+
+struct timecounter stick_timecounter = {
+	stick_get_timecount, NULL, ~0u, 0, "stick", 1000, NULL
+};
 
 /*
  * autoconfiguration
@@ -238,6 +245,7 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 	int psycho_br[2], n;
 	struct psycho_type *ptype;
 	char buf[32];
+	u_int stick_rate;
 
 	sc->sc_node = ma->ma_node;
 	sc->sc_bustag = ma->ma_bustag;
@@ -416,12 +424,16 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 		psycho_set_intr(sc, 15, psycho_ue,
 		    psycho_psychoreg_vaddr(sc, ue_int_map),
 		    psycho_psychoreg_vaddr(sc, ue_clr_int), "ue");
-		psycho_set_intr(sc, 1, psycho_ce,
-		    psycho_psychoreg_vaddr(sc, ce_int_map),
-		    psycho_psychoreg_vaddr(sc, ce_clr_int), "ce");
-		psycho_set_intr(sc, 15, psycho_bus_a,
-		    psycho_psychoreg_vaddr(sc, pciaerr_int_map),
-		    psycho_psychoreg_vaddr(sc, pciaerr_clr_int), "bus_a");
+		if (sc->sc_mode == PSYCHO_MODE_PSYCHO ||
+		    sc->sc_mode == PSYCHO_MODE_SABRE) {
+			psycho_set_intr(sc, 1, psycho_ce,
+			    psycho_psychoreg_vaddr(sc, ce_int_map),
+			    psycho_psychoreg_vaddr(sc, ce_clr_int), "ce");
+			psycho_set_intr(sc, 15, psycho_bus_a,
+			    psycho_psychoreg_vaddr(sc, pciaerr_int_map),
+			    psycho_psychoreg_vaddr(sc, pciaerr_clr_int),
+			    "bus_a");
+		}
 #if 0
 		psycho_set_intr(sc, 15, psycho_powerfail,
 		    psycho_psychoreg_vaddr(sc, power_int_map),
@@ -433,6 +445,8 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 			    psycho_psychoreg_vaddr(sc, pciberr_int_map),
 			    psycho_psychoreg_vaddr(sc, pciberr_clr_int),
 			    "bus_b");
+		}
+		if (sc->sc_mode == PSYCHO_MODE_PSYCHO) {
 			psycho_set_intr(sc, 1, psycho_wakeup,
 			    psycho_psychoreg_vaddr(sc, pwrmgt_int_map),
 			    psycho_psychoreg_vaddr(sc, pwrmgt_clr_int),
@@ -548,6 +562,18 @@ psycho_attach(struct device *parent, struct device *self, void *aux)
 		    (PAGE_SIZE << sc->sc_is->is_tsbsize)));
 		iommu_reset(sc->sc_is);
 		printf("\n");
+	}
+
+	/*
+	 * The UltraSPARC IIe has new STICK logic that provides a
+	 * timebase counter that doesn't scale with processor
+	 * frequency.  Use it to provide a timecounter.
+	 */
+	stick_rate = getpropint(findroot(), "stick-frequency", 0);
+	if (stick_rate > 0 && sc->sc_mode == PSYCHO_MODE_SABRE) {
+		stick_timecounter.tc_frequency = stick_rate;
+		stick_timecounter.tc_priv = sc;
+		tc_init(&stick_timecounter);
 	}
 
 	/*
@@ -739,15 +765,23 @@ int
 psycho_ce(void *arg)
 {
 	struct psycho_softc *sc = arg;
+	u_int64_t afar, afsr;
 
 	/*
 	 * It's correctable.  Dump the regs and continue.
 	 */
 
+	afar = psycho_psychoreg_read(sc, psy_ce_afar);
+	afsr = psycho_psychoreg_read(sc, psy_ce_afsr);
+
 	printf("%s: correctable DMA error AFAR %llx AFSR %llx\n",
-	    sc->sc_dev.dv_xname, 
-	    (long long)psycho_psychoreg_read(sc, psy_ce_afar),
-	    (long long)psycho_psychoreg_read(sc, psy_ce_afsr));
+	    sc->sc_dev.dv_xname, afar, afsr);
+
+	/* Clear error. */
+	psycho_psychoreg_write(sc, psy_ce_afsr,
+	    afsr & (PSY_CEAFSR_PDRD | PSY_CEAFSR_PDWR |
+	    PSY_CEAFSR_SDRD | PSY_CEAFSR_SDWR));
+			       
 	return (1);
 }
 
@@ -1277,4 +1311,12 @@ psycho_sabre_dvmamap_sync(bus_dma_tag_t t, bus_dma_tag_t t0, bus_dmamap_t map,
 
 	if (ops & (BUS_DMASYNC_POSTREAD | BUS_DMASYNC_PREWRITE))
 		membar(MemIssue);
+}
+
+u_int
+stick_get_timecount(struct timecounter *tc)
+{
+	struct psycho_softc *sc = tc->tc_priv;
+
+	return psycho_psychoreg_read(sc, stick_reg_low);
 }

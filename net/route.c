@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.93 2008/06/08 19:12:28 claudio Exp $	*/
+/*	$OpenBSD: route.c,v 1.97 2008/09/10 14:01:23 blambert Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -885,7 +885,8 @@ makeroute:
 #ifndef SMALL_KERNEL
 		if (rn_mpath_capable(rnh) &&
 		    (rn = rnh->rnh_lookup(info->rti_info[RTAX_DST],
-		    info->rti_info[RTAX_NETMASK], rnh)) != NULL) {
+		    info->rti_info[RTAX_NETMASK], rnh)) != NULL &&
+		    (rn = rn_mpath_prio(rn, prio)) != NULL) {
 			if (rn_mpath_next(rn) == NULL)
 				((struct rtentry *)rn)->rt_flags &= ~RTF_MPATH;
 			else
@@ -1109,7 +1110,7 @@ rt_timer_init()
 
 	LIST_INIT(&rttimer_queue_head);
 	timeout_set(&rt_timer_timeout, rt_timer_timer, &rt_timer_timeout);
-	timeout_add(&rt_timer_timeout, hz);	/* every second */
+	timeout_add_sec(&rt_timer_timeout, 1);
 	rt_init_done = 1;
 }
 
@@ -1276,7 +1277,7 @@ rt_timer_timer(void *arg)
 	}
 	splx(s);
 
-	timeout_add(to, hz);		/* every second */
+	timeout_add_sec(to, 1);
 }
 
 u_int16_t

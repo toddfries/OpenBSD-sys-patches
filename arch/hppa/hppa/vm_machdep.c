@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.62 2007/10/10 15:53:51 art Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.64 2008/09/30 18:54:26 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2004 Michael Shalayeff
@@ -151,7 +151,8 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	 */
 	tf->tf_sr7 = HPPA_SID_KERNEL;
 	mfctl(CR_EIEM, tf->tf_eiem);
-	tf->tf_ipsw = PSL_C | PSL_Q | PSL_P | PSL_D | PSL_I /* | PSL_L */;
+	tf->tf_ipsw = PSL_C | PSL_Q | PSL_P | PSL_D | PSL_I /* | PSL_L */ |
+	    (kpsw & PSL_O);
 
 	/*
 	 * If specified, give the child a different stack.
@@ -217,13 +218,7 @@ vmapbuf(bp, len)
 	off = (vaddr_t)bp->b_data - uva;
 	size = round_page(off + len);
 
-	/*
-	 * We do it on our own here to be able to specify an offset to uvm_map
-	 * so that we can get all benefits of PMAP_PREFER.
-	 * - art@
-	 */
 	kva = uvm_km_valloc_prefer_wait(phys_map, size, uva);
-	fdcache(pm->pm_space, uva, size);
 	bp->b_data = (caddr_t)(kva + off);
 	while (size > 0) {
 		paddr_t pa;

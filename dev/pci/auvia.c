@@ -1,4 +1,4 @@
-/*	$OpenBSD: auvia.c,v 1.39 2008/06/26 05:42:17 ray Exp $ */
+/*	$OpenBSD: auvia.c,v 1.42 2008/10/02 18:29:40 jakemsr Exp $ */
 /*	$NetBSD: auvia.c,v 1.28 2002/11/04 16:38:49 kent Exp $	*/
 
 /*-
@@ -91,6 +91,7 @@ int	auvia_get_port(void *, mixer_ctrl_t *);
 int	auvia_query_devinfo(void *, mixer_devinfo_t *);
 void *	auvia_malloc(void *, int, size_t, int, int);
 void	auvia_free(void *, void *, int);
+size_t	auvia_round_buffersize(void *, int, size_t);
 paddr_t	auvia_mappage(void *, void *, off_t, int);
 int	auvia_get_props(void *);
 int	auvia_build_dma_ops(struct auvia_softc *, struct auvia_softc_chan *,
@@ -161,6 +162,8 @@ struct cfattach auvia_ca = {
 #define VIA8233_OFF_MP_SCRATCH		0x03
 #define VIA8233_OFF_MP_STOP		0x08
 
+#define VIA8233_WR_BASE			0x60
+
 #define	AUVIA_CODEC_CTL			0x80
 #define		AUVIA_CODEC_READ		0x00800000
 #define		AUVIA_CODEC_BUSY		0x01000000
@@ -200,7 +203,7 @@ struct audio_hw_if auvia_hw_if = {
 	auvia_query_devinfo,
 	auvia_malloc,
 	auvia_free,
-	NULL, /* auvia_round_buffersize */
+	auvia_round_buffersize,
 	auvia_mappage,
 	auvia_get_props,
 	auvia_trigger_output,
@@ -247,6 +250,7 @@ auvia_attach(struct device *parent, struct device *self, void *aux)
 	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT8233_AC97) {
 		sc->sc_flags |= AUVIA_FLAGS_VT8233;
 		sc->sc_play.sc_base = VIA8233_MP_BASE;
+		sc->sc_record.sc_base = VIA8233_WR_BASE;
 	}
 
 	if (pci_mapreg_map(pa, 0x10, PCI_MAPREG_TYPE_IO, 0, &sc->sc_iot,
@@ -702,6 +706,10 @@ auvia_set_params(void *addr, int setmode, int usemode,
 int
 auvia_round_blocksize(void *addr, int blk)
 {
+	struct auvia_softc *sc = addr;
+
+	if (sc->bufsize / blk > AUVIA_DMALIST_MAX)
+		blk = sc->bufsize / AUVIA_DMALIST_MAX + 1;
 	return ((blk + 31) & -32);
 }
 
@@ -854,6 +862,15 @@ auvia_free(void *addr, void *ptr, int pool)
 	panic("auvia_free: trying to free unallocated memory");
 }
 
+size_t
+auvia_round_buffersize(void *addr, int direction, size_t bufsize)
+{
+	struct auvia_softc *sc = addr;
+
+	sc->bufsize = bufsize;
+	return bufsize;
+}
+
 paddr_t
 auvia_mappage(void *addr, void *mem, off_t off, int prot)
 {
@@ -877,14 +894,9 @@ auvia_mappage(void *addr, void *mem, off_t off, int prot)
 int
 auvia_get_props(void *addr)
 {
-	struct auvia_softc *sc = addr;
 	int props;
 
-	props = AUDIO_PROP_MMAP | AUDIO_PROP_INDEPENDENT; 
-
-	/* recording doesn't work correctly on 8233 based devices */
-	if (!(sc->sc_flags & AUVIA_FLAGS_VT8233))
-		props |= AUDIO_PROP_FULLDUPLEX;
+	props = AUDIO_PROP_MMAP|AUDIO_PROP_INDEPENDENT|AUDIO_PROP_FULLDUPLEX;
 
 	return  props;
 }
@@ -903,6 +915,10 @@ auvia_build_dma_ops(struct auvia_softc *sc, struct auvia_softc_chan *ch,
 	s = p->map->dm_segs[0].ds_addr;
 	l = (vaddr_t)end - (vaddr_t)start;
 	segs = howmany(l, blksize);
+	if (segs > AUVIA_DMALIST_MAX) {
+		panic("%s: build_dma_ops: too many DMA segments",
+			    sc->sc_dev.dv_xname);
+	}
 
 	if (segs > ch->sc_dma_op_count) {
 		/* if old list was too small, free it */
@@ -925,7 +941,6 @@ auvia_build_dma_ops(struct auvia_softc *sc, struct auvia_softc_chan *ch,
 		ch->sc_dma_ops_dma = dp;
 	}
 
-	dp = ch->sc_dma_ops_dma;
 	op = ch->sc_dma_ops;
 
 	while (l) {

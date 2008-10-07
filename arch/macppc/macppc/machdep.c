@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.99 2008/06/27 17:22:14 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.101 2008/09/18 03:56:25 drahn Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -82,6 +82,7 @@
 
 #ifdef DDB
 #include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
 #include <ddb/db_access.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
@@ -387,6 +388,7 @@ initppc(startkernel, endkernel, args)
 
 #ifdef DDB
 	ddb_init();
+	db_machine_init();
 #endif
 
 	/*
@@ -875,8 +877,6 @@ dumpsys()
 
 }
 
-int imask[IPL_NUM];
-
 /*
  * this is a hack interface to allow zs to work better until
  * a true soft interrupt mechanism is created.
@@ -1022,7 +1022,7 @@ signotify(struct proc *p)
 	aston(p);
 #ifdef MULTIPROCESSOR
 	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
-		openpic_send_ipi(p->p_cpu->ci_cpuid);
+		ppc_send_ipi(p->p_cpu, PPC_IPI_NOP);
 #endif
 }
 
@@ -1101,6 +1101,22 @@ ppc_intr_setup(intr_establish_t *establish, intr_disestablish_t *disestablish)
 	intr_establish_func = establish;
 	intr_disestablish_func = disestablish;
 }
+
+intr_send_ipi_t ppc_no_send_ipi;
+intr_send_ipi_t *intr_send_ipi_func = ppc_no_send_ipi;
+
+void
+ppc_no_send_ipi(struct cpu_info *ci, int id)
+{
+	panic("ppc_send_ipi called: no ipi function\n");
+}
+
+void
+ppc_send_ipi(struct cpu_info *ci, int id)
+{
+	(*intr_send_ipi_func)(ci, id);
+}
+
 
 /* BUS functions */
 int

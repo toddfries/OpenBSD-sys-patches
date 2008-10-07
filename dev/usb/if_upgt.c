@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.35 2008/04/16 18:32:15 damien Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.38 2008/08/27 10:34:24 damien Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -1771,6 +1771,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	struct ifnet *ifp = &ic->ic_if;
 	struct upgt_lmac_rx_desc *rxdesc;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m;
 	int s;
@@ -1782,13 +1783,11 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	m = m_devget(rxdesc->data - ETHER_ALIGN, pkglen + ETHER_ALIGN, 0, ifp,
 	    NULL);
 	if (m == NULL) {
-		printf("%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
+		DPRINTF(1, "%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
+		ifp->if_ierrors++;
 		return;
 	}
 	m_adj(m, ETHER_ALIGN);
-
-	/* trim FCS */
-	m_adj(m, -IEEE80211_CRC_LEN);
 
 	s = splnet();
 
@@ -1797,7 +1796,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 		struct mbuf mb;
 		struct upgt_rx_radiotap_header *tap = &sc->sc_rxtap;
 
-		tap->wr_flags = 0;
+		tap->wr_flags = IEEE80211_RADIOTAP_F_FCS;
 		tap->wr_rate = upgt_rx_rate(sc, rxdesc->rate);
 		tap->wr_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
 		tap->wr_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
@@ -1812,12 +1811,17 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif
+	/* trim FCS */
+	m_adj(m, -IEEE80211_CRC_LEN);
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* push the frame up to the 802.11 stack */
-	ieee80211_input(ifp, m, ni, rxdesc->rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = rxdesc->rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);

@@ -46,7 +46,7 @@ int	drm_set_busid(struct drm_device *);
 int
 drm_getunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_unique_t	 *u = data;
+	struct drm_unique	 *u = data;
 
 	if (u->unique_len >= dev->unique_len) {
 		if (DRM_COPY_TO_USER(u->unique, dev->unique, dev->unique_len))
@@ -63,9 +63,9 @@ drm_getunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_setunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_unique_t *u = data;
-	int domain, bus, slot, func, ret;
-	char *busid;
+	struct drm_unique	*u = data;
+	char			*busid;
+	int			 domain, bus, slot, func, ret;
 #if defined (__NetBSD__) 
 	return EOPNOTSUPP;
 #endif
@@ -74,12 +74,12 @@ drm_setunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	if (!u->unique_len || u->unique_len > 1024)
 		return EINVAL;
 
-	busid = malloc(u->unique_len + 1, M_DRM, M_WAITOK);
+	busid = drm_alloc(u->unique_len + 1, DRM_MEM_DRIVER);
 	if (busid == NULL)
 		return ENOMEM;
 
 	if (DRM_COPY_FROM_USER(busid, u->unique, u->unique_len)) {
-		free(busid, M_DRM);
+		drm_free(busid, u->unique_len + 1, DRM_MEM_DRIVER);
 		return EFAULT;
 	}
 	busid[u->unique_len] = '\0';
@@ -92,17 +92,15 @@ drm_setunique(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #endif /* Net and Openbsd don't have sscanf in the kernel this is deprecated anyway. */
 
 	if (ret != 3) {
-		free(busid, M_DRM);
+		drm_free(busid, u->unique_len + 1, DRM_MEM_DRIVER);
 		return EINVAL;
 	}
 	domain = bus >> 8;
 	bus &= 0xff;
 	
-	if ((domain != dev->pci_domain) ||
-	    (bus != dev->pci_bus) ||
-	    (slot != dev->pci_slot) ||
-	    (func != dev->pci_func)) {
-		free(busid, M_DRM);
+	if ((domain != dev->pci_domain) || (bus != dev->pci_bus) ||
+	    (slot != dev->pci_slot) || (func != dev->pci_func)) {
+		drm_free(busid, u->unique_len + 1, DRM_MEM_DRIVER);
 		return EINVAL;
 	}
 
@@ -133,7 +131,7 @@ drm_set_busid(struct drm_device *dev)
 	}
 
 	dev->unique_len = 20;
-	dev->unique = malloc(dev->unique_len + 1, M_DRM, M_NOWAIT);
+	dev->unique = drm_alloc(dev->unique_len + 1, DRM_MEM_DRIVER);
 	if (dev->unique == NULL) {
 		DRM_UNLOCK();
 		return ENOMEM;
@@ -150,10 +148,9 @@ drm_set_busid(struct drm_device *dev)
 int
 drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_map_t    *map = data;
-	drm_local_map_t    *mapinlist;
-	int          idx;
-	int	     i = 0;
+	struct drm_map	*map = data;
+	drm_local_map_t	*mapinlist;
+	int		 idx, i = 0;
 
 	idx = map->offset;
 
@@ -164,7 +161,7 @@ drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	}
 
 	TAILQ_FOREACH(mapinlist, &dev->maplist, link) {
-		if (i==idx) {
+		if (i == idx) {
 			map->offset = mapinlist->offset;
 			map->size = mapinlist->size;
 			map->type = mapinlist->type;
@@ -187,56 +184,13 @@ drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_getclient(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_client_t	*client = data;
-	struct drm_file	*pt;
-	int		 idx;
-	int		 i = 0;
-
-	idx = client->idx;
-	DRM_LOCK();
-	TAILQ_FOREACH(pt, &dev->files, link) {
-		if (i==idx)
-		{
-			client->auth = pt->authenticated;
-			client->pid = pt->pid;
-			client->uid = pt->uid;
-			client->magic = pt->magic;
-			client->iocs = pt->ioctl_count;
-			DRM_UNLOCK();
-			return 0;
-		}
-		i++;
-	}
-	DRM_UNLOCK();
-
-	return EINVAL;
+	return (EINVAL);
 }
 
 int
 drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_stats_t *stats = data;
-	int i;
-
-	memset(stats, 0, sizeof(drm_stats_t));
-	
-	DRM_LOCK();
-
-	for (i = 0; i < dev->counters; i++) {
-		if (dev->types[i] == _DRM_STAT_LOCK)
-			stats->data[i].value
-			    = (dev->lock.hw_lock
-			    ? dev->lock.hw_lock->lock : 0);
-		else 
-			stats->data[i].value = atomic_read(&dev->counts[i]);
-		stats->data[i].type  = dev->types[i];
-	}
-	
-	stats->count = dev->counters;
-
-	DRM_UNLOCK();
-
-	return 0;
+	return (EINVAL);
 }
 
 #define DRM_IF_MAJOR	1
@@ -245,9 +199,8 @@ drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 int
 drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_set_version_t *sv = data;
-	drm_set_version_t ver;
-	int if_version;
+	struct drm_set_version	ver, *sv = data;
+	int			if_version;
 
 	/* Save the incoming data, and set the response before continuing
 	 * any further.
@@ -259,12 +212,11 @@ drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	sv->drm_dd_minor = dev->driver.minor;
 
 	if (ver.drm_di_major != -1) {
-		if (ver.drm_di_major != DRM_IF_MAJOR ||
-		    ver.drm_di_minor < 0 || ver.drm_di_minor > DRM_IF_MINOR) {
+		if (ver.drm_di_major != DRM_IF_MAJOR || ver.drm_di_minor < 0 ||
+		    ver.drm_di_minor > DRM_IF_MINOR) {
 			return EINVAL;
 		}
-		if_version = DRM_IF_VERSION(ver.drm_di_major,
-		    ver.drm_dd_minor);
+		if_version = DRM_IF_VERSION(ver.drm_di_major, ver.drm_dd_minor);
 		dev->if_version = DRM_MAX(if_version, dev->if_version);
 		if (ver.drm_di_minor >= 1) {
 			/*

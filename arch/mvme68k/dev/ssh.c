@@ -1,4 +1,4 @@
-/*	$OpenBSD: ssh.c,v 1.17 2008/05/19 18:42:12 miod Exp $ */
+/*	$OpenBSD: ssh.c,v 1.19 2008/09/12 11:14:02 miod Exp $ */
 
 /*
  * Copyright (c) 1994 Michael L. Hitch
@@ -157,10 +157,6 @@ struct scsi_xfer *xs;
 	slp = xs->sc_link;
 	sc = slp->adapter_softc;
 	flags = xs->flags;
-
-	/* XXXX ?? */
-	if (flags & SCSI_DATA_UIO)
-		panic("ssh: scsi data uio requested");
 
 	/* XXXX ?? */
 	if (sc->sc_nexus && flags & SCSI_POLL)
@@ -582,8 +578,7 @@ struct ssh_softc *sc;
 	splx(s);
 
 	delay(ssh_reset_delay * 1000);
-	printf(": version %d target %d\n", rp->ssh_ctest8 >> 4,
-			 sc->sc_link.adapter_target);
+	printf(": version %d\n", rp->ssh_ctest8 >> 4);
 
 	if ((sc->sc_flags & SSH_ALIVE) == 0) {
 		TAILQ_INIT(&sc->ready_list);

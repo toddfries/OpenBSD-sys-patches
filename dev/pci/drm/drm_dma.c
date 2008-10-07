@@ -42,9 +42,11 @@ int
 drm_dma_setup(struct drm_device *dev)
 {
 
-	dev->dma = malloc(sizeof(*dev->dma), M_DRM, M_NOWAIT | M_ZERO);
+	dev->dma = drm_calloc(1, sizeof(*dev->dma), DRM_MEM_DRIVER);
 	if (dev->dma == NULL)
 		return ENOMEM;
+
+	dev->buf_use = 0;
 
 	DRM_SPININIT(&dev->dma_lock, "drmdma");
 
@@ -52,45 +54,49 @@ drm_dma_setup(struct drm_device *dev)
 }
 
 void
+drm_cleanup_buf(struct drm_device *dev, drm_buf_entry_t *entry)
+{
+	int i;
+
+	if (entry->seg_count) {
+		for (i = 0; i < entry->seg_count; i++)
+			drm_pci_free(dev, entry->seglist[i]);
+		drm_free(entry->seglist, entry->seg_count *
+		    sizeof(*entry->seglist), DRM_MEM_BUFS);
+
+		entry->seg_count = 0;
+	}
+
+   	if (entry->buf_count) {
+	   	for (i = 0; i < entry->buf_count; i++) {
+			drm_free(entry->buflist[i].dev_private,
+			    dev->driver.buf_priv_size, DRM_MEM_BUFS);
+		}
+		drm_free(entry->buflist, entry->buf_count *
+		    sizeof(*entry->buflist), DRM_MEM_BUFS);
+
+		entry->buf_count = 0;
+	}
+}
+
+void
 drm_dma_takedown(struct drm_device *dev)
 {
 	drm_device_dma_t *dma = dev->dma;
-	int i, j;
+	int i;
 
 	if (dma == NULL)
 		return;
 
 	/* Clear dma buffers */
-	for (i = 0; i <= DRM_MAX_ORDER; i++) {
-		if (dma->bufs[i].seg_count) {
-			DRM_DEBUG("order %d: buf_count = %d,"
-			    " seg_count = %d\n",
-			    i,
-			    dma->bufs[i].buf_count,
-			    dma->bufs[i].seg_count);
-			for (j = 0; j < dma->bufs[i].seg_count; j++) {
-				drm_pci_free(dev, dma->bufs[i].seglist[j]);
-			}
-			if (dma->bufs[i].seglist)
-				free(dma->bufs[i].seglist, M_DRM);
-		}
+	for (i = 0; i <= DRM_MAX_ORDER; i++)
+		drm_cleanup_buf(dev, &dma->bufs[i]);
 
-	   	if (dma->bufs[i].buf_count) {
-		   	for (j = 0; j < dma->bufs[i].buf_count; j++) {
-				free(dma->bufs[i].buflist[j].dev_private,
-				    M_DRM);
-			}
-			if (dma->bufs[i].buflist)
-		   		free(dma->bufs[i].buflist, M_DRM);
-		}
-	}
-
-	if (dma->buflist)
-		free(dma->buflist, M_DRM);
-	if (dma->pagelist)
-		free(dma->pagelist, M_DRM);
-	if (dev->dma)
-		free(dev->dma, M_DRM);
+	drm_free(dma->buflist, dma->buf_count * sizeof(*dma->buflist),
+	    DRM_MEM_BUFS);
+	drm_free(dma->pagelist, dma->page_count * sizeof(*dma->pagelist),
+	    DRM_MEM_BUFS);
+	drm_free(dev->dma, sizeof(*dev->dma), DRM_MEM_DMA);
 	dev->dma = NULL;
 	DRM_SPINUNINIT(&dev->dma_lock);
 }
@@ -99,7 +105,8 @@ drm_dma_takedown(struct drm_device *dev)
 void
 drm_free_buffer(struct drm_device *dev, drm_buf_t *buf)
 {
-	if (!buf) return;
+	if (buf == NULL)
+		return;
 
 	buf->pending = 0;
 	buf->file_priv= NULL;
@@ -112,21 +119,11 @@ drm_reclaim_buffers(struct drm_device *dev, struct drm_file *file_priv)
 	drm_device_dma_t *dma = dev->dma;
 	int i;
 
-	if (!dma) return;
+	if (dma == NULL)
+		return;
 	for (i = 0; i < dma->buf_count; i++) {
-		if (dma->buflist[i]->file_priv == file_priv) {
-			switch (dma->buflist[i]->list) {
-			case DRM_LIST_NONE:
+		if (dma->buflist[i]->file_priv == file_priv)
 				drm_free_buffer(dev, dma->buflist[i]);
-				break;
-			case DRM_LIST_WAIT:
-				dma->buflist[i]->list = DRM_LIST_RECLAIM;
-				break;
-			default:
-				/* Buffer already on hardware. */
-				break;
-			}
-		}
 	}
 }
 

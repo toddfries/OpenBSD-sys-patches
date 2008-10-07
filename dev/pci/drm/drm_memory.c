@@ -57,8 +57,10 @@ drm_alloc(size_t size, int area)
 void *
 drm_calloc(size_t nmemb, size_t size, int area)
 {
-	/* XXX overflow checking */
-	return malloc(size * nmemb, M_DRM, M_NOWAIT | M_ZERO);
+	if (nmemb == 0 || SIZE_MAX / nmemb < size)
+		return (NULL);
+	else
+		return malloc(size * nmemb, M_DRM, M_NOWAIT | M_ZERO);
 }
 
 void *
@@ -70,7 +72,7 @@ drm_realloc(void *oldpt, size_t oldsize, size_t size, int area)
 	if (pt == NULL)
 		return NULL;
 	if (oldpt && oldsize) {
-		memcpy(pt, oldpt, oldsize);
+		memcpy(pt, oldpt, min(oldsize, size));
 		free(oldpt, M_DRM);
 	}
 	return pt;
@@ -79,7 +81,8 @@ drm_realloc(void *oldpt, size_t oldsize, size_t size, int area)
 void
 drm_free(void *pt, size_t size, int area)
 {
-	free(pt, M_DRM);
+	if (pt != NULL)
+		free(pt, M_DRM);
 }
 
 void *
@@ -106,7 +109,7 @@ drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
 		}
 		goto done;
 	} else {
-		for (i = 0 ; i < DRM_MAX_PCI_RESOURCE; ++i) {
+		for (i = 0; i < DRM_MAX_PCI_RESOURCE; ++i) {
 			bar = vga_pci_bar_info(dev->vga_softc, i);
 			if (bar == NULL)
 				continue;
@@ -133,7 +136,10 @@ done:
 void
 drm_ioremapfree(drm_local_map_t *map)
 {
-	if (map != NULL && map->bsr != NULL)
+	if (map == NULL)
+		return;
+
+	if (map->bsr != NULL)
 		vga_pci_bar_unmap(map->bsr);
 	else
 		bus_space_unmap(map->bst, map->bsh, map->size);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.84 2008/06/15 04:03:40 thib Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.86 2008/08/25 09:26:17 pedro Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -514,7 +514,6 @@ static short *nfsrv_v3errmap[] = {
 	nfsv3err_commit,
 };
 
-extern struct proc *nfs_iodwant[NFS_MAXASYNCDAEMON];
 extern struct nfsrtt nfsrtt;
 
 struct pool nfsreqpl;
@@ -954,11 +953,6 @@ int
 nfs_vfs_init(vfsp)
 	struct vfsconf *vfsp;
 {
-	int i;
-
-	/* Ensure async daemons disabled */
-	for (i = 0; i < NFS_MAXASYNCDAEMON; i++)
-		nfs_iodwant[i] = (struct proc *)0;
 	TAILQ_INIT(&nfs_bufq);
 	nfs_nhinit();			/* Init the nfsnode table */
 
@@ -1075,7 +1069,6 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	}
 	vap = &np->n_vattr;
 	vap->va_type = vtyp;
-	vap->va_mode = (vmode & 07777);
 	vap->va_rdev = (dev_t)rdev;
 	vap->va_mtime = mtime;
 	vap->va_fsid = vp->v_mount->mnt_stat.f_fsid.val[0];
@@ -1085,8 +1078,10 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	/* Invalidate access cache if uid, gid or mode changed. */
 	if (np->n_accstamp != -1 &&
 	    (gid != vap->va_gid || uid != vap->va_uid ||
-	    vmode != vap->va_mode))
+	    (vmode & 07777) != vap->va_mode))
 		np->n_accstamp = -1;
+
+	vap->va_mode = (vmode & 07777);
 
 	switch (vtyp) {
 	case VBLK:

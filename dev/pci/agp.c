@@ -1,4 +1,4 @@
-/* $OpenBSD: agp.c,v 1.23 2008/07/07 07:54:48 bernd Exp $ */
+/* $OpenBSD: agp.c,v 1.26 2008/09/26 21:15:53 mikeb Exp $ */
 /*-
  * Copyright (c) 2000 Doug Rabson
  * All rights reserved.
@@ -93,6 +93,7 @@ const struct agp_product agp_products[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM965_HB, agp_i810_attach },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G33_HB, agp_i810_attach },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G35_HB, agp_i810_attach },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q35_HB, agp_i810_attach },
 #endif 
 #if NAGP_INTEL > 0
 	{ PCI_VENDOR_INTEL, -1, agp_intel_attach },
@@ -174,6 +175,9 @@ agp_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_pc = pa->pa_pc;
 		sc->sc_id = pa->pa_id;
 		sc->sc_dmat = pa->pa_dmat;
+		sc->sc_memt = pa->pa_memt;
+		sc->sc_vgapcitag = aaa->apa_vga_args.pa_tag;
+		sc->sc_vgapc = aaa->apa_vga_args.pa_pc;
 
 		pci_get_capability(sc->sc_pc, sc->sc_pcitag, PCI_CAP_AGP,
 		    &sc->sc_capoff, NULL);
@@ -426,7 +430,7 @@ agp_generic_enable(struct agp_softc *sc, u_int32_t mode)
 	pcireg_t command;
 	int rq, sba, fw, rate, capoff;
 	
-	if (pci_get_capability(sc->sc_pc, sc->sc_pcitag, PCI_CAP_AGP,
+	if (pci_get_capability(sc->sc_vgapc, sc->sc_vgapcitag, PCI_CAP_AGP,
 	    &capoff, NULL) == 0) {
 		printf("agp_generic_enable: not an AGP capable device\n");
 		return (-1);
@@ -434,7 +438,8 @@ agp_generic_enable(struct agp_softc *sc, u_int32_t mode)
 
 	tstatus = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
 	    sc->sc_capoff + AGP_STATUS);
-	mstatus = pci_conf_read(sc->sc_pc, sc->sc_pcitag,
+	/* display agp mode */
+	mstatus = pci_conf_read(sc->sc_vgapc, sc->sc_vgapcitag,
 	    capoff + AGP_STATUS);
 
 	/* Set RQ to the min of mode, tstatus and mstatus */
@@ -471,9 +476,11 @@ agp_generic_enable(struct agp_softc *sc, u_int32_t mode)
 	command = AGP_MODE_SET_FW(command, fw);
 	command = AGP_MODE_SET_RATE(command, rate);
 	command = AGP_MODE_SET_AGP(command, 1);
+
 	pci_conf_write(sc->sc_pc, sc->sc_pcitag,
 	    sc->sc_capoff + AGP_COMMAND, command);
-	pci_conf_write(sc->sc_pc, sc->sc_pcitag, capoff + AGP_COMMAND, command);
+	pci_conf_write(sc->sc_vgapc, sc->sc_vgapcitag, capoff + AGP_COMMAND,
+	    command);
 	return (0);
 }
 
@@ -745,6 +752,9 @@ agp_acquire_helper(void *dev, enum agp_acquire_state state)
 {
 	struct agp_softc *sc = (struct agp_softc *)dev;
 
+	if (sc->sc_chipc == NULL) 
+		return (EINVAL);
+
 	if (sc->sc_state != AGP_ACQUIRE_FREE)
 		return (EBUSY);
 	sc->sc_state = state;
@@ -959,8 +969,7 @@ agp_unbind_memory(void *dev, void *handle)
 }
 
 void
-agp_memory_info(void *dev, void *handle, struct
-    agp_memory_info *mi)
+agp_memory_info(void *dev, void *handle, struct agp_memory_info *mi)
 {
         struct agp_memory *mem = (struct agp_memory *) handle;
 

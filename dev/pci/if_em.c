@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.185 2008/06/15 16:37:00 millert Exp $ */
+/* $OpenBSD: if_em.c,v 1.191 2008/10/05 11:57:48 kettenis Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -315,8 +315,10 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_80003es2lan:	/* Limit Jumbo Frame size */
 			sc->hw.max_frame_size = 9234;
 			break;
+			/* Adapters that do not support Jumbo frames */
+		case em_82542_rev2_0:
+		case em_82542_rev2_1:
 		case em_ich8lan:
-			/* ICH8 does not support jumbo frames */
 			sc->hw.max_frame_size = ETHER_MAX_LEN;
 			break;
 		default:
@@ -533,11 +535,6 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->interface_data, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFADDR (Set Interface "
@@ -610,8 +607,7 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
 	default:
-		IOCTL_DEBUGOUT1("ioctl received: UNKNOWN (0x%x)", (int)command);
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->interface_data, command, data);
 	}
 
 	splx(s);
@@ -1411,6 +1407,8 @@ em_update_link_status(struct em_softc *sc)
 			sc->link_active = 1;
 			sc->smartspeed = 0;
 			ifp->if_baudrate = sc->link_speed * 1000000;
+		}
+		if (!LINK_STATE_IS_UP(ifp->if_link_state)) {
 			if (sc->link_duplex == FULL_DUPLEX)
 				ifp->if_link_state = LINK_STATE_FULL_DUPLEX;
 			else
@@ -1422,6 +1420,8 @@ em_update_link_status(struct em_softc *sc)
 			ifp->if_baudrate = sc->link_speed = 0;
 			sc->link_duplex = 0;
 			sc->link_active = 0;
+		}
+		if (ifp->if_link_state != LINK_STATE_DOWN) {
 			ifp->if_link_state = LINK_STATE_DOWN;
 			if_link_state_change(ifp);
 		}
@@ -1855,9 +1855,7 @@ em_dma_malloc(struct em_softc *sc, bus_size_t size,
 	}
 
 	r = bus_dmamap_load(sc->osdep.em_pa.pa_dmat, dma->dma_map,
-			    dma->dma_vaddr,
-			    size,
-			    NULL,
+			    dma->dma_vaddr, size, NULL,
 			    mapflags | BUS_DMA_NOWAIT);
 	if (r != 0) {
 		printf("%s: em_dma_malloc: bus_dmamap_load failed; "
@@ -2418,11 +2416,9 @@ em_initialize_receive_unit(struct em_softc *sc)
 {
 	u_int32_t	reg_rctl;
 	u_int32_t	reg_rxcsum;
-	struct ifnet	*ifp;
 	u_int64_t	bus_addr;
 
 	INIT_DEBUGOUT("em_initialize_receive_unit: begin");
-	ifp = &sc->interface_data.ac_if;
 
 	/* Make sure receives are disabled while setting up the descriptor ring */
 	E1000_WRITE_REG(&sc->hw, RCTL, 0);
@@ -2869,26 +2865,14 @@ em_pci_clear_mwi(struct em_hw *hw)
 		(hw->pci_cmd_word & ~CMD_MEM_WRT_INVALIDATE));
 }
 
+/*
+ * We may eventually really do this, but its unnecessary
+ * for now so we just return unsupported.
+ */
 int32_t
 em_read_pcie_cap_reg(struct em_hw *hw, uint32_t reg, uint16_t *value)
 {
-	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	int32_t	rc;
-	u_int16_t pectl;
-
-	/* find the PCIe link width and set max read request to 4KB */
-	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
-	    NULL, NULL) != 0) {
-		em_read_pci_cfg(hw, reg + 0x12, value);
-
-		em_read_pci_cfg(hw, reg + 0x8, &pectl);
-		pectl = (pectl & ~0x7000) | (5 << 12);
-		em_write_pci_cfg(hw, reg + 0x8, &pectl);
-		rc = 0;
-	} else
-		rc = -1;
-
-	return (rc);
+	return -E1000_NOT_IMPLEMENTED;
 }
 
 /*********************************************************************

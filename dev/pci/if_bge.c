@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.236 2008/06/07 19:05:11 brad Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.246 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -107,6 +107,7 @@
 #endif
 
 #ifdef __sparc64__
+#include <sparc64/autoconf.h>
 #include <dev/ofw/openfirm.h>
 #endif
 
@@ -1352,17 +1353,19 @@ bge_blockinit(struct bge_softc *sc)
 
 	/* Configure mbuf pool watermarks */
 	/* new Broadcom docs strongly recommend these: */
-	if (!(BGE_IS_5705_OR_BEYOND(sc))) {
+	if (BGE_IS_5705_OR_BEYOND(sc)) {
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
+
+		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906) {
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x04);
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x10);
+		} else {
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x10);
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x60);
+		}
+	} else {
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x50);
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x20);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x60);
-	} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906) {
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x04);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x10);
-	} else {
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x10);
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x60);
 	}
 
@@ -1662,18 +1665,13 @@ bge_blockinit(struct bge_softc *sc)
 	/* Turn on write DMA state machine */
 	CSR_WRITE_4(sc, BGE_WDMA_MODE, val);
 
+	val = BGE_RDMAMODE_ENABLE|BGE_RDMAMODE_ALL_ATTNS;
+
+	if (sc->bge_flags & BGE_PCIE)
+		val |= BGE_RDMAMODE_FIFO_LONG_BURST;
+
 	/* Turn on read DMA state machine */
-	{
-		uint32_t dma_read_modebits;
-
-		dma_read_modebits =
-		  BGE_RDMAMODE_ENABLE | BGE_RDMAMODE_ALL_ATTNS;
-
-		if (sc->bge_flags & BGE_PCIE && 0)
-			dma_read_modebits |= BGE_RDMA_MODE_FIFO_LONG_BURST;
-
-		CSR_WRITE_4(sc, BGE_RDMA_MODE, dma_read_modebits);
-	}
+	CSR_WRITE_4(sc, BGE_RDMA_MODE, val);
 
 	/* Turn on RX data completion state machine */
 	CSR_WRITE_4(sc, BGE_RDC_MODE, BGE_RDCMODE_ENABLE);
@@ -1792,7 +1790,7 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet		*ifp;
 	caddr_t			kva;
 #ifdef __sparc64__
-	int			subvendor;
+	char			name[32];
 #endif
 
 	sc->bge_pa = *pa;
@@ -1867,11 +1865,17 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	 * SEEPROM check.
 	 */
 #ifdef __sparc64__
-	if (OF_getprop(PCITAG_NODE(pa->pa_tag), "subsystem-vendor-id",
-	    &subvendor, sizeof(subvendor)) == sizeof(subvendor)) {
-		if (subvendor == PCI_VENDOR_SUN)
+	/*
+	 * Onboard interfaces on UltraSPARC systems generally don't
+	 * have a SEEPROM fitted.  These interfaces, and cards that
+	 * have FCode, are named "network" by the PROM, whereas cards
+	 * without FCode show up as "ethernet".  Since we don't really
+	 * need the information from the SEEPROM on cards that have
+	 * FCode it's fine to pretend they don't have one.
+	 */
+	if (OF_getprop(PCITAG_NODE(pa->pa_tag), "name", name,
+	    sizeof(name)) > 0 && strcmp(name, "network") == 0)
 		sc->bge_flags |= BGE_NO_EEPROM;
-	}
 #endif
 
 	/*
@@ -1896,6 +1900,11 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 
 	misccfg = CSR_READ_4(sc, BGE_MISC_CFG);
 	misccfg &= BGE_MISCCFG_BOARD_ID_MASK;
+
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5705 &&
+	    (misccfg == BGE_MISCCFG_BOARD_ID_5788 ||
+	     misccfg == BGE_MISCCFG_BOARD_ID_5788M))
+		sc->bge_flags |= BGE_IS_5788;
 
 	if ((BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5703 &&
 	     (misccfg == 0x4000 || misccfg == 0x8000)) ||
@@ -2437,7 +2446,7 @@ bge_rxeof(struct bge_softc *sc)
 		u_int32_t		rxidx;
 		struct mbuf		*m = NULL;
 #ifdef BGE_CHECKSUM
-		int			sumflags = 0;
+		u_int16_t		sumflags = 0;
 #endif
 
 		cur_rx = &sc->bge_rdata->
@@ -2697,7 +2706,7 @@ bge_tick(void *xsc)
 			mii_tick(mii);
 	}       
 
-	timeout_add(&sc->bge_timeout, hz);
+	timeout_add_sec(&sc->bge_timeout, 1);
 
 	splx(s);
 }
@@ -3140,7 +3149,7 @@ bge_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->bge_timeout, hz);
+	timeout_add_sec(&sc->bge_timeout, 1);
 }
 
 /*
@@ -3204,6 +3213,20 @@ bge_ifmedia_upd(struct ifnet *ifp)
 	}
 	mii_mediachg(mii);
 
+	/*
+	 * Force an interrupt so that we will call bge_link_upd
+	 * if needed and clear any pending link state attention.
+	 * Without this we are not getting any further interrupts
+	 * for link state changes and thus will not UP the link and
+	 * not be able to send in bge_start. The only way to get
+	 * things working was to receive a packet and get a RX intr.
+	 */
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700 ||
+	    sc->bge_flags & BGE_IS_5788)
+		BGE_SETBIT(sc, BGE_MISC_LOCAL_CTL, BGE_MLC_INTR_SET);
+	else
+		BGE_SETBIT(sc, BGE_HCC_MODE, BGE_HCCMODE_COAL_NOW);
+
 	return (0);
 }
 
@@ -3250,11 +3273,6 @@ bge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct mii_data *mii;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -3328,12 +3346,10 @@ bge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.95 2008/04/21 00:32:42 jakemsr Exp $	*/
+/*	$OpenBSD: audio.c,v 1.98 2008/09/29 02:27:38 jakemsr Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -1711,10 +1711,10 @@ audio_ioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		s = splaudio();
 		/* figure out where next DMA will start */
 		ao = (struct audio_offset *)addr;
-		ao->samples = sc->sc_rr.stamp;
+		ao->samples = sc->sc_rr.stamp / sc->sc_rparams.factor;
 		ao->deltablks = (sc->sc_rr.stamp - sc->sc_rr.stamp_last) / sc->sc_rr.blksize;
 		sc->sc_rr.stamp_last = sc->sc_rr.stamp;
-		ao->offset = sc->sc_rr.inp - sc->sc_rr.start;
+		ao->offset = (sc->sc_rr.inp - sc->sc_rr.start) / sc->sc_rparams.factor;
 		splx(s);
 		break;
 
@@ -1725,10 +1725,10 @@ audio_ioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		offs = sc->sc_pr.outp - sc->sc_pr.start + sc->sc_pr.blksize;
 		if (sc->sc_pr.start + offs >= sc->sc_pr.end)
 			offs = 0;
-		ao->samples = sc->sc_pr.stamp;
+		ao->samples = sc->sc_pr.stamp / sc->sc_pparams.factor;
 		ao->deltablks = (sc->sc_pr.stamp - sc->sc_pr.stamp_last) / sc->sc_pr.blksize;
 		sc->sc_pr.stamp_last = sc->sc_pr.stamp;
-		ao->offset = offs;
+		ao->offset = offs / sc->sc_pparams.factor;
 		splx(s);
 		break;
 
@@ -2227,11 +2227,15 @@ audio_rint(void *v)
 		DPRINTFN(1, ("audio_rint: pdrops %lu\n", cb->pdrops));
 		cb->pdrops += blksize;
 		cb->outp += blksize;
+		if (cb->outp >= cb->end)
+			cb->outp = cb->start;
 		cb->used -= blksize;
 	} else if (cb->used >= cb->usedhigh && !cb->copying) {
 		DPRINTFN(1, ("audio_rint: drops %lu\n", cb->drops));
 		cb->drops += blksize;
 		cb->outp += blksize;
+		if (cb->outp >= cb->end)
+			cb->outp = cb->start;
 		cb->used -= blksize;
 	}
 
@@ -3100,7 +3104,7 @@ mixer_remove(struct audio_softc *sc, struct proc *p)
 }
 
 /*
- * Signal all processes waitinf for the mixer.
+ * Signal all processes waiting for the mixer.
  */
 static void
 mixer_signal(struct audio_softc *sc)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bwi_pci.c,v 1.7 2008/05/23 08:49:27 brad Exp $ */
+/*	$OpenBSD: if_bwi_pci.c,v 1.9 2008/09/11 20:55:34 brad Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -86,13 +86,24 @@ const struct pci_matchid bwi_pci_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4312 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4318 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4319 },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4322 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM43XG }
 };
 
 int
 bwi_pci_match(struct device *parent, void *match, void *aux)
 {
+	struct pci_attach_args *pa = aux;
+
+	/*
+	 * The second revision of the BCM4311/BCM4312
+	 * chips require v4 firmware.
+	 */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_BROADCOM &&
+            (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM4311 ||
+	     PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM4312) &&
+	     PCI_REVISION(pa->pa_class) == 0x02)
+		return (0);
+
 	return (pci_matchbyid((struct pci_attach_args *)aux, bwi_pci_devices,
 	    sizeof(bwi_pci_devices) / sizeof(bwi_pci_devices[0])));
 }

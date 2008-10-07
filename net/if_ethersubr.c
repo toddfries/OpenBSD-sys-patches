@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.122 2008/06/13 23:24:21 mpf Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.125 2008/10/02 20:21:14 brad Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -172,7 +172,6 @@ ether_ioctl(ifp, arp, cmd, data)
 	int	error = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef NETATALK
@@ -183,7 +182,7 @@ ether_ioctl(ifp, arp, cmd, data)
 		}
 		break;
 	default:
-		break;
+		error = ENOTTY;
 	}
 
 	return error;
@@ -460,10 +459,10 @@ ether_output(ifp0, m0, dst, rt0)
 		splx(s);
 		return (error);
 	}
-	ifp->if_obytes += len + ETHER_HDR_LEN;
+	ifp->if_obytes += len;
 #if NCARP > 0
 	if (ifp != ifp0)
-		ifp0->if_obytes += len + ETHER_HDR_LEN;
+		ifp0->if_obytes += len;
 #endif /* NCARP > 0 */
 	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
@@ -714,9 +713,9 @@ decapsulate:
 		bcopy(eh, eh_tmp, sizeof(struct ether_header));
 
 		if (etype == ETHERTYPE_PPPOEDISC)
-			inq = &ppoediscinq;
+			inq = &pppoediscinq;
 		else
-			inq = &ppoeinq;
+			inq = &pppoeinq;
 
 		schednetisr(NETISR_PPPOE);
 		break;

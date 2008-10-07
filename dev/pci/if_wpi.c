@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.61 2008/06/16 18:43:06 damien Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.64 2008/08/27 09:05:03 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007
@@ -1204,6 +1204,7 @@ wpi_rx_intr(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	struct wpi_rx_tail *tail;
 	struct wpi_rbuf *rbuf;
 	struct ieee80211_frame *wh;
+	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
 	struct mbuf *m, *mnew;
 
@@ -1317,7 +1318,10 @@ wpi_rx_intr(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	ni = ieee80211_find_rxnode(ic, wh);
 
 	/* send the frame to the 802.11 layer */
-	ieee80211_input(ifp, m, ni, stat->rssi, 0);
+	rxi.rxi_flags = 0;
+	rxi.rxi_rssi = stat->rssi;
+	rxi.rxi_tstamp = 0;	/* unused */
+	ieee80211_input(ifp, m, ni, &rxi);
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
@@ -2604,6 +2608,8 @@ wpi_config(struct wpi_softc *sc)
 		sc->config.mode = WPI_MODE_STA;
 		sc->config.filter |= htole32(WPI_FILTER_MULTICAST);
 		break;
+#ifndef IEEE80211_STA_ONLY
+#ifdef notyet
 	case IEEE80211_M_IBSS:
 	case IEEE80211_M_AHDEMO:
 		sc->config.mode = WPI_MODE_IBSS;
@@ -2611,10 +2617,15 @@ wpi_config(struct wpi_softc *sc)
 	case IEEE80211_M_HOSTAP:
 		sc->config.mode = WPI_MODE_HOSTAP;
 		break;
+#endif
+#endif
 	case IEEE80211_M_MONITOR:
 		sc->config.mode = WPI_MODE_MONITOR;
 		sc->config.filter |= htole32(WPI_FILTER_MULTICAST |
 		    WPI_FILTER_CTL | WPI_FILTER_PROMISC);
+		break;
+	default:
+		/* should not get there */
 		break;
 	}
 	sc->config.cck_mask  = 0x0f;	/* not yet negotiated */
@@ -2721,12 +2732,12 @@ wpi_reset(struct wpi_softc *sc)
 	WPI_WRITE(sc, WPI_GPIO_CTL, tmp | WPI_GPIO_INIT);
 
 	/* wait for clock stabilization */
-	for (ntries = 0; ntries < 1000; ntries++) {
+	for (ntries = 0; ntries < 25000; ntries++) {
 		if (WPI_READ(sc, WPI_GPIO_CTL) & WPI_GPIO_CLOCK)
 			break;
-		DELAY(10);
+		DELAY(100);
 	}
-	if (ntries == 1000) {
+	if (ntries == 25000) {
 		printf("%s: timeout waiting for clock stabilization\n",
 		    sc->sc_dev.dv_xname);
 		return ETIMEDOUT;

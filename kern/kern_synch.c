@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.83 2007/11/30 16:44:44 oga Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.87 2008/09/10 12:30:40 blambert Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -164,10 +164,10 @@ msleep(void *ident, struct mutex *mtx,  int priority, const char *wmesg, int tim
 	error1 = sleep_finish_timeout(&sls);
 	error = sleep_finish_signal(&sls);
 
-	if (mtx && (priority & PNORELOCK) == 0)
+	if (mtx && (priority & PNORELOCK) == 0) {
 		mtx_enter(mtx);
-
-	MUTEX_OLDIPL(mtx) = spl; /* put the ipl back else it breaks things */
+		MUTEX_OLDIPL(mtx) = spl; /* put the ipl back */
+	}
 	/* Signal errors are higher priority than timeouts. */
 	if (error == 0 && error1 != 0)
 		error = error1;
@@ -446,10 +446,10 @@ sys_thrwakeup(struct proc *p, void *v, register_t *retval)
 	int n = SCARG(uap, n);
 	struct proc *q;
 	int found = 0;
-	
+
 	TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
 		if (q->p_thrslpid == ident) {
-			wakeup(&q->p_thrslpid);
+			wakeup_one(&q->p_thrslpid);
 			q->p_thrslpid = 0;
 			if (++found == n)
 				return (0);

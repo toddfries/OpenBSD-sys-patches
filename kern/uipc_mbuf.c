@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.90 2008/06/11 02:46:34 henning Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.93 2008/09/28 14:08:51 naddy Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -195,6 +195,7 @@ m_gethdr(int nowait, int type)
 		m->m_pkthdr.rcvif = NULL;
 		SLIST_INIT(&m->m_pkthdr.tags);
 		m->m_pkthdr.csum_flags = 0;
+		m->m_pkthdr.ether_vtag = 0;
 		m->m_pkthdr.pf.hdr = NULL;
 		m->m_pkthdr.pf.statekey = NULL;
 		m->m_pkthdr.pf.rtableid = 0;
@@ -218,6 +219,7 @@ m_inithdr(struct mbuf *m)
 	m->m_pkthdr.rcvif = NULL;
 	SLIST_INIT(&m->m_pkthdr.tags);
 	m->m_pkthdr.csum_flags = 0;
+	m->m_pkthdr.ether_vtag = 0;
 	m->m_pkthdr.pf.hdr = NULL;
 	m->m_pkthdr.pf.statekey = NULL;
 	m->m_pkthdr.pf.rtableid = 0;
@@ -271,9 +273,12 @@ m_free(struct mbuf *m)
 	if (m->m_flags & M_PKTHDR)
 		m_tag_delete_chain(m);
 	if (m->m_flags & M_EXT) {
-		if (MCLISREFERENCED(m))
-			_MCLDEREFERENCE(m);
-		else if (m->m_flags & M_CLUSTER)
+		if (MCLISREFERENCED(m)) {
+			m->m_ext.ext_nextref->m_ext.ext_prevref =
+			    m->m_ext.ext_prevref;
+			m->m_ext.ext_prevref->m_ext.ext_nextref =
+			    m->m_ext.ext_nextref;
+		} else if (m->m_flags & M_CLUSTER)
 			pool_put(&mclpool, m->m_ext.ext_buf);
 		else if (m->m_ext.ext_free)
 			(*(m->m_ext.ext_free))(m->m_ext.ext_buf,
@@ -715,8 +720,10 @@ m_pullup2(struct mbuf *n, int len)
 		if (m == NULL)
 			goto bad;
 		MCLGET(m, M_DONTWAIT);
-		if ((m->m_flags & M_EXT) == 0)
+		if ((m->m_flags & M_EXT) == 0) {
+			m_free(m);
 			goto bad;
+		}
 		m->m_len = 0;
 		if (n->m_flags & M_PKTHDR) {
 			/* Too many adverse side effects. */

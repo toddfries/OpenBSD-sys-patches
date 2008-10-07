@@ -39,11 +39,6 @@
 #define DRIVER_DESC		"Intel Graphics"
 #define DRIVER_DATE		"20080312"
 
-#if defined(__linux__)
-#define I915_HAVE_FENCE
-#define I915_HAVE_BUFFER
-#endif
-
 /* Interface history:
  *
  * 1.1: Original.
@@ -60,22 +55,13 @@
  * 1.12: TTM relocation optimization
  */
 #define DRIVER_MAJOR		1
-#if defined(I915_HAVE_FENCE) && defined(I915_HAVE_BUFFER)
-#define DRIVER_MINOR		13
-#else
 #define DRIVER_MINOR		6
-#endif
 #define DRIVER_PATCHLEVEL	0
 
 enum pipe {
     PIPE_A = 0,
     PIPE_B,
 };
-
-#ifdef I915_HAVE_BUFFER
-#define I915_MAX_VALIDATE_BUFFERS 4096
-struct drm_i915_validate_buffer;
-#endif
 
 typedef struct _drm_i915_ring_buffer {
 	int tail_mask;
@@ -105,6 +91,22 @@ typedef struct _drm_i915_vbl_swap {
 	int flip;
 } drm_i915_vbl_swap_t;
 
+#ifdef __linux__
+struct opregion_header;
+struct opregion_acpi;
+struct opregion_swsci;
+struct opregion_asle;
+
+struct intel_opregion {
+	struct opregion_header *header;
+	struct opregion_acpi *acpi;
+	struct opregion_swsci *swsci;
+	struct opregion_asle *asle;
+
+	int enabled;
+};
+#endif
+
 typedef struct drm_i915_private {
 	drm_local_map_t *sarea;
 	drm_local_map_t *mmio_map;
@@ -120,44 +122,32 @@ typedef struct drm_i915_private {
 	drm_local_map_t hws_map;
 
 	unsigned int cpp;
-	int use_mi_batchbuffer_start;
 
 	wait_queue_head_t irq_queue;
 	atomic_t irq_received;
 	atomic_t irq_emitted;
+	/* Protects user_irq_refcount and irq_mask reg */
+	DRM_SPINTYPE user_irq_lock;
+	/* Refcount for user irq, only enabled when needed */
+	int user_irq_refcount;
+	/* Cached value of IMR to avoid reads in updating the bitfield */
+	u_int32_t irq_mask_reg;
+	int irq_enabled;
 
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
 	struct mem_block *agp_heap;
 	unsigned int sr01, adpa, ppcr, dvob, dvoc, lvds;
 	int vblank_pipe;
-	DRM_SPINTYPE user_irq_lock;
-	int user_irq_refcount;
-	int fence_irq_on;
-	uint32_t irq_enable_reg;
-	int irq_enabled;
-
-#ifdef I915_HAVE_FENCE
-	uint32_t flush_sequence;
-	uint32_t flush_flags;
-	uint32_t flush_pending;
-	uint32_t saved_flush_status;
-#endif
-#ifdef I915_HAVE_BUFFER
-	void *agp_iomap;
-	unsigned int max_validate_buffers;
-	struct mutex cmdbuf_mutex;
-	struct drm_i915_validate_buffer *val_bufs;
-#endif
 
 	DRM_SPINTYPE swaps_lock;
 	drm_i915_vbl_swap_t vbl_swaps;
 	unsigned int swaps_pending;
-#if defined(I915_HAVE_BUFFER)
-	/* DRI2 sarea */
-	struct drm_buffer_object *sarea_bo;
-	struct drm_bo_kmap_obj sarea_kmap;
+
+#ifdef __linux__
+	struct intel_opregion opregion;
 #endif
+
 	/* Register state */
 	u8 saveLBB;
 	u32 saveDSPACNTR;
@@ -286,6 +276,7 @@ extern irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS);
 extern void i915_driver_irq_preinstall(struct drm_device * dev);
 extern int i915_driver_irq_postinstall(struct drm_device * dev);
 extern void i915_driver_irq_uninstall(struct drm_device * dev);
+extern void i915_enable_interrupt(struct drm_device *dev);
 extern int i915_vblank_pipe_set(struct drm_device *dev, void *data,
 				struct drm_file *file_priv);
 extern int i915_vblank_pipe_get(struct drm_device *dev, void *data,
@@ -317,29 +308,12 @@ extern void i915_mem_release(struct drm_device * dev,
 extern int i915_save_state(struct drm_device *dev);
 extern int i915_restore_state(struct drm_device *dev);
 
-#ifdef I915_HAVE_FENCE
-/* i915_fence.c */
-extern void i915_fence_handler(struct drm_device *dev);
-extern void i915_invalidate_reported_sequence(struct drm_device *dev);
-
-#endif
-
-#ifdef I915_HAVE_BUFFER
-/* i915_buffer.c */
-extern struct drm_ttm_backend *i915_create_ttm_backend_entry(struct drm_device *dev);
-extern int i915_fence_type(struct drm_buffer_object *bo, uint32_t *fclass,
-			   uint32_t *type);
-extern int i915_invalidate_caches(struct drm_device *dev, uint64_t buffer_flags);
-extern int i915_init_mem_type(struct drm_device *dev, uint32_t type,
-			       struct drm_mem_type_manager *man);
-extern uint64_t i915_evict_flags(struct drm_buffer_object *bo);
-extern int i915_move(struct drm_buffer_object *bo, int evict,
-		int no_wait, struct drm_bo_mem_reg *new_mem);
-void i915_flush_ttm(struct drm_ttm *ttm);
-/* i915_execbuf.c */
-int i915_execbuffer(struct drm_device *dev, void *data,
-				   struct drm_file *file_priv);
-
+#ifdef __linux__
+/* i915_opregion.c */
+extern int intel_opregion_init(struct drm_device *dev);
+extern void intel_opregion_free(struct drm_device *dev);
+extern void opregion_asle_intr(struct drm_device *dev);
+extern void opregion_enable_asle(struct drm_device *dev);
 #endif
 
 #ifdef __linux__
@@ -588,6 +562,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define PRB1_HEAD	0x02044 /* 915+ only */
 #define PRB1_START	0x02048 /* 915+ only */
 #define PRB1_CTL	0x0204c /* 915+ only */
+#define ACTHD_I965	0x02074
 #define HWS_PGA		0x02080
 #define IPEIR		0x02088
 #define NOPID		0x02094
@@ -613,10 +588,12 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define   I915_DISPLAY_PIPE_B_EVENT_INTERRUPT		(1<<4)
 #define   I915_DEBUG_INTERRUPT				(1<<2)
 #define   I915_USER_INTERRUPT				(1<<1)
+#define   I915_ASLE_INTERRUPT				(1<<0)
 #define EIR		0x020b0
 #define EMR		0x020b4
 #define ESR		0x020b8
 #define INSTPM	        0x020c0
+#define ACTHD		0x020c8
 #define FW_BLC		0x020d8
 #define FW_BLC_SELF	0x020e0 /* 915+ only */
 #define MI_ARB_STATE	0x020e4 /* 915+ only */

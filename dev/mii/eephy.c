@@ -1,4 +1,4 @@
-/*	$OpenBSD: eephy.c,v 1.43 2007/11/18 18:10:13 krw Exp $	*/
+/*	$OpenBSD: eephy.c,v 1.45 2008/09/09 00:25:55 brad Exp $	*/
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -95,10 +95,14 @@ static const struct mii_phydesc eephys[] = {
 	  MII_STR_MARVELL_E1112 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1116,
 	  MII_STR_MARVELL_E1116 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1116R,
+	  MII_STR_MARVELL_E1116R },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1118,
 	  MII_STR_MARVELL_E1118 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1149,
 	  MII_STR_MARVELL_E1149 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E3016,
+	  MII_STR_MARVELL_E3016},
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E3082,
 	  MII_STR_MARVELL_E3082 },
 	{ MII_OUI_xxMARVELL,		MII_MODEL_xxMARVELL_E1000_5,
@@ -198,6 +202,7 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 
 	/* Enable auto crossover. */
 	switch (sc->mii_model) {
+	case MII_MODEL_MARVELL_E3016:
 	case MII_MODEL_MARVELL_E3082:
 		/* Bits are in a different position.  */
 		reg |= (E1000_SCR_AUTO_X_MODE >> 1);

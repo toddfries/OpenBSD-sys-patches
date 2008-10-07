@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tsec.c,v 1.10 2008/05/26 21:08:47 kettenis Exp $	*/
+/*	$OpenBSD: if_tsec.c,v 1.12 2008/10/02 20:21:13 brad Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -341,7 +341,11 @@ tsec_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_start = tsec_start;
 	ifp->if_watchdog = tsec_watchdog;
 	ifp->if_baudrate = IF_Gbps(1);
+	IFQ_SET_MAXLEN(&ifp->if_snd, TSEC_NTXDESC - 1);
+	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 	sc->sc_mii.mii_ifp = ifp;
 	sc->sc_mii.mii_readreg = tsec_mii_readreg;
@@ -452,13 +456,9 @@ tsec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	struct tsec_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)addr;
 	struct ifreq *ifr = (struct ifreq *)addr;
-	int error, s;
+	int error = 0, s;
 
 	s = splnet();
-
-	error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
-	if (error)
-		goto err;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -506,11 +506,10 @@ tsec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
 		break;
 	}
 
-err:
 	splx(s);
 	return (error);
 }

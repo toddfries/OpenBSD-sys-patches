@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.46 2008/06/15 06:56:09 mpf Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.51 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -479,14 +479,13 @@ trunk_port_destroy(struct trunk_port *tp)
 void
 trunk_port_watchdog(struct ifnet *ifp)
 {
-	struct trunk_softc *tr;
 	struct trunk_port *tp;
 
 	/* Should be checked by the caller */
 	if (ifp->if_type != IFT_IEEE8023ADLAG)
 		return;
 	if ((tp = (struct trunk_port *)ifp->if_tp) == NULL ||
-	    (tr = (struct trunk_softc *)tp->tp_trunk) == NULL)
+	    tp->tp_trunk == NULL)
 		return;
 
 	if (tp->tp_watchdog != NULL)
@@ -499,7 +498,7 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct trunk_reqport *rp = (struct trunk_reqport *)data;
 	struct trunk_softc *tr;
-	struct trunk_port *tp;
+	struct trunk_port *tp = NULL;
 	int s, error = 0;
 
 	s = splnet();
@@ -599,11 +598,13 @@ trunk_port2req(struct trunk_port *tp, struct trunk_reqport *rp)
 	case TRUNK_PROTO_ROUNDROBIN:
 	case TRUNK_PROTO_LOADBALANCE:
 	case TRUNK_PROTO_BROADCAST:
+		rp->rp_flags = tp->tp_flags;
 		if (TRUNK_PORTACTIVE(tp))
 			rp->rp_flags |= TRUNK_PORT_ACTIVE;
 		break;
 
 	case TRUNK_PROTO_LACP:
+		rp->rp_flags = 0;
 		/* LACP has a different definition of active */
 		if (lacp_isactive(tp))
 			rp->rp_flags |= TRUNK_PORT_ACTIVE;
@@ -630,9 +631,6 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, i, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &tr->tr_ac, cmd, data)) > 0)
-		goto out;
 
 	bzero(&rpbuf, sizeof(rpbuf));
 
@@ -766,8 +764,7 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ENETRESET;
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &tr->tr_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -961,16 +958,19 @@ trunk_start(struct ifnet *ifp)
 int
 trunk_enqueue(struct ifnet *ifp, struct mbuf *m)
 {
-	int error = 0;
+	int len, error = 0;
+	u_short mflags;
 
 	/* Send mbuf */
+	mflags = m->m_flags;
+	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
 	if (error)
 		return (error);
 	if_start(ifp);
 
-	ifp->if_obytes += m->m_pkthdr.len;
-	if (m->m_flags & M_MCAST)
+	ifp->if_obytes += len;
+	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
 
 	return (error);
@@ -1460,6 +1460,11 @@ trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 	struct trunk_port *tp = NULL;
 	u_int32_t p = 0;
 	int idx;
+
+	if (tr->tr_count == 0) {
+		m_freem(m);
+		return (EINVAL);
+	}
 
 	p = trunk_hashmbuf(m, lb->lb_key);
 	if ((idx = p % tr->tr_count) >= TRUNK_MAX_PORTS) {

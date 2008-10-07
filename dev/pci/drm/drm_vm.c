@@ -31,22 +31,21 @@
 paddr_t
 drmmmap(dev_t kdev, off_t offset, int prot)
 {
-	struct drm_device *dev = drm_get_device_from_kdev(kdev);
-	drm_local_map_t *map;
-	struct drm_file *priv;
-	drm_map_type_t type;
-	paddr_t phys;
+	struct drm_device	*dev = drm_get_device_from_kdev(kdev);
+	drm_local_map_t		*map;
+	struct drm_file		*priv;
+	enum drm_map_type	 type;
 
 	DRM_LOCK();
 	priv = drm_find_file_by_minor(dev, minor(kdev));
 	DRM_UNLOCK();
 	if (priv == NULL) {
 		DRM_ERROR("can't find authenticator\n");
-		return (EINVAL);
+		return (-1);
 	}
 
 	if (!priv->authenticated)
-		return (EACCES);
+		return (-1);
 
 	if (dev->dma && offset >= 0 && offset < ptoa(dev->dma->page_count)) {
 		drm_device_dma_t *dma = dev->dma;
@@ -54,8 +53,7 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 		DRM_SPINLOCK(&dev->dma_lock);
 
 		if (dma->pagelist != NULL) {
-			unsigned long page = offset >> PAGE_SHIFT;
-			unsigned long phys = dma->pagelist[page];
+			paddr_t phys = dma->pagelist[offset >> PAGE_SHIFT];
 
 			DRM_SPINUNLOCK(&dev->dma_lock);
 			return (atop(phys));
@@ -76,9 +74,9 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 	 */
 	DRM_LOCK();
 	TAILQ_FOREACH(map, &dev->maplist, link) {
-		if (offset >= map->mm->start &&
-		    offset < map->mm->start + map->size) {
-			offset -= map->mm->start;
+		if (offset >= map->ext &&
+		    offset < map->ext + map->size) {
+			offset -= map->ext;
 			break;
 		}
 	}
@@ -100,7 +98,7 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 	case _DRM_FRAME_BUFFER:
 	case _DRM_REGISTERS:
 	case _DRM_AGP:
-		phys = offset + map->offset;
+		return (atop(offset + map->offset));
 		break;
 	/* XXX unify all the bus_dmamem_mmap bits */
 	case _DRM_SCATTER_GATHER:
@@ -115,7 +113,6 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 		DRM_ERROR("bad map type %d\n", type);
 		return (-1);	/* This should never happen. */
 	}
-
-	return (atop(phys));
+	/* NOTREACHED */
 }
 

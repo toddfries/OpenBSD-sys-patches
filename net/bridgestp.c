@@ -1,4 +1,4 @@
-/*	$OpenBSD: bridgestp.c,v 1.34 2008/06/14 19:13:42 jsing Exp $	*/
+/*	$OpenBSD: bridgestp.c,v 1.36 2008/09/10 14:01:23 blambert Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -371,7 +371,7 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 	struct ifnet *ifp = bp->bp_ifp;
 	struct ether_header *eh;
 	struct mbuf *m;
-	int s,error;
+	int s, len, error;
 
 	if (ifp == NULL || (ifp->if_flags & IFF_RUNNING) == 0)
 		return;
@@ -397,9 +397,13 @@ bstp_transmit_tcn(struct bstp_state *bs, struct bstp_port *bp)
 
 	s = splnet();
 	bp->bp_txcount++;
+	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error == 0)
+	if (error == 0) {
+		ifp->if_obytes += len;
+		ifp->if_omcasts++;
 		if_start(ifp);
+	}
 	splx(s);
 }
 
@@ -482,7 +486,7 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	struct ifnet *ifp = bp->bp_ifp;
 	struct mbuf *m;
 	struct ether_header *eh;
-	int s, error;
+	int s, len, error;
 
 	s = splnet();
 	if (ifp == NULL || (ifp->if_flags & IFF_RUNNING) == 0)
@@ -530,9 +534,13 @@ bstp_send_bpdu(struct bstp_state *bs, struct bstp_port *bp,
 	m->m_len = m->m_pkthdr.len;
 
 	bp->bp_txcount++;
+	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
-	if (error == 0)
+	if (error == 0) {
+		ifp->if_obytes += len;
+		ifp->if_omcasts++;
 		if_start(ifp);
+	}
  done:
 	splx(s);
 }
@@ -1754,7 +1762,7 @@ bstp_tick(void *arg)
 	}
 
 	if (bs->bs_ifp->if_flags & IFF_RUNNING)
-		timeout_add(&bs->bs_bstptimeout, hz);
+		timeout_add_sec(&bs->bs_bstptimeout, 1);
 
 	splx(s);
 }
@@ -1915,7 +1923,7 @@ bstp_initialization(struct bstp_state *bs)
 		timeout_set(&bs->bs_bstptimeout, bstp_tick, bs);
 	if (bs->bs_ifflags & IFF_RUNNING &&
 	    !timeout_pending(&bs->bs_bstptimeout))
-		timeout_add(&bs->bs_bstptimeout, hz);
+		timeout_add_sec(&bs->bs_bstptimeout, 1);
 
 	LIST_FOREACH(bp, &bs->bs_bplist, bp_next) {
 		bp->bp_port_id = (bp->bp_priority << 8) |

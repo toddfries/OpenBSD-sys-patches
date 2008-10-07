@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.79 2008/05/11 03:01:29 brad Exp $	*/
+/*	$OpenBSD: xl.c,v 1.82 2008/10/02 20:21:13 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1184,8 +1184,9 @@ xl_rxeof(struct xl_softc *sc)
         struct mbuf		*m;
         struct ifnet		*ifp;
 	struct xl_chain_onefrag	*cur_rx;
-	int			total_len = 0, sumflags = 0;
+	int			total_len = 0;
 	u_int32_t		rxstat;
+	u_int16_t		sumflags = 0;
 
 	ifp = &sc->sc_arpcom.ac_if;
 
@@ -1597,7 +1598,7 @@ xl_stats_update(void *xsc)
 	XL_SEL_WIN(7);
 
 	if (!sc->xl_stats_no_timeout)
-		timeout_add(&sc->xl_stsup_tmo, hz);
+		timeout_add_sec(&sc->xl_stsup_tmo, 1);
 }
 
 /*
@@ -2143,7 +2144,7 @@ xl_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->xl_stsup_tmo, hz);
+	timeout_add_sec(&sc->xl_stsup_tmo, 1);
 }
 
 /*
@@ -2270,11 +2271,6 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2343,12 +2339,10 @@ xl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			    &mii->mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

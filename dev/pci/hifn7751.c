@@ -1,4 +1,4 @@
-/*	$OpenBSD: hifn7751.c,v 1.155 2008/06/09 07:07:16 djm Exp $	*/
+/*	$OpenBSD: hifn7751.c,v 1.157 2008/09/25 17:55:28 chl Exp $	*/
 
 /*
  * Invertex AEON / Hifn 7751 driver
@@ -589,7 +589,7 @@ struct pci2id {
 	}, {
 		/*
 		 * Other vendors share this PCI ID as well, such as
-		 * http://www.powercrypt.com, and obviously they also
+		 * powercrypt, and obviously they also
 		 * use the same key.
 		 */
 		PCI_VENDOR_HIFN,
@@ -1009,7 +1009,7 @@ hifn_writeramaddr(struct hifn_softc *sc, int addr, u_int8_t *data)
 		printf("%s: writeramaddr -- "
 		    "result[%d](addr %d) still valid\n",
 		    sc->sc_dv.dv_xname, resi, addr);
-		r = -1;
+
 		return (-1);
 	} else
 		r = 0;
