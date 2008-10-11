@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.105 2008/10/03 04:22:37 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.107 2008/10/10 14:35:06 deraadt Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-

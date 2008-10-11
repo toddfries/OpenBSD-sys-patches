@@ -1,4 +1,4 @@
-/*	$OpenBSD: it.c,v 1.32 2008/04/07 17:50:37 form Exp $	*/
+/*	$OpenBSD: it.c,v 1.36 2008/10/11 20:31:50 miod Exp $	*/
 
 /*
  * Copyright (c) 2007-2008 Oleg Safiullin <form@pdp-11.org.ru>
@@ -189,7 +189,6 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	struct it_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 	int i;
-	u_int8_t cr;
 
 	sc->sc_iot = ia->ia_iot;
 	sc->sc_iobase = ia->ipa_io[0].base;
@@ -204,19 +203,18 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	/* get chip id and rev */
 	sc->sc_chipid = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPID1) << 8;
 	sc->sc_chipid |= it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPID2);
-	sc->sc_chiprev = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPREV);
+	sc->sc_chiprev = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPREV) & 0x0f;
 
 	/* get environment controller base address */
 	it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_EC_LDN);
 	sc->sc_ec_iobase = it_readreg(sc->sc_iot, sc->sc_ioh, IT_EC_MSB) << 8;
 	sc->sc_ec_iobase |= it_readreg(sc->sc_iot, sc->sc_ioh, IT_EC_LSB);
 
-	/* initialize watchdog */
+	/* initialize watchdog timer */
 	if (sc->sc_chipid != IT_ID_8705) {
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_WDT_LDN);
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_CSR, 0x00);
-		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
-		    IT_WDT_TCR_SECS);
+		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0x00);
 		wdog_register(sc, it_wdog_cb);
 	}
 
@@ -224,8 +222,7 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	it_exit(sc->sc_iot, sc->sc_ioh);
 
 	LIST_INSERT_HEAD(&it_softc_list, sc, sc_list);
-
-	printf(": IT%xF rev 0x%02x", sc->sc_chipid, sc->sc_chiprev);
+	printf(": IT%xF rev 0x%x", sc->sc_chipid, sc->sc_chiprev);
 
 	if (sc->sc_ec_iobase == 0) {
 		printf(", EC disabled\n");
@@ -251,17 +248,17 @@ it_attach(struct device *parent, struct device *self, void *aux)
 			    sizeof(sc->sc_sensors[i].desc));
 	}
 
-	/* register update task */
+	/* register sensor update task */
 	if (sensor_task_register(sc, it_ec_refresh, IT_EC_INTERVAL) == NULL) {
-		printf(": unable to register update task\n",
+		printf("%s: unable to register update task\n",
 		    sc->sc_dev.dv_xname);
 		bus_space_unmap(sc->sc_ec_iot, sc->sc_ec_ioh, 8);
 		return;
 	}
 
 	/* activate monitoring */
-	cr = it_ec_readreg(sc, IT_EC_CFG);
-	it_ec_writereg(sc, IT_EC_CFG, cr | 0x09);
+	it_ec_writereg(sc, IT_EC_CFG,
+	    it_ec_readreg(sc, IT_EC_CFG) | IT_EC_CFG_START | IT_EC_INT_CLEAR);
 
 	/* initialize sensors */
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
@@ -409,13 +406,14 @@ int
 it_wdog_cb(void *arg, int period)
 {
 	struct it_softc *sc = arg;
+	int minutes = 0;
 
 	/* enter MB PnP mode and select WDT device */
 	it_enter(sc->sc_iot, sc->sc_ioh, sc->sc_iobase);
 	it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_WDT_LDN);
 
-	/* disable watchdog timeout */
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, IT_WDT_TCR_SECS);
+	/* disable watchdog timer */
+	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0x00);
 
 	/* 1000s should be enough for everyone */
 	if (period > 1000)
@@ -423,14 +421,38 @@ it_wdog_cb(void *arg, int period)
 	else if (period < 0)
 		period = 0;
 
-	/* set watchdog timeout */
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_MSB, period >> 8);
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_LSB, period & 0xff);
+	if (period > 0) {
+		/*
+		 * Older IT8712F chips have 8-bit timeout counter.
+		 * Use minutes for 16-bit values for these chips.
+		 */
+		if (sc->sc_chipid == IT_ID_8712 && sc->sc_chiprev < 0x8 &&
+		    period > 0xff) {
+			period /= 60;
+			minutes++;
+		}
 
-	if (period > 0)
-		/* enable watchdog timeout */
-		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
-		    IT_WDT_TCR_SECS | IT_WDT_TCR_KRST);
+		/* set watchdog timeout (low byte) */
+		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_LSB,
+		    period & 0xff);
+
+		if (minutes) {
+			/* enable watchdog timer */
+			it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
+			    IT_WDT_TCR_KRST | IT_WDT_TCR_PWROK);
+
+			period *= 60;
+		} else {
+			/* set watchdog timeout (high byte) */
+			it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_MSB,
+			    period >> 8);
+
+			/* enable watchdog timer */
+			it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
+			    IT_WDT_TCR_SECS | IT_WDT_TCR_KRST |
+			    IT_WDT_TCR_PWROK);
+		}
+	}
 
 	/* exit MB PnP mode */
 	it_exit(sc->sc_iot, sc->sc_ioh);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.55 2008/07/23 17:39:35 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.58 2008/10/10 08:36:28 art Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -81,8 +81,10 @@ extern struct cpu_info cpu_info_primary;
 #define CPU_INFO_ITERATOR	int
 #define CPU_INFO_FOREACH(cii, ci)	\
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-
+#define CPU_INFO_UNIT(ci)	0
+#define MAXCPUS	1
 #define cpu_number()	0
+#define cpu_unidle(ci)
 
 /* types */
 enum hppa_cpu_type {

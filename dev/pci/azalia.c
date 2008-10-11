@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.55 2008/09/24 19:09:05 chl Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.57 2008/10/10 22:40:22 brad Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -426,6 +426,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
  
 	/* enable PCIe snoop */
 	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_ATI_SB450_HDA:
 	case PCI_PRODUCT_ATI_SBX00_HDA:
 		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, ATI_PCIE_SNOOP_REG);
 		reg &= ATI_PCIE_SNOOP_MASK;
@@ -433,6 +434,27 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		azalia_pci_write(pa->pa_pc, pa->pa_tag, ATI_PCIE_SNOOP_REG, reg);
 		break;
 	case PCI_PRODUCT_NVIDIA_MCP51_HDA:
+	case PCI_PRODUCT_NVIDIA_MCP55_HDA:
+	case PCI_PRODUCT_NVIDIA_MCP61_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP61_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP65_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP65_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP67_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP67_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP73_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP73_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_4:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_4:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_4:
 		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, NVIDIA_PCIE_SNOOP_REG);
 		reg &= NVIDIA_PCIE_SNOOP_MASK;
 		reg |= NVIDIA_PCIE_SNOOP_ENABLE;
@@ -1473,12 +1495,16 @@ int
 azalia_codec_comresp(const codec_t *codec, nid_t nid, uint32_t control,
 		     uint32_t param, uint32_t* result)
 {
-	int err;
+	int err, s;
 
+	s = splaudio();
 	err = azalia_set_command(codec->az, codec->address, nid, control, param);
 	if (err)
-		return err;
-	return azalia_get_response(codec->az, result);
+		goto exit;
+	err = azalia_get_response(codec->az, result);
+exit:
+	splx(s);
+	return err;
 }
 
 int

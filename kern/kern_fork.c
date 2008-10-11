@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.95 2008/05/11 23:54:40 tedu Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.97 2008/10/10 14:35:06 deraadt Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
