@@ -202,6 +202,7 @@ struct cpu_info {
 	u_long ci_flags;		/* flags; see below */
 	u_long ci_ipis;			/* interprocessor interrupts pending */
 #endif
+	u_int32_t ci_randseed;
 };
 
 #define	CPUF_PRIMARY	0x01		/* CPU is primary CPU */

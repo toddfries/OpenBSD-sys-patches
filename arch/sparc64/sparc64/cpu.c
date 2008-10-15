@@ -701,6 +701,7 @@ cpu_boot_secondary_processors(void)
 	for (ci = cpus; ci != NULL; ci = ci->ci_next) {
 		if (ci->ci_upaid == cpu_myid())
 			continue;
+		ci->ci_randseed = random();
 
 		if (CPU_ISSUN4V)
 			cpuid = ci->ci_upaid;

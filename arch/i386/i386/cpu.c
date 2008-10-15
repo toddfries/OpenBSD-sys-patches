@@ -355,6 +355,7 @@ cpu_boot_secondary_processors()
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
+		ci->ci_randseed = random();
 		if (ci->ci_idle_pcb == NULL)
 			continue;
 		if ((ci->ci_flags & CPUF_PRESENT) == 0)

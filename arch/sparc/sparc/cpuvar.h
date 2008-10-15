@@ -79,6 +79,7 @@ struct cpu_info {
 	struct cpu_info *ci_next;
 
 	struct schedstate_percpu ci_schedstate;
+	u_int32_t 		ci_randseed;
 };
 
 #define curcpu() (&cpuinfo.ci)

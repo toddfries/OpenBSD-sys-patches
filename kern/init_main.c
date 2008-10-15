@@ -513,7 +513,7 @@ main(void *framep)
 #endif /* CRYPTO */
 
 	microtime(&rtv);
-	srandom((u_long)(rtv.tv_sec ^ rtv.tv_usec));
+	srandom((u_int32_t)(rtv.tv_sec ^ rtv.tv_usec));
 
 	randompid = 1;
 
