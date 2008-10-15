@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.4 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.6 2008/10/14 11:45:40 jsg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -65,8 +65,6 @@
 #include <net/bpf.h>
 #endif
 
-#include <dev/rndvar.h>
-
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
 #include <dev/mii/jmphyreg.h>
@@ -80,8 +78,6 @@
 
 /* Define the following to disable printing Rx errors. */
 #undef	JME_SHOW_ERRORS
-
-//#define	JME_CSUM_FEATURES	(CSUM_IP | CSUM_TCP | CSUM_UDP)
 
 int	jme_match(struct device *, void *, void *);
 void	jme_attach(struct device *, struct device *, void *);
@@ -474,25 +470,13 @@ jme_reg_macaddr(struct jme_softc *sc, uint8_t eaddr[])
 	par0 = CSR_READ_4(sc, JME_PAR0);
 	par1 = CSR_READ_4(sc, JME_PAR1);
 	par1 &= 0xFFFF;
-	if ((par0 == 0 && par1 == 0) || (par0 & 0x1)) {
-		printf("%s: generating fake ethernet address.\n",
-		    sc->sc_dev.dv_xname);
-		par0 = arc4random();
-		/* Set OUI to JMicron. */
-		eaddr[0] = 0x00;
-		eaddr[1] = 0x1B;
-		eaddr[2] = 0x8C;
-		eaddr[3] = (par0 >> 16) & 0xff;
-		eaddr[4] = (par0 >> 8) & 0xff;
-		eaddr[5] = par0 & 0xff;
-	} else {
-		eaddr[0] = (par0 >> 0) & 0xFF;
-		eaddr[1] = (par0 >> 8) & 0xFF;
-		eaddr[2] = (par0 >> 16) & 0xFF;
-		eaddr[3] = (par0 >> 24) & 0xFF;
-		eaddr[4] = (par1 >> 0) & 0xFF;
-		eaddr[5] = (par1 >> 8) & 0xFF;
-	}
+
+	eaddr[0] = (par0 >> 0) & 0xFF;
+	eaddr[1] = (par0 >> 8) & 0xFF;
+	eaddr[2] = (par0 >> 16) & 0xFF;
+	eaddr[3] = (par0 >> 24) & 0xFF;
+	eaddr[4] = (par1 >> 0) & 0xFF;
+	eaddr[5] = (par1 >> 8) & 0xFF;
 }
 
 void
@@ -507,9 +491,7 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 
 	struct ifnet *ifp;
 	uint32_t reg;
-//	uint8_t pcie_ptr;
 	int error = 0;
-//	uint8_t eaddr[ETHER_ADDR_LEN];
 
 	/*
 	 * Allocate IO memory
@@ -1249,7 +1231,6 @@ jme_start(struct ifnet *ifp)
 				ifp->if_oerrors++;
 				break;
 			}
-//			ifq_prepend(&ifp->if_snd, m_head);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
@@ -2308,7 +2289,7 @@ jme_newbuf(struct jme_softc *sc, struct jme_rxdesc *rxd, int init)
 void
 jme_set_vlan(struct jme_softc *sc)
 {
-//	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+/*	struct ifnet *ifp = &sc->sc_arpcom.ac_if; */
 	uint32_t reg;
 
 	reg = CSR_READ_4(sc, JME_RXMAC);
