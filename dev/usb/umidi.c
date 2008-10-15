@@ -166,6 +166,15 @@ umidi_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceSubClass==UISUBCLASS_MIDISTREAM)
 		return UMATCH_IFACECLASS_IFACESUBCLASS;
 
+	if (uaa->vendor == USB_VENDOR_MOTU && uaa->product == USB_PRODUCT_MOTU_FLMIDI) {
+		if (id != NULL) {
+			printf(".. class=%d, subclass=%d\n",
+	    			id->bInterfaceClass,
+	    			id->bInterfaceSubClass);
+		}
+		return UMATCH_IFACECLASS_IFACESUBCLASS;
+	}
+		
 	return UMATCH_NONE;
 }
 
