@@ -306,6 +306,7 @@ vendor APTIO		0x07d2	Aptio Products
 vendor ARASAN		0x07da	Arasan Chip Systems
 vendor ALLIEDCABLE	0x07e6	Allied Cable
 vendor STSN		0x07ef	STSN
+vendor MOTU		0x07fd	Motu
 vendor ZOOM		0x0803	Zoom Telephonics
 vendor BROADLOGIC	0x0827	BroadLogic
 vendor HANDSPRING	0x082d	Handspring
@@ -2010,6 +2011,9 @@ product MOTOROLA2 USBLAN2	0x6027	USBLAN
 /* Motorola(3) products */
 product MOTOROLA3 SB4100	0x4100	SB4100 Cable Modem
 product MOTOROLA3 SB5100	0x5100	SB5100 Cable Modem
+
+/* Motu products */
+product MOTU FLMIDI		0x0001	FastLane MIDI I/F
 
 /* MultiTech products */
 product MULTITECH ATLAS		0xf101	MT5634ZBA modem
