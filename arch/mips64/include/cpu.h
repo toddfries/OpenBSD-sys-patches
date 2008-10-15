@@ -374,6 +374,7 @@ struct cpu_info {
 	struct schedstate_percpu ci_schedstate;
 
 	struct proc *ci_curproc;
+	u_int32_t ci_randseed;
 };
 
 extern struct cpu_info cpu_info_primary;

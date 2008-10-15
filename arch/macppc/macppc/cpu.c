@@ -670,6 +670,7 @@ cpu_boot_secondary_processors(void)
 
 	for (i = 0; i < PPC_MAXPROCS; i++) {
 		ci = &cpu_info[i];
+		ci->ci_randseed = random();
 		if (ci->ci_cpuid == 0)
 			continue;
 

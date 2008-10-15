@@ -86,6 +86,7 @@ struct cpu_info {
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */
 #endif
+	u_int32_t ci_randseed;
 
 	/*
 	 * Private members.

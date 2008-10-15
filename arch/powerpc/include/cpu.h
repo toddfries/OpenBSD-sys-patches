@@ -80,7 +80,7 @@ struct cpu_info {
 #define	CI_DDB_ENTERDDB		3
 #define	CI_DDB_INDDB		4
 
-	u_long ci_randseed;
+	u_int32_t ci_randseed;
 };
 
 static __inline struct cpu_info *

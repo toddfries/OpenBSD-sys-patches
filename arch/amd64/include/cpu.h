@@ -71,6 +71,7 @@ struct cpu_info {
 	u_int ci_apicid;
 	u_long ci_spin_locks;
 	u_long ci_simple_locks;
+	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
 

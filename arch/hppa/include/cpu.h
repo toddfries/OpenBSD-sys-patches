@@ -68,9 +68,10 @@
 #include <sys/sched.h>
 
 struct cpu_info {
-	struct proc *ci_curproc;
+	struct proc	*ci_curproc;
 
 	struct schedstate_percpu ci_schedstate;
+	u_int32_t	ci_randseed;
 };
 
 extern struct cpu_info cpu_info_primary;

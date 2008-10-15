@@ -216,6 +216,7 @@ struct cpu_info {
 #ifdef MULTIPROCESSOR
 	MP_CPU_INFO_MEMBERS
 #endif
+	u_int32_t ci_randseed;
 };
 
 #ifndef MULTIPROCESSOR

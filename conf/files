@@ -1033,7 +1033,6 @@ file compat/common/vm_43.c		!small_kernel
 file lib/libkern/mcount.c		gprof
 file lib/libkern/getsn.c
 file lib/libkern/random.c
-file lib/libkern/srandom.c
 file lib/libkern/arch/${MACHINE_ARCH}/strchr.S | lib/libkern/strchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/strrchr.S | lib/libkern/strrchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/__main.S | lib/libkern/__main.c

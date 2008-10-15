@@ -119,6 +119,7 @@ struct cpu_info {
 	int			ci_itid;
 #endif
 	int			ci_node;
+	u_int32_t 		ci_randseed;
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 
 	int			ci_want_resched;

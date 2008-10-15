@@ -110,6 +110,7 @@ struct cpu_info {
 #define	CI_DDB_PAUSE	3
 
 	int	ci_softintr;			/* pending soft interrupts */
+	u_int32_t ci_randseed;
 
 #ifdef MULTIPROCESSOR
 
