@@ -128,20 +128,22 @@ struct timeval malloc_errintvl = { 5, 0 };
 struct timeval malloc_lasterr;
 #endif
 
-void	*malloc_page_alloc(struct pool *, int);
+void	*malloc_page_alloc(struct pool *, int, int *);
 void	malloc_page_free(struct pool *, void *);
 struct pool_allocator pool_allocator_malloc = {
 	malloc_page_alloc, malloc_page_free, 0,
 };
 
 void *
-malloc_page_alloc(struct pool *pp, int flags)
+malloc_page_alloc(struct pool *pp, int flags, int *slowdown)
 {
 	void *v;
 	struct vm_page *pg;
 	paddr_t pa;
 
-	v = uvm_km_getpage((flags & PR_WAITOK) ? TRUE : FALSE);
+	v = uvm_km_getpage((flags & PR_WAITOK) ? TRUE : FALSE, slowdown);
+	if (!v)
+		return (NULL);
 	if (!pmap_extract(pmap_kernel(), (vaddr_t)v, &pa))
 		panic("malloc_page_alloc: pmap_extract failed");
 

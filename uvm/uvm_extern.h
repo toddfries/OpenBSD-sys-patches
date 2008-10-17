@@ -505,7 +505,7 @@ vaddr_t			uvm_km_alloc_poolpage1(vm_map_t,
 				struct uvm_object *, boolean_t);
 void			uvm_km_free_poolpage1(vm_map_t, vaddr_t);
 
-void			*uvm_km_getpage(boolean_t);
+void			*uvm_km_getpage(boolean_t, int *);
 void			uvm_km_putpage(void *);
 
 /* uvm_map.c */

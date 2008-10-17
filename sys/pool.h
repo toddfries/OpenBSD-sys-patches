@@ -52,7 +52,7 @@
 struct pool;
 
 struct pool_allocator {
-	void *(*pa_alloc)(struct pool *, int);
+	void *(*pa_alloc)(struct pool *, int, int *);
 	void (*pa_free)(struct pool *, void *);
 	int pa_pagesz;
 	int pa_pagemask;
