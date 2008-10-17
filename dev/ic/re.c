@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.94 2008/10/11 23:49:05 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.96 2008/10/16 19:18:03 naddy Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -1461,6 +1461,13 @@ re_rxeof(struct rl_softc *sc)
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
 				    M_UDP_CSUM_IN_OK;
 		}
+#if NVLAN > 0
+		if (rxvlan & RL_RDESC_VLANCTL_TAG) {
+			m->m_pkthdr.ether_vtag =
+			    ntohs((rxvlan & RL_RDESC_VLANCTL_DATA));
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -1642,13 +1649,6 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	struct rl_desc	*d;
 	u_int32_t	cmdstat, vlanctl = 0, csum_flags = 0;
 	struct rl_txq	*txq;
-#if NVLAN > 0
-	struct ifvlan	*ifv = NULL;
-
-	if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m->m_pkthdr.rcvif != NULL)
-		ifv = m->m_pkthdr.rcvif->if_softc;
-#endif
 
 	if (sc->rl_ldata.rl_tx_free <= RL_NTXDESC_RSVD)
 		return (EFBIG);
@@ -1721,8 +1721,9 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	 * transmission attempt.
 	 */
 #if NVLAN > 0
-	if (ifv != NULL)
-		vlanctl |= swap16(ifv->ifv_tag) | RL_TDESC_VLANCTL_TAG;
+	if (m->m_flags & M_VLANTAG)
+		vlanctl |= swap16(m->m_pkthdr.ether_vtag) |
+		    RL_TDESC_VLANCTL_TAG;
 #endif
 
 	/*
@@ -1917,6 +1918,8 @@ re_init(struct ifnet *ifp)
 	cfg = RL_CPLUSCMD_PCI_MRW;
 	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
 		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		cfg |= RL_CPLUSCMD_VLANSTRIP;
 	if (sc->rl_flags & RL_FLAG_MACSTAT) {
 		cfg |= RL_CPLUSCMD_MACSTAT_DIS;
 		/* XXX magic. */

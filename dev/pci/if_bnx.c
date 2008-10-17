@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.66 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.68 2008/10/16 19:18:03 naddy Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -4014,26 +4014,14 @@ bnx_rx_intr(struct bnx_softc *sc)
 			if ((status & L2_FHDR_STATUS_L2_VLAN_TAG) &&
 			    !(sc->rx_mode & BNX_EMAC_RX_MODE_KEEP_VLAN_TAG)) {
 #if NVLAN > 0
-				struct ether_vlan_header vh;
-
 				DBPRINT(sc, BNX_VERBOSE_SEND,
 				    "%s(): VLAN tag = 0x%04X\n",
 				    __FUNCTION__,
 				    l2fhdr->l2_fhdr_vlan_tag);
 
-				if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-					m_freem(m);
-					goto bnx_rx_int_next_rx;
-				}
-				m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&vh);
-				vh.evl_proto = vh.evl_encap_proto;
-				vh.evl_tag = htons(l2fhdr->l2_fhdr_vlan_tag);
-				vh.evl_encap_proto = htons(ETHERTYPE_VLAN);
-				m_adj(m, ETHER_HDR_LEN);
-				M_PREPEND(m, sizeof(vh), M_DONTWAIT);
-				if (m == NULL)
-					goto bnx_rx_int_next_rx;
-				m_copyback(m, 0, sizeof(vh), &vh);
+				m->m_pkthdr.ether_vtag =
+				    l2fhdr->l2_fhdr_vlan_tag;
+				m->m_flags |= M_VLANTAG;
 #else
 				m_freem(m);
 				goto bnx_rx_int_next_rx;
@@ -4400,11 +4388,9 @@ bnx_tx_encap(struct bnx_softc *sc, struct mbuf **m_head)
 
 #if NVLAN > 0
 	/* Transfer any VLAN tags to the bd. */
-	if ((m0->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m0->m_pkthdr.rcvif != NULL) {
-		struct ifvlan *ifv = m0->m_pkthdr.rcvif->if_softc;
+	if (m0->m_flags & M_VLANTAG) {
 		flags |= TX_BD_FLAGS_VLAN_TAG;
-		vlan_tag = ifv->ifv_tag;
+		vlan_tag = m0->m_pkthdr.ether_vtag;
 	}
 #endif
 
