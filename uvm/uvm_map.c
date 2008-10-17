@@ -390,6 +390,7 @@ uvm_mapent_alloc(struct vm_map *map)
 {
 	struct vm_map_entry *me, *ne;
 	int s, i;
+	int slowdown;
 	UVMHIST_FUNC("uvm_mapent_alloc"); UVMHIST_CALLED(maphist);
 
 	if (map->flags & VM_MAP_INTRSAFE || cold) {
@@ -397,7 +398,7 @@ uvm_mapent_alloc(struct vm_map *map)
 		simple_lock(&uvm.kentry_lock);
 		me = uvm.kentry_free;
 		if (me == NULL) {
-			ne = uvm_km_getpage(0);
+			ne = uvm_km_getpage(0, &slowdown);
 			if (ne == NULL)
 				panic("uvm_mapent_alloc: cannot allocate map "
 				    "entry");

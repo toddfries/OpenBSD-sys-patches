@@ -106,7 +106,7 @@ void	 pr_rmpage(struct pool *, struct pool_item_header *,
 int	pool_chk_page(struct pool *, const char *, struct pool_item_header *);
 struct pool_item_header *pool_alloc_item_header(struct pool *, caddr_t , int);
 
-void	*pool_allocator_alloc(struct pool *, int);
+void	*pool_allocator_alloc(struct pool *, int, int *);
 void	 pool_allocator_free(struct pool *, void *);
 
 #ifdef DDB
@@ -392,6 +392,7 @@ pool_do_get(struct pool *pp, int flags)
 	struct pool_item *pi;
 	struct pool_item_header *ph;
 	void *v;
+	int slowdown = 0;
 
 #ifdef DIAGNOSTIC
 	if ((flags & PR_WAITOK) != 0)
@@ -462,7 +463,7 @@ startover:
 		/*
 		 * Call the back-end page allocator for more memory.
 		 */
-		v = pool_allocator_alloc(pp, flags);
+		v = pool_allocator_alloc(pp, flags, &slowdown);
 		if (__predict_true(v != NULL))
 			ph = pool_alloc_item_header(pp, v, flags);
 
@@ -489,6 +490,12 @@ startover:
 		/* We have more memory; add it to the pool */
 		pool_prime_page(pp, v, ph);
 		pp->pr_npagealloc++;
+
+		if (slowdown && (flags & PR_WAITOK)) {
+			mtx_leave(&pp->pr_mtx);
+			yield();
+			mtx_enter(&pp->pr_mtx);
+		}
 
 		/* Start the allocation process over. */
 		goto startover;
@@ -688,12 +695,13 @@ pool_prime(struct pool *pp, int n)
 	struct pool_item_header *ph;
 	caddr_t cp;
 	int newpages;
+	int slowdown;
 
 	mtx_enter(&pp->pr_mtx);
 	newpages = roundup(n, pp->pr_itemsperpage) / pp->pr_itemsperpage;
 
 	while (newpages-- > 0) {
-		cp = pool_allocator_alloc(pp, PR_NOWAIT);
+		cp = pool_allocator_alloc(pp, PR_NOWAIT, &slowdown);
 		if (__predict_true(cp != NULL))
 			ph = pool_alloc_item_header(pp, cp, PR_NOWAIT);
 		if (__predict_false(cp == NULL || ph == NULL)) {
@@ -799,12 +807,13 @@ pool_catchup(struct pool *pp)
 	struct pool_item_header *ph;
 	caddr_t cp;
 	int error = 0;
+	int slowdown;
 
 	while (POOL_NEEDS_CATCHUP(pp)) {
 		/*
 		 * Call the page back-end allocator for more memory.
 		 */
-		cp = pool_allocator_alloc(pp, PR_NOWAIT);
+		cp = pool_allocator_alloc(pp, PR_NOWAIT, &slowdown);
 		if (__predict_true(cp != NULL))
 			ph = pool_alloc_item_header(pp, cp, PR_NOWAIT);
 		if (__predict_false(cp == NULL || ph == NULL)) {
@@ -1249,9 +1258,7 @@ sysctl_dopool(int *name, u_int namelen, char *where, size_t *sizep)
  *
  * Each pool has a backend allocator that handles allocation, deallocation
  */
-void	*pool_page_alloc_oldnointr(struct pool *, int);
-void	pool_page_free_oldnointr(struct pool *, void *);
-void	*pool_page_alloc(struct pool *, int);
+void	*pool_page_alloc(struct pool *, int, int *);
 void	pool_page_free(struct pool *, void *);
 
 /*
@@ -1278,14 +1285,14 @@ struct pool_allocator pool_allocator_nointr = {
  */
 
 void *
-pool_allocator_alloc(struct pool *pp, int flags)
+pool_allocator_alloc(struct pool *pp, int flags, int *slowdown)
 {
 	boolean_t waitok = (flags & PR_WAITOK) ? TRUE : FALSE;
 	void *v;
 
 	if (waitok)
 		mtx_leave(&pp->pr_mtx);
-	v = pp->pr_alloc->pa_alloc(pp, flags);
+	v = pp->pr_alloc->pa_alloc(pp, flags, slowdown);
 	if (waitok)
 		mtx_enter(&pp->pr_mtx);
 
@@ -1301,11 +1308,11 @@ pool_allocator_free(struct pool *pp, void *v)
 }
 
 void *
-pool_page_alloc(struct pool *pp, int flags)
+pool_page_alloc(struct pool *pp, int flags, int *slowdown)
 {
 	boolean_t waitok = (flags & PR_WAITOK) ? TRUE : FALSE;
 
-	return (uvm_km_getpage(waitok));
+	return (uvm_km_getpage(waitok, slowdown));
 }
 
 void
