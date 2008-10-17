@@ -1,4 +1,4 @@
-/*	$OpenBSD: random.c,v 1.7 2004/08/07 00:38:33 deraadt Exp $	*/
+/*	$OpenBSD: random.c,v 1.8 2008/10/15 23:23:51 deraadt Exp $	*/
 /*	$NetBSD: random.c,v 1.2 1994/10/26 06:42:42 cgd Exp $	*/
 
 /*-
@@ -42,13 +42,15 @@
  * and whatever else we might use it for.  The result is uniform on
  * [0, 2^31 - 1].
  */
-u_int32_t _randseed = 1;
 
 void
 srandom(u_int32_t seed)
 {
 	struct cpu_info *ci = curcpu();
 
+	seed &= 0x7fffffff;
+	if (seed == 0)
+		seed = 1;
 	ci->ci_randseed = seed;
 }
 
