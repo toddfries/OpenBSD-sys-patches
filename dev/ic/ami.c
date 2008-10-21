@@ -370,6 +370,9 @@ ami_attach(struct ami_softc *sc)
 	struct ami_ccb iccb;
 	struct ami_iocmd *cmd;
 	struct ami_mem *am;
+	struct ami_inquiry *inq;
+	struct ami_fc_einquiry *einq;
+	struct ami_fc_prodinfo *pi;
 	const char *p;
 	paddr_t	pa;
 	int s;
@@ -407,8 +410,8 @@ ami_attach(struct ami_softc *sc)
 	cmd->acc_io.aio_param = AMI_FC_EINQ3_SOLICITED_FULL;
 	cmd->acc_io.aio_data = pa;
 	if (ami_poll(sc, &iccb) == 0) {
-		struct ami_fc_einquiry *einq = AMIMEM_KVA(am);
-		struct ami_fc_prodinfo *pi = AMIMEM_KVA(am);
+		einq = AMIMEM_KVA(am);
+		pi = AMIMEM_KVA(am);
 
 		sc->sc_nunits = einq->ain_nlogdrv;
 		ami_copyhds(sc, einq->ain_ldsize, einq->ain_ldprop,
@@ -434,7 +437,7 @@ ami_attach(struct ami_softc *sc)
 	}
 
 	if (sc->sc_maxunits == 0) {
-		struct ami_inquiry *inq = AMIMEM_KVA(am);
+		inq = AMIMEM_KVA(am);
 
 		cmd->acc_cmd = AMI_EINQUIRY;
 		cmd->acc_io.aio_channel = 0;
@@ -1863,33 +1866,28 @@ int
 ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 {
 	struct ami_big_diskarray *p; /* struct too large for stack */
-	char *plist;
-	int i, s, t;
-	int off;
-	int error = 0;
 	struct scsi_inquiry_data inqbuf;
-	u_int8_t ch, tg;
+	int ch, tg;
+	int i, s, t, off;
+	int error = 0;
 
 	p = malloc(sizeof *p, M_DEVBUF, M_NOWAIT);
 	if (!p)
 		return (ENOMEM);
 
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!plist) {
-		error = ENOMEM;
+	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p,
+	    p))) {
+		error = EINVAL;
 		goto bail;
 	}
 
-	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p,
-	    p)))
-		goto bail2;
+	bzero(sc->sc_plist, sizeof sc->sc_plist);
 
 	bi->bi_novol = p->ada_nld;
 	bi->bi_nodisk = 0;
-
 	strlcpy(bi->bi_dev, DEVNAME(sc), sizeof(bi->bi_dev));
 
-	/* do we actually care how many disks we have at this point? */
+	/* count used disks, including failed ones */
 	for (i = 0; i < p->ada_nld; i++)
 		for (s = 0; s < p->ald[i].adl_spandepth; s++)
 			for (t = 0; t < p->ald[i].adl_nstripes; t++) {
@@ -1897,117 +1895,71 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 				    AMI_MAX_TARGET +
 				    p->ald[i].asp[s].adv[t].add_target;
 
-				if (!plist[off]) {
-					plist[off] = 1;
+				/* account for multi raid vol on same disk */
+				if (!sc->sc_plist[off]) {
+					sc->sc_plist[off] = 1;
 					bi->bi_nodisk++;
 				}
 			}
 
-	/*
-	 * hack warning!
-	 * Megaraid cards sometimes return a size in the PD structure
-	 * even though there is no disk in that slot.  Work around
-	 * that by issuing an INQUIRY to determine if there is
-	 * an actual disk in the slot.
-	 */
-	for(i = 0; i < ((sc->sc_flags & AMI_QUARTZ) ?
-	    AMI_BIG_MAX_PDRIVES : AMI_MAX_PDRIVES); i++) {
-	    	/* skip claimed drives */
-	    	if (plist[i])
+	/* count unsued disks */
+	for(i = 0; i < sc->sc_channels * 16; i++) {
+	    	if (sc->sc_plist[i])
+			continue; /* skip claimed drives */
+		if (!p->ada_pdrv[i].adp_size)
 			continue;
 
-	    	/*
-		 * poke drive to make sure its there.  If it is it is either
-		 * unused or a hot spare; at this point we dont care which it is
-		 */
-		if (p->apd[i].adp_size) {
-			ch = (i & 0xf0) >> 4;
-			tg = i & 0x0f;
-
-			if (!ami_drv_inq(sc, ch, tg, 0, &inqbuf)) {
-				bi->bi_novol++;
-				bi->bi_nodisk++;
-				plist[i] = 1;
-			}
-		}
+		ch = (i & 0xf0) >> 4;
+		tg = i & 0x0f;
+		if (!ami_drv_inq(sc, ch, tg, 0, &inqbuf)) {
+			bi->bi_novol++;
+			bi->bi_nodisk++;
+			sc->sc_plist[i] = 2;
+		} else
+			sc->sc_plist[i] = 0;
 	}
 
-bail2:
-	free(plist, M_DEVBUF);
+	error = 0;
 bail:
 	free(p, M_DEVBUF);
-
 	return (error);
 }
 
 int
 ami_vol(struct ami_softc *sc, struct bioc_vol *bv, struct ami_big_diskarray *p)
 {
-	struct scsi_inquiry_data inqbuf;
-	char *plist;
-	int i, s, t, off;
-	int ld = p->ada_nld, error = EINVAL;
-	u_int8_t ch, tg;
+	int i, ld = p->ada_nld, error = EINVAL;
 
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!plist)
-		return (ENOMEM);
-
-	/* setup plist */
-	for (i = 0; i < p->ada_nld; i++)
-		for (s = 0; s < p->ald[i].adl_spandepth; s++)
-			for (t = 0; t < p->ald[i].adl_nstripes; t++) {
-				off = p->ald[i].asp[s].adv[t].add_channel *
-				    AMI_MAX_TARGET +
-				    p->ald[i].asp[s].adv[t].add_target;
-
-				if (!plist[off])
-					plist[off] = 1;
-			}
-
-	for(i = 0; i < ((sc->sc_flags & AMI_QUARTZ) ?
-	    AMI_BIG_MAX_PDRIVES : AMI_MAX_PDRIVES); i++) {
-	    	/* skip claimed drives */
-	    	if (plist[i])
+	for(i = 0; i < sc->sc_channels * 16; i++) {
+	    	/* skip claimed/unused drives */
+	    	if (sc->sc_plist[i] != 2)
 			continue;
 
-	    	/*
-		 * poke drive to make sure its there.  If it is it is either
-		 * unused or a hot spare; at this point we dont care which it is
-		 */
-		if (p->apd[i].adp_size) {
-			ch = (i & 0xf0) >> 4;
-			tg = i & 0x0f;
-
-			if (!ami_drv_inq(sc, ch, tg, 0, &inqbuf)) {
-				if (ld != bv->bv_volid) {
-					ld++;
-					continue;
-				}
-
-				bv->bv_status = BIOC_SVONLINE;
-				bv->bv_size = (u_quad_t)p->apd[i].adp_size *
-				    (u_quad_t)512;
-				bv->bv_nodisk = 1;
-				strlcpy(bv->bv_dev,
-				    sc->sc_hdr[bv->bv_volid].dev,
-				    sizeof(bv->bv_dev));
-
-				if (p->apd[i].adp_ostatus == AMI_PD_HOTSPARE
-				    && p->apd[i].adp_type == 0)
-					bv->bv_level = -1;
-				else
-					bv->bv_level = -2;
-
-				error = 0;
-				goto bail;
-			}
+		/* are we it? */
+		if (ld != bv->bv_volid) {
+			ld++;
+			continue;
 		}
+
+		bv->bv_status = BIOC_SVONLINE;
+		bv->bv_size = (u_quad_t)p->apd[i].adp_size *
+		    (u_quad_t)512;
+		bv->bv_nodisk = 1;
+		strlcpy(bv->bv_dev,
+		    sc->sc_hdr[bv->bv_volid].dev,
+		    sizeof(bv->bv_dev));
+
+		if (p->apd[i].adp_ostatus == AMI_PD_HOTSPARE
+		    && p->apd[i].adp_type == 0)
+			bv->bv_level = -1;
+		else
+			bv->bv_level = -2;
+
+		error = 0;
+		goto bail;
 	}
 
 bail:
-	free(plist, M_DEVBUF);
-
 	return (error);
 }
 
@@ -2015,75 +1967,43 @@ int
 ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
     struct ami_big_diskarray *p)
 {
+	char vend[8+16+4+1];
+	char ser[32 + 1];
 	struct scsi_inquiry_data inqbuf;
 	struct scsi_vpd_serial vpdbuf;
-	char *plist;
-	int i, s, t, off;
-	int ld = p->ada_nld, error = EINVAL;
+	int i, ld = p->ada_nld, error = EINVAL;
 	u_int8_t ch, tg;
 
-	plist = malloc(AMI_BIG_MAX_PDRIVES, M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!plist)
-		return (ENOMEM);
-
-	/* setup plist */
-	for (i = 0; i < p->ada_nld; i++)
-		for (s = 0; s < p->ald[i].adl_spandepth; s++)
-			for (t = 0; t < p->ald[i].adl_nstripes; t++) {
-				off = p->ald[i].asp[s].adv[t].add_channel *
-				    AMI_MAX_TARGET +
-				    p->ald[i].asp[s].adv[t].add_target;
-
-				if (!plist[off])
-					plist[off] = 1;
-			}
-
-	for(i = 0; i < ((sc->sc_flags & AMI_QUARTZ) ?
-	    AMI_BIG_MAX_PDRIVES : AMI_MAX_PDRIVES); i++) {
-		char vend[8+16+4+1];
-
-	    	/* skip claimed drives */
-	    	if (plist[i])
+	for(i = 0; i < sc->sc_channels * 16; i++) {
+	    	/* skip claimed/unused drives */
+	    	if (sc->sc_plist[i] != 2)
 			continue;
 
-		/* no size no disk, most of the times */
-		if (!p->apd[i].adp_size)
-			continue;
-
-		ch = (i & 0xf0) >> 4;
-		tg = i & 0x0f;
-
-	    	/*
-		 * poke drive to make sure its there.  If it is it is either
-		 * unused or a hot spare; at this point we dont care which it is
-		 */
-		if (ami_drv_inq(sc, ch, tg, 0, &inqbuf)) 
-			continue;
-		
+		/* are we it? */
 		if (ld != bd->bd_volid) {
 			ld++;
 			continue;
 		}
 
+		ch = (i & 0xf0) >> 4;
+		tg = i & 0x0f;
+		if (ami_drv_inq(sc, ch, tg, 0, &inqbuf)) 
+			goto bail;
+		
 		bcopy(inqbuf.vendor, vend, sizeof vend - 1);
 
 		vend[sizeof vend - 1] = '\0';
 		strlcpy(bd->bd_vendor, vend, sizeof(bd->bd_vendor));
 
 		if (!ami_drv_inq(sc, ch, tg, 0x80, &vpdbuf)) {
-			char ser[32 + 1];
-
 			bcopy(vpdbuf.serial, ser, sizeof ser - 1);
-
 			ser[sizeof ser - 1] = '\0';
 			if (vpdbuf.hdr.page_length < sizeof ser)
 				ser[vpdbuf.hdr.page_length] = '\0';
-
 			strlcpy(bd->bd_serial, ser, sizeof(bd->bd_serial));
 		}
 
 		bd->bd_size = (u_quad_t)p->apd[i].adp_size * (u_quad_t)512;
-
 		bd->bd_channel = ch;
 		bd->bd_target = tg;
 
@@ -2106,8 +2026,6 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 	}
 
 bail:
-	free(plist, M_DEVBUF);
-
 	return (error);
 }
 
@@ -2177,7 +2095,7 @@ ami_ioctl_vol(struct ami_softc *sc, struct bioc_vol *bv)
 			if (p->apd[off].adp_ostatus != AMI_PD_RBLD)
 				continue;
 
-			/* get rebuild progress here */
+			/* get rebuild progress from pd 0 */
 			bv->bv_status = BIOC_SVREBUILD;
 			if (ami_mgmt(sc, AMI_GRBLDPROGR,
 			    p->ald[i].asp[s].adv[t].add_channel,
@@ -2187,10 +2105,6 @@ ami_ioctl_vol(struct ami_softc *sc, struct bioc_vol *bv)
 			else
 				bv->bv_percent = perc.apr_progress >= 100 ? -1 :
 				    perc.apr_progress;
-
-			/* XXX fix this, we should either use lowest percentage
-			 * of all disks in rebuild state or an average
-			 */
 			break;
 		}
 
@@ -2240,8 +2154,10 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 	struct ami_big_diskarray *p; /* struct too large for stack */
 	int i, s, t, d;
 	int off;
-	int error = 0;
+	int error = EINVAL;
 	u_int16_t ch, tg;
+	char vend[8+16+4+1];
+	char ser[32 + 1];
 
 	p = malloc(sizeof *p, M_DEVBUF, M_NOWAIT);
 	if (!p)
@@ -2256,8 +2172,6 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 	}
 
 	i = bd->bd_volid;
-	error = EINVAL;
-
 	for (s = 0, d = 0; s < p->ald[i].adl_spandepth; s++)
 		for (t = 0; t < p->ald[i].adl_nstripes; t++) {
 			if (d != bd->bd_diskid) {
@@ -2268,6 +2182,9 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 			off = p->ald[i].asp[s].adv[t].add_channel *
 			    AMI_MAX_TARGET +
 			    p->ald[i].asp[s].adv[t].add_target;
+
+			bd->bd_size = (u_quad_t)p->apd[off].adp_size *
+			    (u_quad_t)512;
 
 			switch (p->apd[off].adp_ostatus) {
 			case AMI_PD_UNCNF:
@@ -2280,6 +2197,7 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 
 			case AMI_PD_FAILED:
 				bd->bd_status = BIOC_SDFAILED;
+				bd->bd_size = 0;
 				break;
 
 			case AMI_PD_RBLD:
@@ -2292,47 +2210,45 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 
 			default:
 				bd->bd_status = BIOC_SDINVALID;
+				bd->bd_size = 0;
 			}
 
-			bd->bd_size = (u_quad_t)p->apd[off].adp_size *
-			    (u_quad_t)512;
 
 			ch = p->ald[i].asp[s].adv[t].add_target >> 4;
 			tg = p->ald[i].asp[s].adv[t].add_target & 0x0f;
 
+			bd->bd_channel = ch;
+			bd->bd_target = tg;
+			strlcpy(bd->bd_procdev, sc->sc_rawsoftcs[ch].sc_procdev,
+			    sizeof(bd->bd_procdev));
+
+			/* if we are failed don't query drive */
+			if (bd->bd_size == 0) {
+				bzero(&bd->bd_vendor, sizeof(bd->bd_vendor));
+				bzero(&bd->bd_serial, sizeof(bd->bd_serial));
+				goto done;
+			}
+
 			if (!ami_drv_inq(sc, ch, tg, 0, &inqbuf)) {
-				char vend[8+16+4+1];
-
 				bcopy(inqbuf.vendor, vend, sizeof vend - 1);
-
 				vend[sizeof vend - 1] = '\0';
 				strlcpy(bd->bd_vendor, vend,
 				    sizeof(bd->bd_vendor));
 			}
 
 			if (!ami_drv_inq(sc, ch, tg, 0x80, &vpdbuf)) {
-				char ser[32 + 1];
-
 				bcopy(vpdbuf.serial, ser, sizeof ser - 1);
-
 				ser[sizeof ser - 1] = '\0';
 				if (vpdbuf.hdr.page_length < sizeof ser)
 					ser[vpdbuf.hdr.page_length] = '\0';
 				strlcpy(bd->bd_serial, ser,
 				    sizeof(bd->bd_serial));
 			}
-
-			bd->bd_channel = ch;
-			bd->bd_target = tg;
-
-			strlcpy(bd->bd_procdev, sc->sc_rawsoftcs[ch].sc_procdev,
-			    sizeof(bd->bd_procdev));
-
-			error = 0;
-			goto bail;
+			goto done;
 		}
 
-	/* XXX if we reach this do dedicated hotspare magic*/
+done:
+	error = 0;
 bail:
 	free(p, M_DEVBUF);
 
