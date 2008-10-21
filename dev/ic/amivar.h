@@ -145,6 +145,7 @@ struct ami_softc {
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 	struct ami_big_diskarray *sc_bd;
+	char			sc_plist[AMI_BIG_MAX_PDRIVES];
 };
 
 int  ami_attach(struct ami_softc *sc);
