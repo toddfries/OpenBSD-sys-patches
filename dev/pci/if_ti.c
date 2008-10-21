@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ti.c,v 1.90 2008/10/16 19:18:03 naddy Exp $	*/
+/*	$OpenBSD: if_ti.c,v 1.92 2008/10/20 01:02:52 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -1446,6 +1446,10 @@ ti_gibinit(struct ti_softc *sc)
 	rcb->ti_max_len = ETHER_MAX_LEN;
 	rcb->ti_flags = 0;
 	rcb->ti_flags |= TI_RCB_FLAG_IP_CKSUM | TI_RCB_FLAG_NO_PHDR_CKSUM;
+#if NVLAN > 0
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		rcb->ti_flags |= TI_RCB_FLAG_VLAN_ASSIST;
+#endif
 
 	/* Set up the jumbo receive ring. */
 	rcb = &sc->ti_rdata->ti_info.ti_jumbo_rx_rcb;
@@ -1453,6 +1457,10 @@ ti_gibinit(struct ti_softc *sc)
 	rcb->ti_max_len = TI_JUMBO_FRAMELEN;
 	rcb->ti_flags = 0;
 	rcb->ti_flags |= TI_RCB_FLAG_IP_CKSUM | TI_RCB_FLAG_NO_PHDR_CKSUM;
+#if NVLAN > 0
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		rcb->ti_flags |= TI_RCB_FLAG_VLAN_ASSIST;
+#endif
 
 	/*
 	 * Set up the mini ring. Only activated on the
@@ -1467,6 +1475,10 @@ ti_gibinit(struct ti_softc *sc)
 	else
 		rcb->ti_flags = 0;
 	rcb->ti_flags |= TI_RCB_FLAG_IP_CKSUM | TI_RCB_FLAG_NO_PHDR_CKSUM;
+#if NVLAN > 0
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		rcb->ti_flags |= TI_RCB_FLAG_VLAN_ASSIST;
+#endif
 
 	/*
 	 * Set up the receive return ring.
@@ -1767,7 +1779,6 @@ ti_rxeof(struct ti_softc *sc)
 		struct ti_rx_desc	*cur_rx;
 		u_int32_t		rxidx;
 		struct mbuf		*m = NULL;
-		u_int16_t		sumflags = 0;
 		bus_dmamap_t		dmamap;
 
 		cur_rx =
@@ -1839,6 +1850,13 @@ ti_rxeof(struct ti_softc *sc)
 		ifp->if_ipackets++;
 		m->m_pkthdr.rcvif = ifp;
 
+#if NVLAN > 0
+		if (cur_rx->ti_flags & TI_BDFLAG_VLAN_TAG) {
+			m->m_pkthdr.ether_vtag = cur_rx->ti_vlan_tag;
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		/*
 	 	 * Handle BPF listeners. Let the BPF user see the packet.
@@ -1848,8 +1866,7 @@ ti_rxeof(struct ti_softc *sc)
 #endif
 
 		if ((cur_rx->ti_ip_cksum ^ 0xffff) == 0)
-			sumflags |= M_IPV4_CSUM_IN_OK;
-		m->m_pkthdr.csum_flags = sumflags;
+			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
 
 		ether_input_mbuf(ifp, m);
 	}
@@ -2022,7 +2039,7 @@ ti_stats_update(struct ti_softc *sc)
 int
 ti_encap_tigon1(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 {
-	u_int32_t		frag, cur, cnt = 0;
+	u_int32_t		frag, cur;
 	struct ti_txmap_entry	*entry;
 	bus_dmamap_t		txmap;
 	struct ti_tx_desc	txdesc;
@@ -2044,6 +2061,13 @@ ti_encap_tigon1(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	    BUS_DMA_NOWAIT))
 		return (ENOBUFS);
 
+	/*
+	 * Sanity check: avoid coming within 16 descriptors
+	 * of the end of the ring.
+	 */
+	if (txmap->dm_nsegs > (TI_TX_RING_CNT - sc->ti_txcnt - 16))
+		goto fail_unload;
+
 	for (i = 0; i < txmap->dm_nsegs; i++) {
 		if (sc->ti_cdata.ti_tx_chain[frag] != NULL)
 			break;
@@ -2052,8 +2076,9 @@ ti_encap_tigon1(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 
 		TI_HOSTADDR(txdesc.ti_addr) = txmap->dm_segs[i].ds_addr;
 		txdesc.ti_len = txmap->dm_segs[i].ds_len & 0xffff;
-
 		txdesc.ti_flags = 0;
+		txdesc.ti_vlan_tag = 0;
+
 #if NVLAN > 0
 		if (m_head->m_flags & M_VLANTAG) {
 			txdesc.ti_flags |= TI_BDFLAG_VLAN_TAG;
@@ -2064,19 +2089,12 @@ ti_encap_tigon1(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 		ti_mem_write(sc, TI_TX_RING_BASE + frag * sizeof(txdesc),
 			     sizeof(txdesc), (caddr_t)&txdesc);
 
-		/*
-		 * Sanity check: avoid coming within 16 descriptors
-		 * of the end of the ring.
-		 */
-		if ((TI_TX_RING_CNT - (sc->ti_txcnt + cnt)) < 16)
-			return (ENOBUFS);
 		cur = frag;
 		TI_INC(frag, TI_TX_RING_CNT);
-		cnt++;
 	}
 
 	if (frag == sc->ti_tx_saved_considx)
-		return (ENOBUFS);
+		goto fail_unload;
 
 	txdesc.ti_flags |= TI_BDFLAG_END;
 	ti_mem_write(sc, TI_TX_RING_BASE + cur * sizeof(txdesc),
@@ -2088,11 +2106,16 @@ ti_encap_tigon1(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	sc->ti_cdata.ti_tx_chain[cur] = m_head;
 	SLIST_REMOVE_HEAD(&sc->ti_tx_map_listhead, link);
 	sc->ti_cdata.ti_tx_map[cur] = entry;
-	sc->ti_txcnt += cnt;
+	sc->ti_txcnt += txmap->dm_nsegs;
 
 	*txidx = frag;
 
 	return (0);
+
+fail_unload:
+	bus_dmamap_unload(sc->sc_dmatag, txmap);
+
+	return (ENOBUFS);
 }
 
 /*
@@ -2103,7 +2126,7 @@ int
 ti_encap_tigon2(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 {
 	struct ti_tx_desc	*f = NULL;
-	u_int32_t		frag, cur, cnt = 0;
+	u_int32_t		frag, cur;
 	struct ti_txmap_entry	*entry;
 	bus_dmamap_t		txmap;
 	int			i = 0;
@@ -2124,6 +2147,13 @@ ti_encap_tigon2(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	    BUS_DMA_NOWAIT))
 		return (ENOBUFS);
 
+	/*
+	 * Sanity check: avoid coming within 16 descriptors
+	 * of the end of the ring.
+	 */
+	if (txmap->dm_nsegs > (TI_TX_RING_CNT - sc->ti_txcnt - 16))
+		goto fail_unload;
+
 	for (i = 0; i < txmap->dm_nsegs; i++) {
 		f = &sc->ti_rdata->ti_tx_ring[frag];
 
@@ -2133,27 +2163,21 @@ ti_encap_tigon2(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 		TI_HOSTADDR(f->ti_addr) = txmap->dm_segs[i].ds_addr;
 		f->ti_len = txmap->dm_segs[i].ds_len & 0xffff;
 		f->ti_flags = 0;
+		f->ti_vlan_tag = 0;
+
 #if NVLAN > 0
 		if (m_head->m_flags & M_VLANTAG) {
 			f->ti_flags |= TI_BDFLAG_VLAN_TAG;
 			f->ti_vlan_tag = m_head->m_pkthdr.ether_vtag;
-		} else {
-			f->ti_vlan_tag = 0;
 		}
 #endif
-		/*
-		 * Sanity check: avoid coming within 16 descriptors
-		 * of the end of the ring.
-		 */
-		if ((TI_TX_RING_CNT - (sc->ti_txcnt + cnt)) < 16)
-			return(ENOBUFS);
+
 		cur = frag;
 		TI_INC(frag, TI_TX_RING_CNT);
-		cnt++;
 	}
 
 	if (frag == sc->ti_tx_saved_considx)
-		return(ENOBUFS);
+		goto fail_unload;
 
 	sc->ti_rdata->ti_tx_ring[cur].ti_flags |= TI_BDFLAG_END;
 
@@ -2165,11 +2189,16 @@ ti_encap_tigon2(struct ti_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	sc->ti_cdata.ti_tx_chain[cur] = m_head;
 	SLIST_REMOVE_HEAD(&sc->ti_tx_map_listhead, link);
 	sc->ti_cdata.ti_tx_map[cur] = entry;
-	sc->ti_txcnt += cnt;
+	sc->ti_txcnt += txmap->dm_nsegs;
 
 	*txidx = frag;
 
 	return (0);
+
+fail_unload:
+	bus_dmamap_unload(sc->sc_dmatag, txmap);
+
+	return (ENOBUFS);
 }
 
 /*
