@@ -25,7 +25,7 @@
 #include <sys/event.h>
 #include <sys/signalvar.h>
 #include <sys/proc.h>
-#include <sys/kthread.h>
+#include <sys/workq.h>
 
 #include <machine/conf.h>
 #include <machine/cpufunc.h>
@@ -53,8 +53,9 @@ int acpi_hasprocfvs;
 
 #define ACPIEN_RETRIES 15
 
-void	acpi_isr_thread(void *);
-void	acpi_create_thread(void *);
+void	acpi_initialize(void *, void *);
+/* XXX */
+void	acpi_dowork(void *, void *);
 
 int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
@@ -614,13 +615,13 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Setup threads */
-	sc->sc_thread = malloc(sizeof(struct acpi_thread), M_DEVBUF, M_WAITOK);
-	sc->sc_thread->sc = sc;
-	sc->sc_thread->running = 1;
+	sc->sc_workq = workq_create("acpi", 1);
 
 	acpi_attach_machdep(sc);
 
-	kthread_create_deferred(acpi_create_thread, sc);
+	workq_add_task(sc->sc_workq, WQ_WAITOK, acpi_initialize, sc,
+	    NULL);
+
 #endif /* SMALL_KERNEL */
 }
 
@@ -1294,8 +1295,8 @@ acpi_interrupt(void *arg)
 	}
 
 	if (processed) {
-		sc->sc_wakeup = 0;
-		wakeup(sc);
+		workq_add_task(sc->sc_workq, WQ_WAITOK, acpi_dowork,
+		    sc, NULL);
 	}
 
 	return (processed);
@@ -1785,12 +1786,58 @@ acpi_powerdown(void)
 
 extern int aml_busy;
 
+/* XXX */
 void
-acpi_isr_thread(void *arg)
+acpi_dowork(void *arg, void *unused)
 {
-	struct acpi_thread *thread = arg;
-	struct acpi_softc  *sc = thread->sc;
+	struct acpi_softc *sc = arg;
 	u_int32_t gpe;
+
+	if (aml_busy)
+		return;
+
+	for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
+		struct gpe_block *pgpe = &sc->gpe_table[gpe];
+
+		if (pgpe->active) {
+			pgpe->active = 0;
+			dnprintf(50, "softgpe: %.2x\n", gpe);
+			if (pgpe->handler)
+				pgpe->handler(sc, gpe, pgpe->arg);
+		}
+	}
+	if (sc->sc_powerbtn) {
+		sc->sc_powerbtn = 0;
+
+		aml_notify_dev(ACPI_DEV_PBD, 0x80);
+
+		acpi_evindex++;
+		dnprintf(1,"power button pressed\n");
+		KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_PWRBTN,
+		    acpi_evindex));
+	}
+	if (sc->sc_sleepbtn) {
+		sc->sc_sleepbtn = 0;
+
+		aml_notify_dev(ACPI_DEV_SBD, 0x80);
+
+		acpi_evindex++;
+		dnprintf(1,"sleep button pressed\n");
+		KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_SLPBTN,
+		    acpi_evindex));
+	}
+
+	/* handle polling here to keep code non-concurrent*/
+	if (sc->sc_poll) {
+		sc->sc_poll = 0;
+		acpi_poll_notify();
+	}
+}
+
+void
+acpi_initialize(void *arg, void *unused)
+{
+	struct acpi_softc *sc = arg;
 
 	/*
 	 * If we have an interrupt handler, we can get notification
@@ -1798,13 +1845,13 @@ acpi_isr_thread(void *arg)
 	 * so let us enable some events we can forward to userland
 	 */
 	if (sc->sc_interrupt) {
+		u_int32_t gpe;
 		int16_t flag;
 
 		dnprintf(1,"slpbtn:%c  pwrbtn:%c\n",
 		    sc->sc_fadt->flags & FADT_SLP_BUTTON ? 'n' : 'y',
 		    sc->sc_fadt->flags & FADT_PWR_BUTTON ? 'n' : 'y');
 		dnprintf(10, "Enabling acpi interrupts...\n");
-		sc->sc_wakeup = 1;
 
 		/* Enable Sleep/Power buttons if they exist */
 		flag = acpi_read_pmreg(sc, ACPIREG_PM1_EN, 0);
@@ -1821,69 +1868,6 @@ acpi_isr_thread(void *arg)
 			if (sc->gpe_table[gpe].handler)
 				acpi_enable_onegpe(sc, gpe, 1);
 		}
-	}
-
-	while (thread->running) {
-		dnprintf(10, "sleep... %d\n", sc->sc_wakeup);
-		while (sc->sc_wakeup)
-			tsleep(sc, PWAIT, "acpi_idle", 0);
-		sc->sc_wakeup = 1;
-		dnprintf(10, "wakeup..\n");
-		if (aml_busy)
-			continue;
-
-		for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
-			struct gpe_block *pgpe = &sc->gpe_table[gpe];
-
-			if (pgpe->active) {
-				pgpe->active = 0;
-				dnprintf(50, "softgpe: %.2x\n", gpe);
-				if (pgpe->handler)
-					pgpe->handler(sc, gpe, pgpe->arg);
-			}
-		}
-		if (sc->sc_powerbtn) {
-			sc->sc_powerbtn = 0;
-
-			aml_notify_dev(ACPI_DEV_PBD, 0x80);
-
-			acpi_evindex++;
-			dnprintf(1,"power button pressed\n");
-			KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_PWRBTN,
-			    acpi_evindex));
-		}
-		if (sc->sc_sleepbtn) {
-			sc->sc_sleepbtn = 0;
-
-			aml_notify_dev(ACPI_DEV_SBD, 0x80);
-
-			acpi_evindex++;
-			dnprintf(1,"sleep button pressed\n");
-			KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_SLPBTN,
-			    acpi_evindex));
-		}
-
-		/* handle polling here to keep code non-concurrent*/
-		if (sc->sc_poll) {
-			sc->sc_poll = 0;
-			acpi_poll_notify();
-		}
-	}
-	free(thread, M_DEVBUF);
-
-	kthread_exit(0);
-}
-
-void
-acpi_create_thread(void *arg)
-{
-	struct acpi_softc *sc = arg;
-
-	if (kthread_create(acpi_isr_thread, sc->sc_thread, NULL, DEVNAME(sc))
-	    != 0) {
-		printf("%s: unable to create isr thread, GPEs disabled\n",
-		    DEVNAME(sc));
-		return;
 	}
 }
 

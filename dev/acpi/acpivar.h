@@ -108,11 +108,6 @@ struct acpi_reg_map {
 	const char	   *name;
 };
 
-struct acpi_thread {
-	struct acpi_softc   *sc;
-	volatile int	    running;
-};
-
 struct acpi_mutex {
 	struct rwlock		amt_lock;
 #define ACPI_MTX_MAXNAME	5
@@ -120,12 +115,6 @@ struct acpi_mutex {
 	int			amt_ref_count;
 	int			amt_timeout;
 	int			amt_synclevel;
-};
-
-struct gpe_block {
-	int  (*handler)(struct acpi_softc *, int, void *);
-	void *arg;
-	int   active;
 };
 
 struct acpi_ac {
@@ -187,10 +176,9 @@ struct acpi_softc {
 
 	struct gpe_block	*gpe_table;
 
-	int			sc_wakeup;
 	u_int32_t		sc_gpe_sts;
 	u_int32_t		sc_gpe_en;
-	struct acpi_thread	*sc_thread;
+	struct workq		*sc_workq;
 
 	struct aml_node		*sc_tts;
 	struct aml_node		*sc_pts;
@@ -207,6 +195,12 @@ struct acpi_softc {
 	int			sc_poll;
 
 	int			sc_revision;
+};
+
+struct gpe_block {
+	int  (*handler)(struct acpi_softc *, int, void *);
+	void *arg;
+	int   active;
 };
 
 #define GPE_NONE  0x00
