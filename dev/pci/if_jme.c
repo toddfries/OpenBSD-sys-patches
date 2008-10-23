@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.9 2008/10/20 19:40:54 brad Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.11 2008/10/21 19:41:13 brad Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -435,11 +435,8 @@ jme_eeprom_macaddr(struct jme_softc *sc, uint8_t eaddr[])
 	do {
 		if (jme_eeprom_read_byte(sc, offset, &fup) != 0)
 			break;
-		/* Check for the end of EEPROM descriptor. */
-		if ((fup & JME_EEPROM_DESC_END) == JME_EEPROM_DESC_END)
-			break;
-		if ((uint8_t)JME_EEPROM_MKDESC(JME_EEPROM_FUNC0,
-		    JME_EEPROM_PAGE_BAR1) == fup) {
+		if (JME_EEPROM_MKDESC(JME_EEPROM_FUNC0, JME_EEPROM_PAGE_BAR1) ==
+		    (fup & (JME_EEPROM_FUNC_MASK | JME_EEPROM_PAGE_MASK))) {
 			if (jme_eeprom_read_byte(sc, offset + 1, &reg) != 0)
 				break;
 			if (reg >= JME_PAR0 &&
@@ -451,6 +448,9 @@ jme_eeprom_macaddr(struct jme_softc *sc, uint8_t eaddr[])
 				match++;
 			}
 		}
+		/* Check for the end of EEPROM descriptor. */
+		if ((fup & JME_EEPROM_DESC_END) == JME_EEPROM_DESC_END)
+			break;
 		/* Try next eeprom descriptor. */
 		offset += JME_EEPROM_DESC_BYTES;
 	} while (match != ETHER_ADDR_LEN && offset < JME_EEPROM_END);
@@ -1217,11 +1217,6 @@ jme_start(struct ifnet *ifp)
 		if (m_head == NULL)
 			break;
 
-#if NBPFILTER > 0
-		if (ifp->if_bpf != NULL)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
-#endif
-
 		/*
 		 * Pack the data into the transmit ring. If we
 		 * don't have room, set the OACTIVE flag and wait
@@ -1237,11 +1232,11 @@ jme_start(struct ifnet *ifp)
 		}
 		enq++;
 
+#if NBPFILTER > 0
 		/*
 		 * If there's a BPF listener, bounce a copy of this frame
 		 * to him.
 		 */
-#if NBPFILTER > 0
 		if (ifp->if_bpf != NULL)
 			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
