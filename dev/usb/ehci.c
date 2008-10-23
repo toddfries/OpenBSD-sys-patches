@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.92 2008/09/15 13:44:09 mglocker Exp $ */
+/*	$OpenBSD: ehci.c,v 1.94 2008/10/07 11:31:09 mglocker Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -2675,7 +2675,7 @@ ehci_free_itd(ehci_softc_t *sc, ehci_soft_itd_t *itd)
 	int s;
 
 	s = splusb();
-	LIST_INSERT_AFTER(LIST_FIRST(&sc->sc_freeitds), itd, u.free_list);
+	LIST_INSERT_HEAD(&sc->sc_freeitds, itd, u.free_list);
 	splx(s);
 }
 
@@ -3833,9 +3833,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 
 		k = (UE_GET_DIR(epipe->pipe.endpoint->edesc->bEndpointAddress))
 		    ? 1 : 0;
-		j = UE_GET_SIZE(
-		    UGETW(epipe->pipe.endpoint->edesc->wMaxPacketSize));
-
+		j = UGETW(epipe->pipe.endpoint->edesc->wMaxPacketSize);
 		itd->itd.itd_bufr[1] |= htole32(EHCI_ITD_SET_DIR(k) |
 		    EHCI_ITD_SET_MAXPKT(UE_GET_SIZE(j)));
 

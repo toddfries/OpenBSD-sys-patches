@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.66 2008/08/10 14:13:05 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.69 2008/10/15 23:23:50 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -119,6 +119,7 @@ struct cpu_info {
 	int			ci_itid;
 #endif
 	int			ci_node;
+	u_int32_t 		ci_randseed;
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 
 	int			ci_want_resched;
@@ -175,6 +176,7 @@ curcpu(void)
 #define CPU_INFO_FOREACH(cii, ci)					\
 	for (cii = 0, ci = cpus; ci != NULL; ci = ci->ci_next)
 #define CPU_INFO_UNIT(ci)	((ci)->ci_number)
+#define MAXCPUS	256
 
 void	cpu_boot_secondary_processors(void);
 
@@ -192,6 +194,8 @@ void	smp_signotify(struct proc *);
 #define CPU_INFO_ITERATOR	int
 #define CPU_INFO_FOREACH(cii, ci)					\
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+#define CPU_INFO_UNIT(ci)	0
+#define MAXCPUS 1
 
 #endif
 

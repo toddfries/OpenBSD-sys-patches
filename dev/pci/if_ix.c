@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.9 2008/10/02 20:21:14 brad Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.12 2008/10/16 19:18:03 naddy Exp $	*/
 
 /******************************************************************************
 
@@ -841,9 +841,7 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
         cmd_type_len |= IXGBE_ADVTXD_DCMD_IFCS | IXGBE_ADVTXD_DCMD_DEXT;
 
 #if NVLAN > 0
-	/* VLAN tagging? */
-	if ((m_head->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m_head->m_pkthdr.rcvif != NULL)
+	if (m_head->m_flags & M_VLANTAG)
         	cmd_type_len |= IXGBE_ADVTXD_DCMD_VLE;
 #endif
 
@@ -1361,7 +1359,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	sc->hw.fc.send_xon = TRUE;
 
 	if (ixgbe_hw(&sc->hw, init_hw) != 0) {
-		printf("%s: Hardware Initialization Failed");
+		printf("%s: Hardware Initialization Failed", ifp->if_xname);
 		return (EIO);
 	}
 	bcopy(sc->hw.mac.addr, sc->arpcom.ac_enaddr,
@@ -1888,11 +1886,6 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	int ctxd = txr->next_avail_tx_desc;
 #if NVLAN > 0
 	struct ether_vlan_header *eh;
-	struct ifvlan		*ifv = NULL;
-
-	if ((mp->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    mp->m_pkthdr.rcvif != NULL)
-		ifv = mp->m_pkthdr.rcvif->if_softc;
 #else
 	struct ether_header *eh;
 #endif
@@ -1908,9 +1901,9 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	 * be placed into the descriptor itself.
 	 */
 #if NVLAN > 0
-	if (ifv != NULL) {
+	if (mp->m_flags & M_VLANTAG) {
 		vlan_macip_lens |=
-		    htole16(ifv->ifv_tag) << IXGBE_ADVTXD_VLAN_SHIFT;
+		    htole16(mp->m_pkthdr.ether_vtag) << IXGBE_ADVTXD_VLAN_SHIFT;
 	} else
 #endif
 	if (offload == FALSE)
@@ -2021,12 +2014,6 @@ ixgbe_tso_setup(struct tx_ring *txr, struct mbuf *mp, uint32_t *paylen)
 #if NVLAN > 0
 	uint16_t vtag = 0;
 	struct ether_vlan_header *eh;
-
-	struct ifvlan		*ifv = NULL;
-
-	if ((mp->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    mp->m_pkthdr.rcvif != NULL)
-		ifv = mp->m_pkthdr.rcvif->if_softc;
 #else
 	struct ether_header *eh;
 #endif
@@ -2076,9 +2063,9 @@ ixgbe_tso_setup(struct tx_ring *txr, struct mbuf *mp, uint32_t *paylen)
 
 #if NVLAN > 0
 	/* VLAN MACLEN IPLEN */
-	if (ifv != NULL) {
+	if (mp->m_flags & M_VLANTAG) {
 		vtag = htole16(mp->m_pkthdr.ether_vtag);
-                vlan_macip_lens |= (ifv->ifv_tag << IXGBE_ADVTXD_VLAN_SHIFT);
+		vlan_macip_lens |= (vtag << IXGBE_ADVTXD_VLAN_SHIFT);
 	}
 #endif
 
@@ -2791,22 +2778,9 @@ ixgbe_rxeof(struct rx_ring *rxr, int count)
 
 #if NVLAN > 0 && defined(IX_CSUM_OFFLOAD)
 				if (staterr & IXGBE_RXD_STAT_VP) {
-					struct ether_vlan_header vh;
-
-					if (m->m_pkthdr.len < ETHER_HDR_LEN)
-						goto discard;
-					m_copydata(m, 0,
-					    ETHER_HDR_LEN, (caddr_t)&vh);
-					vh.evl_proto = vh.evl_encap_proto;
-					vh.evl_tag =
+					m->m_pkthdr.ether_vtag =
 					    letoh16(cur->wb.upper.vlan);
-					vh.evl_encap_proto =
-					    htons(ETHERTYPE_VLAN);
-					m_adj(m, ETHER_HDR_LEN);
-					M_PREPEND(m, sizeof(vh), M_DONTWAIT);
-					if (m == NULL)
-						goto discard;
-					m_copyback(m, 0, sizeof(vh), &vh);
+					m->m_flags |= M_VLANTAG;
 				}
 #endif
 				rxr->fmp = NULL;

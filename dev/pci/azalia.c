@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.55 2008/09/24 19:09:05 chl Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.60 2008/10/16 19:16:58 jakemsr Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -36,7 +36,6 @@
  *
  *
  * TO DO:
- *  - S/PDIF
  *  - power hook
  *  - multiple codecs (needed?)
  *  - multiple streams (needed?)
@@ -234,6 +233,7 @@ void	azalia_codec_add_format(codec_t *, int, int, int, uint32_t,
 int	azalia_codec_comresp(const codec_t *, nid_t, uint32_t,
 	uint32_t, uint32_t *);
 int	azalia_codec_connect_stream(codec_t *, int, uint16_t, int);
+int	azalia_codec_disconnect_stream(codec_t *, int);
 
 int	azalia_widget_init(widget_t *, const codec_t *, int);
 int	azalia_widget_label_widgets(codec_t *);
@@ -426,6 +426,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
  
 	/* enable PCIe snoop */
 	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_ATI_SB450_HDA:
 	case PCI_PRODUCT_ATI_SBX00_HDA:
 		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, ATI_PCIE_SNOOP_REG);
 		reg &= ATI_PCIE_SNOOP_MASK;
@@ -433,6 +434,27 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		azalia_pci_write(pa->pa_pc, pa->pa_tag, ATI_PCIE_SNOOP_REG, reg);
 		break;
 	case PCI_PRODUCT_NVIDIA_MCP51_HDA:
+	case PCI_PRODUCT_NVIDIA_MCP55_HDA:
+	case PCI_PRODUCT_NVIDIA_MCP61_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP61_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP65_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP65_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP67_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP67_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP73_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP73_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP77_HDA_4:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP79_HDA_4:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_1:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_2:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_3:
+	case PCI_PRODUCT_NVIDIA_MCP7B_HDA_4:
 		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, NVIDIA_PCIE_SNOOP_REG);
 		reg &= NVIDIA_PCIE_SNOOP_MASK;
 		reg |= NVIDIA_PCIE_SNOOP_ENABLE;
@@ -703,6 +725,7 @@ azalia_attach_intr(struct device *self)
 	}
 	printf("\n");
 
+	/* Use stream#1 and #2.  Don't use stream#0. */
 	if (azalia_stream_init(&az->pstream, az, az->nistreams + 0,
 	    1, AUMODE_PLAY))
 		goto err_exit;
@@ -1473,18 +1496,23 @@ int
 azalia_codec_comresp(const codec_t *codec, nid_t nid, uint32_t control,
 		     uint32_t param, uint32_t* result)
 {
-	int err;
+	int err, s;
 
+	s = splaudio();
 	err = azalia_set_command(codec->az, codec->address, nid, control, param);
 	if (err)
-		return err;
-	return azalia_get_response(codec->az, result);
+		goto exit;
+	err = azalia_get_response(codec->az, result);
+exit:
+	splx(s);
+	return err;
 }
 
 int
 azalia_codec_connect_stream(codec_t *this, int dir, uint16_t fmt, int number)
 {
 	const convgroup_t *group;
+	uint32_t v;
 	int i, err, startchan, nchan;
 	nid_t nid;
 	boolean_t flag222;
@@ -1502,6 +1530,7 @@ azalia_codec_connect_stream(codec_t *this, int dir, uint16_t fmt, int number)
 	nchan = (fmt & HDA_SD_FMT_CHAN) + 1;
 	startchan = 0;
 	for (i = 0; i < group->nconv; i++) {
+		uint32_t stream_chan;
 		nid = group->conv[i];
 
 		/* surround and c/lfe handling */
@@ -1514,17 +1543,53 @@ azalia_codec_connect_stream(codec_t *this, int dir, uint16_t fmt, int number)
 		err = this->comresp(this, nid, CORB_SET_CONVERTER_FORMAT, fmt, NULL);
 		if (err)
 			goto exit;
+		stream_chan = (number << 4) | startchan;
+		if (startchan >= nchan)
+			stream_chan = 0; /* stream#0 */
 		err = this->comresp(this, nid, CORB_SET_CONVERTER_STREAM_CHANNEL,
-				    (number << 4) | startchan, NULL);
+				    stream_chan, NULL);
 		if (err)
 			goto exit;
-		if (nchan > 2)
-			startchan += WIDGET_CHANNELS(&this->w[nid]);
+		if (this->w[nid].widgetcap & COP_AWCAP_DIGITAL) {
+			/* enable S/PDIF */
+			this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
+			    0, &v);
+			v = (v & 0xff) | CORB_DCC_DIGEN;
+			this->comresp(this, nid, CORB_SET_DIGITAL_CONTROL_L,
+			    v, NULL);
+		}
+		startchan += WIDGET_CHANNELS(&this->w[nid]);
 	}
 
 exit:
 	DPRINTF(("%s: leave with %d\n", __func__, err));
 	return err;
+}
+
+int
+azalia_codec_disconnect_stream(codec_t *this, int dir)
+{
+	const convgroup_t *group;
+	uint32_t v;
+	int i;
+	nid_t nid;
+
+	if (dir == AUMODE_RECORD)
+		group = &this->adcs.groups[this->adcs.cur];
+	else
+		group = &this->dacs.groups[this->dacs.cur];
+	for (i = 0; i < group->nconv; i++) {
+		nid = group->conv[i];
+		this->comresp(this, nid, CORB_SET_CONVERTER_STREAM_CHANNEL,
+		    0, NULL);	/* stream#0 */
+		if (this->w[nid].widgetcap & COP_AWCAP_DIGITAL) {
+			/* disable S/PDIF */
+			this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL, 0, &v);
+			v = (v & ~CORB_DCC_DIGEN) & 0xff;
+			this->comresp(this, nid, CORB_SET_DIGITAL_CONTROL_L, v, NULL);
+		}
+	}
+	return 0;
 }
 
 /* ================================================================
@@ -2034,6 +2099,8 @@ azalia_stream_halt(stream_t *this)
 	STR_WRITE_2(this, CTL, ctl);
 	AZ_WRITE_4(this->az, INTCTL,
 	    AZ_READ_4(this->az, INTCTL) & ~this->intr_bit);
+	azalia_codec_disconnect_stream
+	    (&this->az->codecs[this->az->codecno], this->dir);
 	return (0);
 }
 
