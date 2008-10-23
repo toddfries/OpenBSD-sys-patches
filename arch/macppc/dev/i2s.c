@@ -53,15 +53,6 @@
 # define DPRINTF(x)
 #endif
 
-struct audio_params i2s_audio_default = {
-	44100,		/* sample_rate */
-	AUDIO_ENCODING_SLINEAR_BE, /* encoding */
-	16,		/* precision */
-	2,		/* channels */
-	NULL,		/* sw_code */
-	1		/* factor */
-};
-
 struct i2s_mode *i2s_find_mode(u_int, u_int, u_int);
 
 static int gpio_read(char *);
@@ -456,12 +447,6 @@ i2s_set_params(h, setmode, usemode, play, rec)
 	return 0;
 }
 
-void
-i2s_get_default_params(struct audio_params *params)
-{
-	*params = i2s_audio_default;
-}
-
 int
 i2s_round_blocksize(h, size)
 	void *h;
@@ -659,8 +644,10 @@ i2s_query_devinfo(h, dip)
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
 		dip->un.v.num_channels = 2;
+#if 0
 		strlcpy(dip->un.v.units.name, AudioNvolume,
 		    sizeof(dip->un.v.units.name));
+#endif
 		return 0;
 
 	case I2S_INPUT_SELECT:
@@ -683,8 +670,10 @@ i2s_query_devinfo(h, dip)
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
 		dip->un.v.num_channels = 2;
+#if 0
 		strlcpy(dip->un.v.units.name, AudioNvolume,
 		    sizeof(dip->un.v.units.name));
+#endif
 		return 0;
 
 	case I2S_OUTPUT_CLASS:
@@ -865,7 +854,9 @@ i2s_set_rate(sc, rate)
 	int MCLK;
 	int clksrc, mdiv, sdiv;
 	int mclk_fs;
+/*
 	int timo;
+ */
 
 	/* sanify */
 	if (rate > 48000)
@@ -934,12 +925,13 @@ i2s_set_rate(sc, rate)
 	out32rb(sc->sc_reg + I2S_WORDSIZE, 0x02000200);
 
 	/* Clear CLKSTOPPEND */
-	out32rb(sc->sc_reg + I2S_INT, I2S_INT_CLKSTOPPEND);
+/*	out32rb(sc->sc_reg + I2S_INT, I2S_INT_CLKSTOPPEND);
 
 	keylargo_fcr_disable(I2SClockOffset, I2S0CLKEN);
+ */
 
 	/* Wait until clock is stopped */
-	for (timo = 1000; timo > 0; timo--) {
+/*	for (timo = 1000; timo > 0; timo--) {
 		if (in32rb(sc->sc_reg + I2S_INT) & I2S_INT_CLKSTOPPEND)
 			goto done;
 		delay(1);
@@ -948,6 +940,7 @@ i2s_set_rate(sc, rate)
 	printf("i2s_set_rate: timeout\n");
 
 done:
+ */
 	DPRINTF(("I2SSetSerialFormatReg 0x%x -> 0x%x\n",
 	    in32rb(sc->sc_reg + I2S_FORMAT), reg));
 	out32rb(sc->sc_reg + I2S_FORMAT, reg);
@@ -1295,4 +1288,3 @@ deq_reset(struct i2s_softc *sc)
 
 	return (0);
 }
-

@@ -88,7 +88,6 @@ int i2s_open(void *, int);
 void i2s_close(void *);
 int i2s_query_encoding(void *, struct audio_encoding *);
 int i2s_set_params(void *, int, int, struct audio_params *, struct audio_params *);
-void i2s_get_default_params(struct audio_params *);
 int i2s_round_blocksize(void *, int);
 int i2s_halt_output(void *);
 int i2s_halt_input(void *);
