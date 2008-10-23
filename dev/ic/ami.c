@@ -69,12 +69,6 @@
 #include <dev/ic/amireg.h>
 #include <dev/ic/amivar.h>
 
-
-#if NBIO > 0
-#include <dev/biovar.h>
-#include <sys/sensors.h>
-#endif
-
 #ifdef AMI_DEBUG
 #define	AMI_DPRINTF(m,a)	do { if (ami_debug & (m)) printf a; } while (0)
 #define	AMI_D_CMD	0x0001
@@ -157,6 +151,10 @@ int		ami_load_ptmem(struct ami_softc*, struct ami_ccb *,
 #if NBIO > 0
 int		ami_mgmt(struct ami_softc *, u_int8_t, u_int8_t, u_int8_t,
 		    u_int8_t, size_t, void *);
+int		ami_drv_pt(struct ami_softc *, u_int8_t, u_int8_t, u_int8_t *,
+		    int, int, void *);
+int		ami_drv_readcap(struct ami_softc *, u_int8_t, u_int8_t,
+		    daddr64_t *);
 int		ami_drv_inq(struct ami_softc *, u_int8_t, u_int8_t, u_int8_t,
 		    void *);
 int		ami_ioctl(struct device *, u_long, caddr_t);
@@ -414,6 +412,7 @@ ami_attach(struct ami_softc *sc)
 		pi = AMIMEM_KVA(am);
 
 		sc->sc_nunits = einq->ain_nlogdrv;
+		sc->sc_drvinscnt = einq->ain_drvinscnt + 1; /* force scan */
 		ami_copyhds(sc, einq->ain_ldsize, einq->ain_ldprop,
 		    einq->ain_ldstat);
 
@@ -468,6 +467,7 @@ ami_attach(struct ami_softc *sc)
 		sc->sc_targets = inq->ain_targets;
 		sc->sc_memory = inq->ain_ramsize;
 		sc->sc_maxcmds = inq->ain_maxcmd;
+		sc->sc_drvinscnt = inq->ain_drvinscnt + 1; /* force scan */
 		p = "target";
 	}
 
@@ -1709,12 +1709,11 @@ ami_ioctl(struct device *dev, u_long cmd, caddr_t addr)
 }
 
 int
-ami_drv_inq(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, u_int8_t page,
-    void *inqbuf)
+ami_drv_pt(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, u_int8_t *cmd,
+    int clen, int blen, void *buf)
 {
 	struct ami_ccb *ccb;
 	struct ami_passthrough *pt;
-	struct scsi_inquiry_data *inq = inqbuf;
 	int error = 0;
 	int s;
 
@@ -1734,28 +1733,17 @@ ami_drv_inq(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, u_int8_t page,
 	ccb->ccb_cmd.acc_passthru.apt_data = ccb->ccb_ptpa;
 
 	pt = ccb->ccb_pt;
-	memset(pt, 0, sizeof(struct ami_passthrough));
+	memset(pt, 0, sizeof *pt);
 	pt->apt_channel = ch;
 	pt->apt_target = tg;
-	pt->apt_ncdb = sizeof(struct scsi_inquiry);
+	pt->apt_ncdb = clen;
 	pt->apt_nsense = sizeof(struct scsi_sense_data);
-	pt->apt_datalen = sizeof(struct scsi_inquiry_data);
+	pt->apt_datalen = blen;
 	pt->apt_data = 0;
 
-	pt->apt_cdb[0] = INQUIRY;
-	pt->apt_cdb[1] = 0;
-	pt->apt_cdb[2] = 0;
-	pt->apt_cdb[3] = 0;
-	pt->apt_cdb[4] = sizeof(struct scsi_inquiry_data); /* INQUIRY length */
-	pt->apt_cdb[5] = 0;
+	bcopy(cmd, pt->apt_cdb, clen);
 
-	if (page != 0) {
-		pt->apt_cdb[1] = SI_EVPD;
-		pt->apt_cdb[2] = page;
-	}
-
-	if (ami_load_ptmem(sc, ccb, inqbuf, sizeof(struct scsi_inquiry_data),
-	    1, 0) != 0) {
+	if (ami_load_ptmem(sc, ccb, buf, blen, 1, 0) != 0) {
 		error = ENOMEM;
 		goto ptmemerr;
 	}
@@ -1776,8 +1764,6 @@ ami_drv_inq(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, u_int8_t page,
 		error = EIO;
 	else if (pt->apt_scsistat != 0x00)
 		error = EIO;
-	else if ((inq->device & SID_TYPE) != T_DIRECT)
-		error = EINVAL;
 
 ptmemerr:
 	s = splbio();
@@ -1786,6 +1772,81 @@ ptmemerr:
 
 err:
 	rw_exit_write(&sc->sc_lock);
+	return (error);
+}
+
+int
+ami_drv_inq(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, u_int8_t page,
+    void *inqbuf)
+{
+	struct scsi_inquiry_data *inq = inqbuf;
+	u_int8_t cdb[6];
+	int error = 0;
+
+	bzero(&cdb, sizeof cdb);
+
+	cdb[0] = INQUIRY;
+	cdb[1] = 0;
+	cdb[2] = 0;
+	cdb[3] = 0;
+	cdb[4] = sizeof(struct scsi_inquiry_data);
+	cdb[5] = 0;
+	if (page != 0) {
+		cdb[1] = SI_EVPD;
+		cdb[2] = page;
+	}
+
+	error = ami_drv_pt(sc, ch, tg, cdb, 6, sizeof *inq, inqbuf);
+	if (error)
+		return (error);
+
+	if ((inq->device & SID_TYPE) != T_DIRECT)
+		error = EINVAL;
+
+	return (error);
+}
+
+int
+ami_drv_readcap(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, daddr64_t *sz)
+{
+	struct scsi_read_cap_data rcd;
+	struct scsi_read_cap_data_16 rcd16;
+	u_int8_t cdb[16];
+	u_int32_t blksz;
+	daddr64_t noblk;
+	int error = 0;
+
+	bzero(&rcd, sizeof rcd);
+	bzero(&cdb, sizeof cdb);
+	cdb[0] = READ_CAPACITY;
+
+	error = ami_drv_pt(sc, ch, tg, cdb, 10, sizeof rcd, &rcd);
+	if (error)
+		return (error);
+
+	noblk = _4btol(rcd.addr);
+	if (noblk == 0xffffffffllu) {
+		/* huge disk */
+		bzero(&rcd16, sizeof rcd16);
+		bzero(&cdb, sizeof cdb);
+		cdb[0] = READ_CAPACITY_16;
+
+		error = ami_drv_pt(sc, ch, tg, cdb, 16, sizeof rcd16, &rcd16);
+		if (error)
+			return (error);
+
+		noblk = _8btol(rcd16.addr);
+		blksz = _4btol(rcd16.length);
+		if (blksz == 0)
+			blksz = 512;
+		*sz = noblk * blksz;
+	} else {
+		blksz = _4btol(rcd.length);
+		if (blksz == 0)
+			blksz = 512;
+		*sz = noblk * blksz;
+	}
+
 	return (error);
 }
 
@@ -1867,9 +1928,36 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 {
 	struct ami_big_diskarray *p; /* struct too large for stack */
 	struct scsi_inquiry_data inqbuf;
+	struct ami_fc_einquiry einq;
 	int ch, tg;
 	int i, s, t, off;
-	int error = 0;
+	int error = 0, changes = 0;
+
+	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_EINQ3,
+	    AMI_FC_EINQ3_SOLICITED_FULL, 0, sizeof einq, &einq)))
+		return (EINVAL);
+
+	if (einq.ain_drvinscnt == sc->sc_drvinscnt) {
+		/* poke existing known drives to make sure they aren't gone */
+		for(i = 0; i < sc->sc_channels * 16; i++) {
+			if (sc->sc_plist[i] == 0)
+				continue;
+
+			ch = (i & 0xf0) >> 4;
+			tg = i & 0x0f;
+			if (ami_drv_inq(sc, ch, tg, 0, &inqbuf)) {
+				/* drive is gone, force rescan */
+				changes = 1;
+				break;
+			}
+		}
+		if (changes == 0) {
+			bcopy(&sc->sc_bi, bi, sizeof *bi);
+			return (0);
+		}
+	}
+
+	sc->sc_drvinscnt = einq.ain_drvinscnt;
 
 	p = malloc(sizeof *p, M_DEVBUF, M_NOWAIT);
 	if (!p)
@@ -1906,12 +1994,19 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 	for(i = 0; i < sc->sc_channels * 16; i++) {
 	    	if (sc->sc_plist[i])
 			continue; /* skip claimed drives */
-		if (!p->ada_pdrv[i].adp_size)
-			continue;
+
+		/*
+		 * hack to invalidate device type, needed for initiator id
+		 * on an unconnected channel.
+		 * XXX find out if we can determine this differently
+		 */
+		memset(&inqbuf, 0xff, sizeof inqbuf);
 
 		ch = (i & 0xf0) >> 4;
 		tg = i & 0x0f;
 		if (!ami_drv_inq(sc, ch, tg, 0, &inqbuf)) {
+			if ((inqbuf.device & SID_TYPE) != T_DIRECT)
+				continue;
 			bi->bi_novol++;
 			bi->bi_nodisk++;
 			sc->sc_plist[i] = 2;
@@ -1919,6 +2014,7 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 			sc->sc_plist[i] = 0;
 	}
 
+	bcopy(bi, &sc->sc_bi, sizeof sc->sc_bi);
 	error = 0;
 bail:
 	free(p, M_DEVBUF);
@@ -1973,6 +2069,7 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 	struct scsi_vpd_serial vpdbuf;
 	int i, ld = p->ada_nld, error = EINVAL;
 	u_int8_t ch, tg;
+	daddr64_t sz = 0;
 
 	for(i = 0; i < sc->sc_channels * 16; i++) {
 	    	/* skip claimed/unused drives */
@@ -2003,7 +2100,11 @@ ami_disk(struct ami_softc *sc, struct bioc_disk *bd,
 			strlcpy(bd->bd_serial, ser, sizeof(bd->bd_serial));
 		}
 
-		bd->bd_size = (u_quad_t)p->apd[i].adp_size * (u_quad_t)512;
+		error = ami_drv_readcap(sc, ch, tg, &sz);
+		if (error)
+			goto bail;
+
+		bd->bd_size = sz;
 		bd->bd_channel = ch;
 		bd->bd_target = tg;
 

@@ -27,7 +27,13 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "bio.h"
+
+#if NBIO > 0
+#include <dev/biovar.h>
 #include <sys/sensors.h>
+#endif
+
 
 struct ami_mem {
 	bus_dmamap_t		am_map;
@@ -145,7 +151,11 @@ struct ami_softc {
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 	struct ami_big_diskarray *sc_bd;
+
+	/* bio stuff */
+	struct bioc_inq		sc_bi;
 	char			sc_plist[AMI_BIG_MAX_PDRIVES];
+	u_int8_t		sc_drvinscnt;
 };
 
 int  ami_attach(struct ami_softc *sc);
