@@ -240,7 +240,7 @@ nfs_access(v)
 	struct vnode *vp = ap->a_vp;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, attrflag;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	u_int32_t mode, rmode;
@@ -613,7 +613,7 @@ nfs_setattrrpc(vp, vap, cred, procp)
 {
 	struct nfsv2_sattr *sp;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	u_int32_t *tl;
 	int error = 0, wccflag = NFSV3_WCCRATTR;
 	struct mbuf *mreq, *mrep, *md, *mb;
@@ -673,7 +673,7 @@ nfs_lookup(v)
 	u_int32_t *tl;
 	int32_t t1;
 	struct nfsmount *nmp;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	long len;
 	nfsfh_t *fhp;
@@ -950,7 +950,7 @@ nfs_readlinkrpc(vp, uiop, cred)
 {
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, len, attrflag;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	int v3 = NFS_ISV3(vp);
@@ -981,7 +981,7 @@ nfs_readrpc(vp, uiop)
 {
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	struct nfsmount *nmp;
 	int error = 0, len, retlen, tsiz, eof, attrflag;
@@ -1044,7 +1044,7 @@ nfs_writerpc(vp, uiop, iomode, must_commit)
 {
 	u_int32_t *tl;
 	int32_t t1, backup;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
 	int error = 0, len, tsiz, wccflag = NFSV3_WCCRATTR, rlen, commit;
@@ -1158,7 +1158,6 @@ nfs_mknodrpc(dvp, vpp, cnp, vap)
 	int32_t t1;
 	struct vnode *newvp = (struct vnode *)0;
 	struct nfsnode *np = NULL;
-	char *cp2;
 	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR, gotvp = 0;
 	struct mbuf *mreq, *mrep, *md, *mb;
@@ -1269,7 +1268,7 @@ nfs_create(v)
 	int32_t t1;
 	struct nfsnode *np = (struct nfsnode *)0;
 	struct vnode *newvp = (struct vnode *)0;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR, gotvp = 0, fmode = 0;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	int v3 = NFS_ISV3(dvp);
@@ -1451,7 +1450,7 @@ nfs_removerpc(dvp, name, namelen, cred, proc)
 {
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	int v3 = NFS_ISV3(dvp);
@@ -1569,7 +1568,7 @@ nfs_renamerpc(fdvp, fnameptr, fnamelen, tdvp, tnameptr, tnamelen, cred, proc)
 {
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, fwccflag = NFSV3_WCCRATTR, twccflag = NFSV3_WCCRATTR;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	int v3 = NFS_ISV3(fdvp);
@@ -1610,7 +1609,7 @@ nfs_link(v)
 	struct componentname *cnp = ap->a_cnp;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR, attrflag = 0;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	int v3;
@@ -1672,7 +1671,7 @@ nfs_symlink(v)
 	struct nfsv2_sattr *sp;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int slen, error = 0, wccflag = NFSV3_WCCRATTR, gotvp;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	struct vnode *newvp = (struct vnode *)0;
@@ -1732,7 +1731,7 @@ nfs_mkdir(v)
 	int len;
 	struct nfsnode *np = (struct nfsnode *)0;
 	struct vnode *newvp = (struct vnode *)0;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR;
 	int gotvp = 0;
 	struct mbuf *mreq, *mrep, *md, *mb;
@@ -1802,7 +1801,7 @@ nfs_rmdir(v)
 	struct componentname *cnp = ap->a_cnp;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	int v3 = NFS_ISV3(dvp);
@@ -2026,7 +2025,7 @@ nfs_readdirrpc(struct vnode *vp,
 	u_int32_t *tl;
 	caddr_t cp;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	nfsuint64 cookie;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
@@ -2210,7 +2209,7 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 	caddr_t cp;
 	int32_t t1;
 	struct vnode *newvp;
-	caddr_t dpos, cp2, dpossav1, dpossav2;
+	caddr_t dpos, dpossav1, dpossav2;
 	struct mbuf *mreq, *mrep, *md, *mb, *mdsav1, *mdsav2;
 	struct nameidata nami, *ndp = &nami;
 	struct componentname *cnp = &ndp->ni_cnd;
@@ -2499,7 +2498,7 @@ nfs_lookitup(dvp, name, len, cred, procp, npp)
 	int32_t t1;
 	struct vnode *newvp = (struct vnode *)0;
 	struct nfsnode *np, *dnp = VTONFS(dvp);
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, fhlen, attrflag;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	nfsfh_t *nfhp;
@@ -2566,7 +2565,7 @@ nfs_commit(vp, offset, cnt, procp)
 	u_int32_t *tl;
 	int32_t t1;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error = 0, wccflag = NFSV3_WCCRATTR;
 	struct mbuf *mreq, *mrep, *md, *mb;
 	
