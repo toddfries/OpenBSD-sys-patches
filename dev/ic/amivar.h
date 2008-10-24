@@ -148,6 +148,7 @@ struct ami_softc {
 	}			sc_hdr[AMI_BIG_MAX_LDRIVES];
 	struct ami_rawsoftc	*sc_rawsoftcs;
 
+#if NBIO > 0
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 	struct ami_big_diskarray *sc_bd;
@@ -155,6 +156,10 @@ struct ami_softc {
 	/* bio stuff */
 	struct bioc_inq		sc_bi;
 	char			sc_plist[AMI_BIG_MAX_PDRIVES];
+#endif
+	struct ami_ccb		*sc_mgmtccb;
+	int			sc_drained;
+	int			sc_drainio;
 	u_int8_t		sc_drvinscnt;
 };
 
