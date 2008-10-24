@@ -854,9 +854,7 @@ i2s_set_rate(sc, rate)
 	int MCLK;
 	int clksrc, mdiv, sdiv;
 	int mclk_fs;
-/*
 	int timo;
- */
 
 	/* sanify */
 	if (rate > 48000)
@@ -925,22 +923,20 @@ i2s_set_rate(sc, rate)
 	out32rb(sc->sc_reg + I2S_WORDSIZE, 0x02000200);
 
 	/* Clear CLKSTOPPEND */
-/*	out32rb(sc->sc_reg + I2S_INT, I2S_INT_CLKSTOPPEND);
+	out32rb(sc->sc_reg + I2S_INT, I2S_INT_CLKSTOPPEND);
 
 	keylargo_fcr_disable(I2SClockOffset, I2S0CLKEN);
- */
 
 	/* Wait until clock is stopped */
-/*	for (timo = 1000; timo > 0; timo--) {
+	for (timo = 50; timo > 0; timo--) {
 		if (in32rb(sc->sc_reg + I2S_INT) & I2S_INT_CLKSTOPPEND)
 			goto done;
-		delay(1);
+		delay(10);
 	}
 
 	printf("i2s_set_rate: timeout\n");
 
 done:
- */
 	DPRINTF(("I2SSetSerialFormatReg 0x%x -> 0x%x\n",
 	    in32rb(sc->sc_reg + I2S_FORMAT), reg));
 	out32rb(sc->sc_reg + I2S_FORMAT, reg);
