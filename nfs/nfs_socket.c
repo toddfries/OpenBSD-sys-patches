@@ -665,7 +665,7 @@ nfs_reply(myrep)
 	int32_t t1;
 	struct mbuf *mrep, *nam, *md;
 	u_int32_t rxid, *tl;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int error;
 
 	/*
@@ -826,7 +826,7 @@ nfs_request(vp, mrest, procnum, procp, cred, mrp, mdp, dposp)
 	struct nfsmount *nmp;
 	struct mbuf *md;
 	time_t waituntil;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	int t1, s, error = 0, mrest_len;
 	int trylater_delay;
 
@@ -1468,7 +1468,7 @@ nfs_getreq(nd, nfsd, has_header)
 	int len, i;
 	u_int32_t *tl;
 	int32_t t1;
-	caddr_t dpos, cp2;
+	caddr_t dpos;
 	u_int32_t nfsvers, auth_type;
 	int error = 0;
 	struct mbuf *mrep, *md;

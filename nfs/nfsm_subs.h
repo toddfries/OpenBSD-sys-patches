@@ -68,17 +68,11 @@
  */
 
 #define	nfsm_dissect(a, c, s) \
-		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
-		if (t1 >= (s)) { \
-			(a) = (c)(dpos); \
-			dpos += (s); \
-		} else if ((t1 = nfsm_disct(&md, &dpos, (s), t1, &cp2)) != 0){ \
+		if (((a) = nfsm_disct(&md, (s), &t1, &dpos)) == NULL) { \
 			error = t1; \
 			m_freem(mrep); \
 			goto nfsmout; \
-		} else { \
-			(a) = (c)cp2; \
-		} }
+		}
 
 #define nfsm_fhtom(v, v3) \
 	      { if (v3) { \
@@ -270,9 +264,7 @@
 
 #define	nfsm_adv(s) \
 		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
-		if (t1 >= (s)) { \
-			dpos += (s); \
-		} else if ((t1 = nfs_adv(&md, &dpos, (s), t1)) != 0) { \
+		if ((t1 = nfs_adv(&md, &dpos, (s), t1)) != 0) { \
 			error = t1; \
 			m_freem(mrep); \
 			goto nfsmout; \

@@ -54,6 +54,7 @@
 #include <sys/stat.h>
 #include <sys/pool.h>
 #include <sys/time.h>
+#include <sys/hash.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -650,74 +651,48 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
  * copies mbuf chain to the uio scatter/gather list
  */
 int
-nfsm_mbuftouio(mrep, uiop, siz, dpos)
-	struct mbuf **mrep;
-	struct uio *uiop;
-	int siz;
-	caddr_t *dpos;
+nfsm_mbuftouio(struct mbuf **mrep, struct uio *uiop, int siz, caddr_t *dposp)
 {
-	char *mbufcp, *uiocp;
-	int xfer, left, len;
 	struct mbuf *mp;
-	long uiosiz, rem;
-	int error = 0;
+	int xfer, len, pad, error = 0;
+	caddr_t dpos;
+	off_t saved_off;	/* XXX -- if we don't save this here,
+				 *        vnode ops explode; please fix me */
+#ifdef DIAGNOSTIC
+	if (uiop->uio_rw != UIO_READ)
+		panic("nfsm_mbuftouio: uio_rw != UIO_READ");
+	if (uiop->uio_segflg != UIO_SYSSPACE)
+		panic("nfsm_mbuftouio: uio_segflg != UIO_SYSSPACE");
+#endif
 
 	mp = *mrep;
-	mbufcp = *dpos;
-	len = mtod(mp, caddr_t)+mp->m_len-mbufcp;
-	rem = nfsm_padlen(siz);
+	dpos = *dposp;
+	pad = nfsm_padlen(siz);
+	saved_off = uiop->uio_offset;
+
 	while (siz > 0) {
-		if (uiop->uio_iovcnt <= 0 || uiop->uio_iov == NULL)
-			return (EFBIG);
-		left = uiop->uio_iov->iov_len;
-		uiocp = uiop->uio_iov->iov_base;
-		if (left > siz)
-			left = siz;
-		uiosiz = left;
-		while (left > 0) {
-			while (len == 0) {
+		len = mtod(mp, caddr_t) + mp->m_len - dpos;	/* XXX */
+		xfer = min(len, siz);
+		uiomove(dpos, xfer, uiop);
+		siz -= xfer;
+		if (siz > 0) {
+			mp->m_len -= xfer;
+			mp->m_data += xfer;
+			if (mp->m_len == 0) {
 				mp = mp->m_next;
+				dpos = mtod(mp, caddr_t);
 				if (mp == NULL)
 					return (EBADRPC);
-				mbufcp = mtod(mp, caddr_t);
-				len = mp->m_len;
 			}
-			xfer = (left > len) ? len : left;
-#ifdef notdef
-			/* Not Yet.. */
-			if (uiop->uio_iov->iov_op != NULL)
-				(*(uiop->uio_iov->iov_op))
-				(mbufcp, uiocp, xfer);
-			else
-#endif
-			if (uiop->uio_segflg == UIO_SYSSPACE)
-				bcopy(mbufcp, uiocp, xfer);
-			else
-				copyout(mbufcp, uiocp, xfer);
-			left -= xfer;
-			len -= xfer;
-			mbufcp += xfer;
-			uiocp += xfer;
-			uiop->uio_offset += xfer;
-			uiop->uio_resid -= xfer;
 		}
-		if (uiop->uio_iov->iov_len <= siz) {
-			uiop->uio_iovcnt--;
-			uiop->uio_iov++;
-		} else {
-			(char *)uiop->uio_iov->iov_base += uiosiz;
-			uiop->uio_iov->iov_len -= uiosiz;
-		}
-		siz -= uiosiz;
 	}
-	*dpos = mbufcp;
 	*mrep = mp;
-	if (rem > 0) {
-		if (len < rem)
-			error = nfs_adv(mrep, dpos, rem, len);
-		else
-			*dpos += rem;
+	if (pad > 0) {
+		error = nfs_adv(mrep, &dpos, pad, len);
 	}
+	uiop->uio_offset = saved_off;
+	*dposp = dpos;
+
 	return (error);
 }
 
@@ -815,69 +790,62 @@ nfsm_strtombuf(struct mbuf **mp, void *str, size_t len)
 }
 
 /*
- * Help break down an mbuf chain by setting the first siz bytes contiguous
- * pointed to by returned val.
- * This is used by the macros nfsm_dissect and nfsm_dissecton for tough
- * cases. (The macros use the vars. dpos and dpos2)
+ * Ensure siz bytes in the mbuf chain are contiguous
  */
-int
-nfsm_disct(mdp, dposp, siz, left, cp2)
-	struct mbuf **mdp;
-	caddr_t *dposp;
-	int siz;
-	int left;
-	caddr_t *cp2;
+void *
+nfsm_disct(struct mbuf **mdp, int siz, int *err, caddr_t *dposp)
 {
 	struct mbuf *mp, *mp2;
-	int siz2, xfer;
-	caddr_t p;
+	int xfer, left;
+	caddr_t buf;
 
+	if (siz > MHLEN)
+		panic("nfsm_disct: siz too large");
+
+	*err = 0;
 	mp = *mdp;
-	while (left == 0) {
-		*mdp = mp = mp->m_next;
-		if (mp == NULL)
-			return (EBADRPC);
-		left = mp->m_len;
-		*dposp = mtod(mp, caddr_t);
-	}
-	if (left >= siz) {
-		*cp2 = *dposp;
+	left = mtod(mp, caddr_t) + mp->m_len - *dposp;	/* XXX */
+
+	/*
+	 * There are two cases that must be considered:
+	 * 1) the data is contiguous in the current mbuf
+	 * 2) the data spans two mbufs
+	 *
+	 * case 1
+	 */
+	if (siz <= left) {
+		buf = *dposp;				/* XXX */
 		*dposp += siz;
-	} else if (mp->m_next == NULL) {
-		return (EBADRPC);
-	} else if (siz > MHLEN) {
-		panic("nfs S too big");
-	} else {
-		MGET(mp2, M_WAIT, MT_DATA);
-		mp2->m_next = mp->m_next;
-		mp->m_next = mp2;
-		mp->m_len -= left;
-		mp = mp2;
-		*cp2 = p = mtod(mp, caddr_t);
-		bcopy(*dposp, p, left);		/* Copy what was left */
-		siz2 = siz-left;
-		p += left;
-		mp2 = mp->m_next;
-		/* Loop around copying up the siz2 bytes */
-		while (siz2 > 0) {
-			if (mp2 == NULL)
-				return (EBADRPC);
-			xfer = (siz2 > mp2->m_len) ? mp2->m_len : siz2;
-			if (xfer > 0) {
-				bcopy(mtod(mp2, caddr_t), p, xfer);
-				mp2->m_data += xfer;
-				mp2->m_len -= xfer;
-				p += xfer;
-				siz2 -= xfer;
-			}
-			if (siz2 > 0)
-				mp2 = mp2->m_next;
-		}
-		mp->m_len = siz;
-		*mdp = mp2;
-		*dposp = mtod(mp2, caddr_t);
+		mp->m_data += siz;
+		mp->m_len -= siz;
+
+		return (buf);
 	}
-	return (0);
+
+	/* spanning mbufs requires a second mbuf */
+	if (mp->m_next == NULL) {
+		*err = EBADRPC;
+		return (NULL);
+	}
+
+	/* case 2 */
+	MGET(mp2, MT_DATA, M_WAIT);
+	M_ALIGN(mp2, siz);
+	buf = mtod(mp2, void *);
+	xfer = *dposp - mtod(mp, caddr_t);		/* XXX */
+	bcopy(*dposp, buf, xfer);			/* XXX */
+	mp->m_data += xfer;
+	mp->m_len -= xfer;
+	mp->m_len += xfer;
+	siz -= xfer;
+	bcopy(mtod(mp->m_next, caddr_t), buf + xfer, siz);
+	mp->m_len += siz;
+	mp2->m_next = mp->m_next;
+	mp->m_next = mp2;
+	*dposp = buf + siz;
+	*mdp = mp2;
+
+	return (buf);
 }
 
 /*
@@ -891,19 +859,25 @@ nfs_adv(mdp, dposp, offs, left)
 	int left;
 {
 	struct mbuf *m;
+	caddr_t dpos;
 	int s;
 
 	m = *mdp;
 	s = left;
+	dpos = *dposp;
+
 	while (s < offs) {
 		offs -= s;
 		m = m->m_next;
 		if (m == NULL)
 			return (EBADRPC);
 		s = m->m_len;
+		dpos = mtod(m, caddr_t);
 	}
+
 	*mdp = m;
-	*dposp = mtod(m, caddr_t)+offs;
+	*dposp = dpos + offs;
+
 	return (0);
 }
 
@@ -985,8 +959,6 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	struct nfs_fattr *fp;
 	extern int (**spec_nfsv2nodeop_p)(void *);
 	struct nfsnode *np;
-	int32_t t1;
-	caddr_t cp2;
 	int error = 0;
 	int32_t rdev;
 	struct mbuf *md;
@@ -999,11 +971,9 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	gid_t gid;
 
 	md = *mdp;
-	t1 = (mtod(md, caddr_t) + md->m_len) - *dposp;
-	error = nfsm_disct(mdp, dposp, NFSX_FATTR(v3), t1, &cp2);
+	fp = nfsm_disct(mdp, NFSX_FATTR(v3), &error, dposp);
 	if (error)
 		return (error);
-	fp = (struct nfs_fattr *)cp2;
 	if (v3) {
 		vtyp = nfsv3tov_type(fp->fa_type);
 		vmode = fxdr_unsigned(mode_t, fp->fa_mode);
@@ -1236,9 +1206,10 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	struct vnode **retdirp;
 	struct proc *p;
 {
-	int i, rem;
+	struct uio uio;
+	struct iovec iov;
+	int rem;
 	struct mbuf *md;
-	char *fromcp, *tocp;
 	struct vnode *dp;
 	int error, rdonly;
 	struct componentname *cnp = &ndp->ni_cnd;
@@ -1249,41 +1220,38 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	 * Copy the name from the mbuf list to ndp->ni_pnbuf
 	 * and set the various ndp fields appropriately.
 	 */
-	fromcp = *dposp;
-	tocp = cnp->cn_pnbuf;
 	md = *mdp;
-	rem = mtod(md, caddr_t) + md->m_len - fromcp;
-	cnp->cn_hash = 0;
-	for (i = 0; i < len; i++) {
-		while (rem == 0) {
-			md = md->m_next;
-			if (md == NULL) {
-				error = EBADRPC;
-				goto out;
-			}
-			fromcp = mtod(md, caddr_t);
-			rem = md->m_len;
-		}
-		if (*fromcp == '\0' || *fromcp == '/') {
-			error = EACCES;
-			goto out;
-		}
-		cnp->cn_hash += (u_char)*fromcp;
-		*tocp++ = *fromcp++;
-		rem--;
+
+	iov.iov_base = cnp->cn_pnbuf;
+	iov.iov_len = len;
+
+	uio.uio_iov = &iov;
+	uio.uio_iovcnt = 1;
+	uio.uio_resid = len;
+	uio.uio_segflg = UIO_SYSSPACE;
+	uio.uio_rw = UIO_READ;
+	uio.uio_procp = NULL;
+
+	error = nfsm_mbuftouio(&md, &uio, len, dposp);
+	if (error)
+		goto out;
+
+	cnp->cn_pnbuf[len + 1] = '\0';	/* XXX -- bounds checking */
+	if (strlen(cnp->cn_pnbuf) < len ||
+	    strchr(cnp->cn_pnbuf, '/') != NULL) {
+		error = EACCES;
+		goto out;
 	}
-	*tocp = '\0';
+	cnp->cn_hash = hash32_str(cnp->cn_pnbuf, 0);
+	cnp->cn_nameptr = cnp->cn_pnbuf;
+	ndp->ni_pathlen = len;
+
 	*mdp = md;
-	*dposp = fromcp;
 	len = nfsm_padlen(len);
 	if (len > 0) {
-		if (rem >= len)
-			*dposp += len;
-		else if ((error = nfs_adv(mdp, dposp, len, rem)) != 0)
+		if ((error = nfs_adv(mdp, dposp, len, rem)) != 0)
 			goto out;
 	}
-	ndp->ni_pathlen = tocp - cnp->cn_pnbuf;
-	cnp->cn_nameptr = cnp->cn_pnbuf;
 	/*
 	 * Extract and set starting directory.
 	 */
