@@ -77,9 +77,9 @@
 #define	AMI_D_DMA	0x0008
 #define	AMI_D_IOCTL	0x0010
 int ami_debug = 0
-	| AMI_D_CMD
-	| AMI_D_INTR
-	| AMI_D_MISC
+/*	| AMI_D_CMD */
+/*	| AMI_D_INTR */
+/*	| AMI_D_MISC */
 /*	| AMI_D_DMA */
 /*	| AMI_D_IOCTL */
 	;
@@ -113,6 +113,8 @@ struct scsi_device ami_raw_dev = {
 	NULL, NULL, NULL, NULL
 };
 
+void		ami_remove_runq(struct ami_ccb *);
+void		ami_insert_runq(struct ami_ccb *);
 struct ami_ccb	*ami_get_ccb(struct ami_softc *);
 void		ami_put_ccb(struct ami_ccb *);
 
@@ -140,6 +142,7 @@ void		ami_done_flush(struct ami_softc *, struct ami_ccb *);
 void		ami_done_sysflush(struct ami_softc *, struct ami_ccb *);
 void		ami_stimeout(void *);
 
+void		ami_done_dummy(struct ami_softc *, struct ami_ccb *);
 void		ami_done_ioctl(struct ami_softc *, struct ami_ccb *);
 void		ami_done_init(struct ami_softc *, struct ami_ccb *);
 
@@ -176,10 +179,33 @@ void		ami_refresh_sensors(void *);
 
 #define DEVNAME(_s)	((_s)->sc_dev.dv_xname)
 
+void
+ami_remove_runq(struct ami_ccb *ccb)
+{
+	splassert(IPL_BIO);
+
+	TAILQ_REMOVE(&ccb->ccb_sc->sc_ccb_runq, ccb, ccb_link);
+	if (TAILQ_EMPTY(&ccb->ccb_sc->sc_ccb_runq)) {
+		ccb->ccb_sc->sc_drained = 1;
+		wakeup(ccb->ccb_sc);
+	}
+}
+
+void
+ami_insert_runq(struct ami_ccb *ccb)
+{
+	splassert(IPL_BIO);
+
+	ccb->ccb_sc->sc_drained = 0;
+	TAILQ_INSERT_TAIL(&ccb->ccb_sc->sc_ccb_runq, ccb, ccb_link);
+}
+
 struct ami_ccb *
 ami_get_ccb(struct ami_softc *sc)
 {
 	struct ami_ccb *ccb;
+
+	splassert(IPL_BIO);
 
 	ccb = TAILQ_FIRST(&sc->sc_ccb_freeq);
 	if (ccb) {
@@ -194,6 +220,8 @@ void
 ami_put_ccb(struct ami_ccb *ccb)
 {
 	struct ami_softc *sc = ccb->ccb_sc;
+
+	splassert(IPL_BIO);
 
 	ccb->ccb_state = AMI_CCB_FREE;
 	ccb->ccb_xs = NULL;
@@ -344,7 +372,12 @@ ami_alloc_ccbs(struct ami_softc *sc, int nccbs)
 		ccb->ccb_sglistpa = htole32(AMIMEM_DVA(sc->sc_ccbmem_am) +
 		    ccb->ccb_offset + sizeof(struct ami_passthrough));
 
-		ami_put_ccb(ccb);
+		/* override last command for management */
+		if (i == nccbs - 1) {
+			ccb->ccb_cmd.acc_id = 0xfe;
+			sc->sc_mgmtccb = ccb;
+		} else
+			ami_put_ccb(ccb);
 	}
 
 	return (0);
@@ -498,10 +531,11 @@ ami_attach(struct ami_softc *sc)
 
 	ami_freemem(sc, am);
 
-	if (ami_alloc_ccbs(sc, AMI_MAXCMDS) != 0) {
+	if (ami_alloc_ccbs(sc, AMI_MAXCMDS + 1) != 0) {
 		/* error already printed */
 		goto free_mbox;
 	}
+	sc->sc_drained = 1;
 
 	/* hack for hp netraid version encoding */
 	if ('A' <= sc->sc_fwver[2] && sc->sc_fwver[2] <= 'Z' &&
@@ -706,8 +740,10 @@ ami_quartz_poll(struct ami_softc *sc, struct ami_iocmd *cmd)
 	u_int32_t i;
 	u_int8_t status;
 
+	splassert(IPL_BIO);
+
 	if (sc->sc_dis_poll)
-		return (1); /* fail */
+		return (-1); /* fail */
 
 	i = 0;
 	while (sc->sc_mbox->acc_busy && (i < AMI_MAX_BUSYWAIT)) {
@@ -716,7 +752,7 @@ ami_quartz_poll(struct ami_softc *sc, struct ami_iocmd *cmd)
 	}
 	if (sc->sc_mbox->acc_busy) {
 		AMI_DPRINTF(AMI_D_CMD, ("mbox_busy "));
-		return (EBUSY);
+		return (-1);
 	}
 
 	memcpy((struct ami_iocmd *)sc->sc_mbox, cmd, 16);
@@ -727,13 +763,13 @@ ami_quartz_poll(struct ami_softc *sc, struct ami_iocmd *cmd)
 	sc->sc_mbox->acc_busy = 1;
 	sc->sc_mbox->acc_poll = 0;
 	sc->sc_mbox->acc_ack = 0;
-
 	sc->sc_mbox->acc_nstat = 0xff;
 	sc->sc_mbox->acc_status = 0xff;
 
 	/* send command to firmware */
 	ami_write(sc, AMI_QIDB, sc->sc_mbox_pa | htole32(AMI_QIDB_EXEC));
 
+	i = 0;
 	while ((sc->sc_mbox->acc_nstat == 0xff) && (i < AMI_MAX_POLLWAIT)) {
 		delay(1);
 		i++;
@@ -742,24 +778,11 @@ ami_quartz_poll(struct ami_softc *sc, struct ami_iocmd *cmd)
 		printf("%s: command not accepted, polling disabled\n",
 		    DEVNAME(sc));
 		sc->sc_dis_poll = 1;
-		return (1);
+		return (-1);
 	}
-
-	sc->sc_mbox->acc_nstat = 0xff;
-
-	while ((sc->sc_mbox->acc_status == 0xff) && (i < AMI_MAX_POLLWAIT)) {
-		delay(1);
-		i++;
-	}
-	if (i >= AMI_MAX_POLLWAIT) {
-		printf("%s: bad status, polling disabled\n", DEVNAME(sc));
-		sc->sc_dis_poll = 1;
-		return (1);
-	}
-	status = sc->sc_mbox->acc_status;
-	sc->sc_mbox->acc_status = 0xff;
 
 	/* poll firmware */
+	i = 0;
 	while ((sc->sc_mbox->acc_poll != 0x77) && (i < AMI_MAX_POLLWAIT)) {
 		delay(1);
 		i++;
@@ -768,15 +791,13 @@ ami_quartz_poll(struct ami_softc *sc, struct ami_iocmd *cmd)
 		printf("%s: firmware didn't reply, polling disabled\n",
 		    DEVNAME(sc));
 		sc->sc_dis_poll = 1;
-		return 1;
+		return (-1);
 	}
-
-	sc->sc_mbox->acc_poll = 0;
-	sc->sc_mbox->acc_ack = 0x77;
 
 	/* ack */
 	ami_write(sc, AMI_QIDB, sc->sc_mbox_pa | htole32(AMI_QIDB_ACK));
 
+	i = 0;
 	while((ami_read(sc, AMI_QIDB) & AMI_QIDB_ACK) &&
 	    (i < AMI_MAX_POLLWAIT)) {
 		delay(1);
@@ -786,8 +807,14 @@ ami_quartz_poll(struct ami_softc *sc, struct ami_iocmd *cmd)
 		printf("%s: firmware didn't ack the ack, polling disabled\n",
 		    DEVNAME(sc));
 		sc->sc_dis_poll = 1;
-		return (1);
+		return (-1);
 	}
+
+	sc->sc_mbox->acc_poll = 0;
+	sc->sc_mbox->acc_ack = 0x77;
+	status = sc->sc_mbox->acc_status;
+	sc->sc_mbox->acc_nstat = 0xff;
+	sc->sc_mbox->acc_status = 0xff;
 
 	for (i = 0; i < AMI_MAXSTATACK; i++)
 		sc->sc_mbox->acc_cmplidl[i] = 0xff;
@@ -866,8 +893,10 @@ ami_schwartz_poll(struct ami_softc *sc, struct ami_iocmd *mbox)
 	u_int32_t i;
 	int rv;
 
+	splassert(IPL_BIO);
+
 	if (sc->sc_dis_poll)
-		return (1); /* fail */
+		return (-1); /* fail */
 
 	for (i = 0; i < AMI_MAX_POLLWAIT; i++) {
 		if (!(bus_space_read_1(sc->sc_iot, sc->sc_ioh, AMI_SMBSTAT) &
@@ -877,7 +906,7 @@ ami_schwartz_poll(struct ami_softc *sc, struct ami_iocmd *mbox)
 	}
 	if (i >= AMI_MAX_POLLWAIT) {
 		AMI_DPRINTF(AMI_D_CMD, ("mbox_busy "));
-		return (EBUSY);
+		return (-1);
 	}
 
 	memcpy((struct ami_iocmd *)sc->sc_mbox, mbox, 16);
@@ -901,7 +930,7 @@ ami_schwartz_poll(struct ami_softc *sc, struct ami_iocmd *mbox)
 		printf("%s: command not accepted, polling disabled\n",
 		    DEVNAME(sc));
 		sc->sc_dis_poll = 1;
-		return (1); /* fail */
+		return (-1);
 	}
 
 	/* wait for interrupt bit */
@@ -915,7 +944,7 @@ ami_schwartz_poll(struct ami_softc *sc, struct ami_iocmd *mbox)
 		printf("%s: interrupt didn't arrive, polling disabled\n",
 		    DEVNAME(sc));
 		sc->sc_dis_poll = 1;
-		return (1); /* fail */
+		return (-1);
 	}
 
 	/* write ststus back to firmware */
@@ -942,7 +971,8 @@ ami_start_xs(struct ami_softc *sc, struct ami_ccb *ccb, struct scsi_xfer *xs)
 		ami_complete(sc, ccb, xs->timeout);
 		return (COMPLETE);
 	}
- 
+
+	/* XXX way wrong, this timeout needs to be set later */
 	timeout_add(&xs->stimeout, 61 * hz);
 	ami_start(sc, ccb);
 
@@ -977,6 +1007,11 @@ ami_runqueue(struct ami_softc *sc)
 {
 	struct ami_ccb *ccb;
 
+	splassert(IPL_BIO);
+
+	if (sc->sc_drainio)
+		return;
+
 	while ((ccb = TAILQ_FIRST(&sc->sc_ccb_preq)) != NULL) {
 		if (sc->sc_exec(sc, &ccb->ccb_cmd) != 0) {
 			/* this is now raceable too with other incomming io */
@@ -986,7 +1021,7 @@ ami_runqueue(struct ami_softc *sc)
 
 		TAILQ_REMOVE(&sc->sc_ccb_preq, ccb, ccb_link);
 		ccb->ccb_state = AMI_CCB_QUEUED;
-		TAILQ_INSERT_TAIL(&sc->sc_ccb_runq, ccb, ccb_link);
+		ami_insert_runq(ccb);
 	}
 }
 
@@ -996,14 +1031,9 @@ ami_poll(struct ami_softc *sc, struct ami_ccb *ccb)
 	int error;
 	int s;
 
-	/* XXX this is broken, shall drain IO or consider this
-	 * a normal completion which can complete async and
-	 * polled commands until the polled commands completes
-	 */
-
 	s = splbio();
 	error = sc->sc_poll(sc, &ccb->ccb_cmd);
-	if (error)
+	if (error == -1)
 		ccb->ccb_flags |= AMI_CCB_F_ERR;
 
 	ccb->ccb_done(sc, ccb);
@@ -1017,7 +1047,7 @@ ami_complete(struct ami_softc *sc, struct ami_ccb *ccb, int timeout)
 {
 	struct ami_iocmd mbox;
 	int i = 0, j, done = 0;
-	int s;
+	int s, ready;
 
 	s = splbio();
 
@@ -1028,21 +1058,27 @@ ami_complete(struct ami_softc *sc, struct ami_ccb *ccb, int timeout)
 	while (i < AMI_MAX_BUSYWAIT) {
 		if (sc->sc_exec(sc, &ccb->ccb_cmd) == 0) {
 			ccb->ccb_state = AMI_CCB_QUEUED;
-			TAILQ_INSERT_TAIL(&sc->sc_ccb_runq, ccb, ccb_link);
+			ami_insert_runq(ccb);
 			break;
 		}
-		
 		DELAY(1000);
 		i++;
 	}
 	if (ccb->ccb_state != AMI_CCB_QUEUED)
 		goto err;
 
+	/*
+	 * Override timeout for PERC3.  The first command triggers a chip
+	 * reset on the QL12160 chip which causes the firmware to reload.
+	 * 30000 is slightly less than double of how long it takes for the
+	 * firmware to be up again.  After the first two commands the
+	 * timeouts are as expected.
+	 */
 	i = 0;
-	while (i < timeout) {
+	while (i < 30000 /* timeout */) {
 		if (sc->sc_done(sc, &mbox) != 0) {
 			for (j = 0; j < mbox.acc_nstat; j++) {
-				int ready = mbox.acc_cmplidl[j];
+				ready = mbox.acc_cmplidl[j];
 				ami_done(sc, ready, mbox.acc_status);
 				if (ready == ccb->ccb_cmd.acc_id)
 					done = 1;
@@ -1057,7 +1093,7 @@ ami_complete(struct ami_softc *sc, struct ami_ccb *ccb, int timeout)
 	if (!done) {
 		printf("%s: timeout ccb %d\n", DEVNAME(sc),
 		    ccb->ccb_cmd.acc_id);
-		TAILQ_REMOVE(&sc->sc_ccb_runq, ccb, ccb_link);
+		ami_remove_runq(ccb);
 		goto err;
 	}
 
@@ -1124,7 +1160,7 @@ ami_done(struct ami_softc *sc, int idx, int status)
 
 	ccb->ccb_state = AMI_CCB_READY;
 	ccb->ccb_status = status;
-	TAILQ_REMOVE(&sc->sc_ccb_runq, ccb, ccb_link);
+	ami_remove_runq(ccb);
 
 	ccb->ccb_done(sc, ccb);
 
@@ -1239,6 +1275,11 @@ ami_done_sysflush(struct ami_softc *sc, struct ami_ccb *ccb)
 
 	ami_put_ccb(ccb);
 	scsi_done(xs);
+}
+
+void
+ami_done_dummy(struct ami_softc *sc, struct ami_ccb *ccb)
+{
 }
 
 void
@@ -1622,7 +1663,9 @@ ami_intr(void *v)
 {
 	struct ami_softc *sc = v;
 	struct ami_iocmd mbox;
-	int i, rv = 0;
+	int i, rv = 0, ready;
+
+	splassert(IPL_BIO);
 
 	if (TAILQ_EMPTY(&sc->sc_ccb_runq))
 		return (0);
@@ -1632,10 +1675,8 @@ ami_intr(void *v)
 	while ((sc->sc_done)(sc, &mbox)) {
 		AMI_DPRINTF(AMI_D_CMD, ("got#%d ", mbox.acc_nstat));
 		for (i = 0; i < mbox.acc_nstat; i++ ) {
-			int ready = mbox.acc_cmplidl[i];
-
+			ready = mbox.acc_cmplidl[i];
 			AMI_DPRINTF(AMI_D_CMD, ("ready=%d ", ready));
-
 			if (!ami_done(sc, ready, mbox.acc_status))
 				rv |= 1;
 		}
@@ -1751,7 +1792,7 @@ ami_drv_pt(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, u_int8_t *cmd,
 	ami_start(sc, ccb);
 
 	while (ccb->ccb_state != AMI_CCB_READY)
-		tsleep(ccb, PRIBIO, "ami_drv_inq", 0);
+		tsleep(ccb, PRIBIO, "ami_drv_pt", 0);
 
 	bus_dmamap_sync(sc->sc_dmat, ccb->ccb_dmamap, 0,
 	    ccb->ccb_dmamap->dm_mapsize, BUS_DMASYNC_POSTREAD);
@@ -1837,15 +1878,12 @@ ami_drv_readcap(struct ami_softc *sc, u_int8_t ch, u_int8_t tg, daddr64_t *sz)
 
 		noblk = _8btol(rcd16.addr);
 		blksz = _4btol(rcd16.length);
-		if (blksz == 0)
-			blksz = 512;
-		*sz = noblk * blksz;
-	} else {
+	} else
 		blksz = _4btol(rcd.length);
-		if (blksz == 0)
-			blksz = 512;
-		*sz = noblk * blksz;
-	}
+
+	if (blksz == 0)
+		blksz = 512;
+	*sz = noblk * blksz;
 
 	return (error);
 }
@@ -1858,17 +1896,22 @@ ami_mgmt(struct ami_softc *sc, u_int8_t opcode, u_int8_t par1, u_int8_t par2,
 	struct ami_iocmd *cmd;
 	struct ami_mem *am = NULL;
 	char *idata = NULL;
-	int error = 0;
-	int s;
+	int s, error = 0;
 
 	rw_enter_write(&sc->sc_lock);
 
-	s = splbio();
-	ccb = ami_get_ccb(sc);
-	splx(s);
-	if (ccb == NULL) {
-		error = ENOMEM;
-		goto err;
+	if (opcode != AMI_CHSTATE) {
+		s = splbio();
+		ccb = ami_get_ccb(sc);
+		splx(s);
+		if (ccb == NULL) {
+			error = ENOMEM;
+			goto err;
+		}
+		ccb->ccb_done = ami_done_ioctl;
+	} else {
+		ccb = sc->sc_mgmtccb;
+		ccb->ccb_done = ami_done_dummy;
 	}
 
 	if (size) {
@@ -1879,9 +1922,7 @@ ami_mgmt(struct ami_softc *sc, u_int8_t opcode, u_int8_t par1, u_int8_t par2,
 		idata = AMIMEM_KVA(am);
 	}
 
-	ccb->ccb_done = ami_done_ioctl;
 	cmd = &ccb->ccb_cmd;
-
 	cmd->acc_cmd = opcode;
 
 	/*
@@ -1901,9 +1942,28 @@ ami_mgmt(struct ami_softc *sc, u_int8_t opcode, u_int8_t par1, u_int8_t par2,
 
 	cmd->acc_io.aio_data = am ? htole32(AMIMEM_DVA(am)) : 0;
 
-	ami_start(sc, ccb);
-	while (ccb->ccb_state != AMI_CCB_READY)
-		tsleep(ccb, PRIBIO,"ami_mgmt", 0);
+	if (opcode != AMI_CHSTATE) {
+		ami_start(sc, ccb);
+		while (ccb->ccb_state != AMI_CCB_READY)
+			tsleep(ccb, PRIBIO,"ami_mgmt", 0);
+	} else {
+		/* change state must be run with id 0xfe and MUST be polled */
+		sc->sc_drainio = 1;
+		while (sc->sc_drained != 1)
+			if (tsleep(sc, PRIBIO, "ami_mgmt_drain", hz * 60) ==
+			    EWOULDBLOCK) {
+				printf("%s: drain io timeout\n");
+				ccb->ccb_flags |= AMI_CCB_F_ERR;
+				goto restartio;
+			}
+		ami_poll(sc, ccb);
+restartio:
+		/* restart io */
+		s = splbio();
+		sc->sc_drainio = 0;
+		ami_runqueue(sc);
+		splx(s);
+	}
 
 	if (ccb->ccb_flags & AMI_CCB_F_ERR)
 		error = EIO;
@@ -1912,11 +1972,16 @@ ami_mgmt(struct ami_softc *sc, u_int8_t opcode, u_int8_t par1, u_int8_t par2,
 
 	if (am)
 		ami_freemem(sc, am);
-
 memerr:
-	s = splbio();
-	ami_put_ccb(ccb);
-	splx(s);
+	if (opcode != AMI_CHSTATE) {
+		s = splbio();
+		ami_put_ccb(ccb);
+		splx(s);
+	} else {
+		ccb->ccb_flags = 0;
+		ccb->ccb_state = AMI_CCB_FREE;
+		ccb->ccb_done = NULL;
+	}
 
 err:
 	rw_exit_write(&sc->sc_lock);
