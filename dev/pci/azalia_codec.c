@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia_codec.c,v 1.49 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: azalia_codec.c,v 1.51 2008/10/16 19:16:58 jakemsr Exp $	*/
 /*	$NetBSD: azalia_codec.c,v 1.8 2006/05/10 11:17:27 kent Exp $	*/
 
 /*-
@@ -68,7 +68,7 @@ int	azalia_generic_mixer_delete(codec_t *);
 int	azalia_generic_mixer_ensure_capacity(codec_t *, size_t);
 int	azalia_generic_mixer_get(const codec_t *, nid_t, int, mixer_ctrl_t *);
 int	azalia_generic_mixer_set(codec_t *, nid_t, int, const mixer_ctrl_t *);
-int 	azalia_generic_mixer_pinctrl(codec_t *, nid_t, uint32_t);
+int	azalia_generic_mixer_pinctrl(codec_t *, nid_t, uint32_t);
 u_char	azalia_generic_mixer_from_device_value
 	(const codec_t *, nid_t, int, uint32_t );
 uint32_t azalia_generic_mixer_to_device_value
@@ -428,8 +428,17 @@ azalia_generic_mixer_init(codec_t *this)
 
 		w = &this->w[i];
 
+		/* skip unconnected pins */
+		if (w->type == COP_AWTYPE_PIN_COMPLEX) {
+			uint8_t conn =
+			    (w->d.pin.config & CORB_CD_PORT_MASK) >> 30;
+			if (conn == 1)	/* no physical connection */
+				continue;
+		}
+
 		/* selector */
-		if (w->type != COP_AWTYPE_AUDIO_MIXER && w->nconnections >= 2) {
+		if (w->type != COP_AWTYPE_AUDIO_MIXER &&
+		    w->type != COP_AWTYPE_POWER && w->nconnections >= 2) {
 			MIXER_REG_PROLOG;
 			snprintf(d->label.name, sizeof(d->label.name),
 			    "%s.source", w->name);
@@ -442,7 +451,14 @@ azalia_generic_mixer_init(codec_t *this)
 				d->mixer_class = AZ_CLASS_OUTPUT;
 			m->target = MI_TARGET_CONNLIST;
 			for (j = 0, k = 0; j < w->nconnections && k < 32; j++) {
+				uint8_t conn;
+
 				if (!VALID_WIDGET_NID(w->connections[j], this))
+					continue;
+				/* skip unconnected pins */
+				PIN_STATUS(&this->w[w->connections[j]],
+				    conn);
+				if (conn == 1)
 					continue;
 				d->un.e.member[k].ord = j;
 				strlcpy(d->un.e.member[k].label.name,
@@ -531,9 +547,16 @@ azalia_generic_mixer_init(codec_t *this)
 				    AudioNon, MAX_AUDIO_DEV_LEN);
 				this->nmixers++;
 			} else {
+				uint8_t conn;
+
 				for (j = 0; j < w->nconnections; j++) {
 					MIXER_REG_PROLOG;
 					if (!VALID_WIDGET_NID(w->connections[j], this))
+						continue;
+					/* skip unconnected pins */
+					PIN_STATUS(&this->w[w->connections[j]],
+					    conn);
+					if (conn == 1)
 						continue;
 					snprintf(d->label.name, sizeof(d->label.name),
 					    "%s.%s.mute", w->name,
@@ -582,9 +605,16 @@ azalia_generic_mixer_init(codec_t *this)
 				    MIXER_DELTA(COP_AMPCAP_NUMSTEPS(w->inamp_cap));
 				this->nmixers++;
 			} else {
+				uint8_t conn;
+
 				for (j = 0; j < w->nconnections; j++) {
 					MIXER_REG_PROLOG;
 					if (!VALID_WIDGET_NID(w->connections[j], this))
+						continue;
+					/* skip unconnected pins */
+					PIN_STATUS(&this->w[w->connections[j]],
+					    conn);
+					if (conn == 1)
 						continue;
 					snprintf(d->label.name, sizeof(d->label.name),
 					    "%s.%s", w->name,
@@ -983,6 +1013,22 @@ azalia_generic_mixer_get(const codec_t *this, nid_t nid, int target, mixer_ctrl_
 		mc->un.value.num_channels = 1;
 	}
 
+	/* S/PDIF */
+	else if (target == MI_TARGET_SPDIF) {
+		err = this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
+		    0, &result);
+		if (err)
+			return err;
+		mc->un.mask = result & 0xff & ~(CORB_DCC_DIGEN | CORB_DCC_NAUDIO);
+	} else if (target == MI_TARGET_SPDIF_CC) {
+		err = this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
+		    0, &result);
+		if (err)
+			return err;
+		mc->un.value.num_channels = 1;
+		mc->un.value.level[0] = CORB_DCC_CC(result);
+	}
+
 	/* EAPD */
 	else if (target == MI_TARGET_EAPD) {
 		err = this->comresp(this, nid,
@@ -1247,6 +1293,27 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_
 			return err;
 	}
 
+	/* S/PDIF */
+	else if (target == MI_TARGET_SPDIF) {
+		err = this->comresp(this, nid, CORB_GET_DIGITAL_CONTROL,
+		    0, &result);
+		result &= CORB_DCC_DIGEN | CORB_DCC_NAUDIO;
+		result |= mc->un.mask & 0xff & ~CORB_DCC_DIGEN;
+		err = this->comresp(this, nid, CORB_SET_DIGITAL_CONTROL_L,
+		    result, NULL);
+		if (err)
+			return err;
+	} else if (target == MI_TARGET_SPDIF_CC) {
+		if (mc->un.value.num_channels != 1)
+			return EINVAL;
+		if (mc->un.value.level[0] > 127)
+			return EINVAL;
+		err = this->comresp(this, nid, CORB_SET_DIGITAL_CONTROL_H,
+		    mc->un.value.level[0], NULL);
+		if (err)
+			return err;
+	}
+
 	/* EAPD */
 	else if (target == MI_TARGET_EAPD) {
 		if (mc->un.ord >= 2)
@@ -1265,7 +1332,7 @@ azalia_generic_mixer_set(codec_t *this, nid_t nid, int target, const mixer_ctrl_
 		    CORB_SET_EAPD_BTL_ENABLE, result, &result);
 		if (err)
 			return err;
-	} 
+	}
 
 	else {
 		printf("%s: internal error in %s: target=%x\n",
