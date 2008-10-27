@@ -344,16 +344,13 @@ UMQ_DEF(ROLAND, ROLAND_UA700, 3) = {
  */
 #ifdef motuquirk
 #else
-UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 0, 1, 1) = {
+UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 0, 1, 0) = {
 	/* out */
-	{ 0, 1 },
-	/* in */
-	{ 1, 1 }
+	{ 0, 2 },
 };
-UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 1, 1, 1) = {
-	/* out */
-	{ 0, 1 },
+UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 1, 0, 2) = {
 	/* in */
+	{ 0, 1 }
 	{ 1, 1 }
 };
 UMQ_DEF(MOTU, MOTU_FLMIDI, 0) = {
