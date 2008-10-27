@@ -161,10 +161,6 @@ umidi_match(struct device *parent, void *match, void *aux)
     			uaa->vendor,
     			uaa->product,
 			uaa->ifaceno);
-
-	if (umidi_search_quirk(uaa->vendor, uaa->product, uaa->ifaceno))
-		return UMATCH_IFACECLASS_IFACESUBCLASS;
-
 	/* XXX should 'id' be returned to a pool/freed? does it leak memory? */
 	id = usbd_get_interface_descriptor(uaa->iface);
 	if (id!=NULL &&
@@ -172,10 +168,13 @@ umidi_match(struct device *parent, void *match, void *aux)
 	    id->bInterfaceSubClass==UISUBCLASS_MIDISTREAM)
 		return UMATCH_IFACECLASS_IFACESUBCLASS;
 	if (id != NULL) {
-		printf".. ifclass=0x%x, ifsubclass=0x%x\n",
+		printf(".. ifclass=0x%x, ifsubclass=0x%x\n",
 			id->bInterfaceClass,
-			id->bInterfaceSubClass;
+			id->bInterfaceSubClass);
 	}
+
+	if (umidi_search_quirk(uaa->vendor, uaa->product, uaa->ifaceno))
+		return UMATCH_IFACECLASS_IFACESUBCLASS;
 
 
 	if (uaa->vendor == USB_VENDOR_MOTU && uaa->product == USB_PRODUCT_MOTU_FLMIDI) {
