@@ -157,15 +157,36 @@ umidi_match(struct device *parent, void *match, void *aux)
 	if (uaa->iface == NULL)
 		return UMATCH_NONE;
 
-	if (umidi_search_quirk(uaa->vendor, uaa->product, uaa->ifaceno))
-		return UMATCH_IFACECLASS_IFACESUBCLASS;
-
+	printf(".. class=%d, subclass=%d, iface=%d\n",
+    			uaa->vendor,
+    			uaa->product,
+			uaa->ifaceno);
+	/* XXX should 'id' be returned to a pool/freed? does it leak memory? */
 	id = usbd_get_interface_descriptor(uaa->iface);
 	if (id!=NULL &&
 	    id->bInterfaceClass==UICLASS_AUDIO &&
 	    id->bInterfaceSubClass==UISUBCLASS_MIDISTREAM)
 		return UMATCH_IFACECLASS_IFACESUBCLASS;
+	if (id != NULL) {
+		printf(".. ifclass=0x%x, ifsubclass=0x%x\n",
+			id->bInterfaceClass,
+			id->bInterfaceSubClass);
+	}
 
+	if (umidi_search_quirk(uaa->vendor, uaa->product, uaa->ifaceno))
+		return UMATCH_IFACECLASS_IFACESUBCLASS;
+
+
+	if (uaa->vendor == USB_VENDOR_MOTU && uaa->product == USB_PRODUCT_MOTU_FLMIDI) {
+		if (id != NULL) {
+			printf(".. class=%d, subclass=%d, iface=%d\n",
+	    			id->bInterfaceClass,
+	    			id->bInterfaceSubClass,
+				uaa->ifaceno);
+		}
+		return UMATCH_IFACECLASS_IFACESUBCLASS;
+	}
+		
 	return UMATCH_NONE;
 }
 
@@ -483,7 +504,8 @@ alloc_all_endpoints_fixed_ep(struct umidi_softc *sc)
 			err = USBD_INVAL;
 			goto error;
 		}
-		if (UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK ||
+		if ((UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK &&
+		     UE_GET_XFERTYPE(epd->bmAttributes)!=UE_INTERRUPT) ||
 		    UE_GET_DIR(epd->bEndpointAddress)!=UE_DIR_OUT) {
 			printf("%s: illegal endpoint(out:%d)\n",
 			       sc->sc_dev.dv_xname, fp->out_ep[i].ep);
@@ -510,7 +532,8 @@ alloc_all_endpoints_fixed_ep(struct umidi_softc *sc)
 			err = USBD_INVAL;
 			goto error;
 		}
-		if (UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK ||
+		if ((UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK &&
+		     UE_GET_XFERTYPE(epd->bmAttributes)!=UE_INTERRUPT) ||
 		    UE_GET_DIR(epd->bEndpointAddress)!=UE_DIR_IN) {
 			printf("%s: illegal endpoint(in:%d)\n",
 			       sc->sc_dev.dv_xname, fp->in_ep[i].ep);

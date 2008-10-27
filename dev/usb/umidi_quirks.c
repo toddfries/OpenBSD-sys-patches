@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidi_quirks.c,v 1.9 2008/06/26 05:42:19 ray Exp $	*/
+/*	$OpenBSD: umidi_quirks.c,v 1.7 2005/11/21 18:16:44 millert Exp $	*/
 /*	$NetBSD: umidi_quirks.c,v 1.4 2002/06/19 13:55:30 tshiozak Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
+#include <sys/lock.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -338,6 +339,33 @@ UMQ_DEF(ROLAND, ROLAND_UA700, 3) = {
 	UMQ_TERMINATOR
 };
 
+/*
+ * MOTU FastLane MIDI
+ */
+#ifdef motuquirk
+#else
+UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 0, 1, 1) = {
+	/* out */
+	{ 1, 2 },
+	/* in */
+	{ 2, 2 },
+};
+UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 1, 1, 1) = {
+	/* out */
+	{ 2, 2 },
+	/* in */
+	{ 3, 2 }
+};
+UMQ_DEF(MOTU, MOTU_FLMIDI, 0) = {
+	UMQ_FIXED_EP_REG(MOTU, MOTU_FLMIDI, 0),
+	UMQ_TERMINATOR
+};
+UMQ_DEF(MOTU, MOTU_FLMIDI, 1) = {
+	UMQ_FIXED_EP_REG(MOTU, MOTU_FLMIDI, 1),
+	UMQ_TERMINATOR
+};
+#endif
+
 
 /*
  * quirk list
@@ -361,6 +389,11 @@ struct umidi_quirk umidi_quirklist[] = {
 	UMQ_REG(ROLAND, ROLAND_SD20, 0),
 	UMQ_REG(ROLAND, ROLAND_SD80, 0),
 	UMQ_REG(ROLAND, ROLAND_UA700, 3),
+#ifdef motuquirk
+#else
+	UMQ_REG(MOTU, MOTU_FLMIDI, 0),
+	UMQ_REG(MOTU, MOTU_FLMIDI, 1),
+#endif
 	UMQ_TERMINATOR
 };
 

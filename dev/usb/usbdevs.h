@@ -313,6 +313,7 @@
 #define	USB_VENDOR_ARASAN	0x07da		/* Arasan Chip Systems */
 #define	USB_VENDOR_ALLIEDCABLE	0x07e6		/* Allied Cable */
 #define	USB_VENDOR_STSN	0x07ef		/* STSN */
+#define	USB_VENDOR_MOTU	0x07fd		/* Motu */
 #define	USB_VENDOR_ZOOM	0x0803		/* Zoom Telephonics */
 #define	USB_VENDOR_BROADLOGIC	0x0827		/* BroadLogic */
 #define	USB_VENDOR_HANDSPRING	0x082d		/* Handspring */
@@ -2018,6 +2019,9 @@
 /* Motorola(3) products */
 #define	USB_PRODUCT_MOTOROLA3_SB4100	0x4100		/* SB4100 Cable Modem */
 #define	USB_PRODUCT_MOTOROLA3_SB5100	0x5100		/* SB5100 Cable Modem */
+
+/* Motu products */
+#define	USB_PRODUCT_MOTU_FLMIDI	0x0001		/* FastLane MIDI I/F */
 
 /* MultiTech products */
 #define	USB_PRODUCT_MULTITECH_ATLAS	0xf101		/* MT5634ZBA modem */
