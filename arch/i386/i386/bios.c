@@ -322,7 +322,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 #if NAPM > 0
-	if (apm && ncpu < 2 && smbiosrev < 250) {
+	if (apm && ncpu < 2 && smbiosrev < 230) {
 		struct bios_attach_args ba;
 
 #if defined(DEBUG) || defined(APMDEBUG)
