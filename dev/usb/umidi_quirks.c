@@ -343,15 +343,19 @@ UMQ_DEF(ROLAND, ROLAND_UA700, 3) = {
  * MOTU FastLane MIDI
  */
 #ifdef motuquirk
+#else
 UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 0, 1, 1) = {
+	/* out */
 	{ 0, 1 },
-	{ 0, 1 },
+	/* in */
+	{ 1, 1 }
 };
 UMQ_FIXED_EP_DEF(MOTU, MOTU_FLMIDI, 1, 1, 1) = {
+	/* out */
 	{ 0, 1 },
-	{ 0, 1 },
+	/* in */
+	{ 1, 1 }
 };
-
 UMQ_DEF(MOTU, MOTU_FLMIDI, 0) = {
 	UMQ_FIXED_EP_REG(MOTU, MOTU_FLMIDI, 0),
 	UMQ_TERMINATOR
@@ -385,7 +389,8 @@ struct umidi_quirk umidi_quirklist[] = {
 	UMQ_REG(ROLAND, ROLAND_SD20, 0),
 	UMQ_REG(ROLAND, ROLAND_SD80, 0),
 	UMQ_REG(ROLAND, ROLAND_UA700, 3),
-#if 0
+#ifdef motuquirk
+#else
 	UMQ_REG(MOTU, MOTU_FLMIDI, 0),
 	UMQ_REG(MOTU, MOTU_FLMIDI, 1),
 #endif

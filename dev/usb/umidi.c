@@ -168,9 +168,10 @@ umidi_match(struct device *parent, void *match, void *aux)
 
 	if (uaa->vendor == USB_VENDOR_MOTU && uaa->product == USB_PRODUCT_MOTU_FLMIDI) {
 		if (id != NULL) {
-			printf(".. class=%d, subclass=%d\n",
+			printf(".. class=%d, subclass=%d, iface=%d\n",
 	    			id->bInterfaceClass,
-	    			id->bInterfaceSubClass);
+	    			id->bInterfaceSubClass,
+				uaa->ifaceno);
 		}
 		return UMATCH_IFACECLASS_IFACESUBCLASS;
 	}
@@ -492,7 +493,8 @@ alloc_all_endpoints_fixed_ep(struct umidi_softc *sc)
 			err = USBD_INVAL;
 			goto error;
 		}
-		if (UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK ||
+		if ((UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK &&
+		     UE_GET_XFERTYPE(epd->bmAttributes)!=UE_INTERRUPT) ||
 		    UE_GET_DIR(epd->bEndpointAddress)!=UE_DIR_OUT) {
 			printf("%s: illegal endpoint(out:%d)\n",
 			       sc->sc_dev.dv_xname, fp->out_ep[i].ep);
@@ -519,7 +521,8 @@ alloc_all_endpoints_fixed_ep(struct umidi_softc *sc)
 			err = USBD_INVAL;
 			goto error;
 		}
-		if (UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK ||
+		if ((UE_GET_XFERTYPE(epd->bmAttributes)!=UE_BULK &&
+		     UE_GET_XFERTYPE(epd->bmAttributes)!=UE_INTERRUPT) ||
 		    UE_GET_DIR(epd->bEndpointAddress)!=UE_DIR_IN) {
 			printf("%s: illegal endpoint(in:%d)\n",
 			       sc->sc_dev.dv_xname, fp->in_ep[i].ep);
