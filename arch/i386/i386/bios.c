@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.82 2008/08/16 00:26:26 krw Exp $	*/
+/*	$OpenBSD: bios.c,v 1.83 2008/10/28 00:05:32 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -274,7 +274,10 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 			printf(", SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
 			    sh->majrev, sh->minrev, sh->addr, sh->count);
-			/* 2.3 ... 2.33 ... 2.5 */
+			/*
+			 * Unbelievably the SMBIOS version number
+			 * sequence is like 2.3 ... 2.33 ... 2.4 ... 2.5
+			 */
 			smbiosrev = sh->majrev * 100 + sh->minrev;
 			if (sh->minrev < 10)
 				smbiosrev = sh->majrev * 100 + sh->minrev * 10;

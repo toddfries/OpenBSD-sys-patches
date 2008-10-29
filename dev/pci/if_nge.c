@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.61 2008/10/16 19:18:03 naddy Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.65 2008/10/28 22:45:20 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -887,7 +887,7 @@ nge_attach(parent, self, aux)
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
-#ifdef NGE_VLAN
+#if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
@@ -1272,7 +1272,7 @@ nge_rxeof(sc)
 	ifp = &sc->arpcom.ac_if;
 	i = sc->nge_cdata.nge_rx_prod;
 
-	while(NGE_OWNDESC(&sc->nge_ldata->nge_rx_list[i])) {
+	while (NGE_OWNDESC(&sc->nge_ldata->nge_rx_list[i])) {
 		struct mbuf		*m0 = NULL;
 		u_int32_t		extsts;
 
@@ -1291,9 +1291,23 @@ nge_rxeof(sc)
 		 * comes up in the ring.
 		 */
 		if (!(rxstat & NGE_CMDSTS_PKT_OK)) {
-			ifp->if_ierrors++;
-			nge_newbuf(sc, cur_rx, m);
-			continue;
+#if NVLAN > 0
+			if ((rxstat & NGE_RXSTAT_RUNT) &&
+			    total_len >= (ETHER_MIN_LEN - ETHER_CRC_LEN -
+			    ETHER_VLAN_ENCAP_LEN)) {
+				/*
+				 * Workaround a hardware bug. Accept runt
+				 * frames if its length is larger than or
+				 * equal to 56.
+				 */
+			} else {
+#endif
+				ifp->if_ierrors++;
+				nge_newbuf(sc, cur_rx, m);
+				continue;
+#if NVLAN > 0
+			}
+#endif
 		}
 
 		/*
@@ -1329,6 +1343,14 @@ nge_rxeof(sc)
 #endif
 
 		ifp->if_ipackets++;
+
+#if NVLAN > 0
+		if (extsts & NGE_RXEXTSTS_VLANPKT) {
+			m->m_pkthdr.ether_vtag =
+			    ntohs(extsts & NGE_RXEXTSTS_VTCI);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
 
 #if NBPFILTER > 0
 		/*
@@ -1628,7 +1650,7 @@ nge_encap(sc, m_head, txidx)
 #if NVLAN > 0
 	if (m_head->m_flags & M_VLANTAG) {
 		sc->nge_ldata->nge_tx_list[cur].nge_extsts |=
-		    (NGE_TXEXTSTS_VLANPKT|m_head->m_pkthdr.ether_vtag);
+		    (NGE_TXEXTSTS_VLANPKT|htons(m_head->m_pkthdr.ether_vtag));
 	}
 #endif
 
@@ -1798,10 +1820,18 @@ nge_init(xsc)
 	 */
 	CSR_WRITE_4(sc, NGE_VLAN_IP_RXCTL, NGE_VIPRXCTL_IPCSUM_ENB);
 
+	/*
+	 * If VLAN support is enabled, tell the chip to detect
+	 * and strip VLAN tag info from received frames. The tag
+	 * will be provided in the extsts field in the RX descriptors.
+	 */
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		NGE_SETBIT(sc, NGE_VLAN_IP_RXCTL,
+		    NGE_VIPRXCTL_TAG_DETECT_ENB | NGE_VIPRXCTL_TAG_STRIP_ENB);
+
 	/* Set TX configuration */
 	CSR_WRITE_4(sc, NGE_TX_CFG, NGE_TXCFG);
 
-#if NVLAN > 0
 	/*
 	 * If VLAN support is enabled, tell the chip to insert
 	 * VLAN tags on a per-packet basis as dictated by the
@@ -1809,7 +1839,6 @@ nge_init(xsc)
 	 */
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		NGE_SETBIT(sc, NGE_VLAN_IP_TXCTL, NGE_VIPTXCTL_TAG_PER_PKT);
-#endif
 
 	/* Set full/half duplex mode. */
 	if (sc->nge_tbi)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: amivar.h,v 1.53 2008/04/10 06:39:00 dlg Exp $	*/
+/*	$OpenBSD: amivar.h,v 1.54 2008/10/28 11:43:10 marco Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -26,14 +26,6 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include "bio.h"
-
-#if NBIO > 0
-#include <dev/biovar.h>
-#include <sys/sensors.h>
-#endif
-
 
 struct ami_mem {
 	bus_dmamap_t		am_map;
@@ -148,7 +140,6 @@ struct ami_softc {
 	}			sc_hdr[AMI_BIG_MAX_LDRIVES];
 	struct ami_rawsoftc	*sc_rawsoftcs;
 
-#if NBIO > 0
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 	struct ami_big_diskarray *sc_bd;
@@ -156,7 +147,7 @@ struct ami_softc {
 	/* bio stuff */
 	struct bioc_inq		sc_bi;
 	char			sc_plist[AMI_BIG_MAX_PDRIVES];
-#endif
+
 	struct ami_ccb		*sc_mgmtccb;
 	int			sc_drained;
 	int			sc_drainio;
