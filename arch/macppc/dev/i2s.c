@@ -389,10 +389,14 @@ i2s_set_params(h, setmode, usemode, play, rec)
 
 		p = mode == AUMODE_PLAY ? play : rec;
 
-		if (p->sample_rate < 4000 || p->sample_rate > 50000 ||
-		    (p->precision != 8 && p->precision != 16) ||
-		    (p->channels != 1 && p->channels != 2))
-			return EINVAL;
+		if (p->sample_rate < 4000)
+			p->sample_rate = 4000;
+		if (p->sample_rate > 50000)
+			p->sample_rate = 50000;
+		if (p->precision > 16)
+			p->precision = 16;
+		if (p->channels > 2)
+			p->channels = 2;
 
 		switch (p->encoding) {
 		case AUDIO_ENCODING_SLINEAR_LE:
@@ -872,9 +876,9 @@ i2s_set_rate(sc, rate)
 	int timo;
 
 	/* sanify */
-	if (rate > 48000)
+	if (rate > (48000 + 44100) / 2)
 		rate = 48000;
-	else if (rate < 44100)
+	else
 		rate = 44100;
 
 	switch (rate) {
