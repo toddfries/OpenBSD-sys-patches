@@ -615,7 +615,7 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Setup threads */
-	sc->sc_workq = workq_create("acpi", 1);
+	sc->sc_workq = workq_create("acpi", 1, IPL_HIGH);
 
 	acpi_attach_machdep(sc);
 
