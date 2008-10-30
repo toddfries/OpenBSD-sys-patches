@@ -685,7 +685,7 @@ tas3004_init(struct snapper_softc *sc)
 	DEQ_WRITE(sc, DEQ_RB3, tas3004_initdata.RB3);
 	DEQ_WRITE(sc, DEQ_RB4, tas3004_initdata.RB4);
 	DEQ_WRITE(sc, DEQ_RB5, tas3004_initdata.RB5);
-	DEQ_WRITE(sc, DEQ_RB66 tas3004_initdata.RB6);
+	DEQ_WRITE(sc, DEQ_RB6, tas3004_initdata.RB6);
 	DEQ_WRITE(sc, DEQ_MCR1, tas3004_initdata.MCR1);
 	DEQ_WRITE(sc, DEQ_MCR2, tas3004_initdata.MCR2);
 	DEQ_WRITE(sc, DEQ_DRC, tas3004_initdata.DRC);
