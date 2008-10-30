@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_cache.c,v 1.27 2008/10/20 20:33:07 deraadt Exp $	*/
+/*	$OpenBSD: vfs_cache.c,v 1.29 2008/10/24 00:22:57 tedu Exp $	*/
 /*	$NetBSD: vfs_cache.c,v 1.13 1996/02/04 02:18:09 christos Exp $	*/
 
 /*
