@@ -598,7 +598,7 @@ awacs_set_params(void *h, int setmode, int usemode, struct audio_params *play,
 		switch (p->encoding) {
 
 		case AUDIO_ENCODING_SLINEAR_LE:
-			if (p->percision != 16)
+			if (p->precision != 16)
 				p->precision = 16;
 			if (p->channels == 2)
 				p->sw_code = swap_bytes;
