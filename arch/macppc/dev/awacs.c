@@ -1,4 +1,4 @@
-/*	$OpenBSD: awacs.c,v 1.22 2008/04/21 00:32:42 jakemsr Exp $	*/
+/*	$OpenBSD: awacs.c,v 1.23 2008/10/30 06:12:47 todd Exp $	*/
 /*	$NetBSD: awacs.c,v 1.4 2001/02/26 21:07:51 wiz Exp $	*/
 
 /*-
