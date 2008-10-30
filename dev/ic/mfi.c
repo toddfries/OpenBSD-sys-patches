@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.82 2008/10/23 00:30:04 marco Exp $ */
+/* $OpenBSD: mfi.c,v 1.85 2008/10/28 21:44:25 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -26,6 +26,7 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/rwlock.h>
+#include <sys/sensors.h>
 
 #include <machine/bus.h>
 
@@ -33,13 +34,9 @@
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
+#include <dev/biovar.h>
 #include <dev/ic/mfireg.h>
 #include <dev/ic/mfivar.h>
-
-#if NBIO > 0
-#include <dev/biovar.h>
-#include <sys/sensors.h>
-#endif /* NBIO > 0 */
 
 #ifdef MFI_DEBUG
 uint32_t	mfi_debug = 0
@@ -1232,7 +1229,6 @@ mfi_mgmt_done(struct mfi_ccb *ccb)
 	wakeup(ccb);
 }
 
-
 int
 mfi_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag,
     struct proc *p)
@@ -1424,8 +1420,8 @@ mfi_ioctl_disk(struct mfi_softc *sc, struct bioc_disk *bd)
 	struct mfi_pd_details	*pd;
 	struct scsi_inquiry_data *inqbuf;
 	char			vend[8+16+4+1];
-	int			i, rv = EINVAL;
-	int			arr, vol, disk;
+	int			rv = EINVAL;
+	int			arr, vol, disk, span;
 	uint32_t		size;
 	uint8_t			mbox[MFI_MBOX_SIZE];
 
@@ -1448,31 +1444,30 @@ mfi_ioctl_disk(struct mfi_softc *sc, struct bioc_disk *bd)
 		goto freeme;
 
 	ar = cfg->mfc_array;
-
-	/* calculate offset to ld structure */
-	ld = (struct mfi_ld_cfg *)(
-	    ((uint8_t *)cfg) + offsetof(struct mfi_conf, mfc_array) +
-	    cfg->mfc_array_size * cfg->mfc_no_array);
-
 	vol = bd->bd_volid;
-
 	if (vol >= cfg->mfc_no_ld) {
 		/* do hotspares */
 		rv = mfi_bio_hs(sc, bd->bd_volid, MFI_MGMT_SD, bd);
 		goto freeme;
 	}
 
-	/* find corresponding array for ld */
-	for (i = 0, arr = 0; i < vol; i++)
-		arr += ld[i].mlc_parm.mpa_span_depth;
+	/* calculate offset to ld structure */
+	ld = (struct mfi_ld_cfg *)(
+	    ((uint8_t *)cfg) + offsetof(struct mfi_conf, mfc_array) +
+	    cfg->mfc_array_size * cfg->mfc_no_array);
+
+	/* use span 0 only when raid group is not spanned */
+	if (ld[vol].mlc_parm.mpa_span_depth > 1)
+		span = bd->bd_diskid / ld[vol].mlc_parm.mpa_no_drv_per_span;
+	else
+		span = 0;
+	arr = ld[vol].mlc_span[span].mls_index;
 
 	/* offset disk into pd list */
 	disk = bd->bd_diskid % ld[vol].mlc_parm.mpa_no_drv_per_span;
-
-	/* offset array index into the next spans */
-	arr += bd->bd_diskid / ld[vol].mlc_parm.mpa_no_drv_per_span;
-
 	bd->bd_target = ar[arr].pd[disk].mar_enc_slot;
+
+	/* get status */
 	switch (ar[arr].pd[disk].mar_pd_state){
 	case MFI_PD_UNCONFIG_GOOD:
 	case MFI_PD_FAILED:

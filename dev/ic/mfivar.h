@@ -1,4 +1,4 @@
-/* $OpenBSD: mfivar.h,v 1.31 2008/02/11 01:07:02 dlg Exp $ */
+/* $OpenBSD: mfivar.h,v 1.33 2008/10/27 03:11:58 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -14,8 +14,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#include <sys/sensors.h>
 
 #define DEVNAME(_s)     ((_s)->sc_dev.dv_xname)
 
@@ -119,9 +117,6 @@ struct mfi_softc {
 	bus_space_handle_t	sc_ioh;
 	bus_dma_tag_t		sc_dmat;
 
-	/* mgmt lock */
-	struct rwlock		sc_lock;
-
 	/* save some useful information for logical drives that is missing
 	 * in sc_ld_list
 	 */
@@ -158,6 +153,10 @@ struct mfi_softc {
 
 	struct mfi_ccb_list	sc_ccb_freeq;
 
+	/* mgmt lock */
+	struct rwlock		sc_lock;
+
+	/* sensors */
 	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
 };
