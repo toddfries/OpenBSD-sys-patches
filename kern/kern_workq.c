@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_workq.c,v 1.8 2008/10/27 02:13:34 dlg Exp $ */
+/*	$OpenBSD: kern_workq.c,v 1.9 2008/10/30 23:55:22 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>

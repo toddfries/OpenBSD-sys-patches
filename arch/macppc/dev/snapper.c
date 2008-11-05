@@ -1,4 +1,4 @@
-/*	$OpenBSD: snapper.c,v 1.32 2008/10/29 00:04:14 jakemsr Exp $	*/
+/*	$OpenBSD: snapper.c,v 1.33 2008/11/05 01:43:09 jakemsr Exp $	*/
 /*	$NetBSD: snapper.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
@@ -564,7 +564,7 @@ snapper_set_input(struct snapper_softc *sc, int mask)
 {
 	uint8_t val = 0;
 
-	switch(mask) {
+	switch (mask) {
 	case    1 << 0: /* microphone */
 		val = DEQ_ACR_ADM | DEQ_ACR_LRB | DEQ_ACR_INP_B;
 		break;
@@ -725,7 +725,7 @@ snapper_init(struct snapper_softc *sc)
 	if (tas3004_init(sc))
 		return;
 
-	snapper_set_volume(sc, 120, 120);
+	snapper_set_volume(sc, 190, 190);
 	snapper_set_treble(sc, 128); /* 0 dB */
 	snapper_set_bass(sc, 128); /* 0 dB */
 
