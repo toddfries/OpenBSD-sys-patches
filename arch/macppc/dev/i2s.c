@@ -667,10 +667,8 @@ i2s_query_devinfo(h, dip)
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
 		dip->un.v.num_channels = 2;
-#if 0
 		strlcpy(dip->un.v.units.name, AudioNvolume,
 		    sizeof(dip->un.v.units.name));
-#endif
 		return 0;
 
 	case I2S_INPUT_SELECT:
@@ -693,10 +691,8 @@ i2s_query_devinfo(h, dip)
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
 		dip->un.v.num_channels = 2;
-#if 0
 		strlcpy(dip->un.v.units.name, AudioNvolume,
 		    sizeof(dip->un.v.units.name));
-#endif
 		return 0;
 
 	case I2S_OUTPUT_CLASS:
