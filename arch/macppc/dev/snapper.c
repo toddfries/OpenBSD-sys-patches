@@ -729,8 +729,8 @@ snapper_init(struct snapper_softc *sc)
 	snapper_set_treble(sc, 128); /* 0 dB */
 	snapper_set_bass(sc, 128); /* 0 dB */
 
-	/* Line in, reflects tas3004_initdata.ACR */
-	sc->sc_record_source = 1 << 1;
+	/* Microphone, reflects tas3004_initdata.ACR */
+	sc->sc_record_source = 1 << 0;
 }
 
 int
