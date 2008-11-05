@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1425 2008/10/28 01:45:30 brad Exp 
+ *	OpenBSD: pcidevs,v 1.1430 2008/11/04 16:28:22 deraadt Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -2756,6 +2756,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon 2100",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4850,
+	    "Radeon HD 4850",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2400_XT,
 	    "Radeon HD 2400 XT",
 	},
@@ -2778,6 +2782,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_PRO,
 	    "Radeon HD 2600 Pro",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3650,
+	    "Radeon HD 3650",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450,
@@ -2818,6 +2826,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD34xx_HDA,
 	    "Radeon HD 34xx HD Audio",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD48xx_HDA,
+	    "Radeon HD 48xx HD Audio",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS100_AGP,
@@ -5254,6 +5266,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_IDT, PCI_PRODUCT_IDT_89HPES12N3A,
 	    "89HPES12N3A",
+	},
+	{
+	    PCI_VENDOR_IDT, PCI_PRODUCT_IDT_89HPES24N3A,
+	    "89HPES24N3A",
+	},
+	{
+	    PCI_VENDOR_IDT, PCI_PRODUCT_IDT_89HPES24T6,
+	    "89HPES24T6",
 	},
 	{
 	    PCI_VENDOR_INDCOMPSRC, PCI_PRODUCT_INDCOMPSRC_WDT50x,
@@ -7796,6 +7816,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "G45 Host",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_PCIE,
+	    "G45 PCIE",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,
 	    "G45 Video",
 	},
@@ -7964,8 +7988,60 @@ static const struct pci_known_product pci_known_products[] = {
 	    "E7525 Host",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_HB,
+	    "7300 Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_PCIE_1,
+	    "7300 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_PCIE_2,
+	    "7300 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_PCIE_3,
+	    "7300 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_PCIE_4,
+	    "7300 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_PCIE_5,
+	    "7300 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_PCIE_6,
+	    "7300 PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_PCIE_7,
+	    "7300 PCIE",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_IOAT_CNB,
 	    "I/OAT CNB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_FSBINT,
+	    "7300 E5400 FSB/Boot/Interrupt",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_SNOOP,
+	    "7300 Snoop Filter",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_MISC,
+	    "7300 Misc",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_FBD_0,
+	    "7300 FBD",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_FBD_1,
+	    "7300 FBD",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JIR_LPC,
@@ -12718,6 +12794,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_PROMISE, PCI_PRODUCT_PROMISE_PDC20575,
 	    "PDC20575",
+	},
+	{
+	    PCI_VENDOR_PROMISE, PCI_PRODUCT_PROMISE_PDC42819,
+	    "PDC42819",
 	},
 	{
 	    PCI_VENDOR_PROMISE, PCI_PRODUCT_PROMISE_PDC20267,
