@@ -1129,6 +1129,9 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 	int			 nxt;
 	struct pf_fragment6	*frag6;
 
+	if (dir == PF_FORWARD)
+		return (PF_PASS);
+
 	r = TAILQ_FIRST(pf_main_ruleset.rules[PF_RULESET_SCRUB].active.ptr);
 	while (r != NULL) {
 		r->evaluations++;
