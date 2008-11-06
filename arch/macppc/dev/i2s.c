@@ -574,7 +574,8 @@ i2s_set_port(h, mc)
 		return 0;
 
 	case I2S_VOL_INPUT:
-		/* XXX TO BE DONE */
+		if (sc->sc_setinvolume != NULL)
+			(*sc->sc_setinvolume)(sc, l, r);
 		return 0;
 	}
 
@@ -617,9 +618,8 @@ i2s_get_port(h, mc)
 		return 0;
 
 	case I2S_VOL_INPUT:
-		/* XXX TO BE DONE */
-		mc->un.value.level[AUDIO_MIXER_LEVEL_LEFT] = 0;
-		mc->un.value.level[AUDIO_MIXER_LEVEL_RIGHT] = 0;
+		mc->un.value.level[AUDIO_MIXER_LEVEL_LEFT] = sc->sc_invol_l;
+		mc->un.value.level[AUDIO_MIXER_LEVEL_RIGHT] = sc->sc_invol_r;
 		return 0;
 
 	default:

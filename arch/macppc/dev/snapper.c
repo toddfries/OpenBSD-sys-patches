@@ -64,6 +64,7 @@ int snapper_match(struct device *, void *, void *);
 void snapper_attach(struct device *, struct device *, void *);
 void snapper_defer(struct device *);
 int snapper_set_volume(struct snapper_softc *, int, int);
+int snapper_set_involume(struct snapper_softc *, int, int);
 int snapper_set_bass(struct snapper_softc *, int);
 int snapper_set_treble(struct snapper_softc *, int);
 int snapper_set_input(struct snapper_softc *, int);
@@ -534,6 +535,55 @@ snapper_set_volume(struct snapper_softc *sc, int left, int right)
 		sc->sc_vol_l = left;
 		sc->sc_vol_r = right;
 	}
+
+	return 0;
+}
+
+int
+snapper_set_involume(struct snapper_softc *sc, int left, int right)
+{
+	u_char vol[9];
+	int nentries = sizeof(snapper_volumetab) / sizeof(snapper_volumetab[0]);
+	int l, r, off;
+
+	l = nentries - (left * nentries / 256);
+	r = nentries - (right * nentries / 256);
+
+	DPRINTF(" left %d vol %d %d, right %d vol %d %d\n",
+		left, l, nentries,
+		right, r, nentries);
+	if (l >= nentries)
+		l = nentries-1;
+	if (r >= nentries)
+		r = nentries-1;
+
+	switch (sc->sc_record_source) {
+		case    1 << 0: /* microphone */
+			off = 0;
+			break;
+		case	1 << 1: /* line in */
+			off = 3;
+			break;
+		case	1 << 2: /* output sound */
+			off = 6;
+			break;
+	}
+	vol[0+off] = snapper_volumetab[l].high;
+	vol[1+off] = snapper_volumetab[l].mid;
+	vol[2+off] = snapper_volumetab[l].low;
+
+	if (tas3004_write(sc, DEQ_MIXER_L, vol))
+		return -1;
+
+	vol[0+off] = snapper_volumetab[r].high;
+	vol[1+off] = snapper_volumetab[r].mid;
+	vol[2+off] = snapper_volumetab[r].low;
+
+	if (tas3004_write(sc, DEQ_MIXER_R, vol))
+		return -1;
+
+	sc->sc_invol_l = left;
+	sc->sc_invol_r = right;
 
 	return 0;
 }
