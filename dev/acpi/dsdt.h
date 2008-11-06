@@ -89,6 +89,7 @@ int			acpi_mutex_acquire(struct aml_value *, int);
 void			acpi_mutex_release(struct aml_value *);
 
 const char		*aml_nodename(struct aml_node *);
+int aml_evalhid(struct aml_node *, struct aml_value *);
 
 #define SR_IRQ			0x04
 #define SR_DMA			0x05

@@ -22,6 +22,8 @@
 #include <sys/rwlock.h>
 #include <machine/biosvar.h>
 
+/* #define acpi_sleep_enabled */
+
 /* #define ACPI_DEBUG */
 #ifdef ACPI_DEBUG
 extern int acpi_debug;
@@ -41,7 +43,7 @@ struct klist;
 struct acpiec_softc;
 
 struct acpi_attach_args {
-	char		*aaa_name;
+	const char      *aaa_name;
 	bus_space_tag_t	 aaa_iot;
 	bus_space_tag_t	 aaa_memt;
 	void		*aaa_table;
@@ -70,6 +72,13 @@ struct acpi_wakeq {
 	int				 q_state;
 };
 
+struct acpi_device {
+	const char			*d_hid;
+	struct aml_node			*d_node;
+	SIMPLEQ_ENTRY(acpi_device)	 d_link;
+};
+
+typedef SIMPLEQ_HEAD(, acpi_device) acpi_devhead_t;
 typedef SIMPLEQ_HEAD(, acpi_q) acpi_qhead_t;
 typedef SIMPLEQ_HEAD(, acpi_wakeq) acpi_wakeqhead_t;
 
@@ -243,10 +252,16 @@ int	 acpi_probe(struct device *, struct cfdata *, struct bios_attach_args *);
 u_int	 acpi_checksum(const void *, size_t);
 void	 acpi_attach_machdep(struct acpi_softc *);
 int	 acpi_interrupt(void *);
-void	 acpi_enter_sleep_state(struct acpi_softc *, int);
 void	 acpi_powerdown(void);
-void	 acpi_resume(struct acpi_softc *);
 void	 acpi_reset(void);
+
+void	acpi_cpu_flush(struct acpi_softc *, int);
+
+int	acpi_sleep_state(struct acpi_softc *, int);
+void	acpi_resume(struct acpi_softc *);
+int	acpi_prepare_sleep_state(struct acpi_softc *, int);
+int	acpi_enter_sleep_state(struct acpi_softc *, int);
+int	acpi_sleep_machdep(struct acpi_softc *, int);
 
 #define ACPI_IOREAD 0
 #define ACPI_IOWRITE 1
@@ -267,6 +282,8 @@ int	acpi_read_pmreg(struct acpi_softc *, int, int);
 void	acpi_write_pmreg(struct acpi_softc *, int, int, int);
 
 void	acpi_poll(void *);
+
+int acpi_matchhids(struct acpi_attach_args *, const char *[], const char *);
 
 #endif
 

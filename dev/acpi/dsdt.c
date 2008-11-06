@@ -2369,7 +2369,6 @@ void aml_xcreatefield(struct aml_value *, int, struct aml_value *, int, int,
     struct aml_value *, int, int);
 void aml_xparsefieldlist(struct aml_scope *, int, int,
     struct aml_value *, struct aml_value *, int);
-int aml_evalhid(struct aml_node *, struct aml_value *);
 
 #define GAS_PCI_CFG_SPACE_UNEVAL  0xCC
 
