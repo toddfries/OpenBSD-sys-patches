@@ -209,3 +209,4 @@ define	CPU_INFO_ISOURCES	offsetof(struct cpu_info, ci_isources)
 
 define	SIZEOF_CPU_INFO		sizeof(struct cpu_info)
 
+define	SIZEOF_REGION_DESCRIPTOR	sizeof(struct region_descriptor)
