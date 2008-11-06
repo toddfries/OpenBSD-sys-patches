@@ -196,20 +196,17 @@ onyx_set_volume(struct onyx_softc *sc, int left, int right)
 {
 	u_int8_t data;
 
-	if (sc->sc_vol_l != left || sc->sc_vol_r != right) {
-
-		kiic_setmode(sc->sc_i2c, I2C_STDSUBMODE, 0);
-		data = 128 + (left >> 1);
-		if (kiic_write(sc->sc_i2c, PCM3052_I2C_ADDR,
-		    PCM3052_REG_LEFT_VOLUME, &data, 1))
-			return -1;
-		data = 128 + (right >> 1);
-		if (kiic_write(sc->sc_i2c, PCM3052_I2C_ADDR,
-		    PCM3052_REG_RIGHT_VOLUME, &data, 1))
-			return -1;
-		sc->sc_vol_l = left;
-		sc->sc_vol_r = right;
-	}
+	kiic_setmode(sc->sc_i2c, I2C_STDSUBMODE, 0);
+	data = 128 + (left >> 1);
+	if (kiic_write(sc->sc_i2c, PCM3052_I2C_ADDR,
+	    PCM3052_REG_LEFT_VOLUME, &data, 1))
+		return -1;
+	data = 128 + (right >> 1);
+	if (kiic_write(sc->sc_i2c, PCM3052_I2C_ADDR,
+	    PCM3052_REG_RIGHT_VOLUME, &data, 1))
+		return -1;
+	sc->sc_vol_l = left;
+	sc->sc_vol_r = right;
 	return 0;
 }
 

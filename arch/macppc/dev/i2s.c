@@ -372,6 +372,8 @@ i2s_set_params(h, setmode, usemode, play, rec)
 	 */
 	if (play->sample_rate != rec->sample_rate &&
 	    usemode == (AUMODE_PLAY | AUMODE_RECORD)) {
+		/* XXX does this really only have play _or_ record, can
+		   we not do both? */
 		if (setmode == AUMODE_PLAY) {
 			rec->sample_rate = play->sample_rate;
 			setmode |= AUMODE_RECORD;
@@ -525,7 +527,7 @@ i2s_set_port(h, mc)
 
 	switch (mc->dev) {
 	case I2S_OUTPUT_SELECT:
-		/* No change necessary? */
+		/* No change necessary */
 		if (mc->un.mask == sc->sc_output_mask)
 			return 0;
 
@@ -543,14 +545,23 @@ i2s_set_port(h, mc)
 		return 0;
 
 	case I2S_VOL_OUTPUT:
+		/* No change necessary */
+		if (sc->sc_vol_l == l && sc->sc_vol_r == r)
+			return 0;
+	
 		return (*sc->sc_setvolume)(sc, l, r);
 
 	case I2S_BASS:
+		/* No change necessary */
+		if (sc->sc_bass == l)
+			return 0;
 		if (sc->sc_setbass != NULL)
 			return (*sc->sc_setbass)(sc, l);
 		return (0);
 
 	case I2S_TREBLE:
+		if (sc->sc_treble == l)
+			return 0;
 		if (sc->sc_settreble != NULL)
 			return (*sc->sc_settreble)(sc, l);
 		return (0);
@@ -568,8 +579,13 @@ i2s_set_port(h, mc)
 		return 0;
 
 	case I2S_VOL_INPUT:
+		/* No change necessary */
+		if (sc->sc_record_l == l && sc->sc_record_r == r)
+			return 0;
+		
 		if (sc->sc_setrecord != NULL)
 			return (*sc->sc_setrecord)(sc, l, r);
+
 		return 0;
 	}
 
