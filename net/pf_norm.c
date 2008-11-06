@@ -1110,7 +1110,7 @@ pf_find_fragment6(u_int32_t ident, struct in6_addr *src, struct in6_addr *dst)
 
 int
 pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
-    u_short *reason, struct pf_pdesc *pd)
+    u_short *reason, struct pf_pdesc *pd, struct mbuf **tree)
 {
 	struct mbuf		*m = *m0, *n;
 	struct pf_rule		*r;
@@ -1294,7 +1294,7 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 	}
 
 	TAILQ_REMOVE(&pf_frag_tree6, frag6, next);
-	/* *tree = frag6->m; */
+	*tree = frag6->m;
 	timeout_del(&frag6->lifetime);
 	pool_put(&pf_fragment6_pl, frag6);
 
