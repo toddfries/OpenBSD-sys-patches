@@ -202,14 +202,13 @@ drm_attach(struct device *parent, struct device *kdev,
 	dev->pci_device = PCI_PRODUCT(dev->pa.pa_id);
 
 	rw_init(&dev->dev_lock, "drmdevlk");
-	mtx_init(&dev->drw_lock, IPL_BIO);
+	mtx_init(&dev->drw_lock, IPL_NONE);
 	mtx_init(&dev->tsk_lock, IPL_BIO);
 	mtx_init(&dev->lock.spinlock, IPL_NONE);
 
 	id_entry = drm_find_description(PCI_VENDOR(pa->pa_id),
 	    PCI_PRODUCT(pa->pa_id), idlist);
 	dev->id_entry = id_entry;
-	printf(" %s(%d)", id_entry->name, dev->unit);
 
 	TAILQ_INIT(&dev->maplist);
 
@@ -253,9 +252,7 @@ drm_attach(struct device *parent, struct device *kdev,
 		printf(": couldn't allocate memory for context bitmap.\n");
 		goto error;
 	}
-	printf(", %d.%d.%d %s\n", dev->driver->major, dev->driver->minor,
-	    dev->driver->patchlevel, dev->driver->date);
-
+	printf("\n");
 	return;
 
 error:

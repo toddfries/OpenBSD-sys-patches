@@ -21,7 +21,6 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
-#include <sys/workq.h>
 
 #include <machine/bus.h>
 
@@ -47,9 +46,6 @@
 #define AML_REVISION		0x01
 #define AML_INTSTRLEN		16
 #define AML_NAMESEG_LEN		4
-
-/* XXX */
-void			acpi_dowork(void *, void *);
 
 void			aml_copyvalue(struct aml_value *, struct aml_value *);
 
@@ -531,8 +527,8 @@ void
 acpi_poll(void *arg)
 {
 	dsdt_softc->sc_poll = 1;
-	workq_add_task(dsdt_softc->sc_workq, WQ_WAITOK, acpi_dowork,
-	    dsdt_softc, NULL);
+	dsdt_softc->sc_wakeup = 0;
+	wakeup(dsdt_softc);
 
 	timeout_add_sec(&dsdt_softc->sc_dev_timeout, 10);
 }
@@ -2373,7 +2369,6 @@ void aml_xcreatefield(struct aml_value *, int, struct aml_value *, int, int,
     struct aml_value *, int, int);
 void aml_xparsefieldlist(struct aml_scope *, int, int,
     struct aml_value *, struct aml_value *, int);
-int aml_evalhid(struct aml_node *, struct aml_value *);
 
 #define GAS_PCI_CFG_SPACE_UNEVAL  0xCC
 

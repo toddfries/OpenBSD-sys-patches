@@ -62,6 +62,8 @@ struct cfdriver acpibtn_cd = {
 	NULL, "acpibtn", DV_DULL
 };
 
+const char *acpibtn_hids[] = { ACPI_DEV_LD, ACPI_DEV_PBD, ACPI_DEV_SBD, 0 };
+
 int
 acpibtn_match(struct device *parent, void *match, void *aux)
 {
@@ -69,12 +71,7 @@ acpibtn_match(struct device *parent, void *match, void *aux)
 	struct cfdata		*cf = match;
 
 	/* sanity */
-	if (aa->aaa_name == NULL ||
-	    strcmp(aa->aaa_name, cf->cf_driver->cd_name) != 0 ||
-	    aa->aaa_table != NULL)
-		return (0);
-
-	return (1);
+	return acpi_matchhids(aa, acpibtn_hids, cf->cf_driver->cd_name);
 }
 
 void
@@ -125,11 +122,17 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 	switch (sc->sc_btn_type) {
 	case ACPIBTN_LID:
 	case ACPIBTN_SLEEP:
+#ifdef acpi_sleep_enabled
+	case ACPIBTN_POWER:
+		acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
+#endif /* acpi_sleep_enabled */
 		break;
+#ifndef acpi_sleep_enabled
 	case ACPIBTN_POWER:
 		if (notify_type == 0x80)
 			psignal(initproc, SIGUSR2);
 		break;
+#endif
 	default:
 		printf("%s: spurious acpi button interrupt %i\n", DEVNAME(sc),
 		    sc->sc_btn_type);

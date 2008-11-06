@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.67 2008/06/14 03:48:32 art Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.68 2008/10/23 23:54:02 tedu Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 

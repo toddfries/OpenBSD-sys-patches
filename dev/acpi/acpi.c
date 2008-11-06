@@ -25,7 +25,7 @@
 #include <sys/event.h>
 #include <sys/signalvar.h>
 #include <sys/proc.h>
-#include <sys/workq.h>
+#include <sys/kthread.h>
 
 #include <machine/conf.h>
 #include <machine/cpufunc.h>
@@ -53,9 +53,10 @@ int acpi_hasprocfvs;
 
 #define ACPIEN_RETRIES 15
 
-void	acpi_initialize(void *, void *);
-/* XXX */
-void	acpi_dowork(void *, void *);
+void    acpipwr(int, void *);
+
+void	acpi_isr_thread(void *);
+void	acpi_create_thread(void *);
 
 int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
@@ -83,6 +84,7 @@ void	acpi_init_gpes(struct acpi_softc *);
 void	acpi_init_pm(struct acpi_softc *);
 
 #ifndef SMALL_KERNEL
+int acpi_show_device(struct aml_node *node, void *arg);
 int acpi_add_device(struct aml_node *node, void *arg);
 #endif /* SMALL_KERNEL */
 
@@ -92,8 +94,19 @@ int	acpi_gpe_edge(struct acpi_softc *, int, void *);
 
 struct gpe_block *acpi_find_gpe(struct acpi_softc *, int);
 
+void	acpi_sleep_prep_walk(struct acpi_softc *, int);
+void	acpi_wake_prep_walk(struct acpi_softc *, int);
+
 #define	ACPI_LOCK(sc)
 #define	ACPI_UNLOCK(sc)
+
+struct aml_pwr
+{
+	struct aml_node *node;
+	int refcnt;
+	struct aml_pwr *next;
+};
+struct aml_pwr *acpi_add_pwrrsrc(struct aml_node *node);
 
 /* XXX move this into dsdt softc at some point */
 extern struct aml_node aml_root;
@@ -362,6 +375,52 @@ acpi_match(struct device *parent, void *match, void *aux)
 	return (1);
 }
 
+int acpi_foundide(struct aml_node *node, void *arg);
+int acpiide_notify(struct aml_node *, int, void *);
+
+int ide_installed=1;
+
+#include <dev/pci/pciidereg.h>
+#include <dev/pci/pciidevar.h>
+void  wdcattach(struct channel_softc *);
+int   wdcdetach(struct channel_softc *, int);
+int acpiide_notify(struct aml_node *node, int ntype, void *arg)
+{
+	struct aml_value res;
+	struct acpi_softc *sc = arg;
+	struct device *dev;
+
+	printf("IDE notify! %s %d\n", aml_nodename(node), ntype);
+	if (aml_evalname(sc, node, "_STA", 0, NULL, &res) != 0) {
+		return 0;
+	}
+	printf("Status is %x\n", res.v_integer);
+	TAILQ_FOREACH(dev, &alldevs, dv_list) {
+		struct pciide_softc *wsc = 
+		    (struct pciide_softc *)dev;
+
+		if (strncmp(dev->dv_xname, "pciide", 6)) {
+			continue;
+		}
+		if (res.v_integer == 0 && ide_installed) {
+			ide_installed = 0;
+			wdcdetach(&wsc->pciide_channels[0].wdc_channel,0);
+		}
+		else if (res.v_integer && !ide_installed) {
+			ide_installed = 1;
+			wdcattach(&wsc->pciide_channels[0].wdc_channel);
+		}
+	}
+	return 0;
+}
+
+int acpi_foundide(struct aml_node *node, void *arg)
+{
+	dnprintf(5, "Found IDE/SATA: %s\n", aml_nodename(node));
+	aml_register_notify(node->parent, "acpiide", acpiide_notify, arg, 0);
+	return 0;
+}
+
 void
 acpi_attach(struct device *parent, struct device *self, void *aux)
 {
@@ -587,10 +646,14 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	 /* XXX EC needs to be attached first on some systems */
 	aml_find_node(&aml_root, "_HID", acpi_foundec, sc);
 
+	aml_walknodes(&aml_root, AML_WALK_PRE, acpi_show_device, sc);
 	aml_walknodes(&aml_root, AML_WALK_PRE, acpi_add_device, sc);
 
 	/* attach battery, power supply and button devices */
 	aml_find_node(&aml_root, "_HID", acpi_foundhid, sc);
+
+	aml_find_node(&aml_root, "_GTF", acpi_foundide, sc);
+	aml_find_node(&aml_root, "_GTM", acpi_foundide, sc);
 
 	/* attach docks */
 	aml_find_node(&aml_root, "_DCK", acpi_founddock, sc);
@@ -615,13 +678,13 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Setup threads */
-	sc->sc_workq = workq_create("acpi", 1);
+	sc->sc_thread = malloc(sizeof(struct acpi_thread), M_DEVBUF, M_WAITOK);
+	sc->sc_thread->sc = sc;
+	sc->sc_thread->running = 1;
 
 	acpi_attach_machdep(sc);
 
-	workq_add_task(sc->sc_workq, WQ_WAITOK, acpi_initialize, sc,
-	    NULL);
-
+	kthread_create_deferred(acpi_create_thread, sc);
 #endif /* SMALL_KERNEL */
 }
 
@@ -1295,11 +1358,60 @@ acpi_interrupt(void *arg)
 	}
 
 	if (processed) {
-		workq_add_task(sc->sc_workq, WQ_WAITOK, acpi_dowork,
-		    sc, NULL);
+		sc->sc_wakeup = 0;
+		wakeup(sc);
 	}
 
 	return (processed);
+}
+
+int
+acpi_show_device(struct aml_node *node, void *arg)
+{
+	struct acpi_softc *sc = arg;
+	struct aml_node *p;
+	struct aml_value res;
+
+	if (node->value->type != AML_OBJTYPE_DEVICE)
+		return 0;
+	dnprintf(5, "Device: %s\n", aml_nodename(node));
+	for (p=node; p; p=p->parent) {
+		if (aml_evalhid(p, &res) == 0) {
+			dnprintf(5, "  _HID is: '%s' self:%d\n",
+			    res.v_string, p == node);
+			aml_freevalue(&res);
+			break;
+		}
+	}
+	if (aml_evalname(sc, node, "_ADR", 0, NULL, &res) == 0) {
+		dnprintf(5, "  _ADR is: %llx\n", res.v_integer);
+	}
+	return 0;
+}
+
+struct aml_pwr *pwrlist;
+
+struct aml_pwr *
+acpi_add_pwrrsrc(struct aml_node *node)
+{
+	struct aml_pwr *pwr;
+
+	if (node == NULL || node->value->type != AML_OBJTYPE_POWERRSRC) {
+		printf("not power resource\n");
+	}
+	for (pwr=pwrlist; pwr; pwr=pwr->next) {
+		if (pwr->node == node) {
+			pwr->refcnt++;
+			return pwr;
+		}
+	}
+	pwr = (struct aml_pwr *)malloc(sizeof(*pwr), M_DEVBUF, M_NOWAIT);
+	pwr->node = node;
+	pwr->next = pwrlist;
+	pwr->refcnt = 0;
+	pwrlist = pwr;
+
+	return pwr;
 }
 
 int
@@ -1342,6 +1454,12 @@ acpi_add_device(struct aml_node *node, void *arg)
 	case AML_OBJTYPE_THERMZONE:
 		aaa.aaa_name = "acpitz";
 		break;
+	case AML_OBJTYPE_POWERRSRC:
+		acpi_add_pwrrsrc(node);
+		break;
+	case AML_OBJTYPE_DEVICE:
+		powerhook_establish(acpipwr, node);
+		return 0;
 	default:
 		return 0;
 	}
@@ -1654,20 +1772,133 @@ acpi_init_pm(struct acpi_softc *sc)
 	sc->sc_gts = aml_searchname(&aml_root, "_GTS");
 }
 
+void acpi_sleep_walk(struct acpi_softc *sc, int state);
+
 void
-acpi_enter_sleep_state(struct acpi_softc *sc, int state)
+acpipwr(int why, void *arg)
+{
+	struct aml_node *node = arg;
+	struct aml_node *pp;
+	struct aml_value res;
+	char psx[] = { '_', 'P', 'S', '0', 0 };
+	int i;
+
+	if (why != PWR_RESUME)
+		psx[3] = '3';
+
+	if (aml_searchname(node, psx) != NULL) {
+		printf("acpi power: %d %s %s\n", why, 
+		    aml_nodename(node), psx);
+		aml_evalname(acpi_softc, node, psx, 0, NULL, NULL);
+	}
+	/* Execute PR0 method */
+	if (!aml_evalname(acpi_softc, node, "_PR0", 0, NULL, &res)) {
+		for (i = 0; i < res.length; i++) {
+			pp = aml_searchname(node, res.v_package[i]->v_string);
+			if (pp == NULL)
+				continue;
+			printf("%s: Power Resource\n", aml_nodename(node));
+			acpi_add_pwrrsrc(pp);
+			aml_evalname(acpi_softc, pp, 
+			    why == PWR_RESUME ? "_ON_" : "_OFF",
+			    0, NULL, NULL);
+		}
+	}
+}       
+
+void
+acpi_sleep_walk(struct acpi_softc *sc, int state)
+{
+	struct acpi_wakeq *wentry;
+	int idx;
+
+	/* Clear GPE status */
+	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
+		acpi_write_pmreg(sc, ACPIREG_GPE_EN,  idx>>3, 0);
+		acpi_write_pmreg(sc, ACPIREG_GPE_STS, idx>>3, -1);
+	}
+
+	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
+		dnprintf(5, "%.4s(S%d) gpe %.2x\n", wentry->q_node->name,
+		    wentry->q_state,
+		    wentry->q_gpe);
+		if (state <= wentry->q_state)
+			acpi_enable_onegpe(sc, wentry->q_gpe, 1);
+	}
+
+	/* Walk devices for PSx */
+}
+
+#if 0
+void
+apci_resume_walk(struct acpi_softc *sc, int state)
+{
+	struct acpi_wakeq *wentry;
+
+	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
+		printf("%.4s(S%d)\n", wentry->q_node->name,
+		    wentry->q_state);
+		if (state <= wentry->q_state)
+			acpi_enable_onegpe(sc, wentry->w_gpe, 1);
+	}
+}
+#endif
+
+int
+acpi_sleep_state(struct acpi_softc *sc, int state)
+{
+	int ret;
+
+	switch (state) {
+	case ACPI_STATE_S0:
+		return (0);
+	case ACPI_STATE_S4:
+		return (EOPNOTSUPP);
+	case ACPI_STATE_S5:
+		break;
+	case ACPI_STATE_S1:
+	case ACPI_STATE_S2:
+	case ACPI_STATE_S3:
+		if (sc->sc_sleeptype[state].slp_typa == -1 ||
+		    sc->sc_sleeptype[state].slp_typb == -1)
+			return (EOPNOTSUPP);
+	}
+
+	acpi_sleep_walk(sc, state);
+
+	if ((ret = acpi_prepare_sleep_state(sc, state)) != 0)
+		return (ret);
+
+	if (state != ACPI_STATE_S1) {
+		ret = acpi_sleep_machdep(sc, state);
+	} else {
+		ret = acpi_enter_sleep_state(sc, state);
+	}
+#ifdef notyet
+	acpi_wake_prep_walk(sc, state);
+#endif
+
+#ifdef acpi_sleep_enabled
+	acpi_resume(sc);
+#endif
+
+	printf( "ACPI Sleep/Resume cycle complete.\n" );
+
+	return (ret);
+}
+
+int
+acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 {
 	struct aml_value env;
-	u_int16_t rega, regb;
-	int retries;
 
 	if (state == ACPI_STATE_S0)
-		return;
+		return (0);
 	if (sc->sc_sleeptype[state].slp_typa == -1 ||
 	    sc->sc_sleeptype[state].slp_typb == -1) {
 		printf("%s: state S%d unavailable\n",
 		    sc->sc_dev.dv_xname, state);
-		return;
+		return (ENXIO);
 	}
 
 	memset(&env, 0, sizeof(env));
@@ -1678,7 +1909,7 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _TTS failed.\n",
 			    DEVNAME(sc));
-			return;
+			return (ENXIO);
 		}
 	}
 	switch (state) {
@@ -1697,7 +1928,7 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _PTS failed.\n",
 			    DEVNAME(sc));
-			return;
+			return (ENXIO);
 		}
 	}
 	sc->sc_state = state;
@@ -1706,13 +1937,24 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 		if (aml_evalnode(sc, sc->sc_gts, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _GTS failed.\n",
 			    DEVNAME(sc));
-			return;
+			return (ENXIO);
 		}
 	}
-	disable_intr();
+	aml_evalname(sc, &aml_root, "\\_SST", 1, &env, NULL);
+
+	sc->sc_state = state;
+
+	return (0);
+}
+
+int
+acpi_enter_sleep_state(struct acpi_softc *sc, int state)
+{
+	uint16_t rega, regb;
+	int retries;
 
 	/* Clear WAK_STS bit */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_WAK_STS);
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 1, ACPI_PM1_WAK_STS);
 
 	/* Write SLP_TYPx values */
 	rega = acpi_read_pmreg(sc, ACPIREG_PM1A_CNT, 0);
@@ -1727,6 +1969,15 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 	/* Set SLP_EN bit */
 	rega |= ACPI_PM1_SLP_EN;
 	regb |= ACPI_PM1_SLP_EN;
+
+	/*
+	 * Let the machdep code flush caches and do any other necessary
+	 * tasks before going away.
+	 */
+	acpi_cpu_flush(sc, state);
+
+/*	delay(10000000); */
+
 	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
 	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
 
@@ -1740,104 +1991,68 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 		DELAY(10);
 	}
 
-	enable_intr();
+	return -1;
 }
 
-#if 0
 void
 acpi_resume(struct acpi_softc *sc)
 {
 	struct aml_value env;
+
+	printf("Optimist.\n");
 
 	memset(&env, 0, sizeof(env));
 	env.type = AML_OBJTYPE_INTEGER;
 	env.v_integer = sc->sc_state;
 
 	if (sc->sc_bfs) {
-		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
+		if (aml_evalnode(sc, sc->sc_bfs, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _BFS failed.\n",
 			    DEVNAME(sc));
 		}
+		printf("done with BFS\n");
 	}
-	dopowerhooks(PWR_RESUME);
-	inittodr(0);
 	if (sc->sc_wak) {
 		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _WAK failed.\n",
 			    DEVNAME(sc));
 		}
+		printf("done with wak\n");
 	}
 	sc->sc_state = ACPI_STATE_S0;
+
+	dopowerhooks(PWR_RESUME);
+	inittodr(0);
+
 	if (sc->sc_tts) {
 		env.v_integer = sc->sc_state;
-		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _TTS failed.\n",
 			    DEVNAME(sc));
 		}
 	}
 }
-#endif
 
 void
 acpi_powerdown(void)
 {
+	/*
+	 * In case acpi_prepare_sleep fails, we shouldn't try to enter
+	 * the sleep state. It might cost us the battery.
+	 */
+	if (acpi_prepare_sleep_state(acpi_softc, ACPI_STATE_S5) == 0)
 	acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
 }
 
 extern int aml_busy;
+int acpi_en_s3;
 
-/* XXX */
 void
-acpi_dowork(void *arg, void *unused)
+acpi_isr_thread(void *arg)
 {
-	struct acpi_softc *sc = arg;
+	struct acpi_thread *thread = arg;
+	struct acpi_softc  *sc = thread->sc;
 	u_int32_t gpe;
-
-	if (aml_busy)
-		return;
-
-	for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
-		struct gpe_block *pgpe = &sc->gpe_table[gpe];
-
-		if (pgpe->active) {
-			pgpe->active = 0;
-			dnprintf(50, "softgpe: %.2x\n", gpe);
-			if (pgpe->handler)
-				pgpe->handler(sc, gpe, pgpe->arg);
-		}
-	}
-	if (sc->sc_powerbtn) {
-		sc->sc_powerbtn = 0;
-
-		aml_notify_dev(ACPI_DEV_PBD, 0x80);
-
-		acpi_evindex++;
-		dnprintf(1,"power button pressed\n");
-		KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_PWRBTN,
-		    acpi_evindex));
-	}
-	if (sc->sc_sleepbtn) {
-		sc->sc_sleepbtn = 0;
-
-		aml_notify_dev(ACPI_DEV_SBD, 0x80);
-
-		acpi_evindex++;
-		dnprintf(1,"sleep button pressed\n");
-		KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_SLPBTN,
-		    acpi_evindex));
-	}
-
-	/* handle polling here to keep code non-concurrent*/
-	if (sc->sc_poll) {
-		sc->sc_poll = 0;
-		acpi_poll_notify();
-	}
-}
-
-void
-acpi_initialize(void *arg, void *unused)
-{
-	struct acpi_softc *sc = arg;
 
 	/*
 	 * If we have an interrupt handler, we can get notification
@@ -1845,13 +2060,13 @@ acpi_initialize(void *arg, void *unused)
 	 * so let us enable some events we can forward to userland
 	 */
 	if (sc->sc_interrupt) {
-		u_int32_t gpe;
 		int16_t flag;
 
 		dnprintf(1,"slpbtn:%c  pwrbtn:%c\n",
 		    sc->sc_fadt->flags & FADT_SLP_BUTTON ? 'n' : 'y',
 		    sc->sc_fadt->flags & FADT_PWR_BUTTON ? 'n' : 'y');
 		dnprintf(10, "Enabling acpi interrupts...\n");
+		sc->sc_wakeup = 1;
 
 		/* Enable Sleep/Power buttons if they exist */
 		flag = acpi_read_pmreg(sc, ACPIREG_PM1_EN, 0);
@@ -1868,6 +2083,69 @@ acpi_initialize(void *arg, void *unused)
 			if (sc->gpe_table[gpe].handler)
 				acpi_enable_onegpe(sc, gpe, 1);
 		}
+	}
+
+	while (thread->running) {
+		dnprintf(10, "sleep... %d\n", sc->sc_wakeup);
+		while (sc->sc_wakeup)
+			tsleep(sc, PWAIT, "acpi_idle", 0);
+		sc->sc_wakeup = 1;
+		dnprintf(10, "wakeup..\n");
+		if (aml_busy)
+			continue;
+
+		for (gpe = 0; gpe < sc->sc_lastgpe; gpe++) {
+			struct gpe_block *pgpe = &sc->gpe_table[gpe];
+
+			if (pgpe->active) {
+				pgpe->active = 0;
+				dnprintf(50, "softgpe: %.2x\n", gpe);
+				if (pgpe->handler)
+					pgpe->handler(sc, gpe, pgpe->arg);
+			}
+		}
+		if (sc->sc_powerbtn) {
+			sc->sc_powerbtn = 0;
+
+			aml_notify_dev(ACPI_DEV_PBD, 0x80);
+
+			acpi_evindex++;
+			dnprintf(1,"power button pressed\n");
+			KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_PWRBTN,
+			    acpi_evindex));
+		}
+		if (sc->sc_sleepbtn) {
+			sc->sc_sleepbtn = 0;
+			printf("sleep button pressed\n");
+			aml_notify_dev(ACPI_DEV_SBD, 0x80);
+
+			acpi_evindex++;
+			dnprintf(1,"sleep button pressed\n");
+			KNOTE(sc->sc_note, ACPI_EVENT_COMPOSE(ACPI_EV_SLPBTN,
+			    acpi_evindex));
+		}
+
+		/* handle polling here to keep code non-concurrent*/
+		if (sc->sc_poll) {
+			sc->sc_poll = 0;
+			acpi_poll_notify();
+		}
+	}
+	free(thread, M_DEVBUF);
+
+	kthread_exit(0);
+}
+
+void
+acpi_create_thread(void *arg)
+{
+	struct acpi_softc *sc = arg;
+
+	if (kthread_create(acpi_isr_thread, sc->sc_thread, NULL, DEVNAME(sc))
+	    != 0) {
+		printf("%s: unable to create isr thread, GPEs disabled\n",
+		    DEVNAME(sc));
+		return;
 	}
 }
 
@@ -1935,6 +2213,23 @@ acpi_foundec(struct aml_node *node, void *arg)
 	aml_freevalue(&res);
 
 	return 0;
+}
+
+int
+acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
+    const char *driver)
+{
+	int i;
+
+	if (aa->aaa_dev == NULL || aa->aaa_node == NULL)
+		return (0);
+	for (i = 0; hids[i]; i++) {
+		if (!strcmp(aa->aaa_dev, hids[i])) {
+			dnprintf(5, "driver %s matches %s\n", driver, hids[i]);
+			return (1);
+		}
+	}
+	return (0);
 }
 
 int

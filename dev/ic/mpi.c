@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.98 2008/10/07 12:34:30 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.104 2008/11/03 01:42:15 marco Exp $ */
 
 /*
  * Copyright (c) 2005, 2006 David Gwynne <dlg@openbsd.org>
@@ -17,19 +17,25 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include "bio.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/device.h>
+#include <sys/ioctl.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
+#include <sys/rwlock.h>
+#include <sys/sensors.h>
 
 #include <machine/bus.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 
+#include <dev/biovar.h>
 #include <dev/ic/mpireg.h>
 #include <dev/ic/mpivar.h>
 
@@ -138,6 +144,20 @@ int			mpi_req_cfg_header(struct mpi_softc *, u_int8_t,
 int			mpi_req_cfg_page(struct mpi_softc *, u_int32_t, int,
 			    void *, int, void *, size_t);
 
+#if NBIO > 0
+int		mpi_bio_get_pg0_raid(struct mpi_softc *, int);
+int		mpi_ioctl(struct device *, u_long, caddr_t);
+int		mpi_ioctl_inq(struct mpi_softc *, struct bioc_inq *);
+int		mpi_ioctl_vol(struct mpi_softc *, struct bioc_vol *);
+int		mpi_ioctl_disk(struct mpi_softc *, struct bioc_disk *);
+int		mpi_ioctl_setstate(struct mpi_softc *, struct bioc_setstate *);
+#ifndef SMALL_KERNEL
+int		mpi_create_sensors(struct mpi_softc *);
+void		mpi_refresh_sensors(void *);
+void		mpi_refresh_sensors(void *);
+#endif /* SMALL_KERNEL */
+#endif /* NBIO > 0 */
+
 #define DEVNAME(s)		((s)->sc_dev.dv_xname)
 
 #define	dwordsof(s)		(sizeof(s) / sizeof(u_int32_t))
@@ -241,6 +261,8 @@ mpi_attach(struct mpi_softc *sc)
 		mpi_squash_ppr(sc);
 	}
 
+	rw_init(&sc->sc_lock, "mpi_lock");
+
 	/* we should be good to go now, attach scsibus */
 	sc->sc_link.device = &mpi_dev;
 	sc->sc_link.adapter = &mpi_switch;
@@ -265,6 +287,39 @@ mpi_attach(struct mpi_softc *sc)
 
 	/* enable interrupts */
 	mpi_write(sc, MPI_INTR_MASK, MPI_INTR_MASK_DOORBELL);
+
+#ifdef notyet
+#if NBIO > 0
+	if (sc->sc_flags & MPI_F_RAID) {
+		if (bio_register(&sc->sc_dev, mpi_ioctl) != 0)
+			panic("%s: controller registration failed",
+			    DEVNAME(sc));
+		else {
+			if (mpi_cfg_header(sc, MPI_CONFIG_REQ_PAGE_TYPE_IOC,
+			    2, 0, &sc->sc_cfg_hdr) != 0) {
+				printf("%s: can't get IOC page 2 hdr, bio "
+				    "disabled\n", DEVNAME(sc));
+				goto done;
+			}
+			sc->sc_vol_page = malloc(sc->sc_cfg_hdr.page_length * 4,
+			    M_TEMP, M_WAITOK | M_CANFAIL);
+			if (sc->sc_vol_page == NULL) {
+				printf("%s: can't get memory for IOC page 2, "
+				    "bio disabled\n", DEVNAME(sc));
+				goto done;
+			}
+			sc->sc_vol_list = (struct mpi_cfg_raid_vol *)
+			    (sc->sc_vol_page + 1);
+
+			sc->sc_ioctl = mpi_ioctl;
+		}
+	}
+#ifndef SMALL_KERNEL
+	mpi_create_sensors(sc);
+#endif /* SMALL_KERNEL */
+done:
+#endif /* NBIO > 0 */
+#endif /* notyet */
 
 	return (0);
 
@@ -1408,38 +1463,32 @@ mpi_scsi_probe(struct scsi_link *link)
 	if (mpi_ecfg_page(sc, address, &ehdr, 1, &pg0, sizeof(pg0)) != 0)
 		return (0);
 
-	DPRINTF(MPI_D_MISC, "%s: mpi_scsi_probe sas dev pg 0 for target %d:\n",
+	DNPRINTF(MPI_D_MISC, "%s: mpi_scsi_probe sas dev pg 0 for target %d:\n",
 	    DEVNAME(sc), link->target);
-	DPRINTF(MPI_D_MISC, "%s:  slot: 0x%04x enc_handle: 0x%04x\n",
+	DNPRINTF(MPI_D_MISC, "%s:  slot: 0x%04x enc_handle: 0x%04x\n",
 	    DEVNAME(sc), letoh16(pg0.slot), letoh16(pg0.enc_handle));
-	DPRINTF(MPI_D_MISC, "%s:  sas_addr: 0x%016llx\n", DEVNAME(sc),
+	DNPRINTF(MPI_D_MISC, "%s:  sas_addr: 0x%016llx\n", DEVNAME(sc),
 	    letoh64(pg0.sas_addr));
-	DPRINTF(MPI_D_MISC, "%s:  parent_dev_handle: 0x%04x phy_num: 0x%02x "
+	DNPRINTF(MPI_D_MISC, "%s:  parent_dev_handle: 0x%04x phy_num: 0x%02x "
 	    "access_status: 0x%02x\n", DEVNAME(sc),
 	    letoh16(pg0.parent_dev_handle), pg0.phy_num, pg0.access_status);
-	DPRINTF(MPI_D_MISC, "%s:  dev_handle: 0x%04x "
+	DNPRINTF(MPI_D_MISC, "%s:  dev_handle: 0x%04x "
 	    "bus: 0x%02x target: 0x%02x\n", DEVNAME(sc),
 	    letoh16(pg0.dev_handle), pg0.bus, pg0.target);
-	DPRINTF(MPI_D_MISC, "%s:  device_info: 0x%08x\n", DEVNAME(sc),
+	DNPRINTF(MPI_D_MISC, "%s:  device_info: 0x%08x\n", DEVNAME(sc),
 	    letoh32(pg0.device_info));
-	DPRINTF(MPI_D_MISC, "%s:  flags: 0x%04x physical_port: 0x%02x\n",
+	DNPRINTF(MPI_D_MISC, "%s:  flags: 0x%04x physical_port: 0x%02x\n",
 	    DEVNAME(sc), letoh16(pg0.flags), pg0.physical_port);
 
 	if (ISSET(letoh32(pg0.device_info),
 	    MPI_CFG_SAS_DEV_0_DEVINFO_ATAPI_DEVICE)) {
-		DPRINTF(MPI_D_MISC, "%s: target %d is an ATAPI device\n",
+		DNPRINTF(MPI_D_MISC, "%s: target %d is an ATAPI device\n",
 		    DEVNAME(sc), link->target);
 		link->flags |= SDEV_ATAPI;
 		link->quirks |= SDEV_ONLYBIG;
 	}
 
 	return (0);
-}
-
-int
-mpi_scsi_ioctl(struct scsi_link *a, u_long b, caddr_t c, int d, struct proc *e)
-{
-	return (ENOTTY);
 }
 
 u_int32_t
@@ -2522,3 +2571,437 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int extended,
 
 	return (rv);
 }
+
+int
+mpi_scsi_ioctl(struct scsi_link *link, u_long cmd, caddr_t addr, int flag,
+    struct proc *p)
+{
+	struct mpi_softc	*sc = (struct mpi_softc *)link->adapter_softc;
+
+	DNPRINTF(MPI_D_IOCTL, "%s: mpi_scsi_ioctl\n", DEVNAME(sc));
+
+	if (sc->sc_ioctl)
+		return (sc->sc_ioctl(link->adapter_softc, cmd, addr));
+	else
+		return (ENOTTY);
+}
+
+#if NBIO > 0
+int
+mpi_bio_get_pg0_raid(struct mpi_softc *sc, int id)
+{
+	int			len, rv = EINVAL;
+	u_int32_t		address;
+	struct mpi_cfg_hdr	hdr;
+	struct mpi_cfg_raid_vol_pg0 *rpg0;
+
+	/* get IOC page 2 */
+	if (mpi_cfg_page(sc, 0, &sc->sc_cfg_hdr, 1, sc->sc_vol_page,
+	    sc->sc_cfg_hdr.page_length * 4) != 0) {
+		DNPRINTF(MPI_D_IOCTL, "%s: mpi_bio_get_pg0_raid unable to "
+		    "fetch IOC page 2\n", DEVNAME(sc));
+		goto done;
+	}
+
+	/* XXX return something else than EINVAL to indicate within hs range */
+	if (id > sc->sc_vol_page->active_vols) {
+		DNPRINTF(MPI_D_IOCTL, "%s: mpi_bio_get_pg0_raid invalid vol "
+		    "id: %d\n", DEVNAME(sc), id);
+		goto done;
+	}
+
+	/* replace current buffer with new one */
+	len = sizeof *rpg0 + sc->sc_vol_page->max_physdisks *
+	    sizeof(struct mpi_cfg_raid_vol_pg0_physdisk);
+	rpg0 = malloc(len, M_TEMP, M_WAITOK | M_CANFAIL);
+	if (rpg0 == NULL) {
+		printf("%s: can't get memory for RAID page 0, "
+		    "bio disabled\n", DEVNAME(sc));
+		goto done;
+	}
+	if (sc->sc_rpg0)
+		free(sc->sc_rpg0, M_DEVBUF);
+	sc->sc_rpg0 = rpg0;
+
+	/* get raid vol page 0 */
+	address = sc->sc_vol_list[id].vol_id |
+	    (sc->sc_vol_list[id].vol_bus << 8);
+	if (mpi_cfg_header(sc, MPI_CONFIG_REQ_PAGE_TYPE_RAID_VOL, 0,
+	    address, &hdr) != 0)
+		goto done;
+	if (mpi_cfg_page(sc, address, &hdr, 1, rpg0, len)) {
+		printf("%s: can't get RAID vol cfg page 0\n", DEVNAME(sc));
+		goto done;
+	}
+
+	rv = 0;
+done:
+	return (rv);
+}
+
+int
+mpi_ioctl(struct device *dev, u_long cmd, caddr_t addr)
+{
+	struct mpi_softc	*sc = (struct mpi_softc *)dev;
+	int error = 0;
+
+	DNPRINTF(MPI_D_IOCTL, "%s: mpi_ioctl ", DEVNAME(sc));
+
+	/* make sure we have bio enabled */
+	if (sc->sc_ioctl != mpi_ioctl)
+		return (EINVAL);
+
+	rw_enter_write(&sc->sc_lock);
+
+	switch (cmd) {
+	case BIOCINQ:
+		DNPRINTF(MPI_D_IOCTL, "inq\n");
+		error = mpi_ioctl_inq(sc, (struct bioc_inq *)addr);
+		break;
+
+	case BIOCVOL:
+		DNPRINTF(MPI_D_IOCTL, "vol\n");
+		error = mpi_ioctl_vol(sc, (struct bioc_vol *)addr);
+		break;
+
+	case BIOCDISK:
+		DNPRINTF(MPI_D_IOCTL, "disk\n");
+		error = mpi_ioctl_disk(sc, (struct bioc_disk *)addr);
+		break;
+
+	case BIOCALARM:
+		DNPRINTF(MPI_D_IOCTL, "alarm\n");
+		break;
+
+	case BIOCBLINK:
+		DNPRINTF(MPI_D_IOCTL, "blink\n");
+		break;
+
+	case BIOCSETSTATE:
+		DNPRINTF(MPI_D_IOCTL, "setstate\n");
+		error = mpi_ioctl_setstate(sc, (struct bioc_setstate *)addr);
+		break;
+
+	default:
+		DNPRINTF(MPI_D_IOCTL, " invalid ioctl\n");
+		error = EINVAL;
+	}
+
+	rw_exit_write(&sc->sc_lock);
+
+	return (error);
+}
+
+int
+mpi_ioctl_inq(struct mpi_softc *sc, struct bioc_inq *bi)
+{
+	if (!(sc->sc_flags & MPI_F_RAID)) {
+		bi->bi_novol = 0;
+		bi->bi_nodisk = 0;
+	}
+
+	if (mpi_cfg_page(sc, 0, &sc->sc_cfg_hdr, 1, sc->sc_vol_page,
+	    sc->sc_cfg_hdr.page_length * 4) != 0) {
+		DNPRINTF(MPI_D_IOCTL, "%s: mpi_get_raid unable to fetch IOC "
+		    "page 2\n", DEVNAME(sc));
+		return (EINVAL);
+	}
+
+	DNPRINTF(MPI_D_IOCTL, "%s:  active_vols: %d max_vols: %d "
+	    "active_physdisks: %d max_physdisks: %d\n", DEVNAME(sc),
+	    sc->sc_vol_page->active_vols, sc->sc_vol_page->max_vols,
+	    sc->sc_vol_page->active_physdisks, sc->sc_vol_page->max_physdisks);
+
+	bi->bi_novol = sc->sc_vol_page->active_vols;
+	bi->bi_nodisk = sc->sc_vol_page->active_physdisks;
+	strlcpy(bi->bi_dev, DEVNAME(sc), sizeof(bi->bi_dev));
+
+	return (0);
+}
+
+int
+mpi_ioctl_vol(struct mpi_softc *sc, struct bioc_vol *bv)
+{
+	int			i, vol, id, rv = EINVAL;
+	struct device		*dev;
+	struct scsi_link	*link;
+	struct mpi_cfg_raid_vol_pg0 *rpg0;
+
+	id = bv->bv_volid;
+	if (mpi_bio_get_pg0_raid(sc, id))
+		goto done;
+
+	if (id > sc->sc_vol_page->active_vols)
+		return (EINVAL); /* XXX deal with hot spares */
+
+	rpg0 = sc->sc_rpg0;
+	if (rpg0 == NULL)
+		goto done;
+
+	/* determine status */
+	switch (rpg0->volume_state) {
+	case MPI_CFG_RAID_VOL_0_STATE_OPTIMAL:
+		bv->bv_status = BIOC_SVONLINE;
+		break;
+	case MPI_CFG_RAID_VOL_0_STATE_DEGRADED:
+		bv->bv_status = BIOC_SVDEGRADED;
+		break;
+	case MPI_CFG_RAID_VOL_0_STATE_FAILED:
+	case MPI_CFG_RAID_VOL_0_STATE_MISSING:
+		bv->bv_status = BIOC_SVOFFLINE;
+		break;
+	default:
+		bv->bv_status = BIOC_SVINVALID;
+	}
+
+	/* override status if scrubbing or something */
+	if (rpg0->volume_status & MPI_CFG_RAID_VOL_0_STATUS_RESYNCING)
+		bv->bv_status = BIOC_SVREBUILD;
+
+	bv->bv_size = (u_quad_t)letoh32(rpg0->max_lba) * 512;
+
+	switch (sc->sc_vol_list[id].vol_type) {
+	case MPI_CFG_RAID_TYPE_RAID_IS:
+		bv->bv_level = 0;
+		break;
+	case MPI_CFG_RAID_TYPE_RAID_IME:
+	case MPI_CFG_RAID_TYPE_RAID_IM:
+		bv->bv_level = 1;
+		break;
+	case MPI_CFG_RAID_TYPE_RAID_5:
+		bv->bv_level = 5;
+		break;
+	case MPI_CFG_RAID_TYPE_RAID_6:
+		bv->bv_level = 6;
+		break;
+	case MPI_CFG_RAID_TYPE_RAID_10:
+		bv->bv_level = 10;
+		break;
+	case MPI_CFG_RAID_TYPE_RAID_50:
+		bv->bv_level = 50;
+		break;
+	default:
+		bv->bv_level = -1;
+	}
+
+	bv->bv_nodisk = rpg0->num_phys_disks;
+
+	for (i = 0, vol = -1; i < sc->sc_buswidth; i++) {
+		link = sc->sc_scsibus->sc_link[i][0];
+		if (link == NULL)
+			continue;
+
+		/* skip if not a virtual disk */
+		if (!(link->flags & SDEV_VIRTUAL))
+			continue;
+
+		vol++;
+		/* are we it? */
+		if (vol == bv->bv_volid) {
+			dev = link->device_softc;
+			memcpy(bv->bv_vendor, link->inqdata.vendor,
+			    sizeof bv->bv_vendor);
+			bv->bv_vendor[sizeof(bv->bv_vendor) - 1] = '\0';
+			strlcpy(bv->bv_dev, dev->dv_xname, sizeof bv->bv_dev);
+			break;
+		}
+	}
+	rv = 0;
+done:
+	return (rv);
+}
+
+int
+mpi_ioctl_disk(struct mpi_softc *sc, struct bioc_disk *bd)
+{
+	int			pdid, id, rv = EINVAL;
+	u_int32_t		address;
+	struct mpi_cfg_hdr	hdr;
+	struct mpi_cfg_raid_vol_pg0 *rpg0;
+	struct mpi_cfg_raid_vol_pg0_physdisk *physdisk;
+	struct mpi_cfg_raid_physdisk_pg0 pdpg0;
+
+	id = bd->bd_volid;
+	if (mpi_bio_get_pg0_raid(sc, id))
+		goto done;
+
+	if (id > sc->sc_vol_page->active_vols)
+		return (EINVAL); /* XXX deal with hot spares */
+
+	rpg0 = sc->sc_rpg0;
+	if (rpg0 == NULL)
+		goto done;
+
+	pdid = bd->bd_diskid;
+	if (pdid > rpg0->num_phys_disks)
+		goto done;
+	physdisk = (struct mpi_cfg_raid_vol_pg0_physdisk *)(rpg0 + 1);
+	physdisk += pdid;
+
+	/* get raid phys disk page 0 */
+	address = physdisk->phys_disk_num;
+	if (mpi_cfg_header(sc, MPI_CONFIG_REQ_PAGE_TYPE_RAID_PD, 0, address,
+	    &hdr) != 0)
+		goto done;
+	if (mpi_cfg_page(sc, address, &hdr, 1, &pdpg0, sizeof pdpg0)) {
+		bd->bd_status = BIOC_SDFAILED;
+		return (0);
+	}
+	bd->bd_channel = pdpg0.phys_disk_bus;
+	bd->bd_target = pdpg0.phys_disk_id;
+	bd->bd_lun = 0;
+	bd->bd_size = (u_quad_t)pdpg0.max_lba * 512;
+	strlcpy(bd->bd_vendor, pdpg0.vendor_id, sizeof(bd->bd_vendor));
+
+	switch (pdpg0.phys_disk_state) {
+	case MPI_CFG_RAID_PHYDISK_0_STATE_ONLINE:
+		bd->bd_status = BIOC_SDONLINE;
+		break;
+	case MPI_CFG_RAID_PHYDISK_0_STATE_MISSING:
+	case MPI_CFG_RAID_PHYDISK_0_STATE_FAILED:
+		bd->bd_status = BIOC_SDFAILED;
+		break;
+	case MPI_CFG_RAID_PHYDISK_0_STATE_HOSTFAIL:
+	case MPI_CFG_RAID_PHYDISK_0_STATE_OTHER:
+	case MPI_CFG_RAID_PHYDISK_0_STATE_OFFLINE:
+		bd->bd_status = BIOC_SDOFFLINE;
+		break;
+	case MPI_CFG_RAID_PHYDISK_0_STATE_INIT:
+		bd->bd_status = BIOC_SDSCRUB;
+		break;
+	case MPI_CFG_RAID_PHYDISK_0_STATE_INCOMPAT:
+	default:
+		bd->bd_status = BIOC_SDINVALID;
+		break;
+	}
+
+	/* XXX figure this out */
+	/* bd_serial[32]; */
+	/* bd_procdev[16]; */
+
+	rv = 0;
+done:
+	return (rv);
+}
+
+int
+mpi_ioctl_setstate(struct mpi_softc *sc, struct bioc_setstate *bs)
+{
+	return (ENOTTY);
+}
+
+#ifndef SMALL_KERNEL
+int
+mpi_create_sensors(struct mpi_softc *sc)
+{
+	struct device		*dev;
+	struct scsi_link	*link;
+	int			i, vol;
+
+	/* count volumes */
+	for (i = 0, vol = 0; i < sc->sc_buswidth; i++) {
+		link = sc->sc_scsibus->sc_link[i][0];
+		if (link == NULL)
+			continue;
+		/* skip if not a virtual disk */
+		if (!(link->flags & SDEV_VIRTUAL))
+			continue;
+		
+		vol++;
+	}
+
+	sc->sc_sensors = malloc(sizeof(struct ksensor) * vol,
+	    M_DEVBUF, M_WAITOK|M_ZERO);
+	if (sc->sc_sensors == NULL)
+		return (1);
+
+	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
+	    sizeof(sc->sc_sensordev.xname));
+
+	for (i = 0, vol= 0; i < sc->sc_buswidth; i++) {
+		link = sc->sc_scsibus->sc_link[i][0];
+		if (link == NULL)
+			continue;
+		/* skip if not a virtual disk */
+		if (!(link->flags & SDEV_VIRTUAL))
+			continue;
+
+		dev = link->device_softc;
+		strlcpy(sc->sc_sensors[vol].desc, dev->dv_xname,
+		    sizeof(sc->sc_sensors[vol].desc));
+		sc->sc_sensors[vol].type = SENSOR_DRIVE;
+		sc->sc_sensors[vol].status = SENSOR_S_UNKNOWN;
+		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[vol]);
+
+		vol++;
+	}
+
+	if (sensor_task_register(sc, mpi_refresh_sensors, 10) == NULL)
+		goto bad;
+
+	sensordev_install(&sc->sc_sensordev);
+
+	return (0);
+
+bad:
+	free(sc->sc_sensors, M_DEVBUF);
+	return (1);
+}
+
+void
+mpi_refresh_sensors(void *arg)
+{
+	int			i, vol;
+	struct scsi_link	*link;
+	struct mpi_softc	*sc = arg;
+	struct mpi_cfg_raid_vol_pg0 *rpg0;
+
+	rw_enter_write(&sc->sc_lock);
+
+	for (i = 0, vol = 0; i < sc->sc_buswidth; i++) {
+		link = sc->sc_scsibus->sc_link[i][0];
+		if (link == NULL)
+			continue;
+		/* skip if not a virtual disk */
+		if (!(link->flags & SDEV_VIRTUAL))
+			continue;
+
+		if (mpi_bio_get_pg0_raid(sc, vol))
+			continue;
+
+		rpg0 = sc->sc_rpg0;
+		if (rpg0 == NULL)
+			goto done;
+
+		/* determine status */
+		switch (rpg0->volume_state) {
+		case MPI_CFG_RAID_VOL_0_STATE_OPTIMAL:
+			sc->sc_sensors[vol].value = SENSOR_DRIVE_ONLINE;
+			sc->sc_sensors[vol].status = SENSOR_S_OK;
+			break;
+		case MPI_CFG_RAID_VOL_0_STATE_DEGRADED:
+			sc->sc_sensors[vol].value = SENSOR_DRIVE_PFAIL;
+			sc->sc_sensors[vol].status = SENSOR_S_WARN;
+			break;
+		case MPI_CFG_RAID_VOL_0_STATE_FAILED:
+		case MPI_CFG_RAID_VOL_0_STATE_MISSING:
+			sc->sc_sensors[vol].value = SENSOR_DRIVE_FAIL;
+			sc->sc_sensors[vol].status = SENSOR_S_CRIT;
+			break;
+		default:
+			sc->sc_sensors[vol].value = 0; /* unknown */
+			sc->sc_sensors[vol].status = SENSOR_S_UNKNOWN;
+		}
+
+		/* override status if scrubbing or something */
+		if (rpg0->volume_status & MPI_CFG_RAID_VOL_0_STATUS_RESYNCING)
+			sc->sc_sensors[vol].value = SENSOR_DRIVE_REBUILD;
+			sc->sc_sensors[vol].status = SENSOR_S_WARN;
+
+		vol++;
+	}
+done:
+	rw_exit_write(&sc->sc_lock);
+}
+#endif /* SMALL_KERNEL */
+#endif /* NBIO > 0 */

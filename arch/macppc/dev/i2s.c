@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2s.c,v 1.12 2008/08/24 23:44:44 todd Exp $	*/
+/*	$OpenBSD: i2s.c,v 1.15 2008/10/30 06:12:47 todd Exp $	*/
 /*	$NetBSD: i2s.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
@@ -52,6 +52,15 @@
 #else
 # define DPRINTF(x)
 #endif
+
+struct audio_params i2s_audio_default = {
+	44100,		/* sample_rate */
+	AUDIO_ENCODING_SLINEAR_BE, /* encoding */
+	16,		/* precision */
+	2,		/* channels */
+	NULL,		/* sw_code */
+	1		/* factor */
+};
 
 struct i2s_mode *i2s_find_mode(u_int, u_int, u_int);
 
@@ -380,10 +389,14 @@ i2s_set_params(h, setmode, usemode, play, rec)
 
 		p = mode == AUMODE_PLAY ? play : rec;
 
-		if (p->sample_rate < 4000 || p->sample_rate > 50000 ||
-		    (p->precision != 8 && p->precision != 16) ||
-		    (p->channels != 1 && p->channels != 2))
-			return EINVAL;
+		if (p->sample_rate < 4000)
+			p->sample_rate = 4000;
+		if (p->sample_rate > 50000)
+			p->sample_rate = 50000;
+		if (p->precision > 16)
+			p->precision = 16;
+		if (p->channels > 2)
+			p->channels = 2;
 
 		switch (p->encoding) {
 		case AUDIO_ENCODING_SLINEAR_LE:
@@ -445,6 +458,12 @@ i2s_set_params(h, setmode, usemode, play, rec)
 	p->sample_rate = sc->sc_rate;
 
 	return 0;
+}
+
+void
+i2s_get_default_params(struct audio_params *params)
+{
+	*params = i2s_audio_default;
 }
 
 int
@@ -586,12 +605,16 @@ i2s_get_port(h, mc)
 		return 0;
 
 	case I2S_BASS:
+		if (mc->un.value.num_channels != 1)
+			return ENXIO;
 		mc->un.value.level[AUDIO_MIXER_LEVEL_MONO] = sc->sc_bass;
-		return (0);
+		return 0;
 
 	case I2S_TREBLE:
+		if (mc->un.value.num_channels != 1)
+			return ENXIO;
 		mc->un.value.level[AUDIO_MIXER_LEVEL_MONO] = sc->sc_treble;
-		return (0);
+		return 0;
 
 	case I2S_VOL_INPUT:
 		/* XXX TO BE DONE */
@@ -857,9 +880,9 @@ i2s_set_rate(sc, rate)
 	int timo;
 
 	/* sanify */
-	if (rate > 48000)
+	if (rate > (48000 + 44100) / 2)
 		rate = 48000;
-	else if (rate < 44100)
+	else
 		rate = 44100;
 
 	switch (rate) {

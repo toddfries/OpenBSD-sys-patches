@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.29 2008/06/26 05:42:20 ray Exp $	*/
+/*	$OpenBSD: pool.h,v 1.30 2008/10/23 23:54:02 tedu Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
