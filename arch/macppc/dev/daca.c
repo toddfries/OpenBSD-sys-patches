@@ -56,14 +56,14 @@
 
 /* XXX */
 int kiic_write(struct device *, int, int, const void *, int);
-int kiic_writereg(struct device *, int, u_int);
+void kiic_writereg(struct device *, int, u_int);
 
 int daca_getdev(void *, struct audio_device *);
 int daca_match(struct device *, void *, void *);
 void daca_attach(struct device *, struct device *, void *);
 void daca_defer(struct device *);
 void daca_init(struct daca_softc *);
-void daca_set_volume(struct daca_softc *, int, int);
+int daca_set_volume(struct daca_softc *, int, int);
 void daca_get_default_params(void *, int, struct audio_params *);
 
 struct cfattach daca_ca = {
@@ -187,18 +187,19 @@ daca_getdev(void *h, struct audio_device *retp)
 	return (0);
 }
 
-void
+int
 daca_set_volume(struct daca_softc *sc, int left, int right)
 {
 	u_int16_t data;
 
-	sc->sc_vol_l = left;
-	sc->sc_vol_r = right;
-
 	left >>= 2;
 	right >>= 2;
 	data = left << 8 | right;
-	kiic_write(sc->sc_i2c, DEQaddr, DEQ_AVOL, &data, 2);
+	if (kiic_write(sc->sc_i2c, DEQaddr, DEQ_AVOL, &data, 2))
+		return -1;
+	sc->sc_vol_l = left;
+	sc->sc_vol_r = right;
+	return 0;
 }
 
 void

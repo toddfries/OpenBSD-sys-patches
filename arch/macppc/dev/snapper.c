@@ -63,10 +63,11 @@ int snapper_getdev(void *, struct audio_device *);
 int snapper_match(struct device *, void *, void *);
 void snapper_attach(struct device *, struct device *, void *);
 void snapper_defer(struct device *);
-void snapper_set_volume(struct snapper_softc *, int, int);
-void snapper_set_bass(struct snapper_softc *, int);
-void snapper_set_treble(struct snapper_softc *, int);
-void snapper_set_input(struct snapper_softc *, int);
+int snapper_set_volume(struct snapper_softc *, int, int);
+int snapper_set_record(struct snapper_softc *, int, int);
+int snapper_set_bass(struct snapper_softc *, int);
+int snapper_set_treble(struct snapper_softc *, int);
+int snapper_set_input(struct snapper_softc *, int);
 void snapper_get_default_params(void *, int, struct audio_params *);
 
 int tas3004_write(struct snapper_softc *, u_int, const void *);
@@ -502,15 +503,12 @@ snapper_defer(struct device *dev)
 	snapper_init(sc);
 }
 
-void
+int
 snapper_set_volume(struct snapper_softc *sc, int left, int right)
 {
 	u_char vol[6];
 	int nentries = sizeof(snapper_volumetab) / sizeof(snapper_volumetab[0]);
 	int l, r;
-
-	sc->sc_vol_l = left;
-	sc->sc_vol_r = right;
 
 	l = nentries - (left * nentries / 256);
 	r = nentries - (right * nentries / 256);
@@ -530,40 +528,100 @@ snapper_set_volume(struct snapper_softc *sc, int left, int right)
 	vol[4] = snapper_volumetab[r].mid;
 	vol[5] = snapper_volumetab[r].low;
 
-	tas3004_write(sc, DEQ_VOLUME, vol);
+	if (tas3004_write(sc, DEQ_VOLUME, vol))
+		return -1;
+
+	/* XXX move this to i2s.c.. */
+	sc->sc_vol_l = left;
+	sc->sc_vol_r = right;
+
+	return 0;
 }
 
-void
+int
+snapper_set_record(struct snapper_softc *sc, int left, int right)
+{
+	u_char vol[9];
+	int nentries = sizeof(snapper_volumetab) / sizeof(snapper_volumetab[0]);
+	int l, r, off;
+
+	memset(vol,NULL,sizeof vol);
+
+	l = nentries - (left * nentries / 256);
+	r = nentries - (right * nentries / 256);
+
+	DPRINTF(" left %d vol %d %d, right %d vol %d %d\n",
+		left, l, nentries,
+		right, r, nentries);
+	if (l >= nentries)
+		l = nentries-1;
+	if (r >= nentries)
+		r = nentries-1;
+
+	switch (sc->sc_record_source) {
+		case    1 << 0: /* microphone */
+			off = 0;
+			break;
+		case	1 << 1: /* line in */
+			off = 3;
+			break;
+		case	1 << 2: /* output sound */
+			off = 6;
+			break;
+	}
+	vol[0+off] = snapper_volumetab[l].high;
+	vol[1+off] = snapper_volumetab[l].mid;
+	vol[2+off] = snapper_volumetab[l].low;
+
+	if (tas3004_write(sc, DEQ_MIXER_L, vol))
+		return -1;
+
+	vol[0+off] = snapper_volumetab[r].high;
+	vol[1+off] = snapper_volumetab[r].mid;
+	vol[2+off] = snapper_volumetab[r].low;
+
+	if (tas3004_write(sc, DEQ_MIXER_R, vol))
+		return -1;
+
+	sc->sc_record_l = left;
+	sc->sc_record_r = right;
+
+	return 0;
+}
+
+int
 snapper_set_treble(struct snapper_softc *sc, int value)
 {
 	uint8_t reg;
 
-	if ((value >= 0) && (value <= 255) && (value != sc->sc_treble)) {
+	if ((value >= 0) && (value <= 255)) {
 		reg = snapper_trebletab[(value >> 3) + 2];
 		if (tas3004_write(sc, DEQ_TREBLE, &reg) < 0)
-			return;
+			return -1;
 		sc->sc_treble = value;
 	}
+	return 0;
 }
 
-void
+int
 snapper_set_bass(struct snapper_softc *sc, int value)
 {
 	uint8_t reg;
 
-	if ((value >= 0) && (value <= 255) && (value != sc->sc_bass)) {
+	if ((value >= 0) && (value <= 255)) {
 		reg = snapper_basstab[(value >> 3) + 2];
 		if (tas3004_write(sc, DEQ_BASS, &reg) < 0)
-			return;
+			return -1;
 		sc->sc_bass = value;
 	}
+	return 0;
 }
 
-void
+int
 snapper_set_input(struct snapper_softc *sc, int mask)
 {
 	uint8_t val = 0;
-
+	
 	switch (mask) {
 	case    1 << 0: /* microphone */
 		val = DEQ_ACR_ADM | DEQ_ACR_LRB | DEQ_ACR_INP_B;
@@ -571,14 +629,19 @@ snapper_set_input(struct snapper_softc *sc, int mask)
 	case    1 << 1: /* line in */
 		val = 0;
 		break;
+	default:
+		return -1;
 	}
-	tas3004_write(sc, DEQ_ACR, &val);
+	if (tas3004_write(sc, DEQ_ACR, &val))
+		return -1;
+	sc->sc_record_source = mask;
+	return 0;
 }
 
 const struct tas3004_reg tas3004_initdata = {
 	{ DEQ_MCR1_SC_64 | DEQ_MCR1_SM_I2S | DEQ_MCR1_W_20 },	/* MCR1 */
 	{ 1, 0, 0, 0, 0, 0 },					/* DRC */
-	{ 0, 0, 0, 0, 0, 0 },					/* VOLUME */
+	{ 0x00, 0xd7, 0x66, 0x00, 0xd7, 0x66 },			/* VOLUME */
 	{ 0x72 },						/* TREBLE */
 	{ 0x72 },						/* BASS */
 	{ 0x10, 0x00, 0x00, 0, 0, 0, 0, 0, 0 },			/* MIXER_L */
@@ -601,7 +664,7 @@ const struct tas3004_reg tas3004_initdata = {
 	{ 0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },	/* BIQUAD */
 	{ 0, 0, 0 },						/* LLB_GAIN */
 	{ 0, 0, 0 },						/* RLB_GAIN */
-	{ 0 },							/* ACR */
+	{ DEQ_ACR_ADM | DEQ_ACR_LRB | DEQ_ACR_INP_B },		/* ACR */
 	{ 0 }							/* MCR2 */
 };
 
@@ -700,6 +763,15 @@ tas3004_init(struct snapper_softc *sc)
 	DEQ_WRITE(sc, DEQ_RLB_GAIN, tas3004_initdata.RLB_GAIN);
 	DEQ_WRITE(sc, DEQ_ACR, tas3004_initdata.ACR);
 
+	if (snapper_set_volume(sc, 190, 190))
+		goto err;
+	if (snapper_set_treble(sc, 128)) /* 0 dB */
+		goto err;
+	if (snapper_set_bass(sc, 128)) /* 0 dB */
+		goto err;
+	if (snapper_set_input(sc, 1 << 0)) /* Microphone */
+		goto err;
+
 	return (0);
 err:
 	printf("%s: tas3004_init failed\n", sc->sc_dev.dv_xname);
@@ -724,13 +796,6 @@ snapper_init(struct snapper_softc *sc)
 
 	if (tas3004_init(sc))
 		return;
-
-	snapper_set_volume(sc, 190, 190);
-	snapper_set_treble(sc, 128); /* 0 dB */
-	snapper_set_bass(sc, 128); /* 0 dB */
-
-	/* Microphone, reflects tas3004_initdata.ACR */
-	sc->sc_record_source = 1 << 0;
 }
 
 int

@@ -62,9 +62,9 @@ int tumbler_getdev(void *, struct audio_device *);
 int tumbler_match(struct device *, void *, void *);
 void tumbler_attach(struct device *, struct device *, void *);
 void tumbler_defer(struct device *);
-void tumbler_set_volume(struct tumbler_softc *, int, int);
-void tumbler_set_bass(struct tumbler_softc *, int);
-void tumbler_set_treble(struct tumbler_softc *, int);
+int tumbler_set_volume(struct tumbler_softc *, int, int);
+int tumbler_set_bass(struct tumbler_softc *, int);
+int tumbler_set_treble(struct tumbler_softc *, int);
 void tumbler_get_default_params(void *, int, struct audio_params *);
 
 int tas3001_write(struct tumbler_softc *, u_int, const void *);
@@ -317,13 +317,10 @@ tumbler_defer(struct device *dev)
 	tumbler_init(sc);
 }
 
-void
+int
 tumbler_set_volume(struct tumbler_softc *sc, int left, int right)
 {
 	u_char vol[6];
-
-	sc->sc_vol_l = left;
-	sc->sc_vol_r = right;
 
 	left <<= 6;	/* XXX for now */
 	right <<= 6;
@@ -335,10 +332,16 @@ tumbler_set_volume(struct tumbler_softc *sc, int left, int right)
 	vol[4] = right >> 8;
 	vol[5] = right;
 
-	tas3001_write(sc, DEQ_VOLUME, vol);
+	if (tas3001_write(sc, DEQ_VOLUME, vol))
+		return -1;
+
+	sc->sc_vol_l = left;
+	sc->sc_vol_r = right;
+
+	return 0;
 }
 
-void
+int
 tumbler_set_treble(struct tumbler_softc *sc, int value)
 {
 	uint8_t reg;
@@ -346,12 +349,13 @@ tumbler_set_treble(struct tumbler_softc *sc, int value)
 	if ((value >= 0) && (value <= 255) && (value != sc->sc_treble)) {
 		reg = tumbler_trebletab[(value >> 3) + 2];
 		if (tas3001_write(sc, DEQ_TREBLE, &reg) < 0)
-			return;
+			return -1;
 		sc->sc_treble = value;
 	}
+	return 0;
 }
 
-void
+int
 tumbler_set_bass(struct tumbler_softc *sc, int value)
 {
 	uint8_t reg;
@@ -359,9 +363,10 @@ tumbler_set_bass(struct tumbler_softc *sc, int value)
 	if ((value >= 0) && (value <= 255) && (value != sc->sc_bass)) {
 		reg = tumbler_basstab[(value >> 3) + 2];
 		if (tas3001_write(sc, DEQ_BASS, &reg) < 0)
-			return;
+			return -1;
 		sc->sc_bass = value;
 	}
+	return 0;
 }
 
 const struct tas3001_reg tas3001_initdata = {
@@ -460,6 +465,13 @@ tas3001_init(struct tumbler_softc *sc)
 	DEQ_WRITE(sc, DEQ_MIXER1, tas3001_initdata.MIXER1);
 	DEQ_WRITE(sc, DEQ_MIXER2, tas3001_initdata.MIXER2);
 
+	if (tumbler_set_volume(sc, 80, 80))
+		goto err;
+	if (tumbler_set_bass(sc, 128))
+		goto err;
+	if (tumbler_set_treble(sc, 128))
+		goto err;
+
 	return (0);
 err:
 	printf("%s: tas3001_init: error\n", sc->sc_dev.dv_xname);
@@ -484,8 +496,6 @@ tumbler_init(struct tumbler_softc *sc)
 
 	if (tas3001_init(sc))
 		return;
-
-	tumbler_set_volume(sc, 80, 80);
 }
 
 int

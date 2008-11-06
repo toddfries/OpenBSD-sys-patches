@@ -372,6 +372,8 @@ i2s_set_params(h, setmode, usemode, play, rec)
 	 */
 	if (play->sample_rate != rec->sample_rate &&
 	    usemode == (AUMODE_PLAY | AUMODE_RECORD)) {
+		/* XXX does this really only have play _or_ record, can
+		   we not do both? */
 		if (setmode == AUMODE_PLAY) {
 			rec->sample_rate = play->sample_rate;
 			setmode |= AUMODE_RECORD;
@@ -516,7 +518,7 @@ i2s_set_port(h, mc)
 	mixer_ctrl_t *mc;
 {
 	struct i2s_softc *sc = h;
-	int l, r;
+	int l, r, ret = 0;
 
 	DPRINTF(("i2s_set_port dev = %d, type = %d\n", mc->dev, mc->type));
 
@@ -525,7 +527,7 @@ i2s_set_port(h, mc)
 
 	switch (mc->dev) {
 	case I2S_OUTPUT_SELECT:
-		/* No change necessary? */
+		/* No change necessary */
 		if (mc->un.mask == sc->sc_output_mask)
 			return 0;
 
@@ -543,38 +545,47 @@ i2s_set_port(h, mc)
 		return 0;
 
 	case I2S_VOL_OUTPUT:
-		(*sc->sc_setvolume)(sc, l, r);
-		return 0;
+		/* No change necessary */
+		if (sc->sc_vol_l == l && sc->sc_vol_r == r)
+			return 0;
+	
+		return (*sc->sc_setvolume)(sc, l, r);
 
 	case I2S_BASS:
+		/* No change necessary */
+		if (sc->sc_bass == l)
+			return 0;
 		if (sc->sc_setbass != NULL)
-			(*sc->sc_setbass)(sc, l);
+			return (*sc->sc_setbass)(sc, l);
 		return (0);
 
 	case I2S_TREBLE:
+		if (sc->sc_treble == l)
+			return 0;
 		if (sc->sc_settreble != NULL)
-			(*sc->sc_settreble)(sc, l);
+			return (*sc->sc_settreble)(sc, l);
 		return (0);
 
 	case I2S_INPUT_SELECT:
 		/* no change necessary? */
 		if (mc->un.mask == sc->sc_record_source)
 			return 0;
-		switch (mc->un.mask) {
-		case 1 << 0: /* microphone */
-		case 1 << 1: /* line in */
-			/* XXX TO BE DONE */
-			break;
-		default: /* invalid argument */
+		if ( (mc->un.mask - (mc->un.mask & 0x3)) ) {
 			return EINVAL;
 		}
 		if (sc->sc_setinput != NULL)
-			(*sc->sc_setinput)(sc, mc->un.mask);
+			ret = (*sc->sc_setinput)(sc, mc->un.mask);
 		sc->sc_record_source = mc->un.mask;
 		return 0;
 
 	case I2S_VOL_INPUT:
-		/* XXX TO BE DONE */
+		/* No change necessary */
+		if (sc->sc_record_l == l && sc->sc_record_r == r)
+			return 0;
+		
+		if (sc->sc_setrecord != NULL)
+			return (*sc->sc_setrecord)(sc, l, r);
+
 		return 0;
 	}
 
@@ -617,9 +628,8 @@ i2s_get_port(h, mc)
 		return 0;
 
 	case I2S_VOL_INPUT:
-		/* XXX TO BE DONE */
-		mc->un.value.level[AUDIO_MIXER_LEVEL_LEFT] = 0;
-		mc->un.value.level[AUDIO_MIXER_LEVEL_RIGHT] = 0;
+		mc->un.value.level[AUDIO_MIXER_LEVEL_LEFT] = sc->sc_record_l;
+		mc->un.value.level[AUDIO_MIXER_LEVEL_RIGHT] = sc->sc_record_r;
 		return 0;
 
 	default:
@@ -667,10 +677,8 @@ i2s_query_devinfo(h, dip)
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
 		dip->un.v.num_channels = 2;
-#if 0
 		strlcpy(dip->un.v.units.name, AudioNvolume,
 		    sizeof(dip->un.v.units.name));
-#endif
 		return 0;
 
 	case I2S_INPUT_SELECT:
@@ -693,10 +701,8 @@ i2s_query_devinfo(h, dip)
 		dip->type = AUDIO_MIXER_VALUE;
 		dip->prev = dip->next = AUDIO_MIXER_LAST;
 		dip->un.v.num_channels = 2;
-#if 0
 		strlcpy(dip->un.v.units.name, AudioNvolume,
 		    sizeof(dip->un.v.units.name));
-#endif
 		return 0;
 
 	case I2S_OUTPUT_CLASS:
