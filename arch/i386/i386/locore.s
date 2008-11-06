@@ -1856,3 +1856,4 @@ ENTRY(acpi_release_global_lock)
 #endif
 
 #include <i386/i386/mutex.S>
+#include <i386/i386/acpi_wakeup.S>

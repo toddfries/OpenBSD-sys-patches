@@ -103,18 +103,15 @@ struct cfdriver acpiasus_cd = {
 	NULL, "acpiasus", DV_DULL
 };
 
+const char *acpiasus_hids[] = { ACPI_DEV_ASUS, 0 };
+
 int
 acpiasus_match(struct device *parent, void *match, void *aux)
 {
 	struct acpi_attach_args *aa = aux;
 	struct cfdata *cf = match;
 
-	if (aa->aaa_name == NULL ||
-	    strcmp(aa->aaa_name, cf->cf_driver->cd_name) != 0 ||
-	    aa->aaa_table != NULL)
-		return 0;
-
-	return 1;
+	return acpi_matchhids(aa, acpiasus_hids, cf->cf_driver->cd_name);
 }
 
 void

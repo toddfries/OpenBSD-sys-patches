@@ -103,6 +103,8 @@ struct cfdriver acpithinkpad_cd = {
 	NULL, "acpithinkpad", DV_DULL
 };
 
+const char *acpithinkpad_hids[] = { ACPI_DEV_THINKPAD, 0 };
+
 int
 thinkpad_match(struct device *parent, void *match, void *aux)
 {
@@ -111,9 +113,7 @@ thinkpad_match(struct device *parent, void *match, void *aux)
 	struct aml_value	res;
 	int			rv = 0;
 
-	if (aa->aaa_name == NULL ||
-	    strcmp(aa->aaa_name, cf->cf_driver->cd_name) != 0 ||
-	    aa->aaa_table != NULL)
+	if (!acpi_matchhids(aa, acpithinkpad_hids, cf->cf_driver->cd_name))
 		return (0);
 
 	if (aml_evalname((struct acpi_softc *)parent, aa->aaa_node,

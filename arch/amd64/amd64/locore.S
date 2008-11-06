@@ -1103,3 +1103,5 @@ ENTRY(acpi_release_global_lock)
 	andl	$1, %eax
 	ret
 #endif
+
+#include <amd64/amd64/acpi_wakeup.S>
