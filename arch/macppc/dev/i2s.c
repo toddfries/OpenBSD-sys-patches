@@ -516,7 +516,7 @@ i2s_set_port(h, mc)
 	mixer_ctrl_t *mc;
 {
 	struct i2s_softc *sc = h;
-	int l, r;
+	int l, r, ret = 0;
 
 	DPRINTF(("i2s_set_port dev = %d, type = %d\n", mc->dev, mc->type));
 
@@ -543,39 +543,33 @@ i2s_set_port(h, mc)
 		return 0;
 
 	case I2S_VOL_OUTPUT:
-		(*sc->sc_setvolume)(sc, l, r);
-		return 0;
+		return (*sc->sc_setvolume)(sc, l, r);
 
 	case I2S_BASS:
 		if (sc->sc_setbass != NULL)
-			(*sc->sc_setbass)(sc, l);
+			return (*sc->sc_setbass)(sc, l);
 		return (0);
 
 	case I2S_TREBLE:
 		if (sc->sc_settreble != NULL)
-			(*sc->sc_settreble)(sc, l);
+			return (*sc->sc_settreble)(sc, l);
 		return (0);
 
 	case I2S_INPUT_SELECT:
 		/* no change necessary? */
 		if (mc->un.mask == sc->sc_record_source)
 			return 0;
-		switch (mc->un.mask) {
-		case 1 << 0: /* microphone */
-		case 1 << 1: /* line in */
-			/* XXX TO BE DONE */
-			break;
-		default: /* invalid argument */
+		if ( (mc->un.mask - (mc->un.mask & 0x3)) ) {
 			return EINVAL;
 		}
 		if (sc->sc_setinput != NULL)
-			(*sc->sc_setinput)(sc, mc->un.mask);
+			ret = (*sc->sc_setinput)(sc, mc->un.mask);
 		sc->sc_record_source = mc->un.mask;
 		return 0;
 
 	case I2S_VOL_INPUT:
-		if (sc->sc_setinvolume != NULL)
-			(*sc->sc_setinvolume)(sc, l, r);
+		if (sc->sc_setrecord != NULL)
+			return (*sc->sc_setrecord)(sc, l, r);
 		return 0;
 	}
 
@@ -618,8 +612,8 @@ i2s_get_port(h, mc)
 		return 0;
 
 	case I2S_VOL_INPUT:
-		mc->un.value.level[AUDIO_MIXER_LEVEL_LEFT] = sc->sc_invol_l;
-		mc->un.value.level[AUDIO_MIXER_LEVEL_RIGHT] = sc->sc_invol_r;
+		mc->un.value.level[AUDIO_MIXER_LEVEL_LEFT] = sc->sc_record_l;
+		mc->un.value.level[AUDIO_MIXER_LEVEL_RIGHT] = sc->sc_record_r;
 		return 0;
 
 	default:

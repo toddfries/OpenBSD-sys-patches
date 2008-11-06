@@ -62,7 +62,7 @@ struct i2s_softc {
 	int (*sc_setbass)(struct i2s_softc *, int);
 	int (*sc_settreble)(struct i2s_softc *, int);
 	int (*sc_setinput)(struct i2s_softc *, int);
-	int (*sc_setinvolume)(struct i2s_softc *, int, int);
+	int (*sc_setrecord)(struct i2s_softc *, int, int);
 
 	u_char *sc_reg;
 	void *sc_i2c;
@@ -72,8 +72,8 @@ struct i2s_softc {
 	u_int sc_vol_r;
 	u_int sc_bass;
 	u_int sc_treble;
-	u_int sc_invol_l;
-	u_int sc_invol_r;
+	u_int sc_record_l;
+	u_int sc_record_r;
 
 	bus_dma_tag_t sc_dmat;
 	dbdma_regmap_t *sc_odma;

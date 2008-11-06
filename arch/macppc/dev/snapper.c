@@ -64,7 +64,7 @@ int snapper_match(struct device *, void *, void *);
 void snapper_attach(struct device *, struct device *, void *);
 void snapper_defer(struct device *);
 int snapper_set_volume(struct snapper_softc *, int, int);
-int snapper_set_involume(struct snapper_softc *, int, int);
+int snapper_set_record(struct snapper_softc *, int, int);
 int snapper_set_bass(struct snapper_softc *, int);
 int snapper_set_treble(struct snapper_softc *, int);
 int snapper_set_input(struct snapper_softc *, int);
@@ -540,11 +540,13 @@ snapper_set_volume(struct snapper_softc *sc, int left, int right)
 }
 
 int
-snapper_set_involume(struct snapper_softc *sc, int left, int right)
+snapper_set_record(struct snapper_softc *sc, int left, int right)
 {
 	u_char vol[9];
 	int nentries = sizeof(snapper_volumetab) / sizeof(snapper_volumetab[0]);
 	int l, r, off;
+
+	memset(vol,NULL,sizeof vol);
 
 	l = nentries - (left * nentries / 256);
 	r = nentries - (right * nentries / 256);
@@ -582,8 +584,8 @@ snapper_set_involume(struct snapper_softc *sc, int left, int right)
 	if (tas3004_write(sc, DEQ_MIXER_R, vol))
 		return -1;
 
-	sc->sc_invol_l = left;
-	sc->sc_invol_r = right;
+	sc->sc_record_l = left;
+	sc->sc_record_r = right;
 
 	return 0;
 }
