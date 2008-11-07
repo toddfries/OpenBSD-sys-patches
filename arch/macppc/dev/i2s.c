@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2s.c,v 1.15 2008/10/30 06:12:47 todd Exp $	*/
+/*	$OpenBSD: i2s.c,v 1.17 2008/11/07 19:53:20 todd Exp $	*/
 /*	$NetBSD: i2s.c,v 1.1 2003/12/27 02:19:34 grant Exp $	*/
 
 /*-
@@ -605,12 +605,16 @@ i2s_get_port(h, mc)
 		return 0;
 
 	case I2S_BASS:
+		if (mc->un.value.num_channels != 1)
+			return ENXIO;
 		mc->un.value.level[AUDIO_MIXER_LEVEL_MONO] = sc->sc_bass;
-		return (0);
+		return 0;
 
 	case I2S_TREBLE:
+		if (mc->un.value.num_channels != 1)
+			return ENXIO;
 		mc->un.value.level[AUDIO_MIXER_LEVEL_MONO] = sc->sc_treble;
-		return (0);
+		return 0;
 
 	case I2S_VOL_INPUT:
 		/* XXX TO BE DONE */
@@ -943,10 +947,10 @@ i2s_set_rate(sc, rate)
 	keylargo_fcr_disable(I2SClockOffset, I2S0CLKEN);
 
 	/* Wait until clock is stopped */
-	for (timo = 1000; timo > 0; timo--) {
+	for (timo = 50; timo > 0; timo--) {
 		if (in32rb(sc->sc_reg + I2S_INT) & I2S_INT_CLKSTOPPEND)
 			goto done;
-		delay(1);
+		delay(10);
 	}
 
 	printf("i2s_set_rate: timeout\n");
