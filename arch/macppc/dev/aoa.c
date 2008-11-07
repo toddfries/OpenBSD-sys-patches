@@ -56,7 +56,7 @@
 int aoa_getdev(void *, struct audio_device *);
 int aoa_match(struct device *, void *, void *);
 void aoa_attach(struct device *, struct device *, void *);
-void aoa_set_volume(struct aoa_softc *, int, int);
+int aoa_set_volume(struct aoa_softc *, int, int);
 void aoa_get_default_params(void *, int, struct audio_params *);
 
 struct cfattach aoa_ca = {
@@ -146,10 +146,11 @@ aoa_getdev(void *h, struct audio_device *retp)
 	return (0);
 }
 
-void
+int
 aoa_set_volume(struct aoa_softc *sc, int left, int right)
 {
 	printf("aoa_set_volume() not supported yet\n");
+	return (0);
 }
 
 void
