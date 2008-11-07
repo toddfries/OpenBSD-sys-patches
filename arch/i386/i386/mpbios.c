@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpbios.c,v 1.24 2008/06/26 05:42:10 ray Exp $	*/
+/*	$OpenBSD: mpbios.c,v 1.26 2008/10/05 16:57:36 kettenis Exp $	*/
 /*	$NetBSD: mpbios.c,v 1.2 2002/10/01 12:56:57 fvdl Exp $	*/
 
 /*-
@@ -721,7 +721,9 @@ mpbios_cpu(const u_int8_t *ent, struct device *self)
 
 	caa.caa_name = "cpu";
 	caa.cpu_number = entry->apic_id;
+#ifdef MULTIPROCESSOR
 	caa.cpu_func = &mp_cpu_funcs;
+#endif
 #if 1 /* XXX Will be removed when the real stuff is probed */
 	caa.cpu_signature = entry->cpu_signature;
 
@@ -1033,7 +1035,7 @@ mpbios_int(const u_int8_t *ent, struct mp_intr_map *mpi)
 	struct mp_intr_map *altmpi;
 	struct mp_bus *mpb;
 
-	u_int32_t id = IOAPIC_REMAPPED_ID(entry->dst_apic_id);
+	u_int32_t id = entry->dst_apic_id;
 	u_int32_t pin = entry->dst_apic_int;
 	u_int32_t bus = entry->src_bus_id;
 	u_int32_t dev = entry->src_bus_irq;

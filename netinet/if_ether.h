@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.h,v 1.40 2008/04/18 09:16:14 djm Exp $	*/
+/*	$OpenBSD: if_ether.h,v 1.43 2008/10/31 21:08:33 claudio Exp $	*/
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -88,11 +88,6 @@ struct	ether_header {
 #define	ETHER_CRC_POLY_LE	0xedb88320
 #define	ETHER_CRC_POLY_BE	0x04c11db6
 
-/*
- * Ethernet-specific mbuf flags.
- */
-#define M_HASFCS	M_LINK0	/* FCS included at end of frame */
-
 #ifdef _KERNEL
 /*
  * Macro to map an IP multicast address to an Ethernet multicast address.
@@ -167,10 +162,14 @@ struct	arpcom {
 struct llinfo_arp {
 	LIST_ENTRY(llinfo_arp) la_list;
 	struct	rtentry *la_rt;
-	struct	mbuf *la_hold;		/* last packet until resolved/timeout */
+	struct	mbuf *la_hold_head;	/* packet hold queue */
+	struct	mbuf *la_hold_tail;
+	int	la_hold_count;		/* number of packets queued */
 	long	la_asked;		/* last time we QUERIED for this addr */
 #define la_timer la_rt->rt_rmx.rmx_expire /* deletion time in seconds */
 };
+#define MAX_HOLD_QUEUE 10
+#define MAX_HOLD_TOTAL 100
 
 struct sockaddr_inarp {
 	u_int8_t  sin_len;

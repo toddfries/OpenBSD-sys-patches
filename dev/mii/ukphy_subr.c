@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukphy_subr.c,v 1.8 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: ukphy_subr.c,v 1.10 2008/10/24 16:50:01 brad Exp $	*/
 /*	$NetBSD: ukphy_subr.c,v 1.2 1998/11/05 04:08:02 thorpej Exp $	*/
 
 /*-
@@ -101,10 +101,10 @@ ukphy_status(struct mii_softc *phy)
 		else if ((gtcr & GTCR_ADV_1000THDX) &&
 			 (gtsr & GTSR_LP_1000THDX))
 			mii->mii_media_active |= IFM_1000_T|IFM_HDX;
-		else if (anlpar & ANLPAR_T4)
-			mii->mii_media_active |= IFM_100_T4|IFM_HDX;
 		else if (anlpar & ANLPAR_TX_FD)
 			mii->mii_media_active |= IFM_100_TX|IFM_FDX;
+		else if (anlpar & ANLPAR_T4)
+			mii->mii_media_active |= IFM_100_T4|IFM_HDX;
 		else if (anlpar & ANLPAR_TX)
 			mii->mii_media_active |= IFM_100_TX|IFM_HDX;
 		else if (anlpar & ANLPAR_10_FD)
@@ -113,6 +113,9 @@ ukphy_status(struct mii_softc *phy)
 			mii->mii_media_active |= IFM_10_T|IFM_HDX;
 		else
 			mii->mii_media_active |= IFM_NONE;
+
+		if (mii->mii_media_active & IFM_FDX)
+			mii->mii_media_active |= mii_phy_flowstatus(phy);
 
 		if ((IFM_SUBTYPE(mii->mii_media_active) == IFM_1000_T) &&
 		    (gtsr & GTSR_MS_RES))

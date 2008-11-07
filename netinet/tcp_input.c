@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.220 2008/07/03 15:46:24 henning Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.224 2008/11/02 10:37:29 claudio Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -342,21 +342,6 @@ tcp6_input(struct mbuf **mp, int *offp, int proto)
 	}
 #endif
 
-	/*
-	 * draft-itojun-ipv6-tcp-to-anycast
-	 * better place to put this in?
-	 */
-	if (m->m_flags & M_ANYCAST6) {
-		if (m->m_len >= sizeof(struct ip6_hdr)) {
-			struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
-			icmp6_error(m, ICMP6_DST_UNREACH,
-				ICMP6_DST_UNREACH_ADDR,
-				(caddr_t)&ip6->ip6_dst - (caddr_t)ip6);
-		} else
-			m_freem(m);
-		return IPPROTO_DONE;
-	}
-
 	tcp_input(m, *offp, proto);
 	return IPPROTO_DONE;
 }
@@ -594,11 +579,11 @@ tcp_input(struct mbuf *m, ...)
 	/*
 	 * Locate pcb for segment.
 	 */
-findpcb:
 #if NPF > 0
 	if (m->m_pkthdr.pf.statekey)
 		inp = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp;
 #endif
+findpcb:
 	if (inp == NULL) {
 		switch (af) {
 #ifdef INET6
@@ -1309,6 +1294,7 @@ trimthenstep6:
 			    ((arc4random() & 0x7fffffff) | 0x8000);
 			reuse = &iss;
 			tp = tcp_close(tp);
+			inp = NULL;
 			goto findpcb;
 		}
 	}

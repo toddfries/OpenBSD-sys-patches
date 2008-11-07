@@ -1,4 +1,4 @@
-/*	$OpenBSD: tqphy.c,v 1.12 2008/06/26 05:42:16 ray Exp $	*/
+/*	$OpenBSD: tqphy.c,v 1.14 2008/10/25 00:10:21 brad Exp $	*/
 /*	$NetBSD: tqphy.c,v 1.9 2000/02/02 23:34:57 thorpej Exp $	*/
 
 /*
@@ -102,8 +102,8 @@ const struct mii_phy_funcs tqphy_funcs = {
 };
 
 static const struct mii_phydesc tqphys[] = {
-	{ MII_OUI_TSC,		MII_MODEL_TSC_78Q2120,
-	  MII_STR_TSC_78Q2120 },
+	{ MII_OUI_TDK,		MII_MODEL_TDK_78Q2120,
+	  MII_STR_TDK_78Q2120 },
 
 	{ 0,			0,
 	  NULL },
@@ -137,9 +137,6 @@ tqphyattach(struct device *parent, struct device *self, void *aux)
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
 
-	/*
-	 * Apparently, we can't do loopback on this PHY.
-	 */
 	sc->mii_flags |= MIIF_NOLOOP;
 
 	PHY_RESET(sc);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_output.c,v 1.73 2008/08/29 12:14:53 damien Exp $	*/
+/*	$OpenBSD: ieee80211_output.c,v 1.79 2008/09/27 15:16:09 damien Exp $	*/
 /*	$NetBSD: ieee80211_output.c,v 1.13 2004/05/31 11:02:55 dyoung Exp $	*/
 
 /*-
@@ -56,6 +56,9 @@
 #include <netinet/if_ether.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#ifdef INET6
+#include <netinet/ip6.h>
+#endif
 #endif
 
 #if NVLAN > 0
@@ -66,7 +69,6 @@
 #include <net80211/ieee80211_var.h>
 #include <net80211/ieee80211_priv.h>
 
-enum	ieee80211_edca_ac ieee80211_up_to_ac(struct ieee80211com *, int);
 int	ieee80211_classify(struct ieee80211com *, struct mbuf *);
 int	ieee80211_mgmt_output(struct ifnet *, struct ieee80211_node *,
 	    struct mbuf *, int);
@@ -238,6 +240,11 @@ ieee80211_mgmt_output(struct ifnet *ifp, struct ieee80211_node *ni,
 			    ieee80211_chan2mode(ic, ni->ni_chan)]);
 	}
 
+#ifndef IEEE80211_STA_ONLY
+	if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+	    ieee80211_pwrsave(ic, m, ni) != 0)
+		return 0;
+#endif
 	IF_ENQUEUE(&ic->ic_mgtq, m);
 	ifp->if_timer = 1;
 	(*ifp->if_start)(ifp);
@@ -339,7 +346,7 @@ static const struct ieee80211_edca_ac_params
 enum ieee80211_edca_ac
 ieee80211_up_to_ac(struct ieee80211com *ic, int up)
 {
-	/* IEEE Std 802.11e-2005, table 20i */
+	/* see Table 9-1 */
 	static const enum ieee80211_edca_ac up_to_ac[] = {
 		EDCA_AC_BE,	/* BE */
 		EDCA_AC_BK,	/* BK */
@@ -360,7 +367,7 @@ ieee80211_up_to_ac(struct ieee80211com *ic, int up)
 #endif
 	/*
 	 * We do not support the admission control procedure defined in
-	 * IEEE Std 802.11e-2005 section 9.9.3.1.2.  The spec says that
+	 * IEEE Std 802.11-2007 section 9.9.3.1.2.  The spec says that
 	 * non-AP QSTAs that don't support this procedure shall use EDCA
 	 * parameters of a lower priority AC that does not require
 	 * admission control.
@@ -393,11 +400,12 @@ int
 ieee80211_classify(struct ieee80211com *ic, struct mbuf *m)
 {
 #ifdef INET
-	const struct ether_header *eh;
+	struct ether_header *eh;
+	u_int8_t ds_field;
 #endif
 #if NVLAN > 0
 	if ((m->m_flags & M_PROTO1) == M_PROTO1 && m->m_pkthdr.rcvif != NULL) {
-		const struct ifvlan *ifv = m->m_pkthdr.rcvif->if_softc;
+		struct ifvlan *ifv = m->m_pkthdr.rcvif->if_softc;
 
 		/* use VLAN 802.1D user-priority */
 		if (ifv->ifv_prio <= 7)
@@ -407,29 +415,46 @@ ieee80211_classify(struct ieee80211com *ic, struct mbuf *m)
 #ifdef INET
 	eh = mtod(m, struct ether_header *);
 	if (eh->ether_type == htons(ETHERTYPE_IP)) {
-		const struct ip *ip = (const struct ip *)(eh + 1);
-		/*
-		 * Map Differentiated Services Codepoint field (see RFC2474).
-		 * Preserves backward compatibility with IP Precedence field.
-		 */
-		switch (ip->ip_tos & 0xfc) {
-		case IPTOS_PREC_PRIORITY:
-			return 2;
-		case IPTOS_PREC_IMMEDIATE:
-			return 1;
-		case IPTOS_PREC_FLASH:
-			return 3;
-		case IPTOS_PREC_FLASHOVERRIDE:
-			return 4;
-		case IPTOS_PREC_CRITIC_ECP:
-			return 5;
-		case IPTOS_PREC_INTERNETCONTROL:
-			return 6;
-		case IPTOS_PREC_NETCONTROL:
-			return 7;
-		}
+		struct ip *ip = (struct ip *)&eh[1];
+		if (ip->ip_v != 4)
+			return 0;
+		ds_field = ip->ip_tos;
 	}
-#endif
+#ifdef INET6
+	else if (eh->ether_type == htons(ETHERTYPE_IPV6)) {
+		struct ip6_hdr *ip6 = (struct ip6_hdr *)&eh[1];
+		u_int32_t flowlabel;
+
+		flowlabel = ntohl(ip6->ip6_flow);
+		if ((flowlabel >> 28) != 6)
+			return 0;
+		ds_field = (flowlabel >> 20) & 0xff;
+	}
+#endif	/* INET6 */
+	else	/* neither IPv4 nor IPv6 */
+		return 0;
+
+	/*
+	 * Map Differentiated Services Codepoint field (see RFC2474).
+	 * Preserves backward compatibility with IP Precedence field.
+	 */
+	switch (ds_field & 0xfc) {
+	case IPTOS_PREC_PRIORITY:
+		return 2;
+	case IPTOS_PREC_IMMEDIATE:
+		return 1;
+	case IPTOS_PREC_FLASH:
+		return 3;
+	case IPTOS_PREC_FLASHOVERRIDE:
+		return 4;
+	case IPTOS_PREC_CRITIC_ECP:
+		return 5;
+	case IPTOS_PREC_INTERNETCONTROL:
+		return 6;
+	case IPTOS_PREC_NETCONTROL:
+		return 7;
+	}
+#endif	/* INET */
 	return 0;	/* default to Best-Effort */
 }
 
@@ -564,8 +589,12 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 		struct ieee80211_qosframe *qwh =
 		    (struct ieee80211_qosframe *)wh;
 		qwh->i_fc[0] |= IEEE80211_FC0_SUBTYPE_QOS;
-		qwh->i_qos[0] = tid & 0xf;
-		qwh->i_qos[1] = 0;	/* no TXOP requested */
+		qwh->i_qos[0] = tid;
+		if (ic->ic_tid_noack & (1 << tid)) {
+			qwh->i_qos[0] |= IEEE80211_QOS_ACK_POLICY_NOACK <<
+			    IEEE80211_QOS_ACK_POLICY_SHIFT;
+		}
+		qwh->i_qos[1] = 0;	/* unused/set by hardware */
 		*(u_int16_t *)&qwh->i_seq[0] =
 		    htole16(ni->ni_qos_txseqs[tid] << IEEE80211_SEQ_SEQ_SHIFT);
 		ni->ni_qos_txseqs[tid]++;
@@ -606,6 +635,13 @@ ieee80211_encap(struct ifnet *ifp, struct mbuf *m, struct ieee80211_node **pni)
 	     (ni->ni_flags & IEEE80211_NODE_TXPROT)))
 		wh->i_fc[1] |= IEEE80211_FC1_PROTECTED;
 
+#ifndef IEEE80211_STA_ONLY
+	if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+	    ieee80211_pwrsave(ic, m, ni) != 0) {
+		*pni = NULL;
+		return NULL;
+	}
+#endif
 	*pni = ni;
 	return m;
 bad:
@@ -718,7 +754,7 @@ ieee80211_add_tim(u_int8_t *frm, struct ieee80211com *ic)
 	/* Bitmap Control */
 	*frm = offset;
 	/* set broadcast/multicast indication bit if necessary */
-	if (ic->ic_dtim_count == 0 && ic->ic_tim_mcast)
+	if (ic->ic_dtim_count == 0 && ic->ic_tim_mcast_pending)
 		*frm |= 0x01;
 	frm++;
 
@@ -883,12 +919,12 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 		*frm++ = 2;
 		count++;
 	}
-	if (ni->ni_rsnakms & IEEE80211_AKM_SHA256_8021X) {
+	if (!wpa && (ni->ni_rsnakms & IEEE80211_AKM_SHA256_8021X)) {
 		memcpy(frm, oui, 3); frm += 3;
 		*frm++ = 5;
 		count++;
 	}
-	if (ni->ni_rsnakms & IEEE80211_AKM_SHA256_PSK) {
+	if (!wpa && (ni->ni_rsnakms & IEEE80211_AKM_SHA256_PSK)) {
 		memcpy(frm, oui, 3); frm += 3;
 		*frm++ = 6;
 		count++;
@@ -902,11 +938,19 @@ ieee80211_add_rsn_body(u_int8_t *frm, struct ieee80211com *ic,
 	/* write RSN Capabilities field */
 	LE_WRITE_2(frm, ni->ni_rsncaps); frm += 2;
 
+	if (ni->ni_flags & IEEE80211_NODE_PMKID) {
+		/* write PMKID Count field */
+		LE_WRITE_2(frm, 1); frm += 2;
+		/* write PMKID List (only 1) */
+		memcpy(frm, ni->ni_pmkid, IEEE80211_PMKID_LEN);
+		frm += IEEE80211_PMKID_LEN;
+	} else {
+		/* no PMKID (PMKID Count=0) */
+		LE_WRITE_2(frm, 0); frm += 2;
+	}
+
 	if (!(ic->ic_caps & IEEE80211_C_MFP))
 		return frm;
-
-	/* no PMKID List for now */
-	LE_WRITE_2(frm, 0); frm += 2;
 
 	/* write Group Integrity Cipher Suite field */
 	memcpy(frm, oui, 3); frm += 3;
@@ -1159,7 +1203,7 @@ ieee80211_get_deauth(struct ieee80211com *ic, struct ieee80211_node *ni,
  */
 struct mbuf *
 ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
-    int reassoc)
+    int type)
 {
 	const struct ieee80211_rateset *rs = &ni->ni_rates;
 	struct mbuf *m;
@@ -1168,7 +1212,7 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 	m = ieee80211_getmgmt(M_DONTWAIT, MT_DATA,
 	    2 + 2 +
-	    ((reassoc == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) ?
+	    ((type == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) ?
 		IEEE80211_ADDR_LEN : 0) +
 	    2 + ni->ni_esslen +
 	    2 + min(rs->rs_nrates, IEEE80211_RATE_SIZE) +
@@ -1196,7 +1240,7 @@ ieee80211_get_assoc_req(struct ieee80211com *ic, struct ieee80211_node *ni,
 		capinfo |= IEEE80211_CAPINFO_SHORT_SLOTTIME;
 	LE_WRITE_2(frm, capinfo); frm += 2;
 	LE_WRITE_2(frm, ic->ic_lintval); frm += 2;
-	if (reassoc) {
+	if (type == IEEE80211_FC0_SUBTYPE_REASSOC_REQ) {
 		IEEE80211_ADDR_COPY(frm, ic->ic_bss->ni_bssid);
 		frm += IEEE80211_ADDR_LEN;
 	}
@@ -1472,7 +1516,7 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	    ((rs->rs_nrates > IEEE80211_RATE_SIZE) ?
 		2 + rs->rs_nrates - IEEE80211_RATE_SIZE : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
-	     (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ?
+	      (ni->ni_rsnprotos & IEEE80211_PROTO_RSN)) ?
 		2 + IEEE80211_RSNIE_MAXLEN : 0) +
 	    ((ic->ic_flags & IEEE80211_F_QOS) ? 2 + 18 : 0) +
 	    (((ic->ic_flags & IEEE80211_F_RSNON) &&
@@ -1527,31 +1571,56 @@ ieee80211_beacon_alloc(struct ieee80211com *ic, struct ieee80211_node *ni)
 	return m;
 }
 
-void
-ieee80211_pwrsave(struct ieee80211com *ic, struct ieee80211_node *ni,
-    struct mbuf *m)
+/*
+ * Check if an outgoing MSDU or management frame should be buffered into
+ * the AP for power management.  Return 1 if the frame was buffered into
+ * the AP, or 0 if the frame shall be transmitted immediately.
+ */
+int
+ieee80211_pwrsave(struct ieee80211com *ic, struct mbuf *m,
+    struct ieee80211_node *ni)
 {
-	/* store the new packet on our queue, changing the TIM if necessary */
-	if (IF_IS_EMPTY(&ni->ni_savedq))
-		(*ic->ic_set_tim)(ic, ni->ni_associd, 1);
+	const struct ieee80211_frame *wh;
 
-	if (ni->ni_savedq.ifq_len >= IEEE80211_PS_MAX_QUEUE) {
-		IF_DROP(&ni->ni_savedq);
-		m_freem(m);
-		if (ic->ic_if.if_flags & IFF_DEBUG)
-			printf("%s: station %s power save queue overflow"
-			    " of size %d drops %d\n",
-			    ic->ic_if.if_xname,
-			    ether_sprintf(ni->ni_macaddr),
-			    IEEE80211_PS_MAX_QUEUE,
-			    ni->ni_savedq.ifq_drops);
+	KASSERT(ic->ic_opmode == IEEE80211_M_HOSTAP);
+	if (!(ic->ic_caps & IEEE80211_C_APPMGT))
+		return 0;
+
+	wh = mtod(m, struct ieee80211_frame *);
+	if (IEEE80211_IS_MULTICAST(wh->i_addr1)) {
+		/*
+		 * Buffer group addressed MSDUs with the Order bit clear
+		 * if any associated STAs are in PS mode.
+		 */
+		if ((wh->i_fc[1] & IEEE80211_FC1_ORDER) ||
+		    ic->ic_pssta == 0)
+			return 0;
+		ic->ic_tim_mcast_pending = 1;
 	} else {
 		/*
-		 * Similar to ieee80211_mgmt_output, store the node in
-		 * the rcvif field.
+		 * Buffer MSDUs, A-MSDUs or management frames destined for
+		 * PS STAs.
 		 */
+		if (ni->ni_pwrsave == IEEE80211_PS_AWAKE ||
+		    (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+		    IEEE80211_FC0_TYPE_CTL)
+			return 0;
+		if (IF_IS_EMPTY(&ni->ni_savedq))
+			(*ic->ic_set_tim)(ic, ni->ni_associd, 1);
+	}
+	/* NB: ni == ic->ic_bss for broadcast/multicast */
+	if (IF_QFULL(&ni->ni_savedq)) {
+		/* XXX should we drop the oldest instead? */
+		IF_DROP(&ni->ni_savedq);
+		m_freem(m);
+	} else {
 		IF_ENQUEUE(&ni->ni_savedq, m);
+		/*
+		 * Similar to ieee80211_mgmt_output, store the node in the
+		 * rcvif field.
+		 */
 		m->m_pkthdr.rcvif = (void *)ni;
 	}
+	return 1;
 }
 #endif	/* IEEE80211_STA_ONLY */

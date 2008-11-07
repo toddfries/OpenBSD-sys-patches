@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.49 2008/08/07 18:06:17 damien Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.58 2008/11/04 13:44:11 brad Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -479,14 +479,13 @@ trunk_port_destroy(struct trunk_port *tp)
 void
 trunk_port_watchdog(struct ifnet *ifp)
 {
-	struct trunk_softc *tr;
 	struct trunk_port *tp;
 
 	/* Should be checked by the caller */
 	if (ifp->if_type != IFT_IEEE8023ADLAG)
 		return;
 	if ((tp = (struct trunk_port *)ifp->if_tp) == NULL ||
-	    (tr = (struct trunk_softc *)tp->tp_trunk) == NULL)
+	    tp->tp_trunk == NULL)
 		return;
 
 	if (tp->tp_watchdog != NULL)
@@ -499,7 +498,7 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct trunk_reqport *rp = (struct trunk_reqport *)data;
 	struct trunk_softc *tr;
-	struct trunk_port *tp;
+	struct trunk_port *tp = NULL;
 	int s, error = 0;
 
 	s = splnet();
@@ -596,6 +595,11 @@ trunk_port2req(struct trunk_port *tp, struct trunk_reqport *rp)
 	/* Add protocol specific flags */
 	switch (tr->tr_proto) {
 	case TRUNK_PROTO_FAILOVER:
+		rp->rp_flags = tp->tp_flags;
+		if (tp == trunk_link_active(tr, tr->tr_primary))
+			rp->rp_flags |= TRUNK_PORT_ACTIVE;
+		break;
+
 	case TRUNK_PROTO_ROUNDROBIN:
 	case TRUNK_PROTO_LOADBALANCE:
 	case TRUNK_PROTO_BROADCAST:
@@ -632,9 +636,6 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, i, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &tr->tr_ac, cmd, data)) > 0)
-		goto out;
 
 	bzero(&rpbuf, sizeof(rpbuf));
 
@@ -768,8 +769,7 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ENETRESET;
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &tr->tr_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -946,7 +946,7 @@ trunk_start(struct ifnet *ifp)
 			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
-		if (tr->tr_proto != TRUNK_PROTO_NONE)
+		if (tr->tr_proto != TRUNK_PROTO_NONE && tr->tr_count)
 			error = (*tr->tr_start)(tr, m);
 		else
 			m_freem(m);
@@ -956,8 +956,6 @@ trunk_start(struct ifnet *ifp)
 		else
 			ifp->if_oerrors++;
 	}
-
-	return;
 }
 
 int
@@ -993,6 +991,7 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 	struct ip *ip, ipbuf;
 #endif
 #ifdef INET6
+	u_int32_t flow;
 	struct ip6_hdr *ip6, ip6buf;
 #endif
 
@@ -1031,6 +1030,8 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 			return (p);
 		p = hash32_buf(&ip6->ip6_src, sizeof(struct in6_addr), p);
 		p = hash32_buf(&ip6->ip6_dst, sizeof(struct in6_addr), p);
+		flow = ip6->ip6_flow & IPV6_FLOWLABEL_MASK;
+		p = hash32_buf(&flow, sizeof(flow), p); /* IPv6 flow label */
 		break;
 #endif
 	}
@@ -1148,9 +1149,10 @@ trunk_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	imr->ifm_status = IFM_AVALID;
 	imr->ifm_active = IFM_ETHER | IFM_AUTO;
 
-	tp = tr->tr_primary;
-	if (tp != NULL && tp->tp_if->if_flags & IFF_UP)
-		imr->ifm_status |= IFM_ACTIVE;
+	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries) {
+		if (TRUNK_PORTACTIVE(tp))
+			imr->ifm_status |= IFM_ACTIVE;
+	}
 }
 
 void
@@ -1464,19 +1466,10 @@ trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 	struct trunk_lb *lb = (struct trunk_lb *)tr->tr_psc;
 	struct trunk_port *tp = NULL;
 	u_int32_t p = 0;
-	int idx;
-
-	if (tr->tr_count == 0) {
-		m_freem(m);
-		return (EINVAL);
-	}
 
 	p = trunk_hashmbuf(m, lb->lb_key);
-	if ((idx = p % tr->tr_count) >= TRUNK_MAX_PORTS) {
-		m_freem(m);
-		return (EINVAL);
-	}
-	tp = lb->lb_ports[idx];
+	p %= tr->tr_count;
+	tp = lb->lb_ports[p];
 
 	/*
 	 * Check the port's link state. This will return the next active

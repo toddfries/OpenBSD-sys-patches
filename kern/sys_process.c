@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_process.c,v 1.39 2007/04/10 17:47:55 miod Exp $	*/
+/*	$OpenBSD: sys_process.c,v 1.43 2008/10/31 17:29:51 deraadt Exp $	*/
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -51,6 +51,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/exec.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/errno.h>
@@ -66,6 +67,8 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/reg.h>
+
+int	process_auxv_offset(struct proc *, struct proc *, struct uio *);
 
 #ifdef PTRACE
 /*
@@ -288,6 +291,19 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		case PIOD_WRITE_D:
 			req = PT_WRITE_D;
 			uio.uio_rw = UIO_WRITE;
+			break;
+		case PIOD_READ_AUXV:
+			req = PT_READ_D;
+			uio.uio_rw = UIO_READ;
+			temp = t->p_emul->e_arglen * sizeof(char *);
+			if (uio.uio_offset > temp)
+				return (EIO);
+			if (uio.uio_resid > temp - uio.uio_offset)
+				uio.uio_resid = temp - uio.uio_offset;
+			piod.piod_len = iov.iov_len = uio.uio_resid;
+			error = process_auxv_offset(p, t, &uio);
+			if (error)
+				return (error);
 			break;
 		default:
 			return (EINVAL);
@@ -573,6 +589,7 @@ process_checkioperm(struct proc *p, struct proc *t)
 int
 process_domem(struct proc *curp, struct proc *p, struct uio *uio, int req)
 {
+	struct vmspace *vm;
 	int error;
 	vaddr_t addr;
 	vsize_t len;
@@ -588,13 +605,57 @@ process_domem(struct proc *curp, struct proc *p, struct uio *uio, int req)
 	if ((p->p_flag & P_WEXIT) || (p->p_vmspace->vm_refcnt < 1)) 
 		return(EFAULT);
 	addr = uio->uio_offset;
-	p->p_vmspace->vm_refcnt++;  /* XXX */
-	error = uvm_io(&p->p_vmspace->vm_map, uio,
+
+	vm = p->p_vmspace;
+	vm->vm_refcnt++;
+
+	error = uvm_io(&vm->vm_map, uio,
 	    (req == PT_WRITE_I) ? UVM_IO_FIXPROT : 0);
-	uvmspace_free(p->p_vmspace);
+
+	uvmspace_free(vm);
 
 	if (error == 0 && req == PT_WRITE_I)
 		pmap_proc_iflush(p, addr, len);
 
 	return (error);
 }
+
+#ifdef PTRACE
+int
+process_auxv_offset(struct proc *curp, struct proc *p, struct uio *uiop)
+{
+	struct ps_strings pss;
+	struct iovec iov;
+	struct uio uio;
+	int error;
+
+	iov.iov_base = &pss;
+	iov.iov_len = sizeof(pss);
+	uio.uio_iov = &iov;
+	uio.uio_iovcnt = 1;	
+	uio.uio_offset = (off_t)PS_STRINGS;
+	uio.uio_resid = sizeof(pss);
+	uio.uio_segflg = UIO_SYSSPACE;
+	uio.uio_rw = UIO_READ;
+	uio.uio_procp = curp;
+
+	if ((error = uvm_io(&p->p_vmspace->vm_map, &uio, 0)) != 0)
+		return (error);
+
+	if (pss.ps_envstr == NULL)
+		return (EIO);
+
+	uiop->uio_offset += (off_t)(long)(pss.ps_envstr + pss.ps_nenvstr + 1);
+#ifdef MACHINE_STACK_GROWS_UP
+	if (uiop->uio_offset < (off_t)PS_STRINGS)
+		return (EIO);
+#else
+	if (uiop->uio_offset > (off_t)PS_STRINGS)
+		return (EIO);
+	if ((uiop->uio_offset + uiop->uio_resid) > (off_t)PS_STRINGS)
+		uiop->uio_resid = (off_t)PS_STRINGS - uiop->uio_offset;
+#endif
+
+	return (0);
+}
+#endif

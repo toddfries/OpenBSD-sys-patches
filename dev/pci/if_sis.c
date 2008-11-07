@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.80 2008/07/15 12:10:48 thib Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.83 2008/10/14 18:01:53 naddy Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -1344,14 +1344,13 @@ sis_rxeof(struct sis_softc *sc)
 #endif
 		{
 			struct mbuf *m0;
-			m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-			    total_len + ETHER_ALIGN, 0, ifp, NULL);
+			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
+			    ifp, NULL);
 			sis_newbuf(sc, cur_rx, m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
 				continue;
 			}
-			m_adj(m0, ETHER_ALIGN);
 			m = m0;
 		}
 
@@ -1463,7 +1462,7 @@ sis_tick(void *xsc)
 		if (!IFQ_IS_EMPTY(&ifp->if_snd))
 			sis_start(ifp);
 	}
-	timeout_add(&sc->sis_timeout, hz);
+	timeout_add_sec(&sc->sis_timeout, 1);
 
 	splx(s);
 }
@@ -1841,7 +1840,7 @@ sis_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->sis_timeout, hz);
+	timeout_add_sec(&sc->sis_timeout, 1);
 }
 
 /*
@@ -1894,11 +1893,6 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1959,12 +1953,10 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return(error);
 }
 

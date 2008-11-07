@@ -1,4 +1,4 @@
-/*      $OpenBSD: cpu.h,v 1.29 2008/08/18 23:05:37 miod Exp $      */
+/*      $OpenBSD: cpu.h,v 1.33 2008/10/15 23:23:50 deraadt Exp $      */
 /*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
 
 /*
@@ -54,6 +54,7 @@ struct cpu_info {
 	struct proc *ci_curproc;
 
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
+	u_int32_t 		ci_randseed;
 };
 
 extern struct cpu_info cpu_info_store;
@@ -63,6 +64,9 @@ extern struct cpu_info cpu_info_store;
 #define CPU_INFO_ITERATOR	int
 #define CPU_INFO_FOREACH(cii, ci) \
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+#define CPU_INFO_UNIT(ci)	0
+#define MAXCPUS	1
+#define cpu_unidle(ci)
 
 struct clockframe {
         int     pc;

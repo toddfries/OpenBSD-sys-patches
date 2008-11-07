@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tsec.c,v 1.11 2008/08/07 17:56:51 brad Exp $	*/
+/*	$OpenBSD: if_tsec.c,v 1.13 2008/10/15 19:12:19 blambert Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -456,13 +456,9 @@ tsec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	struct tsec_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)addr;
 	struct ifreq *ifr = (struct ifreq *)addr;
-	int error, s;
+	int error = 0, s;
 
 	s = splnet();
-
-	error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
-	if (error)
-		goto err;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -510,11 +506,10 @@ tsec_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
 		break;
 	}
 
-err:
 	splx(s);
 	return (error);
 }
@@ -632,7 +627,7 @@ tsec_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 int
@@ -933,7 +928,7 @@ tsec_up(struct tsec_softc *sc)
 	    TSEC_IMASK_TXBEN | TSEC_IMASK_TXFEN |
 	    TSEC_IMASK_RXBEN | TSEC_IMASK_RXFEN);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 void

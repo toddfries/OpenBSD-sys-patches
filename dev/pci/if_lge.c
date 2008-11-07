@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lge.c,v 1.47 2008/05/23 08:49:27 brad Exp $	*/
+/*	$OpenBSD: if_lge.c,v 1.49 2008/10/22 00:01:59 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -595,7 +595,7 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 	DPRINTFN(5, ("timeout_set\n"));
 	timeout_set(&sc->lge_timeout, lge_tick, sc);
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 	return;
 
 fail_5:
@@ -640,7 +640,7 @@ lge_list_tx_init(struct lge_softc *sc)
 
 /*
  * Initialize the RX descriptors and allocate mbufs for them. Note that
- * we arralge the descriptors in a closed ring, so that the last descriptor
+ * we arrange the descriptors in a closed ring, so that the last descriptor
  * points back to the first.
  */
 int
@@ -671,7 +671,7 @@ lge_list_rx_init(struct lge_softc *sc)
 }
 
 /*
- * Initialize an RX descriptor and attach an MBUF cluster.
+ * Initialize a RX descriptor and attach a MBUF cluster.
  */
 int
 lge_newbuf(struct lge_softc *sc, struct lge_rx_desc *c, struct mbuf *m)
@@ -1035,7 +1035,7 @@ lge_tick(void *xsc)
 		}
 	}
 
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 
 	splx(s);
 }
@@ -1325,7 +1325,7 @@ lge_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 }
 
 /*

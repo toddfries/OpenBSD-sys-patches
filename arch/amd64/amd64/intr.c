@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.17 2008/04/28 18:09:00 kettenis Exp $	*/
+/*	$OpenBSD: intr.c,v 1.19 2008/10/22 19:53:31 kettenis Exp $	*/
 /*	$NetBSD: intr.c,v 1.3 2003/03/03 22:16:20 fvdl Exp $	*/
 
 /*
@@ -515,8 +515,10 @@ intr_disestablish(struct intrhand *ih)
 	*p = q->ih_next;
 
 	intr_calculatemasks(ci);
-	pic->pic_delroute(pic, ci, ih->ih_pin, idtvec, source->is_type);
-	pic->pic_hwunmask(pic, ih->ih_pin);
+	if (source->is_handlers == NULL)
+		pic->pic_delroute(pic, ci, ih->ih_pin, idtvec, source->is_type);
+	else
+		pic->pic_hwunmask(pic, ih->ih_pin);
 
 #ifdef INTRDEBUG
 	printf("cpu%u: remove slot %d (pic %s pin %d vec %d)\n",
@@ -565,7 +567,7 @@ cpu_intr_init(struct cpu_info *ci)
 	int i;
 #endif
 
-	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_WAITOK|M_ZERO);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	isp->is_recurse = Xsoftclock;
@@ -574,7 +576,7 @@ cpu_intr_init(struct cpu_info *ci)
 	isp->is_handlers = &fake_softclock_intrhand;
 	isp->is_pic = &softintr_pic;
 	ci->ci_isources[SIR_CLOCK] = isp;
-	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_WAITOK|M_ZERO);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	isp->is_recurse = Xsoftnet;
@@ -583,7 +585,7 @@ cpu_intr_init(struct cpu_info *ci)
 	isp->is_handlers = &fake_softnet_intrhand;
 	isp->is_pic = &softintr_pic;
 	ci->ci_isources[SIR_NET] = isp;
-	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_WAITOK|M_ZERO);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	isp->is_recurse = Xsofttty;
@@ -593,7 +595,7 @@ cpu_intr_init(struct cpu_info *ci)
 	isp->is_pic = &softintr_pic;
 	ci->ci_isources[SIR_TTY] = isp;
 #if NLAPIC > 0
-	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_WAITOK|M_ZERO);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	isp->is_recurse = Xrecurse_lapic_ltimer;
@@ -603,7 +605,7 @@ cpu_intr_init(struct cpu_info *ci)
 	isp->is_pic = &local_pic;
 	ci->ci_isources[LIR_TIMER] = isp;
 #ifdef MULTIPROCESSOR
-	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_WAITOK|M_ZERO);
+	isp = malloc(sizeof (struct intrsource), M_DEVBUF, M_NOWAIT|M_ZERO);
 	if (isp == NULL)
 		panic("can't allocate fixed interrupt source");
 	isp->is_recurse = Xrecurse_lapic_ipi;

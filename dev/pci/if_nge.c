@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.58 2008/05/23 08:49:27 brad Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.65 2008/10/28 22:45:20 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -887,7 +887,7 @@ nge_attach(parent, self, aux)
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
-#ifdef NGE_VLAN
+#if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
@@ -950,7 +950,7 @@ nge_attach(parent, self, aux)
 	ether_ifattach(ifp);
 	DPRINTFN(5, ("%s: timeout_set\n", sc->sc_dv.dv_xname));
 	timeout_set(&sc->nge_timeout, nge_tick, sc);
-	timeout_add(&sc->nge_timeout, hz);
+	timeout_add_sec(&sc->nge_timeout, 1);
 	return;
 
 fail_5:
@@ -1272,7 +1272,7 @@ nge_rxeof(sc)
 	ifp = &sc->arpcom.ac_if;
 	i = sc->nge_cdata.nge_rx_prod;
 
-	while(NGE_OWNDESC(&sc->nge_ldata->nge_rx_list[i])) {
+	while (NGE_OWNDESC(&sc->nge_ldata->nge_rx_list[i])) {
 		struct mbuf		*m0 = NULL;
 		u_int32_t		extsts;
 
@@ -1291,9 +1291,23 @@ nge_rxeof(sc)
 		 * comes up in the ring.
 		 */
 		if (!(rxstat & NGE_CMDSTS_PKT_OK)) {
-			ifp->if_ierrors++;
-			nge_newbuf(sc, cur_rx, m);
-			continue;
+#if NVLAN > 0
+			if ((rxstat & NGE_RXSTAT_RUNT) &&
+			    total_len >= (ETHER_MIN_LEN - ETHER_CRC_LEN -
+			    ETHER_VLAN_ENCAP_LEN)) {
+				/*
+				 * Workaround a hardware bug. Accept runt
+				 * frames if its length is larger than or
+				 * equal to 56.
+				 */
+			} else {
+#endif
+				ifp->if_ierrors++;
+				nge_newbuf(sc, cur_rx, m);
+				continue;
+#if NVLAN > 0
+			}
+#endif
 		}
 
 		/*
@@ -1329,6 +1343,14 @@ nge_rxeof(sc)
 #endif
 
 		ifp->if_ipackets++;
+
+#if NVLAN > 0
+		if (extsts & NGE_RXEXTSTS_VLANPKT) {
+			m->m_pkthdr.ether_vtag =
+			    ntohs(extsts & NGE_RXEXTSTS_VTCI);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
 
 #if NBPFILTER > 0
 		/*
@@ -1430,7 +1452,7 @@ nge_tick(xsc)
 	DPRINTFN(10, ("%s: nge_tick: link=%d\n", sc->sc_dv.dv_xname,
 		      sc->nge_link));
 
-	timeout_add(&sc->nge_timeout, hz);
+	timeout_add_sec(&sc->nge_timeout, 1);
 	if (sc->nge_link) {
 		splx(s);
 		return;
@@ -1593,13 +1615,6 @@ nge_encap(sc, m_head, txidx)
 	struct nge_desc		*f = NULL;
 	struct mbuf		*m;
 	int			frag, cur, cnt = 0;
-#if NVLAN > 0
-	struct ifvlan		*ifv = NULL;
-
-	if ((m_head->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m_head->m_pkthdr.rcvif != NULL)
-		ifv = m_head->m_pkthdr.rcvif->if_softc;
-#endif
 
 	/*
 	 * Start packing the mbufs in this chain into
@@ -1633,9 +1648,9 @@ nge_encap(sc, m_head, txidx)
 	sc->nge_ldata->nge_tx_list[*txidx].nge_extsts = 0;
 
 #if NVLAN > 0
-	if (ifv != NULL) {
+	if (m_head->m_flags & M_VLANTAG) {
 		sc->nge_ldata->nge_tx_list[cur].nge_extsts |=
-			(NGE_TXEXTSTS_VLANPKT|ifv->ifv_tag);
+		    (NGE_TXEXTSTS_VLANPKT|htons(m_head->m_pkthdr.ether_vtag));
 	}
 #endif
 
@@ -1805,10 +1820,18 @@ nge_init(xsc)
 	 */
 	CSR_WRITE_4(sc, NGE_VLAN_IP_RXCTL, NGE_VIPRXCTL_IPCSUM_ENB);
 
+	/*
+	 * If VLAN support is enabled, tell the chip to detect
+	 * and strip VLAN tag info from received frames. The tag
+	 * will be provided in the extsts field in the RX descriptors.
+	 */
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		NGE_SETBIT(sc, NGE_VLAN_IP_RXCTL,
+		    NGE_VIPRXCTL_TAG_DETECT_ENB | NGE_VIPRXCTL_TAG_STRIP_ENB);
+
 	/* Set TX configuration */
 	CSR_WRITE_4(sc, NGE_TX_CFG, NGE_TXCFG);
 
-#if NVLAN > 0
 	/*
 	 * If VLAN support is enabled, tell the chip to insert
 	 * VLAN tags on a per-packet basis as dictated by the
@@ -1816,7 +1839,6 @@ nge_init(xsc)
 	 */
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		NGE_SETBIT(sc, NGE_VLAN_IP_TXCTL, NGE_VIPTXCTL_TAG_PER_PKT);
-#endif
 
 	/* Set full/half duplex mode. */
 	if (sc->nge_tbi)
@@ -2046,11 +2068,6 @@ nge_ioctl(ifp, command, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFMTU:
 		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
@@ -2123,12 +2140,10 @@ nge_ioctl(ifp, command, data)
 		}
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return(error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.103 2008/05/05 15:37:41 thib Exp $	*/
+/*	$OpenBSD: proc.h,v 1.109 2008/11/01 05:59:20 deraadt Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -143,6 +143,7 @@ struct process {
 	struct	plimit *ps_limit;	/* Process limits. */
 
 	TAILQ_HEAD(,proc) ps_threads;	/* Threads in this process. */
+	int	ps_refcnt;		/* Number of references. */
 };
 #else
 struct process;
@@ -185,6 +186,7 @@ struct proc {
 	int	p_dupfd;	 /* Sideways return value from filedescopen. XXX */
 
 	long 	p_thrslpid;	/* for thrsleep syscall */
+	int	p_sigwait;	/* signal handled by sigwait() */
 
 
 	/* scheduling */
@@ -269,7 +271,6 @@ struct proc {
 #define P_ZOMBIE(p)	((p)->p_stat == SZOMB || (p)->p_stat == SDEAD)
 
 /* These flags are kept in p_flag. */
-#define	P_ADVLOCK	0x000001	/* Proc may hold a POSIX adv. lock. */
 #define	P_CONTROLT	0x000002	/* Has a controlling terminal. */
 #define	P_INMEM		0x000004	/* Loaded into memory. UNUSED */
 #define	P_NOCLDSTOP	0x000008	/* No SIGCHLD when children stop. */
@@ -399,6 +400,7 @@ extern struct pool proc_pool;		/* memory pool for procs */
 extern struct pool rusage_pool;		/* memory pool for zombies */
 extern struct pool ucred_pool;		/* memory pool for ucreds */
 extern struct pool session_pool;	/* memory pool for sessions */
+extern struct pool pgrp_pool;		/* memory pool for pgrps */
 extern struct pool pcred_pool;		/* memory pool for pcreds */
 
 struct simplelock;
@@ -409,7 +411,8 @@ void	proc_printit(struct proc *p, const char *modif,
     int (*pr)(const char *, ...));
 
 int	chgproccnt(uid_t uid, int diff);
-int	enterpgrp(struct proc *p, pid_t pgid, int mksess);
+int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *newpgrp,
+	    struct session *newsess);
 void	fixjobc(struct proc *p, struct pgrp *pgrp, int entering);
 int	inferior(struct proc *p);
 int	leavepgrp(struct proc *p);

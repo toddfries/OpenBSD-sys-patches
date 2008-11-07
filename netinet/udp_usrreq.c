@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.124 2008/07/16 09:00:44 henning Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.126 2008/10/13 14:02:20 henning Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -534,7 +534,7 @@ udp_input(struct mbuf *m, ...)
 	/*
 	 * Locate pcb for datagram.
 	 */
-#if NPF > 0
+#if 0
 	if (m->m_pkthdr.pf.statekey)
 		inp = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp;
 #endif
@@ -988,7 +988,6 @@ udp_output(struct mbuf *m, ...)
 	((struct ip *)ui)->ip_ttl = inp->inp_ip.ip_ttl;
 	((struct ip *)ui)->ip_tos = inp->inp_ip.ip_tos;
 
-	m->m_pkthdr.pf.statekey = inp->inp_pf_sk;
 	udpstat.udps_opackets++;
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
 	    inp->inp_socket->so_options &

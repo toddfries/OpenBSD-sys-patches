@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.73 2008/05/07 13:45:35 dlg Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.77 2008/10/16 19:18:03 naddy Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -206,23 +206,11 @@ vlan_start(struct ifnet *ifp)
 		 * If the IFCAP_VLAN_HWTAGGING capability is set on the parent,
 		 * it can do VLAN tag insertion itself and doesn't require us
 	 	 * to create a special header for it. In this case, we just pass
-		 * the packet along. However, we need some way to tell the
-		 * interface where the packet came from so that it knows how
-		 * to find the VLAN tag to use, so we set the rcvif in the
-		 * mbuf header to our ifnet.
-		 *
-		 * Note: we also set the M_PROTO1 flag in the mbuf to let
-		 * the parent driver know that the rcvif pointer is really
-		 * valid. We need to do this because sometimes mbufs will
-		 * be allocated by other parts of the system that contain
-		 * garbage in the rcvif pointer. Using the M_PROTO1 flag
-		 * lets the driver perform a proper sanity check and avoid
-		 * following potentially bogus rcvif pointers off into
-		 * never-never land.
+		 * the packet along.
 		 */
 		if (p->if_capabilities & IFCAP_VLAN_HWTAGGING) {
-			m->m_pkthdr.rcvif = ifp;
-			m->m_flags |= M_PROTO1;
+			m->m_pkthdr.ether_vtag = ifv->ifv_tag;
+			m->m_flags |= M_VLANTAG;
 		} else {
 			struct ether_vlan_header evh;
 
@@ -276,13 +264,17 @@ vlan_input(eh, m)
 	u_int tag;
 	struct ifnet *ifp = m->m_pkthdr.rcvif;
 
-	if (m->m_len < EVL_ENCAPLEN &&
-	    (m = m_pullup(m, EVL_ENCAPLEN)) == NULL) {
-		ifp->if_ierrors++;
-		return (0);
-	}
+	if (m->m_flags & M_VLANTAG) {
+		tag = EVL_VLANOFTAG(m->m_pkthdr.ether_vtag);
+	} else {
+		if (m->m_len < EVL_ENCAPLEN &&
+		    (m = m_pullup(m, EVL_ENCAPLEN)) == NULL) {
+			ifp->if_ierrors++;
+			return (0);
+		}
 
-	tag = EVL_VLANOFTAG(ntohs(*mtod(m, u_int16_t *)));
+		tag = EVL_VLANOFTAG(ntohs(*mtod(m, u_int16_t *)));
+	}
 
 	LIST_FOREACH(ifv, &vlan_tagh[TAG_HASH(tag)], ifv_list) {
 		if (m->m_pkthdr.rcvif == ifv->ifv_p && tag == ifv->ifv_tag)
@@ -305,16 +297,35 @@ vlan_input(eh, m)
 	 * reentrant!).
 	 */
 	m->m_pkthdr.rcvif = &ifv->ifv_if;
-	eh->ether_type = mtod(m, u_int16_t *)[1];
-	m->m_len -= EVL_ENCAPLEN;
-	m->m_data += EVL_ENCAPLEN;
-	m->m_pkthdr.len -= EVL_ENCAPLEN;
+	if (m->m_flags & M_VLANTAG) {
+		m->m_flags &= ~M_VLANTAG;
+	} else {
+		eh->ether_type = mtod(m, u_int16_t *)[1];
+		m->m_len -= EVL_ENCAPLEN;
+		m->m_data += EVL_ENCAPLEN;
+		m->m_pkthdr.len -= EVL_ENCAPLEN;
+	}
 
 #if NBPFILTER > 0
 	if (ifv->ifv_if.if_bpf)
 		bpf_mtap_hdr(ifv->ifv_if.if_bpf, (char *)eh, ETHER_HDR_LEN,
 		    m, BPF_DIRECTION_IN);
 #endif
+
+	/*
+	 * Drop promiscuously received packets if we are not in
+	 * promiscuous mode.
+	 */
+	if ((m->m_flags & (M_BCAST|M_MCAST)) == 0 &&
+	    (ifp->if_flags & IFF_PROMISC) &&
+	    (ifv->ifv_if.if_flags & IFF_PROMISC) == 0) {
+		struct arpcom *ac = &ifv->ifv_ac;
+		if (bcmp(ac->ac_enaddr, eh->ether_dhost, ETHER_ADDR_LEN)) {
+			m_freem(m);
+			return (0);
+		}
+	}
+
 	ifv->ifv_if.if_ipackets++;
 	ether_input(&ifv->ifv_if, eh, m);
 
@@ -422,16 +433,12 @@ vlan_unconfig(struct ifnet *ifp)
 	struct sockaddr_dl *sdl;
 	struct ifvlan *ifv;
 	struct ifnet *p;
-	struct ifreq *ifr, *ifr_p;
 	int s;
 
 	ifv = ifp->if_softc;
 	p = ifv->ifv_p;
 	if (p == NULL)
 		return 0;
-
-	ifr = (struct ifreq *)&ifp->if_data;
-	ifr_p = (struct ifreq *)&ifv->ifv_p->if_data;
 
 	s = splnet();
 	LIST_REMOVE(ifv, ifv_list);

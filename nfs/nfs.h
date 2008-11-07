@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.33 2008/07/05 17:34:26 thib Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.35 2008/09/12 16:55:37 thib Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -80,7 +80,6 @@
 /*
  * Oddballs
  */
-#define	NMOD(a)		((a) % nfs_asyncdaemons)
 #define NFS_CMPFH(n, f, s) \
 	((n)->n_fhsize == (s) && !bcmp((caddr_t)(n)->n_fhp, (caddr_t)(f), (s)))
 #define NFS_ISV3(v)	(VFSTONFS((v)->v_mount)->nm_flag & NFSMNT_NFSV3)
@@ -118,17 +117,6 @@
  */
 #ifndef IO_METASYNC
 #define IO_METASYNC	0
-#endif
-
-/*
- * Set the attribute timeout based on how recently the file has been modified.
- */
-#if 0 /* replaced by nfs_attrtimeo() in nfs_subs.c */
-#define	NFS_ATTRTIMEO(np) \
-	((((np)->n_flag & NMODIFIED) || \
-	 (time_second - (np)->n_mtime) / 10 < NFS_MINATTRTIMO) ? NFS_MINATTRTIMO : \
-	 ((time_second - (np)->n_mtime) / 10 > NFS_MAXATTRTIMO ? NFS_MAXATTRTIMO : \
-	  (time_second - (np)->n_mtime) / 10))
 #endif
 
 /*

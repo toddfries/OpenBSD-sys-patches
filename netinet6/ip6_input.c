@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.86 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.89 2008/11/02 10:37:29 claudio Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -173,7 +173,7 @@ ip6_init2(void *dummy)
 	/* nd6_timer_init */
 	bzero(&nd6_timer_ch, sizeof(nd6_timer_ch));
 	timeout_set(&nd6_timer_ch, nd6_timer, NULL);
-	timeout_add(&nd6_timer_ch, hz);
+	timeout_add_sec(&nd6_timer_ch, 1);
 }
 
 /*
@@ -210,7 +210,7 @@ ip6_input(struct mbuf *m)
 #if NPF > 0
 	struct in6_addr odst;
 #endif
-	int srcrt = 0, rtableid = 0;
+	int srcrt = 0, rtableid = 0, isanycast = 0;
 
 	/*
 	 * mbuf statistics by kazu
@@ -496,7 +496,7 @@ ip6_input(struct mbuf *m)
 		struct in6_ifaddr *ia6 =
 			(struct in6_ifaddr *)ip6_forward_rt.ro_rt->rt_ifa;
 		if (ia6->ia6_flags & IN6_IFF_ANYCAST)
-			m->m_flags |= M_ANYCAST6;
+			isanycast = 1;
 		/*
 		 * packets to a tentative, duplicated, or somehow invalid
 		 * address must not be accepted.
@@ -716,13 +716,24 @@ ip6_input(struct mbuf *m)
 			goto bad;
 		}
 
+		/* draft-itojun-ipv6-tcp-to-anycast */
+		if (isanycast && nxt == IPPROTO_TCP) {
+			if (m->m_len >= sizeof(struct ip6_hdr)) {
+				ip6 = mtod(m, struct ip6_hdr *);
+				icmp6_error(m, ICMP6_DST_UNREACH,
+					ICMP6_DST_UNREACH_ADDR,
+					(caddr_t)&ip6->ip6_dst - (caddr_t)ip6);
+				break;
+			} else
+				goto bad;
+		}
+
 		nxt = (*inet6sw[ip6_protox[nxt]].pr_input)(&m, &off, nxt);
 	}
 	return;
  bad:
 	m_freem(m);
 }
-
 
 /* scan packet for RH0 routing header. Mostly stolen from pf.c:pf_test6() */
 int
@@ -802,7 +813,6 @@ ip6_hopopts_input(u_int32_t *plenp, u_int32_t *rtalertp, struct mbuf **mp,
 	struct mbuf *m = *mp;
 	int off = *offp, hbhlen;
 	struct ip6_hbh *hbh;
-	u_int8_t *opt;
 
 	/* validation of the length of the header */
 	IP6_EXTHDR_GET(hbh, struct ip6_hbh *, m,
@@ -820,7 +830,6 @@ ip6_hopopts_input(u_int32_t *plenp, u_int32_t *rtalertp, struct mbuf **mp,
 	}
 	off += hbhlen;
 	hbhlen -= sizeof(struct ip6_hbh);
-	opt = (u_int8_t *)hbh + sizeof(struct ip6_hbh);
 
 	if (ip6_process_hopopts(m, (u_int8_t *)hbh + sizeof(struct ip6_hbh),
 				hbhlen, rtalertp, plenp) < 0)

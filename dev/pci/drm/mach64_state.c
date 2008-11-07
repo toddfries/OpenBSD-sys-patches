@@ -35,25 +35,6 @@
 #include "mach64_drm.h"
 #include "mach64_drv.h"
 
-/* Interface history:
- *
- * 1.0 - Initial mach64 DRM
- *
- */
-struct drm_ioctl_desc mach64_ioctls[] = {
-	DRM_IOCTL_DEF(DRM_MACH64_INIT, mach64_dma_init, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_MACH64_CLEAR, mach64_dma_clear, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_MACH64_SWAP, mach64_dma_swap, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_MACH64_IDLE, mach64_dma_idle, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_MACH64_RESET, mach64_engine_reset, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_MACH64_VERTEX, mach64_dma_vertex, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_MACH64_BLIT, mach64_dma_blit, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_MACH64_FLUSH, mach64_dma_flush, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_MACH64_GETPARAM, mach64_get_param, DRM_AUTH),
-};
-
-int mach64_max_ioctl = DRM_ARRAY_SIZE(mach64_ioctls);
-
 /* ================================================================
  * DMA hardware state programming functions
  */
@@ -239,7 +220,7 @@ static int mach64_dma_dispatch_clear(struct drm_device * dev,
 		fb_bpp = MACH64_DATATYPE_ARGB8888;
 		break;
 	default:
-		return -EINVAL;
+		return EINVAL;
 	}
 	switch (dev_priv->depth_bpp) {
 	case 16:
@@ -250,7 +231,7 @@ static int mach64_dma_dispatch_clear(struct drm_device * dev,
 		depth_bpp = MACH64_DATATYPE_ARGB8888;
 		break;
 	default:
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	if (!nbox)
@@ -492,11 +473,11 @@ static __inline__ int copy_from_user_vertex(u32 *to,
 
 	from = drm_alloc(bytes, DRM_MEM_DRIVER);
 	if (from == NULL)
-		return -ENOMEM;
+		return ENOMEM;
 
 	if (DRM_COPY_FROM_USER(from, ufrom, bytes)) {
 		drm_free(from, bytes, DRM_MEM_DRIVER);
-		return -EFAULT;
+		return EFAULT;
 	}
 	orig_from = from; /* we'll be modifying the "from" ptr, so save it */
 
@@ -527,14 +508,14 @@ static __inline__ int copy_from_user_vertex(u32 *to,
 			} else {
 				DRM_ERROR("Got bad command: 0x%04x\n", reg);
 				drm_free(orig_from, bytes, DRM_MEM_DRIVER);
-				return -EACCES;
+				return EACCES;
 			}
 		} else {
 			DRM_ERROR
 			    ("Got bad command count(=%u) dwords remaining=%lu\n",
 			     count, n);
 			drm_free(orig_from, bytes, DRM_MEM_DRIVER);
-			return -EINVAL;
+			return EINVAL;
 		}
 	}
 
@@ -543,7 +524,7 @@ static __inline__ int copy_from_user_vertex(u32 *to,
 		return 0;
 	else {
 		DRM_ERROR("Bad buf->used(=%lu)\n", bytes);
-		return -EINVAL;
+		return EINVAL;
 	}
 }
 
@@ -571,7 +552,7 @@ static int mach64_dma_dispatch_vertex(struct drm_device * dev,
 	copy_buf = mach64_freelist_get(dev_priv);
 	if (copy_buf == NULL) {
 		DRM_ERROR("couldn't get buffer\n");
-		return -EAGAIN;
+		return EAGAIN;
 	}
 
 	/* Mach64's vertex data is actually register writes. To avoid security
@@ -641,7 +622,7 @@ static __inline__ int copy_from_user_blit(u32 *to,
 	to = (u32 *)((char *)to + MACH64_HOSTDATA_BLIT_OFFSET);
 
 	if (DRM_COPY_FROM_USER(to, ufrom, bytes)) {
-		return -EFAULT;
+		return EFAULT;
 	}
 
 	return 0;
@@ -679,7 +660,7 @@ static int mach64_dma_dispatch_blit(struct drm_device * dev,
 		break;
 	default:
 		DRM_ERROR("invalid blit format %d\n", blit->format);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	/* Set buf->used to the bytes of blit data based on the blit dimensions
@@ -692,13 +673,13 @@ static int mach64_dma_dispatch_blit(struct drm_device * dev,
 	if (used <= 0 ||
 	    used > MACH64_BUFFER_SIZE - MACH64_HOSTDATA_BLIT_OFFSET) {
 		DRM_ERROR("Invalid blit size: %lu bytes\n", used);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	copy_buf = mach64_freelist_get(dev_priv);
 	if (copy_buf == NULL) {
 		DRM_ERROR("couldn't get buffer\n");
-		return -EAGAIN;
+		return EAGAIN;
 	}
 
 	/* Copy the blit data from userspace.
@@ -830,7 +811,7 @@ int mach64_dma_vertex(struct drm_device *dev, void *data,
 
 	if (!dev_priv) {
 		DRM_ERROR("called with no initialization\n");
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	DRM_DEBUG("pid=%d buf=%p used=%lu discard=%d\n",
@@ -839,13 +820,13 @@ int mach64_dma_vertex(struct drm_device *dev, void *data,
 
 	if (vertex->prim < 0 || vertex->prim > MACH64_PRIM_POLYGON) {
 		DRM_ERROR("buffer prim %d\n", vertex->prim);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	if (vertex->used > MACH64_BUFFER_SIZE || (vertex->used & 3) != 0) {
 		DRM_ERROR("Invalid vertex buffer size: %lu bytes\n",
 			  vertex->used);
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	if (sarea_priv->nbox > MACH64_NR_SAREA_CLIPRECTS)
@@ -885,7 +866,7 @@ int mach64_get_param(struct drm_device *dev, void *data,
 
 	if (!dev_priv) {
 		DRM_ERROR("called with no initialization\n");
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	switch (param->param) {
@@ -898,12 +879,12 @@ int mach64_get_param(struct drm_device *dev, void *data,
 		value = dev->irq;
 		break;
 	default:
-		return -EINVAL;
+		return EINVAL;
 	}
 
 	if (DRM_COPY_TO_USER(param->value, &value, sizeof(int))) {
 		DRM_ERROR("copy_to_user\n");
-		return -EFAULT;
+		return EFAULT;
 	}
 
 	return 0;

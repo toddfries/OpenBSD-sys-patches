@@ -1,4 +1,4 @@
-/*	$OpenBSD: eephy.c,v 1.44 2008/07/12 05:31:14 brad Exp $	*/
+/*	$OpenBSD: eephy.c,v 1.46 2008/10/07 20:41:05 kettenis Exp $	*/
 /*
  * Principal Author: Parag Patel
  * Copyright (c) 2001
@@ -95,6 +95,8 @@ static const struct mii_phydesc eephys[] = {
 	  MII_STR_MARVELL_E1112 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1116,
 	  MII_STR_MARVELL_E1116 },
+	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1116R,
+	  MII_STR_MARVELL_E1116R },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1118,
 	  MII_STR_MARVELL_E1118 },
 	{ MII_OUI_MARVELL,		MII_MODEL_MARVELL_E1149,
@@ -148,6 +150,9 @@ eephyattach(struct device *parent, struct device *self, void *aux)
 
 	/* XXX No loopback support yet, although the hardware can do it. */
 	sc->mii_flags |= MIIF_NOLOOP;
+
+	/* Make sure page 0 is selected. */
+        PHY_WRITE(sc, E1000_EADR, 0);
 
 	/* Switch to copper-only mode if necessary. */
 	if (sc->mii_model == MII_MODEL_MARVELL_E1111 &&

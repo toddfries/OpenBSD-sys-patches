@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.73 2008/05/11 23:54:40 tedu Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.79 2008/10/31 17:17:01 deraadt Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -388,17 +388,13 @@ reaper(void)
 
 	for (;;) {
 		mtx_enter(&deadproc_mutex);
-		p = LIST_FIRST(&deadproc);
-		if (p == NULL) {
-			/* No work for us; go to sleep until someone exits. */
-			mtx_leave(&deadproc_mutex);
-			(void) tsleep(&deadproc, PVM, "reaper", 0);
-			continue;
-		}
+		while ((p = LIST_FIRST(&deadproc)) == NULL)
+			msleep(&deadproc, &deadproc_mutex, PVM, "reaper", 0);
 
 		/* Remove us from the deadproc list. */
 		LIST_REMOVE(p, p_hash);
 		mtx_leave(&deadproc_mutex);
+
 		KERNEL_PROC_LOCK(curproc);
 
 		/*
@@ -590,7 +586,7 @@ proc_zap(struct proc *p)
 	 * Remove us from our process list, possibly killing the process
 	 * in the process (pun intended).
 	 */
-	if ((p->p_flag & P_THREAD) == 0) {
+	if (--p->p_p->ps_refcnt == 0) {
 		KASSERT(TAILQ_EMPTY(&p->p_p->ps_threads));
 		limfree(p->p_p->ps_limit);
 		if (--p->p_p->ps_cred->p_refcnt == 0) {

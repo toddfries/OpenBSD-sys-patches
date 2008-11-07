@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc91cxx.c,v 1.27 2008/06/26 05:42:16 ray Exp $	*/
+/*	$OpenBSD: smc91cxx.c,v 1.29 2008/10/03 20:25:29 brad Exp $	*/
 /*	$NetBSD: smc91cxx.c,v 1.11 1998/08/08 23:51:41 mycroft Exp $	*/
 
 /*-
@@ -518,7 +518,7 @@ smc91cxx_init(sc)
 	if (sc->sc_flags & SMC_FLAGS_HAS_MII) {
 		/* Start the one second clock. */
 		timeout_set(&sc->sc_mii_timeout, smc91cxx_tick, sc);
-		timeout_add(&sc->sc_mii_timeout, hz);
+		timeout_add_sec(&sc->sc_mii_timeout, 1);
 	}
 
 	/*
@@ -1116,8 +1116,7 @@ smc91cxx_ioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);
@@ -1362,5 +1361,5 @@ smc91cxx_tick(arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 }

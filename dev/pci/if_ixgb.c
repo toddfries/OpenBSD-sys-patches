@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_ixgb.c,v 1.44 2008/06/08 16:54:34 brad Exp $ */
+/* $OpenBSD: if_ixgb.c,v 1.50 2008/10/28 05:43:11 brad Exp $ */
 
 #include <dev/pci/if_ixgb.h>
 
@@ -110,6 +110,7 @@ void ixgb_update_link_status(struct ixgb_softc *);
 int
 ixgb_get_buf(struct ixgb_softc *, int i,
 	     struct mbuf *);
+void ixgb_enable_hw_vlans(struct ixgb_softc *);
 int  ixgb_encap(struct ixgb_softc *, struct mbuf *);
 int
 ixgb_dma_malloc(struct ixgb_softc *, bus_size_t,
@@ -370,11 +371,6 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->interface_data, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFADDR (Set Interface "
@@ -438,8 +434,7 @@ ixgb_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
 	default:
-		IOCTL_DEBUGOUT1("ioctl received: UNKNOWN (0x%X)\n", (int)command);
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->interface_data, command, data);
 	}
 
 	splx(s);
@@ -510,6 +505,9 @@ ixgb_init(void *arg)
 		return;
 	}
 
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		ixgb_enable_hw_vlans(sc);
+
 	/* Prepare transmit descriptors and buffers */
 	if (ixgb_setup_transmit_structures(sc)) {
 		printf("%s: Could not setup transmit structures\n",
@@ -546,7 +544,7 @@ ixgb_init(void *arg)
 	temp_reg |= IXGB_CTRL0_JFE;
 	IXGB_WRITE_REG(&sc->hw, CTRL0, temp_reg);
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 	ixgb_clear_hw_cntrs(&sc->hw);
 	ixgb_enable_intr(sc);
 
@@ -590,7 +588,7 @@ ixgb_intr(void *arg)
 			timeout_del(&sc->timer_handle);
 			ixgb_check_for_link(&sc->hw);
 			ixgb_update_link_status(sc);
-			timeout_add(&sc->timer_handle, hz);
+			timeout_add_sec(&sc->timer_handle, 1);
 		}
 
 		if (rxdmt0 && sc->raidc) {
@@ -734,6 +732,15 @@ ixgb_encap(struct ixgb_softc *sc, struct mbuf *m_head)
 	sc->num_tx_desc_avail -= map->dm_nsegs;
 	sc->next_avail_tx_desc = i;
 
+	/* Find out if we are in VLAN mode */
+	if (m_head->m_flags & M_VLANTAG) {
+		/* Set the VLAN id */
+		current_tx_desc->vlan = m_head->m_pkthdr.ether_vtag;
+
+		/* Tell hardware to add tag */
+		current_tx_desc->cmd_type_len |= IXGB_TX_DESC_CMD_VLE;
+	}
+
 	tx_buffer->m_head = m_head;
 	bus_dmamap_sync(sc->txtag, map, 0, map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
@@ -840,7 +847,7 @@ ixgb_local_timer(void *arg)
 		ixgb_print_hw_stats(sc);
 #endif
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 
 	splx(s);
 }
@@ -1054,6 +1061,10 @@ ixgb_setup_interface(struct ixgb_softc *sc)
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
+
 #ifdef IXGB_CSUM_OFFLOAD
 	ifp->if_capabilities |= IFCAP_CSUM_TCPv4|IFCAP_CSUM_UDPv4;
 #endif
@@ -1116,9 +1127,7 @@ ixgb_dma_malloc(struct ixgb_softc *sc, bus_size_t size,
 	}
 
 	r = bus_dmamap_load(sc->osdep.ixgb_pa.pa_dmat, dma->dma_map,
-			    dma->dma_vaddr,
-			    size,
-			    NULL,
+			    dma->dma_vaddr, size, NULL,
 			    mapflags | BUS_DMA_NOWAIT);
 	if (r != 0) {
 		printf("%s: ixgb_dma_malloc: bus_dmamap_load failed; "
@@ -1475,10 +1484,7 @@ ixgb_get_buf(struct ixgb_softc *sc, int i,
 {
 	struct mbuf *mp = nmp;
 	struct ixgb_buffer *rx_buffer;
-	struct ifnet   *ifp;
 	int             error;
-
-	ifp = &sc->interface_data.ac_if;
 
 	if (mp == NULL) {
 		MGETHDR(mp, M_DONTWAIT, MT_DATA);
@@ -1605,10 +1611,7 @@ ixgb_initialize_receive_unit(struct ixgb_softc *sc)
 	u_int32_t       reg_rctl;
 	u_int32_t       reg_rxcsum;
 	u_int32_t       reg_rxdctl;
-	struct ifnet   *ifp;
 	u_int64_t       bus_addr;
-
-	ifp = &sc->interface_data.ac_if;
 
 	/*
 	 * Make sure receives are disabled while setting up the descriptor
@@ -1811,6 +1814,15 @@ ixgb_rxeof(struct ixgb_softc *sc, int count)
 				eop_desc = i;
 				sc->fmp->m_pkthdr.rcvif = ifp;
 				ifp->if_ipackets++;
+				ixgb_receive_checksum(sc, current_desc, sc->fmp);
+
+#if NVLAN > 0
+				if (current_desc->status & IXGB_RX_DESC_STATUS_VP) {
+					sc->fmp->m_pkthdr.ether_vtag =
+					    current_desc->special;
+					sc->fmp->m_flags |= M_VLANTAG;
+				}
+#endif
 
 #if NBPFILTER > 0
 				/*
@@ -1822,8 +1834,6 @@ ixgb_rxeof(struct ixgb_softc *sc, int count)
 					    BPF_DIRECTION_IN);
 #endif
 
-				ixgb_receive_checksum(sc, current_desc,
-						      sc->fmp);
 				ether_input_mbuf(ifp, sc->fmp);
 				sc->fmp = NULL;
 				sc->lmp = NULL;
@@ -1929,6 +1939,20 @@ ixgb_receive_checksum(struct ixgb_softc *sc,
 				M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
 		}
 	}
+}
+
+/*
+ * This turns on the hardware offload of the VLAN
+ * tag insertion and strip
+ */
+void
+ixgb_enable_hw_vlans(struct ixgb_softc *sc)
+{
+	uint32_t ctrl;
+
+	ctrl = IXGB_READ_REG(&sc->hw, CTRL0);
+	ctrl |= IXGB_CTRL0_VME;
+	IXGB_WRITE_REG(&sc->hw, CTRL0, ctrl);
 }
 
 void

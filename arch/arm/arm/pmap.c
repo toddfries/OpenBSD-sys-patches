@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.17 2008/06/27 06:03:08 ray Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.19 2008/10/28 20:16:58 drahn Exp $	*/
 /*	$NetBSD: pmap.c,v 1.147 2004/01/18 13:03:50 scw Exp $	*/
 
 /*
@@ -249,6 +249,7 @@ struct pmap     kernel_pmap_store;
  * XXXSCW: Fix for SMP ...
  */
 union pmap_cache_state *pmap_cache_state;
+union pmap_cache_state pmap_deadproc_cache_state;
 
 /*
  * Pool and cache that pmap structures are allocated from.
@@ -262,7 +263,7 @@ static LIST_HEAD(, pmap) pmap_pmaps;
  * Pool of PV structures
  */
 static struct pool pmap_pv_pool;
-void *pmap_bootstrap_pv_page_alloc(struct pool *, int);
+void *pmap_bootstrap_pv_page_alloc(struct pool *, int, int *);
 void pmap_bootstrap_pv_page_free(struct pool *, void *);
 struct pool_allocator pmap_bootstrap_pv_allocator = {
 	pmap_bootstrap_pv_page_alloc, pmap_bootstrap_pv_page_free
@@ -3204,6 +3205,9 @@ pmap_destroy(pmap_t pm)
 
 	LIST_REMOVE(pm, pm_list);
 
+	if (pmap_cache_state == &pm->pm_cstate)
+		pmap_cache_state = &pmap_deadproc_cache_state;
+
 	pmap_free_l1(pm);
 
 	/* return the pmap to the pool */
@@ -4055,14 +4059,15 @@ static vaddr_t last_bootstrap_page = 0;
 static void *free_bootstrap_pages = NULL;
 
 void *
-pmap_bootstrap_pv_page_alloc(struct pool *pp, int flags)
+pmap_bootstrap_pv_page_alloc(struct pool *pp, int flags, int *slowdown)
 {
-	extern void *pool_page_alloc(struct pool *, int);
+	extern void *pool_page_alloc(struct pool *, int, int *);
 	vaddr_t new_page;
 	void *rv;
 
 	if (pmap_initialized)
-		return (pool_page_alloc(pp, flags));
+		return (pool_page_alloc(pp, flags, slowdown));
+	*slowdown = 0;
 
 	if (free_bootstrap_pages) {
 		rv = free_bootstrap_pages;

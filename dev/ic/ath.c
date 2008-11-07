@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.77 2008/08/29 11:15:32 reyk Exp $  */
+/*      $OpenBSD: ath.c,v 1.79 2008/10/15 19:12:19 blambert Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -158,7 +158,7 @@ int ath_dwelltime = 200;		/* 5 channels/second */
 int ath_calinterval = 30;		/* calibrate every 30 secs */
 int ath_outdoor = AH_TRUE;		/* outdoor operation */
 int ath_xchanmode = AH_TRUE;		/* enable extended channels */
-int ath_softcrypto = 0;			/* 1=enable software crypto */
+int ath_softcrypto = 1;			/* 1=enable software crypto */
 
 struct cfdriver ath_cd = {
 	NULL, "ath", DV_IFNET
@@ -2894,7 +2894,7 @@ ath_calibrate(void *arg)
 		    __func__, c->ic_freq));
 		sc->sc_stats.ast_per_calfail++;
 	}
-	timeout_add(&sc->sc_cal_to, hz * ath_calinterval);
+	timeout_add_sec(&sc->sc_cal_to, ath_calinterval);
 	splx(s);
 }
 
@@ -3024,7 +3024,7 @@ ath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 	if (nstate == IEEE80211_S_RUN) {
 		/* start periodic recalibration timer */
-		timeout_add(&sc->sc_cal_to, hz * ath_calinterval);
+		timeout_add_sec(&sc->sc_cal_to, ath_calinterval);
 
 		if (ic->ic_opmode != IEEE80211_M_MONITOR)
 			timeout_add(&sc->sc_rssadapt_to, hz / 10);

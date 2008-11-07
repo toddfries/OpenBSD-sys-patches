@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.37 2008/05/22 19:23:04 mk Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.41 2008/10/22 05:31:29 brad Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -82,6 +82,7 @@
  */
 
 #include "bpfilter.h"
+#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/endian.h>
@@ -104,6 +105,11 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#endif
+
+#if NVLAN > 0
+#include <net/if_types.h>
+#include <net/if_vlan_var.h>
 #endif
 
 #if NBPFILTER > 0
@@ -774,6 +780,10 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
 				IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
+
 	/* Set interface name */
 	strlcpy(ifp->if_xname, sc->vge_dev.dv_xname, IFNAMSIZ);
 
@@ -1031,15 +1041,13 @@ vge_rxeof(struct vge_softc *sc)
 				sc->vge_head = sc->vge_tail = NULL;
 			}
 
-			m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-			    total_len - ETHER_CRC_LEN + ETHER_ALIGN,
-			    0, ifp, NULL);
+			m0 = m_devget(mtod(m, char *),
+			    total_len - ETHER_CRC_LEN, ETHER_ALIGN, ifp, NULL);
 			vge_newbuf(sc, i, m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
 				continue;
 			}
-			m_adj(m0, ETHER_ALIGN);
 			m = m0;
 
 			VGE_RX_DESC_INC(i);
@@ -1091,6 +1099,13 @@ vge_rxeof(struct vge_softc *sc)
 		if ((rxctl & (VGE_RDCTL_TCPPKT|VGE_RDCTL_UDPPKT)) &&
 		    (rxctl & VGE_RDCTL_PROTOCSUMOK))
 			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
+
+#if NVLAN > 0
+		if (rxstat & VGE_RDSTS_VTAG) {
+			m->m_pkthdr.ether_vtag = swap16(rxctl & VGE_RDCTL_VLANID);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
@@ -1200,7 +1215,7 @@ vge_tick(void *xsc)
 				vge_start(ifp);
 		}
 	}
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 	splx(s);
 }
 
@@ -1367,6 +1382,14 @@ repack:
 	if (m_head->m_pkthdr.len > ETHERMTU + ETHER_HDR_LEN)
 		d->vge_ctl |= htole32(VGE_TDCTL_JUMBO);
 
+#if NVLAN > 0
+	/* Set up hardware VLAN tagging. */
+	if (m_head->m_flags & M_VLANTAG) {
+		d->vge_ctl |= htole32(m_head->m_pkthdr.ether_vtag |
+		    VGE_TDCTL_VTAG);
+	}
+#endif
+
 	sc->vge_ldata.vge_tx_dmamap[idx] = txmap;
 	sc->vge_ldata.vge_tx_mbuf[idx] = m_head;
 	sc->vge_ldata.vge_tx_free--;
@@ -1498,6 +1521,15 @@ vge_init(struct ifnet *ifp)
 	CSR_CLRBIT_1(sc, VGE_RXCFG, VGE_RXCFG_FIFO_THR);
 	CSR_SETBIT_1(sc, VGE_RXCFG, VGE_RXFIFOTHR_128BYTES);
 
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING) {
+		/*
+		 * Allow transmission and reception of VLAN tagged
+		 * frames.
+		 */
+		CSR_CLRBIT_1(sc, VGE_RXCFG, VGE_RXCFG_VTAGOPT);
+		CSR_SETBIT_1(sc, VGE_RXCFG, VGE_VTAG_OPT2);
+	}
+
 	/* Set DMA burst length */
 	CSR_CLRBIT_1(sc, VGE_DMACFG0, VGE_DMACFG0_BURSTLEN);
 	CSR_SETBIT_1(sc, VGE_DMACFG0, VGE_DMABURST_128);
@@ -1622,7 +1654,7 @@ vge_init(struct ifnet *ifp)
 	sc->vge_link = 0;
 
 	if (!timeout_pending(&sc->timer_handle))
-		timeout_add(&sc->timer_handle, hz);
+		timeout_add_sec(&sc->timer_handle, 1);
 
 	return (0);
 }
@@ -1707,11 +1739,6 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1772,8 +1799,7 @@ vge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);

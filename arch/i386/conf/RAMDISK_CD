@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.158 2008/07/02 22:14:07 todd Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.160 2008/10/23 17:26:26 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -134,6 +134,7 @@ upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 urio*	at uhub?		# Diamond Multimedia Rio 500
 cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
+mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 #uscanner* at uhub?		# USB Scanners
@@ -364,6 +365,7 @@ xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 et*	at pci?				# Agere/LSI ET1310
 lii*	at pci?				# Attansic L2 Ethernet
+jme*	at pci?				# JMicron JMC250/JMC260 Ethernet
 
 # Wireless network cards
 acx*	at pci?				# TI ACX100/ACX111 (802.11b/g)
@@ -416,6 +418,7 @@ bmtphy* at mii?				# Broadcom 10/100 PHYs
 rgephy*	at mii?				# Realtek 8169S/8110S PHY
 ciphy*	at mii?				# Cicada CS8201 10/100/1000 copper PHY
 etphy*	at mii?				# Agere/LSI ET1011 TruePHY
+jmphy*	at mii?				# JMicron JMP202/JMP211 PHYs
 ukphy*	at mii?				# "unknown" PHYs
 
 pseudo-device	loop	1		# network loopback

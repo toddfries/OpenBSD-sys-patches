@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.33 2008/07/18 23:43:31 art Exp $ */
+/* $OpenBSD: cpu.h,v 1.36 2008/10/15 23:23:44 deraadt Exp $ */
 /* $NetBSD: cpu.h,v 1.45 2000/08/21 02:03:12 thorpej Exp $ */
 
 /*-
@@ -202,6 +202,7 @@ struct cpu_info {
 	u_long ci_flags;		/* flags; see below */
 	u_long ci_ipis;			/* interprocessor interrupts pending */
 #endif
+	u_int32_t ci_randseed;
 };
 
 #define	CPUF_PRIMARY	0x01		/* CPU is primary CPU */
@@ -217,6 +218,10 @@ void	fpusave_proc(struct proc *, int);
 #define	CPU_INFO_ITERATOR		int
 #define	CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = curcpu(); \
 					    ci != NULL; ci = ci->ci_next)
+
+#define MAXCPUS	ALPHA_MAXPROCS
+
+#define cpu_unidle(ci)
 
 #if defined(MULTIPROCESSOR)
 extern	__volatile u_long cpus_running;

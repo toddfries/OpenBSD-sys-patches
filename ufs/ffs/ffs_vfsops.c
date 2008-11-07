@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.116 2008/08/08 23:49:53 krw Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.118 2008/11/02 08:53:06 otto Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -892,7 +892,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	 * a little added paranoia never hurts.
 	 */
 	ump->um_savedmaxfilesize = fs->fs_maxfilesize;		/* XXX */
-	maxfilesize = (u_int64_t)0x80000000 * MIN(PAGE_SIZE, fs->fs_bsize) - 1;
+	maxfilesize = FS_KERNMAXFILESIZE(fs);
 	if (fs->fs_maxfilesize > maxfilesize)			/* XXX */
 		fs->fs_maxfilesize = maxfilesize;		/* XXX */
 	if (ronly == 0) {
@@ -1254,8 +1254,7 @@ retry:
 #ifdef VFSDEBUG
 	vp->v_flag |= VLOCKSWORK;
 #endif
-	ip = pool_get(&ffs_ino_pool, PR_WAITOK);
-	bzero((caddr_t)ip, sizeof(struct inode));
+	ip = pool_get(&ffs_ino_pool, PR_WAITOK|PR_ZERO);
 	lockinit(&ip->i_lock, PINOD, "inode", 0, 0);
 	ip->i_ump = ump;
 	VREF(ip->i_devvp);

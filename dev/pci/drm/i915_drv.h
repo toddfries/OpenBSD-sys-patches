@@ -39,6 +39,11 @@
 #define DRIVER_DESC		"Intel Graphics"
 #define DRIVER_DATE		"20080312"
 
+enum pipe {
+	PIPE_A = 0,
+	PIPE_B,
+};
+
 /* Interface history:
  *
  * 1.1: Original.
@@ -48,25 +53,13 @@
  * 1.5: Add vblank pipe configuration
  * 1.6: - New ioctl for scheduling buffer swaps on vertical blank
  *      - Support vertical blank on secondary display pipe
- * 1.8: New ioctl for ARB_Occlusion_Query
- * 1.9: Usable page flipping and triple buffering
- * 1.10: Plane/pipe disentangling
- * 1.11: TTM superioctl
- * 1.12: TTM relocation optimization
  */
 #define DRIVER_MAJOR		1
 #define DRIVER_MINOR		6
 #define DRIVER_PATCHLEVEL	0
 
-enum pipe {
-    PIPE_A = 0,
-    PIPE_B,
-};
-
 typedef struct _drm_i915_ring_buffer {
 	int tail_mask;
-	unsigned long Start;
-	unsigned long End;
 	unsigned long Size;
 	u8 *virtual_start;
 	int head;
@@ -86,26 +79,9 @@ struct mem_block {
 typedef struct _drm_i915_vbl_swap {
 	struct list_head head;
 	drm_drawable_t drw_id;
-	unsigned int plane;
+	unsigned int pipe;
 	unsigned int sequence;
-	int flip;
 } drm_i915_vbl_swap_t;
-
-#ifdef __linux__
-struct opregion_header;
-struct opregion_acpi;
-struct opregion_swsci;
-struct opregion_asle;
-
-struct intel_opregion {
-	struct opregion_header *header;
-	struct opregion_acpi *acpi;
-	struct opregion_swsci *swsci;
-	struct opregion_asle *asle;
-
-	int enabled;
-};
-#endif
 
 typedef struct drm_i915_private {
 	drm_local_map_t *sarea;
@@ -122,29 +98,28 @@ typedef struct drm_i915_private {
 	drm_local_map_t hws_map;
 
 	unsigned int cpp;
+	int back_offset;
+	int front_offset;
+	int current_page;
+	int page_flipping;
 
 	wait_queue_head_t irq_queue;
 	atomic_t irq_received;
-	atomic_t irq_emitted;
+	/* Protects user_irq_refcount and irq_mask reg */
+	DRM_SPINTYPE user_irq_lock;
+	/* Refcount for user irq, only enabled when needed */
+	int user_irq_refcount;
+	/* Cached value of IMR to avoid reads in updating the bitfield */
+	u_int32_t irq_mask_reg;
 
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
 	struct mem_block *agp_heap;
 	unsigned int sr01, adpa, ppcr, dvob, dvoc, lvds;
-	int vblank_pipe;
-	DRM_SPINTYPE user_irq_lock;
-	int user_irq_refcount;
-	int fence_irq_on;
-	uint32_t irq_enable_reg;
-	int irq_enabled;
 
 	DRM_SPINTYPE swaps_lock;
 	drm_i915_vbl_swap_t vbl_swaps;
 	unsigned int swaps_pending;
-
-#ifdef __linux__
-	struct intel_opregion opregion;
-#endif
 
 	/* Register state */
 	u8 saveLBB;
@@ -243,9 +218,6 @@ enum intel_chip_family {
 	CHIP_I965 = 0x08,
 };
 
-extern struct drm_ioctl_desc i915_ioctls[];
-extern int i915_max_ioctl;
-
 				/* i915_dma.c */
 extern void i915_kernel_lost_context(struct drm_device * dev);
 extern int i915_driver_load(struct drm_device *, unsigned long flags);
@@ -257,7 +229,7 @@ extern int i915_driver_device_is_agp(struct drm_device * dev);
 extern long i915_compat_ioctl(struct file *filp, unsigned int cmd,
 			      unsigned long arg);
 extern void i915_emit_breadcrumb(struct drm_device *dev);
-extern void i915_dispatch_flip(struct drm_device * dev, int pipes, int sync);
+extern void i915_dispatch_flip(struct drm_device *);
 extern int i915_emit_mi_flush(struct drm_device *dev, uint32_t flush);
 extern int i915_driver_firstopen(struct drm_device *dev);
 extern int i915_dispatch_batchbuffer(struct drm_device * dev,
@@ -274,9 +246,6 @@ extern irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS);
 extern void i915_driver_irq_preinstall(struct drm_device * dev);
 extern int i915_driver_irq_postinstall(struct drm_device * dev);
 extern void i915_driver_irq_uninstall(struct drm_device * dev);
-extern void i915_enable_interrupt(struct drm_device *dev);
-extern int i915_vblank_pipe_set(struct drm_device *dev, void *data,
-				struct drm_file *file_priv);
 extern int i915_vblank_pipe_get(struct drm_device *dev, void *data,
 				struct drm_file *file_priv);
 extern int i915_emit_irq(struct drm_device * dev);
@@ -285,8 +254,8 @@ extern void i915_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 i915_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int i915_vblank_swap(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
-extern void i915_user_irq_on(drm_i915_private_t *dev_priv);
-extern void i915_user_irq_off(drm_i915_private_t *dev_priv);
+extern void i915_user_irq_get(struct drm_device *dev);
+extern void i915_user_irq_put(struct drm_device *dev);
 
 /* i915_mem.c */
 extern int i915_mem_alloc(struct drm_device *dev, void *data,
@@ -306,20 +275,15 @@ extern void i915_mem_release(struct drm_device * dev,
 extern int i915_save_state(struct drm_device *dev);
 extern int i915_restore_state(struct drm_device *dev);
 
-#ifdef __linux__
-/* i915_opregion.c */
-extern int intel_opregion_init(struct drm_device *dev);
-extern void intel_opregion_free(struct drm_device *dev);
-extern void opregion_asle_intr(struct drm_device *dev);
-extern void opregion_enable_asle(struct drm_device *dev);
-#endif
-
-#ifdef __linux__
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
-extern void intel_init_chipset_flush_compat(struct drm_device *dev);
-extern void intel_fini_chipset_flush_compat(struct drm_device *dev);
-#endif
-#endif
+/* ioctls */
+extern int i915_dma_init(struct drm_device *, void *, struct drm_file *);
+extern int i915_flush_ioctl(struct drm_device *, void *, struct drm_file *);
+extern int i915_batchbuffer(struct drm_device *, void *, struct drm_file *);
+extern int i915_flip_bufs(struct drm_device *, void *, struct drm_file *);
+extern int i915_getparam(struct drm_device *, void *, struct drm_file *);
+extern int i915_setparam(struct drm_device *, void *, struct drm_file *);
+extern int i915_cmdbuffer(struct drm_device *, void *, struct drm_file *);
+extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 
 #define I915_READ(reg)          DRM_READ32(dev_priv->mmio_map, (reg))
 #define I915_WRITE(reg,val)     DRM_WRITE32(dev_priv->mmio_map, (reg), (val))
@@ -328,23 +292,16 @@ extern void intel_fini_chipset_flush_compat(struct drm_device *dev);
 #define I915_READ8(reg)		DRM_READ8(dev_priv->mmio_map, (reg))
 #define I915_WRITE8(reg,val)	DRM_WRITE8(dev_priv->mmio_map, (reg), (val))
 
-#if defined(__FreeBSD__)
-typedef boolean_t bool;
-#endif
-
 #define I915_VERBOSE 0
-
-#define PRIMARY_RINGBUFFER_SIZE         (128*1024)
 
 #define RING_LOCALS	unsigned int outring, ringmask, outcount; \
 			volatile char *virt;
 
 #define BEGIN_LP_RING(n) do {				\
 	if (I915_VERBOSE)				\
-		DRM_DEBUG("BEGIN_LP_RING(%d)\n",	\
-	                         (n));		        \
-	if (dev_priv->ring.space < (n)*4)                      \
-		i915_wait_ring(dev, (n)*4, __FUNCTION__);      \
+		DRM_DEBUG("BEGIN_LP_RING(%d)\n", (n));	\
+	if (dev_priv->ring.space < (n)*4)		\
+		i915_wait_ring(dev, (n)*4, __func__);	\
 	outcount = 0;					\
 	outring = dev_priv->ring.tail;			\
 	ringmask = dev_priv->ring.tail_mask;		\
@@ -353,7 +310,7 @@ typedef boolean_t bool;
 
 #define OUT_RING(n) do {					\
 	if (I915_VERBOSE) DRM_DEBUG("   OUT_RING %x\n", (int)(n));	\
-	*(volatile unsigned int *)(virt + outring) = (n);		\
+	*(volatile unsigned int *)(virt + outring) = (n);	\
 	outcount++;						\
 	outring += 4;						\
 	outring &= ringmask;					\
@@ -468,6 +425,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define MI_STORE_DWORD_IMM	MI_INSTR(0x20, 1)
 #define   MI_MEM_VIRTUAL	(1 << 22) /* 965+ only */
 #define MI_STORE_DWORD_INDEX	MI_INSTR(0x21, 1)
+#define MI_STORE_DWORD_INDEX_SHIFT 2
 #define MI_LOAD_REGISTER_IMM	MI_INSTR(0x22, 1)
 #define MI_BATCH_BUFFER		MI_INSTR(0x30, 1)
 #define   MI_BATCH_NON_SECURE	(1)
@@ -476,8 +434,6 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 #define BREADCRUMB_BITS 31
 #define BREADCRUMB_MASK ((1U << BREADCRUMB_BITS) - 1)
-
-#define READ_BREADCRUMB(dev_priv)  (((volatile u32*)(dev_priv->hw_status_page))[5])
 
 /**
  * Reads a dword out of the status page, which is written to from the command
@@ -493,6 +449,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
  * The area from dword 0x10 to 0x3ff is available for driver usage.
  */
 #define READ_HWSP(dev_priv, reg)  (((volatile u32*)(dev_priv->hw_status_page))[reg])
+#define READ_BREADCRUMB(dev_priv) READ_HWSP(dev_priv, 5)
 #define I915_GEM_HWS_INDEX		0x10
 
 /*
@@ -560,6 +517,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define PRB1_HEAD	0x02044 /* 915+ only */
 #define PRB1_START	0x02048 /* 915+ only */
 #define PRB1_CTL	0x0204c /* 915+ only */
+#define ACTHD_I965	0x02074
 #define HWS_PGA		0x02080
 #define IPEIR		0x02088
 #define NOPID		0x02094
@@ -590,6 +548,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define EMR		0x020b4
 #define ESR		0x020b8
 #define INSTPM	        0x020c0
+#define ACTHD		0x020c8
 #define FW_BLC		0x020d8
 #define FW_BLC_SELF	0x020e0 /* 915+ only */
 #define MI_ARB_STATE	0x020e4 /* 915+ only */
@@ -1791,5 +1750,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 			IS_I945GM(dev) || IS_I965GM(dev) || IS_GM45(dev))
 
 #define I915_NEED_GFX_HWS(dev) (IS_G33(dev) || IS_GM45(dev) || IS_G4X(dev))
+
+#define PRIMARY_RINGBUFFER_SIZE         (128*1024)
 
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: it.c,v 1.32 2008/04/07 17:50:37 form Exp $	*/
+/*	$OpenBSD: it.c,v 1.38 2008/10/23 08:08:44 form Exp $	*/
 
 /*
  * Copyright (c) 2007-2008 Oleg Safiullin <form@pdp-11.org.ru>
@@ -71,8 +71,8 @@ int it_wdog_cb(void *, int);
 
 
 struct {
-	int		type;
-	const char	*desc;
+	enum sensor_type	type;
+	const char		*desc;
 } it_sensors[IT_EC_NUMSENSORS] = {
 #define IT_TEMP_BASE		0
 #define IT_TEMP_COUNT		3
@@ -81,20 +81,22 @@ struct {
 	{ SENSOR_TEMP,		NULL		},
 
 #define IT_FAN_BASE		3
-#define IT_FAN_COUNT		3
+#define IT_FAN_COUNT		5
+	{ SENSOR_FANRPM,	NULL		},
+	{ SENSOR_FANRPM,	NULL		},
 	{ SENSOR_FANRPM,	NULL		},
 	{ SENSOR_FANRPM,	NULL		},
 	{ SENSOR_FANRPM,	NULL		},
 
-#define IT_VOLT_BASE		6
+#define IT_VOLT_BASE		8
 #define IT_VOLT_COUNT		9
 	{ SENSOR_VOLTS_DC,	"VCORE_A"	},
 	{ SENSOR_VOLTS_DC,	"VCORE_B"	},
 	{ SENSOR_VOLTS_DC,	"+3.3V"		},
 	{ SENSOR_VOLTS_DC,	"+5V"		},
 	{ SENSOR_VOLTS_DC,	"+12V"		},
-	{ SENSOR_VOLTS_DC,	"-5V"		},
 	{ SENSOR_VOLTS_DC,	"-12V"		},
+	{ SENSOR_VOLTS_DC,	"-5V"		},
 	{ SENSOR_VOLTS_DC,	"+5VSB"		},
 	{ SENSOR_VOLTS_DC,	"VBAT"		}
 };
@@ -106,10 +108,20 @@ int it_vrfact[IT_VOLT_COUNT] = {
 	RFACT_NONE,		/* +3.3V	*/
 	RFACT(68, 100),		/* +5V		*/
 	RFACT(30, 10),		/* +12V		*/
-	RFACT(21, 10),		/* -5V		*/
 	RFACT(83, 20),		/* -12V		*/
+	RFACT(21, 10),		/* -5V		*/
 	RFACT(68, 100),		/* +5VSB	*/
 	RFACT_NONE		/* VBAT		*/
+};
+
+int it_fan_regs[] = {
+	IT_EC_FAN_TAC1, IT_EC_FAN_TAC2, IT_EC_FAN_TAC3,
+	IT_EC_FAN_TAC4_LSB, IT_EC_FAN_TAC5_LSB
+};
+
+int it_fan_ext_regs[] = {
+	IT_EC_FAN_EXT_TAC1, IT_EC_FAN_EXT_TAC2, IT_EC_FAN_EXT_TAC3,
+	IT_EC_FAN_TAC4_MSB, IT_EC_FAN_TAC5_MSB
 };
 
 LIST_HEAD(, it_softc) it_softc_list = LIST_HEAD_INITIALIZER(&it_softc_list);
@@ -189,7 +201,6 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	struct it_softc *sc = (void *)self;
 	struct isa_attach_args *ia = aux;
 	int i;
-	u_int8_t cr;
 
 	sc->sc_iot = ia->ia_iot;
 	sc->sc_iobase = ia->ipa_io[0].base;
@@ -204,19 +215,18 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	/* get chip id and rev */
 	sc->sc_chipid = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPID1) << 8;
 	sc->sc_chipid |= it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPID2);
-	sc->sc_chiprev = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPREV);
+	sc->sc_chiprev = it_readreg(sc->sc_iot, sc->sc_ioh, IT_CHIPREV) & 0x0f;
 
 	/* get environment controller base address */
 	it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_EC_LDN);
 	sc->sc_ec_iobase = it_readreg(sc->sc_iot, sc->sc_ioh, IT_EC_MSB) << 8;
 	sc->sc_ec_iobase |= it_readreg(sc->sc_iot, sc->sc_ioh, IT_EC_LSB);
 
-	/* initialize watchdog */
+	/* initialize watchdog timer */
 	if (sc->sc_chipid != IT_ID_8705) {
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_WDT_LDN);
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_CSR, 0x00);
-		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
-		    IT_WDT_TCR_SECS);
+		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0x00);
 		wdog_register(sc, it_wdog_cb);
 	}
 
@@ -224,8 +234,7 @@ it_attach(struct device *parent, struct device *self, void *aux)
 	it_exit(sc->sc_iot, sc->sc_ioh);
 
 	LIST_INSERT_HEAD(&it_softc_list, sc, sc_list);
-
-	printf(": IT%xF rev 0x%02x", sc->sc_chipid, sc->sc_chiprev);
+	printf(": IT%xF rev %X", sc->sc_chipid, sc->sc_chiprev);
 
 	if (sc->sc_ec_iobase == 0) {
 		printf(", EC disabled\n");
@@ -251,17 +260,22 @@ it_attach(struct device *parent, struct device *self, void *aux)
 			    sizeof(sc->sc_sensors[i].desc));
 	}
 
-	/* register update task */
+	/* register sensor update task */
 	if (sensor_task_register(sc, it_ec_refresh, IT_EC_INTERVAL) == NULL) {
-		printf(": unable to register update task\n",
+		printf("%s: unable to register update task\n",
 		    sc->sc_dev.dv_xname);
 		bus_space_unmap(sc->sc_ec_iot, sc->sc_ec_ioh, 8);
 		return;
 	}
 
+	/* use 16-bit FAN tachometer registers for newer chips */
+	if (sc->sc_chipid != IT_ID_8705 && sc->sc_chipid != IT_ID_8712)
+		it_ec_writereg(sc, IT_EC_FAN_ECER,
+		    it_ec_readreg(sc, IT_EC_FAN_ECER) | 0x07);
+
 	/* activate monitoring */
-	cr = it_ec_readreg(sc, IT_EC_CFG);
-	it_ec_writereg(sc, IT_EC_CFG, cr | 0x09);
+	it_ec_writereg(sc, IT_EC_CFG,
+	    it_ec_readreg(sc, IT_EC_CFG) | IT_EC_CFG_START | IT_EC_CFG_INTCLR);
 
 	/* initialize sensors */
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
@@ -322,10 +336,22 @@ void
 it_ec_refresh(void *arg)
 {
 	struct it_softc *sc = arg;
-	int i, sdata, mode, divisor, odivisor, ndivisor;
+	int i, sdata, divisor, odivisor, ndivisor;
+	u_int8_t cr, ecr;
 
 	/* refresh temp sensors */
+	cr = it_ec_readreg(sc, IT_EC_ADC_TEMPER);
+
 	for (i = 0; i < IT_TEMP_COUNT; i++) {
+		sc->sc_sensors[IT_TEMP_BASE + i].flags &=
+		    SENSOR_FINVALID;
+
+		if (!(cr & (1 << i)) && !(cr & (1 << (i + 3)))) {
+			sc->sc_sensors[IT_TEMP_BASE + i].flags |=
+			    SENSOR_FINVALID;
+			continue;
+		}
+
 		sdata = it_ec_readreg(sc, IT_EC_TEMPBASE + i);
 		/* convert to degF */
 		sc->sc_sensors[IT_TEMP_BASE + i].value =
@@ -333,7 +359,18 @@ it_ec_refresh(void *arg)
 	}
 
 	/* refresh volt sensors */
+	cr = it_ec_readreg(sc, IT_EC_ADC_VINER);
+
 	for (i = 0; i < IT_VOLT_COUNT; i++) {
+		sc->sc_sensors[IT_VOLT_BASE + i].flags &=
+		    SENSOR_FINVALID;
+
+		if ((i < 8) && !(cr & (1 << i))) {
+			sc->sc_sensors[IT_VOLT_BASE + i].flags |=
+			    SENSOR_FINVALID;
+			continue;
+		}
+
 		sdata = it_ec_readreg(sc, IT_EC_VOLTBASE + i);
 		/* voltage returned as (mV >> 4) */
 		sc->sc_sensors[IT_VOLT_BASE + i].value = sdata << 4;
@@ -350,25 +387,55 @@ it_ec_refresh(void *arg)
 	}
 
 	/* refresh fan sensors */
-	if (sc->sc_chipid == IT_ID_8705 || sc->sc_chipid == IT_ID_8712)
-		odivisor = ndivisor = divisor =
-		    it_ec_readreg(sc, IT_EC_FAN_DIV);
-	else {
-		mode = it_ec_readreg(sc, IT_EC_FAN_ECR);
-		divisor = -1;
-	}
+	cr = it_ec_readreg(sc, IT_EC_FAN_MCR);
 
-	for (i = 0; i < IT_FAN_COUNT; i++) {
-		sc->sc_sensors[IT_FAN_BASE + i].flags &= ~SENSOR_FINVALID;
-		sdata = it_ec_readreg(sc, IT_EC_FANBASE + i);
+	if (sc->sc_chipid != IT_ID_8705 && sc->sc_chipid != IT_ID_8712) {
+		/* use 16-bit FAN tachometer registers */
+		ecr = it_ec_readreg(sc, IT_EC_FAN_ECER);
 
-		if (divisor != -1) {
-			/*
-			 * Use 8-bit FAN Tachometer & FAN Divisor registers
-			 */
-			if (sdata == 0xff) {
+		for (i = 0; i < IT_FAN_COUNT; i++) {
+			sc->sc_sensors[IT_FAN_BASE + i].flags &=
+			    ~SENSOR_FINVALID;
+
+			if (i < 3 && !(cr & (1 << (i + 4)))) {
 				sc->sc_sensors[IT_FAN_BASE + i].flags |=
 				    SENSOR_FINVALID;
+				continue;
+			} else if (i > 2 && !(ecr & (1 << (i + 1)))) {
+				sc->sc_sensors[IT_FAN_BASE + i].flags |=
+				    SENSOR_FINVALID;
+				continue;
+			}
+
+			sdata = it_ec_readreg(sc, it_fan_regs[i]);
+			sdata |= it_ec_readreg(sc, it_fan_ext_regs[i]) << 8;
+
+			if (sdata == 0 || sdata == 0xffff)
+				sc->sc_sensors[IT_FAN_BASE + i].value = 0;
+			else
+				sc->sc_sensors[IT_FAN_BASE + i].value =
+				    675000 / sdata;
+		}
+	} else {
+		/* use 8-bit FAN tachometer & FAN divisor registers */
+		odivisor = ndivisor = divisor =
+		    it_ec_readreg(sc, IT_EC_FAN_DIV);
+
+		for (i = 0; i < IT_FAN_COUNT; i++) {
+			if (i > 2 || !(cr & (1 << (i + 4)))) {
+				sc->sc_sensors[IT_FAN_BASE + i].flags |=
+				    SENSOR_FINVALID;
+				continue;
+			}
+
+			sc->sc_sensors[IT_FAN_BASE + i].flags &=
+			    ~SENSOR_FINVALID;
+
+			sdata = it_ec_readreg(sc, it_fan_regs[i]);
+
+			if (sdata == 0xff) {
+				sc->sc_sensors[IT_FAN_BASE + i].value = 0;
+
 				if (i == 2)
 					ndivisor ^= 0x40;
 				else {
@@ -383,25 +450,10 @@ it_ec_refresh(void *arg)
 				    1350000 / (sdata << (divisor & 7));
 			} else
 				sc->sc_sensors[IT_FAN_BASE + i].value = 0;
-
-			if (ndivisor != odivisor)
-				it_ec_writereg(sc, IT_EC_FAN_DIV, ndivisor);
-		} else {
-			/*
-			 * Use 16-bit FAN tachometer register
-			 */
-			if (mode & (1 << i))
-				sdata |= it_ec_readreg(sc,
-				    IT_EC_FANEXTBASE + i) << 8;
-			if (sdata == ((mode & (1 << i)) ? 0xffff : 0xff))
-				sc->sc_sensors[IT_FAN_BASE + i].flags |=
-				    SENSOR_FINVALID;
-			else if (sdata != 0)
-				sc->sc_sensors[IT_FAN_BASE + i].value =
-				    675000 / sdata;
-			else
-				sc->sc_sensors[IT_FAN_BASE + i].value = 0;
 		}
+
+		if (ndivisor != odivisor)
+			it_ec_writereg(sc, IT_EC_FAN_DIV, ndivisor);
 	}
 }
 
@@ -409,13 +461,14 @@ int
 it_wdog_cb(void *arg, int period)
 {
 	struct it_softc *sc = arg;
+	int minutes = 0;
 
 	/* enter MB PnP mode and select WDT device */
 	it_enter(sc->sc_iot, sc->sc_ioh, sc->sc_iobase);
 	it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_WDT_LDN);
 
-	/* disable watchdog timeout */
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, IT_WDT_TCR_SECS);
+	/* disable watchdog timer */
+	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0x00);
 
 	/* 1000s should be enough for everyone */
 	if (period > 1000)
@@ -423,14 +476,40 @@ it_wdog_cb(void *arg, int period)
 	else if (period < 0)
 		period = 0;
 
-	/* set watchdog timeout */
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_MSB, period >> 8);
-	it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_LSB, period & 0xff);
+	if (period > 0) {
+		/*
+		 * Older IT8712F chips have 8-bit timeout counter.
+		 * Use minutes for 16-bit values for these chips.
+		 */
+		if (sc->sc_chipid == IT_ID_8712 && sc->sc_chiprev < 0x8 &&
+		    period > 0xff) {
+			if (period % 60 >= 30)
+				period += 60;
+			period /= 60;
+			minutes++;
+		}
 
-	if (period > 0)
-		/* enable watchdog timeout */
-		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
-		    IT_WDT_TCR_SECS | IT_WDT_TCR_KRST);
+		/* set watchdog timeout (low byte) */
+		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_LSB,
+		    period & 0xff);
+
+		if (minutes) {
+			/* enable watchdog timer */
+			it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
+			    IT_WDT_TCR_KRST | IT_WDT_TCR_PWROK);
+
+			period *= 60;
+		} else {
+			/* set watchdog timeout (high byte) */
+			it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TMO_MSB,
+			    period >> 8);
+
+			/* enable watchdog timer */
+			it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR,
+			    IT_WDT_TCR_SECS | IT_WDT_TCR_KRST |
+			    IT_WDT_TCR_PWROK);
+		}
+	}
 
 	/* exit MB PnP mode */
 	it_exit(sc->sc_iot, sc->sc_ioh);

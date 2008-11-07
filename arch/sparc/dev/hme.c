@@ -1,4 +1,4 @@
-/*	$OpenBSD: hme.c,v 1.55 2006/06/25 21:53:44 brad Exp $	*/
+/*	$OpenBSD: hme.c,v 1.57 2008/10/14 18:01:53 naddy Exp $	*/
 
 /*
  * Copyright (c) 1998 Jason L. Wright (jason@thought.net)
@@ -385,11 +385,6 @@ hmeioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
@@ -466,7 +461,7 @@ hmeioctl(ifp, cmd, data)
 		error = ifmedia_ioctl(ifp, ifr,  &sc->sc_mii.mii_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	sc->sc_if_flags = ifp->if_flags;
@@ -958,13 +953,12 @@ hme_read(sc, idx, len, flags)
 	}
 
 	/* Pull packet off interface. */
-	m = m_devget(sc->sc_bufs->rx_buf[idx], len + HME_RX_OFFSET, 0,
-	    &sc->sc_arpcom.ac_if, NULL);
+	m = m_devget(sc->sc_bufs->rx_buf[idx] + HME_RX_OFFSET, len,
+	    HME_RX_OFFSET, &sc->sc_arpcom.ac_if, NULL);
 	if (m == NULL) {
 		ifp->if_ierrors++;
 		return;
 	}
-	m_adj(m, HME_RX_OFFSET);
 
 	ifp->if_ipackets++;
 	hme_rxcksum(m, flags);

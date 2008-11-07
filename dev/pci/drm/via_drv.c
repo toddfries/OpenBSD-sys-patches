@@ -34,93 +34,64 @@
 #include "via_drv.h"
 #include "drm_pciids.h"
 
-void	via_configure(struct drm_device *);
-
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t via_pciidlist[] = {
 	viadrv_PCI_IDS
 };
 
-void
-via_configure(struct drm_device *dev)
-{
-	dev->driver.buf_priv_size	= 1;
-	dev->driver.load		= via_driver_load;
-	dev->driver.unload		= via_driver_unload;
-	dev->driver.context_ctor	= via_init_context;
-	dev->driver.context_dtor	= via_final_context;
-	dev->driver.get_vblank_counter	= via_get_vblank_counter;
-	dev->driver.enable_vblank	= via_enable_vblank;
-	dev->driver.disable_vblank	= via_disable_vblank;
-	dev->driver.irq_preinstall	= via_driver_irq_preinstall;
-	dev->driver.irq_postinstall	= via_driver_irq_postinstall;
-	dev->driver.irq_uninstall	= via_driver_irq_uninstall;
-	dev->driver.irq_handler		= via_driver_irq_handler;
-	dev->driver.dma_quiescent	= via_driver_dma_quiescent;
-
-	dev->driver.ioctls		= via_ioctls;
-	dev->driver.max_ioctl		= via_max_ioctl;
-
-	dev->driver.name		= DRIVER_NAME;
-	dev->driver.desc		= DRIVER_DESC;
-	dev->driver.date		= DRIVER_DATE;
-	dev->driver.major		= DRIVER_MAJOR;
-	dev->driver.minor		= DRIVER_MINOR;
-	dev->driver.patchlevel		= DRIVER_PATCHLEVEL;
-
-	dev->driver.use_agp		= 1;
-	dev->driver.use_mtrr		= 1;
-	dev->driver.use_irq		= 1;
-	dev->driver.use_vbl_irq		= 1;
-}
-
-#ifdef __FreeBSD__
-static int
-via_probe(device_t dev)
-{
-	return drm_probe(dev, via_pciidlist);
-}
-
-static int
-via_attach(device_t nbdev)
-{
-	struct drm_device *dev = device_get_softc(nbdev);
-
-	bzero(dev, sizeof(struct drm_device));
-	via_configure(dev);
-	return drm_attach(nbdev, via_pciidlist);
-}
-
-static device_method_t via_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_probe,		via_probe),
-	DEVMETHOD(device_attach,	via_attach),
-	DEVMETHOD(device_detach,	drm_detach),
-
-	{ 0, 0 }
+struct drm_ioctl_desc via_ioctls[] = {
+	DRM_IOCTL_DEF(DRM_VIA_ALLOCMEM, via_mem_alloc, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_FREEMEM, via_mem_free, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_AGP_INIT, via_agp_init, DRM_AUTH|DRM_MASTER),
+	DRM_IOCTL_DEF(DRM_VIA_FB_INIT, via_fb_init, DRM_AUTH|DRM_MASTER),
+	DRM_IOCTL_DEF(DRM_VIA_MAP_INIT, via_map_init, DRM_AUTH|DRM_MASTER),
+	DRM_IOCTL_DEF(DRM_VIA_DEC_FUTEX, via_decoder_futex, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_DMA_INIT, via_dma_init, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_CMDBUFFER, via_cmdbuffer, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_FLUSH, via_flush_ioctl, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_PCICMD, via_pci_cmdbuffer, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_CMDBUF_SIZE, via_cmdbuf_size, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_WAIT_IRQ, via_wait_irq, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_DMA_BLIT, via_dma_blit, DRM_AUTH),
+	DRM_IOCTL_DEF(DRM_VIA_BLIT_SYNC, via_dma_blit_sync, DRM_AUTH)
 };
 
-static driver_t via_driver = {
-	"drm",
-	via_methods,
-	sizeof(struct drm_device)
+static const struct drm_driver_info via_driver = {
+	.buf_priv_size		= 1,
+	.load			= via_driver_load,
+	.unload			= via_driver_unload,
+	.context_ctor		= via_init_context,
+	.context_dtor		= via_final_context,
+	.get_vblank_counter	= via_get_vblank_counter,
+	.enable_vblank		= via_enable_vblank,
+	.disable_vblank		= via_disable_vblank,
+	.irq_preinstall		= via_driver_irq_preinstall,
+	.irq_postinstall	= via_driver_irq_postinstall,
+	.irq_uninstall		= via_driver_irq_uninstall,
+	.irq_handler		= via_driver_irq_handler,
+	.dma_quiescent		= via_driver_dma_quiescent,
+
+	.ioctls			= via_ioctls,
+	.max_ioctl		= DRM_ARRAY_SIZE(via_ioctls),
+
+	.name			= DRIVER_NAME,
+	.desc			= DRIVER_DESC,
+	.date			= DRIVER_DATE,
+	.major			= DRIVER_MAJOR,
+	.minor			= DRIVER_MINOR,
+	.patchlevel		= DRIVER_PATCHLEVEL,
+
+	.use_agp		= 1,
+	.use_mtrr		= 1,
+	.use_irq		= 1,
+	.use_vbl_irq		= 1,
 };
-
-extern devclass_t drm_devclass;
-DRIVER_MODULE(via, pci, via_driver, drm_devclass, 0, 0);
-MODULE_DEPEND(via, drm, 1, 1, 1);
-
-#elif defined(__NetBSD__) || defined(__OpenBSD__)
 
 int	viadrm_probe(struct device *, void *, void *);
 void	viadrm_attach(struct device *, struct device *, void *);
 
 int
-#if defined(__OpenBSD__)
 viadrm_probe(struct device *parent, void *match, void *aux)
-#else
-viadrm_probe(struct device *parent, struct cfdata *match, void *aux)
-#endif
 {
 	return drm_probe((struct pci_attach_args *)aux, via_pciidlist);
 }
@@ -131,11 +102,10 @@ viadrm_attach(struct device *parent, struct device *self, void *opaque)
 	struct pci_attach_args *pa = opaque;
 	struct drm_device *dev = (struct drm_device *)self;
 
-	viadrm_configure(dev);
+	dev->driver = &via_driver;
 	drm_attach(parent, self, pa, via_pciidlist);
 }
 
-#if defined(__OpenBSD__)
 struct cfattach viadrm_ca = {
 	sizeof(struct drm_device), viadrm_probe, viadrm_attach,
 	drm_detach, drm_activate
@@ -144,13 +114,3 @@ struct cfattach viadrm_ca = {
 struct cfdriver viadrm_cd = {
 	0, "viadrm", DV_DULL
 };
-#else
-#ifdef _LKM
-CFDRIVER_DECL(viadrm, DV_TTY, NULL);
-#else
-CFATTACH_DECL(viadrm, sizeof(struct drm_device), viadrm_probe, viadrm_attach,
-	drm_detach, drm_activate);
-#endif
-#endif
-
-#endif
