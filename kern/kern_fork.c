@@ -182,6 +182,9 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	extern void endtsleep(void *);
 	extern void realitexpire(void *);
 	struct  ptrace_state *newptstat;
+#if NSYSTRACE > 0
+	void *newstrp;
+#endif
 
 	/*
 	 * Although process entries are dynamically created, we still keep
@@ -385,7 +388,9 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	}
 
 	newptstat = malloc(sizeof(struct ptrace_state), M_SUBPROC, M_WAITOK);
-
+#if NSYSTRACE > 0
+	newstrp = systrace_getproc();
+#endif
 	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
 	do {
 		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
@@ -416,7 +421,9 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 #if NSYSTRACE > 0
 	if (ISSET(p1->p_flag, P_SYSTRACE))
-		systrace_fork(p1, p2);
+		systrace_fork(p1, p2, newstrp);
+	else
+		systrace_freeproc(newstrp);
 #endif
 
 	/*

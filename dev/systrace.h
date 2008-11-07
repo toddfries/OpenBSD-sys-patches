@@ -222,7 +222,9 @@ struct fsystrace {
 void systrace_namei(struct nameidata *);
 int  systrace_redirect(int, struct proc *, void *, register_t *);
 void systrace_exit(struct proc *);
-void systrace_fork(struct proc *, struct proc *);
+struct str_process *systrace_getproc(void);
+void systrace_freeproc(struct str_process *);
+void systrace_fork(struct proc *, struct proc *, struct str_process *newstrp);
 void systrace_execve0(struct proc *);
 void systrace_execve1(char *, struct proc *);
 int systrace_scriptname(struct proc *, char *);
