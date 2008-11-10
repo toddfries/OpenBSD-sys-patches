@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.48 2008/09/12 12:27:27 blambert Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.49 2008/11/09 05:13:53 deraadt Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -680,6 +680,7 @@ systrace_fork(struct proc *oldproc, struct proc *p, struct str_process *newstrp)
 	oldstrp = oldproc->p_systrace;
 	if (oldstrp == NULL) {
 		systrace_unlock();
+		systrace_freeproc(newstrp);
 		return;
 	}
 

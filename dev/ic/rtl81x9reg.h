@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.56 2008/10/11 23:49:05 brad Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.58 2008/11/08 06:52:49 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -665,7 +665,7 @@ struct rl_stats {
 
 #define RL_RX_DESC_CNT		64
 #define RL_TX_DESC_CNT_8139	64
-#define RL_TX_DESC_CNT_8169	1024
+#define RL_TX_DESC_CNT_8169	512
 
 #define RL_TX_QLEN		64
 
@@ -894,6 +894,7 @@ struct rl_softc {
 	CSR_WRITE_4(sc, offset, CSR_READ_4(sc, offset) & ~(val))
 
 #define RL_TIMEOUT		1000
+#define RL_PHY_TIMEOUT		20
 
 /*
  * General constants that are fun to know.
