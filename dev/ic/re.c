@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.96 2008/10/16 19:18:03 naddy Exp $	*/
+/*	$OpenBSD: re.c,v 1.99 2008/11/09 15:08:25 naddy Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -342,23 +342,21 @@ re_gmii_readreg(struct device *self, int phy, int reg)
 		return (0);
 
 	/* Let the rgephy driver read the GMEDIASTAT register */
-
 	if (reg == RL_GMEDIASTAT) {
 		rval = CSR_READ_1(sc, RL_GMEDIASTAT);
 		return (rval);
 	}
 
 	CSR_WRITE_4(sc, RL_PHYAR, reg << 16);
-	DELAY(1000);
 
-	for (i = 0; i < RL_TIMEOUT; i++) {
+	for (i = 0; i < RL_PHY_TIMEOUT; i++) {
 		rval = CSR_READ_4(sc, RL_PHYAR);
 		if (rval & RL_PHYAR_BUSY)
 			break;
-		DELAY(100);
+		DELAY(25);
 	}
 
-	if (i == RL_TIMEOUT) {
+	if (i == RL_PHY_TIMEOUT) {
 		printf ("%s: PHY read failed\n", sc->sc_dev.dv_xname);
 		return (0);
 	}
@@ -375,16 +373,15 @@ re_gmii_writereg(struct device *dev, int phy, int reg, int data)
 
 	CSR_WRITE_4(sc, RL_PHYAR, (reg << 16) |
 	    (data & RL_PHYAR_PHYDATA) | RL_PHYAR_BUSY);
-	DELAY(1000);
 
-	for (i = 0; i < RL_TIMEOUT; i++) {
+	for (i = 0; i < RL_PHY_TIMEOUT; i++) {
 		rval = CSR_READ_4(sc, RL_PHYAR);
 		if (!(rval & RL_PHYAR_BUSY))
 			break;
-		DELAY(100);
+		DELAY(25);
 	}
 
-	if (i == RL_TIMEOUT)
+	if (i == RL_PHY_TIMEOUT)
 		printf ("%s: PHY write failed\n", sc->sc_dev.dv_xname);
 }
 
@@ -1471,7 +1468,7 @@ re_rxeof(struct rl_softc *sc)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 	}
@@ -1627,12 +1624,30 @@ re_intr(void *arg)
 
 	if (sc->rl_imtype == RL_IMTYPE_SIM) {
 		if ((sc->rl_flags & RL_FLAG_TIMERINTR)) {
-			if ((tx | rx) == 0)
+			if ((tx | rx) == 0) {
+				/*
+				 * Nothing needs to be processed, fallback
+				 * to use TX/RX interrupts.
+				 */
 				re_setup_intr(sc, 1, RL_IMTYPE_NONE);
-			else
+
+				/*
+				 * Recollect, mainly to avoid the possible
+				 * race introduced by changing interrupt
+				 * masks.
+				 */
+				re_rxeof(sc);
+				tx = re_txeof(sc);
+			} else
 				CSR_WRITE_4(sc, RL_TIMERCNT, 1); /* reload */
-		} else if (tx | rx)
+		} else if (tx | rx) {
+			/*
+			 * Assume that using simulated interrupt moderation
+			 * (hardware timer based) could reduce the interrupt
+			 * rate.
+			 */
 			re_setup_intr(sc, 1, RL_IMTYPE_SIM);
+		}
 	}
 
 	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1875,7 +1890,7 @@ re_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 	}
 

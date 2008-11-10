@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.19 2008/06/01 17:59:55 marco Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.20 2008/11/06 23:41:28 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -71,7 +71,7 @@ acpibtn_match(struct device *parent, void *match, void *aux)
 	struct cfdata		*cf = match;
 
 	/* sanity */
-	return acpi_matchhids(aa, acpibtn_hids, cf->cf_driver->cd_name);
+	return (acpi_matchhids(aa, acpibtn_hids, cf->cf_driver->cd_name));
 }
 
 void
