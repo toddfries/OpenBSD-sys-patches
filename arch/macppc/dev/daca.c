@@ -192,15 +192,13 @@ daca_set_volume(struct daca_softc *sc, int left, int right)
 {
 	u_int16_t data;
 
-	if (sc->sc_vol_l != left || sc->sc_vol_r != right) {
-		left >>= 2;
-		right >>= 2;
-		data = left << 8 | right;
-		if (kiic_write(sc->sc_i2c, DEQaddr, DEQ_AVOL, &data, 2))
-			return -1;
-		sc->sc_vol_l = left;
-		sc->sc_vol_r = right;
-	}
+	left >>= 2;
+	right >>= 2;
+	data = left << 8 | right;
+	if (kiic_write(sc->sc_i2c, DEQaddr, DEQ_AVOL, &data, 2))
+		return -1;
+	sc->sc_vol_l = left;
+	sc->sc_vol_r = right;
 	return 0;
 }
 

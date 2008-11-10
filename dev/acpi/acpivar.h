@@ -22,7 +22,7 @@
 #include <sys/rwlock.h>
 #include <machine/biosvar.h>
 
-/* #define acpi_sleep_enabled */
+#define acpi_sleep_enabled
 
 /* #define ACPI_DEBUG */
 #ifdef ACPI_DEBUG
