@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.68 2008/11/08 14:09:03 damien Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.71 2008/11/09 10:00:17 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -118,8 +118,7 @@ void		wpi_cmd_done(struct wpi_softc *, struct wpi_rx_desc *);
 void		wpi_notif_intr(struct wpi_softc *);
 void		wpi_fatal_intr(struct wpi_softc *);
 int		wpi_intr(void *);
-uint8_t		wpi_plcp_signal(int);
-int		wpi_tx_data(struct wpi_softc *, struct mbuf *,
+int		wpi_tx(struct wpi_softc *, struct mbuf *,
 		    struct ieee80211_node *);
 void		wpi_start(struct ifnet *);
 void		wpi_watchdog(struct ifnet *);
@@ -1008,15 +1007,23 @@ void
 wpi_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 {
 	struct wpi_softc *sc = ic->ic_if.if_softc;
-	int i;
+	struct wpi_node *wn = (void *)ni;
+	uint8_t rate;
+	int ridx, i;
 
-	ieee80211_amrr_node_init(&sc->amrr, &((struct wpi_node *)ni)->amn);
+	ieee80211_amrr_node_init(&sc->amrr, &wn->amn);
 
-	/* Set rate to some reasonable initial value. */
-	for (i = ni->ni_rates.rs_nrates - 1;
-	     i > 0 && (ni->ni_rates.rs_rates[i] & IEEE80211_RATE_VAL) > 72;
-	     i--);
-	ni->ni_txrate = i;
+	for (i = 0; i < ni->ni_rates.rs_nrates; i++) {
+		rate = ni->ni_rates.rs_rates[i] & IEEE80211_RATE_VAL;
+		/* Map 802.11 rate to HW rate index. */
+		for (ridx = 0; ridx <= WPI_RIDX_MAX; ridx++)
+			if (wpi_rates[ridx].rate == rate)
+				break;
+		wn->ridx[i] = ridx;
+		/* Initial TX rate <= 24Mbps. */
+		if (rate <= 48)
+			ni->ni_txrate = i;
+	}
 }
 
 int
@@ -1075,7 +1082,7 @@ wpi_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		break;
 
 	case IEEE80211_S_RUN:
-		if ((error == wpi_run(sc)) != 0) {
+		if ((error = wpi_run(sc)) != 0) {
 			printf("%s: could not move to run state\n",
 			    sc->sc_dev.dv_xname);
 			return error;
@@ -1128,7 +1135,7 @@ wpi_calib_timeout(void *arg)
 }
 
 int
-wpi_ccmp_decap(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_key *k)
+wpi_ccmp_decap(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_key *k)
 {
 	struct ieee80211_frame *wh;
 	uint64_t pn, *prsc;
@@ -1136,7 +1143,7 @@ wpi_ccmp_decap(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_key *k)
 	uint8_t tid;
 	int hdrlen;
 
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	hdrlen = ieee80211_get_hdrlen(wh);
 	ivp = (uint8_t *)wh + hdrlen;
 
@@ -1169,10 +1176,10 @@ wpi_ccmp_decap(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_key *k)
 
 	/* Clear Protected bit and strip IV. */
 	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
-	ovbcopy(wh, mtod(m0, caddr_t) + IEEE80211_CCMP_HDRLEN, hdrlen);
-	m_adj(m0, IEEE80211_CCMP_HDRLEN);
+	ovbcopy(wh, mtod(m, caddr_t) + IEEE80211_CCMP_HDRLEN, hdrlen);
+	m_adj(m, IEEE80211_CCMP_HDRLEN);
 	/* Strip MIC. */
-	m_adj(m0, -IEEE80211_CCMP_MICLEN);
+	m_adj(m, -IEEE80211_CCMP_MICLEN);
 	return 0;
 }
 
@@ -1190,7 +1197,7 @@ wpi_rx_done(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	struct ieee80211_frame *wh;
 	struct ieee80211_rxinfo rxi;
 	struct ieee80211_node *ni;
-	struct mbuf *m, *mnew;
+	struct mbuf *m, *m1;
 	uint32_t flags;
 
 	stat = (struct wpi_rx_stat *)(desc + 1);
@@ -1255,18 +1262,18 @@ wpi_rx_done(struct wpi_softc *sc, struct wpi_rx_desc *desc,
 	}
 
 	if ((rbuf = SLIST_FIRST(&sc->rxq.freelist)) != NULL) {
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			ic->ic_stats.is_rx_nombuf++;
 			ifp->if_ierrors++;
 			return;
 		}
 		/* Attach RX buffer to mbuf header. */
-		MEXTADD(mnew, rbuf->vaddr, WPI_RBUF_SIZE, 0, wpi_free_rbuf,
+		MEXTADD(m1, rbuf->vaddr, WPI_RBUF_SIZE, 0, wpi_free_rbuf,
 		    rbuf);
 		SLIST_REMOVE_HEAD(&sc->rxq.freelist, next);
 
-		data->m = mnew;
+		data->m = m1;
 
 		/* Update RX descriptor. */
 		ring->desc[ring->cur] = htole32(rbuf->paddr);
@@ -1617,55 +1624,28 @@ wpi_intr(void *arg)
 	return 1;
 }
 
-uint8_t
-wpi_plcp_signal(int rate)
-{
-	switch (rate) {
-	/* CCK rates (returned values are device-dependent) */
-	case 2:		return 10;
-	case 4:		return 20;
-	case 11:	return 55;
-	case 22:	return 110;
-
-	/* OFDM rates (cf IEEE Std 802.11a-1999, pp. 14 Table 80) */
-	/* R1-R4, (u)ral is R4-R1 */
-	case 12:	return 0xd;
-	case 18:	return 0xf;
-	case 24:	return 0x5;
-	case 36:	return 0x7;
-	case 48:	return 0x9;
-	case 72:	return 0xb;
-	case 96:	return 0x1;
-	case 108:	return 0x3;
-
-	/* Unsupported rates (should not get there.) */
-	default:	return 0;
-	}
-}
-
-/* Determine if a given rate is CCK or OFDM. */
-#define WPI_RATE_IS_OFDM(rate) ((rate) >= 12 && (rate) != 22)
-
 int
-wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
+wpi_tx(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct wpi_node *wn = (void *)ni;
 	struct wpi_tx_ring *ring;
 	struct wpi_tx_desc *desc;
 	struct wpi_tx_data *data;
 	struct wpi_tx_cmd *cmd;
 	struct wpi_cmd_data *tx;
+	const struct wpi_rate *rinfo;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k = NULL;
 	enum ieee80211_edca_ac ac;
-	struct mbuf *mnew;
+	struct mbuf *m1;
 	uint32_t flags;
 	uint16_t qos;
-	uint8_t *ivp, tid, type;
 	u_int hdrlen;
-	int i, totlen, hasqos, rate, error;
+	uint8_t *ivp, tid, ridx, type;
+	int i, totlen, hasqos, error;
 
-	wh = mtod(m0, struct ieee80211_frame *);
+	wh = mtod(m, struct ieee80211_frame *);
 	hdrlen = ieee80211_get_hdrlen(wh);
 	type = wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
 
@@ -1683,16 +1663,14 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	desc = &ring->desc[ring->cur];
 	data = &ring->data[ring->cur];
 
-	/* Chose a TX rate. */
+	/* Chose a TX rate index. */
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
 	    type != IEEE80211_FC0_TYPE_DATA) {
-		rate = ni->ni_rates.rs_rates[0];
-	} else if (ic->ic_fixed_rate != -1) {
-		rate = ic->ic_sup_rates[ic->ic_curmode].
-		    rs_rates[ic->ic_fixed_rate];
+		ridx = (ic->ic_curmode == IEEE80211_MODE_11A) ?
+		    WPI_RIDX_OFDM6 : WPI_RIDX_CCK1;
 	} else
-		rate = ni->ni_rates.rs_rates[ni->ni_txrate];
-	rate &= IEEE80211_RATE_VAL;
+		ridx = wn->ridx[ni->ni_txrate];
+	rinfo = &wpi_rates[ridx];
 
 #if NBPFILTER > 0
 	if (sc->sc_drvbpf != NULL) {
@@ -1702,7 +1680,7 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		tap->wt_flags = 0;
 		tap->wt_chan_freq = htole16(ni->ni_chan->ic_freq);
 		tap->wt_chan_flags = htole16(ni->ni_chan->ic_flags);
-		tap->wt_rate = rate;
+		tap->wt_rate = rinfo->rate;
 		tap->wt_hwqueue = ac;
 		if ((ic->ic_flags & IEEE80211_F_WEPON) &&
 		    (wh->i_fc[1] & IEEE80211_FC1_PROTECTED))
@@ -1710,7 +1688,7 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 
 		mb.m_data = (caddr_t)tap;
 		mb.m_len = sc->sc_txtap_len;
-		mb.m_next = m0;
+		mb.m_next = m;
 		mb.m_nextpkt = NULL;
 		mb.m_type = 0;
 		mb.m_flags = 0;
@@ -1718,7 +1696,7 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	}
 #endif
 
-	totlen = m0->m_pkthdr.len;
+	totlen = m->m_pkthdr.len;
 
 	/* Encrypt the frame if need be. */
 	if (wh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
@@ -1726,11 +1704,11 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		k = ieee80211_get_txkey(ic, wh, ni);
 		if (k->k_cipher != IEEE80211_CIPHER_CCMP) {
 			/* Do software encryption. */
-			if ((m0 = ieee80211_encrypt(ic, m0, k)) == NULL)
+			if ((m = ieee80211_encrypt(ic, m, k)) == NULL)
 				return ENOBUFS;
 			/* 802.11 header may have moved. */
-			wh = mtod(m0, struct ieee80211_frame *);
-			totlen = m0->m_pkthdr.len;
+			wh = mtod(m, struct ieee80211_frame *);
+			totlen = m->m_pkthdr.len;
 
 		} else	/* HW appends CCMP MIC. */
 			totlen += IEEE80211_CCMP_HDRLEN;
@@ -1761,7 +1739,7 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		if (totlen + IEEE80211_CRC_LEN > ic->ic_rtsthreshold) {
 			flags |= WPI_TX_NEED_RTS | WPI_TX_FULL_TXOP;
 		} else if ((ic->ic_flags & IEEE80211_F_USEPROT) &&
-		    WPI_RATE_IS_OFDM(rate)) {
+		    ridx <= WPI_RIDX_OFDM54) {
 			if (ic->ic_protmode == IEEE80211_PROT_CTSONLY)
 				flags |= WPI_TX_NEED_CTS | WPI_TX_FULL_TXOP;
 			else if (ic->ic_protmode == IEEE80211_PROT_RTSCTS)
@@ -1773,7 +1751,7 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	    type != IEEE80211_FC0_TYPE_DATA)
 		tx->id = WPI_ID_BROADCAST;
 	else
-		tx->id = ((struct wpi_node *)ni)->id;
+		tx->id = wn->id;
 
 	if (type == IEEE80211_FC0_TYPE_MGT) {
 		uint8_t subtype = wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
@@ -1798,15 +1776,15 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	tx->ofdm_mask = 0xff;
 	tx->cck_mask = 0x0f;
 	tx->lifetime = htole32(WPI_LIFETIME_INFINITE);
-	tx->rate = wpi_plcp_signal(rate);
+	tx->plcp = rinfo->plcp;
 
 	/* Copy 802.11 header in TX command. */
 	memcpy((uint8_t *)(tx + 1), wh, hdrlen);
 
 	if (k != NULL && k->k_cipher == IEEE80211_CIPHER_CCMP) {
 		/* Trim 802.11 header and prepend CCMP IV. */
-		m_adj(m0, hdrlen - IEEE80211_CCMP_HDRLEN);
-		ivp = mtod(m0, uint8_t *);
+		m_adj(m, hdrlen - IEEE80211_CCMP_HDRLEN);
+		ivp = mtod(m, uint8_t *);
 		k->k_tsc++;
 		ivp[0] = k->k_tsc;
 		ivp[1] = k->k_tsc >> 8;
@@ -1821,59 +1799,57 @@ wpi_tx_data(struct wpi_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		memcpy(tx->key, k->k_key, k->k_len);
 	} else {
 		/* Trim 802.11 header. */
-		m_adj(m0, hdrlen);
+		m_adj(m, hdrlen);
 		tx->security = 0;
 	}
 	tx->flags = htole32(flags);
 
-	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
+	error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 	    BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
 		printf("%s: could not map mbuf (error %d)\n",
 		    sc->sc_dev.dv_xname, error);
-		m_freem(m0);
+		m_freem(m);
 		return error;
 	}
 	if (error != 0) {
 		/* Too many DMA segments, linearize mbuf. */
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
-			m_freem(m0);
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
+			m_freem(m);
 			return ENOMEM;
 		}
-		M_DUP_PKTHDR(mnew, m0);
-		if (m0->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
-				m_freem(m0);
-				m_freem(mnew);
+		if (m->m_pkthdr.len > MHLEN) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
+				m_freem(m);
+				m_freem(m1);
 				return ENOMEM;
 			}
 		}
-		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(mnew, caddr_t));
-		m_freem(m0);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m0 = mnew;
+		m_copydata(m, 0, m->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_len = m1->m_pkthdr.len = m->m_pkthdr.len;
+		m_freem(m);
+		m = m1;
 
-		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
+		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m,
 		    BUS_DMA_NOWAIT);
 		if (error != 0) {
 			printf("%s: could not map mbuf (error %d)\n",
 			    sc->sc_dev.dv_xname, error);
-			m_freem(m0);
+			m_freem(m);
 			return error;
 		}
 	}
 
-	data->m = m0;
+	data->m = m;
 	data->ni = ni;
 
 	DPRINTFN(4, ("sending data: qid=%d idx=%d len=%d nsegs=%d\n",
-	    ring->qid, ring->cur, m0->m_pkthdr.len, data->map->dm_nsegs));
+	    ring->qid, ring->cur, m->m_pkthdr.len, data->map->dm_nsegs));
 
 	/* Fill TX descriptor. */
-	desc->flags = htole32(WPI_PAD32(m0->m_pkthdr.len) << 28 |
+	desc->flags = htole32(WPI_PAD32(m->m_pkthdr.len) << 28 |
 	    (1 + data->map->dm_nsegs) << 24);
 	/* First DMA segment is used by the TX command. */
 	desc->segs[0].addr = htole32(ring->cmd_dma.paddr +
@@ -1939,7 +1915,7 @@ sendit:
 		if (ic->ic_rawbpf != NULL)
 			bpf_mtap(ic->ic_rawbpf, m, BPF_DIRECTION_OUT);
 #endif
-		if (wpi_tx_data(sc, m, ni) != 0) {
+		if (wpi_tx(sc, m, ni) != 0) {
 			ieee80211_release_node(ic, ni);
 			ifp->if_oerrors++;
 			continue;
@@ -2118,23 +2094,24 @@ wpi_mrr_setup(struct wpi_softc *sc)
 	int i, error;
 
 	/* CCK rates (not used with 802.11a). */
-	for (i = WPI_CCK1; i <= WPI_CCK11; i++) {
+	for (i = WPI_RIDX_CCK1; i <= WPI_RIDX_CCK11; i++) {
 		mrr.rates[i].flags = 0;
-		mrr.rates[i].plcp = wpi_ridx_to_plcp[i];
+		mrr.rates[i].plcp = wpi_rates[i].plcp;
 		/* Fallback to the immediate lower CCK rate (if any.) */
-		mrr.rates[i].next = (i == WPI_CCK1) ? WPI_CCK1 : i - 1;
+		mrr.rates[i].next =
+		    (i == WPI_RIDX_CCK1) ? WPI_RIDX_CCK1 : i - 1;
 		/* Try one time at this rate before falling back to "next". */
 		mrr.rates[i].ntries = 1;
 	}
 	/* OFDM rates (not used with 802.11b). */
-	for (i = WPI_OFDM6; i <= WPI_OFDM54; i++) {
+	for (i = WPI_RIDX_OFDM6; i <= WPI_RIDX_OFDM54; i++) {
 		mrr.rates[i].flags = 0;
-		mrr.rates[i].plcp = wpi_ridx_to_plcp[i];
+		mrr.rates[i].plcp = wpi_rates[i].plcp;
 		/* Fallback to the immediate lower rate (if any.) */
 		/* We allow fallback from OFDM/6 to CCK/2 in 11b/g mode. */
-		mrr.rates[i].next = (i == WPI_OFDM6) ?
+		mrr.rates[i].next = (i == WPI_RIDX_OFDM6) ?
 		    ((ic->ic_curmode == IEEE80211_MODE_11A) ?
-			WPI_OFDM6 : WPI_CCK2) :
+			WPI_RIDX_OFDM6 : WPI_RIDX_CCK2) :
 		    i - 1;
 		/* Try one time at this rate before falling back to "next". */
 		mrr.rates[i].ntries = 1;
@@ -2268,11 +2245,11 @@ wpi_set_txpower(struct wpi_softc *sc, int async)
 	cmd.chan = htole16(chan);
 
 	/* Set TX power for all OFDM and CCK rates. */
-	for (i = 0; i <= 11 ; i++) {
+	for (i = 0; i <= WPI_RIDX_MAX ; i++) {
 		/* Retrieve TX power for this channel/rate. */
-		idx = wpi_get_power_index(sc, group, ch, wpi_ridx_to_rate[i]);
+		idx = wpi_get_power_index(sc, group, ch, i);
 
-		cmd.rates[i].plcp = wpi_ridx_to_plcp[i];
+		cmd.rates[i].plcp = wpi_rates[i].plcp;
 
 		if (IEEE80211_IS_CHAN_5GHZ(ch)) {
 			cmd.rates[i].rf_gain = wpi_rf_gain_5ghz[idx];
@@ -2282,7 +2259,7 @@ wpi_set_txpower(struct wpi_softc *sc, int async)
 			cmd.rates[i].dsp_gain = wpi_dsp_gain_2ghz[idx];
 		}
 		DPRINTF(("chan %d/rate %d: power index %d\n", chan,
-		    wpi_ridx_to_rate[i], idx));
+		    wpi_rates[i].rate, idx));
 	}
 	return wpi_cmd(sc, WPI_CMD_TXPOWER, &cmd, sizeof cmd, async);
 }
@@ -2294,7 +2271,7 @@ wpi_set_txpower(struct wpi_softc *sc, int async)
  */
 int
 wpi_get_power_index(struct wpi_softc *sc, struct wpi_power_group *group,
-    struct ieee80211_channel *c, int rate)
+    struct ieee80211_channel *c, int ridx)
 {
 /* Fixed-point arithmetic division using a n-bit fractional part. */
 #define fdivround(a, b, n)	\
@@ -2316,14 +2293,14 @@ wpi_get_power_index(struct wpi_softc *sc, struct wpi_power_group *group,
 	pwr = group->maxpwr / 2;
 
 	/* Decrease TX power for highest OFDM rates to reduce distortion. */
-	switch (rate) {
-	case 72:	/* OFDM36 */
+	switch (ridx) {
+	case WPI_RIDX_OFDM36:
 		pwr -= IEEE80211_IS_CHAN_2GHZ(c) ? 0 :  5;
 		break;
-	case 96:	/* OFDM48 */
+	case WPI_RIDX_OFDM48:
 		pwr -= IEEE80211_IS_CHAN_2GHZ(c) ? 7 : 10;
 		break;
-	case 108:	/* OFDM54 */
+	case WPI_RIDX_OFDM54:
 		pwr -= IEEE80211_IS_CHAN_2GHZ(c) ? 9 : 12;
 		break;
 	}
@@ -2347,7 +2324,7 @@ wpi_get_power_index(struct wpi_softc *sc, struct wpi_power_group *group,
 	idx -= (sc->temp - group->temp) * 11 / 100;
 
 	/* Decrease TX power for CCK rates (-5dB). */
-	if (!WPI_RATE_IS_OFDM(rate))
+	if (ridx >= WPI_RIDX_CCK1)
 		idx += 10;
 
 	/* Make sure idx stays in a valid range. */
@@ -2482,7 +2459,7 @@ wpi_config(struct wpi_softc *sc)
 	memset(&node, 0, sizeof node);
 	IEEE80211_ADDR_COPY(node.macaddr, etherbroadcastaddr);
 	node.id = WPI_ID_BROADCAST;
-	node.rate = wpi_ridx_to_plcp[WPI_CCK1];
+	node.plcp = wpi_rates[WPI_RIDX_CCK1].plcp;
 	node.action = htole32(WPI_ACTION_SET_RATE);
 	node.antenna = WPI_ANTENNA_BOTH;
 	error = wpi_cmd(sc, WPI_CMD_ADD_NODE, &node, sizeof node, 0);
@@ -2535,12 +2512,12 @@ wpi_scan(struct wpi_softc *sc, uint16_t flags)
 	if (flags & IEEE80211_CHAN_5GHZ) {
 		hdr->crc_threshold = htole16(1);
 		/* Send probe requests at 6Mbps. */
-		tx->rate = wpi_ridx_to_plcp[WPI_OFDM6];
+		tx->plcp = wpi_rates[WPI_RIDX_OFDM6].plcp;
 		rs = &ic->ic_sup_rates[IEEE80211_MODE_11A];
 	} else {
 		hdr->flags = htole32(WPI_RXON_24GHZ | WPI_RXON_AUTO);
 		/* Send probe requests at 1Mbps. */
-		tx->rate = wpi_ridx_to_plcp[WPI_CCK1];
+		tx->plcp = wpi_rates[WPI_RIDX_CCK1].plcp;
 		rs = &ic->ic_sup_rates[IEEE80211_MODE_11G];
 	}
 
@@ -2661,8 +2638,8 @@ wpi_auth(struct wpi_softc *sc)
 	memset(&node, 0, sizeof node);
 	IEEE80211_ADDR_COPY(node.macaddr, etherbroadcastaddr);
 	node.id = WPI_ID_BROADCAST;
-	node.rate = (ic->ic_curmode == IEEE80211_MODE_11A) ?
-	    wpi_ridx_to_plcp[WPI_OFDM6] : wpi_ridx_to_plcp[WPI_CCK1];
+	node.plcp = (ic->ic_curmode == IEEE80211_MODE_11A) ?
+	    wpi_rates[WPI_RIDX_OFDM6].plcp : wpi_rates[WPI_RIDX_CCK1].plcp;
 	node.action = htole32(WPI_ACTION_SET_RATE);
 	node.antenna = WPI_ANTENNA_BOTH;
 	error = wpi_cmd(sc, WPI_CMD_ADD_NODE, &node, sizeof node, 1);
@@ -2716,13 +2693,16 @@ wpi_run(struct wpi_softc *sc)
 		return error;
 	}
 
-	/* Add BSS node. */
+	/* Fake a join to init the TX rate. */
 	((struct wpi_node *)ni)->id = WPI_ID_BSS;
+	wpi_newassoc(ic, ni, 1);
+
+	/* Add BSS node. */
 	memset(&node, 0, sizeof node);
 	IEEE80211_ADDR_COPY(node.macaddr, ni->ni_bssid);
 	node.id = WPI_ID_BSS;
-	node.rate = (ic->ic_curmode == IEEE80211_MODE_11A) ?
-	    wpi_ridx_to_plcp[WPI_OFDM6] : wpi_ridx_to_plcp[WPI_CCK1];
+	node.plcp = (ic->ic_curmode == IEEE80211_MODE_11A) ?
+	    wpi_rates[WPI_RIDX_OFDM6].plcp : wpi_rates[WPI_RIDX_CCK1].plcp;
 	node.action = htole32(WPI_ACTION_SET_RATE);
 	node.antenna = WPI_ANTENNA_BOTH;
 	DPRINTF(("adding BSS node\n"));
@@ -2731,9 +2711,6 @@ wpi_run(struct wpi_softc *sc)
 		printf("%s: could not add BSS node\n", sc->sc_dev.dv_xname);
 		return error;
 	}
-
-	/* Fake a join to init the TX rate. */
-	wpi_newassoc(ic, ni, 1);
 
 	/* Start periodic calibration timer. */
 	sc->calib_cnt = 0;
