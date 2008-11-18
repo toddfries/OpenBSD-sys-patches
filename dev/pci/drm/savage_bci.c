@@ -535,21 +535,6 @@ static void savage_fake_dma_flush(drm_savage_private_t *dev_priv)
 	dev_priv->first_dma_page = dev_priv->current_dma_page = 0;
 }
 
-int savage_driver_load(struct drm_device *dev, unsigned long chipset)
-{
-	drm_savage_private_t *dev_priv;
-
-	dev_priv = drm_calloc(1, sizeof(drm_savage_private_t), DRM_MEM_DRIVER);
-	if (dev_priv == NULL)
-		return ENOMEM;
-
-	dev->dev_private = (void *)dev_priv;
-
-	dev_priv->chipset = (enum savage_family)chipset;
-
-	return 0;
-}
-
 /*
  * Initalize mappings. On Savage4 and SavageIX the alignment
  * and size of the aperture is not suitable for automatic MTRR setup
@@ -726,7 +711,6 @@ static int savage_do_init_bci(struct drm_device *dev, drm_savage_init_t *init)
 		dev_priv->status = NULL;
 	}
 	if (dev_priv->dma_type == SAVAGE_DMA_AGP && init->buffers_offset) {
-		dev->agp_buffer_token = init->buffers_offset;
 		dev->agp_buffer_map = drm_core_findmap(dev,
 						       init->buffers_offset);
 		if (!dev->agp_buffer_map) {
@@ -907,11 +891,11 @@ static int savage_do_cleanup_bci(struct drm_device *dev)
 	} else if (dev_priv->cmd_dma && dev_priv->cmd_dma->handle &&
 		   dev_priv->cmd_dma->type == _DRM_AGP &&
 		   dev_priv->dma_type == SAVAGE_DMA_AGP)
-		drm_core_ioremapfree(dev_priv->cmd_dma, dev);
+		drm_core_ioremapfree(dev_priv->cmd_dma);
 
 	if (dev_priv->dma_type == SAVAGE_DMA_AGP &&
 	    dev->agp_buffer_map && dev->agp_buffer_map->handle) {
-		drm_core_ioremapfree(dev->agp_buffer_map, dev);
+		drm_core_ioremapfree(dev->agp_buffer_map);
 		/* make sure the next instance (which may be running
 		 * in PCI mode) doesn't try to use an old
 		 * agp_buffer_map. */
