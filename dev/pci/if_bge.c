@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.242 2008/09/08 08:10:54 brad Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.255 2008/11/09 15:08:26 naddy Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -1316,6 +1316,15 @@ bge_chipinit(struct bge_softc *sc)
 
 	/* Set the timer prescaler (always 66MHz) */
 	CSR_WRITE_4(sc, BGE_MISC_CFG, 65 << 1/*BGE_32BITTIME_66MHZ*/);
+
+	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906) {
+		DELAY(40);	/* XXX */
+
+		/* Put PHY into ready state */
+		BGE_CLRBIT(sc, BGE_MISC_CFG, BGE_MISCCFG_EPHY_IDDQ);
+		CSR_READ_4(sc, BGE_MISC_CFG); /* Flush */
+		DELAY(40);
+	}
 }
 
 int
@@ -1353,17 +1362,19 @@ bge_blockinit(struct bge_softc *sc)
 
 	/* Configure mbuf pool watermarks */
 	/* new Broadcom docs strongly recommend these: */
-	if (!(BGE_IS_5705_OR_BEYOND(sc))) {
+	if (BGE_IS_5705_OR_BEYOND(sc)) {
+		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
+
+		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906) {
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x04);
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x10);
+		} else {
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x10);
+			CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x60);
+		}
+	} else {
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x50);
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x20);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x60);
-	} else if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906) {
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x04);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x10);
-	} else {
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_READDMA_LOWAT, 0x0);
-		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_MACRX_LOWAT, 0x10);
 		CSR_WRITE_4(sc, BGE_BMAN_MBUFPOOL_HIWAT, 0x60);
 	}
 
@@ -1663,18 +1674,13 @@ bge_blockinit(struct bge_softc *sc)
 	/* Turn on write DMA state machine */
 	CSR_WRITE_4(sc, BGE_WDMA_MODE, val);
 
+	val = BGE_RDMAMODE_ENABLE|BGE_RDMAMODE_ALL_ATTNS;
+
+	if (sc->bge_flags & BGE_PCIE)
+		val |= BGE_RDMAMODE_FIFO_LONG_BURST;
+
 	/* Turn on read DMA state machine */
-	{
-		uint32_t dma_read_modebits;
-
-		dma_read_modebits =
-		  BGE_RDMAMODE_ENABLE | BGE_RDMAMODE_ALL_ATTNS;
-
-		if (sc->bge_flags & BGE_PCIE)
-			dma_read_modebits |= BGE_RDMAMODE_FIFO_LONG_BURST;
-
-		CSR_WRITE_4(sc, BGE_RDMA_MODE, dma_read_modebits);
-	}
+	CSR_WRITE_4(sc, BGE_RDMA_MODE, val);
 
 	/* Turn on RX data completion state machine */
 	CSR_WRITE_4(sc, BGE_RDC_MODE, BGE_RDCMODE_ENABLE);
@@ -2449,7 +2455,7 @@ bge_rxeof(struct bge_softc *sc)
 		u_int32_t		rxidx;
 		struct mbuf		*m = NULL;
 #ifdef BGE_CHECKSUM
-		int			sumflags = 0;
+		u_int16_t		sumflags = 0;
 #endif
 
 		cur_rx = &sc->bge_rdata->
@@ -2471,15 +2477,14 @@ bge_rxeof(struct bge_softc *sc)
 			if (bge_newbuf_jumbo(sc, sc->bge_jumbo, NULL)
 			    == ENOBUFS) {
 				struct mbuf             *m0;
-				m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-				    cur_rx->bge_len - ETHER_CRC_LEN +
-				    ETHER_ALIGN, 0, ifp, NULL);
+				m0 = m_devget(mtod(m, char *),
+				    cur_rx->bge_len - ETHER_CRC_LEN,
+				    ETHER_ALIGN, ifp, NULL);
 				bge_newbuf_jumbo(sc, sc->bge_jumbo, m);
 				if (m0 == NULL) {
 					ifp->if_ierrors++;
 					continue;
 				}
-				m_adj(m0, ETHER_ALIGN);
 				m = m0;
 			}
 		} else {
@@ -2518,12 +2523,19 @@ bge_rxeof(struct bge_softc *sc)
 		m->m_pkthdr.len = m->m_len = cur_rx->bge_len - ETHER_CRC_LEN; 
 		m->m_pkthdr.rcvif = ifp;
 
+#if NVLAN > 0
+		if (cur_rx->bge_flags & BGE_RXBDFLAG_VLAN_TAG) {
+			m->m_pkthdr.ether_vtag = cur_rx->bge_vlan_tag;
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		/*
 		 * Handle BPF listeners. Let the BPF user see the packet.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
 #ifdef BGE_CHECKSUM
@@ -2709,7 +2721,7 @@ bge_tick(void *xsc)
 			mii_tick(mii);
 	}       
 
-	timeout_add(&sc->bge_timeout, hz);
+	timeout_add_sec(&sc->bge_timeout, 1);
 
 	splx(s);
 }
@@ -2874,13 +2886,6 @@ bge_encap(struct bge_softc *sc, struct mbuf *m_head, u_int32_t *txidx)
 	struct txdmamap_pool_entry *dma;
 	bus_dmamap_t dmamap;
 	int			i = 0;
-#if NVLAN > 0
-	struct ifvlan		*ifv = NULL;
-
-	if ((m_head->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m_head->m_pkthdr.rcvif != NULL)
-		ifv = m_head->m_pkthdr.rcvif->if_softc;
-#endif
 
 	cur = frag = *txidx;
 
@@ -2939,12 +2944,11 @@ doit:
 		BGE_HOSTADDR(f->bge_addr, dmamap->dm_segs[i].ds_addr);
 		f->bge_len = dmamap->dm_segs[i].ds_len;
 		f->bge_flags = csum_flags;
+		f->bge_vlan_tag = 0;
 #if NVLAN > 0
-		if (ifv != NULL) {
+		if (m_head->m_flags & M_VLANTAG) {
 			f->bge_flags |= BGE_TXBDFLAG_VLAN_TAG;
-			f->bge_vlan_tag = ifv->ifv_tag;
-		} else {
-			f->bge_vlan_tag = 0;
+			f->bge_vlan_tag = m_head->m_pkthdr.ether_vtag;
 		}
 #endif
 		cur = frag;
@@ -3024,7 +3028,7 @@ bge_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 	if (pkts == 0)
@@ -3085,8 +3089,10 @@ bge_init(void *xsc)
 	CSR_WRITE_4(sc, BGE_MAC_ADDR1_LO, htons(m[0]));
 	CSR_WRITE_4(sc, BGE_MAC_ADDR1_HI, (htons(m[1]) << 16) | htons(m[2]));
 
-	/* Disable hardware decapsulation of vlan frames. */
-	BGE_SETBIT(sc, BGE_RX_MODE, BGE_RXMODE_RX_KEEP_VLAN_DIAG);
+	if (!(ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)) {
+		/* Disable hardware decapsulation of VLAN frames. */
+		BGE_SETBIT(sc, BGE_RX_MODE, BGE_RXMODE_RX_KEEP_VLAN_DIAG);
+	}
 
 	/* Program promiscuous mode and multicast filters. */
 	bge_iff(sc);
@@ -3152,7 +3158,7 @@ bge_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->bge_timeout, hz);
+	timeout_add_sec(&sc->bge_timeout, 1);
 }
 
 /*
@@ -3277,11 +3283,6 @@ bge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -3354,12 +3355,10 @@ bge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 

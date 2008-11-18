@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.287 2008/07/29 20:09:11 kettenis Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.290 2008/10/02 16:00:41 deraadt Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -130,11 +130,6 @@ int wdcdebug_pciide_mask = WDCDEBUG_PCIIDE_MASK;
 #include <dev/pci/pciide_svwsata_reg.h>
 #include <dev/pci/pciide_jmicron_reg.h>
 #include <dev/pci/cy82c693var.h>
-
-#ifdef __sparc64__
-#include <machine/autoconf.h>
-#include <machine/openfirm.h>
-#endif
 
 /* functions for reading/writing 8-bit PCI registers */
 
@@ -1076,35 +1071,35 @@ const struct pciide_product_desc pciide_ite_products[] = {
 };
 
 const struct pciide_product_desc pciide_ati_products[] = {
-	{ PCI_PRODUCT_ATI_IXP_IDE_200,
+	{ PCI_PRODUCT_ATI_SB200_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_300,
+	{ PCI_PRODUCT_ATI_SB300_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_400,
+	{ PCI_PRODUCT_ATI_SB400_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_600,
+	{ PCI_PRODUCT_ATI_SB600_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_700,
+	{ PCI_PRODUCT_ATI_SB700_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_SATA_300,
+	{ PCI_PRODUCT_ATI_SB300_SATA,
 	  0,
 	  sii3112_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_SATA_400_1,
+	{ PCI_PRODUCT_ATI_SB400_SATA_1,
 	  0,
 	  sii3112_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_SATA_400_2,
+	{ PCI_PRODUCT_ATI_SB400_SATA_2,
 	  0,
 	  sii3112_chip_map
 	}
@@ -4233,7 +4228,6 @@ sii3114_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 void
 sii3114_mapreg_dma(struct pciide_softc *sc, struct pci_attach_args *pa)
 {
-	struct pciide_channel *pc;
 	int chan, reg;
 	bus_size_t size;
 	struct pciide_satalink *sl = sc->sc_cookie;
@@ -4250,7 +4244,6 @@ sii3114_mapreg_dma(struct pciide_softc *sc, struct pci_attach_args *pa)
 
 	sc->sc_dma_iot = sl->ba5_st;
 	for (chan = 0; chan < 4; chan++) {
-		pc = &sc->pciide_channels[chan];
 		for (reg = 0; reg < IDEDMA_NREGS; reg++) {
 			size = 4;
 			if (size > (IDEDMA_SCH_OFFSET - reg))
@@ -5347,26 +5340,11 @@ acer_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t cr, interface;
 	bus_size_t cmdsize, ctlsize;
 	int rev = sc->sc_rev;
-#ifdef __sparc64__
-	char buf[32];
-#endif
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 	sc->sc_wdcdev.cap = WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
 	    WDC_CAPABILITY_MODE;
-
-#ifdef __sparc64__
-	/*
-	 * XXX The Tadpole SPARCLE doesn't want to do DMA.  PIO works
-	 * fine, so we have this ugly hack to make the machine work.
-	 * It is likely the real cause is still lurking somewhere in
-	 * the code.
-	 */
-	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
-	    strcmp(buf, "TAD,SPARCLE") == 0)
-		sc->sc_dma_ok = 0;
-#endif
 
 	if (sc->sc_dma_ok) {
 		sc->sc_wdcdev.cap |= WDC_CAPABILITY_DMA;
@@ -8469,7 +8447,6 @@ pio:
 		if (mode <= 2) {
 			drvp->DMA_mode = 0;
 			drvp->PIO_mode = 0;
-			mode = 0;
 		} else {
 			drvp->PIO_mode = mode;
 			drvp->DMA_mode = mode - 2;

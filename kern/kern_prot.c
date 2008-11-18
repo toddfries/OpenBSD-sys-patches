@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.31 2008/05/22 21:27:40 thib Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.37 2008/11/01 05:59:21 deraadt Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -233,11 +233,18 @@ sys_getgroups(struct proc *p, void *v, register_t *retval)
 int
 sys_setsid(struct proc *p, void *v, register_t *retval)
 {
+	struct session *newsess;
+	struct pgrp *newpgrp;
+
+	newsess = pool_get(&session_pool, PR_WAITOK);
+	newpgrp = pool_get(&pgrp_pool, PR_WAITOK);
 
 	if (p->p_pgid == p->p_pid || pgfind(p->p_pid)) {
+		pool_put(&pgrp_pool, newpgrp);
+		pool_put(&session_pool, newsess);
 		return (EPERM);
 	} else {
-		(void)enterpgrp(p, p->p_pid, 1);
+		(void) enterpgrp(p, p->p_pid, newpgrp, newsess);
 		*retval = p->p_pid;
 		return (0);
 	}
@@ -265,9 +272,9 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 		syscallarg(int) pgid;
 	} */ *uap = v;
 	struct proc *targp;		/* target process */
-	struct pgrp *pgrp;		/* target pgrp */
+	struct pgrp *pgrp, *newpgrp;	/* target pgrp */
 	pid_t pid;
-	int pgid;
+	int pgid, error;
 
 	pid = SCARG(uap, pid);
 	pgid = SCARG(uap, pgid);
@@ -275,24 +282,39 @@ sys_setpgid(struct proc *curp, void *v, register_t *retval)
 	if (pgid < 0)
 		return (EINVAL);
 
+	newpgrp = pool_get(&pgrp_pool, PR_WAITOK);
+
 	if (pid != 0 && pid != curp->p_pid) {
-		if ((targp = pfind(pid)) == 0 || !inferior(targp))
-			return (ESRCH);
-		if (targp->p_session != curp->p_session)
-			return (EPERM);
-		if (targp->p_flag & P_EXEC)
-			return (EACCES);
+		if ((targp = pfind(pid)) == 0 || !inferior(targp)) {
+			error = ESRCH;
+			goto out;
+		}
+		if (targp->p_session != curp->p_session) {
+			error = EPERM;
+			goto out;
+		}
+		if (targp->p_flag & P_EXEC) {
+			error = EACCES;
+			goto out;
+		}
 	} else
 		targp = curp;
-	if (SESS_LEADER(targp))
-		return (EPERM);
+	if (SESS_LEADER(targp)) {
+		error = EPERM;
+		goto out;
+	}
 	if (pgid == 0)
 		pgid = targp->p_pid;
 	else if (pgid != targp->p_pid)
 		if ((pgrp = pgfind(pgid)) == 0 ||
-		    pgrp->pg_session != curp->p_session)
-			return (EPERM);
-	return (enterpgrp(targp, pgid, 0));
+		    pgrp->pg_session != curp->p_session) {
+			error = EPERM;
+			goto out;
+		}
+	return (enterpgrp(targp, pgid, newpgrp, NULL));
+out:
+	pool_put(&pgrp_pool, newpgrp);
+	return (error);
 }
 
 /* ARGSUSED */
@@ -377,8 +399,8 @@ sys_setresuid(struct proc *p, void *v, register_t *retval)
 		/*
 		 * Transfer proc count to new user.
 		 */
-		(void)chgproccnt(pc->p_ruid, -1);
-		(void)chgproccnt(ruid, 1);
+		(void)chgproccnt(pc->p_ruid, -p->p_p->ps_refcnt);
+		(void)chgproccnt(ruid, p->p_p->ps_refcnt);
 		pc->p_ruid = ruid;
 	}
 	if (euid != (uid_t)-1 && euid != pc->pc_ucred->cr_uid) {
@@ -582,8 +604,8 @@ sys_setuid(struct proc *p, void *v, register_t *retval)
 		 * Transfer proc count to new user.
 		 */
 		if (uid != pc->p_ruid) {
-			(void)chgproccnt(pc->p_ruid, -1);
-			(void)chgproccnt(uid, 1);
+			(void)chgproccnt(pc->p_ruid, -p->p_p->ps_refcnt);
+			(void)chgproccnt(uid, p->p_p->ps_refcnt);
 		}
 		pc->p_ruid = uid;
 		pc->p_svuid = uid;

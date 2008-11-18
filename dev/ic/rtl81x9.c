@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.58 2008/04/20 00:23:28 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.61 2008/10/14 18:01:53 naddy Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -676,27 +676,22 @@ rl_rxeof(sc)
 		wrap = (sc->rl_cdata.rl_rx_buf + RL_RXBUFLEN) - rxbufpos;
 
 		if (total_len > wrap) {
-			m = m_devget(rxbufpos - ETHER_ALIGN,
-			    wrap + ETHER_ALIGN, 0, ifp, NULL);
+			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp, NULL);
 			if (m == NULL)
 				ifp->if_ierrors++;
 			else {
-				m_copyback(m, wrap + ETHER_ALIGN,
-				     total_len - wrap, sc->rl_cdata.rl_rx_buf);
-				m = m_pullup(m, sizeof(struct ip) +ETHER_ALIGN);
+				m_copyback(m, wrap, total_len - wrap,
+				    sc->rl_cdata.rl_rx_buf);
+				m = m_pullup(m, sizeof(struct ip));
 				if (m == NULL)
 					ifp->if_ierrors++;
-				else
-					m_adj(m, ETHER_ALIGN);
 			}
 			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
 		} else {
-			m = m_devget(rxbufpos - ETHER_ALIGN,
-			    total_len + ETHER_ALIGN, 0, ifp, NULL);
+			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp,
+			    NULL);
 			if (m == NULL)
 				ifp->if_ierrors++;
-			else
-				m_adj(m, ETHER_ALIGN);
 			cur_rx += total_len + 4 + ETHER_CRC_LEN;
 		}
 
@@ -1052,7 +1047,7 @@ void rl_init(xsc)
 	splx(s);
 
 	timeout_set(&sc->sc_tick_tmo, rl_tick, sc);
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }
 
 /*
@@ -1092,11 +1087,6 @@ int rl_ioctl(ifp, command, data)
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1150,12 +1140,10 @@ int rl_ioctl(ifp, command, data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -1473,7 +1461,7 @@ rl_tick(v)
 	s = splnet();
 	mii_tick(&sc->sc_mii);
 	splx(s);
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }
 
 struct cfdriver rl_cd = {

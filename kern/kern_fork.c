@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.95 2008/05/11 23:54:40 tedu Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.101 2008/11/11 02:13:14 tedu Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -161,6 +161,7 @@ process_new(struct proc *newproc, struct proc *parent)
 	pr->ps_mainproc = newproc;
 	TAILQ_INIT(&pr->ps_threads);
 	TAILQ_INSERT_TAIL(&pr->ps_threads, newproc, p_thr_link);
+	pr->ps_refcnt = 1;
 	newproc->p_p = pr;
 }
 
@@ -180,6 +181,10 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	int s;
 	extern void endtsleep(void *);
 	extern void realitexpire(void *);
+	struct  ptrace_state *newptstat = NULL;
+#if NSYSTRACE > 0
+	void *newstrp = NULL;
+#endif
 
 	/*
 	 * Although process entries are dynamically created, we still keep
@@ -231,6 +236,7 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		atomic_setbits_int(&p2->p_flag, P_THREAD);
 		p2->p_p = p1->p_p;
 		TAILQ_INSERT_TAIL(&p2->p_p->ps_threads, p2, p_thr_link);
+		p2->p_p->ps_refcnt++;
 	} else {
 		process_new(p2, p1);
 	}
@@ -381,6 +387,13 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		forkstat.sizkthread += vm->vm_dsize + vm->vm_ssize;
 	}
 
+	if (p2->p_flag & P_TRACED && flags & FORK_FORK)
+		newptstat = malloc(sizeof(*newptstat), M_SUBPROC, M_WAITOK);
+#if NSYSTRACE > 0
+	if (ISSET(p1->p_flag, P_SYSTRACE))
+		newstrp = systrace_getproc();
+#endif
+
 	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
 	do {
 		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
@@ -400,8 +413,8 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 		 * Set ptrace status.
 		 */
 		if (flags & FORK_FORK) {
-			p2->p_ptstat = malloc(sizeof(*p2->p_ptstat),
-			    M_SUBPROC, M_WAITOK);
+			p2->p_ptstat = newptstat;
+			newptstat = NULL;
 			p1->p_ptstat->pe_report_event = PTRACE_FORK;
 			p2->p_ptstat->pe_report_event = PTRACE_FORK;
 			p1->p_ptstat->pe_other_pid = p2->p_pid;
@@ -410,8 +423,8 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	}
 
 #if NSYSTRACE > 0
-	if (ISSET(p1->p_flag, P_SYSTRACE))
-		systrace_fork(p1, p2);
+	if (newstrp)
+		systrace_fork(p1, p2, newstrp);
 #endif
 
 	/*
@@ -423,6 +436,9 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	p2->p_stat = SRUN;
 	setrunqueue(p2);
 	SCHED_UNLOCK(s);
+
+	if (newptstat)
+		free(newptstat, M_SUBPROC);
 
 	/*
 	 * Notify any interested parties about the new process.

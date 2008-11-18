@@ -71,8 +71,6 @@ drm_ctxbitmap_next(struct drm_device *dev)
 
 	set_bit(bit, dev->ctx_bitmap);
 	DRM_DEBUG("drm_ctxbitmap_next bit : %d\n", bit);
-	if ((bit+1) > dev->max_context)
-		dev->max_context = (bit+1);
 	DRM_UNLOCK();
 	return bit;
 }
@@ -89,7 +87,6 @@ drm_ctxbitmap_init(struct drm_device *dev)
 		return (ENOMEM);
 	DRM_LOCK();
 	dev->ctx_bitmap = bitmap;
-	dev->max_context = -1;
 	DRM_UNLOCK();
 
 	for (i = 0; i < DRM_RESERVED_CONTEXTS; i++) {
@@ -150,11 +147,8 @@ drm_addctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		return ENOMEM;
 	}
 
-	if (dev->driver.context_ctor && ctx->handle != DRM_KERNEL_CONTEXT) {
-		DRM_LOCK();
-		dev->driver.context_ctor(dev, ctx->handle);
-		DRM_UNLOCK();
-	}
+	if (dev->driver->context_ctor && ctx->handle != DRM_KERNEL_CONTEXT)
+		dev->driver->context_ctor(dev, ctx->handle);
 
 	return 0;
 }
@@ -177,11 +171,8 @@ drm_rmctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	DRM_DEBUG("%d\n", ctx->handle);
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {
-		if (dev->driver.context_dtor) {
-			DRM_LOCK();
-			dev->driver.context_dtor(dev, ctx->handle);
-			DRM_UNLOCK();
-		}
+		if (dev->driver->context_dtor)
+			dev->driver->context_dtor(dev, ctx->handle);
 
 		drm_ctxbitmap_free(dev, ctx->handle);
 	}

@@ -1,13 +1,13 @@
-/*	$OpenBSD: ehci.c,v 1.89 2008/09/08 07:08:27 brad Exp $ */
+/*	$OpenBSD: ehci.c,v 1.95 2008/10/30 08:11:13 mglocker Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
- * Copyright (c) 2004,2005 The NetBSD Foundation, Inc.
- * Copyright (c) 2008 Jeremy Morse <jeremy.morse@gmail.com>
+ * Copyright (c) 2004-2008 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
  * This code is derived from software contributed to The NetBSD Foundation
- * by Lennart Augustsson (lennart@augustsson.net) and by Charles M. Hannum.
+ * by Lennart Augustsson (lennart@augustsson.net), Charles M. Hannum and
+ * Jeremy Morse (jeremy.morse@gmail.com).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,16 +42,12 @@
 
 /*
  * TODO:
- * 1) The meaty part to implement is isochronous transactions. They are
- *    needed for USB 1 devices below USB 2.0 hubs. They are quite complicated
- *    since they need to be able to do "transaction translation", ie,
- *    converting to/from USB 2 and USB 1.
- *    So the hub driver needs to handle and schedule these things, to
- *    assign place in frame where different devices get to go. See chapter
+ * 1) The hub driver needs to handle and schedule the transaction translator,
+ *    to assign place in frame where different devices get to go. See chapter
  *    on hubs in USB 2.0 for details.
  *
  * 2) Command failures are not recovered correctly.
-*/
+ */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -246,13 +242,13 @@ void		ehci_dump_exfer(struct ehci_xfer *);
 #define EHCI_INTR_ENDPT 1
 
 #define ehci_add_intr_list(sc, ex) \
-	LIST_INSERT_HEAD(&(sc)->sc_intrhead, (ex), inext);
-#define ehci_del_intr_list(ex) \
+	TAILQ_INSERT_TAIL(&(sc)->sc_intrhead, (ex), inext);
+#define ehci_del_intr_list(sc, ex) \
 	do { \
-		LIST_REMOVE((ex), inext); \
-		(ex)->inext.le_prev = NULL; \
+		TAILQ_REMOVE(&sc->sc_intrhead, (ex), inext); \
+		(ex)->inext.tqe_prev = NULL; \
 	} while (0)
-#define ehci_active_intr_list(ex) ((ex)->inext.le_prev != NULL)
+#define ehci_active_intr_list(ex) ((ex)->inext.tqe_prev != NULL)
 
 struct usbd_bus_methods ehci_bus_methods = {
 	ehci_open,
@@ -417,6 +413,7 @@ ehci_init(ehci_softc_t *sc)
 	if (sc->sc_softitds == NULL)
 		return (ENOMEM);
 	LIST_INIT(&sc->sc_freeitds);
+	TAILQ_INIT(&sc->sc_intrhead);
 
 	/* Set up the bus struct. */
 	sc->sc_bus.methods = &ehci_bus_methods;
@@ -663,15 +660,15 @@ ehci_softintr(void *v)
 	 * An interrupt just tells us that something is done, we have no
 	 * clue what, so we need to scan through all active transfers. :-(
 	 */
-	for (ex = LIST_FIRST(&sc->sc_intrhead); ex; ex = nextex) {
-		nextex = LIST_NEXT(ex, inext);
+	for (ex = TAILQ_FIRST(&sc->sc_intrhead); ex; ex = nextex) {
+		nextex = TAILQ_NEXT(ex, inext);
 		ehci_check_intr(sc, ex);
 	}
 
 	/* Schedule a callout to catch any dropped transactions. */
 	if ((sc->sc_flags & EHCIF_DROPPED_INTR_WORKAROUND) &&
-	    !LIST_EMPTY(&sc->sc_intrhead)) {
-		timeout_add(&sc->sc_tmo_intrlist, hz);
+	    !TAILQ_EMPTY(&sc->sc_intrhead)) {
+		timeout_add_sec(&sc->sc_tmo_intrlist, 1);
 	}
 
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
@@ -754,6 +751,9 @@ ehci_check_itd_intr(ehci_softc_t *sc, struct ehci_xfer *ex) {
 	ehci_soft_itd_t *itd;
 	int i;
 
+	if (&ex->xfer != SIMPLEQ_FIRST(&ex->xfer.pipe->queue))
+		return;
+
 	if (ex->itdstart == NULL) {
 		printf("ehci_check_itd_intr: not valid itd\n");
 		return;
@@ -769,6 +769,7 @@ ehci_check_itd_intr(ehci_softc_t *sc, struct ehci_xfer *ex) {
 
 	/*
 	 * Step 1, check no active transfers in last itd, meaning we're finished
+	 * check no active transfers in last itd, meaning we're finished
 	 */
 	for (i = 0; i < 8; i++) {
 		if (letoh32(itd->itd.itd_ctl[i]) & EHCI_ITD_ACTIVE)
@@ -779,27 +780,9 @@ ehci_check_itd_intr(ehci_softc_t *sc, struct ehci_xfer *ex) {
 		goto done; /* All 8 descriptors inactive, it's done */
 	}
 
-	/*
-	 * Step 2, check for errors in status bits, throughout chain...
-	 */
-
-	DPRINTFN(12, ("ehci_check_itd_intr: active ex=%p\n", ex));
-
-	for (itd = ex->itdstart; itd != ex->itdend; itd = itd->xfer_next) {
-		for (i = 0; i < 8; i++) {
-			if (letoh32(itd->itd.itd_ctl[i]) & (EHCI_ITD_BUF_ERR |
-			    EHCI_ITD_BABBLE | EHCI_ITD_ERROR))
-				break;
-		}
-		if (i != 8) { /* Error in one of the itds */
-			goto done;
-		}
-	} /* itd search loop */
-
 	DPRINTFN(12, ("ehci_check_itd_intr: ex %p itd %p still active\n", ex,
 	    ex->itdstart));
 	return;
-
 done:
 	DPRINTFN(12, ("ehci_check_itd_intr: ex=%p done\n", ex));
 	timeout_del(&ex->xfer.timeout_handle);
@@ -1533,8 +1516,10 @@ ehci_open(usbd_pipe_handle pipe)
 		panic("ehci_open: bad device speed %d", dev->speed);
 	}
 	if (speed != EHCI_QH_SPEED_HIGH && xfertype == UE_ISOCHRONOUS) {
-		printf("%s: *** Error: opening low/full speed isoc device on"
-		    "ehci, this does not work yet. Feel free to implement\n",
+		printf("%s: Error opening low/full speed isoc endpoint.\n"
+		    "A low/full speed device is attached to a USB2 hub, and "
+		    "transaction translations are not yet supported.\n"
+		    "Reattach the device to the root hub instead.\n",
 		    sc->sc_bus.bdev.dv_xname);
 		DPRINTFN(1,("ehci_open: hshubaddr=%d hshubport=%d\n",
 		    hshubaddr, hshubport));
@@ -2677,7 +2662,7 @@ ehci_free_itd(ehci_softc_t *sc, ehci_soft_itd_t *itd)
 	int s;
 
 	s = splusb();
-	LIST_INSERT_AFTER(LIST_FIRST(&sc->sc_freeitds), itd, u.free_list);
+	LIST_INSERT_HEAD(&sc->sc_freeitds, itd, u.free_list);
 	splx(s);
 }
 
@@ -3102,7 +3087,7 @@ ehci_device_ctrl_done(usbd_xfer_handle xfer)
 #endif
 
 	if (xfer->status != USBD_NOMEM && ehci_active_intr_list(ex)) {
-		ehci_del_intr_list(ex);	/* remove from active list */
+		ehci_del_intr_list(sc, ex);	/* remove from active list */
 		ehci_free_sqtd_chain(sc, ex->sqtdstart, NULL);
 	}
 
@@ -3416,7 +3401,7 @@ ehci_device_bulk_done(usbd_xfer_handle xfer)
 	    xfer, xfer->actlen));
 
 	if (xfer->status != USBD_NOMEM && ehci_active_intr_list(ex)) {
-		ehci_del_intr_list(ex);	/* remove from active list */
+		ehci_del_intr_list(sc, ex);	/* remove from active list */
 		ehci_free_sqtd_chain(sc, ex->sqtdstart, NULL);
 	}
 
@@ -3638,7 +3623,7 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 
 		xfer->status = USBD_IN_PROGRESS;
 	} else if (xfer->status != USBD_NOMEM && ehci_active_intr_list(ex)) {
-		ehci_del_intr_list(ex); /* remove from active list */
+		ehci_del_intr_list(sc, ex); /* remove from active list */
 		ehci_free_sqtd_chain(sc, ex->sqtdstart, NULL);
 	}
 #undef exfer
@@ -3796,6 +3781,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 
 			if (trans_count >= xfer->nframes) { /*Set IOC*/
 				itd->itd.itd_ctl[j] |= htole32(EHCI_ITD_IOC);
+				break;
 			}
 		}       
 
@@ -3834,9 +3820,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 
 		k = (UE_GET_DIR(epipe->pipe.endpoint->edesc->bEndpointAddress))
 		    ? 1 : 0;
-		j = UE_GET_SIZE(
-		    UGETW(epipe->pipe.endpoint->edesc->wMaxPacketSize));
-
+		j = UGETW(epipe->pipe.endpoint->edesc->wMaxPacketSize);
 		itd->itd.itd_bufr[1] |= htole32(EHCI_ITD_SET_DIR(k) |
 		    EHCI_ITD_SET_MAXPKT(UE_GET_SIZE(j)));
 
@@ -3954,7 +3938,7 @@ ehci_device_isoc_done(usbd_xfer_handle xfer)
 	s = splusb();
 	epipe->u.isoc.cur_xfers--;
 	if (xfer->status != USBD_NOMEM && ehci_active_intr_list(exfer)) {
-		ehci_del_intr_list(exfer);
+		ehci_del_intr_list(sc, exfer);
 		ehci_rem_free_itd_chain(sc, exfer);
 	}
 	splx(s);

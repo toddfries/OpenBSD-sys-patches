@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bm.c,v 1.22 2007/04/22 22:31:14 deraadt Exp $	*/
+/*	$OpenBSD: if_bm.c,v 1.24 2008/10/15 19:12:19 blambert Exp $	*/
 /*	$NetBSD: if_bm.c,v 1.1 1999/01/01 01:27:52 tsubai Exp $	*/
 
 /*-
@@ -753,7 +753,6 @@ bmac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -827,7 +826,7 @@ bmac_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
 	}
 
 	splx(s);
@@ -983,5 +982,5 @@ bmac_mii_tick(void *v)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }

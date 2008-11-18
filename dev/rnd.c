@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.92 2008/06/11 19:38:00 djm Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.95 2008/10/15 03:30:57 djm Exp $	*/
 
 /*
  * rnd.c -- A strong random number generator
@@ -819,7 +819,6 @@ arc4_reinit(void *v)
 static void
 arc4maybeinit(void)
 {
-	extern int hz;
 
 	if (!arc4random_initialized) {
 #ifdef DIAGNOSTIC
@@ -829,7 +828,7 @@ arc4maybeinit(void)
 		arc4random_initialized++;
 		arc4_stir();
 		/* 10 minutes, per dm@'s suggestion */
-		timeout_add(&arc4_timeout, 10 * 60 * hz);
+		timeout_add_sec(&arc4_timeout, 10 * 60);
 	}
 }
 
@@ -967,7 +966,7 @@ arc4random_uniform(u_int32_t upper_bound)
 }
 
 /*
- * random, srandom, urandom, prandom, arandom char devices
+ * random, srandom, urandom, arandom char devices
  * -------------------------------------------------------
  */
 
@@ -1001,7 +1000,6 @@ int
 randomread(dev_t dev, struct uio *uio, int ioflag)
 {
 	int		ret = 0;
-	int		i;
 	u_int32_t 	*buf;
 
 	if (uio->uio_resid == 0)
@@ -1052,19 +1050,18 @@ randomread(dev_t dev, struct uio *uio, int ioflag)
 				printf("rnd: %u bytes for output\n", n);
 #endif
 			break;
-		case RND_PRND:
-			i = (n + 3) / 4;
-			while (i--)
-				buf[i] = random() << 16 | (random() & 0xFFFF);
-			break;
+		case RND_ARND_OLD:
 		case RND_ARND:
 			arc4random_buf(buf, n);
 			break;
 		default:
 			ret = ENXIO;
 		}
-		if (n != 0 && ret == 0)
+		if (n != 0 && ret == 0) {
 			ret = uiomove((caddr_t)buf, n, uio);
+			if (!ret && uio->uio_resid > 0)
+				yield();
+		}
 	}
 
 	free(buf, M_TEMP);
@@ -1150,7 +1147,7 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 	int		ret = 0;
 	u_int32_t	*buf;
 
-	if (minor(dev) == RND_RND || minor(dev) == RND_PRND)
+	if (minor(dev) == RND_RND)
 		return ENXIO;
 
 	if (uio->uio_resid == 0)
@@ -1169,7 +1166,8 @@ randomwrite(dev_t dev, struct uio *uio, int flags)
 		}
 	}
 
-	if (minor(dev) == RND_ARND && !ret)
+	if ((minor(dev) == RND_ARND || minor(dev) == RND_ARND_OLD) &&
+	    !ret)
 		arc4random_initialized = 0;
 
 	free(buf, M_TEMP);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.7 2008/06/19 08:43:55 reyk Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.14 2008/11/09 15:08:26 naddy Exp $	*/
 
 /******************************************************************************
 
@@ -112,9 +112,7 @@ void	ixgbe_print_hw_stats(struct ix_softc *);
 void	ixgbe_update_link_status(struct ix_softc *);
 int	ixgbe_get_buf(struct rx_ring *, int, struct mbuf *);
 int	ixgbe_encap(struct tx_ring *, struct mbuf *);
-#if NVLAN > 0
 void	ixgbe_enable_hw_vlans(struct ix_softc * sc);
-#endif
 int	ixgbe_dma_malloc(struct ix_softc *, bus_size_t,
 		    struct ixgbe_dma_alloc *, int);
 void	ixgbe_dma_free(struct ix_softc *, struct ixgbe_dma_alloc *);
@@ -364,7 +362,7 @@ ixgbe_start_locked(struct tx_ring *txr, struct ifnet * ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 
 		/* Set timeout in case hardware has problems transmitting */
@@ -434,11 +432,6 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		IOCTL_DEBUGOUT("ioctl: SIOCxIFADDR (Get/Set Interface Addr)");
@@ -499,9 +492,7 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->media, command);
 		break;
 	default:
-		IOCTL_DEBUGOUT1("ioctl: UNKNOWN (0x%X)\n", (int)command);
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
 	}
 
 	splx(s);
@@ -610,10 +601,8 @@ ixgbe_init(void *arg)
 		return;
 	}
 
-#if NVLAN > 0
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		ixgbe_enable_hw_vlans(sc);
-#endif
 
 	/* Prepare transmit descriptors and buffers */
 	if (ixgbe_setup_transmit_structures(sc)) {
@@ -685,7 +674,7 @@ ixgbe_init(void *arg)
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_RXDCTL(i), rxdctl);
 	}
 
-	timeout_add(&sc->timer, hz);
+	timeout_add_sec(&sc->timer, 1);
 
 	/* Set up MSI/X routing */
 	ixgbe_configure_ivars(sc);
@@ -741,7 +730,7 @@ ixgbe_legacy_irq(void *arg)
 		if (reg_eicr & IXGBE_EICR_LSC) {
 			timeout_del(&sc->timer);
 		        ixgbe_update_link_status(sc);
-			timeout_add(&sc->timer, hz);
+			timeout_add_sec(&sc->timer, 1);
 		}
 	}
 
@@ -848,10 +837,8 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
         cmd_type_len |= IXGBE_ADVTXD_DCMD_IFCS | IXGBE_ADVTXD_DCMD_DEXT;
 
 #if NVLAN > 0
-	/* VLAN tagging? */
-	if ((m_head->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m_head->m_pkthdr.rcvif != NULL)
-        	cmd_type_len |= IXGBE_ADVTXD_DCMD_VLE;
+	if (m_head->m_flags & M_VLANTAG)
+		cmd_type_len |= IXGBE_ADVTXD_DCMD_VLE;
 #endif
 
 	/*
@@ -1100,7 +1087,7 @@ ixgbe_local_timer(void *arg)
 		ixgbe_print_hw_stats(sc);
 #endif
 
-	timeout_add(&sc->timer, hz);
+	timeout_add_sec(&sc->timer, 1);
 
 	splx(s);
 }
@@ -1368,7 +1355,7 @@ ixgbe_hardware_init(struct ix_softc *sc)
 	sc->hw.fc.send_xon = TRUE;
 
 	if (ixgbe_hw(&sc->hw, init_hw) != 0) {
-		printf("%s: Hardware Initialization Failed");
+		printf("%s: Hardware Initialization Failed", ifp->if_xname);
 		return (EIO);
 	}
 	bcopy(sc->hw.mac.addr, sc->arpcom.ac_enaddr,
@@ -1402,11 +1389,15 @@ ixgbe_setup_interface(struct ix_softc *sc)
 	IFQ_SET_MAXLEN(&ifp->if_snd, sc->num_tx_desc - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
-#ifdef IX_CSUM_OFFLOAD
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#ifdef IX_VLAN_HWTAGGING
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
-	ifp->if_capabilities |= IFCAP_CSUM_IPv4;
-	ifp->if_capabilities |= IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+#endif
+
+#ifdef IX_CSUM_OFFLOAD
+	ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
+				IFCAP_CSUM_UDPv4;
 #endif
 
 	sc->max_frame_size =
@@ -1895,11 +1886,6 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	int ctxd = txr->next_avail_tx_desc;
 #if NVLAN > 0
 	struct ether_vlan_header *eh;
-	struct ifvlan		*ifv = NULL;
-
-	if ((mp->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    mp->m_pkthdr.rcvif != NULL)
-		ifv = mp->m_pkthdr.rcvif->if_softc;
 #else
 	struct ether_header *eh;
 #endif
@@ -1915,9 +1901,9 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 	 * be placed into the descriptor itself.
 	 */
 #if NVLAN > 0
-	if (ifv != NULL) {
+	if (mp->m_flags & M_VLANTAG) {
 		vlan_macip_lens |=
-		    htole16(ifv->ifv_tag) << IXGBE_ADVTXD_VLAN_SHIFT;
+		    htole16(mp->m_pkthdr.ether_vtag) << IXGBE_ADVTXD_VLAN_SHIFT;
 	} else
 #endif
 	if (offload == FALSE)
@@ -2028,12 +2014,6 @@ ixgbe_tso_setup(struct tx_ring *txr, struct mbuf *mp, uint32_t *paylen)
 #if NVLAN > 0
 	uint16_t vtag = 0;
 	struct ether_vlan_header *eh;
-
-	struct ifvlan		*ifv = NULL;
-
-	if ((mp->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    mp->m_pkthdr.rcvif != NULL)
-		ifv = mp->m_pkthdr.rcvif->if_softc;
 #else
 	struct ether_header *eh;
 #endif
@@ -2083,9 +2063,9 @@ ixgbe_tso_setup(struct tx_ring *txr, struct mbuf *mp, uint32_t *paylen)
 
 #if NVLAN > 0
 	/* VLAN MACLEN IPLEN */
-	if (ifv != NULL) {
+	if (mp->m_flags & M_VLANTAG) {
 		vtag = htole16(mp->m_pkthdr.ether_vtag);
-                vlan_macip_lens |= (ifv->ifv_tag << IXGBE_ADVTXD_VLAN_SHIFT);
+		vlan_macip_lens |= (vtag << IXGBE_ADVTXD_VLAN_SHIFT);
 	}
 #endif
 
@@ -2792,30 +2772,17 @@ ixgbe_rxeof(struct rx_ring *rxr, int count)
 				ifp->if_ipackets++;
 				rxr->packet_count++;
 				rxr->byte_count += rxr->fmp->m_pkthdr.len;
-				m = rxr->fmp;
-
 				ixgbe_rx_checksum(sc, staterr, rxr->fmp);
 
-#if NVLAN > 0 && defined(IX_CSUM_OFFLOAD)
+#if NVLAN > 0
 				if (staterr & IXGBE_RXD_STAT_VP) {
-					struct ether_vlan_header vh;
-
-					if (m->m_pkthdr.len < ETHER_HDR_LEN)
-						goto discard;
-					m_copydata(m, 0,
-					    ETHER_HDR_LEN, (caddr_t)&vh);
-					vh.evl_proto = vh.evl_encap_proto;
-					vh.evl_tag =
+					rxr->fmp->m_pkthdr.ether_vtag =
 					    letoh16(cur->wb.upper.vlan);
-					vh.evl_encap_proto =
-					    htons(ETHERTYPE_VLAN);
-					m_adj(m, ETHER_HDR_LEN);
-					M_PREPEND(m, sizeof(vh), M_DONTWAIT);
-					if (m == NULL)
-						goto discard;
-					m_copyback(m, 0, sizeof(vh), &vh);
+					rxr->fmp->m_flags |= M_VLANTAG;
 				}
 #endif
+
+				m = rxr->fmp;
 				rxr->fmp = NULL;
 				rxr->lmp = NULL;
 			}
@@ -2846,7 +2813,8 @@ discard:
                         rxr->next_to_check = i;
 #if NBPFILTER > 0
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				bpf_mtap_ether(ifp->if_bpf, m,
+				    BPF_DIRECTION_IN);
 #endif
 			ether_input_mbuf(ifp, m);
 			i = rxr->next_to_check;
@@ -2877,37 +2845,27 @@ void
 ixgbe_rx_checksum(struct ix_softc *sc,
     uint32_t staterr, struct mbuf * mp)
 {
-	struct ifnet   	*ifp = &sc->arpcom.ac_if;
 	uint16_t status = (uint16_t) staterr;
 	uint8_t  errors = (uint8_t) (staterr >> 24);
 
-	/* Not offloading */
-	if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) == 0) {
-		mp->m_pkthdr.csum_flags = 0;
-		return;
-	}
-
-	// XXX
-	printf("%s: status 0x%04x errors 0x%02x\n", ifp->if_xname,
-	    status, errors);
-
-	mp->m_pkthdr.csum_flags = 0;
 	if (status & IXGBE_RXD_STAT_IPCS) {
 		/* Did it pass? */
-		if (!(errors & IXGBE_RXD_ERR_IPE))
+		if (!(errors & IXGBE_RXD_ERR_IPE)) {
 			/* IP Checksum Good */
 			mp->m_pkthdr.csum_flags = M_IPV4_CSUM_IN_OK;
+		} else
+			mp->m_pkthdr.csum_flags = 0;
 	}
-	/* Did it pass? */
-	if (errors & IXGBE_RXD_ERR_TCPE)
-		return;
-	if (status & IXGBE_RXD_STAT_L4CS)
-		mp->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
-	if (status & IXGBE_RXD_STAT_UDPCS)
-		mp->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
+
+	if (status & IXGBE_RXD_STAT_L4CS) {
+		/* Did it pass? */
+		if (!(errors & IXGBE_RXD_ERR_TCPE))
+			mp->m_pkthdr.csum_flags |=
+				M_TCP_CSUM_IN_OK | M_UDP_CSUM_IN_OK;
+	}
+
 }
 
-#if NVLAN > 0
 void
 ixgbe_enable_hw_vlans(struct ix_softc *sc)
 {
@@ -2920,7 +2878,6 @@ ixgbe_enable_hw_vlans(struct ix_softc *sc)
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_VLNCTRL, ctrl);
 	ixgbe_enable_intr(sc);
 }
-#endif
 
 void
 ixgbe_enable_intr(struct ix_softc *sc)

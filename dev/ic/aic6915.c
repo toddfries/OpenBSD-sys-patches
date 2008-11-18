@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic6915.c,v 1.5 2008/06/26 05:42:15 ray Exp $	*/
+/*	$OpenBSD: aic6915.c,v 1.7 2008/10/02 20:21:13 brad Exp $	*/
 /*	$NetBSD: aic6915.c,v 1.15 2005/12/24 20:27:29 perry Exp $	*/
 
 /*-
@@ -543,11 +543,6 @@ sf_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -603,7 +598,7 @@ sf_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	/* Try to get more packets going. */
@@ -906,7 +901,7 @@ sf_tick(void *arg)
 	sf_stats_update(sc);
 	splx(s);
 
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 }
 
 /*
@@ -1165,7 +1160,7 @@ sf_init(struct ifnet *ifp)
 	    GEC_TxDmaEn|GEC_RxDmaEn|GEC_TransmitEn|GEC_ReceiveEn);
 
 	/* Start the on second clock. */
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 
 	/*
 	 * Note that the interface is now running.

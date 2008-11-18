@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_myx.c,v 1.7 2008/05/23 08:49:27 brad Exp $	*/
+/*	$OpenBSD: if_myx.c,v 1.9 2008/10/02 20:21:14 brad Exp $	*/
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@openbsd.org>
@@ -290,7 +290,7 @@ myx_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 
 	timeout_set(&sc->sc_tick, myx_tick, sc);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 
 	mountroothook_establish(myx_attachhook, sc);
 
@@ -810,7 +810,7 @@ myx_tick(void *arg)
 		return;
 
 	myx_link_state(sc);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 int
@@ -822,10 +822,6 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int			 s, error = 0;
 
 	s = splnet();
-	if ((error = ether_ioctl(ifp, &sc->sc_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -868,7 +864,7 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -879,7 +875,6 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	splx(s);
-
 	return (error);
 }
 

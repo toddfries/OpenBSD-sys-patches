@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lii.c,v 1.17 2008/09/01 14:38:31 brad Exp $	*/
+/*	$OpenBSD: if_lii.c,v 1.20 2008/10/07 16:03:37 jsing Exp $	*/
 
 /*
  *  Copyright (c) 2007 The NetBSD Foundation.
@@ -137,7 +137,7 @@ struct cfattach lii_ca = {
 
 int	lii_reset(struct lii_softc *);
 int	lii_eeprom_present(struct lii_softc *);
-int	lii_read_macaddr(struct lii_softc *, uint8_t *);
+void	lii_read_macaddr(struct lii_softc *, uint8_t *);
 int	lii_eeprom_read(struct lii_softc *, uint32_t, uint32_t *);
 void	lii_spi_configure(struct lii_softc *);
 int	lii_spi_read(struct lii_softc *, uint32_t, uint32_t *);
@@ -230,8 +230,7 @@ lii_attach(struct device *parent, struct device *self, void *aux)
 	else
 		sc->sc_memread = lii_spi_read;
 
-	if (lii_read_macaddr(sc, sc->sc_ac.ac_enaddr))
-		goto unmap;
+	lii_read_macaddr(sc, sc->sc_ac.ac_enaddr);
 
 	if (pci_intr_map(pa, &ih) != 0) {
 		printf(": failed to map interrupt!\n");
@@ -435,7 +434,7 @@ lii_spi_read(struct lii_softc *sc, uint32_t reg, uint32_t *val)
 	return 0;
 }
 
-int
+void
 lii_read_macaddr(struct lii_softc *sc, uint8_t *ea)
 {
 	uint32_t offset = 0x100;
@@ -468,10 +467,10 @@ lii_read_macaddr(struct lii_softc *sc, uint8_t *ea)
 		}
 	}
 
-	if (found < 2) {
-		printf(": error reading MAC address\n");
-		return 1;
-	}
+#ifdef LII_DEBUG
+	if (found < 2)
+		printf(": error reading MAC address, using registers...\n");
+#endif
 
 	addr0 = htole32(addr0);
 	addr1 = htole32(addr1);
@@ -488,8 +487,6 @@ lii_read_macaddr(struct lii_softc *sc, uint8_t *ea)
 	ea[3] = (addr0 & 0x00ff0000) >> 16;
 	ea[4] = (addr0 & 0x0000ff00) >> 8;
 	ea[5] = (addr0 & 0x000000ff);
-
-	return 0;
 }
 
 int
@@ -701,7 +698,7 @@ lii_init(struct ifnet *ifp)
 
 	LII_WRITE_4(sc, LII_IMR, IMR_NORMAL_MASK);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1049,13 +1046,9 @@ lii_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	struct lii_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)addr;
 	struct ifaddr *ifa;
-	int s, error;
+	int s, error = 0;
 
 	s = splnet();
-
-	error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
-	if (error > 0)
-		goto err;
 
 	switch(cmd) {
 	case SIOCSIFADDR:
@@ -1090,18 +1083,16 @@ lii_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
 	}
 
-err:
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
 			lii_iff(sc);
 		error = 0;
 	}
-	splx(s);
 
+	splx(s);
 	return error;
 }
 
@@ -1159,5 +1150,5 @@ lii_tick(void *v)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }

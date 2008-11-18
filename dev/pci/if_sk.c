@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sk.c,v 1.146 2008/05/24 01:32:54 brad Exp $	*/
+/*	$OpenBSD: if_sk.c,v 1.149 2008/10/14 18:01:53 naddy Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -866,11 +866,6 @@ sk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc_if->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -926,12 +921,10 @@ sk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc_if->arpcom, command, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1246,7 +1239,7 @@ sk_attach(struct device *parent, struct device *self, void *aux)
 
 	if (SK_IS_GENESIS(sc)) {
 		timeout_set(&sc_if->sk_tick_ch, sk_tick, sc_if);
-		timeout_add(&sc_if->sk_tick_ch, hz);
+		timeout_add_sec(&sc_if->sk_tick_ch, 1);
 	} else
 		timeout_set(&sc_if->sk_tick_ch, sk_yukon_tick, sc_if);
 
@@ -1784,14 +1777,13 @@ sk_rxeof(struct sk_if_softc *sc_if)
 		 */
 		if (sk_newbuf(sc_if, cur, NULL, dmamap) == ENOBUFS) {
 			struct mbuf		*m0;
-			m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-			    total_len + ETHER_ALIGN, 0, ifp, NULL);
+			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
+			    ifp, NULL);
 			sk_newbuf(sc_if, cur, m, dmamap);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
 				continue;
 			}
-			m_adj(m0, ETHER_ALIGN);
 			m = m0;
 		} else {
 			m->m_pkthdr.rcvif = ifp;
@@ -1988,7 +1980,7 @@ sk_tick(void *xsc_if)
 	}
 
 	if (i != 3) {
-		timeout_add(&sc_if->sk_tick_ch, hz);
+		timeout_add_sec(&sc_if->sk_tick_ch, 1);
 		return;
 	}
 
@@ -2009,7 +2001,7 @@ sk_yukon_tick(void *xsc_if)
 	s = splnet();
 	mii_tick(mii);
 	splx(s);
-	timeout_add(&sc_if->sk_tick_ch, hz);
+	timeout_add_sec(&sc_if->sk_tick_ch, 1);
 }
 
 void
@@ -2057,7 +2049,7 @@ sk_intr_bcom(struct sk_if_softc *sc_if)
 			    SK_LINKLED_BLINK_OFF);
 		} else {
 			mii_tick(mii);
-			timeout_add(&sc_if->sk_tick_ch, hz);
+			timeout_add_sec(&sc_if->sk_tick_ch, 1);
 		}
 	}
 
@@ -2074,11 +2066,11 @@ sk_intr_xmac(struct sk_if_softc	*sc_if)
 	if (sc_if->sk_phytype == SK_PHYTYPE_XMAC) {
 		if (status & XM_ISR_GP0_SET) {
 			SK_XM_SETBIT_2(sc_if, XM_IMR, XM_IMR_GP0_SET);
-			timeout_add(&sc_if->sk_tick_ch, hz);
+			timeout_add_sec(&sc_if->sk_tick_ch, 1);
 		}
 
 		if (status & XM_ISR_AUTONEG_DONE) {
-			timeout_add(&sc_if->sk_tick_ch, hz);
+			timeout_add_sec(&sc_if->sk_tick_ch, 1);
 		}
 	}
 
@@ -2670,7 +2662,7 @@ sk_init(void *xsc_if)
 	ifp->if_flags &= ~IFF_OACTIVE;
 
 	if (SK_IS_YUKON(sc))
-		timeout_add(&sc_if->sk_tick_ch, hz);
+		timeout_add_sec(&sc_if->sk_tick_ch, 1);
 
 	splx(s);
 }

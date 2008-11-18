@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.30 2008/04/24 09:04:14 jakob Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.32 2008/11/10 15:55:06 cnst Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -339,7 +339,7 @@ ciss_attach(struct ciss_softc *sc)
 	CISS_UNLOCK_SCRATCH(sc, lock);
 
 	timeout_set(&sc->sc_hb, ciss_heartbeat, sc);
-	timeout_add(&sc->sc_hb, hz * 3);
+	timeout_add_sec(&sc->sc_hb, 3);
 
 	/* map LDs */
 	if (ciss_ldmap(sc)) {
@@ -826,7 +826,6 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
 	ciss_lock_t lock;
-	int error;
 
 	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_raw_cmd "));
 
@@ -843,7 +842,6 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 		return (COMPLETE);
 	}
 
-	error = 0;
 	xs->error = XS_NOERROR;
 
 	/* TODO check this target has not yet employed w/ any volume */
@@ -886,7 +884,6 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	u_int8_t target = link->target;
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
-	int error;
 	ciss_lock_t lock;
 
 	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_cmd "));
@@ -904,7 +901,6 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 		return (COMPLETE);
 	}
 
-	error = 0;
 	xs->error = XS_NOERROR;
 
 	/* XXX emulate SYNCHRONIZE_CACHE ??? */
@@ -985,7 +981,7 @@ ciss_heartbeat(void *v)
 	else
 		sc->heartbeat = hb;
 
-	timeout_add(&sc->sc_hb, hz * 3);
+	timeout_add_sec(&sc->sc_hb, 3);
 }
 
 void

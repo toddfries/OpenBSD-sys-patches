@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.20 2008/08/30 07:39:12 brad Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.23 2008/10/14 18:01:53 naddy Exp $	*/
 
 /*
  *
@@ -661,7 +661,7 @@ cas_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 }
 
 int
@@ -1074,7 +1074,7 @@ cas_init(struct ifnet *ifp)
 		bus_space_write_4(t, h, CAS_RX_KICK2, 4);
 
 	/* Start the one second timer. */
-	timeout_add(&sc->sc_tick_ch, hz);
+	timeout_add_sec(&sc->sc_tick_ch, 1);
 
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -1205,14 +1205,13 @@ cas_rint(struct cas_softc *sc)
 			bus_dmamap_sync(sc->sc_dmatag, rxs->rxs_dmamap, 0,
 			    rxs->rxs_dmamap->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
-			cp = rxs->rxs_kva + off * 256;
-			m = m_devget(cp, len + ETHER_ALIGN, 0, ifp, NULL);
+			cp = rxs->rxs_kva + off * 256 + ETHER_ALIGN;
+			m = m_devget(cp, len, ETHER_ALIGN, ifp, NULL);
 			
 			if (word[0] & CAS_RC0_RELEASE_HDR)
 				cas_add_rxbuf(sc, idx);
 
 			if (m != NULL) {
-				m_adj(m, ETHER_ALIGN);
 
 #if NBPFILTER > 0
 				/*
@@ -1242,15 +1241,13 @@ cas_rint(struct cas_softc *sc)
 			    rxs->rxs_dmamap->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
 			/* XXX We should not be copying the packet here. */
-			cp = rxs->rxs_kva + off;
-			m = m_devget(cp, len + ETHER_ALIGN, 0, ifp, NULL);
+			cp = rxs->rxs_kva + off + ETHER_ALIGN;
+			m = m_devget(cp, len, ETHER_ALIGN, ifp, NULL);
 
 			if (word[0] & CAS_RC0_RELEASE_DATA)
 				cas_add_rxbuf(sc, idx);
 
 			if (m != NULL) {
-				m_adj(m, ETHER_ALIGN);
-
 #if NBPFILTER > 0
 				/*
 				 * Pass this up to any BPF listeners, but only
@@ -1689,13 +1686,7 @@ cas_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		if ((ifp->if_flags & IFF_RUNNING) == 0)
@@ -1758,8 +1749,7 @@ cas_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);

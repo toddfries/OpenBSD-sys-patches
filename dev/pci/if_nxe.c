@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nxe.c,v 1.54 2008/05/05 23:56:21 claudio Exp $ */
+/*	$OpenBSD: if_nxe.c,v 1.57 2008/10/29 01:14:47 deraadt Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -1020,15 +1020,11 @@ nxe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 	struct nxe_softc		*sc = ifp->if_softc;
 	struct ifreq			*ifr = (struct ifreq *)addr;
 	struct ifaddr			*ifa;
-	int				error;
+	int				error = 0;
 	int				s;
 
 	rw_enter_write(&sc->sc_lock);
 	s = splnet();
-
-	error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
-	if (error > 0)
-		goto err;
 
 	timeout_del(&sc->sc_tick);
 
@@ -1066,8 +1062,7 @@ nxe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		break;
 
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, addr);
 	}
 
 	if (error == ENETRESET) {
@@ -1081,7 +1076,6 @@ nxe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 
 	nxe_tick(sc);
 
-err:
 	splx(s);
 	rw_exit_write(&sc->sc_lock);
 	return (error);
@@ -1630,7 +1624,7 @@ nxe_board_info(struct nxe_softc *sc)
 	int				rv = 1;
 	int				i;
 
-	ni = malloc(sizeof(struct nxe_info), M_NOWAIT, M_TEMP);
+	ni = malloc(sizeof(struct nxe_info), M_TEMP, M_NOWAIT);
 	if (ni == NULL) {
 		printf(": unable to allocate temporary memory\n");
 		return (1);
@@ -1677,7 +1671,7 @@ nxe_user_info(struct nxe_softc *sc)
 	struct nxe_lladdr		*la;
 	int				rv = 1;
 
-	nu = malloc(sizeof(struct nxe_userinfo), M_NOWAIT, M_TEMP);
+	nu = malloc(sizeof(struct nxe_userinfo), M_TEMP, M_NOWAIT);
 	if (nu == NULL) {
 		printf(": unable to allocate temp memory\n");
 		return (1);
@@ -1853,7 +1847,7 @@ nxe_tick(void *xsc)
 		break;
 	}
 
-	timeout_add(&sc->sc_tick, hz * 5);
+	timeout_add_sec(&sc->sc_tick, 5);
 }
 
 

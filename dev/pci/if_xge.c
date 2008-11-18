@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xge.c,v 1.43 2007/09/19 03:50:25 brad Exp $	*/
+/*	$OpenBSD: if_xge.c,v 1.48 2008/11/09 15:08:26 naddy Exp $	*/
 /*	$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $	*/
 
 /*
@@ -749,10 +749,12 @@ xge_init(struct ifnet *ifp)
 		return (1);
 	}
 
-	/* disable VLAN tag stripping */
-	val = PIF_RCSR(RX_PA_CFG);
-	val &= ~STRIP_VLAN_TAG;
-	PIF_WCSR(RX_PA_CFG, val);
+	if (!(ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)) {
+		/* disable VLAN tag stripping */
+		val = PIF_RCSR(RX_PA_CFG);
+		val &= ~STRIP_VLAN_TAG;
+		PIF_WCSR(RX_PA_CFG, val);
+	}
 
 	/* set MRU */
 #ifdef XGE_JUMBO
@@ -940,9 +942,17 @@ xge_intr(void *pv)
 		if (RXD_CTL1_PROTOS(val) & RXD_CTL1_P_UDP)
 			m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
 
+#if NVLAN > 0
+		if (RXD_CTL1_PROTOS(val) & RXD_CTL1_P_VLAN) {
+			m->m_pkthdr.ether_vtag =
+			    RXD_CTL2_VLANTAG(rxd->rxd_control2);
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
+
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
 
 		ether_input_mbuf(ifp, m);
@@ -963,11 +973,6 @@ xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1018,11 +1023,10 @@ xge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &sc->xena_media, cmd);
 		break;
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1105,9 +1109,6 @@ xge_start(struct ifnet *ifp)
 	struct	mbuf *m;
 	uint64_t par, lcr;
 	int nexttx = 0, ntxd, error, i;
-#if NVLAN > 0
-	struct ifvlan *ifv = NULL;
-#endif
 
 	if ((ifp->if_flags & (IFF_RUNNING|IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -1151,12 +1152,10 @@ xge_start(struct ifnet *ifp)
 		txd->txd_control2 = TXD_CTL2_UTIL;
 
 #if NVLAN > 0
-		if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-		    m->m_pkthdr.rcvif != NULL) {
-			ifv = m->m_pkthdr.rcvif->if_softc;
-
+		if (m->m_flags & M_VLANTAG) {
 			txd->txd_control2 |= TXD_CTL2_VLANE;
-			txd->txd_control2 |= TXD_CTL2_VLANT(ifv->ifv_tag);
+			txd->txd_control2 |=
+			    TXD_CTL2_VLANT(m->m_pkthdr.ether_vtag);
 		}
 #endif
 
@@ -1179,7 +1178,7 @@ xge_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif /* NBPFILTER > 0 */
 
 		sc->sc_nexttx = NEXTTX(nexttx);
@@ -1221,7 +1220,7 @@ xge_alloc_txmem(struct xge_softc *sc)
 	/* setup transmit array pointers */
 	txp = (struct txd *)kva;
 	txdp = seg.ds_addr;
-	for (txp = (struct txd *)kva, i = 0; i < NTXDESCS; i++) {
+	for (i = 0; i < NTXDESCS; i++) {
 		sc->sc_txd[i] = txp;
 		sc->sc_txdp[i] = txdp;
 		txp += NTXFRAGS;
