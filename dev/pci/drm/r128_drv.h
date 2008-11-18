@@ -76,6 +76,8 @@ typedef struct drm_r128_ring_buffer {
 } drm_r128_ring_buffer_t;
 
 typedef struct drm_r128_private {
+	struct device	 dev;
+	struct device	*drmdev;
 	drm_r128_ring_buffer_t ring;
 	drm_r128_sarea_t *sarea_priv;
 

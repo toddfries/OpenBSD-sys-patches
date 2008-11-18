@@ -132,7 +132,6 @@
 #define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
 #define DRM_UNLOCK()		rw_exit_write(&dev->dev_lock)
 #define DRM_MAXUNITS	8
-extern struct drm_device *drm_units[];
 
 /* Deal with netbsd code where only the print statements differ */
 #define printk printf
@@ -151,13 +150,10 @@ enum {
 #define DRM_AGP_MEM		struct agp_memory_info
 
 /* D_CLONE only supports one device, this will be fixed eventually */
+#define drm_get_device_from_kdev(_kdev) drm_cd.cd_devs[0]
+#if 0
 #define drm_get_device_from_kdev(_kdev)			\
-	drm_units[0]
-
-#if 0 /* D_CLONE only supports on device for now */
-#define drm_get_device_from_kdev(_kdev) 		\
-	(minor(kdev) < DRM_MAXUNITS) ?			\
-	    drm_units[minor(kdev)] : NULL
+	(minor(_kdev) < drm_cd.cd_ndevs) ? drm_cd.cd_devs[minor(_kdev)] : NULL
 #endif
 
 
@@ -209,7 +205,7 @@ typedef u_int8_t u8;
 
 #define DRM_VERIFYAREA_READ( uaddr, size )				\
 	(!uvm_map_checkprot(&(curproc->p_vmspace->vm_map),		\
-		    (vaddr_t)uaddr, (vaddr_t)uaddr+size, UVM_PROT_READ))
+	(vaddr_t)uaddr, (vaddr_t)uaddr+size, UVM_PROT_READ))
 
 #define DRM_COPY_TO_USER(user, kern, size) \
 	copyout(kern, user, size)
@@ -251,7 +247,7 @@ DRM_SPINUNLOCK(&dev->irq_lock)
 	printf("error: [" DRM_NAME ":pid%d:%s] *ERROR* " fmt,		\
 	    DRM_CURRENTPID, __func__ , ## arg)
 
-#define DRM_INFO(fmt, arg...)  printf("%s: " fmt, drm_units[0]->device.dv_xname, ## arg)
+#define DRM_INFO(fmt, arg...)  printf("%s: " fmt, dev_priv->dev.dv_xname, ## arg)
 
 #undef DRM_DEBUG
 #define DRM_DEBUG(fmt, arg...) do {					\
@@ -265,10 +261,10 @@ typedef struct drm_pci_id_list
 	int vendor;
 	int device;
 	long driver_private;
-	char *name;
 } drm_pci_id_list_t;
 
 struct drm_file;
+struct drm_device;
 
 #define DRM_AUTH	0x1
 #define DRM_MASTER	0x2
@@ -443,7 +439,6 @@ struct drm_ati_pcigart_info {
 };
 
 struct drm_driver_info {
-	int	(*load)(struct drm_device *, unsigned long);
 	int	(*firstopen)(struct drm_device *);
 	int	(*open)(struct drm_device *, struct drm_file *);
 	int	(*ioctl)(struct drm_device*, u_long, caddr_t,
@@ -451,7 +446,6 @@ struct drm_driver_info {
 	void	(*preclose)(struct drm_device *, struct drm_file *);
 	void	(*postclose)(struct drm_device *, struct drm_file *);
 	void	(*lastclose)(struct drm_device *);
-	int	(*unload)(struct drm_device *);
 	void	(*reclaim_buffers_locked)(struct drm_device *,
 		    struct drm_file *);
 	int	(*dma_ioctl)(struct drm_device *, void *, struct drm_file *);
@@ -509,7 +503,6 @@ struct drm_device {
 	struct device	  device; /* softc is an extension of struct device */
 
 	const struct drm_driver_info *driver;
-	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
 
 	u_int16_t pci_device;		/* PCI device id */
 	u_int16_t pci_vendor;		/* PCI vendor id */
@@ -572,7 +565,6 @@ struct drm_device {
 	drm_sg_mem_t		*sg;  /* Scatter gather memory */
 	atomic_t		*ctx_bitmap;
 	void			*dev_private;
-	unsigned int		 agp_buffer_token;
 	drm_local_map_t		*agp_buffer_map;
 
 	u_int		  drw_no;
@@ -580,14 +572,19 @@ struct drm_device {
 	RB_HEAD(drawable_tree, bsd_drm_drawable_info) drw_head;
 };
 
+struct drm_attach_args {
+	const struct drm_driver_info	*driver;
+	struct pci_attach_args		*pa;
+	struct vga_pci_softc		*vga;
+};
+
 extern int	drm_debug_flag;
 
 /* Device setup support (drm_drv.c) */
-int	drm_probe(struct pci_attach_args *, drm_pci_id_list_t * );
-void	drm_attach(struct device *, struct device *,
-	    struct pci_attach_args *, drm_pci_id_list_t *);
-int	drm_detach(struct device *, int );
-int	drm_activate(struct device *, enum devact);
+int	drm_pciprobe(struct pci_attach_args *, drm_pci_id_list_t * );
+struct device	*drm_attach_mi(const struct drm_driver_info *,
+		     struct pci_attach_args *pa, struct device *,
+		     struct device *);
 dev_type_ioctl(drmioctl);
 dev_type_open(drmopen);
 dev_type_close(drmclose);
@@ -595,6 +592,8 @@ dev_type_read(drmread);
 dev_type_poll(drmpoll);
 dev_type_mmap(drmmmap);
 extern drm_local_map_t	*drm_getsarea(struct drm_device *);
+
+drm_pci_id_list_t *drm_find_description(int , int , drm_pci_id_list_t *);
 
 /* File operations helpers (drm_fops.c) */
 struct drm_file	*drm_find_file_by_minor(struct drm_device *, int);
@@ -755,9 +754,9 @@ int	drm_sg_alloc_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_sg_free(struct drm_device *, void *, struct drm_file *);
 
 /* consistent PCI memory functions (drm_pci.c) */
-drm_dma_handle_t *drm_pci_alloc(struct drm_device *, size_t, size_t,
+drm_dma_handle_t *drm_pci_alloc(bus_dma_tag_t, size_t, size_t,
 		      dma_addr_t);
-void	drm_pci_free(struct drm_device *, drm_dma_handle_t *);
+void	drm_pci_free(bus_dma_tag_t, drm_dma_handle_t *);
 
 /* Inline replacements for DRM_IOREMAP macros */
 #define drm_core_ioremap_wc drm_core_ioremap
@@ -765,7 +764,7 @@ static __inline__ void drm_core_ioremap(struct drm_local_map *map, struct drm_de
 {
 	map->handle = drm_ioremap(dev, map);
 }
-static __inline__ void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
+static __inline__ void drm_core_ioremapfree(struct drm_local_map *map)
 {
 	if ( map->handle && map->size )
 		drm_ioremapfree(map);

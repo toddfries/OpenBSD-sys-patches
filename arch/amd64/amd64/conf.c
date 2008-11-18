@@ -174,7 +174,7 @@ cdev_decl(cztty);
 cdev_decl(nvram);
 #include "agp.h"
 cdev_decl(agp);
-#include "drmbase.h"
+#include "drm.h"
 cdev_decl(drm);
 
 #include "wsdisplay.h"
@@ -299,7 +299,7 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 84: bthub */
 	cdev_nvram_init(NNVRAM,nvram),	/* 85: NVRAM interface */
 	cdev_agp_init(NAGP,agp),	/* 86: agp */
-	cdev_drm_init(NDRMBASE,drm),	/* 87: drm */
+	cdev_drm_init(NDRM,drm),	/* 87: drm */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

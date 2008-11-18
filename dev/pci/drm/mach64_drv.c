@@ -37,7 +37,11 @@
 #include "drm.h"
 #include "mach64_drm.h"
 #include "mach64_drv.h"
-#include "drm_pciids.h"
+
+int	machdrm_probe(struct device *, void *, void *);
+void	machdrm_attach(struct device *, struct device *, void *);
+int	machdrm_detach(struct device *, int);
+int	machdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int	mach64drm_probe(struct device *, void *, void *);
 void	mach64drm_attach(struct device *, struct device *, void *);
@@ -45,10 +49,30 @@ int	machdrm_ioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mach64_pciidlist[] = {
-	mach64_PCI_IDS
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GI},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GQ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGEPRO},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GD},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LI},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LP},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LQ},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LB},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LD},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GO},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGEXL},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GS},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_GN},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RAGE_PM},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64LS},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_1},
+	{PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MACH64_LN},
+	{0, 0, 0}
 };
 
-static const struct drm_driver_info mach64_driver = {
+static const struct drm_driver_info machdrm_driver = {
 	.buf_priv_size		= 1, /* No dev_priv */
 	.ioctl			= machdrm_ioctl,
 	.lastclose		= mach64_driver_lastclose,
@@ -73,25 +97,36 @@ static const struct drm_driver_info mach64_driver = {
 };
 
 int
-mach64drm_probe(struct device *parent, void *match, void *aux)
+machdrm_probe(struct device *parent, void *match, void *aux)
 {
-	return drm_probe((struct pci_attach_args *)aux, mach64_pciidlist);
+	return drm_pciprobe((struct pci_attach_args *)aux, mach64_pciidlist);
 }
 
 void
-mach64drm_attach(struct device *parent, struct device *self, void *aux)
+machdrm_attach(struct device *parent, struct device *self, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-	struct drm_device *dev = (struct drm_device *)self;
+	drm_mach64_private_t	*dev_priv = (drm_mach64_private_t *)self;
+	struct pci_attach_args	*pa = aux;
 
-	dev->driver = &mach64_driver;
+	dev_priv->drmdev = drm_attach_mi(&machdrm_driver, pa, parent, self);
+}
 
-	return drm_attach(parent, self, pa, mach64_pciidlist);
+int
+machdrm_detach(struct device *self, int flags)
+{
+	drm_mach64_private_t *dev_priv = (drm_mach64_private_t *)self;
+
+	if (dev_priv->drmdev != NULL) {
+		config_detach(dev_priv->drmdev, flags);
+		dev_priv->drmdev = NULL;
+	}
+
+	return (0);
 }
 
 struct cfattach machdrm_ca = {
-	sizeof(struct drm_device), mach64drm_probe, mach64drm_attach,
-	drm_detach, drm_activate
+	sizeof(drm_mach64_private_t), machdrm_probe, machdrm_attach,
+	machdrm_detach
 };
 
 struct cfdriver machdrm_cd = {
