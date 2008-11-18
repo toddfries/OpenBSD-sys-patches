@@ -104,6 +104,7 @@ typedef struct drm_i915_private {
 	int user_irq_refcount;
 	/* Cached value of IMR to avoid reads in updating the bitfield */
 	u_int32_t irq_mask_reg;
+	u_int32_t pipestat[2];
 
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
@@ -218,7 +219,7 @@ extern int i915_driver_device_is_agp(struct drm_device * dev);
 extern long i915_compat_ioctl(struct file *filp, unsigned int cmd,
 			      unsigned long arg);
 extern void i915_emit_breadcrumb(struct drm_device *dev);
-extern void i915_dispatch_flip(struct drm_device *);
+extern int i915_dispatch_flip(struct drm_device *);
 extern int i915_emit_mi_flush(struct drm_device *dev, uint32_t flush);
 extern int i915_driver_firstopen(struct drm_device *dev);
 extern int i915_dispatch_batchbuffer(struct drm_device * dev,
@@ -241,8 +242,6 @@ extern int i915_emit_irq(struct drm_device * dev);
 extern int i915_enable_vblank(struct drm_device *dev, int crtc);
 extern void i915_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 i915_get_vblank_counter(struct drm_device *dev, int crtc);
-extern int i915_vblank_swap(struct drm_device *dev, void *data,
-			    struct drm_file *file_priv);
 extern void i915_user_irq_get(struct drm_device *dev);
 extern void i915_user_irq_put(struct drm_device *dev);
 
@@ -430,16 +429,19 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
  * MI_STORE_DATA_IMM.
  *
  * The following dwords have a reserved meaning:
- * 0: ISR copy, updated when an ISR bit not set in the HWSTAM changes.
- * 4: ring 0 head pointer
- * 5: ring 1 head pointer (915-class)
- * 6: ring 2 head pointer (915-class)
+ * 0x00: ISR copy, updated when an ISR bit not set in the HWSTAM changes.
+ * 0x04: ring 0 head pointer
+ * 0x05: ring 1 head pointer (915-class)
+ * 0x06: ring 2 head pointer (915-class)
+ * 0x10-0x1b: Context status DWords (GM45)
+ * 0x1f: Last written status offset. (GM45)
  *
- * The area from dword 0x10 to 0x3ff is available for driver usage.
+ * The area from dword 0x20 to 0x3ff is available for driver usage.
  */
 #define READ_HWSP(dev_priv, reg)  (((volatile u32*)(dev_priv->hw_status_page))[reg])
-#define READ_BREADCRUMB(dev_priv) READ_HWSP(dev_priv, 5)
-#define I915_GEM_HWS_INDEX		0x10
+#define READ_BREADCRUMB(dev_priv) READ_HWSP(dev_priv, I915_BREADCRUMB_INDEX)
+#define I915_GEM_HWS_INDEX		0x20
+#define	I915_BREADCRUMB_INDEX		0x21
 
 /*
  * 3D instructions used by the kernel

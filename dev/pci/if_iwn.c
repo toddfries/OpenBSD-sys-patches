@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.32 2008/11/09 10:00:17 damien Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.34 2008/11/16 09:52:31 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007, 2008
@@ -421,6 +421,8 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Power OFF adapter. */
 	iwn_apm_stop(sc);
+	/* Clear pending interrupts. */
+	IWN_WRITE(sc, IWN_INT, 0xffffffff);
 
 	printf(", MIMO %dT%dR, %.4s, address %s\n", sc->ntxchains,
 	    sc->nrxchains, sc->eeprom_domain, ether_sprintf(ic->ic_myaddr));
@@ -2761,7 +2763,7 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
 	struct ieee80211_rateset *rs = &ni->ni_rates;
 	struct iwn_cmd_link_quality linkq;
 	const struct iwn_rate *rinfo;
-	uint8_t txant, rate;
+	uint8_t txant;
 	int i, txrate;
 
 	/* Use the first valid TX antenna. */
@@ -2778,7 +2780,6 @@ iwn_set_link_quality(struct iwn_softc *sc, struct ieee80211_node *ni)
 	/* Start at highest available bit-rate. */
 	txrate = rs->rs_nrates - 1;
 	for (i = 0; i < IWN_MAX_TX_RETRIES; i++) {
-		rate = rs->rs_rates[txrate] & IEEE80211_RATE_VAL;
 		rinfo = &iwn_rates[wn->ridx[txrate]];
 		linkq.retry[i].plcp = rinfo->plcp;
 		linkq.retry[i].rflags = rinfo->flags;
@@ -4821,7 +4822,7 @@ iwn_hw_init(struct iwn_softc *sc)
 	const struct iwn_hal *hal = sc->sc_hal;
 	int error, qid;
 
-	/* Clear any pending interrupts. */
+	/* Clear pending interrupts. */
 	IWN_WRITE(sc, IWN_INT, 0xffffffff);
 
 	if ((error = hal->apm_init(sc)) != 0) {
@@ -4887,7 +4888,7 @@ iwn_hw_init(struct iwn_softc *sc)
 	IWN_WRITE(sc, IWN_UCODE_GP1_CLR, IWN_UCODE_GP1_RFKILL);
 	IWN_WRITE(sc, IWN_UCODE_GP1_CLR, IWN_UCODE_GP1_CMD_BLOCKED);
 
-	/* Clear any pending interrupts. */
+	/* Clear pending interrupts. */
 	IWN_WRITE(sc, IWN_INT, 0xffffffff);
 	/* Enable interrupt coalescing. */
 	IWN_WRITE(sc, IWN_INT_COALESCING, 512 / 8);
