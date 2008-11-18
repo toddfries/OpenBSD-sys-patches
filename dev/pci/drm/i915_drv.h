@@ -77,12 +77,14 @@ struct mem_block {
 };
 
 typedef struct drm_i915_private {
+	struct device	dev;
+	struct device	*drmdev;
+	bus_dma_tag_t		 dmat;
+	struct vga_pci_bar *regs;
 	drm_local_map_t *sarea;
-	drm_local_map_t *mmio_map;
 
 	drm_i915_sarea_t *sarea_priv;
 	drm_i915_ring_buffer_t ring;
-
 	drm_dma_handle_t *status_page_dmah;
 	void *hw_status_page;
 	dma_addr_t dma_status_page;
@@ -104,7 +106,9 @@ typedef struct drm_i915_private {
 	int user_irq_refcount;
 	/* Cached value of IMR to avoid reads in updating the bitfield */
 	u_int32_t irq_mask_reg;
+	u_int32_t pipestat[2];
 
+	u_long flags;
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
 	struct mem_block *agp_heap;
@@ -200,12 +204,23 @@ typedef struct drm_i915_private {
 	u8 saveCR[37];
 } drm_i915_private_t;
 
-enum intel_chip_family {
-	CHIP_I8XX = 0x01,
-	CHIP_I9XX = 0x02,
-	CHIP_I915 = 0x04,
-	CHIP_I965 = 0x08,
-};
+/* chip type flags */
+#define CHIP_I830	0x0001
+#define CHIP_I845G	0x0002
+#define CHIP_I85X	0x0004
+#define CHIP_I865G	0x0008
+#define CHIP_I9XX	0x0010
+#define CHIP_I915G	0x0020
+#define CHIP_I915GM	0x0040
+#define CHIP_I945G	0x0080
+#define CHIP_I945GM	0x0100
+#define CHIP_I965	0x0200
+#define CHIP_I965GM	0x0400
+#define CHIP_G33	0x0800
+#define CHIP_GM45	0x1000
+#define CHIP_G4X	0x2000
+#define CHIP_M		0x4000
+#define CHIP_HWS	0x8000
 
 				/* i915_dma.c */
 extern void i915_kernel_lost_context(struct drm_device * dev);
@@ -218,12 +233,16 @@ extern int i915_driver_device_is_agp(struct drm_device * dev);
 extern long i915_compat_ioctl(struct file *filp, unsigned int cmd,
 			      unsigned long arg);
 extern void i915_emit_breadcrumb(struct drm_device *dev);
-extern void i915_dispatch_flip(struct drm_device *);
+extern int i915_dispatch_flip(struct drm_device *);
 extern int i915_emit_mi_flush(struct drm_device *dev, uint32_t flush);
 extern int i915_driver_firstopen(struct drm_device *dev);
 extern int i915_dispatch_batchbuffer(struct drm_device * dev,
 				     drm_i915_batchbuffer_t * batch);
 extern int i915_quiescent(struct drm_device *dev);
+
+int	i915_init_phys_hws(drm_i915_private_t *, bus_dma_tag_t);
+void	i915_free_hws(drm_i915_private_t *, bus_dma_tag_t);
+
 
 /* i915_irq.c */
 extern int i915_irq_emit(struct drm_device *dev, void *data,
@@ -241,8 +260,6 @@ extern int i915_emit_irq(struct drm_device * dev);
 extern int i915_enable_vblank(struct drm_device *dev, int crtc);
 extern void i915_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 i915_get_vblank_counter(struct drm_device *dev, int crtc);
-extern int i915_vblank_swap(struct drm_device *dev, void *data,
-			    struct drm_file *file_priv);
 extern void i915_user_irq_get(struct drm_device *dev);
 extern void i915_user_irq_put(struct drm_device *dev);
 
@@ -274,12 +291,18 @@ extern int i915_setparam(struct drm_device *, void *, struct drm_file *);
 extern int i915_cmdbuffer(struct drm_device *, void *, struct drm_file *);
 extern int i915_set_status_page(struct drm_device *, void *, struct drm_file *);
 
-#define I915_READ(reg)          DRM_READ32(dev_priv->mmio_map, (reg))
-#define I915_WRITE(reg,val)     DRM_WRITE32(dev_priv->mmio_map, (reg), (val))
-#define I915_READ16(reg)	DRM_READ16(dev_priv->mmio_map, (reg))
-#define I915_WRITE16(reg,val)	DRM_WRITE16(dev_priv->mmio_map, (reg), (val))
-#define I915_READ8(reg)		DRM_READ8(dev_priv->mmio_map, (reg))
-#define I915_WRITE8(reg,val)	DRM_WRITE8(dev_priv->mmio_map, (reg), (val))
+#define I915_READ(reg)		bus_space_read_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define I915_WRITE(reg,val)	bus_space_write_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
+#define I915_READ16(reg)	bus_space_read_2(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define I915_WRITE16(reg,val)	bus_space_write_2(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
+#define I915_READ8(reg)		bus_space_read_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define I915_WRITE8(reg,val)	bus_space_write_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
 
 #define I915_VERBOSE 0
 
@@ -430,16 +453,19 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
  * MI_STORE_DATA_IMM.
  *
  * The following dwords have a reserved meaning:
- * 0: ISR copy, updated when an ISR bit not set in the HWSTAM changes.
- * 4: ring 0 head pointer
- * 5: ring 1 head pointer (915-class)
- * 6: ring 2 head pointer (915-class)
+ * 0x00: ISR copy, updated when an ISR bit not set in the HWSTAM changes.
+ * 0x04: ring 0 head pointer
+ * 0x05: ring 1 head pointer (915-class)
+ * 0x06: ring 2 head pointer (915-class)
+ * 0x10-0x1b: Context status DWords (GM45)
+ * 0x1f: Last written status offset. (GM45)
  *
- * The area from dword 0x10 to 0x3ff is available for driver usage.
+ * The area from dword 0x20 to 0x3ff is available for driver usage.
  */
 #define READ_HWSP(dev_priv, reg)  (((volatile u32*)(dev_priv->hw_status_page))[reg])
-#define READ_BREADCRUMB(dev_priv) READ_HWSP(dev_priv, 5)
-#define I915_GEM_HWS_INDEX		0x10
+#define READ_BREADCRUMB(dev_priv) READ_HWSP(dev_priv, I915_BREADCRUMB_INDEX)
+#define I915_GEM_HWS_INDEX		0x20
+#define	I915_BREADCRUMB_INDEX		0x21
 
 /*
  * 3D instructions used by the kernel
@@ -1698,47 +1724,28 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 /* Chipset type macros */
 
-#define IS_I830(dev) ((dev)->pci_device == 0x3577)
-#define IS_845G(dev) ((dev)->pci_device == 0x2562)
-#define IS_I85X(dev) ((dev)->pci_device == 0x3582)
-#define IS_I855(dev) ((dev)->pci_device == 0x3582)
-#define IS_I865G(dev) ((dev)->pci_device == 0x2572)
+#define IS_I830(dev) ((dev_priv)->flags & CHIP_I830)
+#define IS_845G(dev) ((dev_priv)->flags & CHIP_I845G)
+#define IS_I85X(dev) ((dev_priv)->flags & CHIP_I85X)
+#define IS_I865G(dev) ((dev_priv)->flags & CHIP_I865G)
 
-#define IS_I915G(dev) ((dev)->pci_device == 0x2582 || (dev)->pci_device == 0x258a)
-#define IS_I915GM(dev) ((dev)->pci_device == 0x2592)
-#define IS_I945G(dev) ((dev)->pci_device == 0x2772)
-#define IS_I945GM(dev) ((dev)->pci_device == 0x27A2 ||\
-		        (dev)->pci_device == 0x27AE)
-#define IS_I965G(dev) ((dev)->pci_device == 0x2972 || \
-		       (dev)->pci_device == 0x2982 || \
-		       (dev)->pci_device == 0x2992 || \
-		       (dev)->pci_device == 0x29A2 || \
-		       (dev)->pci_device == 0x2A02 || \
-		       (dev)->pci_device == 0x2A12 || \
-		       (dev)->pci_device == 0x2A42 || \
-		       (dev)->pci_device == 0x2E02 || \
-		       (dev)->pci_device == 0x2E12 || \
-		       (dev)->pci_device == 0x2E22)
+#define IS_I915G(dev) ((dev_priv)->flags & CHIP_I915G)
+#define IS_I915GM(dev) ((dev_priv)->flags & CHIP_I915GM)
+#define IS_I945G(dev) ((dev)->flags & CHIP_I945G)
+#define IS_I945GM(dev) ((dev_priv)->flags & CHIP_I945GM)
+#define IS_I965G(dev) ((dev_priv)->flags & CHIP_I965)
+#define IS_I965GM(dev) ((dev_priv)->flags & CHIP_I965GM)
 
-#define IS_I965GM(dev) ((dev)->pci_device == 0x2A02)
+#define IS_GM45(dev) ((dev_priv)->flags & CHIP_GM45)
+#define IS_G4X(dev) ((dev_priv)->flags & CHIP_G4X)
 
-#define IS_GM45(dev) ((dev)->pci_device == 0x2A42)
+#define IS_G33(dev)    ((dev_priv)->flags & CHIP_G33)
 
-#define IS_G4X(dev) ((dev)->pci_device == 0x2E02 || \
-		     (dev)->pci_device == 0x2E12 || \
-		     (dev)->pci_device == 0x2E22)
+#define IS_I9XX(dev) ((dev_priv)->flags & CHIP_I9XX)
 
-#define IS_G33(dev)    ((dev)->pci_device == 0x29C2 ||	\
-			(dev)->pci_device == 0x29B2 ||	\
-			(dev)->pci_device == 0x29D2)
+#define IS_MOBILE(dev) (dev_priv->flags & CHIP_M)
 
-#define IS_I9XX(dev) (IS_I915G(dev) || IS_I915GM(dev) || IS_I945G(dev) || \
-		      IS_I945GM(dev) || IS_I965G(dev) || IS_G33(dev))
-
-#define IS_MOBILE(dev) (IS_I830(dev) || IS_I85X(dev) || IS_I915GM(dev) || \
-			IS_I945GM(dev) || IS_I965GM(dev) || IS_GM45(dev))
-
-#define I915_NEED_GFX_HWS(dev) (IS_G33(dev) || IS_GM45(dev) || IS_G4X(dev))
+#define I915_NEED_GFX_HWS(dev) (dev_priv->flags & CHIP_HWS)
 
 #define PRIMARY_RINGBUFFER_SIZE         (128*1024)
 
