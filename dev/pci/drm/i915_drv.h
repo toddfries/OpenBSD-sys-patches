@@ -77,9 +77,6 @@ struct mem_block {
 };
 
 typedef struct drm_i915_private {
-	struct device	dev;
-	struct device	*drmdev;
-	bus_dma_tag_t		 dmat;
 	struct vga_pci_bar *regs;
 	drm_local_map_t *sarea;
 
