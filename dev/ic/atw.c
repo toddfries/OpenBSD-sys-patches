@@ -4041,13 +4041,6 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-        case SIOCSIFMTU:
-                if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-                        error = EINVAL;
-                } else if (ifp->if_mtu != ifr->ifr_mtu) {
-                        ifp->if_mtu = ifr->ifr_mtu;
-                }
-                break;
         case SIOCSIFADDR:
                 ifp->if_flags |= IFF_UP;
 #ifdef INET
@@ -4056,6 +4049,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
                 }
 #endif  /* INET */
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ATW_IS_ENABLED(sc)) {
@@ -4070,6 +4064,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		} else if (ATW_IS_ENABLED(sc))
 			atw_stop(ifp, 1);
 		break;
+
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		error = (cmd == SIOCADDMULTI) ?
@@ -4082,6 +4077,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = 0;
 		}
 		break;
+
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
 		if (error == ENETRESET) {

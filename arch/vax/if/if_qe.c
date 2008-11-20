@@ -631,7 +631,6 @@ int
 qeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct qe_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error = 0;
 
@@ -676,27 +675,14 @@ qeioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/*
-		 * Update our multicast list.
-		 */
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ac):
-			ether_delmulti(ifr, &sc->sc_ac);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			qe_setup(sc);
-			error = 0;
-		}
-		break;
-
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			qe_setup(sc);
+		error = 0;
 	}
 
 	splx(s);

@@ -742,13 +742,6 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif /* INET */
 		error = ENETRESET;
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU) {
-			error = EINVAL;
-			break;
-		}
-		ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		error = ENETRESET;
 		break;

@@ -434,8 +434,8 @@ int
 bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct bce_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct ifreq   *ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
 	int             s, error = 0;
 
 	s = splnet();
@@ -456,12 +456,7 @@ bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if(ifp->if_flags & IFF_UP)
 			if(ifp->if_flags & IFF_RUNNING)
@@ -472,28 +467,20 @@ bce_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			bce_stop(ifp, 0);
 
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->bce_ac) :
-		    ether_delmulti(ifr, &sc->bce_ac);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				bce_set_filter(ifp);
-			error = 0;
-		}
-		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->bce_mii.mii_media, cmd);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->bce_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			bce_set_filter(ifp);
+		error = 0;
 	}
 
 	if (error == 0) {

@@ -1116,13 +1116,6 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1141,25 +1134,21 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ac) :
-			ether_delmulti(ifr, &sc->sc_ac);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				url_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = GET_MII(sc);
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
+
 	default:
 		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			url_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);

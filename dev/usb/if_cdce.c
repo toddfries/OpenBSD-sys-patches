@@ -531,7 +531,6 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct cdce_softc	*sc = ifp->if_softc;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
-	struct ifreq		*ifr = (struct ifreq *)data;
 	int			 s, error = 0;
 
 	if (sc->cdce_dying)
@@ -550,13 +549,6 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (!(ifp->if_flags & IFF_RUNNING))
@@ -568,20 +560,13 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = 0;
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->cdce_arpcom) :
-		    ether_delmulti(ifr, &sc->cdce_arpcom);
-
-		if (error == ENETRESET)
-			error = 0;
-		break;
-
 	default:
 		error = ether_ioctl(ifp, &sc->cdce_arpcom, command, data);
 		break;
 	}
+
+	if (error == ENETRESET)
+		error = 0;
 
 	splx(s);
 	return (error);
